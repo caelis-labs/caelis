@@ -438,7 +438,7 @@ func (r *Runner) dispatchInitialPrompt(
 			prepared.Abandon()
 		}
 		if client.DispatchMayHaveCommitted(err) {
-			err = joinChildInputUnknown("Initial subagent message delivery outcome cannot be confirmed.", err)
+			err = joinChildInputUnknown("Initial participant message delivery outcome cannot be confirmed.", err)
 		}
 		go func() {
 			r.finishDrive(producerCtx, run, "", err)
@@ -993,16 +993,16 @@ func subagentPromptUnknownDetail(err error) string {
 		// The standard numeric code is safe to retain alongside the existing
 		// Task, activity and Session identities. Peer text/data can contain
 		// credentials and must not enter model context or public diagnostics.
-		return fmt.Sprintf("Subagent prompt outcome cannot be confirmed (ACP response code %d).", response.Code)
+		return fmt.Sprintf("Participant prompt outcome cannot be confirmed (ACP response code %d).", response.Code)
 	}
-	return "Subagent prompt outcome cannot be confirmed (response observation lost)."
+	return "Participant prompt outcome cannot be confirmed (response observation lost)."
 }
 
 func subagentPromptFailureDetail(err error) string {
 	if errors.Is(err, context.DeadlineExceeded) {
-		return "subagent prompt timed out"
+		return "participant prompt timed out"
 	}
-	return "subagent prompt failed"
+	return "participant prompt failed"
 }
 
 func pickWorkDir(preferred string, fallback string) string {

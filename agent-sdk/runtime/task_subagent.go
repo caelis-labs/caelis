@@ -804,11 +804,11 @@ func subagentFailureDiagnostic(state taskapi.State, diagnostic string) (string, 
 	diagnostic = strings.TrimSpace(diagnostic)
 	switch state {
 	case taskapi.StateFailed:
-		return firstNonEmpty(diagnostic, "subagent failed"), true
+		return firstNonEmpty(diagnostic, "participant failed"), true
 	case taskapi.StateInterrupted:
-		return firstNonEmpty(diagnostic, "subagent interrupted"), true
+		return firstNonEmpty(diagnostic, "participant interrupted"), true
 	case taskapi.StateUnknownOutcome:
-		return firstNonEmpty(diagnostic, "subagent outcome could not be confirmed"), true
+		return firstNonEmpty(diagnostic, "participant outcome could not be confirmed"), true
 	default:
 		return "", false
 	}

@@ -212,8 +212,8 @@ Consumer setup and package layout live in
 
 Control assembles Guardian as a private tool-capable approval Agent. Each review
 includes the exact action, request options, reason, and Runtime-bound producer
-origin. Main/subagent role and built-in/external endpoint are independent;
-parent Session history does not represent a child's private execution history.
+origin. Controller/collaborator role and built-in/external endpoint are independent;
+the main Session history does not represent a collaborator's private execution history.
 Guardian selects an exact supplied option. Allow responses contain `option_id`;
 denials also contain a rationale. Execution failures are not policy denials.
 

@@ -161,7 +161,7 @@ func (s *runtimeComposition) materializeDelegatedModel(name, profileID, effort s
 		// so public handles do not overwrite execution identity.
 		materialized.Name = name
 	}
-	materialized.Description = "Caelis delegated model"
+	materialized.Description = "Caelis participant model"
 	return materialized, nil
 }
 

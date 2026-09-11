@@ -61,13 +61,13 @@ func TestRunnerPromptFailureBeforeFirstUpdateDoesNotPersistRawDiagnostics(t *tes
 	if got.State != delegation.StateFailed || got.Running {
 		t.Fatalf("Result = state %q running %v, want terminal failed", got.State, got.Running)
 	}
-	if got.Error != "subagent prompt failed" {
+	if got.Error != "participant prompt failed" {
 		t.Fatalf("Error = %q, want stable operation-level summary", got.Error)
 	}
 	if got.Result != "" {
 		t.Fatalf("Result = %q, want no final assistant output", got.Result)
 	}
-	if got.OutputPreview != "subagent prompt failed" {
+	if got.OutputPreview != "participant prompt failed" {
 		t.Fatalf("OutputPreview = %q, want stable operation-level summary", got.OutputPreview)
 	}
 	for _, secret := range []string{
@@ -654,10 +654,10 @@ func (sink completionSinkFunc) PublishSubagentCompletion(result delegation.Resul
 }
 
 func TestSubagentPromptFailureDetailIsStable(t *testing.T) {
-	if got := subagentPromptFailureDetail(context.DeadlineExceeded); got != "subagent prompt timed out" {
+	if got := subagentPromptFailureDetail(context.DeadlineExceeded); got != "participant prompt timed out" {
 		t.Fatalf("deadline detail = %q, want timeout summary", got)
 	}
-	if got := subagentPromptFailureDetail(errors.New("Authorization: Bearer secret")); got != "subagent prompt failed" {
+	if got := subagentPromptFailureDetail(errors.New("Authorization: Bearer secret")); got != "participant prompt failed" {
 		t.Fatalf("generic detail = %q, want non-sensitive failure summary", got)
 	}
 }

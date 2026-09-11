@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -26,6 +27,27 @@ func TestCheckMarkdownLinks(t *testing.T) {
 	problems := checkPaths(root, []string{"docs/bad.md"})
 	if len(problems) != 1 {
 		t.Fatalf("problems = %v, want one missing link", problems)
+	}
+}
+
+func TestDocumentationPathsIncludesTranslatedReadmeAndInstructions(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	want := []string{"AGENTS.md", "README.md", "README.zh-CN.md", "agent-sdk/README.md", "docs/participants.md"}
+	for _, path := range want {
+		mustWrite(t, filepath.Join(root, path), "# Documentation\n")
+	}
+	mustWrite(t, filepath.Join(root, "README.zh-CN.md"), "[missing](missing.md)\n")
+	paths, err := documentationPaths(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(paths, want) {
+		t.Fatalf("documentation paths = %v, want %v", paths, want)
+	}
+	if problems := checkPaths(root, paths); len(problems) != 1 {
+		t.Fatalf("translated README problems = %v, want one missing link", problems)
 	}
 }
 

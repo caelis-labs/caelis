@@ -2,6 +2,7 @@
 
 This document owns the product contract for local external ACP Agent onboarding,
 authentication, model selection, input, disconnect, and endpoint compatibility.
+For collaboration setup and workspace controls, see [Participants](participants.md).
 Layer ownership lives in [Architecture](architecture.md).
 
 ## Connect
@@ -252,7 +253,8 @@ local provider. Local-only capabilities such as Runtime compaction are omitted o
 rejected while the external Agent controls the Session.
 
 The latest standard ACP `usage_update` is retained as the main context gauge.
-Subagent gauges remain on their Tasks and contribute once to Session totals.
+Collaborating participants' gauges remain on their Tasks and contribute once to
+Session totals.
 
 ## Disconnect
 
@@ -336,8 +338,8 @@ The executable must already be visible on the Host process PATH. Caelis persists
 the logical command and arguments but does not install, update, version-pin, or
 repair third-party adapters. Use Custom for any other ACP stdio command.
 
-Executable discovery does not authorize subagent use. A profile must still be
-bound explicitly through `/subagent bind`.
+Executable discovery does not make an Agent available as a collaborator. Bind its
+profile to a participant role explicitly through `/subagent bind`.
 
 ## Compatibility
 

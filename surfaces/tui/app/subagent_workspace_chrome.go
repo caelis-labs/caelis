@@ -35,7 +35,7 @@ func (m *Model) renderPaneTitle(view *subagentOutputView, width int) string {
 		style = m.paneHeaderStyle("agents", style)
 		handle, binding := subagentRosterMetadata(view)
 		if handle == "" {
-			handle = "Subagent"
+			handle = "Participant"
 		}
 		if leftWidth >= 3 {
 			left = m.renderSubagentIdentity(subagentRosterRow{handle: handle, binding: binding}, leftWidth-2, style) + style.Bold(false).Render(" ≡")

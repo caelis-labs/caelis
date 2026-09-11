@@ -113,7 +113,7 @@ func (m *Model) openSubagentOverlay() tea.Cmd {
 	}
 	service, ok := m.cfg.ControlService.(agentbinding.ConfigurationService)
 	if !ok {
-		return m.showHint("subagent configuration is unavailable", hintOptions{
+		return m.showHint("participant and system-agent configuration is unavailable", hintOptions{
 			priority:       HintPriorityHigh,
 			clearOnMessage: true,
 			clearAfter:     systemHintDuration,
@@ -143,7 +143,7 @@ func (m *Model) runSubagentMutation(
 	}
 	service, ok := m.cfg.ControlService.(agentbinding.ConfigurationService)
 	if !ok {
-		m.subagentOverlay.err = "subagent configuration is unavailable"
+		m.subagentOverlay.err = "participant and system-agent configuration is unavailable"
 		return nil
 	}
 	m.subagentOverlay.pending = true
@@ -255,9 +255,11 @@ func (m *Model) renderSubagentOverlay() string {
 }
 
 func (m *Model) renderSubagentTitle(width int) string {
-	title := m.theme.TitleStyle().Render("◆ Subagents")
 	close := m.theme.HelpHintTextStyle().Render("×")
-	gap := maxInt(1, width-displayColumns(title)-displayColumns(close))
+	closeWidth := displayColumns(close)
+	titleWidth := maxInt(1, width-closeWidth-1)
+	title := m.theme.TitleStyle().Render(truncateTailDisplay("◆ Participants & system agents", titleWidth))
+	gap := maxInt(1, width-displayColumns(title)-closeWidth)
 	return title + strings.Repeat(" ", gap) + close
 }
 
@@ -427,7 +429,7 @@ func (m *Model) subagentMainRows() []subagentOverlayRow {
 		row := subagentOverlayRow{
 			action:  subagentActionOpenBinding,
 			key:     "handle:" + string(item.Definition.Handle),
-			section: "Delegation Profiles",
+			section: "Participant profiles",
 			label:   string(item.Definition.Handle),
 			detail:  detail,
 			handle:  item.Definition.Handle,

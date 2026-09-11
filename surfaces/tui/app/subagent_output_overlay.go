@@ -565,12 +565,12 @@ func (m *Model) subagentOutputRows(view *subagentOutputView, width, height int) 
 		rows, fixedRows, entries = m.renderSubagentOutputDocument(view, ctx, previous)
 	}
 	if len(rows) == 0 {
-		label := "Waiting for subagent output…"
+		label := "Waiting for participant output…"
 		switch {
 		case view == nil:
-			label = "Subagent transcript is unavailable."
+			label = "Participant transcript is unavailable."
 		case m.subagentOutputCurrentStatus(view) != subagentOutputRunning && m.subagentOutputHistoryPending(view):
-			label = "Loading subagent history…"
+			label = "Loading participant history…"
 		case m.subagentOutputCurrentStatus(view) != subagentOutputRunning:
 			label = ""
 		}

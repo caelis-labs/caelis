@@ -672,6 +672,9 @@ func TestSubagentProducerCompletionDoesNotRequireTaskObservation(t *testing.T) {
 	if strings.Contains(notice.Text, "ReadThread") || !strings.Contains(notice.Text, started.Handle) || strings.Contains(notice.Text, "producer-owned final") {
 		t.Fatalf("completion notice text = %q, want compact handle hint without final payload", notice.Text)
 	}
+	if want := "Participant @" + strings.TrimPrefix(started.Handle, "@") + " is completed."; notice.Text != want {
+		t.Fatalf("completion notice text = %q, want %q", notice.Text, want)
+	}
 }
 
 func TestSubagentCompletionNoticeUsesInterruptionLanguage(t *testing.T) {
@@ -687,7 +690,7 @@ func TestSubagentCompletionNoticeUsesInterruptionLanguage(t *testing.T) {
 	if !ok {
 		t.Fatal("subagentCompletionNotice() ok = false")
 	}
-	if notice.Text != "Subagent @nova is interrupted." {
+	if notice.Text != "Participant @nova is interrupted." {
 		t.Fatalf("notice text = %q, want natural-language interruption", notice.Text)
 	}
 }

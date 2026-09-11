@@ -42,7 +42,7 @@ func (target runningActivityTarget) label() string {
 	case runningTargetShell:
 		return "shell"
 	case runningTargetSubagent:
-		return "subagent"
+		return "participant"
 	case runningTargetTask:
 		return "task"
 	default:

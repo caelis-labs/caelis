@@ -302,7 +302,7 @@ func TestRunnerTerminalDiagnosticOverridesActionSummary(t *testing.T) {
 	runner.finishDrive(context.Background(), run, "", errors.New("provider secret detail"))
 
 	got := runner.waitRun(context.Background(), run, 0)
-	if got.State != delegation.StateFailed || got.OutputPreview != "subagent prompt failed" || got.Error != "subagent prompt failed" {
+	if got.State != delegation.StateFailed || got.OutputPreview != "participant prompt failed" || got.Error != "participant prompt failed" {
 		t.Fatalf("terminal result = %#v, want stable failure diagnostic", got)
 	}
 

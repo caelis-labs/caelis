@@ -104,10 +104,10 @@ func TestSlashSubagentListsAndBindsProfilesAndSystemAgents(t *testing.T) {
 		t.Fatalf("list table result = %#v", tables[0])
 	}
 	wantTable := controlprompt.SlashTableSnapshot{
-		Title: "Subagents",
+		Title: "Participants & system agents",
 		Sections: []controlprompt.SlashTableSection{
 			{
-				Title:   "Delegation Profiles",
+				Title:   "Participant profiles",
 				Columns: []string{"Profile", "Name", "Binding"},
 				Rows: [][]string{
 					{"self", "Session Default", "Current Session controller and effort"},
@@ -131,7 +131,7 @@ func TestSlashSubagentListsAndBindsProfilesAndSystemAgents(t *testing.T) {
 		t.Fatalf("list table = %#v, want %#v", tables[0].Table, wantTable)
 	}
 	listOutput := slashOutputPlainForTest(renderSlashCommandResultLines(tables[0]))
-	for _, want := range []string{"Caelis Breeze", "Caelis Orbit", "Caelis Zenith", "openai-codex/gpt-5.6-sol", "[high]", "System Agents", "Guardian", "Reviewer", "Memory Steward", "Static (zero-token)"} {
+	for _, want := range []string{"Participants & system agents", "Participant profiles", "Caelis Breeze", "Caelis Orbit", "Caelis Zenith", "openai-codex/gpt-5.6-sol", "[high]", "System Agents", "Guardian", "Reviewer", "Memory Steward", "Static (zero-token)"} {
 		if !strings.Contains(listOutput, want) {
 			t.Fatalf("list output = %q, want %q", listOutput, want)
 		}
@@ -166,6 +166,18 @@ func TestSlashSubagentListsAndBindsProfilesAndSystemAgents(t *testing.T) {
 	result = slashSubagentWithContext(context.Background(), service, send, "reset orbit")
 	if result.Err != nil || service.reset != "" || !strings.Contains(notices[len(notices)-1], "usage: /subagent") {
 		t.Fatalf("removed reset action result = %#v reset=%q notices=%#v", result, service.reset, notices)
+	}
+}
+
+func TestSlashSubagentFriendlyErrorsUseParticipantWording(t *testing.T) {
+	service := &subagentDelegationStub{status: subagentTestStatus()}
+	result := slashSubagentWithContext(context.Background(), service, nil, "bind breeze self high")
+	if result.Err == nil || !strings.Contains(result.Err.Error(), "reset participant or system-agent binding") {
+		t.Fatalf("self+effort error = %v", result.Err)
+	}
+	result = slashSubagentWithContext(context.Background(), service, nil, "bind breeze provider:sol")
+	if result.Err == nil || !strings.Contains(result.Err.Error(), "bind participant or system-agent handle") {
+		t.Fatalf("missing-effort error = %v", result.Err)
 	}
 }
 

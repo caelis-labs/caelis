@@ -98,6 +98,18 @@ func TestSubagentRosterFooterRunningDotBreathesGreen(t *testing.T) {
 	}
 }
 
+func TestSubagentRosterMetadataFallsBackToParticipant(t *testing.T) {
+	t.Parallel()
+
+	handle, binding := subagentRosterMetadata(&subagentOutputView{title: "inspect workspace"})
+	if handle != "Participant" || binding != "" {
+		t.Fatalf("fallback identity = %q %q, want Participant", handle, binding)
+	}
+	if got := subagentTranscriptActor(TranscriptEvent{}); got != "Participant" {
+		t.Fatalf("subagentTranscriptActor() = %q, want Participant", got)
+	}
+}
+
 func TestSubagentRosterOmitsSpawnWithoutChildHandle(t *testing.T) {
 	t.Parallel()
 

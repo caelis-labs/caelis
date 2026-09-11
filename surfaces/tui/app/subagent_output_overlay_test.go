@@ -470,12 +470,38 @@ func TestSubagentOutputOverlayKeepsPromptAboveOutput(t *testing.T) {
 
 	frame := model.View().Content
 	promptIndex := strings.LastIndex(frame, "Approval")
-	outputIndex := strings.LastIndex(frame, "Subagent")
+	outputIndex := strings.LastIndex(frame, "Participant")
 	if promptIndex < 0 || outputIndex < 0 {
-		t.Fatalf("frame omitted prompt or subagent overlay:\n%s", frame)
+		t.Fatalf("frame omitted prompt or participant overlay:\n%s", frame)
 	}
 	if promptIndex < outputIndex {
-		t.Fatalf("approval prompt rendered beneath subagent output overlay:\n%s", frame)
+		t.Fatalf("approval prompt rendered beneath participant output overlay:\n%s", frame)
+	}
+}
+
+func TestSubagentOutputEmptyLabelsUseParticipantWording(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	unavailable := model.subagentOutputRows(nil, 80, 10)
+	if len(unavailable) != 1 || unavailable[0].Plain != "Participant transcript is unavailable." {
+		t.Fatalf("unavailable rows = %#v", unavailable)
+	}
+
+	waitingView := model.ensureSubagentOutputView("spawn-waiting")
+	waiting := model.subagentOutputRows(waitingView, 80, 10)
+	if len(waiting) != 1 || waiting[0].Plain != "Waiting for participant output…" {
+		t.Fatalf("waiting rows = %#v", waiting)
+	}
+
+	loadingView := model.ensureSubagentOutputView("spawn-loading")
+	loadingView.block.SetStatus("completed", "", "", time.Unix(200, 0))
+	model.taskStreamIDsByCallID[loadingView.callID] = "task-loading"
+	model.taskStreamWanted["task-loading"] = true
+	model.taskStreamTokens["task-loading"] = 1
+	loading := model.subagentOutputRows(loadingView, 80, 10)
+	if len(loading) != 1 || loading[0].Plain != "Loading participant history…" {
+		t.Fatalf("loading rows = %#v", loading)
 	}
 }
 

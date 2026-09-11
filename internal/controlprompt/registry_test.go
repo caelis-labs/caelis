@@ -115,6 +115,19 @@ func TestRootArgCandidatesReturnsCopies(t *testing.T) {
 	}
 }
 
+func TestSubagentSpecDescribesParticipantConfigurationAndKeepsCommandName(t *testing.T) {
+	spec, ok := Lookup("subagent")
+	if !ok {
+		t.Fatal("Lookup(subagent) missing")
+	}
+	if spec.Name != "subagent" || spec.Usage != "/subagent <action>" {
+		t.Fatalf("subagent spec identity = %#v, want unchanged command name and usage", spec)
+	}
+	if spec.Description != "Configure participant profiles and system Agents" {
+		t.Fatalf("subagent description = %q", spec.Description)
+	}
+}
+
 func TestRemovedAgentManagementCommandIsUnknown(t *testing.T) {
 	for _, removed := range []string{"agent"} {
 		if IsKnownForPlatform(removed, "linux") || IsSharedKnownForPlatform(removed, "linux") {

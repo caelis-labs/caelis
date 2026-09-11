@@ -15,7 +15,7 @@ semantics, and each capability has one authoritative data path.
 | --- | --- | --- |
 | Surfaces | TUI, headless, and ACP presentation; input collection | Model, tool, sandbox, policy, persistence, replay, permission, or lifecycle decisions |
 | Control | Product configuration, Agent assembly, placement, Session and endpoint lifecycle, permissions, replay, orchestration, controller selection, and handoff | Presentation layout or reusable provider/runtime mechanics |
-| Agent Runtime / SDK | Reusable model, tool, Session, sandbox, policy, task, subagent, and Runtime contracts and implementations | Caelis product configuration, Host composition, product wire transport, or presentation |
+| Agent Runtime / SDK | Reusable model, tool, Session, sandbox, policy, task, participant, and Runtime contracts and implementations | Caelis product configuration, Host composition, product wire transport, or presentation |
 | Host-private composition | Process startup, concrete services, transports, credentials, stores, Runtime activation, and shutdown | A second product semantics API |
 
 ACP is the interoperability language shared by built-in and external Agents.
@@ -31,6 +31,7 @@ uses them.
   concurrency, tool, and instruction-authority contracts.
 - [ACP Projection Contract](acp-projection-architecture.md) owns Envelope,
   live/replay, Task, and Surface projection rules.
+- [Participants](participants.md) owns user-facing collaboration setup and workspace controls.
 - [External ACP Agents](external-acp-agents.md) owns onboarding, authentication,
   model selection, endpoint compatibility, and disconnect behavior.
 - [Testing](testing.md) and [Release](release.md) own their procedures.

@@ -42,7 +42,7 @@ func TestSubagentApplyResultKeepsFailureDiagnosticTerminalOnly(t *testing.T) {
 		OutputPreview: "stale child activity",
 		Result:        "must not become a final message",
 	})
-	if got := taskStringValue(task.result["error"]); got != "subagent interrupted" {
+	if got := taskStringValue(task.result["error"]); got != "participant interrupted" {
 		t.Fatalf("interrupted fallback error = %q, want fixed diagnostic", got)
 	}
 	for _, key := range []string{"result", "final_message", "output_preview"} {
@@ -172,11 +172,11 @@ func TestFailedSubagentDiagnosticSurvivesCanonicalTaskSyncAndRehydrate(t *testin
 		"handle": taskPublicHandle(snapshot),
 		"state":  string(task.StateFailed),
 	}, "completed", time.Now())
-	if got := taskStringValue(compatibility.Result["error"]); got != "subagent failed" {
-		t.Fatalf("canonical fallback error = %q, want subagent failed", got)
+	if got := taskStringValue(compatibility.Result["error"]); got != "participant failed" {
+		t.Fatalf("canonical fallback error = %q, want participant failed", got)
 	}
-	if compatibility.FailureDiagnostic != "subagent failed" {
-		t.Fatalf("canonical typed diagnostic = %q, want subagent failed", compatibility.FailureDiagnostic)
+	if compatibility.FailureDiagnostic != "participant failed" {
+		t.Fatalf("canonical typed diagnostic = %q, want participant failed", compatibility.FailureDiagnostic)
 	}
 }
 
@@ -195,7 +195,7 @@ func TestSubagentTaskPayloadOwnsFailureDiagnostic(t *testing.T) {
 		Running: true,
 		Result:  result,
 	})
-	if got := taskStringValue(payload["error"]); got != "subagent outcome could not be confirmed" {
+	if got := taskStringValue(payload["error"]); got != "participant outcome could not be confirmed" {
 		t.Fatalf("payload error = %q, want fixed unknown-outcome diagnostic", got)
 	}
 	for _, key := range []string{"output_preview", "final_message"} {
@@ -222,21 +222,21 @@ func TestLegacySubagentFailureErrorIsNotPromotedAcrossRehydrate(t *testing.T) {
 			state:      task.StateFailed,
 			rawError:   "request failed: Authorization: Bearer legacy-token at /Users/alice/work",
 			secrets:    []string{"legacy-token", "/Users/alice"},
-			diagnostic: "subagent failed",
+			diagnostic: "participant failed",
 		},
 		{
 			name:       "interrupted api key",
 			state:      task.StateInterrupted,
 			rawError:   "transport interrupted: api_key=legacy-api-key at /private/tmp/child.sock",
 			secrets:    []string{"legacy-api-key", "/private/tmp/child.sock"},
-			diagnostic: "subagent interrupted",
+			diagnostic: "participant interrupted",
 		},
 		{
 			name:       "unknown outcome path",
 			state:      task.StateUnknownOutcome,
 			rawError:   "unknown effect: sk-legacy-secret in /home/service/.config",
 			secrets:    []string{"sk-legacy-secret", "/home/service/.config"},
-			diagnostic: "subagent outcome could not be confirmed",
+			diagnostic: "participant outcome could not be confirmed",
 		},
 	}
 	for _, test := range tests {
@@ -440,10 +440,10 @@ func TestCanonicalSubagentFailureDoesNotPromoteUntypedDiagnostic(t *testing.T) {
 			if err != nil {
 				t.Fatalf("store Get() error = %v", err)
 			}
-			if got := taskStringValue(entry.Result["error"]); got != "subagent failed" {
+			if got := taskStringValue(entry.Result["error"]); got != "participant failed" {
 				t.Fatalf("canonical error = %q, want fixed fallback", got)
 			}
-			if entry.FailureDiagnostic != "subagent failed" {
+			if entry.FailureDiagnostic != "participant failed" {
 				t.Fatalf("typed diagnostic = %q, want fixed fallback", entry.FailureDiagnostic)
 			}
 			exposed := fmt.Sprint(entry.Result, entry.FailureDiagnostic)
@@ -597,5 +597,31 @@ func TestCanonicalSubagentBatchNormalizesEachFailureIndependently(t *testing.T) 
 		if got[i] != want[i] {
 			t.Fatalf("canonical batch diagnostic[%d] = %q, want %q", i, got[i], want[i])
 		}
+	}
+}
+
+// The fixed fallbacks are the user-visible failure text when a producer omits a
+// typed Runtime diagnostic. A supplied diagnostic is retained verbatim so
+// historical transcripts keep rendering unchanged.
+func TestSubagentFailureDiagnosticFallbacksNameParticipant(t *testing.T) {
+	tests := []struct {
+		state task.State
+		want  string
+	}{
+		{state: task.StateFailed, want: "participant failed"},
+		{state: task.StateInterrupted, want: "participant interrupted"},
+		{state: task.StateUnknownOutcome, want: "participant outcome could not be confirmed"},
+	}
+	for _, test := range tests {
+		got, ok := subagentFailureDiagnostic(test.state, "")
+		if !ok || got != test.want {
+			t.Fatalf("subagentFailureDiagnostic(%q) = %q/%v, want %q", test.state, got, ok, test.want)
+		}
+	}
+	if got, ok := subagentFailureDiagnostic(task.StateFailed, "subagent prompt failed"); !ok || got != "subagent prompt failed" {
+		t.Fatalf("subagentFailureDiagnostic(supplied) = %q/%v, want supplied diagnostic unchanged", got, ok)
+	}
+	if got, ok := subagentFailureDiagnostic(task.StateCompleted, "stale"); ok || got != "" {
+		t.Fatalf("subagentFailureDiagnostic(completed) = %q/%v, want no diagnostic", got, ok)
 	}
 }

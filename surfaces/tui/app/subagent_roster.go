@@ -128,7 +128,7 @@ func subagentRosterMetadata(view *subagentOutputView) (handle string, binding st
 		handle = strings.TrimSpace(prefix)
 	}
 	if handle == "" {
-		handle = "subagent"
+		handle = "Participant"
 	}
 	return handle, binding
 }
