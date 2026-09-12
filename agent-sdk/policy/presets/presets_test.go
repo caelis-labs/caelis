@@ -400,7 +400,7 @@ func TestDefaultModeAllowsExplicitSensitiveUserConfigReadRoot(t *testing.T) {
 	}
 }
 
-func TestDefaultModeOnlyApprovesCommandEscalation(t *testing.T) {
+func TestDefaultModeOrdinaryCommandRequiresOnlyEscalationApproval(t *testing.T) {
 	t.Parallel()
 
 	decision, err := AutoReviewMode().DecideTool(context.Background(), commandCtx("go test ./...", false))
@@ -423,7 +423,7 @@ func TestDefaultModeOnlyApprovesCommandEscalation(t *testing.T) {
 	}
 }
 
-func TestDefaultModeCommandApprovalsAlwaysRouteHost(t *testing.T) {
+func TestDefaultModeExplicitCommandEscalationsRouteHost(t *testing.T) {
 	t.Parallel()
 
 	outsideDelete := "rm -rf " + testOutsidePath()
@@ -442,7 +442,7 @@ func TestDefaultModeCommandApprovalsAlwaysRouteHost(t *testing.T) {
 			t.Fatalf("DecideTool(%q) action = %q, want ask_approval", command, decision.Action)
 		}
 		if decision.Constraints.Route != sandbox.RouteHost || decision.Constraints.Permission != sandbox.PermissionFullAccess {
-			t.Fatalf("DecideTool(%q) constraints = %#v, every command approval must route Host", command, decision.Constraints)
+			t.Fatalf("DecideTool(%q) constraints = %#v, explicit escalation must route Host", command, decision.Constraints)
 		}
 	}
 }
@@ -855,16 +855,11 @@ func TestDefaultModeRequiresApprovalForDestructiveGitCommands(t *testing.T) {
 			if err != nil {
 				t.Fatalf("DecideTool() error = %v", err)
 			}
-			if decision.Action != policy.ActionDeny {
-				t.Fatalf("Action = %q, want sandbox policy redirect to explicit Host request", decision.Action)
+			if decision.Action != policy.ActionAskApproval || decision.Constraints.Route != sandbox.RouteSandbox {
+				t.Fatalf("Decision = %#v, want approval on the requested sandbox route", decision)
 			}
-			for _, want := range []string{"policy requires Host review", "sandbox_permissions=require_escalated"} {
-				if !strings.Contains(decision.Reason, want) {
-					t.Fatalf("Reason = %q, want %q", decision.Reason, want)
-				}
-			}
-			if strings.Count(decision.Reason, "Host review") != 1 {
-				t.Fatalf("Reason repeats Host review wording: %q", decision.Reason)
+			if strings.Contains(decision.Reason, "require_escalated") {
+				t.Fatalf("Reason redirects execution: %q", decision.Reason)
 			}
 		})
 	}
@@ -886,7 +881,7 @@ func TestDefaultModeRequiresApprovalForDestructiveGitCommands(t *testing.T) {
 	}
 }
 
-func TestDefaultModeRedirectsGitPushToExplicitHostReview(t *testing.T) {
+func TestDefaultModeGitPushApprovalPreservesRequestedRoute(t *testing.T) {
 	t.Parallel()
 
 	for _, command := range []string{"git push origin main", "git push --force origin main"} {
@@ -894,11 +889,8 @@ func TestDefaultModeRedirectsGitPushToExplicitHostReview(t *testing.T) {
 		if err != nil {
 			t.Fatalf("DecideTool(%q) error = %v", command, err)
 		}
-		if decision.Action != policy.ActionDeny {
-			t.Fatalf("DecideTool(%q) action = %q, want explicit Host redirect", command, decision.Action)
-		}
-		if !strings.Contains(decision.Reason, "sandbox_permissions=require_escalated") {
-			t.Fatalf("DecideTool(%q) reason = %q", command, decision.Reason)
+		if decision.Action != policy.ActionAskApproval || decision.Constraints.Route != sandbox.RouteSandbox {
+			t.Fatalf("Decision = %#v, want sandbox approval", decision)
 		}
 
 		decision, err = AutoReviewMode().DecideTool(context.Background(), commandCtx(command, true))
@@ -1166,8 +1158,8 @@ func TestRecursiveDeleteOutsideRootsRequiresApproval(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DecideTool() error = %v", err)
 	}
-	if decision.Action != policy.ActionDeny || !strings.Contains(decision.Reason, "sandbox_permissions=require_escalated") {
-		t.Fatalf("Decision = %#v, want explicit Host retry for outside recursive delete", decision)
+	if decision.Action != policy.ActionAskApproval || decision.Constraints.Route != sandbox.RouteSandbox {
+		t.Fatalf("Decision = %#v, want sandbox approval for outside recursive delete", decision)
 	}
 	decision, err = AutoReviewMode().DecideTool(context.Background(), commandCtx(command, true))
 	if err != nil {
