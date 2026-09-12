@@ -11,6 +11,7 @@ import (
 func (m *Model) handlePaneWorkspaceKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 	if state := m.subagentOutputOverlay; state != nil {
 		state.hoveredHeader = ""
+		state.footerHideHovered = false
 	}
 	if m.workspace.dragging {
 		if msg.Key().Code == tea.KeyEscape {
@@ -91,7 +92,7 @@ func (m *Model) handlePaneResizeKey(msg tea.KeyMsg) tea.Cmd {
 			m.cancelPaneResize()
 			return nil
 		}
-		p := m.workspace.preferences.WithDefaults()
+		p := m.uiPreferences.value.WithDefaults()
 		horizontal := p.SubagentLayout == uipreferences.Left || p.SubagentLayout == uipreferences.Right
 		code := msg.Key().Code
 		if horizontal != (code == tea.KeyLeft || code == tea.KeyRight) {
@@ -116,7 +117,7 @@ func (m *Model) handlePaneResizeKey(msg tea.KeyMsg) tea.Cmd {
 }
 
 func (m *Model) paneSplitRatio() int {
-	p := m.workspace.preferences.WithDefaults()
+	p := m.uiPreferences.value.WithDefaults()
 	if p.SubagentLayout == uipreferences.Left || p.SubagentLayout == uipreferences.Right {
 		return p.HorizontalRatio
 	}
@@ -124,7 +125,7 @@ func (m *Model) paneSplitRatio() int {
 }
 
 func (m *Model) paneResizePreferences() uipreferences.Preferences {
-	p := m.workspace.preferences.WithDefaults()
+	p := m.uiPreferences.value.WithDefaults()
 	if p.SubagentLayout == uipreferences.Left || p.SubagentLayout == uipreferences.Right {
 		p.HorizontalRatio = m.workspace.resizeRatio
 	} else {
@@ -137,11 +138,16 @@ func (m *Model) paneResizePreferences() uipreferences.Preferences {
 // when the gesture is complete, so long histories do not reflow per mouse cell.
 func (m *Model) applyPaneResize() tea.Cmd {
 	p := m.paneResizePreferences()
-	if p == m.workspace.preferences {
+	if p == m.uiPreferences.value {
 		return nil
 	}
-	m.workspace.preferences = p
-	m.workspace.preferenceRevision++
+	update := uipreferences.Preferences{}
+	if p.SubagentLayout == uipreferences.Left || p.SubagentLayout == uipreferences.Right {
+		update.HorizontalRatio = p.HorizontalRatio
+	} else {
+		update.VerticalRatio = p.VerticalRatio
+	}
+	cmd := m.setUIPreferences(update)
 	m.resizeWorkspace()
-	return m.savePanePreferences()
+	return cmd
 }

@@ -51,10 +51,10 @@ func caelisDuskTheme(profile colorprofile.Profile, background color.Color) Theme
 			Selection:        adaptiveTintColor(profile, background, true, [3]uint8{124, 156, 245}, [3]uint8{}, 0.28, 0, "#2a3a5c", "", "24", ""),
 			SelectionText:    profileColor(profile, "#e7e9ee", "254", "7"),
 			OnAccent:         profileColor(profile, "#11151d", "233", "0"),
-			DiffAdd:          adaptiveTintColor(profile, background, true, [3]uint8{127, 181, 138}, [3]uint8{}, 0.12, 0, "#1e3025", "", "22", ""),
-			DiffAddStrong:    adaptiveTintColor(profile, background, true, [3]uint8{127, 181, 138}, [3]uint8{}, 0.22, 0, "#294334", "", "29", ""),
-			DiffRemove:       adaptiveTintColor(profile, background, true, [3]uint8{225, 132, 140}, [3]uint8{}, 0.12, 0, "#351f24", "", "52", ""),
-			DiffRemoveStrong: adaptiveTintColor(profile, background, true, [3]uint8{225, 132, 140}, [3]uint8{}, 0.22, 0, "#482a31", "", "88", ""),
+			DiffAdd:          adaptiveTintColor(profile, background, true, [3]uint8{127, 181, 138}, [3]uint8{}, 0.22, 0, "#1e3025", "", "22", ""),
+			DiffAddStrong:    adaptiveTintColor(profile, background, true, [3]uint8{127, 181, 138}, [3]uint8{}, 0.36, 0, "#294334", "", "29", ""),
+			DiffRemove:       adaptiveTintColor(profile, background, true, [3]uint8{225, 132, 140}, [3]uint8{}, 0.22, 0, "#351f24", "", "52", ""),
+			DiffRemoveStrong: adaptiveTintColor(profile, background, true, [3]uint8{225, 132, 140}, [3]uint8{}, 0.36, 0, "#482a31", "", "88", ""),
 		},
 	)
 }
@@ -96,10 +96,10 @@ func caelisDawnTheme(profile colorprofile.Profile, background color.Color) Theme
 			Selection:        adaptiveTintColor(profile, background, false, [3]uint8{}, [3]uint8{49, 95, 187}, 0, 0.16, "", "#dce7fa", "", "153"),
 			SelectionText:    profileColor(profile, "#242a35", "235", "0"),
 			OnAccent:         profileColor(profile, "#ffffff", "255", "7"),
-			DiffAdd:          adaptiveTintColor(profile, background, false, [3]uint8{}, [3]uint8{47, 125, 72}, 0, 0.12, "", "#e8f3eb", "", "194"),
-			DiffAddStrong:    adaptiveTintColor(profile, background, false, [3]uint8{}, [3]uint8{47, 125, 72}, 0, 0.21, "", "#cfe6d5", "", "157"),
-			DiffRemove:       adaptiveTintColor(profile, background, false, [3]uint8{}, [3]uint8{183, 58, 74}, 0, 0.10, "", "#f9ecee", "", "224"),
-			DiffRemoveStrong: adaptiveTintColor(profile, background, false, [3]uint8{}, [3]uint8{183, 58, 74}, 0, 0.18, "", "#f0d6da", "", "217"),
+			DiffAdd:          adaptiveTintColor(profile, background, false, [3]uint8{}, [3]uint8{47, 125, 72}, 0, 0.18, "", "#e8f3eb", "", "194"),
+			DiffAddStrong:    adaptiveTintColor(profile, background, false, [3]uint8{}, [3]uint8{47, 125, 72}, 0, 0.30, "", "#cfe6d5", "", "157"),
+			DiffRemove:       adaptiveTintColor(profile, background, false, [3]uint8{}, [3]uint8{183, 58, 74}, 0, 0.16, "", "#f9ecee", "", "224"),
+			DiffRemoveStrong: adaptiveTintColor(profile, background, false, [3]uint8{}, [3]uint8{183, 58, 74}, 0, 0.28, "", "#f0d6da", "", "217"),
 		},
 	)
 }

@@ -43,6 +43,7 @@ func TestThemeCommandStaysLocalDuringRunningTurn(t *testing.T) {
 		t.Fatal("theme picker did not open")
 	}
 	m.handleKey(keyPress("down"))
+	settleThemePreview(t, m)
 	if m.theme.Name != "catppuccin-latte" {
 		t.Fatalf("light preview = %s", m.theme.Name)
 	}
@@ -128,15 +129,43 @@ func TestThemeSwitchPaintsWholePhysicalFrame(t *testing.T) {
 	}
 }
 
+func TestThemePickerNamesInWideAndCompactViews(t *testing.T) {
+	for _, width := range []int{48, 120} {
+		m := NewModel(Config{ColorProfile: colorprofile.TrueColor})
+		m.Update(tea.WindowSizeMsg{Width: width, Height: 30})
+		m.Update(tea.BackgroundColorMsg{Color: color.White})
+		m.submitThemeCommand("/theme nord")
+		m.submitThemeCommand("/theme")
+		plain := ansi.Strip(m.renderPromptModal())
+		if strings.Count(plain, "↑/↓") != 1 || !strings.Contains(plain, "Esc restore") {
+			t.Fatalf("theme picker must explain preview/apply/restore once:\n%s", plain)
+		}
+		for _, prefix := range []string{"Auto ·", "Dark ·", "Light ·", "Fixed dark background", "Dark palette", "Light palette", "terminal:"} {
+			if strings.Contains(plain, prefix) {
+				t.Fatalf("width %d: picker obscures theme names with %q:\n%s", width, prefix, plain)
+			}
+		}
+		last := -1
+		for _, label := range []string{"Terminal", "Catppuccin", "Catppuccin Latte", "Catppuccin Mocha", "Dracula", "Nord"} {
+			index := strings.Index(plain, label)
+			if index <= last {
+				t.Fatalf("width %d: missing or out-of-order theme name %q:\n%s", width, label, plain)
+			}
+			last = index
+		}
+	}
+}
+
 func TestThemePickerSurvivesSessionReconnectWithoutAnsweringPrompts(t *testing.T) {
 	m := NewModel(Config{ColorProfile: colorprofile.TrueColor})
 	m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	m.submitThemeCommand("/theme nord")
 	m.submitThemeCommand("/theme")
-	m.handleKey(keyPress("down"))
+	m.handleKey(keyPress("up"))
 	response := make(chan PromptResponse, 1)
 	m.enqueuePrompt(PromptRequestMsg{Title: "Old approval", Response: response})
 	m.applySessionReconnectState(appserver.SessionState{SessionID: "new-session"})
+	settleThemePreview(t, m)
 	if m.themePicker == nil || m.activePrompt != m.themePicker.prompt || m.themeName != "dracula" || len(m.pendingPrompt) != 0 {
 		t.Fatal("reconnect lost the local preview or retained a Session prompt")
 	}

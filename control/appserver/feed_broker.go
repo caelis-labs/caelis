@@ -12,7 +12,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	acpprojector "github.com/caelis-labs/caelis/control/appserver/projection"
@@ -807,15 +806,21 @@ func (s *feedSubscription) replayCanonical() (uint32, error) {
 	if s.broker == nil || s.broker.reader == nil || s.replayThrough == nil || s.replayThrough.Seq == 0 {
 		return 0, nil
 	}
+	pages := newFeedReplacementPageBuilder(s.replacementID)
+	deliverPage := func(page FeedDelivery) error {
+		if !s.deliver(page) {
+			return s.ctx.Err()
+		}
+		return nil
+	}
 	after := uint64(0)
-	pageNumber := uint32(0)
 	for after < s.replayThrough.Seq {
 		page, err := s.broker.reader.EventsPage(s.ctx, session.EventPageRequest{
 			SessionRef: s.broker.ref, AfterSeq: after, ThroughSeq: s.replayThrough.Seq,
 			Visibility: session.EventPageClientReplay,
 		})
 		if err != nil {
-			return pageNumber, err
+			return pages.nextPage(), err
 		}
 		for _, event := range page.Events {
 			if event == nil || suppressHistoricalChildStreamMirror(event) {
@@ -830,21 +835,15 @@ func (s *feedSubscription) replayCanonical() (uint32, error) {
 				// Keep the durable position as canonical provenance, but only the
 				// matching Sync carries the boundary cursor after commit.
 				envelope.Cursor = ""
-				raw, err := json.Marshal(envelope)
+				flushed, ok, err := pages.add(envelope)
 				if err != nil {
-					return pageNumber, err
+					return pages.nextPage(), err
 				}
-				if len(raw) > maxFeedReplacementPageBytes {
-					return pageNumber, errorcode.New(errorcode.ResourceExhausted, "controlclient: Session replacement page exceeds byte limit")
+				if ok {
+					if err := deliverPage(flushed); err != nil {
+						return flushed.Page, err
+					}
 				}
-				if !s.deliver(FeedDelivery{
-					Kind: FeedDeliveryReplacePage, Source: FeedSourceReplacement,
-					SnapshotID: s.replacementID, Page: pageNumber,
-					Events: []eventstream.Envelope{eventstream.CloneEnvelope(envelope)},
-				}) {
-					return pageNumber, s.ctx.Err()
-				}
-				pageNumber++
 			}
 		}
 		if page.NextSeq <= after || len(page.Events) == 0 {
@@ -852,7 +851,12 @@ func (s *feedSubscription) replayCanonical() (uint32, error) {
 		}
 		after = page.NextSeq
 	}
-	return pageNumber, nil
+	if flushed, ok := pages.flush(); ok {
+		if err := deliverPage(flushed); err != nil {
+			return flushed.Page, err
+		}
+	}
+	return pages.nextPage(), nil
 }
 
 // followCanonical is the availability fallback for a disabled or lost spool.

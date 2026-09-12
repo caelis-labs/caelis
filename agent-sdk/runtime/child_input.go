@@ -206,13 +206,7 @@ func (r *Runtime) prepareChildTaskOutput(ctx context.Context, task *subagentTask
 	observer := r.tasks.bindSubagentOutput(ctx, ref, taskRef.TaskID, taskRef.TerminalID, activityID, false)
 	completion := newSubagentCompletionSink(ctx, r.tasks, taskRef.TaskID, turnSeq)
 	if !running {
-		activity := &childTaskActivity{
-			ready:       make(chan struct{}),
-			persistDone: make(chan struct{}),
-			runtime:     r.tasks, ctx: session.ContextWithControlMutation(context.WithoutCancel(ctx), session.ControlMutationPurposeSubagentActivity),
-			ref: ref, taskID: taskRef.TaskID,
-			activityID: activityID, turnSeq: turnSeq, observer: observer,
-		}
+		activity := newChildTaskActivity(r.tasks, ctx, ref, taskRef.TaskID, activityID, turnSeq, observer, true, false)
 		observer = activity
 		completion.activity = activity
 		completion.observedTerminal = true

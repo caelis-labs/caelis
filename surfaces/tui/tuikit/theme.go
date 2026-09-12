@@ -129,6 +129,8 @@ func ValidateTheme(theme Theme) []ThemeIssue {
 			issues = append(issues, ThemeIssue{Field: "ComposerBg", Message: "surface is required"})
 		case colorsEqual(theme.UserBg, theme.ComposerBg):
 			issues = append(issues, ThemeIssue{Field: "ComposerBg", Message: "must differ from UserBg"})
+		case colorsEqual(theme.AppBg, theme.ComposerBg):
+			issues = append(issues, ThemeIssue{Field: "ComposerBg", Message: "must differ from AppBg"})
 		}
 	}
 

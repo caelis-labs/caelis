@@ -34,10 +34,7 @@ func overlayAboveBottomAreaLeft(base string, overlay string, screenWidth int, st
 	if startX < 0 {
 		startX = 0
 	}
-	startRow := len(baseLines) - maxInt(0, bottomHeight) - len(overlayLines) - gap
-	if startRow < 0 {
-		startRow = 0
-	}
+	startRow := maxInt(0, len(baseLines)-maxInt(0, bottomHeight)-len(overlayLines)-gap)
 	for i, line := range overlayLines {
 		row := startRow + i
 		if row < 0 || row >= len(baseLines) {

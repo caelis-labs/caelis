@@ -160,19 +160,30 @@ func (tm *taskRuntime) startSubagentTarget(
 	}
 	handle := firstNonEmpty(outcome.Entry.Handle, taskSpecString(outcome.Entry.Spec, "handle"))
 	var task *subagentTask
+	var spawnActivity *childTaskActivity
+	spawnInstalled := false
 	if outcome.ShouldSpawn {
 		activityID := firstNonEmpty(
 			taskStringValue(outcome.Entry.Metadata[subagentActivityIDMeta]),
 			taskSpecString(outcome.Entry.Spec, subagentActivityIDMeta),
 		)
 		outputObserver := tm.bindSubagentOutput(ctx, ref, taskID, subagentTerminalID(taskID), activityID, true)
+		spawnActivity = newChildTaskActivity(tm, ctx, ref, taskID, activityID, 1, outputObserver, false, true)
+		outputObserver = spawnActivity
+		completion := newSubagentCompletionSink(ctx, tm, taskID, 1)
+		completion.activity = spawnActivity
+		defer func() {
+			if spawnActivity != nil && !spawnInstalled {
+				spawnActivity.discard()
+			}
+		}()
 		childPrompt := contextprompt.ComposeTextPrompt(spawnContextFromSpec(outcome.Entry.Spec), strings.TrimSpace(req.Prompt))
 		spawnContext := subagent.SpawnContext{
 			SessionRef: session.NormalizeSessionRef(ref), Session: session.CloneSession(activeSession), CWD: strings.TrimSpace(activeSession.CWD),
 			TaskID: taskID, ActivityID: activityID, Handle: handle, Role: role, ParentCallID: strings.TrimSpace(req.ParentCall), Mode: mode, ApprovalMode: strings.TrimSpace(req.ApprovalMode),
 			ApprovalRequester: req.Approval,
 			Output:            outputObserver,
-			Completion:        newSubagentCompletionSink(ctx, tm, taskID, 1),
+			Completion:        completion,
 		}
 		anchor, result, err := spawnSubagentTarget(ctx, runner, spawnContext, target, childPrompt)
 		if err != nil {
@@ -206,7 +217,19 @@ func (tm *taskRuntime) startSubagentTarget(
 			return taskapi.Snapshot{}, tm.compensateSubagentSpawn(ctx, task, validationErr)
 		}
 		task = newSubagentTaskFromSpawn(ref, taskID, spawnID, requestDigest, target, req, mode, role, handle, runner, anchor, result, outcome.Entry.Revision, tm.runtime.now(), spawnPhasePostSpawn)
+		if taskapi.IsTerminalState(task.state) {
+			// Spawn owns synchronous terminal persistence. Join the gated writer
+			// before installation, retaining its latest gauge for the commit.
+			spawnActivity.sealUsage()
+			_ = spawnActivity.awaitPersistence(context.WithoutCancel(ctx))
+		}
 		task.activityID = activityID
+		task.activityGeneration = 1
+		task.metadata[subagentActivityIDMeta] = activityID
+		task.metadata[subagentActivityGenerationMeta] = int64(1)
+		if usage := spawnActivity.peekUsage(); usage != nil {
+			task.contextUsage = usage
+		}
 		// Keep the exact completed result in the Task fallback. Transient ACP
 		// deltas already went directly to Control's bound output observer.
 		spawnedEntry := task.entrySnapshot(tm.runtime.now())
@@ -229,6 +252,10 @@ func (tm *taskRuntime) startSubagentTarget(
 	task.mu.Lock()
 	task.completionReady = true
 	task.mu.Unlock()
+	if spawnActivity != nil {
+		spawnActivity.markInstalled()
+		spawnInstalled = true
+	}
 	tm.kickSubagentCompletion(taskID)
 	return snapshot, nil
 }

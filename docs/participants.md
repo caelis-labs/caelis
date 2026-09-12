@@ -97,7 +97,11 @@ Main-composer Tab completion and Shift+Tab mode switching keep their usual behav
 
 Keyboard resizing previews five-percentage-point adjustments. Enter applies and
 saves; Esc cancels. Terminal resizing cancels an unconfirmed resize preview.
-F7 or the close button hides the pane while the participant keeps working.
+F7, the footer's clickable **F7 Hide**, or the title's close button hides the pane
+while the participant keeps working. The footer shows the short model ID on the
+left and the latest ACP-reported context usage at the far right, with **F7 Hide**
+immediately to its left. Agents that do not report context usage leave the gauge
+empty.
 
 ### Send input
 

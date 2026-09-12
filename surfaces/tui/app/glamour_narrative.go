@@ -147,20 +147,6 @@ var glamourStreamingCache struct {
 	order   []string
 }
 
-// clearGlamourCache invalidates the cached glamour renderer so that the next
-// call to getGlamourRenderer creates a fresh one. Call this when the theme or
-// color profile changes (e.g. from applyTheme).
-func clearGlamourCache() {
-	glamourCache.Lock()
-	glamourCache.entries = nil
-	glamourCache.order = nil
-	glamourCache.Unlock()
-	glamourStreamingCache.Lock()
-	glamourStreamingCache.entries = nil
-	glamourStreamingCache.order = nil
-	glamourStreamingCache.Unlock()
-}
-
 func getGlamourRenderer(width int, theme tuikit.Theme, roleStyle tuikit.LineStyle) *narrativeMarkdown {
 	glamourCache.Lock()
 	defer glamourCache.Unlock()
@@ -187,9 +173,12 @@ func getGlamourRendererLocked(width int, theme tuikit.Theme, roleStyle tuikit.Li
 }
 
 func renderGlamourMarkdown(raw string, width int, theme tuikit.Theme, roleStyle tuikit.LineStyle) (string, error) {
-	glamourCache.Lock()
-	defer glamourCache.Unlock()
-	return getGlamourRendererLocked(width, theme, roleStyle).Render(raw)
+	rendered, _, err := defaultGlamourOutputCache.getOrRender(raw, width, themeRenderCacheKey(theme), roleStyle, func() (string, error) {
+		glamourCache.Lock()
+		defer glamourCache.Unlock()
+		return getGlamourRendererLocked(width, theme, roleStyle).Render(raw)
+	})
+	return rendered, err
 }
 
 func touchGlamourRendererCacheKey(key glamourRendererKey) {

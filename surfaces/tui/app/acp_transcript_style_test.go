@@ -442,3 +442,85 @@ func TestMutationLifecycleHeaderUsesEdit(t *testing.T) {
 		t.Fatalf("failed write header = %q, want Edit ... failed", got)
 	}
 }
+
+func TestParticipantTurnEmptyPlaceholderOmitsRedundantWaitingRow(t *testing.T) {
+	t.Parallel()
+
+	for _, status := range []string{"", "running", "prompting", "completed", "failed"} {
+		if got := participantTurnEmptyPlaceholder(status); got != "" {
+			t.Fatalf("participantTurnEmptyPlaceholder(%q) = %q, want empty", status, got)
+		}
+	}
+	if got := participantTurnEmptyPlaceholder("initializing"); got != "  · initializing session" {
+		t.Fatalf("initializing placeholder = %q", got)
+	}
+	if got := participantTurnEmptyPlaceholder("waiting_approval"); got != "  · waiting approval" {
+		t.Fatalf("waiting_approval placeholder = %q", got)
+	}
+}
+
+func TestACPEmptyRunningTurnOmitsWaitingPlaceholderAndKeepsLifecycleNotices(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	ctx := BlockRenderContext{Width: 96, TermWidth: 96, Theme: model.theme}
+	opts := acpTranscriptRenderOptions{
+		UseStatusPlaceholder:   true,
+		PlaceholderAsMeta:      true,
+		HideWaitingApprovalRow: true,
+		HideCompletedRow:       true,
+		HideFailedRow:          true,
+	}
+	assertNoWaitingRow := func(t *testing.T, rows []RenderedRow, label string) {
+		t.Helper()
+		plain := strings.Join(renderedPlainRows(rows), "\n")
+		if strings.Contains(plain, "waiting for agent output") {
+			t.Fatalf("%s rendered waiting placeholder:\n%s", label, plain)
+		}
+	}
+
+	for _, status := range []string{"", "running"} {
+		rows := renderACPTranscriptRows("block-1", nil, status, 96, ctx, opts)
+		assertNoWaitingRow(t, rows, "status "+status)
+		if len(rows) != 0 {
+			t.Fatalf("status %q rows = %#v, want none", status, renderedPlainRows(rows))
+		}
+	}
+
+	initRows := renderACPTranscriptRows("block-1", nil, "initializing", 96, ctx, opts)
+	assertNoWaitingRow(t, initRows, "initializing")
+	if got := strings.Join(renderedPlainRows(initRows), "\n"); !strings.Contains(got, "initializing session") {
+		t.Fatalf("initializing rows = %q, want initializing session", got)
+	}
+
+	approvalRows := renderACPTranscriptRows("block-1", nil, "waiting_approval", 96, ctx, opts)
+	assertNoWaitingRow(t, approvalRows, "waiting_approval")
+	if got := strings.Join(renderedPlainRows(approvalRows), "\n"); !strings.Contains(got, "waiting approval") {
+		t.Fatalf("waiting_approval rows = %q, want waiting approval", got)
+	}
+
+	noticeRows := renderACPTranscriptRows("block-1", []SubagentEvent{{
+		Kind:       SENotice,
+		Text:       "• " + transcript.CompactNoticeLabel,
+		NoticeKind: transcript.NoticeKindCompact,
+	}}, "running", 96, ctx, opts)
+	assertNoWaitingRow(t, noticeRows, "compact notice")
+	if got := strings.Join(renderedPlainRows(noticeRows), "\n"); !strings.Contains(got, transcript.CompactNoticeLabel) {
+		t.Fatalf("compact notice rows = %q, want compacted notice", got)
+	}
+
+	main := NewMainACPTurnBlock("turn-empty")
+	assertNoWaitingRow(t, main.Render(ctx), "main empty running")
+	if rows := main.Render(ctx); len(rows) != 0 {
+		t.Fatalf("empty running main rows = %#v, want none", renderedPlainRows(rows))
+	}
+
+	participant := NewParticipantTurnBlock("session-1", "@reviewer")
+	assertNoWaitingRow(t, participant.Render(ctx), "participant empty running")
+	participant.Status = "initializing"
+	initParticipant := participant.Render(ctx)
+	assertNoWaitingRow(t, initParticipant, "participant initializing")
+	if got := strings.Join(renderedPlainRows(initParticipant), "\n"); !strings.Contains(got, "initializing session") {
+		t.Fatalf("participant initializing rows = %q, want initializing session", got)
+	}
+}

@@ -18,6 +18,7 @@ import (
 	"github.com/charmbracelet/colorprofile"
 
 	"github.com/caelis-labs/caelis/control/appserver/taskstream"
+	"github.com/caelis-labs/caelis/control/uipreferences"
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 )
 
@@ -32,7 +33,11 @@ func requestBackgroundColorCmd() tea.Cmd {
 func NewModel(cfg Config) *Model {
 	cfg.CommandDetails = maps.Clone(cfg.CommandDetails)
 	theme := tuikit.ResolveThemeFromOptions(cfg.NoColor, cfg.ColorProfile)
-	themeName, _ := tuikit.NormalizeThemeName(os.Getenv("CAELIS_THEME"))
+	themeEnv := strings.TrimSpace(os.Getenv("CAELIS_THEME"))
+	themeName, ok := tuikit.NormalizeThemeName(themeEnv)
+	if !ok {
+		themeName = "auto"
+	}
 
 	delegate := list.NewDefaultDelegate()
 	configurePaletteDelegateStyles(&delegate, theme)
@@ -68,6 +73,10 @@ func NewModel(cfg Config) *Model {
 	vp.KeyMap.PageUp = key.NewBinding(key.WithKeys("pgup"))
 
 	m := &Model{
+		uiPreferences: uiPreferencesState{
+			value:        (uipreferences.Preferences{}).WithDefaults(),
+			themeFromEnv: themeEnv != "",
+		},
 		cfg:          cfg,
 		theme:        theme,
 		themeName:    themeName,
@@ -184,7 +193,7 @@ func (m *Model) Init() tea.Cmd {
 	}
 	m.hasCommittedLine = m.doc.Len() > 0
 	m.syncViewportContent()
-	cmds := []tea.Cmd{tickStatusCmd(), m.loadPanePreferences()}
+	cmds := []tea.Cmd{tickStatusCmd(), m.loadUIPreferences()}
 	if m.cfg.InitialSessionID != "" {
 		cmds = append(cmds, m.executeLineCmd(Submission{Text: "/resume " + m.cfg.InitialSessionID}))
 	}
@@ -376,6 +385,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.resolveSelectedTheme()
 		return m, nil
 
+	case uiPreferencesLoadedMsg:
+		return m, m.applyLoadedUIPreferences(typed)
+
+	case uiPreferencesSavedMsg:
+		return m, m.finishUIPreferencesSave(typed)
+
+	case themePreviewMsg:
+		m.applyThemePreview(typed)
+		return m, nil
+
 	case tea.ColorProfileMsg:
 		if m.noColor || typed.Profile == colorprofile.Unknown || typed.Profile == m.colorProfile {
 			return m, nil
@@ -527,7 +546,6 @@ func (m *Model) applyTheme(theme tuikit.Theme) {
 	}
 	m.theme = theme
 	m.themeCacheKey = themeRenderCacheKey(theme)
-	clearGlamourCache()
 	configureHelpStyles(&m.help, theme)
 	m.applyPaletteTheme(theme)
 	m.applyTextareaStyles(theme)

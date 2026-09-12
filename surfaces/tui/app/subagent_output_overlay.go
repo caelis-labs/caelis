@@ -26,6 +26,7 @@ type subagentOutputOverlayGeometry struct {
 	width        int
 	height       int
 	headerY      int
+	footerY      int
 	contentX     int
 	contentY     int
 	contentWidth int
@@ -58,6 +59,9 @@ type subagentOutputOverlayState struct {
 	menuRect           paneRect
 	headerActions      []paneHeaderAction
 	hoveredHeader      string
+	footerHideX        int
+	footerHideWidth    int
+	footerHideHovered  bool
 	callID             string
 	offset             int
 	followTail         bool
@@ -328,6 +332,7 @@ func (m *Model) renderSubagentOutputOverlay() string {
 		width:        layout.frameWidth,
 		height:       layout.frameHeight,
 		headerY:      layout.startY + layout.borderInset,
+		footerY:      state.editorY + state.editorHeight,
 		contentX:     layout.startX + layout.contentInset,
 		contentY:     layout.startY + layout.borderInset + 2,
 		contentWidth: layout.innerWidth,

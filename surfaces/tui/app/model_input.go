@@ -17,6 +17,9 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if m.sessionPicker != nil {
 		return m, m.handleSessionPickerMouse(msg)
 	}
+	if m.themePicker != nil && m.activePrompt == m.themePicker.prompt && m.subagentOverlay == nil {
+		return m, m.handleThemePickerMouse(msg)
+	}
 	m.updatePaneChromeHover(msg)
 	if handled, cmd := m.handleSubagentOverlayMouse(msg); handled {
 		return m, cmd
@@ -636,6 +639,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.materializeViewportContentIfStale()
 		m.viewport.GotoBottom()
+		m.materializeVisibleViewport()
 		return m, tea.Batch(m.touchViewportScrollbar(), m.resumeRunningAnimationIfNeeded())
 	case key.Matches(msg, m.keys.HalfPageUp):
 		m.materializeViewportContentIfStale()

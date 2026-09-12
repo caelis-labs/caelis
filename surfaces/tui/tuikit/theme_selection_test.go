@@ -2,6 +2,7 @@ package tuikit
 
 import (
 	"image/color"
+	"slices"
 	"testing"
 
 	"github.com/alecthomas/chroma/v2"
@@ -35,6 +36,33 @@ func TestSelectableThemesReadableOnLightAndDarkTerminals(t *testing.T) {
 	}
 	if options := ThemeOptions(colorprofile.TrueColor, true); len(options) != 1 {
 		t.Fatal("NO_COLOR offered invisible palette variants")
+	}
+}
+
+func TestThemeOptionsEmphasizeNames(t *testing.T) {
+	options := ThemeOptions(colorprofile.TrueColor, false)
+	var names []string
+	for _, option := range options {
+		names = append(names, option.Name)
+	}
+	want := []string{"auto", "catppuccin", "catppuccin-latte", "catppuccin-mocha", "dracula", "nord"}
+	if !slices.Equal(names, want) {
+		t.Fatalf("theme order = %v, want %v", names, want)
+	}
+	for i, label := range []string{"Terminal", "Catppuccin", "Catppuccin Latte", "Catppuccin Mocha", "Dracula", "Nord"} {
+		if options[i].Label != label {
+			t.Errorf("theme %s label = %q, want %q", options[i].Name, options[i].Label, label)
+		}
+	}
+}
+
+func TestValidateThemeRejectsInvisibleComposer(t *testing.T) {
+	theme := ResolveSelectedTheme("dracula", nil, true, false, colorprofile.TrueColor)
+	theme.ComposerBg = theme.AppBg
+	if !slices.ContainsFunc(ValidateTheme(theme), func(issue ThemeIssue) bool {
+		return issue.Field == "ComposerBg" && issue.Message == "must differ from AppBg"
+	}) {
+		t.Fatal("composer indistinguishable from page background must be rejected")
 	}
 }
 

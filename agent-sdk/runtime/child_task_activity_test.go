@@ -2,7 +2,9 @@ package runtime
 
 import (
 	"context"
+	"reflect"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -60,7 +62,8 @@ func TestChildInputAdmissionDoesNotAdvanceTask(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertChildActivityEntry(t, r, task, before.Revision, 1, taskStringValue(before.Metadata[subagentActivityIDMeta]), false)
-	if err := req.Output.ObserveTaskOutput(t.Context(), output.Event{Text: "second", Running: true}); err != nil {
+	// Explicit producer lifecycle starts the activity before any content.
+	if err := req.Output.ObserveTaskOutput(t.Context(), output.Event{State: "running", Running: true}); err != nil {
 		t.Fatal(err)
 	}
 	deadline := time.Now().Add(2 * time.Second)
@@ -165,15 +168,27 @@ func TestChildActivitySidecarFinalSurvivesModelContextRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := observer.ObserveTaskOutput(t.Context(), output.Event{State: "running", Running: true}); err != nil {
+		t.Fatal(err)
+	}
 	if err := observer.ObserveTaskOutput(t.Context(), output.Event{Text: "disposable partial trace", Running: true}); err != nil {
 		t.Fatal(err)
 	}
+	if err := observer.ObserveTaskOutput(t.Context(), childUsageOutput(200000, 8000, "gauge-model-only")); err != nil {
+		t.Fatal(err)
+	}
 	finishChildActivity(t, completion, "follow-up sidecar final")
+	wantTask := assertChildContextUsage(t, r, task, 200000, 8000, "gauge-model-only")
+	assertSubagentSagaModelRoundTrip(t, sessions, active.SessionRef)
 
 	reopened := sessionfile.NewStore(sessionfile.Config{RootDir: root})
 	rebuilt, err := New(testConfigWithACPForwarder(Config{Sessions: reopened, TaskStore: sessionfile.NewTaskStore(reopened), AgentFactory: chat.Factory{}}))
 	if err != nil {
 		t.Fatal(err)
+	}
+	gotTask, err := rebuilt.tasks.store.Get(t.Context(), task.ref.TaskID)
+	if err != nil || !reflect.DeepEqual(gotTask, wantTask) {
+		t.Fatalf("reopened Task = %#v, %v; want %#v", gotTask, err, wantTask)
 	}
 	probe := &capturingContextModel{messages: make(chan []model.Message, 1)}
 	run, err := rebuilt.Run(t.Context(), agent.RunRequest{SessionRef: active.SessionRef, Input: "read persisted context", AgentSpec: agent.AgentSpec{Name: "chat", Model: probe}})
@@ -193,8 +208,8 @@ func TestChildActivitySidecarFinalSurvivesModelContextRoundTrip(t *testing.T) {
 			t.Fatalf("model context must contain final once: %q in %q", final, contextText.String())
 		}
 	}
-	if strings.Contains(contextText.String(), "disposable partial trace") {
-		t.Fatal("transient child trace entered durable model context")
+	if strings.Contains(contextText.String(), "disposable partial trace") || strings.Contains(contextText.String(), "gauge-model-only") {
+		t.Fatal("child trace or context gauge entered durable model context")
 	}
 }
 
@@ -269,6 +284,140 @@ func TestChildActivityOutputDoesNotWaitForTaskControl(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestChildActivityPersistsReplaceableACPUsageGauge(t *testing.T) {
+	r, task, _ := newIdleChildActivityTask(t)
+	_, observer, completion, err := r.prepareChildTaskOutput(t.Context(), task)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := observer.ObserveTaskOutput(t.Context(), output.Event{State: "running", Running: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := observer.(*childTaskActivity).awaitOpenPersistence(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	release, claimed := r.tasks.tryClaimSubagentOperation(task.sessionRef, task.ref.TaskID)
+	if !claimed {
+		t.Fatal("could not hold Task operation claim")
+	}
+	if err := observer.ObserveTaskOutput(t.Context(), childUsageOutput(200000, 42000, "gpt-test")); err != nil {
+		t.Fatal(err)
+	}
+	if err := observer.ObserveTaskOutput(t.Context(), childUsageOutput(200000, 8000, "gpt-test")); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() {
+		finishChildActivity(t, completion, "first gauge turn")
+		close(done)
+	}()
+	release()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("terminal completion did not finish after claim release")
+	}
+	entry := assertChildContextUsage(t, r, task, 200000, 8000, "gpt-test")
+	reloaded := r.tasks.rehydrateSubagentTask(entry)
+	if reloaded.contextUsage == nil || reloaded.contextUsage.Snapshot.Used != 8000 || reloaded.contextUsage.Snapshot.Size != 200000 {
+		t.Fatalf("rehydrated context usage = %#v, want replaced ACP gauge", reloaded.contextUsage)
+	}
+	_, observer, _, err = r.prepareChildTaskOutput(t.Context(), task)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := observer.ObserveTaskOutput(t.Context(), output.Event{State: "running", Running: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := observer.(*childTaskActivity).awaitOpenPersistence(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	entry, err = r.tasks.store.Get(t.Context(), task.ref.TaskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entry.ContextUsage != nil {
+		t.Fatalf("follow-up retained previous gauge %#v", entry.ContextUsage)
+	}
+}
+
+func TestChildSpawnPersistsSynchronousACPUsageGauge(t *testing.T) {
+	runner := &recordingSubagentRunner{
+		spawnResult:        delegation.Result{State: delegation.StateCompleted, Result: "spawned"},
+		publishOnSpawn:     true,
+		spawnStreamRunning: true,
+		spawnStreamState:   string(delegation.StateRunning),
+		spawnStreamEvent: &session.Event{
+			ContextUsage: &session.ContextUsageSnapshot{Size: 200000, Used: 42000},
+			Invocation:   &session.EventInvocation{Provider: "codex", Model: "gpt-test"},
+		},
+	}
+	r, active := newSubagentTaskTestRuntime(t, runner)
+	const spawnID = "synchronous-terminal-usage"
+	taskID, err := subagentSpawnTaskID(active.SessionRef, spawnID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Keep a live usage writer from acquiring its claim after installation.
+	// Terminal Spawn must drain its gated recorder without needing this claim.
+	release, claimed := r.tasks.tryClaimSubagentOperation(active.SessionRef, taskID)
+	if !claimed {
+		t.Fatal("claim unavailable")
+	}
+	var releaseOnce sync.Once
+	releaseClaim := func() { releaseOnce.Do(release) }
+	t.Cleanup(releaseClaim)
+	snapshot, err := r.StartSubagentWithOptions(t.Context(), active.SessionRef, "helper", "inspect", "test", StartSubagentOptions{SpawnID: spawnID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	activity := runner.spawnContext.Output.(*childTaskActivity)
+	t.Cleanup(func() {
+		activity.discard()
+		releaseClaim()
+		if err := activity.awaitPersistence(context.Background()); err != nil {
+			t.Error(err)
+		}
+	})
+	activity.usageMu.Lock()
+	closed, worker := activity.usageClosed, activity.usageDone
+	activity.usageMu.Unlock()
+	if !closed || worker != nil {
+		t.Errorf("terminal Spawn returned before usage was sealed and drained: closed=%v, worker=%v", closed, worker != nil)
+	}
+	task := &subagentTask{ref: snapshot.Ref, sessionRef: active.SessionRef}
+	entry := assertChildContextUsage(t, r, task, 200000, 42000, "gpt-test")
+	if snapshot.Running || snapshot.State != taskapi.StateCompleted {
+		t.Fatalf("Spawn returned nonterminal Task: %#v", snapshot)
+	}
+	_ = activity.ObserveTaskOutput(t.Context(), childUsageOutput(200000, 8000, "late"))
+	releaseClaim()
+	awaitChildUsagePersistence(t, activity)
+	after, err := r.tasks.store.Get(t.Context(), snapshot.Ref.TaskID)
+	if err != nil || !reflect.DeepEqual(entry, after) {
+		t.Fatalf("usage wrote after terminal Spawn returned: %#v, %v", after, err)
+	}
+}
+
+func childUsageOutput(size, used uint64, model string) output.Event {
+	return output.Event{State: "running", Running: true, Event: &session.Event{
+		ContextUsage: &session.ContextUsageSnapshot{Size: size, Used: used},
+		Invocation:   &session.EventInvocation{Provider: "codex", Model: model},
+	}}
+}
+
+func assertChildContextUsage(t *testing.T, r *Runtime, task *subagentTask, size, used uint64, model string) *taskapi.Entry {
+	t.Helper()
+	entry, err := r.tasks.store.Get(t.Context(), task.ref.TaskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entry.ContextUsage == nil || entry.ContextUsage.Snapshot.Size != size || entry.ContextUsage.Snapshot.Used != used || entry.ContextUsage.Invocation.Model != model {
+		t.Fatalf("context usage = %#v, want size=%d used=%d model=%q", entry.ContextUsage, size, used, model)
+	}
+	return entry
 }
 
 func newIdleChildActivityTask(t *testing.T) (*Runtime, *subagentTask, *runtimeChildInputRunner) {

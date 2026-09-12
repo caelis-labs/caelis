@@ -45,8 +45,9 @@ func TestRichDiffPreservesEachFileIdentity(t *testing.T) {
 					if displayColumns(row.Styled) > width {
 						t.Fatalf("row exceeds width %d", width)
 					}
-					if ansi.Strip(row.Styled) != row.Plain {
-						t.Fatal("styled and plain rows differ")
+					// Background fill pads the physical row, not the source text.
+					if strings.TrimRight(ansi.Strip(row.Styled), " ") != strings.TrimRight(row.Plain, " ") {
+						t.Fatalf("styled and plain rows differ at width %d: visible=%q plain=%q", width, ansi.Strip(row.Styled), row.Plain)
 					}
 					visible = append(visible, row.Plain)
 				}

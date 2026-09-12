@@ -123,6 +123,11 @@ thought/tool/plan/lifecycle/notice boundary ends the run and clears both content
 and active identity; later text starts a new run. Identity is never carried
 through a semantic barrier.
 
+Surface live append targets are run-scoped even when an Agent reuses a message
+ID. A typed canonical final repairs the latest matching run in place; this does
+not reopen that run or interrupt newer output. Updating an existing tool or
+approval row, or a usage gauge, is not a new narrative boundary.
+
 One live Turn has one content source:
 
 - live Assistant and thought text comes from source chunks;
@@ -179,8 +184,10 @@ When the Host dispatches that input, the recipient sees a standard ACP
 lives under `_meta.caelis.agent_communication`. Control derives
 `Envelope.AgentCommunicationSource` from the typed event actor; Surfaces use
 that field to identify Agent input. External ACP ingress removes the reserved
-marker before live or canonical projection. Later collaborator output alone
-advances Task activity.
+marker before live or canonical projection. Successful dispatch of a fresh child
+prompt emits a producer running observation, so Task activity includes the wait
+for its first content update. Queued mail and steering within a running Turn do
+not start another activity.
 
 The `subagent-workspace-v1` Host capability covers child input, receipts, layout
 preferences, and child model/context descriptors. Interactive attach requires
@@ -216,7 +223,7 @@ authorized input; both Agent mail and user input reuse that loaded connection.
 Recovery resolves the same Session Runtime used by input admission. An attached
 Task reader retains that Runtime independently of the parent Session feed.
 Each prompt retains the existing Host work reference through producer settlement,
-including the interval before its first output advances the Task directory.
+including the interval before its running observation reaches the Task directory.
 Built-in managed children use the same exact parent/Task authorization for load
 and resume; a successful load retains connection ownership for later prompts.
 
@@ -301,6 +308,15 @@ Every Surface must consume typed Control deliveries, commit replacement pages
 only after their end marker, preserve identity/relation fields, keep transcript
 state non-durable, treat terminal/approval state monotonically, and avoid
 Runtime, policy, Session-store, spool-file, or Host implementation dependencies.
+
+The TUI main transcript keeps the newest two logical Turns fully detailed. Older
+terminal Turns display user and assistant narrative without completed tool,
+reasoning, or plan details; nonterminal blocks and standalone child panes remain
+fully detailed. This presentation policy does not remove document events or
+change canonical history or model context. Main-transcript layout materializes
+visible blocks and a scroll margin, retaining estimated heights outside that
+window. Display-column selections stay tied to measured rows; width changes clear
+them before reflow.
 
 Projection changes require whole-Envelope live/replay parity. Changes affecting
 persistence or model visibility also require a round trip proving rebuilt model

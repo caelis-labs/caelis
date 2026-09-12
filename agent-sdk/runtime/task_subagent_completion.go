@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -100,6 +101,7 @@ func (sink subagentCompletionSink) enqueue(result delegation.Result) <-chan stru
 	default:
 		return nil
 	}
+	sink.activity.sealUsage()
 	return sink.runtime.enqueueSubagentCompletion(&subagentCompletion{
 		ctx:              sink.ctx,
 		result:           result,
@@ -288,11 +290,19 @@ func (tm *taskRuntime) persistSubagentCompletion(completion *subagentCompletion)
 		task.mu.Unlock()
 		return nil
 	}
+	pendingUsage := (*taskapi.ContextUsageRecord)(nil)
+	if completion.activity != nil {
+		pendingUsage = completion.activity.peekUsage()
+	}
 	if !completion.initialized {
 		completion.initialized = true
 		// A terminal Task observed before this completion already crossed its
 		// durable mutation boundary under the serialized Task operation claim.
-		completion.taskPersisted = !task.running && !completion.observedTerminal
+		completion.taskPersisted = !task.running && !completion.observedTerminal && pendingUsage == nil
+	}
+	if pendingUsage != nil && !reflect.DeepEqual(task.contextUsage, pendingUsage) {
+		task.contextUsage = pendingUsage
+		completion.taskPersisted = false
 	}
 	if !completion.taskPersisted {
 		if task.running {

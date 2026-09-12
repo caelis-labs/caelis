@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
 )
 
@@ -112,6 +113,76 @@ func TestDirectoryIndexFansStatusToIndependentObserversAndReleasesSession(t *tes
 	}
 	if sessions, observers := directoryIndexCounts(index); sessions != 0 || observers != 0 {
 		t.Fatalf("directory after final close = %d Sessions/%d observers, want no retained state", sessions, observers)
+	}
+}
+
+func TestDirectoryIndexPublishesChildModelAndContextGaugeChanges(t *testing.T) {
+	t.Parallel()
+
+	entry := taskStreamTestEntry("session-1", "task-1", task.KindSubagent)
+	entry.Spec = map[string]any{"target": map[string]any{"placement": map[string]any{"model": "assigned-model"}}}
+	store := newTaskStreamTestStore(entry)
+	index := NewDirectoryIndex()
+	created, err := New(Config{Tasks: store, Directory: index, Authorizer: taskStreamTestAuthorizer{}, Secret: taskStreamTestSecret})
+	if err != nil {
+		t.Fatal(err)
+	}
+	watch, err := created.(DirectoryService).WatchDirectory(context.Background(), Principal{ID: "owner"}, DirectoryWatchRequest{SessionID: "session-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer watch.Subscription.Close()
+	initial := receiveDirectorySnapshot(t, watch.Subscription)
+	if len(initial.Tasks) != 1 || initial.Tasks[0].Model != "assigned-model" || initial.Tasks[0].ContextUsed != 0 || initial.Tasks[0].ContextSize != 0 {
+		t.Fatalf("initial child metadata = %#v", initial)
+	}
+	revision := initial.Revision
+	for _, change := range []struct {
+		name  string
+		apply func(*task.Entry)
+		model string
+		used  uint64
+		size  uint64
+	}{
+		{"first gauge", func(entry *task.Entry) {
+			entry.ContextUsage = &task.ContextUsageRecord{Snapshot: session.ContextUsageSnapshot{Used: 12000, Size: 128000}}
+		}, "assigned-model", 12000, 128000},
+		{"replaced gauge", func(entry *task.Entry) { entry.ContextUsage.Snapshot.Used = 8000 }, "assigned-model", 8000, 128000},
+		{"window changed", func(entry *task.Entry) { entry.ContextUsage.Snapshot.Size = 256000 }, "assigned-model", 8000, 256000},
+		{"observed model", func(entry *task.Entry) { entry.ContextUsage.Invocation.Model = "observed-model" }, "observed-model", 8000, 256000},
+		{"cleared gauge", func(entry *task.Entry) { entry.ContextUsage = nil }, "assigned-model", 0, 0},
+		{"assigned model", func(entry *task.Entry) {
+			entry.Spec["target"] = map[string]any{"placement": map[string]any{"model": "next-model"}}
+		}, "next-model", 0, 0},
+	} {
+		entry = task.CloneEntry(entry)
+		change.apply(entry)
+		entry.Revision++
+		if err := store.Upsert(context.Background(), entry); err != nil {
+			t.Fatal(err)
+		}
+		index.Notify(entry)
+		snapshot := receiveDirectorySnapshot(t, watch.Subscription)
+		revision++
+		if snapshot.Revision != revision || len(snapshot.Tasks) != 1 {
+			t.Fatalf("%s snapshot = %#v", change.name, snapshot)
+		}
+		descriptor := snapshot.Tasks[0]
+		if descriptor.Model != change.model || descriptor.ContextUsed != change.used || descriptor.ContextSize != change.size {
+			t.Fatalf("%s metadata = %#v", change.name, descriptor)
+		}
+		// Repeated gauges and unrelated content commits are still folded away.
+		entry = task.CloneEntry(entry)
+		entry.Revision++
+		entry.UpdatedAt = time.Now()
+		entry.Result = map[string]any{"output_preview": "new output"}
+		if err := store.Upsert(context.Background(), entry); err != nil {
+			t.Fatal(err)
+		}
+		index.Notify(entry)
+		if got := index.revision("session-1"); got != revision {
+			t.Fatalf("unchanged %s metadata advanced revision to %d, want %d", change.name, got, revision)
+		}
 	}
 }
 

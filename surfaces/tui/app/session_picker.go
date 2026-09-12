@@ -15,6 +15,7 @@ import (
 type sessionPickerState struct {
 	rows     []ResumeCandidate
 	index    int
+	offset   int
 	loading  bool
 	err      string
 	request  uint64
@@ -81,6 +82,7 @@ func (m *Model) applySessionPickerResult(msg sessionPickerResultMsg) tea.Cmd {
 			selected = state.rows[state.index].SessionID
 		}
 		state.rows, state.err = msg.rows, ""
+		state.geometry = subagentOverlayGeometry{}
 		state.index = clampInt(state.index, 0, maxInt(0, len(state.rows)-1))
 		for i, row := range state.rows {
 			if row.SessionID == selected {
@@ -104,6 +106,7 @@ func (m *Model) selectSessionPicker() tea.Cmd {
 
 func (m *Model) handleSessionPickerKey(msg tea.KeyMsg) tea.Cmd {
 	state := m.sessionPicker
+	state.pressed = ""
 	switch msg.String() {
 	case "esc", "ctrl+o":
 		m.closeSessionPicker()
@@ -112,9 +115,9 @@ func (m *Model) handleSessionPickerKey(msg tea.KeyMsg) tea.Cmd {
 	case "down", "j":
 		state.index = minInt(maxInt(0, len(state.rows)-1), state.index+1)
 	case "pgup":
-		state.index = maxInt(0, state.index-maxInt(1, m.height-8))
+		state.index = maxInt(0, state.index-maxInt(1, m.height-9))
 	case "pgdown":
-		state.index = minInt(maxInt(0, len(state.rows)-1), state.index+maxInt(1, m.height-8))
+		state.index = minInt(maxInt(0, len(state.rows)-1), state.index+maxInt(1, m.height-9))
 	case "home":
 		state.index = 0
 	case "end":
@@ -130,13 +133,17 @@ func (m *Model) renderSessionPicker() string {
 	if state == nil {
 		return ""
 	}
-	width := minInt(100, maxInt(12, m.width-4))
+	width := maxInt(20, m.width-4)
 	inner := maxInt(1, width-m.overlayBorderChromeWidth())
 	title := m.theme.TitleStyle().Render("Sessions")
 	body := []string{title + strings.Repeat(" ", maxInt(1, inner-displayColumns(title)-1)) + "×", ""}
 	count := minInt(len(state.rows), maxInt(1, m.height-9))
-	start := maxInt(0, state.index-count+1)
-	start = minInt(start, maxInt(0, len(state.rows)-count))
+	// Keep visible rows stationary while hovering; scroll only when selection
+	// leaves the window or a resize/refresh changes its bounds.
+	start := maxInt(state.index-count+1, minInt(state.offset, state.index))
+	start = clampInt(start, 0, maxInt(0, len(state.rows)-count))
+	state.offset = start
+	now := time.Now()
 	rowOffsets := make([]int, len(state.rows))
 	for i := range rowOffsets {
 		rowOffsets[i] = -1
@@ -149,20 +156,33 @@ func (m *Model) renderSessionPicker() string {
 			status = "running"
 		}
 		if row.SessionID == m.currentSessionID {
-			status = strings.TrimSpace(status + " · current")
+			if status != "" {
+				status += " · "
+			}
+			status += "current"
 		}
 		prefix := "  "
 		if i == state.index {
 			prefix = "> "
 		}
-		budget := maxInt(1, inner-displayColumns(prefix)-displayColumns(status)-2)
+		age := sessionPickerAge(row.UpdatedAt, now)
+		// Reserve the age and some title even when status must be shortened.
+		statusBudget := maxInt(0, inner-displayColumns(prefix)-displayColumns(age)-minInt(12, inner/2)-4)
+		if statusBudget == 0 {
+			status = ""
+		} else {
+			status = truncateTailDisplay(status, statusBudget)
+		}
+		suffix := age
+		if status != "" {
+			suffix = status + "  " + age
+		}
+		budget := maxInt(1, inner-displayColumns(prefix)-displayColumns(suffix)-2)
 		label = truncateTailDisplay(label, budget)
 		line := prefix + label
-		if status != "" {
-			line += strings.Repeat(" ", maxInt(1, inner-displayColumns(line)-displayColumns(status))) + status
-		}
+		line += strings.Repeat(" ", maxInt(1, inner-displayColumns(line)-displayColumns(suffix))) + suffix
 		if i == state.index {
-			line = m.theme.CommandStyle().Padding(0).Render(line)
+			line = m.theme.CommandActiveStyle().Padding(0).Render(line)
 		}
 		rowOffsets[i] = len(body)
 		body = append(body, line)
@@ -194,17 +214,47 @@ func (m *Model) renderSessionPicker() string {
 			rowOffsets[i] = y + inset + offset
 		}
 	}
-	state.geometry = subagentOverlayGeometry{x: x, y: y, width: w, height: h, rows: rowOffsets, closeX: x + w - 2, closeY: y + inset}
+	state.geometry = subagentOverlayGeometry{x: x, y: y, width: w, height: h, rows: rowOffsets, closeX: x + w - 1 - m.overlayBorderChromeWidth()/2, closeY: y + inset}
 	return frame
+}
+
+func sessionPickerAge(updatedAt, now time.Time) string {
+	if updatedAt.IsZero() {
+		return "—"
+	}
+	age := now.Sub(updatedAt)
+	switch {
+	case age < time.Minute:
+		return "now"
+	case age < time.Hour:
+		return fmt.Sprintf("%dm", age/time.Minute)
+	case age < 24*time.Hour:
+		return fmt.Sprintf("%dh", age/time.Hour)
+	default:
+		return fmt.Sprintf("%dd", age/(24*time.Hour))
+	}
 }
 
 func (m *Model) handleSessionPickerMouse(msg tea.MouseMsg) tea.Cmd {
 	state, mouse := m.sessionPicker, msg.Mouse()
 	g := state.geometry
 	inside := mouse.X >= g.x && mouse.X < g.x+g.width && mouse.Y >= g.y && mouse.Y < g.y+g.height
-	row := subagentRowAtY(g.rows, mouse.Y)
+	row := -1
+	inset := m.overlayBorderChromeWidth() / 2
+	if inside && mouse.X >= g.x+inset && mouse.X < g.x+g.width-inset {
+		row = subagentRowAtY(g.rows, mouse.Y)
+	}
+	closeTarget := inside && mouse.Y == g.closeY && mouse.X == g.closeX
 	switch msg.(type) {
+	case tea.MouseMotionMsg:
+		if row >= 0 {
+			state.index = row
+		}
 	case tea.MouseWheelMsg:
+		state.pressed = ""
+		if !inside {
+			return nil
+		}
 		if mouse.Button == tea.MouseWheelUp {
 			state.index = maxInt(0, state.index-1)
 		}
@@ -216,11 +266,11 @@ func (m *Model) handleSessionPickerMouse(msg tea.MouseMsg) tea.Cmd {
 		if !inside || mouse.Button != tea.MouseLeft {
 			return nil
 		}
-		if mouse.Y == g.closeY && mouse.X >= g.closeX-1 {
+		if closeTarget {
 			state.pressed = "close"
 		} else if row >= 0 {
 			state.index = row
-			state.pressed = fmt.Sprint(row)
+			state.pressed = "session:" + state.rows[row].SessionID
 		}
 	case tea.MouseReleaseMsg:
 		pressed := state.pressed
@@ -228,9 +278,9 @@ func (m *Model) handleSessionPickerMouse(msg tea.MouseMsg) tea.Cmd {
 		if !inside || (mouse.Button != tea.MouseLeft && mouse.Button != tea.MouseNone) {
 			return nil
 		}
-		if pressed == "close" && mouse.Y == g.closeY && mouse.X >= g.closeX-1 {
+		if pressed == "close" && closeTarget {
 			m.closeSessionPicker()
-		} else if row >= 0 && pressed == fmt.Sprint(row) {
+		} else if row >= 0 && pressed == "session:"+state.rows[row].SessionID {
 			state.index = row
 			return m.selectSessionPicker()
 		}

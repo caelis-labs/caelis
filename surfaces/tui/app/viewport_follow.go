@@ -26,9 +26,10 @@ func (m *Model) refreshViewportFollowStateFromOffset() {
 	}
 	if m.viewport.AtBottom() {
 		m.setViewportFollowState(viewportFollowTail)
-		return
+	} else {
+		m.setViewportFollowState(viewportPinnedHistory)
 	}
-	m.setViewportFollowState(viewportPinnedHistory)
+	m.materializeVisibleViewport()
 }
 
 func (m *Model) enterViewportSelecting() {

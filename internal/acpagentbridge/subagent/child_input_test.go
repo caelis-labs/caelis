@@ -94,6 +94,11 @@ func TestActiveChildInputPreservesIngressOrderAndPublishesAcceptedInput(t *testi
 		t.Fatalf("SubmitChildInput() = (%#v, %v), want active steering", result, err)
 	}
 	frames, terminal := waitChildActivityFramesUntilTerminalFor(t, ctx, events, result.ActivityID)
+	for _, frame := range frames {
+		if isProducerRunningEvidence(frame) {
+			t.Fatalf("steering published idle producer running evidence: %#v", frames)
+		}
+	}
 	if len(frames) != 2 || frames[0].Event == nil || frames[1].Event == nil {
 		t.Fatalf("active input frames = %#v, want Agent output then accepted input", frames)
 	}
@@ -270,18 +275,12 @@ func TestIdleChildInputStartsPromptOnExistingSession(t *testing.T) {
 		t.Fatalf("SubmitChildInput() = (%#v, %v), want new prompt activity", result, err)
 	}
 	frames, terminal := waitChildActivityFramesUntilTerminalFor(t, ctx, events, result.ActivityID)
-	if len(frames) != 2 || frames[0].Event == nil || frames[1].Event == nil {
-		t.Fatalf("idle input frames = %#v, want accepted input and Agent output", frames)
-	}
-	acceptedFrame, outputFrame := frames[0], frames[1]
-	if session.ProtocolAgentCommunicationOf(acceptedFrame.Event) == nil {
-		acceptedFrame, outputFrame = outputFrame, acceptedFrame
-	}
+	acceptedFrame, outputFrame := requireIdlePromptRunningThenAccepted(t, frames)
 	if communication := session.ProtocolAgentCommunicationOf(acceptedFrame.Event); communication == nil ||
 		communication.Text != "second prompt" || acceptedFrame.Event.Actor.ID != "controller-1" {
 		t.Fatalf("accepted idle input = %#v, want standard Agent communication", acceptedFrame.Event)
 	}
-	if outputFrame.Event.Text != "prompt output 2" {
+	if outputFrame.Event == nil || outputFrame.Event.Text != "prompt output 2" {
 		t.Fatalf("idle prompt output = %#v", outputFrame)
 	}
 	if terminal.Result.State != delegation.StateCompleted {
@@ -407,6 +406,11 @@ func TestIdleChildInputCancellationBeforeWriteRestoresCompleteRunState(t *testin
 	}
 	if gotActivity := run.slot.activityCheckpoint(); !reflect.DeepEqual(gotActivity, wantActivity) {
 		t.Fatalf("activity after pre-write cancellation = %#v, want %#v", gotActivity, wantActivity)
+	}
+	select {
+	case event := <-events:
+		t.Fatalf("pre-write cancellation published %#v", event)
+	default:
 	}
 	if err := runner.Quiesce(ctx); err != nil {
 		t.Fatal(err)
@@ -697,6 +701,25 @@ func TestIdlePromptOwnershipMakesImmediateNextInputSteering(t *testing.T) {
 	if err != nil || !first.StartedActivity {
 		t.Fatalf("first input = (%#v, %v)", first, err)
 	}
+	// The helper withholds all second-prompt output until steering. Running
+	// state and accepted input must reach observers before that release.
+	for i := range 2 {
+		select {
+		case event := <-events:
+			if event.ActivityID != first.ActivityID || event.Frame == nil {
+				t.Fatalf("pre-output event = %#v, want new activity frame", event)
+			}
+			if i == 0 {
+				if !isProducerRunningEvidence(*event.Frame) || event.Frame.State != string(delegation.StateRunning) || event.Frame.OccurredAt.IsZero() {
+					t.Fatalf("first pre-output frame = %#v, want explicit running state", event.Frame)
+				}
+			} else if communication := session.ProtocolAgentCommunicationOf(event.Frame.Event); communication == nil || communication.Text != "prompt two" {
+				t.Fatalf("second pre-output frame = %#v, want accepted input", event.Frame)
+			}
+		case <-ctx.Done():
+			t.Fatal("new activity waited for assistant output before publishing running state")
+		}
+	}
 	second, err := submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{
 		Target: run.slot.target, Source: session.ActorRef{Kind: session.ActorKindController, ID: "controller-1"}, Input: "steer two",
 	})
@@ -971,6 +994,45 @@ func waitChildActivityTerminalFor(t *testing.T, ctx context.Context, events <-ch
 			return event
 		}
 	}
+}
+
+func isProducerRunningEvidence(frame output.Event) bool {
+	return frame.Running && !frame.Closed && frame.Event == nil && strings.TrimSpace(frame.Text) == ""
+}
+
+func requireIdlePromptRunningThenAccepted(t *testing.T, frames []output.Event) (output.Event, output.Event) {
+	t.Helper()
+	if len(frames) != 3 {
+		t.Fatalf("idle prompt frames = %#v, want one running, input, and output frame", frames)
+	}
+	started := -1
+	accepted := -1
+	outputIdx := -1
+	for i, frame := range frames {
+		if isProducerRunningEvidence(frame) {
+			if started != -1 {
+				t.Fatalf("duplicate producer running evidence in %#v", frames)
+			}
+			started = i
+			continue
+		}
+		if session.ProtocolAgentCommunicationOf(frame.Event) != nil {
+			if started < 0 {
+				t.Fatalf("accepted input before producer running evidence: %#v", frames)
+			}
+			if accepted < 0 {
+				accepted = i
+			}
+			continue
+		}
+		if outputIdx < 0 {
+			outputIdx = i
+		}
+	}
+	if started < 0 || accepted < 0 || outputIdx < 0 {
+		t.Fatalf("idle prompt frames = %#v, want running evidence, accepted input, and Agent output", frames)
+	}
+	return frames[accepted], frames[outputIdx]
 }
 
 func waitChildActivityFramesUntilTerminalFor(

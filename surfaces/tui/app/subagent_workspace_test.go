@@ -23,6 +23,9 @@ type paneTestClient struct {
 	mu          sync.Mutex
 	requests    []appserver.SubagentInputRequest
 	preferences uipreferences.Preferences
+	saves       []uipreferences.Preferences
+	loadErr     error
+	saveErr     error
 }
 
 func (c *paneTestClient) SubmitSubagentInput(_ context.Context, req appserver.SubagentInputRequest) (collaboration.UserInputStatus, error) {
@@ -37,12 +40,16 @@ func (*paneTestClient) SubagentInputStatuses(_ context.Context, req appserver.Su
 func (c *paneTestClient) LoadUIPreferences(context.Context) (uipreferences.Preferences, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.preferences, nil
+	return c.preferences.WithDefaults(), c.loadErr
 }
 func (c *paneTestClient) SaveUIPreferences(_ context.Context, p uipreferences.Preferences) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.preferences = p
+	c.saves = append(c.saves, p)
+	if c.saveErr != nil {
+		return c.saveErr
+	}
+	c.preferences = c.preferences.Merge(p).WithDefaults()
 	return nil
 }
 func newPaneTestModel(t testing.TB) (*Model, *paneTestClient) {
@@ -106,7 +113,7 @@ func TestSubagentWorkspaceLayoutsAndBoundedDrag(t *testing.T) {
 			if model.workspaceLayout().split {
 				t.Fatal("small terminal did not temporarily use overlay")
 			}
-			if model.workspace.preferences != p {
+			if model.uiPreferences.value != p {
 				t.Fatal("fallback overwrote preference")
 			}
 			_, _ = model.Update(tea.WindowSizeMsg{Width: 160, Height: 48})
@@ -180,8 +187,8 @@ func TestSubagentWorkspacePreferencesSerializeLatestChoice(t *testing.T) {
 		t.Fatalf("latest preference lost=%#v", client.preferences)
 	}
 	reopened := NewModel(Config{UIPreferences: client})
-	runTeaCmds(t, reopened, reopened.loadPanePreferences())
-	if reopened.workspace.preferences != client.preferences {
+	runTeaCmds(t, reopened, reopened.loadUIPreferences())
+	if reopened.uiPreferences.value != client.preferences {
 		t.Fatal("new UI did not load stored preference")
 	}
 }
@@ -301,7 +308,7 @@ func TestSubagentWorkspaceResizeEndsDragAndFocusesFallback(t *testing.T) {
 	if m.subagentOutputOverlay.editor.Value() != "visible child" || m.textarea.Value() != "" {
 		t.Fatal("fallback paste entered hidden main composer")
 	}
-	if client.preferences != m.workspace.preferences {
+	if client.preferences != m.uiPreferences.value {
 		t.Fatal("terminal resize changed the committed ratio")
 	}
 }

@@ -11,6 +11,25 @@ import (
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 )
 
+// adoptCanonicalSubagentEntry publishes a loaded Task under the operation claim.
+// Usage writers reuse this revision check without invoking history backfill.
+func (tm *taskRuntime) adoptCanonicalSubagentEntry(entry *taskapi.Entry) *subagentTask {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	if installed := tm.subagents[entry.TaskID]; installed != nil {
+		installed.mu.Lock()
+		revision := installed.revision
+		installed.mu.Unlock()
+		if revision >= entry.Revision {
+			return installed
+		}
+	}
+	fresh := tm.rehydrateSubagentTask(entry)
+	tm.subagents[entry.TaskID] = fresh
+	tm.rememberTaskHandleLocked(fresh.sessionRef.SessionID, fresh.handle)
+	return fresh
+}
+
 // rebaseObservedSubagentTask keeps completion persistence revision-safe. It
 // carries only Task lifecycle metadata; transient output belongs to Control's
 // spool and never participates in this rebase.

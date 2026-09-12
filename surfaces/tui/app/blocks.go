@@ -285,11 +285,8 @@ func (b *MainACPTurnBlock) AddApprovalReviewEvent(callID, tool, command, status,
 	}
 }
 
-func (b *MainACPTurnBlock) Render(ctx BlockRenderContext) []RenderedRow {
-	if b == nil {
-		return nil
-	}
-	rows := renderACPTranscriptRows(b.id, b.Events, b.Status, maxInt(8, ctx.Width), ctx, acpTranscriptRenderOptions{
+func (b *MainACPTurnBlock) transcriptRenderOptions() acpTranscriptRenderOptions {
+	return acpTranscriptRenderOptions{
 		UseStatusPlaceholder:    true,
 		PlaceholderAsMeta:       true,
 		HideWaitingApprovalRow:  true,
@@ -307,7 +304,14 @@ func (b *MainACPTurnBlock) Render(ctx BlockRenderContext) []RenderedRow {
 		AgentMessageExpanded:    b.agentMessageExpanded,
 		AgentMessageTargetLinks: true,
 		SubagentOutputLinks:     true,
-	})
+	}
+}
+
+func (b *MainACPTurnBlock) Render(ctx BlockRenderContext) []RenderedRow {
+	if b == nil {
+		return nil
+	}
+	rows := renderACPTranscriptRows(b.id, b.Events, b.Status, maxInt(8, ctx.Width), ctx, b.transcriptRenderOptions())
 	return b.compactHeightBudget.apply(b.id, rows, b.Events, b.Status, ctx)
 }
 
@@ -563,11 +567,8 @@ func (b *ParticipantTurnBlock) AddApprovalReviewEvent(callID, tool, command, sta
 	}
 }
 
-func (b *ParticipantTurnBlock) Render(ctx BlockRenderContext) []RenderedRow {
-	if b == nil {
-		return nil
-	}
-	bodyRows := renderACPTranscriptRows(b.id, b.Events, b.Status, maxInt(8, ctx.Width), ctx, acpTranscriptRenderOptions{
+func (b *ParticipantTurnBlock) transcriptRenderOptions() acpTranscriptRenderOptions {
+	return acpTranscriptRenderOptions{
 		UseStatusPlaceholder:   true,
 		PlaceholderAsMeta:      true,
 		HideWaitingApprovalRow: true,
@@ -583,7 +584,14 @@ func (b *ParticipantTurnBlock) Render(ctx BlockRenderContext) []RenderedRow {
 		ReasoningExpanded:      b.reasoningExpanded,
 		AgentMessageExpanded:   b.agentMessageExpanded,
 		FullAgentMessages:      b.FullAgentMessages,
-	})
+	}
+}
+
+func (b *ParticipantTurnBlock) Render(ctx BlockRenderContext) []RenderedRow {
+	if b == nil {
+		return nil
+	}
+	bodyRows := renderACPTranscriptRows(b.id, b.Events, b.Status, maxInt(8, ctx.Width), ctx, b.transcriptRenderOptions())
 	if len(bodyRows) == 0 && participantTurnIsTerminal(b.Status) && strings.TrimSpace(b.Actor) == "" {
 		return nil
 	}

@@ -15,6 +15,9 @@ type CommandSpec struct {
 	Platforms        []string
 	ArgCandidates    []SlashArgCandidate
 	DynamicCompleter bool
+	// AvailableWhileRunning marks commands the TUI may advertise while a Turn is
+	// running. Execution, queueing, and permission remain owned by the submit path.
+	AvailableWhileRunning bool
 }
 
 var defaultACPCommandNames = []string{"status", "breeze", "orbit", "zenith", "compact", "review"}
@@ -97,7 +100,7 @@ func defaultSharedSpecs() []CommandSpec {
 		{Name: "status", Usage: "/status", Description: "Show current provider, model, session, sandbox, and store info"},
 		{Name: "doctor", Usage: "/doctor", Description: "Diagnose and repair Windows sandbox readiness", Platforms: []string{"windows"}},
 		{Name: "new", Usage: "/new", Description: "Start a fresh session"},
-		{Name: "resume", Usage: "/resume [session-id]", Description: "List recent sessions or resume one by id", DynamicCompleter: true},
+		{Name: "resume", Usage: "/resume [session-id]", Description: "List recent sessions or resume one by id", DynamicCompleter: true, AvailableWhileRunning: true},
 		{Name: "compact", Usage: "/compact", Description: "Compact the current session transcript"},
 	}
 	return specs
@@ -109,8 +112,8 @@ func defaultTUISpecs() []CommandSpec {
 		{Name: "disconnect", Usage: "/disconnect", Description: "Disconnect provider models or local ACP Agents", DynamicCompleter: true},
 		{Name: "subagent", Usage: "/subagent <action>", Description: "Configure participant profiles and system Agents", DynamicCompleter: true, Details: []string{"actions: list; bind <breeze|orbit|zenith> <self|agent> [effort]; bind <guardian|reviewer> <default|model-agent> [effort]"}},
 		{Name: "plugin", Usage: "/plugin <action>", Description: "Manage Caelis plugins", Details: []string{"actions: install <plugin@marketplace|path>, marketplace add|list|update|rm, manage, rm <id>"}, ArgCandidates: pluginRootCandidates(), DynamicCompleter: true},
-		{Name: "exit", Usage: "/exit", Description: "Exit the TUI"},
-		{Name: "quit", Usage: "/quit", Description: "Exit the TUI"},
+		{Name: "exit", Usage: "/exit", Description: "Exit the TUI", AvailableWhileRunning: true},
+		{Name: "quit", Usage: "/quit", Description: "Exit the TUI", AvailableWhileRunning: true},
 	}
 	return specs
 }

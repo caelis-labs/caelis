@@ -15,10 +15,14 @@ import (
 
 type viewportRenderEntry struct {
 	viewportRowCache
-	cacheKey  string
-	rhythm    viewportRhythmClass
-	lineStart int
-	lineCount int
+	cacheKey     string
+	rhythm       viewportRhythmClass
+	lineStart    int
+	lineCount    int
+	layoutWidth  int
+	materialized bool
+	visible      bool
+	compact      bool
 }
 
 type viewportRhythmClass string
@@ -36,15 +40,32 @@ func (m *Model) rebuildViewportRenderCache(ctx BlockRenderContext) {
 		oldEntries[entry.blockID] = entry
 	}
 
-	nextEntries := make([]viewportRenderEntry, 0, m.doc.Len())
-	for _, block := range m.doc.Blocks() {
-		key := viewportBlockRenderKey(block, ctx)
+	blocks := m.doc.Blocks()
+	compactBlocks := historicalTurnBlocks(blocks)
+	nextEntries := make([]viewportRenderEntry, 0, len(blocks))
+	for _, block := range blocks {
+		compact := compactBlocks[block.BlockID()]
 		cached, ok := oldEntries[block.BlockID()]
-		if ok && cached.cacheKey == key {
-			nextEntries = append(nextEntries, cached)
-			continue
+		if ok && cached.compact == compact && m.lastViewportRenderContextKey == viewportRenderContextKey(ctx) {
+			_, dirty := m.dirtyViewportBlocks[block.BlockID()]
+			if !dirty && (!cached.materialized || cached.cacheKey == viewportEntryRenderKey(block, ctx, compact)) {
+				nextEntries = append(nextEntries, cached)
+				continue
+			}
 		}
-		nextEntries = append(nextEntries, m.renderViewportEntry(block, key, ctx, cached.viewportRowCache))
+		var count int
+		if ok && cached.compact == compact && cached.lineCount > 0 {
+			count = max(1, cached.lineCount*max(1, cached.layoutWidth)/max(1, ctx.Width))
+		} else if compact {
+			count = historicalTurnRowHint(block, ctx.Width)
+		} else {
+			count = estimatedViewportBlockLines(block, ctx.Width)
+		}
+		nextEntries = append(nextEntries, viewportRenderEntry{
+			viewportRowCache: viewportRowCache{blockID: block.BlockID()},
+			rhythm:           viewportRhythmForBlock(block),
+			lineCount:        count, layoutWidth: ctx.Width, visible: count > 0, compact: compact,
+		})
 	}
 	m.viewportRenderEntries = nextEntries
 }
@@ -65,19 +86,27 @@ func (m *Model) viewportRenderCacheMatchesDocument(ctx BlockRenderContext) bool 
 		if entry.blockID != block.BlockID() {
 			return false
 		}
-		if entry.cacheKey != viewportBlockRenderKey(block, ctx) {
+		if entry.materialized && entry.cacheKey != viewportEntryRenderKey(block, ctx, entry.compact) {
 			return false
 		}
 	}
 	return true
 }
 
-func (m *Model) renderViewportEntry(block Block, cacheKey string, ctx BlockRenderContext, previous viewportRowCache) viewportRenderEntry {
-	return viewportRenderEntry{
-		viewportRowCache: m.renderViewportRowCache(block, ctx, previous),
-		cacheKey:         cacheKey,
-		rhythm:           viewportRhythmForBlock(block),
+func (m *Model) renderViewportEntry(block Block, cacheKey string, ctx BlockRenderContext, previous viewportRowCache, compact bool) viewportRenderEntry {
+	var rows viewportRowCache
+	if compact {
+		m.observeBlockRender(block.Kind())
+		rows = m.renderViewportRowCacheFromRows(block, ctx, previous, renderHistoricalTurn(block, ctx))
+	} else {
+		rows = m.renderViewportRowCache(block, ctx, previous)
 	}
+	entry := viewportRenderEntry{
+		viewportRowCache: rows, cacheKey: cacheKey, rhythm: viewportRhythmForBlock(block),
+		lineCount: len(rows.styledLines), layoutWidth: ctx.Width, materialized: true, compact: compact,
+	}
+	entry.visible = viewportEntryHasVisibleContent(entry)
+	return entry
 }
 
 type wrappedViewportRows struct {
@@ -410,7 +439,18 @@ func (m *Model) rebuildViewportLineCaches(ctx BlockRenderContext) {
 			clickBounds = append(clickBounds, clickColumnRange{})
 		}
 		entry.lineStart = len(styledLines)
-		entry.lineCount = len(entry.styledLines)
+		if !entry.materialized {
+			styledLines = append(styledLines, make([]string, entry.lineCount)...)
+			plainLines = append(plainLines, make([]string, entry.lineCount)...)
+			selectionIndents = append(selectionIndents, make([]int, entry.lineCount)...)
+			blockIDs = append(blockIDs, make([]string, entry.lineCount)...)
+			clickTokens = append(clickTokens, make([]string, entry.lineCount)...)
+			clickBounds = append(clickBounds, make([]clickColumnRange, entry.lineCount)...)
+			if viewportEntryHasVisibleContent(*entry) {
+				prevEntry = entry
+			}
+			continue
+		}
 		styledLines = append(styledLines, entry.styledLines...)
 		plainLines = append(plainLines, entry.plainLines...)
 		selectionIndents = append(selectionIndents, entry.selectionIndents...)
@@ -451,6 +491,7 @@ func (m *Model) syncDirtyViewportRenderEntries(ctx BlockRenderContext) bool {
 		m.lastViewportRenderContextKey != viewportRenderContextKey(ctx) {
 		return false
 	}
+	compactBlocks := historicalTurnBlocks(m.doc.Blocks())
 	entryIndexes := make([]int, 0, len(m.dirtyViewportBlocks))
 	seen := make(map[int]struct{}, len(m.dirtyViewportBlocks))
 	for blockID := range m.dirtyViewportBlocks {
@@ -469,12 +510,15 @@ func (m *Model) syncDirtyViewportRenderEntries(ctx BlockRenderContext) bool {
 	})
 	for _, idx := range entryIndexes {
 		old := m.viewportRenderEntries[idx]
+		if !old.materialized || old.compact != compactBlocks[old.blockID] {
+			return false
+		}
 		block := m.doc.Find(old.blockID)
 		if block == nil {
 			return false
 		}
-		key := viewportBlockRenderKey(block, ctx)
-		next := m.renderViewportEntry(block, key, ctx, old.viewportRowCache)
+		key := viewportEntryRenderKey(block, ctx, old.compact)
+		next := m.renderViewportEntry(block, key, ctx, old.viewportRowCache, old.compact)
 		if next.rhythm != old.rhythm || viewportEntryHasVisibleContent(next) != viewportEntryHasVisibleContent(old) {
 			return false
 		}
@@ -504,6 +548,14 @@ func (m *Model) syncDirtyViewportRenderEntries(ctx BlockRenderContext) bool {
 		m.rebuildViewportLineCaches(ctx)
 	}
 	return true
+}
+
+func viewportEntryRenderKey(block Block, ctx BlockRenderContext, compact bool) string {
+	key := viewportBlockRenderKey(block, ctx)
+	if compact {
+		key += "|history"
+	}
+	return key
 }
 
 func viewportRenderContextKey(ctx BlockRenderContext) string {
@@ -600,6 +652,9 @@ func shouldInsertViewportRhythmGap(prev, current *viewportRenderEntry) bool {
 }
 
 func viewportEntryHasVisibleContent(entry viewportRenderEntry) bool {
+	if !entry.materialized {
+		return entry.visible
+	}
 	for _, line := range entry.plainLines {
 		if strings.TrimSpace(line) != "" {
 			return true

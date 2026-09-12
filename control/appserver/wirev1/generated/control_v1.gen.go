@@ -1740,6 +1740,7 @@ type TurnTarget struct {
 type UIPreferences struct {
 	HorizontalRatio *int    `json:"horizontal_ratio,omitempty"`
 	SubagentLayout  *string `json:"subagent_layout,omitempty"`
+	Theme           *string `json:"theme,omitempty"`
 	VerticalRatio   *int    `json:"vertical_ratio,omitempty"`
 }
 

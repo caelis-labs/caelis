@@ -123,7 +123,12 @@ func (m *Model) View() tea.View {
 	if m.sessionPicker == nil && m.activePrompt != nil && m.width > 0 && m.height > 0 {
 		if promptView := m.renderPromptModal(); promptView != "" {
 			normalizeBaseForOverlay()
-			view = overlayAboveBottomAreaLeft(view, promptView, m.width, m.mainColumnX()+inputHorizontalInset, maxInt(0, m.height-mainRect.y-mainRect.height+bottomHeight-m.promptModalReservedHeight()), 0)
+			if picker := m.themePicker; picker != nil && picker.prompt == m.activePrompt {
+				m.positionThemePicker(promptView)
+				view = picker.composition.compose(view, promptView, m.width, m.height)
+			} else {
+				view = overlayAboveBottomAreaLeft(view, promptView, m.width, m.mainColumnX()+inputHorizontalInset, maxInt(0, m.height-mainRect.y-mainRect.height+bottomHeight-m.promptModalReservedHeight()), 0)
+			}
 		}
 	} else if overlayView := m.renderInputOverlay(); m.sessionPicker == nil && overlayView != "" && m.width > 0 && m.height > 0 {
 		normalizeBaseForOverlay()
@@ -191,6 +196,12 @@ func (m *Model) View() tea.View {
 }
 
 func (m *Model) desiredMouseMode() tea.MouseMode {
+	if m.sessionPicker != nil {
+		return tea.MouseModeAllMotion
+	}
+	if m.themePicker != nil && m.activePrompt == m.themePicker.prompt && m.subagentOverlay == nil {
+		return tea.MouseModeAllMotion
+	}
 	if m.subagentOutputOverlay != nil && m.activePrompt == nil && m.subagentOverlay == nil {
 		return tea.MouseModeAllMotion
 	}

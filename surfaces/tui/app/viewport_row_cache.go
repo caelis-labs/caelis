@@ -16,12 +16,15 @@ type viewportRowCache struct {
 }
 
 func (m *Model) renderViewportRowCache(block Block, ctx BlockRenderContext, previous viewportRowCache) viewportRowCache {
+	m.observeBlockRender(block.Kind())
+	return m.renderViewportRowCacheFromRows(block, ctx, previous, block.Render(ctx))
+}
+
+func (m *Model) renderViewportRowCacheFromRows(block Block, ctx BlockRenderContext, previous viewportRowCache, source []RenderedRow) viewportRowCache {
 	contextKey := viewportRenderContextKey(ctx)
 	if previous.blockID != block.BlockID() || previous.contextKey != contextKey || previous.height != ctx.Height {
 		previous = viewportRowCache{}
 	}
-	m.observeBlockRender(block.Kind())
-	source := block.Render(ctx)
 	prefix := 0
 	for prefix < len(source) && prefix < len(previous.sourceRows) && source[prefix] == previous.sourceRows[prefix] {
 		prefix++

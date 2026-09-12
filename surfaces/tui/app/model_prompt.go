@@ -28,11 +28,11 @@ func (m *Model) enqueuePrompt(req PromptRequestMsg) {
 	m.pendingPrompt = append(m.pendingPrompt, req)
 }
 
-func (m *Model) finishPrompt(line string, err error) {
+func (m *Model) finishPrompt(line string, err error) tea.Cmd {
 	if m.activePrompt == nil {
-		return
+		return nil
 	}
-	m.finishThemeSelection(line, err)
+	themeChanged, cmd := m.finishThemeSelection(line, err)
 	resp := m.activePrompt.response
 	if resp != nil && resp == m.slashArgLoadAuthPrompt {
 		m.slashArgLoadAuthPrompt = nil
@@ -42,15 +42,18 @@ func (m *Model) finishPrompt(line string, err error) {
 	}
 	if len(m.pendingPrompt) == 0 {
 		m.activePrompt = nil
-		m.ensureViewportLayout()
-		m.syncViewportContent()
-		return
+	} else {
+		next := m.pendingPrompt[0]
+		m.pendingPrompt = m.pendingPrompt[1:]
+		m.activePrompt = newPromptState(next)
 	}
-	next := m.pendingPrompt[0]
-	m.pendingPrompt = m.pendingPrompt[1:]
-	m.activePrompt = newPromptState(next)
 	m.ensureViewportLayout()
-	m.syncViewportContent()
+	if themeChanged {
+		m.resolveSelectedTheme()
+	} else {
+		m.syncViewportContent()
+	}
+	return cmd
 }
 
 func (m *Model) handlePromptKey(msg tea.KeyMsg) tea.Cmd {
@@ -58,25 +61,24 @@ func (m *Model) handlePromptKey(msg tea.KeyMsg) tea.Cmd {
 		return nil
 	}
 	if len(m.activePrompt.choices) > 0 {
-		defer m.previewThemeSelection()
+		if picker := m.themePicker; picker != nil && picker.prompt == m.activePrompt {
+			return m.handleThemePickerKey(msg)
+		}
 		return m.handlePromptChoiceKey(msg)
 	}
 	switch msg.String() {
 	case "ctrl+c", "esc":
-		m.finishPrompt("", errors.New(PromptErrInterrupt))
-		return nil
+		return m.finishPrompt("", errors.New(PromptErrInterrupt))
 	case "ctrl+d":
 		if len(m.activePrompt.input) == 0 {
-			m.finishPrompt("", errors.New(PromptErrEOF))
-			return nil
+			return m.finishPrompt("", errors.New(PromptErrEOF))
 		}
 		if m.activePrompt.cursor < len(m.activePrompt.input) {
 			m.activePrompt.input = append(m.activePrompt.input[:m.activePrompt.cursor], m.activePrompt.input[m.activePrompt.cursor+1:]...)
 		}
 		return nil
 	case "enter":
-		m.finishPrompt(strings.TrimSpace(string(m.activePrompt.input)), nil)
-		return nil
+		return m.finishPrompt(strings.TrimSpace(string(m.activePrompt.input)), nil)
 	case "left":
 		if m.activePrompt.cursor > 0 {
 			m.activePrompt.cursor--
@@ -117,7 +119,6 @@ func (m *Model) handlePromptKey(msg tea.KeyMsg) tea.Cmd {
 }
 
 func (m *Model) handlePromptPaste(msg tea.PasteMsg) tea.Cmd {
-	defer m.previewThemeSelection()
 	if m.activePrompt == nil {
 		return nil
 	}
@@ -256,11 +257,9 @@ func (m *Model) handlePromptChoiceKey(msg tea.KeyMsg) tea.Cmd {
 	}
 	switch msg.String() {
 	case "ctrl+c", "esc":
-		m.finishPrompt("", errors.New(PromptErrInterrupt))
-		return nil
+		return m.finishPrompt("", errors.New(PromptErrInterrupt))
 	case "ctrl+d":
-		m.finishPrompt("", errors.New(PromptErrEOF))
-		return nil
+		return m.finishPrompt("", errors.New(PromptErrEOF))
 	case "left":
 		if m.activePrompt.filterable && m.activePrompt.cursor > 0 {
 			m.activePrompt.cursor--
@@ -325,13 +324,11 @@ func (m *Model) handlePromptChoiceKey(msg tea.KeyMsg) tea.Cmd {
 		visible = m.visiblePromptChoices()
 		if m.activePrompt.multiSelect && len(m.activePrompt.selected) == 0 {
 			if m.activePrompt.allowEmptySelection {
-				m.finishPrompt("", nil)
-				return nil
+				return m.finishPrompt("", nil)
 			}
 			filterValue := strings.TrimSpace(string(m.activePrompt.filter))
 			if custom, ok := firstAlwaysVisibleChoice(m.activePrompt.choices); ok && (filterValue == "" || len(visible) == 0 || promptChoicesOnlyAlwaysVisible(visible)) {
-				m.finishPrompt(custom.value, nil)
-				return nil
+				return m.finishPrompt(custom.value, nil)
 			}
 		}
 		if len(visible) == 0 {
@@ -341,12 +338,10 @@ func (m *Model) handlePromptChoiceKey(msg tea.KeyMsg) tea.Cmd {
 			if len(m.activePrompt.selected) == 0 {
 				m.activePrompt.selected[visible[m.activePrompt.choiceIndex].value] = struct{}{}
 			}
-			m.finishPrompt(strings.Join(m.selectedPromptChoices(), ","), nil)
-			return nil
+			return m.finishPrompt(strings.Join(m.selectedPromptChoices(), ","), nil)
 		}
 		choice := visible[m.activePrompt.choiceIndex]
-		m.finishPrompt(choice.value, nil)
-		return nil
+		return m.finishPrompt(choice.value, nil)
 	}
 	if text := msg.Key().Text; text != "" {
 		if m.activePrompt.filterable {
@@ -362,8 +357,7 @@ func (m *Model) handlePromptChoiceKey(msg tea.KeyMsg) tea.Cmd {
 		key := strings.ToLower(strings.TrimSpace(text))
 		for _, choice := range visible {
 			if choice.value == key {
-				m.finishPrompt(choice.value, nil)
-				return nil
+				return m.finishPrompt(choice.value, nil)
 			}
 		}
 	}

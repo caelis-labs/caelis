@@ -2,18 +2,50 @@ package tuiapp
 
 import (
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/caelis-labs/caelis/control/uipreferences"
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 )
 
 type themePickerState struct {
-	previous string
-	prompt   *promptState
+	previous          string
+	prompt            *promptState
+	hoverIndex        int
+	pressedName       string
+	geometry          themePickerGeometry
+	composition       centeredOverlayCache
+	previewGeneration uint64
 }
 
 func (m *Model) resolveSelectedTheme() {
 	m.applyTheme(tuikit.ResolveSelectedTheme(m.themeName, m.terminalBg, m.terminalDark, m.noColor, m.colorProfile))
+}
+
+// A late startup load changes the cancel target, not an in-progress preview.
+func (m *Model) applySavedTheme(saved string) {
+	name, ok := tuikit.NormalizeThemeName(saved)
+	if !ok {
+		name = "auto"
+	}
+	if picker := m.themePicker; picker != nil {
+		picker.previous = name
+		if picker.previewGeneration != 0 {
+			return
+		}
+		picker.prompt.choiceIndex = 0
+		for i, choice := range picker.prompt.choices {
+			if choice.value == name {
+				picker.prompt.choiceIndex = i
+				break
+			}
+		}
+	}
+	if m.themeName != name {
+		m.themeName = name
+		m.resolveSelectedTheme()
+	}
 }
 
 // Theme commands are intercepted before turn admission and never become a
@@ -35,7 +67,7 @@ func (m *Model) submitThemeCommand(line string) tea.Cmd {
 		m.themeName = name
 		m.resetComposerAfterOverlayOpen()
 		m.resolveSelectedTheme()
-		return nil
+		return m.setUIPreferences(uipreferences.Preferences{Theme: name})
 	}
 	if m.activePrompt != nil {
 		return nil
@@ -53,45 +85,87 @@ func (m *Model) submitThemeCommand(line string) tea.Cmd {
 		title:   "Theme",
 		choices: choices, choiceIndex: index,
 	}
-	m.themePicker = &themePickerState{previous: m.themeName, prompt: prompt}
+	m.themePicker = &themePickerState{previous: m.themeName, prompt: prompt, hoverIndex: -1}
 	m.activePrompt = prompt
 	m.ensureViewportLayout()
 	m.syncViewportContent()
 	return nil
 }
 
-func (m *Model) previewThemeSelection() {
+// Selection paints immediately. Coalesce rapid navigation before retheming the
+// transcript, and bind every delayed preview to the picker that requested it.
+const themePreviewDelay = 180 * time.Millisecond
+
+type themePreviewMsg struct {
+	picker     *themePickerState
+	generation uint64
+}
+
+func (m *Model) handleThemePickerKey(msg tea.KeyMsg) tea.Cmd {
+	// Generic choice prompts also accept a whole choice value as committed text.
+	// Theme previews require explicit Enter confirmation, including with IME input.
+	switch msg.String() {
+	case "up", "down", "enter", "esc", "ctrl+c", "ctrl+d":
+	default:
+		return nil
+	}
 	picker := m.themePicker
-	if picker == nil || m.activePrompt != picker.prompt {
+	before := picker.prompt.choiceIndex
+	picker.hoverIndex = -1
+	picker.pressedName = ""
+	cmd := m.handlePromptChoiceKey(msg)
+	if m.themePicker == picker && picker.prompt.choiceIndex != before {
+		return tea.Batch(cmd, m.scheduleThemePreview())
+	}
+	return cmd
+}
+
+func (m *Model) scheduleThemePreview() tea.Cmd {
+	picker := m.themePicker
+	picker.previewGeneration++
+	if picker.prompt.choices[picker.prompt.choiceIndex].value == m.themeName {
+		return nil
+	}
+	msg := themePreviewMsg{picker: picker, generation: picker.previewGeneration}
+	return tea.Tick(themePreviewDelay, func(time.Time) tea.Msg { return msg })
+}
+
+func (m *Model) applyThemePreview(msg themePreviewMsg) {
+	picker := m.themePicker
+	if picker == nil || picker != msg.picker || m.activePrompt != picker.prompt || picker.previewGeneration != msg.generation {
 		return
 	}
-	p := picker.prompt
-	if p.choiceIndex < 0 || p.choiceIndex >= len(p.choices) {
-		return
-	}
-	name := p.choices[p.choiceIndex].value
+	name := picker.prompt.choices[picker.prompt.choiceIndex].value
 	if m.themeName != name {
 		m.themeName = name
 		m.resolveSelectedTheme()
 	}
 }
 
-func (m *Model) finishThemeSelection(line string, err error) {
+// Finish the local choice before the prompt is dismissed. The caller applies
+// any color change after replacing the prompt, avoiding an intermediate layout.
+func (m *Model) finishThemeSelection(line string, err error) (bool, tea.Cmd) {
 	picker := m.themePicker
 	if picker == nil || picker.prompt != m.activePrompt {
-		return
+		return false, nil
 	}
 	m.themePicker = nil
-	m.themeName = picker.previous
+	name := picker.previous
+	var cmd tea.Cmd
 	if err == nil {
 		for _, choice := range picker.prompt.choices {
 			if choice.value == line {
-				m.themeName = line
+				name = line
+				cmd = m.setUIPreferences(uipreferences.Preferences{Theme: name})
 				break
 			}
 		}
 	}
-	m.resolveSelectedTheme()
+	if m.themeName == name {
+		return false, cmd
+	}
+	m.themeName = name
+	return true, cmd
 }
 
 func (m *Model) closeThemePickerForProfileChange() {

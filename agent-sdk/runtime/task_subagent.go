@@ -465,30 +465,7 @@ func (tm *taskRuntime) lookupSubagentCanonical(ctx context.Context, ref session.
 	if err != nil {
 		return nil, err
 	}
-	if current != nil && strings.TrimSpace(current.sessionRef.SessionID) == strings.TrimSpace(ref.SessionID) {
-		current.mu.Lock()
-		currentRevision := current.revision
-		current.mu.Unlock()
-		if currentRevision >= entry.Revision {
-			return current, nil
-		}
-	}
-	fresh := tm.rehydrateSubagentTask(entry)
-	tm.mu.Lock()
-	installed := tm.subagents[taskID]
-	if installed != nil {
-		installed.mu.Lock()
-		installedRevision := installed.revision
-		installed.mu.Unlock()
-		if installedRevision >= entry.Revision {
-			tm.mu.Unlock()
-			return installed, nil
-		}
-	}
-	tm.subagents[taskID] = fresh
-	tm.rememberTaskHandleLocked(fresh.sessionRef.SessionID, fresh.handle)
-	tm.mu.Unlock()
-	return fresh, nil
+	return tm.adoptCanonicalSubagentEntry(entry), nil
 }
 
 func (tm *taskRuntime) invalidateSubagentTask(ref session.SessionRef, taskID string, throughRevision uint64) {

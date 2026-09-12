@@ -131,6 +131,11 @@ func highlightDiffSide(lines []*diffPanelLine, ctx BlockRenderContext) {
 }
 
 func renderDiffToken(text string, offset int, style lipgloss.Style, line *diffPanelLine, ctx BlockRenderContext) string {
+	// Syntax palettes are authored on the base surface, not the red/green
+	// overlays. Keep their roles while checking the background actually painted.
+	foreground := style.GetForeground()
+	background, _ := diffPanelLineStyle(line.Kind, ctx)
+	style = style.Foreground(ctx.Theme.ReadableTextColor(foreground, background.GetBackground()))
 	var result strings.Builder
 	cursor, end := offset, offset+len(text)
 	for _, span := range line.Changed {
@@ -143,9 +148,11 @@ func renderDiffToken(text string, offset int, style lipgloss.Style, line *diffPa
 		if ctx.Theme.NoColor || ctx.Theme.Profile < colorprofile.ANSI {
 			changed = changed.Underline(true)
 		} else if line.Kind == diffPanelLineAdd {
-			changed = changed.Background(ctx.Theme.DiffAddStrongBg)
+			changed = changed.Background(ctx.Theme.DiffAddStrongBg).
+				Foreground(ctx.Theme.ReadableTextColor(foreground, ctx.Theme.DiffAddStrongBg))
 		} else {
-			changed = changed.Background(ctx.Theme.DiffRemoveStrongBg)
+			changed = changed.Background(ctx.Theme.DiffRemoveStrongBg).
+				Foreground(ctx.Theme.ReadableTextColor(foreground, ctx.Theme.DiffRemoveStrongBg))
 		}
 		result.WriteString(changed.Render(text[start-offset : stop-offset]))
 		cursor = stop

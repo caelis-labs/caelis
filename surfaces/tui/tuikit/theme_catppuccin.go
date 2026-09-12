@@ -23,6 +23,10 @@ func catppuccinAdaptiveThemeVariant(profile colorprofile.Profile, dark bool, _ c
 			"#89b4fa", "#b4befe", "#cba6f7", "#a6e3a1", "#f9e2af", "#f38ba8", "#94e2d5", "#f5e0dc",
 		}
 	}
+	addLine, addText, removeLine, removeText := .20, .32, .12, .22
+	if dark {
+		removeLine, removeText = .24, .38
+	}
 	c := func(i int) color.Color { return profile.Convert(lipgloss.Color(colors[i])) }
 	return themeFrom(themePalette{
 		Name: name, IsDark: dark, TextPrimary: c(4), TextSecondary: c(5), Muted: c(6),
@@ -32,15 +36,16 @@ func catppuccinAdaptiveThemeVariant(profile colorprofile.Profile, dark bool, _ c
 	}, themeSurfaces{
 		App: c(0), Base: c(1), Raised: c(2), User: c(2), Composer: c(1),
 		Selection: c(2), SelectionText: c(4), OnAccent: c(0),
-		DiffAdd:          paletteTint(profile, colors[0], colors[10], .15),
-		DiffAddStrong:    paletteTint(profile, colors[0], colors[10], .25),
-		DiffRemove:       paletteTint(profile, colors[0], colors[12], .15),
-		DiffRemoveStrong: paletteTint(profile, colors[0], colors[12], .25),
+		DiffAdd:          paletteTint(profile, colors[0], colors[10], addLine),
+		DiffAddStrong:    paletteTint(profile, colors[0], colors[10], addText),
+		DiffRemove:       paletteTint(profile, colors[0], colors[12], removeLine),
+		DiffRemoveStrong: paletteTint(profile, colors[0], colors[12], removeText),
 	})
 }
 
 // Terminals lack alpha; precompose semantic diff colors over the palette base.
-// Catppuccin's diff guide specifies 10–20% line tint and 15–25% changed text tint.
+// Line and intraline tints are tuned per palette: equal opacity does not give
+// red and green equal visual weight, especially across light and dark bases.
 func paletteTint(profile colorprofile.Profile, base, foreground string, opacity float64) color.Color {
 	r, g, b, _ := rgb8(lipgloss.Color(base))
 	fr, fg, fb, _ := rgb8(lipgloss.Color(foreground))

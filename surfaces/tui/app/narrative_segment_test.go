@@ -147,6 +147,23 @@ func TestNarrativeStreamScopesSharedMessageIdentityByKind(t *testing.T) {
 	}
 }
 
+func TestNarrativeStreamTypedKindSwitchReasoningAssistantReasoning(t *testing.T) {
+	t.Parallel()
+
+	block := NewMainACPTurnBlock("turn-1")
+	source := newNarrativeSourceIdentity("message-1", "event-1", "projection-1")
+	block.AppendStreamEvent(SEReasoning, "think", source)
+	block.AppendStreamEvent(SEAssistant, "answer", source)
+	block.AppendStreamEvent(SEReasoning, "rethink", source)
+
+	if len(block.Events) != 3 ||
+		block.Events[0].Kind != SEReasoning || block.Events[0].Text != "think" ||
+		block.Events[1].Kind != SEAssistant || block.Events[1].Text != "answer" ||
+		block.Events[2].Kind != SEReasoning || block.Events[2].Text != "rethink" {
+		t.Fatalf("events = %#v, want reasoning → assistant → new reasoning run", block.Events)
+	}
+}
+
 func TestNarrativeStreamKeepsDistinctMessageIdentitiesSeparate(t *testing.T) {
 	t.Parallel()
 
@@ -224,7 +241,7 @@ func TestTypedMessageIdentityConvergesACPChunksAndCanonicalFinal(t *testing.T) {
 	}
 }
 
-func TestACPEnvelopeReasoningIdentitySurvivesInterleavedToolEvent(t *testing.T) {
+func TestACPEnvelopeReasoningIdentityPreservesRunsAcrossNewTool(t *testing.T) {
 	t.Parallel()
 
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
@@ -263,7 +280,7 @@ func TestACPEnvelopeReasoningIdentitySurvivesInterleavedToolEvent(t *testing.T) 
 		"",
 		"",
 	)))
-	secondText := "\n**Identifying major test coverage gaps in runners**\n**Inspecting generated skill documentation sources**"
+	secondText := "**Identifying major test coverage gaps in runners**"
 	second := sdkmodel.NewReasoningMessage(sdkmodel.RoleAssistant, secondText, sdkmodel.ReasoningVisibilityVisible)
 	apply("thought-2", session.MarkUIOnly(&session.Event{
 		Type: session.EventTypeAssistant, MessageID: messageID, Message: &second,
@@ -273,21 +290,13 @@ func TestACPEnvelopeReasoningIdentitySurvivesInterleavedToolEvent(t *testing.T) 
 			Content:       session.ProtocolTextContent(secondText),
 		}},
 	}))
-	finalText := first.ReasoningText() + secondText
-	final := sdkmodel.NewReasoningMessage(sdkmodel.RoleAssistant, finalText, sdkmodel.ReasoningVisibilityVisible)
-	apply("thought-final", session.CanonicalizeEvent(&session.Event{
-		Type: session.EventTypeAssistant, MessageID: messageID, Message: &final,
-	}))
 
 	block := requireMainACPTurnBlockForTest(t, model)
-	var reasoning []SubagentEvent
-	for _, event := range block.Events {
-		if event.Kind == SEReasoning {
-			reasoning = append(reasoning, event)
-		}
-	}
-	if len(reasoning) != 1 || reasoning[0].Text != finalText {
-		t.Fatalf("reasoning = %#v (events %#v), want one canonical message owner", reasoning, block.Events)
+	if len(block.Events) != 3 ||
+		block.Events[0].Kind != SEReasoning || block.Events[0].Text != first.ReasoningText() ||
+		block.Events[1].Kind != SEToolCall ||
+		block.Events[2].Kind != SEReasoning || block.Events[2].Text != secondText {
+		t.Fatalf("events = %#v, want reasoning → new tool → next reasoning", block.Events)
 	}
 	var reasoningHeads int
 	for _, row := range renderedPlainRows(block.Render(model.blockRenderContext(180))) {
@@ -295,8 +304,8 @@ func TestACPEnvelopeReasoningIdentitySurvivesInterleavedToolEvent(t *testing.T) 
 			reasoningHeads++
 		}
 	}
-	if reasoningHeads != 1 {
-		t.Fatalf("reasoning rendered as %d blocks, want 1", reasoningHeads)
+	if reasoningHeads != 2 {
+		t.Fatalf("reasoning rendered as %d blocks, want 2 preserved runs", reasoningHeads)
 	}
 }
 
@@ -390,25 +399,23 @@ func TestNarrativeStreamBucketsAnonymousDeltasByOutputType(t *testing.T) {
 	}
 }
 
-func TestNarrativeStreamStableIdentitySurvivesForeignSemanticBoundary(t *testing.T) {
+func TestNarrativeStreamLiveIdentityDoesNotBackappendAcrossBoundary(t *testing.T) {
 	t.Parallel()
 
 	block := NewMainACPTurnBlock("turn-1")
 	source := narrativeTestSource()
 	block.AppendStreamEvent(SEReasoning, "before wait", source)
 	block.advanceNarrativeBoundary()
-	block.AppendStreamEvent(SEReasoning, " after wait", source)
-	block.ReplaceFinalStreamEvent(SEReasoning, "before wait after wait final", source)
+	block.AppendStreamEvent(SEReasoning, "after wait", source)
 
-	if len(block.Events) != 1 {
-		t.Fatalf("events = %#v, want one identity-owned reasoning event", block.Events)
-	}
-	if block.Events[0].Text != "before wait after wait final" {
-		t.Fatalf("events = %#v, want final snapshot to replace its original owner", block.Events)
+	if len(block.Events) != 2 ||
+		block.Events[0].Kind != SEReasoning || block.Events[0].Text != "before wait" ||
+		block.Events[1].Kind != SEReasoning || block.Events[1].Text != "after wait" {
+		t.Fatalf("events = %#v, want two preserved reasoning runs", block.Events)
 	}
 }
 
-func TestNarrativeStreamNonNarrativeEventsCannotCloseIdentifiedMessage(t *testing.T) {
+func TestNarrativeStreamNewToolPlanNoticeCloseIdentifiedLiveRun(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -443,8 +450,7 @@ func TestNarrativeStreamNonNarrativeEventsCannotCloseIdentifiedMessage(t *testin
 			source := narrativeTestSource()
 			block.AppendStreamEvent(SEReasoning, "before", source)
 			test.barrier(block)
-			block.AppendStreamEvent(SEReasoning, " after", source)
-			block.ReplaceFinalStreamEvent(SEReasoning, "before after final", source)
+			block.AppendStreamEvent(SEReasoning, "after", source)
 
 			var reasoning []string
 			for _, event := range block.Events {
@@ -452,8 +458,8 @@ func TestNarrativeStreamNonNarrativeEventsCannotCloseIdentifiedMessage(t *testin
 					reasoning = append(reasoning, event.Text)
 				}
 			}
-			if len(reasoning) != 1 || reasoning[0] != "before after final" {
-				t.Fatalf("reasoning = %#v (events %#v), want one identity-owned message", reasoning, block.Events)
+			if len(reasoning) != 2 || reasoning[0] != "before" || reasoning[1] != "after" {
+				t.Fatalf("reasoning = %#v (events %#v), want two preserved runs", reasoning, block.Events)
 			}
 		})
 	}
@@ -509,7 +515,7 @@ func TestNarrativeStreamNonNarrativeEventsStillSeparateAnonymousMessages(t *test
 	}
 }
 
-func TestIdentifiedReasoningRendersOnceAcrossHiddenCompletedTool(t *testing.T) {
+func TestIdentifiedReasoningRendersOnceAcrossHistoricalSameToolRepair(t *testing.T) {
 	t.Parallel()
 
 	type narrativeBlock interface {
@@ -534,19 +540,35 @@ func TestIdentifiedReasoningRendersOnceAcrossHiddenCompletedTool(t *testing.T) {
 
 			block := test.block()
 			source := newNarrativeSourceIdentity("message-1", "event-1", "projection-1")
-			block.AppendStreamEvent(SEReasoning, "**Identifying spec duplication and reuse opportunities**", source)
-			block.UpdateToolWithMeta("late-hidden-tool", "Read", "", "", true, false, ToolUpdateMeta{ToolKind: "read"})
-			block.AppendStreamEvent(
-				SEReasoning,
-				"\n**Identifying major test coverage gaps in runners**\n**Inspecting generated skill documentation sources**",
-				source,
+			const (
+				first = "**Identifying spec duplication and reuse opportunities**"
+				next  = "\n**Identifying major test coverage gaps in runners**\n**Inspecting generated skill documentation sources**"
+				final = first + next
 			)
-			block.ReplaceFinalStreamEvent(
-				SEReasoning,
-				"**Identifying spec duplication and reuse opportunities**\n**Identifying major test coverage gaps in runners**\n**Inspecting generated skill documentation sources**",
-				source,
-			)
+			block.UpdateToolWithMeta("read-1", "Read", "file.go", "", false, false, ToolUpdateMeta{ToolKind: "read"})
+			block.AppendStreamEvent(SEReasoning, first, source)
+			block.UpdateToolWithMeta("read-1", "Read", "file.go", "ok", true, false, ToolUpdateMeta{ToolKind: "read"})
+			block.AppendStreamEvent(SEReasoning, next, source)
+			block.ReplaceFinalStreamEvent(SEReasoning, final, source)
 
+			var events []SubagentEvent
+			switch typed := block.(type) {
+			case *MainACPTurnBlock:
+				events = typed.Events
+			case *ParticipantTurnBlock:
+				events = typed.Events
+			default:
+				t.Fatalf("block = %T, want main or participant turn", block)
+			}
+			var reasoning []string
+			for _, event := range events {
+				if event.Kind == SEReasoning {
+					reasoning = append(reasoning, event.Text)
+				}
+			}
+			if len(reasoning) != 1 || reasoning[0] != final {
+				t.Fatalf("reasoning = %#v, want one historical same-tool run", reasoning)
+			}
 			model := NewModel(Config{NoColor: true, NoAnimation: true})
 			var reasoningHeads int
 			for _, row := range renderedPlainRows(block.Render(model.blockRenderContext(180))) {
@@ -690,6 +712,23 @@ func TestNarrativeStreamStableFinalAdoptsAnonymousProvisionalOnlyInCurrentSegmen
 	}
 }
 
+func TestNarrativeStreamHistoricalTypedFinalDoesNotSplitAnonymousLiveRun(t *testing.T) {
+	t.Parallel()
+
+	block := NewMainACPTurnBlock("turn-1")
+	typed := newNarrativeSourceIdentity("message-1", "event-1", "projection-1")
+	block.AppendStreamEvent(SEAssistant, "typed live", typed)
+	block.AppendStreamEvent(SEAssistant, "anon", narrativeSourceIdentity{})
+	block.ReplaceFinalStreamEvent(SEAssistant, "typed final", typed)
+	block.AppendStreamEvent(SEAssistant, " continued", narrativeSourceIdentity{})
+
+	if len(block.Events) != 2 ||
+		block.Events[0].Kind != SEAssistant || block.Events[0].Text != "typed final" ||
+		block.Events[1].Kind != SEAssistant || block.Events[1].Text != "anon continued" {
+		t.Fatalf("events = %#v, want in-place typed final without splitting anonymous run", block.Events)
+	}
+}
+
 func TestNarrativeStreamIdentityFreeFinalFailsClosedAcrossBarrier(t *testing.T) {
 	t.Parallel()
 
@@ -707,7 +746,7 @@ func TestNarrativeStreamIdentityFreeFinalFailsClosedAcrossBarrier(t *testing.T) 
 	}
 }
 
-func TestNarrativeStreamStableFinalReplacesOriginalOwnerAcrossBoundary(t *testing.T) {
+func TestNarrativeStreamStableFinalBelongsNewestRunAfterReuse(t *testing.T) {
 	t.Parallel()
 
 	block := NewMainACPTurnBlock("turn-1")
@@ -715,10 +754,12 @@ func TestNarrativeStreamStableFinalReplacesOriginalOwnerAcrossBoundary(t *testin
 	block.AppendStreamEvent(SEAssistant, "before", source)
 	block.advanceNarrativeBoundary()
 	block.AppendStreamEvent(SEAssistant, "after", source)
-	block.ReplaceFinalStreamEvent(SEAssistant, "  before\nafter final", source)
+	block.ReplaceFinalStreamEvent(SEAssistant, "after final", source)
 
-	if len(block.Events) != 1 || block.Events[0].Text != "  before\nafter final" {
-		t.Fatalf("events = %#v, want stable final on the original message owner", block.Events)
+	if len(block.Events) != 2 ||
+		block.Events[0].Kind != SEAssistant || block.Events[0].Text != "before" ||
+		block.Events[1].Kind != SEAssistant || block.Events[1].Text != "after final" {
+		t.Fatalf("events = %#v, want final on the newest same-ID run", block.Events)
 	}
 }
 
@@ -739,31 +780,14 @@ func TestNarrativeStreamStableFinalOnlyUpdateDoesNotCreateBoundarySegment(t *tes
 func TestNarrativeStreamFinalEqualToIdentifiedMessageAddsNoDuplicate(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name        string
-		provisional string
-	}{
-		{name: "final only"},
-		{name: "discard provisional", provisional: "speculative"},
-	}
-	for _, test := range tests {
-		test := test
-		t.Run(test.name, func(t *testing.T) {
-			t.Parallel()
+	block := NewParticipantTurnBlock("participant-1", "@reviewer")
+	source := newNarrativeSourceIdentity("message-1", "event-1", "projection-1")
+	block.AppendStreamEvent(SEReasoning, "before", source)
+	block.advanceNarrativeBoundary()
+	block.ReplaceFinalStreamEvent(SEReasoning, "before", source)
 
-			block := NewParticipantTurnBlock("participant-1", "@reviewer")
-			source := newNarrativeSourceIdentity("message-1", "event-1", "projection-1")
-			block.AppendStreamEvent(SEReasoning, "before", source)
-			block.advanceNarrativeBoundary()
-			if test.provisional != "" {
-				block.AppendStreamEvent(SEReasoning, test.provisional, source)
-			}
-			block.ReplaceFinalStreamEvent(SEReasoning, "before", source)
-
-			if len(block.Events) != 1 || block.Events[0].Text != "before" {
-				t.Fatalf("events = %#v, want only the identified reasoning message", block.Events)
-			}
-		})
+	if len(block.Events) != 1 || block.Events[0].Text != "before" {
+		t.Fatalf("events = %#v, want only the identified reasoning message", block.Events)
 	}
 }
 

@@ -2,6 +2,7 @@ package tuiapp
 
 import (
 	"fmt"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/caelis-labs/caelis/control/uipreferences"
@@ -23,14 +24,11 @@ type workspaceLayout struct {
 	split                bool
 }
 type subagentWorkspaceState struct {
-	preferences        uipreferences.Preferences
-	preferenceRevision uint64
-	saving             bool
-	childFocused       bool
-	lastCallID         string
-	dragging           bool
-	resizing           bool
-	resizeRatio        int
+	childFocused bool
+	lastCallID   string
+	dragging     bool
+	resizing     bool
+	resizeRatio  int
 }
 type paneMenuItem struct{ label, binding, value string }
 
@@ -42,7 +40,7 @@ type paneHeaderAction struct {
 // workspaceLayout is the only owner of pane rectangles. Ratios describe the
 // main pane; a small terminal temporarily presents the child as an overlay.
 func (m *Model) workspaceLayout() workspaceLayout {
-	return m.workspaceLayoutForPreferences(m.workspace.preferences)
+	return m.workspaceLayoutForPreferences(m.uiPreferences.value)
 }
 
 func (m *Model) workspaceLayoutForPreferences(p uipreferences.Preferences) workspaceLayout {
@@ -126,18 +124,16 @@ func (m *Model) openSubagentWorkspace() bool {
 }
 
 func (m *Model) setSubagentLayout(layout uipreferences.Layout) tea.Cmd {
-	p := m.workspace.preferences.WithDefaults()
-	p.SubagentLayout = layout
+	p := uipreferences.Preferences{SubagentLayout: layout}
 	if p.Validate() != nil {
 		return nil
 	}
-	m.workspace.preferences = p
-	m.workspace.preferenceRevision++
+	cmd := m.setUIPreferences(p)
 	if state := m.subagentOutputOverlay; state != nil {
 		state.menu = ""
 	}
 	m.resizeWorkspace()
-	return m.savePanePreferences()
+	return cmd
 }
 func (m *Model) handlePaneDivider(msg tea.MouseMsg) (bool, tea.Cmd) {
 	layout := m.workspaceLayout()
@@ -157,7 +153,7 @@ func (m *Model) handlePaneDivider(msg tea.MouseMsg) (bool, tea.Cmd) {
 		if !m.workspace.dragging {
 			return false, nil
 		}
-		p := m.workspace.preferences.WithDefaults()
+		p := m.uiPreferences.value.WithDefaults()
 		axis, pos := m.width-1, mouse.X
 		if p.SubagentLayout == uipreferences.Up || p.SubagentLayout == uipreferences.Down {
 			axis, pos = m.height-1, mouse.Y
@@ -192,7 +188,7 @@ func (m *Model) effectivePaneLayout() uipreferences.Layout {
 	if !m.workspaceLayout().split {
 		return uipreferences.Overlay
 	}
-	return m.workspace.preferences.WithDefaults().SubagentLayout
+	return m.uiPreferences.value.WithDefaults().SubagentLayout
 }
 
 func paneLayoutSymbol(layout uipreferences.Layout) string {
@@ -210,16 +206,26 @@ func paneLayoutSymbol(layout uipreferences.Layout) string {
 }
 func (m *Model) paneStatusParts(state *subagentOutputOverlayState) (string, string) {
 	descriptor := m.subagentRosterTasks[state.callID]
-	model := descriptor.Model
-	if model == "" {
-		model = "Model unavailable"
-	}
 	usage := ""
 	if descriptor.ContextSize > 0 {
 		usage = fmt.Sprintf("%s / %s · %d%%", compactPaneTokens(descriptor.ContextUsed), compactPaneTokens(descriptor.ContextSize), uint64(float64(descriptor.ContextUsed)/float64(descriptor.ContextSize)*100))
 	}
-	return model, usage
+	return paneModelDisplay(descriptor.Model), usage
 }
+
+func paneModelDisplay(model string) string {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return "Model unavailable"
+	}
+	if endpoint, alias, ok := strings.Cut(model, "/"); ok && strings.Contains(endpoint, "@") {
+		if alias = strings.TrimSpace(alias); alias != "" {
+			return alias
+		}
+	}
+	return model
+}
+
 func compactPaneTokens(n uint64) string {
 	if n >= 1000 {
 		return fmt.Sprintf("%.0fk", float64(n)/1000)

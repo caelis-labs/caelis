@@ -311,6 +311,128 @@ func TestRegressionACPEventstreamContextCompactingHint120x32(t *testing.T) {
 	}
 }
 
+func TestRegressionACPEventstreamPromptBeforeFirstOutputOmitsWaitingRow120x32(t *testing.T) {
+	t.Parallel()
+
+	model := newACPEventstreamRegressionModel(t, 120, 32)
+	model = applyACPEventstreamRegressionEnvelope(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "sess-regression",
+		Final:     true,
+		Update: eventstream.ContentChunk{
+			SessionUpdate: eventstream.UpdateUserMessage,
+			Content:       eventstream.TextContent{Type: "text", Text: "inspect the remaining context"},
+		},
+	})
+	model.beginLiveTurn(SubmissionModeDefault, false, time.Unix(120, 0))
+	model = applyACPEventstreamRegressionEnvelope(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindLifecycle,
+		SessionID: "sess-regression",
+		TurnID:    "turn-waiting",
+		Scope:     eventstream.ScopeMain,
+		Lifecycle: &eventstream.Lifecycle{State: eventstream.LifecycleStateRunning},
+	})
+
+	block := requireMainACPTurnBlockForTest(t, model)
+	if len(block.Events) != 0 || block.Status != eventstream.LifecycleStateRunning {
+		t.Fatalf("main ACP block = events %#v status %q, want empty running turn", block.Events, block.Status)
+	}
+
+	frame := evalharness.NormalizeFrame(model.View().Content)
+	assertFrameContainsInOrder(t, "prompt before first output 120x32", frame, []string{
+		"inspect the remaining context",
+		"Waiting for response",
+	})
+	if strings.Contains(frame, "waiting for agent output") {
+		t.Fatalf("prompt-before-first-output frame rendered waiting placeholder:\n%s", frame)
+	}
+}
+
+func TestRegressionACPEventstreamContextCompactingBeforeOutputOmitsWaitingRow120x32(t *testing.T) {
+	t.Parallel()
+
+	model := newACPEventstreamRegressionModel(t, 120, 32)
+	model = applyACPEventstreamRegressionEnvelope(t, model, eventstream.Envelope{
+		Kind:      eventstream.KindSessionUpdate,
+		SessionID: "sess-regression",
+		Final:     true,
+		Update: eventstream.ContentChunk{
+			SessionUpdate: eventstream.UpdateUserMessage,
+			Content:       eventstream.TextContent{Type: "text", Text: "inspect the remaining context"},
+		},
+	})
+	model.beginLiveTurn(SubmissionModeDefault, false, time.Unix(120, 0))
+	for _, env := range []eventstream.Envelope{
+		{
+			Kind:      eventstream.KindLifecycle,
+			SessionID: "sess-regression",
+			TurnID:    "turn-compact",
+			Scope:     eventstream.ScopeMain,
+			Lifecycle: &eventstream.Lifecycle{State: eventstream.LifecycleStateRunning},
+		},
+		{
+			Kind:      eventstream.KindLifecycle,
+			SessionID: "sess-regression",
+			TurnID:    "turn-compact",
+			Scope:     eventstream.ScopeMain,
+			Delivery:  &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
+			Lifecycle: &eventstream.Lifecycle{State: session.LifecycleStatusContextCompacting},
+		},
+	} {
+		model = applyACPEventstreamRegressionEnvelope(t, model, env)
+	}
+
+	block := requireMainACPTurnBlockForTest(t, model)
+	if len(block.Events) != 0 {
+		t.Fatalf("compact-before-output events = %#v, want no transcript facts", block.Events)
+	}
+	if block.Status == session.LifecycleStatusContextCompacting {
+		t.Fatalf("main Turn status = %q, transient compact activity must remain hint-only", block.Status)
+	}
+
+	frame := evalharness.NormalizeFrame(model.View().Content)
+	assertFrameContainsInOrder(t, "compacting before output 120x32", frame, []string{
+		"inspect the remaining context",
+		"Compacting context",
+	})
+	if strings.Contains(frame, "waiting for agent output") {
+		t.Fatalf("compacting-before-output frame rendered waiting placeholder:\n%s", frame)
+	}
+	if strings.Contains(frame, "Waiting for response") || strings.Contains(frame, "Thinking ·") {
+		t.Fatalf("compacting-before-output frame leaked model-wait/thinking hint:\n%s", frame)
+	}
+}
+
+func newACPEventstreamRegressionModel(t *testing.T, width, height int) *Model {
+	t.Helper()
+	model := NewModel(Config{
+		AppName:     "CAELIS",
+		Version:     "dev",
+		Workspace:   "/tmp/workspace",
+		ModelAlias:  "minimax/MiniMax-M1",
+		Commands:    DefaultCommands(),
+		Wizards:     DefaultWizards(),
+		NoColor:     true,
+		NoAnimation: true,
+	})
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: width, Height: height})
+	typed, ok := updated.(*Model)
+	if !ok {
+		t.Fatalf("model = %T, want *Model", updated)
+	}
+	return typed
+}
+
+func applyACPEventstreamRegressionEnvelope(t *testing.T, model *Model, env eventstream.Envelope) *Model {
+	t.Helper()
+	updated, _ := model.Update(env)
+	typed, ok := updated.(*Model)
+	if !ok {
+		t.Fatalf("model = %T, want *Model", updated)
+	}
+	return typed
+}
+
 func acpToolNameMeta(name string) map[string]any {
 	return testMeta.WithRuntimeSection(nil, testMeta.RuntimeTool, map[string]any{
 		testMeta.RuntimeToolName: name,

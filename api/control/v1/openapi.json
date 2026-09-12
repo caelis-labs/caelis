@@ -56,6 +56,7 @@
       },
       "put": {
         "operationId": "saveUIPreferences",
+        "description": "Sparse update of persisted UI preferences. Omitted or zero fields are unchanged; nonzero fields replace the stored value. Theme is an opaque selected name; Host does not validate palettes. Surfaces reset layout or ratios by sending explicit values such as overlay and the default split ratios.",
         "responses": {
           "400": {"$ref": "#/components/responses/BadRequest"},
           "401": {"$ref": "#/components/responses/Unauthorized"},
@@ -1842,12 +1843,14 @@
       "SubagentInputStatuses": {"type": "array", "items": {"$ref": "#/components/schemas/SubagentInputStatus"}},
       "UIPreferences": {
         "type": "object",
+        "description": "Persisted presentation preferences. PUT is a sparse merge: omitted or zero fields are unchanged. Theme is an opaque selected name; surfaces own palette names and the default auto. Host does not validate palettes.",
         "additionalProperties": false,
         "required": [],
         "properties": {
-          "subagent_layout": {"type": "string", "enum": ["overlay", "left", "right", "up", "down"]},
-          "horizontal_ratio": {"type": "integer", "minimum": 30, "maximum": 70},
-          "vertical_ratio": {"type": "integer", "minimum": 30, "maximum": 70}
+          "subagent_layout": {"type": "string", "enum": ["", "overlay", "left", "right", "up", "down"], "description": "Empty string is a sparse no-op; overlay/left/right/up/down replace the stored layout."},
+          "horizontal_ratio": {"type": "integer", "anyOf": [{"const": 0}, {"minimum": 30, "maximum": 70}], "description": "0 is a sparse no-op; 30 through 70 replace the stored ratio."},
+          "vertical_ratio": {"type": "integer", "anyOf": [{"const": 0}, {"minimum": 30, "maximum": 70}], "description": "0 is a sparse no-op; 30 through 70 replace the stored ratio."},
+          "theme": {"type": "string", "description": "Opaque selected theme name. Host stores the value as sent and does not validate palettes. Empty string is a sparse no-op."}
         }
       },
       "EmptyResult": {"type":"object","additionalProperties":false},

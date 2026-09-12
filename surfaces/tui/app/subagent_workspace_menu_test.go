@@ -26,7 +26,7 @@ func TestSubagentWorkspaceMenuHoverAndBorder(t *testing.T) {
 				if !strings.HasPrefix(frame, "┌") || !strings.HasSuffix(frame, "┘") {
 					t.Fatalf("menu omitted thin border: %q", frame)
 				}
-				originalCall, originalPreferences := state.callID, m.workspace.preferences
+				originalCall, originalPreferences := state.callID, m.uiPreferences.value
 				cacheRenders := m.subagentOutputViews[state.callID].renderCache.renders
 				rect := state.menuRect
 				point := tea.Mouse{X: rect.x + 2, Y: rect.y + 2}
@@ -35,7 +35,7 @@ func TestSubagentWorkspaceMenuHoverAndBorder(t *testing.T) {
 				if state.menuIndex != 1 || hovered == baseline || state.menuRect != rect {
 					t.Fatal("hover did not move highlight without moving the menu")
 				}
-				if state.callID != originalCall || m.workspace.preferences != originalPreferences || m.subagentOutputViews[state.callID].renderCache.renders != cacheRenders {
+				if state.callID != originalCall || m.uiPreferences.value != originalPreferences || m.subagentOutputViews[state.callID].renderCache.renders != cacheRenders {
 					t.Fatal("hover activated a choice or rerendered the transcript")
 				}
 				for _, border := range []tea.Mouse{
@@ -67,7 +67,7 @@ func TestSubagentWorkspaceMenuHoverAndBorder(t *testing.T) {
 				m.Update(tea.MouseMotionMsg(point))
 				want := state.menuItems[1].value
 				m.handlePaneMenuKey(tea.KeyPressMsg{Code: tea.KeyEnter})
-				if menu == "agents" && m.subagentOutputOverlay.callID != want || menu == "layout" && string(m.workspace.preferences.SubagentLayout) != want {
+				if menu == "agents" && m.subagentOutputOverlay.callID != want || menu == "layout" && string(m.uiPreferences.value.SubagentLayout) != want {
 					t.Fatal("Enter did not activate the hovered option")
 				}
 			})

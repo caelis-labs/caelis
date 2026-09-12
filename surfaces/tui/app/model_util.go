@@ -665,10 +665,12 @@ func slashSkillReferenceBoundary(input []rune, index int) bool {
 	return strings.ContainsRune("([{,;\"'", prev)
 }
 
-func slashCompletionTargetAtCursor(input []rune, cursor int, turnRunning bool) (query string, start int, end int, skillOnly bool, ok bool) {
+// Line-start queries mix catalog commands and skills; inline tokens are
+// skill-only. refreshSlashCommands filters commands by Turn state.
+func slashCompletionTargetAtCursor(input []rune, cursor int) (query string, start int, end int, skillOnly bool, ok bool) {
 	lineQuery, lineOK := slashCommandQueryAtCursor(input, cursor)
 	skillStart, skillEnd, skillQuery, skillOK := slashSkillQueryAtCursor(input, cursor)
-	if !turnRunning && lineOK {
+	if lineOK {
 		if skillOK {
 			return lineQuery, skillStart, skillEnd, false, true
 		}

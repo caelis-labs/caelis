@@ -52,31 +52,54 @@ func (m *Model) subagentPaneSurface() lipgloss.Style {
 	return m.theme.Tokens().OverlayBg
 }
 
-// The footer keeps metadata at the edges; optional key hints consume only the
-// remaining space. Editor padding and text never contain workspace controls.
+// Hide and the context gauge stay right-aligned, independent of composer focus
+// and optional hints. Editor padding and text never contain workspace controls.
 func (m *Model) renderPaneFooter(state *subagentOutputOverlayState, width int) string {
-	model, usage := m.paneStatusParts(state)
-	model = truncateTailDisplay(model, maxInt(1, width-displayColumns(usage)-2))
-	remaining := width - displayColumns(model) - displayColumns(usage)
-	hints := m.paneFooterHints(state)
-	if (m.workspace.resizing || m.workspace.dragging || state.menu != "") && displayColumns(hints)+4 > remaining {
-		return m.theme.HelpHintTextStyle().Render(truncateTailDisplay(hints, width))
+	state.footerHideX, state.footerHideWidth = 0, 0
+	if width <= 0 {
+		return ""
 	}
-	for displayColumns(hints)+4 > remaining && hints != "" {
-		if i := strings.LastIndex(hints, "  "); i >= 0 {
-			hints = hints[:i]
-		} else {
-			hints = ""
+	model, usage := m.paneStatusParts(state)
+	hide := truncateTailDisplay(firstNonEmptyString(m.paneKeyHint(m.keys.PaneToggle), "Hide"), width)
+	hideWidth := displayColumns(hide)
+	if usageWidth := width - hideWidth - 2; usageWidth > 0 {
+		usage = truncateTailDisplay(usage, usageWidth)
+	} else {
+		usage = ""
+	}
+	rightWidth := hideWidth
+	if usage != "" {
+		rightWidth += 2 + displayColumns(usage)
+	}
+	state.footerHideX, state.footerHideWidth = width-rightWidth, hideWidth
+	leftWidth := maxInt(0, width-rightWidth-2)
+	hints := m.paneFooterHints(state)
+	left := ""
+	if leftWidth > 0 && (m.workspace.resizing || m.workspace.dragging || state.menu != "") && displayColumns(model)+2+displayColumns(hints) > leftWidth {
+		left = m.theme.HelpHintTextStyle().Render(truncateTailDisplay(hints, leftWidth))
+	} else if leftWidth > 0 {
+		model = truncateTailDisplay(model, leftWidth)
+		for displayColumns(model)+2+displayColumns(hints) > leftWidth && hints != "" {
+			if i := strings.LastIndex(hints, "  "); i >= 0 {
+				hints = hints[:i]
+			} else {
+				hints = ""
+			}
+		}
+		left = lipgloss.NewStyle().Foreground(m.theme.TextSecondary).Render(model)
+		if hints != "" {
+			left += m.theme.HelpHintTextStyle().Render("  " + hints)
 		}
 	}
-	center := ""
-	if hints != "" {
-		center = "  " + hints
+	hideStyle := m.theme.HelpHintTextStyle()
+	if state.footerHideHovered {
+		hideStyle = m.theme.SelectionStyle()
 	}
-	gap := maxInt(0, remaining-displayColumns(center))
-	return lipgloss.NewStyle().Foreground(m.theme.TextSecondary).Render(model) +
-		m.theme.HelpHintTextStyle().Render(center) + strings.Repeat(" ", gap) +
-		m.theme.TranscriptMetaStyle().Render(usage)
+	right := hideStyle.Render(hide)
+	if usage != "" {
+		right += "  " + m.theme.TranscriptMetaStyle().Render(usage)
+	}
+	return left + strings.Repeat(" ", width-rightWidth-displayColumns(left)) + right
 }
 
 func (m *Model) paneFooterHints(state *subagentOutputOverlayState) string {
@@ -108,7 +131,7 @@ func (m *Model) paneFooterHints(state *subagentOutputOverlayState) string {
 	if m.theme.NoColor {
 		hints = "▸ Focused  " + hints
 	}
-	return hints + m.paneKeyHint(m.keys.PaneToggle)
+	return strings.TrimSpace(hints)
 }
 
 func (m *Model) paneKeyHint(binding key.Binding) string {

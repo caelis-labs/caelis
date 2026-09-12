@@ -22,13 +22,14 @@ func (s *appConfigStore) SaveUIPreferences(ctx context.Context, p uipreferences.
 		if err != nil {
 			return err
 		}
-		if doc.UI == p {
+		merged := doc.UI.Merge(p)
+		if doc.UI == merged {
 			return nil
 		}
-		doc.UI = p
+		doc.UI = merged
 		_, err = s.CompareAndSave(ctx, doc.ConfigurationRevision, doc)
-		// A proven pre-write revision conflict can be retried: reload all
-		// unrelated fields before applying the same idempotent UI value.
+		// A proven pre-write revision conflict can be retried: reload product
+		// configuration and unrelated UI fields, then merge the same sparse update.
 		if !errors.Is(err, configstore.ErrConfigurationRevisionConflict) {
 			return err
 		}

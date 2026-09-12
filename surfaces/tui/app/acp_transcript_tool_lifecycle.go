@@ -782,7 +782,8 @@ func renderACPMutationLifecycleRows(blockID string, ev SubagentEvent, callID str
 	if mutationPanelTextIsHeaderOnly(ev, text) {
 		return rows
 	}
-	rows = append(rows, renderACPToolPanelRows(blockID, callID, ev.Name, false, text, width, ctx, err, token, opts)...)
+	panel := renderACPToolPanelRows(blockID, callID, ev.Name, false, text, width, ctx, err, token, opts)
+	rows = append(rows, omitRedundantMutationDiffFileHeader(ev.Args, text, err, panel)...)
 	return rows
 }
 

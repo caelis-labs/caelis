@@ -8,18 +8,11 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/collaboration"
-	"github.com/caelis-labs/caelis/control/uipreferences"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/internal/controlprompt/appserveradapter"
 	"github.com/google/uuid"
 )
 
-type panePreferencesMsg struct {
-	value    uipreferences.Preferences
-	revision uint64
-	save     bool
-	err      error
-}
 type paneInputResultMsg struct {
 	sessionID, callID, id string
 	status                collaboration.UserInputStatus
@@ -40,56 +33,8 @@ type paneInputTickMsg struct {
 // results from a prior Session, even if the same call ID is opened again.
 type paneReceiptPoll struct{ querying bool }
 
-func (m *Model) loadPanePreferences() tea.Cmd {
-	client := m.cfg.UIPreferences
-	if client == nil {
-		return nil
-	}
-	revision := m.workspace.preferenceRevision
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		p, err := client.LoadUIPreferences(ctx)
-		return panePreferencesMsg{value: p, revision: revision, err: err}
-	}
-}
-func (m *Model) savePanePreferences() tea.Cmd {
-	if m.workspace.saving || m.cfg.UIPreferences == nil {
-		return nil
-	}
-	m.workspace.saving = true
-	p, revision, client := m.workspace.preferences.WithDefaults(), m.workspace.preferenceRevision, m.cfg.UIPreferences
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		err := client.SaveUIPreferences(ctx, p)
-		return panePreferencesMsg{value: p, revision: revision, save: true, err: err}
-	}
-}
-
 func (m *Model) updateSubagentWorkspace(msg tea.Msg) (bool, tea.Cmd) {
 	switch value := msg.(type) {
-	case panePreferencesMsg:
-		if value.save {
-			m.workspace.saving = false
-			if value.revision != m.workspace.preferenceRevision {
-				return true, m.savePanePreferences()
-			}
-		} else if value.err == nil && value.revision == m.workspace.preferenceRevision && !m.workspace.resizing && !m.workspace.dragging {
-			if err := value.value.Validate(); err != nil {
-				value.err = err
-			} else {
-				m.workspace.preferences = value.value.WithDefaults()
-				m.resizeWorkspace()
-			}
-		}
-		if value.err != nil {
-			if state := m.subagentOutputOverlay; state != nil {
-				state.inputStatus = "Layout not saved: " + value.err.Error()
-			}
-			return true, m.showHint("Layout preferences: "+value.err.Error(), hintOptions{priority: HintPriorityHigh, clearOnMessage: true})
-		}
-		return true, nil
 	case paneInputResultMsg:
 		if value.sessionID != m.currentSessionID {
 			return true, nil
