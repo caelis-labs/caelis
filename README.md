@@ -111,6 +111,7 @@ requirements and delivery guarantees.
 | Goal | Command |
 | --- | --- |
 | Start the TUI | `caelis` |
+| Observe an existing Session in another terminal | `caelis -session <session-id>` |
 | Run one prompt | `caelis -p "Summarize this repository."` |
 | Return one structured result | `caelis -p "Review the changes." -format json` |
 | Stream ACP envelopes | `caelis -p "Run the tests." -format jsonl` |
@@ -123,6 +124,19 @@ requirements and delivery guarantees.
 Use `-session` to target a durable Session, `-store-dir` to choose another data
 root, `-control-url` to attach to a specific Host, and `-embedded` for explicit
 single-process operation.
+
+In the TUI, `/resume` or `Ctrl+O` opens the Session list, with active Sessions
+marked `running`. Selecting a Session changes the view while its work continues
+on the Host. Each terminal can observe the same Session, see later Turns, send
+prompts, and answer approvals. The first valid approval answer takes effect;
+the other observers close that approval when its result arrives.
+
+`/quit`, `/exit`, `Ctrl+D`, or two presses of `Ctrl+C` close the TUI without
+cancelling an accepted Turn. Press `Esc` in the Session workspace to interrupt
+the current Turn; inside the Session list, `Esc` closes the list. Continued work
+after terminal exit requires a managed or remote Host. An `-embedded` Host ends
+with its owning process. Reattaching from another terminal requires the same
+Host and data root.
 
 ## Safety and local data
 

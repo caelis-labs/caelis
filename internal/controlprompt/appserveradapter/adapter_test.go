@@ -33,7 +33,6 @@ func TestSessionClientAdapterRoutesMainTurnWritesAndObservationThroughTypedClien
 		target:       target,
 		subscription: subscription,
 		reconnectSubscriptions: []*sessionClientAdapterTestSubscription{
-			newSessionClientAdapterTestSubscription(),
 			subscription,
 		},
 	}
@@ -119,7 +118,6 @@ func TestSessionClientAdapterInterruptsBlockedMainTurnAdmission(t *testing.T) {
 		subscription: newSessionClientAdapterTestSubscription(),
 		reconnectSubscriptions: []*sessionClientAdapterTestSubscription{
 			newSessionClientAdapterTestSubscription(),
-			newSessionClientAdapterTestSubscription(),
 		},
 		promptStarted: started,
 		promptRelease: release,
@@ -196,7 +194,6 @@ func TestSessionClientAdapterInterruptBoundsUncooperativeAdmissionAndCancelsLate
 		subscription: newSessionClientAdapterTestSubscription(),
 		reconnectSubscriptions: []*sessionClientAdapterTestSubscription{
 			newSessionClientAdapterTestSubscription(),
-			newSessionClientAdapterTestSubscription(),
 		},
 		promptStarted:       started,
 		promptRelease:       release,
@@ -255,7 +252,6 @@ func TestSessionClientAdapterFailedAdmissionAfterInterruptDoesNotCancelNextTurn(
 		target:       target,
 		subscription: newSessionClientAdapterTestSubscription(),
 		reconnectSubscriptions: []*sessionClientAdapterTestSubscription{
-			newSessionClientAdapterTestSubscription(),
 			newSessionClientAdapterTestSubscription(),
 		},
 		promptStarted: started,
@@ -324,7 +320,6 @@ func TestSessionClientAdapterUnknownAdmissionWithoutTargetDoesNotAcceptInterrupt
 		subscription: newSessionClientAdapterTestSubscription(),
 		reconnectSubscriptions: []*sessionClientAdapterTestSubscription{
 			newSessionClientAdapterTestSubscription(),
-			newSessionClientAdapterTestSubscription(),
 		},
 		promptStarted:    started,
 		promptRelease:    release,
@@ -384,7 +379,6 @@ func TestSessionClientAdapterUnknownAdmissionWithTargetKeepsTurnForCancel(t *tes
 		subscription: newSessionClientAdapterTestSubscription(),
 		reconnectSubscriptions: []*sessionClientAdapterTestSubscription{
 			newSessionClientAdapterTestSubscription(),
-			newSessionClientAdapterTestSubscription(),
 		},
 		promptErr:     appserver.NewOutcomeError(appserver.OutcomeUnknown, errors.New("effect outcome cannot be proven")),
 		promptOutcome: appserver.OutcomeUnknown,
@@ -415,7 +409,6 @@ func TestSessionClientAdapterReportsFailedCancelAfterAdmission(t *testing.T) {
 		subscription: newSessionClientAdapterTestSubscription(),
 		reconnectSubscriptions: []*sessionClientAdapterTestSubscription{
 			newSessionClientAdapterTestSubscription(),
-			newSessionClientAdapterTestSubscription(),
 		},
 		cancelErr: cancelErr,
 	}
@@ -440,7 +433,6 @@ func TestSessionClientAdapterInterruptsBlockedReviewAdmission(t *testing.T) {
 		target:       target,
 		subscription: newSessionClientAdapterTestSubscription(),
 		reconnectSubscriptions: []*sessionClientAdapterTestSubscription{
-			newSessionClientAdapterTestSubscription(),
 			newSessionClientAdapterTestSubscription(),
 		},
 		state: appserver.SessionState{
@@ -510,7 +502,6 @@ func TestSessionClientAdapterRetriesCancelAfterTransientFailure(t *testing.T) {
 		subscription: newSessionClientAdapterTestSubscription(),
 		reconnectSubscriptions: []*sessionClientAdapterTestSubscription{
 			newSessionClientAdapterTestSubscription(),
-			newSessionClientAdapterTestSubscription(),
 		},
 		cancelErrs: []error{firstErr, nil},
 	}
@@ -541,7 +532,6 @@ func TestSessionClientAdapterRetriesRejectedCancelWithFreshOperationID(t *testin
 		target:       target,
 		subscription: newSessionClientAdapterTestSubscription(),
 		reconnectSubscriptions: []*sessionClientAdapterTestSubscription{
-			newSessionClientAdapterTestSubscription(),
 			newSessionClientAdapterTestSubscription(),
 		},
 		cancelOutcomes: []appserver.Outcome{appserver.OutcomeRejected, appserver.OutcomeCommitted},
@@ -576,7 +566,6 @@ func TestSessionClientAdapterBoundsUncooperativeActiveCancel(t *testing.T) {
 		target:       target,
 		subscription: newSessionClientAdapterTestSubscription(),
 		reconnectSubscriptions: []*sessionClientAdapterTestSubscription{
-			newSessionClientAdapterTestSubscription(),
 			newSessionClientAdapterTestSubscription(),
 		},
 		cancelStarted: started,
@@ -873,12 +862,10 @@ func newSessionClientAdapterForTest(
 
 func TestAppServerAdapterRoutesSessionLifecycleThroughTypedClient(t *testing.T) {
 	replay := newSessionClientAdapterTestSubscription()
-	presence := newSessionClientAdapterTestSubscription()
 	client := &sessionClientAdapterTestClient{
 		createSessionID: "session-new",
 		reconnectSubscriptions: []*sessionClientAdapterTestSubscription{
 			replay,
-			presence,
 		},
 		state: appserver.SessionState{
 			Revision: 7,
@@ -927,20 +914,20 @@ func TestAppServerAdapterRoutesSessionLifecycleThroughTypedClient(t *testing.T) 
 	if resumed.SessionID != "session-resumed" || resumed.Reconnect == nil || adapter.clientSessionID() != "session-resumed" {
 		t.Fatalf("resumed = %#v active=%q", resumed, adapter.clientSessionID())
 	}
-	if replay.closed || presence.closed {
-		t.Fatalf("ResumeSession closed live replay/presence: replay=%v presence=%v", replay.closed, presence.closed)
+	if replay.closed {
+		t.Fatal("ResumeSession closed its observation")
 	}
 	if err := resumed.Reconnect.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if !replay.closed || presence.closed {
-		t.Fatalf("closing transcript reconnect affected presence: replay=%v presence=%v", replay.closed, presence.closed)
+	if !replay.closed {
+		t.Fatal("closing reconnect retained observation")
 	}
 	if err := adapter.ResetSession(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if !presence.closed || adapter.clientSessionID() != "" {
-		t.Fatalf("ResetSession did not detach presence: closed=%v active=%q", presence.closed, adapter.clientSessionID())
+	if adapter.clientSessionID() != "" {
+		t.Fatal("ResetSession retained selection")
 	}
 }
 
@@ -1093,10 +1080,8 @@ func TestResetSessionDetachesActiveTurnWithoutCancellingHostWork(t *testing.T) {
 func TestTUIResumeAcceptsExternalMainControllerSession(t *testing.T) {
 	subscription := newSessionClientAdapterTestSubscription()
 	client := &sessionClientAdapterTestClient{
-		subscription: subscription,
-		reconnectSubscriptions: []*sessionClientAdapterTestSubscription{
-			newSessionClientAdapterTestSubscription(),
-		},
+		subscription:           subscription,
+		reconnectSubscriptions: []*sessionClientAdapterTestSubscription{},
 		state: appserver.SessionState{
 			SessionID: "retired-controller-session",
 			Controller: session.ControllerBinding{
@@ -1138,7 +1123,6 @@ func TestTUIWorkAcceptsExternalMainControllerSession(t *testing.T) {
 				createSessionID: test.createSessionID,
 				subscription:    continuation,
 				reconnectSubscriptions: []*sessionClientAdapterTestSubscription{
-					newSessionClientAdapterTestSubscription(),
 					continuation,
 				},
 				state: appserver.SessionState{
@@ -1282,11 +1266,10 @@ func TestAppServerAdapterResumeFailurePreservesCurrentSession(t *testing.T) {
 	}
 }
 
-func TestAppServerAdapterIncompleteActiveResumeReleasesPresence(t *testing.T) {
+func TestAppServerAdapterIncompleteActiveResumeReleasesObservation(t *testing.T) {
 	replay := newSessionClientAdapterTestSubscription()
-	presence := newSessionClientAdapterTestSubscription()
 	client := &sessionClientAdapterTestClient{
-		reconnectSubscriptions: []*sessionClientAdapterTestSubscription{replay, presence},
+		reconnectSubscriptions: []*sessionClientAdapterTestSubscription{replay},
 		state: appserver.SessionState{
 			SessionID: "session-target",
 			Run:       appserver.RunState{Active: true, HandleID: "handle-only"},
@@ -1298,8 +1281,8 @@ func TestAppServerAdapterIncompleteActiveResumeReleasesPresence(t *testing.T) {
 		!strings.Contains(err.Error(), "complete Turn target") {
 		t.Fatalf("ResumeSession() error = %v, want incomplete Turn target", err)
 	}
-	if !replay.closed || !presence.closed {
-		t.Fatalf("failed ResumeSession retained subscriptions: replay=%v presence=%v", replay.closed, presence.closed)
+	if !replay.closed {
+		t.Fatal("failed ResumeSession retained observation")
 	}
 	if got := adapter.clientSessionID(); got != "session-current" {
 		t.Fatalf("active Session after failed resume = %q, want session-current", got)

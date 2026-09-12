@@ -433,11 +433,6 @@ func (m *Model) currentInputGhostHint() string {
 	switch {
 	case len(m.slashCandidates) > 0 && m.slashIndex >= 0 && m.slashIndex < len(m.slashCandidates):
 		suggestion = strings.TrimSpace(m.slashCandidates[m.slashIndex])
-	case len(m.resumeCandidates) > 0 && m.resumeIndex >= 0 && m.resumeIndex < len(m.resumeCandidates):
-		selected := strings.TrimSpace(m.resumeCandidates[m.resumeIndex].SessionID)
-		if selected != "" {
-			suggestion = "/resume " + selected
-		}
 	case len(m.slashArgCandidates) > 0:
 		candidate, ok := m.currentSlashArgCandidate()
 		if !ok {

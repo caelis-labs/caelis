@@ -409,30 +409,6 @@ func mentionQueryAtCursorWithPrefix(input []rune, cursor int) (int, int, string,
 	return start, end, query, prefix, true
 }
 
-func resumeQueryAtCursor(input []rune, cursor int) (string, bool) {
-	if len(input) == 0 {
-		return "", false
-	}
-	if cursor < 0 {
-		cursor = 0
-	}
-	if cursor > len(input) {
-		cursor = len(input)
-	}
-	text := strings.TrimSpace(string(input[:cursor]))
-	if text == "" {
-		return "", false
-	}
-	if text == "/resume" {
-		return "", true
-	}
-	if !strings.HasPrefix(text, "/resume ") {
-		return "", false
-	}
-	query := strings.TrimSpace(strings.TrimPrefix(text, "/resume "))
-	return query, true
-}
-
 func slashArgQueryAtCursor(input []rune, cursor int) (string, string, bool) {
 	if len(input) == 0 {
 		return "", "", false
@@ -619,10 +595,6 @@ func pluginMarketplaceSlashArgQuery(command string, fields []string, hasTrailing
 
 func slashArgQueryAtEnd(input []rune) (string, string, bool) {
 	return slashArgQueryAtCursor(input, len(input))
-}
-
-func resumeQueryAtEnd(input []rune) (string, bool) {
-	return resumeQueryAtCursor(input, len(input))
 }
 
 func slashCommandQueryAtCursor(input []rune, cursor int) (string, bool) {

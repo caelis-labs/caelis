@@ -20,7 +20,10 @@ func TestForwardTurnEventStreamPreservesTypedClientClosureError(t *testing.T) {
 	turn := &errorReportingControlTurn{events: events, err: want}
 	var messages []tea.Msg
 	result := forwardTurnEventStream(context.Background(), turn, &ProgramSender{
-		Send: func(message tea.Msg) { messages = append(messages, message) },
+		Send: func(message tea.Msg) {
+			message = unwrapSessionViewMessage(message)
+			messages = append(messages, message)
+		},
 	})
 	if !result.queued || len(messages) != 1 {
 		t.Fatalf("result/messages = %#v / %#v", result, messages)

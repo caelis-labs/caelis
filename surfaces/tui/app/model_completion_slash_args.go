@@ -39,7 +39,6 @@ func (m *Model) openSlashArgPicker(command string) tea.Cmd {
 	// synchronously, but always load candidates through a Bubble Tea command so
 	// Control or filesystem work never blocks the update loop.
 	m.clearMention()
-	m.clearResume()
 	m.clearSlashCompletion()
 	m.cancelSlashArgRequest()
 	m.slashArgActive = true
@@ -70,7 +69,6 @@ func (m *Model) activateSlashArgPickerStateFromInput(command string) bool {
 		return true
 	}
 	m.clearMention()
-	m.clearResume()
 	m.clearSlashCompletion()
 	m.cancelSlashArgRequest()
 	m.slashArgActive = true
@@ -88,16 +86,6 @@ func (m *Model) syncSlashInputOverlayState() bool {
 		return false
 	}
 	raw := m.textarea.Value()
-	trimmed := strings.TrimSpace(raw)
-	hasResumePrefix := strings.HasPrefix(raw, "/resume ")
-	hasBareResumeTrigger := strings.EqualFold(trimmed, "/resume") && len(raw) > 0 && (raw[len(raw)-1] == ' ' || raw[len(raw)-1] == '\t')
-	if hasResumePrefix || hasBareResumeTrigger {
-		m.activateResumePickerFromInput()
-		return true
-	}
-	if m.resumeActive {
-		m.clearResume()
-	}
 	if command, _, ok := slashArgQueryAtEnd([]rune(raw)); ok {
 		return m.activateSlashArgPickerStateFromInput(command)
 	}

@@ -32,6 +32,11 @@ type ProgramSender struct {
 	ctx               context.Context
 	cancel            context.CancelFunc
 	nextRunID         uint64
+	viewGeneration    uint64
+	viewSessionID     string
+	viewCancel        context.CancelFunc
+	sessionCommands   sync.Mutex
+	statusReads       sync.Mutex
 	runCancels        []activeRunCancel
 	forwarders        sync.WaitGroup
 	closed            atomic.Bool
@@ -39,9 +44,11 @@ type ProgramSender struct {
 }
 
 type activeRunCancel struct {
-	id        uint64
-	cancel    context.CancelFunc
-	admitting bool
+	id         uint64
+	cancel     context.CancelFunc
+	interrupt  context.CancelFunc
+	generation uint64
+	admitting  bool
 }
 
 type programSenderBoundContextKey struct{}
@@ -58,9 +65,8 @@ func (s *ProgramSender) sendFunc() func(tea.Msg) {
 	if s == nil {
 		return nil
 	}
-	return func(msg tea.Msg) {
-		s.SendMsg(msg)
-	}
+	_, generation := s.sessionView()
+	return s.sessionSend(generation)
 }
 
 func (s *ProgramSender) SendMsg(msg tea.Msg) {
@@ -144,7 +150,8 @@ func (s *ProgramSender) beginRunContext(parent context.Context) (context.Context
 		return parent, func() {}
 	}
 	base := s.bindContext(parent)
-	ctx, cancel := context.WithCancel(base)
+	ctx, cancelCause := context.WithCancelCause(base)
+	cancel := func() { cancelCause(context.Canceled) }
 	s.mu.Lock()
 	if s.closed.Load() {
 		s.mu.Unlock()
@@ -153,7 +160,10 @@ func (s *ProgramSender) beginRunContext(parent context.Context) (context.Context
 	}
 	s.nextRunID++
 	id := s.nextRunID
-	s.runCancels = append(s.runCancels, activeRunCancel{id: id, cancel: cancel, admitting: true})
+	s.runCancels = append(s.runCancels, activeRunCancel{
+		id: id, cancel: cancel, admitting: true, generation: s.viewGeneration,
+		interrupt: func() { cancelCause(controlprompt.ErrUserInterrupt) },
+	})
 	s.mu.Unlock()
 	ctx = context.WithValue(ctx, programSenderRunContextKey{}, id)
 	return ctx, func() {
@@ -200,8 +210,8 @@ func (s *ProgramSender) CancelPendingRuns() bool {
 	s.mu.Lock()
 	cancels := make([]context.CancelFunc, 0, len(s.runCancels))
 	for _, run := range s.runCancels {
-		if run.admitting && run.cancel != nil {
-			cancels = append(cancels, run.cancel)
+		if run.admitting && run.generation == s.viewGeneration && run.interrupt != nil {
+			cancels = append(cancels, run.interrupt)
 		}
 	}
 	s.mu.Unlock()
@@ -303,6 +313,16 @@ func ConfigFromControlService(service ControlServices, sender *ProgramSender, ba
 				runCtx, finish = sender.beginRunContext(ctx)
 			}
 			defer finish()
+			if sender != nil {
+				if _, ok := service.(interface{ SessionID() string }); ok {
+					sender.sessionCommands.Lock()
+					defer sender.sessionCommands.Unlock()
+					_, generation := sender.sessionView()
+					if generation != sub.viewGeneration && !isSessionSelectionLine(sub.Text) {
+						return executeLineResult{queued: true}
+					}
+				}
+			}
 			return executeLineViaControlServiceWithContextResult(runCtx, service, sender, sub, promptRouterFactory)
 		}
 		base.ExecuteLine = func(sub Submission) TaskResultMsg {
@@ -403,26 +423,8 @@ func ConfigFromControlService(service ControlServices, sender *ProgramSender, ba
 		}
 	}
 
-	if base.ResumeComplete == nil {
-		base.ResumeComplete = func(requestCtx context.Context, query string, limit int) ([]ResumeCandidate, error) {
-			candidates, err := service.CompleteResume(requestCtx, query, limit)
-			if err != nil {
-				return nil, err
-			}
-			out := make([]ResumeCandidate, len(candidates))
-			for i, c := range candidates {
-				out[i] = ResumeCandidate{
-					SessionID: c.SessionID,
-					Title:     c.Title,
-					Prompt:    c.Prompt,
-					Model:     c.Model,
-					Workspace: c.Workspace,
-					Age:       c.Age,
-					UpdatedAt: c.UpdatedAt,
-				}
-			}
-			return out, nil
-		}
+	if base.ListSessions == nil {
+		base.ListSessions = sessionListLoader(service)
 	}
 
 	if base.SlashArgComplete == nil {
@@ -446,6 +448,21 @@ func ConfigFromControlService(service ControlServices, sender *ProgramSender, ba
 		}
 	}
 
+	if addressed, ok := service.(interface {
+		InterruptSession(context.Context, string) error
+		SessionID() string
+	}); ok {
+		base.cancelSession = func(sessionID string) bool {
+			if addressed.InterruptSession(ctx, sessionID) == nil {
+				return true
+			}
+			if sender == nil || addressed.SessionID() != sessionID {
+				return false
+			}
+			selected, _ := sender.sessionView()
+			return selected == sessionID && sender.CancelPendingRuns()
+		}
+	}
 	if base.CancelRunning == nil {
 		base.CancelRunning = func() bool {
 			// Ask Control to cancel the Host turn. Observation stays on the
@@ -582,6 +599,9 @@ func executeLineViaControlServiceWithContextResult(ctx context.Context, service 
 	if turn == nil {
 		return executeLineResult{completion: TaskResultMsg{ContinueRunning: true, SuppressTurnDivider: true}}
 	}
+	if observed, ok := attachAdmittedSession(ctx, service, sender, turn); ok {
+		return observed
+	}
 	defer turn.Close()
 
 	send := sender.sendFunc()
@@ -598,15 +618,22 @@ func executeLineViaControlServiceWithContextResult(ctx context.Context, service 
 func executeControlPromptResult(ctx context.Context, service ControlServices, sender *ProgramSender, result controlprompt.Result) executeLineResult {
 	send := sender.sendFunc()
 	if result.Reconnect != nil {
-		defer result.Reconnect.Close()
-		if send != nil {
-			send(SessionReconnectMsg{State: result.Reconnect.State()})
+		if sender != nil {
+			observed := observeSelectedSession(ctx, sender, result.Reconnect, false)
+			if result.RefreshCommands && service != nil {
+				refreshAgentSlashCommandsViaSendWithContext(ctx, service, sender.sendFunc())
+			}
+			return observed
 		}
-		if err := streamReconnectBackfill(ctx, result.Reconnect, send); err != nil {
+		defer result.Reconnect.Close()
+		if err := streamReconnectBackfill(ctx, result.Reconnect, nil); err != nil {
 			return executeLineResult{completion: TaskResultMsg{Err: controlprompt.FriendlyCommandError("resume session feed", err)}}
 		}
-	} else if result.ClearHistory && send != nil {
-		send(ClearHistoryMsg{})
+		return executeLineResult{completion: TaskResultMsg{SuppressTurnDivider: result.SuppressTurnDivider}}
+	} else if result.ClearHistory && sender != nil {
+		_, generation := sender.replaceSessionView(ctx, "")
+		sender.SendMsg(sessionViewStartMsg{generation: generation})
+		send = sender.sessionSend(generation)
 	}
 	for _, event := range result.Events {
 		if send == nil {
@@ -630,23 +657,10 @@ func executeControlPromptResult(ctx context.Context, service ControlServices, se
 	if result.RefreshCommands {
 		refreshAgentSlashCommandsViaSendWithContext(ctx, service, send)
 	}
-	if result.Reconnect != nil {
-		for _, event := range result.Reconnect.BootstrapEvents() {
-			if send == nil {
-				continue
-			}
-			send(event)
-			if req := approvalPayloadFromACPEvent(event); req != nil {
-				sendApprovalPrompt(ctx, result.Reconnect, req, send)
-			}
-		}
-		state := result.Reconnect.State()
-		if state.Run.Active || state.Approval.Active != nil {
-			return forwardSessionReconnectEventStream(ctx, result.Reconnect, sender)
-		}
-		return executeLineResult{completion: TaskResultMsg{SuppressTurnDivider: result.SuppressTurnDivider}}
-	}
 	if result.Turn != nil {
+		if observed, ok := attachAdmittedSession(ctx, service, sender, result.Turn); ok {
+			return observed
+		}
 		return runSubagentTurn(ctx, sender, result.Turn)
 	}
 	if result.ContinueRunning {
@@ -812,8 +826,15 @@ func sendApprovalPrompt(ctx context.Context, turn approvalSubmitter, req *approv
 		return
 	}
 	responses := make(chan PromptResponse, 1)
-	send(approvalToPromptRequest(req, responses))
-	go awaitApprovalPrompt(ctx, turn, req, responses, send)
+	ctx, cancel := context.WithCancel(contextOrBackground(ctx))
+	prompt := approvalToPromptRequest(req, responses)
+	prompt.ApprovalRequestID = string(req.RequestID)
+	prompt.dismiss = cancel
+	send(prompt)
+	go func() {
+		defer cancel()
+		awaitApprovalPrompt(ctx, turn, req, responses, send)
+	}()
 }
 
 func isAutomaticApprovalEvent(req *approvalPayload) bool {
@@ -852,9 +873,12 @@ func awaitApprovalPrompt(ctx context.Context, turn approvalSubmitter, req *appro
 		}
 		response = next
 	}
+	if ctx.Err() != nil {
+		return
+	}
 	decision := approvalDecisionFromPrompt(req, response)
 	if err := turn.SubmitApproval(ctx, decision); err != nil {
-		if send != nil {
+		if send != nil && ctx.Err() == nil {
 			send(LogChunkMsg{Chunk: fmt.Sprintf("approval submit failed: %v\n", err)})
 		}
 	}

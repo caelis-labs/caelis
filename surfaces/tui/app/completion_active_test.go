@@ -9,13 +9,6 @@ func TestActiveCompletionKindDoesNotFallThroughEmptyFlaggedPicker(t *testing.T) 
 		activate func(*Model)
 	}{
 		{
-			name: "resume",
-			kind: completionResume,
-			activate: func(model *Model) {
-				model.resumeActive = true
-			},
-		},
-		{
 			name: "slash argument",
 			kind: completionSlashArg,
 			activate: func(model *Model) {
@@ -49,35 +42,5 @@ func TestActiveCompletionKindDoesNotFallThroughEmptyFlaggedPicker(t *testing.T) 
 				t.Fatalf("lower slash selection moved to %d, want 0", got)
 			}
 		})
-	}
-}
-
-func TestActiveCompletionKindRoutesKeysAndGeometryToSamePicker(t *testing.T) {
-	model := NewModel(Config{})
-	model.resumeActive = true
-	model.resumeCandidates = []ResumeCandidate{
-		{SessionID: "session-1"},
-		{SessionID: "session-2"},
-	}
-	model.slashArgActive = true
-	model.slashArgCommand = "model"
-	model.slashArgCandidates = []SlashArgCandidate{
-		{Value: "alpha"},
-		{Value: "bravo"},
-	}
-
-	snapshot, geometry, ok := model.activeCompletionGeometry()
-	if !ok || snapshot.kind != completionResume || geometry.kind != completionResume {
-		t.Fatalf("active completion snapshot=%+v geometry=%+v ok=%v, want resume", snapshot, geometry, ok)
-	}
-	handled, _ := model.handleActiveCompletionKey(keyPress("down"))
-	if !handled {
-		t.Fatal("resume completion did not handle navigation")
-	}
-	if model.resumeIndex != 1 {
-		t.Fatalf("resume index = %d, want 1", model.resumeIndex)
-	}
-	if model.slashArgIndex != 0 {
-		t.Fatalf("lower slash-arg index = %d, want 0", model.slashArgIndex)
 	}
 }

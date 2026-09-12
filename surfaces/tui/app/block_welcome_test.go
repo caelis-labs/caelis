@@ -394,15 +394,15 @@ func TestWelcomeMouseActionsMatchManualSlashSubmission(t *testing.T) {
 		}
 	})
 
-	t.Run("resume opens the same picker", func(t *testing.T) {
+	t.Run("resume opens the same session overlay", func(t *testing.T) {
 		manual := newWelcomeTestModel(t, 80, 24, Config{})
 		clicked := newWelcomeTestModel(t, 80, 24, Config{})
 
 		submitManualWelcomeCommand(manual, "/resume")
 		_ = clickWelcomeAction(t, clicked, welcomeActionTokenResume)
 
-		if !manual.resumeActive || !clicked.resumeActive {
-			t.Fatalf("resume picker active: manual=%v clicked=%v", manual.resumeActive, clicked.resumeActive)
+		if manual.sessionPicker == nil || clicked.sessionPicker == nil {
+			t.Fatalf("session overlay active: manual=%v clicked=%v", manual.sessionPicker != nil, clicked.sessionPicker != nil)
 		}
 		if manual.textarea.Value() != clicked.textarea.Value() {
 			t.Fatalf("resume input differs: manual=%q clicked=%q", manual.textarea.Value(), clicked.textarea.Value())
@@ -493,8 +493,8 @@ func TestWelcomeMouseHitTestingUsesActionColumnAndRejectsMismatchedRelease(t *te
 	resumePoint := welcomeActionMousePoint(t, model, welcomeActionTokenResume)
 	_, _ = model.Update(tea.MouseClickMsg(connectPoint))
 	_, _ = model.Update(tea.MouseReleaseMsg(resumePoint))
-	if model.isWizardActive() || model.resumeActive || len(submissions) != 0 {
-		t.Fatalf("mismatched release triggered action: wizard=%v resume=%v submissions=%#v", model.isWizardActive(), model.resumeActive, submissions)
+	if model.isWizardActive() || model.sessionPicker != nil || len(submissions) != 0 {
+		t.Fatalf("mismatched release triggered action: wizard=%v sessions=%v submissions=%#v", model.isWizardActive(), model.sessionPicker != nil, submissions)
 	}
 
 	_, _ = model.Update(tea.MouseClickMsg(connectPoint))
@@ -598,7 +598,7 @@ func TestWelcomeHeightOnlyResizeRebuildsResponsiveLayoutAndClickTargets(t *testi
 	}
 
 	_ = clickWelcomeAction(t, model, welcomeActionTokenResume)
-	if !model.resumeActive {
+	if model.sessionPicker == nil {
 		t.Fatal("height-only resize left stale welcome click targets")
 	}
 }
@@ -614,8 +614,8 @@ func TestWelcomeKeyboardDoesNotActivateActions(t *testing.T) {
 	for _, keyName := range []string{"tab", "up", "down", "enter"} {
 		_, _ = model.Update(keyPress(keyName))
 	}
-	if model.isWizardActive() || model.resumeActive || len(submissions) != 0 {
-		t.Fatalf("keyboard activated welcome action: wizard=%v resume=%v submissions=%#v", model.isWizardActive(), model.resumeActive, submissions)
+	if model.isWizardActive() || model.sessionPicker != nil || len(submissions) != 0 {
+		t.Fatalf("keyboard activated welcome action: wizard=%v sessions=%v submissions=%#v", model.isWizardActive(), model.sessionPicker != nil, submissions)
 	}
 	_, _ = model.Update(keyPress("x"))
 	if got := model.textarea.Value(); got != "x" {
@@ -680,11 +680,11 @@ func TestLocalSlashWelcomeLifecycleFollowsTranscriptAppend(t *testing.T) {
 		ExecuteLine: func(Submission) TaskResultMsg { return TaskResultMsg{} },
 	})
 	_ = clickWelcomeAction(t, quitModel, welcomeActionTokenQuit)
-	if got := len(quitModel.doc.FindByKind(BlockWelcome)); got != 0 {
-		t.Fatalf("quit transcript append left %d welcome blocks, want 0", got)
+	if !quitModel.quit {
+		t.Fatal("quit click did not request application exit")
 	}
-	if plain := strings.Join(rowPlainTexts(quitModel.doc.RenderAll(quitModel.blockRenderContext(77))), "\n"); !strings.Contains(plain, "/quit") {
-		t.Fatalf("quit click did not append its normal transcript line\n%s", plain)
+	if got := len(quitModel.doc.FindByKind(BlockWelcome)); got != 1 {
+		t.Fatalf("quit click changed Welcome before exit: %d blocks, want 1", got)
 	}
 
 	called := false

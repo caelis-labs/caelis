@@ -29,7 +29,6 @@ type SessionClientAdapter struct {
 	surface          string
 	workspaceKey     string
 	preferredID      string
-	onSessionNotice  func(eventstream.Envelope)
 
 	sessionMu       sync.RWMutex
 	sessionChangeMu sync.Mutex
@@ -39,7 +38,6 @@ type SessionClientAdapter struct {
 	activeMu      sync.Mutex
 	active        *sessionClientTurn
 	reconnect     *clientSessionReconnect
-	presence      *sessionPresence
 	starting      int
 	admissionWait chan struct{}
 	admissionErr  error
@@ -66,9 +64,6 @@ type AppServerAdapterConfig struct {
 	Agents             appserver.AgentClient
 	Completion         appserver.CompletionClient
 	Plugins            appserver.PluginClient
-	// OnSessionNotice observes transient Session notices through the existing
-	// TUI presence subscription, including while no Turn is active.
-	OnSessionNotice func(eventstream.Envelope)
 }
 
 // NewAppServerAdapter composes the complete typed facade used by production
@@ -103,7 +98,6 @@ func NewAppServerAdapter(config AppServerAdapterConfig) (*SessionClientAdapter, 
 		agentClient: config.Agents, completionClient: config.Completion, pluginClient: config.Plugins,
 		surface: strings.TrimSpace(config.Surface), workspaceKey: strings.TrimSpace(config.WorkspaceKey),
 		preferredID: strings.TrimSpace(config.PreferredSessionID), sessionID: strings.TrimSpace(config.SessionID),
-		onSessionNotice: config.OnSessionNotice,
 		workspaceDir:    strings.TrimSpace(config.WorkspaceDir),
 		acpPreparations: map[string]controlagents.ACPPreparation{},
 		acpPending:      map[string]pendingACPPreparationObservation{},
@@ -177,6 +171,16 @@ const (
 )
 
 func (a *SessionClientAdapter) Interrupt(ctx context.Context) error {
+	return a.interruptSession(ctx, "")
+}
+
+// InterruptSession interrupts only the selected Session observed by the caller.
+// A view switch cannot retarget an already queued keyboard interrupt.
+func (a *SessionClientAdapter) InterruptSession(ctx context.Context, sessionID string) error {
+	return a.interruptSession(ctx, strings.TrimSpace(sessionID))
+}
+
+func (a *SessionClientAdapter) interruptSession(ctx context.Context, sessionID string) error {
 	if a == nil {
 		return errors.New("app/gatewayapp/controladapter: Session client adapter is unavailable")
 	}
@@ -190,9 +194,15 @@ func (a *SessionClientAdapter) Interrupt(ctx context.Context) error {
 	starting := a.starting
 	a.activeMu.Unlock()
 	if active != nil {
+		if sessionID != "" && active.turn.SessionID() != sessionID {
+			return noActiveTurnSubmissionError()
+		}
 		return cancelTurnWithTimeout(ctx, active.cancel)
 	}
-	if reconnect != nil {
+	if reconnect != nil && reconnect.State().Run.Active {
+		if sessionID != "" && reconnect.State().SessionID != sessionID {
+			return noActiveTurnSubmissionError()
+		}
 		return cancelTurnWithTimeout(ctx, reconnect.cancel)
 	}
 	if starting == 0 || wait == nil {
@@ -213,9 +223,15 @@ func (a *SessionClientAdapter) Interrupt(ctx context.Context) error {
 		admissionErr := a.admissionErr
 		a.activeMu.Unlock()
 		if active != nil {
+			if sessionID != "" && active.turn.SessionID() != sessionID {
+				return noActiveTurnSubmissionError()
+			}
 			return cancelTurnWithTimeout(ctx, active.cancel)
 		}
-		if reconnect != nil {
+		if reconnect != nil && reconnect.State().Run.Active {
+			if sessionID != "" && reconnect.State().SessionID != sessionID {
+				return noActiveTurnSubmissionError()
+			}
 			return cancelTurnWithTimeout(ctx, reconnect.cancel)
 		}
 		if currentWait != wait && admissionErr != nil {
@@ -233,9 +249,15 @@ func (a *SessionClientAdapter) Interrupt(ctx context.Context) error {
 	admissionErr := a.admissionErr
 	a.activeMu.Unlock()
 	if active != nil {
+		if sessionID != "" && active.turn.SessionID() != sessionID {
+			return noActiveTurnSubmissionError()
+		}
 		return cancelTurnWithTimeout(ctx, active.cancel)
 	}
-	if reconnect != nil {
+	if reconnect != nil && reconnect.State().Run.Active {
+		if sessionID != "" && reconnect.State().SessionID != sessionID {
+			return noActiveTurnSubmissionError()
+		}
 		return cancelTurnWithTimeout(ctx, reconnect.cancel)
 	}
 	if admissionErr != nil {
@@ -268,8 +290,9 @@ type turnAdmissionResult struct {
 }
 
 type turnAdmission struct {
-	cancel    context.CancelFunc
-	cancelled bool
+	cancel      context.CancelFunc
+	cancelled   bool
+	interrupted bool
 }
 
 func (a *SessionClientAdapter) startAdmittedTurn(
@@ -289,8 +312,9 @@ func (a *SessionClientAdapter) startAdmittedTurn(
 	select {
 	case result = <-resultCh:
 	case <-admissionCtx.Done():
+		interrupted := a.admissionInterrupted(admissionID) || errors.Is(context.Cause(admissionCtx), controlprompt.ErrUserInterrupt)
 		a.finishTurnAdmission(admissionID, admissionCtx.Err())
-		go cleanupLateAdmission(resultCh)
+		go cleanupLateAdmission(resultCh, interrupted)
 		return nil, admissionCtx.Err()
 	}
 	turn, err := result.turn, result.err
@@ -307,8 +331,9 @@ func (a *SessionClientAdapter) startAdmittedTurn(
 	wrapped.onClose = func() { a.clearActiveTurn(wrapped) }
 	if !a.setActiveTurnForAdmission(admissionID, admissionCtx, wrapped) {
 		err = context.Canceled
+		interrupted := a.admissionInterrupted(admissionID) || errors.Is(context.Cause(admissionCtx), controlprompt.ErrUserInterrupt)
 		a.finishTurnAdmission(admissionID, err)
-		go cleanupAdmittedTurn(turn)
+		go cleanupAdmittedTurn(turn, interrupted)
 		return nil, err
 	}
 	a.finishTurnAdmission(admissionID, nil)
@@ -374,6 +399,7 @@ func (a *SessionClientAdapter) cancelTurnAdmissions(wait chan struct{}) {
 			continue
 		}
 		admission.cancelled = true
+		admission.interrupted = wait != nil
 		cancels = append(cancels, admission.cancel)
 	}
 	a.activeMu.Unlock()
@@ -382,18 +408,27 @@ func (a *SessionClientAdapter) cancelTurnAdmissions(wait chan struct{}) {
 	}
 }
 
-func cleanupLateAdmission(resultCh <-chan turnAdmissionResult) {
-	result := <-resultCh
-	cleanupAdmittedTurn(result.turn)
+func (a *SessionClientAdapter) admissionInterrupted(id uint64) bool {
+	a.activeMu.Lock()
+	defer a.activeMu.Unlock()
+	admission := a.admissions[id]
+	return admission != nil && admission.interrupted
 }
 
-func cleanupAdmittedTurn(turn appserver.TargetTurn) {
+func cleanupLateAdmission(resultCh <-chan turnAdmissionResult, interrupted bool) {
+	result := <-resultCh
+	cleanupAdmittedTurn(result.turn, interrupted)
+}
+
+func cleanupAdmittedTurn(turn appserver.TargetTurn, interrupted bool) {
 	if turn == nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), interruptCancelTimeout)
-	_ = turn.Cancel(ctx, "tui interrupt during admission")
-	cancel()
+	if interrupted {
+		ctx, cancel := context.WithTimeout(context.Background(), interruptCancelTimeout)
+		_ = turn.Cancel(ctx, "tui interrupt during admission")
+		cancel()
+	}
 	_ = turn.Close()
 }
 
@@ -416,7 +451,7 @@ func (a *SessionClientAdapter) CanSubmitRunningPrompt() bool {
 	}
 	return a.reconnect != nil &&
 		a.reconnect.client != nil &&
-		a.reconnect.state.Run.Active &&
+		a.reconnect.State().Run.Active &&
 		completeTurnTarget(a.reconnect.target())
 }
 
@@ -441,15 +476,10 @@ func (a *SessionClientAdapter) setActiveTurn(turn *sessionClientTurn) {
 	}
 	a.activeMu.Lock()
 	previous := a.active
-	previousReconnect := a.reconnect
 	a.active = turn
-	a.reconnect = nil
 	a.activeMu.Unlock()
 	if previous != nil && previous != turn {
 		_ = previous.Close()
-	}
-	if previousReconnect != nil {
-		_ = previousReconnect.Close()
 	}
 }
 
@@ -468,15 +498,10 @@ func (a *SessionClientAdapter) setActiveTurnForAdmission(
 		return false
 	}
 	previous := a.active
-	previousReconnect := a.reconnect
 	a.active = turn
-	a.reconnect = nil
 	a.activeMu.Unlock()
 	if previous != nil && previous != turn {
 		_ = previous.Close()
-	}
-	if previousReconnect != nil {
-		_ = previousReconnect.Close()
 	}
 	return true
 }

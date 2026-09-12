@@ -9,7 +9,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	appserver "github.com/caelis-labs/caelis/control/appserver"
-	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/workspacetrust"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/internal/controlprompt/appserveradapter"
@@ -56,18 +55,16 @@ func runTUI(
 	}
 	sender := &tuiapp.ProgramSender{}
 	typedDriver, err := appserveradapter.NewAppServerAdapter(appserveradapter.AppServerAdapterConfig{
-		PreferredSessionID: strings.TrimSpace(sessionID),
-		WorkspaceKey:       strings.TrimSpace(workspaceKey),
-		WorkspaceDir:       strings.TrimSpace(workspaceDir),
-		Surface:            "cli-tui",
-		Sessions:           clients.Sessions,
-		Participants:       clients.Participants,
-		Status:             clients.Status,
-		Configuration:      clients.Configuration,
-		Agents:             clients.Agents,
-		Completion:         clients.Completion,
-		Plugins:            clients.Plugins,
-		OnSessionNotice:    func(envelope eventstream.Envelope) { sender.SendMsg(envelope) },
+		WorkspaceKey:  strings.TrimSpace(workspaceKey),
+		WorkspaceDir:  strings.TrimSpace(workspaceDir),
+		Surface:       "cli-tui",
+		Sessions:      clients.Sessions,
+		Participants:  clients.Participants,
+		Status:        clients.Status,
+		Configuration: clients.Configuration,
+		Agents:        clients.Agents,
+		Completion:    clients.Completion,
+		Plugins:       clients.Plugins,
 	})
 	if err != nil {
 		return err
@@ -78,6 +75,7 @@ func runTUI(
 	updateRequested := false
 	tuiCfg := tuiapp.ConfigFromControlService(typedDriver, sender, tuiapp.Config{
 		Context:             programCtx,
+		InitialSessionID:    strings.TrimSpace(sessionID),
 		AppName:             "CAELIS",
 		Version:             version.String(),
 		Workspace:           workspaceDir,

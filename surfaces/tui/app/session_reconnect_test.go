@@ -2,6 +2,7 @@ package tuiapp
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -146,7 +147,7 @@ func TestExecuteReconnectTreatsHistoryAsTranscriptAndRestoresApproval(t *testing
 	close(backfill)
 	live := make(chan eventstream.Envelope, 1)
 	live <- eventstream.TurnCompleted("handle-1", "run-1", "turn-1", time.Unix(20, 0))
-	close(live)
+	defer close(live)
 	reconnect := &tuiReconnect{
 		state: appserver.SessionState{
 			SessionID: "session-1",
@@ -171,6 +172,7 @@ func TestExecuteReconnectTreatsHistoryAsTranscriptAndRestoresApproval(t *testing
 	var mu sync.Mutex
 	var messages []any
 	sender := &ProgramSender{Send: func(message tea.Msg) {
+		message = unwrapSessionViewMessage(message)
 		mu.Lock()
 		messages = append(messages, message)
 		mu.Unlock()
@@ -178,6 +180,7 @@ func TestExecuteReconnectTreatsHistoryAsTranscriptAndRestoresApproval(t *testing
 			prompt.Response <- PromptResponse{Line: "allow_once"}
 		}
 	}}
+	defer sender.Close()
 	result := executeControlPromptResult(context.Background(), nil, sender, controlprompt.Result{
 		Handled: true, ClearHistory: true, Reconnect: reconnect, SuppressTurnDivider: true,
 	})
@@ -205,8 +208,8 @@ func TestExecuteReconnectTreatsHistoryAsTranscriptAndRestoresApproval(t *testing
 	if len(messages) == 0 {
 		t.Fatal("no reconnect messages were forwarded")
 	}
-	if _, ok := messages[0].(SessionReconnectMsg); !ok {
-		t.Fatalf("first reconnect message = %T, want atomic SessionReconnectMsg", messages[0])
+	if _, ok := messages[0].(sessionViewStartMsg); !ok {
+		t.Fatalf("first reconnect message = %T, want atomic sessionViewStartMsg", messages[0])
 	}
 }
 
@@ -383,7 +386,11 @@ func (r *tuiReconnect) Deliveries() <-chan appserver.FeedDelivery {
 			}
 			r.deliveries <- appserver.FeedDelivery{Kind: appserver.FeedDeliverySync, Source: appserver.FeedSourceExact}
 			if r.live != nil {
+				var sequence uint64
 				for envelope := range r.live {
+					sequence++
+					envelope.Cursor = fmt.Sprintf("reconnect-test-%d", sequence)
+					envelope.Position = &eventstream.FeedPosition{Transient: &eventstream.TransientFeedPosition{Generation: "reconnect-test", Sequence: sequence}}
 					r.deliveries <- appserver.FeedDelivery{
 						Kind: appserver.FeedDeliveryAppendPage, Source: appserver.FeedSourceExact,
 						Events: []eventstream.Envelope{envelope}, NextCursor: envelope.Cursor,
