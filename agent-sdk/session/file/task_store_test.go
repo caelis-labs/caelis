@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -142,6 +143,74 @@ func TestTaskStoreDetachedSubagentActivityRequiresNextGeneration(t *testing.T) {
 				t.Fatalf("invalid activity %q accepted", invalid)
 			}
 		})
+	}
+}
+
+func TestTaskStoreDetachedSubagentUsagePreservesActivity(t *testing.T) {
+	for _, state := range []task.State{task.StateRunning, task.StateCompleted, task.StateUnknownOutcome} {
+		for _, mutation := range []string{"", "identity", "generation", "state", "running", "result", "cancel", "spec", "lease", "no_gauge"} {
+			t.Run(string(state)+"/"+mutation, func(t *testing.T) {
+				store := NewTaskStore(NewStore(Config{RootDir: t.TempDir()}))
+				seed := &task.Entry{
+					TaskID: "child", Kind: task.KindSubagent, Session: taskSessionRef("external-session"),
+					State: state, Running: state == task.StateRunning,
+					Spec:     map[string]any{"turn_seq": int64(1), "retained": "spec"},
+					Metadata: map[string]any{"child_activity_id": "first", "child_activity_generation": int64(1), "cancel_turn_seq": int64(1)},
+					Result:   map[string]any{"retained": "result"},
+				}
+				current, err := store.Put(t.Context(), task.PutRequest{Entry: seed})
+				if err != nil {
+					t.Fatal(err)
+				}
+				// Use the actual decoded canonical entry, as the Runtime writer does.
+				current, err = store.Get(t.Context(), current.TaskID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				entry := task.CloneEntry(current)
+				entry.ContextUsage = &task.ContextUsageRecord{Snapshot: session.ContextUsageSnapshot{Size: 200000, Used: 8000}}
+				entry.UpdatedAt = time.Now()
+				switch mutation {
+				case "identity":
+					entry.Metadata["child_activity_id"] = "other"
+				case "generation":
+					entry.Metadata["child_activity_generation"] = int64(2)
+				case "state":
+					entry.State = task.StateFailed
+				case "running":
+					entry.Running = !entry.Running
+				case "result":
+					entry.Result["retained"] = "changed"
+				case "cancel":
+					delete(entry.Metadata, "cancel_turn_seq")
+				case "spec":
+					entry.Spec["retained"] = "changed"
+				case "lease":
+					entry.Lease.ID = "new-lease"
+				case "no_gauge":
+					entry.ContextUsage = nil
+				}
+				ctx := session.ContextWithControlMutation(t.Context(), session.ControlMutationPurposeSubagentActivity)
+				_, err = store.Put(ctx, task.PutRequest{Entry: entry, ExpectedRevision: current.Revision})
+				if mutation == "" {
+					if err != nil {
+						t.Fatalf("same-activity usage rejected: %v", err)
+					}
+					got, err := store.Get(t.Context(), current.TaskID)
+					if err != nil || got.ContextUsage == nil || got.ContextUsage.Snapshot.Used != 8000 {
+						t.Fatalf("durable gauge = %#v, %v", got, err)
+					}
+				} else {
+					if err == nil {
+						t.Fatal("usage mutation changed another activity field")
+					}
+					got, loadErr := store.Get(t.Context(), current.TaskID)
+					if loadErr != nil || !reflect.DeepEqual(got, current) {
+						t.Fatalf("rejected mutation changed durable Task: %#v, %v", got, loadErr)
+					}
+				}
+			})
+		}
 	}
 }
 

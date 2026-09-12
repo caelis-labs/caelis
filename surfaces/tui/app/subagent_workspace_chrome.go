@@ -63,6 +63,7 @@ func (m *Model) paneHeaderStyle(action string, style lipgloss.Style) lipgloss.St
 func (m *Model) clearPaneChromeMouse() {
 	if state := m.subagentOutputOverlay; state != nil {
 		state.hoveredHeader, state.pressedItem = "", ""
+		state.footerHideHovered = false
 	}
 }
 
@@ -80,6 +81,12 @@ func (m *Model) paneHeaderActionAt(mouse tea.Mouse) string {
 	return ""
 }
 
+func (m *Model) paneFooterHideAt(mouse tea.Mouse) bool {
+	state := m.subagentOutputOverlay
+	col := mouse.X - state.geometry.contentX
+	return mouse.Y == state.geometry.footerY && col >= state.footerHideX && col < state.footerHideX+state.footerHideWidth
+}
+
 // Track the chrome before routing the event, so leaving the child pane also
 // clears its hover. Pointer motion never changes the focused composer.
 func (m *Model) updatePaneChromeHover(msg tea.MouseMsg) {
@@ -88,11 +95,13 @@ func (m *Model) updatePaneChromeHover(msg tea.MouseMsg) {
 		return
 	}
 	state.hoveredHeader = ""
+	state.footerHideHovered = false
 	if m.activePrompt != nil || m.subagentOverlay != nil || m.workspace.dragging || m.workspace.resizing || state.menu != "" || state.selecting || state.editorSelecting {
 		return
 	}
 	if _, motion := msg.(tea.MouseMotionMsg); motion && msg.Mouse().Button == tea.MouseNone {
 		state.hoveredHeader = m.paneHeaderActionAt(msg.Mouse())
+		state.footerHideHovered = m.paneFooterHideAt(msg.Mouse())
 	}
 }
 
@@ -144,6 +153,25 @@ func (m *Model) handlePaneChromeMouse(msg tea.MouseMsg) (bool, tea.Cmd) {
 	}
 	if state.menu != "" {
 		return m.handlePaneMenuMouse(msg)
+	}
+	if !state.selecting && (mouse.Y == g.footerY || state.pressedItem == "footer:hide") {
+		switch msg.(type) {
+		case tea.MouseClickMsg:
+			state.pressedItem = ""
+			if mouse.Button == tea.MouseLeft && m.paneFooterHideAt(mouse) {
+				state.pressedItem = "footer:hide"
+			}
+			return true, nil
+		case tea.MouseReleaseMsg:
+			pressed := state.pressedItem
+			state.pressedItem = ""
+			if pressed == "footer:hide" && m.paneFooterHideAt(mouse) && (mouse.Button == tea.MouseLeft || mouse.Button == tea.MouseNone) {
+				m.closeSubagentOutputOverlay()
+			}
+			return true, nil
+		case tea.MouseMotionMsg:
+			return true, nil
+		}
 	}
 	if mouse.Y == g.headerY {
 		action := m.paneHeaderActionAt(mouse)

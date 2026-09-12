@@ -3,6 +3,7 @@ package taskstream
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -33,8 +34,8 @@ func NewDirectoryIndex() *DirectoryIndex {
 }
 
 // Notify records one committed Task entry. Output-only revision changes are
-// folded away; lifecycle, activity identity, routing identity, and capability
-// changes wake every current observer independently.
+// folded away; lifecycle, activity identity, routing identity, capability,
+// model, and context gauge changes wake every current observer independently.
 func (i *DirectoryIndex) Notify(entry *task.Entry) {
 	if i == nil || entry == nil {
 		return
@@ -88,6 +89,9 @@ func directoryDescriptorFingerprint(descriptor TaskDescriptor) string {
 		descriptor.ParticipantID,
 		descriptor.CurrentTurnID,
 		descriptor.ActivityID,
+		descriptor.Model,
+		strconv.FormatUint(descriptor.ContextUsed, 10),
+		strconv.FormatUint(descriptor.ContextSize, 10),
 	}, "\x00")
 }
 

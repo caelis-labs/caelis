@@ -2,6 +2,7 @@ package tuiapp
 
 import (
 	"fmt"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/caelis-labs/caelis/control/uipreferences"
@@ -205,16 +206,26 @@ func paneLayoutSymbol(layout uipreferences.Layout) string {
 }
 func (m *Model) paneStatusParts(state *subagentOutputOverlayState) (string, string) {
 	descriptor := m.subagentRosterTasks[state.callID]
-	model := descriptor.Model
-	if model == "" {
-		model = "Model unavailable"
-	}
 	usage := ""
 	if descriptor.ContextSize > 0 {
 		usage = fmt.Sprintf("%s / %s · %d%%", compactPaneTokens(descriptor.ContextUsed), compactPaneTokens(descriptor.ContextSize), uint64(float64(descriptor.ContextUsed)/float64(descriptor.ContextSize)*100))
 	}
-	return model, usage
+	return paneModelDisplay(descriptor.Model), usage
 }
+
+func paneModelDisplay(model string) string {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return "Model unavailable"
+	}
+	if endpoint, alias, ok := strings.Cut(model, "/"); ok && strings.Contains(endpoint, "@") {
+		if alias = strings.TrimSpace(alias); alias != "" {
+			return alias
+		}
+	}
+	return model
+}
+
 func compactPaneTokens(n uint64) string {
 	if n >= 1000 {
 		return fmt.Sprintf("%.0fk", float64(n)/1000)

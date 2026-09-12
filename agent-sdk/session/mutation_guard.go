@@ -35,7 +35,8 @@ const (
 	// Task and side-participant commit after the spawning Turn may have ended.
 	ControlMutationPurposeSubagentCompletion ControlMutationPurpose = "subagent_completion"
 	// ControlMutationPurposeSubagentActivity records producer-proven Task activity
-	// independently of the parent Turn that admitted the child input.
+	// and replaces its latest context gauge without changing that activity's
+	// lifecycle, independently of the parent Turn that admitted the child input.
 	ControlMutationPurposeSubagentActivity ControlMutationPurpose = "subagent_activity"
 )
 

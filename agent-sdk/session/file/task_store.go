@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"time"
 
@@ -118,6 +119,18 @@ func (s *TaskStore) validateDetachedSubagentLifecycle(entry *taskapi.Entry, expe
 		activity, _ := entry.Metadata["child_activity_id"].(string)
 		generation := taskLifecycleGeneration(entry.Spec["turn_seq"])
 		previous := taskLifecycleGeneration(current.Spec["turn_seq"])
+		if previous > 0 && generation == previous && strings.TrimSpace(activity) != "" &&
+			taskLifecycleGeneration(entry.Metadata["child_activity_generation"]) == generation && entry.ContextUsage != nil {
+			// A live gauge replaces only usage within this exact activity. The
+			// existing lifecycle, identity, result, and cancellation journal stay
+			// authoritative, including when the Task is already terminal.
+			gaugeOnly := taskapi.CloneEntry(entry)
+			gaugeOnly.ContextUsage = taskapi.CloneContextUsageRecord(current.ContextUsage)
+			gaugeOnly.UpdatedAt = current.UpdatedAt
+			if reflect.DeepEqual(gaugeOnly, current) {
+				return nil
+			}
+		}
 		if !entry.Running || entry.State != taskapi.StateRunning || strings.TrimSpace(activity) == "" ||
 			previous <= 0 || generation != previous+1 || taskLifecycleGeneration(entry.Metadata["child_activity_generation"]) != generation {
 			return fmt.Errorf("agent-sdk/session/file: detached subagent activity requires a running Task with activity identity")

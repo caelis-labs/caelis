@@ -13,28 +13,74 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/task/output"
 )
 
-// childTaskActivity binds a possible follow-up to its first producer evidence.
-// Admission alone changes no Task state. The latch retains only identity;
-// output payloads go directly to the application observer.
+// childTaskActivity binds a child producer to its Task generation. Follow-up
+// admission alone changes no Task state. The latch retains activity identity
+// and the latest replaceable ACP context gauge; other output payloads go
+// directly to the application observer.
 type childTaskActivity struct {
-	runtime     *taskRuntime
-	ctx         context.Context
-	ref         session.SessionRef
-	taskID      string
-	activityID  string
-	turnSeq     int64
-	observer    output.Observer
-	started     sync.Once
-	observed    atomic.Bool
-	ready       chan struct{}
-	readyOnce   sync.Once
-	persistDone chan struct{}
-	settled     atomic.Bool
+	runtime        *taskRuntime
+	ctx            context.Context
+	ref            session.SessionRef
+	taskID         string
+	activityID     string
+	turnSeq        int64
+	observer       output.Observer
+	needsOpen      bool
+	started        sync.Once
+	observed       atomic.Bool
+	ready          chan struct{}
+	readyOnce      sync.Once
+	persistDone    chan struct{}
+	settled        atomic.Bool
+	usageMu        sync.Mutex
+	latestUsage    *taskapi.ContextUsageRecord
+	persistedUsage *taskapi.ContextUsageRecord
+	usageDone      chan struct{}
+	usageClosed    bool
+	usageCtx       context.Context
+	stopUsage      context.CancelFunc
+	installed      chan struct{}
+	installedOnce  sync.Once
+}
+
+func newChildTaskActivity(
+	runtime *taskRuntime,
+	ctx context.Context,
+	ref session.SessionRef,
+	taskID string,
+	activityID string,
+	turnSeq int64,
+	observer output.Observer,
+	needsOpen bool,
+	waitInstall bool,
+) *childTaskActivity {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	a := &childTaskActivity{
+		runtime: runtime,
+		ctx: session.ContextWithControlMutation(
+			context.WithoutCancel(ctx), session.ControlMutationPurposeSubagentActivity,
+		),
+		ref: ref, taskID: taskID, activityID: activityID, turnSeq: turnSeq,
+		observer: observer, needsOpen: needsOpen,
+		ready: make(chan struct{}), persistDone: make(chan struct{}), installed: make(chan struct{}),
+	}
+	a.usageCtx, a.stopUsage = context.WithCancel(a.ctx)
+	if !needsOpen {
+		a.observed.Store(true)
+		close(a.ready)
+		close(a.persistDone)
+	}
+	if !waitInstall {
+		a.markInstalled()
+	}
+	return a
 }
 
 func (a *childTaskActivity) ObserveTaskOutput(ctx context.Context, event output.Event) error {
 	// Recipient-visible input is admission evidence, not child execution.
-	if !session.IsAgentCommunicationProtocol(event.Event) &&
+	if a.needsOpen && !session.IsAgentCommunicationProtocol(event.Event) &&
 		(event.Event != nil || event.Text != "" || event.Running || event.Closed || event.State != "") {
 		a.started.Do(func() {
 			a.observed.Store(true)
@@ -43,6 +89,7 @@ func (a *childTaskActivity) ObserveTaskOutput(ctx context.Context, event output.
 			go a.persistWhenAvailable()
 		})
 	}
+	a.noteUsage(contextUsageRecordFromOutput(event))
 	if a.observer != nil {
 		return a.observer.ObserveTaskOutput(ctx, event)
 	}
@@ -83,14 +130,35 @@ func (a *childTaskActivity) awaitObservedStart(ctx context.Context) error {
 	}
 }
 
-// awaitPersistence joins the first-output writer after terminal commit. It
-// runs outside the Task operation claim and never delays output callbacks.
-func (a *childTaskActivity) awaitPersistence(ctx context.Context) error {
+func (a *childTaskActivity) awaitOpenPersistence(ctx context.Context) error {
 	if a == nil || !a.observed.Load() {
 		return nil
 	}
 	select {
 	case <-a.persistDone:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// awaitPersistence joins activity-open persistence and the latest usage writer.
+// Terminal callers first seal usage and wait outside the Task operation claim.
+func (a *childTaskActivity) awaitPersistence(ctx context.Context) error {
+	if err := a.awaitOpenPersistence(ctx); err != nil {
+		return err
+	}
+	if a == nil {
+		return nil
+	}
+	a.usageMu.Lock()
+	done := a.usageDone
+	a.usageMu.Unlock()
+	if done == nil {
+		return nil
+	}
+	select {
+	case <-done:
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()

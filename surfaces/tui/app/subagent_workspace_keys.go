@@ -11,6 +11,7 @@ import (
 func (m *Model) handlePaneWorkspaceKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 	if state := m.subagentOutputOverlay; state != nil {
 		state.hoveredHeader = ""
+		state.footerHideHovered = false
 	}
 	if m.workspace.dragging {
 		if msg.Key().Code == tea.KeyEscape {
