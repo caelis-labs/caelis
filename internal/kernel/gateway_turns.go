@@ -122,6 +122,7 @@ func (g *Gateway) BeginTurn(ctx context.Context, req BeginTurnRequest) (BeginTur
 	}
 	g.mu.Unlock()
 
+	handle.publishStarted()
 	go g.runTurn(runCtx, cancelFn, activeSession, req, resolved, handle)
 
 	return BeginTurnResult{

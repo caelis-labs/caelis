@@ -7,7 +7,6 @@ type completionKind uint8
 const (
 	completionNone completionKind = iota
 	completionMention
-	completionResume
 	completionSlashArg
 	completionSlashCommand
 )

@@ -50,6 +50,7 @@ type SetStatusMsg struct {
 }
 
 type StatusRefreshResultMsg struct {
+	viewGeneration       uint64
 	Workspace            string
 	HasWorkspace         bool
 	Model                string
@@ -87,6 +88,7 @@ type UpdateCheckResultMsg struct {
 }
 
 type TaskResultMsg struct {
+	sessionSelection    bool
 	ExitNow             bool
 	Err                 error
 	Interrupted         bool
@@ -115,6 +117,9 @@ type SandboxProgressMsg struct {
 }
 
 type PromptRequestMsg struct {
+	dismiss func()
+	// ApprovalRequestID associates this modal with its Control settlement.
+	ApprovalRequestID   string
 	Title               string
 	Prompt              string
 	Details             []PromptDetail

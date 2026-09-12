@@ -598,8 +598,13 @@ func (m *Model) statusRefreshCmd() tea.Cmd {
 		return nil
 	}
 	cfg := m.cfg
+	generation := m.viewGeneration
 	return func() tea.Msg {
-		msg := StatusRefreshResultMsg{}
+		if cfg.ProgramSender != nil {
+			cfg.ProgramSender.statusReads.Lock()
+			defer cfg.ProgramSender.statusReads.Unlock()
+		}
+		msg := StatusRefreshResultMsg{viewGeneration: generation}
 		if cfg.RefreshWorkspace != nil {
 			msg.Workspace = strings.TrimSpace(cfg.RefreshWorkspace())
 			msg.HasWorkspace = true
@@ -631,11 +636,16 @@ func (m *Model) statusRefreshCmd() tea.Cmd {
 }
 
 func (m *Model) handleTaskResultMsg(msg TaskResultMsg) (tea.Model, tea.Cmd) {
+	// An admission or slash command can finish while another observer's Turn
+	// runs. Only the Session feed may finish a Turn already observed from Host.
+	if m.turnRunning() && m.liveTurn.observed {
+		msg.ContinueRunning = true
+	}
 	if msg.ContinueRunning {
 		if msg.Err != nil {
 			if msg.FailedSubmission != nil {
 				m.handleFailedActiveSubmission(*msg.FailedSubmission, msg.SubmissionOutcome)
-			} else {
+			} else if !msg.sessionSelection {
 				m.pendingQueue = nil
 			}
 			errLine := terminalErrorLine(msg.Err)

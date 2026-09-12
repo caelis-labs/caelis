@@ -8,6 +8,7 @@
 //   - presets.go: mode registry and shared decision helpers
 //   - filesystem_policy.go: READ/WRITE/PATCH path authorization
 //   - command_policy.go: RUN_COMMAND classification (machine deny / approval)
+//   - remote_script.go: remote script flows in POSIX and PowerShell commands
 //   - shell_parse.go: shell tokenization helpers shared by command and git policy
 //   - git_policy.go: Git subcommand classification
 //
@@ -17,9 +18,11 @@
 //     second Tool-name allowlist; calls without a maintained risk classifier
 //     are allowed under the default workspace constraints.
 //   - Hard deny is reserved for machine-level catastrophic operations
-//     (system/home root recursive deletes, device wipes, remote pipe execution).
+//     (system/home root recursive deletes and device wipes).
 //   - Built-in filesystem writes outside allowed roots ask for approval with
 //     exact path grants under sandbox constraints.
-//   - Destructive VCS operations, Git metadata writes, and out-of-root recursive
-//     deletes require approval instead of deny-and-retry tutorials.
+//   - Destructive VCS operations, remote script execution (including PowerShell
+//     download-to-Invoke-Expression flows), and out-of-root recursive deletes
+//     require approval on the requested execution route.
+//     Approval alone does not expand sandbox filesystem or network permissions.
 package presets

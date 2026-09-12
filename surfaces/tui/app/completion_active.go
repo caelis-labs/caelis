@@ -22,8 +22,6 @@ func (m *Model) activeCompletionKind() completionKind {
 		return completionMention
 	case m.mentionRequestPending:
 		return completionMention
-	case m.resumeActive:
-		return completionResume
 	case m.slashArgActive:
 		return completionSlashArg
 	case len(m.slashCandidates) > 0:
@@ -47,12 +45,6 @@ func (m *Model) completionSnapshotForKind(kind completionKind) (completionSnapsh
 			selected:    m.mentionIndex,
 			total:       total,
 			canLoadMore: shouldLoadMoreCompletionCandidates(total, m.mentionLimit),
-		}, true
-	case completionResume:
-		return completionSnapshot{
-			kind:     kind,
-			selected: m.resumeIndex,
-			total:    len(m.resumeCandidates),
 		}, true
 	case completionSlashArg:
 		candidates := m.visibleSlashArgCandidates()
@@ -95,11 +87,6 @@ func (m *Model) completionKeyAt(kind completionKind, index int) string {
 			return ""
 		}
 		return completionCandidateStableKey(m.mentionCandidates[index])
-	case completionResume:
-		if index >= len(m.resumeCandidates) {
-			return ""
-		}
-		return strings.TrimSpace(m.resumeCandidates[index].SessionID)
 	case completionSlashArg:
 		candidates := m.visibleSlashArgCandidates()
 		if index >= len(candidates) {
@@ -125,8 +112,6 @@ func (m *Model) setCompletionIndex(kind completionKind, index int) {
 	switch kind {
 	case completionMention:
 		m.mentionIndex = index
-	case completionResume:
-		m.resumeIndex = index
 	case completionSlashArg:
 		m.slashArgIndex = index
 	case completionSlashCommand:
@@ -139,9 +124,6 @@ func (m *Model) activateCompletion(kind completionKind) tea.Cmd {
 	switch kind {
 	case completionMention:
 		_, cmd := m.handleMentionKey(enter)
-		return cmd
-	case completionResume:
-		_, cmd := m.handleResumeKey(enter)
 		return cmd
 	case completionSlashArg:
 		if candidate, ok := m.currentSlashArgCandidate(); ok {
@@ -170,8 +152,6 @@ func (m *Model) renderCompletion(geometry completionOverlayGeometry) string {
 	switch geometry.kind {
 	case completionMention:
 		return m.renderMentionListGeometry(geometry, m.mentionCandidates)
-	case completionResume:
-		return m.renderResumeListGeometry(geometry, m.resumeCandidates)
 	case completionSlashArg:
 		return m.renderSlashArgListGeometry(geometry, m.visibleSlashArgCandidates())
 	case completionSlashCommand:
@@ -201,8 +181,6 @@ func (m *Model) handleActiveCompletionKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 	switch m.activeCompletionKind() {
 	case completionMention:
 		return m.handleMentionKey(msg)
-	case completionResume:
-		return m.handleResumeKey(msg)
 	case completionSlashArg:
 		return m.handleSlashArgKey(msg)
 	case completionSlashCommand:

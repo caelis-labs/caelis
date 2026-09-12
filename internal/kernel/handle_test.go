@@ -1105,6 +1105,57 @@ func TestTurnHandleConcurrentApprovalSubmissionsOnlyResolveActiveHead(t *testing
 	}
 }
 
+func TestTurnHandleConcurrentApprovalSubmissionsFirstDecisionWins(t *testing.T) {
+	t.Parallel()
+
+	handle := newTestTurnHandle()
+	pending, err := handle.openPendingApproval(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const attempts = 16
+	errs := make(chan error, attempts)
+	var submits sync.WaitGroup
+	for index := range attempts {
+		outcome := fmt.Sprintf("observer-%d", index)
+		submits.Add(1)
+		go func(outcome string) {
+			defer submits.Done()
+			errs <- handle.Submit(context.Background(), SubmitRequest{
+				Kind: SubmissionKindApproval,
+				Approval: &ApprovalDecision{
+					RequestID: pending.id,
+					Outcome:   outcome,
+					Approved:  true,
+				},
+			})
+		}(outcome)
+	}
+	submits.Wait()
+	close(errs)
+
+	accepted := 0
+	for err := range errs {
+		if err == nil {
+			accepted++
+			continue
+		}
+		assertApprovalNotPending(t, err)
+	}
+	if accepted != 1 {
+		t.Fatalf("accepted approval submissions = %d, want exactly one", accepted)
+	}
+	select {
+	case decision := <-pending.decisions:
+		if decision.RequestID != pending.id || !decision.Approved {
+			t.Fatalf("winning decision = %+v, want request %q approved", decision, pending.id)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("winning approval decision was not delivered to the waiter")
+	}
+}
+
 func newTestTurnHandle() *turnHandle {
 	ref := session.SessionRef{
 		AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",

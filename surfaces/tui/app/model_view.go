@@ -55,7 +55,11 @@ func (m *Model) View() tea.View {
 	}
 
 	// 2. Hint row (contextual guidance).
-	sections = append(sections, m.placeInMainColumn(m.renderHintRow()))
+	hintRow := ""
+	if m.sessionPicker == nil {
+		hintRow = m.renderHintRow()
+	}
+	sections = append(sections, m.placeInMainColumn(hintRow))
 	sections = append(sections, "")
 
 	// 5. Composer top padding before input.
@@ -116,12 +120,12 @@ func (m *Model) View() tea.View {
 		}
 	}
 
-	if m.activePrompt != nil && m.width > 0 && m.height > 0 {
+	if m.sessionPicker == nil && m.activePrompt != nil && m.width > 0 && m.height > 0 {
 		if promptView := m.renderPromptModal(); promptView != "" {
 			normalizeBaseForOverlay()
 			view = overlayAboveBottomAreaLeft(view, promptView, m.width, m.mainColumnX()+inputHorizontalInset, maxInt(0, m.height-mainRect.y-mainRect.height+bottomHeight-m.promptModalReservedHeight()), 0)
 		}
-	} else if overlayView := m.renderInputOverlay(); overlayView != "" && m.width > 0 && m.height > 0 {
+	} else if overlayView := m.renderInputOverlay(); m.sessionPicker == nil && overlayView != "" && m.width > 0 && m.height > 0 {
 		normalizeBaseForOverlay()
 		view = overlayAboveBottomAreaLeft(view, overlayView, m.width, m.mainColumnX()+inputHorizontalInset, m.height-mainRect.y-mainRect.height+bottomHeight, 0)
 	}
@@ -145,6 +149,10 @@ func (m *Model) View() tea.View {
 			view = tuikit.OverlayCenter(view, overlay, m.width, m.height)
 		}
 	}
+	if m.sessionPicker != nil && m.width > 0 && m.height > 0 {
+		normalizeBaseForOverlay()
+		view = tuikit.OverlayCenter(view, m.renderSessionPicker(), m.width, m.height)
+	}
 	var finalTrim int
 	view, finalTrim = m.normalizeFullscreenFrameWithTopTrim(view)
 	topTrim += finalTrim
@@ -157,7 +165,7 @@ func (m *Model) View() tea.View {
 	frame.MouseMode = m.desiredMouseMode()
 	frame.ReportFocus = true
 	frame.WindowTitle = m.windowTitle()
-	if m.subagentOverlay == nil && (!m.workspace.childFocused || m.activePrompt != nil) {
+	if m.sessionPicker == nil && m.subagentOverlay == nil && (!m.workspace.childFocused || m.activePrompt != nil) {
 		if cursor := m.regularInputCursor(); cursor != nil {
 			cursor.X += m.mainColumnX()
 			cursor.Y += m.viewport.Height() + m.preComposerFixedHeight() + tuikit.ComposerPadTop
@@ -173,7 +181,7 @@ func (m *Model) View() tea.View {
 			frame.Cursor = cursor
 		}
 	}
-	if m.activePrompt == nil {
+	if m.activePrompt == nil && m.sessionPicker == nil {
 		if cursor := m.paneCursor(); cursor != nil {
 			frame.Cursor = cursor
 		}

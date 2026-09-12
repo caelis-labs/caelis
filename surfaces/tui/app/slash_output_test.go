@@ -218,6 +218,8 @@ func TestExecuteControlPromptResultForwardsSlashResultAndEvents(t *testing.T) {
 	})
 	var got []tea.Msg
 	sender := &ProgramSender{Send: func(msg tea.Msg) {
+		msg = unwrapSessionViewMessage(msg)
+
 		got = append(got, msg)
 	}}
 	result := controlprompt.Result{
@@ -252,7 +254,10 @@ func TestExecuteControlPromptResultAppliesPostCompactContextStatus(t *testing.T)
 		},
 	}
 	var got []tea.Msg
-	sender := &ProgramSender{Send: func(msg tea.Msg) { got = append(got, msg) }}
+	sender := &ProgramSender{Send: func(msg tea.Msg) {
+		msg = unwrapSessionViewMessage(msg)
+		got = append(got, msg)
+	}}
 	executeControlPromptResult(context.Background(), nil, sender, controlprompt.Result{
 		Handled: true,
 		Events: []eventstream.Envelope{{
@@ -281,7 +286,10 @@ func TestExecuteControlPromptResultDefersNewSessionStatusAfterClearAndNotice(t *
 	t.Parallel()
 
 	var got []tea.Msg
-	sender := &ProgramSender{Send: func(msg tea.Msg) { got = append(got, msg) }}
+	sender := &ProgramSender{Send: func(msg tea.Msg) {
+		msg = unwrapSessionViewMessage(msg)
+		got = append(got, msg)
+	}}
 	executeControlPromptResult(context.Background(), &modelConnectControlStub{}, sender, controlprompt.Result{
 		Handled:      true,
 		ClearHistory: true,
@@ -297,7 +305,7 @@ func TestExecuteControlPromptResultDefersNewSessionStatusAfterClearAndNotice(t *
 	if len(got) != 4 {
 		t.Fatalf("sent messages = %#v, want clear, notice, deferred status, commands", got)
 	}
-	if _, ok := got[0].(ClearHistoryMsg); !ok {
+	if _, ok := got[0].(sessionViewStartMsg); !ok {
 		t.Fatalf("first message = %#v, want ClearHistoryMsg", got[0])
 	}
 	if notice, ok := got[1].(SlashNoticeMsg); !ok || notice.Text != "new session: session-2" {
@@ -316,7 +324,10 @@ func TestExecuteControlPromptResultOmitsNewSessionSuccessNotice(t *testing.T) {
 	t.Parallel()
 
 	var got []tea.Msg
-	sender := &ProgramSender{Send: func(msg tea.Msg) { got = append(got, msg) }}
+	sender := &ProgramSender{Send: func(msg tea.Msg) {
+		msg = unwrapSessionViewMessage(msg)
+		got = append(got, msg)
+	}}
 	executeControlPromptResult(context.Background(), &modelConnectControlStub{}, sender, controlprompt.Result{
 		Handled:             true,
 		ClearHistory:        true,
@@ -333,7 +344,7 @@ func TestExecuteControlPromptResultOmitsNewSessionSuccessNotice(t *testing.T) {
 	if len(got) != 3 {
 		t.Fatalf("sent messages = %#v, want clear, deferred status, commands", got)
 	}
-	if _, ok := got[0].(ClearHistoryMsg); !ok {
+	if _, ok := got[0].(sessionViewStartMsg); !ok {
 		t.Fatalf("first message = %#v, want ClearHistoryMsg", got[0])
 	}
 	if _, ok := got[1].(statusRefreshRequestMsg); !ok {

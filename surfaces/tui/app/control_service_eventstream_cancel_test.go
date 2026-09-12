@@ -21,6 +21,7 @@ func TestRunContextCancelKeepsLiveTurnObservationUntilTerminal(t *testing.T) {
 	turn := &surfaceDetachTurn{events: make(chan eventstream.Envelope, 1)}
 	messages := make(chan tea.Msg, 8)
 	sender.Send = func(message tea.Msg) {
+		message = unwrapSessionViewMessage(message)
 		messages <- message
 	}
 	result := make(chan executeLineResult, 1)
@@ -73,6 +74,7 @@ func TestCancelRunningKeepsFeedUntilHostTerminal(t *testing.T) {
 	sender := &ProgramSender{}
 	messages := make(chan tea.Msg, 8)
 	sender.Send = func(message tea.Msg) {
+		message = unwrapSessionViewMessage(message)
 		messages <- message
 	}
 	cfg := ConfigFromControlService(service, sender, Config{
@@ -260,6 +262,8 @@ func TestForwardTurnEventStreamDetachesWithoutCancellingOnSurfaceShutdown(t *tes
 	result := make(chan executeLineResult, 1)
 	go func() {
 		result <- forwardTurnEventStream(ctx, turn, &ProgramSender{Send: func(message tea.Msg) {
+			message = unwrapSessionViewMessage(message)
+
 			messages <- message
 		}})
 	}()

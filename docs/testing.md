@@ -50,6 +50,20 @@ narrowest relevant `go test -race` package. File locking, atomic replacement,
 and WAL recovery require native Windows evidence when Windows behavior changes;
 cross-compilation is not equivalent.
 
+Guardian command approval has an opt-in live test:
+
+```bash
+CAELIS_GUARDIAN_COMMAND_E2E=1 go test ./app/gatewayapp -run '^TestGuardianCommandE2E$' -count=1 -timeout=30m -v
+```
+
+It uses locally configured DeepSeek V4 Flash with thinking disabled and GPT-5.6
+Luna without an effort override. A deterministic caller drives policy, Guardian,
+and native command execution against disposable files and loopback scripts.
+Seatbelt or Bubblewrap must be available. The test checks approval decisions,
+execution routes, file effects, and provider reasoning settings; optional
+`CAELIS_GUARDIAN_COMMAND_E2E_OUT` writes per-scenario JSON evidence.
+`CAELIS_GUARDIAN_COMMAND_E2E_REPETITIONS` repeats each scenario up to five times.
+
 ## Product scenarios
 
 `make product-acceptance` selects deterministic cross-layer tests through

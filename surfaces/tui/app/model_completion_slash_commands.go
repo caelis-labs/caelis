@@ -24,7 +24,7 @@ func (m *Model) refreshSlashCommands() {
 	if m.slashArgActive || m.isWizardActive() {
 		return
 	}
-	if len(m.mentionCandidates) > 0 || len(m.resumeCandidates) > 0 || len(m.slashArgCandidates) > 0 {
+	if len(m.mentionCandidates) > 0 || len(m.slashArgCandidates) > 0 {
 		return
 	}
 	query, start, end, skillOnly, ok := slashCompletionTargetAtCursor(m.input, m.cursor, m.turnRunning())
@@ -270,9 +270,6 @@ func (m *Model) handleSlashCommandKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 		if cmd != nil {
 			return true, cmd
 		}
-		if m.resumeActive {
-			return true, m.requestCompletionRefresh()
-		}
 		return true, nil
 	case key.Matches(msg, m.keys.Accept):
 		if len(m.slashCandidates) == 0 {
@@ -285,9 +282,6 @@ func (m *Model) handleSlashCommandKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 		m.syncTextareaFromInput()
 		if cmd != nil {
 			return true, cmd
-		}
-		if m.resumeActive {
-			return true, m.requestCompletionRefresh()
 		}
 		return true, nil
 	default:

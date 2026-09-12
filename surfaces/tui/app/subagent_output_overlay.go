@@ -151,13 +151,17 @@ func (m *Model) openSubagentOutputOverlayView(callID string, view *subagentOutpu
 	m.showPalette = false
 	m.subagentOverlay = nil
 	m.subagentRosterPressed = false
-	if view.pane == nil {
+	newPane := view.pane == nil
+	if newPane {
 		view.pane = &subagentOutputOverlayState{callID: callID, followTail: true, selectStart: textSelectionPoint{line: -1, col: -1}, selectEnd: textSelectionPoint{line: -1, col: -1}}
 	}
 	m.subagentOutputOverlay = view.pane
 	m.workspace.childFocused = true
 	m.workspace.lastCallID = callID
 	m.ensureSubagentEditor(view.pane)
+	if newPane {
+		m.restoreChildSessionDraft(view.pane)
+	}
 	m.resizeWorkspace()
 
 	view.prepareVisibleRender()

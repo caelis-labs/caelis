@@ -185,7 +185,6 @@ func (m *Model) startWizard(def *WizardDef) tea.Cmd {
 
 func (m *Model) startWizardWithQuery(def *WizardDef, initialQuery string) tea.Cmd {
 	m.clearMention()
-	m.clearResume()
 	m.clearSlashCompletion()
 
 	m.wizard = &wizardRuntime{

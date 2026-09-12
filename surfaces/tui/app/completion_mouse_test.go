@@ -250,16 +250,6 @@ func TestCompletionMouseHoverSupportsSharedOverlayKinds(t *testing.T) {
 			selected: func(model *Model) int { return model.mentionIndex },
 		},
 		{
-			name: "resume",
-			open: func(model *Model) {
-				model.resumeActive = true
-				model.resumeCandidates = []ResumeCandidate{
-					{SessionID: "alpha"}, {SessionID: "bravo"},
-				}
-			},
-			selected: func(model *Model) int { return model.resumeIndex },
-		},
-		{
 			name: "slash argument",
 			open: func(model *Model) {
 				model.setInputText("/model ")
@@ -303,30 +293,6 @@ func TestCompletionMouseClickAppliesSharedOverlayKinds(t *testing.T) {
 		clickCompletionCandidate(t, model, 1)
 		if got := model.textarea.Value(); got != "@bravo.go " {
 			t.Fatalf("mention click = %q, want @bravo.go ", got)
-		}
-	})
-
-	t.Run("resume", func(t *testing.T) {
-		var submitted []Submission
-		model := newCompletionMouseTestModel(t, 120, 40, Config{
-			ExecuteLine: func(submission Submission) TaskResultMsg {
-				submitted = append(submitted, submission)
-				return TaskResultMsg{}
-			},
-		})
-		model.setInputText("/resume ")
-		model.syncTextareaFromInput()
-		model.resumeActive = true
-		model.resumeCandidates = []ResumeCandidate{
-			{SessionID: "alpha"}, {SessionID: "bravo"},
-		}
-
-		cmd := clickCompletionCandidate(t, model, 1)
-		if cmd == nil || !findAndRunTaskResult(cmd(), model) {
-			t.Fatal("resume click did not execute the existing Enter path")
-		}
-		if len(submitted) != 1 || submitted[0].Text != "/resume bravo" {
-			t.Fatalf("resume submissions = %#v, want /resume bravo", submitted)
 		}
 	})
 

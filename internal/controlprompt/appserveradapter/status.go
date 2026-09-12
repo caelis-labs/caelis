@@ -101,9 +101,6 @@ func (a *SessionClientAdapter) ensureClientSessionForWork(ctx context.Context, o
 	defer a.sessionChangeMu.Unlock()
 	if sessionID := a.clientSessionID(); sessionID != "" {
 		state, err := a.inspectWorkSession(ctx, sessionID)
-		if err == nil {
-			err = a.ensureSessionPresence(state)
-		}
 		return state, err
 	}
 	result, err := a.sessionClient.CreateSession(ctx, appserver.CreateSessionRequest{
@@ -128,33 +125,7 @@ func (a *SessionClientAdapter) ensureClientSessionForWork(ctx context.Context, o
 	}
 	a.preferredID = ""
 	a.setClientSession(state.SessionID, state.CWD)
-	if err := a.ensureSessionPresence(state); err != nil {
-		return appserver.SessionState{}, err
-	}
 	return state, nil
-}
-
-func (a *SessionClientAdapter) ensureSessionPresence(state appserver.SessionState) error {
-	if !a.tracksSessionPresence() {
-		return nil
-	}
-	a.activeMu.Lock()
-	presence := a.presence
-	a.activeMu.Unlock()
-	if presence != nil {
-		select {
-		case <-presence.done:
-			a.replaceSessionPresence(nil)
-		default:
-			return nil
-		}
-	}
-	presence, err := a.openSessionPresence(state)
-	if err != nil {
-		return err
-	}
-	a.replaceSessionPresence(presence)
-	return nil
 }
 
 func (a *SessionClientAdapter) inspectWorkSession(ctx context.Context, sessionID string) (appserver.SessionState, error) {

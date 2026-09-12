@@ -719,14 +719,17 @@ func TestPromptParticipantCancelCancelsRuntimeRunner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
+	recorder := newTestTurnEventRecorder()
 	result, err := gw.PromptParticipant(context.Background(), PromptParticipantRequest{
 		SessionRef:    activeSession.SessionRef,
 		ParticipantID: "side-1",
 		Input:         "hello",
+		Observer:      recorder,
 	})
 	if err != nil {
 		t.Fatalf("PromptParticipant() error = %v", err)
 	}
+	assertTurnStarted(t, recorder.waitNext(t), result.Handle)
 	select {
 	case <-runner.eventsStarted:
 	case <-time.After(2 * time.Second):
@@ -1819,8 +1822,13 @@ func TestBeginTurnLoadsSessionResolvesIntentRunsRuntimeAndPublishesEvents(t *tes
 	}
 	_ = collectHandleEvents(t, result.Handle)
 	got := recorder.snapshot()
-	if len(got) == 0 || got[0].EventID != "e1" || eventstream.UpdateType(got[0].Update) != eventstream.UpdateAgentMessage {
-		t.Fatalf("published events = %#v, want assistant event e1", got)
+	if len(got) != 3 {
+		t.Fatalf("published events = %#v, want running, assistant, terminal", got)
+	}
+	started := got[0]
+	assertTurnStarted(t, started, result.Handle)
+	if got[1].EventID != "e1" || eventstream.UpdateType(got[1].Update) != eventstream.UpdateAgentMessage || !eventstream.IsTurnTerminalLifecycle(got[2]) {
+		t.Fatalf("published events = %#v, want assistant event e1 then terminal", got)
 	}
 	if rt.lastReq.SessionRef != activeSession.SessionRef || rt.lastReq.Input != "hello" {
 		t.Fatalf("runtime req = %+v", rt.lastReq)
@@ -2210,6 +2218,7 @@ func TestBeginTurnBridgesApprovalRequestsIntoHandleEvents(t *testing.T) {
 		t.Fatalf("BeginTurn() error = %v", err)
 	}
 
+	assertTurnStarted(t, recorder.waitNext(t), result.Handle)
 	first := recorder.waitNext(t)
 	if first.Kind != eventstream.KindRequestPermission {
 		t.Fatalf("first event kind = %q, want request_permission", first.Kind)
@@ -2260,13 +2269,14 @@ func TestBeginTurnPublishesChildApprovalThroughControlQueue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginTurn() error = %v", err)
 	}
+	assertTurnStarted(t, recorder.waitNext(t), result.Handle)
 	permission := recorder.waitNext(t)
 	if permission.ApprovalRequestID == "" {
 		t.Fatal("Control-published child approval has no request id")
 	}
 	assertChildPermissionEnvelope(t, permission, permission.ApprovalRequestID, "task-1", "child.txt")
-	if events := recorder.snapshot(); len(events) != 1 || events[0].ApprovalRequestID != permission.ApprovalRequestID {
-		t.Fatalf("gateway direct approval events = %#v; want one Control-owned permission", events)
+	if events := recorder.snapshot(); len(events) != 2 || events[1].ApprovalRequestID != permission.ApprovalRequestID {
+		t.Fatalf("gateway direct approval events = %#v; want running then one Control-owned permission", events)
 	}
 
 	if err := result.Handle.Submit(context.Background(), SubmitRequest{
@@ -2585,6 +2595,7 @@ func TestBeginTurnDefaultManualApprovalModePromptsClient(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginTurn() error = %v", err)
 	}
+	assertTurnStarted(t, recorder.waitNext(t), result.Handle)
 	first := recorder.waitNext(t)
 	if first.Kind != eventstream.KindRequestPermission {
 		t.Fatalf("first event kind = %q, want request_permission from default manual mode", first.Kind)
@@ -2636,6 +2647,7 @@ func TestBeginTurnSessionApprovalModeOverridesDefaultManual(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginTurn() error = %v", err)
 	}
+	assertTurnStarted(t, recorder.waitNext(t), result.Handle)
 	first := recorder.waitNext(t)
 	if first.Kind != eventstream.KindApprovalReview {
 		t.Fatalf("first event kind = %q, want approval_review from session auto-review override", first.Kind)
@@ -2721,6 +2733,7 @@ func TestBeginTurnRequestModeManualIgnoredUnderAutoReview(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginTurn() error = %v", err)
 	}
+	assertTurnStarted(t, recorder.waitNext(t), result.Handle)
 	first := recorder.waitNext(t)
 	if first.Kind != eventstream.KindApprovalReview {
 		t.Fatalf("first event kind = %q, want auto approval_review", first.Kind)
@@ -2770,6 +2783,7 @@ func TestBeginTurnApprovalModeSnapshotErrorFailsTurn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginTurn() error = %v", err)
 	}
+	assertTurnStarted(t, recorder.waitNext(t), result.Handle)
 	first := recorder.waitNext(t)
 	if first.Kind != eventstream.KindError || first.Err == nil {
 		t.Fatalf("first event = %+v, want eventstream error on state read failure", first)
@@ -2819,9 +2833,11 @@ func TestBeginTurnAutoReviewDenialDoesNotInterruptTurn(t *testing.T) {
 	if got := rt.executionCount(); got != 0 {
 		t.Fatalf("denied executor calls = %d, want 0", got)
 	}
-	if len(events) < 2 {
-		t.Fatalf("events len = %d, want in-progress and denied review", len(events))
+	if len(events) < 3 {
+		t.Fatalf("events len = %d, want running, in-progress and denied review", len(events))
 	}
+	assertTurnStarted(t, events[0], result.Handle)
+	events = events[1:]
 	if events[0].Kind != eventstream.KindApprovalReview || events[0].ApprovalReview == nil {
 		t.Fatalf("first event = %#v, want approval_review", events[0])
 	}
@@ -2873,6 +2889,7 @@ func TestBeginTurnAutoReviewCancelPublishesTerminalReview(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BeginTurn() error = %v", err)
 	}
+	assertTurnStarted(t, recorder.waitNext(t), result.Handle)
 	first := recorder.waitNext(t)
 	if first.Kind != eventstream.KindApprovalReview || first.ApprovalReview == nil || first.ApprovalReview.Status != string(ApprovalReviewStatusInProgress) {
 		t.Fatalf("first event = %#v, want in-progress approval review", first)
