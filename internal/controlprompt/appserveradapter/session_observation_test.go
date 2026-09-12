@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
@@ -48,6 +49,8 @@ func TestSessionObservationSurvivesCommandContextAndTracksLaterTurns(t *testing.
 		env := eventstream.Envelope{Kind: eventstream.KindLifecycle, SessionID: "session-1", Scope: eventstream.ScopeMain,
 			HandleID: "h-" + turn, RunID: "r-" + turn, TurnID: "t-" + turn,
 			Lifecycle: &eventstream.Lifecycle{State: eventstream.LifecycleStateRunning}}
+		client.state = appserver.SessionState{SessionID: "session-1", Controller: session.ControllerBinding{EpochID: "epoch-" + turn},
+			Run: appserver.RunState{Active: true, HandleID: env.HandleID, RunID: env.RunID, TurnID: env.TurnID}}
 		r.ObserveEvent(env)
 		if !adapter.CanSubmitRunningPrompt() {
 			t.Fatal("later Turn is not addressable by the observer")
@@ -86,12 +89,20 @@ func TestSessionObservationNeverRetargetsInputWhileRefreshingRevision(t *testing
 		return eventstream.Envelope{Kind: eventstream.KindLifecycle, SessionID: "session-1", HandleID: "h", RunID: "r-" + turn, TurnID: turn, Lifecycle: &eventstream.Lifecycle{State: eventstream.LifecycleStateRunning}}
 	}
 	r.ObserveEvent(running("old"))
+	client.state = appserver.SessionState{SessionID: "session-1", Controller: session.ControllerBinding{EpochID: "old-epoch"},
+		Run: appserver.RunState{Active: true, HandleID: "h", RunID: "r-old", TurnID: "old"}}
+	if err := r.steer(context.Background(), "pin old controller", "", nil); err != nil {
+		t.Fatal(err)
+	}
 	client.inspectHook = func() { r.ObserveEvent(running("new")) }
 	if err := r.steer(context.Background(), "old turn input", "", nil); err != nil {
 		t.Fatal(err)
 	}
 	if client.steer.Target.TurnID != "old" {
 		t.Fatalf("input retargeted to %q", client.steer.Target.TurnID)
+	}
+	if client.steer.ExpectedControllerEpoch != "old-epoch" {
+		t.Fatal("old input adopted a different controller epoch")
 	}
 }
 
@@ -131,7 +142,7 @@ func TestSessionSurfaceCloseDoesNotCancelLateAcceptedTurn(t *testing.T) {
 	turn := &lateObservationTurn{done: make(chan struct{})}
 	result := make(chan error, 1)
 	go func() {
-		_, err := adapter.startAdmittedTurn(context.Background(), func(context.Context) (appserver.TargetTurn, error) {
+		_, err := adapter.startAdmittedTurn(context.Background(), func(context.Context) (appserver.SessionState, error) { return appserver.SessionState{}, nil }, func(context.Context, appserver.SessionState) (appserver.TargetTurn, error) {
 			close(started)
 			<-release
 			return turn, nil
@@ -163,7 +174,7 @@ func TestExplicitSurfaceInterruptCancelsLateAcceptedTurn(t *testing.T) {
 	turn := &lateObservationTurn{done: make(chan struct{})}
 	result := make(chan error, 1)
 	go func() {
-		_, err := adapter.startAdmittedTurn(ctx, func(context.Context) (appserver.TargetTurn, error) {
+		_, err := adapter.startAdmittedTurn(ctx, func(context.Context) (appserver.SessionState, error) { return appserver.SessionState{}, nil }, func(context.Context, appserver.SessionState) (appserver.TargetTurn, error) {
 			close(started)
 			<-release
 			return turn, nil

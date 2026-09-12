@@ -111,7 +111,7 @@ func (a *SessionClientAdapter) Close() error {
 	}
 	a.sessionChangeMu.Lock()
 	defer a.sessionChangeMu.Unlock()
-	a.cancelTurnAdmissions(nil)
+	a.cancelTurnAdmissions(nil, "")
 	a.closeActiveTurn()
 	return nil
 }
@@ -293,10 +293,14 @@ func (r *clientSessionReconnect) writeBase(ctx context.Context, prefix string, o
 	if err != nil {
 		return appserver.WriteBase{}, err
 	}
+	epoch, err := r.observedControllerEpoch(observed, state)
+	if err != nil {
+		return appserver.WriteBase{}, err
+	}
 	revision := state.Revision
 	return appserver.WriteBase{
 		OperationID: prefix + "-" + uuid.NewString(), SessionID: observed.SessionID,
-		ExpectedRevision: &revision, ExpectedControllerEpoch: strings.TrimSpace(observed.Controller.EpochID),
+		ExpectedRevision: &revision, ExpectedControllerEpoch: epoch,
 	}, nil
 }
 
