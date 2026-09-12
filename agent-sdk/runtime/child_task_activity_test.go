@@ -60,7 +60,8 @@ func TestChildInputAdmissionDoesNotAdvanceTask(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertChildActivityEntry(t, r, task, before.Revision, 1, taskStringValue(before.Metadata[subagentActivityIDMeta]), false)
-	if err := req.Output.ObserveTaskOutput(t.Context(), output.Event{Text: "second", Running: true}); err != nil {
+	// Explicit producer lifecycle starts the activity before any content.
+	if err := req.Output.ObserveTaskOutput(t.Context(), output.Event{State: "running", Running: true}); err != nil {
 		t.Fatal(err)
 	}
 	deadline := time.Now().Add(2 * time.Second)
@@ -163,6 +164,9 @@ func TestChildActivitySidecarFinalSurvivesModelContextRoundTrip(t *testing.T) {
 	}
 	_, observer, completion, err := r.prepareChildTaskOutput(t.Context(), task)
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := observer.ObserveTaskOutput(t.Context(), output.Event{State: "running", Running: true}); err != nil {
 		t.Fatal(err)
 	}
 	if err := observer.ObserveTaskOutput(t.Context(), output.Event{Text: "disposable partial trace", Running: true}); err != nil {

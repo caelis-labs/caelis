@@ -179,8 +179,10 @@ When the Host dispatches that input, the recipient sees a standard ACP
 lives under `_meta.caelis.agent_communication`. Control derives
 `Envelope.AgentCommunicationSource` from the typed event actor; Surfaces use
 that field to identify Agent input. External ACP ingress removes the reserved
-marker before live or canonical projection. Later collaborator output alone
-advances Task activity.
+marker before live or canonical projection. Successful dispatch of a fresh child
+prompt emits a producer running observation, so Task activity includes the wait
+for its first content update. Queued mail and steering within a running Turn do
+not start another activity.
 
 The `subagent-workspace-v1` Host capability covers child input, receipts, layout
 preferences, and child model/context descriptors. Interactive attach requires
@@ -216,7 +218,7 @@ authorized input; both Agent mail and user input reuse that loaded connection.
 Recovery resolves the same Session Runtime used by input admission. An attached
 Task reader retains that Runtime independently of the parent Session feed.
 Each prompt retains the existing Host work reference through producer settlement,
-including the interval before its first output advances the Task directory.
+including the interval before its running observation reaches the Task directory.
 Built-in managed children use the same exact parent/Task authorization for load
 and resume; a successful load retains connection ownership for later prompts.
 

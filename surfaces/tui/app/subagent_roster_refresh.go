@@ -173,7 +173,7 @@ func (m *Model) handleSubagentDirectorySnapshot(msg subagentDirectorySnapshotMsg
 	// Directory metadata never mutates transcript content. It only starts or
 	// stops the content subscription owned by an already-visible overlay.
 	m.reconcileSubagentOutputTaskStreams()
-	return m.requestSubagentOutputRender()
+	return tea.Batch(m.requestSubagentOutputRender(), m.resumeRunningAnimationIfNeeded())
 }
 
 func (m *Model) handleSubagentDirectoryClosed(msg subagentDirectoryClosedMsg) tea.Cmd {

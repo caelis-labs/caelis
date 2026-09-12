@@ -1281,14 +1281,12 @@ func approvalReviewStatusStyle(ctx BlockRenderContext, status string) lipgloss.S
 	}
 }
 
+// Empty running Turns leave progress to the hint area; initialization and
+// approval retain their explicit transcript notices.
 func participantTurnEmptyPlaceholder(status string) string {
 	switch strings.ToLower(strings.TrimSpace(status)) {
-	case "", "running":
-		return "  · waiting for agent output"
 	case "initializing":
 		return "  · initializing session"
-	case "prompting":
-		return ""
 	case "waiting_approval":
 		return "  · waiting approval"
 	default:

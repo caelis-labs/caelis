@@ -697,7 +697,10 @@ func (r *Runner) submitIdleChildInput(
 		slot.opMu.Unlock()
 		return agent.ChildInputResult{}, dispatchErr
 	}
-	slot.settleInput(run, true, acceptedInput)
+	// A dispatched fresh prompt is running even before the Agent emits content.
+	// Keep that producer state distinct from accepted input and mailbox receipts.
+	started := &output.Event{State: string(delegation.StateRunning), Running: true, OccurredAt: r.clock()}
+	slot.settleInput(run, true, append([]*output.Event{started}, acceptedInput...))
 	go r.drivePreparedPrompt(responseCtx, run, prepared, prompt, fence)
 	slot.opMu.Unlock()
 	return agent.ChildInputResult{ActivityID: activityID, StartedActivity: true}, nil

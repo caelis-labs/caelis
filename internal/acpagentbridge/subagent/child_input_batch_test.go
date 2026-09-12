@@ -44,18 +44,26 @@ func TestIdleChildBatchStartsOnePromptAndProjectsEverySource(t *testing.T) {
 	}
 	frames, terminal := waitChildActivityFramesUntilTerminalFor(t, ctx, events, result.ActivityID)
 	var accepted int
+	running := 0
 	for _, frame := range frames {
+		if isProducerRunningEvidence(frame) {
+			running++
+			continue
+		}
 		if communication := session.ProtocolAgentCommunicationOf(frame.Event); communication != nil {
+			if accepted == 0 && running != 1 {
+				t.Fatalf("accepted batch input before producer running evidence: %#v", frames)
+			}
 			if accepted >= len(inputs) || communication.Text != inputs[accepted].DisplayInput || frame.Event.Actor.ID != inputs[accepted].Source.ID {
 				t.Fatalf("source/order mismatch: %#v", frame.Event)
 			}
 			accepted++
-		} else if frame.Event.Text != "prompt output 2" {
+		} else if frame.Event == nil || frame.Event.Text != "prompt output 2" {
 			t.Fatalf("unexpected prompt: %#v", frame.Event)
 		}
 	}
-	if accepted != 2 || len(frames) != 3 || terminal.Result.State != delegation.StateCompleted {
-		t.Fatalf("frames %d accepted %d terminal %#v", len(frames), accepted, terminal.Result)
+	if running != 1 || accepted != 2 || len(frames) != 4 || terminal.Result.State != delegation.StateCompleted {
+		t.Fatalf("running %d frames %d accepted %d terminal %#v", running, len(frames), accepted, terminal.Result)
 	}
 	encoded, _ := json.Marshal(buildAgentCommunicationPrompt(agent.ChildInputRequest{Messages: inputs}))
 	text := string(encoded)
