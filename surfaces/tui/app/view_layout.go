@@ -90,6 +90,10 @@ func (m *Model) syncViewportContent() {
 		m.viewportDirty = true
 		return
 	}
+	anchor := m.viewportAnchorAt(m.viewportVisibleOffset())
+	selectionStart := m.viewportAnchorAt(m.selectionStart.line)
+	selectionEnd := m.viewportAnchorAt(m.selectionEnd.line)
+	selected := m.selecting || m.hasSelectionRange()
 	m.viewportSyncPending = false
 	m.offscreenViewportDirty = false
 	m.offscreenViewportTickScheduled = false
@@ -110,6 +114,7 @@ func (m *Model) syncViewportContent() {
 			if m.isViewportFollowTail() && !m.viewportContentStale {
 				m.viewport.GotoBottom()
 			}
+			m.materializeVisibleViewport()
 			return
 		}
 		m.rebuildViewportLineCaches(ctx)
@@ -119,6 +124,7 @@ func (m *Model) syncViewportContent() {
 	}
 	if !incremental {
 		m.rebuildViewportRenderCache(ctx)
+		m.materializeViewportEntries(ctx, anchor)
 		m.rebuildViewportLineCaches(ctx)
 		m.viewportStructureDirty = false
 		m.diag.ViewportFullSyncs++
@@ -136,6 +142,17 @@ func (m *Model) syncViewportContent() {
 	m.lastViewportStreamLine = m.streamLine
 
 	m.renderViewportContent(syncReason, activeTailOnly)
+	if !m.isViewportFollowTail() {
+		m.viewport.SetYOffset(m.viewportAnchorLine(anchor, m.viewport.YOffset()))
+	}
+	if selected {
+		m.selectionStart.line = m.viewportAnchorLine(selectionStart, m.selectionStart.line)
+		m.selectionEnd.line = m.viewportAnchorLine(selectionEnd, m.selectionEnd.line)
+		m.bumpViewportSelectionVersion()
+	}
+	if incremental {
+		m.materializeVisibleViewport()
+	}
 }
 
 func (m *Model) dirtyViewportBlocksOnlyActiveNarrative() bool {

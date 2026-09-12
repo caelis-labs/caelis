@@ -639,6 +639,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.materializeViewportContentIfStale()
 		m.viewport.GotoBottom()
+		m.materializeVisibleViewport()
 		return m, tea.Batch(m.touchViewportScrollbar(), m.resumeRunningAnimationIfNeeded())
 	case key.Matches(msg, m.keys.HalfPageUp):
 		m.materializeViewportContentIfStale()

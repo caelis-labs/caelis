@@ -203,6 +203,8 @@ func (m *Model) scrollViewportSelectionBy(delta int, mouse tea.Mouse) (bool, tea
 		return false, nil
 	}
 	m.viewport.SetYOffset(next)
+	m.setViewportFollowState(viewportSelecting)
+	m.materializeVisibleViewport()
 	point, ok := m.mousePointToContentPoint(mouse.X, mouse.Y, true)
 	if ok && m.selectionEnd != point {
 		m.selectionEnd = point

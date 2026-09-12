@@ -563,7 +563,7 @@ func TestWelcomeClickExecutesOnceAndTracksViewportOffset(t *testing.T) {
 		model := newWelcomeTestModel(t, size.width, size.height, Config{InitialLogs: logs})
 		model.syncViewportContent()
 		model.viewport.SetYOffset(1)
-		model.setViewportFollowState(viewportPinnedHistory)
+		model.refreshViewportFollowStateFromOffset()
 
 		point := welcomeActionMousePoint(t, model, welcomeActionTokenConnect)
 		_, _ = model.Update(tea.MouseClickMsg(point))

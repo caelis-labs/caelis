@@ -302,6 +302,15 @@ only after their end marker, preserve identity/relation fields, keep transcript
 state non-durable, treat terminal/approval state monotonically, and avoid
 Runtime, policy, Session-store, spool-file, or Host implementation dependencies.
 
+The TUI main transcript keeps the newest two logical Turns fully detailed. Older
+terminal Turns display user and assistant narrative without completed tool,
+reasoning, or plan details; nonterminal blocks and standalone child panes remain
+fully detailed. This presentation policy does not remove document events or
+change canonical history or model context. Main-transcript layout materializes
+visible blocks and a scroll margin, retaining estimated heights outside that
+window. Display-column selections stay tied to measured rows; width changes clear
+them before reflow.
+
 Projection changes require whole-Envelope live/replay parity. Changes affecting
 persistence or model visibility also require a round trip proving rebuilt model
 context matches Runtime-produced context.

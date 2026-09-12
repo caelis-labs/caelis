@@ -13,6 +13,10 @@ import (
 )
 
 func (m *Model) handleTranscriptEventsMsg(msg TranscriptEventsMsg) (tea.Model, tea.Cmd) {
+	// A replay batch has one visible layout, not one intermediate layout per
+	// user/tool/lifecycle event. The scheduler can nest this same transaction.
+	m.beginDeferredViewportSync()
+	defer m.endDeferredViewportSync()
 	// Preserve projection order within replay batches: a Spawn owner must be
 	// observed before a later SendMessage resolves that owner's public handle.
 	// Decorating the whole batch first would permanently erase the structured

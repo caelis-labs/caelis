@@ -91,7 +91,7 @@ func TestThemeApplyPreviewKeepsContentAndRepaintsColors(t *testing.T) {
 	baselineFrame := m.View().Content
 	baselineStyled := joinedViewportStyled(m)
 	baselinePlain := joinedViewportPlain(m)
-	if !strings.Contains(baselinePlain, "请排查场景 1") || !strings.Contains(baselinePlain, "长记录 89") || !strings.Contains(baselinePlain, "remote_script_test.go") {
+	if !strings.Contains(baselinePlain, "长记录 89") || !strings.Contains(baselinePlain, "remote_script_test.go") {
 		t.Fatal("fixture missing historical markdown or mutation diff")
 	}
 
@@ -122,6 +122,19 @@ func TestThemeApplyPreviewKeepsContentAndRepaintsColors(t *testing.T) {
 	applySelectedThemePreview(m, "auto")
 	if themeApplyPreviewSink != baselineFrame || joinedViewportStyled(m) != baselineStyled || joinedViewportPlain(m) != baselinePlain {
 		t.Fatal("restoring auto left stale colors or content")
+	}
+
+	// Old turns are laid out on demand, not retained in the tail's row cache.
+	m.viewport.SetYOffset(0)
+	m.refreshViewportFollowStateFromOffset()
+	historyFrame := m.View().Content
+	historyPlain := joinedViewportPlain(m)
+	if !strings.Contains(historyPlain, "请排查场景 1") {
+		t.Fatal("scrolling to history lost the earliest user message")
+	}
+	applySelectedThemePreview(m, "nord")
+	if themeApplyPreviewSink == historyFrame || ansi.Strip(themeApplyPreviewSink) != ansi.Strip(historyFrame) {
+		t.Fatal("on-demand history did not repaint with the selected theme")
 	}
 }
 
