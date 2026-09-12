@@ -123,6 +123,11 @@ thought/tool/plan/lifecycle/notice boundary ends the run and clears both content
 and active identity; later text starts a new run. Identity is never carried
 through a semantic barrier.
 
+Surface live append targets are run-scoped even when an Agent reuses a message
+ID. A typed canonical final repairs the latest matching run in place; this does
+not reopen that run or interrupt newer output. Updating an existing tool or
+approval row, or a usage gauge, is not a new narrative boundary.
+
 One live Turn has one content source:
 
 - live Assistant and thought text comes from source chunks;

@@ -453,18 +453,23 @@ func TestMainACPIdentifiedFinalStaysWithPreToolMessage(t *testing.T) {
 	block := NewMainACPTurnBlock("session-1")
 	block.AppendStreamEvent(SEAssistant, "Before tool.", narrativeTestSource())
 	block.UpdateToolWithMeta("command-1", "RunCommand", "pwd", "ok", true, false, ToolUpdateMeta{})
-	block.AppendStreamEvent(SEAssistant, "After", narrativeTestSource())
+	nextSource := newNarrativeSourceIdentity("next-message", "next-event", "next-projection")
+	block.AppendStreamEvent(SEAssistant, "After", nextSource)
 
-	block.ReplaceFinalStreamEvent(SEAssistant, "Before tool.\n\nAfter tool done.", narrativeTestSource())
+	block.ReplaceFinalStreamEvent(SEAssistant, "Before tool final.", narrativeTestSource())
+	block.AppendStreamEvent(SEAssistant, " tool.", nextSource)
 
-	if len(block.Events) != 2 {
-		t.Fatalf("events = %#v, want one identified assistant message followed by tool", block.Events)
+	if len(block.Events) != 3 {
+		t.Fatalf("events = %#v, want two assistant messages separated by tool", block.Events)
 	}
-	if block.Events[0].Kind != SEAssistant || block.Events[0].Text != "Before tool.\n\nAfter tool done." {
+	if block.Events[0].Kind != SEAssistant || block.Events[0].Text != "Before tool final." {
 		t.Fatalf("assistant event = %#v, want canonical final on its original owner", block.Events[0])
 	}
 	if block.Events[1].Kind != SEToolCall || block.Events[1].Name != "RunCommand" {
 		t.Fatalf("tool event = %#v, want RunCommand after its owning assistant message", block.Events[1])
+	}
+	if block.Events[2].Kind != SEAssistant || block.Events[2].Text != "After tool." {
+		t.Fatalf("next event = %#v, want late final to preserve the current live run", block.Events[2])
 	}
 }
 
@@ -622,18 +627,23 @@ func TestParticipantIdentifiedFinalStaysWithPreToolMessage(t *testing.T) {
 	block := NewParticipantTurnBlock("session-1", "@self")
 	block.AppendStreamEvent(SEAssistant, "Before tool.", narrativeTestSource())
 	block.UpdateToolWithMeta("command-1", "RunCommand", "pwd", "ok", true, false, ToolUpdateMeta{})
-	block.AppendStreamEvent(SEAssistant, "After", narrativeTestSource())
+	nextSource := newNarrativeSourceIdentity("next-message", "next-event", "next-projection")
+	block.AppendStreamEvent(SEAssistant, "After", nextSource)
 
-	block.ReplaceFinalStreamEvent(SEAssistant, "Before tool.\n\nAfter tool done.", narrativeTestSource())
+	block.ReplaceFinalStreamEvent(SEAssistant, "Before tool final.", narrativeTestSource())
+	block.AppendStreamEvent(SEAssistant, " tool.", nextSource)
 
-	if len(block.Events) != 2 {
-		t.Fatalf("events = %#v, want one identified assistant message followed by tool", block.Events)
+	if len(block.Events) != 3 {
+		t.Fatalf("events = %#v, want two assistant messages separated by tool", block.Events)
 	}
-	if block.Events[0].Kind != SEAssistant || block.Events[0].Text != "Before tool.\n\nAfter tool done." {
+	if block.Events[0].Kind != SEAssistant || block.Events[0].Text != "Before tool final." {
 		t.Fatalf("assistant event = %#v, want canonical final on its original owner", block.Events[0])
 	}
 	if block.Events[1].Kind != SEToolCall || block.Events[1].Name != "RunCommand" {
 		t.Fatalf("tool event = %#v, want RunCommand after its owning assistant message", block.Events[1])
+	}
+	if block.Events[2].Kind != SEAssistant || block.Events[2].Text != "After tool." {
+		t.Fatalf("next event = %#v, want late final to preserve the current live run", block.Events[2])
 	}
 }
 
