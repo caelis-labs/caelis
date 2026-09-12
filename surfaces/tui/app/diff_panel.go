@@ -62,16 +62,20 @@ func parseDiffPanelText(text string) diffPanelModel {
 	text = strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", "\n"), "\r", "\n")
 	model := diffPanelModel{}
 	oldNo, newNo := 0, 0
+	oldRemaining, newRemaining := 0, 0
 	inHunk, seenHunk := false, false
-	path := ""
+	path, title := "", ""
 	for _, raw := range strings.Split(strings.TrimRight(text, "\n"), "\n") {
 		if strings.HasPrefix(raw, "@@") {
 			oldStart, oldCount, newStart, newCount, ok := parseDiffHunkHeader(raw)
 			if ok {
-				if seenHunk {
+				if !seenHunk && title != "" {
+					model.Lines = append(model.Lines, diffPanelLine{Kind: diffPanelLineMeta, Text: title, Path: path})
+				} else if seenHunk {
 					model.Lines = append(model.Lines, diffPanelLine{Kind: diffPanelLineMeta})
 				}
 				oldNo, newNo = oldStart, newStart
+				oldRemaining, newRemaining = oldCount, newCount
 				model.MaxOld = max(model.MaxOld, lastDiffRangeLine(oldStart, oldCount))
 				model.MaxNew = max(model.MaxNew, lastDiffRangeLine(newStart, newCount))
 				inHunk, seenHunk = true, true
@@ -79,7 +83,12 @@ func parseDiffPanelText(text string) diffPanelModel {
 			}
 		}
 		if strings.HasPrefix(raw, "diff --git ") {
-			inHunk = false
+			inHunk, seenHunk = false, false
+			path, title = "", ""
+			continue
+		}
+		if strings.HasPrefix(raw, "\\") {
+			model.Lines = append(model.Lines, diffPanelLine{Kind: diffPanelLineMeta, Text: strings.TrimPrefix(raw, "\\ ")})
 			continue
 		}
 		if !inHunk {
@@ -87,21 +96,23 @@ func parseDiffPanelText(text string) diffPanelModel {
 				continue
 			}
 			if strings.HasPrefix(raw, "--- ") {
+				path = diffPanelFilePath(strings.TrimPrefix(raw, "--- "))
+				title, seenHunk = path, false
 				continue
 			}
 			if strings.HasPrefix(raw, "+++ ") {
-				path = strings.TrimPrefix(raw, "+++ ")
+				if nextPath := diffPanelFilePath(strings.TrimPrefix(raw, "+++ ")); nextPath != "/dev/null" {
+					path = nextPath
+				}
+				title = path
 			} else if candidate, _, _, ok := tuikit.SplitDiffCountTokens(raw); ok {
-				path = candidate
+				path, title, seenHunk = candidate, strings.TrimSpace(raw), false
 			} else {
-				path = strings.TrimSpace(raw)
+				path, title, seenHunk = strings.TrimSpace(raw), strings.TrimSpace(raw), false
 			}
 			continue
 		}
-		if raw == "" || strings.HasPrefix(raw, "\\") {
-			if strings.HasPrefix(raw, "\\") {
-				model.Lines = append(model.Lines, diffPanelLine{Kind: diffPanelLineMeta, Text: strings.TrimPrefix(raw, "\\ ")})
-			}
+		if raw == "" {
 			continue
 		}
 		line := diffPanelLine{Marker: raw[0], Text: raw[1:], Path: path}
@@ -109,22 +120,40 @@ func parseDiffPanelText(text string) diffPanelModel {
 		case '+':
 			line.Kind, line.NewNo = diffPanelLineAdd, newNo
 			newNo++
+			newRemaining--
 		case '-':
 			line.Kind, line.OldNo = diffPanelLineRemove, oldNo
 			oldNo++
+			oldRemaining--
 		case ' ':
 			line.Kind, line.OldNo, line.NewNo = diffPanelLineContext, oldNo, newNo
 			oldNo++
 			newNo++
+			oldRemaining--
+			newRemaining--
 		default:
 			model.Lines = append(model.Lines, diffPanelLine{Kind: diffPanelLineMeta, Text: raw})
 			continue
 		}
+		// Only complete hunks admit new file headers. Source lines can contain
+		// strings such as "second.py +1 -1" or "+++ b/name" verbatim.
+		inHunk = oldRemaining > 0 || newRemaining > 0
 		model.MaxOld = max(model.MaxOld, line.OldNo)
 		model.MaxNew = max(model.MaxNew, line.NewNo)
 		model.Lines = append(model.Lines, line)
 	}
 	return model
+}
+
+func diffPanelFilePath(raw string) string {
+	path, _, _ := strings.Cut(raw, "\t")
+	if unquoted, err := strconv.Unquote(path); err == nil {
+		path = unquoted
+	}
+	if strings.HasPrefix(path, "a/") || strings.HasPrefix(path, "b/") {
+		return path[2:]
+	}
+	return path
 }
 
 func parseDiffHunkHeader(header string) (oldStart, oldCount, newStart, newCount int, ok bool) {

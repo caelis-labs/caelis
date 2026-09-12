@@ -14,7 +14,7 @@ const richDiffFixture = "storage.go +2 -1\ndiff / hunk\n@@ -8,4 +8,5 @@\n func c
 func TestRichDiffResponsiveLayoutAndLineNumbers(t *testing.T) {
 	theme := tuikit.ResolveSelectedTheme("catppuccin-mocha", nil, true, false, colorprofile.TrueColor)
 	model := parseDiffPanelText(richDiffFixture)
-	if model.Lines[1].OldNo != 9 || model.Lines[1].NewNo != 9 {
+	if model.Lines[2].OldNo != 9 || model.Lines[2].NewNo != 9 {
 		t.Fatal("blank context line did not advance line numbers")
 	}
 	for _, width := range []int{24, 80, 119, 120, 180} {
@@ -75,7 +75,7 @@ func TestRichDiffEmphasizesOnlyChangedGraphemes(t *testing.T) {
 
 func TestRichDiffPairsRelatedLinesAcrossInsertedComment(t *testing.T) {
 	model := parseDiffPanelText("demo.go\n@@ -1 +1,2 @@\n-    return count\n+    // only changed values\n+    return affected")
-	pairs := alignDiffPanelLines(model.Lines)
+	pairs := alignDiffPanelLines(model.Lines[1:])
 	if len(pairs) != 2 || pairs[0].old != nil || pairs[0].new == nil || pairs[1].old == nil || pairs[1].new == nil || !strings.Contains(pairs[1].new.Text, "return affected") {
 		t.Fatalf("replacement alignment = %#v", pairs)
 	}
