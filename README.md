@@ -147,6 +147,8 @@ particular, `CAELIS_STARTUP_WORKSPACE_IDENTITY_CONFLICT` is repaired by
 
 ## Documentation
 
+- [Terminal UI](surfaces/tui/README.md): themes and responsive rich diffs.
+
 - [Participants](docs/participants.md): configure collaborators and use their workspaces.
 - [External ACP agents](docs/external-acp-agents.md): connection, capabilities, and messaging contracts.
 - [Agent SDK](agent-sdk/README.md): embed or extend the reusable Go runtime.

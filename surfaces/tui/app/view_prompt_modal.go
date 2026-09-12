@@ -28,6 +28,9 @@ func (m *Model) renderPromptModal() string {
 		}
 		bodyLines = append(bodyLines, m.renderPromptDetailLines(p.details)...)
 	}
+	if m.themePicker != nil && m.themePicker.prompt == p {
+		bodyLines = append(bodyLines, m.theme.HelpHintTextStyle().Render("↑/↓ preview · Enter apply · Esc restore"))
+	}
 	visible := m.visiblePromptChoices()
 	if len(visible) == 0 {
 		if len(bodyLines) > 0 {
@@ -47,6 +50,9 @@ func (m *Model) renderPromptModal() string {
 	lines := make([]string, 0, len(window))
 	for i := range window {
 		choice := window[i]
+		if m.themePicker != nil && m.themePicker.prompt == p && m.promptModalInnerWidth() < 64 {
+			choice.detail = ""
+		}
 		actualIndex := start + i
 		lines = append(lines, m.renderPromptChoiceLines(choice, actualIndex == p.choiceIndex, stackChoices, choiceLabelWidth)...)
 		if stackChoices && i < len(window)-1 {

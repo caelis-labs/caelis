@@ -3,6 +3,7 @@ package tuiapp
 import (
 	"context"
 	"maps"
+	"os"
 	"strings"
 	"time"
 
@@ -31,7 +32,7 @@ func requestBackgroundColorCmd() tea.Cmd {
 func NewModel(cfg Config) *Model {
 	cfg.CommandDetails = maps.Clone(cfg.CommandDetails)
 	theme := tuikit.ResolveThemeFromOptions(cfg.NoColor, cfg.ColorProfile)
-	themeAuto := tuikit.ThemeUsesAutoBackground()
+	themeName, _ := tuikit.NormalizeThemeName(os.Getenv("CAELIS_THEME"))
 
 	delegate := list.NewDefaultDelegate()
 	configurePaletteDelegateStyles(&delegate, theme)
@@ -69,7 +70,8 @@ func NewModel(cfg Config) *Model {
 	m := &Model{
 		cfg:          cfg,
 		theme:        theme,
-		themeAuto:    themeAuto,
+		themeName:    themeName,
+		terminalDark: theme.IsDark,
 		noColor:      cfg.NoColor,
 		noAnimation:  cfg.NoAnimation,
 		colorProfile: theme.Profile,
@@ -192,7 +194,7 @@ func (m *Model) Init() tea.Cmd {
 			return nil
 		})
 	}
-	if cmd := m.requestBackgroundColorIfAutoCmd(); cmd != nil {
+	if cmd := m.requestTerminalBackgroundCmd(); cmd != nil {
 		cmds = append(cmds, cmd)
 	}
 	// Sequence makes Bubble Tea receive the synthetic width report before
@@ -310,29 +312,21 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.ready = true
 			m.viewport.GotoBottom()
 		}
-		return m, m.requestBackgroundColorIfAutoCmd()
+		return m, m.requestTerminalBackgroundCmd()
 
 	case tea.BackgroundColorMsg:
-		if !m.themeAuto {
-			return m, nil
-		}
-		nextTheme := tuikit.ResolveThemeWithBackgroundColor(typed.Color, m.noColor, m.colorProfile)
-		m.applyTheme(nextTheme)
+		m.terminalBg = typed.Color
+		m.terminalDark = typed.IsDark()
+		m.resolveSelectedTheme()
 		return m, nil
 
 	case tea.ColorProfileMsg:
-		if m.noColor {
-			return m, nil
-		}
-		if typed.Profile == colorprofile.Unknown || typed.Profile == m.colorProfile {
+		if m.noColor || typed.Profile == colorprofile.Unknown || typed.Profile == m.colorProfile {
 			return m, nil
 		}
 		m.colorProfile = typed.Profile
-		nextTheme := tuikit.ResolveThemeWithState(m.theme.IsDark, m.noColor, m.colorProfile)
-		if m.themeAuto && m.theme.TerminalBg != nil {
-			nextTheme = tuikit.ResolveThemeWithBackgroundColor(m.theme.TerminalBg, m.noColor, m.colorProfile)
-		}
-		m.applyTheme(nextTheme)
+		m.closeThemePickerForProfileChange()
+		m.resolveSelectedTheme()
 		return m, nil
 
 	case tea.MouseMsg:
@@ -345,7 +339,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.FocusMsg:
 		m.focused = true
-		return m, m.requestBackgroundColorIfAutoCmd()
+		return m, m.requestTerminalBackgroundCmd()
 
 	case tea.BlurMsg:
 		m.focused = false
@@ -511,8 +505,8 @@ func newSandboxProgressBar(theme tuikit.Theme) progress.Model {
 	return bar
 }
 
-func (m *Model) requestBackgroundColorIfAutoCmd() tea.Cmd {
-	if m == nil || !m.themeAuto {
+func (m *Model) requestTerminalBackgroundCmd() tea.Cmd {
+	if m == nil || m.noColor {
 		return nil
 	}
 	m.armTerminalResponseGuard()

@@ -32,9 +32,12 @@ func (m *Model) refreshSlashCommands() {
 		return
 	}
 
-	commands := m.cfg.Commands
+	commands := append([]string(nil), m.cfg.Commands...)
 	if skillOnly {
 		commands = nil
+	}
+	if _, lineStart := slashCommandQueryAtCursor(m.input, m.cursor); lineStart {
+		commands = append(commands, "theme")
 	}
 	assembled := assembleSlashCompletionCandidates(commands, m.slashSkillCatalog, query)
 	if len(assembled.commands) == 0 {
@@ -195,6 +198,10 @@ func (m *Model) applySlashCommandCompletion() tea.Cmd {
 	if selected == "" {
 		return nil
 	}
+	if selected == "/theme" {
+		m.clearSlashCompletion()
+		return m.submitThemeCommand(selected)
+	}
 	if m.slashSkillOnly {
 		m.applySlashSkillReferenceCompletion(selected)
 		return nil
@@ -278,7 +285,7 @@ func (m *Model) handleSlashCommandKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 		if len(m.slashCandidates) == 0 {
 			return true, nil
 		}
-		if m.turnRunning() && !m.slashSkillOnly {
+		if m.turnRunning() && !m.slashSkillOnly && m.slashCandidates[m.slashIndex] != "/theme" {
 			return true, nil
 		}
 		cmd := m.applySlashCommandCompletion()

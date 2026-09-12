@@ -2,13 +2,14 @@ package filesystem
 
 import (
 	"fmt"
+
+	"github.com/aymanbagabas/go-udiff/lcs"
 )
 
 const (
 	mutationDiffContextLines = 2
 	mutationDiffMaxHunks     = 64
 	mutationDiffMaxLines     = 800
-	mutationDiffMaxCells     = maxDiffStatCells
 )
 
 type MutationDiffHunk struct {
@@ -25,11 +26,6 @@ type mutationDiffRow struct {
 	oldLine int
 	newLine int
 	text    string
-}
-
-type mutationDiffLinePair struct {
-	oldIndex int
-	newIndex int
 }
 
 func mutationDiffResultMeta(before, after string) ([]MutationDiffHunk, bool) {
@@ -91,46 +87,36 @@ func BuildMutationDiffHunks(before, after string, contextLines, maxHunks, maxLin
 	if maxLines <= 0 {
 		maxLines = mutationDiffMaxLines
 	}
-	prefix, suffix := commonMutationLineAffixCounts(oldLines, newLines)
-	oldCoreLen := len(oldLines) - prefix - suffix
-	newCoreLen := len(newLines) - prefix - suffix
-	if diffMatrixTooLarge(oldCoreLen, newCoreLen) {
-		return buildLargeMutationDiffHunk(oldLines, newLines, prefix, suffix, contextLines, maxLines)
+	// The bounded Myers matcher searches by edit distance, not file area. Sparse
+	// edits in a large file must retain their unchanged middle lines.
+	edits := lcs.DiffLines(oldLines, newLines)
+	if len(edits) == 1 {
+		edit := edits[0]
+		if edit.End-edit.Start+edit.ReplEnd-edit.ReplStart > maxLines-1 {
+			prefix, suffix := commonMutationLineAffixCounts(oldLines, newLines)
+			return buildLargeMutationDiffHunk(oldLines, newLines, prefix, suffix, contextLines, maxLines)
+		}
 	}
-	rows := buildMutationDiffRows(oldLines, newLines)
+	rows := buildMutationDiffRows(oldLines, newLines, edits)
 	return buildMutationDiffHunksFromRows(rows, contextLines, maxHunks, maxLines)
 }
 
-func buildMutationDiffRows(oldLines, newLines []string) []mutationDiffRow {
-	prefix, suffix := commonMutationLineAffixCounts(oldLines, newLines)
-	pairs := mutationLinePairs(oldLines[prefix:len(oldLines)-suffix], newLines[prefix:len(newLines)-suffix], prefix, prefix)
+func buildMutationDiffRows(oldLines, newLines []string, edits []lcs.Diff) []mutationDiffRow {
 	rows := make([]mutationDiffRow, 0, len(oldLines)+len(newLines))
-	for idx := 0; idx < prefix; idx++ {
-		rows = append(rows, mutationDiffRow{kind: ' ', oldLine: idx + 1, newLine: idx + 1, text: oldLines[idx]})
+	oldIdx, newIdx := 0, 0
+	appendContext := func(end int) {
+		for oldIdx < end {
+			rows = append(rows, mutationDiffRow{kind: ' ', oldLine: oldIdx + 1, newLine: newIdx + 1, text: oldLines[oldIdx]})
+			oldIdx++
+			newIdx++
+		}
 	}
-
-	oldCursor := prefix
-	newCursor := prefix
-	for _, pair := range pairs {
-		rows = appendMutationChangedRows(rows, oldLines, newLines, oldCursor, pair.oldIndex, newCursor, pair.newIndex)
-		rows = append(rows, mutationDiffRow{
-			kind:    ' ',
-			oldLine: pair.oldIndex + 1,
-			newLine: pair.newIndex + 1,
-			text:    oldLines[pair.oldIndex],
-		})
-		oldCursor = pair.oldIndex + 1
-		newCursor = pair.newIndex + 1
+	for _, edit := range edits {
+		appendContext(edit.Start)
+		rows = appendMutationChangedRows(rows, oldLines, newLines, edit.Start, edit.End, edit.ReplStart, edit.ReplEnd)
+		oldIdx, newIdx = edit.End, edit.ReplEnd
 	}
-
-	oldCoreEnd := len(oldLines) - suffix
-	newCoreEnd := len(newLines) - suffix
-	rows = appendMutationChangedRows(rows, oldLines, newLines, oldCursor, oldCoreEnd, newCursor, newCoreEnd)
-	for offset := 0; offset < suffix; offset++ {
-		oldIdx := oldCoreEnd + offset
-		newIdx := newCoreEnd + offset
-		rows = append(rows, mutationDiffRow{kind: ' ', oldLine: oldIdx + 1, newLine: newIdx + 1, text: oldLines[oldIdx]})
-	}
+	appendContext(len(oldLines))
 	return rows
 }
 
@@ -142,44 +128,6 @@ func appendMutationChangedRows(rows []mutationDiffRow, oldLines, newLines []stri
 		rows = append(rows, mutationDiffRow{kind: '+', newLine: idx + 1, text: newLines[idx]})
 	}
 	return rows
-}
-
-func mutationLinePairs(oldLines, newLines []string, oldBase, newBase int) []mutationDiffLinePair {
-	if len(oldLines) == 0 || len(newLines) == 0 {
-		return nil
-	}
-	if len(oldLines)*len(newLines) > mutationDiffMaxCells {
-		return nil
-	}
-	dp := make([][]int, len(oldLines)+1)
-	for i := range dp {
-		dp[i] = make([]int, len(newLines)+1)
-	}
-	for i := len(oldLines) - 1; i >= 0; i-- {
-		for j := len(newLines) - 1; j >= 0; j-- {
-			if oldLines[i] == newLines[j] {
-				dp[i][j] = dp[i+1][j+1] + 1
-			} else if dp[i+1][j] >= dp[i][j+1] {
-				dp[i][j] = dp[i+1][j]
-			} else {
-				dp[i][j] = dp[i][j+1]
-			}
-		}
-	}
-	pairs := make([]mutationDiffLinePair, 0, dp[0][0])
-	for oldIdx, newIdx := 0, 0; oldIdx < len(oldLines) && newIdx < len(newLines); {
-		switch {
-		case oldLines[oldIdx] == newLines[newIdx]:
-			pairs = append(pairs, mutationDiffLinePair{oldIndex: oldBase + oldIdx, newIndex: newBase + newIdx})
-			oldIdx++
-			newIdx++
-		case dp[oldIdx+1][newIdx] >= dp[oldIdx][newIdx+1]:
-			oldIdx++
-		default:
-			newIdx++
-		}
-	}
-	return pairs
 }
 
 func buildMutationDiffHunksFromRows(rows []mutationDiffRow, contextLines, maxHunks, maxLines int) ([]MutationDiffHunk, bool) {
@@ -400,13 +348,6 @@ func linesEqual(left, right []string) bool {
 		}
 	}
 	return true
-}
-
-func diffMatrixTooLarge(oldLen, newLen int) bool {
-	if oldLen <= 0 || newLen <= 0 {
-		return false
-	}
-	return oldLen > mutationDiffMaxCells/newLen
 }
 
 func buildPatchHunk(lineStart, oldLines, newLines int) string {

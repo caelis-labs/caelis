@@ -26,6 +26,7 @@ func (m *Model) finishPrompt(line string, err error) {
 	if m.activePrompt == nil {
 		return
 	}
+	m.finishThemeSelection(line, err)
 	resp := m.activePrompt.response
 	if resp != nil && resp == m.slashArgLoadAuthPrompt {
 		m.slashArgLoadAuthPrompt = nil
@@ -51,6 +52,7 @@ func (m *Model) handlePromptKey(msg tea.KeyMsg) tea.Cmd {
 		return nil
 	}
 	if len(m.activePrompt.choices) > 0 {
+		defer m.previewThemeSelection()
 		return m.handlePromptChoiceKey(msg)
 	}
 	switch msg.String() {
@@ -109,6 +111,7 @@ func (m *Model) handlePromptKey(msg tea.KeyMsg) tea.Cmd {
 }
 
 func (m *Model) handlePromptPaste(msg tea.PasteMsg) tea.Cmd {
+	defer m.previewThemeSelection()
 	if m.activePrompt == nil {
 		return nil
 	}

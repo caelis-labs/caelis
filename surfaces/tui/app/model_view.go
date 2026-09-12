@@ -152,6 +152,7 @@ func (m *Model) View() tea.View {
 
 	duration := time.Since(start)
 	m.observeRender(duration, len(view), "fullscreen")
+	view = tuikit.PaintLineBackground(view, m.width, m.theme.AppBg)
 	frame := tea.NewView(view)
 	frame.AltScreen = true
 	frame.MouseMode = m.desiredMouseMode()

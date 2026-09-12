@@ -231,12 +231,8 @@ func ResolveThemeWithBackgroundColor(background color.Color, noColor bool, profi
 	})
 }
 
-func ThemeUsesAutoBackground() bool {
-	name := strings.ToLower(strings.TrimSpace(os.Getenv("CAELIS_THEME")))
-	return name == "" || name == "auto" || name == "default" || name == "catppuccin" || name == "catppuccin-auto"
-}
-
 type themeResolveOptions struct {
+	name                 *string
 	backgroundKnown      bool
 	backgroundDark       bool
 	backgroundColorKnown bool
@@ -249,6 +245,14 @@ type themeResolveOptions struct {
 func resolveTheme(opts themeResolveOptions) Theme {
 	profile := resolvedColorProfile(opts)
 	name := strings.ToLower(strings.TrimSpace(os.Getenv("CAELIS_THEME")))
+	if opts.name != nil {
+		name = *opts.name
+	}
+	// Named RGB palettes cannot promise readable colors on a user-defined
+	// ANSI palette. Fall back to terminal foregrounds when RGB is unavailable.
+	if profile < colorprofile.ANSI256 {
+		name = "auto"
+	}
 	theme := namedTheme(name, profile, resolvedDarkBackground(opts), resolvedBackgroundColor(opts))
 	theme.Profile = profile
 	theme.TerminalBg = resolvedBackgroundColor(opts)
@@ -418,9 +422,9 @@ func namedTheme(name string, profile colorprofile.Profile, darkBackground bool, 
 		return defaultAdaptiveThemeVariant(profile, false, background)
 	case "catppuccin", "catppuccin-auto":
 		return catppuccinAdaptiveThemeVariant(profile, darkBackground, background)
-	case "catppuccin-dark", "catppuccin-mocha":
+	case "catppuccin-dark", "catppuccin-mocha", "mocha":
 		return catppuccinAdaptiveThemeVariant(profile, true, background)
-	case "catppuccin-light", "catppuccin-latte":
+	case "catppuccin-light", "catppuccin-latte", "latte":
 		return catppuccinAdaptiveThemeVariant(profile, false, background)
 	case "nord":
 		return stripThemeBackgroundsForANSI(nordTheme(profile), profile)

@@ -6,24 +6,27 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
+	"github.com/charmbracelet/x/ansi"
 )
 
 type diffPanelLineKind int
 
 const (
 	diffPanelLineMeta diffPanelLineKind = iota
-	diffPanelLineHunk
 	diffPanelLineContext
 	diffPanelLineAdd
 	diffPanelLineRemove
 )
 
 type diffPanelLine struct {
-	Kind   diffPanelLineKind
-	OldNo  int
-	NewNo  int
-	Marker byte
-	Text   string
+	Kind       diffPanelLineKind
+	OldNo      int
+	NewNo      int
+	Marker     byte
+	Text       string
+	Path       string
+	StyledText string
+	Changed    []diffTextSpan
 }
 
 type diffPanelModel struct {
@@ -57,59 +60,69 @@ type renderedDiffPanelRow struct {
 
 func parseDiffPanelText(text string) diffPanelModel {
 	text = strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", "\n"), "\r", "\n")
-	rawLines := strings.Split(strings.TrimRight(text, "\n"), "\n")
-	model := diffPanelModel{Lines: make([]diffPanelLine, 0, len(rawLines))}
+	model := diffPanelModel{}
 	oldNo, newNo := 0, 0
-	inHunk := false
-	for _, raw := range rawLines {
-		trimmed := strings.TrimSpace(raw)
-		switch {
-		case trimmed == "":
-			model.Lines = append(model.Lines, diffPanelLine{Kind: diffPanelLineMeta})
-			continue
-		case strings.EqualFold(trimmed, "diff / hunk"):
-			model.Lines = append(model.Lines, diffPanelLine{Kind: diffPanelLineMeta, Text: trimmed})
-			continue
-		case strings.HasPrefix(trimmed, "@@"):
-			oldStart, oldCount, newStart, newCount, ok := parseDiffHunkHeader(trimmed)
+	inHunk, seenHunk := false, false
+	path := ""
+	for _, raw := range strings.Split(strings.TrimRight(text, "\n"), "\n") {
+		if strings.HasPrefix(raw, "@@") {
+			oldStart, oldCount, newStart, newCount, ok := parseDiffHunkHeader(raw)
 			if ok {
-				oldNo = oldStart
-				newNo = newStart
-				inHunk = true
-				model.MaxOld = maxInt(model.MaxOld, lastDiffRangeLine(oldStart, oldCount))
-				model.MaxNew = maxInt(model.MaxNew, lastDiffRangeLine(newStart, newCount))
+				if seenHunk {
+					model.Lines = append(model.Lines, diffPanelLine{Kind: diffPanelLineMeta})
+				}
+				oldNo, newNo = oldStart, newStart
+				model.MaxOld = max(model.MaxOld, lastDiffRangeLine(oldStart, oldCount))
+				model.MaxNew = max(model.MaxNew, lastDiffRangeLine(newStart, newCount))
+				inHunk, seenHunk = true, true
+				continue
 			}
-			model.Lines = append(model.Lines, diffPanelLine{Kind: diffPanelLineHunk, Text: trimmed})
+		}
+		if strings.HasPrefix(raw, "diff --git ") {
+			inHunk = false
 			continue
 		}
-		if !inHunk || raw == "" {
-			model.Lines = append(model.Lines, diffPanelLine{Kind: diffPanelLineContext, Marker: ' ', Text: raw})
+		if !inHunk {
+			if strings.TrimSpace(raw) == "" || strings.EqualFold(strings.TrimSpace(raw), "diff / hunk") {
+				continue
+			}
+			if strings.HasPrefix(raw, "--- ") {
+				continue
+			}
+			if strings.HasPrefix(raw, "+++ ") {
+				path = strings.TrimPrefix(raw, "+++ ")
+			} else if candidate, _, _, ok := tuikit.SplitDiffCountTokens(raw); ok {
+				path = candidate
+			} else {
+				path = strings.TrimSpace(raw)
+			}
 			continue
 		}
-		marker := raw[0]
-		body := raw[1:]
-		switch marker {
+		if raw == "" || strings.HasPrefix(raw, "\\") {
+			if strings.HasPrefix(raw, "\\") {
+				model.Lines = append(model.Lines, diffPanelLine{Kind: diffPanelLineMeta, Text: strings.TrimPrefix(raw, "\\ ")})
+			}
+			continue
+		}
+		line := diffPanelLine{Marker: raw[0], Text: raw[1:], Path: path}
+		switch raw[0] {
 		case '+':
-			model.Lines = append(model.Lines, diffPanelLine{Kind: diffPanelLineAdd, NewNo: newNo, Marker: marker, Text: body})
-			model.MaxNew = maxInt(model.MaxNew, newNo)
+			line.Kind, line.NewNo = diffPanelLineAdd, newNo
 			newNo++
 		case '-':
-			model.Lines = append(model.Lines, diffPanelLine{Kind: diffPanelLineRemove, OldNo: oldNo, Marker: marker, Text: body})
-			model.MaxOld = maxInt(model.MaxOld, oldNo)
+			line.Kind, line.OldNo = diffPanelLineRemove, oldNo
 			oldNo++
 		case ' ':
-			model.Lines = append(model.Lines, diffPanelLine{Kind: diffPanelLineContext, OldNo: oldNo, NewNo: newNo, Marker: marker, Text: body})
-			model.MaxOld = maxInt(model.MaxOld, oldNo)
-			model.MaxNew = maxInt(model.MaxNew, newNo)
+			line.Kind, line.OldNo, line.NewNo = diffPanelLineContext, oldNo, newNo
 			oldNo++
 			newNo++
 		default:
-			model.Lines = append(model.Lines, diffPanelLine{Kind: diffPanelLineContext, OldNo: oldNo, NewNo: newNo, Marker: ' ', Text: raw})
-			model.MaxOld = maxInt(model.MaxOld, oldNo)
-			model.MaxNew = maxInt(model.MaxNew, newNo)
-			oldNo++
-			newNo++
+			model.Lines = append(model.Lines, diffPanelLine{Kind: diffPanelLineMeta, Text: raw})
+			continue
 		}
+		model.MaxOld = max(model.MaxOld, line.OldNo)
+		model.MaxNew = max(model.MaxNew, line.NewNo)
+		model.Lines = append(model.Lines, line)
 	}
 	return model
 }
@@ -142,7 +155,7 @@ func parseDiffRange(token string, prefix byte) (start, count int, ok bool) {
 			return 0, 0, false
 		}
 	}
-	return parsedStart, parsedCount, true
+	return parsedStart, parsedCount, parsedStart >= 0 && parsedCount >= 0
 }
 
 func lastDiffRangeLine(start, count int) int {
@@ -152,84 +165,145 @@ func lastDiffRangeLine(start, count int) int {
 	return start + count - 1
 }
 
+// Each side needs at least 48 source columns, in addition to its line gutter.
+// The available panel width (not the terminal width) also handles split workspaces.
+const diffSideMinContentWidth = 48
+
 func renderNumberedACPDiffPanelBody(model diffPanelModel, width int, ctx BlockRenderContext) []renderedDiffPanelRow {
 	oldWidth := maxInt(1, decimalWidth(model.MaxOld))
 	newWidth := maxInt(1, decimalWidth(model.MaxNew))
+	pairs := alignDiffPanelLines(model.Lines)
+	highlightDiffPanelLines(model.Lines, ctx)
+	split := width >= max(120, 2*diffSideMinContentWidth+oldWidth+newWidth+9)
 	rows := make([]renderedDiffPanelRow, 0, len(model.Lines))
-	for _, line := range model.Lines {
-		rows = append(rows, renderNumberedACPDiffPanelLine(line, oldWidth, newWidth, width, ctx)...)
+	for _, pair := range pairs {
+		if pair.meta != nil {
+			plain := truncateTailDisplay(pair.meta.Text, width)
+			rows = append(rows, renderedDiffPanelRow{Plain: plain, Styled: ctx.Theme.TranscriptMetaStyle().Render(plain)})
+			continue
+		}
+		if split {
+			leftWidth := (width - 3) / 2
+			rightWidth := width - 3 - leftWidth
+			left := renderDiffPanelCell(pair.old, oldWidth, 0, leftWidth, ctx)
+			right := renderDiffPanelCell(pair.new, 0, newWidth, rightWidth, ctx)
+			for i := range max(len(left), len(right)) {
+				l, r := paddedDiffCell(left, i, leftWidth), paddedDiffCell(right, i, rightWidth)
+				rows = append(rows, renderedDiffPanelRow{
+					Plain:  l.Plain + " │ " + r.Plain,
+					Styled: l.Styled + ctx.Theme.DiffGutterStyle().Render(" │ ") + r.Styled,
+				})
+			}
+		} else {
+			if pair.old != nil {
+				rows = append(rows, renderDiffPanelCell(pair.old, oldWidth, newWidth, width, ctx)...)
+			}
+			if pair.new != nil && pair.new != pair.old {
+				rows = append(rows, renderDiffPanelCell(pair.new, oldWidth, newWidth, width, ctx)...)
+			}
+		}
 	}
 	return rows
 }
 
-func renderNumberedACPDiffPanelLine(line diffPanelLine, oldWidth, newWidth, width int, ctx BlockRenderContext) []renderedDiffPanelRow {
-	switch line.Kind {
-	case diffPanelLineMeta:
-		plain := "  " + line.Text
-		if strings.TrimSpace(line.Text) == "" {
-			plain = ""
-		}
-		return []renderedDiffPanelRow{{
-			Plain:  plain,
-			Styled: ctx.Theme.TranscriptMetaStyle().Width(width).Render(plain),
-		}}
-	case diffPanelLineHunk:
-		plain := "  " + line.Text
-		return []renderedDiffPanelRow{{
-			Plain:  plain,
-			Styled: ctx.Theme.DiffHunkStyle().Width(width).Render(plain),
-		}}
-	}
+type diffPanelPair struct{ old, new, meta *diffPanelLine }
 
-	lineStyle, markerStyle, contentStyle := diffPanelStyles(line.Kind, ctx)
-	gutterPlain := diffGutterPlain(line, oldWidth, newWidth)
-	marker := string(line.Marker)
-	if marker == "" || line.Marker == 0 {
-		marker = " "
-	}
-	firstPrefixPlain := gutterPlain + marker
-	continuationPrefixPlain := strings.Repeat(" ", displayColumns(firstPrefixPlain))
-	available := maxInt(1, width-displayColumns(firstPrefixPlain))
-	wrapped := strings.Split(hardWrapDisplayLine(line.Text, available), "\n")
-	if len(wrapped) == 0 {
-		wrapped = []string{""}
-	}
-	out := make([]renderedDiffPanelRow, 0, len(wrapped))
-	for idx, segment := range wrapped {
-		prefixPlain := firstPrefixPlain
-		prefixStyled := diffGutterStyled(gutterPlain, ctx) + markerStyle.Render(marker)
-		if idx > 0 {
-			prefixPlain = continuationPrefixPlain
-			prefixStyled = ctx.Theme.DiffLineNoStyle().Render(continuationPrefixPlain)
+func alignDiffPanelLines(lines []diffPanelLine) []diffPanelPair {
+	pairs := make([]diffPanelPair, 0, len(lines))
+	for i := 0; i < len(lines); {
+		line := &lines[i]
+		if line.Kind == diffPanelLineMeta {
+			pairs = append(pairs, diffPanelPair{meta: line})
+			i++
+			continue
 		}
-		plain := prefixPlain + segment
-		styled := lineStyle.Width(width).Render(prefixStyled + contentStyle.Render(tuikit.LinkifyText(segment, ctx.Theme.LinkStyle())))
-		out = append(out, renderedDiffPanelRow{Plain: plain, Styled: styled})
+		if line.Kind == diffPanelLineContext {
+			pairs = append(pairs, diffPanelPair{old: line, new: line})
+			i++
+			continue
+		}
+		var old, next []*diffPanelLine
+		for i < len(lines) && (lines[i].Kind == diffPanelLineAdd || lines[i].Kind == diffPanelLineRemove) {
+			if lines[i].Kind == diffPanelLineRemove {
+				old = append(old, &lines[i])
+			} else {
+				next = append(next, &lines[i])
+			}
+			i++
+		}
+		for _, pair := range alignDiffChanges(old, next) {
+			if pair.old != nil && pair.new != nil {
+				markDiffTextChanges(pair.old, pair.new)
+			}
+			pairs = append(pairs, pair)
+		}
 	}
-	return out
+	return pairs
 }
 
-func diffPanelStyles(kind diffPanelLineKind, ctx BlockRenderContext) (line lipgloss.Style, marker lipgloss.Style, content lipgloss.Style) {
+func paddedDiffCell(rows []renderedDiffPanelRow, i, width int) renderedDiffPanelRow {
+	if i >= len(rows) {
+		blank := strings.Repeat(" ", width)
+		return renderedDiffPanelRow{Plain: blank, Styled: blank}
+	}
+	row := rows[i]
+	row.Plain += strings.Repeat(" ", max(0, width-displayColumns(row.Plain)))
+	row.Styled += strings.Repeat(" ", max(0, width-displayColumns(row.Styled)))
+	return row
+}
+
+func renderDiffPanelCell(line *diffPanelLine, oldWidth, newWidth, width int, ctx BlockRenderContext) []renderedDiffPanelRow {
+	if line == nil {
+		return nil
+	}
+	gutter := " "
+	if oldWidth > 0 {
+		gutter += formatDiffLineNo(line.OldNo, oldWidth) + " "
+	}
+	if newWidth > 0 {
+		gutter += formatDiffLineNo(line.NewNo, newWidth) + " "
+	}
+	marker := string(line.Marker)
+	prefix := gutter + marker + " "
+	// Very narrow terminals preserve source characters before optional line numbers.
+	if displayColumns(prefix) >= width {
+		prefix, gutter = marker, ""
+	}
+	available := max(1, width-displayColumns(prefix))
+	styledText := line.StyledText
+	if styledText == "" {
+		styledText = ctx.Theme.TextStyle().Render(line.Text)
+	}
+	wrapped := strings.Split(hardWrapDisplayLine(styledText, available), "\n")
+	background, markerStyle := diffPanelLineStyle(line.Kind, ctx)
+	rows := make([]renderedDiffPanelRow, 0, len(wrapped))
+	for i, segment := range wrapped {
+		plainPrefix := prefix
+		styledPrefix := ctx.Theme.DiffLineNoStyle().Render(gutter) + markerStyle.Render(marker+" ")
+		if gutter == "" {
+			styledPrefix = markerStyle.Render(marker)
+		}
+		if i > 0 {
+			plainPrefix = strings.Repeat(" ", displayColumns(prefix))
+			styledPrefix = plainPrefix
+		}
+		plain := plainPrefix + ansi.Strip(segment)
+		styled := styledPrefix + segment
+		styled = tuikit.PaintLineBackground(styled, width, background.GetBackground())
+		rows = append(rows, renderedDiffPanelRow{Plain: plain, Styled: styled})
+	}
+	return rows
+}
+
+func diffPanelLineStyle(kind diffPanelLineKind, ctx BlockRenderContext) (lipgloss.Style, lipgloss.Style) {
 	switch kind {
 	case diffPanelLineAdd:
-		style := ctx.Theme.DiffAddStyle().Background(ctx.Theme.DiffAddBg)
-		return style, ctx.Theme.DiffAddStyle().Bold(true).Background(ctx.Theme.DiffAddBg), style
+		return lipgloss.NewStyle().Background(ctx.Theme.DiffAddBg), ctx.Theme.DiffAddStyle().Bold(true)
 	case diffPanelLineRemove:
-		style := ctx.Theme.DiffRemoveStyle().Background(ctx.Theme.DiffRemoveBg)
-		return style, ctx.Theme.DiffRemoveStyle().Bold(true).Background(ctx.Theme.DiffRemoveBg), style
+		return lipgloss.NewStyle().Background(ctx.Theme.DiffRemoveBg), ctx.Theme.DiffRemoveStyle().Bold(true)
 	default:
-		return ctx.Theme.ToolOutputStyle(), ctx.Theme.DiffGutterStyle(), ctx.Theme.ToolOutputStyle()
+		return lipgloss.NewStyle(), ctx.Theme.DiffGutterStyle()
 	}
-}
-
-func diffGutterPlain(line diffPanelLine, oldWidth, newWidth int) string {
-	oldNo := formatDiffLineNo(line.OldNo, oldWidth)
-	newNo := formatDiffLineNo(line.NewNo, newWidth)
-	return "  " + oldNo + " " + newNo + " "
-}
-
-func diffGutterStyled(gutter string, ctx BlockRenderContext) string {
-	return ctx.Theme.DiffLineNoStyle().Render(gutter)
 }
 
 func formatDiffLineNo(value int, width int) string {

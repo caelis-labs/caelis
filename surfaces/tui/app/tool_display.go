@@ -946,12 +946,7 @@ func toolDisplayPanelOutput(name string, output string) string {
 	if name == surfaceToolSendMessage && isACPCompactToolAck(output) {
 		return ""
 	}
-	if info, ok := surfaceToolProfile(name); ok && info.ResultStyle == surfaceResultMutation {
-		lines := strings.Split(strings.TrimSpace(output), "\n")
-		if len(lines) >= 2 && strings.EqualFold(strings.TrimSpace(lines[1]), "diff / hunk") {
-			return strings.Join(lines[1:], "\n")
-		}
-	}
+
 	return output
 }
 

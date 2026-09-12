@@ -71,7 +71,7 @@ func TestSlashCommandScrollAffordanceAtTopAndBottom(t *testing.T) {
 		t.Fatalf("CanDown = false at top, want true")
 	}
 
-	for i := 0; i < 11; i++ {
+	for i := 0; i < len(model.slashCandidates)-1; i++ {
 		_, _ = model.handleSlashCommandKey(keyPress("down"))
 	}
 	_, geometry, ok = model.activeCompletionGeometry()

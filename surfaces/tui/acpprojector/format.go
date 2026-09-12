@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/aymanbagabas/go-udiff/lcs"
 )
 
 type ToolContent struct {
@@ -90,60 +92,27 @@ type unifiedRow struct {
 	text  string
 }
 
-type indexPair struct {
-	a int
-	b int
-}
-
-func buildUnifiedRows(oldLines []string, newLines []string) []unifiedRow {
-	pairs := unifiedLinePairs(oldLines, newLines)
+func buildUnifiedRows(oldLines, newLines []string) []unifiedRow {
 	rows := make([]unifiedRow, 0, len(oldLines)+len(newLines))
 	oldIdx, newIdx := 0, 0
-	for _, pair := range pairs {
-		rows = appendUnifiedChangedRows(rows, oldLines, newLines, oldIdx, pair.a, newIdx, pair.b)
-		rows = append(rows, unifiedRow{
-			kind:  ' ',
-			oldNo: pair.a + 1,
-			newNo: pair.b + 1,
-			text:  oldLines[pair.a],
-		})
-		oldIdx = pair.a + 1
-		newIdx = pair.b + 1
-	}
-	rows = appendUnifiedChangedRows(rows, oldLines, newLines, oldIdx, len(oldLines), newIdx, len(newLines))
-	return rows
-}
-
-func appendUnifiedChangedRows(rows []unifiedRow, oldLines []string, newLines []string, oldStart int, oldEnd int, newStart int, newEnd int) []unifiedRow {
-	for idx := oldStart; idx < oldEnd; idx++ {
-		rows = append(rows, unifiedRow{kind: '-', oldNo: idx + 1, text: oldLines[idx]})
-	}
-	for idx := newStart; idx < newEnd; idx++ {
-		rows = append(rows, unifiedRow{kind: '+', newNo: idx + 1, text: newLines[idx]})
-	}
-	return rows
-}
-
-func unifiedLinePairs(oldLines []string, newLines []string) []indexPair {
-	const maxCells = 250000
-	prefix, suffix := commonLineAffixCounts(oldLines, newLines)
-	pairs := make([]indexPair, 0, prefix+suffix)
-	for idx := 0; idx < prefix; idx++ {
-		pairs = append(pairs, indexPair{a: idx, b: idx})
-	}
-	oldCore := oldLines[prefix : len(oldLines)-suffix]
-	newCore := newLines[prefix : len(newLines)-suffix]
-	if len(oldCore) > 0 && len(newCore) > 0 && len(oldCore) <= maxCells/len(newCore) {
-		for _, pair := range lcsLinePairs(oldCore, newCore) {
-			pairs = append(pairs, indexPair{a: prefix + pair.a, b: prefix + pair.b})
+	appendContext := func(end int) {
+		for oldIdx < end {
+			rows = append(rows, unifiedRow{kind: ' ', oldNo: oldIdx + 1, newNo: newIdx + 1, text: oldLines[oldIdx]})
+			oldIdx++
+			newIdx++
 		}
 	}
-	for idx := 0; idx < suffix; idx++ {
-		oldIndex := len(oldLines) - suffix + idx
-		newIndex := len(newLines) - suffix + idx
-		pairs = append(pairs, indexPair{a: oldIndex, b: newIndex})
+	for _, edit := range lcs.DiffLines(oldLines, newLines) {
+		appendContext(edit.Start)
+		for ; oldIdx < edit.End; oldIdx++ {
+			rows = append(rows, unifiedRow{kind: '-', oldNo: oldIdx + 1, text: oldLines[oldIdx]})
+		}
+		for ; newIdx < edit.ReplEnd; newIdx++ {
+			rows = append(rows, unifiedRow{kind: '+', newNo: newIdx + 1, text: newLines[newIdx]})
+		}
 	}
-	return pairs
+	appendContext(len(oldLines))
+	return rows
 }
 
 func unifiedHunkLines(rows []unifiedRow) []string {
@@ -219,69 +188,7 @@ func splitUnifiedContentLines(text string) []string {
 	}
 	normalized := strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", "\n"), "\r", "\n")
 	normalized = strings.TrimSuffix(normalized, "\n")
-	if normalized == "" {
-		return nil
-	}
 	return strings.Split(normalized, "\n")
-}
-
-func commonLineAffixCounts(oldLines, newLines []string) (int, int) {
-	prefix := 0
-	for prefix < len(oldLines) && prefix < len(newLines) && oldLines[prefix] == newLines[prefix] {
-		prefix++
-	}
-
-	suffix := 0
-	for prefix+suffix < len(oldLines) &&
-		prefix+suffix < len(newLines) &&
-		oldLines[len(oldLines)-1-suffix] == newLines[len(newLines)-1-suffix] {
-		suffix++
-	}
-	return prefix, suffix
-}
-
-func lcsLinePairs(oldLines, newLines []string) []indexPair {
-	n := len(oldLines)
-	m := len(newLines)
-	if n == 0 || m == 0 {
-		return nil
-	}
-	dp := make([][]int, n+1)
-	for i := range dp {
-		dp[i] = make([]int, m+1)
-	}
-	for i := n - 1; i >= 0; i-- {
-		for j := m - 1; j >= 0; j-- {
-			if oldLines[i] == newLines[j] {
-				dp[i][j] = dp[i+1][j+1] + 1
-			} else {
-				dp[i][j] = maxInt(dp[i+1][j], dp[i][j+1])
-			}
-		}
-	}
-	pairs := make([]indexPair, 0, dp[0][0])
-	i, j := 0, 0
-	for i < n && j < m {
-		if oldLines[i] == newLines[j] {
-			pairs = append(pairs, indexPair{a: i, b: j})
-			i++
-			j++
-			continue
-		}
-		if dp[i+1][j] >= dp[i][j+1] {
-			i++
-		} else {
-			j++
-		}
-	}
-	return pairs
-}
-
-func maxInt(a int, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }
 
 func diffDisplayPath(path string) string {
