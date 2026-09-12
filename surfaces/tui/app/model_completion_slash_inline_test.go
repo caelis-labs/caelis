@@ -143,10 +143,6 @@ func TestRunningSlashCompletionOffersSkillsAndLocalTheme(t *testing.T) {
 				{Value: "superpowers:brainstorm", Display: "brainstorm", Kind: "Plugin"},
 			}, nil
 		},
-		ResumeComplete: func(context.Context, string, int) ([]ResumeCandidate, error) {
-			t.Fatal("resume completion requested while running")
-			return nil, nil
-		},
 		SlashArgComplete: func(context.Context, string, string, int) ([]SlashArgCandidate, error) {
 			t.Fatal("slash argument completion requested while running")
 			return nil, nil
@@ -191,16 +187,6 @@ func TestRunningSlashCompletionOffersSkillsAndLocalTheme(t *testing.T) {
 	}
 	if len(submitted) != 0 {
 		t.Fatalf("submitted = %#v, want no running skill submission", submitted)
-	}
-
-	model.setInputText("/resume ")
-	model.syncTextareaFromInput()
-	runCompletionCmd(t, model, model.refreshCompletionOverlaysNow())
-	if model.resumeActive || len(model.resumeCandidates) != 0 {
-		t.Fatal("running /resume opened resume completion")
-	}
-	if model.slashArgActive || model.isWizardActive() {
-		t.Fatal("running /resume opened slash-arg or wizard completion")
 	}
 
 	model.setInputText("/model ")

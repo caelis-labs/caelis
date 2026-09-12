@@ -16,8 +16,17 @@ func (m *Model) applySessionReconnectState(state appserver.SessionState) tea.Cmd
 	if m == nil {
 		return nil
 	}
+	m.saveSessionDraft()
 	// Discard old-Session prompts without responding: completing them would
 	// submit an implicit rejection to the Session that was just left.
+	if m.activePrompt != nil && m.activePrompt.dismiss != nil {
+		m.activePrompt.dismiss()
+	}
+	for _, prompt := range m.pendingPrompt {
+		if prompt.dismiss != nil {
+			prompt.dismiss()
+		}
+	}
 	m.activePrompt = nil
 	// A local theme preview belongs to the TUI and survives Session changes.
 	if m.themePicker != nil {
@@ -29,8 +38,12 @@ func (m *Model) applySessionReconnectState(state appserver.SessionState) tea.Cmd
 	m.resetSlashSkillCatalog()
 	m.runningHintTracker.resetSession()
 	m.resetConversationView()
+	m.restoreSessionDraft()
+	m.statusRefreshInFlight = false
+	m.clearInputOverlays()
 	if state.Run.Active || state.Approval.Active != nil {
 		m.beginLiveTurn(SubmissionModeDefault, false, state.Run.StartedAt)
+		m.liveTurn.observed = m.viewGeneration != 0
 		return m.resumeRunningAnimationIfNeeded()
 	}
 	return nil
@@ -81,6 +94,14 @@ func streamReconnectBackfill(
 			}
 			for _, envelope := range events {
 				if eventstream.IsSessionNotice(envelope) {
+					// The exact spool can contain notices published during first
+					// admission. Present them in order without making them replayable
+					// canonical history or advancing the live Turn target.
+					flush()
+					if send != nil {
+						send(envelope)
+						published = true
+					}
 					continue
 				}
 				presentation := transcriptEventsMsg(projectResumeReplayEvents([]eventstream.Envelope{envelope}))

@@ -15,6 +15,12 @@ func (m *Model) enqueuePrompt(req PromptRequestMsg) {
 	if req.Response == nil {
 		return
 	}
+	if req.ApprovalRequestID != "" && m.hasApprovalPrompt(req.ApprovalRequestID) {
+		if req.dismiss != nil {
+			req.dismiss()
+		}
+		return
+	}
 	if m.activePrompt == nil {
 		m.activePrompt = newPromptState(req)
 		return
@@ -143,11 +149,13 @@ func (m *Model) handlePromptPaste(msg tea.PasteMsg) tea.Cmd {
 
 func newPromptState(req PromptRequestMsg) *promptState {
 	state := &promptState{
+		dismiss:             req.dismiss,
 		title:               strings.TrimSpace(req.Title),
 		prompt:              req.Prompt,
 		details:             append([]PromptDetail(nil), req.Details...),
 		secret:              req.Secret,
 		response:            req.Response,
+		approvalRequestID:   req.ApprovalRequestID,
 		filterable:          req.Filterable,
 		multiSelect:         req.MultiSelect,
 		allowEmptySelection: req.AllowEmptySelection,

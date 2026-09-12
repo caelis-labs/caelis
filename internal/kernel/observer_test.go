@@ -15,6 +15,16 @@ type testTurnEventRecorder struct {
 	next   chan eventstream.Envelope
 }
 
+func assertTurnStarted(t *testing.T, started eventstream.Envelope, handle TurnHandle) {
+	t.Helper()
+	if started.Kind != eventstream.KindLifecycle || started.Lifecycle == nil || started.Lifecycle.State != eventstream.LifecycleStateRunning ||
+		started.SessionID != handle.SessionRef().SessionID || started.Scope != eventstream.ScopeMain ||
+		started.HandleID != handle.HandleID() || started.RunID != handle.RunID() || started.TurnID != handle.TurnID() ||
+		!started.OccurredAt.Equal(handle.CreatedAt()) || started.Delivery == nil || started.Delivery.Mode != eventstream.DeliveryTransient {
+		t.Fatalf("running event = %#v, want the admitted live target", started)
+	}
+}
+
 var testTurnRecorders sync.Map
 
 func newTestTurnEventRecorder() *testTurnEventRecorder {

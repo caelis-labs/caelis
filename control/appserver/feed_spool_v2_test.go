@@ -68,6 +68,79 @@ func TestFeedBrokerSpoolDeliversWithoutProducerConsumerCoupling(t *testing.T) {
 	}
 }
 
+func TestFeedBrokerBroadcastsApprovalRequestAndSettlementToAllObservers(t *testing.T) {
+	t.Parallel()
+
+	broker, _ := newTestFeedBroker(t, nil, FeedBrokerConfig{})
+	first, err := broker.Subscribe(t.Context(), SubscribeRequest{SessionID: "session-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := broker.Subscribe(t.Context(), SubscribeRequest{SessionID: "session-1"})
+	if err != nil {
+		_ = first.Subscription.Close()
+		t.Fatal(err)
+	}
+	defer first.Subscription.Close()
+	defer second.Subscription.Close()
+	assertFeedDelivery(t, first.Subscription.Deliveries(), FeedDeliverySync)
+	assertFeedDelivery(t, second.Subscription.Deliveries(), FeedDeliverySync)
+
+	request := eventstream.Envelope{
+		Kind:              eventstream.KindRequestPermission,
+		SessionID:         "session-1",
+		EventID:           "approval-request-event",
+		ProjectionID:      "approval-request-projection",
+		ApprovalRequestID: "approval-1",
+		Position:          &eventstream.FeedPosition{Durable: &eventstream.DurableFeedPosition{Seq: 1}},
+		Delivery:          &eventstream.Delivery{Mode: eventstream.DeliveryMirror},
+		Permission: &eventstream.RequestPermissionRequest{
+			SessionID: "session-1",
+			ToolCall: eventstream.ToolCallUpdate{
+				SessionUpdate: eventstream.UpdateToolCallInfo,
+				ToolCallID:    "call-1",
+			},
+		},
+	}
+	settlement := eventstream.Envelope{
+		Kind:              eventstream.KindLifecycle,
+		SessionID:         "session-1",
+		EventID:           "approval-settlement-event",
+		ProjectionID:      "approval-settlement-projection",
+		ApprovalRequestID: "approval-1",
+		Position:          &eventstream.FeedPosition{Durable: &eventstream.DurableFeedPosition{Seq: 2}},
+		Delivery:          &eventstream.Delivery{Mode: eventstream.DeliveryMirror},
+		Lifecycle:         &eventstream.Lifecycle{State: eventstream.LifecycleStateCompleted, Reason: "resolved"},
+	}
+	if err := broker.Publish(request); err != nil {
+		t.Fatal(err)
+	}
+	if err := broker.Publish(settlement); err != nil {
+		t.Fatal(err)
+	}
+
+	for name, subscription := range map[string]FeedSubscription{
+		"first observer":  first.Subscription,
+		"second observer": second.Subscription,
+	} {
+		t.Run(name, func(t *testing.T) {
+			events := receiveFeedEvents(t, subscription, 2)
+			if len(events) != 2 || events[0].Kind != eventstream.KindRequestPermission || events[1].Kind != eventstream.KindLifecycle {
+				t.Fatalf("events = %#v, want approval request then settlement", events)
+			}
+			if events[0].ApprovalRequestID != request.ApprovalRequestID || events[1].ApprovalRequestID != request.ApprovalRequestID {
+				t.Fatalf("approval correlation = %q, %q; want %q", events[0].ApprovalRequestID, events[1].ApprovalRequestID, request.ApprovalRequestID)
+			}
+			if events[0].Permission == nil || events[0].Permission.ToolCall.ToolCallID != "call-1" {
+				t.Fatalf("approval request = %#v", events[0])
+			}
+			if events[1].Lifecycle == nil || events[1].Lifecycle.State != eventstream.LifecycleStateCompleted {
+				t.Fatalf("approval settlement = %#v", events[1])
+			}
+		})
+	}
+}
+
 func TestFeedRegistrySessionCloseBoundsRegistrationsByConcurrencyNotLifetime(t *testing.T) {
 	t.Parallel()
 

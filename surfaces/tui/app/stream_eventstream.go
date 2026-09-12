@@ -12,7 +12,19 @@ import (
 )
 
 func (m *Model) handleACPEventEnvelope(env eventstream.Envelope) (tea.Model, tea.Cmd) {
+	if m.currentSessionID != "" && env.SessionID != "" && env.SessionID != m.currentSessionID {
+		return m, nil
+	}
 	m.observeTaskStreamSession(env)
+	if approvalSettled(env) {
+		m.dismissApproval(string(env.ApprovalRequestID))
+	}
+	if env.Kind == eventstream.KindLifecycle && env.Lifecycle != nil && env.Lifecycle.State == eventstream.LifecycleStateRunning && (env.Scope == "" || env.Scope == eventstream.ScopeMain) && env.ApprovalRequestID == "" {
+		if !m.turnRunning() {
+			m.beginLiveTurn(SubmissionModeDefault, true, env.OccurredAt)
+		}
+		m.liveTurn.observed = m.viewGeneration != 0
+	}
 	if env.Err != nil || env.Kind == eventstream.KindError {
 		if text := display.UserVisibleError(env.Err); text != "" {
 			env.Error = text

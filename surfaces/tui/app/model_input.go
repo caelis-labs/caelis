@@ -14,6 +14,9 @@ import (
 )
 
 func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	if m.sessionPicker != nil {
+		return m, m.handleSessionPickerMouse(msg)
+	}
 	m.updatePaneChromeHover(msg)
 	if handled, cmd := m.handleSubagentOverlayMouse(msg); handled {
 		return m, cmd
@@ -557,6 +560,22 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if key.Matches(msg, m.keys.Update) {
 		return m.handleUpdateKey()
 	}
+	if key.Matches(msg, m.keys.Quit) {
+		return m, m.requestSurfaceQuit()
+	}
+	if msg.String() == "ctrl+d" {
+		m.quit = true
+		return m, tea.Quit
+	}
+	if m.sessionPicker != nil {
+		return m, m.handleSessionPickerKey(msg)
+	}
+	if msg.String() == "ctrl+o" {
+		return m, m.openSessionPicker()
+	}
+	if m.activePrompt != nil && m.activePrompt.approvalRequestID != "" && m.turnRunning() && key.Matches(msg, m.keys.Interrupt) {
+		return m.requestRunningInterrupt()
+	}
 	// External prompt input takes priority.
 	if m.activePrompt != nil {
 		return m, m.handlePromptKey(msg)
@@ -655,54 +674,6 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Batch(m.touchViewportScrollbar(), resumeCmd)
 
-	case key.Matches(msg, m.keys.Quit):
-		if m.turnRunning() {
-			return m, m.showHint("press Esc to interrupt running task", hintOptions{
-				priority:       HintPriorityHigh,
-				clearOnMessage: true,
-				clearAfter:     copyHintDuration,
-			})
-		}
-		now := time.Now()
-		if m.ctrlCArmed && now.Sub(m.lastCtrlCAt) <= ctrlCExitWindow {
-			m.quit = true
-			return m, tea.Quit
-		}
-		current := strings.TrimSpace(m.textarea.Value())
-		if current != "" || len(m.inputAttachments) > 0 {
-			m.recordHistoryEntry(current, m.inputAttachments)
-		}
-		m.textarea.SetValue("")
-		m.textarea.CursorStart()
-		m.adjustTextareaHeight()
-		m.input = m.input[:0]
-		m.cursor = 0
-		m.clearInputAttachments()
-		if m.cfg.ClearAttachments != nil {
-			m.cfg.ClearAttachments()
-		}
-		m.historyIndex = -1
-		m.historyDraft = ""
-		m.historyDraftAttachments = nil
-		m.ctrlCArmed = true
-		m.ctrlCArmSeq++
-		m.lastCtrlCAt = now
-		return m, tea.Batch(
-			expireCtrlCCmd(now, m.ctrlCArmSeq),
-			m.showHint("press Ctrl+C again to quit", hintOptions{
-				priority:       HintPriorityCritical,
-				clearOnMessage: false,
-				clearAfter:     ctrlCExitWindow,
-			}),
-		)
-
-	case msg.String() == "ctrl+d":
-		if !m.turnRunning() && len(m.input) == 0 && m.textarea.Value() == "" {
-			m.quit = true
-			return m, tea.Quit
-		}
-		return m, nil
-
 	case msg.String() == "ctrl+p":
 		if m.turnRunning() {
 			return m, nil
@@ -772,9 +743,6 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.syncTextareaFromInput()
 		case m.hasMentionCompletionTarget():
 			return m, m.requestMentionCompletion(0)
-		case len(m.resumeCandidates) > 0:
-			m.applyResumeCompletion()
-			m.syncTextareaFromInput()
 		case len(m.slashArgCandidates) > 0:
 			cmd := m.applySlashArgCompletion()
 			m.syncTextareaFromInput()
@@ -1242,6 +1210,18 @@ func (m *Model) submitLine(line string) (tea.Model, tea.Cmd) {
 // to normal submission.
 func (m *Model) submitInteractiveLine(execLine string, displayLine string, attachments []Attachment) (tea.Model, tea.Cmd) {
 	execLine = strings.TrimSpace(execLine)
+	if isTUIExitLine(execLine) {
+		m.quit = true
+		return m, tea.Quit
+	}
+	if execLine == "/resume" {
+		m.resetComposerAfterOverlayOpen()
+		return m, m.openSessionPicker()
+	}
+	if isSessionSelectionLine(execLine) {
+		m.resetComposerAfterOverlayOpen()
+		return m, m.executeLineCmd(Submission{Text: execLine})
+	}
 	if execLine == "" && len(attachments) == 0 {
 		return m, nil
 	}
@@ -1313,7 +1293,7 @@ func (m *Model) requestRunningInterrupt() (tea.Model, tea.Cmd) {
 		)
 	}
 	m.revokeSubmissionDispatchesForTurn(m.liveTurn.generation)
-	if m.cfg.CancelRunning == nil {
+	if m.cfg.CancelRunning == nil && m.cfg.cancelSession == nil {
 		return m, nil
 	}
 	if m.runningInterruptRequested {
@@ -1324,6 +1304,11 @@ func (m *Model) requestRunningInterrupt() (tea.Model, tea.Cmd) {
 		})
 	}
 	cancel := m.cfg.CancelRunning
+	if m.cfg.cancelSession != nil {
+		sessionID, cancelSession := m.currentSessionID, m.cfg.cancelSession
+		cancel = func() bool { return cancelSession(sessionID) }
+	}
+	generation := m.viewGeneration
 	m.runningInterruptRequested = true
 	m.setRunningInterruptActivity()
 	return m, tea.Batch(
@@ -1333,7 +1318,7 @@ func (m *Model) requestRunningInterrupt() (tea.Model, tea.Cmd) {
 			clearAfter:     systemHintDuration,
 		}),
 		func() tea.Msg {
-			return RunningInterruptResultMsg{Accepted: cancel()}
+			return sessionViewMessage{generation: generation, message: RunningInterruptResultMsg{Accepted: cancel()}}
 		},
 	)
 }
@@ -1361,6 +1346,21 @@ type resolvedSubmission struct {
 
 func (m *Model) submitLineWithDisplayAndAttachmentsOptions(execLine string, displayLine string, attachments []Attachment, opts submitLineOptions) (tea.Model, tea.Cmd) {
 	m.revokeUpdateOffer()
+	if isTUIExitLine(execLine) {
+		m.quit = true
+		return m, tea.Quit
+	}
+	if m.sessionSwitchPending {
+		return m, m.showHint("Switching Session…", hintOptions{priority: HintPriorityHigh})
+	}
+	if strings.TrimSpace(execLine) == "/resume" {
+		m.resetComposerAfterOverlayOpen()
+		return m, m.openSessionPicker()
+	}
+	if isSessionSelectionLine(execLine) {
+		m.resetComposerAfterOverlayOpen()
+		return m, m.executeLineCmd(Submission{Text: execLine})
+	}
 	alreadyRunning := m.turnRunning()
 	resolved := resolvedSubmission{
 		uiMode:         SubmissionModeDefault,
@@ -1516,6 +1516,14 @@ func (m *Model) deferLocalUserDisplayLine(line string) bool {
 }
 
 func (m *Model) executeLineCmd(submission Submission) tea.Cmd {
+	if isSessionSelectionLine(submission.Text) {
+		if m.sessionSwitchPending {
+			return nil
+		}
+		m.sessionSwitchPending = true
+	}
+	submission.viewGeneration = m.viewGeneration
+	sender := m.cfg.ProgramSender
 	return func() tea.Msg {
 		var msg tea.Msg
 		if m.cfg.executeLineCmd != nil {
@@ -1537,7 +1545,15 @@ func (m *Model) executeLineCmd(submission Submission) tea.Cmd {
 			result.FailedSubmission = &failed
 			result.SubmissionOutcome = activeSubmissionErrorOutcome(result.Err)
 		}
-		return result
+		if isSessionSelectionLine(submission.Text) && result.Err != nil {
+			result.ContinueRunning = true
+		}
+		result.sessionSelection = isSessionSelectionLine(submission.Text)
+		generation := submission.viewGeneration
+		if result.sessionSelection && sender != nil {
+			_, generation = sender.sessionView()
+		}
+		return sessionViewMessage{generation: generation, message: result}
 	}
 }
 

@@ -1796,6 +1796,7 @@ func runConnectTestCmd(m *Model, cmd tea.Cmd) {
 }
 
 func taskResultMessageForTest(msg tea.Msg, m *Model) (TaskResultMsg, bool) {
+	msg = unwrapSessionViewMessage(msg)
 	if result, ok := msg.(TaskResultMsg); ok {
 		return result, true
 	}
@@ -1821,6 +1822,7 @@ func taskResultMessageForTest(msg tea.Msg, m *Model) (TaskResultMsg, bool) {
 }
 
 func findAndRunTaskResult(msg tea.Msg, m *Model) bool {
+	msg = unwrapSessionViewMessage(msg)
 	if _, ok := msg.(TaskResultMsg); ok {
 		m.Update(msg)
 		return true

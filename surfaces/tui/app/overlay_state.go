@@ -19,6 +19,8 @@ type OverlayState struct {
 	btwOverlay   *btwOverlayState
 	btwDismissed bool
 
+	sessionPicker      *sessionPickerState
+	sessionPickerSeq   uint64
 	subagentOverlay    *subagentOverlayState
 	subagentRequestSeq uint64
 
@@ -60,16 +62,6 @@ type OverlayState struct {
 	slashSkillLoadPending bool
 	slashSkillLoadSeq     uint64
 
-	resumeActive         bool
-	resumeQuery          string
-	resumeLoaded         bool
-	resumeCandidates     []ResumeCandidate
-	resumeIndex          int
-	resumeRequestSeq     uint64
-	resumeRequestQuery   string
-	resumeRequestPending bool
-	resumeRequestCancel  context.CancelFunc
-
 	slashArgActive            bool
 	slashArgCommand           string
 	slashArgQuery             string
@@ -110,6 +102,6 @@ func (o *OverlayState) HasActiveOverlay() bool {
 		o.showPalette ||
 		len(o.mentionCandidates) > 0 ||
 		len(o.slashCandidates) > 0 ||
-		o.resumeActive ||
+		o.sessionPicker != nil ||
 		o.slashArgActive
 }

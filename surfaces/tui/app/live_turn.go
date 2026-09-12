@@ -27,6 +27,7 @@ func (m *Model) beginLiveTurn(mode SubmissionMode, divider bool, startedAt time.
 		m.nextLiveTurnGeneration++
 	}
 	m.liveTurn.Active = true
+	m.liveTurn.observed = false
 	m.liveTurn.Mode = mode
 	m.liveTurn.Divider = divider
 	m.liveTurn.StartedAt = startedAt

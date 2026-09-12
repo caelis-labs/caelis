@@ -41,11 +41,7 @@ func (a *SessionClientAdapter) StartAgentRun(
 	if strings.TrimSpace(prompt) == "" && len(contentParts) == 0 {
 		return nil, errors.New("app/gatewayapp/controladapter: direct Agent prompt input is required")
 	}
-	return a.startAdmittedTurn(ctx, func(startCtx context.Context) (appserver.TargetTurn, error) {
-		state, err := a.ensureSessionForParticipantStart(startCtx)
-		if err != nil {
-			return nil, err
-		}
+	return a.startAdmittedTurn(ctx, a.ensureSessionForParticipantStart, func(startCtx context.Context, state appserver.SessionState) (appserver.TargetTurn, error) {
 		label := allocateParticipantLabel(state.Participants, string(handle))
 		displayAddress := "/" + string(handle)
 		if runName := controlagents.FormatRunName(string(handle), label); runName != "" {
@@ -76,11 +72,7 @@ func (a *SessionClientAdapter) ContinueAgentRun(
 	if a == nil || a.participants == nil {
 		return nil, errors.New("app/gatewayapp/controladapter: participant client is unavailable")
 	}
-	return a.startAdmittedTurn(ctx, func(startCtx context.Context) (appserver.TargetTurn, error) {
-		state, err := a.currentClientSessionState(startCtx)
-		if err != nil {
-			return nil, err
-		}
+	return a.startAdmittedTurn(ctx, a.currentClientSessionState, func(startCtx context.Context, state appserver.SessionState) (appserver.TargetTurn, error) {
 		participants := make([]participantAddress, 0, len(state.Participants))
 		for _, participant := range state.Participants {
 			participants = append(participants, participantAddress{
@@ -124,11 +116,7 @@ func (a *SessionClientAdapter) StartReview(
 	if err != nil {
 		return nil, err
 	}
-	return a.startAdmittedTurn(ctx, func(startCtx context.Context) (appserver.TargetTurn, error) {
-		state, err := a.ensureSessionForParticipantStart(startCtx)
-		if err != nil {
-			return nil, err
-		}
+	return a.startAdmittedTurn(ctx, a.ensureSessionForParticipantStart, func(startCtx context.Context, state appserver.SessionState) (appserver.TargetTurn, error) {
 		return a.participants.Start(startCtx, appserver.ParticipantTurnStartRequest{
 			SessionID:      state.SessionID,
 			Handle:         string(agentbinding.HandleReviewer),

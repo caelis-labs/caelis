@@ -491,6 +491,14 @@ func (h *turnHandle) publishError(err error) {
 	h.publishEnvelope(env, "")
 }
 
+// publishStarted announces the admitted target before Runtime can emit output.
+// Reconnect restores active state separately; this notification is live-only.
+func (h *turnHandle) publishStarted() {
+	env := eventstream.TurnLifecycle(h.handleID, h.runID, h.turnID, eventstream.LifecycleStateRunning, "", "", h.createdAt)
+	env.Delivery = &eventstream.Delivery{Mode: eventstream.DeliveryTransient}
+	h.publishEnvelope(env, "")
+}
+
 func (h *turnHandle) publishEnvelope(env eventstream.Envelope, bridgeSource string) {
 	h.publishEnvelopes([]eventstream.Envelope{env}, bridgeSource)
 }

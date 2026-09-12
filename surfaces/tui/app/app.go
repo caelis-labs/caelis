@@ -185,6 +185,9 @@ func (m *Model) Init() tea.Cmd {
 	m.hasCommittedLine = m.doc.Len() > 0
 	m.syncViewportContent()
 	cmds := []tea.Cmd{tickStatusCmd(), m.loadPanePreferences()}
+	if m.cfg.InitialSessionID != "" {
+		cmds = append(cmds, m.executeLineCmd(Submission{Text: "/resume " + m.cfg.InitialSessionID}))
+	}
 	if cmd := m.beginStatusRefreshCmd(); cmd != nil {
 		cmds = append(cmds, cmd)
 	}
@@ -216,6 +219,45 @@ func (m *Model) appendWelcomeCard() {
 }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch scoped := msg.(type) {
+	case sessionViewMessage:
+		if scoped.generation != m.viewGeneration {
+			return m, nil
+		}
+		msg = scoped.message
+	case sessionViewStartMsg:
+		if scoped.generation <= m.viewGeneration {
+			return m, nil
+		}
+		m.pendingRenderEvents.reset()
+		m.renderDrainTickScheduled = false
+		m.viewGeneration = scoped.generation
+		if !scoped.automatic {
+			m.sessionSwitchPending = false
+		}
+		claimDraft := scoped.automatic && m.currentSessionID == ""
+		if claimDraft {
+			m.saveSessionDraft()
+			m.sessionDrafts[scoped.state.SessionID] = m.sessionDrafts[""]
+		}
+		cmd := m.applySessionReconnectState(scoped.state)
+		if claimDraft {
+			delete(m.sessionDrafts, "")
+		}
+		return m, cmd
+	case sessionObservationErrorMsg:
+		return m, m.showHint(scoped.err.Error(), hintOptions{priority: HintPriorityHigh})
+	}
+	if failure, ok := msg.(sessionObservationErrorMsg); ok {
+		return m, m.showHint(failure.err.Error(), hintOptions{priority: HintPriorityHigh})
+	}
+	if status, ok := msg.(StatusRefreshResultMsg); ok && status.viewGeneration != m.viewGeneration {
+		return m, nil
+	}
+	if result, ok := msg.(TaskResultMsg); ok && result.sessionSelection {
+		m.sessionSwitchPending = false
+	}
+
 	if handled, cmd := m.updateSubagentWorkspace(msg); handled {
 		return m, cmd
 	}
@@ -225,6 +267,20 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.flushPendingDeferredBatches()
 
 	switch typed := msg.(type) {
+	case sessionHistoryReadyMsg:
+		if !m.turnRunning() {
+			if pending, ok := m.pendingQueue.takeNextDeferred(); ok {
+				return m.submitPendingPromptAsIdle(pending)
+			}
+		}
+		return m, m.beginStatusRefreshCmd()
+	case sessionPickerResultMsg:
+		return m, m.applySessionPickerResult(typed)
+	case sessionPickerRefreshMsg:
+		if m.sessionPicker != nil && m.sessionPicker.request == typed.request {
+			return m, m.loadSessionPicker()
+		}
+		return m, nil
 	case taskStreamOpenedMsg:
 		return m.handleTaskStreamOpened(typed)
 
@@ -357,9 +413,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case slashArgCompletionResultMsg:
 		return m.handleSlashArgCompletionResultMsg(typed)
-
-	case resumeCompletionResultMsg:
-		return m.handleResumeCompletionResultMsg(typed)
 
 	case terminalResponsePendingFlushMsg:
 		return m.handleTerminalResponsePendingFlush(typed)

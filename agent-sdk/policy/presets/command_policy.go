@@ -49,13 +49,16 @@ func classifyRUNCommand(command string, opts policy.ModeOptions, req commandSand
 	} else if pathReason := outOfRootsRecursiveDeleteReason(command, opts); pathReason != "" {
 		reason, riskClass = pathReason, riskClassPathEscape
 	}
-	if class, gated := hostGatedCommand(reason, riskClass, req, desc); gated {
+	if remoteScriptExecution(command) {
+		reason, riskClass = "remote script execution requires approval", riskClassRemoteScript
+	}
+	if class, gated := approvalGatedCommand(reason, riskClass, req, desc, opts); gated {
 		return class
 	}
 	return commandClass{}
 }
 
-func hostGatedCommand(reason string, riskClass string, req commandSandboxRequest, desc sandbox.Descriptor) (commandClass, bool) {
+func approvalGatedCommand(reason string, riskClass string, req commandSandboxRequest, desc sandbox.Descriptor, opts policy.ModeOptions) (commandClass, bool) {
 	hostExecution := commandHostApprovalRequired(req, desc)
 	if reason == "" && !hostExecution {
 		return commandClass{}, false
@@ -78,8 +81,10 @@ func hostGatedCommand(reason string, riskClass string, req commandSandboxRequest
 		}, true
 	}
 	return commandClass{
-		Action: policy.ActionDeny,
-		Reason: reason + "; retry this exact command with sandbox_permissions=require_escalated and a concrete justification because policy requires Host review",
+		Action:      policy.ActionAskApproval,
+		Reason:      reason,
+		RiskClass:   riskClass,
+		Constraints: workspaceWriteConstraints(opts),
 	}, true
 }
 
@@ -107,10 +112,6 @@ func classifyMachineHardDeny(command string, opts policy.ModeOptions) commandCla
 		return commandClass{Action: policy.ActionDeny, Reason: "dangerous shell command is blocked", RiskClass: riskClassMachine}
 	case strings.Contains(compact, "/dev/tcp/"):
 		return commandClass{Action: policy.ActionDeny, Reason: "dangerous network shell command is blocked", RiskClass: riskClassMachine}
-	case strings.Contains(compact, "curl") && (strings.Contains(compact, "|bash") || strings.Contains(compact, "|sh")):
-		return commandClass{Action: policy.ActionDeny, Reason: "remote script execution is blocked", RiskClass: riskClassMachine}
-	case strings.Contains(compact, "wget") && (strings.Contains(compact, "|bash") || strings.Contains(compact, "|sh")):
-		return commandClass{Action: policy.ActionDeny, Reason: "remote script execution is blocked", RiskClass: riskClassMachine}
 	case commandLooksLikeDeviceWipe(compact):
 		return commandClass{Action: policy.ActionDeny, Reason: "device or filesystem wipe command is blocked", RiskClass: riskClassMachine}
 	}

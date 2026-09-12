@@ -2712,6 +2712,8 @@ func TestForwardTurnEventStreamQueuesLiveACPEnvelopes(t *testing.T) {
 	var sent []tea.Msg
 	result := forwardTurnEventStream(context.Background(), &eventstreamIntegrationTurn{events: events}, &ProgramSender{
 		Send: func(msg tea.Msg) {
+			msg = unwrapSessionViewMessage(msg)
+
 			sent = append(sent, msg)
 		},
 	})

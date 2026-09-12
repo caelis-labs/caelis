@@ -9,7 +9,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/caelis-labs/caelis/agent-sdk/display"
-	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/surfaces/internal/transcript"
@@ -36,58 +35,6 @@ func forwardTurnEventStream(ctx context.Context, turn controlprompt.Turn, sender
 	}
 	return forwardControlEventStream(ctx, turn, closureError, sender)
 }
-
-func forwardSessionReconnectEventStream(ctx context.Context, reconnect controlprompt.SessionReconnect, sender *ProgramSender) executeLineResult {
-	if reconnect == nil {
-		return executeLineResult{completion: TaskResultMsg{}}
-	}
-	events := make(chan eventstream.Envelope)
-	streamCtx, cancel := context.WithCancel(contextOrBackground(ctx))
-	defer cancel()
-	go func() {
-		defer close(events)
-		assembler := &appserver.FeedDeliveryAssembler{}
-		for {
-			select {
-			case <-streamCtx.Done():
-				return
-			case delivery, open := <-reconnect.Deliveries():
-				if !open {
-					return
-				}
-				visible, replacement, err := assembler.Accept(delivery)
-				if err != nil {
-					return
-				}
-				// The initial reconnect transaction was already rendered before
-				// this live follower started. A later replacement cannot be
-				// appended to that irreversible transcript.
-				if replacement {
-					select {
-					case <-streamCtx.Done():
-					case events <- eventstream.Error(fmt.Errorf("session replacement crossed visible reconnect output")):
-					}
-					return
-				}
-				for _, envelope := range visible {
-					select {
-					case <-streamCtx.Done():
-						return
-					case events <- envelope:
-					}
-				}
-			}
-		}
-	}()
-	return forwardControlEventStream(ctx, reconnectEventTurn{SessionReconnect: reconnect, events: events}, reconnect.Err, sender)
-}
-
-type reconnectEventTurn struct {
-	controlprompt.SessionReconnect
-	events <-chan eventstream.Envelope
-}
-
-func (t reconnectEventTurn) Events() <-chan eventstream.Envelope { return t.events }
 
 func forwardControlEventStream(
 	ctx context.Context,
@@ -123,11 +70,6 @@ func forwardControlEventStream(
 		case env, ok := <-events:
 			if !ok {
 				events = nil
-				continue
-			}
-			// The Session presence observer owns these notices across active and
-			// idle periods; the Turn/reconnect view must not render them twice.
-			if eventstream.IsSessionNotice(env) {
 				continue
 			}
 			if reason := eventStreamEnvelopeErrorReason(env); reason != "" {

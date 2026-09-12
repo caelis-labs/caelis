@@ -309,6 +309,7 @@ func TestSessionTurnClientKeepsTurnWhenUnknownOutcomeHasTarget(t *testing.T) {
 
 	target := TurnTarget{HandleID: "handle-1", RunID: "run-1", TurnID: "turn-1"}
 	subscription := newOpenSessionTurnTestSubscription()
+	var cancelCalls int
 	client := &sessionTurnTestClient{
 		inspectFn: func(context.Context, StateRequest) (SessionState, error) {
 			return SessionState{SessionID: "session-1", BoundaryCursor: "cursor-boundary"}, nil
@@ -327,6 +328,10 @@ func TestSessionTurnClientKeepsTurnWhenUnknownOutcomeHasTarget(t *testing.T) {
 				Target:      target,
 			}, NewOutcomeError(OutcomeUnknown, errors.New("effect outcome cannot be proven"))
 		},
+		cancelFn: func(_ context.Context, _ CancelRequest) (CommandResult, error) {
+			cancelCalls++
+			return CommandResult{Outcome: OutcomeCommitted}, nil
+		},
 	}
 	starter, err := NewSessionTurnClient(client)
 	if err != nil {
@@ -341,6 +346,9 @@ func TestSessionTurnClientKeepsTurnWhenUnknownOutcomeHasTarget(t *testing.T) {
 	}
 	if err := turn.Close(); err != nil {
 		t.Fatal(err)
+	}
+	if cancelCalls != 0 {
+		t.Fatalf("closing an observed unknown-outcome Turn called Cancel %d times", cancelCalls)
 	}
 }
 
@@ -388,6 +396,9 @@ func TestSessionTurnClientCancelsAfterPromptReceiptWriteFails(t *testing.T) {
 	defer turn.Close()
 	if turn.Target() != target {
 		t.Fatalf("Turn target = %#v", turn.Target())
+	}
+	if backend.calls != 1 {
+		t.Fatalf("receipt failure triggered an implicit cleanup command; backend calls = %d, want prompt only", backend.calls)
 	}
 	if err := turn.Cancel(context.Background(), "tui interrupt"); err != nil {
 		t.Fatalf("Cancel() = %v", err)

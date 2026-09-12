@@ -2,11 +2,17 @@ package controlprompt
 
 import (
 	"context"
+	"errors"
 
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
 )
+
+// ErrUserInterrupt is the cancellation cause for an explicit Surface interrupt
+// before a Turn target is available. Ordinary context cancellation detaches;
+// this cause permits cancelling a target whose admission arrives late.
+var ErrUserInterrupt = errors.New("user interrupted pending Turn admission")
 
 type Turn interface {
 	HandleID() string
@@ -24,7 +30,8 @@ type Turn interface {
 
 // SessionReconnect is the presentation-facing view of one Control-owned
 // reconnect transaction. Deliveries explicitly distinguish atomic canonical
-// replacement from exact append. Closing it never cancels the Runtime Turn.
+// replacement from exact append. The observation spans subsequent Turns until
+// closed; closing it never cancels the Runtime Turn.
 type SessionReconnect interface {
 	State() appserver.SessionState
 	HandleID() string

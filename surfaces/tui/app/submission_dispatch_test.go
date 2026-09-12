@@ -78,7 +78,7 @@ func TestExecutableSubmissionsShareRenderYieldBeforeDispatch(t *testing.T) {
 			if len(calls) != 0 {
 				t.Fatalf("ExecuteLine calls before execution command = %d, want 0", len(calls))
 			}
-			if _, ok := executeCmd().(TaskResultMsg); !ok {
+			if _, ok := unwrapSessionViewMessage(executeCmd()).(TaskResultMsg); !ok {
 				t.Fatal("execution command did not return TaskResultMsg")
 			}
 			if len(calls) != 1 {
@@ -213,7 +213,7 @@ func TestInterruptDuringRenderYieldRevokesActiveTurnDispatch(t *testing.T) {
 	if !ok || len(batch) == 0 {
 		t.Fatalf("interrupt command = %T, want non-empty batch", interruptCmd())
 	}
-	result, ok := batch[len(batch)-1]().(RunningInterruptResultMsg)
+	result, ok := unwrapSessionViewMessage(batch[len(batch)-1]()).(RunningInterruptResultMsg)
 	if !ok || !result.Accepted || cancelCalls != 1 {
 		t.Fatalf("Control cancel result = %#v calls=%d, want one accepted call", result, cancelCalls)
 	}

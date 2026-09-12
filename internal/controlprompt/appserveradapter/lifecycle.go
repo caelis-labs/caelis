@@ -36,7 +36,6 @@ func (a *SessionClientAdapter) ResetSession(ctx context.Context) error {
 	a.closeActiveTurn()
 	a.preferredID = ""
 	a.setClientSession("", "")
-	a.replaceSessionPresence(nil)
 	return nil
 }
 
@@ -48,41 +47,46 @@ func (a *SessionClientAdapter) ResumeSession(ctx context.Context, sessionID stri
 	}
 	a.sessionChangeMu.Lock()
 	defer a.sessionChangeMu.Unlock()
-	result, err := a.sessionClient.Reconnect(ctx, appserver.ReconnectRequest{SessionID: strings.TrimSpace(sessionID)})
-	if err != nil {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	feedCtx, cancelFeed := context.WithCancel(context.WithoutCancel(ctx))
+	stopAdmission := context.AfterFunc(ctx, cancelFeed)
+	result, err := a.sessionClient.Reconnect(feedCtx, appserver.ReconnectRequest{SessionID: strings.TrimSpace(sessionID)})
+	stopAdmission()
+	if err != nil || ctx.Err() != nil {
+		cancelFeed()
+		if result.Subscription != nil {
+			_ = result.Subscription.Close()
+		}
+		if err == nil {
+			err = ctx.Err()
+		}
 		return controlprompt.SessionSnapshot{}, err
 	}
 	if result.Subscription == nil {
+		cancelFeed()
 		return controlprompt.SessionSnapshot{}, errors.New("app/gatewayapp/controladapter: reconnect returned no continuation")
 	}
 	if err := a.validateTUISessionController(result.State); err != nil {
+		cancelFeed()
 		_ = result.Subscription.Close()
 		return controlprompt.SessionSnapshot{}, err
 	}
-	reconnect := &clientSessionReconnect{state: result.State, subscription: result.Subscription, client: a.sessionClient}
+	reconnect := &clientSessionReconnect{state: result.State, subscription: result.Subscription, client: a.sessionClient, stopFeed: cancelFeed}
 	if err := reconnect.prepareBootstrapEvents(); err != nil {
 		_ = reconnect.Close()
 		return controlprompt.SessionSnapshot{}, err
 	}
-	var presence *sessionPresence
 	abort := true
 	defer func() {
 		if !abort {
 			return
 		}
 		_ = reconnect.Close()
-		if presence != nil {
-			_ = presence.Close()
-		}
 	}()
 	if strings.TrimSpace(result.State.SessionID) != strings.TrimSpace(sessionID) {
 		return controlprompt.SessionSnapshot{}, errors.New("app/gatewayapp/controladapter: reconnect state belongs to another Session")
-	}
-	if a.tracksSessionPresence() {
-		presence, err = a.openSessionPresence(result.State)
-		if err != nil {
-			return controlprompt.SessionSnapshot{}, err
-		}
 	}
 	registerActive := result.State.Run.Active || result.State.Approval.Active != nil
 	if registerActive {
@@ -93,11 +97,8 @@ func (a *SessionClientAdapter) ResumeSession(ctx context.Context, sessionID stri
 	}
 	a.closeActiveTurn()
 	a.setClientSession(result.State.SessionID, result.State.CWD)
-	a.replaceSessionPresence(presence)
-	if registerActive {
-		reconnect.onClose = func() { a.clearActiveReconnect(reconnect) }
-		a.setActiveReconnect(reconnect)
-	}
+	reconnect.onClose = func() { a.clearActiveReconnect(reconnect) }
+	a.setActiveReconnect(reconnect)
 	abort = false
 	return controlprompt.SessionSnapshot{SessionID: result.State.SessionID, Reconnect: reconnect}, nil
 }
@@ -110,116 +111,9 @@ func (a *SessionClientAdapter) Close() error {
 	}
 	a.sessionChangeMu.Lock()
 	defer a.sessionChangeMu.Unlock()
-	a.cancelTurnAdmissions(nil)
+	a.cancelTurnAdmissions(nil, "")
 	a.closeActiveTurn()
-	a.replaceSessionPresence(nil)
 	return nil
-}
-
-type sessionPresence struct {
-	subscription appserver.FeedSubscription
-	cancel       context.CancelFunc
-	done         chan struct{}
-	once         sync.Once
-	sessionID    string
-	onNotice     func(eventstream.Envelope)
-}
-
-func (a *SessionClientAdapter) openSessionPresence(
-	state appserver.SessionState,
-) (*sessionPresence, error) {
-	if a == nil || a.sessionClient == nil {
-		return nil, errors.New("app/gatewayapp/controladapter: Session client is unavailable")
-	}
-	sessionID := strings.TrimSpace(state.SessionID)
-	if sessionID == "" {
-		return nil, session.ErrInvalidSession
-	}
-	presenceCtx, cancel := context.WithCancel(context.Background())
-	result, err := a.sessionClient.Reconnect(presenceCtx, appserver.ReconnectRequest{
-		SessionID: sessionID,
-		Cursor:    strings.TrimSpace(state.BoundaryCursor),
-	})
-	if err != nil {
-		cancel()
-		return nil, err
-	}
-	if result.Subscription == nil {
-		cancel()
-		return nil, errors.New("app/gatewayapp/controladapter: Session presence returned no continuation")
-	}
-	if strings.TrimSpace(result.State.SessionID) != sessionID {
-		_ = result.Subscription.Close()
-		cancel()
-		return nil, errors.New("app/gatewayapp/controladapter: Session presence belongs to another Session")
-	}
-	presence := &sessionPresence{
-		subscription: result.Subscription,
-		cancel:       cancel,
-		done:         make(chan struct{}),
-		sessionID:    sessionID,
-		onNotice:     a.onSessionNotice,
-	}
-	go presence.drain(presenceCtx)
-	return presence, nil
-}
-
-func (a *SessionClientAdapter) replaceSessionPresence(next *sessionPresence) {
-	if a == nil {
-		if next != nil {
-			_ = next.Close()
-		}
-		return
-	}
-	a.activeMu.Lock()
-	previous := a.presence
-	a.presence = next
-	a.activeMu.Unlock()
-	if previous != nil && previous != next {
-		_ = previous.Close()
-	}
-}
-
-func (p *sessionPresence) drain(ctx context.Context) {
-	defer close(p.done)
-	defer p.subscription.Close()
-	assembler := &appserver.FeedDeliveryAssembler{}
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case delivery, open := <-p.subscription.Deliveries():
-			if !open {
-				return
-			}
-			events, _, err := assembler.Accept(delivery)
-			if err != nil {
-				return
-			}
-			for _, envelope := range events {
-				if envelope.SessionID == p.sessionID && eventstream.IsSessionNotice(envelope) && p.onNotice != nil {
-					p.onNotice(eventstream.CloneEnvelope(envelope))
-				}
-			}
-		}
-	}
-}
-
-func (p *sessionPresence) Close() error {
-	if p == nil {
-		return nil
-	}
-	var err error
-	p.once.Do(func() {
-		p.cancel()
-		err = p.subscription.Close()
-		<-p.done
-	})
-	return err
-}
-
-func (a *SessionClientAdapter) tracksSessionPresence() bool {
-	return a != nil && strings.EqualFold(strings.TrimSpace(a.surface), "cli-tui")
 }
 
 func (a *SessionClientAdapter) validateTUISessionController(state appserver.SessionState) error {
@@ -270,6 +164,8 @@ func (a *SessionClientAdapter) closeActiveTurn() {
 }
 
 type clientSessionReconnect struct {
+	stateMu      sync.RWMutex
+	stopFeed     context.CancelFunc
 	state        appserver.SessionState
 	subscription appserver.FeedSubscription
 	client       appserver.SessionClient
@@ -279,11 +175,13 @@ type clientSessionReconnect struct {
 }
 
 func (r *clientSessionReconnect) State() appserver.SessionState {
+	r.stateMu.RLock()
+	defer r.stateMu.RUnlock()
 	return cloneReconnectState(r.state)
 }
-func (r *clientSessionReconnect) HandleID() string { return strings.TrimSpace(r.state.Run.HandleID) }
-func (r *clientSessionReconnect) RunID() string    { return strings.TrimSpace(r.state.Run.RunID) }
-func (r *clientSessionReconnect) TurnID() string   { return strings.TrimSpace(r.state.Run.TurnID) }
+func (r *clientSessionReconnect) HandleID() string { return r.target().HandleID }
+func (r *clientSessionReconnect) RunID() string    { return r.target().RunID }
+func (r *clientSessionReconnect) TurnID() string   { return r.target().TurnID }
 func (r *clientSessionReconnect) Deliveries() <-chan appserver.FeedDelivery {
 	if r == nil || r.subscription == nil {
 		closed := make(chan appserver.FeedDelivery)
@@ -331,13 +229,14 @@ func (r *clientSessionReconnect) SubmitApproval(ctx context.Context, decision co
 	if r == nil || r.client == nil {
 		return errors.New("app/gatewayapp/controladapter: reconnect client is unavailable")
 	}
-	base, err := r.writeBase(ctx, "reconnect-approval")
+	state := r.State()
+	base, err := r.writeBase(ctx, "reconnect-approval", state)
 	if err != nil {
 		return err
 	}
 	_, err = r.client.ResolveApproval(ctx, appserver.ResolveApprovalRequest{
 		WriteBase:         base,
-		Target:            r.target(),
+		Target:            reconnectTarget(state),
 		ApprovalRequestID: string(decision.RequestID), Outcome: strings.TrimSpace(decision.Outcome),
 		OptionID: strings.TrimSpace(decision.OptionID), Approved: decision.Approved,
 		Reason: strings.TrimSpace(decision.Reason), ReviewText: strings.TrimSpace(decision.ReviewText),
@@ -350,46 +249,58 @@ func (r *clientSessionReconnect) Cancel() {
 }
 
 func (r *clientSessionReconnect) steer(ctx context.Context, input, displayInput string, contentParts []model.ContentPart) error {
-	if r == nil || r.client == nil || !r.state.Run.Active {
+	if r == nil || r.client == nil {
 		return appserver.NewOutcomeError(appserver.OutcomeRejected, noActiveTurnSubmissionError())
 	}
-	base, err := r.writeBase(ctx, "reconnect-steer")
+	state := r.State()
+	if !state.Run.Active {
+		return appserver.NewOutcomeError(appserver.OutcomeRejected, noActiveTurnSubmissionError())
+	}
+	base, err := r.writeBase(ctx, "reconnect-steer", state)
 	if err != nil {
 		return appserver.NewOutcomeError(appserver.OutcomeRejected, err)
 	}
 	result, err := r.client.Steer(ctx, appserver.SteerRequest{
-		WriteBase: base, Target: r.target(), Input: input, DisplayInput: displayInput,
+		WriteBase: base, Target: reconnectTarget(state), Input: input, DisplayInput: displayInput,
 		ContentParts: append([]model.ContentPart(nil), contentParts...),
 	})
 	return appserver.CommandMutationError(result, err)
 }
 
 func (r *clientSessionReconnect) cancel(ctx context.Context, reason string) error {
-	if r == nil || r.client == nil || !r.state.Run.Active {
+	if r == nil || r.client == nil {
 		return noActiveTurnSubmissionError()
 	}
-	base, err := r.writeBase(ctx, "reconnect-cancel")
+	state := r.State()
+	if !state.Run.Active {
+		return noActiveTurnSubmissionError()
+	}
+	base, err := r.writeBase(ctx, "reconnect-cancel", state)
 	if err != nil {
 		return err
 	}
 	_, err = r.client.Cancel(ctx, appserver.CancelRequest{
-		WriteBase: base, Target: r.target(), Reason: strings.TrimSpace(reason),
+		WriteBase: base, Target: reconnectTarget(state), Reason: strings.TrimSpace(reason),
 	})
 	return err
 }
 
-func (r *clientSessionReconnect) writeBase(ctx context.Context, prefix string) (appserver.WriteBase, error) {
+func (r *clientSessionReconnect) writeBase(ctx context.Context, prefix string, observed appserver.SessionState) (appserver.WriteBase, error) {
 	if r == nil || r.client == nil {
 		return appserver.WriteBase{}, errors.New("app/gatewayapp/controladapter: reconnect client is unavailable")
 	}
-	state, err := r.client.InspectSession(ctx, appserver.StateRequest{SessionID: r.state.SessionID})
+	state, err := r.client.InspectSession(ctx, appserver.StateRequest{SessionID: observed.SessionID})
+	if err != nil {
+		return appserver.WriteBase{}, err
+	}
+	epoch, err := r.observedControllerEpoch(observed, state)
 	if err != nil {
 		return appserver.WriteBase{}, err
 	}
 	revision := state.Revision
 	return appserver.WriteBase{
-		OperationID: prefix + "-" + uuid.NewString(), SessionID: r.state.SessionID,
-		ExpectedRevision: &revision, ExpectedControllerEpoch: strings.TrimSpace(r.state.Controller.EpochID),
+		OperationID: prefix + "-" + uuid.NewString(), SessionID: observed.SessionID,
+		ExpectedRevision: &revision, ExpectedControllerEpoch: epoch,
 	}, nil
 }
 
@@ -397,10 +308,14 @@ func (r *clientSessionReconnect) target() appserver.TurnTarget {
 	if r == nil {
 		return appserver.TurnTarget{}
 	}
+	return reconnectTarget(r.State())
+}
+
+func reconnectTarget(state appserver.SessionState) appserver.TurnTarget {
 	return appserver.TurnTarget{
-		HandleID: strings.TrimSpace(r.state.Run.HandleID),
-		RunID:    strings.TrimSpace(r.state.Run.RunID),
-		TurnID:   strings.TrimSpace(r.state.Run.TurnID),
+		HandleID: strings.TrimSpace(state.Run.HandleID),
+		RunID:    strings.TrimSpace(state.Run.RunID),
+		TurnID:   strings.TrimSpace(state.Run.TurnID),
 	}
 }
 
@@ -409,10 +324,15 @@ func (r *clientSessionReconnect) Close() error {
 		return nil
 	}
 	var err error
-	r.closeOnce.Do(func() { err = r.subscription.Close() })
-	if r.onClose != nil {
-		r.onClose()
-	}
+	r.closeOnce.Do(func() {
+		if r.stopFeed != nil {
+			r.stopFeed()
+		}
+		err = r.subscription.Close()
+		if r.onClose != nil {
+			r.onClose()
+		}
+	})
 	return err
 }
 

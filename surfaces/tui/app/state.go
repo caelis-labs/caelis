@@ -59,6 +59,8 @@ type liveTurnState struct {
 	LastDuration    time.Duration
 	HasLastDuration bool
 	generation      uint64
+	// observed distinguishes a Host-owned Turn from provisional local admission.
+	observed bool
 }
 
 type compactNoticePairState struct {
@@ -106,7 +108,6 @@ type Diagnostics struct {
 	LastMentionLatency          time.Duration
 	LastSlashSkillLatency       time.Duration
 	LastSlashArgLatency         time.Duration
-	LastResumeLatency           time.Duration
 	RedrawMode                  string
 }
 
@@ -129,6 +130,7 @@ type Config struct {
 	ShowWelcomeCard        bool
 	WelcomeNotice          string // Optional product announcement; empty uses the default command hint.
 	FullAccessMode         bool   // process-owned Host escape; persistent YOLO footer badge
+	InitialSessionID       string
 	InitialLogs            []string
 	InitialPrompt          *PromptRequestMsg
 	Commands               []string
@@ -144,6 +146,7 @@ type Config struct {
 	executeLineCmd         func(Submission) tea.Msg
 	CanSubmitRunningPrompt func() bool
 	CancelRunning          func() bool
+	cancelSession          func(string) bool
 	ToggleMode             func() (string, error)
 	ModeLabel              func() string
 	RefreshWorkspace       func() string
@@ -152,7 +155,7 @@ type Config struct {
 	RefreshStatusView      func() StatusViewModel
 	FileComplete           func(context.Context, string, int) ([]CompletionCandidate, error)
 	SkillComplete          func(string, int) ([]CompletionCandidate, error)
-	ResumeComplete         func(context.Context, string, int) ([]ResumeCandidate, error)
+	ListSessions           func(context.Context) ([]ResumeCandidate, error)
 	SlashArgComplete       func(context.Context, string, string, int) ([]SlashArgCandidate, error)
 	ReadClipboardText      func() (string, error)
 	WriteClipboardText     func(string) error
@@ -186,6 +189,7 @@ type CompletionCandidate struct {
 }
 
 type ResumeCandidate struct {
+	Running   bool
 	SessionID string
 	Title     string
 	Prompt    string
@@ -244,6 +248,8 @@ type streamPlaybackMetrics struct {
 }
 
 type promptState struct {
+	dismiss             func()
+	approvalRequestID   string
 	title               string
 	prompt              string
 	details             []PromptDetail
@@ -369,6 +375,9 @@ type Model struct {
 	// feed. Spawn output views and RunCommand panels own subscriptions by their
 	// producer call ID; Task control calls never own or redirect them. These maps
 	// are mutated only by the Bubble Tea update loop.
+	viewGeneration           uint64
+	sessionSwitchPending     bool
+	sessionDrafts            map[string]sessionDraft
 	currentSessionID         string
 	taskStreamWanted         map[string]bool
 	taskStreamTokens         map[string]uint64

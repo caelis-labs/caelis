@@ -94,9 +94,6 @@ func (m *Model) refreshCompletionOverlaysBeforeAccept(msg tea.KeyMsg) {
 	switch {
 	case len(m.mentionCandidates) > 0:
 		m.dropStaleMentionCandidates()
-	case !m.turnRunning() && (m.resumeActive || len(m.resumeCandidates) > 0):
-		// Resume completion is asynchronous. Accept/complete never waits for
-		// Control or Store I/O on the Bubble Tea event loop.
 	case !m.turnRunning() && m.slashArgActive:
 		m.dropStaleSlashArgCandidates()
 	case len(m.slashCandidates) > 0:
@@ -106,25 +103,17 @@ func (m *Model) refreshCompletionOverlaysBeforeAccept(msg tea.KeyMsg) {
 
 func (m *Model) refreshCompletionOverlaysNow() tea.Cmd {
 	mentionCmd := m.requestMentionCompletion(0)
-	var resumeCmd tea.Cmd
 	var slashArgCmd tea.Cmd
 	if !m.turnRunning() {
-		if m.isWizardActive() {
-			if m.resumeActive {
-				resumeCmd = m.updateResumeCandidates()
-			}
-		} else {
+		if !m.isWizardActive() {
 			m.syncSlashInputOverlayState()
-			if m.resumeActive {
-				resumeCmd = m.updateResumeCandidates()
-			}
 		}
 		if m.slashArgActive && !m.mentionRequestPending && len(m.mentionCandidates) == 0 {
 			slashArgCmd = m.requestCurrentSlashArgCompletion()
 		}
 	}
 	m.refreshSlashCommands()
-	return tea.Batch(mentionCmd, resumeCmd, slashArgCmd, m.requestSlashSkillCatalog())
+	return tea.Batch(mentionCmd, slashArgCmd, m.requestSlashSkillCatalog())
 }
 
 // ---------------------------------------------------------------------------
@@ -340,195 +329,8 @@ func (m *Model) loadMoreMentionCandidates() tea.Cmd {
 	return m.requestMentionCompletion(limit, true)
 }
 
-// ---------------------------------------------------------------------------
-// /resume completion
-// ---------------------------------------------------------------------------
-
-func (m *Model) clearResume() {
-	m.cancelResumeRequest()
-	m.resumeActive = false
-	m.resumeQuery = ""
-	m.resumeLoaded = false
-	m.resumeCandidates = nil
-	m.resumeIndex = 0
-}
-
-func (m *Model) openResumePicker() {
-	m.clearMention()
-	m.clearSlashArg()
-	m.clearSlashCompletion()
-	m.resumeActive = true
-	m.setInputText("/resume ")
-	m.syncTextareaFromInput()
-}
-
-func (m *Model) activateResumePickerFromInput() {
-	if m.resumeActive {
-		return
-	}
-	m.clearMention()
-	m.clearSlashArg()
-	m.clearSlashCompletion()
-	m.resumeActive = true
-}
-
-func (m *Model) cancelResumeRequest() {
-	if m.resumeRequestCancel != nil {
-		m.resumeRequestCancel()
-	}
-	m.resumeRequestCancel = nil
-	m.resumeRequestPending = false
-	m.resumeRequestQuery = ""
-	m.resumeRequestSeq++
-}
-
-func (m *Model) updateResumeCandidates() tea.Cmd {
-	if !m.resumeActive || m.cfg.ResumeComplete == nil || m.turnRunning() {
-		m.cancelResumeRequest()
-		m.resumeCandidates = nil
-		m.resumeQuery = ""
-		m.resumeLoaded = false
-		m.resumeIndex = 0
-		return nil
-	}
-	// Avoid overlapping popups.
-	if len(m.mentionCandidates) > 0 || len(m.slashArgCandidates) > 0 {
-		m.cancelResumeRequest()
-		m.resumeCandidates = nil
-		m.resumeLoaded = false
-		return nil
-	}
-	query, ok := resumeQueryAtEnd([]rune(m.textarea.Value()))
-	if !ok {
-		m.cancelResumeRequest()
-		m.resumeCandidates = nil
-		m.resumeQuery = ""
-		m.resumeLoaded = false
-		m.resumeIndex = 0
-		return nil
-	}
-	if m.resumeRequestPending && query == m.resumeRequestQuery {
-		return nil
-	}
-	if !m.resumeRequestPending && m.resumeLoaded && query == m.resumeQuery {
-		return nil
-	}
-	if m.resumeRequestCancel != nil {
-		m.resumeRequestCancel()
-	}
-	requestCtx := m.cfg.Context
-	if requestCtx == nil {
-		requestCtx = context.Background()
-	}
-	requestCtx, cancel := context.WithCancel(requestCtx)
-	m.resumeRequestSeq++
-	seq := m.resumeRequestSeq
-	m.resumeRequestQuery = query
-	m.resumeRequestPending = true
-	m.resumeRequestCancel = cancel
-	m.resumeCandidates = nil
-	m.resumeLoaded = false
-	complete := m.cfg.ResumeComplete
-	return func() tea.Msg {
-		started := time.Now()
-		candidates, err := complete(requestCtx, query, 200)
-		return resumeCompletionResultMsg{
-			seq: seq, query: query, candidates: candidates, err: err, latency: time.Since(started),
-		}
-	}
-}
-
-func (m *Model) handleResumeCompletionResultMsg(msg resumeCompletionResultMsg) (tea.Model, tea.Cmd) {
-	if m == nil || msg.seq != m.resumeRequestSeq || msg.query != m.resumeRequestQuery {
-		return m, nil
-	}
-	m.resumeRequestPending = false
-	cancel := m.resumeRequestCancel
-	m.resumeRequestCancel = nil
-	if cancel != nil {
-		cancel()
-	}
-	m.diag.LastResumeLatency = msg.latency
-	query, ok := resumeQueryAtEnd([]rune(m.textarea.Value()))
-	if !m.resumeActive || !ok || query != msg.query || m.turnRunning() {
-		return m, nil
-	}
-	if msg.err != nil || len(msg.candidates) == 0 {
-		m.resumeCandidates = nil
-		m.resumeQuery = query
-		m.resumeLoaded = msg.err == nil
-		m.resumeIndex = 0
-		return m, nil
-	}
-	candidates := append([]ResumeCandidate(nil), msg.candidates...)
-	m.resumeIndex = normalizeFilteredSelection(m.resumeIndex, query, m.resumeQuery, len(candidates))
-	m.resumeQuery = query
-	m.resumeLoaded = true
-	m.resumeCandidates = candidates
-	return m, nil
-}
-
-func (m *Model) applyResumeCompletion() {
-	if len(m.resumeCandidates) == 0 {
-		return
-	}
-	choice := strings.TrimSpace(m.resumeCandidates[m.resumeIndex].SessionID)
-	if choice == "" {
-		return
-	}
-	m.setInputText("/resume " + choice + " ")
-	m.clearResume()
-}
-
-func (m *Model) handleResumeKey(msg tea.KeyMsg) (bool, tea.Cmd) {
-	switch {
-	case key.Matches(msg, m.keys.Back):
-		if _, ok := resumeQueryAtCursor(m.input, m.cursor); ok {
-			m.setInputText("")
-			m.syncTextareaFromInput()
-		}
-		m.clearResume()
-		return true, nil
-	case key.Matches(msg, m.keys.ChoosePrev):
-		if len(m.resumeCandidates) > 0 {
-			m.moveActiveCompletionSelection(-1, true)
-		}
-		return true, nil
-	case key.Matches(msg, m.keys.ChooseNext):
-		if len(m.resumeCandidates) > 0 {
-			m.moveActiveCompletionSelection(1, true)
-		}
-		return true, nil
-	case key.Matches(msg, m.keys.Complete):
-		if len(m.resumeCandidates) == 0 {
-			m.resumeLoaded = false
-			return true, m.updateResumeCandidates()
-		}
-		m.applyResumeCompletion()
-		m.syncTextareaFromInput()
-		return true, nil
-	case key.Matches(msg, m.keys.Accept):
-		if m.turnRunning() {
-			return true, nil
-		}
-		if len(m.resumeCandidates) == 0 {
-			m.resumeLoaded = false
-			return true, m.updateResumeCandidates()
-		}
-		selected := strings.TrimSpace(m.resumeCandidates[m.resumeIndex].SessionID)
-		if selected == "" {
-			return true, nil
-		}
-		_, cmd := m.submitLine("/resume " + selected)
-		return true, cmd
-	default:
-		return false, nil
-	}
-}
-
 func (m *Model) clearInputOverlays() {
 	m.clearMention()
-	m.clearResume()
 	m.clearSlashArg()
 	m.clearSlashCompletion()
 	if m.showPalette {

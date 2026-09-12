@@ -39,6 +39,7 @@ const (
 	riskClassVCSDestructive = "vcs_destructive"
 	riskClassPathEscape     = "path_escape"
 	riskClassHostExec       = "host_exec"
+	riskClassRemoteScript   = "remote_script"
 )
 
 func NormalizeModeName(mode string) string {

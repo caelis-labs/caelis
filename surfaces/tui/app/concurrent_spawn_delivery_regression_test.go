@@ -79,7 +79,10 @@ func TestConcurrentSpawnForwarderPreservesEveryToolEnvelope(t *testing.T) {
 
 	var sent []tea.Msg
 	result := forwardTurnEventStream(context.Background(), &eventstreamIntegrationTurn{events: events}, &ProgramSender{
-		Send: func(message tea.Msg) { sent = append(sent, message) },
+		Send: func(message tea.Msg) {
+			message = unwrapSessionViewMessage(message)
+			sent = append(sent, message)
+		},
 	})
 	if !result.queued {
 		t.Fatalf("forward result = %#v, want queued terminal", result)
