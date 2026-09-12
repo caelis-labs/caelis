@@ -2,6 +2,7 @@ package tuiapp
 
 import (
 	"context"
+	"image/color"
 	"time"
 
 	"charm.land/bubbles/v2/help"
@@ -329,7 +330,10 @@ type Model struct {
 	cfg           Config
 	theme         tuikit.Theme
 	themeCacheKey string
-	themeAuto     bool
+	themeName     string
+	terminalBg    color.Color
+	terminalDark  bool
+	themePicker   *themePickerState
 	noColor       bool
 	noAnimation   bool
 	colorProfile  colorprofile.Profile

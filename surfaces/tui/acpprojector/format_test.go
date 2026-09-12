@@ -139,3 +139,22 @@ func TestFormatToolStartKeepsGenericArgs(t *testing.T) {
 		t.Fatalf("FormatToolStart(ExternalList metadata) = %q, want generic JSON", got)
 	}
 }
+
+func TestExternalDiffLargeSparseEditsStayLocalized(t *testing.T) {
+	before := "old first\n" + strings.Repeat("same middle\n", 1400) + "old last\n"
+	after := "new first\n" + strings.Repeat("same middle\n", 1400) + "new last\n"
+	text := FormatToolContent([]ToolContent{{Type: "diff", Path: "large.go", OldText: &before, NewText: after}})
+	if !strings.Contains(text, "large.go +2 -2") || strings.Count(text, "@@ -") != 2 {
+		t.Fatalf("sparse external diff lost locality: %s", text)
+	}
+	if strings.Contains(text, "-same middle") || strings.Contains(text, "+same middle") {
+		t.Fatal("unchanged lines became changes")
+	}
+}
+
+func TestExternalDiffPreservesAnEmptySourceLine(t *testing.T) {
+	got := buildUnifiedLines("", "\n")
+	if len(got) != 2 || got[1] != "+" {
+		t.Fatalf("blank source insertion = %#v", got)
+	}
+}

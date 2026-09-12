@@ -3,12 +3,14 @@ package tuikit
 import (
 	"image/color"
 
+	"charm.land/lipgloss/v2"
+	"github.com/alecthomas/chroma/v2"
 	"github.com/charmbracelet/colorprofile"
 )
 
 const (
-	CatppuccinMochaChromaTheme = "catppuccin-mocha"
-	CatppuccinLatteChromaTheme = "catppuccin-latte"
+	CatppuccinMochaChromaTheme = "caelis-catppuccin-mocha"
+	CatppuccinLatteChromaTheme = "caelis-catppuccin-latte"
 
 	// The Glamour adapter registers these named Chroma styles from the same
 	// semantic palettes used by shell and inline-code rendering.
@@ -37,8 +39,6 @@ func SyntaxPaletteForTheme(theme Theme) SyntaxPalette {
 	switch theme.Name {
 	case "caelis-dusk", "caelis-dawn":
 		return caelisSyntaxPalette(theme)
-	case "catppuccin-mocha", "catppuccin-latte":
-		return catppuccinSyntaxPalette(theme.IsDark, theme.Profile)
 	default:
 		return semanticSyntaxPalette(theme)
 	}
@@ -99,75 +99,42 @@ func caelisSyntaxPalette(theme Theme) SyntaxPalette {
 	}
 }
 
+// Community syntax is read from Chroma's pinned upstream styles. Shell tokens,
+// Markdown and rich diffs therefore share one authoritative token mapping.
 func semanticSyntaxPalette(theme Theme) SyntaxPalette {
-	chromaTheme := CatppuccinMochaChromaTheme
-	switch theme.Name {
-	case "nord":
-		chromaTheme = "nord"
+	name := theme.Name
+	switch name {
 	case "solarized":
-		chromaTheme = "solarized-dark"
-	case "dracula":
-		chromaTheme = "dracula"
+		name = "solarized-dark"
+	case "nord", "dracula", "catppuccin-mocha", "catppuccin-latte":
 	default:
+		name = "catppuccin-mocha"
 		if !theme.IsDark {
-			chromaTheme = CatppuccinLatteChromaTheme
+			name = "catppuccin-latte"
 		}
 	}
-	return SyntaxPalette{
-		ChromaTheme:      chromaTheme,
-		Text:             theme.TextPrimary,
-		Background:       theme.ModalBg,
-		InlineBackground: firstColor(theme.TranscriptPillBg, theme.ModalBg),
-		Comment:          firstColor(theme.MutedText, theme.TextSecondary),
-		Keyword:          firstColor(theme.Accent, theme.TextPrimary),
-		Function:         firstColor(theme.Focus, theme.TextPrimary),
-		String:           firstColor(theme.Success, theme.TextPrimary),
-		Number:           firstColor(theme.Warning, theme.TextPrimary),
-		Operator:         firstColor(theme.ToolFg, theme.TextSecondary),
-		Path:             firstColor(theme.LinkFg, theme.TextPrimary),
-		Variable:         firstColor(theme.SecondaryText, theme.TextPrimary),
-		Deleted:          firstColor(theme.DiffRemoveFg, theme.Error),
-		Inserted:         firstColor(theme.DiffAddFg, theme.Success),
-	}
-}
-
-func catppuccinSyntaxPalette(dark bool, profile colorprofile.Profile) SyntaxPalette {
+	style := communitySyntaxStyles[name]
+	profile := theme.Profile
 	if profile == colorprofile.Unknown {
 		profile = colorprofile.TrueColor
 	}
-	if dark {
-		return SyntaxPalette{
-			ChromaTheme:      CatppuccinMochaChromaTheme,
-			Text:             syntaxColor(profile, "#cdd6f4", "189", "7"),
-			Background:       syntaxColor(profile, "#1e1e2e", "235", ""),
-			InlineBackground: syntaxColor(profile, "#181825", "", ""),
-			Comment:          syntaxColor(profile, "#6c7086", "242", "8"),
-			Keyword:          syntaxColor(profile, "#cba6f7", "183", "5"),
-			Function:         syntaxColor(profile, "#89b4fa", "111", "6"),
-			String:           syntaxColor(profile, "#a6e3a1", "151", "2"),
-			Number:           syntaxColor(profile, "#fab387", "216", "3"),
-			Operator:         syntaxColor(profile, "#89dceb", "117", "6"),
-			Path:             syntaxColor(profile, "#89b4fa", "111", "6"),
-			Variable:         syntaxColor(profile, "#f5e0dc", "224", "5"),
-			Deleted:          syntaxColor(profile, "#f38ba8", "211", "1"),
-			Inserted:         syntaxColor(profile, "#a6e3a1", "151", "2"),
+	c := func(token chroma.TokenType) color.Color {
+		if theme.NoColor {
+			return nil
 		}
+		value := style.Get(token).Colour
+		if !value.IsSet() {
+			return theme.TextPrimary
+		}
+		return profile.Convert(lipgloss.Color(value.String()))
 	}
 	return SyntaxPalette{
-		ChromaTheme:      CatppuccinLatteChromaTheme,
-		Text:             syntaxColor(profile, "#4c4f69", "60", "0"),
-		Background:       syntaxColor(profile, "#eff1f5", "255", ""),
-		InlineBackground: syntaxColor(profile, "#eff1f5", "", ""),
-		Comment:          syntaxColor(profile, "#9ca0b0", "247", "8"),
-		Keyword:          syntaxColor(profile, "#8839ef", "93", "5"),
-		Function:         syntaxColor(profile, "#1e66f5", "33", "4"),
-		String:           syntaxColor(profile, "#40a02b", "70", "2"),
-		Number:           syntaxColor(profile, "#fe640b", "202", "3"),
-		Operator:         syntaxColor(profile, "#04a5e5", "39", "6"),
-		Path:             syntaxColor(profile, "#1e66f5", "33", "4"),
-		Variable:         syntaxColor(profile, "#dc8a78", "174", "5"),
-		Deleted:          syntaxColor(profile, "#d20f39", "160", "1"),
-		Inserted:         syntaxColor(profile, "#40a02b", "70", "2"),
+		ChromaTheme: style.Name, Text: c(chroma.Text), Background: theme.AppBg,
+		InlineBackground: firstColor(theme.TranscriptPillBg, theme.ModalBg),
+		Comment:          c(chroma.Comment), Keyword: c(chroma.Keyword), Function: c(chroma.NameFunction),
+		String: c(chroma.LiteralString), Number: c(chroma.LiteralNumber), Operator: c(chroma.Operator),
+		Path: theme.LinkFg, Variable: c(chroma.NameVariable),
+		Deleted: c(chroma.GenericDeleted), Inserted: c(chroma.GenericInserted),
 	}
 }
 

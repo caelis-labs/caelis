@@ -1225,6 +1225,9 @@ func (m *Model) submitInteractiveLine(execLine string, displayLine string, attac
 	if execLine == "" && len(attachments) == 0 {
 		return m, nil
 	}
+	if slashCommandName(execLine) == "theme" {
+		return m, m.submitThemeCommand(execLine)
+	}
 	mode := m.submissionModeForLine(execLine)
 	if m.turnRunning() {
 		if m.isConfiguredSlashControlLine(execLine) && !isSessionSelectionLine(execLine) && mode != SubmissionModeOverlay {

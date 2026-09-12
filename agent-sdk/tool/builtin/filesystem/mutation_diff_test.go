@@ -141,3 +141,32 @@ func TestPatchToolAddsStructuredDiffHunksOnlyToMeta(t *testing.T) {
 		t.Fatalf("model-visible result leaked diff_hunks: %s", modelVisible)
 	}
 }
+
+func TestSparseLargeMutationDiffRetainsUnchangedMiddle(t *testing.T) {
+	oldLines := make([]string, 1600)
+	for i := range oldLines {
+		oldLines[i] = "// shared context"
+	}
+	oldLines[3], oldLines[1500] = "old first", "old last"
+	newLines := append([]string(nil), oldLines...)
+	newLines[3], newLines[1500] = "new first", "new last"
+	before, after := strings.Join(oldLines, "\n"), strings.Join(newLines, "\n")
+	stats := CountLineDiff(before, after)
+	if stats.Added != 2 || stats.Removed != 2 {
+		t.Fatalf("sparse diff stats = %+v", stats)
+	}
+	hunks, truncated := BuildMutationDiffHunks(before, after, 2, 64, 800)
+	if truncated || len(hunks) != 2 {
+		t.Fatalf("sparse diff produced %d hunks, truncated=%v", len(hunks), truncated)
+	}
+	if hunks[0].OldStart != 2 || hunks[1].OldStart != 1499 {
+		t.Fatalf("hunk positions = %+v", hunks)
+	}
+	for _, hunk := range hunks {
+		for _, line := range hunk.Lines {
+			if line == "-// shared context" || line == "+// shared context" {
+				t.Fatal("unchanged middle rendered as replacement")
+			}
+		}
+	}
+}

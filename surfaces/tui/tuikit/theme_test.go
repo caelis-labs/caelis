@@ -125,29 +125,6 @@ func TestTerminalColorIndexIsDarkCoversANSI256(t *testing.T) {
 	}
 }
 
-func TestThemeUsesAutoBackground(t *testing.T) {
-	t.Setenv("NO_COLOR", "")
-	t.Setenv("CAELIS_THEME", "")
-	if !ThemeUsesAutoBackground() {
-		t.Fatal("expected empty theme to use auto background detection")
-	}
-
-	t.Setenv("CAELIS_THEME", "auto")
-	if !ThemeUsesAutoBackground() {
-		t.Fatal("expected auto theme to use background detection")
-	}
-
-	t.Setenv("CAELIS_THEME", "catppuccin")
-	if !ThemeUsesAutoBackground() {
-		t.Fatal("expected adaptive Catppuccin theme to use background detection")
-	}
-
-	t.Setenv("CAELIS_THEME", "light")
-	if ThemeUsesAutoBackground() {
-		t.Fatal("expected explicit light theme to disable auto background detection")
-	}
-}
-
 func TestResolveThemeFromOptions_NoColor(t *testing.T) {
 	theme := ResolveThemeFromOptions(true, 0)
 	if !theme.NoColor {
@@ -200,7 +177,7 @@ func TestExplicitCatppuccinThemeRemainsAvailable(t *testing.T) {
 	if theme.Name != "catppuccin-mocha" {
 		t.Fatalf("theme name = %q", theme.Name)
 	}
-	if got := stringifyColor(theme.Accent); got != "#cba6f7" {
+	if got := stringifyColor(theme.Accent); got != "#89b4fa" {
 		t.Fatalf("Catppuccin accent = %q", got)
 	}
 	if got := SyntaxPaletteForTheme(theme).ChromaTheme; got != CatppuccinMochaChromaTheme {
@@ -217,7 +194,7 @@ func TestNamedThemesAvoidLeakage(t *testing.T) {
 	if got := stringifyColor(nord.DiffAddFg); got != "#a3be8c" {
 		t.Fatalf("expected nord DiffAddFg, got %q", got)
 	}
-	if got := stringifyColor(nord.DiffRemoveFg); got != "#d08770" {
+	if got := stringifyColor(nord.DiffRemoveFg); got != "#c56f77" {
 		t.Fatalf("expected nord DiffRemoveFg, got %q", got)
 	}
 
@@ -244,9 +221,9 @@ func TestNamedThemesAvoidLeakage(t *testing.T) {
 
 func TestNamedThemesSelectMatchingSyntaxPalettes(t *testing.T) {
 	for name, want := range map[string]string{
-		"nord":      "nord",
-		"solarized": "solarized-dark",
-		"dracula":   "dracula",
+		"nord":      "caelis-nord",
+		"solarized": "caelis-solarized-dark",
+		"dracula":   "caelis-dracula",
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Setenv("NO_COLOR", "")

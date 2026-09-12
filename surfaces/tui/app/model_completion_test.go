@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -655,7 +656,7 @@ func TestSlashCompletionDistinguishesDuplicateSkillLabelsFromCanonicalValues(t *
 	model.setInputText("/")
 	loadSlashSkillCatalog(t, model)
 
-	if got := model.slashCandidates; !reflect.DeepEqual(got, []string{"/help", "/one:lint", "/two:lint"}) {
+	if got := model.slashCandidates; !reflect.DeepEqual(got, []string{"/help", "/one:lint", "/theme", "/two:lint"}) {
 		t.Fatalf("slashCandidates = %#v, want unique canonical command values", got)
 	}
 	for _, command := range []string{"/one:lint", "/two:lint"} {
@@ -667,7 +668,7 @@ func TestSlashCompletionDistinguishesDuplicateSkillLabelsFromCanonicalValues(t *
 		t.Fatalf("duplicate label details = %q and %q, want distinct sources", one, two)
 	}
 
-	model.slashIndex = 2
+	model.slashIndex = slices.Index(model.slashCandidates, "/two:lint")
 	model.applySlashCommandCompletion()
 	if got := string(model.input); got != "/two:lint " {
 		t.Fatalf("selected duplicate skill inserted %q, want canonical slash identity", got)
@@ -724,7 +725,7 @@ func TestSlashCommandTypingRefreshesBuiltinsImmediately(t *testing.T) {
 	model := NewModel(Config{Commands: []string{"help", "status", "stop"}})
 
 	_, _ = model.handleKey(keyPress("/"))
-	if got := model.slashCandidates; !reflect.DeepEqual(got, []string{"/help", "/status", "/stop"}) {
+	if got := model.slashCandidates; !reflect.DeepEqual(got, []string{"/help", "/status", "/stop", "/theme"}) {
 		t.Fatalf("slashCandidates after / = %#v, want immediate built-in commands", got)
 	}
 
@@ -846,7 +847,7 @@ func TestSlashSkillCatalogLoadDoesNotBlockUpdateLoop(t *testing.T) {
 	close(release)
 	msg := <-result
 	_, _ = model.Update(msg)
-	if got := model.slashCandidates; !reflect.DeepEqual(got, []string{"/help", "/lint", "/status"}) {
+	if got := model.slashCandidates; !reflect.DeepEqual(got, []string{"/help", "/lint", "/status", "/theme"}) {
 		t.Fatalf("slashCandidates after async load = %#v", got)
 	}
 }
@@ -1395,7 +1396,7 @@ func TestSlashCommandCompletionRefreshesBeforeAcceptingStaleCandidates(t *testin
 
 	_, cmd := model.handleKey(keyPress("/"))
 	runCompletionCmd(t, model, cmd)
-	if got := model.slashCandidates; len(got) != 2 || got[0] != "/alpha" {
+	if got := model.slashCandidates; len(got) != 3 || got[0] != "/alpha" {
 		t.Fatalf("slashCandidates after / = %#v, want stale list starting with /alpha", got)
 	}
 	_, cmd = model.handleKey(keyPress("do"))
@@ -1430,7 +1431,7 @@ func TestSlashCommandTabKeepsArrowSelectedCandidateAcrossRefresh(t *testing.T) {
 	model.setInputText("/")
 	model.syncTextareaFromInput()
 	model.refreshSlashCommands()
-	if got := model.slashCandidates; len(got) != 2 || got[0] != "/alpha" || got[1] != "/doctor" {
+	if got := model.slashCandidates; len(got) != 3 || got[0] != "/alpha" || got[1] != "/doctor" {
 		t.Fatalf("slashCandidates = %#v, want /alpha then /doctor", got)
 	}
 

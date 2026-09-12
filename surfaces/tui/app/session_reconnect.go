@@ -28,6 +28,10 @@ func (m *Model) applySessionReconnectState(state appserver.SessionState) tea.Cmd
 		}
 	}
 	m.activePrompt = nil
+	// A local theme preview belongs to the TUI and survives Session changes.
+	if m.themePicker != nil {
+		m.activePrompt = m.themePicker.prompt
+	}
 	m.pendingPrompt = nil
 	m.closeTaskStreamSubscriptions()
 	m.currentSessionID = strings.TrimSpace(state.SessionID)

@@ -1,0 +1,4 @@
+first.go +1 -1
+ 1 - return oldValue                                                           │  1 + return newValue
+second.py +1 -1
+ 1 - print(old_value)                                                          │  1 + print(new_value)

@@ -12,6 +12,7 @@ require (
 	github.com/alecthomas/chroma/v2 v2.27.0
 	github.com/anthropics/anthropic-sdk-go v1.71.0
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1
+	github.com/aymanbagabas/go-udiff v0.4.1
 	github.com/caelis-labs/acp-go-sdk v1.3.0
 	github.com/caelis-labs/memory v0.5.2
 	github.com/charmbracelet/colorprofile v0.4.3

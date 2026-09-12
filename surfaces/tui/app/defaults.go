@@ -182,6 +182,9 @@ func (m *Model) cacheCommandCompletionDetails(commands []string) {
 
 func (m *Model) commandCompletionDetail(command string) string {
 	name := strings.TrimPrefix(strings.TrimSpace(command), "/")
+	if name == "theme" {
+		return "Change terminal theme"
+	}
 	if name == "" {
 		return ""
 	}
