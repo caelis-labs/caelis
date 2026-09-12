@@ -15,20 +15,23 @@ type ThemeOption struct {
 }
 
 // ThemeOptions lists only palettes supported by the terminal's color profile.
-// Named palettes paint their own background, so both light and dark variants
-// remain readable regardless of the terminal's default background.
+// Labels emphasize theme names; details describe background adaptation and
+// capability limits. Named palettes paint their own background.
 func ThemeOptions(profile colorprofile.Profile, noColor bool) []ThemeOption {
-	options := []ThemeOption{{"auto", "Terminal", "Follow terminal background"}}
-	if noColor || profile < colorprofile.ANSI256 {
-		return options
+	if noColor {
+		return []ThemeOption{{"auto", "Terminal", "Colors disabled"}}
 	}
-	return append(options,
-		ThemeOption{"catppuccin", "Catppuccin Auto", "Mocha / Latte · follow terminal brightness"},
-		ThemeOption{"catppuccin-mocha", "Catppuccin Mocha", "Dark"},
-		ThemeOption{"catppuccin-latte", "Catppuccin Latte", "Light"},
-		ThemeOption{"nord", "Nord", "Dark"},
-		ThemeOption{"dracula", "Dracula", "Dark"},
-	)
+	if profile < colorprofile.ANSI256 {
+		return []ThemeOption{{"auto", "Terminal", "Named themes need 256 colors or true color"}}
+	}
+	return []ThemeOption{
+		{"auto", "Terminal", "Keep terminal background"},
+		{"catppuccin", "Catppuccin", "Mocha on dark / Latte on light terminals"},
+		{"catppuccin-latte", "Catppuccin Latte", "Light palette"},
+		{"catppuccin-mocha", "Catppuccin Mocha", "Dark palette"},
+		{"dracula", "Dracula", "Dark palette"},
+		{"nord", "Nord", "Dark palette"},
+	}
 }
 
 // NormalizeThemeName accepts the documented environment names and short aliases.

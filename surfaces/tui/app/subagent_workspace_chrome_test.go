@@ -33,7 +33,7 @@ func TestSubagentWorkspaceAvailableLayoutsAndRestore(t *testing.T) {
 			m, _ := newPaneTestModel(t)
 			for _, mode := range []uipreferences.Layout{uipreferences.Right, uipreferences.Down} {
 				m.setSubagentLayout(mode)
-				preference := m.workspace.preferences
+				preference := m.uiPreferences.value
 				m.Update(tea.WindowSizeMsg{Width: tc.width, Height: tc.height})
 				var choices []string
 				for _, item := range m.buildPaneMenuItems(&subagentOutputOverlayState{menu: "layout"}) {
@@ -59,7 +59,7 @@ func TestSubagentWorkspaceAvailableLayoutsAndRestore(t *testing.T) {
 					t.Fatal("single available layout opened a redundant picker")
 				}
 				m.Update(tea.WindowSizeMsg{Width: 160, Height: 48})
-				if m.workspace.preferences != preference || !m.workspaceLayout().split {
+				if m.uiPreferences.value != preference || !m.workspaceLayout().split {
 					t.Fatal("resize lost preferred layout or ratio")
 				}
 			}
@@ -84,7 +84,7 @@ func TestSubagentWorkspaceLayoutMenuResizeKeepsSelectedValue(t *testing.T) {
 		t.Fatal("resize retained pressed row or retargeted keyboard selection")
 	}
 	m.activatePaneMenu()
-	if m.workspace.preferences.SubagentLayout != uipreferences.Down || !m.workspaceLayout().split {
+	if m.uiPreferences.value.SubagentLayout != uipreferences.Down || !m.workspaceLayout().split {
 		t.Fatal("resized menu activated wrong layout")
 	}
 }

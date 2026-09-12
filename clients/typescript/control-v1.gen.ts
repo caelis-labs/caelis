@@ -1595,7 +1595,8 @@ export interface TurnTarget {
 
 export interface UIPreferences {
   horizontal_ratio?: number;
-  subagent_layout?: "overlay" | "left" | "right" | "up" | "down";
+  subagent_layout?: "" | "overlay" | "left" | "right" | "up" | "down";
+  theme?: string;
   vertical_ratio?: number;
 }
 

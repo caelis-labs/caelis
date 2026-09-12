@@ -194,7 +194,7 @@ func TestNamedThemesAvoidLeakage(t *testing.T) {
 	if got := stringifyColor(nord.DiffAddFg); got != "#a3be8c" {
 		t.Fatalf("expected nord DiffAddFg, got %q", got)
 	}
-	if got := stringifyColor(nord.DiffRemoveFg); got != "#c56f77" {
+	if got := stringifyColor(nord.DiffRemoveFg); got != "#cc8188" {
 		t.Fatalf("expected nord DiffRemoveFg, got %q", got)
 	}
 

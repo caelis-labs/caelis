@@ -6,6 +6,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -303,12 +304,13 @@ func renderDiffPanelCell(line *diffPanelLine, oldWidth, newWidth, width int, ctx
 	if styledText == "" {
 		styledText = ctx.Theme.TextStyle().Render(line.Text)
 	}
-	wrapped := strings.Split(hardWrapDisplayLine(styledText, available), "\n")
+	wrapped := wrapDiffPanelText(styledText, available)
 	background, markerStyle := diffPanelLineStyle(line.Kind, ctx)
+	lineNoStyle := ctx.Theme.DiffLineNoStyle().Foreground(ctx.Theme.ReadableTextColor(ctx.Theme.DiffLineNoFg, background.GetBackground()))
 	rows := make([]renderedDiffPanelRow, 0, len(wrapped))
 	for i, segment := range wrapped {
 		plainPrefix := prefix
-		styledPrefix := ctx.Theme.DiffLineNoStyle().Render(gutter) + markerStyle.Render(marker+" ")
+		styledPrefix := lineNoStyle.Render(gutter) + markerStyle.Render(marker+" ")
 		if gutter == "" {
 			styledPrefix = markerStyle.Render(marker)
 		}
@@ -322,6 +324,24 @@ func renderDiffPanelCell(line *diffPanelLine, oldWidth, newWidth, width int, ctx
 		rows = append(rows, renderedDiffPanelRow{Plain: plain, Styled: styled})
 	}
 	return rows
+}
+
+// Each wrapped row is composed independently next to a gutter and the other
+// side. Resolve the whole wrapped span first so continuation rows retain SGR
+// foregrounds and intraline backgrounds instead of inheriting a gutter reset.
+func wrapDiffPanelText(text string, width int) []string {
+	wrapped := hardWrapDisplayLine(text, width)
+	lines := strings.Split(wrapped, "\n")
+	if len(lines) == 1 {
+		return lines
+	}
+	screen := uv.NewScreenBuffer(lipgloss.Width(wrapped), len(lines))
+	screen.Method = ansi.GraphemeWidth
+	uv.NewStyledString(wrapped).Draw(screen, screen.Bounds())
+	for i, line := range lines {
+		lines[i] = screen.Line(i)[:displayColumns(line)].Render()
+	}
+	return lines
 }
 
 func diffPanelLineStyle(kind diffPanelLineKind, ctx BlockRenderContext) (lipgloss.Style, lipgloss.Style) {

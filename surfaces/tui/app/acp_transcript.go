@@ -829,7 +829,18 @@ func isDiffPanelText(text string) bool {
 }
 
 func renderACPDiffPanelRows(blockID string, text string, width int, ctx BlockRenderContext) []RenderedRow {
-	return renderNumberedACPDiffPanelRows(blockID, text, width, ctx)
+	// Nested rich diffs sit under "• Edit" (and other ACP headers). Shift them to
+	// the header text column and shrink the layout width so split/wrap use the
+	// remaining space. Standalone renderNumberedACPDiffPanelRows stays flush.
+	inset := minInt(2, maxInt(0, width-2))
+	rows := renderNumberedACPDiffPanelRows(blockID, text, maxInt(1, width-inset), ctx)
+	pad := strings.Repeat(" ", inset)
+	for i := range rows {
+		rows[i].Plain = pad + rows[i].Plain
+		rows[i].Styled = pad + rows[i].Styled
+		rows[i].selectionIndent = inset
+	}
+	return rows
 }
 
 func acpToolPanelClickToken(callID string) string {

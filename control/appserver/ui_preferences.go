@@ -9,7 +9,8 @@ import (
 )
 
 // UIPreferencesStore stores presentation preferences independently of Sessions.
-// Save replaces only UI fields; it must preserve concurrent product settings.
+// SaveUIPreferences merges nonzero fields from the argument into the persisted
+// UI document. It must preserve omitted UI fields and concurrent product settings.
 type UIPreferencesStore interface {
 	LoadUIPreferences(context.Context) (uipreferences.Preferences, error)
 	SaveUIPreferences(context.Context, uipreferences.Preferences) error
@@ -29,7 +30,9 @@ func (s *UIPreferencesService) Load(ctx context.Context, p Principal) (uiprefere
 	return s.Store.LoadUIPreferences(ctx)
 }
 
-// Save records an idempotent presentation choice without modifying a Session.
+// Save records a sparse presentation update without modifying a Session.
+// Omitted and zero fields leave stored values unchanged. Validation runs on the
+// update itself; defaults are not written unless the caller sends them.
 func (s *UIPreferencesService) Save(ctx context.Context, p Principal, value uipreferences.Preferences) error {
 	if strings.TrimSpace(p.ID) == "" {
 		return ErrUnauthorized
@@ -40,7 +43,7 @@ func (s *UIPreferencesService) Save(ctx context.Context, p Principal, value uipr
 	if err := value.Validate(); err != nil {
 		return errorcode.New(errorcode.InvalidArgument, err.Error())
 	}
-	return s.Store.SaveUIPreferences(ctx, value.WithDefaults())
+	return s.Store.SaveUIPreferences(ctx, value)
 }
 
 // UIPreferencesClient is the principal-bound presentation preference contract.

@@ -17,6 +17,9 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if m.sessionPicker != nil {
 		return m, m.handleSessionPickerMouse(msg)
 	}
+	if m.themePicker != nil && m.activePrompt == m.themePicker.prompt && m.subagentOverlay == nil {
+		return m, m.handleThemePickerMouse(msg)
+	}
 	m.updatePaneChromeHover(msg)
 	if handled, cmd := m.handleSubagentOverlayMouse(msg); handled {
 		return m, cmd

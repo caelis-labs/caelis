@@ -49,7 +49,7 @@ func TestSubagentWorkspaceKeyboardJourney(t *testing.T) {
 	press(tea.KeyDown, 0)
 	press(tea.KeyDown, 0)
 	press(tea.KeyEnter, 0)
-	if m.workspace.preferences.SubagentLayout != uipreferences.Right {
+	if m.uiPreferences.value.SubagentLayout != uipreferences.Right {
 		t.Fatal("keyboard layout selection failed")
 	}
 	m.Update(tea.PasteMsg{Content: "child draft"})
@@ -89,7 +89,7 @@ func TestSubagentWorkspaceKeyboardResizePreview(t *testing.T) {
 		t.Run(string(mode), func(t *testing.T) {
 			m, client := newPaneTestModel(t)
 			runTeaCmds(t, m, m.setSubagentLayout(mode))
-			original := m.workspace.preferences
+			original := m.uiPreferences.value
 			m.openPaneMenu("layout")
 			m.handlePaneMenuKey(tea.KeyPressMsg{Code: tea.KeyEnd})
 			m.activatePaneMenu()
@@ -103,7 +103,7 @@ func TestSubagentWorkspaceKeyboardResizePreview(t *testing.T) {
 			for range 20 {
 				m.handlePaneResizeKey(tea.KeyPressMsg{Code: code})
 			}
-			if m.workspace.resizeRatio == m.paneSplitRatio() || m.workspace.preferences != original || client.preferences != original {
+			if m.workspace.resizeRatio == m.paneSplitRatio() || m.uiPreferences.value != original || client.preferences != original {
 				t.Fatal("preview did not move or changed committed preferences")
 			}
 			m.Update(tea.PasteMsg{Content: "must not enter composer"})
@@ -111,25 +111,25 @@ func TestSubagentWorkspaceKeyboardResizePreview(t *testing.T) {
 				t.Fatal("resize paste leaked")
 			}
 			// An older preference save must never serialize the unconfirmed preview.
-			runTeaCmds(t, m, m.savePanePreferences())
+			runTeaCmds(t, m, m.saveUIPreferences())
 			if client.preferences != original {
 				t.Fatal("preview escaped through pending save")
 			}
 			m.handlePaneResizeKey(tea.KeyPressMsg{Code: tea.KeyEscape})
-			if m.workspace.preferences != original || m.workspace.resizing {
+			if m.uiPreferences.value != original || m.workspace.resizing {
 				t.Fatal("cancel failed")
 			}
 			m.beginPaneResize()
 			m.handlePaneResizeKey(tea.KeyPressMsg{Code: code})
 			runTeaCmds(t, m, m.handlePaneResizeKey(tea.KeyPressMsg{Code: tea.KeyEnter}))
-			if client.preferences != m.workspace.preferences || client.preferences == original {
+			if client.preferences != m.uiPreferences.value || client.preferences == original {
 				t.Fatal("apply did not persist")
 			}
 			saved := client.preferences
 			m.beginPaneResize()
 			m.handlePaneResizeKey(tea.KeyPressMsg{Code: code})
 			m.Update(tea.WindowSizeMsg{Width: 40, Height: 16})
-			if m.workspace.resizing || m.workspace.preferences != saved || !m.workspace.childFocused {
+			if m.workspace.resizing || m.uiPreferences.value != saved || !m.workspace.childFocused {
 				t.Fatal("terminal resize retained preview/hidden focus")
 			}
 		})
@@ -276,7 +276,7 @@ func TestSubagentWorkspaceDragReflowsOnlyOnRelease(t *testing.T) {
 			runTeaCmds(t, m, m.setSubagentLayout(mode))
 			m.View()
 			layout := m.workspaceLayout()
-			before := m.workspace.preferences
+			before := m.uiPreferences.value
 			renders := m.diag.GlamourRenderCalls
 			childRenders := m.subagentOutputViews[m.subagentOutputOverlay.callID].renderCache.renders
 			r := layout.divider
@@ -290,7 +290,7 @@ func TestSubagentWorkspaceDragReflowsOnlyOnRelease(t *testing.T) {
 				}
 				m.Update(tea.MouseMotionMsg{X: x, Y: y, Button: tea.MouseLeft})
 				m.View()
-				if m.workspaceLayout() != layout || m.workspace.preferences != before || client.preferences != before {
+				if m.workspaceLayout() != layout || m.uiPreferences.value != before || client.preferences != before {
 					t.Fatal("drag reflowed or saved before release")
 				}
 			}
@@ -299,7 +299,7 @@ func TestSubagentWorkspaceDragReflowsOnlyOnRelease(t *testing.T) {
 			}
 			_, cmd := m.Update(tea.MouseReleaseMsg{X: x, Y: y, Button: tea.MouseNone})
 			runTeaCmds(t, m, cmd)
-			if m.workspace.dragging || m.workspace.preferences == before || client.preferences != m.workspace.preferences || m.workspaceLayout() == layout {
+			if m.workspace.dragging || m.uiPreferences.value == before || client.preferences != m.uiPreferences.value || m.workspaceLayout() == layout {
 				t.Fatal("release did not apply and persist")
 			}
 			m.View()

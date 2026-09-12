@@ -3,7 +3,9 @@ package controlserver
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
@@ -39,7 +41,7 @@ func (b *workspaceHTTPBackend) LoadUIPreferences(context.Context) (uipreferences
 	return b.preferences, nil
 }
 func (b *workspaceHTTPBackend) SaveUIPreferences(_ context.Context, p uipreferences.Preferences) error {
-	b.preferences = p
+	b.preferences = b.preferences.Merge(p)
 	return nil
 }
 func TestSubagentWorkspaceHTTPUsesAuthenticatedPrincipalAndTypedPreferences(t *testing.T) {
@@ -96,5 +98,71 @@ func TestSubagentWorkspaceHTTPUsesAuthenticatedPrincipalAndTypedPreferences(t *t
 	got, err := client.LoadUIPreferences(t.Context())
 	if err != nil || got != pref {
 		t.Fatalf("preferences=%#v,%v", got, err)
+	}
+}
+
+func TestUIPreferencesHTTPSparseUpdateAndValidation(t *testing.T) {
+	backend := &workspaceHTTPBackend{preferences: uipreferences.Preferences{SubagentLayout: uipreferences.Left, HorizontalRatio: 62, VerticalRatio: 39}}
+	services := testAppServerServices(&fakeService{}, staticStatusService{})
+	services.UIPreferences = &appserver.UIPreferencesService{Store: backend}
+	server, err := New(HandlerConfig{Services: services, Authenticator: testAuthenticator(), AllowedHosts: []string{"127.0.0.1"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, err := httpclient.New(httpclient.Config{BaseURL: "http://127.0.0.1", BearerToken: "test-token", HTTPClient: &http.Client{Transport: controlHandlerRoundTripper{handler: server}}, Compatibility: appserver.CurrentCompatibility()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.SaveUIPreferences(t.Context(), uipreferences.Preferences{Theme: "catppuccin"}); err != nil {
+		t.Fatal(err)
+	}
+	want := uipreferences.Preferences{SubagentLayout: uipreferences.Left, HorizontalRatio: 62, VerticalRatio: 39, Theme: "catppuccin"}
+	got, err := client.LoadUIPreferences(t.Context())
+	if err != nil || got != want {
+		t.Fatalf("sparse theme=%#v,%v", got, err)
+	}
+	if err := client.SaveUIPreferences(t.Context(), uipreferences.Preferences{}); err != nil {
+		t.Fatal(err)
+	}
+	got, err = client.LoadUIPreferences(t.Context())
+	if err != nil || got != want {
+		t.Fatalf("empty save=%#v,%v", got, err)
+	}
+	if err := client.SaveUIPreferences(t.Context(), uipreferences.Preferences{Theme: "not-a-palette"}); err != nil {
+		t.Fatal(err)
+	}
+	if backend.preferences.Theme != "not-a-palette" {
+		t.Fatalf("opaque theme rejected=%#v", backend.preferences)
+	}
+	if err := client.SaveUIPreferences(t.Context(), uipreferences.Preferences{SubagentLayout: "grid"}); !errorcode.Is(err, errorcode.InvalidArgument) {
+		t.Fatalf("invalid layout=%v", err)
+	}
+	put := func(body string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodPut, apiPrefix+"/presentation/preferences", strings.NewReader(body))
+		request.Host = "127.0.0.1"
+		authorizeTestRequest(request)
+		setJSONContentType(request)
+		recorder := httptest.NewRecorder()
+		server.ServeHTTP(recorder, request)
+		return recorder
+	}
+	if recorder := put(`{"theme":"auto"}`); recorder.Code != http.StatusOK {
+		t.Fatalf("sparse auto theme status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if backend.preferences.Theme != "auto" || backend.preferences.SubagentLayout != uipreferences.Left {
+		t.Fatalf("raw sparse auto=%#v", backend.preferences)
+	}
+	beforeZeros := backend.preferences
+	if recorder := put(`{"subagent_layout":"","horizontal_ratio":0,"vertical_ratio":0,"theme":""}`); recorder.Code != http.StatusOK {
+		t.Fatalf("raw zero no-op status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if backend.preferences != beforeZeros {
+		t.Fatalf("raw zeros mutated=%#v", backend.preferences)
+	}
+	if recorder := put(`{"horizontal_ratio":1}`); recorder.Code != http.StatusBadRequest {
+		t.Fatalf("ratio 1 status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if recorder := put(`{"theme":"catppuccin","unknown":true}`); recorder.Code != http.StatusBadRequest {
+		t.Fatalf("unknown field status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 }

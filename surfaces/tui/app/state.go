@@ -326,6 +326,7 @@ type sandboxProgressState struct {
 }
 
 type Model struct {
+	uiPreferences uiPreferencesState
 	workspace     subagentWorkspaceState
 	cfg           Config
 	theme         tuikit.Theme

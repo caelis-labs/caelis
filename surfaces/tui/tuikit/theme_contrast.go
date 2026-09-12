@@ -50,6 +50,28 @@ func ensureThemeTextContrast(theme Theme) Theme {
 	return theme
 }
 
+// ReadableTextColor preserves foreground unless it needs a contrast correction
+// on background. A nil or inherited background uses the painted or sampled base.
+// Indexed colors are checked after conversion; ANSI and NO_COLOR stay unchanged.
+func (t Theme) ReadableTextColor(foreground, background color.Color) color.Color {
+	if t.NoColor {
+		return nil
+	}
+	profile := t.Profile
+	if profile == colorprofile.Unknown {
+		profile = colorprofile.TrueColor
+	}
+	if profile < colorprofile.ANSI256 {
+		return foreground
+	}
+	if _, inherited := background.(lipgloss.NoColor); inherited {
+		background = nil
+	}
+	foreground = profile.Convert(foreground)
+	background = profile.Convert(firstColor(background, validationBackground(t)))
+	return readablePaletteColor(foreground, background, normalTextContrast, colorIsDark(background), profile)
+}
+
 func readablePaletteColor(fg, bg color.Color, threshold float64, dark bool, profile colorprofile.Profile) color.Color {
 	if fg == nil || bg == nil {
 		return fg

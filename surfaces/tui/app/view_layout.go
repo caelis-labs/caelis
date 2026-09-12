@@ -55,6 +55,9 @@ func (m *Model) promptModalReservedHeight() int {
 	if m == nil || m.activePrompt == nil || m.width <= 0 || m.height <= 0 {
 		return 0
 	}
+	if m.themePicker != nil && m.activePrompt == m.themePicker.prompt {
+		return 0 // The centered theme picker overlays, rather than displaces, content.
+	}
 	modal := ansi.Strip(m.renderPromptModal())
 	if strings.TrimSpace(modal) == "" {
 		return 0
