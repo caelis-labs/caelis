@@ -196,7 +196,10 @@ func (m *Model) View() tea.View {
 }
 
 func (m *Model) desiredMouseMode() tea.MouseMode {
-	if m.themePicker != nil && m.activePrompt == m.themePicker.prompt && m.sessionPicker == nil && m.subagentOverlay == nil {
+	if m.sessionPicker != nil {
+		return tea.MouseModeAllMotion
+	}
+	if m.themePicker != nil && m.activePrompt == m.themePicker.prompt && m.subagentOverlay == nil {
 		return tea.MouseModeAllMotion
 	}
 	if m.subagentOutputOverlay != nil && m.activePrompt == nil && m.subagentOverlay == nil {

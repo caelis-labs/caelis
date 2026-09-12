@@ -7,6 +7,8 @@ import (
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/caelis-labs/caelis/internal/controlprompt"
 )
 
 type slashCompletionCandidates struct {
@@ -27,19 +29,21 @@ func (m *Model) refreshSlashCommands() {
 	if len(m.mentionCandidates) > 0 || len(m.slashArgCandidates) > 0 {
 		return
 	}
-	query, start, end, skillOnly, ok := slashCompletionTargetAtCursor(m.input, m.cursor, m.turnRunning())
+	query, start, end, skillOnly, ok := slashCompletionTargetAtCursor(m.input, m.cursor)
 	if !ok {
 		return
 	}
 
-	commands := append([]string(nil), m.cfg.Commands...)
-	if skillOnly {
-		commands = nil
+	commands := m.slashCommandsForCompletion(skillOnly)
+	reserved := commands
+	if !skillOnly {
+		reserved = append([]string(nil), m.cfg.Commands...)
 	}
 	if _, lineStart := slashCommandQueryAtCursor(m.input, m.cursor); lineStart {
 		commands = append(commands, "theme")
+		reserved = append(reserved, "theme")
 	}
-	assembled := assembleSlashCompletionCandidates(commands, m.slashSkillCatalog, query)
+	assembled := assembleSlashCompletionCandidates(commands, reserved, m.slashSkillCatalog, query)
 	if len(assembled.commands) == 0 {
 		return
 	}
@@ -61,6 +65,24 @@ func (m *Model) refreshSlashCommands() {
 	m.slashEnd = end
 }
 
+func (m *Model) slashCommandsForCompletion(skillOnly bool) []string {
+	if skillOnly {
+		return nil
+	}
+	commands := append([]string(nil), m.cfg.Commands...)
+	if !m.turnRunning() {
+		return commands
+	}
+	filtered := make([]string, 0, len(commands))
+	for _, command := range commands {
+		spec, ok := controlprompt.Lookup(command)
+		if ok && spec.AvailableWhileRunning {
+			filtered = append(filtered, command)
+		}
+	}
+	return filtered
+}
+
 // requestSlashSkillCatalog loads the immutable Runtime skill snapshot outside
 // the Bubble Tea update loop. Built-in slash commands are always refreshed
 // immediately; the skill results are merged when this command completes.
@@ -68,7 +90,7 @@ func (m *Model) requestSlashSkillCatalog() tea.Cmd {
 	if m == nil || m.cfg.SkillComplete == nil || m.slashSkillLoaded || m.slashSkillLoadPending {
 		return nil
 	}
-	if _, _, _, _, ok := slashCompletionTargetAtCursor(m.input, m.cursor, m.turnRunning()); !ok {
+	if _, _, _, _, ok := slashCompletionTargetAtCursor(m.input, m.cursor); !ok {
 		return nil
 	}
 	m.slashSkillLoadSeq++
@@ -112,10 +134,10 @@ func (m *Model) resetSlashSkillCatalog() {
 	m.slashSkillLoadPending = false
 }
 
-func assembleSlashCompletionCandidates(commands []string, skills []CompletionCandidate, query string) slashCompletionCandidates {
+func assembleSlashCompletionCandidates(commands []string, reserved []string, skills []CompletionCandidate, query string) slashCompletionCandidates {
 	candidates := make([]string, 0, len(commands)+len(skills))
-	seen := make(map[string]struct{}, len(commands)+len(skills))
-	builtinNames := make(map[string]struct{}, len(commands))
+	seen := make(map[string]struct{}, len(commands)+len(skills)+len(reserved))
+	builtinNames := make(map[string]struct{}, len(commands)+len(reserved))
 	queryKey := strings.ToLower(strings.TrimSpace(query))
 	for _, command := range commands {
 		full := "/" + strings.TrimSpace(command)
@@ -131,6 +153,14 @@ func assembleSlashCompletionCandidates(commands []string, skills []CompletionCan
 		if queryKey == "" || strings.HasPrefix(strings.ToLower(full), "/"+queryKey) {
 			candidates = append(candidates, full)
 		}
+	}
+	for _, command := range reserved {
+		key := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(command, "/")))
+		if key == "" {
+			continue
+		}
+		builtinNames[key] = struct{}{}
+		seen[key] = struct{}{}
 	}
 
 	var displays map[string]string
@@ -202,7 +232,7 @@ func (m *Model) applySlashCommandCompletion() tea.Cmd {
 		m.clearSlashCompletion()
 		return m.submitThemeCommand(selected)
 	}
-	if m.slashSkillOnly {
+	if m.slashSkillOnly || m.slashCandidateIsSkill(selected) {
 		m.applySlashSkillReferenceCompletion(selected)
 		return nil
 	}
@@ -250,10 +280,18 @@ func slashCommandSubmitsOnCompletion(command string) bool {
 	}
 }
 
+func (m *Model) slashCandidateIsSkill(selected string) bool {
+	name := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(selected), "/"))
+	if name == "" || name == "theme" {
+		return false
+	}
+	return !m.isCommandAvailable(name)
+}
+
 func (m *Model) handleSlashCommandKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 	switch {
 	case key.Matches(msg, m.keys.Back):
-		if !m.slashSkillOnly {
+		if !m.turnRunning() && !m.slashSkillOnly {
 			if _, ok := slashCommandQueryAtCursor(m.input, m.cursor); ok {
 				m.setInputText("")
 				m.syncTextareaFromInput()
@@ -280,9 +318,6 @@ func (m *Model) handleSlashCommandKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 		return true, nil
 	case key.Matches(msg, m.keys.Accept):
 		if len(m.slashCandidates) == 0 {
-			return true, nil
-		}
-		if m.turnRunning() && !m.slashSkillOnly && m.slashCandidates[m.slashIndex] != "/theme" {
 			return true, nil
 		}
 		cmd := m.applySlashCommandCompletion()

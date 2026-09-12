@@ -115,6 +115,24 @@ func TestRootArgCandidatesReturnsCopies(t *testing.T) {
 	}
 }
 
+func TestAvailableWhileRunningMarksResumeAndExitCommandsOnly(t *testing.T) {
+	for _, name := range []string{"resume", "quit", "exit"} {
+		spec, ok := Lookup(name)
+		if !ok || !spec.AvailableWhileRunning {
+			t.Fatalf("Lookup(%q).AvailableWhileRunning = %v ok=%v, want true", name, spec.AvailableWhileRunning, ok)
+		}
+	}
+	for _, name := range []string{"help", "status", "model", "new", "compact", "connect"} {
+		spec, ok := Lookup(name)
+		if !ok {
+			t.Fatalf("Lookup(%q) missing", name)
+		}
+		if spec.AvailableWhileRunning {
+			t.Fatalf("Lookup(%q).AvailableWhileRunning = true, want unsafe command hidden while running", name)
+		}
+	}
+}
+
 func TestSubagentSpecDescribesParticipantConfigurationAndKeepsCommandName(t *testing.T) {
 	spec, ok := Lookup("subagent")
 	if !ok {

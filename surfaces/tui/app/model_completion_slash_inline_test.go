@@ -3,8 +3,13 @@ package tuiapp
 import (
 	"context"
 	"reflect"
+	"slices"
+	"strings"
 	"testing"
 	"time"
+
+	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func TestSlashSkillQueryAtCursorRejectsURLsAndPaths(t *testing.T) {
@@ -136,9 +141,10 @@ func TestInlineSlashSkillCompletionInsertsMultipleCanonicalSkills(t *testing.T) 
 func TestRunningSlashCompletionOffersSkillsAndLocalTheme(t *testing.T) {
 	var submitted []string
 	model := NewModel(Config{
-		Commands: []string{"help", "status", "model", "resume"},
+		Commands: []string{"help", "status", "model", "resume", "quit"},
 		SkillComplete: func(string, int) ([]CompletionCandidate, error) {
 			return []CompletionCandidate{
+				{Value: "help", Display: "help", Kind: "Skill"},
 				{Value: "lint", Display: "lint", Kind: "Skill"},
 				{Value: "superpowers:brainstorm", Display: "brainstorm", Kind: "Plugin"},
 			}, nil
@@ -157,11 +163,11 @@ func TestRunningSlashCompletionOffersSkillsAndLocalTheme(t *testing.T) {
 
 	model.setInputText("/")
 	loadSlashSkillCatalog(t, model)
-	if !model.slashSkillOnly {
-		t.Fatal("running line-start overlay mixed commands, want skill-only")
+	if model.slashSkillOnly {
+		t.Fatal("running line-start overlay is skill-only, want mixed allowed commands and skills")
 	}
-	if got := model.slashCandidates; !reflect.DeepEqual(got, []string{"/lint", "/superpowers:brainstorm", "/theme"}) {
-		t.Fatalf("running slashCandidates = %#v, want skills without ordinary commands", got)
+	if got := model.slashCandidates; !reflect.DeepEqual(got, []string{"/lint", "/quit", "/resume", "/superpowers:brainstorm", "/theme"}) {
+		t.Fatalf("running slashCandidates = %#v, want skills plus /resume /quit /theme", got)
 	}
 
 	model.setInputText("/help")
@@ -197,6 +203,157 @@ func TestRunningSlashCompletionOffersSkillsAndLocalTheme(t *testing.T) {
 	}
 }
 
+func TestRunningSlashCompletionDiscoversResumeAndQuitThroughUpdate(t *testing.T) {
+	const width, height = 100, 30
+	newRunningModel := func(t *testing.T) (*Model, *[]string) {
+		t.Helper()
+		var submitted []string
+		model := NewModel(Config{
+			NoColor:     true,
+			NoAnimation: true,
+			Commands:    []string{"help", "status", "model", "resume", "quit"},
+			SkillComplete: func(string, int) ([]CompletionCandidate, error) {
+				return []CompletionCandidate{
+					{Value: "help", Display: "help", Kind: "Skill"},
+					{Value: "lint", Display: "lint", Kind: "Skill"},
+					{Value: "superpowers:brainstorm", Display: "brainstorm", Kind: "Plugin"},
+				}, nil
+			},
+			SlashArgComplete: func(context.Context, string, string, int) ([]SlashArgCandidate, error) {
+				t.Fatal("slash argument completion requested while running")
+				return nil, nil
+			},
+			ExecuteLine: func(submission Submission) TaskResultMsg {
+				submitted = append(submitted, submission.Text)
+				return TaskResultMsg{}
+			},
+			Wizards: DefaultWizards(),
+		})
+		model.beginLiveTurn(SubmissionModeDefault, true, time.Unix(5, 0))
+		applySlashCompletionUpdate(t, model, tea.WindowSizeMsg{Width: width, Height: height})
+		return model, &submitted
+	}
+
+	t.Run("prefix typing", func(t *testing.T) {
+		model, _ := newRunningModel(t)
+		typeComposerThroughUpdate(t, model, "/")
+		if model.slashSkillOnly {
+			t.Fatal("running Update(/) overlay is skill-only, want mixed allowed commands")
+		}
+		for _, want := range []string{"/resume", "/quit", "/theme", "/lint"} {
+			if !slices.Contains(model.slashCandidates, want) {
+				t.Fatalf("running Update(/) slashCandidates = %#v, missing %s", model.slashCandidates, want)
+			}
+		}
+		for _, hidden := range []string{"/help", "/status", "/model"} {
+			if slices.Contains(model.slashCandidates, hidden) {
+				t.Fatalf("running Update(/) slashCandidates = %#v, want %s hidden", model.slashCandidates, hidden)
+			}
+		}
+
+		typeComposerThroughUpdate(t, model, "re")
+		if got := string(model.input); got != "/re" {
+			t.Fatalf("input after Update(/re) = %q", got)
+		}
+		if !reflect.DeepEqual(model.slashCandidates, []string{"/resume"}) {
+			t.Fatalf("running Update(/re) slashCandidates = %#v, want /resume", model.slashCandidates)
+		}
+
+		model, _ = newRunningModel(t)
+		typeComposerThroughUpdate(t, model, "/q")
+		if !reflect.DeepEqual(model.slashCandidates, []string{"/quit"}) {
+			t.Fatalf("running Update(/q) slashCandidates = %#v, want /quit", model.slashCandidates)
+		}
+
+		model, _ = newRunningModel(t)
+		typeComposerThroughUpdate(t, model, "/h")
+		if len(model.slashCandidates) != 0 {
+			t.Fatalf("running Update(/h) slashCandidates = %#v, want /help command and colliding skill hidden", model.slashCandidates)
+		}
+	})
+
+	t.Run("skill preserves suffix", func(t *testing.T) {
+		model, submitted := newRunningModel(t)
+		const suffix = " remaining suffix"
+		typeComposerThroughUpdate(t, model, suffix)
+		for range suffix {
+			applySlashCompletionUpdate(t, model, tea.KeyPressMsg(tea.Key{Code: tea.KeyLeft}))
+		}
+		typeComposerThroughUpdate(t, model, "/li")
+		cmd := applySlashCompletionUpdate(t, model, keyPress("enter"))
+		if cmd != nil {
+			t.Fatal("running line-start skill completion submitted a command, want span insert")
+		}
+		if got := string(model.input); got != "/lint"+suffix {
+			t.Fatalf("running skill-with-suffix insert = %q, want suffix preserved", got)
+		}
+		if len(*submitted) != 0 {
+			t.Fatalf("submitted = %#v, want no running skill submission", *submitted)
+		}
+	})
+
+	for _, tt := range []struct {
+		name string
+		keys string
+		want string
+	}{
+		{name: "resume hint", keys: "/re", want: "/resume"},
+		{name: "quit hint", keys: "/q", want: "/quit"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			model, _ := newRunningModel(t)
+			typeComposerThroughUpdate(t, model, tt.keys)
+			frame := model.View().Content
+			plain := ansi.Strip(frame)
+			if !strings.Contains(plain, tt.want) {
+				t.Fatalf("running View(%s) omitted %s:\n%s", tt.keys, tt.want, plain)
+			}
+			if strings.Contains(plain, "/help") {
+				t.Fatalf("running View(%s) showed hidden /help:\n%s", tt.keys, plain)
+			}
+			updates := renderFullscreenFramesForTest(t, model.width, model.height, frame)
+			assertPhysicalFullscreenFrame(t, model.width, model.height, frame, updates)
+			t.Logf("Running completion %s:\n%s", tt.keys, plain)
+		})
+	}
+
+	for _, key := range []string{"tab", "enter"} {
+		t.Run("resume "+key, func(t *testing.T) {
+			model, submitted := newRunningModel(t)
+			typeComposerThroughUpdate(t, model, "/re")
+			cmd := applySlashCompletionUpdate(t, model, keyPress(key))
+			if model.sessionPicker == nil {
+				t.Fatalf("running %s on /resume did not open Session picker", key)
+			}
+			if !model.turnRunning() || model.quit {
+				t.Fatalf("running %s on /resume quit=%v running=%v", key, model.quit, model.turnRunning())
+			}
+			if len(*submitted) != 0 {
+				t.Fatalf("running %s on /resume submitted %#v, want picker only", key, *submitted)
+			}
+			_ = cmd
+		})
+
+		t.Run("quit "+key, func(t *testing.T) {
+			model, submitted := newRunningModel(t)
+			typeComposerThroughUpdate(t, model, "/q")
+			cmd := applySlashCompletionUpdate(t, model, keyPress(key))
+			if !model.quit || cmd == nil {
+				t.Fatalf("running %s on /quit cmd=%v quit=%v, want local quit without starting a program", key, cmd != nil, model.quit)
+			}
+			if !model.turnRunning() {
+				t.Fatalf("running %s on /quit stopped the live Turn", key)
+			}
+			if model.sessionPicker != nil {
+				t.Fatalf("running %s on /quit opened Session picker", key)
+			}
+			if len(*submitted) != 0 {
+				t.Fatalf("running %s on /quit submitted %#v, want no ExecuteLine", key, *submitted)
+			}
+		})
+	}
+}
+
 func TestRunningCompletionEscapeDismissesBeforeInterrupt(t *testing.T) {
 	t.Run("skill", func(t *testing.T) {
 		interrupted := false
@@ -223,6 +380,9 @@ func TestRunningCompletionEscapeDismissesBeforeInterrupt(t *testing.T) {
 		}
 		if !model.turnRunning() || len(model.slashCandidates) != 0 {
 			t.Fatalf("after Esc running=%v slashCandidates=%#v", model.turnRunning(), model.slashCandidates)
+		}
+		if got := string(model.input); got != "/li" {
+			t.Fatalf("after Esc input = %q, want running draft retained", got)
 		}
 	})
 
@@ -319,4 +479,20 @@ func TestURLAndPathSlashDoNotOpenSkillCompletion(t *testing.T) {
 	if calls != 0 {
 		t.Fatalf("SkillComplete calls = %d, want URLs and paths disconnected from skill completion", calls)
 	}
+}
+
+func typeComposerThroughUpdate(t *testing.T, model *Model, text string) {
+	t.Helper()
+	for _, r := range text {
+		runCompletionCmd(t, model, applySlashCompletionUpdate(t, model, keyPress(string(r))))
+	}
+}
+
+func applySlashCompletionUpdate(t *testing.T, model *Model, msg tea.Msg) tea.Cmd {
+	t.Helper()
+	updated, cmd := model.Update(msg)
+	if next, ok := updated.(*Model); ok && next != model {
+		*model = *next
+	}
+	return cmd
 }
