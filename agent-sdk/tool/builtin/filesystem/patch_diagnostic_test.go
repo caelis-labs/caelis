@@ -247,6 +247,72 @@ func TestPatchDiagnosticAmbiguousListsStartPositions(t *testing.T) {
 	}
 }
 
+func TestPatchDiagnosticLineColumn(t *testing.T) {
+	content := "éx\r\n中\rz\n\nq"
+	for _, tc := range []struct{ offset, line, column int }{
+		{0, 1, 1}, {2, 1, 2}, {3, 1, 3}, {4, 1, 4},
+		{5, 2, 1}, {8, 2, 2}, {9, 3, 1}, {10, 3, 2},
+		{11, 4, 1}, {12, 5, 1},
+	} {
+		line, column := patchDiagnosticLineColumn(content, tc.offset)
+		if line != tc.line || column != tc.column {
+			t.Errorf("offset %d = %d:%d, want %d:%d", tc.offset, line, column, tc.line, tc.column)
+		}
+	}
+}
+
+func TestPatchDiagnosticLineColumnDoesNotAllocate(t *testing.T) {
+	content := "x x\n" + strings.Repeat("\n", 32<<10)
+	var line, column int
+	allocs := testing.AllocsPerRun(3, func() {
+		line, column = patchDiagnosticLineColumn(content, 2)
+	})
+	if line != 1 || column != 3 {
+		t.Fatalf("position = %d:%d, want 1:3", line, column)
+	}
+	if allocs != 0 {
+		t.Fatalf("position lookup allocated %.0f objects, want no line index", allocs)
+	}
+}
+
+func BenchmarkPatchAmbiguousDiagnostic(b *testing.B) {
+	for _, size := range []int{256 << 10, 1 << 20} {
+		b.Run(fmt.Sprintf("%dKiB", size>>10), func(b *testing.B) {
+			// Both anchors are on the first line. The unrelated tail must not
+			// add diagnostic work beyond the tool's existing file read.
+			content := "x x\n" + strings.Repeat("\n", size-4)
+			dir := b.TempDir()
+			path := filepath.Join(dir, "many-lines.txt")
+			if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+				b.Fatal(err)
+			}
+			patchTool, err := NewPatch(fakeRuntime{defaultFS: hostFileSystem{cwd: dir}})
+			if err != nil {
+				b.Fatal(err)
+			}
+			args := map[string]any{
+				"path":  "many-lines.txt",
+				"edits": []map[string]any{{"old": "x", "new": "y"}},
+			}
+			b.ReportAllocs()
+			for b.Loop() {
+				err = callPatch(patchTool, args)
+			}
+			var toolErr *tool.ToolError
+			if !errors.As(err, &toolErr) || toolErr.Code != tool.ErrorCodeTooManyMatches {
+				b.Fatalf("error = %v, want ambiguous match", err)
+			}
+			if want := "Matches at line:column 1:1, 1:3; add distinguishing context to old."; toolErr.Hint != want {
+				b.Fatalf("hint = %q, want %q", toolErr.Hint, want)
+			}
+			raw, err := os.ReadFile(path)
+			if err != nil || string(raw) != content {
+				b.Fatalf("ambiguous edit changed the file: %v", err)
+			}
+		})
+	}
+}
+
 func TestPatchDiagnosticUnsafeEchoesExactBlock(t *testing.T) {
 	content := "alpha\r\nbeta\r\ngamma\r\n"
 	match := patchMatchRange{start: 0, end: 13, normalizedLineEndings: true}

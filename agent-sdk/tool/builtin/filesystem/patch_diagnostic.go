@@ -271,15 +271,15 @@ func patchDiagnosticFitDiffLines(head string, diffLines []patchDiagnosticDiffLin
 	return builder.String(), true
 }
 
-// patchDiagnosticLineColumn maps a byte offset to its 1-based line and rune
-// column, so several matches on one line stay distinguishable.
+// patchDiagnosticLineColumn maps a source byte offset to its 1-based line and
+// rune column. Scan only the prefix: early matches must not index the file tail.
 func patchDiagnosticLineColumn(content string, offset int) (int, int) {
 	line, lineStart := 1, 0
-	for _, item := range patchLines(content) {
-		if item.end() > offset {
-			break
+	for i := 0; i < offset; i++ {
+		// CRLF counts as one break, only after its LF has been consumed.
+		if content[i] == '\n' || content[i] == '\r' && (i+1 == len(content) || content[i+1] != '\n') {
+			line, lineStart = line+1, i+1
 		}
-		line, lineStart = line+1, item.end()
 	}
 	return line, utf8.RuneCountInString(content[lineStart:offset]) + 1
 }
@@ -291,8 +291,8 @@ func patchDiagnosticLinePhrase(start, end int) string {
 	return fmt.Sprintf("lines %d-%d", start, end)
 }
 
-// patchDiagnosticLineNumber maps a byte offset to its 1-based line using the
-// shared line splitter, so LF, CRLF and lone CR breaks all count correctly.
+// patchDiagnosticLineNumber maps a source byte offset to its 1-based line,
+// counting LF, CRLF and lone CR as single line breaks.
 func patchDiagnosticLineNumber(content string, offset int) int {
 	line, _ := patchDiagnosticLineColumn(content, offset)
 	return line
