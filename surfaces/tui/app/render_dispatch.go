@@ -781,14 +781,14 @@ func (m *Model) lastBlockHasParticipantTurnFooter() bool {
 	return participantTurnHasFooter(block)
 }
 
-func (m *Model) appendUserTurnDividerIfNeeded(suppress bool) bool {
-	if m == nil || m.doc == nil || suppress || !m.liveTurn.Divider || m.doc.Len() == 0 {
+func (m *Model) appendTurnDividerIfNeeded(label string) bool {
+	if m == nil || m.doc == nil || m.doc.Len() == 0 {
 		return false
 	}
 	if m.lastBlockHasParticipantTurnFooter() || m.lastBlockIsDivider() || !m.lastBlockHasContent() {
 		return false
 	}
-	m.doc.Append(NewDividerBlock(m.userTurnDividerLabel()))
+	m.doc.Append(NewDividerBlock(label))
 	m.markViewportStructureDirty()
 	return true
 }

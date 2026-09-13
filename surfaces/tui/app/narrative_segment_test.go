@@ -686,7 +686,7 @@ func TestTranscriptUsageTelemetryDoesNotAdvanceNarrativeBoundary(t *testing.T) {
 		},
 	}
 
-	next, _ := model.applyTranscriptEvents(events)
+	next, _ := model.applyTranscriptEvents(events, false)
 	model = next.(*Model)
 	block := requireMainACPTurnBlockForTest(t, model)
 	if len(block.Events) != 1 || block.Events[0].Kind != SEAssistant || block.Events[0].Text != "first second" {
@@ -824,7 +824,7 @@ func TestHiddenTaskWaitStillCreatesAnonymousNarrativeBoundary(t *testing.T) {
 		},
 	}
 
-	next, _ := model.applyTranscriptEvents(events)
+	next, _ := model.applyTranscriptEvents(events, false)
 	model = next.(*Model)
 	block := requireMainACPTurnBlockForTest(t, model)
 	if len(block.Events) != 3 {
@@ -936,7 +936,7 @@ func TestFailedTaskControlRemainsVisibleWithoutExecutePresentation(t *testing.T)
 					ToolCallID: action + "-1", ToolName: "Task", ToolTaskAction: action,
 					ToolStatus: "failed", ToolError: true, ToolOutput: action + " failed", Final: true,
 				},
-			})
+			}, false)
 			model = next.(*Model)
 			block := requireMainACPTurnBlockForTest(t, model)
 			var failed *SubagentEvent
@@ -1139,7 +1139,7 @@ func TestHiddenTaskBoundaryIsSymmetricForParticipantAndSubagentLanes(t *testing.
 				},
 			}
 
-			next, _ := model.applyTranscriptEvents(events)
+			next, _ := model.applyTranscriptEvents(events, false)
 			model = next.(*Model)
 			var block *ParticipantTurnBlock
 			for _, docBlock := range model.doc.Blocks() {
@@ -1183,7 +1183,7 @@ func TestHiddenParticipantTaskDoesNotCreateEmptyTurnBlock(t *testing.T) {
 	next, _ := model.applyTranscriptEvents([]TranscriptEvent{{
 		Kind: TranscriptEventTool, Scope: ACPProjectionParticipant, ScopeID: "participant-1", TurnID: "turn-1",
 		ToolCallID: "wait-1", ToolName: "Task", ToolTaskAction: "wait", ToolStatus: "completed", Final: true,
-	}})
+	}}, false)
 	model = next.(*Model)
 	for _, block := range model.doc.Blocks() {
 		if _, ok := block.(*ParticipantTurnBlock); ok {
@@ -1220,7 +1220,7 @@ func TestHiddenParticipantTaskReadDoesNotBecomeCommandOutput(t *testing.T) {
 			ToolOutput: observation, ToolOutputTerminal: true,
 		},
 	}
-	next, _ := model.applyTranscriptEvents(events)
+	next, _ := model.applyTranscriptEvents(events, false)
 	model = next.(*Model)
 	block := model.findParticipantTurnBlock(turnID)
 	if block == nil {
@@ -1257,7 +1257,7 @@ func TestHiddenMainTaskReadDoesNotBecomeCommandOutput(t *testing.T) {
 			ToolOutput: observation, ToolOutputTerminal: true,
 		},
 	}
-	next, _ := model.applyTranscriptEvents(events)
+	next, _ := model.applyTranscriptEvents(events, false)
 	model = next.(*Model)
 	block := requireMainACPTurnBlockForTest(t, model)
 	physical := physicalTranscriptEventsForTest(block.Events)
@@ -1392,7 +1392,7 @@ func TestTranscriptNarrativeIdentityFlowsAcrossMainParticipantAndSubagentScopes(
 				},
 			}
 
-			next, _ := model.applyTranscriptEvents(events)
+			next, _ := model.applyTranscriptEvents(events, false)
 			model = next.(*Model)
 			var narratives []SubagentEvent
 			for _, docBlock := range model.doc.Blocks() {

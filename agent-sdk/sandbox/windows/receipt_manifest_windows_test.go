@@ -6,7 +6,31 @@ import (
 	"errors"
 	"os"
 	"testing"
+
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox/windows/internal/acl"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox/windows/internal/win32"
 )
+
+func TestProtectHostAuthorityAlreadyOwnedWithModifyAccess(t *testing.T) {
+	root := t.TempDir()
+	sid, err := win32.CurrentProcessUserSID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := acl.ReplaceFileOwnerAndDACL(root, sid, true, acl.Entry{Principal: sid, Rights: acl.FullControl, Mode: acl.Set}); err != nil {
+		// A newly created directory already has the non-elevated user's owner.
+		info, inspectErr := acl.InspectFileDACL(root)
+		if inspectErr != nil || info.OwnerSID != sid {
+			t.Fatalf("prepare Host-owned directory: %v (%v)", err, inspectErr)
+		}
+	}
+	if err := acl.ReplaceFileDACL(root, true, acl.Entry{Principal: sid, Rights: acl.Modify, Mode: acl.Set}); err != nil {
+		t.Fatal(err)
+	}
+	if err := protectHostAuthorityObject(root, sid, true); err != nil {
+		t.Fatalf("protect already-owned authority without WRITE_OWNER: %v", err)
+	}
+}
 
 func TestPersistHostReceiptLedgerCleansTemporaryFileAfterReplaceFailure(t *testing.T) {
 	root := t.TempDir()

@@ -243,11 +243,16 @@ additional main-Agent recall injection. The address identifies a live log,
 not an immutable snapshot; readers must tolerate an incomplete final append.
 
 Evidence commands use a private temporary write directory and read-only access
-to other directories. Network policy is inherited from the main Agent. macOS
-uses Seatbelt and Linux uses Bubblewrap; unavailable isolation fails the query
-without falling back to Host execution. Queries, output, provider attempts and
-review duration are bounded. Each complete assessment attempt has a three-minute
-budget, shared by its model and evidence calls. A format-validation retry gets a
+to other directories. Network policy is inherited from the main Agent subject
+to backend capabilities. macOS uses Seatbelt, Linux uses Bubblewrap, and Windows
+uses its restricted-token sandbox. Windows keeps network access enabled even
+when network-disabled intent is supplied. The query environment identifies the
+actual shell, temporary-file syntax and network capability. Windows process
+caches stay inside the review's writable directory; ACL state stays outside it.
+Unavailable isolation fails the query without falling back to Host execution.
+Queries, output, provider attempts and review duration are bounded. Each complete
+assessment attempt has a three-minute budget, shared by its model and evidence
+calls. A format-validation retry gets a
 fresh three-minute budget; caller cancellation and cumulative resource limits
 still apply. Guardian stops gathering evidence as soon as the supplied facts
 support its decision. Simple decisions do not start a query sandbox.

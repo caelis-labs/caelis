@@ -172,6 +172,9 @@ func (r *runtime) sandboxEnvBase() string {
 }
 
 func (r *runtime) sandboxEnvRoot(workspaceRoot string) string {
+	if r.cfg.ResourceLimits != nil {
+		return filepath.Join(r.cfg.ResourceLimits.WritePaths[0], ".sandbox-env")
+	}
 	workspace := pathutil.Normalize(workspaceRoot)
 	if workspace == "" {
 		workspace = pathutil.Normalize(r.cfg.CWD)

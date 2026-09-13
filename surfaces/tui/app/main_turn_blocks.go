@@ -155,3 +155,31 @@ func (m *Model) closeMainTimelineTailWithState(block *MainACPTurnBlock, occurred
 		m.mainTimelineTailID = ""
 	}
 }
+
+func (m *Model) mainTurnDividerLabel(block *MainACPTurnBlock) string {
+	startedAt := block.StartedAt
+	// User and participant barriers can split a Turn into multiple timeline
+	// blocks. Its elapsed time includes the earlier blocks before this footer.
+	if key := strings.TrimSpace(block.TurnKey); key != "" {
+		blocks := m.doc.Blocks()
+		for index := len(blocks) - 1; index >= 0; index-- {
+			if _, ok := blocks[index].(*DividerBlock); ok {
+				break
+			}
+			previous, ok := blocks[index].(*MainACPTurnBlock)
+			if !ok {
+				continue
+			}
+			if strings.TrimSpace(previous.TurnKey) != key {
+				break
+			}
+			if !previous.StartedAt.IsZero() && (startedAt.IsZero() || previous.StartedAt.Before(startedAt)) {
+				startedAt = previous.StartedAt
+			}
+		}
+	}
+	if startedAt.IsZero() || block.EndedAt.IsZero() || block.EndedAt.Before(startedAt) {
+		return ""
+	}
+	return formatTurnDuration(block.EndedAt.Sub(startedAt))
+}

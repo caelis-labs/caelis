@@ -586,15 +586,27 @@ func (r *runtime) ensureHostReceiptAuthority() error {
 }
 
 func protectHostAuthorityObject(path, hostUserSID string, inherit bool) error {
-	if err := acl.ReplaceFileOwnerAndDACL(path, hostUserSID, true, acl.Entry{
+	info, err := acl.InspectFileDACL(path)
+	if err != nil {
+		return err
+	}
+	entry := acl.Entry{
 		Principal: hostUserSID,
 		Rights:    acl.FullControl,
 		Mode:      acl.Set,
 		Inherit:   inherit,
-	}); err != nil {
+	}
+	// An owner can protect its DACL without WRITE_OWNER. Temporary directories
+	// may inherit Modify access even though the creating Host already owns them.
+	if strings.EqualFold(info.OwnerSID, hostUserSID) {
+		err = acl.ReplaceFileDACL(path, true, entry)
+	} else {
+		err = acl.ReplaceFileOwnerAndDACL(path, hostUserSID, true, entry)
+	}
+	if err != nil {
 		return fmt.Errorf("impl/sandbox/windows: protect Host authority object %s: %w", path, err)
 	}
-	info, err := acl.InspectFileDACL(path)
+	info, err = acl.InspectFileDACL(path)
 	if err != nil {
 		return err
 	}

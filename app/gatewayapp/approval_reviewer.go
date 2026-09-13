@@ -90,6 +90,9 @@ func (r *guardianApprovalReviewer) Decide(ctx context.Context, req kernel.Approv
 	attempts := &guardianInvocationCollector{}
 	ctx = model.WithInvocationObserver(ctx, attempts.collect)
 	defer func() {
+		if resultErr != nil && r.diagnostics != nil {
+			r.diagnostics.Warn("Guardian review failed", "session_id", req.SessionRef.SessionID, "review_id", req.ReviewID, "error", resultErr)
+		}
 		if persistErr := r.persistGuardianInvocations(ctx, req, attempts.snapshot()); persistErr != nil {
 			if r.diagnostics != nil {
 				r.diagnostics.Warn("Guardian usage persistence failed",
@@ -327,8 +330,9 @@ func (r *guardianApprovalReviewer) runGuardianAgent(
 	if len(queryArgs) > 0 && queryArgs[0].queries != nil {
 		tools = queryArgs[0].queries.tools()
 		profile = systemManagedAgentCapabilityReadOnly
+		instructions = guardianEnvironmentContext(queryArgs[0].queries.network)
 		if queryArgs[0].path != "" {
-			instructions = "Available parent Session JSONL (approval context, not a child endpoint's private log): " + queryArgs[0].path
+			instructions += "\nAvailable parent Session JSONL (approval context, not a child endpoint's private log): " + queryArgs[0].path
 		}
 	}
 
