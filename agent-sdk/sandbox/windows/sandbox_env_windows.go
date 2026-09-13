@@ -113,13 +113,6 @@ func sandboxEnvironment(policy workspacePolicy, extra map[string]string) ([]stri
 		"PSModuleAnalysisCachePath":   filepath.Join(psCacheDir, "PowerShell_AnalysisCache"),
 		"POWERSHELL_TELEMETRY_OPTOUT": "1",
 	}
-	// Windows PowerShell discovers cmdlets through PSModulePath. Search its
-	// built-ins before potentially large third-party module trees when the
-	// sandbox's private analysis cache is cold, while retaining custom modules.
-	forced["PSModulePath"] = prependEnvPath(
-		filepath.Join(resolveSystemRoot(), "System32", "WindowsPowerShell", "v1.0", "Modules"),
-		commandEnvValue(extra, "PSModulePath"),
-	)
 	addSandboxCacheEnv(forced, extra, cacheRoot)
 	if gitSSHCommand, ok := defaultGitOpenSSHCommand(extra); ok {
 		forced["GIT_SSH_COMMAND"] = gitSSHCommand

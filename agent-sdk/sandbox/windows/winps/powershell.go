@@ -23,10 +23,10 @@ func Args(command string, opts Options) []string {
 func Command(command string) string {
 	command = strings.TrimSpace(command)
 	if command == "" {
-		return utf8Prelude
+		return builtinModulePrelude + utf8Prelude
 	}
 	encoded := base64.StdEncoding.EncodeToString([]byte(command))
-	return utf8Prelude +
+	return builtinModulePrelude + utf8Prelude +
 		"$global:LASTEXITCODE = $null; " +
 		"$__caelisUserCommand = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('" + encoded + "')); " +
 		"try { $__caelisScriptBlock = [ScriptBlock]::Create($__caelisUserCommand); } " +
@@ -66,6 +66,11 @@ func utf16LEBytes(text string) []byte {
 	}
 	return out
 }
+
+// PowerShell can prepend machine module paths during startup. Reorder after
+// startup, before Get-Command scans third-party trees with a cold analysis cache.
+// Keep the remaining paths so explicit custom module imports still work.
+const builtinModulePrelude = "$env:PSModulePath = $PSHOME + '\\Modules;' + $env:PSModulePath; "
 
 const utf8Prelude = "" +
 	"$__caelisUtf8Encoding = [System.Text.Encoding]::UTF8; " +
