@@ -17,7 +17,9 @@ location, or set it to an empty value locally to use the standard caches.
 
 PR CI runs lint, the full suite, and build on Linux and native Windows. The
 required `windows-host-open` check also opens embedded Memory with
-`CGO_ENABLED=0`, matching the Windows release build configuration.
+`CGO_ENABLED=0`, matching the Windows release build configuration. Windows CI
+tests at most two packages concurrently and allows 15 minutes per package for
+native process and storage tests.
 
 ## Dependency update CI
 

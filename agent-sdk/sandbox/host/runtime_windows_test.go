@@ -19,6 +19,7 @@ func TestRuntimeRunWindowsDropsPowerShellWriteHostCLIXMLMirror(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
+	t.Cleanup(func() { _ = rt.Close() })
 	result, err := rt.Run(context.Background(), sandbox.CommandRequest{Command: `Write-Host "Done"`})
 	if err != nil {
 		t.Fatalf("Run() error = %v; stdout=%q stderr=%q", err, result.Stdout, result.Stderr)
@@ -39,11 +40,12 @@ func TestRuntimeStartWindowsDecodesPowerShellErrorCLIXML(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
+	t.Cleanup(func() { _ = rt.Close() })
 	session, err := rt.Start(context.Background(), sandbox.CommandRequest{Command: `Test-Path $null`})
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
-	status, err := session.Wait(context.Background(), 5*time.Second)
+	status, err := session.Wait(context.Background(), 30*time.Second)
 	if err != nil {
 		t.Fatalf("Wait() error = %v", err)
 	}
@@ -67,6 +69,7 @@ func TestHostSessionTerminatePublishesTerminalBeforeReturn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = rt.Close() })
 	session, err := rt.Start(context.Background(), sandbox.CommandRequest{
 		Command: "Start-Sleep -Seconds 30",
 	})
@@ -98,6 +101,7 @@ func TestHostSessionOutputCallbackCanTerminateWithoutDeadlock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = rt.Close() })
 	ready := make(chan struct{})
 	callbackStarted := make(chan struct{})
 	callbackDone := make(chan error, 1)
@@ -117,12 +121,13 @@ func TestHostSessionOutputCallbackCanTerminateWithoutDeadlock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The callback can proceed once Start has assigned the session handle.
+	close(ready)
 	select {
 	case <-callbackStarted:
-	case <-time.After(5 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("output callback did not start")
 	}
-	close(ready)
 
 	select {
 	case err := <-callbackDone:
