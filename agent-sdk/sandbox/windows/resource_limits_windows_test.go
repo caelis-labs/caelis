@@ -49,7 +49,10 @@ func TestWindowsResourceLimitsConstrainCommandAndFileSystem(t *testing.T) {
 		t.Fatalf("outside filesystem write=%v", err)
 	}
 	command := "$ErrorActionPreference='Stop'; Set-Content -LiteralPath '" + escapePowerShellSingleQuote(denied) + "' -Value escape"
-	result, err := rt.Run(t.Context(), sandbox.CommandRequest{Command: command, Dir: outside, Timeout: 10 * time.Second, Constraints: constraints})
+	// Allow cold PowerShell startup on CI; this test checks write boundaries,
+	// not command latency.
+	const commandTimeout = 30 * time.Second
+	result, err := rt.Run(t.Context(), sandbox.CommandRequest{Command: command, Dir: outside, Timeout: commandTimeout, Constraints: constraints})
 	if !sandbox.IsCommandExit(err) || result.ExitCode == 0 || result.Route != sandbox.RouteSandbox {
 		t.Fatalf("outside command write=%+v error=%v", result, err)
 	}
@@ -58,7 +61,7 @@ func TestWindowsResourceLimitsConstrainCommandAndFileSystem(t *testing.T) {
 	}
 	result, err = rt.Run(t.Context(), sandbox.CommandRequest{
 		Command: "$ErrorActionPreference='Stop'; Set-Content -LiteralPath \"$env:TEMP/allowed.txt\" -Value cache; Write-Output $env:TEMP",
-		Dir:     outside, Timeout: 10 * time.Second, Constraints: constraints,
+		Dir:     outside, Timeout: commandTimeout, Constraints: constraints,
 	})
 	if err != nil || result.ExitCode != 0 {
 		t.Fatalf("temporary command write=%+v error=%v", result, err)
