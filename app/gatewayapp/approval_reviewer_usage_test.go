@@ -1,9 +1,12 @@
 package gatewayapp
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"iter"
+	"log/slog"
 	"strings"
 	"sync"
 	"testing"
@@ -90,7 +93,9 @@ func TestGuardianRepairPersistsAllUsageToParentAndReopens(t *testing.T) {
 func TestGuardianAccountingFailureKeepsCompletedDecision(t *testing.T) {
 	store, active := newApprovalReviewerTestSession(t, context.Background())
 	failure := errors.New("receipt store unavailable")
-	reviewer := newGuardianApprovalApprover(guardianReceiptFailureStore{Service: store, failure: failure})
+	var diagnostics bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&diagnostics, nil))
+	reviewer := newGuardianApprovalApprover(guardianReceiptFailureStore{Service: store, failure: failure}, logger)
 	llm := &guardianMeasuredModel{approvalReviewerFakeModel: &approvalReviewerFakeModel{responses: []string{`{"option_id":"allow_once"}`}}}
 	req := approvalReviewerTestRequest(active, llm, "inspect", nil)
 	result, err := reviewer.Decide(context.Background(), req)
@@ -99,6 +104,16 @@ func TestGuardianAccountingFailureKeepsCompletedDecision(t *testing.T) {
 	}
 	if len(llm.Requests()) != 1 {
 		t.Fatal("accounting fault repeated decision")
+	}
+	var diagnostic map[string]any
+	if err := json.Unmarshal(diagnostics.Bytes(), &diagnostic); err != nil {
+		t.Fatalf("decode accounting diagnostic: %v; %s", err, diagnostics.String())
+	}
+	if diagnostic["msg"] != "Guardian usage persistence failed" || diagnostic["session_id"] != req.SessionRef.SessionID || diagnostic["review_id"] != req.ReviewID || diagnostic["error"] != (&guardianUsagePersistenceError{cause: failure}).Error() {
+		t.Fatalf("accounting diagnostic lost its cause or correlation: %#v", diagnostic)
+	}
+	if strings.Contains(result.DisplayText, failure.Error()) {
+		t.Fatal("private storage failure leaked into the approval rationale")
 	}
 	usage, _, err := reviewer.ApprovalReviewAccounting(context.Background(), req, result)
 	var typed *guardianUsagePersistenceError
@@ -200,16 +215,29 @@ func (m *guardianCompactionUsageModel) Generate(ctx context.Context, req *model.
 }
 
 func TestGuardianReceiptRetainsOriginalParentFence(t *testing.T) {
-	for _, valid := range []bool{true, false} {
-		t.Run(map[bool]string{true: "owned_fence", false: "public_fields_are_not_authority"}[valid], func(t *testing.T) {
+	for _, scenario := range []string{"owned_fence", "public_fields_are_not_authority", "stale_fence", "empty_runtime_claim"} {
+		t.Run(scenario, func(t *testing.T) {
+			valid := scenario == "owned_fence"
 			store, active := newApprovalReviewerTestSession(t, context.Background())
 			fences := store.(session.SessionFenceService)
 			fence, err := fences.AcquireSessionFence(context.Background(), session.AcquireSessionFenceRequest{SessionRef: active.SessionRef, OwnerID: "parent"})
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !valid {
+			switch scenario {
+			case "public_fields_are_not_authority":
 				fence = session.SessionFence{SessionRef: fence.SessionRef, FenceID: fence.FenceID, OwnerID: fence.OwnerID, FencingToken: fence.FencingToken}
+			case "stale_fence":
+				if err := fences.ReleaseSessionFence(t.Context(), session.SessionFenceReleaseRequest(fence)); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := fences.AcquireSessionFence(t.Context(), session.AcquireSessionFenceRequest{SessionRef: active.SessionRef, OwnerID: "next-turn"}); err != nil {
+					t.Fatal(err)
+				}
+			case "empty_runtime_claim":
+				// The parent still owns the active fence. An empty Runtime claim
+				// must not become Control authority that overlaps it.
+				fence = session.SessionFence{}
 			}
 			ctx := session.ContextWithRuntimeFence(context.Background(), fence)
 			reviewer := newGuardianApprovalApprover(store)

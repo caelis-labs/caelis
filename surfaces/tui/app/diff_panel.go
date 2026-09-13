@@ -6,7 +6,6 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
-	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -326,22 +325,8 @@ func renderDiffPanelCell(line *diffPanelLine, oldWidth, newWidth, width int, ctx
 	return rows
 }
 
-// Each wrapped row is composed independently next to a gutter and the other
-// side. Resolve the whole wrapped span first so continuation rows retain SGR
-// foregrounds and intraline backgrounds instead of inheriting a gutter reset.
 func wrapDiffPanelText(text string, width int) []string {
-	wrapped := hardWrapDisplayLine(text, width)
-	lines := strings.Split(wrapped, "\n")
-	if len(lines) == 1 {
-		return lines
-	}
-	screen := uv.NewScreenBuffer(lipgloss.Width(wrapped), len(lines))
-	screen.Method = ansi.GraphemeWidth
-	uv.NewStyledString(wrapped).Draw(screen, screen.Bounds())
-	for i, line := range lines {
-		lines[i] = screen.Line(i)[:displayColumns(line)].Render()
-	}
-	return lines
+	return splitStyledPhysicalLines(hardWrapDisplayLine(text, width))
 }
 
 func diffPanelLineStyle(kind diffPanelLineKind, ctx BlockRenderContext) (lipgloss.Style, lipgloss.Style) {

@@ -135,11 +135,12 @@ same-Session receipt owns accounting. Missing measurements remain unknown,
 explicit provider zero remains distinguishable, and no local price is invented.
 Guardian staging attempts are accounted in their parent Session with Guardian
 scope. Journal receipts never enter model context or client replay. Receipt
-completion writes retain the original fence under bounded cancellation cleanup;
-failures stay explicit and are not blindly retried. These terminal receipts do
-not establish completeness for attempts interrupted by process crashes. Historical
-responses without a matching receipt remain readable until the supported upgrade
-floor requires receipts; equal token values alone never prove duplicate calls.
+completion writes use bounded cancellation cleanup. Runtime-owned attempts retain
+their original fence; detached Guardian reviews use explicit approval mutation
+authority. Failures stay explicit and are not blindly retried. These terminal
+receipts do not establish completeness for attempts interrupted by process crashes.
+Historical responses without a matching receipt remain readable until the supported
+upgrade floor requires receipts; equal token values alone never prove duplicate calls.
 
 Forwarding model wrappers implement `InvocationTracker` and delegate through
 `model.Generate`, including when the injected provider has no retry wrapper.

@@ -21,11 +21,27 @@ func renderACPNoticeRows(blockID string, ev SubagentEvent, width int, ctx BlockR
 		return []RenderedRow{StyledPlainRow(blockID, text, styled)}
 	}
 	styleKind := tuikit.DetectLineStyle(text)
-	styled := tuikit.ColorizeLogLine(text, styleKind, ctx.Theme)
-	if styleKind == tuikit.LineStyleDefault {
-		styled = ctx.Theme.TranscriptMetaStyle().Width(width).Render(text)
+	if styleKind != tuikit.LineStyleDefault {
+		return []RenderedRow{StyledPlainRow(blockID, text, tuikit.ColorizeLogLine(text, styleKind, ctx.Theme))}
 	}
-	return []RenderedRow{StyledPlainRow(blockID, text, styled)}
+	return renderMarkedNoticeRows(blockID, text, width, ctx)
+}
+
+// Unstyled notices share the transcript bullet and hanging indent. Style each
+// physical line independently so continuation rows survive isolated repaints.
+func renderMarkedNoticeRows(blockID string, text string, width int, ctx BlockRenderContext) []RenderedRow {
+	mark := renderACPTranscriptHeaderMark(ctx, acpHeaderMarkDefault, false)
+	style := func(line string) string {
+		if strings.HasPrefix(line, "• ") {
+			return mark + " " + ctx.Theme.TranscriptMetaStyle().Render(strings.TrimPrefix(line, "• "))
+		}
+		return "  " + ctx.Theme.TranscriptMetaStyle().Render(strings.TrimPrefix(line, "  "))
+	}
+	rows := RenderPrefixedWrappedText(blockID, "•", text, width, style)
+	for i := range rows {
+		rows[i].selectionIndent = displayColumns("• ")
+	}
+	return rows
 }
 
 func renderACPModelRetryNoticeRows(blockID string, text string, ctx BlockRenderContext) []RenderedRow {

@@ -49,10 +49,12 @@ func (m *Model) resetConversationView() {
 	m.clearSelection()
 	m.clearInputSelection()
 	m.setViewportFollowState(viewportFollowTail)
-	if m.cfg.ShowWelcomeCard {
+	// Welcome belongs to the unattached launch view. Attaching a Session
+	// rebuilds its transcript from Control and must not re-seed the card.
+	m.welcomeCardPending = false
+	if m.cfg.ShowWelcomeCard && m.currentSessionID == "" {
 		if m.viewport.Width() > 0 {
 			m.appendWelcomeCard()
-			m.welcomeCardPending = false
 		} else {
 			m.welcomeCardPending = true
 		}
