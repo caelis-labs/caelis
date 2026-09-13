@@ -1,9 +1,6 @@
 package windows
 
-import (
-	"fmt"
-	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
-)
+import "github.com/caelis-labs/caelis/agent-sdk/sandbox"
 
 type Config = sandbox.Config
 
@@ -24,9 +21,6 @@ func (legacyBackendFactory) Build(cfg sandbox.Config) (sandbox.Runtime, error) {
 }
 
 func New(cfg Config) (sandbox.Runtime, error) {
-	if cfg.ResourceLimits != nil {
-		return nil, fmt.Errorf("sandbox: backend cannot enforce explicit resource limits")
-	}
 	return newRuntime(sandbox.NormalizeConfig(cfg))
 }
 

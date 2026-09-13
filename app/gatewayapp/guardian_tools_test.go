@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -105,7 +106,7 @@ func TestGuardianNativeTemporaryWritesAndReadOnlyEvidence(t *testing.T) {
 		}
 		return result
 	}
-	call("RunCommand", map[string]any{"command": "printf evidence > \"$TMPDIR/query.txt\"; cat \"$TMPDIR/query.txt\""})
+	call("RunCommand", map[string]any{"command": guardianNativeTestCommand("printf evidence > \"$TMPDIR/query.txt\"; cat \"$TMPDIR/query.txt\"", "Set-Content -LiteralPath \"$env:TMPDIR/query.txt\" -Value evidence -NoNewline; Get-Content -LiteralPath \"$env:TMPDIR/query.txt\"")})
 	if raw, err := os.ReadFile(filepath.Join(q.scratch, "query.txt")); err != nil || string(raw) != "evidence" {
 		t.Fatalf("temporary write failed: %q %v", raw, err)
 	}
@@ -117,16 +118,22 @@ func TestGuardianNativeTemporaryWritesAndReadOnlyEvidence(t *testing.T) {
 		t.Fatalf("recoverable query poisoned review: %v", q.failure)
 	}
 	call("Read", map[string]any{"path": outside})
-	call("RunCommand", map[string]any{"command": "printf overwritten > " + outside})
+	call("Grep", map[string]any{"path": outside, "pattern": "immutable"})
+	quotedOutside := "'" + strings.ReplaceAll(outside, "'", "''") + "'"
+	call("RunCommand", map[string]any{"command": guardianNativeTestCommand("printf overwritten > '"+strings.ReplaceAll(outside, "'", "'\\''")+"'", "$ErrorActionPreference='Stop'; Set-Content -LiteralPath "+quotedOutside+" -Value overwritten")})
 	if raw, err := os.ReadFile(outside); err != nil || string(raw) != "immutable evidence\n" {
 		t.Fatalf("escaped temporary-only write policy: %q %v", raw, err)
 	}
-	scratch := q.scratch
+	if q.failure != nil {
+		t.Fatalf("ordinary command exit poisoned review: %v", q.failure)
+	}
+	call("Read", map[string]any{"path": outside})
+	root := q.root
 	if err := q.close(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(scratch); !os.IsNotExist(err) {
-		t.Fatalf("scratch remains: %v", err)
+	if _, err := os.Stat(root); !os.IsNotExist(err) {
+		t.Fatalf("review resources remain: %v", err)
 	}
 }
 
@@ -146,8 +153,33 @@ func (m *guardianToolLoopModel) Generate(ctx context.Context, req *model.Request
 	n := len(m.requests)
 	return func(yield func(*model.StreamEvent, error) bool) {
 		if n == 1 {
-			message := model.NewMessage(model.RoleAssistant, model.NewToolUsePart("query-1", "RunCommand", json.RawMessage(`{"command":"printf evidence"}`)))
+			input, _ := json.Marshal(map[string]string{"command": guardianNativeTestCommand("printf evidence", "Write-Output evidence")})
+			message := model.NewMessage(model.RoleAssistant, model.NewToolUsePart("query-1", "RunCommand", input))
 			yield(model.StreamEventFromResponse(&model.Response{Message: message, StepComplete: true, TurnComplete: true}), nil)
+			return
+		}
+		if n == 2 {
+			for _, message := range req.Messages {
+				for _, part := range message.Parts {
+					if part.ToolResult == nil || part.ToolResult.ToolUseID != "query-1" {
+						continue
+					}
+					for _, content := range part.ToolResult.Content {
+						if content.JSON == nil {
+							continue
+						}
+						var result struct {
+							Stdout   string `json:"stdout"`
+							ExitCode int    `json:"exit_code"`
+						}
+						if err := json.Unmarshal(content.JSON.Value, &result); err == nil && !part.ToolResult.IsError && result.ExitCode == 0 && strings.TrimSpace(result.Stdout) == "evidence" {
+							yield(model.StreamEventFromResponse(&model.Response{Message: model.NewTextMessage(model.RoleAssistant, `{"option_id":"allow_once"}`), StepComplete: true, TurnComplete: true}), nil)
+							return
+						}
+					}
+				}
+			}
+			yield(nil, errors.New("Guardian did not receive successful native command evidence"))
 			return
 		}
 		yield(model.StreamEventFromResponse(&model.Response{Message: model.NewTextMessage(model.RoleAssistant, `{"option_id":"allow_once"}`), StepComplete: true, TurnComplete: true}), nil)
@@ -205,14 +237,15 @@ func TestGuardianNativeInheritedNetwork(t *testing.T) {
 	defer server.Close()
 	for _, network := range []sandbox.Network{sandbox.NetworkEnabled, sandbox.NetworkDisabled} {
 		q := &guardianQueries{network: network}
-		raw, _ := json.Marshal(map[string]any{"command": "curl --noproxy '*' --max-time 2 -fsS " + server.URL})
+		command := guardianNativeTestCommand("curl --noproxy '*' --max-time 2 -fsS "+server.URL, "$client = New-Object System.Net.WebClient; $client.Proxy = $null; $client.DownloadString('"+server.URL+"')")
+		raw, _ := json.Marshal(map[string]any{"command": command})
 		result, err := (guardianQueryTool{q, "RunCommand"}).Call(t.Context(), tool.Call{ID: "network", Input: raw})
 		_ = q.close()
 		if err != nil {
 			t.Fatal(err)
 		}
 		encoded, _ := json.Marshal(result)
-		if strings.Contains(string(encoded), "network-evidence") != (network == sandbox.NetworkEnabled) {
+		if strings.Contains(string(encoded), "network-evidence") != (runtime.GOOS == "windows" || network == sandbox.NetworkEnabled) {
 			t.Fatalf("network=%s result=%s", network, encoded)
 		}
 	}
@@ -226,8 +259,17 @@ func TestGuardianExhaustedEvidenceStopsFurtherProviderAdmission(t *testing.T) {
 	}
 	if next := q.admit(t.Context(), &model.Request{}); !errors.Is(next, q.failure) {
 		t.Fatalf("provider admission ignored evidence failure: %v", next)
+	} else if model.IsRetryableLLMError(next) {
+		t.Fatalf("permanent evidence failure is retryable: %v", next)
 	}
 	if q.attempts != 0 {
 		t.Fatalf("exhausted review admitted %d provider attempts", q.attempts)
 	}
+}
+
+func guardianNativeTestCommand(posix, powershell string) string {
+	if runtime.GOOS == "windows" {
+		return powershell
+	}
+	return posix
 }

@@ -16,6 +16,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/bwrap"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/seatbelt"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox/windows"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/filesystem"
@@ -28,6 +29,7 @@ type guardianQueries struct {
 	model                              model.LLM
 	mu                                 sync.Mutex
 	network                            sandbox.Network
+	root                               string
 	scratch                            string
 	runtime                            sandbox.Runtime
 	calls, bytes, attempts, inputBytes int
@@ -38,15 +40,25 @@ func (q *guardianQueries) open() error {
 	if q.runtime != nil {
 		return nil
 	}
-	scratch, err := os.MkdirTemp("", "caelis-guardian-")
+	root, err := os.MkdirTemp("", "caelis-guardian-")
 	if err != nil {
 		return err
 	}
-	created := scratch
-	scratch, err = filepath.EvalSymlinks(scratch)
+	created := root
+	root, err = filepath.EvalSymlinks(root)
 	if err != nil {
 		os.RemoveAll(created)
 		return err
+	}
+	scratch := root
+	if runtime.GOOS == "windows" {
+		// Keep ACL receipts outside the command's writable directory. Both are
+		// private to this review and removed after the runtime closes.
+		scratch = filepath.Join(root, "work")
+		if err := os.Mkdir(scratch, 0o700); err != nil {
+			os.RemoveAll(root)
+			return err
+		}
 	}
 	cfg := sandbox.Config{CWD: scratch, ResourceLimits: &sandbox.ResourceLimits{WritePaths: []string{scratch}, Network: q.network}}
 	var rt sandbox.Runtime
@@ -55,13 +67,18 @@ func (q *guardianQueries) open() error {
 		rt, err = seatbelt.New(cfg)
 	case "linux":
 		rt, err = bwrap.New(cfg)
+	case "windows":
+		cfg.StateDir = filepath.Join(root, "state")
+		cfg.HostAuthorityDir = filepath.Join(root, "authority")
+		rt, err = windows.New(cfg)
 	default:
 		err = fmt.Errorf("guardian evidence sandbox is unavailable on %s", runtime.GOOS)
 	}
 	if err != nil {
-		os.RemoveAll(scratch)
+		os.RemoveAll(root)
 		return err
 	}
+	q.root = root
 	q.scratch = scratch
 	q.runtime = rt
 	return nil
@@ -74,8 +91,8 @@ func (q *guardianQueries) close() error {
 			return err
 		}
 	}
-	if q.scratch != "" {
-		return os.RemoveAll(q.scratch)
+	if q.root != "" {
+		return os.RemoveAll(q.root)
 	}
 	return nil
 }
@@ -83,7 +100,7 @@ func (q *guardianQueries) admit(_ context.Context, req *model.Request) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	if q.failure != nil {
-		return q.failure
+		return guardianAdmissionError{q.failure}
 	}
 	raw, err := json.Marshal(req)
 	if err != nil {
@@ -93,14 +110,14 @@ func (q *guardianQueries) admit(_ context.Context, req *model.Request) error {
 		budget := sdkruntime.EvaluateModelRequestBudget(q.model, req, guardianCompactionConfig(q.model, req.Output)).Usage
 		if budget.EffectiveInputBudget > 0 && budget.TotalTokens > budget.EffectiveInputBudget {
 			q.failure = fmt.Errorf("guardian active request exceeds input budget")
-			return q.failure
+			return guardianAdmissionError{q.failure}
 		}
 	}
 	q.attempts++
 	q.inputBytes += len(raw)
 	if q.attempts > 12 || q.inputBytes > 2*1024*1024 {
 		q.failure = fmt.Errorf("guardian cumulative model budget exhausted")
-		return q.failure
+		return guardianAdmissionError{q.failure}
 	}
 	return nil
 }
@@ -115,7 +132,8 @@ type guardianQueryTool struct {
 
 func (t guardianQueryTool) Definition() tool.Definition {
 	if t.name == "RunCommand" {
-		return tool.Definition{Name: t.name, Description: "Run a local evidence query or script. Only the private temporary directory is writable; TMPDIR points there. Network policy matches the main Agent. Commands complete synchronously; no escalation is available.", InputSchema: map[string]any{"type": "object", "properties": map[string]any{"command": map[string]any{"type": "string"}}, "required": []any{"command"}, "additionalProperties": false}}
+		description := "Run a local evidence query or script using the supplied environment context. Only the private temporary directory is writable; TMPDIR points there. Commands complete synchronously; no escalation is available."
+		return tool.Definition{Name: t.name, Description: description, InputSchema: map[string]any{"type": "object", "properties": map[string]any{"command": map[string]any{"type": "string"}}, "required": []any{"command"}, "additionalProperties": false}}
 	}
 	d := (&filesystem.SearchTool{}).Definition()
 	if t.name == "Read" {
@@ -126,6 +144,13 @@ func (t guardianQueryTool) Definition() tool.Definition {
 	d.ExecutionRequirements = nil
 	return d
 }
+
+// A failed review's admission gate cannot recover by retrying the provider.
+type guardianAdmissionError struct{ cause error }
+
+func (e guardianAdmissionError) Error() string { return e.cause.Error() }
+func (e guardianAdmissionError) Unwrap() error { return e.cause }
+func (guardianAdmissionError) Retryable() bool { return false }
 
 func (t guardianQueryTool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
 	q := t.owner

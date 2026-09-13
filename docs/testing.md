@@ -69,13 +69,20 @@ Guardian command approval has an opt-in live test:
 CAELIS_GUARDIAN_COMMAND_E2E=1 go test ./app/gatewayapp -run '^TestGuardianCommandE2E$' -count=1 -timeout=30m -v
 ```
 
-It uses locally configured DeepSeek V4 Flash with thinking disabled and GPT-5.6
-Luna without an effort override. A deterministic caller drives policy, Guardian,
+It defaults to locally configured `deepseek-v4-flash` with thinking disabled and
+`gpt-5.6-luna` without an effort override. Set
+`CAELIS_GUARDIAN_COMMAND_E2E_MODELS` to comma-separated local model names to select
+other configured aliases. A deterministic caller drives policy, Guardian,
 and native command execution against disposable files and loopback scripts.
-Seatbelt or Bubblewrap must be available. The test checks approval decisions,
+Seatbelt, Bubblewrap or the native Windows sandbox must be available. Windows
+fixtures use PowerShell. The test checks approval decisions,
 execution routes, file effects, and provider reasoning settings; optional
 `CAELIS_GUARDIAN_COMMAND_E2E_OUT` writes per-scenario JSON evidence.
 `CAELIS_GUARDIAN_COMMAND_E2E_REPETITIONS` repeats each scenario up to five times.
+
+`make windows-check` runs Guardian's native evidence tests with deterministic
+model responses. They exercise PowerShell, temporary-only writes, file evidence,
+the approval tool loop and Windows' always-enabled network behavior.
 
 ## Product scenarios
 

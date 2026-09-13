@@ -83,6 +83,11 @@ func newRuntime(cfg Config) (sandbox.Runtime, error) {
 
 func newRuntimeWithHostIdentity(cfg Config, hostUserSID, authorityRoot string) (sandbox.Runtime, error) {
 	cfg = sandbox.NormalizeConfig(cfg)
+	var err error
+	cfg, err = normalizeResourceLimits(cfg)
+	if err != nil {
+		return nil, err
+	}
 	stateRoot, err := resolveStateRoot(cfg.StateDir)
 	if err != nil {
 		return nil, err
@@ -586,6 +591,10 @@ func (r *runtime) derivePolicyForRequest(req sandbox.CommandRequest) (workspaceP
 
 func (r *runtime) policyForRequestWithBinding(req sandbox.CommandRequest, bindingMode capabilityBindingMode, mode ensureMode) (workspacePolicy, error) {
 	constraints := sandbox.EffectiveConstraints(req)
+	if r.cfg.ResourceLimits != nil {
+		constraints.Permission = sandbox.PermissionWorkspaceWrite
+		constraints.PathRules = nil
+	}
 	constraints.Network = effectiveWindowsSandboxNetwork(constraints.Network)
 	if constraints.Permission == "" || constraints.Permission == sandbox.PermissionDefault {
 		constraints.Permission = sandbox.PermissionWorkspaceWrite
@@ -630,7 +639,7 @@ func (r *runtime) policyForRequestWithBinding(req sandbox.CommandRequest, bindin
 		return workspacePolicy{}, err
 	}
 	userWriteRoots := fullUserWriteRoots
-	if mode == ensureModeForegroundCore {
+	if mode == ensureModeForegroundCore && r.cfg.ResourceLimits == nil {
 		userWriteRoots = coreUserWriteRoots
 	}
 	envRoot, err := r.prepareSandboxEnvRoot(workspaceRoot, bindingMode == bindingModeCreate)
@@ -813,6 +822,9 @@ func (r *runtime) prepareSandboxEnvRoot(workspaceRoot string, create bool) (stri
 	root := r.sandboxEnvRoot(workspaceRoot)
 	if root == "" {
 		return "", nil
+	}
+	if err := r.validateResourceLimitEnvironment(root); err != nil {
+		return "", err
 	}
 	if create {
 		for _, dir := range sandboxEnvDirs(root) {

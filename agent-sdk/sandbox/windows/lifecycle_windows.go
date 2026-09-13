@@ -170,7 +170,12 @@ func (r *runtime) Refresh(ctx context.Context) error {
 }
 
 func (r *runtime) startBackgroundRefresh(ctx context.Context, req sandbox.CommandRequest) {
-	if r == nil || !r.beginRefresh() {
+	// Explicit roots are complete at foreground admission. They have no shared
+	// cache to refresh, and their owner may remove them immediately after Close.
+	if r == nil || r.cfg.ResourceLimits != nil {
+		return
+	}
+	if !r.beginRefresh() {
 		return
 	}
 	releaseUse, err := r.beginRuntimeUse()

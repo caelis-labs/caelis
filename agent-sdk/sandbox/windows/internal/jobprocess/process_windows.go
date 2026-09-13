@@ -156,7 +156,7 @@ func Start(cfg Config) (_ *Process, retErr error) {
 }
 
 func (p *Process) Input() io.WriteCloser {
-	if p == nil {
+	if p == nil || p.stdin == nil {
 		return nil
 	}
 	return p.stdin

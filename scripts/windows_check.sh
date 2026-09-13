@@ -28,6 +28,8 @@ bash ./scripts/go_test_nonempty.sh ./control/appserver \
   '^TestSyncOperationStoreDirectoryDoesNotFlushReadOnlyWindowsDirectory$' windows-operation-storage -count=1
 bash ./scripts/go_test_nonempty.sh ./app/gatewayapp \
   '^Test(WindowsOpenRouterReconnectPreservesCustomReasoningLevels|HostModelConnectUsesCanonicalDocumentAndDoesNotPersistSecretInLedger|ACPPrepareCommandRecoversIntentOnlyReceiptWithoutRepeatingProcess|NewLocalStackProductionBootstrapDoesNotPersistSandboxNetworkDefault)$' windows-host-persistence -count=1
+CAELIS_TEST_GUARDIAN_NATIVE=1 bash ./scripts/go_test_nonempty.sh ./app/gatewayapp \
+  '^TestGuardian(Native|Environment)' windows-guardian -count=1
 bash ./scripts/go_test_nonempty.sh ./internal/cli \
   '^TestRunDoctorStartupRepairsWorkspaceIdentityConflict$' windows-workspace-paths -count=1
 bash ./scripts/go_test_nonempty.sh ./surfaces/tui/app \

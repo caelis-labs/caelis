@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/windows/internal/jobprocess"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/windows/internal/win32"
 )
@@ -105,6 +106,9 @@ func runStartedAtomicJobProcess(
 	}
 	drainErr, keepUse := drainAtomicJobProcess(process, releaseUse)
 	copyWG.Wait()
+	if contextErr == nil && terminateErr == nil && drainErr == nil && waited.code > 0 {
+		return waited.code, sandbox.MarkCommandExit(waited.err), keepUse
+	}
 	return waited.code, errors.Join(contextErr, terminateErr, waited.err, drainErr), keepUse
 }
 

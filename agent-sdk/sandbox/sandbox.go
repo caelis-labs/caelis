@@ -149,6 +149,8 @@ type Descriptor struct {
 // ResourceLimits is an embedding-owned mandatory resource ceiling. It cannot
 // be widened by command constraints or a Host/full-access request. Reads retain
 // the backend default. Backends without enforcement reject construction.
+// Windows enforces directory write limits but keeps its online-only network
+// behavior; NetworkDisabled does not disable network access on Windows.
 type ResourceLimits struct {
 	WritePaths []string
 	Network    Network

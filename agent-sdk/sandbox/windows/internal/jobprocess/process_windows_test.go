@@ -131,6 +131,9 @@ func TestStartWithoutStdinProvidesValidEOFHandle(t *testing.T) {
 		t.Fatalf("Start() error = %v", err)
 	}
 	defer process.ClosePipes()
+	if process.Input() != nil {
+		t.Fatal("process without stdin exposed a typed-nil writer")
+	}
 	stdoutCh := make(chan []byte, 1)
 	go func() { data, _ := io.ReadAll(process.Stdout()); stdoutCh <- data }()
 	if _, err := process.WaitRoot(); err != nil {
