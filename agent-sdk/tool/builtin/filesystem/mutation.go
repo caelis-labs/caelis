@@ -224,19 +224,17 @@ func requiredPatchEditString(args map[string]any, editIndex int, key string) (st
 func collectPatchReplacements(content string, edits []patchEdit) ([]patchReplacement, error) {
 	replacements := make([]patchReplacement, 0, len(edits))
 	for idx, edit := range edits {
-		matches := patchMatchRanges(content, edit.old)
-		count := len(matches)
-		if count == 0 {
-			err := tool.NewError(tool.ErrorCodeOldTextNotFound, fmt.Sprintf("Patch edit %d did not contain an exact match for old", idx))
-			err.Hint = "Read the file again and retry Patch with the current text."
-			err.Retryable = true
-			return nil, err
+		matches := patchMatchRanges(content, edit.old, edit.replaceAll)
+		if len(matches) == 0 {
+			replacement, err := whitespacePatchReplacement(content, edit, idx)
+			if err != nil {
+				return nil, err
+			}
+			replacements = append(replacements, replacement)
+			continue
 		}
-		if !edit.replaceAll && count != 1 {
-			err := tool.NewError(tool.ErrorCodeTooManyMatches, fmt.Sprintf("Patch edit %d requires exact single match, found %d", idx, count))
-			err.Hint = "Use a more specific old text or set replace_all."
-			err.Retryable = true
-			return nil, err
+		if !edit.replaceAll && len(matches) != 1 {
+			return nil, patchAmbiguousError(content, matches, idx)
 		}
 		for _, match := range matches {
 			newValue := edit.new
@@ -258,71 +256,6 @@ func collectPatchReplacements(content string, edits []patchEdit) ([]patchReplace
 		return nil, err
 	}
 	return replacements, nil
-}
-
-type patchMatchRange struct {
-	start                 int
-	end                   int
-	normalizedLineEndings bool
-}
-
-func patchMatchRanges(content string, oldValue string) []patchMatchRange {
-	if matches := exactPatchMatchRanges(content, oldValue); len(matches) > 0 {
-		return matches
-	}
-	normalizedContent, offsets := normalizePatchLineEndingsWithOffsets(content)
-	normalizedOld := normalizePatchLineEndings(oldValue)
-	if normalizedContent == content && normalizedOld == oldValue {
-		return nil
-	}
-	normalizedMatches := exactPatchMatchRanges(normalizedContent, normalizedOld)
-	if len(normalizedMatches) == 0 {
-		return nil
-	}
-	ranges := make([]patchMatchRange, 0, len(normalizedMatches))
-	for _, match := range normalizedMatches {
-		if match.start < 0 || match.start >= len(offsets) || match.end < 0 || match.end >= len(offsets) {
-			continue
-		}
-		start := offsets[match.start]
-		end := offsets[match.end]
-		ranges = append(ranges, patchMatchRange{
-			start:                 start,
-			end:                   end,
-			normalizedLineEndings: true,
-		})
-	}
-	return ranges
-}
-
-func exactPatchMatchRanges(content string, oldValue string) []patchMatchRange {
-	var ranges []patchMatchRange
-	offset := 0
-	for offset <= len(content) {
-		index := strings.Index(content[offset:], oldValue)
-		if index < 0 {
-			break
-		}
-		start := offset + index
-		end := start + len(oldValue)
-		if patchRangeSplitsCRLF(content, start, end) {
-			offset = start + 1
-			continue
-		}
-		ranges = append(ranges, patchMatchRange{start: start, end: end})
-		offset = end
-	}
-	return ranges
-}
-
-func patchRangeSplitsCRLF(content string, start int, end int) bool {
-	if start > 0 && start < len(content) && content[start-1] == '\r' && content[start] == '\n' {
-		return true
-	}
-	if end > 0 && end < len(content) && content[end-1] == '\r' && content[end] == '\n' {
-		return true
-	}
-	return false
 }
 
 func normalizePatchLineEndingsWithOffsets(text string) (string, []int) {
