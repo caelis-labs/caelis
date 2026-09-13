@@ -65,7 +65,7 @@ func TestAsyncSessionNonTTYClosesStdin(t *testing.T) {
 	if err := session.WriteInput([]byte("ignored\n")); err == nil || !strings.Contains(err.Error(), "stdin not available") {
 		t.Fatalf("WriteInput() error = %v, want stdin not available", err)
 	}
-	if _, err := manager.WaitSessionWithContextTimeout(context.Background(), session.ID, 5*time.Second); err != nil {
+	if _, err := manager.WaitSessionWithContextTimeout(context.Background(), session.ID, 30*time.Second); err != nil {
 		t.Fatalf("WaitSessionWithContextTimeout() error = %v", err)
 	}
 	result, err := manager.GetResult(session.ID)

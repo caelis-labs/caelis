@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -91,6 +92,43 @@ func TestReleasePublishesProtectedMainTagsWithoutRepeatingPRQuality(t *testing.T
 	publish := strings.Index(release, "name: GoReleaser")
 	if guard < 0 || publish < 0 || guard >= publish {
 		t.Error("release must validate tag ancestry before publishing artifacts")
+	}
+}
+
+func TestWindowsQualityUsesFocusedNativeGate(t *testing.T) {
+	t.Parallel()
+
+	quality := readWorkflow(t, "../.github/workflows/quality.yml")
+	_, windows, ok := strings.Cut(quality, "\n  windows-host-open:\n")
+	if !ok {
+		t.Fatal("required windows-host-open check missing")
+	}
+	windows = regexp.MustCompile(`(?m)^  \S`).Split(windows, 2)[0]
+	for _, want := range []string{
+		"runs-on: windows-2022",
+		"GOWORK: 'off'",
+		"GOFLAGS: -mod=readonly -p=2",
+		"run: make windows-check",
+	} {
+		if !strings.Contains(windows, want) {
+			t.Errorf("Windows quality check missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{"golangci-lint-action", "run: make test", "go test ./...", "GO_TEST_TIMEOUT=15m"} {
+		if strings.Contains(windows, forbidden) {
+			t.Errorf("Windows quality check repeats broad validation %q", forbidden)
+		}
+	}
+	gate := readWorkflow(t, "./windows_check.sh")
+	for _, want := range []string{
+		`"$(go env GOHOSTOS)" != windows`,
+		"CGO_ENABLED=0 go build ./...",
+		"CGO_ENABLED=0 GO_TEST_TIMEOUT=10m bash ./scripts/go_test_nonempty.sh",
+		"./app/gatewayapp/internal/memoryhost '^TestEmbeddedHostBindsSDKClient$' windows-memory-open -count=1",
+	} {
+		if !strings.Contains(gate, want) {
+			t.Errorf("Windows release configuration check missing %q", want)
+		}
 	}
 }
 

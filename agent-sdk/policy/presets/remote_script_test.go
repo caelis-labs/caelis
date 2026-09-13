@@ -164,7 +164,8 @@ func TestRemoteScriptCannotBypassHardDenyOrEscalationJustification(t *testing.T)
 }
 
 func TestSandboxCommandApprovalDoesNotGrantTargetPaths(t *testing.T) {
-	input := commandCtx("chmod -R u+w /outside/release && rm -rf -- /outside/release && git status --short --branch", false)
+	outside := testOutsidePath()
+	input := commandCtx("chmod -R u+w "+outside+" && rm -rf -- "+outside+" && git status --short --branch", false)
 	got, err := WorkspaceWriteMode().DecideTool(context.Background(), input)
 	if err != nil || got.Action != policy.ActionAskApproval || !reflect.DeepEqual(got.Constraints, workspaceWriteConstraints(input.Options)) {
 		t.Fatalf("decision=%#v err=%v", got, err)

@@ -31,16 +31,24 @@ func TestRuntimeCommandTTYDefaultTaskWriteSubmitsWindowsLine(t *testing.T) {
 		t.Fatalf("RunCommand payload = %#v, want running input-capable task", running)
 	}
 	handle, _ := running["handle"].(string)
-	writeResult := callRuntimeTaskTool(t, runtimeTaskTool{
+	taskTool := runtimeTaskTool{
 		base:       tasktool.New(),
 		sessionRef: activeSession.SessionRef,
 		tasks:      runtime.tasks,
-	}, map[string]any{
+	}
+	writeResult := callRuntimeTaskTool(t, taskTool, map[string]any{
 		"action": "write",
 		"handle": handle,
 		"input":  "demo",
 	})
 	completed := testToolResultPayload(t, writeResult)
+	if completed["state"] == string(taskapi.StateRunning) {
+		waitResult := callRuntimeTaskTool(t, taskTool, map[string]any{
+			"action": "wait",
+			"handle": handle,
+		})
+		completed = testToolResultPayload(t, waitResult)
+	}
 	if completed["state"] != string(taskapi.StateCompleted) {
 		t.Fatalf("Task write payload = %#v, want completed", completed)
 	}

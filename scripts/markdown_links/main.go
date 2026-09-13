@@ -49,7 +49,7 @@ func documentationPaths(root string) ([]string, error) {
 		if err != nil {
 			return err
 		}
-		paths = append(paths, relative)
+		paths = append(paths, filepath.ToSlash(relative))
 		return nil
 	})
 	sort.Strings(paths)

@@ -6,7 +6,7 @@ import (
 )
 
 func TestConfigurationUsesExactTriStateWorkspaceDecision(t *testing.T) {
-	root := filepath.Join(string(filepath.Separator), "workspace", "project")
+	root := filepath.Join(t.TempDir(), "project")
 	trusted, err := Set(nil, root, Trusted)
 	if err != nil {
 		t.Fatalf("Set trusted: %v", err)
@@ -33,7 +33,7 @@ func TestConfigurationRejectsInvalidPersistedDecisions(t *testing.T) {
 	if _, err := Set(nil, "relative", Trusted); err == nil {
 		t.Fatal("Set accepted a relative workspace")
 	}
-	root := filepath.Join(string(filepath.Separator), "workspace", "project")
+	root := filepath.Join(t.TempDir(), "project")
 	if _, err := Set(nil, root, Unknown); err == nil {
 		t.Fatal("Set accepted an unknown decision")
 	}
@@ -43,7 +43,7 @@ func TestConfigurationRejectsInvalidPersistedDecisions(t *testing.T) {
 }
 
 func TestValidateIdentitiesRejectsNormalizedCollision(t *testing.T) {
-	root := filepath.Join(string(filepath.Separator), "workspace", "project")
+	root := filepath.Join(t.TempDir(), "project")
 	if err := ValidateIdentities(Configuration{
 		root:                                    Trusted,
 		root + string(filepath.Separator) + ".": Untrusted,
@@ -53,12 +53,13 @@ func TestValidateIdentitiesRejectsNormalizedCollision(t *testing.T) {
 }
 
 func TestConfigurationKeepsCaseDistinctWorkspaceIdentities(t *testing.T) {
-	root := filepath.Join(string(filepath.Separator), "workspace", "Repo")
+	workspace := t.TempDir()
+	root := filepath.Join(workspace, "Repo")
 	trusted, err := Set(nil, root, Trusted)
 	if err != nil {
 		t.Fatalf("Set trusted: %v", err)
 	}
-	other := filepath.Join(string(filepath.Separator), "workspace", "repo")
+	other := filepath.Join(workspace, "repo")
 	if got := Lookup(trusted, other); got != Unknown {
 		t.Fatalf("Lookup(case-distinct workspace) = %q, want %q", got, Unknown)
 	}

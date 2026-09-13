@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"testing/synctest"
 )
 
 func TestNormalizeClipboardImageDownscalesPNGAndPreservesFormat(t *testing.T) {
@@ -295,25 +296,29 @@ func TestNormalizeClipboardImageDoesNotRewriteUserFiles(t *testing.T) {
 }
 
 func TestWriteClipboardImageBytesNormalizesOversizedPNG(t *testing.T) {
-	src := opaqueImage(t, 2300, 100, color.NRGBA{R: 12, G: 24, B: 48, A: 255})
-	names, path, err := writeClipboardImageBytes(encodePNG(t, src), "image/png")
-	if err != nil {
-		t.Fatalf("writeClipboardImageBytes: %v", err)
-	}
-	cleanupPath(t, path)
-	if len(names) != 1 || names[0] != path {
-		t.Fatalf("writeClipboardImageBytes names = %v path = %q", names, path)
-	}
-	cfg, format := decodeConfig(t, path)
-	if format != "png" {
-		t.Fatalf("format = %q, want png", format)
-	}
-	if max(cfg.Width, cfg.Height) != clipboardImageMaxLongEdge {
-		t.Fatalf("normalized size = %dx%d, want long edge %d", cfg.Width, cfg.Height, clipboardImageMaxLongEdge)
-	}
-	if !isClipboardGeneratedImagePath(path) {
-		t.Fatalf("result path is not a clipboard temp file: %q", path)
-	}
+	// A fixed clock reproduces source/output filename collisions even on hosts
+	// whose real clock is precise enough to hide the Windows failure.
+	synctest.Test(t, func(t *testing.T) {
+		src := opaqueImage(t, 2300, 100, color.NRGBA{R: 12, G: 24, B: 48, A: 255})
+		names, path, err := writeClipboardImageBytes(encodePNG(t, src), "image/png")
+		if err != nil {
+			t.Fatalf("writeClipboardImageBytes: %v", err)
+		}
+		cleanupPath(t, path)
+		if len(names) != 1 || names[0] != path {
+			t.Fatalf("writeClipboardImageBytes names = %v path = %q", names, path)
+		}
+		cfg, format := decodeConfig(t, path)
+		if format != "png" {
+			t.Fatalf("format = %q, want png", format)
+		}
+		if max(cfg.Width, cfg.Height) != clipboardImageMaxLongEdge {
+			t.Fatalf("normalized size = %dx%d, want long edge %d", cfg.Width, cfg.Height, clipboardImageMaxLongEdge)
+		}
+		if !isClipboardGeneratedImagePath(path) {
+			t.Fatalf("result path is not a clipboard temp file: %q", path)
+		}
+	})
 }
 
 func TestScaledClipboardImageSize(t *testing.T) {
@@ -396,13 +401,16 @@ func pngConfigBytes(t *testing.T, width, height uint32) []byte {
 
 func writeClipboardTempImage(t *testing.T, ext string, data []byte) string {
 	t.Helper()
-	path, err := newClipboardImagePath(ext)
+	file, err := createClipboardImageFile(ext)
 	if err != nil {
 		t.Fatal(err)
 	}
+	path := file.Name()
 	cleanupPath(t, path)
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		t.Fatal(err)
+	_, writeErr := file.Write(data)
+	closeErr := file.Close()
+	if writeErr != nil || closeErr != nil {
+		t.Fatalf("write clipboard image: %v, close: %v", writeErr, closeErr)
 	}
 	return path
 }

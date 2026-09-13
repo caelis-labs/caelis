@@ -73,8 +73,13 @@ try {
 }
 
 func pasteMacClipboardImage() ([]string, string, error) {
-	path, err := newClipboardImagePath(".png")
+	file, err := createClipboardImageFile(".png")
 	if err != nil {
+		return nil, "", err
+	}
+	path := file.Name()
+	if err := file.Close(); err != nil {
+		_ = os.Remove(path)
 		return nil, "", err
 	}
 	const script = `
@@ -165,18 +170,26 @@ func writeClipboardImageBytes(data []byte, mimeType string) ([]string, string, e
 	if len(data) == 0 {
 		return nil, "", nil
 	}
-	path, err := newClipboardImagePath(imageExtensionForMime(mimeType))
+	file, err := createClipboardImageFile(imageExtensionForMime(mimeType))
 	if err != nil {
 		return nil, "", err
 	}
-	if err := os.WriteFile(path, data, 0o600); err != nil {
+	path := file.Name()
+	_, writeErr := file.Write(data)
+	closeErr := file.Close()
+	if writeErr != nil || closeErr != nil {
 		_ = os.Remove(path)
-		return nil, "", err
+		if writeErr != nil {
+			return nil, "", writeErr
+		}
+		return nil, "", closeErr
 	}
 	return finalizeClipboardImageResult(path)
 }
 
-func newClipboardImagePath(ext string) (string, error) {
+// createClipboardImageFile reserves a unique file even when consecutive calls
+// share a clock tick. The caller owns closing it and removing failed writes.
+func createClipboardImageFile(ext string) (*os.File, error) {
 	ext = strings.TrimSpace(ext)
 	if ext == "" {
 		ext = ".png"
@@ -184,12 +197,11 @@ func newClipboardImagePath(ext string) (string, error) {
 	if !strings.HasPrefix(ext, ".") {
 		ext = "." + ext
 	}
-	dir := filepath.Join(os.TempDir(), "caelis-clipboard")
+	dir := filepath.Join(os.TempDir(), clipboardImageTempDirName)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return "", err
+		return nil, err
 	}
-	name := fmt.Sprintf("clipboard-%s-%d%s", time.Now().UTC().Format("20060102-150405.000000000"), os.Getpid(), ext)
-	return filepath.Join(dir, name), nil
+	return os.CreateTemp(dir, clipboardImageTempNamePref+"*"+ext)
 }
 
 func imageExtensionForMime(mimeType string) string {

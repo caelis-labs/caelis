@@ -66,6 +66,9 @@ jobs:
     if: github.event_name != 'schedule'
     runs-on: windows-2022
     timeout-minutes: 20
+    env:
+      GOWORK: 'off'
+      GOFLAGS: -mod=readonly -p=2
     steps:
       - uses: actions/checkout@v7
 
@@ -74,6 +77,6 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Embedded Memory Open
+      - name: Windows platform checks
         shell: bash
-        run: go test -count=1 -timeout 10m ./app/gatewayapp/internal/memoryhost -run '^TestEmbeddedHostBindsSDKClient$'
+        run: make windows-check

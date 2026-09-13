@@ -207,6 +207,10 @@ func TestHostModelConnectUsesCanonicalDocumentAndDoesNotPersistSecretInLedger(t 
 	if committed.Runtime.ApprovalMode != "manual" || committed.Runtime.PolicyProfile != "external-writer" {
 		t.Fatalf("Host model command lost canonical fields: %#v", committed)
 	}
+	// Release the spool's mandatory Windows lock before inspecting all files.
+	if err := stack.Close(); err != nil {
+		t.Fatal(err)
+	}
 	if err := filepath.WalkDir(controlStoreRoot(stack.composition.authorities.storeDir), func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil || entry.IsDir() {
 			return walkErr
