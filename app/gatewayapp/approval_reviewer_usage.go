@@ -65,7 +65,14 @@ func (r *guardianApprovalReviewer) persistGuardianInvocations(ctx context.Contex
 		}
 		receipt.Meta["usage_category"] = "auto_review"
 		receipt.Meta["review_id"] = req.ReviewID
-		if _, err := r.sessions.AppendEvent(cleanup, session.AppendEventRequest{SessionRef: req.SessionRef, MutationGuard: session.RuntimeMutationGuard(ctx), Event: receipt}); err != nil {
+		// Runtime claims, including empty and stale claims, must fail closed.
+		// Detached child accounting uses Control approval authority without
+		// borrowing the parent Turn's fence.
+		guard := session.RuntimeMutationGuard(ctx)
+		if guard.Authority != session.MutationAuthorityRuntime {
+			guard = session.ControlMutationGuard(session.ControlMutationPurposeApproval)
+		}
+		if _, err := r.sessions.AppendEvent(cleanup, session.AppendEventRequest{SessionRef: req.SessionRef, MutationGuard: guard, Event: receipt}); err != nil {
 			return &guardianUsagePersistenceError{cause: err}
 		}
 	}

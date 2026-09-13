@@ -74,7 +74,7 @@ func TestRegressionAgentGuidanceReachesModelBoundary(t *testing.T) {
 			wants:    []string{"repository inspection", "async Task", "file tools"},
 		},
 		{name: "small edits prefer patch", toolName: filesystem.WriteToolName, wants: []string{"Prefer Patch"}},
-		{name: "patch uses current exact text", toolName: filesystem.PatchToolName, wants: []string{"surgical exact text replacements", "current file"}},
+		{name: "patch explains exact-first edits and bounded recovery", toolName: filesystem.PatchToolName, wants: []string{"Copy old exactly", "current file", "unique multiline match", "new changes only line bodies", "short diagnostic"}},
 		{name: "read exposes Write revision guard", toolName: filesystem.ReadToolName, wants: []string{"has_more", "next_offset", "revision", "if_revision", "Write"}},
 		{name: "task reaches model boundary", toolName: task.ToolName},
 		{name: "spawn coordinates collaborators", toolName: spawn.ToolName, wants: []string{"collaborating Agent", "ReadThread or WaitThread"}},

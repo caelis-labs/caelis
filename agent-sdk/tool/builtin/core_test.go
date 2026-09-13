@@ -215,7 +215,7 @@ func TestCoreToolSchemasExposeGuidanceBoundsAndAnnotations(t *testing.T) {
 	requireStringMinLength(t, defs[filesystem.PatchToolName], "path", 1)
 	requireNoProperty(t, defs[filesystem.PatchToolName], "if_revision")
 	requirePatchEditSchema(t, defs[filesystem.PatchToolName])
-	requireDescriptionContains(t, defs[filesystem.PatchToolName], "surgical exact text replacements", "current file", "replacement batch")
+	requireDescriptionContains(t, defs[filesystem.PatchToolName], "surgical text replacements", "current file", "replacement batch", "Copy old exactly", "new changes only line bodies", "no edits are written")
 	requireAnnotations(t, defs[filesystem.PatchToolName], false, true, true, false)
 
 	requireStringMinLength(t, defs[shell.RunCommandToolName], "command", 1)

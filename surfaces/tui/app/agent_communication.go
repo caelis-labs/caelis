@@ -149,7 +149,7 @@ func renderAgentCommunicationRows(blockID string, event SubagentEvent, eventInde
 	displayText, folded := longCommandDisplayPreview(text, bodyBudget)
 	if opts.AgentMessageTargetLinks {
 		if token := subagentOutputOverlayClickToken(event.SourceCallID); token != "" {
-			return []RenderedRow{renderAgentMessageRow(blockID, name, displayText, ctx, token)}
+			return wrapAgentMessageRows(renderAgentMessageRow(blockID, name, displayText, ctx, token), width)
 		}
 	}
 	token := ""
@@ -160,7 +160,7 @@ func renderAgentCommunicationRows(blockID string, event SubagentEvent, eventInde
 			displayText = text
 		}
 	}
-	return []RenderedRow{renderAgentMessageRow(blockID, name, displayText, ctx, token)}
+	return wrapAgentMessageRows(renderAgentMessageRow(blockID, name, displayText, ctx, token), width)
 }
 
 func agentCommunicationFoldKey(event SubagentEvent, eventIndex int) string {
@@ -213,7 +213,7 @@ func wrapAgentMessageRows(row RenderedRow, width int) []RenderedRow {
 	// Wrap the content after the bullet, keeping ANSI styles and explicit newlines.
 	mark, body, _ := strings.Cut(row.Styled, " ")
 	prefix := mark + " "
-	lines := strings.Split(ansi.Wrap(body, maxInt(1, width-2), ""), "\n")
+	lines := splitStyledPhysicalLines(ansi.Wrap(body, maxInt(1, width-2), ""))
 	rows := make([]RenderedRow, 0, len(lines))
 	for i, line := range lines {
 		indent := "  "

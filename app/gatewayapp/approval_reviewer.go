@@ -26,6 +26,7 @@ type guardianApprovalReviewer struct {
 	sessions      session.Service
 	systemAgents  systemManagedAgentRunner
 	conversations *guardianConversationManager
+	diagnostics   *slog.Logger
 	accountingMu  sync.Mutex
 	accounting    map[string]approvalReviewAccounting
 }
@@ -61,6 +62,7 @@ func newGuardianApprovalApprover(service session.Service, diagnostics ...*slog.L
 			Diagnostics: logger,
 		}),
 		conversations: newGuardianConversationManager(),
+		diagnostics:   logger,
 		accounting:    map[string]approvalReviewAccounting{},
 	}
 }
@@ -89,6 +91,10 @@ func (r *guardianApprovalReviewer) Decide(ctx context.Context, req kernel.Approv
 	ctx = model.WithInvocationObserver(ctx, attempts.collect)
 	defer func() {
 		if persistErr := r.persistGuardianInvocations(ctx, req, attempts.snapshot()); persistErr != nil {
+			if r.diagnostics != nil {
+				r.diagnostics.Warn("Guardian usage persistence failed",
+					"session_id", req.SessionRef.SessionID, "review_id", req.ReviewID, "error", persistErr)
+			}
 			if resultErr != nil {
 				resultErr = errors.Join(resultErr, persistErr)
 			} else {

@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -412,6 +413,56 @@ func wrapStyledANSIText(styled string, width int) ([]string, []string) {
 		return []string{styled}, []string{plain}
 	}
 	return styledSegments, deriveViewportPlainLines(nil, styledSegments)
+}
+
+// splitStyledPhysicalLines makes each physical line independently renderable.
+// Carry SGR and hyperlink state across rows without laying out terminal cells;
+// gutters and viewport repaint must neither inherit nor erase that state.
+func splitStyledPhysicalLines(styled string) []string {
+	lines := strings.Split(styled, "\n")
+	if len(lines) == 1 || (strings.IndexByte(styled, ansi.ESC) < 0 &&
+		strings.IndexByte(styled, ansi.CSI) < 0 && strings.IndexByte(styled, ansi.OSC) < 0) {
+		return lines
+	}
+	p := ansi.GetParser()
+	defer ansi.PutParser(p)
+	var style uv.Style
+	var link uv.Link
+	var sgr, hyperlink string
+	for i, line := range lines {
+		prefix := sgr + hyperlink
+		var state byte
+		for rest := line; len(rest) > 0; {
+			seq, _, n, nextState := ansi.DecodeSequence(rest, state, p)
+			switch {
+			case ansi.HasCsiPrefix(seq) && p.Command() == 'm':
+				uv.ReadStyle(p.Params(), &style)
+				sgr = ""
+				if !style.IsZero() {
+					sgr = style.String()
+				}
+			case ansi.HasOscPrefix(seq) && p.Command() == 8:
+				uv.ReadLink(p.Data(), &link)
+				hyperlink = ""
+				if !link.IsZero() {
+					hyperlink = ansi.SetHyperlink(link.URL, link.Params)
+				}
+			}
+			rest, state = rest[n:], nextState
+		}
+		if line == "" {
+			continue
+		}
+		suffix := ""
+		if hyperlink != "" {
+			suffix = ansi.ResetHyperlink()
+		}
+		if sgr != "" {
+			suffix += ansi.ResetStyle
+		}
+		lines[i] = prefix + line + suffix
+	}
+	return lines
 }
 
 func normalizeTextRenderRaw(raw string) string {
