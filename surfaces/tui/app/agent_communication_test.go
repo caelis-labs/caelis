@@ -161,14 +161,14 @@ func TestAgentCommunicationPreservesMainTimelineOrder(t *testing.T) {
 		NarrativeKind: TranscriptNarrativeAssistant, MessageID: "assistant-1",
 	}
 	base.Text = "before"
-	_, _ = model.applyTranscriptEvent(base)
+	_, _ = model.applyTranscriptEvent(base, false)
 	_, _ = model.applyTranscriptEvent(TranscriptEvent{
 		Kind: TranscriptEventAgentCommunication, Scope: ACPProjectionMain, TurnID: "turn-1",
 		Actor: "reviewer", AgentSourceName: "reviewer", AgentSourceID: "reviewer-1", Text: "review complete",
-	})
+	}, false)
 	base.MessageID = "assistant-2"
 	base.Text = "after"
-	_, _ = model.applyTranscriptEvent(base)
+	_, _ = model.applyTranscriptEvent(base, false)
 
 	blocks := model.doc.Blocks()
 	if len(blocks) != 1 {

@@ -42,7 +42,7 @@ func (m *Model) applySessionReconnectState(state appserver.SessionState) tea.Cmd
 	m.statusRefreshInFlight = false
 	m.clearInputOverlays()
 	if state.Run.Active || state.Approval.Active != nil {
-		m.beginLiveTurn(SubmissionModeDefault, false, state.Run.StartedAt)
+		m.beginLiveTurn(SubmissionModeDefault, true, state.Run.StartedAt)
 		m.liveTurn.observed = m.viewGeneration != 0
 		return m.resumeRunningAnimationIfNeeded()
 	}

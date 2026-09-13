@@ -113,7 +113,7 @@ func (m *Model) finishLiveTurn(endedAt time.Time, interrupted bool, err error) t
 		}
 	}
 	if m.liveTurn.Divider && !participantFooterAlreadyRendered {
-		m.appendUserTurnDividerIfNeeded(false)
+		m.appendTurnDividerIfNeeded(m.userTurnDividerLabel())
 	}
 	m.liveTurn.Divider = false
 	m.ensureViewportLayout()

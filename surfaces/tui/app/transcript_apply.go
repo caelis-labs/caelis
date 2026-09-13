@@ -28,7 +28,7 @@ func (m *Model) handleTranscriptEventsMsg(msg TranscriptEventsMsg) (tea.Model, t
 		subagentOutputChanged = m.observeSubagentOutputEvents(one) || subagentOutputChanged
 		m.decorateAgentMessageDisplayTargets(one)
 	}
-	model, transcriptCmd := m.applyTranscriptEvents(msg.Events)
+	model, transcriptCmd := m.applyTranscriptEvents(msg.Events, msg.ReconnectReplay)
 	if next, ok := model.(*Model); ok {
 		m = next
 	}
@@ -110,7 +110,7 @@ func replaceAgentMessageDisplayTarget(args, rawTarget, label string) string {
 	return args
 }
 
-func (m *Model) applyTranscriptEvents(events []TranscriptEvent) (tea.Model, tea.Cmd) {
+func (m *Model) applyTranscriptEvents(events []TranscriptEvent, reconnectReplay bool) (tea.Model, tea.Cmd) {
 	if len(events) == 0 {
 		return m, nil
 	}
@@ -120,7 +120,7 @@ func (m *Model) applyTranscriptEvents(events []TranscriptEvent) (tea.Model, tea.
 		if eventTargetsSubagentOutputView(event) {
 			continue
 		}
-		model, cmd := m.applyTranscriptEvent(event)
+		model, cmd := m.applyTranscriptEvent(event, reconnectReplay)
 		if next, ok := model.(*Model); ok {
 			m = next
 		}
@@ -129,7 +129,7 @@ func (m *Model) applyTranscriptEvents(events []TranscriptEvent) (tea.Model, tea.
 	return m, tea.Batch(cmds...)
 }
 
-func (m *Model) applyTranscriptEvent(event TranscriptEvent) (tea.Model, tea.Cmd) {
+func (m *Model) applyTranscriptEvent(event TranscriptEvent, reconnectReplay bool) (tea.Model, tea.Cmd) {
 	switch event.Kind {
 	case TranscriptEventNarrative:
 		return m.applyTranscriptNarrative(event)
@@ -144,7 +144,7 @@ func (m *Model) applyTranscriptEvent(event TranscriptEvent) (tea.Model, tea.Cmd)
 	case TranscriptEventParticipant:
 		return m.applyTranscriptParticipant(event)
 	case TranscriptEventLifecycle:
-		return m.applyTranscriptLifecycle(event)
+		return m.applyTranscriptLifecycle(event, reconnectReplay)
 	case TranscriptEventUsage:
 		return m.applyTranscriptUsage(event), nil
 	case TranscriptEventAgentCommunication:
@@ -488,7 +488,7 @@ func (m *Model) applyTranscriptParticipant(event TranscriptEvent) (tea.Model, te
 	}
 }
 
-func (m *Model) applyTranscriptLifecycle(event TranscriptEvent) (tea.Model, tea.Cmd) {
+func (m *Model) applyTranscriptLifecycle(event TranscriptEvent, reconnectReplay bool) (tea.Model, tea.Cmd) {
 	if event.Scope == ACPProjectionMain &&
 		strings.EqualFold(strings.TrimSpace(event.State), session.LifecycleStatusContextCompacting) {
 		// Context compaction activity is a transient hint input, not a main Turn
@@ -510,10 +510,19 @@ func (m *Model) applyTranscriptLifecycle(event TranscriptEvent) (tea.Model, tea.
 		// an invisible MainACPTurnBlock after the participant footer: it would
 		// hide that footer from finishLiveTurn and produce a second duration
 		// divider for the same user submission.
+		var block *MainACPTurnBlock
 		if terminal && strings.TrimSpace(m.mainTimelineTailID) == "" {
-			return m, nil
+			// An idle replay's final assistant message already closed its tail.
+			// Only the immediately preceding main block can receive its footer.
+			if reconnectReplay && m.doc != nil {
+				block, _ = m.doc.Last().(*MainACPTurnBlock)
+				if block != nil && strings.TrimSpace(block.TurnKey) != strings.TrimSpace(event.TurnID) {
+					return m, nil
+				}
+			}
+		} else {
+			block = m.ensureMainTimelineBlock(event)
 		}
-		block := m.ensureMainTimelineBlock(event)
 		if block == nil {
 			return m, nil
 		}
@@ -527,12 +536,19 @@ func (m *Model) applyTranscriptLifecycle(event TranscriptEvent) (tea.Model, tea.
 			if !event.OccurredAt.IsZero() && (block.StartedAt.IsZero() || event.OccurredAt.Before(block.StartedAt)) {
 				block.StartedAt = event.OccurredAt
 			}
-			if !m.turnRunning() && terminal {
+			if terminal && (reconnectReplay || !m.turnRunning()) {
+				if reconnectReplay && !event.OccurredAt.IsZero() {
+					block.EndedAt = event.OccurredAt
+				}
 				m.closeMainTimelineTailWithState(block, event.OccurredAt, event.State)
 			} else {
 				block.SetStatus(event.State, "", "", event.OccurredAt)
 			}
-			if strings.EqualFold(strings.TrimSpace(event.State), "completed") {
+			if reconnectReplay && terminal {
+				// Historical turns have their own timestamps, even when the
+				// reconnected Session has another Turn running now.
+				m.appendTurnDividerIfNeeded(m.mainTurnDividerLabel(block))
+			} else if !reconnectReplay && strings.EqualFold(strings.TrimSpace(event.State), "completed") {
 				m.captureLiveTurnDuration(event.OccurredAt)
 				m.captureLiveTurnDurationFromMainBlock(block)
 			}
