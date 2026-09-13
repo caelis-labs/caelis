@@ -14,7 +14,8 @@ func TestRunDoctorStartupRepairsWorkspaceIdentityConflict(t *testing.T) {
 	ctx := context.Background()
 	storeDir := t.TempDir()
 	store := sessionfile.NewStore(sessionfile.Config{RootDir: filepath.Join(storeDir, "sessions")})
-	for index, cwd := range []string{"/private/tmp/legacy-a/work", "/private/tmp/legacy-b/work"} {
+	legacyRoot := t.TempDir()
+	for index, cwd := range []string{filepath.Join(legacyRoot, "legacy-a", "work"), filepath.Join(legacyRoot, "legacy-b", "work")} {
 		if _, err := store.StartSession(ctx, session.StartSessionRequest{
 			AppName: "caelis", UserID: "local-user", PreferredSessionID: "session-" + string(rune('a'+index)),
 			Workspace: session.WorkspaceRef{Key: "work", CWD: cwd},

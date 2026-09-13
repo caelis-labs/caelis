@@ -15,6 +15,10 @@ pass. Local and sandboxed Make targets use the stable repository-local
 cache integration. Set `CACHE_ROOT=/path/to/cache` to select another persistent
 location, or set it to an empty value locally to use the standard caches.
 
+PR CI runs lint, the full suite, and build on Linux and native Windows. The
+required `windows-host-open` check also opens embedded Memory with
+`CGO_ENABLED=0`, matching the Windows release build configuration.
+
 ## Dependency update CI
 
 Dependabot PRs run the same required checks as other PRs; review does not

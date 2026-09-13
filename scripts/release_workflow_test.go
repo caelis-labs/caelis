@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -91,6 +92,31 @@ func TestReleasePublishesProtectedMainTagsWithoutRepeatingPRQuality(t *testing.T
 	publish := strings.Index(release, "name: GoReleaser")
 	if guard < 0 || publish < 0 || guard >= publish {
 		t.Error("release must validate tag ancestry before publishing artifacts")
+	}
+}
+
+func TestWindowsQualityCoversFullSuiteAndReleaseMemoryOpen(t *testing.T) {
+	t.Parallel()
+
+	quality := readWorkflow(t, "../.github/workflows/quality.yml")
+	_, windows, ok := strings.Cut(quality, "\n  windows-host-open:\n")
+	if !ok {
+		t.Fatal("required windows-host-open check missing")
+	}
+	windows = regexp.MustCompile(`(?m)^  \S`).Split(windows, 2)[0]
+	for _, want := range []string{
+		"GOWORK: 'off'",
+		"GOFLAGS: -mod=readonly",
+		"uses: golangci/golangci-lint-action@",
+		"args: ./...",
+		"run: make test",
+		"name: Build\n        shell: bash\n        env:\n          CGO_ENABLED: '0'\n        run: make build",
+		"name: Embedded Memory Open\n        shell: bash\n        env:\n          CGO_ENABLED: '0'",
+		"go test -count=1 -timeout 10m ./app/gatewayapp/internal/memoryhost -run '^TestEmbeddedHostBindsSDKClient$'",
+	} {
+		if !strings.Contains(windows, want) {
+			t.Errorf("Windows quality check missing %q", want)
+		}
 	}
 }
 

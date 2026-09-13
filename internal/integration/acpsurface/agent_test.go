@@ -686,6 +686,7 @@ func newACPAgentTestStack(t *testing.T, cfg gatewayapp.Config) (*gatewayapp.Stac
 	if err != nil {
 		return nil, err
 	}
+	t.Cleanup(func() { _ = stack.Close() })
 	if strings.TrimSpace(model.Provider) == "" || strings.TrimSpace(model.Model) == "" {
 		return stack, nil
 	}

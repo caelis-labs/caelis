@@ -20,9 +20,11 @@ their isolated default Store.
 
 ## Gate model
 
-`.github/workflows/quality.yml` runs lint, full untagged tests, build, and
-reachable-vulnerability checks for PRs targeting `main`, using GitHub's PR merge
-ref to check integration. The `main` branch ruleset requires up-to-date PRs and
+`.github/workflows/quality.yml` runs lint, full untagged tests, and build on Linux
+and native Windows, plus reachable-vulnerability checks, for PRs targeting `main`.
+Windows also verifies embedded Memory Open with the release's `CGO_ENABLED=0`
+configuration. CI uses GitHub's PR merge ref to check integration.
+The `main` branch ruleset requires up-to-date PRs and
 successful `go-quality`, `windows-host-open`, and `govulncheck` checks before
 merging. Keep these rules enabled; they are the quality gate for releases.
 Merging does not trigger a second quality run. Scheduled quality runs only

@@ -65,7 +65,10 @@ jobs:
   windows-host-open:
     if: github.event_name != 'schedule'
     runs-on: windows-2022
-    timeout-minutes: 20
+    timeout-minutes: 40
+    env:
+      GOWORK: 'off'
+      GOFLAGS: -mod=readonly
     steps:
       - uses: actions/checkout@v7
 
@@ -74,6 +77,25 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Lint
+        uses: golangci/golangci-lint-action@v9.3.0
+        with:
+          version: v2.11.4
+          args: ./...
+          install-mode: goinstall
+
+      - name: Test
+        shell: bash
+        run: make test
+
+      - name: Build
+        shell: bash
+        env:
+          CGO_ENABLED: '0'
+        run: make build
+
       - name: Embedded Memory Open
         shell: bash
+        env:
+          CGO_ENABLED: '0'
         run: go test -count=1 -timeout 10m ./app/gatewayapp/internal/memoryhost -run '^TestEmbeddedHostBindsSDKClient$'

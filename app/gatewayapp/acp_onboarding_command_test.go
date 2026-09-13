@@ -53,6 +53,9 @@ func TestACPPrepareCommandRecoversIntentOnlyReceiptWithoutRepeatingProcess(t *te
 	}
 
 	restartedOperations := reopenControlOperationStore(t, stack.composition.authorities.storeDir)
+	if err := stack.commandBackend.acpPreparations.Close(); err != nil {
+		t.Fatal(err)
+	}
 	restartedPreparations, err := newACPPreparationStore(stack.composition.authorities.storeDir)
 	if err != nil {
 		t.Fatal(err)

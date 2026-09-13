@@ -1173,6 +1173,7 @@ func TestNewLocalStackProductionBootstrapDoesNotPersistSandboxNetworkDefault(t *
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
+	t.Cleanup(func() { _ = stack.Close() })
 	assertSandboxNetworkEnabledDefault(t, stack)
 	assertConfigSandboxNetworkUnset(t, configPath)
 }

@@ -33,6 +33,13 @@ func TestServiceInstallDirIsOutsideStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if !filepath.IsAbs(dir) {
+		t.Fatalf("service install directory is not absolute: %q", dir)
+	}
+	// Directories on different Windows volumes cannot contain one another.
+	if !strings.EqualFold(filepath.VolumeName(store), filepath.VolumeName(dir)) {
+		return
+	}
 	rel, err := filepath.Rel(store, dir)
 	if err != nil {
 		t.Fatal(err)
