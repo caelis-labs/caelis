@@ -33,7 +33,11 @@ func TestWindowsRestrictedStartupDiagnostics(t *testing.T) {
 		{name: "wrapped-console", command: "[Console]::WriteLine('wrapped-ready')"},
 		{name: "wrapped-cmdlet", command: "Write-Output cmdlet-ready"},
 		{name: "raw-cmdlet", exe: "powershell.exe", args: []string{"-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "[Console]::WriteLine('before-cmdlet'); Write-Output cmdlet-ready; [Console]::WriteLine('after-cmdlet')"}},
+		{name: "qualified-cmdlet", exe: "powershell.exe", args: []string{"-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "[Console]::WriteLine($env:PSModulePath); Microsoft.PowerShell.Utility\\Write-Output qualified-ready"}},
+		{name: "builtin-module-path", exe: "powershell.exe", args: []string{"-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "$env:PSModulePath = $PSHOME + '\\Modules'; [Console]::WriteLine('before-builtin'); Write-Output builtin-ready"}},
+		{name: "explicit-module-import", exe: "powershell.exe", args: []string{"-NoLogo", "-NoProfile", "-NonInteractive", "-Command", "[Console]::WriteLine('before-import'); Import-Module ($PSHOME + '\\Modules\\Microsoft.PowerShell.Utility\\Microsoft.PowerShell.Utility.psd1') -Verbose; [Console]::WriteLine('after-import'); Write-Output import-ready"}},
 	} {
+		parent := t
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 			defer cancel()
@@ -48,7 +52,7 @@ func TestWindowsRestrictedStartupDiagnostics(t *testing.T) {
 			}
 			var stdout, stderr bytes.Buffer
 			code, err, _ := runAtomicJobProcess(ctx, cmd, token, nil, &stdout, &stderr, func() {})
-			t.Logf("probe=%s code=%d error=%v stdout=%q stderr=%q", tc.name, code, err, stdout.String(), stderr.String())
+			parent.Logf("probe=%s code=%d error=%v stdout=%q stderr=%q", tc.name, code, err, stdout.String(), stderr.String())
 			if err != nil || code != 0 {
 				t.Fail()
 			}
