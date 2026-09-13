@@ -95,7 +95,7 @@ func TestReleasePublishesProtectedMainTagsWithoutRepeatingPRQuality(t *testing.T
 	}
 }
 
-func TestWindowsQualityCoversFullSuiteAndReleaseMemoryOpen(t *testing.T) {
+func TestWindowsQualityUsesFocusedNativeGate(t *testing.T) {
 	t.Parallel()
 
 	quality := readWorkflow(t, "../.github/workflows/quality.yml")
@@ -105,18 +105,29 @@ func TestWindowsQualityCoversFullSuiteAndReleaseMemoryOpen(t *testing.T) {
 	}
 	windows = regexp.MustCompile(`(?m)^  \S`).Split(windows, 2)[0]
 	for _, want := range []string{
+		"runs-on: windows-2022",
 		"GOWORK: 'off'",
-		"GOFLAGS: -mod=readonly",
-		"uses: golangci/golangci-lint-action@",
-		"args: ./...",
 		"GOFLAGS: -mod=readonly -p=2",
-		"run: make test GO_TEST_TIMEOUT=15m",
-		"name: Build\n        shell: bash\n        env:\n          CGO_ENABLED: '0'\n        run: make build",
-		"name: Embedded Memory Open\n        shell: bash\n        env:\n          CGO_ENABLED: '0'",
-		"go test -count=1 -timeout 10m ./app/gatewayapp/internal/memoryhost -run '^TestEmbeddedHostBindsSDKClient$'",
+		"run: make windows-check",
 	} {
 		if !strings.Contains(windows, want) {
 			t.Errorf("Windows quality check missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{"golangci-lint-action", "run: make test", "go test ./...", "GO_TEST_TIMEOUT=15m"} {
+		if strings.Contains(windows, forbidden) {
+			t.Errorf("Windows quality check repeats broad validation %q", forbidden)
+		}
+	}
+	gate := readWorkflow(t, "./windows_check.sh")
+	for _, want := range []string{
+		`"$(go env GOHOSTOS)" != windows`,
+		"CGO_ENABLED=0 go build ./...",
+		"CGO_ENABLED=0 GO_TEST_TIMEOUT=10m bash ./scripts/go_test_nonempty.sh",
+		"./app/gatewayapp/internal/memoryhost '^TestEmbeddedHostBindsSDKClient$' windows-memory-open -count=1",
+	} {
+		if !strings.Contains(gate, want) {
+			t.Errorf("Windows release configuration check missing %q", want)
 		}
 	}
 }

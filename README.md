@@ -177,8 +177,9 @@ make install
 make commit-check
 ```
 
-`make commit-check` runs lint, the full untagged test suite, and build. See
-[Testing](docs/testing.md) for checks selected by the affected boundary.
+`make commit-check` runs the platform's default gate: focused native checks on
+Windows; lint, the full untagged test suite, and build elsewhere. See
+[Testing](docs/testing.md) for coverage and checks selected by the affected boundary.
 
 ## License
 

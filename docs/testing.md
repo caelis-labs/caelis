@@ -8,18 +8,25 @@ Run before committing:
 make commit-check
 ```
 
-It runs configured lint, the full untagged Go test suite, and build. Lint already
-includes `gofmt` and `govet`, so `make test` disables Go's duplicate implicit vet
-pass. Local and sandboxed Make targets use the stable repository-local
-`.tmp/cache` tree by default. CI retains its standard cache paths for runner
-cache integration. Set `CACHE_ROOT=/path/to/cache` to select another persistent
+On Windows it runs `make windows-check`; other platforms run configured lint,
+the full untagged Go test suite, and build. `make quality` retains that full gate
+on every platform. Lint includes `gofmt` and `govet`, so `make test` disables Go's
+duplicate implicit vet pass. Local and sandboxed Make targets use the stable
+repository-local `.tmp/cache` tree by default. CI retains its standard cache paths
+for runner cache integration. Set `CACHE_ROOT=/path/to/cache` to select another persistent
 location, or set it to an empty value locally to use the standard caches.
 
-PR CI runs lint, the full suite, and build on Linux and native Windows. The
-required `windows-host-open` check also opens embedded Memory with
-`CGO_ENABLED=0`, matching the Windows release build configuration. Windows CI
-tests at most two packages concurrently and allows 15 minutes per package for
-native process and storage tests.
+PR CI runs lint, the full suite, and build on Linux. The required
+`windows-host-open` check runs `make windows-check` on native Windows. It covers
+process trees, ConPTY, sandboxing, Windows paths, file locks, atomic replacement,
+WAL recovery, Host persistence, and clipboard behavior. Small platform owners run
+their full tests; large Runtime, Session, Control, Gateway, CLI, and TUI packages
+use selectors in `scripts/windows_check.sh` that fail if no tests match.
+Implicit vet remains enabled for Windows source. Tests use at most two packages
+concurrently with a five-minute package timeout. A build of all packages and
+embedded Memory Open use `CGO_ENABLED=0`, matching the release configuration.
+Run additional owning tests for the changed contract; the focused gate does not
+replace Linux's general coverage or change-specific Windows validation.
 
 ## Dependency update CI
 

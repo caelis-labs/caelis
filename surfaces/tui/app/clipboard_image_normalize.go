@@ -97,14 +97,11 @@ func normalizeClipboardImageFile(path string) (string, error) {
 	width, height := scaledClipboardImageSize(cfg.Width, cfg.Height, clipboardImageMaxLongEdge)
 	scaled := downscaleImage(img, width, height)
 	outFormat := clipboardImageOutputFormat(format)
-	outPath, err := newClipboardImagePath(clipboardImageExtension(outFormat))
+	out, err := createClipboardImageFile(clipboardImageExtension(outFormat))
 	if err != nil {
 		return path, err
 	}
-	out, err := os.OpenFile(outPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
-		return path, err
-	}
+	outPath := out.Name()
 	encodeErr := encodeClipboardImage(out, scaled, outFormat)
 	closeErr := out.Close()
 	if encodeErr != nil || closeErr != nil {

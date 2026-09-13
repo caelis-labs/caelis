@@ -18,4 +18,4 @@ fi
 
 echo "go-test-nonempty: ${label} matched:"
 printf '%s\n' "${matches}"
-go test -timeout "${GO_TEST_TIMEOUT:-5m}" "${package}" -run "${selector}"
+go test -timeout "${GO_TEST_TIMEOUT:-5m}" "${package}" -run "${selector}" "${@:4}"

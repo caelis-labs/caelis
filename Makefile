@@ -40,7 +40,7 @@ GOLANGCI_LINT_CACHE ?= $(CACHE_ROOT)/golangci-lint
 XDG_CACHE_HOME ?= $(CACHE_ROOT)/xdg
 export GOMODCACHE GOCACHE GOTMPDIR GOLANGCI_LINT_CACHE XDG_CACHE_HOME
 endif
-.PHONY: arch-lint build build-cli cache-dirs client-protocol-check client-protocol-generate command-regression command-execution-regression commit-check control-feed-regression docs-links eval-smoke fmt fmt-check guardian-eval install lint product-acceptance quality regression sdk-boundary-check sdk-proxy-smoke sdk-race startup-performance test tui-golden tui-interaction vet release-dry-run
+.PHONY: arch-lint build build-cli cache-dirs client-protocol-check client-protocol-generate command-regression command-execution-regression commit-check control-feed-regression docs-links eval-smoke fmt fmt-check guardian-eval install lint product-acceptance quality regression sdk-boundary-check sdk-proxy-smoke sdk-race startup-performance test tui-golden tui-interaction vet release-dry-run windows-check
 
 cache-dirs:
 ifneq ($(strip $(CACHE_ROOT)),)
@@ -92,7 +92,14 @@ client-protocol-check: cache-dirs
 
 quality: lint test build
 
+ifeq ($(OS),Windows_NT)
+commit-check: windows-check
+else
 commit-check: quality
+endif
+
+windows-check: cache-dirs
+	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) "$(BASH)" ./scripts/windows_check.sh
 
 startup-performance: cache-dirs
 	go test -run '^$$' -bench '^BenchmarkNewLocalStackFirstFrameBoundary$$' -benchtime=2x -count=1 ./app/gatewayapp
