@@ -49,10 +49,7 @@ func TestWindowsResourceLimitsConstrainCommandAndFileSystem(t *testing.T) {
 		t.Fatalf("outside filesystem write=%v", err)
 	}
 	command := "$ErrorActionPreference='Stop'; Set-Content -LiteralPath '" + escapePowerShellSingleQuote(denied) + "' -Value escape"
-	// Allow cold PowerShell startup on CI; this test checks write boundaries,
-	// not command latency.
-	const commandTimeout = 30 * time.Second
-	result, err := rt.Run(t.Context(), sandbox.CommandRequest{Command: command, Dir: outside, Timeout: commandTimeout, Constraints: constraints})
+	result, err := rt.Run(t.Context(), sandbox.CommandRequest{Command: command, Dir: outside, Timeout: 10 * time.Second, Constraints: constraints})
 	if !sandbox.IsCommandExit(err) || result.ExitCode == 0 || result.Route != sandbox.RouteSandbox {
 		t.Fatalf("outside command write=%+v error=%v", result, err)
 	}
@@ -61,7 +58,7 @@ func TestWindowsResourceLimitsConstrainCommandAndFileSystem(t *testing.T) {
 	}
 	result, err = rt.Run(t.Context(), sandbox.CommandRequest{
 		Command: "$ErrorActionPreference='Stop'; Set-Content -LiteralPath \"$env:TEMP/allowed.txt\" -Value cache; Write-Output $env:TEMP",
-		Dir:     outside, Timeout: commandTimeout, Constraints: constraints,
+		Dir:     outside, Timeout: 10 * time.Second, Constraints: constraints,
 	})
 	if err != nil || result.ExitCode != 0 {
 		t.Fatalf("temporary command write=%+v error=%v", result, err)
@@ -71,6 +68,42 @@ func TestWindowsResourceLimitsConstrainCommandAndFileSystem(t *testing.T) {
 	}
 	if limits.Network != sandbox.NetworkDisabled || limits.WritePaths[0] != outside {
 		t.Fatal("caller config was mutated")
+	}
+}
+
+func TestWindowsResourceLimitsLoadBuiltinAndCustomModules(t *testing.T) {
+	root, modules := t.TempDir(), t.TempDir()
+	moduleDir := filepath.Join(modules, "CaelisEvidence")
+	if err := os.Mkdir(moduleDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range map[string]string{
+		"CaelisEvidence.psd1": "@{ RootModule='CaelisEvidence.psm1'; ModuleVersion='1.0.0'; FunctionsToExport=@('Get-CaelisEvidence','Write-Output'); CmdletsToExport=@(); AliasesToExport=@() }",
+		"CaelisEvidence.psm1": "function Get-CaelisEvidence { 'custom-evidence' }; function Write-Output { throw 'custom module shadowed built-in command' }; Export-ModuleMember -Function Get-CaelisEvidence,Write-Output",
+	} {
+		if err := os.WriteFile(filepath.Join(moduleDir, name), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rt, err := sandbox.New(sandbox.Config{
+		RequestedBackend: sandbox.BackendWindows, CWD: root,
+		StateDir: t.TempDir(), HostAuthorityDir: t.TempDir(),
+		ResourceLimits: &sandbox.ResourceLimits{WritePaths: []string{root}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := rt.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	result, err := rt.Run(t.Context(), sandbox.CommandRequest{
+		Command: "Write-Output builtin-evidence; CaelisEvidence\\Get-CaelisEvidence; $null = 0",
+		Dir:     root, Env: map[string]string{"PSMODULEPATH": modules}, Timeout: 10 * time.Second,
+	})
+	if err != nil || result.ExitCode != 0 || !strings.Contains(result.Stdout, "builtin-evidence") || !strings.Contains(result.Stdout, "custom-evidence") {
+		t.Fatalf("built-in/custom module command=%+v error=%v", result, err)
 	}
 }
 
