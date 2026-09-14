@@ -112,12 +112,14 @@ func TestSessionObservationContinuesAcrossTurnsAndIdleNotices(t *testing.T) {
 func TestSessionSwitchRejectsQueuedOldOutputAndPreservesDrafts(t *testing.T) {
 	m := NewModel(Config{NoColor: true, NoAnimation: true})
 	m.Update(sessionViewStartMsg{generation: 1, state: appserver.SessionState{SessionID: "a", Run: appserver.RunState{Active: true}}})
+	m.Update(sessionHistoryReadyMsg{})
 	m.textarea.SetValue("A draft")
 	m.syncInputFromTextarea()
 	responses := make(chan PromptResponse, 1)
 	dismissed := false
 	m.enqueuePrompt(PromptRequestMsg{ApprovalRequestID: "approval-a", Response: responses, dismiss: func() { dismissed = true }})
 	m.Update(sessionViewStartMsg{generation: 2, state: appserver.SessionState{SessionID: "b", Run: appserver.RunState{Active: true}}})
+	m.Update(sessionHistoryReadyMsg{})
 	if !dismissed || len(responses) != 0 || m.textarea.Value() != "" {
 		t.Fatal("switch must dismiss without answering and isolate the composer")
 	}
@@ -134,10 +136,12 @@ func TestSessionSwitchRejectsQueuedOldOutputAndPreservesDrafts(t *testing.T) {
 		t.Fatal("queued old Session messages crossed the view boundary")
 	}
 	m.Update(sessionViewStartMsg{generation: 3, state: appserver.SessionState{SessionID: "a"}})
+	m.Update(sessionHistoryReadyMsg{})
 	if m.textarea.Value() != "A draft" {
 		t.Fatalf("A draft = %q", m.textarea.Value())
 	}
 	m.Update(sessionViewStartMsg{generation: 4, state: appserver.SessionState{SessionID: "b"}})
+	m.Update(sessionHistoryReadyMsg{})
 	if m.textarea.Value() != "B draft" {
 		t.Fatalf("B draft = %q", m.textarea.Value())
 	}
@@ -170,6 +174,7 @@ func TestSessionObservationOwnsRunningStateAfterConcurrentSubmissionFailure(t *t
 			state := appserver.SessionState{SessionID: "session"}
 			state.Run.Active = observed == "reconnect"
 			m.Update(sessionViewStartMsg{generation: 1, state: state})
+			m.Update(sessionHistoryReadyMsg{})
 			if observed != "reconnect" {
 				// Local input starts a provisional spinner before admission. A
 				// different observer may win admission during that request.
@@ -200,14 +205,17 @@ func TestFirstPromptAttachPreservesDraftAndPendingNavigation(t *testing.T) {
 	m.sessionSwitchPending = true
 	m.textarea.SetValue("draft typed while first prompt was admitted")
 	m.Update(sessionViewStartMsg{generation: 1, state: appserver.SessionState{SessionID: "a"}, automatic: true})
+	m.Update(sessionHistoryReadyMsg{})
 	if !m.sessionSwitchPending || m.textarea.Value() == "" {
 		t.Fatal("automatic attach lost the draft or pending user navigation")
 	}
 	m.Update(sessionViewStartMsg{generation: 2, state: appserver.SessionState{SessionID: "b"}})
+	m.Update(sessionHistoryReadyMsg{})
 	if m.sessionSwitchPending || m.textarea.Value() != "" {
 		t.Fatal("explicit navigation did not finish on a separate composer")
 	}
 	m.Update(sessionViewStartMsg{generation: 3, state: appserver.SessionState{SessionID: "a"}})
+	m.Update(sessionHistoryReadyMsg{})
 	if m.textarea.Value() != "draft typed while first prompt was admitted" {
 		t.Fatal("first Session draft was lost")
 	}
@@ -241,6 +249,7 @@ func TestQueuedNavigationFailureClearsPendingAfterFirstPromptAttach(t *testing.T
 	cmd := m.executeLineCmd(Submission{Text: "/resume missing"})
 	sender.replaceSessionView(context.Background(), "a")
 	m.Update(sessionViewStartMsg{generation: 1, state: appserver.SessionState{SessionID: "a", Run: appserver.RunState{Active: true}}, automatic: true})
+	m.Update(sessionHistoryReadyMsg{})
 	m.Update(cmd())
 	if m.sessionSwitchPending || m.currentSessionID != "a" || !m.turnRunning() {
 		t.Fatal("failed queued navigation left the composer blocked after automatic attachment")

@@ -75,6 +75,9 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		m.materializeViewportContentIfStale()
 		m.viewport, cmd = m.viewport.Update(msg)
 		m.refreshViewportFollowStateFromOffset()
+		if typed.Mouse().Button == tea.MouseWheelUp {
+			m.demandEarlierHistory("")
+		}
 		var resumeCmd tea.Cmd
 		if m.isViewportFollowTail() && m.offscreenViewportDirty {
 			m.syncViewportContent()
@@ -645,6 +648,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.materializeViewportContentIfStale()
 		m.viewport.HalfPageUp()
 		m.refreshViewportFollowStateFromOffset()
+		m.demandEarlierHistory("")
 		return m, m.touchViewportScrollbar()
 	case key.Matches(msg, m.keys.HalfPageDown):
 		wasFollowTail := m.isViewportFollowTail()
@@ -663,6 +667,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.materializeViewportContentIfStale()
 		m.viewport.PageUp()
 		m.refreshViewportFollowStateFromOffset()
+		m.demandEarlierHistory("")
 		return m, m.touchViewportScrollbar()
 	case key.Matches(msg, m.keys.PageDown):
 		wasFollowTail := m.isViewportFollowTail()
@@ -1259,7 +1264,10 @@ func (m *Model) submitInteractiveLine(execLine string, displayLine string, attac
 		}
 		return m.submitLine("/disconnect")
 	}
-	if execLine == "/subagent" && m.isCommandAvailable("subagent") {
+	if spec, ok := controlprompt.Lookup(slashCommandName(execLine)); ok && spec.Name == "team" && m.isCommandAvailable(spec.Name) {
+		if len(strings.Fields(execLine)) != 1 {
+			return m, m.showHint("usage: /team", hintOptions{priority: HintPriorityHigh, clearOnMessage: true, clearAfter: copyHintDuration})
+		}
 		m.resetComposerAfterOverlayOpen()
 		return m, m.openSubagentOverlay()
 	}
@@ -1365,6 +1373,12 @@ func (m *Model) submitLineWithDisplayAndAttachmentsOptions(execLine string, disp
 		m.resetComposerAfterOverlayOpen()
 		return m, m.executeLineCmd(Submission{Text: execLine})
 	}
+	if m.sessionObservationRecovering {
+		return m, m.showHint(sessionObservationRecoveryHint, hintOptions{priority: HintPriorityHigh})
+	}
+	if m.sessionHistoryFailed {
+		return m, m.showHint("Session history unavailable; use /resume to reconnect before sending input.", hintOptions{priority: HintPriorityHigh})
+	}
 	alreadyRunning := m.turnRunning()
 	resolved := resolvedSubmission{
 		uiMode:         SubmissionModeDefault,
@@ -1466,12 +1480,12 @@ func (m *Model) submitLineWithDisplayAndAttachmentsOptions(execLine string, disp
 }
 
 func isTUIExitLine(line string) bool {
-	switch strings.ToLower(strings.TrimSpace(line)) {
-	case "/exit", "/quit":
-		return true
-	default:
+	line = strings.TrimSpace(line)
+	if !strings.HasPrefix(line, "/") {
 		return false
 	}
+	spec, ok := controlprompt.Lookup(line)
+	return ok && spec.Name == "quit"
 }
 
 func isSessionSelectionLine(line string) bool {
@@ -1525,6 +1539,9 @@ func (m *Model) executeLineCmd(submission Submission) tea.Cmd {
 			return nil
 		}
 		m.sessionSwitchPending = true
+		if m.sessionHistory != nil {
+			m.sessionHistory.pendingNavigation = true
+		}
 	}
 	submission.viewGeneration = m.viewGeneration
 	sender := m.cfg.ProgramSender

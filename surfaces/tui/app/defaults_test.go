@@ -18,14 +18,13 @@ func TestDefaultCommandsExposePlatformCoreCommands(t *testing.T) {
 		"zenith",
 		"connect",
 		"disconnect",
-		"subagent",
+		"team",
 		"plugin",
 		"model",
 		"status",
 		"new",
 		"resume",
 		"compact",
-		"exit",
 		"quit",
 	}
 	if !reflect.DeepEqual(got, want) {

@@ -558,11 +558,17 @@ func TestReconnectReturnsTypedAtomicSubscription(t *testing.T) {
 			ContextSyncSeq: math.MaxUint64,
 		},
 	}
-	client, closeServer := newFixtureClient(t, reconnectFixture(t, state, []eventstream.Envelope{backfill}, []eventstream.Envelope{live}, true))
+	fixture := reconnectFixture(t, state, []eventstream.Envelope{backfill}, []eventstream.Envelope{live}, true)
+	client, closeServer := newFixtureClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("history_turns") != "16" {
+			t.Error("missing history window")
+		}
+		fixture(w, r)
+	})
 	defer closeServer()
 
 	result, err := client.Reconnect(context.Background(), appserver.ReconnectRequest{
-		SessionID: "session-1", Cursor: "cursor-client",
+		SessionID: "session-1", Cursor: "cursor-client", HistoryTurns: 16,
 	})
 	if err != nil {
 		t.Fatal(err)

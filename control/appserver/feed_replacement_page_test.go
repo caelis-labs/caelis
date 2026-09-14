@@ -472,3 +472,63 @@ func (r *limitedPageReader) EventsPage(ctx context.Context, req session.EventPag
 	r.remaining--
 	return r.checkpointPageReader.EventsPage(ctx, req)
 }
+
+func TestFeedReplacementStreamingAssemblerRetainsOnlyTransactionState(t *testing.T) {
+	var a FeedDeliveryAssembler
+	if _, _, err := a.AcceptPage(FeedDelivery{Kind: FeedDeliveryReplaceBegin, Source: FeedSourceReplacement, SnapshotID: "snapshot"}); err != nil {
+		t.Fatal(err)
+	}
+	for page := range uint32(140) {
+		input := make([]eventstream.Envelope, 64)
+		for i := range input {
+			input[i] = testPackedEnvelope(fmt.Sprint(page*64+uint32(i)), "text")
+		}
+		events, done, err := a.AcceptPage(FeedDelivery{Kind: FeedDeliveryReplacePage, Source: FeedSourceReplacement, SnapshotID: "snapshot", Page: page, Events: input})
+		if err != nil || done || len(events) != 64 || len(a.events) != 0 {
+			t.Fatalf("page %d retained history or failed: %v", page, err)
+		}
+	}
+	events, done, err := a.AcceptPage(FeedDelivery{Kind: FeedDeliveryReplaceEnd, Source: FeedSourceReplacement, SnapshotID: "snapshot", Page: 140})
+	if err != nil || !done || len(events) != 0 || a.Pending() {
+		t.Fatalf("commit=%v err=%v", done, err)
+	}
+}
+
+func TestFeedExactHistoryBatchesWithoutChangingChunkOrSyncBoundaries(t *testing.T) {
+	broker, _ := newTestFeedBroker(t, nil, FeedBrokerConfig{})
+	for i := range 150 {
+		if err := broker.Publish(eventstream.Envelope{Kind: eventstream.KindSessionUpdate, SessionID: "session-1", EventID: fmt.Sprint(i), Delivery: &eventstream.Delivery{Mode: eventstream.DeliveryTransient}, Update: eventstream.ContentChunk{SessionUpdate: eventstream.UpdateAgentMessage, MessageID: "final", Content: eventstream.TextContent{Type: "text", Text: fmt.Sprint(i)}}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	result, err := broker.Subscribe(t.Context(), SubscribeRequest{SessionID: "session-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer result.Subscription.Close()
+	seen, pages := 0, 0
+	for seen < 150 {
+		d := assertFeedDelivery(t, result.Subscription.Deliveries(), FeedDeliveryAppendPage)
+		if len(d.Events) == 0 || len(d.Events) > 64 || d.NextCursor != d.Events[len(d.Events)-1].Cursor {
+			t.Fatal("invalid history page")
+		}
+		for _, e := range d.Events {
+			if e.EventID != fmt.Sprint(seen) {
+				t.Fatalf("event %d lost or repeated", seen)
+			}
+			seen++
+		}
+		pages++
+	}
+	if pages >= 150 {
+		t.Fatal("history still delivers one record at a time")
+	}
+	assertFeedDelivery(t, result.Subscription.Deliveries(), FeedDeliverySync)
+	if err := broker.Publish(eventstream.Envelope{Kind: eventstream.KindNotice, SessionID: "session-1", Notice: "live"}); err != nil {
+		t.Fatal(err)
+	}
+	live := assertFeedDelivery(t, result.Subscription.Deliveries(), FeedDeliveryAppendPage)
+	if len(live.Events) != 1 || live.Events[0].Notice != "live" {
+		t.Fatal("live tail delayed or duplicated")
+	}
+}

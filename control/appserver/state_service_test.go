@@ -110,6 +110,11 @@ func TestStateServicePreparesExplicitReconnectButKeepsInspectPure(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
+	// An older-page read must not prepare a controller or retain a live observer,
+	// even when its token is rejected by the feed.
+	if _, err := service.Reconnect(t.Context(), ReconnectRequest{SessionID: "session-1", HistoryBefore: "invalid"}); err == nil {
+		t.Fatal("invalid history token accepted")
+	}
 	inspected, err := service.State(context.Background(), StateRequest{SessionID: "session-1"})
 	if err != nil {
 		t.Fatal(err)

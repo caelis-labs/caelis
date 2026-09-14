@@ -27,6 +27,7 @@ func (m *Model) scheduleSubmissionDispatch(submission Submission) tea.Cmd {
 		return nil
 	}
 	turnGeneration := m.liveTurn.generation
+	submission.viewGeneration = m.viewGeneration
 	m.registerSubmissionDispatch(submission, turnGeneration)
 	delay := submissionRenderDelay(m.cfg.RenderFPS)
 	return tea.Tick(delay, func(time.Time) tea.Msg {
@@ -115,6 +116,16 @@ func (m *Model) handleSubmissionDispatch(msg submissionDispatchMsg) (tea.Model, 
 		return m, nil
 	}
 	submission := cloneSubmission(msg.submission)
+	if m.sessionObservationRecovering || m.sessionHistoryFailed || submission.viewGeneration != m.viewGeneration {
+		// This render-yield request has not been sent. Keep it explicitly queued;
+		// recovery must never retarget it to a new Host or active Turn.
+		m.pendingQueue.removeLocalID(submission.localID)
+		m.pendingQueue.enqueue(pendingPromptEnqueueOptions{
+			localID: submission.localID, execLine: submission.Text, displayLine: submission.DisplayText,
+			attachments: submission.Attachments, deferUntilIdle: true,
+		})
+		return m, nil
+	}
 	if submission.Mode != SubmissionModeActiveTurn {
 		return m, m.executeLineCmd(submission)
 	}

@@ -376,8 +376,16 @@ type Model struct {
 	// feed. Spawn output views and RunCommand panels own subscriptions by their
 	// producer call ID; Task control calls never own or redirect them. These maps
 	// are mutated only by the Bubble Tea update loop.
+	sessionObservationRecovering  bool
+	sessionApprovalRefreshPending string
+
 	viewGeneration           uint64
 	sessionSwitchPending     bool
+	sessionHistoryBefore     string
+	earlierHistory           map[string]*earlierHistoryBuild
+	sessionHistory           *sessionHistoryBuild
+	historyBuilding          bool
+	sessionHistoryFailed     bool
 	sessionDrafts            map[string]sessionDraft
 	currentSessionID         string
 	taskStreamWanted         map[string]bool

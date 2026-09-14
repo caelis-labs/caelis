@@ -154,9 +154,13 @@ func sealChildHistoryTail(entry *task.Entry, records []Record) {
 	}
 }
 
-func (s *service) forwardChild(sub *subscription, entry *task.Entry, point cursorPoint, present, follow bool) {
+func (s *service) forwardChild(sub *subscription, entry *task.Entry, point cursorPoint, present, follow, snapshot bool, requests ...SubscribeRequest) {
+	var request SubscribeRequest
+	if len(requests) > 0 {
+		request = requests[0]
+	}
 	for {
-		result, source, err := s.childRead(sub.ctx, entry, point, present)
+		result, source, err := s.childSubscriptionHistory(sub, entry, point, present, snapshot, request)
 		if err != nil {
 			sub.finish(err)
 			return
@@ -177,7 +181,7 @@ func (s *service) forwardChild(sub *subscription, entry *task.Entry, point curso
 				return
 			}
 		}
-		if !follow && !entry.Running {
+		if request.HistoryBefore != "" || !follow && !entry.Running {
 			sub.finish(nil)
 			return
 		}
@@ -195,4 +199,71 @@ func (s *service) retainChildObservation(ref session.SessionRef) (func(), error)
 		return s.retainObservation(ref)
 	}
 	return func() {}, nil
+}
+
+// Subscription snapshots keep only one page in memory. The captured spool high
+// watermark is also the exact continuation position, including when the child
+// is still producing output while its history is being read.
+func (s *service) childSubscriptionHistory(sub *subscription, entry *task.Entry, point cursorPoint, present, snapshot bool, requests ...SubscribeRequest) (ReadResult, exactSource, error) {
+	var request SubscribeRequest
+	if len(requests) > 0 {
+		request = requests[0]
+	}
+	source, err := s.childSource(sub.ctx, entry)
+	if err != nil {
+		return ReadResult{}, source, err
+	}
+	valid := present && point.Key == source.key && point.Offset >= source.bounds.Low && point.Offset <= source.bounds.High
+	if valid || !present && !snapshot && request.HistoryBefore == "" {
+		if valid {
+			source.offset, source.seq = point.Offset, point.Sequence
+		}
+		return s.childAppendPage(sub.ctx, entry, source)
+	}
+	before := ""
+	if !present {
+		var err error
+		source, before, err = s.childHistoryWindow(sub.ctx, entry, source, request)
+		if err != nil {
+			return ReadResult{}, source, err
+		}
+	}
+	id := streamspool.DigestStrings(entry.Session.SessionID, entry.TaskID, fmt.Sprint(source.key), fmt.Sprint(source.offset), fmt.Sprint(source.bounds.High)).Hex()
+	activity := descriptorFromEntry(entry).ActivityID
+	send := func(d Delivery) error {
+		d.Source, d.SnapshotID, d.ActivityID = SourceReplacement, id, activity
+		if !sub.deliver(d) {
+			return sub.ctx.Err()
+		}
+		return nil
+	}
+	if err := send(Delivery{Kind: DeliveryReplaceBegin}); err != nil {
+		return ReadResult{}, source, err
+	}
+	var page uint32
+	for source.offset < source.bounds.High {
+		records, next, err := s.readAvailable(sub.ctx, entry, source)
+		if err != nil {
+			return ReadResult{}, source, err
+		}
+		if next.Offset <= source.offset {
+			return ReadResult{}, source, fmt.Errorf("taskstream: history read made no progress")
+		}
+		source.offset, source.seq = next.Offset, next.Sequence
+		if next.Offset == source.bounds.High && request.HistoryBefore == "" {
+			sealChildHistoryTail(entry, records)
+		}
+		if err := send(Delivery{Kind: DeliveryReplacePage, Page: page, Records: records}); err != nil {
+			return ReadResult{}, source, err
+		}
+		page++
+	}
+	cursor, err := s.cursors.encode(entry.Session.SessionID, entry.TaskID, cursorPoint{Key: source.key, Offset: source.offset, Sequence: source.seq})
+	if err == nil {
+		if request.HistoryBefore != "" {
+			cursor = ""
+		}
+		err = send(Delivery{Kind: DeliveryReplaceEnd, Page: page, NextCursor: cursor, HistoryBefore: before})
+	}
+	return ReadResult{}, source, err
 }

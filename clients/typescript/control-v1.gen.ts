@@ -1204,6 +1204,7 @@ export interface SessionControllerModeRequest {
 
 export interface SessionFeedDelivery {
   events?: Array<Envelope>;
+  history_before?: string;
   kind: StreamDeliveryKind;
   next_cursor?: string;
   page?: number;
@@ -1539,6 +1540,7 @@ export type TaskState = "prepared" | "running" | "waiting_input" | "completed" |
 export interface TaskStreamDelivery {
   activity_id?: string;
   events?: Array<Envelope>;
+  history_before?: string;
   kind: StreamDeliveryKind;
   next_cursor?: string;
   page?: number;

@@ -4,15 +4,23 @@ All Go packages share the root `vX.Y.Z` tag. A release publishes six CLI
 archives plus checksums to GitHub Releases. The workflow also publishes six
 platform npm packages, the main
 `@caelis/caelis` package, and mirrors the latest archives to the public R2 bucket
-used by the installers and raw self-updater.
+used by the raw installers.
 
-Raw installations check `https://releases.caelis.dev/latest.txt` and download
-the archive and `checksums.txt` from `/releases/<tag>/` on the same host.
-`CAELIS_RELEASES_BASE_URL` overrides that base URL for both installation and
-self-update. The raw channel serves the latest release only and does not fall
-back to GitHub; GitHub Releases retains historical versions for manual installs.
-The updater verifies SHA256 before replacing the executable. Global npm
-installations continue to update through npm.
+Raw installations check `https://releases.caelis.dev/latest.txt`. The official
+`https://caelis.dev/install.sh` and `https://caelis.dev/install.ps1` scripts own
+archive download, SHA256 verification, extraction, and executable replacement.
+Raw self-update runs the same scripts against the current installation directory,
+using Bash on macOS/Linux and PowerShell on Windows, then verifies the installed
+binary's release identity. `CAELIS_RELEASES_BASE_URL` overrides the archive base
+URL for both installation and self-update. The raw channel serves the latest
+release only and does not fall back to GitHub; GitHub Releases retains historical
+versions for manual installs. Global npm installations update through npm.
+
+`caelis update` and TUI `Ctrl+U` install artifacts without stopping or starting a
+Host. The next managed application launch owns Host version selection and
+activation, including interruption of active Sessions; see
+[Product Host and clients](architecture.md#product-host-and-clients). Installation
+success does not mean an already-running client or Host has changed version.
 
 Release builds stamp the distribution version, commit, build time, BuildID, and
 `build_kind=release`. Local or unstamped builds remain development builds and use

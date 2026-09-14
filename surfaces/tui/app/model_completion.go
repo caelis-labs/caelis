@@ -3,6 +3,7 @@ package tuiapp
 import (
 	"context"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -499,8 +500,13 @@ func (m *Model) isCommandAvailable(name string) bool {
 	if len(m.cfg.Commands) == 0 {
 		return true
 	}
+	var aliases []string
+	if spec, ok := controlprompt.Lookup(name); ok {
+		name, aliases = spec.Name, spec.Aliases
+	}
 	for _, command := range m.cfg.Commands {
-		if strings.EqualFold(strings.TrimSpace(strings.TrimPrefix(command, "/")), name) {
+		configured := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(command, "/")))
+		if configured == name || slices.Contains(aliases, configured) {
 			return true
 		}
 	}

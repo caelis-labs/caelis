@@ -138,33 +138,62 @@ func assembleSlashCompletionCandidates(commands []string, reserved []string, ski
 	candidates := make([]string, 0, len(commands)+len(skills))
 	seen := make(map[string]struct{}, len(commands)+len(skills)+len(reserved))
 	builtinNames := make(map[string]struct{}, len(commands)+len(reserved))
+	var displays map[string]string
+	var details map[string]string
 	queryKey := strings.ToLower(strings.TrimSpace(query))
 	for _, command := range commands {
-		full := "/" + strings.TrimSpace(command)
-		if full == "/" {
+		name := strings.TrimSpace(command)
+		var aliases []string
+		if spec, ok := controlprompt.Lookup(name); ok {
+			name, aliases = spec.Name, spec.Aliases
+		}
+		if name == "" {
 			continue
 		}
-		key := strings.ToLower(strings.TrimPrefix(full, "/"))
+		key := strings.ToLower(name)
 		builtinNames[key] = struct{}{}
+		for _, alias := range aliases {
+			// Canonical built-ins outrank same-name skills, and an alias never
+			// becomes a separate candidate, so reserve alias keys up front.
+			builtinNames[alias] = struct{}{}
+			seen[alias] = struct{}{}
+		}
 		if _, exists := seen[key]; exists {
 			continue
 		}
 		seen[key] = struct{}{}
-		if queryKey == "" || strings.HasPrefix(strings.ToLower(full), "/"+queryKey) {
-			candidates = append(candidates, full)
+		full := "/" + name
+		if !commandMatchesQuery(full, aliases, queryKey) {
+			continue
+		}
+		candidates = append(candidates, full)
+		if len(aliases) > 0 {
+			if displays == nil {
+				displays = map[string]string{}
+			}
+			displays[key] = full + " (" + strings.Join(aliases, ", ") + ")"
 		}
 	}
 	for _, command := range reserved {
-		key := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(command, "/")))
-		if key == "" {
+		name := strings.TrimSpace(command)
+		var aliases []string
+		if spec, ok := controlprompt.Lookup(name); ok {
+			name, aliases = spec.Name, spec.Aliases
+		}
+		if name == "" {
 			continue
 		}
+		key := strings.ToLower(name)
 		builtinNames[key] = struct{}{}
 		seen[key] = struct{}{}
+		for _, alias := range aliases {
+			// Reserved commands may be filtered out of the visible list while a
+			// Turn runs, but their aliases must still suppress same-name skills.
+			builtinNames[alias] = struct{}{}
+			seen[alias] = struct{}{}
+		}
 	}
 
-	var displays map[string]string
-	var details map[string]string
 	for _, candidate := range skills {
 		command := strings.TrimSpace(candidate.Value)
 		key := strings.ToLower(command)
@@ -237,11 +266,6 @@ func (m *Model) applySlashCommandCompletion() tea.Cmd {
 		return nil
 	}
 	command := strings.TrimPrefix(selected, "/")
-	if strings.EqualFold(command, "subagent") {
-		m.clearSlashCompletion()
-		m.resetComposerAfterOverlayOpen()
-		return m.openSubagentOverlay()
-	}
 	if slashCommandSubmitsOnCompletion(command) {
 		m.setInputText(selected)
 		m.syncTextareaFromInput()
@@ -271,13 +295,36 @@ func (m *Model) applySlashSkillReferenceCompletion(selected string) {
 	m.clearSlashCompletion()
 }
 
+// Selecting an argument-free command uses the same submit path as typed input.
 func slashCommandSubmitsOnCompletion(command string) bool {
-	switch strings.ToLower(strings.TrimSpace(command)) {
-	case "help", "status", "exit", "quit":
+	name := strings.ToLower(strings.TrimSpace(command))
+	if spec, ok := controlprompt.Lookup(name); ok {
+		name = spec.Name
+	}
+	switch name {
+	case "help", "status", "quit", "team":
 		return true
 	default:
 		return false
 	}
+}
+
+// commandMatchesQuery reports whether a built-in command or one of its aliases
+// prefix-matches the slash query. Discovery widens through the alias while the
+// committed candidate stays canonical.
+func commandMatchesQuery(full string, aliases []string, queryKey string) bool {
+	if queryKey == "" {
+		return true
+	}
+	if strings.HasPrefix(strings.ToLower(full), "/"+queryKey) {
+		return true
+	}
+	for _, alias := range aliases {
+		if strings.HasPrefix(alias, queryKey) {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *Model) slashCandidateIsSkill(selected string) bool {

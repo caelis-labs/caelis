@@ -427,6 +427,83 @@ func TestManagerSerializesConcurrentStartAndLaunchesOnce(t *testing.T) {
 	}
 }
 
+func TestManagerStartShutsDownReadyInstanceBeforeLaunchingReplacement(t *testing.T) {
+	executable := filepath.Join(t.TempDir(), "caelis")
+	if err := os.WriteFile(executable, []byte("replacement executable"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	running := Status{Identity: releaseIdentity("v1.2.0", "old-build"), InstanceID: "old-instance", PID: 11, Endpoint: "http://127.0.0.1:1"}
+	var events []string
+	manager := Manager{
+		StoreDir: t.TempDir(), InstallDir: t.TempDir(), PollInterval: time.Millisecond,
+		Probe: func(context.Context) ProbeResult {
+			if running.Identity == (Identity{}) {
+				return ProbeResult{State: ProbeMissing}
+			}
+			return ProbeResult{State: ProbeReady, Status: running}
+		},
+		Shutdown: func(_ context.Context, status Status) error {
+			events = append(events, "shutdown:"+status.InstanceID)
+			if status != running {
+				t.Errorf("Shutdown() status = %#v, want the running instance %#v", status, running)
+			}
+			running = Status{}
+			return nil
+		},
+		Launch: func(candidate Candidate) (LaunchedProcess, error) {
+			events = append(events, "launch:"+candidate.BuildID)
+			running = Status{Identity: candidate.Identity, InstanceID: "new-instance", PID: 22}
+			return testLaunchedProcess(22), nil
+		},
+	}
+	candidate := Candidate{Identity: releaseIdentity("v1.3.0", "new-build"), Executable: executable}
+	got, err := manager.Start(context.Background(), candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Identity != candidate.Identity || got.InstanceID != "new-instance" {
+		t.Fatalf("Start() status = %#v, want the replaced instance", got)
+	}
+	if len(events) != 2 || events[0] != "shutdown:old-instance" || events[1] != "launch:new-build" {
+		t.Fatalf("lifecycle order = %v, want the old Host shut down before the replacement is launched", events)
+	}
+	selected, err := manager.loadSelected()
+	if err != nil || selected.Identity != candidate.Identity {
+		t.Fatalf("selected candidate = %#v, %v", selected, err)
+	}
+}
+
+func TestManagerStartKeepsNewerRunningReleaseWithoutReplacement(t *testing.T) {
+	executable := filepath.Join(t.TempDir(), "caelis")
+	if err := os.WriteFile(executable, []byte("older executable"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	running := Status{Identity: releaseIdentity("v1.4.0", "newer-build"), InstanceID: "newer-instance", PID: 7}
+	replaced := false
+	manager := Manager{
+		StoreDir: t.TempDir(), InstallDir: t.TempDir(), PollInterval: time.Millisecond,
+		Probe: func(context.Context) ProbeResult { return ProbeResult{State: ProbeReady, Status: running} },
+		Shutdown: func(context.Context, Status) error {
+			replaced = true
+			return nil
+		},
+		Launch: func(Candidate) (LaunchedProcess, error) {
+			replaced = true
+			return testLaunchedProcess(1), nil
+		},
+	}
+	got, err := manager.Start(context.Background(), Candidate{Identity: releaseIdentity("v1.3.0", "older-build"), Executable: executable})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != running {
+		t.Fatalf("Start() status = %#v, want the running newer release %#v", got, running)
+	}
+	if replaced {
+		t.Fatal("an older caller shut down or replaced a newer running release")
+	}
+}
+
 func releaseIdentity(distribution string, buildID string) Identity {
 	return Identity{DistributionVersion: distribution, BuildID: buildID, BuildKind: version.BuildKindRelease}
 }

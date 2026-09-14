@@ -305,7 +305,12 @@ func (s *Server) reconnectSession(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	turns, ok := historyTurnsQuery(w, r)
+	if !ok {
+		return
+	}
 	result, err := s.config.Services.Sessions.Reconnect(r.Context(), principal, appserver.ReconnectRequest{
+		HistoryTurns: turns, HistoryBefore: r.URL.Query().Get("history_before"),
 		SessionID: r.PathValue("session_id"),
 		Cursor:    cursor,
 	})
@@ -382,7 +387,7 @@ func (s *Server) streamControlSubscription(
 func marshalFeedDelivery(delivery appserver.FeedDelivery) ([]byte, error) {
 	wire := wirev1.FeedDelivery{
 		Kind: string(delivery.Kind), Source: string(delivery.Source), SnapshotID: delivery.SnapshotID,
-		Page: delivery.Page, NextCursor: delivery.NextCursor,
+		Page: delivery.Page, NextCursor: delivery.NextCursor, HistoryBefore: delivery.HistoryBefore,
 		Events: make([]json.RawMessage, 0, len(delivery.Events)),
 	}
 	for _, envelope := range delivery.Events {

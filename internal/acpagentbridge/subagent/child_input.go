@@ -665,9 +665,23 @@ func (r *Runner) submitIdleChildInput(
 	}
 	slot.opMu.Unlock()
 
+	// Keep the input projection ahead of peer output that can arrive before
+	// the local writer reports a complete prompt. The dispatch reservation
+	// still excludes other endpoint operations while ingress is held.
+	slot.ingressMu.Lock()
 	dispatchErr := prepared.DispatchWithAbort(dispatchCtx, func() {
+		// Close joins notification callbacks, so release ingress during abort.
+		slot.ingressMu.Unlock()
+		defer slot.ingressMu.Lock()
 		_ = acpClient.Close(context.Background())
 	})
+	if dispatchErr == nil {
+		started := &output.Event{State: string(delegation.StateRunning), Running: true, OccurredAt: r.clock()}
+		for _, event := range append([]*output.Event{started}, acceptedInput...) {
+			slot.publishRunOutputLocked(run, *event)
+		}
+	}
+	slot.ingressMu.Unlock()
 	cancelDispatch()
 
 	slot.opMu.Lock()
@@ -697,10 +711,6 @@ func (r *Runner) submitIdleChildInput(
 		slot.opMu.Unlock()
 		return agent.ChildInputResult{}, dispatchErr
 	}
-	// A dispatched fresh prompt is running even before the Agent emits content.
-	// Keep that producer state distinct from accepted input and mailbox receipts.
-	started := &output.Event{State: string(delegation.StateRunning), Running: true, OccurredAt: r.clock()}
-	slot.settleInput(run, true, append([]*output.Event{started}, acceptedInput...))
 	go r.drivePreparedPrompt(responseCtx, run, prepared, prompt, fence)
 	slot.opMu.Unlock()
 	return agent.ChildInputResult{ActivityID: activityID, StartedActivity: true}, nil

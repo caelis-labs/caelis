@@ -10,6 +10,7 @@ import (
 
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	"github.com/caelis-labs/caelis/control/modelprofile"
+	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 )
 
@@ -44,18 +45,19 @@ const (
 )
 
 type subagentOverlayRow struct {
-	action      subagentOverlayAction
-	key         string
-	section     string
-	label       string
-	detail      string
-	efforts     []string
-	effortIndex int
-	handle      agentbinding.Handle
-	binding     agentbinding.Binding
-	reset       bool
-	enabled     bool
-	custom      bool
+	action       subagentOverlayAction
+	key          string
+	section      string
+	label        string
+	detail       string
+	nameConflict bool
+	efforts      []string
+	effortIndex  int
+	handle       agentbinding.Handle
+	binding      agentbinding.Binding
+	reset        bool
+	enabled      bool
+	custom       bool
 }
 
 type subagentOverlayGeometry struct {
@@ -123,6 +125,7 @@ func (m *Model) openSubagentOverlay() tea.Cmd {
 	m.showPalette = false
 	m.subagentRosterPressed = false
 	m.dismissWelcomeCard()
+	m.syncViewportContent()
 	m.subagentRequestSeq++
 	request := m.subagentRequestSeq
 	ctx := contextOrBackground(m.cfg.Context)
@@ -258,7 +261,7 @@ func (m *Model) renderSubagentTitle(width int) string {
 	close := m.theme.HelpHintTextStyle().Render("×")
 	closeWidth := displayColumns(close)
 	titleWidth := maxInt(1, width-closeWidth-1)
-	title := m.theme.TitleStyle().Render(truncateTailDisplay("◆ Participants & system agents", titleWidth))
+	title := m.theme.TitleStyle().Render(truncateTailDisplay("◆ Team Configuration", titleWidth))
 	gap := maxInt(1, width-displayColumns(title)-closeWidth)
 	return title + strings.Repeat(" ", gap) + close
 }
@@ -324,7 +327,9 @@ func (m *Model) renderSubagentRow(row subagentOverlayRow, selected bool, width i
 	switch {
 	case selected && row.enabled:
 		selection := m.theme.SelectionStyle()
-		if !styledEffortDetail {
+		if row.nameConflict {
+			detailSegment = m.theme.ErrorStyle().Background(selection.GetBackground()).Render(detailSegment)
+		} else if !styledEffortDetail {
 			detailSegment = selection.Render(detailSegment)
 		}
 		return selection.Bold(true).Render(labelSegment) + detailSegment
@@ -346,7 +351,9 @@ func (m *Model) renderSubagentRow(row subagentOverlayRow, selected bool, width i
 		subagentActionCommitSet:
 		labelStyle = labelStyle.Bold(true)
 	}
-	if !styledEffortDetail {
+	if row.nameConflict {
+		detailSegment = m.theme.ErrorStyle().Render(detailSegment)
+	} else if !styledEffortDetail {
 		detailSegment = m.theme.HelpHintTextStyle().Render(detailSegment)
 	}
 	return labelStyle.Render(labelSegment) + detailSegment
@@ -435,6 +442,10 @@ func (m *Model) subagentMainRows() []subagentOverlayRow {
 			handle:  item.Definition.Handle,
 			enabled: item.Definition.Configurable,
 			custom:  item.Definition.Custom,
+		}
+		if spec, ok := controlprompt.Lookup(string(row.handle)); row.custom && ok {
+			row.nameConflict = true
+			row.detail = "Name conflicts with /" + spec.Name + "; rename role"
 		}
 		if item.Definition.Class == agentbinding.HandleClassSystem {
 			row.section = "System Agents"

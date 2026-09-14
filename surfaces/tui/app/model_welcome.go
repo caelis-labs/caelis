@@ -15,8 +15,8 @@ type welcomeAction struct {
 var welcomeActions = []welcomeAction{
 	{token: welcomeActionTokenResume, label: "Resume Session", command: "/resume"},
 	{token: welcomeActionTokenModel, label: "Switch Model", command: "/model"},
-	{token: welcomeActionTokenConnect, label: "Connect", command: "/connect"},
-	{token: welcomeActionTokenQuit, label: "Quit", command: "/quit"},
+	{token: welcomeActionTokenTeam, label: "Configure Team", command: "/team"},
+	{token: welcomeActionTokenConnect, label: "Connect Model / Agent", command: "/connect"},
 }
 
 func welcomeActionForToken(token string) (welcomeAction, bool) {

@@ -7,7 +7,9 @@ import (
 
 // CommandSpec describes one slash command in the shared Control prompt catalog.
 type CommandSpec struct {
-	Name             string
+	Name string
+	// Aliases resolve to this spec without appearing as separate commands.
+	Aliases          []string
 	Usage            string
 	Description      string
 	Details          []string
@@ -79,7 +81,7 @@ func defaultSpecs() []CommandSpec {
 	for _, spec := range append(defaultSharedSpecs(), defaultTUISpecs()...) {
 		byName[spec.Name] = spec
 	}
-	order := []string{"help", "review", "breeze", "orbit", "zenith", "connect", "disconnect", "subagent", "plugin", "model", "status", "doctor", "new", "resume", "compact", "exit", "quit"}
+	order := []string{"help", "review", "breeze", "orbit", "zenith", "connect", "disconnect", "team", "plugin", "model", "status", "doctor", "new", "resume", "compact", "quit"}
 	specs := make([]CommandSpec, 0, len(order))
 	for _, name := range order {
 		if spec, ok := byName[name]; ok {
@@ -110,10 +112,9 @@ func defaultTUISpecs() []CommandSpec {
 	specs := []CommandSpec{
 		{Name: "connect", Usage: "/connect", Description: "Connect a model provider or local ACP Agent", DynamicCompleter: true},
 		{Name: "disconnect", Usage: "/disconnect", Description: "Disconnect provider models or local ACP Agents", DynamicCompleter: true},
-		{Name: "subagent", Usage: "/subagent <action>", Description: "Configure participant profiles and system Agents", DynamicCompleter: true, Details: []string{"actions: list; bind <breeze|orbit|zenith> <self|agent> [effort]; bind <guardian|reviewer> <default|model-agent> [effort]"}},
+		{Name: "team", Aliases: []string{"subagent"}, Usage: "/team", Description: "Configure participant profiles and system Agents"},
 		{Name: "plugin", Usage: "/plugin <action>", Description: "Manage Caelis plugins", Details: []string{"actions: install <plugin@marketplace|path>, marketplace add|list|update|rm, manage, rm <id>"}, ArgCandidates: pluginRootCandidates(), DynamicCompleter: true},
-		{Name: "exit", Usage: "/exit", Description: "Exit the TUI", AvailableWhileRunning: true},
-		{Name: "quit", Usage: "/quit", Description: "Exit the TUI", AvailableWhileRunning: true},
+		{Name: "quit", Aliases: []string{"exit"}, Usage: "/quit", Description: "Exit the TUI", AvailableWhileRunning: true},
 	}
 	return specs
 }
@@ -211,7 +212,7 @@ func DefaultACPNamesForPlatform(goos string) []string {
 	return out
 }
 
-// Lookup returns a core command spec by name.
+// Lookup returns a core command spec by canonical name or alias.
 func Lookup(name string) (CommandSpec, bool) {
 	return LookupForPlatform(name, runtime.GOOS)
 }
@@ -219,7 +220,7 @@ func Lookup(name string) (CommandSpec, bool) {
 func LookupForPlatform(name string, goos string) (CommandSpec, bool) {
 	name = normalizeName(name)
 	for _, spec := range DefaultSpecsForPlatform(goos) {
-		if spec.Name == name {
+		if spec.Name == name || specHasAlias(spec, name) {
 			return spec, true
 		}
 	}
@@ -233,7 +234,7 @@ func LookupShared(name string) (CommandSpec, bool) {
 func LookupSharedForPlatform(name string, goos string) (CommandSpec, bool) {
 	name = normalizeName(name)
 	for _, spec := range DefaultSharedSpecsForPlatform(goos) {
-		if spec.Name == name {
+		if spec.Name == name || specHasAlias(spec, name) {
 			return spec, true
 		}
 	}
@@ -247,7 +248,7 @@ func LookupACP(name string) (CommandSpec, bool) {
 func LookupACPForPlatform(name string, goos string) (CommandSpec, bool) {
 	name = normalizeName(name)
 	for _, spec := range DefaultACPSpecsForPlatform(goos) {
-		if spec.Name == name {
+		if spec.Name == name || specHasAlias(spec, name) {
 			return spec, true
 		}
 	}
@@ -295,11 +296,16 @@ func HelpSnapshot(names []string) CommandHelpSnapshot {
 		if name == "" {
 			continue
 		}
+		spec, known := Lookup(name)
+		if known {
+			// Resolve aliases to the canonical identity before deduping so
+			// `/quit` and `/exit` render a single entry.
+			name = spec.Name
+		}
 		if _, exists := seen[name]; exists {
 			continue
 		}
 		seen[name] = struct{}{}
-		spec, known := Lookup(name)
 		if !known {
 			out.Items = append(out.Items, CommandHelpItem{
 				Name:        name,
@@ -366,4 +372,13 @@ func pluginRootCandidates() []SlashArgCandidate {
 
 func normalizeName(name string) string {
 	return strings.ToLower(strings.TrimSpace(strings.TrimPrefix(name, "/")))
+}
+
+func specHasAlias(spec CommandSpec, name string) bool {
+	for _, alias := range spec.Aliases {
+		if normalizeName(alias) == name {
+			return true
+		}
+	}
+	return false
 }

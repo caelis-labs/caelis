@@ -371,6 +371,12 @@ func (c *Client) Reconnect(ctx context.Context, request appserver.ReconnectReque
 		return appserver.ReconnectResult{}, err
 	}
 	query := make(url.Values)
+	if request.HistoryTurns != 0 {
+		query.Set("history_turns", strconv.Itoa(request.HistoryTurns))
+	}
+	if request.HistoryBefore != "" {
+		query.Set("history_before", request.HistoryBefore)
+	}
 	if request.Cursor != "" {
 		query.Set("after", request.Cursor)
 	}
@@ -388,7 +394,7 @@ func (c *Client) Reconnect(ctx context.Context, request appserver.ReconnectReque
 	frame, err := readRemoteSSEFrame(scanner)
 	if err != nil {
 		response.Body.Close()
-		return appserver.ReconnectResult{}, fmt.Errorf("control http client: read reconnect bootstrap: %w", err)
+		return appserver.ReconnectResult{}, fmt.Errorf("control http client: read reconnect bootstrap: %w", classifyStreamReadError("Session feed", err))
 	}
 	if frame.event != wirev1.BootstrapEventName {
 		response.Body.Close()
@@ -784,11 +790,7 @@ func (s *remoteSubscription) read() {
 			if s.wasClosed() {
 				return
 			}
-			if errors.Is(err, io.EOF) {
-				s.setError(errorcode.New(errorcode.Unavailable, "control http client: Session feed ended without a done event"))
-			} else {
-				s.setError(err)
-			}
+			s.setError(classifyStreamReadError("Session feed", err))
 			return
 		}
 		switch frame.event {
@@ -839,7 +841,7 @@ func (s *remoteSubscription) publish(delivery appserver.FeedDelivery) bool {
 func decodeFeedDelivery(wire wirev1.FeedDelivery) (appserver.FeedDelivery, error) {
 	delivery := appserver.FeedDelivery{
 		Kind: appserver.FeedDeliveryKind(wire.Kind), Source: appserver.FeedSourceClass(wire.Source),
-		SnapshotID: wire.SnapshotID, Page: wire.Page, NextCursor: wire.NextCursor,
+		SnapshotID: wire.SnapshotID, Page: wire.Page, NextCursor: wire.NextCursor, HistoryBefore: wire.HistoryBefore,
 		Events: make([]eventstream.Envelope, 0, len(wire.Events)),
 	}
 	for _, raw := range wire.Events {

@@ -8,6 +8,8 @@ import (
 )
 
 func (m *Model) resetConversationView() {
+	m.cancelEarlierHistory("")
+	m.sessionHistoryBefore = ""
 	m.flushStream()
 	m.closeTaskStreamSubscriptions()
 	m.closeSubagentOutputOverlay()

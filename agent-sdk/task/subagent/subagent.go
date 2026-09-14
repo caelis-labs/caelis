@@ -115,14 +115,17 @@ func CloneReconnectRequest(in *ReconnectRequest) *ReconnectRequest {
 // history may be loaded without resuming execution. Anchor and Reconnect are
 // trusted Task facts reconstructed by Control, never model input.
 type HistoryRequest struct {
-	Anchor    delegation.Anchor `json:"-"`
-	Reconnect ReconnectRequest  `json:"-"`
+	// MetadataOnly omits returned history events when an output observer consumes
+	// the complete replay. It does not truncate the observer's history.
+	MetadataOnly bool              `json:"-"`
+	Anchor       delegation.Anchor `json:"-"`
+	Reconnect    ReconnectRequest  `json:"-"`
 }
 
 // CloneHistoryRequest copies a read-only child Session recovery request.
 func CloneHistoryRequest(in HistoryRequest) HistoryRequest {
 	reconnect := CloneReconnectRequest(&in.Reconnect)
-	out := HistoryRequest{Anchor: delegation.CloneAnchor(in.Anchor)}
+	out := HistoryRequest{Anchor: delegation.CloneAnchor(in.Anchor), MetadataOnly: in.MetadataOnly}
 	if reconnect != nil {
 		out.Reconnect = *reconnect
 	}

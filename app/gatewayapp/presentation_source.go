@@ -280,7 +280,7 @@ func (p gatewayPresentationSource) AvailableCommands(ctx context.Context, sessio
 func availableProfileDescription(profile agentbinding.HandleStatus) string {
 	description := strings.TrimSpace(profile.Definition.Description)
 	if strings.TrimSpace(profile.Binding.ProfileID) == "" {
-		return firstNonEmpty(description+" Unbound; configure it with /subagent bind.", description)
+		return firstNonEmpty(description+" Unbound; configure it with /team in the TUI.", description)
 	}
 	target := strings.TrimSpace(firstNonEmpty(profile.Profile.DisplayName, profile.Binding.ProfileID))
 	if effort := strings.TrimSpace(profile.Binding.Effort); effort != "" {

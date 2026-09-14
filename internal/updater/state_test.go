@@ -144,12 +144,8 @@ func TestWindowsHandoffLockRecordsParentPID(t *testing.T) {
 				return nil, nil
 			}
 		},
-		CommandRun: func(context.Context, string, []string, io.Writer, io.Writer) error {
+		CommandRun: func(context.Context, string, []string, []string, io.Writer, io.Writer) error {
 			t.Fatal("Windows npm handoff must not run npm before the native process exits")
-			return nil
-		},
-		CommandStart: func(string, []string) error {
-			t.Fatal("foreground launcher handoff must not schedule a detached update")
 			return nil
 		},
 	})

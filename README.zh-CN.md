@@ -59,8 +59,7 @@ caelis
 
 1. 通过 `/connect` 添加所需的模型服务或 ACP Agent。外部 Agent 的可执行程序需要单独安装，
    并位于 Host 进程的 `PATH` 中；其他 ACP stdio 命令可通过 **Custom** 接入。
-2. 输入 `/subagent`，配置 `breeze`、`orbit`、`zenith` 等参与者角色，或创建自定义角色。
-   `/subagent` 是当前配置参与者和系统 Agent 的实际命令名。
+2. 输入 `/team`，在团队面板中配置 `breeze`、`orbit`、`zenith` 等参与者角色，或创建自定义角色。
 3. 请主 Agent 组织协作，例如：
 
    ```text
@@ -86,7 +85,7 @@ caelis
 - **模型选择：** 在同一个模型选择器中使用 ChatGPT Codex 登录、API 服务、本地模型或 ACP Agent。
 - **工作空间扩展：** 支持 MCP Server、Skill 和插件；项目级 MCP 配置需要先获得工作空间信任。
 - **持久会话与记忆：** 恢复历史对话，使用内置的 `Remember` 和 `Recall`。
-  记忆功能无需单独安装；除非在 `/subagent` 中显式绑定 Memory Steward，否则不会为记忆调用模型。
+  记忆功能无需单独安装；除非在 `/team` 中显式绑定 Memory Steward，否则不会为记忆调用模型。
 - **交互与自动化：** 提供 TUI、文本、版本化 JSON、流式 JSONL 和 ACP Server，
   使用相同的 Session 与 Control 服务。
 

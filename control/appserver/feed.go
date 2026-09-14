@@ -33,19 +33,24 @@ const (
 // Valid Session history has no fixed total replacement limit. Result is one
 // cursorless terminal semantic fallback used only when the spool is unavailable.
 type FeedDelivery struct {
-	Kind       FeedDeliveryKind       `json:"kind"`
-	Source     FeedSourceClass        `json:"source"`
-	SnapshotID string                 `json:"snapshot_id,omitempty"`
-	Page       uint32                 `json:"page,omitempty"`
-	Events     []eventstream.Envelope `json:"events,omitempty"`
-	NextCursor string                 `json:"next_cursor,omitempty"`
+	Kind          FeedDeliveryKind       `json:"kind"`
+	Source        FeedSourceClass        `json:"source"`
+	SnapshotID    string                 `json:"snapshot_id,omitempty"`
+	Page          uint32                 `json:"page,omitempty"`
+	Events        []eventstream.Envelope `json:"events,omitempty"`
+	NextCursor    string                 `json:"next_cursor,omitempty"`
+	HistoryBefore string                 `json:"history_before,omitempty"`
 }
 
 // SubscribeRequest requests one authorized Session feed. Cursor is the only
 // public resume identity; EventID and ProjectionID are never accepted here.
 type SubscribeRequest struct {
-	SessionID string `json:"session_id"`
-	Cursor    string `json:"cursor,omitempty"`
+	// HistoryTurns limits initial history to complete recent Turns; zero loads all.
+	HistoryTurns int `json:"history_turns,omitempty"`
+	// HistoryBefore selects a finite older page, independently of the live cursor.
+	HistoryBefore string `json:"history_before,omitempty"`
+	SessionID     string `json:"session_id"`
+	Cursor        string `json:"cursor,omitempty"`
 }
 
 // FeedSubscription is an independent view of a Session feed. Closing it does

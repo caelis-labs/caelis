@@ -6,11 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"mime"
-	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -94,8 +93,17 @@ func (c *TaskClient) Subscribe(ctx context.Context, request taskstream.Subscribe
 		return taskstream.SubscribeResult{}, err
 	}
 	query := make(url.Values)
+	if request.HistoryTurns != 0 {
+		query.Set("history_turns", strconv.Itoa(request.HistoryTurns))
+	}
+	if request.HistoryBefore != "" {
+		query.Set("history_before", request.HistoryBefore)
+	}
 	if cursor := strings.TrimSpace(request.Cursor); cursor != "" {
 		query.Set("after", cursor)
+	}
+	if request.HistorySnapshot {
+		query.Set("history_snapshot", "true")
 	}
 	if request.Follow {
 		query.Set("follow", "true")
@@ -138,7 +146,7 @@ func decodeTaskDelivery(wire wirev1.TaskStreamDelivery) (taskstream.Delivery, er
 	delivery := taskstream.Delivery{
 		Kind: taskstream.DeliveryKind(wire.Kind), Source: taskstream.SourceClass(wire.Source),
 		SnapshotID: wire.SnapshotID, Page: wire.Page,
-		NextCursor: wire.NextCursor, ActivityID: wire.ActivityID,
+		NextCursor: wire.NextCursor, HistoryBefore: wire.HistoryBefore, ActivityID: wire.ActivityID,
 		Events: make([]eventstream.Envelope, 0, len(wire.Events)),
 	}
 	for _, item := range wire.Events {
@@ -206,7 +214,7 @@ func (s *remoteTaskSubscription) readLoop() {
 			if s.stopped() {
 				return
 			}
-			s.setErr(classifyTaskStreamReadError(err))
+			s.setErr(classifyStreamReadError("Task stream", err))
 			return
 		}
 		switch frame.event {
@@ -251,32 +259,6 @@ func (s *remoteTaskSubscription) publish(delivery taskstream.Delivery) bool {
 	case <-s.stop:
 		return false
 	}
-}
-
-// classifyTaskStreamReadError maps abrupt transport truncation to retryable
-// Unavailable while preserving non-retryable decode/frame-size failures.
-func classifyTaskStreamReadError(err error) error {
-	if err == nil {
-		return nil
-	}
-	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
-		// Wire contract: only an explicit done event is a clean end.
-		return errorcode.New(errorcode.Unavailable, "control http client: Task stream ended without a done event")
-	}
-	if errors.Is(err, bufio.ErrTooLong) {
-		return errorcode.New(errorcode.InvalidArgument, "control http client: Task stream frame is too large")
-	}
-	var netErr net.Error
-	if errors.As(err, &netErr) {
-		return errorcode.New(errorcode.Unavailable, "control http client: Task stream transport interrupted")
-	}
-	message := strings.ToLower(err.Error())
-	if strings.Contains(message, "connection reset") ||
-		strings.Contains(message, "broken pipe") ||
-		strings.Contains(message, "use of closed network connection") {
-		return errorcode.New(errorcode.Unavailable, "control http client: Task stream transport interrupted")
-	}
-	return err
 }
 
 func (s *remoteTaskSubscription) stopped() bool {

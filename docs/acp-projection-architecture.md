@@ -99,6 +99,28 @@ before mutation, releases its spool writer when the removal committed despite
 a reporting error, continues from the returned committed Session, and retains
 the warning for the caller.
 
+TUI Session restoration consumes Control-selected history in bounded batches into
+an unrendered document. Exact trace deltas remain visible history even when their
+delivery mode is transient; durability does not select a second Surface replay
+path. The document is published at the feed sync boundary, including replacement
+received after live output. Incomplete restoration retains the previous document.
+Only the final viewport is laid out; history loading does not animate prior output.
+The TUI initially requests the latest 16 complete Turns. Scrolling upward requests
+an older window through `history_before`; its finite subscription does not change
+the live cursor or command target. Pages build privately and prepend only after
+completion, preserving the visible block and selection. Failed requests preserve
+both the document and the previous history token for retry.
+
+Control indexes source positions and Turn boundaries, never another copy of
+content. A window expands when interleaved Turns require earlier records; history
+without Turn identities falls back to the complete range. Indexes are rebuilt
+from the source after eviction or Host restart. Signed backward tokens bind the
+Session, optional Task, source incarnation, and upper boundary. Session tokens
+arrive at `sync`, child tokens at `replace_end`; absence marks the origin. They
+cannot be used as live cursors. A lost source rejects the older request rather
+than splicing another incarnation into an existing document. Consumers omitting
+`history_turns` retain full-history behavior.
+
 Live durable delivery and replay use the same projector. Reload must not create
 Session Events, promote transient output, or change rebuilt model context.
 
@@ -214,7 +236,13 @@ one or gain authenticated user authority.
 Task status is a replaceable directory snapshot and contains no transcript.
 Visible content demand has an independent spool cursor. Child workspaces use
 one following subscription, including while idle. A complete retained origin
-and its live tail come from the same Task spool. If that origin is missing,
+and its live tail come from the same Task spool. Child workspace subscriptions
+request `history_snapshot` and a recent-Turn window when opening without a cursor. Control streams that
+captured window as bounded replacement pages and commits its exact continuation
+cursor at the end; new output follows from that same boundary. Retained history
+snapshots have no fixed total event limit. The TUI builds their child narrative
+privately and publishes it once, without buffering every transport Envelope.
+If that origin is missing,
 Control shares one recovery per Task: the runner checks `loadSession`, performs
 ACP `session/load`, and queues its complete ordered replay before accepting live
 updates from the same connection. The load response is the replay boundary.
@@ -244,8 +272,15 @@ queued payloads across the recorder. Overflow or a write failure invalidates the
 cache and reports a gap without blocking execution or silently losing a prefix.
 Spool segments use append writes and close without fsync; they are disposable
 cache files, never a second durable Session history. Ordinary follow-up turns
-append new output without rewriting prior history. Recovery replay is bounded
-at 8,192 events / 32 MiB and is never truncated into a supposedly complete view.
+append new output without rewriting prior history. Metadata-only ACP history recovery stages complete input groups and output in
+private temporary files, then streams them into the recorder's unpublished
+incarnation. It retains at most one input group in memory, bounded at 8,192 events
+/ 32 MiB. Staging is limited to 256 MiB per load and 1 GiB across concurrent
+loads; spool quotas still apply. Temporary files are removed on success, failure,
+and authentication retry. The streaming observer joins its reader before
+returning, including cancellation. Callers requesting returned history events
+retain the bounded in-memory load path. Replay is never truncated into a
+supposedly complete view.
 
 Only implemented notification methods enter the ACP client's ordered queue;
 standard `session/update` and the supported notice extension remain enabled.

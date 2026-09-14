@@ -24,6 +24,8 @@ type subagentOutputNarrativeKey struct {
 }
 
 type subagentOutputView struct {
+	historyBefore string
+	history       *subagentOutputView
 	pane          *subagentOutputOverlayState
 	activity      runningHintTracker
 	callID        string

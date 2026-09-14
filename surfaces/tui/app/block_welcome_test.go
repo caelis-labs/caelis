@@ -5,7 +5,6 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/colorprofile"
@@ -296,8 +295,8 @@ func TestWelcomeBlockActionRowsCarryStableTokens(t *testing.T) {
 		want := []string{
 			welcomeActionTokenResume,
 			welcomeActionTokenModel,
+			welcomeActionTokenTeam,
 			welcomeActionTokenConnect,
-			welcomeActionTokenQuit,
 		}
 		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("%dx%d click tokens = %#v, want %#v", size.width, size.height, got, want)
@@ -429,30 +428,26 @@ func TestWelcomeMouseActionsMatchManualSlashSubmission(t *testing.T) {
 		}
 	})
 
-	t.Run("quit uses the same immediate lifecycle path", func(t *testing.T) {
-		var manualSubmissions []Submission
+	t.Run("team opens the same overlay", func(t *testing.T) {
 		manual := newWelcomeTestModel(t, 80, 24, Config{
-			ExecuteLine: func(submission Submission) TaskResultMsg {
-				manualSubmissions = append(manualSubmissions, submission)
-				return TaskResultMsg{}
-			},
+			ControlService: &subagentDelegationStub{status: subagentTestStatus()},
 		})
-		var clickedSubmissions []Submission
 		clicked := newWelcomeTestModel(t, 80, 24, Config{
-			ExecuteLine: func(submission Submission) TaskResultMsg {
-				clickedSubmissions = append(clickedSubmissions, submission)
-				return TaskResultMsg{}
-			},
+			ControlService: &subagentDelegationStub{status: subagentTestStatus()},
 		})
 
-		manualCmd := submitManualWelcomeCommand(manual, "/quit")
-		clickedCmd := clickWelcomeAction(t, clicked, welcomeActionTokenQuit)
+		_ = submitManualWelcomeCommand(manual, "/team")
+		_ = clickWelcomeAction(t, clicked, welcomeActionTokenTeam)
 
-		if manualCmd == nil || clickedCmd == nil || !manual.quit || !clicked.quit {
-			t.Fatalf("immediate quit state = manual(cmd:%v quit:%v) clicked(cmd:%v quit:%v)", manualCmd != nil, manual.quit, clickedCmd != nil, clicked.quit)
+		if manual.subagentOverlay == nil || clicked.subagentOverlay == nil {
+			t.Fatalf("team overlay active: manual=%v clicked=%v", manual.subagentOverlay != nil, clicked.subagentOverlay != nil)
 		}
-		if len(manualSubmissions) != 0 || len(clickedSubmissions) != 0 {
-			t.Fatalf("quit reached asynchronous ExecuteLine: manual=%#v clicked=%#v", manualSubmissions, clickedSubmissions)
+		if modelHasBlockKind(manual, BlockWelcome) || modelHasBlockKind(clicked, BlockWelcome) {
+			t.Fatal("opening team configuration retained the welcome card")
+		}
+		if manual.subagentOverlay.loading != clicked.subagentOverlay.loading || manual.textarea.Value() != clicked.textarea.Value() {
+			t.Fatalf("team state differs: manual=(loading:%v,input:%q) clicked=(loading:%v,input:%q)",
+				manual.subagentOverlay.loading, manual.textarea.Value(), clicked.subagentOverlay.loading, clicked.textarea.Value())
 		}
 	})
 }
@@ -514,22 +509,24 @@ func TestWelcomeMouseHitTestingRejectsRightOutsidePaddedRows(t *testing.T) {
 		{width: 80, height: 24},
 		{width: 35, height: 16},
 	} {
-		model := newWelcomeTestModel(t, size.width, size.height, Config{})
-		inside := welcomeActionMousePoint(t, model, welcomeActionTokenQuit)
-		contentLine := welcomeActionContentLine(t, model, welcomeActionTokenQuit)
+		model := newWelcomeTestModel(t, size.width, size.height, Config{
+			ControlService: &subagentDelegationStub{status: subagentTestStatus()},
+		})
+		inside := welcomeActionMousePoint(t, model, welcomeActionTokenTeam)
+		contentLine := welcomeActionContentLine(t, model, welcomeActionTokenTeam)
 		clickBounds := model.viewportClickBounds[contentLine]
 		outside := inside
 		outside.X = model.mainColumnX() + tuikit.GutterNarrative + clickBounds.end + 3
 
 		clickWelcomePoint(model, outside)
-		if model.quit {
-			t.Fatalf("%dx%d click right of padded /quit row triggered Quit", size.width, size.height)
+		if model.subagentOverlay != nil {
+			t.Fatalf("%dx%d click right of padded team row opened the overlay", size.width, size.height)
 		}
 
 		_, _ = model.Update(tea.MouseClickMsg(outside))
 		_, _ = model.Update(tea.MouseReleaseMsg(inside))
-		if model.quit {
-			t.Fatalf("%dx%d outside press and inside release triggered Quit", size.width, size.height)
+		if model.subagentOverlay != nil {
+			t.Fatalf("%dx%d outside press and inside release opened the team overlay", size.width, size.height)
 		}
 	}
 }
@@ -675,34 +672,6 @@ func TestLocalSlashWelcomeLifecycleFollowsTranscriptAppend(t *testing.T) {
 			t.Fatalf("%s click left %d welcome blocks, want 1", token, got)
 		}
 	}
-
-	quitModel := newWelcomeTestModel(t, 80, 24, Config{
-		ExecuteLine: func(Submission) TaskResultMsg { return TaskResultMsg{} },
-	})
-	_ = clickWelcomeAction(t, quitModel, welcomeActionTokenQuit)
-	if !quitModel.quit {
-		t.Fatal("quit click did not request application exit")
-	}
-	if got := len(quitModel.doc.FindByKind(BlockWelcome)); got != 1 {
-		t.Fatalf("quit click changed Welcome before exit: %d blocks, want 1", got)
-	}
-
-	called := false
-	model := newWelcomeTestModel(t, 80, 24, Config{
-		ExecuteLine: func(Submission) TaskResultMsg {
-			called = true
-			return TaskResultMsg{}
-		},
-	})
-	model.beginLiveTurn(SubmissionModeDefault, false, time.Unix(100, 0))
-	cmd := clickWelcomeAction(t, model, welcomeActionTokenQuit)
-	runWelcomeTestCmd(model, cmd)
-	if called {
-		t.Fatal("rejected running slash submission executed")
-	}
-	if got := len(model.doc.FindByKind(BlockWelcome)); got != 1 {
-		t.Fatalf("rejected submission left %d welcome blocks, want 1", got)
-	}
 }
 
 func TestSlashTranscriptOutputDismissesWelcomeAndKeepsInitialLogs(t *testing.T) {
@@ -824,13 +793,6 @@ func clickWelcomePoint(model *Model, point tea.Mouse) tea.Cmd {
 	_, _ = model.Update(tea.MouseClickMsg(point))
 	_, cmd := model.Update(tea.MouseReleaseMsg(point))
 	return cmd
-}
-
-func runWelcomeTestCmd(model *Model, cmd tea.Cmd) {
-	if cmd == nil {
-		return
-	}
-	findAndRunTaskResult(cmd(), model)
 }
 
 func rowPlainTexts(rows []RenderedRow) []string {

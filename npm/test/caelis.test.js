@@ -35,7 +35,6 @@ function testPlan() {
     current_version: 'v1.0.0',
     latest_version: 'v1.2.0',
     executable: 'C:\\caelis\\caelis.exe',
-    store_dir: 'C:\\Users\\test\\.caelis',
   };
 }
 
@@ -67,18 +66,18 @@ test('executeHandoffPlan waits for install and verifies the target version', asy
     stderr: { write: () => {} },
     runInstall: async () => ({ code: 0, signal: null, stdout: '', stderr: '' }),
     verifyVersion: async () => '1.2.0',
-    activateCaelis: async () => {},
   });
 
   assert.equal(result, 0);
-  assert.match(writes.join(''), /Caelis v1\.2\.0 is ready/);
+  assert.match(
+    writes.join(''),
+    /Caelis v1\.2\.0 is installed \(updated from v1\.0\.0 via npm\); it takes effect on the next start\./,
+  );
   assert.deepEqual(status.events, [
     ['start', 'Installing update with npm…'],
     ['succeed', 'npm install completed'],
     ['start', 'Verifying updated Caelis…'],
     ['succeed', 'Verified Caelis v1.2.0'],
-    ['start', 'Activating updated Caelis…'],
-    ['succeed', 'Activated Caelis v1.2.0'],
     ['stop'],
   ]);
 });

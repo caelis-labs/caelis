@@ -42,13 +42,14 @@ const (
 )
 
 type Delivery struct {
-	Kind       DeliveryKind           `json:"kind"`
-	Source     SourceClass            `json:"source"`
-	SnapshotID string                 `json:"snapshot_id,omitempty"`
-	Page       uint32                 `json:"page,omitempty"`
-	Events     []eventstream.Envelope `json:"events,omitempty"`
-	NextCursor string                 `json:"next_cursor,omitempty"`
-	ActivityID string                 `json:"activity_id,omitempty"`
+	Kind          DeliveryKind           `json:"kind"`
+	Source        SourceClass            `json:"source"`
+	SnapshotID    string                 `json:"snapshot_id,omitempty"`
+	Page          uint32                 `json:"page,omitempty"`
+	Events        []eventstream.Envelope `json:"events,omitempty"`
+	HistoryBefore string                 `json:"history_before,omitempty"`
+	NextCursor    string                 `json:"next_cursor,omitempty"`
+	ActivityID    string                 `json:"activity_id,omitempty"`
 }
 
 type ReadResult struct {
@@ -168,7 +169,7 @@ func (s *subscription) Err() error { return s.inner.Err() }
 func projectDelivery(delivery controltaskstream.Delivery) Delivery {
 	out := Delivery{
 		Kind: delivery.Kind, Source: delivery.Source, SnapshotID: delivery.SnapshotID,
-		Page: delivery.Page, NextCursor: delivery.NextCursor, ActivityID: delivery.ActivityID,
+		Page: delivery.Page, NextCursor: delivery.NextCursor, HistoryBefore: delivery.HistoryBefore, ActivityID: delivery.ActivityID,
 	}
 	for _, record := range delivery.Records {
 		out.Events = append(out.Events, projectRecord(record)...)

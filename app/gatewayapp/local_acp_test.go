@@ -237,6 +237,9 @@ func bindProfileToModelForToolTest(t *testing.T, stack *Stack, handle agentbindi
 }
 
 func TestACPProfileCommandDescriptionIncludesBoundModel(t *testing.T) {
+	if detail := availableProfileDescription(agentbinding.HandleStatus{}); detail != "Unbound; configure it with /team in the TUI." {
+		t.Fatalf("unbound profile description = %q", detail)
+	}
 	detail := availableProfileDescription(agentbinding.HandleStatus{
 		Definition: agentbinding.Definition{Handle: agentbinding.HandleOrbit, Description: "General implementation."},
 		Binding: agentbinding.Binding{

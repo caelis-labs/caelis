@@ -18,14 +18,13 @@ func TestDefaultNamesExposePlatformCoreCommandsOnly(t *testing.T) {
 		"zenith",
 		"connect",
 		"disconnect",
-		"subagent",
+		"team",
 		"plugin",
 		"model",
 		"status",
 		"new",
 		"resume",
 		"compact",
-		"exit",
 		"quit",
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -44,12 +43,27 @@ func TestDefaultNamesExposePlatformCoreCommandsOnly(t *testing.T) {
 }
 
 func TestProductCommandNamesAreReservedFromCustomRoles(t *testing.T) {
+	// Every registered product command and alias is reserved from custom
+	// delegation handles, so a role cannot hijack command or alias resolution.
+	// `team` is the deliberate exception: it stays a legal custom handle because
+	// the TUI resolves the built-in /team overlay before considering agent runs,
+	// so a colliding role cannot shadow it there.
 	for _, goos := range []string{"linux", "windows"} {
 		for _, spec := range DefaultSpecsForPlatform(goos) {
-			if err := agentbinding.ValidateCustomHandle(agentbinding.Handle(spec.Name)); err == nil {
-				t.Errorf("ValidateCustomHandle(%q) succeeded for %s product command", spec.Name, goos)
+			if spec.Name != "team" {
+				if err := agentbinding.ValidateCustomHandle(agentbinding.Handle(spec.Name)); err == nil {
+					t.Errorf("ValidateCustomHandle(%q) succeeded for %s product command", spec.Name, goos)
+				}
+			}
+			for _, alias := range spec.Aliases {
+				if err := agentbinding.ValidateCustomHandle(agentbinding.Handle(alias)); err == nil {
+					t.Errorf("ValidateCustomHandle(%q) succeeded for %s product command alias", alias, goos)
+				}
 			}
 		}
+	}
+	if err := agentbinding.ValidateCustomHandle("team"); err != nil {
+		t.Errorf("ValidateCustomHandle(team) = %v, want legal custom handle", err)
 	}
 	for _, name := range []string{"lead", "sandbox"} {
 		if err := agentbinding.ValidateCustomHandle(agentbinding.Handle(name)); err == nil {
@@ -65,7 +79,7 @@ func TestDefaultSharedNamesExcludeTUIPrivateCommands(t *testing.T) {
 			t.Fatalf("DefaultSharedNamesForPlatform(linux) = %#v, want %q", got, want)
 		}
 	}
-	for _, hidden := range []string{"connect", "disconnect", "subagent", "plugin", "exit", "quit"} {
+	for _, hidden := range []string{"connect", "disconnect", "team", "subagent", "plugin", "quit", "exit"} {
 		if sliceContainsString(got, hidden) {
 			t.Fatalf("DefaultSharedNamesForPlatform(linux) = %#v, should exclude TUI-private %q", got, hidden)
 		}
@@ -81,7 +95,7 @@ func TestDefaultACPNamesExposeACPPromptCommandsOnly(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("DefaultACPNamesForPlatform(linux) = %#v, want %#v", got, want)
 	}
-	for _, hidden := range []string{"help", "agent", "subagent", "model", "new", "resume", "connect", "disconnect", "plugin", "exit", "quit"} {
+	for _, hidden := range []string{"help", "agent", "team", "subagent", "model", "new", "resume", "connect", "disconnect", "plugin", "quit", "exit"} {
 		if sliceContainsString(got, hidden) {
 			t.Fatalf("DefaultACPNamesForPlatform(linux) = %#v, should exclude %q", got, hidden)
 		}
@@ -103,6 +117,18 @@ func TestHelpSnapshotUsesRegistrySpecs(t *testing.T) {
 	}
 }
 
+func TestHelpSnapshotResolvesAliasesToSingleCanonicalEntry(t *testing.T) {
+	got := HelpSnapshot([]string{"quit", "exit", "team", "subagent"})
+	if len(got.Items) != 2 {
+		t.Fatalf("HelpSnapshot() items = %#v, want one entry per canonical command", got.Items)
+	}
+	for index, want := range []string{"/quit", "/team"} {
+		if got.Items[index].Name != strings.TrimPrefix(want, "/") || !strings.HasPrefix(got.Items[index].Usage, want) {
+			t.Fatalf("HelpSnapshot().Items[%d] = %#v, want canonical %s", index, got.Items[index], want)
+		}
+	}
+}
+
 func TestRootArgCandidatesReturnsCopies(t *testing.T) {
 	first := RootArgCandidates("plugin")
 	if len(first) == 0 {
@@ -115,14 +141,14 @@ func TestRootArgCandidatesReturnsCopies(t *testing.T) {
 	}
 }
 
-func TestAvailableWhileRunningMarksResumeAndExitCommandsOnly(t *testing.T) {
+func TestAvailableWhileRunningMarksResumeAndQuitCommandsOnly(t *testing.T) {
 	for _, name := range []string{"resume", "quit", "exit"} {
 		spec, ok := Lookup(name)
 		if !ok || !spec.AvailableWhileRunning {
 			t.Fatalf("Lookup(%q).AvailableWhileRunning = %v ok=%v, want true", name, spec.AvailableWhileRunning, ok)
 		}
 	}
-	for _, name := range []string{"help", "status", "model", "new", "compact", "connect"} {
+	for _, name := range []string{"help", "status", "model", "new", "compact", "connect", "team"} {
 		spec, ok := Lookup(name)
 		if !ok {
 			t.Fatalf("Lookup(%q) missing", name)
@@ -133,16 +159,69 @@ func TestAvailableWhileRunningMarksResumeAndExitCommandsOnly(t *testing.T) {
 	}
 }
 
-func TestSubagentSpecDescribesParticipantConfigurationAndKeepsCommandName(t *testing.T) {
-	spec, ok := Lookup("subagent")
-	if !ok {
-		t.Fatal("Lookup(subagent) missing")
+func TestCommandAliasesResolveToCanonicalSpec(t *testing.T) {
+	cases := []struct {
+		alias     string
+		canonical string
+	}{
+		{alias: "subagent", canonical: "team"},
+		{alias: "exit", canonical: "quit"},
 	}
-	if spec.Name != "subagent" || spec.Usage != "/subagent <action>" {
-		t.Fatalf("subagent spec identity = %#v, want unchanged command name and usage", spec)
+	for _, tc := range cases {
+		aliasSpec, ok := Lookup(tc.alias)
+		if !ok {
+			t.Fatalf("Lookup(%q) missing for alias", tc.alias)
+		}
+		canonicalSpec, ok := Lookup(tc.canonical)
+		if !ok {
+			t.Fatalf("Lookup(%q) missing for canonical name", tc.canonical)
+		}
+		if aliasSpec.Name != tc.canonical || canonicalSpec.Name != tc.canonical {
+			t.Fatalf("alias %q resolved to %q, canonical %q resolved to %q", tc.alias, aliasSpec.Name, tc.canonical, canonicalSpec.Name)
+		}
+		if aliasSpec.Usage != canonicalSpec.Usage {
+			t.Fatalf("alias %q usage = %q, want canonical %q", tc.alias, aliasSpec.Usage, canonicalSpec.Usage)
+		}
+	}
+}
+
+func TestAliasesAreNotAdvertisedAsSeparateCommands(t *testing.T) {
+	for _, goos := range []string{"linux", "windows"} {
+		for _, name := range DefaultNamesForPlatform(goos) {
+			if name == "subagent" || name == "exit" {
+				t.Fatalf("DefaultNamesForPlatform(%s) advertises alias %q", goos, name)
+			}
+		}
+		for _, spec := range DefaultSpecsForPlatform(goos) {
+			for _, alias := range spec.Aliases {
+				if alias == spec.Name {
+					t.Fatalf("spec %q aliases itself", spec.Name)
+				}
+				resolved, ok := LookupForPlatform(alias, goos)
+				if !ok || resolved.Name != spec.Name {
+					t.Fatalf("alias %q of %q resolved to %#v ok=%v", alias, spec.Name, resolved, ok)
+				}
+			}
+		}
+	}
+}
+
+func TestTeamSpecIsArgumentFreeOverlayEntry(t *testing.T) {
+	spec, ok := Lookup("team")
+	if !ok {
+		t.Fatal("Lookup(team) missing")
+	}
+	if spec.Name != "team" || spec.Usage != "/team" {
+		t.Fatalf("team spec identity = %#v, want canonical /team usage", spec)
 	}
 	if spec.Description != "Configure participant profiles and system Agents" {
-		t.Fatalf("subagent description = %q", spec.Description)
+		t.Fatalf("team description = %q", spec.Description)
+	}
+	if spec.DynamicCompleter || len(spec.ArgCandidates) > 0 || len(spec.Details) > 0 {
+		t.Fatalf("team spec = %#v, want no argument completion surface", spec)
+	}
+	if got := spec.Aliases; len(got) != 1 || got[0] != "subagent" {
+		t.Fatalf("team aliases = %#v, want [subagent]", got)
 	}
 }
 

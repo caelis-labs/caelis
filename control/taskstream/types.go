@@ -104,22 +104,30 @@ type ReadRequest struct {
 }
 
 type SubscribeRequest struct {
-	SessionID string `json:"session_id"`
-	TaskID    string `json:"task_id"`
-	Cursor    string `json:"cursor,omitempty"`
+	// HistoryTurns limits initial history to complete recent Turns; zero loads all.
+	HistoryTurns int `json:"history_turns,omitempty"`
+	// HistoryBefore selects a finite older page, independently of the live cursor.
+	HistoryBefore string `json:"history_before,omitempty"`
+	SessionID     string `json:"session_id"`
+	TaskID        string `json:"task_id"`
+	Cursor        string `json:"cursor,omitempty"`
 	// Follow keeps a subagent Task timeline attached across activity periods
 	// until the observer closes it. It never changes Task lifecycle.
 	Follow bool `json:"follow,omitempty"`
+	// HistorySnapshot requests a paged atomic child history snapshot when opening
+	// without a cursor. Its end cursor joins the same exact live stream.
+	HistorySnapshot bool `json:"history_snapshot,omitempty"`
 }
 
 type Delivery struct {
-	Kind       DeliveryKind `json:"kind"`
-	Source     SourceClass  `json:"source"`
-	SnapshotID string       `json:"snapshot_id,omitempty"`
-	Page       uint32       `json:"page,omitempty"`
-	Records    []Record     `json:"records,omitempty"`
-	NextCursor string       `json:"next_cursor,omitempty"`
-	ActivityID string       `json:"activity_id,omitempty"`
+	Kind          DeliveryKind `json:"kind"`
+	Source        SourceClass  `json:"source"`
+	SnapshotID    string       `json:"snapshot_id,omitempty"`
+	Page          uint32       `json:"page,omitempty"`
+	Records       []Record     `json:"records,omitempty"`
+	NextCursor    string       `json:"next_cursor,omitempty"`
+	HistoryBefore string       `json:"history_before,omitempty"`
+	ActivityID    string       `json:"activity_id,omitempty"`
 }
 
 // Record is one cursor-stamped Task frame or descriptor. ACP-shaped Surface projection

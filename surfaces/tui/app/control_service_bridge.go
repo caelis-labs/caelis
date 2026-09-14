@@ -35,6 +35,8 @@ type ProgramSender struct {
 	viewGeneration    uint64
 	viewSessionID     string
 	viewCancel        context.CancelFunc
+	resumeSession     func(context.Context, string) (controlprompt.SessionSnapshot, error)
+	recoveryCancel    context.CancelFunc
 	sessionCommands   sync.Mutex
 	statusReads       sync.Mutex
 	runCancels        []activeRunCancel
@@ -291,6 +293,7 @@ func ConfigFromControlService(service ControlServices, sender *ProgramSender, ba
 		ctx = sender.bindContext(ctx)
 		base.Context = ctx
 		base.ProgramSender = sender
+		sender.resumeSession = service.ResumeSession
 	}
 	base.Commands = appendAgentSlashCommandsWithContext(ctx, service, base.Commands)
 	for name, detail := range profileCommandDetailsWithContext(ctx, service) {
@@ -315,6 +318,9 @@ func ConfigFromControlService(service ControlServices, sender *ProgramSender, ba
 			defer finish()
 			if sender != nil {
 				if _, ok := service.(interface{ SessionID() string }); ok {
+					if isSessionSelectionLine(sub.Text) {
+						sender.cancelSessionRecovery()
+					}
 					sender.sessionCommands.Lock()
 					defer sender.sessionCommands.Unlock()
 					_, generation := sender.sessionView()
@@ -634,6 +640,8 @@ func executeControlPromptResult(ctx context.Context, service ControlServices, se
 		_, generation := sender.replaceSessionView(ctx, "")
 		sender.SendMsg(sessionViewStartMsg{generation: generation})
 		send = sender.sessionSend(generation)
+		// An empty selection has no history feed to provide its commit boundary.
+		send(sessionHistoryReadyMsg{})
 	}
 	for _, event := range result.Events {
 		if send == nil {
@@ -686,7 +694,7 @@ func appendAgentSlashCommandsWithContext(ctx context.Context, service controlpro
 	if bindings, ok := service.(agentbinding.Service); ok {
 		bindingStatus, _ = bindings.AgentBindingStatus(ctx)
 	}
-	commands = agentbinding.ProjectBoundDirectNames(commands, bindingStatus)
+	commands = agentbinding.ProjectBoundDirectNames(commands, agentCommandBindings(bindingStatus))
 	status, err := service.AgentStatus(ctx)
 	if err == nil {
 		if strings.EqualFold(strings.TrimSpace(status.ControllerKind), string(session.ControllerKindACP)) {
@@ -727,11 +735,11 @@ func profileCommandDetailsWithContext(ctx context.Context, service controlprompt
 	details := map[string]string{}
 	if bindings, ok := service.(agentbinding.Service); ok {
 		if status, err := bindings.AgentBindingStatus(ctx); err == nil {
-			for _, handle := range status.Handles {
+			for _, handle := range agentCommandBindings(status).Handles {
 				if !agentbinding.IsDirectRunDefinition(handle.Definition) || !agentbinding.IsBound(handle) {
 					continue
 				}
-				details[string(handle.Definition.Handle)] = subagentProfileCommandDetail(handle)
+				details[string(handle.Definition.Handle)] = agentProfileCommandDetail(handle)
 			}
 		}
 	}

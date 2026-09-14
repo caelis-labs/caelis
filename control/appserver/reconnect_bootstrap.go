@@ -21,7 +21,7 @@ func (s *StateService) Reconnect(
 	ctx context.Context,
 	req ReconnectRequest,
 ) (ReconnectResult, error) {
-	return s.reconnect(ctx, req, true)
+	return s.reconnect(ctx, req, req.HistoryBefore == "")
 }
 
 func (s *StateService) reconnect(
@@ -64,7 +64,7 @@ func (s *StateService) reconnect(
 		return ReconnectResult{}, err
 	}
 
-	subscribeRequest := SubscribeRequest{SessionID: sessionID, Cursor: strings.TrimSpace(req.Cursor)}
+	subscribeRequest := SubscribeRequest{SessionID: sessionID, Cursor: strings.TrimSpace(req.Cursor), HistoryTurns: req.HistoryTurns, HistoryBefore: req.HistoryBefore}
 	var subscribed SubscribeResult
 	var checkpoint session.EventCheckpoint
 	if prepared, ok := feed.(checkpointSessionFeed); ok {

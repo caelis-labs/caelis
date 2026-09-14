@@ -1,27 +1,34 @@
 package updater
 
 import (
-	"archive/tar"
-	"compress/gzip"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"golang.org/x/mod/semver"
+
+	"github.com/caelis-labs/caelis/internal/version"
+)
+
+const (
+	// installerBaseURL serves the official installation scripts. Raw
+	// self-update runs the same install.sh / install.ps1 published for manual
+	// installs, so there is one installation implementation.
+	installerBaseURL = "https://caelis.dev"
+	// maxInstallerScriptBytes bounds a download of the installer script.
+	maxInstallerScriptBytes = 1 << 20
+	// maxLatestBytes bounds the latest-only release channel response.
+	maxLatestBytes = 1024
 )
 
 // latestRawVersion reads the same latest-only channel as install.sh and install.ps1.
 func (m *Manager) latestRawVersion(ctx context.Context) (string, error) {
-	const maxLatestBytes = 1024
 	body, err := m.downloadBytes(ctx, m.cfg.HTTPClient, m.cfg.ReleasesBaseURL+"/latest.txt", maxLatestBytes+1)
 	if err != nil {
 		return "", err
@@ -35,80 +42,153 @@ func (m *Manager) latestRawVersion(ctx context.Context) (string, error) {
 	return version, nil
 }
 
-func (m *Manager) installRaw(ctx context.Context, latest string, progress progressReporter) (bool, error) {
-	archiveName, err := rawArchiveName(latest, m.cfg.GOOS, m.cfg.GOARCH)
+// installRaw installs the latest raw release through the official installer and
+// returns the version actually installed on disk.
+//
+// The installer script is latest-only, so a release can land between the
+// preceding check and the install. Accepting any installed version at or above
+// the checked target keeps that race from failing an otherwise successful
+// update while still rejecting a stale or partial artifact.
+func (m *Manager) installRaw(ctx context.Context, latest string, stdout io.Writer, stderr io.Writer, progress progressReporter) (string, error) {
+	installDir, err := m.installTargetDir()
 	if err != nil {
-		return false, err
+		return "", err
 	}
-	binaryName := rawBinaryName(m.cfg.GOOS)
-	client := m.installHTTPClient()
-	tmpDir, err := os.MkdirTemp("", "caelis-update-*")
+	reportProgress(progress, ProgressEvent{Stage: ProgressInstalling})
+	if err := m.runOfficialInstaller(ctx, installDir, stdout, stderr); err != nil {
+		return "", err
+	}
+	installed, err := m.artifactVersion(ctx, filepath.Join(installDir, rawBinaryName(m.cfg.GOOS)))
 	if err != nil {
-		return false, err
+		return "", err
 	}
-	defer os.RemoveAll(tmpDir)
-	archivePath := filepath.Join(tmpDir, archiveName)
-	archiveURL := m.releaseAssetURL(latest, archiveName)
-	reportProgress(progress, ProgressEvent{Stage: ProgressDownloading, Detail: archiveName})
-	if err := m.downloadFile(ctx, client, archiveURL, archivePath, archiveName, progress); err != nil {
-		return false, err
+	if compareVersions(installed, latest) < 0 {
+		return "", fmt.Errorf("installed Caelis %s is older than the released %s", displayVersion(installed), displayVersion(latest))
 	}
-	checksums, err := m.downloadBytes(ctx, client, m.releaseAssetURL(latest, "checksums.txt"), 2<<20)
-	if err != nil {
-		return false, err
-	}
-	reportProgress(progress, ProgressEvent{Stage: ProgressVerifying})
-	if err := verifyChecksum(archiveName, archivePath, checksums); err != nil {
-		return false, err
-	}
-	reportProgress(progress, ProgressEvent{Stage: ProgressVerifying, Done: true})
-	extracted := filepath.Join(tmpDir, binaryName)
-	reportProgress(progress, ProgressEvent{Stage: ProgressExtracting, Detail: binaryName})
-	if err := extractBinary(archivePath, binaryName, extracted); err != nil {
-		return false, err
-	}
-	reportProgress(progress, ProgressEvent{Stage: ProgressExtracting, Detail: binaryName, Done: true})
-	reportProgress(progress, ProgressEvent{Stage: ProgressInstalling, Detail: binaryName})
-	deferred, err := m.replaceExecutable(extracted)
-	if err != nil {
-		return false, err
-	}
-	reportProgress(progress, ProgressEvent{
-		Stage:    ProgressInstalling,
-		Detail:   binaryName,
-		Done:     true,
-		Deferred: deferred,
-	})
-	return deferred, nil
+	reportProgress(progress, ProgressEvent{Stage: ProgressInstalling, Done: true})
+	return installed, nil
 }
 
-func (m *Manager) installHTTPClient() *http.Client {
-	if m.cfg.HTTPClient == nil {
-		return &http.Client{}
+// runOfficialInstaller downloads and runs the official installer, passing the
+// current install directory and release channel so the installer replaces this
+// executable instead of writing a second copy to its own default directory.
+func (m *Manager) runOfficialInstaller(ctx context.Context, installDir string, stdout io.Writer, stderr io.Writer) error {
+	scriptURL := installerBaseURL + "/" + installerScriptName(m.cfg.GOOS)
+	scriptPath, cleanup, err := m.downloadInstallerScript(ctx, scriptURL)
+	if err != nil {
+		return err
 	}
-	clone := *m.cfg.HTTPClient
-	clone.Timeout = 0
-	return &clone
+	defer cleanup()
+	name, args := installerCommand(m.cfg.GOOS, scriptPath)
+	if !strings.EqualFold(strings.TrimSpace(m.cfg.GOOS), "windows") {
+		// install.sh uses bash features (the shebang is bash and get_latest_version
+		// relies on [[ =~ ]]), so POSIX sh such as dash would fail. Resolve bash
+		// explicitly and name the missing dependency instead of exec'ing sh.
+		bash, err := m.cfg.LookPath(name)
+		if err != nil {
+			return fmt.Errorf("official installer requires bash on PATH: %w", err)
+		}
+		if strings.TrimSpace(bash) == "" {
+			return errors.New("official installer requires bash on PATH")
+		}
+		name = bash
+	}
+	// CommandRun appends these to the inherited environment.
+	env := []string{
+		"CAELIS_INSTALL_DIR=" + installDir,
+		"CAELIS_RELEASES_BASE_URL=" + m.cfg.ReleasesBaseURL,
+	}
+	if err := m.cfg.CommandRun(ctx, name, args, env, stdout, stderr); err != nil {
+		return fmt.Errorf("official installer %s failed: %w", scriptURL, err)
+	}
+	return nil
 }
 
-func (m *Manager) releaseAssetURL(version string, name string) string {
-	return m.cfg.ReleasesBaseURL + "/releases/" + displayVersion(version) + "/" + name
+func (m *Manager) downloadInstallerScript(ctx context.Context, scriptURL string) (string, func(), error) {
+	body, err := m.downloadBytes(ctx, m.cfg.HTTPClient, scriptURL, maxInstallerScriptBytes+1)
+	if err != nil {
+		return "", nil, fmt.Errorf("download installer %s: %w", scriptURL, err)
+	}
+	if len(body) == 0 || len(body) > maxInstallerScriptBytes {
+		return "", nil, fmt.Errorf("download installer %s: unexpected script size %d", scriptURL, len(body))
+	}
+	dir, err := os.MkdirTemp("", "caelis-installer-*")
+	if err != nil {
+		return "", nil, err
+	}
+	cleanup := func() { _ = os.RemoveAll(dir) }
+	path := filepath.Join(dir, installerScriptName(m.cfg.GOOS))
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		cleanup()
+		return "", nil, err
+	}
+	return path, cleanup, nil
 }
 
-func rawArchiveName(version string, goos string, goarch string) (string, error) {
-	osPart := strings.ToLower(strings.TrimSpace(goos))
-	archPart := strings.ToLower(strings.TrimSpace(goarch))
-	switch osPart {
-	case "linux", "darwin", "windows":
-	default:
-		return "", fmt.Errorf("unsupported update OS: %s", goos)
+// artifactVersion runs an installed Caelis binary and returns the release
+// version it reports. It requires a canonical semver release with a release
+// build identity, so a development or mismatched artifact cannot pass as an
+// update.
+func (m *Manager) artifactVersion(ctx context.Context, executable string) (string, error) {
+	out, err := m.cfg.CommandOutput(ctx, executable, []string{"version", "--format", "json"})
+	if err != nil {
+		return "", fmt.Errorf("verify installed Caelis %s: %w", executable, err)
 	}
-	switch archPart {
-	case "amd64", "arm64":
-	default:
-		return "", fmt.Errorf("unsupported update architecture: %s", goarch)
+	var info version.Info
+	if err := json.Unmarshal(out, &info); err != nil {
+		return "", fmt.Errorf("verify installed Caelis %s: %w", executable, err)
 	}
-	return fmt.Sprintf("caelis_%s_%s_%s.tar.gz", npmVersion(version), osPart, archPart), nil
+	installed := strings.TrimSpace(info.Version)
+	if !semver.IsValid(installed) || semver.Canonical(installed) != installed {
+		return "", fmt.Errorf("verify installed Caelis %s: invalid release version %q", executable, installed)
+	}
+	if info.BuildKind != version.BuildKindRelease {
+		return "", fmt.Errorf("verify installed Caelis %s: build kind %q is not a release", executable, info.BuildKind)
+	}
+	if strings.TrimSpace(info.BuildID) == "" {
+		return "", fmt.Errorf("verify installed Caelis %s: missing build identity", executable)
+	}
+	return installed, nil
+}
+
+// installTargetDir resolves the directory that holds the running executable so
+// the official installer replaces that binary. It refuses a target whose
+// resolved name is not the standard binary: the installer always writes
+// `caelis` (`caelis.exe`), so a renamed or unresolvable target would leave the
+// original command running the old version.
+func (m *Manager) installTargetDir() (string, error) {
+	executable := strings.TrimSpace(m.cfg.Executable)
+	if executable == "" {
+		exe, err := os.Executable()
+		if err != nil {
+			return "", fmt.Errorf("locate current Caelis executable: %w", err)
+		}
+		executable = exe
+	}
+	resolved, err := filepath.EvalSymlinks(filepath.Clean(executable))
+	if err != nil {
+		return "", fmt.Errorf("resolve Caelis executable %s: %w", executable, err)
+	}
+	if name := filepath.Base(resolved); name != rawBinaryName(m.cfg.GOOS) {
+		return "", fmt.Errorf("unexpected Caelis executable name %q: refusing to install a different binary", name)
+	}
+	return filepath.Dir(resolved), nil
+}
+
+func installerScriptName(goos string) string {
+	if strings.EqualFold(strings.TrimSpace(goos), "windows") {
+		return "install.ps1"
+	}
+	return "install.sh"
+}
+
+func installerCommand(goos string, scriptPath string) (string, []string) {
+	if strings.EqualFold(strings.TrimSpace(goos), "windows") {
+		return "powershell", []string{"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", scriptPath}
+	}
+	// install.sh is a bash script; the runner resolves bash on PATH so a system
+	// without it reports a clear dependency error instead of a shell failure.
+	return "bash", []string{scriptPath}
 }
 
 func rawBinaryName(goos string) string {
@@ -116,54 +196,6 @@ func rawBinaryName(goos string) string {
 		return "caelis.exe"
 	}
 	return "caelis"
-}
-
-func (m *Manager) downloadFile(ctx context.Context, client *http.Client, url string, dest string, label string, progress progressReporter) error {
-	if client == nil {
-		client = &http.Client{}
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("User-Agent", "caelis-updater")
-	resp, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("GET %s: %s", url, resp.Status)
-	}
-	file, err := os.OpenFile(dest, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
-	if err != nil {
-		return err
-	}
-	reader := io.Reader(resp.Body)
-	if progress != nil {
-		reader = &downloadProgressReader{
-			reader:   resp.Body,
-			total:    resp.ContentLength,
-			label:    label,
-			progress: progress,
-		}
-	}
-	downloaded, copyErr := io.Copy(file, reader)
-	closeErr := file.Close()
-	if copyErr != nil {
-		return copyErr
-	}
-	if closeErr != nil {
-		return closeErr
-	}
-	reportProgress(progress, ProgressEvent{
-		Stage:   ProgressDownloading,
-		Detail:  label,
-		Current: downloaded,
-		Total:   resp.ContentLength,
-		Done:    true,
-	})
-	return nil
 }
 
 func (m *Manager) downloadBytes(ctx context.Context, client *http.Client, url string, limit int64) ([]byte, error) {
@@ -184,221 +216,4 @@ func (m *Manager) downloadBytes(ctx context.Context, client *http.Client, url st
 		return nil, fmt.Errorf("GET %s: %s", url, resp.Status)
 	}
 	return io.ReadAll(io.LimitReader(resp.Body, limit))
-}
-
-type downloadProgressReader struct {
-	reader      io.Reader
-	total       int64
-	downloaded  int64
-	lastPercent int
-	label       string
-	progress    progressReporter
-}
-
-func (p *downloadProgressReader) Read(b []byte) (int, error) {
-	n, err := p.reader.Read(b)
-	if n > 0 {
-		p.downloaded += int64(n)
-		p.report()
-	}
-	return n, err
-}
-
-func (p *downloadProgressReader) report() {
-	if p.total > 0 {
-		percent := int(p.downloaded * 100 / p.total)
-		if percent < 100 && percent-p.lastPercent < 5 {
-			return
-		}
-		p.lastPercent = percent
-		reportProgress(p.progress, ProgressEvent{
-			Stage:   ProgressDownloading,
-			Detail:  p.label,
-			Current: p.downloaded,
-			Total:   p.total,
-		})
-		return
-	}
-	const step = 5 << 20
-	milestone := int(p.downloaded / step)
-	if milestone <= p.lastPercent {
-		return
-	}
-	p.lastPercent = milestone
-	reportProgress(p.progress, ProgressEvent{
-		Stage:   ProgressDownloading,
-		Detail:  p.label,
-		Current: p.downloaded,
-	})
-}
-
-func verifyChecksum(archiveName string, archivePath string, checksums []byte) error {
-	expected := ""
-	for _, line := range strings.Split(string(checksums), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) < 2 {
-			continue
-		}
-		if fields[1] == archiveName || filepath.Base(fields[1]) == archiveName {
-			expected = strings.ToLower(strings.TrimSpace(fields[0]))
-			break
-		}
-	}
-	if expected == "" {
-		return fmt.Errorf("checksum for %s not found", archiveName)
-	}
-	file, err := os.Open(archivePath)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	hash := sha256.New()
-	if _, err := io.Copy(hash, file); err != nil {
-		return err
-	}
-	actual := hex.EncodeToString(hash.Sum(nil))
-	if actual != expected {
-		return fmt.Errorf("checksum verification failed for %s", archiveName)
-	}
-	return nil
-}
-
-func extractBinary(archivePath string, binaryName string, dest string) error {
-	file, err := os.Open(archivePath)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	gz, err := gzip.NewReader(file)
-	if err != nil {
-		return err
-	}
-	defer gz.Close()
-	reader := tar.NewReader(gz)
-	for {
-		header, err := reader.Next()
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil {
-			return err
-		}
-		if header.Typeflag != tar.TypeReg || filepath.Base(header.Name) != binaryName {
-			continue
-		}
-		out, err := os.OpenFile(dest, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o755)
-		if err != nil {
-			return err
-		}
-		_, copyErr := io.Copy(out, reader)
-		closeErr := out.Close()
-		if copyErr != nil {
-			return copyErr
-		}
-		if closeErr != nil {
-			return closeErr
-		}
-		return os.Chmod(dest, 0o755)
-	}
-	return fmt.Errorf("%s not found in release archive", binaryName)
-}
-
-func (m *Manager) replaceExecutable(newBinary string) (bool, error) {
-	dest := strings.TrimSpace(m.cfg.Executable)
-	if dest == "" {
-		exe, err := os.Executable()
-		if err != nil {
-			return false, err
-		}
-		dest = exe
-	}
-	dest = filepath.Clean(dest)
-	if strings.EqualFold(m.cfg.GOOS, "windows") {
-		return m.scheduleWindowsReplacement(newBinary, dest)
-	}
-	tmp, err := copyToDestinationTemp(newBinary, dest)
-	if err != nil {
-		return false, err
-	}
-	if err := os.Rename(tmp, dest); err != nil {
-		_ = os.Remove(tmp)
-		return false, err
-	}
-	return false, nil
-}
-
-func copyToDestinationTemp(src string, dest string) (string, error) {
-	dir := filepath.Dir(dest)
-	tmp, err := os.CreateTemp(dir, ".caelis-update-*.tmp")
-	if err != nil {
-		return "", err
-	}
-	tmpPath := tmp.Name()
-	committed := false
-	defer func() {
-		if !committed {
-			_ = os.Remove(tmpPath)
-		}
-	}()
-	in, err := os.Open(src)
-	if err != nil {
-		_ = tmp.Close()
-		return "", err
-	}
-	_, copyErr := io.Copy(tmp, in)
-	closeInErr := in.Close()
-	syncErr := tmp.Sync()
-	closeTmpErr := tmp.Close()
-	switch {
-	case copyErr != nil:
-		return "", copyErr
-	case closeInErr != nil:
-		return "", closeInErr
-	case syncErr != nil:
-		return "", syncErr
-	case closeTmpErr != nil:
-		return "", closeTmpErr
-	}
-	if err := os.Chmod(tmpPath, 0o755); err != nil {
-		return "", err
-	}
-	committed = true
-	return tmpPath, nil
-}
-
-func (m *Manager) scheduleWindowsReplacement(newBinary string, dest string) (bool, error) {
-	dir := filepath.Dir(dest)
-	tmpExe, err := copyToDestinationTemp(newBinary, dest)
-	if err != nil {
-		return false, err
-	}
-	finalTmpExe := strings.TrimSuffix(tmpExe, ".tmp") + ".exe"
-	if err := os.Rename(tmpExe, finalTmpExe); err != nil {
-		_ = os.Remove(tmpExe)
-		return false, err
-	}
-	script := filepath.Join(dir, ".caelis-update-"+strconv.Itoa(os.Getpid())+".cmd")
-	body := strings.Join([]string{
-		"@echo off",
-		"ping 127.0.0.1 -n 2 > nul",
-		"move /Y " + windowsQuote(finalTmpExe) + " " + windowsQuote(dest) + " > nul",
-		"start \"\" /B " + windowsQuote(dest) + " service start --store-dir " + windowsQuote(m.cfg.StoreDir) + " --format json > nul 2> nul",
-		"del \"%~f0\" > nul 2> nul",
-		"",
-	}, "\r\n")
-	if err := os.WriteFile(script, []byte(body), 0o600); err != nil {
-		_ = os.Remove(finalTmpExe)
-		return false, err
-	}
-	cmd := exec.Command("cmd.exe", "/C", "start", "", "/B", script)
-	if err := cmd.Start(); err != nil {
-		_ = os.Remove(script)
-		_ = os.Remove(finalTmpExe)
-		return false, err
-	}
-	return true, nil
-}
-
-func windowsQuote(value string) string {
-	return `"` + strings.ReplaceAll(value, `"`, `""`) + `"`
 }

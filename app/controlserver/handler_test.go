@@ -214,14 +214,14 @@ func TestReconnectSSEBootstrapsStateBeforeBackfillAndLiveEvents(t *testing.T) {
 		},
 	}
 	server := newTestServer(t, service, time.Hour)
-	request := httptest.NewRequest(http.MethodGet, apiPrefix+"/sessions/session-1/reconnect?after=cursor-client", nil)
+	request := httptest.NewRequest(http.MethodGet, apiPrefix+"/sessions/session-1/reconnect?after=cursor-client&history_turns=16", nil)
 	authorizeTestRequest(request)
 	recorder := httptest.NewRecorder()
 	server.ServeHTTP(recorder, request)
 	response := recorder.Result()
 	defer response.Body.Close()
 
-	if service.reconnectReq.SessionID != "session-1" || service.reconnectReq.Cursor != "cursor-client" {
+	if service.reconnectReq.SessionID != "session-1" || service.reconnectReq.Cursor != "cursor-client" || service.reconnectReq.HistoryTurns != 16 {
 		t.Fatalf("Reconnect request = %#v", service.reconnectReq)
 	}
 	body, err := io.ReadAll(response.Body)

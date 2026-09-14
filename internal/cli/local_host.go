@@ -185,49 +185,6 @@ func classifyMissingManagedHost(storeDir string) managedHostInspection {
 	return managedHostInspection{Probe: servicelifecycle.ProbeResult{State: servicelifecycle.ProbeMissing}}
 }
 
-func attachManagedHostClient(ctx context.Context, options productClientOptions) (*httpclient.Client, controlserver.DiscoveryRecord, error) {
-	inspection := inspectManagedHost(ctx, options)
-	switch inspection.Probe.State {
-	case servicelifecycle.ProbeMissing:
-		return nil, controlserver.DiscoveryRecord{}, os.ErrNotExist
-	case servicelifecycle.ProbeUnreachable:
-		return nil, controlserver.DiscoveryRecord{}, inspection.Probe.Err
-	}
-	for _, capability := range appserver.RequiredManagedHostCapabilities() {
-		if !slices.Contains(inspection.Record.Capabilities, capability) {
-			return nil, controlserver.DiscoveryRecord{}, &managedCompatibilityError{
-				cause: fmt.Errorf("discovery is missing capability %q", capability),
-			}
-		}
-	}
-	policy := appserver.CurrentCompatibility(appserver.RequiredManagedHostCapabilities()...)
-	if err := policy.Accept(inspection.Info); err != nil {
-		return nil, controlserver.DiscoveryRecord{}, &managedCompatibilityError{cause: err}
-	}
-	token := inspection.Token
-	if options.ACPIngress {
-		var err error
-		token, err = controlserver.LoadBearerToken(controlserver.DefaultACPIngressTokenFile(options.StoreDir))
-		if err != nil {
-			return nil, controlserver.DiscoveryRecord{}, fmt.Errorf("cli: load ACP ingress credential: %w", err)
-		}
-	}
-	remote, err := newManagedHTTPClient(inspection.Record, token, options, policy)
-	if err != nil {
-		return nil, controlserver.DiscoveryRecord{}, err
-	}
-	attemptCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
-	info, err := remote.Initialize(attemptCtx)
-	if err != nil {
-		return nil, controlserver.DiscoveryRecord{}, err
-	}
-	if err := validateManagedServerInfo(inspection.Record, info); err != nil {
-		return nil, controlserver.DiscoveryRecord{}, err
-	}
-	return remote, inspection.Record, nil
-}
-
 func newManagedHTTPClient(
 	record controlserver.DiscoveryRecord,
 	token string,

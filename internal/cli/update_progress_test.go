@@ -14,25 +14,16 @@ func TestUpdateProgressRendererPlainOutputUsesStableStageLines(t *testing.T) {
 	for _, event := range []updater.ProgressEvent{
 		{Stage: updater.ProgressChecking},
 		{Stage: updater.ProgressChecking, Done: true},
-		{Stage: updater.ProgressDownloading},
-		{Stage: updater.ProgressDownloading, Current: 5 << 20, Total: 10 << 20},
-		{Stage: updater.ProgressDownloading, Current: 10 << 20, Total: 10 << 20, Done: true},
-		{Stage: updater.ProgressVerifying},
-		{Stage: updater.ProgressVerifying, Done: true},
-		{Stage: updater.ProgressInstalling, Detail: "caelis.exe"},
-		{Stage: updater.ProgressInstalling, Detail: "caelis.exe", Done: true, Deferred: true},
+		{Stage: updater.ProgressInstalling, Detail: "caelis"},
+		{Stage: updater.ProgressInstalling, Detail: "caelis", Done: true},
 	} {
 		renderer.Report(event)
 	}
 	want := strings.Join([]string{
 		"Checking for updates…",
 		"✓ Checked for updates",
-		"Downloading update…",
-		"✓ Downloaded 10.0 MB",
-		"Verifying checksum…",
-		"✓ Checksum verified",
 		"Installing update…",
-		"✓ Prepared update for installation",
+		"✓ Installed caelis",
 		"",
 	}, "\n")
 	if output.String() != want {
@@ -40,35 +31,37 @@ func TestUpdateProgressRendererPlainOutputUsesStableStageLines(t *testing.T) {
 	}
 }
 
-func TestUpdateProgressRendererInteractiveRewritesDownloadLine(t *testing.T) {
+func TestUpdateProgressRendererInteractiveRewritesStageInPlace(t *testing.T) {
 	var output bytes.Buffer
 	renderer := &updateProgressRenderer{writer: &output, interactive: true}
-	renderer.Report(updater.ProgressEvent{Stage: updater.ProgressDownloading})
+	renderer.Report(updater.ProgressEvent{Stage: updater.ProgressChecking})
+	renderer.Report(updater.ProgressEvent{Stage: updater.ProgressChecking, Done: true})
+
+	want := "\rChecking for updates…\r✓ Checked for updates\n"
+	if output.String() != want {
+		t.Fatalf("interactive progress = %q, want %q", output.String(), want)
+	}
+}
+
+func TestUpdateProgressRendererFinishesLineBeforeForegroundInstallerOutput(t *testing.T) {
+	var output bytes.Buffer
+	renderer := &updateProgressRenderer{writer: &output, interactive: true}
+
 	renderer.Report(updater.ProgressEvent{
-		Stage:   updater.ProgressDownloading,
-		Current: 5 << 20,
-		Total:   10 << 20,
+		Stage:  updater.ProgressInstalling,
+		Detail: "caelis",
 	})
 	renderer.Report(updater.ProgressEvent{
-		Stage:   updater.ProgressDownloading,
-		Current: 10 << 20,
-		Total:   10 << 20,
-		Done:    true,
+		Stage:  updater.ProgressInstalling,
+		Detail: "caelis",
+		Done:   true,
 	})
 
-	got := output.String()
-	if strings.Count(got, "\n") != 1 {
-		t.Fatalf("interactive progress newlines = %d, want 1: %q", strings.Count(got, "\n"), got)
-	}
-	for _, want := range []string{
-		"\rDownloading update…",
-		"████████████░░░░░░░░░░░░",
-		"5.0 MB / 10.0 MB  50%",
-		"\r✓ Downloaded 10.0 MB",
-	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("interactive progress = %q, want fragment %q", got, want)
-		}
+	// The official installer writes its own output, so the status line must end
+	// before it starts.
+	want := "\rInstalling update…\n\r✓ Installed caelis\n"
+	if output.String() != want {
+		t.Fatalf("interactive raw progress = %q, want %q", output.String(), want)
 	}
 }
 
@@ -122,28 +115,18 @@ func TestFormatUpdateResultUsesFriendlyCompletionMessages(t *testing.T) {
 		InstallMethod:  updater.MethodRaw,
 		Updated:        true,
 	})
-	if updated != "Caelis v1.2.0 is ready (updated from v1.0.0 via raw)." {
-		t.Fatalf("updated result = %q", updated)
+	wantUpdated := "Caelis v1.2.0 is installed (updated from v1.0.0 via raw); it takes effect on the next start."
+	if updated != wantUpdated {
+		t.Fatalf("updated result = %q, want %q", updated, wantUpdated)
 	}
-	deferred := formatUpdateResult(updater.Result{
+	available := formatUpdateResult(updater.Result{
 		CurrentVersion: "v1.0.0",
 		LatestVersion:  "v1.2.0",
 		InstallMethod:  updater.MethodRaw,
-		Deferred:       true,
+		Available:      true,
 	})
-	wantDeferred := "Caelis v1.2.0 is prepared (current v1.0.0 via raw). Installation will finish after this process exits."
-	if deferred != wantDeferred {
-		t.Fatalf("deferred result = %q, want %q", deferred, wantDeferred)
-	}
-	degraded := formatUpdateResult(updater.Result{
-		CurrentVersion: "v1.0.0",
-		LatestVersion:  "v1.2.0",
-		InstallMethod:  updater.MethodNPM,
-		Deferred:       true,
-		Reason:         "The npm launcher handoff is unavailable; wait for the background update to finish before starting Caelis again",
-	})
-	wantDegraded := "Caelis v1.2.0 is prepared (current v1.0.0 via npm). Installation will finish after this process exits. The npm launcher handoff is unavailable; wait for the background update to finish before starting Caelis again."
-	if degraded != wantDegraded {
-		t.Fatalf("degraded result = %q, want %q", degraded, wantDegraded)
+	wantAvailable := "update available: v1.0.0 -> v1.2.0 (raw)"
+	if available != wantAvailable {
+		t.Fatalf("available result = %q, want %q", available, wantAvailable)
 	}
 }

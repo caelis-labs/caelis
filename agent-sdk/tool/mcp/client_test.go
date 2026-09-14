@@ -350,7 +350,9 @@ func TestMCPManagerSSE(t *testing.T) {
 		t.Fatalf("NewManager() error = %v", err)
 	}
 	defer mgr.Close()
-	requireNegotiatedProtocolVersion(t, mgr, "myplugin", "sseserver", mcpProtocolVersion20260728)
+	// HTTP+SSE has no 2026-07-28 binding; the SDK negotiates its latest
+	// supported legacy version for this transport.
+	requireNegotiatedProtocolVersion(t, mgr, "myplugin", "sseserver", mcpLegacyProtocolVersion)
 
 	tools := mgr.Tools()
 	if len(tools) != 1 {

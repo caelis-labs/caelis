@@ -53,6 +53,7 @@ func TestFirstPromptSubmissionDoesNotResurrectWelcome(t *testing.T) {
 		state:      appserver.SessionState{SessionID: "s-first", Run: appserver.RunState{Active: true}},
 		automatic:  true,
 	})
+	model.Update(sessionHistoryReadyMsg{})
 	record("session attach", false)
 
 	model.Update(UserMessageMsg{Text: "inspect the repository"})
@@ -61,11 +62,6 @@ func TestFirstPromptSubmissionDoesNotResurrectWelcome(t *testing.T) {
 	if got := len(model.doc.FindByKind(BlockWelcome)); got != 0 {
 		t.Fatalf("welcome blocks after first prompt lifecycle = %d, want 0", got)
 	}
-
-	// A terminal with no Session is the launch view again; its reset re-seeds
-	// the card so an unattached reset (/new) still shows it.
-	model.Update(sessionViewStartMsg{generation: 2, state: appserver.SessionState{}})
-	record("launch reset", true)
 
 	terminal := vt.NewSafeEmulator(width, height)
 	t.Cleanup(func() { _ = terminal.Close() })
@@ -100,6 +96,7 @@ func TestSessionAttachClearsDeferredWelcome(t *testing.T) {
 	}
 
 	model.Update(sessionViewStartMsg{generation: 1, state: appserver.SessionState{SessionID: "s-first"}})
+	model.Update(sessionHistoryReadyMsg{})
 	if model.welcomeCardPending {
 		t.Fatal("Session attach left a deferred Welcome card")
 	}

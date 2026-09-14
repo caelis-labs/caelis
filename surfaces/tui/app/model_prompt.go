@@ -32,6 +32,9 @@ func (m *Model) finishPrompt(line string, err error) tea.Cmd {
 	if m.activePrompt == nil {
 		return nil
 	}
+	if m.activePrompt.approvalRequestID != "" && (m.sessionObservationRecovering || m.sessionHistoryFailed || m.sessionApprovalRefreshPending == m.activePrompt.approvalRequestID) {
+		return m.showHint("Session approval unavailable until observation reconnects.", hintOptions{priority: HintPriorityHigh})
+	}
 	themeChanged, cmd := m.finishThemeSelection(line, err)
 	resp := m.activePrompt.response
 	if resp != nil && resp == m.slashArgLoadAuthPrompt {

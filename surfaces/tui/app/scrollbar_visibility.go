@@ -153,8 +153,12 @@ func (m *Model) dragViewportScrollbarTo(y int) bool {
 	if next == m.viewport.YOffset() {
 		return false
 	}
+	up := next < m.viewport.YOffset()
 	m.viewport.SetYOffset(next)
 	m.refreshViewportFollowStateFromOffset()
+	if up {
+		m.demandEarlierHistory("")
+	}
 	return true
 }
 

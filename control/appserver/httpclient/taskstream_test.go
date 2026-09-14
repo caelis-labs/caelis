@@ -2,10 +2,8 @@ package httpclient
 
 import (
 	"bufio"
-	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"testing"
 	"time"
@@ -68,26 +66,11 @@ func TestRemoteTaskSubscriptionBareEOFIsUnavailable(t *testing.T) {
 	_ = subscription.Close()
 }
 
-func TestClassifyTaskStreamReadError(t *testing.T) {
-	if !errorcode.Is(classifyTaskStreamReadError(io.EOF), errorcode.Unavailable) {
-		t.Fatal("EOF should be Unavailable")
-	}
-	if !errorcode.Is(classifyTaskStreamReadError(io.ErrUnexpectedEOF), errorcode.Unavailable) {
-		t.Fatal("UnexpectedEOF should be Unavailable")
-	}
-	if !errorcode.Is(classifyTaskStreamReadError(bufio.ErrTooLong), errorcode.InvalidArgument) {
-		t.Fatal("ErrTooLong should be InvalidArgument")
-	}
-	if !errorcode.Is(classifyTaskStreamReadError(&net.OpError{Op: "read", Err: errors.New("connection reset by peer")}), errorcode.Unavailable) {
-		t.Fatal("connection reset should be Unavailable")
-	}
-}
-
 func taskDeliveryJSON(t *testing.T, delivery taskstream.Delivery) []byte {
 	t.Helper()
 	wire := wirev1.TaskStreamDelivery{
 		Kind: string(delivery.Kind), Source: string(delivery.Source), SnapshotID: delivery.SnapshotID,
-		Page: delivery.Page, NextCursor: delivery.NextCursor, ActivityID: delivery.ActivityID,
+		Page: delivery.Page, NextCursor: delivery.NextCursor, HistoryBefore: delivery.HistoryBefore, ActivityID: delivery.ActivityID,
 	}
 	for _, envelope := range delivery.Events {
 		raw, err := wirev1.MarshalEnvelope(envelope)
@@ -101,4 +84,24 @@ func taskDeliveryJSON(t *testing.T, delivery taskstream.Delivery) []byte {
 		t.Fatal(err)
 	}
 	return raw
+}
+
+func TestRemoteTaskSubscribeRequestsAtomicHistory(t *testing.T) {
+	client, closeServer := newFixtureClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("history_snapshot") != "true" || r.URL.Query().Get("follow") != "true" || r.URL.Query().Get("history_turns") != "16" || r.URL.Query().Get("history_before") != "older" {
+			t.Error("missing history/follow request")
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "event: "+wirev1.TaskStreamDoneEventName+"\ndata: {}\n\n")
+	})
+	defer closeServer()
+	tasks, err := NewTaskClient(client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := tasks.Subscribe(t.Context(), taskstream.SubscribeRequest{SessionID: "session", TaskID: "task", Follow: true, HistorySnapshot: true, HistoryTurns: 16, HistoryBefore: "older"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = result.Subscription.Close()
 }

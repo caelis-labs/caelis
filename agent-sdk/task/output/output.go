@@ -70,3 +70,16 @@ func Nop() Observer { return nopObserver{} }
 type HistoryObserver interface {
 	ReplaceTaskHistory(context.Context, []*session.Event) error
 }
+
+// HistorySource emits a complete ordered observation replay. The consumer must
+// finish using each event before returning from yield. Source ownership remains
+// with the caller until ReplaceTaskHistoryStream returns, including cancellation.
+type HistorySource func(context.Context, func(*session.Event) error) error
+
+// StreamingHistoryObserver accepts history without retaining the whole replay
+// in memory. Returning success means the complete observation replacement was
+// accepted; failure must not expose a partial replacement. This does not change
+// canonical Session state, model context, or Task lifecycle.
+type StreamingHistoryObserver interface {
+	ReplaceTaskHistoryStream(context.Context, HistorySource) error
+}

@@ -42,6 +42,9 @@ func dispatchTUIPrivateSlashCommandWithContext(ctx context.Context, service Cont
 		ctx = sender.bindContext(ctx)
 	}
 	send := sender.sendFunc()
+	if spec, ok := controlprompt.Lookup(cmd); ok {
+		cmd = spec.Name
+	}
 
 	switch cmd {
 	case "plugin":
@@ -50,9 +53,7 @@ func dispatchTUIPrivateSlashCommandWithContext(ctx context.Context, service Cont
 		return executeLineResult{completion: slashConnectWithContext(ctx, service, service, send, args)}
 	case "disconnect":
 		return executeLineResult{completion: slashDisconnectWithContext(ctx, service, send, args)}
-	case "subagent":
-		return executeLineResult{completion: slashSubagentWithContext(ctx, service, send, args)}
-	case "exit", "quit":
+	case "quit":
 		return executeLineResult{completion: TaskResultMsg{ExitNow: true}}
 	default:
 		sendNotice(send, fmt.Sprintf("unknown TUI command: /%s", cmd), SlashNoticeHint)

@@ -121,7 +121,7 @@ func TestTaskHTTPSubscribeParsesFollowQuery(t *testing.T) {
 	server := newTaskTestServer(t, tasks)
 	request := httptest.NewRequest(
 		http.MethodGet,
-		apiPrefix+"/sessions/session-1/tasks/task-1/subscribe?follow=true",
+		apiPrefix+"/sessions/session-1/tasks/task-1/subscribe?follow=true&history_snapshot=true&history_turns=16&history_before=older",
 		nil,
 	)
 	authorizeTestRequest(request)
@@ -130,7 +130,7 @@ func TestTaskHTTPSubscribeParsesFollowQuery(t *testing.T) {
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d", recorder.Code)
 	}
-	if !tasks.request.Follow || tasks.request.SessionID != "session-1" || tasks.request.TaskID != "task-1" {
+	if tasks.request.HistoryBefore != "older" || tasks.request.HistoryTurns != 16 || !tasks.request.HistorySnapshot || !tasks.request.Follow || tasks.request.SessionID != "session-1" || tasks.request.TaskID != "task-1" {
 		t.Fatalf("Subscribe request = %#v, want Follow=true for exact Task target", tasks.request)
 	}
 }

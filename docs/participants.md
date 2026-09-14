@@ -17,7 +17,7 @@ choose the main Session controller. External executables must already be on the
 Host's `PATH`. The ACP catalog includes a **Custom** command for other stdio
 agents; see [connection and endpoint setup](external-acp-agents.md#connect).
 
-Open `/subagent` to configure the profiles available for collaboration:
+Open `/team` to configure the profiles available for collaboration:
 
 - `self` uses the current Session controller's model and reasoning effort.
 - `breeze`, `orbit`, and `zenith` are named profiles that you bind to a provider
@@ -26,16 +26,21 @@ Open `/subagent` to configure the profiles available for collaboration:
 - Custom roles give another profile a stable handle and capability description.
 - Binding sets save named snapshots of explicit profile bindings.
 
-The same configuration view includes Guardian, Reviewer, and Memory Steward.
-These have fixed responsibilities rather than general-purpose participant
-profiles; configuring a binding does not start a conversation. Memory Steward
-has no default-model fallback: unbound Memory uses its durable journal and
-lexical recall without model calls.
+The same overlay includes Guardian, Reviewer, and Memory Steward. These have
+fixed responsibilities rather than general-purpose participant profiles;
+configuring a binding does not start a conversation. Memory Steward has no
+default-model fallback: unbound Memory uses its durable journal and lexical
+recall without model calls.
 
-`/subagent` and `/subagent bind` are the current configuration commands. The
-product term **participant** describes the collaboration role; `subagent` still
-names native execution contracts, SDK packages, and existing wire or storage
-fields. Those technical names do not imply a separate messaging network.
+`/team` takes no arguments and opens the configuration overlay. The TUI accepts
+`/subagent` as an alias; completion shows one `/team (subagent)` entry. Likewise,
+`/quit` accepts `/exit` and appears as `/quit (exit)`. Built-in commands take
+precedence over same-name Skills and custom roles. A conflicting role stays in
+configuration with a name-conflict warning; rename it to use its slash command.
+
+The product term **participant** describes the collaboration role; `subagent`
+still names native execution contracts, SDK packages, and existing wire or
+storage fields. Those technical names do not imply a separate messaging network.
 
 ## Coordinate work
 

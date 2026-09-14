@@ -32,6 +32,9 @@ func (m *Model) handleTranscriptEventsMsg(msg TranscriptEventsMsg) (tea.Model, t
 	if next, ok := model.(*Model); ok {
 		m = next
 	}
+	if m.historyBuilding {
+		return m, nil
+	}
 	if msg.ReconnectReplay {
 		m.seedReconnectReplayExploration()
 	}

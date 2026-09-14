@@ -338,8 +338,8 @@ The executable must already be visible on the Host process PATH. Caelis persists
 the logical command and arguments but does not install, update, version-pin, or
 repair third-party adapters. Use Custom for any other ACP stdio command.
 
-Executable discovery does not make an Agent available as a collaborator. Bind its
-profile to a participant role explicitly through `/subagent bind`.
+Executable discovery does not make an Agent available as a collaborator. Open
+`/team` to choose its participant profile and binding in the Team overlay.
 
 ## Compatibility
 

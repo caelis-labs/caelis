@@ -44,7 +44,6 @@ type Config struct {
 	CurrentVersion string
 	Executable     string
 	GOOS           string
-	GOARCH         string
 
 	// ReleasesBaseURL overrides EnvReleasesBaseURL and the default raw release channel.
 	ReleasesBaseURL string
@@ -55,8 +54,9 @@ type Config struct {
 	Env           func(string) string
 	LookPath      func(string) (string, error)
 	CommandOutput func(context.Context, string, []string) ([]byte, error)
-	CommandRun    func(context.Context, string, []string, io.Writer, io.Writer) error
-	CommandStart  func(string, []string) error
+	// CommandRun runs a command with extra environment entries appended to the
+	// inherited environment. exec uses the last value for a duplicated key.
+	CommandRun func(context.Context, string, []string, []string, io.Writer, io.Writer) error
 	// PID, ParentPID, and ProcessExists customize update-lock ownership.
 	// Production uses the current process and OS liveness checks.
 	PID           func() int
@@ -64,7 +64,8 @@ type Config struct {
 	ProcessExists func(int) bool
 }
 
-// Manager checks for and applies Caelis updates for the local product host.
+// Manager checks for and installs Caelis distribution artifacts. Application
+// startup, not installation, owns Host version selection and activation.
 type Manager struct {
 	cfg Config
 }
@@ -81,6 +82,8 @@ type UpdateOptions struct {
 	Progress  func(ProgressEvent)
 }
 
+// Result describes artifact installation, not the version of a running Host.
+// Updated is set only after the installed executable has been verified.
 type Result struct {
 	CurrentVersion string `json:"current_version,omitempty"`
 	LatestVersion  string `json:"latest_version,omitempty"`
@@ -114,9 +117,6 @@ func normalizeConfig(cfg Config) Config {
 	if cfg.GOOS == "" {
 		cfg.GOOS = runtime.GOOS
 	}
-	if cfg.GOARCH == "" {
-		cfg.GOARCH = runtime.GOARCH
-	}
 	if cfg.NPMRegistry == "" {
 		cfg.NPMRegistry = defaultNPMRegistry
 	}
@@ -146,9 +146,6 @@ func normalizeConfig(cfg Config) Config {
 	if cfg.CommandRun == nil {
 		cfg.CommandRun = defaultCommandRun
 	}
-	if cfg.CommandStart == nil {
-		cfg.CommandStart = defaultCommandStart
-	}
 	if cfg.PID == nil {
 		cfg.PID = os.Getpid
 	}
@@ -166,16 +163,14 @@ func defaultCommandOutput(ctx context.Context, name string, args []string) ([]by
 	return cmd.Output()
 }
 
-func defaultCommandRun(ctx context.Context, name string, args []string, stdout io.Writer, stderr io.Writer) error {
+func defaultCommandRun(ctx context.Context, name string, args []string, env []string, stdout io.Writer, stderr io.Writer) error {
 	cmd := exec.CommandContext(ctx, name, args...)
+	if len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
+	}
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	return cmd.Run()
-}
-
-func defaultCommandStart(name string, args []string) error {
-	cmd := exec.Command(name, args...)
-	return cmd.Start()
 }
 
 func (m *Manager) Check(ctx context.Context, opts CheckOptions) (Result, error) {
@@ -255,12 +250,12 @@ func (m *Manager) Update(ctx context.Context, opts UpdateOptions) (Result, error
 	}
 	switch result.InstallMethod {
 	case MethodRaw:
-		deferred, err := m.installRaw(ctx, result.LatestVersion, opts.Progress)
+		installed, err := m.installRaw(ctx, result.LatestVersion, opts.Stdout, opts.Stderr, opts.Progress)
 		if err != nil {
 			return result, err
 		}
-		result.Deferred = deferred
-		result.Updated = !deferred
+		result.LatestVersion = displayVersion(installed)
+		result.Updated = true
 	case MethodNPM:
 		cmd, err := m.npmInstallCommand(result.LatestVersion)
 		if err != nil {
@@ -281,7 +276,6 @@ func (m *Manager) Update(ctx context.Context, opts UpdateOptions) (Result, error
 		}
 		result.Deferred = installResult.Deferred
 		result.Handoff = installResult.Handoff
-		result.Reason = installResult.Reason
 		result.Updated = !installResult.Deferred
 		lockTransferred = installResult.Handoff
 	default:
