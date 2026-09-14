@@ -24,9 +24,9 @@ func (m *guardianRetryBudgetModel) Generate(ctx context.Context, req *model.Requ
 			return
 		}
 		m.remaining = append(m.remaining, time.Until(deadline))
-		delay := 170 * time.Second
+		delay := 10 * time.Second
 		if len(m.remaining) > 1 {
-			delay = 20 * time.Second
+			delay = 2 * time.Second
 		}
 		select {
 		case <-time.After(delay):
@@ -42,8 +42,8 @@ func (m *guardianRetryBudgetModel) Generate(ctx context.Context, req *model.Requ
 	}
 }
 
-func TestGuardianFormatRetryGetsFreshTimeoutAndPreservesCallerDeadline(t *testing.T) {
-	for _, callerLimit := range []time.Duration{0, 175 * time.Second} {
+func TestGuardianFormatRetrySharesDeadlineAndPreservesCallerDeadline(t *testing.T) {
+	for _, callerLimit := range []time.Duration{0, 11 * time.Second} {
 		t.Run(callerLimit.String(), func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				ctx := t.Context()
@@ -59,10 +59,10 @@ func TestGuardianFormatRetryGetsFreshTimeoutAndPreservesCallerDeadline(t *testin
 				if len(llm.remaining) != 2 {
 					t.Fatalf("attempts=%d error=%v", len(llm.remaining), err)
 				}
-				wantFirst, wantSecond := 3*time.Minute, 3*time.Minute
+				wantFirst, wantSecond := guardianReviewTimeout, guardianReviewTimeout-10*time.Second
 				if callerLimit > 0 {
 					wantFirst = callerLimit
-					wantSecond = 5 * time.Second
+					wantSecond = time.Second
 				}
 				if llm.remaining[0] != wantFirst || llm.remaining[1] != wantSecond {
 					t.Fatalf("attempt budgets=%v want %v/%v", llm.remaining, wantFirst, wantSecond)

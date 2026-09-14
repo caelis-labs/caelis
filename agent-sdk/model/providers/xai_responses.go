@@ -228,6 +228,9 @@ func xAIResponsesRequestFromModel(req *model.Request, modelName string, maxOutpu
 	if len(tools) > 0 {
 		toolChoice = "auto"
 	}
+	if req.DisableTools {
+		toolChoice = "none"
+	}
 	effort := strings.TrimSpace(req.Reasoning.Effort)
 	var include []string
 	var reasoning *openAICodexReasoning

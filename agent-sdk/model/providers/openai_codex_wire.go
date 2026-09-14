@@ -118,6 +118,9 @@ func openAICodexRequestFromModel(req *model.Request, modelName string) (openAICo
 	if len(tools) > 0 {
 		toolChoice = "auto"
 	}
+	if req.DisableTools {
+		toolChoice = "none"
+	}
 	reasoning := &openAICodexReasoning{Effort: strings.TrimSpace(req.Reasoning.Effort), Summary: "auto"}
 	return openAICodexRequest{
 		Model:        strings.TrimSpace(modelName),

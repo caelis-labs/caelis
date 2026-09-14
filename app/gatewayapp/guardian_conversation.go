@@ -62,6 +62,7 @@ type guardianConversationSnapshot struct {
 	ParentEvents []*session.Event
 
 	ParentCursor guardianParentCanonicalCursor
+	SourceCursor guardianParentCanonicalCursor
 	Version      uint64
 }
 
@@ -108,7 +109,12 @@ func (m *guardianConversationManager) fork(
 	sessionID string,
 	ref guardianConversationForkRef,
 	parentEvents []*session.Event,
+	cursors ...guardianParentCanonicalCursor,
 ) (guardianConversationSnapshot, error) {
+	var sourceCursor guardianParentCanonicalCursor
+	if len(cursors) > 0 {
+		sourceCursor = cursors[0]
+	}
 	ref, err := normalizeGuardianConversationForkRef(ref)
 	if err != nil {
 		return guardianConversationSnapshot{}, err
@@ -116,6 +122,7 @@ func (m *guardianConversationManager) fork(
 	if ref == (guardianConversationForkRef{}) {
 		snapshot, snapshotErr := m.snapshot(sessionID)
 		snapshot.ParentEvents = session.CloneEvents(parentEvents)
+		snapshot.SourceCursor = sourceCursor
 		return snapshot, snapshotErr
 	}
 	sessionID = strings.TrimSpace(sessionID)
@@ -135,6 +142,7 @@ func (m *guardianConversationManager) fork(
 			base: guardianConversationSnapshot{
 				Events:       session.CloneEvents(conversation.events),
 				ParentCursor: conversation.parentCursor,
+				SourceCursor: sourceCursor,
 				Version:      conversation.version,
 			},
 			parentEvents: session.CloneEvents(parentEvents),
@@ -281,7 +289,6 @@ func (m *guardianConversationManager) commitTurn(req guardianConversationCommit)
 	if turn[0].Meta == nil {
 		turn[0].Meta = map[string]any{}
 	}
-	turn[0].Meta[guardianCallKey] = req.User.Meta[guardianCallKey]
 	for _, e := range turn {
 		if e.Meta == nil {
 			e.Meta = map[string]any{}

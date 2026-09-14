@@ -917,11 +917,17 @@ func (s *runtimeComposition) closeWorkspaceResources() error {
 	s.mu.Lock()
 	exec := s.exec
 	s.exec = nil
+	guardian := s.guardian
+	s.guardian = nil
 	mcpMgr := s.mcpMgr
 	s.mcpMgr = nil
 	pluginCacheRelease := s.pluginCacheRelease
 	s.mu.Unlock()
 
+	var guardianErr error
+	if guardian != nil {
+		guardianErr = guardian.Close()
+	}
 	var execErr error
 	if exec != nil {
 		execErr = exec.Close()
@@ -939,7 +945,7 @@ func (s *runtimeComposition) closeWorkspaceResources() error {
 			s.mcpMgr = mcpMgr
 		}
 		s.mu.Unlock()
-		return errors.Join(execErr, mcpErr)
+		return errors.Join(guardianErr, execErr, mcpErr)
 	}
 	var pluginCacheErr error
 	if pluginCacheRelease != nil {
@@ -953,7 +959,7 @@ func (s *runtimeComposition) closeWorkspaceResources() error {
 	if pluginCacheErr == nil {
 		s.releaseSpawnedSessionModelPins()
 	}
-	return pluginCacheErr
+	return errors.Join(guardianErr, pluginCacheErr)
 }
 
 func (s *runtimeComposition) MCPServersStatus(pluginID string) []mcp.MCPServerInfo {

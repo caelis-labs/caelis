@@ -72,7 +72,7 @@ func (l *geminiLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 			return
 		}
 
-		googleSearchEnabled := geminiGoogleSearchEnabled(l.name, req.Tools)
+		googleSearchEnabled := !req.DisableTools && geminiGoogleSearchEnabled(l.name, req.Tools)
 		cfg := &genai.GenerateContentConfig{
 			Tools: toGeminiTools(req.Tools, googleSearchEnabled),
 		}
@@ -81,6 +81,9 @@ func (l *geminiLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 			cfg.ToolConfig = &genai.ToolConfig{
 				IncludeServerSideToolInvocations: &includeServerSideTools,
 			}
+		}
+		if req.DisableTools {
+			cfg.ToolConfig = &genai.ToolConfig{FunctionCallingConfig: &genai.FunctionCallingConfig{Mode: genai.FunctionCallingConfigModeNone}}
 		}
 		if strings.TrimSpace(system) != "" {
 			cfg.SystemInstruction = &genai.Content{

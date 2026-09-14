@@ -210,6 +210,9 @@ func runGuardianCommandE2E(t *testing.T, guardian model.LLM, alias, name string,
 		t.Fatal(err)
 	}
 	reviewer := newGuardianApprovalApprover(service)
+	defer reviewer.Close()
+	var reviewMetrics []guardianReviewMetrics
+	reviewer.observeReview = func(metrics guardianReviewMetrics) { reviewMetrics = append(reviewMetrics, metrics) }
 	reviewer.queryNetwork = sandbox.NetworkEnabled
 	var review approval.Decision
 	var reviewErr error
@@ -261,6 +264,7 @@ func runGuardianCommandE2E(t *testing.T, guardian model.LLM, alias, name string,
 	}
 	record := map[string]any{"model": alias, "scenario": name, "expected_allow": wantAllow, "review": review, "error": errorText, "command_output": commandOutput, "reviews": reviews, "executions": len(executed), "script_fetches": fetched.Load(), "uploads": uploads.Load(), "elapsed_ms": time.Since(started).Milliseconds()}
 	record["platform"] = runtime.GOOS
+	record["review_metrics"] = reviewMetrics
 	record["backend"] = native.Describe().Backend
 	record["expected_review"] = wantReview
 	record["repetition"] = repetition

@@ -81,6 +81,20 @@ execution routes, file effects, and provider reasoning settings; optional
 `CAELIS_GUARDIAN_COMMAND_E2E_OUT` writes per-scenario JSON evidence.
 `CAELIS_GUARDIAN_COMMAND_E2E_REPETITIONS` repeats each scenario up to five times.
 
+`CAELIS_GUARDIAN_RESIDENT_E2E=1` enables `TestGuardianResidentE2E` with the local
+`gpt-5.6-luna` alias. It exercises 48 successive development approvals across
+built-in and external main/subagent origins, concurrent review queueing, task
+conflicts, injected tool output and evidence failures. Failure scenarios select a
+reproducible tool operation before the real model makes its judgment. The output
+directory also receives resident review metrics. Ordinary approvals require P95
+at most eight seconds, at least
+90% without tools, and Runtime reuse while the bounded window still fits. The
+median target is three seconds. Evidence timeout must still permit a final
+judgment for both allowed and rejected actions; no incorrect allow or deny is
+accepted. Command E2E verifies real execution effects separately.
+Provider latency/cache counters are observations,
+not deterministic unit-test assertions or guarantees from the Harness.
+
 `make windows-check` runs Guardian's native evidence tests with deterministic
 model responses. They exercise PowerShell, temporary-only writes, file evidence,
 the approval tool loop and Windows' always-enabled network behavior.

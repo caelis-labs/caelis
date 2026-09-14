@@ -18,8 +18,12 @@ import (
 	"github.com/caelis-labs/caelis/internal/kernel"
 )
 
-const guardianAssessmentMaxAttempts = 3
-const guardianReviewAttemptTimeout = 3 * time.Minute
+const guardianAssessmentMaxAttempts = 2
+
+// Queueing, evidence, provider retries and format repair share one deadline.
+// The final reserve covers the observed provider tail after restricted evidence.
+const guardianReviewTimeout = 20 * time.Second
+const guardianFinalDecisionReserve = 8 * time.Second
 
 type guardianApprovalReviewer struct {
 	queryNetwork  sandbox.Network
@@ -29,6 +33,10 @@ type guardianApprovalReviewer struct {
 	diagnostics   *slog.Logger
 	accountingMu  sync.Mutex
 	accounting    map[string]approvalReviewAccounting
+	resourcesMu   sync.Mutex
+	residents     map[string]*guardianResident
+	closed        bool
+	observeReview func(guardianReviewMetrics)
 }
 
 type approvalReviewAccounting struct {
@@ -166,6 +174,15 @@ func (r *guardianApprovalReviewer) ReleaseApprovalContext(ref session.SessionRef
 	if r == nil || r.conversations == nil {
 		return
 	}
+	r.resourcesMu.Lock()
+	resident := r.residents[ref.SessionID]
+	delete(r.residents, ref.SessionID)
+	r.resourcesMu.Unlock()
+	if resident != nil {
+		_ = resident.close()
+	}
+	// Draining comes first: an in-flight validated turn must not resurrect
+	// the private conversation after its owner has forgotten it.
 	r.conversations.forget(ref.SessionID)
 }
 
@@ -185,106 +202,6 @@ func approvalInvocationFromEvent(event *session.Event) *session.EventInvocation 
 		return nil
 	}
 	return &invocation
-}
-
-func (r *guardianApprovalReviewer) runGuardianReview(
-	ctx context.Context,
-	req kernel.ApprovalReviewRequest,
-) (items guardianPromptItems, prompt *session.Event, assistant *session.Event, assessment guardianReviewModelOutput, reviewErr error) {
-	queries := &guardianQueries{network: r.queryNetwork, model: req.Model}
-	baseCtx := model.WithInvocationAdmission(ctx, queries.admit)
-	ctx, cancel := context.WithTimeout(baseCtx, guardianReviewAttemptTimeout)
-	defer cancel()
-	defer func() { reviewErr = errors.Join(reviewErr, queries.close()) }()
-	path := guardianHistoryPath(ctx, r.sessions, req.SessionRef)
-	activeSession, err := r.sessions.Session(ctx, req.SessionRef)
-	if err != nil {
-		return guardianPromptItems{}, nil, nil, guardianReviewModelOutput{}, err
-	}
-	if r.conversations == nil {
-		return guardianPromptItems{}, nil, nil, guardianReviewModelOutput{}, fmt.Errorf("approval reviewer requires an in-memory conversation manager")
-	}
-	parentEvents, err := r.sessions.Events(ctx, session.EventsRequest{SessionRef: req.SessionRef})
-	if err != nil {
-		return guardianPromptItems{}, nil, nil, guardianReviewModelOutput{}, err
-	}
-	forkRef := guardianConversationForkFromApproval(req)
-	conversation, err := r.conversations.fork(req.SessionRef.SessionID, forkRef, parentEvents)
-	if err != nil {
-		return guardianPromptItems{}, nil, nil, guardianReviewModelOutput{}, err
-	}
-	outputSpec, err := guardianOutputSpecForModel(req.Model, req.Approval)
-	if err != nil {
-		return guardianPromptItems{}, nil, nil, guardianReviewModelOutput{}, err
-	}
-	turnKey := fmt.Sprintf("%d:%s", conversation.Version, req.ReviewID)
-	windowReq := req
-	windowReq.ReviewID = turnKey
-	compactionCfg := guardianCompactionConfig(req.Model, outputSpec)
-	historyEvents, promptItems, err := guardianWindow(conversation, windowReq, outputSpec)
-	if err != nil {
-		return guardianPromptItems{}, nil, nil, guardianReviewModelOutput{}, err
-	}
-	if promptItems.MandatoryInputTooLarge {
-		return promptItems, nil, nil, guardianReviewModelOutput{}, nil
-	}
-	var options []kernel.ApprovalOption
-	if req.Approval != nil {
-		options = req.Approval.Options
-	}
-	promptEvent := guardianUserEvent(activeSession, promptItems.Text)
-	annotateGuardianReviewEvent(promptEvent, req.ReviewID)
-	promptEvent.Meta[guardianCallKey] = guardianApprovalCallKey(req)
-	promptEvent.Meta[guardianPendingCallKey] = guardianCurrentSourceCall(conversation, req) == 0
-	var lastAssistantEvent *session.Event
-	var lastParseErr error
-	for attempt := 0; attempt < guardianAssessmentMaxAttempts; attempt++ {
-		attemptCtx := ctx
-		releaseAttempt := func() {}
-		if attempt > 0 {
-			cancel()
-			attemptCtx, releaseAttempt = context.WithTimeout(baseCtx, guardianReviewAttemptTimeout)
-		}
-		attemptHistory := historyEvents
-		if lastParseErr != nil {
-			attemptHistory = append(session.CloneEvents(historyEvents), guardianEvidenceEvent("The previous response could not be used: "+lastParseErr.Error()+". Return only option_id for an allow option; include a nonempty rationale only for a reject option. Choose from this request's options."))
-		}
-		runResult, err := r.runGuardianAgent(attemptCtx, req.Model, activeSession, attemptHistory, promptItems.Text, promptItems.UserEvidence, outputSpec, compactionCfg, guardianQueryContext{queries, path})
-		releaseAttempt()
-		if err != nil {
-			return promptItems, promptEvent, runResult.AssistantEvent, guardianReviewModelOutput{}, err
-		}
-		if queries.failure != nil {
-			return promptItems, promptEvent, runResult.AssistantEvent, guardianReviewModelOutput{}, queries.failure
-		}
-		lastAssistantEvent = runResult.AssistantEvent
-		parsed, err := parseGuardianAssessmentForMode(runResult.Text, outputSpec.Mode, options)
-		if err != nil {
-			lastParseErr = err
-			continue
-		}
-		// Commit only validated assessments to the process-local conversation;
-		// malformed attempts and staging compact artifacts are discarded together.
-		annotateGuardianReviewEvent(runResult.AssistantEvent, req.ReviewID)
-		_, _, err = r.conversations.commitValidated(guardianConversationCommit{
-			SessionID:       req.SessionRef.SessionID,
-			ExpectedVersion: conversation.Version,
-			Fork:            forkRef,
-			ParentCursor:    promptItems.ParentCursor,
-			User:            promptEvent,
-			Assistant:       runResult.AssistantEvent,
-			ContextEvents:   runResult.ContextEvents,
-			PrefixEvents:    historyEvents,
-			TurnID:          turnKey,
-		})
-		if err != nil {
-			return promptItems, promptEvent, runResult.AssistantEvent, guardianReviewModelOutput{}, err
-		}
-		// A concurrent version loser keeps its already validated decision but
-		// cannot advance the reusable prefix or parent transcript cursor.
-		return promptItems, promptEvent, runResult.AssistantEvent, parsed, nil
-	}
-	return promptItems, promptEvent, lastAssistantEvent, guardianReviewModelOutput{}, fmt.Errorf("approval reviewer failed to return a valid JSON assessment after %d attempts: %w", guardianAssessmentMaxAttempts, lastParseErr)
 }
 
 func guardianConversationForkFromApproval(req kernel.ApprovalReviewRequest) guardianConversationForkRef {
@@ -328,12 +245,12 @@ func (r *guardianApprovalReviewer) runGuardianAgent(
 	instructions := ""
 	profile := spec.CapabilityProfile
 	if len(queryArgs) > 0 && queryArgs[0].queries != nil {
+		if queryArgs[0].queries.runner != nil {
+			runner = queryArgs[0].queries.runner
+		}
 		tools = queryArgs[0].queries.tools()
 		profile = systemManagedAgentCapabilityReadOnly
 		instructions = guardianEnvironmentContext(queryArgs[0].queries.network)
-		if queryArgs[0].path != "" {
-			instructions += "\nAvailable parent Session JSONL (approval context, not a child endpoint's private log): " + queryArgs[0].path
-		}
 	}
 
 	result, err := runner.Run(ctx, systemManagedAgentRunRequest{
@@ -401,5 +318,4 @@ var _ kernel.ApprovalApprover = (*guardianApprovalReviewer)(nil)
 
 type guardianQueryContext struct {
 	queries *guardianQueries
-	path    string
 }

@@ -43,10 +43,7 @@ func TestGuardianWindowAppendsAndDoesNotRepeatOperations(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := guardianEventsText(out)
-	if strings.Contains(text, "call-2") || strings.Contains(text, "call-3") {
-		t.Fatal("bootstrap retained more than recent 3")
-	}
-	for _, id := range []string{"call-4", "call-5", "call-6"} {
+	for _, id := range []string{"call-2", "call-3", "call-4", "call-5", "call-6"} {
 		if strings.Count(text, id) != 1 {
 			t.Fatalf("missing or repeated %s", id)
 		}
@@ -64,7 +61,7 @@ func TestGuardianWindowAppendsAndDoesNotRepeatOperations(t *testing.T) {
 		t.Fatal("delta repeated or lost an operation")
 	}
 	trimmed := guardianDropOldestTurn(next, "T2")
-	if strings.Contains(guardianEventsText(trimmed), "call-4") || !strings.Contains(guardianEventsText(trimmed), "B steering") || !strings.Contains(guardianEventsText(trimmed), "A") {
+	if strings.Contains(guardianEventsText(trimmed), "call-2") || !strings.Contains(guardianEventsText(trimmed), "B steering") || !strings.Contains(guardianEventsText(trimmed), "A") {
 		t.Fatal("turn trim lost independent users")
 	}
 	snapshot.Events = trimmed
@@ -74,7 +71,7 @@ func TestGuardianWindowAppendsAndDoesNotRepeatOperations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(guardianEventsText(again), "call-6") {
+	if strings.Contains(guardianEventsText(again), "call-2") {
 		t.Fatal("trim rewound source cursor")
 	}
 }
@@ -143,7 +140,7 @@ func TestGuardianProviderPrefixAndStableSchema(t *testing.T) {
 		bb, _ := json.Marshal(b.Messages)
 		t.Fatalf("message prefix changed:\n%s\n%s", aa, bb)
 	}
-	if len(a.Tools) != 3 {
+	if len(a.Tools) != 4 {
 		t.Fatalf("tools=%d", len(a.Tools))
 	}
 	text := ""
@@ -170,7 +167,7 @@ func TestGuardianTurnBudgetTrimsWithHeadroom(t *testing.T) {
 		events = append(events, e)
 	}
 	got := guardianTrimTurns(events, 7000, "active")
-	if len(got) > 3 {
+	if len(got) > 4 {
 		t.Fatalf("trim retained %d turns", len(got))
 	}
 	before := session.CloneEvents(got)
@@ -257,16 +254,13 @@ func TestGuardianReusedCallIDsRemainDistinctSourceOperations(t *testing.T) {
 	if text := guardianEventsText(out); !strings.Contains(text, "first") || !strings.Contains(text, "second") {
 		t.Fatalf("reused ID lost operation: %s", text)
 	}
-	// A pending approval consumes exactly one future source call, not every
-	// later operation bearing the endpoint's reused ID.
+	// Approval history never changes how canonical calls are projected.
 	pending := guardianEvidenceEvent("previous approval")
-	pending.Meta[guardianCallKey] = "parent:" + first.Tool.ID
-	pending.Meta[guardianPendingCallKey] = true
 	out, _, err = guardianWindow(guardianConversationSnapshot{Events: []*session.Event{pending}, ParentEvents: []*session.Event{first, next}}, req, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if text := guardianEventsText(out); strings.Contains(text, "first") || !strings.Contains(text, "second") {
-		t.Fatalf("approval consumption is not one occurrence: %s", text)
+	if text := guardianEventsText(out); !strings.Contains(text, "first") || !strings.Contains(text, "second") {
+		t.Fatalf("approval changed source projection: %s", text)
 	}
 }

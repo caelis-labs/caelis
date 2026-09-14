@@ -63,6 +63,7 @@ func TestGuardianFileToolsReuseBuiltinDefinitionsAndResults(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			want, _ = tool.TruncateResultWithInfo(want, tool.TruncationPolicy{MaxBytes: 8 * 1024})
 			got, err := query.Call(t.Context(), call)
 			if err != nil {
 				t.Fatal(err)
@@ -111,11 +112,8 @@ func TestGuardianNativeTemporaryWritesAndReadOnlyEvidence(t *testing.T) {
 		t.Fatalf("temporary write failed: %q %v", raw, err)
 	}
 	missing, _ := json.Marshal(map[string]any{"path": outside + ".missing"})
-	if _, err := (guardianQueryTool{q, "Read"}).Call(t.Context(), tool.Call{ID: "missing", Input: missing}); err == nil {
-		t.Fatal("missing evidence should report a tool error")
-	}
-	if q.failure != nil {
-		t.Fatalf("recoverable query poisoned review: %v", q.failure)
+	if result, err := (guardianQueryTool{q, "Read"}).Call(t.Context(), tool.Call{ID: "missing", Input: missing}); err != nil || !result.IsError {
+		t.Fatalf("missing evidence should return a model-visible error: %+v %v", result, err)
 	}
 	call("Read", map[string]any{"path": outside})
 	call("Grep", map[string]any{"path": outside, "pattern": "immutable"})
@@ -123,9 +121,6 @@ func TestGuardianNativeTemporaryWritesAndReadOnlyEvidence(t *testing.T) {
 	call("RunCommand", map[string]any{"command": guardianNativeTestCommand("printf overwritten > '"+strings.ReplaceAll(outside, "'", "'\\''")+"'", "$ErrorActionPreference='Stop'; Set-Content -LiteralPath "+quotedOutside+" -Value overwritten")})
 	if raw, err := os.ReadFile(outside); err != nil || string(raw) != "immutable evidence\n" {
 		t.Fatalf("escaped temporary-only write policy: %q %v", raw, err)
-	}
-	if q.failure != nil {
-		t.Fatalf("ordinary command exit poisoned review: %v", q.failure)
 	}
 	call("Read", map[string]any{"path": outside})
 	root := q.root
@@ -192,6 +187,7 @@ func TestGuardianNativeToolTurnReplaysAsStablePrefix(t *testing.T) {
 	service, active := newApprovalReviewerTestSession(t, t.Context())
 	llm := &guardianToolLoopModel{}
 	reviewer := newGuardianApprovalApprover(service)
+	defer reviewer.Close()
 	req := approvalReviewerTestRequest(active, llm, "check", nil)
 	if result, err := reviewer.Decide(t.Context(), req); err != nil || !result.Approved {
 		t.Fatalf("decision=%v err=%v", result, err)
@@ -251,19 +247,20 @@ func TestGuardianNativeInheritedNetwork(t *testing.T) {
 	}
 }
 
-func TestGuardianExhaustedEvidenceStopsFurtherProviderAdmission(t *testing.T) {
-	q := &guardianQueries{calls: 8}
-	_, err := (guardianQueryTool{q, "Read"}).Call(t.Context(), tool.Call{ID: "over-budget", Input: json.RawMessage(`{"path":"unused"}`)})
-	if err == nil || q.failure == nil {
-		t.Fatal("expected evidence budget failure")
+func TestGuardianExhaustedEvidenceStillAdmitsFinalDecision(t *testing.T) {
+	q := &guardianQueries{bytes: 24 * 1024}
+	result, err := (guardianQueryTool{q, "Read"}).Call(t.Context(), tool.Call{ID: "over-budget", Input: json.RawMessage(`{"path":"unused"}`)})
+	if err != nil || !result.IsError {
+		t.Fatalf("expected model-visible budget result: %+v %v", result, err)
 	}
-	if next := q.admit(t.Context(), &model.Request{}); !errors.Is(next, q.failure) {
-		t.Fatalf("provider admission ignored evidence failure: %v", next)
-	} else if model.IsRetryableLLMError(next) {
-		t.Fatalf("permanent evidence failure is retryable: %v", next)
+	if q.runtime != nil {
+		t.Fatal("closed evidence opened a sandbox")
 	}
-	if q.attempts != 0 {
-		t.Fatalf("exhausted review admitted %d provider attempts", q.attempts)
+	if next := q.admit(t.Context(), &model.Request{}); next != nil {
+		t.Fatalf("final decision blocked by evidence failure: %v", next)
+	}
+	if q.attempts != 1 {
+		t.Fatalf("final model attempts=%d", q.attempts)
 	}
 }
 

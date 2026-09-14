@@ -775,6 +775,10 @@ const (
 
 // Request is the provider-agnostic model request contract.
 type Request struct {
+	// DisableTools closes tool selection for this step while retaining definitions
+	// needed to interpret prior tool calls. Providers use their native no-tool
+	// choice; protocols without one omit declarations from the wire request.
+	DisableTools bool            `json:"disable_tools,omitempty"`
 	Instructions []Part          `json:"instructions,omitempty"`
 	Messages     []Message       `json:"messages,omitempty"`
 	Tools        []ToolSpec      `json:"tools,omitempty"`
