@@ -55,6 +55,8 @@ type taskStreamBatchMsg struct {
 	cursor      string
 	activityID  string
 	replacement bool
+	phase       taskstream.DeliveryKind
+	before      string
 }
 
 type taskStreamClosedMsg struct {
@@ -427,10 +429,12 @@ func (m *Model) startTaskStreamForwarder(
 	started := cfg.ProgramSender.startForwarder(func() {
 		defer cancel()
 		result, err := cfg.TaskStreams.Subscribe(ctx, taskstream.SubscribeRequest{
-			SessionID: sessionID,
-			TaskID:    taskID,
-			Cursor:    cursor,
-			Follow:    follow,
+			SessionID:       sessionID,
+			TaskID:          taskID,
+			Cursor:          cursor,
+			Follow:          follow,
+			HistorySnapshot: follow && cursor == "",
+			HistoryTurns:    16,
 		})
 		if err != nil {
 			cfg.ProgramSender.SendMsg(taskStreamClosedMsg{
@@ -450,14 +454,19 @@ func (m *Model) startTaskStreamForwarder(
 			return
 		}
 		defer sub.Close()
-		mailbox := &taskStreamMailbox{}
+		mailbox := &taskStreamMailbox{streamPages: follow}
 		committedCursor := cursor
 		for {
 			events, cursor, activityID, replacement, open, readErr := mailbox.read(ctx, sub.Deliveries())
-			if len(events) > 0 || replacement || cursor != "" || activityID != "" {
+			var phase taskstream.DeliveryKind
+			if mailbox.streamPages {
+				phase = mailbox.kind
+			}
+			if len(events) > 0 || replacement || cursor != "" || activityID != "" || mailbox.streamPages && mailbox.kind == taskstream.DeliveryReplaceBegin {
 				cfg.ProgramSender.SendMsg(taskStreamBatchMsg{
 					sessionID: sessionID, taskID: taskID, token: token, events: events,
 					cursor: cursor, activityID: activityID, replacement: replacement,
+					phase: phase, before: mailbox.before,
 				})
 				if cursor != "" {
 					committedCursor = cursor
@@ -505,6 +514,9 @@ func (m *Model) handleTaskStreamBatch(msg taskStreamBatchMsg) (tea.Model, tea.Cm
 	if m == nil || msg.sessionID != m.currentSessionID || !m.taskStreamWanted[msg.taskID] ||
 		m.taskStreamTokens[msg.taskID] != msg.token {
 		return m, nil
+	}
+	if handled, cmd := m.handleChildHistoryPage(msg); handled {
+		return m, cmd
 	}
 	delete(m.taskStreamRetries, msg.taskID)
 	if cursor := strings.TrimSpace(msg.cursor); cursor != "" {
@@ -563,6 +575,9 @@ func (m *Model) handleTaskStreamBatch(msg taskStreamBatchMsg) (tea.Model, tea.Cm
 func (m *Model) handleTaskStreamClosed(msg taskStreamClosedMsg) (tea.Model, tea.Cmd) {
 	if m == nil || msg.sessionID != m.currentSessionID || m.taskStreamTokens[msg.taskID] != msg.token {
 		return m, nil
+	}
+	if view := m.subagentOutputViews[m.taskStreamCallIDsByID[msg.taskID]]; view != nil {
+		view.history = nil
 	}
 	delete(m.taskStreamSubscriptions, msg.taskID)
 	if cancel := m.taskStreamCancels[msg.taskID]; cancel != nil {

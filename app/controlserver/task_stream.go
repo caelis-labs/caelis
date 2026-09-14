@@ -129,11 +129,17 @@ func (s *Server) subscribeTask(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	turns, ok := historyTurnsQuery(w, r)
+	if !ok {
+		return
+	}
 	result, err := s.config.Services.Tasks.Subscribe(r.Context(), taskPrincipal(principal), taskstream.SubscribeRequest{
-		SessionID: r.PathValue("session_id"),
-		TaskID:    r.PathValue("task_id"),
-		Cursor:    cursor,
-		Follow:    parseFollowQuery(r),
+		HistoryTurns: turns, HistoryBefore: r.URL.Query().Get("history_before"),
+		SessionID:       r.PathValue("session_id"),
+		TaskID:          r.PathValue("task_id"),
+		Cursor:          cursor,
+		Follow:          parseFollowQuery(r),
+		HistorySnapshot: r.URL.Query().Get("history_snapshot") == "true",
 	})
 	if err != nil {
 		writeMappedError(w, err)
@@ -251,7 +257,7 @@ func taskDeliveryWire(delivery taskstream.Delivery) (wirev1.TaskStreamDelivery, 
 	wire := wirev1.TaskStreamDelivery{
 		Kind: string(delivery.Kind), Source: string(delivery.Source),
 		SnapshotID: delivery.SnapshotID, Page: delivery.Page,
-		NextCursor: delivery.NextCursor, ActivityID: delivery.ActivityID,
+		NextCursor: delivery.NextCursor, HistoryBefore: delivery.HistoryBefore, ActivityID: delivery.ActivityID,
 		Events: make([]json.RawMessage, 0, len(delivery.Events)),
 	}
 	for _, envelope := range delivery.Events {

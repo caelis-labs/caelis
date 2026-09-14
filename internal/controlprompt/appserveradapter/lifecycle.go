@@ -52,7 +52,11 @@ func (a *SessionClientAdapter) ResumeSession(ctx context.Context, sessionID stri
 	}
 	feedCtx, cancelFeed := context.WithCancel(context.WithoutCancel(ctx))
 	stopAdmission := context.AfterFunc(ctx, cancelFeed)
-	result, err := a.sessionClient.Reconnect(feedCtx, appserver.ReconnectRequest{SessionID: strings.TrimSpace(sessionID)})
+	historyTurns := 0
+	if a.surface == "cli-tui" {
+		historyTurns = 16
+	}
+	result, err := a.sessionClient.Reconnect(feedCtx, appserver.ReconnectRequest{SessionID: strings.TrimSpace(sessionID), HistoryTurns: historyTurns})
 	stopAdmission()
 	if err != nil || ctx.Err() != nil {
 		cancelFeed()

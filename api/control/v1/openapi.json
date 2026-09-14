@@ -215,6 +215,8 @@
       "get": {
         "operationId": "reconnectSession",
         "parameters": [
+          {"name": "history_turns", "in": "query", "description": "Recent complete Turns; zero selects all. A backward request defaults to 16.", "schema": {"type": "integer", "minimum": 0, "maximum": 64}},
+          {"name": "history_before", "in": "query", "description": "Opaque older-history token, mutually exclusive with after or Last-Event-ID. Selects a finite window without changing the live continuation.", "schema": {"type": "string"}},
           {"$ref": "#/components/parameters/SessionID"},
           {"$ref": "#/components/parameters/After"},
           {"name": "Last-Event-ID", "in": "header", "schema": {"type": "string"}}
@@ -367,10 +369,13 @@
       "get": {
         "operationId": "subscribeTaskEvents",
         "parameters": [
+          {"name": "history_turns", "in": "query", "description": "Recent complete Turns; zero selects all. A backward request defaults to 16.", "schema": {"type": "integer", "minimum": 0, "maximum": 64}},
+          {"name": "history_before", "in": "query", "description": "Opaque older-history token, mutually exclusive with after or Last-Event-ID. Selects a finite window without changing the live continuation.", "schema": {"type": "string"}},
           {"$ref": "#/components/parameters/SessionID"},
           {"$ref": "#/components/parameters/TaskID"},
           {"$ref": "#/components/parameters/After"},
-          {"name": "Last-Event-ID", "in": "header", "schema": {"type": "string"}}
+          {"name": "Last-Event-ID", "in": "header", "schema": {"type": "string"}},
+          {"name": "history_snapshot", "in": "query", "description": "Stream a paged atomic child history snapshot when opening without a cursor, followed by its exact continuation.", "schema": {"type": "boolean", "default": false}}
         ],
         "responses": {
           "200": {
@@ -2539,6 +2544,7 @@
       "TaskStreamDelivery": {
         "type": "object", "additionalProperties": false, "required": ["kind", "source"],
         "properties": {
+          "history_before": {"type": "string", "description": "Earlier-history token, present only at Session sync or Task replace_end; absent at the beginning of history."},
           "kind": {"$ref": "#/components/schemas/StreamDeliveryKind"}, "source": {"$ref": "#/components/schemas/StreamSourceClass"},
           "snapshot_id": {"type": "string"}, "page": {"type": "integer", "minimum": 0},
           "events": {"type": "array", "items": {"$ref": "#/components/schemas/Envelope"}},
@@ -2548,6 +2554,7 @@
       "SessionFeedDelivery": {
         "type": "object", "additionalProperties": false, "required": ["kind", "source"],
         "properties": {
+          "history_before": {"type": "string", "description": "Earlier-history token, present only at Session sync or Task replace_end; absent at the beginning of history."},
           "kind": {"$ref": "#/components/schemas/StreamDeliveryKind"}, "source": {"$ref": "#/components/schemas/StreamSourceClass"},
           "snapshot_id": {"type": "string"}, "page": {"type": "integer", "minimum": 0},
           "events": {"type": "array", "items": {"$ref": "#/components/schemas/Envelope"}}, "next_cursor": {"type": "string"}

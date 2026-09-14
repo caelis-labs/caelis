@@ -7,7 +7,7 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 )
 
-func TestProjectReplayEventsKeepsFinalAssistantChunksOnly(t *testing.T) {
+func TestProjectReplayEventsKeepsControlSelectedAssistantChunks(t *testing.T) {
 	t.Parallel()
 
 	events := ProjectReplayEvents([]eventstream.Envelope{
@@ -27,15 +27,19 @@ func TestProjectReplayEventsKeepsFinalAssistantChunksOnly(t *testing.T) {
 			Final: true,
 		},
 	}, nil)
-	if len(events) != 1 {
-		t.Fatalf("events = %#v, want one final replay event", events)
+	if len(events) != 2 {
+		t.Fatalf("events = %#v, want delta and final replay events", events)
 	}
+	if events[0].Final {
+		t.Fatal("delta became final")
+	}
+	events = events[1:]
 	if events[0].Kind != EventNarrative || events[0].NarrativeKind != NarrativeAssistant || events[0].Text != "final" || !events[0].Final {
 		t.Fatalf("event = %#v, want final assistant narrative", events[0])
 	}
 }
 
-func TestProjectReplayEventsKeepsFinalThoughtChunksOnly(t *testing.T) {
+func TestProjectReplayEventsKeepsControlSelectedThoughtChunks(t *testing.T) {
 	t.Parallel()
 
 	events := ProjectReplayEvents([]eventstream.Envelope{
@@ -55,9 +59,13 @@ func TestProjectReplayEventsKeepsFinalThoughtChunksOnly(t *testing.T) {
 			Final: true,
 		},
 	}, nil)
-	if len(events) != 1 {
-		t.Fatalf("events = %#v, want one final replay event", events)
+	if len(events) != 2 {
+		t.Fatalf("events = %#v, want delta and final replay events", events)
 	}
+	if events[0].Final {
+		t.Fatal("delta became final")
+	}
+	events = events[1:]
 	if events[0].Kind != EventNarrative || events[0].NarrativeKind != NarrativeReasoning || events[0].Text != "final thought" || !events[0].Final {
 		t.Fatalf("event = %#v, want final reasoning narrative", events[0])
 	}

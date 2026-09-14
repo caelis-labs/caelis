@@ -54,12 +54,18 @@ func streamReconnectBackfill(
 	reconnect controlprompt.SessionReconnect,
 	send func(tea.Msg),
 ) error {
+	return streamReconnectBackfillFrom(ctx, reconnect, send, nil)
+}
+
+func streamReconnectBackfillFrom(ctx context.Context, reconnect interface {
+	Deliveries() <-chan appserver.FeedDelivery
+	Err() error
+}, send func(tea.Msg), first *appserver.FeedDelivery) error {
 	if reconnect == nil {
 		return nil
 	}
 	const batchSize = resumeReplayTranscriptBatchSize
 	batch := make([]TranscriptEvent, 0, batchSize)
-	published := false
 	assembler := &appserver.FeedDeliveryAssembler{}
 	flush := func() {
 		if len(batch) == 0 || send == nil {
@@ -70,53 +76,64 @@ func streamReconnectBackfill(
 			Events:          append([]TranscriptEvent(nil), batch...),
 			ReconnectReplay: true,
 		})
-		published = true
 		batch = batch[:0]
 	}
 	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case delivery, open := <-reconnect.Deliveries():
-			if !open {
-				flush()
-				return reconnect.Err()
+		var delivery appserver.FeedDelivery
+		open := true
+		if first != nil {
+			delivery = *first
+			first = nil
+		} else {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case delivery, open = <-reconnect.Deliveries():
 			}
-			events, replacement, err := assembler.Accept(delivery)
-			if err != nil {
+		}
+		if !open {
+			if err := reconnect.Err(); err != nil {
 				return err
 			}
-			if replacement {
-				if published {
-					return errorcode.New(errorcode.Conflict, "Session replacement crossed visible reconnect output")
-				}
-				batch = batch[:0]
+			return errorcode.New(errorcode.Unavailable, "Session history ended before sync")
+		}
+		if delivery.Kind == appserver.FeedDeliveryReplaceBegin {
+			batch = batch[:0]
+			if send != nil {
+				send(sessionHistoryResetMsg{})
 			}
-			for _, envelope := range events {
-				if eventstream.IsSessionNotice(envelope) {
-					// The exact spool can contain notices published during first
-					// admission. Present them in order without making them replayable
-					// canonical history or advancing the live Turn target.
-					flush()
-					if send != nil {
-						send(envelope)
-						published = true
-					}
-					continue
-				}
-				presentation := transcriptEventsMsg(projectResumeReplayEvents([]eventstream.Envelope{envelope}))
-				batch = append(batch, presentation.Events...)
-				if len(batch) >= batchSize {
-					flush()
-				}
-			}
-			if delivery.Kind == appserver.FeedDeliverySync {
-				if assembler.Pending() {
-					return errorcode.New(errorcode.Unavailable, "Session replacement ended before sync")
-				}
+		}
+		events, _, err := assembler.AcceptPage(delivery)
+		if err != nil {
+			return err
+		}
+
+		for _, envelope := range events {
+			if eventstream.IsSessionNotice(envelope) {
+				// The exact spool can contain notices published during first
+				// admission. Present them in order without making them replayable
+				// canonical history or advancing the live Turn target.
 				flush()
-				return nil
+				if send != nil {
+					send(envelope)
+				}
+				continue
 			}
+			presentation := transcriptEventsMsg(projectResumeReplayEvents([]eventstream.Envelope{envelope}))
+			batch = append(batch, presentation.Events...)
+			if len(batch) >= batchSize {
+				flush()
+			}
+		}
+		if delivery.Kind == appserver.FeedDeliverySync {
+			if assembler.Pending() {
+				return errorcode.New(errorcode.Unavailable, "Session replacement ended before sync")
+			}
+			flush()
+			if send != nil && delivery.HistoryBefore != "" {
+				send(sessionHistoryPositionMsg{before: delivery.HistoryBefore})
+			}
+			return nil
 		}
 	}
 }

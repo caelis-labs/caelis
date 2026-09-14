@@ -58,6 +58,7 @@ type recordingPartition struct {
 }
 
 type outputWrite struct {
+	stream  func(streamspool.Writer) error
 	records []streamspool.Record
 	bytes   int
 	replace bool
@@ -173,19 +174,15 @@ func (o *boundRecorder) ReplaceTaskHistory(ctx context.Context, events []*sessio
 		if event == nil {
 			continue
 		}
-		terminalID := ""
-		if event.Scope != nil {
-			terminalID = event.Scope.TurnID
-		}
-		payload, err := json.Marshal(recordedTaskOutput{TerminalID: terminalID, ActivityID: o.binding.ActivityID, Event: output.Event{Event: event, OccurredAt: event.Time}})
+		record, err := historyOutputRecord(o.binding.ActivityID, event)
 		if err != nil {
 			return err
 		}
-		item.bytes += len(payload)
+		item.bytes += len(record.Payload)
 		if item.bytes > taskOutputQueueBytes || len(item.records) >= taskOutputQueueRecords {
 			return o.recorder.failQueue(o.partition, streamspool.ErrLimit)
 		}
-		item.records = append(item.records, streamspool.Record{Type: taskOutputRecordType, OccurredAt: event.Time, Payload: payload})
+		item.records = append(item.records, record)
 	}
 	return o.recorder.enqueue(o.partition, item)
 }

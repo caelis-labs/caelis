@@ -13,8 +13,11 @@ import (
 // merges across replacement or activity boundaries, and leaves each delivery's
 // cursor attached to all of its events until the UI applies the resulting batch.
 type taskStreamMailbox struct {
-	assembler taskstream.DeliveryAssembler
-	pending   *taskstream.Delivery
+	assembler   taskstream.DeliveryAssembler
+	pending     *taskstream.Delivery
+	streamPages bool
+	kind        taskstream.DeliveryKind
+	before      string
 }
 
 func (m *taskStreamMailbox) read(ctx context.Context, deliveries <-chan taskstream.Delivery) ([]eventstream.Envelope, string, string, bool, bool, error) {
@@ -34,9 +37,18 @@ func (m *taskStreamMailbox) read(ctx context.Context, deliveries <-chan taskstre
 				delivery = next
 			}
 		}
-		events, replacement, err := m.assembler.Accept(delivery)
+		m.kind = delivery.Kind
+		m.before = delivery.HistoryBefore
+		accept := m.assembler.Accept
+		if m.streamPages {
+			accept = m.assembler.AcceptPage
+		}
+		events, replacement, err := accept(delivery)
 		if err != nil {
 			return nil, "", "", false, false, err
+		}
+		if m.streamPages && (delivery.Kind == taskstream.DeliveryReplaceBegin || delivery.Kind == taskstream.DeliveryReplacePage || delivery.Kind == taskstream.DeliveryReplaceEnd) {
+			return events, delivery.NextCursor, delivery.ActivityID, replacement, true, nil
 		}
 		if len(events) == 0 && !replacement && delivery.NextCursor == "" &&
 			(delivery.ActivityID == "" || delivery.Kind != taskstream.DeliveryStatus) {

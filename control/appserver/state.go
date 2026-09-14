@@ -156,8 +156,12 @@ type StateReader interface {
 
 // ReconnectRequest atomically bootstraps one explicit Session from Cursor.
 type ReconnectRequest struct {
-	SessionID string `json:"session_id"`
-	Cursor    string `json:"cursor,omitempty"`
+	// HistoryTurns limits initial history to complete recent Turns; zero loads all.
+	HistoryTurns int `json:"history_turns,omitempty"`
+	// HistoryBefore selects a finite older page, independently of the live cursor.
+	HistoryBefore string `json:"history_before,omitempty"`
+	SessionID     string `json:"session_id"`
+	Cursor        string `json:"cursor,omitempty"`
 }
 
 // ReconnectResult couples typed state to the exact feed cut and continuation

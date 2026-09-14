@@ -28,8 +28,22 @@ type DeliveryAssembler struct {
 // Accept returns immediately displayable events. replacement is true only
 // when the returned events are a complete replacement snapshot.
 func (a *DeliveryAssembler) Accept(delivery Delivery) (events []eventstream.Envelope, replacement bool, err error) {
+	return a.accept(delivery, true)
+}
+
+// AcceptPage returns validated pages for a private document builder. Consumers
+// publish only at replacement end and discard the builder on any error. Limits
+// apply per page so long snapshots do not require a whole-history buffer.
+func (a *DeliveryAssembler) AcceptPage(delivery Delivery) ([]eventstream.Envelope, bool, error) {
+	return a.accept(delivery, false)
+}
+
+func (a *DeliveryAssembler) accept(delivery Delivery, retain bool) (events []eventstream.Envelope, replacement bool, err error) {
 	if a == nil {
 		return nil, false, errorcode.New(errorcode.InvalidArgument, "Task delivery assembler is required")
+	}
+	if delivery.HistoryBefore != "" && delivery.Kind != DeliveryReplaceEnd {
+		return nil, false, invalidTaskDelivery("history boundary")
 	}
 	switch delivery.Kind {
 	case DeliveryAppendPage:
@@ -55,6 +69,9 @@ func (a *DeliveryAssembler) Accept(delivery Delivery) (events []eventstream.Enve
 		if delivery.Source != SourceReplacement || !a.Pending() || delivery.SnapshotID != a.snapshotID || delivery.Page != a.nextPage || delivery.NextCursor != "" || !nonResumableTaskEnvelopes(delivery.Events) {
 			return nil, false, invalidTaskDelivery("replacement page")
 		}
+		if !retain {
+			a.bytes = 0
+		}
 		if len(a.events)+len(delivery.Events) > maxReplacementEvents {
 			a.Reset()
 			return nil, false, errorcode.New(errorcode.ResourceExhausted, "Task replacement exceeds event limit")
@@ -71,8 +88,11 @@ func (a *DeliveryAssembler) Accept(delivery Delivery) (events []eventstream.Enve
 			}
 			a.bytes += len(raw)
 		}
-		a.events = append(a.events, delivery.Events...)
 		a.nextPage++
+		if !retain {
+			return append([]eventstream.Envelope(nil), delivery.Events...), false, nil
+		}
+		a.events = append(a.events, delivery.Events...)
 		return nil, false, nil
 	case DeliveryReplaceEnd:
 		if delivery.Source != SourceReplacement || !a.Pending() || delivery.SnapshotID != a.snapshotID || delivery.Page != a.nextPage || len(delivery.Events) != 0 {

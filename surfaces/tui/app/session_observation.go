@@ -21,9 +21,10 @@ type sessionViewMessage struct {
 }
 
 type sessionViewStartMsg struct {
-	generation uint64
-	state      appserver.SessionState
-	automatic  bool
+	generation  uint64
+	state       appserver.SessionState
+	automatic   bool
+	replacement bool
 }
 
 type sessionObservationErrorMsg struct{ err error }
@@ -115,6 +116,18 @@ func observeSelectedSession(ctx context.Context, sender *ProgramSender, reconnec
 						send(sessionObservationErrorMsg{err: err})
 					}
 					return
+				}
+				if delivery.Kind == appserver.FeedDeliveryReplaceBegin {
+					batcher.flush(send)
+					send(sessionHistoryReplacementMsg{state: reconnect.State()})
+					if err := streamReconnectBackfillFrom(viewCtx, reconnect, send, &delivery); err != nil {
+						if viewCtx.Err() == nil {
+							send(sessionObservationErrorMsg{err: err})
+						}
+						return
+					}
+					send(sessionHistoryReadyMsg{})
+					continue
 				}
 				events, replacement, err := assembler.Accept(delivery)
 				if err != nil || replacement {

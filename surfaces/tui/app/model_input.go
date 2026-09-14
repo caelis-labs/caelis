@@ -75,6 +75,9 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		m.materializeViewportContentIfStale()
 		m.viewport, cmd = m.viewport.Update(msg)
 		m.refreshViewportFollowStateFromOffset()
+		if typed.Mouse().Button == tea.MouseWheelUp {
+			m.demandEarlierHistory("")
+		}
 		var resumeCmd tea.Cmd
 		if m.isViewportFollowTail() && m.offscreenViewportDirty {
 			m.syncViewportContent()
@@ -645,6 +648,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.materializeViewportContentIfStale()
 		m.viewport.HalfPageUp()
 		m.refreshViewportFollowStateFromOffset()
+		m.demandEarlierHistory("")
 		return m, m.touchViewportScrollbar()
 	case key.Matches(msg, m.keys.HalfPageDown):
 		wasFollowTail := m.isViewportFollowTail()
@@ -663,6 +667,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.materializeViewportContentIfStale()
 		m.viewport.PageUp()
 		m.refreshViewportFollowStateFromOffset()
+		m.demandEarlierHistory("")
 		return m, m.touchViewportScrollbar()
 	case key.Matches(msg, m.keys.PageDown):
 		wasFollowTail := m.isViewportFollowTail()
@@ -1367,6 +1372,9 @@ func (m *Model) submitLineWithDisplayAndAttachmentsOptions(execLine string, disp
 	if isSessionSelectionLine(execLine) {
 		m.resetComposerAfterOverlayOpen()
 		return m, m.executeLineCmd(Submission{Text: execLine})
+	}
+	if m.sessionHistoryFailed {
+		return m, m.showHint("Session history unavailable; use /resume to reconnect before sending input.", hintOptions{priority: HintPriorityHigh})
 	}
 	alreadyRunning := m.turnRunning()
 	resolved := resolvedSubmission{

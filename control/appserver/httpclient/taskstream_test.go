@@ -87,7 +87,7 @@ func taskDeliveryJSON(t *testing.T, delivery taskstream.Delivery) []byte {
 	t.Helper()
 	wire := wirev1.TaskStreamDelivery{
 		Kind: string(delivery.Kind), Source: string(delivery.Source), SnapshotID: delivery.SnapshotID,
-		Page: delivery.Page, NextCursor: delivery.NextCursor, ActivityID: delivery.ActivityID,
+		Page: delivery.Page, NextCursor: delivery.NextCursor, HistoryBefore: delivery.HistoryBefore, ActivityID: delivery.ActivityID,
 	}
 	for _, envelope := range delivery.Events {
 		raw, err := wirev1.MarshalEnvelope(envelope)
@@ -101,4 +101,24 @@ func taskDeliveryJSON(t *testing.T, delivery taskstream.Delivery) []byte {
 		t.Fatal(err)
 	}
 	return raw
+}
+
+func TestRemoteTaskSubscribeRequestsAtomicHistory(t *testing.T) {
+	client, closeServer := newFixtureClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("history_snapshot") != "true" || r.URL.Query().Get("follow") != "true" || r.URL.Query().Get("history_turns") != "16" || r.URL.Query().Get("history_before") != "older" {
+			t.Error("missing history/follow request")
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "event: "+wirev1.TaskStreamDoneEventName+"\ndata: {}\n\n")
+	})
+	defer closeServer()
+	tasks, err := NewTaskClient(client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := tasks.Subscribe(t.Context(), taskstream.SubscribeRequest{SessionID: "session", TaskID: "task", Follow: true, HistorySnapshot: true, HistoryTurns: 16, HistoryBefore: "older"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = result.Subscription.Close()
 }

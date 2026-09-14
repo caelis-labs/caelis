@@ -50,7 +50,7 @@ func (r *Runner) LoadHistory(ctx context.Context, raw tasksubagent.HistoryReques
 			return session.LoadedSession{}, err
 		}
 	}
-	_, loaded, err := r.loadChildEndpointLocked(ctx, req.Anchor, &req.Reconnect, slot, false)
+	_, loaded, err := r.loadChildEndpointLocked(ctx, req.Anchor, &req.Reconnect, slot, false, req.MetadataOnly)
 	return loaded, err
 }
 
@@ -81,6 +81,8 @@ type historyCollector struct {
 	events            []*session.Event
 	err               error
 	bytes             int
+	eventCount        int
+	staging           *historyStaging
 }
 
 func newHistoryCollector(runner *Runner, anchor delegation.Anchor, agentName string) *historyCollector {
@@ -108,11 +110,6 @@ func (c *historyCollector) observe(env client.UpdateEnvelope) {
 			return
 		}
 	}
-	c.bytes += len(raw)
-	if len(c.events) >= 8192 || c.bytes > 32<<20 {
-		c.err = errorcode.New(errorcode.ResourceExhausted, "Child replay exceeds observation budget")
-		return
-	}
 	wantSessionID := strings.TrimSpace(c.run.anchor.SessionID)
 	gotSessionID := strings.TrimSpace(env.SessionID)
 	if gotSessionID != wantSessionID {
@@ -135,6 +132,7 @@ func (c *historyCollector) observe(env client.UpdateEnvelope) {
 		}
 		if c.lastUpdateType != client.UpdateUserMessage || messageID != "" && messageID != c.lastUserMessageID {
 			c.flushUserText()
+			c.stageEvents()
 			c.turnSeq++
 			newInputTurn = true
 		}
@@ -145,6 +143,15 @@ func (c *historyCollector) observe(env client.UpdateEnvelope) {
 	}
 	if updateType != client.UpdateUserMessage {
 		c.flushUserText()
+		c.stageEvents()
+	}
+	c.bytes += len(raw)
+	if len(c.events) >= 8192 || c.bytes > 32<<20 {
+		c.err = errorcode.New(errorcode.ResourceExhausted, "Child replay exceeds observation budget")
+		return
+	}
+	if c.err != nil {
+		return
 	}
 	event := c.run.acpUpdateEvent(env, c.runner.clock())
 	if event == nil {
@@ -234,7 +241,8 @@ func (c *historyCollector) appendHistoryEvent(event *session.Event) {
 	}
 	event.Scope.TurnID = fmt.Sprintf("%s:%d", strings.TrimSpace(c.run.taskID), c.turnSeq)
 	event.SessionID = strings.TrimSpace(c.run.anchor.SessionID)
-	event.ID = fmt.Sprintf("subagent-load:%s:%d", strings.TrimSpace(c.run.taskID), len(c.events)+1)
+	c.eventCount++
+	event.ID = fmt.Sprintf("subagent-load:%s:%d", strings.TrimSpace(c.run.taskID), c.eventCount)
 	c.events = append(c.events, event)
 }
 

@@ -1313,12 +1313,13 @@ type SessionControllerModeRequest struct {
 }
 
 type SessionFeedDelivery struct {
-	Events     []Envelope         `json:"events,omitempty"`
-	Kind       StreamDeliveryKind `json:"kind"`
-	NextCursor *string            `json:"next_cursor,omitempty"`
-	Page       *int               `json:"page,omitempty"`
-	SnapshotId *string            `json:"snapshot_id,omitempty"`
-	Source     StreamSourceClass  `json:"source"`
+	Events        []Envelope         `json:"events,omitempty"`
+	HistoryBefore *string            `json:"history_before,omitempty"`
+	Kind          StreamDeliveryKind `json:"kind"`
+	NextCursor    *string            `json:"next_cursor,omitempty"`
+	Page          *int               `json:"page,omitempty"`
+	SnapshotId    *string            `json:"snapshot_id,omitempty"`
+	Source        StreamSourceClass  `json:"source"`
 }
 
 type SessionList struct {
@@ -1681,13 +1682,14 @@ const (
 )
 
 type TaskStreamDelivery struct {
-	ActivityId *string            `json:"activity_id,omitempty"`
-	Events     []Envelope         `json:"events,omitempty"`
-	Kind       StreamDeliveryKind `json:"kind"`
-	NextCursor *string            `json:"next_cursor,omitempty"`
-	Page       *int               `json:"page,omitempty"`
-	SnapshotId *string            `json:"snapshot_id,omitempty"`
-	Source     StreamSourceClass  `json:"source"`
+	ActivityId    *string            `json:"activity_id,omitempty"`
+	Events        []Envelope         `json:"events,omitempty"`
+	HistoryBefore *string            `json:"history_before,omitempty"`
+	Kind          StreamDeliveryKind `json:"kind"`
+	NextCursor    *string            `json:"next_cursor,omitempty"`
+	Page          *int               `json:"page,omitempty"`
+	SnapshotId    *string            `json:"snapshot_id,omitempty"`
+	Source        StreamSourceClass  `json:"source"`
 }
 
 type TerminalExitStatus struct {

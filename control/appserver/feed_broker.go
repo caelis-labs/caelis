@@ -15,6 +15,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	acpprojector "github.com/caelis-labs/caelis/control/appserver/projection"
+	"github.com/caelis-labs/caelis/control/history"
 	"github.com/caelis-labs/caelis/control/streamspool"
 )
 
@@ -39,11 +40,12 @@ type FeedBrokerConfig struct {
 // spool partition. Session storage remains canonical; the spool is a lossy
 // delivery trace and never participates in model-context reconstruction.
 type FeedBroker struct {
-	ref    session.SessionRef
-	reader session.PagedReader
-	spool  streamspool.Store
-	codec  *CursorCodec
-	now    func() time.Time
+	histories history.Cache
+	ref       session.SessionRef
+	reader    session.PagedReader
+	spool     streamspool.Store
+	codec     *CursorCodec
+	now       func() time.Time
 
 	primeMu       sync.Mutex
 	acceptMu      sync.Mutex
@@ -379,6 +381,13 @@ func (b *FeedBroker) subscribeCheckpoint(ctx context.Context, req SubscribeReque
 	if err != nil {
 		return SubscribeResult{}, session.EventCheckpoint{}, err
 	}
+	if err := history.ValidateRequest(req.Cursor, req.HistoryBefore, req.HistoryTurns); err != nil {
+		return SubscribeResult{}, checkpoint, err
+	}
+	if req.HistoryBefore != "" {
+		result, err := b.subscribeEarlier(ctx, req)
+		return result, checkpoint, err
+	}
 	if strings.TrimSpace(req.Cursor) != "" {
 		point, resumePosition, err := b.codec.decodeResume(b.ref.SessionID, req.Cursor)
 		if err != nil {
@@ -433,7 +442,11 @@ func (b *FeedBroker) subscribeCheckpoint(ctx context.Context, req SubscribeReque
 			if err != nil {
 				return SubscribeResult{}, session.EventCheckpoint{}, err
 			}
-			sub := b.startSubscription(ctx, 0, bounds.High, nil, 0, eventstream.DurableFeedPosition{}, "", cursor)
+			window, err := b.historyWindow(ctx, sessionSpoolGeneration(key), key, uint64(bounds.High), req.HistoryTurns)
+			if err != nil {
+				return SubscribeResult{}, checkpoint, err
+			}
+			sub := b.startSubscription(ctx, streamspool.Offset(window.after), bounds.High, nil, 0, eventstream.DurableFeedPosition{}, "", cursor, window)
 			return SubscribeResult{Subscription: sub, BoundaryCursor: cursor, BoundaryPosition: &position}, checkpoint, nil
 		}
 	}
@@ -455,7 +468,11 @@ func (b *FeedBroker) subscribeCheckpoint(ctx context.Context, req SubscribeReque
 	// checkpoint. A canonical commit may be visible to EventCheckpoint before
 	// its producer reaches Publish; following from checkpoint.ThroughSeq would
 	// skip that committed event forever.
-	sub := b.startSubscription(ctx, h0, h0, &d0, d0.Seq, d0, "", boundaryCursor)
+	window, err := b.historyWindow(ctx, "canonical", key, d0.Seq, req.HistoryTurns)
+	if err != nil {
+		return SubscribeResult{}, checkpoint, err
+	}
+	sub := b.startSubscription(ctx, h0, h0, &d0, d0.Seq, d0, "", boundaryCursor, window)
 	return SubscribeResult{
 		Subscription: sub, BoundaryCursor: boundaryCursor, BoundaryPosition: &position,
 	}, checkpoint, nil
@@ -500,8 +517,11 @@ func sessionBoundaryPosition(anchor eventstream.DurableFeedPosition, key streams
 	}}
 }
 
-func (b *FeedBroker) startSubscription(ctx context.Context, start, initialHigh streamspool.Offset, replayThrough *eventstream.DurableFeedPosition, canonicalAfter uint64, lastDurable eventstream.DurableFeedPosition, initialCursor, syncCursor string) *feedSubscription {
+func (b *FeedBroker) startSubscription(ctx context.Context, start, initialHigh streamspool.Offset, replayThrough *eventstream.DurableFeedPosition, canonicalAfter uint64, lastDurable eventstream.DurableFeedPosition, initialCursor, syncCursor string, windows ...feedHistoryWindow) *feedSubscription {
 	sub := newFeedSubscription(ctx, b, start, initialHigh, replayThrough, canonicalAfter, lastDurable, initialCursor, syncCursor)
+	if len(windows) > 0 {
+		sub.history = windows[0]
+	}
 	b.acceptMu.Lock()
 	closed := b.closed
 	b.subsMu.Lock()
@@ -627,6 +647,7 @@ func checkpointBoundaryPosition(ref session.SessionRef, event *session.Event) *e
 }
 
 type feedSubscription struct {
+	history        feedHistoryWindow
 	ctx            context.Context
 	cancel         context.CancelFunc
 	broker         *FeedBroker
@@ -676,6 +697,9 @@ func (s *feedSubscription) run() {
 			s.setErr(err)
 			return
 		}
+		if s.history.finite {
+			return
+		}
 		if !s.spoolAvailable() {
 			if err := s.followCanonical(s.lastDurable); err != nil {
 				s.setErr(err)
@@ -684,6 +708,10 @@ func (s *feedSubscription) run() {
 		}
 	}
 	if err := s.followSpool(s.start); err != nil {
+		if s.history.finite {
+			s.setErr(err)
+			return
+		}
 		if s.ctx.Err() != nil {
 			return
 		}
@@ -733,7 +761,7 @@ func (s *feedSubscription) deliverCanonicalReplacement() error {
 	if !s.deliver(FeedDelivery{Kind: FeedDeliveryReplaceEnd, Source: FeedSourceReplacement, SnapshotID: s.replacementID, Page: page}) {
 		return s.ctx.Err()
 	}
-	if !s.deliver(FeedDelivery{Kind: FeedDeliverySync, Source: FeedSourceExact, NextCursor: s.syncCursor}) {
+	if !s.deliver(FeedDelivery{Kind: FeedDeliverySync, Source: FeedSourceExact, NextCursor: s.syncCursor, HistoryBefore: s.history.before}) {
 		return s.ctx.Err()
 	}
 	s.synced = true
@@ -789,6 +817,7 @@ func (s *feedSubscription) replaceAndFollowCanonical() error {
 		through = s.broker.latestDurable
 		s.broker.acceptMu.Unlock()
 	}
+	s.history = feedHistoryWindow{}
 	s.replayThrough = &through
 	// Replacement covers only the last client-replay projection. Journal-only
 	// or concurrently committed records after it must still be scanned.
@@ -813,7 +842,7 @@ func (s *feedSubscription) replayCanonical() (uint32, error) {
 		}
 		return nil
 	}
-	after := uint64(0)
+	after := s.history.after
 	for after < s.replayThrough.Seq {
 		page, err := s.broker.reader.EventsPage(s.ctx, session.EventPageRequest{
 			SessionRef: s.broker.ref, AfterSeq: after, ThroughSeq: s.replayThrough.Seq,
@@ -1020,12 +1049,36 @@ func (s *feedSubscription) followSpool(offset streamspool.Offset) error {
 		}
 	}()
 	current := offset
+	var page []eventstream.Envelope
+	pageBytes := 0
+	flush := func() bool {
+		if len(page) == 0 {
+			return true
+		}
+		ok := s.deliver(FeedDelivery{Kind: FeedDeliveryAppendPage, Source: FeedSourceExact, Events: page, NextCursor: page[len(page)-1].Cursor})
+		if ok {
+			for _, envelope := range page {
+				if isMainTerminalEnvelope(envelope) {
+					s.rememberDeliveredTerminal(envelope)
+				}
+				if envelope.Position != nil && envelope.Position.Durable != nil && compareDurablePosition(*envelope.Position.Durable, s.lastDurable) > 0 {
+					s.lastDurable = *envelope.Position.Durable
+				}
+			}
+		}
+		page = nil
+		pageBytes = 0
+		return ok
+	}
 	for {
 		if !s.synced && current >= s.initialHigh {
-			if !s.deliver(FeedDelivery{Kind: FeedDeliverySync, Source: FeedSourceExact, NextCursor: s.syncCursor}) {
+			if !s.deliver(FeedDelivery{Kind: FeedDeliverySync, Source: FeedSourceExact, NextCursor: s.syncCursor, HistoryBefore: s.history.before}) {
 				return s.ctx.Err()
 			}
 			s.synced = true
+			if s.history.finite {
+				return nil
+			}
 		}
 		var record streamspool.Record
 		var err error
@@ -1060,17 +1113,14 @@ func (s *feedSubscription) followSpool(offset streamspool.Offset) error {
 			return fmt.Errorf("controlclient: decode Session spool record: %w", err)
 		}
 		current++
-		if !s.deliver(FeedDelivery{
-			Kind: FeedDeliveryAppendPage, Source: FeedSourceExact,
-			Events: []eventstream.Envelope{eventstream.CloneEnvelope(envelope)}, NextCursor: envelope.Cursor,
-		}) {
-			return s.ctx.Err()
-		}
-		if isMainTerminalEnvelope(envelope) {
-			s.rememberDeliveredTerminal(envelope)
-		}
-		if envelope.Position != nil && envelope.Position.Durable != nil && compareDurablePosition(*envelope.Position.Durable, s.lastDurable) > 0 {
-			s.lastDurable = *envelope.Position.Durable
+		page = append(page, envelope)
+		pageBytes += len(record.Payload)
+		// Backfill reads an already captured prefix and needs no per-record
+		// delivery. Once caught up, live records retain immediate delivery.
+		if current >= s.initialHigh || len(page) >= 64 || pageBytes >= 64<<10 {
+			if !flush() {
+				return s.ctx.Err()
+			}
 		}
 	}
 }

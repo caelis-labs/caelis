@@ -28,12 +28,13 @@ const (
 )
 
 type FeedDelivery struct {
-	Kind       string            `json:"kind"`
-	Source     string            `json:"source"`
-	SnapshotID string            `json:"snapshot_id,omitempty"`
-	Page       uint32            `json:"page,omitempty"`
-	Events     []json.RawMessage `json:"events,omitempty"`
-	NextCursor string            `json:"next_cursor,omitempty"`
+	Kind          string            `json:"kind"`
+	Source        string            `json:"source"`
+	SnapshotID    string            `json:"snapshot_id,omitempty"`
+	Page          uint32            `json:"page,omitempty"`
+	Events        []json.RawMessage `json:"events,omitempty"`
+	NextCursor    string            `json:"next_cursor,omitempty"`
+	HistoryBefore string            `json:"history_before,omitempty"`
 }
 
 const (

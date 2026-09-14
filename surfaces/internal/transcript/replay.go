@@ -1,15 +1,13 @@
 package transcript
 
 import (
-	"strings"
-
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 )
 
+// ProjectReplayEvents presents the history selected by Control. Exact spool
+// history may consist solely of transient deltas: filtering those by durability
+// would discard content whose canonical final was suppressed during live delivery.
 func ProjectReplayEvents(events []eventstream.Envelope, surface SurfaceProjector) []Event {
-	if len(events) == 0 {
-		return nil
-	}
 	out := make([]Event, 0, len(events))
 	for _, env := range events {
 		out = append(out, ProjectReplayEvent(env, surface)...)
@@ -17,87 +15,22 @@ func ProjectReplayEvents(events []eventstream.Envelope, surface SurfaceProjector
 	return out
 }
 
+// ProjectReplayEvent presents one Control-selected history envelope without
+// activating historical permission requests or compaction progress.
 func ProjectReplayEvent(env eventstream.Envelope, surface SurfaceProjector) []Event {
-	if projected := replayableACPEvents(env, surface); len(projected) != 0 {
-		return projected
-	}
-	return nil
-}
-
-// replayableACPEvents is a defensive projector boundary for replay envelopes
-// supplied directly as ACP events. Canonical session replay filtering lives in
-// agent-sdk/session.
-func replayableACPEvents(env eventstream.Envelope, surface SurfaceProjector) []Event {
-	if env.Delivery != nil && env.Delivery.Mode == eventstream.DeliveryTransient {
+	// Historical compaction progress and permission interactions are not replayed as
+	// current UI actions. Reconnect bootstrap supplies active approvals separately.
+	if env.Kind == eventstream.KindLifecycle && env.Lifecycle != nil && env.Lifecycle.State == "context_compacting" {
 		return nil
-	}
-	if env.Delivery != nil && env.Delivery.Mode == eventstream.DeliveryMirror {
-		return replayableACPMirrorEvent(env, surface)
 	}
 	switch env.Kind {
 	case eventstream.KindSessionUpdate:
-		return replayableACPSessionUpdate(env, surface)
-	case eventstream.KindAgentCommunication:
-		return ProjectACPEventToEvents(env, surface)
-	case eventstream.KindLifecycle:
-		return replayableACPTraceEvent(env, surface)
-	default:
-		return nil
-	}
-}
-
-func replayableACPMirrorEvent(env eventstream.Envelope, surface SurfaceProjector) []Event {
-	switch env.Kind {
-	case eventstream.KindLifecycle:
-		return ProjectACPEventToEvents(env, surface)
-	case eventstream.KindSessionUpdate:
-		switch env.Update.(type) {
-		case eventstream.ContentChunk, eventstream.ToolCall, eventstream.ToolCallUpdate, eventstream.PlanUpdate, eventstream.UsageUpdate:
-			return ProjectACPEventToEvents(env, surface)
-		}
-	}
-	return nil
-}
-
-func replayableACPSessionUpdate(env eventstream.Envelope, surface SurfaceProjector) []Event {
-	update, ok := env.Update.(eventstream.ContentChunk)
-	if !ok {
-		switch env.Update.(type) {
-		case eventstream.ToolCall, eventstream.ToolCallUpdate, eventstream.PlanUpdate, eventstream.UsageUpdate:
-			return replayableACPTraceEvent(env, surface)
-		default:
+		if eventstream.UpdateType(env.Update) == eventstream.UpdateCompact {
 			return nil
 		}
-	}
-	projected := ProjectACPEventToEvents(env, surface)
-	if len(projected) == 0 {
-		return nil
-	}
-	switch strings.TrimSpace(update.SessionUpdate) {
-	case eventstream.UpdateUserMessage:
-		return projected
-	case eventstream.UpdateAgentMessage, eventstream.UpdateAgentThought:
-		if !env.Final {
-			return nil
-		}
-		return projected
+	case eventstream.KindAgentCommunication, eventstream.KindLifecycle, eventstream.KindParticipant, eventstream.KindApprovalReview:
 	default:
-		return nil
-	}
-}
-
-func replayableACPTraceEvent(env eventstream.Envelope, surface SurfaceProjector) []Event {
-	if !replayableTraceScope(env) {
 		return nil
 	}
 	return ProjectACPEventToEvents(env, surface)
-}
-
-func replayableTraceScope(env eventstream.Envelope) bool {
-	switch ACPEventScope(env.Scope) {
-	case ScopeMain, ScopeParticipant:
-		return true
-	default:
-		return false
-	}
 }

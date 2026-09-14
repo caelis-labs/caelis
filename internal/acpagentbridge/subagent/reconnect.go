@@ -20,7 +20,7 @@ import (
 )
 
 func (r *Runner) reconnectChildEndpointLocked(ctx context.Context, anchor delegation.Anchor, recovery *tasksubagent.ReconnectRequest, slot *childSlot) (*childRun, error) {
-	run, _, err := r.loadChildEndpointLocked(ctx, anchor, recovery, slot, true)
+	run, _, err := r.loadChildEndpointLocked(ctx, anchor, recovery, slot, true, false)
 	return run, err
 }
 
@@ -30,6 +30,7 @@ func (r *Runner) loadChildEndpointLocked(
 	recovery *tasksubagent.ReconnectRequest,
 	slot *childSlot,
 	configure bool,
+	metadataOnly bool,
 ) (reconnected *childRun, loaded session.LoadedSession, reconnectErr error) {
 	if slot != nil {
 		defer func() {
@@ -86,6 +87,7 @@ func (r *Runner) loadChildEndpointLocked(
 	}()
 
 	collector := newHistoryCollector(r, anchor, cfg.Name)
+	defer func() { collector.closeStaging() }()
 	run.replay = collector
 	launchEnv := childRecoveryEnvironment(cfg)
 
@@ -128,7 +130,13 @@ func (r *Runner) loadChildEndpointLocked(
 		func(loadCtx context.Context, activeClient *client.Client) (client.LoadSessionResponse, error) {
 			// A proven auth-required retry starts a new complete replay, never appends
 			// a rejected load's partial history or initialization notices.
+			collector.closeStaging()
 			collector = newHistoryCollector(r, anchor, cfg.Name)
+			if metadataOnly {
+				if _, ok := spawn.Output.(output.StreamingHistoryObserver); ok {
+					collector.openStaging()
+				}
+			}
 			run.mu.Lock()
 			run.replay = collector
 			run.mu.Unlock()
@@ -137,7 +145,11 @@ func (r *Runner) loadChildEndpointLocked(
 					if err := collector.errSnapshot(); err != nil {
 						return err
 					}
-					if observer, ok := spawn.Output.(output.HistoryObserver); ok {
+					if observer, ok := spawn.Output.(output.StreamingHistoryObserver); ok && collector.staging != nil {
+						if err := observer.ReplaceTaskHistoryStream(boundaryCtx, collector.streamEvents); err != nil {
+							return err
+						}
+					} else if observer, ok := spawn.Output.(output.HistoryObserver); ok {
 						if err := observer.ReplaceTaskHistory(boundaryCtx, collector.eventsSnapshot()); err != nil {
 							return err
 						}
@@ -190,7 +202,11 @@ func (r *Runner) loadChildEndpointLocked(
 	r.slots[runKey] = slot
 	r.mu.Unlock()
 	setupCommitted = true
-	return run, session.LoadedSession{Session: session.Session{SessionRef: session.SessionRef{SessionID: anchor.SessionID}, CWD: spawn.CWD}, Events: collector.eventsSnapshot()}, nil
+	loaded = session.LoadedSession{Session: session.Session{SessionRef: session.SessionRef{SessionID: anchor.SessionID}, CWD: spawn.CWD}}
+	if !metadataOnly {
+		loaded.Events = collector.eventsSnapshot()
+	}
+	return run, loaded, nil
 }
 
 func childEndpointFromReconnect(anchor delegation.Anchor, recovery *tasksubagent.ReconnectRequest) agent.ChildEndpointRef {

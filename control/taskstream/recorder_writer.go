@@ -71,7 +71,7 @@ func (r *Recorder) writeLoop(logical streamspool.LogicalKey, p *recordingPartiti
 			}
 			var err error
 			if items[0].replace {
-				err = r.replacePartition(p, logical, records)
+				err = r.replacePartition(p, logical, records, items[0].stream)
 			} else {
 				err = appendOutputRecords(p.writer, records)
 			}
@@ -137,14 +137,20 @@ func appendOutputRecords(writer streamspool.Writer, records []streamspool.Record
 	return nil
 }
 
-func (r *Recorder) replacePartition(p *recordingPartition, logical streamspool.LogicalKey, records []streamspool.Record) error {
+func (r *Recorder) replacePartition(p *recordingPartition, logical streamspool.LogicalKey, records []streamspool.Record, stream func(streamspool.Writer) error) error {
 	ctx := context.Background()
 	staged, err := r.store.Register(ctx, logical, streamspool.WriterOptions{OriginComplete: true, Unpublished: true})
 	if err != nil {
 		return err
 	}
 	discard := func() { _ = staged.Invalidate(ctx); _ = r.store.Remove(ctx, staged.Key()) }
-	if err := appendOutputRecords(staged, records); err != nil {
+	write := func() error {
+		if stream != nil {
+			return stream(staged)
+		}
+		return appendOutputRecords(staged, records)
+	}
+	if err := write(); err != nil {
 		discard()
 		return err
 	}

@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -94,8 +95,17 @@ func (c *TaskClient) Subscribe(ctx context.Context, request taskstream.Subscribe
 		return taskstream.SubscribeResult{}, err
 	}
 	query := make(url.Values)
+	if request.HistoryTurns != 0 {
+		query.Set("history_turns", strconv.Itoa(request.HistoryTurns))
+	}
+	if request.HistoryBefore != "" {
+		query.Set("history_before", request.HistoryBefore)
+	}
 	if cursor := strings.TrimSpace(request.Cursor); cursor != "" {
 		query.Set("after", cursor)
+	}
+	if request.HistorySnapshot {
+		query.Set("history_snapshot", "true")
 	}
 	if request.Follow {
 		query.Set("follow", "true")
@@ -138,7 +148,7 @@ func decodeTaskDelivery(wire wirev1.TaskStreamDelivery) (taskstream.Delivery, er
 	delivery := taskstream.Delivery{
 		Kind: taskstream.DeliveryKind(wire.Kind), Source: taskstream.SourceClass(wire.Source),
 		SnapshotID: wire.SnapshotID, Page: wire.Page,
-		NextCursor: wire.NextCursor, ActivityID: wire.ActivityID,
+		NextCursor: wire.NextCursor, HistoryBefore: wire.HistoryBefore, ActivityID: wire.ActivityID,
 		Events: make([]eventstream.Envelope, 0, len(wire.Events)),
 	}
 	for _, item := range wire.Events {

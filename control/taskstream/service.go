@@ -19,6 +19,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
+	"github.com/caelis-labs/caelis/control/history"
 	"github.com/caelis-labs/caelis/control/streamspool"
 )
 
@@ -55,6 +56,7 @@ type Config struct {
 }
 
 type service struct {
+	histories         history.Cache
 	retainObservation func(session.SessionRef) (func(), error)
 	tasks             task.Store
 	spool             streamspool.Store
@@ -153,6 +155,10 @@ func (s *service) Events(ctx context.Context, principal Principal, req ReadReque
 }
 
 func (s *service) Subscribe(ctx context.Context, principal Principal, req SubscribeRequest) (SubscribeResult, error) {
+	if err := history.ValidateRequest(req.Cursor, req.HistoryBefore, req.HistoryTurns); err != nil {
+		return SubscribeResult{}, err
+	}
+
 	entry, point, cursorPresent, err := s.prepare(ctx, principal, ReadRequest{
 		SessionID: req.SessionID, TaskID: req.TaskID, Cursor: req.Cursor,
 	})
@@ -167,9 +173,12 @@ func (s *service) Subscribe(ctx context.Context, principal Principal, req Subscr
 		sub := newSubscription(ctx)
 		go func() {
 			defer release()
-			s.forwardChild(sub, entry, point, cursorPresent, req.Follow)
+			s.forwardChild(sub, entry, point, cursorPresent, req.Follow, req.HistorySnapshot, req)
 		}()
 		return SubscribeResult{Subscription: sub}, nil
+	}
+	if req.HistoryBefore != "" {
+		return SubscribeResult{}, errorcode.New(errorcode.InvalidArgument, "Earlier history requires a child Task")
 	}
 	source, exact, err := s.selectExact(ctx, entry, point, cursorPresent)
 	if err != nil {

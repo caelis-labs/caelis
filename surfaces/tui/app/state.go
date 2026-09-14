@@ -378,6 +378,11 @@ type Model struct {
 	// are mutated only by the Bubble Tea update loop.
 	viewGeneration           uint64
 	sessionSwitchPending     bool
+	sessionHistoryBefore     string
+	earlierHistory           map[string]*earlierHistoryBuild
+	sessionHistory           *sessionHistoryBuild
+	historyBuilding          bool
+	sessionHistoryFailed     bool
 	sessionDrafts            map[string]sessionDraft
 	currentSessionID         string
 	taskStreamWanted         map[string]bool

@@ -90,6 +90,7 @@ func (m *Model) handlePaneEditorKey(msg tea.KeyMsg) tea.Cmd {
 	case k.Code == tea.KeyHome && state.editor.Value() == "":
 		state.offset = 0
 		state.followTail = false
+		m.demandEarlierHistory(state.callID)
 		return nil
 	case k.Code == tea.KeyPgUp:
 		m.scrollSubagentOutputOverlay(-m.subagentOutputOverlayPageSize())

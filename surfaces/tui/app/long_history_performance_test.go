@@ -7,6 +7,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 	"github.com/caelis-labs/caelis/control/uipreferences"
 	"github.com/charmbracelet/colorprofile"
@@ -212,8 +213,8 @@ func BenchmarkGiantNarrativeWidthReflow(b *testing.B) {
 	}
 }
 
-// This benchmark starts after Control's replacement commit. It measures TUI
-// replay application separately from transport and Runtime startup.
+// This benchmark includes private history construction and the final visible
+// commit, excluding transport and Runtime startup.
 func BenchmarkLongHistoryResumeLayout(b *testing.B) {
 	for _, turns := range []int{32, 256} {
 		b.Run(fmt.Sprintf("turns=%d", turns), func(b *testing.B) {
@@ -224,10 +225,31 @@ func BenchmarkLongHistoryResumeLayout(b *testing.B) {
 				defaultGlamourOutputCache.clear()
 				m := NewModel(Config{NoAnimation: true, ColorProfile: colorprofile.TrueColor})
 				m.Update(tea.WindowSizeMsg{Width: 180, Height: 60})
+				m.Update(sessionViewStartMsg{generation: 1, state: appserver.SessionState{SessionID: "history"}})
 				for start := 0; start < len(events); start += resumeReplayTranscriptBatchSize {
 					m.Update(TranscriptEventsMsg{Events: events[start:min(len(events), start+resumeReplayTranscriptBatchSize)], ReconnectReplay: true})
 				}
-				m.syncViewportContent()
+				m.Update(sessionHistoryReadyMsg{})
+				longHistoryFrameSink = m.View().Content
+			}
+		})
+	}
+}
+
+func BenchmarkRecentHistoryResumeLayout(b *testing.B) {
+	for _, turns := range []int{32, 256} {
+		b.Run(fmt.Sprint(turns), func(b *testing.B) {
+			events := longHistoryTranscript(turns)
+			events = events[len(events)-16*4:]
+			b.Setenv("CAELIS_THEME", "catppuccin-mocha")
+			b.ReportAllocs()
+			for b.Loop() {
+				defaultGlamourOutputCache.clear()
+				m := NewModel(Config{NoAnimation: true, ColorProfile: colorprofile.TrueColor})
+				m.Update(tea.WindowSizeMsg{Width: 180, Height: 60})
+				m.Update(sessionViewStartMsg{generation: 1, state: appserver.SessionState{SessionID: "history"}})
+				m.Update(TranscriptEventsMsg{Events: events, ReconnectReplay: true})
+				m.Update(sessionHistoryReadyMsg{})
 				longHistoryFrameSink = m.View().Content
 			}
 		})

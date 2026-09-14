@@ -21,9 +21,25 @@ type FeedDeliveryAssembler struct {
 	events     []eventstream.Envelope
 }
 
+// AcceptPage validates the same transaction as Accept, but hands each page to
+// a private consumer immediately. The caller must discard pages on failure and
+// publish them only when the returned replacement flag marks ReplaceEnd.
+func (a *FeedDeliveryAssembler) AcceptPage(delivery FeedDelivery) ([]eventstream.Envelope, bool, error) {
+	return a.accept(delivery, false)
+}
+
+// Accept retains replacement pages and returns them together at ReplaceEnd.
+// Use either Accept or AcceptPage consistently within a transaction.
 func (a *FeedDeliveryAssembler) Accept(delivery FeedDelivery) ([]eventstream.Envelope, bool, error) {
+	return a.accept(delivery, true)
+}
+
+func (a *FeedDeliveryAssembler) accept(delivery FeedDelivery, retain bool) ([]eventstream.Envelope, bool, error) {
 	if a == nil {
 		return nil, false, errorcode.New(errorcode.InvalidArgument, "Session delivery assembler is required")
+	}
+	if delivery.HistoryBefore != "" && delivery.Kind != FeedDeliverySync {
+		return nil, false, invalidFeedDelivery("history boundary")
 	}
 	switch delivery.Kind {
 	case FeedDeliveryAppendPage:
@@ -75,8 +91,11 @@ func (a *FeedDeliveryAssembler) Accept(delivery FeedDelivery) ([]eventstream.Env
 				return nil, false, errorcode.New(errorcode.ResourceExhausted, "Session replacement page exceeds byte limit")
 			}
 		}
-		a.events = append(a.events, cloneEnvelopes(delivery.Events)...)
 		a.nextPage++
+		if !retain {
+			return cloneEnvelopes(delivery.Events), false, nil
+		}
+		a.events = append(a.events, cloneEnvelopes(delivery.Events)...)
 		return nil, false, nil
 	case FeedDeliveryReplaceEnd:
 		if delivery.Source != FeedSourceReplacement || !a.Pending() || delivery.SnapshotID != a.snapshotID || delivery.Page != a.nextPage || len(delivery.Events) != 0 || delivery.NextCursor != "" {

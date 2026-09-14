@@ -41,6 +41,7 @@ func (s *service) loadProviderSubagentHistory(
 		role = session.ParticipantRoleDelegated
 	}
 	req := tasksubagent.HistoryRequest{
+		MetadataOnly: true,
 		Anchor: delegation.Anchor{
 			TaskID: strings.TrimSpace(entry.TaskID), SessionID: strings.TrimSpace(childSessionID),
 			AgentID: firstString(mapString(entry.Spec, "agent_id"), mapString(entry.Metadata, "agent_id"), entry.TaskID),

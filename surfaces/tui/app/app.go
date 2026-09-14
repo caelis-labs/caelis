@@ -17,6 +17,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/colorprofile"
 
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 	"github.com/caelis-labs/caelis/control/uipreferences"
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
@@ -228,6 +229,9 @@ func (m *Model) appendWelcomeCard() {
 }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if page, ok := msg.(earlierHistoryMsg); ok {
+		return m, m.handleEarlierHistory(page)
+	}
 	switch scoped := msg.(type) {
 	case sessionViewMessage:
 		if scoped.generation != m.viewGeneration {
@@ -241,24 +245,34 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pendingRenderEvents.reset()
 		m.renderDrainTickScheduled = false
 		m.viewGeneration = scoped.generation
-		if !scoped.automatic {
-			m.sessionSwitchPending = false
-		}
-		claimDraft := scoped.automatic && m.currentSessionID == ""
-		if claimDraft {
-			m.saveSessionDraft()
-			m.sessionDrafts[scoped.state.SessionID] = m.sessionDrafts[""]
-		}
-		cmd := m.applySessionReconnectState(scoped.state)
-		if claimDraft {
-			delete(m.sessionDrafts, "")
-		}
-		return m, cmd
+		return m, m.beginSessionHistory(scoped)
 	case sessionObservationErrorMsg:
+		m.abortSessionHistory()
 		return m, m.showHint(scoped.err.Error(), hintOptions{priority: HintPriorityHigh})
 	}
 	if failure, ok := msg.(sessionObservationErrorMsg); ok {
+		m.abortSessionHistory()
 		return m, m.showHint(failure.err.Error(), hintOptions{priority: HintPriorityHigh})
+	}
+	if replace, ok := msg.(sessionHistoryReplacementMsg); ok {
+		return m, m.beginSessionHistory(sessionViewStartMsg{generation: m.viewGeneration, state: replace.state, replacement: true})
+	}
+	if m.sessionHistory != nil {
+		if position, ok := msg.(sessionHistoryPositionMsg); ok {
+			m.sessionHistory.before = position.before
+			return m, nil
+		}
+		if _, ok := msg.(sessionHistoryResetMsg); ok {
+			return m, m.beginSessionHistory(m.sessionHistory.start)
+		}
+		if env, ok := msg.(eventstream.Envelope); ok && eventstream.IsSessionNotice(env) {
+			m.sessionHistory.model.handleACPEventEnvelope(env)
+			return m, nil
+		}
+		if replay, ok := msg.(TranscriptEventsMsg); ok && replay.ReconnectReplay {
+			m.sessionHistory.model.handleTranscriptEventsMsg(replay)
+			return m, nil
+		}
 	}
 	if status, ok := msg.(StatusRefreshResultMsg); ok && status.viewGeneration != m.viewGeneration {
 		return m, nil
@@ -277,12 +291,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch typed := msg.(type) {
 	case sessionHistoryReadyMsg:
+		commitCmd := m.commitSessionHistory()
 		if !m.turnRunning() {
 			if pending, ok := m.pendingQueue.takeNextDeferred(); ok {
-				return m.submitPendingPromptAsIdle(pending)
+				next, cmd := m.submitPendingPromptAsIdle(pending)
+				return next, tea.Batch(commitCmd, cmd)
 			}
 		}
-		return m, m.beginStatusRefreshCmd()
+		return m, tea.Batch(commitCmd, m.beginStatusRefreshCmd())
 	case sessionPickerResultMsg:
 		return m, m.applySessionPickerResult(typed)
 	case sessionPickerRefreshMsg:

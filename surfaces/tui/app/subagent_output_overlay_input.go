@@ -30,6 +30,9 @@ func (m *Model) scrollSubagentOutputOverlay(delta int) {
 	state := m.subagentOutputOverlay
 	state.offset = maxInt(0, state.offset+delta)
 	state.followTail = delta > 0 && state.offset >= m.subagentOutputOverlayMaxOffset()
+	if delta < 0 {
+		m.demandEarlierHistory(state.callID)
+	}
 }
 
 func (m *Model) subagentOutputOverlayMaxOffset() int {

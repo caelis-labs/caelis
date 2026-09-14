@@ -238,6 +238,9 @@ func TestStreamReconnectBackfillPreservesCanonicalSpawnResult(t *testing.T) {
 		context.Background(),
 		&tuiReconnect{backfill: backfill},
 		func(message tea.Msg) {
+			if _, ok := message.(sessionHistoryResetMsg); ok {
+				return
+			}
 			transcript, ok := message.(TranscriptEventsMsg)
 			if !ok {
 				t.Fatalf("backfill message = %T, want TranscriptEventsMsg", message)

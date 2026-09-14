@@ -14,6 +14,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
+	"github.com/caelis-labs/caelis/agent-sdk/task/output"
 	tasksubagent "github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
@@ -239,61 +240,75 @@ func TestRunnerPromptRecoversConfiguredAuthentication(t *testing.T) {
 }
 
 func TestRunnerLoadHistoryUsesSessionLoadAndPreservesMultipleTurns(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	registry, err := NewRegistry([]AgentConfig{{
-		Name:    "helper",
-		Command: os.Args[0],
-		Args:    []string{"-test.run=TestRunnerPromptFailureHelperProcess", "--"},
-		Env: map[string]string{
-			"CAELIS_ACP_SUBAGENT_HELPER": "history-load",
-		},
-	}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	runner, err := NewRunner(RunnerConfig{Registry: registry})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = runner.Quiesce(context.Background()) }()
-	loaded, err := runner.LoadHistory(ctx, tasksubagent.HistoryRequest{
-		Anchor: delegation.Anchor{TaskID: "task-history", SessionID: "child-history", AgentID: "agent-history"},
-		Reconnect: tasksubagent.ReconnectRequest{
-			Spawn: tasksubagent.SpawnContext{
-				SessionRef: session.SessionRef{SessionID: "parent-history"},
-				CWD:        os.TempDir(),
-				TaskID:     "task-history",
-				Handle:     "helper",
-			},
-			Target: delegation.AgentTarget("helper"),
-		},
-	})
-	if err != nil {
-		t.Fatalf("LoadHistory() error = %v", err)
-	}
-	var (
-		assistantTexts []string
-		assistantTurns []string
-		toolUpdate     *session.ProtocolUpdate
-	)
-	for _, event := range loaded.Events {
-		if event == nil {
-			continue
-		}
-		if session.EventTypeOf(event) == session.EventTypeAssistant && session.ProtocolSessionUpdateType(event) == string(session.ProtocolUpdateTypeAgentMessage) {
-			assistantTexts = append(assistantTexts, session.EventText(event))
-			assistantTurns = append(assistantTurns, event.Scope.TurnID)
-		}
-		if update := session.ProtocolUpdateOf(event); update != nil && update.SessionUpdate == string(session.ProtocolUpdateTypeToolUpdate) {
-			toolUpdate = update
-		}
-	}
-	if fmt.Sprint(assistantTexts) != "[first answer second answer]" || fmt.Sprint(assistantTurns) != "[task-history:1 task-history:2]" {
-		t.Fatalf("assistant history = texts %v turns %v, want two session/load Turns", assistantTexts, assistantTurns)
-	}
-	if toolUpdate == nil || toolUpdate.RawOutput["formatted_output"] != "HISTORY_TOOL_OUTPUT\n" || len(session.ProtocolToolCallContentOf(toolUpdate)) != 0 {
-		t.Fatalf("sparse standard tool update = %#v, want exact session/load update", toolUpdate)
+	for _, metadataOnly := range []bool{false, true} {
+		t.Run(fmt.Sprintf("metadataOnly=%v", metadataOnly), func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			registry, err := NewRegistry([]AgentConfig{{
+				Name:    "helper",
+				Command: os.Args[0],
+				Args:    []string{"-test.run=TestRunnerPromptFailureHelperProcess", "--"},
+				Env: map[string]string{
+					"CAELIS_ACP_SUBAGENT_HELPER": "history-load",
+				},
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			runner, err := NewRunner(RunnerConfig{Registry: registry})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = runner.Quiesce(context.Background()) }()
+			sink := &historyStreamTestSink{}
+			loaded, err := runner.LoadHistory(ctx, tasksubagent.HistoryRequest{
+				MetadataOnly: metadataOnly,
+				Anchor:       delegation.Anchor{TaskID: "task-history", SessionID: "child-history", AgentID: "agent-history"},
+				Reconnect: tasksubagent.ReconnectRequest{
+					Spawn: tasksubagent.SpawnContext{
+						SessionRef: session.SessionRef{SessionID: "parent-history"},
+						CWD:        os.TempDir(),
+						TaskID:     "task-history",
+						Handle:     "helper",
+						Output:     sink,
+					},
+					Target: delegation.AgentTarget("helper"),
+				},
+			})
+			if err != nil {
+				t.Fatalf("LoadHistory() error = %v", err)
+			}
+			var (
+				assistantTexts []string
+				assistantTurns []string
+				toolUpdate     *session.ProtocolUpdate
+			)
+			events := loaded.Events
+			if metadataOnly {
+				if len(events) != 0 {
+					t.Fatal("metadata-only load retained complete history")
+				}
+				events = sink.events
+			}
+			for _, event := range events {
+				if event == nil {
+					continue
+				}
+				if session.EventTypeOf(event) == session.EventTypeAssistant && session.ProtocolSessionUpdateType(event) == string(session.ProtocolUpdateTypeAgentMessage) {
+					assistantTexts = append(assistantTexts, session.EventText(event))
+					assistantTurns = append(assistantTurns, event.Scope.TurnID)
+				}
+				if update := session.ProtocolUpdateOf(event); update != nil && update.SessionUpdate == string(session.ProtocolUpdateTypeToolUpdate) {
+					toolUpdate = update
+				}
+			}
+			if fmt.Sprint(assistantTexts) != "[first answer second answer]" || fmt.Sprint(assistantTurns) != "[task-history:1 task-history:2]" {
+				t.Fatalf("assistant history = texts %v turns %v, want two session/load Turns", assistantTexts, assistantTurns)
+			}
+			if toolUpdate == nil || toolUpdate.RawOutput["formatted_output"] != "HISTORY_TOOL_OUTPUT\n" || len(session.ProtocolToolCallContentOf(toolUpdate)) != 0 {
+				t.Fatalf("sparse standard tool update = %#v, want exact session/load update", toolUpdate)
+			}
+		})
 	}
 }
 
@@ -660,4 +675,12 @@ func TestSubagentPromptFailureDetailIsStable(t *testing.T) {
 	if got := subagentPromptFailureDetail(errors.New("Authorization: Bearer secret")); got != "participant prompt failed" {
 		t.Fatalf("generic detail = %q, want non-sensitive failure summary", got)
 	}
+}
+
+// The source is consumed synchronously, matching the observer ownership contract.
+type historyStreamTestSink struct{ events []*session.Event }
+
+func (*historyStreamTestSink) ObserveTaskOutput(context.Context, output.Event) error { return nil }
+func (s *historyStreamTestSink) ReplaceTaskHistoryStream(ctx context.Context, source output.HistorySource) error {
+	return source(ctx, func(event *session.Event) error { s.events = append(s.events, session.CloneEvent(event)); return nil })
 }
