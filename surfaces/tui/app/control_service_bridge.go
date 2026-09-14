@@ -640,6 +640,8 @@ func executeControlPromptResult(ctx context.Context, service ControlServices, se
 		_, generation := sender.replaceSessionView(ctx, "")
 		sender.SendMsg(sessionViewStartMsg{generation: generation})
 		send = sender.sessionSend(generation)
+		// An empty selection has no history feed to provide its commit boundary.
+		send(sessionHistoryReadyMsg{})
 	}
 	for _, event := range result.Events {
 		if send == nil {

@@ -302,21 +302,24 @@ func TestExecuteControlPromptResultDefersNewSessionStatusAfterClearAndNotice(t *
 		RefreshCommands: true,
 	})
 
-	if len(got) != 4 {
-		t.Fatalf("sent messages = %#v, want clear, notice, deferred status, commands", got)
+	if len(got) != 5 {
+		t.Fatalf("sent messages = %#v, want view start, ready, notice, deferred status, commands", got)
 	}
 	if _, ok := got[0].(sessionViewStartMsg); !ok {
-		t.Fatalf("first message = %#v, want ClearHistoryMsg", got[0])
+		t.Fatalf("first message = %#v, want sessionViewStartMsg", got[0])
 	}
-	if notice, ok := got[1].(SlashNoticeMsg); !ok || notice.Text != "new session: session-2" {
-		t.Fatalf("second message = %#v, want structured new-session notice", got[1])
+	if _, ok := got[1].(sessionHistoryReadyMsg); !ok {
+		t.Fatalf("second message = %#v, want sessionHistoryReadyMsg", got[1])
 	}
-	if _, ok := got[2].(statusRefreshRequestMsg); !ok {
-		t.Fatalf("third message = %#v, want deferred status refresh", got[2])
+	if notice, ok := got[2].(SlashNoticeMsg); !ok || notice.Text != "new session: session-2" {
+		t.Fatalf("third message = %#v, want structured new-session notice", got[2])
 	}
-	commands, ok := got[3].(SetCommandsMsg)
+	if _, ok := got[3].(statusRefreshRequestMsg); !ok {
+		t.Fatalf("fourth message = %#v, want deferred status refresh", got[3])
+	}
+	commands, ok := got[4].(SetCommandsMsg)
 	if !ok || slices.Contains(commands.Commands, "breeze") || slices.Contains(commands.Commands, "orbit") || slices.Contains(commands.Commands, "zenith") || slices.Contains(commands.Commands, "sol") {
-		t.Fatalf("last message = %#v, want unbound profiles and raw Agent IDs hidden", got[3])
+		t.Fatalf("last message = %#v, want unbound profiles and raw Agent IDs hidden", got[4])
 	}
 }
 
@@ -341,23 +344,27 @@ func TestExecuteControlPromptResultOmitsNewSessionSuccessNotice(t *testing.T) {
 			t.Fatalf("sent notice = %#v, want no /new success notice", notice)
 		}
 	}
-	if len(got) != 3 {
-		t.Fatalf("sent messages = %#v, want clear, deferred status, commands", got)
+	if len(got) != 4 {
+		t.Fatalf("sent messages = %#v, want view start, ready, deferred status, commands", got)
 	}
 	if _, ok := got[0].(sessionViewStartMsg); !ok {
-		t.Fatalf("first message = %#v, want ClearHistoryMsg", got[0])
+		t.Fatalf("first message = %#v, want sessionViewStartMsg", got[0])
 	}
-	if _, ok := got[1].(statusRefreshRequestMsg); !ok {
-		t.Fatalf("second message = %#v, want deferred status refresh", got[1])
+	if _, ok := got[1].(sessionHistoryReadyMsg); !ok {
+		t.Fatalf("second message = %#v, want sessionHistoryReadyMsg", got[1])
 	}
-	if _, ok := got[2].(SetCommandsMsg); !ok {
-		t.Fatalf("last message = %#v, want command refresh", got[2])
+	if _, ok := got[2].(statusRefreshRequestMsg); !ok {
+		t.Fatalf("third message = %#v, want deferred status refresh", got[2])
+	}
+	if _, ok := got[3].(SetCommandsMsg); !ok {
+		t.Fatalf("last message = %#v, want command refresh", got[3])
 	}
 
 	model := NewModel(Config{ShowWelcomeCard: true})
 	model.handleUserMessageMsg(UserMessageMsg{Text: "hello"})
-	next, _ := model.Update(ClearHistoryMsg{})
-	model = next.(*Model)
+	for _, msg := range got {
+		model.Update(msg)
+	}
 	for _, block := range model.doc.Blocks() {
 		slash, ok := block.(*slashOutputBlock)
 		if !ok {

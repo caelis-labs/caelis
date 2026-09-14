@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -301,13 +302,14 @@ func TestRawUpdateSurfacesInstallerFailure(t *testing.T) {
 }
 
 func TestInstallTargetDirResolvesSymlink(t *testing.T) {
+	binaryName := rawBinaryName(runtime.GOOS)
 	realDir := t.TempDir()
-	realExe := filepath.Join(realDir, "caelis")
+	realExe := filepath.Join(realDir, binaryName)
 	if err := os.WriteFile(realExe, []byte("binary"), 0o755); err != nil {
 		t.Fatalf("write executable: %v", err)
 	}
 	linkDir := t.TempDir()
-	link := filepath.Join(linkDir, "caelis")
+	link := filepath.Join(linkDir, binaryName)
 	if err := os.Symlink(realExe, link); err != nil {
 		t.Skipf("symlinks unavailable: %v", err)
 	}

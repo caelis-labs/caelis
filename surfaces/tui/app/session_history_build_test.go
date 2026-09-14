@@ -10,9 +10,101 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
+	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/vt"
 )
+
+type newSessionControlService struct {
+	observingControlService
+	resetCalls int
+}
+
+func (s *newSessionControlService) ResetSession(context.Context) error {
+	s.resetCalls++
+	s.selected.Store(false)
+	return nil
+}
+
+func TestNewCommandCommitsEmptySessionView(t *testing.T) {
+	feed := newObservationTestFeed("session-old")
+	service := &newSessionControlService{observingControlService: observingControlService{feed: feed}}
+	messages := make(chan tea.Msg, 32)
+	sender := &ProgramSender{Send: func(msg tea.Msg) { messages <- msg }}
+	t.Cleanup(sender.Close)
+	cfg := ConfigFromControlService(service, sender, Config{
+		Context: t.Context(), PromptRouterFactory: controlprompt.New,
+		NoColor: true, NoAnimation: true, ShowWelcomeCard: true,
+	})
+	m := NewModel(cfg)
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	applyMessages := func() {
+		for len(messages) > 0 {
+			m.Update(<-messages)
+		}
+	}
+	if msg := cfg.executeLineCmd(Submission{Text: "/resume session-old"}); msg != nil {
+		t.Fatalf("resume completion = %#v, want following observation", msg)
+	}
+	applyMessages()
+	if m.currentSessionID != "session-old" || m.sessionHistory != nil {
+		t.Fatal("initial Session did not attach through the command bridge")
+	}
+	m.handleUserMessageMsg(UserMessageMsg{Text: "previous session transcript"})
+	m.textarea.SetValue("previous session draft")
+	frames := []string{m.View().Content}
+	responses := make(chan PromptResponse, 1)
+	dismissed := false
+	m.enqueuePrompt(PromptRequestMsg{
+		ApprovalRequestID: "approval-old", Response: responses,
+		dismiss: func() { dismissed = true },
+	})
+	subscription := newTUIProtocolTaskSubscription()
+	t.Cleanup(func() { _ = subscription.Close() })
+	m.taskStreamSubscriptions["task-old"] = subscription
+	m.pendingQueue.enqueue(pendingPromptEnqueueOptions{execLine: "old queued input", deferUntilIdle: true})
+
+	cmd := m.executeLineCmd(Submission{Text: "/new"})
+	if cmd == nil {
+		t.Fatal("/new did not dispatch")
+	}
+	completion := cmd()
+	applyMessages()
+	if service.resetCalls != 1 || service.SessionID() != "" {
+		t.Fatal("/new did not reset the Control selection")
+	}
+	// The command bridge must commit the empty view before command completion;
+	// there is no reconnect feed to provide a later history-ready message.
+	if m.currentSessionID != "" || m.sessionHistory != nil || m.sessionSwitchPending {
+		t.Fatalf("/new left Session=%q historyPending=%v switching=%v", m.currentSessionID, m.sessionHistory != nil, m.sessionSwitchPending)
+	}
+	m.Update(completion)
+	if result, ok := unwrapSessionViewMessage(completion).(TaskResultMsg); !ok || result.Err != nil {
+		t.Fatalf("/new completion = %#v", completion)
+	}
+	if len(m.doc.Blocks()) != 1 || len(m.doc.FindByKind(BlockWelcome)) != 1 {
+		t.Fatal("/new did not replace the old document with the launch view")
+	}
+	if !dismissed || m.activePrompt != nil || len(responses) != 0 || len(m.pendingQueue) != 0 || m.textarea.Value() != "" {
+		t.Fatal("/new retained old interaction or answered an approval")
+	}
+	if subscription.closeCalls.Load() != 1 || len(m.taskStreamSubscriptions) != 0 {
+		t.Fatal("/new left old Task subscriptions open")
+	}
+	select {
+	case <-feed.done:
+	case <-time.After(time.Second):
+		t.Fatal("/new left the old Session observation open")
+	}
+	m.Update(sessionViewMessage{generation: 1, message: LogChunkMsg{Chunk: "late old output"}})
+	frames = append(frames, m.View().Content)
+	plain := ansi.Strip(frames[1])
+	if !welcomeFrameVisible(plain) || strings.Contains(plain, "previous session transcript") || strings.Contains(plain, "late old output") || strings.Contains(plain, sessionHistoryLoadingHint) {
+		t.Fatalf("/new rendered stale Session content:\n%s", plain)
+	}
+	updates := renderFullscreenFramesForTest(t, m.width, m.height, frames...)
+	assertPhysicalFullscreenFrame(t, m.width, m.height, frames[1], updates)
+}
 
 func TestSessionHistoryCommitsExactNarrativeOnlyWhenReady(t *testing.T) {
 	m := NewModel(Config{NoColor: true, NoAnimation: true})

@@ -63,12 +63,6 @@ func TestFirstPromptSubmissionDoesNotResurrectWelcome(t *testing.T) {
 		t.Fatalf("welcome blocks after first prompt lifecycle = %d, want 0", got)
 	}
 
-	// A terminal with no Session is the launch view again; its reset re-seeds
-	// the card so an unattached reset (/new) still shows it.
-	model.Update(sessionViewStartMsg{generation: 2, state: appserver.SessionState{}})
-	model.Update(sessionHistoryReadyMsg{})
-	record("launch reset", true)
-
 	terminal := vt.NewSafeEmulator(width, height)
 	t.Cleanup(func() { _ = terminal.Close() })
 
