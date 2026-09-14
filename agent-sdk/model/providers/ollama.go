@@ -140,6 +140,10 @@ func (l *ollamaLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 			Tools:    fromKernelTools(model.FunctionToolDefinitions(req.Tools), false),
 			Stream:   req.Stream,
 		}
+		// Ollama's native chat protocol has no tool-choice control.
+		if req.DisableTools {
+			payload.Tools = nil
+		}
 		if think := ollamaThinkValue(req.Reasoning, l.reasoningMode); think != nil {
 			payload.Think = think
 		}

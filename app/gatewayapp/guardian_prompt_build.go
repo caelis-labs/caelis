@@ -18,6 +18,7 @@ const (
 	guardianMaxActionDepth           = 16
 	guardianMaxActionNodes           = 2048
 	guardianMaxActionCollectionItems = 512
+	guardianMaxActionBytes           = 128 * 1024
 )
 
 type guardianPromptItems struct {
@@ -25,6 +26,7 @@ type guardianPromptItems struct {
 	UserEvidence           []string
 	ParentCursor           guardianParentCanonicalCursor
 	MandatoryInputTooLarge bool
+	ContextTrimmed         bool
 }
 
 func guardianCompactionConfig(llm model.LLM, output *model.OutputSpec) sdkruntime.CompactionConfig {
@@ -84,9 +86,15 @@ func guardianModelRequest(history []*session.Event, input string, output *model.
 	if input = strings.TrimSpace(input); input != "" {
 		messages = append(messages, model.NewTextMessage(model.RoleUser, input))
 	}
+	var tools []model.ToolSpec
+	for _, t := range (&guardianQueries{}).tools() {
+		definition := t.Definition()
+		tools = append(tools, model.NewFunctionToolSpec(definition.Name, definition.Description, definition.InputSchema))
+	}
 	return &model.Request{
-		Instructions: []model.Part{model.NewTextPart(guardianPolicyPrompt())},
+		Instructions: []model.Part{model.NewTextPart(guardianPolicyPrompt() + "\n\n" + guardianEnvironmentContext(sandbox.NetworkEnabled))},
 		Messages:     messages,
+		Tools:        tools,
 		Output:       model.CloneOutputSpec(output),
 	}
 }
@@ -148,7 +156,7 @@ func guardianOversizedActionJSON() string {
 }
 
 func guardianActionWithinStructuralLimits(value any) bool {
-	nodes := 0
+	nodes, bytes := 0, 0
 	var visit func(any, int) bool
 	visit = func(current any, depth int) bool {
 		if depth > guardianMaxActionDepth {
@@ -159,11 +167,18 @@ func guardianActionWithinStructuralLimits(value any) bool {
 			return false
 		}
 		switch typed := current.(type) {
+		case string:
+			bytes += len(typed)
+		case json.RawMessage:
+			bytes += len(typed)
+		case []byte:
+			bytes += len(typed)
 		case map[string]any:
 			if len(typed) > guardianMaxActionCollectionItems {
 				return false
 			}
-			for _, item := range typed {
+			for key, item := range typed {
+				bytes += len(key)
 				if !visit(item, depth+1) {
 					return false
 				}
@@ -178,7 +193,7 @@ func guardianActionWithinStructuralLimits(value any) bool {
 				}
 			}
 		}
-		return true
+		return bytes <= guardianMaxActionBytes
 	}
 	return visit(value, 1)
 }

@@ -90,7 +90,7 @@ func guardianUnavailableError(cause error) *Error {
 		Code:        CodeGuardianUnavailable,
 		Retryable:   true,
 		UserVisible: true,
-		Message:     "guardian_unavailable: Guardian could not produce a valid decision within its bounded model and validation policy; no action was executed and this Turn stopped; retry the Turn after Guardian is available",
+		Message:     "guardian_unavailable: automatic review could not produce a valid decision; this action was not executed. This is not a risk rejection. Other task work may continue; do not repeatedly resubmit this approval.",
 		Detail:      "guardian_execution_unavailable",
 		Cause:       cause,
 	}

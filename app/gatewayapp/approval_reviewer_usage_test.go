@@ -42,6 +42,13 @@ type guardianReceiptFailureStore struct {
 	failure error
 }
 
+func (s guardianReceiptFailureStore) EventsPage(ctx context.Context, req session.EventPageRequest) (session.EventPage, error) {
+	return s.Service.(session.PagedReader).EventsPage(ctx, req)
+}
+func (s guardianReceiptFailureStore) EventCheckpoint(ctx context.Context, ref session.SessionRef) (session.EventCheckpoint, error) {
+	return s.Service.(session.EventCheckpointReader).EventCheckpoint(ctx, ref)
+}
+
 func (s guardianReceiptFailureStore) AppendEvent(ctx context.Context, req session.AppendEventRequest) (*session.Event, error) {
 	if session.IsModelInvocationReceipt(req.Event) {
 		return nil, s.failure
@@ -106,7 +113,8 @@ func TestGuardianAccountingFailureKeepsCompletedDecision(t *testing.T) {
 		t.Fatal("accounting fault repeated decision")
 	}
 	var diagnostic map[string]any
-	if err := json.Unmarshal(diagnostics.Bytes(), &diagnostic); err != nil {
+	lines := bytes.Split(bytes.TrimSpace(diagnostics.Bytes()), []byte("\n"))
+	if err := json.Unmarshal(lines[len(lines)-1], &diagnostic); err != nil {
 		t.Fatalf("decode accounting diagnostic: %v; %s", err, diagnostics.String())
 	}
 	if diagnostic["msg"] != "Guardian usage persistence failed" || diagnostic["session_id"] != req.SessionRef.SessionID || diagnostic["review_id"] != req.ReviewID || diagnostic["error"] != (&guardianUsagePersistenceError{cause: failure}).Error() {

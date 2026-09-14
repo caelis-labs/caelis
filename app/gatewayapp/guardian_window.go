@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
+	"unicode/utf8"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	sdkruntime "github.com/caelis-labs/caelis/agent-sdk/runtime"
@@ -14,81 +16,25 @@ import (
 
 const guardianUserSource = "guardian_user_source"
 const guardianTurnKey = "guardian_turn"
-const guardianCallKey = "guardian_source_call"
-const guardianPendingCallKey = "guardian_pending_source_call"
-const guardianInitialCalls = 3
 
 // guardianWindow prepares an append-only input sequence. Source users have a
 // separate budget and survive removal of the surrounding completed turns.
 func guardianWindow(snapshot guardianConversationSnapshot, req kernel.ApprovalReviewRequest, output *model.OutputSpec) ([]*session.Event, guardianPromptItems, error) {
 	history := session.CloneEvents(snapshot.Events)
 	items := guardianPromptItems{ParentCursor: snapshot.ParentCursor}
-	// Source sequence owns identity. A call ID may be reused by an endpoint.
-	// Only consume one not-yet-recorded call for each previous approval; retained
-	// operation previews must not suppress later calls with the same ID.
-	pending := map[string][]*session.Event{}
-	for _, e := range history {
-		if e != nil && e.Meta[guardianPendingCallKey] == true {
-			if id, ok := e.Meta[guardianCallKey].(string); ok {
-				pending[id] = append(pending[id], e)
-			}
-		}
-	}
-	skipped := map[uint64]bool{}
-	currentSeq := guardianCurrentSourceCall(snapshot, req)
 	for _, e := range snapshot.ParentEvents {
-		if e == nil || e.Seq <= snapshot.ParentCursor.EventSeq || !session.IsCanonicalHistoryEvent(e) || session.EventTypeOf(e) != session.EventTypeToolCall || e.Tool == nil {
-			continue
-		}
-		key := e.SessionID + ":" + e.Tool.ID
-		if previous := pending[key]; len(previous) > 0 {
-			delete(previous[0].Meta, guardianPendingCallKey)
-			pending[key] = previous[1:]
-			skipped[e.Seq] = true
-		}
-	}
-	if currentSeq != 0 {
-		skipped[currentSeq] = true
-	}
-	var calls []*session.Event
-	for _, e := range snapshot.ParentEvents {
-		if e == nil || !session.IsCanonicalHistoryEvent(e) {
-			continue
-		}
-		if e.Seq <= snapshot.ParentCursor.EventSeq {
+		if e == nil || e.Seq <= snapshot.ParentCursor.EventSeq || !session.IsCanonicalHistoryEvent(e) {
 			continue
 		}
 		if e.Seq > items.ParentCursor.EventSeq {
 			items.ParentCursor = guardianParentCanonicalCursor{EventID: e.ID, EventSeq: e.Seq}
 		}
-		if session.EventTypeOf(e) == session.EventTypeToolCall && session.IsMainInvocationVisibleEvent(e) && e.Tool != nil && !skipped[e.Seq] {
-			calls = append(calls, e)
-		}
-	}
-	firstCall := uint64(0)
-	if len(calls) > guardianInitialCalls {
-		firstCall = calls[len(calls)-guardianInitialCalls].Seq
-	}
-	for _, e := range snapshot.ParentEvents {
-		if e == nil || e.Seq <= snapshot.ParentCursor.EventSeq || !session.IsCanonicalHistoryEvent(e) {
-			continue
-		}
-		if session.EventTypeOf(e) == session.EventTypeUser && (e.Actor.Kind == session.ActorKindUser || e.Actor.Kind == "") {
-			text := guardianVisibleText(e)
-			if text == "" {
-				continue
-			}
-			one := guardianEvidenceEvent(fmt.Sprintf("User message [session=%s seq=%d]:\n%s", e.SessionID, e.Seq, text))
-			one.Meta[guardianUserSource] = fmt.Sprintf("%s:%d", e.SessionID, e.Seq)
-			history = append(history, one)
-		} else if session.EventTypeOf(e) == session.EventTypeToolCall && session.IsMainInvocationVisibleEvent(e) && e.Seq >= firstCall && e.Tool != nil && !skipped[e.Seq] {
-			input, _ := json.Marshal(e.Tool.Input)
-			text := fmt.Sprintf("Operation [session=%s seq=%d tool_call_id=%s tool=%s]\n%s", e.SessionID, e.Seq, e.Tool.ID, e.Tool.Name, guardianFold(string(input), 2048))
-			one := guardianEvidenceEvent(text)
-			one.Meta[guardianTurnKey] = req.ReviewID
-			one.Meta[guardianCallKey] = e.SessionID + ":" + e.Tool.ID
+		if one := guardianProjectEvent(e); one != nil {
 			history = append(history, one)
 		}
+	}
+	if snapshot.SourceCursor.EventSeq > items.ParentCursor.EventSeq {
+		items.ParentCursor = snapshot.SourceCursor
 	}
 	action, oversized, err := guardianPlannedActionJSON(req)
 	if err != nil {
@@ -112,8 +58,11 @@ func guardianWindow(snapshot guardianConversationSnapshot, req kernel.ApprovalRe
 		limit = 24000
 	}
 	// Reserve room for exact input, schema and evidence gathered in this turn.
-	userBudget := min(32000, max(1024, limit*4/10)) * 3
-	turnBudget := min(24000, max(1024, limit*3/10)) * 3
+	userBudget := min(6000, max(1024, limit*3/10)) * 3
+	// Structured messages contain JSON framing as well as prose. The exact
+	// token check below remains authoritative; the byte cap bounds retention.
+	turnBudget := min(8000, max(1024, limit*3/10)) * 6
+	beforeRetention := append([]*session.Event(nil), history...)
 	history = guardianTrimUsers(history, userBudget)
 	history = guardianTrimTurns(history, turnBudget, req.ReviewID)
 	for len(history) > 0 && sdkruntime.EvaluateModelRequestBudget(req.Model, guardianModelRequest(history, items.Text, output), cfg).Usage.TotalTokens > limit*8/10 {
@@ -126,6 +75,7 @@ func guardianWindow(snapshot guardianConversationSnapshot, req kernel.ApprovalRe
 	if sdkruntime.EvaluateModelRequestBudget(req.Model, guardianModelRequest(history, items.Text, output), cfg).Usage.TotalTokens > limit {
 		items.MandatoryInputTooLarge = true
 	}
+	items.ContextTrimmed = !reflect.DeepEqual(beforeRetention, history)
 	return history, items, nil
 }
 
@@ -134,12 +84,27 @@ func guardianEvidenceEvent(text string) *session.Event {
 	return &session.Event{Type: session.EventTypeUser, Visibility: session.VisibilityCanonical, Actor: session.ActorRef{Kind: session.ActorKindSystem, Name: "guardian_evidence"}, Message: &message, Text: text, Meta: map[string]any{}}
 }
 func guardianFold(text string, limit int) string {
-	runes := []rune(text)
-	if len(runes) <= limit {
+	if len(text) <= limit {
 		return text
 	}
 	n := limit / 2
-	return string(runes[:n]) + fmt.Sprintf("\n[folded %d characters; original remains in Session JSONL]\n", len(runes)-2*n) + string(runes[len(runes)-n:])
+	first, last := 0, len(text)
+	for range n {
+		if first >= last {
+			return text
+		}
+		_, size := utf8.DecodeRuneInString(text[first:last])
+		first += size
+		if first >= last {
+			return text
+		}
+		_, size = utf8.DecodeLastRuneInString(text[first:last])
+		last -= size
+	}
+	if first >= last {
+		return text
+	}
+	return text[:first] + fmt.Sprintf("\n[folded %d bytes; source event can be read with ReadEvents]\n", last-first) + text[last:]
 }
 func guardianTrimUsers(events []*session.Event, budget int) []*session.Event {
 	total := func() int {
@@ -162,14 +127,26 @@ func guardianTrimUsers(events []*session.Event, budget int) []*session.Event {
 			break
 		}
 		old := events[largest]
-		one := guardianEvidenceEvent(guardianFold(session.EventText(old), 2048))
+		one := session.CloneEvent(old)
+		text := guardianFold(session.EventText(old), 2048)
+		message := model.NewTextMessage(model.RoleUser, text)
+		one.Message, one.Text = &message, text
 		one.Meta = session.CloneState(old.Meta)
 		events[largest] = one
 	}
 	for total() > budget {
 		dropped := false
+		first, last := -1, -1
 		for i, e := range events {
 			if guardianIsUser(e) {
+				if first < 0 {
+					first = i
+				}
+				last = i
+			}
+		}
+		for i, e := range events {
+			if guardianIsUser(e) && i != first && i != last {
 				events = append(events[:i:i], events[i+1:]...)
 				dropped = true
 				break
@@ -215,7 +192,13 @@ func guardianTrimTurns(events []*session.Event, budget int, current string) []*s
 		n := 0
 		for _, e := range events {
 			if !guardianIsUser(e) {
-				raw, _ := json.Marshal(e)
+				// Budget the model input, not duplicated Event.Text, metadata,
+				// IDs and journal provenance that never enter the model prefix.
+				message, ok := session.ModelMessageOf(e)
+				if !ok {
+					message = model.NewTextMessage(model.RoleUser, session.EventText(e))
+				}
+				raw, _ := json.Marshal(message)
 				n += len(raw)
 			}
 		}
@@ -225,8 +208,8 @@ func guardianTrimTurns(events []*session.Event, budget int, current string) []*s
 		return events
 	}
 	// A low-water target buys several append-only turns after each trim.
-	// Retain at most three completed turns, or fewer when large tool evidence
-	// needs more room. Never split the active turn or move user-source messages.
+	// Never split the active turn or move user-source messages. Turn count is
+	// not a budget: many short approvals can share the same cache epoch.
 	for {
 		groups := map[string]bool{}
 		for _, e := range events {
@@ -234,7 +217,7 @@ func guardianTrimTurns(events []*session.Event, budget int, current string) []*s
 				groups[key] = true
 			}
 		}
-		if len(groups) <= 3 && size() <= budget*6/10 {
+		if size() <= budget*6/10 || (len(groups) <= 1 && size() <= budget) {
 			return events
 		}
 		next := guardianDropOldestTurn(events, current)
@@ -254,33 +237,4 @@ func (guardianTurnCompactor) Prepare(_ context.Context, req compact.Request) (co
 }
 func (guardianTurnCompactor) CompactOnOverflow(_ context.Context, _ compact.Request, err error) (compact.Result, error) {
 	return compact.Result{}, fmt.Errorf("guardian active turn exceeded context budget: %w", err)
-}
-
-func guardianApprovalCallKey(req kernel.ApprovalReviewRequest) string {
-	id := req.RuntimeRequest.Call.ID
-	if req.Approval != nil && req.Approval.ToolCallID != "" {
-		id = req.Approval.ToolCallID
-	}
-	if id == "" {
-		return ""
-	}
-	source := req.SessionRef.SessionID
-	if origin := req.RuntimeRequest.Origin; origin != nil && origin.SessionID != "" {
-		source = origin.SessionID
-	}
-	return source + ":" + id
-}
-
-// guardianCurrentSourceCall finds the current request in the unconsumed source
-// interval. Providers normally use unique IDs; choosing the latest occurrence
-// also preserves preceding calls when an endpoint reuses an ID.
-func guardianCurrentSourceCall(snapshot guardianConversationSnapshot, req kernel.ApprovalReviewRequest) uint64 {
-	key := guardianApprovalCallKey(req)
-	var seq uint64
-	for _, e := range snapshot.ParentEvents {
-		if e != nil && e.Seq > snapshot.ParentCursor.EventSeq && session.IsCanonicalHistoryEvent(e) && session.EventTypeOf(e) == session.EventTypeToolCall && e.Tool != nil && e.SessionID+":"+e.Tool.ID == key {
-			seq = e.Seq
-		}
-	}
-	return seq
 }

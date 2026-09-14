@@ -2,10 +2,12 @@ package gatewayapp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -74,6 +76,8 @@ type systemManagedAgentRunRequest struct {
 }
 
 type systemManagedAgentRunResult struct {
+	RuntimeReused  bool
+	PrepareMS      int64
 	AssistantEvent *session.Event
 	ContextEvents  []*session.Event
 	Text           string
@@ -109,6 +113,38 @@ func boolPtr(value bool) *bool {
 
 type systemManagedAgentRuntime struct {
 	config systemManagedAgentRuntimeConfig
+	// A resident execution is exclusively leased by its domain owner. It is
+	// replaced only when the supplied checkpoint no longer extends its history.
+	resident  bool
+	execution *systemManagedAgentExecution
+}
+
+type systemManagedAgentExecution struct {
+	staging session.Service
+	core    *sdkruntime.Runtime
+	history []*session.Event
+	key     string
+}
+
+func systemManagedExecutionKey(plan systemManagedAgentRunPlan) string {
+	definitions := make([]tool.Definition, 0, len(plan.Tools))
+	for _, t := range plan.Tools {
+		definitions = append(definitions, t.Definition())
+	}
+	key, _ := json.Marshal([]any{plan.Session.SessionID, plan.Model.Name(), plan.PolicyInstructions, definitions, plan.Output, plan.Compaction})
+	return string(key)
+}
+
+func systemManagedHistoryExtends(previous, next []*session.Event) bool {
+	if len(previous) > len(next) {
+		return false
+	}
+	for i, event := range previous {
+		if event == nil || next[i] == nil || session.EventTypeOf(event) != session.EventTypeOf(next[i]) || !reflect.DeepEqual(event.Message, next[i].Message) || session.EventText(event) != session.EventText(next[i]) {
+			return false
+		}
+	}
+	return true
 }
 
 type systemManagedAgentRuntimeConfig struct {
@@ -149,6 +185,7 @@ func newSystemManagedAgentRuntimeWithConfig(config systemManagedAgentRuntimeConf
 }
 
 func (r *systemManagedAgentRuntime) Run(ctx context.Context, req systemManagedAgentRunRequest) (systemManagedAgentRunResult, error) {
+	started := time.Now()
 	plan, err := systemManagedAgentRunPlanFor(req)
 	if err != nil {
 		return systemManagedAgentRunResult{}, err
@@ -175,7 +212,19 @@ func (r *systemManagedAgentRuntime) Run(ctx context.Context, req systemManagedAg
 	// session. The domain owner validates the result before atomically advancing
 	// its process-local conversation, so a malformed attempt receives the common
 	// safety and journal pipeline without poisoning the next model prefix.
-	staging := config.StagingSessions()
+	var previous *systemManagedAgentExecution
+	key := systemManagedExecutionKey(plan)
+	if r != nil && r.resident && r.execution != nil && r.execution.key == key && systemManagedHistoryExtends(r.execution.history, plan.Events) {
+		previous = r.execution
+	}
+	var staging session.Service
+	seed := plan.Events
+	if previous != nil {
+		staging = previous.staging
+		seed = seed[len(previous.history):]
+	} else {
+		staging = config.StagingSessions()
+	}
 	if staging == nil {
 		return systemManagedAgentRunResult{}, fmt.Errorf("gatewayapp: system-managed agent staging session service is unavailable")
 	}
@@ -188,12 +237,12 @@ func (r *systemManagedAgentRuntime) Run(ctx context.Context, req systemManagedAg
 	if err != nil {
 		return systemManagedAgentRunResult{}, err
 	}
-	if len(plan.Events) > 0 {
+	if len(seed) > 0 {
 		batch, ok := staging.(session.EventBatchService)
 		if !ok {
 			return systemManagedAgentRunResult{}, fmt.Errorf("gatewayapp: system-managed agent staging service requires event batches")
 		}
-		if _, err := batch.AppendEvents(stagingCtx, session.AppendEventsRequest{SessionRef: activeSession.SessionRef, Events: session.CloneEvents(plan.Events)}); err != nil {
+		if _, err := batch.AppendEvents(stagingCtx, session.AppendEventsRequest{SessionRef: activeSession.SessionRef, Events: session.CloneEvents(seed)}); err != nil {
 			return systemManagedAgentRunResult{}, err
 		}
 	}
@@ -214,18 +263,23 @@ func (r *systemManagedAgentRuntime) Run(ctx context.Context, req systemManagedAg
 	if plan.Purpose == systemManagedAgentPurposeApprovalReview {
 		compactor = guardianTurnCompactor{}
 	}
-	core, err := sdkruntime.New(sdkruntime.Config{
-		Compactor:             compactor,
-		Sessions:              staging,
-		AgentFactory:          config.AgentFactory,
-		Compaction:            plan.Compaction,
-		LifecycleInterceptors: config.LifecycleInterceptors,
-		TraceSink:             config.TraceSink,
-		Guardrails:            config.Guardrails,
-		Diagnostics:           config.Diagnostics,
-	})
-	if err != nil {
-		return systemManagedAgentRunResult{}, err
+	var core *sdkruntime.Runtime
+	if previous != nil {
+		core = previous.core
+	} else {
+		core, err = sdkruntime.New(sdkruntime.Config{
+			Compactor:             compactor,
+			Sessions:              staging,
+			AgentFactory:          config.AgentFactory,
+			Compaction:            plan.Compaction,
+			LifecycleInterceptors: config.LifecycleInterceptors,
+			TraceSink:             config.TraceSink,
+			Guardrails:            config.Guardrails,
+			Diagnostics:           config.Diagnostics,
+		})
+		if err != nil {
+			return systemManagedAgentRunResult{}, err
+		}
 	}
 	run, err := core.Run(stagingCtx, agent.RunRequest{
 		SessionRef: activeSession.SessionRef,
@@ -255,7 +309,17 @@ func (r *systemManagedAgentRuntime) Run(ctx context.Context, req systemManagedAg
 		return systemManagedAgentRunResult{}, fmt.Errorf("gatewayapp: system-managed agent runtime returned no handle")
 	}
 	defer run.Handle.Close()
-	return collectSystemManagedAgentResult(stagingCtx, staging, activeSession.SessionRef, baselineSeq, run.Handle)
+	prepareMS := guardianElapsed(started)
+	result, err := collectSystemManagedAgentResult(stagingCtx, staging, activeSession.SessionRef, baselineSeq, run.Handle)
+	result.RuntimeReused, result.PrepareMS = previous != nil, prepareMS
+	if r != nil && r.resident {
+		if err == nil {
+			r.execution = &systemManagedAgentExecution{staging: staging, core: core, history: session.CloneEvents(result.ContextEvents), key: key}
+		} else {
+			r.execution = nil
+		}
+	}
+	return result, err
 }
 
 // collectSystemManagedAgentResult waits for producer quiescence, then reads the

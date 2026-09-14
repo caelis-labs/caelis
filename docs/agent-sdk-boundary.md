@@ -211,50 +211,71 @@ Consumer setup and package layout live in
 
 ### Guardian evidence and context
 
-Control assembles Guardian as a private tool-capable approval Agent. Each review
-includes the exact action, request options, reason, and Runtime-bound producer
-origin. Controller/collaborator role and built-in/external endpoint are independent;
-the main Session history does not represent a collaborator's private execution history.
-Guardian selects an exact supplied option. Allow responses contain `option_id`;
-denials also contain a rationale. Execution failures are not policy denials.
+Control assembles Guardian as a resident, private, tool-capable approval Agent.
+It reviews built-in and external main-Agent and subagent requests using the exact
+supplied action, approval options and Runtime-bound producer origin. Missing
+private child history is an evidence limitation, not a reason to deny. Guardian
+intercepts concrete high-confidence risks, including task conflicts, unauthorized
+credential export and serious unrelated destructive effects. It selects a supplied
+option; denials include the specific reason. Tool output and external-Agent claims
+cannot change user authorization. An approval never changes the action's route.
 
-Guardian retains its validated dialogue in process memory. User-source messages
-remain chronological, including steering, and have a separate budget. Long user
-messages are mechanically folded in the middle before older messages are
-removed. Each new approval adds up to three newly observed tool calls with
-bounded arguments and source IDs, without success or failure result bodies.
-Already observed calls do not roll into subsequent approvals. The approval,
-optional evidence tools and decision form one complete Guardian Turn.
+Each root Session owns up to four exclusively leased execution lanes.
+Sequential approvals reuse the SDK Runtime and private in-memory Session; a
+concurrent model step pins one common prefix and joins validated whole turns in
+source call order. A context-window rotation or incompatible model/policy/tool
+configuration replaces a lane's staging history. Invalid attempts never enter
+the validated conversation. Closing the root or Runtime cancels and drains its
+leases before releasing private resources. Provider usage receipts retain the
+parent-Session accounting and producer-drain contract.
 
-Instructions, tools, output schema and the local Session JSONL address stay
-fixed between reviews. Below budget the dialogue only appends. At the budget
-threshold Guardian removes whole oldest turns to leave headroom, retaining user
-messages independently. It never asks a model to summarize this dialogue and
-never imports the main Agent's compact summary. Parallel approvals share a
-pinned prefix and join in model-call order. Steering invalidates pending
-automatic approvals before their settlement.
+The canonical Session log is the only source history. A forward paged reader
+captures a source checkpoint and projects user messages, tool calls and tool
+results independently of the pending approval. Source Session, event ID and Seq
+identify each record; a late result never rewrites its call. Arguments, output,
+error status and truncation facts are bounded before serialization. The intake
+cursor advances independently of validated-review commits. Journal records,
+client mirrors, assistant reasoning and main-Agent compact summaries do not enter
+this projection. User documents and quotations remain evidence rather than new
+instructions.
 
-Additional retrieval is optional and is appropriate only when the supplied
-context cannot support an accurate decision. Read and Grep reuse the SDK's
-built-in file tools; Guardian supplies its sandbox policy and cumulative review
-budgets, not separate file semantics. These tools and synchronous local scripts
-can inspect the live canonical JSONL; there is no derived history tree or
-additional main-Agent recall injection. The address identifies a live log,
-not an immutable snapshot; readers must tolerate an incomplete final append.
+Instructions, tool definitions and output schema are stable across ordinary
+reviews. Below the window budget the model input only appends. Retention measures
+model messages rather than duplicated log metadata and removes whole oldest turns
+to a lower water mark. User messages have a separate budget: long messages fold
+in the middle before older intermediate messages are removed; the original task
+and latest steering are retained. Guardian never spends a model call summarizing
+its own dialogue. Omitted evidence is not proof of absent risk or authorization.
+Steering invalidates pending automatic approvals before settlement.
 
-Evidence commands use a private temporary write directory and read-only access
-to other directories. Network policy is inherited from the main Agent subject
-to backend capabilities. macOS uses Seatbelt, Linux uses Bubblewrap, and Windows
-uses its restricted-token sandbox. Windows keeps network access enabled even
-when network-disabled intent is supplied. The query environment identifies the
-actual shell, temporary-file syntax and network capability. Windows process
-caches stay inside the review's writable directory; ACL state stays outside it.
-Unavailable isolation fails the query without falling back to Host execution.
-Queries, output, provider attempts and review duration are bounded. Each complete
-assessment attempt has a three-minute budget, shared by its model and evidence
-calls. A format-validation retry gets a
-fresh three-minute budget; caller cancellation and cumulative resource limits
-still apply. Guardian stops gathering evidence as soon as the supplied facts
-support its decision. Simple decisions do not start a query sandbox.
-Guardian tool transcripts stay private; provider usage receipts retain the
-existing parent-Session accounting and producer-drain contract.
+Most approvals decide from supplied context. Optional `ReadEvents` retrieves a
+bounded canonical page through the review's pinned checkpoint; `Read` and `Grep`
+use SDK file-tool semantics, and `RunCommand` supports focused local inspection.
+File observations describe current state rather than historical state. These
+tools use a separate resident restricted sandbox, with a fresh temporary working
+directory per review. It shares the main Agent's network intent, not its write
+capabilities or running processes. macOS uses Seatbelt, Linux uses Bubblewrap,
+and Windows uses its restricted-token sandbox. Windows network access remains
+enabled even when disabled intent is supplied; the environment states the actual
+capability and shell. Runtime/ACL state stays outside the temporary command work
+directory. There is no Host fallback, recursive approval or Agent communication.
+Simple decisions do not initialize a sandbox.
+
+Queueing, evidence, provider retries and at most one format repair share a
+20-second approval deadline, shortened by caller cancellation. Evidence gathering
+closes eight seconds before that deadline to reserve a final judgment. It also
+closes after its bounded model/output allowance. Tool failures, unavailable
+backends, permission errors and evidence expiry return bounded error results to
+the Agent. Output truncation returns partial evidence; neither poisons model
+admission. The next model call can still decide with tool selection disabled;
+providers retain definitions needed by historical tool results when the protocol
+supports a native no-tool choice. A provider that cannot produce a valid decision
+yields an unavailable approval for that
+action, never a fabricated allow or risk rejection; unrelated task work can
+continue. Callers must not repeatedly resubmit an unavailable approval.
+
+Owner diagnostics record review outcome, selected option, total/queue/preparation/
+model/tool/setup duration, invocation counts, tool failures, evidence bytes,
+truncation, source checkpoint, window rotations, actual Runtime/sandbox reuse and
+reported cache usage. Metrics contain no commands, evidence bodies, credentials or reasoning.
+Guardian's dialogue and tool transcripts stay private and process-local.

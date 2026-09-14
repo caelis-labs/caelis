@@ -3035,7 +3035,7 @@ func TestBeginTurnAutoReviewRepeatedDenialsDoNotReplaceReviewerDecision(t *testi
 	}
 }
 
-func TestBeginTurnAutoReviewStopsImmediatelyWhenGuardianIsUnavailable(t *testing.T) {
+func TestBeginTurnAutoReviewReturnsAvailabilityWithoutSyntheticApproval(t *testing.T) {
 	t.Parallel()
 
 	activeSession := session.Session{
@@ -3098,8 +3098,8 @@ func TestBeginTurnAutoReviewStopsImmediatelyWhenGuardianIsUnavailable(t *testing
 	if !errors.As(terminalError.Err, &gatewayErr) || gatewayErr.Code != CodeGuardianUnavailable || gatewayErr.Kind != KindUnavailable || !gatewayErr.Retryable {
 		t.Fatalf("terminal error = %#v, want unavailable/%s", terminalError.Err, CodeGuardianUnavailable)
 	}
-	if !strings.Contains(gatewayErr.Message, "no action was executed") || !strings.Contains(gatewayErr.Message, "this Turn stopped") {
-		t.Fatalf("guardian_unavailable message = %q, want explicit fail-closed Turn behavior", gatewayErr.Message)
+	if !strings.Contains(gatewayErr.Message, "this action was not executed") || !strings.Contains(gatewayErr.Message, "not a risk rejection") || strings.Contains(gatewayErr.Message, "this Turn stopped") {
+		t.Fatalf("guardian_unavailable message = %q, want action-scoped availability diagnostic", gatewayErr.Message)
 	}
 }
 

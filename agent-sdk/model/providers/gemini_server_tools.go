@@ -26,7 +26,7 @@ func geminiGoogleSearchEnabled(_ string, specs []model.ToolSpec) bool {
 }
 
 func (l *geminiLLM) UsesProviderExecutedTools(req *model.Request) bool {
-	if l == nil || req == nil {
+	if l == nil || req == nil || req.DisableTools {
 		return false
 	}
 	return geminiGoogleSearchEnabled(l.name, req.Tools)

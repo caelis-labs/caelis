@@ -54,6 +54,7 @@ type runtimeComposition struct {
 	sandbox            SandboxConfig
 	exec               sandbox.Runtime
 	engine             *runtime.Runtime
+	guardian           *guardianApprovalReviewer
 	placement          controlplane.PlacementExecutor
 	acpControlPlane    *acpassembly.ControlPlane
 	closing            atomic.Bool

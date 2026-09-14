@@ -104,7 +104,7 @@ func (l *anthropicSDKLLM) ContextWindowTokens() int {
 }
 
 func (l *anthropicSDKLLM) UsesProviderExecutedTools(req *model.Request) bool {
-	if l == nil || req == nil {
+	if l == nil || req == nil || req.DisableTools {
 		return false
 	}
 	return anthropicUsesProviderExecutedTools(req.Tools)
@@ -324,6 +324,9 @@ func (l *anthropicSDKLLM) buildRequest(req *model.Request) (anthropic.MessageNew
 		Messages:  toAnthropicMessages(req.Messages),
 		System:    toAnthropicSystem(req.Instructions),
 		Tools:     toAnthropicTools(req.Tools),
+	}
+	if req.DisableTools {
+		params.ToolChoice = anthropic.ToolChoiceUnionParam{OfNone: &anthropic.ToolChoiceNoneParam{}}
 	}
 	if req.Output != nil && req.Output.MaxOutputTokens > 0 {
 		params.MaxTokens = int64(req.Output.MaxOutputTokens)

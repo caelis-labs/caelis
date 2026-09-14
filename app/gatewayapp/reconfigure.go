@@ -124,6 +124,7 @@ type gatewayBuildPlan struct {
 }
 
 type gatewayRuntimeBundle struct {
+	Guardian                    *guardianApprovalReviewer
 	Gateway                     *kernelimpl.Gateway
 	Exec                        sandbox.Runtime
 	Engine                      *runtime.Runtime
@@ -147,6 +148,10 @@ func (b *gatewayRuntimeBundle) Close() {
 		closeIfSupported(b.Engine)
 	}
 	b.Engine = nil
+	if b.Guardian != nil {
+		_ = b.Guardian.Close()
+		b.Guardian = nil
+	}
 	if b.Exec != nil {
 		_ = b.Exec.Close()
 		b.Exec = nil
@@ -493,6 +498,7 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 		return nil, err
 	}
 	guardianApprover := s.newGuardianApprover()
+	bundle.Guardian = guardianApprover
 	guardianApprover.queryNetwork = sandboxPolicySnapshot.Network
 	gw, err := kernelimpl.New(kernelimpl.Config{
 		Sessions:             s.sessions,
@@ -583,6 +589,7 @@ func (s *runtimeComposition) swapGatewayRuntime(bundle *gatewayRuntimeBundle) {
 
 	s.mu.Lock()
 	oldExec := s.exec
+	oldGuardian := s.guardian
 	oldMcpMgr := s.mcpMgr
 	oldPluginCacheRelease := s.pluginCacheRelease
 	currentRuntime := cloneActiveRuntimeConfig(bundle.RuntimeConfig)
@@ -591,12 +598,17 @@ func (s *runtimeComposition) swapGatewayRuntime(bundle *gatewayRuntimeBundle) {
 	s.gateway = bundle.Gateway
 	s.exec = bundle.Exec
 	s.engine = bundle.Engine
+	s.guardian = bundle.Guardian
+	bundle.Guardian = nil
 	s.placement = bundle.Placement
 	s.acpControlPlane = bundle.ACPControlPlane
 	s.mcpMgr = bundle.MCP
 	s.pluginCacheRelease = bundle.ReleasePluginCache
 	bundle.ReleasePluginCache = nil
 	s.mu.Unlock()
+	if oldGuardian != nil {
+		_ = oldGuardian.Close()
+	}
 	if oldExec != nil {
 		_ = oldExec.Close()
 	}

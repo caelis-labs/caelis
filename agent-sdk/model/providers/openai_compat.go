@@ -124,7 +124,7 @@ func (l *openAICompatLLM) ContextWindowTokens() int {
 }
 
 func (l *openAICompatLLM) UsesProviderExecutedTools(req *model.Request) bool {
-	if l == nil || req == nil || l.options.UsesProviderExecutedTools == nil {
+	if l == nil || req == nil || req.DisableTools || l.options.UsesProviderExecutedTools == nil {
 		return false
 	}
 	return l.options.UsesProviderExecutedTools(l.name, req.Tools)
@@ -147,6 +147,9 @@ func (l *openAICompatLLM) Generate(ctx context.Context, req *model.Request) iter
 			Stream:      req.Stream,
 			MaxTokens:   l.maxOutputTok,
 			ServiceTier: req.ServiceTier,
+		}
+		if req.DisableTools {
+			payload.ToolChoice = "none"
 		}
 		if l.api == APIOpenRouter {
 			payload.Models = normalizeOpenRouterModelIDs(l.openRouter.Models)
@@ -357,6 +360,7 @@ type openAICompatRequest struct {
 	ModelName       string                     `json:"modelName,omitempty"`
 	Messages        []openAICompatReqMsg       `json:"messages"`
 	Tools           []openAICompatTool         `json:"tools,omitempty"`
+	ToolChoice      string                     `json:"tool_choice,omitempty"`
 	Stream          bool                       `json:"stream"`
 	StreamOptions   *openAICompatStreamOptions `json:"stream_options,omitempty"`
 	MaxTokens       int                        `json:"max_tokens,omitempty"`

@@ -58,6 +58,23 @@ func WithInvocationObserver(ctx context.Context, observer func(Invocation)) cont
 
 type invocationAdmissionKey struct{}
 
+type toolAvailabilityKey struct{}
+
+// WithToolAvailability lets an embedding close optional tool selection between
+// model steps while leaving final inference available. The callback must be
+// concurrency-safe. A false value disables selection on a copied request while
+// preserving declarations and history; it never reopens a closed tool budget.
+func WithToolAvailability(ctx context.Context, available func() bool) context.Context {
+	if available == nil {
+		return ctx
+	}
+	if parent, ok := ctx.Value(toolAvailabilityKey{}).(func() bool); ok {
+		next := available
+		available = func() bool { return parent() && next() }
+	}
+	return context.WithValue(ctx, toolAvailabilityKey{}, available)
+}
+
 // WithInvocationAdmission installs an embedding-owned gate before each actual
 // provider attempt, including retries. Rejection creates no invocation receipt.
 func WithInvocationAdmission(ctx context.Context, admit func(context.Context, *Request) error) context.Context {
@@ -84,6 +101,10 @@ type InvocationTracker interface{ TracksInvocations() }
 // Generate observes each actual attempt, including unwrapped providers. Nested
 // gates must implement InvocationTracker and delegate through Generate.
 func Generate(ctx context.Context, llm LLM, req *Request) iter.Seq2[*StreamEvent, error] {
+	if available, ok := ctx.Value(toolAvailabilityKey{}).(func() bool); ok && req != nil && !available() {
+		req = CloneRequest(req)
+		req.DisableTools = true
+	}
 	if _, ok := llm.(InvocationTracker); ok {
 		return llm.Generate(ctx, req)
 	}

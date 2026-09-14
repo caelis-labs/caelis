@@ -191,6 +191,9 @@ func (l *openAIResponsesLLM) buildRequest(req *model.Request) (openAIResponsesRe
 	if len(payload.Tools) > 0 {
 		payload.ToolChoice = "auto"
 	}
+	if req.DisableTools {
+		payload.ToolChoice = "none"
+	}
 	if effort := strings.TrimSpace(req.Reasoning.Effort); effort != "" {
 		payload.Reasoning = &openAICodexReasoning{Effort: effort}
 		if l.api == APIOpenAI && effort != "none" {
