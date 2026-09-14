@@ -10,7 +10,8 @@ fi
 # Leave implicit vet enabled for Windows-only source files.
 go test -count=1 -p=2 -timeout "${GO_TEST_TIMEOUT:-5m}" \
   ./platform/winproc \
-  ./internal/filelock ./internal/productpaths ./internal/servicelifecycle \
+  ./internal/filelock ./internal/productpaths ./internal/servicelifecycle ./internal/updater \
+  ./control/appserver/httpclient \
   ./agent-sdk/atomicfile ./agent-sdk/policy/presets \
   ./agent-sdk/sandbox/consoleoutput ./agent-sdk/sandbox/internal/conpty \
   ./agent-sdk/sandbox/host ./agent-sdk/sandbox/backend/cmdsession \
@@ -32,8 +33,12 @@ CAELIS_TEST_GUARDIAN_NATIVE=1 bash ./scripts/go_test_nonempty.sh ./app/gatewayap
   '^TestGuardian(Native|Environment)' windows-guardian -count=1
 bash ./scripts/go_test_nonempty.sh ./internal/cli \
   '^TestRunDoctorStartupRepairsWorkspaceIdentityConflict$' windows-workspace-paths -count=1
+bash ./scripts/go_test_nonempty.sh ./internal/cli \
+  '^TestManaged(LocalHostUpgrade|LocalHostConcurrentLaunch|LocalHostDoesNotDowngrade|Transport|ConnectionError)' windows-host-upgrade -count=1
 bash ./scripts/go_test_nonempty.sh ./surfaces/tui/app \
   '^Test.*(Clipboard|NativeWrite|OSC52)' windows-clipboard -count=1
+bash ./scripts/go_test_nonempty.sh ./surfaces/tui/app \
+  '^Test(SessionObservationRecovery|SessionObservationRetry|ProductSessionObservationAutomaticallyRecoversAfterHostReplacement)' windows-host-reconnect -count=1
 
 # Match the release configuration for all production packages and Memory Open.
 CGO_ENABLED=0 go build ./...

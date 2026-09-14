@@ -35,6 +35,8 @@ type ProgramSender struct {
 	viewGeneration    uint64
 	viewSessionID     string
 	viewCancel        context.CancelFunc
+	resumeSession     func(context.Context, string) (controlprompt.SessionSnapshot, error)
+	recoveryCancel    context.CancelFunc
 	sessionCommands   sync.Mutex
 	statusReads       sync.Mutex
 	runCancels        []activeRunCancel
@@ -291,6 +293,7 @@ func ConfigFromControlService(service ControlServices, sender *ProgramSender, ba
 		ctx = sender.bindContext(ctx)
 		base.Context = ctx
 		base.ProgramSender = sender
+		sender.resumeSession = service.ResumeSession
 	}
 	base.Commands = appendAgentSlashCommandsWithContext(ctx, service, base.Commands)
 	for name, detail := range profileCommandDetailsWithContext(ctx, service) {
@@ -315,6 +318,9 @@ func ConfigFromControlService(service ControlServices, sender *ProgramSender, ba
 			defer finish()
 			if sender != nil {
 				if _, ok := service.(interface{ SessionID() string }); ok {
+					if isSessionSelectionLine(sub.Text) {
+						sender.cancelSessionRecovery()
+					}
 					sender.sessionCommands.Lock()
 					defer sender.sessionCommands.Unlock()
 					_, generation := sender.sessionView()

@@ -10,8 +10,6 @@ import (
 	"github.com/caelis-labs/caelis/internal/updater"
 )
 
-const updateProgressBarWidth = 24
-
 type updateProgressRenderer struct {
 	writer      io.Writer
 	interactive bool
@@ -48,17 +46,15 @@ func (r *updateProgressRenderer) Fail() {
 }
 
 func (r *updateProgressRenderer) renderInteractive(event updater.ProgressEvent) {
-	text := formatUpdateProgress(event, true)
+	text := formatUpdateProgress(event)
 	if text == "" {
 		return
 	}
 	width := utf8.RuneCountInString(text)
 	padding := max(r.lineWidth-width, 0)
-	if event.Stage == updater.ProgressInstalling &&
-		strings.EqualFold(strings.TrimSpace(event.Detail), updater.MethodNPM) &&
-		!event.Done {
-		// npm writes its own foreground output, so finish our status line before
-		// handing the terminal to the child process.
+	if event.Stage == updater.ProgressInstalling && !event.Done {
+		// The official installer (raw) or npm (foreground/handoff) writes its own
+		// output, so finish our status line before handing the terminal back.
 		_, _ = fmt.Fprintf(r.writer, "\r%s%s\n", text, strings.Repeat(" ", padding))
 		r.lineWidth = 0
 		return
@@ -73,32 +69,17 @@ func (r *updateProgressRenderer) renderInteractive(event updater.ProgressEvent) 
 }
 
 func (r *updateProgressRenderer) renderPlain(event updater.ProgressEvent) {
-	if event.Current > 0 && !event.Done {
-		return
-	}
-	text := formatUpdateProgress(event, false)
+	text := formatUpdateProgress(event)
 	if text != "" {
 		_, _ = fmt.Fprintln(r.writer, text)
 	}
 }
 
-func formatUpdateProgress(event updater.ProgressEvent, interactive bool) string {
+func formatUpdateProgress(event updater.ProgressEvent) string {
 	if event.Done {
 		switch event.Stage {
 		case updater.ProgressChecking:
 			return "✓ Checked for updates"
-		case updater.ProgressDownloading:
-			if event.Total > 0 {
-				return "✓ Downloaded " + formatUpdateBytes(event.Total)
-			}
-			if event.Current > 0 {
-				return "✓ Downloaded " + formatUpdateBytes(event.Current)
-			}
-			return "✓ Downloaded update"
-		case updater.ProgressVerifying:
-			return "✓ Checksum verified"
-		case updater.ProgressExtracting:
-			return "✓ Extracted " + firstNonEmptyString(strings.TrimSpace(event.Detail), "update")
 		case updater.ProgressInstalling:
 			if event.Deferred {
 				return "✓ Prepared update for installation"
@@ -115,28 +96,6 @@ func formatUpdateProgress(event updater.ProgressEvent, interactive bool) string 
 	switch event.Stage {
 	case updater.ProgressChecking:
 		return "Checking for updates…"
-	case updater.ProgressDownloading:
-		if event.Current <= 0 {
-			return "Downloading update…"
-		}
-		if event.Total <= 0 {
-			return "Downloading update… " + formatUpdateBytes(event.Current)
-		}
-		percent := min(float64(event.Current)/float64(event.Total), 1)
-		if interactive {
-			return fmt.Sprintf(
-				"Downloading  %s  %s / %s  %d%%",
-				updateProgressBar(percent),
-				formatUpdateBytes(event.Current),
-				formatUpdateBytes(event.Total),
-				int(percent*100),
-			)
-		}
-		return "Downloading update…"
-	case updater.ProgressVerifying:
-		return "Verifying checksum…"
-	case updater.ProgressExtracting:
-		return "Extracting update…"
 	case updater.ProgressInstalling:
 		if event.Deferred {
 			return "Preparing update for installation…"
@@ -147,24 +106,5 @@ func formatUpdateProgress(event updater.ProgressEvent, interactive bool) string 
 		return "Installing update…"
 	default:
 		return ""
-	}
-}
-
-func updateProgressBar(percent float64) string {
-	percent = min(max(percent, 0), 1)
-	filled := int(percent * updateProgressBarWidth)
-	return strings.Repeat("█", filled) + strings.Repeat("░", updateProgressBarWidth-filled)
-}
-
-func formatUpdateBytes(value int64) string {
-	switch {
-	case value >= 1<<30:
-		return fmt.Sprintf("%.1f GB", float64(value)/(1<<30))
-	case value >= 1<<20:
-		return fmt.Sprintf("%.1f MB", float64(value)/(1<<20))
-	case value >= 1<<10:
-		return fmt.Sprintf("%.1f KB", float64(value)/(1<<10))
-	default:
-		return fmt.Sprintf("%d B", value)
 	}
 }

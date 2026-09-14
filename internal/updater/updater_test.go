@@ -1,12 +1,7 @@
 package updater
 
 import (
-	"archive/tar"
-	"bytes"
-	"compress/gzip"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -15,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -101,6 +95,8 @@ func TestAutoCheckUsesDailyCache(t *testing.T) {
 func TestNPMGlobalUpdateRunsNPMInstall(t *testing.T) {
 	globalRoot := t.TempDir()
 	packageDir := filepath.Join(globalRoot, "@caelis", "caelis")
+	platformDir := filepath.Join(globalRoot, "@caelis", "caelis-linux-x64")
+	platformBinary := filepath.Join(platformDir, "runtime", "caelis")
 	var ran []string
 	var progress []ProgressEvent
 	manager := New(Config{
@@ -113,6 +109,8 @@ func TestNPMGlobalUpdateRunsNPMInstall(t *testing.T) {
 				return MethodNPM
 			case EnvNPMPackageDir:
 				return packageDir
+			case EnvNPMPlatformPackageDir:
+				return platformDir
 			default:
 				return ""
 			}
@@ -120,18 +118,24 @@ func TestNPMGlobalUpdateRunsNPMInstall(t *testing.T) {
 		LookPath: func(name string) (string, error) {
 			return "/usr/bin/" + name, nil
 		},
-		CommandOutput: func(_ context.Context, _ string, args []string) ([]byte, error) {
+		CommandOutput: func(_ context.Context, name string, args []string) ([]byte, error) {
+			if name == platformBinary {
+				return []byte(`{"version":"v1.2.0","build_kind":"release","build_id":"release-build"}`), nil
+			}
 			switch strings.Join(args, " ") {
 			case "root -g":
 				return []byte(globalRoot + "\n"), nil
 			case "view @caelis/caelis version --registry=https://registry.npmjs.org":
 				return []byte("1.2.0\n"), nil
 			default:
-				t.Fatalf("unexpected CommandOutput args: %#v", args)
+				t.Fatalf("unexpected CommandOutput %q %#v", name, args)
 				return nil, nil
 			}
 		},
-		CommandRun: func(_ context.Context, name string, args []string, _ io.Writer, _ io.Writer) error {
+		CommandRun: func(_ context.Context, name string, args []string, env []string, _ io.Writer, _ io.Writer) error {
+			if len(env) != 0 {
+				t.Fatalf("npm install env = %#v, want inherited environment", env)
+			}
 			ran = append([]string{name}, args...)
 			return nil
 		},
@@ -159,92 +163,63 @@ func TestNPMGlobalUpdateRunsNPMInstall(t *testing.T) {
 	}
 }
 
-func TestWindowsNPMGlobalUpdateDefersInstall(t *testing.T) {
-	globalRoot := t.TempDir()
-	packageDir := filepath.Join(globalRoot, "@caelis", "caelis")
-	var startName string
-	var startArgs []string
-	var progress []ProgressEvent
-	manager := New(Config{
-		StoreDir:       t.TempDir(),
-		CurrentVersion: "v1.0.0",
-		GOOS:           "windows",
-		Env: func(key string) string {
-			switch key {
-			case EnvInstallMethod:
-				return MethodNPM
-			case EnvNPMPackageDir:
-				return packageDir
-			default:
-				return ""
-			}
-		},
-		LookPath: func(name string) (string, error) {
-			return "/usr/bin/" + name + ".cmd", nil
-		},
-		CommandOutput: func(_ context.Context, _ string, args []string) ([]byte, error) {
-			switch strings.Join(args, " ") {
-			case "root -g":
-				return []byte(globalRoot + "\n"), nil
-			case "view @caelis/caelis version --registry=https://registry.npmjs.org":
-				return []byte("1.2.0\n"), nil
-			default:
-				t.Fatalf("unexpected CommandOutput args: %#v", args)
-				return nil, nil
-			}
-		},
-		CommandRun: func(context.Context, string, []string, io.Writer, io.Writer) error {
-			t.Fatal("Windows npm update must be deferred instead of running npm in-process")
-			return nil
-		},
-		CommandStart: func(name string, args []string) error {
-			startName = name
-			startArgs = append([]string(nil), args...)
-			return nil
-		},
-	})
-	result, err := manager.Update(context.Background(), UpdateOptions{
-		Progress: func(event ProgressEvent) {
-			progress = append(progress, event)
-		},
-	})
-	if err != nil {
-		t.Fatalf("Update() error = %v", err)
-	}
-	wantCommand := []string{"/usr/bin/npm.cmd", "install", "-g", "@caelis/caelis@1.2.0", "--registry=https://registry.npmjs.org"}
-	if !result.Deferred || result.Updated || !reflect.DeepEqual(result.Command, wantCommand) {
-		t.Fatalf("Update() = %#v, want deferred npm command %#v", result, wantCommand)
-	}
-	if result.Reason != windowsNPMDetachedReason {
-		t.Fatalf("Update().Reason = %q, want %q", result.Reason, windowsNPMDetachedReason)
-	}
-	wantProgress := []ProgressEvent{
-		{Stage: ProgressChecking},
-		{Stage: ProgressChecking, Done: true},
-		{Stage: ProgressInstalling, Detail: MethodNPM, Deferred: true},
-		{Stage: ProgressInstalling, Detail: MethodNPM, Done: true, Deferred: true},
-	}
-	if !reflect.DeepEqual(progress, wantProgress) {
-		t.Fatalf("progress = %#v, want %#v", progress, wantProgress)
-	}
-	if startName != "cmd.exe" || len(startArgs) != 5 || startArgs[4] == "" {
-		t.Fatalf("CommandStart(%q, %#v), want cmd.exe start script", startName, startArgs)
-	}
-	scriptPath := startArgs[4]
-	t.Cleanup(func() { _ = os.Remove(scriptPath) })
-	script, err := os.ReadFile(scriptPath)
-	if err != nil {
-		t.Fatalf("read deferred npm script: %v", err)
-	}
-	text := string(script)
-	for _, want := range []string{
-		`tasklist /FI "PID eq `,
-		`call "/usr/bin/npm.cmd" "install" "-g" "@caelis/caelis@1.2.0" "--registry=https://registry.npmjs.org"`,
-		`del "%~f0"`,
+func TestNPMGlobalUpdateRejectsUnverifiedInstalledArtifact(t *testing.T) {
+	for _, tt := range []struct {
+		name        string
+		platformDir bool
+		installed   string
+		want        string
+	}{
+		{name: "stale artifact", platformDir: true, installed: `{"version":"v1.1.0","build_kind":"release","build_id":"b"}`, want: "expected v1.2.0"},
+		{name: "unknown platform package", want: "is not set"},
 	} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("deferred npm script = %q, want fragment %q", text, want)
-		}
+		t.Run(tt.name, func(t *testing.T) {
+			globalRoot := t.TempDir()
+			packageDir := filepath.Join(globalRoot, "@caelis", "caelis")
+			platformDir := filepath.Join(globalRoot, "@caelis", "caelis-linux-x64")
+			manager := New(Config{
+				StoreDir:       t.TempDir(),
+				CurrentVersion: "v1.0.0",
+				GOOS:           "linux",
+				Env: func(key string) string {
+					switch key {
+					case EnvInstallMethod:
+						return MethodNPM
+					case EnvNPMPackageDir:
+						return packageDir
+					case EnvNPMPlatformPackageDir:
+						if tt.platformDir {
+							return platformDir
+						}
+						return ""
+					default:
+						return ""
+					}
+				},
+				LookPath: func(name string) (string, error) { return "/usr/bin/" + name, nil },
+				CommandOutput: func(_ context.Context, _ string, args []string) ([]byte, error) {
+					switch strings.Join(args, " ") {
+					case "root -g":
+						return []byte(globalRoot + "\n"), nil
+					case "view @caelis/caelis version --registry=https://registry.npmjs.org":
+						return []byte("1.2.0\n"), nil
+					case "version --format json":
+						return []byte(tt.installed), nil
+					default:
+						t.Fatalf("unexpected CommandOutput args: %#v", args)
+						return nil, nil
+					}
+				},
+				CommandRun: func(context.Context, string, []string, []string, io.Writer, io.Writer) error { return nil },
+			})
+			result, err := manager.Update(context.Background(), UpdateOptions{})
+			if err == nil || result.Updated {
+				t.Fatalf("Update() = %#v, %v, want npm artifact verification failure", result, err)
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("Update() error = %v, want %q", err, tt.want)
+			}
+		})
 	}
 }
 
@@ -284,12 +259,8 @@ func TestWindowsNPMGlobalUpdateHandsOffToForegroundLauncher(t *testing.T) {
 				return nil, nil
 			}
 		},
-		CommandRun: func(context.Context, string, []string, io.Writer, io.Writer) error {
+		CommandRun: func(context.Context, string, []string, []string, io.Writer, io.Writer) error {
 			t.Fatal("Windows npm handoff must not run npm before the native process exits")
-			return nil
-		},
-		CommandStart: func(string, []string) error {
-			t.Fatal("foreground launcher handoff must not schedule a detached update")
 			return nil
 		},
 	})
@@ -320,7 +291,6 @@ func TestWindowsNPMGlobalUpdateHandsOffToForegroundLauncher(t *testing.T) {
 		CurrentVersion: "v1.0.0",
 		LatestVersion:  "v1.2.0",
 		Executable:     executable,
-		StoreDir:       filepath.Clean(manager.cfg.StoreDir),
 	}
 	lockData, err := os.ReadFile(manager.lockPath())
 	if err != nil {
@@ -347,6 +317,53 @@ func TestWindowsNPMGlobalUpdateHandsOffToForegroundLauncher(t *testing.T) {
 	}
 	if _, err := os.Stat(manager.lockPath()); err != nil {
 		t.Fatalf("handoff update lock is not held: %v", err)
+	}
+}
+
+func TestWindowsNPMUpdateWithoutLauncherHandoffIsRejected(t *testing.T) {
+	globalRoot := t.TempDir()
+	packageDir := filepath.Join(globalRoot, "@caelis", "caelis")
+	manager := New(Config{
+		StoreDir:       t.TempDir(),
+		CurrentVersion: "v1.0.0",
+		GOOS:           "windows",
+		Env: func(key string) string {
+			switch key {
+			case EnvInstallMethod:
+				return MethodNPM
+			case EnvNPMPackageDir:
+				return packageDir
+			default:
+				return ""
+			}
+		},
+		LookPath: func(name string) (string, error) {
+			return "/usr/bin/" + name + ".cmd", nil
+		},
+		CommandOutput: func(_ context.Context, _ string, args []string) ([]byte, error) {
+			switch strings.Join(args, " ") {
+			case "root -g":
+				return []byte(globalRoot + "\n"), nil
+			case "view @caelis/caelis version --registry=https://registry.npmjs.org":
+				return []byte("1.2.0\n"), nil
+			default:
+				t.Fatalf("unexpected CommandOutput args: %#v", args)
+				return nil, nil
+			}
+		},
+		CommandRun: func(context.Context, string, []string, []string, io.Writer, io.Writer) error {
+			t.Fatal("Windows npm update must not run npm in-process")
+			return nil
+		},
+	})
+	result, err := manager.Update(context.Background(), UpdateOptions{})
+	if err == nil || result.Updated || result.Deferred {
+		t.Fatalf("Update() = %#v, %v, want explicit handoff guidance error", result, err)
+	}
+	for _, want := range []string{"npm launcher handoff", "npm install -g @caelis/caelis@1.2.0"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("Update() error = %v, want %q", err, want)
+		}
 	}
 }
 
@@ -450,129 +467,7 @@ func TestDeferredUpdateStateKeepsCurrentVersionAvailable(t *testing.T) {
 	}
 }
 
-func TestRawUpdateReportsStructuredInstallProgress(t *testing.T) {
-	archive := releaseArchive(t, "caelis", []byte("new-binary"))
-	sum := sha256.Sum256(archive)
-	server := newUpdaterTestHTTPServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/latest.txt":
-			fmt.Fprint(w, "v1.2.0\r\n")
-		case "/releases/v1.2.0/caelis_1.2.0_linux_amd64.tar.gz":
-			w.Header().Set("Content-Length", strconv.Itoa(len(archive)))
-			_, _ = w.Write(archive)
-		case "/releases/v1.2.0/checksums.txt":
-			fmt.Fprintf(w, "%s  caelis_1.2.0_linux_amd64.tar.gz\n", hex.EncodeToString(sum[:]))
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer server.Close()
-	exe := filepath.Join(t.TempDir(), "caelis")
-	if err := os.WriteFile(exe, []byte("old-binary"), 0o755); err != nil {
-		t.Fatalf("write executable: %v", err)
-	}
-	var progress []ProgressEvent
-	manager := New(Config{
-		StoreDir:        t.TempDir(),
-		CurrentVersion:  "v1.0.0",
-		Executable:      exe,
-		GOOS:            "linux",
-		GOARCH:          "amd64",
-		ReleasesBaseURL: server.URL,
-		HTTPClient:      server.Client(),
-		Env:             emptyUpdaterEnv,
-	})
-	_, err := manager.Update(context.Background(), UpdateOptions{
-		Progress: func(event ProgressEvent) {
-			progress = append(progress, event)
-		},
-	})
-	if err != nil {
-		t.Fatalf("Update() error = %v", err)
-	}
-	archiveName := "caelis_1.2.0_linux_amd64.tar.gz"
-	want := []ProgressEvent{
-		{Stage: ProgressChecking},
-		{Stage: ProgressChecking, Done: true},
-		{Stage: ProgressDownloading, Detail: archiveName},
-		{Stage: ProgressDownloading, Detail: archiveName, Current: int64(len(archive)), Total: int64(len(archive))},
-		{Stage: ProgressDownloading, Detail: archiveName, Current: int64(len(archive)), Total: int64(len(archive)), Done: true},
-		{Stage: ProgressVerifying},
-		{Stage: ProgressVerifying, Done: true},
-		{Stage: ProgressExtracting, Detail: "caelis"},
-		{Stage: ProgressExtracting, Detail: "caelis", Done: true},
-		{Stage: ProgressInstalling, Detail: "caelis"},
-		{Stage: ProgressInstalling, Detail: "caelis", Done: true},
-	}
-	if !reflect.DeepEqual(progress, want) {
-		t.Fatalf("progress = %#v, want %#v", progress, want)
-	}
-}
-
-func TestRawUpdateDownloadsVerifiesAndReplacesExecutable(t *testing.T) {
-	archive := releaseArchive(t, "caelis", []byte("new-binary"))
-	sum := sha256.Sum256(archive)
-	server := newUpdaterTestHTTPServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/latest.txt":
-			fmt.Fprint(w, "v1.2.0\r\n")
-		case "/releases/v1.2.0/caelis_1.2.0_linux_amd64.tar.gz":
-			_, _ = w.Write(archive)
-		case "/releases/v1.2.0/checksums.txt":
-			fmt.Fprintf(w, "%s  caelis_1.2.0_linux_amd64.tar.gz\n", hex.EncodeToString(sum[:]))
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer server.Close()
-	exe := filepath.Join(t.TempDir(), "caelis")
-	if err := os.WriteFile(exe, []byte("old-binary"), 0o755); err != nil {
-		t.Fatalf("write executable: %v", err)
-	}
-	manager := New(Config{
-		StoreDir:        t.TempDir(),
-		CurrentVersion:  "v1.0.0",
-		Executable:      exe,
-		GOOS:            "linux",
-		GOARCH:          "amd64",
-		ReleasesBaseURL: server.URL,
-		HTTPClient:      server.Client(),
-		Env:             emptyUpdaterEnv,
-	})
-	result, err := manager.Update(context.Background(), UpdateOptions{})
-	if err != nil {
-		t.Fatalf("Update() error = %v", err)
-	}
-	got, err := os.ReadFile(exe)
-	if err != nil {
-		t.Fatalf("read executable: %v", err)
-	}
-	if !result.Updated || string(got) != "new-binary" {
-		t.Fatalf("Update() = %#v, executable=%q, want updated binary", result, got)
-	}
-}
-
 func emptyUpdaterEnv(string) string { return "" }
-
-func releaseArchive(t *testing.T, name string, data []byte) []byte {
-	t.Helper()
-	var buf bytes.Buffer
-	gz := gzip.NewWriter(&buf)
-	tw := tar.NewWriter(gz)
-	if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0o755, Size: int64(len(data))}); err != nil {
-		t.Fatalf("WriteHeader() error = %v", err)
-	}
-	if _, err := tw.Write(data); err != nil {
-		t.Fatalf("tar Write() error = %v", err)
-	}
-	if err := tw.Close(); err != nil {
-		t.Fatalf("tar Close() error = %v", err)
-	}
-	if err := gz.Close(); err != nil {
-		t.Fatalf("gzip Close() error = %v", err)
-	}
-	return buf.Bytes()
-}
 
 type updaterTestHTTPServer struct {
 	URL     string

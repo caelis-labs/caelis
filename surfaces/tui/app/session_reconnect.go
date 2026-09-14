@@ -17,6 +17,7 @@ func (m *Model) applySessionReconnectState(state appserver.SessionState) tea.Cmd
 		return nil
 	}
 	m.saveSessionDraft()
+	m.sessionApprovalRefreshPending = ""
 	// Discard old-Session prompts without responding: completing them would
 	// submit an implicit rejection to the Session that was just left.
 	if m.activePrompt != nil && m.activePrompt.dismiss != nil {
@@ -61,6 +62,13 @@ func streamReconnectBackfillFrom(ctx context.Context, reconnect interface {
 	Deliveries() <-chan appserver.FeedDelivery
 	Err() error
 }, send func(tea.Msg), first *appserver.FeedDelivery) error {
+	return streamReconnectBackfillObserved(ctx, reconnect, send, first, nil)
+}
+
+func streamReconnectBackfillObserved(ctx context.Context, reconnect interface {
+	Deliveries() <-chan appserver.FeedDelivery
+	Err() error
+}, send func(tea.Msg), first *appserver.FeedDelivery, observe func(eventstream.Envelope)) error {
 	if reconnect == nil {
 		return nil
 	}
@@ -109,6 +117,9 @@ func streamReconnectBackfillFrom(ctx context.Context, reconnect interface {
 		}
 
 		for _, envelope := range events {
+			if observe != nil {
+				observe(envelope)
+			}
 			if eventstream.IsSessionNotice(envelope) {
 				// The exact spool can contain notices published during first
 				// admission. Present them in order without making them replayable

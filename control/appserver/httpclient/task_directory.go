@@ -93,7 +93,7 @@ func (s *remoteTaskDirectorySubscription) readLoop() {
 			if s.stopped() {
 				return
 			}
-			s.setErr(classifyTaskStreamReadError(err))
+			s.setErr(classifyStreamReadError("Task directory", err))
 			return
 		}
 		switch frame.event {

@@ -124,21 +124,8 @@ function validateHandoffPlan(plan) {
       plan.command.some((value) => typeof value !== 'string' || value.length === 0)) {
     throw new Error('invalid npm update command');
   }
-  if (!plan.latest_version || !plan.executable || !plan.store_dir) {
+  if (!plan.latest_version || !plan.executable) {
     throw new Error('incomplete npm update handoff plan');
-  }
-}
-
-async function defaultActivateCaelis(executable, storeDir, signalCoordinator) {
-  const result = await runCapturedProcess(
-    executable,
-    ['service', 'start', '--store-dir', storeDir, '--format', 'json'],
-    { windowsHide: true },
-    signalCoordinator,
-  );
-  if (result.signal || result.code !== 0) {
-    const detail = String(result.stderr || result.stdout || '').trim();
-    throw new Error(`updated Caelis did not activate${detail ? `: ${detail}` : ''}`);
   }
 }
 
@@ -261,8 +248,6 @@ async function executeHandoffPlan(plan, options = {}) {
     ((handoffPlan) => defaultRunInstall(handoffPlan, signalCoordinator));
   const verifyVersion = options.verifyVersion ||
     ((executable) => defaultVerifyVersion(executable, signalCoordinator));
-  const activateCaelis = options.activateCaelis ||
-    ((executable, storeDir) => defaultActivateCaelis(executable, storeDir, signalCoordinator));
   let phase = 'install';
 
   try {
@@ -284,21 +269,19 @@ async function executeHandoffPlan(plan, options = {}) {
     }
     status.succeed(`Verified Caelis ${plan.latest_version}`);
 
-    phase = 'activate';
-    status.start('Activating updated Caelis…');
-    await activateCaelis(plan.executable, plan.store_dir);
-    status.succeed(`Activated Caelis ${plan.latest_version}`);
     stdout.write(
       // Keep this completion contract aligned with formatUpdateResult in
-      // internal/cli/update.go; Go is silent while a handoff is active.
-      `Caelis ${plan.latest_version} is ready ` +
-      `(updated from ${plan.current_version || 'unknown'} via npm).\n`,
+      // internal/cli/update.go; Go is silent while a handoff is active. The
+      // installer only replaces the artifact, so the running Host is upgraded
+      // on the next Caelis start instead of being restarted here.
+      `Caelis ${plan.latest_version} is installed ` +
+      `(updated from ${plan.current_version || 'unknown'} via npm); ` +
+      `it takes effect on the next start.\n`,
     );
     return 0;
   } catch (err) {
     status.fail(
-      phase === 'install' ? 'npm install failed' :
-        phase === 'verify' ? 'Version verification failed' : 'Caelis activation failed',
+      phase === 'install' ? 'npm install failed' : 'Version verification failed',
     );
     throw err;
   } finally {

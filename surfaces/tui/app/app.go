@@ -245,14 +245,32 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.pendingRenderEvents.reset()
 		m.renderDrainTickScheduled = false
 		m.viewGeneration = scoped.generation
+		m.sessionObservationRecovering = scoped.recovery
 		return m, m.beginSessionHistory(scoped)
-	case sessionObservationErrorMsg:
-		m.abortSessionHistory()
-		return m, m.showHint(scoped.err.Error(), hintOptions{priority: HintPriorityHigh})
 	}
 	if failure, ok := msg.(sessionObservationErrorMsg); ok {
+		pendingNavigation := m.sessionObservationRecovering && m.sessionSwitchPending
 		m.abortSessionHistory()
+		m.sessionSwitchPending = pendingNavigation
+		m.sessionObservationRecovering = false
+		m.sessionHistoryFailed = true
+		m.removeHintsByText(sessionObservationRecoveryHint)
 		return m, m.showHint(failure.err.Error(), hintOptions{priority: HintPriorityHigh})
+	}
+	if _, ok := msg.(sessionObservationRecoveringMsg); ok {
+		m.removeHintsByText(sessionHistoryLoadingHint)
+		if m.sessionHistory != nil {
+			start := m.sessionHistory.start
+			m.sessionSwitchPending = (start.automatic || start.recovery) && m.sessionHistory.pendingNavigation
+			m.sessionHistory = nil
+		}
+		m.sessionObservationRecovering = true
+		m.removeHintsByText(sessionObservationRecoveryHint)
+		return m, m.showHint(sessionObservationRecoveryHint, hintOptions{priority: HintPriorityHigh})
+	}
+	if refresh, ok := msg.(sessionApprovalRefreshMsg); ok {
+		m.refreshSessionApproval(refresh.prompt)
+		return m, nil
 	}
 	if replace, ok := msg.(sessionHistoryReplacementMsg); ok {
 		return m, m.beginSessionHistory(sessionViewStartMsg{generation: m.viewGeneration, state: replace.state, replacement: true})
@@ -291,8 +309,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch typed := msg.(type) {
 	case sessionHistoryReadyMsg:
+		recovery := m.sessionHistory != nil && m.sessionHistory.start.recovery
 		commitCmd := m.commitSessionHistory()
-		if !m.turnRunning() {
+		if !recovery && !m.turnRunning() {
 			if pending, ok := m.pendingQueue.takeNextDeferred(); ok {
 				next, cmd := m.submitPendingPromptAsIdle(pending)
 				return next, tea.Batch(commitCmd, cmd)

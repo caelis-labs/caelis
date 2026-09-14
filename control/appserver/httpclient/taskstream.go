@@ -6,9 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"mime"
-	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -216,7 +214,7 @@ func (s *remoteTaskSubscription) readLoop() {
 			if s.stopped() {
 				return
 			}
-			s.setErr(classifyTaskStreamReadError(err))
+			s.setErr(classifyStreamReadError("Task stream", err))
 			return
 		}
 		switch frame.event {
@@ -261,32 +259,6 @@ func (s *remoteTaskSubscription) publish(delivery taskstream.Delivery) bool {
 	case <-s.stop:
 		return false
 	}
-}
-
-// classifyTaskStreamReadError maps abrupt transport truncation to retryable
-// Unavailable while preserving non-retryable decode/frame-size failures.
-func classifyTaskStreamReadError(err error) error {
-	if err == nil {
-		return nil
-	}
-	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
-		// Wire contract: only an explicit done event is a clean end.
-		return errorcode.New(errorcode.Unavailable, "control http client: Task stream ended without a done event")
-	}
-	if errors.Is(err, bufio.ErrTooLong) {
-		return errorcode.New(errorcode.InvalidArgument, "control http client: Task stream frame is too large")
-	}
-	var netErr net.Error
-	if errors.As(err, &netErr) {
-		return errorcode.New(errorcode.Unavailable, "control http client: Task stream transport interrupted")
-	}
-	message := strings.ToLower(err.Error())
-	if strings.Contains(message, "connection reset") ||
-		strings.Contains(message, "broken pipe") ||
-		strings.Contains(message, "use of closed network connection") {
-		return errorcode.New(errorcode.Unavailable, "control http client: Task stream transport interrupted")
-	}
-	return err
 }
 
 func (s *remoteTaskSubscription) stopped() bool {

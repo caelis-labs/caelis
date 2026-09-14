@@ -76,9 +76,24 @@ AppServer clients. `-control-url` selects an explicit Host. `-embedded` is the
 single-process exception; automatic embedded fallback is allowed only after
 proving that no Host owns the Store and managed startup failed.
 
-Presentation exit does not stop the managed Host. Host lifecycle is explicit
-through `caelis service start|stop|restart|status`. Shared files are durable
-truth, never a substitute for live Host authority.
+Presentation exit and executable installation do not stop the managed Host.
+Each managed application launch serializes Host selection for its Store. A newer
+release stages its executable separately, stops the old Host, and starts the new
+one; shutdown cancels active Session work rather than waiting for natural
+completion. The replacement must report the expected build identity and readiness
+before the application attaches. An older client never replaces a newer running
+release. Explicit lifecycle commands remain available through
+`caelis service start|stop|restart|status`. Shared files are durable truth, never a
+substitute for live Host authority.
+
+Managed clients follow replacement discovery only after authenticating and
+checking the new instance's identity, protocol, and capabilities. Reconnection
+never starts a Host from the observing client's executable and never retries a
+dispatched mutation. The TUI makes bounded attempts to restore a lost Session
+observation through the existing reconnect bootstrap and atomic history view.
+It preserves local input, refreshes approvals from current Control state, and does
+not resubmit interrupted work. Session closure and incompatible or unauthorized
+Hosts end automatic recovery.
 
 Managed startup retains and reaps the exact launched process until its identity
 is ready. A child exit ends readiness polling immediately; phase durations and
@@ -367,10 +382,9 @@ ecosystem adapter and cannot become a dependency of the embedded Caelis path.
 - External ACP compatibility readers and their removal conditions are listed in
   [External ACP Agents](external-acp-agents.md).
 
-The current product does not provide automatic presentation reconnect after a
-Host replacement, a live multi-Session activity catalog, GUI presentation, a
-system Bar, or a Pet. Those absences are limitations, not parallel architecture
-plans.
+The current product does not provide a live multi-Session activity catalog,
+GUI presentation, a system Bar, or a Pet. Those absences are limitations, not
+parallel architecture plans.
 
 ## Change rules
 

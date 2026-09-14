@@ -1373,6 +1373,9 @@ func (m *Model) submitLineWithDisplayAndAttachmentsOptions(execLine string, disp
 		m.resetComposerAfterOverlayOpen()
 		return m, m.executeLineCmd(Submission{Text: execLine})
 	}
+	if m.sessionObservationRecovering {
+		return m, m.showHint(sessionObservationRecoveryHint, hintOptions{priority: HintPriorityHigh})
+	}
 	if m.sessionHistoryFailed {
 		return m, m.showHint("Session history unavailable; use /resume to reconnect before sending input.", hintOptions{priority: HintPriorityHigh})
 	}
@@ -1536,6 +1539,9 @@ func (m *Model) executeLineCmd(submission Submission) tea.Cmd {
 			return nil
 		}
 		m.sessionSwitchPending = true
+		if m.sessionHistory != nil {
+			m.sessionHistory.pendingNavigation = true
+		}
 	}
 	submission.viewGeneration = m.viewGeneration
 	sender := m.cfg.ProgramSender

@@ -1,14 +1,11 @@
 package cli
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
-	"os"
-	"os/exec"
 	"strings"
 
 	"github.com/caelis-labs/caelis/internal/updater"
@@ -24,7 +21,6 @@ var (
 	checkUpdateOperation = func(ctx context.Context, cfg updater.Config, opts updater.CheckOptions) (updater.Result, error) {
 		return updater.New(cfg).Check(ctx, opts)
 	}
-	activateUpdatedCaelis = activateUpdatedCaelisProcess
 )
 
 func runVersionSubcommand(args []string, stdout io.Writer) error {
@@ -58,6 +54,9 @@ func runUpdateSubcommand(ctx context.Context, args []string, defaultStoreDir str
 	return runUpdate(ctx, strings.TrimSpace(*storeDir), *checkOnly, stdout, stderr)
 }
 
+// runUpdate installs the new artifact only. The installer never touches the
+// running Host; the next Caelis start upgrades it through the existing Service
+// lifecycle, so an update may leave an active Session to be interrupted then.
 func runUpdate(ctx context.Context, storeDir string, checkOnly bool, stdout io.Writer, stderr io.Writer) error {
 	renderer := newUpdateProgressRenderer(stderr)
 	result, err := runUpdateOperation(ctx, updateConfig(storeDir), updater.UpdateOptions{
@@ -70,34 +69,7 @@ func runUpdate(ctx context.Context, storeDir string, checkOnly bool, stdout io.W
 		renderer.Fail()
 		return err
 	}
-	if result.Updated {
-		if err := activateUpdatedCaelis(ctx, storeDir); err != nil {
-			renderer.Fail()
-			return managedProductFailure(storeDir, "finish update", err)
-		}
-	}
 	return writeUpdateResult(stdout, result)
-}
-
-func activateUpdatedCaelisProcess(ctx context.Context, storeDir string) error {
-	executable, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("cli: verify updated Caelis: %w", err)
-	}
-	command := exec.CommandContext(ctx, executable,
-		"service", "start", "--store-dir", strings.TrimSpace(storeDir), "--format", "json",
-	)
-	var output bytes.Buffer
-	command.Stdout = &output
-	command.Stderr = &output
-	if err := command.Run(); err != nil {
-		detail := strings.TrimSpace(output.String())
-		if detail != "" {
-			return fmt.Errorf("cli: updated Caelis could not be activated: %s: %w", detail, err)
-		}
-		return fmt.Errorf("cli: updated Caelis could not be activated: %w", err)
-	}
-	return nil
 }
 
 func updateConfig(storeDir string) updater.Config {
@@ -130,6 +102,8 @@ func writeVersionResult(w io.Writer, format outputFormat, result versionResult) 
 
 func writeUpdateResult(w io.Writer, result updater.Result) error {
 	if result.Handoff {
+		// The npm launcher finishes the update in the foreground and owns the
+		// completion message; Go stays silent to avoid a duplicate report.
 		return nil
 	}
 	_, err := fmt.Fprintln(w, formatUpdateResult(result))
@@ -147,22 +121,10 @@ func formatUpdateResult(result updater.Result) string {
 		reason := firstNonEmptyString(strings.TrimSpace(result.Reason), "not supported for this installation")
 		return "update skipped: " + reason
 	}
-	if result.Deferred {
-		message := fmt.Sprintf(
-			"Caelis %s is prepared (current %s via %s). Installation will finish after this process exits.",
-			latest,
-			current,
-			method,
-		)
-		if reason := strings.TrimSpace(result.Reason); reason != "" {
-			message += " " + reason + "."
-		}
-		return message
-	}
 	if result.Updated {
 		// Keep this completion contract aligned with executeHandoffPlan in
 		// npm/lib/update-handoff.js; the handoff path intentionally silences Go.
-		return fmt.Sprintf("Caelis %s is ready (updated from %s via %s).", latest, current, method)
+		return fmt.Sprintf("Caelis %s is installed (updated from %s via %s); it takes effect on the next start.", latest, current, method)
 	}
 	if result.Available {
 		return fmt.Sprintf("update available: %s -> %s (%s)", current, latest, method)

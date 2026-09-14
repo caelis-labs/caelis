@@ -34,7 +34,9 @@ func (m *Model) beginSessionHistory(start sessionViewStartMsg) tea.Cmd {
 		pending = m.sessionHistory.pendingNavigation
 	}
 	m.sessionHistory = &sessionHistoryBuild{start: start, model: builder, pendingNavigation: pending}
-	m.sessionSwitchPending = true
+	if !start.recovery {
+		m.sessionSwitchPending = true
+	}
 	m.removeHintsByText(sessionHistoryLoadingHint)
 	return m.showHint(sessionHistoryLoadingHint, hintOptions{priority: HintPriorityHigh})
 }
@@ -56,7 +58,9 @@ func (m *Model) commitSessionHistory() tea.Cmd {
 	m.removeHintsByText(sessionHistoryLoadingHint)
 	m.sessionHistory = nil
 	m.sessionHistoryFailed = false
-	m.sessionSwitchPending = build.start.automatic && build.pendingNavigation
+	m.sessionObservationRecovering = false
+	m.removeHintsByText(sessionObservationRecoveryHint)
+	m.sessionSwitchPending = (build.start.automatic || build.start.recovery) && build.pendingNavigation
 	claimDraft := build.start.automatic && m.currentSessionID == ""
 	if claimDraft {
 		m.saveSessionDraft()
@@ -66,8 +70,13 @@ func (m *Model) commitSessionHistory() tea.Cmd {
 	defer m.endDeferredViewportSync()
 	var cmd tea.Cmd
 	previousChildren := m.subagentOutputViews
-	if !build.start.replacement {
+	if build.start.recovery && m.currentSessionID == build.start.state.SessionID {
+		cmd = m.restoreSessionObservationState(build.start.state)
+	} else if !build.start.replacement {
 		cmd = m.applySessionReconnectState(build.start.state)
+		if build.start.recovery && build.start.state.Approval.Active != nil {
+			m.sessionApprovalRefreshPending = string(build.start.state.Approval.Active.RequestID)
+		}
 	}
 	if claimDraft {
 		delete(m.sessionDrafts, "")
@@ -83,7 +92,7 @@ func (m *Model) commitSessionHistory() tea.Cmd {
 	m.participantTurnIDs = b.participantTurnIDs
 	m.activeParticipantTurnSessionID = b.activeParticipantTurnSessionID
 	m.subagentOutputViews = b.subagentOutputViews
-	if build.start.replacement {
+	if build.start.replacement || build.start.recovery {
 		for callID, view := range m.subagentOutputViews {
 			if previous := previousChildren[callID]; previous != nil && previous.taskHandle == view.taskHandle {
 				m.subagentOutputViews[callID] = previous

@@ -7,36 +7,29 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 )
 
 const (
 	npmHandoffOwnershipName = "ownership.json"
 	npmHandoffPlanName      = "plan.json"
-
-	windowsNPMDetachedReason = "The npm launcher handoff is unavailable; wait for the background update to finish before starting Caelis again"
 )
 
 type npmInstallResult struct {
 	Deferred bool
 	Handoff  bool
-	Reason   string
 }
 
-type windowsNPMInstallStrategy uint8
-
-const (
-	windowsNPMForegroundHandoff windowsNPMInstallStrategy = iota + 1
-	windowsNPMDetachedCompatibility
-)
-
+// npmHandoffOwnership records the update-lock ownership that the launcher
+// releases after installing or verifying a failure.
 type npmHandoffOwnership struct {
 	Version   int    `json:"version"`
 	LockPath  string `json:"lock_path"`
 	LockToken string `json:"lock_token"`
 }
 
+// npmHandoffPlan is executed by the npm launcher after this process exits and
+// releases the running executable.
 type npmHandoffPlan struct {
 	Version        int      `json:"version"`
 	Command        []string `json:"command"`
@@ -44,7 +37,6 @@ type npmHandoffPlan struct {
 	CurrentVersion string   `json:"current_version"`
 	LatestVersion  string   `json:"latest_version"`
 	Executable     string   `json:"executable"`
-	StoreDir       string   `json:"store_dir"`
 }
 
 func (m *Manager) npmInstallCommand(latest string) ([]string, error) {
@@ -68,44 +60,56 @@ func (m *Manager) installNPM(
 		return npmInstallResult{}, fmt.Errorf("missing npm command")
 	}
 	windows := strings.EqualFold(m.cfg.GOOS, "windows")
-	reportProgress(progress, ProgressEvent{
-		Stage: ProgressInstalling, Detail: MethodNPM, Deferred: windows,
-	})
 	if windows {
-		switch m.windowsNPMInstallStrategy() {
-		case windowsNPMForegroundHandoff:
-			handoffDir := strings.TrimSpace(m.env(EnvNPMUpdateHandoffDir))
-			if err := m.writeNPMHandoffPlan(handoffDir, cmd, currentVersion, latestVersion); err != nil {
-				return npmInstallResult{}, err
-			}
-			reportProgress(progress, ProgressEvent{
-				Stage: ProgressInstalling, Detail: MethodNPM, Done: true, Deferred: true,
-			})
-			return npmInstallResult{Deferred: true, Handoff: true}, nil
-		case windowsNPMDetachedCompatibility:
-			if err := m.scheduleWindowsNPMInstall(cmd); err != nil {
-				return npmInstallResult{}, err
-			}
-			reportProgress(progress, ProgressEvent{
-				Stage: ProgressInstalling, Detail: MethodNPM, Done: true, Deferred: true,
-			})
-			return npmInstallResult{Deferred: true, Reason: windowsNPMDetachedReason}, nil
-		default:
-			return npmInstallResult{}, fmt.Errorf("unsupported Windows npm install strategy")
+		// Windows cannot replace a running executable, so the npm launcher
+		// installs after this process exits. A launcher that does not offer the
+		// handoff must run npm itself rather than leaving a weaker detached path.
+		handoffDir := strings.TrimSpace(m.env(EnvNPMUpdateHandoffDir))
+		if handoffDir == "" {
+			return npmInstallResult{}, fmt.Errorf(
+				"npm update on Windows requires the npm launcher handoff; run %q or update through the npm launcher",
+				"npm install -g "+npmPackageName+"@"+npmVersion(latestVersion),
+			)
 		}
+		reportProgress(progress, ProgressEvent{
+			Stage: ProgressInstalling, Detail: MethodNPM, Deferred: true,
+		})
+		if err := m.writeNPMHandoffPlan(handoffDir, cmd, currentVersion, latestVersion); err != nil {
+			return npmInstallResult{}, err
+		}
+		reportProgress(progress, ProgressEvent{
+			Stage: ProgressInstalling, Detail: MethodNPM, Done: true, Deferred: true,
+		})
+		return npmInstallResult{Deferred: true, Handoff: true}, nil
 	}
-	if err := m.cfg.CommandRun(ctx, cmd[0], cmd[1:], stdout, stderr); err != nil {
+	reportProgress(progress, ProgressEvent{Stage: ProgressInstalling, Detail: MethodNPM})
+	if err := m.cfg.CommandRun(ctx, cmd[0], cmd[1:], nil, stdout, stderr); err != nil {
+		return npmInstallResult{}, err
+	}
+	if _, err := m.verifyNPMArtifact(ctx, latestVersion); err != nil {
 		return npmInstallResult{}, err
 	}
 	reportProgress(progress, ProgressEvent{Stage: ProgressInstalling, Detail: MethodNPM, Done: true})
 	return npmInstallResult{}, nil
 }
 
-func (m *Manager) windowsNPMInstallStrategy() windowsNPMInstallStrategy {
-	if strings.TrimSpace(m.env(EnvNPMUpdateHandoffDir)) != "" {
-		return windowsNPMForegroundHandoff
+// verifyNPMArtifact verifies the binary the npm launcher will execute, so a
+// changed global prefix cannot report a false success. npm installs an exact
+// version, so the executed target must report that version.
+func (m *Manager) verifyNPMArtifact(ctx context.Context, expected string) (string, error) {
+	dir := m.env(EnvNPMPlatformPackageDir)
+	if dir == "" {
+		return "", fmt.Errorf("verify npm update: %s is not set", EnvNPMPlatformPackageDir)
 	}
-	return windowsNPMDetachedCompatibility
+	executable := filepath.Join(dir, "runtime", rawBinaryName(m.cfg.GOOS))
+	installed, err := m.artifactVersion(ctx, executable)
+	if err != nil {
+		return "", err
+	}
+	if compareVersions(installed, expected) != 0 {
+		return "", fmt.Errorf("npm update target reports Caelis %s, expected %s", displayVersion(installed), displayVersion(expected))
+	}
+	return installed, nil
 }
 
 func (m *Manager) writeNPMHandoffPlan(
@@ -152,7 +156,6 @@ func (m *Manager) writeNPMHandoffPlan(
 		CurrentVersion: strings.TrimSpace(currentVersion),
 		LatestVersion:  strings.TrimSpace(latestVersion),
 		Executable:     filepath.Clean(executable),
-		StoreDir:       filepath.Clean(m.cfg.StoreDir),
 	}
 	// Ownership is published first so the launcher can release the transferred
 	// lock even when plan parsing or child termination prevents installation.
@@ -210,51 +213,6 @@ func writeAtomicNPMHandoffJSON(dir string, name string, value any) error {
 	return nil
 }
 
-func (m *Manager) scheduleWindowsNPMInstall(cmd []string) error {
-	script, err := os.CreateTemp("", "caelis-npm-update-*.cmd")
-	if err != nil {
-		return err
-	}
-	scriptPath := script.Name()
-	committed := false
-	defer func() {
-		if !committed {
-			_ = os.Remove(scriptPath)
-		}
-	}()
-	body := windowsNPMInstallScript(os.Getpid(), cmd)
-	if _, err := script.WriteString(body); err != nil {
-		_ = script.Close()
-		return err
-	}
-	if err := script.Close(); err != nil {
-		return err
-	}
-	if err := m.cfg.CommandStart("cmd.exe", []string{"/C", "start", "", "/B", scriptPath}); err != nil {
-		return err
-	}
-	committed = true
-	return nil
-}
-
-func windowsNPMInstallScript(pid int, cmd []string) string {
-	pidText := strconv.Itoa(pid)
-	lines := []string{
-		"@echo off",
-		"setlocal",
-		":wait",
-		fmt.Sprintf(`tasklist /FI "PID eq %s" /NH | find "%s" > nul`, pidText, pidText),
-		"if not errorlevel 1 (",
-		"  timeout /t 1 /nobreak > nul",
-		"  goto wait",
-		")",
-		windowsNPMCommandLine(cmd) + " > nul 2> nul",
-		"del \"%~f0\" > nul 2> nul",
-		"",
-	}
-	return strings.Join(lines, "\r\n")
-}
-
 func windowsNPMCommandLine(cmd []string) string {
 	if len(cmd) == 0 {
 		return ""
@@ -270,4 +228,8 @@ func windowsNPMCommandLine(cmd []string) string {
 	default:
 		return line
 	}
+}
+
+func windowsQuote(value string) string {
+	return `"` + strings.ReplaceAll(value, `"`, `""`) + `"`
 }

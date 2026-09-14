@@ -394,7 +394,7 @@ func (c *Client) Reconnect(ctx context.Context, request appserver.ReconnectReque
 	frame, err := readRemoteSSEFrame(scanner)
 	if err != nil {
 		response.Body.Close()
-		return appserver.ReconnectResult{}, fmt.Errorf("control http client: read reconnect bootstrap: %w", err)
+		return appserver.ReconnectResult{}, fmt.Errorf("control http client: read reconnect bootstrap: %w", classifyStreamReadError("Session feed", err))
 	}
 	if frame.event != wirev1.BootstrapEventName {
 		response.Body.Close()
@@ -790,11 +790,7 @@ func (s *remoteSubscription) read() {
 			if s.wasClosed() {
 				return
 			}
-			if errors.Is(err, io.EOF) {
-				s.setError(errorcode.New(errorcode.Unavailable, "control http client: Session feed ended without a done event"))
-			} else {
-				s.setError(err)
-			}
+			s.setError(classifyStreamReadError("Session feed", err))
 			return
 		}
 		switch frame.event {

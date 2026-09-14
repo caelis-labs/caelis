@@ -19,7 +19,8 @@ location, or set it to an empty value locally to use the standard caches.
 PR CI runs lint, the full suite, and build on Linux. The required
 `windows-host-open` check runs `make windows-check` on native Windows. It covers
 process trees, ConPTY, sandboxing, Windows paths, file locks, atomic replacement,
-WAL recovery, Host persistence, and clipboard behavior. Small platform owners run
+WAL recovery, Host persistence and replacement, client reconnection, updater
+command handoff, and clipboard behavior. Small platform owners run
 their full tests; large Runtime, Session, Control, Gateway, CLI, and TUI packages
 use selectors in `scripts/windows_check.sh` that fail if no tests match.
 Implicit vet remains enabled for Windows source. Tests use at most two packages

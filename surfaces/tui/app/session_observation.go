@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"strings"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -25,6 +24,7 @@ type sessionViewStartMsg struct {
 	state       appserver.SessionState
 	automatic   bool
 	replacement bool
+	recovery    bool
 }
 
 type sessionObservationErrorMsg struct{ err error }
@@ -75,86 +75,10 @@ func (s *ProgramSender) releaseSessionView(generation uint64) {
 func observeSelectedSession(ctx context.Context, sender *ProgramSender, reconnect controlprompt.SessionReconnect, automatic bool) executeLineResult {
 	state := reconnect.State()
 	viewCtx, generation := sender.replaceSessionView(ctx, state.SessionID)
-	send := sender.sessionSend(generation)
 	sender.SendMsg(sessionViewStartMsg{generation: generation, state: state, automatic: automatic})
-	if err := streamReconnectBackfill(viewCtx, reconnect, send); err != nil {
-		_ = reconnect.Close()
-		if viewCtx.Err() == nil {
-			send(sessionObservationErrorMsg{err: err})
-		}
-		sender.releaseSessionView(generation)
-		return executeLineResult{queued: true}
-	}
-	send(sessionHistoryReadyMsg{})
-	for _, env := range reconnect.BootstrapEvents() {
-		send(env)
-		if req := approvalPayloadFromACPEvent(env); req != nil {
-			sendApprovalPrompt(viewCtx, reconnect, req, send)
-		}
-	}
-	if !sender.startForwarder(func() {
-		defer sender.releaseSessionView(generation)
-		defer reconnect.Close()
-		assembler := &appserver.FeedDeliveryAssembler{}
-		ticker := time.NewTicker(eventStreamBatchInterval)
-		defer ticker.Stop()
-		var batcher eventStreamNarrativeBatcher
-		for {
-			select {
-			case <-viewCtx.Done():
-				return
-			case now := <-ticker.C:
-				batcher.flushReady(now, send)
-			case delivery, open := <-reconnect.Deliveries():
-				if !open {
-					batcher.flush(send)
-					if viewCtx.Err() == nil {
-						err := reconnect.Err()
-						if err == nil {
-							err = errors.New("session observation closed; use /resume to reconnect")
-						}
-						send(sessionObservationErrorMsg{err: err})
-					}
-					return
-				}
-				if delivery.Kind == appserver.FeedDeliveryReplaceBegin {
-					batcher.flush(send)
-					send(sessionHistoryReplacementMsg{state: reconnect.State()})
-					if err := streamReconnectBackfillFrom(viewCtx, reconnect, send, &delivery); err != nil {
-						if viewCtx.Err() == nil {
-							send(sessionObservationErrorMsg{err: err})
-						}
-						return
-					}
-					send(sessionHistoryReadyMsg{})
-					continue
-				}
-				events, replacement, err := assembler.Accept(delivery)
-				if err != nil || replacement {
-					if err == nil {
-						err = errors.New("session history changed; reattach to refresh the view")
-					}
-					send(sessionObservationErrorMsg{err: err})
-					return
-				}
-				for _, env := range events {
-					if env.SessionID != "" && env.SessionID != state.SessionID {
-						continue
-					}
-					if observer, ok := reconnect.(interface{ ObserveEvent(eventstream.Envelope) }); ok {
-						observer.ObserveEvent(env)
-					}
-					if batcher.enqueue(env, send) {
-						continue
-					}
-					send(env)
-					if req := approvalPayloadFromACPEvent(env); req != nil {
-						sendApprovalPrompt(viewCtx, reconnect, req, send)
-					}
-				}
-			}
-		}
-	}) {
+	observer := &sessionObserver{sender: sender, ctx: viewCtx, generation: generation, reconnect: reconnect, sessionID: state.SessionID, automatic: automatic}
+	err := observer.backfill(nil)
+	if !sender.startForwarder(func() { observer.run(err) }) {
 		_ = reconnect.Close()
 		sender.releaseSessionView(generation)
 	}

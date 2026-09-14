@@ -2,10 +2,8 @@ package httpclient
 
 import (
 	"bufio"
-	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"testing"
 	"time"
@@ -66,21 +64,6 @@ func TestRemoteTaskSubscriptionBareEOFIsUnavailable(t *testing.T) {
 		t.Fatalf("Err() = %v", subscription.Err())
 	}
 	_ = subscription.Close()
-}
-
-func TestClassifyTaskStreamReadError(t *testing.T) {
-	if !errorcode.Is(classifyTaskStreamReadError(io.EOF), errorcode.Unavailable) {
-		t.Fatal("EOF should be Unavailable")
-	}
-	if !errorcode.Is(classifyTaskStreamReadError(io.ErrUnexpectedEOF), errorcode.Unavailable) {
-		t.Fatal("UnexpectedEOF should be Unavailable")
-	}
-	if !errorcode.Is(classifyTaskStreamReadError(bufio.ErrTooLong), errorcode.InvalidArgument) {
-		t.Fatal("ErrTooLong should be InvalidArgument")
-	}
-	if !errorcode.Is(classifyTaskStreamReadError(&net.OpError{Op: "read", Err: errors.New("connection reset by peer")}), errorcode.Unavailable) {
-		t.Fatal("connection reset should be Unavailable")
-	}
 }
 
 func taskDeliveryJSON(t *testing.T, delivery taskstream.Delivery) []byte {
