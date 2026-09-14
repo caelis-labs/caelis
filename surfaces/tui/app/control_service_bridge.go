@@ -686,7 +686,7 @@ func appendAgentSlashCommandsWithContext(ctx context.Context, service controlpro
 	if bindings, ok := service.(agentbinding.Service); ok {
 		bindingStatus, _ = bindings.AgentBindingStatus(ctx)
 	}
-	commands = agentbinding.ProjectBoundDirectNames(commands, bindingStatus)
+	commands = agentbinding.ProjectBoundDirectNames(commands, agentCommandBindings(bindingStatus))
 	status, err := service.AgentStatus(ctx)
 	if err == nil {
 		if strings.EqualFold(strings.TrimSpace(status.ControllerKind), string(session.ControllerKindACP)) {
@@ -727,11 +727,11 @@ func profileCommandDetailsWithContext(ctx context.Context, service controlprompt
 	details := map[string]string{}
 	if bindings, ok := service.(agentbinding.Service); ok {
 		if status, err := bindings.AgentBindingStatus(ctx); err == nil {
-			for _, handle := range status.Handles {
+			for _, handle := range agentCommandBindings(status).Handles {
 				if !agentbinding.IsDirectRunDefinition(handle.Definition) || !agentbinding.IsBound(handle) {
 					continue
 				}
-				details[string(handle.Definition.Handle)] = subagentProfileCommandDetail(handle)
+				details[string(handle.Definition.Handle)] = agentProfileCommandDetail(handle)
 			}
 		}
 	}

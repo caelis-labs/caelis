@@ -119,17 +119,17 @@ func TestSlashHelpOutputUsesTUIGrouping(t *testing.T) {
 func TestSlashTableOutputUsesSectionAndTableStyles(t *testing.T) {
 	t.Parallel()
 
-	lines := renderSlashCommandResultLines(controlprompt.NewTableSlashResult("subagent", controlprompt.SlashTableSnapshot{
-		Title: "Subagents",
+	lines := renderSlashCommandResultLines(controlprompt.NewTableSlashResult("example", controlprompt.SlashTableSnapshot{
+		Title: "Example",
 		Sections: []controlprompt.SlashTableSection{{
-			Title:   "Delegation Profiles",
+			Title:   "Bindings",
 			Columns: []string{"Profile", "Binding"},
 			Rows:    [][]string{{"breeze", "Unbound"}, {"orbit", "openai-codex/gpt-5.6-sol [high]"}},
 		}},
 	}))
 	want := strings.Join([]string{
-		"Subagents",
-		"Delegation Profiles",
+		"Example",
+		"Bindings",
 		"  Profile  Binding",
 		"  ───────  ───────────────────────────────",
 		"  breeze   Unbound",
@@ -173,7 +173,7 @@ func TestSlashOutputKeepsBlankLinesBeforeAndAfter(t *testing.T) {
 		t.Fatalf("fourth block = %#v, want trailing spacer", model.doc.blocks[3])
 	}
 
-	model.handleUserMessageMsg(UserMessageMsg{Text: "/subagent"})
+	model.handleUserMessageMsg(UserMessageMsg{Text: "/help"})
 	if model.doc.Len() != 5 {
 		t.Fatalf("document blocks after next command = %d, want existing trailing spacer reused", model.doc.Len())
 	}

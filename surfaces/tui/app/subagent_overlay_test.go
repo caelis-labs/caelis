@@ -15,7 +15,7 @@ func TestSubagentOverlayRendersOpaqueResponsiveFrame(t *testing.T) {
 	model, _ := newSubagentOverlayTestModel(t)
 	frame := ansi.Strip(model.View().Content)
 	for _, want := range []string{
-		"◆ Participants & system agents",
+		"◆ Team Configuration",
 		"Binding set",
 		"Participant profiles",
 		"orbit",
@@ -71,6 +71,37 @@ func TestSubagentOverlayRendersOpaqueResponsiveFrame(t *testing.T) {
 	}
 }
 
+func TestTeamOverlayShowsConflictingRoleWithoutDroppingIt(t *testing.T) {
+	for _, width := range []int{100, 60} {
+		model, service := newSubagentOverlayTestModel(t)
+		service.status.Handles = append(service.status.Handles, agentbinding.HandleStatus{
+			Definition: agentbinding.Definition{Handle: "team", Class: agentbinding.HandleClassDelegation, Custom: true, Configurable: true},
+			Binding:    agentbinding.Binding{Handle: "team", ProfileID: "provider:sol", Effort: "high"},
+			Profile:    testProviderModelProfile(),
+		})
+		model.subagentOverlay.status = service.status
+		updated, _ := model.Update(tea.WindowSizeMsg{Width: width, Height: 32})
+		model = updated.(*Model)
+		selectSubagentTestRow(t, model, "handle:team")
+		frame := ansi.Strip(model.View().Content)
+		if !strings.Contains(frame, "Name conflicts with /team") {
+			t.Fatalf("%d-column frame omitted role conflict:\n%s", width, frame)
+		}
+		row := model.currentSubagentRow()
+		if !row.nameConflict || !row.custom || !row.enabled || row.handle != "team" {
+			t.Fatalf("conflicting role is not available for user configuration: %#v", row)
+		}
+		for _, row := range model.subagentOverlay.rows {
+			if row.handle == "orbit" && row.nameConflict {
+				t.Fatal("built-in profile was marked as a custom-name conflict")
+			}
+		}
+		if service.reset != "" || service.bindRequest.Handle != "" {
+			t.Fatal("displaying a conflict mutated the role")
+		}
+	}
+}
+
 func TestSubagentOverlayStewardDefaultIsStatic(t *testing.T) {
 	model, _ := newSubagentOverlayTestModel(t)
 	selectSubagentTestRow(t, model, "handle:steward")
@@ -97,7 +128,7 @@ func TestSubagentOverlayDismissesWelcomeCardOnOpen(t *testing.T) {
 	}
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 100, Height: 32})
 	model = updated.(*Model)
-	updated, cmd := model.submitInteractiveLine("/subagent", "/subagent", nil)
+	updated, cmd := model.submitInteractiveLine("/team", "/team", nil)
 	model = updated.(*Model)
 	if cmd == nil || model.subagentOverlay == nil {
 		t.Fatal("opening subagent overlay failed")
@@ -412,7 +443,7 @@ func newSubagentOverlayTestModel(t *testing.T) (*Model, *subagentDelegationStub)
 	})
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 100, Height: 32})
 	model = updated.(*Model)
-	updated, cmd := model.submitInteractiveLine("/subagent", "/subagent", nil)
+	updated, cmd := model.submitInteractiveLine("/team", "/team", nil)
 	model = updated.(*Model)
 	if cmd == nil {
 		t.Fatal("open overlay returned nil command")

@@ -250,11 +250,11 @@ func slashHelpGroupTitle(item controlprompt.CommandHelpItem) string {
 		return "Core"
 	case "model", "connect", "new", "resume", "compact":
 		return "Model & Session"
-	case "review", "breeze", "orbit", "zenith", "subagent":
+	case "review", "breeze", "orbit", "zenith", "team":
 		return "Agents"
 	case "plugin":
 		return "Plugins & Tools"
-	case "exit", "quit":
+	case "quit":
 		return "Lifecycle"
 	default:
 		return "Core"

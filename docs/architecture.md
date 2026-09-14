@@ -163,7 +163,7 @@ replay reads the stored bytes and does not repeat a Memory call. Consistency
 cursors and provenance references remain in model-hidden Session state and
 ToolResult metadata.
 
-The only ordinary user choice is the `Memory Steward` row in `/subagent`.
+The only ordinary user choice is the `Memory Steward` row in `/team`.
 Without an explicit provider-model binding, Memory keeps its baseline durable
 receipt journal and lexical recall path and Caelis never invokes a model for
 Memory. Binding that fixed system Agent enables the provider-neutral Steward

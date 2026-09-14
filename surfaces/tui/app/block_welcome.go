@@ -19,7 +19,7 @@ const (
 	welcomeActionTokenConnect = "welcome:action:connect"
 	welcomeActionTokenModel   = "welcome:action:model"
 	welcomeActionTokenResume  = "welcome:action:resume"
-	welcomeActionTokenQuit    = "welcome:action:quit"
+	welcomeActionTokenTeam    = "welcome:action:team"
 )
 
 var welcomeWordmarkASCII = []string{

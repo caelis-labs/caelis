@@ -66,9 +66,8 @@ and ACP agents:
 1. Use `/connect` to add the providers or ACP agents you want. For an external
    agent, install its executable separately and make it available on the Host's
    `PATH`; choose **Custom** for another ACP stdio command.
-2. Open `/subagent` to configure participant profiles such as `breeze`, `orbit`,
-   and `zenith`, or create a custom role. This is the current command name for
-   participant and system-agent configuration.
+2. Open `/team` to configure participant profiles such as `breeze`, `orbit`,
+   and `zenith`, or create a custom role in the Team overlay.
 3. Ask the main agent to coordinate the work, for example:
 
    ```text
@@ -102,7 +101,7 @@ requirements and delivery guarantees.
   configuration requires workspace trust.
 - **Durable sessions and memory:** resume conversations and use built-in
   `Remember` and `Recall`. Memory needs no separate installation and invokes no
-  model unless you explicitly bind the Memory Steward in `/subagent`.
+  model unless you explicitly bind the Memory Steward in `/team`.
 - **Interactive or scriptable:** a TUI, text, versioned JSON, streaming JSONL,
   and an ACP server backed by the same Session and Control services.
 
@@ -131,7 +130,7 @@ on the Host. Each terminal can observe the same Session, see later Turns, send
 prompts, and answer approvals. The first valid approval answer takes effect;
 the other observers close that approval when its result arrives.
 
-`/quit`, `/exit`, `Ctrl+D`, or two presses of `Ctrl+C` close the TUI without
+`/quit` (also `/exit`), `Ctrl+D`, or two presses of `Ctrl+C` close the TUI without
 cancelling an accepted Turn. Press `Esc` in the Session workspace to interrupt
 the current Turn; inside the Session list, `Esc` closes the list. Continued work
 after terminal exit requires a managed or remote Host. An `-embedded` Host ends

@@ -1259,7 +1259,10 @@ func (m *Model) submitInteractiveLine(execLine string, displayLine string, attac
 		}
 		return m.submitLine("/disconnect")
 	}
-	if execLine == "/subagent" && m.isCommandAvailable("subagent") {
+	if spec, ok := controlprompt.Lookup(slashCommandName(execLine)); ok && spec.Name == "team" && m.isCommandAvailable(spec.Name) {
+		if len(strings.Fields(execLine)) != 1 {
+			return m, m.showHint("usage: /team", hintOptions{priority: HintPriorityHigh, clearOnMessage: true, clearAfter: copyHintDuration})
+		}
 		m.resetComposerAfterOverlayOpen()
 		return m, m.openSubagentOverlay()
 	}
@@ -1466,12 +1469,12 @@ func (m *Model) submitLineWithDisplayAndAttachmentsOptions(execLine string, disp
 }
 
 func isTUIExitLine(line string) bool {
-	switch strings.ToLower(strings.TrimSpace(line)) {
-	case "/exit", "/quit":
-		return true
-	default:
+	line = strings.TrimSpace(line)
+	if !strings.HasPrefix(line, "/") {
 		return false
 	}
+	spec, ok := controlprompt.Lookup(line)
+	return ok && spec.Name == "quit"
 }
 
 func isSessionSelectionLine(line string) bool {

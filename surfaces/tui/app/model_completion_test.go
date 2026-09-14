@@ -736,12 +736,12 @@ func TestSlashCommandTypingRefreshesBuiltinsImmediately(t *testing.T) {
 }
 
 func TestSlashCommandCompletionSubmitsOnlySafeArgumentFreeCommands(t *testing.T) {
-	for _, command := range []string{"help", "status", "exit", "quit"} {
+	for _, command := range []string{"help", "status", "quit", "team"} {
 		if !slashCommandSubmitsOnCompletion(command) {
 			t.Fatalf("slashCommandSubmitsOnCompletion(%q) = false, want true", command)
 		}
 	}
-	for _, command := range []string{"review", "breeze", "orbit", "zenith", "connect", "subagent", "plugin", "model", "doctor", "new", "resume", "compact"} {
+	for _, command := range []string{"review", "breeze", "orbit", "zenith", "connect", "plugin", "model", "doctor", "new", "resume", "compact"} {
 		if slashCommandSubmitsOnCompletion(command) {
 			t.Fatalf("slashCommandSubmitsOnCompletion(%q) = true, want explicit confirmation", command)
 		}

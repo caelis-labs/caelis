@@ -2,11 +2,11 @@ package tuiapp
 
 import (
 	"context"
-	"reflect"
 	"strings"
 	"testing"
+	"time"
 
-	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	"github.com/caelis-labs/caelis/control/modelprofile"
@@ -66,142 +66,104 @@ func (s *subagentDelegationStub) DeleteAgentBindingSet(_ context.Context, name s
 	return s.status, nil
 }
 
-func TestBareSubagentOpensDedicatedOverlay(t *testing.T) {
-	service := &subagentDelegationStub{status: subagentTestStatus()}
-	model := NewModel(Config{
-		Commands:       DefaultCommands(),
-		Wizards:        DefaultWizards(),
-		ControlService: service,
-	})
-	_, cmd := model.submitInteractiveLine("/subagent", "/subagent", nil)
-	if model.subagentOverlay == nil || !model.subagentOverlay.loading || model.wizard != nil {
-		t.Fatalf("bare /subagent overlay = %#v wizard=%#v", model.subagentOverlay, model.wizard)
-	}
-	msg := cmd()
-	if _, ok := msg.(subagentOverlayResultMsg); !ok {
-		t.Fatalf("open command message = %T, want subagentOverlayResultMsg", msg)
-	}
-}
-
-func TestSlashSubagentListsAndBindsProfilesAndSystemAgents(t *testing.T) {
-	service := &subagentDelegationStub{status: subagentTestStatus()}
-	var notices []string
-	var tables []controlprompt.SlashCommandResult
-	send := func(msg tea.Msg) {
-		switch value := msg.(type) {
-		case SlashNoticeMsg:
-			notices = append(notices, value.Text)
-		case SlashCommandResultMsg:
-			tables = append(tables, value.Result)
-		}
-	}
-
-	result := slashSubagentWithContext(context.Background(), service, send, "list")
-	if result.Err != nil || !result.SuppressTurnDivider || len(notices) != 0 || len(tables) != 1 {
-		t.Fatalf("list result = %#v notices=%#v tables=%#v", result, notices, tables)
-	}
-	if tables[0].Kind != controlprompt.SlashCommandResultTable || tables[0].Command != "subagent" {
-		t.Fatalf("list table result = %#v", tables[0])
-	}
-	wantTable := controlprompt.SlashTableSnapshot{
-		Title: "Participants & system agents",
-		Sections: []controlprompt.SlashTableSection{
-			{
-				Title:   "Participant profiles",
-				Columns: []string{"Profile", "Name", "Binding"},
-				Rows: [][]string{
-					{"self", "Session Default", "Current Session controller and effort"},
-					{"breeze", "Caelis Breeze", "Unbound"},
-					{"orbit", "Caelis Orbit", "openai-codex/gpt-5.6-sol [high]"},
-					{"zenith", "Caelis Zenith", "Unbound"},
+func TestTeamCommandOpensDedicatedOverlay(t *testing.T) {
+	for _, command := range []string{"/team", "/subagent", " /TEAM "} {
+		t.Run(command, func(t *testing.T) {
+			service := &subagentDelegationStub{status: subagentTestStatus()}
+			model := NewModel(Config{
+				Commands:       DefaultCommands(),
+				Wizards:        DefaultWizards(),
+				ControlService: service,
+				ExecuteLine: func(Submission) TaskResultMsg {
+					t.Fatal("team configuration reached prompt execution")
+					return TaskResultMsg{}
 				},
-			},
-			{
-				Title:   "System Agents",
-				Columns: []string{"Agent", "Name", "Binding"},
-				Rows: [][]string{
-					{"guardian", "Guardian", "openai-codex/gpt-5.6-sol [xhigh]"},
-					{"reviewer", "Reviewer", "Main Agent default"},
-					{"steward", "Memory Steward", "Static (zero-token)"},
-				},
-			},
-		},
-	}
-	if !reflect.DeepEqual(tables[0].Table, wantTable) {
-		t.Fatalf("list table = %#v, want %#v", tables[0].Table, wantTable)
-	}
-	listOutput := slashOutputPlainForTest(renderSlashCommandResultLines(tables[0]))
-	for _, want := range []string{"Participants & system agents", "Participant profiles", "Caelis Breeze", "Caelis Orbit", "Caelis Zenith", "openai-codex/gpt-5.6-sol", "[high]", "System Agents", "Guardian", "Reviewer", "Memory Steward", "Static (zero-token)"} {
-		if !strings.Contains(listOutput, want) {
-			t.Fatalf("list output = %q, want %q", listOutput, want)
-		}
-	}
-
-	result = slashSubagentWithContext(context.Background(), service, send, "bind guardian provider:sol xhigh")
-	if result.Err != nil || service.bindRequest.Handle != agentbinding.HandleGuardian || service.bindRequest.ProfileID != "provider:sol" || service.bindRequest.Effort != "xhigh" {
-		t.Fatalf("system bind result = %#v request=%#v", result, service.bindRequest)
-	}
-	result = slashSubagentWithContext(context.Background(), service, send, "bind reviewer default")
-	if result.Err != nil || service.reset != agentbinding.HandleReviewer {
-		t.Fatalf("system reset result = %#v reset=%q", result, service.reset)
-	}
-
-	result = slashSubagentWithContext(context.Background(), service, send, "bind zenith provider:sol xhigh")
-	if result.Err != nil || service.bindRequest.Handle != agentbinding.HandleZenith || service.bindRequest.ProfileID != "provider:sol" || service.bindRequest.Effort != "xhigh" {
-		t.Fatalf("bind result = %#v request=%#v", result, service.bindRequest)
-	}
-	if got := strings.TrimSpace(notices[len(notices)-1]); !strings.HasPrefix(got, "Updated zenith") {
-		t.Fatalf("model-backed bind notice = %q", got)
-	}
-
-	result = slashSubagentWithContext(context.Background(), service, send, "bind breeze self")
-	if result.Err != nil || service.reset != agentbinding.HandleBreeze {
-		t.Fatalf("self bind result = %#v reset=%q", result, service.reset)
-	}
-	if got := strings.TrimSpace(notices[len(notices)-1]); !strings.HasPrefix(got, "Updated breeze") {
-		t.Fatalf("self bind notice = %q", got)
-	}
-
-	service.reset = ""
-	result = slashSubagentWithContext(context.Background(), service, send, "reset orbit")
-	if result.Err != nil || service.reset != "" || !strings.Contains(notices[len(notices)-1], "usage: /subagent") {
-		t.Fatalf("removed reset action result = %#v reset=%q notices=%#v", result, service.reset, notices)
+			})
+			_, cmd := model.submitInteractiveLine(command, command, nil)
+			if cmd == nil || model.subagentOverlay == nil || !model.subagentOverlay.loading || model.wizard != nil || model.turnRunning() {
+				t.Fatalf("team overlay = %#v wizard=%#v running=%v", model.subagentOverlay, model.wizard, model.turnRunning())
+			}
+			if msg := cmd(); msg == nil {
+				t.Fatal("open command returned no binding result")
+			} else if _, ok := msg.(subagentOverlayResultMsg); !ok {
+				t.Fatalf("open command message = %T, want binding result", msg)
+			}
+			if service.bindRequest.Handle != "" || service.reset != "" || model.doc.Len() != 0 {
+				t.Fatal("opening configuration changed bindings or appended transcript output")
+			}
+		})
 	}
 }
 
-func TestSlashSubagentFriendlyErrorsUseParticipantWording(t *testing.T) {
-	service := &subagentDelegationStub{status: subagentTestStatus()}
-	result := slashSubagentWithContext(context.Background(), service, nil, "bind breeze self high")
-	if result.Err == nil || !strings.Contains(result.Err.Error(), "reset participant or system-agent binding") {
-		t.Fatalf("self+effort error = %v", result.Err)
-	}
-	result = slashSubagentWithContext(context.Background(), service, nil, "bind breeze provider:sol")
-	if result.Err == nil || !strings.Contains(result.Err.Error(), "bind participant or system-agent handle") {
-		t.Fatalf("missing-effort error = %v", result.Err)
+func TestTeamCommandRejectsArgumentsWithoutExecution(t *testing.T) {
+	for _, command := range []string{"/team list", "/team bind orbit provider:sol high", "/subagent list", "/subagent bind guardian default"} {
+		t.Run(command, func(t *testing.T) {
+			service := &subagentDelegationStub{status: subagentTestStatus()}
+			model := NewModel(Config{Commands: DefaultCommands(), ControlService: service})
+			_, _ = model.submitInteractiveLine(command, command, nil)
+			if got := ansi.Strip(model.hint); got != "usage: /team" {
+				t.Fatalf("hint = %q, want argument-free team usage", got)
+			}
+			if model.subagentOverlay != nil || model.turnRunning() || model.doc.Len() != 0 || service.bindRequest.Handle != "" || service.reset != "" {
+				t.Fatal("invalid team arguments opened configuration, mutated bindings, or started a turn")
+			}
+		})
 	}
 }
 
-func TestSubagentBindingNoticeUsesSameRendererForModelExternalAndSelf(t *testing.T) {
-	status := subagentTestStatus()
-	for i := range status.Handles {
-		if status.Handles[i].Definition.Handle != agentbinding.HandleBreeze {
-			continue
+func TestTeamCommandAndAliasRemainUnavailableWhileRunning(t *testing.T) {
+	for _, command := range []string{"/team", "/subagent"} {
+		model := NewModel(Config{Commands: DefaultCommands()})
+		model.beginLiveTurn(SubmissionModeDefault, false, time.Now())
+		_, _ = model.submitInteractiveLine(command, command, nil)
+		if model.subagentOverlay != nil || model.pendingQueue.visibleCount() != 0 || !strings.Contains(ansi.Strip(model.hint), "unavailable while running") {
+			t.Fatalf("%s bypassed running command gate: overlay=%#v hint=%q", command, model.subagentOverlay, model.hint)
 		}
-		status.Handles[i].Binding = agentbinding.Binding{
-			Handle: agentbinding.HandleBreeze, ProfileID: "acp:grok:4.5", Effort: "none",
-		}
-		status.Handles[i].Profile = modelprofile.ModelProfile{ID: "acp:grok:4.5", DisplayName: "Grok 4.5"}
 	}
-	for _, handle := range []agentbinding.Handle{agentbinding.HandleBreeze, agentbinding.HandleOrbit, agentbinding.HandleZenith} {
-		lines := renderSlashNoticeLines(SlashNoticeMsg{Text: formatAgentBindingNotice(status, handle)})
-		if len(lines) != 1 || !strings.HasPrefix(lines[0].Text, "Updated ") || !lines[0].Plain {
-			t.Fatalf("handle %q rendered notice = %#v", handle, lines)
+}
+
+func TestAgentCommandBindingsKeepBuiltinPriorityWithoutChangingConfiguration(t *testing.T) {
+	for _, bound := range []bool{false, true} {
+		status := subagentTestStatus()
+		for _, name := range []agentbinding.Handle{"team", "subagent", "exit", "quit"} {
+			item := agentbinding.HandleStatus{Definition: agentbinding.Definition{
+				Handle: name, Class: agentbinding.HandleClassDelegation, Configurable: true, Custom: true, Description: "Conflicting role description",
+			}}
+			if bound {
+				item.Binding = agentbinding.Binding{Handle: name, ProfileID: "provider:sol", Effort: "high"}
+			}
+			status.Handles = append(status.Handles, item)
+		}
+		service := &subagentDelegationStub{status: status}
+		commands := appendAgentSlashCommands(service, DefaultCommands())
+		for _, canonical := range []string{"team", "quit"} {
+			count := 0
+			for _, command := range commands {
+				if command == canonical {
+					count++
+				}
+			}
+			if count != 1 {
+				t.Fatalf("bound=%v: %s appears %d times in %#v", bound, canonical, count, commands)
+			}
+		}
+		for _, alias := range []string{"subagent", "exit"} {
+			if indexOfString(commands, alias) >= 0 {
+				t.Fatalf("bound=%v: alias/custom role %s advertised separately: %#v", bound, alias, commands)
+			}
+		}
+		details := profileCommandDetailsWithContext(context.Background(), service)
+		if details["team"] != "" || details["quit"] != "" || details["subagent"] != "" || details["exit"] != "" {
+			t.Fatalf("custom role overwrote built-in descriptions: %#v", details)
+		}
+		if len(service.status.Handles) != len(agentbinding.Definitions())+4 {
+			t.Fatal("command projection removed roles from configuration")
 		}
 	}
 }
 
 func TestProfileSlashDescriptionIncludesBoundProviderModelAndEffort(t *testing.T) {
-	detail := subagentProfileCommandDetail(agentbinding.HandleStatus{
+	detail := agentProfileCommandDetail(agentbinding.HandleStatus{
 		Definition: agentbinding.Definition{
 			Handle: agentbinding.HandleOrbit, Description: "General implementation and review.", Configurable: true,
 		},
@@ -214,6 +176,9 @@ func TestProfileSlashDescriptionIncludesBoundProviderModelAndEffort(t *testing.T
 		if !strings.Contains(detail, want) {
 			t.Fatalf("profile detail = %q, want %q", detail, want)
 		}
+	}
+	if detail := agentProfileCommandDetail(agentbinding.HandleStatus{}); detail != "unbound · configure with /team" {
+		t.Fatalf("unbound profile detail = %q", detail)
 	}
 }
 
