@@ -35,6 +35,8 @@ bash ./scripts/go_test_nonempty.sh ./internal/cli \
   '^TestRunDoctorStartupRepairsWorkspaceIdentityConflict$' windows-workspace-paths -count=1
 bash ./scripts/go_test_nonempty.sh ./internal/cli \
   '^TestManaged(LocalHostUpgrade|LocalHostConcurrentLaunch|LocalHostDoesNotDowngrade|Transport|ConnectionError)' windows-host-upgrade -count=1
+bash ./scripts/go_test_nonempty.sh ./internal/acpagentbridge/subagent \
+  '^Test(IdlePromptDispatchOrdersInputBeforePeerOutput|RestoredChildFollowsRealACPConnectionThroughOneSpool)$' windows-child-input-order -count=1
 bash ./scripts/go_test_nonempty.sh ./surfaces/tui/app \
   '^Test.*(Clipboard|NativeWrite|OSC52)' windows-clipboard -count=1
 bash ./scripts/go_test_nonempty.sh ./surfaces/tui/app \

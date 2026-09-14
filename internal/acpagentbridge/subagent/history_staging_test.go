@@ -3,6 +3,7 @@ package subagent
 import (
 	"fmt"
 	"os"
+	"runtime"
 	"testing"
 	"time"
 
@@ -20,7 +21,11 @@ func TestHistoryStagingStreamsLongReplayAndPreservesInputSources(t *testing.T) {
 	}
 	path := c.staging.file.Name()
 	stat, err := os.Stat(path)
-	if err != nil || stat.Mode().Perm() != 0600 {
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Windows uses inherited ACLs rather than Unix permission bits.
+	if runtime.GOOS != "windows" && stat.Mode().Perm() != 0o600 {
 		t.Fatal("history staging is not private")
 	}
 	const count = 9000
