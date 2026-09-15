@@ -176,9 +176,9 @@ make install
 make commit-check
 ```
 
-`make commit-check` runs the platform's default gate: focused native checks on
-Windows; lint, the full untagged test suite, and build elsewhere. See
-[Testing](docs/testing.md) for coverage and checks selected by the affected boundary.
+`make commit-check` checks Go formatting and diff whitespace. Run focused tests
+for changed behavior; PR CI owns the full gate. Use `make quality` for an optional
+full local run. See [Testing](docs/testing.md) for coverage and platform checks.
 
 ## License
 

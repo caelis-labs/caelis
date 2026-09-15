@@ -33,7 +33,8 @@ func TestReleasePleaseFeedsProtectedMainPublication(t *testing.T) {
 	}
 
 	var config struct {
-		Packages map[string]map[string]any `json:"packages"`
+		Packages     map[string]map[string]any `json:"packages"`
+		AlwaysUpdate bool                      `json:"always-update"`
 	}
 	if err := json.Unmarshal([]byte(readWorkflow(t, "../release-please-config.json")), &config); err != nil {
 		t.Fatal(err)
@@ -42,6 +43,9 @@ func TestReleasePleaseFeedsProtectedMainPublication(t *testing.T) {
 	if len(config.Packages) != 1 || root["release-type"] != "go" ||
 		root["include-component-in-tag"] != false || root["include-v-in-tag"] != true {
 		t.Fatal("release-please must use one root Go version with vX.Y.Z tags")
+	}
+	if config.AlwaysUpdate {
+		t.Fatal("release PR must not be refreshed solely to catch up with main")
 	}
 	if root["draft"] == true || root["skip-github-release"] == true {
 		t.Fatal("release-please must create a published release and tag to trigger artifact publication")
@@ -66,8 +70,7 @@ func TestReleasePublishesProtectedMainTagsWithoutRepeatingPRQuality(t *testing.T
 
 	for _, want := range []string{
 		"pull_request:\n    branches: [main]",
-		"schedule:",
-		"if: always() && github.event_name != 'schedule'",
+		"if: needs.changes.outputs.full == 'true'",
 		"contents: read",
 		"name: Lint",
 		"run: make test",
@@ -120,6 +123,12 @@ func TestReleasePublishesProtectedMainTagsWithoutRepeatingPRQuality(t *testing.T
 	}
 	for _, forbidden := range []string{
 		"push:",
+		"schedule:",
+		"workflow_dispatch:",
+		"release-ci-approval",
+		"environment: release-ci",
+		"windows-host-open:",
+		"go test -race",
 		"workflow_call:",
 		"make fmt-check",
 		"make vet",
@@ -145,69 +154,91 @@ func TestReleasePublishesProtectedMainTagsWithoutRepeatingPRQuality(t *testing.T
 	}
 }
 
-func TestReleaseCIApprovalPropagatesToRequiredChecks(t *testing.T) {
+func TestScopedQualityFailsClosed(t *testing.T) {
 	t.Parallel()
-
 	quality := readWorkflow(t, "../.github/workflows/quality.yml")
-	job := func(name string) string {
-		t.Helper()
-		_, section, ok := strings.Cut(quality, "\n  "+name+":\n")
-		if !ok {
-			t.Fatalf("missing quality job %s", name)
-		}
-		return regexp.MustCompile(`(?m)^  \S`).Split(section, 2)[0]
-	}
-	approval := job("release-ci-approval")
 	for _, want := range []string{
-		"if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'release-please--branches--main'",
-		"environment: release-ci",
+		"fetch-depth: 2", "PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}",
+		"node --test scripts/ci_scope.test.mjs", "node scripts/ci_scope.mjs",
+		"if: steps.scope.outputs.docs == 'true'", "go run ./scripts/markdown_links",
+		"needs: [changes, govulncheck, go-quality]", "if: always()",
+		"CHANGES_RESULT: ${{ needs.changes.result }}", "FULL: ${{ needs.changes.outputs.full }}",
+		"VULN_RESULT: ${{ needs.govulncheck.result }}", "GO_RESULT: ${{ needs.go-quality.result }}",
+		"bash scripts/ci_result.sh",
 	} {
-		if !strings.Contains(approval, want) {
-			t.Fatalf("release approval missing %q", want)
+		if !strings.Contains(quality, want) {
+			t.Errorf("scoped quality workflow missing %q", want)
 		}
 	}
-	for _, name := range []string{"govulncheck", "go-quality", "windows-host-open"} {
-		t.Run(name, func(t *testing.T) {
-			section := job(name)
-			condition := "if: always()\n"
-			if name != "govulncheck" {
-				condition = "if: always() && github.event_name != 'schedule'\n"
+	for _, forbidden := range []string{"paths-ignore:", "paths:", "github.actor", "github.head_ref"} {
+		if strings.Contains(quality, forbidden) {
+			t.Errorf("quality must inspect the complete diff regardless of author: %q", forbidden)
+		}
+	}
+	for _, full := range []string{"true", "false"} {
+		expected := "success"
+		if full == "false" {
+			expected = "skipped"
+		}
+		baseline := map[string]string{"CHANGES_RESULT": "success", "FULL": full, "VULN_RESULT": expected, "GO_RESULT": expected}
+		run := func(values map[string]string, want bool) {
+			t.Helper()
+			cmd := exec.Command(testBash(t), "./ci_result.sh")
+			cmd.Env = os.Environ()
+			for key, value := range values {
+				cmd.Env = append(cmd.Env, key+"="+value)
 			}
-			for _, want := range []string{
-				"needs: release-ci-approval",
-				condition,
-				"APPROVAL_RESULT: ${{ needs.release-ci-approval.result }}",
-			} {
-				if !strings.Contains(section, want) {
-					t.Fatalf("required check must observe approval failure instead of skipping: missing %q", want)
+			output, err := cmd.CombinedOutput()
+			if (err == nil) != want {
+				t.Fatalf("guard %v: success=%v, want %v: %s", values, err == nil, want, output)
+			}
+		}
+		run(baseline, true)
+		for key, correct := range baseline {
+			for _, bad := range []string{"", "unknown", "failure", "cancelled", "skipped", "success"} {
+				if bad == correct {
+					continue
 				}
-			}
-			_, guard, ok := strings.Cut(section, "      - name: Check release CI approval\n")
-			if !ok || strings.Index(section, "name: Check release CI approval") > strings.Index(section, "uses: actions/checkout") {
-				t.Fatal("required check must validate approval before checkout")
-			}
-			guard, _, _ = strings.Cut(guard, "\n      - ")
-			_, script, ok := strings.Cut(guard, "        run: |\n")
-			if !ok {
-				t.Fatal("approval guard script missing")
-			}
-			for _, result := range []string{"success", "skipped", "failure", "cancelled", "", "unknown"} {
-				cmd := exec.Command(testBash(t), "-c", script)
-				cmd.Env = append(os.Environ(), "APPROVAL_RESULT="+result)
-				output, err := cmd.CombinedOutput()
-				want := result == "success" || result == "skipped"
-				if (err == nil) != want {
-					t.Fatalf("approval result %q: success=%v, want %v: %s", result, err == nil, want, output)
+				values := make(map[string]string, len(baseline))
+				for k, v := range baseline {
+					values[k] = v
 				}
+				values[key] = bad
+				run(values, false)
 			}
-		})
+		}
+	}
+}
+
+func TestCommitCheckDoesNotRepeatFullPRQuality(t *testing.T) {
+	t.Parallel()
+	makefile := readWorkflow(t, "../Makefile")
+	for _, want := range []string{"commit-check: fmt-check", "git diff --check", "git diff --cached --check", "quality: lint test build"} {
+		if !strings.Contains(makefile, want) {
+			t.Errorf("local checkpoint missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{"commit-check: quality", "commit-check: windows-check"} {
+		if strings.Contains(makefile, forbidden) {
+			t.Errorf("local checkpoint repeats full CI: %q", forbidden)
+		}
 	}
 }
 
 func TestWindowsQualityUsesFocusedNativeGate(t *testing.T) {
 	t.Parallel()
 
-	quality := readWorkflow(t, "../.github/workflows/quality.yml")
+	quality := readWorkflow(t, "../.github/workflows/platform-checks.yml")
+	for _, want := range []string{"schedule:", "workflow_dispatch:", "go test -race", "govulncheck -mode=source -scan=symbol ./..."} {
+		if !strings.Contains(quality, want) {
+			t.Errorf("platform checks missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{"push:", "pull_request:"} {
+		if strings.Contains(quality, forbidden) {
+			t.Errorf("platform checks run on every change: %q", forbidden)
+		}
+	}
 	_, windows, ok := strings.Cut(quality, "\n  windows-host-open:\n")
 	if !ok {
 		t.Fatal("required windows-host-open check missing")

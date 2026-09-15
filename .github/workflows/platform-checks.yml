@@ -1,0 +1,54 @@
+name: platform-checks
+
+on:
+  schedule:
+    - cron: '23 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+concurrency:
+  group: platform-checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-host-open:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    env:
+      GOWORK: 'off'
+      GOFLAGS: -mod=readonly -p=2
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Windows platform checks
+        shell: bash
+        run: make windows-check
+
+  security-and-race:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GOWORK: 'off'
+      GOFLAGS: -mod=readonly
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
+      - name: Check reachable vulnerabilities
+        run: govulncheck -mode=source -scan=symbol ./...
+      - name: Guardian and model invocation concurrency
+        run: go test -race -count=1 -timeout=5m ./app/gatewayapp ./agent-sdk/model ./agent-sdk/session/... ./internal/kernel -run 'TestGuardian|TestApprovalReviewer|TestToolAvailability|TestInvocation|TestAutoReview|Test.*Fence|Test.*MutationGuard'

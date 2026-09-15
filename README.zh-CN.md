@@ -141,8 +141,9 @@ make install
 make commit-check
 ```
 
-`make commit-check` 执行 lint、完整的无标签 Go 测试和构建。
-其他按影响范围选择的检查见 [测试文档](docs/testing.md)。
+`make commit-check` 检查 Go 格式和 diff 空白。修改代码时运行相关测试，
+完整门禁由 PR CI 执行；需要本地全量验证时运行 `make quality`。
+按影响范围选择的检查及平台验证见 [测试文档](docs/testing.md)。
 
 ## 许可证
 

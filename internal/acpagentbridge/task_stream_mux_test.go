@@ -498,14 +498,16 @@ func TestACPTaskStreamMuxExhaustsRetryWithOneSanitizedNotice(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("exhausted Task stream retry emitted no notice")
 	}
+	// Notice delivery precedes the transition back to Idle and deferred cleanup.
+	// A fresh anchor belongs after that resolve generation has actually settled.
+	first := waitForACPMuxGenerationSettled(t, mux, "command-1")
 	if calls := service.subscribeCallCount(); calls != acpTaskStreamResolveMaxAttempts {
 		t.Fatalf("Subscribe calls = %d, want bounded attempts %d", calls, acpTaskStreamResolveMaxAttempts)
 	}
 
 	mux.Observe(anchor)
-	deadline := time.Now().Add(time.Second)
-	for service.subscribeCallCount() != 2*acpTaskStreamResolveMaxAttempts && time.Now().Before(deadline) {
-		time.Sleep(time.Millisecond)
+	if next := waitForACPMuxGenerationSettled(t, mux, "command-1"); next == first {
+		t.Fatal("later anchor did not start a fresh resolve generation")
 	}
 	if calls := service.subscribeCallCount(); calls != 2*acpTaskStreamResolveMaxAttempts {
 		t.Fatalf("Subscribe calls after repeated anchor = %d, want a fresh bounded resolve", calls)
@@ -513,8 +515,28 @@ func TestACPTaskStreamMuxExhaustsRetryWithOneSanitizedNotice(t *testing.T) {
 	select {
 	case envelope := <-mux.Events():
 		t.Fatalf("repeated retryable miss emitted a duplicate notice: %#v", envelope)
-	case <-time.After(2 * acpTaskStreamResolveRetryDelay):
+	default:
 	}
+}
+
+func waitForACPMuxGenerationSettled(t *testing.T, mux *acpTaskStreamMux, callID string) *acpTaskStreamObservationGeneration {
+	t.Helper()
+	mux.mu.Lock()
+	observation := mux.observations[callID]
+	var generation *acpTaskStreamObservationGeneration
+	if observation != nil {
+		generation = observation.generation
+	}
+	mux.mu.Unlock()
+	if generation == nil {
+		t.Fatal("observation has no resolve generation")
+	}
+	select {
+	case <-generation.settled:
+	case <-time.After(time.Second):
+		t.Fatal("resolve generation did not settle")
+	}
+	return generation
 }
 
 func TestACPTaskStreamMuxLaterAnchorAttachesAfterRecoveryWindow(t *testing.T) {
@@ -539,7 +561,7 @@ func TestACPTaskStreamMuxLaterAnchorAttachesAfterRecoveryWindow(t *testing.T) {
 		t.Fatal("initial bounded attach miss emitted no availability notice")
 	}
 
-	time.Sleep(100 * time.Millisecond)
+	waitForACPMuxGenerationSettled(t, mux, "command-1")
 	sub := &acpMuxTestSubscription{events: make(chan eventstream.Envelope, 1)}
 	service.setSubscriptionResult(nil, sub)
 	mux.Observe(anchor)

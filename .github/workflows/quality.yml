@@ -6,8 +6,6 @@ env:
 on:
   pull_request:
     branches: [main]
-  schedule:
-    - cron: '23 6 * * *'
 
 permissions:
   contents: read
@@ -17,34 +15,41 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  release-ci-approval:
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'release-please--branches--main'
+  changes:
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    environment: release-ci
+    outputs:
+      full: ${{ steps.scope.outputs.full }}
     steps:
-      - name: Release CI approved
-        run: echo "Release PR CI approved for this revision."
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Test CI change classification
+        run: node --test scripts/ci_scope.test.mjs
+      - name: Inspect PR changes and release metadata
+        id: scope
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: node scripts/ci_scope.mjs
+      - uses: actions/setup-go@v7
+        if: steps.scope.outputs.docs == 'true'
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Check maintained documentation links
+        if: steps.scope.outputs.docs == 'true'
+        run: go run ./scripts/markdown_links
 
   govulncheck:
-    needs: release-ci-approval
-    if: always()
+    needs: changes
+    if: needs.changes.outputs.full == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
       GOWORK: 'off'
       GOFLAGS: -mod=readonly
     steps:
-      - name: Check release CI approval
-        shell: bash
-        env:
-          APPROVAL_RESULT: ${{ needs.release-ci-approval.result }}
-        run: |
-          case "${APPROVAL_RESULT}" in
-            success|skipped) ;;
-            *) echo "Release CI approval was rejected or cancelled." >&2; exit 1 ;;
-          esac
-
       - uses: actions/checkout@v7
 
       - uses: actions/setup-go@v7
@@ -59,21 +64,11 @@ jobs:
         run: govulncheck -mode=source -scan=symbol ./...
 
   go-quality:
-    needs: release-ci-approval
-    if: always() && github.event_name != 'schedule'
+    needs: changes
+    if: needs.changes.outputs.full == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
-      - name: Check release CI approval
-        shell: bash
-        env:
-          APPROVAL_RESULT: ${{ needs.release-ci-approval.result }}
-        run: |
-          case "${APPROVAL_RESULT}" in
-            success|skipped) ;;
-            *) echo "Release CI approval was rejected or cancelled." >&2; exit 1 ;;
-          esac
-
       - uses: actions/checkout@v7
 
       - uses: actions/setup-go@v7
@@ -86,43 +81,25 @@ jobs:
         with:
           version: v2.11.4
           args: ./...
-          install-mode: goinstall
+          install-mode: binary
 
       - name: Test
         run: make test
 
-      - name: Guardian and model invocation concurrency
-        run: go test -race -count=1 -timeout=5m ./app/gatewayapp ./agent-sdk/model ./agent-sdk/session/... ./internal/kernel -run 'TestGuardian|TestApprovalReviewer|TestToolAvailability|TestInvocation|TestAutoReview|Test.*Fence|Test.*MutationGuard'
-
       - name: Build
         run: make build
 
-  windows-host-open:
-    needs: release-ci-approval
-    if: always() && github.event_name != 'schedule'
-    runs-on: windows-2022
-    timeout-minutes: 20
-    env:
-      GOWORK: 'off'
-      GOFLAGS: -mod=readonly -p=2
+  quality:
+    needs: [changes, govulncheck, go-quality]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
-      - name: Check release CI approval
-        shell: bash
-        env:
-          APPROVAL_RESULT: ${{ needs.release-ci-approval.result }}
-        run: |
-          case "${APPROVAL_RESULT}" in
-            success|skipped) ;;
-            *) echo "Release CI approval was rejected or cancelled." >&2; exit 1 ;;
-          esac
-
       - uses: actions/checkout@v7
-
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Windows platform checks
-        shell: bash
-        run: make windows-check
+      - name: Verify all selected checks passed
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          FULL: ${{ needs.changes.outputs.full }}
+          VULN_RESULT: ${{ needs.govulncheck.result }}
+          GO_RESULT: ${{ needs.go-quality.result }}
+        run: bash scripts/ci_result.sh

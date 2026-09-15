@@ -28,16 +28,17 @@ their isolated default Store.
 
 ## Gate model
 
-`.github/workflows/quality.yml` runs lint, full untagged tests, and build on Linux,
-plus reachable-vulnerability checks, for PRs targeting `main`. Native Windows
-runs the focused platform checks documented in [Testing](testing.md), a build of
-all packages, and embedded Memory Open with the release's `CGO_ENABLED=0`
-configuration. CI uses GitHub's PR merge ref to check integration.
-The `main` branch ruleset requires up-to-date PRs and
-successful `go-quality`, `windows-host-open`, and `govulncheck` checks before
-merging. Keep these rules enabled; they are the quality gate for releases.
-Merging does not trigger a second quality run. Scheduled quality runs only
-refresh vulnerability results.
+The `main` branch ruleset requires the aggregate `quality` check from GitHub
+Actions. It does not require PR branches to be up to date. The workflow selects
+checks from actual changed files: code runs the Linux quality gate; maintained
+prose and release metadata use their specific validators. A failed classifier
+or selected check blocks merging. See [Testing](testing.md#pr-checks) for the
+scope rules and the integration tradeoff of allowing main to advance.
+
+Native Windows and targeted race checks run daily or manually, outside the
+ordinary PR gate. Before publishing platform-sensitive changes, obtain the
+relevant native evidence through `platform-checks.yml`. Merging does not trigger
+a second full quality run.
 
 The tag workflow verifies that the tagged commit belongs to `main`, then builds
 and publishes artifacts. It relies on the protected branch rather than querying
@@ -50,27 +51,23 @@ serialized and do not cancel a publication already in progress.
 The `release-please` workflow maintains one Release PR targeting `main`. It
 updates the root version in `.release-please-manifest.json` and generates
 `CHANGELOG.md`. All Go and npm packages continue to share that version; npm
-manifests are stamped from the tag during publication.
+manifests are stamped from the tag during publication. The bot updates its PR
+when release contents change, without forcing updates solely to catch up with
+`main`.
 
 Create a dedicated fine-grained PAT scoped to `caelis-labs/caelis`, with
 **Contents**, **Issues**, and **Pull requests** set to **Read and write**.
 The token owner must have repository write access; complete any organization
-approval required for the token. Store it as the repository Actions secret
-`RELEASE_PLEASE_TOKEN` and renew it before expiration. Do not grant the bot a
-branch-protection bypass or enable automatic merging.
+approval required for the token. Store it as `RELEASE_PLEASE_TOKEN` in repository
+Actions secrets or in an organization Actions secret shared with this repository,
+and renew it before expiration. Do not grant the bot a branch-protection bypass
+or enable automatic merging.
 
 The dedicated token lets bot-created PRs and tags trigger the existing quality
 and release workflows. The default `GITHUB_TOKEN` suppresses those downstream
 runs; see [release-please authentication](https://github.com/googleapis/release-please-action#other-actions-on-release-please-prs).
 A missing secret fails with a setup diagnostic. After adding or rotating it,
 run the `release-please` workflow manually on `main` if a retry is needed.
-
-Configure the repository environment `release-ci` with the release maintainer
-as a required reviewer before enabling the workflow. Allow self-review when
-the maintainer also owns the bot PAT, so they can approve runs triggered by that
-token. This environment needs no secrets and controls CI startup only. Keep its
-required-reviewer rule enabled: GitHub creates a referenced but missing
-environment without protection rules.
 
 Use Conventional Commit PR titles and squash merge so the resulting commits
 retain their release meaning: `fix:` produces a patch, `feat:` produces a
@@ -93,10 +90,10 @@ version override, use a `Release-As: X.Y.Z` footer in a merged commit, following
 5. Confirm the imported `github.com/caelis-labs/memory` version is released and
    declares a forward-migration floor for the persisted appliance database.
    A prerelease development baseline is a release blocker.
-6. Submit the intended changes through PRs, wait for their complete quality runs,
-   and merge with the branch up to date. Review the resulting Release PR's
-   version and changelog, approve its CI when ready to release, and wait for its
-   required checks too. Do not rerun unchanged local gates just for a tag.
+6. Submit the intended changes through PRs and wait for their selected checks.
+   Review the resulting Release PR's version and changelog, and wait for its
+   metadata validation. Merging this PR is the decision to publish; there is no
+   separate CI approval step. Do not rerun unchanged local gates just for a tag.
 7. Ensure the release notes are concise and user-visible. When retiring a durable writer,
    record the last writer and first no-write version; retain its compatibility
    reader until the supported upgrade floor reaches that version.
@@ -105,24 +102,10 @@ Run optional architecture, SDK, protocol, race, regression, proxy, documentation
 or dry-run checks only when the release changes those boundaries. See
 [Testing](testing.md).
 
-## Approve release CI
-
-Release PR updates trigger a `quality` run that waits at `release-ci-approval`.
-To validate a release candidate, open that run in Actions, select **Review
-deployments**, select **release-ci**, and click **Approve and deploy**. Despite
-the button's name, this starts CI; it does not publish a release. See
-[GitHub's approval controls](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/review-deployments).
-
-The run then executes all three required checks against GitHub's PR merge ref.
-Wait for them to pass before merging the Release PR. Any further PR update
-cancels the previous run and requires approval again. **Reject** stops that
-candidate's checks and blocks merging. Normal PRs and scheduled vulnerability
-checks do not require this approval.
-
 ## Publish
 
-Merge the reviewed, up-to-date Release PR when ready to publish. The bot creates
-the root `vX.Y.Z` tag at that merge commit and a GitHub Release containing the
+Merge the reviewed Release PR after `quality` passes when ready to publish. The
+bot creates the root `vX.Y.Z` tag at that merge commit and a GitHub Release containing the
 changelog. That tag triggers `release.yml`: GoReleaser attaches the CLI archives
 and checksums while preserving the bot's release notes. The GitHub Release may
 be visible before all distribution steps have finished; complete the acceptance
