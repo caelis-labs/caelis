@@ -3242,8 +3242,8 @@ func TestRuntimePolicyDefaultCommandEscalationWaitsApprovalThenExecutes(t *testi
 		if err != nil {
 			t.Fatalf("RunState() during approval error = %v", err)
 		}
-		if state.Status != agent.RunLifecycleStatusWaitingApproval || !state.WaitingApproval {
-			t.Fatalf("run state during approval = %+v, want waiting_approval", state)
+		if state.Status != agent.RunLifecycleStatusRunning || state.WaitingApproval || req.OperationTaskID == "" {
+			t.Fatalf("run state during command approval = %+v, want running with a Task-owned approval", state)
 		}
 		if req.Approval == nil || req.Approval.ToolCall.Name != shell.RunCommandToolName {
 			t.Fatalf("approval request = %+v, want RUN_COMMAND tool call", req.Approval)

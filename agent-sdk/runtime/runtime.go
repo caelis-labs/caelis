@@ -243,6 +243,7 @@ func (r *Runtime) Run(
 
 	runID := r.nextID("run", r.runIDGenerator)
 	turnID := r.nextID("turn", nil)
+	runCtx = context.WithValue(runCtx, taskScopeKey{}, newTaskContinuationScope())
 	runCtx = withLifecycleScope(runCtx, lifecycleScope{sessionRef: ref, runID: runID, turnID: turnID})
 	if err := r.beginRun(ref, runID); err != nil {
 		cancel()
@@ -344,7 +345,12 @@ func (r *Runtime) executeKernelTurn(
 	}
 	lifecycleErr := r.executeLifecycle(ctx, r.lifecycleEvent(ctx, agent.LifecycleRun, "", ""), func(runCtx context.Context) error {
 		return r.executeLifecycle(runCtx, r.lifecycleEvent(runCtx, agent.LifecycleTurn, "", ""), func(turnCtx context.Context) error {
-			return r.runWithOverflowRecovery(turnCtx, activeSession, ref, runID, turnID, req, inputEvents, &batch, handle)
+			runErr := r.runWithOverflowRecovery(turnCtx, activeSession, ref, runID, turnID, req, inputEvents, &batch, handle)
+			scope := taskScopeFromContext(turnCtx)
+			if runErr != nil {
+				scope.revoke(runErr, true)
+			}
+			return errors.Join(runErr, scope.join())
 		})
 	})
 	if err := lifecycleErr; err != nil {

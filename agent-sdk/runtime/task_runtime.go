@@ -277,6 +277,9 @@ func commandTaskToolPayload(snapshot taskapi.Snapshot) map[string]any {
 		return payload
 	}
 	payload["state"] = string(snapshot.State)
+	if code, _ := snapshot.Result["error_code"].(string); code != "" {
+		payload["error_code"] = code
+	}
 	if text, _ := snapshot.Result["result"].(string); text != "" {
 		payload["result"] = text
 	}

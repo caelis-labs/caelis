@@ -81,6 +81,9 @@ func (r *Runtime) recoverCommandEntry(ctx context.Context, entry *task.Entry) er
 	}
 	diagnostic := strings.TrimSpace(taskStringValue(rehydrated.result["error"]))
 	next := commandRecoveryTerminalEntry(entry, rehydrated.state, diagnostic)
+	if code := taskStringValue(rehydrated.result["error_code"]); code != "" {
+		next.Result["error_code"] = code
+	}
 	return r.tasks.persistCommandRecoveryEntry(ctx, next)
 }
 
@@ -177,7 +180,7 @@ func (tm *taskRuntime) hasActiveCommandTask(entry *task.Entry) bool {
 	}
 	active.mu.Lock()
 	defer active.mu.Unlock()
-	return active.running && active.session != nil
+	return active.running && (active.session != nil || active.continuation.live())
 }
 
 func (r *Runtime) recoverSubagentEntry(ctx context.Context, entry *task.Entry) error {

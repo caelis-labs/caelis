@@ -88,9 +88,14 @@ func (r *Runtime) requestDurableApproval(
 		return agent.ApprovalResponse{}, errors.New("agent-sdk/runtime: durable approval service is unavailable")
 	}
 	now := r.now()
+	tokenID := strings.TrimSpace(req.PauseTokenID)
+	if tokenID == "" {
+		tokenID = r.nextID("pause", nil)
+	}
+	blocksRun := req.OperationTaskID == ""
 	token := session.ClonePauseToken(session.PauseToken{
 		Schema:  session.ExecutionJournalSchemaVersion,
-		TokenID: r.nextID("pause", nil), SessionID: req.SessionRef.SessionID, RunID: req.RunID, TurnID: req.TurnID,
+		TokenID: tokenID, SessionID: req.SessionRef.SessionID, RunID: req.RunID, TurnID: req.TurnID,
 		ToolCallID: req.Call.ID, ToolName: req.Tool.Name, Revision: 1, Status: session.PauseTokenPending,
 		Input: req.Call.Input, Approval: req.Approval, Metadata: req.Metadata, CreatedAt: now, UpdatedAt: now,
 	})
@@ -109,12 +114,20 @@ func (r *Runtime) requestDurableApproval(
 	if err := r.appendPauseToken(ctx, req.SessionRef, token); err != nil {
 		return agent.ApprovalResponse{}, err
 	}
-	if err := r.transitionRunTurnJournal(ctx, req.SessionRef, req.RunID, req.TurnID, session.ExecutionWaitingApproval, "approval required"); err != nil {
-		return agent.ApprovalResponse{}, err
+	if blocksRun {
+		if err := r.transitionRunTurnJournal(ctx, req.SessionRef, req.RunID, req.TurnID, session.ExecutionWaitingApproval, "approval required"); err != nil {
+			return agent.ApprovalResponse{}, err
+		}
+		r.setRunState(req.SessionRef.SessionID, agent.RunState{
+			Status: agent.RunLifecycleStatusWaitingApproval, ActiveRunID: req.RunID, WaitingApproval: true, PauseTokenID: token.TokenID, UpdatedAt: r.now(),
+		})
 	}
-	r.setRunState(req.SessionRef.SessionID, agent.RunState{
-		Status: agent.RunLifecycleStatusWaitingApproval, ActiveRunID: req.RunID, WaitingApproval: true, PauseTokenID: token.TokenID, UpdatedAt: r.now(),
-	})
+	abandon := func(err error) error {
+		if blocksRun {
+			return r.joinApprovalCleanup(err, r.abandonWaitingApproval(ctx, req, token, err.Error()))
+		}
+		return r.joinApprovalCleanup(err, r.cancelPendingPauseToken(context.WithoutCancel(ctx), req.SessionRef, token, err.Error()))
+	}
 	if requester != nil {
 		// The durable pause token is the reusable Runtime correlation identity.
 		// Keep it on the normalized request rather than hiding it in metadata or
@@ -131,23 +144,29 @@ func (r *Runtime) requestDurableApproval(
 			// Guardian/auto-review failures surface as tool errors and the main
 			// Turn keeps running, so leave waiting_approval for a stable started
 			// state instead of blocking later terminal transitions.
-			return agent.ApprovalResponse{}, r.joinApprovalCleanup(err, r.abandonWaitingApproval(ctx, req, token, err.Error()))
+			return agent.ApprovalResponse{}, abandon(err)
 		}
 		if err := r.ResolveApproval(ctx, agent.ResolveApprovalRequest{SessionRef: req.SessionRef, TokenID: token.TokenID, Decision: decision}); err != nil {
-			return agent.ApprovalResponse{}, r.joinApprovalCleanup(err, r.abandonWaitingApproval(ctx, req, token, err.Error()))
+			return agent.ApprovalResponse{}, abandon(err)
+		}
+	} else if req.OnAdmission != nil {
+		if err := req.OnAdmission(ctx); err != nil {
+			return agent.ApprovalResponse{}, abandon(err)
 		}
 	}
 	select {
 	case decision := <-waiter:
-		if err := r.resumeAfterApproval(ctx, req, "approval resolved"); err != nil {
-			return agent.ApprovalResponse{}, err
+		if blocksRun {
+			if err := r.resumeAfterApproval(ctx, req, "approval resolved"); err != nil {
+				return agent.ApprovalResponse{}, err
+			}
 		}
 		return decision, nil
 	case <-ctx.Done():
 		// Cancellation is not a continue-after-tool-error path. Only cancel the
 		// pause token and leave journal/run state for the cancel/terminal owner.
 		// Forcing started/Running here races with cancel_requested transitions.
-		_ = r.cancelPauseToken(context.WithoutCancel(ctx), req.SessionRef, token, ctx.Err().Error())
+		_ = r.cancelPendingPauseToken(context.WithoutCancel(ctx), req.SessionRef, token, ctx.Err().Error())
 		return agent.ApprovalResponse{}, ctx.Err()
 	}
 }

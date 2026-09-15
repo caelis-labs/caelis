@@ -18,14 +18,15 @@ import (
 )
 
 const (
-	commandPhaseIntent        = "command_intent"
-	commandPhaseEffectClaimed = "command_effect_claimed"
-	commandPhaseRunning       = "command_running"
-	commandPhaseStartFailed   = "command_start_failed"
-	commandPhaseUnknown       = "command_unknown_outcome"
-	commandPhaseCancelClaimed = "command_cancel_claimed"
-	commandPhaseCancelUnknown = "command_cancel_unknown_outcome"
-	commandPhaseCancelApplied = "command_cancel_effect_applied"
+	commandPhaseIntent          = "command_intent"
+	commandPhaseWaitingApproval = "command_waiting_approval"
+	commandPhaseEffectClaimed   = "command_effect_claimed"
+	commandPhaseRunning         = "command_running"
+	commandPhaseStartFailed     = "command_start_failed"
+	commandPhaseUnknown         = "command_unknown_outcome"
+	commandPhaseCancelClaimed   = "command_cancel_claimed"
+	commandPhaseCancelUnknown   = "command_cancel_unknown_outcome"
+	commandPhaseCancelApplied   = "command_cancel_effect_applied"
 
 	commandStreamOutputCursorMeta = "stream_output_cursor"
 )
@@ -100,19 +101,41 @@ func (tm *taskRuntime) StartCommand(
 	}
 	release, claimed := tm.tryClaimSubagentOperation(ref, taskID)
 	if !claimed {
+		if _, continuation := ctx.Value(taskStartPermitKey{}).(taskStartPermit); continuation {
+			release, err = tm.waitForTaskOperationClaim(ctx, ref, taskID)
+			if err != nil {
+				return taskapi.Snapshot{}, err
+			}
+			claimed = true
+		}
+	}
+	if !claimed {
 		return taskapi.Snapshot{}, fmt.Errorf("command %q already has an operation in progress", taskID)
 	}
 	defer release()
+	task, created, err := tm.prepareCommandClaimed(ctx, activeSession, ref, taskID, requestDigest, req, commandExecutionForRequest(req))
+	if err != nil {
+		if task != nil {
+			return task.snapshotWithoutSession(tm.runtime.now()), err
+		}
+		return taskapi.Snapshot{}, err
+	}
+	outputTask = task
+	tm.bindCommandOutput(ctx, task, created)
+	return tm.resumeCommandStart(ctx, task, runtime, sandboxReq, req)
+}
+
+// prepareCommandClaimed persists the complete intent before any approval or
+// process effect. Its caller holds the short Session-scoped mutation claim.
+func (tm *taskRuntime) prepareCommandClaimed(ctx context.Context, activeSession session.Session, ref session.SessionRef, taskID, requestDigest string, req taskapi.CommandStartRequest, execution commandExecutionSpec) (*commandTask, bool, error) {
 	if existing, ok, existingErr := tm.existingCommandForStart(ctx, ref, taskID, requestDigest); existingErr != nil {
-		return taskapi.Snapshot{}, existingErr
+		return nil, false, existingErr
 	} else if ok {
-		outputTask = existing
-		tm.bindCommandOutput(ctx, existing, false)
-		return tm.resumeCommandStart(ctx, existing, runtime, sandboxReq, req)
+		return existing, false, nil
 	}
 	handle, err := tm.reserveTaskHandle(ctx, activeSession, ref, taskapi.KindCommand, "command")
 	if err != nil {
-		return taskapi.Snapshot{}, err
+		return nil, false, err
 	}
 	now := tm.runtime.now()
 	createdTask := &commandTask{
@@ -154,15 +177,21 @@ func (tm *taskRuntime) StartCommand(
 		},
 		result: map[string]any{"state": string(taskapi.StatePrepared)},
 	}
+	createdTask.execution = execution
+	if execution.Approval != nil {
+		createdTask.state, createdTask.running = taskapi.StateWaitingApproval, true
+		createdTask.metadata["command_phase"] = commandPhaseWaitingApproval
+		createdTask.metadata["state"] = string(createdTask.state)
+		createdTask.metadata["running"] = true
+		createdTask.result["state"] = string(createdTask.state)
+	}
 	intent := createdTask.entrySnapshot(now)
 	if err := tm.persistTaskEntry(ctx, intent); err != nil {
-		return createdTask.snapshotWithoutSession(tm.runtime.now()), err
+		return createdTask, true, err
 	}
 	applyCommandEntry(createdTask, intent)
 	tm.installCommandTask(createdTask)
-	outputTask = createdTask
-	tm.bindCommandOutput(ctx, createdTask, true)
-	return tm.resumeCommandStart(ctx, createdTask, runtime, sandboxReq, req)
+	return createdTask, true, nil
 }
 
 func (tm *taskRuntime) bindCommandOutput(ctx context.Context, task *commandTask, originComplete bool) {
@@ -207,8 +236,11 @@ func (tm *taskRuntime) resumeCommandStart(
 	phase := taskStringValue(task.metadata["command_phase"])
 	running := task.running
 	claim := task.entrySnapshot(tm.runtime.now())
+	work, execution := task.continuation, task.execution
 	task.mu.Unlock()
-	if phase != commandPhaseIntent || running {
+	permit, permitted := ctx.Value(taskStartPermitKey{}).(taskStartPermit)
+	awaiting := phase == commandPhaseWaitingApproval && permitted && permit.taskID == task.ref.TaskID && permit.work == work
+	if !awaiting && (phase != commandPhaseIntent || running) {
 		return tm.snapshotExistingCommand(ctx, task, req.Yield)
 	}
 	claim.State = taskapi.StateRunning
@@ -220,7 +252,19 @@ func (tm *taskRuntime) resumeCommandStart(
 	claim.Result = map[string]any{
 		"state": string(taskapi.StateRunning),
 	}
-	if err := tm.persistTaskEntry(ctx, claim); err != nil {
+	commit := func() error {
+		if awaiting && execution.Approval != nil && !execution.Approval.Deadline.IsZero() && !time.Now().Before(execution.Approval.Deadline) {
+			return context.DeadlineExceeded
+		}
+		return tm.persistTaskEntry(ctx, claim)
+	}
+	var err error
+	if awaiting {
+		err = permit.work.claim(commit)
+	} else {
+		err = commit()
+	}
+	if err != nil {
 		return task.snapshotWithoutSession(tm.runtime.now()), err
 	}
 	applyCommandEntry(task, claim)
@@ -262,6 +306,7 @@ func (tm *taskRuntime) startClaimedCommand(
 	task.metadata["terminal_id"] = task.ref.TerminalID
 	task.metadata["command_phase"] = commandPhaseRunning
 	task.result = map[string]any{"state": string(taskapi.StateRunning), "task_id": task.ref.TaskID}
+	task.notifyCommandOutputChangeLocked()
 	task.mu.Unlock()
 	tm.installCommandTask(task)
 	task.mu.Lock()
@@ -300,6 +345,9 @@ func applyCommandEntry(task *commandTask, entry *taskapi.Entry) {
 	task.supportsInput = entry.SupportsInput
 	task.result = session.CloneState(entry.Result)
 	task.metadata = session.CloneState(entry.Metadata)
+	if execution, err := commandExecutionFromEntry(entry); err == nil {
+		task.execution = execution
+	}
 	if sessionID := strings.TrimSpace(entry.Terminal.SessionID); sessionID != "" {
 		task.ref.SessionID = sessionID
 	}

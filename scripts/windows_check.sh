@@ -24,7 +24,7 @@ go test -count=1 -p=2 -timeout "${GO_TEST_TIMEOUT:-5m}" \
 bash ./scripts/go_test_nonempty.sh ./agent-sdk/session/file \
   '^TestWindows' windows-session-storage -count=1
 bash ./scripts/go_test_nonempty.sh ./agent-sdk/runtime \
-  '^TestRuntime(CommandTTYDefaultTaskWriteSubmitsWindowsLine|SpawnToolIsParallelSafeAndConcurrentAttachmentsConverge)$' windows-runtime -count=1
+  '^Test(Runtime(CommandTTYDefaultTaskWriteSubmitsWindowsLine|SpawnToolIsParallelSafeAndConcurrentAttachmentsConverge)|CommandApproval|CommandExecutionSpec|TaskContinuation)' windows-runtime -count=1
 bash ./scripts/go_test_nonempty.sh ./control/appserver \
   '^TestSyncOperationStoreDirectoryDoesNotFlushReadOnlyWindowsDirectory$' windows-operation-storage -count=1
 bash ./scripts/go_test_nonempty.sh ./app/gatewayapp \

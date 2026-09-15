@@ -45,7 +45,7 @@ func TestRunCommandDefinitionExposesMinimalArguments(t *testing.T) {
 	wantDescriptions := map[string]string{
 		"command":             "Shell command to execute.",
 		"workdir":             "Working directory; defaults to the session cwd. Set this instead of prefixing command with cd.",
-		"yield_time_ms":       "Wait before a running command returns as an async Task; not the command timeout. Omit for the 10000 ms default. Use shorter only to yield known long-running or interactive work early; use longer only to await known medium-duration work.",
+		"yield_time_ms":       "Wait for approval and execution before yielding an async Task; not the command timeout. 10000 ms default. Use shorter for long/interactive work, longer for medium jobs. waiting_approval means not started; Task wait uses the same handle.",
 		"tty":                 "Allocate a terminal for interactive commands. Leave false for ordinary commands so stdin is closed and output streams remain separate.",
 		"sandbox_permissions": "Execution route. Use use_default when the trusted runtime boundary permits the command or is uncertain. Use require_escalated directly when it proves Host is required, or once after a matching sandbox denial; approval is one-shot.",
 		"justification":       "Required for require_escalated: one short sentence with command intent, the trusted boundary or matching denial, and task relevance.",

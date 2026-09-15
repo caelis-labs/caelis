@@ -161,6 +161,8 @@ type commandTask struct {
 	supportsInput bool
 	parentCall    string
 	requestDigest string
+	execution     commandExecutionSpec
+	continuation  *taskContinuation
 	title         string
 	createdAt     time.Time
 	revision      uint64

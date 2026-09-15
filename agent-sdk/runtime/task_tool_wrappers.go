@@ -244,16 +244,51 @@ func (t runtimeCommandTool) Call(ctx context.Context, call tool.Call) (tool.Resu
 	if !ok || runtime == nil {
 		return t.base.Call(ctx, call)
 	}
-	args, err := decodeJSONMap(call.Input)
+	req, err := t.commandRequest(call, runtime)
 	if err != nil {
 		return tool.Result{}, err
 	}
-	if err := shell.ValidateRunCommandArgs(args); err != nil {
+	command := req.Command
+	if _, ok := ctx.Value(taskStartPermitKey{}).(taskStartPermit); ok {
+		req.Yield = 0
+	} else if started, ok := ctx.Value(taskInvocationStartKey{}).(taskInvocationStart); ok {
+		req.Yield = max(time.Until(started.time.Add(req.Yield)), 0)
+	}
+	snapshot, err := t.tasks.StartCommand(ctx, t.session, t.sessionRef, runtime, req)
+	if err != nil {
+		if strings.TrimSpace(snapshot.Ref.TaskID) != "" {
+			payload := taskToolPayload(snapshot)
+			if diag, ok := commanddiag.Best(commanddiag.Input{
+				ToolName: shell.RunCommandToolName, Command: command,
+				Error: strings.TrimSpace(err.Error()), ExitCode: 1,
+			}); ok {
+				if hint := strings.TrimSpace(diag.Hint); hint != "" {
+					payload["system_hint"] = hint
+				}
+			}
+			result := taskSnapshotToolResultWithPayload(call, t.base.Definition(), snapshot, payload)
+			result.IsError = true
+			return result, nil
+		}
+		if result, ok := commandStartDiagnosticToolResult(call, t.base.Definition(), command, err); ok {
+			return result, nil
+		}
 		return tool.Result{}, err
+	}
+	return taskSnapshotToolResult(call, t.base.Definition(), snapshot), nil
+}
+
+func (t runtimeCommandTool) commandRequest(call tool.Call, runtime sandbox.Runtime) (taskapi.CommandStartRequest, error) {
+	args, err := decodeJSONMap(call.Input)
+	if err != nil {
+		return taskapi.CommandStartRequest{}, err
+	}
+	if err := shell.ValidateRunCommandArgs(args); err != nil {
+		return taskapi.CommandStartRequest{}, err
 	}
 	command, ok := stringArg(args, "command")
 	if !ok || strings.TrimSpace(command) == "" {
-		return tool.Result{}, fmt.Errorf("arg %q is required", "command")
+		return taskapi.CommandStartRequest{}, fmt.Errorf("arg %q is required", "command")
 	}
 	workdir, _ := stringArg(args, "workdir")
 	tty := false
@@ -285,28 +320,7 @@ func (t runtimeCommandTool) Call(ctx context.Context, call tool.Call) (tool.Resu
 			observer: call.Observer,
 		},
 	}
-	snapshot, err := t.tasks.StartCommand(ctx, t.session, t.sessionRef, runtime, req)
-	if err != nil {
-		if strings.TrimSpace(snapshot.Ref.TaskID) != "" {
-			payload := taskToolPayload(snapshot)
-			if diag, ok := commanddiag.Best(commanddiag.Input{
-				ToolName: shell.RunCommandToolName, Command: command,
-				Error: strings.TrimSpace(err.Error()), ExitCode: 1,
-			}); ok {
-				if hint := strings.TrimSpace(diag.Hint); hint != "" {
-					payload["system_hint"] = hint
-				}
-			}
-			result := taskSnapshotToolResultWithPayload(call, t.base.Definition(), snapshot, payload)
-			result.IsError = true
-			return result, nil
-		}
-		if result, ok := commandStartDiagnosticToolResult(call, t.base.Definition(), command, err); ok {
-			return result, nil
-		}
-		return tool.Result{}, err
-	}
-	return taskSnapshotToolResult(call, t.base.Definition(), snapshot), nil
+	return req, nil
 }
 
 func commandStartDiagnosticToolResult(call tool.Call, def tool.Definition, command string, err error) (tool.Result, bool) {

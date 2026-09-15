@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
@@ -125,6 +126,11 @@ func (t policyWrappedTool) Definition() tool.Definition {
 }
 
 func (t policyWrappedTool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
+	started := taskInvocationStart{time: time.Now()}
+	if scope := taskScopeFromContext(t.approval.ctx); scope != nil {
+		started.generation = scope.currentGeneration()
+	}
+	ctx = context.WithValue(ctx, taskInvocationStartKey{}, started)
 	defer call.ModelStep.MarkAdmissionComplete()
 	if t.policy == nil {
 		return tool.Result{}, &policy.ProfileError{Profile: t.mode, Detail: "policy mode is unavailable"}
@@ -186,6 +192,25 @@ func (t policyWrappedTool) requestApproval(
 	if len(request.Approval.Options) == 0 {
 		request.Approval.Options = []session.ProtocolApprovalOption{{ID: "allow_once", Name: "Allow once", Kind: "allow_once"}, {ID: "reject_once", Name: "Reject", Kind: "reject_once"}}
 	}
+	approvedCall := tool.CloneCall(call)
+	approvedCall.Metadata = mergeCallMetadata(approvedCall.Metadata, decision)
+	started, _ := ctx.Value(taskInvocationStartKey{}).(taskInvocationStart)
+	if result, handled, err := submitTaskApproval(ctx, approvedCall, taskApproval{
+		owner: t.approval.ctx, request: request, resolve: t.resolveApproval, started: started.time, generation: started.generation,
+	}, t.tool); handled {
+		return result, err
+	}
+	resp, err := t.resolveApproval(ctx, request)
+	if err != nil {
+		return tool.Result{}, err
+	}
+	if resp.Approved {
+		return t.tool.Call(ctx, approvedCall)
+	}
+	return policyDecisionResultWithOutcome(call, t.tool.Definition(), decision, resp), nil
+}
+
+func (t policyWrappedTool) resolveApproval(ctx context.Context, request agent.ApprovalRequest) (agent.ApprovalResponse, error) {
 	var resp agent.ApprovalResponse
 	var err error
 	approvalCall := func(callCtx context.Context) error {
@@ -202,15 +227,7 @@ func (t policyWrappedTool) requestApproval(
 	} else {
 		err = approvalCall(ctx)
 	}
-	if err != nil {
-		return tool.Result{}, err
-	}
-	if resp.Approved {
-		call = tool.CloneCall(call)
-		call.Metadata = mergeCallMetadata(call.Metadata, decision)
-		return t.tool.Call(ctx, call)
-	}
-	return policyDecisionResultWithOutcome(call, t.tool.Definition(), decision, resp), nil
+	return resp, err
 }
 
 func cloneModelStepRef(in *tool.ModelStepRef) *tool.ModelStepRef {

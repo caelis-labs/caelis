@@ -56,6 +56,31 @@ Task addresses individual asynchronous Jobs. The model-facing tool rejects
 participant handles for every action. Input and cancellation follow the Job
 producer capabilities; command execution is the current built-in producer.
 
+For built-in `RunCommand`, one Task owns approval and command execution. Runtime
+persists the execution specification before requesting approval. After Control
+acknowledges queue admission, the invocation may return `waiting_approval` with
+the same handle later used for execution. The default ten-second observation
+budget covers submission, approval and execution; process timeout starts only
+when the process starts. Control's automatic approval deadline includes queue
+time and is not renewed by Task observation. External ACP permission requests
+retain their synchronous contract.
+
+Task-owned approval does not pause the whole Run. Runtime retains at most 32
+pending submission/start continuations per Run; excess submissions fail before
+approval or execution. Cancellation and accepted user steering revoke unclaimed
+continuations. Durable effect claim serializes with revocation; a claimed
+operation follows the command producer's cancellation contract. The Run keeps
+input open at its final safe point and joins these continuations before releasing
+execution authority. A returned tool-call observer does not own their lifetime.
+
+Each invocation produces one canonical tool result. Later Task observations are
+separate calls, and producer updates use Task output. Pending approvals recovered
+without a live owner become interrupted and never start automatically; claimed
+effects without a recoverable process remain `unknown_outcome`. Trusted Runtime
+producers opt into submission through an internal capability and keep ownership
+of their own specification, effects and recovery. Tool names and `ParallelSafe`
+do not grant asynchronous execution authority.
+
 ## Agent input and task observation
 
 `agent-sdk.AgentInputSender` is the provider-neutral Agent input contract.

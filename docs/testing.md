@@ -79,6 +79,8 @@ Seatbelt, Bubblewrap or the native Windows sandbox must be available. Windows
 fixtures use PowerShell. The test checks approval decisions,
 execution routes, file effects, and provider reasoning settings; optional
 `CAELIS_GUARDIAN_COMMAND_E2E_OUT` writes per-scenario JSON evidence.
+The caller uses zero inline yield, observes the same Task until it settles,
+and records time to the first result separately from approval and execution.
 `CAELIS_GUARDIAN_COMMAND_E2E_REPETITIONS` repeats each scenario up to five times.
 
 `CAELIS_GUARDIAN_RESIDENT_E2E=1` enables `TestGuardianResidentE2E` with the local

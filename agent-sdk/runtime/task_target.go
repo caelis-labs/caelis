@@ -217,6 +217,9 @@ func (t commandControlTarget) Wait(ctx context.Context, req taskapi.ControlReque
 }
 
 func (t commandControlTarget) Write(ctx context.Context, req taskapi.ControlRequest) (taskapi.Snapshot, error) {
+	if t.task.approvalWithoutSession() {
+		return taskapi.Snapshot{}, fmt.Errorf("command task %q has not started and does not accept stdin", t.task.handle)
+	}
 	if t.task.commandOutcomeUnattached() {
 		return t.task.snapshotWithoutSession(t.runtime.runtime.now()), nil
 	}
@@ -242,7 +245,7 @@ func (t commandControlTarget) Write(ctx context.Context, req taskapi.ControlRequ
 }
 
 func (t commandControlTarget) Read(ctx context.Context, req taskapi.ControlRequest) (taskapi.Snapshot, error) {
-	if t.task.commandOutcomeUnattached() {
+	if t.task.commandOutcomeUnattached() || t.task.approvalWithoutSession() {
 		return t.task.snapshotWithoutSession(t.runtime.runtime.now()), nil
 	}
 	_, _, err := t.runtime.syncCommandStream(ctx, t.task)
