@@ -2,8 +2,8 @@ package gatewayapp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -24,7 +24,19 @@ func TestMCPBlockedHTTPHandshakeDoesNotBlockRuntimeActivation(t *testing.T) {
 	entered := make(chan struct{}, 1)
 	stop := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = io.Copy(io.Discard, r.Body)
+		var request struct {
+			Method string `json:"method"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		// Block handshake calls, not the SDK's cancellation notification. Blocking
+		// both makes cleanup exhaust its five-second notification timeout.
+		if request.Method == "notifications/cancelled" {
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
 		select {
 		case entered <- struct{}{}:
 		default:
