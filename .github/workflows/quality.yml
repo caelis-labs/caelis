@@ -81,7 +81,7 @@ jobs:
         with:
           version: v2.11.4
           args: ./...
-          install-mode: goinstall
+          install-mode: binary
 
       - name: Test
         run: make test
