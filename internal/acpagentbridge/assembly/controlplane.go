@@ -57,6 +57,7 @@ func NewControlPlane(cfg ControlPlaneConfig) (*ControlPlane, error) {
 		return nil, err
 	}
 	manager, err := acpcontroller.NewManager(acpcontroller.Config{
+		SessionPreparer:   cfg.SessionPreparer,
 		Registry:          registry,
 		EndpointResolver:  cfg.EndpointResolver,
 		PlacementResolver: cfg.PlacementResolver,

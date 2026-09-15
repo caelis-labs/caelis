@@ -23,7 +23,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
-	tasksubagent "github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 	"github.com/caelis-labs/caelis/app/controlserver"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/memoryhost"
 	"github.com/caelis-labs/caelis/control/agentbinding"
@@ -576,7 +575,7 @@ func TestSpawnedSessionCannotUseDeletedParentRuntimeProfile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := parentRuntime.instance.prepareSpawnedACPSession(ctx, tasksubagent.SpawnContext{}, child.SessionID, agentConfig); err != nil {
+	if _, err := parentRuntime.instance.prepareSpawnedACPSession(ctx, child.SessionID, agentConfig); err != nil {
 		t.Fatalf("prepareSpawnedACPSession() before deletion: %v", err)
 	}
 	childRuntime, releaseChild := activateHeldSessionRuntime(t, stack, child.SessionID)
@@ -618,7 +617,7 @@ func TestSpawnedSessionCannotUseDeletedParentRuntimeProfile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := parentRuntime.instance.prepareSpawnedACPSession(ctx, tasksubagent.SpawnContext{}, lateChild.SessionID, agentConfig); err == nil || !strings.Contains(err.Error(), "not configured") {
+	if _, err := parentRuntime.instance.prepareSpawnedACPSession(ctx, lateChild.SessionID, agentConfig); err == nil || !strings.Contains(err.Error(), "not configured") {
 		t.Fatalf("prepareSpawnedACPSession() with revoked pin error = %v, want not configured", err)
 	}
 	releaseChild()
@@ -644,7 +643,7 @@ func TestSpawnedSessionCannotUseDeletedParentRuntimeProfile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := parentRuntime.instance.prepareSpawnedACPSession(ctx, tasksubagent.SpawnContext{}, reconnectedChild.SessionID, agentConfig); err != nil {
+	if _, err := parentRuntime.instance.prepareSpawnedACPSession(ctx, reconnectedChild.SessionID, agentConfig); err != nil {
 		t.Fatalf("prepareSpawnedACPSession() after same-ID reconnect: %v", err)
 	}
 }
@@ -854,7 +853,7 @@ func TestProviderDeletionConvergesConcurrentSameIDReconnect(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := runtime.instance.prepareSpawnedACPSession(ctx, tasksubagent.SpawnContext{}, child.SessionID, oldAgentConfig); err == nil || !strings.Contains(err.Error(), "not configured") {
+	if _, err := runtime.instance.prepareSpawnedACPSession(ctx, child.SessionID, oldAgentConfig); err == nil || !strings.Contains(err.Error(), "not configured") {
 		t.Fatalf("prepareSpawnedACPSession() with stale same-ID generation error = %v, want not configured", err)
 	}
 }

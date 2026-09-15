@@ -42,6 +42,7 @@ type Config struct {
 	Clock             func() time.Time
 	EndpointResolver  endpoint.Resolver
 	PlacementResolver subagent.PlacementResolver
+	SessionPreparer   subagent.SessionPreparer
 }
 
 type Manager struct {
@@ -51,6 +52,7 @@ type Manager struct {
 	startClient       clientStarter
 	endpointResolver  endpoint.Resolver
 	placementResolver subagent.PlacementResolver
+	sessionPreparer   subagent.SessionPreparer
 
 	counter atomic.Uint64
 
@@ -170,6 +172,7 @@ func NewManager(cfg Config) (*Manager, error) {
 		clock:             clock,
 		endpointResolver:  cfg.EndpointResolver,
 		placementResolver: cfg.PlacementResolver,
+		sessionPreparer:   cfg.SessionPreparer,
 		controllers:       map[string]*controllerRun{},
 		participants:      map[participantRunKey]*participantRun{},
 	}
@@ -931,10 +934,10 @@ func (m *Manager) startParticipant(
 			placement.Agent,
 		)
 	}
-	cfg.SessionOptions = controlagents.SessionOptions{
-		ModelID:                 strings.TrimSpace(placement.Model),
-		ConfigValues:            maps.Clone(placement.SessionConfigValues),
-		ReasoningEffortConfigID: placement.ReasoningEffortConfigID,
+	var err error
+	cfg, err = m.participantSessionConfig(ctx, parentSession, cfg, placement)
+	if err != nil {
+		return nil, err
 	}
 	resumeRemoteSessionID := strings.TrimSpace(existing.SessionID)
 	client, remoteSessionID, state, err := m.startClient(ctx, parentSession.CWD, cfg, resumeRemoteSessionID, func(env client.UpdateEnvelope) {
@@ -1084,10 +1087,10 @@ func (m *Manager) startACPClient(
 	if remoteSessionID != "" && acpSessionCapability(initResp, "resume") {
 		recovered, err := authentication.ResumeSession(ctx, recovery, remoteSessionID, cwd, nil)
 		if err == nil {
-			configured, configureErr := sessionconfig.Apply(ctx, recovered.Client, remoteSessionID, sessionconfig.State{
+			configured, configureErr := m.configureSession(ctx, recovered.Client, remoteSessionID, sessionconfig.State{
 				ConfigOptions: recovered.Value.ConfigOptions,
 				Models:        recovered.Value.Models,
-			}, cfg.SessionOptions)
+			}, cfg)
 			if configureErr != nil {
 				_ = acpClient.Close(context.WithoutCancel(ctx))
 				return nil, "", controllerClientState{}, configureErr
@@ -1122,10 +1125,10 @@ func (m *Manager) startACPClient(
 		return nil, "", controllerClientState{}, err
 	}
 	resp := recovered.Value
-	configured, err := sessionconfig.Apply(ctx, acpClient, strings.TrimSpace(resp.SessionID), sessionconfig.State{
+	configured, err := m.configureSession(ctx, acpClient, strings.TrimSpace(resp.SessionID), sessionconfig.State{
 		ConfigOptions: resp.ConfigOptions,
 		Models:        resp.Models,
-	}, cfg.SessionOptions)
+	}, cfg)
 	if err != nil {
 		if acpSessionCapability(initResp, "close") {
 			_ = acpcleanup.CloseSession(ctx, acpClient, strings.TrimSpace(resp.SessionID))

@@ -43,7 +43,7 @@ type PlacementResolver func(context.Context, subagent.SpawnContext, delegation.T
 // after the child has created or resumed its durable Session and before generic
 // ACP defaults are applied. The returned options are the remaining wire-level
 // defaults; product-only values must be consumed by the callback.
-type SessionPreparer func(context.Context, subagent.SpawnContext, string, AgentConfig) (controlagents.SessionOptions, error)
+type SessionPreparer func(context.Context, string, AgentConfig) (controlagents.SessionOptions, error)
 
 type PermissionBridge interface {
 	RequestPermission(context.Context, PermissionRequest) (client.RequestPermissionResponse, error)
@@ -293,7 +293,7 @@ func (r *Runner) SpawnTarget(ctx context.Context, spawn subagent.SpawnContext, r
 	sessionID := strings.TrimSpace(sessionResp.SessionID)
 	sessionOptions := cfg.SessionOptions
 	if r.sessionPreparer != nil {
-		sessionOptions, err = r.sessionPreparer(ctx, spawn, sessionID, cfg)
+		sessionOptions, err = r.sessionPreparer(ctx, sessionID, cfg)
 		if err != nil {
 			childCancel()
 			if hasACPSessionCapability(initialize, "close") {

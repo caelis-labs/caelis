@@ -150,9 +150,9 @@ func TestRunnerAppliesBuiltInSessionOptionsAfterSessionNewBeforePrompt(t *testin
 	preparedSession := ""
 	runner, err := NewRunner(RunnerConfig{
 		Registry: registry,
-		SessionPreparer: func(_ context.Context, spawn tasksubagent.SpawnContext, sessionID string, config AgentConfig) (controlagents.SessionOptions, error) {
-			if spawn.TaskID != "task-session-options" || config.Name != "self" {
-				return controlagents.SessionOptions{}, fmt.Errorf("unexpected preparation scope: task=%q Agent=%q", spawn.TaskID, config.Name)
+		SessionPreparer: func(_ context.Context, sessionID string, config AgentConfig) (controlagents.SessionOptions, error) {
+			if config.Name != "self" {
+				return controlagents.SessionOptions{}, fmt.Errorf("unexpected preparation Agent: %q", config.Name)
 			}
 			preparedSession = sessionID
 			return config.SessionOptions, nil

@@ -223,9 +223,13 @@ func TestManagerSessionDefaultsHelperProcess(t *testing.T) {
 	_ = conn.Serve(context.Background(), func(_ context.Context, msg jsonrpc.Message) (any, *jsonrpc.RPCError) {
 		switch msg.Method {
 		case client.MethodInitialize:
-			return client.InitializeResponse{ProtocolVersion: 1}, nil
+			return client.InitializeResponse{ProtocolVersion: 1, AgentCapabilities: client.AgentCapabilities{
+				SessionCapabilities: map[string]json.RawMessage{"resume": json.RawMessage(`{}`)},
+			}}, nil
 		case client.MethodSessionNew:
 			return client.NewSessionResponse{SessionID: "session-defaults", ConfigOptions: modelConfig("sonnet", "high")}, nil
+		case client.MethodSessionResume:
+			return client.ResumeSessionResponse{ConfigOptions: modelConfig("sonnet", "high")}, nil
 		case client.MethodSessionSetConfig:
 			var req client.SetSessionConfigOptionRequest
 			if err := json.Unmarshal(msg.Params, &req); err != nil {
