@@ -3,6 +3,7 @@ package tuiapp
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -11,9 +12,31 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
+	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
+	"github.com/charmbracelet/colorprofile"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/vt"
 )
+
+func TestSessionHistoryReusesActiveTheme(t *testing.T) {
+	// Start without terminal discovery, then enable colors as a live terminal
+	// would. The private builder must inherit this resolved background/theme.
+	m := NewModel(Config{NoColor: true, ShowWelcomeCard: true})
+	m.cfg.NoColor = false
+	m.cfg.ColorProfile = colorprofile.TrueColor
+	m.applyTheme(tuikit.ResolveThemeWithState(false, false, colorprofile.TrueColor))
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	started := time.Now()
+	for i, sessionID := range []string{"session-a", "", "session-b"} {
+		m.Update(sessionViewStartMsg{generation: uint64(i + 1), state: appserver.SessionState{SessionID: sessionID}})
+		if !reflect.DeepEqual(m.sessionHistory.model.theme, m.theme) {
+			t.Fatal("history builder rediscovered the terminal instead of inheriting the active theme")
+		}
+		m.Update(sessionHistoryReadyMsg{})
+		_ = m.View()
+	}
+	t.Logf("three Session transitions and frames: %s", time.Since(started))
+}
 
 type newSessionControlService struct {
 	observingControlService

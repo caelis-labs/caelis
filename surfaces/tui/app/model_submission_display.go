@@ -157,6 +157,7 @@ func (m *Model) tryOpenSlashArgPicker(line string) (bool, tea.Cmd) {
 		if !m.isCommandAvailable("resume") {
 			return false, nil
 		}
+		m.resetComposerAfterOverlayOpen()
 		return true, m.openSessionPicker()
 	}
 	if strings.HasPrefix(text, "/") && !strings.Contains(text, " ") {

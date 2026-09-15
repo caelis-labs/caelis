@@ -56,6 +56,16 @@ func TestGuardianProjectionRoundTripPreservesCutAcrossApprovalCadence(t *testing
 	}
 	reader := &guardianPagedOnlyStore{Service: store}
 	var live guardianProjection
+	var batch []*session.Event
+	flush := func() {
+		if len(batch) == 0 {
+			return
+		}
+		if _, err := store.AppendEvents(t.Context(), session.AppendEventsRequest{SessionRef: active.SessionRef, Events: batch}); err != nil {
+			t.Fatal(err)
+		}
+		batch = nil
+	}
 	for i := 0; i < 130; i++ {
 		event := guardianSource(0, session.EventTypeToolResult, "")
 		event.ID = ""
@@ -64,15 +74,18 @@ func TestGuardianProjectionRoundTripPreservesCutAcrossApprovalCadence(t *testing
 			event = guardianSource(0, session.EventTypeUser, fmt.Sprintf("user constraint %d", i))
 			event.ID = ""
 		}
-		if _, err := store.AppendEvent(t.Context(), session.AppendEventRequest{SessionRef: active.SessionRef, Event: event}); err != nil {
-			t.Fatal(err)
-		}
+		batch = append(batch, event)
+		// One durable transaction per cadence window keeps the incremental cut
+		// exercised without paying a file transaction (several fsyncs) per event;
+		// the cut must still match a cold rebuild after reopening the source.
 		if i%7 == 0 {
+			flush()
 			if _, _, err := live.read(t.Context(), reader, active.SessionRef); err != nil {
 				t.Fatal(err)
 			}
 		}
 	}
+	flush()
 	a, cut, err := live.read(t.Context(), reader, active.SessionRef)
 	if err != nil {
 		t.Fatal(err)

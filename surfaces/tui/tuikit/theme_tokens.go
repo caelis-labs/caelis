@@ -94,9 +94,10 @@ type Tokens struct {
 	ToolResult lipgloss.Style
 	// ToolErrorMark is reserved for failure icons and status words. ToolError
 	// keeps diagnostic body text readable without painting whole logs red.
-	ToolErrorMark lipgloss.Style
-	ToolError     lipgloss.Style
-	ToolOutput    lipgloss.Style
+	ToolErrorMark  lipgloss.Style
+	ToolError      lipgloss.Style
+	ToolOutput     lipgloss.Style
+	ToolOutputMeta lipgloss.Style // fold counts and tool-output structural marks
 
 	// ── Markdown / prose ───────────────────────────────────────────
 	MarkdownHeading    lipgloss.Style
@@ -180,13 +181,14 @@ func resolveTokens(t Theme) Tokens {
 		Separator: fgStyle(t.PanelBorder),
 
 		// Tool transcript
-		ToolIcon:      fgStyle(t.ToolFg),
-		ToolName:      fgStyle(t.TextPrimary).Bold(true),
-		ToolArgs:      quietStyle(t, t.ReasoningFg),
-		ToolResult:    quietStyle(t, t.SecondaryText),
-		ToolErrorMark: fgStyle(t.Error).Bold(true),
-		ToolError:     quietStyle(t, firstColor(t.TextSecondary, t.SecondaryText, t.MutedText)),
-		ToolOutput:    quietStyle(t, t.TextSecondary),
+		ToolIcon:       fgStyle(t.ToolFg),
+		ToolName:       fgStyle(t.TextPrimary).Bold(true),
+		ToolArgs:       quietStyle(t, t.ReasoningFg),
+		ToolResult:     quietStyle(t, t.SecondaryText),
+		ToolErrorMark:  fgStyle(t.Error).Bold(true),
+		ToolError:      quietStyle(t, firstColor(t.TextSecondary, t.SecondaryText, t.MutedText)),
+		ToolOutput:     quietStyle(t, toolOutputColor(t, .86, 6)),
+		ToolOutputMeta: quietStyle(t, toolOutputColor(t, .68, normalTextContrast)),
 
 		// Markdown / prose
 		MarkdownHeading:    fgStyle(t.TextPrimary).Bold(true),

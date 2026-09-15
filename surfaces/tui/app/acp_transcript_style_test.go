@@ -43,7 +43,7 @@ func TestACPToolOutputSanitizesANSIAndKeepsStructuralPrefix(t *testing.T) {
 			t.Fatalf("row %d leaked source ANSI color into styled output: %q", i, row.Styled)
 		}
 	}
-	metaPrefix := ctx.Theme.TranscriptMetaStyle().Render("  └ ")
+	metaPrefix := ctx.Theme.ToolOutputMetaStyle().Render("  └ ")
 	if !strings.HasPrefix(rows[0].Styled, metaPrefix) {
 		t.Fatalf("structural prefix should use transcript meta style\nprefix=%q\nstyled=%q", metaPrefix, rows[0].Styled)
 	}
@@ -60,7 +60,7 @@ func TestStyleTerminalOutputLineSanitizesANSI(t *testing.T) {
 	if strings.Contains(styled, "[31m") {
 		t.Fatalf("source ANSI color leaked into terminal output line: %q", styled)
 	}
-	metaPrefix := ctx.Theme.TranscriptMetaStyle().Render("  └ ")
+	metaPrefix := ctx.Theme.ToolOutputMetaStyle().Render("  └ ")
 	if !strings.HasPrefix(styled, metaPrefix) {
 		t.Fatalf("structural prefix should use transcript meta style\nprefix=%q\nstyled=%q", metaPrefix, styled)
 	}

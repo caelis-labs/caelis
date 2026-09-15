@@ -80,7 +80,7 @@ func (m *Model) startEarlierHistory(callID, before string) {
 	if callID == "" {
 		cfg.ProgramSender, cfg.TaskStreams, cfg.ControlService = nil, nil, nil
 		cfg.NoAnimation, cfg.ShowWelcomeCard = true, false
-		build.model = NewModel(cfg)
+		build.model = newModelWithTheme(cfg, m.theme)
 		build.model.historyBuilding = true
 		build.model.beginDeferredViewportSync()
 	} else {

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -26,6 +27,52 @@ func TestSessionPickerOpensWhileTurnRunsAndMarksRunningRows(t *testing.T) {
 	}
 	if got := ansi.Strip(model.renderSessionPicker()); !strings.Contains(got, "running") {
 		t.Fatalf("Session picker omitted running marker:\n%s", got)
+	}
+}
+
+func TestSessionPickerCompletionClearsCommandBeforeLoading(t *testing.T) {
+	for _, key := range []string{"enter", "tab"} {
+		t.Run(key, func(t *testing.T) {
+			m := newSessionPickerTestModel(t, 80, 24, []ResumeCandidate{{SessionID: "session-a", Title: "Earlier work"}}, func(Submission) TaskResultMsg {
+				return TaskResultMsg{ContinueRunning: true}
+			})
+			m.setCommands(DefaultCommands())
+			m.setInputText("/res")
+			m.syncTextareaFromInput()
+			m.refreshSlashCommands()
+			_, load := m.Update(keyPress(key))
+			if load == nil || m.sessionPicker == nil || !m.sessionPicker.loading {
+				t.Fatal("completion did not open loading Session picker")
+			}
+			if m.textarea.Value() != "" || len(m.input) != 0 {
+				t.Fatalf("completion retained command: %q", m.textarea.Value())
+			}
+			frames := []string{m.View().Content}
+			m.Update(load())
+			frames = append(frames, m.View().Content)
+			_, attach := m.Update(keyPress("enter"))
+			if attach == nil || !m.sessionSwitchPending || m.textarea.Value() != "" {
+				t.Fatal("selection did not clear composer before attachment")
+			}
+			m.Update(sessionViewStartMsg{generation: 1, state: appserver.SessionState{SessionID: "session-a"}})
+			frames = append(frames, m.View().Content)
+			if !strings.Contains(ansi.Strip(frames[len(frames)-1]), sessionHistoryLoadingHint) || m.textarea.Value() != "" {
+				t.Fatal("loading history did not paint with an empty composer")
+			}
+			updates := renderFullscreenFramesForTest(t, m.width, m.height, frames...)
+			assertPhysicalFullscreenFrame(t, m.width, m.height, frames[len(frames)-1], updates)
+		})
+	}
+}
+
+func TestSessionPickerShortcutPreservesDraft(t *testing.T) {
+	m := newSessionPickerTestModel(t, 80, 24, nil, nil)
+	m.setInputText("unfinished draft")
+	m.syncTextareaFromInput()
+	openSessionPickerForTest(t, m)
+	m.Update(keyPress("esc"))
+	if m.textarea.Value() != "unfinished draft" {
+		t.Fatal("Session shortcut discarded the draft")
 	}
 }
 

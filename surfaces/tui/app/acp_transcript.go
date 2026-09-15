@@ -42,6 +42,7 @@ type toolPanelRenderRequest struct {
 	CallID        string
 	ToolName      string
 	TerminalPanel bool
+	LiveTail      bool
 	Text          string
 	Width         int
 	Ctx           BlockRenderContext
@@ -438,6 +439,9 @@ func renderACPTranscriptHeaderMark(ctx BlockRenderContext, tone acpHeaderMarkTon
 
 func styleACPTranscriptHeaderDetail(ctx BlockRenderContext, verb string, detail string) string {
 	if strings.EqualFold(strings.TrimSpace(verb), "Ran") {
+		if i := strings.LastIndex(detail, " ... +"); i >= 0 && isToolOutputFoldMarker(detail[i+1:]) {
+			return styleShellCommandText(ctx, detail[:i]) + ctx.Theme.ToolOutputMetaStyle().Render(detail[i:])
+		}
 		return styleShellCommandText(ctx, detail)
 	}
 	if strings.EqualFold(strings.TrimSpace(verb), "Spawned") ||
@@ -675,9 +679,9 @@ func transcriptPlanTextStyle(theme tuikit.Theme, tone planStatusTone) lipgloss.S
 	return theme.SecondaryTextStyle()
 }
 
-func renderACPTerminalPanelRows(blockID string, callID string, text string, width int, ctx BlockRenderContext, err bool, token string) []RenderedRow {
+func renderACPTerminalPanelRows(blockID string, callID string, text string, width int, ctx BlockRenderContext, err bool, token string, liveTail bool) []RenderedRow {
 	bodyWidth := maxInt(1, width)
-	lines := renderACPTerminalPanelBody(text, bodyWidth, ctx, err)
+	lines := renderACPTerminalPanelBody(text, bodyWidth, ctx, err, liveTail)
 	rows := make([]RenderedRow, 0, len(lines))
 	for _, line := range lines {
 		rows = append(rows, StyledPlainClickablePreWrappedRow(blockID, ansi.Strip(line), line, token))
@@ -720,7 +724,7 @@ func renderACPFullTerminalPanelBody(text string, width int, ctx BlockRenderConte
 	return out
 }
 
-func renderACPTerminalPanelBody(text string, width int, ctx BlockRenderContext, err bool) []string {
+func renderACPTerminalPanelBody(text string, width int, ctx BlockRenderContext, err bool, liveTail bool) []string {
 	style := ctx.Theme.ToolOutputStyle()
 	if err {
 		style = ctx.Theme.ToolErrorStyle()
@@ -732,7 +736,16 @@ func renderACPTerminalPanelBody(text string, width int, ctx BlockRenderContext, 
 		if i == 0 {
 			prefix = "  └ "
 		}
-		lines = append(lines, styleTerminalOutputLine(ctx, prefix, segment, style))
+		lineStyle := style
+		if liveTail && !err {
+			switch len(segments) - i {
+			case 1:
+				lineStyle = ctx.Theme.TextStyle()
+			case 2, 3:
+				lineStyle = ctx.Theme.SecondaryTextStyle()
+			}
+		}
+		lines = append(lines, styleTerminalOutputLine(ctx, prefix, segment, lineStyle))
 	}
 	return lines
 }
@@ -806,6 +819,9 @@ func tailWrappedTerminalSegmentsFromEnd(text string, width int, limit int) []str
 }
 
 func styleTerminalOutputLine(ctx BlockRenderContext, prefix string, segment string, style lipgloss.Style) string {
+	if isToolOutputFoldMarker(segment) {
+		style = ctx.Theme.ToolOutputMetaStyle()
+	}
 	return stylePrefixedContentLine(ctx, prefix, segment, maxInt(displayColumns(prefix)+displayColumns(segment), ctx.Width), style)
 }
 
@@ -912,7 +928,7 @@ func terminalToolPanelLineCount(events []SubagentEvent, callID string, ctx Block
 	if !ok || !shouldRenderACPToolPanel(text, err) || !terminal {
 		return 0
 	}
-	return len(renderACPTerminalPanelBody(text, maxInt(1, ctx.Width-2), ctx, err))
+	return len(renderACPTerminalPanelBody(text, maxInt(1, ctx.Width-2), ctx, err, false))
 }
 
 func terminalToolPanelPayload(events []SubagentEvent, callID string) (toolName string, terminal bool, text string, err bool, ok bool) {
@@ -1061,7 +1077,11 @@ func renderACPToolOutputRowsWithToken(blockID string, prefix string, text string
 			linePrefix = strings.Repeat(" ", displayColumns(prefix))
 		}
 		plain := linePrefix + segment
-		styled := stylePrefixedContentLine(ctx, linePrefix, segment, width, style)
+		lineStyle := style
+		if isToolOutputFoldMarker(segment) {
+			lineStyle = ctx.Theme.ToolOutputMetaStyle()
+		}
+		styled := stylePrefixedContentLine(ctx, linePrefix, segment, width, lineStyle)
 		rows = append(rows, StyledPlainClickablePreWrappedRow(blockID, plain, styled, token))
 	}
 	return rows
@@ -1102,7 +1122,7 @@ func styleRenderPrefix(ctx BlockRenderContext, prefix string, contentStyle lipgl
 		return ""
 	}
 	if strings.TrimSpace(prefix) == "" || containsStructuralGlyph(prefix) {
-		return ctx.Theme.TranscriptMetaStyle().Render(prefix)
+		return ctx.Theme.ToolOutputMetaStyle().Render(prefix)
 	}
 	return contentStyle.Render(prefix)
 }

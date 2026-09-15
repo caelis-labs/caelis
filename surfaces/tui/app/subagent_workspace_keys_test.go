@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"testing/synctest"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/caelis-labs/caelis/control/uipreferences"
@@ -22,88 +23,91 @@ func TestPaneWorkspaceTerminalKeySequences(t *testing.T) {
 		{"macOS", "darwin", false}, {"Linux", "linux", false}, {"Windows", "windows", false}, {"WSL", "linux", true},
 	} {
 		t.Run(profile.name, func(t *testing.T) {
-			m, _ := newPaneTestModel(t)
-			m.keys = defaultKeyMapForPlatform(profile.goos, profile.wsl)
-			m.setSubagentLayout(uipreferences.Right)
-			m.subagentOutputOverlay.editor.SetValue("child draft")
-			m.textarea.SetValue("parent draft")
-			m.closeSubagentOutputOverlay()
-			cancels := 0
-			m.cfg.CancelRunning = func() bool { cancels++; return true }
-			m.liveTurn.Active = true
-			press := func(sequence string) {
-				t.Helper()
-				var decoder uv.EventDecoder
-				n, event := decoder.Decode([]byte(sequence))
-				k, ok := event.(uv.KeyPressEvent)
-				if n != len(sequence) || !ok {
-					t.Fatalf("decode %q = %d, %#v", sequence, n, event)
+			// Execute hint-expiry commands on virtual time without skipping their messages.
+			synctest.Test(t, func(t *testing.T) {
+				m, _ := newPaneTestModel(t)
+				m.keys = defaultKeyMapForPlatform(profile.goos, profile.wsl)
+				m.setSubagentLayout(uipreferences.Right)
+				m.subagentOutputOverlay.editor.SetValue("child draft")
+				m.textarea.SetValue("parent draft")
+				m.closeSubagentOutputOverlay()
+				cancels := 0
+				m.cfg.CancelRunning = func() bool { cancels++; return true }
+				m.liveTurn.Active = true
+				press := func(sequence string) {
+					t.Helper()
+					var decoder uv.EventDecoder
+					n, event := decoder.Decode([]byte(sequence))
+					k, ok := event.(uv.KeyPressEvent)
+					if n != len(sequence) || !ok {
+						t.Fatalf("decode %q = %d, %#v", sequence, n, event)
+					}
+					_, cmd := m.Update(tea.KeyPressMsg{Code: k.Code, Mod: k.Mod, Text: k.Text})
+					runTeaCmds(t, m, cmd)
 				}
-				_, cmd := m.Update(tea.KeyPressMsg{Code: k.Code, Mod: k.Mod, Text: k.Text})
-				runTeaCmds(t, m, cmd)
-			}
-			press("\x1b[18~") // F7, legacy VT encoding used across terminal hosts.
-			if m.subagentOutputOverlay == nil || !m.workspace.childFocused {
-				t.Fatal("F7 failed to open")
-			}
-			state := m.subagentOutputOverlay
-			press("\x1b[17~")
-			if m.workspace.childFocused {
-				t.Fatal("F6 failed to focus main")
-			}
-			press("\x1b[17;2~")
-			if !m.workspace.childFocused {
-				t.Fatal("Shift+F6 failed to focus child")
-			}
-			press("\x07") // Ctrl+G.
-			if state.menu != "agents" {
-				t.Fatal("agent menu unreachable")
-			}
-			press("\x1b")
-			if state.menu != "" {
-				t.Fatal("Esc did not dismiss menu")
-			}
-			press("\x0c") // Ctrl+L.
-			if state.menu != "layout" {
-				t.Fatal("layout menu unreachable")
-			}
-			press("\x1b")
-			press("\x1b")
-			if m.subagentOutputOverlay != state || cancels != 0 {
-				t.Fatal("child Esc hid pane or cancelled parent")
-			}
-			press("\x0a") // Ctrl+J must work without extended keyboard reporting.
-			if !strings.Contains(state.editor.Value(), "\n") {
-				t.Fatal("legacy newline failed")
-			}
-			draft := state.editor.Value()
-			m.Update(tea.KeyReleaseMsg{Code: tea.KeyF7})
-			if m.subagentOutputOverlay == nil {
-				t.Fatal("key release toggled pane")
-			}
-			press("\x1b[18~")
-			if m.subagentOutputOverlay != nil || m.workspace.childFocused {
-				t.Fatal("F7 did not hide and return focus")
-			}
-			if profile.goos == "windows" {
-				press("\x1b[118;0;0;1;0;1_")
-			} else {
+				press("\x1b[18~") // F7, legacy VT encoding used across terminal hosts.
+				if m.subagentOutputOverlay == nil || !m.workspace.childFocused {
+					t.Fatal("F7 failed to open")
+				}
+				state := m.subagentOutputOverlay
+				press("\x1b[17~")
+				if m.workspace.childFocused {
+					t.Fatal("F6 failed to focus main")
+				}
+				press("\x1b[17;2~")
+				if !m.workspace.childFocused {
+					t.Fatal("Shift+F6 failed to focus child")
+				}
+				press("\x07") // Ctrl+G.
+				if state.menu != "agents" {
+					t.Fatal("agent menu unreachable")
+				}
+				press("\x1b")
+				if state.menu != "" {
+					t.Fatal("Esc did not dismiss menu")
+				}
+				press("\x0c") // Ctrl+L.
+				if state.menu != "layout" {
+					t.Fatal("layout menu unreachable")
+				}
+				press("\x1b")
+				press("\x1b")
+				if m.subagentOutputOverlay != state || cancels != 0 {
+					t.Fatal("child Esc hid pane or cancelled parent")
+				}
+				press("\x0a") // Ctrl+J must work without extended keyboard reporting.
+				if !strings.Contains(state.editor.Value(), "\n") {
+					t.Fatal("legacy newline failed")
+				}
+				draft := state.editor.Value()
+				m.Update(tea.KeyReleaseMsg{Code: tea.KeyF7})
+				if m.subagentOutputOverlay == nil {
+					t.Fatal("key release toggled pane")
+				}
 				press("\x1b[18~")
-			}
-			if m.subagentOutputOverlay != state || state.editor.Value() != draft || m.textarea.Value() != "parent draft" {
-				t.Fatal("reopen lost draft or selected child")
-			}
-			press("\x1b[17~")
-			press("\x1b")
-			if cancels != 1 || m.subagentOutputOverlay != state {
-				t.Fatal("main Esc lost interrupt behavior or hid child")
-			}
-			m.closeSubagentOutputOverlay()
-			m.activePrompt = newPromptState(PromptRequestMsg{Prompt: "Approval", Response: make(chan PromptResponse, 1)})
-			press("\x1b[18~")
-			if m.subagentOutputOverlay != nil {
-				t.Fatal("workspace key escaped modal input owner")
-			}
+				if m.subagentOutputOverlay != nil || m.workspace.childFocused {
+					t.Fatal("F7 did not hide and return focus")
+				}
+				if profile.goos == "windows" {
+					press("\x1b[118;0;0;1;0;1_")
+				} else {
+					press("\x1b[18~")
+				}
+				if m.subagentOutputOverlay != state || state.editor.Value() != draft || m.textarea.Value() != "parent draft" {
+					t.Fatal("reopen lost draft or selected child")
+				}
+				press("\x1b[17~")
+				press("\x1b")
+				if cancels != 1 || m.subagentOutputOverlay != state {
+					t.Fatal("main Esc lost interrupt behavior or hid child")
+				}
+				m.closeSubagentOutputOverlay()
+				m.activePrompt = newPromptState(PromptRequestMsg{Prompt: "Approval", Response: make(chan PromptResponse, 1)})
+				press("\x1b[18~")
+				if m.subagentOutputOverlay != nil {
+					t.Fatal("workspace key escaped modal input owner")
+				}
+			})
 		})
 	}
 }
