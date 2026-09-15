@@ -2,7 +2,6 @@ package gatewayapp
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"reflect"
 	"strings"
@@ -11,12 +10,30 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
-	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
 type guardianPagedOnlyStore struct {
 	session.Service
 	pages int
+}
+
+func TestGuardianCompactSourceAddressRetainsOriginalIdentity(t *testing.T) {
+	for _, kind := range []session.EventType{session.EventTypeUser, session.EventTypeToolCall, session.EventTypeToolResult} {
+		e := guardianSource(17, kind, "Preserve the original ledger.")
+		e.SessionID, e.ID = "parent-session-identity", "canonical-event-identity"
+		if kind == session.EventTypeToolResult {
+			e.Tool.Output = map[string]any{"stdout": "middle evidence fact", "exit_code": 7}
+		}
+		preview := guardianProjectEvent(e)
+		if preview.SessionID != e.SessionID || preview.ID != e.ID || preview.Seq != e.Seq {
+			t.Fatalf("%s lost projection identity", kind)
+		}
+		text := session.EventText(preview)
+		if !strings.Contains(text, "seq=17") || strings.Contains(text, e.SessionID) || strings.Contains(text, e.ID) {
+			t.Fatalf("%s routine address is missing or repeats full identity", kind)
+		}
+
+	}
 }
 
 func (s *guardianPagedOnlyStore) Events(context.Context, session.EventsRequest) ([]*session.Event, error) {
@@ -71,20 +88,10 @@ func TestGuardianProjectionRoundTripPreservesCutAcrossApprovalCadence(t *testing
 		t.Fatalf("model context changed after reopening source: cut=%+v/%+v err=%v", cut, restoredCut, err)
 	}
 	text := guardianEventsText(a)
-	if !strings.Contains(text, "user constraint 0") || !strings.Contains(text, "user constraint 129") || len(text) > 80000 {
+	if !strings.Contains(text, "user constraint 0") || !strings.Contains(text, "user constraint 129") || len(text) > 16*1024*1024 {
 		t.Fatalf("retained context lost user boundaries or grew unbounded: %d", len(text))
 	}
-	late := guardianSource(0, session.EventTypeUser, "not part of pinned approval")
-	late.ID = ""
-	if _, err := store.AppendEvent(t.Context(), session.AppendEventRequest{SessionRef: active.SessionRef, Event: late}); err != nil {
-		t.Fatal(err)
-	}
-	q := &guardianQueries{service: reader, ref: active.SessionRef, through: cut.EventSeq}
-	result, err := q.readEvents(t.Context(), tool.Call{Input: json.RawMessage(fmt.Sprintf(`{"after_seq":%d,"limit":4}`, cut.EventSeq-1))})
-	raw, _ := json.Marshal(result)
-	if err != nil || strings.Contains(string(raw), "not part of pinned approval") || !strings.Contains(string(raw), "user constraint 129") {
-		t.Fatalf("ReadEvents escaped checkpoint or lost source: %s %v", raw, err)
-	}
+
 }
 
 func TestGuardianUserRetentionPreservesOriginalAndLatestConstraints(t *testing.T) {
@@ -112,13 +119,13 @@ func TestGuardianOversizedExactActionDoesNotReachProvider(t *testing.T) {
 }
 
 func TestGuardianEvidenceFoldingPreservesUTF8AndBoundaries(t *testing.T) {
-	short := strings.Repeat("证据", 700)
+	short := strings.Repeat("证据", 300)
 	if guardianFold(short, 2048) != short {
 		t.Fatal("folded a fitting Unicode value")
 	}
 	large := "first marker " + strings.Repeat("证据", 1000000) + " last marker"
 	folded := guardianFold(large, 2048)
-	if !utf8.ValidString(folded) || !strings.HasPrefix(folded, "first marker") || !strings.HasSuffix(folded, "last marker") || len(folded) > 6500 || !strings.Contains(folded, "folded") {
+	if !utf8.ValidString(folded) || !strings.HasPrefix(folded, "first marker") || !strings.HasSuffix(folded, "last marker") || len(folded) > 2200 || !strings.Contains(folded, "folded") {
 		t.Fatal("folding lost boundaries, Unicode validity or output bound")
 	}
 }

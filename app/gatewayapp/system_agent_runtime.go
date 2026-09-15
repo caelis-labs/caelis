@@ -335,7 +335,7 @@ func collectSystemManagedAgentResult(
 	if handle != nil {
 		// The run already receives caller cancellation. As with the owning
 		// Gateway Turn, the wait must still prove producer quiescence before
-		// observers are consumed or the parent execution fence can be released.
+		// observers are consumed or the resident execution lane can be reused.
 		// A non-cooperative producer keeps this invocation draining; Close alone
 		// or a timed-out wait cannot establish completion.
 		if err := handle.WaitCompletion(context.WithoutCancel(ctx)); err != nil || ctx.Err() != nil {

@@ -144,6 +144,7 @@ func TestGuardianCancelledAttemptStillPersistsParentUsage(t *testing.T) {
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancel cause=%v", err)
 	}
+	reviewer.reviews.Wait()
 	events, err := store.Events(context.Background(), session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
 	if err != nil {
 		t.Fatal(err)

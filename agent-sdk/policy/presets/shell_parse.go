@@ -97,19 +97,25 @@ func commandContainsRecursiveDelete(command string) bool {
 	}
 	fields := shellishFields(command)
 	for _, i := range commandStartIndexes(fields) {
-		token := executableBase(fields[i])
-		switch token {
-		case "remove-item", "remove-item.exe", "ri", "ri.exe":
-			if commandSegmentHasFlag(fields[i+1:], "-recurse", "-recursive") {
-				return true
-			}
-		case "del", "del.exe", "erase", "erase.exe", "rd", "rd.exe", "rmdir", "rmdir.exe":
-			if commandSegmentHasSlashFlag(fields[i+1:], "/s") {
-				return true
-			}
+		if isRecursiveWindowsDelete(fields[i], fields[i+1:]) {
+			return true
 		}
 	}
 	return false
+}
+
+func isRecursiveWindowsDelete(command string, args []string) bool {
+	switch executableBase(command) {
+	case "remove-item", "remove-item.exe", "ri", "ri.exe":
+		return commandSegmentHasFlag(args, "-recurse", "-recursive")
+	case "del", "erase", "rd", "rmdir":
+		// These names are both CMD built-ins and PowerShell Remove-Item aliases.
+		return commandSegmentHasFlag(args, "-recurse", "-recursive") || commandSegmentHasSlashFlag(args, "/s")
+	case "del.exe", "erase.exe", "rd.exe", "rmdir.exe":
+		return commandSegmentHasSlashFlag(args, "/s")
+	default:
+		return false
+	}
 }
 
 func commandStartIndexes(fields []string) []int {

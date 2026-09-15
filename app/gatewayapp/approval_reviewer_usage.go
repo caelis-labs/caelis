@@ -65,11 +65,11 @@ func (r *guardianApprovalReviewer) persistGuardianInvocations(ctx context.Contex
 		}
 		receipt.Meta["usage_category"] = "auto_review"
 		receipt.Meta["review_id"] = req.ReviewID
-		// Runtime claims, including empty and stale claims, must fail closed.
-		// Detached child accounting uses Control approval authority without
-		// borrowing the parent Turn's fence.
+		// Empty or stale Runtime claims fail closed. A claim validated at review
+		// admission permits receipt-only Control accounting after cancellation;
+		// detached child accounting never borrows the parent's Runtime fence.
 		guard := session.RuntimeMutationGuard(ctx)
-		if guard.Authority != session.MutationAuthorityRuntime {
+		if guard.Authority != session.MutationAuthorityRuntime || (ctx.Err() != nil && ctx.Value(guardianReceiptAuthorityKey{}) == true) {
 			guard = session.ControlMutationGuard(session.ControlMutationPurposeApproval)
 		}
 		if _, err := r.sessions.AppendEvent(cleanup, session.AppendEventRequest{SessionRef: req.SessionRef, MutationGuard: guard, Event: receipt}); err != nil {

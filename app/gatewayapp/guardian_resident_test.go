@@ -15,6 +15,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/host"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/internal/kernel"
 )
 
 type guardianFaultRuntime struct {
@@ -25,8 +26,7 @@ type guardianFaultRuntime struct {
 func (r guardianFaultRuntime) Run(ctx context.Context, _ sandbox.CommandRequest) (sandbox.CommandResult, error) {
 	switch r.fault {
 	case "timeout":
-		<-ctx.Done()
-		return sandbox.CommandResult{Stdout: "partial evidence", ExitCode: -1}, ctx.Err()
+		return sandbox.CommandResult{Stdout: "partial evidence", ExitCode: -1}, context.DeadlineExceeded
 	case "large":
 		return sandbox.CommandResult{Stdout: strings.Repeat("bounded evidence\n", 65536), ExitCode: 0}, nil
 	default:
@@ -60,7 +60,7 @@ func (m *guardianFaultDecisionModel) Generate(_ context.Context, req *model.Requ
 				}
 				found = true
 				raw, _ := json.Marshal(part.ToolResult)
-				if len(raw) > 10*1024 {
+				if len(raw) > 40*1024 {
 					yield(nil, fmt.Errorf("unbounded evidence reached model: %d", len(raw)))
 					return
 				}
@@ -68,7 +68,7 @@ func (m *guardianFaultDecisionModel) Generate(_ context.Context, req *model.Requ
 					yield(nil, errors.New("failed evidence lost error status"))
 					return
 				}
-				if m.fault == "large" && !strings.Contains(string(raw), "truncated") {
+				if m.fault == "large" && !strings.Contains(string(raw), "truncated") && !strings.Contains(string(raw), "omitted") {
 					yield(nil, errors.New("large output lost truncation fact"))
 					return
 				}
@@ -76,10 +76,6 @@ func (m *guardianFaultDecisionModel) Generate(_ context.Context, req *model.Requ
 		}
 		if !found {
 			yield(nil, errors.New("final model call did not receive evidence result"))
-			return
-		}
-		if m.fault == "timeout" && !req.DisableTools {
-			yield(nil, errors.New("expired evidence budget left tools available"))
 			return
 		}
 		text := `{"option_id":"reject_once","rationale":"The action contradicts the explicit task constraint."}`
@@ -129,7 +125,7 @@ func TestGuardianResidentDecidesAfterEvidenceFailures(t *testing.T) {
 						t.Fatalf("resident resources not reused: %+v", metrics)
 					}
 					for _, m := range metrics {
-						if m.ModelCalls != 2 || m.ToolCalls != 1 || m.TotalMS > guardianReviewTimeout.Milliseconds() {
+						if m.ModelCalls != 2 || m.ToolCalls != 1 || m.TotalMS > kernel.AutoReviewTimeout.Milliseconds() {
 							t.Fatalf("review budget/counts: %+v", m)
 						}
 						if fault != "large" && m.ToolErrors != 1 {

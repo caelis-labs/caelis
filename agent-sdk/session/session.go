@@ -852,3 +852,10 @@ type PriorHostFenceService interface {
 type SessionFenceReader interface {
 	SessionFence(context.Context, SessionRef) (SessionFence, error)
 }
+
+// MutationGuardValidator checks a claim against current durable authority without
+// performing a mutation or returning bearer material. Success is a point-in-time
+// observation, not permission to perform a later mutation with a stale claim.
+type MutationGuardValidator interface {
+	ValidateMutationGuard(context.Context, SessionRef, MutationGuard) error
+}

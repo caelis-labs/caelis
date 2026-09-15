@@ -27,7 +27,7 @@ func (m *guardianCleanupBarrierModel) Generate(ctx context.Context, _ *model.Req
 	}
 }
 
-func TestGuardianCancellationDrainsProducerBeforeParentAccounting(t *testing.T) {
+func TestGuardianCancellationSettlesBeforeDrainAndPersistsLateReceipt(t *testing.T) {
 	store, active := newApprovalReviewerTestSession(t, context.Background())
 	fence, err := store.(session.SessionFenceService).AcquireSessionFence(t.Context(), session.AcquireSessionFenceRequest{SessionRef: active.SessionRef, OwnerID: "parent"})
 	if err != nil {
@@ -36,9 +36,10 @@ func TestGuardianCancellationDrainsProducerBeforeParentAccounting(t *testing.T) 
 	ctx, cancel := context.WithCancel(session.ContextWithRuntimeFence(t.Context(), fence))
 	defer cancel()
 	llm := &guardianCleanupBarrierModel{make(chan struct{}), make(chan struct{}), make(chan struct{})}
+	reviewer := newGuardianApprovalApprover(store)
 	done := make(chan error, 1)
 	go func() {
-		_, err := newGuardianApprovalApprover(store).Decide(ctx, approvalReviewerTestRequest(active, llm, "inspect", nil))
+		_, err := reviewer.Decide(ctx, approvalReviewerTestRequest(active, llm, "inspect", nil))
 		done <- err
 	}()
 	select {
@@ -56,7 +57,15 @@ func TestGuardianCancellationDrainsProducerBeforeParentAccounting(t *testing.T) 
 		early = true
 	case <-time.After(50 * time.Millisecond):
 	}
+	if err := store.(session.SessionFenceService).ReleaseSessionFence(t.Context(), session.SessionFenceReleaseRequest(fence)); err != nil {
+		t.Fatal(err)
+	}
+	if resident := reviewer.residents[active.SessionID]; resident == nil || len(resident.lanes) != guardianResidentLaneCount-1 {
+		t.Fatal("draining lane was released early")
+	}
 	close(llm.release)
+	reviewer.reviews.Wait()
+	defer reviewer.Close()
 	if !early {
 		select {
 		case err = <-done:
@@ -64,8 +73,8 @@ func TestGuardianCancellationDrainsProducerBeforeParentAccounting(t *testing.T) 
 			t.Fatal("producer failed to drain")
 		}
 	}
-	if early {
-		t.Error("Decide returned before the provider cleanup barrier; parent accounting/fence lifetime ended early")
+	if !early {
+		t.Error("Decide did not settle while provider cleanup was blocked")
 	}
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("cause = %v", err)
@@ -84,6 +93,6 @@ func TestGuardianCancellationDrainsProducerBeforeParentAccounting(t *testing.T) 
 		}
 	}
 	if count != 1 || total != 12 {
-		t.Errorf("parent receipts=%d tokens=%d, want 1/12 under original fence", count, total)
+		t.Errorf("parent receipts=%d tokens=%d, want 1/12 after original fence release", count, total)
 	}
 }

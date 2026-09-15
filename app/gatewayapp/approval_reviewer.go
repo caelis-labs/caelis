@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
@@ -20,11 +19,6 @@ import (
 
 const guardianAssessmentMaxAttempts = 2
 
-// Queueing, evidence, provider retries and format repair share one deadline.
-// The final reserve covers the observed provider tail after restricted evidence.
-const guardianReviewTimeout = 20 * time.Second
-const guardianFinalDecisionReserve = 8 * time.Second
-
 type guardianApprovalReviewer struct {
 	queryNetwork  sandbox.Network
 	sessions      session.Service
@@ -33,6 +27,7 @@ type guardianApprovalReviewer struct {
 	diagnostics   *slog.Logger
 	accountingMu  sync.Mutex
 	accounting    map[string]approvalReviewAccounting
+	reviews       sync.WaitGroup
 	resourcesMu   sync.Mutex
 	residents     map[string]*guardianResident
 	closed        bool
@@ -79,10 +74,10 @@ func (r *guardianApprovalReviewer) ReviewApproval(ctx context.Context, req kerne
 	return r.Decide(ctx, req)
 }
 
-// Decide returns one fully resolved Guardian decision. The Guardian path owns
+// decide returns one fully resolved Guardian decision. The Guardian path owns
 // strict model-output validation and must not pass through generic reviewer
 // reconciliation that guesses options or lets an option override its outcome.
-func (r *guardianApprovalReviewer) Decide(ctx context.Context, req kernel.ApprovalReviewRequest) (result kernel.ApprovalReviewResult, resultErr error) {
+func (r *guardianApprovalReviewer) decide(ctx context.Context, req kernel.ApprovalReviewRequest) (result kernel.ApprovalReviewResult, resultErr error) {
 	if req.Model == nil {
 		return kernel.ApprovalReviewResult{}, fmt.Errorf("approval reviewer requires the current session model")
 	}

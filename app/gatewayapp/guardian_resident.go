@@ -134,6 +134,7 @@ func (r *guardianApprovalReviewer) Close() error {
 			first = err
 		}
 	}
+	r.reviews.Wait()
 	return first
 }
 
@@ -148,6 +149,10 @@ type guardianReviewMetrics struct {
 	ReviewID          string         `json:"review_id"`
 	TotalMS           int64          `json:"total_ms"`
 	QueueMS           int64          `json:"queue_ms"`
+	ControlQueueMS    int64          `json:"control_queue_ms"`
+	LaneQueueMS       int64          `json:"lane_queue_ms"`
+	MaxRequestTokens  int            `json:"max_request_tokens"`
+	InputBudgetTokens int            `json:"input_budget_tokens"`
 	PrepareMS         int64          `json:"prepare_ms"`
 	ModelMS           int64          `json:"model_ms"`
 	ToolMS            int64          `json:"tool_ms"`

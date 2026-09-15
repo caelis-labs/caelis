@@ -8,7 +8,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
-	sdkruntime "github.com/caelis-labs/caelis/agent-sdk/runtime"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/internal/kernel"
@@ -17,8 +16,8 @@ import (
 const guardianUserSource = "guardian_user_source"
 const guardianTurnKey = "guardian_turn"
 
-// guardianWindow prepares an append-only input sequence. Source users have a
-// separate budget and survive removal of the surrounding completed turns.
+// guardianWindow prepares an append-only input sequence. Source users survive
+// completed-turn eviction and are folded only under physical capacity pressure.
 func guardianWindow(snapshot guardianConversationSnapshot, req kernel.ApprovalReviewRequest, output *model.OutputSpec) ([]*session.Event, guardianPromptItems, error) {
 	history := session.CloneEvents(snapshot.Events)
 	items := guardianPromptItems{ParentCursor: snapshot.ParentCursor}
@@ -52,29 +51,9 @@ func guardianWindow(snapshot guardianConversationSnapshot, req kernel.ApprovalRe
 		items.MandatoryInputTooLarge = true
 		return history, items, nil
 	}
-	cfg := guardianCompactionConfig(req.Model, output)
-	limit := sdkruntime.EvaluateModelRequestBudget(req.Model, guardianModelRequest(nil, items.Text, output), cfg).Usage.EffectiveInputBudget
-	if limit <= 0 {
-		limit = 24000
-	}
-	// Reserve room for exact input, schema and evidence gathered in this turn.
-	userBudget := min(6000, max(1024, limit*3/10)) * 3
-	// Structured messages contain JSON framing as well as prose. The exact
-	// token check below remains authoritative; the byte cap bounds retention.
-	turnBudget := min(8000, max(1024, limit*3/10)) * 6
-	beforeRetention := append([]*session.Event(nil), history...)
-	history = guardianTrimUsers(history, userBudget)
-	history = guardianTrimTurns(history, turnBudget, req.ReviewID)
-	for len(history) > 0 && sdkruntime.EvaluateModelRequestBudget(req.Model, guardianModelRequest(history, items.Text, output), cfg).Usage.TotalTokens > limit*8/10 {
-		next := guardianDropOldestTurn(history, req.ReviewID)
-		if len(next) == len(history) {
-			break
-		}
-		history = next
-	}
-	if sdkruntime.EvaluateModelRequestBudget(req.Model, guardianModelRequest(history, items.Text, output), cfg).Usage.TotalTokens > limit {
-		items.MandatoryInputTooLarge = true
-	}
+	beforeRetention := session.CloneEvents(history)
+	history, fits := guardianFitHistory(history, req.Model, items.Text, output, req.ReviewID)
+	items.MandatoryInputTooLarge = !fits
 	items.ContextTrimmed = !reflect.DeepEqual(beforeRetention, history)
 	return history, items, nil
 }
@@ -87,25 +66,17 @@ func guardianFold(text string, limit int) string {
 	if len(text) <= limit {
 		return text
 	}
-	n := limit / 2
-	first, last := 0, len(text)
-	for range n {
-		if first >= last {
-			return text
-		}
-		_, size := utf8.DecodeRuneInString(text[first:last])
-		first += size
-		if first >= last {
-			return text
-		}
-		_, size = utf8.DecodeLastRuneInString(text[first:last])
-		last -= size
+	// Limits count bytes, with boundaries advanced only over complete UTF-8.
+	first, last := limit/2, len(text)-limit/2
+	for first > 0 && !utf8.RuneStart(text[first]) {
+		first--
 	}
-	if first >= last {
-		return text
+	for last < len(text) && !utf8.RuneStart(text[last]) {
+		last++
 	}
-	return text[:first] + fmt.Sprintf("\n[folded %d bytes; source event can be read with ReadEvents]\n", last-first) + text[last:]
+	return text[:first] + fmt.Sprintf("\n[folded %d bytes; omitted content is unavailable]\n", last-first) + text[last:]
 }
+
 func guardianTrimUsers(events []*session.Event, budget int) []*session.Event {
 	total := func() int {
 		n := 0
@@ -171,7 +142,7 @@ func guardianTurn(e *session.Event) string {
 func guardianDropOldestTurn(events []*session.Event, current string) []*session.Event {
 	oldest := ""
 	for _, e := range events {
-		if key := guardianTurn(e); key != "" && key != current {
+		if key := guardianTurn(e); key != "" && key != current && !guardianIsUser(e) {
 			oldest = key
 			break
 		}
@@ -228,13 +199,14 @@ func guardianTrimTurns(events []*session.Event, budget int, current string) []*s
 	}
 }
 
-// Guardian never summarizes its private dialogue using another model call.
-// The owner trims completed turns before Run; an overflowing active turn fails.
+// The Harness trims completed turns before Run. An overflowing active review
+// is unavailable; Guardian does not summarize or reconstruct its own history.
 type guardianTurnCompactor struct{}
 
 func (guardianTurnCompactor) Prepare(_ context.Context, req compact.Request) (compact.Result, error) {
 	return compact.Result{PromptEvents: session.CloneEvents(req.Events)}, nil
 }
+
 func (guardianTurnCompactor) CompactOnOverflow(_ context.Context, _ compact.Request, err error) (compact.Result, error) {
 	return compact.Result{}, fmt.Errorf("guardian active turn exceeded context budget: %w", err)
 }
