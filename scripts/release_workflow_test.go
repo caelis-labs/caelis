@@ -1,12 +1,62 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"regexp"
 	"strings"
 	"testing"
 )
+
+func TestReleasePleaseFeedsProtectedMainPublication(t *testing.T) {
+	t.Parallel()
+
+	workflow := readWorkflow(t, "../.github/workflows/release-please.yml")
+	for _, want := range []string{
+		"push:\n    branches: [main]",
+		"if: github.ref == 'refs/heads/main'",
+		"group: release-please-main\n  cancel-in-progress: false",
+		"token: ${{ secrets.RELEASE_PLEASE_TOKEN }}",
+		"target-branch: main",
+		"config-file: release-please-config.json",
+		"manifest-file: .release-please-manifest.json",
+	} {
+		if !strings.Contains(workflow, want) {
+			t.Errorf("release-please workflow missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{"secrets.GITHUB_TOKEN", "github.token", "--auto", "skip-github-release: true"} {
+		if strings.Contains(workflow, forbidden) {
+			t.Errorf("release-please must trigger downstream checks and leave merging to maintainers: %q", forbidden)
+		}
+	}
+
+	var config struct {
+		Packages map[string]map[string]any `json:"packages"`
+	}
+	if err := json.Unmarshal([]byte(readWorkflow(t, "../release-please-config.json")), &config); err != nil {
+		t.Fatal(err)
+	}
+	root := config.Packages["."]
+	if len(config.Packages) != 1 || root["release-type"] != "go" ||
+		root["include-component-in-tag"] != false || root["include-v-in-tag"] != true {
+		t.Fatal("release-please must use one root Go version with vX.Y.Z tags")
+	}
+	if root["draft"] == true || root["skip-github-release"] == true {
+		t.Fatal("release-please must create a published release and tag to trigger artifact publication")
+	}
+	var manifest map[string]string
+	if err := json.Unmarshal([]byte(readWorkflow(t, "../.release-please-manifest.json")), &manifest); err != nil {
+		t.Fatal(err)
+	}
+	if len(manifest) != 1 || !regexp.MustCompile(`^\d+\.\d+\.\d+$`).MatchString(manifest["."]) {
+		t.Fatal("release manifest must contain one root release version")
+	}
+	if !strings.Contains(readWorkflow(t, "../.goreleaser.yml"), "release:\n  mode: keep-existing") {
+		t.Fatal("GoReleaser must preserve the release-please changelog")
+	}
+}
 
 func TestReleasePublishesProtectedMainTagsWithoutRepeatingPRQuality(t *testing.T) {
 	t.Parallel()
