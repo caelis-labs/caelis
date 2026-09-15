@@ -21,7 +21,6 @@ type guardianResident struct {
 	active     sync.WaitGroup
 	lanes      chan *guardianQueries
 	projection guardianProjection
-	evidence   guardianEvidenceStore
 }
 
 func (r *guardianApprovalReviewer) acquireResident(ctx context.Context, ref session.SessionRef) (*guardianResident, *guardianQueries, func(), error) {
@@ -94,7 +93,7 @@ func (r *guardianApprovalReviewer) acquireResident(ctx context.Context, ref sess
 		}
 	}
 	if q == nil {
-		q = &guardianQueries{network: r.queryNetwork, evidence: &resident.evidence}
+		q = &guardianQueries{network: r.queryNetwork}
 		if runner, ok := r.systemAgents.(*systemManagedAgentRuntime); ok {
 			q.runner = &systemManagedAgentRuntime{config: runner.config, resident: true}
 		}
@@ -115,9 +114,6 @@ func (r *guardianResident) close() error {
 				first = err
 			}
 		}
-	}
-	if err := r.evidence.close(); first == nil {
-		first = err
 	}
 	return first
 }
@@ -155,7 +151,6 @@ type guardianReviewMetrics struct {
 	QueueMS           int64          `json:"queue_ms"`
 	ControlQueueMS    int64          `json:"control_queue_ms"`
 	LaneQueueMS       int64          `json:"lane_queue_ms"`
-	ContextRecoveries int            `json:"context_recoveries"`
 	MaxRequestTokens  int            `json:"max_request_tokens"`
 	InputBudgetTokens int            `json:"input_budget_tokens"`
 	PrepareMS         int64          `json:"prepare_ms"`

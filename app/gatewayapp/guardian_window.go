@@ -1,19 +1,20 @@
 package gatewayapp
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"reflect"
 	"unicode/utf8"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/internal/kernel"
 )
 
 const guardianUserSource = "guardian_user_source"
 const guardianTurnKey = "guardian_turn"
-const guardianCheckpointEvidence = "guardian_checkpoint_evidence"
 
 // guardianWindow prepares an append-only input sequence. Source users survive
 // completed-turn eviction and are folded only under physical capacity pressure.
@@ -73,7 +74,7 @@ func guardianFold(text string, limit int) string {
 	for last < len(text) && !utf8.RuneStart(text[last]) {
 		last++
 	}
-	return text[:first] + fmt.Sprintf("\n[folded %d bytes; retrieve original via ReadEvents or ReadEvidence]\n", last-first) + text[last:]
+	return text[:first] + fmt.Sprintf("\n[folded %d bytes; omitted content is unavailable]\n", last-first) + text[last:]
 }
 
 func guardianTrimUsers(events []*session.Event, budget int) []*session.Event {
@@ -99,9 +100,6 @@ func guardianTrimUsers(events []*session.Event, budget int) []*session.Event {
 		old := events[largest]
 		one := session.CloneEvent(old)
 		text := guardianFold(session.EventText(old), 2048)
-		if ref, ok := old.Meta[guardianCheckpointEvidence].(string); ok {
-			text += "\nOriginal checkpoint: ReadEvidence ref=" + ref
-		}
 		message := model.NewTextMessage(model.RoleUser, text)
 		one.Message, one.Text = &message, text
 		one.Meta = session.CloneState(old.Meta)
@@ -199,4 +197,16 @@ func guardianTrimTurns(events []*session.Event, budget int, current string) []*s
 		}
 		events = next
 	}
+}
+
+// The Harness trims completed turns before Run. An overflowing active review
+// is unavailable; Guardian does not summarize or reconstruct its own history.
+type guardianTurnCompactor struct{}
+
+func (guardianTurnCompactor) Prepare(_ context.Context, req compact.Request) (compact.Result, error) {
+	return compact.Result{PromptEvents: session.CloneEvents(req.Events)}, nil
+}
+
+func (guardianTurnCompactor) CompactOnOverflow(_ context.Context, _ compact.Request, err error) (compact.Result, error) {
+	return compact.Result{}, fmt.Errorf("guardian active turn exceeded context budget: %w", err)
 }

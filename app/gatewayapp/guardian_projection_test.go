@@ -2,7 +2,6 @@ package gatewayapp
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"reflect"
 	"strings"
@@ -11,7 +10,6 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
-	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
 type guardianPagedOnlyStore struct {
@@ -26,7 +24,7 @@ func TestGuardianCompactSourceAddressRetainsOriginalIdentity(t *testing.T) {
 		if kind == session.EventTypeToolResult {
 			e.Tool.Output = map[string]any{"stdout": "middle evidence fact", "exit_code": 7}
 		}
-		preview, original := guardianProjectEvent(e), guardianProjectEventFull(e)
+		preview := guardianProjectEvent(e)
 		if preview.SessionID != e.SessionID || preview.ID != e.ID || preview.Seq != e.Seq {
 			t.Fatalf("%s lost projection identity", kind)
 		}
@@ -34,11 +32,7 @@ func TestGuardianCompactSourceAddressRetainsOriginalIdentity(t *testing.T) {
 		if !strings.Contains(text, "seq=17") || strings.Contains(text, e.SessionID) || strings.Contains(text, e.ID) {
 			t.Fatalf("%s routine address is missing or repeats full identity", kind)
 		}
-		for _, identity := range []string{e.SessionID, e.ID, "seq=17"} {
-			if !strings.Contains(session.EventText(original), identity) {
-				t.Fatalf("%s original lost %s", kind, identity)
-			}
-		}
+
 	}
 }
 
@@ -97,17 +91,7 @@ func TestGuardianProjectionRoundTripPreservesCutAcrossApprovalCadence(t *testing
 	if !strings.Contains(text, "user constraint 0") || !strings.Contains(text, "user constraint 129") || len(text) > 16*1024*1024 {
 		t.Fatalf("retained context lost user boundaries or grew unbounded: %d", len(text))
 	}
-	late := guardianSource(0, session.EventTypeUser, "not part of pinned approval")
-	late.ID = ""
-	if _, err := store.AppendEvent(t.Context(), session.AppendEventRequest{SessionRef: active.SessionRef, Event: late}); err != nil {
-		t.Fatal(err)
-	}
-	q := &guardianQueries{service: reader, ref: active.SessionRef, through: cut.EventSeq}
-	result, err := q.readEvents(t.Context(), tool.Call{Input: json.RawMessage(fmt.Sprintf(`{"after_seq":%d,"limit":4}`, cut.EventSeq-1))})
-	raw, _ := json.Marshal(result)
-	if err != nil || strings.Contains(string(raw), "not part of pinned approval") || !strings.Contains(string(raw), "user constraint 129") {
-		t.Fatalf("ReadEvents escaped checkpoint or lost source: %s %v", raw, err)
-	}
+
 }
 
 func TestGuardianUserRetentionPreservesOriginalAndLatestConstraints(t *testing.T) {

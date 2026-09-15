@@ -68,7 +68,7 @@ func (r *guardianApprovalReviewer) runGuardianReview(
 	metrics.SandboxReused = queries.runtime != nil
 	stop := context.AfterFunc(resident.ctx, cancel)
 	defer stop()
-	queries.begin(ctx, req.Model, r.sessions, req.SessionRef)
+	queries.begin(req.Model)
 	ctx = model.WithInvocationAdmission(ctx, queries.admit)
 	ctx = model.WithInvocationObserver(ctx, queries.invocation)
 	activeSession, err := r.sessions.Session(ctx, req.SessionRef)
@@ -87,8 +87,7 @@ func (r *guardianApprovalReviewer) runGuardianReview(
 	if err != nil {
 		return guardianPromptItems{}, nil, nil, guardianReviewModelOutput{}, err
 	}
-	queries.through = conversation.SourceCursor.EventSeq
-	metrics.SourceThrough = queries.through
+	metrics.SourceThrough = conversation.SourceCursor.EventSeq
 	outputSpec, err := guardianOutputSpecForModel(req.Model, req.Approval)
 	if err != nil {
 		return guardianPromptItems{}, nil, nil, guardianReviewModelOutput{}, err

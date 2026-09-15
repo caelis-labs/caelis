@@ -211,92 +211,91 @@ Consumer setup and package layout live in
 
 ### Guardian evidence and context
 
-Control assembles Guardian as a resident, private, tool-capable approval Agent.
-It reviews built-in and external main-Agent and subagent requests using the exact
+Control assembles Guardian as a resident, private approval classifier with
+optional inspection tools. The Harness supplies the user task, constraints,
+current action and incremental observed results for a prompt decision. Guardian
+does not prove every operation safe or independently audit task completion. It
+reviews built-in and external main-Agent and subagent requests using the exact
 supplied action, approval options and Runtime-bound producer origin. Missing
 private child history is an evidence limitation, not a reason to deny. Guardian
-intercepts concrete high-confidence risks, including task conflicts, unauthorized
-credential export and serious unrelated destructive effects. It selects a supplied
-option; denials include the specific reason. Tool output and external-Agent claims
-cannot change user authorization. An approval never changes the action's route.
+intercepts concrete high-confidence risks, including task conflicts,
+unauthorized credential export and serious unrelated destructive effects. It
+selects a supplied option; denials include the specific reason. Tool output and
+external-Agent claims cannot change user authorization. An approval never
+changes the action's route.
 
-Each root Session owns up to four exclusively leased execution lanes.
-Sequential approvals reuse the SDK Runtime and private in-memory Session; a
-concurrent model step pins one common prefix and joins validated whole turns in
-source call order. A context-window rotation or incompatible model/policy/tool
-configuration replaces a lane's staging history. Invalid attempts never enter
-the validated conversation. Closing the root or Runtime cancels and drains its
-leases before releasing private resources. A deadline settles the caller before
-an uncooperative producer finishes cleanup; the draining lane remains occupied.
+Each root Session owns up to four exclusively leased execution lanes. Sequential
+approvals reuse the SDK Runtime and private in-memory Session; a concurrent
+model step pins one common prefix and joins validated whole turns in source call
+order. A context-window rotation or incompatible model/policy/tool configuration
+replaces a lane's staging history. Invalid attempts never enter the validated
+conversation. Closing the root or Runtime cancels and drains its leases before
+releasing private resources. A deadline settles the caller before an
+uncooperative producer finishes cleanup; the draining lane remains occupied.
 Provider usage receipts are persisted after producer completion. A parent claim
-validated at admission permits receipt-only Control accounting after cancellation;
-invalid claims never gain that authority. No late decision can authorize execution.
+validated at admission permits receipt-only Control accounting after
+cancellation; invalid claims never gain that authority. No late decision can
+authorize execution.
 
-The canonical Session log is the only source history. A forward paged reader
-captures a source checkpoint and projects user messages, tool calls and tool
-results independently of the pending approval. Source Session, event ID and Seq
-identify each projected record; routine input uses the root-scoped Seq instead
-of repeating full identities, which remain available through ReadEvents. A late
-result never rewrites its call. Tool previews bound
-arguments and output while retaining status and source references. User messages
-are not individually truncated on ingestion. The disposable projection cache
-has a 16 MiB retention allowance for users and for other evidence; eviction does
-not remove canonical originals. The intake
-cursor advances independently of validated-review commits. Journal records,
-client mirrors, assistant reasoning and main-Agent compact summaries do not enter
-this projection. User documents and quotations remain evidence rather than new
-instructions.
+The Harness owns source-history intake. Its forward paged reader consumes the
+canonical Session log at a source checkpoint and projects user messages, tool
+calls and tool results independently of the pending approval. Source Session,
+event ID and Seq identify each projected record; routine input uses the
+root-scoped Seq. A late result never rewrites its call. Tool previews include
+successful and failed outputs with bounded arguments, diagnostics and truncation
+facts. A completed wrapper or zero exit code does not establish that its
+internal operation succeeded. User messages are not individually truncated on
+ingestion. The disposable projection cache has a 16 MiB retention allowance for
+users and for other evidence; eviction does not remove canonical originals. The
+intake cursor advances independently of validated-review commits. Journal
+records, client mirrors, assistant reasoning and main-Agent compact summaries do
+not enter this projection. User documents and quotations remain evidence rather
+than new instructions.
 
 Instructions, tool definitions and output schema are stable across ordinary
-reviews. Below the window budget the model input only appends. Retention measures
-the entire assembled request, including instructions, tools and output schema.
-The SDK's model-size watermarks trigger batched removal of whole oldest turns.
-User messages have no independent small input cap: they are reduced only when
-the physical input budget remains exceeded after other history is removed.
-Original task and latest steering records survive that reduction, with omitted
-text recoverable from source events. Active-turn overflow creates a deterministic
-checkpoint containing the current request, authorization and evidence references;
-it does not spend a model call inventing a summary or repeat completed tools.
-Checkpoints containing authorization survive completed-turn eviction and retain
-an original reference if physical capacity later requires folding them.
-Omitted evidence is not proof of absent risk or authorization.
-Steering invalidates pending automatic approvals before settlement.
+reviews. Below the window budget the model input only appends. Retention
+measures the entire assembled request, including instructions, tools and output
+schema. The SDK's model-size watermarks trigger batched removal of whole oldest
+turns. User messages have no independent small input cap: they are reduced only
+when the physical input budget remains exceeded after other history is removed.
+Original task and latest steering records survive that reduction; omitted text
+is explicitly unavailable. An active review that still exceeds model capacity is
+unavailable. Guardian does not summarize or reconstruct its own history, and
+omitted evidence is not proof of absent risk or authorization. Steering
+invalidates pending automatic approvals before settlement.
 
-Most approvals decide from supplied context. Optional `ReadEvents` retrieves a
-canonical original page through the review's pinned checkpoint; `Read` and `Grep`
-use SDK file-tool semantics, and `RunCommand` supports focused local inspection.
-File observations describe current state rather than historical state. These
-tools use a separate resident restricted sandbox, with a fresh temporary working
-directory per review. It shares the main Agent's network intent, not its write
-capabilities or running processes. macOS uses Seatbelt, Linux uses Bubblewrap,
-and Windows uses its restricted-token sandbox. Windows network access remains
-enabled even when disabled intent is supplied; the environment states the actual
-capability and shell. Runtime/ACL state stays outside the temporary command work
-directory. There is no Host fallback, recursive approval or Agent communication.
-Simple decisions do not initialize a sandbox. Large evidence responses retain
-their original content in root-owned temporary files outside command scratch.
-`ReadEvidence` retrieves pages or literal-search matches by opaque reference;
-references survive lane changes and subsequent reviews until root release.
-Display pages adapt to remaining model capacity and fit the SDK's canonical
-result limit, so a page cursor never skips text clipped during persistence.
-A storage failure explicitly
-reports that original recovery is unavailable. Upstream canonical truncation
-cannot be reversed by ReadEvents; existing Runtime artifact paths and file tools
-remain the route to upstream originals when available.
+Most approvals decide from supplied context. Optional `Read` and `Grep` use SDK
+file-tool semantics, and `RunCommand` supports focused inspection, such as
+reading a remote script before execution when its effects matter to user
+constraints. Guardian has no Session-history retrieval tool and does not search
+transcripts. File observations describe current state rather than historical
+state. These tools use a separate resident restricted sandbox, with a fresh
+temporary working directory per review. It shares the main Agent's network
+intent, not its write capabilities or running processes. macOS uses Seatbelt,
+Linux uses Bubblewrap, and Windows uses its restricted-token sandbox. Windows
+network access remains enabled even when disabled intent is supplied; the
+environment states the actual capability and shell. Runtime/ACL state stays
+outside the temporary command work directory. There is no Host fallback,
+recursive approval or Agent communication. Simple decisions do not initialize a
+sandbox. Query results are bounded to the remaining model capacity using the
+SDK's result truncation contract. Truncation is reported in the result; no
+separate evidence files or recovery references are created. Only captured output
+is available; upstream output loss cannot be reversed by the review.
 
 Queueing, evidence, provider retries and at most one format repair share a
 90-second approval deadline from Control admission, shortened by caller
 cancellation. There is no separate evidence time slice, cumulative evidence-byte
-cap or fixed limit on valid model/tool steps. Tool failures, unavailable backends,
-permission errors and tool-local timeouts return error evidence to the Agent.
-They do not poison model admission. Total deadline expiry cancels the review;
-it is distinct from a recoverable tool-local failure. A provider that cannot produce a valid decision
-yields an unavailable approval for that
-action, never a fabricated allow or risk rejection; unrelated task work can
-continue. Callers must not repeatedly resubmit an unavailable approval.
+cap or fixed limit on valid model/tool steps. Tool failures, unavailable
+backends, permission errors and tool-local timeouts return error evidence to the
+Agent. They do not poison model admission. Total deadline expiry cancels the
+review; it is distinct from a recoverable tool-local failure. A provider that
+cannot produce a valid decision yields an unavailable approval for that action,
+never a fabricated allow or risk rejection; unrelated task work can continue.
+Callers must not repeatedly resubmit an unavailable approval.
 
-Owner diagnostics record review outcome, selected option, total/Control-queue/lane-queue/
-preparation/model/tool/setup duration, invocation counts, tool failures, evidence bytes,
-truncation, source checkpoint, context recoveries, request capacity, window rotations, actual Runtime/sandbox reuse and
-reported cache usage. Metrics contain no commands, evidence bodies, credentials or reasoning.
-Guardian's dialogue and tool transcripts stay private and process-local.
+Owner diagnostics record review outcome, selected option, queue, preparation,
+model, tool, setup and total durations, invocation counts, tool failures,
+evidence bytes, truncation, source checkpoint, request capacity, window rotations,
+actual Runtime/sandbox reuse and reported cache usage. Metrics contain no commands,
+evidence bodies, credentials or reasoning. Guardian's dialogue and tool transcripts
+stay private and process-local.

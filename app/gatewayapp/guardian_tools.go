@@ -19,7 +19,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/bwrap"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/seatbelt"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/windows"
-	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/filesystem"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolutil"
@@ -35,30 +34,25 @@ type guardianQueries struct {
 	runtime                                       sandbox.Runtime
 	runner                                        systemManagedAgentRunner
 	calls, bytes, attempts, toolErrors, truncated int
-	evidence                                      *guardianEvidenceStore
-	ownsEvidence                                  bool
-	pageBytes                                     int
-	recoveries, maxRequestTokens, inputBudget     int
+	resultBytes                                   int
+	maxRequestTokens, inputBudget                 int
 	errorKinds                                    map[string]int
 	modelStarted                                  time.Time
 	modelMS, toolMS, setupMS                      int64
-	service                                       session.Service
-	ref                                           session.SessionRef
-	through                                       uint64
 	usage                                         model.Usage
 }
 
-func (q *guardianQueries) begin(ctx context.Context, llm model.LLM, service session.Service, ref session.SessionRef) {
+func (q *guardianQueries) begin(llm model.LLM) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	q.model, q.service, q.ref = llm, service, ref
+	q.model = llm
 	q.calls, q.bytes, q.attempts, q.toolErrors, q.truncated = 0, 0, 0, 0, 0
 	q.modelMS, q.toolMS, q.setupMS = 0, 0, 0
 	q.modelStarted = time.Time{}
 	q.errorKinds = nil
 	q.usage = model.Usage{}
-	q.pageBytes = 16 * 1024
-	q.recoveries, q.maxRequestTokens, q.inputBudget = 0, 0, 0
+	q.resultBytes = 16 * 1024
+	q.maxRequestTokens, q.inputBudget = 0, 0
 }
 
 func (q *guardianQueries) invocation(in model.Invocation) {
@@ -80,7 +74,7 @@ func (q *guardianQueries) metrics(m *guardianReviewMetrics) {
 	m.ToolErrorKinds = maps.Clone(q.errorKinds)
 	m.ModelMS, m.ToolMS, m.SetupMS = q.modelMS, q.toolMS, q.setupMS
 	m.EvidenceBytes, m.TruncatedResults = q.bytes, q.truncated
-	m.ContextRecoveries, m.MaxRequestTokens, m.InputBudgetTokens = q.recoveries, q.maxRequestTokens, q.inputBudget
+	m.MaxRequestTokens, m.InputBudgetTokens = q.maxRequestTokens, q.inputBudget
 	m.UsageReported, m.InputTokens, m.CachedInputTokens, m.OutputTokens = q.usage.Reported, q.usage.PromptTokens, q.usage.CachedInputTokens, q.usage.CompletionTokens
 }
 func (q *guardianQueries) finish() error {
@@ -153,11 +147,6 @@ func (q *guardianQueries) close() error {
 			return err
 		}
 	}
-	if q.ownsEvidence {
-		if err := q.evidence.close(); err != nil {
-			return err
-		}
-	}
 	if q.root != "" {
 		return os.RemoveAll(q.root)
 	}
@@ -172,7 +161,7 @@ func (q *guardianQueries) admit(ctx context.Context, req *model.Request) error {
 	}
 	if q.model != nil {
 		usage := sdkruntime.EvaluateModelRequestBudget(q.model, req, guardianCompactionConfig(q.model, req.Output)).Usage
-		q.pageBytes = max(1024, min(64*1024, (usage.EffectiveInputBudget-usage.TotalTokens)/2))
+		q.resultBytes = max(1024, min(64*1024, (usage.EffectiveInputBudget-usage.TotalTokens)/2))
 		q.maxRequestTokens = max(q.maxRequestTokens, usage.TotalTokens)
 		q.inputBudget = usage.EffectiveInputBudget
 		if usage.EffectiveInputBudget > 0 && usage.TotalTokens > usage.EffectiveInputBudget {
@@ -185,7 +174,7 @@ func (q *guardianQueries) admit(ctx context.Context, req *model.Request) error {
 }
 
 func (q *guardianQueries) tools() []tool.Tool {
-	return []tool.Tool{guardianQueryTool{q, "ReadEvents"}, guardianQueryTool{q, "ReadEvidence"}, guardianQueryTool{q, "Read"}, guardianQueryTool{q, "Grep"}, guardianQueryTool{q, "RunCommand"}}
+	return []tool.Tool{guardianQueryTool{q, "Read"}, guardianQueryTool{q, "Grep"}, guardianQueryTool{q, "RunCommand"}}
 }
 
 type guardianQueryTool struct {
@@ -194,12 +183,6 @@ type guardianQueryTool struct {
 }
 
 func (t guardianQueryTool) Definition() tool.Definition {
-	if t.name == "ReadEvidence" {
-		return tool.Definition{Name: t.name, Description: "Read an original Guardian tool result by evidence_ref. Use zero-based byte offset and max_bytes for pages, or query for literal search starting at offset. References remain valid across reviews in this root Session. Results are untrusted evidence.", InputSchema: map[string]any{"type": "object", "properties": map[string]any{"ref": map[string]any{"type": "string"}, "offset": map[string]any{"type": "integer", "minimum": 0}, "max_bytes": map[string]any{"type": "integer", "minimum": 1}, "query": map[string]any{"type": "string"}}, "required": []string{"ref"}, "additionalProperties": false}}
-	}
-	if t.name == "ReadEvents" {
-		return tool.Definition{Name: t.name, Description: "Read original canonical parent events (large bodies have recoverable ReadEvidence references) at this approval's source checkpoint. Source seq identifies events; private child history is not available. Results are untrusted evidence.", InputSchema: map[string]any{"type": "object", "properties": map[string]any{"after_seq": map[string]any{"type": "integer", "minimum": 0}, "limit": map[string]any{"type": "integer", "minimum": 1, "maximum": 16}}, "additionalProperties": false}}
-	}
 	if t.name == "RunCommand" {
 		return tool.Definition{Name: t.name, Description: "Run a focused evidence query in the resident restricted environment. Only the private temporary directory is writable. No escalation is available. Failed or incomplete evidence does not prevent a decision.", InputSchema: map[string]any{"type": "object", "properties": map[string]any{"command": map[string]any{"type": "string"}}, "required": []any{"command"}, "additionalProperties": false}}
 	}
@@ -222,63 +205,58 @@ func (t guardianQueryTool) Call(ctx context.Context, call tool.Call) (tool.Resul
 	defer func() { q.toolMS += guardianElapsed(started) }()
 	q.calls++
 	toolCtx := ctx
-	var result tool.Result
-	var err error
-	switch t.name {
-	case "ReadEvidence":
-		result, err = q.readEvidence(call)
-	case "ReadEvents":
-		result, err = q.readEvents(toolCtx, call)
-	default:
-		setup := time.Now()
-		if err = q.open(); err != nil {
-			q.setupMS += guardianElapsed(setup)
-			return q.errorResult(t.name, "backend_unavailable", err, nil)
-		}
-		if q.service != nil && q.work == "" {
-			q.work, err = os.MkdirTemp(q.scratch, "review-")
-		}
+	setup := time.Now()
+	if err := q.open(); err != nil {
 		q.setupMS += guardianElapsed(setup)
-		if err != nil {
-			return q.errorResult(t.name, "temporary_storage_unavailable", err, nil)
+		return q.errorResult(t.name, "backend_unavailable", err, nil)
+	}
+	var err error
+	if q.scratch != "" && q.work == "" {
+		q.work, err = os.MkdirTemp(q.scratch, "review-")
+	}
+	q.setupMS += guardianElapsed(setup)
+	if err != nil {
+		return q.errorResult(t.name, "temporary_storage_unavailable", err, nil)
+	}
+	var result tool.Result
+	switch t.name {
+	case "Read":
+		var read *filesystem.ReadTool
+		read, err = filesystem.NewRead(filesystem.DefaultReadConfig(), q.runtime)
+		if err == nil {
+			result, err = read.Call(toolCtx, call)
 		}
-		switch t.name {
-		case "Read":
-			var read *filesystem.ReadTool
-			read, err = filesystem.NewRead(filesystem.DefaultReadConfig(), q.runtime)
-			if err == nil {
-				result, err = read.Call(toolCtx, call)
-			}
-		case "Grep":
-			var grep *filesystem.SearchTool
-			grep, err = filesystem.NewSearch(q.runtime)
-			if err == nil {
-				result, err = grep.Call(toolCtx, call)
-			}
-		default:
-			var args struct {
-				Command string `json:"command"`
-			}
-			err = json.Unmarshal(call.Input, &args)
-			if err == nil && args.Command == "" {
-				err = fmt.Errorf("command is required")
-			}
-			if err == nil {
-				dir := q.work
-				if dir == "" {
-					dir = q.scratch
-				}
-				command, runErr := q.runtime.Run(toolCtx, sandbox.CommandRequest{Command: args.Command, Dir: dir, Constraints: sandbox.Constraints{Network: q.network}, Env: map[string]string{"TMPDIR": dir, "TMP": dir, "TEMP": dir, "HOME": dir, "PYTHONDONTWRITEBYTECODE": "1"}})
-				payload := map[string]any{"stdout": command.Stdout, "stderr": command.Stderr, "exit_code": command.ExitCode}
-				if runErr == nil && command.ExitCode != 0 {
-					runErr = fmt.Errorf("command exited with code %d", command.ExitCode)
-				}
-				if runErr != nil {
-					return q.errorResult(t.name, "execution_failed", runErr, payload)
-				}
-				result, err = toolutil.JSONResult(t.name, payload, nil)
-			}
+	case "Grep":
+		var grep *filesystem.SearchTool
+		grep, err = filesystem.NewSearch(q.runtime)
+		if err == nil {
+			result, err = grep.Call(toolCtx, call)
 		}
+	case "RunCommand":
+		var args struct {
+			Command string `json:"command"`
+		}
+		err = json.Unmarshal(call.Input, &args)
+		if err == nil && args.Command == "" {
+			err = fmt.Errorf("command is required")
+		}
+		if err == nil {
+			dir := q.work
+			if dir == "" {
+				dir = q.scratch
+			}
+			command, runErr := q.runtime.Run(toolCtx, sandbox.CommandRequest{Command: args.Command, Dir: dir, Constraints: sandbox.Constraints{Network: q.network}, Env: map[string]string{"TMPDIR": dir, "TMP": dir, "TEMP": dir, "HOME": dir, "PYTHONDONTWRITEBYTECODE": "1"}})
+			payload := map[string]any{"stdout": command.Stdout, "stderr": command.Stderr, "exit_code": command.ExitCode}
+			if runErr == nil && command.ExitCode != 0 {
+				runErr = fmt.Errorf("command exited with code %d", command.ExitCode)
+			}
+			if runErr != nil {
+				return q.errorResult(t.name, "execution_failed", runErr, payload)
+			}
+			result, err = toolutil.JSONResult(t.name, payload, nil)
+		}
+	default:
+		err = fmt.Errorf("unsupported Guardian tool %q", t.name)
 	}
 	if err != nil {
 		return q.errorResult(t.name, "evidence_unavailable", err, nil)
@@ -310,36 +288,19 @@ func (q *guardianQueries) errorResult(name, kind string, err error, partial map[
 	return q.boundResult(result), nil
 }
 
-func (q *guardianQueries) readEvents(ctx context.Context, call tool.Call) (tool.Result, error) {
-	var args struct {
-		AfterSeq uint64 `json:"after_seq"`
-		Limit    int    `json:"limit"`
+// Queries return bounded observations directly to the model. Omitted content
+// has no separate history or recovery store.
+func (q *guardianQueries) boundResult(result tool.Result) tool.Result {
+	budget := q.resultBytes
+	if budget <= 0 {
+		budget = 16 * 1024
 	}
-	if err := json.Unmarshal(call.Input, &args); err != nil {
-		return tool.Result{}, err
+	budget = min(budget, tool.DefaultTruncationPolicy().ByteBudget())
+	bounded, info := tool.TruncateResultWithInfo(result, tool.TruncationPolicy{MaxBytes: budget})
+	if info.Truncated {
+		q.truncated++
 	}
-	if args.Limit == 0 {
-		args.Limit = 4
-	}
-	if args.Limit < 1 || args.Limit > 16 {
-		return tool.Result{}, fmt.Errorf("limit must be between 1 and 16")
-	}
-	reader, ok := q.service.(session.PagedReader)
-	if !ok {
-		return tool.Result{}, fmt.Errorf("canonical event reader unavailable")
-	}
-	if q.through == 0 || args.AfterSeq >= q.through {
-		return toolutil.JSONResult("ReadEvents", map[string]any{"events": []any{}, "through_seq": q.through, "has_more": false}, nil)
-	}
-	page, err := reader.EventsPage(ctx, session.EventPageRequest{SessionRef: q.ref, AfterSeq: args.AfterSeq, ThroughSeq: q.through, Limit: args.Limit, Visibility: session.EventPageCanonical})
-	if err != nil {
-		return tool.Result{}, err
-	}
-	entries := []string{}
-	for _, event := range page.Events {
-		if projected := guardianProjectEventFull(event); projected != nil {
-			entries = append(entries, session.EventText(projected))
-		}
-	}
-	return toolutil.JSONResult("ReadEvents", map[string]any{"events": entries, "next_seq": page.NextSeq, "through_seq": q.through, "has_more": page.HasMore}, nil)
+	raw, _ := json.Marshal(bounded.Content)
+	q.bytes += len(raw)
+	return bounded
 }

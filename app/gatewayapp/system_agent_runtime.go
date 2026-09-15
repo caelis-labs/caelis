@@ -261,15 +261,7 @@ func (r *systemManagedAgentRuntime) Run(ctx context.Context, req systemManagedAg
 	}
 	var compactor compact.Engine
 	if plan.Purpose == systemManagedAgentPurposeApprovalReview {
-		guardian := guardianTurnCompactor{output: req.Output}
-		for _, t := range req.Tools {
-			if query, ok := t.(guardianQueryTool); ok {
-				guardian.evidence = query.owner.evidenceStore()
-				guardian.queries = query.owner
-				break
-			}
-		}
-		compactor = guardian
+		compactor = guardianTurnCompactor{}
 	}
 	var core *sdkruntime.Runtime
 	if previous != nil {

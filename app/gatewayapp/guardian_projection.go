@@ -69,33 +69,14 @@ func (p *guardianProjection) read(ctx context.Context, service session.Service, 
 // guardianProjectEvent is independent of the pending action, paging and review
 // completion. Calls and late results retain their distinct source identities.
 func guardianProjectEvent(e *session.Event) *session.Event {
-	return guardianProjectSource(e, false)
-}
-
-func guardianProjectEventFull(e *session.Event) *session.Event {
-	return guardianProjectSource(e, true)
-}
-
-func guardianProjectSource(e *session.Event, original bool) *session.Event {
-	render := guardianEvidenceJSON
-	fold := guardianFold
-	if original {
-		render = func(value any) string { raw, _ := json.Marshal(value); return string(raw) }
-		fold = func(text string, _ int) string { return text }
-	}
 	if e == nil || !session.IsCanonicalHistoryEvent(e) {
 		return nil
 	}
 	if e.Meta[guardianSourceProjection] == true {
 		return session.CloneEvent(e)
 	}
-	// The private conversation has one pinned parent Session. Its seq is enough
-	// to address a source record in routine input; full identity remains on the
-	// projected Event and is shown when ReadEvents retrieves the original.
+	// Sequence numbers identify records within the pinned parent Session.
 	identity := fmt.Sprintf("seq=%d", e.Seq)
-	if original {
-		identity = fmt.Sprintf("session=%s seq=%d event=%s", e.SessionID, e.Seq, e.ID)
-	}
 	var text string
 	user := session.EventTypeOf(e) == session.EventTypeUser && (e.Actor.Kind == session.ActorKindUser || e.Actor.Kind == "")
 	if user {
@@ -105,20 +86,20 @@ func guardianProjectSource(e *session.Event, original bool) *session.Event {
 		if session.EventTypeOf(e) == session.EventTypeToolResult {
 			kind, value = "Tool result", e.Tool.Output
 		}
-		text = fmt.Sprintf("%s [%s tool_call_id=%s tool=%s status=%s]\n%s", kind, identity, e.Tool.ID, e.Tool.Name, e.Tool.Status, render(value))
+		text = fmt.Sprintf("%s [%s tool_call_id=%s tool=%s status=%s]\n%s", kind, identity, e.Tool.ID, e.Tool.Name, e.Tool.Status, guardianEvidenceJSON(value))
 		if kind == "Tool result" {
 			facts := map[string]any{}
-			for _, key := range []string{"status", "error", "error_kind", "exit_code", "is_error", "truncated"} {
+			for _, key := range []string{"state", "status", "error", "error_code", "error_kind", "exit_code", "is_error", "truncated", "stderr"} {
 				if v, ok := value[key]; ok {
 					facts[key] = v
 				}
 			}
 			if len(facts) > 0 {
-				text = fmt.Sprintf("Result status fields (untrusted evidence): %s\n", render(facts)) + text
+				text = fmt.Sprintf("Result diagnostics (untrusted evidence): %s\n", guardianEvidenceJSON(facts)) + text
 			}
 		}
 		if len(value) == 0 && kind == "Tool result" {
-			text += "\n" + fold(guardianVisibleText(e), 2048)
+			text += "\n" + guardianFold(guardianVisibleText(e), 2048)
 		}
 	} else {
 		return nil
@@ -201,7 +182,7 @@ func guardianEvidenceJSON(value any) string {
 func guardianEvidenceKeyLess(a, b string) bool {
 	priority := func(key string) bool {
 		switch key {
-		case "error", "error_kind", "exit_code", "status", "is_error", "truncated", "stderr":
+		case "state", "status", "error", "error_code", "error_kind", "exit_code", "is_error", "truncated", "stderr", "stdout", "result":
 			return true
 		default:
 			return false

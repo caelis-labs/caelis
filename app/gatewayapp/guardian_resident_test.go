@@ -68,7 +68,7 @@ func (m *guardianFaultDecisionModel) Generate(_ context.Context, req *model.Requ
 					yield(nil, errors.New("failed evidence lost error status"))
 					return
 				}
-				if m.fault == "large" && !strings.Contains(string(raw), "truncated") {
+				if m.fault == "large" && !strings.Contains(string(raw), "truncated") && !strings.Contains(string(raw), "omitted") {
 					yield(nil, errors.New("large output lost truncation fact"))
 					return
 				}

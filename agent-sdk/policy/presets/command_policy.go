@@ -231,17 +231,7 @@ func windowsRecursiveDeleteTargets(command string) []string {
 	fields := shellishFields(command)
 	var out []string
 	for _, i := range commandStartIndexes(fields) {
-		base := executableBase(fields[i])
-		switch base {
-		case "remove-item", "remove-item.exe", "ri", "ri.exe":
-			if !commandSegmentHasFlag(fields[i+1:], "-recurse", "-recursive") {
-				continue
-			}
-			out = append(out, commandSegmentPathOperands(fields[i+1:])...)
-		case "del", "del.exe", "erase", "erase.exe", "rd", "rd.exe", "rmdir", "rmdir.exe":
-			if !commandSegmentHasSlashFlag(fields[i+1:], "/s") {
-				continue
-			}
+		if isRecursiveWindowsDelete(fields[i], fields[i+1:]) {
 			out = append(out, commandSegmentPathOperands(fields[i+1:])...)
 		}
 	}

@@ -32,7 +32,7 @@ func TestGuardianFileToolsReuseBuiltinDefinitionsAndResults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	q := &guardianQueries{runtime: rt, pageBytes: 64 * 1024}
+	q := &guardianQueries{runtime: rt, resultBytes: 64 * 1024}
 	t.Cleanup(func() { _ = q.close() })
 	read, err := filesystem.NewRead(filesystem.DefaultReadConfig(), rt)
 	if err != nil {
@@ -107,7 +107,7 @@ func TestGuardianNativeTemporaryWritesAndReadOnlyEvidence(t *testing.T) {
 		return result
 	}
 	call("RunCommand", map[string]any{"command": guardianNativeTestCommand("printf evidence > \"$TMPDIR/query.txt\"; cat \"$TMPDIR/query.txt\"", "Set-Content -LiteralPath \"$env:TMPDIR/query.txt\" -Value evidence -NoNewline; Get-Content -LiteralPath \"$env:TMPDIR/query.txt\"")})
-	if raw, err := os.ReadFile(filepath.Join(q.scratch, "query.txt")); err != nil || string(raw) != "evidence" {
+	if raw, err := os.ReadFile(filepath.Join(q.work, "query.txt")); err != nil || string(raw) != "evidence" {
 		t.Fatalf("temporary write failed: %q %v", raw, err)
 	}
 	missing, _ := json.Marshal(map[string]any{"path": outside + ".missing"})
@@ -255,6 +255,24 @@ func TestGuardianEvidenceVolumeDoesNotBlockContinuation(t *testing.T) {
 	}
 	if q.attempts != 12 {
 		t.Fatalf("attempts=%d", q.attempts)
+	}
+}
+
+func TestGuardianBoundedResultReportsMissingContentAndPreservesError(t *testing.T) {
+	for _, failed := range []bool{false, true} {
+		q := &guardianQueries{resultBytes: 4096}
+		raw, err := json.Marshal(map[string]any{"stdout": strings.Repeat("large observed output\n", 10000), "exit_code": 7, "stderr": "inspection diagnostic"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		result := q.boundResult(tool.Result{ID: "inspection", Name: "RunCommand", IsError: failed, Content: []model.Part{model.NewJSONPart(raw)}})
+		if result.ID != "inspection" || result.IsError != failed || q.truncated != 1 || tool.ResultNeedsTruncation(result, tool.TruncationPolicy{MaxBytes: q.resultBytes}) {
+			t.Fatalf("bounded result lost identity, outcome or budget: %+v", result)
+		}
+		encoded, _ := json.Marshal(result.Content)
+		if (!strings.Contains(string(encoded), "truncated") && !strings.Contains(string(encoded), "omitted")) || strings.Contains(string(encoded), "evidence_ref") {
+			t.Fatalf("missing content was not reported directly: %s", encoded)
+		}
 	}
 }
 

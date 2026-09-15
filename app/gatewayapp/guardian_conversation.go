@@ -277,17 +277,7 @@ func (m *guardianConversationManager) commitTurn(req guardianConversationCommit)
 			}
 		}
 		if start < 0 {
-			// Active-turn capacity recovery replaces the exact input with a
-			// checkpoint containing it. Persist that recovered model prefix.
-			hasCheckpoint := false
-			for _, e := range req.ContextEvents {
-				hasCheckpoint = hasCheckpoint || session.EventTypeOf(e) == session.EventTypeCompact
-			}
-			if !hasCheckpoint {
-				return false, false, fmt.Errorf("guardian context lost current request")
-			}
-			start = 0
-			req.PrefixEvents = nil
+			return false, false, fmt.Errorf("guardian context lost current request")
 		}
 		turn = session.CloneEvents(req.ContextEvents[start:])
 	} else {

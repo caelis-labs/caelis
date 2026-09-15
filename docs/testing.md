@@ -92,12 +92,12 @@ latency and cache usage are reported for comparison under the same provider and
 settings, not enforced as universal provider speed limits. Slow native evidence
 and recoverable tool failures must still permit a final judgment for both allowed
 and rejected actions; no incorrect allow or deny is accepted. Command E2E verifies
-real execution effects separately. Add `TestGuardianMultiEvidenceE2E` to the test
-selector for six necessary searches in the middle of a large manifest and a real
-provider's final decision. It also runs deterministically without the live flag.
-Deterministic availability tests cover 25/60/89-second valid responses, total
-deadline expiry, shared queue budgets, late producer cleanup, original-result
-pagination, long user-message constraints and active context-overflow recovery.
+real execution effects separately. Deterministic context tests cover successive
+approvals, user steering, late results and diagnostic output from successful
+wrappers without history lookup or sandbox setup. Availability tests cover
+25/60/89-second valid responses, total deadline expiry, shared queue budgets,
+late producer cleanup, long user-message constraints and unavailable active
+context overflow without repeated tool execution.
 Provider latency/cache counters are observations,
 not deterministic unit-test assertions or guarantees from the Harness.
 

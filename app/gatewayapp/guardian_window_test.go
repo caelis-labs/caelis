@@ -140,7 +140,7 @@ func TestGuardianProviderPrefixAndStableSchema(t *testing.T) {
 		bb, _ := json.Marshal(b.Messages)
 		t.Fatalf("message prefix changed:\n%s\n%s", aa, bb)
 	}
-	if len(a.Tools) != 5 {
+	if len(a.Tools) != 3 {
 		t.Fatalf("tools=%d", len(a.Tools))
 	}
 	text := ""
@@ -152,7 +152,7 @@ func TestGuardianProviderPrefixAndStableSchema(t *testing.T) {
 	}
 }
 func TestGuardianPolicyOptionalEvidenceAndNetwork(t *testing.T) {
-	for _, text := range []string{"Additional retrieval and evidence gathering are optional", "existing context is insufficient", "Only temporary directories are writable", "network policy is inherited from the main Agent"} {
+	for _, text := range []string{"Additional retrieval and evidence gathering are optional", "Do not search Session transcripts or reconstruct task history", "Only temporary directories are writable", "network policy is inherited from the main Agent"} {
 		if !strings.Contains(guardianPolicyPrompt(), text) {
 			t.Fatalf("policy missing %q", text)
 		}
