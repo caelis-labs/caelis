@@ -235,7 +235,9 @@ invalid claims never gain that authority. No late decision can authorize executi
 The canonical Session log is the only source history. A forward paged reader
 captures a source checkpoint and projects user messages, tool calls and tool
 results independently of the pending approval. Source Session, event ID and Seq
-identify each record; a late result never rewrites its call. Tool previews bound
+identify each projected record; routine input uses the root-scoped Seq instead
+of repeating full identities, which remain available through ReadEvents. A late
+result never rewrites its call. Tool previews bound
 arguments and output while retaining status and source references. User messages
 are not individually truncated on ingestion. The disposable projection cache
 has a 16 MiB retention allowance for users and for other evidence; eviction does

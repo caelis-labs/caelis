@@ -89,16 +89,23 @@ func guardianProjectSource(e *session.Event, original bool) *session.Event {
 	if e.Meta[guardianSourceProjection] == true {
 		return session.CloneEvent(e)
 	}
+	// The private conversation has one pinned parent Session. Its seq is enough
+	// to address a source record in routine input; full identity remains on the
+	// projected Event and is shown when ReadEvents retrieves the original.
+	identity := fmt.Sprintf("seq=%d", e.Seq)
+	if original {
+		identity = fmt.Sprintf("session=%s seq=%d event=%s", e.SessionID, e.Seq, e.ID)
+	}
 	var text string
 	user := session.EventTypeOf(e) == session.EventTypeUser && (e.Actor.Kind == session.ActorKindUser || e.Actor.Kind == "")
 	if user {
-		text = fmt.Sprintf("User message [session=%s seq=%d event=%s]:\n%s", e.SessionID, e.Seq, e.ID, guardianVisibleText(e))
+		text = fmt.Sprintf("User message [%s]:\n%s", identity, guardianVisibleText(e))
 	} else if (session.EventTypeOf(e) == session.EventTypeToolCall || session.EventTypeOf(e) == session.EventTypeToolResult) && session.IsMainInvocationVisibleEvent(e) && e.Tool != nil {
 		kind, value := "Operation", e.Tool.Input
 		if session.EventTypeOf(e) == session.EventTypeToolResult {
 			kind, value = "Tool result", e.Tool.Output
 		}
-		text = fmt.Sprintf("%s [session=%s seq=%d event=%s tool_call_id=%s tool=%s status=%s]\n%s", kind, e.SessionID, e.Seq, e.ID, e.Tool.ID, e.Tool.Name, e.Tool.Status, render(value))
+		text = fmt.Sprintf("%s [%s tool_call_id=%s tool=%s status=%s]\n%s", kind, identity, e.Tool.ID, e.Tool.Name, e.Tool.Status, render(value))
 		if kind == "Tool result" {
 			facts := map[string]any{}
 			for _, key := range []string{"status", "error", "error_kind", "exit_code", "is_error", "truncated"} {

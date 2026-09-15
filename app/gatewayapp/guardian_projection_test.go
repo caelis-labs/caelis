@@ -19,6 +19,29 @@ type guardianPagedOnlyStore struct {
 	pages int
 }
 
+func TestGuardianCompactSourceAddressRetainsOriginalIdentity(t *testing.T) {
+	for _, kind := range []session.EventType{session.EventTypeUser, session.EventTypeToolCall, session.EventTypeToolResult} {
+		e := guardianSource(17, kind, "Preserve the original ledger.")
+		e.SessionID, e.ID = "parent-session-identity", "canonical-event-identity"
+		if kind == session.EventTypeToolResult {
+			e.Tool.Output = map[string]any{"stdout": "middle evidence fact", "exit_code": 7}
+		}
+		preview, original := guardianProjectEvent(e), guardianProjectEventFull(e)
+		if preview.SessionID != e.SessionID || preview.ID != e.ID || preview.Seq != e.Seq {
+			t.Fatalf("%s lost projection identity", kind)
+		}
+		text := session.EventText(preview)
+		if !strings.Contains(text, "seq=17") || strings.Contains(text, e.SessionID) || strings.Contains(text, e.ID) {
+			t.Fatalf("%s routine address is missing or repeats full identity", kind)
+		}
+		for _, identity := range []string{e.SessionID, e.ID, "seq=17"} {
+			if !strings.Contains(session.EventText(original), identity) {
+				t.Fatalf("%s original lost %s", kind, identity)
+			}
+		}
+	}
+}
+
 func (s *guardianPagedOnlyStore) Events(context.Context, session.EventsRequest) ([]*session.Event, error) {
 	return nil, fmt.Errorf("full history read is forbidden in this test")
 }
