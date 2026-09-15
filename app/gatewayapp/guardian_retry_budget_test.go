@@ -57,6 +57,11 @@ func TestGuardianFormatRetrySharesDeadlineAndPreservesCallerDeadline(t *testing.
 				llm := &guardianRetryBudgetModel{approvalReviewerFakeModel: &approvalReviewerFakeModel{responses: []string{`{"outcome":`, `{"option_id":"allow_once"}`}}}
 				reviewer := newGuardianApprovalApprover(service)
 				result, err := reviewer.Decide(ctx, approvalReviewerTestRequest(active, llm, "inspect", nil))
+				// Deadline settlement can precede producer cleanup. Join before
+				// reading the model's recorded attempts, even with fake time.
+				if closeErr := reviewer.Close(); closeErr != nil {
+					t.Fatal(closeErr)
+				}
 				if len(llm.remaining) != 2 {
 					t.Fatalf("attempts=%d error=%v", len(llm.remaining), err)
 				}
