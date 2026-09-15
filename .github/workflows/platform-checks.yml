@@ -52,4 +52,3 @@ jobs:
         run: govulncheck -mode=source -scan=symbol ./...
       - name: Guardian and model invocation concurrency
         run: go test -race -count=1 -timeout=5m ./app/gatewayapp ./agent-sdk/model ./agent-sdk/session/... ./internal/kernel -run 'TestGuardian|TestApprovalReviewer|TestToolAvailability|TestInvocation|TestAutoReview|Test.*Fence|Test.*MutationGuard'
-
