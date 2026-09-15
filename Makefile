@@ -92,11 +92,10 @@ client-protocol-check: cache-dirs
 
 quality: lint test build
 
-ifeq ($(OS),Windows_NT)
-commit-check: windows-check
-else
-commit-check: quality
-endif
+# Run owning tests while changing code; the PR owns the full quality gate.
+commit-check: fmt-check
+	git diff --check
+	git diff --cached --check
 
 windows-check: cache-dirs
 	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) "$(BASH)" ./scripts/windows_check.sh

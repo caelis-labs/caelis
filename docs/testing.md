@@ -8,40 +8,60 @@ Run before committing:
 make commit-check
 ```
 
-On Windows it runs `make windows-check`; other platforms run configured lint,
-the full untagged Go test suite, and build. `make quality` retains that full gate
-on every platform. Lint includes `gofmt` and `govet`, so `make test` disables Go's
-duplicate implicit vet pass. Local and sandboxed Make targets use the stable
-repository-local `.tmp/cache` tree by default. CI retains its standard cache paths
-for runner cache integration. Set `CACHE_ROOT=/path/to/cache` to select another persistent
-location, or set it to an empty value locally to use the standard caches.
+`make commit-check` checks Go formatting and staged/unstaged diff whitespace on
+all platforms. Run focused owning tests while changing code, plus the relevant
+checks below. Full lint, tests, and build belong to PR CI; `make quality` remains
+available when a full local run is useful. Do not repeat unchanged passing tests
+just to commit or push. Lint includes `govet`, so `make test` disables Go's
+implicit vet pass and belongs with lint in the full gate.
 
-PR CI runs lint, the full suite, and build on Linux. The required
-`windows-host-open` check runs `make windows-check` on native Windows. It covers
-process trees, ConPTY, sandboxing, Windows paths, file locks, atomic replacement,
-WAL recovery, Host persistence and replacement, client reconnection, updater
-command handoff, and clipboard behavior. Small platform owners run
-their full tests; large Runtime, Session, Control, Gateway, CLI, and TUI packages
-use selectors in `scripts/windows_check.sh` that fail if no tests match.
-Implicit vet remains enabled for Windows source. Tests use at most two packages
-concurrently with a five-minute package timeout. A build of all packages and
-embedded Memory Open use `CGO_ENABLED=0`, matching the release configuration.
-Run additional owning tests for the changed contract; the focused gate does not
-replace Linux's general coverage or change-specific Windows validation.
+Local and sandboxed Make targets use the stable repository-local `.tmp/cache`
+tree by default. CI uses standard cache paths for runner cache integration.
+Set `CACHE_ROOT=/path/to/cache` to select another persistent location, or set it
+to an empty value locally to use standard caches.
 
-## Release PR CI approval
+## PR checks
 
-Ordinary PRs run quality checks automatically. PRs from this repository's
-`release-please--branches--main` branch first wait for approval of the
-`release-ci` environment. Approving that run starts the same complete Linux,
-Windows, and vulnerability checks; release metadata changes do not exempt a PR
-from them. See [Release](release.md#approve-release-ci) for the approval steps.
+The `quality` workflow runs only on PRs targeting `main`, checks GitHub's PR
+merge ref, and cancels superseded runs for the same PR. Its `changes` job
+classifies the complete Git diff against the PR base, regardless of the author
+or branch name:
 
-Until approval, the three required checks remain pending. Rejection or
-cancellation of the approval makes the required jobs fail before checkout,
-rather than reporting skipped quality checks as success. Each PR update starts
-a new run requiring approval and cancels the superseded run. Scheduled
-vulnerability checks continue without approval.
+| Changed files | Checks |
+| --- | --- |
+| Root README files, `AGENTS.md`, `agent-sdk/README.md`, `docs/**/*.md` | Maintained Markdown links |
+| `.release-please-manifest.json`, `CHANGELOG.md` | Valid root version, increasing version when changed, matching first changelog heading, regular file types |
+| Any other path, or executable/symlink prose | Linux lint, full untagged tests, build, reachable-vulnerability scan |
+| Mixed changes | All applicable checks above |
+
+Embedded prompts, test fixtures, Go dependencies, scripts, and workflow changes
+receive full checks. Release-only PRs need neither a Go toolchain nor manual CI
+approval. The single required `quality` result fails if classification, metadata
+validation, documentation validation, or any selected job fails or is cancelled.
+Only jobs outside the selected scope may be skipped.
+
+The branch rule does not require chasing the latest `main`. Advancing `main`
+alone does not force another PR update and rerun. Checks prove the merge tree
+at the time of the run; later combinations with newly merged changes are not
+automatically retested. Resolve actual conflicts and rerun checks on any changed
+candidate. Merging a PR does not trigger another full quality run.
+
+## Daily and manual platform checks
+
+`platform-checks.yml` runs daily on `main` and can be started from Actions with
+**Run workflow** for a selected branch. It runs reachable-vulnerability scans,
+Guardian/model invocation race tests, and `make windows-check` on native Windows.
+These jobs are outside the ordinary PR merge gate; platform or race regressions
+can therefore be discovered after merging. Run the workflow before merging when
+a change specifically needs native platform evidence.
+
+The Windows gate covers process trees, ConPTY, sandboxing, paths, file locks,
+atomic replacement, WAL recovery, Host persistence and replacement, client
+reconnection, updater handoff, and clipboard behavior. Small platform owners run
+their full tests; larger packages use selectors in `scripts/windows_check.sh`
+that fail if no tests match. Implicit vet remains enabled. Tests use at most two
+packages concurrently with a five-minute package timeout. A build of all packages
+and embedded Memory Open use `CGO_ENABLED=0`, matching the release configuration.
 
 ## Dependency update CI
 
@@ -51,7 +71,7 @@ To bound routine CI volume, `.github/dependabot.yml` checks weekly and permits
 one open version-update PR per ecosystem (Go modules and GitHub Actions).
 Minor and patch updates are grouped within each ecosystem; major updates stay
 in individual PRs and share that ecosystem's limit. Security updates are not
-subject to the version-update limit and are not delayed for CI approval.
+subject to the version-update limit.
 The limit controls new PR creation, not CI reruns or already-open PRs.
 
 ## Change-scoped checks
