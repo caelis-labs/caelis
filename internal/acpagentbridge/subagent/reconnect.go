@@ -234,7 +234,7 @@ type childPendingConfiguration struct {
 
 func (r *Runner) applyChildConfiguration(ctx context.Context, run *childRun) error {
 	run.mu.RLock()
-	pending, spawn, sessionID := run.pendingConfiguration, run.spawn, run.anchor.SessionID
+	pending, sessionID := run.pendingConfiguration, run.anchor.SessionID
 	run.mu.RUnlock()
 	if pending == nil {
 		return nil
@@ -245,7 +245,7 @@ func (r *Runner) applyChildConfiguration(ctx context.Context, run *childRun) err
 	options := pending.config.SessionOptions
 	if r.sessionPreparer != nil {
 		var err error
-		options, err = r.sessionPreparer(ctx, spawn, sessionID, pending.config)
+		options, err = r.sessionPreparer(ctx, sessionID, pending.config)
 		if err != nil {
 			return err
 		}
