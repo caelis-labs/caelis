@@ -10,8 +10,6 @@ const (
 	pendingPromptQueued pendingPromptState = iota
 	pendingPromptDispatchScheduled
 	pendingPromptDispatched
-	pendingPromptAwaitingActiveDisplay
-	pendingPromptRendered
 )
 
 type pendingPrompt struct {
@@ -49,11 +47,9 @@ func (q *pendingPromptQueue) enqueue(opts pendingPromptEnqueueOptions) {
 	})
 }
 
+// matchGatewayEcho correlates accepted input only with requests already sent.
+// Equal text in a queued or scheduled request is not evidence of its acceptance.
 func (q *pendingPromptQueue) matchGatewayEcho(texts ...string) (pendingPrompt, bool) {
-	return q.removeMatching(texts...)
-}
-
-func (q *pendingPromptQueue) removeMatching(texts ...string) (pendingPrompt, bool) {
 	if q == nil || len(*q) == 0 {
 		return pendingPrompt{}, false
 	}
@@ -67,7 +63,7 @@ func (q *pendingPromptQueue) removeMatching(texts ...string) (pendingPrompt, boo
 		return pendingPrompt{}, false
 	}
 	for i, pending := range *q {
-		if pending.dispatchScheduled() {
+		if pending.state != pendingPromptDispatched {
 			continue
 		}
 		for _, needle := range needles {
@@ -84,7 +80,7 @@ func (q *pendingPromptQueue) removeSubmission(submission Submission) (pendingPro
 	if submission.localID != 0 {
 		return q.removeLocalID(submission.localID)
 	}
-	return q.removeMatching(submission.Text, submission.DisplayText)
+	return q.matchGatewayEcho(submission.Text, submission.DisplayText)
 }
 
 func (q *pendingPromptQueue) removeLocalID(localID uint64) (pendingPrompt, bool) {
@@ -101,7 +97,7 @@ func (q *pendingPromptQueue) removeLocalID(localID uint64) (pendingPrompt, bool)
 	return pendingPrompt{}, false
 }
 
-func (q *pendingPromptQueue) markDispatched(localID uint64, deferDisplay bool, mode SubmissionMode) bool {
+func (q *pendingPromptQueue) markDispatched(localID uint64) bool {
 	if q == nil || localID == 0 {
 		return false
 	}
@@ -111,9 +107,6 @@ func (q *pendingPromptQueue) markDispatched(localID uint64, deferDisplay bool, m
 			continue
 		}
 		pending.state = pendingPromptDispatched
-		if !deferDisplay && mode == SubmissionModeActiveTurn {
-			pending.state = pendingPromptAwaitingActiveDisplay
-		}
 		return true
 	}
 	return false
@@ -134,23 +127,14 @@ func (q *pendingPromptQueue) takeScheduled(localID uint64) (pendingPrompt, bool)
 }
 
 func (q pendingPromptQueue) visibleCount() int {
-	count := 0
-	for _, pending := range q {
-		if pending.isVisiblePending() {
-			count++
-		}
-	}
-	return count
+	return len(q)
 }
 
 func (q pendingPromptQueue) nextVisible() (pendingPrompt, bool) {
-	i, ok := q.nextIndex(func(p pendingPrompt) bool {
-		return p.isVisiblePending()
-	})
-	if !ok {
+	if len(q) == 0 {
 		return pendingPrompt{}, false
 	}
-	return q[i], true
+	return q[0], true
 }
 
 func (q pendingPromptQueue) nextIndex(match func(pendingPrompt) bool) (int, bool) {
@@ -165,22 +149,6 @@ func (q pendingPromptQueue) nextIndex(match func(pendingPrompt) bool) (int, bool
 	return -1, false
 }
 
-func (q *pendingPromptQueue) acceptedActiveDisplay() (pendingPrompt, bool) {
-	if q == nil {
-		return pendingPrompt{}, false
-	}
-	i, ok := q.nextIndex(func(p pendingPrompt) bool {
-		return p.awaitsAcceptedActiveDisplay()
-	})
-	if !ok {
-		return pendingPrompt{}, false
-	}
-	pending := &(*q)[i]
-	out := *pending
-	pending.markLocallyRendered()
-	return out, true
-}
-
 func (q *pendingPromptQueue) onTurnEnd(canDispatchDeferred bool, clearOnAbort bool) (pendingPrompt, bool) {
 	if q == nil {
 		return pendingPrompt{}, false
@@ -190,7 +158,6 @@ func (q *pendingPromptQueue) onTurnEnd(canDispatchDeferred bool, clearOnAbort bo
 	if canDispatchDeferred {
 		next, hasNext = q.takeNextDeferred()
 	}
-	q.discardDispatched()
 	if !hasNext && clearOnAbort {
 		q.discardQueuedAfterAbort()
 	}
@@ -212,25 +179,12 @@ func (q *pendingPromptQueue) takeNextDeferred() (pendingPrompt, bool) {
 	return pending, true
 }
 
-func (q *pendingPromptQueue) discardDispatched() {
-	if q == nil || len(*q) == 0 {
-		return
-	}
-	out := (*q)[:0]
-	for _, pending := range *q {
-		if pending.canDispatchAfterIdle() || pending.dispatchScheduled() || pending.needsGatewayEchoCorrelation() {
-			out = append(out, pending)
-		}
-	}
-	*q = out
-}
-
 func (q *pendingPromptQueue) discardQueuedAfterAbort() {
 	if q == nil || len(*q) == 0 {
 		return
 	}
 	// A failed or interrupted step never drains mid-turn submissions, so there
-	// will be no insertion echo. Drop awaiting/rendered correlation too; a late
+	// will be no insertion echo. Drop pending correlation too; a late
 	// durable user line still renders through the ordinary echo path.
 	*q = nil
 }
@@ -248,49 +202,9 @@ func (p pendingPrompt) dispatchScheduled() bool {
 	return p.state == pendingPromptDispatchScheduled
 }
 
-func (p pendingPrompt) isVisiblePending() bool {
-	return p.state != pendingPromptRendered
-}
-
-func (p pendingPrompt) isLocallyRendered() bool {
-	return p.state == pendingPromptRendered
-}
-
-func (p pendingPrompt) needsGatewayEchoCorrelation() bool {
-	return p.state == pendingPromptAwaitingActiveDisplay || p.state == pendingPromptRendered
-}
-
-func (p pendingPrompt) awaitsAcceptedActiveDisplay() bool {
-	return p.state == pendingPromptAwaitingActiveDisplay
-}
-
-func (p *pendingPrompt) markLocallyRendered() {
-	if p == nil {
-		return
-	}
-	// Keep rendered prompts in the queue until their gateway echo arrives, so
-	// echo correlation can remove the exact accepted active-turn prompt.
-	p.state = pendingPromptRendered
-}
-
 func (p pendingPrompt) displayText() string {
 	if text := strings.TrimSpace(p.displayLine); text != "" {
 		return text
 	}
 	return strings.TrimSpace(p.execLine)
-}
-
-func (m *Model) renderNextAcceptedPendingPrompt() bool {
-	pending, ok := m.pendingQueue.acceptedActiveDisplay()
-	if !ok {
-		return false
-	}
-	text := pending.displayText()
-	if text == "" {
-		return false
-	}
-	m.commitUserDisplayLine(text)
-	m.ensureViewportLayout()
-	m.syncViewportContent()
-	return true
 }

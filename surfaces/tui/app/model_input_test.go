@@ -576,26 +576,21 @@ func TestFixedFooterHitboxAccountsForComposerChromeRows(t *testing.T) {
 	}
 }
 
-func TestDirectSideAgentSubmissionDefersToCanonicalUserEcho(t *testing.T) {
+func TestSubmissionWaitsForCanonicalUserEcho(t *testing.T) {
 	t.Parallel()
-
-	model := NewModel(Config{Commands: []string{"breeze", "orbit", "zenith", "review"}})
-	for _, line := range []string{
-		"/breeze inspect",
-		"/orbit implement",
-		"/zenith explain",
-		"/review",
-	} {
-		if !model.deferLocalUserDisplayLine(line) {
-			t.Fatalf("deferLocalUserDisplayLine(%q) = false, want canonical user echo ownership", line)
-		}
-	}
-	if model.deferLocalUserDisplayLine("ordinary prompt") {
-		t.Fatal("ordinary prompt unexpectedly deferred")
-	}
-	unconfigured := NewModel(Config{Commands: []string{"help"}})
-	if unconfigured.deferLocalUserDisplayLine("/zenith explain") {
-		t.Fatal("unconfigured /zenith unexpectedly deferred without a canonical user echo")
+	for _, line := range []string{"ordinary prompt", "/breeze inspect", "/orbit implement", "/zenith explain", "/review"} {
+		t.Run(line, func(t *testing.T) {
+			model := NewModel(Config{Commands: []string{"breeze", "orbit", "zenith", "review"}})
+			next, _ := model.submitInteractiveLine(line, line, nil)
+			model = next.(*Model)
+			if got := countUserNarrativeBlocksForTest(model, line); got != 0 {
+				t.Fatalf("user blocks on local submit = %d, want none before canonical event", got)
+			}
+			model.Update(UserMessageMsg{Text: line})
+			if got := countUserNarrativeBlocksForTest(model, line); got != 1 {
+				t.Fatalf("user blocks after event = %d, want one", got)
+			}
+		})
 	}
 }
 
@@ -1418,7 +1413,7 @@ func TestRunningImageSubmissionUsesActiveTurnPendingUserMessage(t *testing.T) {
 		!reflect.DeepEqual(got.Attachments, attachments) {
 		t.Fatalf("running image submission = %#v", got)
 	}
-	if len(model.pendingQueue) != 1 || !model.pendingQueue[0].awaitsAcceptedActiveDisplay() ||
+	if len(model.pendingQueue) != 1 || model.pendingQueue[0].state != pendingPromptDispatched ||
 		model.pendingQueue[0].displayText() != "inspect [image #1] screenshot" ||
 		!reflect.DeepEqual(model.pendingQueue[0].attachments, attachments) {
 		t.Fatalf("running image pending queue = %#v", model.pendingQueue)

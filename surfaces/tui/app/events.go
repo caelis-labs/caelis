@@ -192,6 +192,8 @@ type SessionReconnectMsg struct {
 	State appserver.SessionState
 }
 
+// UserMessageMsg displays one anonymous observed user message. Each delivery is
+// distinct; replayable Control messages use TranscriptEventsMsg with source identity.
 type UserMessageMsg struct {
 	Text string
 }

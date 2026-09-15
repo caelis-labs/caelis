@@ -11,20 +11,13 @@ import (
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 )
 
-// commitUserDisplayLine appends a local user display line without deduping.
-// Gateway/user transcript echoes must enter through handleUserMessageMsg so
-// they can be matched against the document before rendering.
-func (m *Model) commitUserDisplayLine(displayLine string) {
-	displayLine = strings.TrimSpace(displayLine)
-	if displayLine == "" {
-		return
-	}
+// appendUserNarrativeBlock appends an observed user message to the transcript.
+func (m *Model) appendUserNarrativeBlock(block *UserNarrativeBlock) {
 	m.mainTimelineBarrier()
-	userLine := userNarrativePrefix + displayLine
+	userLine := userNarrativePrefix + block.Raw
 	if m.hasCommittedLine {
 		m.insertSpacing(tuikit.LineStyleUser, userLine)
 	}
-	block := NewUserNarrativeBlock(displayLine)
 	m.appendMainTranscriptBlock(block)
 	m.lastCommittedStyle = tuikit.LineStyleUser
 	m.lastCommittedRaw = userLine
@@ -32,115 +25,52 @@ func (m *Model) commitUserDisplayLine(displayLine string) {
 }
 
 type gatewayUserEchoOptions struct {
-	displayLine        string
-	dequeueNeedles     []string
-	participantTurnKey string
+	displayLine    string
+	dequeueNeedles []string
+	event          TranscriptEvent
 }
 
-// applyGatewayUserEcho renders a durable user line. Mid-turn steers wait for
-// this echo because Runtime inserts them after the current LLM step.
+// userNarrativeBlockID binds a finalized user event to its document block.
+// Event identity survives replay and replacement; text is never an identity.
+// Unidentified notifications are separate messages, not guesses at retransmits.
+func userNarrativeBlockID(event TranscriptEvent) string {
+	if id := strings.TrimSpace(event.SourceEventID); id != "" {
+		return fmt.Sprintf("user:event:%q:%q:%q", event.Scope, event.ScopeID, id)
+	}
+	if id := strings.TrimSpace(event.SourceProjectionID); id != "" {
+		return fmt.Sprintf("user:projection:%q:%q:%q", event.Scope, event.ScopeID, id)
+	}
+	if id := strings.TrimSpace(event.MessageID); id != "" {
+		return fmt.Sprintf("user:message:%q:%q:%q:%q", event.Scope, event.ScopeID, event.TurnID, id)
+	}
+	return ""
+}
+
+// applyGatewayUserEcho displays accepted input from Control, never submission
+// intent. A duplicate event cannot consume another pending input with the same
+// text. Queue matching affects status only, not whether a message is displayed.
 func (m *Model) applyGatewayUserEcho(opts gatewayUserEchoOptions) tea.Model {
 	displayLine := strings.TrimSpace(opts.displayLine)
 	if displayLine == "" {
 		return m
 	}
+	blockID := userNarrativeBlockID(opts.event)
+	if blockID != "" {
+		if _, exists := m.doc.index[blockID]; exists {
+			return m
+		}
+	}
 	needles := append([]string(nil), opts.dequeueNeedles...)
 	needles = append(needles, displayLine)
-	matchedPendingPrompt, matchedPending := m.pendingQueue.matchGatewayEcho(needles...)
-	if matchedPending && matchedPendingPrompt.isLocallyRendered() {
-		m.ensureViewportLayout()
-		m.syncViewportContent()
-		return m
+	m.pendingQueue.matchGatewayEcho(needles...)
+	block := NewUserNarrativeBlock(displayLine)
+	if blockID != "" {
+		block.id = blockID
 	}
-	if !matchedPending && m.lastVisibleUserNarrativeMatchesForEcho(displayLine, opts.participantTurnKey) {
-		m.ensureViewportLayout()
-		m.syncViewportContent()
-		return m
-	}
-	m.commitUserDisplayLine(displayLine)
+	m.appendUserNarrativeBlock(block)
 	m.ensureViewportLayout()
 	m.syncViewportContent()
 	return m
-}
-
-func normalizeUserDisplayLine(text string) string {
-	return strings.Join(strings.Fields(strings.TrimSpace(text)), " ")
-}
-
-func userDisplayLinesMatchForDedup(existing string, incoming string) bool {
-	existingNormalized := normalizeUserDisplayLine(existing)
-	incomingNormalized := normalizeUserDisplayLine(incoming)
-	if existingNormalized == "" || incomingNormalized == "" {
-		return false
-	}
-	if existingNormalized == incomingNormalized {
-		return true
-	}
-	existingWithoutTokens := normalizeUserDisplayLine(stripComposerDisplayTokens(existing))
-	incomingWithoutTokens := normalizeUserDisplayLine(stripComposerDisplayTokens(incoming))
-	return existingWithoutTokens != "" && existingWithoutTokens == incomingWithoutTokens
-}
-
-func stripComposerDisplayTokens(text string) string {
-	if text == "" {
-		return ""
-	}
-	var out strings.Builder
-	cursor := 0
-	for cursor < len(text) {
-		nextImage := strings.Index(text[cursor:], "[image")
-		nextPaste := strings.Index(strings.ToLower(text[cursor:]), "[pasted")
-		var idx int
-		switch {
-		case nextImage < 0 && nextPaste < 0:
-			out.WriteString(text[cursor:])
-			return out.String()
-		case nextImage < 0:
-			idx = cursor + nextPaste
-		case nextPaste < 0:
-			idx = cursor + nextImage
-		default:
-			idx = cursor + min(nextImage, nextPaste)
-		}
-		out.WriteString(text[cursor:idx])
-		end := strings.Index(text[idx:], "]")
-		if end < 0 {
-			out.WriteString(text[idx:])
-			break
-		}
-		tokenEnd := idx + end + 1
-		token := text[idx:tokenEnd]
-		if isComposerDisplayToken(token) {
-			out.WriteByte(' ')
-			cursor = tokenEnd
-			continue
-		}
-		out.WriteString(text[idx : idx+1])
-		cursor = idx + 1
-	}
-	return out.String()
-}
-
-// stripImageDisplayTokens is retained for older call sites / tests.
-func stripImageDisplayTokens(text string) string {
-	return stripComposerDisplayTokens(text)
-}
-
-func isComposerDisplayToken(token string) bool {
-	token = strings.ToLower(strings.TrimSpace(token))
-	return isImageDisplayToken(token) || isPasteDisplayToken(token)
-}
-
-func isImageDisplayToken(token string) bool {
-	token = strings.ToLower(strings.TrimSpace(token))
-	return strings.HasPrefix(token, "[image #") && strings.HasSuffix(token, "]") ||
-		strings.HasPrefix(token, "[image:") && strings.HasSuffix(token, "]")
-}
-
-func isPasteDisplayToken(token string) bool {
-	token = strings.ToLower(strings.TrimSpace(token))
-	return strings.HasPrefix(token, "[pasted:") && strings.HasSuffix(token, "]") ||
-		strings.HasPrefix(token, "[pasted ") && strings.HasSuffix(token, "]")
 }
 
 func (m *Model) displayLineWithAttachments(line string) string {

@@ -1406,7 +1406,7 @@ func (m *Model) submitLineWithDisplayAndAttachmentsOptions(execLine string, disp
 	case SubmissionModeOverlay:
 		m.openBTWOverlay(execLine)
 	default:
-		deferDisplayLine := m.deferLocalUserDisplayLine(execLine)
+		m.dismissWelcomeCard()
 		if alreadyRunning {
 			m.pendingQueue.enqueue(pendingPromptEnqueueOptions{
 				localID:        localID,
@@ -1415,8 +1415,6 @@ func (m *Model) submitLineWithDisplayAndAttachmentsOptions(execLine string, disp
 				attachments:    attachments,
 				deferUntilIdle: deferUntilIdle,
 			})
-		} else if !deferDisplayLine {
-			m.commitUserDisplayLine(displayLine)
 		}
 	}
 	m.setViewportFollowState(viewportFollowTail)
@@ -1518,17 +1516,6 @@ func resolveSubmissionModes(uiMode SubmissionMode, alreadyRunning bool, canSubmi
 		gatewayMode:    gatewayMode,
 		deferUntilIdle: deferUntilIdle,
 	}
-}
-
-func (m *Model) deferLocalUserDisplayLine(line string) bool {
-	name := slashCommandName(line)
-	if name == "" {
-		return false
-	}
-	if strings.EqualFold(name, "review") {
-		return true
-	}
-	return m.isConfiguredAgentSlashLine(line)
 }
 
 func (m *Model) executeLineCmd(submission Submission) tea.Cmd {

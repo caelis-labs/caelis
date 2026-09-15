@@ -312,7 +312,7 @@ func TestSessionObservationRecoveryDoesNotRedispatchPendingInputs(t *testing.T) 
 			m.beginLiveTurn(SubmissionModeDefault, true, time.Now())
 			m.pendingQueue = pendingPromptQueue{
 				{localID: 1, execLine: "unknown outcome", state: pendingPromptDispatched},
-				{localID: 2, execLine: "accepted input", state: pendingPromptAwaitingActiveDisplay},
+				{localID: 2, execLine: "accepted input", state: pendingPromptDispatched},
 				{localID: 3, execLine: "still queued", state: pendingPromptQueued},
 				{localID: 4, execLine: "not sent", state: pendingPromptDispatchScheduled},
 			}
@@ -325,7 +325,7 @@ func TestSessionObservationRecoveryDoesNotRedispatchPendingInputs(t *testing.T) 
 				m.Update(sessionHistoryReadyMsg{})
 			}
 			_, cmd := m.handleSubmissionDispatch(submissionDispatchMsg{submission: submission, turnGeneration: turnGeneration})
-			if cmd != nil || calls != 0 || len(m.pendingQueue) != 4 || m.pendingQueue[0].state != pendingPromptDispatched || m.pendingQueue[1].state != pendingPromptAwaitingActiveDisplay || m.pendingQueue[3].state != pendingPromptQueued {
+			if cmd != nil || calls != 0 || len(m.pendingQueue) != 4 || m.pendingQueue[0].state != pendingPromptDispatched || m.pendingQueue[1].state != pendingPromptDispatched || m.pendingQueue[3].state != pendingPromptQueued {
 				t.Fatal("recovery reissued input or changed admission certainty")
 			}
 		})
