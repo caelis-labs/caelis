@@ -148,11 +148,11 @@ func renderACPToolLifecycleRowsWithoutReview(blockID string, events []SubagentEv
 	}
 	rows := renderACPStandardToolCollapsedRows(blockID, headerEvent, callID, width, ctx, false, settled, "")
 	if text := sanitizeRenderableText(preview); text != "" {
-		rows = append(rows, renderACPToolDetailRows(blockID, "· ", text, width, ctx, ctx.Theme.HelpHintTextStyle())...)
+		rows = append(rows, renderACPToolDetailRows(blockID, "· ", text, width, ctx, ctx.Theme.ToolOutputStyle())...)
 	}
 	if hasFinal {
 		prefix := "✓ "
-		style := ctx.Theme.HelpHintTextStyle()
+		style := ctx.Theme.ToolOutputStyle()
 		if final.Err {
 			prefix = "✗ "
 			style = ctx.Theme.ToolErrorStyle()
@@ -225,7 +225,7 @@ func renderACPStandaloneFinalToolRows(blockID string, ev SubagentEvent, width in
 	}
 	rows := renderACPStandardToolCollapsedRows(blockID, header, ev.CallID, width, ctx, ev.Err, true, "")
 	prefix := "✓ "
-	style := ctx.Theme.HelpHintTextStyle()
+	style := ctx.Theme.ToolOutputStyle()
 	if ev.Err {
 		prefix = "✗ "
 		style = ctx.Theme.ToolErrorStyle()
@@ -350,7 +350,7 @@ func renderACPStandardToolLifecycleRows(blockID string, ev SubagentEvent, callID
 		}
 		text = "completed"
 	}
-	style := ctx.Theme.HelpHintTextStyle()
+	style := ctx.Theme.ToolOutputStyle()
 	if err {
 		style = ctx.Theme.ToolErrorStyle()
 	}
@@ -487,12 +487,13 @@ func standardVerbLifecycleHeader(verb string, args string, err bool) string {
 	return "• " + verb
 }
 
-func renderACPToolPanelRows(blockID string, callID string, toolName string, terminalPanel bool, text string, width int, ctx BlockRenderContext, err bool, token string, opts acpTranscriptRenderOptions) []RenderedRow {
+func renderACPToolPanelRows(blockID string, callID string, toolName string, terminalPanel bool, text string, width int, ctx BlockRenderContext, err bool, token string, liveTail bool, opts acpTranscriptRenderOptions) []RenderedRow {
 	request := toolPanelRenderRequest{
 		BlockID:       blockID,
 		CallID:        callID,
 		ToolName:      toolName,
 		TerminalPanel: terminalPanel,
+		LiveTail:      liveTail,
 		Text:          text,
 		Width:         width,
 		Ctx:           ctx,
@@ -519,9 +520,9 @@ func (r toolPanelRenderRequest) renderUncached() []RenderedRow {
 		return applyClickTokenToRows(renderACPDiffPanelRows(blockID, text, width, ctx), token)
 	}
 	if r.TerminalPanel || surfaceIsTerminalPanelTool(toolName) {
-		return renderACPTerminalPanelRows(blockID, callID, text, width, ctx, err, token)
+		return renderACPTerminalPanelRows(blockID, callID, text, width, ctx, err, token, r.LiveTail)
 	}
-	style := ctx.Theme.HelpHintTextStyle()
+	style := ctx.Theme.ToolOutputStyle()
 	if err {
 		style = ctx.Theme.ToolErrorStyle()
 	}
@@ -602,8 +603,9 @@ func renderACPTerminalLifecycleRows(blockID string, ev SubagentEvent, callID str
 		rows = append(rows, renderACPFullTerminalPanelRows(blockID, callID, text, width, ctx, err, token)...)
 		return rows
 	}
+	liveTail := isTerminalPanelToolEvent(ev) && toolPanelLiveTail(callID, text, width, ctx, final, fullOutput, err, opts)
 	text = summarizeACPToolPanelText(text, final)
-	rows = append(rows, renderACPToolPanelRows(blockID, callID, ev.Name, isTerminalPanelToolEvent(ev), text, width, ctx, err, token, opts)...)
+	rows = append(rows, renderACPToolPanelRows(blockID, callID, ev.Name, isTerminalPanelToolEvent(ev), text, width, ctx, err, token, liveTail, opts)...)
 	return rows
 }
 
@@ -782,7 +784,7 @@ func renderACPMutationLifecycleRows(blockID string, ev SubagentEvent, callID str
 	if mutationPanelTextIsHeaderOnly(ev, text) {
 		return rows
 	}
-	panel := renderACPToolPanelRows(blockID, callID, ev.Name, false, text, width, ctx, err, token, opts)
+	panel := renderACPToolPanelRows(blockID, callID, ev.Name, false, text, width, ctx, err, token, false, opts)
 	rows = append(rows, omitRedundantMutationDiffFileHeader(ev.Args, text, err, panel)...)
 	return rows
 }
