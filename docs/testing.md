@@ -86,12 +86,18 @@ execution routes, file effects, and provider reasoning settings; optional
 built-in and external main/subagent origins, concurrent review queueing, task
 conflicts, injected tool output and evidence failures. Failure scenarios select a
 reproducible tool operation before the real model makes its judgment. The output
-directory also receives resident review metrics. Ordinary approvals require P95
-at most eight seconds, at least
-90% without tools, and Runtime reuse while the bounded window still fits. The
-median target is three seconds. Evidence timeout must still permit a final
-judgment for both allowed and rejected actions; no incorrect allow or deny is
-accepted. Command E2E verifies real execution effects separately.
+directory also receives resident review metrics. Ordinary approvals require at
+least 90% without tools and Runtime reuse while the window still fits. P50/P95
+latency and cache usage are reported for comparison under the same provider and
+settings, not enforced as universal provider speed limits. Slow native evidence
+and recoverable tool failures must still permit a final judgment for both allowed
+and rejected actions; no incorrect allow or deny is accepted. Command E2E verifies
+real execution effects separately. Add `TestGuardianMultiEvidenceE2E` to the test
+selector for six necessary searches in the middle of a large manifest and a real
+provider's final decision. It also runs deterministically without the live flag.
+Deterministic availability tests cover 25/60/89-second valid responses, total
+deadline expiry, shared queue budgets, late producer cleanup, original-result
+pagination, long user-message constraints and active context-overflow recovery.
 Provider latency/cache counters are observations,
 not deterministic unit-test assertions or guarantees from the Harness.
 

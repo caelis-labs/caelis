@@ -32,7 +32,7 @@ func TestGuardianFileToolsReuseBuiltinDefinitionsAndResults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	q := &guardianQueries{runtime: rt}
+	q := &guardianQueries{runtime: rt, pageBytes: 64 * 1024}
 	t.Cleanup(func() { _ = q.close() })
 	read, err := filesystem.NewRead(filesystem.DefaultReadConfig(), rt)
 	if err != nil {
@@ -63,7 +63,6 @@ func TestGuardianFileToolsReuseBuiltinDefinitionsAndResults(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			want, _ = tool.TruncateResultWithInfo(want, tool.TruncationPolicy{MaxBytes: 8 * 1024})
 			got, err := query.Call(t.Context(), call)
 			if err != nil {
 				t.Fatal(err)
@@ -247,20 +246,15 @@ func TestGuardianNativeInheritedNetwork(t *testing.T) {
 	}
 }
 
-func TestGuardianExhaustedEvidenceStillAdmitsFinalDecision(t *testing.T) {
-	q := &guardianQueries{bytes: 24 * 1024}
-	result, err := (guardianQueryTool{q, "Read"}).Call(t.Context(), tool.Call{ID: "over-budget", Input: json.RawMessage(`{"path":"unused"}`)})
-	if err != nil || !result.IsError {
-		t.Fatalf("expected model-visible budget result: %+v %v", result, err)
+func TestGuardianEvidenceVolumeDoesNotBlockContinuation(t *testing.T) {
+	q := &guardianQueries{bytes: 240 * 1024}
+	for i := 0; i < 12; i++ {
+		if err := q.admit(t.Context(), &model.Request{}); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if q.runtime != nil {
-		t.Fatal("closed evidence opened a sandbox")
-	}
-	if next := q.admit(t.Context(), &model.Request{}); next != nil {
-		t.Fatalf("final decision blocked by evidence failure: %v", next)
-	}
-	if q.attempts != 1 {
-		t.Fatalf("final model attempts=%d", q.attempts)
+	if q.attempts != 12 {
+		t.Fatalf("attempts=%d", q.attempts)
 	}
 }
 

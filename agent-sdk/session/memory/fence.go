@@ -18,6 +18,20 @@ type priorHostFenceService struct {
 	authorize func(context.Context) (release func(), ok bool)
 }
 
+// ValidateMutationGuard verifies the opaque claim under the store lock.
+func (s *Store) ValidateMutationGuard(ctx context.Context, ref session.SessionRef, guard session.MutationGuard) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	record, ok := s.lookupLocked(ref)
+	if !ok {
+		return session.ErrSessionNotFound
+	}
+	return session.AuthorizeMutationGuard(record.fence, guard)
+}
+
 func (s *Store) SessionFence(_ context.Context, ref session.SessionRef) (session.SessionFence, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

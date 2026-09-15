@@ -261,7 +261,15 @@ func (r *systemManagedAgentRuntime) Run(ctx context.Context, req systemManagedAg
 	}
 	var compactor compact.Engine
 	if plan.Purpose == systemManagedAgentPurposeApprovalReview {
-		compactor = guardianTurnCompactor{}
+		guardian := guardianTurnCompactor{output: req.Output}
+		for _, t := range req.Tools {
+			if query, ok := t.(guardianQueryTool); ok {
+				guardian.evidence = query.owner.evidenceStore()
+				guardian.queries = query.owner
+				break
+			}
+		}
+		compactor = guardian
 	}
 	var core *sdkruntime.Runtime
 	if previous != nil {
@@ -335,7 +343,7 @@ func collectSystemManagedAgentResult(
 	if handle != nil {
 		// The run already receives caller cancellation. As with the owning
 		// Gateway Turn, the wait must still prove producer quiescence before
-		// observers are consumed or the parent execution fence can be released.
+		// observers are consumed or the resident execution lane can be reused.
 		// A non-cooperative producer keeps this invocation draining; Close alone
 		// or a timed-out wait cannot establish completion.
 		if err := handle.WaitCompletion(context.WithoutCancel(ctx)); err != nil || ctx.Err() != nil {

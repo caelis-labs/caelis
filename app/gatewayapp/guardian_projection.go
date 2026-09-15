@@ -50,8 +50,8 @@ func (p *guardianProjection) read(ctx context.Context, service session.Service, 
 				p.events = append(p.events, projected)
 				// Retention follows source order, not the caller's page size or
 				// approval cadence, so a reopened source rebuilds the same cut.
-				p.events = guardianTrimUsers(p.events, 24000)
-				p.events = guardianTrimTurns(p.events, 48000, "")
+				p.events = guardianTrimUsers(p.events, 16*1024*1024)
+				p.events = guardianTrimTurns(p.events, 16*1024*1024, "")
 			}
 		}
 		if !page.HasMore {
@@ -69,6 +69,20 @@ func (p *guardianProjection) read(ctx context.Context, service session.Service, 
 // guardianProjectEvent is independent of the pending action, paging and review
 // completion. Calls and late results retain their distinct source identities.
 func guardianProjectEvent(e *session.Event) *session.Event {
+	return guardianProjectSource(e, false)
+}
+
+func guardianProjectEventFull(e *session.Event) *session.Event {
+	return guardianProjectSource(e, true)
+}
+
+func guardianProjectSource(e *session.Event, original bool) *session.Event {
+	render := guardianEvidenceJSON
+	fold := guardianFold
+	if original {
+		render = func(value any) string { raw, _ := json.Marshal(value); return string(raw) }
+		fold = func(text string, _ int) string { return text }
+	}
 	if e == nil || !session.IsCanonicalHistoryEvent(e) {
 		return nil
 	}
@@ -78,13 +92,13 @@ func guardianProjectEvent(e *session.Event) *session.Event {
 	var text string
 	user := session.EventTypeOf(e) == session.EventTypeUser && (e.Actor.Kind == session.ActorKindUser || e.Actor.Kind == "")
 	if user {
-		text = fmt.Sprintf("User message [session=%s seq=%d event=%s]:\n%s", e.SessionID, e.Seq, e.ID, guardianFold(guardianVisibleText(e), 8192))
+		text = fmt.Sprintf("User message [session=%s seq=%d event=%s]:\n%s", e.SessionID, e.Seq, e.ID, guardianVisibleText(e))
 	} else if (session.EventTypeOf(e) == session.EventTypeToolCall || session.EventTypeOf(e) == session.EventTypeToolResult) && session.IsMainInvocationVisibleEvent(e) && e.Tool != nil {
 		kind, value := "Operation", e.Tool.Input
 		if session.EventTypeOf(e) == session.EventTypeToolResult {
 			kind, value = "Tool result", e.Tool.Output
 		}
-		text = fmt.Sprintf("%s [session=%s seq=%d event=%s tool_call_id=%s tool=%s status=%s]\n%s", kind, e.SessionID, e.Seq, e.ID, e.Tool.ID, e.Tool.Name, e.Tool.Status, guardianEvidenceJSON(value))
+		text = fmt.Sprintf("%s [session=%s seq=%d event=%s tool_call_id=%s tool=%s status=%s]\n%s", kind, e.SessionID, e.Seq, e.ID, e.Tool.ID, e.Tool.Name, e.Tool.Status, render(value))
 		if kind == "Tool result" {
 			facts := map[string]any{}
 			for _, key := range []string{"status", "error", "error_kind", "exit_code", "is_error", "truncated"} {
@@ -93,11 +107,11 @@ func guardianProjectEvent(e *session.Event) *session.Event {
 				}
 			}
 			if len(facts) > 0 {
-				text = fmt.Sprintf("Result status fields (untrusted evidence): %s\n", guardianEvidenceJSON(facts)) + text
+				text = fmt.Sprintf("Result status fields (untrusted evidence): %s\n", render(facts)) + text
 			}
 		}
 		if len(value) == 0 && kind == "Tool result" {
-			text += "\n" + guardianFold(guardianVisibleText(e), 2048)
+			text += "\n" + fold(guardianVisibleText(e), 2048)
 		}
 	} else {
 		return nil

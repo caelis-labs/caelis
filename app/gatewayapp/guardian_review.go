@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -15,8 +14,8 @@ func (r *guardianApprovalReviewer) runGuardianReview(
 	ctx context.Context,
 	req kernel.ApprovalReviewRequest,
 ) (items guardianPromptItems, prompt *session.Event, assistant *session.Event, assessment guardianReviewModelOutput, reviewErr error) {
-	started := time.Now()
-	ctx, cancel := context.WithTimeout(ctx, guardianReviewTimeout)
+	started := kernel.AutoReviewStarted(ctx)
+	ctx, cancel := kernel.WithAutoReviewBudget(ctx)
 	defer cancel()
 	var queries *guardianQueries
 	var release func()
@@ -59,8 +58,10 @@ func (r *guardianApprovalReviewer) runGuardianReview(
 	}()
 	var resident *guardianResident
 	var err error
+	metrics.ControlQueueMS = guardianElapsed(started)
 	resident, queries, release, err = r.acquireResident(ctx, req.SessionRef)
 	metrics.QueueMS = guardianElapsed(started)
+	metrics.LaneQueueMS = metrics.QueueMS - metrics.ControlQueueMS
 	if err != nil {
 		return items, nil, nil, assessment, err
 	}
@@ -70,7 +71,6 @@ func (r *guardianApprovalReviewer) runGuardianReview(
 	queries.begin(ctx, req.Model, r.sessions, req.SessionRef)
 	ctx = model.WithInvocationAdmission(ctx, queries.admit)
 	ctx = model.WithInvocationObserver(ctx, queries.invocation)
-	ctx = model.WithToolAvailability(ctx, queries.available)
 	activeSession, err := r.sessions.Session(ctx, req.SessionRef)
 	if err != nil {
 		return guardianPromptItems{}, nil, nil, guardianReviewModelOutput{}, err
@@ -130,6 +130,9 @@ func (r *guardianApprovalReviewer) runGuardianReview(
 		if err != nil {
 			lastParseErr = err
 			continue
+		}
+		if err := ctx.Err(); err != nil {
+			return promptItems, promptEvent, runResult.AssistantEvent, guardianReviewModelOutput{}, err
 		}
 		// Commit only validated assessments to the process-local conversation;
 		// malformed attempts and staging compact artifacts are discarded together.

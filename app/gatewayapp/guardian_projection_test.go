@@ -71,7 +71,7 @@ func TestGuardianProjectionRoundTripPreservesCutAcrossApprovalCadence(t *testing
 		t.Fatalf("model context changed after reopening source: cut=%+v/%+v err=%v", cut, restoredCut, err)
 	}
 	text := guardianEventsText(a)
-	if !strings.Contains(text, "user constraint 0") || !strings.Contains(text, "user constraint 129") || len(text) > 80000 {
+	if !strings.Contains(text, "user constraint 0") || !strings.Contains(text, "user constraint 129") || len(text) > 16*1024*1024 {
 		t.Fatalf("retained context lost user boundaries or grew unbounded: %d", len(text))
 	}
 	late := guardianSource(0, session.EventTypeUser, "not part of pinned approval")
@@ -112,13 +112,13 @@ func TestGuardianOversizedExactActionDoesNotReachProvider(t *testing.T) {
 }
 
 func TestGuardianEvidenceFoldingPreservesUTF8AndBoundaries(t *testing.T) {
-	short := strings.Repeat("证据", 700)
+	short := strings.Repeat("证据", 300)
 	if guardianFold(short, 2048) != short {
 		t.Fatal("folded a fitting Unicode value")
 	}
 	large := "first marker " + strings.Repeat("证据", 1000000) + " last marker"
 	folded := guardianFold(large, 2048)
-	if !utf8.ValidString(folded) || !strings.HasPrefix(folded, "first marker") || !strings.HasSuffix(folded, "last marker") || len(folded) > 6500 || !strings.Contains(folded, "folded") {
+	if !utf8.ValidString(folded) || !strings.HasPrefix(folded, "first marker") || !strings.HasSuffix(folded, "last marker") || len(folded) > 2200 || !strings.Contains(folded, "folded") {
 		t.Fatal("folding lost boundaries, Unicode validity or output bound")
 	}
 }

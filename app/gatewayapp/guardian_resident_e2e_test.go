@@ -18,6 +18,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/host"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/internal/kernel"
 )
 
 // The command E2E covers policy and actual effects. This companion keeps one
@@ -154,7 +155,7 @@ func TestGuardianResidentE2E(t *testing.T) {
 		for _, m := range all[before:] {
 			t.Logf("metrics: %s", mustGuardianE2EJSON(t, m))
 			queued = queued || m.QueueMS > 0
-			if m.TotalMS >= guardianReviewTimeout.Milliseconds() {
+			if m.TotalMS >= kernel.AutoReviewTimeout.Milliseconds() {
 				t.Errorf("concurrent review exceeded deadline: %+v", m)
 			}
 		}
@@ -183,7 +184,7 @@ func TestGuardianResidentE2E(t *testing.T) {
 			}
 		})
 	}
-	for _, fault := range []string{"missing_file", "command_failure", "oversized_output", "evidence_deadline"} {
+	for _, fault := range []string{"missing_file", "command_failure", "oversized_output", "slow_evidence"} {
 		for _, allow := range []bool{true, false} {
 			t.Run(fmt.Sprintf("%s/allow=%v", fault, allow), func(t *testing.T) {
 				probe := &guardianLiveEvidenceProbe{systemAgentReasoningModel: systemAgentReasoningModel{inner: llm}, name: "RunCommand"}
@@ -194,7 +195,7 @@ func TestGuardianResidentE2E(t *testing.T) {
 					probe.input, _ = json.Marshal(map[string]any{"path": filepath.Join(active.CWD, "missing-evidence.txt")})
 				case "oversized_output":
 					command = guardianNativeTestCommand("head -c 200000 /dev/zero | tr '\\000' x", "[Console]::Write(('x' * 200000))")
-				case "evidence_deadline":
+				case "slow_evidence":
 					command = guardianNativeTestCommand("printf partial; sleep 30", "Write-Output partial; Start-Sleep -Seconds 30")
 				}
 				if probe.input == nil {
@@ -242,8 +243,8 @@ func TestGuardianResidentE2E(t *testing.T) {
 	if len(latencies) > 0 {
 		p50, p95 := latencies[(len(latencies)-1)/2], latencies[(len(latencies)*95+99)/100-1]
 		t.Logf("acceptance: ordinary=%d p50_ms=%d p95_ms=%d no_tool=%d reused=%d window_rotations=%d", len(normal), p50, p95, noTools, reused, rotations)
-		if p50 > 3000 || p95 > 8000 || noTools*100 < len(normal)*90 {
-			t.Errorf("ordinary latency/tool/reuse acceptance failed")
+		if noTools*100 < len(normal)*90 {
+			t.Errorf("ordinary tool-use acceptance failed")
 		}
 	}
 	if out := os.Getenv("CAELIS_GUARDIAN_COMMAND_E2E_OUT"); out != "" {

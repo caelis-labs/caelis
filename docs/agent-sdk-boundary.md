@@ -226,14 +226,20 @@ concurrent model step pins one common prefix and joins validated whole turns in
 source call order. A context-window rotation or incompatible model/policy/tool
 configuration replaces a lane's staging history. Invalid attempts never enter
 the validated conversation. Closing the root or Runtime cancels and drains its
-leases before releasing private resources. Provider usage receipts retain the
-parent-Session accounting and producer-drain contract.
+leases before releasing private resources. A deadline settles the caller before
+an uncooperative producer finishes cleanup; the draining lane remains occupied.
+Provider usage receipts are persisted after producer completion. A parent claim
+validated at admission permits receipt-only Control accounting after cancellation;
+invalid claims never gain that authority. No late decision can authorize execution.
 
 The canonical Session log is the only source history. A forward paged reader
 captures a source checkpoint and projects user messages, tool calls and tool
 results independently of the pending approval. Source Session, event ID and Seq
-identify each record; a late result never rewrites its call. Arguments, output,
-error status and truncation facts are bounded before serialization. The intake
+identify each record; a late result never rewrites its call. Tool previews bound
+arguments and output while retaining status and source references. User messages
+are not individually truncated on ingestion. The disposable projection cache
+has a 16 MiB retention allowance for users and for other evidence; eviction does
+not remove canonical originals. The intake
 cursor advances independently of validated-review commits. Journal records,
 client mirrors, assistant reasoning and main-Agent compact summaries do not enter
 this projection. User documents and quotations remain evidence rather than new
@@ -241,15 +247,21 @@ instructions.
 
 Instructions, tool definitions and output schema are stable across ordinary
 reviews. Below the window budget the model input only appends. Retention measures
-model messages rather than duplicated log metadata and removes whole oldest turns
-to a lower water mark. User messages have a separate budget: long messages fold
-in the middle before older intermediate messages are removed; the original task
-and latest steering are retained. Guardian never spends a model call summarizing
-its own dialogue. Omitted evidence is not proof of absent risk or authorization.
+the entire assembled request, including instructions, tools and output schema.
+The SDK's model-size watermarks trigger batched removal of whole oldest turns.
+User messages have no independent small input cap: they are reduced only when
+the physical input budget remains exceeded after other history is removed.
+Original task and latest steering records survive that reduction, with omitted
+text recoverable from source events. Active-turn overflow creates a deterministic
+checkpoint containing the current request, authorization and evidence references;
+it does not spend a model call inventing a summary or repeat completed tools.
+Checkpoints containing authorization survive completed-turn eviction and retain
+an original reference if physical capacity later requires folding them.
+Omitted evidence is not proof of absent risk or authorization.
 Steering invalidates pending automatic approvals before settlement.
 
 Most approvals decide from supplied context. Optional `ReadEvents` retrieves a
-bounded canonical page through the review's pinned checkpoint; `Read` and `Grep`
+canonical original page through the review's pinned checkpoint; `Read` and `Grep`
 use SDK file-tool semantics, and `RunCommand` supports focused local inspection.
 File observations describe current state rather than historical state. These
 tools use a separate resident restricted sandbox, with a fresh temporary working
@@ -259,23 +271,30 @@ and Windows uses its restricted-token sandbox. Windows network access remains
 enabled even when disabled intent is supplied; the environment states the actual
 capability and shell. Runtime/ACL state stays outside the temporary command work
 directory. There is no Host fallback, recursive approval or Agent communication.
-Simple decisions do not initialize a sandbox.
+Simple decisions do not initialize a sandbox. Large evidence responses retain
+their original content in root-owned temporary files outside command scratch.
+`ReadEvidence` retrieves pages or literal-search matches by opaque reference;
+references survive lane changes and subsequent reviews until root release.
+Display pages adapt to remaining model capacity and fit the SDK's canonical
+result limit, so a page cursor never skips text clipped during persistence.
+A storage failure explicitly
+reports that original recovery is unavailable. Upstream canonical truncation
+cannot be reversed by ReadEvents; existing Runtime artifact paths and file tools
+remain the route to upstream originals when available.
 
 Queueing, evidence, provider retries and at most one format repair share a
-20-second approval deadline, shortened by caller cancellation. Evidence gathering
-closes eight seconds before that deadline to reserve a final judgment. It also
-closes after its bounded model/output allowance. Tool failures, unavailable
-backends, permission errors and evidence expiry return bounded error results to
-the Agent. Output truncation returns partial evidence; neither poisons model
-admission. The next model call can still decide with tool selection disabled;
-providers retain definitions needed by historical tool results when the protocol
-supports a native no-tool choice. A provider that cannot produce a valid decision
+90-second approval deadline from Control admission, shortened by caller
+cancellation. There is no separate evidence time slice, cumulative evidence-byte
+cap or fixed limit on valid model/tool steps. Tool failures, unavailable backends,
+permission errors and tool-local timeouts return error evidence to the Agent.
+They do not poison model admission. Total deadline expiry cancels the review;
+it is distinct from a recoverable tool-local failure. A provider that cannot produce a valid decision
 yields an unavailable approval for that
 action, never a fabricated allow or risk rejection; unrelated task work can
 continue. Callers must not repeatedly resubmit an unavailable approval.
 
-Owner diagnostics record review outcome, selected option, total/queue/preparation/
-model/tool/setup duration, invocation counts, tool failures, evidence bytes,
-truncation, source checkpoint, window rotations, actual Runtime/sandbox reuse and
+Owner diagnostics record review outcome, selected option, total/Control-queue/lane-queue/
+preparation/model/tool/setup duration, invocation counts, tool failures, evidence bytes,
+truncation, source checkpoint, context recoveries, request capacity, window rotations, actual Runtime/sandbox reuse and
 reported cache usage. Metrics contain no commands, evidence bodies, credentials or reasoning.
 Guardian's dialogue and tool transcripts stay private and process-local.

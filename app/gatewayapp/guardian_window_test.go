@@ -140,7 +140,7 @@ func TestGuardianProviderPrefixAndStableSchema(t *testing.T) {
 		bb, _ := json.Marshal(b.Messages)
 		t.Fatalf("message prefix changed:\n%s\n%s", aa, bb)
 	}
-	if len(a.Tools) != 4 {
+	if len(a.Tools) != 5 {
 		t.Fatalf("tools=%d", len(a.Tools))
 	}
 	text := ""

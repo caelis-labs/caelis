@@ -46,6 +46,12 @@ func (g *Gateway) resolveApprovalRequest(
 		return agent.ApprovalResponse{}, modeErr
 	}
 
+	if mode == ApprovalModeAutoReview {
+		var cancel context.CancelFunc
+		approvalCtx, cancel = WithAutoReviewBudget(approvalCtx)
+		defer cancel()
+	}
+
 	// Every normalized request enters the same Control-owned queue. Manual
 	// requests publish an ACP permission only when they become the active head;
 	// auto reviews from one model step may share that head as a concurrent cohort.

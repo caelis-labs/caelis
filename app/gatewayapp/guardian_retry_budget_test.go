@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/internal/kernel"
 )
 
 type guardianRetryBudgetModel struct {
@@ -59,7 +60,7 @@ func TestGuardianFormatRetrySharesDeadlineAndPreservesCallerDeadline(t *testing.
 				if len(llm.remaining) != 2 {
 					t.Fatalf("attempts=%d error=%v", len(llm.remaining), err)
 				}
-				wantFirst, wantSecond := guardianReviewTimeout, guardianReviewTimeout-10*time.Second
+				wantFirst, wantSecond := kernel.AutoReviewTimeout, kernel.AutoReviewTimeout-10*time.Second
 				if callerLimit > 0 {
 					wantFirst = callerLimit
 					wantSecond = time.Second

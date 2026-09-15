@@ -18,6 +18,21 @@ type priorHostFenceService struct {
 	authorize func(context.Context) (release func(), ok bool)
 }
 
+// ValidateMutationGuard reloads the claim under the cross-process store lock.
+func (s *Store) ValidateMutationGuard(ctx context.Context, ref session.SessionRef, guard session.MutationGuard) error {
+	if err := s.mu.LockContext(ctx); err != nil {
+		return err
+	}
+	defer s.mu.Unlock()
+	return s.withRootLockContext(ctx, storeRootLockExclusive, func() error {
+		doc, err := s.readDocumentForRef(ref)
+		if err != nil {
+			return err
+		}
+		return session.AuthorizeMutationGuard(activeDocumentFence(doc), guard)
+	})
+}
+
 func (s *Store) SessionFence(ctx context.Context, ref session.SessionRef) (session.SessionFence, error) {
 	if err := s.mu.LockContext(ctx); err != nil {
 		return session.SessionFence{}, err
