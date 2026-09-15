@@ -569,6 +569,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if key.Matches(msg, m.keys.Quit) {
 		return m, m.requestSurfaceQuit()
 	}
+	m.ctrlCArmed = false
+	m.lastCtrlCAt = time.Time{}
 	if msg.String() == "ctrl+d" {
 		m.quit = true
 		return m, tea.Quit
@@ -610,10 +612,6 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.requestRunningInterrupt()
 	}
 	m.clearInputSelection()
-	if !key.Matches(msg, m.keys.Quit) {
-		m.ctrlCArmed = false
-		m.lastCtrlCAt = time.Time{}
-	}
 	if matchesModeKey(msg, m.keys.Mode) && m.cfg.ToggleMode != nil {
 		hint, err := m.cfg.ToggleMode()
 		if err != nil {
@@ -704,7 +702,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.syncInputFromTextareaAndFollow()
 			return m, cmd
 		}
-		if !m.turnRunning() && len(m.history) > 0 {
+		if len(m.history) > 0 {
 			val := m.textarea.Value()
 			if m.historyIndex == -1 {
 				m.historyDraft = val
@@ -726,7 +724,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.syncInputFromTextareaAndFollow()
 			return m, cmd
 		}
-		if !m.turnRunning() && m.historyIndex != -1 {
+		if m.historyIndex != -1 {
 			if m.historyIndex < len(m.history)-1 {
 				m.historyIndex++
 				m.restoreHistoryEntry(m.history[m.historyIndex], m.historyAttachments[m.historyIndex])

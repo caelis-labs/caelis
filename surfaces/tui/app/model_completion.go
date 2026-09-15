@@ -474,6 +474,12 @@ func (m *Model) recordHistoryEntry(value string, attachments []inputAttachment) 
 	if m.isConfiguredSlashControlLine(strings.TrimSpace(expandComposerText(entry, clonedAttachments))) {
 		return
 	}
+	m.appendInputHistory(entry, clonedAttachments)
+}
+
+// appendInputHistory preserves drafts verbatim; submission filtering belongs to recordHistoryEntry.
+func (m *Model) appendInputHistory(entry string, attachments []inputAttachment) {
+	clonedAttachments := cloneInputAttachments(attachments)
 	if len(m.history) == 0 || m.history[len(m.history)-1] != entry || !inputAttachmentsEqual(m.historyAttachments[len(m.historyAttachments)-1], clonedAttachments) {
 		m.history = append(m.history, entry)
 		m.historyAttachments = append(m.historyAttachments, clonedAttachments)
