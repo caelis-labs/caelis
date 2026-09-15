@@ -32,8 +32,13 @@ func requestBackgroundColorCmd() tea.Cmd {
 }
 
 func NewModel(cfg Config) *Model {
+	return newModelWithTheme(cfg, tuikit.ResolveThemeFromOptions(cfg.NoColor, cfg.ColorProfile))
+}
+
+// History builders reuse the active theme: terminal discovery must not run
+// inside Update or compete with Bubble Tea's terminal input reader.
+func newModelWithTheme(cfg Config, theme tuikit.Theme) *Model {
 	cfg.CommandDetails = maps.Clone(cfg.CommandDetails)
-	theme := tuikit.ResolveThemeFromOptions(cfg.NoColor, cfg.ColorProfile)
 	themeEnv := strings.TrimSpace(os.Getenv("CAELIS_THEME"))
 	themeName, ok := tuikit.NormalizeThemeName(themeEnv)
 	if !ok {

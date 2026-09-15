@@ -25,7 +25,7 @@ func (m *Model) beginSessionHistory(start sessionViewStartMsg) tea.Cmd {
 	cfg := m.cfg
 	cfg.ProgramSender, cfg.TaskStreams, cfg.ControlService = nil, nil, nil
 	cfg.NoAnimation, cfg.ShowWelcomeCard = true, false
-	builder := NewModel(cfg)
+	builder := newModelWithTheme(cfg, m.theme)
 	builder.historyBuilding = true
 	builder.beginDeferredViewportSync()
 	builder.applySessionReconnectState(start.state)
