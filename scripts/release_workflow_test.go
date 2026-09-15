@@ -1,12 +1,62 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"regexp"
 	"strings"
 	"testing"
 )
+
+func TestReleasePleaseFeedsProtectedMainPublication(t *testing.T) {
+	t.Parallel()
+
+	workflow := readWorkflow(t, "../.github/workflows/release-please.yml")
+	for _, want := range []string{
+		"push:\n    branches: [main]",
+		"if: github.ref == 'refs/heads/main'",
+		"group: release-please-main\n  cancel-in-progress: false",
+		"token: ${{ secrets.RELEASE_PLEASE_TOKEN }}",
+		"target-branch: main",
+		"config-file: release-please-config.json",
+		"manifest-file: .release-please-manifest.json",
+	} {
+		if !strings.Contains(workflow, want) {
+			t.Errorf("release-please workflow missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{"secrets.GITHUB_TOKEN", "github.token", "--auto", "skip-github-release: true"} {
+		if strings.Contains(workflow, forbidden) {
+			t.Errorf("release-please must trigger downstream checks and leave merging to maintainers: %q", forbidden)
+		}
+	}
+
+	var config struct {
+		Packages map[string]map[string]any `json:"packages"`
+	}
+	if err := json.Unmarshal([]byte(readWorkflow(t, "../release-please-config.json")), &config); err != nil {
+		t.Fatal(err)
+	}
+	root := config.Packages["."]
+	if len(config.Packages) != 1 || root["release-type"] != "go" ||
+		root["include-component-in-tag"] != false || root["include-v-in-tag"] != true {
+		t.Fatal("release-please must use one root Go version with vX.Y.Z tags")
+	}
+	if root["draft"] == true || root["skip-github-release"] == true {
+		t.Fatal("release-please must create a published release and tag to trigger artifact publication")
+	}
+	var manifest map[string]string
+	if err := json.Unmarshal([]byte(readWorkflow(t, "../.release-please-manifest.json")), &manifest); err != nil {
+		t.Fatal(err)
+	}
+	if len(manifest) != 1 || !regexp.MustCompile(`^\d+\.\d+\.\d+$`).MatchString(manifest["."]) {
+		t.Fatal("release manifest must contain one root release version")
+	}
+	if !strings.Contains(readWorkflow(t, "../.goreleaser.yml"), "release:\n  mode: keep-existing") {
+		t.Fatal("GoReleaser must preserve the release-please changelog")
+	}
+}
 
 func TestReleasePublishesProtectedMainTagsWithoutRepeatingPRQuality(t *testing.T) {
 	t.Parallel()
@@ -17,7 +67,7 @@ func TestReleasePublishesProtectedMainTagsWithoutRepeatingPRQuality(t *testing.T
 	for _, want := range []string{
 		"pull_request:\n    branches: [main]",
 		"schedule:",
-		"if: github.event_name != 'schedule'",
+		"if: always() && github.event_name != 'schedule'",
 		"contents: read",
 		"name: Lint",
 		"run: make test",
@@ -92,6 +142,65 @@ func TestReleasePublishesProtectedMainTagsWithoutRepeatingPRQuality(t *testing.T
 	publish := strings.Index(release, "name: GoReleaser")
 	if guard < 0 || publish < 0 || guard >= publish {
 		t.Error("release must validate tag ancestry before publishing artifacts")
+	}
+}
+
+func TestReleaseCIApprovalPropagatesToRequiredChecks(t *testing.T) {
+	t.Parallel()
+
+	quality := readWorkflow(t, "../.github/workflows/quality.yml")
+	job := func(name string) string {
+		t.Helper()
+		_, section, ok := strings.Cut(quality, "\n  "+name+":\n")
+		if !ok {
+			t.Fatalf("missing quality job %s", name)
+		}
+		return regexp.MustCompile(`(?m)^  \S`).Split(section, 2)[0]
+	}
+	approval := job("release-ci-approval")
+	for _, want := range []string{
+		"if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'release-please--branches--main'",
+		"environment: release-ci",
+	} {
+		if !strings.Contains(approval, want) {
+			t.Fatalf("release approval missing %q", want)
+		}
+	}
+	for _, name := range []string{"govulncheck", "go-quality", "windows-host-open"} {
+		t.Run(name, func(t *testing.T) {
+			section := job(name)
+			condition := "if: always()\n"
+			if name != "govulncheck" {
+				condition = "if: always() && github.event_name != 'schedule'\n"
+			}
+			for _, want := range []string{
+				"needs: release-ci-approval",
+				condition,
+				"APPROVAL_RESULT: ${{ needs.release-ci-approval.result }}",
+			} {
+				if !strings.Contains(section, want) {
+					t.Fatalf("required check must observe approval failure instead of skipping: missing %q", want)
+				}
+			}
+			_, guard, ok := strings.Cut(section, "      - name: Check release CI approval\n")
+			if !ok || strings.Index(section, "name: Check release CI approval") > strings.Index(section, "uses: actions/checkout") {
+				t.Fatal("required check must validate approval before checkout")
+			}
+			guard, _, _ = strings.Cut(guard, "\n      - ")
+			_, script, ok := strings.Cut(guard, "        run: |\n")
+			if !ok {
+				t.Fatal("approval guard script missing")
+			}
+			for _, result := range []string{"success", "skipped", "failure", "cancelled", "", "unknown"} {
+				cmd := exec.Command(testBash(t), "-c", script)
+				cmd.Env = append(os.Environ(), "APPROVAL_RESULT="+result)
+				output, err := cmd.CombinedOutput()
+				want := result == "success" || result == "skipped"
+				if (err == nil) != want {
+					t.Fatalf("approval result %q: success=%v, want %v: %s", result, err == nil, want, output)
+				}
+			}
+		})
 	}
 }
 

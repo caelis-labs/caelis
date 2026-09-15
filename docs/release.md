@@ -45,6 +45,41 @@ historical CI runs or repeating ordinary tests. Maintainers must tag a reviewed
 commit on `main` without bypassing its required checks. Release workflows are
 serialized and do not cancel a publication already in progress.
 
+## Release bot setup
+
+The `release-please` workflow maintains one Release PR targeting `main`. It
+updates the root version in `.release-please-manifest.json` and generates
+`CHANGELOG.md`. All Go and npm packages continue to share that version; npm
+manifests are stamped from the tag during publication.
+
+Create a dedicated fine-grained PAT scoped to `caelis-labs/caelis`, with
+**Contents**, **Issues**, and **Pull requests** set to **Read and write**.
+The token owner must have repository write access; complete any organization
+approval required for the token. Store it as the repository Actions secret
+`RELEASE_PLEASE_TOKEN` and renew it before expiration. Do not grant the bot a
+branch-protection bypass or enable automatic merging.
+
+The dedicated token lets bot-created PRs and tags trigger the existing quality
+and release workflows. The default `GITHUB_TOKEN` suppresses those downstream
+runs; see [release-please authentication](https://github.com/googleapis/release-please-action#other-actions-on-release-please-prs).
+A missing secret fails with a setup diagnostic. After adding or rotating it,
+run the `release-please` workflow manually on `main` if a retry is needed.
+
+Configure the repository environment `release-ci` with the release maintainer
+as a required reviewer before enabling the workflow. Allow self-review when
+the maintainer also owns the bot PAT, so they can approve runs triggered by that
+token. This environment needs no secrets and controls CI startup only. Keep its
+required-reviewer rule enabled: GitHub creates a referenced but missing
+environment without protection rules.
+
+Use Conventional Commit PR titles and squash merge so the resulting commits
+retain their release meaning: `fix:` produces a patch, `feat:` produces a
+minor release, and `feat!:` or `BREAKING CHANGE:` records an incompatible change.
+While the version is below `1.0.0`, incompatible changes also bump the minor
+version. `chore:` and `docs:` alone do not open a Release PR. For an intentional
+version override, use a `Release-As: X.Y.Z` footer in a merged commit, following
+[release-please version overrides](https://github.com/googleapis/release-please#how-do-i-change-the-version-number).
+
 ## Preflight
 
 1. Confirm the worktree contains only intended changes and `main` is current
@@ -53,15 +88,16 @@ serialized and do not cancel a publication already in progress.
    and `https://caelis.dev/install.ps1`.
 3. Confirm every `@caelis/*` trusted publisher targets this repository,
    `release.yml`, and the `default` environment.
-4. Confirm `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, and `R2_ENDPOINT` are
-   available and the public release domain is active.
+4. Confirm `RELEASE_PLEASE_TOKEN`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, and
+   `R2_ENDPOINT` are available and the public release domain is active.
 5. Confirm the imported `github.com/caelis-labs/memory` version is released and
    declares a forward-migration floor for the persisted appliance database.
    A prerelease development baseline is a release blocker.
-6. Submit the intended changes through a PR, wait for its complete quality run,
-   and merge with the branch up to date. Tag the resulting commit on `main`, not
-   an intermediate PR commit. Do not rerun unchanged local gates just for a tag.
-7. Prepare concise user-visible release notes. When retiring a durable writer,
+6. Submit the intended changes through PRs, wait for their complete quality runs,
+   and merge with the branch up to date. Review the resulting Release PR's
+   version and changelog, approve its CI when ready to release, and wait for its
+   required checks too. Do not rerun unchanged local gates just for a tag.
+7. Ensure the release notes are concise and user-visible. When retiring a durable writer,
    record the last writer and first no-write version; retain its compatibility
    reader until the supported upgrade floor reaches that version.
 
@@ -69,19 +105,46 @@ Run optional architecture, SDK, protocol, race, regression, proxy, documentation
 or dry-run checks only when the release changes those boundaries. See
 [Testing](testing.md).
 
+## Approve release CI
+
+Release PR updates trigger a `quality` run that waits at `release-ci-approval`.
+To validate a release candidate, open that run in Actions, select **Review
+deployments**, select **release-ci**, and click **Approve and deploy**. Despite
+the button's name, this starts CI; it does not publish a release. See
+[GitHub's approval controls](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/review-deployments).
+
+The run then executes all three required checks against GitHub's PR merge ref.
+Wait for them to pass before merging the Release PR. Any further PR update
+cancels the previous run and requires approval again. **Reject** stops that
+candidate's checks and blocks merging. Normal PRs and scheduled vulnerability
+checks do not require this approval.
+
 ## Publish
 
-Create and push an annotated tag for the quality-approved SHA:
+Merge the reviewed, up-to-date Release PR when ready to publish. The bot creates
+the root `vX.Y.Z` tag at that merge commit and a GitHub Release containing the
+changelog. That tag triggers `release.yml`: GoReleaser attaches the CLI archives
+and checksums while preserving the bot's release notes. The GitHub Release may
+be visible before all distribution steps have finished; complete the acceptance
+checks below before announcing availability.
+
+The workflow then publishes the platform and main npm packages, verifies the
+GitHub assets, mirrors them under `releases/vX.Y.Z/` in R2, and updates `latest.txt`
+last. GitHub Releases remains the complete versioned archive.
+
+### Manual fallback
+
+If the bot is unavailable, first merge a reviewed PR updating the root manifest
+version and changelog to the intended release. Close any superseded Release PR.
+Create and push an annotated tag for that quality-approved SHA on `main`:
 
 ```bash
 git tag -a vX.Y.Z -m vX.Y.Z
 git push origin vX.Y.Z
 ```
 
-The workflow verifies that the tag belongs to `main`, runs GoReleaser, publishes
-the platform and main npm packages, verifies the GitHub assets, mirrors them under
-`releases/vX.Y.Z/` in R2, and updates `latest.txt` last. GitHub Releases remains
-the complete versioned archive.
+The same artifact workflow handles manual tags. Keep the manifest aligned with
+the released tag so the bot resumes from that version; never move a published tag.
 
 ## Acceptance
 

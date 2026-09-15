@@ -17,13 +17,34 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  release-ci-approval:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'release-please--branches--main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: release-ci
+    steps:
+      - name: Release CI approved
+        run: echo "Release PR CI approved for this revision."
+
   govulncheck:
+    needs: release-ci-approval
+    if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
       GOWORK: 'off'
       GOFLAGS: -mod=readonly
     steps:
+      - name: Check release CI approval
+        shell: bash
+        env:
+          APPROVAL_RESULT: ${{ needs.release-ci-approval.result }}
+        run: |
+          case "${APPROVAL_RESULT}" in
+            success|skipped) ;;
+            *) echo "Release CI approval was rejected or cancelled." >&2; exit 1 ;;
+          esac
+
       - uses: actions/checkout@v7
 
       - uses: actions/setup-go@v7
@@ -38,10 +59,21 @@ jobs:
         run: govulncheck -mode=source -scan=symbol ./...
 
   go-quality:
-    if: github.event_name != 'schedule'
+    needs: release-ci-approval
+    if: always() && github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
+      - name: Check release CI approval
+        shell: bash
+        env:
+          APPROVAL_RESULT: ${{ needs.release-ci-approval.result }}
+        run: |
+          case "${APPROVAL_RESULT}" in
+            success|skipped) ;;
+            *) echo "Release CI approval was rejected or cancelled." >&2; exit 1 ;;
+          esac
+
       - uses: actions/checkout@v7
 
       - uses: actions/setup-go@v7
@@ -66,13 +98,24 @@ jobs:
         run: make build
 
   windows-host-open:
-    if: github.event_name != 'schedule'
+    needs: release-ci-approval
+    if: always() && github.event_name != 'schedule'
     runs-on: windows-2022
     timeout-minutes: 20
     env:
       GOWORK: 'off'
       GOFLAGS: -mod=readonly -p=2
     steps:
+      - name: Check release CI approval
+        shell: bash
+        env:
+          APPROVAL_RESULT: ${{ needs.release-ci-approval.result }}
+        run: |
+          case "${APPROVAL_RESULT}" in
+            success|skipped) ;;
+            *) echo "Release CI approval was rejected or cancelled." >&2; exit 1 ;;
+          esac
+
       - uses: actions/checkout@v7
 
       - uses: actions/setup-go@v7
