@@ -65,6 +65,13 @@ runs; see [release-please authentication](https://github.com/googleapis/release-
 A missing secret fails with a setup diagnostic. After adding or rotating it,
 run the `release-please` workflow manually on `main` if a retry is needed.
 
+Configure the repository environment `release-ci` with the release maintainer
+as a required reviewer before enabling the workflow. Allow self-review when
+the maintainer also owns the bot PAT, so they can approve runs triggered by that
+token. This environment needs no secrets and controls CI startup only. Keep its
+required-reviewer rule enabled: GitHub creates a referenced but missing
+environment without protection rules.
+
 Use Conventional Commit PR titles and squash merge so the resulting commits
 retain their release meaning: `fix:` produces a patch, `feat:` produces a
 minor release, and `feat!:` or `BREAKING CHANGE:` records an incompatible change.
@@ -88,8 +95,8 @@ version override, use a `Release-As: X.Y.Z` footer in a merged commit, following
    A prerelease development baseline is a release blocker.
 6. Submit the intended changes through PRs, wait for their complete quality runs,
    and merge with the branch up to date. Review the resulting Release PR's
-   version and changelog, then wait for its required checks too. Do not rerun
-   unchanged local gates just for a tag.
+   version and changelog, approve its CI when ready to release, and wait for its
+   required checks too. Do not rerun unchanged local gates just for a tag.
 7. Ensure the release notes are concise and user-visible. When retiring a durable writer,
    record the last writer and first no-write version; retain its compatibility
    reader until the supported upgrade floor reaches that version.
@@ -97,6 +104,20 @@ version override, use a `Release-As: X.Y.Z` footer in a merged commit, following
 Run optional architecture, SDK, protocol, race, regression, proxy, documentation,
 or dry-run checks only when the release changes those boundaries. See
 [Testing](testing.md).
+
+## Approve release CI
+
+Release PR updates trigger a `quality` run that waits at `release-ci-approval`.
+To validate a release candidate, open that run in Actions, select **Review
+deployments**, select **release-ci**, and click **Approve and deploy**. Despite
+the button's name, this starts CI; it does not publish a release. See
+[GitHub's approval controls](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/review-deployments).
+
+The run then executes all three required checks against GitHub's PR merge ref.
+Wait for them to pass before merging the Release PR. Any further PR update
+cancels the previous run and requires approval again. **Reject** stops that
+candidate's checks and blocks merging. Normal PRs and scheduled vulnerability
+checks do not require this approval.
 
 ## Publish
 

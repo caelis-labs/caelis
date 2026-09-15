@@ -29,6 +29,20 @@ embedded Memory Open use `CGO_ENABLED=0`, matching the release configuration.
 Run additional owning tests for the changed contract; the focused gate does not
 replace Linux's general coverage or change-specific Windows validation.
 
+## Release PR CI approval
+
+Ordinary PRs run quality checks automatically. PRs from this repository's
+`release-please--branches--main` branch first wait for approval of the
+`release-ci` environment. Approving that run starts the same complete Linux,
+Windows, and vulnerability checks; release metadata changes do not exempt a PR
+from them. See [Release](release.md#approve-release-ci) for the approval steps.
+
+Until approval, the three required checks remain pending. Rejection or
+cancellation of the approval makes the required jobs fail before checkout,
+rather than reporting skipped quality checks as success. Each PR update starts
+a new run requiring approval and cancels the superseded run. Scheduled
+vulnerability checks continue without approval.
+
 ## Dependency update CI
 
 Dependabot PRs run the same required checks as other PRs; review does not
