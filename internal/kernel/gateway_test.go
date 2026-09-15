@@ -2407,6 +2407,7 @@ func TestResolveApprovalRequestSerializesDifferentModelSteps(t *testing.T) {
 	}
 	stepRefs["step-1"][1].MarkAdmissionComplete()
 	stepRefs["step-2"][1].MarkAdmissionComplete()
+	admitted := make(chan string, 2)
 	request := func(callID string, stepID string) *agent.ApprovalRequest {
 		return &agent.ApprovalRequest{
 			SessionRef: activeSession.SessionRef,
@@ -2416,6 +2417,13 @@ func TestResolveApprovalRequestSerializesDifferentModelSteps(t *testing.T) {
 			Tool:       tool.Definition{Name: "RunCommand"},
 			Call:       tool.Call{ID: callID, Name: "RunCommand"},
 			ModelStep:  stepRefs[stepID][0],
+			OnAdmission: func(ctx context.Context) error {
+				if deadline, ok := ctx.Deadline(); !ok || time.Until(deadline) <= 0 || time.Until(deadline) > AutoReviewTimeout {
+					return errors.New("admission did not retain the approval deadline")
+				}
+				admitted <- callID
+				return nil
+			},
 		}
 	}
 	type result struct {
@@ -2436,12 +2444,22 @@ func TestResolveApprovalRequestSerializesDifferentModelSteps(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("first auto-review did not start")
 	}
+	if callID := <-admitted; callID != "first" {
+		t.Fatalf("admitted %q first", callID)
+	}
 
 	go func() {
 		resp, err := gw.resolveApprovalRequest(context.Background(), context.Background(), handle, request("second", "step-2"), nil)
 		results <- result{callID: "second", resp: resp, err: err}
 	}()
-	waitForApprovalQueueLength(t, handle, 2)
+	select {
+	case callID := <-admitted:
+		if callID != "second" {
+			t.Fatalf("admitted %q second", callID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("queued approval did not acknowledge admission")
+	}
 	second := handle.approvals.queueSnapshot()[1]
 	select {
 	case <-second.activated:

@@ -28,6 +28,9 @@ func (tm *taskRuntime) waitCommandTask(
 	commandSession := task.observableCommandSession()
 	commandYield := req.Yield
 	if commandSession == nil {
+		if !task.waitForCommandProducer(ctx, req.Yield) {
+			return task.snapshotWithoutSession(tm.runtime.now()), ctx.Err()
+		}
 		var fallback taskapi.Snapshot
 		var err error
 		task, commandSession, fallback, err = tm.commandWaitTarget(ctx, ref, task, commandWaitBudget(req.Yield, waitStarted))

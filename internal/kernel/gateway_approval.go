@@ -61,6 +61,11 @@ func (g *Gateway) resolveApprovalRequest(
 	}
 	defer handle.releasePendingApproval(pending, "abandoned")
 	req = pending.request
+	if req.OnAdmission != nil {
+		if err := req.OnAdmission(approvalCtx); err != nil {
+			return agent.ApprovalResponse{}, err
+		}
+	}
 	if mode != ApprovalModeManual {
 		var cancel context.CancelFunc
 		approvalCtx, cancel = context.WithCancel(approvalCtx)

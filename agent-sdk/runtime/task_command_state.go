@@ -78,6 +78,10 @@ func (tm *taskRuntime) rehydrateCommandTask(entry *taskapi.Entry) (*commandTask,
 	if entry == nil {
 		return nil, fmt.Errorf("task entry is required")
 	}
+	execution, specErr := commandExecutionFromEntry(entry)
+	if specErr != nil {
+		return nil, specErr
+	}
 	seededOutput, seededFromResult := rehydratedCommandOutput(entry)
 	checkpoint := parseCommandOutputCheckpoint(entry)
 	restoredCheckpoint := checkpoint
@@ -99,6 +103,7 @@ func (tm *taskRuntime) rehydrateCommandTask(entry *taskapi.Entry) (*commandTask,
 		supportsInput: entry.SupportsInput,
 		parentCall:    taskSpecString(entry.Spec, "parent_call"),
 		requestDigest: taskSpecString(entry.Spec, "command_request_digest"),
+		execution:     execution,
 		title:         strings.TrimSpace(entry.Title),
 		createdAt:     entry.CreatedAt,
 		revision:      entry.Revision,
@@ -144,6 +149,14 @@ func (tm *taskRuntime) rehydrateCommandTask(entry *taskapi.Entry) (*commandTask,
 		}
 	}
 	phase := taskStringValue(entry.Metadata["command_phase"])
+	if phase == commandPhaseWaitingApproval {
+		if !taskapi.IsTerminalState(task.state) {
+			task.state, task.running = taskapi.StateInterrupted, false
+			task.metadata["state"], task.metadata["running"] = string(task.state), false
+			task.result = map[string]any{"state": string(task.state), "error": "approval owner was lost; the command was not started", "error_code": "approval_interrupted"}
+		}
+		return task, nil
+	}
 	if phase == commandPhaseIntent {
 		return task, nil
 	}
@@ -348,6 +361,7 @@ func (t *commandTask) entrySnapshot(now time.Time) *taskapi.Entry {
 			"session_id":             t.ref.SessionID,
 			"parent_call":            t.parentCall,
 			"command_request_digest": t.requestDigest,
+			"execution":              t.execution.value(),
 		},
 		Result:   commandTaskEntryResult(t.result, t.running),
 		Metadata: metadata,
@@ -363,6 +377,18 @@ func (t *commandTask) commandOutcomeUnattached() bool {
 	defer t.mu.Unlock()
 	phase := taskStringValue(t.metadata["command_phase"])
 	return strings.TrimSpace(t.ref.SessionID) == "" && (phase == commandPhaseEffectClaimed || phase == commandPhaseUnknown)
+}
+
+func (t *commandTask) approvalWithoutSession() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.session == nil && taskStringValue(t.metadata["command_phase"]) == commandPhaseWaitingApproval
+}
+
+func (t *commandTask) hasLiveContinuation() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.continuation.live()
 }
 
 func (t *commandTask) observableCommandSession() sandbox.Session {

@@ -59,10 +59,10 @@ func (s *terminalService) Wait(ctx context.Context, ref terminal.Ref) (terminal.
 		return terminal.Snapshot{}, err
 	}
 	for {
-		if task.commandOutcomeUnattached() || task.observableCommandSession() == nil {
+		if task.commandOutcomeUnattached() || (task.observableCommandSession() == nil && !task.hasLiveContinuation()) {
 			return s.Read(ctx, ref)
 		}
-		observed, waitErr := s.tasks.waitCommandCompletion(ctx, task, taskWaitMaxYield)
+		observed, waitErr := s.tasks.waitCommandTask(ctx, task.sessionRef, task, taskapi.ControlRequest{Yield: taskWaitMaxYield})
 		if waitErr != nil {
 			return terminal.Snapshot{}, waitErr
 		}
@@ -117,6 +117,9 @@ func commandStatusWithoutSession(task *commandTask) (sandbox.SessionStatus, erro
 	}
 	task.mu.Lock()
 	defer task.mu.Unlock()
+	if taskStringValue(task.metadata["command_phase"]) == commandPhaseWaitingApproval {
+		return sandbox.SessionStatus{Running: task.running, UpdatedAt: task.createdAt}, nil
+	}
 	if task.running || !taskapi.IsTerminalState(task.state) {
 		return sandbox.SessionStatus{}, fmt.Errorf("command Task %q has no observable sandbox Session", task.ref.TaskID)
 	}

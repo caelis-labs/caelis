@@ -52,9 +52,17 @@ type ApprovalRequest struct {
 	// PauseTokenID identifies the SDK-owned durable pause, when this approval
 	// was created by Runtime durable approval handling. Product Control may use
 	// it as the request correlation value without adding it to ACP wire payloads.
-	PauseTokenID string          `json:"pause_token_id,omitempty"`
-	Tool         tool.Definition `json:"tool"`
-	Call         tool.Call       `json:"call"`
+	PauseTokenID string `json:"pause_token_id,omitempty"`
+	// OperationTaskID associates the approval with a Job in SessionRef. It is
+	// separate from Origin.TaskID, which identifies the requesting Agent.
+	OperationTaskID string `json:"operation_task_id,omitempty"`
+	// OnAdmission acknowledges registration in the approval scheduler. Task
+	// producers may yield only after it succeeds. The supplied context carries
+	// the original approval deadline; observing a Task never renews it.
+	// Requesters which omit the acknowledgment retain synchronous observation.
+	OnAdmission func(context.Context) error `json:"-"`
+	Tool        tool.Definition             `json:"tool"`
+	Call        tool.Call                   `json:"call"`
 	// ModelStep identifies the model-emitted tool-call batch. Concurrent batches
 	// also carry a process-local admission barrier; neither is part of the ACP
 	// permission payload.

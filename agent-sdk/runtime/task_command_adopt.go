@@ -82,6 +82,15 @@ func (tm *taskRuntime) commandFromDurableEntry(entry *taskapi.Entry) (*commandTa
 	tm.mu.RLock()
 	current := tm.tasks[strings.TrimSpace(entry.TaskID)]
 	tm.mu.RUnlock()
+	if current != nil {
+		current.mu.Lock()
+		liveContinuation := current.continuation.live() && current.requestDigest == taskSpecString(entry.Spec, "command_request_digest")
+		current.mu.Unlock()
+		if liveContinuation {
+			applyCommandEntry(current, entry)
+			return current, nil
+		}
+	}
 	if current == nil || !entry.Running {
 		return tm.rehydrateCommandTask(entry)
 	}

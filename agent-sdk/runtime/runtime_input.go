@@ -19,6 +19,9 @@ func (c *localInputContext) CommitAgentInputBatch(inputs []agent.AgentCommunicat
 }
 
 func (c *localInputContext) DrainFinalSubmissions() []agent.Submission {
+	if !taskScopeFromContext(c.runner.ctx).wait(c.runner.ctx, c.runner.inputReadySignal()) {
+		return c.runner.drainSubmissions()
+	}
 	return c.runner.drainFinalSubmissions()
 }
 

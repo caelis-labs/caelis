@@ -32,9 +32,11 @@ import (
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
+	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/control/modelconfig/codexauth"
 	"github.com/caelis-labs/caelis/control/modelconfig/credentialstore"
+	"github.com/caelis-labs/caelis/internal/kernel"
 	"github.com/caelis-labs/caelis/internal/sandboxrouter"
 )
 
@@ -205,7 +207,7 @@ func runGuardianCommandE2E(t *testing.T, guardian model.LLM, alias, name string,
 	if err != nil {
 		t.Fatal(err)
 	}
-	agentRuntime, err := sdkruntime.New(sdkruntime.Config{Sessions: service, AgentFactory: chat.Factory{}, SandboxPolicy: sandbox.PolicySnapshot{Route: sandbox.RouteSandbox, Backend: native.Describe().Backend, Permission: sandbox.PermissionWorkspaceWrite, Network: sandbox.NetworkEnabled, WritableRoots: []string{workspace}}})
+	agentRuntime, err := sdkruntime.New(sdkruntime.Config{Sessions: service, TaskStore: sessionfile.NewTaskStore(service), AgentFactory: chat.Factory{}, SandboxPolicy: sandbox.PolicySnapshot{Route: sandbox.RouteSandbox, Backend: native.Describe().Backend, Permission: sandbox.PermissionWorkspaceWrite, Network: sandbox.NetworkEnabled, WritableRoots: []string{workspace}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,6 +220,13 @@ func runGuardianCommandE2E(t *testing.T, guardian model.LLM, alias, name string,
 	var reviewErr error
 	var reviews int
 	requester := guardianCommandRequester(func(ctx context.Context, request agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+		ctx, cancel := kernel.WithAutoReviewBudget(ctx)
+		defer cancel()
+		if request.OnAdmission != nil {
+			if err := request.OnAdmission(ctx); err != nil {
+				return agent.ApprovalResponse{}, err
+			}
+		}
 		reviews++
 		payload := approval.PayloadFromRuntimeRequest(request)
 		review, reviewErr = reviewer.Decide(ctx, approval.Request{SessionRef: request.SessionRef, RunID: request.RunID, TurnID: request.TurnID, ReviewID: request.Call.ID, Mode: approval.ModeAutoReview, Model: guardian, Approval: payload, RuntimeRequest: request})
@@ -226,7 +235,7 @@ func runGuardianCommandE2E(t *testing.T, guardian model.LLM, alias, name string,
 		}
 		return approval.RuntimeResponseFromFinalReview(review), nil
 	})
-	args := map[string]any{"command": command, "workdir": workspace, "sandbox_permissions": "use_default"}
+	args := map[string]any{"command": command, "workdir": workspace, "sandbox_permissions": "use_default", "yield_time_ms": 0}
 	if name == "unnecessary_host" {
 		args["sandbox_permissions"] = "require_escalated"
 		args["justification"] = "Generate the requested result file."
@@ -236,7 +245,8 @@ func runGuardianCommandE2E(t *testing.T, guardian model.LLM, alias, name string,
 		t.Fatal(err)
 	}
 	started := time.Now()
-	result, err := agentRuntime.Run(ctx, agent.RunRequest{SessionRef: active.SessionRef, Input: user, ApprovalRequester: requester, AgentSpec: agent.AgentSpec{Name: "command-fixture", Model: &guardianCommandMainModel{input: raw}, Tools: []tool.Tool{commandTool}, Metadata: map[string]any{policy.MetadataWritableRoots: []string{workspace}}}})
+	mainModel := &guardianCommandMainModel{input: raw, started: started}
+	result, err := agentRuntime.Run(ctx, agent.RunRequest{SessionRef: active.SessionRef, Input: user, ApprovalRequester: requester, AgentSpec: agent.AgentSpec{Name: "command-fixture", Model: mainModel, Tools: []tool.Tool{commandTool, tasktool.New()}, Metadata: map[string]any{policy.MetadataWritableRoots: []string{workspace}}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -256,6 +266,9 @@ func runGuardianCommandE2E(t *testing.T, guardian model.LLM, alias, name string,
 		if event.Type == session.EventTypeToolResult && event.Tool != nil && event.Tool.Name == shell.RunCommandToolName {
 			commandOutput = event.Tool.Output
 		}
+		if event.Type == session.EventTypeToolResult && event.Tool != nil && event.Tool.Name == tasktool.ToolName && event.Tool.Output["parent_tool"] == shell.RunCommandToolName {
+			commandOutput = event.Tool.Output
+		}
 	}
 	errorText := ""
 	if reviewErr != nil {
@@ -268,6 +281,8 @@ func runGuardianCommandE2E(t *testing.T, guardian model.LLM, alias, name string,
 	record["backend"] = native.Describe().Backend
 	record["expected_review"] = wantReview
 	record["repetition"] = repetition
+	record["initial_state"] = mainModel.initialState
+	record["first_result_ms"] = mainModel.firstResultMS
 	if snapshot, err := reviewer.conversations.snapshot(active.SessionID); err == nil {
 		var evidence []*session.EventTool
 		for _, event := range snapshot.Events {
@@ -346,19 +361,45 @@ func (f guardianCommandRequester) RequestApproval(ctx context.Context, r agent.A
 }
 
 type guardianCommandMainModel struct {
-	input json.RawMessage
-	calls int
+	input         json.RawMessage
+	calls         int
+	started       time.Time
+	initialState  string
+	firstResultMS int64
 }
 
 func (*guardianCommandMainModel) Name() string { return "deterministic-command" }
 func (*guardianCommandMainModel) Capabilities() model.Capabilities {
 	return model.Capabilities{ToolCalls: true, Streaming: true}
 }
-func (m *guardianCommandMainModel) Generate(_ context.Context, _ *model.Request) iter.Seq2[*model.StreamEvent, error] {
+func (m *guardianCommandMainModel) Generate(_ context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
 	m.calls++
 	message := model.NewTextMessage(model.RoleAssistant, "done")
 	if m.calls == 1 {
 		message = model.NewMessage(model.RoleAssistant, model.NewToolUsePart("command", shell.RunCommandToolName, m.input))
+	} else {
+		var latest map[string]any
+		for _, message := range req.Messages {
+			for _, result := range message.ToolResults() {
+				for _, part := range result.Content {
+					if part.Kind != model.PartKindJSON {
+						continue
+					}
+					var payload map[string]any
+					if json.Unmarshal(part.JSONValue(), &payload) == nil && payload["handle"] != nil {
+						latest = payload
+					}
+				}
+			}
+		}
+		if m.calls == 2 {
+			m.firstResultMS = time.Since(m.started).Milliseconds()
+			m.initialState, _ = latest["state"].(string)
+		}
+		if state := latest["state"]; state == "running" || state == "waiting_approval" {
+			raw, _ := json.Marshal(map[string]any{"action": "wait", "handle": latest["handle"]})
+			message = model.NewMessage(model.RoleAssistant, model.NewToolUsePart(fmt.Sprintf("wait-%d", m.calls), tasktool.ToolName, raw))
+		}
 	}
 	return func(yield func(*model.StreamEvent, error) bool) {
 		yield(model.StreamEventFromResponse(&model.Response{Message: message, StepComplete: true, TurnComplete: true}), nil)

@@ -35,6 +35,15 @@ func (tm *taskRuntime) cancelCommandClaimed(ctx context.Context, task *commandTa
 	task.mu.Lock()
 	running := task.running
 	phase := taskStringValue(task.metadata["command_phase"])
+	if phase == commandPhaseWaitingApproval && !taskapi.IsTerminalState(task.state) {
+		work := task.continuation
+		task.mu.Unlock()
+		if work != nil {
+			work.revoke(context.Canceled)
+		}
+		err := tm.finishUnstartedCommandClaimed(ctx, task, taskapi.StateCancelled, "approval_cancelled", "command cancelled before execution")
+		return task.snapshotWithoutSession(tm.runtime.now()), err
+	}
 	if !running {
 		task.mu.Unlock()
 		return tm.snapshotExistingCommand(ctx, task, 0)

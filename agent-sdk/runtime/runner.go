@@ -96,6 +96,9 @@ func (r *runner) submitContext(ctx context.Context, sub agent.Submission) error 
 		r.mu.Unlock()
 		return errRunnerSubmissionClosed
 	}
+	if sub.Kind == agent.SubmissionKindConversation {
+		taskScopeFromContext(r.ctx).revoke(errTaskAuthorizationChanged, false)
+	}
 	dispatcher := r.dispatcher
 	if dispatcher != nil {
 		r.mu.Unlock()
@@ -188,6 +191,7 @@ func (r *runner) Cancel() agent.CancelResult {
 	cancelHook := r.cancelHook
 	r.mu.Unlock()
 
+	taskScopeFromContext(r.ctx).revoke(context.Canceled, true)
 	if cancelFn != nil {
 		cancelFn()
 	}

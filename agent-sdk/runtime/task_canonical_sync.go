@@ -125,6 +125,11 @@ func (tm *taskRuntime) syncCanonicalToolOutput(ctx context.Context, ref session.
 }
 
 func (tm *taskRuntime) syncCanonicalTaskEntry(ctx context.Context, ref session.SessionRef, taskID string, kind taskapi.Kind, output map[string]any, event *session.Event) (bool, error) {
+	if kind == taskapi.KindCommand && taskStringValue(output["state"]) == string(taskapi.StateWaitingApproval) {
+		// Submission already persisted the intent. A delayed observation cannot
+		// move the producer back to approval after it has started or settled.
+		return true, nil
+	}
 	entry, ok := tm.storedTaskEntry(ctx, ref, taskID, kind)
 	if !ok {
 		return false, nil
@@ -243,6 +248,9 @@ func (tm *taskRuntime) backfillCanonicalTaskEntry(ctx context.Context, ref sessi
 	)
 	for _, event := range events {
 		for _, candidate := range canonicalTaskHistoryOutputs(event) {
+			if entry.Kind == taskapi.KindCommand && taskStringValue(candidate.Output["state"]) == string(taskapi.StateWaitingApproval) {
+				continue
+			}
 			if (candidate.Kind != "" && candidate.Kind != entry.Kind) || !canonicalTaskOutputMatchesEntry(entry, candidate.Output) {
 				continue
 			}
