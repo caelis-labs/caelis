@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 )
 
@@ -15,7 +16,7 @@ func TestContinueRunningDoesNotRenderMidTurnUserLine(t *testing.T) {
 	model.pendingQueue = append(model.pendingQueue, pendingPrompt{
 		execLine:    "steer after this step",
 		displayLine: "steer after this step",
-		state:       pendingPromptAwaitingActiveDisplay,
+		state:       pendingPromptDispatched,
 	})
 
 	next, _ := model.handleTaskResultMsg(TaskResultMsg{ContinueRunning: true})
@@ -23,7 +24,7 @@ func TestContinueRunningDoesNotRenderMidTurnUserLine(t *testing.T) {
 	if got := countUserNarrativeBlocksForTest(model, "steer after this step"); got != 0 {
 		t.Fatalf("user prompt blocks after ContinueRunning = %d, want 0 until insertion echo", got)
 	}
-	if len(model.pendingQueue) != 1 || !model.pendingQueue[0].awaitsAcceptedActiveDisplay() {
+	if len(model.pendingQueue) != 1 || model.pendingQueue[0].state != pendingPromptDispatched {
 		t.Fatalf("pendingQueue = %#v, want awaiting insertion echo", model.pendingQueue)
 	}
 }
@@ -37,7 +38,7 @@ func TestPendingImageRendersAsOrdinaryUserMessageOnGatewayEcho(t *testing.T) {
 		execLine:    "inspect this",
 		displayLine: display,
 		attachments: []Attachment{{Name: "shot.png", Offset: len([]rune("inspect this"))}},
-		state:       pendingPromptAwaitingActiveDisplay,
+		state:       pendingPromptDispatched,
 	})
 
 	model = model.handleUserMessageMsg(UserMessageMsg{Text: display}).(*Model)
@@ -52,13 +53,12 @@ func TestPendingImageRendersAsOrdinaryUserMessageOnGatewayEcho(t *testing.T) {
 	}
 }
 
-func TestPendingQueueAbortDropsAwaitingActiveDisplay(t *testing.T) {
+func TestPendingQueueAbortDropsDispatched(t *testing.T) {
 	t.Parallel()
 
 	queue := pendingPromptQueue{
 		{execLine: "queued later", displayLine: "queued later", state: pendingPromptQueued},
-		{execLine: "steer now", displayLine: "steer now", state: pendingPromptAwaitingActiveDisplay},
-		{execLine: "already shown", displayLine: "already shown", state: pendingPromptRendered},
+		{execLine: "steer now", displayLine: "steer now", state: pendingPromptDispatched},
 	}
 
 	next, hasNext := queue.onTurnEnd(false, true)
@@ -91,12 +91,12 @@ func TestActiveTurnPromptAbortWithoutEchoClearsPending(t *testing.T) {
 			model.pendingQueue = append(model.pendingQueue, pendingPrompt{
 				execLine:    prompt,
 				displayLine: prompt,
-				state:       pendingPromptAwaitingActiveDisplay,
+				state:       pendingPromptDispatched,
 			})
 
 			next, _ := model.handleTaskResultMsg(TaskResultMsg{ContinueRunning: true})
 			model = next.(*Model)
-			if !model.pendingQueue[0].awaitsAcceptedActiveDisplay() {
+			if model.pendingQueue[0].state != pendingPromptDispatched {
 				t.Fatalf("pendingQueue after ContinueRunning = %#v, want awaiting insertion echo", model.pendingQueue)
 			}
 
@@ -138,7 +138,7 @@ func TestEscCancelledLifecycleClearsPendingWithoutEcho(t *testing.T) {
 	model.pendingQueue = append(model.pendingQueue, pendingPrompt{
 		execLine:    prompt,
 		displayLine: prompt,
-		state:       pendingPromptAwaitingActiveDisplay,
+		state:       pendingPromptDispatched,
 	})
 
 	next, _ := model.handleTaskResultMsg(TaskResultMsg{ContinueRunning: true})
@@ -152,5 +152,64 @@ func TestEscCancelledLifecycleClearsPendingWithoutEcho(t *testing.T) {
 	}
 	if len(model.pendingQueue) != 0 || model.pendingQueue.visibleCount() != 0 {
 		t.Fatalf("pendingQueue after Esc cancel = %#v, want empty", model.pendingQueue)
+	}
+}
+
+func TestCanonicalUserEventConsumesOnlyDispatchedPrompt(t *testing.T) {
+	t.Parallel()
+	const text = "same prompt"
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model.pendingQueue = pendingPromptQueue{
+		{localID: 1, execLine: text, state: pendingPromptQueued},
+		{localID: 2, execLine: text, state: pendingPromptDispatchScheduled},
+		{localID: 3, execLine: text, state: pendingPromptDispatched},
+		{localID: 4, execLine: text, state: pendingPromptDispatched},
+	}
+	event := TranscriptEvent{Kind: TranscriptEventNarrative, Scope: ACPProjectionMain,
+		ScopeID: "session-1", TurnID: "turn-1", SourceEventID: "user-1",
+		NarrativeKind: TranscriptNarrativeUser, Text: text, Final: true}
+	model.Update(TranscriptEventsMsg{Events: []TranscriptEvent{event}})
+	if len(model.pendingQueue) != 3 || model.pendingQueue[0].localID != 1 || model.pendingQueue[1].localID != 2 || model.pendingQueue[2].localID != 4 {
+		t.Fatalf("pending after event = %#v, want only first dispatched entry removed", model.pendingQueue)
+	}
+	model.Update(TranscriptEventsMsg{Events: []TranscriptEvent{event}})
+	if len(model.pendingQueue) != 3 {
+		t.Fatalf("pending after retransmission = %#v, want no further consumption", model.pendingQueue)
+	}
+	if got := countUserNarrativeBlocksForTest(model, text); got != 1 {
+		t.Fatalf("user blocks after retransmission = %d, want one", got)
+	}
+	event.SourceEventID = "user-2"
+	model.Update(TranscriptEventsMsg{Events: []TranscriptEvent{event}})
+	if len(model.pendingQueue) != 2 || model.pendingQueue[0].localID != 1 || model.pendingQueue[1].localID != 2 {
+		t.Fatalf("pending after distinct event = %#v, want undispatched entries preserved", model.pendingQueue)
+	}
+	if got := countUserNarrativeBlocksForTest(model, text); got != 2 {
+		t.Fatalf("user blocks after distinct event = %d, want two", got)
+	}
+}
+
+func TestRejectedEchoRacePreservesUnsentIdenticalInputs(t *testing.T) {
+	for _, outcome := range []appserver.Outcome{appserver.OutcomeRejected, appserver.OutcomeConflicted} {
+		t.Run(string(outcome), func(t *testing.T) {
+			m := NewModel(Config{NoColor: true, NoAnimation: true})
+			const text = "same input"
+			m.pendingQueue = pendingPromptQueue{
+				{localID: 1, execLine: text, state: pendingPromptQueued},
+				{localID: 2, execLine: text, state: pendingPromptDispatchScheduled},
+				{localID: 3, execLine: text, state: pendingPromptDispatched},
+			}
+			m.Update(UserMessageMsg{Text: text})
+			m.handleFailedActiveSubmission(Submission{localID: 3, Text: text}, outcome)
+			if len(m.pendingQueue) != 2 || m.pendingQueue[0].localID != 1 || m.pendingQueue[1].localID != 2 {
+				t.Fatalf("failed submission consumed unsent input: %#v", m.pendingQueue)
+			}
+			if m.textarea.Value() != text {
+				t.Fatalf("failed draft = %q, want %q", m.textarea.Value(), text)
+			}
+			if got := countUserNarrativeBlocksForTest(m, text); got != 1 {
+				t.Fatalf("observed user messages = %d, want one", got)
+			}
+		})
 	}
 }

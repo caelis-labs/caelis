@@ -315,7 +315,7 @@ func (m *Model) applyTranscriptNarrative(event TranscriptEvent) (tea.Model, tea.
 		if event.Scope == ACPProjectionParticipant {
 			return m.handleDirectedParticipantUserMessage(event), nil
 		}
-		return m.handleUserMessageMsg(UserMessageMsg{Text: event.Text}), nil
+		return m.applyGatewayUserEcho(gatewayUserEchoOptions{displayLine: event.Text, event: event}), nil
 	case TranscriptNarrativeSystem, TranscriptNarrativeNotice:
 		return m.appendEventStreamTranscriptText(event.Text)
 	}
@@ -338,9 +338,9 @@ func (m *Model) handleDirectedParticipantUserMessage(event TranscriptEvent) tea.
 	// Participant echoes are directed side-agent prompts; they must not close
 	// or finalize any active main ACP turn.
 	return m.applyGatewayUserEcho(gatewayUserEchoOptions{
-		displayLine:        text,
-		dequeueNeedles:     []string{directedParticipantUserDequeueText(event)},
-		participantTurnKey: transcriptParticipantTurnKey(event),
+		displayLine:    text,
+		dequeueNeedles: []string{directedParticipantUserDequeueText(event)},
+		event:          event,
 	})
 }
 

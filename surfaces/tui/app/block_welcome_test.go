@@ -641,8 +641,8 @@ func TestAcceptedOrdinarySubmissionDismissesWelcomeAndKeepsInitialLogs(t *testin
 		strings.Contains(plain, welcomeActions[0].label) {
 		t.Fatalf("submitted workspace still contains welcome content\n%s", plain)
 	}
-	if !strings.Contains(plain, "sandbox ready") || !strings.Contains(plain, "inspect the repository") {
-		t.Fatalf("submitted workspace lost logs or user message\n%s", plain)
+	if !strings.Contains(plain, "sandbox ready") || strings.Contains(plain, "inspect the repository") {
+		t.Fatalf("submitted workspace must preserve logs without an unobserved user message\n%s", plain)
 	}
 	if len(plainRows) == 0 || strings.TrimSpace(plainRows[0]) == "" {
 		t.Fatalf("welcome cleanup left leading blank rows: %#v", plainRows)

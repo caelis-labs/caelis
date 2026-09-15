@@ -492,72 +492,6 @@ func (m *Model) handleUserMessageMsg(msg UserMessageMsg) tea.Model {
 	})
 }
 
-// lastVisibleUserNarrativeMatchesForEcho applies gateway-user echo dedup. Local
-// submission rendering uses commitUserDisplayLine directly; ACP/user transcript
-// messages enter here so a late echo can be matched even after the current main
-// turn block has started.
-func (m *Model) lastVisibleUserNarrativeMatchesForEcho(text string, participantTurnKey string) bool {
-	if m == nil || m.doc == nil {
-		return false
-	}
-	normalized := normalizeUserDisplayLine(text)
-	if normalized == "" {
-		return false
-	}
-	blocks := m.doc.Blocks()
-	if len(blocks) == 0 {
-		return false
-	}
-	for i := len(blocks) - 1; i >= 0; i-- {
-		switch block := blocks[i].(type) {
-		case *UserNarrativeBlock:
-			return userDisplayLinesMatchForDedup(block.Raw, text)
-		case *MainACPTurnBlock:
-			if m.mainACPTurnBlockAllowsUserEchoDedup(block) {
-				continue
-			}
-			return false
-		case *ParticipantTurnBlock:
-			if strings.TrimSpace(participantTurnKey) != "" && m.participantTurnBlockAllowsUserEchoDedup(block, participantTurnKey) {
-				continue
-			}
-			return false
-		case *TranscriptBlock:
-			if strings.TrimSpace(block.Raw) == "" {
-				continue
-			}
-			return false
-		default:
-			return false
-		}
-	}
-	return false
-}
-
-func (m *Model) mainACPTurnBlockAllowsUserEchoDedup(block *MainACPTurnBlock) bool {
-	if m == nil || block == nil {
-		return false
-	}
-	return turnBlockAllowsUserEchoDedup(m.mainTimelineTailID, block.BlockID(), block.EndedAt, len(block.Events))
-}
-
-func (m *Model) participantTurnBlockAllowsUserEchoDedup(block *ParticipantTurnBlock, participantTurnKey string) bool {
-	if m == nil || block == nil {
-		return false
-	}
-	if strings.TrimSpace(participantTurnKey) == "" || strings.TrimSpace(participantTurnKey) != strings.TrimSpace(block.SessionID) {
-		return false
-	}
-	return turnBlockAllowsUserEchoDedup(participantTurnKey, block.SessionID, block.EndedAt, len(block.Events))
-}
-
-func turnBlockAllowsUserEchoDedup(activeKey, blockKey string, endedAt time.Time, eventCount int) bool {
-	if strings.TrimSpace(activeKey) != "" && strings.TrimSpace(activeKey) == strings.TrimSpace(blockKey) {
-		return true
-	}
-	return endedAt.IsZero() && eventCount == 0
-}
-
 func (m *Model) handleBTWErrorMsg(msg BTWErrorMsg) tea.Model {
 	if m.btwOverlay == nil && m.btwDismissed {
 		return m
@@ -685,8 +619,8 @@ func (m *Model) handleFailedActiveSubmission(submission Submission, outcome apps
 			// A same-text gateway echo may have raced ahead and consumed this
 			// rejected entry. Because this outcome proves no effect, that echo
 			// belongs to another equivalent pending submission; consume its
-			// remaining queue entry before restoring the exact failed draft.
-			_, _ = m.pendingQueue.removeMatching(submission.Text, submission.DisplayText)
+			// remaining dispatched entry before restoring the exact failed draft.
+			_, _ = m.pendingQueue.matchGatewayEcho(submission.Text, submission.DisplayText)
 		}
 		pending = pendingPrompt{
 			localID:     submission.localID,

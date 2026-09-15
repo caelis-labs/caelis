@@ -130,11 +130,7 @@ func (m *Model) handleSubmissionDispatch(msg submissionDispatchMsg) (tea.Model, 
 		return m, m.executeLineCmd(submission)
 	}
 	if m.turnRunning() && m.liveTurn.generation == msg.turnGeneration {
-		if !m.pendingQueue.markDispatched(
-			submission.localID,
-			m.deferLocalUserDisplayLine(submission.Text),
-			submission.Mode,
-		) {
+		if !m.pendingQueue.markDispatched(submission.localID) {
 			return m, nil
 		}
 		return m, m.executeLineCmd(submission)

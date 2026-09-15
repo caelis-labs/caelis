@@ -569,6 +569,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if key.Matches(msg, m.keys.Quit) {
 		return m, m.requestSurfaceQuit()
 	}
+	m.ctrlCArmed = false
+	m.lastCtrlCAt = time.Time{}
 	if msg.String() == "ctrl+d" {
 		m.quit = true
 		return m, tea.Quit
@@ -610,10 +612,6 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.requestRunningInterrupt()
 	}
 	m.clearInputSelection()
-	if !key.Matches(msg, m.keys.Quit) {
-		m.ctrlCArmed = false
-		m.lastCtrlCAt = time.Time{}
-	}
 	if matchesModeKey(msg, m.keys.Mode) && m.cfg.ToggleMode != nil {
 		hint, err := m.cfg.ToggleMode()
 		if err != nil {
@@ -704,7 +702,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.syncInputFromTextareaAndFollow()
 			return m, cmd
 		}
-		if !m.turnRunning() && len(m.history) > 0 {
+		if len(m.history) > 0 {
 			val := m.textarea.Value()
 			if m.historyIndex == -1 {
 				m.historyDraft = val
@@ -726,7 +724,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.syncInputFromTextareaAndFollow()
 			return m, cmd
 		}
-		if !m.turnRunning() && m.historyIndex != -1 {
+		if m.historyIndex != -1 {
 			if m.historyIndex < len(m.history)-1 {
 				m.historyIndex++
 				m.restoreHistoryEntry(m.history[m.historyIndex], m.historyAttachments[m.historyIndex])
@@ -1408,7 +1406,7 @@ func (m *Model) submitLineWithDisplayAndAttachmentsOptions(execLine string, disp
 	case SubmissionModeOverlay:
 		m.openBTWOverlay(execLine)
 	default:
-		deferDisplayLine := m.deferLocalUserDisplayLine(execLine)
+		m.dismissWelcomeCard()
 		if alreadyRunning {
 			m.pendingQueue.enqueue(pendingPromptEnqueueOptions{
 				localID:        localID,
@@ -1417,8 +1415,6 @@ func (m *Model) submitLineWithDisplayAndAttachmentsOptions(execLine string, disp
 				attachments:    attachments,
 				deferUntilIdle: deferUntilIdle,
 			})
-		} else if !deferDisplayLine {
-			m.commitUserDisplayLine(displayLine)
 		}
 	}
 	m.setViewportFollowState(viewportFollowTail)
@@ -1520,17 +1516,6 @@ func resolveSubmissionModes(uiMode SubmissionMode, alreadyRunning bool, canSubmi
 		gatewayMode:    gatewayMode,
 		deferUntilIdle: deferUntilIdle,
 	}
-}
-
-func (m *Model) deferLocalUserDisplayLine(line string) bool {
-	name := slashCommandName(line)
-	if name == "" {
-		return false
-	}
-	if strings.EqualFold(name, "review") {
-		return true
-	}
-	return m.isConfiguredAgentSlashLine(line)
 }
 
 func (m *Model) executeLineCmd(submission Submission) tea.Cmd {
