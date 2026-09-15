@@ -13,7 +13,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	"github.com/caelis-labs/caelis/agent-sdk/task/output"
-	tasksubagent "github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	"github.com/caelis-labs/caelis/internal/acptest/jsonrpc"
@@ -76,7 +75,7 @@ func TestSpawnDoesNotProjectInitialInputWhenDispatchDoesNotStart(t *testing.T) {
 	observeCtx, cancelObserve := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancelObserve()
 
-	runner := spawnInputProjectionTestRunner(t, "no-echo", func(context.Context, tasksubagent.SpawnContext, string, AgentConfig) (controlagents.SessionOptions, error) {
+	runner := spawnInputProjectionTestRunner(t, "no-echo", func(context.Context, string, AgentConfig) (controlagents.SessionOptions, error) {
 		// Session setup is complete and zero options make the following apply a
 		// no-op. Cancel here so the real initial PreparedPrompt dispatch observes
 		// RequestSubmissionNotStarted without a timing race.

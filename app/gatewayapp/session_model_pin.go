@@ -10,7 +10,6 @@ import (
 	"sync"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	tasksubagent "github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/internal/kernel"
@@ -198,7 +197,6 @@ func (r *sessionModelPinRegistry) config(ctx context.Context, sessionID string) 
 
 func (s *runtimeComposition) prepareSpawnedACPSession(
 	ctx context.Context,
-	_ tasksubagent.SpawnContext,
 	sessionID string,
 	config assembly.AgentConfig,
 ) (controlagents.SessionOptions, error) {
