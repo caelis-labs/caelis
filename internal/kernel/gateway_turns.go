@@ -14,6 +14,7 @@ import (
 	policyapi "github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/internal/kernel/hooks"
+	"github.com/google/uuid"
 )
 
 func (g *Gateway) BeginTurn(ctx context.Context, req BeginTurnRequest) (BeginTurnResult, error) {
@@ -56,7 +57,7 @@ func (g *Gateway) BeginTurn(ctx context.Context, req BeginTurnRequest) (BeginTur
 	}
 	handleID := g.allocateID("handle")
 	runID := g.allocateID("run")
-	turnID := g.allocateID("turn")
+	turnID := "turn-" + uuid.NewString()
 	handle := newTurnHandle(turnHandleConfig{
 		ctx:                     runCtx,
 		handleID:                handleID,
@@ -177,6 +178,7 @@ func (g *Gateway) runTurn(
 
 	runReq := resolved.RunRequest
 	runReq.SessionRef = session.SessionRef
+	runReq.TurnID = handle.TurnID()
 	if runReq.InputKind == "" {
 		runReq.InputKind = req.InputKind
 	}

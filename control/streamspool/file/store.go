@@ -16,15 +16,15 @@ import (
 )
 
 const (
-	defaultSegmentBytes       = int64(64 << 20)
+	defaultSegmentBytes       = int64(1 << 20)
 	defaultMaxBytes           = int64(1 << 30)
-	defaultMaxStreamBytes     = int64(256 << 20)
+	defaultMaxStreamBytes     = int64(16 << 20)
 	defaultMaxRegistrations   = 4096
 	defaultMaxReaders         = 8192
 	defaultMaxReadersPerPart  = 64
 	defaultMaxPartitions      = 16384
 	defaultMaxSegments        = 32768
-	defaultMaxSegmentsPerPart = 8
+	defaultMaxSegmentsPerPart = 32
 	defaultPartitionCharge    = int64(32 << 10)
 	defaultSegmentCharge      = int64(8 << 10)
 	defaultTerminalTTL        = 24 * time.Hour
@@ -65,6 +65,7 @@ type partition struct {
 	store          *Store
 	key            streamspool.Key
 	originComplete bool
+	published      bool
 	dir            string
 
 	mu            sync.Mutex
@@ -79,12 +80,16 @@ type partition struct {
 	physical      bool
 	allocSegments int
 	readers       int
+	leases        map[*reader]struct{}
 	writerActive  bool
 	updatedAt     time.Time
 }
 
 // Store owns one process epoch and every writer/reader in it.
 type Store struct {
+	// Admission serializes append/pressure reclamation. Readers remain independent;
+	// no writer can reserve against space another writer is about to reclaim.
+	admission  sync.Mutex
 	writeCalls atomic.Uint64
 	writeBytes atomic.Uint64
 	cfg        Config
@@ -264,7 +269,7 @@ func (s *Store) Register(ctx context.Context, logical streamspool.LogicalKey, op
 	}
 	key := streamspool.Key{LogicalKey: logical, Epoch: s.epoch, Incarnation: incarnation}
 	p := &partition{
-		store: s, key: key, originComplete: options.OriginComplete,
+		store: s, key: key, originComplete: options.OriginComplete, published: !options.Unpublished,
 		dir: partitionRelativeDir(key), notify: make(chan struct{}),
 		state: streamspool.StatePending, writerActive: true, updatedAt: s.cfg.Now(),
 	}
@@ -297,6 +302,7 @@ func (s *Store) Publish(ctx context.Context, key streamspool.Key) error {
 	}
 	previous := s.partitions[s.current[key.LogicalKey]]
 	s.current[key.LogicalKey] = key
+	p.published = true
 	s.mu.Unlock()
 	p.mu.Unlock()
 	if previous != nil && previous != p {
@@ -383,9 +389,14 @@ func (s *Store) readerForPartition(p *partition, key streamspool.Key, offset str
 	}
 	s.readerCount++
 	p.readers++
+	r := &reader{partition: p, key: key, offset: offset, closedCh: make(chan struct{})}
+	if p.leases == nil {
+		p.leases = make(map[*reader]struct{})
+	}
+	p.leases[r] = struct{}{}
 	s.mu.Unlock()
 	p.mu.Unlock()
-	return &reader{partition: p, key: key, offset: offset, closedCh: make(chan struct{})}, nil
+	return r, nil
 }
 
 func (s *Store) lookup(ctx context.Context, key streamspool.Key) (*partition, error) {

@@ -59,7 +59,10 @@ func (r *Runtime) runACPControllerTurn(
 		return agent.RunResult{}, fmt.Errorf("agent-sdk/runtime: ACP controller backend is not configured")
 	}
 	runID := r.nextID("run", r.runIDGenerator)
-	turnID := r.nextID("turn", nil)
+	turnID := strings.TrimSpace(req.TurnID)
+	if turnID == "" {
+		turnID = r.nextID("turn", nil)
+	}
 	ctx = withLifecycleScope(ctx, lifecycleScope{sessionRef: ref, runID: runID, turnID: turnID})
 	if err := r.beginRun(ref, runID); err != nil {
 		cancel()

@@ -85,7 +85,7 @@ func (s *service) childRead(ctx context.Context, entry *task.Entry, point cursor
 		return s.childAppendPage(ctx, entry, current)
 	}
 	var records []Record
-	next := cursorPoint{Key: current.key}
+	next := cursorPoint{Key: current.key, Offset: current.offset, Sequence: current.seq}
 	bytes := 0
 	for next.Offset < current.bounds.High {
 		current.offset, current.seq = next.Offset, next.Sequence

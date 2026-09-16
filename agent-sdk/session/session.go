@@ -228,7 +228,8 @@ const (
 	VisibilityOverlay   Visibility = "overlay"
 	VisibilityMirror    Visibility = "mirror"
 	// VisibilityJournal marks durable execution-control facts that are excluded
-	// from canonical model history and transcript replay.
+	// from canonical model history. Only completed reviewed approval decisions
+	// have a client projection; other journal facts remain internal.
 	VisibilityJournal Visibility = "journal"
 )
 

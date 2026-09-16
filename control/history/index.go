@@ -1,5 +1,5 @@
-// Package history indexes immutable Control replay sources. It stores only
-// positions and Turn boundaries; source records remain the sole content owner.
+// Package history provides Control replay indexes and bounded display
+// projections. Source records remain authoritative for history and model context.
 package history
 
 import (

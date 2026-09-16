@@ -27,11 +27,14 @@ func IsCanonicalHistoryEvent(event *Event) bool {
 }
 
 // IsClientReplayEvent reports whether one durable event belongs to the client
-// semantic replay lane. Mirrors are included without becoming model context;
-// transient, overlay, notice, and journal state remain excluded.
+// semantic replay lane. Mirrors and completed reviewed approval decisions are
+// included without becoming model context; other journal state stays internal.
 func IsClientReplayEvent(event *Event) bool {
-	if event == nil || IsTransient(event) || IsJournal(event) {
+	if event == nil || IsTransient(event) {
 		return false
+	}
+	if IsJournal(event) {
+		return ResolvedApprovalReview(event) != nil
 	}
 	// Agent-authored Context is durable model input, not a client-feed fact.
 	// Unless it carries an explicit protocol or usage projection, treating it
@@ -48,9 +51,8 @@ func IsClientReplayEvent(event *Event) bool {
 	return IsCanonicalHistoryEvent(event) || IsMirror(event)
 }
 
-// FilterClientReplayEvents returns canonical and mirror events in source
-// order. It is intentionally independent from model-context and bounded TUI
-// transcript replay filters.
+// FilterClientReplayEvents returns client-projectable durable events in source
+// order, independently from model-context and bounded transcript replay filters.
 func FilterClientReplayEvents(events []*Event) []*Event {
 	out := make([]*Event, 0, len(events))
 	for _, event := range events {

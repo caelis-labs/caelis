@@ -40,6 +40,12 @@ func (r *Runner) loadChildEndpointLocked(
 	if recovery == nil {
 		return nil, session.LoadedSession{}, fmt.Errorf("target Agent reconnect context is required")
 	}
+	select {
+	case historyReplaySlots <- struct{}{}:
+		defer func() { <-historyReplaySlots }()
+	case <-ctx.Done():
+		return nil, session.LoadedSession{}, ctx.Err()
+	}
 	recovery = tasksubagent.CloneReconnectRequest(recovery)
 	spawn := recovery.Spawn
 	anchor = delegation.CloneAnchor(anchor)
@@ -87,7 +93,7 @@ func (r *Runner) loadChildEndpointLocked(
 	}()
 
 	collector := newHistoryCollector(r, anchor, cfg.Name)
-	defer func() { collector.closeStaging() }()
+	defer func() { collector.closeProjection() }()
 	run.replay = collector
 	launchEnv := childRecoveryEnvironment(cfg)
 
@@ -130,13 +136,9 @@ func (r *Runner) loadChildEndpointLocked(
 		func(loadCtx context.Context, activeClient *client.Client) (client.LoadSessionResponse, error) {
 			// A proven auth-required retry starts a new complete replay, never appends
 			// a rejected load's partial history or initialization notices.
-			collector.closeStaging()
+			collector.closeProjection()
 			collector = newHistoryCollector(r, anchor, cfg.Name)
-			if metadataOnly {
-				if _, ok := spawn.Output.(output.StreamingHistoryObserver); ok {
-					collector.openStaging()
-				}
-			}
+			collector.openProjection()
 			run.mu.Lock()
 			run.replay = collector
 			run.mu.Unlock()
@@ -145,7 +147,7 @@ func (r *Runner) loadChildEndpointLocked(
 					if err := collector.errSnapshot(); err != nil {
 						return err
 					}
-					if observer, ok := spawn.Output.(output.StreamingHistoryObserver); ok && collector.staging != nil {
+					if observer, ok := spawn.Output.(output.StreamingHistoryObserver); ok && collector.projection != nil {
 						if err := observer.ReplaceTaskHistoryStream(boundaryCtx, collector.streamEvents); err != nil {
 							return err
 						}

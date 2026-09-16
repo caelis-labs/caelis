@@ -81,7 +81,7 @@ func TestCommandApprovalYieldsWithinRunAndPreservesCanonicalHistory(t *testing.T
 		approvalEntered <- req
 		select {
 		case <-approve:
-			return agent.ApprovalResponse{Approved: true, Outcome: "selected", OptionID: "allow_once"}, nil
+			return agent.ApprovalResponse{Approved: true, Outcome: "selected", OptionID: "allow_once", ReviewText: "approved"}, nil
 		case <-ctx.Done():
 			return agent.ApprovalResponse{}, ctx.Err()
 		}
@@ -166,8 +166,14 @@ func TestCommandApprovalYieldsWithinRunAndPreservesCanonicalHistory(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	results, terminalReceipts := 0, 0
+	results, terminalReceipts, reviewed := 0, 0, 0
 	for _, event := range events {
+		if token := session.ResolvedApprovalReview(event); token != nil {
+			reviewed++
+			if !session.IsClientReplayEvent(event) || session.IsCanonicalHistoryEvent(event) || token.ToolCallID != "pending-command" {
+				t.Fatalf("review visibility or identity changed: %#v", event)
+			}
+		}
 		if event.Tool != nil && event.Tool.ID == "pending-command" && session.EventTypeOf(event) == session.EventTypeToolResult {
 			results++
 		}
@@ -175,10 +181,34 @@ func TestCommandApprovalYieldsWithinRunAndPreservesCanonicalHistory(t *testing.T
 			terminalReceipts++
 		}
 	}
-	if results != 1 || terminalReceipts != 1 {
-		t.Fatalf("canonical results/terminal receipts = %d/%d", results, terminalReceipts)
+	if results != 1 || terminalReceipts != 1 || reviewed != 1 {
+		t.Fatalf("canonical results/terminal receipts/reviews = %d/%d/%d", results, terminalReceipts, reviewed)
 	}
-	assertSubagentSagaModelRoundTrip(t, sessionfile.NewStore(sessionfile.Config{RootDir: root}), active.SessionRef)
+	reopened := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+	reviewed = 0
+	var after uint64
+	for {
+		page, err := reopened.EventsPage(ctx, session.EventPageRequest{SessionRef: active.SessionRef, AfterSeq: after, Visibility: session.EventPageClientReplay})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, event := range page.Events {
+			if token := session.ResolvedApprovalReview(event); token != nil {
+				reviewed++
+				if !token.Approved || token.ToolCallID != "pending-command" {
+					t.Fatalf("reopened decision = %#v", token)
+				}
+			}
+		}
+		if !page.HasMore {
+			break
+		}
+		after = page.NextSeq
+	}
+	if reviewed != 1 {
+		t.Fatalf("reopened client replay reviews = %d", reviewed)
+	}
+	assertSubagentSagaModelRoundTrip(t, reopened, active.SessionRef)
 }
 
 func TestCommandApprovalUsesOneInlineBudget(t *testing.T) {

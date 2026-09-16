@@ -63,21 +63,22 @@ func (nopObserver) ObserveTaskOutput(context.Context, Event) error { return nil 
 // Nop returns an observer suitable when the application trace is unavailable.
 func Nop() Observer { return nopObserver{} }
 
-// HistoryObserver accepts an ordered, complete provider replay before new live
+// HistoryObserver accepts an ordered provider display snapshot before new live
 // output on the same producer connection. It replaces only observation history,
 // never Session model context or Task lifecycle. Acceptance is not disk durability.
-// Implementations must bound retained work and report inability to accept it.
+// Display snapshots may omit old detail or prefixes; implementations bound
+// retained work and report inability to accept a replacement atomically.
 type HistoryObserver interface {
 	ReplaceTaskHistory(context.Context, []*session.Event) error
 }
 
-// HistorySource emits a complete ordered observation replay. The consumer must
+// HistorySource emits one ordered observation snapshot. The consumer must
 // finish using each event before returning from yield. Source ownership remains
 // with the caller until ReplaceTaskHistoryStream returns, including cancellation.
 type HistorySource func(context.Context, func(*session.Event) error) error
 
 // StreamingHistoryObserver accepts history without retaining the whole replay
-// in memory. Returning success means the complete observation replacement was
+// in memory. Returning success means the bounded observation replacement was
 // accepted; failure must not expose a partial replacement. This does not change
 // canonical Session state, model context, or Task lifecycle.
 type StreamingHistoryObserver interface {

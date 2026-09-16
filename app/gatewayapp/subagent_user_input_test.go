@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -137,6 +138,20 @@ func runHostedSubagentUserInput(t *testing.T, assemble func(*Stack) (appserver.A
 	if child.ID == "" {
 		t.Fatal("Spawn did not attach child")
 	}
+	// The first provider request proves ACP setup completed before inspecting
+	// the effective mode; attachment alone may precede configuration.
+	select {
+	case <-provider.firstRequest:
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	childState, err := host.composition.sessions.SnapshotState(ctx, session.SessionRef{SessionID: child.SessionID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := approval.CurrentMode(childState); got != approval.ModeAutoReview {
+		t.Fatalf("real self ACP child mode=%v, want its own auto-review", got)
+	}
 	var stream <-chan taskstream.Delivery
 	observed := map[string]int{}
 	initialComplete, replacements := false, 0
@@ -144,7 +159,8 @@ func runHostedSubagentUserInput(t *testing.T, assemble func(*Stack) (appserver.A
 		if delivery.Kind == taskstream.DeliveryReplaceBegin {
 			if initialComplete {
 				replacements++
-				if mode != "retained-spool" || replacements != 1 {
+				// Replay recovery and Turn-window compaction each publish atomically.
+				if replacements > 3 {
 					t.Fatal("unexpected repeated history replacement")
 				}
 			}
@@ -301,7 +317,7 @@ recovered:
 				t.Fatalf("live output missing: %v", observed)
 			}
 		}
-		if mode == "retained-spool" && replacements != 1 {
+		if mode == "retained-spool" && replacements < 1 {
 			t.Fatal("reconnected producer did not refresh its retained cache")
 		}
 		for _, text := range []string{"reply-1", "reply-2", "reply-3"} {

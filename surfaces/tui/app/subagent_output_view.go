@@ -16,7 +16,7 @@ type subagentOutputRenderTickMsg struct {
 // subagentOutputView is a transient, presentation-only projection of one
 // anchored child Task. Its block reuses the Side ACP renderer but is not part
 // of the main Document and never becomes Session or Task authority. Views and
-// their complete child transcript are retained until the Session changes.
+// their bounded child display window can be evicted independently of the Task.
 type subagentOutputNarrativeKey struct {
 	block     *ParticipantTurnBlock
 	kind      TranscriptNarrativeKind
@@ -24,18 +24,21 @@ type subagentOutputNarrativeKey struct {
 }
 
 type subagentOutputView struct {
-	historyBefore string
-	history       *subagentOutputView
-	pane          *subagentOutputOverlayState
-	activity      runningHintTracker
-	callID        string
-	taskHandle    string
-	participantID string
-	actor         string
-	title         string
-	document      *Document
-	turnBlocks    map[string]*ParticipantTurnBlock
-	turnID        string
+	retentionUpdates int
+	retentionBlocks  int
+	lastViewed       time.Time
+	historyBefore    string
+	history          *subagentOutputView
+	pane             *subagentOutputOverlayState
+	activity         runningHintTracker
+	callID           string
+	taskHandle       string
+	participantID    string
+	actor            string
+	title            string
+	document         *Document
+	turnBlocks       map[string]*ParticipantTurnBlock
+	turnID           string
 	// block is the current transcript block. Historical blocks remain in
 	// document and are rendered in stream order; TurnID is internal routing
 	// metadata, never overlay identity or lifecycle authority.
@@ -52,6 +55,7 @@ type subagentOutputView struct {
 	liveActivityID  string
 	renderCache     subagentOutputRenderCache
 	seenProjections map[string]struct{}
+	approvalReviews childApprovalReviews
 	// liveNarratives records typed messages that entered this detached view as
 	// live deltas. A later final snapshot with the same message identity replaces
 	// that stream; compatibility frames that arrive final-only remain deltas.
@@ -98,6 +102,13 @@ func (m *Model) observeSubagentOutputEvents(events []TranscriptEvent) bool {
 		before := view.revision
 		view.observeChildEvent(event)
 		changed = changed || view.revision != before
+	}
+	if changed && len(m.subagentOutputViews) > childDisplayViews {
+		selected := ""
+		if m.subagentOutputOverlay != nil {
+			selected = m.subagentOutputOverlay.callID
+		}
+		m.retainChildDisplayViews(selected)
 	}
 	return changed
 }
@@ -178,6 +189,7 @@ func (v *subagentOutputView) resetForReplacement() {
 	v.block = block
 	v.historyResolved = false
 	v.seenProjections = nil
+	v.approvalReviews = v.approvalReviews.clone()
 	v.liveNarratives = nil
 	v.renderCache = subagentOutputRenderCache{}
 	v.touch(true)
@@ -187,6 +199,7 @@ func (v *subagentOutputView) observeChildEvent(event TranscriptEvent) {
 	if v == nil {
 		return
 	}
+	defer v.retainDisplayWindow()
 	if projectionID := strings.TrimSpace(event.SourceProjectionID); projectionID != "" {
 		if _, seen := v.seenProjections[projectionID]; seen {
 			return
@@ -203,6 +216,7 @@ func (v *subagentOutputView) observeChildEvent(event TranscriptEvent) {
 	}
 	var block *ParticipantTurnBlock
 	if event.Kind == TranscriptEventApproval {
+		v.approvalReviews.remember(event)
 		block = v.blockForObservedChildTool(event.ToolCallID)
 	} else {
 		block = v.blockForEvent(event)
@@ -232,6 +246,9 @@ func (v *subagentOutputView) observeChildEvent(event TranscriptEvent) {
 		monotonicStatus:      true,
 		reopenPlan:           true,
 	})
+	if event.Kind == TranscriptEventTool && v.applyChildReview(block, event.ToolCallID) {
+		result.changed = true
+	}
 	if !result.changed {
 		return
 	}
@@ -280,10 +297,9 @@ func (v *subagentOutputView) blockForObservedChildTool(callID string) *Participa
 			return block
 		}
 	}
-	// Approval review is delivered through the parent Session feed, so its
-	// TurnID is not a child transcript position. Without the typed child tool
-	// call anchor, omitting the transient review is safer than creating a
-	// detached block at the wrong point in the overlay.
+	// Parent-feed reviews can precede the independent child history. Their
+	// parent TurnID never creates a child block; the bounded review cache joins
+	// them when the typed child tool anchor arrives.
 	return nil
 }
 

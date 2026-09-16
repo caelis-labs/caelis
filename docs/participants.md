@@ -19,7 +19,10 @@ agents; see [connection and endpoint setup](external-acp-agents.md#connect).
 
 Open `/team` to configure the profiles available for collaboration:
 
-- `self` uses the current Session controller's model and reasoning effort.
+- `self` uses the current Session controller's model, reasoning effort, and
+  approval mode. With auto-review, the child's own Guardian handles its
+  approvals. Full access is inherited from the shared Host. Manual approval
+  continues through the ACP permission bridge.
 - `breeze`, `orbit`, and `zenith` are named profiles that you bind to a provider
   model or ACP agent. Their descriptions help the controller select a fit for
   the work; the name itself does not select a model.

@@ -11,7 +11,8 @@ type EventPageVisibility string
 const (
 	// EventPageCanonical returns canonical model/session history only.
 	EventPageCanonical EventPageVisibility = "canonical"
-	// EventPageClientReplay returns canonical and durable client mirror events.
+	// EventPageClientReplay returns durable events with a client projection,
+	// including completed reviewed approval decisions from execution journals.
 	EventPageClientReplay EventPageVisibility = "client_replay"
 	// EventPageAllDurable also returns journal records for recovery consumers.
 	EventPageAllDurable EventPageVisibility = "all_durable"

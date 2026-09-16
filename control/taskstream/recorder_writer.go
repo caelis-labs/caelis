@@ -74,6 +74,9 @@ func (r *Recorder) writeLoop(logical streamspool.LogicalKey, p *recordingPartiti
 				err = r.replacePartition(p, logical, records, items[0].stream)
 			} else {
 				err = appendOutputRecords(p.writer, records)
+				if err == nil && p.subagent {
+					err = r.retainChildWindow(p, logical, records)
+				}
 			}
 			if err == nil && sealed {
 				err = p.writer.Seal(context.Background())
@@ -165,12 +168,11 @@ func (r *Recorder) replacePartition(p *recordingPartition, logical streamspool.L
 		discard()
 		return err
 	}
-	if p.unpublished {
-		_ = p.writer.Seal(ctx)
-		_ = r.store.Remove(ctx, p.writer.Key())
-		p.unpublished = false
-	}
+	_ = p.writer.Seal(ctx)
+	_ = r.store.Remove(ctx, p.writer.Key())
+	p.unpublished = false
 	p.writer = staged
+	p.writtenBytes = 0
 	return nil
 }
 

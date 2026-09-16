@@ -408,8 +408,8 @@ func TestUseModelChangesDefaultWithoutOverwritingModelProfile(t *testing.T) {
 	if got := self.SessionOptions.ConfigValues[acpConfigReasoningID]; got != "high" || self.SessionOptions.ReasoningEffortConfigID != acpConfigReasoningID {
 		t.Fatalf("runtime-derived self reasoning session options = %#v, want high", self.SessionOptions)
 	}
-	if got := self.SessionOptions.ConfigValues[acpConfigModeID]; got != "manual" {
-		t.Fatalf("runtime-derived self mode session option = %q, want manual", got)
+	if got := self.SessionOptions.ConfigValues[acpConfigModeID]; got != "auto-review" {
+		t.Fatalf("runtime-derived self mode session option = %q, want auto-review", got)
 	}
 }
 

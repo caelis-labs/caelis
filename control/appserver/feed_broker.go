@@ -443,11 +443,13 @@ func (b *FeedBroker) subscribeCheckpoint(ctx context.Context, req SubscribeReque
 				return SubscribeResult{}, session.EventCheckpoint{}, err
 			}
 			window, err := b.historyWindow(ctx, sessionSpoolGeneration(key), key, uint64(bounds.High), req.HistoryTurns)
-			if err != nil {
+			if err != nil && !errors.Is(err, streamspool.ErrExpired) {
 				return SubscribeResult{}, checkpoint, err
 			}
-			sub := b.startSubscription(ctx, streamspool.Offset(window.after), bounds.High, nil, 0, eventstream.DurableFeedPosition{}, "", cursor, window)
-			return SubscribeResult{Subscription: sub, BoundaryCursor: cursor, BoundaryPosition: &position}, checkpoint, nil
+			if err == nil {
+				sub := b.startSubscription(ctx, streamspool.Offset(window.after), bounds.High, nil, 0, eventstream.DurableFeedPosition{}, "", cursor, window)
+				return SubscribeResult{Subscription: sub, BoundaryCursor: cursor, BoundaryPosition: &position}, checkpoint, nil
+			}
 		}
 	}
 	h0 := streamspool.Offset(0)
@@ -707,13 +709,28 @@ func (s *feedSubscription) run() {
 			return
 		}
 	}
-	if err := s.followSpool(s.start); err != nil {
+	for {
+		err := s.followSpool(s.start)
+		if err == nil {
+			return
+		}
 		if s.history.finite {
 			s.setErr(err)
 			return
 		}
 		if s.ctx.Err() != nil {
 			return
+		}
+		if errors.Is(err, streamspool.ErrExpired) {
+			// Retention invalidates this reader's cursor, not the shared writer.
+			if err := s.replaceRetainedPrefix(); err != nil {
+				if !s.spoolAvailable() {
+					err = s.replaceAndFollowCanonical()
+				}
+				s.setErr(err)
+				return
+			}
+			continue
 		}
 		if errors.Is(err, io.EOF) {
 			// A complete sealed trace needs no replacement. If final Prime was
@@ -747,6 +764,7 @@ func (s *feedSubscription) run() {
 		if err := s.replaceAndFollowCanonical(); err != nil {
 			s.setErr(err)
 		}
+		return
 	}
 }
 

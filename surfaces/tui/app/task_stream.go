@@ -249,6 +249,7 @@ func (m *Model) reconcileTaskStreamOwner(callID, rawHandle string) {
 		return
 	}
 	if !wanted {
+		delete(m.taskStreamRecovery, callID)
 		if m.taskStreamResolveTokens[callID] == 0 && m.taskStreamResolveRetries[callID] == 0 {
 			return
 		}
@@ -257,6 +258,9 @@ func (m *Model) reconcileTaskStreamOwner(callID, rawHandle string) {
 		return
 	}
 	if handle == "" {
+		return
+	}
+	if deadline := m.taskStreamRecovery[callID]; !deadline.IsZero() && !time.Now().Before(deadline) {
 		return
 	}
 	if wanted && m.taskStreamResolveTokens[callID] != 0 {
@@ -273,8 +277,14 @@ func (m *Model) startTaskStreamResolver(sessionID, callID, handle string, token 
 	if sessionID == "" || cfg.ProgramSender == nil || cfg.TaskStreams == nil {
 		return
 	}
-	ctx := contextOrBackground(cfg.Context)
+	deadline := m.taskStreamRecoveryDeadline(callID, time.Now())
 	cfg.ProgramSender.startForwarder(func() {
+		requestDeadline := time.Now().Add(5 * time.Second)
+		if deadline.Before(requestDeadline) {
+			requestDeadline = deadline
+		}
+		ctx, cancel := context.WithDeadline(contextOrBackground(cfg.Context), requestDeadline)
+		defer cancel()
 		result, err := cfg.TaskStreams.List(ctx, taskstream.ListRequest{SessionID: sessionID})
 		if err == nil {
 			var matched *taskstream.TaskDescriptor
@@ -320,11 +330,13 @@ func (m *Model) handleTaskStreamResolved(msg taskStreamResolvedMsg) (tea.Model, 
 		return m, nil
 	}
 	if msg.err != nil || strings.TrimSpace(msg.taskID) == "" {
-		if taskStreamRetryable(msg.err) {
+		if taskStreamRetryable(msg.err) && m.taskStreamRetryWithinBudget(msg.callID, time.Now()) {
 			m.taskStreamResolveRetries[msg.callID]++
 			return m, taskStreamResolveRetryCmd(msg, m.taskStreamResolveRetries[msg.callID])
 		}
 		m.taskStreamResolveTokens[msg.callID] = 0
+		m.taskStreamRecoveryDeadline(msg.callID, time.Now())
+		m.taskStreamRecovery[msg.callID] = time.Now()
 		return m, m.showHint(taskStreamUnavailableHint(msg.handle, msg.err), hintOptions{
 			priority: HintPriorityHigh, clearOnMessage: true, clearAfter: systemHintDuration,
 		})
@@ -361,6 +373,8 @@ func (m *Model) wantResolvedTaskStream(taskID string, wanted bool) {
 	}
 	if !wanted {
 		delete(m.taskStreamRetries, taskID)
+		delete(m.taskStreamRecovery, m.taskStreamCallIDsByID[taskID])
+		delete(m.taskStreamFollowing, taskID)
 		if !m.taskStreamWanted[taskID] && m.taskStreamSubscriptions[taskID] == nil &&
 			m.taskStreamCancels[taskID] == nil {
 			return
@@ -374,6 +388,9 @@ func (m *Model) wantResolvedTaskStream(taskID string, wanted bool) {
 	demand := m.taskStreamDemandForTaskID(taskID)
 	if !m.taskStreamLiveWanted(taskID, demand) {
 		m.taskStreamWanted[taskID] = false
+		return
+	}
+	if deadline := m.taskStreamRecovery[m.taskStreamCallIDsByID[taskID]]; !deadline.IsZero() && !time.Now().Before(deadline) {
 		return
 	}
 	if m.taskStreamWanted[taskID] && (m.taskStreamSubscriptions[taskID] != nil || m.taskStreamTokens[taskID] != 0) {
@@ -421,13 +438,17 @@ func (m *Model) startTaskStreamForwarder(
 	if cfg.ProgramSender == nil || cfg.TaskStreams == nil {
 		return
 	}
-	ctx, cancel := context.WithCancel(cfg.ProgramSender.observationContext(cfg.Context))
+	ctx, cancelCause := context.WithCancelCause(cfg.ProgramSender.observationContext(cfg.Context))
+	cancel := func() { cancelCause(nil) }
+	deadline := m.taskStreamRecoveryDeadline(m.taskStreamCallIDsByID[taskID], time.Now())
 	if previous := m.taskStreamCancels[taskID]; previous != nil {
 		previous()
 	}
 	m.taskStreamCancels[taskID] = cancel
 	started := cfg.ProgramSender.startForwarder(func() {
 		defer cancel()
+		watchdog := time.AfterFunc(max(0, time.Until(deadline)), func() { cancelCause(errorcode.New(errorcode.Timeout, "Task history recovery timed out")) })
+		defer watchdog.Stop()
 		result, err := cfg.TaskStreams.Subscribe(ctx, taskstream.SubscribeRequest{
 			SessionID:       sessionID,
 			TaskID:          taskID,
@@ -437,6 +458,9 @@ func (m *Model) startTaskStreamForwarder(
 			HistoryTurns:    16,
 		})
 		if err != nil {
+			if cause := context.Cause(ctx); cause != nil {
+				err = cause
+			}
 			cfg.ProgramSender.SendMsg(taskStreamClosedMsg{
 				sessionID: sessionID, taskID: taskID, token: token, cursor: cursor, err: err,
 			})
@@ -453,14 +477,28 @@ func (m *Model) startTaskStreamForwarder(
 			})
 			return
 		}
+		if !follow {
+			// Command subscriptions can legitimately wait without delivering a
+			// cursor, including when resuming at the current output tail.
+			watchdog.Stop()
+		}
 		defer sub.Close()
 		mailbox := &taskStreamMailbox{streamPages: follow}
 		committedCursor := cursor
+		var followingSince time.Time
 		for {
 			events, cursor, activityID, replacement, open, readErr := mailbox.read(ctx, sub.Deliveries())
 			var phase taskstream.DeliveryKind
 			if mailbox.streamPages {
 				phase = mailbox.kind
+			}
+			if phase == taskstream.DeliveryReplaceBegin {
+				now := time.Now()
+				if !followingSince.IsZero() && now.Sub(followingSince) >= 5*time.Second {
+					deadline = now.Add(taskStreamRecoveryBudget)
+				}
+				followingSince = time.Time{}
+				watchdog.Reset(max(0, time.Until(deadline)))
 			}
 			if len(events) > 0 || replacement || cursor != "" || activityID != "" || mailbox.streamPages && mailbox.kind == taskstream.DeliveryReplaceBegin {
 				cfg.ProgramSender.SendMsg(taskStreamBatchMsg{
@@ -470,9 +508,16 @@ func (m *Model) startTaskStreamForwarder(
 				})
 				if cursor != "" {
 					committedCursor = cursor
+					watchdog.Stop()
+					if followingSince.IsZero() {
+						followingSince = time.Now()
+					}
 				}
 			}
 			if !open {
+				if cause := context.Cause(ctx); cause != nil {
+					readErr = cause
+				}
 				if readErr == nil {
 					readErr = sub.Err()
 				}
@@ -518,7 +563,7 @@ func (m *Model) handleTaskStreamBatch(msg taskStreamBatchMsg) (tea.Model, tea.Cm
 	if handled, cmd := m.handleChildHistoryPage(msg); handled {
 		return m, cmd
 	}
-	delete(m.taskStreamRetries, msg.taskID)
+	m.noteTaskStreamFollowing(msg.taskID, time.Now())
 	if cursor := strings.TrimSpace(msg.cursor); cursor != "" {
 		m.taskStreamCursors[msg.taskID] = cursor
 	}
@@ -576,7 +621,13 @@ func (m *Model) handleTaskStreamClosed(msg taskStreamClosedMsg) (tea.Model, tea.
 	if m == nil || msg.sessionID != m.currentSessionID || m.taskStreamTokens[msg.taskID] != msg.token {
 		return m, nil
 	}
-	if view := m.subagentOutputViews[m.taskStreamCallIDsByID[msg.taskID]]; view != nil {
+	callID := m.taskStreamCallIDsByID[msg.taskID]
+	if since := m.taskStreamFollowing[msg.taskID]; !since.IsZero() && time.Since(since) >= 5*time.Second {
+		delete(m.taskStreamRecovery, callID)
+		delete(m.taskStreamRetries, msg.taskID)
+	}
+	delete(m.taskStreamFollowing, msg.taskID)
+	if view := m.subagentOutputViews[callID]; view != nil {
 		view.history = nil
 	}
 	delete(m.taskStreamSubscriptions, msg.taskID)
@@ -594,8 +645,11 @@ func (m *Model) handleTaskStreamClosed(msg taskStreamClosedMsg) (tea.Model, tea.
 	}
 	if msg.err == nil && demand == taskStreamDemandVisibleSubagent && m.taskStreamWanted[msg.taskID] {
 		m.taskStreamRetries[msg.taskID]++
-		if m.taskStreamRetries[msg.taskID] > taskStreamCleanExitRetries {
+		if m.taskStreamRetries[msg.taskID] > taskStreamCleanExitRetries || !m.taskStreamRetryWithinBudget(callID, time.Now()) {
 			m.taskStreamTokens[msg.taskID] = 0
+			m.taskStreamWanted[msg.taskID] = false
+			m.taskStreamRecoveryDeadline(callID, time.Now())
+			m.taskStreamRecovery[callID] = time.Now()
 			handle := m.taskStreamHandlesByID[msg.taskID]
 			return m, m.showHint(taskStreamUnavailableHint(handle, errTaskStreamUnexpectedClose), hintOptions{
 				priority: HintPriorityHigh, clearOnMessage: true, clearAfter: systemHintDuration,
@@ -607,7 +661,7 @@ func (m *Model) handleTaskStreamClosed(msg taskStreamClosedMsg) (tea.Model, tea.
 	// Delivery failures are local to this panel. A valid cursor prefers the
 	// retained trace; Control may answer a cache miss with an atomic replacement,
 	// which this panel applies through the delivery assembler before retrying.
-	if taskStreamRetryable(msg.err) && m.taskStreamWanted[msg.taskID] && demand.wanted() {
+	if taskStreamRetryable(msg.err) && m.taskStreamWanted[msg.taskID] && demand.wanted() && m.taskStreamRetryWithinBudget(callID, time.Now()) {
 		m.taskStreamRetries[msg.taskID]++
 		m.taskStreamTokens[msg.taskID] = 0
 		return m, taskStreamSubscribeRetryCmd(msg.sessionID, msg.taskID, m.taskStreamRetries[msg.taskID])
@@ -615,6 +669,8 @@ func (m *Model) handleTaskStreamClosed(msg taskStreamClosedMsg) (tea.Model, tea.
 	if msg.err != nil && !errors.Is(msg.err, context.Canceled) {
 		m.taskStreamTokens[msg.taskID] = 0
 		m.taskStreamWanted[msg.taskID] = false
+		m.taskStreamRecoveryDeadline(callID, time.Now())
+		m.taskStreamRecovery[callID] = time.Now()
 		handle := m.taskStreamHandlesByID[msg.taskID]
 		return m, m.showHint(taskStreamUnavailableHint(handle, msg.err), hintOptions{
 			priority: HintPriorityHigh, clearOnMessage: true, clearAfter: systemHintDuration,
@@ -740,4 +796,6 @@ func (m *Model) closeTaskStreamSubscriptions() {
 	m.taskStreamResolveTokens = map[string]uint64{}
 	m.taskStreamResolveRetries = map[string]int{}
 	m.taskStreamRetries = map[string]int{}
+	m.taskStreamRecovery = map[string]time.Time{}
+	m.taskStreamFollowing = map[string]time.Time{}
 }

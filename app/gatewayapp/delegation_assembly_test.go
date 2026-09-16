@@ -220,8 +220,8 @@ func assertDelegationPlacementSessionOptions(t *testing.T, stack *Stack, target 
 	if got := agent.SessionOptions.ModelID; got != modelID {
 		t.Fatalf("placement model session option = %q, want %q", got, modelID)
 	}
-	if got := agent.SessionOptions.ConfigValues[acpConfigModeID]; got != "manual" {
-		t.Fatalf("placement mode session option = %q, want manual", got)
+	if got := agent.SessionOptions.ConfigValues[acpConfigModeID]; got != "auto-review" {
+		t.Fatalf("placement mode session option = %q, want auto-review", got)
 	}
 	if got := agent.SessionOptions.ConfigValues[acpConfigReasoningID]; got != effort {
 		t.Fatalf("placement effort session option = %q, want %q", got, effort)

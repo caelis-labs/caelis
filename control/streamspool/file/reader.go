@@ -56,8 +56,8 @@ func (r *reader) Next(ctx context.Context) (streamspool.Record, error) {
 		if offset < p.high {
 			segments := append([]segment(nil), p.segments...)
 			originComplete := p.originComplete
-			p.mu.Unlock()
 			record, err := r.readOffset(offset, segments, originComplete)
+			p.mu.Unlock()
 			if err != nil {
 				return streamspool.Record{}, err
 			}
@@ -182,6 +182,7 @@ func (r *reader) Close() error {
 	r.mu.Unlock()
 	p := r.partition
 	p.mu.Lock()
+	delete(p.leases, r)
 	if p.readers > 0 {
 		p.readers--
 	}

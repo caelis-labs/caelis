@@ -162,8 +162,8 @@ func TestProviderProfileBindingMaterializesFixedDirectHandle(t *testing.T) {
 	if got := materialized.SessionOptions.ModelID; got != profile.Backend.Provider.ModelConfigID {
 		t.Fatalf("materialized model session option = %q, want %q", got, profile.Backend.Provider.ModelConfigID)
 	}
-	if got := materialized.SessionOptions.ConfigValues[acpConfigModeID]; got != "manual" {
-		t.Fatalf("materialized mode session option = %q, want manual", got)
+	if got := materialized.SessionOptions.ConfigValues[acpConfigModeID]; got != "auto-review" {
+		t.Fatalf("materialized mode session option = %q, want auto-review", got)
 	}
 	if got := materialized.SessionOptions.ConfigValues[acpConfigReasoningID]; got != "xhigh" || materialized.SessionOptions.ReasoningEffortConfigID != acpConfigReasoningID {
 		t.Fatalf("materialized reasoning session options = %#v, want xhigh", materialized.SessionOptions)
@@ -268,8 +268,8 @@ func TestSystemAgentBindingsApplySelectedModelAndEffort(t *testing.T) {
 		if got := agent.SessionOptions.ConfigValues[acpConfigReasoningID]; got != "xhigh" || agent.SessionOptions.ReasoningEffortConfigID != acpConfigReasoningID {
 			t.Fatalf("Reviewer reasoning session options = %#v, want xhigh", agent.SessionOptions)
 		}
-		if got := agent.SessionOptions.ConfigValues[acpConfigModeID]; got != "manual" {
-			t.Fatalf("Reviewer mode session option = %q, want manual", got)
+		if got := agent.SessionOptions.ConfigValues[acpConfigModeID]; got != "auto-review" {
+			t.Fatalf("Reviewer mode session option = %q, want auto-review", got)
 		}
 		joined := strings.Join(agent.Args, " ")
 		for _, forbidden := range []string{"-model-profile", "-reasoning-effort", "-approval-mode", "--embedded"} {

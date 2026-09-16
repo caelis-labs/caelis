@@ -252,7 +252,7 @@ func TestFirstRollFailureCleansDirectoryAndAccounting(t *testing.T) {
 	}
 }
 
-func TestPerStreamQuotaPoisonsOnlyThatPartition(t *testing.T) {
+func TestPerStreamQuotaRetainsSuffixAndRejectsOversizedRecord(t *testing.T) {
 	store := newTestStore(t, Config{
 		MaxBytes:                  1 << 20,
 		MaxStreamBytes:            300,
@@ -264,8 +264,15 @@ func TestPerStreamQuotaPoisonsOnlyThatPartition(t *testing.T) {
 	if _, err := limited.Append(context.Background(), 1, time.Now(), make([]byte, 20)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := limited.Append(context.Background(), 1, time.Now(), make([]byte, 120)); !errors.Is(err, streamspool.ErrLimit) {
-		t.Fatalf("Append over per-stream quota error = %v", err)
+	if _, err := limited.Append(context.Background(), 1, time.Now(), make([]byte, 120)); err != nil {
+		t.Fatalf("rolling append = %v", err)
+	}
+	bounds, _ := limited.Bounds(t.Context())
+	if bounds.Low != 1 || bounds.High != 2 {
+		t.Fatalf("retained bounds = %+v", bounds)
+	}
+	if _, err := limited.Append(t.Context(), 1, time.Now(), make([]byte, 500)); !errors.Is(err, streamspool.ErrLimit) {
+		t.Fatalf("oversized record = %v", err)
 	}
 
 	independent := registerTestWriter(t, store, "session", "independent", true)

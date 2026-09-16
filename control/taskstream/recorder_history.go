@@ -7,6 +7,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task/output"
+	"github.com/caelis-labs/caelis/control/history"
 	"github.com/caelis-labs/caelis/control/streamspool"
 )
 
@@ -26,43 +27,27 @@ func (o *boundRecorder) ReplaceTaskHistoryStream(ctx context.Context, source out
 	barrier := make(chan error, 1)
 	item := outputWrite{replace: true, barrier: barrier}
 	item.stream = func(writer streamspool.Writer) error {
-		var records []streamspool.Record
-		bytes := 0
-		flush := func() error {
-			if len(records) == 0 {
-				return nil
-			}
-			_, err := writer.AppendBatch(ctx, records)
-			records, bytes = nil, 0
-			return err
-		}
-		err := source(ctx, func(event *session.Event) error {
+		o.recorder.compactMu.Lock()
+		defer o.recorder.compactMu.Unlock()
+		var window history.Transcript
+		if err := source(ctx, func(event *session.Event) error {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			if event == nil {
-				return nil
-			}
+			window.Append(event)
+			return nil
+		}); err != nil {
+			return err
+		}
+		var records []streamspool.Record
+		for _, event := range window.Events() {
 			record, err := historyOutputRecord(o.binding.ActivityID, event)
 			if err != nil {
 				return err
 			}
-			if len(record.Payload) > taskOutputQueueBytes {
-				return streamspool.ErrLimit
-			}
-			if len(records) >= maxDeliveryRecords || bytes+len(record.Payload) > taskOutputBatchBytes {
-				if err := flush(); err != nil {
-					return err
-				}
-			}
 			records = append(records, record)
-			bytes += len(record.Payload)
-			return nil
-		})
-		if err != nil {
-			return err
 		}
-		return flush()
+		return appendOutputRecords(writer, records)
 	}
 	if err := o.recorder.enqueue(o.partition, item); err != nil {
 		return err

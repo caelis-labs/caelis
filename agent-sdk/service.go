@@ -89,6 +89,9 @@ type ApprovalRequester interface {
 // RunRequest is the minimal runtime execution request.
 type RunRequest struct {
 	SessionRef session.SessionRef `json:"session_ref"`
+	// TurnID is the trusted caller's semantic Turn identity. When omitted,
+	// Runtime allocates it. Live observation and durable replay share this ID.
+	TurnID string `json:"turn_id,omitempty"`
 	// InputKind distinguishes a real user turn from trusted Agent-to-Agent
 	// communication. Empty retains ordinary conversation behavior.
 	InputKind    SubmissionKind      `json:"input_kind,omitempty"`

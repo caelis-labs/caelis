@@ -121,3 +121,23 @@ func TestFeedHistoryRejectsForeignIncarnationAndLiveCursor(t *testing.T) {
 		t.Fatal("foreign spool incarnation accepted")
 	}
 }
+
+func TestFeedHistoryLateApprovalRetainsOriginalTurn(t *testing.T) {
+	reader := &checkpointPageReader{}
+	reader.setEvents(
+		feedIdentifiedNarrative(1, "message-1", "turn-1", "first turn"),
+		feedIdentifiedNarrative(2, "message-2", "turn-2", "second turn"),
+		&session.Event{ID: "late-review", Seq: 3, Type: session.EventTypeLifecycle, Visibility: session.VisibilityJournal,
+			Journal: &session.ExecutionJournalEntry{Kind: session.JournalKindPauseToken, PauseToken: &session.PauseToken{Status: session.PauseTokenResolved, TurnID: "turn-1", ToolCallID: "call-1", Approved: true, ReviewText: "approved"}}},
+	)
+	broker, _ := newTestFeedBroker(t, reader, FeedBrokerConfig{})
+	result, err := broker.Subscribe(t.Context(), SubscribeRequest{SessionID: "session-1", HistoryTurns: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer result.Subscription.Close()
+	events, _ := collectHistoryWindow(t, result.Subscription)
+	if len(events) != 3 || events[0].TurnID != "turn-1" || events[2].ApprovalReview == nil {
+		t.Fatalf("late decision lost its original Turn: %#v", events)
+	}
+}
