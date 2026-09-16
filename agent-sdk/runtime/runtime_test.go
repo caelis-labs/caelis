@@ -397,6 +397,7 @@ func TestRuntimeRunPersistsMinimalChatTurn(t *testing.T) {
 	}
 	result, err := runtime.Run(context.Background(), agent.RunRequest{
 		SessionRef: activeSession.SessionRef,
+		TurnID:     "control-turn-stable",
 		Input:      "hello",
 		AgentSpec: agent.AgentSpec{
 			Name:  "chat",
@@ -420,6 +421,12 @@ func TestRuntimeRunPersistsMinimalChatTurn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadSession() error = %v", err)
 	}
+	for _, event := range loaded.Events {
+		if event.Scope == nil || event.Scope.TurnID != "control-turn-stable" {
+			t.Fatalf("durable Turn identity=%#v", event.Scope)
+		}
+	}
+
 	if got, want := len(loaded.Events), 2; got != want {
 		t.Fatalf("len(loaded.Events) = %d, want %d", got, want)
 	}

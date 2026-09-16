@@ -32,6 +32,11 @@ func (s *runtimeComposition) LoadHistory(ctx context.Context, req sdksubagent.Hi
 func (s *runtimeComposition) delegationPlacementResolver(runtimeCfg stackRuntimeConfig) acpsubagent.PlacementResolver {
 	return func(_ context.Context, spawn sdksubagent.SpawnContext, req delegation.TargetRequest) (acpsubagent.AgentConfig, error) {
 		cfg, err := s.resolveDelegationPlacement(req, runtimeCfg)
+		if err == nil && cfg.BuiltinRuntime && !runtimeCfg.DangerouslySkipPermissions && spawn.ApprovalMode != "" {
+			// Spawn carries the effective Session mode, which may have changed
+			// since this Runtime's assembly was built.
+			cfg.SessionOptions = spawnedCaelisSessionOptions(cfg.SessionOptions, spawn.ApprovalMode)
+		}
 		if err == nil && !cfg.BuiltinRuntime {
 			cfg.MCPServers, cfg.MCPGrant, err = s.collaborationServers(spawn)
 		}

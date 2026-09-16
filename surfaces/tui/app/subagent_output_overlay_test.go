@@ -282,11 +282,11 @@ func TestSubagentOutputOverlayAnchorsApprovalReviewToObservedChildTool(t *testin
 
 		view := requireSubagentOutputViewForTest(t, model, "spawn-1")
 		plain := strings.Join(renderedPlainRows(model.subagentOutputRows(view, 96, 20)), "\n")
-		if strings.Contains(plain, "Auto approval ·") || strings.Contains(plain, "approval denied") {
-			t.Fatalf("unanchored approval review was rendered in the overlay:\n%s", plain)
+		if strings.Contains(plain, "Auto approval ·") || strings.Count(plain, "approval denied") != 1 {
+			t.Fatalf("review reason must render once beside its child tool:\n%s", plain)
 		}
-		if !strings.Contains(plain, "ps aux | head -5") {
-			t.Fatalf("child tool missing after an early approval review:\n%s", plain)
+		if strings.Count(plain, "ps aux | head -5 denied") != 1 {
+			t.Fatalf("child review missing after its tool arrived:\n%s", plain)
 		}
 	})
 }

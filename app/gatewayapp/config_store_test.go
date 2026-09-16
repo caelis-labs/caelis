@@ -114,8 +114,8 @@ func TestNewLocalStackUsesModelProfileWithoutMutatingConfigOrCredential(t *testi
 	if got := self.SessionOptions.ConfigValues[acpConfigReasoningID]; got != "high" || self.SessionOptions.ReasoningEffortConfigID != acpConfigReasoningID {
 		t.Fatalf("child self reasoning session options = %#v, want high", self.SessionOptions)
 	}
-	if got := self.SessionOptions.ConfigValues[acpConfigModeID]; got != "manual" {
-		t.Fatalf("child self mode session option = %q, want manual", got)
+	if got := self.SessionOptions.ConfigValues[acpConfigModeID]; got != "auto-review" {
+		t.Fatalf("child self mode session option = %q, want auto-review", got)
 	}
 	if child.composition.lookup.DefaultID() == child.composition.activeRuntime.Model.ID {
 		t.Fatalf("test setup did not preserve a distinct global default: lookup=%q selected=%q", child.composition.lookup.DefaultID(), child.composition.activeRuntime.Model.ID)

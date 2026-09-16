@@ -7,6 +7,7 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	acpprojector "github.com/caelis-labs/caelis/control/appserver/projection"
 )
 
 func replayClientEvents(events []*session.Event) []*session.Event {
@@ -44,59 +45,10 @@ func canonicalOriginFromApproval(req *agent.ApprovalRequest, fallbackRef session
 	if strings.TrimSpace(ref.SessionID) == "" {
 		ref = fallbackRef
 	}
-	scope := EventScopeMain
-	participantID := metadataString(req.Metadata, "participant_id")
-	participantKind := metadataString(req.Metadata, "participant_kind")
-	participantSessionID := firstNonEmpty(
-		metadataString(req.Metadata, "participant_session_id"),
-		metadataString(req.Metadata, "session_id"),
-	)
-	turnID := firstNonEmpty(strings.TrimSpace(req.TurnID), strings.TrimSpace(fallbackTurnID))
-	switch {
-	case metadataBool(req.Metadata, "subagent"):
-		scope = EventScopeSubagent
-	case participantID != "" || participantSessionID != "":
-		scope = EventScopeParticipant
-	case strings.EqualFold(metadataString(req.Metadata, "scope"), string(EventScopeSubagent)):
-		scope = EventScopeSubagent
-	case strings.EqualFold(metadataString(req.Metadata, "scope"), string(EventScopeParticipant)):
-		scope = EventScopeParticipant
-	}
-	scopeID := firstNonEmpty(
-		metadataString(req.Metadata, "scope_id"),
-	)
-	if scopeID == "" {
-		switch scope {
-		case EventScopeSubagent:
-			scopeID = firstNonEmpty(metadataString(req.Metadata, "task_id"), participantSessionID, participantID)
-		case EventScopeParticipant:
-			scopeID = firstNonEmpty(participantSessionID, participantID)
-		default:
-			scopeID = canonicalScopeID(ref, scope, participantID, participantSessionID, turnID)
-		}
-	}
-	if scope == EventScopeMain && scopeID == "" {
-		scopeID = canonicalScopeID(ref, scope, participantID, participantSessionID, turnID)
-	}
+	origin := acpprojector.ApprovalOriginFromMetadata(req.Metadata, ref, firstNonEmpty(req.TurnID, fallbackTurnID))
 	return &EventOrigin{
-		Scope:                scope,
-		ScopeID:              scopeID,
-		Source:               metadataString(req.Metadata, "source"),
-		Actor:                metadataString(req.Metadata, "agent"),
-		ParticipantID:        participantID,
-		ParticipantKind:      participantKind,
-		ParticipantSessionID: participantSessionID,
-	}
-}
-
-func canonicalScopeID(ref session.SessionRef, scope EventScope, participantID string, participantSessionID string, turnID string) string {
-	switch scope {
-	case EventScopeParticipant:
-		return firstNonEmpty(strings.TrimSpace(turnID), participantSessionID, participantID)
-	case EventScopeSubagent:
-		return firstNonEmpty(participantSessionID, participantID, strings.TrimSpace(turnID))
-	default:
-		return firstNonEmpty(strings.TrimSpace(ref.SessionID), strings.TrimSpace(turnID))
+		Scope: EventScope(origin.Scope), ScopeID: origin.ScopeID, Source: origin.Source, Actor: origin.Actor,
+		ParticipantID: origin.ParticipantID, ParticipantKind: origin.ParticipantKind, ParticipantSessionID: origin.ParticipantSessionID,
 	}
 }
 

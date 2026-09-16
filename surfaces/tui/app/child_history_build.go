@@ -1,6 +1,8 @@
 package tuiapp
 
 import (
+	"time"
+
 	tea "charm.land/bubbletea/v2"
 	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 )
@@ -18,6 +20,12 @@ func (m *Model) handleChildHistoryPage(msg taskStreamBatchMsg) (bool, tea.Cmd) {
 	}
 	switch msg.phase {
 	case taskstream.DeliveryReplaceBegin:
+		now := time.Now()
+		if since := m.taskStreamFollowing[msg.taskID]; !since.IsZero() && now.Sub(since) >= 5*time.Second {
+			m.noteTaskStreamFollowing(msg.taskID, now)
+		}
+		m.taskStreamRecoveryDeadline(callID, now)
+		delete(m.taskStreamFollowing, msg.taskID)
 		m.cancelEarlierHistory(callID)
 		build := *view
 		build.history, build.pane = nil, nil
@@ -39,6 +47,10 @@ func (m *Model) handleChildHistoryPage(msg taskStreamBatchMsg) (bool, tea.Cmd) {
 		if build == nil {
 			return true, nil
 		}
+		// Parent-feed decisions can arrive after replacement began, even after
+		// the matching tool's page. Join current decisions before committing.
+		build.approvalReviews = view.approvalReviews.clone()
+		build.restoreChildReviews()
 		view.history = nil
 		view.historyBefore = msg.before
 		view.document, view.turnBlocks, view.turnID = build.document, build.turnBlocks, build.turnID
@@ -48,7 +60,7 @@ func (m *Model) handleChildHistoryPage(msg taskStreamBatchMsg) (bool, tea.Cmd) {
 		view.historyResolved = true
 		view.liveActivityID = taskStreamActivityKey(msg.activityID)
 		m.taskStreamCursors[msg.taskID] = msg.cursor
-		delete(m.taskStreamRetries, msg.taskID)
+		m.noteTaskStreamFollowing(msg.taskID, time.Now())
 		view.touch(true)
 		m.reconcileTaskStreamOwner(callID, view.taskHandle)
 		return true, m.requestSubagentOutputRender()

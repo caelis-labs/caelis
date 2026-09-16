@@ -1830,7 +1830,7 @@ func TestBeginTurnLoadsSessionResolvesIntentRunsRuntimeAndPublishesEvents(t *tes
 	if got[1].EventID != "e1" || eventstream.UpdateType(got[1].Update) != eventstream.UpdateAgentMessage || !eventstream.IsTurnTerminalLifecycle(got[2]) {
 		t.Fatalf("published events = %#v, want assistant event e1 then terminal", got)
 	}
-	if rt.lastReq.SessionRef != activeSession.SessionRef || rt.lastReq.Input != "hello" {
+	if rt.lastReq.SessionRef != activeSession.SessionRef || rt.lastReq.Input != "hello" || rt.lastReq.TurnID != result.Handle.TurnID() {
 		t.Fatalf("runtime req = %+v", rt.lastReq)
 	}
 }

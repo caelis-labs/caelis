@@ -6,6 +6,13 @@ func (m *Model) prependSessionHistory(older *Model) {
 	m.doc = prependHistoryDocument(older.doc, m.doc)
 	m.mainAnchorBlockIDs = mergeHistoryMap(m.mainAnchorBlockIDs, older.mainAnchorBlockIDs)
 	m.participantTurnIDs = mergeHistoryMap(m.participantTurnIDs, older.participantTurnIDs)
+	for callID, earlier := range older.subagentOutputViews {
+		if current := m.subagentOutputViews[callID]; current != nil {
+			current.approvalReviews.prepend(earlier.approvalReviews)
+			current.restoreChildReviews()
+			current.touch(true)
+		}
+	}
 	m.subagentOutputViews = mergeHistoryMap(m.subagentOutputViews, older.subagentOutputViews)
 	m.markViewportStructureDirty()
 	m.syncViewportContent()
@@ -50,6 +57,9 @@ func (m *Model) prependChildHistory(view, older *subagentOutputView) {
 	view.turnBlocks = mergeHistoryMap(view.turnBlocks, older.turnBlocks)
 	view.seenProjections = mergeHistoryMap(view.seenProjections, older.seenProjections)
 	view.liveNarratives = mergeHistoryMap(view.liveNarratives, older.liveNarratives)
+	view.restoreChildReviews()
+	view.retentionBlocks = -1
+	view.retainDisplayWindow()
 	view.touch(true)
 	if pane != nil && len(oldRows) > 0 {
 		rows := m.subagentOutputRows(view, max(1, cache.width), max(1, cache.height))

@@ -242,7 +242,10 @@ func (r *Runtime) Run(
 	}
 
 	runID := r.nextID("run", r.runIDGenerator)
-	turnID := r.nextID("turn", nil)
+	turnID := strings.TrimSpace(req.TurnID)
+	if turnID == "" {
+		turnID = r.nextID("turn", nil)
+	}
 	runCtx = context.WithValue(runCtx, taskScopeKey{}, newTaskContinuationScope())
 	runCtx = withLifecycleScope(runCtx, lifecycleScope{sessionRef: ref, runID: runID, turnID: turnID})
 	if err := r.beginRun(ref, runID); err != nil {

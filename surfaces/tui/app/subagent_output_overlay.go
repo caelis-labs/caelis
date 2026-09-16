@@ -2,6 +2,7 @@ package tuiapp
 
 import (
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
@@ -151,6 +152,11 @@ func (m *Model) openSubagentOutputOverlayView(callID string, view *subagentOutpu
 	if m.subagentOutputOverlay != nil {
 		m.closeSubagentOutputOverlay()
 	}
+	view.lastViewed = time.Now()
+	if view.document == nil {
+		view.resetForReplacement()
+	}
+	m.retainChildDisplayViews(callID)
 	m.clearInputOverlays()
 	m.showPalette = false
 	m.subagentOverlay = nil

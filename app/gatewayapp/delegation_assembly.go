@@ -148,9 +148,9 @@ func (s *runtimeComposition) materializeDelegatedModel(name, profileID, effort s
 			configured,
 			effort,
 		),
-		PinnedModel:    ptrToModelConfig(configured),
-		BridgeApproval: !runtimeCfg.DangerouslySkipPermissions,
-		ControlURL:     process.childControlURL, ControlTokenFile: process.childControlTokenFile,
+		PinnedModel:  ptrToModelConfig(configured),
+		ApprovalMode: spawnedApprovalMode(runtimeCfg),
+		ControlURL:   process.childControlURL, ControlTokenFile: process.childControlTokenFile,
 	})
 	if err != nil {
 		return assembly.AgentConfig{}, fmt.Errorf("gatewayapp: materialize delegated model %q: %w", name, err)

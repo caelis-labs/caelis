@@ -126,6 +126,12 @@ func EnvelopeBaseFromSessionEvent(ref session.SessionRef, event *session.Event, 
 		return base
 	}
 	if event.Scope == nil {
+		if token := session.ResolvedApprovalReview(event); token != nil {
+			origin := ApprovalOriginFromMetadata(token.Metadata, ref, token.TurnID)
+			base.Scope, base.ScopeID = origin.Scope, origin.ScopeID
+			base.Actor, base.ParticipantID = origin.Actor, origin.ParticipantID
+			base.ParentTool = origin.ParentTool
+		}
 		return base
 	}
 	participantID := strings.TrimSpace(event.Scope.Participant.ID)
@@ -193,7 +199,7 @@ func sessionEventDelivery(event *session.Event) *eventstream.Delivery {
 	switch {
 	case event == nil:
 		return nil
-	case session.IsMirror(event):
+	case session.IsMirror(event), session.ResolvedApprovalReview(event) != nil:
 		return &eventstream.Delivery{Mode: eventstream.DeliveryMirror}
 	case session.IsTransient(event):
 		return &eventstream.Delivery{Mode: eventstream.DeliveryTransient}
@@ -232,6 +238,9 @@ func isLiveStreamingNarrativeEvent(event *session.Event) bool {
 }
 
 func sessionEventTurnID(event *session.Event) string {
+	if token := session.ResolvedApprovalReview(event); token != nil {
+		return strings.TrimSpace(token.TurnID)
+	}
 	if event == nil || event.Scope == nil {
 		return ""
 	}
@@ -239,10 +248,10 @@ func sessionEventTurnID(event *session.Event) string {
 }
 
 func projectSessionEventEnvelope(base eventstream.Envelope, event *session.Event) []eventstream.Envelope {
-	// Journals are internal durable evidence. Client lifecycle, permission and
-	// tool updates have their own typed events and must not be inferred here.
+	// Reviewed decisions have a narrow client projection. Other journal facts
+	// never become client lifecycle, permission, usage or tool updates.
 	if session.IsJournal(event) {
-		return nil
+		return stampDurableProjectionPositions(event, projectApprovalReview(base, event))
 	}
 	out := projectSessionEventToACPEnvelopes(base, event)
 	if len(out) == 0 {

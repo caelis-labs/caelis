@@ -33,9 +33,9 @@ func (s *runtimeComposition) materializeReviewerAgent(
 				configured,
 				placement.ReasoningEffort,
 			),
-			PinnedModel:    ptrToModelConfig(configured),
-			BridgeApproval: !runtimeCfg.DangerouslySkipPermissions,
-			ControlURL:     process.childControlURL, ControlTokenFile: process.childControlTokenFile,
+			PinnedModel:  ptrToModelConfig(configured),
+			ApprovalMode: spawnedApprovalMode(runtimeCfg),
+			ControlURL:   process.childControlURL, ControlTokenFile: process.childControlTokenFile,
 		})
 	case sdkplacement.KindAgent:
 		snapshot, err := s.placementSnapshot(ctx)

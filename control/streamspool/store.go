@@ -93,7 +93,9 @@ const (
 	StateStoreClosed
 )
 
-// Bounds is one atomic partition availability snapshot.
+// Bounds is one atomic partition availability snapshot. Low advances when cache
+// retention reclaims a prefix; OriginComplete identifies a producer-established
+// display origin, not a promise to retain the provider's entire raw history.
 type Bounds struct {
 	Low            Offset
 	High           Offset

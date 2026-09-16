@@ -116,7 +116,7 @@ func CloneReconnectRequest(in *ReconnectRequest) *ReconnectRequest {
 // trusted Task facts reconstructed by Control, never model input.
 type HistoryRequest struct {
 	// MetadataOnly omits returned history events when an output observer consumes
-	// the complete replay. It does not truncate the observer's history.
+	// display replay. The observer may retain a bounded projection of that replay.
 	MetadataOnly bool              `json:"-"`
 	Anchor       delegation.Anchor `json:"-"`
 	Reconnect    ReconnectRequest  `json:"-"`

@@ -7,6 +7,7 @@ import (
 	"maps"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
@@ -82,7 +83,7 @@ type historyCollector struct {
 	err               error
 	bytes             int
 	eventCount        int
-	staging           *historyStaging
+	projection        *historyProjection
 }
 
 func newHistoryCollector(runner *Runner, anchor delegation.Anchor, agentName string) *historyCollector {
@@ -132,7 +133,7 @@ func (c *historyCollector) observe(env client.UpdateEnvelope) {
 		}
 		if c.lastUpdateType != client.UpdateUserMessage || messageID != "" && messageID != c.lastUserMessageID {
 			c.flushUserText()
-			c.stageEvents()
+			c.projectEvents()
 			c.turnSeq++
 			newInputTurn = true
 		}
@@ -143,12 +144,14 @@ func (c *historyCollector) observe(env client.UpdateEnvelope) {
 	}
 	if updateType != client.UpdateUserMessage {
 		c.flushUserText()
-		c.stageEvents()
+		c.projectEvents()
 	}
 	c.bytes += len(raw)
-	if len(c.events) >= 8192 || c.bytes > 32<<20 {
-		c.err = errorcode.New(errorcode.ResourceExhausted, "Child replay exceeds observation budget")
-		return
+	if len(c.events) >= 4096 || c.bytes > 2<<20 {
+		// Retain the input suffix until a possible sender footer arrives. The
+		// provider still owns the full input, including discarded display bytes.
+		c.events = nil
+		c.inputStart, c.bytes = 0, len(raw)
 	}
 	if c.err != nil {
 		return
@@ -178,6 +181,21 @@ func (c *historyCollector) observe(env client.UpdateEnvelope) {
 			}
 			previousBytes := c.userTextBody.Len()
 			c.userTextBody.WriteString(event.Text)
+			if c.userTextBody.Len() > 256<<10 {
+				body := c.userTextBody.String()
+				head, tail := 64<<10, len(body)-(64<<10)
+				for head > 0 && !utf8.RuneStart(body[head]) {
+					head--
+				}
+				for tail < len(body) && !utf8.RuneStart(body[tail]) {
+					tail++
+				}
+				c.userTextBody.Reset()
+				c.userTextBody.WriteString(body[:head])
+				c.userTextBody.WriteString("\n[Earlier input display omitted]\n")
+				c.userTextBody.WriteString(body[tail:])
+				previousBytes = 0
+			}
 			text := c.userTextBody.String()
 			// Inspect only new bytes plus the possible split delimiter. Tiny
 			// ACP chunks must not repeatedly copy or rescan the whole input.
@@ -379,8 +397,13 @@ func (c *historyCollector) eventsSnapshot() []*session.Event {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.flushUserText()
-	out := make([]*session.Event, 0, len(c.events))
-	for _, event := range c.events {
+	events := c.events
+	if c.projection != nil {
+		c.projectEvents()
+		events = c.projection.transcript.Events()
+	}
+	out := make([]*session.Event, 0, len(events))
+	for _, event := range events {
 		out = append(out, session.CloneEvent(event))
 	}
 	return out

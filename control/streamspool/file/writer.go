@@ -36,6 +36,8 @@ func (w *writer) AppendBatch(ctx context.Context, records []streamspool.Record) 
 		}
 	}
 	p := w.partition
+	p.store.admission.Lock()
+	defer p.store.admission.Unlock()
 	p.mu.Lock()
 	defer func() {
 		forget := p.state == streamspool.StatePoisoned && !p.physical && p.readers == 0
@@ -80,6 +82,12 @@ func (w *writer) AppendBatch(ctx context.Context, records []streamspool.Record) 
 }
 
 func (p *partition) appendEncodedLocked(encoded []byte, count int) (streamspool.Offset, error) {
+	// Retention is a moving cache window, not a lifetime output quota. Make
+	// room before reservation; a lagging reader receives ErrExpired.
+	if err := p.makeRoomLocked(int64(len(encoded))); err != nil {
+		p.poisonLocked(err)
+		return 0, err
+	}
 	newPartition := !p.physical
 	newSegment := newPartition || p.active == nil || p.activeBytes+int64(len(encoded)) > p.store.cfg.SegmentBytes
 	if newSegment && p.allocSegments >= p.store.cfg.MaxSegmentsPerPartition {

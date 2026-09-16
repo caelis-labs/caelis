@@ -399,6 +399,8 @@ type Model struct {
 	taskStreamResolveTokens  map[string]uint64
 	taskStreamResolveRetries map[string]int
 	taskStreamRetries        map[string]int
+	taskStreamRecovery       map[string]time.Time
+	taskStreamFollowing      map[string]time.Time
 	taskStreamNextToken      uint64
 	// Subagent output views are transient Surface projections keyed by the
 	// parent Spawn call. They are never persisted or used as Task identity.

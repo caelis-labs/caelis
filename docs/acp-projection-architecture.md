@@ -64,6 +64,29 @@ Session history has no fixed total replay limit. Replace-capable consumers swap 
 an ACP or other irreversible consumer rejects replacement after it has exposed
 an exact prefix. No gap event or second Runtime stream repairs it.
 
+Retention expiry belongs to an observer's cursor, not to the shared Session
+writer. Control captures the accepted durable boundary and spool high-water
+together, replaces the expired prefix, then follows from that same cut. Other
+observers and later transient events retain the healthy writer. Under continued
+pressure, another expired cursor repeats replacement rather than disabling the
+Session's spool.
+
+Spool epochs are disposable process caches. After obtaining the exclusive Store
+lock, startup reclaims previous epochs in both Session and Task namespaces,
+including exhausted caches from earlier versions. This does not alter durable
+Session history and requires no manual data cleanup.
+
+Completed reviewed approval decisions have a `mirror` projection from the
+Runtime's persisted resolved pause token, including tokens written by earlier
+versions. It restores the original tool call's approved or denied display during
+replacement and restart. Progress remains transient; private journal metadata,
+pending approvals, and invocation receipts are not exposed by this projection.
+Replaying a decision neither authorizes execution nor adds model context.
+Child decisions arrive on the parent Session feed independently of Task history.
+The TUI retains bounded review facts per Spawn anchor and joins them by child
+tool call ID when the tool appears, including after pane eviction or replacement.
+A review's parent Turn ID never creates a child transcript block.
+
 If the Session spool cannot deliver a live main-Turn terminal, Control may emit
 one cursorless `result` append containing only that terminal lifecycle. It is a
 bounded completion fallback, not exact history and not a resumable source. If
@@ -116,10 +139,11 @@ content. A window expands when interleaved Turns require earlier records; histor
 without Turn identities falls back to the complete range. Indexes are rebuilt
 from the source after eviction or Host restart. Signed backward tokens bind the
 Session, optional Task, source incarnation, and upper boundary. Session tokens
-arrive at `sync`, child tokens at `replace_end`; absence marks the origin. They
+arrive at `sync`, child tokens at `replace_end`; absence marks the earliest available boundary. They
 cannot be used as live cursors. A lost source rejects the older request rather
 than splicing another incarnation into an existing document. Consumers omitting
-`history_turns` retain full-history behavior.
+`history_turns` receive the complete available range, which can be a retained
+display window for a child.
 
 Live durable delivery and replay use the same projector. Reload must not create
 Session Events, promote transient output, or change rebuilt model context.
@@ -235,52 +259,58 @@ one or gain authenticated user authority.
 
 Task status is a replaceable directory snapshot and contains no transcript.
 Visible content demand has an independent spool cursor. Child workspaces use
-one following subscription, including while idle. A complete retained origin
-and its live tail come from the same Task spool. Child workspace subscriptions
-request `history_snapshot` and a recent-Turn window when opening without a cursor. Control streams that
-captured window as bounded replacement pages and commits its exact continuation
-cursor at the end; new output follows from that same boundary. Retained history
-snapshots have no fixed total event limit. The TUI builds their child narrative
-privately and publishes it once, without buffering every transport Envelope.
-If that origin is missing,
-Control shares one recovery per Task: the runner checks `loadSession`, performs
-ACP `session/load`, and queues its complete ordered replay before accepting live
-updates from the same connection. The load response is the replay boundary.
-An idle history open submits no prompt and defers execution configuration until
-authorized input; both Agent mail and user input reuse that loaded connection.
-Recovery resolves the same Session Runtime used by input admission. An attached
-Task reader retains that Runtime independently of the parent Session feed.
-Each prompt retains the existing Host work reference through producer settlement,
-including the interval before its running observation reaches the Task directory.
-Built-in managed children use the same exact parent/Task authorization for load
-and resume; a successful load retains connection ownership for later prompts.
+one following subscription, including while idle. A retained display window and
+its live tail come from the same Task spool. Opening without a cursor requests
+`history_snapshot` and a recent-Turn window. Control streams bounded replacement
+pages and commits their continuation cursor at the end; subsequent output starts
+at that boundary. Readers behind the retained low watermark receive a replacement.
+Backward history tokens page within the retained window; its earliest boundary
+may be later than the provider's original Session history.
 
-The recorder writes replay into a private incarnation, then atomically publishes
-it only after the whole replay is written. Later queued updates append to it.
-Readers commit a bounded replacement transaction and continue from its actual
-spool cursor. Failed or over-budget replay leaves the previous document visible
-and reports an error; a Task final answer never substitutes for child history.
-A failed cache can be rebuilt through the same ACP load path once the child is
-idle and settled. Command output still uses its terminal `FinalResult` when its
-cache is unavailable. Surfaces never merge provider history or infer overlap.
+Control shares one recovery per Task when its cache is unavailable. The runner
+checks `loadSession` and consumes ACP `session/load` into a bounded display
+projection. The load response is the replay boundary; subsequent live updates
+use the same connection and recorder. An idle history open submits no prompt and
+defers execution configuration until authorized input. Agent mail and user input
+reuse that connection. Recovery uses the same Session Runtime as input admission,
+which attached readers retain independently of the parent feed. Each prompt
+retains its Host work reference through producer settlement. Built-in managed
+children use exact parent/Task authorization for load and resume.
 
-Task producer callbacks admit immutable records into bounded memory; one writer
-per Task batches at 64 KiB or a 40 ms flush window. Small tails arriving during
-writes also receive a batching window. Reader/lifecycle barriers may flush early.
-Limits include in-flight records: 8,192 records / 32 MiB per Task and 64 MiB of
-queued payloads across the recorder. Overflow or a write failure invalidates the
-cache and reports a gap without blocking execution or silently losing a prefix.
-Spool segments use append writes and close without fsync; they are disposable
-cache files, never a second durable Session history. Ordinary follow-up turns
-append new output without rewriting prior history. Metadata-only ACP history recovery stages complete input groups and output in
-private temporary files, then streams them into the recorder's unpublished
-incarnation. It retains at most one input group in memory, bounded at 8,192 events
-/ 32 MiB. Staging is limited to 256 MiB per load and 1 GiB across concurrent
-loads; spool quotas still apply. Temporary files are removed on success, failure,
-and authentication retry. The streaming observer joins its reader before
-returning, including cancellation. Callers requesting returned history events
-retain the bounded in-memory load path. Replay is never truncated into a
-supposedly complete view.
+The display projection coalesces adjacent text chunks from the same message and
+speaker. The newest two Turns retain detail; older Turns retain user/assistant
+messages and Agent communication with sender provenance. Retention is capped at
+64 Turns, 4,096 events and 2 MiB, including a single long Turn. Oversized records
+and the oldest display prefix may be omitted. The child owns raw persistence;
+this projection never supplies model context. At most eight provider replays run
+concurrently. Replay does not stage a complete second transcript on disk.
+
+The recorder publishes a private replacement incarnation only after the bounded
+projection is written. Subsequent queued updates append to it. Live child output
+is compacted at Turn boundaries and byte thresholds through that same publication
+path. Compaction preserves retained frames' transport metadata and the latest
+lifecycle fact for each retained activity, in source order, including terminal
+facts carried separately from dialogue. Readers commit the matching replacement end marker before advancing their
+cursor. Failed replacement retains the previous document and reports an error;
+a Task final answer never substitutes for child history. Missing raw history is
+not reconstructed from the display cache. Command output can use its terminal
+`FinalResult` when its cache is unavailable.
+
+Task callbacks admit immutable records into bounded queues; one writer per Task
+batches at 64 KiB or a 40 ms flush window. Queue limits include in-flight records:
+8,192 records / 32 MiB per Task and 64 MiB across the recorder. Oversized display
+records become an omission notice. Queue overload or physical write failure
+reports a cache gap without changing execution. Streaming history observers join
+their source before returning, including cancellation.
+
+Spool defaults retain at most 16 MiB per stream and 1 GiB globally, including
+allocation charges. One-MiB segments roll as a stream grows. Global pressure
+reclaims the oldest published windows without waiting for terminal TTL; slow
+readers cannot pin disk bytes indefinitely. Reclaimed idle writers can append
+again. Unpublished replacement windows are protected from other writers until
+publication. Segments are disposable, close without fsync, and are not a durable
+message queue. Filesystem errors or a single record exceeding admission limits
+remain explicit failures.
 
 Only implemented notification methods enter the ACP client's ordered queue;
 standard `session/update` and the supported notice extension remain enabled.
@@ -346,9 +376,15 @@ Runtime, policy, Session-store, spool-file, or Host implementation dependencies.
 
 The TUI main transcript keeps the newest two logical Turns fully detailed. Older
 terminal Turns display user and assistant narrative without completed tool,
-reasoning, or plan details; nonterminal blocks and standalone child panes remain
-fully detailed. This presentation policy does not remove document events or
-change canonical history or model context. Main-transcript layout materializes
+reasoning, or plan details; nonterminal main blocks remain fully detailed. This
+main-transcript presentation policy does not remove document events. Child panes
+also release older detail, periodically compact to 64 Turn blocks / 4,096 events / 4 MiB,
+and cap individual displayed text tails. At most eight child documents stay
+cached; reopening an evicted pane requests a fresh snapshot and preserves its
+draft. These limits never change canonical history or model context. Child
+observation retries share a 35-second recovery episode across resolution and
+subscription failures; replacement alone does not reset it. Exhaustion keeps the
+mounted document and reports an error. Stable following resets the episode. Main-transcript layout materializes
 visible blocks and a scroll margin, retaining estimated heights outside that
 window. Display-column selections stay tied to measured rows; width changes clear
 them before reflow.

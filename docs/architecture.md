@@ -203,7 +203,8 @@ typed contract explicitly says otherwise.
 Control records normalized Session and Task output in one file-backed,
 append-only spool model. Each partition has one writer and independent
 cursor-based readers; a missing or slow Surface parks only its reader. The
-spool is quota- and TTL-bounded, may be discarded after restart, and never
+spool uses rolling retention and capacity-pressure reclamation as well as TTL,
+may be discarded after restart, and never
 participates in execution recovery or model-context reconstruction. Session
 events, Task results, and ACP child Sessions remain authoritative.
 
@@ -233,8 +234,10 @@ Both Session and Task clients receive explicit append or transactional
 replacement deliveries. Replacement pages remain non-visible until their
 matching end marker. A valid cursor prefers exact spool bytes, but missing,
 expired, or corrupt cache state selects one complete authoritative replacement:
-canonical Session replay, command final result, or ACP child session replay.
-Child replay is written and atomically published by the same recorder that
+canonical Session replay, command final result, or a bounded projection of ACP
+child Session replay. Child display history can omit earlier detail and prefixes;
+the provider remains the raw history owner.
+Child display replay is written and atomically published by the same recorder that
 accepts live updates from the loaded connection. Child history errors remain
 errors; a final answer never replaces a missing transcript. Replace-capable Surfaces swap only after
 the matching end marker; an irreversible ACP callback rejects a replacement

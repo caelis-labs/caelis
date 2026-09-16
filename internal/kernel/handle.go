@@ -14,6 +14,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
+	acpprojector "github.com/caelis-labs/caelis/control/appserver/projection"
 )
 
 type turnHandleConfig struct {
@@ -391,10 +392,9 @@ func (h *turnHandle) approvalReviewEnvelopes(req *agent.ApprovalRequest, payload
 		}
 	}
 	// Scope describes who produced an event; it does not make that event
-	// durable. Guardian review progress is a live observation. Its usage belongs
-	// to durable Session accounting instead of the parent's context stream,
-	// while reconnectable permission requests are projected from their stored
-	// Session events by the approval coordinator.
+	// durable. Guardian progress is live; completed decisions also have a
+	// replay projection from their persisted pause token. Usage belongs to
+	// Session accounting and never enters the parent's model context.
 	base.Delivery = &eventstream.Delivery{Mode: eventstream.DeliveryTransient}
 	if review := approvalReviewFromPayload(payload); review != nil {
 		next := base
@@ -451,14 +451,7 @@ func approvalParentToolRelation(req *agent.ApprovalRequest) *eventstream.ParentT
 	if req == nil {
 		return nil
 	}
-	toolCallID := metadataString(req.Metadata, "parent_call_id")
-	if toolCallID == "" {
-		return nil
-	}
-	return &eventstream.ParentToolRelation{
-		ToolCallID: toolCallID,
-		ToolName:   firstNonEmpty(metadataString(req.Metadata, "parent_tool"), metadataString(req.Metadata, "parent_tool_name")),
-	}
+	return acpprojector.ApprovalOriginFromMetadata(req.Metadata, req.SessionRef, req.TurnID).ParentTool
 }
 
 func (h *turnHandle) nextApprovalReviewID() string {

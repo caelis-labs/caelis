@@ -7,6 +7,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
+	acpprojector "github.com/caelis-labs/caelis/control/appserver/projection"
 	"github.com/caelis-labs/caelis/control/history"
 	"github.com/caelis-labs/caelis/control/streamspool"
 )
@@ -31,8 +32,16 @@ func (b *FeedBroker) historyWindow(ctx context.Context, source string, key strea
 				return feedHistoryWindow{}, err
 			}
 			for _, event := range page.Events {
-				if event != nil && event.Scope != nil && event.ChildOrigin == nil && event.Seq > 0 {
+				if event == nil || event.ChildOrigin != nil || event.Seq == 0 {
+					continue
+				}
+				if event.Scope != nil {
 					e.Index.Observe(event.Seq-1, event.Scope.TurnID)
+				} else if session.ResolvedApprovalReview(event) != nil {
+					base := acpprojector.EnvelopeBaseFromSessionEvent(b.ref, event, acpprojector.SessionEventTransport{})
+					if base.Scope == eventstream.ScopeMain {
+						e.Index.Observe(event.Seq-1, base.TurnID)
+					}
 				}
 			}
 			if page.NextSeq <= e.Index.High {

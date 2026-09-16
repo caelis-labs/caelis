@@ -11,6 +11,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/task/output"
+	"github.com/caelis-labs/caelis/control/history"
 )
 
 func TestRecorderStreamsLongHistoryBeforeQueuedLiveOutput(t *testing.T) {
@@ -59,14 +60,14 @@ func TestRecorderStreamsLongHistoryBeforeQueuedLiveOutput(t *testing.T) {
 	}
 	svc := newTaskStreamTestService(t, newTaskStreamTestStore(entry), spool, recorder)
 	seen, cursor := 0, ""
-	for seen <= count {
+	for seen <= history.TranscriptEvents {
 		result, err := svc.Events(ctx, Principal{ID: "owner"}, ReadRequest{SessionID: "session-1", TaskID: "task-1", Cursor: cursor})
 		if err != nil {
 			t.Fatal(err)
 		}
 		for _, delivery := range result.Deliveries {
 			for _, record := range delivery.Records {
-				if seen < count && session.EventText(record.Frame.Event) != fmt.Sprint(seen) || seen == count && record.Frame.Text != "live tail" {
+				if seen < history.TranscriptEvents && session.EventText(record.Frame.Event) != fmt.Sprint(count-history.TranscriptEvents+seen) || seen == history.TranscriptEvents && record.Frame.Text != "live tail" {
 					t.Fatalf("record %d lost or reordered", seen)
 				}
 				seen++
@@ -77,7 +78,7 @@ func TestRecorderStreamsLongHistoryBeforeQueuedLiveOutput(t *testing.T) {
 			cursor = delivery.NextCursor
 		}
 	}
-	if seen != count+1 {
+	if seen != history.TranscriptEvents+1 {
 		t.Fatalf("read %d records", seen)
 	}
 }

@@ -13,6 +13,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/task/output"
+	"github.com/caelis-labs/caelis/control/history"
 	"github.com/caelis-labs/caelis/control/streamspool"
 )
 
@@ -35,6 +36,7 @@ type recordedTaskOutput struct {
 // Recorder binds trusted Task identity to raw SDK output and appends it to the
 // Control-owned transient spool. It owns no Task lifecycle authority.
 type Recorder struct {
+	compactMu   sync.Mutex // bounds concurrent projection memory across Tasks
 	store       streamspool.Store
 	diagnostics *slog.Logger
 
@@ -45,6 +47,10 @@ type Recorder struct {
 }
 
 type recordingPartition struct {
+	subagent          bool
+	writtenBytes      int
+	lastTurn          string
+	turnCount         int
 	writer            streamspool.Writer // worker-owned after registration
 	unpublished       bool
 	sessionID, taskID string
@@ -128,7 +134,7 @@ func (r *Recorder) BindTaskOutput(ctx context.Context, binding output.Binding) o
 			r.logFailure("register", binding, err)
 			return output.Nop()
 		}
-		partition = &recordingPartition{writer: writer, unpublished: unpublished, sessionID: binding.SessionID, taskID: binding.TaskID, wake: make(chan struct{}, 1), done: make(chan struct{})}
+		partition = &recordingPartition{writer: writer, unpublished: unpublished, subagent: binding.Kind == output.TaskKindSubagent, sessionID: binding.SessionID, taskID: binding.TaskID, wake: make(chan struct{}, 1), done: make(chan struct{})}
 		r.writers[logical] = partition
 		go r.writeLoop(logical, partition)
 	}
@@ -157,6 +163,18 @@ func (o *boundRecorder) ObserveTaskOutput(ctx context.Context, event output.Even
 		o.partition.mu.Unlock()
 		return o.recorder.failQueue(o.partition, err)
 	}
+	if len(payload) > history.TranscriptBytes/2 {
+		// This is a disposable presentation record. A huge tool result must
+		// not poison the writer and hide every subsequent approval or final.
+		event.Event = &session.Event{Type: session.EventTypeNotice, Time: event.OccurredAt,
+			Notice: &session.EventNotice{Level: "info", Text: "Large event omitted from display"}}
+		event.Text = ""
+		payload, err = json.Marshal(recordedTaskOutput{TerminalID: o.binding.TerminalID, ActivityID: o.binding.ActivityID, Event: event})
+		if err != nil {
+			o.partition.mu.Unlock()
+			return o.recorder.failQueue(o.partition, err)
+		}
+	}
 	return o.recorder.enqueueLocked(o.partition, outputWrite{
 		records: []streamspool.Record{{Type: taskOutputRecordType, OccurredAt: event.OccurredAt, Payload: payload}}, bytes: len(payload),
 		seal: event.Closed && o.partitionTerminal,
@@ -169,20 +187,21 @@ func (o *boundRecorder) ReplaceTaskHistory(ctx context.Context, events []*sessio
 	if o == nil || o.partition == nil {
 		return nil
 	}
-	item := outputWrite{replace: true}
+	var window history.Transcript
 	for _, event := range events {
-		if event == nil {
-			continue
+		if err := ctx.Err(); err != nil {
+			return err
 		}
+		window.Append(event)
+	}
+	item := outputWrite{replace: true}
+	for _, event := range window.Events() {
 		record, err := historyOutputRecord(o.binding.ActivityID, event)
 		if err != nil {
 			return err
 		}
-		item.bytes += len(record.Payload)
-		if item.bytes > taskOutputQueueBytes || len(item.records) >= taskOutputQueueRecords {
-			return o.recorder.failQueue(o.partition, streamspool.ErrLimit)
-		}
 		item.records = append(item.records, record)
+		item.bytes += len(record.Payload)
 	}
 	return o.recorder.enqueue(o.partition, item)
 }

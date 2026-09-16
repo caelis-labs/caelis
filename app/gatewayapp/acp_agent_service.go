@@ -38,7 +38,7 @@ type defaultSpawnedSelfACPAgentConfig struct {
 	WorkspaceCWD     string
 	SessionOptions   controlagents.SessionOptions
 	PinnedModel      *ModelConfig
-	BridgeApproval   bool
+	ApprovalMode     string
 	ControlURL       string
 	ControlTokenFile string
 }
@@ -48,7 +48,7 @@ func defaultSpawnedSelfACPAgent(cfg defaultSpawnedSelfACPAgentConfig) (assembly.
 		StoreDir:       cfg.StoreDir,
 		WorkspaceKey:   cfg.WorkspaceKey,
 		WorkspaceCWD:   cfg.WorkspaceCWD,
-		SessionOptions: spawnedCaelisSessionOptions(cfg.SessionOptions, cfg.BridgeApproval),
+		SessionOptions: spawnedCaelisSessionOptions(cfg.SessionOptions, cfg.ApprovalMode),
 		ControlURL:     cfg.ControlURL, ControlTokenFile: cfg.ControlTokenFile,
 	})
 	if err != nil {
@@ -63,7 +63,7 @@ func configuredModelSpawnedSelfACPAgent(cfg defaultSpawnedSelfACPAgentConfig) (a
 		StoreDir:       cfg.StoreDir,
 		WorkspaceKey:   cfg.WorkspaceKey,
 		WorkspaceCWD:   cfg.WorkspaceCWD,
-		SessionOptions: spawnedCaelisSessionOptions(cfg.SessionOptions, cfg.BridgeApproval),
+		SessionOptions: spawnedCaelisSessionOptions(cfg.SessionOptions, cfg.ApprovalMode),
 		ControlURL:     cfg.ControlURL, ControlTokenFile: cfg.ControlTokenFile,
 	})
 	if err != nil {
@@ -81,17 +81,28 @@ func cloneOptionalPinnedModel(model *ModelConfig) *ModelConfig {
 	return &cloned
 }
 
-func spawnedCaelisSessionOptions(in controlagents.SessionOptions, bridgeApproval bool) controlagents.SessionOptions {
+func spawnedCaelisSessionOptions(in controlagents.SessionOptions, mode string) controlagents.SessionOptions {
 	out := controlagents.NormalizeSessionOptions(in)
-	if bridgeApproval {
-		if out.ConfigValues == nil {
-			out.ConfigValues = map[string]string{}
-		}
-		// A Caelis child must ask the parent client to resolve permissions. Apply
-		// this after session/new instead of constructing a second embedded Host.
-		out.ConfigValues[acpConfigModeID] = "manual"
+	if mode == dangerouslySkipPermissionsModeLabel {
+		// Full access is a Host posture, not an ACP Session mode. That Host
+		// exposes no mutable approval choices, so do not send a mode setter.
+		delete(out.ConfigValues, acpConfigModeID)
+		return out
 	}
+	if out.ConfigValues == nil {
+		out.ConfigValues = map[string]string{}
+	}
+	// Built-in children share the Host's sandbox/policy configuration. Each
+	// Session owns its approval queue and Guardian, including automatic review.
+	out.ConfigValues[acpConfigModeID] = approvalMode(mode)
 	return out
+}
+
+func spawnedApprovalMode(cfg stackRuntimeConfig) string {
+	if cfg.DangerouslySkipPermissions {
+		return dangerouslySkipPermissionsModeLabel
+	}
+	return cfg.ApprovalMode
 }
 
 func (s *runtimeComposition) configuredAssembly(base assembly.ResolvedAssembly, plugins []PluginConfig, runtimeCfg stackRuntimeConfig) (assembly.ResolvedAssembly, error) {
@@ -112,9 +123,9 @@ func (s *runtimeComposition) configuredAssemblyWithPluginAgents(base assembly.Re
 			runtimeCfg.Model,
 			runtimeCfg.ModelProfileEffort,
 		),
-		PinnedModel:    ptrToModelConfig(runtimeCfg.Model),
-		BridgeApproval: !runtimeCfg.DangerouslySkipPermissions,
-		ControlURL:     process.childControlURL, ControlTokenFile: process.childControlTokenFile,
+		PinnedModel:  ptrToModelConfig(runtimeCfg.Model),
+		ApprovalMode: spawnedApprovalMode(runtimeCfg),
+		ControlURL:   process.childControlURL, ControlTokenFile: process.childControlTokenFile,
 	})
 	if err != nil {
 		return assembly.ResolvedAssembly{}, err

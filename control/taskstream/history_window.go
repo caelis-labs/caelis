@@ -11,7 +11,11 @@ import (
 )
 
 func (s *service) childHistoryWindow(ctx context.Context, entry *task.Entry, source exactSource, req SubscribeRequest) (exactSource, string, error) {
+	// A retained low watermark is part of this rebuildable index's identity.
 	name := fmt.Sprint(source.key)
+	if source.bounds.Low > 0 {
+		name = fmt.Sprint(name, ":", source.bounds.Low)
+	}
 	high := uint64(source.bounds.High)
 	turns := req.HistoryTurns
 	if req.HistoryBefore != "" {
@@ -19,7 +23,7 @@ func (s *service) childHistoryWindow(ctx context.Context, entry *task.Entry, sou
 		if err != nil {
 			return source, "", err
 		}
-		if p.Source != name || p.Before > high || source.bounds.Low != 0 || !source.bounds.OriginComplete {
+		if p.Source != name || p.Before > high || p.Before <= uint64(source.bounds.Low) || !source.bounds.OriginComplete {
 			return source, "", history.Stale()
 		}
 		high = p.Before
@@ -33,6 +37,9 @@ func (s *service) childHistoryWindow(ctx context.Context, entry *task.Entry, sou
 	e := s.histories.Get(name)
 	e.Lock()
 	defer e.Unlock()
+	if e.Index.High < uint64(source.bounds.Low) {
+		e.Index.High = uint64(source.bounds.Low)
+	}
 	if e.Index.High < high {
 		reader, err := s.spool.Reader(ctx, source.key, streamspool.Offset(e.Index.High))
 		if err != nil {
@@ -56,9 +63,12 @@ func (s *service) childHistoryWindow(ctx context.Context, entry *task.Entry, sou
 			e.Index.High = uint64(raw.Offset) + 1
 		}
 	}
-	start := e.Index.Start(high, turns)
+	start := max(e.Index.Start(high, turns), uint64(source.bounds.Low))
 	source.offset, source.seq = streamspool.Offset(start), start
 	source.bounds.High = streamspool.Offset(high)
 	before := history.Encode(s.cursors.secret, history.Position{SessionID: entry.Session.SessionID, TaskID: entry.TaskID, Source: name, Before: start})
+	if start == uint64(source.bounds.Low) {
+		before = ""
+	}
 	return source, before, nil
 }

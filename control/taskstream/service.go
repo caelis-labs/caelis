@@ -355,11 +355,17 @@ func (s *service) selectExact(ctx context.Context, entry *task.Entry, point curs
 	}
 	key, bounds, err := s.spool.Resolve(ctx, logical)
 	if err == nil {
-		if !bounds.OriginComplete || bounds.Low != 0 || bounds.State == streamspool.StatePoisoned ||
+		// A fully reclaimed partition still owns a live writer, but has no
+		// display history to serve. A new reader must use authoritative recovery;
+		// an empty origin (Low == High == 0) can still receive its first output.
+		if bounds.Low > 0 && bounds.Low == bounds.High {
+			return exactSource{}, false, nil
+		}
+		if !bounds.OriginComplete || bounds.State == streamspool.StatePoisoned ||
 			bounds.State == streamspool.StateStoreClosed || bounds.State == streamspool.StateEmptyTerminal {
 			return exactSource{}, false, nil
 		}
-		return exactSource{key: key, bounds: bounds}, true, nil
+		return exactSource{key: key, offset: bounds.Low, seq: uint64(bounds.Low), bounds: bounds}, true, nil
 	}
 	return exactSource{}, false, nil
 }
