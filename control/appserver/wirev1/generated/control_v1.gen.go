@@ -390,6 +390,24 @@ type BindAgentBindingRequest struct {
 	SessionId               *string        `json:"session_id,omitempty"`
 }
 
+type Bot struct {
+	Config        BotConfig     `json:"config"`
+	Id            string        `json:"id"`
+	ModelSelector *string       `json:"model_selector,omitempty"`
+	Revision      Uint64Decimal `json:"revision"`
+	SessionId     string        `json:"session_id"`
+}
+
+type BotConfig struct {
+	Description *string `json:"description,omitempty"`
+	Effort      *string `json:"effort,omitempty"`
+	Fast        *bool   `json:"fast,omitempty"`
+	Model       *string `json:"model,omitempty"`
+	Name        string  `json:"name"`
+}
+
+type BotList []Bot
+
 type CaelisMetadata map[string]JSONValue
 
 type CaelisRuntimeMetadata map[string]JSONValue
@@ -550,6 +568,14 @@ type CreateAgentRoleRequest struct {
 	ExpectedRevision        *Uint64Decimal `json:"expected_revision,omitempty"`
 	OperationId             *string        `json:"operation_id,omitempty"`
 	Role                    JSONObject     `json:"role"`
+	SessionId               *string        `json:"session_id,omitempty"`
+}
+
+type CreateBotRequest struct {
+	Config                  BotConfig      `json:"config"`
+	ExpectedControllerEpoch *string        `json:"expected_controller_epoch,omitempty"`
+	ExpectedRevision        *Uint64Decimal `json:"expected_revision,omitempty"`
+	OperationId             *string        `json:"operation_id,omitempty"`
 	SessionId               *string        `json:"session_id,omitempty"`
 }
 
@@ -1433,6 +1459,7 @@ type SkillResolveResult struct {
 type SlashArgCandidate struct {
 	Detail                *string `json:"detail,omitempty"`
 	Display               *string `json:"display,omitempty"`
+	ModelConfigId         *string `json:"model_config_id,omitempty"`
 	ModelImageInputKnown  *bool   `json:"model_image_input_known,omitempty"`
 	ModelMetadataComplete *bool   `json:"model_metadata_complete,omitempty"`
 	NoAuth                *bool   `json:"no_auth,omitempty"`
@@ -1748,6 +1775,15 @@ type UIPreferences struct {
 
 type Uint64Decimal string
 
+type UpdateBotRequest struct {
+	BotId                   string         `json:"bot_id"`
+	Config                  BotConfig      `json:"config"`
+	ExpectedControllerEpoch *string        `json:"expected_controller_epoch,omitempty"`
+	ExpectedRevision        *Uint64Decimal `json:"expected_revision,omitempty"`
+	OperationId             *string        `json:"operation_id,omitempty"`
+	SessionId               *string        `json:"session_id,omitempty"`
+}
+
 type UpdateMarketplaceRequest struct {
 	ExpectedControllerEpoch *string        `json:"expected_controller_epoch,omitempty"`
 	ExpectedRevision        *Uint64Decimal `json:"expected_revision,omitempty"`
@@ -1819,4 +1855,4 @@ type WriteBase struct {
 	SessionId               *string        `json:"session_id,omitempty"`
 }
 
-var OperationIDs = []string{"cancelParticipant", "cancelSessionTurn", "closeSession", "compactSession", "completeFiles", "completeSessions", "completeSkills", "completeSlashArguments", "configureSessionControllerMode", "configureSessionMode", "configureSessionPresentation", "configureSessionPresentationMode", "createSession", "getAgentStatus", "getHostStatus", "getPresentationCapabilities", "getSessionPresentation", "getSessionState", "getSessionStatus", "getTerminalOutput", "handoffAgent", "hostAddMarketplace", "hostAddPluginPath", "hostApplyAgentBindingSet", "hostBindAgent", "hostCompleteFiles", "hostCompleteSessions", "hostCompleteSkills", "hostCompleteSlashArguments", "hostConnectACP", "hostConnectModel", "hostCreateAgentRole", "hostDeleteAgentBindingSet", "hostDeleteAgentRole", "hostDeleteModel", "hostDisablePlugin", "hostDisconnectACP", "hostEnablePlugin", "hostGetACPPreparation", "hostGetAgentBindingStatus", "hostGetAgentStatus", "hostInspectPlugin", "hostInstallPlugin", "hostListAgents", "hostListDisconnectCandidates", "hostListMarketplaces", "hostListPlugins", "hostPrepareACP", "hostPrepareACPAuthentication", "hostRemoveMarketplace", "hostRemovePlugin", "hostResetAgentBinding", "hostResolveSkill", "hostSaveAgentBindingSet", "hostUpdateMarketplace", "hostUseModel", "initializeClient", "inspectPlugin", "killTerminal", "listAgents", "listMarketplaces", "listParticipantHandles", "listPlugins", "listSessionTasks", "listSessions", "loadUIPreferences", "prepareSandbox", "promptParticipant", "promptSession", "readTaskEvents", "reconnectSession", "refreshSandbox", "releaseTerminal", "repairSandbox", "resetSandbox", "resolveApproval", "resolveSkill", "saveUIPreferences", "setSandboxBackend", "setWorkspaceTrust", "shutdownHost", "startParticipant", "steerSession", "subagentInputStatuses", "submitSubagentInput", "subscribeTaskEvents", "useSessionModel", "waitTerminal", "watchSessionTaskDirectory"}
+var OperationIDs = []string{"cancelParticipant", "cancelSessionTurn", "closeSession", "compactSession", "completeFiles", "completeSessions", "completeSkills", "completeSlashArguments", "configureSessionControllerMode", "configureSessionMode", "configureSessionPresentation", "configureSessionPresentationMode", "createSession", "getAgentStatus", "getBot", "getHostStatus", "getPresentationCapabilities", "getSessionPresentation", "getSessionState", "getSessionStatus", "getTerminalOutput", "handoffAgent", "hostAddMarketplace", "hostAddPluginPath", "hostApplyAgentBindingSet", "hostBindAgent", "hostCompleteFiles", "hostCompleteSessions", "hostCompleteSkills", "hostCompleteSlashArguments", "hostConnectACP", "hostConnectModel", "hostCreateAgentRole", "hostCreateBot", "hostDeleteAgentBindingSet", "hostDeleteAgentRole", "hostDeleteModel", "hostDisablePlugin", "hostDisconnectACP", "hostEnablePlugin", "hostGetACPPreparation", "hostGetAgentBindingStatus", "hostGetAgentStatus", "hostInspectPlugin", "hostInstallPlugin", "hostListAgents", "hostListDisconnectCandidates", "hostListMarketplaces", "hostListPlugins", "hostPrepareACP", "hostPrepareACPAuthentication", "hostRemoveMarketplace", "hostRemovePlugin", "hostResetAgentBinding", "hostResolveSkill", "hostSaveAgentBindingSet", "hostUpdateMarketplace", "hostUseModel", "initializeClient", "inspectPlugin", "killTerminal", "listAgents", "listBots", "listMarketplaces", "listParticipantHandles", "listPlugins", "listSessionTasks", "listSessions", "loadUIPreferences", "prepareSandbox", "promptParticipant", "promptSession", "readTaskEvents", "reconnectSession", "refreshSandbox", "releaseTerminal", "repairSandbox", "resetSandbox", "resolveApproval", "resolveSkill", "saveUIPreferences", "setSandboxBackend", "setWorkspaceTrust", "shutdownHost", "startParticipant", "steerSession", "subagentInputStatuses", "submitSubagentInput", "subscribeTaskEvents", "updateBot", "useSessionModel", "waitTerminal", "watchSessionTaskDirectory"}

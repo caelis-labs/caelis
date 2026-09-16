@@ -21,6 +21,7 @@ func (m *Model) restoreSessionObservationState(state appserver.SessionState) tea
 	m.runningHintTracker.resetSession()
 	m.stopLiveTurn()
 	m.liveTurn = liveTurnState{}
+	m.setBotRunStatus(state.SessionID, state.Run.Status)
 
 	head := ""
 	if state.Approval.Active != nil {

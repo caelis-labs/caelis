@@ -7,6 +7,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/control/sessionvisibility"
 )
 
 var ErrUnauthorized = errorcode.New(errorcode.PermissionDenied, "controlclient: permission denied")
@@ -46,6 +47,18 @@ func (a SessionAuthorizer) Authorize(ctx context.Context, principal Principal, a
 		return errorcode.Wrap(errorcode.Internal, "controlclient: load session for authorization", err)
 	}
 	if !principal.HasRole("admin") && strings.TrimSpace(active.UserID) != principal.ID {
+		return ErrUnauthorized
+	}
+	if sessionvisibility.IsBotSession(active) {
+		// Bot conversation lifecycle and configuration belong to the focused
+		// service. Knowing its Session ID does not grant workspace commands,
+		// participant access, steering, handoff, or close authority.
+		switch action {
+		case ActionSessionInspect, ActionPrompt, ActionCancel, ActionBotGet, ActionBotUpdate:
+		default:
+			return ErrUnauthorized
+		}
+	} else if action == ActionBotGet || action == ActionBotUpdate {
 		return ErrUnauthorized
 	}
 	if action != ActionSessionInspect && action != ActionSessionClose {
@@ -94,6 +107,7 @@ func isHostProductAction(action Action) bool {
 	case ActionModelConnect, ActionModelUse, ActionModelDelete,
 		ActionSandboxBackend, ActionSandboxPrepare, ActionSandboxRepair, ActionSandboxReset, ActionSandboxRefresh,
 		ActionWorkspaceTrust,
+		ActionBotCreate,
 		ActionAgentBindingBind, ActionAgentBindingReset, ActionAgentRoleCreate, ActionAgentRoleDelete,
 		ActionAgentBindingSetSave, ActionAgentBindingSetApply, ActionAgentBindingSetDelete,
 		ActionACPAgentPrepare, ActionACPAgentPrepareAuth, ActionACPAgentConnect,

@@ -21,6 +21,7 @@ type AppServerServices struct {
 	Status        StatusService
 	Configuration ConfigurationService
 	Agents        AgentService
+	Bots          BotService
 	Completion    CompletionService
 	Plugins       PluginService
 	Presentation  PresentationService
@@ -44,6 +45,7 @@ func (s AppServerServices) Validate() error {
 		{name: "status", value: s.Status},
 		{name: "configuration", value: s.Configuration},
 		{name: "Agent", value: s.Agents},
+		{name: "Bot", value: s.Bots},
 		{name: "completion", value: s.Completion},
 		{name: "plugin", value: s.Plugins},
 		{name: "presentation", value: s.Presentation},
@@ -69,6 +71,7 @@ type AppServerClients struct {
 	Status         StatusClient
 	Configuration  ConfigurationClient
 	Agents         AgentClient
+	Bots           BotClient
 	Completion     CompletionClient
 	Plugins        PluginClient
 	Presentation   PresentationClient
@@ -101,6 +104,10 @@ func BindAppServerClients(services AppServerServices, principal Principal) (AppS
 	if err != nil {
 		return AppServerClients{}, err
 	}
+	bots, err := BindBotClient(services.Bots, principal)
+	if err != nil {
+		return AppServerClients{}, err
+	}
 	completion, err := BindCompletionClient(services.Completion, principal)
 	if err != nil {
 		return AppServerClients{}, err
@@ -127,7 +134,7 @@ func BindAppServerClients(services AppServerServices, principal Principal) (AppS
 		SubagentInputs: &boundSubagentInputClient{service: services.SubagentInputs, principal: Principal{ID: principal.ID, Roles: append([]string(nil), principal.Roles...)}},
 		UIPreferences:  &boundUIPreferencesClient{service: services.UIPreferences, principal: Principal{ID: principal.ID, Roles: append([]string(nil), principal.Roles...)}},
 		Sessions:       sessions, Participants: participants, Status: status,
-		Configuration: configuration, Agents: agents, Completion: completion, Plugins: plugins,
+		Configuration: configuration, Agents: agents, Bots: bots, Completion: completion, Plugins: plugins,
 		Presentation: presentation, Terminal: terminal, Tasks: tasks,
 	}
 	if err := clients.Validate(); err != nil {
@@ -139,7 +146,7 @@ func BindAppServerClients(services AppServerServices, principal Principal) (AppS
 // Validate rejects a partial presentation client facade.
 func (c AppServerClients) Validate() error {
 	if c.SubagentInputs == nil || c.UIPreferences == nil || c.Sessions == nil || c.Participants == nil || c.Status == nil || c.Configuration == nil ||
-		c.Agents == nil || c.Completion == nil || c.Plugins == nil || c.Presentation == nil || c.Terminal == nil || c.Tasks == nil {
+		c.Agents == nil || c.Bots == nil || c.Completion == nil || c.Plugins == nil || c.Presentation == nil || c.Terminal == nil || c.Tasks == nil {
 		return errors.New("controlclient: complete AppServer clients are required")
 	}
 	return nil

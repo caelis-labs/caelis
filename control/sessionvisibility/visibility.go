@@ -18,6 +18,8 @@ const (
 	// created by Spawn. These Sessions remain addressable participants but must
 	// not receive nested Spawn authority.
 	SystemManagedAgentSubagent = "subagent"
+	// SystemManagedAgentBot identifies a persistent, tool-free Bot conversation.
+	SystemManagedAgentBot = "bot"
 )
 
 // IsSystemManagedMetadata reports whether product Session metadata marks a
@@ -38,6 +40,12 @@ func IsSystemManagedSession(active session.Session) bool {
 func IsSpawnedSubagentSession(active session.Session) bool {
 	value, _ := active.Metadata[MetadataSystemManagedAgent].(string)
 	return strings.EqualFold(strings.TrimSpace(value), SystemManagedAgentSubagent)
+}
+
+// IsBotSession reports whether a canonical Session belongs to a persistent Bot.
+func IsBotSession(active session.Session) bool {
+	value, _ := active.Metadata[MetadataSystemManagedAgent].(string)
+	return strings.EqualFold(strings.TrimSpace(value), SystemManagedAgentBot)
 }
 
 // IsSystemManagedSummary reports whether a Session directory entry is

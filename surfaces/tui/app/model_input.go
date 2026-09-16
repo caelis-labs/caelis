@@ -1221,6 +1221,11 @@ func (m *Model) submitInteractiveLine(execLine string, displayLine string, attac
 		m.quit = true
 		return m, tea.Quit
 	}
+	if m.botMode() {
+		if next, cmd, handled := m.submitBotLine(execLine, displayLine, attachments); handled {
+			return next, cmd
+		}
+	}
 	if execLine == "/resume" {
 		m.resetComposerAfterOverlayOpen()
 		return m, m.openSessionPicker()

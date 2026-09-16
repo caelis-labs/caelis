@@ -10,6 +10,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
 	"github.com/caelis-labs/caelis/control/modelconfig"
+	"github.com/caelis-labs/caelis/control/modelprofile"
 	controller "github.com/caelis-labs/caelis/internal/acpagentbridge/controller"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/internal/kernel"
@@ -457,7 +458,8 @@ func modelChoiceCandidates(choices []ModelChoice, query string, limit int) ([]co
 	}
 	out := make([]controlprompt.SlashArgCandidate, 0, min(limit, len(choices)))
 	for _, choice := range choices {
-		value := modelconfig.PublicSelector(modelChoiceConfig(choice))
+		cfg := modelChoiceConfig(choice)
+		value := modelconfig.PublicSelector(cfg)
 		display := strings.TrimSpace(firstNonEmpty(choice.Alias, choice.ID))
 		if display == "" {
 			continue
@@ -465,11 +467,18 @@ func modelChoiceCandidates(choices []ModelChoice, query string, limit int) ([]co
 		if query != "" && !hasSlashArgPrefix(query, display) && !hasSlashArgPrefix(query, value) {
 			continue
 		}
-		out = append(out, controlprompt.SlashArgCandidate{
+		candidate := controlprompt.SlashArgCandidate{
 			Value:   value,
 			Display: display,
 			Detail:  strings.TrimSpace(choice.Detail),
-		})
+		}
+		// Only provider configs carry a durable model config ID. ACP and other
+		// non-provider choices select by their ModelProfile ID, which is not a
+		// modelconfig identifier and must not be published as one.
+		if choice.Backend != string(modelprofile.BackendACP) {
+			candidate.ModelConfigID = cfg.ID
+		}
+		out = append(out, candidate)
 		if len(out) >= limit {
 			break
 		}

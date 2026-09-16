@@ -65,6 +65,10 @@ func (m *Model) activateSlashArgPickerStateFromInput(command string) bool {
 	if cmd == "" {
 		return false
 	}
+	if m.botMode() && isBotManagedCommand(cmd) {
+		// Bot commands own their own flow; never open a coding-shell picker.
+		return false
+	}
 	if m.slashArgActive && strings.TrimSpace(m.slashArgCommand) == cmd && !m.isWizardActive() {
 		return true
 	}

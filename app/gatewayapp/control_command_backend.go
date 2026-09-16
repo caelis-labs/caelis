@@ -20,6 +20,10 @@ type controlCommandBackend struct {
 
 	acpPreparations *acpPreparationStore
 
+	// botAdmissionMu serializes Bot settings with prompt reservation, not reply
+	// execution. Runtime fences then reject edits during an admitted Turn.
+	botAdmissionMu sync.Mutex
+
 	hostAuthenticationMu sync.Mutex
 	hostAuthentications  map[string]struct{}
 

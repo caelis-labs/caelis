@@ -19,6 +19,7 @@ func TestSystemManagedSessionClassification(t *testing.T) {
 		{name: "wrong marker type", metadata: map[string]any{MetadataSystemManagedAgent: true}},
 		{name: "subagent", metadata: map[string]any{MetadataSystemManagedAgent: "subagent"}, want: true},
 		{name: "guardian", metadata: map[string]any{MetadataSystemManagedAgent: "guardian"}, want: true},
+		{name: "bot", metadata: map[string]any{MetadataSystemManagedAgent: SystemManagedAgentBot}, want: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
@@ -32,6 +33,17 @@ func TestSystemManagedSessionClassification(t *testing.T) {
 				t.Fatalf("IsSystemManagedSummary() = %v, want %v", got, test.want)
 			}
 		})
+	}
+}
+
+func TestIsBotSessionRequiresBotClass(t *testing.T) {
+	t.Parallel()
+	for _, marker := range []string{"bot", " Bot ", "subagent", "guardian", ""} {
+		active := session.Session{Metadata: map[string]any{MetadataSystemManagedAgent: marker}}
+		want := marker == "bot" || marker == " Bot "
+		if got := IsBotSession(active); got != want {
+			t.Errorf("IsBotSession(%q) = %v, want %v", marker, got, want)
+		}
 	}
 }
 

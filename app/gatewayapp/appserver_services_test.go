@@ -6,6 +6,7 @@ import (
 )
 
 type gatewayTestFocusedServices struct {
+	appserver.BotService
 	appserver.ParticipantService
 	appserver.ConfigurationService
 	appserver.AgentService
@@ -23,7 +24,7 @@ func gatewayTestAppServerServices(sessions appserver.Service, status appserver.S
 	}
 	return appserver.AppServerServices{
 		SubagentInputs: &appserver.SubagentInputService{}, UIPreferences: &appserver.UIPreferencesService{},
-		Sessions: sessions, Participants: focused, Status: status, Configuration: focused,
+		Bots: focused, Sessions: sessions, Participants: focused, Status: status, Configuration: focused,
 		Agents: focused, Completion: focused, Plugins: focused,
 		Presentation: focused, Terminal: focused, Tasks: taskService,
 	}

@@ -86,9 +86,10 @@ func (a *SessionClientAdapter) completionRequest(ctx context.Context, query stri
 	if a == nil || a.completionClient == nil {
 		return appserver.CompletionRequest{}, errors.New("app/gatewayapp/controladapter: completion client is unavailable")
 	}
+	workspace := a.workspaceAddress()
 	return appserver.CompletionRequest{
-		WorkspaceKey: a.workspaceKey,
-		CWD:          a.WorkspaceDir(),
+		WorkspaceKey: workspace.Key,
+		CWD:          workspace.CWD,
 		Surface:      a.surface,
 		Query:        query,
 		Limit:        limit,

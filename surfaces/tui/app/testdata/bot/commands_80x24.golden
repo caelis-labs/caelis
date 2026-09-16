@@ -1,0 +1,24 @@
+
+
+
+
+
+
+   ╭──────────────────────────────────────────────────────────────────────────╮
+   │                                                                          │
+   │  /bots         Switch between Bots                                       │
+   │  /connect      Connect a provider or ACP Agent to the Host               │
+   │  /disconnect   Disconnect a provider or ACP Agent from the Host          │
+   │  /help         Show commands and shortcuts                               │
+   │  /model        Change this Bot's model                                   │
+   │  /new          Create a new Bot                                          │
+   │  /quit (exit)  Exit the Bot TUI                                          │
+   │  /settings     Edit this Bot's name, description, and model              │
+   │                                                                          │
+   ╰──────────────────────────────────────────────────────────────────────────╯
+      ↑↓/hover select click/enter apply  tab fill
+
+
+
+   > /bots
+   Ada · gpt-5

@@ -12,10 +12,14 @@ import (
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/memorybinding"
 	"github.com/caelis-labs/caelis/control/memorytool"
+	"github.com/caelis-labs/caelis/control/sessionvisibility"
 	v1alpha1 "github.com/caelis-labs/memory/api/memory/v1alpha1"
 )
 
 func (s *runtimeComposition) admitCreatedMemorySession(ctx context.Context, created session.Session) (session.Session, error) {
+	if sessionvisibility.IsBotSession(created) {
+		return created, nil
+	}
 	if s == nil || s.process == nil || s.authorities.store == nil || s.sessions == nil {
 		return created, nil
 	}

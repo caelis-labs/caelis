@@ -32,6 +32,7 @@ uses them.
 - [ACP Projection Contract](acp-projection-architecture.md) owns Envelope,
   live/replay, Task, and Surface projection rules.
 - [Participants](participants.md) owns user-facing collaboration setup and workspace controls.
+- [Bot Mode](bot.md) owns the standalone Bot product mode, its configuration, and its restricted surface commands.
 - [External ACP Agents](external-acp-agents.md) owns onboarding, authentication,
   model selection, endpoint compatibility, and disconnect behavior.
 - [Testing](testing.md) and [Release](release.md) own their procedures.
@@ -52,6 +53,7 @@ and acceptance history belong in Git and CI, not in this map.
 | `control/streamspool`, `control/streamspool/file` | Product-neutral Control cache records and the bounded local append-only spool implementation |
 | `control/modelcatalog`, `modelconfig`, `modelprofile`, `placement`, `agentbinding` | Provider and model discovery, credentials/configuration, selectable profiles, placement, and fixed Agent bindings |
 | `control/agents` | External ACP Agent identity, preparation, connection, and configuration |
+| `control/bot` | Persistent tool-free Bot identity, configuration, and owner-scoped listing |
 | `control/memorybinding` | Opaque host-selected Memory binding references, Runtime actor and audience delegation, and immutable logical snapshots |
 | `control/collaboration` | Session-scoped participant discovery, public-result observation, mailboxes, collaborator prompt slices, and expiring external grants |
 | `control/mcpconfig`, `control/plugin`, `control/status` | MCP assembly inputs, plugin lifecycle, and product status read models |
@@ -158,9 +160,10 @@ or another concept to a `BindingRef` or append opaque labels through the
 embedding-only selector; Memory still sees neither those product concepts nor
 their semantics. The mandatory workspace label cannot be removed by that
 extension. Later binding changes affect new Sessions, never a Session that has
-already admitted Memory authority. A new canonical Session pins its complete
-non-secret delegation and LabelSet at creation. A
-Session created before Memory was enabled is pinned before its first Memory call
+already admitted Memory authority. A new canonical Session that admits Memory
+pins its complete non-secret delegation and LabelSet at creation. Tool-free
+[Bot conversations](bot.md) do not select or admit Workspace Memory authority.
+A Session created before Memory was enabled is pinned before its first Memory call
 under the Runtime fence. Public or mixed-audience Runtime composition is invalid.
 
 The current Session pin includes binding, actor, principal, issuer reference,

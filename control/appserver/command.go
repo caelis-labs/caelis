@@ -101,6 +101,12 @@ const (
 	ActionPluginEnable              Action = "configuration.plugin.enable"
 	ActionPluginDisable             Action = "configuration.plugin.disable"
 	ActionPluginRemove              Action = "configuration.plugin.remove"
+	// ActionBotCreate creates a Host-owned Bot without addressing a Session;
+	// ActionBotUpdate edits one Bot through its bound Session; ActionBotGet is the
+	// read action used to authorize access through the Bot's bound Session.
+	ActionBotCreate Action = "bot.create"
+	ActionBotUpdate Action = "bot.update"
+	ActionBotGet    Action = "bot.get"
 )
 
 type Outcome string
@@ -156,6 +162,7 @@ const (
 	CommandResourceModelProfile   = "model_profile"
 	CommandResourcePlugin         = "plugin"
 	CommandResourceMarketplace    = "plugin_marketplace"
+	CommandResourceBot            = "bot"
 )
 
 type CreateSessionRequest struct {

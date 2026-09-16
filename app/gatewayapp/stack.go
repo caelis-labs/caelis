@@ -150,6 +150,7 @@ type Stack struct {
 	configurationCommands     appserver.ConfigurationCommandService
 	agentCommands             appserver.AgentCommandService
 	pluginCommands            appserver.PluginCommandService
+	bots                      appserver.BotService
 	taskStreams               acptaskstream.Service
 	operations                appserver.DurableOperationStore
 	lifecycleCancel           context.CancelFunc

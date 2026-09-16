@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"sync"
 
+	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 )
 
 // controlRuntimeStateReader is the focused live-state dependency supplied to
@@ -40,8 +42,9 @@ func (r *controlRuntimeStateReader) bindRegistry(registry *sessionRuntimeRegistr
 	return nil
 }
 
-// ControlClientRuntimeState reads live state only from an already activated
-// Session Runtime. Observation never assembles or retains execution state.
+// ControlClientRuntimeState reads an activated Runtime or recovers the last
+// canonical outcome through the Host Runtime's existing journal reader.
+// Observation never assembles or retains a Session Runtime.
 func (r *controlRuntimeStateReader) ControlClientRuntimeState(ctx context.Context, ref session.SessionRef) (appserver.RuntimeState, error) {
 	if r == nil || r.defaultRuntime == nil {
 		return appserver.RuntimeState{}, fmt.Errorf("gatewayapp: control runtime is unavailable")
@@ -50,18 +53,36 @@ func (r *controlRuntimeStateReader) ControlClientRuntimeState(ctx context.Contex
 	registry := r.registry
 	r.mu.RUnlock()
 	composition := r.defaultRuntime
+	dormant := false
 	if registry != nil {
-		runtime, ok := registry.loaded(ref.SessionID)
-		if !ok {
-			return appserver.RuntimeState{}, nil
+		if runtime, ok := registry.loaded(ref.SessionID); ok {
+			composition = &runtime.instance.runtimeComposition
+		} else {
+			dormant = true
 		}
-		composition = &runtime.instance.runtimeComposition
 	}
 	gateway := composition.currentGateway()
 	if gateway == nil {
 		return appserver.RuntimeState{}, fmt.Errorf("gatewayapp: control runtime is unavailable")
 	}
-	return gateway.ControlClientRuntimeState(ctx, ref)
+	state, err := gateway.ControlClientRuntimeState(ctx, ref)
+	if err != nil || !dormant {
+		return state, err
+	}
+	// Prefer an activation published while canonical history was being read.
+	if runtime, ok := registry.loaded(ref.SessionID); ok {
+		return runtime.instance.currentGateway().ControlClientRuntimeState(ctx, ref)
+	}
+	if !state.Run.Active {
+		switch agent.RunLifecycleStatus(state.Run.Status) {
+		case agent.RunLifecycleStatusRunning, agent.RunLifecycleStatusWaitingApproval:
+			// No current producer and no durable terminal fact: do not claim
+			// success, cancellation, or an actionable approval after a crash.
+			state.Run.Status = eventstream.LifecycleStateUnknown
+			state.Run.WaitingApproval = false
+		}
+	}
+	return state, nil
 }
 
 var _ appserver.RuntimeStateReader = (*controlRuntimeStateReader)(nil)
