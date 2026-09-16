@@ -657,8 +657,7 @@ func TestBotImageOnlyInputBlockedBeforeBootstrap(t *testing.T) {
 		submitted = append(submitted, sub)
 		return TaskResultMsg{}
 	})
-	updated, cmd := model.submitInteractiveLine("", "shot.png", []Attachment{{Name: "shot.png"}})
-	model = updated.(*Model)
+	_, cmd := model.submitInteractiveLine("", "shot.png", []Attachment{{Name: "shot.png"}})
 	if cmd == nil {
 		t.Fatal("image-only input before bootstrap did not surface a hint")
 	}
@@ -1123,8 +1122,7 @@ func TestBotInputBlockedBeforeBootstrap(t *testing.T) {
 		submitted = append(submitted, sub)
 		return TaskResultMsg{}
 	})
-	updated, cmd := model.submitInteractiveLine("hello", "hello", nil)
-	model = updated.(*Model)
+	_, cmd := model.submitInteractiveLine("hello", "hello", nil)
 	if cmd == nil {
 		t.Fatal("input before bootstrap did not surface a hint")
 	}
