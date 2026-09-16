@@ -1137,6 +1137,10 @@ func operationIDOf(request any) string {
 		return req.OperationID
 	case RemovePluginRequest:
 		return req.OperationID
+	case CreateBotRequest:
+		return req.OperationID
+	case UpdateBotRequest:
+		return req.OperationID
 	default:
 		return ""
 	}

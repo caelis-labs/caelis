@@ -335,6 +335,10 @@ func validateCommandRequest(action Action, request any) error {
 		}
 	case HandoffRequest:
 		return validateHandoffRequest(typed)
+	case CreateBotRequest:
+		return validateCreateBotCommandRequest(action, typed)
+	case UpdateBotRequest:
+		return validateUpdateBotCommandRequest(action, typed)
 	case SessionModeRequest:
 		return validateSessionModeRequest(typed)
 	case SessionModelRequest:

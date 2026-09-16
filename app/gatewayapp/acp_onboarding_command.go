@@ -25,7 +25,7 @@ type acpPreparationEffectResult struct {
 }
 
 func (*controlCommandBackend) CanRecoverControlCommand(action appserver.Action) bool {
-	return recoverableACPCommandAction(action)
+	return action == appserver.ActionBotCreate || recoverableACPCommandAction(action)
 }
 
 func recoverableACPCommandAction(action appserver.Action) bool {
@@ -37,8 +37,8 @@ func recoverableACPCommandAction(action appserver.Action) bool {
 	}
 }
 
-// RecoverControlCommand proves terminal ACP preparation results from the
-// domain-owned durable staging record. Plugin mutations deliberately do not
+// RecoverControlCommand proves Bot creation and terminal ACP preparation from
+// their domain-owned durable records. Plugin mutations deliberately do not
 // recover operation-specific effects: managed materialization is retry-safe,
 // and callers retry with a fresh operation and current configuration revision.
 func (s *controlCommandBackend) RecoverControlCommand(
@@ -47,6 +47,9 @@ func (s *controlCommandBackend) RecoverControlCommand(
 	intent appserver.OperationIntent,
 	_ any,
 ) (appserver.CommandResult, bool, error) {
+	if intent.Action == appserver.ActionBotCreate {
+		return s.recoverBotCreation(ctx, principal, intent)
+	}
 	if !recoverableACPCommandAction(intent.Action) {
 		return appserver.CommandResult{}, false, nil
 	}

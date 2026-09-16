@@ -36,6 +36,7 @@ func (m *Model) applySessionReconnectState(state appserver.SessionState) tea.Cmd
 	m.pendingPrompt = nil
 	m.closeTaskStreamSubscriptions()
 	m.currentSessionID = strings.TrimSpace(state.SessionID)
+	m.setBotRunStatus(state.SessionID, state.Run.Status)
 	m.resetSlashSkillCatalog()
 	m.runningHintTracker.resetSession()
 	m.resetConversationView()

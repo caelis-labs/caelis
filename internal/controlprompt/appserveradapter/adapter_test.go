@@ -2122,7 +2122,7 @@ func TestSessionClientAdapterConnectDoesNotRetargetSelectionAfterSessionChange(t
 		connectResult: appserver.CommandResult{Outcome: appserver.OutcomeCommitted, Revision: 1},
 		connectHook: func() {
 			adapter.sessionChangeMu.Lock()
-			adapter.setClientSession("session-2", "")
+			adapter.setClientSession("session-2", session.WorkspaceRef{Key: "workspace-2", CWD: "/workspace-2"})
 			adapter.sessionChangeMu.Unlock()
 		},
 	}

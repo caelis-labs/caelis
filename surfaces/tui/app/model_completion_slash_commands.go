@@ -87,7 +87,7 @@ func (m *Model) slashCommandsForCompletion(skillOnly bool) []string {
 // the Bubble Tea update loop. Built-in slash commands are always refreshed
 // immediately; the skill results are merged when this command completes.
 func (m *Model) requestSlashSkillCatalog() tea.Cmd {
-	if m == nil || m.cfg.SkillComplete == nil || m.slashSkillLoaded || m.slashSkillLoadPending {
+	if m == nil || m.botMode() || m.cfg.SkillComplete == nil || m.slashSkillLoaded || m.slashSkillLoadPending {
 		return nil
 	}
 	if _, _, _, _, ok := slashCompletionTargetAtCursor(m.input, m.cursor); !ok {

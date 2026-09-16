@@ -1,0 +1,40 @@
+   > Explain streaming
+
+  · Streaming keeps long answers readable while they are still being written.
+    Each chunk is buffered and painted in order so the tail stays stable,
+    the viewport follows the newest text, and scrolling never fights the
+    writer. Wrapped continuations keep their alignment, and the composer
+    never loses a draft just because output is still arriving.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+   >
+   Ada · gpt-5

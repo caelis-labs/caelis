@@ -94,6 +94,7 @@ caelis
 | 目标 | 命令 |
 | --- | --- |
 | 启动 TUI | `caelis` |
+| 打开独立 Bot TUI | `caelis bot` |
 | 执行一次提示 | `caelis -p "概述这个仓库。"` |
 | 返回结构化结果 | `caelis -p "审查这些改动。" -format json` |
 | 流式输出 ACP Envelope | `caelis -p "运行测试。" -format jsonl` |

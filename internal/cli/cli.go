@@ -141,6 +141,10 @@ func runWithProductClientOpener(
 	if doctorSubcommand {
 		args = args[1:]
 	}
+	botSubcommand := len(args) > 0 && strings.EqualFold(strings.TrimSpace(args[0]), "bot")
+	if botSubcommand {
+		args = args[1:]
+	}
 	controlServerSubcommand := len(args) > 0 && (strings.EqualFold(strings.TrimSpace(args[0]), "serve") || strings.EqualFold(strings.TrimSpace(args[0]), "server"))
 	if controlServerSubcommand {
 		args = args[1:]
@@ -227,6 +231,7 @@ func runWithProductClientOpener(
 	headlessCandidate := !acpSubcommand &&
 		!controlServerSubcommand &&
 		!doctorSubcommand &&
+		!botSubcommand &&
 		serviceSubcommand == "" &&
 		sandboxSubcommand == "" &&
 		!*forceInteractive &&
@@ -438,6 +443,12 @@ func runWithProductClientOpener(
 		}
 		headlessResultWritten = err == nil
 		return err
+	}
+	if botSubcommand {
+		return runBot(ctx, product, tuiOptions{
+			NoAnimation:                *noAnimation,
+			DangerouslySkipPermissions: cfg.DangerouslySkipPermissions,
+		}, stdin, stdout, stderr)
 	}
 	return runInteractive(ctx, product, preferredInteractiveSessionID(*sessionID), renderModelText(cfg), tuiOptions{
 		NoAnimation:                *noAnimation,

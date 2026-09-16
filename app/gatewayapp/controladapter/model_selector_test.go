@@ -69,6 +69,36 @@ func TestCompleteSlashArgModelPublishesPublicSelectors(t *testing.T) {
 	}
 }
 
+func TestCompleteSlashArgModelPublishesDurableModelConfigIDs(t *testing.T) {
+	driver := modelSelectorDriver()
+	candidates, err := driver.CompleteSlashArg(context.Background(), "model", "", 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Value stays the user-facing public selector; ModelConfigID carries the
+	// durable config identity for provider endpoints (default and non-default).
+	// ACP choices omit it because their ID is a ModelProfile ID, not a
+	// modelconfig identity.
+	want := map[string]string{
+		"deepseek/deepseek-v4-flash":         "deepseek@default/deepseek/deepseek-v4-flash",
+		"xiaomi@api-cn/mimo-v2.5-pro":        "xiaomi@api-cn/xiaomi/mimo-v2.5-pro",
+		"xiaomi@token-plan-cn/mimo-v2.5-pro": "xiaomi@token-plan-cn/xiaomi/mimo-v2.5-pro",
+		"acp:codex:default":                  "",
+	}
+	if len(candidates) != len(want) {
+		t.Fatalf("candidate count = %d, want %d", len(candidates), len(want))
+	}
+	for _, candidate := range candidates {
+		expected, ok := want[candidate.Value]
+		if !ok {
+			t.Fatalf("unexpected candidate %q", candidate.Value)
+		}
+		if candidate.ModelConfigID != expected {
+			t.Fatalf("candidate %q model config ID = %q, want %q", candidate.Value, candidate.ModelConfigID, expected)
+		}
+	}
+}
+
 func TestResolveStoredModelAliasUsesSharedSelectors(t *testing.T) {
 	driver := modelSelectorDriver()
 	tests := []struct{ input, want string }{

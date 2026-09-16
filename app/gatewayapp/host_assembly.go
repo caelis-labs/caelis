@@ -6,6 +6,7 @@ import (
 
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	acptaskstream "github.com/caelis-labs/caelis/control/appserver/taskstream"
+	"github.com/caelis-labs/caelis/control/bot"
 	"github.com/caelis-labs/caelis/control/collaboration"
 	controltaskstream "github.com/caelis-labs/caelis/control/taskstream"
 )
@@ -100,6 +101,16 @@ func assembleHostControlServices(stack *Stack, cfg Config, storeDir string, curs
 	stack.configurationCommands = controlCommands
 	stack.agentCommands = controlCommands
 	stack.pluginCommands = controlCommands
+	stack.bots, err = appserver.NewBotService(appserver.BotServiceConfig{
+		Reader: botModelSelectorProjector{
+			reader: &bot.Service{Sessions: stack.composition.sessions},
+			lookup: stack.composition.lookup,
+		}, Commands: controlCommands,
+		Authorizer: sessionAuthorizer,
+	})
+	if err != nil {
+		return hostControlAssembly{}, err
+	}
 
 	taskStreamRouter := &hostTaskStreamService{
 		host: &stack.composition, lifecycle: stack.composition.authorities.taskOutputLifecycle,

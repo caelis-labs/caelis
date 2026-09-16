@@ -110,6 +110,7 @@ requirements and delivery guarantees.
 | Goal | Command |
 | --- | --- |
 | Start the TUI | `caelis` |
+| Open the standalone Bot TUI | `caelis bot` |
 | Observe an existing Session in another terminal | `caelis -session <session-id>` |
 | Run one prompt | `caelis -p "Summarize this repository."` |
 | Return one structured result | `caelis -p "Review the changes." -format json` |

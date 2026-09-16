@@ -35,7 +35,7 @@ func (a *SessionClientAdapter) ResetSession(ctx context.Context) error {
 	// active view detaches its feed; it does not cancel durable Host work.
 	a.closeActiveTurn()
 	a.preferredID = ""
-	a.setClientSession("", "")
+	a.setClientSession("", session.WorkspaceRef{})
 	return nil
 }
 
@@ -100,7 +100,7 @@ func (a *SessionClientAdapter) ResumeSession(ctx context.Context, sessionID stri
 		}
 	}
 	a.closeActiveTurn()
-	a.setClientSession(result.State.SessionID, result.State.CWD)
+	a.setClientSession(result.State.SessionID, sessionWorkspaceAddress(result.State))
 	reconnect.onClose = func() { a.clearActiveReconnect(reconnect) }
 	a.setActiveReconnect(reconnect)
 	abort = false

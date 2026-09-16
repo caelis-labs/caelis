@@ -137,6 +137,23 @@ context overflow without repeated tool execution.
 Provider latency/cache counters are observations,
 not deterministic unit-test assertions or guarantees from the Harness.
 
+`CAELIS_BOT_E2E=1` enables `TestBotRealMimoConversation`, a bounded real-provider
+Bot conversation test. It copies the configured
+`provider:xiaomi@token-plan-cn/xiaomi/mimo-v2.5` profile and its credential into a
+disposable Store, leaving the user's Host, configuration, and conversation
+untouched. Exactly three prompts run with streaming, a description change, and a
+Host restart; the test asserts exactly three provider calls, that each request
+preserves the previous message prefix, and that no request exposes tools, within
+a two-minute budget.
+
+```bash
+CAELIS_BOT_E2E=1 CAELIS_BOT_SOURCE_STORE=$HOME/.caelis CAELIS_BOT_E2E_OUT=/tmp/caelis-bot-evidence.json go test ./app/gatewayapp -run '^TestBotRealMimoConversation$' -count=1 -timeout=3m -v
+```
+
+`CAELIS_BOT_SOURCE_STORE` selects the Store holding the configured provider and
+credential. `CAELIS_BOT_E2E_OUT` is optional; when set, it writes only the test's
+request and response payloads, never headers or credentials.
+
 `make windows-check` runs Guardian's native evidence tests with deterministic
 model responses. They exercise PowerShell, temporary-only writes, file evidence,
 the approval tool loop and Windows' always-enabled network behavior.

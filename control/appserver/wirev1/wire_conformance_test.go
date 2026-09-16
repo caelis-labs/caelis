@@ -20,6 +20,7 @@ import (
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/wirev1/generated"
+	"github.com/caelis-labs/caelis/control/bot"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
 	"github.com/caelis-labs/caelis/control/workspacetrust"
 	jsonschema "github.com/google/jsonschema-go/jsonschema"
@@ -79,6 +80,14 @@ func TestProductionRequestAndResponseJSONConformsToOpenAPI(t *testing.T) {
 			WriteBase: appserver.WriteBase{OperationID: "agent-binding-set-operation-1", ExpectedRevision: &revision},
 			SetName:   "baseline",
 		},
+		"CreateBotRequest": appserver.CreateBotRequest{
+			WriteBase: appserver.WriteBase{OperationID: "bot-create-operation-1"},
+			Config:    bot.Config{Name: "Ada", Description: "Investigate unfamiliar systems.", Model: "mimo", Effort: "high", Fast: true},
+		},
+		"UpdateBotRequest": appserver.UpdateBotRequest{
+			WriteBase: appserver.WriteBase{OperationID: "bot-update-operation-1", SessionID: "bot-chat-1", ExpectedRevision: &revision},
+			BotID:     "bot-1", Config: bot.Config{Name: "Ada"},
+		},
 		"CompletionRequest": appserver.CompletionRequest{
 			SessionID: "session-1", WorkspaceKey: "workspace-1", CWD: "/tmp/workspace",
 			Surface: "tui", Query: "read", Command: "model", Name: "review", Limit: 10,
@@ -124,6 +133,8 @@ func TestProductionRequestAndResponseJSONConformsToOpenAPI(t *testing.T) {
 		Capabilities: appserver.ClientCapabilities{CaelisTerminalStream: true},
 	}
 	validateWireValue(t, "SessionState", state)
+	validateWireValue(t, "Bot", bot.Bot{ID: "bot-1", SessionID: "bot-chat-1", Revision: math.MaxUint64, Config: bot.Config{Name: "Ada", Fast: true}})
+	validateWireValue(t, "BotList", []bot.Bot{{ID: "bot-1", SessionID: "bot-chat-1", Revision: 4, Config: bot.Config{Name: "Ada"}}})
 	validateWireValue(t, "StatusSnapshot", controlstatus.StatusSnapshot{
 		Configuration: controlstatus.StatusConfiguration{Revision: math.MaxUint64, WorkspaceTrust: workspacetrust.Unknown},
 		Usage: controlstatus.StatusUsage{
@@ -149,6 +160,28 @@ func TestStatusConfigurationRevisionWireRoundTrip(t *testing.T) {
 		t.Fatalf("wire JSON = %s, want decimal string revision", raw)
 	}
 	var got controlstatus.StatusSnapshot
+	if err := Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("round trip = %#v, want %#v", got, want)
+	}
+}
+
+func TestSlashArgCandidateModelConfigIDWireRoundTrip(t *testing.T) {
+	want := []appserver.SlashArgCandidate{
+		{Value: "xiaomi@api-cn/mimo-v2.5-pro", Display: "xiaomi/mimo-v2.5-pro", ModelConfigID: "xiaomi@api-cn/xiaomi/mimo-v2.5-pro"},
+		{Value: "acp:codex:default", Display: "Codex — Sol"},
+	}
+	validateWireValue(t, "SlashArgCandidateList", want)
+	raw, err := Marshal(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(raw, []byte(`"model_config_id":"xiaomi@api-cn/xiaomi/mimo-v2.5-pro"`)) {
+		t.Fatalf("wire JSON = %s, want durable model_config_id", raw)
+	}
+	var got []appserver.SlashArgCandidate
 	if err := Unmarshal(raw, &got); err != nil {
 		t.Fatal(err)
 	}

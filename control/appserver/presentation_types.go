@@ -29,6 +29,12 @@ type SlashArgCandidate struct {
 	NoAuth                bool   `json:"no_auth,omitempty"`
 	ModelMetadataComplete bool   `json:"model_metadata_complete,omitempty"`
 	ModelImageInputKnown  bool   `json:"model_image_input_known,omitempty"`
+	// ModelConfigID is the durable provider model config ID behind a "model"
+	// candidate. Value stays the user-facing public selector, which is not a
+	// durable identifier; a client that persists a selection (for example the
+	// Bot model picker) submits ModelConfigID instead. It is empty for ACP and
+	// other non-provider candidates.
+	ModelConfigID string `json:"model_config_id,omitempty"`
 }
 
 // SkillResolveResult distinguishes a canonical skill match from an ambiguous

@@ -11,6 +11,7 @@ import (
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
 	"github.com/caelis-labs/caelis/control/memorybinding"
 	controlplacement "github.com/caelis-labs/caelis/control/placement"
+	"github.com/caelis-labs/caelis/control/sessionvisibility"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 )
 
@@ -53,6 +54,9 @@ func (a *workspaceConfigAssembler) assembleSnapshot(
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
+	}
+	if sessionvisibility.IsBotSession(active) {
+		return a.assembleBotSnapshot(ctx, active, activity, sessions)
 	}
 
 	deps := a.deps

@@ -67,6 +67,7 @@ func appServerTestServices(tasks taskstream.Service) AppServerServices {
 		Status:         struct{ StatusService }{},
 		Configuration:  struct{ ConfigurationService }{},
 		Agents:         struct{ AgentService }{},
+		Bots:           struct{ BotService }{},
 		Completion:     struct{ CompletionService }{},
 		Plugins:        struct{ PluginService }{},
 		Presentation:   struct{ PresentationService }{},

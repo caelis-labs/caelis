@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
@@ -27,13 +28,20 @@ type SessionClientAdapter struct {
 	completionClient appserver.CompletionClient
 	pluginClient     appserver.PluginClient
 	surface          string
-	workspaceKey     string
 	preferredID      string
+	// requireExistingSession forbids implicit Session creation. A surface that
+	// must never allocate an ordinary workspace Session (the Bot TUI) sets it so
+	// work-bearing submissions fail closed until an addressable Session exists.
+	requireExistingSession bool
 
 	sessionMu       sync.RWMutex
 	sessionChangeMu sync.Mutex
 	sessionID       string
-	workspaceDir    string
+	// workspace is the single workspace address Host reads use. It starts as the
+	// surface's configured address and is replaced as a whole pair whenever a
+	// Session reports its own workspace, so its key and CWD always describe the
+	// same workspace.
+	workspace session.WorkspaceRef
 
 	activeMu      sync.Mutex
 	active        *sessionClientTurn
@@ -64,6 +72,10 @@ type AppServerAdapterConfig struct {
 	Agents             appserver.AgentClient
 	Completion         appserver.CompletionClient
 	Plugins            appserver.PluginClient
+	// RequireExistingSession rejects work-bearing submissions that have no
+	// addressable Session instead of creating one. This is the enforcement
+	// boundary; presentation-level guards are not sufficient on their own.
+	RequireExistingSession bool
 }
 
 // NewAppServerAdapter composes the complete typed facade used by production
@@ -96,11 +108,16 @@ func NewAppServerAdapter(config AppServerAdapterConfig) (*SessionClientAdapter, 
 		turns: turns, participants: participantTurns, sessionClient: config.Sessions,
 		statusClient: config.Status, configClient: config.Configuration,
 		agentClient: config.Agents, completionClient: config.Completion, pluginClient: config.Plugins,
-		surface: strings.TrimSpace(config.Surface), workspaceKey: strings.TrimSpace(config.WorkspaceKey),
-		preferredID: strings.TrimSpace(config.PreferredSessionID), sessionID: strings.TrimSpace(config.SessionID),
-		workspaceDir:    strings.TrimSpace(config.WorkspaceDir),
-		acpPreparations: map[string]controlagents.ACPPreparation{},
-		acpPending:      map[string]pendingACPPreparationObservation{},
+		surface:     strings.TrimSpace(config.Surface),
+		preferredID: strings.TrimSpace(config.PreferredSessionID),
+		sessionID:   strings.TrimSpace(config.SessionID),
+		workspace: session.WorkspaceRef{
+			Key: strings.TrimSpace(config.WorkspaceKey),
+			CWD: strings.TrimSpace(config.WorkspaceDir),
+		},
+		requireExistingSession: config.RequireExistingSession,
+		acpPreparations:        map[string]controlagents.ACPPreparation{},
+		acpPending:             map[string]pendingACPPreparationObservation{},
 	}, nil
 }
 

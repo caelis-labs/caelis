@@ -15,6 +15,7 @@ import (
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	controlplacement "github.com/caelis-labs/caelis/control/placement"
+	"github.com/caelis-labs/caelis/control/sessionvisibility"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
 
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
@@ -37,6 +38,22 @@ func (s *controlCommandBackend) ExecuteControlCommand(ctx context.Context, princ
 				appserver.OutcomeRejected,
 				errorcode.New(errorcode.Unavailable, "gatewayapp: host is closing"),
 			)
+	}
+	if create, ok := request.(appserver.CreateSessionRequest); ok && isReservedBotCreation(create) {
+		return appserver.CommandResult{}, appserver.NewOutcomeError(appserver.OutcomeRejected, appserver.ErrUnauthorized)
+	}
+	if action == appserver.ActionBotCreate || action == appserver.ActionBotUpdate {
+		return s.executeBotCommand(ctx, principal, request)
+	}
+	if action == appserver.ActionPrompt {
+		active, err := s.composition.sessions.Session(ctx, session.SessionRef{SessionID: controlCommandSessionID(request)})
+		if err != nil {
+			return appserver.CommandResult{}, classifyControlPreDispatchError(err)
+		}
+		if sessionvisibility.IsBotSession(active) {
+			s.botAdmissionMu.Lock()
+			defer s.botAdmissionMu.Unlock()
+		}
 	}
 	if isHostConfigurationCommandRequest(request) {
 		return s.executeConfigurationCommand(ctx, action, request)

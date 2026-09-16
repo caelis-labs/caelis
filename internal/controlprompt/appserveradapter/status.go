@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
 	"github.com/google/uuid"
@@ -41,24 +42,44 @@ func (a *SessionClientAdapter) addressedStatus(
 	sessionID string,
 	diagnostics bool,
 ) (controlstatus.StatusSnapshot, error) {
+	workspace := a.workspaceAddress()
 	return a.statusClient.SessionStatus(ctx, appserver.StatusRequest{
 		SessionID:          strings.TrimSpace(sessionID),
-		WorkspaceKey:       strings.TrimSpace(a.workspaceKey),
-		CWD:                a.WorkspaceDir(),
+		WorkspaceKey:       workspace.Key,
+		CWD:                workspace.CWD,
 		Surface:            strings.TrimSpace(a.surface),
 		IncludeDiagnostics: diagnostics,
 	})
 }
 
 // WorkspaceDir returns the workspace selected by Session lifecycle operations.
-// Read-only status and inspection calls must not change the active Session.
+// ResetSession retains that workspace. Read-only status and inspection calls
+// must not change the active Session.
 func (a *SessionClientAdapter) WorkspaceDir() string {
+	return a.workspaceAddress().CWD
+}
+
+// workspaceAddress returns the workspace key and CWD that one Host read must
+// use. Both halves come from a single lock acquisition and are only ever
+// replaced together, so a read can never pair one workspace's key with another
+// workspace's CWD. The Host rejects such a mixed address as a workspace-identity
+// conflict.
+func (a *SessionClientAdapter) workspaceAddress() session.WorkspaceRef {
 	if a == nil {
-		return ""
+		return session.WorkspaceRef{}
 	}
 	a.sessionMu.RLock()
 	defer a.sessionMu.RUnlock()
-	return a.workspaceDir
+	return a.workspace
+}
+
+// sessionWorkspaceAddress is the workspace address a Session reports for itself.
+// It is the only authority for addressing that Session's workspace.
+func sessionWorkspaceAddress(state appserver.SessionState) session.WorkspaceRef {
+	return session.WorkspaceRef{
+		Key: strings.TrimSpace(state.WorkspaceKey),
+		CWD: strings.TrimSpace(state.CWD),
+	}
 }
 
 func (a *SessionClientAdapter) clientSessionID() string {
@@ -70,14 +91,21 @@ func (a *SessionClientAdapter) clientSessionID() string {
 	return a.sessionID
 }
 
-func (a *SessionClientAdapter) setClientSession(sessionID, cwd string) {
+// setClientSession commits one Session selection. A selection that reports a
+// workspace replaces the whole address pair - key and CWD together - so Host
+// reads keep describing one workspace. Clearing the selection leaves the
+// current workspace, which stays the address subsequent reads and Session
+// creation use.
+func (a *SessionClientAdapter) setClientSession(sessionID string, workspace session.WorkspaceRef) {
 	if a == nil {
 		return
 	}
+	workspace.Key = strings.TrimSpace(workspace.Key)
+	workspace.CWD = strings.TrimSpace(workspace.CWD)
 	a.sessionMu.Lock()
 	a.sessionID = strings.TrimSpace(sessionID)
-	if strings.TrimSpace(cwd) != "" {
-		a.workspaceDir = strings.TrimSpace(cwd)
+	if workspace.Key != "" || workspace.CWD != "" {
+		a.workspace = workspace
 	}
 	a.sessionMu.Unlock()
 }
@@ -103,11 +131,20 @@ func (a *SessionClientAdapter) ensureClientSessionForWork(ctx context.Context, o
 		state, err := a.inspectWorkSession(ctx, sessionID)
 		return state, err
 	}
+	if a.requireExistingSession {
+		// Fail closed instead of allocating an ordinary workspace Session. A
+		// Bot conversation must be selected before any work is admitted.
+		return appserver.SessionState{}, appserver.NewOutcomeError(
+			appserver.OutcomeRejected,
+			errors.New("app/gatewayapp/controladapter: select a Bot conversation before sending input"),
+		)
+	}
+	workspace := a.workspaceAddress()
 	result, err := a.sessionClient.CreateSession(ctx, appserver.CreateSessionRequest{
 		WriteBase:          appserver.WriteBase{OperationID: operationPrefix + uuid.NewString()},
 		PreferredSessionID: strings.TrimSpace(a.preferredID),
-		WorkspaceKey:       strings.TrimSpace(a.workspaceKey),
-		CWD:                strings.TrimSpace(a.workspaceDir),
+		WorkspaceKey:       workspace.Key,
+		CWD:                workspace.CWD,
 		Metadata:           map[string]any{"surface": strings.TrimSpace(a.surface)},
 	})
 	if err != nil {
@@ -124,7 +161,7 @@ func (a *SessionClientAdapter) ensureClientSessionForWork(ctx context.Context, o
 		return appserver.SessionState{}, err
 	}
 	a.preferredID = ""
-	a.setClientSession(state.SessionID, state.CWD)
+	a.setClientSession(state.SessionID, sessionWorkspaceAddress(state))
 	return state, nil
 }
 

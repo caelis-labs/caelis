@@ -7,6 +7,7 @@ import (
 	"time"
 
 	appserver "github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/bot"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/surfaces/internal/transcript"
 )
@@ -51,6 +52,7 @@ type SetStatusMsg struct {
 
 type StatusRefreshResultMsg struct {
 	viewGeneration       uint64
+	botConfiguration     *bot.Bot
 	Workspace            string
 	HasWorkspace         bool
 	Model                string
