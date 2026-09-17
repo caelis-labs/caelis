@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
@@ -114,8 +116,8 @@ func TestReceivedAgentCommunicationOpensOverlayForLongMessage(t *testing.T) {
 	if token := model.viewportClickTokens[headerLine]; token != linkToken {
 		t.Fatalf("Received source-label token = %q, want %q", token, linkToken)
 	}
-	if bounds := model.viewportClickBounds[headerLine]; !bounds.valid() || bounds.start != 0 || bounds.end != labelEnd {
-		t.Fatalf("Received source-label span = %#v, want [0,%d)", bounds, labelEnd)
+	if bounds := model.viewportClickBounds[headerLine]; !bounds.valid() || bounds.start != agentMessageGutterColumns || bounds.end != labelEnd {
+		t.Fatalf("Received source-label span = %#v, want [%d,%d)", bounds, agentMessageGutterColumns, labelEnd)
 	}
 	if token := model.viewportClickAltTokens[headerLine]; !strings.HasPrefix(token, agentMessageFoldTokenPrefix) {
 		t.Fatalf("Received body token = %q, want in-place fold", token)
@@ -197,6 +199,112 @@ func TestSubagentOverlayRendersParentMessageAsAgentCommunication(t *testing.T) {
 	}
 }
 
+// A peer label is not width-limited, so a narrow pane can split it across
+// physical lines. Every line the label covers keeps the workspace link; only the
+// columns past the label fall back to the row's fold action.
+func TestWrappedAgentCommunicationLabelKeepsItsWorkspaceLink(t *testing.T) {
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	resized, _ := model.Update(tea.WindowSizeMsg{Width: 18, Height: 40})
+	model = resized.(*Model)
+	model.currentSessionID = "session-1"
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
+		Update: eventstream.ToolCall{
+			SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "spawn-1", Title: "Spawn breeze",
+			Kind: eventstream.ToolKindExecute, Status: eventstream.ToolStatusInProgress,
+			RawInput: map[string]any{"agent": "breeze", "prompt": "delegated messaging exercise"}, Meta: acpToolNameMeta("StartThread"),
+		},
+	})
+	running := eventstream.ToolStatusInProgress
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "spawn-1", Status: &running,
+			RawOutput: map[string]any{"handle": "bot-cli-smoke", "state": "running"}, Meta: acpToolNameMeta("StartThread"),
+		},
+	})
+	view := requireSubagentOutputViewForTest(t, model, "spawn-1")
+	view.participantID = "participant-1"
+	message := "start " + strings.Repeat("payload ", 18) + "middle-marker " + strings.Repeat("tail ", 18)
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
+		AgentCommunicationSource: &eventstream.ActorIdentity{Kind: "participant", ID: "participant-1", Role: "delegated", Name: "breeze(bot-cli-smoke)"},
+		Update: eventstream.ContentChunk{
+			SessionUpdate: eventstream.UpdateUserMessage,
+			Content:       eventstream.TextContent{Type: "text", Text: message},
+			MessageID:     "agent-message-1",
+			Meta: map[string]any{"caelis": map[string]any{"agent_communication": map[string]any{
+				"source": map[string]any{"kind": "participant", "id": "participant-1", "role": "delegated", "name": "breeze(bot-cli-smoke)"},
+			}}},
+		},
+	})
+
+	model.syncViewportContent()
+	labelLine, continuation := -1, -1
+	for index, line := range model.viewportPlainLines {
+		if strings.HasPrefix(line, "• bot-cli-") {
+			labelLine, continuation = index, index+1
+			break
+		}
+	}
+	if labelLine < 0 || continuation+1 >= len(model.viewportPlainLines) {
+		t.Fatalf("wrapped label lines missing: %#v", model.viewportPlainLines)
+	}
+	labelStartLine := model.viewportPlainLines[labelLine]
+	labelTailLine := model.viewportPlainLines[continuation]
+	bodyLine := model.viewportPlainLines[continuation+1]
+	if !strings.HasPrefix(labelTailLine, "  ") || !strings.Contains(labelTailLine, "[breeze]") {
+		t.Fatalf("label continuation line = %q, want the rest of the peer label", labelTailLine)
+	}
+	if !strings.HasPrefix(bodyLine, "  ") || strings.Contains(bodyLine, "breeze") {
+		t.Fatalf("body line = %q, want text past the peer label", bodyLine)
+	}
+
+	linkToken := subagentOutputOverlayClickToken("spawn-1")
+	if strings.Contains(labelStartLine, ":") {
+		t.Fatalf("label line = %q, want the label split across lines", labelStartLine)
+	}
+	labelTailEnd := agentMessageGutterColumns + displayColumns(strings.Split(strings.TrimPrefix(labelTailLine, "  "), ":")[0])
+	spans := []struct {
+		line int
+		end  int
+	}{
+		{labelLine, displayColumns(labelStartLine)},
+		{continuation, labelTailEnd},
+	}
+	for _, span := range spans {
+		if token := model.viewportClickTokens[span.line]; token != linkToken {
+			t.Fatalf("line %d token = %q, want the workspace link %q", span.line, token, linkToken)
+		}
+		if token := model.viewportClickAltTokens[span.line]; !strings.HasPrefix(token, agentMessageFoldTokenPrefix) {
+			t.Fatalf("line %d body token = %q, want in-place fold", span.line, token)
+		}
+		if bounds := model.viewportClickBounds[span.line]; !bounds.valid() || bounds.start != agentMessageGutterColumns || bounds.end != span.end {
+			t.Fatalf("line %d label span = %#v, want [%d,%d)", span.line, bounds, agentMessageGutterColumns, span.end)
+		}
+	}
+	if token := model.viewportClickTokens[continuation+1]; !strings.HasPrefix(token, agentMessageFoldTokenPrefix) {
+		t.Fatalf("line past the label token = %q, want the body action", token)
+	}
+
+	// The second physical label line opens the source workspace...
+	clickViewportColumn(t, model, continuation, agentMessageGutterColumns)
+	if model.subagentOutputOverlay == nil || model.subagentOutputOverlay.callID != "spawn-1" {
+		t.Fatalf("label continuation click did not open the source overlay (%q -> %q): %#v", labelStartLine, labelTailLine, model.subagentOutputOverlay)
+	}
+	model.subagentOutputOverlay = nil
+
+	// ...and the body lines past the label still fold the message instead.
+	clickViewportColumn(t, model, continuation+1, agentMessageGutterColumns+2)
+	plain := strings.Join(model.viewportPlainLines, "\n")
+	if model.subagentOutputOverlay != nil {
+		t.Fatalf("body click opened a workspace: %#v", model.subagentOutputOverlay)
+	}
+	if !strings.Contains(plain, "middle-marker") {
+		t.Fatalf("body click did not expand the message:\n%s", plain)
+	}
+}
+
 func TestAgentCommunicationPreservesMainTimelineOrder(t *testing.T) {
 	t.Parallel()
 
@@ -260,7 +368,7 @@ func TestWrappedAgentMessageRowsKeepOneLabelTargetAndBodyAction(t *testing.T) {
 	if first.ClickToken != linkToken || first.ClickTokenAlt != bodyToken {
 		t.Fatalf("labeled row tokens = %q/%q, want %q/%q", first.ClickToken, first.ClickTokenAlt, linkToken, bodyToken)
 	}
-	if first.ClickStartCol != 0 || first.ClickEndCol != displayColumns("• @ziva[breeze]") {
+	if first.ClickStartCol != agentMessageGutterColumns || first.ClickEndCol != displayColumns("• @ziva[breeze]") {
 		t.Fatalf("labeled row span = [%d,%d)", first.ClickStartCol, first.ClickEndCol)
 	}
 	for i, next := range rows[1:] {

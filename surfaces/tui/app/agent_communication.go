@@ -159,13 +159,13 @@ func renderAgentCommunicationRows(blockID string, event SubagentEvent, eventInde
 	if opts.AgentMessageTargetLinks {
 		linkToken = subagentOutputOverlayClickToken(event.SourceCallID)
 	}
-	rows := wrapAgentMessageRows(renderAgentMessageRow(blockID, name, displayText, ctx, foldToken), width)
-	// The source label opens the Agent workspace; the compact body keeps its own
-	// expansion, so a long incoming message carries both actions.
-	if len(rows) > 0 {
-		rows[0] = bindAgentMessageTargets(rows[0], 2+displayColumns(name), linkToken)
-	}
-	return rows
+	// The source label opens the Agent workspace; every other column keeps the
+	// row's own expansion, so a long incoming message carries both actions even
+	// when a narrow pane splits the label across lines.
+	return wrapAgentMessageRows(
+		bindAgentMessageTargets(renderAgentMessageRow(blockID, name, displayText, ctx, foldToken), agentMessageGutterColumns+displayColumns(name), linkToken),
+		width,
+	)
 }
 
 func agentCommunicationFoldKey(event SubagentEvent, eventIndex int) string {
@@ -213,27 +213,53 @@ func styleAgentMessageTarget(ctx BlockRenderContext, target string, sent bool) s
 	return styled
 }
 
+// agentMessageGutterColumns is the two-column bullet/indent gutter that precedes
+// every Agent message line, on its label line and on each continuation line.
+const agentMessageGutterColumns = 2
+
 // wrapAgentMessageRows keeps complete input readable with a two-column gutter.
+// A bounded label span is projected onto every physical line the label covers,
+// so a label that wraps in a narrow pane keeps its target on each of its lines;
+// lines past the label keep only the row's own body action.
 func wrapAgentMessageRows(row RenderedRow, width int) []RenderedRow {
 	// Wrap the content after the bullet, keeping ANSI styles and explicit newlines.
 	mark, body, _ := strings.Cut(row.Styled, " ")
 	prefix := mark + " "
+	indentColumns := agentMessageGutterColumns
 	lines := splitStyledPhysicalLines(ansi.Wrap(body, maxInt(1, width-2), ""))
-	continuationToken := firstNonEmpty(row.ClickTokenAlt, row.ClickToken)
+	labelEnd := -1
+	if row.boundedClick() {
+		labelEnd = maxInt(0, row.ClickEndCol-indentColumns)
+	}
 	rows := make([]RenderedRow, 0, len(lines))
+	remaining := ansi.Strip(body)
+	offset := 0
 	for i, line := range lines {
 		indent := "  "
 		if i == 0 {
 			indent = prefix
 		}
+		text := ansi.Strip(line)
+		if i > 0 {
+			// ansi.Wrap removes the character it breaks on; skipping it keeps the
+			// projected source offset aligned with the body columns.
+			if skip := strings.Index(remaining, text); skip > 0 {
+				offset += displayColumns(remaining[:skip])
+				remaining = remaining[skip:]
+			}
+		}
+		lineStart := offset
+		lineEnd := offset + displayColumns(text)
+		remaining = remaining[minInt(len(text), len(remaining)):]
+		offset = lineEnd
 		next := StyledPlainClickableRow(row.BlockID, ansi.Strip(indent+line), indent+line, row.ClickToken)
-		if i == 0 {
-			next.ClickStartCol, next.ClickEndCol = row.ClickStartCol, row.ClickEndCol
+		if start, end := maxInt(lineStart, 0), minInt(lineEnd, labelEnd); labelEnd >= 0 && end > start {
+			next.ClickStartCol = indentColumns + start - lineStart
+			next.ClickEndCol = indentColumns + end - lineStart
 			next.ClickTokenAlt = row.ClickTokenAlt
-		} else {
-			// A bounded label target belongs to the line carrying the label; the
-			// remaining lines keep the row's own body action.
-			next.ClickToken = continuationToken
+		} else if labelEnd >= 0 {
+			// Past the label: only the row's own body action applies.
+			next.ClickToken = firstNonEmpty(strings.TrimSpace(row.ClickTokenAlt), row.ClickToken)
 		}
 		next.PreWrapped = true
 		next.selectionIndent = 2
@@ -256,7 +282,7 @@ func bindAgentMessageTargets(row RenderedRow, labelEnd int, linkToken string) Re
 	if bodyToken == "" || labelEnd <= 0 {
 		return row
 	}
-	row.ClickStartCol = 0
+	row.ClickStartCol = agentMessageGutterColumns
 	row.ClickEndCol = labelEnd
 	row.ClickTokenAlt = bodyToken
 	return row

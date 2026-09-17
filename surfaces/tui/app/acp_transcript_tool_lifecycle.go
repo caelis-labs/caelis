@@ -627,7 +627,7 @@ func renderSendMessageHeaderRow(blockID string, args string, ctx BlockRenderCont
 	row := StyledPlainClickableRow(blockID, plain, styled, token)
 	// The recipient label opens the target Agent's workspace; the body keeps the
 	// send panel's own expand/collapse instead of losing it to whole-row navigation.
-	row = bindAgentMessageTargets(row, displayColumns("• "+target), linkToken)
+	row = bindAgentMessageTargets(row, agentMessageGutterColumns+displayColumns(target), linkToken)
 	row.selectionIndent = 2
 	return row
 }

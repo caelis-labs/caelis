@@ -96,8 +96,8 @@ func TestSendMessageToolAppearsAfterSuccessAndOpensOverlay(t *testing.T) {
 	if token := model.viewportClickTokens[headerLine]; token != agentMessageTargetOverlayClickToken("message-1") {
 		t.Fatalf("SendMessage recipient-label token = %q", token)
 	}
-	if bounds := model.viewportClickBounds[headerLine]; !bounds.valid() || bounds.start != 0 || bounds.end != labelEnd {
-		t.Fatalf("SendMessage recipient-label span = %#v, want [0,%d)", bounds, labelEnd)
+	if bounds := model.viewportClickBounds[headerLine]; !bounds.valid() || bounds.start != agentMessageGutterColumns || bounds.end != labelEnd {
+		t.Fatalf("SendMessage recipient-label span = %#v, want [%d,%d)", bounds, agentMessageGutterColumns, labelEnd)
 	}
 	if token := model.viewportClickAltTokens[headerLine]; token != acpToolPanelClickToken("message-1") {
 		t.Fatalf("SendMessage body token = %q, want send panel toggle", token)

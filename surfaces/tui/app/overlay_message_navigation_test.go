@@ -81,9 +81,8 @@ func TestSendMessageRowSplitsTargetNavigationFromPanelExpansion(t *testing.T) {
 				assertClickOpensOverlay(t, model, block, row, "spawn-1", tc.hidden)
 				return
 			}
-			labelEnd := displayColumns("• @ziva[breeze]")
-			if bounds := (clickColumnRange{row.ClickStartCol, row.ClickEndCol}); !bounds.valid() || bounds.end != labelEnd {
-				t.Fatalf("SendMessage recipient-label span = %#v, want [0,%d)", bounds, labelEnd)
+			if bounds := (clickColumnRange{row.ClickStartCol, row.ClickEndCol}); !bounds.valid() || bounds.end != displayColumns("• @ziva[breeze]") {
+				t.Fatalf("SendMessage recipient-label span = %#v", bounds)
 			}
 			if row.ClickTokenAlt != acpToolPanelClickToken("message-1") {
 				t.Fatalf("SendMessage body token = %q, want send panel toggle", row.ClickTokenAlt)
