@@ -116,8 +116,6 @@ func applyTranscriptEventToParticipantTurn(
 				event.ApprovalTool,
 				event.ApprovalCommand,
 				event.ApprovalStatus,
-				event.ApprovalRisk,
-				event.ApprovalAuth,
 				event.ApprovalText,
 			)
 			break

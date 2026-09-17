@@ -84,7 +84,7 @@ func TestApprovalReviewCompactStatusAndWrappedReason(t *testing.T) {
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
 	for _, status := range []string{"approved", "denied", "failed", "timed_out", "needs_user"} {
 		rows := renderACPApprovalReviewRows("b", SubagentEvent{ApprovalStatus: status, ApprovalText: status}, 40, model.blockRenderContext(40))
-		if len(rows) != 1 || rows[0].Plain != "• "+status {
+		if len(rows) != 1 || rows[0].Plain != "• ["+status+"]" {
 			t.Fatalf("status %s: %#v", status, rows)
 		}
 	}
@@ -96,6 +96,38 @@ func TestApprovalReviewCompactStatusAndWrappedReason(t *testing.T) {
 	for _, row := range rows[2:] {
 		if !strings.HasPrefix(row.Plain, "    ") || displayColumns(row.Plain) > 30 {
 			t.Fatalf("reason wrap: %q", row.Plain)
+		}
+	}
+}
+
+func TestApprovalReviewStatusRendersAsBracketedChip(t *testing.T) {
+	theme := tuikit.ResolveThemeWithState(true, false, colorprofile.TrueColor)
+	ctx := BlockRenderContext{Width: 100, TermWidth: 100, Theme: theme}
+	bracket := ctx.Theme.TranscriptMetaStyle()
+
+	for _, status := range []string{"approved", "denied"} {
+		rows := renderACPApprovalReviewRows("b", SubagentEvent{
+			ApprovalTool: "RunCommand", ApprovalCommand: "go test ./...", ApprovalStatus: status, ApprovalText: status,
+		}, 100, ctx)
+		if len(rows) != 1 {
+			t.Fatalf("status %s rows = %#v", status, rows)
+		}
+		want := "• RunCommand go test ./... [" + status + "]"
+		if rows[0].Plain != want {
+			t.Fatalf("status %s plain = %q, want %q", status, rows[0].Plain, want)
+		}
+		if !strings.Contains(rows[0].Styled, bracket.Render("[")) || !strings.Contains(rows[0].Styled, bracket.Render("]")) {
+			t.Fatalf("status %s brackets lost their secondary tone: %q", status, rows[0].Styled)
+		}
+		tone := ctx.Theme.Success
+		if status == "denied" {
+			tone = ctx.Theme.ErrorStyle().GetForeground()
+		}
+		if got := ansiTextForForeground(t, rows[0].Styled, tone); !strings.Contains(got, status) {
+			t.Fatalf("status %s lost its tone: %q", status, rows[0].Styled)
+		}
+		if strings.Contains(rows[0].Plain, status+" ") || strings.HasSuffix(rows[0].Plain, "[") {
+			t.Fatalf("status %s escaped its chip: %q", status, rows[0].Plain)
 		}
 	}
 }

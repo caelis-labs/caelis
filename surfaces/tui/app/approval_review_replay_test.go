@@ -43,7 +43,7 @@ func TestApprovalDecisionReplayRendersOnCommandHeader(t *testing.T) {
 			}
 			plain := strings.Join(lines, "\n")
 			t.Log(plain)
-			if strings.Count(plain, "git status "+status) != 1 || strings.Contains(plain, "Auto approval") {
+			if strings.Count(plain, "git status ["+status+"]") != 1 {
 				t.Fatalf("missing or duplicate review header (live=%v): %s", liveFirst, plain)
 			}
 			if status == "denied" && strings.Count(plain, "review reason") != 1 {

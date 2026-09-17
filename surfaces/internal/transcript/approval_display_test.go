@@ -15,21 +15,18 @@ func TestApprovalReviewCurrentAndHistoricalResults(t *testing.T) {
 		{"Automatic approval review denied: unsafe command", "denied", "unsafe command"},
 	} {
 		t.Run(tc.text, func(t *testing.T) {
-			got := ApprovalReviewDisplayParts("", "", "", tc.text)
+			got := ApprovalReviewDisplayParts("", tc.text)
 			if got.Status != tc.status || got.Rationale != tc.rationale {
 				t.Fatalf("display = %#v", got)
 			}
 		})
 	}
-	current := ApprovalReviewDisplayParts("denied", "", "", "denied: risk: high; authorization: missing")
-	if current.Risk != "" || current.Authorization != "" {
-		t.Fatalf("rationale became structured fields: %#v", current)
-	}
-	if got := ApprovalReviewTailOutput(ApprovalReviewFields{Status: "approved", Text: "approved"}); got != "Auto approval · approved\n" {
-		t.Fatalf("tail = %q", got)
+	current := ApprovalReviewDisplayParts("denied", "denied: risk: high; authorization: missing")
+	if current.Rationale != "risk: high; authorization: missing" {
+		t.Fatalf("rationale lost its literal prose: %#v", current)
 	}
 	// Typed status stays authoritative when a diagnostic contains another status.
-	if got := ApprovalReviewDisplayParts("failed", "", "", "denied: delivery failed"); got.Status != "failed" {
+	if got := ApprovalReviewDisplayParts("failed", "denied: delivery failed"); got.Status != "failed" {
 		t.Fatalf("status = %q", got.Status)
 	}
 }

@@ -457,7 +457,7 @@ func (m *Model) applyTranscriptApprovalReview(event TranscriptEvent) (tea.Model,
 		if state := strings.ToLower(strings.TrimSpace(block.Status)); state == "waiting_approval" {
 			block.Status = "running"
 		}
-		block.AddApprovalReviewEvent(event.ToolCallID, event.ApprovalTool, event.ApprovalCommand, event.ApprovalStatus, event.ApprovalRisk, event.ApprovalAuth, event.ApprovalText)
+		block.AddApprovalReviewEvent(event.ToolCallID, event.ApprovalTool, event.ApprovalCommand, event.ApprovalStatus, event.ApprovalText)
 		m.markViewportBlockDirty(block.BlockID())
 		return m, m.requestStreamViewportSync()
 	}

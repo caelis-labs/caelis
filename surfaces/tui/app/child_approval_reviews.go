@@ -23,8 +23,7 @@ func (c childApprovalReviews) clone() childApprovalReviews {
 func (c *childApprovalReviews) remember(event TranscriptEvent) {
 	c.rememberReview(SubagentEvent{Kind: SEApproval, CallID: event.ToolCallID,
 		ApprovalTool: event.ApprovalTool, ApprovalCommand: event.ApprovalCommand,
-		ApprovalStatus: event.ApprovalStatus, ApprovalRisk: event.ApprovalRisk,
-		ApprovalAuth: event.ApprovalAuth, ApprovalText: event.ApprovalText})
+		ApprovalStatus: event.ApprovalStatus, ApprovalText: event.ApprovalText})
 }
 
 func (c *childApprovalReviews) rememberReview(review SubagentEvent) {
@@ -63,7 +62,7 @@ func (c *childApprovalReviews) prepend(older childApprovalReviews) {
 }
 
 func childReviewBytes(e SubagentEvent) int {
-	return 256 + len(e.CallID) + len(e.ApprovalTool) + len(e.ApprovalCommand) + len(e.ApprovalStatus) + len(e.ApprovalRisk) + len(e.ApprovalAuth) + len(e.ApprovalText)
+	return 256 + len(e.CallID) + len(e.ApprovalTool) + len(e.ApprovalCommand) + len(e.ApprovalStatus) + len(e.ApprovalText)
 }
 
 func (v *subagentOutputView) applyChildReview(block *ParticipantTurnBlock, callID string) bool {
@@ -72,7 +71,7 @@ func (v *subagentOutputView) applyChildReview(block *ParticipantTurnBlock, callI
 		return false
 	}
 	block.AddApprovalReviewEvent(review.CallID, review.ApprovalTool, review.ApprovalCommand,
-		review.ApprovalStatus, review.ApprovalRisk, review.ApprovalAuth, review.ApprovalText)
+		review.ApprovalStatus, review.ApprovalText)
 	return true
 }
 

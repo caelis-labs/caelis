@@ -364,9 +364,6 @@ func wrapACPTranscriptHeaderForViewport(
 	if width <= 0 {
 		width = 1
 	}
-	if isApprovalReviewHeaderPlain(plain) {
-		return nil, nil, false
-	}
 	prefix, detail, ok := splitACPTranscriptHeaderPrefix(plain)
 	if !ok || strings.TrimSpace(detail) == "" {
 		return nil, nil, false
@@ -410,10 +407,6 @@ func wrapACPTranscriptHeaderForViewport(
 		styledLines = append(styledLines, styleACPTranscriptHeaderContinuation(ctx, verb, continuationPrefix, line))
 	}
 	return plainLines, styledLines, true
-}
-
-func isApprovalReviewHeaderPlain(plain string) bool {
-	return strings.HasPrefix(strings.TrimSpace(plain), "• Auto approval · ")
 }
 
 func acpTranscriptHeaderUsesRailContinuation(verb string) bool {
@@ -993,8 +986,6 @@ func writeSubagentEvents(builder *blockKeyBuilder, events []SubagentEvent, ctx B
 		builder.addString(event.ApprovalTool)
 		builder.addString(event.ApprovalCommand)
 		builder.addString(event.ApprovalStatus)
-		builder.addString(event.ApprovalRisk)
-		builder.addString(event.ApprovalAuth)
 		builder.addString(event.ApprovalText)
 		builder.addInt(len(event.PlanEntries))
 		for _, entry := range event.PlanEntries {

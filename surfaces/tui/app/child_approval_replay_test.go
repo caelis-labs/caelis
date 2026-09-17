@@ -70,7 +70,7 @@ func TestChildApprovalReplaySurvivesDeferredToolHistory(t *testing.T) {
 					view := m.subagentOutputViews["spawn-1"]
 					view.prepareVisibleRender()
 					plain := strings.Join(renderedPlainRows(m.subagentOutputRows(view, 100, 24)), "\n")
-					if strings.Count(plain, "git status "+status) != 1 {
+					if strings.Count(plain, "git status ["+status+"]") != 1 {
 						t.Fatalf("pass %d missing or repeated review:\n%s", pass, plain)
 					}
 					if status == "denied" && strings.Count(plain, "review reason") != 1 {

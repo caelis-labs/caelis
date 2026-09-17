@@ -126,10 +126,10 @@ func TestSubagentOutputIncrementalWrappedMiddleAndSuffix(t *testing.T) {
 func TestSubagentOutputCacheRefreshesApprovalAndFullToolOutput(t *testing.T) {
 	m := newSubagentOutputPerformanceModel(t, 120, 32, 1)
 	v := m.subagentOutputViews["performance-child"]
-	v.block.AddApprovalReviewEvent("approval", "RunCommand", "pwd", "pending", "", "", "waiting")
+	v.block.AddApprovalReviewEvent("approval", "RunCommand", "pwd", "pending", "waiting")
 	v.touch(true)
 	_ = m.View()
-	v.block.AddApprovalReviewEvent("approval", "RunCommand", "pwd", "denied", "high", "denied", "scope changed")
+	v.block.AddApprovalReviewEvent("approval", "RunCommand", "pwd", "denied", "scope changed")
 	v.touch(true)
 	_ = m.View()
 	assertSubagentOutputCacheMatchesFresh(t, m)

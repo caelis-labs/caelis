@@ -2682,8 +2682,8 @@ func TestHandleACPEventEnvelopeAppliesApprovalReview(t *testing.T) {
 	if len(block.Events) != 1 || block.Events[0].Kind != SEApproval || block.Events[0].ApprovalStatus != "approved" {
 		t.Fatalf("main events = %#v, want approved approval review", block.Events)
 	}
-	if block.Events[0].ApprovalText != "approved by policy" || block.Events[0].ApprovalRisk != "low" || block.Events[0].ApprovalAuth != "allow" {
-		t.Fatalf("approval event = %#v, want review fields", block.Events[0])
+	if block.Events[0].ApprovalText != "approved by policy" {
+		t.Fatalf("approval event = %#v, want review text", block.Events[0])
 	}
 }
 

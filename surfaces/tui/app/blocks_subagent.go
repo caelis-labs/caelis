@@ -110,8 +110,6 @@ type SubagentEvent struct {
 	ApprovalTool    string
 	ApprovalCommand string
 	ApprovalStatus  string
-	ApprovalRisk    string
-	ApprovalAuth    string
 	ApprovalText    string
 }
 
