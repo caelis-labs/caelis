@@ -326,28 +326,6 @@ func cloneAndSortAttachments(items []controlprompt.Attachment, textLen int) []co
 	return out
 }
 
-func contentPartsFromAttachments(items []controlprompt.Attachment, workspace string) ([]model.ContentPart, error) {
-	if len(items) == 0 {
-		return nil, nil
-	}
-	out := make([]model.ContentPart, 0, len(items))
-	totalImageBytes := 0
-	for _, item := range cloneAndSortAttachments(items, 0) {
-		part, imageBytes, err := imageContentPartFromAttachment(item, workspace)
-		if err != nil {
-			return nil, err
-		}
-		if err := addPromptImageBytes(&totalImageBytes, imageBytes); err != nil {
-			return nil, err
-		}
-		out = append(out, part)
-	}
-	if len(out) == 0 {
-		return nil, nil
-	}
-	return out, nil
-}
-
 func addPromptImageBytes(total *int, imageBytes int) error {
 	if total == nil || *total < 0 || *total > appserver.MaxPromptImageTotalBytes || imageBytes < 0 || imageBytes > appserver.MaxPromptImageTotalBytes-*total {
 		return fmt.Errorf("image attachments exceed the aggregate limit of %d bytes", appserver.MaxPromptImageTotalBytes)

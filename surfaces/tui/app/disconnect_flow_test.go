@@ -54,7 +54,7 @@ func TestDisconnectWizardSelectsMultipleTargetsBeforeSubmission(t *testing.T) {
 			if called != "" {
 				t.Fatalf("selection submitted before confirmation: %q", called)
 			}
-			frame := ansi.Strip(m.renderSlashArgList())
+			frame := ansi.Strip(m.renderInputOverlay())
 			for _, want := range []string{"[x] first", "[ ] second", "[x] third", "click/space/tab toggle", "enter confirm"} {
 				if !strings.Contains(frame, want) {
 					t.Fatalf("disconnect picker missing %q:\n%s", want, frame)

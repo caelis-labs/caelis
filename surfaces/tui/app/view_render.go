@@ -682,10 +682,6 @@ func (m *Model) renderCachedViewportLinesView(showScrollbar bool) (string, bool)
 	return strings.Join(lines, "\n"), true
 }
 
-func (m *Model) renderViewportSelectionView() string {
-	return m.renderViewportLinesView(true)
-}
-
 func (m *Model) renderViewportLinesView(applySelection bool) string {
 	if m == nil || len(m.viewportStyledLines) == 0 || m.viewport.Height() <= 0 {
 		return m.viewport.View()
@@ -980,10 +976,6 @@ func fitStatusFooterParts(width int, left string, subagents string, compact stri
 	return left, selected, right
 }
 
-func fitHeaderRowParts(width int, workspace string, model string) (string, string) {
-	return fitFooterParts(width, workspace, model, truncateWorkspaceStatusDisplay, truncateMiddleDisplayWidthPlain, 20, 24)
-}
-
 func fitGenericFooterParts(width int, left string, right string) (string, string) {
 	return fitFooterParts(width, left, right, truncateTailDisplay, truncateTailDisplay, 16, 10)
 }
@@ -1032,61 +1024,6 @@ func fitFooterParts(width int, left string, right string, leftTrunc func(string,
 	return left, right
 }
 
-func truncateWorkspaceStatusDisplay(input string, width int) string {
-	input = strings.TrimSpace(input)
-	if input == "" || width <= 0 || displayColumns(input) <= width {
-		return input
-	}
-	path, branch, dirty, ok := parseWorkspaceStatusDisplay(input)
-	if !ok {
-		return truncateMiddleDisplayWidthPlain(input, width)
-	}
-	if branch == "" {
-		return truncateMiddleDisplayWidthPlain(path, width)
-	}
-	suffix := " [⎇ " + branch
-	if dirty {
-		suffix += "*"
-	}
-	suffix += "]"
-	if displayColumns(suffix) >= width {
-		return truncateTailDisplay(suffix, width)
-	}
-	contentBudget := maxInt(1, width-displayColumns(" [⎇ ")-displayColumns("]"))
-	if dirty {
-		contentBudget--
-	}
-	pathBudget := maxInt(8, minInt(contentBudget*2/3, contentBudget-8))
-	branchBudget := maxInt(8, contentBudget-pathBudget)
-	if pathWidth := displayColumns(path); pathWidth < pathBudget {
-		branchBudget = minInt(contentBudget-pathWidth, contentBudget-1)
-		pathBudget = contentBudget - branchBudget
-	}
-	if branchWidth := displayColumns(branch); branchWidth < branchBudget {
-		pathBudget = minInt(contentBudget-branchWidth, contentBudget-1)
-		branchBudget = contentBudget - pathBudget
-	}
-	if branchBudget < 8 {
-		branchBudget = minInt(contentBudget, 8)
-		pathBudget = maxInt(1, contentBudget-branchBudget)
-	}
-	if pathBudget < 8 {
-		pathBudget = minInt(contentBudget, 8)
-		branchBudget = maxInt(1, contentBudget-pathBudget)
-	}
-	path = truncateMiddleDisplayWidthPlain(path, pathBudget)
-	branch = truncateTailDisplay(branch, branchBudget)
-	out := path + " [⎇ " + branch
-	if dirty {
-		out += "*"
-	}
-	out += "]"
-	if displayColumns(out) > width {
-		return truncateTailDisplay(out, width)
-	}
-	return out
-}
-
 func parseWorkspaceStatusDisplay(input string) (path string, branch string, dirty bool, ok bool) {
 	input = strings.TrimSpace(input)
 	if input == "" {
@@ -1106,22 +1043,6 @@ func parseWorkspaceStatusDisplay(input string) (path string, branch string, dirt
 		return "", "", false, false
 	}
 	return path, branch, dirty, true
-}
-
-func truncateMiddleDisplayWidthPlain(input string, limit int) string {
-	text := strings.Join(strings.Fields(strings.TrimSpace(input)), " ")
-	if text == "" || limit <= 0 || displayColumns(text) <= limit {
-		return text
-	}
-	if limit <= 3 {
-		return sliceByDisplayColumns(text, 0, limit)
-	}
-	head := maxInt(1, (limit-3)*2/3)
-	tail := maxInt(1, (limit-3)-head)
-	total := displayColumns(text)
-	prefix := sliceByDisplayColumns(text, 0, head)
-	suffix := sliceByDisplayColumns(text, total-tail, total)
-	return prefix + "..." + suffix
 }
 
 func styleFooterLeft(m *Model, plain string) string {

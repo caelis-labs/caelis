@@ -169,14 +169,6 @@ func (m *Model) renderInputOverlay() string {
 	return m.renderCompletion(geometry)
 }
 
-func (m *Model) renderCompletionKind(kind completionKind) string {
-	snapshot, geometry, ok := m.activeCompletionGeometry()
-	if !ok || snapshot.kind != kind {
-		return ""
-	}
-	return m.renderCompletion(geometry)
-}
-
 func (m *Model) handleActiveCompletionKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 	switch m.activeCompletionKind() {
 	case completionMention:

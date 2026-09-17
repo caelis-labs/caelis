@@ -56,10 +56,6 @@ func (m *Model) regularInputCursor() *tea.Cursor {
 	return &cursor
 }
 
-func (m *Model) composeInputRender() composerRender {
-	return m.composeInputRenderFrom(m.composeInputLayout())
-}
-
 func (m *Model) composeInputRenderFrom(snapshot composerInputLayout) composerRender {
 	placeholder := ""
 	if len(m.inputAttachments) == 0 && snapshot.value == "" {

@@ -203,28 +203,6 @@ func cloneGitRepoImmutable(ctx context.Context, repoURL string, ref string, pare
 	return cloneGitRepoImmutableFromSource(ctx, validatedURL, ref, parentDir, expectedSHA)
 }
 
-// cloneLocalGitRepoImmutable is the package-private test/fixture seam for local
-// git repositories. It never relaxes the production URL allowlist; callers must
-// already trust the local path.
-func cloneLocalGitRepoImmutable(ctx context.Context, localRepo string, ref string, parentDir string, expectedSHA string) (string, error) {
-	localRepo = strings.TrimSpace(localRepo)
-	if localRepo == "" {
-		return "", fmt.Errorf("plugin service: local git repo is required")
-	}
-	abs, err := filepath.Abs(localRepo)
-	if err != nil {
-		return "", fmt.Errorf("plugin service: resolve local git repo: %w", err)
-	}
-	fi, err := os.Stat(abs)
-	if err != nil {
-		return "", fmt.Errorf("plugin service: local git repo: %w", err)
-	}
-	if !fi.IsDir() {
-		return "", fmt.Errorf("plugin service: local git repo is not a directory: %s", abs)
-	}
-	return cloneGitRepoImmutableFromSource(ctx, abs, ref, parentDir, expectedSHA)
-}
-
 func cloneGitRepoImmutableFromSource(ctx context.Context, source string, ref string, parentDir string, expectedSHA string) (string, error) {
 	source = strings.TrimSpace(source)
 	if source == "" {

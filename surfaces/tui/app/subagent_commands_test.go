@@ -135,7 +135,7 @@ func TestAgentCommandBindingsKeepBuiltinPriorityWithoutChangingConfiguration(t *
 			status.Handles = append(status.Handles, item)
 		}
 		service := &subagentDelegationStub{status: status}
-		commands := appendAgentSlashCommands(service, DefaultCommands())
+		commands := appendAgentSlashCommandsWithContext(context.Background(), service, DefaultCommands())
 		for _, canonical := range []string{"team", "quit"} {
 			count := 0
 			for _, command := range commands {

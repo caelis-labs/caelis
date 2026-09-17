@@ -12,14 +12,6 @@ import (
 	"github.com/caelis-labs/caelis/surfaces/internal/transcript"
 )
 
-func toolDisplayArgs(name string, raw map[string]any, fallback ...string) string {
-	return toolDisplayArgsForKind(name, "", raw, fallback...)
-}
-
-func toolDisplayArgsForKind(name string, kind string, raw map[string]any, fallback ...string) string {
-	return toolDisplayArgsForKindWithQueryWrapper(name, kind, raw, !surfaceIsExplorationTool(name, kind, ""), fallback...)
-}
-
 func toolDisplayArgsForKindWithQueryWrapper(name string, kind string, raw map[string]any, wrapGenericQuery bool, fallback ...string) string {
 	if preview, _, ok := commandDisplayArguments(name, kind, raw); ok {
 		return preview
@@ -1079,11 +1071,6 @@ func compactToolResultHeaderPath(name string, header string) string {
 		return header
 	}
 	return compact + rest
-}
-
-func splitLeadingPathHeader(header string) (pathPart string, rest string, ok bool) {
-	pathPart, rest, ok, _ = splitLeadingPathHeaderParts(header)
-	return pathPart, rest, ok
 }
 
 func splitLeadingPathHeaderParts(header string) (pathPart string, rest string, ok bool, tagged bool) {

@@ -26,7 +26,7 @@ func TestTurnHandleCanonicalForwardingFailureCancelsProducer(t *testing.T) {
 			}
 			handle := newTurnHandle(ctx, cancel, forwarding)
 			message := model.NewTextMessage(model.RoleUser, "canonical fact")
-			handle.publishEvent(&session.Event{Type: session.EventTypeUser, Visibility: session.VisibilityCanonical, Message: &message})
+			handle.publishSourceEvent(&session.Event{Type: session.EventTypeUser, Visibility: session.VisibilityCanonical, Message: &message}, nil)
 			if sessions.calls != 1 {
 				t.Fatalf("AppendEvent calls = %d, want 1", sessions.calls)
 			}

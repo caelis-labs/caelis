@@ -1516,7 +1516,7 @@ func TestConnectWizardSelectsMultipleMetadataBackedModels(t *testing.T) {
 	if len(m.slashArgCandidates) != 2 {
 		t.Fatalf("model candidates = %#v", m.slashArgCandidates)
 	}
-	plain := ansi.Strip(m.renderSlashArgList())
+	plain := ansi.Strip(m.renderInputOverlay())
 	if !strings.Contains(plain, "[ ] minimax/MiniMax-M2.7") || !strings.Contains(plain, "[ ] minimax/MiniMax-M2.7-highspeed") {
 		t.Fatalf("initial model picker missing unchecked boxes:\n%s", plain)
 	}
@@ -1531,7 +1531,7 @@ func TestConnectWizardSelectsMultipleMetadataBackedModels(t *testing.T) {
 	if len(m.slashArgCandidates) != 2 {
 		t.Fatalf("model candidates after first toggle = %#v, want checked row retained", m.slashArgCandidates)
 	}
-	plain = ansi.Strip(m.renderSlashArgList())
+	plain = ansi.Strip(m.renderInputOverlay())
 	if !strings.Contains(plain, "[x] minimax/MiniMax-M2.7") {
 		t.Fatalf("model picker missing checked first model:\n%s", plain)
 	}
@@ -1567,7 +1567,7 @@ func TestConnectWizardSelectsMultipleMetadataBackedModels(t *testing.T) {
 	if got := m.wizard.state["model"]; got != "MiniMax-M2.7,MiniMax-M2.7-highspeed" {
 		t.Fatalf("selected models = %q", got)
 	}
-	plain = ansi.Strip(m.renderSlashArgList())
+	plain = ansi.Strip(m.renderInputOverlay())
 	if strings.Count(plain, "[x]") != 2 || !strings.Contains(plain, "click/space/tab toggle") || !strings.Contains(plain, "enter confirm") {
 		t.Fatalf("model picker missing checked models or checkbox guidance:\n%s", plain)
 	}

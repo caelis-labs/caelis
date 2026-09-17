@@ -107,12 +107,6 @@ type SelectableModel struct {
 	ImageInputKnown  bool
 }
 
-// ResolveModelDefaults resolves maintained metadata for a model and falls back
-// to the provider template only when the concrete model is unknown.
-func ResolveModelDefaults(provider string, modelName string) (ModelDefaults, error) {
-	return ResolveModelDefaultsForEndpoint(provider, "", modelName)
-}
-
 // ResolveModelDefaultsForEndpoint resolves maintained metadata with the
 // endpoint's catalog identity. This keeps endpoint-specific model semantics out
 // of callers and presentation adapters.

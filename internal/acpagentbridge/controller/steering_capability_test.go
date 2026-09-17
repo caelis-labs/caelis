@@ -202,7 +202,7 @@ func TestParticipantSteeringOrdersPriorAndBufferedRemoteEventsAroundCanonicalInp
 
 	priorMessage := model.NewTextMessage(model.RoleAssistant, "before steer")
 	go func() {
-		handle.publishEvent(&session.Event{Type: session.EventTypeAssistant, Message: &priorMessage})
+		handle.publishSourceEvent(&session.Event{Type: session.EventTypeAssistant, Message: &priorMessage}, nil)
 	}()
 	select {
 	case <-priorStarted:
@@ -309,7 +309,7 @@ func TestMainControllerSteeringOrdersPriorAndBufferedRemoteEventsAroundCanonical
 
 	priorMessage := model.NewTextMessage(model.RoleAssistant, "before main steer")
 	go func() {
-		handle.publishEvent(&session.Event{Type: session.EventTypeAssistant, Message: &priorMessage})
+		handle.publishSourceEvent(&session.Event{Type: session.EventTypeAssistant, Message: &priorMessage}, nil)
 	}()
 	select {
 	case <-priorStarted:

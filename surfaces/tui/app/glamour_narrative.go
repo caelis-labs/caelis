@@ -147,12 +147,6 @@ var glamourStreamingCache struct {
 	order   []string
 }
 
-func getGlamourRenderer(width int, theme tuikit.Theme, roleStyle tuikit.LineStyle) *narrativeMarkdown {
-	glamourCache.Lock()
-	defer glamourCache.Unlock()
-	return getGlamourRendererLocked(width, theme, roleStyle)
-}
-
 func getGlamourRendererLocked(width int, theme tuikit.Theme, roleStyle tuikit.LineStyle) *narrativeMarkdown {
 	themeKey := themeRenderCacheKey(theme)
 	key := glamourRendererKey{width: width, themeKey: themeKey, role: roleStyle}

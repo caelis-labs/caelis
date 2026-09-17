@@ -67,10 +67,10 @@ func TestRenderModelSpeedPickerShowsCatalogDescription(t *testing.T) {
 		{Value: "fast", Display: "Fast", Detail: "1.5x faster, more usage"},
 	}
 
-	rendered := ansi.Strip(model.renderSlashArgList())
+	rendered := ansi.Strip(model.renderInputOverlay())
 	for _, want := range []string{"Fast", "1.5x faster, more usage"} {
 		if !strings.Contains(rendered, want) {
-			t.Fatalf("renderSlashArgList() = %q, want %q", rendered, want)
+			t.Fatalf("renderInputOverlay() = %q, want %q", rendered, want)
 		}
 	}
 }
@@ -94,15 +94,15 @@ func TestRenderSlashArgListHidesModelOperationalRemarks(t *testing.T) {
 	}
 	model.slashArgIndex = 0
 
-	rendered := ansi.Strip(model.renderSlashArgList())
+	rendered := ansi.Strip(model.renderInputOverlay())
 	for _, want := range []string{"xai/grok-4.6", "minimax/minimax-m3"} {
 		if !strings.Contains(rendered, want) {
-			t.Fatalf("renderSlashArgList() = %q, want %q", rendered, want)
+			t.Fatalf("renderInputOverlay() = %q, want %q", rendered, want)
 		}
 	}
 	for _, unwanted := range []string{"endpoint:", "managed auth", "cli-chat-proxy.grok.com", "api.minimaxi.com"} {
 		if strings.Contains(rendered, unwanted) {
-			t.Fatalf("renderSlashArgList() = %q, should not paint %q", rendered, unwanted)
+			t.Fatalf("renderInputOverlay() = %q, should not paint %q", rendered, unwanted)
 		}
 	}
 }
@@ -124,7 +124,7 @@ func TestRenderSlashArgListKeepsSelectedHintContrast(t *testing.T) {
 	}
 	model.slashArgIndex = 0
 
-	rendered := model.renderSlashArgList()
+	rendered := model.renderInputOverlay()
 	identityWidth := completionTableIdentityWidth([]completionTableRow{
 		{identity: "codex", hint: "ChatGPT subscription models through Codex"},
 		{identity: "grok", hint: "Grok models through an eligible xAI subscription"},
@@ -173,12 +173,12 @@ func TestRenderSlashCommandListAlignsDescriptions(t *testing.T) {
 	model.slashCandidates = []string{"/help", "/connect", "/status"}
 	model.slashIndex = 0
 
-	rendered := ansi.Strip(model.renderSlashCommandList())
+	rendered := ansi.Strip(model.renderInputOverlay())
 	lines := strings.Split(strings.TrimRight(rendered, "\n"), "\n")
 	help := lineContaining(lines, "/help")
 	connect := lineContaining(lines, "/connect")
 	if help == "" || connect == "" {
-		t.Fatalf("renderSlashCommandList() = %q, want command rows", rendered)
+		t.Fatalf("renderInputOverlay() = %q, want command rows", rendered)
 	}
 	helpHint := strings.Index(help, "Show commands")
 	connectHint := strings.Index(connect, "Connect a model")

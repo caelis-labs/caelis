@@ -360,11 +360,6 @@ func looksWindowsPath(path string) bool {
 		((path[0] >= 'a' && path[0] <= 'z') || (path[0] >= 'A' && path[0] <= 'Z'))
 }
 
-func (m *Model) renderInlineMarkdown(text string, base lipgloss.Style) string {
-	m.observeInlineMarkdownRender()
-	return renderInlineMarkdown(text, base, m.theme)
-}
-
 func (ctx BlockRenderContext) renderThemeKey() string {
 	if key := strings.TrimSpace(ctx.ThemeKey); key != "" {
 		return key

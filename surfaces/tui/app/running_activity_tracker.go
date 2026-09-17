@@ -402,67 +402,6 @@ func (t *runningHintTracker) toolKey(turnID string, callID string, occurredAt ti
 	return "tool:g" + strconv.FormatUint(t.turnGeneration, 10) + ":" + callID
 }
 
-func (t *runningHintTracker) observedOwnerCandidates(handle string, parentCallID string) []runningActivityOwner {
-	handle = normalizeRunningActivityHandle(handle)
-	parentCallID = strings.TrimSpace(parentCallID)
-	t.ensure()
-	callOwners := t.ownersByCallID[parentCallID]
-	if len(callOwners) == 0 {
-		return nil
-	}
-	if handle == "" {
-		return append([]runningActivityOwner(nil), callOwners...)
-	}
-	handleOwner := t.ownersByHandle[handle]
-	if handleOwner.Key != "" && handleOwner.CallID != parentCallID {
-		return nil
-	}
-	// Return every owner for the call ID. The Model filters owners whose block
-	// is still open before applying exact-handle/unique-compatible rules; doing
-	// that here would let a closed owner make a later fallback ambiguous.
-	return append([]runningActivityOwner(nil), callOwners...)
-}
-
-// presentationOwner resolves one rendered Task owner through the same
-// normalized handle/call index used by running activity. Known handle and typed
-// parent identities must agree. An unknown handle may fall back to the typed
-// parent only when it has one compatible rendered owner.
-func (t *runningHintTracker) presentationOwner(
-	handle string,
-	parentCallID string,
-	target runningActivityTarget,
-) (runningActivityOwner, bool) {
-	handle = normalizeRunningActivityHandle(handle)
-	parentCallID = strings.TrimSpace(parentCallID)
-	t.ensure()
-	if handle != "" {
-		owner := t.ownersByHandle[handle]
-		if owner.Key != "" {
-			if owner.BlockID == "" || owner.Target != target {
-				return runningActivityOwner{}, false
-			}
-			if parentCallID != "" && owner.CallID != parentCallID {
-				return runningActivityOwner{}, false
-			}
-			return owner, true
-		}
-	}
-	if parentCallID == "" {
-		return runningActivityOwner{}, false
-	}
-	var match runningActivityOwner
-	for _, owner := range t.ownersByCallID[parentCallID] {
-		if owner.BlockID == "" || owner.Target != target {
-			continue
-		}
-		if match.Key != "" && match.Key != owner.Key {
-			return runningActivityOwner{}, false
-		}
-		match = owner
-	}
-	return match, match.Key != ""
-}
-
 func (t *runningHintTracker) targetForHandles(handles []string) runningActivityTarget {
 	if len(handles) == 0 {
 		return ""

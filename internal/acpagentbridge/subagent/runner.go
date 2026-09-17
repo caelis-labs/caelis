@@ -1196,11 +1196,6 @@ func (run *childRun) acpUpdateEvent(env client.UpdateEnvelope, at time.Time, tex
 	return acpingress.NormalizeUpdate(env.Update, opts)
 }
 
-func (run *childRun) appendAgentMessageLocked(text string) string {
-	delta, _ := run.appendAgentMessageChunkLocked("", text)
-	return delta
-}
-
 func (run *childRun) appendAgentMessageChunkLocked(messageID string, text string) (string, string) {
 	if run == nil {
 		return "", ""

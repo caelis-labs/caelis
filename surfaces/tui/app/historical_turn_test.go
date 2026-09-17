@@ -320,7 +320,7 @@ func TestRenderDocumentHistoricalMoreThanTwoTurns(t *testing.T) {
 	second := newClutteredHistoricalTurn("turn-2", "hist-thought-two", "hist-tool-two.go", "hist-plan-two", "hist-answer-two")
 	third := newClutteredHistoricalTurn("turn-3", "hist-thought-three", "hist-tool-three.go", "hist-plan-three", "hist-answer-three")
 	blocks := []Block{
-		NewWelcomeBlock("test"),
+		newWelcomeBlock("test", ""),
 		NewUserNarrativeBlock("one"),
 		first,
 		NewUserNarrativeBlock("two"),

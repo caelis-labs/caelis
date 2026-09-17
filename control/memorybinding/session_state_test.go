@@ -37,8 +37,8 @@ func TestSessionAdmissionPinsActorAudienceAndCausalCursor(t *testing.T) {
 	if err := store.ReleaseSessionFence(ctx, session.SessionFenceReleaseRequest(fence)); err != nil {
 		t.Fatal(err)
 	}
-	if token, err := ConsistencyToken(ctx, store, active.SessionRef, binding); err != nil || token != "token-a" {
-		t.Fatalf("ConsistencyToken() = %q, %v", token, err)
+	if token, err := PrepareConsistency(ctx, store, active.SessionRef, binding); err != nil || token != "token-a" {
+		t.Fatalf("PrepareConsistency() = %q, %v", token, err)
 	}
 	for _, changed := range []RuntimeMemoryBindingSnapshot{
 		runtimeSnapshotForState(2, "view-a", OutputAudiencePrivate, "actor-a"),
@@ -48,7 +48,7 @@ func TestSessionAdmissionPinsActorAudienceAndCausalCursor(t *testing.T) {
 			t.Fatalf("changed binding error = %v, want ErrSessionAdmissionConflict", err)
 		}
 	}
-	if token, err := ConsistencyToken(ctx, store, active.SessionRef, binding); err != nil || token != "token-a" {
+	if token, err := PrepareConsistency(ctx, store, active.SessionRef, binding); err != nil || token != "token-a" {
 		t.Fatalf("unchanged binding token = %q, %v", token, err)
 	}
 }
@@ -240,8 +240,8 @@ func TestPrepareConsistencyPinsLegacySessionUnderRuntimeFence(t *testing.T) {
 	if err := store.ReleaseSessionFence(ctx, session.SessionFenceReleaseRequest(fence)); err != nil {
 		t.Fatal(err)
 	}
-	if token, err := ConsistencyToken(ctx, store, active.SessionRef, binding); err != nil || token != "" {
-		t.Fatalf("ConsistencyToken() = %q, %v", token, err)
+	if token, err := PrepareConsistency(ctx, store, active.SessionRef, binding); err != nil || token != "" {
+		t.Fatalf("PrepareConsistency() = %q, %v", token, err)
 	}
 }
 

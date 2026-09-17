@@ -17,9 +17,9 @@ func TestCompletionListDoesNotRenderEarlierOrMoreLines(t *testing.T) {
 		_, _ = model.handleSlashCommandKey(keyPress("down"))
 	}
 
-	rendered := ansi.Strip(model.renderSlashCommandList())
+	rendered := ansi.Strip(model.renderInputOverlay())
 	if strings.Contains(rendered, "earlier") || strings.Contains(rendered, "more") {
-		t.Fatalf("renderSlashCommandList() = %q, should not contain scroll text rows", rendered)
+		t.Fatalf("renderInputOverlay() = %q, should not contain scroll text rows", rendered)
 	}
 }
 
@@ -32,10 +32,10 @@ func TestCompletionOverlayFooterShowsBelowList(t *testing.T) {
 		_, _ = model.handleSlashCommandKey(keyPress("down"))
 	}
 
-	rendered := ansi.Strip(model.renderSlashCommandList())
+	rendered := ansi.Strip(model.renderInputOverlay())
 	if !strings.Contains(rendered, "hover select") ||
 		!strings.Contains(rendered, "click/enter apply") {
-		t.Fatalf("renderSlashCommandList() = %q, want unified overlay footer", rendered)
+		t.Fatalf("renderInputOverlay() = %q, want unified overlay footer", rendered)
 	}
 	if hint := strings.TrimSpace(model.hintRowText()); hint != "" {
 		t.Fatalf("hintRowText() = %q, want empty while completion overlay is active", hint)
@@ -48,9 +48,9 @@ func TestCompletionOverlayFooterAlwaysShowsWhenOverlayOpen(t *testing.T) {
 	model.setInputText("/")
 	model.refreshSlashCommands()
 
-	rendered := ansi.Strip(model.renderSlashCommandList())
+	rendered := ansi.Strip(model.renderInputOverlay())
 	if !strings.Contains(rendered, "tab fill") {
-		t.Fatalf("renderSlashCommandList() = %q, want unified overlay footer even when list fits", rendered)
+		t.Fatalf("renderInputOverlay() = %q, want unified overlay footer even when list fits", rendered)
 	}
 }
 

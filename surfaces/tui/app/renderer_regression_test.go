@@ -321,8 +321,9 @@ func normalizedTranscriptScrollFramesWithToolsForTest(
 	afterLines := append([]string(nil), beforeLines[len(toolLines):7]...)
 	afterLines = append(afterLines, toolLines...)
 	afterLines = append(afterLines, beforeLines[7:]...)
-	return normalizeFullscreenFrame(strings.Join(beforeLines, "\n"), width, height),
-		normalizeFullscreenFrame(strings.Join(afterLines, "\n"), width, height)
+	before, _ := normalizeFullscreenFrameWithTopTrim(strings.Join(beforeLines, "\n"), width, height)
+	after, _ := normalizeFullscreenFrameWithTopTrim(strings.Join(afterLines, "\n"), width, height)
+	return before, after
 }
 
 func waitForPhysicalStreamLine(t *testing.T, terminal *vt.SafeEmulator, want string) {

@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/caelis-labs/caelis/control/streamspool"
@@ -57,10 +56,6 @@ func validateLogicalKey(key streamspool.LogicalKey) error {
 		return errors.New("stream spool digest is empty")
 	}
 	return nil
-}
-
-func partitionDir(root string, key streamspool.Key) string {
-	return filepath.Join(root, partitionRelativeDir(key))
 }
 
 func partitionRelativeDir(key streamspool.Key) string {
@@ -194,15 +189,6 @@ func removeManagedPartition(root *os.Root, path string) error {
 
 func segmentFilename(offset streamspool.Offset) string {
 	return fmt.Sprintf("%020d.log", uint64(offset))
-}
-
-func parseSegmentFilename(name string) (streamspool.Offset, bool) {
-	if len(name) != 24 || !strings.HasSuffix(name, ".log") {
-		return 0, false
-	}
-	raw := strings.TrimSuffix(name, ".log")
-	value, err := strconv.ParseUint(raw, 10, 64)
-	return streamspool.Offset(value), err == nil
 }
 
 func openExclusiveRegular(root *os.Root, path string) (*os.File, error) {

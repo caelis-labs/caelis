@@ -119,7 +119,8 @@ func TestThemePickerCenteredWithoutDisplacingTranscript(t *testing.T) {
 			m.submitThemeCommand("/theme")
 			view := m.View().Content
 			layout := m.themePickerLayout()
-			x, y := (size[0]-layout.width)/2, (size[1]-layout.height())/2
+			layoutHeight := 2*layout.border + 3 + layout.count + len(layout.hints)
+			x, y := (size[0]-layout.width)/2, (size[1]-layoutHeight)/2
 			modal := strings.Split(ansi.Strip(m.renderThemePicker()), "\n")
 			frame := strings.Split(ansi.Strip(view), "\n")
 			if m.viewport.Height() != beforeHeight || m.promptModalReservedHeight() != 0 {

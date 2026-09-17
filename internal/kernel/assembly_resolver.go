@@ -446,11 +446,6 @@ func CurrentModelFastMode(state map[string]any) (bool, bool) {
 	return value, ok
 }
 
-// CurrentSessionMode returns the normalized per-session approval routing mode.
-func CurrentSessionMode(state map[string]any) string {
-	return string(CurrentApprovalMode(state))
-}
-
 func CurrentSessionModeOrDefault(state map[string]any, fallback string) string {
 	return string(CurrentApprovalModeOrDefault(state, NormalizeApprovalMode(fallback)))
 }

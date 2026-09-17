@@ -339,23 +339,6 @@ func RenderPrefixedWrappedText(blockID, prefix, text string, width int, style fu
 	return rows
 }
 
-func RowsFromStyledANSI(blockID, styled string) []RenderedRow {
-	lines := strings.Split(styled, "\n")
-	rows := make([]RenderedRow, 0, len(lines))
-	for _, line := range lines {
-		rows = append(rows, RenderedRow{
-			Styled:  line,
-			Plain:   strings.TrimRight(ansi.Strip(line), " "),
-			BlockID: blockID,
-		})
-	}
-	return rows
-}
-
-func RowsFromPlainAndStyled(blockID, plain, styled string) RenderedRow {
-	return RenderedRow{Styled: styled, Plain: plain, BlockID: blockID}
-}
-
 func renderPlainStructuralText(req TextRenderRequest) []RenderedRow {
 	raw := strings.TrimRight(req.Raw, "\n")
 	if raw == "" {

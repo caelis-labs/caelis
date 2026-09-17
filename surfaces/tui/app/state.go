@@ -230,9 +230,6 @@ func (i commandItem) FilterValue() string { return i.name }
 
 type streamSmoothingState struct {
 	targetKind   string
-	streamKind   string
-	sessionKey   string
-	actor        string
 	pending      []string
 	firstSeen    time.Time
 	firstPaint   time.Time

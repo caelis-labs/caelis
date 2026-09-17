@@ -13,7 +13,7 @@ import (
 func TestRanHeaderStylesShellCommandTokens(t *testing.T) {
 	model := NewModel(Config{ColorProfile: colorprofile.TrueColor})
 	plain := "• Ran GOMODCACHE=/tmp/cache git status --short --branch"
-	styled := styleACPTranscriptHeader(BlockRenderContext{Width: 120, TermWidth: 120, Theme: model.theme}, plain)
+	styled := styleACPTranscriptHeaderWithMark(BlockRenderContext{Width: 120, TermWidth: 120, Theme: model.theme}, plain, acpHeaderMarkDefault, false)
 	if got := ansi.Strip(styled); got != plain {
 		t.Fatalf("styled header strips to %q, want %q", got, plain)
 	}
@@ -26,7 +26,7 @@ func TestRanHeaderShellCommandUsesDistinctTokenStyles(t *testing.T) {
 	model := NewModel(Config{ColorProfile: colorprofile.TrueColor})
 	ctx := BlockRenderContext{Width: 160, TermWidth: 160, Theme: model.theme}
 	plain := `• Ran ls -la /home/xueyongzhi/WorkDir/code/demo/.venv/bin/ 2>/dev/null | head -20; echo "---"; cat /home/xueyongzhi/WorkDir/code/demo/.venv/pyvenv.cfg 2>/dev/null`
-	styled := styleACPTranscriptHeader(ctx, plain)
+	styled := styleACPTranscriptHeaderWithMark(ctx, plain, acpHeaderMarkDefault, false)
 	if got := ansi.Strip(styled); got != plain {
 		t.Fatalf("styled header strips to %q, want %q", got, plain)
 	}

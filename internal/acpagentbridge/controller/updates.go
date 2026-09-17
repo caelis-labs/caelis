@@ -42,10 +42,6 @@ func normalizeACPUpdateEvent(
 	})
 }
 
-func contentChunkText(chunk client.ContentChunk) string {
-	return acpingress.ContentChunkText(chunk)
-}
-
 func controllerCommandsFromACP(in []acpsdk.AvailableCommand) []ControllerCommand {
 	if len(in) == 0 {
 		return nil

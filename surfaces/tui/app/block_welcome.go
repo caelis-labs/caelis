@@ -58,10 +58,6 @@ func newWelcomeAnnouncementWithEmphasis(text string, emphasis string) welcomeAnn
 
 func (a welcomeAnnouncement) plainText() string { return a.text }
 
-func NewWelcomeBlock(version string) *WelcomeBlock {
-	return newWelcomeBlock(version, "")
-}
-
 func newWelcomeBlock(version string, notice string) *WelcomeBlock {
 	return &WelcomeBlock{
 		id:           nextBlockID(),

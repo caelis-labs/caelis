@@ -477,17 +477,6 @@ func IsRetryLine(line string) bool {
 	return strings.Contains(lower, "retry") || strings.Contains(lower, "retrying")
 }
 
-// IsLogLine returns true if the line is a system/tool log rather than
-// narrative content (assistant/user/reasoning).
-func IsLogLine(style LineStyle) bool {
-	switch style {
-	case LineStyleTool, LineStyleWarn, LineStyleError, LineStyleNote:
-		return true
-	default:
-		return false
-	}
-}
-
 // colorizeWarnLineWithBang handles lines that already start with "! ".
 func colorizeWarnLineWithBang(line string, theme Theme) string {
 	content := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "!"))

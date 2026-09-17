@@ -78,7 +78,7 @@ func TestTurnHandlePublishesApprovalAsACPPermission(t *testing.T) {
 	t.Parallel()
 
 	handle := newTestTurnHandle()
-	pending, err := handle.publishApproval(&agent.ApprovalRequest{
+	pending, err := handle.enqueueApproval(&agent.ApprovalRequest{
 		Tool: tool.Definition{Name: "RunCommand"},
 		Call: tool.Call{ID: "call-1", Input: []byte(`{"command":"go test ./..."}`)},
 		Approval: &session.ProtocolApproval{
@@ -88,9 +88,9 @@ func TestTurnHandlePublishesApprovalAsACPPermission(t *testing.T) {
 				Kind: "allow_once",
 			}},
 		},
-	})
+	}, true)
 	if err != nil {
-		t.Fatalf("publishApproval() error = %v", err)
+		t.Fatalf("enqueueApproval() error = %v", err)
 	}
 	replayed := testObservedTurnEvents(handle)
 	if len(replayed) != 1 || replayed[0].Kind != eventstream.KindRequestPermission || replayed[0].Permission == nil {
@@ -120,12 +120,12 @@ func TestTurnHandlePublishApprovalRequiresDurablePersister(t *testing.T) {
 		sessionRef: session.SessionRef{SessionID: "s1"},
 		observer:   recorder,
 	})
-	_, err := handle.publishApproval(&agent.ApprovalRequest{
+	_, err := handle.enqueueApproval(&agent.ApprovalRequest{
 		Tool: tool.Definition{Name: "RunCommand"},
 		Call: tool.Call{ID: "call-1", Name: "RunCommand"},
-	})
+	}, true)
 	if err == nil || !strings.Contains(err.Error(), "durable approval persistence is unavailable") {
-		t.Fatalf("publishApproval() error = %v, want durable persistence failure", err)
+		t.Fatalf("enqueueApproval() error = %v, want durable persistence failure", err)
 	}
 	events := recorder.snapshot()
 	if len(events) != 0 {
@@ -247,9 +247,9 @@ func TestTurnHandleSubmitRoutesApprovalAndContinuation(t *testing.T) {
 		t.Fatalf("runner submissions = %#v", runner.submissions)
 	}
 
-	pending, err := handle.openPendingApproval(nil)
+	pending, err := handle.enqueueApproval(nil, false)
 	if err != nil {
-		t.Fatalf("openPendingApproval() error = %v", err)
+		t.Fatalf("enqueueApproval() error = %v", err)
 	}
 	if err := handle.Submit(context.Background(), SubmitRequest{
 		Kind:     SubmissionKindApproval,
@@ -581,11 +581,11 @@ func TestTurnHandleQueuesChildApprovalsInFIFOOrder(t *testing.T) {
 	t.Parallel()
 
 	handle := newTestTurnHandle()
-	childA, err := handle.publishApproval(testChildApprovalRequest("task-a", "a.txt"))
+	childA, err := handle.enqueueApproval(testChildApprovalRequest("task-a", "a.txt"), true)
 	if err != nil {
 		t.Fatalf("publish child A approval: %v", err)
 	}
-	childB, err := handle.publishApproval(testChildApprovalRequest("task-b", "b.txt"))
+	childB, err := handle.enqueueApproval(testChildApprovalRequest("task-b", "b.txt"), true)
 	if err != nil {
 		t.Fatalf("publish child B approval: %v", err)
 	}
@@ -662,17 +662,17 @@ func TestTurnHandleQueuesMainAndChildApprovalsOnOnePlane(t *testing.T) {
 	t.Parallel()
 
 	handle := newTestTurnHandle()
-	main, err := handle.publishApproval(&agent.ApprovalRequest{
+	main, err := handle.enqueueApproval(&agent.ApprovalRequest{
 		Tool: tool.Definition{Name: "RunCommand"},
 		Call: tool.Call{ID: "main-call", Name: "RunCommand"},
 		Approval: &session.ProtocolApproval{Options: []session.ProtocolApprovalOption{{
 			ID: "allow_once", Name: "Allow once", Kind: "allow_once",
 		}}},
-	})
+	}, true)
 	if err != nil {
 		t.Fatalf("publish main approval: %v", err)
 	}
-	child, err := handle.publishApproval(testChildApprovalRequest("task-child", "child.txt"))
+	child, err := handle.enqueueApproval(testChildApprovalRequest("task-child", "child.txt"), true)
 	if err != nil {
 		t.Fatalf("publish child approval: %v", err)
 	}
@@ -740,7 +740,7 @@ func TestTurnHandleRejectsMissingUnknownStaleAndDuplicateApprovalIDs(t *testing.
 		Approval: &ApprovalDecision{RequestID: "unknown", Approved: true, Outcome: string(ApprovalStatusApproved)},
 	}))
 
-	pending, err := handle.openPendingApproval(&agent.ApprovalRequest{PauseTokenID: "pause-stable"})
+	pending, err := handle.enqueueApproval(&agent.ApprovalRequest{PauseTokenID: "pause-stable"}, false)
 	if err != nil {
 		t.Fatalf("open durable approval: %v", err)
 	}
@@ -758,13 +758,13 @@ func TestTurnHandleRejectsMissingUnknownStaleAndDuplicateApprovalIDs(t *testing.
 		Kind:     SubmissionKindApproval,
 		Approval: &ApprovalDecision{RequestID: pending.id, Approved: true, Outcome: string(ApprovalStatusApproved)},
 	}))
-	if _, err := handle.openPendingApproval(&agent.ApprovalRequest{PauseTokenID: "pause-stable"}); err == nil {
+	if _, err := handle.enqueueApproval(&agent.ApprovalRequest{PauseTokenID: "pause-stable"}, false); err == nil {
 		t.Fatal("open reused durable approval id error = nil, want conflict")
 	} else {
 		assertApprovalNotPending(t, err)
 	}
 
-	stale, err := handle.openPendingApproval(nil)
+	stale, err := handle.enqueueApproval(nil, false)
 	if err != nil {
 		t.Fatalf("open live approval: %v", err)
 	}
@@ -788,7 +788,7 @@ func TestTurnHandleClearsPendingApprovalsOnCancelCloseAndTerminal(t *testing.T) 
 	for name, stop := range cleanup {
 		t.Run(name, func(t *testing.T) {
 			handle := newTestTurnHandle()
-			pending, err := handle.openPendingApproval(nil)
+			pending, err := handle.enqueueApproval(nil, false)
 			if err != nil {
 				t.Fatalf("open approval: %v", err)
 			}
@@ -824,11 +824,11 @@ func TestTurnHandleAdvancesQueueWhenActiveApprovalIsAbandoned(t *testing.T) {
 	t.Parallel()
 
 	handle := newTestTurnHandle()
-	first, err := handle.publishApproval(testChildApprovalRequest("task-a", "a.txt"))
+	first, err := handle.enqueueApproval(testChildApprovalRequest("task-a", "a.txt"), true)
 	if err != nil {
 		t.Fatalf("publish first child approval: %v", err)
 	}
-	second, err := handle.publishApproval(testChildApprovalRequest("task-b", "b.txt"))
+	second, err := handle.enqueueApproval(testChildApprovalRequest("task-b", "b.txt"), true)
 	if err != nil {
 		t.Fatalf("publish second child approval: %v", err)
 	}
@@ -867,7 +867,7 @@ func TestSessionApprovalCoordinatorAcceptsDetachedChildAfterParentTerminal(t *te
 	handle.finish()
 	request := testChildApprovalRequest("task-detached", "detached.txt")
 	request.PauseTokenID = "detached-approval"
-	pending, err := handle.openPendingApproval(request)
+	pending, err := handle.enqueueApproval(request, false)
 	if err != nil {
 		t.Fatalf("open detached approval after parent terminal: %v", err)
 	}
@@ -900,11 +900,11 @@ func TestSessionApprovalCoordinatorSharesFIFOAcrossTurnOwners(t *testing.T) {
 	coordinator := newApprovalCoordinator(ref)
 	firstOwner := newTurnHandle(turnHandleConfig{handleID: "turn-a", sessionRef: ref, approvals: coordinator})
 	secondOwner := newTurnHandle(turnHandleConfig{handleID: "turn-b", sessionRef: ref, approvals: coordinator})
-	first, err := firstOwner.openPendingApproval(testChildApprovalRequest("task-a", "a.txt"))
+	first, err := firstOwner.enqueueApproval(testChildApprovalRequest("task-a", "a.txt"), false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := secondOwner.openPendingApproval(testChildApprovalRequest("task-b", "b.txt"))
+	second, err := secondOwner.enqueueApproval(testChildApprovalRequest("task-b", "b.txt"), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -943,11 +943,11 @@ func TestSessionApprovalCoordinatorKeepsConcurrentStepOpenForLateSibling(t *test
 		}
 	}
 
-	first, err := handle.openPendingApproval(request("first", stepRefs[0]))
+	first, err := handle.enqueueApproval(request("first", stepRefs[0]), false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	other, err := handle.openPendingApproval(request("other", nil))
+	other, err := handle.enqueueApproval(request("other", nil), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -960,7 +960,7 @@ func TestSessionApprovalCoordinatorKeepsConcurrentStepOpenForLateSibling(t *test
 	default:
 	}
 
-	late, err := handle.openPendingApproval(request("late", stepRefs[1]))
+	late, err := handle.enqueueApproval(request("late", stepRefs[1]), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -993,22 +993,22 @@ func TestSessionApprovalCoordinatorAbandonReleasesOpenConcurrentStep(t *testing.
 	firstOwner := newTurnHandle(turnHandleConfig{handleID: "turn-a", sessionRef: ref, approvals: coordinator})
 	otherOwner := newTurnHandle(turnHandleConfig{handleID: "turn-b", sessionRef: ref, approvals: coordinator})
 	stepRefs := tool.NewConcurrentModelStepRefs("step-a", 2)
-	first, err := firstOwner.openPendingApproval(&agent.ApprovalRequest{
+	first, err := firstOwner.enqueueApproval(&agent.ApprovalRequest{
 		SessionRef: ref,
 		RunID:      "run-a",
 		TurnID:     "turn-a",
 		Tool:       tool.Definition{Name: "RunCommand"},
 		Call:       tool.Call{ID: "first", Name: "RunCommand"},
 		ModelStep:  stepRefs[0],
-	})
+	}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	other, err := otherOwner.openPendingApproval(&agent.ApprovalRequest{
+	other, err := otherOwner.enqueueApproval(&agent.ApprovalRequest{
 		SessionRef: ref,
 		Tool:       tool.Definition{Name: "Write"},
 		Call:       tool.Call{ID: "other", Name: "Write"},
-	})
+	}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1037,7 +1037,7 @@ func TestTurnHandleConcurrentApprovalSubmissionsOnlyResolveActiveHead(t *testing
 	handle := newTestTurnHandle()
 	pendings := make([]*pendingApproval, 0, 3)
 	for range 3 {
-		pending, err := handle.openPendingApproval(nil)
+		pending, err := handle.enqueueApproval(nil, false)
 		if err != nil {
 			t.Fatalf("open approval: %v", err)
 		}
@@ -1109,7 +1109,7 @@ func TestTurnHandleConcurrentApprovalSubmissionsFirstDecisionWins(t *testing.T) 
 	t.Parallel()
 
 	handle := newTestTurnHandle()
-	pending, err := handle.openPendingApproval(nil)
+	pending, err := handle.enqueueApproval(nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}

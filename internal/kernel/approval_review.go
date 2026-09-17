@@ -20,10 +20,6 @@ func NormalizeApprovalMode(mode string) ApprovalMode {
 	return approval.NormalizeMode(mode)
 }
 
-func CurrentApprovalMode(state map[string]any) ApprovalMode {
-	return approval.CurrentMode(state)
-}
-
 func CurrentApprovalModeOrDefault(state map[string]any, fallback ApprovalMode) ApprovalMode {
 	return approval.CurrentModeOrDefault(state, fallback)
 }

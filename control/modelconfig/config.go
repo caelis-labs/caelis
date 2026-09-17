@@ -278,16 +278,6 @@ func ConfigCarriesProviderEndpointFields(cfg Config) bool {
 		cfg.StreamFirstEventTimeout > 0
 }
 
-// ConfigCarriesProviderEndpointAuth reports whether cfg can update stored
-// provider endpoint credentials.
-func ConfigCarriesProviderEndpointAuth(cfg Config) bool {
-	return strings.TrimSpace(cfg.Token) != "" ||
-		strings.TrimSpace(cfg.CredentialRef) != "" ||
-		strings.TrimSpace(cfg.HeaderKey) != "" ||
-		cfg.PersistToken ||
-		cfg.HTTPClient != nil
-}
-
 // MergeConfigProviderEndpoint hydrates a model record from its provider endpoint.
 func MergeConfigProviderEndpoint(cfg Config, endpoint ProviderEndpointConfig) Config {
 	cfg = NormalizeConfig(cfg)

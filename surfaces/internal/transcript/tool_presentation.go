@@ -24,13 +24,6 @@ type ToolPresentation struct {
 	TitleAsLabel    bool
 }
 
-// ResolveToolPresentation derives presentation-only behavior from standard ACP
-// fields, with exact built-in names providing optional label enrichment. The
-// result is ephemeral surface state, not a runtime or protocol authority.
-func ResolveToolPresentation(name string, kind string, title string) ToolPresentation {
-	return resolveToolPresentation(name, kind, title, "")
-}
-
 // ResolveToolPresentationWithHint applies one normalized display-only
 // compatibility hint after standard ACP kind and exact built-in presentation
 // have been resolved. The hint never becomes tool identity.
@@ -68,13 +61,6 @@ func resolveToolPresentation(name string, kind string, title string, exploration
 	}
 	resolved.DisplayName = "Tool"
 	return resolved
-}
-
-// ToolIsExploration reports whether a tool belongs in the shared compact
-// exploration presentation. Standard ACP kind is sufficient; an exact built-in
-// name only refines the verb.
-func ToolIsExploration(name string, kind string) bool {
-	return toolExplorationVerb(strings.TrimSpace(name), strings.ToLower(strings.TrimSpace(kind))) != ""
 }
 
 // ToolIsExplorationWithHint reports compact exploration membership after a

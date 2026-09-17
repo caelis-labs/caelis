@@ -90,17 +90,6 @@ type Run struct {
 	Addressable bool
 }
 
-// RunFromParticipant normalizes the Control semantics of one participant into
-// a direct Agent run. Only ACP sidecars are user-addressable; delegated and
-// system participants remain visible to status without becoming commands.
-func RunFromParticipant(name, agent, kind, role string) Run {
-	return Run{
-		Name:        FormatRunName(agent, name),
-		Agent:       NormalizeName(agent),
-		Addressable: strings.EqualFold(strings.TrimSpace(kind), "acp") && strings.EqualFold(strings.TrimSpace(role), "sidecar"),
-	}
-}
-
 // NameFilter decides whether a normalized Agent name is eligible for a
 // product surface, including command-name reservations.
 type NameFilter func(string) bool

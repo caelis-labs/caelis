@@ -135,11 +135,6 @@ func overlayLineAt(_ string, overlayLine string, startX int, screenWidth int) st
 	return prefix + overlayLine + suffix
 }
 
-func normalizeFullscreenFrame(view string, width int, height int) string {
-	normalized, _ := normalizeFullscreenFrameWithTopTrim(view, width, height)
-	return normalized
-}
-
 func (m *Model) normalizeFullscreenFrameWithTopTrim(view string) (string, int) {
 	if m == nil {
 		return view, 0

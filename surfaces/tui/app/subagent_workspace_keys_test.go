@@ -130,7 +130,7 @@ func TestPaneWorkspaceFocusPreservesTranscriptLayout(t *testing.T) {
 				m.Update(tea.KeyPressMsg{Code: tea.KeyF6})
 				m.View()
 				child := m.renderPaneEditor(state, state.geometry.contentWidth)
-				main := m.wrapInputBarInContainer(m.composeInputRender().styledText())
+				main := m.wrapInputBarInContainer(m.composeInputRenderFrom(m.composeInputLayout()).styledText())
 				childBg, mainBg := m.theme.ComposerBg, m.theme.ComposerFocusBg
 				if m.workspace.childFocused {
 					childBg, mainBg = mainBg, childBg

@@ -16,10 +16,6 @@ type themePickerLayout struct {
 	hints             []string
 }
 
-func (l themePickerLayout) height() int {
-	return 2*l.border + 3 + l.count + len(l.hints)
-}
-
 func (m *Model) themePickerLayout() themePickerLayout {
 	width := minInt(96, maxInt(20, m.width-4))
 	inner := maxInt(1, width-m.overlayBorderChromeWidth())

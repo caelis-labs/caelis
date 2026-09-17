@@ -80,7 +80,7 @@ func TestACPHeaderSanitizesSourceANSI(t *testing.T) {
 	model := NewModel(Config{ColorProfile: colorprofile.TrueColor})
 	ctx := BlockRenderContext{Width: 120, TermWidth: 120, Theme: model.theme}
 
-	header := styleACPTranscriptHeader(ctx, "• Ran \x1b[31mgit\x1b[0m status --short")
+	header := styleACPTranscriptHeaderWithMark(ctx, "• Ran \x1b[31mgit\x1b[0m status --short", acpHeaderMarkDefault, false)
 	if got := ansi.Strip(header); got != "• Ran git status --short" {
 		t.Fatalf("header strips to %q, want sanitized shell command", got)
 	}

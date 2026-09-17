@@ -698,10 +698,6 @@ func executeControlPromptResult(ctx context.Context, service ControlServices, se
 // Helpers
 // ---------------------------------------------------------------------------
 
-func appendAgentSlashCommands(service ControlServices, commands []string) []string {
-	return appendAgentSlashCommandsWithContext(context.Background(), service, commands)
-}
-
 func appendAgentSlashCommandsWithContext(ctx context.Context, service controlprompt.RouterService, commands []string) []string {
 	ctx = contextOrBackground(ctx)
 	if len(commands) == 0 {

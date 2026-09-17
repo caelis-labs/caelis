@@ -20,16 +20,6 @@ type inlineSpan struct {
 	State inlineStyleState
 }
 
-func renderInlineMarkdown(text string, base lipgloss.Style, theme tuikit.Theme) string {
-	if text == "" {
-		return ""
-	}
-	if !hasInlineMarkdownMarkers(text) {
-		return renderInlineText(text, inlineStyleState{}, base, theme)
-	}
-	return renderInlineSpans(parseInlineMarkdownSpans(text), base, theme)
-}
-
 func renderInlineSpans(spans []inlineSpan, base lipgloss.Style, theme tuikit.Theme) string {
 	var out strings.Builder
 	for _, span := range spans {
@@ -148,10 +138,6 @@ func parseInlineMarkdownSpansWithState(text string, state inlineStyleState) []in
 	}
 	flushLiteral()
 	return spans
-}
-
-func hasInlineMarkdownMarkers(text string) bool {
-	return strings.ContainsAny(text, "\\`*_~")
 }
 
 func stripInlineMarkdown(text string) string {

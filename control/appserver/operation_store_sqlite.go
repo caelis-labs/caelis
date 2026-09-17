@@ -21,9 +21,9 @@ const (
 )
 
 // SQLiteOperationStore is the Control-owned durable operation ledger. It
-// stores point-addressed idempotency records as rows while retaining the same
+// stores point-addressed idempotency records as rows while retaining the
 // intent-before-effect, immutable-result, unknown-outcome, and retention
-// semantics as FileOperationStore.
+// semantics required by DurableOperationStore.
 type SQLiteOperationStore struct {
 	path               string
 	db                 *sql.DB

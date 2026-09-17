@@ -248,15 +248,6 @@ func collectExplorationContainers(events []SubagentEvent, status string) []explo
 	return containers
 }
 
-func collectStableExplorationRuns(events []SubagentEvent, status string) [][]string {
-	containers := collectExplorationContainers(events, status)
-	runs := make([][]string, 0, len(containers))
-	for _, container := range containers {
-		runs = append(runs, append([]string(nil), container.CallIDs...))
-	}
-	return runs
-}
-
 type explorationRenderStep struct {
 	start   int
 	end     int

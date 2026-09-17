@@ -130,13 +130,6 @@ func (q pendingPromptQueue) visibleCount() int {
 	return len(q)
 }
 
-func (q pendingPromptQueue) nextVisible() (pendingPrompt, bool) {
-	if len(q) == 0 {
-		return pendingPrompt{}, false
-	}
-	return q[0], true
-}
-
 func (q pendingPromptQueue) nextIndex(match func(pendingPrompt) bool) (int, bool) {
 	if match == nil {
 		return -1, false
@@ -200,11 +193,4 @@ func (p pendingPrompt) canDispatchAfterIdle() bool {
 
 func (p pendingPrompt) dispatchScheduled() bool {
 	return p.state == pendingPromptDispatchScheduled
-}
-
-func (p pendingPrompt) displayText() string {
-	if text := strings.TrimSpace(p.displayLine); text != "" {
-		return text
-	}
-	return strings.TrimSpace(p.execLine)
 }

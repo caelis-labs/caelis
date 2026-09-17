@@ -47,7 +47,7 @@ func assertRenderedInlineCodeRun(t *testing.T, theme tuikit.Theme, raw string, w
 	glamour := glamourRenderNarrative(raw, width, theme, tuikit.LineStyleAssistant)
 	assertInlineCodeRunText(t, "glamour", raw, width, want, ansi.Strip(glamour), glamour)
 
-	inline := renderInlineMarkdown(raw, theme.TextStyle(), theme)
+	inline := renderInlineSpans(parseInlineMarkdownSpans(raw), theme.TextStyle(), theme)
 	assertInlineCodeRunText(t, "inline", raw, width, want, ansi.Strip(inline), inline)
 
 	wrappedStyled, wrappedPlain := renderInlineMarkdownWrappedSegments(raw, theme.TextStyle(), theme, width)
@@ -112,7 +112,7 @@ func assertPhysicalInlineCodeRun(t *testing.T, raw string, width int, want strin
 	for i, row := range rows {
 		styled[i] = row.Styled
 	}
-	frame := normalizeFullscreenFrame(strings.Join(styled, "\n"), width, height)
+	frame, _ := normalizeFullscreenFrameWithTopTrim(strings.Join(styled, "\n"), width, height)
 	terminal := vt.NewSafeEmulator(width, height)
 	t.Cleanup(func() { _ = terminal.Close() })
 	if _, err := terminal.Write([]byte(renderFullscreenFramesForTest(t, width, height, frame)[0])); err != nil {

@@ -133,91 +133,6 @@ func (m *Model) streamCatchupMaxPerTick() int {
 	return m.cfg.StreamCatchupMaxTick
 }
 
-func (m *Model) streamSmoothingState(key string) *streamSmoothingState {
-	if m == nil || key == "" {
-		return nil
-	}
-	if m.streamSmoothing == nil {
-		m.streamSmoothing = map[string]*streamSmoothingState{}
-	}
-	state := m.streamSmoothing[key]
-	if state == nil {
-		parts := strings.SplitN(key, "|", 4)
-		now := time.Now()
-		state = &streamSmoothingState{
-			firstSeen: now,
-			lastTick:  now,
-		}
-		if len(parts) > 0 {
-			state.targetKind = parts[0]
-		}
-		if len(parts) > 1 {
-			state.sessionKey = parts[1]
-		}
-		if len(parts) > 2 {
-			state.streamKind = parts[2]
-		}
-		if len(parts) > 3 {
-			state.actor = parts[3]
-		}
-		m.streamSmoothing[key] = state
-	}
-	return state
-}
-
-func (m *Model) enqueueStreamDelta(targetKind string, sessionKey string, streamKind string, actor string, text string, final bool) bool {
-	if m == nil {
-		return false
-	}
-	key := streamSmoothingKey(targetKind, sessionKey, streamKind, actor)
-	state := m.streamSmoothingState(key)
-	if state == nil {
-		return false
-	}
-	state.actor = strings.TrimSpace(actor)
-	if final {
-		state.upstreamDone = true
-	}
-	if text == "" {
-		return final
-	}
-	now := time.Now()
-	if state.firstSeen.IsZero() {
-		state.firstSeen = now
-	}
-	if state.lastTick.IsZero() {
-		state.lastTick = now
-	}
-	clusters := splitGraphemeClusters(text)
-	if len(clusters) == 0 {
-		return false
-	}
-	if len(state.pending) == 0 {
-		state.pendingSince = now
-	}
-	state.pending = append(state.pending, clusters...)
-	backlog := len(state.pending)
-	m.streamPlayback.BacklogRunes = backlog
-	if backlog > m.streamPlayback.MaxBacklogRunes {
-		m.streamPlayback.MaxBacklogRunes = backlog
-	}
-	return true
-}
-
-func (m *Model) ensurePendingStreamSmoothingTick() tea.Cmd {
-	if m == nil {
-		return nil
-	}
-	if len(m.streamSmoothing) == 0 || m.streamSmoothingTickScheduled {
-		return nil
-	}
-	if !m.hasImmediateStreamSmoothingWork() {
-		return nil
-	}
-	m.streamSmoothingTickScheduled = true
-	return frameTickCmd(frameTickStreamSmoothing, m.streamTickInterval())
-}
-
 func (m *Model) hasImmediateStreamSmoothingWork() bool {
 	if m == nil {
 		return false
@@ -456,24 +371,6 @@ func (m *Model) handleBTWDelta(text string, final bool) (tea.Model, tea.Cmd) {
 	}
 	m.applyBTWOverlayImmediate(text, false)
 	return m, nil
-}
-
-func (m *Model) enqueueBTWDelta(text string, final bool) (tea.Model, tea.Cmd) {
-	if m == nil {
-		return m, nil
-	}
-	if m.btwOverlay == nil && m.btwDismissed {
-		return m, nil
-	}
-	if final {
-		m.dropPendingStreamSmoothing(streamSmoothingKey("btw", "", "answer", ""))
-		m.applyBTWOverlayImmediate(text, true)
-		return m, nil
-	}
-	if !m.enqueueStreamDelta("btw", "", "answer", "", text, false) {
-		return m, nil
-	}
-	return m, m.ensurePendingStreamSmoothingTick()
 }
 
 func (m *Model) ensureParticipantTurnBlock(sessionID string, actor string) *ParticipantTurnBlock {

@@ -52,7 +52,7 @@ func TestLiveExplorationKeepsCompletedGroupsStableAroundPendingStage(t *testing.
 	}
 	wantFirst := []string{"read-1", "read-2"}
 	wantLast := []string{"read-last-1", "read-last-2"}
-	stableRuns := collectStableExplorationRuns(block.Events, block.Status)
+	stableRuns := stableExplorationRunsForTest(block.Events, block.Status)
 	if len(stableRuns) != 2 || !slices.Equal(stableRuns[0], wantFirst) || !slices.Equal(stableRuns[1], wantLast) {
 		t.Fatalf("stable exploration runs = %#v, want completed runs %#v and %#v", stableRuns, wantFirst, wantLast)
 	}
@@ -90,7 +90,7 @@ func TestLiveExplorationKeepsCompletedGroupsStableAroundPendingStage(t *testing.
 		t.Fatal("explicit result update did not complete the pending search")
 	}
 	wantRun := []string{"read-1", "read-2", "search-middle", "read-middle", "read-last-1", "read-last-2"}
-	stableRuns = collectStableExplorationRuns(block.Events, block.Status)
+	stableRuns = stableExplorationRunsForTest(block.Events, block.Status)
 	if len(stableRuns) != 1 || !slices.Equal(stableRuns[0], wantRun) {
 		t.Fatalf("stable exploration runs = %#v, want %#v", stableRuns, [][]string{wantRun})
 	}
@@ -152,7 +152,7 @@ func TestHiddenTaskWaitCannotDowngradeExploredSummary(t *testing.T) {
 
 	block := requireMainACPTurnBlockForTest(t, h.model)
 	wantRun := []string{"search-1", "read-1"}
-	stableRuns := collectStableExplorationRuns(block.Events, block.Status)
+	stableRuns := stableExplorationRunsForTest(block.Events, block.Status)
 	if len(stableRuns) != 1 || !slices.Equal(stableRuns[0], wantRun) {
 		t.Fatalf("stable exploration runs after Task wait = %#v, want %#v", stableRuns, [][]string{wantRun})
 	}
@@ -200,7 +200,7 @@ func TestFailedExplorationStaysInsideOneExploredGroup(t *testing.T) {
 
 	block := requireMainACPTurnBlockForTest(t, h.model)
 	wantRun := []string{"read-1", "search-1", "read-failed", "read-2", "search-2"}
-	stableRuns := collectStableExplorationRuns(block.Events, block.Status)
+	stableRuns := stableExplorationRunsForTest(block.Events, block.Status)
 	if len(stableRuns) != 1 || !slices.Equal(stableRuns[0], wantRun) {
 		t.Fatalf("stable exploration runs = %#v, want one run %#v", stableRuns, wantRun)
 	}
@@ -290,7 +290,7 @@ func TestRetryNoticeKeepsCompletedExplorationCollapsed(t *testing.T) {
 	block.AddNotice("Retrying model request (1/5, retry in 1s)", time.Time{}, transcript.NoticeKindModelRetry)
 
 	wantRun := []string{"read-1", "search-1"}
-	stableRuns := collectStableExplorationRuns(block.Events, block.Status)
+	stableRuns := stableExplorationRunsForTest(block.Events, block.Status)
 	if len(stableRuns) != 1 || !slices.Equal(stableRuns[0], wantRun) {
 		t.Fatalf("stable exploration runs = %#v, want %#v", stableRuns, [][]string{wantRun})
 	}
@@ -329,7 +329,7 @@ func TestAttemptResetRetryNoticeDoesNotFlattenSettledExploration(t *testing.T) {
 	block.AddNotice("Retrying model request (1/5, retry in 1s)", time.Time{}, transcript.NoticeKindModelRetry)
 
 	wantRun := []string{"read-1", "search-1"}
-	stableRuns := collectStableExplorationRuns(block.Events, block.Status)
+	stableRuns := stableExplorationRunsForTest(block.Events, block.Status)
 	if len(stableRuns) != 1 || !slices.Equal(stableRuns[0], wantRun) {
 		t.Fatalf("stable exploration runs after retry = %#v, want %#v", stableRuns, [][]string{wantRun})
 	}
@@ -455,7 +455,7 @@ func TestLaterWorkSuppressesRetryNoticeAndKeepsOneExploredGroup(t *testing.T) {
 		}
 	}
 	wantRun := []string{"read-1", "search-1", "read-2", "search-2"}
-	stableRuns := collectStableExplorationRuns(block.Events, block.Status)
+	stableRuns := stableExplorationRunsForTest(block.Events, block.Status)
 	if len(stableRuns) != 1 || !slices.Equal(stableRuns[0], wantRun) {
 		t.Fatalf("stable exploration runs = %#v, want one merged run %#v", stableRuns, [][]string{wantRun})
 	}
@@ -549,6 +549,17 @@ func (h *liveExplorationHarness) start(callID, name, kind, arg string) {
 func (h *liveExplorationHarness) complete(callID, name, kind, arg string) {
 	h.t.Helper()
 	h.apply(liveExplorationToolCompleteEnvelope(callID, name, kind, arg))
+}
+
+// stableExplorationRunsForTest lists the call IDs of each settled exploration
+// container the live collector produces.
+func stableExplorationRunsForTest(events []SubagentEvent, status string) [][]string {
+	containers := collectExplorationContainers(events, status)
+	runs := make([][]string, 0, len(containers))
+	for _, container := range containers {
+		runs = append(runs, append([]string(nil), container.CallIDs...))
+	}
+	return runs
 }
 
 func requireToolEventForTest(t *testing.T, events []SubagentEvent, callID string) SubagentEvent {

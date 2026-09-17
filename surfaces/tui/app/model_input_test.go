@@ -282,7 +282,7 @@ func TestViewportSelectionUsesInputSelectionStyle(t *testing.T) {
 	model.selectionStart = textSelectionPoint{line: 0, col: 0}
 	model.selectionEnd = textSelectionPoint{line: 0, col: 5}
 
-	rendered := strings.Join(model.renderSelectionLines(), "\n")
+	rendered := model.renderViewportLinesView(true)
 	want := model.theme.InputSelectionStyle().Render("hello")
 	if !strings.Contains(rendered, want) {
 		t.Fatalf("viewport selection render missing input selection style %q: %q", want, rendered)
@@ -351,7 +351,7 @@ func TestAssistantViewportSelectionUsesContentIndentInsteadOfRoleMarker(t *testi
 
 	m.selectionStart = start
 	m.selectionEnd = end
-	rendered := m.renderViewportSelectionView()
+	rendered := m.renderViewportLinesView(true)
 	if plain := ansi.Strip(rendered); !strings.Contains(plain, "· 审查结论") {
 		t.Fatalf("selection view lost decorative role marker or content: %q", plain)
 	}
@@ -1167,7 +1167,7 @@ func TestComposerMixedWidthDeleteAsciiBeforeCJKKeepsNextGlyphVisible(t *testing.
 
 func assertComposerRenderContains(t *testing.T, m *Model, want string) {
 	t.Helper()
-	render := m.composeInputRender()
+	render := m.composeInputRenderFrom(m.composeInputLayout())
 	plain := strings.Join(render.plainLines, "\n")
 	if !strings.Contains(plain, want) {
 		t.Fatalf("plain composer render = %q, want to contain %q", plain, want)
@@ -1414,7 +1414,7 @@ func TestRunningImageSubmissionUsesActiveTurnPendingUserMessage(t *testing.T) {
 		t.Fatalf("running image submission = %#v", got)
 	}
 	if len(model.pendingQueue) != 1 || model.pendingQueue[0].state != pendingPromptDispatched ||
-		model.pendingQueue[0].displayText() != "inspect [image #1] screenshot" ||
+		model.pendingQueue[0].displayLine != "inspect [image #1] screenshot" ||
 		!reflect.DeepEqual(model.pendingQueue[0].attachments, attachments) {
 		t.Fatalf("running image pending queue = %#v", model.pendingQueue)
 	}

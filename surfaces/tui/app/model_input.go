@@ -1708,10 +1708,6 @@ func (m *Model) tryToggleACPAgentMessageToken(blockID string, key string) bool {
 	}
 }
 
-func (m *Model) tryToggleACPToolPanelToken(blockID string, token string) bool {
-	return m.tryToggleFoldToken(blockID, token)
-}
-
 func (m *Model) tryToggleACPReasoningToken(blockID string, key string) bool {
 	key = strings.TrimSpace(key)
 	if key == "" {

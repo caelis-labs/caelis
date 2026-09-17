@@ -266,25 +266,6 @@ func observedSpawnStatus(taskStatus *string, rawOutput map[string]any) string {
 	return eventstream.ToolStatusCompleted
 }
 
-func childTerminalResultText(status string, rawOutput map[string]any) string {
-	if strings.EqualFold(strings.TrimSpace(status), eventstream.ToolStatusFailed) {
-		return firstChildTerminalText(
-			display.MapString(rawOutput, "error"),
-			display.MapString(rawOutput, "reason"),
-		)
-	}
-	return display.SubagentTaskFinalText(display.MapString(rawOutput, "state"), rawOutput)
-}
-
-func firstChildTerminalText(values ...string) string {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return value
-		}
-	}
-	return ""
-}
-
 func childTerminalResultNotification(
 	sessionID string,
 	parentCallID string,

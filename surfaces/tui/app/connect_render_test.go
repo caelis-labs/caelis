@@ -39,7 +39,7 @@ func TestRenderSlashArgListUsesWizardHintInsteadOfInternalConnectPayload(t *test
 		Detail:  "context window tokens",
 	}}
 
-	rendered := model.renderSlashArgList()
+	rendered := model.renderInputOverlay()
 	if strings.Contains(rendered, "sk-secret") {
 		t.Fatalf("rendered slash arg list leaked api key: %q", rendered)
 	}
@@ -76,7 +76,7 @@ func TestRenderSlashArgListDistinguishesCandidateTextFromDetail(t *testing.T) {
 	}
 	model.slashArgIndex = 0
 
-	rendered := model.renderSlashArgList()
+	rendered := model.renderInputOverlay()
 	line := styledLineContaining(t, rendered, "token plan cn")
 	plain := ansi.Strip(line)
 	candidateX := strings.Index(plain, "token plan cn")
@@ -112,13 +112,13 @@ func TestRenderSlashArgListAlignsProviderHints(t *testing.T) {
 	}
 	model.slashArgIndex = 0
 
-	rendered := ansi.Strip(model.renderSlashArgList())
+	rendered := ansi.Strip(model.renderInputOverlay())
 	lines := strings.Split(strings.TrimRight(rendered, "\n"), "\n")
 	codex := lineContaining(lines, "codex")
 	grok := lineContaining(lines, "Grok models")
 	compat := lineContaining(lines, "openai-chat-compatible")
 	if codex == "" || grok == "" || compat == "" {
-		t.Fatalf("renderSlashArgList() = %q, want provider rows", rendered)
+		t.Fatalf("renderInputOverlay() = %q, want provider rows", rendered)
 	}
 	codexHint := strings.Index(codex, "ChatGPT")
 	grokHint := strings.Index(grok, "Grok models")
@@ -143,13 +143,13 @@ func TestRenderSlashArgListDistinguishesOpenAIProtocolProviders(t *testing.T) {
 	}
 	model.slashArgIndex = 0
 
-	rendered := ansi.Strip(model.renderSlashArgList())
+	rendered := ansi.Strip(model.renderInputOverlay())
 	t.Logf("provider menu:\n%s", rendered)
 	official := lineContaining(strings.Split(rendered, "\n"), "OpenAI-hosted models")
 	responses := lineContaining(strings.Split(rendered, "\n"), "openai-responses-compatible")
 	chat := lineContaining(strings.Split(rendered, "\n"), "openai-chat-compatible")
 	if official == "" || responses == "" || chat == "" {
-		t.Fatalf("renderSlashArgList() = %q, want distinct OpenAI protocol rows", rendered)
+		t.Fatalf("renderInputOverlay() = %q, want distinct OpenAI protocol rows", rendered)
 	}
 	if !strings.Contains(official, "Responses") {
 		t.Fatalf("openai row = %q, want Responses", official)
@@ -176,16 +176,16 @@ func TestRenderSlashArgListNarrowWidthKeepsANSIIntact(t *testing.T) {
 	}
 	model.slashArgIndex = 0
 
-	rendered := model.renderSlashArgList()
+	rendered := model.renderInputOverlay()
 	plain := ansi.Strip(rendered)
 	for _, fragment := range []string{"[38;", "[48;", "[0m", "\x1b"} {
 		if strings.Contains(plain, fragment) {
-			t.Fatalf("renderSlashArgList() plain output leaked ANSI fragment %q: raw=%q plain=%q", fragment, rendered, plain)
+			t.Fatalf("renderInputOverlay() plain output leaked ANSI fragment %q: raw=%q plain=%q", fragment, rendered, plain)
 		}
 	}
 	for _, line := range strings.Split(strings.TrimRight(plain, "\n"), "\n") {
 		if width := displayColumns(line); width > model.completionOverlayInnerWidth() {
-			t.Fatalf("renderSlashArgList() row width = %d, want <= %d: %q", width, model.completionOverlayInnerWidth(), line)
+			t.Fatalf("renderInputOverlay() row width = %d, want <= %d: %q", width, model.completionOverlayInnerWidth(), line)
 		}
 	}
 }
@@ -205,17 +205,17 @@ func TestRenderSlashArgListUsesWideDisplayForBaseURL(t *testing.T) {
 	}
 	model.slashArgIndex = 0
 
-	rendered := ansi.Strip(model.renderSlashArgList())
+	rendered := ansi.Strip(model.renderInputOverlay())
 	if !strings.Contains(rendered, baseURL) {
-		t.Fatalf("renderSlashArgList() = %q, want full base URL %q", rendered, baseURL)
+		t.Fatalf("renderInputOverlay() = %q, want full base URL %q", rendered, baseURL)
 	}
 	if !strings.Contains(rendered, "default base URL") {
-		t.Fatalf("renderSlashArgList() = %q, want base URL detail", rendered)
+		t.Fatalf("renderInputOverlay() = %q, want base URL detail", rendered)
 	}
 	limit := model.completionOverlayRenderedRowWidth()
 	for _, line := range strings.Split(strings.TrimRight(rendered, "\n"), "\n") {
 		if width := displayColumns(line); width > limit {
-			t.Fatalf("renderSlashArgList() row width = %d, want <= %d: %q", width, limit, line)
+			t.Fatalf("renderInputOverlay() row width = %d, want <= %d: %q", width, limit, line)
 		}
 	}
 }

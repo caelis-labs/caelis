@@ -152,8 +152,8 @@ func TestAgentMessageAndApprovalPhysicalFrames(t *testing.T) {
 					}
 				}
 				height := len(styled) + 1
-				before := normalizeFullscreenFrame("previous frame", width, height)
-				after := normalizeFullscreenFrame(strings.Join(styled, "\n"), width, height)
+				before, _ := normalizeFullscreenFrameWithTopTrim("previous frame", width, height)
+				after, _ := normalizeFullscreenFrameWithTopTrim(strings.Join(styled, "\n"), width, height)
 				updates := renderFullscreenFramesForTest(t, width, height, before, after)
 				assertPhysicalFullscreenFrame(t, width, height, after, updates)
 			})

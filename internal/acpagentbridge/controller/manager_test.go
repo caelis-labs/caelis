@@ -25,6 +25,7 @@ import (
 	tasksubagent "github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpingress"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpmeta"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/subagent"
 	"github.com/caelis-labs/caelis/internal/acpbridge"
@@ -40,12 +41,12 @@ func TestContentChunkTextPreservesStreamWhitespace(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got := contentChunkText(client.ContentChunk{
+	got := acpingress.ContentChunkText(client.ContentChunk{
 		SessionUpdate: client.UpdateAgentMessage,
 		Content:       raw,
 	})
 	if got != "hello " {
-		t.Fatalf("contentChunkText() = %q, want trailing space preserved", got)
+		t.Fatalf("acpingress.ContentChunkText() = %q, want trailing space preserved", got)
 	}
 }
 
@@ -2973,11 +2974,11 @@ func TestTurnHandlePublishDoesNotBlockAfterBufferFillsOrFinishes(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		for i := 0; i < 128; i++ {
-			handle.publishEvent(&session.Event{ID: "event", Type: session.EventTypeAssistant})
+			handle.publishSourceEvent(&session.Event{ID: "event", Type: session.EventTypeAssistant}, nil)
 		}
 		handle.finish()
 		for i := 0; i < 8; i++ {
-			handle.publishEvent(&session.Event{ID: "late", Type: session.EventTypeAssistant})
+			handle.publishSourceEvent(&session.Event{ID: "late", Type: session.EventTypeAssistant}, nil)
 		}
 		close(done)
 	}()
@@ -3445,7 +3446,7 @@ func TestTurnHandleSourceEventsDoNotDropBurst(t *testing.T) {
 
 	handle := newTestTurnHandle(nil)
 	for i := 0; i < 128; i++ {
-		handle.publishEvent(&session.Event{ID: fmt.Sprintf("event-%d", i), Type: session.EventTypeAssistant})
+		handle.publishSourceEvent(&session.Event{ID: fmt.Sprintf("event-%d", i), Type: session.EventTypeAssistant}, nil)
 	}
 	handle.finish()
 

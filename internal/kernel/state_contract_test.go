@@ -2,29 +2,6 @@ package kernel
 
 import "testing"
 
-func TestCurrentSessionModeNormalizesCompatibilityValues(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name  string
-		state map[string]any
-		want  string
-	}{
-		{name: "empty defaults to auto-review", state: map[string]any{}, want: string(ApprovalModeAutoReview)},
-		{name: "approval mode key normalizes", state: map[string]any{StateCurrentApprovalMode: "auto_review"}, want: string(ApprovalModeAutoReview)},
-		{name: "unknown explicit mode defaults to auto-review", state: map[string]any{StateCurrentApprovalMode: "unknown"}, want: string(ApprovalModeAutoReview)},
-	}
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			if got := CurrentSessionMode(tt.state); got != tt.want {
-				t.Fatalf("CurrentSessionMode(%#v) = %q, want %q", tt.state, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestCurrentSessionModeOrDefaultNormalizesFallback(t *testing.T) {
 	t.Parallel()
 

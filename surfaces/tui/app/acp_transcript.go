@@ -382,10 +382,6 @@ func acpToolHeaderMark(ctx BlockRenderContext, err bool, completed bool) (acpHea
 	return acpHeaderMarkDefault, false
 }
 
-func styleACPTranscriptHeader(ctx BlockRenderContext, plain string) string {
-	return styleACPTranscriptHeaderWithMark(ctx, plain, acpHeaderMarkDefault, false)
-}
-
 func styleACPTranscriptHeaderWithMark(
 	ctx BlockRenderContext,
 	plain string,

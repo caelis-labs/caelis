@@ -114,16 +114,6 @@ func FriendlyCommandError(action string, err error) error {
 	}
 }
 
-// IsLocalAgentTarget reports whether target selects the built-in local Agent.
-func IsLocalAgentTarget(target string) bool {
-	switch strings.ToLower(strings.TrimSpace(target)) {
-	case "local", "kernel", "main":
-		return true
-	default:
-		return false
-	}
-}
-
 func dashAsEmpty(value string) string {
 	value = strings.TrimSpace(value)
 	if value == "-" {

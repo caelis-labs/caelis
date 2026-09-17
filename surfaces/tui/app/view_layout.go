@@ -607,16 +607,6 @@ func (m *Model) selectionText() string {
 	return selectionTextFromLinesWithIndents(m.viewportPlainLines, m.viewportSelectionIndents, start, end)
 }
 
-func (m *Model) renderSelectionLines() []string {
-	start, end, ok := normalizedSelectionRange(m.selectionStart, m.selectionEnd, len(m.viewportPlainLines))
-	if !ok {
-		return append([]string(nil), m.viewportStyledLines...)
-	}
-	// Rendered-text-first selection: non-selected lines keep styled output,
-	// selected lines show plain text with reverse highlight.
-	return renderSelectionOnStyledLinesWithIndents(m.viewportStyledLines, m.viewportPlainLines, m.viewportSelectionIndents, start, end, m.theme.InputSelectionStyle())
-}
-
 type fixedTextRegion struct {
 	area fixedSelectionArea
 	y    int

@@ -48,24 +48,11 @@ func TestStackAssemblesConfiguredControlOperationRetention(t *testing.T) {
 func TestStackStartsFreshWithoutImportingRetiredControlState(t *testing.T) {
 	storeDir := t.TempDir()
 	operationRoot := filepath.Join(storeDir, "control-operations")
-	seed, err := appserver.NewFileOperationStoreWithConfig(
-		operationRoot,
-		appserver.OperationRetentionConfig{TerminalRetention: 6 * time.Hour},
-	)
-	if err != nil {
+	if err := os.MkdirAll(operationRoot, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := seed.Initialize(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	legacyIntent := appserver.OperationIntent{
-		PrincipalID: "owner", OperationID: "retired-operation", Action: appserver.ActionPluginInstall,
-		Target: "demo", Digest: "retired-digest",
-	}
-	if _, created, err := seed.Begin(context.Background(), legacyIntent); err != nil || !created {
-		t.Fatalf("seed legacy operation = created %v, error %v", created, err)
-	}
-	if err := seed.Close(); err != nil {
+	legacyRecord := []byte(`{"intent":{"principal_id":"owner","operation_id":"retired-operation","action":"plugin_install","target":"demo","digest":"retired-digest"}}`)
+	if err := os.WriteFile(filepath.Join(operationRoot, "retired-operation.json"), legacyRecord, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(operationRoot, ".retention-policy.json"), []byte("not-json"), 0o000); err != nil {
@@ -90,6 +77,10 @@ func TestStackStartsFreshWithoutImportingRetiredControlState(t *testing.T) {
 	defer stack.Close()
 	if stack.controlOperationRetention != DefaultControlOperationRetention {
 		t.Fatalf("Control operation retention = %v, want default %v", stack.controlOperationRetention, DefaultControlOperationRetention)
+	}
+	legacyIntent := appserver.OperationIntent{
+		PrincipalID: "owner", OperationID: "retired-operation", Action: appserver.ActionPluginInstall,
+		Target: "demo", Digest: "retired-digest",
 	}
 	if _, created, err := stack.operations.Begin(context.Background(), legacyIntent); err != nil || !created {
 		t.Fatalf("Begin(retired operation identity) = created %v, error %v; want fresh operation", created, err)

@@ -27,7 +27,7 @@ func BenchmarkNormalizeFullscreenFrame(b *testing.B) {
 			b.ReportAllocs()
 			b.SetBytes(int64(len(frame)))
 			for b.Loop() {
-				normalizedFullscreenFrameBenchmarkSink = normalizeFullscreenFrame(frame, width, height)
+				normalizedFullscreenFrameBenchmarkSink, _ = normalizeFullscreenFrameWithTopTrim(frame, width, height)
 			}
 		})
 	}

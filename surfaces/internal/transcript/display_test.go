@@ -121,8 +121,8 @@ func TestSuppressToolResultOutput(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			if got := SuppressToolResultOutput(tt.toolName, "", tt.output, tt.synthetic, tt.isErr); got != tt.want {
-				t.Fatalf("SuppressToolResultOutput() = %v, want %v", got, tt.want)
+			if got := SuppressToolResultOutputWithHint(tt.toolName, "", "", tt.output, tt.synthetic, tt.isErr); got != tt.want {
+				t.Fatalf("SuppressToolResultOutputWithHint() = %v, want %v", got, tt.want)
 			}
 		})
 	}

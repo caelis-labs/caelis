@@ -29,7 +29,8 @@ func TestUnicodeNarrativePhysicalFrames(t *testing.T) {
 					}
 					styled[i], plain[i] = row.Styled, row.Plain
 				}
-				frames = append(frames, normalizeFullscreenFrame(strings.Join(styled, "\n"), width, height))
+				frame, _ := normalizeFullscreenFrameWithTopTrim(strings.Join(styled, "\n"), width, height)
+				frames = append(frames, frame)
 				wants = append(wants, trimPhysicalFramePadding(strings.Join(plain, "\n")))
 			}
 			// Promote complete paragraphs from the plain streaming tail into
@@ -106,7 +107,8 @@ func TestLongRichDiffPhysicalFrames(t *testing.T) {
 				for i := range styled {
 					styled[i], plain[i] = rows[offset+i].Styled, rows[offset+i].Plain
 				}
-				frames = append(frames, normalizeFullscreenFrame(strings.Join(styled, "\n"), width, height))
+				frame, _ := normalizeFullscreenFrameWithTopTrim(strings.Join(styled, "\n"), width, height)
+				frames = append(frames, frame)
 				wants = append(wants, trimPhysicalFramePadding(strings.Join(plain, "\n")))
 			}
 			terminal := vt.NewSafeEmulator(width, height)

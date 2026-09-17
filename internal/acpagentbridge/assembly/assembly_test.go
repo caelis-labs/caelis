@@ -110,38 +110,3 @@ func TestProvidersFromAssemblyEmptyPreservesAbsentCapabilities(t *testing.T) {
 		t.Fatalf("ProvidersFromAssembly(empty) = %#v, want no capabilities", providers)
 	}
 }
-
-func TestSkillBundlesNormalizeNamespaceAndDropEmptyRoots(t *testing.T) {
-	assembly := assemblyapi.ResolvedAssembly{
-		Skills: []assemblyapi.SkillBundle{
-			{
-				Plugin:   "plugin-a",
-				Root:     "/tmp/a",
-				Disabled: []string{" alpha ", "beta"},
-			},
-			{
-				Plugin:    "plugin-b",
-				Namespace: "custom",
-				Root:      " /tmp/b ",
-			},
-			{
-				Plugin: "ignored",
-				Root:   "   ",
-			},
-		},
-	}
-
-	bundles := bridgeassembly.SkillBundles(assembly)
-	if got, want := len(bundles), 2; got != want {
-		t.Fatalf("len(SkillBundles) = %d, want %d", got, want)
-	}
-	if got := bundles[0].Namespace; got != "plugin-a" {
-		t.Fatalf("bundle[0].Namespace = %q, want plugin name default", got)
-	}
-	if got := bundles[0].Disabled[0]; got != "alpha" {
-		t.Fatalf("bundle[0].Disabled[0] = %q, want trimmed value", got)
-	}
-	if got := bundles[1].Namespace; got != "custom" {
-		t.Fatalf("bundle[1].Namespace = %q, want explicit namespace", got)
-	}
-}

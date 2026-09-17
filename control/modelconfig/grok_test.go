@@ -97,7 +97,7 @@ func TestAssembleConnectRejectsCustomGrokOAuthEndpoint(t *testing.T) {
 }
 
 func TestGrok46OAuthDefaultsIncludeXHighReasoning(t *testing.T) {
-	defaults, err := ResolveModelDefaults("grok", "grok-4.6")
+	defaults, err := ResolveModelDefaultsForEndpoint("grok", "", "grok-4.6")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +112,7 @@ func TestGrok46OAuthDefaultsIncludeXHighReasoning(t *testing.T) {
 }
 
 func TestGrokOAuthNonReasoningModelDisablesReasoning(t *testing.T) {
-	defaults, err := ResolveModelDefaults("grok", "grok-4.20-0309-non-reasoning")
+	defaults, err := ResolveModelDefaultsForEndpoint("grok", "", "grok-4.20-0309-non-reasoning")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,8 +137,8 @@ func TestMaintainedSelectableGrokOAuthModels(t *testing.T) {
 			t.Fatalf("model = %#v, want complete image-capable metadata", model)
 		}
 	}
-	legacy, err := ResolveModelDefaults("xai", "grok-4.5")
+	legacy, err := ResolveModelDefaultsForEndpoint("xai", "", "grok-4.5")
 	if err != nil || legacy.ContextWindowTokens != 500000 {
-		t.Fatalf("ResolveModelDefaults(xai, grok-4.5) = %#v, %v; want retained compatibility defaults", legacy, err)
+		t.Fatalf("ResolveModelDefaultsForEndpoint(xai, grok-4.5) = %#v, %v; want retained compatibility defaults", legacy, err)
 	}
 }

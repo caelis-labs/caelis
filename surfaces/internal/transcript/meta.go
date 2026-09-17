@@ -16,17 +16,6 @@ func RuntimeTaskMeta(meta map[string]any) map[string]any {
 	return taskMeta
 }
 
-func RuntimeMetaSection(meta map[string]any, section string) map[string]any {
-	caelis, _ := meta["caelis"].(map[string]any)
-	runtimeMeta, _ := caelis["runtime"].(map[string]any)
-	values, _ := runtimeMeta[section].(map[string]any)
-	return values
-}
-
-func MetaInt64(meta map[string]any, path ...string) (int64, bool) {
-	return jsonvalue.Int64At(meta, path...)
-}
-
 func MergeMeta(base map[string]any, overlay map[string]any) map[string]any {
 	if len(base) == 0 {
 		return CloneAnyMap(overlay)

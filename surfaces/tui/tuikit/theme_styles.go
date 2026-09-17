@@ -1,8 +1,6 @@
 package tuikit
 
 import (
-	"strings"
-
 	"charm.land/lipgloss/v2"
 )
 
@@ -190,48 +188,12 @@ func (t Theme) NoteStyle() lipgloss.Style {
 	return quietStyle(t, t.NoteFg)
 }
 
-func (t Theme) TranscriptRailStyle() lipgloss.Style {
-	return fgStyle(t.TranscriptRail)
-}
-
-func (t Theme) TranscriptShellStyle() lipgloss.Style {
-	return fgStyle(t.TranscriptShell)
-}
-
 func (t Theme) TranscriptMetaStyle() lipgloss.Style {
 	return quietStyle(t, t.MutedText)
 }
 
 func (t Theme) TranscriptLabelStyle() lipgloss.Style {
 	return quietStyle(t, t.SecondaryText).Bold(true)
-}
-
-func (t Theme) TranscriptPillStyle(tone string) lipgloss.Style {
-	style := quietStyle(t, t.SecondaryText).Bold(true)
-	switch strings.ToLower(strings.TrimSpace(tone)) {
-	case "success":
-		return style.Foreground(t.Success)
-	case "warning":
-		return style.Foreground(t.Warning)
-	case "error":
-		return style.Foreground(t.Error)
-	case "accent":
-		return style.Foreground(t.Accent)
-	default:
-		return style
-	}
-}
-
-func (t Theme) CodeSurfaceStyle() lipgloss.Style {
-	return withBg(fgStyle(t.CodeBlockFg), t.CodeSurface)
-}
-
-func (t Theme) TableHeaderStyle() lipgloss.Style {
-	return t.MarkdownTableHeaderStyle()
-}
-
-func (t Theme) TableBorderStyle() lipgloss.Style {
-	return t.MarkdownTableBorderStyle()
 }
 
 func (t Theme) MarkdownHeadingStyle() lipgloss.Style {
@@ -252,14 +214,6 @@ func (t Theme) MarkdownCodeBlockStyle() lipgloss.Style {
 
 func (t Theme) MarkdownQuoteStyle() lipgloss.Style {
 	return t.Tokens().MarkdownQuote
-}
-
-func (t Theme) MarkdownTableHeaderStyle() lipgloss.Style {
-	return t.Tokens().MarkdownTableHead
-}
-
-func (t Theme) MarkdownTableBorderStyle() lipgloss.Style {
-	return t.Tokens().MarkdownTableEdge
 }
 
 func (t Theme) MarkdownRuleStyle() lipgloss.Style {
@@ -290,44 +244,6 @@ func (t Theme) PromptStyle() lipgloss.Style {
 // ScrollHintIndicator renders scroll hint text.
 func (t Theme) ScrollHintStyle() lipgloss.Style {
 	return fgStyle(t.ScrollHintFg)
-}
-
-func ComposeFooter(width int, left string, right string) string {
-	left = strings.TrimSpace(left)
-	right = strings.TrimSpace(right)
-	if width <= 0 {
-		return ""
-	}
-	if left == "" && right == "" {
-		return strings.Repeat(" ", width)
-	}
-	if left == "" {
-		if len(right) >= width {
-			return right[len(right)-width:]
-		}
-		return strings.Repeat(" ", width-len(right)) + right
-	}
-	if right == "" {
-		if len(left) >= width {
-			return left[:width]
-		}
-		return left + strings.Repeat(" ", width-len(left))
-	}
-	if len(left)+len(right)+1 <= width {
-		return left + strings.Repeat(" ", width-len(left)-len(right)) + right
-	}
-	maxLeft := width - len(right) - 1
-	if maxLeft < 0 {
-		maxLeft = 0
-	}
-	if len(left) > maxLeft {
-		left = left[:maxLeft]
-	}
-	gap := width - len(left) - len(right)
-	if gap < 1 {
-		gap = 1
-	}
-	return left + strings.Repeat(" ", gap) + right
 }
 
 // ---------------------------------------------------------------------------
