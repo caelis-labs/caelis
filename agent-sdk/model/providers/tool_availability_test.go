@@ -13,7 +13,7 @@ func TestToolAvailabilityPreservesHistoryAcrossProviderProtocols(t *testing.T) {
 	for _, protocol := range []string{"anthropic", "gemini", "chat", "ollama", "responses", "codex", "xai"} {
 		t.Run(protocol, func(t *testing.T) {
 			req := &model.Request{
-				Tools: model.ToolSpecsFromDefinitions([]model.ToolDefinition{{Name: "Read", Parameters: map[string]any{"type": "object"}}}),
+				Tools: []model.ToolSpec{model.NewFunctionToolSpec("Read", "", map[string]any{"type": "object"})},
 				Messages: []model.Message{
 					model.NewTextMessage(model.RoleUser, "Decide using the available evidence."),
 					model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{ID: "call_1", Name: "Read", Args: `{}`}}, ""),

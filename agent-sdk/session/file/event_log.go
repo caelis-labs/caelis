@@ -23,11 +23,6 @@ func (s *Store) eventsForDocumentContext(ctx context.Context, doc persistedDocum
 	return s.readCachedEventLogContext(ctx, path)
 }
 
-func (s *Store) appendEventLog(documentPath string, events []*session.Event) error {
-	_, err := s.appendEventLogTransaction(documentPath, events)
-	return err
-}
-
 func (s *Store) appendEventLogTransaction(documentPath string, events []*session.Event) (func() error, error) {
 	events = persistedEvents(events)
 	if len(events) == 0 {

@@ -294,10 +294,6 @@ func defaultRunCommandConstraints(runtime sandbox.Runtime) sandbox.Constraints {
 	return constraints
 }
 
-func runCommandPayload(result sandbox.CommandResult, err error) map[string]any {
-	return runCommandPayloadForCommand("", result, err)
-}
-
 func runCommandPayloadForCommand(command string, result sandbox.CommandResult, err error) map[string]any {
 	merged := runCommandMergedOutput(result.Stdout, result.Stderr)
 	payload := map[string]any{}

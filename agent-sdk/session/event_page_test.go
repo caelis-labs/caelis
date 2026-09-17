@@ -25,9 +25,9 @@ func TestPageEventsClientReplayIncludesCanonicalAndMirrorOnly(t *testing.T) {
 		t.Fatalf("second page = %#v, want canonical-4", second)
 	}
 
-	filtered := FilterClientReplayEvents(events)
-	if len(filtered) != 3 || filtered[0].ID != "canonical-1" || filtered[1].ID != "mirror-2" || filtered[2].ID != "canonical-4" {
-		t.Fatalf("FilterClientReplayEvents() = %#v", filtered)
+	full := PageEvents(events, EventPageRequest{Limit: 10, Visibility: EventPageClientReplay})
+	if len(full.Events) != 3 || full.Events[0].ID != "canonical-1" || full.Events[1].ID != "mirror-2" || full.Events[2].ID != "canonical-4" {
+		t.Fatalf("client replay page = %#v, want canonical+mirror only", full)
 	}
 }
 
@@ -43,8 +43,8 @@ func TestClientReplaySkipsUnprojectedAgentContext(t *testing.T) {
 	if IsClientReplayEvent(event) {
 		t.Fatalf("IsClientReplayEvent(%#v) = true, want model-only Context excluded", event)
 	}
-	if got := FilterClientReplayEvents([]*Event{event}); len(got) != 0 {
-		t.Fatalf("FilterClientReplayEvents() = %#v, want model-only Context excluded", got)
+	if got := PageEvents([]*Event{event}, EventPageRequest{Limit: 10, Visibility: EventPageClientReplay}); len(got.Events) != 0 {
+		t.Fatalf("client replay page = %#v, want model-only Context excluded", got.Events)
 	}
 
 	event.Protocol = &EventProtocol{

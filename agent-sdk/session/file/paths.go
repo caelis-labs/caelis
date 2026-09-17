@@ -6,7 +6,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -91,31 +90,6 @@ func (s *Store) findDocumentPath(sessionID string, workspaceKey string) (string,
 			session.ErrAmbiguousSession,
 		)
 	}
-}
-
-func (s *Store) listDocumentPaths() ([]string, error) {
-	paths := make([]string, 0)
-	err := filepath.WalkDir(s.rootDir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			if os.IsNotExist(err) {
-				return nil
-			}
-			return err
-		}
-		if d.IsDir() || !currentDocumentFileName(d.Name()) {
-			return nil
-		}
-		paths = append(paths, path)
-		return nil
-	})
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	sort.Strings(paths)
-	return paths, nil
 }
 
 func currentDocumentFileName(name string) bool {

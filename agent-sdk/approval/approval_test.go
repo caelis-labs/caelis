@@ -66,7 +66,7 @@ func TestPayloadFromRuntimeRequestUsesProtocolApprovalFirst(t *testing.T) {
 	}
 }
 
-func TestNormalizeOptionsAndOptionIDs(t *testing.T) {
+func TestNormalizeOptions(t *testing.T) {
 	options := NormalizeOptions([]Option{
 		{ID: " allow_once ", Name: " Allow once ", Kind: " allow_once "},
 		{ID: "allow_once", Name: "Duplicate", Kind: "allow"},
@@ -79,10 +79,6 @@ func TestNormalizeOptionsAndOptionIDs(t *testing.T) {
 	}
 	if options[0] != (Option{ID: "allow_once", Name: "Allow once", Kind: "allow_once"}) {
 		t.Fatalf("NormalizeOptions()[0] = %#v, want trimmed option", options[0])
-	}
-	ids := OptionIDs(options)
-	if len(ids) != 2 || ids[0] != "allow_once" || ids[1] != "reject_once" {
-		t.Fatalf("OptionIDs() = %#v, want de-duplicated ids", ids)
 	}
 }
 
@@ -111,11 +107,11 @@ func TestRuntimeResponseFromReviewSelectsMatchingOption(t *testing.T) {
 			{ID: "reject_once", Name: "Reject once", Kind: "reject_once"},
 		},
 	}
-	resp := RuntimeResponseFromReview(payload, ReviewResult{
+	resp := RuntimeResponseFromFinalReview(FinalizeReviewResult(payload, ReviewResult{
 		Approved:    true,
 		Rationale:   "matches request",
 		DisplayText: "Automatic approval review approved",
-	})
+	}))
 
 	if !resp.Approved || resp.Outcome != string(StatusSelected) || resp.OptionID != "allow_once" {
 		t.Fatalf("response = %#v, want selected allow_once", resp)
@@ -161,12 +157,12 @@ func TestRuntimeResponseFromReviewValidOptionOverridesOutcome(t *testing.T) {
 			{ID: "reject_once", Name: "Reject once", Kind: "reject_once"},
 		},
 	}
-	resp := RuntimeResponseFromReview(payload, ReviewResult{
+	resp := RuntimeResponseFromFinalReview(FinalizeReviewResult(payload, ReviewResult{
 		Approved:  true,
 		Outcome:   string(StatusApproved),
 		OptionID:  "reject_once",
 		Rationale: "selected reject option",
-	})
+	}))
 
 	if resp.Approved || resp.Outcome != string(StatusSelected) || resp.OptionID != "reject_once" {
 		t.Fatalf("response = %#v, want selected reject_once denial", resp)
@@ -180,10 +176,10 @@ func TestRuntimeResponseFromReviewInvalidOptionFallsBackToOutcome(t *testing.T) 
 			{ID: "reject_once", Name: "Reject once", Kind: "reject_once"},
 		},
 	}
-	resp := RuntimeResponseFromReview(payload, ReviewResult{
+	resp := RuntimeResponseFromFinalReview(FinalizeReviewResult(payload, ReviewResult{
 		Outcome:  "allow",
 		OptionID: "not-real",
-	})
+	}))
 
 	if !resp.Approved || resp.Outcome != string(StatusSelected) || resp.OptionID != "allow_once" {
 		t.Fatalf("response = %#v, want fallback selected allow_once", resp)

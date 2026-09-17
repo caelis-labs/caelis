@@ -196,9 +196,9 @@ func TestParseMetaCacheIsBounded(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		meta, err := parseMetaCached(path, info)
+		meta, _, err := parseMetaHashCached(path, info)
 		if err != nil || meta.Name != name {
-			t.Fatalf("parseMetaCached(%s) = %#v, %v", path, meta, err)
+			t.Fatalf("parseMetaHashCached(%s) = %#v, %v", path, meta, err)
 		}
 	}
 	metaCache.Lock()

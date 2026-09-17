@@ -254,33 +254,11 @@ func (t NamedTool) Call(ctx context.Context, call Call) (Result, error) {
 	return CloneResult(t.Invoke(ctx, CloneCall(call)))
 }
 
-// Definitions returns cloned definitions for one tool slice.
-func Definitions(tools []Tool) []Definition {
-	if len(tools) == 0 {
-		return nil
-	}
-	out := make([]Definition, 0, len(tools))
-	for _, item := range tools {
-		if item == nil {
-			continue
-		}
-		out = append(out, CloneDefinition(item.Definition()))
-	}
-	return out
-}
-
 // ModelSpecs converts the default model-visible tool set into provider-neutral
 // specs. Deferred tools remain hidden until ToolVisibility reveals them.
 // Model capability requirements are not filtered because no model is supplied.
 func ModelSpecs(tools []Tool) []model.ToolSpec {
 	return NewToolVisibility(tools).ModelSpecs()
-}
-
-// AllModelSpecs converts every tool definition into provider-neutral model
-// specs without deferred-tool filtering.
-func AllModelSpecs(tools []Tool) []model.ToolSpec {
-	definitions := Definitions(tools)
-	return modelSpecsFromDefinitions(definitions)
 }
 
 func modelSpecsFromDefinitions(definitions []Definition) []model.ToolSpec {

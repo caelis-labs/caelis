@@ -114,12 +114,6 @@ func UsageSnapshotFromContextUsage(value ContextUsageSnapshot) *UsageSnapshot {
 
 func maxUsageInt() int { return int(^uint(0) >> 1) }
 
-// UsageSnapshotFromMap projects one provider-style usage payload into the
-// canonical session usage contract.
-func UsageSnapshotFromMap(payload map[string]any) *UsageSnapshot {
-	return usageSnapshotFromPayload(payload, usageProviderFromMetadata(payload))
-}
-
 // UsageSnapshotFromMapForProvider projects usage while applying
 // provider-specific parsing rules that are unavailable from the payload alone.
 func UsageSnapshotFromMapForProvider(payload map[string]any, provider string) *UsageSnapshot {
@@ -227,19 +221,6 @@ func usageSnapshotFromPayload(payload map[string]any, provider string) *UsageSna
 		return nil
 	}
 	return usage
-}
-
-// ProviderSeparatesCachedInput reports providers whose prompt/input token count
-// excludes cache-read tokens.
-func ProviderSeparatesCachedInput(provider string) bool {
-	return model.ProviderSeparatesCachedInput(provider)
-}
-
-// ProviderSeparatesCachedInputForUsage reports whether this specific usage
-// payload follows Anthropic-style cache accounting where cache reads are
-// separate from prompt/input tokens.
-func ProviderSeparatesCachedInputForUsage(provider string, payload map[string]any) bool {
-	return model.ProviderSeparatesCachedInputForUsage(provider, payload)
 }
 
 // NormalizeUsageForDisplay converts provider raw usage into the status-table

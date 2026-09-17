@@ -350,13 +350,6 @@ func NewJSONPart(raw json.RawMessage) Part {
 	return Part{Kind: PartKindJSON, JSON: &JSONPart{Value: append(json.RawMessage(nil), raw...)}}
 }
 
-func NewFileRefPart(name, mimeType, uri, fileID, localRef string) Part {
-	return Part{
-		Kind:    PartKindFileRef,
-		FileRef: &FileRefPart{Name: name, MimeType: mimeType, URI: uri, FileID: fileID, LocalRef: localRef},
-	}
-}
-
 func NewMessage(role Role, parts ...Part) Message {
 	return Message{Role: role, Parts: CloneParts(parts)}
 }
@@ -500,16 +493,6 @@ func MessageFromAssistantParts(text string, reasoning string, calls []ToolCall) 
 	return Message{Role: RoleAssistant, Parts: parts}
 }
 
-func MessageFromToolResponse(resp *ToolResponse) Message {
-	if resp == nil {
-		return Message{Role: RoleTool}
-	}
-	return Message{
-		Role:  RoleTool,
-		Parts: []Part{NewToolResultJSONPart(resp.ID, resp.Name, resp.Result, false)},
-	}
-}
-
 type FunctionToolSpec struct {
 	Name        string         `json:"name,omitempty"`
 	Description string         `json:"description,omitempty"`
@@ -568,21 +551,6 @@ func NewProviderExecutedToolSpec(provider, name string, details map[string]json.
 
 // ToolDefinition remains the concrete function-tool declaration used by simple registries.
 type ToolDefinition = FunctionToolSpec
-
-func ToolSpecsFromDefinitions(defs []ToolDefinition) []ToolSpec {
-	if len(defs) == 0 {
-		return nil
-	}
-	out := make([]ToolSpec, 0, len(defs))
-	for _, def := range defs {
-		spec := NewFunctionToolSpec(def.Name, def.Description, def.Parameters)
-		if spec.Function != nil {
-			spec.Function.Strict = def.Strict
-		}
-		out = append(out, spec)
-	}
-	return out
-}
 
 func FunctionToolDefinitions(specs []ToolSpec) []ToolDefinition {
 	if len(specs) == 0 {

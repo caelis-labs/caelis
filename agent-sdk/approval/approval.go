@@ -261,29 +261,6 @@ func NormalizeOptions(options []Option) []Option {
 	return out
 }
 
-// OptionIDs returns the normalized, de-duplicated option identifiers in
-// encounter order.
-func OptionIDs(options []Option) []string {
-	options = NormalizeOptions(options)
-	if len(options) == 0 {
-		return nil
-	}
-	out := make([]string, 0, len(options))
-	seen := map[string]bool{}
-	for _, option := range options {
-		if option.ID == "" || seen[option.ID] {
-			continue
-		}
-		seen[option.ID] = true
-		out = append(out, option.ID)
-	}
-	return out
-}
-
-func RuntimeResponseFromReview(payload *Payload, result ReviewResult) agentsdk.ApprovalResponse {
-	return RuntimeResponseFromFinalReview(FinalizeReviewResult(payload, result))
-}
-
 // RuntimeResponseFromFinalReview converts an already-finalized review result
 // into the runtime approval response shape.
 func RuntimeResponseFromFinalReview(result ReviewResult) agentsdk.ApprovalResponse {

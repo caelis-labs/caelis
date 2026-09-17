@@ -60,21 +60,6 @@ type invocationAdmissionKey struct{}
 
 type toolAvailabilityKey struct{}
 
-// WithToolAvailability lets an embedding close optional tool selection between
-// model steps while leaving final inference available. The callback must be
-// concurrency-safe. A false value disables selection on a copied request while
-// preserving declarations and history; it never reopens a closed tool budget.
-func WithToolAvailability(ctx context.Context, available func() bool) context.Context {
-	if available == nil {
-		return ctx
-	}
-	if parent, ok := ctx.Value(toolAvailabilityKey{}).(func() bool); ok {
-		next := available
-		available = func() bool { return parent() && next() }
-	}
-	return context.WithValue(ctx, toolAvailabilityKey{}, available)
-}
-
 // WithInvocationAdmission installs an embedding-owned gate before each actual
 // provider attempt, including retries. Rejection creates no invocation receipt.
 func WithInvocationAdmission(ctx context.Context, admit func(context.Context, *Request) error) context.Context {

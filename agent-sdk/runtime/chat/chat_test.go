@@ -567,7 +567,7 @@ func TestExecuteToolCallCancellationDoesNotWaitForUnresponsiveTool(t *testing.T)
 	ctx, cancel := context.WithCancel(context.Background())
 	finished := make(chan error, 1)
 	go func() {
-		_, _, callErr := chatAgent.executeToolCallWithProgress(ctx, model.ToolCall{ID: "call-1", Name: "BLOCK", Args: `{}`}, nil)
+		_, _, callErr := chatAgent.executeToolCallWithProgressAdmitted(ctx, model.ToolCall{ID: "call-1", Name: "BLOCK", Args: `{}`}, nil, nil, nil)
 		finished <- callErr
 	}()
 	<-started
@@ -576,10 +576,10 @@ func TestExecuteToolCallCancellationDoesNotWaitForUnresponsiveTool(t *testing.T)
 	select {
 	case callErr := <-finished:
 		if !errors.Is(callErr, context.Canceled) {
-			t.Fatalf("executeToolCallWithProgress() error = %v, want context.Canceled", callErr)
+			t.Fatalf("executeToolCallWithProgressAdmitted() error = %v, want context.Canceled", callErr)
 		}
 	case <-time.After(time.Second):
-		t.Fatal("executeToolCallWithProgress() remained blocked after cancellation")
+		t.Fatal("executeToolCallWithProgressAdmitted() remained blocked after cancellation")
 	}
 }
 
@@ -2220,14 +2220,16 @@ func TestToolResultMessagePreservesCanonicalCommandPayloadForModel(t *testing.T)
 	t.Parallel()
 
 	const deniedPath = "/home/test/go/pkg/mod/cache/download/code.example/internal/system/@v/v0.0.0.tmp"
-	message := toolResultMessage(model.ToolCall{
-		ID:   "call-1",
-		Name: "RunCommand",
-	}, tool.Result{
+	result := tool.Result{
 		ID:      "call-1",
 		Name:    "RunCommand",
 		Content: []model.Part{model.NewJSONPart([]byte(`{"result":"go: writing stat cache: open /home/test/go/pkg/mod/cache/download/code.example/internal/system/@v/v0.0.0.tmp: read-only file system\n","exit_code":1,"error":"Sandbox permission denied. Use a writable workspace path or request elevated permissions."}`))},
-	})
+	}
+	canonical, _ := canonicalToolResult(result, nil)
+	message := toolResultMessageFromCanonical(model.ToolCall{
+		ID:   "call-1",
+		Name: "RunCommand",
+	}, canonical)
 
 	results := message.ToolResults()
 	if len(results) != 1 {
@@ -2552,7 +2554,8 @@ func TestTaskObservedFailureToolResultModelContextRoundTrip(t *testing.T) {
 	if !ok {
 		t.Fatal("messageFromDurableEvent() = false, want Task result")
 	}
-	live := toolResultMessage(call, result)
+	canonical, _ := canonicalToolResult(result, nil)
+	live := toolResultMessageFromCanonical(call, canonical)
 	if !reflect.DeepEqual(replayed, live) {
 		t.Fatalf("Task result model context changed across durable replay\nlive: %#v\nreplayed: %#v", live, replayed)
 	}
@@ -2579,7 +2582,8 @@ func TestImageToolResultModelContextRoundTrip(t *testing.T) {
 			),
 		},
 	}
-	live := toolResultMessage(call, result)
+	canonical, _ := canonicalToolResult(result, nil)
+	live := toolResultMessageFromCanonical(call, canonical)
 	event := toolResultEvent(call, result, &live)
 	replayed, ok := messageFromDurableEvent(event)
 	if !ok {
@@ -2947,16 +2951,18 @@ func TestToolResultMessageCompactsLargeJSONPayloadForModel(t *testing.T) {
 	t.Parallel()
 
 	large := strings.Repeat("permission denied\n", tool.DefaultTruncationPolicy().ByteBudget()/2)
-	message := toolResultMessage(model.ToolCall{
-		ID:   "call-1",
-		Name: "RunCommand",
-	}, tool.Result{
+	result := tool.Result{
 		ID:   "call-1",
 		Name: "RunCommand",
 		Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
 			"result": large,
 		}))},
-	})
+	}
+	canonical, _ := canonicalToolResult(result, nil)
+	message := toolResultMessageFromCanonical(model.ToolCall{
+		ID:   "call-1",
+		Name: "RunCommand",
+	}, canonical)
 
 	results := message.ToolResults()
 	if len(results) != 1 || len(results[0].Content) == 0 || results[0].Content[0].JSON == nil {

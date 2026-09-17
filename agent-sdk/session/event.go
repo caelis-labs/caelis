@@ -166,30 +166,6 @@ func MarkUIOnly(event *Event) *Event {
 	return event
 }
 
-// MarkOverlay annotates one event as transient display overlay state.
-func MarkOverlay(event *Event) *Event {
-	if event == nil {
-		return nil
-	}
-	event.Visibility = VisibilityOverlay
-	if event.Type == "" {
-		event.Type = EventTypeOf(event)
-	}
-	return event
-}
-
-// MarkMirror annotates one event as durable transcript-only state.
-func MarkMirror(event *Event) *Event {
-	if event == nil {
-		return nil
-	}
-	event.Visibility = VisibilityMirror
-	if event.Type == "" {
-		event.Type = EventTypeOf(event)
-	}
-	return event
-}
-
 // MarkNotice annotates one event as one transient runtime notice.
 func MarkNotice(event *Event, level string, text string) *Event {
 	if event == nil {

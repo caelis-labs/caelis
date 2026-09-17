@@ -81,11 +81,7 @@ func TestEventProjectorRememberTitleFollowsLifecycle(t *testing.T) {
 		{name: "in progress canonical payload overrides stale title", status: eventstream.ToolStatusInProgress, stale: "Updated memory", wantTitle: "Updating memory"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			response := model.MessageFromToolResponse(&model.ToolResponse{
-				ID:     "remember-1",
-				Name:   memorytool.RememberToolName,
-				Result: map[string]any{"accepted": true},
-			})
+			response := model.NewMessage(model.RoleTool, model.NewToolResultJSONPart("remember-1", memorytool.RememberToolName, map[string]any{"accepted": true}, false))
 			event := &session.Event{Type: session.EventTypeToolResult, Message: &response, Meta: test.meta}
 			if test.stale != "" {
 				event.Tool = &session.EventTool{
@@ -114,9 +110,7 @@ func TestEventProjectorRememberTitleFollowsLifecycle(t *testing.T) {
 func TestEventProjectorParameterizedToolCompletionDoesNotReplaceTitle(t *testing.T) {
 	t.Parallel()
 
-	response := model.MessageFromToolResponse(&model.ToolResponse{
-		ID: "read-1", Name: "Read", Result: map[string]any{"content": "ok"},
-	})
+	response := model.NewMessage(model.RoleTool, model.NewToolResultJSONPart("read-1", "Read", map[string]any{"content": "ok"}, false))
 	updates, err := ProjectEvent(&session.Event{Type: session.EventTypeToolResult, Message: &response})
 	if err != nil {
 		t.Fatalf("ProjectEvent(Read result) error = %v", err)
@@ -785,11 +779,7 @@ func TestEventProjectorProjectsCanonicalToolPayloads(t *testing.T) {
 	assertTerminalAnchor(t, call.Content, "call-1")
 	assertTerminalInfo(t, call.Meta, "call-1")
 
-	toolMessage := model.MessageFromToolResponse(&model.ToolResponse{
-		ID:     "call-1",
-		Name:   "RunCommand",
-		Result: map[string]any{"stdout": "ok\n", "exit_code": 0},
-	})
+	toolMessage := model.NewMessage(model.RoleTool, model.NewToolResultJSONPart("call-1", "RunCommand", map[string]any{"stdout": "ok\n", "exit_code": 0}, false))
 	resultEvent := session.CanonicalizeEvent(&session.Event{
 		SessionID: "session-1",
 		Type:      session.EventTypeToolResult,

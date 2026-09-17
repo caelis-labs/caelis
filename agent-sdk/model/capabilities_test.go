@@ -24,19 +24,6 @@ func TestValidateCapabilitiesIsConservativeAndDeterministic(t *testing.T) {
 	}
 }
 
-func TestMergeCapabilitiesUnionsRequirements(t *testing.T) {
-	t.Parallel()
-
-	got := model.MergeCapabilities(
-		model.Capabilities{Streaming: true, HostedTools: true, ImageInput: true},
-		model.Capabilities{StructuredOutput: true, Streaming: true},
-	)
-	want := model.Capabilities{Streaming: true, StructuredOutput: true, HostedTools: true, ImageInput: true}
-	if got != want {
-		t.Fatalf("MergeCapabilities() = %+v, want %+v", got, want)
-	}
-}
-
 func TestDeriveContentRequiredCapabilitiesFindsDirectAndNestedImages(t *testing.T) {
 	t.Parallel()
 

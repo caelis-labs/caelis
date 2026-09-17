@@ -149,10 +149,10 @@ func TestStoreEventsPageStreamsCanonicalAndMirrorBySequence(t *testing.T) {
 	}
 	user := model.NewTextMessage(model.RoleUser, "one")
 	appendEvent(&session.Event{ID: "canonical-1", Type: session.EventTypeUser, Message: &user})
-	appendEvent(session.MarkMirror(&session.Event{ID: "mirror-2", Type: session.EventTypeAssistant, Protocol: &session.EventProtocol{
+	appendEvent(&session.Event{ID: "mirror-2", Type: session.EventTypeAssistant, Visibility: session.VisibilityMirror, Protocol: &session.EventProtocol{
 		Method: session.ProtocolMethodSessionUpdate,
 		Update: &session.ProtocolUpdate{SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage), Content: session.ProtocolTextContent("child")},
-	}}))
+	}})
 	appendEvent(&session.Event{ID: "journal-3", Type: session.EventTypeLifecycle, Visibility: session.VisibilityJournal, Lifecycle: &session.EventLifecycle{Status: "prepared"}})
 	assistant := model.NewTextMessage(model.RoleAssistant, "four")
 	appendEvent(&session.Event{ID: "canonical-4", Type: session.EventTypeAssistant, Message: &assistant})
@@ -297,9 +297,9 @@ func TestCommittedTransactionMigratesRawEventsBeforeTypedDecode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	transaction, err := decodePersistedTransaction(raw)
+	transaction, _, err := decodePersistedTransactionWithReport(raw)
 	if err != nil {
-		t.Fatalf("decodePersistedTransaction() error = %v", err)
+		t.Fatalf("decodePersistedTransactionWithReport() error = %v", err)
 	}
 	if len(transaction.Events) != 1 || transaction.Events[0].Journal == nil || transaction.Events[0].Journal.Schema != session.ExecutionJournalSchemaVersion || transaction.Events[0].Journal.Execution == nil || transaction.Events[0].Journal.Execution.Schema != session.RunSchemaVersion {
 		t.Fatalf("transaction events = %#v, want migrated nested journal", transaction.Events)
@@ -780,8 +780,8 @@ func TestStoreLoadRejectsToolResultNameMismatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveWritePath() error = %v", err)
 	}
-	if err := store.appendEventLog(path, []*session.Event{legacy}); err != nil {
-		t.Fatalf("appendEventLog() error = %v", err)
+	if _, err := store.appendEventLogTransaction(path, []*session.Event{legacy}); err != nil {
+		t.Fatalf("appendEventLogTransaction() error = %v", err)
 	}
 
 	_, err = store.LoadSession(ctx, session.LoadSessionRequest{SessionRef: createdSession.SessionRef})

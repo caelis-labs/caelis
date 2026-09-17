@@ -544,9 +544,6 @@ func TestRetryExhaustedErrorKeepsCauseOutOfDisplayMessage(t *testing.T) {
 	if got, want := exhausted.DisplayMessage(), "model request failed after 5 retries"; got != want {
 		t.Fatalf("DisplayMessage() = %q, want %q", got, want)
 	}
-	if got, want := UserVisibleError(err), "model request failed after 5 retries"; got != want {
-		t.Fatalf("UserVisibleError() = %q, want %q", got, want)
-	}
 	if !strings.Contains(err.Error(), "Internal Server Error") {
 		t.Fatalf("Error() = %q, want runtime error chain to retain cause", err)
 	}

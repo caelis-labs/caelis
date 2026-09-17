@@ -535,11 +535,6 @@ func Metadata(systemPrompt string) map[string]any {
 	return map[string]any{"system_prompt": systemPrompt}
 }
 
-// CloneMetadata returns one shallow metadata copy.
-func CloneMetadata(values map[string]any) map[string]any {
-	return session.CloneState(values)
-}
-
 func (a *Agent) refreshDeferredTools(visibility *tool.ToolVisibility) {
 	if a.deferredTools != nil {
 		visibility.RefreshDeferredTools(a.deferredTools.Tools(), a.model)

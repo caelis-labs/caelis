@@ -601,11 +601,6 @@ func EvaluateModelRequestBudget(llm model.LLM, req *model.Request, cfg Compactio
 	}
 }
 
-func usageForModelRequest(events []*session.Event, llm model.LLM, req *model.Request, cfg CompactionConfig) (compact.UsageSnapshot, int) {
-	usage, requestTokens, _ := usageForModelRequestDetails(events, llm, req, cfg)
-	return usage, requestTokens
-}
-
 func usageForModelRequestDetails(
 	events []*session.Event,
 	llm model.LLM,

@@ -16,26 +16,6 @@ import (
 // Ollama provider helpers
 // ---------------------------------------------------------------------------
 
-func TestIsOllamaProvider(t *testing.T) {
-	cases := []struct {
-		input string
-		want  bool
-	}{
-		{"ollama", true},
-		{"Ollama", true},
-		{"OLLAMA", true},
-		{" ollama ", true},
-		{"openai", false},
-		{"", false},
-	}
-	for _, tc := range cases {
-		got := isOllamaProvider(tc.input)
-		if got != tc.want {
-			t.Errorf("isOllamaProvider(%q) = %v, want %v", tc.input, got, tc.want)
-		}
-	}
-}
-
 func TestOllamaMessageTransformCarriesToolResultImages(t *testing.T) {
 	t.Parallel()
 

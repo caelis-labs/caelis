@@ -218,11 +218,6 @@ func transactionPaths(root string) ([]string, error) {
 	return paths, nil
 }
 
-func decodePersistedTransaction(data []byte) (persistedTransaction, error) {
-	record, _, err := decodePersistedTransactionWithReport(data)
-	return record, err
-}
-
 func decodePersistedTransactionWithReport(data []byte) (persistedTransaction, MigrationReport, error) {
 	var raw struct {
 		Kind     string            `json:"kind"`

@@ -36,14 +36,6 @@ type toolExecutionResult struct {
 	err     error
 }
 
-func (a *Agent) executeToolCallWithProgress(
-	ctx context.Context,
-	call model.ToolCall,
-	yieldProgress func(*session.Event) bool,
-) (model.Message, *session.Event, error) {
-	return a.executeToolCallWithProgressAdmitted(ctx, call, nil, yieldProgress, nil)
-}
-
 func (a *Agent) executeToolCallWithProgressAdmitted(
 	ctx context.Context,
 	call model.ToolCall,
@@ -109,10 +101,6 @@ func (a *Agent) executeToolCallWithProgressAdmitted(
 			}
 		}
 	}
-}
-
-func (a *Agent) executeToolCall(ctx context.Context, call model.ToolCall, observer tool.Observer) (model.Message, *session.Event, error) {
-	return a.executeToolCallAdmitted(ctx, call, nil, observer, nil)
 }
 
 func (a *Agent) executeToolCallAdmitted(
@@ -193,11 +181,6 @@ func (a *Agent) lookupTool(name string) (tool.Tool, bool) {
 	}
 	configured, ok := a.toolsByName[name]
 	return configured, ok
-}
-
-func toolResultMessage(call model.ToolCall, result tool.Result) model.Message {
-	canonical, _ := canonicalToolResult(result, nil)
-	return toolResultMessageFromCanonical(call, canonical)
 }
 
 func canonicalToolResult(result tool.Result, artifacts *toolResultArtifactStore) (tool.Result, map[string]any) {

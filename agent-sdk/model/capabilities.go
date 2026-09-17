@@ -88,19 +88,6 @@ func ValidateCapabilities(modelName string, actual, required Capabilities) error
 	return nil
 }
 
-// MergeCapabilities returns the union of two capability requirements.
-func MergeCapabilities(left, right Capabilities) Capabilities {
-	return Capabilities{
-		ToolCalls:             left.ToolCalls || right.ToolCalls,
-		StructuredOutput:      left.StructuredOutput || right.StructuredOutput,
-		Streaming:             left.Streaming || right.Streaming,
-		ParallelToolCalls:     left.ParallelToolCalls || right.ParallelToolCalls,
-		ReasoningContinuation: left.ReasoningContinuation || right.ReasoningContinuation,
-		HostedTools:           left.HostedTools || right.HostedTools,
-		ImageInput:            left.ImageInput || right.ImageInput,
-	}
-}
-
 // DeriveRequiredCapabilities expands declared model requirements with the
 // features implied by one assembled invocation (stream, output mode, tools).
 // Control preflight and Runtime gates must share this derivation.

@@ -107,7 +107,7 @@ func TestSanitizeResultForPersistence(t *testing.T) {
 	}
 
 	canonical := SanitizeResultForPersistence(result, ResultPersistenceCanonical)
-	for _, key := range TransientResultKeys() {
+	for _, key := range transientResultKeys {
 		if value, ok := canonical[key]; ok {
 			t.Fatalf("canonical result unexpectedly contains transient %q: %#v", key, value)
 		}
@@ -120,7 +120,7 @@ func TestSanitizeResultForPersistence(t *testing.T) {
 	}
 
 	deferred := SanitizeResultForPersistence(result, ResultPersistenceDeferred)
-	for _, key := range append(TransientResultKeys(), "result", "final_message") {
+	for _, key := range append(append([]string(nil), transientResultKeys...), "result", "final_message") {
 		if value, ok := deferred[key]; ok {
 			t.Fatalf("deferred result unexpectedly contains %q: %#v", key, value)
 		}

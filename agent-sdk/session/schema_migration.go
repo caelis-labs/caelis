@@ -126,13 +126,6 @@ func newDefaultMigrationRegistry() *MigrationRegistry {
 
 var builtInMigrationRegistry = newDefaultMigrationRegistry()
 
-// DefaultMigrationRegistry returns a mutable copy of the built-in pre-v1
-// migration set. Internal migrations share an immutable registry so replaying
-// histories does not rebuild identical lookup maps for every event.
-func DefaultMigrationRegistry() *MigrationRegistry {
-	return newDefaultMigrationRegistry()
-}
-
 // MigrateEvent upgrades one event and nested execution journal records.
 func MigrateEvent(in Event) (Event, error) {
 	raw, err := json.Marshal(in)
@@ -264,43 +257,6 @@ func stampCurrentEventSchemas(event *Event) {
 	if event.Journal.PauseToken != nil && event.Journal.PauseToken.Schema == 0 {
 		event.Journal.PauseToken.Schema = ExecutionJournalSchemaVersion
 	}
-}
-
-// MigrateExecutionRecord upgrades one durable Run/Turn/Step record.
-func MigrateExecutionRecord(in ExecutionRecord) (ExecutionRecord, error) {
-	raw, err := migrateTypedSchema(SchemaKindRun, in.Schema, RunSchemaVersion, in)
-	if err != nil {
-		return ExecutionRecord{}, err
-	}
-	var out ExecutionRecord
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return ExecutionRecord{}, err
-	}
-	return out, nil
-}
-
-// MigrateToolExecution upgrades one durable tool execution record.
-func MigrateToolExecution(in ToolExecution) (ToolExecution, error) {
-	raw, err := migrateTypedSchema(SchemaKindToolExecution, in.Schema, ToolExecutionSchemaVersion, in)
-	if err != nil {
-		return ToolExecution{}, err
-	}
-	var out ToolExecution
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return ToolExecution{}, err
-	}
-	return out, nil
-}
-
-func migrateTypedSchema(kind SchemaKind, source, target int, value any) (json.RawMessage, error) {
-	if source > target {
-		return nil, &SchemaVersionError{Kind: kind, From: source, To: target, Current: target, Detail: "future schema is unsupported"}
-	}
-	raw, err := json.Marshal(value)
-	if err != nil {
-		return nil, err
-	}
-	return DefaultMigrationRegistry().Migrate(kind, source, target, raw)
 }
 
 func migrateSchemaFieldV0ToV1(raw json.RawMessage) (json.RawMessage, error) {

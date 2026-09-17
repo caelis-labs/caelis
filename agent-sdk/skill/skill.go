@@ -192,15 +192,6 @@ func (c Catalog) MatchingMetas(name string) []Meta {
 	return out
 }
 
-// CloneDiscoverRequest returns a deep-enough copy of a discovery request for
-// callers that store or reuse request state across tool invocations.
-func CloneDiscoverRequest(req DiscoverRequest) DiscoverRequest {
-	out := req
-	out.Dirs = append([]string(nil), req.Dirs...)
-	out.PluginBundles = ClonePluginBundles(req.PluginBundles)
-	return out
-}
-
 // ClonePluginBundles returns a copy of plugin skill bundle metadata.
 func ClonePluginBundles(in []PluginBundle) []PluginBundle {
 	if len(in) == 0 {

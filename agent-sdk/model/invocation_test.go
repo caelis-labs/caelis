@@ -86,25 +86,3 @@ func TestInvocationAdmissionStopsRetriesBeforeProviderAndReceipt(t *testing.T) {
 		t.Fatalf("err=%v calls=%d receipts=%d", last, inner.calls, receipts)
 	}
 }
-
-func TestToolAvailabilityPreservesPrefixAndClosesSelectionAcrossRetries(t *testing.T) {
-	inner := &retryTestLLM{errs: []error{errors.New("provider unavailable"), nil}}
-	llm := WithRetry(inner, RetryConfig{MaxRetries: 1, BaseDelay: time.Nanosecond, MaxDelay: time.Nanosecond})
-	req := &Request{Tools: ToolSpecsFromDefinitions([]ToolDefinition{{Name: "Read", Parameters: map[string]any{"type": "object"}}})}
-	ctx := WithToolAvailability(t.Context(), func() bool { return false })
-	// A nested scope cannot reopen an embedding's closed tool budget.
-	ctx = WithToolAvailability(ctx, func() bool { return true })
-	for _, err := range Generate(ctx, llm, req) {
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-	if inner.calls != 2 || len(req.Tools) != 1 || req.DisableTools {
-		t.Fatalf("calls=%d original tools=%d", inner.calls, len(req.Tools))
-	}
-	for _, seen := range inner.seenReqs {
-		if !seen.DisableTools || len(seen.Tools) != 1 {
-			t.Fatal("retry reopened tools")
-		}
-	}
-}

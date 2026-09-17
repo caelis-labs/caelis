@@ -15,11 +15,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 )
 
-// isOllamaProvider returns true when the provider string identifies Ollama.
-func isOllamaProvider(provider string) bool {
-	return strings.EqualFold(strings.TrimSpace(provider), "ollama")
-}
-
 type ollamaLLM struct {
 	name                string
 	provider            string
