@@ -222,10 +222,6 @@ func finalizeGuardianDecision(payload *kernel.ApprovalPayload, parsed guardianRe
 	return kernel.ApprovalReviewResult{Approved: approved, Outcome: string(kernel.ApprovalStatusSelected), OptionID: parsed.OptionID, Rationale: parsed.Rationale, DisplayText: display, DecisionSource: "auto-review"}, nil
 }
 
-func parseGuardianAssessmentWithOptions(text string, options []kernel.ApprovalOption) (guardianReviewModelOutput, error) {
-	return parseGuardianAssessmentForMode(text, model.OutputModeSchema, options)
-}
-
 func normalizeGuardianAssessment(parsed guardianReviewModelOutput, options []kernel.ApprovalOption) (guardianReviewModelOutput, error) {
 	_, decision, err := approval.ResolveStrictOption(options, parsed.OptionID)
 	if err != nil {

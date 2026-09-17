@@ -62,7 +62,7 @@ func TestPendingQueueAbortDropsDispatched(t *testing.T) {
 	}
 
 	next, hasNext := queue.onTurnEnd(false, true)
-	if hasNext || next.displayText() != "" {
+	if hasNext || next.displayLine != "" || next.execLine != "" {
 		t.Fatalf("onTurnEnd(abort) next = %#v/%v, want none", next, hasNext)
 	}
 	if len(queue) != 0 {

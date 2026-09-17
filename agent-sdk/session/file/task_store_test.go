@@ -798,9 +798,8 @@ func fixedTaskClock() time.Time { return time.Unix(100, 0).UTC() }
 
 func assertNoTransientTaskResultKeys(t *testing.T, result map[string]any) {
 	t.Helper()
-	for _, key := range task.TransientResultKeys() {
-		if value, ok := result[key]; ok {
-			t.Fatalf("task result unexpectedly contains transient %q: %#v", key, value)
-		}
+	sanitized := task.SanitizeResultForPersistence(result, task.ResultPersistenceCanonical)
+	if !reflect.DeepEqual(sanitized, result) {
+		t.Fatalf("task result still carries transient keys: sanitized = %#v, want %#v", sanitized, result)
 	}
 }

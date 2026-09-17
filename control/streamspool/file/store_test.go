@@ -231,7 +231,7 @@ func TestHardQuotaPoisonsAndWakesReader(t *testing.T) {
 func TestFirstRollFailureCleansDirectoryAndAccounting(t *testing.T) {
 	store := newTestStore(t, Config{})
 	writer := registerTestWriter(t, store, "session", "roll-failure", true)
-	dir := partitionDir(store.root, writer.Key())
+	dir := filepath.Join(store.root, partitionRelativeDir(writer.Key()))
 	if err := os.MkdirAll(filepath.Join(dir, segmentFilename(0)), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -484,7 +484,7 @@ func TestNewStoreReclaimsOldEpoch(t *testing.T) {
 		t.Fatal(err)
 	}
 	oldKey := writer.Key()
-	oldDir := partitionDir(root, oldKey)
+	oldDir := filepath.Join(root, partitionRelativeDir(oldKey))
 	if err := first.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -584,7 +584,7 @@ func TestCorruptRecordIsRejected(t *testing.T) {
 	var segmentPath string
 	if err := filepath.WalkDir(store.root, func(path string, entry os.DirEntry, err error) error {
 		if err == nil && !entry.IsDir() {
-			if _, ok := parseSegmentFilename(entry.Name()); ok {
+			if entry.Name() == segmentFilename(0) {
 				segmentPath = path
 			}
 		}

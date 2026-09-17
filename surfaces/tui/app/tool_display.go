@@ -12,14 +12,6 @@ import (
 	"github.com/caelis-labs/caelis/surfaces/internal/transcript"
 )
 
-func toolDisplayArgs(name string, raw map[string]any, fallback ...string) string {
-	return toolDisplayArgsForKind(name, "", raw, fallback...)
-}
-
-func toolDisplayArgsForKind(name string, kind string, raw map[string]any, fallback ...string) string {
-	return toolDisplayArgsForKindWithQueryWrapper(name, kind, raw, !surfaceIsExplorationTool(name, kind, ""), fallback...)
-}
-
 func toolDisplayArgsForKindWithQueryWrapper(name string, kind string, raw map[string]any, wrapGenericQuery bool, fallback ...string) string {
 	if preview, _, ok := commandDisplayArguments(name, kind, raw); ok {
 		return preview
@@ -1081,11 +1073,6 @@ func compactToolResultHeaderPath(name string, header string) string {
 	return compact + rest
 }
 
-func splitLeadingPathHeader(header string) (pathPart string, rest string, ok bool) {
-	pathPart, rest, ok, _ = splitLeadingPathHeaderParts(header)
-	return pathPart, rest, ok
-}
-
 func splitLeadingPathHeaderParts(header string) (pathPart string, rest string, ok bool, tagged bool) {
 	header = strings.TrimSpace(header)
 	if header == "" {
@@ -1294,15 +1281,6 @@ func parsedCommandField(raw map[string]any, key string) string {
 	return ""
 }
 
-func parsedCommandType(raw map[string]any) string {
-	for _, entry := range parsedCommandEntries(raw["parsed_cmd"]) {
-		if value := strings.ToLower(strings.TrimSpace(asString(entry["type"]))); value != "" && value != "<nil>" {
-			return value
-		}
-	}
-	return ""
-}
-
 func parsedCommandEntries(raw any) []map[string]any {
 	switch typed := raw.(type) {
 	case []map[string]any:
@@ -1338,18 +1316,6 @@ func firstTrimmed(values ...string) string {
 		}
 	}
 	return ""
-}
-
-func displayBool(value any) bool {
-	switch typed := value.(type) {
-	case bool:
-		return typed
-	case string:
-		parsed, err := strconv.ParseBool(strings.TrimSpace(typed))
-		return err == nil && parsed
-	default:
-		return false
-	}
 }
 
 func displayInt(value any) int {

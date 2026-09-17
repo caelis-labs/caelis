@@ -231,8 +231,8 @@ func TestTruncateMapRolloutSizedEscapedOutputFitsDefaultBudget(t *testing.T) {
 	if err != nil {
 		t.Fatalf("json.Marshal(out) error = %v", err)
 	}
-	if got := estimateTextTokens(string(raw)); got > DefaultTruncationPolicy().TokenBudget() {
-		t.Fatalf("serialized truncated output estimated tokens = %d, want <= %d", got, DefaultTruncationPolicy().TokenBudget())
+	if got := estimateTextTokens(string(raw)); got > DefaultTruncationPolicy().tokenBudget() {
+		t.Fatalf("serialized truncated output estimated tokens = %d, want <= %d", got, DefaultTruncationPolicy().tokenBudget())
 	}
 	result, _ := out["result"].(string)
 	if !strings.Contains(result, "lines omitted") {
@@ -316,14 +316,14 @@ func TestTruncateLineUnitsLargeMultilineOutputCompletesPromptly(t *testing.T) {
 	}
 }
 
-func TestTruncatePartsPreservesMediaAndTruncatesText(t *testing.T) {
+func TestTruncatePartsWithProtectedJSONFieldsPreservesMediaAndTruncatesText(t *testing.T) {
 	t.Parallel()
 
 	parts := []model.Part{
 		model.NewTextPart(strings.Repeat("alpha ", 200)),
 		model.NewMediaPart(model.MediaModalityImage, model.MediaSource{Kind: model.MediaSourceURL, URI: "https://example.test/img.png"}, "image/png", "img"),
 	}
-	out, info := TruncateParts(parts, TruncationPolicy{MaxTokens: 30})
+	out, info := truncatePartsWithProtectedJSONFields(parts, TruncationPolicy{MaxTokens: 30}, nil)
 	if !info.Truncated {
 		t.Fatal("info.Truncated = false, want true")
 	}

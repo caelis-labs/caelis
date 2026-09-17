@@ -30,7 +30,7 @@ func TestCloneGitRepoImmutableKeepsExistingPublishedRoot(t *testing.T) {
 	firstSHA := gitHEAD(t, repo)
 
 	parent := filepath.Join(tmp, "cache")
-	firstRoot, err := cloneLocalGitRepoImmutable(context.Background(), repo, "", parent, "")
+	firstRoot, err := cloneGitRepoImmutableFromSource(context.Background(), repo, "", parent, "")
 	if err != nil {
 		t.Fatalf("first clone: %v", err)
 	}
@@ -51,7 +51,7 @@ func TestCloneGitRepoImmutableKeepsExistingPublishedRoot(t *testing.T) {
 	if secondSHA == firstSHA {
 		t.Fatal("expected distinct commits")
 	}
-	secondRoot, err := cloneLocalGitRepoImmutable(context.Background(), repo, "", parent, "")
+	secondRoot, err := cloneGitRepoImmutableFromSource(context.Background(), repo, "", parent, "")
 	if err != nil {
 		t.Fatalf("second clone: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestCloneGitRepoImmutableConcurrentSameParentPublishesOnce(t *testing.T) {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			root, err := cloneLocalGitRepoImmutable(context.Background(), repo, "", parent, "")
+			root, err := cloneGitRepoImmutableFromSource(context.Background(), repo, "", parent, "")
 			roots[idx] = root
 			errs[idx] = err
 		}(i)

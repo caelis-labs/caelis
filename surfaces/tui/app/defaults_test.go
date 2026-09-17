@@ -148,14 +148,3 @@ func sliceContainsString(values []string, want string) bool {
 	}
 	return false
 }
-
-func TestShortcutHelpUsesPlatformImagePasteKeys(t *testing.T) {
-	windows := shortcutHelpTextForPlatform("windows", false)
-	if !strings.Contains(windows, "Ctrl+Alt+V") || !strings.Contains(windows, "Paste clipboard image") {
-		t.Fatalf("windows shortcut help = %q, want Ctrl+Alt+V image paste", windows)
-	}
-	linux := shortcutHelpTextForPlatform("linux", false)
-	if !strings.Contains(linux, "Ctrl+V") || !strings.Contains(linux, "Paste clipboard image") {
-		t.Fatalf("linux shortcut help = %q, want Ctrl+V image paste", linux)
-	}
-}

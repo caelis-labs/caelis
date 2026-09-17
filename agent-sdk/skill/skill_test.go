@@ -88,24 +88,3 @@ func TestDisplayHelpersPreferLocalNameAndPluginDetail(t *testing.T) {
 		t.Fatalf("DisplayDetail(regular) = %q", got)
 	}
 }
-
-func TestCloneDiscoverRequestCopiesMutableSlices(t *testing.T) {
-	req := DiscoverRequest{
-		Dirs: []string{"one"},
-		PluginBundles: []PluginBundle{{
-			Plugin:   "plugin",
-			Disabled: []string{"old"},
-		}},
-	}
-
-	cloned := CloneDiscoverRequest(req)
-	cloned.Dirs[0] = "changed"
-	cloned.PluginBundles[0].Disabled[0] = "changed"
-
-	if req.Dirs[0] != "one" {
-		t.Fatalf("original Dirs mutated: %#v", req.Dirs)
-	}
-	if req.PluginBundles[0].Disabled[0] != "old" {
-		t.Fatalf("original PluginBundles mutated: %#v", req.PluginBundles)
-	}
-}

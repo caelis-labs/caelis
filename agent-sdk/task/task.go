@@ -337,12 +337,6 @@ var (
 	deferredFinalResultKeys = []string{"result", "final_message"}
 )
 
-// TransientResultKeys returns task result keys that are display-only and must
-// not be persisted in durable task indexes.
-func TransientResultKeys() []string {
-	return append([]string(nil), transientResultKeys...)
-}
-
 // NormalizeHandle returns the canonical comparable form of a task handle.
 func NormalizeHandle(value string) string {
 	return strings.ToLower(strings.TrimPrefix(strings.TrimSpace(value), "@"))

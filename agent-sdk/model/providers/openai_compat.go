@@ -742,23 +742,6 @@ type openAIThinking struct {
 	Type string `json:"type"`
 }
 
-func applyToggleThinkingReasoning(payload *openAICompatRequest, cfg model.ReasoningConfig) {
-	if payload == nil {
-		return
-	}
-	effort := strings.ToLower(strings.TrimSpace(cfg.Effort))
-	if effort == "" {
-		return
-	}
-	state := "enabled"
-	if effort == "none" {
-		state = "disabled"
-	}
-	payload.Thinking = &openAIThinking{Type: state}
-	payload.Reasoning = nil
-	payload.ReasoningEffort = ""
-}
-
 func applyOpenAIReasoning(payload *openAICompatRequest, cfg model.ReasoningConfig) {
 	if payload == nil {
 		return

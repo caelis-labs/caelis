@@ -96,14 +96,6 @@ func DangerFullAccessMode() policy.Mode {
 	}
 }
 
-func AutoReviewMode() policy.Mode {
-	return WorkspaceWriteMode()
-}
-
-func ManualMode() policy.Mode {
-	return WorkspaceWriteMode()
-}
-
 func workspaceWriteAliasMode(id string) policy.Mode {
 	base := WorkspaceWriteMode()
 	return policy.NamedMode{

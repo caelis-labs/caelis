@@ -7,15 +7,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if trimmed := strings.TrimSpace(value); trimmed != "" {
-			return trimmed
-		}
-	}
-	return ""
-}
-
 func mustJSON(value map[string]any) json.RawMessage {
 	if value == nil {
 		value = map[string]any{}

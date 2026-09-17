@@ -285,30 +285,6 @@ func TestIsRetryLine(t *testing.T) {
 	}
 }
 
-func TestIsLogLine(t *testing.T) {
-	if !IsLogLine(LineStyleTool) {
-		t.Error("tool should be a log line")
-	}
-	if !IsLogLine(LineStyleWarn) {
-		t.Error("warn should be a log line")
-	}
-	if !IsLogLine(LineStyleError) {
-		t.Error("error should be a log line")
-	}
-	if !IsLogLine(LineStyleNote) {
-		t.Error("note should be a log line")
-	}
-	if IsLogLine(LineStyleAssistant) {
-		t.Error("assistant should not be a log line")
-	}
-	if IsLogLine(LineStyleUser) {
-		t.Error("user should not be a log line")
-	}
-	if IsLogLine(LineStyleDefault) {
-		t.Error("default should not be a log line")
-	}
-}
-
 func TestColorizeBangPrefixLine(t *testing.T) {
 	theme := DefaultTheme()
 	result := ColorizeLogLine("! some warning with bang", LineStyleWarn, theme)

@@ -1407,81 +1407,6 @@ func (terminalBridgeRuntime) RunState(context.Context, session.SessionRef) (agen
 	return agent.RunState{}, nil
 }
 
-type terminalBridgeFinalRuntime struct {
-	toolName   string
-	taskID     string
-	terminalID string
-}
-
-func (r terminalBridgeFinalRuntime) Run(_ context.Context, req agent.RunRequest) (agent.RunResult, error) {
-	sessionID := req.SessionRef.SessionID
-	toolName := strings.TrimSpace(r.toolName)
-	if toolName == "" {
-		toolName = "RunCommand"
-	}
-	taskID := strings.TrimSpace(r.taskID)
-	if taskID == "" {
-		taskID = "task-1"
-	}
-	terminalID := strings.TrimSpace(r.terminalID)
-	if terminalID == "" {
-		terminalID = "terminal-1"
-	}
-	rawInput := map[string]any{"command": "printf streamed"}
-	if strings.EqualFold(toolName, "StartThread") {
-		rawInput = map[string]any{"agent": "claude", "prompt": "stream child output"}
-	}
-	return agent.RunResult{
-		Handle: terminalBridgeRun{observer: req.SourceObserver, events: []*session.Event{
-			{
-				SessionID: sessionID,
-				Type:      session.EventTypeToolCall,
-				Protocol: &session.EventProtocol{
-					Update: &session.ProtocolUpdate{
-						SessionUpdate: string(session.ProtocolUpdateTypeToolCall),
-						ToolCallID:    "call-1",
-						Kind:          toolName,
-						Status:        "pending",
-						RawInput:      rawInput,
-					},
-				},
-			},
-			{
-				SessionID: sessionID,
-				Type:      session.EventTypeToolResult,
-				Protocol: &session.EventProtocol{
-					Update: &session.ProtocolUpdate{
-						SessionUpdate: string(session.ProtocolUpdateTypeToolUpdate),
-						ToolCallID:    "call-1",
-						Kind:          toolName,
-						Status:        "completed",
-						Content: []session.ProtocolToolCallContent{{
-							Type:       "terminal",
-							TerminalID: terminalID,
-							Content:    session.ProtocolTextContent("streamed output\n"),
-						}},
-					},
-				},
-				Meta: map[string]any{
-					"caelis": map[string]any{
-						"runtime": map[string]any{
-							"task": map[string]any{
-								"task_id":     taskID,
-								"terminal_id": terminalID,
-								"running":     false,
-							},
-						},
-					},
-				},
-			},
-		}},
-	}, nil
-}
-
-func (terminalBridgeFinalRuntime) RunState(context.Context, session.SessionRef) (agent.RunState, error) {
-	return agent.RunState{}, nil
-}
-
 type narrativeReplayRuntime struct{}
 
 func (narrativeReplayRuntime) Run(_ context.Context, req agent.RunRequest) (agent.RunResult, error) {
@@ -1751,28 +1676,6 @@ func (terminalBridgeRun) Cancel() agent.CancelResult {
 }
 func (terminalBridgeRun) Close() error { return nil }
 
-type terminalBridgeCallbacks struct {
-	mu            sync.Mutex
-	notifications []eventstream.SessionNotification
-}
-
-func (c *terminalBridgeCallbacks) SessionUpdate(_ context.Context, notification eventstream.SessionNotification) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.notifications = append(c.notifications, notification)
-	return nil
-}
-
-func (c *terminalBridgeCallbacks) RequestPermission(context.Context, acpsdk.RequestPermissionRequest) (acpsdk.RequestPermissionResponse, error) {
-	return acpsdk.RequestPermissionResponse{}, nil
-}
-
-func (c *terminalBridgeCallbacks) snapshot() []eventstream.SessionNotification {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return append([]eventstream.SessionNotification(nil), c.notifications...)
-}
-
 func terminalOutputPayloads(notifications []eventstream.SessionNotification, toolCallID string) []string {
 	out := []string{}
 	for _, notification := range notifications {
@@ -1804,49 +1707,6 @@ func standardToolResultPayloads(notifications []eventstream.SessionNotification,
 		}
 	}
 	return out
-}
-
-func hasToolUpdateContent(notifications []eventstream.SessionNotification, toolCallID string) bool {
-	for _, notification := range notifications {
-		update, ok := notification.Update.(eventstream.ToolCallUpdate)
-		if !ok || strings.TrimSpace(update.ToolCallID) != toolCallID {
-			continue
-		}
-		if len(update.Content) > 0 {
-			return true
-		}
-	}
-	return false
-}
-
-func hasToolCallNotification(notifications []eventstream.SessionNotification, toolCallID string) bool {
-	for _, notification := range notifications {
-		switch update := notification.Update.(type) {
-		case eventstream.ToolCall:
-			if strings.TrimSpace(update.ToolCallID) == toolCallID {
-				return true
-			}
-		case eventstream.ToolCallUpdate:
-			if strings.TrimSpace(update.ToolCallID) == toolCallID {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func hasTerminalContent(notifications []eventstream.SessionNotification, toolCallID string, terminalID string, text string) bool {
-	for _, notification := range notifications {
-		update, ok := notification.Update.(eventstream.ToolCallUpdate)
-		if !ok || strings.TrimSpace(update.ToolCallID) != toolCallID {
-			continue
-		}
-		output, ok := acpmeta.ReadTerminalOutput(update.Meta)
-		if ok && strings.TrimSpace(output.TerminalID) == terminalID && strings.Contains(output.Data, text) {
-			return true
-		}
-	}
-	return false
 }
 
 func hasTerminalInfo(notifications []eventstream.SessionNotification, toolCallID string, terminalID string) bool {
@@ -1882,19 +1742,6 @@ func transientTerminalStreamMetaForTest(mode string) map[string]any {
 			},
 		},
 	}
-}
-
-func firstCompletedToolUpdateIndex(notifications []eventstream.SessionNotification, terminalID string) int {
-	for i, notification := range notifications {
-		update, ok := notification.Update.(eventstream.ToolCallUpdate)
-		if !ok || strings.TrimSpace(update.ToolCallID) != terminalID || update.Status == nil {
-			continue
-		}
-		if *update.Status == eventstream.ToolStatusCompleted {
-			return i
-		}
-	}
-	return -1
 }
 
 func agentMessageChunks(notifications []eventstream.SessionNotification) []string {
@@ -1953,20 +1800,6 @@ func agentThoughtChunks(notifications []eventstream.SessionNotification) []strin
 		}
 	}
 	return out
-}
-
-func terminalContentText(content []eventstream.ToolCallContent, terminalID string) string {
-	for _, item := range content {
-		if item.Type != "terminal" || item.TerminalID != terminalID {
-			continue
-		}
-		text, ok := item.Content.(eventstream.TextContent)
-		if !ok {
-			continue
-		}
-		return text.Text
-	}
-	return ""
 }
 
 func testStringPointer(value string) *string {

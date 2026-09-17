@@ -79,7 +79,7 @@ func TestGuardianDetachedReviewPersistsUsageDuringParentTurn(t *testing.T) {
 			if got := guardianReceiptParentModelContext(t, active, after); !reflect.DeepEqual(got, wantContext) {
 				t.Fatalf("receipt changed rebuilt parent model context: %#v, want %#v", got, wantContext)
 			}
-			if !reflect.DeepEqual(session.FilterClientReplayEvents(after), session.FilterClientReplayEvents(before)) {
+			if session.IsClientReplayEvent(receipt) {
 				t.Fatal("Guardian receipt entered client replay")
 			}
 		})

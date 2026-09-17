@@ -505,10 +505,6 @@ func (c *approvalCoordinator) target(requestID eventstream.ApprovalRequestID) (A
 	}, true
 }
 
-func (h *turnHandle) openPendingApproval(req *agent.ApprovalRequest) (*pendingApproval, error) {
-	return h.enqueueApproval(req, false)
-}
-
 func (h *turnHandle) enqueueApproval(req *agent.ApprovalRequest, publishOnActivate bool) (*pendingApproval, error) {
 	if h == nil || h.approvals == nil {
 		return nil, approvalUnavailableError()
@@ -534,10 +530,6 @@ func (h *turnHandle) releasePendingApproval(pending *pendingApproval, state stri
 	if h != nil && h.approvals != nil {
 		h.approvals.release(pending, state)
 	}
-}
-
-func (h *turnHandle) publishApproval(req *agent.ApprovalRequest) (*pendingApproval, error) {
-	return h.enqueueApproval(req, true)
 }
 
 // invalidateAutoReviews serializes steering with approval settlement. A decision

@@ -998,10 +998,6 @@ func hasCompletedToolUpdate(notifications []eventstream.SessionNotification, too
 	return false
 }
 
-func hasTerminalExitForTool(notifications []eventstream.SessionNotification, toolCallID string) bool {
-	return countTerminalExitsForTool(notifications, toolCallID) > 0
-}
-
 func countTerminalExitsForTool(notifications []eventstream.SessionNotification, toolCallID string) int {
 	count := 0
 	for _, notification := range notifications {

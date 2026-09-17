@@ -8,7 +8,6 @@ import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/caelis-labs/caelis/control/agentbinding"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 )
@@ -976,10 +975,6 @@ func (m *Model) clearTerminalResponsePending() {
 	m.terminalResponsePendingSeq++
 }
 
-func looksLikeTerminalResponseFragment(text string) bool {
-	return terminalResponseFragmentState(text) == terminalResponseComplete
-}
-
 // containsControlByte reports whether s contains ESC (0x1B), CSI (0x9B), or OSC (0x9D).
 // These are terminal control-introducing bytes; checking bytes avoids invalid-UTF-8 lint warnings.
 func containsControlByte(s string) bool {
@@ -1639,29 +1634,6 @@ func (m *Model) submitPendingPromptAsIdle(prompt pendingPrompt) (tea.Model, tea.
 	})
 }
 
-func (m *Model) isConfiguredAgentSlashLine(line string) bool {
-	name := slashCommandName(line)
-	if name == "" || m == nil {
-		return false
-	}
-	if _, ok := controlprompt.Lookup(name); ok {
-		return agentbinding.IsDirectRun(agentbinding.Handle(name)) && m.hasConfiguredCommand(name)
-	}
-	return m.hasConfiguredCommand(name)
-}
-
-func (m *Model) hasConfiguredCommand(name string) bool {
-	if m == nil {
-		return false
-	}
-	for _, command := range m.cfg.Commands {
-		if strings.EqualFold(strings.TrimSpace(strings.TrimPrefix(command, "/")), name) {
-			return true
-		}
-	}
-	return false
-}
-
 func (m *Model) allowsBTWSubmission() bool {
 	if m == nil {
 		return false
@@ -1734,10 +1706,6 @@ func (m *Model) tryToggleACPAgentMessageToken(blockID string, key string) bool {
 	default:
 		return false
 	}
-}
-
-func (m *Model) tryToggleACPToolPanelToken(blockID string, token string) bool {
-	return m.tryToggleFoldToken(blockID, token)
 }
 
 func (m *Model) tryToggleACPReasoningToken(blockID string, key string) bool {

@@ -225,7 +225,7 @@ func TestGlamourListStrongDoesNotStealToolCodeColor(t *testing.T) {
 func TestNarrativeViewportWrapPreservesRenderedInlineCodeANSI(t *testing.T) {
 	m := NewModel(Config{ColorProfile: colorprofile.TrueColor})
 	raw := "前缀前缀前缀前缀前缀前缀，用 `Shell` 验证结果。"
-	styled := renderInlineMarkdown(raw, m.theme.TextStyle(), m.theme)
+	styled := renderInlineSpans(parseInlineMarkdownSpans(raw), m.theme.TextStyle(), m.theme)
 	wrapped := hardWrapDisplayLine(styled, 24)
 
 	assertInlineCodeForegroundScope(t,
@@ -316,9 +316,11 @@ func TestGlamourNarrativeRendererCacheKeepsRecentKeys(t *testing.T) {
 	clearGlamourCache()
 	theme := tuikit.ResolveThemeWithState(true, false, colorprofile.TrueColor)
 
-	first := getGlamourRenderer(80, theme, tuikit.LineStyleAssistant)
-	second := getGlamourRenderer(96, theme, tuikit.LineStyleReasoning)
-	again := getGlamourRenderer(80, theme, tuikit.LineStyleAssistant)
+	glamourCache.Lock()
+	first := getGlamourRendererLocked(80, theme, tuikit.LineStyleAssistant)
+	second := getGlamourRendererLocked(96, theme, tuikit.LineStyleReasoning)
+	again := getGlamourRendererLocked(80, theme, tuikit.LineStyleAssistant)
+	glamourCache.Unlock()
 
 	if first == nil || second == nil || again == nil {
 		t.Fatal("expected cached glamour renderers")

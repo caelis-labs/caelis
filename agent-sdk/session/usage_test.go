@@ -5,8 +5,8 @@ import (
 	"testing"
 )
 
-func TestUsageSnapshotFromMapAcceptsGeminiUsageMetadata(t *testing.T) {
-	usage := UsageSnapshotFromMap(map[string]any{
+func TestUsageSnapshotFromMapForProviderAcceptsGeminiUsageMetadata(t *testing.T) {
+	usage := UsageSnapshotFromMapForProvider(map[string]any{
 		"usageMetadata": map[string]any{
 			"promptTokenCount":        11,
 			"cachedContentTokenCount": 7,
@@ -15,10 +15,10 @@ func TestUsageSnapshotFromMapAcceptsGeminiUsageMetadata(t *testing.T) {
 			"toolUsePromptTokenCount": 3,
 			"totalTokenCount":         21,
 		},
-	})
+	}, "")
 
 	if usage == nil {
-		t.Fatal("UsageSnapshotFromMap() = nil, want usage")
+		t.Fatal("UsageSnapshotFromMapForProvider() = nil, want usage")
 		return
 	}
 	if usage.PromptTokens != 11 {
@@ -108,16 +108,16 @@ func TestUsageSnapshotFromSessionEventUsesSDKContextWindowMetadata(t *testing.T)
 	}
 }
 
-func TestUsageSnapshotFromMapAcceptsAnthropicCacheReadUsage(t *testing.T) {
-	usage := UsageSnapshotFromMap(map[string]any{
+func TestUsageSnapshotFromMapForProviderAcceptsAnthropicCacheReadUsage(t *testing.T) {
+	usage := UsageSnapshotFromMapForProvider(map[string]any{
 		"input_tokens":                11,
 		"cache_creation_input_tokens": 3,
 		"cache_read_input_tokens":     7,
 		"output_tokens":               2,
-	})
+	}, "")
 
 	if usage == nil {
-		t.Fatal("UsageSnapshotFromMap() = nil, want usage")
+		t.Fatal("UsageSnapshotFromMapForProvider() = nil, want usage")
 		return
 	}
 	if usage.PromptTokens != 14 {
@@ -197,17 +197,17 @@ func TestDeepSeekAnthropicUsageProviderFoldsCacheReadForDisplay(t *testing.T) {
 	}
 }
 
-func TestUsageSnapshotFromMapAcceptsAnthropicThinkingTokenDetails(t *testing.T) {
-	usage := UsageSnapshotFromMap(map[string]any{
+func TestUsageSnapshotFromMapForProviderAcceptsAnthropicThinkingTokenDetails(t *testing.T) {
+	usage := UsageSnapshotFromMapForProvider(map[string]any{
 		"input_tokens":  10,
 		"output_tokens": 7,
 		"output_tokens_details": map[string]any{
 			"thinking_tokens": 3,
 		},
-	})
+	}, "")
 
 	if usage == nil {
-		t.Fatal("UsageSnapshotFromMap() = nil, want usage")
+		t.Fatal("UsageSnapshotFromMapForProvider() = nil, want usage")
 		return
 	}
 	if usage.ReasoningTokens != 3 {

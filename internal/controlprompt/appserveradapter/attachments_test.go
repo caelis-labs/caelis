@@ -26,9 +26,9 @@ func TestContentPartsFromAttachmentsReadsImageFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	parts, err := contentPartsFromAttachments([]controlprompt.Attachment{{Name: "shot.png"}}, workspace)
+	parts, err := ContentPartsFromSubmission("", []controlprompt.Attachment{{Name: "shot.png"}}, workspace)
 	if err != nil {
-		t.Fatalf("contentPartsFromAttachments() error = %v", err)
+		t.Fatalf("ContentPartsFromSubmission() error = %v", err)
 	}
 	if len(parts) != 1 {
 		t.Fatalf("len(parts) = %d, want 1", len(parts))
@@ -52,13 +52,13 @@ func TestContentPartsFromAttachmentsReadsInlineImageData(t *testing.T) {
 	t.Parallel()
 
 	imageData := "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
-	parts, err := contentPartsFromAttachments([]controlprompt.Attachment{{
+	parts, err := ContentPartsFromSubmission("", []controlprompt.Attachment{{
 		Name:     "inline.png",
 		MimeType: "image/png",
 		Data:     imageData,
 	}}, t.TempDir())
 	if err != nil {
-		t.Fatalf("contentPartsFromAttachments(inline data) error = %v", err)
+		t.Fatalf("ContentPartsFromSubmission(inline data) error = %v", err)
 	}
 	if len(parts) != 1 {
 		t.Fatalf("len(parts) = %d, want 1", len(parts))
@@ -120,8 +120,8 @@ func TestContentPartsFromAttachmentsRejectsNonImages(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := contentPartsFromAttachments([]controlprompt.Attachment{{Name: "note.txt"}}, workspace); err == nil {
-		t.Fatal("contentPartsFromAttachments() error = nil, want non-image rejection")
+	if _, err := ContentPartsFromSubmission("", []controlprompt.Attachment{{Name: "note.txt"}}, workspace); err == nil {
+		t.Fatal("ContentPartsFromSubmission() error = nil, want non-image rejection")
 	}
 }
 
@@ -133,8 +133,8 @@ func TestContentPartsFromAttachmentsRejectsRenamedNonImages(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := contentPartsFromAttachments([]controlprompt.Attachment{{Name: "not-really.png"}}, workspace); err == nil {
-		t.Fatal("contentPartsFromAttachments() error = nil, want content-based non-image rejection")
+	if _, err := ContentPartsFromSubmission("", []controlprompt.Attachment{{Name: "not-really.png"}}, workspace); err == nil {
+		t.Fatal("ContentPartsFromSubmission() error = nil, want content-based non-image rejection")
 	}
 }
 
@@ -155,8 +155,8 @@ func TestContentPartsFromAttachmentsRejectsOversizedImages(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := contentPartsFromAttachments([]controlprompt.Attachment{{Name: "huge.png"}}, workspace); err == nil {
-		t.Fatal("contentPartsFromAttachments() error = nil, want image size rejection")
+	if _, err := ContentPartsFromSubmission("", []controlprompt.Attachment{{Name: "huge.png"}}, workspace); err == nil {
+		t.Fatal("ContentPartsFromSubmission() error = nil, want image size rejection")
 	}
 }
 
@@ -183,9 +183,9 @@ func TestContentPartsFromAttachmentsRejectsEmptyImages(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := contentPartsFromAttachments([]controlprompt.Attachment{{Name: "empty.png"}}, workspace)
+	_, err := ContentPartsFromSubmission("", []controlprompt.Attachment{{Name: "empty.png"}}, workspace)
 	if err == nil || !strings.Contains(err.Error(), "is empty") {
-		t.Fatalf("contentPartsFromAttachments() error = %v, want empty rejection", err)
+		t.Fatalf("ContentPartsFromSubmission() error = %v, want empty rejection", err)
 	}
 }
 
@@ -196,9 +196,9 @@ func TestContentPartsFromAttachmentsAcceptsExactPerImageLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	parts, err := contentPartsFromAttachments([]controlprompt.Attachment{{Name: "exact.png"}}, workspace)
+	parts, err := ContentPartsFromSubmission("", []controlprompt.Attachment{{Name: "exact.png"}}, workspace)
 	if err != nil {
-		t.Fatalf("contentPartsFromAttachments() error = %v", err)
+		t.Fatalf("ContentPartsFromSubmission() error = %v", err)
 	}
 	if len(parts) != 1 || parts[0].Type != model.ContentPartImage || parts[0].MimeType != "image/png" {
 		t.Fatalf("parts = %#v, want one png image", parts)

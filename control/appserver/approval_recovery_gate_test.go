@@ -121,23 +121,6 @@ func (s *deferredApprovalRecoveryStore) SessionFence(_ context.Context, ref sess
 	return session.SessionFence{SessionRef: ref, FenceID: "foreign-runtime"}, nil
 }
 
-type approvalRecoveryClock struct {
-	mu  sync.Mutex
-	now time.Time
-}
-
-func (c *approvalRecoveryClock) Now() time.Time {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.now
-}
-
-func (c *approvalRecoveryClock) Advance(delta time.Duration) {
-	c.mu.Lock()
-	c.now = c.now.Add(delta)
-	c.mu.Unlock()
-}
-
 func (s *blockingApprovalRecoveryStore) ListSessions(context.Context, session.ListSessionsRequest) (session.SessionList, error) {
 	close(s.started)
 	<-s.release

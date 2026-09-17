@@ -152,7 +152,7 @@ func TestCancelRunningKeepsFeedUntilHostTerminal(t *testing.T) {
 	if next.runningInterruptRequested {
 		t.Fatal("runningInterruptRequested still set after cancelled lifecycle")
 	}
-	if activity, _ := next.runningActivityText(); activity == "Interrupting" {
+	if activity, _ := next.runningActivityStyle(next.runningActivity); activity == "Interrupting" {
 		t.Fatalf("running activity = %q after terminal, want interrupt overlay cleared", activity)
 	}
 }
@@ -201,7 +201,7 @@ func TestCancelRunningFailedInterruptClearsInterrupting(t *testing.T) {
 	if next.runningInterruptRequested {
 		t.Fatal("runningInterruptRequested still set after failed interrupt")
 	}
-	if activity, _ := next.runningActivityText(); activity == "Interrupting" {
+	if activity, _ := next.runningActivityStyle(next.runningActivity); activity == "Interrupting" {
 		t.Fatalf("running activity = %q, want Interrupting cleared after failed interrupt", activity)
 	}
 	select {

@@ -25,7 +25,7 @@ func TestCloneDefinitionIsolatesExecutionRequirements(t *testing.T) {
 	}
 }
 
-func TestDefinitionsAndModelSpecsCloneStableToolContracts(t *testing.T) {
+func TestModelSpecsClonesStableToolContracts(t *testing.T) {
 	t.Parallel()
 
 	tools := []Tool{
@@ -44,7 +44,7 @@ func TestDefinitionsAndModelSpecsCloneStableToolContracts(t *testing.T) {
 		},
 	}
 
-	defs := Definitions(tools)
+	defs := []Definition{CloneDefinition(tools[0].Definition())}
 	if got, want := len(defs), 1; got != want {
 		t.Fatalf("len(defs) = %d, want %d", got, want)
 	}
@@ -74,7 +74,7 @@ func TestDefinitionsAndModelSpecsCloneStableToolContracts(t *testing.T) {
 	defs[0].InputSchema["type"] = "array"
 	specs[0].Function.Parameters["type"] = "array"
 
-	clone := Definitions(tools)
+	clone := []Definition{CloneDefinition(tools[0].Definition())}
 	if got := clone[0].InputSchema["type"]; got != "object" {
 		t.Fatalf("clone[0].InputSchema[type] = %v, want object", got)
 	}
@@ -201,9 +201,9 @@ func TestToolVisibilityDefersMCPToolsBehindToolSearch(t *testing.T) {
 		t.Fatalf("ToolVisibility.ModelSpecs names = %v, want %v", got, want)
 	}
 
-	allSpecs := AllModelSpecs(tools)
+	allSpecs := modelSpecsFromDefinitions([]Definition{inspect.Definition(), search.Definition(), mcp.Definition()})
 	if got, want := toolSpecNames(allSpecs), []string{"inspect", ToolSearchToolName, "mcp__plugin__server__read"}; !equalStrings(got, want) {
-		t.Fatalf("AllModelSpecs names = %v, want %v", got, want)
+		t.Fatalf("unfiltered model specs names = %v, want %v", got, want)
 	}
 }
 

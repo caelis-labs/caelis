@@ -306,8 +306,8 @@ func TestEmitTaskAwareControlEnvelopeSuppressesChildStreamAndClosesParentOnceFro
 	parentCloses := 0
 	for _, notification := range notifications {
 		if chunk, ok := notification.Update.(eventstream.ContentChunk); ok {
-			_, _, text, _ := acpContentChunkText(chunk)
-			if strings.Contains(text, "retained child output") {
+			text, _ := chunk.Content.(eventstream.TextContent)
+			if strings.Contains(text.Text, "retained child output") {
 				t.Fatalf("child stream leaked as ACP narrative: %#v", notification)
 			}
 		}

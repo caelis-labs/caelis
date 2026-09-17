@@ -143,7 +143,7 @@ func TestOpenAICodexToolLoopPreservesEncryptedReasoning(t *testing.T) {
 		t.Fatalf("tool calls = %#v", calls)
 	}
 
-	toolResult := model.MessageFromToolResponse(&model.ToolResponse{ID: "call_1", Name: "lookup", Result: map[string]any{"weather": "sunny"}})
+	toolResult := model.NewMessage(model.RoleTool, model.NewToolResultJSONPart("call_1", "lookup", map[string]any{"weather": "sunny"}, false))
 	second, _, _, err := collectOpenAICodexTestResponse(llm, &model.Request{
 		Messages: []model.Message{user, first.Message, toolResult},
 		Tools:    []model.ToolSpec{toolSpec},

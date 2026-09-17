@@ -49,18 +49,8 @@ func newStore(cfg Config) *Store {
 	return store
 }
 
-func (s *Store) withRootWriteLock(fn func() error) error {
-	return s.withRootLockContext(context.Background(), storeRootLockExclusive, fn)
-}
-
 func (s *Store) withRootWriteLockContext(ctx context.Context, fn func() error) error {
 	return s.withRootLockContext(ctx, storeRootLockExclusive, fn)
-}
-
-func (s *Store) withRootReadLock(fn func() error) error {
-	// Reads may need to finish a committed WAL transaction before exposing
-	// document/event state, so they take the exclusive root lock as well.
-	return s.withRootLockContext(context.Background(), storeRootLockExclusive, fn)
 }
 
 func (s *Store) withRootReadLockContext(ctx context.Context, fn func() error) error {
@@ -68,10 +58,6 @@ func (s *Store) withRootReadLockContext(ctx context.Context, fn func() error) er
 	// document/event state, so cancellation changes acquisition only, not the
 	// exclusive recovery barrier.
 	return s.withRootLockContext(ctx, storeRootLockExclusive, fn)
-}
-
-func (s *Store) withRootLock(mode storeRootLockMode, fn func() error) error {
-	return s.withRootLockContext(context.Background(), mode, fn)
 }
 
 func (s *Store) withRootLockContext(ctx context.Context, mode storeRootLockMode, fn func() error) error {

@@ -65,10 +65,6 @@ func StandardToolOutput(status string, isErr bool) string {
 	return ""
 }
 
-func SuppressToolResultOutput(toolName string, toolKind string, output string, synthetic bool, isErr bool) bool {
-	return SuppressToolResultOutputWithHint(toolName, toolKind, "", output, synthetic, isErr)
-}
-
 // SuppressToolResultOutputWithHint applies the same completion suppression to
 // provider-compatible exploration without treating its display hint as tool
 // identity.

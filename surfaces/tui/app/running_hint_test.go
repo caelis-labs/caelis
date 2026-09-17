@@ -889,7 +889,7 @@ func TestInterruptReplacesApprovalReviewActivity(t *testing.T) {
 	if next.runningActivity.Phase != runningPhaseInterrupt {
 		t.Fatalf("runningActivity = %#v, want interrupting", next.runningActivity)
 	}
-	activity, _ := next.runningActivityText()
+	activity, _ := next.runningActivityStyle(next.runningActivity)
 	if activity != "Interrupting" {
 		t.Fatalf("running activity = %q, want interrupting to replace approval review", activity)
 	}
@@ -973,7 +973,7 @@ func TestAcceptedInterruptClearsAfterCancelledLifecycle(t *testing.T) {
 	if next.runningInterruptRequested {
 		t.Fatal("runningInterruptRequested still set after cancelled lifecycle")
 	}
-	if activity, _ := next.runningActivityText(); activity == "Interrupting" {
+	if activity, _ := next.runningActivityStyle(next.runningActivity); activity == "Interrupting" {
 		t.Fatalf("running activity = %q after terminal, want interrupt overlay cleared", activity)
 	}
 }

@@ -24,35 +24,15 @@ type CommandSpec struct {
 
 var defaultACPCommandNames = []string{"status", "breeze", "orbit", "zenith", "compact", "review"}
 
-// DefaultSpecs returns the canonical TUI slash command specs in display order.
-// Use DefaultSharedSpecs for commands that are safe for shared prompt routers,
-// and DefaultACPSpecs for commands exposed through ACP clients.
-func DefaultSpecs() []CommandSpec {
-	return DefaultSpecsForPlatform(runtime.GOOS)
-}
-
 func DefaultSpecsForPlatform(goos string) []CommandSpec {
 	return filterSpecsForPlatform(defaultSpecs(), goos)
 }
 
-// DefaultSharedSpecs returns slash commands whose behavior is surface-neutral.
-// Wizard/modal style commands remain TUI-only and must not be exposed by ACP.
-func DefaultSharedSpecs() []CommandSpec {
-	return DefaultSharedSpecsForPlatform(runtime.GOOS)
-}
-
+// DefaultSharedSpecsForPlatform returns slash commands whose behavior is
+// surface-neutral. Wizard/modal style commands remain TUI-only and must not be
+// exposed by ACP.
 func DefaultSharedSpecsForPlatform(goos string) []CommandSpec {
 	return filterSpecsForPlatform(defaultSharedSpecs(), goos)
-}
-
-// DefaultTUISpecs returns commands that require TUI-owned interaction or app
-// lifecycle behavior.
-func DefaultTUISpecs() []CommandSpec {
-	return DefaultTUISpecsForPlatform(runtime.GOOS)
-}
-
-func DefaultTUISpecsForPlatform(goos string) []CommandSpec {
-	return filterSpecsForPlatform(defaultTUISpecs(), goos)
 }
 
 // DefaultACPSpecs returns the narrow slash command set exposed through ACP
@@ -225,10 +205,6 @@ func LookupForPlatform(name string, goos string) (CommandSpec, bool) {
 		}
 	}
 	return CommandSpec{}, false
-}
-
-func LookupShared(name string) (CommandSpec, bool) {
-	return LookupSharedForPlatform(name, runtime.GOOS)
 }
 
 func LookupSharedForPlatform(name string, goos string) (CommandSpec, bool) {

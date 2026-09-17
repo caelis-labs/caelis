@@ -25,8 +25,6 @@ bash ./scripts/go_test_nonempty.sh ./agent-sdk/session/file \
   '^TestWindows' windows-session-storage -count=1
 bash ./scripts/go_test_nonempty.sh ./agent-sdk/runtime \
   '^Test(Runtime(CommandTTYDefaultTaskWriteSubmitsWindowsLine|SpawnToolIsParallelSafeAndConcurrentAttachmentsConverge)|CommandApproval|CommandExecutionSpec|TaskContinuation)' windows-runtime -count=1
-bash ./scripts/go_test_nonempty.sh ./control/appserver \
-  '^TestSyncOperationStoreDirectoryDoesNotFlushReadOnlyWindowsDirectory$' windows-operation-storage -count=1
 bash ./scripts/go_test_nonempty.sh ./app/gatewayapp \
   '^Test(WindowsOpenRouterReconnectPreservesCustomReasoningLevels|HostModelConnectUsesCanonicalDocumentAndDoesNotPersistSecretInLedger|ACPPrepareCommandRecoversIntentOnlyReceiptWithoutRepeatingProcess|NewLocalStackProductionBootstrapDoesNotPersistSandboxNetworkDefault)$' windows-host-persistence -count=1
 CAELIS_TEST_GUARDIAN_NATIVE=1 bash ./scripts/go_test_nonempty.sh ./app/gatewayapp \

@@ -26,9 +26,9 @@ func TestResolveToolPresentationKeepsExactNameSeparateFromStandardFields(t *test
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			presentation := ResolveToolPresentation(tt.exactName, tt.kind, tt.title)
+			presentation := ResolveToolPresentationWithHint(tt.exactName, tt.kind, tt.title, "")
 			if presentation.Name != tt.exactName || presentation.DisplayName != tt.wantDisplay || presentation.ExplorationVerb != tt.wantExploration || presentation.TitleAsLabel != tt.wantTitleLabel {
-				t.Fatalf("ResolveToolPresentation() = %#v, want exact=%q display=%q exploration=%q titleLabel=%v", presentation, tt.exactName, tt.wantDisplay, tt.wantExploration, tt.wantTitleLabel)
+				t.Fatalf("ResolveToolPresentationWithHint() = %#v, want exact=%q display=%q exploration=%q titleLabel=%v", presentation, tt.exactName, tt.wantDisplay, tt.wantExploration, tt.wantTitleLabel)
 			}
 		})
 	}

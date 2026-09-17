@@ -825,10 +825,10 @@ func TestCommandServicePreservesTurnTargetWhenReceiptWriteFails(t *testing.T) {
 	}
 }
 
-func TestFileOperationStoreSurvivesRestartAndBindsPayload(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "operations")
+func TestOperationStoreSurvivesRestartAndBindsPayload(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "control.sqlite")
 	intent := OperationIntent{PrincipalID: "owner", OperationID: "op-1", Action: ActionPrompt, SessionID: "session-1", Target: "session-1", Digest: "digest-a"}
-	first := NewFileOperationStore(path)
+	first := newTestSQLiteOperationStore(t, path, OperationRetentionConfig{})
 	if _, created, err := first.Begin(context.Background(), intent); err != nil || !created {
 		t.Fatalf("Begin = created %v, %v", created, err)
 	}
@@ -836,7 +836,10 @@ func TestFileOperationStoreSurvivesRestartAndBindsPayload(t *testing.T) {
 	if _, err := first.Complete(context.Background(), intent, want); err != nil {
 		t.Fatal(err)
 	}
-	second := NewFileOperationStore(path)
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+	second := newTestSQLiteOperationStore(t, path, OperationRetentionConfig{})
 	record, created, err := second.Begin(context.Background(), intent)
 	if err != nil || created || record.Result == nil || *record.Result != want {
 		t.Fatalf("restart record = %#v created=%v err=%v", record, created, err)
@@ -849,10 +852,10 @@ func TestFileOperationStoreSurvivesRestartAndBindsPayload(t *testing.T) {
 }
 
 func TestCommandServicePersistsKnownEffectResultAfterRequestCancellation(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "operations")
+	root := filepath.Join(t.TempDir(), "control.sqlite")
 	ctx, cancel := context.WithCancel(context.Background())
 	backend := &cancelAfterCommitBackend{cancel: cancel}
-	service := newTestCommandService(t, allowAuthorizer{}, NewFileOperationStore(root), backend)
+	service := newTestCommandService(t, allowAuthorizer{}, newTestSQLiteOperationStore(t, root, OperationRetentionConfig{}), backend)
 	principal := Principal{ID: "owner"}
 	req := PromptRequest{
 		WriteBase: WriteBase{OperationID: "committed-before-cancel", SessionID: "session-1"},
@@ -868,7 +871,7 @@ func TestCommandServicePersistsKnownEffectResultAfterRequestCancellation(t *test
 	}
 
 	replayBackend := &recordingCommandBackend{}
-	reopened := newTestCommandService(t, allowAuthorizer{}, NewFileOperationStore(root), replayBackend)
+	reopened := newTestCommandService(t, allowAuthorizer{}, newTestSQLiteOperationStore(t, root, OperationRetentionConfig{}), replayBackend)
 	got, err := reopened.Prompt(context.Background(), principal, req)
 	if err != nil || got != want {
 		t.Fatalf("Prompt(retry) = %#v, %v; want durable %#v", got, err, want)

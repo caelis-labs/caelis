@@ -348,23 +348,3 @@ func listDirNames(t *testing.T, dir string) []string {
 	}
 	return names
 }
-
-func writeLocalMarketplace(t *testing.T, dir, name, pluginName string) {
-	t.Helper()
-	pluginDir := filepath.Join(dir, "plugins", pluginName)
-	marketManifestDir := filepath.Join(dir, ".claude-plugin")
-	for _, d := range []string{pluginDir, marketManifestDir} {
-		if err := os.MkdirAll(d, 0o700); err != nil {
-			t.Fatal(err)
-		}
-	}
-	manifest := `{
-  "name": "` + name + `",
-  "owner": {"name": "tester"},
-  "plugins": [{"name": "` + pluginName + `", "source": "./plugins/` + pluginName + `"}]
-}`
-	if err := os.WriteFile(filepath.Join(marketManifestDir, "marketplace.json"), []byte(manifest), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	buildMinimalPluginDir(t, pluginDir, `{"name":"`+pluginName+`","version":"1.0.0"}`)
-}

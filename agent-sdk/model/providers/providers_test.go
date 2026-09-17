@@ -67,11 +67,8 @@ func TestOpenAICompatMessagePreservesFlatAndNestedURLAnnotations(t *testing.T) {
 	}
 }
 
-func TestListModelsRequiresRegistration(t *testing.T) {
+func TestNewByAliasRequiresRegistration(t *testing.T) {
 	factory := NewFactory()
-	if got := factory.ListModels(); len(got) != 0 {
-		t.Fatalf("expected empty model list, got %v", got)
-	}
 	if _, err := factory.NewByAlias("deepseek/deepseek-v4-flash"); err == nil {
 		t.Fatalf("expected unknown alias error without registration")
 	}
@@ -91,9 +88,8 @@ func TestListModelsRequiresRegistration(t *testing.T) {
 	if err := factory.Register(cfg); err != nil {
 		t.Fatalf("register provider config: %v", err)
 	}
-	list := factory.ListModels()
-	if len(list) != 1 || list[0] != cfg.Alias {
-		t.Fatalf("unexpected list models: %v", list)
+	if _, err := factory.NewByAlias(cfg.Alias); err != nil {
+		t.Fatalf("NewByAlias(registered alias) error = %v", err)
 	}
 }
 
@@ -1417,21 +1413,9 @@ func TestOpenAICompatMessageTransform_SkipsInvalidToolResponses(t *testing.T) {
 			Name: "echo",
 			Args: jsonArgs(map[string]any{"text": "x"}),
 		}}, ""),
-		model.MessageFromToolResponse(&model.ToolResponse{
-			ID:     "",
-			Name:   "echo",
-			Result: map[string]any{"echo": "missing-id"},
-		}),
-		model.MessageFromToolResponse(&model.ToolResponse{
-			ID:     "call_2",
-			Name:   "echo",
-			Result: map[string]any{"echo": "unmatched-id"},
-		}),
-		model.MessageFromToolResponse(&model.ToolResponse{
-			ID:     "call_1",
-			Name:   "echo",
-			Result: map[string]any{"echo": "ok"},
-		}),
+		model.NewMessage(model.RoleTool, model.NewToolResultJSONPart("", "echo", map[string]any{"echo": "missing-id"}, false)),
+		model.NewMessage(model.RoleTool, model.NewToolResultJSONPart("call_2", "echo", map[string]any{"echo": "unmatched-id"}, false)),
+		model.NewMessage(model.RoleTool, model.NewToolResultJSONPart("call_1", "echo", map[string]any{"echo": "ok"}, false)),
 		{
 			Role: model.RoleTool,
 		},
@@ -1470,11 +1454,7 @@ func TestOpenAICompatMessageTransformBridgesToolResultImages(t *testing.T) {
 			},
 		}, ""),
 		imageToolResultMessageForTest("call_image", "ViewImage"),
-		model.MessageFromToolResponse(&model.ToolResponse{
-			ID:     "call_echo",
-			Name:   "Echo",
-			Result: map[string]any{"result": "ok"},
-		}),
+		model.NewMessage(model.RoleTool, model.NewToolResultJSONPart("call_echo", "Echo", map[string]any{"result": "ok"}, false)),
 	})
 	if len(messages) != 4 {
 		t.Fatalf("transformed messages = %#v, want assistant, both tool results, and image bridge", messages)
@@ -1736,11 +1716,7 @@ func TestAnthropicSDKNonStream_NormalizesBaseURLAndMapsParts(t *testing.T) {
 				model.NewTextPart("Working."),
 				model.NewToolUsePart("call-prev", "echo", json.RawMessage(`{"text":"x"}`)),
 			),
-			model.MessageFromToolResponse(&model.ToolResponse{
-				ID:     "call-prev",
-				Name:   "echo",
-				Result: map[string]any{"echo": "x"},
-			}),
+			model.NewMessage(model.RoleTool, model.NewToolResultJSONPart("call-prev", "echo", map[string]any{"echo": "x"}, false)),
 		},
 		Tools: []model.ToolSpec{
 			model.NewFunctionToolSpec("lookup", "Look up weather.", map[string]any{

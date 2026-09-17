@@ -153,18 +153,6 @@ func (m *Model) syncAttachmentSummary() {
 	m.attachmentCount = len(items)
 }
 
-func (m *Model) setInputAttachments(items []inputAttachment) {
-	valueLen := len([]rune(m.textarea.Value()))
-	cloned := cloneInputAttachments(items)
-	for i := range cloned {
-		if cloned[i].Offset > valueLen {
-			cloned[i].Offset = valueLen
-		}
-	}
-	m.inputAttachments = cloned
-	m.syncAttachmentSummary()
-}
-
 func (m *Model) clearInputAttachments() {
 	m.inputAttachments = nil
 	m.syncAttachmentSummary()
@@ -323,31 +311,6 @@ func (m *Model) insertAttachmentsAtCursor(names []string) {
 	m.syncBackendAttachments()
 	m.syncTextareaChrome()
 	m.syncInputFromTextareaAndFollow()
-}
-
-func (m *Model) removeAttachmentAtCursor() bool {
-	// Deletes the sentinel immediately before the caret (same as Backspace on
-	// a token). Prefer the normal textarea Backspace path in production.
-	if m == nil || len(m.inputAttachments) == 0 {
-		return false
-	}
-	cursor := m.textareaCursorIndex()
-	if cursor <= 0 {
-		return false
-	}
-	before := m.textarea.Value()
-	runes := []rune(before)
-	if cursor-1 >= len(runes) || !isAttachmentSentinel(runes[cursor-1]) {
-		return false
-	}
-	after := string(append(append([]rune{}, runes[:cursor-1]...), runes[cursor:]...))
-	m.textarea.SetValue(after)
-	m.moveTextareaCursorToIndex(cursor - 1)
-	m.reconcileAttachmentsAfterEdit(before, after)
-	m.syncBackendAttachments()
-	m.syncTextareaChrome()
-	m.syncInputFromTextareaAndFollow()
-	return true
 }
 
 func shouldCollapsePaste(text string) bool {

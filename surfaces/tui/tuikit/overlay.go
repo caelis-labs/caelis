@@ -13,23 +13,15 @@ import (
 // Overlay primitives — unified frame, z-order, and ESC-layer-close helpers.
 //
 // Every overlay/modal in the TUI (prompt, palette, completion list, BTW)
-// renders inside an OverlayFrame. The frame provides:
+// renders through RenderResponsiveOverlayFrame. The frame provides:
 //
 //   - Consistent rounded-border chrome with token-driven colors
-//   - Optional title row
 //   - Width/height constraints
 //   - Positioning helpers (center, above-bottom, bottom-anchored)
 //
 // Z-order is managed by the caller (overlay_state.go); these primitives
 // only handle rendering of a single overlay layer.
 // ---------------------------------------------------------------------------
-
-// OverlayFrameModel defines the content and structure of an overlay.
-type OverlayFrameModel struct {
-	Title string   // optional title text at top
-	Body  []string // body content lines
-	Width int      // desired frame width
-}
 
 // ResponsiveOverlayFrameModel renders overlay body lines with optional border chrome.
 type ResponsiveOverlayFrameModel struct {
@@ -95,97 +87,6 @@ func paintBlockBackground(block string, width int, background color.Color) strin
 		lines[y] = screen.Line(y).Render()
 	}
 	return strings.Join(lines, "\n")
-}
-
-// RenderOverlayFrame renders a bordered overlay frame with optional title.
-func RenderOverlayFrame(theme Theme, m OverlayFrameModel) string {
-	tok := theme.Tokens()
-	width := maxInt(20, m.Width)
-
-	content := make([]string, 0, len(m.Body)+1)
-	if title := strings.TrimSpace(m.Title); title != "" {
-		content = append(content, tok.OverlayTitle.Render(title))
-	}
-	content = append(content, m.Body...)
-
-	return RenderResponsiveOverlayFrame(theme, ResponsiveOverlayFrameModel{
-		Body:      content,
-		Width:     width,
-		UseBorder: true,
-	})
-}
-
-// OverlayCompletionModel defines a completion/suggestion list overlay.
-type OverlayCompletionModel struct {
-	Title   string
-	Items   []OverlayCompletionItem
-	Index   int // currently selected index
-	Width   int
-	MaxShow int // max visible items (0 = show all)
-}
-
-// OverlayCompletionItem is a single item in a completion list.
-type OverlayCompletionItem struct {
-	Label string
-	Desc  string
-}
-
-// RenderOverlayCompletion renders a completion/suggestion list inside an
-// overlay frame. The selected item is highlighted.
-func RenderOverlayCompletion(theme Theme, m OverlayCompletionModel) string {
-	tok := theme.Tokens()
-	if len(m.Items) == 0 {
-		return ""
-	}
-
-	maxShow := m.MaxShow
-	if maxShow <= 0 {
-		maxShow = len(m.Items)
-	}
-
-	// Determine visible window centered on the selection.
-	start := 0
-	if m.Index >= maxShow {
-		start = m.Index - maxShow + 1
-	}
-	end := start + maxShow
-	if end > len(m.Items) {
-		end = len(m.Items)
-		start = maxInt(0, end-maxShow)
-	}
-
-	lines := make([]string, 0, end-start)
-	for i := start; i < end; i++ {
-		item := m.Items[i]
-		label := strings.TrimSpace(item.Label)
-		if label == "" {
-			continue
-		}
-		var line string
-		if i == m.Index {
-			line = theme.SelectionStyle().Bold(true).Render("▸ " + label)
-		} else {
-			line = tok.TextPrimary.Render("  " + label)
-		}
-		if desc := strings.TrimSpace(item.Desc); desc != "" {
-			line += "  " + tok.TextMuted.Render(desc)
-		}
-		lines = append(lines, line)
-	}
-
-	// Scroll indicators.
-	if start > 0 {
-		lines = append([]string{tok.TextMuted.Render("  ↑ more")}, lines...)
-	}
-	if end < len(m.Items) {
-		lines = append(lines, tok.TextMuted.Render("  ↓ more"))
-	}
-
-	return RenderOverlayFrame(theme, OverlayFrameModel{
-		Title: m.Title,
-		Body:  lines,
-		Width: m.Width,
-	})
 }
 
 // ---------------------------------------------------------------------------

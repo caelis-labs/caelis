@@ -119,8 +119,9 @@ func TestThemePickerMouseTargetsTrackResizeAndShortWindow(t *testing.T) {
 			m.handleKey(keyPress("down"))
 			frame := m.View().Content
 			layout := m.themePickerLayout()
-			if got := strings.Count(m.renderThemePicker(), "\n") + 1; got != layout.height() || m.promptModalReservedHeight() != 0 {
-				t.Fatalf("picker height: rendered %d, layout %d", got, layout.height())
+			layoutHeight := 2*layout.border + 3 + layout.count + len(layout.hints)
+			if got := strings.Count(m.renderThemePicker(), "\n") + 1; got != layoutHeight || m.promptModalReservedHeight() != 0 {
+				t.Fatalf("picker height: rendered %d, layout %d", got, layoutHeight)
 			}
 			g := m.themePicker.geometry
 			for i := layout.start; i < layout.start+layout.count; i++ {

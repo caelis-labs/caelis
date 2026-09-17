@@ -413,7 +413,7 @@ func TestParticipantSpawnToolPanelExpandsFullFinalResponse(t *testing.T) {
 			if strings.Contains(summary, "critical middle finding") {
 				t.Fatalf("summarized participant Spawn unexpectedly showed hidden middle output:\n%s", summary)
 			}
-			if !model.tryToggleACPToolPanelToken(block.BlockID(), acpToolPanelClickToken(callID)) {
+			if !model.tryToggleFoldToken(block.BlockID(), acpToolPanelClickToken(callID)) {
 				t.Fatal("participant Spawn panel click could not reveal full FinalResponse")
 			}
 			full := joinRenderedPlain(block.Render(BlockRenderContext{

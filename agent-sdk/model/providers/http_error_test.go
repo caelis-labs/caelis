@@ -47,7 +47,7 @@ func TestStatusErrorDoesNotTreatBackpressureTokenMessageAsOverflow(t *testing.T)
 	if !model.IsRetryableLLMError(err) {
 		t.Fatalf("statusError() = %v, want retryable error", err)
 	}
-	if got := model.ErrorCodeOf(err); got != errorcode.RateLimited {
-		t.Fatalf("ErrorCodeOf() = %q, want rate_limited", got)
+	if got := errorcode.CodeOf(err); got != errorcode.RateLimited {
+		t.Fatalf("CodeOf() = %q, want rate_limited", got)
 	}
 }

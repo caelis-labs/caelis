@@ -46,25 +46,3 @@ func TestAppendRunNamesFiltersAddressabilityAndAgentIdentity(t *testing.T) {
 		t.Fatalf("RunNameAllowed() accepted wrong run: %#v", runs)
 	}
 }
-
-func TestRunFromParticipantAddressability(t *testing.T) {
-	tests := []struct {
-		name        string
-		kind        string
-		role        string
-		addressable bool
-	}{
-		{name: "ACP sidecar", kind: "acp", role: "sidecar", addressable: true},
-		{name: "normalized ACP sidecar", kind: " ACP ", role: " SideCar ", addressable: true},
-		{name: "delegated ACP", kind: "acp", role: "delegated", addressable: false},
-		{name: "non-ACP sidecar", kind: "builtin", role: "sidecar", addressable: false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			run := RunFromParticipant("@lina", "helper", tt.kind, tt.role)
-			if run.Name != "helper(lina)" || run.Agent != "helper" || run.Addressable != tt.addressable {
-				t.Fatalf("RunFromParticipant() = %#v, want addressable=%v", run, tt.addressable)
-			}
-		})
-	}
-}

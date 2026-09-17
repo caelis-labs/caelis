@@ -72,18 +72,6 @@ func (e *Error) Error() string {
 
 func (e *Error) Unwrap() error { return e.Cause }
 
-func NoActiveRunError(message string) *Error {
-	if message == "" {
-		message = "gateway: no active run is available for this session"
-	}
-	return &Error{
-		Kind:        KindConflict,
-		Code:        CodeNoActiveRun,
-		UserVisible: true,
-		Message:     message,
-	}
-}
-
 func guardianUnavailableError(cause error) *Error {
 	return &Error{
 		Kind:        KindUnavailable,
@@ -93,22 +81,6 @@ func guardianUnavailableError(cause error) *Error {
 		Message:     "guardian_unavailable: automatic review could not produce a valid decision; this action was not executed. This is not a risk rejection. Other task work may continue; do not repeatedly resubmit this approval.",
 		Detail:      "guardian_execution_unavailable",
 		Cause:       cause,
-	}
-}
-
-func EventError(err error) *Error {
-	if err == nil {
-		return nil
-	}
-	var gatewayErr *Error
-	if errors.As(err, &gatewayErr) {
-		return gatewayErr
-	}
-	return &Error{
-		Kind:    KindInternal,
-		Code:    CodeInternal,
-		Message: err.Error(),
-		Cause:   err,
 	}
 }
 

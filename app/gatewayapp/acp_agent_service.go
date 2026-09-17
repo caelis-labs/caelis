@@ -105,14 +105,6 @@ func spawnedApprovalMode(cfg stackRuntimeConfig) string {
 	return cfg.ApprovalMode
 }
 
-func (s *runtimeComposition) configuredAssembly(base assembly.ResolvedAssembly, plugins []PluginConfig, runtimeCfg stackRuntimeConfig) (assembly.ResolvedAssembly, error) {
-	contributions, err := resolveGatewayPluginContributions(plugins)
-	if err != nil {
-		return assembly.ResolvedAssembly{}, err
-	}
-	return s.configuredAssemblyWithPluginAgents(base, contributions.Agents, runtimeCfg)
-}
-
 func (s *runtimeComposition) configuredAssemblyWithPluginAgents(base assembly.ResolvedAssembly, pluginAgents []pluginapi.AgentRegistration, runtimeCfg stackRuntimeConfig) (assembly.ResolvedAssembly, error) {
 	process := s.runtimeProcessSnapshot()
 	self, err := defaultSpawnedSelfACPAgent(defaultSpawnedSelfACPAgentConfig{

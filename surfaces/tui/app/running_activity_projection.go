@@ -156,15 +156,6 @@ func isForegroundRunningActivityScope(scope ACPProjectionScope) bool {
 	return scope == ACPProjectionMain || scope == ACPProjectionParticipant
 }
 
-// applyToolRunningActivity intentionally projects only operations that usually
-// remain pending on external work. Short local and unknown tools leave the
-// current model phase unchanged; add a named case when a new tool has reliable
-// long-running semantics instead of inferring activity from text or a timeout.
-func (m *Model) applyToolRunningActivity(event TranscriptEvent) {
-	applyToolActivity(&m.runningHintTracker, event, m.taskControlActivityTarget)
-	m.refreshRunningActivity()
-}
-
 func applyToolActivity(tracker *runningHintTracker, event TranscriptEvent, targetFor func(TranscriptEvent) runningActivityTarget) {
 	start := func(phase runningActivityPhase, target runningActivityTarget, key, callID string) {
 		tracker.start(key, phase, target, time.Now(), callID)

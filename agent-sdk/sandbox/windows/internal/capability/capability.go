@@ -344,17 +344,6 @@ func upgradeStore(store *Store, hostUserSID string) (bool, error) {
 	}
 }
 
-func cloneMap(in map[string]string) map[string]string {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make(map[string]string, len(in))
-	for key, value := range in {
-		out[key] = value
-	}
-	return out
-}
-
 func recordBinding(store *Store, scope Scope, binding Binding) (bool, error) {
 	workspaceKey := pathutil.Key(scope.WorkspaceRoot)
 	if current := strings.TrimSpace(store.WorkspaceByRoot[workspaceKey]); current != "" && !strings.EqualFold(current, binding.WorkspaceSID) {
@@ -565,10 +554,6 @@ func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
 
 func stableWorkspaceSID(hostUserSID, workspaceRoot string) string {
 	return stableRootSID(hostUserSID, workspaceRoot)
-}
-
-func stableExternalRootSID(hostUserSID, externalRoot string) string {
-	return stableRootSID(hostUserSID, externalRoot)
 }
 
 func stableRootSID(hostUserSID, root string) string {

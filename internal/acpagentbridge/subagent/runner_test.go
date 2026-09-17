@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -1056,10 +1054,10 @@ func TestRunnerAgentMessageDeltaMergeDoesNotUseOverlapHeuristic(t *testing.T) {
 	t.Parallel()
 
 	run := &childRun{}
-	if got := run.appendAgentMessageLocked("abcabc"); got != "abcabc" {
+	if got, _ := run.appendAgentMessageChunkLocked("", "abcabc"); got != "abcabc" {
 		t.Fatalf("first delta = %q, want abcabc", got)
 	}
-	if got := run.appendAgentMessageLocked("abcXYZ"); got != "abcXYZ" {
+	if got, _ := run.appendAgentMessageChunkLocked("", "abcXYZ"); got != "abcXYZ" {
 		t.Fatalf("overlapping delta = %q, want full incoming chunk", got)
 	}
 	if run.result != "abcabcabcXYZ" {
@@ -1067,10 +1065,10 @@ func TestRunnerAgentMessageDeltaMergeDoesNotUseOverlapHeuristic(t *testing.T) {
 	}
 
 	prefixGrowing := &childRun{}
-	if got := prefixGrowing.appendAgentMessageLocked("a"); got != "a" {
+	if got, _ := prefixGrowing.appendAgentMessageChunkLocked("", "a"); got != "a" {
 		t.Fatalf("first prefix-growing delta = %q, want a", got)
 	}
-	if got := prefixGrowing.appendAgentMessageLocked("ab"); got != "ab" {
+	if got, _ := prefixGrowing.appendAgentMessageChunkLocked("", "ab"); got != "ab" {
 		t.Fatalf("second prefix-growing delta = %q, want exact ab", got)
 	}
 	if prefixGrowing.result != "aab" {
@@ -1089,7 +1087,8 @@ func TestRunnerAgentMessageDeltaMergePreservesMixedLanguageChunks(t *testing.T) 
 	run := &childRun{}
 	var rendered string
 	for _, chunk := range chunks {
-		rendered += run.appendAgentMessageLocked(chunk)
+		delta, _ := run.appendAgentMessageChunkLocked("", chunk)
+		rendered += delta
 	}
 	want := strings.Join(chunks, "")
 	if rendered != want {
@@ -1352,25 +1351,6 @@ func (s *blockingStreams) ObserveTaskOutput(context.Context, output.Event) error
 	close(s.entered)
 	<-s.release
 	return nil
-}
-
-func repoRootForRunnerTest(t *testing.T) string {
-	t.Helper()
-	wd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("os.Getwd() error = %v", err)
-	}
-	dir := wd
-	for {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			return dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			t.Fatal("could not locate repo root")
-		}
-		dir = parent
-	}
 }
 
 func TestRunnerNoticeStaysOutOfPublicResultWithoutTruncatingAssistant(t *testing.T) {

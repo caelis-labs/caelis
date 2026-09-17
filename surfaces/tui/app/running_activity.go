@@ -106,13 +106,6 @@ func (m *Model) refreshRunningActivity() {
 	m.runningActivity = m.runningHintTracker.visible(m.turnRunning())
 }
 
-func (m *Model) runningActivityText() (string, lipgloss.Style) {
-	if m == nil {
-		return "", lipgloss.Style{}
-	}
-	return m.runningActivityStyle(m.runningActivity)
-}
-
 func (m *Model) runningActivityStyle(activity runningActivityState) (string, lipgloss.Style) {
 	label := activity.label()
 	switch activity.Phase {

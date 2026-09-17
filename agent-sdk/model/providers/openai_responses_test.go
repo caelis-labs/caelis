@@ -813,7 +813,7 @@ func TestOpenAIResponsesStatelessMultiTurnRoundTripThroughMessageJSON(t *testing
 	if len(calls) != 1 || calls[0].ID != "call_1" {
 		t.Fatalf("round-tripped tool calls = %#v", calls)
 	}
-	toolResult := model.MessageFromToolResponse(&model.ToolResponse{ID: "call_1", Name: "lookup", Result: map[string]any{"weather": "sunny"}})
+	toolResult := model.NewMessage(model.RoleTool, model.NewToolResultJSONPart("call_1", "lookup", map[string]any{"weather": "sunny"}, false))
 	second, _, _, err := collectOpenAICodexTestResponse(llm, &model.Request{
 		Messages: []model.Message{user, assistant, roundTripMessageJSON(t, toolResult)},
 		Tools:    []model.ToolSpec{tool},
@@ -1008,7 +1008,7 @@ func TestOpenAIResponsesSessionFileStoreRebuildsModelContext(t *testing.T) {
 	if len(calls) != 1 || calls[0].ID != "call_1" {
 		t.Fatalf("provider tool calls = %#v", calls)
 	}
-	toolResult := model.MessageFromToolResponse(&model.ToolResponse{ID: calls[0].ID, Name: calls[0].Name, Result: map[string]any{"weather": "sunny"}})
+	toolResult := model.NewMessage(model.RoleTool, model.NewToolResultJSONPart(calls[0].ID, calls[0].Name, map[string]any{"weather": "sunny"}, false))
 
 	store := sessionfile.NewStore(sessionfile.Config{
 		RootDir:            t.TempDir(),

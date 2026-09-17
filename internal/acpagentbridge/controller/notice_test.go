@@ -29,7 +29,7 @@ func TestACPNoticeHasOneTransientProjectionAndNoModelMessage(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, value := range []*session.Event{event, &decoded} {
-		if _, ok := session.ModelMessageOf(value); ok || session.IsInvocationVisibleEvent(value) || session.IsCanonicalHistoryEvent(value) || len(session.FilterClientReplayEvents([]*session.Event{value})) != 0 {
+		if _, ok := session.ModelMessageOf(value); ok || session.IsInvocationVisibleEvent(value) || session.IsCanonicalHistoryEvent(value) || session.EventMatchesPageVisibility(value, session.EventPageClientReplay) {
 			t.Fatalf("notice became history: %#v", value)
 		}
 		base := projection.EnvelopeBaseFromSessionEvent(session.SessionRef{SessionID: "local"}, value, projection.SessionEventTransport{})

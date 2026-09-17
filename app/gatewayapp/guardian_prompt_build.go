@@ -2,7 +2,6 @@ package gatewayapp
 
 import (
 	"encoding/json"
-	"fmt"
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
@@ -202,12 +201,4 @@ func rawJSONMap(raw []byte) map[string]any {
 	var out map[string]any
 	_ = json.Unmarshal(raw, &out)
 	return out
-}
-
-func mustPrettyJSON(value any) string {
-	raw, err := json.MarshalIndent(value, "", "  ")
-	if err != nil {
-		return fmt.Sprint(value)
-	}
-	return string(raw)
 }

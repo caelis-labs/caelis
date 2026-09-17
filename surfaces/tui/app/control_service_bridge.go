@@ -698,10 +698,6 @@ func executeControlPromptResult(ctx context.Context, service ControlServices, se
 // Helpers
 // ---------------------------------------------------------------------------
 
-func appendAgentSlashCommands(service ControlServices, commands []string) []string {
-	return appendAgentSlashCommandsWithContext(context.Background(), service, commands)
-}
-
 func appendAgentSlashCommandsWithContext(ctx context.Context, service controlprompt.RouterService, commands []string) []string {
 	ctx = contextOrBackground(ctx)
 	if len(commands) == 0 {
@@ -728,10 +724,6 @@ func tuiDirectAgentRuns(status controlprompt.AgentStatusSnapshot) []controlagent
 		runs = append(runs, controlagents.DirectRunFromParticipant(participant.Label, participant.Kind, participant.Role, participant.Source))
 	}
 	return runs
-}
-
-func refreshAgentSlashCommandsViaSend(service ControlServices, send func(tea.Msg)) {
-	refreshAgentSlashCommandsViaSendWithContext(context.Background(), service, send)
 }
 
 func refreshAgentSlashCommandsViaSendWithContext(ctx context.Context, service controlprompt.RouterService, send func(tea.Msg)) {
@@ -803,19 +795,6 @@ func statusModelDisplay(model string) string {
 	return normalizeStatusModel(model)
 }
 
-func refreshStatusViaSend(service controlprompt.StatusService, send func(tea.Msg)) {
-	refreshStatusViaSendWithContext(context.Background(), service, send)
-}
-
-func refreshStatusViaSendWithContext(ctx context.Context, service controlprompt.StatusService, send func(tea.Msg)) {
-	ctx = contextOrBackground(ctx)
-	status, err := service.Status(ctx)
-	if err != nil {
-		return
-	}
-	sendStatusUpdate(send, status)
-}
-
 func approvalCommandPreview(raw map[string]any) string {
 	if len(raw) == 0 {
 		return ""
@@ -828,18 +807,6 @@ func approvalCommandPreview(raw map[string]any) string {
 		return ""
 	}
 	return compactString(string(data), 240)
-}
-
-func approvalRawInputFromJSON(raw string) map[string]any {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return nil
-	}
-	var decoded map[string]any
-	if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
-		return nil
-	}
-	return decoded
 }
 
 type approvalSubmitter interface {
@@ -860,30 +827,6 @@ func sendApprovalPrompt(ctx context.Context, turn approvalSubmitter, req *approv
 		defer cancel()
 		awaitApprovalPrompt(ctx, turn, req, responses, send)
 	}()
-}
-
-func isAutomaticApprovalEvent(req *approvalPayload) bool {
-	if req == nil {
-		return false
-	}
-	return strings.EqualFold(strings.TrimSpace(req.DecisionSource), "auto-review") ||
-		strings.TrimSpace(req.ReviewStatus) != "" ||
-		strings.TrimSpace(req.ReviewID) != ""
-}
-
-func automaticApprovalReviewDisplayText(req *approvalPayload) string {
-	if req == nil {
-		return ""
-	}
-	switch req.ReviewStatus {
-	case approvalReviewStatusApproved, approvalReviewStatusDenied, approvalReviewStatusTimedOut, approvalReviewStatusFailed, "needs_user", "needs user", "needs-user":
-		return firstNonEmpty(strings.TrimSpace(req.ReviewText), strings.TrimSpace(req.ReviewStatus))
-	default:
-		if text := strings.TrimSpace(req.ReviewText); text != "" {
-			return text
-		}
-		return ""
-	}
 }
 
 func awaitApprovalPrompt(ctx context.Context, turn approvalSubmitter, req *approvalPayload, responses <-chan PromptResponse, send func(tea.Msg)) {

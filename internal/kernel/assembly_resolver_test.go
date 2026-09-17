@@ -478,51 +478,6 @@ func TestAssemblyResolverRejectsUnknownMode(t *testing.T) {
 	}
 }
 
-func TestCurrentSessionModeUsesSessionModeKey(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name  string
-		state map[string]any
-		want  string
-	}{
-		{name: "empty defaults to auto-review", state: map[string]any{}, want: "auto-review"},
-		{name: "approval mode key wins", state: map[string]any{StateCurrentApprovalMode: "auto-review"}, want: "auto-review"},
-	}
-
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			if got := CurrentSessionMode(tt.state); got != tt.want {
-				t.Fatalf("CurrentSessionMode(%#v) = %q, want %q", tt.state, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestCurrentApprovalModeIgnoresLegacySandboxState(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name  string
-		state map[string]any
-		want  ApprovalMode
-	}{
-		{name: "empty defaults to auto-review", state: map[string]any{}, want: ApprovalModeAutoReview},
-		{name: "unknown approval mode defaults to auto-review", state: map[string]any{StateCurrentApprovalMode: "unknown"}, want: ApprovalModeAutoReview},
-		{name: "approval mode key wins", state: map[string]any{StateCurrentApprovalMode: "manual"}, want: ApprovalModeManual},
-	}
-
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			if got := CurrentApprovalMode(tt.state); got != tt.want {
-				t.Fatalf("CurrentApprovalMode(%#v) = %q, want %q", tt.state, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestCurrentApprovalModeOrDefaultUsesFallbackOnlyWithoutOverride(t *testing.T) {
 	t.Parallel()
 

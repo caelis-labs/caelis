@@ -138,11 +138,6 @@ type legacyV1ParticipantBinding struct {
 	ControllerRef        string              `json:"controller_ref,omitempty"`
 }
 
-func decodeLegacyV1Document(data []byte) (persistedDocument, error) {
-	doc, _, err := decodeLegacyV1DocumentWithReport(data)
-	return doc, err
-}
-
 func decodeLegacyV1DocumentWithReport(data []byte) (persistedDocument, MigrationReport, error) {
 	var legacy legacyV1Document
 	if err := json.Unmarshal(data, &legacy); err != nil {

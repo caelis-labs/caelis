@@ -18,10 +18,6 @@ func subagentTerminalID(taskID string) string {
 	return "subagent-" + taskID
 }
 
-func allocateSubagentHandle(activeSession session.Session, agent string) string {
-	return agenthandle.Allocate(subagentHandlesFromSession(activeSession), agent)
-}
-
 func (tm *taskRuntime) reserveTaskHandle(ctx context.Context, activeSession session.Session, ref session.SessionRef, kind taskapi.Kind, hint string) (string, error) {
 	return tm.reserveTaskHandleValue(ctx, activeSession, ref, kind, hint, "")
 }

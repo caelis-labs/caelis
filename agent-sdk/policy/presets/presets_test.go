@@ -22,10 +22,10 @@ import (
 	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
 )
 
-func TestAutoReviewModeAllowsWorkspaceWrites(t *testing.T) {
+func TestWorkspaceWriteModeAllowsWorkspaceWrites(t *testing.T) {
 	t.Parallel()
 
-	decision, err := AutoReviewMode().DecideTool(context.Background(), writeCtx(filepath.Join(testWorkspaceRoot(), "notes.md")))
+	decision, err := WorkspaceWriteMode().DecideTool(context.Background(), writeCtx(filepath.Join(testWorkspaceRoot(), "notes.md")))
 	if err != nil {
 		t.Fatalf("DecideTool() error = %v", err)
 	}
@@ -33,7 +33,7 @@ func TestAutoReviewModeAllowsWorkspaceWrites(t *testing.T) {
 		t.Fatalf("Action = %q, want allow", decision.Action)
 	}
 
-	decision, err = AutoReviewMode().DecideTool(context.Background(), writeCtx(filepath.Join(testWorkspaceRoot(), "main.go")))
+	decision, err = WorkspaceWriteMode().DecideTool(context.Background(), writeCtx(filepath.Join(testWorkspaceRoot(), "main.go")))
 	if err != nil {
 		t.Fatalf("DecideTool() error = %v", err)
 	}
@@ -152,7 +152,7 @@ func TestDangerFullAccessModeDoesNotParseCommandInput(t *testing.T) {
 func TestDefaultModeRestrictsWriteRoots(t *testing.T) {
 	t.Parallel()
 
-	decision, err := AutoReviewMode().DecideTool(context.Background(), writeCtx(filepath.Join(testWorkspaceRoot(), "main.go")))
+	decision, err := WorkspaceWriteMode().DecideTool(context.Background(), writeCtx(filepath.Join(testWorkspaceRoot(), "main.go")))
 	if err != nil {
 		t.Fatalf("DecideTool() error = %v", err)
 	}
@@ -160,7 +160,7 @@ func TestDefaultModeRestrictsWriteRoots(t *testing.T) {
 		t.Fatalf("Action = %q, want allow", decision.Action)
 	}
 
-	decision, err = AutoReviewMode().DecideTool(context.Background(), writeCtx(testOutsidePath()))
+	decision, err = WorkspaceWriteMode().DecideTool(context.Background(), writeCtx(testOutsidePath()))
 	if err != nil {
 		t.Fatalf("DecideTool() error = %v", err)
 	}
@@ -181,7 +181,7 @@ func TestDefaultModeRejectsMalformedToolInput(t *testing.T) {
 	input := writeCtx(filepath.Join(testWorkspaceRoot(), "main.go"))
 	input.Call.Input = []byte(`{"path":`)
 
-	_, err := AutoReviewMode().DecideTool(context.Background(), input)
+	_, err := WorkspaceWriteMode().DecideTool(context.Background(), input)
 	if err == nil {
 		t.Fatal("DecideTool() error = nil, want malformed input error")
 	}
@@ -216,7 +216,7 @@ func TestDefaultModeAllowsExplicitWebAndMCPTools(t *testing.T) {
 		},
 	}
 	for _, input := range tests {
-		decision, err := AutoReviewMode().DecideTool(context.Background(), input)
+		decision, err := WorkspaceWriteMode().DecideTool(context.Background(), input)
 		if err != nil {
 			t.Fatalf("%s DecideTool() error = %v", input.Tool.Name, err)
 		}
@@ -240,7 +240,7 @@ func TestDefaultModeAllowsAssembledToolsWithoutANameAllowlist(t *testing.T) {
 		},
 	}
 	for _, input := range tests {
-		decision, err := AutoReviewMode().DecideTool(context.Background(), input)
+		decision, err := WorkspaceWriteMode().DecideTool(context.Background(), input)
 		if err != nil {
 			t.Fatalf("%s DecideTool() error = %v", input.Tool.Name, err)
 		}
@@ -276,7 +276,7 @@ func TestDefaultModeAllowsUserConfigReadsButRequiresWriteGrant(t *testing.T) {
 
 	readInput := readCtx(configPath)
 	readInput.Options.TempRoot = tempRoot
-	decision, err := AutoReviewMode().DecideTool(context.Background(), readInput)
+	decision, err := WorkspaceWriteMode().DecideTool(context.Background(), readInput)
 	if err != nil {
 		t.Fatalf("READ DecideTool() error = %v", err)
 	}
@@ -286,7 +286,7 @@ func TestDefaultModeAllowsUserConfigReadsButRequiresWriteGrant(t *testing.T) {
 
 	writeInput := writeCtx(configPath)
 	writeInput.Options.TempRoot = tempRoot
-	decision, err = AutoReviewMode().DecideTool(context.Background(), writeInput)
+	decision, err = WorkspaceWriteMode().DecideTool(context.Background(), writeInput)
 	if err != nil {
 		t.Fatalf("WRITE DecideTool() error = %v", err)
 	}
@@ -312,7 +312,7 @@ func TestDefaultModeReadToolsDoNotRequireExplicitReadGrantsForOrdinaryReads(t *t
 	}
 	for _, input := range cases {
 		input.Options.ExtraReadRoots = []string{extraReadRoot}
-		decision, err := AutoReviewMode().DecideTool(context.Background(), input)
+		decision, err := WorkspaceWriteMode().DecideTool(context.Background(), input)
 		if err != nil {
 			t.Fatalf("%s DecideTool() error = %v", input.Tool.Name, err)
 		}
@@ -335,7 +335,7 @@ func TestDefaultModeCommandConstraintsDoNotProjectPolicyReadGrants(t *testing.T)
 	input := commandCtx("go test ./...", false)
 	input.Options.ExtraReadRoots = []string{extraReadRoot}
 
-	decision, err := AutoReviewMode().DecideTool(context.Background(), input)
+	decision, err := WorkspaceWriteMode().DecideTool(context.Background(), input)
 	if err != nil {
 		t.Fatalf("RUN_COMMAND DecideTool() error = %v", err)
 	}
@@ -367,7 +367,7 @@ func TestDefaultModeDeniesSensitiveUserConfigReadsByDefault(t *testing.T) {
 		{name: "glob gh", input: globCtx(filepath.Join(home, ".config", "gh"), "*")},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			decision, err := AutoReviewMode().DecideTool(context.Background(), test.input)
+			decision, err := WorkspaceWriteMode().DecideTool(context.Background(), test.input)
 			if err != nil {
 				t.Fatalf("DecideTool() error = %v", err)
 			}
@@ -390,7 +390,7 @@ func TestDefaultModeAllowsExplicitSensitiveUserConfigReadRoot(t *testing.T) {
 		globCtx(ghRoot, "*"),
 	} {
 		input.Options.ExtraReadRoots = []string{ghRoot}
-		decision, err := AutoReviewMode().DecideTool(context.Background(), input)
+		decision, err := WorkspaceWriteMode().DecideTool(context.Background(), input)
 		if err != nil {
 			t.Fatalf("%s DecideTool() error = %v", input.Tool.Name, err)
 		}
@@ -403,7 +403,7 @@ func TestDefaultModeAllowsExplicitSensitiveUserConfigReadRoot(t *testing.T) {
 func TestDefaultModeOrdinaryCommandRequiresOnlyEscalationApproval(t *testing.T) {
 	t.Parallel()
 
-	decision, err := AutoReviewMode().DecideTool(context.Background(), commandCtx("go test ./...", false))
+	decision, err := WorkspaceWriteMode().DecideTool(context.Background(), commandCtx("go test ./...", false))
 	if err != nil {
 		t.Fatalf("DecideTool() error = %v", err)
 	}
@@ -411,7 +411,7 @@ func TestDefaultModeOrdinaryCommandRequiresOnlyEscalationApproval(t *testing.T) 
 		t.Fatalf("Action = %q, want allow", decision.Action)
 	}
 
-	decision, err = AutoReviewMode().DecideTool(context.Background(), commandCtx("go test ./...", true))
+	decision, err = WorkspaceWriteMode().DecideTool(context.Background(), commandCtx("go test ./...", true))
 	if err != nil {
 		t.Fatalf("DecideTool() error = %v", err)
 	}
@@ -434,7 +434,7 @@ func TestDefaultModeExplicitCommandEscalationsRouteHost(t *testing.T) {
 		"git push origin main",
 		outsideDelete,
 	} {
-		decision, err := AutoReviewMode().DecideTool(context.Background(), commandCtx(command, true))
+		decision, err := WorkspaceWriteMode().DecideTool(context.Background(), commandCtx(command, true))
 		if err != nil {
 			t.Fatalf("DecideTool(%q) error = %v", command, err)
 		}
@@ -460,7 +460,7 @@ func TestDefaultModeAddsDeveloperCacheWriteRoots(t *testing.T) {
 	t.Setenv("CARGO_HOME", filepath.Join(home, ".custom-cargo"))
 	t.Setenv("GRADLE_USER_HOME", filepath.Join(home, ".custom-gradle"))
 
-	decision, err := AutoReviewMode().DecideTool(context.Background(), commandCtx("go test ./...", false))
+	decision, err := WorkspaceWriteMode().DecideTool(context.Background(), commandCtx("go test ./...", false))
 	if err != nil {
 		t.Fatalf("DecideTool() error = %v", err)
 	}
@@ -497,7 +497,7 @@ func TestDefaultModeAddsDeveloperCacheWriteRoots(t *testing.T) {
 func TestDefaultModeSkipsDefaultTempWriteRootOnWindows(t *testing.T) {
 	t.Parallel()
 
-	decision, err := AutoReviewMode().DecideTool(context.Background(), commandCtx("go test ./...", false))
+	decision, err := WorkspaceWriteMode().DecideTool(context.Background(), commandCtx("go test ./...", false))
 	if err != nil {
 		t.Fatalf("DecideTool() error = %v", err)
 	}
@@ -546,7 +546,7 @@ func TestDefaultModeKeepsCommandNetworkEnabled(t *testing.T) {
 		t.Run(tt.command, func(t *testing.T) {
 			t.Parallel()
 
-			decision, err := AutoReviewMode().DecideTool(context.Background(), commandCtx(tt.command, false))
+			decision, err := WorkspaceWriteMode().DecideTool(context.Background(), commandCtx(tt.command, false))
 			if err != nil {
 				t.Fatalf("DecideTool() error = %v", err)
 			}
@@ -566,7 +566,7 @@ func TestDefaultModeAllowsConfigToDisableSandboxNetwork(t *testing.T) {
 	disabled := false
 	input := commandCtx("go test ./...", false)
 	input.Options.NetworkEnabled = &disabled
-	decision, err := AutoReviewMode().DecideTool(context.Background(), input)
+	decision, err := WorkspaceWriteMode().DecideTool(context.Background(), input)
 	if err != nil {
 		t.Fatalf("DecideTool() error = %v", err)
 	}
@@ -603,7 +603,7 @@ func TestDefaultModeAllowsReadOnlyGitCommands(t *testing.T) {
 		t.Run(command, func(t *testing.T) {
 			t.Parallel()
 
-			decision, err := AutoReviewMode().DecideTool(context.Background(), commandCtx(command, false))
+			decision, err := WorkspaceWriteMode().DecideTool(context.Background(), commandCtx(command, false))
 			if err != nil {
 				t.Fatalf("DecideTool() error = %v", err)
 			}
@@ -649,7 +649,7 @@ func TestDefaultModeKeepsGitMetadataCommandsInSandbox(t *testing.T) {
 		t.Run(tt.command, func(t *testing.T) {
 			t.Parallel()
 
-			decision, err := AutoReviewMode().DecideTool(context.Background(), commandCtx(tt.command, false))
+			decision, err := WorkspaceWriteMode().DecideTool(context.Background(), commandCtx(tt.command, false))
 			if err != nil {
 				t.Fatalf("DecideTool() error = %v", err)
 			}
@@ -674,7 +674,7 @@ func TestDefaultModeRequiresApprovalForExplicitGitEscalation(t *testing.T) {
 		t.Run(command+" escalated", func(t *testing.T) {
 			t.Parallel()
 
-			decision, err := AutoReviewMode().DecideTool(context.Background(), commandCtx(command, true))
+			decision, err := WorkspaceWriteMode().DecideTool(context.Background(), commandCtx(command, true))
 			if err != nil {
 				t.Fatalf("DecideTool() error = %v", err)
 			}
@@ -762,7 +762,7 @@ func TestApprovalMetadataCarriesRuntimeSandboxPolicy(t *testing.T) {
 		Permission:       sandbox.PermissionWorkspaceWrite,
 		ReadOnlySubpaths: []string{".git"},
 	}
-	decision, err := AutoReviewMode().DecideTool(context.Background(), input)
+	decision, err := WorkspaceWriteMode().DecideTool(context.Background(), input)
 	if err != nil {
 		t.Fatalf("DecideTool() error = %v", err)
 	}
@@ -787,7 +787,7 @@ func TestDefaultModeRequiresApprovalWhenDefaultCommandWouldRunOnHost(t *testing.
 			Permission: sandbox.PermissionFullAccess,
 		},
 	}
-	decision, err := AutoReviewMode().DecideTool(context.Background(), input)
+	decision, err := WorkspaceWriteMode().DecideTool(context.Background(), input)
 	if err != nil {
 		t.Fatalf("DecideTool() error = %v", err)
 	}
@@ -851,7 +851,7 @@ func TestDefaultModeRequiresApprovalForDestructiveGitCommands(t *testing.T) {
 		t.Run(command, func(t *testing.T) {
 			t.Parallel()
 
-			decision, err := AutoReviewMode().DecideTool(context.Background(), commandCtx(command, false))
+			decision, err := WorkspaceWriteMode().DecideTool(context.Background(), commandCtx(command, false))
 			if err != nil {
 				t.Fatalf("DecideTool() error = %v", err)
 			}
@@ -865,7 +865,7 @@ func TestDefaultModeRequiresApprovalForDestructiveGitCommands(t *testing.T) {
 	}
 
 	for _, command := range []string{"git clean -fd", "git reset --hard", "git push --force origin main"} {
-		decision, err := AutoReviewMode().DecideTool(context.Background(), commandCtx(command, true))
+		decision, err := WorkspaceWriteMode().DecideTool(context.Background(), commandCtx(command, true))
 		if err != nil {
 			t.Fatalf("DecideTool(%q escalated) error = %v", command, err)
 		}
@@ -885,7 +885,7 @@ func TestDefaultModeGitPushApprovalPreservesRequestedRoute(t *testing.T) {
 	t.Parallel()
 
 	for _, command := range []string{"git push origin main", "git push --force origin main"} {
-		decision, err := AutoReviewMode().DecideTool(context.Background(), commandCtx(command, false))
+		decision, err := WorkspaceWriteMode().DecideTool(context.Background(), commandCtx(command, false))
 		if err != nil {
 			t.Fatalf("DecideTool(%q) error = %v", command, err)
 		}
@@ -893,7 +893,7 @@ func TestDefaultModeGitPushApprovalPreservesRequestedRoute(t *testing.T) {
 			t.Fatalf("Decision = %#v, want sandbox approval", decision)
 		}
 
-		decision, err = AutoReviewMode().DecideTool(context.Background(), commandCtx(command, true))
+		decision, err = WorkspaceWriteMode().DecideTool(context.Background(), commandCtx(command, true))
 		if err != nil {
 			t.Fatalf("DecideTool(%q escalated) error = %v", command, err)
 		}
@@ -916,7 +916,7 @@ func TestDefaultModeDoesNotClassifyCommandTextAsDangerous(t *testing.T) {
 		t.Run(command, func(t *testing.T) {
 			t.Parallel()
 
-			decision, err := AutoReviewMode().DecideTool(context.Background(), commandCtx(command, false))
+			decision, err := WorkspaceWriteMode().DecideTool(context.Background(), commandCtx(command, false))
 			if err != nil {
 				t.Fatalf("DecideTool() error = %v", err)
 			}
@@ -954,7 +954,7 @@ func TestDefaultModeExplicitEscalationRequiresJustification(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			decision, err := AutoReviewMode().DecideTool(context.Background(), commandCtxWithArgs(tt.args))
+			decision, err := WorkspaceWriteMode().DecideTool(context.Background(), commandCtxWithArgs(tt.args))
 			if err != nil {
 				t.Fatalf("DecideTool() error = %v", err)
 			}
@@ -973,7 +973,7 @@ func TestDefaultModeExplicitEscalationRequiresJustification(t *testing.T) {
 func TestDefaultModeEscalationApprovalCarriesPromptMetadata(t *testing.T) {
 	t.Parallel()
 
-	decision, err := AutoReviewMode().DecideTool(context.Background(), commandCtxWithArgs(map[string]any{
+	decision, err := WorkspaceWriteMode().DecideTool(context.Background(), commandCtxWithArgs(map[string]any{
 		"command":             "go test ./...",
 		"sandbox_permissions": "require_escalated",
 		"justification":       "Do you want to run tests outside the sandbox?",
@@ -1024,7 +1024,7 @@ func TestDefaultModeIgnoresRemovedSandboxPermissionFields(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			decision, err := AutoReviewMode().DecideTool(context.Background(), commandCtxWithArgs(tt.args))
+			decision, err := WorkspaceWriteMode().DecideTool(context.Background(), commandCtxWithArgs(tt.args))
 			if err != nil {
 				t.Fatalf("DecideTool() error = %v", err)
 			}
@@ -1049,7 +1049,7 @@ func TestDefaultModeAllowsRelativeFilesystemPathsWithinWorkspace(t *testing.T) {
 		globCtx(".", "README*"),
 	}
 	for _, input := range cases {
-		decision, err := AutoReviewMode().DecideTool(context.Background(), input)
+		decision, err := WorkspaceWriteMode().DecideTool(context.Background(), input)
 		if err != nil {
 			t.Fatalf("%s DecideTool() error = %v", input.Tool.Name, err)
 		}
@@ -1068,7 +1068,7 @@ func TestDefaultModeAllowsRelativeReadPathsOutsideWorkspace(t *testing.T) {
 		globCtx("..", "*.md"),
 	}
 	for _, input := range cases {
-		decision, err := AutoReviewMode().DecideTool(context.Background(), input)
+		decision, err := WorkspaceWriteMode().DecideTool(context.Background(), input)
 		if err != nil {
 			t.Fatalf("%s DecideTool() error = %v", input.Tool.Name, err)
 		}
@@ -1081,7 +1081,7 @@ func TestDefaultModeAllowsRelativeReadPathsOutsideWorkspace(t *testing.T) {
 func TestFullAccessBlocksDangerousCommands(t *testing.T) {
 	t.Parallel()
 
-	decision, err := AutoReviewMode().DecideTool(context.Background(), commandCtx("rm -rf /", false))
+	decision, err := WorkspaceWriteMode().DecideTool(context.Background(), commandCtx("rm -rf /", false))
 	if err != nil {
 		t.Fatalf("DecideTool() error = %v", err)
 	}
@@ -1089,7 +1089,7 @@ func TestFullAccessBlocksDangerousCommands(t *testing.T) {
 		t.Fatalf("Action = %q, want deny", decision.Action)
 	}
 
-	decision, err = AutoReviewMode().DecideTool(context.Background(), commandCtx("rm -rf $HOME", false))
+	decision, err = WorkspaceWriteMode().DecideTool(context.Background(), commandCtx("rm -rf $HOME", false))
 	if err != nil {
 		t.Fatalf("DecideTool() error = %v", err)
 	}
@@ -1097,7 +1097,7 @@ func TestFullAccessBlocksDangerousCommands(t *testing.T) {
 		t.Fatalf("Action = %q, want deny for home target", decision.Action)
 	}
 
-	decision, err = AutoReviewMode().DecideTool(context.Background(), commandCtx("rm $HOME -rf", false))
+	decision, err = WorkspaceWriteMode().DecideTool(context.Background(), commandCtx("rm $HOME -rf", false))
 	if err != nil {
 		t.Fatalf("DecideTool() error = %v", err)
 	}
@@ -1105,7 +1105,7 @@ func TestFullAccessBlocksDangerousCommands(t *testing.T) {
 		t.Fatalf("Action = %q, want deny for trailing flags on home target", decision.Action)
 	}
 
-	decision, err = AutoReviewMode().DecideTool(context.Background(), commandCtx("echo ready\nrm -rf /", false))
+	decision, err = WorkspaceWriteMode().DecideTool(context.Background(), commandCtx("echo ready\nrm -rf /", false))
 	if err != nil {
 		t.Fatalf("DecideTool() error = %v", err)
 	}
@@ -1138,7 +1138,7 @@ func TestRecursiveDeleteInsideWritableRootsIsAllowed(t *testing.T) {
 		command := command
 		t.Run(command, func(t *testing.T) {
 			t.Parallel()
-			decision, err := AutoReviewMode().DecideTool(context.Background(), commandCtx(command, false))
+			decision, err := WorkspaceWriteMode().DecideTool(context.Background(), commandCtx(command, false))
 			if err != nil {
 				t.Fatalf("DecideTool(%q) error = %v", command, err)
 			}
@@ -1154,14 +1154,14 @@ func TestRecursiveDeleteOutsideRootsRequiresApproval(t *testing.T) {
 
 	outside := testOutsidePath()
 	command := "rm -rf " + outside
-	decision, err := AutoReviewMode().DecideTool(context.Background(), commandCtx(command, false))
+	decision, err := WorkspaceWriteMode().DecideTool(context.Background(), commandCtx(command, false))
 	if err != nil {
 		t.Fatalf("DecideTool() error = %v", err)
 	}
 	if decision.Action != policy.ActionAskApproval || decision.Constraints.Route != sandbox.RouteSandbox {
 		t.Fatalf("Decision = %#v, want sandbox approval for outside recursive delete", decision)
 	}
-	decision, err = AutoReviewMode().DecideTool(context.Background(), commandCtx(command, true))
+	decision, err = WorkspaceWriteMode().DecideTool(context.Background(), commandCtx(command, true))
 	if err != nil {
 		t.Fatalf("DecideTool(escalated) error = %v", err)
 	}
@@ -1175,7 +1175,7 @@ func TestSensitiveWritePathsRemainDenied(t *testing.T) {
 	setHomeForPresetsTest(t, home)
 	secretPath := filepath.Join(home, ".ssh", "id_rsa")
 
-	decision, err := AutoReviewMode().DecideTool(context.Background(), writeCtx(secretPath))
+	decision, err := WorkspaceWriteMode().DecideTool(context.Background(), writeCtx(secretPath))
 	if err != nil {
 		t.Fatalf("DecideTool() error = %v", err)
 	}
@@ -1343,10 +1343,6 @@ func testWorkspaceRoot() string {
 
 func testWorkspaceProjectRoot() string {
 	return filepath.Join(testWorkspaceRoot(), "project")
-}
-
-func testWorkspaceGitRoot() string {
-	return filepath.Join(testWorkspaceRoot(), ".git")
 }
 
 func testTempRoot() string {

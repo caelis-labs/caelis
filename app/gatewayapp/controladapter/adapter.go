@@ -131,13 +131,6 @@ func (d *assembler) WorkspaceDir() string {
 	return strings.TrimSpace(d.deps.Session.Workspace.CWD)
 }
 
-func (d *assembler) requireSession() (session.Session, error) {
-	if activeSession, ok := d.currentSession(); ok {
-		return activeSession, nil
-	}
-	return session.Session{}, fmt.Errorf("app/gatewayapp/controladapter: no bound session")
-}
-
 func (d *assembler) currentSession() (session.Session, bool) {
 	d.mu.Lock()
 	defer d.mu.Unlock()

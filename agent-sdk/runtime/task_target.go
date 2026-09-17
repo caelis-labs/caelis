@@ -196,17 +196,6 @@ func validateTaskControlPrincipal(principal session.ActorKind) error {
 	}
 }
 
-func (tm *taskRuntime) lookupControlTarget(ctx context.Context, ref session.SessionRef, taskID string) (taskControlTarget, error) {
-	if task, err := tm.lookupCommand(ctx, ref, taskID); err == nil {
-		return commandControlTarget{runtime: tm, task: task}, nil
-	}
-	task, err := tm.lookupSubagent(ctx, ref, taskID)
-	if err != nil {
-		return nil, err
-	}
-	return subagentControlTarget{runtime: tm, task: task}, nil
-}
-
 type commandControlTarget struct {
 	runtime *taskRuntime
 	task    *commandTask

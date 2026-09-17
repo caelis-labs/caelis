@@ -113,15 +113,3 @@ func mergeLinkedSubagentOutput(ev *SubagentEvent, output string, messageID strin
 	ev.OutputNarrative = ev.OutputNarrative || outputNarrative
 	ev.OutputSynthetic = false
 }
-
-func spawnContinuationDisplayArgs(existing string, prompt string) string {
-	prompt = strings.Join(strings.Fields(strings.TrimSpace(prompt)), " ")
-	if prompt == "" {
-		return strings.TrimSpace(existing)
-	}
-	existing = sanitizeSpawnHeaderArgs(existing)
-	if before, _, ok := strings.Cut(existing, ":"); ok && strings.TrimSpace(before) != "" {
-		return strings.TrimSpace(before) + ": " + prompt
-	}
-	return prompt
-}

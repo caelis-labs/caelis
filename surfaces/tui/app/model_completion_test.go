@@ -1649,36 +1649,36 @@ func TestSlashCompletionRendersDescriptionsWithoutHeaderOrBorder(t *testing.T) {
 	model.slashCandidates = []string{"/model", "/status"}
 	model.slashIndex = 0
 
-	rendered := ansi.Strip(model.renderSlashCommandList())
+	rendered := ansi.Strip(model.renderInputOverlay())
 	if strings.Contains(rendered, "Commands") {
-		t.Fatalf("renderSlashCommandList() = %q, should not show a header", rendered)
+		t.Fatalf("renderInputOverlay() = %q, should not show a header", rendered)
 	}
 	if strings.ContainsAny(rendered, "┌┐└┘│─") || strings.ContainsAny(rendered, "╭╮╰╯│─") {
-		t.Fatalf("renderSlashCommandList() = %q, should not show borders", rendered)
+		t.Fatalf("renderInputOverlay() = %q, should not show borders", rendered)
 	}
 	for _, want := range []string{"/model", "Choose the model, effort", "/status", "Show current provider"} {
 		if !strings.Contains(rendered, want) {
-			t.Fatalf("renderSlashCommandList() = %q, want %q", rendered, want)
+			t.Fatalf("renderInputOverlay() = %q, want %q", rendered, want)
 		}
 	}
 	lines := strings.Split(strings.TrimRight(rendered, "\n"), "\n")
 	if len(lines) != 3 {
-		t.Fatalf("renderSlashCommandList() lines = %#v, want two candidate rows plus footer", lines)
+		t.Fatalf("renderInputOverlay() lines = %#v, want two candidate rows plus footer", lines)
 	}
 	if !strings.Contains(lines[len(lines)-1], "select") {
-		t.Fatalf("renderSlashCommandList() footer = %q, want unified overlay footer", lines[len(lines)-1])
+		t.Fatalf("renderInputOverlay() footer = %q, want unified overlay footer", lines[len(lines)-1])
 	}
 	for _, line := range lines[:len(lines)-1] {
 		if width := displayColumns(line); width != model.completionOverlayRenderedRowWidth() {
-			t.Fatalf("renderSlashCommandList() row width = %d, want %d: %q", width, model.completionOverlayRenderedRowWidth(), line)
+			t.Fatalf("renderInputOverlay() row width = %d, want %d: %q", width, model.completionOverlayRenderedRowWidth(), line)
 		}
 	}
 
 	// 测试大屏幕宽度 >=80 时有边框
 	model.width = 120
-	renderedWithBorder := ansi.Strip(model.renderSlashCommandList())
+	renderedWithBorder := ansi.Strip(model.renderInputOverlay())
 	if !strings.ContainsAny(renderedWithBorder, "┌┐└┘│─") && !strings.ContainsAny(renderedWithBorder, "╭╮╰╯│─") {
-		t.Fatalf("renderSlashCommandList() with width 120 = %q, expected to show borders", renderedWithBorder)
+		t.Fatalf("renderInputOverlay() with width 120 = %q, expected to show borders", renderedWithBorder)
 	}
 }
 
@@ -1691,8 +1691,8 @@ func TestProfileSlashCompletionShowsBoundProviderModelButExecutesStableProfile(t
 	model.setInputText("/")
 	model.syncTextareaFromInput()
 	model.refreshSlashCommands()
-	if got := ansi.Strip(model.renderSlashCommandList()); !strings.Contains(got, "/breeze") || !strings.Contains(got, "openai-codex/gpt-5.6-sol") {
-		t.Fatalf("renderSlashCommandList() = %q, want profile and bound model display", got)
+	if got := ansi.Strip(model.renderInputOverlay()); !strings.Contains(got, "/breeze") || !strings.Contains(got, "openai-codex/gpt-5.6-sol") {
+		t.Fatalf("renderInputOverlay() = %q, want profile and bound model display", got)
 	}
 	model.applySlashCommandCompletion()
 	model.syncTextareaFromInput()
@@ -1738,13 +1738,13 @@ func TestModelCompletionUsesWideDisplayForLongAliases(t *testing.T) {
 	}
 	model.slashArgIndex = 0
 
-	rendered := ansi.Strip(model.renderSlashArgList())
+	rendered := ansi.Strip(model.renderInputOverlay())
 	if !strings.Contains(rendered, alias) {
-		t.Fatalf("renderSlashArgList() = %q, want full model alias %q", rendered, alias)
+		t.Fatalf("renderInputOverlay() = %q, want full model alias %q", rendered, alias)
 	}
 	for _, unwanted := range []string{"configured model alias", "endpoint:", "managed auth"} {
 		if strings.Contains(rendered, unwanted) {
-			t.Fatalf("renderSlashArgList() = %q, should not paint %q", rendered, unwanted)
+			t.Fatalf("renderInputOverlay() = %q, should not paint %q", rendered, unwanted)
 		}
 	}
 }
@@ -1756,14 +1756,14 @@ func TestInputCompletionSelectionsAvoidFocusAccent(t *testing.T) {
 
 	model.slashCandidates = []string{"/help", "/model"}
 	model.slashIndex = 1
-	cases["slash"] = model.renderSlashCommandList()
+	cases["slash"] = model.renderInputOverlay()
 
 	model.mentionPrefix = "@"
 	model.mentionCandidates = []CompletionCandidate{
 		{Value: "docs/readme.md", Display: "docs/readme.md", Detail: "file"},
 	}
 	model.mentionIndex = 0
-	cases["file"] = model.renderMentionList()
+	cases["file"] = model.renderInputOverlay()
 
 	model.slashArgCandidates = []SlashArgCandidate{
 		{Value: "gpt-5.5", Display: "gpt-5.5", Detail: "configured model alias"},
@@ -1771,7 +1771,7 @@ func TestInputCompletionSelectionsAvoidFocusAccent(t *testing.T) {
 	model.slashArgIndex = 0
 	model.slashArgActive = true
 	model.slashArgCommand = "model"
-	cases["slash-arg"] = model.renderSlashArgList()
+	cases["slash-arg"] = model.renderInputOverlay()
 
 	for name, rendered := range cases {
 		assertNoCompletionAccent(t, name, rendered)
@@ -1886,16 +1886,16 @@ func TestFileCompletionListHidesPrefixAndTypeDetail(t *testing.T) {
 		{Value: "docs/providers/openai-compatible/base-url-reference.md", Display: "docs/providers/openai-compatible/base-url-reference.md", Detail: "file"},
 	}
 
-	rendered := ansi.Strip(model.renderMentionList())
+	rendered := ansi.Strip(model.renderInputOverlay())
 
 	for _, unwanted := range []string{"@docs/", "@docs/message.sql", "@docs/providers", "directory", "file"} {
 		if strings.Contains(rendered, unwanted) {
-			t.Fatalf("renderMentionList() = %q, should not contain %q", rendered, unwanted)
+			t.Fatalf("renderInputOverlay() = %q, should not contain %q", rendered, unwanted)
 		}
 	}
 	for _, want := range []string{"docs/", "docs/message.sql", "docs/providers/openai-compatible/base-url-reference.md"} {
 		if !strings.Contains(rendered, want) {
-			t.Fatalf("renderMentionList() = %q, want %q", rendered, want)
+			t.Fatalf("renderInputOverlay() = %q, want %q", rendered, want)
 		}
 	}
 }
@@ -1925,18 +1925,18 @@ func TestFileCompletionFetchesBeyondVisibleWindowAndScrolls(t *testing.T) {
 		}
 	}
 
-	rendered := ansi.Strip(model.renderMentionList())
+	rendered := ansi.Strip(model.renderInputOverlay())
 	if !strings.Contains(rendered, "file-09") {
-		t.Fatalf("renderMentionList() = %q, want selected file-09 visible", rendered)
+		t.Fatalf("renderInputOverlay() = %q, want selected file-09 visible", rendered)
 	}
 	if strings.Contains(rendered, "file-00") {
-		t.Fatalf("renderMentionList() = %q, should have scrolled past file-00", rendered)
+		t.Fatalf("renderInputOverlay() = %q, should have scrolled past file-00", rendered)
 	}
 	if strings.Contains(rendered, "earlier") || strings.Contains(rendered, "more") {
-		t.Fatalf("renderMentionList() = %q, should not contain scroll text rows", rendered)
+		t.Fatalf("renderInputOverlay() = %q, should not contain scroll text rows", rendered)
 	}
-	if !strings.Contains(ansi.Strip(model.renderMentionList()), "select") {
-		t.Fatalf("renderMentionList() should include unified overlay footer")
+	if !strings.Contains(ansi.Strip(model.renderInputOverlay()), "select") {
+		t.Fatalf("renderInputOverlay() should include unified overlay footer")
 	}
 }
 

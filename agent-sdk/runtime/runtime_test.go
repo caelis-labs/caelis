@@ -5247,17 +5247,6 @@ func TestTaskSnapshotToolResultKeepsSubagentTerminalRefInMetaOnly(t *testing.T) 
 	}
 }
 
-func beginTaskTurnForFinalResponseTest(task *subagentTask) {
-	task.mu.Lock()
-	task.turnSeq++
-	task.applyResult(delegation.Result{
-		TaskID:  task.ref.TaskID,
-		State:   delegation.StateRunning,
-		Running: true,
-	})
-	task.mu.Unlock()
-}
-
 func TestRuntimeTaskReadRejectsBatchHandles(t *testing.T) {
 	t.Parallel()
 

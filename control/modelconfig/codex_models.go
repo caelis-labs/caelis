@@ -72,8 +72,3 @@ func codexOAuthModelDefaults(name string) (ModelDefaults, bool) {
 	}
 	return ModelDefaults{}, false
 }
-
-func isCodexOAuthModel(name string) bool {
-	_, ok := codexOAuthModelDefaults(name)
-	return ok
-}

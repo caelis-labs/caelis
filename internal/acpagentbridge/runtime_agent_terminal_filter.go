@@ -191,29 +191,3 @@ func terminalExitCodeFromRawOutput(raw any) *int {
 		return nil
 	}
 }
-
-func acpContentChunkText(update eventstream.Update) (string, string, string, bool) {
-	chunk, ok := update.(eventstream.ContentChunk)
-	if !ok {
-		return "", "", "", false
-	}
-	updateType := strings.TrimSpace(chunk.SessionUpdate)
-	switch updateType {
-	case eventstream.UpdateUserMessage, eventstream.UpdateAgentMessage, eventstream.UpdateAgentThought:
-	default:
-		return "", "", "", false
-	}
-	return updateType, strings.TrimSpace(chunk.MessageID), acpTextContentText(chunk.Content), true
-}
-
-func acpTextContentText(content any) string {
-	switch typed := content.(type) {
-	case eventstream.TextContent:
-		return typed.Text
-	case map[string]any:
-		text, _ := typed["text"].(string)
-		return text
-	default:
-		return ""
-	}
-}

@@ -25,11 +25,6 @@ func DefaultTruncationPolicy() TruncationPolicy {
 	return TruncationPolicy{MaxTokens: 10000}
 }
 
-// TokenBudget returns the effective approximate token budget.
-func (p TruncationPolicy) TokenBudget() int {
-	return p.tokenBudget()
-}
-
 // ByteBudget returns the effective byte budget.
 func (p TruncationPolicy) ByteBudget() int {
 	return p.byteBudget()
@@ -88,12 +83,6 @@ func ResultNeedsTruncation(result Result, policy TruncationPolicy) bool {
 		policy = DefaultTruncationPolicy()
 	}
 	return estimateTokensForParts(result.Content) > policy.tokenBudget()
-}
-
-// TruncateParts applies one shared budget to model content items while
-// preserving non-text references such as images and files.
-func TruncateParts(parts []model.Part, policy TruncationPolicy) ([]model.Part, TruncationInfo) {
-	return truncatePartsWithProtectedJSONFields(parts, policy, nil)
 }
 
 func truncatePartsWithProtectedJSONFields(parts []model.Part, policy TruncationPolicy, protected map[string]any) ([]model.Part, TruncationInfo) {
@@ -188,11 +177,6 @@ func injectProtectedJSONFields(parts []model.Part, protected map[string]any) ([]
 		return out, index
 	}
 	return out, -1
-}
-
-// TruncateJSON applies recursive truncation to one JSON payload.
-func TruncateJSON(raw json.RawMessage, policy TruncationPolicy) (json.RawMessage, TruncationInfo) {
-	return truncateJSONWithProtectedFields(raw, policy, nil)
 }
 
 func truncateJSONWithProtectedFields(raw json.RawMessage, policy TruncationPolicy, protected map[string]any) (json.RawMessage, TruncationInfo) {
@@ -972,14 +956,6 @@ func cloneTruncationValue(value any) any {
 	default:
 		return typed
 	}
-}
-
-func jsonObject(raw json.RawMessage) (map[string]any, bool) {
-	var payload map[string]any
-	if err := json.Unmarshal(raw, &payload); err != nil || payload == nil {
-		return nil, false
-	}
-	return payload, true
 }
 
 func mustMarshalMap(value map[string]any) json.RawMessage {

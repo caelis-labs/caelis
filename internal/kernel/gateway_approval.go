@@ -403,35 +403,6 @@ func addUsageSnapshot(total *UsageSnapshot, usage UsageSnapshot) {
 	}
 }
 
-func approvalOptionIDForDecision(options []ApprovalOption, approved bool) string {
-	wantKind := "reject_once"
-	wantID := "reject_once"
-	if approved {
-		wantKind = "allow_once"
-		wantID = "allow_once"
-	}
-	for _, option := range options {
-		kind := strings.ToLower(strings.TrimSpace(option.Kind))
-		id := strings.TrimSpace(option.ID)
-		if id == "" {
-			continue
-		}
-		if kind == wantKind {
-			return id
-		}
-	}
-	for _, option := range options {
-		id := strings.TrimSpace(option.ID)
-		if id == "" {
-			continue
-		}
-		if strings.EqualFold(id, wantID) {
-			return id
-		}
-	}
-	return ""
-}
-
 type approvalModelResolver = approval.ModelResolver
 
 func (g *Gateway) approvalReviewModel(ctx context.Context, ref session.SessionRef) (model.LLM, bool, error) {

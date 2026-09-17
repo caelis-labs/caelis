@@ -19,10 +19,6 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 )
 
-func modelMessagePtr(message model.Message) *model.Message {
-	return &message
-}
-
 func TestNewRequiresSessionsRuntimeAndResolver(t *testing.T) {
 	t.Parallel()
 
@@ -2971,7 +2967,7 @@ func TestPersistApprovalReviewSessionAccountingUsesSessionStateNotHistory(t *tes
 		t.Fatalf("SnapshotState() error = %v", err)
 	}
 	accounting, _ := state[StateUsageAccounting].(map[string]any)
-	got := session.UsageSnapshotFromMap(anyMapValue(accounting["auto_review"]))
+	got := session.UsageSnapshotFromMapForProvider(anyMapValue(accounting["auto_review"]), "")
 	if got == nil || *got != *usage {
 		t.Fatalf("auto-review usage state = %+v, want %+v", got, usage)
 	}
@@ -2989,7 +2985,7 @@ func TestPersistApprovalReviewSessionAccountingUsesSessionStateNotHistory(t *tes
 	if row["category"] != "auto_review" {
 		t.Fatalf("by_model category = %#v, want auto_review", row["category"])
 	}
-	modelUsage := session.UsageSnapshotFromMap(anyMapValue(row["usage"]))
+	modelUsage := session.UsageSnapshotFromMapForProvider(anyMapValue(row["usage"]), "")
 	if modelUsage == nil || *modelUsage != *usage {
 		t.Fatalf("by_model usage = %+v, want %+v", modelUsage, usage)
 	}

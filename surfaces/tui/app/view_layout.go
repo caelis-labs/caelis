@@ -65,22 +65,6 @@ func (m *Model) promptModalReservedHeight() int {
 	return strings.Count(modal, "\n") + 1
 }
 
-// renderedStyledLines returns the unwrapped styled lines from all document
-// blocks. This replaces the old historyLines cache with an on-demand
-// computation directly from the document model.
-func (m *Model) renderedStyledLines() []string {
-	ctx := m.blockRenderContext(maxInt(1, m.viewport.Width()))
-	var lines []string
-	for _, block := range m.doc.Blocks() {
-		for _, row := range block.Render(ctx) {
-			lines = append(lines, row.Styled)
-		}
-	}
-	streamStyled, _, _ := m.renderStreamViewportLines(ctx)
-	lines = append(lines, streamStyled...)
-	return lines
-}
-
 // syncViewportContent rebuilds the viewport content from the document model
 // plus any in-progress streaming content, then sets it on the viewport.
 // Both styled and plain text are wrapped independently from RenderedRow,
@@ -621,16 +605,6 @@ func (m *Model) selectionText() string {
 		return ""
 	}
 	return selectionTextFromLinesWithIndents(m.viewportPlainLines, m.viewportSelectionIndents, start, end)
-}
-
-func (m *Model) renderSelectionLines() []string {
-	start, end, ok := normalizedSelectionRange(m.selectionStart, m.selectionEnd, len(m.viewportPlainLines))
-	if !ok {
-		return append([]string(nil), m.viewportStyledLines...)
-	}
-	// Rendered-text-first selection: non-selected lines keep styled output,
-	// selected lines show plain text with reverse highlight.
-	return renderSelectionOnStyledLinesWithIndents(m.viewportStyledLines, m.viewportPlainLines, m.viewportSelectionIndents, start, end, m.theme.InputSelectionStyle())
 }
 
 type fixedTextRegion struct {

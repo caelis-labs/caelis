@@ -54,13 +54,6 @@ func DefaultDiscoveryDirs(workspaceDir string) []string {
 	return out
 }
 
-func DiscoverMeta(dirs []string, workspaceDir string) ([]Meta, error) {
-	return DiscoverMetaRequest(skill.DiscoverRequest{
-		Dirs:         dirs,
-		WorkspaceDir: workspaceDir,
-	})
-}
-
 func DiscoverMetaRequest(req skill.DiscoverRequest) ([]Meta, error) {
 	dirs := discoveryDirs(req.Dirs, req.WorkspaceDir)
 	pluginMetas, suppressedRegular, err := discoverPluginBundleMeta(req.PluginBundles)
@@ -195,11 +188,6 @@ func ResolvePath(path string) (string, error) {
 	return filepath.Clean(path), nil
 }
 
-func parseMetaCached(path string, info os.FileInfo) (Meta, error) {
-	meta, _, err := parseMetaHashCached(path, info)
-	return meta, err
-}
-
 func parseMetaHashCached(path string, info os.FileInfo) (Meta, string, error) {
 	if info == nil {
 		return parseMetaHash(path)
@@ -248,11 +236,6 @@ func pruneMetaCacheLocked() {
 		}
 		delete(metaCache.entries, oldestPath)
 	}
-}
-
-func parseMeta(path string) (Meta, error) {
-	meta, _, err := parseMetaHash(path)
-	return meta, err
 }
 
 func parseMetaHash(path string) (Meta, string, error) {

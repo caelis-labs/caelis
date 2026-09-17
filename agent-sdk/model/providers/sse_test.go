@@ -52,7 +52,7 @@ func TestSSETimeoutDrainsActiveCallbackBeforeReturning(t *testing.T) {
 		closed, entered, release := make(chan struct{}), make(chan struct{}), make(chan struct{})
 		done := make(chan error, 1)
 		go func() {
-			done <- readSSEWithEventTimeout(sseCloseObservedReader{reader, closed}, time.Second, 20*time.Millisecond, func([]byte) error {
+			done <- readSSEWithActivityTimeout(sseCloseObservedReader{reader, closed}, time.Second, 20*time.Millisecond, func([]byte) bool { return true }, func([]byte) error {
 				close(entered)
 				<-release
 				return nil
@@ -148,7 +148,7 @@ func TestReadSSEWithEventTimeout_TimesOutAfterFirstEventSilence(t *testing.T) {
 		dataCh := make(chan string, 1)
 		errCh := make(chan error, 1)
 		go func() {
-			errCh <- readSSEWithEventTimeout(reader, 250*time.Millisecond, 20*time.Millisecond, func(data []byte) error {
+			errCh <- readSSEWithActivityTimeout(reader, 250*time.Millisecond, 20*time.Millisecond, func([]byte) bool { return true }, func(data []byte) error {
 				dataCh <- string(data)
 				return nil
 			})
@@ -168,10 +168,10 @@ func TestReadSSEWithEventTimeout_TimesOutAfterFirstEventSilence(t *testing.T) {
 		select {
 		case err := <-errCh:
 			if !errors.Is(err, errStreamIdleTimeout) {
-				t.Fatalf("readSSEWithEventTimeout() error = %v, want idle timeout", err)
+				t.Fatalf("readSSEWithActivityTimeout() error = %v, want idle timeout", err)
 			}
 		case <-time.After(250 * time.Millisecond):
-			t.Fatal("readSSEWithEventTimeout() did not time out")
+			t.Fatal("readSSEWithActivityTimeout() did not time out")
 		}
 	})
 }
@@ -185,7 +185,7 @@ func TestReadSSEWithEventTimeout_AllowsSilenceWhenIdleDisabled(t *testing.T) {
 		dataCh := make(chan string, 2)
 		errCh := make(chan error, 1)
 		go func() {
-			errCh <- readSSEWithEventTimeout(reader, 20*time.Millisecond, 0, func(data []byte) error {
+			errCh <- readSSEWithActivityTimeout(reader, 20*time.Millisecond, 0, func([]byte) bool { return true }, func(data []byte) error {
 				dataCh <- string(data)
 				return nil
 			})
@@ -206,7 +206,7 @@ func TestReadSSEWithEventTimeout_AllowsSilenceWhenIdleDisabled(t *testing.T) {
 		time.Sleep(80 * time.Millisecond)
 		select {
 		case err := <-errCh:
-			t.Fatalf("readSSEWithEventTimeout() returned with idle disabled: %v", err)
+			t.Fatalf("readSSEWithActivityTimeout() returned with idle disabled: %v", err)
 		default:
 		}
 
@@ -216,10 +216,10 @@ func TestReadSSEWithEventTimeout_AllowsSilenceWhenIdleDisabled(t *testing.T) {
 		select {
 		case err := <-errCh:
 			if err != nil {
-				t.Fatalf("readSSEWithEventTimeout() error = %v, want nil", err)
+				t.Fatalf("readSSEWithActivityTimeout() error = %v, want nil", err)
 			}
 		case <-time.After(250 * time.Millisecond):
-			t.Fatal("readSSEWithEventTimeout() did not finish")
+			t.Fatal("readSSEWithActivityTimeout() did not finish")
 		}
 	})
 }

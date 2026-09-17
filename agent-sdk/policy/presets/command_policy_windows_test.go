@@ -13,7 +13,7 @@ import (
 func TestPortableRootDeleteRemainsCatastrophicOnWindows(t *testing.T) {
 	t.Parallel()
 
-	decision, err := AutoReviewMode().DecideTool(context.Background(), commandCtx("rm -rf /", false))
+	decision, err := WorkspaceWriteMode().DecideTool(context.Background(), commandCtx("rm -rf /", false))
 	if err != nil {
 		t.Fatalf("DecideTool() error = %v", err)
 	}

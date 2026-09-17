@@ -695,26 +695,6 @@ func requireIntegerBounds(t *testing.T, def tool.Definition, prop string, minimu
 	}
 }
 
-func requireBooleanProperty(t *testing.T, def tool.Definition, prop string) {
-	t.Helper()
-	schemaProp := schemaProperty(t, def, prop)
-	if got := schemaProp["type"]; got != "boolean" {
-		t.Fatalf("%s.%s type = %#v, want boolean", def.Name, prop, got)
-	}
-}
-
-func requireArrayItemMinLength(t *testing.T, def tool.Definition, prop string, want int) {
-	t.Helper()
-	schemaProp := schemaProperty(t, def, prop)
-	items, _ := schemaProp["items"].(map[string]any)
-	if len(items) == 0 {
-		t.Fatalf("%s.%s items missing: %#v", def.Name, prop, schemaProp)
-	}
-	if got := items["minLength"]; got != want {
-		t.Fatalf("%s.%s.items minLength = %#v, want %d", def.Name, prop, got, want)
-	}
-}
-
 func requirePatchEditSchema(t *testing.T, def tool.Definition) {
 	t.Helper()
 	edits := schemaProperty(t, def, "edits")

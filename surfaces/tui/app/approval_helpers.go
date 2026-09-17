@@ -10,11 +10,6 @@ const (
 	approvalStatusApproved = "approved"
 	approvalStatusRejected = "rejected"
 	approvalStatusSelected = "selected"
-
-	approvalReviewStatusApproved = "approved"
-	approvalReviewStatusDenied   = "denied"
-	approvalReviewStatusTimedOut = "timed_out"
-	approvalReviewStatusFailed   = "failed"
 )
 
 type approvalPayload struct {
@@ -99,15 +94,6 @@ func approvalToolSummary(req *approvalPayload) (string, string) {
 	return approvalToolDisplayLabel(req.ToolName), approvalCommandPreview(req.RawInput)
 }
 
-func approvalReviewPendingHint(toolName string, raw map[string]any, maxWidth int) string {
-	detail := firstNonEmpty(approvalKnownInputPreview(raw), approvalReviewToolName(toolName), approvalCommandPreview(raw), "approval request")
-	text := compactString("Reviewing approval request: "+detail, 0)
-	if maxWidth > 0 {
-		text = truncateTailDisplay(text, maxWidth)
-	}
-	return strings.TrimSpace(text)
-}
-
 func approvalKnownInputPreview(raw map[string]any) string {
 	if len(raw) == 0 {
 		return ""
@@ -118,10 +104,6 @@ func approvalKnownInputPreview(raw map[string]any) string {
 		}
 	}
 	return ""
-}
-
-func approvalReviewToolName(toolName string) string {
-	return approvalToolDisplayLabel(toolName)
 }
 
 func approvalToolDisplayLabel(toolName string) string {

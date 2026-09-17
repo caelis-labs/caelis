@@ -39,19 +39,6 @@ type appKeyMap struct {
 	PaneLayout    key.Binding
 }
 
-type helpBindings struct {
-	short []key.Binding
-	full  [][]key.Binding
-}
-
-func (h helpBindings) ShortHelp() []key.Binding {
-	return h.short
-}
-
-func (h helpBindings) FullHelp() [][]key.Binding {
-	return h.full
-}
-
 func defaultKeyMap(isWSL bool) appKeyMap {
 	return defaultKeyMapForPlatform(runtime.GOOS, isWSL)
 }
@@ -174,55 +161,6 @@ func enabledBindings(bindings ...key.Binding) []key.Binding {
 		}
 	}
 	return out
-}
-
-func (m *Model) currentFooterHelp() helpBindings {
-	if m.activePrompt != nil {
-		if len(m.activePrompt.choices) > 0 {
-			return helpBindings{
-				short: enabledBindings(m.keys.Accept, m.keys.Back),
-				full: [][]key.Binding{
-					enabledBindings(m.keys.Accept, m.keys.Back),
-				},
-			}
-		}
-		return helpBindings{
-			short: enabledBindings(m.keys.Accept, m.keys.Back),
-			full: [][]key.Binding{
-				enabledBindings(m.keys.Accept, m.keys.Back),
-			},
-		}
-	}
-	if m.btwOverlay != nil {
-		return helpBindings{
-			short: enabledBindings(m.keys.OverlayClose),
-			full: [][]key.Binding{
-				enabledBindings(m.keys.OverlayClose),
-			},
-		}
-	}
-	if m.showPalette || m.slashArgActive || len(m.slashCandidates) > 0 || len(m.mentionCandidates) > 0 {
-		return helpBindings{
-			short: enabledBindings(m.keys.Back),
-			full: [][]key.Binding{
-				enabledBindings(m.keys.Back),
-			},
-		}
-	}
-	if m.turnRunning() {
-		return helpBindings{
-			short: enabledBindings(m.keys.Mode, m.keys.Interrupt),
-			full: [][]key.Binding{
-				enabledBindings(m.keys.Mode, m.keys.Interrupt),
-			},
-		}
-	}
-	return helpBindings{
-		short: enabledBindings(m.keys.Mode),
-		full: [][]key.Binding{
-			enabledBindings(m.keys.Mode),
-		},
-	}
 }
 
 func (m *Model) overlayHintText(label string) string {

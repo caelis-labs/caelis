@@ -2,7 +2,6 @@ package providers
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
@@ -137,30 +136,6 @@ func (f *Factory) NewByAlias(alias string) (model.LLM, error) {
 		return nil, fmt.Errorf("providers: unsupported api type %q", cfg.API)
 	}
 	return model.WithRetry(llm, cfg.Retry), nil
-}
-
-// ListModels returns available aliases from current factory.
-func (f *Factory) ListModels() []string {
-	if f == nil {
-		return nil
-	}
-	out := make([]string, 0, len(f.configs))
-	for k := range f.configs {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
-}
-
-// ConfigForAlias returns the registered Config for the given alias.
-// Returns zero Config and false if the alias is not registered.
-func (f *Factory) ConfigForAlias(alias string) (Config, bool) {
-	if f == nil {
-		return Config{}, false
-	}
-	alias = strings.ToLower(strings.TrimSpace(alias))
-	cfg, ok := f.configs[alias]
-	return cfg, ok
 }
 
 func resolveToken(cfg AuthConfig) (string, error) {

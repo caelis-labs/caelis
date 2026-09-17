@@ -265,14 +265,6 @@ func reasoningPreviewText(text string, width int) string {
 	return strings.TrimSpace(truncateDisplayPreviewMiddle(text, budget))
 }
 
-func reasoningExpandedBodyVisible(text string, width int) bool {
-	normalized := reasoningPreviewText(text, 1<<20)
-	if normalized == "" {
-		return false
-	}
-	return normalized != reasoningPreviewText(text, width)
-}
-
 func renderACPReasoningExpandedRows(blockID string, text string, activeBuffer *activeNarrativeBuffer, idx int, width int, ctx BlockRenderContext, active bool) []RenderedRow {
 	rows := renderParticipantTurnNarrativeRowsWithBuffer(blockID, text, activeBuffer, tuikit.LineStyleReasoning, width, ctx, active)
 	rows = applyClickTokenToRows(rows, acpReasoningClickToken(reasoningFoldKey(idx)))

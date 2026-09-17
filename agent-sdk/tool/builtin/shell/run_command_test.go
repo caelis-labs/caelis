@@ -686,7 +686,7 @@ func TestRunCommandCallPreservesWindowsDACLRefreshFailure(t *testing.T) {
 func TestRunCommandPayloadTreatsWindowsExitSummaryAsPlainExit(t *testing.T) {
 	t.Parallel()
 
-	payload := runCommandPayload(sandbox.CommandResult{ExitCode: 1}, fmt.Errorf("process exited with code 1"))
+	payload := runCommandPayloadForCommand("", sandbox.CommandResult{ExitCode: 1}, fmt.Errorf("process exited with code 1"))
 	if got, _ := payload["result"].(string); got != "" {
 		t.Fatalf("result = %q, want no synthetic Windows exit summary", got)
 	}
@@ -701,7 +701,7 @@ func TestRunCommandPayloadTreatsWindowsExitSummaryAsPlainExit(t *testing.T) {
 func TestRunCommandPayloadTreatsNegativeExitCodeAsCancelled(t *testing.T) {
 	t.Parallel()
 
-	payload := runCommandPayload(sandbox.CommandResult{ExitCode: -1}, context.Canceled)
+	payload := runCommandPayloadForCommand("", sandbox.CommandResult{ExitCode: -1}, context.Canceled)
 	if got, _ := payload["state"].(string); got != "cancelled" {
 		t.Fatalf("state = %q, want cancelled", got)
 	}
@@ -713,7 +713,7 @@ func TestRunCommandPayloadTreatsNegativeExitCodeAsCancelled(t *testing.T) {
 func TestRunCommandPayloadTreatsNegativeExitCodeWithNonCancelErrorAsFailed(t *testing.T) {
 	t.Parallel()
 
-	payload := runCommandPayload(sandbox.CommandResult{ExitCode: -1}, fmt.Errorf("prepare sandbox failed"))
+	payload := runCommandPayloadForCommand("", sandbox.CommandResult{ExitCode: -1}, fmt.Errorf("prepare sandbox failed"))
 	if got, _ := payload["state"].(string); got != "failed" {
 		t.Fatalf("state = %q, want failed", got)
 	}
@@ -728,7 +728,7 @@ func TestRunCommandPayloadTreatsNegativeExitCodeWithNonCancelErrorAsFailed(t *te
 func TestRunCommandPayloadDoesNotSynthesizeNoOutputPlaceholder(t *testing.T) {
 	t.Parallel()
 
-	payload := runCommandPayload(sandbox.CommandResult{ExitCode: 0}, nil)
+	payload := runCommandPayloadForCommand("", sandbox.CommandResult{ExitCode: 0}, nil)
 	if got, ok := payload["result"]; ok {
 		t.Fatalf("result = %#v, want no UI placeholder in tool payload", got)
 	}
@@ -743,7 +743,7 @@ func TestRunCommandPayloadDoesNotSynthesizeNoOutputPlaceholder(t *testing.T) {
 func TestRunCommandPayloadPreservesInternalStdoutNewlines(t *testing.T) {
 	t.Parallel()
 
-	payload := runCommandPayload(sandbox.CommandResult{
+	payload := runCommandPayloadForCommand("", sandbox.CommandResult{
 		Stdout:   "requests 2.34.2\r\nHTTP 200\r\n",
 		ExitCode: 0,
 	}, nil)
@@ -755,7 +755,7 @@ func TestRunCommandPayloadPreservesInternalStdoutNewlines(t *testing.T) {
 func TestRunCommandPayloadSeparatesStdoutAndStderrWithoutTrimming(t *testing.T) {
 	t.Parallel()
 
-	payload := runCommandPayload(sandbox.CommandResult{
+	payload := runCommandPayloadForCommand("", sandbox.CommandResult{
 		Stdout:   "ok",
 		Stderr:   "warning\n",
 		ExitCode: 1,

@@ -93,7 +93,8 @@ func TestChatAgentRestoresDeferredMCPVisibilityFromToolSearchHistory(t *testing.
 		Name:    searchCall.Name,
 		Content: []model.Part{model.NewJSONPart(toolSearchResultJSON(t, mcpToolName))},
 	}
-	searchMessage := toolResultMessage(searchCall, searchResult)
+	canonical, _ := canonicalToolResult(searchResult, nil)
+	searchMessage := toolResultMessageFromCanonical(searchCall, canonical)
 
 	ctx := agent.NewContext(agent.ContextSpec{
 		Context: context.Background(),

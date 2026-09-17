@@ -787,10 +787,6 @@ func (m *Model) handleSlashArgKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 	}
 }
 
-func (m *Model) renderSlashArgList() string {
-	return m.renderCompletionKind(completionSlashArg)
-}
-
 func (m *Model) renderSlashArgListGeometry(geometry completionOverlayGeometry, candidates []SlashArgCandidate) string {
 	rows := make([]completionTableRow, 0, geometry.candidateCount)
 	for i := geometry.windowStart; i < geometry.windowEnd; i++ {

@@ -919,17 +919,6 @@ func writeToolPanelScrollStates(builder *blockKeyBuilder, values map[string]tool
 	}
 }
 
-func writeRenderedRows(builder *blockKeyBuilder, rows []RenderedRow) {
-	builder.addInt(len(rows))
-	for _, row := range rows {
-		builder.addString(row.Styled)
-		builder.addString(row.Plain)
-		builder.addBool(row.PreWrapped)
-		builder.addInt(row.selectionIndent)
-		builder.addBool(row.activeTail)
-	}
-}
-
 func writeSubagentEvents(builder *blockKeyBuilder, events []SubagentEvent, ctx BlockRenderContext, fullOutput map[string]bool) {
 	if ctx.AnimationsEnabled && acpTranscriptEventsHaveRunningTool(events) {
 		builder.addBool(subagentOutputPulseDim(ctx.SpinnerView))

@@ -15,21 +15,12 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
-func (s *Store) eventsForDocument(doc persistedDocument) ([]*session.Event, error) {
-	return s.eventsForDocumentContext(context.Background(), doc)
-}
-
 func (s *Store) eventsForDocumentContext(ctx context.Context, doc persistedDocument) ([]*session.Event, error) {
 	path, err := s.resolveWritePath(doc.Session)
 	if err != nil {
 		return nil, err
 	}
 	return s.readCachedEventLogContext(ctx, path)
-}
-
-func (s *Store) appendEventLog(documentPath string, events []*session.Event) error {
-	_, err := s.appendEventLogTransaction(documentPath, events)
-	return err
 }
 
 func (s *Store) appendEventLogTransaction(documentPath string, events []*session.Event) (func() error, error) {
@@ -117,66 +108,6 @@ func rollbackEventLogAppend(durability durabilityOps, path string, offset int64)
 		return err
 	}
 	return durability.SyncDirectory(filepath.Dir(path))
-}
-
-func (s *Store) readEventLog(documentPath string) ([]*session.Event, error) {
-	return s.readEventLogContext(context.Background(), documentPath)
-}
-
-func (s *Store) readEventLogContext(ctx context.Context, documentPath string) ([]*session.Event, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	path := eventLogPath(documentPath)
-	file, err := os.Open(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	defer file.Close()
-	reader := bufio.NewReader(file)
-	events := make([]*session.Event, 0)
-	lineNo := 0
-	for {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		line, readErr := reader.ReadString('\n')
-		lineNo++
-		if readErr != nil && !errors.Is(readErr, io.EOF) {
-			return nil, readErr
-		}
-		trimmed := strings.TrimSpace(line)
-		if trimmed != "" {
-			if err := rejectUnsupportedLegacyEventLogLine([]byte(trimmed), path, lineNo); err != nil {
-				return nil, err
-			}
-			migratedRaw, err := session.MigrateEventJSON(json.RawMessage(trimmed))
-			if err != nil {
-				if errors.Is(readErr, io.EOF) {
-					break
-				}
-				return nil, fmt.Errorf("agent-sdk/session/file: migrate event log %s line %d: %w", path, lineNo, err)
-			}
-			var event session.Event
-			if err := json.Unmarshal(migratedRaw, &event); err != nil {
-				if errors.Is(readErr, io.EOF) {
-					break
-				}
-				return nil, fmt.Errorf("agent-sdk/session/file: decode event log %s: %w", path, err)
-			}
-			if err := session.ValidateDurableCoreEvent(&event); err != nil {
-				return nil, fmt.Errorf("agent-sdk/session/file: invalid event log %s line %d: %w", path, lineNo, err)
-			}
-			events = append(events, session.CloneEvent(&event))
-		}
-		if errors.Is(readErr, io.EOF) {
-			break
-		}
-	}
-	return events, nil
 }
 
 func (s *Store) readEventLogPage(ctx context.Context, documentPath string, req session.EventPageRequest) (session.EventPage, error) {
@@ -369,23 +300,6 @@ func truncatePartialEventLogTail(durability durabilityOps, path string) error {
 		return err
 	}
 	return durability.SyncFile(file)
-}
-
-func (s *Store) readEventLogIDs(documentPath string) (map[string]bool, error) {
-	events, err := s.readEventLog(documentPath)
-	if err != nil {
-		return nil, err
-	}
-	ids := make(map[string]bool, len(events))
-	for _, event := range events {
-		if event == nil {
-			continue
-		}
-		if id := strings.TrimSpace(event.ID); id != "" {
-			ids[id] = true
-		}
-	}
-	return ids, nil
 }
 
 func eventLogPath(documentPath string) string {

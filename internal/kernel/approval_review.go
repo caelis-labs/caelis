@@ -20,10 +20,6 @@ func NormalizeApprovalMode(mode string) ApprovalMode {
 	return approval.NormalizeMode(mode)
 }
 
-func CurrentApprovalMode(state map[string]any) ApprovalMode {
-	return approval.CurrentMode(state)
-}
-
 func CurrentApprovalModeOrDefault(state map[string]any, fallback ApprovalMode) ApprovalMode {
 	return approval.CurrentModeOrDefault(state, fallback)
 }
@@ -54,12 +50,6 @@ type ApprovalReviewRequest = approval.Request
 type ApprovalReviewResult = approval.Decision
 type ApprovalReviewer = approval.Reviewer
 type ApprovalApprover = approval.Approver
-
-type denyingApprovalReviewer struct{}
-
-func (denyingApprovalReviewer) ReviewApproval(ctx context.Context, req ApprovalReviewRequest) (ApprovalReviewResult, error) {
-	return denyingApprovalApprover{}.Decide(ctx, req)
-}
 
 type denyingApprovalApprover struct{}
 

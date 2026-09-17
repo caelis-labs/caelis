@@ -30,10 +30,6 @@ import (
 	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
 )
 
-func ptrModelMessage(message model.Message) *model.Message {
-	return &message
-}
-
 func mustSealPlacement(t *testing.T, value placement.Placement) placement.Placement {
 	t.Helper()
 	sealed, err := placement.Seal(value)
@@ -984,28 +980,28 @@ func TestSubagentRejectsUnknownNeutralRoleBeforeSpawn(t *testing.T) {
 	}
 }
 
-func TestAllocateSubagentHandleUsesAgentDerivedFallback(t *testing.T) {
+func TestSubagentHandleUsesAgentDerivedFallback(t *testing.T) {
 	t.Parallel()
 
 	activeSession := session.Session{Participants: []session.ParticipantBinding{
 		{Label: "@codex"},
 		{Label: "@codex2"},
 	}}
-	if got := allocateSubagentHandle(activeSession, "codex"); !agenthandle.ContainsPoolName(got) {
-		t.Fatalf("allocateSubagentHandle() = %q, want shared human-name pool handle", got)
+	if got := agenthandle.Allocate(subagentHandlesFromSession(activeSession), "codex"); !agenthandle.ContainsPoolName(got) {
+		t.Fatalf("agenthandle.Allocate() = %q, want shared human-name pool handle", got)
 	}
-	if got := allocateSubagentHandle(session.Session{}, "Anthropic/Claude Agent"); !agenthandle.ContainsPoolName(got) {
-		t.Fatalf("allocateSubagentHandle() = %q, want shared human-name pool handle", got)
+	if got := agenthandle.Allocate(subagentHandlesFromSession(session.Session{}), "Anthropic/Claude Agent"); !agenthandle.ContainsPoolName(got) {
+		t.Fatalf("agenthandle.Allocate() = %q, want shared human-name pool handle", got)
 	}
-	if got := allocateSubagentHandle(session.Session{}, "!!!"); !agenthandle.ContainsPoolName(got) {
-		t.Fatalf("allocateSubagentHandle() = %q, want shared human-name pool handle", got)
+	if got := agenthandle.Allocate(subagentHandlesFromSession(session.Session{}), "!!!"); !agenthandle.ContainsPoolName(got) {
+		t.Fatalf("agenthandle.Allocate() = %q, want shared human-name pool handle", got)
 	}
-	if got := allocateSubagentHandle(session.Session{}, "self"); !agenthandle.ContainsPoolName(got) {
-		t.Fatalf("allocateSubagentHandle(self) = %q, want shared human-name pool handle", got)
+	if got := agenthandle.Allocate(subagentHandlesFromSession(session.Session{}), "self"); !agenthandle.ContainsPoolName(got) {
+		t.Fatalf("agenthandle.Allocate(self) = %q, want shared human-name pool handle", got)
 	}
 	usedSelfHandle := session.Session{Participants: []session.ParticipantBinding{{Label: "@jeff"}}}
-	if got := allocateSubagentHandle(usedSelfHandle, "self"); got == "jeff" || !agenthandle.ContainsPoolName(got) {
-		t.Fatalf("allocateSubagentHandle(self with used handle) = %q, want unused shared pool handle", got)
+	if got := agenthandle.Allocate(subagentHandlesFromSession(usedSelfHandle), "self"); got == "jeff" || !agenthandle.ContainsPoolName(got) {
+		t.Fatalf("agenthandle.Allocate(self with used handle) = %q, want unused shared pool handle", got)
 	}
 }
 
@@ -1558,19 +1554,6 @@ func (r *overlappingSubagentRunner) Wait(context.Context, delegation.Anchor, int
 }
 
 func (r *overlappingSubagentRunner) Cancel(context.Context, delegation.Anchor) error { return nil }
-
-func (r *overlappingSubagentRunner) waitUntilOverlapping(t *testing.T) {
-	t.Helper()
-	timer := time.NewTimer(5 * time.Second)
-	defer timer.Stop()
-	for i := 0; i < r.want; i++ {
-		select {
-		case <-r.ready:
-		case <-timer.C:
-			t.Fatalf("only %d/%d Spawn calls reached the external runner", i, r.want)
-		}
-	}
-}
 
 func (r *overlappingSubagentRunner) maxActive() int {
 	r.mu.Lock()

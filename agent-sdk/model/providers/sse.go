@@ -151,10 +151,6 @@ func readSSEWithFirstEventTimeout(reader io.Reader, timeout time.Duration, onDat
 	}
 }
 
-func readSSEWithEventTimeout(reader io.Reader, firstEventTimeout time.Duration, idleTimeout time.Duration, onData func([]byte) error) error {
-	return readSSEWithActivityTimeout(reader, firstEventTimeout, idleTimeout, func([]byte) bool { return true }, onData)
-}
-
 // readSSEWithActivityTimeout switches from the first-event budget to the idle
 // budget after the first complete data event. Later events reset the idle
 // budget only when isActivity reports semantic progress, so provider heartbeat

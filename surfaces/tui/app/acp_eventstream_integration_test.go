@@ -3191,7 +3191,7 @@ func TestDequeuePendingUserMessageAnyPreservesQueueOnMismatch(t *testing.T) {
 	if len(model.pendingQueue) != 2 {
 		t.Fatalf("pendingQueue = %#v, want preserved queue on mismatch", model.pendingQueue)
 	}
-	if got := model.pendingQueue[0].displayText(); got != "first pending" {
+	if got := model.pendingQueue[0].displayLine; got != "first pending" {
 		t.Fatalf("first pending = %q, want preserved queue head", got)
 	}
 }
@@ -3419,9 +3419,8 @@ func TestAcceptedActiveTurnPendingPromptsRenderOnlyOnEvents(t *testing.T) {
 		pendingPrompt{execLine: "first guidance", displayLine: "first guidance", state: pendingPromptDispatched},
 		pendingPrompt{execLine: "second guidance", displayLine: "second guidance", state: pendingPromptDispatched},
 	)
-	visible, ok := model.pendingQueue.nextVisible()
-	if !ok || visible.displayText() != "first guidance" {
-		t.Fatalf("next visible pending = %#v/%v, want first guidance", visible, ok)
+	if len(model.pendingQueue) == 0 || model.pendingQueue[0].displayLine != "first guidance" {
+		t.Fatalf("next visible pending = %#v, want first guidance", model.pendingQueue)
 	}
 
 	if got := countUserNarrativeBlocksForTest(model, "first guidance"); got != 0 {
@@ -3431,9 +3430,8 @@ func TestAcceptedActiveTurnPendingPromptsRenderOnlyOnEvents(t *testing.T) {
 	if got := countUserNarrativeBlocksForTest(model, "first guidance"); got != 1 {
 		t.Fatalf("first guidance blocks = %d, want one", got)
 	}
-	visible, ok = model.pendingQueue.nextVisible()
-	if !ok || visible.displayText() != "second guidance" {
-		t.Fatalf("next visible pending after first render = %#v/%v, want second guidance", visible, ok)
+	if len(model.pendingQueue) == 0 || model.pendingQueue[0].displayLine != "second guidance" {
+		t.Fatalf("next visible pending after first render = %#v, want second guidance", model.pendingQueue)
 	}
 
 	model.Update(UserMessageMsg{Text: "second guidance"})

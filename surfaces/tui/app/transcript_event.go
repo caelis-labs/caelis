@@ -36,10 +36,6 @@ const (
 
 type TranscriptEvent = transcript.Event
 
-func mergeTranscriptMeta(base map[string]any, overlay map[string]any) map[string]any {
-	return transcript.MergeMeta(base, overlay)
-}
-
 func directedParticipantUserDisplay(event TranscriptEvent) string {
 	if event.Scope != ACPProjectionParticipant {
 		return ""

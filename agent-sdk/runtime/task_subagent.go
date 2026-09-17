@@ -391,10 +391,6 @@ func (tm *taskRuntime) applyObservedSubagentResult(
 	return snapshot, nil
 }
 
-func (tm *taskRuntime) cancelSubagent(ctx context.Context, task *subagentTask) (taskapi.Snapshot, error) {
-	return tm.cancelSubagentSaga(ctx, task)
-}
-
 func (tm *taskRuntime) lookupSubagent(ctx context.Context, ref session.SessionRef, taskID string) (*subagentTask, error) {
 	lookupID := strings.TrimSpace(taskID)
 	tm.mu.RLock()
@@ -689,15 +685,6 @@ func (t *subagentTask) applyResult(result delegation.Result) {
 	t.result["agent"] = t.agent
 	t.result["state"] = string(t.state)
 	normalizeSubagentResultForState(&t.result, t.state, result.Error)
-}
-
-func (t *subagentTask) isRunning() bool {
-	if t == nil {
-		return false
-	}
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.running
 }
 
 func (t *subagentTask) applyInterruptedLocked(reason string) {

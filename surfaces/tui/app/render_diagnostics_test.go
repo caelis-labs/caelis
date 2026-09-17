@@ -43,17 +43,6 @@ func TestRenderDiagnosticsCountsMessageLaneAndViewportSetContent(t *testing.T) {
 	}
 }
 
-func TestRenderDiagnosticsCountsSmoothingFlushReason(t *testing.T) {
-	m := NewModel(Config{NoColor: true})
-	_, _ = m.enqueueBTWDelta("hello", false)
-
-	m.flushAllPendingStreamSmoothingWithReason("semantic_barrier")
-
-	if got := m.diag.StreamSmoothingFlushReason["semantic_barrier"]; got != 1 {
-		t.Fatalf("semantic_barrier flush count = %d, want 1", got)
-	}
-}
-
 func TestRenderDiagnosticsCountsOneRenderPerViewportEntry(t *testing.T) {
 	m := NewModel(Config{NoColor: true})
 	m.viewport.SetWidth(80)
@@ -85,7 +74,12 @@ func TestRenderDiagnosticsCountsMarkdownGlamourAndStatusCallbacks(t *testing.T) 
 		t.Fatalf("driver status callback calls = %d, want > %d", got, statusBefore)
 	}
 
-	_ = m.renderInlineMarkdown("plain **bold** text", m.theme.TextStyle())
+	RenderTextWithContext(m.blockRenderContext(80), TextRenderRequest{
+		Kind:  TextAssistant,
+		Mode:  RenderInlineOnly,
+		Raw:   "plain **bold** text",
+		Width: 80,
+	})
 	if got := m.diag.InlineMarkdownCalls; got == 0 {
 		t.Fatal("inline markdown render counter was not incremented")
 	}

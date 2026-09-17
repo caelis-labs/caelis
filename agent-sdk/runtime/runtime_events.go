@@ -263,10 +263,6 @@ func defaultActorForEvent(event *session.Event) session.ActorRef {
 	}
 }
 
-func ptrScope(scope session.EventScope) *session.EventScope {
-	return &scope
-}
-
 func (r *Runtime) handlePlanEvent(
 	ctx context.Context,
 	ref session.SessionRef,
@@ -457,21 +453,6 @@ func planEntriesFromAny(raw any) []plan.Entry {
 		})
 	}
 	return entries
-}
-
-func entriesToProtocol(entries []plan.Entry) []session.ProtocolPlanEntry {
-	if len(entries) == 0 {
-		return nil
-	}
-	out := make([]session.ProtocolPlanEntry, 0, len(entries))
-	for _, item := range entries {
-		out = append(out, session.ProtocolPlanEntry{
-			Content:  strings.TrimSpace(item.Content),
-			Status:   strings.TrimSpace(string(item.Status)),
-			Priority: "medium",
-		})
-	}
-	return out
 }
 
 func entriesToPlanPayload(entries []plan.Entry) []session.EventPlanEntry {

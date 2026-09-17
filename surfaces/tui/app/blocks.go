@@ -1,7 +1,6 @@
 package tuiapp
 
 import (
-	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -634,16 +633,6 @@ func (b *DividerBlock) Render(ctx BlockRenderContext) []RenderedRow {
 	}}
 }
 
-func renderParticipantActorLabel(theme tuikit.Theme, actor string) string {
-	name, provider := splitParticipantActor(actor)
-	nameStyle := theme.TextStyle().Bold(true)
-	if provider == "" {
-		return nameStyle.Render(name)
-	}
-	return nameStyle.Render(name) +
-		" " + theme.TranscriptMetaStyle().Render(fmt.Sprintf("[%s]", provider))
-}
-
 func narrativeLinePrefixes(lineStyle tuikit.LineStyle) (string, string) {
 	switch lineStyle {
 	case tuikit.LineStyleAssistant:
@@ -836,22 +825,4 @@ func shouldRenderReasoningEvent(events []SubagentEvent, idx int, _ string) bool 
 	}
 	ev := events[idx]
 	return ev.Kind == SEReasoning && renderableTextHasContent(ev.Text)
-}
-
-func splitParticipantActor(actor string) (name string, provider string) {
-	actor = strings.TrimSpace(actor)
-	if actor == "" {
-		return "", ""
-	}
-	open := strings.LastIndex(actor, "(")
-	closeIdx := strings.LastIndex(actor, ")")
-	if open <= 0 || closeIdx != len(actor)-1 || closeIdx <= open+1 {
-		return actor, ""
-	}
-	name = strings.TrimSpace(actor[:open])
-	provider = strings.TrimSpace(actor[open+1 : closeIdx])
-	if name == "" || provider == "" {
-		return actor, ""
-	}
-	return name, provider
 }

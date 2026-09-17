@@ -2730,24 +2730,6 @@ func (c *sandboxConfigurationClientProbe) SetSandboxBackend(_ context.Context, r
 	return result, c.err
 }
 
-type blockingInspectSessionClient struct {
-	*sessionClientAdapterTestClient
-	started chan appserver.StateRequest
-	release chan struct{}
-	once    sync.Once
-}
-
-func (c *blockingInspectSessionClient) InspectSession(ctx context.Context, request appserver.StateRequest) (appserver.SessionState, error) {
-	c.once.Do(func() {
-		c.started <- request
-		select {
-		case <-c.release:
-		case <-ctx.Done():
-		}
-	})
-	return c.sessionClientAdapterTestClient.InspectSession(ctx, request)
-}
-
 type sessionClientAdapterTestConfigurationClient struct{}
 
 func (sessionClientAdapterTestConfigurationClient) ConfigureSessionMode(_ context.Context, request appserver.SessionModeRequest) (appserver.CommandResult, error) {

@@ -211,31 +211,6 @@ func PrepareConsistency(
 	return prepared.ConsistencyToken, nil
 }
 
-// ConsistencyToken returns the cursor only when the complete current Runtime
-// binding still matches the admitted Session state.
-func ConsistencyToken(
-	ctx context.Context,
-	reader session.StateReader,
-	ref session.SessionRef,
-	binding RuntimeMemoryBindingSnapshot,
-) (string, error) {
-	if reader == nil {
-		return "", fmt.Errorf("control/memorybinding: Session state reader is required")
-	}
-	state, err := reader.SnapshotState(ctx, ref)
-	if err != nil {
-		return "", err
-	}
-	current, found, err := decodeSessionBindingState(state)
-	if err != nil {
-		return "", err
-	}
-	if !found || !sessionBindingMatches(current, binding) {
-		return "", fmt.Errorf("control/memorybinding: Runtime Memory binding does not match canonical Session admission")
-	}
-	return current.ConsistencyToken, nil
-}
-
 // AdvanceConsistency durably records a non-authorizing causal cursor under the
 // Runtime fence carried by ctx. It never widens actor or audience authority.
 func AdvanceConsistency(

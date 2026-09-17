@@ -1280,7 +1280,7 @@ func TestSemanticBoundaryStillAllowsNewDenseExplorationRun(t *testing.T) {
 	block.UpdateToolWithMeta("read-1", "Read", "first.go", "", true, false, ToolUpdateMeta{ToolKind: "read"})
 	block.UpdateToolWithMeta("read-2", "Read", "second.go", "", true, false, ToolUpdateMeta{ToolKind: "read"})
 
-	runs := collectStableExplorationRuns(block.Events, block.Status)
+	runs := stableExplorationRunsForTest(block.Events, block.Status)
 	if len(runs) != 1 || len(runs[0]) != 2 || runs[0][0] != "read-1" || runs[0][1] != "read-2" {
 		t.Fatalf("stable exploration runs = %#v, want the new two-tool stage compacted", runs)
 	}

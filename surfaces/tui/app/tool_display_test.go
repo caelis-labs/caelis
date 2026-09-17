@@ -2,6 +2,18 @@ package tuiapp
 
 import "testing"
 
+// toolDisplayArgsForTest renders compact display arguments the way the TUI does
+// for a tool call without a provider-reported tool kind.
+func toolDisplayArgsForTest(name string, raw map[string]any, fallback ...string) string {
+	return toolDisplayArgsForKindForTest(name, "", raw, fallback...)
+}
+
+// toolDisplayArgsForKindForTest renders compact display arguments for an
+// explicit provider-reported tool kind.
+func toolDisplayArgsForKindForTest(name string, kind string, raw map[string]any, fallback ...string) string {
+	return toolDisplayArgsForKindWithQueryWrapper(name, kind, raw, !surfaceIsExplorationTool(name, kind, ""), fallback...)
+}
+
 func TestTaskTargetKindDisplayUsesParticipantFallback(t *testing.T) {
 	t.Parallel()
 
@@ -69,16 +81,16 @@ func TestCompactPathDisplayWithBaseHandlesWindowsPaths(t *testing.T) {
 func TestToolDisplayArgsHidesMetadataOnlyGenericArgs(t *testing.T) {
 	t.Parallel()
 
-	if got := toolDisplayArgs("ExternalList", map[string]any{"metadata": true}); got != "" {
-		t.Fatalf("toolDisplayArgs(ExternalList metadata) = %q, want empty", got)
+	if got := toolDisplayArgsForTest("ExternalList", map[string]any{"metadata": true}); got != "" {
+		t.Fatalf("toolDisplayArgsForTest(ExternalList metadata) = %q, want empty", got)
 	}
 }
 
 func TestViewImageDisplayUsesImagePath(t *testing.T) {
 	t.Parallel()
 
-	if got := toolDisplayArgs("ViewImage", map[string]any{"path": "/tmp/screens/pixel.png"}); got != "/tmp/screens/pixel.png" {
-		t.Fatalf("toolDisplayArgs(ViewImage) = %q", got)
+	if got := toolDisplayArgsForTest("ViewImage", map[string]any{"path": "/tmp/screens/pixel.png"}); got != "/tmp/screens/pixel.png" {
+		t.Fatalf("toolDisplayArgsForTest(ViewImage) = %q", got)
 	}
 	if got := toolTitleDisplayArgs("ViewImage", "read", "View /tmp/screens/pixel.png"); got != "/tmp/screens/pixel.png" {
 		t.Fatalf("toolTitleDisplayArgs(ViewImage) = %q", got)
@@ -102,8 +114,8 @@ func TestApprovalToolDisplayLabelUnifiesWriteAndPatchAsEdit(t *testing.T) {
 func TestToolDisplayArgsSkillUsesName(t *testing.T) {
 	t.Parallel()
 
-	if got := toolDisplayArgs("Skill", map[string]any{"name": "superpowers:brainstorming"}); got != "superpowers:brainstorming" {
-		t.Fatalf("toolDisplayArgs(Skill) = %q, want skill name", got)
+	if got := toolDisplayArgsForTest("Skill", map[string]any{"name": "superpowers:brainstorming"}); got != "superpowers:brainstorming" {
+		t.Fatalf("toolDisplayArgsForTest(Skill) = %q, want skill name", got)
 	}
 }
 
@@ -114,8 +126,8 @@ func TestToolTitleDisplayArgsCompactsSkillContentWithoutChangingReadIdentity(t *
 	if got := toolTitleDisplayArgs("", "read", title); got != "review" {
 		t.Fatalf("toolTitleDisplayArgs(read skill_content) = %q, want review", got)
 	}
-	if got := toolDisplayArgs("Skill", map[string]any{"path": `<skill_content name="review">`}); got != "review" {
-		t.Fatalf("toolDisplayArgs(Skill skill_content path) = %q, want review", got)
+	if got := toolDisplayArgsForTest("Skill", map[string]any{"path": `<skill_content name="review">`}); got != "review" {
+		t.Fatalf("toolDisplayArgsForTest(Skill skill_content path) = %q, want review", got)
 	}
 }
 
@@ -123,16 +135,16 @@ func TestToolDisplayArgsExactSkillContentUsesToolPathAliases(t *testing.T) {
 	t.Parallel()
 
 	raw := map[string]any{"filePath": `<skill_content name="superpowers:brainstorm">`}
-	if got := toolDisplayArgs("Skill", raw); got != "superpowers:brainstorm" {
-		t.Fatalf("toolDisplayArgs(Skill raw only) = %q, want namespaced skill", got)
+	if got := toolDisplayArgsForTest("Skill", raw); got != "superpowers:brainstorm" {
+		t.Fatalf("toolDisplayArgsForTest(Skill raw only) = %q, want namespaced skill", got)
 	}
 }
 
 func TestToolDisplayArgsGlobUsesProviderPatternAlias(t *testing.T) {
 	t.Parallel()
 
-	if got := toolDisplayArgs("Glob", map[string]any{"glob_pattern": "**/*.py"}); got != "**/*.py" {
-		t.Fatalf("toolDisplayArgs(Glob glob_pattern) = %q, want pattern", got)
+	if got := toolDisplayArgsForTest("Glob", map[string]any{"glob_pattern": "**/*.py"}); got != "**/*.py" {
+		t.Fatalf("toolDisplayArgsForTest(Glob glob_pattern) = %q, want pattern", got)
 	}
 }
 
@@ -163,13 +175,13 @@ func TestCompactExplorationArgsHaveNoOuterWrappers(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			fallback := toolTitleDisplayArgs(tt.toolName, tt.kind, tt.title)
-			if got := toolDisplayArgsForKind(tt.toolName, tt.kind, tt.raw, fallback); got != tt.want {
-				t.Fatalf("toolDisplayArgsForKind() = %q, want %q", got, tt.want)
+			if got := toolDisplayArgsForKindForTest(tt.toolName, tt.kind, tt.raw, fallback); got != tt.want {
+				t.Fatalf("toolDisplayArgsForKindForTest() = %q, want %q", got, tt.want)
 			}
 		})
 	}
 
-	if got := toolDisplayArgsForKind("ExternalTool", "other", map[string]any{"query": "tool call"}); got != `"tool call"` {
+	if got := toolDisplayArgsForKindForTest("ExternalTool", "other", map[string]any{"query": "tool call"}); got != `"tool call"` {
 		t.Fatalf("generic non-exploration args = %q, want quoted compatibility display", got)
 	}
 }
@@ -319,9 +331,9 @@ func TestToolDisplayResultHeaderCompactsWindowsReadPath(t *testing.T) {
 
 	base := `D:\xue\code\storage`
 	header := `D:\xue\code\storage\internal\handler\oss_bucket.go 1~100`
-	pathPart, rest, ok := splitLeadingPathHeader(header)
+	pathPart, rest, ok, _ := splitLeadingPathHeaderParts(header)
 	if !ok {
-		t.Fatalf("splitLeadingPathHeader() ok = false")
+		t.Fatalf("splitLeadingPathHeaderParts() ok = false")
 	}
 	compact := compactPathDisplayWithBase(pathPart, base)
 	if got := compact + rest; got != `internal\handler\oss_bucket.go 1~100` {
@@ -332,12 +344,12 @@ func TestToolDisplayResultHeaderCompactsWindowsReadPath(t *testing.T) {
 func TestSplitLeadingPathHeaderHandlesTaggedPath(t *testing.T) {
 	t.Parallel()
 
-	pathPart, rest, ok := splitLeadingPathHeader(`<path>D:\repo\internal\foo.sql</path> 10~20`)
+	pathPart, rest, ok, _ := splitLeadingPathHeaderParts(`<path>D:\repo\internal\foo.sql</path> 10~20`)
 	if !ok {
-		t.Fatalf("splitLeadingPathHeader() ok = false")
+		t.Fatalf("splitLeadingPathHeaderParts() ok = false")
 	}
 	if pathPart != `D:\repo\internal\foo.sql` || rest != " 10~20" {
-		t.Fatalf("splitLeadingPathHeader() = %q, %q, want tagged path and range rest", pathPart, rest)
+		t.Fatalf("splitLeadingPathHeaderParts() = %q, %q, want tagged path and range rest", pathPart, rest)
 	}
 }
 

@@ -251,22 +251,6 @@ func TestACPChildTerminalProjectorClosesEmptyFailedLifecycle(t *testing.T) {
 	}
 }
 
-func TestChildTerminalResultTextDoesNotReuseStaleSuccessForFailure(t *testing.T) {
-	t.Parallel()
-
-	rawOutput := map[string]any{
-		"state":         "cancelled",
-		"final_message": "stale completed final",
-	}
-	if got := childTerminalResultText(eventstream.ToolStatusFailed, rawOutput); got != "" {
-		t.Fatalf("failed child result text = %q, want stale FinalResponse suppressed", got)
-	}
-	rawOutput["reason"] = "cancelled by parent"
-	if got := childTerminalResultText(eventstream.ToolStatusFailed, rawOutput); got != "cancelled by parent" {
-		t.Fatalf("failed child result text = %q, want cancellation reason", got)
-	}
-}
-
 func assertACPChildFinalResult(t *testing.T, notification eventstream.SessionNotification, wantStatus, wantText string) {
 	t.Helper()
 	update, ok := notification.Update.(eventstream.ToolCallUpdate)
@@ -473,7 +457,9 @@ func TestACPNarrativeFilterOnlySuppressesUserEcho(t *testing.T) {
 			Content:       eventstream.TextContent{Type: "text", Text: "hello"},
 		},
 	})
-	if !ok || acpTextContentText(agent.Update.(eventstream.ContentChunk).Content) != "hello" {
+	chunk, _ := agent.Update.(eventstream.ContentChunk)
+	text, _ := chunk.Content.(eventstream.TextContent)
+	if !ok || text.Text != "hello" {
 		t.Fatalf("agent delta = %#v, want unchanged", agent)
 	}
 }

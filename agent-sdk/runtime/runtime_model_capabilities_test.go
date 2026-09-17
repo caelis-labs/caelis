@@ -44,15 +44,6 @@ func (*approveEscalatedCommandRuntimeModel) Capabilities() model.Capabilities {
 func (*commandTaskLoopRuntimeModel) Capabilities() model.Capabilities {
 	return runtimeTestModelCapabilities()
 }
-func (*spawnTaskLoopRuntimeModel) Capabilities() model.Capabilities {
-	return runtimeTestModelCapabilities()
-}
-func (*spawnApprovalTaskLoopRuntimeModel) Capabilities() model.Capabilities {
-	return runtimeTestModelCapabilities()
-}
-func (*spawnProbeTaskLoopRuntimeModel) Capabilities() model.Capabilities {
-	return runtimeTestModelCapabilities()
-}
 func (*stepWatermarkModel) Capabilities() model.Capabilities { return runtimeTestModelCapabilities() }
 func (*repeatedWatermarkModel) Capabilities() model.Capabilities {
 	return runtimeTestModelCapabilities()

@@ -241,15 +241,6 @@ func (c *codexStyleCompactor) snapshotUsage(req compact.Request, promptEvents []
 	})
 }
 
-// ComputeUsageSnapshot projects the latest provider-aware usage for reporting
-// without mutating Session history. Callers that know the active model identity
-// should use ComputeUsageSnapshotForModel so another model cannot seed the
-// active context meter.
-func ComputeUsageSnapshot(events []*session.Event, pendingEvents []*session.Event, contextWindow int, cfg CompactionConfig) compact.UsageSnapshot {
-	promptEvents := compact.PromptEventsFromLatestCompact(events)
-	return snapshotUsageWithResolvedWindow(promptEventsWithPending(promptEvents, pendingEvents), contextWindow, cfg)
-}
-
 // ComputeUsageSnapshotForModel projects reporting usage using only a provider
 // baseline produced by the named model. Incomplete or mismatched identities
 // fail closed to the local prompt estimate.

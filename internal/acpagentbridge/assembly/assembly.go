@@ -70,37 +70,6 @@ func ProvidersFromAssembly(cfg ProviderConfig) Providers {
 	return providers
 }
 
-// SkillBundles returns normalized pure skill-bundle declarations. Empty roots
-// are dropped. Empty namespaces default to the plugin name.
-func SkillBundles(resolved assembly.ResolvedAssembly) []assembly.SkillBundle {
-	resolved = assembly.CloneResolvedAssembly(resolved)
-	if len(resolved.Skills) == 0 {
-		return nil
-	}
-	out := make([]assembly.SkillBundle, 0, len(resolved.Skills))
-	for _, one := range resolved.Skills {
-		root := strings.TrimSpace(one.Root)
-		if root == "" {
-			continue
-		}
-		bundle := assembly.CloneSkillBundle(one)
-		bundle.Plugin = strings.TrimSpace(bundle.Plugin)
-		bundle.Root = root
-		bundle.Namespace = strings.TrimSpace(bundle.Namespace)
-		if bundle.Namespace == "" {
-			bundle.Namespace = bundle.Plugin
-		}
-		for i, disabled := range bundle.Disabled {
-			bundle.Disabled[i] = strings.TrimSpace(disabled)
-		}
-		out = append(out, bundle)
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
-}
-
 type modeProvider struct {
 	available []acpsdk.SessionMode
 	defaultID string

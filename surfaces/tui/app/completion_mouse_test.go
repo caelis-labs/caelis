@@ -48,11 +48,11 @@ func TestSlashCompletionMouseHoverChangesOnlyRenderedSelection(t *testing.T) {
 	model.setInputText("/")
 	model.syncTextareaFromInput()
 	model.refreshSlashCommands()
-	before := model.renderSlashCommandList()
+	before := model.renderInputOverlay()
 
 	point := completionMouseCandidatePoint(t, model, 2)
 	_, _ = model.handleMouse(tea.MouseMotionMsg(point))
-	after := model.renderSlashCommandList()
+	after := model.renderInputOverlay()
 	if model.slashIndex != 2 {
 		t.Fatalf("slashIndex after hover = %d, want 2", model.slashIndex)
 	}

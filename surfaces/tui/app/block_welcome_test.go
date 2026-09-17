@@ -51,7 +51,7 @@ func TestWelcomeBlockResponsiveRender(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			rows := NewWelcomeBlock("v9.9.9").Render(BlockRenderContext{
+			rows := newWelcomeBlock("v9.9.9", "").Render(BlockRenderContext{
 				Width:     tc.width,
 				Height:    tc.height,
 				TermWidth: tc.width,
@@ -268,7 +268,7 @@ func TestWelcomeBlockActionRowsCarryStableTokens(t *testing.T) {
 		{width: 52, height: 15},
 		{width: 33, height: 11},
 	} {
-		rows := NewWelcomeBlock("v1.0.0").Render(BlockRenderContext{
+		rows := newWelcomeBlock("v1.0.0", "").Render(BlockRenderContext{
 			Width:  size.width,
 			Height: size.height,
 			Theme:  theme,
@@ -308,7 +308,7 @@ func TestWelcomeBlockUltraSmallFallbackKeepsActionsClickable(t *testing.T) {
 	t.Parallel()
 	theme := tuikit.ResolveThemeFromOptions(true, colorprofile.NoTTY)
 	for width := 1; width <= 8; width++ {
-		rows := NewWelcomeBlock("v1.0.0").Render(BlockRenderContext{
+		rows := newWelcomeBlock("v1.0.0", "").Render(BlockRenderContext{
 			Width:  width,
 			Height: 3,
 			Theme:  theme,

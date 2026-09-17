@@ -105,8 +105,8 @@ func assertMessagePhysicalColors(t *testing.T, styled []string, width int, sourc
 		painted[i] = "\x1b[m" + line + "\x1b[m"
 	}
 	height := len(styled) + 1
-	frame := normalizeFullscreenFrame(strings.Join(painted, "\n"), width, height)
-	previous := normalizeFullscreenFrame("previous frame", width, height)
+	frame, _ := normalizeFullscreenFrameWithTopTrim(strings.Join(painted, "\n"), width, height)
+	previous, _ := normalizeFullscreenFrameWithTopTrim("previous frame", width, height)
 	updates := renderFullscreenFramesForTest(t, width, height, previous, frame)
 	assertPhysicalFullscreenFrame(t, width, height, frame, updates)
 	terminal := vt.NewSafeEmulator(width, height)

@@ -980,13 +980,6 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-func trimStringPtr(value *string) string {
-	if value == nil {
-		return ""
-	}
-	return strings.TrimSpace(*value)
-}
-
 func subagentPromptUnknownDetail(err error) string {
 	var response *acpsdk.RequestError
 	if errors.As(err, &response) {
@@ -1201,11 +1194,6 @@ func (run *childRun) acpUpdateEvent(env client.UpdateEnvelope, at time.Time, tex
 		opts.TextOverride = textOverride[0]
 	}
 	return acpingress.NormalizeUpdate(env.Update, opts)
-}
-
-func (run *childRun) appendAgentMessageLocked(text string) string {
-	delta, _ := run.appendAgentMessageChunkLocked("", text)
-	return delta
 }
 
 func (run *childRun) appendAgentMessageChunkLocked(messageID string, text string) (string, string) {

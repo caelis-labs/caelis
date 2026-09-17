@@ -148,9 +148,9 @@ func TestStoreCreateKeepsZeroEventWALUntilIndexRecovery(t *testing.T) {
 	if !reflect.DeepEqual(loaded, committed) {
 		t.Fatalf("StartSession(recovery retry) rebuilt Session\ngot:  %#v\nwant: %#v", loaded, committed)
 	}
-	paths, err := reopened.listDocumentPaths()
-	if err != nil || len(paths) != 1 || paths[0] != documentPath {
-		t.Fatalf("document paths = %#v, %v, want one original document", paths, err)
+	foundPath, err := reopened.findDocumentPath(committed.SessionID, "")
+	if err != nil || foundPath != documentPath {
+		t.Fatalf("document path = %q, %v, want one original document", foundPath, err)
 	}
 	loadedDocument, err := reopened.LoadSession(context.Background(), session.LoadSessionRequest{SessionRef: committed.SessionRef})
 	if err != nil {

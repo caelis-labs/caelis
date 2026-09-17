@@ -53,7 +53,7 @@ func TestToolResultEventTaskBindingRequiresRuntimeWrapper(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, event, err := agent.executeToolCall(context.Background(), model.ToolCall{ID: "call-1", Name: "RunCommand", Args: `{}`}, nil)
+			_, event, err := agent.executeToolCallAdmitted(context.Background(), model.ToolCall{ID: "call-1", Name: "RunCommand", Args: `{}`}, nil, nil, nil)
 			if err != nil {
 				t.Fatal(err)
 			}

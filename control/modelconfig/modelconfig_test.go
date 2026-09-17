@@ -519,7 +519,11 @@ func TestMaintainedSelectableModelsUsesCurrentBundledCodexCatalog(t *testing.T) 
 			t.Fatalf("codex selectable model requires unnecessary advanced setup = %#v", item)
 		}
 	}
-	if isCodexOAuthModel("gpt-5.7-pro") || isCodexOAuthModel("gpt-5.7-sol") || !isCodexOAuthModel("gpt-6-astra") || !isCodexOAuthModel("gpt-5.6-sol") || !isCodexOAuthModel("gpt-5.3-codex-spark") {
+	knownCodexOAuthModel := func(name string) bool {
+		_, known := codexOAuthModelDefaults(name)
+		return known
+	}
+	if knownCodexOAuthModel("gpt-5.7-pro") || knownCodexOAuthModel("gpt-5.7-sol") || !knownCodexOAuthModel("gpt-6-astra") || !knownCodexOAuthModel("gpt-5.6-sol") || !knownCodexOAuthModel("gpt-5.3-codex-spark") {
 		t.Fatalf("codex model allowlist accepted an unknown model or rejected a maintained one")
 	}
 }
@@ -544,18 +548,18 @@ func TestResolveCodexOAuthModelDefaultsUseCodexCatalogMetadata(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			defaults, err := ResolveModelDefaults("codex", tt.name)
+			defaults, err := ResolveModelDefaultsForEndpoint("codex", "", tt.name)
 			if err != nil {
-				t.Fatalf("ResolveModelDefaults(codex, %q) error = %v", tt.name, err)
+				t.Fatalf("ResolveModelDefaultsForEndpoint(codex, %q) error = %v", tt.name, err)
 			}
 			if defaults.ContextWindowTokens != tt.context || defaults.MaxOutputTokens != codexOAuthDefaultMaxOutputTokens || defaults.DefaultReasoningEffort != tt.defaultEffort || defaults.ReasoningMode != modelcatalog.ReasoningModeEffort || !slices.Equal(defaults.ReasoningLevels, tt.reasoningLevel) {
-				t.Fatalf("ResolveModelDefaults(codex, %q) = %#v", tt.name, defaults)
+				t.Fatalf("ResolveModelDefaultsForEndpoint(codex, %q) = %#v", tt.name, defaults)
 			}
 			if defaults.ImageInput == nil || !*defaults.ImageInput {
-				t.Fatalf("ResolveModelDefaults(codex, %q).ImageInput = %v, want maintained true", tt.name, defaults.ImageInput)
+				t.Fatalf("ResolveModelDefaultsForEndpoint(codex, %q).ImageInput = %v, want maintained true", tt.name, defaults.ImageInput)
 			}
 			if slices.Contains(defaults.ReasoningLevels, "none") {
-				t.Fatalf("ResolveModelDefaults(codex, %q) advertises unsupported none effort", tt.name)
+				t.Fatalf("ResolveModelDefaultsForEndpoint(codex, %q) advertises unsupported none effort", tt.name)
 			}
 		})
 	}
@@ -760,9 +764,9 @@ func TestMaintainedImageCapabilityOverridesConfig(t *testing.T) {
 func TestResolveModelDefaultsCarriesMaintainedImageCapability(t *testing.T) {
 	t.Parallel()
 
-	defaults, err := ResolveModelDefaults("xai", "grok-4.5")
+	defaults, err := ResolveModelDefaultsForEndpoint("xai", "", "grok-4.5")
 	if err != nil {
-		t.Fatalf("ResolveModelDefaults(maintained image model) error = %v", err)
+		t.Fatalf("ResolveModelDefaultsForEndpoint(maintained image model) error = %v", err)
 	}
 	if defaults.ImageInput == nil || !*defaults.ImageInput {
 		t.Fatalf("defaults image input = %v, want maintained true", defaults.ImageInput)

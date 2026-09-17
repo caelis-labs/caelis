@@ -11,78 +11,6 @@ import (
 	xansi "github.com/charmbracelet/x/ansi"
 )
 
-func TestComposeFooter(t *testing.T) {
-	got := ComposeFooter(20, "left", "right")
-	if len(got) != 20 {
-		t.Fatalf("expected width 20, got %d", len(got))
-	}
-	if got[:4] != "left" {
-		t.Fatalf("expected left prefix, got %q", got)
-	}
-}
-
-func TestResolveThemeFromEnv_UsesNamedThemeAndAccentOverride(t *testing.T) {
-	t.Setenv("NO_COLOR", "")
-	t.Setenv("CAELIS_THEME", "nord")
-	t.Setenv("CAELIS_ACCENT", "#ff9900")
-	t.Setenv("COLORTERM", "truecolor")
-
-	theme := ResolveThemeFromEnv()
-	if got := stringifyColor(theme.AppBg); got != "#2e3440" {
-		t.Fatalf("expected nord app bg, got %q", got)
-	}
-	if got := stringifyColor(theme.Accent); got != "#ff9900" {
-		t.Fatalf("expected accent override, got %q", got)
-	}
-	if got := stringifyColor(theme.ComposerBorderFocus); got != "#ff9900" {
-		t.Fatalf("expected composer focus override, got %q", got)
-	}
-	if got := stringifyColor(theme.PromptFg); got != "#ff9900" {
-		t.Fatalf("expected prompt accent override, got %q", got)
-	}
-	if got := stringifyColor(theme.SpinnerFg); got != "#ff9900" {
-		t.Fatalf("expected spinner accent override, got %q", got)
-	}
-	if got := stringifyColor(theme.InputSelectionBg); got != "#ff9900" {
-		t.Fatalf("expected input selection accent override, got %q", got)
-	}
-}
-
-func TestResolveThemeFromEnv_FallsBackTo256Palette(t *testing.T) {
-	t.Setenv("NO_COLOR", "")
-	t.Setenv("CAELIS_THEME", "dracula")
-	t.Setenv("COLORTERM", "")
-	t.Setenv("TERM", "xterm-256color")
-
-	theme := ResolveThemeFromEnv()
-	if got := stringifyColor(theme.AppBg); got != "236" {
-		t.Fatalf("expected 256-color fallback app bg, got %q", got)
-	}
-	if got := stringifyColor(theme.Focus); got != "123" {
-		t.Fatalf("expected 256-color fallback focus, got %q", got)
-	}
-}
-
-func TestResolveThemeForBackground_SelectsLightTheme(t *testing.T) {
-	t.Setenv("NO_COLOR", "")
-	t.Setenv("CAELIS_THEME", "")
-	t.Setenv("COLORTERM", "truecolor")
-
-	theme := ResolveThemeForBackground(false)
-	if theme.IsDark {
-		t.Fatal("expected light theme for light terminal background")
-	}
-	if got := stringifyColor(theme.TextPrimary); got != "#242a35" {
-		t.Fatalf("expected light theme body text to use explicit high-contrast foreground, got %q", got)
-	}
-	if got := stringifyColor(theme.Focus); got != "#315fbb" {
-		t.Fatalf("expected light-theme focus accent, got %q", got)
-	}
-	if got := stringifyColor(theme.PanelBorder); got != "#cbd1dc" {
-		t.Fatalf("expected light-theme border, got %q", got)
-	}
-}
-
 func TestResolveThemeFromOptionsUsesCOLORFGBGForAutoBackground(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	t.Setenv("CAELIS_THEME", "auto")
@@ -370,6 +298,34 @@ func TestNamedThemesUseMutedReasoningText(t *testing.T) {
 	}
 }
 
+func TestBuiltInThemesKeepConversationSurfacesDistinctAcrossRichProfiles(t *testing.T) {
+	names := []string{
+		"dark",
+		"light",
+		"catppuccin-mocha",
+		"catppuccin-latte",
+		"nord",
+		"solarized",
+		"dracula",
+	}
+	profiles := []colorprofile.Profile{colorprofile.TrueColor, colorprofile.ANSI256}
+	for _, name := range names {
+		for _, profile := range profiles {
+			t.Run(fmt.Sprintf("%s/%v", name, profile), func(t *testing.T) {
+				t.Setenv("NO_COLOR", "")
+				t.Setenv("CAELIS_THEME", name)
+				theme := ResolveThemeFromOptions(false, profile)
+				if theme.UserBg == nil || theme.ComposerBg == nil {
+					t.Fatalf("surfaces = user:%v composer:%v, want both", theme.UserBg, theme.ComposerBg)
+				}
+				if colorsEqual(theme.UserBg, theme.ComposerBg) {
+					t.Fatalf("surfaces share %q", stringifyColor(theme.UserBg))
+				}
+			})
+		}
+	}
+}
+
 func TestValidateThemeAcceptsSupportedPalettes(t *testing.T) {
 	for _, name := range []string{
 		"dark",
@@ -410,31 +366,23 @@ func TestValidateThemeRequiresDistinctConversationSurfaces(t *testing.T) {
 	}
 }
 
-func TestBuiltInThemesKeepConversationSurfacesDistinctAcrossRichProfiles(t *testing.T) {
-	names := []string{
-		"dark",
-		"light",
-		"catppuccin-mocha",
-		"catppuccin-latte",
-		"nord",
-		"solarized",
-		"dracula",
+func TestValidateThemeChecksMutedTextAgainstModalSurface(t *testing.T) {
+	background := color.RGBA{R: 0x2e, G: 0x34, B: 0x40, A: 0xff}
+	theme := ResolveThemeWithBackgroundColor(background, false, colorprofile.TrueColor)
+	theme.MutedText = lipgloss.Color("#9da5b6")
+
+	issues := ValidateTheme(theme)
+	if !slices.ContainsFunc(issues, func(issue ThemeIssue) bool {
+		return issue.Field == "MutedText/ModalBg" && issue.Message == "contrast below threshold"
+	}) {
+		t.Fatalf("ValidateTheme(low modal contrast) issues = %#v", issues)
 	}
-	profiles := []colorprofile.Profile{colorprofile.TrueColor, colorprofile.ANSI256}
-	for _, name := range names {
-		for _, profile := range profiles {
-			t.Run(fmt.Sprintf("%s/%v", name, profile), func(t *testing.T) {
-				t.Setenv("NO_COLOR", "")
-				t.Setenv("CAELIS_THEME", name)
-				theme := ResolveThemeFromOptions(false, profile)
-				if theme.UserBg == nil || theme.ComposerBg == nil {
-					t.Fatalf("surfaces = user:%v composer:%v, want both", theme.UserBg, theme.ComposerBg)
-				}
-				if colorsEqual(theme.UserBg, theme.ComposerBg) {
-					t.Fatalf("surfaces share %q", stringifyColor(theme.UserBg))
-				}
-			})
-		}
+}
+
+func TestValidateThemeSkipsNoColorPalette(t *testing.T) {
+	theme := ResolveThemeFromOptions(true, colorprofile.NoTTY)
+	if issues := ValidateTheme(theme); len(issues) != 0 {
+		t.Fatalf("ValidateTheme(no-color) issues = %#v, want none", issues)
 	}
 }
 
@@ -453,26 +401,6 @@ func TestValidateAdaptiveThemeAgainstSampledTerminalBackgrounds(t *testing.T) {
 				t.Fatalf("MutedText/ModalBg contrast = %.2f, want at least %.2f", ratio, normalTextContrast)
 			}
 		})
-	}
-}
-
-func TestValidateThemeChecksMutedTextAgainstModalSurface(t *testing.T) {
-	background := color.RGBA{R: 0x2e, G: 0x34, B: 0x40, A: 0xff}
-	theme := ResolveThemeWithBackgroundColor(background, false, colorprofile.TrueColor)
-	theme.MutedText = lipgloss.Color("#9da5b6")
-
-	issues := ValidateTheme(theme)
-	if !slices.ContainsFunc(issues, func(issue ThemeIssue) bool {
-		return issue.Field == "MutedText/ModalBg" && issue.Message == "contrast below threshold"
-	}) {
-		t.Fatalf("ValidateTheme(low modal contrast) issues = %#v", issues)
-	}
-}
-
-func TestValidateThemeSkipsNoColorPalette(t *testing.T) {
-	theme := ResolveThemeFromOptions(true, colorprofile.NoTTY)
-	if issues := ValidateTheme(theme); len(issues) != 0 {
-		t.Fatalf("ValidateTheme(no-color) issues = %#v, want none", issues)
 	}
 }
 

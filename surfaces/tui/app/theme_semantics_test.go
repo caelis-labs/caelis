@@ -15,7 +15,7 @@ func TestCaelisToolHeaderKeepsRoleAndActionColorsSeparate(t *testing.T) {
 	theme := tuikit.ResolveThemeWithState(true, false, colorprofile.TrueColor)
 	ctx := BlockRenderContext{Width: 100, TermWidth: 100, Theme: theme}
 
-	styled := styleACPTranscriptHeader(ctx, "• Ran git status --short")
+	styled := styleACPTranscriptHeaderWithMark(ctx, "• Ran git status --short", acpHeaderMarkDefault, false)
 	if got := ansiTextForForeground(t, styled, theme.ToolFg); got != "•" {
 		t.Fatalf("tool foreground text = %q, want icon only\nstyled=%q", got, styled)
 	}
@@ -27,7 +27,7 @@ func TestCaelisToolHeaderKeepsRoleAndActionColorsSeparate(t *testing.T) {
 	}
 
 	for _, verb := range []string{"Updated", "Edit"} {
-		styledVerb := styleACPTranscriptHeader(ctx, "• "+verb+" theme.go")
+		styledVerb := styleACPTranscriptHeaderWithMark(ctx, "• "+verb+" theme.go", acpHeaderMarkDefault, false)
 		if got := ansiTextForForeground(t, styledVerb, theme.TextPrimary); !strings.Contains(got, verb) {
 			t.Fatalf("primary foreground text = %q, want %s action\nstyled=%q", got, verb, styledVerb)
 		}
@@ -39,7 +39,7 @@ func TestCaelisToolHeaderKeepsRoleAndActionColorsSeparate(t *testing.T) {
 		}
 	}
 
-	edit := styleACPTranscriptHeader(ctx, "• Edit process_alive.go +21 -0")
+	edit := styleACPTranscriptHeaderWithMark(ctx, "• Edit process_alive.go +21 -0", acpHeaderMarkDefault, false)
 	if got := ansiTextForForeground(t, edit, theme.DiffAddFg); !strings.Contains(got, "+21") {
 		t.Fatalf("diff-add foreground text = %q, want +21\nstyled=%q", got, edit)
 	}
@@ -50,7 +50,7 @@ func TestCaelisToolHeaderKeepsRoleAndActionColorsSeparate(t *testing.T) {
 		t.Fatalf("success foreground should not color Edit action, got %q", got)
 	}
 
-	failed := styleACPTranscriptHeader(ctx, "• Failed theme.go")
+	failed := styleACPTranscriptHeaderWithMark(ctx, "• Failed theme.go", acpHeaderMarkDefault, false)
 	if got := ansiTextForForeground(t, failed, theme.Error); !strings.Contains(got, "Failed") {
 		t.Fatalf("danger foreground text = %q, want Failed action", got)
 	}

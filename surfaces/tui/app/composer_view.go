@@ -40,14 +40,6 @@ func (r composerRender) styledText() string {
 	return strings.Join(r.styledLines, "\n")
 }
 
-func (m *Model) regularInputPlainLines() []string {
-	lines := m.composeInputLayout().visiblePlainLines()
-	if len(lines) == 0 {
-		return []string{m.inputPromptPrefix()}
-	}
-	return lines
-}
-
 func (m *Model) regularInputCursor() *tea.Cursor {
 	if m.activePrompt != nil {
 		return nil
@@ -62,10 +54,6 @@ func (m *Model) regularInputCursor() *tea.Cursor {
 	cursor := *render.cursor
 	cursor.X += m.composerInputColumnOffset()
 	return &cursor
-}
-
-func (m *Model) composeInputRender() composerRender {
-	return m.composeInputRenderFrom(m.composeInputLayout())
 }
 
 func (m *Model) composeInputRenderFrom(snapshot composerInputLayout) composerRender {

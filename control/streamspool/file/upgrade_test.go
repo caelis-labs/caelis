@@ -35,7 +35,7 @@ func TestNewStoreReclaimsExhaustedLegacyCache(t *testing.T) {
 			t.Fatal(err)
 		}
 		data := append(encodeSegmentHeader(key, true, 0, time.Unix(1, 0)), record...)
-		dir := partitionDir(spoolRoot, key)
+		dir := filepath.Join(spoolRoot, partitionRelativeDir(key))
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -57,7 +57,7 @@ func TestNewStoreReclaimsExhaustedLegacyCache(t *testing.T) {
 		t.Fatalf("startup retained exhausted cache: %d", store.usedBytes)
 	}
 	for _, key := range oldKeys {
-		if _, err := os.Stat(partitionDir(spoolRoot, key)); !errors.Is(err, os.ErrNotExist) {
+		if _, err := os.Stat(filepath.Join(spoolRoot, partitionRelativeDir(key))); !errors.Is(err, os.ErrNotExist) {
 			t.Fatalf("old epoch retained: %v", err)
 		}
 		writer, err := store.Register(t.Context(), streamspool.LogicalKey{Namespace: key.Namespace, Digest: streamspool.DigestStrings("new-session", key.Namespace.String())}, streamspool.WriterOptions{OriginComplete: true})

@@ -42,10 +42,6 @@ func normalizeACPUpdateEvent(
 	})
 }
 
-func contentChunkText(chunk client.ContentChunk) string {
-	return acpingress.ContentChunkText(chunk)
-}
-
 func controllerCommandsFromACP(in []acpsdk.AvailableCommand) []ControllerCommand {
 	if len(in) == 0 {
 		return nil
@@ -177,10 +173,6 @@ func isReasoningEffortValue(value string) bool {
 	default:
 		return false
 	}
-}
-
-func controllerEffortChoicesFromModels(models *client.SessionModelState, model string) []ControllerConfigChoice {
-	return controllerEffortChoicesFromMap(controllerEffortChoicesByModelFromModels(models), model)
 }
 
 func controllerEffortChoicesByModelFromModels(models *client.SessionModelState) map[string][]ControllerConfigChoice {

@@ -2,7 +2,6 @@ package tuiapp
 
 import (
 	"context"
-	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -436,22 +435,6 @@ func completionCandidateStableKey(candidate CompletionCandidate) string {
 		parts[i] = strings.ToLower(part)
 	}
 	return strings.Join(parts, "\x00")
-}
-
-func shortWorkspaceLabel(workspace string) string {
-	workspace = strings.TrimSpace(workspace)
-	if workspace == "" {
-		return ""
-	}
-	return filepath.Base(workspace)
-}
-
-func shortSessionLabel(sessionID string) string {
-	sessionID = strings.TrimSpace(sessionID)
-	if sessionID == "" {
-		return ""
-	}
-	return "id:" + sessionID
 }
 
 func (m *Model) setInputText(text string) {

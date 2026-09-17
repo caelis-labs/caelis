@@ -11,7 +11,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
-func TestComputeUsageSnapshotIncludesEstimatedPromptPrefix(t *testing.T) {
+func TestSnapshotUsageIncludesEstimatedPromptPrefix(t *testing.T) {
 	msg := model.NewTextMessage(model.RoleUser, "hello")
 	events := []*session.Event{{
 		ID:         "u1",
@@ -21,7 +21,7 @@ func TestComputeUsageSnapshotIncludesEstimatedPromptPrefix(t *testing.T) {
 		Text:       msg.TextContent(),
 	}}
 
-	got := ComputeUsageSnapshot(events, nil, 1000, CompactionConfig{
+	got := snapshotUsageWithResolvedWindow(compact.PromptEventsFromLatestCompact(events), 1000, CompactionConfig{
 		EstimatedPromptPrefixTokens: 400,
 	})
 
@@ -36,7 +36,7 @@ func TestComputeUsageSnapshotIncludesEstimatedPromptPrefix(t *testing.T) {
 	}
 }
 
-func TestComputeUsageSnapshotDoesNotDoubleCountPrefixWithProviderBaseline(t *testing.T) {
+func TestSnapshotUsageDoesNotDoubleCountPrefixWithProviderBaseline(t *testing.T) {
 	user := model.NewTextMessage(model.RoleUser, "hello")
 	assistant := model.NewTextMessage(model.RoleAssistant, "world")
 	events := []*session.Event{
@@ -61,7 +61,7 @@ func TestComputeUsageSnapshotDoesNotDoubleCountPrefixWithProviderBaseline(t *tes
 		},
 	}
 
-	got := ComputeUsageSnapshot(events, nil, 1000, CompactionConfig{
+	got := snapshotUsageWithResolvedWindow(compact.PromptEventsFromLatestCompact(events), 1000, CompactionConfig{
 		EstimatedPromptPrefixTokens: 400,
 	})
 
@@ -76,7 +76,7 @@ func TestComputeUsageSnapshotDoesNotDoubleCountPrefixWithProviderBaseline(t *tes
 	}
 }
 
-func TestComputeUsageSnapshotIncludesAnthropicCachedInputBaseline(t *testing.T) {
+func TestSnapshotUsageIncludesAnthropicCachedInputBaseline(t *testing.T) {
 	user := model.NewTextMessage(model.RoleUser, "hello")
 	assistant := model.NewTextMessage(model.RoleAssistant, "answer")
 	events := []*session.Event{
@@ -111,7 +111,7 @@ func TestComputeUsageSnapshotIncludesAnthropicCachedInputBaseline(t *testing.T) 
 		},
 	}
 
-	got := ComputeUsageSnapshot(events, nil, 1048576, CompactionConfig{})
+	got := snapshotUsageWithResolvedWindow(compact.PromptEventsFromLatestCompact(events), 1048576, CompactionConfig{})
 
 	if got.Source != compact.UsageSourceProvider {
 		t.Fatalf("usage source = %q, want provider", got.Source)
@@ -464,7 +464,7 @@ func TestUsageForModelRequestKeepsProviderUsageAuthoritative(t *testing.T) {
 	user.ID = "u1"
 	fresh := userTextEvent("fresh post-snapshot event")
 	fresh.ID = "u2"
-	usage, requestTokens := usageForModelRequest([]*session.Event{user, assistant, fresh}, identifiedCompactionModel{
+	usage, requestTokens, _ := usageForModelRequestDetails([]*session.Event{user, assistant, fresh}, identifiedCompactionModel{
 		staticModel:  staticModel{text: "ok"},
 		providerName: "openai-codex",
 		modelName:    "gpt-5.6-sol",
@@ -571,11 +571,7 @@ func TestEstimateModelRequestTokensIncludesStructuredRequestParts(t *testing.T) 
 				Name: "Grep",
 				Args: string(toolInput),
 			}}, ""),
-			model.MessageFromToolResponse(&model.ToolResponse{
-				ID:     "call-1",
-				Name:   "Grep",
-				Result: map[string]any{"result": "found source"},
-			}),
+			model.NewMessage(model.RoleTool, model.NewToolResultJSONPart("call-1", "Grep", map[string]any{"result": "found source"}, false)),
 		},
 		Tools: []model.ToolSpec{
 			model.NewFunctionToolSpec("Grep", "search docs", map[string]any{"type": "object"}),
@@ -613,7 +609,7 @@ func TestEstimateModelRequestTokensBoundsInlineMediaPayload(t *testing.T) {
 						Data: data,
 					}, "image/png", "screenshot.png"),
 					model.NewJSONPart(jsonPayload),
-					model.NewFileRefPart("report.pdf", "application/pdf", "https://example.com/report.pdf", "file-123", "local-report-ref"),
+					model.Part{Kind: model.PartKindFileRef, FileRef: &model.FileRefPart{Name: "report.pdf", MimeType: "application/pdf", URI: "https://example.com/report.pdf", FileID: "file-123", LocalRef: "local-report-ref"}},
 					model.NewReasoningPart(visibleReasoning, model.ReasoningVisibilityVisible),
 				),
 			},

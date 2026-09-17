@@ -81,13 +81,6 @@ func (h *turnHandle) WaitCompletion(ctx context.Context) error {
 
 func (h *turnHandle) Close() error { return nil }
 
-func (h *turnHandle) publishEvent(event *session.Event) {
-	if h == nil || event == nil {
-		return
-	}
-	h.publish(turnHandleEvent{event: acpbridge.SourceEvent{Canonical: session.CloneEvent(event)}})
-}
-
 func (h *turnHandle) publishSourceEvent(event *session.Event, acp *eventstream.Envelope) {
 	if h == nil {
 		return

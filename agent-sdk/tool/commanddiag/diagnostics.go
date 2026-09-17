@@ -86,14 +86,6 @@ func Best(input Input) (Diagnostic, bool) {
 	}
 }
 
-func Detect(input Input) []Diagnostic {
-	best, ok := Best(input)
-	if !ok {
-		return nil
-	}
-	return []Diagnostic{best}
-}
-
 func isWindowsSandbox(input Input) bool {
 	if goos := strings.TrimSpace(input.GOOS); goos != "" && !strings.EqualFold(goos, "windows") {
 		return false
