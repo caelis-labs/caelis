@@ -26,7 +26,7 @@ func renderACPToolLifecycleRows(blockID string, events []SubagentEvent, idx int,
 	if review == nil {
 		return renderACPToolLifecycleRowsWithoutReview(blockID, events, idx, width, ctx, opts)
 	}
-	display := transcript.ApprovalReviewDisplayParts(review.ApprovalStatus, review.ApprovalRisk, review.ApprovalAuth, review.ApprovalText)
+	display := transcript.ApprovalReviewDisplayParts(review.ApprovalStatus, review.ApprovalText)
 	if display.Status == "denied" {
 		events = slices.Clone(events)
 		for i := idx; i < len(events) && events[i].Kind == SEToolCall && events[i].CallID == callID; i++ {
@@ -44,8 +44,9 @@ func renderACPToolLifecycleRows(blockID string, events []SubagentEvent, idx int,
 			rows[0].Plain = strings.TrimSuffix(rows[0].Plain, " failed")
 			rows[0].Styled = ansi.Truncate(rows[0].Styled, ansi.StringWidth(rows[0].Styled)-len(" failed"), "")
 		}
-		rows[0].Plain += " " + display.Status
-		rows[0].Styled += " " + approvalReviewStatusStyle(ctx, display.Status).Render(display.Status)
+		statusPlain, statusStyled := approvalReviewStatusTag(ctx, display.Status)
+		rows[0].Plain += " " + statusPlain
+		rows[0].Styled += " " + statusStyled
 	}
 	if len(rows) > 0 {
 		headerRows := wrapAgentMessageRows(rows[0], width)

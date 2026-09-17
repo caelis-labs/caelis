@@ -147,20 +147,25 @@ func renderAgentCommunicationRows(blockID string, event SubagentEvent, eventInde
 	}
 	bodyBudget := maxInt(1, compactSingleLineBudget(width)-displayColumns("• "+name+": "))
 	displayText, folded := longCommandDisplayPreview(text, bodyBudget)
-	if opts.AgentMessageTargetLinks {
-		if token := subagentOutputOverlayClickToken(event.SourceCallID); token != "" {
-			return wrapAgentMessageRows(renderAgentMessageRow(blockID, name, displayText, ctx, token), width)
-		}
-	}
-	token := ""
+	foldToken := ""
 	if folded {
 		key := agentCommunicationFoldKey(event, eventIndex)
-		token = agentMessageFoldClickToken(key)
+		foldToken = agentMessageFoldClickToken(key)
 		if opts.AgentMessageExpanded != nil && opts.AgentMessageExpanded(key) {
 			displayText = text
 		}
 	}
-	return wrapAgentMessageRows(renderAgentMessageRow(blockID, name, displayText, ctx, token), width)
+	linkToken := ""
+	if opts.AgentMessageTargetLinks {
+		linkToken = subagentOutputOverlayClickToken(event.SourceCallID)
+	}
+	// The source label opens the Agent workspace; every other column keeps the
+	// row's own expansion, so a long incoming message carries both actions even
+	// when a narrow pane splits the label across lines.
+	return wrapAgentMessageRows(
+		bindAgentMessageTargets(renderAgentMessageRow(blockID, name, displayText, ctx, foldToken), agentMessageGutterColumns+displayColumns(name), linkToken),
+		width,
+	)
 }
 
 func agentCommunicationFoldKey(event SubagentEvent, eventIndex int) string {
@@ -208,22 +213,77 @@ func styleAgentMessageTarget(ctx BlockRenderContext, target string, sent bool) s
 	return styled
 }
 
+// agentMessageGutterColumns is the two-column bullet/indent gutter that precedes
+// every Agent message line, on its label line and on each continuation line.
+const agentMessageGutterColumns = 2
+
 // wrapAgentMessageRows keeps complete input readable with a two-column gutter.
+// A bounded label span is projected onto every physical line the label covers,
+// so a label that wraps in a narrow pane keeps its target on each of its lines;
+// lines past the label keep only the row's own body action.
 func wrapAgentMessageRows(row RenderedRow, width int) []RenderedRow {
 	// Wrap the content after the bullet, keeping ANSI styles and explicit newlines.
 	mark, body, _ := strings.Cut(row.Styled, " ")
 	prefix := mark + " "
+	indentColumns := agentMessageGutterColumns
 	lines := splitStyledPhysicalLines(ansi.Wrap(body, maxInt(1, width-2), ""))
+	labelEnd := -1
+	if row.boundedClick() {
+		labelEnd = maxInt(0, row.ClickEndCol-indentColumns)
+	}
 	rows := make([]RenderedRow, 0, len(lines))
+	remaining := ansi.Strip(body)
+	offset := 0
 	for i, line := range lines {
 		indent := "  "
 		if i == 0 {
 			indent = prefix
 		}
+		text := ansi.Strip(line)
+		if i > 0 {
+			// ansi.Wrap removes the character it breaks on; skipping it keeps the
+			// projected source offset aligned with the body columns.
+			if skip := strings.Index(remaining, text); skip > 0 {
+				offset += displayColumns(remaining[:skip])
+				remaining = remaining[skip:]
+			}
+		}
+		lineStart := offset
+		lineEnd := offset + displayColumns(text)
+		remaining = remaining[minInt(len(text), len(remaining)):]
+		offset = lineEnd
 		next := StyledPlainClickableRow(row.BlockID, ansi.Strip(indent+line), indent+line, row.ClickToken)
+		if start, end := maxInt(lineStart, 0), minInt(lineEnd, labelEnd); labelEnd >= 0 && end > start {
+			next.ClickStartCol = indentColumns + start - lineStart
+			next.ClickEndCol = indentColumns + end - lineStart
+			next.ClickTokenAlt = row.ClickTokenAlt
+		} else if labelEnd >= 0 {
+			// Past the label: only the row's own body action applies.
+			next.ClickToken = firstNonEmpty(strings.TrimSpace(row.ClickTokenAlt), row.ClickToken)
+		}
 		next.PreWrapped = true
 		next.selectionIndent = 2
 		rows = append(rows, next)
 	}
 	return rows
+}
+
+// bindAgentMessageTargets gives one Agent-message row its click targets: the
+// peer label in [0, labelEnd) opens the peer's workspace while the row's own
+// body action owns the rest of the line. A row that only has navigation keeps
+// it as the whole-row target.
+func bindAgentMessageTargets(row RenderedRow, labelEnd int, linkToken string) RenderedRow {
+	bodyToken := strings.TrimSpace(row.ClickToken)
+	linkToken = strings.TrimSpace(linkToken)
+	if linkToken == "" {
+		return row
+	}
+	row.ClickToken = linkToken
+	if bodyToken == "" || labelEnd <= 0 {
+		return row
+	}
+	row.ClickStartCol = agentMessageGutterColumns
+	row.ClickEndCol = labelEnd
+	row.ClickTokenAlt = bodyToken
+	return row
 }

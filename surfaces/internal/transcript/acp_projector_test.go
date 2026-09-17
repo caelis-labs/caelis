@@ -401,7 +401,7 @@ func TestProjectACPEventToEventsProjectsApprovalReview(t *testing.T) {
 		t.Fatalf("events = %#v, want one approval event", events)
 	}
 	event := events[0]
-	if event.Kind != EventApproval || event.ApprovalCommand != "git status" || event.ApprovalRisk != "low" || event.ApprovalAuth != "allow" {
+	if event.Kind != EventApproval || event.ApprovalCommand != "git status" || event.ApprovalStatus != "approved" {
 		t.Fatalf("event = %#v, want approval review projection", event)
 	}
 }

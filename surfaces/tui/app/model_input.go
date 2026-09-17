@@ -361,24 +361,49 @@ func (m *Model) tryHandleViewportClick(mouse tea.Mouse) tea.Cmd {
 	if bid == "" {
 		return nil
 	}
-	if contentLine >= 0 && contentLine < len(m.viewportClickTokens) {
-		if token := strings.TrimSpace(m.viewportClickTokens[contentLine]); token != "" {
-			if messageCallID, ok := strings.CutPrefix(token, agentMessageTargetOverlayTokenPrefix); ok {
-				if m.openSubagentOutputOverlayForMessage(bid, messageCallID) {
-					m.syncViewportContent()
-				}
-				return nil
-			}
-			if m.tryToggleFoldToken(bid, token) {
+	if token := m.viewportClickTokenAt(contentLine, mouse); token != "" {
+		if messageCallID, ok := strings.CutPrefix(token, agentMessageTargetOverlayTokenPrefix); ok {
+			if m.openSubagentOutputOverlayForMessage(bid, messageCallID) {
 				m.syncViewportContent()
-				return nil
 			}
-			if _, ok := welcomeActionForToken(token); ok {
-				return m.tryTriggerWelcomeActionToken(bid, token, contentLine)
-			}
+			return nil
+		}
+		if m.tryToggleFoldToken(bid, token) {
+			m.syncViewportContent()
+			return nil
+		}
+		if _, ok := welcomeActionForToken(token); ok {
+			return m.tryTriggerWelcomeActionToken(bid, token, contentLine)
 		}
 	}
 	return nil
+}
+
+// viewportClickTokenAt resolves one viewport line's hit target for the click
+// column. A row's bounded target only fires inside its span; the row's second
+// target owns the remaining columns, so one line can carry peer navigation and
+// its own expand/collapse action.
+func (m *Model) viewportClickTokenAt(line int, mouse tea.Mouse) string {
+	if m == nil || line < 0 || line >= len(m.viewportClickTokens) {
+		return ""
+	}
+	token := strings.TrimSpace(m.viewportClickTokens[line])
+	alt := ""
+	if line < len(m.viewportClickAltTokens) {
+		alt = strings.TrimSpace(m.viewportClickAltTokens[line])
+	}
+	if alt == "" || line >= len(m.viewportClickBounds) {
+		return token
+	}
+	bounds := m.viewportClickBounds[line]
+	if !bounds.valid() {
+		return token
+	}
+	point, ok := m.mousePointToContentPoint(mouse.X, mouse.Y, false)
+	if !ok || (point.col >= bounds.start && point.col < bounds.end) {
+		return token
+	}
+	return alt
 }
 
 func (m *Model) handleInputAreaMouse(mouse tea.Mouse, phase mousePhase) (bool, tea.Cmd) {

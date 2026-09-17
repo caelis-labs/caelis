@@ -605,10 +605,10 @@ func TestHistoricalPresentationRepairsDoNotAdvanceAnonymousNarrative(t *testing.
 			name: "approval settlement",
 			setup: func(block *MainACPTurnBlock) {
 				block.UpdateToolWithMeta("write-1", "Write", "file.go", "", false, false, ToolUpdateMeta{ToolKind: "edit"})
-				block.AddApprovalReviewEvent("write-1", "Write", "file.go", "pending", "", "", "")
+				block.AddApprovalReviewEvent("write-1", "Write", "file.go", "pending", "")
 			},
 			repair: func(block *MainACPTurnBlock) {
-				block.AddApprovalReviewEvent("write-1", "Write", "file.go", "approved", "", "session", "approved")
+				block.AddApprovalReviewEvent("write-1", "Write", "file.go", "approved", "approved")
 			},
 		},
 	}

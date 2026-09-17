@@ -268,7 +268,7 @@ func TestSubagentOutputOverlayAnchorsApprovalReviewToObservedChildTool(t *testin
 		}
 		plain := strings.Join(renderedPlainRows(model.subagentOutputRows(view, 96, 20)), "\n")
 		toolAt := strings.Index(plain, "ps aux | head -5")
-		reviewAt := strings.Index(plain, " denied")
+		reviewAt := strings.Index(plain, " [denied]")
 		if toolAt < 0 || reviewAt <= toolAt {
 			t.Fatalf("approval review did not render after its child tool:\n%s", plain)
 		}
@@ -282,10 +282,10 @@ func TestSubagentOutputOverlayAnchorsApprovalReviewToObservedChildTool(t *testin
 
 		view := requireSubagentOutputViewForTest(t, model, "spawn-1")
 		plain := strings.Join(renderedPlainRows(model.subagentOutputRows(view, 96, 20)), "\n")
-		if strings.Contains(plain, "Auto approval ·") || strings.Count(plain, "approval denied") != 1 {
+		if strings.Count(plain, "approval denied") != 1 {
 			t.Fatalf("review reason must render once beside its child tool:\n%s", plain)
 		}
-		if strings.Count(plain, "ps aux | head -5 denied") != 1 {
+		if strings.Count(plain, "ps aux | head -5 [denied]") != 1 {
 			t.Fatalf("child review missing after its tool arrived:\n%s", plain)
 		}
 	})

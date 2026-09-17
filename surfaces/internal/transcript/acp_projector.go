@@ -491,7 +491,7 @@ func projectACPApprovalReview(env eventstream.Envelope, meta map[string]any, sco
 	if surface != nil {
 		preview = surface.ApprovalCommandPreview(env.ApprovalReview.RawInput)
 	}
-	display := ApprovalReviewDisplayParts(env.ApprovalReview.Status, env.ApprovalReview.Risk, env.ApprovalReview.Authorization, text)
+	display := ApprovalReviewDisplayParts(env.ApprovalReview.Status, text)
 	return Event{
 		Kind:            EventApproval,
 		Scope:           scope,
@@ -503,8 +503,6 @@ func projectACPApprovalReview(env eventstream.Envelope, meta map[string]any, sco
 		ApprovalTool:    strings.TrimSpace(env.ApprovalReview.ToolName),
 		ApprovalCommand: preview,
 		ApprovalStatus:  display.Status,
-		ApprovalRisk:    display.Risk,
-		ApprovalAuth:    display.Authorization,
 		ApprovalText:    text,
 		Final:           true,
 	}, true

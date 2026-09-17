@@ -5,25 +5,10 @@ import "testing"
 func TestApprovalReviewDisplayPartsParsesFallbackText(t *testing.T) {
 	t.Parallel()
 
-	display := ApprovalReviewDisplayParts("", "", "", "⚠ Automatic approval review denied (risk: high, authorization: deny): command writes outside workspace")
+	display := ApprovalReviewDisplayParts("", "⚠ Automatic approval review denied (risk: high, authorization: deny): command writes outside workspace")
 
-	if display.Status != "denied" || display.Risk != "high" || display.Authorization != "deny" || display.Rationale != "command writes outside workspace" {
-		t.Fatalf("ApprovalReviewDisplayParts() = %#v, want parsed review fields", display)
-	}
-}
-
-func TestApprovalReviewTailOutputUsesParsedFallbackFields(t *testing.T) {
-	t.Parallel()
-
-	output := ApprovalReviewTailOutput(ApprovalReviewFields{
-		Tool:    "RunCommand",
-		Command: "git status",
-		Text:    "Automatic approval review approved (risk: low, authorization: allow): safe read-only command",
-	})
-
-	want := "Auto approval · approved RunCommand git status (risk: low, authorization: allow)\nsafe read-only command\n"
-	if output != want {
-		t.Fatalf("ApprovalReviewTailOutput() = %q, want %q", output, want)
+	if display.Status != "denied" || display.Rationale != "command writes outside workspace" {
+		t.Fatalf("ApprovalReviewDisplayParts() = %#v, want parsed review state", display)
 	}
 }
 

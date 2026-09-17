@@ -43,7 +43,7 @@ func subagentOutputWrappedRows(blockID string, wrapped wrappedViewportRows) []Re
 	for index, styled := range wrapped.styledLines {
 		row := RenderedRow{
 			Styled: styled, Plain: wrapped.plainLines[index], BlockID: blockID,
-			ClickToken: wrapped.clickTokens[index], PreWrapped: true,
+			ClickToken: wrapped.clickTokens[index], ClickTokenAlt: wrapped.altClickTokens[index], PreWrapped: true,
 			selectionIndent: wrapped.selectionIndents[index],
 			activeTail:      strings.Contains(styled, wideCellRendererSentinel()),
 		}

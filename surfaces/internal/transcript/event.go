@@ -142,8 +142,6 @@ type Event struct {
 	ApprovalOptions   []ApprovalOption
 	ApprovalCommand   string
 	ApprovalStatus    string
-	ApprovalRisk      string
-	ApprovalAuth      string
 	ApprovalText      string
 
 	State      string

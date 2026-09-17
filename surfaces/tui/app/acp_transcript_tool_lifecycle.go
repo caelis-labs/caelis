@@ -578,11 +578,12 @@ func renderACPTerminalLifecycleRows(blockID string, ev SubagentEvent, callID str
 	token := acpToolPanelClickTokenIf(callID, toolPanelCanExpandHiddenDetails(ev, text, final, err))
 	tone, dim := acpToolHeaderMark(ctx, err, final)
 	var headerRow RenderedRow
-	if sendMessage && !err && opts.AgentMessageTargetLinks && agentMessageTargetCanOpenOverlay(ev.MessageTarget) {
-		token = agentMessageTargetOverlayClickToken(callID)
-		headerRow = renderSendMessageHeaderRow(blockID, headerEvent.Args, ctx, token, tone, dim)
-	} else if sendMessage {
-		headerRow = renderSendMessageHeaderRow(blockID, headerEvent.Args, ctx, token, tone, dim)
+	if sendMessage {
+		linkToken := ""
+		if !err && opts.AgentMessageTargetLinks && agentMessageTargetCanOpenOverlay(ev.MessageTarget) {
+			linkToken = agentMessageTargetOverlayClickToken(callID)
+		}
+		headerRow = renderSendMessageHeaderRow(blockID, headerEvent.Args, ctx, token, linkToken, tone, dim)
 	} else {
 		headerRow = renderACPTranscriptHeaderRowMarked(blockID, header, width, ctx, token, tone, dim)
 	}
@@ -609,7 +610,7 @@ func renderACPTerminalLifecycleRows(blockID string, ev SubagentEvent, callID str
 	return rows
 }
 
-func renderSendMessageHeaderRow(blockID string, args string, ctx BlockRenderContext, token string, tone acpHeaderMarkTone, dim bool) RenderedRow {
+func renderSendMessageHeaderRow(blockID string, args string, ctx BlockRenderContext, token string, linkToken string, tone acpHeaderMarkTone, dim bool) RenderedRow {
 	args = sanitizeRenderableText(args)
 	target := strings.TrimSpace(args)
 	message := ""
@@ -624,6 +625,9 @@ func renderSendMessageHeaderRow(blockID string, args string, ctx BlockRenderCont
 		styled += ctx.Theme.TextStyle().Render(": " + message)
 	}
 	row := StyledPlainClickableRow(blockID, plain, styled, token)
+	// The recipient label opens the target Agent's workspace; the body keeps the
+	// send panel's own expand/collapse instead of losing it to whole-row navigation.
+	row = bindAgentMessageTargets(row, agentMessageGutterColumns+displayColumns(target), linkToken)
 	row.selectionIndent = 2
 	return row
 }

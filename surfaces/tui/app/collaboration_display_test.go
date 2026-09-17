@@ -130,10 +130,10 @@ func TestToolReviewRendersOnOriginalHeader(t *testing.T) {
 		m := NewModel(Config{NoColor: true, NoAnimation: true})
 		block := &MainACPTurnBlock{}
 		block.UpdateToolWithMeta("edit-1", "Edit", "file.go", "normal result", true, status == "denied", ToolUpdateMeta{ToolKind: "edit"})
-		block.AddApprovalReviewEvent("edit-1", "Edit", "file.go", status, "", "", "denied: outside the requested scope")
+		block.AddApprovalReviewEvent("edit-1", "Edit", "file.go", status, "denied: outside the requested scope")
 		plain := strings.Join(renderedPlainRows(block.Render(m.blockRenderContext(100))), "\n")
 		t.Log(plain)
-		if strings.Contains(plain, "Auto approval") || !strings.Contains(plain, "file.go "+status) {
+		if !strings.Contains(plain, "file.go ["+status+"]") {
 			t.Fatalf("review header: %s", plain)
 		}
 		if status == "denied" && (strings.Contains(plain, "normal result") || strings.Count(plain, "outside the requested scope") != 1) {

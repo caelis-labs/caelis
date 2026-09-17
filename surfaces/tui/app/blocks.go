@@ -273,13 +273,13 @@ func (b *MainACPTurnBlock) SetStatus(state string, approvalTool string, approval
 	b.advanceNarrativeBoundary()
 }
 
-func (b *MainACPTurnBlock) AddApprovalReviewEvent(callID, tool, command, status, risk, authorization, text string) {
+func (b *MainACPTurnBlock) AddApprovalReviewEvent(callID, tool, command, status, text string) {
 	if b == nil {
 		return
 	}
 	b.clearTransientRetryNotice()
 	var insertedAt int
-	b.Events, _, insertedAt = addApprovalReviewSubagentEvent(b.Events, callID, tool, command, status, risk, authorization, text)
+	b.Events, _, insertedAt = addApprovalReviewSubagentEvent(b.Events, callID, tool, command, status, text)
 	if insertedAt == len(b.Events)-1 {
 		b.advanceNarrativeBoundary()
 	}
@@ -555,13 +555,13 @@ func (b *ParticipantTurnBlock) SetStatus(state string, approvalTool string, appr
 	b.advanceNarrativeBoundary()
 }
 
-func (b *ParticipantTurnBlock) AddApprovalReviewEvent(callID, tool, command, status, risk, authorization, text string) {
+func (b *ParticipantTurnBlock) AddApprovalReviewEvent(callID, tool, command, status, text string) {
 	if b == nil {
 		return
 	}
 	b.clearTransientRetryNotice()
 	var insertedAt int
-	b.Events, _, insertedAt = addApprovalReviewSubagentEvent(b.Events, callID, tool, command, status, risk, authorization, text)
+	b.Events, _, insertedAt = addApprovalReviewSubagentEvent(b.Events, callID, tool, command, status, text)
 	if insertedAt == len(b.Events)-1 {
 		b.advanceNarrativeBoundary()
 	}
@@ -701,15 +701,13 @@ func visibleNarrativeEvents(events []SubagentEvent, status string) []SubagentEve
 	return out
 }
 
-func addApprovalReviewSubagentEvent(events []SubagentEvent, callID, tool, command, status, risk, authorization, text string) ([]SubagentEvent, bool, int) {
+func addApprovalReviewSubagentEvent(events []SubagentEvent, callID, tool, command, status, text string) ([]SubagentEvent, bool, int) {
 	review := SubagentEvent{
 		Kind:            SEApproval,
 		CallID:          strings.TrimSpace(callID),
 		ApprovalTool:    strings.TrimSpace(tool),
 		ApprovalCommand: strings.TrimSpace(command),
 		ApprovalStatus:  strings.TrimSpace(status),
-		ApprovalRisk:    strings.TrimSpace(risk),
-		ApprovalAuth:    strings.TrimSpace(authorization),
 		ApprovalText:    strings.TrimSpace(text),
 	}
 	if review.CallID != "" {
@@ -745,12 +743,6 @@ func mergeApprovalReviewEvent(target *SubagentEvent, review SubagentEvent) {
 	}
 	if review.ApprovalStatus != "" {
 		target.ApprovalStatus = review.ApprovalStatus
-	}
-	if review.ApprovalRisk != "" {
-		target.ApprovalRisk = review.ApprovalRisk
-	}
-	if review.ApprovalAuth != "" {
-		target.ApprovalAuth = review.ApprovalAuth
 	}
 	if review.ApprovalText != "" {
 		target.ApprovalText = review.ApprovalText

@@ -61,6 +61,7 @@ func (m *Model) renderViewportRowCacheFromRows(block Block, ctx BlockRenderConte
 		wrapped.plainLines = spliceStrings(previous.plainLines, start, end-start, wrapped.plainLines)
 		wrapped.selectionIndents = spliceInts(previous.selectionIndents, start, end-start, wrapped.selectionIndents)
 		wrapped.clickTokens = spliceStrings(previous.clickTokens, start, end-start, wrapped.clickTokens)
+		wrapped.altClickTokens = spliceStrings(previous.altClickTokens, start, end-start, wrapped.altClickTokens)
 		wrapped.clickBounds = spliceClickColumnRanges(previous.clickBounds, start, end-start, wrapped.clickBounds)
 	}
 	var fixed []string

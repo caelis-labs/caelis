@@ -1254,14 +1254,15 @@ func renderACPApprovalReviewRows(blockID string, ev SubagentEvent, width int, ct
 	if strings.TrimSpace(ev.ApprovalText) == "" && strings.TrimSpace(ev.ApprovalStatus) == "" {
 		return nil
 	}
-	display := transcript.ApprovalReviewDisplayParts(ev.ApprovalStatus, ev.ApprovalRisk, ev.ApprovalAuth, ev.ApprovalText)
+	display := transcript.ApprovalReviewDisplayParts(ev.ApprovalStatus, ev.ApprovalText)
 	if display.Status == "" && display.Rationale == "" {
 		return nil
 	}
 	header := strings.TrimSpace(ev.ApprovalTool + " " + ev.ApprovalCommand)
 	prefix := strings.TrimSpace("• "+header) + " "
-	prefixPlain := prefix + display.Status
-	prefixStyled := ctx.Theme.ToolStyle().Render(prefix) + approvalReviewStatusStyle(ctx, display.Status).Render(display.Status)
+	statusPlain, statusStyled := approvalReviewStatusTag(ctx, display.Status)
+	prefixPlain := prefix + statusPlain
+	prefixStyled := ctx.Theme.ToolStyle().Render(prefix) + statusStyled
 	if display.Rationale == "" {
 		return []RenderedRow{StyledPlainRow(blockID, prefixPlain, prefixStyled)}
 	}
@@ -1299,6 +1300,19 @@ func approvalReviewStatusStyle(ctx BlockRenderContext, status string) lipgloss.S
 	default:
 		return ctx.Theme.TranscriptLabelStyle()
 	}
+}
+
+// approvalReviewStatusTag renders one review outcome as a bracket-delimited chip
+// so a trailing word never reads as part of the command. The brackets stay
+// secondary; the status keeps the row's only saturated color.
+func approvalReviewStatusTag(ctx BlockRenderContext, status string) (plain string, styled string) {
+	status = strings.TrimSpace(status)
+	if status == "" {
+		return "", ""
+	}
+	bracket := ctx.Theme.TranscriptMetaStyle()
+	return "[" + status + "]",
+		bracket.Render("[") + approvalReviewStatusStyle(ctx, status).Render(status) + bracket.Render("]")
 }
 
 // Empty running Turns leave progress to the hint area; initialization and

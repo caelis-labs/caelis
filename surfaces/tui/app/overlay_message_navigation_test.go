@@ -49,16 +49,19 @@ func TestShortAndLongSpawnRowsOpenOverlayInsteadOfFolding(t *testing.T) {
 	}
 }
 
-func TestSendMessageToChildOpensOverlayInsteadOfFolding(t *testing.T) {
+// SendMessage rows keep two actions: the recipient label opens the target's
+// workspace, while the body expands the send panel that hides the full message.
+func TestSendMessageRowSplitsTargetNavigationFromPanelExpansion(t *testing.T) {
 	t.Parallel()
 
 	for _, tc := range []struct {
-		name    string
-		message string
-		hidden  string
+		name      string
+		message   string
+		hidden    string
+		hasTarget bool
 	}{
 		{name: "short", message: "continue from the parent"},
-		{name: "long", message: overlayNavLongText("send-marker"), hidden: "send-marker"},
+		{name: "long", message: overlayNavLongText("send-marker"), hidden: "send-marker", hasTarget: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -68,9 +71,30 @@ func TestSendMessageToChildOpensOverlayInsteadOfFolding(t *testing.T) {
 			block := requireMainACPTurnBlockForTest(t, model)
 			row := requireRenderedRowContaining(t, overlayNavRows(t, model, block), "• @ziva")
 			if row.ClickToken != agentMessageTargetOverlayClickToken("message-1") {
-				t.Fatalf("SendMessage click token = %q, want child overlay link", row.ClickToken)
+				t.Fatalf("SendMessage recipient-label token = %q, want child overlay link", row.ClickToken)
+			}
+			if !tc.hasTarget {
+				// Nothing is hidden, so the row keeps its single navigation target.
+				if row.ClickStartCol != 0 || row.ClickEndCol != 0 || row.ClickTokenAlt != "" {
+					t.Fatalf("short SendMessage row kept a body target: %#v", row)
+				}
+				assertClickOpensOverlay(t, model, block, row, "spawn-1", tc.hidden)
+				return
+			}
+			if bounds := (clickColumnRange{row.ClickStartCol, row.ClickEndCol}); !bounds.valid() || bounds.end != displayColumns("• @ziva[breeze]") {
+				t.Fatalf("SendMessage recipient-label span = %#v", bounds)
+			}
+			if row.ClickTokenAlt != acpToolPanelClickToken("message-1") {
+				t.Fatalf("SendMessage body token = %q, want send panel toggle", row.ClickTokenAlt)
 			}
 			assertClickOpensOverlay(t, model, block, row, "spawn-1", tc.hidden)
+			model.subagentOutputOverlay = nil
+			if !model.tryToggleFoldToken(block.BlockID(), row.ClickTokenAlt) {
+				t.Fatal("SendMessage body target did not toggle the send panel")
+			}
+			if plain := renderedRowsPlain(overlayNavRows(t, model, block)); !strings.Contains(plain, tc.hidden) {
+				t.Fatalf("SendMessage body target did not expand the hidden message:\n%s", plain)
+			}
 		})
 	}
 }

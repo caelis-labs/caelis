@@ -300,8 +300,6 @@ func (s *corpusTranscriptState) reduceProjected(env eventstream.Envelope, identi
 		item["id"] = identity
 		item["kind"] = "approval"
 		item["status"] = event.ApprovalStatus
-		corpusSet(item, "authorization", event.ApprovalAuth)
-		corpusSet(item, "risk", event.ApprovalRisk)
 		corpusSet(item, "text", event.ApprovalText)
 		corpusSet(item, "toolCallId", event.ToolCallID)
 		corpusSet(item, "toolName", event.ApprovalTool)

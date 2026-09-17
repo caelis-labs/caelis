@@ -432,6 +432,7 @@ type Model struct {
 	viewportSelectionIndents      []int
 	viewportBlockIDs              []string
 	viewportClickTokens           []string
+	viewportClickAltTokens        []string
 	viewportClickBounds           []clickColumnRange
 	frameTopTrim                  int
 	viewport                      viewport.Model

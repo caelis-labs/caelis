@@ -30,6 +30,7 @@ type RenderedRow struct {
 	ClickToken        string // optional interaction token for row-level hit testing
 	ClickStartCol     int    // inclusive display-column start; valid when ClickEndCol > ClickStartCol
 	ClickEndCol       int    // exclusive display-column end for a bounded click target
+	ClickTokenAlt     string // second row target: the columns outside a bounded ClickToken span
 	PreWrapped        bool   // if true, already wrapped to viewport width — skip re-wrapping
 	ACPHeader         bool   // if true, wrap as an ACP transcript header row
 	acpHeaderMarkTone acpHeaderMarkTone
@@ -52,6 +53,13 @@ func StyledPlainRow(blockID, plain, styled string) RenderedRow {
 
 func StyledPlainClickableRow(blockID, plain, styled, clickToken string) RenderedRow {
 	return RenderedRow{Styled: styled, Plain: plain, BlockID: blockID, ClickToken: clickToken}
+}
+
+// boundedClick reports whether the row's primary target is restricted to
+// [ClickStartCol, ClickEndCol). A row without a bounded target applies its
+// primary target to the whole line.
+func (r RenderedRow) boundedClick() bool {
+	return r.ClickEndCol > r.ClickStartCol
 }
 
 func StyledPlainBoundedClickableRow(blockID, plain, styled, clickToken string, clickStartCol, clickEndCol int) RenderedRow {

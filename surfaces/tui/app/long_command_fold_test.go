@@ -200,11 +200,18 @@ func TestLongCommandHeaderClickExpandsAndCollapsesCommand(t *testing.T) {
 	}
 }
 
+// clickViewportLine clicks the row's content column 2, inside the selection
+// indent used by ACP transcript rows.
 func clickViewportLine(t *testing.T, model *Model, line int) {
+	t.Helper()
+	clickViewportColumn(t, model, line, 2)
+}
+
+func clickViewportColumn(t *testing.T, model *Model, line int, col int) {
 	t.Helper()
 	mouse := tea.Mouse{
 		Button: tea.MouseLeft,
-		X:      model.mainColumnX() + tuikit.GutterNarrative + 2,
+		X:      model.mainColumnX() + tuikit.GutterNarrative + col,
 		Y:      line - model.viewportVisibleOffset(),
 	}
 	_ = model.handleViewportMousePress(mouse)
