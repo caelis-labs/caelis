@@ -759,43 +759,6 @@ func childMessageEventForStreamTest(text string) *session.Event {
 	}
 }
 
-func childPlanEventForStreamTest() *session.Event {
-	return &session.Event{
-		ID:         "child-plan-stream-1",
-		Type:       session.EventTypePlan,
-		Visibility: session.VisibilityUIOnly,
-		Scope:      spawnSubagentScope("jack"),
-		Protocol: &session.EventProtocol{
-			Method: session.ProtocolMethodSessionUpdate,
-			Update: &session.ProtocolUpdate{
-				SessionUpdate: string(session.ProtocolUpdateTypePlan),
-				Entries: []session.ProtocolPlanEntry{{
-					Content: "inspect parent delivery",
-					Status:  "in_progress",
-				}},
-			},
-		},
-	}
-}
-
-func childToolUpdateEventForStreamTest() *session.Event {
-	return &session.Event{
-		ID:         "child-tool-stream-1",
-		Type:       session.EventTypeToolResult,
-		Visibility: session.VisibilityUIOnly,
-		Scope:      spawnSubagentScope("jack"),
-		Protocol: &session.EventProtocol{
-			Method: session.ProtocolMethodSessionUpdate,
-			Update: &session.ProtocolUpdate{
-				SessionUpdate: string(session.ProtocolUpdateTypeToolUpdate),
-				ToolCallID:    "child-tool-stream-1",
-				Kind:          "Patch",
-				Status:        eventstream.ToolStatusCompleted,
-			},
-		},
-	}
-}
-
 func spawnProjectionRequestForTest() taskFrameProjectionRequest {
 	return taskFrameProjectionRequest{
 		TurnID:            "turn-1",
@@ -903,13 +866,6 @@ func stringPtrValue(value *string) string {
 		return ""
 	}
 	return *value
-}
-
-func runtimeTaskMeta(meta map[string]any) map[string]any {
-	caelis, _ := meta[eventmeta.Root].(map[string]any)
-	runtimeMeta, _ := caelis[eventmeta.Runtime].(map[string]any)
-	taskMeta, _ := runtimeMeta[eventmeta.RuntimeTask].(map[string]any)
-	return taskMeta
 }
 
 func TestStreamParentEchoMatchingUsesExactToolName(t *testing.T) {

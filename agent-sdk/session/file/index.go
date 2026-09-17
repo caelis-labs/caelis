@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -405,13 +404,4 @@ func unixNanoToTime(ns int64) time.Time {
 		return time.Time{}
 	}
 	return time.Unix(0, ns).UTC()
-}
-
-func sortSessionSummaries(summaries []session.SessionSummary) {
-	sort.Slice(summaries, func(i, j int) bool {
-		if !summaries[i].UpdatedAt.Equal(summaries[j].UpdatedAt) {
-			return summaries[i].UpdatedAt.After(summaries[j].UpdatedAt)
-		}
-		return summaries[i].SessionID < summaries[j].SessionID
-	})
 }

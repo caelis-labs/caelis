@@ -3,12 +3,10 @@ package gatewayapp
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"iter"
 	"reflect"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -154,81 +152,6 @@ func TestGuardianPlannedActionIncludesOnlyRuntimeOwnedSandboxPolicy(t *testing.T
 	}
 }
 
-type guardianApprovalGateResolver struct {
-	model model.LLM
-}
-
-func (r guardianApprovalGateResolver) ResolveTurn(_ context.Context, intent kernel.TurnIntent) (kernel.ResolvedTurn, error) {
-	return kernel.ResolvedTurn{RunRequest: agent.RunRequest{
-		SessionRef: intent.SessionRef,
-		AgentSpec:  agent.AgentSpec{Model: r.model},
-	}}, nil
-}
-
-type guardianApprovalGateRuntime struct {
-	session    session.Session
-	model      model.LLM
-	requests   int
-	command    string
-	responses  atomic.Int64
-	executions atomic.Int64
-}
-
-func (r *guardianApprovalGateRuntime) Run(ctx context.Context, req agent.RunRequest) (agent.RunResult, error) {
-	if req.ApprovalRequester == nil {
-		return agent.RunResult{}, fmt.Errorf("guardian approval gate test: missing approval requester")
-	}
-	for range r.requests {
-		response, err := req.ApprovalRequester.RequestApproval(ctx, agent.ApprovalRequest{
-			SessionRef: r.session.SessionRef,
-			Session:    r.session,
-			RunID:      "runtime-run",
-			TurnID:     "runtime-turn",
-			Tool:       tool.Definition{Name: "RunCommand"},
-			Call:       tool.Call{ID: "runtime-call", Name: "RunCommand", RuntimeModel: r.model},
-			Approval: &session.ProtocolApproval{
-				ToolCall: session.ProtocolToolCall{
-					ID:       "runtime-call",
-					Name:     "RunCommand",
-					Kind:     "execute",
-					Status:   "pending",
-					RawInput: map[string]any{"cmd": r.command},
-				},
-				Options: []session.ProtocolApprovalOption{
-					{ID: "allow_once", Name: "Allow once", Kind: "allow_once"},
-					{ID: "deny_once", Name: "Deny once", Kind: "deny_once"},
-				},
-			},
-		})
-		if err != nil {
-			return agent.RunResult{}, err
-		}
-		r.responses.Add(1)
-		if response.Approved {
-			r.executions.Add(1)
-		}
-	}
-	return agent.RunResult{Session: r.session, Handle: guardianApprovalGateRunner{}}, nil
-}
-
-func (*guardianApprovalGateRuntime) RunState(context.Context, session.SessionRef) (agent.RunState, error) {
-	return agent.RunState{}, nil
-}
-
-type guardianApprovalGateRunner struct{}
-
-func (guardianApprovalGateRunner) RunID() string { return "guardian-approval-gate" }
-
-func (guardianApprovalGateRunner) Submit(agent.Submission) error { return nil }
-
-func (guardianApprovalGateRunner) Cancel() agent.CancelResult {
-	return agent.CancelResult{Status: agent.CancelStatusCancelled}
-}
-
-func (guardianApprovalGateRunner) Close() error { return nil }
-
-func (guardianApprovalGateRunner) WaitCompletion(context.Context) error { return nil }
-
 func TestSystemManagedAgentPlanRejectsGuardianTools(t *testing.T) {
 	_, err := systemManagedAgentRunPlanFor(systemManagedAgentRunRequest{
 		AgentID: guardianSceneID,
@@ -283,14 +206,6 @@ func TestSystemManagedAgentSessionUsesEphemeralStagingID(t *testing.T) {
 	if got.SessionID != want {
 		t.Fatalf("system-managed session id = %q, want ephemeral staging id %q", got.SessionID, want)
 	}
-}
-
-func guardianSelectorTestTokenCount(text string) int {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return 0
-	}
-	return len([]rune(text))/4 + 1
 }
 
 func TestApprovalReviewerRetriesInvalidJSONAssessment(t *testing.T) {
@@ -449,38 +364,6 @@ type approvalReviewerFakeModel struct {
 	contextWindowTokens     int
 }
 
-type approvalReviewerSystemAgentRunner struct {
-	calls       int
-	req         systemManagedAgentRunRequest
-	response    string
-	err         error
-	deadline    time.Time
-	hasDeadline bool
-}
-
-func (r *approvalReviewerSystemAgentRunner) Run(ctx context.Context, req systemManagedAgentRunRequest) (systemManagedAgentRunResult, error) {
-	r.calls++
-	r.req = req
-	r.deadline, r.hasDeadline = ctx.Deadline()
-	if r.err != nil {
-		return systemManagedAgentRunResult{}, r.err
-	}
-	text := strings.TrimSpace(r.response)
-	if text == "" {
-		text = `{"option_id":"allow_once"}`
-	}
-	message := model.NewTextMessage(model.RoleAssistant, text)
-	event := &session.Event{
-		Type:    session.EventTypeAssistant,
-		Message: &message,
-		Text:    text,
-	}
-	return systemManagedAgentRunResult{
-		AssistantEvent: event,
-		Text:           text,
-	}, nil
-}
-
 func (m *approvalReviewerFakeModel) Name() string {
 	if m != nil && strings.TrimSpace(m.name) != "" {
 		return strings.TrimSpace(m.name)
@@ -561,75 +444,6 @@ func (m *approvalReviewerFakeModel) Requests() []model.Request {
 		out = append(out, cp)
 	}
 	return out
-}
-
-type approvalReviewerProviderRecorder struct {
-	base model.LLM
-	mu   sync.Mutex
-	reqs []model.Request
-	uses []model.Usage
-}
-
-func (m *approvalReviewerProviderRecorder) Name() string { return m.base.Name() }
-
-func (m *approvalReviewerProviderRecorder) Capabilities() model.Capabilities {
-	if provider, ok := m.base.(model.CapabilityProvider); ok {
-		return provider.Capabilities()
-	}
-	return model.Capabilities{}
-}
-
-func (m *approvalReviewerProviderRecorder) Generate(ctx context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
-	m.recordRequest(req)
-	return func(yield func(*model.StreamEvent, error) bool) {
-		for event, err := range m.base.Generate(ctx, req) {
-			if event != nil && event.Response != nil {
-				m.recordUsage(event.Usage)
-			}
-			if !yield(event, err) {
-				return
-			}
-		}
-	}
-}
-
-func (m *approvalReviewerProviderRecorder) recordRequest(req *model.Request) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if req == nil {
-		m.reqs = append(m.reqs, model.Request{})
-		return
-	}
-	cp := *req
-	cp.Messages = model.CloneMessages(req.Messages)
-	cp.Instructions = model.CloneParts(req.Instructions)
-	cp.Tools = append([]model.ToolSpec(nil), req.Tools...)
-	cp.Output = agent.ModelRequestOptions{Output: req.Output}.OutputSpec()
-	m.reqs = append(m.reqs, cp)
-}
-
-func (m *approvalReviewerProviderRecorder) recordUsage(usage model.Usage) {
-	if usage.PromptTokens == 0 && usage.CachedInputTokens == 0 && usage.CompletionTokens == 0 && usage.ReasoningTokens == 0 && usage.TotalTokens == 0 {
-		return
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.uses = append(m.uses, usage)
-}
-
-func (m *approvalReviewerProviderRecorder) Snapshot() ([]model.Request, []model.Usage) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	reqs := make([]model.Request, 0, len(m.reqs))
-	for _, req := range m.reqs {
-		cp := req
-		cp.Messages = model.CloneMessages(req.Messages)
-		cp.Instructions = model.CloneParts(req.Instructions)
-		cp.Tools = append([]model.ToolSpec(nil), req.Tools...)
-		cp.Output = agent.ModelRequestOptions{Output: req.Output}.OutputSpec()
-		reqs = append(reqs, cp)
-	}
-	return reqs, append([]model.Usage(nil), m.uses...)
 }
 
 func ptrMessage(message model.Message) *model.Message {

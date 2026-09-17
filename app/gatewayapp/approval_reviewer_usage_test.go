@@ -205,24 +205,6 @@ func TestGuardianConcurrentReviewsDoNotShareAccounting(t *testing.T) {
 	wg.Wait()
 }
 
-type guardianCompactionUsageModel struct {
-	*guardianMeasuredModel
-	compactCalls int
-}
-
-func (m *guardianCompactionUsageModel) Generate(ctx context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
-	if req.Output != nil {
-		return m.guardianMeasuredModel.Generate(ctx, req)
-	}
-	m.compactCalls++
-	return func(yield func(*model.StreamEvent, error) bool) {
-		if !yield(&model.StreamEvent{Type: model.StreamEventPartDelta, Response: &model.Response{Usage: model.Usage{TotalTokens: 12}}}, nil) {
-			return
-		}
-		yield(nil, &model.ContextOverflowError{Cause: errors.New("compaction input overflow")})
-	}
-}
-
 func TestGuardianReceiptRetainsOriginalParentFence(t *testing.T) {
 	for _, scenario := range []string{"owned_fence", "public_fields_are_not_authority", "stale_fence", "empty_runtime_claim"} {
 		t.Run(scenario, func(t *testing.T) {

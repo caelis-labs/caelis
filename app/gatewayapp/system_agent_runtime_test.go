@@ -3,7 +3,6 @@ package gatewayapp
 import (
 	"context"
 	"iter"
-	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -104,46 +103,6 @@ func TestSystemManagedAgentDoesNotInheritParentRuntimeFence(t *testing.T) {
 	if result.AssistantEvent == nil {
 		t.Fatal("Run() returned no Guardian assessment")
 	}
-}
-
-func systemManagedTextResponse(text string) iter.Seq2[*model.StreamEvent, error] {
-	return func(yield func(*model.StreamEvent, error) bool) {
-		yield(&model.StreamEvent{Type: model.StreamEventTurnDone, Response: &model.Response{
-			Status: model.ResponseStatusCompleted, TurnComplete: true, StepComplete: true,
-			Message: model.NewTextMessage(model.RoleAssistant, text),
-		}}, nil)
-	}
-}
-
-func systemManagedRequestInstructions(req *model.Request) string {
-	if req == nil {
-		return ""
-	}
-	parts := make([]string, 0, len(req.Instructions))
-	for _, instruction := range req.Instructions {
-		if instruction.Text != nil {
-			parts = append(parts, instruction.Text.Text)
-		}
-	}
-	return strings.Join(parts, "\n")
-}
-
-func requestContainsExactMessage(req *model.Request, text string) bool {
-	if req == nil {
-		return false
-	}
-	return slices.ContainsFunc(req.Messages, func(message model.Message) bool {
-		return message.TextContent() == text
-	})
-}
-
-func requestContainsText(req *model.Request, text string) bool {
-	if req == nil {
-		return false
-	}
-	return slices.ContainsFunc(req.Messages, func(message model.Message) bool {
-		return strings.Contains(message.TextContent(), text)
-	})
 }
 
 type systemManagedLifecycleRecorder struct {

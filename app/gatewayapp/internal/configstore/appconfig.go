@@ -40,16 +40,16 @@ func (e *invalidMemoryConfigurationError) Unwrap() error {
 	return e.err
 }
 
-// IsInvalidMemoryConfiguration reports whether AppConfig loading failed at the
+// isInvalidMemoryConfiguration reports whether AppConfig loading failed at the
 // Memory binding boundary. Callers use it only for a fixed, secret-free product
 // diagnostic and must not persist the wrapped detail.
-func IsInvalidMemoryConfiguration(err error) bool {
+func isInvalidMemoryConfiguration(err error) bool {
 	var invalid *invalidMemoryConfigurationError
 	return errors.As(err, &invalid)
 }
 
 func wrapInvalidMemoryConfiguration(err error) error {
-	if err == nil || IsInvalidMemoryConfiguration(err) {
+	if err == nil || isInvalidMemoryConfiguration(err) {
 		return err
 	}
 	return &invalidMemoryConfigurationError{err: err}

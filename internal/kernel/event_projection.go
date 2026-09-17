@@ -10,33 +10,6 @@ import (
 	acpprojector "github.com/caelis-labs/caelis/control/appserver/projection"
 )
 
-func replayClientEvents(events []*session.Event) []*session.Event {
-	return session.FilterClientReplayEvents(events)
-}
-
-func replayControlPlaneEvents(events []*session.Event, includeTransient bool) []*session.Event {
-	if includeTransient {
-		return events
-	}
-	out := make([]*session.Event, 0, len(events))
-	for _, event := range events {
-		if session.IsCanonicalHistoryEvent(event) {
-			out = append(out, event)
-		}
-	}
-	return out
-}
-
-func cursorNotFoundError(cursor string) error {
-	return &Error{
-		Kind:        KindNotFound,
-		Code:        CodeCursorNotFound,
-		UserVisible: true,
-		Message:     "gateway: cursor not found",
-		Detail:      cursor,
-	}
-}
-
 func canonicalOriginFromApproval(req *agent.ApprovalRequest, fallbackRef session.SessionRef, fallbackTurnID string) *EventOrigin {
 	if req == nil {
 		return nil
@@ -65,18 +38,6 @@ func metadataString(meta map[string]any, key string) string {
 		return ""
 	}
 	return strings.TrimSpace(text)
-}
-
-func metadataBool(meta map[string]any, key string) bool {
-	if len(meta) == 0 {
-		return false
-	}
-	value, ok := meta[key]
-	if !ok {
-		return false
-	}
-	flag, ok := value.(bool)
-	return ok && flag
 }
 
 func canonicalApprovalPayload(req *agent.ApprovalRequest) *ApprovalPayload {

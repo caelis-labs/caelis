@@ -5,7 +5,6 @@ import (
 	"strings"
 	"time"
 
-	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textarea"
 	"charm.land/lipgloss/v2"
 
@@ -476,10 +475,6 @@ func (m *Model) suggestedSlashArgInput(choice string) string {
 		}
 		return "/" + command + " " + choice
 	}
-}
-
-func (m *Model) inputPlainLines() []string {
-	return m.regularInputPlainLines()
 }
 
 func insetRenderedBlock(text string, inset int) string {
@@ -1162,21 +1157,6 @@ func styleFooterLeft(m *Model, plain string) string {
 	}
 
 	return prefix + lipgloss.NewStyle().Foreground(m.theme.TextSecondary).Render(plain)
-}
-
-func formatFooterBindingKeys(bindings []key.Binding) string {
-	parts := make([]string, 0, len(bindings))
-	for _, binding := range bindings {
-		if !binding.Enabled() {
-			continue
-		}
-		keyLabel := strings.TrimSpace(binding.Help().Key)
-		if keyLabel == "" {
-			continue
-		}
-		parts = append(parts, keyLabel)
-	}
-	return strings.Join(parts, "  ")
 }
 
 func formatStatusContextDisplay(text string) string {

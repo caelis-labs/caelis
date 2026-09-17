@@ -466,13 +466,6 @@ func metadataString(meta map[string]any, key string) string {
 	return strings.TrimSpace(text)
 }
 
-func metadataMap(meta map[string]any, key string) map[string]any {
-	if len(meta) == 0 {
-		return nil
-	}
-	return anyMap(meta[key])
-}
-
 func rawString(raw map[string]any, key string) string {
 	if len(raw) == 0 {
 		return ""
@@ -484,28 +477,6 @@ func rawString(raw map[string]any, key string) string {
 	return strings.TrimSpace(text)
 }
 
-func rawMap(raw map[string]any, key string) map[string]any {
-	if len(raw) == 0 {
-		return nil
-	}
-	return anyMap(raw[key])
-}
-
-func anyMap(value any) map[string]any {
-	switch typed := value.(type) {
-	case map[string]any:
-		return jsonvalue.CloneMap(typed)
-	case map[string]string:
-		out := make(map[string]any, len(typed))
-		for key, value := range typed {
-			out[key] = value
-		}
-		return out
-	default:
-		return nil
-	}
-}
-
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {
 		if trimmed := strings.TrimSpace(value); trimmed != "" {
@@ -513,13 +484,4 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
-}
-
-func firstNonEmptyMap(values ...map[string]any) map[string]any {
-	for _, value := range values {
-		if len(value) > 0 {
-			return jsonvalue.CloneMap(value)
-		}
-	}
-	return nil
 }

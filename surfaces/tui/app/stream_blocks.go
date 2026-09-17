@@ -391,10 +391,6 @@ func (m *Model) applyPendingSmoothChunk(state *streamSmoothingState, chunk strin
 	return nil
 }
 
-func (m *Model) flushAllPendingStreamSmoothing() {
-	m.flushAllPendingStreamSmoothingWithReason("manual")
-}
-
 func (m *Model) flushAllPendingStreamSmoothingWithReason(reason string) {
 	if m == nil || len(m.streamSmoothing) == 0 {
 		return

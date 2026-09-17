@@ -974,14 +974,6 @@ func cloneTruncationValue(value any) any {
 	}
 }
 
-func jsonObject(raw json.RawMessage) (map[string]any, bool) {
-	var payload map[string]any
-	if err := json.Unmarshal(raw, &payload); err != nil || payload == nil {
-		return nil, false
-	}
-	return payload, true
-}
-
 func mustMarshalMap(value map[string]any) json.RawMessage {
 	if value == nil {
 		return json.RawMessage(`{}`)

@@ -240,14 +240,6 @@ func (r *AssemblyResolver) ResolveApprovalModel(ctx context.Context, ref session
 	return model.Model, nil
 }
 
-func (r *AssemblyResolver) resolveModelAlias(state map[string]any, hint string) string {
-	if r == nil {
-		return strings.TrimSpace(hint)
-	}
-	snap := r.snapshot()
-	return resolveModelAliasWith(snap.modelLookup, snap.defaultModelAlias, state, hint)
-}
-
 func resolveModelAliasWith(lookup ModelLookup, defaultAlias string, state map[string]any, hint string) string {
 	alias := strings.TrimSpace(hint)
 	if alias == "" {
@@ -326,11 +318,6 @@ func (r *AssemblyResolver) snapshotState(ctx context.Context, ref session.Sessio
 		return nil, wrapSessionError(err)
 	}
 	return state, nil
-}
-
-func (r *AssemblyResolver) resolveMetadata(intent TurnIntent, state map[string]any, model ModelResolution) (map[string]any, error) {
-	snap := r.snapshot()
-	return resolveMetadataWith(snap.baseMetadata, snap.assembly, intent, state, model)
 }
 
 func resolveAgentSpecWith(ctx context.Context, snap assemblyResolverSnapshot, intent TurnIntent, state map[string]any, modelResolution ModelResolution) (agent.AgentSpec, error) {
@@ -489,10 +476,6 @@ func UnsupportedLegacyStateKey(state map[string]any) string {
 
 func unsupportedLegacyStateKey(state map[string]any) string {
 	return UnsupportedLegacyStateKey(state)
-}
-
-func normalizeSessionMode(mode string) string {
-	return string(NormalizeApprovalMode(mode))
 }
 
 func applyAssemblySelections(metadata map[string]any, resolved assembly.ResolvedAssembly, requestedMode string, state map[string]any) error {

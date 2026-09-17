@@ -179,10 +179,6 @@ func isReasoningEffortValue(value string) bool {
 	}
 }
 
-func controllerEffortChoicesFromModels(models *client.SessionModelState, model string) []ControllerConfigChoice {
-	return controllerEffortChoicesFromMap(controllerEffortChoicesByModelFromModels(models), model)
-}
-
 func controllerEffortChoicesByModelFromModels(models *client.SessionModelState) map[string][]ControllerConfigChoice {
 	if models == nil || len(models.AvailableModels) == 0 {
 		return nil

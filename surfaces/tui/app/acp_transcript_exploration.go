@@ -446,10 +446,6 @@ func compactExplorationStageHasSummary(stage []SubagentEvent) bool {
 	return countExplorationTools(stage) >= 2
 }
 
-func compactExplorationStage(events []SubagentEvent, idx int, status string) ([]SubagentEvent, int) {
-	return collectExplorationStage(events, idx, status, false)
-}
-
 func potentialExplorationStage(events []SubagentEvent, idx int, status string) ([]SubagentEvent, int) {
 	return collectExplorationStage(events, idx, status, true)
 }
@@ -584,16 +580,6 @@ func countExplorationTools(events []SubagentEvent) int {
 	return count
 }
 
-func explorationToolEvents(events []SubagentEvent) []SubagentEvent {
-	out := make([]SubagentEvent, 0, len(events))
-	for _, ev := range events {
-		if isCompactExplorationTool(ev) {
-			out = append(out, ev)
-		}
-	}
-	return out
-}
-
 func renderExplorationNarrativeRows(blockID string, text string, width int, ctx BlockRenderContext, style lipgloss.Style, token string, first bool) []RenderedRow {
 	text = sanitizeRenderableText(text)
 	if text == "" {
@@ -713,14 +699,6 @@ func explorationGroupDetailRowsWithWorkspaceMode(events []SubagentEvent, width i
 	return rows
 }
 
-func explorationToolDetail(ev SubagentEvent) string {
-	return explorationToolDetailWithWorkspace(ev, "")
-}
-
-func explorationToolDetailWithWorkspace(ev SubagentEvent, workspace string) string {
-	return explorationToolDetailForDisplay(ev, workspace, explorationToolDetailSettled)
-}
-
 type explorationToolDetailMode int
 
 const (
@@ -754,10 +732,6 @@ func explorationToolDetailForDisplay(ev SubagentEvent, workspace string, mode ex
 	return item
 }
 
-func compactExplorationToolDetail(ev SubagentEvent, detail string) string {
-	return compactExplorationToolDetailWithWorkspace(ev, detail, "")
-}
-
 func compactExplorationToolDetailWithWorkspace(ev SubagentEvent, detail string, workspace string) string {
 	detail = strings.TrimSpace(detail)
 	if detail == "" {
@@ -784,10 +758,6 @@ func compactExplorationToolDetailWithWorkspace(ev SubagentEvent, detail string, 
 	default:
 		return detail
 	}
-}
-
-func compactExplorationPathDetail(detail string) string {
-	return compactExplorationPathDetailWithBase(detail, "")
 }
 
 func compactExplorationPathDetailWithBase(detail string, workspace string) string {

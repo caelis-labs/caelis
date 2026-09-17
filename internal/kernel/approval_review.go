@@ -55,12 +55,6 @@ type ApprovalReviewResult = approval.Decision
 type ApprovalReviewer = approval.Reviewer
 type ApprovalApprover = approval.Approver
 
-type denyingApprovalReviewer struct{}
-
-func (denyingApprovalReviewer) ReviewApproval(ctx context.Context, req ApprovalReviewRequest) (ApprovalReviewResult, error) {
-	return denyingApprovalApprover{}.Decide(ctx, req)
-}
-
 type denyingApprovalApprover struct{}
 
 func (denyingApprovalApprover) Decide(_ context.Context, req ApprovalReviewRequest) (ApprovalReviewResult, error) {

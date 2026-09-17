@@ -76,15 +76,6 @@ func (s *completionGateTaskStore) GetSessionTaskByHandle(ctx context.Context, re
 	return s.base.GetSessionTaskByHandle(ctx, ref, handle)
 }
 
-type getFailingSagaTaskStore struct {
-	*sagaTaskStore
-	err error
-}
-
-func (s *getFailingSagaTaskStore) Get(context.Context, string) (*taskapi.Entry, error) {
-	return nil, s.err
-}
-
 func newSagaTaskStore() *sagaTaskStore { return &sagaTaskStore{entries: map[string]*taskapi.Entry{}} }
 
 func (s *sagaTaskStore) Upsert(ctx context.Context, entry *taskapi.Entry) error {

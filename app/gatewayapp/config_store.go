@@ -47,10 +47,6 @@ func LoadAppConfig(root string) (AppConfig, error) {
 	return doc, nil
 }
 
-func isInvalidMemoryConfiguration(err error) bool {
-	return configstore.IsInvalidMemoryConfiguration(err)
-}
-
 func (s *appConfigStore) Load() (AppConfig, error) {
 	return s.LoadContext(context.Background())
 }

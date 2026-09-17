@@ -317,16 +317,6 @@ func (tm *taskRuntime) waitForTaskOperationClaim(ctx context.Context, ref sessio
 	}
 }
 
-func (tm *taskRuntime) hasSubagentOperation(ref session.SessionRef, taskID string) bool {
-	if tm == nil {
-		return false
-	}
-	tm.mu.RLock()
-	_, active := tm.operations[taskOperationKey(ref, taskID)]
-	tm.mu.RUnlock()
-	return active
-}
-
 func taskOperationKey(ref session.SessionRef, taskID string) string {
 	return strings.TrimSpace(session.NormalizeSessionRef(ref).SessionID) + "\x00" + strings.TrimSpace(taskID)
 }
@@ -367,20 +357,6 @@ func normalizeTaskWriteInput(input string, appendNewline *bool, backend sandbox.
 		return input
 	}
 	return input + "\n"
-}
-
-func subagentTaskStateCanStartTurn(state taskapi.State) bool {
-	switch state {
-	case taskapi.StateCompleted,
-		taskapi.StateFailed,
-		taskapi.StateCancelled,
-		taskapi.StateInterrupted,
-		taskapi.StateTerminated,
-		taskapi.StateUnknownOutcome:
-		return true
-	default:
-		return false
-	}
 }
 
 func stateFromStatus(status sandbox.SessionStatus) taskapi.State {

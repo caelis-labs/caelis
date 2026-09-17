@@ -1294,15 +1294,6 @@ func parsedCommandField(raw map[string]any, key string) string {
 	return ""
 }
 
-func parsedCommandType(raw map[string]any) string {
-	for _, entry := range parsedCommandEntries(raw["parsed_cmd"]) {
-		if value := strings.ToLower(strings.TrimSpace(asString(entry["type"]))); value != "" && value != "<nil>" {
-			return value
-		}
-	}
-	return ""
-}
-
 func parsedCommandEntries(raw any) []map[string]any {
 	switch typed := raw.(type) {
 	case []map[string]any:
@@ -1338,18 +1329,6 @@ func firstTrimmed(values ...string) string {
 		}
 	}
 	return ""
-}
-
-func displayBool(value any) bool {
-	switch typed := value.(type) {
-	case bool:
-		return typed
-	case string:
-		parsed, err := strconv.ParseBool(strings.TrimSpace(typed))
-		return err == nil && parsed
-	default:
-		return false
-	}
 }
 
 func displayInt(value any) int {

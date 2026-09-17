@@ -326,13 +326,6 @@ func isACPCompactToolAck(text string) bool {
 	}
 }
 
-func finalPanelToolName(start SubagentEvent, final SubagentEvent, hasFinal bool) string {
-	if hasFinal && strings.TrimSpace(final.Name) != "" {
-		return final.Name
-	}
-	return start.Name
-}
-
 func renderACPStandardToolLifecycleRows(blockID string, ev SubagentEvent, callID string, text string, width int, ctx BlockRenderContext, err bool, final bool, fullOutput bool) []RenderedRow {
 	ev = compactACPToolHeaderEvent(ev, width)
 	header := standardToolLifecycleHeader(ev, err)
@@ -537,10 +530,6 @@ func isTerminalPanelToolEvent(ev SubagentEvent) bool {
 		return false
 	}
 	return ev.Terminal || isExecuteToolKind(ev.ToolKind) || surfaceIsTerminalPanelTool(ev.Name)
-}
-
-func isMutationPanelTool(name string) bool {
-	return isMutationPanelToolKind(name, "")
 }
 
 func isMutationPanelToolKind(name string, kind string) bool {

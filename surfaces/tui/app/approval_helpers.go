@@ -10,11 +10,6 @@ const (
 	approvalStatusApproved = "approved"
 	approvalStatusRejected = "rejected"
 	approvalStatusSelected = "selected"
-
-	approvalReviewStatusApproved = "approved"
-	approvalReviewStatusDenied   = "denied"
-	approvalReviewStatusTimedOut = "timed_out"
-	approvalReviewStatusFailed   = "failed"
 )
 
 type approvalPayload struct {

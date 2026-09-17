@@ -208,45 +208,6 @@ func colorizeWarnLine(line string, theme Theme) string {
 	return theme.WarnStyle().Render("! ") + theme.TextStyle().Render(LinkifyText(content, theme.LinkStyle()))
 }
 
-func styleUserMentions(text string, theme Theme) string {
-	runes := []rune(text)
-	if len(runes) == 0 {
-		return ""
-	}
-	var out strings.Builder
-	for i := 0; i < len(runes); {
-		if runes[i] == '@' {
-			j := i + 1
-			for j < len(runes) && isUserMentionRune(runes[j]) {
-				j++
-			}
-			if j > i+1 {
-				out.WriteString(theme.UserMentionStyle().Render(string(runes[i:j])))
-				i = j
-				continue
-			}
-		}
-		start := i
-		for i < len(runes) && runes[i] != '@' {
-			i++
-		}
-		out.WriteString(theme.UserStyle().Render(string(runes[start:i])))
-	}
-	return out.String()
-}
-
-func isUserMentionRune(r rune) bool {
-	if unicode.IsSpace(r) {
-		return false
-	}
-	switch r {
-	case ',', '，', '。', ':', '：', ';', '；', '!', '?', '！', '？', '"', '\'', '(', ')', '[', ']', '{', '}', '<', '>', '|':
-		return false
-	default:
-		return true
-	}
-}
-
 func colorizeToolLine(line string, theme Theme) string {
 	trimmed := strings.TrimSpace(line)
 

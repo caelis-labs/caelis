@@ -19,23 +19,6 @@ type agentRosterServices interface {
 	controlagents.Disconnector
 }
 
-func dispatchSlashCommand(service ControlServices, sender *ProgramSender, text string) TaskResultMsg {
-	return dispatchSlashCommandWithContext(context.Background(), service, sender, text, nil)
-}
-
-func dispatchSlashCommandWithContext(ctx context.Context, service ControlServices, sender *ProgramSender, text string, attachments []Attachment) TaskResultMsg {
-	return dispatchSlashCommandWithContextResult(ctx, service, sender, text, attachments).completion
-}
-
-func dispatchSlashCommandWithContextResult(ctx context.Context, service ControlServices, sender *ProgramSender, text string, attachments []Attachment) executeLineResult {
-	ctx = contextOrBackground(ctx)
-	if sender != nil {
-		ctx = sender.bindContext(ctx)
-	}
-	cmd, args, _, _ := controlprompt.ParseSlash(text)
-	return dispatchTUIPrivateSlashCommandWithContext(ctx, service, sender, cmd, args)
-}
-
 func dispatchTUIPrivateSlashCommandWithContext(ctx context.Context, service ControlServices, sender *ProgramSender, cmd string, args string) executeLineResult {
 	ctx = contextOrBackground(ctx)
 	if sender != nil {
@@ -87,10 +70,6 @@ func runSubagentTurn(ctx context.Context, sender *ProgramSender, turn controlpro
 
 func projectResumeReplayEvents(events []eventstream.Envelope) []TranscriptEvent {
 	return transcript.ProjectReplayEvents(events, tuiTranscriptProjector{})
-}
-
-func slashConnect(service ControlServices, agents agentRosterServices, send func(tea.Msg), args string) TaskResultMsg {
-	return slashConnectWithContext(context.Background(), service, agents, send, args)
 }
 
 func slashConnectWithContext(ctx context.Context, service ControlServices, agents agentRosterServices, send func(tea.Msg), args string) TaskResultMsg {

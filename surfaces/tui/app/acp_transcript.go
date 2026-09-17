@@ -314,18 +314,6 @@ func appendBlankRowIfNeeded(rows []RenderedRow, blockID string) []RenderedRow {
 	return append(rows, PlainRow(blockID, ""))
 }
 
-func renderACPTranscriptLines(blockID string, events []SubagentEvent, status string, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions) []string {
-	rows := renderACPTranscriptRows(blockID, events, status, width, ctx, opts)
-	if len(rows) == 0 {
-		return nil
-	}
-	lines := make([]string, 0, len(rows))
-	for _, row := range rows {
-		lines = append(lines, row.Styled)
-	}
-	return lines
-}
-
 func renderACPPlanRows(blockID string, ev SubagentEvent, width int, ctx BlockRenderContext) []RenderedRow {
 	if len(ev.PlanEntries) == 0 {
 		return nil
@@ -913,117 +901,6 @@ func acpReasoningClickToken(key string) string {
 		return ""
 	}
 	return "acp_reasoning:" + key
-}
-
-func acpToolPanelScrollToken(callID string) string {
-	callID = strings.TrimSpace(callID)
-	if callID == "" {
-		return ""
-	}
-	return "acp_tool_panel_scroll:" + callID
-}
-
-func terminalToolPanelLineCount(events []SubagentEvent, callID string, ctx BlockRenderContext) int {
-	_, terminal, text, err, ok := terminalToolPanelPayload(events, callID)
-	if !ok || !shouldRenderACPToolPanel(text, err) || !terminal {
-		return 0
-	}
-	return len(renderACPTerminalPanelBody(text, maxInt(1, ctx.Width-2), ctx, err, false))
-}
-
-func terminalToolPanelPayload(events []SubagentEvent, callID string) (toolName string, terminal bool, text string, err bool, ok bool) {
-	callID = strings.TrimSpace(callID)
-	if callID == "" {
-		return "", false, "", false, false
-	}
-	var start SubagentEvent
-	var final SubagentEvent
-	var preview string
-	hasStart := false
-	hasFinal := false
-	for _, item := range events {
-		if item.Kind != SEToolCall || strings.TrimSpace(item.CallID) != callID {
-			continue
-		}
-		if !item.Done {
-			if !hasStart {
-				start = item
-				hasStart = true
-			}
-			if out := item.Output; renderableTextHasContent(out) {
-				preview = out
-			}
-			continue
-		}
-		if !hasStart {
-			start = item
-			hasStart = true
-		}
-		if shouldRenderToolEvent(item) {
-			final = item
-			hasFinal = true
-		}
-	}
-	if !hasStart && !hasFinal {
-		return "", false, "", false, false
-	}
-	toolName = finalPanelToolName(start, final, hasFinal)
-	terminal = isTerminalPanelToolEvent(start) || hasFinal && isTerminalPanelToolEvent(final)
-	text = preview
-	err = false
-	if hasFinal {
-		text = final.Output
-		err = final.Err
-		if !renderableTextHasContent(text) && !err {
-			text = "completed"
-		}
-	}
-	return toolName, terminal, text, err, true
-}
-
-func renderACPToolPanelBody(text string, width int, ctx BlockRenderContext, err bool) []string {
-	prefix := "  "
-	lines := make([]string, 0, 8)
-	for _, raw := range splitRenderableLines(sanitizeRenderableText(text)) {
-		if !renderableLineHasContent(raw) {
-			continue
-		}
-		style := toolPanelLineStyle(raw, ctx, err)
-		linePrefix := prefix
-		if err {
-			linePrefix = "! "
-		}
-		wrapped := strings.Split(hardWrapDisplayLine(raw, maxInt(1, width-displayColumns(linePrefix))), "\n")
-		for i, segment := range wrapped {
-			if i > 0 {
-				linePrefix = strings.Repeat(" ", displayColumns(linePrefix))
-			}
-			styled := style.Width(width).Render(linePrefix + tuikit.LinkifyText(segment, ctx.Theme.LinkStyle()))
-			lines = append(lines, styled)
-		}
-	}
-	return lines
-}
-
-func toolPanelLineStyle(raw string, ctx BlockRenderContext, err bool) lipgloss.Style {
-	if err {
-		return ctx.Theme.ToolErrorStyle()
-	}
-	trimmed := strings.TrimSpace(raw)
-	switch {
-	case strings.HasPrefix(trimmed, "+++"), strings.HasPrefix(trimmed, "---"):
-		return ctx.Theme.DiffHeaderStyle()
-	case strings.HasPrefix(trimmed, "@@"):
-		return ctx.Theme.DiffHunkStyle()
-	case strings.HasPrefix(trimmed, "+"):
-		return ctx.Theme.DiffAddStyle().Background(ctx.Theme.DiffAddBg)
-	case strings.HasPrefix(trimmed, "-"):
-		return ctx.Theme.DiffRemoveStyle().Background(ctx.Theme.DiffRemoveBg)
-	case strings.EqualFold(trimmed, "diff / hunk"):
-		return ctx.Theme.TranscriptMetaStyle()
-	default:
-		return ctx.Theme.ToolOutputStyle()
-	}
 }
 
 func renderACPToolDetailRows(blockID string, prefix string, text string, width int, ctx BlockRenderContext, style lipgloss.Style) []RenderedRow {

@@ -264,15 +264,6 @@ func doFocusedSessionJSON[T any](ctx context.Context, client *Client, sessionID,
 	return doFocusedJSON[T](ctx, client, http.MethodPost, path, body)
 }
 
-func doFocusedRequiredSessionJSON[T any](ctx context.Context, client *Client, sessionID, suffix string, body any) (T, error) {
-	path, err := focusedSessionPath(sessionID, suffix)
-	if err != nil {
-		var zero T
-		return zero, err
-	}
-	return doFocusedJSON[T](ctx, client, http.MethodPost, path, body)
-}
-
 func focusedOptionalSessionPath(sessionID, suffix string) (string, error) {
 	if strings.TrimSpace(sessionID) == "" {
 		return suffix, nil

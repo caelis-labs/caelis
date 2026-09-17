@@ -84,20 +84,6 @@ func RenderTextWithContext(ctx BlockRenderContext, req TextRenderRequest) TextRe
 	return RenderText(req)
 }
 
-func (m *Model) renderText(req TextRenderRequest) TextRenderResult {
-	if m == nil {
-		return RenderText(req)
-	}
-	if req.Width <= 0 {
-		req.Width = maxInt(1, m.viewport.Width())
-	}
-	req.Theme = m.theme
-	req.ThemeKey = m.cachedThemeRenderKey()
-	req.ObserveGlamourRender = m.observeGlamourRender
-	req.ObserveInlineMarkdown = m.observeInlineMarkdownRender
-	return RenderText(req)
-}
-
 func RenderText(req TextRenderRequest) TextRenderResult {
 	req.Raw = normalizeTextRenderRaw(req.Raw)
 	req.StablePrefixRaw = normalizeTextRenderRaw(req.StablePrefixRaw)

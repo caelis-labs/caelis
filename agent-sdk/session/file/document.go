@@ -59,11 +59,6 @@ func (s *Store) readDocumentAt(path string) (persistedDocument, error) {
 	return doc, nil
 }
 
-func decodePersistedDocument(data []byte) (persistedDocument, error) {
-	doc, _, err := decodePersistedDocumentWithReport(data)
-	return doc, err
-}
-
 func decodePersistedDocumentWithReport(data []byte) (persistedDocument, MigrationReport, error) {
 	var header struct {
 		Kind    string `json:"kind"`

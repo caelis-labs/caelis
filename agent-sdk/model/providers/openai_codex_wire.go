@@ -268,10 +268,6 @@ func openAICodexImage(part model.Part) (openAICodexInputImage, error) {
 	return openAICodexInputImage{Type: "input_image", ImageURL: "data:" + mimeType + ";base64," + data}, nil
 }
 
-func openAICodexAssistantContent(out []any, parts []model.Part, seenToolCalls map[string]struct{}) ([]any, error) {
-	return openAIResponsesAssistantContent(out, parts, seenToolCalls, openAICodexReplayProvider)
-}
-
 func openAIResponsesAssistantContent(out []any, parts []model.Part, seenToolCalls map[string]struct{}, replayProvider string) ([]any, error) {
 	text := make([]openAICodexOutputText, 0, 1)
 	flushText := func() {
@@ -308,10 +304,6 @@ func openAIResponsesAssistantContent(out []any, parts []model.Part, seenToolCall
 	}
 	flushText()
 	return out, nil
-}
-
-func openAICodexReasoningReplay(part model.Part) (openAICodexReasoningInput, bool) {
-	return openAIResponsesReasoningReplay(part, openAICodexReplayProvider)
 }
 
 func openAIResponsesReasoningReplay(part model.Part, replayProvider string) (openAICodexReasoningInput, bool) {

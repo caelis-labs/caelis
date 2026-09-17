@@ -19,10 +19,6 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 )
 
-func modelMessagePtr(message model.Message) *model.Message {
-	return &message
-}
-
 func TestNewRequiresSessionsRuntimeAndResolver(t *testing.T) {
 	t.Parallel()
 

@@ -133,15 +133,6 @@ func (t *commandTask) commitOutputResumeCheckpointLocked() {
 	t.outputState.resume.advance(next)
 }
 
-func (t *commandTask) appendOutput(text string) {
-	if t == nil || text == "" {
-		return
-	}
-	t.mu.Lock()
-	t.appendOutputLocked(text)
-	t.mu.Unlock()
-}
-
 func (t *commandTask) appendOutputLocked(text string) {
 	if t == nil || text == "" || t.outputTerminal {
 		return

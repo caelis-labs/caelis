@@ -1,7 +1,6 @@
 package tuiapp
 
 import (
-	"runtime"
 	"strconv"
 	"strings"
 
@@ -9,18 +8,9 @@ import (
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/internal/controlprompt/connectwizard"
-	"github.com/caelis-labs/caelis/surfaces/internal/promptview"
 )
 
 // defaults.go provides DefaultCommands and DefaultWizards for the TUI shell.
-
-func defaultHelpText() string {
-	return helpTextForCommands(DefaultCommands())
-}
-
-func helpTextForCommands(commands []string) string {
-	return promptview.FormatCommandHelp(controlprompt.HelpSnapshot(commands)) + "\n\n" + shortcutHelpTextForPlatform(runtime.GOOS, isWSL())
-}
 
 type shortcutHelpRow struct {
 	Keys        []string

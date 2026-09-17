@@ -6,21 +6,6 @@ import (
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 )
 
-func participantTurnStatusLabel(state string) string {
-	switch strings.ToLower(strings.TrimSpace(state)) {
-	case "", "running", "initializing", "prompting", "completed":
-		return ""
-	case "waiting_approval":
-		return "waiting approval"
-	case "failed":
-		return "failed"
-	case "interrupted":
-		return "interrupted"
-	default:
-		return strings.TrimSpace(state)
-	}
-}
-
 func participantNarrativeEventActive(events []SubagentEvent, idx int, status string) bool {
 	return narrativeEventActive(events, idx, participantTurnIsTerminal(status))
 }

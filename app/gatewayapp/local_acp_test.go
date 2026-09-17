@@ -363,15 +363,6 @@ func agentConfigForToolTest(agents []assembly.AgentConfig, name string) (assembl
 	return assembly.AgentConfig{}, false
 }
 
-func argValue(args []string, flag string) (string, bool) {
-	for i, value := range args {
-		if value == flag && i+1 < len(args) {
-			return args[i+1], true
-		}
-	}
-	return "", false
-}
-
 func repoRootForGatewayAppTest(t *testing.T) string {
 	t.Helper()
 	dir, err := os.Getwd()

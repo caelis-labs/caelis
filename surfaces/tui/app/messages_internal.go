@@ -4,14 +4,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-
-	controlstatus "github.com/caelis-labs/caelis/control/status"
 )
-
-type bootstrapMsg struct {
-	status controlstatus.StatusSnapshot
-	err    error
-}
 
 // statusRefreshRequestMsg schedules status work through Bubble Tea instead of
 // running storage-backed callbacks on the caller's message path.

@@ -17,20 +17,6 @@ func wrapOptionalError(message string, err error) error {
 	return fmt.Errorf("%s: %w", message, err)
 }
 
-func (s *runtimeComposition) setRuntimeDefaultModelFromLookup() {
-	if s == nil || s.lookup == nil {
-		return
-	}
-	cfg := ModelConfig{}
-	profileID := ""
-	if defaultID := s.lookup.DefaultID(); strings.TrimSpace(defaultID) != "" {
-		cfg, _ = s.lookup.Config(defaultID)
-		profileID = modelprofile.BuildProviderID(defaultID)
-		cfg.ReasoningEffort = s.lookup.DefaultEffort()
-	}
-	s.setRuntimeModel(profileID, cfg, s.lookup.DefaultFastMode())
-}
-
 func (s *runtimeComposition) setRuntimeDefaultProfile(profiles modelprofile.Configuration) {
 	if s == nil {
 		return
@@ -244,18 +230,6 @@ func (s *runtimeComposition) EffectiveModelAlias() string {
 		return profile.DisplayName
 	}
 	return s.DefaultModelAlias()
-}
-
-func (s *runtimeComposition) cachedDefaultProfileID() string {
-	if s == nil {
-		return ""
-	}
-	s.placementCacheMu.RLock()
-	defer s.placementCacheMu.RUnlock()
-	if s.placementCache == nil {
-		return ""
-	}
-	return s.placementCache.placement.Profiles.DefaultProfileID
 }
 
 func (s *runtimeComposition) cachedModelProfile(profileID string) (modelprofile.ModelProfile, bool) {

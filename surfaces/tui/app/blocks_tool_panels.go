@@ -25,19 +25,6 @@ func toolPanelFullOutput(state map[string]bool, callID string) bool {
 	return state[callID]
 }
 
-func toggleToolPanelExpanded(state *map[string]bool, callID string) bool {
-	callID = strings.TrimSpace(callID)
-	if callID == "" {
-		return false
-	}
-	if *state == nil {
-		*state = map[string]bool{}
-	}
-	next := !toolPanelExpanded(*state, callID)
-	(*state)[callID] = next
-	return true
-}
-
 func toggleToolPanelClick(expandedState *map[string]bool, fullOutputState *map[string]bool, events []SubagentEvent, callID string) bool {
 	callID = strings.TrimSpace(callID)
 	if callID == "" {
@@ -148,26 +135,6 @@ func toolPanelScrollStateFromMap(state map[string]toolPanelScrollState, callID s
 	return value
 }
 
-func scrollToolPanelState(state *map[string]toolPanelScrollState, callID string, total int, delta int) bool {
-	callID = strings.TrimSpace(callID)
-	if state == nil || callID == "" {
-		return false
-	}
-	value := defaultToolPanelScrollState()
-	if *state != nil {
-		value = toolPanelScrollStateFromMap(*state, callID)
-	}
-	if !scrollPanelState(&value.Offset, &value.FollowTail, total, acpTerminalPanelMaxLines, delta) {
-		return false
-	}
-	value.ScrollbarVisibleUntil = time.Now().Add(scrollbarVisibleDuration)
-	if *state == nil {
-		*state = map[string]toolPanelScrollState{}
-	}
-	(*state)[callID] = value
-	return true
-}
-
 func (b *MainACPTurnBlock) toolPanelExpanded(callID string) bool {
 	if b == nil {
 		return true
@@ -187,13 +154,6 @@ func (b *MainACPTurnBlock) renderToolPanelRows(request toolPanelRenderRequest) [
 		return request.renderUncached()
 	}
 	return renderCachedToolPanelRows(&b.toolPanelRenderCache, request, b.toolPanelScrollState(request.CallID))
-}
-
-func (b *MainACPTurnBlock) toggleToolPanelExpanded(callID string) bool {
-	if b == nil {
-		return false
-	}
-	return toggleToolPanelExpanded(&b.ExpandedTools, callID)
 }
 
 func (b *MainACPTurnBlock) toggleToolPanelClick(callID string) bool {
@@ -300,13 +260,6 @@ func (b *ParticipantTurnBlock) renderToolPanelRows(request toolPanelRenderReques
 		return request.renderUncached()
 	}
 	return renderCachedToolPanelRows(&b.toolPanelRenderCache, request, b.toolPanelScrollState(request.CallID))
-}
-
-func (b *ParticipantTurnBlock) toggleToolPanelExpanded(callID string) bool {
-	if b == nil {
-		return false
-	}
-	return toggleToolPanelExpanded(&b.ExpandedTools, callID)
 }
 
 func (b *ParticipantTurnBlock) toggleToolPanelClick(callID string) bool {

@@ -32,10 +32,6 @@ func (t inMemoryHandlerTransport) RoundTrip(request *http.Request) (*http.Respon
 	return response, nil
 }
 
-func newMemoryCallbackHarness(t *testing.T) (net.Listener, *http.Client) {
-	return newMemoryCallbackHarnessAt(t, callbackAddress)
-}
-
 func newMemoryCallbackHarnessAt(t *testing.T, address string) (net.Listener, *http.Client) {
 	t.Helper()
 	listener := &memoryListener{

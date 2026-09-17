@@ -237,16 +237,6 @@ func transcriptParticipantLaneID(event TranscriptEvent) string {
 	)
 }
 
-func participantTurnBlockMatchesLane(block *ParticipantTurnBlock, participantID string, turnID string) bool {
-	if block == nil {
-		return false
-	}
-	if participantID != "" {
-		return strings.TrimSpace(block.ParticipantID) == participantID
-	}
-	return turnID != "" && strings.TrimSpace(block.SessionID) == turnID
-}
-
 // mainBlockForStreamOwner lets a later TaskStream record deliver bytes to the
 // original async tool panel. Cross-Turn routing is deliberately limited to
 // projector-owned stream frames and requires both physical task and call

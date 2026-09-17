@@ -13,14 +13,6 @@ import (
 	"github.com/caelis-labs/caelis/internal/kernel"
 )
 
-func (d *assembler) sessionTokenUsage(ctx context.Context, ref session.SessionRef) (session.UsageSnapshot, error) {
-	breakdown, err := d.sessionTokenUsageBreakdown(ctx, ref)
-	if err != nil {
-		return session.UsageSnapshot{}, err
-	}
-	return breakdown.Total, nil
-}
-
 type sessionTokenUsageBreakdown struct {
 	Total      session.UsageSnapshot
 	Main       session.UsageSnapshot

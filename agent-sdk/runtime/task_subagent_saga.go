@@ -642,11 +642,6 @@ func setSpawnEntryPhase(entry *taskapi.Entry, phase spawnPhase, reason string) {
 	}
 }
 
-// setSpawnEntryStatus is retained for older call sites/tests.
-func setSpawnEntryStatus(entry *taskapi.Entry, status string, reason string) {
-	setSpawnEntryPhase(entry, normalizeSpawnPhase(status), reason)
-}
-
 func snapshotFromTaskEntry(entry *taskapi.Entry) taskapi.Snapshot {
 	if entry == nil {
 		return taskapi.Snapshot{}
@@ -687,10 +682,6 @@ func (tm *taskRuntime) markSubagentSpawnPhase(ctx context.Context, task *subagen
 		task.mu.Unlock()
 	}
 	return err
-}
-
-func (tm *taskRuntime) markSubagentSpawnStatus(ctx context.Context, task *subagentTask, status string, reason string) error {
-	return tm.markSubagentSpawnPhase(ctx, task, normalizeSpawnPhase(status), reason)
 }
 
 func (tm *taskRuntime) advanceSubagentSpawn(

@@ -11,8 +11,6 @@ import (
 	"github.com/caelis-labs/caelis/surfaces/tui/acpprojector"
 )
 
-func ptrStr(s string) *string { return &s }
-
 func TestRegressionACPProjectorGoldenTerminalOutput(t *testing.T) {
 	t.Parallel()
 

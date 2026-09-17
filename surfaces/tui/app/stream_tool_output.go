@@ -24,8 +24,3 @@ func wrapToolOutputText(text string, width int) []string {
 	}
 	return out
 }
-
-func isSpawnLikeTool(name string) bool {
-	name = strings.TrimSpace(name)
-	return name == surfaceToolSpawn
-}

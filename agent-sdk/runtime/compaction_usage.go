@@ -102,10 +102,6 @@ type providerTokenSnapshot struct {
 	PromptPrefixTokens      int
 }
 
-func latestProviderTokenSnapshot(events []*session.Event) (providerTokenSnapshot, bool) {
-	return latestProviderTokenSnapshotUsing(events, nil)
-}
-
 func latestProviderTokenSnapshotUsing(
 	events []*session.Event,
 	useProviderSnapshot func(providerTokenSnapshot) bool,
@@ -622,11 +618,6 @@ func usageForModelRequestDetails(
 		return providerSnapshotCompatibleWithLLM(snapshot, llm)
 	})
 	return usageWithModelRequestEstimateDetails(usage, providerSnapshot, hasProviderSnapshot, req)
-}
-
-func usageWithModelRequestEstimate(usage compact.UsageSnapshot, req *model.Request) (compact.UsageSnapshot, int) {
-	usage, requestTokens, _ := usageWithModelRequestEstimateDetails(usage, providerTokenSnapshot{}, false, req)
-	return usage, requestTokens
 }
 
 func usageWithModelRequestEstimateDetails(

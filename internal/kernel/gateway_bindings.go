@@ -172,13 +172,6 @@ func (g *Gateway) sessionTarget(ref session.SessionRef, bindingKey string) (sess
 	}
 }
 
-func (g *Gateway) hasActiveHandle(sessionID string) bool {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	handle, ok := g.active[strings.TrimSpace(sessionID)]
-	return ok && handle != nil
-}
-
 func (g *Gateway) noteActiveHandleLocked(sessionID string, handle *turnHandle) {
 	if handle == nil {
 		return

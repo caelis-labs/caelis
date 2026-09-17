@@ -4035,52 +4035,6 @@ func (m *streamingModel) Generate(_ context.Context, req *model.Request) iter.Se
 	}
 }
 
-type blockingStreamingModel struct {
-	started      chan struct{}
-	releaseFinal chan struct{}
-}
-
-func (m *blockingStreamingModel) Name() string { return "blocking-streaming" }
-
-func (m *blockingStreamingModel) Generate(_ context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
-	return func(yield func(*model.StreamEvent, error) bool) {
-		if m.started != nil {
-			select {
-			case <-m.started:
-			default:
-				close(m.started)
-			}
-		}
-		if !yield(&model.StreamEvent{
-			Type: model.StreamEventPartDelta,
-			PartDelta: &model.PartDelta{
-				Kind:      model.PartKindText,
-				TextDelta: "hel",
-			},
-		}, nil) {
-			return
-		}
-		if m.releaseFinal != nil {
-			select {
-			case <-m.releaseFinal:
-			case <-time.After(5 * time.Second):
-				yield(nil, context.DeadlineExceeded)
-				return
-			}
-		}
-		yield(&model.StreamEvent{
-			Type: model.StreamEventTurnDone,
-			Response: &model.Response{
-				Message:      model.NewTextMessage(model.RoleAssistant, "hello"),
-				TurnComplete: true,
-				StepComplete: true,
-				Status:       model.ResponseStatusCompleted,
-			},
-		}, nil)
-		_ = req
-	}
-}
-
 type longToolLoopModel struct {
 	calls    int
 	progress bool

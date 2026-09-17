@@ -30,10 +30,6 @@ import (
 	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
 )
 
-func ptrModelMessage(message model.Message) *model.Message {
-	return &message
-}
-
 func mustSealPlacement(t *testing.T, value placement.Placement) placement.Placement {
 	t.Helper()
 	sealed, err := placement.Seal(value)
@@ -1558,19 +1554,6 @@ func (r *overlappingSubagentRunner) Wait(context.Context, delegation.Anchor, int
 }
 
 func (r *overlappingSubagentRunner) Cancel(context.Context, delegation.Anchor) error { return nil }
-
-func (r *overlappingSubagentRunner) waitUntilOverlapping(t *testing.T) {
-	t.Helper()
-	timer := time.NewTimer(5 * time.Second)
-	defer timer.Stop()
-	for i := 0; i < r.want; i++ {
-		select {
-		case <-r.ready:
-		case <-timer.C:
-			t.Fatalf("only %d/%d Spawn calls reached the external runner", i, r.want)
-		}
-	}
-}
 
 func (r *overlappingSubagentRunner) maxActive() int {
 	r.mu.Lock()

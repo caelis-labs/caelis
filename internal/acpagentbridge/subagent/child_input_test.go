@@ -1061,11 +1061,6 @@ func waitChildActivityFramesUntilTerminalFor(
 	}
 }
 
-func waitChildActivityTextBeforeTerminal(t *testing.T, ctx context.Context, events <-chan childInputTestEvent, text string) int {
-	t.Helper()
-	return waitChildActivityTextBeforeTerminalFor(t, ctx, events, "", text)
-}
-
 func waitChildActivityTextBeforeTerminalFor(t *testing.T, ctx context.Context, events <-chan childInputTestEvent, activityID string, text string) int {
 	t.Helper()
 	count := 0

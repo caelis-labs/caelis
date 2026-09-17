@@ -250,11 +250,6 @@ func pruneMetaCacheLocked() {
 	}
 }
 
-func parseMeta(path string) (Meta, error) {
-	meta, _, err := parseMetaHash(path)
-	return meta, err
-}
-
 func parseMetaHash(path string) (Meta, string, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {

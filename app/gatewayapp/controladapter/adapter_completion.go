@@ -284,22 +284,6 @@ func (d *assembler) completeModelSpeedModes(ctx context.Context, aliasQuery stri
 	return filterSlashCandidates(candidates, query, limit), nil
 }
 
-func (d *assembler) modelAliasSupportsReasoningLevel(alias string, level string) bool {
-	if d.deps.Model.ConfigFn == nil {
-		return false
-	}
-	cfg, ok := d.deps.Model.ConfigFn(alias)
-	if !ok {
-		return false
-	}
-	for _, one := range d.configuredModelReasoningLevels(cfg) {
-		if strings.EqualFold(strings.TrimSpace(one), strings.TrimSpace(level)) {
-			return true
-		}
-	}
-	return false
-}
-
 func (d *assembler) configuredModelReasoningLevels(cfg ModelConfig) []string {
 	levels := modelconfig.NormalizeReasoningLevels(cfg.ReasoningLevels)
 	for _, level := range modelconfig.ReasoningLevelsForConfig(cfg) {

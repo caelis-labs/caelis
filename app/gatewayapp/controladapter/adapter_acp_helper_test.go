@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -61,17 +60,4 @@ func TestAdapterACPHelperProcess(t *testing.T) {
 		t.Fatalf("helper Serve() error = %v", err)
 	}
 	os.Exit(0)
-}
-
-func adapterACPHelperCommandForTest(t *testing.T) string {
-	t.Helper()
-	command := os.Args[0]
-	if filepath.IsAbs(command) {
-		return command
-	}
-	abs, err := filepath.Abs(command)
-	if err != nil {
-		t.Fatalf("Abs(%q) error = %v", command, err)
-	}
-	return abs
 }

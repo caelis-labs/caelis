@@ -8,7 +8,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
-	tasksubagent "github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 )
 
 // subagentCancelPhase records the one-way boundary around the remote Cancel
@@ -31,89 +30,6 @@ const (
 func subagentCancelTurnSeq(values map[string]any) (int64, bool) {
 	turnSeq, ok := taskInt64Value(values[subagentCancelTurnSeqKey])
 	return turnSeq, ok && turnSeq > 0
-}
-
-func (tm *taskRuntime) cancelSubagentSaga(ctx context.Context, task *subagentTask) (taskapi.Snapshot, error) {
-	if task == nil {
-		return taskapi.Snapshot{}, fmt.Errorf("task is required")
-	}
-	task.mu.Lock()
-	running := task.running
-	turnSeq := max(task.turnSeq, 1)
-	phase := subagentCancelPhase(taskStringValue(task.metadata[subagentCancelPhaseKey]))
-	cancelTurnSeq, cancelTurnScoped := subagentCancelTurnSeq(task.metadata)
-	runner := task.runner
-	anchor := delegation.CloneAnchor(task.anchor)
-	task.mu.Unlock()
-
-	// A non-terminal journal makes the Task conservatively appear running. Its
-	// stored generation remains authoritative even when it is one ahead of the
-	// last output-derived Task generation.
-	if running && phase != subagentCancelPhaseNone {
-		if !cancelTurnScoped {
-			cancelTurnSeq = turnSeq
-		}
-		return tm.advanceSubagentCancel(ctx, task, phase, cancelTurnSeq, 10)
-	}
-
-	if !running {
-		if runner == nil {
-			return task.snapshot(), nil
-		}
-		// Task lifecycle is derived from child activity, so an accepted
-		// SendMessage can start a runner-owned Turn before its first event opens
-		// the next Task generation. Sample that owner without turning admission
-		// into a Task write; a truly idle endpoint remains an idempotent no-op.
-		if !subagentRunnerTurnIsLive(ctx, runner, anchor) {
-			return task.snapshot(), nil
-		}
-		targetTurnSeq := turnSeq + 1
-		if phase != subagentCancelPhaseNone && cancelTurnScoped && cancelTurnSeq == targetTurnSeq {
-			return tm.advanceSubagentCancel(ctx, task, phase, cancelTurnSeq, 10)
-		}
-		cancelTurnSeq = targetTurnSeq
-		// A terminal or legacy journal on the idle observed Turn belongs to the
-		// prior activity. The live endpoint proves a later, not-yet-observed Turn.
-		phase = subagentCancelPhaseNone
-	} else {
-		cancelTurnSeq = turnSeq
-	}
-	if phase != subagentCancelPhaseNone {
-		return tm.advanceSubagentCancel(ctx, task, phase, cancelTurnSeq, 10)
-	}
-	if runner == nil {
-		return task.snapshot(), fmt.Errorf("subagent %q cannot be cancelled because its runner is unavailable", task.ref.TaskID)
-	}
-	persisted, err := tm.persistSubagentCancelPhase(ctx, task, cancelTurnSeq, subagentCancelPhaseClaimed,
-		"subagent cancellation was claimed; remote outcome is not yet known", nil, false)
-	if err != nil {
-		return task.snapshot(), err
-	}
-	if !persisted {
-		return task.snapshot(), nil
-	}
-	if err := runner.Cancel(ctx, anchor); err != nil {
-		_, persistErr := tm.persistSubagentCancelPhase(context.WithoutCancel(ctx), task, cancelTurnSeq, subagentCancelPhaseUnknown,
-			"remote subagent cancellation outcome could not be confirmed", nil, false)
-		return task.snapshot(), errors.Join(err, persistErr)
-	}
-	persisted, err = tm.persistSubagentCancelPhase(context.WithoutCancel(ctx), task, cancelTurnSeq, subagentCancelPhaseApplied,
-		"remote subagent cancellation was requested; terminal result is pending", nil, false)
-	if err != nil {
-		return task.snapshot(), err
-	}
-	if !persisted {
-		return task.snapshot(), nil
-	}
-	return tm.advanceSubagentCancel(ctx, task, subagentCancelPhaseApplied, cancelTurnSeq, 10)
-}
-
-func subagentRunnerTurnIsLive(ctx context.Context, runner tasksubagent.Runner, anchor delegation.Anchor) bool {
-	if runner == nil {
-		return false
-	}
-	current, err := runner.Wait(ctx, delegation.CloneAnchor(anchor), 0)
-	return err == nil && subagentCancelResultPending(current)
 }
 
 func (tm *taskRuntime) advanceSubagentCancel(

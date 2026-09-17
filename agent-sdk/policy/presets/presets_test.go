@@ -1345,10 +1345,6 @@ func testWorkspaceProjectRoot() string {
 	return filepath.Join(testWorkspaceRoot(), "project")
 }
 
-func testWorkspaceGitRoot() string {
-	return filepath.Join(testWorkspaceRoot(), ".git")
-}
-
 func testTempRoot() string {
 	if runtime.GOOS == "windows" {
 		return `C:\tmp`

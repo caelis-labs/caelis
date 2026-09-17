@@ -18,25 +18,6 @@ func subagentOutputStatusFromState(status string) subagentOutputStatus {
 	}
 }
 
-func renderSubagentOutputStatusMark(ctx BlockRenderContext, status subagentOutputStatus) string {
-	tone := subagentOutputHeaderMarkTone(status)
-	dim := status == subagentOutputRunning &&
-		ctx.AnimationsEnabled &&
-		subagentOutputPulseDim(ctx.SpinnerView)
-	return renderACPTranscriptHeaderMark(ctx, tone, dim)
-}
-
-func subagentOutputHeaderMarkTone(status subagentOutputStatus) acpHeaderMarkTone {
-	switch status {
-	case subagentOutputSucceeded:
-		return acpHeaderMarkSuccess
-	case subagentOutputFailed:
-		return acpHeaderMarkDanger
-	default:
-		return acpHeaderMarkAccent
-	}
-}
-
 func subagentOutputPulseDim(spinnerView string) bool {
 	frame := strings.TrimSpace(ansi.Strip(spinnerView))
 	for index, candidate := range runningSpinnerFrames {

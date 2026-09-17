@@ -372,35 +372,6 @@ func (ctx BlockRenderContext) renderThemeKey() string {
 	return themeRenderCacheKey(ctx.Theme)
 }
 
-func (ctx BlockRenderContext) observeGlamourRender() {
-	if ctx.ObserveGlamourRender != nil {
-		ctx.ObserveGlamourRender()
-	}
-}
-
-func (ctx BlockRenderContext) observeInlineMarkdownRender() {
-	if ctx.ObserveInlineMarkdown != nil {
-		ctx.ObserveInlineMarkdown()
-	}
-}
-
-func (m *Model) refreshModeLabelFromConfig() bool {
-	if m == nil || m.cfg.ModeLabel == nil {
-		return false
-	}
-	next := strings.TrimSpace(m.cfg.ModeLabel())
-	if next == m.statusModeLabel {
-		return false
-	}
-	m.statusModeLabel = next
-	return true
-}
-
-func mentionQueryAtCursor(input []rune, cursor int) (int, int, string, bool) {
-	start, end, query, _, ok := mentionQueryAtCursorWithPrefix(input, cursor)
-	return start, end, query, ok
-}
-
 func mentionQueryAtCursorWithPrefix(input []rune, cursor int) (int, int, string, string, bool) {
 	start, end, query, prefix, ok := promptrefs.MentionQueryAtCursorWithPrefix(input, cursor)
 	if !ok || prefix != "@" {
@@ -482,49 +453,6 @@ func slashArgQueryAtCursor(input []rune, cursor int) (string, string, bool) {
 	default:
 		return "", "", false
 	}
-}
-
-func slashRootActionQuery(command string, fields []string, hasTrailingDelimiter bool, rootActions []string, valueActions []string) (string, string, bool) {
-	command = strings.ToLower(strings.TrimSpace(command))
-	if command == "" || len(fields) == 0 {
-		return "", "", false
-	}
-	if len(fields) == 1 {
-		return command, "", true
-	}
-	action := strings.ToLower(strings.TrimSpace(fields[1]))
-	if len(fields) == 2 {
-		if hasTrailingDelimiter {
-			if slashArgStringSliceContains(valueActions, action) {
-				return command + " " + action, "", true
-			}
-			return "", "", false
-		}
-		if action == "" {
-			return "", "", false
-		}
-		if slashArgStringSliceContains(rootActions, action) {
-			return command, action, true
-		}
-		return command, action, true
-	}
-	if slashArgStringSliceContains(valueActions, action) {
-		return command + " " + action, strings.TrimSpace(strings.Join(fields[2:], " ")), true
-	}
-	return "", "", false
-}
-
-func slashArgStringSliceContains(values []string, target string) bool {
-	target = strings.ToLower(strings.TrimSpace(target))
-	if target == "" {
-		return false
-	}
-	for _, value := range values {
-		if strings.EqualFold(strings.TrimSpace(value), target) {
-			return true
-		}
-	}
-	return false
 }
 
 func pluginSlashArgQuery(command string, fields []string, hasTrailingDelimiter bool) (string, string, bool) {
@@ -680,10 +608,6 @@ func slashCompletionTargetAtCursor(input []rune, cursor int) (query string, star
 		return skillQuery, skillStart, skillEnd, true, true
 	}
 	return "", 0, 0, false, false
-}
-
-func isMentionQueryRune(r rune) bool {
-	return promptrefs.IsMentionQueryRune(r)
 }
 
 func replaceRuneSpan(input []rune, start int, end int, replacement string) ([]rune, int) {
@@ -851,14 +775,6 @@ func renderSelectionOnLines(lines []string, start textSelectionPoint, end textSe
 		out = append(out, prefix+highlight.Render(middle)+suffix)
 	}
 	return out
-}
-
-// renderSelectionOnStyledLines renders selection highlight while preserving
-// styled (ANSI-colored) output for non-selected lines. Selected lines show
-// plain text with the configured selection style so the selection boundary is
-// visually unambiguous.
-func renderSelectionOnStyledLines(styledLines, plainLines []string, start textSelectionPoint, end textSelectionPoint, highlight lipgloss.Style) []string {
-	return renderSelectionOnStyledLinesWithIndents(styledLines, plainLines, nil, start, end, highlight)
 }
 
 // renderSelectionOnStyledLinesWithIndents follows the same model as composer

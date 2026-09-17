@@ -885,21 +885,6 @@ func renderModelText(cfg gatewayapp.Config) string {
 	return profileID
 }
 
-func renderConfiguredModelText(alias string, provider string, model string) string {
-	if trimmedAlias := strings.TrimSpace(alias); trimmedAlias != "" {
-		return trimmedAlias
-	}
-	provider = strings.TrimSpace(provider)
-	model = strings.TrimSpace(model)
-	if model == "" {
-		return ""
-	}
-	if provider == "" {
-		return model
-	}
-	return provider + "/" + model
-}
-
 func writeResult(w io.Writer, format outputFormat, result runResult) error {
 	switch format {
 	case outputJSON, outputJSONL:
@@ -1007,25 +992,6 @@ func envBool(key string, fallback bool) bool {
 		}
 	}
 	return fallback
-}
-
-func splitNonEmptyCSV(value string) []string {
-	values := strings.Split(value, ",")
-	out := make([]string, 0, len(values))
-	seen := map[string]struct{}{}
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value == "" {
-			continue
-		}
-		key := strings.ToLower(value)
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		out = append(out, value)
-	}
-	return out
 }
 
 func sandboxStartupEscapeError(err error) error {

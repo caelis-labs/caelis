@@ -70,12 +70,6 @@ func newSubagentCompletionSink(ctx context.Context, runtime *taskRuntime, taskID
 	}
 }
 
-func newObservedSubagentCompletionSink(ctx context.Context, runtime *taskRuntime, taskID string, turnSeq int64) subagentCompletionSink {
-	sink := newSubagentCompletionSink(ctx, runtime, taskID, turnSeq)
-	sink.observedTerminal = true
-	return sink
-}
-
 func (sink subagentCompletionSink) PublishSubagentCompletion(result delegation.Result) {
 	done := sink.enqueue(result)
 	if done != nil {
