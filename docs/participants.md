@@ -77,8 +77,11 @@ for the full guarantees and limits.
 
 ## Participant workspace
 
-Click the running/done count in the footer or a participant link in the
-transcript to open one participant pane. The name dropdown switches participants;
+Click the running/done count in the footer or a participant's label in the
+transcript to open one participant pane. Message rows split that click: the peer
+label (`handle[agent]`, or `@handle[agent]` when you send) opens the peer's pane,
+while the rest of the row expands or collapses the message in place. The name
+dropdown switches participants;
 the layout dropdown chooses **Overlay**, **Split left/right**, or **Split up/down**.
 The dropdown lists Agents, not individual command Jobs.
 

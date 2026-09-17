@@ -92,11 +92,15 @@ func TestSendMessageToolAppearsAfterSuccessAndOpensOverlay(t *testing.T) {
 	if strings.Contains(plain, `Ran SendMessage`) || strings.Contains(plain, `"message"`) || strings.Contains(plain, "middle-marker") || strings.Contains(plain, "receipt-must-not-render") {
 		t.Fatalf("collapsed SendMessage leaked raw/full input:\n%s", plain)
 	}
+	labelEnd := displayColumns("• @ziva[breeze]")
 	if token := model.viewportClickTokens[headerLine]; token != agentMessageTargetOverlayClickToken("message-1") {
-		t.Fatalf("SendMessage header click token = %q", token)
+		t.Fatalf("SendMessage recipient-label token = %q", token)
 	}
-	if bounds := model.viewportClickBounds[headerLine]; bounds.valid() {
-		t.Fatalf("SendMessage retained a bounded sub-target instead of whole-row navigation: %#v", bounds)
+	if bounds := model.viewportClickBounds[headerLine]; !bounds.valid() || bounds.start != 0 || bounds.end != labelEnd {
+		t.Fatalf("SendMessage recipient-label span = %#v, want [0,%d)", bounds, labelEnd)
+	}
+	if token := model.viewportClickAltTokens[headerLine]; token != acpToolPanelClickToken("message-1") {
+		t.Fatalf("SendMessage body token = %q, want send panel toggle", token)
 	}
 
 	clickViewportLine(t, model, headerLine)
@@ -105,9 +109,23 @@ func TestSendMessageToolAppearsAfterSuccessAndOpensOverlay(t *testing.T) {
 		t.Fatalf("SendMessage row did not open its target overlay: %#v", model.subagentOutputOverlay)
 	}
 	if strings.Contains(plain, "middle-marker") {
-		t.Fatalf("SendMessage row expanded its hidden message:\n%s", plain)
+		t.Fatalf("SendMessage recipient-label click expanded the hidden message:\n%s", plain)
 	}
 	model.subagentOutputOverlay = nil
+
+	// The body keeps the send panel's own expansion instead of navigating away.
+	clickViewportColumn(t, model, headerLine, labelEnd+4)
+	plain = strings.Join(model.viewportPlainLines, "\n")
+	if model.subagentOutputOverlay != nil {
+		t.Fatalf("SendMessage body click opened a workspace: %#v", model.subagentOutputOverlay)
+	}
+	if !strings.Contains(plain, "middle-marker") {
+		t.Fatalf("SendMessage body click did not expand the hidden message:\n%s", plain)
+	}
+	clickViewportColumn(t, model, headerLine, labelEnd+4)
+	if plain = strings.Join(model.viewportPlainLines, "\n"); strings.Contains(plain, "middle-marker") {
+		t.Fatalf("SendMessage body click did not collapse the message:\n%s", plain)
+	}
 
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-2",
@@ -144,6 +162,95 @@ func TestSendMessageToolAppearsAfterSuccessAndOpensOverlay(t *testing.T) {
 	clickViewportLine(t, model, secondHeaderLine)
 	if model.subagentOutputOverlay == nil || model.subagentOutputOverlay.callID != "spawn-1" {
 		t.Fatalf("later-Turn SendMessage row lost stable Spawn owner: %#v", model.subagentOutputOverlay)
+	}
+}
+
+// A long SendMessage header wraps once it expands. Its continuation lines carry
+// no label span, so clicking them must collapse the send panel instead of
+// opening the recipient's workspace.
+func TestExpandedSendMessageContinuationClickCollapsesInsteadOfNavigating(t *testing.T) {
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model.width = 120
+	model.height = 40
+	model.currentSessionID = "session-1"
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
+		Update: eventstream.ToolCall{
+			SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "spawn-1", Title: "Spawn breeze",
+			Kind: eventstream.ToolKindExecute, Status: eventstream.ToolStatusInProgress,
+			RawInput: map[string]any{"agent": "breeze", "prompt": "delegated messaging exercise"}, Meta: acpToolNameMeta("StartThread"),
+		},
+	})
+	running := eventstream.ToolStatusInProgress
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "spawn-1", Status: &running,
+			RawOutput: map[string]any{"handle": "ziva", "state": "running"}, Meta: acpToolNameMeta("StartThread"),
+		},
+	})
+	view := model.ensureSubagentOutputView("spawn-1")
+	view.taskHandle = "ziva"
+	message := "start " + strings.Repeat("payload ", 18) + "middle-marker " + strings.Repeat("tail ", 18)
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
+		Update: eventstream.ToolCall{
+			SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "message-1", Title: "SendMessage",
+			Kind: eventstream.ToolKindExecute, Status: eventstream.ToolStatusInProgress,
+			RawInput: map[string]any{"to": "ziva", "message": message}, Meta: acpToolNameMeta("SendMessage"),
+		},
+	})
+	completed := eventstream.ToolStatusCompleted
+	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
+		Update: eventstream.ToolCallUpdate{
+			SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "message-1", Status: &completed,
+			RawOutput: map[string]any{"accepted": true}, Meta: acpToolNameMeta("SendMessage"),
+		},
+	})
+
+	model.syncViewportContent()
+	labelEnd := displayColumns("• @ziva[breeze]")
+	headerLine := -1
+	for index, line := range model.viewportPlainLines {
+		if strings.Contains(line, "• @ziva[breeze]:") {
+			headerLine = index
+			break
+		}
+	}
+	if headerLine < 0 {
+		t.Fatalf("SendMessage header missing: %#v", model.viewportPlainLines)
+	}
+
+	clickViewportColumn(t, model, headerLine, labelEnd+4)
+	if plain := strings.Join(model.viewportPlainLines, "\n"); !strings.Contains(plain, "middle-marker") {
+		t.Fatalf("SendMessage body click did not expand the hidden message:\n%s", plain)
+	}
+
+	continuation := headerLine + 1
+	if continuation >= len(model.viewportPlainLines) {
+		t.Fatalf("expanded SendMessage header did not wrap: %#v", model.viewportPlainLines)
+	}
+	if line := model.viewportPlainLines[continuation]; strings.TrimSpace(line) == "" || strings.HasPrefix(strings.TrimSpace(line), "• ") {
+		t.Fatalf("continuation line %d = %q, want wrapped body text", continuation, line)
+	}
+	bodyToken := acpToolPanelClickToken("message-1")
+	if token := model.viewportClickTokens[continuation]; token != bodyToken {
+		t.Fatalf("continuation token = %q, want the body action %q", token, bodyToken)
+	}
+	if alt := model.viewportClickAltTokens[continuation]; alt != "" {
+		t.Fatalf("continuation kept a second target: %q", alt)
+	}
+	if bounds := model.viewportClickBounds[continuation]; bounds.valid() {
+		t.Fatalf("continuation kept a label span: %#v", bounds)
+	}
+
+	clickViewportColumn(t, model, continuation, 4)
+	if model.subagentOutputOverlay != nil {
+		t.Fatalf("continuation click opened a workspace: %#v", model.subagentOutputOverlay)
+	}
+	if plain := strings.Join(model.viewportPlainLines, "\n"); strings.Contains(plain, "middle-marker") {
+		t.Fatalf("continuation click did not collapse the message:\n%s", plain)
 	}
 }
 
@@ -309,7 +416,7 @@ func TestSendMessageFailureDoesNotClaimDelivery(t *testing.T) {
 func TestSendMessageHeaderUsesOutgoingTargetStyling(t *testing.T) {
 	theme := tuikit.ResolveThemeWithState(true, false, colorprofile.TrueColor)
 	ctx := BlockRenderContext{Width: 100, TermWidth: 100, Theme: theme}
-	row := renderSendMessageHeaderRow("block", "@ziva: compact message", ctx, "", acpHeaderMarkDefault, false)
+	row := renderSendMessageHeaderRow("block", "@ziva: compact message", ctx, "", "", acpHeaderMarkDefault, false)
 	if got := ansiTextForForeground(t, row.Styled, ctx.Theme.AgentMessageSentFg); !strings.Contains(got, "@ziva") {
 		t.Fatalf("SendMessage target did not receive outgoing styling: %q", row.Styled)
 	}

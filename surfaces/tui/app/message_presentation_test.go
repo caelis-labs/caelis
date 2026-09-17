@@ -64,7 +64,7 @@ func TestAgentMessageDirectionStylesPreserveBindingAndBody(t *testing.T) {
 			theme := tuikit.ResolveThemeWithState(dark, false, profile)
 			ctx := BlockRenderContext{Width: 80, TermWidth: 80, Theme: theme}
 			received := renderAgentMessageRow("b", "reviewer[orbit]", "message body", ctx, "")
-			sent := renderSendMessageHeaderRow("b", "@reviewer[orbit]: message body", ctx, "", acpHeaderMarkDefault, false)
+			sent := renderSendMessageHeaderRow("b", "@reviewer[orbit]: message body", ctx, "", "", acpHeaderMarkDefault, false)
 			if !strings.Contains(sent.Styled, theme.AgentMessageSentStyle().Render("@reviewer")) || !strings.Contains(received.Styled, theme.AgentMessageReceivedStyle().Render("reviewer")) {
 				t.Fatal("direction color missing")
 			}

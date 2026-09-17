@@ -147,20 +147,25 @@ func renderAgentCommunicationRows(blockID string, event SubagentEvent, eventInde
 	}
 	bodyBudget := maxInt(1, compactSingleLineBudget(width)-displayColumns("• "+name+": "))
 	displayText, folded := longCommandDisplayPreview(text, bodyBudget)
-	if opts.AgentMessageTargetLinks {
-		if token := subagentOutputOverlayClickToken(event.SourceCallID); token != "" {
-			return wrapAgentMessageRows(renderAgentMessageRow(blockID, name, displayText, ctx, token), width)
-		}
-	}
-	token := ""
+	foldToken := ""
 	if folded {
 		key := agentCommunicationFoldKey(event, eventIndex)
-		token = agentMessageFoldClickToken(key)
+		foldToken = agentMessageFoldClickToken(key)
 		if opts.AgentMessageExpanded != nil && opts.AgentMessageExpanded(key) {
 			displayText = text
 		}
 	}
-	return wrapAgentMessageRows(renderAgentMessageRow(blockID, name, displayText, ctx, token), width)
+	linkToken := ""
+	if opts.AgentMessageTargetLinks {
+		linkToken = subagentOutputOverlayClickToken(event.SourceCallID)
+	}
+	rows := wrapAgentMessageRows(renderAgentMessageRow(blockID, name, displayText, ctx, foldToken), width)
+	// The source label opens the Agent workspace; the compact body keeps its own
+	// expansion, so a long incoming message carries both actions.
+	if len(rows) > 0 {
+		rows[0] = bindAgentMessageTargets(rows[0], 2+displayColumns(name), linkToken)
+	}
+	return rows
 }
 
 func agentCommunicationFoldKey(event SubagentEvent, eventIndex int) string {
@@ -214,6 +219,7 @@ func wrapAgentMessageRows(row RenderedRow, width int) []RenderedRow {
 	mark, body, _ := strings.Cut(row.Styled, " ")
 	prefix := mark + " "
 	lines := splitStyledPhysicalLines(ansi.Wrap(body, maxInt(1, width-2), ""))
+	continuationToken := firstNonEmpty(row.ClickTokenAlt, row.ClickToken)
 	rows := make([]RenderedRow, 0, len(lines))
 	for i, line := range lines {
 		indent := "  "
@@ -221,9 +227,37 @@ func wrapAgentMessageRows(row RenderedRow, width int) []RenderedRow {
 			indent = prefix
 		}
 		next := StyledPlainClickableRow(row.BlockID, ansi.Strip(indent+line), indent+line, row.ClickToken)
+		if i == 0 {
+			next.ClickStartCol, next.ClickEndCol = row.ClickStartCol, row.ClickEndCol
+			next.ClickTokenAlt = row.ClickTokenAlt
+		} else {
+			// A bounded label target belongs to the line carrying the label; the
+			// remaining lines keep the row's own body action.
+			next.ClickToken = continuationToken
+		}
 		next.PreWrapped = true
 		next.selectionIndent = 2
 		rows = append(rows, next)
 	}
 	return rows
+}
+
+// bindAgentMessageTargets gives one Agent-message row its click targets: the
+// peer label in [0, labelEnd) opens the peer's workspace while the row's own
+// body action owns the rest of the line. A row that only has navigation keeps
+// it as the whole-row target.
+func bindAgentMessageTargets(row RenderedRow, labelEnd int, linkToken string) RenderedRow {
+	bodyToken := strings.TrimSpace(row.ClickToken)
+	linkToken = strings.TrimSpace(linkToken)
+	if linkToken == "" {
+		return row
+	}
+	row.ClickToken = linkToken
+	if bodyToken == "" || labelEnd <= 0 {
+		return row
+	}
+	row.ClickStartCol = 0
+	row.ClickEndCol = labelEnd
+	row.ClickTokenAlt = bodyToken
+	return row
 }
