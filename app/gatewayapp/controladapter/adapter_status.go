@@ -87,6 +87,11 @@ func (d *assembler) status(ctx context.Context, includeDiagnostics bool) (contro
 		modelText = acpModelText
 		reasoningEffort = strings.TrimSpace(acpStatus.ReasoningEffort)
 		fastMode = false
+		for _, option := range acpStatus.ConfigOptions {
+			if option.ID == "service_tier" {
+				fastMode = option.CurrentValue == "fast" || option.CurrentValue == "priority"
+			}
+		}
 		acpModeID = strings.TrimSpace(acpStatus.Mode)
 		acpModeLabel = acpControllerModeDisplay(acpStatus)
 	}
@@ -247,7 +252,7 @@ func (d *assembler) status(ctx context.Context, includeDiagnostics bool) (contro
 		status.ModelStatus.Alias = rawModelText
 		status.ModelStatus.Display = formatReasoningModelDisplay(rawModelText, strings.TrimSpace(acpStatus.ReasoningEffort))
 		status.ModelStatus.ReasoningEffort = strings.TrimSpace(acpStatus.ReasoningEffort)
-		status.ModelStatus.FastMode = false
+		status.ModelStatus.FastMode = fastMode
 		if acpModeID != "" && !processOwnedSessionMode {
 			status.Session.SessionMode = acpModeID
 		}

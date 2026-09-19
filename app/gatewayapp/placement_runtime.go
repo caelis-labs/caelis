@@ -356,5 +356,8 @@ func (s *runtimeComposition) resolveSystemAgentModel(
 	if err != nil {
 		return kernelimpl.ModelResolution{}, false, err
 	}
+	if placement.ServiceTier != "" {
+		resolved.FastMode = placement.ServiceTier == "priority"
+	}
 	return resolved, true, nil
 }

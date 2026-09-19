@@ -98,6 +98,25 @@ narrowest relevant `go test -race` package. File locking, atomic replacement,
 and WAL recovery require native Windows evidence when Windows behavior changes;
 cross-compilation is not equivalent.
 
+Codex ACP has two opt-in live tests:
+
+```bash
+CAELIS_CODEX_TIER_E2E=1 go test ./adapters/codex -run '^TestLiveCodexServiceTiers$' -count=1 -timeout=3m -v
+CAELIS_CODEX_COLLABORATION_E2E=1 go test ./app/gatewayapp -run '^TestLiveCodexControllerCollaboration$' -count=1 -timeout=5m -v
+```
+
+Both require an installed Codex CLI and authenticated account. They copy only
+authentication into a temporary `CODEX_HOME`, leaving the user's configuration
+and conversations unchanged. They make real model requests; the tier test
+includes Fast requests. `CAELIS_CODEX_TIER_MODEL` selects the model (default
+`gpt-5.6-luna`). Optional `CAELIS_CODEX_TIER_E2E_OUT` records service-tier request
+and response fields; `CAELIS_CODEX_COLLABORATION_E2E_OUT` records canonical
+participants, Tasks, creation journals and explicit peer messages, without
+credentials. The collaboration test uses a real Codex controller and ACP child
+with a deterministic native provider, checking actual Caelis ownership rather
+than the model's final answer. Its approval resolver allows only the test's
+Caelis collaboration calls.
+
 Guardian command approval has an opt-in live test:
 
 ```bash

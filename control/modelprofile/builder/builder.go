@@ -26,6 +26,7 @@ func FromProvider(raw modelconfig.Config) (modelprofile.ModelProfile, error) {
 			ModelConfigID: configured.ID,
 		}},
 		Effort: providerEffortCapability(configured),
+		Speed:  providerSpeedCapability(configured),
 	})
 	if err := modelprofile.Validate(profile); err != nil {
 		return modelprofile.ModelProfile{}, err
@@ -132,6 +133,10 @@ func FromACP(
 			)
 		}
 	}
+	speed, err := acpSpeedCapability(discovery, nonEffortDefaults)
+	if err != nil {
+		return modelprofile.ModelProfile{}, err
+	}
 	if len(nonEffortDefaults) == 0 {
 		nonEffortDefaults = nil
 	}
@@ -149,6 +154,7 @@ func FromACP(
 			SessionDefaults: nonEffortDefaults,
 		}},
 		Effort: effort,
+		Speed:  speed,
 	})
 	if err := modelprofile.Validate(profile); err != nil {
 		return modelprofile.ModelProfile{}, err

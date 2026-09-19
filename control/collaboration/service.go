@@ -1,4 +1,5 @@
-// Package collaboration owns Session-scoped discovery, Agent mailboxes, and
+// Package collaboration owns Session-scoped discovery, explicit shared messages,
+// independent instance read positions, Agent mailboxes, and
 // authenticated user input to delegated children. Taking or dispatching Agent
 // mail removes it; mail has no acknowledgements, retries, or exactly-once
 // guarantee. User input has a separate durable admission ledger and cannot be
@@ -13,6 +14,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -70,6 +72,7 @@ type Backend interface {
 
 // Service owns the persistent pending mailbox and process-bound credentials.
 type Service struct {
+	readLocks   [64]sync.Mutex
 	db          *sql.DB
 	backend     Backend
 	mu          sync.Mutex
@@ -93,6 +96,10 @@ func Open(path string, backend Backend) (*Service, error) {
 	 seq INTEGER PRIMARY KEY AUTOINCREMENT, session TEXT NOT NULL, recipient TEXT NOT NULL, body TEXT NOT NULL
 	); CREATE INDEX IF NOT EXISTS collaboration_recipient ON collaboration_mailbox(session, recipient, seq);`)
 	if err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if err := prepareMessageStore(db); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -141,6 +148,11 @@ func (s *Service) Send(ctx context.Context, i Identity, to, text, replyTo string
 	if err != nil {
 		return Message{}, err
 	}
+	to = strings.TrimPrefix(to, "@")
+	instance, err := readerInstance(threads, i.Member)
+	if err != nil {
+		return Message{}, err
+	}
 	if len(text) == 0 || len(text) > 65536 {
 		return Message{}, errors.New("message must contain 1 to 65536 bytes")
 	}
@@ -166,8 +178,19 @@ func (s *Service) Send(ctx context.Context, i Identity, to, text, replyTo string
 	if len(body)+2 > mailboxBatchBytes {
 		return Message{}, errors.New("encoded message exceeds mailbox response budget")
 	}
-	_, err = s.db.ExecContext(ctx, `INSERT INTO collaboration_mailbox(session,recipient,body) VALUES(?,?,?)`, i.Session, to, string(body))
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
+		return Message{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err = appendSharedMessage(ctx, tx, i, instance, m, string(body)); err != nil {
+		return Message{}, err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO collaboration_mailbox(session,recipient,body) VALUES(?,?,?)`, i.Session, to, string(body))
+	if err != nil {
+		return m, err
+	}
+	if err = tx.Commit(); err != nil {
 		return m, err
 	}
 	// A close may have raced membership validation and an earlier cleanup.
@@ -181,13 +204,21 @@ func (s *Service) Send(ctx context.Context, i Identity, to, text, replyTo string
 // Receive atomically removes a bounded batch from the caller's mailbox.
 // A lost response loses those messages; the service deliberately never retries.
 func (s *Service) Receive(ctx context.Context, i Identity) ([]Message, error) {
-	if _, err := s.members(ctx, i); err != nil {
+	lock := s.readerLock(i)
+	lock.Lock()
+	defer lock.Unlock()
+	threads, err := s.members(ctx, i)
+	if err != nil {
 		return nil, err
 	}
-	return s.take(ctx, i, 32)
+	instance, err := readerInstance(threads, i.Member)
+	if err != nil {
+		return nil, err
+	}
+	return s.take(ctx, i, 32, instance)
 }
 
-func (s *Service) take(ctx context.Context, i Identity, limit int) ([]Message, error) {
+func (s *Service) take(ctx context.Context, i Identity, limit int, seenInstance ...string) ([]Message, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -239,6 +270,11 @@ func (s *Service) take(ctx context.Context, i Identity, limit int) ([]Message, e
 	}
 	if len(out) > 0 {
 		if _, err = tx.ExecContext(ctx, `DELETE FROM collaboration_mailbox WHERE session=? AND recipient=? AND seq<=?`, i.Session, i.Member, last); err != nil {
+			return nil, err
+		}
+	}
+	if len(seenInstance) > 0 {
+		if err = markMessagesSeen(ctx, tx, i.Session, seenInstance[0], out); err != nil {
 			return nil, err
 		}
 	}
@@ -331,6 +367,9 @@ func (s *Service) pendingRecipients(ctx context.Context) ([]Identity, error) {
 }
 
 func (s *Service) deliverRecipient(ctx context.Context, i Identity) error {
+	lock := s.readerLock(i)
+	lock.Lock()
+	defer lock.Unlock()
 	threads, err := s.backend.List(ctx, i.Session)
 	if errors.Is(err, ErrSessionClosed) {
 		return s.purgeClosedSession(ctx, i.Session)
@@ -353,6 +392,10 @@ func (s *Service) deliverRecipient(ctx context.Context, i Identity) error {
 			// An ambiguous outcome never reinserts any member of the batch.
 			if err := s.backend.Deliver(ctx, i.Session, messages); err != nil {
 				return fmt.Errorf("deliver %d messages (removed; remote outcome may be unknown): %w", len(messages), err)
+			}
+			instance, _ := readerInstance(threads, i.Member)
+			if err := s.markDelivered(context.WithoutCancel(ctx), i, instance, messages); err != nil {
+				return err
 			}
 			s.notifyDelivery(i)
 		}
@@ -396,6 +439,15 @@ func (s *Service) notifyDelivery(i Identity) {
 }
 
 func (s *Service) purgeClosedSession(ctx context.Context, id string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM collaboration_mailbox WHERE session=?`, id)
-	return err
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, table := range []string{"collaboration_mailbox", "collaboration_messages", "collaboration_readers", "collaboration_seen", "collaboration_retention", "collaboration_setups"} {
+		if _, err = tx.ExecContext(ctx, "DELETE FROM "+table+" WHERE session=?", id); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }

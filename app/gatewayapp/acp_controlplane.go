@@ -9,6 +9,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	sdksubagent "github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 	acpassembly "github.com/caelis-labs/caelis/internal/acpagentbridge/assembly"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/controller"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/endpoint"
 	acpsubagent "github.com/caelis-labs/caelis/internal/acpagentbridge/subagent"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
@@ -37,7 +38,7 @@ func (s *runtimeComposition) delegationPlacementResolver(runtimeCfg stackRuntime
 			// since this Runtime's assembly was built.
 			cfg.SessionOptions = spawnedCaelisSessionOptions(cfg.SessionOptions, spawn.ApprovalMode)
 		}
-		if err == nil && !cfg.BuiltinRuntime {
+		if err == nil && !cfg.BuiltinRuntime && spawn.TaskID != "" {
 			cfg.MCPServers, cfg.MCPGrant, err = s.collaborationServers(spawn)
 		}
 		return cfg, err
@@ -51,14 +52,20 @@ func injectACPControlPlane(
 	sessionPreparer acpsubagent.SessionPreparer,
 	endpointResolver endpoint.Resolver,
 	retainWork func(session.SessionRef) func(),
+	controllerMCP ...controller.CollaborationResolver,
 ) (runtime.Config, *acpassembly.ControlPlane, error) {
+	var collaborationResolver controller.CollaborationResolver
+	if len(controllerMCP) > 0 {
+		collaborationResolver = controllerMCP[0]
+	}
 	controlPlane, err := acpassembly.NewControlPlane(acpassembly.ControlPlaneConfig{
-		Diagnostics:          cfg.Diagnostics,
-		RetainChildExecution: retainWork,
-		Agents:               resolved.Agents,
-		PlacementResolver:    placementResolver,
-		SessionPreparer:      sessionPreparer,
-		EndpointResolver:     endpointResolver,
+		Diagnostics:             cfg.Diagnostics,
+		ControllerCollaboration: collaborationResolver,
+		RetainChildExecution:    retainWork,
+		Agents:                  resolved.Agents,
+		PlacementResolver:       placementResolver,
+		SessionPreparer:         sessionPreparer,
+		EndpointResolver:        endpointResolver,
 	})
 	if err != nil {
 		return cfg, nil, err

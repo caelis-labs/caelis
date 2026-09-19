@@ -56,7 +56,7 @@ func DiscoveryInstruction() string {
 
 // CollaboratorInstructions defines reporting and turn completion for children.
 func CollaboratorInstructions() string {
-	return "Use SendMessage to report meaningful progress or blockers to parent; send brief updates during longer tasks. Process any messages returned by the tool. When finished or blocked, return your result and end the turn; new messages resume this Session."
+	return "Use SendMessage to report meaningful progress or blockers to parent; send brief updates during longer tasks. Process any messages returned by the tool. Use ReadMessages for an unread page of the shared collaboration conversation. When finished or blocked, return your result and end the turn; new messages resume this Session."
 }
 
 // RenderPromptSlice returns the one-time setup appended to a child's initial

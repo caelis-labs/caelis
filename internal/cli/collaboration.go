@@ -2,11 +2,14 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 
 	"github.com/caelis-labs/caelis/control/appserver/httpclient"
+	"github.com/caelis-labs/caelis/control/collaboration"
 	surfacemcp "github.com/caelis-labs/caelis/surfaces/mcp"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -23,5 +26,11 @@ func runCollaboration(ctx context.Context, args []string, stdin io.Reader, stdou
 	if endpoint == "" || token == "" {
 		return errors.New("collaboration requires a Host-issued endpoint and participant credential")
 	}
-	return surfacemcp.Run(ctx, httpclient.Collaboration(endpoint, token), &mcp.IOTransport{Reader: io.NopCloser(stdin), Writer: collaborationWriter{stdout}})
+	definitions := collaboration.Definitions(false)
+	if raw := os.Getenv("CAELIS_COLLABORATION_TOOLS"); raw != "" {
+		if err := json.Unmarshal([]byte(raw), &definitions); err != nil {
+			return fmt.Errorf("collaboration tool definitions: %w", err)
+		}
+	}
+	return surfacemcp.Run(ctx, httpclient.Collaboration(endpoint, token), &mcp.IOTransport{Reader: io.NopCloser(stdin), Writer: collaborationWriter{stdout}}, definitions)
 }

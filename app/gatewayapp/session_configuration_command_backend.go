@@ -164,8 +164,15 @@ func (s *runtimeComposition) configureSessionModel(ctx context.Context, req apps
 	if found {
 		switch selected.Profile.Kind() {
 		case modelprofile.BackendACP:
-			if req.FastMode {
-				return sessionCommandResult(active), sessionConfigurationRejected(fmt.Sprintf("model profile %q does not support fast mode", selected.Profile.ID))
+			if req.FastMode || selected.Profile.SupportsFast() {
+				speed := "standard"
+				if req.FastMode {
+					speed = "fast"
+				}
+				selected.Placement, err = selected.Profile.ApplySpeed(selected.Placement, speed)
+				if err != nil {
+					return sessionCommandResult(active), sessionConfigurationRejectedError(err)
+				}
 			}
 			return s.configureSessionACPProfile(ctx, active, selected)
 		case modelprofile.BackendProvider:

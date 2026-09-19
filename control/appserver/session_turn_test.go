@@ -623,8 +623,8 @@ func TestParticipantTurnClientSteersExactObservedTarget(t *testing.T) {
 	if err := turn.Steer(context.Background(), "guide", "display guide", parts); err != nil {
 		t.Fatalf("Steer() error = %v", err)
 	}
-	if steerRequest.OperationID == "" || steerRequest.SessionID != "session-1" || steerRequest.ExpectedControllerEpoch != "epoch-7" {
-		t.Fatalf("Steer() write fence = %#v, want session-1/epoch-7 with operation ID", steerRequest.WriteBase)
+	if steerRequest.OperationID == "" || steerRequest.SessionID != "session-1" || steerRequest.ExpectedControllerEpoch != "" {
+		t.Fatalf("Steer() write fence = %#v, want session-1 with an operation ID and an exact Turn target", steerRequest.WriteBase)
 	}
 	if steerRequest.Target != target || steerRequest.Input != "guide" || steerRequest.DisplayInput != "display guide" {
 		t.Fatalf("Steer() request = %#v, want exact participant target and input", steerRequest)
@@ -761,7 +761,7 @@ func TestSessionTurnClientRoutesApprovalAndCancelWithoutClosingSession(t *testin
 		t.Fatal(err)
 	}
 	if approvalRequest.SessionID != "session-1" ||
-		approvalRequest.ExpectedControllerEpoch != "epoch-1" ||
+		approvalRequest.ExpectedControllerEpoch != "" ||
 		approvalRequest.Target != target ||
 		approvalRequest.ApprovalRequestID != "approval-1" ||
 		approvalRequest.OptionID != "allow_once" ||
@@ -769,13 +769,13 @@ func TestSessionTurnClientRoutesApprovalAndCancelWithoutClosingSession(t *testin
 		t.Fatalf("ResolveApproval request = %#v", approvalRequest)
 	}
 	if cancelRequest.SessionID != "session-1" ||
-		cancelRequest.ExpectedControllerEpoch != "epoch-1" ||
+		cancelRequest.ExpectedControllerEpoch != "" ||
 		cancelRequest.Target != target ||
 		cancelRequest.Reason != "test cancellation" {
 		t.Fatalf("Cancel request = %#v", cancelRequest)
 	}
 	if steerRequest.SessionID != "session-1" ||
-		steerRequest.ExpectedControllerEpoch != "epoch-1" ||
+		steerRequest.ExpectedControllerEpoch != "" ||
 		steerRequest.Target != target ||
 		steerRequest.Input != "continue" ||
 		steerRequest.DisplayInput != "continue shown" ||

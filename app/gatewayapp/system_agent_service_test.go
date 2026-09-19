@@ -81,8 +81,29 @@ func TestSystemAgentReasoningModelOverridesRequestMetadata(t *testing.T) {
 	}
 }
 
+func TestSystemAgentSpeedOverridesRequestMetadata(t *testing.T) {
+	for _, fast := range []bool{false, true} {
+		inner := &systemAgentReasoningRecorder{}
+		wrapped := withSystemAgentReasoningEffort(kernelimpl.ModelResolution{Model: inner, ReasoningEffort: "high", FastMode: fast})
+		request := &model.Request{ServiceTier: model.ServiceTierPriority}
+		for _, err := range wrapped.Generate(t.Context(), request) {
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		want := model.ServiceTier("")
+		if fast {
+			want = model.ServiceTierPriority
+		}
+		if inner.tier != want || inner.effort != "high" || request.ServiceTier != model.ServiceTierPriority {
+			t.Fatalf("bound speed/effort or caller request changed: %#v", inner)
+		}
+	}
+}
+
 type systemAgentReasoningRecorder struct {
 	effort string
+	tier   model.ServiceTier
 }
 
 func (*systemAgentReasoningRecorder) Name() string { return "system-agent-reasoning-recorder" }
@@ -90,6 +111,7 @@ func (*systemAgentReasoningRecorder) Name() string { return "system-agent-reason
 func (m *systemAgentReasoningRecorder) Generate(_ context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
 	if req != nil {
 		m.effort = req.Reasoning.Effort
+		m.tier = req.ServiceTier
 	}
 	return func(func(*model.StreamEvent, error) bool) {}
 }

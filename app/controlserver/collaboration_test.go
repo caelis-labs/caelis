@@ -49,18 +49,20 @@ func TestCollaborationMCPHTTPRoundTrip(t *testing.T) {
 	token := grant.Token()
 	clientSide, serverSide := mcp.NewInMemoryTransports()
 	done := make(chan error, 1)
-	go func() { done <- surfacemcp.Run(ctx, httpclient.Collaboration(server.URL, token), serverSide) }()
+	go func() {
+		done <- surfacemcp.Run(ctx, httpclient.Collaboration(server.URL, token), serverSide, collaboration.Definitions(false))
+	}()
 	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "1"}, nil)
 	session, err := client.Connect(ctx, clientSide, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	tools, err := session.ListTools(ctx, nil)
-	if err != nil || len(tools.Tools) != 2 {
+	if err != nil || len(tools.Tools) != 3 {
 		t.Fatalf("tools %v %v", tools, err)
 	}
 	for _, definition := range tools.Tools {
-		if definition.Name != "ListThreads" && definition.Name != "SendMessage" {
+		if definition.Name != "ReadMessages" && definition.Name != "ListThreads" && definition.Name != "SendMessage" {
 			t.Fatalf("child MCP exposed %s", definition.Name)
 		}
 	}

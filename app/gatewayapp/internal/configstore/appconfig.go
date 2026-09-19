@@ -169,7 +169,11 @@ func Validate(doc AppConfig) error {
 	}
 	if profiles.DefaultFastMode {
 		profile, _ := modelprofile.Lookup(profiles, profiles.DefaultProfileID)
-		if profile.Backend.Provider == nil || !modelconfig.SupportsSpeedMode(modelConfigs[profile.Backend.Provider.ModelConfigID], "fast") {
+		supported := profile.SupportsFast()
+		if profile.Backend.Provider != nil {
+			supported = modelconfig.SupportsSpeedMode(modelConfigs[profile.Backend.Provider.ModelConfigID], "fast")
+		}
+		if !supported {
 			return fmt.Errorf("gatewayapp: default model profile %q does not support fast mode", profiles.DefaultProfileID)
 		}
 	}
@@ -186,6 +190,7 @@ func Normalize(doc AppConfig) AppConfig {
 	doc.Models.ProviderEndpoints = dedupeProviderEndpointsForSave(doc.Models.ProviderEndpoints)
 	doc.ExternalAgents = controlagents.NormalizeConfiguration(doc.ExternalAgents)
 	doc.ModelProfiles = modelprofile.NormalizeConfiguration(doc.ModelProfiles)
+	refreshProviderSpeeds(&doc)
 	doc.AgentBindings = agentbinding.NormalizeConfiguration(doc.AgentBindings)
 	doc.Sandbox = NormalizeSandboxConfig(doc.Sandbox)
 	doc.Runtime = NormalizeRuntimeConfig(doc.Runtime)

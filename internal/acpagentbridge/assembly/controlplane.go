@@ -31,11 +31,12 @@ type ControlPlaneConfig struct {
 	// RetainChildExecution retains the Host Runtime for a child prompt producer.
 	RetainChildExecution func(session.SessionRef) func()
 	// Diagnostics is the Host-private ACP lifecycle error sink.
-	Diagnostics       *slog.Logger
-	Agents            []assembly.AgentConfig
-	PlacementResolver acpsubagent.PlacementResolver
-	SessionPreparer   acpsubagent.SessionPreparer
-	EndpointResolver  endpoint.Resolver
+	Diagnostics             *slog.Logger
+	Agents                  []assembly.AgentConfig
+	PlacementResolver       acpsubagent.PlacementResolver
+	SessionPreparer         acpsubagent.SessionPreparer
+	EndpointResolver        endpoint.Resolver
+	ControllerCollaboration acpcontroller.CollaborationResolver
 }
 
 // NewControlPlane constructs controller and subagent runner instances backed
@@ -58,6 +59,7 @@ func NewControlPlane(cfg ControlPlaneConfig) (*ControlPlane, error) {
 	}
 	manager, err := acpcontroller.NewManager(acpcontroller.Config{
 		SessionPreparer:   cfg.SessionPreparer,
+		Collaboration:     cfg.ControllerCollaboration,
 		Registry:          registry,
 		EndpointResolver:  cfg.EndpointResolver,
 		PlacementResolver: cfg.PlacementResolver,

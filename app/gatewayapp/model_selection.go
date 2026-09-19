@@ -24,7 +24,9 @@ func (s *runtimeComposition) modelSelectionChoices(ctx context.Context, ref sess
 		if active.Controller.Kind == session.ControllerKindACP {
 			currentID = active.Controller.Placement.ProfileID
 			effort = active.Controller.Placement.ReasoningEffort
-			fast = false
+			if profile, ok := modelprofile.Lookup(profiles, currentID); ok {
+				fast = profile.SelectedSpeed(active.Controller.Placement) == "fast"
+			}
 		} else {
 			if selected := kernel.CurrentModelAlias(state); selected != "" {
 				currentID = selected
@@ -44,6 +46,9 @@ func (s *runtimeComposition) modelSelectionChoices(ctx context.Context, ref sess
 		if profile, ok := modelprofile.Lookup(profiles, choice.ProfileID); ok {
 			choice.ReasoningLevels = modelProfileEfforts(profile)
 			choice.ReasoningEffort = profile.Effort.DefaultEffort
+			if profile.Kind() == modelprofile.BackendACP {
+				choice.FastSupported = profile.SupportsFast()
+			}
 		}
 		choice.Current = currentID != "" && (strings.EqualFold(currentID, choice.ID) || strings.EqualFold(currentID, choice.ProfileID))
 		choice.FastMode = choice.Current && fast && choice.FastSupported

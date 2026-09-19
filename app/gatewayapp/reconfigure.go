@@ -395,6 +395,7 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 		s.prepareSpawnedACPSession,
 		s.authorities.acpEndpointResolver,
 		s.retainRuntimeWork,
+		s.controllerCollaboration,
 	)
 	if err != nil {
 		bundle.Close()

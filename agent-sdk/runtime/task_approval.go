@@ -60,26 +60,32 @@ func submitTaskApproval(ctx context.Context, call tool.Call, approval taskApprov
 // second result for that call ID. Journaling still begins only after approval.
 func (t journaledTool) callTaskContinuation(ctx context.Context, call tool.Call) (tool.Result, error) {
 	result, callErr := t.Call(ctx, call)
+	return result, errors.Join(callErr, persistToolExecutionReceipt(ctx, t.sessions, t.sessionRef, call, result))
+}
+
+// persistToolExecutionReceipt records a terminal journal entry when the caller
+// has no native chat tool-result event to carry it.
+func persistToolExecutionReceipt(ctx context.Context, sessions session.Service, ref session.SessionRef, call tool.Call, result tool.Result) error {
 	value, ok := result.Metadata[tool.MetadataExecutionJournal]
 	if !ok {
-		return result, callErr
+		return nil
 	}
 	raw, err := json.Marshal(value)
 	if err != nil {
-		return result, errors.Join(callErr, err)
+		return err
 	}
 	var journal session.ExecutionJournalEntry
 	if err := json.Unmarshal(raw, &journal); err != nil {
-		return result, errors.Join(callErr, err)
+		return err
 	}
 	record := journal.ToolExecution
 	if record == nil {
-		return result, errors.Join(callErr, errors.New("task execution receipt is missing"))
+		return errors.New("task execution receipt is missing")
 	}
 	receiptCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), approvalResolutionRecoveryTimeout)
 	defer cancel()
-	_, err = t.sessions.AppendEvent(receiptCtx, session.AppendEventRequest{
-		SessionRef: t.sessionRef, MutationGuard: session.RuntimeMutationGuard(ctx),
+	_, err = sessions.AppendEvent(receiptCtx, session.AppendEventRequest{
+		SessionRef: ref, MutationGuard: session.RuntimeMutationGuard(ctx),
 		Event: &session.Event{
 			IdempotencyKey: "tool-execution:" + record.Identity + ":" + fmt.Sprint(record.Revision),
 			Type:           session.EventTypeLifecycle, Visibility: session.VisibilityJournal,
@@ -88,5 +94,5 @@ func (t journaledTool) callTaskContinuation(ctx context.Context, call tool.Call)
 			Lifecycle: &session.EventLifecycle{Status: string(record.Status), Reason: record.Reason},
 		},
 	})
-	return result, errors.Join(callErr, err)
+	return err
 }

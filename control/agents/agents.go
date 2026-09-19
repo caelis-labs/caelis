@@ -92,6 +92,7 @@ type ConfigOptionPurpose string
 
 const (
 	ConfigOptionPurposeReasoningEffort ConfigOptionPurpose = "reasoning_effort"
+	ConfigOptionPurposeServiceTier     ConfigOptionPurpose = "service_tier"
 )
 
 // ConfigOption is the persisted discovery view of one ACP session option.
@@ -467,6 +468,8 @@ func classifyConfigOptionPurpose(option ConfigOption) ConfigOptionPurpose {
 	}
 	id := compact(option.ID)
 	switch id {
+	case "servicetier":
+		return ConfigOptionPurposeServiceTier
 	case "effort", "reasoningeffort", "reasoninglevel", "reasoningdepth", "thoughtlevel", "thoughtdepth", "thinkinglevel", "thinkingdepth":
 		return ConfigOptionPurposeReasoningEffort
 	}

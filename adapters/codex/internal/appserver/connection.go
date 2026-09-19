@@ -47,6 +47,7 @@ type Notification struct {
 
 // Request is one server-to-client request.
 type Request struct {
+	ID     json.RawMessage
 	Method string
 	Params json.RawMessage
 }
@@ -219,7 +220,7 @@ func (c *Connection) dispatchRequest(msg message) {
 				err = &Error{Code: -32601, Message: "method not found"}
 			} else {
 				result, err = c.onRequest(context.Background(), Request{
-					Method: msg.Method, Params: append(json.RawMessage(nil), msg.Params...),
+					ID: append(json.RawMessage(nil), msg.ID...), Method: msg.Method, Params: append(json.RawMessage(nil), msg.Params...),
 				})
 			}
 			reply := message{ID: append(json.RawMessage(nil), msg.ID...)}

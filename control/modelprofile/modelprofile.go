@@ -62,6 +62,7 @@ type ModelProfile struct {
 	DisplayName string           `json:"display_name,omitempty"`
 	Backend     Backend          `json:"backend"`
 	Effort      EffortCapability `json:"effort"`
+	Speed       SpeedCapability  `json:"speed,omitzero"`
 }
 
 // Configuration is the single Control-owned profile catalog.
@@ -104,6 +105,7 @@ func Normalize(in ModelProfile) ModelProfile {
 		ID:          NormalizeID(in.ID),
 		DisplayName: strings.TrimSpace(in.DisplayName),
 		Effort:      normalizeEffort(in.Effort),
+		Speed:       normalizeSpeed(in.Speed),
 	}
 	if in.Backend.Provider != nil {
 		out.Backend.Provider = &ProviderBackend{ModelConfigID: strings.ToLower(strings.TrimSpace(in.Backend.Provider.ModelConfigID))}
@@ -180,7 +182,7 @@ func Validate(raw ModelProfile) error {
 	if err := validateEffort(p); err != nil {
 		return err
 	}
-	return nil
+	return validateSpeed(p)
 }
 
 // NormalizeConfiguration returns a detached deterministic profile catalog.

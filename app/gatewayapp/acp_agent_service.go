@@ -178,7 +178,7 @@ func (s *runtimeComposition) withDirectProfileAgents(resolved assembly.ResolvedA
 		if _, exists := seen[name]; exists {
 			return assembly.ResolvedAssembly{}, fmt.Errorf("gatewayapp: direct Agent handle %q conflicts with an existing Agent", handle)
 		}
-		materialized, err := s.materializeDelegatedModel(string(handle), placement.ProfileID, placement.ReasoningEffort, runtimeCfg)
+		materialized, err := s.materializeDelegatedModel(string(handle), placement.ProfileID, placement.ReasoningEffort, runtimeCfg, placement.ServiceTier)
 		if err != nil {
 			return assembly.ResolvedAssembly{}, err
 		}

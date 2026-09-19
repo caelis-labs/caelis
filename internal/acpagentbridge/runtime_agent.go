@@ -642,7 +642,7 @@ func (a *RuntimeAgent) SetSessionConfigOption(ctx context.Context, req acpsdk.Se
 				WriteBase: base,
 				Model:     strings.TrimSpace(value),
 			})
-		case "reasoning_effort":
+		case "reasoning_effort", "service_tier":
 			snapshot, snapshotErr := a.presentationClient.PresentationSnapshot(ctx, appserver.PresentationRequest{SessionID: active.SessionID})
 			if snapshotErr != nil {
 				return acpsdk.SetSessionConfigOptionResponse{}, snapshotErr
@@ -650,11 +650,24 @@ func (a *RuntimeAgent) SetSessionConfigOption(ctx context.Context, req acpsdk.Se
 			if snapshot.Models == nil || strings.TrimSpace(snapshot.Models.CurrentModelID) == "" {
 				return acpsdk.SetSessionConfigOptionResponse{}, errors.New("internal/acpagentbridge: current Session model is unavailable")
 			}
-			result, err = a.configurationClient.UseSessionModel(ctx, appserver.SessionModelRequest{
-				WriteBase:       base,
-				Model:           strings.TrimSpace(snapshot.Models.CurrentModelID),
-				ReasoningEffort: strings.TrimSpace(value),
-			})
+			selection := appserver.SessionModelRequest{WriteBase: base, Model: strings.TrimSpace(snapshot.Models.CurrentModelID)}
+			for _, option := range snapshot.ConfigOptions {
+				if option.ID == "reasoning_effort" {
+					selection.ReasoningEffort, _ = option.CurrentValue.(string)
+				}
+				if option.ID == "service_tier" {
+					selection.FastMode = option.CurrentValue == "fast"
+				}
+			}
+			if configID == "service_tier" {
+				if value != "fast" && value != "default" {
+					return acpsdk.SetSessionConfigOptionResponse{}, fmt.Errorf("unsupported service tier %q", value)
+				}
+				selection.FastMode = value == "fast"
+			} else {
+				selection.ReasoningEffort = strings.TrimSpace(value)
+			}
+			result, err = a.configurationClient.UseSessionModel(ctx, selection)
 		default:
 			result, err = a.configurationClient.ConfigureSessionPresentation(ctx, appserver.SessionPresentationConfigRequest{
 				WriteBase: base,

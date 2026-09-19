@@ -184,7 +184,7 @@ func TestUint64WireRoundTripAtJavaScriptBoundary(t *testing.T) {
 			}
 			bindingJSON := mustMarshalWire(t, appserver.BindAgentBindingRequest{
 				WriteBase: appserver.WriteBase{OperationID: "agent-binding-operation-1", ExpectedRevision: &value},
-				Binding:   agentbinding.Binding{Handle: agentbinding.HandleOrbit, ProfileID: "provider:mimo", Effort: "high"},
+				Binding:   agentbinding.Binding{Handle: agentbinding.HandleOrbit, ProfileID: "provider:mimo", Effort: "high", Speed: "fast"},
 			})
 			var bindingDTO generated.BindAgentBindingRequest
 			if err := json.Unmarshal(bindingJSON, &bindingDTO); err != nil {
@@ -192,6 +192,9 @@ func TestUint64WireRoundTripAtJavaScriptBoundary(t *testing.T) {
 			}
 			if bindingDTO.ExpectedRevision == nil || string(*bindingDTO.ExpectedRevision) != decimal {
 				t.Fatalf("generated Agent binding expected_revision = %#v, want %q", bindingDTO.ExpectedRevision, decimal)
+			}
+			if bindingDTO.Binding.Speed == nil || *bindingDTO.Binding.Speed != "fast" {
+				t.Fatal("generated binding lost speed")
 			}
 			var decodedBinding appserver.BindAgentBindingRequest
 			if err := DecodeRequest(bindingJSON, &decodedBinding); err != nil {

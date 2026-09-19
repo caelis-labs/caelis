@@ -28,7 +28,7 @@ func TestBuiltInCollaborationToolsFollowSessionRole(t *testing.T) {
 		for _, configured := range host.composition.collaborationTools(active) {
 			names = append(names, configured.Definition().Name)
 		}
-		want := []string{"ListThreads", "SendMessage"}
+		want := []string{"ReadMessages", "ListThreads", "SendMessage"}
 		if active.SessionID == parent.SessionID {
 			want = append(want, "ReadThread", "WaitThread")
 		}

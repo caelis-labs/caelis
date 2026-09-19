@@ -43,21 +43,23 @@ const (
 )
 
 type subagentOverlayRow struct {
-	action       subagentOverlayAction
-	key          string
-	section      string
-	label        string
-	detail       string
-	current      bool
-	search       string
-	nameConflict bool
-	efforts      []string
-	effortIndex  int
-	handle       agentbinding.Handle
-	binding      agentbinding.Binding
-	reset        bool
-	enabled      bool
-	custom       bool
+	action        subagentOverlayAction
+	key           string
+	section       string
+	label         string
+	detail        string
+	current       bool
+	search        string
+	nameConflict  bool
+	efforts       []string
+	fastSupported bool
+	fastMode      bool
+	effortIndex   int
+	handle        agentbinding.Handle
+	binding       agentbinding.Binding
+	reset         bool
+	enabled       bool
+	custom        bool
 }
 
 type subagentOverlayGeometry struct {
@@ -95,6 +97,8 @@ type subagentOverlayState struct {
 	notice      string
 
 	bindingHandle           agentbinding.Handle
+	selectedSpeedByProfile  map[string]string
+	fastFocus               bool
 	selectedEffortByProfile map[string]string
 	creatingRole            bool
 
@@ -313,6 +317,13 @@ func (m *Model) subagentBindingRows() []subagentOverlayRow {
 		effort := state.subagentBindingEffort(profile, efforts)
 		effortIndex := indexOfString(efforts, effort)
 		binding := agentbinding.Binding{Handle: handle, ProfileID: profile.ID, Effort: effort}
+		if state.currentBinding().ProfileID == profile.ID {
+			binding.Speed = state.currentBinding().Speed
+		}
+		if speed, ok := state.selectedSpeedByProfile[profile.ID]; ok {
+			binding.Speed = speed
+		}
+		effectiveSpeed := firstNonEmpty(binding.Speed, profile.Speed.DefaultSpeed)
 		rows = append(rows, subagentOverlayRow{
 			action: subagentActionOpenBinding,
 			key:    "binding:" + profile.ID,
@@ -321,7 +332,7 @@ func (m *Model) subagentBindingRows() []subagentOverlayRow {
 				profile,
 				nameCounts[subagentProfileNameKey(profile)] > 1,
 			),
-			efforts: efforts, effortIndex: effortIndex,
+			efforts: efforts, effortIndex: effortIndex, fastSupported: profile.SupportsFast(), fastMode: effectiveSpeed == "fast",
 			handle: handle, binding: binding, enabled: true,
 			current: modelprofile.NormalizeID(state.currentBinding().ProfileID) == modelprofile.NormalizeID(profile.ID),
 		})
@@ -484,16 +495,23 @@ func subagentProviderSource(profile modelprofile.ModelProfile) string {
 
 func subagentBindingDisplay(binding agentbinding.Binding, profiles []modelprofile.ModelProfile) string {
 	name := ""
+	speed := ""
 	for _, profile := range profiles {
 		if modelprofile.NormalizeID(profile.ID) == modelprofile.NormalizeID(binding.ProfileID) {
 			name = subagentProfileDisplayName(profile)
+			if profile.SupportsFast() {
+				speed = " · Fast off"
+				if firstNonEmpty(binding.Speed, profile.Speed.DefaultSpeed) == "fast" {
+					speed = " · Fast on"
+				}
+			}
 			break
 		}
 	}
 	if name == "" {
 		name = strings.TrimSpace(binding.ProfileID)
 	}
-	return name + " [" + strings.TrimSpace(binding.Effort) + "]"
+	return name + " [" + strings.TrimSpace(binding.Effort) + "]" + speed
 }
 
 func subagentFieldValue(value, placeholder string) string {

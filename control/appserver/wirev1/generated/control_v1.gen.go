@@ -256,6 +256,13 @@ type AddPluginPathRequest struct {
 	SessionId               *string        `json:"session_id,omitempty"`
 }
 
+type AgentBinding struct {
+	Effort    *string `json:"effort,omitempty"`
+	Handle    *string `json:"handle,omitempty"`
+	ProfileId *string `json:"profile_id,omitempty"`
+	Speed     *string `json:"speed,omitempty"`
+}
+
 type AgentBindingSetRequest struct {
 	ExpectedControllerEpoch *string        `json:"expected_controller_epoch,omitempty"`
 	ExpectedRevision        *Uint64Decimal `json:"expected_revision,omitempty"`
@@ -264,7 +271,19 @@ type AgentBindingSetRequest struct {
 	SetName                 string         `json:"set_name"`
 }
 
-type AgentBindingStatus map[string]any
+type AgentBindingSetStatus struct {
+	Active    bool           `json:"Active"`
+	Available bool           `json:"Available"`
+	Bindings  []AgentBinding `json:"Bindings"`
+	Name      string         `json:"Name"`
+	Problem   string         `json:"Problem"`
+}
+
+type AgentBindingStatus struct {
+	Handles []AgentHandleStatus     `json:"Handles"`
+	Sets    []AgentBindingSetStatus `json:"Sets"`
+	Targets []ModelProfile          `json:"Targets"`
+}
 
 type AgentCandidate struct {
 	Description *string `json:"description,omitempty"`
@@ -299,6 +318,12 @@ type AgentCommunicationEnvelope struct {
 	ScopeId            *string             `json:"scope_id,omitempty"`
 	SessionId          *string             `json:"session_id,omitempty"`
 	TurnId             *string             `json:"turn_id,omitempty"`
+}
+
+type AgentHandleStatus struct {
+	Binding    AgentBinding `json:"Binding"`
+	Definition JSONObject   `json:"Definition"`
+	Profile    ModelProfile `json:"Profile"`
 }
 
 type AgentParticipantSnapshot struct {
@@ -385,7 +410,7 @@ type AvailableCommand struct {
 }
 
 type BindAgentBindingRequest struct {
-	Binding                 JSONObject     `json:"binding"`
+	Binding                 AgentBinding   `json:"binding"`
 	ExpectedControllerEpoch *string        `json:"expected_controller_epoch,omitempty"`
 	ExpectedRevision        *Uint64Decimal `json:"expected_revision,omitempty"`
 	OperationId             *string        `json:"operation_id,omitempty"`
@@ -565,7 +590,7 @@ const (
 )
 
 type CreateAgentRoleRequest struct {
-	Binding                 JSONObject     `json:"binding,omitempty"`
+	Binding                 *AgentBinding  `json:"binding,omitempty"`
 	ExpectedControllerEpoch *string        `json:"expected_controller_epoch,omitempty"`
 	ExpectedRevision        *Uint64Decimal `json:"expected_revision,omitempty"`
 	OperationId             *string        `json:"operation_id,omitempty"`
@@ -886,6 +911,25 @@ type MarketplaceSnapshot struct {
 
 type MarketplaceSnapshotList []MarketplaceSnapshot
 
+type ModelEffortCapability struct {
+	AcpConfigId   *string             `json:"acp_config_id,omitempty"`
+	Choices       []ModelEffortChoice `json:"choices,omitempty"`
+	DefaultEffort *string             `json:"default_effort,omitempty"`
+}
+
+type ModelEffortChoice struct {
+	Canonical *string `json:"canonical,omitempty"`
+	WireValue *string `json:"wire_value,omitempty"`
+}
+
+type ModelProfile struct {
+	Backend     JSONObject            `json:"backend"`
+	DisplayName *string               `json:"display_name,omitempty"`
+	Effort      ModelEffortCapability `json:"effort"`
+	Id          *string               `json:"id,omitempty"`
+	Speed       *ModelSpeedCapability `json:"speed,omitempty"`
+}
+
 type ModelSelection struct {
 	ContextWindowTokens *int     `json:"context_window_tokens,omitempty"`
 	Current             *bool    `json:"current,omitempty"`
@@ -893,6 +937,17 @@ type ModelSelection struct {
 	Efforts             []string `json:"efforts"`
 	Fast                *bool    `json:"fast,omitempty"`
 	FastSupported       *bool    `json:"fast_supported,omitempty"`
+}
+
+type ModelSpeedCapability struct {
+	AcpConfigId  *string            `json:"acp_config_id,omitempty"`
+	Choices      []ModelSpeedChoice `json:"choices,omitempty"`
+	DefaultSpeed *string            `json:"default_speed,omitempty"`
+}
+
+type ModelSpeedChoice struct {
+	Canonical string `json:"canonical"`
+	WireValue string `json:"wire_value"`
 }
 
 type ModelUsageSnapshot struct {

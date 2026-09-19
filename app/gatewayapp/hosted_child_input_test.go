@@ -434,12 +434,17 @@ func newHostedChildRouteFixture(t *testing.T, ctx context.Context) (*runtimeComp
 	return &runtimeComposition{sessions: sessions, gateway: gateway}, active, runtime
 }
 
-func newHostedChildInputTestStack(t *testing.T, provider *hostedChildInputTestProvider) *Stack {
+func newHostedChildInputTestStack(t *testing.T, provider *hostedChildInputTestProvider, approvalMode ...string) *Stack {
 	t.Helper()
 	root := t.TempDir()
 	imageInput := true
+	mode := ""
+	if len(approvalMode) > 0 {
+		mode = approvalMode[0]
+	}
 	host, err := newGatewayAppTestStack(t, Config{
 		AppName: "caelis-test", UserID: "owner", StoreDir: filepath.Join(root, "store"),
+		ApprovalMode: mode,
 		WorkspaceKey: "workspace", WorkspaceCWD: root, SkillDirs: []string{t.TempDir()},
 		Sandbox: SandboxConfig{RequestedType: "host"},
 		Model: ModelConfig{

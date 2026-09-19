@@ -16,6 +16,15 @@ import (
 
 func TestSendMessageReturnedMailSurvivesModelContextRoundTrip(t *testing.T) {
 	t.Parallel()
+	runMessageModelRoundTrip(t, false)
+}
+
+func TestReadMessagesSurvivesModelContextRoundTrip(t *testing.T) {
+	t.Parallel()
+	runMessageModelRoundTrip(t, true)
+}
+
+func runMessageModelRoundTrip(t *testing.T, shared bool) {
 	service := openTestService(t, &testBackend{})
 	incoming, err := service.Send(t.Context(), Identity{"work", "a"}, "b", "Continue with the review.", "")
 	if err != nil {
@@ -24,7 +33,7 @@ func TestSendMessageReturnedMailSurvivesModelContextRoundTrip(t *testing.T) {
 	tools := Tools(false, func(ctx context.Context, req Request) (json.RawMessage, error) {
 		return service.Call(ctx, Identity{"work", "b"}, req)
 	})
-	liveModel := &mailboxRoundTripModel{send: true}
+	liveModel := &mailboxRoundTripModel{send: true, shared: shared}
 	live, err := chat.NewWithTools("child", liveModel, tools, "")
 	if err != nil {
 		t.Fatal(err)
@@ -48,7 +57,7 @@ func TestSendMessageReturnedMailSurvivesModelContextRoundTrip(t *testing.T) {
 	if len(liveModel.requests) != 2 {
 		t.Fatalf("model calls = %d", len(liveModel.requests))
 	}
-	if len(liveModel.requests[0].Tools) != 2 {
+	if len(liveModel.requests[0].Tools) != 3 {
 		t.Fatalf("child model tools = %#v", liveModel.requests[0].Tools)
 	}
 	liveResult := sendResultPartJSON(t, liveModel.requests[1])
@@ -81,7 +90,11 @@ func TestSendMessageReturnedMailSurvivesModelContextRoundTrip(t *testing.T) {
 	if got := sendResultPartJSON(t, reloadModel.requests[0]); got != liveResult {
 		t.Fatalf("reloaded result = %s, want %s", got, liveResult)
 	}
-	if mail, err := service.Receive(t.Context(), Identity{"work", "b"}); err != nil || len(mail) != 0 {
+	wantMail := 0
+	if shared {
+		wantMail = 1
+	}
+	if mail, err := service.Receive(t.Context(), Identity{"work", "b"}); err != nil || len(mail) != wantMail {
 		t.Fatalf("replayed consumed mail: %v, %v", mail, err)
 	}
 }
@@ -108,6 +121,7 @@ func sendResultPartJSON(t *testing.T, req *model.Request) string {
 
 type mailboxRoundTripModel struct {
 	send     bool
+	shared   bool
 	requests []*model.Request
 }
 
@@ -119,6 +133,9 @@ func (m *mailboxRoundTripModel) Generate(_ context.Context, req *model.Request) 
 		if m.send {
 			m.send = false
 			response.Message = model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{ID: "send-progress", Name: "SendMessage", Args: `{"to":"a","message":"Review in progress."}`}}, "")
+			if m.shared {
+				response.Message = model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{ID: "read-shared", Name: "ReadMessages", Args: `{}`}}, "")
+			}
 			response.FinishReason = model.FinishReasonToolCalls
 		}
 		yield(&model.StreamEvent{Type: model.StreamEventTurnDone, Response: response}, nil)

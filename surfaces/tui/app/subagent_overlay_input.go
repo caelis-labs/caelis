@@ -66,6 +66,10 @@ func (m *Model) handleSubagentOverlayKey(msg tea.KeyMsg) tea.Cmd {
 		m.moveSubagentEffort(1)
 		return nil
 	case tea.KeyTab:
+		if state.page == subagentPageBinding && m.currentSubagentRow().fastSupported {
+			state.fastFocus = !state.fastFocus
+			return nil
+		}
 		delta := 1
 		if keyEvent.Mod.Contains(tea.ModShift) {
 			delta = -1
@@ -231,6 +235,19 @@ func (m *Model) moveSubagentEffort(delta int) {
 		return
 	}
 	row := m.currentSubagentRow()
+	if state.fastFocus && row.fastSupported {
+		speed := "standard"
+		if delta > 0 {
+			speed = "fast"
+		}
+		if state.selectedSpeedByProfile == nil {
+			state.selectedSpeedByProfile = map[string]string{}
+		}
+		state.selectedSpeedByProfile[row.binding.ProfileID] = speed
+		state.rows[state.index].binding.Speed = speed
+		state.rows[state.index].fastMode = speed == "fast"
+		return
+	}
 	if len(row.efforts) < 2 || row.binding.ProfileID == "" {
 		return
 	}
@@ -261,6 +278,8 @@ func (m *Model) activateSubagentRow(row subagentOverlayRow) tea.Cmd {
 		state.bindingHandle = row.handle
 		state.creatingRole = false
 		state.selectedEffortByProfile = nil
+		state.selectedSpeedByProfile = nil
+		state.fastFocus = false
 		m.openSubagentPage(subagentPageBinding, 0)
 	case subagentActionNewRole:
 		m.openNewSubagentRole()
@@ -276,6 +295,8 @@ func (m *Model) activateSubagentRow(row subagentOverlayRow) tea.Cmd {
 		state.bindingHandle = handle
 		state.creatingRole = true
 		state.selectedEffortByProfile = nil
+		state.selectedSpeedByProfile = nil
+		state.fastFocus = false
 		m.openSubagentPage(subagentPageBinding, 0)
 	case subagentActionCreateRole:
 		return m.createSubagentRole()
