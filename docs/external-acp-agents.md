@@ -65,11 +65,16 @@ Host and Session model commands retain their explicit Fast boolean: false select
 standard on a capable profile. Guardian and Steward remain provider-only.
 
 The Codex adapter reads `model/list.serviceTiers` and `defaultServiceTier` and
-publishes `service_tier`. The protocol baseline is `default`; additional choices
-use catalog IDs (currently `priority` for Fast). Missing or empty catalogs do not
+publishes `service_tier`. Every catalog-known model exposes the protocol baseline
+`default`, including models without additional tiers. Additional choices use
+catalog IDs (currently `priority` for Fast). Missing or empty catalogs do not
 advertise Fast; there is no `additionalSpeedTiers` or model-name fallback.
 Thread start/resume responses supply the effective tier. Missing/null tier stays
 inherited internally, even when the selector displays its discovered default.
+Control sends explicitly configured values even when they equal that display;
+only an omitted selection inherits. When a combined model/tier selection requests
+Standard, Control applies it before switching models if the current model advertises
+it, then confirms the requested defaults against the destination configuration.
 Changing a model validates an explicit tier against the destination capability.
 Explicit standard (`default`) remains valid without additional tiers; an
 incompatible Fast selection fails without silently downgrading it.
@@ -77,9 +82,11 @@ incompatible Fast selection fails without silently downgrading it.
 Set-config validates the current catalog and stages the next Turn selection.
 The next `turn/start.serviceTier` applies it to that and subsequent Turns;
 `serviceTierForTurn` is not used. Configuration cannot change during an active
-Turn. A rejected start restores the last effective tier; an ambiguous start
-closes the route rather than claiming a successful change. A newly opened Codex
-thread cannot be resumed until it has persisted its first Turn, so set-config
+Turn. A rejected start retains the complete staged model, effort and tier so a
+retry sends the same selection; it does not combine a new model with an old tier.
+An ambiguous start closes the route rather than claiming a successful change.
+A newly opened Codex thread cannot be resumed until it has persisted its first
+Turn, so set-config
 does not fabricate a resume as an acknowledgement. Resume reads actual backend
 state again. See the [Codex app-server protocol](https://developers.openai.com/codex/app-server).
 

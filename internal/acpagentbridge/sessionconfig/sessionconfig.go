@@ -25,8 +25,8 @@ type State struct {
 }
 
 // Apply validates and applies desired defaults against the real session
-// handshake. Explicit unavailable values fail closed; they never silently fall
-// back to the external Agent's default.
+// handshake. Explicit values are sent even when they match a displayed default,
+// which does not prove an explicit selection. Unavailable values fail closed.
 func Apply(ctx context.Context, acpClient Client, sessionID string, state State, desired controlagents.SessionOptions) (State, error) {
 	desired = controlagents.NormalizeSessionOptions(desired)
 	if desired.ModelID == "" && len(desired.ConfigValues) == 0 {
@@ -47,6 +47,11 @@ func Apply(ctx context.Context, acpClient Client, sessionID string, state State,
 				return State{}, fmt.Errorf("internal/acpagentbridge/sessionconfig: model %q is unavailable: %w", desired.ModelID, err)
 			}
 			if currentValue(modelOption.CurrentValue) != desired.ModelID {
+				var err error
+				state, err = applyStandardBeforeModel(ctx, acpClient, sessionID, state, desired)
+				if err != nil {
+					return State{}, err
+				}
 				resp, err := acpClient.SetConfigOption(ctx, sessionID, modelOption.ID, desired.ModelID)
 				if err != nil {
 					return State{}, fmt.Errorf("internal/acpagentbridge/sessionconfig: set model %q through config option %q: %w", desired.ModelID, modelOption.ID, err)
@@ -61,6 +66,11 @@ func Apply(ctx context.Context, acpClient Client, sessionID string, state State,
 				return State{}, fmt.Errorf("internal/acpagentbridge/sessionconfig: model %q is not advertised by the ACP session", desired.ModelID)
 			}
 			if state.Models == nil || strings.TrimSpace(state.Models.CurrentModelID) != desired.ModelID {
+				var err error
+				state, err = applyStandardBeforeModel(ctx, acpClient, sessionID, state, desired)
+				if err != nil {
+					return State{}, err
+				}
 				if err := acpClient.SetModel(ctx, sessionID, desired.ModelID); err != nil {
 					return State{}, fmt.Errorf("internal/acpagentbridge/sessionconfig: set model %q: %w", desired.ModelID, err)
 				}
@@ -103,16 +113,10 @@ func Apply(ctx context.Context, acpClient Client, sessionID string, state State,
 		if err := validateChoice(option, value); err != nil {
 			return State{}, fmt.Errorf("internal/acpagentbridge/sessionconfig: value %q for config option %q is unavailable: %w", value, option.ID, err)
 		}
-		if currentValue(option.CurrentValue) == value {
-			continue
-		}
-		resp, err := acpClient.SetConfigOption(ctx, sessionID, option.ID, value)
+		var err error
+		state.ConfigOptions, err = setConfigOption(ctx, acpClient, sessionID, option.ID, value)
 		if err != nil {
-			return State{}, fmt.Errorf("internal/acpagentbridge/sessionconfig: set config option %q to %q: %w", option.ID, value, err)
-		}
-		state.ConfigOptions, err = validatedConfigOptionResponse(resp, option.ID, value)
-		if err != nil {
-			return State{}, fmt.Errorf("internal/acpagentbridge/sessionconfig: set config option %q to %q: %w", option.ID, value, err)
+			return State{}, err
 		}
 	}
 	return state, nil
@@ -238,6 +242,18 @@ func cloneConfigOptions(in []client.SessionConfigOption) []client.SessionConfigO
 		out = append(out, option)
 	}
 	return out
+}
+
+func setConfigOption(ctx context.Context, acpClient Client, sessionID, id, value string) ([]client.SessionConfigOption, error) {
+	resp, err := acpClient.SetConfigOption(ctx, sessionID, id, value)
+	var options []client.SessionConfigOption
+	if err == nil {
+		options, err = validatedConfigOptionResponse(resp, id, value)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("internal/acpagentbridge/sessionconfig: set config option %q to %q: %w", id, value, err)
+	}
+	return options, nil
 }
 
 func validatedConfigOptionResponse(resp client.SetSessionConfigOptionResponse, id string, value string) ([]client.SessionConfigOption, error) {

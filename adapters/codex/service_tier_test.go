@@ -14,6 +14,22 @@ func tierModels() []codexModel {
 	return []codexModel{{ID: "model", DefaultServiceTier: "default", ServiceTiers: []codexServiceTier{{ID: "default", Name: "Standard"}, {ID: "fast", Name: "Fast"}}}, {ID: "other"}}
 }
 
+// assertStandardOnly asserts the protocol baseline is published without any
+// invented Fast-like choice.
+func assertStandardOnly(t *testing.T, option *acp.SessionConfigOption) {
+	t.Helper()
+	if option == nil || option.Select == nil {
+		t.Fatalf("catalog-known model published no service tier: %v", option)
+	}
+	if got := string(option.Select.CurrentValue); got != "default" {
+		t.Fatalf("service tier current = %q, want default", got)
+	}
+	values := option.Select.Options.Ungrouped
+	if values == nil || len(*values) != 1 || string((*values)[0].Value) != "default" {
+		t.Fatalf("service tier values = %v, want Standard only", values)
+	}
+}
+
 func TestServiceTierDiscoveryPreservesUnknownAndEffectiveDefault(t *testing.T) {
 	for _, raw := range []string{`{"model":"model"}`, `{"model":"model","serviceTier":null}`, `{"model":"model","serviceTier":"fast"}`} {
 		var opened threadOpenResponse
@@ -38,8 +54,9 @@ func TestServiceTierDiscoveryPreservesUnknownAndEffectiveDefault(t *testing.T) {
 		}
 	}
 	state := &sessionState{model: "model", models: []codexModel{{ID: "model"}}}
-	if state.serviceTierOptionLocked() != nil {
-		t.Fatal("guessed tiers for old schema")
+	assertStandardOnly(t, state.serviceTierOptionLocked())
+	if unknown := (&sessionState{model: "missing", models: tierModels()}).serviceTierOptionLocked(); unknown != nil {
+		t.Fatal("uncatalogued model advertised a service tier")
 	}
 	state.models = tierModels()
 	state.models[0].DefaultServiceTier = "fast"
@@ -54,8 +71,8 @@ func TestServiceTierDiscoveryPreservesUnknownAndEffectiveDefault(t *testing.T) {
 
 // TestServiceTierStandardSurvivesTierlessModelSwitch covers the protocol
 // baseline staying selectable across a model change. Fast -> Standard -> a
-// model that advertises no additional tiers must switch, and the next Turns
-// must carry Standard rather than resurrecting Fast.
+// model that advertises no additional tiers must switch, publish Standard and
+// carry it on the next Turns rather than resurrecting Fast.
 func TestServiceTierStandardSurvivesTierlessModelSwitch(t *testing.T) {
 	appIn, appOut := io.Pipe()
 	adapterIn, adapterOut := io.Pipe()
@@ -105,9 +122,7 @@ func TestServiceTierStandardSurvivesTierlessModelSwitch(t *testing.T) {
 	if state.model != "other" || state.serviceTier == nil || *state.serviceTier != "default" {
 		t.Fatalf("model = %q, service tier = %v", state.model, state.serviceTier)
 	}
-	if state.serviceTierOptionLocked() != nil {
-		t.Fatal("tier-less model advertised a service tier")
-	}
+	assertStandardOnly(t, state.serviceTierOptionLocked())
 
 	for _, turnID := range []string{"turn-1", "turn-2"} {
 		done := make(chan error, 1)
@@ -174,17 +189,6 @@ func TestServiceTierBackendCommitIsolationAndTurnRequest(t *testing.T) {
 		if *state.serviceTier != value || *a.sessions["two"].serviceTier != "fast" {
 			t.Fatal("cross-session mutation")
 		}
-	}
-	state.effectiveServiceTier = acp.Ptr("default")
-	rejected := make(chan error, 1)
-	go func() {
-		_, err := a.Prompt(ctx, acp.PromptRequest{SessionId: "one", Prompt: []acp.ContentBlock{acp.TextBlock("hello")}})
-		rejected <- err
-	}()
-	denied := expectPromptRPCRequest(t, ctx, fake.requests, "turn/start")
-	fake.respondError(denied, -32602, "tier unavailable")
-	if err := <-rejected; err == nil || *state.serviceTier != "default" {
-		t.Fatal("rejected tier retained")
 	}
 	state.serviceTier = acp.Ptr("fast")
 	done := make(chan error, 1)

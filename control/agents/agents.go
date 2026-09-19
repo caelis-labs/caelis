@@ -448,7 +448,7 @@ func NormalizeDiscoverySnapshot(in DiscoverySnapshot) DiscoverySnapshot {
 		option.CurrentValue = strings.TrimSpace(option.CurrentValue)
 		option.Purpose = ConfigOptionPurpose(strings.ToLower(strings.TrimSpace(string(option.Purpose))))
 		if option.Purpose == "" {
-			option.Purpose = classifyConfigOptionPurpose(option)
+			option.Purpose = ClassifyConfigOptionPurpose(option)
 		}
 		option.Options = append([]ConfigChoice(nil), option.Options...)
 		out.ConfigOptions = append(out.ConfigOptions, option)
@@ -462,7 +462,9 @@ func IsDefaultRemoteModelID(id string) bool {
 	return strings.EqualFold(strings.TrimSpace(id), DefaultRemoteModelID)
 }
 
-func classifyConfigOptionPurpose(option ConfigOption) ConfigOptionPurpose {
+// ClassifyConfigOptionPurpose identifies a known semantic role from advertised
+// option IDs and categories. Unrecognized options have no inferred purpose.
+func ClassifyConfigOptionPurpose(option ConfigOption) ConfigOptionPurpose {
 	compact := func(value string) string {
 		return strings.NewReplacer("_", "", "-", "", " ", "").Replace(strings.ToLower(strings.TrimSpace(value)))
 	}

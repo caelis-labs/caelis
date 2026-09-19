@@ -288,13 +288,10 @@ func (a *agent) Prompt(ctx context.Context, request acp.PromptRequest) (acp.Prom
 	err = a.backend.rpc.Request(startCtx, "turn/start", params, &response)
 	cancelStart()
 	if err != nil {
-		state.mu.Lock()
-		state.serviceTier = state.effectiveServiceTier
-		options := state.configOptionsLocked()
-		state.mu.Unlock()
-		if a.connection != nil {
-			_ = a.connection.SessionUpdate(context.WithoutCancel(ctx), acp.SessionNotification{SessionId: acp.SessionId(state.threadID), Update: acp.SessionUpdate{ConfigOptionUpdate: &acp.SessionConfigOptionUpdate{SessionUpdate: "config_option_update", ConfigOptions: options}}})
-		}
+		// A rejected turn/start never applied this Turn's request overrides.
+		// Model, effort and tier stay staged so a retry resends the same
+		// complete selection rather than resurrecting a tier that belonged
+		// to an earlier model.
 		state.clearTurn(done)
 		if errors.Is(err, context.DeadlineExceeded) {
 			state.route.close(errors.New("codex adapter: turn/start outcome is unknown after timeout"))
@@ -308,7 +305,6 @@ func (a *agent) Prompt(ctx context.Context, request acp.PromptRequest) (acp.Prom
 	}
 	state.mu.Lock()
 	state.activeTurnID = turnID
-	state.effectiveServiceTier = serviceTier
 	state.mu.Unlock()
 	if ctx.Err() != nil {
 		return a.finishCancelledTurn(state, done)

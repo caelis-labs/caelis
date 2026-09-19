@@ -55,9 +55,8 @@ type sessionState struct {
 	model    string
 	effort   string
 	// nil preserves an inherited/unknown remote tier; it never means standard.
-	serviceTier          *string
-	effectiveServiceTier *string
-	models               []codexModel
+	serviceTier *string
+	models      []codexModel
 	// subscribed records that thread/start or thread/resume may have loaded the
 	// Thread into the shared Codex app-server process. Synthetic reserved routes
 	// used before any app-server request must not unsubscribe another owner.
@@ -79,7 +78,6 @@ func (s *sessionState) applyOpenResponse(response threadOpenResponse) {
 	s.model = strings.TrimSpace(response.Model)
 	s.effort = strings.TrimSpace(response.ReasoningEffort)
 	s.serviceTier = response.ServiceTier
-	s.effectiveServiceTier = response.ServiceTier
 	s.mu.Unlock()
 }
 

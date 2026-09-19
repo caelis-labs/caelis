@@ -101,6 +101,45 @@ func TestInitialSessionControllerFreezesACPDefaultProfile(t *testing.T) {
 	}
 }
 
+func TestInitialSessionControllerSealsStandardOnlySpeed(t *testing.T) {
+	stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
+	persistDisconnectTestAgent(t, stack, "codex")
+	ctx := t.Context()
+	doc, err := stack.composition.authorities.store.LoadContext(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile, ok := modelprofile.Lookup(doc.ModelProfiles, "acp:codex:default")
+	if !ok {
+		t.Fatal("missing Codex profile")
+	}
+	profile.Speed = modelprofile.SpeedCapability{
+		DefaultSpeed: "standard", ACPConfigID: "service_tier",
+		Choices: []modelprofile.SpeedChoice{{Canonical: "standard", WireValue: "default"}},
+	}
+	doc.ModelProfiles, err = modelprofile.Upsert(doc.ModelProfiles, profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc.ModelProfiles, err = modelprofile.SelectDefault(doc.ModelProfiles, profile.ID, "none")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := stack.composition.authorities.store.Save(doc); err != nil {
+		t.Fatal(err)
+	}
+	stack.composition.invalidateOwnPlacementSnapshot()
+	stack.composition.setRuntimeDefaultProfile(doc.ModelProfiles)
+
+	binding, err := stack.composition.initialSessionController(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := binding.Placement.SessionConfigValues["service_tier"]; got != "default" {
+		t.Fatalf("initial controller service tier = %q, want explicit Standard", got)
+	}
+}
+
 func TestACPIngressCreatesKernelControllerAtomicallyUnderACPDefault(t *testing.T) {
 	stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{})
 	persistDisconnectTestAgent(t, stack, "codex")

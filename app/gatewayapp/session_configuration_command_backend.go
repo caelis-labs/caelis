@@ -164,7 +164,7 @@ func (s *runtimeComposition) configureSessionModel(ctx context.Context, req apps
 	if found {
 		switch selected.Profile.Kind() {
 		case modelprofile.BackendACP:
-			if req.FastMode || selected.Profile.SupportsFast() {
+			if _, standard := selected.Profile.WireSpeed("standard"); req.FastMode || standard {
 				speed := "standard"
 				if req.FastMode {
 					speed = "fast"
