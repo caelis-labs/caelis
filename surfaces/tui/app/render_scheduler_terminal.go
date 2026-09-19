@@ -22,7 +22,11 @@ func eventStreamTerminalBatchKey(env eventstream.Envelope) (string, bool) {
 	if text == "" {
 		return "", false
 	}
-	toolName := transcript.ToolNameFromMeta(transcript.MergeMeta(eventstream.UpdateMeta(update), env.Meta))
+	toolName := transcript.ToolNameFromUpdate(update.Name, transcript.MergeMeta(eventstream.UpdateMeta(update), env.Meta))
+	namePresence := ""
+	if update.Name != nil {
+		namePresence = "present"
+	}
 	return strings.Join([]string{
 		strings.TrimSpace(env.HandleID),
 		strings.TrimSpace(env.RunID),
@@ -30,6 +34,7 @@ func eventStreamTerminalBatchKey(env eventstream.Envelope) (string, bool) {
 		strings.TrimSpace(env.SessionID),
 		strings.TrimSpace(update.ToolCallID),
 		strings.TrimSpace(toolName),
+		namePresence,
 		terminalID,
 	}, "\x00"), true
 }

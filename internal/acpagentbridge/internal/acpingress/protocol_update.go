@@ -28,6 +28,7 @@ func protocolUpdateFromToolCall(call client.ToolCall) *session.ProtocolUpdate {
 	return cloneProtocolUpdate(session.ProtocolUpdate{
 		SessionUpdate: call.SessionUpdate,
 		ToolCallID:    call.ToolCallID,
+		Name:          call.Name,
 		Title:         call.Title,
 		Kind:          call.Kind,
 		Status:        call.Status,
@@ -43,6 +44,7 @@ func protocolUpdateFromToolCallUpdate(update client.ToolCallUpdate) *session.Pro
 	return cloneProtocolUpdate(session.ProtocolUpdate{
 		SessionUpdate: update.SessionUpdate,
 		ToolCallID:    update.ToolCallID,
+		Name:          update.Name,
 		Title:         stringValue(update.Title),
 		Kind:          stringValue(update.Kind),
 		Status:        stringValue(update.Status),

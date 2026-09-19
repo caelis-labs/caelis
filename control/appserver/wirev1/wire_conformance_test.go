@@ -259,8 +259,8 @@ func TestEveryProductionEnvelopeVariantConformsToOpenAPI(t *testing.T) {
 		eventstream.ContentChunk{SessionUpdate: eventstream.UpdateAgentMessage, Content: text, MessageID: "message-1"},
 		eventstream.ContentChunk{SessionUpdate: eventstream.UpdateAgentThought, Content: text},
 		eventstream.ContentChunk{SessionUpdate: eventstream.UpdateCompact, Content: text},
-		eventstream.ToolCall{SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "tool-1", Title: "Read", Kind: eventstream.ToolKindRead, Status: eventstream.ToolStatusPending},
-		eventstream.ToolCallUpdate{SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "tool-1", Title: &title, Status: stringPointer(eventstream.ToolStatusCompleted)},
+		eventstream.ToolCall{SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "tool-1", Name: stringPointer("ReadFile"), Title: "Read", Kind: eventstream.ToolKindRead, Status: eventstream.ToolStatusPending},
+		eventstream.ToolCallUpdate{SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "tool-1", Name: stringPointer("ReadFile"), Title: &title, Status: stringPointer(eventstream.ToolStatusCompleted)},
 		eventstream.PlanUpdate{SessionUpdate: eventstream.UpdatePlan, Entries: []eventstream.PlanEntry{{Content: "Inspect", Status: "completed", Priority: "high"}}},
 		eventstream.UsageUpdate{SessionUpdate: eventstream.UpdateUsage, Size: 200000, Used: 42000, Cost: &acpsdk.Cost{Amount: 0.47, Currency: "USD"}},
 		eventstream.RawUpdate{SessionUpdate: eventstream.UpdateConfigOption, Raw: configOptionRaw},
@@ -284,7 +284,7 @@ func TestEveryProductionEnvelopeVariantConformsToOpenAPI(t *testing.T) {
 	permission.ApprovalRequestID = "approval-1"
 	permission.Permission = &eventstream.RequestPermissionRequest{
 		SessionID: "session-1",
-		ToolCall:  eventstream.ToolCallUpdate{SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "tool-1", Title: &title},
+		ToolCall:  eventstream.ToolCallUpdate{SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "tool-1", Name: stringPointer("ReadFile"), Title: &title},
 		Options: []acpsdk.PermissionOption{{
 			OptionId: acpsdk.PermissionOptionId(acpsdk.PermissionOptionKindAllowOnce),
 			Name:     "Allow once",

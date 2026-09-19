@@ -156,6 +156,9 @@ implicitly a second live stream.
 
 ACP `tool_call` is a lifecycle snapshot; `tool_call_update` is a sparse patch
 keyed by `toolCallId`. Missing fields retain the latest value for that call.
+For the stable v1 `name` field, omission and JSON `null` both mean no update;
+a string value replaces the name. The same semantics survive persistence and
+replay. Experimental v2 nullable-field semantics do not apply to this path.
 Terminal status settles the call even without displayable result content and
 never reopens on a later sparse update.
 
@@ -343,9 +346,15 @@ and completed tools do not create an elapsed-time separator.
 
 ## Display and compatibility
 
-Standard ACP `kind` owns the coarse tool category. Exact Runtime tool names may
-select a compatible presentation profile but never execution, permission,
-persistence, or Task authority. Human-readable titles are labels only.
+Standard ACP `name` carries the programmatic tool name; `title` remains a
+human-readable label. Projection uses canonical Runtime tool identity first,
+then standard `name`, then retained `_meta.caelis.runtime.tool.name` and the
+historical non-standard `kind` fallback. Standard ACP `kind` owns the coarse
+tool category. Exact tool names may select a compatible presentation profile
+but never execution, permission, persistence, or Task authority.
+Native projections retain the tool-name metadata alongside standard `name` for
+older clients; remove that compatibility writer when all supported consumers
+read the standard field.
 
 Provider-specific metadata is normalized at the Host-private ingress under an
 exact maintained profile. Unknown, malformed, or mutability-inconsistent values

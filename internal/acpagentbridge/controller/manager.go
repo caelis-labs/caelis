@@ -1200,7 +1200,7 @@ func translateApprovalRequest(
 		})
 	}
 	toolName := strings.TrimSpace(approval.ToolCall.Name)
-	if toolName == strings.TrimSpace(approval.ToolCall.Title) || toolName == strings.TrimSpace(approval.ToolCall.Kind) {
+	if req.ToolCall.Name == nil && (toolName == strings.TrimSpace(approval.ToolCall.Title) || toolName == strings.TrimSpace(approval.ToolCall.Kind)) {
 		toolName = acputil.ToolCallName(req.ToolCall)
 	}
 	return controller.ApprovalRequest{

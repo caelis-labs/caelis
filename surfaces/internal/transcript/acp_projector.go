@@ -23,11 +23,13 @@ type ToolProjectionInput struct {
 	OccurredAt time.Time
 	Meta       map[string]any
 
-	CallID    string
-	ToolName  string
-	ToolKind  string
-	ToolTitle string
-	Status    string
+	CallID   string
+	ToolName string
+	// ToolNameExplicit preserves a standard name patch, including an empty string.
+	ToolNameExplicit bool
+	ToolKind         string
+	ToolTitle        string
+	Status           string
 	// StatusExplicit distinguishes a producer-supplied lifecycle value from
 	// the Surface default used to materialize a sparse tool_call_update.
 	StatusExplicit bool
@@ -73,7 +75,7 @@ func ProjectACPEventToEvents(env eventstream.Envelope, surface SurfaceProjector)
 				OccurredAt:        occurredAt,
 				Meta:              meta,
 				ToolCallID:        strings.TrimSpace(env.Permission.ToolCall.ToolCallID),
-				ApprovalTool:      firstNonEmptyString(StringFromPtr(env.Permission.ToolCall.Title), StringFromPtr(env.Permission.ToolCall.Kind)),
+				ApprovalTool:      firstNonEmptyString(ToolNameFromUpdate(env.Permission.ToolCall.Name, meta), StringFromPtr(env.Permission.ToolCall.Title), StringFromPtr(env.Permission.ToolCall.Kind)),
 				ApprovalRequestID: strings.TrimSpace(string(env.ApprovalRequestID)),
 				ApprovalOptions:   options,
 			})
@@ -271,22 +273,23 @@ func projectACPSessionUpdate(env eventstream.Envelope, meta map[string]any, scop
 			return nil
 		}
 		input := ToolProjectionInput{
-			Scope:          scope,
-			ScopeID:        scopeID,
-			Actor:          strings.TrimSpace(env.Actor),
-			OccurredAt:     env.OccurredAt,
-			Meta:           meta,
-			CallID:         update.ToolCallID,
-			ToolName:       ToolNameFromMeta(meta),
-			ToolKind:       update.Kind,
-			ToolTitle:      update.Title,
-			Status:         update.Status,
-			StatusExplicit: strings.TrimSpace(update.Status) != "",
-			RawInput:       RawMap(update.RawInput),
-			RawOutput:      update.RawOutput,
-			Content:        update.Content,
-			ContentPresent: update.Content != nil,
-			Locations:      update.Locations,
+			Scope:            scope,
+			ScopeID:          scopeID,
+			Actor:            strings.TrimSpace(env.Actor),
+			OccurredAt:       env.OccurredAt,
+			Meta:             meta,
+			CallID:           update.ToolCallID,
+			ToolName:         ToolNameFromUpdate(update.Name, meta),
+			ToolNameExplicit: update.Name != nil,
+			ToolKind:         update.Kind,
+			ToolTitle:        update.Title,
+			Status:           update.Status,
+			StatusExplicit:   strings.TrimSpace(update.Status) != "",
+			RawInput:         RawMap(update.RawInput),
+			RawOutput:        update.RawOutput,
+			Content:          update.Content,
+			ContentPresent:   update.Content != nil,
+			Locations:        update.Locations,
 		}
 		// ACP permits tool_call to carry any lifecycle status. Some agents emit a
 		// complete one-shot snapshot instead of a start followed by a patch, so
@@ -315,7 +318,8 @@ func projectACPSessionUpdate(env eventstream.Envelope, meta map[string]any, scop
 			OccurredAt:        env.OccurredAt,
 			Meta:              meta,
 			CallID:            update.ToolCallID,
-			ToolName:          ToolNameFromMeta(meta),
+			ToolName:          ToolNameFromUpdate(update.Name, meta),
+			ToolNameExplicit:  update.Name != nil,
 			ToolKind:          kind,
 			ToolTitle:         title,
 			Status:            StringFromPtr(update.Status),
@@ -568,6 +572,15 @@ func RawMap(raw any) map[string]any {
 
 func GatewayProjection(meta map[string]any) bool {
 	return strings.EqualFold(MetaString(meta, "caelis", "bridge", "source"), "gateway_projection")
+}
+
+// ToolNameFromUpdate prefers the standard ACP name, including an empty value,
+// over retained metadata used by older producers.
+func ToolNameFromUpdate(name *string, meta map[string]any) string {
+	if name != nil {
+		return strings.TrimSpace(*name)
+	}
+	return ToolNameFromMeta(meta)
 }
 
 // ToolNameFromMeta returns the exact runtime tool identity when the producer

@@ -42,9 +42,11 @@ func TestProtocolUpdateFromToolCallDeepCopiesWireValues(t *testing.T) {
 
 	line := 17
 	oldText := "before"
+	name := "read_file"
 	wire := client.ToolCall{
 		SessionUpdate: client.UpdateToolCall,
 		ToolCallID:    "call-1",
+		Name:          &name,
 		RawInput:      map[string]any{"nested": map[string]any{"value": "before"}},
 		Content: []client.ToolCallContent{{
 			Type: "diff", Content: map[string]any{"nested": map[string]any{"value": "before"}},
@@ -54,6 +56,10 @@ func TestProtocolUpdateFromToolCallDeepCopiesWireValues(t *testing.T) {
 		Meta:      map[string]any{"nested": map[string]any{"value": "before"}},
 	}
 	update := protocolUpdateFromToolCall(wire)
+	name = "mutated"
+	if update.Name == nil || *update.Name != "read_file" {
+		t.Fatalf("name aliased: %v", update.Name)
+	}
 	wire.RawInput.(map[string]any)["nested"].(map[string]any)["value"] = "after"
 	wire.Content[0].Content.(map[string]any)["nested"].(map[string]any)["value"] = "after"
 	wire.Meta["nested"].(map[string]any)["value"] = "after"

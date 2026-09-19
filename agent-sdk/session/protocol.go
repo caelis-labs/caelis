@@ -67,11 +67,13 @@ type ProtocolToolCallContent struct {
 // ProtocolUpdate is the normalized ACP session/update payload carried by one
 // canonical event. Caelis-specific projection data belongs under Meta["caelis"]
 // and is serialized as the standard payload's private _meta field.
+// Name follows ACP v1: absent or null leaves the current tool name unchanged.
 type ProtocolUpdate struct {
 	SessionUpdate string                     `json:"sessionUpdate,omitempty"`
 	Content       any                        `json:"content,omitempty"`
 	MessageID     string                     `json:"messageId,omitempty"`
 	ToolCallID    string                     `json:"toolCallId,omitempty"`
+	Name          *string                    `json:"name,omitempty"`
 	Title         string                     `json:"title,omitempty"`
 	Kind          string                     `json:"kind,omitempty"`
 	Status        string                     `json:"status,omitempty"`
@@ -373,6 +375,7 @@ func protocolUpdateHasOnlySessionUpdate(update *ProtocolUpdate) bool {
 		return true
 	}
 	return strings.TrimSpace(update.ToolCallID) == "" &&
+		update.Name == nil &&
 		strings.TrimSpace(update.Title) == "" &&
 		strings.TrimSpace(update.Kind) == "" &&
 		strings.TrimSpace(update.Status) == "" &&
@@ -569,6 +572,10 @@ func cloneProtocolUpdate(in ProtocolUpdate) ProtocolUpdate {
 		RawInput:      jsonvalue.CloneMap(in.RawInput),
 		RawOutput:     jsonvalue.CloneMap(in.RawOutput),
 		Meta:          cloneProtocolAnyMap(in.Meta),
+	}
+	if in.Name != nil {
+		name := *in.Name
+		out.Name = &name
 	}
 	if len(in.Locations) > 0 {
 		out.Locations = slices.Clone(in.Locations)

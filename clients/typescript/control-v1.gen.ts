@@ -167,6 +167,7 @@ export interface ACPToolCall {
   content?: Array<ToolCallContent>;
   kind?: string;
   locations?: Array<ToolCallLocation>;
+  name?: string;
   rawInput?: JSONValue;
   rawOutput?: JSONValue;
   sessionUpdate: "tool_call";
@@ -180,6 +181,7 @@ export interface ACPToolCallUpdate {
   content?: Array<ToolCallContent>;
   kind?: string;
   locations?: Array<ToolCallLocation>;
+  name?: string;
   rawInput?: JSONValue;
   rawOutput?: JSONValue;
   sessionUpdate: "tool_call_update";

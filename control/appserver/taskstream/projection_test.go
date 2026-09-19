@@ -104,6 +104,9 @@ func TestProjectTaskFrameBuildsStandardToolUpdateEnvelope(t *testing.T) {
 	if update.ToolCallID != "call-1" {
 		t.Fatalf("tool update = %#v, want call-1", update)
 	}
+	if update.Name == nil || *update.Name != req.ToolName {
+		t.Fatalf("tool name = %v, want %q", update.Name, req.ToolName)
+	}
 	if update.Kind != nil || update.Title != nil || update.RawInput != nil {
 		t.Fatalf("tool update = %#v, stream append should not repeat stable tool fields", update)
 	}

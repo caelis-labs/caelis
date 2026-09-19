@@ -32,6 +32,9 @@ func selectedOutcome(optionID string) client.RequestPermissionResponse {
 }
 
 func ToolCallName(update acpsdk.ToolCallUpdate) string {
+	if update.Name != nil {
+		return strings.TrimSpace(*update.Name)
+	}
 	if output, ok := update.RawOutput.(map[string]any); ok {
 		if name, _ := output["name"].(string); strings.TrimSpace(name) != "" {
 			return strings.TrimSpace(name)

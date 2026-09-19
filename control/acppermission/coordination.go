@@ -27,7 +27,11 @@ func DecodePermissionRequest(wire eventstream.RequestPermissionRequest) (*sessio
 	}
 	toolCall := permissionToolCallFromWire(wire.ToolCall)
 	meta := mergePermissionMeta(wire.ToolCall.Meta, wire.Meta)
-	toolCall.Name = canonicalPermissionToolName(meta, toolCall)
+	if wire.ToolCall.Name != nil {
+		toolCall.Name = strings.TrimSpace(*wire.ToolCall.Name)
+	} else {
+		toolCall.Name = canonicalPermissionToolName(meta, toolCall)
+	}
 	approval := &session.ProtocolApproval{ToolCall: toolCall}
 	for _, option := range wire.Options {
 		approval.Options = append(approval.Options, session.ProtocolApprovalOption{
@@ -53,6 +57,7 @@ func EncodePermissionRequest(ref session.SessionRef, approval *session.ProtocolA
 		SessionID: strings.TrimSpace(ref.SessionID),
 		ToolCall: eventstream.ToolCallUpdate{
 			SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: normalized.ToolCall.ID,
+			Name:  permissionOptionalString(normalized.ToolCall.Name),
 			Title: title, Kind: kind, Status: status,
 			RawInput: permissionMapOrNil(normalized.ToolCall.RawInput), RawOutput: permissionMapOrNil(normalized.ToolCall.RawOutput),
 			Content: permissionToolContentToWire(normalized.ToolCall.Content),

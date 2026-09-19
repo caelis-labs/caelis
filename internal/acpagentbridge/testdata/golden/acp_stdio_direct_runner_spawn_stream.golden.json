@@ -4,6 +4,7 @@
     "update": {
       "sessionUpdate": "tool_call",
       "toolCallId": "spawn-call-1",
+      "name": "StartThread",
       "title": "StartThread breeze: explain your capability",
       "kind": "execute",
       "status": "pending",
@@ -28,6 +29,7 @@
     "update": {
       "sessionUpdate": "tool_call_update",
       "toolCallId": "spawn-call-1",
+      "name": "StartThread",
       "title": "StartThread",
       "kind": "execute",
       "status": "in_progress",
@@ -72,6 +74,7 @@
     "update": {
       "sessionUpdate": "tool_call",
       "toolCallId": "wait-call-1",
+      "name": "Task",
       "title": "Task wait",
       "kind": "other",
       "status": "pending",
@@ -96,6 +99,7 @@
     "update": {
       "sessionUpdate": "tool_call_update",
       "toolCallId": "wait-call-1",
+      "name": "Task",
       "title": "Task wait",
       "kind": "other",
       "status": "completed",

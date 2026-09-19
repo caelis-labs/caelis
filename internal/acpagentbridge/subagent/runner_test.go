@@ -313,6 +313,7 @@ func TestTranslateApprovalRequestPreservesCanonicalToolPayload(t *testing.T) {
 		ToolCall: acpsdk.ToolCallUpdate{
 			ToolCallId: "call-1",
 			Title:      stringPtr("write file"),
+			Name:       stringPtr("write_file"),
 			Status:     &status,
 			RawInput:   map[string]any{"path": "a.txt"},
 			RawOutput:  map[string]any{"preview": "new text"},
@@ -324,6 +325,9 @@ func TestTranslateApprovalRequestPreservesCanonicalToolPayload(t *testing.T) {
 	got, err := translateApprovalRequest(tasksubagent.SpawnContext{TaskID: "task-1"}, AgentConfig{Name: "child"}, "child-1", req)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if got.ToolCall.Name != "write_file" {
+		t.Fatalf("name = %q, want write_file", got.ToolCall.Name)
 	}
 	if got.ToolCall.RawOutput["preview"] != "new text" {
 		t.Fatalf("raw output = %#v, want preserved preview", got.ToolCall.RawOutput)

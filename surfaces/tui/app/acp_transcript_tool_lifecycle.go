@@ -250,7 +250,7 @@ func acpToolPanelText(preview string, final SubagentEvent, hasFinal bool) (strin
 func toolLifecycleHeaderEvent(start SubagentEvent, final SubagentEvent, hasFinal bool, settled bool, width int) SubagentEvent {
 	header := start
 	if hasFinal {
-		if name := strings.TrimSpace(final.Name); name != "" {
+		if name := strings.TrimSpace(final.Name); final.NameExplicit || name != "" {
 			header.Name = name
 		}
 		if toolKind := strings.TrimSpace(final.ToolKind); toolKind != "" {
