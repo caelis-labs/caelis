@@ -177,9 +177,10 @@ make install
 make commit-check
 ```
 
-`make commit-check` checks Go formatting and diff whitespace. Run focused tests
-for changed behavior; PR CI owns the full gate. Use `make quality` for an optional
-full local run. See [Testing](docs/testing.md) for coverage and platform checks.
+`make commit-check` checks Go formatting, runs full lint, and checks diff
+whitespace. Run focused tests for changed behavior; PR CI runs the full test/build
+gate. Use `make quality` for an optional full local run. See
+[Testing](docs/testing.md) for prerequisites, coverage, and platform checks.
 
 ## License
 

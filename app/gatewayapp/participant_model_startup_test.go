@@ -195,11 +195,14 @@ func TestParticipantModelStartupHelperProcess(t *testing.T) {
 			return client.PromptResponse{StopReason: string(acpsdk.StopReasonEndTurn)}, nil
 		case client.MethodSessionSetConfig:
 			var req client.SetSessionConfigOptionRequest
-			if err := json.Unmarshal(msg.Params, &req); err != nil || req.ValueId == nil || req.ValueId.ConfigId != "mode" || req.ValueId.Value != "manual" {
-				return nil, &jsonrpc.RPCError{Code: -32602, Message: "only the permission bridge may cross ACP"}
+			// Explicit mode defaults are reasserted before permission bridging;
+			// provider model and effort configuration must still stay in Control.
+			if err := json.Unmarshal(msg.Params, &req); err != nil || req.ValueId == nil || req.ValueId.ConfigId != "mode" || (req.ValueId.Value != "auto-review" && req.ValueId.Value != "manual") {
+				return nil, &jsonrpc.RPCError{Code: -32602, Message: "only mode configuration may cross ACP"}
 			}
-			manual = true
-			return client.SetSessionConfigOptionResponse{ConfigOptions: options("manual")}, nil
+			mode := string(req.ValueId.Value)
+			manual = mode == "manual"
+			return client.SetSessionConfigOptionResponse{ConfigOptions: options(mode)}, nil
 		case client.MethodSessionSetModel:
 			return nil, &jsonrpc.RPCError{Code: -32602, Message: "provider configuration must stay in Control"}
 		default:

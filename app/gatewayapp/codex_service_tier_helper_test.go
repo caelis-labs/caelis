@@ -4,11 +4,13 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 	"testing"
+	"testing/iotest"
 
 	"github.com/caelis-labs/caelis/adapters/codex"
 )
@@ -200,9 +202,44 @@ func (s *codexTierAppServer) serve() error {
 				}
 			}
 		}
-		if err != nil {
+		if errors.Is(err, io.EOF) {
 			return nil
 		}
+		if err != nil {
+			return fmt.Errorf("read app-server request: %w", err)
+		}
+	}
+}
+
+func TestCodexServiceTierAppServerReadErrors(t *testing.T) {
+	readErr := errors.New("request read failed")
+	request := `{"id":1,"method":"initialize"}`
+	response := "{\"id\":1,\"result\":{\"codexHome\":\"\"}}\n"
+	for _, test := range []struct {
+		name         string
+		input        string
+		readErr      error
+		wantErr      error
+		wantResponse string
+	}{
+		{name: "EOF", readErr: io.EOF},
+		{name: "EOF after final request", input: request, readErr: io.EOF, wantResponse: response},
+		{name: "read failure", readErr: readErr, wantErr: readErr},
+		{name: "read failure after final request", input: request, readErr: readErr, wantErr: readErr, wantResponse: response},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var output strings.Builder
+			server := codexTierAppServer{
+				reader: bufio.NewReader(io.MultiReader(strings.NewReader(test.input), iotest.ErrReader(test.readErr))),
+				writer: &output,
+			}
+			if err := server.serve(); !errors.Is(err, test.wantErr) {
+				t.Fatalf("serve() error = %v, want %v", err, test.wantErr)
+			}
+			if got := output.String(); got != test.wantResponse {
+				t.Fatalf("response = %q, want %q", got, test.wantResponse)
+			}
+		})
 	}
 }
 

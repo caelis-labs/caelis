@@ -8,12 +8,15 @@ Run before committing:
 make commit-check
 ```
 
-`make commit-check` checks Go formatting and staged/unstaged diff whitespace on
-all platforms. Run focused owning tests while changing code, plus the relevant
-checks below. Full lint, tests, and build belong to PR CI; `make quality` remains
-available when a full local run is useful. Do not repeat unchanged passing tests
-just to commit or push. Lint includes `govet`, so `make test` disables Go's
-implicit vet pass and belongs with lint in the full gate.
+`make commit-check` checks Go formatting, runs the full `make lint` target, and
+checks staged/unstaged diff whitespace on all platforms. It requires
+`golangci-lint` on `PATH`; use the version pinned in
+[the quality workflow](../.github/workflows/quality.yml). Run focused owning tests
+while changing code, plus the relevant checks below. PR CI runs lint, full tests,
+and build; `make quality` remains available when a full local run is useful. Do
+not repeat unchanged passing checks just to commit or push. Lint includes
+`govet`, so `make test` disables Go's implicit vet pass and belongs with lint in
+the full gate.
 
 Local and sandboxed Make targets use the stable repository-local `.tmp/cache`
 tree by default. CI uses standard cache paths for runner cache integration.
