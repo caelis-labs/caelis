@@ -335,6 +335,20 @@ func TestTranslateApprovalRequestPreservesCanonicalToolPayload(t *testing.T) {
 	if len(got.ToolCall.Content) != 1 || session.ExtractProtocolText(got.ToolCall.Content[0].Content) != "permission detail" {
 		t.Fatalf("content = %#v, want preserved canonical content", got.ToolCall.Content)
 	}
+	for _, name := range []*string{nil, new(""), new(" write_file ")} {
+		req.ToolCall.Name = name
+		got, err := translateApprovalRequest(tasksubagent.SpawnContext{TaskID: "task-1"}, AgentConfig{Name: "child"}, "child-1", req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := "write file"
+		if name != nil {
+			want = *name
+		}
+		if got.ToolCall.Name != want || got.ToolCall.NamePresent == nil || *got.ToolCall.NamePresent != (name != nil) {
+			t.Fatalf("tool name = %q, presence = %v; want %q, %t", got.ToolCall.Name, got.ToolCall.NamePresent, want, name != nil)
+		}
+	}
 }
 
 func TestRunnerPermissionCallbackNormalizesChildApprovalWithoutPublishingFrame(t *testing.T) {

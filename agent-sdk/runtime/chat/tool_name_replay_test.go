@@ -38,6 +38,17 @@ func TestToolNamePersistencePreservesRuntimeModelContext(t *testing.T) {
 			SessionUpdate: "tool_call", ToolCallID: "remote-1", Name: &name, Title: "Display only", Kind: "other",
 		}},
 	})
+	for _, present := range []bool{true, false} {
+		live = append(live, &session.Event{
+			Type: session.EventTypeLifecycle,
+			Protocol: &session.EventProtocol{
+				Method: session.ProtocolMethodRequestPermission,
+				Permission: &session.ProtocolApproval{ToolCall: session.ProtocolToolCall{
+					ID: "remote-1", NamePresent: new(present),
+				}},
+			},
+		})
+	}
 	for _, event := range live {
 		if _, err := store.AppendEvent(ctx, session.AppendEventRequest{SessionRef: active.SessionRef, Event: event}); err != nil {
 			t.Fatal(err)
@@ -52,8 +63,14 @@ func TestToolNamePersistencePreservesRuntimeModelContext(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("rebuilt context = %s, want %s", canonicalMessagesJSON(t, got), canonicalMessagesJSON(t, want))
 	}
-	update := session.ProtocolUpdateOf(loaded.Events[len(loaded.Events)-1])
+	update := session.ProtocolUpdateOf(loaded.Events[len(live)-3])
 	if update == nil || update.Name == nil || *update.Name != name {
 		t.Fatalf("replayed display name = %#v", update)
+	}
+	for i, present := range []bool{true, false} {
+		approval := session.ProtocolPermissionOf(loaded.Events[len(live)-2+i])
+		if approval == nil || approval.ToolCall.NamePresent == nil || *approval.ToolCall.NamePresent != present {
+			t.Fatalf("replayed approval = %#v, want name presence %t", approval, present)
+		}
 	}
 }

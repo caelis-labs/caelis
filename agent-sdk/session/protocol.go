@@ -38,14 +38,18 @@ const AgentCommunicationMetaKey = "agent_communication"
 // ProtocolToolCall is the ACP-compatible tool call or tool update view of one
 // canonical event.
 type ProtocolToolCall struct {
-	ID        string                    `json:"id,omitempty"`
-	Name      string                    `json:"name,omitempty"`
-	Kind      string                    `json:"kind,omitempty"`
-	Title     string                    `json:"title,omitempty"`
-	Status    string                    `json:"status,omitempty"`
-	RawInput  map[string]any            `json:"raw_input,omitempty"`
-	RawOutput map[string]any            `json:"raw_output,omitempty"`
-	Content   []ProtocolToolCallContent `json:"content,omitempty"`
+	ID   string `json:"id,omitempty"`
+	Name string `json:"name,omitempty"`
+	// NamePresent records external name presence: true includes an empty name,
+	// false keeps a compatibility-derived Name out of the standard wire field.
+	// Nil uses a non-empty Name for native approvals and older stored records.
+	NamePresent *bool                     `json:"name_present,omitempty"`
+	Kind        string                    `json:"kind,omitempty"`
+	Title       string                    `json:"title,omitempty"`
+	Status      string                    `json:"status,omitempty"`
+	RawInput    map[string]any            `json:"raw_input,omitempty"`
+	RawOutput   map[string]any            `json:"raw_output,omitempty"`
+	Content     []ProtocolToolCallContent `json:"content,omitempty"`
 }
 
 // ProtocolToolCallLocation is the ACP tool-call location shape.
@@ -676,7 +680,12 @@ func firstNonEmpty(values ...string) string {
 func cloneProtocolToolCall(in ProtocolToolCall) ProtocolToolCall {
 	call := in
 	call.ID = strings.TrimSpace(call.ID)
-	call.Name = strings.TrimSpace(call.Name)
+	if in.NamePresent != nil {
+		call.NamePresent = new(*in.NamePresent)
+	}
+	if call.NamePresent == nil || !*call.NamePresent {
+		call.Name = strings.TrimSpace(call.Name)
+	}
 	call.Kind = strings.TrimSpace(call.Kind)
 	call.Title = strings.TrimSpace(call.Title)
 	call.Status = strings.TrimSpace(call.Status)

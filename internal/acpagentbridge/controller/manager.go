@@ -1199,7 +1199,7 @@ func translateApprovalRequest(
 			Kind: strings.TrimSpace(item.Kind),
 		})
 	}
-	toolName := strings.TrimSpace(approval.ToolCall.Name)
+	toolName := approval.ToolCall.Name
 	if req.ToolCall.Name == nil && (toolName == strings.TrimSpace(approval.ToolCall.Title) || toolName == strings.TrimSpace(approval.ToolCall.Kind)) {
 		toolName = acputil.ToolCallName(req.ToolCall)
 	}
@@ -1210,14 +1210,15 @@ func translateApprovalRequest(
 		Agent:             strings.TrimSpace(agent),
 		Mode:              strings.TrimSpace(mode),
 		ToolCall: controller.ApprovalToolCall{
-			ID:        strings.TrimSpace(approval.ToolCall.ID),
-			Name:      toolName,
-			Kind:      strings.TrimSpace(approval.ToolCall.Kind),
-			Title:     strings.TrimSpace(approval.ToolCall.Title),
-			Status:    strings.TrimSpace(approval.ToolCall.Status),
-			RawInput:  session.CloneState(approval.ToolCall.RawInput),
-			RawOutput: session.CloneState(approval.ToolCall.RawOutput),
-			Content:   session.CloneProtocolToolCallContent(approval.ToolCall.Content),
+			ID:          strings.TrimSpace(approval.ToolCall.ID),
+			Name:        toolName,
+			NamePresent: approval.ToolCall.NamePresent,
+			Kind:        strings.TrimSpace(approval.ToolCall.Kind),
+			Title:       strings.TrimSpace(approval.ToolCall.Title),
+			Status:      strings.TrimSpace(approval.ToolCall.Status),
+			RawInput:    session.CloneState(approval.ToolCall.RawInput),
+			RawOutput:   session.CloneState(approval.ToolCall.RawOutput),
+			Content:     session.CloneProtocolToolCallContent(approval.ToolCall.Content),
 		},
 		Options: options,
 	}, nil

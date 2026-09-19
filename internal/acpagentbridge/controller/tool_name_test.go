@@ -130,6 +130,9 @@ func TestTranslateApprovalRequestStandardNameWinsFallbacks(t *testing.T) {
 			if request.ToolCall.Name != name {
 				t.Fatalf("name = %q, want %q", request.ToolCall.Name, name)
 			}
+			if request.ToolCall.NamePresent == nil || !*request.ToolCall.NamePresent {
+				t.Fatal("standard name presence was lost in the controller bridge")
+			}
 		})
 	}
 }

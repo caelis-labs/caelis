@@ -28,7 +28,7 @@ func DecodePermissionRequest(wire eventstream.RequestPermissionRequest) (*sessio
 	toolCall := permissionToolCallFromWire(wire.ToolCall)
 	meta := mergePermissionMeta(wire.ToolCall.Meta, wire.Meta)
 	if wire.ToolCall.Name != nil {
-		toolCall.Name = strings.TrimSpace(*wire.ToolCall.Name)
+		toolCall.Name = *wire.ToolCall.Name
 	} else {
 		toolCall.Name = canonicalPermissionToolName(meta, toolCall)
 	}
@@ -53,11 +53,18 @@ func EncodePermissionRequest(ref session.SessionRef, approval *session.ProtocolA
 	title := permissionOptionalString(normalized.ToolCall.Title)
 	kind := permissionOptionalString(normalized.ToolCall.Kind)
 	status := permissionOptionalString(normalized.ToolCall.Status)
+	name := permissionOptionalString(normalized.ToolCall.Name)
+	if normalized.ToolCall.NamePresent != nil {
+		name = nil
+		if *normalized.ToolCall.NamePresent {
+			name = &normalized.ToolCall.Name
+		}
+	}
 	wire := eventstream.RequestPermissionRequest{
 		SessionID: strings.TrimSpace(ref.SessionID),
 		ToolCall: eventstream.ToolCallUpdate{
 			SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: normalized.ToolCall.ID,
-			Name:  permissionOptionalString(normalized.ToolCall.Name),
+			Name:  name,
 			Title: title, Kind: kind, Status: status,
 			RawInput: permissionMapOrNil(normalized.ToolCall.RawInput), RawOutput: permissionMapOrNil(normalized.ToolCall.RawOutput),
 			Content: permissionToolContentToWire(normalized.ToolCall.Content),
@@ -91,13 +98,14 @@ func permissionToolCallFromWire(wire eventstream.ToolCallUpdate) session.Protoco
 		})
 	}
 	return session.ProtocolToolCall{
-		ID:        wire.ToolCallID,
-		Kind:      permissionStringValue(wire.Kind),
-		Title:     permissionStringValue(wire.Title),
-		Status:    permissionStringValue(wire.Status),
-		RawInput:  session.NormalizeProtocolRawMap(wire.RawInput),
-		RawOutput: session.NormalizeProtocolRawMap(wire.RawOutput),
-		Content:   content,
+		ID:          wire.ToolCallID,
+		NamePresent: new(wire.Name != nil),
+		Kind:        permissionStringValue(wire.Kind),
+		Title:       permissionStringValue(wire.Title),
+		Status:      permissionStringValue(wire.Status),
+		RawInput:    session.NormalizeProtocolRawMap(wire.RawInput),
+		RawOutput:   session.NormalizeProtocolRawMap(wire.RawOutput),
+		Content:     content,
 	}
 }
 
