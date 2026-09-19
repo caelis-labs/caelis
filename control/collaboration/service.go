@@ -298,10 +298,14 @@ func (s *Service) Run(ctx context.Context, report func(error)) {
 	finished := make(chan completion)
 	active := map[Identity]bool{}
 	var workers sync.WaitGroup
-	workers.Add(1)
+	workers.Add(2)
 	go func() {
 		defer workers.Done()
 		s.runUserInputs(ctx, report)
+	}()
+	go func() {
+		defer workers.Done()
+		s.runClosedSessionCleanup(ctx, report)
 	}()
 	defer workers.Wait()
 	for {
@@ -436,18 +440,4 @@ func (s *Service) notifyDelivery(i Identity) {
 		close(wake)
 	}
 	s.mu.Unlock()
-}
-
-func (s *Service) purgeClosedSession(ctx context.Context, id string) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-	for _, table := range []string{"collaboration_mailbox", "collaboration_messages", "collaboration_readers", "collaboration_seen", "collaboration_retention", "collaboration_setups"} {
-		if _, err = tx.ExecContext(ctx, "DELETE FROM "+table+" WHERE session=?", id); err != nil {
-			return err
-		}
-	}
-	return tx.Commit()
 }

@@ -390,6 +390,7 @@ type Model struct {
 	earlierHistory           map[string]*earlierHistoryBuild
 	sessionHistory           *sessionHistoryBuild
 	historyBuilding          bool
+	historyReplay            bool
 	sessionHistoryFailed     bool
 	sessionDrafts            map[string]sessionDraft
 	currentSessionID         string

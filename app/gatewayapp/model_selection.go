@@ -6,6 +6,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/modelprofile"
+	modelprofilebuilder "github.com/caelis-labs/caelis/control/modelprofile/builder"
 	"github.com/caelis-labs/caelis/internal/kernel"
 )
 
@@ -49,6 +50,10 @@ func (s *runtimeComposition) modelSelectionChoices(ctx context.Context, ref sess
 			if profile.Kind() == modelprofile.BackendACP {
 				choice.FastSupported = profile.SupportsFast()
 			}
+		} else if profile, ok := s.legacyProviderProfile(*choice); ok {
+			choice.ReasoningLevels = modelProfileEfforts(profile)
+			choice.ReasoningEffort = profile.Effort.DefaultEffort
+			choice.FastSupported = profile.SupportsFast()
 		}
 		choice.Current = currentID != "" && (strings.EqualFold(currentID, choice.ID) || strings.EqualFold(currentID, choice.ProfileID))
 		choice.FastMode = choice.Current && fast && choice.FastSupported
@@ -59,4 +64,22 @@ func (s *runtimeComposition) modelSelectionChoices(ctx context.Context, ref sess
 		}
 	}
 	return choices, nil
+}
+
+// legacyProviderProfile derives capabilities for selectable provider configs
+// without a stored ModelProfile, matching the profile built when selected.
+// ACP and unresolvable choices do not use this provider fallback.
+func (s *runtimeComposition) legacyProviderProfile(choice ModelChoice) (modelprofile.ModelProfile, bool) {
+	if s == nil || s.lookup == nil || choice.Backend == string(modelprofile.BackendACP) {
+		return modelprofile.ModelProfile{}, false
+	}
+	configured, ok := s.lookup.Config(choice.ID)
+	if !ok {
+		return modelprofile.ModelProfile{}, false
+	}
+	profile, err := modelprofilebuilder.FromProvider(configured)
+	if err != nil {
+		return modelprofile.ModelProfile{}, false
+	}
+	return profile, true
 }

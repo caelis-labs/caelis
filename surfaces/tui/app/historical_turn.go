@@ -6,27 +6,47 @@ import (
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 )
 
-// historicalTurnFullCount is how many newest logical turns stay fully detailed.
+// historicalTurnFullCount is how many newest restored turns stay fully
+// detailed. Live Session turns are never counted and never folded.
 const historicalTurnFullCount = 2
 
+// restoringHistory reports whether the transcript events being applied
+// reconstruct Session history instead of live Session output. historyBuilding
+// covers the private history builders; historyReplay covers a history batch
+// applied to the live transcript. Only Turns created while it reports true
+// carry Block.Historical and may fold to narrative-only rendering.
+func (m *Model) restoringHistory() bool {
+	return m != nil && (m.historyBuilding || m.historyReplay)
+}
+
 // historicalTurnBlocks reports Block IDs that should use compact historical
-// rendering. Newest historicalTurnFullCount logical turns stay full. Older
-// nonterminal blocks stay full so live tools and approvals remain visible.
-// User narrative, welcome, dividers, and FullAgentMessages child-pane blocks
-// are omitted. Display-only: Events are not mutated.
+// rendering. Only Turns restored from Session history replay fold: the newest
+// historicalTurnFullCount restored Turns stay fully detailed and an older
+// restored Turn folds only once it is terminal. A Turn created by the live
+// Session is never folded just because a newer Turn began, so the execution
+// trace of the Turn the user just watched stays visible. User narrative,
+// welcome, dividers, and FullAgentMessages child-pane blocks are omitted.
+// Display-only: Events are not mutated.
 //
 // Logical turns start at a UserNarrativeBlock barrier, at the first
 // MainACPTurnBlock or ParticipantTurnBlock when none is open, and at a
 // timeline split where a later MainACPTurnBlock carries a different non-empty
 // TurnKey. Consecutive MainACPTurnBlocks with the same or empty TurnKey stay
-// one turn.
+// one turn. A logical turn counts as restored only when every contributing
+// block was created by history restore.
 func historicalTurnBlocks(blocks []Block) map[string]bool {
 	compact := make(map[string]bool)
 	turns := collectHistoricalTurns(blocks)
-	if len(turns) <= historicalTurnFullCount {
+	restored := make([]historicalTurn, 0, len(turns))
+	for _, turn := range turns {
+		if turn.restored && len(turn.blocks) > 0 {
+			restored = append(restored, turn)
+		}
+	}
+	if len(restored) <= historicalTurnFullCount {
 		return compact
 	}
-	for _, turn := range turns[:len(turns)-historicalTurnFullCount] {
+	for _, turn := range restored[:len(restored)-historicalTurnFullCount] {
 		for _, block := range turn.blocks {
 			if historicalTurnBlockIsTerminal(block) {
 				compact[block.BlockID()] = true
@@ -77,6 +97,9 @@ func historicalTurnRowHint(block Block, width int) int {
 
 type historicalTurn struct {
 	blocks []Block
+	// restored is true while every contributing block was created by history
+	// restore. Live Session Turns are never foldable.
+	restored bool
 }
 
 func collectHistoricalTurns(blocks []Block) []historicalTurn {
@@ -85,7 +108,7 @@ func collectHistoricalTurns(blocks []Block) []historicalTurn {
 	openHasMain := false
 	openTurnKey := ""
 	startTurn := func() {
-		turns = append(turns, historicalTurn{})
+		turns = append(turns, historicalTurn{restored: true})
 		open = len(turns) - 1
 		openHasMain = false
 		openTurnKey = ""
@@ -105,6 +128,7 @@ func collectHistoricalTurns(blocks []Block) []historicalTurn {
 				startTurn()
 			}
 			turns[open].blocks = append(turns[open].blocks, b)
+			turns[open].restored = turns[open].restored && blockWasRestored(b)
 			openHasMain = true
 			if key != "" {
 				openTurnKey = key
@@ -117,9 +141,21 @@ func collectHistoricalTurns(blocks []Block) []historicalTurn {
 				continue
 			}
 			turns[open].blocks = append(turns[open].blocks, b)
+			turns[open].restored = turns[open].restored && blockWasRestored(b)
 		}
 	}
 	return turns
+}
+
+func blockWasRestored(block Block) bool {
+	switch b := block.(type) {
+	case *MainACPTurnBlock:
+		return b.Historical
+	case *ParticipantTurnBlock:
+		return b.Historical
+	default:
+		return false
+	}
 }
 
 func historicalTurnBlockIsTerminal(block Block) bool {

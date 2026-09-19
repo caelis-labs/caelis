@@ -188,7 +188,8 @@ func TestRunStopsPollingClosedHistoricalSession(t *testing.T) {
 		b.mu.Lock()
 		first := b.lists
 		b.mu.Unlock()
-		if first != 1 {
+		// Delivery and the startup retention sweep may both observe closure.
+		if first < 1 || first > 2 {
 			t.Fatalf("initial checks %d", first)
 		}
 		time.Sleep(2 * time.Second)

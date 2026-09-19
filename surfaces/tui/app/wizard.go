@@ -49,10 +49,11 @@ type WizardStepDef struct {
 	// steps can still allow custom base URLs or model names.
 	RequireCandidate bool
 
-	// MultiSelect renders eligible completion candidates as checkboxes. Space,
-	// tab, and mouse clicks toggle the highlighted candidate before enter
-	// confirms the selection. Enter still keeps the one-candidate fast path, and
-	// free-form input remains a single value.
+	// MultiSelect renders eligible completion candidates as checkboxes. Space
+	// and mouse clicks toggle the highlighted candidate before enter confirms
+	// the selection; tab keeps its ordinary completion or selection move. Enter
+	// still keeps the one-candidate fast path, and free-form input remains a
+	// single value.
 	MultiSelect bool
 
 	// MultiSelectCandidate optionally decides whether a completion candidate may

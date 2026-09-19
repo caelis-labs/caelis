@@ -30,6 +30,8 @@ type runner struct {
 	inputReady    chan struct{}
 	cancelHook    func() error
 	dispatcher    *runnerSubmissionDispatcher
+
+	controllerCalls *controllerCallScope
 }
 
 func newRunner(ctx context.Context, runID string, cancel context.CancelFunc, observer agent.SourceEventObserver) *runner {

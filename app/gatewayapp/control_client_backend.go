@@ -81,7 +81,7 @@ func (s *controlCommandBackend) ExecuteControlCommand(ctx context.Context, princ
 		result, commandErr := s.composition.executeControlCommand(ctx, principal, action, request)
 		if action == appserver.ActionSessionClose && commandErr == nil && result.Outcome == appserver.OutcomeCommitted {
 			releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), controlFeedPublishTimeout)
-			s.composition.releaseControlSessionStreams(releaseCtx, session.SessionRef{SessionID: result.SessionID})
+			s.composition.releaseControlSessionResources(releaseCtx, session.SessionRef{SessionID: result.SessionID})
 			cancel()
 		}
 		return result, commandErr
@@ -219,9 +219,9 @@ func (s *controlCommandBackend) ExecuteControlCommand(ctx context.Context, princ
 			result.Detail = "session closed; execution Runtime cleanup remains pending"
 		}
 		cancelRuntimeRelease()
-		streamReleaseCtx, cancelStreamRelease := context.WithTimeout(context.WithoutCancel(ctx), controlFeedPublishTimeout)
-		s.composition.releaseControlSessionStreams(streamReleaseCtx, session.SessionRef{SessionID: sessionID})
-		cancelStreamRelease()
+		resourceReleaseCtx, cancelResourceRelease := context.WithTimeout(context.WithoutCancel(ctx), controlFeedPublishTimeout)
+		s.composition.releaseControlSessionResources(resourceReleaseCtx, session.SessionRef{SessionID: sessionID})
+		cancelResourceRelease()
 	}
 	return result, commandErr
 }

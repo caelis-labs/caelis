@@ -77,6 +77,11 @@ func (b *UserNarrativeBlock) Render(ctx BlockRenderContext) []RenderedRow {
 // ---------------------------------------------------------------------------
 
 type MainACPTurnBlock struct {
+	// Historical marks a Turn reconstructed from Session history replay rather
+	// than created by the live Session. Only historical Turns may fold to
+	// narrative-only rendering; a live Turn keeps its full execution trace for
+	// the lifetime of the Session. ParticipantTurnBlock carries the same field.
+	Historical            bool
 	id                    string
 	TurnKey               string
 	Status                string
@@ -398,6 +403,7 @@ func hasDeferredLiveTailCompactStage(events []SubagentEvent, status string) bool
 type ParticipantTurnBlock struct {
 	// FullAgentMessages keeps received messages unabridged in detached overlays.
 	FullAgentMessages     bool
+	Historical            bool
 	id                    string
 	SessionID             string
 	ParticipantID         string
