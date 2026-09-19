@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.58.0](https://github.com/caelis-labs/caelis/compare/v0.57.0...v0.58.0) (2026-09-19)
+
+
+### Features
+
+* enable ACP controller collaboration and per-agent Fast mode ([#54](https://github.com/caelis-labs/caelis/issues/54)) ([5812568](https://github.com/caelis-labs/caelis/commit/58125688a5409a7bde199298d7d4c18d76e9574c))
+* **tui:** unify slash interactions across work and bot modes ([#51](https://github.com/caelis-labs/caelis/issues/51)) ([cd13382](https://github.com/caelis-labs/caelis/commit/cd133824d8bef500f6c92751c522e2abddc969c9))
+
+
+### Bug Fixes
+
+* **acp:** preserve tool names with SDK v1.4.0 ([#53](https://github.com/caelis-labs/caelis/issues/53)) ([7ebba29](https://github.com/caelis-labs/caelis/commit/7ebba290d88649aeb16de2bd213b9446f3786925))
+
 ## [0.57.0](https://github.com/caelis-labs/caelis/compare/v0.56.1...v0.57.0) (2026-09-17)
 
 
