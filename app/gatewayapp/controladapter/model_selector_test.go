@@ -99,6 +99,32 @@ func TestCompleteSlashArgModelPublishesDurableModelConfigIDs(t *testing.T) {
 	}
 }
 
+func TestCompleteSlashArgModelSelectionProjection(t *testing.T) {
+	choices := []ModelChoice{
+		{ID: "provider-id", Alias: "Flash", ReasoningLevels: []string{"none", "high"}, ReasoningEffort: "high", Current: true, FastSupported: true, FastMode: true, ContextWindowTokens: 100000},
+		{ID: "acp:agent:flash", Alias: "Agent Flash", Backend: "acp", ReasoningLevels: []string{"none"}, ReasoningEffort: "none"},
+	}
+	driver := newHostAssembler(&runtimeDeps{Model: ModelRuntimeDeps{
+		ListChoicesFn: func(context.Context, session.SessionRef) ([]ModelChoice, error) { return choices, nil },
+	}}, "", "")
+	got, err := driver.CompleteSlashArg(context.Background(), "model", "lash", 20)
+	if err != nil || len(got) != 2 {
+		t.Fatalf("completion = %#v, %v", got, err)
+	}
+	provider := got[0].ModelSelection
+	if provider == nil || provider.Effort != "high" || !provider.Current || !provider.FastSupported || !provider.Fast || provider.ContextWindowTokens != 100000 {
+		t.Fatalf("provider metadata = %+v", provider)
+	}
+	agent := got[1].ModelSelection
+	if agent == nil || agent.FastSupported || agent.Fast || agent.ContextWindowTokens != 0 || agent.Effort != "none" {
+		t.Fatalf("ACP invented unsupported capabilities: %+v", agent)
+	}
+	provider.Efforts[0] = "changed"
+	if choices[0].ReasoningLevels[0] != "none" {
+		t.Fatal("completion shares mutable catalog slice")
+	}
+}
+
 func TestResolveStoredModelAliasUsesSharedSelectors(t *testing.T) {
 	driver := modelSelectorDriver()
 	tests := []struct{ input, want string }{

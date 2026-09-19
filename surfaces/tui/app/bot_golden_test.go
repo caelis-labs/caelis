@@ -1,7 +1,6 @@
 package tuiapp
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -111,25 +110,14 @@ func botGoldenDescriptionFrame(t *testing.T, width, height int) string {
 
 func botGoldenCreateStepFrame(t *testing.T, width, height int, description bool) string {
 	t.Helper()
-	client := &fakeBotClient{}
-	send := make(chan tea.Msg, 8)
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		runBotCreateFlow(t.Context(), client, func(msg tea.Msg) { send <- msg })
-	}()
-	req := nextBotPrompt(t, send)
-	if description {
-		req.Response <- PromptResponse{Line: "Ada"}
-		req = nextBotPrompt(t, send)
-	}
 	model, _ := botGoldenModel(t, width, height, nil)
-	model.enqueuePrompt(req)
+	model.startBotCreateFlow()
+	if description {
+		model.Update(tea.PasteMsg{Content: "Ada"})
+		model.Update(connectKey("tab"))
+	}
 	model.syncViewportContent()
-	frame := model.View().Content
-	req.Response <- PromptResponse{Err: errors.New(PromptErrInterrupt)}
-	<-done
-	return frame
+	return model.View().Content
 }
 
 func botGoldenCommandsFrame(t *testing.T, width, height int) string {
@@ -158,26 +146,12 @@ func botGoldenTeamCompletionFrame(t *testing.T, width, height int) string {
 
 func botGoldenSettingsFrame(t *testing.T, width, height int) string {
 	t.Helper()
-	client := &fakeBotClient{bots: []bot.Bot{{
-		ID: "bot-1", SessionID: "bot-chat-1", Revision: 4,
-		Config: bot.Config{Name: "Ada", Description: "kind and brief", Model: "gpt-5", Effort: "high"},
-	}}}
-	send := make(chan tea.Msg, 8)
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		runBotSettingsFlow(t.Context(), client, "bot-1", false, nil, func(msg tea.Msg) { send <- msg })
-	}()
-	nextBotPrompt(t, send).Response <- PromptResponse{Line: ""}
-	req := nextBotPrompt(t, send)
-	model, _ := botGoldenModel(t, width, height, client.bots)
-	stageBotForGolden(model, client.bots[0])
-	model.enqueuePrompt(req)
+	value := bot.Bot{ID: "bot-1", SessionID: "bot-chat-1", Revision: 4, Config: bot.Config{Name: "Ada", Description: "kind and brief", Model: "gpt-5", Effort: "high"}}
+	model, _ := botGoldenModel(t, width, height, []bot.Bot{value})
+	stageBotForGolden(model, value)
+	model.Update(model.startBotSettingsFlow(false)())
 	model.syncViewportContent()
-	frame := model.View().Content
-	req.Response <- PromptResponse{Err: errors.New(PromptErrInterrupt)}
-	<-done
-	return frame
+	return model.View().Content
 }
 
 // applyBotGoldenEnvelope feeds one ScopeMain envelope through the real

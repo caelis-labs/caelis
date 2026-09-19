@@ -88,6 +88,7 @@ func DefaultWizards() []WizardDef {
 	return []WizardDef{
 		connectWizard(),
 		disconnectWizard(),
+		pluginWizard(),
 	}
 }
 
@@ -97,8 +98,6 @@ func connectWizard() WizardDef {
 		DisplayLine: "/connect",
 		Steps: []WizardStepDef{{
 			Key:               "source",
-			HintLabel:         "/connect source",
-			FreeformHint:      "/connect source: sign in with an account or API key, or connect a local ACP Agent",
 			RequireCandidate:  true,
 			CompletionCommand: func(map[string]string) string { return "connect" },
 		}},
@@ -109,14 +108,8 @@ func connectWizard() WizardDef {
 			switch source {
 			case "account", "api-key":
 				next = connectModelWizard(source)
-			case "model":
-				// Compatibility for a typed or restored pre-split wizard state.
-				next = connectModelWizard()
 			case "acp":
 				next = connectACPWizard()
-			case "disconnect":
-				// Compatibility for the retired nested disconnect wizard.
-				next = legacyDisconnectACPWizard()
 			default:
 				return nil
 			}
@@ -125,58 +118,40 @@ func connectWizard() WizardDef {
 	}
 }
 
-func connectModelWizard(authSources ...string) WizardDef {
-	authSource := ""
-	if len(authSources) > 0 && strings.TrimSpace(authSources[0]) != "" {
-		authSource = strings.TrimSpace(authSources[0])
-	}
-	providerCommand := "connect-provider"
-	if authSource != "" {
-		providerCommand += "-" + authSource
-	}
+func connectModelWizard(authSource string) WizardDef {
+	providerCommand := "connect-provider-" + authSource
 	return WizardDef{
 		Command: "connect", DisplayLine: "/connect",
 		Steps: []WizardStepDef{
 			{
-				Key: "provider", HintLabel: "/connect provider",
-				FreeformHint:      "/connect provider: choose a provider; compatible endpoints may ask for a custom base URL",
+				Key:               "provider",
 				RequireCandidate:  true,
 				CompletionCommand: func(map[string]string) string { return providerCommand },
 			},
 			{
-				Key: "endpoint", HintLabel: "/connect endpoint",
-				FreeformHint:      "/connect endpoint: choose a provider endpoint, or paste a custom base URL",
+				Key:               "endpoint",
 				CompletionCommand: func(state map[string]string) string { return "connect-baseurl:" + state["provider"] },
 				ShouldSkip:        func(state map[string]string) bool { return !connectWizardProviderHasEndpointStep(state["provider"]) },
 			},
 			{
-				Key: "baseurl", HintLabel: "/connect base_url",
-				FreeformHint:      "/connect base_url: choose the default compatible API root or paste your own full base URL",
+				Key:               "baseurl",
 				CompletionCommand: func(state map[string]string) string { return "connect-baseurl:" + state["provider"] },
 				ShouldSkip:        func(state map[string]string) bool { return !connectWizardProviderHasBaseURLStep(state["provider"]) },
 			},
 			{
-				Key: "apikey", HintLabel: "/connect api_key", HideInput: true,
-				FreeformHint:      "/connect api_key: paste a key",
+				Key: "apikey", HideInput: true,
 				CompletionCommand: func(state map[string]string) string { return "connect-apikey:" + state["provider"] },
 				ShouldSkip:        func(state map[string]string) bool { return state["_noauth"] == "true" || state["_reuseauth"] == "true" },
 			},
 			{
-				Key: "model", HintLabel: "/connect model", MultiSelect: true,
+				Key: "model", MultiSelect: true,
 				MultiSelectCandidate: func(candidate SlashArgCandidate) bool {
 					return candidate.ModelMetadataComplete && candidate.ModelImageInputKnown
-				},
-				FreeformHintFunc: func(state map[string]string) string {
-					if selected := connectWizardSelectedModelCount(state); selected > 0 {
-						return "/connect model: press enter to confirm the selected models"
-					}
-					return "/connect model: choose a suggested model or type one custom model name and press enter"
 				},
 				CompletionCommand: func(state map[string]string) string { return "connect-model:" + buildConnectWizardPayload(state) },
 			},
 			{
-				Key: "image_input", HintLabel: "/connect image input",
-				FreeformHint:     "/connect image input: choose whether this model accepts images",
+				Key:              "image_input",
 				RequireCandidate: true,
 				CompletionCommand: func(state map[string]string) string {
 					return "connect-image-input:" + buildConnectWizardPayload(state)
@@ -184,20 +159,17 @@ func connectModelWizard(authSources ...string) WizardDef {
 				ShouldSkip: func(state map[string]string) bool { return state["_known_image_input"] == "true" },
 			},
 			{
-				Key: "context_window_tokens", HintLabel: "/connect context_window_tokens", Validate: ValidateInt,
-				FreeformHint:      "/connect context_window_tokens: type integer and press enter",
+				Key: "context_window_tokens", Validate: ValidateInt,
 				CompletionCommand: func(state map[string]string) string { return "connect-context:" + buildConnectWizardPayload(state) },
 				ShouldSkip:        func(state map[string]string) bool { return state["_known_model"] == "true" },
 			},
 			{
-				Key: "max_output_tokens", HintLabel: "/connect max_output_tokens", Validate: ValidateInt,
-				FreeformHint:      "/connect max_output_tokens: type integer and press enter",
+				Key: "max_output_tokens", Validate: ValidateInt,
 				CompletionCommand: func(state map[string]string) string { return "connect-maxout:" + buildConnectWizardPayload(state) },
 				ShouldSkip:        func(state map[string]string) bool { return state["_known_model"] == "true" },
 			},
 			{
-				Key: "reasoning_levels", HintLabel: "/connect reasoning_levels(csv)",
-				FreeformHint: "/connect reasoning_levels(csv): e.g. low,medium (use - for empty)",
+				Key: "reasoning_levels",
 				CompletionCommand: func(state map[string]string) string {
 					return "connect-reasoning-levels:" + buildConnectWizardPayload(state)
 				},
@@ -214,30 +186,26 @@ func connectACPWizard() WizardDef {
 		Command: "connect", DisplayLine: "/connect",
 		Steps: []WizardStepDef{
 			{
-				Key: "acp_agent", HintLabel: "/connect ACP agent",
-				FreeformHint:      "/connect ACP agent: choose a built-in adapter, installed native ACP Agent, or custom command",
+				Key:               "acp_agent",
 				RequireCandidate:  true,
 				CompletionCommand: func(map[string]string) string { return "connect-acp-agent" },
 			},
 			{
-				Key: "acp_launcher", HintLabel: "/connect launch",
-				FreeformHint:     "/connect launch: choose how Caelis starts the local ACP agent",
+				Key:              "acp_launcher",
 				RequireCandidate: true,
 				CompletionCommand: func(state map[string]string) string {
 					return "connect-acp-launcher:" + strings.ToLower(strings.TrimSpace(state["acp_agent"]))
 				},
 			},
 			{
-				Key: "acp_command", HintLabel: "/connect ACP command", NoCompletion: true,
-				FreeformHint: "/connect ACP command: choose an installed executable or type an absolute command path",
+				Key: "acp_command", NoCompletion: true,
 				ShouldSkip: func(state map[string]string) bool {
 					launcher := strings.ToLower(strings.TrimSpace(state["acp_launcher"]))
 					return launcher == "installed" || launcher == "hosted"
 				},
 			},
 			{
-				Key: "acp_model", HintLabel: "/connect ACP model",
-				FreeformHint:     "/connect ACP model: pick one model; press enter to retry discovery or go back to change launcher",
+				Key:              "acp_model",
 				RequireCandidate: true,
 				CompletionCommand: func(state map[string]string) string {
 					return "connect-acp-model:" + buildACPConnectWizardPayload(state)
@@ -254,8 +222,6 @@ func disconnectWizard() WizardDef {
 		DisplayLine: "/disconnect",
 		Steps: []WizardStepDef{{
 			Key:               "kind",
-			HintLabel:         "/disconnect type",
-			FreeformHint:      "/disconnect type: choose a provider model or local ACP Agent",
 			RequireCandidate:  true,
 			CompletionCommand: func(map[string]string) string { return "disconnect" },
 		}},
@@ -280,8 +246,8 @@ func disconnectProviderWizard() WizardDef {
 	return WizardDef{
 		Command: "disconnect", DisplayLine: "/disconnect",
 		Steps: []WizardStepDef{{
-			Key: "provider_model", HintLabel: "/disconnect provider", MultiSelect: true,
-			FreeformHint: "/disconnect provider: select configured models, then press enter to disconnect", RequireCandidate: true,
+			Key: "provider_model", MultiSelect: true,
+			RequireCandidate:  true,
 			CompletionCommand: func(map[string]string) string { return "disconnect-provider" },
 		}},
 		BuildExecLine: func(state map[string]string) string {
@@ -294,35 +260,12 @@ func disconnectACPWizard() WizardDef {
 	return WizardDef{
 		Command: "disconnect", DisplayLine: "/disconnect",
 		Steps: []WizardStepDef{{
-			Key: "disconnect_agent", HintLabel: "/disconnect ACP Agent", MultiSelect: true,
-			FreeformHint: "/disconnect ACP Agent: select connected Agents, then press enter to disconnect", RequireCandidate: true,
+			Key: "disconnect_agent", MultiSelect: true,
+			RequireCandidate:  true,
 			CompletionCommand: func(map[string]string) string { return "disconnect-acp" },
 		}},
 		BuildExecLine: func(state map[string]string) string {
 			return "/disconnect acp " + strings.TrimSpace(state["disconnect_agent"])
-		},
-	}
-}
-
-func legacyDisconnectACPWizard() WizardDef {
-	return WizardDef{
-		Command: "connect", DisplayLine: "/connect",
-		Steps: []WizardStepDef{
-			{
-				Key: "disconnect_agent", HintLabel: "/connect disconnect Agent",
-				FreeformHint: "/connect disconnect: choose a connected local ACP Agent", RequireCandidate: true,
-				CompletionCommand: func(map[string]string) string { return "connect-disconnect-agent" },
-			},
-			{
-				Key: "disconnect_confirm", HintLabel: "/connect disconnect confirm",
-				FreeformHint: "/connect disconnect: confirm the Agent to disconnect", RequireCandidate: true,
-				CompletionCommand: func(state map[string]string) string {
-					return "connect-disconnect-confirm:" + strings.TrimSpace(state["disconnect_agent"])
-				},
-			},
-		},
-		BuildExecLine: func(state map[string]string) string {
-			return "/connect disconnect " + strings.TrimSpace(state["disconnect_agent"]) + " confirmed"
 		},
 	}
 }
@@ -401,26 +344,6 @@ func buildACPConnectWizardPayload(state map[string]string) string {
 
 func parseACPConnectWizardPayload(raw string) (controlagents.ConnectState, error) {
 	return controlagents.DecodeConnectState(raw)
-}
-
-func connectWizardSelectedModelCount(state map[string]string) int {
-	if state == nil {
-		return 0
-	}
-	count := 0
-	seen := map[string]struct{}{}
-	for _, value := range strings.Split(state["model"], ",") {
-		value = strings.ToLower(strings.TrimSpace(value))
-		if value == "" {
-			continue
-		}
-		if _, ok := seen[value]; ok {
-			continue
-		}
-		seen[value] = struct{}{}
-		count++
-	}
-	return count
 }
 
 func connectWizardProviderHasEndpointStep(provider string) bool {

@@ -164,11 +164,3 @@ func (*interruptBridgeStub) DiscoverACPConnection(context.Context, controlagents
 func (*interruptBridgeStub) ConnectACP(context.Context, controlagents.ConnectRequest) (controlagents.ConnectResult, error) {
 	return controlagents.ConnectResult{}, nil
 }
-func (*interruptBridgeStub) DisconnectCandidates(context.Context) ([]controlagents.DisconnectCandidate, error) {
-	return nil, nil
-}
-func (*interruptBridgeStub) DisconnectACP(context.Context, string) (controlagents.DisconnectResult, error) {
-	return controlagents.DisconnectResult{}, nil
-}
-
-var _ ControlServices = (*interruptBridgeStub)(nil)

@@ -74,14 +74,6 @@ func (*modelConnectControlStub) ConnectACP(context.Context, controlagents.Connec
 	return controlagents.ConnectResult{}, nil
 }
 
-func (*modelConnectControlStub) DisconnectCandidates(context.Context) ([]controlagents.DisconnectCandidate, error) {
-	return nil, nil
-}
-
-func (*modelConnectControlStub) DisconnectACP(context.Context, string) (controlagents.DisconnectResult, error) {
-	return controlagents.DisconnectResult{}, nil
-}
-
 func (s *acpConnectControlStub) DiscoverACPConnection(_ context.Context, _ controlagents.ConnectRequest) (controlagents.DiscoverySnapshot, error) {
 	return controlagents.DiscoverySnapshot{}, nil
 }
@@ -89,17 +81,6 @@ func (s *acpConnectControlStub) DiscoverACPConnection(_ context.Context, _ contr
 func (s *acpConnectControlStub) ConnectACP(_ context.Context, req controlagents.ConnectRequest) (controlagents.ConnectResult, error) {
 	s.req = req
 	return controlagents.ConnectResult{Profiles: []controlagents.ConnectedProfile{{ID: "acp:claude:opus"}}}, nil
-}
-
-func (s *acpConnectControlStub) DisconnectCandidates(context.Context) ([]controlagents.DisconnectCandidate, error) {
-	return []controlagents.DisconnectCandidate{{AgentID: "opus", ConnectionID: "claude", LastOnConnection: true}}, nil
-}
-
-func (s *acpConnectControlStub) DisconnectACP(_ context.Context, agentID string) (controlagents.DisconnectResult, error) {
-	s.disconnected = agentID
-	return controlagents.DisconnectResult{
-		Agent: controlagents.Agent{ID: agentID}, ConnectionID: "claude", ConnectionRemoved: true,
-	}, nil
 }
 
 func (s *acpConnectControlStub) DisconnectACPAgents(_ context.Context, agentIDs []string) ([]string, error) {
@@ -143,26 +124,6 @@ func TestConnectIsHandledAsLocalAppConfiguration(t *testing.T) {
 	}
 	if service.connected.Provider != "codex" || service.connected.Model != "gpt-5.6-sol" {
 		t.Fatalf("Connect() config = %#v, want local App model connection", service.connected)
-	}
-}
-
-func TestSlashConnectDisconnectsOnlyAfterWizardConfirmation(t *testing.T) {
-	service := &acpConnectControlStub{}
-
-	result := slashConnectWithContext(context.Background(), service, service, nil, "disconnect opus")
-	if result.Err != nil || !result.SuppressTurnDivider {
-		t.Fatalf("unconfirmed result = %#v", result)
-	}
-	if service.disconnected != "" {
-		t.Fatalf("unconfirmed disconnect called for %q", service.disconnected)
-	}
-
-	result = slashConnectWithContext(context.Background(), service, service, nil, "disconnect opus confirmed")
-	if result.Err != nil || !result.SuppressTurnDivider {
-		t.Fatalf("confirmed result = %#v", result)
-	}
-	if service.disconnected != "opus" {
-		t.Fatalf("disconnect called for %q, want opus", service.disconnected)
 	}
 }
 

@@ -79,6 +79,26 @@ func TestInitialSessionControllerFreezesACPDefaultProfile(t *testing.T) {
 		binding.Placement.ProfileID != "acp:codex:default" || binding.Placement.Fingerprint == "" {
 		t.Fatalf("initial controller = %#v, want frozen ACP default", binding)
 	}
+	active, err := startGatewayAppTestSession(context.Background(), stack, "acp-picker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	choices, err := stack.Models().ListChoices(context.Background(), active.SessionRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	currentCount := 0
+	for _, choice := range choices {
+		if choice.Current {
+			currentCount++
+			if choice.ProfileID != binding.Placement.ProfileID || choice.ReasoningEffort != "none" || choice.FastSupported || choice.ContextWindowTokens != 0 {
+				t.Fatalf("ACP picker selection = %+v", choice)
+			}
+		}
+	}
+	if currentCount != 1 {
+		t.Fatalf("ACP current count = %d: %+v", currentCount, choices)
+	}
 }
 
 func TestACPIngressCreatesKernelControllerAtomicallyUnderACPDefault(t *testing.T) {

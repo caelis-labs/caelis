@@ -9,6 +9,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
+	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/control/modelprofile"
 	controller "github.com/caelis-labs/caelis/internal/acpagentbridge/controller"
@@ -151,7 +152,7 @@ func (d *assembler) CompleteSlashArg(ctx context.Context, command string, query 
 			{Value: "acp", Display: "ACP Agent", Detail: "Disconnect local ACP Agents"},
 		}, query, limit), nil
 	case "disconnect-acp":
-		return completeConnectDisconnectAgents(ctx, d, query, limit)
+		return completeDisconnectACPAgents(ctx, d, query, limit)
 	case "plugin rm":
 		return d.completePluginIDs(ctx, query, limit)
 	case "plugin marketplace":
@@ -448,13 +449,23 @@ func modelChoiceCandidates(choices []ModelChoice, query string, limit int) ([]co
 		if display == "" {
 			continue
 		}
-		if query != "" && !hasSlashArgPrefix(query, display) && !hasSlashArgPrefix(query, value) {
+		if query != "" && !strings.Contains(strings.ToLower(display), query) && !strings.Contains(strings.ToLower(value), query) {
 			continue
 		}
 		candidate := controlprompt.SlashArgCandidate{
 			Value:   value,
 			Display: display,
 			Detail:  strings.TrimSpace(choice.Detail),
+		}
+		if len(choice.ReasoningLevels) > 0 && choice.ReasoningEffort != "" {
+			candidate.ModelSelection = &appserver.ModelSelection{
+				Efforts:             append([]string(nil), choice.ReasoningLevels...),
+				Effort:              choice.ReasoningEffort,
+				FastSupported:       choice.FastSupported,
+				Fast:                choice.FastMode,
+				Current:             choice.Current,
+				ContextWindowTokens: choice.ContextWindowTokens,
+			}
 		}
 		// Only provider configs carry a durable model config ID. ACP and other
 		// non-provider choices select by their ModelProfile ID, which is not a

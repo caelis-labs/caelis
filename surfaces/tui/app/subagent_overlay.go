@@ -6,12 +6,10 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	"github.com/caelis-labs/caelis/control/modelprofile"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
-	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 )
 
 type subagentOverlayPage int
@@ -50,6 +48,8 @@ type subagentOverlayRow struct {
 	section      string
 	label        string
 	detail       string
+	current      bool
+	search       string
 	nameConflict bool
 	efforts      []string
 	effortIndex  int
@@ -73,19 +73,26 @@ type subagentOverlayGeometry struct {
 type subagentOverlayNav struct {
 	page  subagentOverlayPage
 	index int
+	key   string
+	query string
+	depth int
 }
 
 type subagentOverlayState struct {
-	page       subagentOverlayPage
-	status     agentbinding.Status
-	loading    bool
-	pending    bool
-	err        string
-	request    uint64
-	index      int
-	rows       []subagentOverlayRow
-	geometry   subagentOverlayGeometry
-	pressedKey string
+	page        subagentOverlayPage
+	status      agentbinding.Status
+	loading     bool
+	pending     bool
+	err         string
+	request     uint64
+	index       int
+	rows        []subagentOverlayRow
+	geometry    subagentOverlayGeometry
+	pressedKey  string
+	query       string
+	windowStart int
+	parents     []subagentOverlayNav
+	notice      string
 
 	bindingHandle           agentbinding.Handle
 	selectedEffortByProfile map[string]string
@@ -166,6 +173,7 @@ func (m *Model) handleSubagentOverlayResult(msg subagentOverlayResultMsg) tea.Cm
 		return nil
 	}
 	state := m.subagentOverlay
+	wasPending := state.pending
 	state.loading = false
 	state.pending = false
 	if msg.err != nil {
@@ -176,10 +184,14 @@ func (m *Model) handleSubagentOverlayResult(msg subagentOverlayResultMsg) tea.Cm
 	state.status = msg.status
 	state.err = ""
 	if state.afterMutation != nil {
-		state.page = state.afterMutation.page
-		state.index = state.afterMutation.index
+		nav := *state.afterMutation
 		state.afterMutation = nil
+		m.restoreSubagentPage(nav)
 	}
+	if wasPending {
+		state.notice = "Configuration saved."
+	}
+	m.refreshSubagentRows("")
 	return m.refreshAgentSlashCommandsCmd()
 }
 
@@ -196,202 +208,7 @@ func (m *Model) refreshAgentSlashCommandsCmd() tea.Cmd {
 	}
 }
 
-func (m *Model) renderSubagentOverlay() string {
-	if m == nil || m.subagentOverlay == nil {
-		return ""
-	}
-	state := m.subagentOverlay
-	width := minInt(maxInt(48, m.fixedRowWidth()-4), 120)
-	if m.width > 0 {
-		width = minInt(width, maxInt(20, m.width-4))
-	}
-	innerWidth := maxInt(16, width-m.overlayBorderChromeWidth())
-	body := make([]string, 0, 24)
-	body = append(body, m.renderSubagentTitle(innerWidth))
-	body = append(body, m.theme.MutedTextStyle().Render(strings.Repeat("─", innerWidth)))
-
-	state.rows = m.subagentRows()
-	state.index = clampInt(state.index, 0, maxInt(0, len(state.rows)-1))
-	rowLines, rowOffsets := m.renderSubagentRows(state.rows, innerWidth, len(body))
-	body = append(body, rowLines...)
-	if state.loading {
-		body = append(body, "", m.theme.HelpHintTextStyle().Render("Loading Agent bindings…"))
-	}
-	if state.pending {
-		body = append(body, "", m.theme.HelpHintTextStyle().Render("Saving configuration…"))
-	}
-	if state.err != "" {
-		body = append(body, "", m.theme.ErrorStyle().Render(truncateTailDisplay(state.err, innerWidth)))
-	}
-	body = append(body, "")
-	body = append(body, m.theme.HelpHintTextStyle().Render(truncateTailDisplay(m.subagentFooter(), innerWidth)))
-
-	frame := tuikit.RenderResponsiveOverlayFrame(m.theme, tuikit.ResponsiveOverlayFrameModel{
-		Body:      body,
-		Width:     width,
-		UseBorder: m.overlayUsesBorder(),
-	})
-	renderedWidth := lipgloss.Width(frame)
-	renderedHeight := len(strings.Split(frame, "\n"))
-	startX := maxInt(0, (m.width-renderedWidth)/2)
-	startY := maxInt(0, (m.height-renderedHeight)/2)
-	borderInset := 0
-	contentInset := 0
-	if m.overlayUsesBorder() {
-		borderInset = 1
-		contentInset = 2
-	}
-	screenRows := make([]int, len(rowOffsets))
-	for i, offset := range rowOffsets {
-		screenRows[i] = -1
-		if offset >= 0 {
-			screenRows[i] = startY + borderInset + offset
-		}
-	}
-	state.geometry = subagentOverlayGeometry{
-		x: startX, y: startY,
-		closeX: startX + contentInset + maxInt(0, innerWidth-1),
-		closeY: startY + borderInset,
-		width:  renderedWidth, height: renderedHeight, rows: screenRows,
-	}
-	return frame
-}
-
-func (m *Model) renderSubagentTitle(width int) string {
-	close := m.theme.HelpHintTextStyle().Render("×")
-	closeWidth := displayColumns(close)
-	titleWidth := maxInt(1, width-closeWidth-1)
-	title := m.theme.TitleStyle().Render(truncateTailDisplay("◆ Team Configuration", titleWidth))
-	gap := maxInt(1, width-displayColumns(title)-closeWidth)
-	return title + strings.Repeat(" ", gap) + close
-}
-
-func (m *Model) renderSubagentRows(rows []subagentOverlayRow, width int, bodyOffset int) ([]string, []int) {
-	if len(rows) == 0 {
-		return []string{"", m.theme.HelpHintTextStyle().Render("No configurable Agents.")}, nil
-	}
-	maxVisible := maxInt(2, m.height-16)
-	start := 0
-	if len(rows) > maxVisible {
-		start = m.subagentOverlay.index - maxVisible/2
-		start = clampInt(start, 0, len(rows)-maxVisible)
-	}
-	end := minInt(len(rows), start+maxVisible)
-	lines := make([]string, 0, end-start+6)
-	offsets := make([]int, len(rows))
-	for i := range offsets {
-		offsets[i] = -1
-	}
-	lastSection := ""
-	if start > 0 {
-		lines = append(lines, m.theme.HelpHintTextStyle().Render("  ↑ more"))
-	}
-	for i := start; i < end; i++ {
-		row := rows[i]
-		if row.section != "" && row.section != lastSection {
-			if len(lines) > 0 {
-				lines = append(lines, "")
-			}
-			lines = append(lines, m.theme.KeyLabelStyle().Render(row.section))
-			lastSection = row.section
-		}
-		offsets[i] = bodyOffset + len(lines)
-		lines = append(lines, m.renderSubagentRow(row, i == m.subagentOverlay.index, width))
-	}
-	if end < len(rows) {
-		lines = append(lines, m.theme.HelpHintTextStyle().Render("  ↓ more"))
-	}
-	return lines, offsets
-}
-
-func (m *Model) renderSubagentRow(row subagentOverlayRow, selected bool, width int) string {
-	marker := "  "
-	if selected {
-		marker = "▎ "
-	}
-	labelWidth := minInt(24, maxInt(14, width/3))
-	if m.subagentOverlay != nil && m.subagentOverlay.page == subagentPageBinding {
-		labelWidth = minInt(44, maxInt(24, width*2/5))
-	}
-	labelWidth = minInt(labelWidth, maxInt(1, width-displayColumns(marker)-3))
-	label := truncateTailDisplay(row.label, labelWidth)
-	detailWidth := maxInt(1, width-displayColumns(marker)-labelWidth-2)
-	detail := truncateTailDisplay(row.detail, detailWidth)
-	labelSegment := marker + padRightDisplay(label, labelWidth) + "  "
-	detailSegment := padRightDisplay(detail, detailWidth)
-	styledEffortDetail := false
-	if len(row.efforts) > 0 && displayColumns(row.detail) <= detailWidth {
-		detailSegment = m.renderSubagentEffortDetail(row, selected, detailWidth)
-		styledEffortDetail = true
-	}
-	switch {
-	case selected && row.enabled:
-		selection := m.theme.SelectionStyle()
-		if row.nameConflict {
-			detailSegment = m.theme.ErrorStyle().Background(selection.GetBackground()).Render(detailSegment)
-		} else if !styledEffortDetail {
-			detailSegment = selection.Render(detailSegment)
-		}
-		return selection.Bold(true).Render(labelSegment) + detailSegment
-	case selected:
-		return m.theme.MutedTextStyle().Render(labelSegment + detailSegment)
-	case !row.enabled:
-		return m.theme.HelpHintTextStyle().Render(labelSegment + detailSegment)
-	}
-	labelStyle := m.theme.TextStyle()
-	switch row.action {
-	case subagentActionConfirm:
-		labelStyle = m.theme.ErrorStyle().Bold(true)
-	case subagentActionCancel:
-		labelStyle = m.theme.SecondaryTextStyle().Bold(true)
-	case subagentActionNewRole,
-		subagentActionSaveSet,
-		subagentActionApplySet,
-		subagentActionCreateRole,
-		subagentActionCommitSet:
-		labelStyle = labelStyle.Bold(true)
-	}
-	if row.nameConflict {
-		detailSegment = m.theme.ErrorStyle().Render(detailSegment)
-	} else if !styledEffortDetail {
-		detailSegment = m.theme.HelpHintTextStyle().Render(detailSegment)
-	}
-	return labelStyle.Render(labelSegment) + detailSegment
-}
-
-func (m *Model) renderSubagentEffortDetail(row subagentOverlayRow, selected bool, width int) string {
-	baseStyle := m.theme.HelpHintTextStyle()
-	activeStyle := m.theme.TextStyle().Bold(true).Underline(true)
-	if selected {
-		baseStyle = m.theme.SelectionStyle()
-		activeStyle = baseStyle.Bold(true).Underline(true)
-	}
-	choices := "[" + strings.Join(row.efforts, " | ") + "]"
-	var detail strings.Builder
-	detail.WriteString(baseStyle.Render("["))
-	for index, effort := range row.efforts {
-		if index > 0 {
-			detail.WriteString(baseStyle.Render(" | "))
-		}
-		style := baseStyle
-		if index == row.effortIndex {
-			style = activeStyle
-		}
-		detail.WriteString(style.Render(effort))
-	}
-	detail.WriteString(baseStyle.Render("]"))
-	plainWidth := displayColumns(choices)
-	if suffix := strings.TrimPrefix(row.detail, choices); suffix != "" {
-		detail.WriteString(baseStyle.Render(suffix))
-		plainWidth += displayColumns(suffix)
-	}
-	if padding := width - plainWidth; padding > 0 {
-		detail.WriteString(baseStyle.Render(strings.Repeat(" ", padding)))
-	}
-	return detail.String()
-}
-
-func (m *Model) subagentRows() []subagentOverlayRow {
+func (m *Model) allSubagentRows() []subagentOverlayRow {
 	state := m.subagentOverlay
 	if state == nil {
 		return nil
@@ -442,6 +259,7 @@ func (m *Model) subagentMainRows() []subagentOverlayRow {
 			handle:  item.Definition.Handle,
 			enabled: item.Definition.Configurable,
 			custom:  item.Definition.Custom,
+			search:  item.Definition.Description,
 		}
 		if spec, ok := controlprompt.Lookup(string(row.handle)); row.custom && ok {
 			row.nameConflict = true
@@ -457,7 +275,7 @@ func (m *Model) subagentMainRows() []subagentOverlayRow {
 		rows = append(rows, row)
 	}
 	rows = append(rows,
-		subagentOverlayRow{action: subagentActionNewRole, key: "new", section: "Custom roles", label: "+ new", detail: "Handle + description + binding", enabled: true},
+		subagentOverlayRow{action: subagentActionNewRole, key: "new", section: "Custom roles", label: "+ new", detail: "Choose a name, purpose and model", enabled: true},
 		subagentOverlayRow{action: subagentActionSaveSet, key: "save", section: "Snapshots", label: "Save binding set…", detail: "Snapshot all active bindings", enabled: true},
 	)
 	return rows
@@ -478,8 +296,9 @@ func (m *Model) subagentBindingRows() []subagentOverlayRow {
 	var rows []subagentOverlayRow
 	if !state.creatingRole {
 		rows = append(rows, subagentOverlayRow{
-			action: subagentActionOpenBinding, key: "binding:reset", section: "Choose binding",
+			action: subagentActionOpenBinding, key: "binding:reset",
 			label: "Default", detail: resetDetail, handle: handle, reset: true, enabled: true,
+			current: state.currentBinding().ProfileID == "",
 		})
 	}
 	nameCounts := subagentProfileNameCounts(handle, state.status.Targets)
@@ -494,22 +313,17 @@ func (m *Model) subagentBindingRows() []subagentOverlayRow {
 		effort := state.subagentBindingEffort(profile, efforts)
 		effortIndex := indexOfString(efforts, effort)
 		binding := agentbinding.Binding{Handle: handle, ProfileID: profile.ID, Effort: effort}
-		section := ""
-		if len(rows) == 0 {
-			section = "Choose binding"
-		}
 		rows = append(rows, subagentOverlayRow{
-			action:  subagentActionOpenBinding,
-			key:     "binding:" + profile.ID,
-			section: section,
-			label:   subagentProfileDisplayName(profile),
+			action: subagentActionOpenBinding,
+			key:    "binding:" + profile.ID,
+			label:  subagentProfileDisplayName(profile),
 			detail: subagentTargetDetail(
 				profile,
-				efforts,
 				nameCounts[subagentProfileNameKey(profile)] > 1,
 			),
 			efforts: efforts, effortIndex: effortIndex,
 			handle: handle, binding: binding, enabled: true,
+			current: modelprofile.NormalizeID(state.currentBinding().ProfileID) == modelprofile.NormalizeID(profile.ID),
 		})
 	}
 	return rows
@@ -533,17 +347,7 @@ func (s *subagentOverlayState) subagentBindingEffort(profile modelprofile.ModelP
 	if effort := strings.TrimSpace(s.selectedEffortByProfile[profileID]); indexOfString(efforts, effort) >= 0 {
 		return effort
 	}
-	seed := agentbinding.Binding{}
-	if s.creatingRole {
-		seed = s.roleBinding
-	} else {
-		for _, item := range s.status.Handles {
-			if item.Definition.Handle == s.bindingHandle || item.Binding.Handle == s.bindingHandle {
-				seed = item.Binding
-				break
-			}
-		}
-	}
+	seed := s.currentBinding()
 	effort := strings.TrimSpace(profile.Effort.DefaultEffort)
 	if modelprofile.NormalizeID(seed.ProfileID) == profileID && indexOfString(efforts, strings.TrimSpace(seed.Effort)) >= 0 {
 		effort = strings.TrimSpace(seed.Effort)
@@ -578,7 +382,7 @@ func (m *Model) subagentSetRows() []subagentOverlayRow {
 		}
 		rows = append(rows, subagentOverlayRow{
 			action: subagentActionApplySet, key: "set:" + set.Name,
-			label: set.Name, detail: detail, enabled: set.Available && !set.Active,
+			label: set.Name, detail: detail, current: set.Active, enabled: set.Available && !set.Active,
 		})
 	}
 	return rows
@@ -586,7 +390,7 @@ func (m *Model) subagentSetRows() []subagentOverlayRow {
 
 func (m *Model) subagentNewRoleRows() []subagentOverlayRow {
 	state := m.subagentOverlay
-	binding := "Choose a ModelProfile and effort  ›"
+	binding := "Choose a model and effort  ›"
 	if state.roleBinding.ProfileID != "" {
 		binding = subagentBindingDisplay(state.roleBinding, state.status.Targets)
 	}
@@ -594,7 +398,7 @@ func (m *Model) subagentNewRoleRows() []subagentOverlayRow {
 		{action: subagentActionFieldHandle, key: "field:handle", section: "New custom role", label: "Handle", detail: subagentFieldValue(state.roleHandle, "lowercase handle"), enabled: true},
 		{action: subagentActionFieldDesc, key: "field:description", label: "Description", detail: subagentFieldValue(state.roleDescription, "what this Agent is good at"), enabled: true},
 		{action: subagentActionFieldBind, key: "field:binding", label: "Binding", detail: binding, enabled: true},
-		{action: subagentActionCreateRole, key: "create", section: "Actions", label: "Create role", detail: "Persist role and initial binding", enabled: !state.pending},
+		{action: subagentActionCreateRole, key: "create", section: "Actions", label: "Create role", detail: "Save role and model binding", enabled: !state.pending},
 		{action: subagentActionCancel, key: "cancel", label: "Cancel", detail: "Discard this draft", enabled: true},
 	}
 }
@@ -652,18 +456,18 @@ func subagentProfileNameCounts(
 	return counts
 }
 
-func subagentTargetDetail(profile modelprofile.ModelProfile, efforts []string, duplicateName bool) string {
-	detail := "[" + strings.Join(efforts, " | ") + "]"
+func subagentTargetDetail(profile modelprofile.ModelProfile, duplicateName bool) string {
+	detail := ""
 	switch profile.Kind() {
 	case modelprofile.BackendACP:
-		detail += "  · ACP"
+		detail = "ACP"
 		if duplicateName {
 			detail += " · " + strings.TrimSpace(profile.Backend.ACP.AgentID)
 		}
 	case modelprofile.BackendProvider:
 		if duplicateName {
 			if source := subagentProviderSource(profile); source != "" {
-				detail += "  · " + source
+				detail = source
 			}
 		}
 	}
@@ -699,26 +503,6 @@ func subagentFieldValue(value, placeholder string) string {
 	return value
 }
 
-func (m *Model) subagentFooter() string {
-	if m.subagentOverlay == nil {
-		return ""
-	}
-	switch m.subagentOverlay.page {
-	case subagentPageMain:
-		return "↑/↓/j/k navigate · Enter edit · p sets · n new · s save · d delete · Esc close"
-	case subagentPageNewRole:
-		return "↑/↓ or Tab fields · type to edit · Enter choose/save · Esc back"
-	case subagentPageSaveSet:
-		return "↑/↓ or Tab fields · type name · Enter save · Esc back"
-	case subagentPageSets:
-		return "↑/↓/j/k navigate · Enter apply · s save · d delete · Esc back"
-	case subagentPageBinding:
-		return "↑/↓/j/k model · ←/→/h/l effort · Enter choose · Esc back"
-	default:
-		return "↑/↓/j/k navigate · Enter choose · Esc back"
-	}
-}
-
 func clampInt(value, low, high int) int {
 	if value < low {
 		return low
@@ -727,4 +511,16 @@ func clampInt(value, low, high int) int {
 		return high
 	}
 	return value
+}
+
+func (s *subagentOverlayState) currentBinding() agentbinding.Binding {
+	if s.creatingRole {
+		return s.roleBinding
+	}
+	for _, item := range s.status.Handles {
+		if item.Definition.Handle == s.bindingHandle {
+			return item.Binding
+		}
+	}
+	return agentbinding.Binding{}
 }

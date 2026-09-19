@@ -67,7 +67,16 @@ func (m *Model) renderCompletionTableLines(geometry completionOverlayGeometry, r
 func (m *Model) renderCompletionTableLine(identity string, hint string, identityWidth int, selected bool) string {
 	identity = strings.TrimSpace(identity)
 	hint = strings.Join(strings.Fields(strings.TrimSpace(hint)), " ")
-	innerWidth := m.completionRowInnerWidth()
+	return m.renderCompletionColumnsLine(identity, hint, identityWidth, selected)
+}
+
+// renderCompletionColumnsLine preserves spacing in preformatted control
+// columns while sharing the normal completion row styles and width budget.
+func (m *Model) renderCompletionColumnsLine(identity string, hint string, identityWidth int, selected bool) string {
+	return m.renderPickerColumnsLine(identity, hint, identityWidth, m.completionRowInnerWidth(), selected)
+}
+
+func (m *Model) renderPickerColumnsLine(identity, hint string, identityWidth, innerWidth int, selected bool) string {
 	if hint == "" || identityWidth <= 0 {
 		if selected {
 			return m.renderCompletionSelectedLine(innerWidth, truncateTailDisplay(identity, innerWidth))

@@ -266,7 +266,7 @@ func (m *Model) applySlashCommandCompletion() tea.Cmd {
 		return nil
 	}
 	command := strings.TrimPrefix(selected, "/")
-	if slashCommandSubmitsOnCompletion(command) {
+	if slashCommandSubmitsOnCompletion(command) || m.botMode() && isBotManagedCommand(command) {
 		m.setInputText(selected)
 		m.syncTextareaFromInput()
 		m.clearSlashCompletion()
@@ -275,6 +275,8 @@ func (m *Model) applySlashCommandCompletion() tea.Cmd {
 	}
 	line := selected + " "
 	m.setInputText(line)
+	// An overlay may consume the completed command when it opens.
+	m.syncTextareaFromInput()
 	m.clearSlashCompletion()
 	_, cmd := m.tryOpenSlashArgPicker(line)
 	return cmd
@@ -366,6 +368,14 @@ func (m *Model) handleSlashCommandKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 	case key.Matches(msg, m.keys.Accept):
 		if len(m.slashCandidates) == 0 {
 			return true, nil
+		}
+		selected := m.slashCandidates[m.slashIndex]
+		if !m.slashSkillOnly && !m.slashCandidateIsSkill(selected) && (selected == "/new" || selected == "/compact") {
+			m.clearSlashCompletion()
+			m.setInputText(selected)
+			m.syncTextareaFromInput()
+			_, cmd := m.submitInteractiveLine(selected, selected, nil)
+			return true, cmd
 		}
 		cmd := m.applySlashCommandCompletion()
 		m.syncTextareaFromInput()

@@ -102,7 +102,9 @@ func (m *Model) finishLiveTurn(endedAt time.Time, interrupted bool, err error) t
 	// added after the current submission; the submission path already clears
 	// attachments that were actually sent.
 	m.syncTextareaChrome()
-	m.clearInputOverlays()
+	if m.wizardOverlay == nil {
+		m.clearInputOverlays()
+	}
 	if err != nil && !interrupted {
 		errText := strings.TrimSpace(err.Error())
 		isPromptCancel := errText == "cli: input interrupted" ||

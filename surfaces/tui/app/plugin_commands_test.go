@@ -193,8 +193,8 @@ func TestSlashPluginManageOpensMultiSelectManager(t *testing.T) {
 	if !prompt.MultiSelect || !prompt.Filterable {
 		t.Fatalf("prompt flags = multi %v filter %v, want true/true", prompt.MultiSelect, prompt.Filterable)
 	}
-	if prompt.Title != "Manage plugins" {
-		t.Fatalf("prompt title = %q, want Manage plugins", prompt.Title)
+	if prompt.Title != "/plugin · Enabled plugins" {
+		t.Fatalf("prompt title = %q, want /plugin · Enabled plugins", prompt.Title)
 	}
 	if got := strings.Join(prompt.SelectedChoices, ","); got != "enabled-plug" {
 		t.Fatalf("selected choices = %#v, want enabled-plug", prompt.SelectedChoices)

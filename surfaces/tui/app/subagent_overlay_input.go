@@ -12,13 +12,49 @@ import (
 
 func (m *Model) handleSubagentOverlayKey(msg tea.KeyMsg) tea.Cmd {
 	state := m.subagentOverlay
-	if state == nil {
+	if state == nil || state.pending {
 		return nil
 	}
 	if _, ok := msg.(tea.KeyReleaseMsg); ok {
 		return nil
 	}
 	keyEvent := msg.Key()
+	if state.loading {
+		if keyEvent.Code == tea.KeyEscape {
+			m.backSubagentOverlay()
+		}
+		return nil
+	}
+	if state.err != "" && len(state.status.Handles) == 0 {
+		switch keyEvent.Code {
+		case tea.KeyEnter:
+			return m.openSubagentOverlay()
+		case tea.KeyEscape:
+			m.backSubagentOverlay()
+		}
+		return nil
+	}
+	if keyEvent.Mod.Contains(tea.ModCtrl) {
+		switch keyEvent.Code {
+		case 'p':
+			if state.page == subagentPageMain {
+				m.openSubagentPage(subagentPageSets, 0)
+			}
+		case 'n':
+			if state.page == subagentPageMain {
+				m.openNewSubagentRole()
+			}
+		case 's':
+			if state.page == subagentPageMain || state.page == subagentPageSets {
+				m.openSaveSubagentSet()
+			}
+		case 'w':
+			if state.searchable() {
+				m.searchSubagentRows("")
+			}
+		}
+		return nil
+	}
 	switch keyEvent.Code {
 	case tea.KeyEscape:
 		m.backSubagentOverlay()
@@ -30,7 +66,11 @@ func (m *Model) handleSubagentOverlayKey(msg tea.KeyMsg) tea.Cmd {
 		m.moveSubagentEffort(1)
 		return nil
 	case tea.KeyTab:
-		m.moveSubagentSelection(1)
+		delta := 1
+		if keyEvent.Mod.Contains(tea.ModShift) {
+			delta = -1
+		}
+		m.moveSubagentSelection(delta)
 		return nil
 	case tea.KeyUp:
 		m.moveSubagentSelection(-1)
@@ -39,10 +79,19 @@ func (m *Model) handleSubagentOverlayKey(msg tea.KeyMsg) tea.Cmd {
 		m.moveSubagentSelection(1)
 		return nil
 	case tea.KeyEnter:
+		if m.editingSubagentField() {
+			m.moveSubagentSelection(1)
+			return nil
+		}
 		return m.activateSubagentRow(m.currentSubagentRow())
+	case tea.KeyDelete:
+		m.prepareSubagentDelete()
+		return nil
 	case tea.KeyBackspace:
 		if m.editingSubagentField() {
 			m.backspaceSubagentField()
+		} else if state.searchable() {
+			m.searchSubagentRows(trimLastRune(state.query))
 		}
 		return nil
 	}
@@ -54,40 +103,23 @@ func (m *Model) handleSubagentOverlayKey(msg tea.KeyMsg) tea.Cmd {
 		m.appendSubagentField(text)
 		return nil
 	}
-	switch strings.ToLower(text) {
-	case "j":
-		m.moveSubagentSelection(1)
-	case "k":
-		m.moveSubagentSelection(-1)
-	case "h":
-		m.moveSubagentEffort(-1)
-	case "l":
-		m.moveSubagentEffort(1)
-	case "p":
-		if state.page == subagentPageMain {
-			m.openSubagentPage(subagentPageSets, 0)
-		}
-	case "n":
-		if state.page == subagentPageMain {
-			m.openNewSubagentRole()
-		}
-	case "s":
-		if state.page == subagentPageMain || state.page == subagentPageSets {
-			m.openSaveSubagentSet()
-		}
-	case "d":
-		m.prepareSubagentDelete()
+	if state.searchable() {
+		m.searchSubagentRows(state.query + text)
 	}
 	return nil
 }
 
 func (m *Model) handleSubagentOverlayPaste(msg tea.PasteMsg) tea.Cmd {
-	if m == nil || m.subagentOverlay == nil || !m.editingSubagentField() {
+	if m == nil || m.subagentOverlay == nil || m.subagentOverlay.pending || m.subagentOverlay.loading {
 		return nil
 	}
 	text := normalizeClipboardText(msg.String())
 	text = strings.ReplaceAll(text, "\n", " ")
-	m.appendSubagentField(text)
+	if m.editingSubagentField() {
+		m.appendSubagentField(text)
+	} else if m.subagentOverlay.searchable() {
+		m.searchSubagentRows(m.subagentOverlay.query + text)
+	}
 	return nil
 }
 
@@ -95,6 +127,9 @@ func (m *Model) handleSubagentOverlayMouse(msg tea.MouseMsg) (bool, tea.Cmd) {
 	state := m.subagentOverlay
 	if state == nil {
 		return false, nil
+	}
+	if state.pending || state.loading {
+		return true, nil
 	}
 	// The modal captures every mouse event while open so clicks cannot leak to
 	// the underlying transcript or prompt.
@@ -115,7 +150,13 @@ func (m *Model) handleSubagentOverlayMouse(msg tea.MouseMsg) (bool, tea.Cmd) {
 		}
 		return true, nil
 	case tea.MouseMotionMsg:
+		if !inside {
+			return true, nil
+		}
 		if index := subagentRowAtY(geometry.rows, mouse.Y); index >= 0 {
+			if state.index != index {
+				state.notice = ""
+			}
 			state.index = index
 		}
 		return true, nil
@@ -138,6 +179,9 @@ func (m *Model) handleSubagentOverlayMouse(msg tea.MouseMsg) (bool, tea.Cmd) {
 	case tea.MouseReleaseMsg:
 		pressed := state.pressedKey
 		state.pressedKey = ""
+		if !inside {
+			return true, nil
+		}
 		if pressed == "close" && mouse.Y == geometry.closeY && mouse.X >= geometry.closeX-1 && mouse.X <= geometry.closeX+1 {
 			m.subagentOverlay = nil
 			return true, nil
@@ -156,7 +200,7 @@ func (m *Model) handleSubagentOverlayMouse(msg tea.MouseMsg) (bool, tea.Cmd) {
 
 func subagentRowAtY(rows []int, y int) int {
 	for index, rowY := range rows {
-		if rowY == y {
+		if rowY >= 0 && rowY == y {
 			return index
 		}
 	}
@@ -177,6 +221,7 @@ func (m *Model) moveSubagentSelection(delta int) {
 		return
 	}
 	state.index = (state.index + delta + len(state.rows)) % len(state.rows)
+	state.notice = ""
 	state.pressedKey = ""
 }
 
@@ -189,7 +234,7 @@ func (m *Model) moveSubagentEffort(delta int) {
 	if len(row.efforts) < 2 || row.binding.ProfileID == "" {
 		return
 	}
-	index := (row.effortIndex + delta + len(row.efforts)) % len(row.efforts)
+	index := clampInt(row.effortIndex+delta, 0, len(row.efforts)-1)
 	effort := row.efforts[index]
 	profileID := modelprofile.NormalizeID(row.binding.ProfileID)
 	if state.selectedEffortByProfile == nil {
@@ -199,36 +244,6 @@ func (m *Model) moveSubagentEffort(delta int) {
 	state.rows[state.index].effortIndex = index
 	state.rows[state.index].binding.Effort = effort
 	state.pressedKey = ""
-}
-
-func (m *Model) openSubagentPage(page subagentOverlayPage, index int) {
-	if m.subagentOverlay == nil {
-		return
-	}
-	m.subagentOverlay.page = page
-	m.subagentOverlay.index = index
-	m.subagentOverlay.err = ""
-	m.subagentOverlay.pressedKey = ""
-}
-
-func (m *Model) backSubagentOverlay() {
-	state := m.subagentOverlay
-	if state == nil {
-		return
-	}
-	switch state.page {
-	case subagentPageMain:
-		m.subagentOverlay = nil
-	case subagentPageBinding:
-		if state.creatingRole {
-			state.creatingRole = false
-			m.openSubagentPage(subagentPageNewRole, 2)
-		} else {
-			m.openSubagentPage(subagentPageMain, 0)
-		}
-	default:
-		m.openSubagentPage(subagentPageMain, 0)
-	}
 }
 
 func (m *Model) activateSubagentRow(row subagentOverlayRow) tea.Cmd {
@@ -284,8 +299,7 @@ func (m *Model) chooseSubagentBinding(row subagentOverlayRow) tea.Cmd {
 			return nil
 		}
 		state.roleBinding = row.binding
-		state.creatingRole = false
-		m.openSubagentPage(subagentPageNewRole, 2)
+		m.backSubagentOverlay()
 		return nil
 	}
 	state.navigateAfterMutation(subagentPageMain, 0)
@@ -336,6 +350,8 @@ func (m *Model) createSubagentRole() tea.Cmd {
 	binding := state.roleBinding
 	binding.Handle = handle
 	state.navigateAfterMutation(subagentPageMain, 0)
+	state.afterMutation.key = "handle:" + string(handle)
+	state.afterMutation.query = ""
 	return m.runSubagentMutation(func(ctx context.Context, service agentbinding.ConfigurationService) (agentbinding.Status, error) {
 		return service.CreateAgentRole(ctx, role, binding)
 	})
@@ -360,6 +376,8 @@ func (m *Model) saveSubagentSet() tea.Cmd {
 		return nil
 	}
 	state.navigateAfterMutation(subagentPageSets, 0)
+	state.afterMutation.key = "set:" + name
+	state.afterMutation.query = ""
 	return m.runSubagentMutation(func(ctx context.Context, service agentbinding.ConfigurationService) (agentbinding.Status, error) {
 		return service.SaveAgentBindingSet(ctx, name)
 	})
@@ -376,12 +394,12 @@ func (m *Model) prepareSubagentDelete() {
 		state.confirmHandle = row.handle
 		state.confirmSet = ""
 		state.confirmLabel = "custom role " + string(row.handle)
-		m.openSubagentPage(subagentPageConfirm, 0)
+		m.openSubagentPage(subagentPageConfirm, 1)
 	case state.page == subagentPageSets && strings.HasPrefix(row.key, "set:"):
 		state.confirmHandle = ""
 		state.confirmSet = strings.TrimPrefix(row.key, "set:")
 		state.confirmLabel = "binding set " + state.confirmSet
-		m.openSubagentPage(subagentPageConfirm, 0)
+		m.openSubagentPage(subagentPageConfirm, 1)
 	}
 }
 
@@ -433,6 +451,7 @@ func (m *Model) appendSubagentField(text string) {
 		state.setName = truncateRunes(state.setName+text, 32)
 	}
 	state.err = ""
+	m.refreshSubagentRows(row.key)
 }
 
 func (m *Model) backspaceSubagentField() {
@@ -449,13 +468,8 @@ func (m *Model) backspaceSubagentField() {
 	case subagentActionFieldSetName:
 		state.setName = trimLastRune(state.setName)
 	}
-}
-
-func (s *subagentOverlayState) navigateAfterMutation(page subagentOverlayPage, index int) {
-	if s == nil {
-		return
-	}
-	s.afterMutation = &subagentOverlayNav{page: page, index: index}
+	state.err = ""
+	m.refreshSubagentRows(row.key)
 }
 
 func truncateRunes(value string, limit int) string {

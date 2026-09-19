@@ -27,18 +27,15 @@ import (
 const (
 	// botSaveAfterReplyNotice explains why a settings save is deferred while a
 	// reply is still streaming. Saving never rotates the Bot's conversation.
-	botSaveAfterReplyNotice = "Bot settings can be saved once the current reply finishes. Changes apply to your next message."
-	// botClearDescriptionToken lets the settings flow clear a description, since
-	// an empty answer keeps the current value.
-	botClearDescriptionToken = "-"
+	botSaveAfterReplyNotice = "Wait for the reply to finish before saving."
 	// botCreateConflictNotice and botUpdateConflictNotice report a failed CAS. The
 	// original configuration and any local draft are preserved for review.
-	botCreateConflictNotice = "Bot creation conflicted with another change. Use /bots to review the existing Bots."
-	botUpdateConflictNotice = "This Bot changed elsewhere, so your edit was not saved. Reopen /settings to review the latest values."
+	botCreateConflictNotice = "Creation conflicted. Review /bots."
+	botUpdateConflictNotice = "Bot changed elsewhere; edit not saved. Reopen /settings."
 	// botCreateUnknownNotice and botUpdateUnknownNotice report an unprovable
 	// effect. Nothing is retried automatically; the user inspects first.
-	botCreateUnknownNotice = "Bot creation outcome unknown; inspect /bots before retrying. Do not retry blindly."
-	botUpdateUnknownNotice = "Bot settings outcome unknown; inspect /settings before retrying. Do not retry blindly."
+	botCreateUnknownNotice = "Creation outcome unknown; inspect /bots before retrying."
+	botUpdateUnknownNotice = "Save outcome unknown. Review /settings before retrying."
 	// botCreateFailedSuffix never claims a failed creation had no effect.
 	botCreateFailedSuffix = " If a Bot was created it will appear in /bots."
 	// botOutcomeUnknownText marks a recovered Run whose terminal state Control
@@ -96,12 +93,10 @@ type botPickerResultMsg struct {
 }
 
 // botFlowResultMsg reports a completed create or settings flow. created marks a
-// flow that must open the new Bot's conversation; modelReset notes that a model
-// change discarded stale effort/fast options.
+// flow that must open the new Bot's conversation.
 type botFlowResultMsg struct {
-	created    bool
-	modelReset bool
-	bot        bot.Bot
+	created bool
+	bot     bot.Bot
 }
 
 func (m *Model) botMode() bool {
@@ -395,7 +390,8 @@ func (m *Model) applyBotPickerResult(msg botPickerResultMsg) {
 		return
 	}
 	m.bot.bots = msg.bots
-	state.rows = m.botPickerRows(msg.bots)
+	state.allRows = m.botPickerRows(msg.bots)
+	state.filterRows()
 	state.err = ""
 	state.geometry = subagentOverlayGeometry{}
 	state.index = clampInt(state.index, 0, maxInt(0, len(state.rows)-1))
@@ -430,10 +426,10 @@ func (m *Model) renderBotPicker() string {
 	if state == nil || !state.botPicker {
 		return ""
 	}
-	width := maxInt(20, m.width-4)
+	width := min(112, maxInt(20, m.width-4))
 	inner := maxInt(1, width-m.overlayBorderChromeWidth())
-	title := m.theme.TitleStyle().Render("Bots")
-	body := []string{title + strings.Repeat(" ", maxInt(1, inner-displayColumns(title)-1)) + "×", ""}
+	title := m.theme.TitleStyle().Render("/bots · Bots")
+	body := []string{title + strings.Repeat(" ", maxInt(1, inner-displayColumns(title)-1)) + "×", m.theme.HelpHintTextStyle().Render(state.searchLine(inner))}
 	count := minInt(len(state.rows), maxInt(1, m.height-9))
 	start := maxInt(state.index-count+1, minInt(state.offset, state.index))
 	start = clampInt(start, 0, maxInt(0, len(state.rows)-count))
@@ -475,7 +471,7 @@ func (m *Model) renderBotPicker() string {
 		body = append(body, m.theme.ErrorStyle().Render(truncateTailDisplay(state.err, inner)))
 	}
 	body = append(body, "")
-	body = append(body, m.theme.HelpHintTextStyle().Render(truncateTailDisplay("↑↓ Select  Enter Open  Esc Close", inner)))
+	body = append(body, m.theme.HelpHintTextStyle().Render(truncateTailDisplay("↑↓ select  enter open  esc close", inner)))
 	frame := tuikit.RenderResponsiveOverlayFrame(m.theme, tuikit.ResponsiveOverlayFrameModel{Body: body, Width: width, UseBorder: m.overlayUsesBorder()})
 	w, h := lipgloss.Width(frame), lipgloss.Height(frame)
 	x, y := maxInt(0, (m.width-w)/2), maxInt(0, (m.height-h)/2)
@@ -628,7 +624,7 @@ func firstLineDisplay(text string) string {
 }
 
 // botFlowContext returns the Program-lifetime context for one Bot flow so a
-// closed program cancels pending prompts.
+// closed program cancels pending reads and writes.
 func (m *Model) botFlowContext() context.Context {
 	if m.cfg.ProgramSender != nil {
 		return m.cfg.ProgramSender.observationContext(m.cfg.Context)
@@ -636,59 +632,10 @@ func (m *Model) botFlowContext() context.Context {
 	return contextOrBackground(m.cfg.Context)
 }
 
-func (m *Model) botSend() func(tea.Msg) {
-	return func(msg tea.Msg) {
-		if m.cfg.ProgramSender != nil {
-			m.cfg.ProgramSender.SendMsg(msg)
-		}
-	}
-}
-
-func (m *Model) startBotFlow(run func(ctx context.Context, send func(tea.Msg))) tea.Cmd {
-	if m == nil || m.cfg.ProgramSender == nil || run == nil {
-		return nil
-	}
-	ctx := m.botFlowContext()
-	send := m.botSend()
-	m.cfg.ProgramSender.startForwarder(func() { run(ctx, send) })
-	return nil
-}
-
-// startBotCreateFlow asks for a name and an optional description. An empty model
-// snapshots the Host default; chat fails closed until a model is configured.
-func (m *Model) startBotCreateFlow() tea.Cmd {
-	if m == nil || m.bot == nil || m.bot.client == nil {
-		return nil
-	}
-	client := m.bot.client
-	return m.startBotFlow(func(ctx context.Context, send func(tea.Msg)) {
-		runBotCreateFlow(ctx, client, send)
-	})
-}
-
-func runBotCreateFlow(ctx context.Context, client appserver.BotClient, send func(tea.Msg)) {
-	name, ok := promptBotValue(ctx, send, PromptRequestMsg{
-		Title:  "New Bot",
-		Prompt: "New Bot name",
-	})
-	if !ok {
-		return
-	}
-	name = strings.TrimSpace(name)
-	if name == "" {
-		sendNotice(send, "A Bot needs a name", SlashNoticeHint)
-		return
-	}
-	description, ok := promptBotValue(ctx, send, PromptRequestMsg{
-		Title:  "New Bot",
-		Prompt: "Description (optional; Enter to skip)",
-	})
-	if !ok {
-		return
-	}
+func runBotCreateFlow(ctx context.Context, client appserver.BotClient, config bot.Config, send func(tea.Msg)) {
 	result, err := client.CreateBot(ctx, appserver.CreateBotRequest{
 		WriteBase: appserver.WriteBase{OperationID: "bot-create-" + uuid.NewString()},
-		Config:    bot.Config{Name: name, Description: description},
+		Config:    config,
 	})
 	switch botCommandStatusOf(result, err) {
 	case botCommandCommitted:
@@ -778,106 +725,7 @@ func botCommandDetail(result appserver.CommandResult, err error) string {
 	return "unknown error"
 }
 
-// startBotSettingsFlow edits the active Bot. modelOnly drives the /model
-// shortcut; the full flow edits name, description, and model together. A save
-// is refused while a reply streams and never rotates the conversation.
-func (m *Model) startBotSettingsFlow(modelOnly bool) tea.Cmd {
-	if m == nil || m.bot == nil || m.bot.client == nil {
-		return nil
-	}
-	active, ok := m.activeBot()
-	if !ok {
-		return m.showHint("Select or create a Bot first", botHintOptions())
-	}
-	if m.turnRunning() {
-		return m.showHint(botSaveAfterReplyNotice, botHintOptions())
-	}
-	client := m.bot.client
-	listModels := m.botModelLister()
-	return m.startBotFlow(func(ctx context.Context, send func(tea.Msg)) {
-		runBotSettingsFlow(ctx, client, active.ID, modelOnly, listModels, send)
-	})
-}
-
-func (m *Model) botModelLister() func(context.Context) ([]SlashArgCandidate, error) {
-	complete := m.cfg.SlashArgComplete
-	if complete == nil {
-		return nil
-	}
-	return func(ctx context.Context) ([]SlashArgCandidate, error) {
-		return complete(contextOrBackground(ctx), "model", "", 200)
-	}
-}
-
-func runBotSettingsFlow(
-	ctx context.Context,
-	client appserver.BotClient,
-	botID string,
-	modelOnly bool,
-	listModels func(context.Context) ([]SlashArgCandidate, error),
-	send func(tea.Msg),
-) {
-	current, err := client.GetBot(ctx, botID)
-	if err != nil {
-		sendNotice(send, "Could not load Bot settings: "+err.Error(), SlashNoticeHint)
-		return
-	}
-	config := current.Config
-	changed := false
-	if !modelOnly {
-		name, ok := promptBotValue(ctx, send, PromptRequestMsg{
-			Title:  "Bot settings",
-			Prompt: "Name (now: " + displayOrNone(config.Name) + ") — leave empty to keep",
-		})
-		if !ok {
-			return
-		}
-		if trimmed := strings.TrimSpace(name); trimmed != "" {
-			config.Name = trimmed
-			changed = changed || trimmed != strings.TrimSpace(current.Config.Name)
-		}
-		description, ok := promptBotValue(ctx, send, PromptRequestMsg{
-			Title:  "Bot settings",
-			Prompt: "Description (now: " + displayOrNone(config.Description) + ") — leave empty to keep, type " + botClearDescriptionToken + " to clear",
-		})
-		if !ok {
-			return
-		}
-		switch strings.TrimSpace(description) {
-		case "":
-		case botClearDescriptionToken:
-			if config.Description != "" {
-				config.Description = ""
-				changed = true
-			}
-		default:
-			config.Description = description
-			changed = changed || description != current.Config.Description
-		}
-	}
-	model, ok := promptBotModel(ctx, send, current, listModels)
-	if !ok {
-		return
-	}
-	modelReset := false
-	if model != "" && model != strings.TrimSpace(current.Config.Model) {
-		config.Model = model
-		// A different model carries its own supported effort/fast pair. Reset
-		// stale options so the Host applies the selected model's defaults
-		// instead of rejecting them.
-		config.Effort = ""
-		config.Fast = false
-		changed = true
-		modelReset = true
-	}
-	if !changed {
-		sendNotice(send, "Bot settings unchanged", SlashNoticeHint)
-		return
-	}
-	if config.Name == "" {
-		sendNotice(send, "A Bot needs a name", SlashNoticeHint)
-		return
-	}
+func runBotSettingsFlow(ctx context.Context, client appserver.BotClient, current bot.Bot, config bot.Config, send func(tea.Msg)) {
 	revision := current.Revision
 	result, err := client.UpdateBot(ctx, appserver.UpdateBotRequest{
 		WriteBase: appserver.WriteBase{
@@ -895,7 +743,7 @@ func runBotSettingsFlow(
 			sendNotice(send, "Settings saved, but the Bot could not be reloaded: "+getErr.Error(), SlashNoticeHint)
 			return
 		}
-		send(botFlowResultMsg{bot: refreshed, modelReset: modelReset})
+		send(botFlowResultMsg{bot: refreshed})
 	case botCommandConflict:
 		// The published configuration and any local draft stay untouched.
 		sendNotice(send, botUpdateConflictNotice, SlashNoticeHint)
@@ -903,80 +751,6 @@ func runBotSettingsFlow(
 		sendNotice(send, botUpdateUnknownNotice, SlashNoticeHint)
 	default:
 		sendNotice(send, "Could not save Bot settings: "+botCommandDetail(result, err), SlashNoticeHint)
-	}
-}
-
-// promptBotModel uses Control's durable model identities for choice values and
-// comparison with saved settings; the public selector is presentation only.
-func promptBotModel(ctx context.Context, send func(tea.Msg), current bot.Bot, listModels func(context.Context) ([]SlashArgCandidate, error)) (string, bool) {
-	var choices []PromptChoice
-	display := botModelDisplay(current)
-	if listModels != nil {
-		candidates, err := listModels(ctx)
-		if err != nil {
-			sendNotice(send, "Could not load Bot models: "+err.Error(), SlashNoticeHint)
-			return "", false
-		}
-		choices = botModelChoices(candidates)
-	}
-	if len(choices) == 0 {
-		sendNotice(send, "No provider models available. Use /connect to configure one.", SlashNoticeHint)
-		return strings.TrimSpace(current.Config.Model), true
-	}
-	selected := strings.TrimSpace(current.Config.Model)
-	found := false
-	for _, choice := range choices {
-		found = found || choice.Value == selected
-	}
-	if selected != "" && !found {
-		// A removed model or a bounded catalog must not silently select the
-		// first available model when the user only edits name/description.
-		choices = append([]PromptChoice{{Label: display, Value: selected, Detail: "Keep current model"}}, choices...)
-	}
-	return promptBotValue(ctx, send, PromptRequestMsg{
-		Title:         "Bot settings",
-		Prompt:        "Model (now: " + displayOrNone(display) + ")",
-		Choices:       choices,
-		DefaultChoice: selected,
-		Filterable:    true,
-	})
-}
-
-func botModelChoices(candidates []SlashArgCandidate) []PromptChoice {
-	out := make([]PromptChoice, 0, len(candidates))
-	for _, candidate := range candidates {
-		value := strings.TrimSpace(candidate.ModelConfigID)
-		if value == "" {
-			// External Agent model candidates are not provider configurations.
-			continue
-		}
-		label := strings.TrimSpace(candidate.Display)
-		if label == "" {
-			label = strings.TrimSpace(candidate.Value)
-		}
-		out = append(out, PromptChoice{Label: label, Value: value, Detail: strings.TrimSpace(candidate.Detail)})
-	}
-	return out
-}
-
-// promptBotValue sends one modal prompt and waits for its answer. A cancelled
-// or interrupted prompt reports ok=false so the flow aborts without mutating
-// the Bot.
-func promptBotValue(ctx context.Context, send func(tea.Msg), req PromptRequestMsg) (string, bool) {
-	if send == nil {
-		return "", false
-	}
-	response := make(chan PromptResponse, 1)
-	req.Response = response
-	send(req)
-	select {
-	case <-ctx.Done():
-		return "", false
-	case reply, ok := <-response:
-		if !ok || reply.Err != nil {
-			return "", false
-		}
-		return reply.Line, true
 	}
 }
 
@@ -992,10 +766,7 @@ func (m *Model) handleBotFlowResult(msg botFlowResultMsg) tea.Cmd {
 		m.bot.bots = upsertBot(m.bot.bots, msg.bot)
 		return nil
 	}
-	notice := "Bot settings saved; they apply to your next message."
-	if msg.modelReset {
-		notice = "Bot settings saved; model options reset to the selected model's defaults and apply to your next message."
-	}
+	notice := "Bot settings saved"
 	return m.showHint(notice, botHintOptions())
 }
 

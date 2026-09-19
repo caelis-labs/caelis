@@ -26,12 +26,12 @@ func TestConnectEnterStartsInteractiveWizardAndIgnoresTypedArgs(t *testing.T) {
 		Wizards: DefaultWizards(),
 		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			if command == "connect" {
-				return []SlashArgCandidate{{Value: "model", Display: "Model provider"}}, nil
+				return []SlashArgCandidate{{Value: "api-key", Display: "Use an API key"}}, nil
 			}
 			return nil, nil
 		},
 	})
-	m.setInputText("/connect model")
+	m.setInputText("/connect api-key")
 	m.syncTextareaFromInput()
 	_, cmd := m.Update(keyPress("enter"))
 	if cmd != nil {
@@ -46,11 +46,11 @@ func TestConnectEnterStartsInteractiveWizardAndIgnoresTypedArgs(t *testing.T) {
 	if strings.TrimSpace(m.slashArgCommand) != "connect" {
 		t.Fatalf("slashArgCommand = %q, want connect", m.slashArgCommand)
 	}
-	if got := m.textarea.Value(); got != "model" {
-		t.Fatalf("textarea = %q, want model", got)
+	if got := m.textarea.Value(); got != "" {
+		t.Fatalf("textarea = %q, want composer separate from connect search", got)
 	}
-	if got := strings.TrimSpace(m.slashArgQuery); got != "model" {
-		t.Fatalf("slashArgQuery = %q, want model", got)
+	if got := strings.TrimSpace(m.slashArgQuery); got != "api-key" {
+		t.Fatalf("slashArgQuery = %q, want api-key", got)
 	}
 }
 
@@ -123,7 +123,7 @@ func TestConnectWizardACPFlowPicksLauncherAndModel(t *testing.T) {
 		},
 	})
 	runConnectTestCmd(m, m.openSlashArgPicker("connect"))
-	for i := 0; i < 4; i++ {
+	for i := 0; i < 3; i++ {
 		handled, cmd := m.handleWizardEnter()
 		if !handled {
 			t.Fatalf("wizard step %d was not handled; command=%q", i, m.slashArgCommand)
@@ -142,68 +142,6 @@ func TestConnectWizardACPFlowPicksLauncherAndModel(t *testing.T) {
 	}
 	if payload.Agent != "grok" || payload.Launcher != "installed" || payload.Model != "opus" || len(payload.ConfigValues) != 0 {
 		t.Fatalf("ACP connect payload = %#v", payload)
-	}
-}
-
-func TestConnectWizardDisconnectRequiresAgentAndConfirmation(t *testing.T) {
-	called := ""
-	m := NewModel(Config{
-		Wizards: DefaultWizards(),
-		ExecuteLine: func(submission Submission) TaskResultMsg {
-			called = submission.Text
-			return TaskResultMsg{}
-		},
-		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
-			switch command {
-			case "connect":
-				return []SlashArgCandidate{{Value: "disconnect", Display: "Disconnect local ACP Agent"}}, nil
-			case "connect-disconnect-agent":
-				return []SlashArgCandidate{{Value: "codex", Display: "/codex", Detail: "codex(gpt-5.6-sol)"}}, nil
-			case "connect-disconnect-confirm:codex":
-				return []SlashArgCandidate{{Value: "confirm", Display: "Disconnect /codex"}}, nil
-			default:
-				return nil, nil
-			}
-		},
-	})
-
-	m.setInputText("/connect disconnect")
-	m.syncTextareaFromInput()
-	if _, cmd := m.Update(keyPress("enter")); cmd != nil {
-		findAndRunTaskResult(cmd(), m)
-	}
-	if !m.isWizardActive() {
-		t.Fatal("/connect disconnect did not open the guided disconnect flow")
-	}
-	if handled, cmd := m.handleWizardEnter(); !handled {
-		t.Fatalf("source selection = handled:%v", handled)
-	} else {
-		runConnectTestCmd(m, cmd)
-	}
-	if got := m.slashArgCommand; got != "connect-disconnect-agent" {
-		t.Fatalf("command after source = %q, want Agent picker", got)
-	}
-	if handled, cmd := m.handleWizardEnter(); !handled {
-		t.Fatalf("Agent selection = handled:%v", handled)
-	} else {
-		runConnectTestCmd(m, cmd)
-	}
-	if called != "" {
-		t.Fatalf("Agent selection submitted %q before confirmation", called)
-	}
-	if got := m.slashArgCommand; got != "connect-disconnect-confirm:codex" {
-		t.Fatalf("command after Agent = %q, want confirmation", got)
-	}
-
-	handled, cmd := m.handleWizardEnter()
-	if !handled || cmd == nil {
-		t.Fatalf("confirmation = handled:%v cmd:%v", handled, cmd)
-	}
-	if !findAndRunTaskResult(cmd(), m) {
-		t.Fatal("expected TaskResultMsg after disconnect confirmation")
-	}
-	if called != "/connect disconnect codex confirmed" {
-		t.Fatalf("ExecuteLine called with %q", called)
 	}
 }
 
@@ -334,8 +272,8 @@ func TestConnectWizardRunsCodexAuthenticationInBackgroundAndShowsBrowserGuidance
 		SlashArgComplete: func(ctx context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch command {
 			case "connect":
-				return []SlashArgCandidate{{Value: "model", Display: "Model provider"}}, nil
-			case "connect-provider":
+				return []SlashArgCandidate{{Value: "account", Display: "Sign in with an account"}}, nil
+			case "connect-provider-account":
 				return []SlashArgCandidate{{Value: "codex", Display: "codex", NoAuth: true}}, nil
 			default:
 				modelconfig.ReportAuthProgress(ctx, modelconfig.AuthProgress{
@@ -348,15 +286,15 @@ func TestConnectWizardRunsCodexAuthenticationInBackgroundAndShowsBrowserGuidance
 			}
 		},
 	})
-	m.width = 120
+	m.width, m.height = 120, 30
 	runConnectTestCmd(m, m.openSlashArgPicker("connect"))
 	if handled, cmd := m.handleWizardEnter(); !handled {
-		t.Fatalf("model source selection = handled:%v", handled)
+		t.Fatalf("account source selection = handled:%v", handled)
 	} else {
 		runConnectTestCmd(m, cmd)
 	}
-	if got := m.slashArgCommand; got != "connect-provider" {
-		t.Fatalf("command after model source = %q", got)
+	if got := m.slashArgCommand; got != "connect-provider-account" {
+		t.Fatalf("command after account source = %q", got)
 	}
 	handled, cmd := m.handleWizardEnter()
 	if !handled {
@@ -379,11 +317,11 @@ func TestConnectWizardRunsCodexAuthenticationInBackgroundAndShowsBrowserGuidance
 		close(release)
 		t.Fatal("Codex auth progress was not forwarded to the TUI")
 	}
-	if got := ansi.Strip(m.renderModelAuthDrawer()); !strings.Contains(got, "Finish signing in via your browser") || !strings.Contains(got, "https://auth.openai.com/oauth/authorize?test=1") || !strings.Contains(got, "Esc cancels") {
+	if got := ansi.Strip(m.renderWizardOverlay()); !strings.Contains(got, "Finish signing in to Codex in your browser") || !strings.Contains(got, "https://auth.openai.com/oauth/authorize?test=1") || !strings.Contains(got, "esc back") {
 		close(release)
 		t.Fatalf("renderModelAuthDrawer() = %q", got)
 	}
-	if hint := ansi.Strip(m.buildHintText()); !strings.Contains(hint, "Finish signing in to Codex in your browser") || !strings.Contains(hint, "Esc cancels") {
+	if hint := ansi.Strip(m.buildHintText()); hint != "" {
 		close(release)
 		t.Fatalf("buildHintText() = %q", hint)
 	}
@@ -690,8 +628,8 @@ func TestConnectWizardSkipsDirectlyToAPIKeyForMiniMax(t *testing.T) {
 		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch command {
 			case "connect":
-				return []SlashArgCandidate{{Value: "model", Display: "Model provider"}}, nil
-			case "connect-provider":
+				return []SlashArgCandidate{{Value: "api-key", Display: "Use an API key"}}, nil
+			case "connect-provider-api-key":
 				return []SlashArgCandidate{{Value: "minimax", Display: "minimax"}}, nil
 			case "connect-apikey:minimax":
 				return nil, nil
@@ -724,8 +662,8 @@ func TestConnectWizardOllamaLocalEndpointSkipsAPIKey(t *testing.T) {
 		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch command {
 			case "connect":
-				return []SlashArgCandidate{{Value: "model", Display: "Model provider"}}, nil
-			case "connect-provider":
+				return []SlashArgCandidate{{Value: "api-key", Display: "Use an API key"}}, nil
+			case "connect-provider-api-key":
 				return []SlashArgCandidate{{Value: "ollama", Display: "ollama"}}, nil
 			case "connect-baseurl:ollama":
 				return []SlashArgCandidate{
@@ -775,8 +713,8 @@ func TestConnectWizardOllamaCustomEndpointSkipsAPIKey(t *testing.T) {
 		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch command {
 			case "connect":
-				return []SlashArgCandidate{{Value: "model", Display: "Model provider"}}, nil
-			case "connect-provider":
+				return []SlashArgCandidate{{Value: "api-key", Display: "Use an API key"}}, nil
+			case "connect-provider-api-key":
 				return []SlashArgCandidate{{Value: "ollama", Display: "ollama"}}, nil
 			case "connect-baseurl:ollama":
 				return []SlashArgCandidate{
@@ -817,8 +755,8 @@ func TestConnectWizardOllamaCloudEndpointRequiresAPIKey(t *testing.T) {
 		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch command {
 			case "connect":
-				return []SlashArgCandidate{{Value: "model", Display: "Model provider"}}, nil
-			case "connect-provider":
+				return []SlashArgCandidate{{Value: "api-key", Display: "Use an API key"}}, nil
+			case "connect-provider-api-key":
 				return []SlashArgCandidate{{Value: "ollama", Display: "ollama"}}, nil
 			case "connect-baseurl:ollama":
 				return []SlashArgCandidate{
@@ -851,9 +789,6 @@ func TestConnectWizardOllamaCloudEndpointRequiresAPIKey(t *testing.T) {
 	if got := strings.TrimSpace(m.slashArgCommand); got != "connect-apikey:ollama" {
 		t.Fatalf("slashArgCommand after Ollama Cloud endpoint = %q, want API key step", got)
 	}
-	if hint := m.wizardHintText(); hint != "/connect api_key: paste a key" {
-		t.Fatalf("wizard hint = %q, want pasted API-key guidance", hint)
-	}
 
 	m.slashArgQuery = "ollama-secret"
 	handled, cmd = m.handleWizardEnter()
@@ -873,8 +808,8 @@ func TestConnectWizardKeepsBaseURLStepForCompatibleProviders(t *testing.T) {
 		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch command {
 			case "connect":
-				return []SlashArgCandidate{{Value: "model", Display: "Model provider"}}, nil
-			case "connect-provider":
+				return []SlashArgCandidate{{Value: "api-key", Display: "Use an API key"}}, nil
+			case "connect-provider-api-key":
 				return []SlashArgCandidate{{Value: "openai-compatible", Display: "openai-compatible"}}, nil
 			case "connect-baseurl:openai-compatible":
 				return []SlashArgCandidate{{Value: "https://api.openai.com/v1", Display: "https://api.openai.com/v1"}}, nil
@@ -908,8 +843,8 @@ func TestConnectWizardKeepsBaseURLStepForOpenAIProtocolProviders(t *testing.T) {
 				SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 					switch command {
 					case "connect":
-						return []SlashArgCandidate{{Value: "model", Display: "Model provider"}}, nil
-					case "connect-provider":
+						return []SlashArgCandidate{{Value: "api-key", Display: "Use an API key"}}, nil
+					case "connect-provider-api-key":
 						return []SlashArgCandidate{{Value: provider, Display: provider}}, nil
 					case "connect-baseurl:" + provider:
 						return []SlashArgCandidate{{Value: "https://api.openai.com/v1", Display: "https://api.openai.com/v1"}}, nil
@@ -942,8 +877,8 @@ func TestConnectWizardSkipsAPIKeyForReusableBaseURLAuth(t *testing.T) {
 		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch command {
 			case "connect":
-				return []SlashArgCandidate{{Value: "model", Display: "Model provider"}}, nil
-			case "connect-provider":
+				return []SlashArgCandidate{{Value: "api-key", Display: "Use an API key"}}, nil
+			case "connect-provider-api-key":
 				return []SlashArgCandidate{{Value: "openai-compatible", Display: "openai-compatible"}}, nil
 			case "connect-baseurl:openai-compatible":
 				return []SlashArgCandidate{{Value: baseURL, Display: baseURL, Detail: "configured auth", NoAuth: true}}, nil
@@ -982,8 +917,8 @@ func TestConnectWizardSkipsAPIKeyForReusableDefaultProviderAuth(t *testing.T) {
 		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch command {
 			case "connect":
-				return []SlashArgCandidate{{Value: "model", Display: "Model provider"}}, nil
-			case "connect-provider":
+				return []SlashArgCandidate{{Value: "api-key", Display: "Use an API key"}}, nil
+			case "connect-provider-api-key":
 				return []SlashArgCandidate{{Value: "deepseek", Display: "deepseek", Detail: "configured auth", NoAuth: true}}, nil
 			default:
 				state, ok := connectModelCommandState(command)
@@ -1016,8 +951,8 @@ func TestConnectWizardTypedXiaomiAdvancesToEndpointStep(t *testing.T) {
 		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch command {
 			case "connect":
-				return []SlashArgCandidate{{Value: "model", Display: "Model provider"}}, nil
-			case "connect-provider":
+				return []SlashArgCandidate{{Value: "api-key", Display: "Use an API key"}}, nil
+			case "connect-provider-api-key":
 				return []SlashArgCandidate{{Value: "xiaomi", Display: "xiaomi"}}, nil
 			case "connect-baseurl:xiaomi":
 				return []SlashArgCandidate{
@@ -1029,7 +964,7 @@ func TestConnectWizardTypedXiaomiAdvancesToEndpointStep(t *testing.T) {
 			}
 		},
 	})
-	m.setInputText("/connect model")
+	m.setInputText("/connect api-key")
 	m.syncTextareaFromInput()
 	_, cmd := m.Update(keyPress("enter"))
 	if cmd != nil {
@@ -1050,9 +985,6 @@ func TestConnectWizardTypedXiaomiAdvancesToEndpointStep(t *testing.T) {
 	if got := strings.TrimSpace(m.slashArgCommand); got != "connect-baseurl:xiaomi" {
 		t.Fatalf("slashArgCommand after typed xiaomi provider = %q, want connect-baseurl:xiaomi", got)
 	}
-	if got := m.wizardHintText(); !strings.Contains(got, "/connect endpoint") {
-		t.Fatalf("wizard hint = %q, want endpoint hint", got)
-	}
 }
 
 func TestConnectWizardPrefixSelectsXiaomiCandidateAndKeepsModelCandidates(t *testing.T) {
@@ -1062,8 +994,8 @@ func TestConnectWizardPrefixSelectsXiaomiCandidateAndKeepsModelCandidates(t *tes
 		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch command {
 			case "connect":
-				return []SlashArgCandidate{{Value: "model", Display: "Model provider"}}, nil
-			case "connect-provider":
+				return []SlashArgCandidate{{Value: "api-key", Display: "Use an API key"}}, nil
+			case "connect-provider-api-key":
 				return []SlashArgCandidate{{Value: "xiaomi", Display: "xiaomi"}}, nil
 			case "connect-baseurl:xiaomi":
 				return []SlashArgCandidate{
@@ -1081,7 +1013,7 @@ func TestConnectWizardPrefixSelectsXiaomiCandidateAndKeepsModelCandidates(t *tes
 			}
 		},
 	})
-	m.setInputText("/connect model")
+	m.setInputText("/connect api-key")
 	m.syncTextareaFromInput()
 	_, cmd := m.Update(keyPress("enter"))
 	if cmd != nil {
@@ -1137,15 +1069,15 @@ func TestConnectWizardDoesNotAcceptUnknownProviderFreeform(t *testing.T) {
 		Wizards: DefaultWizards(),
 		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			if command == "connect" {
-				return []SlashArgCandidate{{Value: "model", Display: "Model provider"}}, nil
+				return []SlashArgCandidate{{Value: "api-key", Display: "Use an API key"}}, nil
 			}
-			if command == "connect-provider" {
+			if command == "connect-provider-api-key" {
 				return []SlashArgCandidate{{Value: "xiaomi", Display: "xiaomi"}}, nil
 			}
 			return nil, nil
 		},
 	})
-	m.setInputText("/connect model")
+	m.setInputText("/connect api-key")
 	m.syncTextareaFromInput()
 	_, cmd := m.Update(keyPress("enter"))
 	if cmd != nil {
@@ -1163,7 +1095,7 @@ func TestConnectWizardDoesNotAcceptUnknownProviderFreeform(t *testing.T) {
 		t.Fatal("provider step enter was not handled")
 	}
 	runConnectTestCmd(m, cmd)
-	if got := strings.TrimSpace(m.slashArgCommand); got != "connect-provider" {
+	if got := strings.TrimSpace(m.slashArgCommand); got != "connect-provider-api-key" {
 		t.Fatalf("slashArgCommand after unknown provider input = %q, want to stay on connect-provider step", got)
 	}
 	if got := strings.TrimSpace(m.wizard.state["provider"]); got != "" {
@@ -1183,8 +1115,8 @@ func TestConnectWizardAddsEndpointStepForXiaomiTokenPlan(t *testing.T) {
 		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch command {
 			case "connect":
-				return []SlashArgCandidate{{Value: "model", Display: "Model provider"}}, nil
-			case "connect-provider":
+				return []SlashArgCandidate{{Value: "api-key", Display: "Use an API key"}}, nil
+			case "connect-provider-api-key":
 				return []SlashArgCandidate{{Value: "xiaomi", Display: "xiaomi"}}, nil
 			case "connect-baseurl:xiaomi":
 				return []SlashArgCandidate{
@@ -1264,8 +1196,8 @@ func TestConnectWizardSkipsAPIKeyForReusableEndpointAuth(t *testing.T) {
 		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch command {
 			case "connect":
-				return []SlashArgCandidate{{Value: "model", Display: "Model provider"}}, nil
-			case "connect-provider":
+				return []SlashArgCandidate{{Value: "api-key", Display: "Use an API key"}}, nil
+			case "connect-provider-api-key":
 				return []SlashArgCandidate{{Value: "xiaomi", Display: "xiaomi"}}, nil
 			case "connect-baseurl:xiaomi":
 				return []SlashArgCandidate{{Value: apiBaseURL, Display: "api cn", Detail: "configured auth", NoAuth: true}}, nil
@@ -1295,55 +1227,6 @@ func TestConnectWizardSkipsAPIKeyForReusableEndpointAuth(t *testing.T) {
 	}
 }
 
-func TestConnectWizardAPIKeyHintRequiresPastedKeyForEveryXiaomiEndpoint(t *testing.T) {
-	tests := []struct {
-		name    string
-		baseURL string
-	}{
-		{name: "api cn", baseURL: "https://api.xiaomimimo.com/v1"},
-		{name: "token plan cn", baseURL: "https://token-plan-cn.xiaomimimo.com/v1"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			m := NewModel(Config{
-				Wizards: DefaultWizards(),
-			})
-			def := connectModelWizard()
-			m.wizard = &wizardRuntime{
-				def:       &def,
-				stepIndex: 3,
-				state: map[string]string{
-					"provider": "xiaomi",
-					"baseurl":  tt.baseURL,
-				},
-			}
-			got := m.wizardHintText()
-			if got != "/connect api_key: paste a key" {
-				t.Fatalf("wizard hint = %q, want pasted API-key guidance", got)
-			}
-		})
-	}
-}
-
-func TestConnectWizardAPIKeyHintDoesNotInferEnvironmentFromCustomHost(t *testing.T) {
-	m := NewModel(Config{
-		Wizards: DefaultWizards(),
-	})
-	def := connectModelWizard()
-	m.wizard = &wizardRuntime{
-		def:       &def,
-		stepIndex: 3,
-		state: map[string]string{
-			"provider": "xiaomi",
-			"baseurl":  "https://token-plan-cn.xiaomimimo.com/custom/v1",
-		},
-	}
-	got := m.wizardHintText()
-	if got != "/connect api_key: paste a key" {
-		t.Fatalf("wizard hint = %q, want pasted API-key guidance", got)
-	}
-}
-
 func TestConnectWizardSkipsAdvancedStepsForKnownModelCandidate(t *testing.T) {
 	called := ""
 	m := NewModel(Config{
@@ -1355,8 +1238,8 @@ func TestConnectWizardSkipsAdvancedStepsForKnownModelCandidate(t *testing.T) {
 		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch command {
 			case "connect":
-				return []SlashArgCandidate{{Value: "model", Display: "Model provider"}}, nil
-			case "connect-provider":
+				return []SlashArgCandidate{{Value: "api-key", Display: "Use an API key"}}, nil
+			case "connect-provider-api-key":
 				return []SlashArgCandidate{{Value: "minimax", Display: "minimax"}}, nil
 			default:
 				state, ok := connectModelCommandState(command)
@@ -1414,8 +1297,8 @@ func TestConnectWizardAsksImageCapabilityWhenOtherModelMetadataIsKnown(t *testin
 		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch {
 			case command == "connect":
-				return []SlashArgCandidate{{Value: "model", Display: "Model provider"}}, nil
-			case command == "connect-provider":
+				return []SlashArgCandidate{{Value: "api-key", Display: "Use an API key"}}, nil
+			case command == "connect-provider-api-key":
 				return []SlashArgCandidate{{Value: "minimax", Display: "minimax"}}, nil
 			case strings.HasPrefix(command, "connect-image-input:"):
 				return []SlashArgCandidate{{Value: "false"}, {Value: "true"}}, nil
@@ -1486,8 +1369,8 @@ func TestConnectWizardSelectsMultipleMetadataBackedModels(t *testing.T) {
 		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch command {
 			case "connect":
-				return []SlashArgCandidate{{Value: "model", Display: "Model provider"}}, nil
-			case "connect-provider":
+				return []SlashArgCandidate{{Value: "api-key", Display: "Use an API key"}}, nil
+			case "connect-provider-api-key":
 				return []SlashArgCandidate{{Value: "minimax", Display: "minimax"}}, nil
 			default:
 				state, ok := connectModelCommandState(command)
@@ -1501,6 +1384,7 @@ func TestConnectWizardSelectsMultipleMetadataBackedModels(t *testing.T) {
 			}
 		},
 	})
+	m.width, m.height = 120, 30
 	openModelConnectWizard(t, m)
 	if handled, cmd := m.handleWizardEnter(); !handled {
 		t.Fatal("provider selection was not handled")
@@ -1516,7 +1400,7 @@ func TestConnectWizardSelectsMultipleMetadataBackedModels(t *testing.T) {
 	if len(m.slashArgCandidates) != 2 {
 		t.Fatalf("model candidates = %#v", m.slashArgCandidates)
 	}
-	plain := ansi.Strip(m.renderInputOverlay())
+	plain := ansi.Strip(m.renderWizardOverlay())
 	if !strings.Contains(plain, "[ ] minimax/MiniMax-M2.7") || !strings.Contains(plain, "[ ] minimax/MiniMax-M2.7-highspeed") {
 		t.Fatalf("initial model picker missing unchecked boxes:\n%s", plain)
 	}
@@ -1531,7 +1415,7 @@ func TestConnectWizardSelectsMultipleMetadataBackedModels(t *testing.T) {
 	if len(m.slashArgCandidates) != 2 {
 		t.Fatalf("model candidates after first toggle = %#v, want checked row retained", m.slashArgCandidates)
 	}
-	plain = ansi.Strip(m.renderInputOverlay())
+	plain = ansi.Strip(m.renderWizardOverlay())
 	if !strings.Contains(plain, "[x] minimax/MiniMax-M2.7") {
 		t.Fatalf("model picker missing checked first model:\n%s", plain)
 	}
@@ -1567,8 +1451,8 @@ func TestConnectWizardSelectsMultipleMetadataBackedModels(t *testing.T) {
 	if got := m.wizard.state["model"]; got != "MiniMax-M2.7,MiniMax-M2.7-highspeed" {
 		t.Fatalf("selected models = %q", got)
 	}
-	plain = ansi.Strip(m.renderInputOverlay())
-	if strings.Count(plain, "[x]") != 2 || !strings.Contains(plain, "click/space/tab toggle") || !strings.Contains(plain, "enter confirm") {
+	plain = ansi.Strip(m.renderWizardOverlay())
+	if strings.Count(plain, "[x]") != 2 || !strings.Contains(plain, "space toggle") || !strings.Contains(plain, "Connect 2 models") {
 		t.Fatalf("model picker missing checked models or checkbox guidance:\n%s", plain)
 	}
 	handled, cmd := m.handleWizardEnter()
@@ -1599,8 +1483,8 @@ func TestConnectWizardKeepsAdvancedStepsForCustomCompatibleModel(t *testing.T) {
 		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch command {
 			case "connect":
-				return []SlashArgCandidate{{Value: "model", Display: "Model provider"}}, nil
-			case "connect-provider":
+				return []SlashArgCandidate{{Value: "api-key", Display: "Use an API key"}}, nil
+			case "connect-provider-api-key":
 				return []SlashArgCandidate{{Value: "openai-compatible", Display: "openai-compatible"}}, nil
 			case "connect-baseurl:openai-compatible":
 				return []SlashArgCandidate{{Value: baseURL, Display: baseURL, NoAuth: true}}, nil
@@ -1699,8 +1583,8 @@ func TestConnectWizardTypedKnownModelAlsoSkipsAdvancedSteps(t *testing.T) {
 		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch command {
 			case "connect":
-				return []SlashArgCandidate{{Value: "model", Display: "Model provider"}}, nil
-			case "connect-provider":
+				return []SlashArgCandidate{{Value: "api-key", Display: "Use an API key"}}, nil
+			case "connect-provider-api-key":
 				return []SlashArgCandidate{{Value: "minimax", Display: "minimax"}}, nil
 			default:
 				state, ok := connectModelCommandState(command)
@@ -1757,11 +1641,11 @@ func advanceConnectWizardSourceToProvider(t *testing.T, m *Model) {
 	t.Helper()
 	handled, cmd := m.handleWizardEnter()
 	if !handled {
-		t.Fatal("model source selection was not handled")
+		t.Fatal("API-key source selection was not handled")
 	}
 	runConnectTestCmd(m, cmd)
-	if got := strings.TrimSpace(m.slashArgCommand); got != "connect-provider" {
-		t.Fatalf("slashArgCommand after model source = %q, want connect-provider", got)
+	if got := strings.TrimSpace(m.slashArgCommand); got != "connect-provider-api-key" {
+		t.Fatalf("slashArgCommand after API-key source = %q, want connect-provider-api-key", got)
 	}
 }
 
@@ -1785,6 +1669,9 @@ func connectModelCommandState(command string) (connectwizard.ConnectWizardState,
 
 func refreshConnectSlashArgCandidates(t *testing.T, m *Model) {
 	t.Helper()
+	if m.wizardOverlay != nil {
+		m.slashArgQuery = m.textarea.Value()
+	}
 	m.dropStaleSlashArgCandidates()
 	runConnectTestCmd(m, m.requestCurrentSlashArgCompletion())
 }
@@ -1828,13 +1715,16 @@ func findAndRunTaskResult(msg tea.Msg, m *Model) bool {
 		return true
 	}
 	switch msg.(type) {
+	case botSettingsSavedMsg:
+		m.Update(msg)
+		return true
 	case submissionDispatchMsg:
 		_, nextCmd := m.Update(msg)
 		if nextCmd == nil {
 			return false
 		}
 		return findAndRunTaskResult(nextCmd(), m)
-	case slashArgLoadResultMsg, slashArgCompletionResultMsg:
+	case slashArgLoadResultMsg, slashArgCompletionResultMsg, botSettingsLoadedMsg:
 		_, nextCmd := m.Update(msg)
 		runConnectTestCmd(m, nextCmd)
 		return false

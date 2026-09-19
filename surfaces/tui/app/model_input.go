@@ -19,6 +19,9 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if m.themePicker != nil && m.activePrompt == m.themePicker.prompt && m.subagentOverlay == nil {
 		return m, m.handleThemePickerMouse(msg)
 	}
+	if m.wizardOverlay != nil && m.activePrompt == nil {
+		return m, m.handleWizardOverlayMouse(msg)
+	}
 	m.updatePaneChromeHover(msg)
 	if handled, cmd := m.handleSubagentOverlayMouse(msg); handled {
 		return m, cmd
@@ -587,7 +590,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if handled, cmd := m.handleTerminalResponseGuardKey(msg); handled {
 		return m, cmd
 	}
-	if key.Matches(msg, m.keys.Update) {
+	if m.wizardOverlay == nil && m.sessionPicker == nil && key.Matches(msg, m.keys.Update) {
 		return m.handleUpdateKey()
 	}
 	if key.Matches(msg, m.keys.Quit) {
@@ -602,7 +605,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.sessionPicker != nil {
 		return m, m.handleSessionPickerKey(msg)
 	}
-	if msg.String() == "ctrl+o" {
+	if m.wizardOverlay == nil && msg.String() == "ctrl+o" {
+		if m.botMode() {
+			return m, m.openBotPicker()
+		}
 		return m, m.openSessionPicker()
 	}
 	if m.activePrompt != nil && m.activePrompt.approvalRequestID != "" && m.turnRunning() && key.Matches(msg, m.keys.Interrupt) {
@@ -611,6 +617,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// External prompt input takes priority.
 	if m.activePrompt != nil {
 		return m, m.handlePromptKey(msg)
+	}
+	if m.wizardOverlay != nil {
+		return m, m.handleWizardOverlayKey(msg)
 	}
 	if m.subagentOverlay != nil {
 		return m, m.handleSubagentOverlayKey(msg)
@@ -1151,6 +1160,13 @@ func (m *Model) handlePaste(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
 	if m.activePrompt != nil {
 		return m, m.handlePromptPaste(msg)
 	}
+	if m.wizardOverlay != nil {
+		return m, m.handleWizardOverlayPaste(msg)
+	}
+	if m.sessionPicker != nil {
+		m.sessionPicker.setQuery(m.sessionPicker.query + strings.ReplaceAll(normalizeClipboardText(msg.String()), "\n", " "))
+		return m, nil
+	}
 	if m.subagentOverlay != nil {
 		return m, m.handleSubagentOverlayPaste(msg)
 	}
@@ -1579,6 +1595,7 @@ func (m *Model) executeLineCmd(submission Submission) tea.Cmd {
 		if isSessionSelectionLine(submission.Text) && result.Err != nil {
 			result.ContinueRunning = true
 		}
+		result.localID = submission.localID
 		result.sessionSelection = isSessionSelectionLine(submission.Text)
 		generation := submission.viewGeneration
 		if result.sessionSelection && sender != nil {

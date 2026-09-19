@@ -31,6 +31,7 @@ func TestDisconnectWizardSelectsMultipleTargetsBeforeSubmission(t *testing.T) {
 					return candidates, nil
 				},
 			})
+			m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 			runConnectTestCmd(m, m.openSlashArgPicker("disconnect"))
 			_, cmd := m.handleWizardEnter()
 			runConnectTestCmd(m, cmd)
@@ -47,15 +48,15 @@ func TestDisconnectWizardSelectsMultipleTargetsBeforeSubmission(t *testing.T) {
 			}
 			press(tea.KeySpace)
 			press(tea.KeyDown)
-			press(tea.KeyTab)
-			press(tea.KeyTab) // Clear second; only first and third should be removed.
+			press(tea.KeySpace)
+			press(tea.KeySpace) // Clear second; only first and third should be removed.
 			press(tea.KeyDown)
 			press(tea.KeySpace)
 			if called != "" {
 				t.Fatalf("selection submitted before confirmation: %q", called)
 			}
-			frame := ansi.Strip(m.renderInputOverlay())
-			for _, want := range []string{"[x] first", "[ ] second", "[x] third", "click/space/tab toggle", "enter confirm"} {
+			frame := ansi.Strip(m.renderWizardOverlay())
+			for _, want := range []string{"[x] first", "[ ] second", "[x] third", "space toggle", "Disconnect 2"} {
 				if !strings.Contains(frame, want) {
 					t.Fatalf("disconnect picker missing %q:\n%s", want, frame)
 				}

@@ -13,7 +13,7 @@ func TestActiveCompletionKindDoesNotFallThroughEmptyFlaggedPicker(t *testing.T) 
 			kind: completionSlashArg,
 			activate: func(model *Model) {
 				model.slashArgActive = true
-				model.slashArgCommand = "model"
+				model.slashArgCommand = "plugin rm"
 			},
 		},
 	}

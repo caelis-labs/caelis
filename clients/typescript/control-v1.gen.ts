@@ -788,6 +788,15 @@ export interface MarketplaceSnapshot {
 
 export type MarketplaceSnapshotList = Array<MarketplaceSnapshot>;
 
+export interface ModelSelection {
+  context_window_tokens?: number;
+  current?: boolean;
+  effort: string;
+  efforts: Array<string>;
+  fast?: boolean;
+  fast_supported?: boolean;
+}
+
 export interface ModelUsageSnapshot {
   model?: string;
   provider?: string;
@@ -1352,6 +1361,7 @@ export interface SlashArgCandidate {
   model_config_id?: string;
   model_image_input_known?: boolean;
   model_metadata_complete?: boolean;
+  model_selection?: ModelSelection;
   no_auth?: boolean;
   value: string;
 }

@@ -18,6 +18,8 @@ type completionSnapshot struct {
 // slices so an empty loading picker cannot expose another completion behind it.
 func (m *Model) activeCompletionKind() completionKind {
 	switch {
+	case m.wizardOverlay != nil:
+		return completionNone
 	case len(m.mentionCandidates) > 0:
 		return completionMention
 	case m.mentionRequestPending:
@@ -33,7 +35,7 @@ func (m *Model) activeCompletionKind() completionKind {
 
 func (m *Model) completionSnapshot() (completionSnapshot, bool) {
 	snapshot, ok := m.completionSnapshotForKind(m.activeCompletionKind())
-	return snapshot, ok && snapshot.total > 0
+	return snapshot, ok && (snapshot.total > 0 || m.isModelPicker())
 }
 
 func (m *Model) completionSnapshotForKind(kind completionKind) (completionSnapshot, bool) {
@@ -114,6 +116,11 @@ func (m *Model) setCompletionIndex(kind completionKind, index int) {
 		m.mentionIndex = index
 	case completionSlashArg:
 		m.slashArgIndex = index
+		if m.modelPicker != nil {
+			if candidates := m.visibleSlashArgCandidates(); index >= 0 && index < len(candidates) {
+				m.modelPicker.selected = candidates[index].Value
+			}
+		}
 	case completionSlashCommand:
 		m.slashIndex = index
 	}

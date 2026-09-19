@@ -14,11 +14,6 @@ import (
 	"github.com/caelis-labs/caelis/surfaces/internal/transcript"
 )
 
-type agentRosterServices interface {
-	controlagents.Connector
-	controlagents.Disconnector
-}
-
 func dispatchTUIPrivateSlashCommandWithContext(ctx context.Context, service ControlServices, sender *ProgramSender, cmd string, args string) executeLineResult {
 	ctx = contextOrBackground(ctx)
 	if sender != nil {
@@ -72,30 +67,9 @@ func projectResumeReplayEvents(events []eventstream.Envelope) []TranscriptEvent 
 	return transcript.ProjectReplayEvents(events, tuiTranscriptProjector{})
 }
 
-func slashConnectWithContext(ctx context.Context, service ControlServices, agents agentRosterServices, send func(tea.Msg), args string) TaskResultMsg {
+func slashConnectWithContext(ctx context.Context, service ControlServices, agents controlagents.Connector, send func(tea.Msg), args string) TaskResultMsg {
 	ctx = contextOrBackground(ctx)
 	kind, payloadText, _ := controlprompt.ParseFirst(strings.TrimSpace(args))
-	if strings.EqualFold(strings.TrimSpace(kind), "disconnect") {
-		agentID, confirmation, _ := controlprompt.ParseFirst(payloadText)
-		if strings.TrimSpace(agentID) == "" || !strings.EqualFold(strings.TrimSpace(confirmation), "confirmed") {
-			sendNotice(send, "Choose an ACP Agent in /connect disconnect, then confirm", SlashNoticeHint)
-			return TaskResultMsg{SuppressTurnDivider: true}
-		}
-		if agents == nil {
-			return TaskResultMsg{Err: controlprompt.FriendlyCommandError("disconnect ACP Agent", fmt.Errorf("ACP Agent roster service is unavailable"))}
-		}
-		result, err := agents.DisconnectACP(ctx, agentID)
-		if err != nil {
-			return TaskResultMsg{Err: controlprompt.FriendlyCommandError("disconnect ACP Agent", err)}
-		}
-		message := "Disconnected /" + strings.TrimSpace(result.Agent.ID)
-		if result.ConnectionRemoved {
-			message += " · local connection removed"
-		}
-		sendNotice(send, message, SlashNoticeFeedback)
-		refreshAgentSlashCommandsViaSendWithContext(ctx, service, send)
-		return TaskResultMsg{SuppressTurnDivider: true}
-	}
 	if strings.EqualFold(strings.TrimSpace(kind), "acp") {
 		payload, err := parseACPConnectWizardPayload(payloadText)
 		if err != nil {

@@ -80,8 +80,9 @@ func (s *runtimeComposition) ListModelChoices(ctx context.Context, ref session.S
 	}
 	profiles := modelprofile.NormalizeConfiguration(snapshot.placement.Profiles)
 	choices := make([]ModelChoice, 0, len(profiles.Profiles)+1)
+	var state map[string]any
 	if strings.TrimSpace(ref.SessionID) != "" {
-		state, err := s.sessions.SnapshotState(ctx, ref)
+		state, err = s.sessions.SnapshotState(ctx, ref)
 		if err != nil {
 			return nil, err
 		}
@@ -135,7 +136,7 @@ func (s *runtimeComposition) ListModelChoices(ctx context.Context, ref session.S
 		choice.ProfileID = modelprofile.BuildProviderID(choice.ID)
 		choices = append(choices, choice)
 	}
-	return dedupeModelChoices(choices), nil
+	return s.modelSelectionChoices(ctx, ref, profiles, dedupeModelChoices(choices), state)
 }
 
 func modelProfileEfforts(profile modelprofile.ModelProfile) []string {

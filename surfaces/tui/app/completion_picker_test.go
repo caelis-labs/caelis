@@ -117,7 +117,7 @@ func TestRenderSlashArgListKeepsSelectedHintContrast(t *testing.T) {
 	model.theme.InvalidateTokens()
 	model.themeCacheKey = ""
 	model.slashArgActive = true
-	model.slashArgCommand = "connect-provider"
+	model.slashArgCommand = "connect-provider-api-key"
 	model.slashArgCandidates = []SlashArgCandidate{
 		{Value: "codex", Display: "codex", Detail: "ChatGPT subscription models through Codex"},
 		{Value: "grok", Display: "grok", Detail: "Grok models through an eligible xAI subscription"},

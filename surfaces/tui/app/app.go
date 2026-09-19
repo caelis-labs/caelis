@@ -348,6 +348,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case botPickerResultMsg:
 		m.applyBotPickerResult(typed)
 		return m, nil
+	case botSettingsLoadedMsg:
+		return m, m.handleBotSettingsLoaded(typed)
+	case botSettingsSavedMsg:
+		return m, m.handleBotSettingsSaved(typed)
 	case botFlowResultMsg:
 		return m, m.handleBotFlowResult(typed)
 	case sessionPickerRefreshMsg:

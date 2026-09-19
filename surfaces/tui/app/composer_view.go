@@ -154,15 +154,9 @@ func (m *Model) buildComposeInputLayout() composerInputLayout {
 
 	value := m.textarea.Value()
 	cursorIndex := m.textareaCursorIndex()
-	if m.isWizardActive() && m.wizard != nil {
-		if visible, visibleCursor, ok := wizardVisibleInputAtCursor(m.wizard.def.Command, []rune(value), cursorIndex); ok {
-			value = visible
-			cursorIndex = visibleCursor
-			if m.wizard.hideInput() {
-				value = strings.Repeat("•", len([]rune(visible)))
-				cursorIndex = len([]rune(value))
-			}
-		}
+	if m.wizardOverlay == nil && m.isWizardActive() && m.wizard.hideInput() {
+		value = strings.Repeat("•", len([]rune(value)))
+		cursorIndex = len([]rune(value))
 	}
 	totalWidth := m.composerContentWidth()
 	contentWidth := maxInt(1, totalWidth-promptWidth)

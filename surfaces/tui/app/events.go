@@ -90,6 +90,7 @@ type UpdateCheckResultMsg struct {
 }
 
 type TaskResultMsg struct {
+	localID             uint64
 	sessionSelection    bool
 	ExitNow             bool
 	Err                 error

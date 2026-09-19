@@ -1,12 +1,9 @@
 package tuiapp
 
 import (
-	"context"
-	"errors"
 	"strings"
 	"testing"
 
-	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/caelis-labs/caelis/control/bot"
@@ -70,41 +67,20 @@ func TestBotPickerRenderEvidence(t *testing.T) {
 }
 
 func TestBotCreatePromptRenderEvidence(t *testing.T) {
-	client := &fakeBotClient{}
-	send := make(chan tea.Msg, 8)
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		runBotCreateFlow(context.Background(), client, func(msg tea.Msg) { send <- msg })
-	}()
-	req := nextBotPrompt(t, send)
-	for _, step := range []struct{ name, hint string }{
-		{"name", "Enter New Bot name"},
-		{"description", "optional; Enter to skip"},
-	} {
-		if step.name == "description" {
-			req.Response <- PromptResponse{Line: "Ada"}
-			req = nextBotPrompt(t, send)
-		}
-		for _, size := range botRenderSizes {
-			t.Run(step.name+"/"+size.name, func(t *testing.T) {
-				model := newBotTestModel(t, size.width, size.height, client, nil)
-				model.enqueuePrompt(req)
-				model.syncViewportContent()
-				frame := model.View().Content
-				plain := ansi.Strip(frame)
-				if !strings.Contains(strings.Join(strings.Fields(plain), " "), step.hint) {
-					t.Fatalf("create prompt omitted %q:\n%s", step.hint, plain)
-				}
-				assertBotFrameBounds(t, model, frame)
-				updates := renderFullscreenFramesForTest(t, size.width, size.height, frame)
-				assertPhysicalFullscreenFrame(t, size.width, size.height, frame, updates)
-			})
-		}
+	for _, size := range botRenderSizes {
+		t.Run(size.name, func(t *testing.T) {
+			model := newBotTestModel(t, size.width, size.height, &fakeBotClient{}, nil)
+			model.startBotCreateFlow()
+			model.syncViewportContent()
+			frame := model.View().Content
+			if !strings.Contains(ansi.Strip(frame), "Name") {
+				t.Fatal(frame)
+			}
+			assertBotFrameBounds(t, model, frame)
+			updates := renderFullscreenFramesForTest(t, size.width, size.height, frame)
+			assertPhysicalFullscreenFrame(t, size.width, size.height, frame, updates)
+		})
 	}
-
-	req.Response <- PromptResponse{Err: errors.New(PromptErrInterrupt)}
-	<-done
 }
 
 func TestBotChatChromeRenderEvidence(t *testing.T) {
@@ -142,35 +118,20 @@ func TestBotChatChromeRenderEvidence(t *testing.T) {
 }
 
 func TestBotSettingsPromptRenderEvidence(t *testing.T) {
-	client := &fakeBotClient{bots: []bot.Bot{{
-		ID: "bot-1", SessionID: "bot-chat-1", Revision: 2,
-		Config: bot.Config{Name: "Ada", Description: "old", Model: "gpt-5"},
-	}}}
-	send := make(chan tea.Msg, 8)
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		runBotSettingsFlow(context.Background(), client, "bot-1", false, nil, func(msg tea.Msg) { send <- msg })
-	}()
-	nextBotPrompt(t, send).Response <- PromptResponse{Line: ""}
-	req := nextBotPrompt(t, send)
-
+	value := bot.Bot{ID: "bot-1", Config: bot.Config{Name: "Ada", Description: "old", Model: "gpt-5"}}
 	for _, size := range botRenderSizes {
 		t.Run(size.name, func(t *testing.T) {
-			model := newBotTestModel(t, size.width, size.height, client, nil)
-			model.enqueuePrompt(req)
+			model := newBotTestModel(t, size.width, size.height, &fakeBotClient{bots: []bot.Bot{value}}, nil)
+			stageBotForGolden(model, value)
+			model.Update(model.startBotSettingsFlow(false)())
 			model.syncViewportContent()
 			frame := model.View().Content
-			plain := ansi.Strip(frame)
-			if !strings.Contains(plain, "Description") || !strings.Contains(plain, "old") {
-				t.Fatalf("settings prompt omitted the current description at %dx%d:\n%s", size.width, size.height, plain)
+			if !strings.Contains(ansi.Strip(frame), "Name") {
+				t.Fatal(frame)
 			}
 			assertBotFrameBounds(t, model, frame)
 			updates := renderFullscreenFramesForTest(t, size.width, size.height, frame)
 			assertPhysicalFullscreenFrame(t, size.width, size.height, frame, updates)
 		})
 	}
-
-	req.Response <- PromptResponse{Err: errors.New(PromptErrInterrupt)}
-	<-done
 }

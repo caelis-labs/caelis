@@ -86,7 +86,10 @@ func (m *Model) handleSlashArgCompletionResultMsg(msg slashArgCompletionResultMs
 		return m, nil
 	}
 	m.applySlashArgCandidates(msg.command, msg.query, msg.candidates, msg.err)
-	if msg.err == nil && !m.isWizardActive() {
+	if m.wizardOverlay != nil {
+		return m, m.wizardCatalogReady(msg.err)
+	}
+	if msg.err == nil && !m.isWizardActive() && !m.isModelPicker() {
 		if nextCommand := nextModelCompletionCommand(msg.command, msg.query, m.slashArgCandidates); nextCommand != "" {
 			m.slashArgCommand = nextCommand
 			m.slashArgCandidates = nil
