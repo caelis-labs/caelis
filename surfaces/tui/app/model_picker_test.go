@@ -228,3 +228,59 @@ func TestModelPickerKeepsFastColumnAligned(t *testing.T) {
 		t.Fatalf("Fast controls are not in one column: %v\n%s", columns, ansi.Strip(model.renderInputOverlay()))
 	}
 }
+
+// TestModelPickerAppliesProfileLessProviderRow pins the shipped Control
+// projection for a selectable provider model that has no ModelProfile: it
+// reports its honest no-reasoning capability instead of reaching the picker
+// without typed selection metadata. Such a row stays a first-class picker row
+// that paints its single effort control and applies on Enter.
+func TestModelPickerAppliesProfileLessProviderRow(t *testing.T) {
+	legacy := SlashArgCandidate{
+		Value: "ollama/legacy-flash", Display: "Legacy Flash", ModelConfigID: "ollama@default/ollama/legacy-flash",
+		ModelSelection: &appserver.ModelSelection{Efforts: []string{"none"}, Effort: "none"},
+	}
+	var submitted []string
+	model := NewModel(Config{
+		Commands: DefaultCommands(), NoAnimation: true,
+		ExecuteLine: func(submission Submission) TaskResultMsg {
+			submitted = append(submitted, submission.Text)
+			return TaskResultMsg{SuppressTurnDivider: true}
+		},
+		SlashArgComplete: func(_ context.Context, command, _ string, _ int) ([]SlashArgCandidate, error) {
+			if command != "model" {
+				return nil, nil
+			}
+			return append(modelPickerCandidates(), legacy), nil
+		},
+	})
+	applySlashCompletionUpdate(t, model, tea.WindowSizeMsg{Width: 100, Height: 30})
+	runCompletionCmd(t, model, model.openSlashArgPicker("model"))
+	if model.slashArgIndex != 1 {
+		t.Fatalf("picker did not start on Control's current model: index=%d", model.slashArgIndex)
+	}
+	painted := false
+	for _, line := range strings.Split(ansi.Strip(model.renderInputOverlay()), "\n") {
+		if !strings.Contains(line, "Legacy Flash") {
+			continue
+		}
+		painted = true
+		if !strings.Contains(line, "none") || strings.Contains(line, "Fast") {
+			t.Fatalf("profile-less row controls = %q", line)
+		}
+	}
+	if !painted {
+		t.Fatalf("profile-less row missing from painted picker:\n%s", ansi.Strip(model.renderInputOverlay()))
+	}
+	model.handleSlashArgKey(keyPress("down"))
+	if draft := model.modelPickerDraft(legacy); draft.effort != "none" || draft.fast {
+		t.Fatalf("profile-less draft = %+v", draft)
+	}
+	_, cmd := model.handleSlashArgKey(keyPress("enter"))
+	if cmd == nil {
+		t.Fatal("Enter on the profile-less provider row was dropped")
+	}
+	findAndRunTaskResult(cmd(), model)
+	if got := strings.Join(submitted, ","); got != "/model ollama/legacy-flash none" {
+		t.Fatalf("submitted %q", got)
+	}
+}

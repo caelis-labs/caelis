@@ -26,6 +26,7 @@ func (m *Model) ensureMainTimelineBlock(event TranscriptEvent) *MainACPTurnBlock
 		m.mainTimelineTailID = ""
 	}
 	block := NewMainACPTurnBlock(strings.TrimSpace(event.TurnID))
+	block.Historical = m.restoringHistory()
 	m.fillMainTimelineBlockMetadata(block, event)
 	m.appendMainTranscriptBlock(block)
 	m.mainTimelineTailID = block.BlockID()

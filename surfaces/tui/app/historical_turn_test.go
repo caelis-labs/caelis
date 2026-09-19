@@ -103,20 +103,21 @@ func TestHistoricalTurnBlocksPromotesWhenNewTurnStarts(t *testing.T) {
 		t.Fatalf("two turns compacted = %#v, want none", compact)
 	}
 
+	// A live barrier alone must not reshuffle restored detail: the newest two
+	// restored turns stay full until another restored turn arrives.
 	blocks = append(blocks, NewUserNarrativeBlock("three"))
-	compact := historicalTurnBlocks(blocks)
-	if !compact[first.BlockID()] {
-		t.Fatalf("new user turn did not promote first turn to compact: %#v", compact)
+	if compact := historicalTurnBlocks(blocks); len(compact) != 0 {
+		t.Fatalf("live barrier compacted restored turns = %#v, want none", compact)
 	}
-	if compact[second.BlockID()] {
-		t.Fatalf("ongoing second turn compacted after promotion: %#v", compact)
+	if compact := historicalTurnBlocks(blocks); compact[first.BlockID()] || compact[second.BlockID()] {
+		t.Fatalf("restored turn compacted before a newer restored turn arrived: %#v", compact)
 	}
 
 	third := newHistoricalMainTurn("turn-3", "hist-answer-three")
 	blocks = append(blocks, third)
-	compact = historicalTurnBlocks(blocks)
+	compact := historicalTurnBlocks(blocks)
 	if !compact[first.BlockID()] || compact[second.BlockID()] || compact[third.BlockID()] {
-		t.Fatalf("after third assistant arrived compact = %#v", compact)
+		t.Fatalf("after third restored assistant arrived compact = %#v", compact)
 	}
 }
 
@@ -150,6 +151,7 @@ func TestHistoricalTurnBlocksKeepsOlderNonterminalTurnFull(t *testing.T) {
 	t.Parallel()
 
 	live := NewMainACPTurnBlock("turn-1")
+	live.Historical = true
 	live.Events = []SubagentEvent{
 		{Kind: SEReasoning, Text: "hist-thought-secret"},
 		{Kind: SEToolCall, CallID: "run-1", Name: "RunCommand", Args: "hist-running-secret", Output: "started\n", Done: false, ToolKind: "execute"},
@@ -240,6 +242,7 @@ func TestRenderHistoricalTurnCompactsInlineParticipantAndLeavesChildPaneFull(t *
 
 	first := newHistoricalMainTurn("turn-1", "hist-answer-one")
 	inline := NewParticipantTurnBlock("child-inline", "reviewer")
+	inline.Historical = true
 	inline.Events = []SubagentEvent{
 		{Kind: SEReasoning, Text: "hist-child-thought"},
 		{Kind: SEToolCall, CallID: "child-tool", Name: "Read", Args: "hist-child-tool.go", Output: "child out", Done: true, ToolKind: "read"},
@@ -351,8 +354,11 @@ func historicalTestContext() BlockRenderContext {
 	}
 }
 
+// newHistoricalMainTurn builds one restored main Turn fixture. Restored turns
+// are the only ones that may fold to narrative-only rendering.
 func newHistoricalMainTurn(turnKey, answer string) *MainACPTurnBlock {
 	block := NewMainACPTurnBlock(turnKey)
+	block.Historical = true
 	block.Events = []SubagentEvent{{Kind: SEAssistant, Text: answer}}
 	block.Status = "completed"
 	return block
@@ -360,6 +366,7 @@ func newHistoricalMainTurn(turnKey, answer string) *MainACPTurnBlock {
 
 func newClutteredHistoricalTurn(turnKey, thought, tool, plan, answer string) *MainACPTurnBlock {
 	block := NewMainACPTurnBlock(turnKey)
+	block.Historical = true
 	block.Events = []SubagentEvent{
 		{Kind: SEReasoning, Text: thought},
 		{Kind: SEToolCall, CallID: "tool-" + turnKey, Name: "Read", Args: tool, Output: "output of " + tool, Done: true, ToolKind: "read"},

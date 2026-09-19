@@ -394,6 +394,7 @@ func (m *Model) ensureParticipantTurnBlock(sessionID string, actor string) *Part
 		}
 	}
 	block := NewParticipantTurnBlock(sessionID, actor)
+	block.Historical = m.restoringHistory()
 	m.appendMainTranscriptBlock(block)
 	m.participantTurnIDs[sessionID] = block.BlockID()
 	m.markViewportStructureDirty()

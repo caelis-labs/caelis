@@ -383,9 +383,11 @@ only after their end marker, preserve identity/relation fields, keep transcript
 state non-durable, treat terminal/approval state monotonically, and avoid
 Runtime, policy, Session-store, spool-file, or Host implementation dependencies.
 
-The TUI main transcript keeps the newest two logical Turns fully detailed. Older
-terminal Turns display user and assistant narrative without completed tool,
-reasoning, or plan details; nonterminal main blocks remain fully detailed. This
+The TUI main transcript folds only Turns restored from Session history replay,
+keeping the newest two restored Turns fully detailed. An older restored terminal
+Turn displays user and assistant narrative without completed tool, reasoning, or
+plan details; a Turn created by the live Session stays fully detailed no matter
+how many later Turns begin. Nonterminal main blocks remain fully detailed. This
 main-transcript presentation policy does not remove document events. Child panes
 also release older detail, periodically compact to 64 Turn blocks / 4,096 events / 4 MiB,
 and cap individual displayed text tails. At most eight child documents stay

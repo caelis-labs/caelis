@@ -84,6 +84,7 @@ func (r *Runtime) runACPControllerTurn(
 		UpdatedAt:   r.now(),
 	})
 	handle := newRunner(ctx, runID, cancel, req.SourceObserver)
+	handle.controllerCalls = newControllerCallScope(ctx)
 	handle.setCancelHook(func() error {
 		return r.transitionRunTurnJournal(context.WithoutCancel(ctx), ref, runID, turnID, session.ExecutionCancelRequested, "run cancellation requested")
 	})
@@ -144,6 +145,10 @@ func (r *Runtime) executeACPControllerTurn(
 			handle.publishError(err)
 		}
 	}()
+
+	// Host tools execute outside the ACP prompt goroutine. Keep this Runner's
+	// fence until their cancellation cleanup and terminal receipts have settled.
+	defer handle.controllerCalls.closeAndWait()
 
 	inputEvents, inputErr := buildRunInputEvents(activeSession, turnID, req)
 	if inputErr != nil {
@@ -302,6 +307,7 @@ func (r *Runtime) executeACPControllerTurn(
 		admission.resolve(nil)
 		admitted = true
 		err = turnResult.Handle.WaitCompletion(ctx)
+		handle.controllerCalls.closeAndWait()
 		if err == nil && forwarding != nil {
 			err = forwarding.Complete(ctx)
 		} else if err == nil {

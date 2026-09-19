@@ -19,7 +19,7 @@ func (s *runtimeComposition) releaseControlTaskOutput(ctx context.Context, ref t
 	}
 }
 
-func (s *runtimeComposition) releaseControlSessionStreams(ctx context.Context, ref session.SessionRef) {
+func (s *runtimeComposition) releaseControlSessionResources(ctx context.Context, ref session.SessionRef) {
 	if s == nil {
 		return
 	}
@@ -31,6 +31,11 @@ func (s *runtimeComposition) releaseControlSessionStreams(ctx context.Context, r
 	if s.authorities.controlFeedLifecycle != nil {
 		if err := s.authorities.controlFeedLifecycle.CloseSession(ctx, ref); err != nil && s.authorities.diagnostics != nil {
 			s.authorities.diagnostics.Warn("Control Session feed release failed", "session_id", ref.SessionID, "error", err)
+		}
+	}
+	if s.authorities.collaboration != nil {
+		if err := s.authorities.collaboration.CleanupClosedSession(ctx, ref.SessionID); err != nil && s.authorities.diagnostics != nil {
+			s.authorities.diagnostics.Warn("Control Session collaboration cleanup failed", "session_id", ref.SessionID, "error", err)
 		}
 	}
 }

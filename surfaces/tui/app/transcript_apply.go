@@ -22,6 +22,9 @@ func (m *Model) handleTranscriptEventsMsg(msg TranscriptEventsMsg) (tea.Model, t
 	// Decorating the whole batch first would permanently erase the structured
 	// target before the earlier Spawn event had mounted its view.
 	msg.Events = expandCollaborationMessages(msg.Events)
+	previousHistoryReplay := m.historyReplay
+	m.historyReplay = msg.ReconnectReplay
+	defer func() { m.historyReplay = previousHistoryReplay }()
 	subagentOutputChanged := false
 	for index := range msg.Events {
 		one := msg.Events[index : index+1]
