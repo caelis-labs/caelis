@@ -75,6 +75,7 @@ type ToolCallContent struct {
 type ToolCall struct {
 	SessionUpdate string             `json:"sessionUpdate"`
 	ToolCallID    string             `json:"toolCallId"`
+	Name          *string            `json:"name,omitempty"`
 	Title         string             `json:"title"`
 	Kind          string             `json:"kind,omitempty"`
 	Status        string             `json:"status,omitempty"`
@@ -89,6 +90,7 @@ type ToolCall struct {
 type ToolCallUpdate struct {
 	SessionUpdate string             `json:"sessionUpdate"`
 	ToolCallID    string             `json:"toolCallId"`
+	Name          *string            `json:"name,omitempty"`
 	Title         *string            `json:"title,omitempty"`
 	Kind          *string            `json:"kind,omitempty"`
 	Status        *string            `json:"status,omitempty"`

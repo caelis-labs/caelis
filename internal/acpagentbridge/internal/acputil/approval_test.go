@@ -51,3 +51,16 @@ func TestToolCallNameDoesNotReturnUnknownForMissingName(t *testing.T) {
 func stringPtr(value string) *string {
 	return &value
 }
+
+func TestToolCallNamePrefersStandardName(t *testing.T) {
+	t.Parallel()
+	for _, name := range []string{"ReadFile", ""} {
+		got := ToolCallName(acpsdk.ToolCallUpdate{
+			Name: &name, Kind: acpsdk.Ptr(acpsdk.ToolKindRead),
+			RawInput: map[string]any{"name": "input"}, RawOutput: map[string]any{"name": "output"},
+		})
+		if got != name {
+			t.Fatalf("name = %q, want %q", got, name)
+		}
+	}
+}

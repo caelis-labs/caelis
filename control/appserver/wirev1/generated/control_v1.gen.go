@@ -191,6 +191,7 @@ type ACPToolCall struct {
 	Content       []ToolCallContent  `json:"content,omitempty"`
 	Kind          *string            `json:"kind,omitempty"`
 	Locations     []ToolCallLocation `json:"locations,omitempty"`
+	Name          *string            `json:"name,omitempty"`
 	RawInput      JSONValue          `json:"rawInput,omitempty"`
 	RawOutput     JSONValue          `json:"rawOutput,omitempty"`
 	SessionUpdate string             `json:"sessionUpdate"`
@@ -204,6 +205,7 @@ type ACPToolCallUpdate struct {
 	Content       []ToolCallContent  `json:"content,omitempty"`
 	Kind          *string            `json:"kind,omitempty"`
 	Locations     []ToolCallLocation `json:"locations,omitempty"`
+	Name          *string            `json:"name,omitempty"`
 	RawInput      JSONValue          `json:"rawInput,omitempty"`
 	RawOutput     JSONValue          `json:"rawOutput,omitempty"`
 	SessionUpdate string             `json:"sessionUpdate"`

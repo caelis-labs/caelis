@@ -7,6 +7,22 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 )
 
+func TestTerminalBatchKeyPreservesStandardNamePatches(t *testing.T) {
+	t.Parallel()
+	keys := map[string]bool{}
+	for _, name := range []*string{nil, stringPtr(""), stringPtr("RunCommand"), stringPtr("different_tool")} {
+		env := terminalMetaStreamEnvelope("call-1", "line\n")
+		update := env.Update.(eventstream.ToolCallUpdate)
+		update.Name = name
+		env.Update = update
+		key, ok := eventStreamTerminalBatchKey(env)
+		if !ok || keys[key] {
+			t.Fatalf("name patch %v merged with another name or absent field", name)
+		}
+		keys[key] = true
+	}
+}
+
 func TestRenderSchedulerMergesTerminalContent(t *testing.T) {
 	t.Parallel()
 

@@ -47,6 +47,9 @@ func TestPermissionWireRoundTripPreservesSDKSemantics(t *testing.T) {
 	if got := permissionToolNameForTest(wire.ToolCall.Meta); got != wantApproval.ToolCall.Name {
 		t.Fatalf("wire tool name = %q, want %q", got, wantApproval.ToolCall.Name)
 	}
+	if wire.ToolCall.Name == nil || *wire.ToolCall.Name != wantApproval.ToolCall.Name {
+		t.Fatalf("standard wire name = %v, want %q", wire.ToolCall.Name, wantApproval.ToolCall.Name)
+	}
 	raw, err := json.Marshal(wire)
 	if err != nil {
 		t.Fatal(err)
@@ -59,8 +62,60 @@ func TestPermissionWireRoundTripPreservesSDKSemantics(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DecodePermissionRequest() error = %v", err)
 	}
+	wantApproval.ToolCall.NamePresent = new(true)
 	if !reflect.DeepEqual(gotApproval, &wantApproval) {
 		t.Fatalf("approval = %#v, want %#v", gotApproval, &wantApproval)
+	}
+}
+
+func TestPermissionNameCompatibilityPriority(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ name, field, meta, title, kind, want string }{
+		{"standard", `,"name":"standard"`, "legacy", "Title", "read", "standard"},
+		{"standard verbatim", `,"name":" standard "`, "legacy", "Title", "read", " standard "},
+		{"empty string", `,"name":""`, "legacy", "Title", "read", ""},
+		{"null", `,"name":null`, "legacy", "Title", "read", "legacy"},
+		{"absent", "", "legacy", "Title", "read", "legacy"},
+		{"title", "", "", "Title", "read", "Title"},
+		{"null with title", `,"name":null`, "", "Title", "read", "Title"},
+		{"kind", "", "", "", "read", "read"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := `{"sessionId":"s","toolCall":{"toolCallId":"c","title":"` + tc.title + `","kind":"` + tc.kind + `"` + tc.field + `,"_meta":{"caelis":{"runtime":{"tool":{"name":"` + tc.meta + `"}}}}}}`
+			var request eventstream.RequestPermissionRequest
+			if err := json.Unmarshal([]byte(raw), &request); err != nil {
+				t.Fatal(err)
+			}
+			approval, err := acppermission.DecodePermissionRequest(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if approval.ToolCall.Name != tc.want {
+				t.Fatalf("name = %q, want %q", approval.ToolCall.Name, tc.want)
+			}
+			encoded, err := acppermission.EncodePermissionRequest(session.SessionRef{SessionID: "s"}, approval, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			data, err := json.Marshal(encoded)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var output struct {
+				ToolCall map[string]json.RawMessage `json:"toolCall"`
+			}
+			if err := json.Unmarshal(data, &output); err != nil {
+				t.Fatal(err)
+			}
+			name, present := output.ToolCall["name"]
+			if request.ToolCall.Name == nil {
+				if present {
+					t.Fatalf("absent/null name became a standard name: %s", data)
+				}
+			} else if want, _ := json.Marshal(*request.ToolCall.Name); !present || string(name) != string(want) {
+				t.Fatalf("wire name = %s (present %t), want %s: %s", name, present, want, data)
+			}
+		})
 	}
 }
 

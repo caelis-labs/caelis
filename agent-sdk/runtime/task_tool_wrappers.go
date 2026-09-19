@@ -570,6 +570,10 @@ func (r subagentApprovalRequester) RequestSubagentApproval(
 		})
 	}
 	toolName := firstNonEmpty(req.ToolCall.Name, req.ToolCall.Kind)
+	approvalToolName := toolName
+	if req.ToolCall.NamePresent != nil && *req.ToolCall.NamePresent {
+		approvalToolName = req.ToolCall.Name
+	}
 	rawInput := session.CloneState(req.ToolCall.RawInput)
 	var callInput json.RawMessage
 	if len(rawInput) > 0 {
@@ -598,14 +602,15 @@ func (r subagentApprovalRequester) RequestSubagentApproval(
 		},
 		Approval: &session.ProtocolApproval{
 			ToolCall: session.ProtocolToolCall{
-				ID:        strings.TrimSpace(req.ToolCall.ID),
-				Name:      toolName,
-				Kind:      strings.TrimSpace(req.ToolCall.Kind),
-				Title:     strings.TrimSpace(req.ToolCall.Title),
-				Status:    strings.TrimSpace(req.ToolCall.Status),
-				RawInput:  rawInput,
-				RawOutput: session.CloneState(req.ToolCall.RawOutput),
-				Content:   session.CloneProtocolToolCallContent(req.ToolCall.Content),
+				ID:          strings.TrimSpace(req.ToolCall.ID),
+				Name:        approvalToolName,
+				NamePresent: req.ToolCall.NamePresent,
+				Kind:        strings.TrimSpace(req.ToolCall.Kind),
+				Title:       strings.TrimSpace(req.ToolCall.Title),
+				Status:      strings.TrimSpace(req.ToolCall.Status),
+				RawInput:    rawInput,
+				RawOutput:   session.CloneState(req.ToolCall.RawOutput),
+				Content:     session.CloneProtocolToolCallContent(req.ToolCall.Content),
 			},
 			Options: options,
 		},

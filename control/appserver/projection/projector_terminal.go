@@ -196,6 +196,12 @@ func terminalExitCode(raw any) *int {
 }
 
 func protocolToolNameForUpdate(event *session.Event, update *session.ProtocolUpdate) string {
+	if name := protocolCanonicalEventToolName(event, update); name != "" {
+		return name
+	}
+	if update != nil && update.Name != nil {
+		return strings.TrimSpace(*update.Name)
+	}
 	var updateMeta map[string]any
 	var eventMeta map[string]any
 	var legacyKind string
@@ -207,11 +213,10 @@ func protocolToolNameForUpdate(event *session.Event, update *session.ProtocolUpd
 		legacyKind = update.Kind
 	}
 	// Standard ACP kind and title are presentation fields, not exact tool
-	// identity. Only canonical Runtime facts or the maintained display extension
-	// may populate caelis.runtime.tool.name. Historical internal updates that put
+	// identity. Canonical Runtime facts and standard names win over maintained
+	// display extensions. Historical internal updates that put
 	// a non-standard exact Definition.Name in Kind retain that compatibility.
 	candidates := []string{
-		protocolCanonicalEventToolName(event, update),
 		protocolToolNameFromMeta(updateMeta),
 		protocolToolNameFromMeta(eventMeta),
 		protocolToolNameFromLegacyKind(legacyKind),
@@ -225,10 +230,8 @@ func protocolToolNameForUpdate(event *session.Event, update *session.ProtocolUpd
 }
 
 // protocolCanonicalEventToolName reads only the canonical durable tool
-// payload. It deliberately does not use session.CanonicalToolName here because
-// that helper also falls back to protocol title/kind and display metadata;
-// those candidates have their own explicit positions in the projection ladder
-// below.
+// payload. Protocol names and legacy display hints have their own positions
+// in protocolToolNameForUpdate.
 func protocolCanonicalEventToolName(event *session.Event, update *session.ProtocolUpdate) string {
 	if event == nil {
 		return ""

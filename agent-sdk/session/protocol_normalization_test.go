@@ -7,6 +7,21 @@ import (
 
 type protocolStringValue string
 
+func TestCloneProtocolApprovalOwnsNamePresence(t *testing.T) {
+	t.Parallel()
+	for _, present := range []bool{true, false} {
+		original := ProtocolApproval{ToolCall: ProtocolToolCall{Name: "", NamePresent: new(present)}}
+		cloned := CloneProtocolApproval(original)
+		if cloned.ToolCall.NamePresent == nil || *cloned.ToolCall.NamePresent != present {
+			t.Fatalf("cloned name presence = %v, want %t", cloned.ToolCall.NamePresent, present)
+		}
+		*cloned.ToolCall.NamePresent = !present
+		if *original.ToolCall.NamePresent != present {
+			t.Fatal("cloned approval aliases source name presence")
+		}
+	}
+}
+
 func (s protocolStringValue) String() string {
 	return string(s)
 }

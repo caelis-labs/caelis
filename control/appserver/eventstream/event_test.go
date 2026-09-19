@@ -590,6 +590,7 @@ func TestCloneUpdateDeepCopiesToolCallUpdate(t *testing.T) {
 	update := ToolCallUpdate{
 		SessionUpdate: UpdateToolCallInfo,
 		ToolCallID:    "call-1",
+		Name:          acpsdk.Ptr("RunCommand"),
 		Title:         &title,
 		RawInput:      map[string]any{"command": "make test"},
 	}
@@ -598,9 +599,28 @@ func TestCloneUpdateDeepCopiesToolCallUpdate(t *testing.T) {
 		t.Fatalf("CloneUpdate() = %T, want ToolCallUpdate", CloneUpdate(update))
 	}
 	*cloned.Title = "mutated"
+	*cloned.Name = "mutated"
 	cloned.RawInput.(map[string]any)["command"] = "mutated"
 	if update.Title == nil || *update.Title != "RunCommand" || update.RawInput.(map[string]any)["command"] != "make test" {
 		t.Fatalf("source tool update mutated: %#v", update)
+	}
+	if *update.Name != "RunCommand" {
+		t.Fatal("source tool name mutated")
+	}
+}
+
+func TestCloneEnvelopeDeepCopiesStandardToolNames(t *testing.T) {
+	t.Parallel()
+	name := "ReadFile"
+	input := Envelope{
+		Update:     ToolCall{SessionUpdate: UpdateToolCall, ToolCallID: "c", Name: &name},
+		Permission: &RequestPermissionRequest{ToolCall: ToolCallUpdate{ToolCallID: "c", Name: &name}},
+	}
+	cloned := CloneEnvelope(input)
+	*cloned.Update.(ToolCall).Name = "changed_call"
+	*cloned.Permission.ToolCall.Name = "changed_permission"
+	if name != "ReadFile" {
+		t.Fatal("cloned envelope aliased source name")
 	}
 }
 

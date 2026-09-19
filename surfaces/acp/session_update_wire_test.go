@@ -2,11 +2,56 @@ package acp
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 )
+
+func TestSessionNotificationForWirePreservesToolNamesV1(t *testing.T) {
+	t.Parallel()
+	for _, updateType := range []string{eventstream.UpdateToolCall, eventstream.UpdateToolCallInfo} {
+		for _, field := range []string{"", `,"name":null`, `,"name":"ReadFile"`, `,"name":""`} {
+			t.Run(updateType+field, func(t *testing.T) {
+				raw := []byte(`{"sessionId":"s","update":{"sessionUpdate":"` + updateType + `","toolCallId":"c","title":"Inspect file"` + field + `}}`)
+				var input struct {
+					Update json.RawMessage `json:"update"`
+				}
+				if err := json.Unmarshal(raw, &input); err != nil {
+					t.Fatal(err)
+				}
+				update, err := eventstream.DecodeUpdateJSON(input.Update)
+				if err != nil {
+					t.Fatal(err)
+				}
+				notification := eventstream.SessionNotification{SessionID: "s", Update: update}
+				wire, err := sessionNotificationForWire(notification)
+				if err != nil {
+					t.Fatal(err)
+				}
+				encoded, err := json.Marshal(wire)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var want, got struct {
+					Update struct {
+						Name *string `json:"name"`
+					} `json:"update"`
+				}
+				if err := json.Unmarshal(raw, &want); err != nil {
+					t.Fatal(err)
+				}
+				if err := json.Unmarshal(encoded, &got); err != nil {
+					t.Fatal(err)
+				}
+				if !reflect.DeepEqual(got, want) {
+					t.Fatalf("wire = %s, want name from %s", encoded, raw)
+				}
+			})
+		}
+	}
+}
 
 func TestSessionNotificationForWireUsesSDKForStandardUpdate(t *testing.T) {
 	notification := eventstream.SessionNotification{

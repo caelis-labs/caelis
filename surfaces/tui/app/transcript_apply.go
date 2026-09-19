@@ -702,6 +702,7 @@ func transcriptParticipantTurnKey(event TranscriptEvent) string {
 
 func transcriptToolUpdateMeta(event TranscriptEvent) ToolUpdateMeta {
 	return ToolUpdateMeta{
+		ToolNameExplicit:   event.ToolNameExplicit,
 		TaskHandle:         event.ToolTaskHandle,
 		TaskAction:         event.ToolTaskAction,
 		TaskInput:          event.ToolTaskInput,

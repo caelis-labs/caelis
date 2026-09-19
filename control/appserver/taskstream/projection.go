@@ -155,6 +155,7 @@ func streamToolUpdateEnvelope(req taskFrameProjectionRequest, frame controltasks
 func withCommandDisplayTerminal(update eventstream.ToolCallUpdate, toolCallID string, toolName string) eventstream.ToolCallUpdate {
 	toolName = strings.TrimSpace(toolName)
 	if toolName != "" {
+		update.Name = &toolName
 		update.Meta = eventmeta.WithRuntimeSection(update.Meta, eventmeta.RuntimeTool, map[string]any{
 			eventmeta.RuntimeToolName: toolName,
 		})

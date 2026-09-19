@@ -99,6 +99,7 @@ type Event struct {
 
 	ToolCallID          string
 	ToolName            string
+	ToolNameExplicit    bool
 	ToolKind            string
 	ToolTitle           string
 	ToolExplorationVerb string

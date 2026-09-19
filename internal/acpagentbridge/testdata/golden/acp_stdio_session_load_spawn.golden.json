@@ -4,6 +4,7 @@
     "update": {
       "sessionUpdate": "tool_call",
       "toolCallId": "spawn-alpha",
+      "name": "StartThread",
       "title": "StartThread breeze: alpha work",
       "kind": "execute",
       "status": "pending",
@@ -28,6 +29,7 @@
     "update": {
       "sessionUpdate": "tool_call",
       "toolCallId": "spawn-beta",
+      "name": "StartThread",
       "title": "StartThread orbit: beta work",
       "kind": "execute",
       "status": "pending",
@@ -52,6 +54,7 @@
     "update": {
       "sessionUpdate": "tool_call_update",
       "toolCallId": "spawn-alpha",
+      "name": "StartThread",
       "title": "StartThread",
       "kind": "execute",
       "status": "in_progress",
@@ -79,6 +82,7 @@
     "update": {
       "sessionUpdate": "tool_call_update",
       "toolCallId": "spawn-beta",
+      "name": "StartThread",
       "title": "StartThread",
       "kind": "execute",
       "status": "in_progress",
@@ -126,6 +130,7 @@
     "update": {
       "sessionUpdate": "tool_call",
       "toolCallId": "wait-one",
+      "name": "Task",
       "title": "Task wait",
       "kind": "other",
       "status": "pending",
@@ -150,6 +155,7 @@
     "update": {
       "sessionUpdate": "tool_call_update",
       "toolCallId": "wait-one",
+      "name": "Task",
       "title": "Task wait",
       "kind": "other",
       "status": "completed",
@@ -201,6 +207,7 @@
     "update": {
       "sessionUpdate": "tool_call_update",
       "toolCallId": "spawn-alpha",
+      "name": "StartThread",
       "title": "StartThread",
       "kind": "execute",
       "status": "completed",
@@ -256,6 +263,7 @@
     "update": {
       "sessionUpdate": "tool_call",
       "toolCallId": "wait-two",
+      "name": "Task",
       "title": "Task wait",
       "kind": "other",
       "status": "pending",
@@ -280,6 +288,7 @@
     "update": {
       "sessionUpdate": "tool_call_update",
       "toolCallId": "wait-two",
+      "name": "Task",
       "title": "Task wait",
       "kind": "other",
       "status": "completed",
@@ -325,6 +334,7 @@
     "update": {
       "sessionUpdate": "tool_call_update",
       "toolCallId": "spawn-beta",
+      "name": "StartThread",
       "title": "StartThread",
       "kind": "execute",
       "status": "completed",
@@ -380,6 +390,7 @@
     "update": {
       "sessionUpdate": "tool_call",
       "toolCallId": "read-report",
+      "name": "Read",
       "title": "Read report.md",
       "kind": "read",
       "status": "pending",
@@ -403,6 +414,7 @@
     "update": {
       "sessionUpdate": "tool_call_update",
       "toolCallId": "read-report",
+      "name": "Read",
       "title": "Read report.md",
       "kind": "read",
       "status": "completed",

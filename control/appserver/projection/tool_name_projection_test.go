@@ -65,6 +65,7 @@ func TestEventProjectorProjectsEventToolSemanticNameInStandardNotifications(t *t
 			if len(updates) != 1 {
 				t.Fatalf("ProjectEvent() produced %d updates, want 1", len(updates))
 			}
+			assertStandardToolName(t, updates[0], tt.wantName)
 			meta := toolUpdateMeta(t, updates[0])
 			assertRuntimeToolName(t, meta, tt.wantName)
 			if _, leaked := meta["event_only"]; leaked {
@@ -280,5 +281,38 @@ func assertRuntimeToolName(t *testing.T, meta map[string]any, want string) {
 	t.Helper()
 	if got := eventmeta.String(meta, eventmeta.Root, eventmeta.Runtime, eventmeta.RuntimeTool, eventmeta.RuntimeToolName); got != want {
 		t.Fatalf("runtime tool name = %q, want %q; meta=%#v", got, want, meta)
+	}
+}
+
+func assertStandardToolName(t *testing.T, update eventstream.Update, want string) {
+	t.Helper()
+	var got *string
+	switch value := update.(type) {
+	case eventstream.ToolCall:
+		got = value.Name
+	case eventstream.ToolCallUpdate:
+		got = value.Name
+	default:
+		t.Fatalf("update = %T", value)
+	}
+	if got == nil || *got != want {
+		t.Fatalf("standard name = %v, want %q", got, want)
+	}
+}
+
+func TestProtocolStandardToolNameWinsMetadata(t *testing.T) {
+	t.Parallel()
+	for _, updateType := range []string{eventstream.UpdateToolCall, eventstream.UpdateToolCallInfo} {
+		for _, name := range []string{"ReadFile", ""} {
+			event := &session.Event{Type: session.EventTypeToolCall, Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
+				SessionUpdate: updateType, ToolCallID: "call-1", Name: &name,
+				Meta: eventmeta.WithRuntimeSection(nil, eventmeta.RuntimeTool, map[string]any{eventmeta.RuntimeToolName: "RunCommand"}),
+			}}}
+			updates, err := ProjectEvent(event)
+			if err != nil || len(updates) != 1 {
+				t.Fatalf("projection = %#v, %v", updates, err)
+			}
+			assertStandardToolName(t, updates[0], name)
+		}
 	}
 }

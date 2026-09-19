@@ -184,6 +184,7 @@ func (u ContentChunk) SessionUpdateType() string { return u.SessionUpdate }
 type ToolCall struct {
 	SessionUpdate string             `json:"sessionUpdate"`
 	ToolCallID    string             `json:"toolCallId"`
+	Name          *string            `json:"name,omitempty"`
 	Title         string             `json:"title"`
 	Kind          string             `json:"kind,omitempty"`
 	Status        string             `json:"status,omitempty"`
@@ -196,9 +197,12 @@ type ToolCall struct {
 
 func (u ToolCall) SessionUpdateType() string { return u.SessionUpdate }
 
+// ToolCallUpdate is an ACP v1 sparse patch. An absent or null Name leaves the
+// current tool name unchanged.
 type ToolCallUpdate struct {
 	SessionUpdate string             `json:"sessionUpdate"`
 	ToolCallID    string             `json:"toolCallId"`
+	Name          *string            `json:"name,omitempty"`
 	Title         *string            `json:"title,omitempty"`
 	Kind          *string            `json:"kind,omitempty"`
 	Status        *string            `json:"status,omitempty"`
@@ -219,6 +223,7 @@ func (u ToolCallUpdate) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
 		SessionUpdate string             `json:"sessionUpdate"`
 		ToolCallID    string             `json:"toolCallId"`
+		Name          *string            `json:"name,omitempty"`
 		Title         *string            `json:"title,omitempty"`
 		Kind          *string            `json:"kind,omitempty"`
 		Status        *string            `json:"status,omitempty"`
@@ -230,6 +235,7 @@ func (u ToolCallUpdate) MarshalJSON() ([]byte, error) {
 	}{
 		SessionUpdate: u.SessionUpdate,
 		ToolCallID:    u.ToolCallID,
+		Name:          u.Name,
 		Title:         u.Title,
 		Kind:          u.Kind,
 		Status:        u.Status,

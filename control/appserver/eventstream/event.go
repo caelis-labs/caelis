@@ -527,6 +527,7 @@ func CloneUpdate(update Update) Update {
 		typed.Meta = cloneAnyMap(typed.Meta)
 		return typed
 	case ToolCall:
+		typed.Name = cloneStringPtr(typed.Name)
 		typed.RawInput = cloneAny(typed.RawInput)
 		typed.RawOutput = cloneAny(typed.RawOutput)
 		typed.Content = cloneToolCallContent(typed.Content)
@@ -534,6 +535,7 @@ func CloneUpdate(update Update) Update {
 		typed.Meta = cloneAnyMap(typed.Meta)
 		return typed
 	case ToolCallUpdate:
+		typed.Name = cloneStringPtr(typed.Name)
 		typed.Title = cloneStringPtr(typed.Title)
 		typed.Kind = cloneStringPtr(typed.Kind)
 		typed.Status = cloneStringPtr(typed.Status)
@@ -585,6 +587,7 @@ func UpdateMeta(update Update) map[string]any {
 }
 
 func cloneToolCallUpdate(in ToolCallUpdate) ToolCallUpdate {
+	in.Name = cloneStringPtr(in.Name)
 	in.Title = cloneStringPtr(in.Title)
 	in.Kind = cloneStringPtr(in.Kind)
 	in.Status = cloneStringPtr(in.Status)

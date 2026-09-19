@@ -5,6 +5,7 @@ import (
 )
 
 type ToolUpdateMeta struct {
+	ToolNameExplicit   bool
 	TaskHandle         string
 	TaskAction         string
 	TaskInput          string
@@ -61,8 +62,10 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 	if existingIdx < 0 {
 		existingIdx = settledIdx
 	}
-	if existingIdx >= 0 && effectiveName == "" {
+	if existingIdx >= 0 && !update.Meta.ToolNameExplicit && (effectiveName == "" || out[existingIdx].NameExplicit) {
 		effectiveName = strings.TrimSpace(out[existingIdx].Name)
+		name = effectiveName
+		update.Meta.ToolNameExplicit = out[existingIdx].NameExplicit
 	}
 	semanticName := effectiveName
 	output := normalizeToolEventOutput(update.Output, effectiveName, update.Meta.Terminal)
@@ -102,6 +105,7 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 			Kind:             SEToolCall,
 			CallID:           callID,
 			Name:             name,
+			NameExplicit:     update.Meta.ToolNameExplicit,
 			ToolKind:         toolKind,
 			Title:            toolTitle,
 			ExplorationVerb:  explorationVerb,
@@ -130,6 +134,7 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 		Kind:             SEToolCall,
 		CallID:           callID,
 		Name:             name,
+		NameExplicit:     update.Meta.ToolNameExplicit,
 		ToolKind:         toolKind,
 		Title:            toolTitle,
 		ExplorationVerb:  explorationVerb,
@@ -284,8 +289,9 @@ func mergeOpenToolEvent(ev *SubagentEvent, name, toolKind, toolTitle, args, full
 	if ev == nil {
 		return
 	}
-	if strings.TrimSpace(ev.Name) == "" && strings.TrimSpace(name) != "" {
+	if meta.ToolNameExplicit || (strings.TrimSpace(ev.Name) == "" && strings.TrimSpace(name) != "") {
 		ev.Name = name
+		ev.NameExplicit = meta.ToolNameExplicit
 	}
 	if strings.TrimSpace(toolKind) != "" {
 		ev.ToolKind = toolKind
@@ -418,8 +424,9 @@ func fillFinalToolEventFromExisting(finalEvent *SubagentEvent, existing Subagent
 	if finalEvent == nil {
 		return
 	}
-	if strings.TrimSpace(finalEvent.Name) == "" {
+	if strings.TrimSpace(finalEvent.Name) == "" && !finalEvent.NameExplicit {
 		finalEvent.Name = strings.TrimSpace(existing.Name)
+		finalEvent.NameExplicit = existing.NameExplicit
 	}
 	if shouldUseExistingArgsForFinal(*finalEvent, existing) {
 		finalEvent.Args = strings.TrimSpace(existing.Args)
@@ -482,8 +489,9 @@ func fillMissingFinalToolEventFromExisting(finalEvent *SubagentEvent, existing S
 	if finalEvent == nil {
 		return
 	}
-	if strings.TrimSpace(finalEvent.Name) == "" {
+	if strings.TrimSpace(finalEvent.Name) == "" && !finalEvent.NameExplicit {
 		finalEvent.Name = strings.TrimSpace(existing.Name)
+		finalEvent.NameExplicit = existing.NameExplicit
 	}
 	if strings.TrimSpace(finalEvent.Args) == "" {
 		finalEvent.Args = strings.TrimSpace(existing.Args)

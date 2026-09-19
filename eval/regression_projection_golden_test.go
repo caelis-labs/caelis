@@ -227,6 +227,7 @@ func TestRegressionProjectionGoldenFullEnvelopes(t *testing.T) {
     "update": {
       "sessionUpdate": "tool_call",
       "toolCallId": "call-1",
+      "name": "RunCommand",
       "title": "RunCommand go test ./control/appserver/projection",
       "kind": "execute",
       "status": "pending",
@@ -266,6 +267,7 @@ func TestRegressionProjectionGoldenFullEnvelopes(t *testing.T) {
     "update": {
       "sessionUpdate": "tool_call_update",
       "toolCallId": "call-1",
+      "name": "RunCommand",
       "title": "RunCommand go test ./control/appserver/projection",
       "kind": "execute",
       "status": "completed",
@@ -344,6 +346,7 @@ func TestRegressionProjectionGoldenFullEnvelopes(t *testing.T) {
       "toolCall": {
         "sessionUpdate": "tool_call_update",
         "toolCallId": "call-2",
+        "name": "RunCommand",
         "title": "RunCommand make arch-lint",
         "kind": "execute",
         "status": "pending",

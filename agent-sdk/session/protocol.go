@@ -38,14 +38,18 @@ const AgentCommunicationMetaKey = "agent_communication"
 // ProtocolToolCall is the ACP-compatible tool call or tool update view of one
 // canonical event.
 type ProtocolToolCall struct {
-	ID        string                    `json:"id,omitempty"`
-	Name      string                    `json:"name,omitempty"`
-	Kind      string                    `json:"kind,omitempty"`
-	Title     string                    `json:"title,omitempty"`
-	Status    string                    `json:"status,omitempty"`
-	RawInput  map[string]any            `json:"raw_input,omitempty"`
-	RawOutput map[string]any            `json:"raw_output,omitempty"`
-	Content   []ProtocolToolCallContent `json:"content,omitempty"`
+	ID   string `json:"id,omitempty"`
+	Name string `json:"name,omitempty"`
+	// NamePresent records external name presence: true includes an empty name,
+	// false keeps a compatibility-derived Name out of the standard wire field.
+	// Nil uses a non-empty Name for native approvals and older stored records.
+	NamePresent *bool                     `json:"name_present,omitempty"`
+	Kind        string                    `json:"kind,omitempty"`
+	Title       string                    `json:"title,omitempty"`
+	Status      string                    `json:"status,omitempty"`
+	RawInput    map[string]any            `json:"raw_input,omitempty"`
+	RawOutput   map[string]any            `json:"raw_output,omitempty"`
+	Content     []ProtocolToolCallContent `json:"content,omitempty"`
 }
 
 // ProtocolToolCallLocation is the ACP tool-call location shape.
@@ -67,11 +71,13 @@ type ProtocolToolCallContent struct {
 // ProtocolUpdate is the normalized ACP session/update payload carried by one
 // canonical event. Caelis-specific projection data belongs under Meta["caelis"]
 // and is serialized as the standard payload's private _meta field.
+// Name follows ACP v1: absent or null leaves the current tool name unchanged.
 type ProtocolUpdate struct {
 	SessionUpdate string                     `json:"sessionUpdate,omitempty"`
 	Content       any                        `json:"content,omitempty"`
 	MessageID     string                     `json:"messageId,omitempty"`
 	ToolCallID    string                     `json:"toolCallId,omitempty"`
+	Name          *string                    `json:"name,omitempty"`
 	Title         string                     `json:"title,omitempty"`
 	Kind          string                     `json:"kind,omitempty"`
 	Status        string                     `json:"status,omitempty"`
@@ -373,6 +379,7 @@ func protocolUpdateHasOnlySessionUpdate(update *ProtocolUpdate) bool {
 		return true
 	}
 	return strings.TrimSpace(update.ToolCallID) == "" &&
+		update.Name == nil &&
 		strings.TrimSpace(update.Title) == "" &&
 		strings.TrimSpace(update.Kind) == "" &&
 		strings.TrimSpace(update.Status) == "" &&
@@ -570,6 +577,10 @@ func cloneProtocolUpdate(in ProtocolUpdate) ProtocolUpdate {
 		RawOutput:     jsonvalue.CloneMap(in.RawOutput),
 		Meta:          cloneProtocolAnyMap(in.Meta),
 	}
+	if in.Name != nil {
+		name := *in.Name
+		out.Name = &name
+	}
 	if len(in.Locations) > 0 {
 		out.Locations = slices.Clone(in.Locations)
 	}
@@ -669,7 +680,12 @@ func firstNonEmpty(values ...string) string {
 func cloneProtocolToolCall(in ProtocolToolCall) ProtocolToolCall {
 	call := in
 	call.ID = strings.TrimSpace(call.ID)
-	call.Name = strings.TrimSpace(call.Name)
+	if in.NamePresent != nil {
+		call.NamePresent = new(*in.NamePresent)
+	}
+	if call.NamePresent == nil || !*call.NamePresent {
+		call.Name = strings.TrimSpace(call.Name)
+	}
 	call.Kind = strings.TrimSpace(call.Kind)
 	call.Title = strings.TrimSpace(call.Title)
 	call.Status = strings.TrimSpace(call.Status)
