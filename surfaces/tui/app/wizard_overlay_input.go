@@ -1,10 +1,12 @@
 package tuiapp
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/caelis-labs/caelis/control/bot"
 )
 
 func (m *Model) wizardRowCount() int {
@@ -191,39 +193,56 @@ func (m *Model) editWizardField(k tea.Key) {
 		return
 	}
 	value := []rune(f.value)
-	s.cursor = clampInt(s.cursor, 0, len(value))
+	cursor := clampInt(s.cursor, 0, len(value))
 	switch k.Code {
 	case tea.KeyLeft:
-		s.cursor = max(0, s.cursor-1)
+		s.cursor = max(0, cursor-1)
+		return
 	case tea.KeyRight:
-		s.cursor = min(len(value), s.cursor+1)
+		s.cursor = min(len(value), cursor+1)
+		return
 	case tea.KeyHome:
 		s.cursor = 0
+		return
 	case tea.KeyEnd:
 		s.cursor = len(value)
+		return
 	case tea.KeyBackspace:
-		if s.cursor > 0 {
-			value = append(value[:s.cursor-1], value[s.cursor:]...)
-			s.cursor--
+		if cursor == 0 {
+			return
 		}
+		value = append(value[:cursor-1], value[cursor:]...)
+		cursor--
 	case tea.KeyDelete:
-		if s.cursor < len(value) {
-			value = append(value[:s.cursor], value[s.cursor+1:]...)
+		if cursor == len(value) {
+			return
 		}
+		value = append(value[:cursor], value[cursor+1:]...)
 	default:
-		if k.Text != "" && !k.Mod.Contains(tea.ModAlt) {
-			insert := []rune(k.Text)
-			value = append(append(append([]rune(nil), value[:s.cursor]...), insert...), value[s.cursor:]...)
-			s.cursor += len(insert)
+		if k.Text == "" || k.Mod.Contains(tea.ModAlt) {
+			return
 		}
+		insert := []rune(k.Text)
+		value = append(append(append([]rune(nil), value[:cursor]...), insert...), value[cursor:]...)
+		cursor += len(insert)
 	}
-	m.setWizardFieldValue(string(value))
+	if m.setWizardFieldValue(string(value)) {
+		s.cursor = min(cursor, len([]rune(f.value)))
+	}
 }
 
-func (m *Model) setWizardFieldValue(value string) {
+func (m *Model) setWizardFieldValue(value string) bool {
 	s := m.wizardOverlay
 	f := &s.fields[s.field]
-	updated := truncateRunes(value, 8192)
+	updated := value
+	if s.bot != nil && f.key == "description" {
+		if len(value) > bot.MaxDescriptionBytes {
+			s.err = fmt.Sprintf("Description exceeds %d KiB", bot.MaxDescriptionBytes/1024)
+			return false
+		}
+	} else {
+		updated = truncateRunes(value, 8192)
+	}
 	if (f.key == "baseurl" || f.key == "endpoint") && updated != f.value {
 		for i := range s.fields {
 			if s.fields[i].secret {
@@ -234,6 +253,7 @@ func (m *Model) setWizardFieldValue(value string) {
 	f.value = updated
 	s.cursor = min(s.cursor, len([]rune(f.value)))
 	s.err = ""
+	return true
 }
 
 func (m *Model) handleWizardOverlayPaste(msg tea.PasteMsg) tea.Cmd {

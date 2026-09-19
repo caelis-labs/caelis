@@ -20,6 +20,8 @@ const (
 	StateKey = "control.bot.v1"
 	// MetadataID binds a private conversation to its stable Bot identity.
 	MetadataID = "control_bot_id"
+	// MaxDescriptionBytes bounds the UTF-8 byte length of a Bot description.
+	MaxDescriptionBytes = 64 * 1024
 )
 
 // Config is user-maintained configuration. Model is an existing provider model
@@ -64,7 +66,7 @@ func Normalize(config Config) (Config, error) {
 	if config.Name == "" || utf8.RuneCountInString(config.Name) > 100 || strings.IndexFunc(config.Name, func(r rune) bool { return unicode.IsControl(r) || r == '\u2028' || r == '\u2029' }) >= 0 {
 		return Config{}, errorcode.New(errorcode.InvalidArgument, "bot: name must be one line of 1–100 characters")
 	}
-	if !utf8.ValidString(config.Name) || !utf8.ValidString(config.Description) || len(config.Description) > 64*1024 || strings.ContainsRune(config.Description, '\x00') {
+	if !utf8.ValidString(config.Name) || !utf8.ValidString(config.Description) || len(config.Description) > MaxDescriptionBytes || strings.ContainsRune(config.Description, '\x00') {
 		return Config{}, errorcode.New(errorcode.InvalidArgument, "bot: description must be valid text of at most 64 KiB")
 	}
 	return config, nil

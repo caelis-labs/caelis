@@ -327,10 +327,13 @@ func (m *Model) wizardBodyLines(width, offset, budget int) ([]string, []int) {
 func (m *Model) renderWizardField(field wizardField, selected bool, width int) string {
 	labelWidth := min(14, max(6, width/3))
 	available := max(1, width-labelWidth-4)
-	value := strings.ReplaceAll(field.value, "\n", " ↵ ")
-	if field.secret {
-		value = strings.Repeat("•", len([]rune(value)))
+	displayValue := func(value string) string {
+		if field.secret {
+			return strings.Repeat("•", len([]rune(value)))
+		}
+		return strings.ReplaceAll(value, "\n", " ↵ ")
 	}
+	value := displayValue(field.value)
 	if field.choice {
 		value = "No"
 		if field.value == "true" {
@@ -345,10 +348,10 @@ func (m *Model) renderWizardField(field wizardField, selected bool, width int) s
 		}
 		value += "  ›"
 	} else if selected {
-		runes := []rune(value)
+		runes := []rune(field.value)
 		cursor := clampInt(m.wizardOverlay.cursor, 0, len(runes))
-		prefix := truncateDisplayCellsFromEnd(string(runes[:cursor]), available-1)
-		value = prefix + "▏" + truncateDisplayCells(string(runes[cursor:]), max(0, available-displayColumns(prefix)-1))
+		prefix := truncateDisplayCellsFromEnd(displayValue(string(runes[:cursor])), available-1)
+		value = prefix + "▏" + truncateDisplayCells(displayValue(string(runes[cursor:])), max(0, available-displayColumns(prefix)-1))
 	}
 	if field.value == "" && selected && !field.choice {
 		placeholder := field.placeholder
