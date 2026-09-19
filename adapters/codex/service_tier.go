@@ -10,14 +10,18 @@ import (
 
 func (s *sessionState) hasServiceTierLocked(value string) bool {
 	for _, model := range s.models {
-		if modelName(model) == s.model {
-			if value == "default" && len(model.ServiceTiers) > 0 {
+		if modelName(model) != s.model {
+			continue
+		}
+		// Standard is the protocol baseline, not a catalog capability: it stays
+		// valid on every known model, including a model advertising no
+		// additional service tiers. Catalog IDs are the only Fast-like choices.
+		if value == "default" {
+			return true
+		}
+		for _, tier := range model.ServiceTiers {
+			if tier.ID == value {
 				return true
-			}
-			for _, tier := range model.ServiceTiers {
-				if tier.ID == value {
-					return true
-				}
 			}
 		}
 	}

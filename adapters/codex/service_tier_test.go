@@ -52,6 +52,81 @@ func TestServiceTierDiscoveryPreservesUnknownAndEffectiveDefault(t *testing.T) {
 	}
 }
 
+// TestServiceTierStandardSurvivesTierlessModelSwitch covers the protocol
+// baseline staying selectable across a model change. Fast -> Standard -> a
+// model that advertises no additional tiers must switch, and the next Turns
+// must carry Standard rather than resurrecting Fast.
+func TestServiceTierStandardSurvivesTierlessModelSwitch(t *testing.T) {
+	appIn, appOut := io.Pipe()
+	adapterIn, adapterOut := io.Pipe()
+	defer appIn.Close()
+	defer appOut.Close()
+	defer adapterIn.Close()
+	defer adapterOut.Close()
+	fake := newPromptRPCFake(adapterIn, appOut)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	backend, err := NewBackend(ctx, appIn, adapterOut)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer backend.Close()
+	a := &agent{backend: backend, sessions: map[string]*sessionState{}}
+	route, err := a.reserveSession("one", t.TempDir(), nil, routeLive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	route.state.models = tierModels()
+	route.state.model = "model"
+	route.state.serviceTier = acp.Ptr("fast")
+	state := a.sessions["one"]
+
+	standard := make(chan error, 1)
+	go func() { _, err := a.setServiceTier(ctx, state, "default"); standard <- err }()
+	list := expectPromptRPCRequest(t, ctx, fake.requests, "model/list")
+	fake.respond(list, map[string]any{"data": tierModels()})
+	if err := <-standard; err != nil {
+		t.Fatal(err)
+	}
+	if state.serviceTier == nil || *state.serviceTier != "default" {
+		t.Fatalf("service tier = %v, want explicit default", state.serviceTier)
+	}
+
+	switched := make(chan error, 1)
+	go func() {
+		_, err := a.SetSessionConfigOption(ctx, acp.SetSessionConfigOptionRequest{ValueId: &acp.SetSessionConfigOptionValueId{SessionId: "one", ConfigId: configIDModel, Value: "other"}})
+		switched <- err
+	}()
+	refresh := expectPromptRPCRequest(t, ctx, fake.requests, "model/list")
+	fake.respond(refresh, map[string]any{"data": tierModels()})
+	if err := <-switched; err != nil {
+		t.Fatalf("Standard blocked a tier-less model switch: %v", err)
+	}
+	if state.model != "other" || state.serviceTier == nil || *state.serviceTier != "default" {
+		t.Fatalf("model = %q, service tier = %v", state.model, state.serviceTier)
+	}
+	if state.serviceTierOptionLocked() != nil {
+		t.Fatal("tier-less model advertised a service tier")
+	}
+
+	for _, turnID := range []string{"turn-1", "turn-2"} {
+		done := make(chan error, 1)
+		go func() {
+			_, err := a.Prompt(ctx, acp.PromptRequest{SessionId: "one", Prompt: []acp.ContentBlock{acp.TextBlock("hello")}})
+			done <- err
+		}()
+		start := expectPromptRPCRequest(t, ctx, fake.requests, "turn/start")
+		if got := stringValue(start.Params["serviceTier"]); got != "default" {
+			t.Fatalf("turn serviceTier = %q, want default", got)
+		}
+		fake.respond(start, map[string]any{"turn": map[string]any{"id": turnID}})
+		fake.notify("turn/completed", map[string]any{"threadId": "one", "turn": map[string]any{"id": turnID, "status": "completed"}})
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func TestServiceTierBackendCommitIsolationAndTurnRequest(t *testing.T) {
 	appIn, appOut := io.Pipe()
 	adapterIn, adapterOut := io.Pipe()

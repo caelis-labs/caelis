@@ -15,7 +15,6 @@ import (
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	agent "github.com/caelis-labs/caelis/agent-sdk"
-	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	sdkplacement "github.com/caelis-labs/caelis/agent-sdk/placement"
 	contextprompt "github.com/caelis-labs/caelis/agent-sdk/runtime/contexttransfer"
@@ -397,14 +396,6 @@ func (m *Manager) RunTurn(ctx context.Context, req controller.TurnRequest) (cont
 	if run == nil {
 		return controller.TurnResult{}, fmt.Errorf("%w for session %q", controller.ErrNotActive, sessionID)
 	}
-	run.mu.Lock()
-	ready := run.client == nil || run.client.CollaborationReady()
-	run.mu.Unlock()
-	if !ready {
-		if _, err := m.reconnectControllerRun(ctx, run); err != nil {
-			return controller.TurnResult{}, err
-		}
-	}
 	if contentPartsContainImage(req.ContentParts) && !run.supportsPromptImages() {
 		return controller.TurnResult{}, fmt.Errorf("internal/acpagentbridge/controller: agent %q does not support image prompts", run.agent)
 	}
@@ -441,8 +432,7 @@ func (m *Manager) RunTurn(ctx context.Context, req controller.TurnRequest) (cont
 			pendingContext,
 			pendingContextSyncSeq,
 			pendingContextFresh,
-			req.FreshContext,
-			req.ContextSyncSeq,
+			req,
 		)
 		if err != nil {
 			run.restoreContext(attemptedContext, attemptedContextSyncSeq, attemptedContextFresh)
@@ -454,47 +444,6 @@ func (m *Manager) RunTurn(ctx context.Context, req controller.TurnRequest) (cont
 		run.finishTurn(handle)
 	}()
 	return controller.TurnResult{Handle: handle, UpdatedAt: m.clock()}, nil
-}
-
-func (m *Manager) promptControllerRun(
-	ctx context.Context,
-	run *controllerRun,
-	prompt []json.RawMessage,
-	contextTransfer agent.ContextTransfer,
-	contextSyncSeq uint64,
-	contextFresh bool,
-	freshContext agent.ContextTransfer,
-	freshContextSyncSeq uint64,
-) (agent.ContextTransfer, uint64, bool, error) {
-	attemptedContext := agent.CloneContextTransfer(contextTransfer)
-	attemptedContextSyncSeq := contextSyncSeq
-	attemptedContextFresh := contextFresh
-	if _, err := run.promptWithCollaboration(ctx, composeACPContextPrompt(prompt, attemptedContext)); err != nil {
-		if client.DispatchMayHaveCommitted(err) {
-			return attemptedContext, attemptedContextSyncSeq, attemptedContextFresh, errorcode.Wrap(errorcode.UnknownOutcome, "internal/acpagentbridge/controller: controller prompt outcome cannot be proven", err)
-		}
-		if !isACPClientConnectionError(err) {
-			return attemptedContext, attemptedContextSyncSeq, attemptedContextFresh, err
-		}
-		if !client.SubmissionProvenNotStarted(err) {
-			return attemptedContext, attemptedContextSyncSeq, attemptedContextFresh, errorcode.Wrap(errorcode.UnknownOutcome, "internal/acpagentbridge/controller: controller prompt outcome cannot be proven", err)
-		}
-		fresh, reconnectErr := m.reconnectControllerRun(ctx, run)
-		if reconnectErr != nil {
-			return attemptedContext, attemptedContextSyncSeq, attemptedContextFresh, fmt.Errorf("%w; reconnect failed: %w", err, reconnectErr)
-		}
-		if fresh {
-			attemptedContext = agent.CloneContextTransfer(freshContext)
-			attemptedContextSyncSeq = freshContextSyncSeq
-			attemptedContextFresh = true
-		}
-		_, err = run.promptWithCollaboration(ctx, composeACPContextPrompt(prompt, attemptedContext))
-		if err != nil && (client.DispatchMayHaveCommitted(err) || !client.SubmissionProvenNotStarted(err)) {
-			err = errorcode.Wrap(errorcode.UnknownOutcome, "internal/acpagentbridge/controller: retried controller prompt outcome cannot be proven", err)
-		}
-		return attemptedContext, attemptedContextSyncSeq, attemptedContextFresh, err
-	}
-	return attemptedContext, attemptedContextSyncSeq, attemptedContextFresh, nil
 }
 
 func contentPartsContainImage(parts []model.ContentPart) bool {

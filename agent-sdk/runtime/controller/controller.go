@@ -152,6 +152,11 @@ type TurnRequest struct {
 	Mode              string                    `json:"mode,omitempty"`
 	ApprovalRequester ApprovalRequester         `json:"-"`
 	Observer          agent.SourceEventObserver `json:"-"`
+	// CommitBinding persists the BindingProvider's exact remote Session identity
+	// under the admitted Turn's Runtime fence. Backends call it before each
+	// prompt, including reconnect retries, and must not submit on failure. It
+	// does not acknowledge context delivery; a fresh remote has checkpoint zero.
+	CommitBinding func(context.Context) error `json:"-"`
 }
 
 // ParticipantPromptRequest sends one bounded prompt to an attached ACP
@@ -245,8 +250,9 @@ type Backend interface {
 }
 
 // BindingProvider reports the exact live binding for an active controller.
-// Runtime uses this optional capability to persist a replacement remote
-// Session created during a proven-unsent reconnect.
+// Runtime uses it when committing a replacement remote Session before a prompt
+// and when acknowledging context delivery after the Turn. A fresh remote must
+// report checkpoint zero until its bootstrap prompt succeeds.
 type BindingProvider interface {
 	ActiveControllerBinding(context.Context, session.SessionRef) (session.ControllerBinding, bool, error)
 }

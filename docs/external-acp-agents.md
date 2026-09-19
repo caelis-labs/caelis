@@ -70,8 +70,9 @@ use catalog IDs (currently `priority` for Fast). Missing or empty catalogs do no
 advertise Fast; there is no `additionalSpeedTiers` or model-name fallback.
 Thread start/resume responses supply the effective tier. Missing/null tier stays
 inherited internally, even when the selector displays its discovered default.
-Changing a model validates an explicit tier against the destination capability;
-an incompatible selection fails without silently downgrading it.
+Changing a model validates an explicit tier against the destination capability.
+Explicit standard (`default`) remains valid without additional tiers; an
+incompatible Fast selection fails without silently downgrading it.
 
 Set-config validates the current catalog and stages the next Turn selection.
 The next `turn/start.serviceTier` applies it to that and subsequent Turns;
@@ -231,6 +232,9 @@ remote Session gets its own instruction. A proven non-submission releases the
 marker; an ambiguous submission retains it. The prompt grants no authority.
 
 Controller grants bind the current controller epoch and exact remote Session.
+Before prompting a replacement remote Session, Runtime commits its binding under
+the admitted Turn's fence. A fresh remote starts at checkpoint zero and receives
+full context; only successful prompt completion acknowledges context delivery.
 Restoring a controller can replace its epoch within an admitted Turn. Bound
 Turn approval, steering and cancellation use the exact Handle/Run/Turn target;
 new commands still validate the controller epoch observed before admission.

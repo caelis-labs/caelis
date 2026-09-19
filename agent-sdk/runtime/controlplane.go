@@ -207,6 +207,9 @@ func (r *Runtime) executeACPControllerTurn(
 		Stream:            req.Request.StreamEnabled(false),
 		Mode:              r.policyMode(req.AgentSpec),
 		ApprovalRequester: controllerApprovalRequester{runtime: r, requester: req.ApprovalRequester, sessionRef: ref, session: activeSession, runID: runID, turnID: turnID},
+		CommitBinding: func(commitCtx context.Context) error {
+			return r.commitControllerBinding(commitCtx, ref)
+		},
 	}
 	contextRoute, err := r.buildControllerTurnContext(ctx, activeSession, ref, turnID)
 	if err != nil {
