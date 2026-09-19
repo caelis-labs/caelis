@@ -339,19 +339,30 @@ func (m *Model) clearInputOverlays() {
 }
 
 func filterSlashArgCandidates(query string, candidates []SlashArgCandidate) []SlashArgCandidate {
-	return filterByPrefix(query, candidates, func(one SlashArgCandidate) []string {
-		value := strings.TrimSpace(one.Value)
-		display := strings.TrimSpace(one.Display)
-		if display == "" {
-			display = value
+	if len(candidates) == 0 {
+		return nil
+	}
+	filtered := make([]SlashArgCandidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		if slashArgCandidateMatchesQuery(query, candidate) {
+			filtered = append(filtered, candidate)
 		}
-		detail := strings.TrimSpace(one.Detail)
-		values := []string{value, display, detail}
-		if _, local, ok := strings.Cut(value, ":"); ok {
-			values = append(values, local)
-		}
-		return values
-	})
+	}
+	return filtered
+}
+
+func slashArgCandidateMatchesQuery(query string, candidate SlashArgCandidate) bool {
+	query = strings.ToLower(strings.TrimSpace(query))
+	// Configured models support substring search across their label and public
+	// selector. Other completion steps retain their argument-prefix semantics.
+	if candidate.ModelSelection != nil {
+		return strings.Contains(strings.ToLower(candidate.Value), query) || strings.Contains(strings.ToLower(candidate.Display), query)
+	}
+	values := []string{candidate.Value, candidate.Display, candidate.Detail}
+	if _, local, ok := strings.Cut(strings.TrimSpace(candidate.Value), ":"); ok {
+		values = append(values, local)
+	}
+	return candidateMatchesPrefix(query, values...)
 }
 
 func preservedCompletionIndex(previousQuery string, query string, previousPrefix string, prefix string, previousSelected CompletionCandidate, candidates []CompletionCandidate) int {

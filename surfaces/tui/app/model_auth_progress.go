@@ -108,7 +108,7 @@ func modelAuthProviderDisplayName(provider string) string {
 }
 
 func (m *Model) renderModelAuthDrawer() string {
-	if m == nil || !m.slashArgLoadPending || strings.TrimSpace(m.slashArgLoadAuthURL) == "" || m.width <= 0 {
+	if m == nil || m.wizardOverlay != nil || !m.slashArgLoadPending || strings.TrimSpace(m.slashArgLoadAuthURL) == "" || m.width <= 0 {
 		return ""
 	}
 	contentWidth := maxInt(1, m.mainColumnWidth()-(inputHorizontalInset*2))

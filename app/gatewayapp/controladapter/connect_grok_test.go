@@ -18,7 +18,10 @@ func TestConnectCatalogKeepsGrokProviderAndACPAgentSeparate(t *testing.T) {
 }
 
 func TestConnectCatalogSeparatesAccountAndAPIKeyProviders(t *testing.T) {
-	account := completeConnectProviders(context.Background(), nil, "account", "", 100)
+	account, err := completeConnectArgs(context.Background(), nil, "connect-provider-account", "", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, want := range []string{"codex", "grok"} {
 		if !slashCandidatesHaveValue(account, want) {
 			t.Fatalf("account providers = %#v, want %q", account, want)
@@ -28,7 +31,10 @@ func TestConnectCatalogSeparatesAccountAndAPIKeyProviders(t *testing.T) {
 		t.Fatalf("account providers = %#v, should not include Ollama", account)
 	}
 
-	apiKey := completeConnectProviders(context.Background(), nil, "api-key", "", 100)
+	apiKey, err := completeConnectArgs(context.Background(), nil, "connect-provider-api-key", "", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !slashCandidatesHaveValue(apiKey, "ollama") {
 		t.Fatalf("API-key providers = %#v, want Ollama", apiKey)
 	}
@@ -36,10 +42,6 @@ func TestConnectCatalogSeparatesAccountAndAPIKeyProviders(t *testing.T) {
 		if slashCandidatesHaveValue(apiKey, hidden) {
 			t.Fatalf("API-key providers = %#v, should not include account provider %q", apiKey, hidden)
 		}
-	}
-	legacy, err := completeConnectArgs(context.Background(), nil, "connect-provider", "", 100)
-	if err != nil || !slashCandidatesHaveValue(legacy, "codex") || !slashCandidatesHaveValue(legacy, "ollama") {
-		t.Fatalf("legacy provider catalog = %#v, err=%v, want account and API-key providers", legacy, err)
 	}
 
 	sources := completeConnectSources("", 10)

@@ -161,7 +161,7 @@ func (m *Model) renderPromptChoiceLines(choice promptChoice, selected, stacked b
 	selectedDetailStyle := m.theme.SelectionStyle()
 	if detail == "" {
 		if selected {
-			return []string{selectedLabelStyle.Render(gutter) + selectedLabelStyle.Render(mainText)}
+			return []string{selectedLabelStyle.Render(gutter) + selectedLabelStyle.Render(padRightDisplay(mainText, contentWidth))}
 		}
 		return []string{m.theme.HelpHintTextStyle().Render(gutter) + m.promptToneStyle(choice.tone, m.theme.TextStyle()).Render(mainText)}
 	}
@@ -172,7 +172,7 @@ func (m *Model) renderPromptChoiceLines(choice promptChoice, selected, stacked b
 	detailText := truncateTailDisplay(detail, detailBudget)
 	if selected {
 		return []string{selectedLabelStyle.Render(gutter+labelText+separator) +
-			selectedDetailStyle.Render(detailText)}
+			selectedDetailStyle.Render(padRightDisplay(detailText, detailBudget))}
 	}
 	return []string{m.theme.HelpHintTextStyle().Render(gutter) +
 		m.promptToneStyle(choice.tone, m.theme.TextStyle()).Render(labelText) +
@@ -374,6 +374,9 @@ func (m *Model) completionOverlayWidth() int {
 	width := maxInt(44, m.fixedRowWidth()-chrome)
 	if m.width > 0 {
 		width = minInt(width, maxInt(44, m.width-chrome))
+	}
+	if m.isModelPicker() && m.width > 0 {
+		width = min(width, max(1, m.mainColumnWidth()-2*inputHorizontalInset-chrome))
 	}
 	if width <= 0 {
 		width = 72

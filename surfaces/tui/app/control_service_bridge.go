@@ -276,7 +276,6 @@ type ControlServices interface {
 	controlprompt.CompletionService
 	controlprompt.PluginService
 	controlagents.Connector
-	controlagents.Disconnector
 	agentbinding.Service
 }
 
@@ -463,6 +462,7 @@ func ConfigFromControlService(service ControlServices, sender *ProgramSender, ba
 					Detail:                c.Detail,
 					NoAuth:                c.NoAuth,
 					ModelConfigID:         c.ModelConfigID,
+					ModelSelection:        c.ModelSelection,
 					ModelMetadataComplete: c.ModelMetadataComplete,
 					ModelImageInputKnown:  c.ModelImageInputKnown,
 				}

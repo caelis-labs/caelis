@@ -884,6 +884,15 @@ type MarketplaceSnapshot struct {
 
 type MarketplaceSnapshotList []MarketplaceSnapshot
 
+type ModelSelection struct {
+	ContextWindowTokens *int     `json:"context_window_tokens,omitempty"`
+	Current             *bool    `json:"current,omitempty"`
+	Effort              string   `json:"effort"`
+	Efforts             []string `json:"efforts"`
+	Fast                *bool    `json:"fast,omitempty"`
+	FastSupported       *bool    `json:"fast_supported,omitempty"`
+}
+
 type ModelUsageSnapshot struct {
 	Model    *string       `json:"model,omitempty"`
 	Provider *string       `json:"provider,omitempty"`
@@ -1457,13 +1466,14 @@ type SkillResolveResult struct {
 }
 
 type SlashArgCandidate struct {
-	Detail                *string `json:"detail,omitempty"`
-	Display               *string `json:"display,omitempty"`
-	ModelConfigId         *string `json:"model_config_id,omitempty"`
-	ModelImageInputKnown  *bool   `json:"model_image_input_known,omitempty"`
-	ModelMetadataComplete *bool   `json:"model_metadata_complete,omitempty"`
-	NoAuth                *bool   `json:"no_auth,omitempty"`
-	Value                 string  `json:"value"`
+	Detail                *string         `json:"detail,omitempty"`
+	Display               *string         `json:"display,omitempty"`
+	ModelConfigId         *string         `json:"model_config_id,omitempty"`
+	ModelImageInputKnown  *bool           `json:"model_image_input_known,omitempty"`
+	ModelMetadataComplete *bool           `json:"model_metadata_complete,omitempty"`
+	ModelSelection        *ModelSelection `json:"model_selection,omitempty"`
+	NoAuth                *bool           `json:"no_auth,omitempty"`
+	Value                 string          `json:"value"`
 }
 
 type SlashArgCandidateList []SlashArgCandidate

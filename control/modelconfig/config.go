@@ -82,6 +82,13 @@ type Choice struct {
 	BaseURL            string
 	Detail             string
 	ReasoningLevels    []string
+	// ReasoningEffort is the configured default, or the effective effort when
+	// Current is true. FastMode is meaningful only for that current selection.
+	ReasoningEffort     string
+	FastSupported       bool
+	FastMode            bool
+	Current             bool
+	ContextWindowTokens int
 }
 
 // SpeedModesForConfig returns the maintained non-default request-speed levels
@@ -521,16 +528,19 @@ func ChoiceDetail(cfg Config) string {
 func ChoiceFromConfig(cfg Config) Choice {
 	cfg = NormalizeConfig(cfg)
 	return Choice{
-		ID:                 cfg.ID,
-		Alias:              cfg.Alias,
-		Backend:            "provider",
-		Provider:           cfg.Provider,
-		Model:              cfg.Model,
-		ProviderEndpointID: cfg.ProviderEndpointID,
-		EndpointID:         cfg.EndpointID,
-		BaseURL:            cfg.BaseURL,
-		Detail:             ChoiceDetail(cfg),
-		ReasoningLevels:    ReasoningLevelsForConfig(cfg),
+		ID:                  cfg.ID,
+		Alias:               cfg.Alias,
+		Backend:             "provider",
+		Provider:            cfg.Provider,
+		Model:               cfg.Model,
+		ProviderEndpointID:  cfg.ProviderEndpointID,
+		EndpointID:          cfg.EndpointID,
+		BaseURL:             cfg.BaseURL,
+		Detail:              ChoiceDetail(cfg),
+		ReasoningLevels:     ReasoningLevelsForConfig(cfg),
+		ReasoningEffort:     firstNonEmpty(cfg.ReasoningEffort, cfg.DefaultReasoningEffort),
+		FastSupported:       SupportsSpeedMode(cfg, "fast"),
+		ContextWindowTokens: cfg.ContextWindowTokens,
 	}
 }
 

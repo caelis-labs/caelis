@@ -578,6 +578,7 @@ func (m *Model) statusRefreshCmd() tea.Cmd {
 }
 
 func (m *Model) handleTaskResultMsg(msg TaskResultMsg) (tea.Model, tea.Cmd) {
+	m.finishWizardSubmission(msg)
 	// An admission or slash command can finish while another observer's Turn
 	// runs. Only the Session feed may finish a Turn already observed from Host.
 	if m.turnRunning() && m.liveTurn.observed {

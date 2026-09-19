@@ -96,7 +96,7 @@ func sendPluginManagerPrompt(ctx context.Context, service controlprompt.PluginSe
 	}
 	responses := make(chan PromptResponse, 1)
 	send(PromptRequestMsg{
-		Title:               "Manage plugins",
+		Title:               "/plugin · Enabled plugins",
 		Prompt:              "Select enabled plugins",
 		Choices:             choices,
 		SelectedChoices:     selected,

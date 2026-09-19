@@ -40,6 +40,7 @@ func (m *Model) openSlashArgPicker(command string) tea.Cmd {
 	// Control or filesystem work never blocks the update loop.
 	m.clearMention()
 	m.clearSlashCompletion()
+	m.modelPicker = nil
 	m.cancelSlashArgRequest()
 	m.slashArgActive = true
 	m.slashArgCommand = cmd
@@ -74,6 +75,7 @@ func (m *Model) activateSlashArgPickerStateFromInput(command string) bool {
 	}
 	m.clearMention()
 	m.clearSlashCompletion()
+	m.modelPicker = nil
 	m.cancelSlashArgRequest()
 	m.slashArgActive = true
 	m.slashArgCommand = cmd
@@ -111,8 +113,14 @@ func (m *Model) currentSlashArgCompletionTarget() (command string, query string,
 			return "", "", false
 		}
 		command = w.completionCommand()
-		query, ok = wizardQueryAtCursor(w.def.Command, m.input, m.cursor)
-		return command, query, ok
+		if m.wizardOverlay != nil {
+			query = m.slashArgQuery
+			if len(m.wizardOverlay.fields) > 0 {
+				query = ""
+			}
+			return command, query, true
+		}
+		return command, wizardQueryAtCursor(m.input, m.cursor), true
 	}
 	parsedCommand, query, ok := slashArgQueryAtEnd([]rune(m.textarea.Value()))
 	if !ok {
@@ -150,13 +158,19 @@ func (m *Model) dropStaleSlashArgCandidates() {
 	if ok {
 		m.slashArgQuery = query
 	} else if m.isWizardActive() {
-		m.slashArgQuery, _ = wizardQueryAtCursor(m.wizard.def.Command, m.input, m.cursor)
+		m.slashArgQuery = wizardQueryAtCursor(m.input, m.cursor)
 	} else {
 		m.slashArgQuery = ""
 	}
 }
 
 func (m *Model) applySlashArgCandidates(command string, query string, candidates []SlashArgCandidate, err error) {
+	if m.isBotSettingsModel() {
+		candidates = m.botSettingsCandidates(query, candidates)
+	}
+	if command == "model" {
+		m.updateModelPickerCandidates(candidates, err)
+	}
 	m.slashArgCandidateCommand = strings.TrimSpace(command)
 	m.slashArgCompletionSettled = err == nil
 	if err != nil || len(candidates) == 0 {
@@ -175,6 +189,9 @@ func (m *Model) applySlashArgCandidates(command string, query string, candidates
 	m.slashArgIndex = normalizeFilteredSelection(m.slashArgIndex, query, m.slashArgQuery, len(filtered))
 	m.slashArgQuery = query
 	m.slashArgCandidates = filtered
+	if (m.isModelPicker() || m.isBotSettingsModel()) && m.modelPicker != nil {
+		m.restoreModelPickerSelection(filtered)
+	}
 }
 
 func (m *Model) beginSlashArgLoad() tea.Cmd {
@@ -310,6 +327,9 @@ func (m *Model) handleSlashArgLoadResult(msg slashArgLoadResultMsg) tea.Cmd {
 	// against the current composer query so typing while the load is in flight
 	// cannot restore stale, unfiltered candidates when the result arrives.
 	m.applySlashArgCandidates(command, query, msg.candidates, msg.err)
+	if m.wizardOverlay != nil {
+		return m.wizardCatalogReady(msg.err)
+	}
 	if msg.err != nil {
 		failureLabel := slashArgLoadFailureLabel(msg.command)
 		if shouldStopACPSetupAfterLoadError(msg.command, msg.err) {
@@ -668,6 +688,14 @@ func isExecutableSlashArgInput(line string) bool {
 }
 
 func (m *Model) handleSlashArgKey(msg tea.KeyMsg) (bool, tea.Cmd) {
+	if m.wizardOverlay != nil {
+		return true, m.handleWizardOverlayKey(msg)
+	}
+	if m.isModelPicker() {
+		if handled, cmd := m.handleModelPickerKey(msg); handled {
+			return true, cmd
+		}
+	}
 	if m.slashArgActive && strings.TrimSpace(m.slashArgCommand) == "" && !m.isWizardActive() {
 		m.clearSlashArg()
 		return false, nil
@@ -788,6 +816,9 @@ func (m *Model) handleSlashArgKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 }
 
 func (m *Model) renderSlashArgListGeometry(geometry completionOverlayGeometry, candidates []SlashArgCandidate) string {
+	if m.isModelPicker() {
+		return m.renderModelPicker(geometry, candidates)
+	}
 	rows := make([]completionTableRow, 0, geometry.candidateCount)
 	for i := geometry.windowStart; i < geometry.windowEnd; i++ {
 		identity := slashArgCandidateIdentity(candidates[i])

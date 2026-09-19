@@ -34,21 +34,12 @@ func completeConnectArgs(ctx context.Context, driver *assembler, command string,
 		return completeConnectProviders(ctx, driver, "account", query, limit), nil
 	case command == "connect-provider-api-key":
 		return completeConnectProviders(ctx, driver, "api-key", query, limit), nil
-	case command == "connect-provider":
-		// Compatibility for a typed or restored pre-split /connect model flow.
-		return completeConnectProviders(ctx, driver, "", query, limit), nil
-	case command == "connect-disconnect-agent":
-		return completeConnectDisconnectAgents(ctx, driver, query, limit)
-	case strings.HasPrefix(command, "connect-disconnect-confirm:"):
-		return completeConnectDisconnectConfirmation(ctx, driver, strings.TrimPrefix(command, "connect-disconnect-confirm:"), query, limit)
 	case command == "connect-acp-agent":
 		return completeConnectACPAgents(query, limit), nil
 	case strings.HasPrefix(command, "connect-acp-launcher:"):
 		return completeConnectACPLaunchers(strings.TrimPrefix(command, "connect-acp-launcher:"), query, limit), nil
 	case strings.HasPrefix(command, "connect-baseurl:"):
 		return completeConnectBaseURL(ctx, driver, strings.TrimPrefix(command, "connect-baseurl:"), query, limit), nil
-	case strings.HasPrefix(command, "connect-timeout:"):
-		return completeConnectTimeout(strings.TrimPrefix(command, "connect-timeout:"), query, limit), nil
 	case strings.HasPrefix(command, "connect-apikey:"):
 		return nil, nil
 	case strings.HasPrefix(command, "connect-model:"):
@@ -73,60 +64,6 @@ func completeConnectSources(query string, limit int) []controlprompt.SlashArgCan
 		{Value: "acp", Display: "Use a local ACP Agent", Detail: "Connect an installed native ACP Agent or another local ACP command"},
 	}
 	return filterSlashArgCandidates(candidates, query, limit)
-}
-
-func completeConnectDisconnectAgents(ctx context.Context, driver *assembler, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
-	if driver == nil {
-		return nil, missingRuntimeDependency("ACP Agent disconnect")
-	}
-	connected, err := driver.DisconnectCandidates(ctx)
-	if err != nil {
-		return nil, err
-	}
-	candidates := make([]controlprompt.SlashArgCandidate, 0, len(connected))
-	for _, candidate := range connected {
-		detail := firstNonEmpty(candidate.Name, candidate.ConnectionID, "local ACP Agent")
-		if candidate.LastOnConnection {
-			detail += " · last Agent on this connection; keeps the installed adapter"
-		} else {
-			detail += fmt.Sprintf(" · %d other %s will remain", candidate.SiblingCount, pluralAgent(candidate.SiblingCount))
-		}
-		candidates = append(candidates, controlprompt.SlashArgCandidate{
-			Value: candidate.AgentID, Display: "/" + candidate.AgentID, Detail: detail,
-		})
-	}
-	return filterSlashArgCandidates(candidates, query, limit), nil
-}
-
-func completeConnectDisconnectConfirmation(ctx context.Context, driver *assembler, agentID string, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
-	if driver == nil {
-		return nil, missingRuntimeDependency("ACP Agent disconnect")
-	}
-	agentID = controlagents.NormalizeName(agentID)
-	connected, err := driver.DisconnectCandidates(ctx)
-	if err != nil {
-		return nil, err
-	}
-	for _, candidate := range connected {
-		if candidate.AgentID != agentID {
-			continue
-		}
-		detail := fmt.Sprintf("Keep the installed adapter and %d sibling %s", candidate.SiblingCount, pluralAgent(candidate.SiblingCount))
-		if candidate.LastOnConnection {
-			detail = "Remove the Caelis connection settings and keep the installed adapter"
-		}
-		return filterSlashArgCandidates([]controlprompt.SlashArgCandidate{{
-			Value: "confirm", Display: "Disconnect /" + candidate.AgentID, Detail: detail,
-		}}, query, limit), nil
-	}
-	return nil, fmt.Errorf("app/gatewayapp/controladapter: ACP Agent %q is no longer connected", agentID)
-}
-
-func pluralAgent(count int) string {
-	if count == 1 {
-		return "Agent"
-	}
-	return "Agents"
 }
 
 func completeConnectACPAgents(query string, limit int) []controlprompt.SlashArgCandidate {
@@ -269,16 +206,6 @@ func connectEndpointCandidates(template modelconfig.ProviderTemplate) []controlp
 		})
 	}
 	return out
-}
-
-func completeConnectTimeout(provider string, query string, limit int) []controlprompt.SlashArgCandidate {
-	values := []string{"60", "120", "180"}
-	out := make([]controlprompt.SlashArgCandidate, 0, len(values))
-	for _, value := range values {
-		out = append(out, controlprompt.SlashArgCandidate{Value: value, Display: value, Detail: fmt.Sprintf("%ss", value)})
-	}
-	_ = provider
-	return filterSlashArgCandidates(out, query, limit)
 }
 
 func completeConnectModels(ctx context.Context, driver *assembler, payload connectWizardPayload, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {

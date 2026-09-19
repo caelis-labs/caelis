@@ -148,6 +148,13 @@ func (m *Model) View() tea.View {
 			view = overlayTopRight(view, progressView, m.width, sandboxProgressOverlayTopInset, sandboxProgressOverlayRightInset)
 		}
 	}
+	if m.wizardOverlay != nil && m.activePrompt == nil && m.width > 0 && m.height > 0 {
+		if overlay := m.renderWizardOverlay(); overlay != "" {
+			normalizeBaseForOverlay()
+			g := m.wizardOverlay.geometry
+			view = tuikit.OverlayAt(view, overlay, m.width, m.height, g.x, g.y)
+		}
+	}
 	if m.subagentOverlay != nil && m.width > 0 && m.height > 0 {
 		if overlay := m.renderSubagentOverlay(); overlay != "" {
 			normalizeBaseForOverlay()
@@ -175,7 +182,7 @@ func (m *Model) View() tea.View {
 	frame.MouseMode = m.desiredMouseMode()
 	frame.ReportFocus = true
 	frame.WindowTitle = m.windowTitle()
-	if m.sessionPicker == nil && m.subagentOverlay == nil && (!m.workspace.childFocused || m.activePrompt != nil) {
+	if (m.wizardOverlay == nil || m.activePrompt != nil) && m.sessionPicker == nil && m.subagentOverlay == nil && (!m.workspace.childFocused || m.activePrompt != nil) {
 		if cursor := m.regularInputCursor(); cursor != nil {
 			cursor.X += m.mainColumnX()
 			cursor.Y += m.viewport.Height() + m.preComposerFixedHeight() + tuikit.ComposerPadTop
@@ -191,7 +198,7 @@ func (m *Model) View() tea.View {
 			frame.Cursor = cursor
 		}
 	}
-	if m.activePrompt == nil && m.sessionPicker == nil {
+	if m.wizardOverlay == nil && m.activePrompt == nil && m.sessionPicker == nil {
 		if cursor := m.paneCursor(); cursor != nil {
 			frame.Cursor = cursor
 		}

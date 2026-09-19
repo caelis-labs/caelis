@@ -171,7 +171,12 @@ func TestStatusConfigurationRevisionWireRoundTrip(t *testing.T) {
 func TestSlashArgCandidateModelConfigIDWireRoundTrip(t *testing.T) {
 	want := []appserver.SlashArgCandidate{
 		{Value: "xiaomi@api-cn/mimo-v2.5-pro", Display: "xiaomi/mimo-v2.5-pro", ModelConfigID: "xiaomi@api-cn/xiaomi/mimo-v2.5-pro"},
-		{Value: "acp:codex:default", Display: "Codex — Sol"},
+		{Value: "acp:codex:default", Display: "Codex — Sol", ModelSelection: &appserver.ModelSelection{
+			Efforts: []string{"low", "high"}, Effort: "high", Current: true,
+		}},
+		{Value: "openai/sol", ModelSelection: &appserver.ModelSelection{
+			Efforts: []string{"low", "high"}, Effort: "low", FastSupported: true, Fast: true, ContextWindowTokens: 272000,
+		}},
 	}
 	validateWireValue(t, "SlashArgCandidateList", want)
 	raw, err := Marshal(want)

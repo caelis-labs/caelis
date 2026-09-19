@@ -23,6 +23,8 @@ type completionOverlayChrome struct {
 	topInsetRows     int
 	bottomInsetRows  int
 	footerRows       int
+	headerRows       int
+	detailRows       int
 }
 
 func completionOverlayChromeFor(useBorder bool) completionOverlayChrome {
@@ -41,11 +43,23 @@ func (c completionOverlayChrome) rowCount() int {
 		c.bottomBorderRows +
 		c.topInsetRows +
 		c.bottomInsetRows +
-		c.footerRows
+		c.footerRows + c.headerRows + c.detailRows
 }
 
 func (c completionOverlayChrome) candidateOffset() int {
-	return c.topBorderRows + c.topInsetRows
+	return c.topBorderRows + c.topInsetRows + c.headerRows
+}
+
+func (m *Model) completionChrome() completionOverlayChrome {
+	chrome := completionOverlayChromeFor(m.overlayUsesBorder())
+	if m.isModelPicker() {
+		chrome.headerRows = 1
+		chrome.detailRows = 2
+		if m.height > 0 && m.height < 20 {
+			chrome.detailRows = 1
+		}
+	}
+	return chrome
 }
 
 // completionOverlayGeometry is the single paint and pointer layout model for
@@ -73,8 +87,8 @@ func (m *Model) completionOverlayVisibleLimit(total int) int {
 	}
 	limit := completionOverlayVisibleItems
 	if m.height > 0 {
-		chrome := completionOverlayChromeFor(m.overlayUsesBorder())
-		available := m.height - m.bottomSectionHeight() - chrome.rowCount()
+		chrome := m.completionChrome()
+		available := m.workspaceLayout().main.height - m.bottomSectionHeight() - chrome.rowCount()
 		if available < 1 {
 			available = 1
 		}
@@ -120,11 +134,12 @@ func (m *Model) buildCompletionOverlayGeometry(snapshot completionSnapshot) comp
 	}
 	end := minInt(total, start+visible)
 
-	chrome := completionOverlayChromeFor(m.overlayUsesBorder())
+	chrome := m.completionChrome()
 	height := end - start + chrome.rowCount()
-	top := m.height - m.bottomSectionHeight() - height
-	if top < 0 {
-		top = 0
+	main := m.workspaceLayout().main
+	top := main.y + main.height - m.bottomSectionHeight() - height
+	if top < main.y {
+		top = main.y
 	}
 	candidateTop := top + chrome.candidateOffset()
 	atBottom := selected >= total-1

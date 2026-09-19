@@ -4,11 +4,8 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
-
-	tea "charm.land/bubbletea/v2"
 
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/internal/controlprompt/appserveradapter"
@@ -87,8 +84,7 @@ func TestProductBotModelSelectionPreservesConfiguration(t *testing.T) {
 	if got, _ := model.activeBot(); got.Config.Model != value.Config.Model {
 		t.Fatalf("footer display changed the durable model identity: %q", got.Config.Model)
 	}
-	list := model.botModelLister()
-	candidates, err := list(ctx)
+	candidates, err := model.cfg.SlashArgComplete(ctx, "model", "", 200)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,30 +101,16 @@ func TestProductBotModelSelectionPreservesConfiguration(t *testing.T) {
 		t.Fatalf("current model must not be the first catalog entry: %+v", candidates)
 	}
 	for _, modelOnly := range []bool{true, false} {
-		prompts := 0
-		runBotSettingsFlow(ctx, clients.Bots, value.ID, modelOnly, list, func(msg tea.Msg) {
-			switch msg := msg.(type) {
-			case PromptRequestMsg:
-				prompts++
-				if len(msg.Choices) == 0 {
-					answer := ""
-					if prompts == 2 {
-						answer = "new description"
-					}
-					msg.Response <- PromptResponse{Line: answer}
-					return
-				}
-				model.enqueuePrompt(msg)
-				if got := model.activePrompt.choices[model.activePrompt.choiceIndex].value; got != value.Config.Model {
-					t.Fatalf("default selected %q, want current model %q", got, value.Config.Model)
-				}
-				model.Update(keyPress("enter"))
-			case SlashNoticeMsg:
-				if !strings.Contains(msg.Text, "unchanged") {
-					t.Errorf("unexpected settings notice: %s", msg.Text)
-				}
+		runConnectTestCmd(model, model.startBotSettingsFlow(modelOnly))
+		if modelOnly {
+			if model.slashArgCandidates[model.slashArgIndex].ModelConfigID != value.Config.Model {
+				t.Fatal("current model not selected")
 			}
-		})
+			runConnectTestCmd(model, model.acceptBotSettings())
+		} else {
+			model.wizardOverlay.fields[1].value = "new description"
+			runConnectTestCmd(model, model.saveBotSettings())
+		}
 		got, err := clients.Bots.GetBot(ctx, value.ID)
 		if err != nil {
 			t.Fatal(err)

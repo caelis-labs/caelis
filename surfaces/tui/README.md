@@ -1,5 +1,51 @@
 # Terminal UI
 
+`/model` opens a picker above the fixed composer. Type in the composer to search
+configured model names and selectors, use Up/Down to select a row, and Left/Right
+to adjust its reasoning effort. For models supporting Fast mode, Tab switches
+between effort and Fast. The current model is marked with a filled dot. Enter
+or a row click applies the selection; Esc discards all unconfirmed changes.
+Model capabilities and the effective selection come from Control. Unknown
+capabilities are not inferred from model names. Explicit commands such as
+`/model <model> <effort> [fast]` remain available.
+
+`/team` opens a centered configuration overlay. Type to search roles, models or
+binding sets. Up/Down selects a row; Enter or a row click opens or confirms it.
+The model picker starts on the role's current binding, marked with a filled dot;
+Left/Right adjusts effort without saving. Enter saves the binding and returns to
+the original role and search; Esc discards the binding draft. New roles remain
+local drafts until Create role is confirmed. Tab/Shift+Tab moves between form
+fields, and Enter advances a text field. Ctrl+N creates a role, Ctrl+P opens
+binding sets, Ctrl+S saves a set, and Delete opens deletion confirmation. Ctrl+W
+clears a list search. Saving blocks further edits until the Host responds;
+failures retain the draft for correction or retry. The same overlay configures
+the connected Host in Bot mode. See [Participants](../../docs/participants.md)
+for role, system-agent and binding-set semantics.
+
+`/connect` uses a multi-step overlay above the fixed composer. Search stays
+inside the overlay; Esc returns to the previous step with its draft intact, and
+Esc at the first step or the close button dismisses the flow. Endpoint and key
+share a form, keys are masked, and changing an endpoint clears the entered key.
+Tab moves between fields; Left/Right changes a choice. Known models support
+Space or click to select several, then Enter connects the selection. Custom
+models collect the required capabilities in one form. A sole ACP launch method
+is selected automatically. Authentication and model discovery remain owned by
+Control. Cancelled discovery cannot reopen the overlay; uncertain save outcomes
+require checking `/model` before reconnecting. Success closes the overlay and
+preserves the composer draft. Credentials never enter composer history.
+
+`/disconnect` shares this overlay: choose Provider or ACP Agent, search and
+select targets with Space or click, then Enter disconnects the selection. Back
+preserves selections across searches. `/plugin` uses the same navigation for
+installation, removal and marketplace actions; installation sources are entered
+in a form. Enable/disable uses the shared multi-select prompt. Completed commands
+leave the composer clear; full commands with arguments remain available.
+
+`/resume` and Bot mode's `/bots` search inside their overlays. Search survives
+catalog refreshes and never changes the composer draft. Up/Down selects, Enter
+opens, and Esc closes. Bot `/new`, `/settings` and `/model` use the shared form
+and model controls through the Bot client; see [Bot Mode](../../docs/bot.md).
+
 `/theme` opens a centered local theme picker. Up/Down and clicks update the
 selection immediately; after a short pause, the latest selection is previewed
 without closing the picker. Mouse hover only highlights a row. Enter applies the

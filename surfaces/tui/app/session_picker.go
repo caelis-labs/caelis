@@ -14,6 +14,8 @@ import (
 
 type sessionPickerState struct {
 	rows      []ResumeCandidate
+	allRows   []ResumeCandidate
+	query     string
 	index     int
 	offset    int
 	loading   bool
@@ -88,7 +90,8 @@ func (m *Model) applySessionPickerResult(msg sessionPickerResultMsg) tea.Cmd {
 		if state.index < len(state.rows) {
 			selected = state.rows[state.index].SessionID
 		}
-		state.rows, state.err = msg.rows, ""
+		state.allRows, state.err = msg.rows, ""
+		state.filterRows()
 		state.geometry = subagentOverlayGeometry{}
 		state.index = clampInt(state.index, 0, maxInt(0, len(state.rows)-1))
 		for i, row := range state.rows {
@@ -120,14 +123,17 @@ func (m *Model) selectSessionPicker() tea.Cmd {
 }
 
 func (m *Model) handleSessionPickerKey(msg tea.KeyMsg) tea.Cmd {
+	if _, release := msg.(tea.KeyReleaseMsg); release {
+		return nil
+	}
 	state := m.sessionPicker
 	state.pressed = ""
 	switch msg.String() {
 	case "esc", "ctrl+o":
 		m.closeSessionPicker()
-	case "up", "k":
+	case "up":
 		state.index = maxInt(0, state.index-1)
-	case "down", "j":
+	case "down":
 		state.index = minInt(maxInt(0, len(state.rows)-1), state.index+1)
 	case "pgup":
 		state.index = maxInt(0, state.index-maxInt(1, m.height-9))
@@ -138,7 +144,18 @@ func (m *Model) handleSessionPickerKey(msg tea.KeyMsg) tea.Cmd {
 	case "end":
 		state.index = maxInt(0, len(state.rows)-1)
 	case "enter":
+		if state.err != "" {
+			return m.loadSessionPicker()
+		}
 		return m.selectSessionPicker()
+	case "backspace":
+		state.setQuery(trimLastRune(state.query))
+	case "ctrl+u", "ctrl+w":
+		state.setQuery("")
+	default:
+		if k := msg.Key(); k.Text != "" && !k.Mod.Contains(tea.ModCtrl) && !k.Mod.Contains(tea.ModAlt) {
+			state.setQuery(state.query + k.Text)
+		}
 	}
 	return nil
 }
@@ -148,10 +165,10 @@ func (m *Model) renderSessionPicker() string {
 	if state == nil {
 		return ""
 	}
-	width := maxInt(20, m.width-4)
+	width := min(112, maxInt(20, m.width-4))
 	inner := maxInt(1, width-m.overlayBorderChromeWidth())
-	title := m.theme.TitleStyle().Render("Sessions")
-	body := []string{title + strings.Repeat(" ", maxInt(1, inner-displayColumns(title)-1)) + "×", ""}
+	title := m.theme.TitleStyle().Render("/resume · Sessions")
+	body := []string{title + strings.Repeat(" ", maxInt(1, inner-displayColumns(title)-1)) + "×", m.theme.HelpHintTextStyle().Render(state.searchLine(inner))}
 	count := minInt(len(state.rows), maxInt(1, m.height-9))
 	// Keep visible rows stationary while hovering; scroll only when selection
 	// leaves the window or a resize/refresh changes its bounds.
@@ -216,7 +233,7 @@ func (m *Model) renderSessionPicker() string {
 	if len(state.rows) > 0 {
 		body = append(body, m.theme.MutedTextStyle().Render(truncateTailDisplay("ID "+state.rows[state.index].SessionID, inner)))
 	}
-	body = append(body, m.theme.HelpHintTextStyle().Render(truncateTailDisplay("↑↓ Select  Enter Attach  Esc Close", inner)))
+	body = append(body, m.theme.HelpHintTextStyle().Render(truncateTailDisplay("↑↓ select  enter open  esc close", inner)))
 	frame := tuikit.RenderResponsiveOverlayFrame(m.theme, tuikit.ResponsiveOverlayFrameModel{Body: body, Width: width, UseBorder: m.overlayUsesBorder()})
 	w, h := lipgloss.Width(frame), lipgloss.Height(frame)
 	x, y := maxInt(0, (m.width-w)/2), maxInt(0, (m.height-h)/2)
@@ -301,4 +318,29 @@ func (m *Model) handleSessionPickerMouse(msg tea.MouseMsg) tea.Cmd {
 		}
 	}
 	return nil
+}
+
+func (s *sessionPickerState) setQuery(query string) {
+	s.query = truncateRunes(query, 160)
+	s.index, s.offset = 0, 0
+	s.filterRows()
+}
+
+func (s *sessionPickerState) filterRows() {
+	s.rows = nil
+	query := strings.ToLower(strings.TrimSpace(s.query))
+	for _, row := range s.allRows {
+		if query == "" || strings.Contains(strings.ToLower(row.Title+" "+row.Prompt+" "+row.SessionID), query) {
+			s.rows = append(s.rows, row)
+		}
+	}
+	s.index = clampInt(s.index, 0, max(0, len(s.rows)-1))
+}
+
+func (s *sessionPickerState) searchLine(width int) string {
+	value := "/ " + s.query + "▏"
+	if s.query == "" {
+		value += "Search"
+	}
+	return truncateTailDisplay(value, width)
 }

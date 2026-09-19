@@ -15,7 +15,7 @@ func TestSubagentOverlayRendersOpaqueResponsiveFrame(t *testing.T) {
 	model, _ := newSubagentOverlayTestModel(t)
 	frame := ansi.Strip(model.View().Content)
 	for _, want := range []string{
-		"◆ Team Configuration",
+		"/team · Team Configuration",
 		"Binding set",
 		"Participant profiles",
 		"orbit",
@@ -24,7 +24,7 @@ func TestSubagentOverlayRendersOpaqueResponsiveFrame(t *testing.T) {
 		"Memory Steward",
 		"Static (zero-token)",
 		"Save binding set…",
-		"Esc close",
+		"esc close",
 	} {
 		if !strings.Contains(frame, want) {
 			t.Fatalf("overlay frame omitted %q\n%s", want, frame)
@@ -160,8 +160,8 @@ func TestSubagentOverlayBindingPickerUsesModelFirstLabels(t *testing.T) {
 		"openai-codex/gpt-5.6-sol",
 		"openai-codex/gpt-5.6-terra",
 		"Claude — Opus",
-		"[low | medium | high | xhigh | max | ultra]",
-		"[none]  · ACP",
+		"■■■□□□  high",
+		"(ACP)",
 	} {
 		if !strings.Contains(frame, want) {
 			t.Fatalf("binding picker omitted %q\n%s", want, frame)
@@ -199,7 +199,7 @@ func TestSubagentOverlayReviewerPickerAllowsACPButGuardianDoesNot(t *testing.T) 
 	selectSubagentTestRow(t, reviewer, "handle:reviewer")
 	_ = reviewer.handleSubagentOverlayKey(subagentSpecialKey(tea.KeyEnter))
 	reviewerFrame := ansi.Strip(reviewer.renderSubagentOverlay())
-	if !strings.Contains(reviewerFrame, "Claude — Opus") || !strings.Contains(reviewerFrame, "· ACP") {
+	if !strings.Contains(reviewerFrame, "Claude — Opus") || !strings.Contains(reviewerFrame, "(ACP)") {
 		t.Fatalf("Reviewer binding picker omitted ACP profile\n%s", reviewerFrame)
 	}
 
@@ -207,7 +207,7 @@ func TestSubagentOverlayReviewerPickerAllowsACPButGuardianDoesNot(t *testing.T) 
 	selectSubagentTestRow(t, guardian, "handle:guardian")
 	_ = guardian.handleSubagentOverlayKey(subagentSpecialKey(tea.KeyEnter))
 	guardianFrame := ansi.Strip(guardian.renderSubagentOverlay())
-	if strings.Contains(guardianFrame, "Claude — Opus") || strings.Contains(guardianFrame, "· ACP") {
+	if strings.Contains(guardianFrame, "Claude — Opus") || strings.Contains(guardianFrame, "(ACP)") {
 		t.Fatalf("Guardian binding picker exposed ACP profile\n%s", guardianFrame)
 	}
 }
@@ -234,27 +234,6 @@ func TestSubagentOverlayDisambiguatesDuplicateModelNamesWithoutProfileIDs(t *tes
 	if !strings.Contains(details["provider:sol"], "openai-codex") ||
 		!strings.Contains(details["provider:team-sol"], "openai-codex@team") {
 		t.Fatalf("duplicate model details = %#v", details)
-	}
-}
-
-func TestSubagentOverlayActionRowsEmphasizeLabelsOnly(t *testing.T) {
-	model, _ := newSubagentOverlayTestModel(t)
-	model.openSaveSubagentSet()
-	rows := model.subagentSaveSetRows()
-	for _, row := range rows[1:] {
-		line := model.renderSubagentRow(row, false, 80)
-		boldStart := strings.Index(line, "\x1b[1m")
-		boldEnd := strings.Index(line, "\x1b[m")
-		if boldEnd < 0 {
-			boldEnd = strings.Index(line, "\x1b[0m")
-		}
-		detailStart := strings.Index(line, row.detail)
-		if boldStart < 0 || boldEnd < 0 {
-			t.Fatalf("action %q did not emphasize its label: %q", row.label, line)
-		}
-		if detailStart < 0 || boldEnd > detailStart {
-			t.Fatalf("action %q emphasized its detail: %q", row.label, line)
-		}
 	}
 }
 
@@ -285,7 +264,7 @@ func TestSubagentOverlayKeyboardBindsAndCreatesRole(t *testing.T) {
 
 	model.openSubagentPage(subagentPageMain, 0)
 	model.renderSubagentOverlay()
-	_ = model.handleSubagentOverlayKey(tea.KeyPressMsg(tea.Key{Text: "n"}))
+	_ = model.handleSubagentOverlayKey(tea.KeyPressMsg(tea.Key{Code: 'n', Mod: tea.ModCtrl}))
 	model.renderSubagentOverlay()
 	_ = model.handleSubagentOverlayPaste(tea.PasteMsg{Content: "research"})
 	_ = model.handleSubagentOverlayKey(subagentSpecialKey(tea.KeyDown))
@@ -385,7 +364,7 @@ func TestSubagentOverlayMouseAndBindingSetShortcuts(t *testing.T) {
 		t.Fatal("mouse wheel did not move binding-set selection")
 	}
 
-	_ = model.handleSubagentOverlayKey(tea.KeyPressMsg(tea.Key{Text: "s"}))
+	_ = model.handleSubagentOverlayKey(tea.KeyPressMsg(tea.Key{Code: 's', Mod: tea.ModCtrl}))
 	model.renderSubagentOverlay()
 	_ = model.handleSubagentOverlayPaste(tea.PasteMsg{Content: "deep-work"})
 	selectSubagentTestRow(t, model, "save")

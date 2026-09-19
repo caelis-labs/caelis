@@ -56,6 +56,9 @@ func workspaceWindowTitle(workspace string) string {
 }
 
 func (m *Model) buildHintText() string {
+	if m.wizardOverlay != nil {
+		return ""
+	}
 	// Show hint message if set.
 	if h := strings.TrimSpace(m.hint); h != "" {
 		return h
@@ -416,17 +419,20 @@ func (m *Model) inputPromptPrefix() string {
 }
 
 func (m *Model) currentInputGhostHint() string {
+	if m.wizardOverlay != nil {
+		return ""
+	}
 	if m == nil || m.activePrompt != nil || m.runningIndicatorActive() {
+		return ""
+	}
+	if m.isModelPicker() {
+		if m.cursor == len(m.input) && strings.TrimSpace(m.slashArgQuery) == "" {
+			return "Type to search models"
+		}
 		return ""
 	}
 	value := m.textarea.Value()
 	cursorAtEnd := m.cursor == len(m.input)
-	if m.isWizardActive() && m.wizard != nil {
-		if visible, visibleCursor, ok := wizardVisibleInputAtCursor(m.wizard.def.Command, []rune(value), m.cursor); ok {
-			value = visible
-			cursorAtEnd = visibleCursor == len([]rune(visible))
-		}
-	}
 	if value == "" || strings.Contains(value, "\n") {
 		return ""
 	}

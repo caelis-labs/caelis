@@ -17,6 +17,9 @@ func (m *Model) completionOverlayFooterIndent() int {
 }
 
 func (m *Model) renderCompletionOverlayFooter(geometry completionOverlayGeometry) string {
+	if m.isModelPicker() {
+		return m.renderModelPickerFooter()
+	}
 	affordance := geometry.scroll
 	sepStyle := m.theme.HelpHintTextStyle()
 	descStyle := m.theme.HelpHintTextStyle()

@@ -34,7 +34,21 @@ type SlashArgCandidate struct {
 	// durable identifier; a client that persists a selection (for example the
 	// Bot model picker) submits ModelConfigID instead. It is empty for ACP and
 	// other non-provider candidates.
-	ModelConfigID string `json:"model_config_id,omitempty"`
+	ModelConfigID  string          `json:"model_config_id,omitempty"`
+	ModelSelection *ModelSelection `json:"model_selection,omitempty"`
+}
+
+// ModelSelection projects the configured capabilities and initial selection of
+// a model picker. Current identifies the effective Host or Session choice by
+// identity, independently of the candidate's display label. Clients stage
+// changes locally and submit only on confirmation.
+type ModelSelection struct {
+	Efforts             []string `json:"efforts"`
+	Effort              string   `json:"effort"`
+	FastSupported       bool     `json:"fast_supported,omitempty"`
+	Fast                bool     `json:"fast,omitempty"`
+	Current             bool     `json:"current,omitempty"`
+	ContextWindowTokens int      `json:"context_window_tokens,omitempty"`
 }
 
 // SkillResolveResult distinguishes a canonical skill match from an ambiguous

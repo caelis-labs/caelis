@@ -344,205 +344,6 @@ func TestBotChatIsQueuedWhileRunningInsteadOfSteering(t *testing.T) {
 	}
 }
 
-func TestRunBotCreateFlowOptionalDescription(t *testing.T) {
-	for _, description := range []string{"", "  Be kind.\nKeep replies brief.  "} {
-		t.Run(description, func(t *testing.T) {
-			client := &fakeBotClient{}
-			send := make(chan tea.Msg, 16)
-			done := make(chan struct{})
-			go func() {
-				defer close(done)
-				runBotCreateFlow(t.Context(), client, func(msg tea.Msg) { send <- msg })
-			}()
-
-			prompt := nextBotPrompt(t, send)
-			if prompt.Prompt != "New Bot name" {
-				t.Fatalf("first prompt = %q", prompt.Prompt)
-			}
-			prompt.Response <- PromptResponse{Line: "  Ada  "}
-			prompt = nextBotPrompt(t, send)
-			if prompt.Prompt != "Description (optional; Enter to skip)" {
-				t.Fatalf("second prompt = %q", prompt.Prompt)
-			}
-			prompt.Response <- PromptResponse{Line: description}
-
-			result := nextBotFlowResult(t, send)
-			<-done
-			if len(client.created) != 1 {
-				t.Fatalf("CreateBot calls = %d, want 1", len(client.created))
-			}
-			created := client.created[0]
-			if want := (bot.Config{Name: "Ada", Description: description}); created.Config != want {
-				t.Fatalf("created config = %#v, want %#v", created.Config, want)
-			}
-			if !result.created || result.bot.ID == "" || result.bot.SessionID == "" {
-				t.Fatalf("create flow did not load the new Bot: %#v", result)
-			}
-		})
-	}
-}
-
-func TestBotCreateDescriptionKeyboard(t *testing.T) {
-	for _, description := range []string{"", "Be kind.\nKeep replies brief."} {
-		t.Run(description, func(t *testing.T) {
-			client := &fakeBotClient{}
-			model := newBotTestModel(t, 80, 24, client, nil)
-			prompts := 0
-			runBotCreateFlow(t.Context(), client, func(msg tea.Msg) {
-				if req, ok := msg.(PromptRequestMsg); ok {
-					model.Update(req)
-					text := description
-					if prompts == 0 {
-						text = "Ada"
-					}
-					prompts++
-					model.Update(tea.PasteMsg{Content: text})
-					model.Update(keyPress("enter"))
-				}
-			})
-			if prompts != 2 || len(client.created) != 1 || client.created[0].Config.Description != description {
-				t.Fatalf("keyboard creation: prompts=%d writes=%+v", prompts, client.created)
-			}
-		})
-	}
-}
-
-func TestRunBotCreateFlowCancelledDoesNotCreate(t *testing.T) {
-	for _, cancelAt := range []string{"name", "description"} {
-		t.Run(cancelAt, func(t *testing.T) {
-			client := &fakeBotClient{}
-			send := make(chan tea.Msg, 4)
-			done := make(chan struct{})
-			go func() {
-				defer close(done)
-				runBotCreateFlow(t.Context(), client, func(msg tea.Msg) { send <- msg })
-			}()
-			prompt := nextBotPrompt(t, send)
-			if cancelAt == "description" {
-				prompt.Response <- PromptResponse{Line: "Ada"}
-				prompt = nextBotPrompt(t, send)
-			}
-			prompt.Response <- PromptResponse{Err: errors.New(PromptErrInterrupt)}
-			<-done
-			if len(client.created) != 0 {
-				t.Fatalf("cancelled creation still called CreateBot: %#v", client.created)
-			}
-		})
-	}
-}
-
-func TestRunBotSettingsFlowSavesFullConfigWithRevision(t *testing.T) {
-	client := &fakeBotClient{bots: []bot.Bot{{
-		ID: "bot-1", SessionID: "bot-chat-1", Revision: 7,
-		Config: bot.Config{Name: "Ada", Description: "old", Model: "gpt-5", Effort: "high"},
-	}}}
-	send := make(chan tea.Msg, 16)
-	done := make(chan struct{})
-	listModels := botTestModels
-	go func() {
-		defer close(done)
-		runBotSettingsFlow(context.Background(), client, "bot-1", false, listModels, func(msg tea.Msg) { send <- msg })
-	}()
-
-	nextBotPrompt(t, send).Response <- PromptResponse{Line: "Ada Lovelace"}
-	nextBotPrompt(t, send).Response <- PromptResponse{Line: "Counts on it"}
-	modelPrompt := nextBotPrompt(t, send)
-	if len(modelPrompt.Choices) != 2 {
-		t.Fatalf("model prompt choices = %d, want 2", len(modelPrompt.Choices))
-	}
-	modelPrompt.Response <- PromptResponse{Line: "claude-4"}
-
-	result := nextBotFlowResult(t, send)
-	<-done
-
-	if len(client.updated) != 1 {
-		t.Fatalf("UpdateBot calls = %d, want 1", len(client.updated))
-	}
-	update := client.updated[0]
-	if update.BotID != "bot-1" || update.SessionID != "bot-chat-1" {
-		t.Fatalf("update address = %q/%q", update.BotID, update.SessionID)
-	}
-	if update.ExpectedRevision == nil || *update.ExpectedRevision != 7 {
-		t.Fatalf("expected revision = %v, want 7", update.ExpectedRevision)
-	}
-	want := bot.Config{Name: "Ada Lovelace", Description: "Counts on it", Model: "claude-4"}
-	if update.Config != want {
-		t.Fatalf("update config = %#v, want %#v", update.Config, want)
-	}
-	if result.bot.Config.Model != "claude-4" {
-		t.Fatalf("flow result model = %q, want claude-4", result.bot.Config.Model)
-	}
-}
-
-func TestRunBotModelOnlyFlowDoesNotTouchNameOrDescription(t *testing.T) {
-	client := &fakeBotClient{bots: []bot.Bot{{
-		ID: "bot-1", SessionID: "bot-chat-1", Revision: 2,
-		Config: bot.Config{Name: "Ada", Description: "keep me", Model: "gpt-5"},
-	}}}
-	send := make(chan tea.Msg, 16)
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		runBotSettingsFlow(context.Background(), client, "bot-1", true, botTestModels, func(msg tea.Msg) { send <- msg })
-	}()
-	prompt := nextBotPrompt(t, send)
-	if len(prompt.Choices) != 2 {
-		t.Fatalf("model-only flow choices = %d, want 2", len(prompt.Choices))
-	}
-	prompt.Response <- PromptResponse{Line: "claude-4"}
-	nextBotFlowResult(t, send)
-	<-done
-
-	if len(client.updated) != 1 {
-		t.Fatalf("UpdateBot calls = %d, want 1", len(client.updated))
-	}
-	update := client.updated[0]
-	if update.Config.Name != "Ada" || update.Config.Description != "keep me" || update.Config.Model != "claude-4" {
-		t.Fatalf("model-only update = %#v", update.Config)
-	}
-}
-
-func TestRunBotSettingsFlowUnchangedSendsNoUpdate(t *testing.T) {
-	client := &fakeBotClient{bots: []bot.Bot{{
-		ID: "bot-1", SessionID: "bot-chat-1", Revision: 2,
-		Config: bot.Config{Name: "Ada", Model: "gpt-5"},
-	}}}
-	send := make(chan tea.Msg, 16)
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		runBotSettingsFlow(context.Background(), client, "bot-1", false, botTestModels, func(msg tea.Msg) { send <- msg })
-	}()
-	nextBotPrompt(t, send).Response <- PromptResponse{Line: ""}
-	nextBotPrompt(t, send).Response <- PromptResponse{Line: ""}
-	nextBotPrompt(t, send).Response <- PromptResponse{Line: ""}
-	<-done
-	if len(client.updated) != 0 {
-		t.Fatalf("unchanged settings still updated: %#v", client.updated)
-	}
-}
-
-func botTestModels(context.Context) ([]SlashArgCandidate, error) {
-	return []SlashArgCandidate{
-		{Value: "gpt-5", ModelConfigID: "gpt-5", Display: "gpt-5", Detail: "openai"},
-		{Value: "claude-4", ModelConfigID: "claude-4", Display: "claude-4", Detail: "anthropic"},
-	}, nil
-}
-
-func nextBotPrompt(t *testing.T, send <-chan tea.Msg) PromptRequestMsg {
-	t.Helper()
-	for {
-		select {
-		case msg := <-send:
-			if prompt, ok := msg.(PromptRequestMsg); ok {
-				return prompt
-			}
-		case <-time.After(5 * time.Second):
-			t.Fatal("timed out waiting for a Bot prompt")
-		}
-	}
-}
-
 func nextBotFlowResult(t *testing.T, send <-chan tea.Msg) botFlowResultMsg {
 	t.Helper()
 	for {
@@ -676,9 +477,8 @@ func TestBotSettingsResultDoesNotOverrideSwitchedBot(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		runBotSettingsFlow(context.Background(), client, "bot-1", true, botTestModels, func(msg tea.Msg) { send <- msg })
+		runBotSettingsFlow(context.Background(), client, base.bots[0], bot.Config{Name: "Ada", Model: "claude-4"}, func(msg tea.Msg) { send <- msg })
 	}()
-	nextBotPrompt(t, send).Response <- PromptResponse{Line: "claude-4"}
 	<-client.entered // Ada's save is now in flight inside UpdateBot
 
 	model := newBotTestModel(t, 80, 24, client, nil)
@@ -738,29 +538,8 @@ func TestBotSettingsResultRefreshesStillActiveBot(t *testing.T) {
 	if model.botModelText() != "claude-4" {
 		t.Fatalf("active Bot model = %q, want claude-4", model.botModelText())
 	}
-	if !strings.Contains(model.hint, "reset to the selected model's defaults") {
-		t.Fatalf("model-reset notice missing: hint=%q flow=%#v", model.hint, notices)
-	}
-}
-
-func TestRunBotUpdateFlowModelChangeResetsEffortAndFast(t *testing.T) {
-	client := &fakeBotClient{bots: []bot.Bot{{
-		ID: "bot-1", SessionID: "bot-chat-1", Revision: 4,
-		Config: bot.Config{Name: "Ada", Model: "gpt-5", Effort: "high", Fast: true},
-	}}}
-	_, result := runBotUpdateFlowResult(t, client, "claude-4")
-	if len(client.updated) != 1 {
-		t.Fatalf("UpdateBot calls = %d, want 1", len(client.updated))
-	}
-	config := client.updated[0].Config
-	if config.Model != "claude-4" {
-		t.Fatalf("model = %q, want claude-4", config.Model)
-	}
-	if config.Effort != "" || config.Fast {
-		t.Fatalf("stale effort/fast survived a model change: %#v", config)
-	}
-	if result == nil || !result.modelReset {
-		t.Fatalf("flow result did not report the model reset: %#v", result)
+	if !strings.Contains(model.hint, "Bot settings saved") {
+		t.Fatalf("save notice missing: hint=%q flow=%#v", model.hint, notices)
 	}
 }
 
@@ -801,24 +580,23 @@ func runBotCreateFlowResult(t *testing.T, client appserver.BotClient) ([]string,
 	t.Helper()
 	send := make(chan tea.Msg, 16)
 	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		runBotCreateFlow(context.Background(), client, func(msg tea.Msg) { send <- msg })
-	}()
-	nextBotPrompt(t, send).Response <- PromptResponse{Line: "Ada"}
-	nextBotPrompt(t, send).Response <- PromptResponse{Line: ""}
+	runBotCreateFlow(t.Context(), client, bot.Config{Name: "Ada"}, func(msg tea.Msg) { send <- msg })
+	close(done)
 	return collectBotFlow(t, send, done)
 }
 
 func runBotUpdateFlowResult(t *testing.T, client appserver.BotClient, model string) ([]string, *botFlowResultMsg) {
 	t.Helper()
+	current, err := client.GetBot(t.Context(), "bot-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := current.Config
+	config.Model, config.Effort, config.Fast = model, "", false
 	send := make(chan tea.Msg, 16)
 	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		runBotSettingsFlow(context.Background(), client, "bot-1", true, botTestModels, func(msg tea.Msg) { send <- msg })
-	}()
-	nextBotPrompt(t, send).Response <- PromptResponse{Line: model}
+	runBotSettingsFlow(t.Context(), client, current, config, func(msg tea.Msg) { send <- msg })
+	close(done)
 	return collectBotFlow(t, send, done)
 }
 

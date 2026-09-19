@@ -2,7 +2,6 @@ package tuiapp
 
 import (
 	"reflect"
-	"strings"
 	"testing"
 
 	"github.com/caelis-labs/caelis/internal/controlprompt"
@@ -40,13 +39,13 @@ func TestDefaultCommandsExposePlatformCoreCommands(t *testing.T) {
 	}
 }
 
-func TestDefaultWizardsExposeConnectAndDisconnectFlows(t *testing.T) {
+func TestDefaultWizardsExposeConfigurationFlows(t *testing.T) {
 	wizards := DefaultWizards()
-	if len(wizards) != 2 {
-		t.Fatalf("DefaultWizards() count = %d, want connect and disconnect", len(wizards))
+	if len(wizards) != 3 {
+		t.Fatalf("DefaultWizards() count = %d, want connect, disconnect and plugin", len(wizards))
 	}
-	if wizards[0].Command != "connect" || wizards[1].Command != "disconnect" {
-		t.Fatalf("DefaultWizards() = %#v, want connect then disconnect", wizards)
+	if wizards[0].Command != "connect" || wizards[1].Command != "disconnect" || wizards[2].Command != "plugin" {
+		t.Fatalf("DefaultWizards() = %#v, want connect, disconnect then plugin", wizards)
 	}
 }
 
@@ -121,14 +120,6 @@ func TestDefaultDisconnectWizardSeparatesProviderAndACP(t *testing.T) {
 	}
 	if got := acp.BuildExecLine(map[string]string{"disconnect_agent": "codex"}); got != "/disconnect acp codex" {
 		t.Fatalf("ACP disconnect exec line = %q", got)
-	}
-}
-
-func TestConnectACPModelHintExplainsDiscoveryRecovery(t *testing.T) {
-	steps := connectACPWizard().Steps
-	modelHint := steps[len(steps)-1].FreeformHint
-	if !strings.Contains(modelHint, "retry discovery") || !strings.Contains(modelHint, "change launcher") {
-		t.Fatalf("ACP model hint = %q, want retry and launcher recovery guidance", modelHint)
 	}
 }
 

@@ -281,7 +281,7 @@ func TestProductBotTeamOverlayReadsAndSavesHostConfiguration(t *testing.T) {
 		t.Fatal("the configuration overlay did not load before saving")
 	}
 
-	_ = h.model.handleSubagentOverlayKey(tea.KeyPressMsg(tea.Key{Text: "s"}))
+	_ = h.model.handleSubagentOverlayKey(tea.KeyPressMsg(tea.Key{Code: 's', Mod: tea.ModCtrl}))
 	h.model.renderSubagentOverlay()
 	if h.model.subagentOverlay.page != subagentPageSaveSet {
 		t.Fatalf("overlay page = %v, want the save-binding-set page", h.model.subagentOverlay.page)
@@ -329,36 +329,26 @@ func TestProductBotTeamOverlayReadsAndSavesHostConfiguration(t *testing.T) {
 }
 
 // TestProductBotCreateWithDescription drives the real /new create flow against a
-// real Host. The two prompt answers, including a multiline description, must
+// real Host. The form values, including a multiline description, must
 // persist on the created Bot with no model call and no coding Session.
 func TestProductBotCreateWithDescription(t *testing.T) {
 	h := newBotCommandProductHarness(t)
 
 	answers := []string{"Ada", "Investigate flaky tests.\nReport only confirmed causes."}
-	asked := 0
+	h.model.startBotCreateFlow()
+	h.model.Update(tea.PasteMsg{Content: answers[0]})
+	h.model.Update(connectKey("tab"))
+	h.model.Update(tea.PasteMsg{Content: answers[1]})
+	msg := h.model.saveBotSettings()().(botSettingsSavedMsg)
 	var created *botFlowResultMsg
-	send := func(msg tea.Msg) {
-		switch typed := msg.(type) {
-		case PromptRequestMsg:
-			if asked >= len(answers) {
-				t.Fatal("create flow asked for more input than a name and description")
-			}
-			answer := answers[asked]
-			asked++
-			typed.Response <- PromptResponse{Line: answer}
-		case botFlowResultMsg:
-			result := typed
+	for _, message := range msg.messages {
+		if result, ok := message.(botFlowResultMsg); ok {
 			created = &result
 		}
 	}
-	runBotCreateFlow(h.ctx, h.clients.Bots, send)
-	if asked != len(answers) {
-		t.Fatalf("create flow prompts = %d, want %d", asked, len(answers))
+	if created == nil {
+		t.Fatal("creation did not complete")
 	}
-	if created == nil || !created.created {
-		t.Fatalf("create flow result = %#v", created)
-	}
-
 	got, err := h.clients.Bots.GetBot(h.ctx, created.bot.ID)
 	if err != nil {
 		t.Fatal(err)

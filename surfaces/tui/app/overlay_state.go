@@ -21,6 +21,7 @@ type OverlayState struct {
 
 	sessionPicker      *sessionPickerState
 	sessionPickerSeq   uint64
+	wizardOverlay      *wizardOverlayState
 	subagentOverlay    *subagentOverlayState
 	subagentRequestSeq uint64
 
@@ -67,6 +68,7 @@ type OverlayState struct {
 	slashArgQuery             string
 	slashArgCandidates        []SlashArgCandidate
 	slashArgIndex             int
+	modelPicker               *modelPickerState
 	slashArgLoadSeq           uint64
 	slashArgLoadPending       bool
 	slashArgLoadCommand       string
@@ -95,7 +97,7 @@ type OverlayState struct {
 
 // HasActiveOverlay returns true if any overlay is currently visible.
 func (o *OverlayState) HasActiveOverlay() bool {
-	return o.btwOverlay != nil ||
+	return o.wizardOverlay != nil || o.btwOverlay != nil ||
 		o.subagentOverlay != nil ||
 		o.subagentOutputOverlay != nil ||
 		o.activePrompt != nil ||

@@ -19,7 +19,7 @@ func TestRenderSlashArgListUsesWizardHintInsteadOfInternalConnectPayload(t *test
 		Commands: DefaultCommands(),
 		Wizards:  DefaultWizards(),
 	})
-	def := connectModelWizard()
+	def := connectModelWizard("api-key")
 	model.wizard = &wizardRuntime{
 		def:       &def,
 		stepIndex: 5,
@@ -62,7 +62,7 @@ func TestRenderSlashArgListDistinguishesCandidateTextFromDetail(t *testing.T) {
 	model.theme.HelpHintFg = lipgloss.Color("#8190aa")
 	model.theme.InvalidateTokens()
 	model.themeCacheKey = ""
-	def := connectModelWizard()
+	def := connectModelWizard("api-key")
 	model.wizard = &wizardRuntime{
 		def:       &def,
 		stepIndex: 1,
@@ -104,7 +104,7 @@ func TestRenderSlashArgListAlignsProviderHints(t *testing.T) {
 	})
 	model.width = 120
 	model.slashArgActive = true
-	model.slashArgCommand = "connect-provider"
+	model.slashArgCommand = "connect-provider-api-key"
 	model.slashArgCandidates = []SlashArgCandidate{
 		{Value: "codex", Display: "codex", Detail: "ChatGPT subscription models through Codex"},
 		{Value: "grok", Display: "grok", Detail: "Grok models through an eligible xAI subscription"},
@@ -135,7 +135,7 @@ func TestRenderSlashArgListDistinguishesOpenAIProtocolProviders(t *testing.T) {
 	})
 	model.width = 140
 	model.slashArgActive = true
-	model.slashArgCommand = "connect-provider"
+	model.slashArgCommand = "connect-provider-api-key"
 	model.slashArgCandidates = []SlashArgCandidate{
 		{Value: "openai", Display: "openai", Detail: "OpenAI-hosted models through the Responses API"},
 		{Value: "openai-responses-compatible", Display: "openai-responses-compatible", Detail: "OpenAI Responses API compatible proxy or self-hosted endpoint"},
@@ -217,85 +217,5 @@ func TestRenderSlashArgListUsesWideDisplayForBaseURL(t *testing.T) {
 		if width := displayColumns(line); width > limit {
 			t.Fatalf("renderInputOverlay() row width = %d, want <= %d: %q", width, limit, line)
 		}
-	}
-}
-
-func TestRenderInputBarMasksConnectAPIKeyWithoutDuplicatePrompt(t *testing.T) {
-	model := NewModel(Config{
-		Commands: DefaultCommands(),
-		Wizards:  DefaultWizards(),
-	})
-	def := connectModelWizard()
-	model.wizard = &wizardRuntime{
-		def:       &def,
-		stepIndex: 3,
-		state:     map[string]string{"provider": "minimax"},
-	}
-	model.slashArgActive = true
-	model.setInputText("sk-secret")
-	model.syncTextareaFromInput()
-
-	rendered := model.renderInputBar()
-	if strings.Contains(rendered, "sk-secret") {
-		t.Fatalf("rendered input bar leaked api key: %q", rendered)
-	}
-	if strings.Contains(rendered, "> >") {
-		t.Fatalf("rendered input bar duplicated prompt: %q", rendered)
-	}
-	if strings.Contains(rendered, "/connect") {
-		t.Fatalf("rendered input bar leaked /connect prefix: %q", rendered)
-	}
-}
-
-func TestRenderInputBarHidesConnectPrefixForProviderStep(t *testing.T) {
-	model := NewModel(Config{
-		Commands: DefaultCommands(),
-		Wizards:  DefaultWizards(),
-	})
-	def := connectModelWizard()
-	model.wizard = &wizardRuntime{
-		def:       &def,
-		stepIndex: 0,
-		state:     map[string]string{},
-	}
-	model.slashArgActive = true
-	model.setInputText("deepseek")
-	model.syncTextareaFromInput()
-
-	rendered := model.renderInputBar()
-	if strings.Contains(rendered, "/connect") {
-		t.Fatalf("rendered provider step leaked /connect prefix: %q", rendered)
-	}
-	if !strings.Contains(rendered, "deepseek") {
-		t.Fatalf("rendered provider step missing visible query: %q", rendered)
-	}
-}
-
-func TestRenderInputBarKeepsComposerBackgroundForConnectWizardInput(t *testing.T) {
-	model := NewModel(Config{
-		Commands: DefaultCommands(),
-		Wizards:  DefaultWizards(),
-	})
-	model.width = 80
-	model.theme.ComposerBg = lipgloss.Color("#141414")
-	model.theme.NoColor = false
-	def := connectModelWizard()
-	model.wizard = &wizardRuntime{
-		def:       &def,
-		stepIndex: 0,
-		state:     map[string]string{},
-	}
-	model.slashArgActive = true
-	model.setInputText("acp")
-	model.syncTextareaFromInput()
-
-	rendered := model.renderInputBar()
-	wantPrompt := model.theme.PromptStyle().Background(model.theme.ComposerBg).Render("> ")
-	wantInput := model.theme.TextStyle().Background(model.theme.ComposerBg).Render("acp")
-	if !strings.Contains(rendered, wantPrompt) {
-		t.Fatalf("rendered connect input missing composer background on prompt %q: %q", wantPrompt, rendered)
-	}
-	if !strings.Contains(rendered, wantInput) {
-		t.Fatalf("rendered connect input missing composer background on text %q: %q", wantInput, rendered)
 	}
 }

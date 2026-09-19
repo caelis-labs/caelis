@@ -45,7 +45,7 @@ one before sending.
 ## Bots, identity, and ownership
 
 - Creating a Bot from `/new` records a user-supplied name and optional description.
-  The name is the only required input. Cancelling either step creates nothing.
+  The name is the only required input. Cancelling the form creates nothing.
 - A Bot's identity is stable and is derived from the creating principal and the
   create operation, not from its name or workspace. Renaming a Bot via
   `/settings` keeps the same identity, conversation, and history.
@@ -60,9 +60,13 @@ one before sending.
 
 ## Configuration
 
-`/settings` edits name, description, and model together; `/model` edits only the
-model. An empty answer keeps the existing value; entering `-` for the description
-clears it.
+`/new` and `/settings` use one form for name, description, and model. Existing
+values are prefilled; clearing the description removes it. Tab moves between
+fields and the save action. Enter on Model opens the searchable provider picker;
+Esc returns to the form with its draft intact. `/model` opens that picker directly.
+Left/Right adjusts effort; Tab switches to Fast when supported. Enter applies the
+model draft, and Create or Save commits the complete form. Esc closes without
+saving. `/bots` supports typing or pasting a search inside its selection overlay.
 
 - A Bot's model must be an existing provider model from the configured catalog.
   Selection is explicit: Bot mode never silently binds a different provider or a
@@ -72,9 +76,10 @@ clears it.
   one exists. A Bot can still be created and renamed before any provider is
   configured; chatting fails explicitly until a model is selected.
 - Creation preserves the selected Host default's reasoning and speed settings.
-  Changing models in the TUI resets reasoning to the selected model's default
-  and clears the previous fast setting. Control rejects unsupported reasoning
-  or speed settings.
+  Explicit model selection starts from that model's catalog defaults and allows
+  editing supported effort and Fast options. Metadata-only edits preserve the
+  current model and options, including when its catalog entry is unavailable.
+  Control rejects unsupported reasoning or speed settings.
 - Saving is refused while a reply is streaming. The save is a compare-and-swap
   on the conversation revision and applies to your next message. Other open Bot
   windows pick up saved settings through their regular Host status refresh;

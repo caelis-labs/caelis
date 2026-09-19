@@ -229,8 +229,8 @@ func TestSessionPickerResponsiveWidthAndRightAlignedAges(t *testing.T) {
 			openSessionPickerForTest(t, model)
 			frame := model.View().Content
 			g := model.sessionPicker.geometry
-			if g.width != width-4 {
-				t.Fatalf("picker width = %d, want %d", g.width, width-4)
+			if g.width != min(112, width-4) {
+				t.Fatalf("picker width = %d, want %d", g.width, min(112, width-4))
 			}
 			lines := strings.Split(ansi.Strip(frame), "\n")
 			inset := model.overlayBorderChromeWidth() / 2
