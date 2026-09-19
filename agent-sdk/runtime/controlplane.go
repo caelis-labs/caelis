@@ -95,7 +95,7 @@ func (r *Runtime) runACPControllerTurn(
 		r.setRunState(ref.SessionID, agent.RunState{Status: agent.RunLifecycleStatusFailed, ActiveRunID: runID, LastError: err.Error(), UpdatedAt: r.now()})
 		return agent.RunResult{}, err
 	}
-	r.registerActiveRun(ref, activeSession, turnID, handle)
+	r.registerActiveRun(ref, activeSession, turnID, handle, req)
 	go func() {
 		defer cancel()
 		r.executeACPControllerTurn(ctx, activeSession, ref, req, runID, turnID, handle, admission)
@@ -207,6 +207,9 @@ func (r *Runtime) executeACPControllerTurn(
 		Stream:            req.Request.StreamEnabled(false),
 		Mode:              r.policyMode(req.AgentSpec),
 		ApprovalRequester: controllerApprovalRequester{runtime: r, requester: req.ApprovalRequester, sessionRef: ref, session: activeSession, runID: runID, turnID: turnID},
+		CommitBinding: func(commitCtx context.Context) error {
+			return r.commitControllerBinding(commitCtx, ref)
+		},
 	}
 	contextRoute, err := r.buildControllerTurnContext(ctx, activeSession, ref, turnID)
 	if err != nil {
@@ -259,6 +262,9 @@ func (r *Runtime) executeACPControllerTurn(
 					ExcludeTurnID: turnID,
 				})
 				if turnErr == nil {
+					// Recovery creates a new controller instance inside this same
+					// admitted Turn. External tool calls must use its current epoch.
+					r.registerActiveRun(ref, activeSession, turnID, handle, req)
 					turnReq.Session = activeSession
 					contextRoute, turnErr = r.buildControllerTurnContext(turnCtx, activeSession, ref, turnID)
 					if turnErr == nil {

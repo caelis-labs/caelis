@@ -19,8 +19,8 @@ agents; see [connection and endpoint setup](external-acp-agents.md#connect).
 
 Open `/team` to configure the profiles available for collaboration:
 
-- `self` uses the current Session controller's model, reasoning effort, and
-  approval mode. With auto-review, the child's own Guardian handles its
+- `self` uses the current Session controller's model, reasoning effort, Fast selection,
+  and approval mode. With auto-review, the child's own Guardian handles its
   approvals. Full access is inherited from the shared Host. Manual approval
   continues through the ACP permission bridge.
 - `breeze`, `orbit`, and `zenith` are named profiles that you bind to a provider
@@ -28,6 +28,10 @@ Open `/team` to configure the profiles available for collaboration:
   the work; the name itself does not select a model.
 - Custom roles give another profile a stable handle and capability description.
 - Binding sets save named snapshots of explicit profile bindings.
+
+On a capable profile, Tab switches between effort and Fast; left/right changes
+the focused choice. Fast off is explicit standard speed. Unsupported profiles
+hide the control. Binding sets preserve independent profile Fast choices.
 
 The same overlay includes Guardian, Reviewer, and Memory Steward. These have
 fixed responsibilities rather than general-purpose participant profiles;

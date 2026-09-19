@@ -74,7 +74,7 @@ func TestCollaborationToolSetsFollowCallerRole(t *testing.T) {
 		for _, definition := range Definitions(controller) {
 			names = append(names, definition.Name)
 		}
-		want := []string{"ListThreads", "SendMessage"}
+		want := []string{"ReadMessages", "ListThreads", "SendMessage"}
 		if controller {
 			want = append(want, "ReadThread", "WaitThread")
 		}

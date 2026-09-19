@@ -16,14 +16,15 @@ import (
 type systemAgentReasoningModel struct {
 	inner  model.LLM
 	effort string
+	fast   bool
 }
 
 func withSystemAgentReasoningEffort(resolved kernelimpl.ModelResolution) model.LLM {
 	effort := strings.TrimSpace(resolved.ReasoningEffort)
-	if resolved.Model == nil || effort == "" {
+	if resolved.Model == nil || (effort == "" && !resolved.FastMode) {
 		return resolved.Model
 	}
-	return &systemAgentReasoningModel{inner: resolved.Model, effort: effort}
+	return &systemAgentReasoningModel{inner: resolved.Model, effort: effort, fast: resolved.FastMode}
 }
 
 func (m *systemAgentReasoningModel) Name() string {
@@ -45,7 +46,14 @@ func (m *systemAgentReasoningModel) Generate(ctx context.Context, req *model.Req
 		return model.Generate(ctx, m.inner, nil)
 	}
 	cloned := *req
-	cloned.Reasoning.Effort = m.effort
+	if m.effort != "" {
+		cloned.Reasoning.Effort = m.effort
+	}
+	if m.fast {
+		cloned.ServiceTier = model.ServiceTierPriority
+	} else {
+		cloned.ServiceTier = ""
+	}
 	return model.Generate(ctx, m.inner, &cloned)
 }
 

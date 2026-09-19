@@ -113,7 +113,7 @@ func (s *runtimeComposition) resolveDelegationPlacement(req sdkdelegation.Target
 		// The selector is the public AgentHandle. The materialized child keeps
 		// the backend model identity; otherwise a handle such as "zenith" is
 		// accidentally treated as the ACP Agent selected by the Placement.
-		return s.materializeDelegatedModel("", target.Placement.ProfileID, target.Placement.ReasoningEffort, runtimeCfg)
+		return s.materializeDelegatedModel("", target.Placement.ProfileID, target.Placement.ReasoningEffort, runtimeCfg, target.Placement.ServiceTier)
 	case sdkplacement.KindAgent:
 		agent, connection, err := controlagents.ResolveAgent(snapshot.placement.Agents, target.Placement.Agent)
 		if err != nil {
@@ -134,7 +134,7 @@ func (s *runtimeComposition) resolveDelegationPlacement(req sdkdelegation.Target
 	}
 }
 
-func (s *runtimeComposition) materializeDelegatedModel(name, profileID, effort string, runtimeCfg stackRuntimeConfig) (assembly.AgentConfig, error) {
+func (s *runtimeComposition) materializeDelegatedModel(name, profileID, effort string, runtimeCfg stackRuntimeConfig, serviceTier ...string) (assembly.AgentConfig, error) {
 	configured, err := s.resolveProviderProfileConfig(profileID, effort)
 	if err != nil {
 		return assembly.AgentConfig{}, fmt.Errorf("gatewayapp: resolve delegated profile %q: %w", profileID, err)
@@ -146,7 +146,7 @@ func (s *runtimeComposition) materializeDelegatedModel(name, profileID, effort s
 		WorkspaceCWD: s.workspace.CWD,
 		SessionOptions: caelisModelSessionOptions(
 			configured,
-			effort,
+			effort, serviceTier...,
 		),
 		PinnedModel:  ptrToModelConfig(configured),
 		ApprovalMode: spawnedApprovalMode(runtimeCfg),
@@ -165,7 +165,7 @@ func (s *runtimeComposition) materializeDelegatedModel(name, profileID, effort s
 	return materialized, nil
 }
 
-func caelisModelSessionOptions(model ModelConfig, effort string) controlagents.SessionOptions {
+func caelisModelSessionOptions(model ModelConfig, effort string, serviceTier ...string) controlagents.SessionOptions {
 	out := controlagents.SessionOptions{
 		ModelID:      strings.TrimSpace(model.ID),
 		ConfigValues: map[string]string{},
@@ -173,6 +173,13 @@ func caelisModelSessionOptions(model ModelConfig, effort string) controlagents.S
 	if effort = strings.TrimSpace(effort); effort != "" && len(reasoningLevelsForACPModel(model)) > 0 {
 		out.ConfigValues[acpConfigReasoningID] = effort
 		out.ReasoningEffortConfigID = acpConfigReasoningID
+	}
+	if len(serviceTier) > 0 && serviceTier[0] != "" {
+		value := "default"
+		if serviceTier[0] == "priority" {
+			value = "fast"
+		}
+		out.ConfigValues["service_tier"] = value
 	}
 	return out
 }

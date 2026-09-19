@@ -21,14 +21,22 @@ type Request struct {
 // Invoke calls a source-bound collaboration service.
 type Invoke func(context.Context, Request) (json.RawMessage, error)
 
-// Call executes only the participant tool surface. Creation is intentionally
-// absent: a participant credential cannot create another Agent.
+// Call dispatches source-bound tools. Controller creation additionally requires
+// an authenticated grant bound to the exact current controller epoch.
 func (s *Service) Call(ctx context.Context, i Identity, req Request) (json.RawMessage, error) {
+	if req.Tool == "StartThread" {
+		return s.startThread(ctx, i, req.Arguments)
+	}
+	if (req.Tool == "ReadThread" || req.Tool == "WaitThread") && i.Member != "parent" {
+		return nil, errors.New("controller tool is unavailable to participants")
+	}
 	var args struct {
 		To             string   `json:"to"`
 		Message        string   `json:"message"`
 		ReplyTo        string   `json:"reply_to"`
 		Handle         string   `json:"handle"`
+		Cursor         *uint64  `json:"cursor"`
+		Limit          int      `json:"limit"`
 		After          uint64   `json:"after"`
 		Targets        []Target `json:"threads"`
 		TimeoutSeconds *int     `json:"timeout_seconds"`
@@ -46,6 +54,8 @@ func (s *Service) Call(ctx context.Context, i Identity, req Request) (json.RawMe
 	switch req.Tool {
 	case "ListThreads":
 		result, err = s.List(ctx, i)
+	case "ReadMessages":
+		result, err = s.ReadMessages(ctx, i, args.Cursor, args.Limit)
 	case "ReadThread":
 		result, err = s.Read(ctx, i, Target{Handle: args.Handle, After: args.After})
 	case "SendMessage":
@@ -82,6 +92,7 @@ func Definitions(controller bool) []tool.Definition {
 		return map[string]any{"type": "string", "minLength": 1, "description": description}
 	}
 	definitions := []tool.Definition{
+		{Name: "ReadMessages", Description: "Read one unread page of explicit Session group messages, including directed mail. Each member has independent progress. Does not consume directed mail or start work. A lost response can be replayed with an earlier cursor; explicit cursor reads do not change unread progress. Retention gaps are reported.", InputSchema: object(map[string]any{"limit": map[string]any{"type": "integer", "minimum": 1, "maximum": 128}, "cursor": map[string]any{"type": "integer", "minimum": 0}}), EffectClass: tool.EffectNonIdempotent},
 		{Name: "ListThreads", Description: "List participants and their Session-scoped handles.", InputSchema: object(map[string]any{}), EffectClass: tool.EffectReadOnly},
 		{Name: "SendMessage", Description: "Queue mail, then independently take your pending mail. Success means queued, not delivered; do not resend. Delivery occurs at a supported input boundary or through a SendMessage reply. Use received IDs as reply_to.", InputSchema: object(map[string]any{"to": text("Recipient handle from ListThreads."), "message": text("Message body."), "reply_to": map[string]any{"type": "string", "minLength": 36, "maxLength": 36, "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", "description": "Optional UUID of the message being answered."}}, "to", "message"), EffectClass: tool.EffectNonIdempotent},
 	}

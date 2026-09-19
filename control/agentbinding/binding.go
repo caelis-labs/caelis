@@ -23,11 +23,14 @@ const (
 )
 
 // Binding maps one persisted handle to exactly one profile and canonical
-// effort. Self is synthesized from current Session context and is never stored.
+// effort and optional speed. Self is synthesized from current Session context
+// and is never stored.
 type Binding struct {
 	Handle    Handle `json:"handle,omitempty"`
 	ProfileID string `json:"profile_id,omitempty"`
 	Effort    string `json:"effort,omitempty"`
+	// Speed is empty to inherit, "standard" for explicit Off, or "fast".
+	Speed string `json:"speed,omitempty"`
 }
 
 // Role defines one user-created delegation handle. Custom roles deliberately
@@ -100,6 +103,7 @@ func Normalize(in Binding) Binding {
 		Handle:    NormalizeHandle(in.Handle),
 		ProfileID: modelprofile.NormalizeID(in.ProfileID),
 		Effort:    modelcatalog.NormalizeReasoningEffort(in.Effort),
+		Speed:     strings.TrimSpace(in.Speed),
 	}
 }
 
@@ -217,6 +221,11 @@ func ValidateConfiguration(in Configuration, profiles modelprofile.Configuration
 		}
 		if !profile.SupportsEffort(binding.Effort) {
 			return fmt.Errorf("control/agentbinding: effort %q is not supported by profile %q", binding.Effort, profile.ID)
+		}
+		if binding.Speed != "" {
+			if _, ok := profile.WireSpeed(binding.Speed); !ok {
+				return fmt.Errorf("control/agentbinding: speed %q is not supported by profile %q", binding.Speed, profile.ID)
+			}
 		}
 		if !SupportsProfile(binding.Handle, profile) {
 			return &UnsupportedBackendError{Handle: binding.Handle, ProfileID: profile.ID, Backend: profile.Kind()}

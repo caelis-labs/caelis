@@ -67,17 +67,7 @@ func (r *Runtime) resolveAgent(
 	wrap := func(tools []tool.Tool) []tool.Tool {
 		bound := wrappingSpec
 		bound.Tools = tools
-		bound.Tools = r.wrapToolsForExecutionJournal(ref, runID, turnID, toolStepSequence, bound.Tools)
-		bound.Tools = r.wrapToolsForPolicy(activeSession, ref, state, bound, approvalContext{
-			ctx:        ctx,
-			requester:  req.ApprovalRequester,
-			runtime:    r,
-			session:    session.CloneSession(activeSession),
-			sessionRef: session.NormalizeSessionRef(ref),
-			runID:      strings.TrimSpace(runID),
-			turnID:     strings.TrimSpace(turnID),
-		})
-		bound.Tools = r.wrapToolsForLifecycle(bound.Tools)
+		bound.Tools = r.wrapTurnTools(ctx, activeSession, ref, state, bound, req.ApprovalRequester, runID, turnID, toolStepSequence)
 		return bound.Tools
 	}
 	spec.Tools = wrap(spec.Tools)
@@ -86,6 +76,15 @@ func (r *Runtime) resolveAgent(
 	}
 
 	return r.agentFactory.NewAgent(ctx, spec)
+}
+
+// wrapTurnTools is shared by native and externally controlled execution.
+func (r *Runtime) wrapTurnTools(ctx context.Context, activeSession session.Session, ref session.SessionRef, state map[string]any, spec agent.AgentSpec, requester agent.ApprovalRequester, runID, turnID string, sequence *atomic.Uint64) []tool.Tool {
+	spec.Tools = r.wrapToolsForExecutionJournal(ref, runID, turnID, sequence, spec.Tools)
+	spec.Tools = r.wrapToolsForPolicy(activeSession, ref, state, spec, approvalContext{
+		ctx: ctx, requester: requester, runtime: r, session: session.CloneSession(activeSession), sessionRef: session.NormalizeSessionRef(ref), runID: runID, turnID: turnID,
+	})
+	return r.wrapToolsForLifecycle(spec.Tools)
 }
 
 func cloneAgentSpec(in agent.AgentSpec) agent.AgentSpec {

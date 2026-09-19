@@ -31,7 +31,7 @@ func (s *runtimeComposition) materializeReviewerAgent(
 			WorkspaceCWD: s.workspace.CWD,
 			SessionOptions: caelisModelSessionOptions(
 				configured,
-				placement.ReasoningEffort,
+				placement.ReasoningEffort, placement.ServiceTier,
 			),
 			PinnedModel:  ptrToModelConfig(configured),
 			ApprovalMode: spawnedApprovalMode(runtimeCfg),

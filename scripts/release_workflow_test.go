@@ -210,10 +210,10 @@ func TestScopedQualityFailsClosed(t *testing.T) {
 	}
 }
 
-func TestCommitCheckDoesNotRepeatFullPRQuality(t *testing.T) {
+func TestCommitCheckIncludesLintWithoutFullPRQuality(t *testing.T) {
 	t.Parallel()
 	makefile := readWorkflow(t, "../Makefile")
-	for _, want := range []string{"commit-check: fmt-check", "git diff --check", "git diff --cached --check", "quality: lint test build"} {
+	for _, want := range []string{"commit-check: fmt-check lint\n", "git diff --check", "git diff --cached --check", "quality: lint test build"} {
 		if !strings.Contains(makefile, want) {
 			t.Errorf("local checkpoint missing %q", want)
 		}

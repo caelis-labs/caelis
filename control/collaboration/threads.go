@@ -66,6 +66,14 @@ func (s *Service) Read(ctx context.Context, i Identity, target Target) (ThreadRe
 // or a new terminal/attention observation. Cursors suppress repeated
 // observations; they are not message acknowledgements.
 func (s *Service) WaitThreads(ctx context.Context, i Identity, targets []Target, timeout time.Duration) (WaitResult, error) {
+	result, err := s.waitThreads(ctx, i, targets, timeout)
+	if err == nil {
+		_, err = s.members(ctx, i)
+	}
+	return result, err
+}
+
+func (s *Service) waitThreads(ctx context.Context, i Identity, targets []Target, timeout time.Duration) (WaitResult, error) {
 	empty := WaitResult{Reason: "timeout", Messages: []Message{}, Threads: []ThreadRead{}}
 	if timeout < 0 || timeout > time.Minute || len(targets) > 8 {
 		return empty, errors.New("wait accepts at most 8 threads and 0 to 60 seconds")

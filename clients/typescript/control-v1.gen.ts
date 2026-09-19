@@ -232,6 +232,13 @@ export interface AddPluginPathRequest {
   session_id?: string;
 }
 
+export interface AgentBinding {
+  effort?: string;
+  handle?: string;
+  profile_id?: string;
+  speed?: "" | "standard" | "fast";
+}
+
 export interface AgentBindingSetRequest {
   expected_controller_epoch?: string;
   expected_revision?: Uint64Decimal;
@@ -240,7 +247,19 @@ export interface AgentBindingSetRequest {
   set_name: string;
 }
 
-export type AgentBindingStatus = Record<string, JSONValue>;
+export interface AgentBindingSetStatus {
+  Active: boolean;
+  Available: boolean;
+  Bindings: Array<AgentBinding>;
+  Name: string;
+  Problem: string;
+}
+
+export interface AgentBindingStatus {
+  Handles: Array<AgentHandleStatus>;
+  Sets: Array<AgentBindingSetStatus>;
+  Targets: Array<ModelProfile>;
+}
 
 export interface AgentCandidate {
   description?: string;
@@ -275,6 +294,12 @@ export interface AgentCommunicationEnvelope {
   scope_id?: string;
   session_id?: string;
   turn_id?: string;
+}
+
+export interface AgentHandleStatus {
+  Binding: AgentBinding;
+  Definition: JSONObject;
+  Profile: ModelProfile;
 }
 
 export interface AgentParticipantSnapshot {
@@ -361,7 +386,7 @@ export interface AvailableCommand {
 }
 
 export interface BindAgentBindingRequest {
-  binding: JSONObject;
+  binding: AgentBinding;
   expected_controller_epoch?: string;
   expected_revision?: Uint64Decimal;
   operation_id?: string;
@@ -546,7 +571,7 @@ export interface ControllerBinding {
 export type ControllerKind = "kernel" | "acp";
 
 export interface CreateAgentRoleRequest {
-  binding?: JSONObject;
+  binding?: AgentBinding;
   expected_controller_epoch?: string;
   expected_revision?: Uint64Decimal;
   operation_id?: string;
@@ -790,6 +815,25 @@ export interface MarketplaceSnapshot {
 
 export type MarketplaceSnapshotList = Array<MarketplaceSnapshot>;
 
+export interface ModelEffortCapability {
+  acp_config_id?: string;
+  choices?: Array<ModelEffortChoice>;
+  default_effort?: string;
+}
+
+export interface ModelEffortChoice {
+  canonical?: string;
+  wire_value?: string;
+}
+
+export interface ModelProfile {
+  backend: JSONObject;
+  display_name?: string;
+  effort: ModelEffortCapability;
+  id?: string;
+  speed?: ModelSpeedCapability;
+}
+
 export interface ModelSelection {
   context_window_tokens?: number;
   current?: boolean;
@@ -797,6 +841,17 @@ export interface ModelSelection {
   efforts: Array<string>;
   fast?: boolean;
   fast_supported?: boolean;
+}
+
+export interface ModelSpeedCapability {
+  acp_config_id?: string;
+  choices?: Array<ModelSpeedChoice>;
+  default_speed?: string;
+}
+
+export interface ModelSpeedChoice {
+  canonical: string;
+  wire_value: string;
 }
 
 export interface ModelUsageSnapshot {

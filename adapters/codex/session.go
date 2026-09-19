@@ -8,21 +8,30 @@ import (
 )
 
 const (
-	configIDModel  = "model"
-	configIDEffort = "reasoning_effort"
+	configIDModel       = "model"
+	configIDEffort      = "reasoning_effort"
+	configIDServiceTier = "service_tier"
 )
 
 type codexModel struct {
-	ID                     string `json:"id"`
-	Model                  string `json:"model"`
-	DisplayName            string `json:"displayName"`
-	Description            string `json:"description"`
-	Hidden                 bool   `json:"hidden"`
-	DefaultReasoningEffort string `json:"defaultReasoningEffort"`
+	ID                     string             `json:"id"`
+	Model                  string             `json:"model"`
+	DisplayName            string             `json:"displayName"`
+	Description            string             `json:"description"`
+	Hidden                 bool               `json:"hidden"`
+	ServiceTiers           []codexServiceTier `json:"serviceTiers"`
+	DefaultServiceTier     string             `json:"defaultServiceTier"`
+	DefaultReasoningEffort string             `json:"defaultReasoningEffort"`
 	SupportedEfforts       []struct {
 		ReasoningEffort string `json:"reasoningEffort"`
 		Description     string `json:"description"`
 	} `json:"supportedReasoningEfforts"`
+}
+
+type codexServiceTier struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
 }
 
 type threadOpenResponse struct {
@@ -30,8 +39,9 @@ type threadOpenResponse struct {
 		ID  string `json:"id"`
 		CWD string `json:"cwd"`
 	} `json:"thread"`
-	Model           string `json:"model"`
-	ReasoningEffort string `json:"reasoningEffort"`
+	Model           string  `json:"model"`
+	ReasoningEffort string  `json:"reasoningEffort"`
+	ServiceTier     *string `json:"serviceTier"`
 }
 
 type sessionState struct {
@@ -44,7 +54,9 @@ type sessionState struct {
 	roots    []string
 	model    string
 	effort   string
-	models   []codexModel
+	// nil preserves an inherited/unknown remote tier; it never means standard.
+	serviceTier *string
+	models      []codexModel
 	// subscribed records that thread/start or thread/resume may have loaded the
 	// Thread into the shared Codex app-server process. Synthetic reserved routes
 	// used before any app-server request must not unsubscribe another owner.
@@ -65,6 +77,7 @@ func (s *sessionState) applyOpenResponse(response threadOpenResponse) {
 	s.subscribed = true
 	s.model = strings.TrimSpace(response.Model)
 	s.effort = strings.TrimSpace(response.ReasoningEffort)
+	s.serviceTier = response.ServiceTier
 	s.mu.Unlock()
 }
 
@@ -198,6 +211,9 @@ func (s *sessionState) configOptionsLocked() []acp.SessionConfigOption {
 		category := acp.SessionConfigOptionCategoryThoughtLevel
 		effortOption.Select.Category = &category
 		options = append(options, effortOption)
+	}
+	if tier := s.serviceTierOptionLocked(); tier != nil {
+		options = append(options, *tier)
 	}
 	return options
 }

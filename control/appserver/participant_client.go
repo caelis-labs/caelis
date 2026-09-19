@@ -235,9 +235,8 @@ func (c *ParticipantTurnClient) startObserved(
 		turn.steerFn = func(steerCtx context.Context, input, displayInput string, contentParts []model.ContentPart) error {
 			steerResult, steerErr := c.sessions.Steer(steerCtx, SteerRequest{
 				WriteBase: WriteBase{
-					OperationID:             newParticipantOperationID("steer"),
-					SessionID:               sessionID,
-					ExpectedControllerEpoch: turn.controllerEpoch,
+					OperationID: newParticipantOperationID("steer"),
+					SessionID:   sessionID,
 				},
 				Target:       turn.target,
 				Input:        input,
@@ -254,9 +253,8 @@ func (c *ParticipantTurnClient) startObserved(
 			execute: func(cancelCtx context.Context, operationID, reason string) (CommandResult, error) {
 				return c.participants.CancelParticipant(cancelCtx, CancelParticipantRequest{
 					WriteBase: WriteBase{
-						OperationID:             operationID,
-						SessionID:               sessionID,
-						ExpectedControllerEpoch: turn.controllerEpoch,
+						OperationID: operationID,
+						SessionID:   sessionID,
 					},
 					ParticipantID: participantID,
 					Target:        result.Target,

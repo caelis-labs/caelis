@@ -150,7 +150,7 @@ func (s *controlCommandBackend) useHostModelAtRevision(ctx context.Context, alia
 	if !profile.SupportsEffort(reasoning) {
 		return result, errorcode.New(errorcode.InvalidArgument, fmt.Sprintf("gatewayapp: model profile %q does not support reasoning level %q", profile.ID, reasoning))
 	}
-	if fastMode {
+	if fastMode && (profile.Kind() == modelprofile.BackendProvider || !profile.SupportsFast()) {
 		if profile.Kind() != modelprofile.BackendProvider || profile.Backend.Provider == nil {
 			return result, errorcode.New(errorcode.InvalidArgument, fmt.Sprintf("gatewayapp: model profile %q does not support fast mode", profile.ID))
 		}

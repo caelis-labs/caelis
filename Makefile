@@ -93,8 +93,8 @@ client-protocol-check: cache-dirs
 
 quality: lint test build
 
-# Run owning tests while changing code; the PR owns the full quality gate.
-commit-check: fmt-check
+# Run owning tests while changing code; the PR owns the full test/build gate.
+commit-check: fmt-check lint
 	git diff --check
 	git diff --cached --check
 

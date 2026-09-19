@@ -30,11 +30,13 @@ const (
 // applied after the non-effort defaults. ConfigFingerprint identifies the referenced host
 // configuration. Fingerprint seals the remaining normalized fields.
 type Placement struct {
-	Kind                    Kind              `json:"kind,omitempty"`
-	ProfileID               string            `json:"profile_id,omitempty"`
-	Agent                   string            `json:"agent,omitempty"`
-	Model                   string            `json:"model,omitempty"`
-	ReasoningEffort         string            `json:"reasoning_effort,omitempty"`
+	Kind            Kind   `json:"kind,omitempty"`
+	ProfileID       string `json:"profile_id,omitempty"`
+	Agent           string `json:"agent,omitempty"`
+	Model           string `json:"model,omitempty"`
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	// ServiceTier is the provider request tier. Remote backends use SessionConfigValues.
+	ServiceTier             string            `json:"service_tier,omitempty"`
 	ReasoningEffortConfigID string            `json:"reasoning_effort_config_id,omitempty"`
 	SessionConfigValues     map[string]string `json:"session_config_values,omitempty"`
 	ConfigFingerprint       string            `json:"config_fingerprint,omitempty"`
@@ -53,6 +55,7 @@ func Normalize(in Placement) Placement {
 		Agent:                   strings.TrimSpace(in.Agent),
 		Model:                   strings.TrimSpace(in.Model),
 		ReasoningEffort:         strings.ToLower(strings.TrimSpace(in.ReasoningEffort)),
+		ServiceTier:             strings.TrimSpace(in.ServiceTier),
 		ReasoningEffortConfigID: strings.TrimSpace(in.ReasoningEffortConfigID),
 		SessionConfigValues:     NormalizeSessionConfigValues(in.SessionConfigValues),
 		ConfigFingerprint:       strings.ToLower(strings.TrimSpace(in.ConfigFingerprint)),
@@ -67,6 +70,9 @@ func Validate(raw Placement) error {
 	value := Normalize(raw)
 	switch value.Kind {
 	case KindAgent:
+		if value.ServiceTier != "" {
+			return fmt.Errorf("agent-sdk/placement: Agent tier belongs in remote session configuration")
+		}
 		if value.Agent == "" {
 			return fmt.Errorf("agent-sdk/placement: Agent placement requires an Agent")
 		}

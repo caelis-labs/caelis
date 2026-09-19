@@ -325,6 +325,15 @@ func resolveAgentSpecWith(ctx context.Context, snap assemblyResolverSnapshot, in
 	if err != nil {
 		return agent.AgentSpec{}, err
 	}
+	fastMode := modelResolution.FastMode
+	if selected, ok := CurrentModelFastMode(state); ok {
+		fastMode = selected
+	} else if CurrentModelAlias(state) != "" {
+		// Provider aliases written before fast mode existed remain explicit
+		// standard-speed selections rather than inheriting a later Host default.
+		fastMode = false
+	}
+	modelResolution.FastMode = fastMode
 	tools := append([]tool.Tool(nil), snap.tools...)
 	var deferredTools tool.Source
 	if snap.toolAugmenter != nil {
@@ -346,14 +355,6 @@ func resolveAgentSpecWith(ctx context.Context, snap assemblyResolverSnapshot, in
 		}
 	}
 	request := agent.ModelRequestOptions{}
-	fastMode := modelResolution.FastMode
-	if selected, ok := CurrentModelFastMode(state); ok {
-		fastMode = selected
-	} else if CurrentModelAlias(state) != "" {
-		// Provider aliases written before fast mode existed remain explicit
-		// standard-speed selections rather than inheriting a later Host default.
-		fastMode = false
-	}
 	if fastMode {
 		request.ServiceTier = model.ServiceTierPriority
 	}
@@ -382,7 +383,11 @@ func toolAugmentSessionContext(metadata map[string]any, modelResolution ModelRes
 		// canonical "none" value even when runtime model metadata omits it.
 		effort = "none"
 	}
-	return controlplacement.SessionContext{ProfileID: profileID, Effort: effort}
+	speed := ""
+	if modelResolution.FastMode {
+		speed = "fast"
+	}
+	return controlplacement.SessionContext{ProfileID: profileID, Effort: effort, Speed: speed}
 }
 
 func resolveMetadataWith(baseMetadata map[string]any, resolved assembly.ResolvedAssembly, intent TurnIntent, state map[string]any, modelResolution ModelResolution) (map[string]any, error) {

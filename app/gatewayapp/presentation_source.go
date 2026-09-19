@@ -347,6 +347,19 @@ func (p gatewayPresentationSource) modelConfigOptions(ctx context.Context, sessi
 			Options:      reasoningSelectOptions(reasoningLevels),
 		})
 	}
+	if modelconfig.SupportsSpeedMode(cfg, "fast") {
+		state, stateErr := p.runtimeStateFn(ctx, session.SessionRef)
+		if stateErr != nil {
+			return nil, stateErr
+		}
+		value := "default"
+		if state.FastMode {
+			value = "fast"
+		}
+		options = append(options, appserver.PresentationConfigOption{Type: "select", ID: "service_tier", Name: "Service tier", CurrentValue: value,
+			Options: []appserver.PresentationSelectOption{{Value: "default", Name: "Standard"}, {Value: "fast", Name: "Fast"}},
+		})
+	}
 	return options, nil
 }
 

@@ -7,6 +7,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/workspacetrust"
+	"github.com/caelis-labs/caelis/internal/acpagentbridge/controller"
 )
 
 func TestStatusProjectsCanonicalConfigurationRevision(t *testing.T) {
@@ -110,5 +111,25 @@ func TestStatusProjectsEffectiveProcessModelWithoutSession(t *testing.T) {
 	if status.Session.ID != "" || status.ModelStatus.Display != "openai-codex/gpt-5.6-sol [xhigh]" ||
 		status.ModelStatus.ReasoningEffort != "xhigh" || !status.ModelStatus.FastMode {
 		t.Fatalf("Host effective model status = %#v", status)
+	}
+}
+
+func TestStatusProjectsACPServiceTier(t *testing.T) {
+	for _, value := range []string{"priority", "fast", "default", ""} {
+		t.Run(value, func(t *testing.T) {
+			active := session.Session{SessionRef: session.SessionRef{SessionID: "work"}, Controller: session.ControllerBinding{Kind: session.ControllerKindACP, AgentName: "codex", EpochID: "epoch"}}
+			driver, err := NewStatusAssemblerForSession(t.Context(), StatusAssemblyDeps{Agent: AgentRuntimeDeps{
+				ControllerStatusFn: func(context.Context, session.SessionRef) (controller.ControllerStatus, bool, error) {
+					return controller.ControllerStatus{Agent: "codex", Model: "model", ConfigOptions: []controller.ControllerConfigOption{{ID: "service_tier", CurrentValue: value}}}, true, nil
+				},
+			}}, active, "test", "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			status, err := driver.LightweightStatus(t.Context())
+			if err != nil || status.ModelStatus.FastMode != (value == "fast" || value == "priority") {
+				t.Fatalf("ACP speed status = %#v, %v", status.ModelStatus, err)
+			}
+		})
 	}
 }

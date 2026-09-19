@@ -43,7 +43,7 @@ func (b *collaborationBackend) List(ctx context.Context, id string) ([]collabora
 	if closed {
 		return nil, errors.Join(collaboration.ErrSessionClosed, appserver.ErrSessionClosed)
 	}
-	out := []collaboration.Thread{{ID: id, SessionID: id, Handle: "parent", Name: "Main Agent", State: "running"}}
+	out := []collaboration.Thread{{ID: firstNonEmpty(active.Controller.EpochID, id), Generation: active.Controller.EpochID, SessionID: firstNonEmpty(active.Controller.RemoteSessionID, id), Handle: "parent", Name: "Main Agent", State: "running"}}
 	// Runtime acquisition is unnecessary for discovery. Automatic parent
 	// delivery is allowed only while a registry already exists.
 	b.router.mu.RLock()
@@ -198,6 +198,15 @@ func (s *runtimeComposition) collaborationTools(active session.Session) []tool.T
 				return nil, errors.New("participant is no longer attached")
 			}
 			identity = collaboration.Identity{Session: parentID, Member: hostedChildHandle(binding)}
+		}
+		if identity.Member == "parent" {
+			current, err := s.sessions.Session(ctx, active.SessionRef)
+			if err != nil {
+				return nil, err
+			}
+			if current.Controller.Kind == session.ControllerKindACP || (active.Controller.EpochID != "" && current.Controller.EpochID != active.Controller.EpochID) {
+				return nil, errors.New("controller instance was replaced")
+			}
 		}
 		return service.Call(ctx, identity, req)
 	})

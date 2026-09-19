@@ -34,6 +34,7 @@ const (
 type SessionContext struct {
 	ProfileID string `json:"profile_id,omitempty"`
 	Effort    string `json:"effort,omitempty"`
+	Speed     string `json:"speed,omitempty"`
 }
 
 // HandleRequest asks Control to resolve one configured handle for one
@@ -134,16 +135,18 @@ func ResolveHandle(snapshot Snapshot, req HandleRequest) (sdkplacement.Placement
 
 	profileID := ""
 	effort := ""
+	speed := ""
 	if handle == agentbinding.HandleSelf {
 		profileID = modelprofile.NormalizeID(req.Session.ProfileID)
 		effort = modelcatalog.NormalizeReasoningEffort(req.Session.Effort)
+		speed = req.Session.Speed
 		if profileID == "" || effort == "" {
 			return sdkplacement.Placement{}, fmt.Errorf("control/placement: self requires the current Session profile and effort")
 		}
 	} else {
 		binding, ok := agentbinding.Lookup(snapshot.Bindings, handle)
 		if ok {
-			profileID, effort = binding.ProfileID, binding.Effort
+			profileID, effort, speed = binding.ProfileID, binding.Effort, binding.Speed
 		} else if purpose == PurposeGuardian || purpose == PurposeReviewer {
 			profile, err := defaultSystemProfile(snapshot.Profiles, handle)
 			if err != nil {
@@ -167,14 +170,20 @@ func ResolveHandle(snapshot Snapshot, req HandleRequest) (sdkplacement.Placement
 		}
 	}
 
+	var frozen sdkplacement.Placement
+	var err error
 	switch profile.Kind() {
 	case modelprofile.BackendProvider:
-		return resolveProvider(snapshot, profile, effort)
+		frozen, err = resolveProvider(snapshot, profile, effort)
 	case modelprofile.BackendACP:
-		return resolveACP(snapshot, profile, effort)
+		frozen, err = resolveACP(snapshot, profile, effort)
 	default:
 		return sdkplacement.Placement{}, fmt.Errorf("control/placement: profile %q has no valid backend", profile.ID)
 	}
+	if err != nil {
+		return sdkplacement.Placement{}, err
+	}
+	return profile.ApplySpeed(frozen, speed)
 }
 
 // ResolveParticipant selects one explicit ACP ModelProfile and effort for
@@ -299,6 +308,13 @@ func ValidateFrozen(snapshot Snapshot, frozen sdkplacement.Placement) error {
 	if err != nil {
 		return err
 	}
+	// Recover the explicit selection from the sealed placement, never the live binding.
+	if frozen.ServiceTier != "" || (profile.Speed.ACPConfigID != "" && frozen.SessionConfigValues[profile.Speed.ACPConfigID] != "") {
+		current, err = profile.ApplySpeed(current, profile.SelectedSpeed(frozen))
+		if err != nil {
+			return err
+		}
+	}
 	if current.ConfigFingerprint != frozen.ConfigFingerprint || current.Fingerprint != frozen.Fingerprint {
 		return fmt.Errorf("control/placement: referenced configuration for profile %q changed after placement was frozen", profile.ID)
 	}
@@ -329,6 +345,9 @@ func ValidateSnapshot(snapshot Snapshot) error {
 				if !modelconfig.SupportsReasoningEffort(configured, choice.Canonical) {
 					return fmt.Errorf("control/placement: provider profile %q declares unsupported effort %q", profile.ID, choice.Canonical)
 				}
+			}
+			if len(profile.Speed.Choices) > 0 && !modelconfig.SupportsSpeedMode(configured, "fast") {
+				return fmt.Errorf("control/placement: provider profile %q declares speed for an unsupported endpoint or model", profile.ID)
 			}
 		case modelprofile.BackendACP:
 			agent, _, err := controlagents.ResolveAgent(snapshot.Agents, profile.Backend.ACP.AgentID)

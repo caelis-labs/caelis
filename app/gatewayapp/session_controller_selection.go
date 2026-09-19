@@ -36,6 +36,16 @@ func (s *runtimeComposition) initialSessionController(ctx context.Context) (sess
 	if err != nil {
 		return session.ControllerBinding{}, fmt.Errorf("gatewayapp: resolve initial ACP controller: %w", err)
 	}
+	if _, standard := profile.WireSpeed("standard"); runtimeCfg.ModelFastMode || standard {
+		speed := "standard"
+		if runtimeCfg.ModelFastMode {
+			speed = "fast"
+		}
+		frozen, err = profile.ApplySpeed(frozen, speed)
+		if err != nil {
+			return session.ControllerBinding{}, err
+		}
+	}
 	return dormantACPControllerBinding(frozen, "default_profile", time.Now()), nil
 }
 

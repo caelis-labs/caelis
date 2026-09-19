@@ -51,6 +51,50 @@ See the upstream
 [ACP authentication methods RFD](https://agentclientprotocol.com/rfds/auth-methods)
 for standard wire behavior.
 
+## Speed and service tiers
+
+ModelProfiles expose a typed speed capability independently of reasoning effort.
+Each choice maps a product value to the exact backend wire value; ACP profiles
+also retain the advertised config ID. `/model` and `/team` show Fast only when
+both standard and Fast are available. Provider capabilities retain the official
+endpoint checks. A binding's empty `speed` preserves an explicitly configured
+profile default in `SessionDefaults`, or inherits the backend default when none
+is configured;
+`standard` and `fast` are explicit selections. Binding sets retain that choice.
+Host and Session model commands retain their explicit Fast boolean: false selects
+standard on a capable profile. Guardian and Steward remain provider-only.
+
+The Codex adapter reads `model/list.serviceTiers` and `defaultServiceTier` and
+publishes `service_tier`. Every catalog-known model exposes the protocol baseline
+`default`, including models without additional tiers. Additional choices use
+catalog IDs (currently `priority` for Fast). Missing or empty catalogs do not
+advertise Fast; there is no `additionalSpeedTiers` or model-name fallback.
+Thread start/resume responses supply the effective tier. Missing/null tier stays
+inherited internally, even when the selector displays its discovered default.
+Control sends explicitly configured values even when they equal that display;
+only an omitted selection inherits. When a combined model/tier selection requests
+Standard, Control applies it before switching models if the current model advertises
+it, then confirms the requested defaults against the destination configuration.
+Changing a model validates an explicit tier against the destination capability.
+Explicit standard (`default`) remains valid without additional tiers; an
+incompatible Fast selection fails without silently downgrading it.
+
+Set-config validates the current catalog and stages the next Turn selection.
+The next `turn/start.serviceTier` applies it to that and subsequent Turns;
+`serviceTierForTurn` is not used. Configuration cannot change during an active
+Turn. A rejected start retains the complete staged model, effort and tier so a
+retry sends the same selection; it does not combine a new model with an old tier.
+An ambiguous start closes the route rather than claiming a successful change.
+A newly opened Codex thread cannot be resumed until it has persisted its first
+Turn, so set-config
+does not fabricate a resume as an acknowledgement. Resume reads actual backend
+state again. See the [Codex app-server protocol](https://developers.openai.com/codex/app-server).
+
+Explicit speed is sealed in the existing Placement: provider `service_tier` or
+ACP `session_config_values`. It contributes to the placement fingerprint.
+Rebinding changes future work; active participants keep their frozen selection.
+Session overrides do not mutate Codex's global configuration or another thread.
+
 ## Input and collaborator Sessions
 
 An idle external collaborator receives `session/prompt` on its existing ACP
@@ -73,12 +117,12 @@ and do not inherit controller-only tool guidance. Transferred parent context
 follows the initial task body.
 
 Product Agents share one Control-owned mailbox service within their owning work
-Session. Children expose only `ListThreads` and `SendMessage`; the controller also
-has `ReadThread` and `WaitThread`. Built-in children and child MCP servers
+Session. Children expose `ReadMessages`, `ListThreads`, and `SendMessage`; the
+controller also has `StartThread`, `ReadThread`, and `WaitThread`. Built-in children and child MCP servers
 register only their tool set. `ListThreads` discovers all collaborators.
 
-`SendMessage {to, message, reply_to?}` first commits a message to the recipient's
-persistent mailbox, then independently takes up to 32 messages from the caller's
+`SendMessage {to, message, reply_to?}` atomically commits a message to the shared
+log and recipient's persistent mailbox, then independently takes up to 32 messages from the caller's
 own mailbox. The result contains `{id, status:"queued"}` and optional `messages`;
 it never echoes the outgoing body. Empty or failed inbox checks omit `messages`
 and do not change the successful send acknowledgement. A failed send does not
@@ -88,6 +132,42 @@ SendMessage replies, and controller waits share the atomic read-and-delete path:
 a message is consumed by only one path. There are no automatic retries if a
 response is lost or a dispatch outcome is unknown. Message text is limited to
 65,536 bytes; `reply_to`, when present, is a canonical message UUID.
+
+`ReadMessages {limit?, cursor?}` reads shared explicit collaboration messages.
+The default page contains at most 32 messages; the limit can be 1–128 and the
+encoded response is bounded by 4 MiB. Each entry includes sequence, message ID,
+sender, directed recipient and optional reply ID. `@handle` and `handle` address
+the same recipient. Public results, private reasoning, tool traces, original
+controller conversation and direct user input are not copied into this log.
+New members may read messages sent before they joined, within retention.
+
+Control commits default read progress before returning. Concurrent reads from
+one member serialize; a cancelled transaction does not advance progress. A lost
+response may therefore lose a page from the unread view. Supplying an earlier
+`cursor` explicitly replays retained bodies without changing saved progress.
+Use the returned cursor to continue; `has_more` reports remaining entries at the
+read snapshot. Messages appended later remain available on subsequent reads.
+These are observation positions, separate from ReadThread cursors and delivery.
+Reading never drains a mailbox or starts execution. A message read from the
+group log can still arrive later through its pending directed delivery.
+
+Successful sends, mailbox takes and successful automatic input admissions mark
+individual IDs known to that reader. Default group reads skip those IDs while
+scanning intervening unseen records in order; they never jump over unread gaps.
+Admission and server-side response completion do not prove model consumption.
+An ambiguous or failed dispatch leaves its body readable in the group log, even
+though its directed queue entry was consumed. Explicit replay can include known
+bodies. None of these paths promises exactly-once delivery.
+
+Reader identity includes the immutable Task/participant/attachment generation,
+or the parent's controller epoch. Credential renewal and reconnect within that
+instance retain progress. Handle reuse, participant replacement and controller
+handoff start a new reader. Progress survives Host restart for unchanged
+instances; a newly activated controller epoch starts afresh. Old credentials
+cannot read as a replacement. Control retains the newest 4,096 messages per
+work Session; `truncated_before` reports when an older cursor crosses discarded
+history. Session closure discards the log, read positions and setup markers along
+with pending mail. Existing mailbox rows are not backfilled into shared history.
 
 `ReadThread` returns a participant's latest public result and observation cursor,
 not its reasoning or complete conversation. Supplying `after` suppresses already
@@ -139,11 +219,39 @@ not authorize cleanup.
 Native tools and the `caelis collaboration mcp --stdio` bridge call the same
 AppServer service. The bridge uses Host-issued `CAELIS_COLLABORATION_URL` and
 `CAELIS_COLLABORATION_TOKEN` environment values, never general Host credentials.
-External child creation and resume inject this stdio server through ACP
+External controller and child creation/load/resume inject this stdio server through ACP
 `mcpServers` when the Host has a child Control endpoint. The built-in Codex
 adapter translates stdio MCP declarations into per-thread app-server overrides;
 HTTP and SSE injection are not supported by that adapter. Bridge exit does not
 cancel queued messages.
+
+Controller MCP declarations include the activation's configured delegation names
+and role descriptions from the same catalog as native StartThread. The Host
+passes these bounded definitions in `CAELIS_COLLABORATION_TOOLS`, so tool search
+works during ACP setup before the grant is bound. Definitions describe tools;
+each invocation still requires the current authenticated controller grant.
+
+The controller's first work-bearing prompt includes a lightweight maintainer
+instruction with the stable `caelis-collaboration` search key. A durable marker
+belongs to the work Session and exact remote Session, so ordinary turns,
+credential renewal, same-remote resume and Host restart do not repeat it. A new
+remote Session gets its own instruction. A proven non-submission releases the
+marker; an ambiguous submission retains it. The prompt grants no authority.
+
+Controller grants bind the current controller epoch and exact remote Session.
+Before prompting a replacement remote Session, Runtime commits its binding under
+the admitted Turn's fence. A fresh remote starts at checkpoint zero and receives
+full context; only successful prompt completion acknowledges context delivery.
+Restoring a controller can replace its epoch within an admitted Turn. Bound
+Turn approval, steering and cancellation use the exact Handle/Run/Turn target;
+new commands still validate the controller epoch observed before admission.
+StartThread reuses Runtime's native Spawn, permission, journal, Task and sealed
+placement owners under the live controller Turn's execution fence. Participants
+cannot obtain this authority through tool arguments or an MCP role flag. Hosts
+embedded without a child Control endpoint cannot inject collaboration MCP;
+endpoint and transport failures are reported by Session setup or tool invocation.
+The Codex adapter forwards explicit empty-form MCP tool approvals through ACP
+permission requests. It does not answer arbitrary elicitation forms or URLs.
 
 The Host keeps random bearer grants in memory. Each grant binds one work
 Session, immutable participant instance, and exact ACP Session. A pending grant

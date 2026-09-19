@@ -8,12 +8,15 @@ Run before committing:
 make commit-check
 ```
 
-`make commit-check` checks Go formatting and staged/unstaged diff whitespace on
-all platforms. Run focused owning tests while changing code, plus the relevant
-checks below. Full lint, tests, and build belong to PR CI; `make quality` remains
-available when a full local run is useful. Do not repeat unchanged passing tests
-just to commit or push. Lint includes `govet`, so `make test` disables Go's
-implicit vet pass and belongs with lint in the full gate.
+`make commit-check` checks Go formatting, runs the full `make lint` target, and
+checks staged/unstaged diff whitespace on all platforms. It requires
+`golangci-lint` on `PATH`; use the version pinned in
+[the quality workflow](../.github/workflows/quality.yml). Run focused owning tests
+while changing code, plus the relevant checks below. PR CI runs lint, full tests,
+and build; `make quality` remains available when a full local run is useful. Do
+not repeat unchanged passing checks just to commit or push. Lint includes
+`govet`, so `make test` disables Go's implicit vet pass and belongs with lint in
+the full gate.
 
 Local and sandboxed Make targets use the stable repository-local `.tmp/cache`
 tree by default. CI uses standard cache paths for runner cache integration.
@@ -97,6 +100,25 @@ Concurrency, lease, persistence, broker, and lifecycle changes also require the
 narrowest relevant `go test -race` package. File locking, atomic replacement,
 and WAL recovery require native Windows evidence when Windows behavior changes;
 cross-compilation is not equivalent.
+
+Codex ACP has two opt-in live tests:
+
+```bash
+CAELIS_CODEX_TIER_E2E=1 go test ./adapters/codex -run '^TestLiveCodexServiceTiers$' -count=1 -timeout=3m -v
+CAELIS_CODEX_COLLABORATION_E2E=1 go test ./app/gatewayapp -run '^TestLiveCodexControllerCollaboration$' -count=1 -timeout=5m -v
+```
+
+Both require an installed Codex CLI and authenticated account. They copy only
+authentication into a temporary `CODEX_HOME`, leaving the user's configuration
+and conversations unchanged. They make real model requests; the tier test
+includes Fast requests. `CAELIS_CODEX_TIER_MODEL` selects the model (default
+`gpt-5.6-luna`). Optional `CAELIS_CODEX_TIER_E2E_OUT` records service-tier request
+and response fields; `CAELIS_CODEX_COLLABORATION_E2E_OUT` records canonical
+participants, Tasks, creation journals and explicit peer messages, without
+credentials. The collaboration test uses a real Codex controller and ACP child
+with a deterministic native provider, checking actual Caelis ownership rather
+than the model's final answer. Its approval resolver allows only the test's
+Caelis collaboration calls.
 
 Guardian command approval has an opt-in live test:
 

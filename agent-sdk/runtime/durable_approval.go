@@ -14,19 +14,27 @@ import (
 const approvalResolutionRecoveryTimeout = 5 * time.Second
 
 type activeRun struct {
-	ref     session.SessionRef
-	session session.Session
-	handle  *runner
-	turnID  string
+	ref               session.SessionRef
+	session           session.Session
+	handle            *runner
+	turnID            string
+	spec              agent.AgentSpec
+	approvalRequester agent.ApprovalRequester
 }
 
-func (r *Runtime) registerActiveRun(ref session.SessionRef, activeSession session.Session, turnID string, handle *runner) {
+func (r *Runtime) registerActiveRun(ref session.SessionRef, activeSession session.Session, turnID string, handle *runner, requests ...agent.RunRequest) {
 	if r == nil || handle == nil {
 		return
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.activeRunners[handle.RunID()] = activeRun{ref: session.NormalizeSessionRef(ref), session: session.CloneSession(activeSession), turnID: strings.TrimSpace(turnID), handle: handle}
+	if len(requests) > 0 {
+		active := r.activeRunners[handle.RunID()]
+		active.approvalRequester = requests[0].ApprovalRequester
+		active.spec = cloneAgentSpec(requests[0].AgentSpec)
+		r.activeRunners[handle.RunID()] = active
+	}
 }
 
 func (r *Runtime) unregisterActiveRun(runID string) {

@@ -15,7 +15,6 @@ import (
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	agent "github.com/caelis-labs/caelis/agent-sdk"
-	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	sdkplacement "github.com/caelis-labs/caelis/agent-sdk/placement"
 	contextprompt "github.com/caelis-labs/caelis/agent-sdk/runtime/contexttransfer"
@@ -43,6 +42,7 @@ type Config struct {
 	EndpointResolver  endpoint.Resolver
 	PlacementResolver subagent.PlacementResolver
 	SessionPreparer   subagent.SessionPreparer
+	Collaboration     CollaborationResolver
 }
 
 type Manager struct {
@@ -53,6 +53,7 @@ type Manager struct {
 	endpointResolver  endpoint.Resolver
 	placementResolver subagent.PlacementResolver
 	sessionPreparer   subagent.SessionPreparer
+	collaboration     CollaborationResolver
 
 	counter atomic.Uint64
 
@@ -173,6 +174,7 @@ func NewManager(cfg Config) (*Manager, error) {
 		endpointResolver:  cfg.EndpointResolver,
 		placementResolver: cfg.PlacementResolver,
 		sessionPreparer:   cfg.SessionPreparer,
+		collaboration:     cfg.Collaboration,
 		controllers:       map[string]*controllerRun{},
 		participants:      map[participantRunKey]*participantRun{},
 	}
@@ -243,6 +245,13 @@ func (m *Manager) Activate(ctx context.Context, req controller.HandoffRequest) (
 		contextPending:  !agent.ContextTransferEmpty(req.Context),
 		contextSyncSeq:  req.ContextSyncSeq,
 		updatedAt:       m.clock(),
+	}
+	if m.collaboration != nil {
+		cfg, err = m.collaboration(ctx, req.SessionRef, run.binding, cfg)
+		if err != nil {
+			return session.ControllerBinding{}, err
+		}
+		run.cfg = cfg
 	}
 	resumeRemoteSessionID := reusableControllerRemoteSessionID(req.Session, cfg.Name)
 	client, remoteSessionID, state, err := m.startClient(ctx, req.Session.CWD, cfg, resumeRemoteSessionID,
@@ -423,8 +432,7 @@ func (m *Manager) RunTurn(ctx context.Context, req controller.TurnRequest) (cont
 			pendingContext,
 			pendingContextSyncSeq,
 			pendingContextFresh,
-			req.FreshContext,
-			req.ContextSyncSeq,
+			req,
 		)
 		if err != nil {
 			run.restoreContext(attemptedContext, attemptedContextSyncSeq, attemptedContextFresh)
@@ -436,47 +444,6 @@ func (m *Manager) RunTurn(ctx context.Context, req controller.TurnRequest) (cont
 		run.finishTurn(handle)
 	}()
 	return controller.TurnResult{Handle: handle, UpdatedAt: m.clock()}, nil
-}
-
-func (m *Manager) promptControllerRun(
-	ctx context.Context,
-	run *controllerRun,
-	prompt []json.RawMessage,
-	contextTransfer agent.ContextTransfer,
-	contextSyncSeq uint64,
-	contextFresh bool,
-	freshContext agent.ContextTransfer,
-	freshContextSyncSeq uint64,
-) (agent.ContextTransfer, uint64, bool, error) {
-	attemptedContext := agent.CloneContextTransfer(contextTransfer)
-	attemptedContextSyncSeq := contextSyncSeq
-	attemptedContextFresh := contextFresh
-	if _, err := run.promptParts(ctx, composeACPContextPrompt(prompt, attemptedContext)); err != nil {
-		if client.DispatchMayHaveCommitted(err) {
-			return attemptedContext, attemptedContextSyncSeq, attemptedContextFresh, errorcode.Wrap(errorcode.UnknownOutcome, "internal/acpagentbridge/controller: controller prompt outcome cannot be proven", err)
-		}
-		if !isACPClientConnectionError(err) {
-			return attemptedContext, attemptedContextSyncSeq, attemptedContextFresh, err
-		}
-		if !client.SubmissionProvenNotStarted(err) {
-			return attemptedContext, attemptedContextSyncSeq, attemptedContextFresh, errorcode.Wrap(errorcode.UnknownOutcome, "internal/acpagentbridge/controller: controller prompt outcome cannot be proven", err)
-		}
-		fresh, reconnectErr := m.reconnectControllerRun(ctx, run)
-		if reconnectErr != nil {
-			return attemptedContext, attemptedContextSyncSeq, attemptedContextFresh, fmt.Errorf("%w; reconnect failed: %w", err, reconnectErr)
-		}
-		if fresh {
-			attemptedContext = agent.CloneContextTransfer(freshContext)
-			attemptedContextSyncSeq = freshContextSyncSeq
-			attemptedContextFresh = true
-		}
-		_, err = run.promptParts(ctx, composeACPContextPrompt(prompt, attemptedContext))
-		if err != nil && (client.DispatchMayHaveCommitted(err) || !client.SubmissionProvenNotStarted(err)) {
-			err = errorcode.Wrap(errorcode.UnknownOutcome, "internal/acpagentbridge/controller: retried controller prompt outcome cannot be proven", err)
-		}
-		return attemptedContext, attemptedContextSyncSeq, attemptedContextFresh, err
-	}
-	return attemptedContext, attemptedContextSyncSeq, attemptedContextFresh, nil
 }
 
 func contentPartsContainImage(parts []model.ContentPart) bool {
@@ -583,10 +550,11 @@ func (m *Manager) reconnectControllerRun(ctx context.Context, run *controllerRun
 	cwd := strings.TrimSpace(run.cwd)
 	resumeRemoteSessionID := strings.TrimSpace(run.remoteSessionID)
 	contextSyncSeq := run.binding.ContextSyncSeq
+	binding := session.CloneControllerBinding(run.binding)
 	desired := controllerReconnectConfigFromState(run.configOptions, run.models, run.mode, run.modeOptions)
 	oldClient := run.client
 	run.mu.Unlock()
-	if strings.TrimSpace(cfg.Command) == "" {
+	if strings.TrimSpace(cfg.Command) == "" && strings.TrimSpace(cfg.HostedAdapterID) == "" {
 		return false, fmt.Errorf("internal/acpagentbridge/controller: controller agent config is unavailable")
 	}
 	if oldClient != nil {
@@ -594,6 +562,16 @@ func (m *Manager) reconnectControllerRun(ctx context.Context, run *controllerRun
 	}
 	if !m.isActiveControllerRun(run) {
 		return false, fmt.Errorf("internal/acpagentbridge/controller: controller run is no longer active")
+	}
+	if m.collaboration != nil {
+		var err error
+		cfg, err = m.collaboration(ctx, session.SessionRef{SessionID: run.parentSessionID}, binding, cfg)
+		if err != nil {
+			return false, err
+		}
+		run.mu.Lock()
+		run.cfg = cfg
+		run.mu.Unlock()
 	}
 	acpClient, remoteSessionID, state, err := m.startClient(ctx, cwd, cfg, resumeRemoteSessionID,
 		func(env client.UpdateEnvelope) {
@@ -1045,7 +1023,8 @@ func (m *Manager) startACPClient(
 		return nil, "", controllerClientState{}, err
 	}
 	acpClient, err := client.Start(context.WithoutCancel(ctx), client.Config{
-		HostedAdapterID:  cfg.HostedAdapterID,
+		HostedAdapterID: cfg.HostedAdapterID,
+		MCPServers:      cfg.MCPServers, MCPGrant: cfg.MCPGrant,
 		ConnectionID:     cfg.Name,
 		EndpointResolver: m.endpointResolver,
 		Command:          cfg.Command,

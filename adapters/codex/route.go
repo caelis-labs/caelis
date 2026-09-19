@@ -243,7 +243,9 @@ func (r *sessionRoute) handleRequest(ctx context.Context, request appserver.Requ
 		return appServerFallbackResponse(request.Method)
 	}
 	switch request.Method {
-	case "item/tool/requestUserInput", "mcpServer/elicitation/request":
+	case "mcpServer/elicitation/request":
+		return r.approveMCPTool(ctx, request)
+	case "item/tool/requestUserInput":
 		return appServerFallbackResponse(request.Method)
 	case "item/commandExecution/requestApproval", "item/fileChange/requestApproval", "item/permissions/requestApproval":
 	default:

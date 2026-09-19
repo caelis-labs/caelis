@@ -129,9 +129,8 @@ func (c *SessionTurnClient) Start(
 		turn.steerFn = func(steerCtx context.Context, input, displayInput string, contentParts []model.ContentPart) error {
 			steerResult, steerErr := c.client.Steer(steerCtx, SteerRequest{
 				WriteBase: WriteBase{
-					OperationID:             newSessionTurnOperationID("steer"),
-					SessionID:               sessionID,
-					ExpectedControllerEpoch: turn.controllerEpoch,
+					OperationID: newSessionTurnOperationID("steer"),
+					SessionID:   sessionID,
 				},
 				Target:       turn.target,
 				Input:        input,
@@ -148,9 +147,8 @@ func (c *SessionTurnClient) Start(
 			execute: func(cancelCtx context.Context, operationID, reason string) (CommandResult, error) {
 				return c.client.Cancel(cancelCtx, CancelRequest{
 					WriteBase: WriteBase{
-						OperationID:             operationID,
-						SessionID:               sessionID,
-						ExpectedControllerEpoch: turn.controllerEpoch,
+						OperationID: operationID,
+						SessionID:   sessionID,
 					},
 					Target: turn.target,
 					Reason: reason,
@@ -279,27 +277,25 @@ func newTargetTurn(
 	target TurnTarget,
 ) *sessionTurn {
 	return &sessionTurn{
-		client:          client,
-		sessionID:       strings.TrimSpace(sessionID),
-		controllerEpoch: strings.TrimSpace(reconnected.State.Controller.EpochID),
-		target:          target,
-		feedCtx:         feedCtx,
-		stopFeed:        stopFeed,
-		subscription:    reconnected.Subscription,
-		events:          make(chan eventstream.Envelope),
-		done:            make(chan struct{}),
+		client:       client,
+		sessionID:    strings.TrimSpace(sessionID),
+		target:       target,
+		feedCtx:      feedCtx,
+		stopFeed:     stopFeed,
+		subscription: reconnected.Subscription,
+		events:       make(chan eventstream.Envelope),
+		done:         make(chan struct{}),
 	}
 }
 
 type sessionTurn struct {
-	client          SessionClient
-	sessionID       string
-	controllerEpoch string
-	target          TurnTarget
-	feedCtx         context.Context
-	stopFeed        context.CancelFunc
-	steerFn         func(context.Context, string, string, []model.ContentPart) error
-	cancelFn        func(context.Context, string) error
+	client    SessionClient
+	sessionID string
+	target    TurnTarget
+	feedCtx   context.Context
+	stopFeed  context.CancelFunc
+	steerFn   func(context.Context, string, string, []model.ContentPart) error
+	cancelFn  func(context.Context, string) error
 
 	mu           sync.RWMutex
 	subscription FeedSubscription
@@ -347,11 +343,13 @@ func (t *sessionTurn) ResolveApproval(
 	if requestID == "" {
 		return errors.New("controlclient: approval request ID is required")
 	}
+	// Target identifies the admitted execution, including restoration of its
+	// external controller. The pre-admission controller epoch can change during
+	// that restoration; it cannot fence writes to an already accepted Turn.
 	_, err := t.client.ResolveApproval(ctx, ResolveApprovalRequest{
 		WriteBase: WriteBase{
-			OperationID:             newSessionTurnOperationID("approval"),
-			SessionID:               t.sessionID,
-			ExpectedControllerEpoch: t.controllerEpoch,
+			OperationID: newSessionTurnOperationID("approval"),
+			SessionID:   t.sessionID,
 		},
 		Target:            t.target,
 		ApprovalRequestID: requestID,

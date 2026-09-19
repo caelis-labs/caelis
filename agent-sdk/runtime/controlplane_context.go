@@ -78,27 +78,9 @@ func (r *Runtime) updateControllerContextCheckpoint(ctx context.Context, ref ses
 	if r.controllerContextRouter == nil {
 		return fmt.Errorf("agent-sdk/runtime: controller context router is unavailable")
 	}
-	activeSession, err := r.sessions.Session(ctx, ref)
+	_, binding, err := r.controllerBindings(ctx, ref)
 	if err != nil {
 		return err
-	}
-	binding := session.CloneControllerBinding(activeSession.Controller)
-	if provider, ok := r.controllers.(controller.BindingProvider); ok {
-		live, found, liveErr := provider.ActiveControllerBinding(ctx, ref)
-		if liveErr != nil {
-			return liveErr
-		}
-		if !found {
-			return fmt.Errorf("agent-sdk/runtime: active controller binding is unavailable")
-		}
-		if strings.TrimSpace(live.EpochID) != strings.TrimSpace(binding.EpochID) {
-			return fmt.Errorf(
-				"agent-sdk/runtime: live controller epoch %q does not match durable epoch %q",
-				strings.TrimSpace(live.EpochID),
-				strings.TrimSpace(binding.EpochID),
-			)
-		}
-		binding = session.CloneControllerBinding(live)
 	}
 	binding.ContextSyncSeq, err = r.controllerContextRouter.Checkpoint(ctx, ref, "")
 	if err != nil {

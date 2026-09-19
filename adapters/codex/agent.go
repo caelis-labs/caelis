@@ -261,6 +261,7 @@ func (a *agent) Prompt(ctx context.Context, request acp.PromptRequest) (acp.Prom
 	state.turnDone = make(chan turnResult, 1)
 	done := state.turnDone
 	model, effort := state.model, state.effort
+	serviceTier := state.serviceTier
 	summary := state.reasoningSummaryModeLocked(accountType)
 	state.mu.Unlock()
 	params := map[string]any{
@@ -275,6 +276,9 @@ func (a *agent) Prompt(ctx context.Context, request acp.PromptRequest) (acp.Prom
 	if effort != "" {
 		params["effort"] = effort
 	}
+	if serviceTier != nil {
+		params["serviceTier"] = *serviceTier
+	}
 	var response struct {
 		Turn struct {
 			ID string `json:"id"`
@@ -284,6 +288,10 @@ func (a *agent) Prompt(ctx context.Context, request acp.PromptRequest) (acp.Prom
 	err = a.backend.rpc.Request(startCtx, "turn/start", params, &response)
 	cancelStart()
 	if err != nil {
+		// A rejected turn/start never applied this Turn's request overrides.
+		// Model, effort and tier stay staged so a retry resends the same
+		// complete selection rather than resurrecting a tier that belonged
+		// to an earlier model.
 		state.clearTurn(done)
 		if errors.Is(err, context.DeadlineExceeded) {
 			state.route.close(errors.New("codex adapter: turn/start outcome is unknown after timeout"))
@@ -448,6 +456,18 @@ func (a *agent) SetSessionConfigOption(ctx context.Context, request acp.SetSessi
 	}
 	id := string(request.ValueId.ConfigId)
 	value := strings.TrimSpace(string(request.ValueId.Value))
+	if id == configIDServiceTier {
+		return a.setServiceTier(ctx, state, value)
+	}
+	if !state.promptMu.TryLock() {
+		return acp.SetSessionConfigOptionResponse{}, fmt.Errorf("codex adapter: configuration cannot change during a turn")
+	}
+	defer state.promptMu.Unlock()
+	if id == configIDModel {
+		if err := a.loadModels(ctx, state); err != nil {
+			return acp.SetSessionConfigOptionResponse{}, err
+		}
+	}
 	state.mu.Lock()
 	switch id {
 	case configIDModel:
@@ -455,7 +475,13 @@ func (a *agent) SetSessionConfigOption(ctx context.Context, request acp.SetSessi
 			state.mu.Unlock()
 			return acp.SetSessionConfigOptionResponse{}, acp.NewInvalidParams(map[string]any{"error": "unknown Codex model"})
 		}
+		previous := state.model
 		state.model = value
+		if state.serviceTier != nil && !state.hasServiceTierLocked(*state.serviceTier) {
+			state.model = previous
+			state.mu.Unlock()
+			return acp.SetSessionConfigOptionResponse{}, fmt.Errorf("codex adapter: selected service tier is unavailable on this model; select a shared tier before switching")
+		}
 		state.selectDefaultEffortLocked()
 	case configIDEffort:
 		if !state.hasEffort(value) {

@@ -178,7 +178,17 @@ func (m *Model) renderSubagentRow(row subagentOverlayRow, selected bool, width i
 			if detail != "" {
 				identity += " (" + detail + ")"
 			}
-			detail = pickerEffortControl(row.efforts, row.binding.Effort, selected, innerWidth)
+			detail = pickerEffortControl(row.efforts, row.binding.Effort, selected && (!m.subagentOverlay.fastFocus || !row.fastSupported), innerWidth)
+			if row.fastSupported {
+				fast := "Fast off"
+				if row.fastMode {
+					fast = "Fast on"
+				}
+				if selected && m.subagentOverlay.fastFocus {
+					fast = "‹ " + fast + " ›"
+				}
+				detail = padRightDisplay(detail, 18) + "  " + fast
+			}
 		}
 		labelWidth = min(52, max(6, innerWidth*3/5), max(1, innerWidth-14))
 	}
@@ -243,6 +253,9 @@ func (m *Model) subagentFooterLines(width int) []string {
 		help, compact = "↑↓ select  ←→ effort  enter apply  esc back", "↑↓  ←→  enter  esc"
 		if state.creatingRole {
 			help = "↑↓ select  ←→ effort  enter choose  esc back"
+		}
+		if row.fastSupported {
+			help, compact = "↑↓ select  tab effort/Fast  ←→ change  enter apply", "↑↓  tab  ←→  enter  esc"
 		}
 	case subagentPageNewRole, subagentPageSaveSet:
 		help = "tab field  type to edit  enter next  esc back"
