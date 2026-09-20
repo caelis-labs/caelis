@@ -33,14 +33,15 @@ func guardianScreenOptions(payload *approval.Payload) error {
 	return nil
 }
 
-// Selection compares probability mass for allow versus deny. Scope is selected
-// separately: prefer once and never broaden authority by combining option mass.
+// Selection requires both a decisive outcome distribution and supporting
+// evidence judgments. Scope is selected separately: prefer once and never
+// broaden authority by combining option mass.
 func guardianScreenSelection(req kernel.ApprovalReviewRequest, response judgment.Response) (approval.Option, error) {
 	fail := func() (approval.Option, error) {
-		return approval.Option{}, fmt.Errorf("guardian classifier decision distribution requires Agent review")
+		return approval.Option{}, fmt.Errorf("guardian classifier decision or evidence requires Agent review")
 	}
 	decision := response.Answers["decision"]
-	if guardianScreenOptions(req.Approval) != nil || decision.Type != judgment.Choice || len(decision.Probabilities) != len(req.Approval.Options) {
+	if guardianScreenOptions(req.Approval) != nil || len(response.Answers) != 3 || decision.Type != judgment.Choice || len(decision.Probabilities) != len(req.Approval.Options) {
 		return fail()
 	}
 	groups := map[string]float64{"allow": 0, "deny": 0}
@@ -71,7 +72,7 @@ func guardianScreenSelection(req kernel.ApprovalReviewRequest, response judgment
 	if groups["deny"] > groups["allow"] {
 		winner = "deny"
 	}
-	if !guardianDistributionDominates(groups, winner, 20, .9) {
+	if !guardianDistributionDominates(groups, winner, 20, .9) || !guardianScreenEvidenceSupports(winner, response.Answers) {
 		return fail()
 	}
 	selectedIndex := -1

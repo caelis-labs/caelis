@@ -259,20 +259,41 @@ LLM nor a query sandbox. Its complete serialized input has a local 24,000-byte
 budget (not an API limit); excess input defers to Agent review without dropping
 user constraints.
 
-One Choice question contains exactly the original option IDs, names and kinds,
-without synthetic abstention options or auxiliary classifications. Screening
-supports the four ACP option kinds and requires both allow and reject outcomes.
+One request asks a Choice question containing exactly the original option IDs,
+names and kinds, plus two independent Noul questions: `material_unknown` identifies
+missing facts needed to approve, and `visible_violation` identifies a concrete
+refusal established by the supplied facts. Neither adds an approval option or
+produces a rationale. Screening supports the four ACP option kinds and requires
+both allow and reject outcomes.
 Other protocol-valid option sets bypass screening for Agent review; malformed
 options remain protocol errors. Names and IDs never establish option meaning.
 Control compares the complete probability distribution, grouping canonical allow
 versus deny mass. Settlement requires a normalized lead of 0.9 and odds of 20
 under one uniform rule. It prefers a once option; without one, the exact persistent
 option must independently dominate. Scalar confidence is not a settlement
-threshold. These are abstention rules, not correctness probabilities.
+threshold. Direct approval additionally requires `material_unknown` to be at most
+0.2 and `visible_violation` at most 0.1. Direct refusal requires `visible_violation`
+to be at least 0.9; it does not require resolving unknown effects when the visible
+conflict already suffices.
+All three answers must be present and valid. Intermediate values, conflicting
+judgments or material information gaps block direct approval. The signals are
+neither averaged nor multiplied into a safety score. These are abstention rules,
+not calibrated correctness or authorization probabilities.
+
+Unseen executable behavior, unresolved targets and other decision-relevant gaps
+are distinct from uncertainty between approval options. A confident judgment that
+facts are missing still defers; a familiar test/build label does not establish
+project code's effects. The classifier receives no trusted sandbox guarantees
+and cannot infer them from action-authored claims or route labels. Direct actions
+with sufficiently specified effects remain eligible for approval. Reading a named
+file does not require knowing its contents beforehand; executing its unseen
+contents does introduce an information gap. Unrelated missing details and absent
+sandbox metadata alone are not such gaps. Unknown facts alone do not establish a
+refusal.
 
 A complete classifier decision settles through the common approval gate. A clear
 refusal returns denied without inventing a rationale. There is no refusal-reason
-or explanation-source classification. Close or malformed distributions,
+or explanation-source classification. Inconclusive or malformed answers,
 unsupported screening inputs, provider errors and screening timeouts proceed to Agent review under
 the original deadline; cancellation ends the review. The Agent model is resolved
 only when needed, using its independent Guardian binding or the current

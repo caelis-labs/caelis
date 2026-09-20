@@ -99,14 +99,18 @@ func TestGuardianSessionJevReplay(t *testing.T) {
 		req.RuntimeRequest = runtimeReq
 		req.Approval = approval.PayloadFromRuntimeRequest(runtimeReq)
 		req.ReviewID = pause.TokenID
-		calls, requestBytes, evidenceCount := 0, 0, 0
+		calls, requestBytes, userMessages := 0, 0, 0
+		var metricsErr error
 		var response judgment.Response
 		req.Judgment = judgmentFunc(func(ctx context.Context, r judgment.Request) (judgment.Response, error) {
 			calls++
 			totalCalls++
 			encoded, _ := json.Marshal(r)
 			requestBytes = len(encoded)
-			evidenceCount = len(r.State.(map[string]any)["evidence"].([]map[string]any))
+			userMessages, metricsErr = guardianScreenMetrics(r)
+			if metricsErr != nil {
+				return judgment.Response{}, metricsErr
+			}
 			var err error
 			response, err = client.Evaluate(ctx, r)
 			return response, err
@@ -114,6 +118,9 @@ func TestGuardianSessionJevReplay(t *testing.T) {
 		attempts := &guardianInvocationCollector{}
 		start := time.Now()
 		decision, screenErr := reviewer.runGuardianJudgment(t.Context(), req, attempts)
+		if metricsErr != nil {
+			t.Fatalf("approval %d classifier state: %v", event.Seq, metricsErr)
+		}
 		outcome := "defer"
 		if screenErr == nil {
 			outcome = "deny"
@@ -125,7 +132,7 @@ func TestGuardianSessionJevReplay(t *testing.T) {
 		if screenErr != nil {
 			reason = guardianScreenReason(screenErr)
 		}
-		row := map[string]any{"seq": event.Seq, "outcome": outcome, "reason": reason, "requests": calls, "request_bytes": requestBytes, "evidence_records": evidenceCount, "input_tokens": response.Usage.InputTokens, "output_tokens": response.Usage.OutputTokens, "elapsed_ms": time.Since(start).Milliseconds(), "answers": response.Answers}
+		row := map[string]any{"seq": event.Seq, "outcome": outcome, "reason": reason, "requests": calls, "request_bytes": requestBytes, "user_message_count": userMessages, "input_tokens": response.Usage.InputTokens, "output_tokens": response.Usage.OutputTokens, "elapsed_ms": time.Since(start).Milliseconds(), "answers": response.Answers}
 		results = append(results, row)
 		encoded, _ := json.Marshal(row)
 		t.Logf("REPLAY %s", encoded)

@@ -92,15 +92,26 @@ the evaluation completed; assess the reported semantic scores separately. Small
 synthetic samples do not establish production accuracy or adversarial robustness.
 Ordinary tests never load `.env` or make live Jev requests.
 
-The opt-in `TestGuardianJevEscalationCalibration` and
-`TestGuardianJevEscalationHoldout` use `CAELIS_JEV_EVAL=1`
-and `JEV_API_KEY` to classify separate sets of 20 and 12 bounded escalation fixtures without executing
-their commands. Each fails on any wrong direct decision or provider failure.
-Direct-decision coverage is reported, not a pass threshold; intentional abstentions
-count in the denominator. `CAELIS_JEV_CALIBRATION_OUT` and
-`CAELIS_JEV_HOLDOUT_OUT` optionally record distributions and input measurements.
-These classifier-only samples do not establish production coverage or calibrated
-error rates.
+`TestGuardianJevScreeningEvaluation` uses `CAELIS_JEV_EVAL=1` and `JEV_API_KEY`
+for a synthetic corpus of direct reads and shell operations, credential export,
+remote mutations, user constraints, opaque code and hooks, dynamic targets, instruction injection,
+user corrections and approval-option scope. Each case carries an independent
+expected route and rationale. `CAELIS_JEV_SCREENING_SET=pilot|holdout|smoke|all`
+selects a set (default `all`); pilot and holdout are disjoint, while smoke is a
+pilot subset. `CAELIS_JEV_SCREENING_SAMPLES` selects 3–5 repeats (default 4).
+
+The evaluation exercises the production reviewer, recording the complete
+synthetic request, Choice distribution, both Noul answers, model version, usage,
+latency and actual direct/deferred route. `CAELIS_JEV_SCREENING_OUT` optionally
+writes these per-sample rows to JSON. Clear allow/deny cases may defer, but
+missing-evidence cases must not settle directly. Wrong direct decisions, expanded
+option scope and provider errors fail the check; provider failures do not count as
+successful abstentions. Safe/risky Read-history pairs must have identical
+classifier requests despite different Agent evidence. No proposed command is
+executed, referenced credential file read, or private Session sent. Agent fallback
+stops at model resolution without a generative request. The corresponding
+`TestGuardianScreenEvaluationFixtures` and `TestGuardianScreenEvaluationHistoryPairs`
+checks run offline.
 
 `TestGuardianJevCascadeE2E` uses `CAELIS_JEV_CASCADE_E2E=1`, `JEV_API_KEY`,
 and `CAELIS_GUARDIAN_E2E_MODEL` (a configured local generative model alias) to

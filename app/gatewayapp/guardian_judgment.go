@@ -15,7 +15,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// The classifier makes one bounded choice over the original approval options.
+// The classifier evaluates original options and two evidence gates in one call.
 // It shares Guardian's cancellation and settlement, but never retrieves tool
 // evidence, waits for Tasks, initializes a query sandbox or generates a rationale.
 func (r *guardianApprovalReviewer) runGuardianJudgment(ctx context.Context, req kernel.ApprovalReviewRequest, attempts *guardianInvocationCollector) (kernel.ApprovalReviewResult, error) {
@@ -80,7 +80,9 @@ func guardianJudgmentRequest(req kernel.ApprovalReviewRequest, events []*session
 		options[option.ID] = option
 	}
 	request := judgment.Request{State: state, Questions: map[string]judgment.Question{
-		"decision": {Type: judgment.Choice, Instructions: guardianScreenPrompt(), Criteria: options},
+		"decision":          {Type: judgment.Choice, Instructions: guardianScreenPrompt(), Criteria: options},
+		"material_unknown":  guardianScreenUnknownQuestion(),
+		"visible_violation": guardianScreenViolationQuestion(),
 	}}
 	encoded, err := json.Marshal(request)
 	if err != nil {
