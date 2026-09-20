@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
-	"github.com/caelis-labs/caelis/agent-sdk/session"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 )
 
@@ -58,8 +57,8 @@ type authBoundaryService struct {
 	principal appserver.Principal
 }
 
-func (s *authBoundaryService) ListSessions(_ context.Context, principal appserver.Principal, _ appserver.ListSessionsRequest) (session.SessionList, error) {
+func (s *authBoundaryService) ListSessions(_ context.Context, principal appserver.Principal, _ appserver.ListSessionsRequest) (appserver.SessionList, error) {
 	s.calls++
 	s.principal = principal
-	return session.SessionList{}, nil
+	return appserver.SessionList{}, nil
 }

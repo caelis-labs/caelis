@@ -1327,6 +1327,7 @@ type ResumeCandidate struct {
 	Age       *string    `json:"age,omitempty"`
 	Model     *string    `json:"model,omitempty"`
 	Prompt    *string    `json:"prompt,omitempty"`
+	Running   *bool      `json:"running,omitempty"`
 	SessionId string     `json:"session_id"`
 	Title     *string    `json:"title,omitempty"`
 	UpdatedAt *time.Time `json:"updated_at,omitempty"`
@@ -1416,8 +1417,9 @@ type SessionFeedDelivery struct {
 }
 
 type SessionList struct {
-	NextCursor *string          `json:"next_cursor,omitempty"`
-	Sessions   []SessionSummary `json:"sessions,omitempty"`
+	NextCursor        *string          `json:"next_cursor,omitempty"`
+	RunningSessionIds []string         `json:"running_session_ids,omitempty"`
+	Sessions          []SessionSummary `json:"sessions,omitempty"`
 }
 
 type SessionModeRequest struct {

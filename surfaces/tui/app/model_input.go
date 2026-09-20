@@ -1560,6 +1560,7 @@ func resolveSubmissionModes(uiMode SubmissionMode, alreadyRunning bool, canSubmi
 }
 
 func (m *Model) executeLineCmd(submission Submission) tea.Cmd {
+	var loading tea.Cmd
 	if isSessionSelectionLine(submission.Text) {
 		if m.sessionSwitchPending {
 			return nil
@@ -1568,10 +1569,13 @@ func (m *Model) executeLineCmd(submission Submission) tea.Cmd {
 		if m.sessionHistory != nil {
 			m.sessionHistory.pendingNavigation = true
 		}
+		if slashCommandName(submission.Text) == "resume" {
+			loading = m.showSessionHistoryLoading()
+		}
 	}
 	submission.viewGeneration = m.viewGeneration
 	sender := m.cfg.ProgramSender
-	return func() tea.Msg {
+	execute := func() tea.Msg {
 		var msg tea.Msg
 		if m.cfg.executeLineCmd != nil {
 			msg = m.cfg.executeLineCmd(submission)
@@ -1603,6 +1607,7 @@ func (m *Model) executeLineCmd(submission Submission) tea.Cmd {
 		}
 		return sessionViewMessage{generation: generation, message: result}
 	}
+	return tea.Batch(loading, execute)
 }
 
 func activeSubmissionErrorOutcome(err error) appserver.Outcome {

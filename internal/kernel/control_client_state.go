@@ -11,6 +11,33 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 )
 
+// SessionRunning samples the existing Turn handle and approval FIFO without
+// reading Runtime journals or assembling reconnect state.
+func (g *Gateway) SessionRunning(sessionID string) bool {
+	if g == nil {
+		return false
+	}
+	g.mu.Lock()
+	handle := g.active[strings.TrimSpace(sessionID)]
+	coordinator := g.approvals[strings.TrimSpace(sessionID)]
+	g.mu.Unlock()
+	if handle != nil {
+		handle.mu.Lock()
+		active := !handle.finished && !handle.closed
+		coordinator = handle.approvals
+		handle.mu.Unlock()
+		if active {
+			return true
+		}
+	}
+	if coordinator == nil {
+		return false
+	}
+	coordinator.mu.Lock()
+	defer coordinator.mu.Unlock()
+	return len(coordinator.active) > 0
+}
+
 // ControlClientRuntimeState returns the live handle and approval FIFO state
 // used by reconnect bootstrap. Durable Session state is read separately so the
 // bootstrap service can enforce one revision/boundary transaction.

@@ -274,6 +274,7 @@ func (b *FeedBroker) publishAccepted(ctx context.Context, envelope eventstream.E
 		b.acceptWithoutSpoolLocked(envelope)
 		return nil
 	}
+	b.indexAcceptedHistory(envelope, uint64(recordOffset))
 	b.acceptDurableLocked(envelope)
 	b.observeLiveNarrativeLocked(envelope)
 	return nil

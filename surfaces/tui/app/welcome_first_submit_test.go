@@ -127,6 +127,13 @@ func TestSessionAttachClearsDeferredWelcome(t *testing.T) {
 	}
 
 	model.Update(sessionViewStartMsg{generation: 1, state: appserver.SessionState{SessionID: "s-first"}})
+	if model.welcomeCardPending {
+		t.Fatal("Session attach retained deferred Welcome while loading history")
+	}
+	model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	if welcomeFrameVisible(model.View().Content) {
+		t.Fatal("resize resurrected Welcome while loading history")
+	}
 	model.Update(sessionHistoryReadyMsg{})
 	if model.welcomeCardPending {
 		t.Fatal("Session attach left a deferred Welcome card")

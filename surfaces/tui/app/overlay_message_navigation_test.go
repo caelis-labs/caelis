@@ -8,7 +8,7 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 )
 
-func TestShortAndLongSpawnRowsOpenOverlayInsteadOfFolding(t *testing.T) {
+func TestSpawnRowSplitsTargetNavigationFromPromptExpansion(t *testing.T) {
 	t.Parallel()
 
 	for _, tc := range []struct {
@@ -45,6 +45,40 @@ func TestShortAndLongSpawnRowsOpenOverlayInsteadOfFolding(t *testing.T) {
 				t.Fatalf("Spawn click token = %q, want overlay link", row.ClickToken)
 			}
 			assertClickOpensOverlay(t, model, block, row, tc.callID, tc.hidden)
+			model.subagentOutputOverlay = nil
+			if tc.hidden == "" {
+				if row.ClickTokenAlt != "" {
+					t.Fatal("short Spawn prompt manufactured hidden content")
+				}
+				return
+			}
+			bodyToken := agentMessageFoldClickToken("spawn:" + tc.callID)
+			if row.ClickTokenAlt != bodyToken || row.ClickStartCol != displayColumns("• Spawned ") || row.ClickEndCol != displayColumns("• Spawned breeze") {
+				t.Fatalf("Spawn prompt has no separate body target: %#v", row)
+			}
+			model.syncViewportContent()
+			headerLine := -1
+			for n, line := range model.viewportPlainLines {
+				if strings.Contains(line, "• Spawned breeze") {
+					headerLine = n
+					break
+				}
+			}
+			if headerLine < 0 {
+				t.Fatal("Spawn viewport header missing")
+			}
+			clickViewportColumn(t, model, headerLine, row.ClickEndCol+3)
+			if model.subagentOutputOverlay != nil || !strings.Contains(strings.Join(model.viewportPlainLines, "\n"), tc.hidden) {
+				t.Fatal("Spawn body did not expand the prompt in place")
+			}
+			continuation := headerLine + 1
+			if model.viewportClickTokens[continuation] != bodyToken || model.viewportClickBounds[continuation].valid() {
+				t.Fatal("wrapped Spawn body retained peer navigation")
+			}
+			clickViewportColumn(t, model, continuation, 4)
+			if model.subagentOutputOverlay != nil || strings.Contains(strings.Join(model.viewportPlainLines, "\n"), tc.hidden) {
+				t.Fatal("wrapped Spawn body did not collapse the prompt")
+			}
 		})
 	}
 }

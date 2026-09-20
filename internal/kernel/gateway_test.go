@@ -1872,11 +1872,17 @@ func TestGatewayActiveTurnsReportsSessionScopedState(t *testing.T) {
 	if current, ok := gw.ActiveTurn("s1"); !ok || current.SessionRef.SessionID != "s1" {
 		t.Fatalf("ActiveTurn(s1) = %+v, %v", current, ok)
 	}
+	if !gw.SessionRunning("s1") {
+		t.Fatal("directory activity omitted the running Turn")
+	}
 
 	close(runner.release)
 	collectHandleEvents(t, result.Handle)
 	if active := gw.ActiveTurns(); len(active) != 0 {
 		t.Fatalf("ActiveTurns() after completion = %+v, want empty", active)
+	}
+	if gw.SessionRunning("s1") {
+		t.Fatal("directory activity retained the completed Turn")
 	}
 }
 

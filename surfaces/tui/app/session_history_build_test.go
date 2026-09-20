@@ -240,3 +240,32 @@ func TestResumeAtomicPhysicalFrames(t *testing.T) {
 		})
 	}
 }
+
+func TestTwoTurnResumePaintsTailBeforeEarlierHistoryIsRequested(t *testing.T) {
+	for _, width := range []int{35, 80} {
+		t.Run(fmt.Sprint(width), func(t *testing.T) {
+			m := newWelcomeTestModel(t, width, 24, Config{NoAnimation: true})
+			frames := []string{m.View().Content}
+			m.Update(sessionViewStartMsg{generation: 1, state: appserver.SessionState{SessionID: "resumed"}})
+			events := longHistoryTranscript(20)
+			m.Update(TranscriptEventsMsg{Events: events[len(events)-8:], ReconnectReplay: true})
+			m.Update(sessionHistoryPositionMsg{before: "older-window"})
+			m.Update(sessionHistoryReadyMsg{})
+			if m.sessionHistory != nil || m.sessionHistoryBefore != "older-window" || !m.isViewportFollowTail() {
+				t.Fatal("tail not ready for independent older-history navigation")
+			}
+			if len(m.earlierHistory) != 0 {
+				t.Fatal("resume eagerly requested older history")
+			}
+			frame := m.View().Content
+			if welcomeFrameVisible(frame) || strings.Contains(ansi.Strip(frame), sessionHistoryLoadingHint) || len(m.doc.Blocks()) == 0 {
+				t.Fatal("tail did not replace loading frame")
+			}
+			frames = append(frames, frame)
+			updates := renderFullscreenFramesForTest(t, m.width, m.height, frames...)
+			for n, frame := range frames {
+				assertPhysicalFullscreenFrame(t, m.width, m.height, frame, updates[:n+1])
+			}
+		})
+	}
+}

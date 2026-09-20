@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -54,7 +55,7 @@ func (a *SessionClientAdapter) ResumeSession(ctx context.Context, sessionID stri
 	stopAdmission := context.AfterFunc(ctx, cancelFeed)
 	historyTurns := 0
 	if a.surface == "cli-tui" {
-		historyTurns = 16
+		historyTurns = 2
 	}
 	result, err := a.sessionClient.Reconnect(feedCtx, appserver.ReconnectRequest{SessionID: strings.TrimSpace(sessionID), HistoryTurns: historyTurns})
 	stopAdmission()
@@ -143,6 +144,7 @@ func (a *SessionClientAdapter) ListSessions(ctx context.Context, limit int) ([]c
 	for _, item := range result.Sessions {
 		out = append(out, controlprompt.ResumeCandidate{
 			SessionID: item.SessionID,
+			Running:   slices.Contains(result.RunningSessionIDs, item.SessionID),
 			Title:     strings.TrimSpace(item.Title),
 			Workspace: strings.TrimSpace(item.CWD),
 			Age:       formatResumeAge(item.UpdatedAt, time.Now()),

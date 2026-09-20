@@ -43,12 +43,13 @@ func gatewayAppRuntimeDepsForTest(stack *gatewayapp.Stack) *runtimeDeps {
 			UserID:    stack.UserID(),
 			Workspace: stack.Workspace(),
 			ListSessionsFn: func(ctx context.Context, req kernel.ListSessionsRequest) (session.SessionList, error) {
-				return stack.ControlClient().ListSessions(ctx, appserver.Principal{ID: stack.UserID()}, appserver.ListSessionsRequest{
+				list, err := stack.ControlClient().ListSessions(ctx, appserver.Principal{ID: stack.UserID()}, appserver.ListSessionsRequest{
 					WorkspaceKey: req.WorkspaceKey,
 					CWD:          req.CWD,
 					Cursor:       req.Cursor,
 					Limit:        req.Limit,
 				})
+				return session.SessionList{Sessions: list.Sessions, NextCursor: list.NextCursor}, err
 			},
 		},
 		Status: StatusRuntimeDeps{

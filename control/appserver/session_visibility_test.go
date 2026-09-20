@@ -2,6 +2,7 @@ package appserver
 
 import (
 	"context"
+	"slices"
 	"sync/atomic"
 	"testing"
 
@@ -13,9 +14,14 @@ func TestClientListSessionsFillsLimitAcrossManagedPages(t *testing.T) {
 	t.Parallel()
 
 	store := &pagedSessionDirectoryStore{}
+	var sampled []string
 	client := &Client{config: ClientConfig{
 		Authorizer: sessionDirectoryAllowAuthorizer{},
 		Sessions:   store,
+		SessionActivity: sessionActivityFunc(func(id string) bool {
+			sampled = append(sampled, id)
+			return id == "visible-2"
+		}),
 	}}
 	listed, err := client.ListSessions(context.Background(), Principal{ID: "owner"}, ListSessionsRequest{
 		WorkspaceKey: "workspace", CWD: "/workspace", Limit: 2,
@@ -26,6 +32,9 @@ func TestClientListSessionsFillsLimitAcrossManagedPages(t *testing.T) {
 	if len(listed.Sessions) != 2 || listed.Sessions[0].SessionID != "visible-1" || listed.Sessions[1].SessionID != "visible-2" {
 		t.Fatalf("ListSessions() = %#v, want two visible Sessions", listed)
 	}
+	if !slices.Equal(sampled, []string{"visible-1", "visible-2"}) || !slices.Equal(listed.RunningSessionIDs, []string{"visible-2"}) {
+		t.Fatalf("sampled = %v, running = %v; want only visible page activity", sampled, listed.RunningSessionIDs)
+	}
 	if len(store.requests) != 3 || store.requests[0].Limit != 2 || store.requests[1].Limit != 2 || store.requests[2].Limit != 1 {
 		t.Fatalf("ListSessions requests = %#v, want remaining visible limit across raw pages", store.requests)
 	}
@@ -35,6 +44,10 @@ func TestClientListSessionsFillsLimitAcrossManagedPages(t *testing.T) {
 		}
 	}
 }
+
+type sessionActivityFunc func(string) bool
+
+func (f sessionActivityFunc) SessionRunning(id string) bool { return f(id) }
 
 type sessionDirectoryAllowAuthorizer struct{}
 

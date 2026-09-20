@@ -96,8 +96,12 @@ func (s *Store) eventPageStartCheckpoint(
 	position := sort.Search(len(index.checkpoints), func(i int) bool {
 		return index.checkpoints[i].Seq > afterSeq
 	})
-	if position == 0 {
-		return eventPageCheckpoint{}, nil
+	metadata, err := s.metadataEventPageCheckpoint(ctx, file, path, info, afterSeq)
+	if err != nil {
+		return eventPageCheckpoint{}, err
+	}
+	if position == 0 || metadata.Seq > index.checkpoints[position-1].Seq {
+		return metadata, nil
 	}
 	checkpoint := index.checkpoints[position-1]
 	valid, err := validateEventPageCheckpoint(ctx, file, info.Size(), checkpoint)

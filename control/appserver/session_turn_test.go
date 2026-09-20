@@ -864,8 +864,8 @@ func (*sessionTurnTestClient) Initialize(context.Context) (ServerInfo, error) {
 	return ServerInfo{}, nil
 }
 
-func (*sessionTurnTestClient) ListSessions(context.Context, ListSessionsRequest) (session.SessionList, error) {
-	return session.SessionList{}, nil
+func (*sessionTurnTestClient) ListSessions(context.Context, ListSessionsRequest) (SessionList, error) {
+	return SessionList{}, nil
 }
 
 func (*sessionTurnTestClient) CreateSession(context.Context, CreateSessionRequest) (CommandResult, error) {

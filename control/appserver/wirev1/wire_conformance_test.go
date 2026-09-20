@@ -115,7 +115,7 @@ func TestProductionRequestAndResponseJSONConformsToOpenAPI(t *testing.T) {
 	validateWireValue(t, "ErrorResponse", map[string]any{
 		"error": "invalid request", "code": errorcode.FailedPrecondition, "kind": appserver.ErrorKindSessionClosed,
 	})
-	validateWireValue(t, "SessionList", session.SessionList{Sessions: []session.SessionSummary{{
+	validateWireValue(t, "SessionList", appserver.SessionList{RunningSessionIDs: []string{"session-1"}, Sessions: []session.SessionSummary{{
 		SessionRef: session.SessionRef{AppName: "caelis", UserID: "owner", SessionID: "session-1", WorkspaceKey: "workspace-1"},
 		CWD:        "/tmp/workspace", Title: "Session", UpdatedAt: time.Unix(100, 0).UTC(), Metadata: map[string]any{"source": "test"},
 	}}})

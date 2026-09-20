@@ -664,7 +664,8 @@ func TestControlHTTPClientControlsHostOwnedTurnAcrossRequests(t *testing.T) {
 		Authorizer: appserver.SessionAuthorizer{
 			Sessions: sessions,
 		},
-		Sessions: sessions,
+		Sessions:        sessions,
+		SessionActivity: runtimeStateReader,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -728,6 +729,24 @@ func TestControlHTTPClientControlsHostOwnedTurnAcrossRequests(t *testing.T) {
 	case <-inner.runner.started:
 	case <-time.After(2 * time.Second):
 		t.Fatal("runtime did not start through the Control Host")
+	}
+	listed, err := remoteB.ListSessions(ctx, appserver.ListSessionsRequest{Limit: 200})
+	if err != nil || len(listed.RunningSessionIDs) != 1 || listed.RunningSessionIDs[0] != active.SessionID {
+		t.Fatalf("directory omitted the live Host Turn: %#v, %v", listed, err)
+	}
+	// The registry-backed path must sample the activated Session's Gateway,
+	// including when the default Host has no execution Gateway at all.
+	registryActivity, err := newControlRuntimeStateReader(&runtimeComposition{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := registryActivity.bindRegistry(&sessionRuntimeRegistry{sessions: map[string]*sessionRuntime{
+		active.SessionID: {instance: &sessionRuntimeInstance{runtimeComposition: runtimeComposition{gateway: kernel}}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if !registryActivity.SessionRunning(active.SessionID) || registryActivity.SessionRunning("dormant") {
+		t.Fatal("directory activity did not follow the activated Session")
 	}
 	beforeSteer, err := sessions.SessionFence(context.Background(), active.SessionRef)
 	if err != nil || beforeSteer.FenceID == "" || beforeSteer.OwnerID != "host-epoch-a" {

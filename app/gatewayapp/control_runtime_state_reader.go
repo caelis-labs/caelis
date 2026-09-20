@@ -42,6 +42,26 @@ func (r *controlRuntimeStateReader) bindRegistry(registry *sessionRuntimeRegistr
 	return nil
 }
 
+// SessionRunning reads only the current Host's live handle. A dormant Session
+// cannot be running, even if its last durable journal predates a Host crash.
+func (r *controlRuntimeStateReader) SessionRunning(sessionID string) bool {
+	if r == nil || r.defaultRuntime == nil {
+		return false
+	}
+	r.mu.RLock()
+	registry := r.registry
+	r.mu.RUnlock()
+	composition := r.defaultRuntime
+	if registry != nil {
+		runtime, ok := registry.loaded(sessionID)
+		if !ok {
+			return false
+		}
+		composition = &runtime.instance.runtimeComposition
+	}
+	return composition.currentGateway().SessionRunning(sessionID)
+}
+
 // ControlClientRuntimeState reads an activated Runtime or recovers the last
 // canonical outcome through the Host Runtime's existing journal reader.
 // Observation never assembles or retains a Session Runtime.
@@ -86,3 +106,4 @@ func (r *controlRuntimeStateReader) ControlClientRuntimeState(ctx context.Contex
 }
 
 var _ appserver.RuntimeStateReader = (*controlRuntimeStateReader)(nil)
+var _ appserver.SessionActivityReader = (*controlRuntimeStateReader)(nil)

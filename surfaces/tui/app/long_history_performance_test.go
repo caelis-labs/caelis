@@ -237,10 +237,10 @@ func BenchmarkLongHistoryResumeLayout(b *testing.B) {
 }
 
 func BenchmarkRecentHistoryResumeLayout(b *testing.B) {
-	for _, turns := range []int{32, 256} {
+	for _, turns := range []int{2, 16} {
 		b.Run(fmt.Sprint(turns), func(b *testing.B) {
-			events := longHistoryTranscript(turns)
-			events = events[len(events)-16*4:]
+			events := longHistoryTranscript(256)
+			events = events[len(events)-turns*4:]
 			b.Setenv("CAELIS_THEME", "catppuccin-mocha")
 			b.ReportAllocs()
 			for b.Loop() {

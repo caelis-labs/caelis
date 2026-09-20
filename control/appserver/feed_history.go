@@ -26,29 +26,35 @@ func (b *FeedBroker) historyWindow(ctx context.Context, source string, key strea
 	e.Lock()
 	defer e.Unlock()
 	if source == "canonical" {
-		for e.Index.High < high {
-			page, err := b.reader.EventsPage(ctx, session.EventPageRequest{SessionRef: b.ref, AfterSeq: e.Index.High, ThroughSeq: high, Visibility: session.EventPageClientReplay})
-			if err != nil {
+		if metadata, ok := b.reader.(session.EventMetadataReader); ok {
+			if err := b.indexHistoryMetadata(ctx, metadata, &e.Index, high); err != nil {
 				return feedHistoryWindow{}, err
 			}
-			for _, event := range page.Events {
-				if event == nil || event.ChildOrigin != nil || event.Seq == 0 {
-					continue
+		} else {
+			for e.Index.High < high {
+				page, err := b.reader.EventsPage(ctx, session.EventPageRequest{SessionRef: b.ref, AfterSeq: e.Index.High, ThroughSeq: high, Visibility: session.EventPageClientReplay})
+				if err != nil {
+					return feedHistoryWindow{}, err
 				}
-				if event.Scope != nil {
-					e.Index.Observe(event.Seq-1, event.Scope.TurnID)
-				} else if session.ResolvedApprovalReview(event) != nil {
-					base := acpprojector.EnvelopeBaseFromSessionEvent(b.ref, event, acpprojector.SessionEventTransport{})
-					if base.Scope == eventstream.ScopeMain {
-						e.Index.Observe(event.Seq-1, base.TurnID)
+				for _, event := range page.Events {
+					if event == nil || event.ChildOrigin != nil || event.Seq == 0 {
+						continue
+					}
+					if event.Scope != nil {
+						e.Index.Observe(event.Seq-1, event.Scope.TurnID)
+					} else if session.ResolvedApprovalReview(event) != nil {
+						base := acpprojector.EnvelopeBaseFromSessionEvent(b.ref, event, acpprojector.SessionEventTransport{})
+						if base.Scope == eventstream.ScopeMain {
+							e.Index.Observe(event.Seq-1, base.TurnID)
+						}
 					}
 				}
+				if page.NextSeq <= e.Index.High {
+					e.Index.High = high
+					break
+				}
+				e.Index.High = page.NextSeq
 			}
-			if page.NextSeq <= e.Index.High {
-				e.Index.High = high
-				break
-			}
-			e.Index.High = page.NextSeq
 		}
 	} else if e.Index.High < high {
 		reader, err := b.spool.Reader(ctx, key, streamspool.Offset(e.Index.High))
@@ -124,4 +130,55 @@ func (b *FeedBroker) subscribeEarlier(ctx context.Context, req SubscribeRequest)
 	}
 	sub := b.startSubscription(ctx, 0, 0, &through, p.Before, through, "", "", window)
 	return SubscribeResult{Subscription: sub, BoundaryCursor: cursor, BoundaryPosition: &pos}, nil
+}
+
+func (b *FeedBroker) indexHistoryMetadata(ctx context.Context, reader session.EventMetadataReader, index *history.Index, high uint64) error {
+	for index.High < high {
+		page, err := reader.EventMetadataPage(ctx, session.EventPageRequest{SessionRef: b.ref, AfterSeq: index.High, ThroughSeq: high, Limit: 2000, Visibility: session.EventPageClientReplay})
+		if err != nil {
+			return err
+		}
+		for _, event := range page.Events {
+			if event.Child || event.Seq == 0 {
+				continue
+			}
+			if event.HasScope {
+				index.Observe(event.Seq-1, event.TurnID)
+			} else if event.ReviewedApproval {
+				// Legacy reviewed decisions keep provenance in their pause token. Only
+				// those records need payload reads; the projector still owns routing.
+				events, err := b.reader.EventsPage(ctx, session.EventPageRequest{SessionRef: b.ref, AfterSeq: event.Seq - 1, ThroughSeq: event.Seq, Limit: 1, Visibility: session.EventPageClientReplay})
+				if err != nil {
+					return err
+				}
+				for _, record := range events.Events {
+					base := acpprojector.EnvelopeBaseFromSessionEvent(b.ref, record, acpprojector.SessionEventTransport{})
+					if base.Scope == eventstream.ScopeMain {
+						index.Observe(record.Seq-1, base.TurnID)
+					}
+				}
+			}
+		}
+		if page.NextSeq <= index.High {
+			index.High = high
+			break
+		}
+		index.High = page.NextSeq
+	}
+	return nil
+}
+
+// The publisher already owns each exact spool record. Index its identity once
+// while accepting it; a reader only scans if an index was evicted or has a gap.
+func (b *FeedBroker) indexAcceptedHistory(envelope eventstream.Envelope, offset uint64) {
+	entry := b.histories.Get(sessionSpoolGeneration(b.key))
+	entry.Lock()
+	defer entry.Unlock()
+	if entry.Index.High != offset {
+		return
+	}
+	if envelope.Scope == "" || envelope.Scope == eventstream.ScopeMain {
+		entry.Index.Observe(offset, envelope.TurnID)
+	}
+	entry.Index.High = offset + 1
 }

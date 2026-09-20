@@ -61,6 +61,9 @@ func (m *Model) buildHintText() string {
 	}
 	// Show hint message if set.
 	if h := strings.TrimSpace(m.hint); h != "" {
+		if h == sessionHistoryLoadingHint && (m.sessionSwitchPending || m.sessionHistory != nil) {
+			return m.theme.SpinnerStyle().Render(m.runningFrame()) + " " + m.theme.HelpHintTextStyle().Render(h)
+		}
 		return h
 	}
 	if m.activePrompt != nil {

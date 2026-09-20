@@ -1171,7 +1171,7 @@ func TestSpawnToolRowUsesOrdinaryHeaderAndOverlayLink(t *testing.T) {
 		ctx := model.blockRenderContext(96)
 		ctx.SpinnerView = frame
 		ctx.AnimationsEnabled = animationsEnabled
-		rows := renderACPSpawnToolRows("block-1", event, event.CallID, 96, ctx)
+		rows := renderACPSpawnToolRows("block-1", event, event.CallID, 96, ctx, acpTranscriptRenderOptions{})
 		if len(rows) != 1 {
 			t.Fatalf("Spawn rows = %#v, want one ordinary tool entry", rows)
 		}

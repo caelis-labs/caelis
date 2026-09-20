@@ -331,7 +331,7 @@ func TestListSessionsCarriesCanonicalCWD(t *testing.T) {
 			r.URL.Query().Get("limit") != "20" {
 			t.Fatalf("list request = %s %s", r.Method, r.URL.String())
 		}
-		writeFixtureJSON(t, w, http.StatusOK, session.SessionList{})
+		writeFixtureJSON(t, w, http.StatusOK, appserver.SessionList{})
 	})
 	defer closeServer()
 	if _, err := client.ListSessions(context.Background(), appserver.ListSessionsRequest{

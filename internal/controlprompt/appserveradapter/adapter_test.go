@@ -873,7 +873,7 @@ func TestAppServerAdapterRoutesSessionLifecycleThroughTypedClient(t *testing.T) 
 				EpochID: "epoch-1",
 			},
 		},
-		list: session.SessionList{Sessions: []session.SessionSummary{{
+		list: appserver.SessionList{RunningSessionIDs: []string{"session-listed"}, Sessions: []session.SessionSummary{{
 			SessionRef: session.SessionRef{SessionID: "session-listed"}, Title: "listed", CWD: t.TempDir(), UpdatedAt: time.Now(),
 		}}},
 	}
@@ -904,7 +904,7 @@ func TestAppServerAdapterRoutesSessionLifecycleThroughTypedClient(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(listed) != 1 || listed[0].SessionID != "session-listed" || listed[0].Title != "listed" {
+	if len(listed) != 1 || listed[0].SessionID != "session-listed" || listed[0].Title != "listed" || !listed[0].Running {
 		t.Fatalf("listed = %#v", listed)
 	}
 	resumed, err := adapter.ResumeSession(context.Background(), "session-resumed")
@@ -1096,6 +1096,9 @@ func TestTUIResumeAcceptsExternalMainControllerSession(t *testing.T) {
 	}
 	if resumed.SessionID != "retired-controller-session" || adapter.clientSessionID() != "retired-controller-session" {
 		t.Fatalf("ResumeSession(ACP controller) = %#v active=%q", resumed, adapter.clientSessionID())
+	}
+	if len(client.reconnectRequests) != 1 || client.reconnectRequests[0].HistoryTurns != 2 {
+		t.Fatalf("initial history requests=%+v", client.reconnectRequests)
 	}
 	if err := resumed.Reconnect.Close(); err != nil {
 		t.Fatal(err)
@@ -2428,12 +2431,13 @@ type sessionClientAdapterTestClient struct {
 	subscription           *sessionClientAdapterTestSubscription
 	reconnectSubscriptions []*sessionClientAdapterTestSubscription
 	state                  appserver.SessionState
-	list                   session.SessionList
+	list                   appserver.SessionList
 	createSessionID        string
 	reconnectErr           error
 	compactNoop            bool
 
 	mu                  sync.Mutex
+	reconnectRequests   []appserver.ReconnectRequest
 	prompt              appserver.PromptRequest
 	steer               appserver.SteerRequest
 	approval            appserver.ResolveApprovalRequest
@@ -2506,7 +2510,7 @@ func (*sessionClientAdapterTestClient) Initialize(context.Context) (appserver.Se
 	return appserver.ServerInfo{}, nil
 }
 
-func (c *sessionClientAdapterTestClient) ListSessions(context.Context, appserver.ListSessionsRequest) (session.SessionList, error) {
+func (c *sessionClientAdapterTestClient) ListSessions(context.Context, appserver.ListSessionsRequest) (appserver.SessionList, error) {
 	return c.list, nil
 }
 
@@ -2570,6 +2574,7 @@ func (c *sessionClientAdapterTestClient) Reconnect(_ context.Context, request ap
 	}
 	subscription := c.subscription
 	c.mu.Lock()
+	c.reconnectRequests = append(c.reconnectRequests, request)
 	if len(c.reconnectSubscriptions) > 0 {
 		subscription = c.reconnectSubscriptions[0]
 		c.reconnectSubscriptions = c.reconnectSubscriptions[1:]

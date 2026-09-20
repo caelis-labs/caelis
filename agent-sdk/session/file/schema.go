@@ -46,20 +46,22 @@ type Config struct {
 
 // Store is the file-backed implementation of session.Service.
 type Store struct {
-	mu                  contextMutex
-	legacyMigrationMu   sync.Mutex
-	legacyMigration     MigrationReport
-	rootDir             string
-	sessionIDGenerator  func() string
-	eventIDGenerator    func() string
-	clock               func() time.Time
-	diagnostics         *slog.Logger
-	pathCache           map[string]string
-	eventPageIndexes    map[string]*eventPageIndex
-	eventPageIndexClock uint64
-	eventLogCaches      map[string]*eventLogCache
-	eventLogCacheBytes  int64
-	eventLogCacheClock  uint64
+	mu                    contextMutex
+	legacyMigrationMu     sync.Mutex
+	legacyMigration       MigrationReport
+	rootDir               string
+	sessionIDGenerator    func() string
+	eventIDGenerator      func() string
+	clock                 func() time.Time
+	diagnostics           *slog.Logger
+	pathCache             map[string]string
+	eventMetadataIndexes  map[string]*eventMetadataIndex
+	eventMetadataLineRead func(path string, lineNo int, offset int64)
+	eventPageIndexes      map[string]*eventPageIndex
+	eventPageIndexClock   uint64
+	eventLogCaches        map[string]*eventLogCache
+	eventLogCacheBytes    int64
+	eventLogCacheClock    uint64
 	// eventLogCacheMaxBytes is an internal test seam for exercising the
 	// oversized-log path without allocating a production-sized fixture.
 	eventLogCacheMaxBytes   int64

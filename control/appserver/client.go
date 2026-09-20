@@ -9,6 +9,7 @@ import (
 )
 
 type ClientConfig struct {
+	SessionActivity    SessionActivityReader
 	Commands           CommandClient
 	State              StateReader
 	Feeds              FeedRegistry
@@ -29,61 +30,6 @@ func NewClient(config ClientConfig) (*Client, error) {
 		return nil, errors.New("controlclient: client dependencies are required")
 	}
 	return &Client{CommandClient: config.Commands, config: config}, nil
-}
-
-func (c *Client) ListSessions(ctx context.Context, principal Principal, req ListSessionsRequest) (session.SessionList, error) {
-	if err := c.config.Authorizer.Authorize(ctx, principal, ActionSessionList, ""); err != nil {
-		return session.SessionList{}, err
-	}
-	listReq := session.ListSessionsRequest{
-		WorkspaceKey: strings.TrimSpace(req.WorkspaceKey),
-		CWD:          strings.TrimSpace(req.CWD),
-		Cursor:       strings.TrimSpace(req.Cursor),
-		Limit:        req.Limit,
-	}
-	if !principal.HasRole("admin") {
-		listReq.UserID = strings.TrimSpace(principal.ID)
-	}
-	if req.Limit <= 0 {
-		list, err := c.config.Sessions.ListSessions(ctx, listReq)
-		if err != nil {
-			return session.SessionList{}, err
-		}
-		list.Sessions = userVisibleSessionSummaries(list.Sessions)
-		return list, nil
-	}
-
-	visible := make([]session.SessionSummary, 0, req.Limit)
-	seen := make(map[string]struct{}, req.Limit)
-	cursor := listReq.Cursor
-	for len(visible) < req.Limit {
-		listReq.Cursor = cursor
-		listReq.Limit = req.Limit - len(visible)
-		page, err := c.config.Sessions.ListSessions(ctx, listReq)
-		if err != nil {
-			return session.SessionList{}, err
-		}
-		for _, summary := range userVisibleSessionSummaries(page.Sessions) {
-			sessionID := strings.TrimSpace(summary.SessionID)
-			if _, ok := seen[sessionID]; ok {
-				continue
-			}
-			seen[sessionID] = struct{}{}
-			visible = append(visible, summary)
-		}
-		next := strings.TrimSpace(page.NextCursor)
-		if len(visible) >= req.Limit {
-			return session.SessionList{
-				Sessions:   session.CloneSessionSummaries(visible[:req.Limit]),
-				NextCursor: next,
-			}, nil
-		}
-		if next == "" || next == cursor {
-			return session.SessionList{Sessions: session.CloneSessionSummaries(visible)}, nil
-		}
-		cursor = next
-	}
-	return session.SessionList{Sessions: session.CloneSessionSummaries(visible)}, nil
 }
 
 // StartParticipant delegates the focused participant capability implemented by

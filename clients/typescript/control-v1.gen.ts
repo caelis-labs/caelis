@@ -1196,6 +1196,7 @@ export interface ResumeCandidate {
   age?: string;
   model?: string;
   prompt?: string;
+  running?: boolean;
   session_id: string;
   title?: string;
   updated_at?: string;
@@ -1307,6 +1308,7 @@ export interface SessionFeedDelivery {
 
 export interface SessionList {
   next_cursor?: string;
+  running_session_ids?: Array<string>;
   sessions?: Array<SessionSummary>;
 }
 

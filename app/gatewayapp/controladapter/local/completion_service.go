@@ -19,7 +19,7 @@ type CompletionService struct {
 	acquireRuntime      acquireControlRuntimeFunc
 	resolveWorkspace    resolveWorkspaceAddressFunc
 	currentSkillCatalog func(context.Context, session.WorkspaceRef) (skill.Catalog, error)
-	listSessions        func(context.Context, appserver.Principal, appserver.ListSessionsRequest) (session.SessionList, error)
+	listSessions        func(context.Context, appserver.Principal, appserver.ListSessionsRequest) (appserver.SessionList, error)
 }
 
 type completionServiceDeps struct {
@@ -27,7 +27,7 @@ type completionServiceDeps struct {
 	acquireRuntime      acquireControlRuntimeFunc
 	resolveWorkspace    resolveWorkspaceAddressFunc
 	currentSkillCatalog func(context.Context, session.WorkspaceRef) (skill.Catalog, error)
-	listSessions        func(context.Context, appserver.Principal, appserver.ListSessionsRequest) (session.SessionList, error)
+	listSessions        func(context.Context, appserver.Principal, appserver.ListSessionsRequest) (appserver.SessionList, error)
 }
 
 func newCompletionService(deps completionServiceDeps) (*CompletionService, error) {
@@ -214,12 +214,13 @@ func (s *CompletionService) bindPrincipalSessionList(deps *controladapter.Comple
 		return
 	}
 	deps.Session.ListSessionsFn = func(ctx context.Context, req kernel.ListSessionsRequest) (session.SessionList, error) {
-		return s.listSessions(ctx, principal, appserver.ListSessionsRequest{
+		list, err := s.listSessions(ctx, principal, appserver.ListSessionsRequest{
 			WorkspaceKey: req.WorkspaceKey,
 			CWD:          req.CWD,
 			Cursor:       req.Cursor,
 			Limit:        req.Limit,
 		})
+		return session.SessionList{Sessions: list.Sessions, NextCursor: list.NextCursor}, err
 	}
 }
 
