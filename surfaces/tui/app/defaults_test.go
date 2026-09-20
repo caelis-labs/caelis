@@ -68,7 +68,7 @@ func TestDefaultConnectWizardSeparatesModelAndACPConnectionSteps(t *testing.T) {
 	if got := len(connect.Steps); got != 1 || connect.Steps[0].Key != "source" || connect.Branch == nil {
 		t.Fatalf("connect root wizard = %#v, want one explicit branching step", connect)
 	}
-	for _, source := range []string{"account", "api-key", "acp"} {
+	for _, source := range []string{"account", "api-key", "judgment", "acp"} {
 		branch := connect.Branch("source", source, nil, map[string]string{})
 		if branch == nil || len(branch.Steps) == 0 {
 			t.Fatalf("/connect %s branch = %#v", source, branch)
@@ -87,6 +87,7 @@ func TestDefaultConnectWizardSeparatesModelAndACPConnectionSteps(t *testing.T) {
 	}{
 		{name: "account", def: connectModelWizard("account"), want: []string{"provider", "endpoint", "baseurl", "apikey", "model", "image_input", "context_window_tokens", "max_output_tokens", "reasoning_levels"}},
 		{name: "api-key", def: connectModelWizard("api-key"), want: []string{"provider", "endpoint", "baseurl", "apikey", "model", "image_input", "context_window_tokens", "max_output_tokens", "reasoning_levels"}},
+		{name: "judgment", def: connectJudgmentWizard(), want: []string{"provider", "endpoint", "baseurl", "apikey", "model"}},
 		{name: "acp", def: connectACPWizard(), want: []string{"acp_agent", "acp_launcher", "acp_command", "acp_model"}},
 	}
 	for _, tt := range tests {

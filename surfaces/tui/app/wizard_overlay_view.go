@@ -288,6 +288,9 @@ func (m *Model) wizardBodyLines(width, offset, budget int) ([]string, []int) {
 			}
 			if m.wizardStepKey() == "source" {
 				detail = ""
+				if m.wizard.def.Command == "connect" {
+					detail = candidate.Detail
+				}
 				switch candidate.Value {
 				case "account":
 					label = "Sign in"
@@ -312,6 +315,24 @@ func (m *Model) wizardBodyLines(width, offset, budget int) ([]string, []int) {
 			marker = "› "
 		}
 		labelWidth := min(46, max(14, (width-4)*3/5))
+		if m.wizard.def.Command == "connect" && m.wizardStepKey() == "source" {
+			labelWidth = min(32, max(14, (width-4)*2/5), max(1, width-5))
+			// Keep examples visible on every row, with subdued text even when selected.
+			detail = truncateTailDisplay(detail, max(1, width-labelWidth-4))
+			if selected && detail != "" {
+				base := m.theme.CommandActiveStyle().Padding(0, 0).UnsetBold()
+				hint := base
+				if m.theme.HelpHintFg != nil {
+					hint = hint.Foreground(m.theme.HelpHintFg)
+				} else if !m.theme.NoColor {
+					hint = hint.Faint(true)
+				}
+				identity := padRightDisplay(truncateTailDisplay(marker+label, labelWidth), labelWidth)
+				trail := strings.Repeat(" ", max(0, width-labelWidth-displayColumns(detail)-4))
+				lines = append(lines, base.Bold(true).Render(" "+identity)+base.Render("  ")+hint.Render(detail)+base.Render(trail+" "))
+				continue
+			}
+		}
 		lines = append(lines, m.renderPickerColumnsLine(marker+label, detail, labelWidth, max(1, width-2), selected))
 	}
 	if count > budget && budget >= 3 {

@@ -48,11 +48,19 @@ var definitions = []Definition{
 		Description:  "Deep architecture, difficult debugging, and high-risk analysis.",
 		Configurable: true,
 	},
+	{Handle: HandleToolSearch, Class: HandleClassSystem, Name: "ToolSearch", Description: "Ranks MCP tools by relevance when bound; otherwise uses lexical matching.", Configurable: true},
 	{
 		Handle:       HandleGuardian,
 		Class:        HandleClassSystem,
 		Name:         "Guardian",
-		Description:  "Reviews tool approval requests and safety policy.",
+		Description:  "Reviews tool approvals; uses the Main Agent model when unbound.",
+		Configurable: true,
+	},
+	{
+		Handle:       HandleGuardianScreen,
+		Class:        HandleClassSystem,
+		Name:         "Guardian Screening",
+		Description:  "Optionally screens approvals before Guardian; uncertain or unavailable judgments continue to Agent review.",
 		Configurable: true,
 	},
 	{
@@ -69,6 +77,7 @@ var definitions = []Definition{
 		Description:  "Organizes Memory semantically when explicitly bound; unbound Memory remains static and token-free.",
 		Configurable: true,
 	},
+	{Handle: HandleMemoryVerifier, Class: HandleClassSystem, Name: "Memory Verifier", Description: "Checks generated Memory proposals against supplied policy and evidence; requires a bound Memory Steward.", Configurable: true},
 }
 
 // Catalog is one closed view of the fixed handle definitions plus the custom

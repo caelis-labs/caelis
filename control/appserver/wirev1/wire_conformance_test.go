@@ -21,6 +21,7 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/wirev1/generated"
 	"github.com/caelis-labs/caelis/control/bot"
+	"github.com/caelis-labs/caelis/control/modelprofile"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
 	"github.com/caelis-labs/caelis/control/workspacetrust"
 	jsonschema "github.com/google/jsonschema-go/jsonschema"
@@ -133,6 +134,7 @@ func TestProductionRequestAndResponseJSONConformsToOpenAPI(t *testing.T) {
 		Capabilities: appserver.ClientCapabilities{CaelisTerminalStream: true},
 	}
 	validateWireValue(t, "SessionState", state)
+	validateWireValue(t, "ModelProfile", modelprofile.ModelProfile{ID: "provider:jev", Judgment: true, Backend: modelprofile.Backend{Provider: &modelprofile.ProviderBackend{ModelConfigID: "jev"}}, Effort: modelprofile.EffortCapability{DefaultEffort: "none", Choices: []modelprofile.EffortChoice{{Canonical: "none"}}}})
 	validateWireValue(t, "Bot", bot.Bot{ID: "bot-1", SessionID: "bot-chat-1", Revision: math.MaxUint64, Config: bot.Config{Name: "Ada", Fast: true}})
 	validateWireValue(t, "BotList", []bot.Bot{{ID: "bot-1", SessionID: "bot-chat-1", Revision: 4, Config: bot.Config{Name: "Ada"}}})
 	validateWireValue(t, "StatusSnapshot", controlstatus.StatusSnapshot{

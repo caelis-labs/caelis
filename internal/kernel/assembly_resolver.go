@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/judgment"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	policyapi "github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -70,6 +71,8 @@ type AssemblyResolverConfig struct {
 	// the Control-managed approval reviewer. handled=false preserves the current
 	// Session model behavior.
 	ApprovalModelResolver func(context.Context, session.SessionRef) (resolved model.LLM, handled bool, err error)
+	// ApprovalJudgmentResolver selects a classifier before model resolution.
+	ApprovalJudgmentResolver func(context.Context, session.SessionRef) (judgment.Evaluator, error)
 }
 
 type AssemblyResolver struct {
@@ -78,15 +81,16 @@ type AssemblyResolver struct {
 	sessions interface {
 		SnapshotState(context.Context, session.SessionRef) (map[string]any, error)
 	}
-	assembly              assembly.ResolvedAssembly
-	defaultModelAlias     string
-	contextWindow         int
-	modelLookup           ModelLookup
-	tools                 []tool.Tool
-	agentName             string
-	baseMetadata          map[string]any
-	toolAugmenter         ToolAugmenter
-	approvalModelResolver func(context.Context, session.SessionRef) (model.LLM, bool, error)
+	assembly                 assembly.ResolvedAssembly
+	defaultModelAlias        string
+	contextWindow            int
+	modelLookup              ModelLookup
+	tools                    []tool.Tool
+	agentName                string
+	baseMetadata             map[string]any
+	toolAugmenter            ToolAugmenter
+	approvalModelResolver    func(context.Context, session.SessionRef) (model.LLM, bool, error)
+	approvalJudgmentResolver func(context.Context, session.SessionRef) (judgment.Evaluator, error)
 }
 
 type ToolAugmenter func(context.Context, ToolAugmentContext) (ToolAugmentation, error)
@@ -120,16 +124,17 @@ func NewAssemblyResolver(cfg AssemblyResolverConfig) (*AssemblyResolver, error) 
 		agentName = "main"
 	}
 	return &AssemblyResolver{
-		sessions:              cfg.Sessions,
-		assembly:              assembly.CloneResolvedAssembly(cfg.Assembly),
-		defaultModelAlias:     strings.TrimSpace(cfg.DefaultModelAlias),
-		contextWindow:         cfg.ContextWindow,
-		modelLookup:           cfg.ModelLookup,
-		tools:                 append([]tool.Tool(nil), cfg.Tools...),
-		agentName:             agentName,
-		baseMetadata:          cloneMap(cfg.BaseMetadata),
-		toolAugmenter:         cfg.ToolAugmenter,
-		approvalModelResolver: cfg.ApprovalModelResolver,
+		sessions:                 cfg.Sessions,
+		assembly:                 assembly.CloneResolvedAssembly(cfg.Assembly),
+		defaultModelAlias:        strings.TrimSpace(cfg.DefaultModelAlias),
+		contextWindow:            cfg.ContextWindow,
+		modelLookup:              cfg.ModelLookup,
+		tools:                    append([]tool.Tool(nil), cfg.Tools...),
+		agentName:                agentName,
+		baseMetadata:             cloneMap(cfg.BaseMetadata),
+		toolAugmenter:            cfg.ToolAugmenter,
+		approvalModelResolver:    cfg.ApprovalModelResolver,
+		approvalJudgmentResolver: cfg.ApprovalJudgmentResolver,
 	}, nil
 }
 
@@ -279,15 +284,16 @@ func (r *AssemblyResolver) ListModelAliases(ctx context.Context, ref session.Ses
 }
 
 type assemblyResolverSnapshot struct {
-	assembly              assembly.ResolvedAssembly
-	defaultModelAlias     string
-	contextWindow         int
-	modelLookup           ModelLookup
-	tools                 []tool.Tool
-	agentName             string
-	baseMetadata          map[string]any
-	toolAugmenter         ToolAugmenter
-	approvalModelResolver func(context.Context, session.SessionRef) (model.LLM, bool, error)
+	assembly                 assembly.ResolvedAssembly
+	defaultModelAlias        string
+	contextWindow            int
+	modelLookup              ModelLookup
+	tools                    []tool.Tool
+	agentName                string
+	baseMetadata             map[string]any
+	toolAugmenter            ToolAugmenter
+	approvalModelResolver    func(context.Context, session.SessionRef) (model.LLM, bool, error)
+	approvalJudgmentResolver func(context.Context, session.SessionRef) (judgment.Evaluator, error)
 }
 
 func (r *AssemblyResolver) snapshot() assemblyResolverSnapshot {
@@ -297,15 +303,16 @@ func (r *AssemblyResolver) snapshot() assemblyResolverSnapshot {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return assemblyResolverSnapshot{
-		assembly:              assembly.CloneResolvedAssembly(r.assembly),
-		defaultModelAlias:     r.defaultModelAlias,
-		contextWindow:         r.contextWindow,
-		modelLookup:           r.modelLookup,
-		tools:                 append([]tool.Tool(nil), r.tools...),
-		agentName:             r.agentName,
-		baseMetadata:          cloneMap(r.baseMetadata),
-		toolAugmenter:         r.toolAugmenter,
-		approvalModelResolver: r.approvalModelResolver,
+		assembly:                 assembly.CloneResolvedAssembly(r.assembly),
+		defaultModelAlias:        r.defaultModelAlias,
+		contextWindow:            r.contextWindow,
+		modelLookup:              r.modelLookup,
+		tools:                    append([]tool.Tool(nil), r.tools...),
+		agentName:                r.agentName,
+		baseMetadata:             cloneMap(r.baseMetadata),
+		toolAugmenter:            r.toolAugmenter,
+		approvalModelResolver:    r.approvalModelResolver,
+		approvalJudgmentResolver: r.approvalJudgmentResolver,
 	}
 }
 
@@ -620,4 +627,14 @@ func firstNonEmptyString(values ...string) string {
 		}
 	}
 	return ""
+}
+
+// ResolveApprovalJudgment selects an explicitly configured classifier. Nil
+// keeps the existing session-model fallback without constructing a fake LLM.
+func (r *AssemblyResolver) ResolveApprovalJudgment(ctx context.Context, ref session.SessionRef) (judgment.Evaluator, error) {
+	resolver := r.snapshot().approvalJudgmentResolver
+	if resolver == nil {
+		return nil, nil
+	}
+	return resolver(ctx, ref)
 }

@@ -48,6 +48,7 @@ type subagentOverlayRow struct {
 	section       string
 	label         string
 	detail        string
+	companion     *subagentCompanion
 	current       bool
 	search        string
 	nameConflict  bool
@@ -70,6 +71,7 @@ type subagentOverlayGeometry struct {
 	width  int
 	height int
 	rows   []int
+	cells  [][]subagentCell
 }
 
 type subagentOverlayNav struct {
@@ -78,27 +80,30 @@ type subagentOverlayNav struct {
 	key   string
 	query string
 	depth int
+	field subagentField
 }
 
 type subagentOverlayState struct {
-	page        subagentOverlayPage
-	status      agentbinding.Status
-	loading     bool
-	pending     bool
-	err         string
-	request     uint64
-	index       int
-	rows        []subagentOverlayRow
-	geometry    subagentOverlayGeometry
-	pressedKey  string
-	query       string
-	windowStart int
-	parents     []subagentOverlayNav
-	notice      string
+	page         subagentOverlayPage
+	status       agentbinding.Status
+	loading      bool
+	pending      bool
+	err          string
+	request      uint64
+	index        int
+	rows         []subagentOverlayRow
+	geometry     subagentOverlayGeometry
+	pressedKey   string
+	pressedField subagentField
+	pressedDelta int
+	query        string
+	windowStart  int
+	parents      []subagentOverlayNav
+	notice       string
 
 	bindingHandle           agentbinding.Handle
 	selectedSpeedByProfile  map[string]string
-	fastFocus               bool
+	field                   subagentField
 	selectedEffortByProfile map[string]string
 	creatingRole            bool
 
@@ -250,6 +255,10 @@ func (m *Model) subagentMainRows() []subagentOverlayRow {
 		label: "Binding set", detail: activeSet + "  ›", enabled: true,
 	}}
 	for _, item := range state.status.Handles {
+		// Auxiliary bindings stay on their owning role's row.
+		if item.Definition.Handle == agentbinding.HandleGuardianScreen || item.Definition.Handle == agentbinding.HandleMemoryVerifier {
+			continue
+		}
 		detail := subagentBindingDetail(item)
 		if item.Definition.Custom {
 			detail += "  · custom"
@@ -260,6 +269,7 @@ func (m *Model) subagentMainRows() []subagentOverlayRow {
 			section: "Participant profiles",
 			label:   string(item.Definition.Handle),
 			detail:  detail,
+			binding: item.Binding,
 			handle:  item.Definition.Handle,
 			enabled: item.Definition.Configurable,
 			custom:  item.Definition.Custom,
@@ -276,6 +286,13 @@ func (m *Model) subagentMainRows() []subagentOverlayRow {
 		if !item.Definition.Configurable {
 			row.action = subagentActionNoop
 		}
+		row.companion = state.subagentCompanion(row.handle)
+		if agentbinding.IsBound(item) {
+			row.efforts = subagentProfileEfforts(item.Profile)
+			row.effortIndex = indexOfString(row.efforts, item.Binding.Effort)
+			row.fastSupported = item.Profile.SupportsFast()
+			row.fastMode = firstNonEmpty(item.Binding.Speed, item.Profile.Speed.DefaultSpeed) == "fast"
+		}
 		rows = append(rows, row)
 	}
 	rows = append(rows,
@@ -290,8 +307,14 @@ func (m *Model) subagentBindingRows() []subagentOverlayRow {
 	handle := state.bindingHandle
 	resetDetail := "Remove the explicit binding"
 	switch handle {
+	case agentbinding.HandleGuardianScreen:
+		resetDetail = "Use Guardian Agent review directly"
+	case agentbinding.HandleMemoryVerifier:
+		resetDetail = "Disable extra Memory proposal checks"
+	case agentbinding.HandleToolSearch:
+		resetDetail = "Use lexical MCP discovery (zero-token)"
 	case agentbinding.HandleGuardian:
-		resetDetail = "Use the provider-backed default"
+		resetDetail = "Use the Main Agent model"
 	case agentbinding.HandleReviewer:
 		resetDetail = "Use the Main Agent default"
 	case agentbinding.HandleSteward:
@@ -299,9 +322,13 @@ func (m *Model) subagentBindingRows() []subagentOverlayRow {
 	}
 	var rows []subagentOverlayRow
 	if !state.creatingRole {
+		label := "Default"
+		if handle == agentbinding.HandleGuardianScreen || handle == agentbinding.HandleMemoryVerifier {
+			label = "Disabled"
+		}
 		rows = append(rows, subagentOverlayRow{
 			action: subagentActionOpenBinding, key: "binding:reset",
-			label: "Default", detail: resetDetail, handle: handle, reset: true, enabled: true,
+			label: label, detail: resetDetail, handle: handle, reset: true, enabled: true,
 			current: state.currentBinding().ProfileID == "",
 		})
 	}
@@ -431,8 +458,12 @@ func subagentBindingDetail(item agentbinding.HandleStatus) string {
 	}
 	if item.Definition.Class == agentbinding.HandleClassSystem {
 		switch item.Definition.Handle {
+		case agentbinding.HandleMemoryVerifier, agentbinding.HandleGuardianScreen:
+			return "Disabled"
+		case agentbinding.HandleToolSearch:
+			return "Lexical (zero-token)"
 		case agentbinding.HandleGuardian:
-			return "Provider-backed default"
+			return "Main Agent default"
 		case agentbinding.HandleSteward:
 			return "Static (zero-token)"
 		default:
@@ -496,9 +527,13 @@ func subagentProviderSource(profile modelprofile.ModelProfile) string {
 func subagentBindingDisplay(binding agentbinding.Binding, profiles []modelprofile.ModelProfile) string {
 	name := ""
 	speed := ""
+	effort := " [" + strings.TrimSpace(binding.Effort) + "]"
 	for _, profile := range profiles {
 		if modelprofile.NormalizeID(profile.ID) == modelprofile.NormalizeID(binding.ProfileID) {
 			name = subagentProfileDisplayName(profile)
+			if profile.Judgment {
+				effort = ""
+			}
 			if profile.SupportsFast() {
 				speed = " · Fast off"
 				if firstNonEmpty(binding.Speed, profile.Speed.DefaultSpeed) == "fast" {
@@ -511,7 +546,7 @@ func subagentBindingDisplay(binding agentbinding.Binding, profiles []modelprofil
 	if name == "" {
 		name = strings.TrimSpace(binding.ProfileID)
 	}
-	return name + " [" + strings.TrimSpace(binding.Effort) + "]" + speed
+	return name + effort + speed
 }
 
 func subagentFieldValue(value, placeholder string) string {

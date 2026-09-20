@@ -8,6 +8,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
+	"github.com/caelis-labs/caelis/agent-sdk/judgment"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
@@ -168,9 +169,26 @@ func (g *Gateway) resolveActiveAutoApproval(
 			approver = denyingApprovalApprover{}
 		}
 	}
-	configured, handled, modelResolveErr := g.approvalReviewModel(turnCtx, req.SessionRef)
-	if modelResolveErr == nil && handled {
-		reviewModel = configured
+	var evaluator judgment.Evaluator
+	if resolver, ok := g.resolver.(approval.JudgmentResolver); ok {
+		// Screening is optional. Failure to construct its provider leaves the
+		// existing Agent review path responsible for the decision.
+		if resolved, err := resolver.ResolveApprovalJudgment(approvalCtx, req.SessionRef); err == nil {
+			evaluator = resolved
+		}
+	}
+	// Capture immutable approval inputs: a deferred resolution can outlive the
+	// caller while the tracked approval producer drains after cancellation.
+	ref := req.SessionRef
+	resolveModel := func(ctx context.Context) (model.LLM, error) {
+		configured, handled, err := g.approvalReviewModel(ctx, ref)
+		if err != nil {
+			return nil, fmt.Errorf("resolve automatic approval review model: %w", err)
+		}
+		if handled {
+			return configured, nil
+		}
+		return reviewModel, nil
 	}
 	reviewReq := ApprovalReviewRequest{
 		SessionRef:     req.SessionRef,
@@ -178,7 +196,7 @@ func (g *Gateway) resolveActiveAutoApproval(
 		TurnID:         req.TurnID,
 		Mode:           mode,
 		ReviewID:       reviewID,
-		Model:          reviewModel,
+		Judgment:       evaluator,
 		Approval:       cloneApprovalPayload(payload),
 		RuntimeRequest: *req,
 	}
@@ -186,9 +204,12 @@ func (g *Gateway) resolveActiveAutoApproval(
 		result ApprovalReviewResult
 		err    error
 	)
-	if modelResolveErr != nil {
-		err = fmt.Errorf("resolve automatic approval review model: %w", modelResolveErr)
+	if evaluator != nil {
+		reviewReq.ResolveModel = resolveModel
 	} else {
+		reviewReq.Model, err = resolveModel(approvalCtx)
+	}
+	if err == nil {
 		result, err = approver.Decide(approvalCtx, reviewReq)
 	}
 	if err == nil && approvalCtx.Err() != nil {

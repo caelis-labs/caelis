@@ -927,6 +927,7 @@ type ModelProfile struct {
 	DisplayName *string               `json:"display_name,omitempty"`
 	Effort      ModelEffortCapability `json:"effort"`
 	Id          *string               `json:"id,omitempty"`
+	Judgment    *bool                 `json:"judgment,omitempty"`
 	Speed       *ModelSpeedCapability `json:"speed,omitempty"`
 }
 

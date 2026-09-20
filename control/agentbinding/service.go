@@ -125,12 +125,17 @@ type BindingSetStatus struct {
 }
 
 // SupportsProfile reports whether a profile may back one persisted handle.
-// Guardian and Steward require an in-process provider model for their
-// validated callback contracts. Reviewer may use either a provider model or
-// an external ACP Agent.
+// ToolSearch, Guardian Screening and Memory Verifier require typed judgments.
+// Guardian and Steward require provider generation models.
 func SupportsProfile(handle Handle, profile modelprofile.ModelProfile) bool {
 	handle = NormalizeHandle(handle)
 	if !isPersistedHandle(handle) && ValidateCustomHandle(handle) != nil {
+		return false
+	}
+	if handle == HandleToolSearch || handle == HandleGuardianScreen || handle == HandleMemoryVerifier {
+		return profile.Judgment && profile.Kind() == modelprofile.BackendProvider
+	}
+	if profile.Judgment {
 		return false
 	}
 	return (handle != HandleGuardian && handle != HandleSteward) || profile.Kind() == modelprofile.BackendProvider

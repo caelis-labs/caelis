@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/judgment/typesafe"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/control/modelcatalog"
 )
@@ -114,6 +115,9 @@ func ResolveModelDefaultsForEndpoint(provider string, baseURL string, modelName 
 	template, ok := LookupProvider(provider)
 	if !ok {
 		return ModelDefaults{}, fmt.Errorf("modelconfig: provider %q is not supported", strings.TrimSpace(provider))
+	}
+	if template.API == APISystemOne {
+		return ModelDefaults{ContextWindowTokens: 32000, MaxOutputTokens: 4096, DefaultReasoningEffort: "none", ImageInput: boolPointer(false)}, nil
 	}
 	if template.AuthFlow == AuthFlowCodexOAuth {
 		if defaults, known := codexOAuthModelDefaults(modelName); known {
@@ -319,6 +323,8 @@ func MaintainedSelectableModels(ctx context.Context, provider string, baseURL st
 	}
 	var maintained []string
 	switch {
+	case template.API == APISystemOne:
+		return []SelectableModel{{Name: typesafe.DefaultModel, Detail: "Jev · typed judgments", MetadataComplete: true, ImageInputKnown: true}}, nil
 	case template.AuthFlow == AuthFlowCodexOAuth:
 		maintained = codexOAuthSelectableModels()
 	case template.AuthFlow == AuthFlowGrokOAuth:

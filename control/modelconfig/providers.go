@@ -80,6 +80,7 @@ type ProviderTemplate struct {
 }
 
 var providerTemplates = []ProviderTemplate{
+	{Label: "typesafe", Provider: "typesafe", API: APISystemOne, AuthType: model.AuthBearerToken, Description: "Jev typed judgments and relevance scores", DefaultBaseURL: "https://api.typesafe.ai/v1", DefaultContextWindowTokens: 32000, DefaultMaxOutputTokens: 4096},
 	{Label: "codex", API: model.APIOpenAICodex, AuthType: model.AuthOAuthToken, AuthFlow: AuthFlowCodexOAuth, AuthDisplay: "browser/device oauth", PreserveModelOrder: true, Provider: "openai-codex", Description: "ChatGPT subscription models through Codex", DefaultBaseURL: CodexOAuthBaseURL, DefaultContextWindowTokens: 272000, DefaultMaxOutputTokens: 32768, DefaultReasoningLevels: []string{"low", "medium", "high", "xhigh"}, DefaultReasoningMode: "effort", DefaultReasoningEffort: "medium"},
 	{Label: "grok", API: model.APIXAIResponses, AuthType: model.AuthOAuthToken, AuthFlow: AuthFlowGrokOAuth, AuthDisplay: "browser/device oauth", PreserveModelOrder: true, Provider: "xai", Description: "Grok models through an eligible xAI subscription", DefaultBaseURL: GrokOAuthBaseURL, DefaultContextWindowTokens: 500000, DefaultMaxOutputTokens: 32768, DefaultReasoningLevels: []string{"low", "medium", "high"}, DefaultReasoningMode: "effort", DefaultReasoningEffort: "high"},
 	{Label: "openai", API: model.APIOpenAI, AuthType: model.AuthAPIKey, Provider: "openai", Description: "OpenAI-hosted models through the Responses API", DefaultBaseURL: "https://api.openai.com/v1", DefaultContextWindowTokens: 128000},

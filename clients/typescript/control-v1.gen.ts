@@ -831,6 +831,7 @@ export interface ModelProfile {
   display_name?: string;
   effort: ModelEffortCapability;
   id?: string;
+  judgment?: boolean;
   speed?: ModelSpeedCapability;
 }
 

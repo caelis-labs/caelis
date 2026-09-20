@@ -418,7 +418,13 @@ func (d *assembler) completeModelAliases(ctx context.Context, query string, limi
 	if err != nil {
 		return nil, err
 	}
-	return modelChoiceCandidates(choices, query, limit)
+	selectable := make([]ModelChoice, 0, len(choices))
+	for _, choice := range choices {
+		if !choice.Judgment {
+			selectable = append(selectable, choice)
+		}
+	}
+	return modelChoiceCandidates(selectable, query, limit)
 }
 
 func modelChoiceConfig(choice ModelChoice) modelconfig.Config {

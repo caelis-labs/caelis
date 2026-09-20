@@ -32,6 +32,8 @@ func completeConnectArgs(ctx context.Context, driver *assembler, command string,
 		return completeConnectSources(query, limit), nil
 	case command == "connect-provider-account":
 		return completeConnectProviders(ctx, driver, "account", query, limit), nil
+	case command == "connect-provider-judgment":
+		return completeConnectProviders(ctx, driver, "judgment", query, limit), nil
 	case command == "connect-provider-api-key":
 		return completeConnectProviders(ctx, driver, "api-key", query, limit), nil
 	case command == "connect-acp-agent":
@@ -59,9 +61,10 @@ func completeConnectArgs(ctx context.Context, driver *assembler, command string,
 
 func completeConnectSources(query string, limit int) []controlprompt.SlashArgCandidate {
 	candidates := []controlprompt.SlashArgCandidate{
-		{Value: "account", Display: "Sign in with an account", Detail: "Use a provider account sign-in"},
-		{Value: "api-key", Display: "Use an API key", Detail: "Use an API key or local model provider"},
-		{Value: "acp", Display: "Use a local ACP Agent", Detail: "Connect an installed native ACP Agent or another local ACP command"},
+		{Value: "account", Display: "Sign in with an account", Detail: "ChatGPT, Grok · account sign-in (OAuth)"},
+		{Value: "api-key", Display: "Use an API key", Detail: "OpenAI, DeepSeek, Ollama · API key or local server"},
+		{Value: "judgment", Display: "Connect a judgment model", Detail: "Jev · classification and relevance scoring"},
+		{Value: "acp", Display: "Use a local ACP Agent", Detail: "Codex CLI, Gemini CLI · run a local agent"},
 	}
 	return filterSlashArgCandidates(candidates, query, limit)
 }
@@ -145,6 +148,9 @@ func completeConnectProviders(ctx context.Context, driver *assembler, authSource
 	templates := modelconfig.ProviderTemplates()
 	out := make([]controlprompt.SlashArgCandidate, 0, len(templates))
 	for _, template := range templates {
+		if (authSource == "judgment") != (template.API == modelconfig.APISystemOne) {
+			continue
+		}
 		accountProvider := strings.TrimSpace(string(template.AuthFlow)) != ""
 		if (authSource == "account" && !accountProvider) || (authSource == "api-key" && accountProvider) {
 			continue

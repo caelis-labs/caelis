@@ -25,7 +25,7 @@ func BenchmarkNewLocalStackFirstFrameBoundary(b *testing.B) {
 		b.Run(fixture.name, func(b *testing.B) {
 			storeDir := b.TempDir()
 			workspaceDir := b.TempDir()
-			benchmarkStackSessions(b, filepath.Join(storeDir, "sessions"), fixture.sessionCount, fixture.eventsPerSess)
+			benchmarkStackSessions(b, filepath.Join(storeDir, "sessions"), workspaceDir, fixture.sessionCount, fixture.eventsPerSess)
 			cfg := Config{
 				AppName: "caelis", UserID: "performance-user", StoreDir: storeDir,
 				WorkspaceKey: "performance-workspace", WorkspaceCWD: workspaceDir,
@@ -81,7 +81,7 @@ func BenchmarkNewSessionControlPath(b *testing.B) {
 	}
 }
 
-func benchmarkStackSessions(b *testing.B, root string, sessionCount int, eventsPerSession int) {
+func benchmarkStackSessions(b *testing.B, root, workspaceDir string, sessionCount int, eventsPerSession int) {
 	b.Helper()
 	nextID := 0
 	service := sessionfile.NewStore(sessionfile.Config{
@@ -101,7 +101,7 @@ func benchmarkStackSessions(b *testing.B, root string, sessionCount int, eventsP
 	for i := 0; i < sessionCount; i++ {
 		active, err := service.StartSession(context.Background(), session.StartSessionRequest{
 			AppName: "caelis", UserID: "performance-user",
-			Workspace: session.WorkspaceRef{Key: "performance-workspace", CWD: "/tmp/performance-workspace"},
+			Workspace: session.WorkspaceRef{Key: "performance-workspace", CWD: workspaceDir},
 			Title:     fmt.Sprintf("fixture %04d", i),
 		})
 		if err != nil {

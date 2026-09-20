@@ -71,6 +71,8 @@ type ProviderEndpointConfig struct {
 
 // Choice is the presentation-neutral identity of one configured model.
 type Choice struct {
+	// Judgment choices remain visible for connection management, not /model.
+	Judgment           bool
 	ID                 string
 	Alias              string
 	ProfileID          string
@@ -528,6 +530,7 @@ func ChoiceDetail(cfg Config) string {
 func ChoiceFromConfig(cfg Config) Choice {
 	cfg = NormalizeConfig(cfg)
 	return Choice{
+		Judgment:            IsJudgment(cfg),
 		ID:                  cfg.ID,
 		Alias:               cfg.Alias,
 		Backend:             "provider",

@@ -161,6 +161,9 @@ func ResolveHandle(snapshot Snapshot, req HandleRequest) (sdkplacement.Placement
 	if !ok {
 		return sdkplacement.Placement{}, fmt.Errorf("control/placement: handle %q references unknown profile %q", handle, profileID)
 	}
+	if profile.Judgment {
+		return sdkplacement.Placement{}, fmt.Errorf("control/placement: judgment profiles require a typed evaluation consumer")
+	}
 	if !profile.SupportsEffort(effort) {
 		return sdkplacement.Placement{}, fmt.Errorf("control/placement: effort %q is not supported by profile %q", effort, profile.ID)
 	}
@@ -216,6 +219,9 @@ func ResolveParticipant(snapshot Snapshot, rawProfileID, rawEffort string) (sdkp
 			Reason:    fmt.Sprintf("profile %q is not ACP-backed", profile.ID),
 		}
 	}
+	if profile.Judgment {
+		return sdkplacement.Placement{}, fmt.Errorf("control/placement: judgment profiles require a typed evaluation consumer")
+	}
 	if !profile.SupportsEffort(effort) {
 		return sdkplacement.Placement{}, &ParticipantSelectionError{
 			ProfileID: profile.ID,
@@ -244,6 +250,9 @@ func ResolveProfile(snapshot Snapshot, rawProfileID, rawEffort string) (sdkplace
 	effort := modelcatalog.NormalizeReasoningEffort(rawEffort)
 	if effort == "" {
 		effort = profile.Effort.DefaultEffort
+	}
+	if profile.Judgment {
+		return sdkplacement.Placement{}, fmt.Errorf("control/placement: judgment profiles require a typed evaluation consumer")
 	}
 	if !profile.SupportsEffort(effort) {
 		return sdkplacement.Placement{}, fmt.Errorf("control/placement: effort %q is not supported by profile %q", effort, profile.ID)
@@ -340,6 +349,9 @@ func ValidateSnapshot(snapshot Snapshot) error {
 			configured, ok := models[profile.Backend.Provider.ModelConfigID]
 			if !ok {
 				return fmt.Errorf("control/placement: provider profile %q references unknown model config %q", profile.ID, profile.Backend.Provider.ModelConfigID)
+			}
+			if profile.Judgment != modelconfig.IsJudgment(configured) {
+				return fmt.Errorf("control/placement: profile judgment capability does not match its model")
 			}
 			for _, choice := range profile.Effort.Choices {
 				if !modelconfig.SupportsReasoningEffort(configured, choice.Canonical) {

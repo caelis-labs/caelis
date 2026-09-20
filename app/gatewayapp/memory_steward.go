@@ -235,6 +235,10 @@ func (g memoryStewardGenerator) Generate(
 	if err != nil || !bound || resolved.Model == nil {
 		return stewardworker.GenerationResponse{}, memoryStewardGenerationError("model_unavailable", true, err)
 	}
+	verifier, err := g.composition.boundJudgment(ctx, agentbinding.HandleMemoryVerifier)
+	if err != nil {
+		return stewardworker.GenerationResponse{}, memoryStewardGenerationError("verifier_unavailable", true, err)
+	}
 	stewardModel := withSystemAgentReasoningEffort(resolved)
 	output, parseMode := memoryStewardOutputSpecForModel(stewardModel, request)
 	result, err := g.runner.Run(ctx, systemManagedAgentRunRequest{
@@ -249,7 +253,13 @@ func (g memoryStewardGenerator) Generate(
 	if err != nil {
 		return stewardworker.GenerationResponse{}, memoryStewardGenerationError("model_failure", true, err)
 	}
-	return stewardworker.GenerationResponse{Text: result.Text, ParseMode: parseMode}, nil
+	response := stewardworker.GenerationResponse{Text: result.Text, ParseMode: parseMode}
+	if verifier != nil {
+		if err := verifyMemoryGeneration(ctx, verifier, request, response); err != nil {
+			return stewardworker.GenerationResponse{}, err
+		}
+	}
+	return response, nil
 }
 
 func memoryStewardGenerationError(code string, retryable bool, err error) error {

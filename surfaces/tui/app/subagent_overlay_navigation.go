@@ -15,7 +15,7 @@ func (m *Model) subagentRows() []subagentOverlayRow {
 	query := strings.ToLower(strings.TrimSpace(state.query))
 	filtered := make([]subagentOverlayRow, 0, len(rows))
 	for _, row := range rows {
-		text := strings.ToLower(row.label + " " + row.detail + " " + row.search + " " + string(row.handle))
+		text := strings.ToLower(row.label + " " + row.detail + " " + row.companion.searchText() + " " + row.search + " " + string(row.handle))
 		if strings.Contains(text, query) {
 			filtered = append(filtered, row)
 		}
@@ -33,6 +33,7 @@ func (m *Model) refreshSubagentRows(key string) {
 			break
 		}
 	}
+	m.normalizeSubagentField()
 }
 
 func (m *Model) searchSubagentRows(query string) {
@@ -53,7 +54,7 @@ func (m *Model) openSubagentPage(page subagentOverlayPage, index int) {
 	}
 	state.parents = append(state.parents, subagentOverlayNav{
 		page: state.page, index: state.index, query: state.query,
-		key: m.currentSubagentRow().key, depth: len(state.parents),
+		key: m.currentSubagentRow().key, depth: len(state.parents), field: state.field,
 	})
 	m.restoreSubagentPage(subagentOverlayNav{page: page, index: index, depth: len(state.parents)})
 	if page == subagentPageBinding {
@@ -69,7 +70,7 @@ func (m *Model) openSubagentPage(page subagentOverlayPage, index int) {
 func (m *Model) restoreSubagentPage(nav subagentOverlayNav) {
 	state := m.subagentOverlay
 	state.parents = state.parents[:min(nav.depth, len(state.parents))]
-	state.page, state.index, state.query = nav.page, nav.index, nav.query
+	state.page, state.index, state.query, state.field = nav.page, nav.index, nav.query, nav.field
 	state.windowStart = 0
 	state.err, state.notice, state.pressedKey = "", "", ""
 	m.refreshSubagentRows(nav.key)

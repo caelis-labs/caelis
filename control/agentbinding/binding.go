@@ -13,13 +13,16 @@ import (
 type Handle string
 
 const (
-	HandleSelf     Handle = "self"
-	HandleBreeze   Handle = "breeze"
-	HandleOrbit    Handle = "orbit"
-	HandleZenith   Handle = "zenith"
-	HandleGuardian Handle = "guardian"
-	HandleReviewer Handle = "reviewer"
-	HandleSteward  Handle = "steward"
+	HandleSelf           Handle = "self"
+	HandleBreeze         Handle = "breeze"
+	HandleOrbit          Handle = "orbit"
+	HandleZenith         Handle = "zenith"
+	HandleToolSearch     Handle = "tool-search"
+	HandleGuardian       Handle = "guardian"
+	HandleGuardianScreen Handle = "guardian-screen"
+	HandleReviewer       Handle = "reviewer"
+	HandleSteward        Handle = "steward"
+	HandleMemoryVerifier Handle = "memory-verifier"
 )
 
 // Binding maps one persisted handle to exactly one profile and canonical

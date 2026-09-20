@@ -26,6 +26,9 @@ func TestTeamFastPickerKeepsEffortAndSubmitsTypedBinding(t *testing.T) {
 				t.Fatal("displaying a backend default changed an inherited selection")
 			}
 			m.handleSubagentOverlayKey(subagentSpecialKey(tea.KeyTab))
+			if len(m.currentSubagentRow().efforts) > 1 {
+				m.handleSubagentOverlayKey(subagentSpecialKey(tea.KeyTab))
+			}
 			frame := ansi.Strip(m.View().Content)
 			if !strings.Contains(frame, "Fast on") || !strings.Contains(frame, "tab") {
 				t.Fatalf("missing Fast control:\n%s", frame)
