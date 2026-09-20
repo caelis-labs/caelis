@@ -9,19 +9,32 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/judgment"
 	"github.com/caelis-labs/caelis/agent-sdk/judgment/typesafe"
+	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 	"github.com/caelis-labs/caelis/control/agentbinding"
+	"github.com/caelis-labs/caelis/control/memorybinding"
 	"github.com/caelis-labs/caelis/control/memorytool"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	stewardv1alpha1 "github.com/caelis-labs/memory/api/memory/steward/v1alpha1"
+	memoryv1alpha1 "github.com/caelis-labs/memory/api/memory/v1alpha1"
 	"github.com/caelis-labs/memory/sdk/go/memory/stewardworker"
 )
 
 func TestMemoryVerifierRejectsEnrichmentWithoutLosingReceipt(t *testing.T) {
+	testMemoryVerifierEnrichment(t, 0.1, true)
+}
+
+func TestMemoryVerifierAcceptsEnrichmentWithoutLosingReceipt(t *testing.T) {
+	testMemoryVerifierEnrichment(t, 0.99, false)
+}
+
+func testMemoryVerifierEnrichment(t *testing.T, grounded float64, wantRejected bool) {
+	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 	root := t.TempDir()
@@ -31,19 +44,62 @@ func TestMemoryVerifierRejectsEnrichmentWithoutLosingReceipt(t *testing.T) {
 	}
 	provider := newMemoryGoldenProvider(t)
 	provider.EnableSteward()
-	stack := newMemoryGoldenStack(t, provider, filepath.Join(root, "store"), workspace)
-	defer stack.Close()
+	var calls atomic.Int32
+	receipts := make(chan memoryv1alpha1.ReceiptID, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var input struct{ Questions map[string]judgment.Question }
+		calls.Add(1)
+		if r.Method != http.MethodPost || r.URL.Path != "/systemone" || r.Header.Get("Authorization") != "Bearer fixture" {
+			t.Errorf("unexpected verifier request: %s %s", r.Method, r.URL.Path)
+		}
+		var input struct {
+			State struct {
+				Input    string `json:"input"`
+				Proposal string `json:"proposal"`
+			}
+			Questions map[string]judgment.Question
+		}
 		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 			t.Error(err)
 		}
-		if len(input.Questions) != 2 {
+		if len(input.Questions) != 2 || input.Questions["grounded"].Type != judgment.Noul || input.Questions["compliant"].Type != judgment.Noul {
 			t.Error("verification questions omitted")
 		}
-		fmt.Fprint(w, `{"model":"jev-1.13.0","answers":{"grounded":{"type":"noul","noul":0.1},"compliant":{"type":"noul","noul":0.99}},"usage":{"input_tokens":100,"output_tokens":20}}`)
+		var work memoryGoldenStewardInputPayload
+		if err := json.Unmarshal([]byte(input.State.Input), &work); err != nil || work.Receipt.ReceiptID == "" || input.State.Proposal == "" {
+			t.Errorf("verification omitted receipt or proposal: %v", err)
+		}
+		select {
+		case receipts <- work.Receipt.ReceiptID:
+		default:
+			t.Error("verifier retried a valid completed judgment")
+		}
+		fmt.Fprintf(w, `{"model":"jev-1.13.0","answers":{"grounded":{"type":"noul","noul":%g},"compliant":{"type":"noul","noul":0.99}},"usage":{"input_tokens":100,"output_tokens":20}}`, grounded)
 	}))
 	defer server.Close()
+	stack, err := newGatewayAppTestStack(t, Config{
+		AppName: "caelis-memory", UserID: "memory-golden", StoreDir: filepath.Join(root, "store"),
+		WorkspaceKey: "memory-golden", WorkspaceCWD: workspace, SkillDirs: []string{},
+		Sandbox: SandboxConfig{RequestedType: "host"},
+		ResolveProviderHTTPClient: func(_ context.Context, config ModelConfig) (*http.Client, error) {
+			if config.Provider == "typesafe" && config.BaseURL == server.URL {
+				return server.Client(), nil
+			}
+			if config.Provider == "openai-compatible" && config.BaseURL == provider.URL {
+				return provider.Client(), nil
+			}
+			return nil, fmt.Errorf("unexpected Memory test provider %q", config.Provider)
+		},
+		Model: ModelConfig{
+			Provider: "openai-compatible", API: providers.APIOpenAICompatible,
+			Model: "memory-golden", BaseURL: provider.URL,
+			Token: "memory-model-test-token", AuthType: providers.AuthBearerToken,
+			ContextWindowTokens: 128000, MaxOutputTok: 4096, Timeout: 5 * time.Second,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stack.Close()
 	profile, err := stack.connectTestModel(ModelConfig{Provider: "typesafe", API: modelconfig.APISystemOne, Model: typesafe.DefaultModel, BaseURL: server.URL, Token: "fixture", ContextWindowTokens: 32000, MaxOutputTok: 4096})
 	if err != nil {
 		t.Fatal(err)
@@ -60,16 +116,55 @@ func TestMemoryVerifierRejectsEnrichmentWithoutLosingReceipt(t *testing.T) {
 	}
 	waitMemoryGoldenCondition(t, ctx, "enabled Steward", func() bool { return stack.memorySteward.active.Load() })
 	provider.Begin(memoryGoldenScenario{name: "verified-remember", actions: []memoryGoldenAction{{name: memorytool.RememberToolName, arguments: `{"text":"the release review language is Chinese"}`}}})
-	runMemoryGoldenSession(t, ctx, stack, "verified-remember")
+	active := runMemoryGoldenSession(t, ctx, stack, "verified-remember")
 	provider.AssertComplete(t)
-	waitMemoryGoldenCondition(t, ctx, "rejected enrichment", func() bool {
+	waitMemoryGoldenCondition(t, ctx, "settled verified enrichment", func() bool {
 		inspection, err := stack.memoryRuntime.Management().Inspect(ctx)
-		return err == nil && inspection.Steward.FailedJobs == 1 && inspection.Steward.ActiveRecords == 0
+		if err != nil {
+			return false
+		}
+		if wantRejected {
+			return inspection.Steward.FailedJobs == 1 && inspection.Steward.CompletedJobs == 0 && inspection.Steward.ActiveRecords == 0
+		}
+		return inspection.Steward.CompletedJobs == 1 && inspection.Steward.FailedJobs == 0 && inspection.Steward.ActiveRecords == 1
 	})
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("verifier requests = %d, want exactly one completed judgment", got)
+	}
+	binding, found, err := memorybinding.Resolve(document.Memory, memorybinding.RuntimeSelection{})
+	if err != nil || !found {
+		t.Fatalf("resolve Memory binding: found=%t error=%v", found, err)
+	}
+	labels, found, err := memorybinding.PinnedRuntimeLabels(ctx, stack.composition.sessions, active.SessionRef, binding)
+	if err != nil || !found {
+		t.Fatalf("resolve receipt workspace labels: found=%t error=%v", found, err)
+	}
+	binding, err = memorybinding.BindRuntimeLabels(binding, labels)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, err := stack.memoryRuntime.Bind(binding, memoryv1alpha1.SourceContext{ActorRef: string(binding.RuntimeActorRef), SourceType: "memory-verifier-test"}, memorytool.DefaultRecallBudget())
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, err := client.GetReceiptStatus(ctx, <-receipts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantCode := ""
+	if wantRejected {
+		wantCode = "verification_rejected"
+	}
+	if string(status.TerminalErrorCode) != wantCode {
+		t.Fatalf("receipt error = %q, want %q", status.TerminalErrorCode, wantCode)
+	}
 	provider.Begin(memoryGoldenScenario{name: "verified-recall", actions: []memoryGoldenAction{{name: memorytool.RecallToolName, arguments: `{"query":"release review language"}`}}})
 	recalled := runMemoryGoldenSession(t, ctx, stack, "verified-recall")
 	assertMemoryGoldenResult(t, memoryGoldenToolResults(t, stack, recalled.SessionRef), memorytool.RecallToolName, "release review language is Chinese")
 	provider.AssertComplete(t)
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("Recall triggered another verification: %d requests", got)
+	}
 }
 
 func TestMemoryJevEvaluation(t *testing.T) {
