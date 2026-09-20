@@ -21,6 +21,7 @@ func FromProvider(raw modelconfig.Config) (modelprofile.ModelProfile, error) {
 	}
 	profile := modelprofile.Normalize(modelprofile.ModelProfile{
 		ID:          modelprofile.BuildProviderID(configured.ID),
+		Judgment:    modelconfig.IsJudgment(configured),
 		DisplayName: firstNonEmpty(configured.Alias, configured.Model, configured.ID),
 		Backend: modelprofile.Backend{Provider: &modelprofile.ProviderBackend{
 			ModelConfigID: configured.ID,

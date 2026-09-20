@@ -6,6 +6,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 
+	"github.com/caelis-labs/caelis/control/agentbinding"
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 )
 
@@ -23,6 +24,17 @@ func (m *Model) renderSubagentOverlay() string {
 		body = append(body, "")
 	}
 	body = append(body, muted.Render(strings.Repeat("─", innerWidth)))
+	if state.page == subagentPageBinding && len(state.rows) > 0 && !state.loading {
+		modelWidth, effortWidth, fastWidth := m.subagentBindingColumns(innerWidth - 2)
+		header := padRightDisplay(sliceByDisplayColumns("  Model", 0, modelWidth), modelWidth)
+		if effortWidth > 0 {
+			header += " " + padRightDisplay(sliceByDisplayColumns("Effort", 0, effortWidth), effortWidth)
+		}
+		if fastWidth > 0 {
+			header += " " + sliceByDisplayColumns("Fast", 0, fastWidth)
+		}
+		body = append(body, " "+muted.Render(header))
+	}
 	footer := m.subagentFooterLines(innerWidth)
 	borderInset, contentInset := 0, 0
 	if m.overlayUsesBorder() {
@@ -51,6 +63,14 @@ func (m *Model) renderSubagentOverlay() string {
 	state.geometry = subagentOverlayGeometry{
 		x: startX, y: startY, closeX: startX + contentInset + innerWidth - 1,
 		closeY: startY + borderInset, width: renderedWidth, height: renderedHeight, rows: screenRows,
+	}
+	state.geometry.cells = make([][]subagentCell, len(state.rows))
+	for i, row := range state.rows {
+		cells := m.subagentCells(row, innerWidth-2)
+		for j := range cells {
+			cells[j].x += startX + contentInset + 1
+		}
+		state.geometry.cells[i] = cells
 	}
 	return frame
 }
@@ -87,6 +107,14 @@ func (m *Model) renderSubagentTitle(width int) string {
 	switch state.page {
 	case subagentPageBinding:
 		title = "/team › " + string(state.bindingHandle) + " · Choose model"
+		switch state.bindingHandle {
+		case agentbinding.HandleGuardianScreen:
+			title = "/team › Guardian · Choose classifier"
+		case agentbinding.HandleMemoryVerifier:
+			title = "/team › Memory Steward · Choose verifier"
+		case agentbinding.HandleGuardian:
+			title = "/team › Guardian · Choose model"
+		}
 	case subagentPageSets:
 		title = "/team › Binding sets"
 	case subagentPageNewRole:
@@ -162,71 +190,19 @@ func (m *Model) renderSubagentRows(rows []subagentOverlayRow, width, bodyOffset,
 	return lines, offsets
 }
 
-func (m *Model) renderSubagentRow(row subagentOverlayRow, selected bool, width int) string {
-	marker := "· "
-	if selected {
-		marker = "› "
-	}
-	if row.current {
-		marker += "● "
-	}
-	identity, detail := marker+row.label, row.detail
-	innerWidth := max(1, width-2)
-	labelWidth := min(26, max(12, innerWidth/3))
-	if m.subagentOverlay.page == subagentPageBinding {
-		if row.binding.ProfileID != "" {
-			if detail != "" {
-				identity += " (" + detail + ")"
-			}
-			detail = pickerEffortControl(row.efforts, row.binding.Effort, selected && (!m.subagentOverlay.fastFocus || !row.fastSupported), innerWidth)
-			if row.fastSupported {
-				fast := "Fast off"
-				if row.fastMode {
-					fast = "Fast on"
-				}
-				if selected && m.subagentOverlay.fastFocus {
-					fast = "‹ " + fast + " ›"
-				}
-				detail = padRightDisplay(detail, 18) + "  " + fast
-			}
-		}
-		labelWidth = min(52, max(6, innerWidth*3/5), max(1, innerWidth-14))
-	}
-	labelWidth = min(labelWidth, max(1, innerWidth-10))
-	if selected && m.editingSubagentField() && row.key == m.currentSubagentRow().key {
-		detail = truncateDisplayCellsFromEnd(detail, max(1, innerWidth-labelWidth-3)) + "▏"
-	}
-	line := m.renderPickerColumnsLine(identity, detail, labelWidth, innerWidth, selected)
-	if !row.enabled && !selected {
-		line = m.theme.HelpHintTextStyle().Render(padRightDisplay(" "+padRightDisplay(truncateTailDisplay(identity, labelWidth), labelWidth)+"  "+truncateTailDisplay(detail, max(0, innerWidth-labelWidth-2)), width))
-	}
-	return line
-}
-
 func (m *Model) subagentFooterLines(width int) []string {
 	state := m.subagentOverlay
 	row := m.currentSubagentRow()
 	muted := m.theme.HelpHintTextStyle()
-	detail := firstNonEmpty(row.search, row.detail)
-	if state.page == subagentPageBinding {
-		detail = row.label
-		if row.reset {
-			detail = row.detail
-		} else if row.binding.ProfileID != "" {
-			detail += " [" + row.binding.Effort + "]"
-			if row.detail != "" {
-				detail += " · " + row.detail
-			}
-			if row.current {
-				detail += " · current model"
-			}
-		}
+	detail := ""
+	if state.page == subagentPageBinding && state.query == "" && len(state.rows) == 1 && row.reset {
+		detail = "Use /connect to add a compatible model."
+	}
+	if state.searchable() && state.query != "" {
+		detail = fmt.Sprintf("%d results", len(state.rows))
 	}
 	if row.nameConflict {
 		detail = row.detail
-	}
-	if state.searchable() && len(state.rows) > 0 {
-		detail = fmt.Sprintf("%d/%d · ", state.index+1, len(state.rows)) + detail
 	}
 	if state.notice != "" {
 		detail = state.notice
@@ -243,20 +219,42 @@ func (m *Model) subagentFooterLines(width int) []string {
 	} else if row.nameConflict {
 		style = m.theme.ErrorStyle()
 	}
-	lines := []string{muted.Render(strings.Repeat("─", width)), style.Render(truncateTailDisplay(detail, width))}
+	lines := []string{muted.Render(strings.Repeat("─", width))}
+	if detail != "" {
+		lines = append(lines, style.Render(truncateTailDisplay(detail, width)))
+	}
 	help := "↑↓ select  enter choose  esc back"
 	compact := "↑↓  enter  esc"
 	switch state.page {
 	case subagentPageMain:
 		help = "↑↓ select  enter edit  esc close"
+		if row.companion != nil {
+			help, compact = "↑↓ row  tab model/"+strings.ToLower(row.companion.label)+"  enter edit  esc close", "↑↓  tab  enter  esc"
+		}
+		if state.field == subagentFieldModel && (len(row.efforts) > 1 || row.fastSupported) {
+			help = "↑↓ row  tab field  ←→ effort"
+			if row.fastSupported {
+				help += "  f fast"
+			}
+			help += "  enter edit  esc close"
+		}
 	case subagentPageBinding:
-		help, compact = "↑↓ select  ←→ effort  enter apply  esc back", "↑↓  ←→  enter  esc"
-		if state.creatingRole {
-			help = "↑↓ select  ←→ effort  enter choose  esc back"
+		help, compact = "↑↓ model", "↑↓  tab  ←→  enter  esc"
+		if len(m.subagentFields()) > 1 {
+			help += "  tab field"
+		}
+		if len(row.efforts) > 1 {
+			help += "  ←→ effort"
 		}
 		if row.fastSupported {
-			help, compact = "↑↓ select  tab effort/Fast  ←→ change  enter apply", "↑↓  tab  ←→  enter  esc"
+			help += "  f fast"
 		}
+		if state.creatingRole {
+			help += "  enter choose"
+		} else {
+			help += "  enter apply"
+		}
+		help += "  esc back"
 	case subagentPageNewRole, subagentPageSaveSet:
 		help = "tab field  type to edit  enter next  esc back"
 		if !m.editingSubagentField() {

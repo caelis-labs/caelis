@@ -7,7 +7,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/caelis-labs/caelis/control/agentbinding"
-	"github.com/caelis-labs/caelis/control/modelprofile"
 )
 
 func (m *Model) handleSubagentOverlayKey(msg tea.KeyMsg) tea.Cmd {
@@ -60,21 +59,19 @@ func (m *Model) handleSubagentOverlayKey(msg tea.KeyMsg) tea.Cmd {
 		m.backSubagentOverlay()
 		return nil
 	case tea.KeyLeft:
-		m.moveSubagentEffort(-1)
-		return nil
+		return m.adjustSubagentControl(-1, false)
 	case tea.KeyRight:
-		m.moveSubagentEffort(1)
-		return nil
+		return m.adjustSubagentControl(1, false)
 	case tea.KeyTab:
-		if state.page == subagentPageBinding && m.currentSubagentRow().fastSupported {
-			state.fastFocus = !state.fastFocus
-			return nil
-		}
 		delta := 1
 		if keyEvent.Mod.Contains(tea.ModShift) {
 			delta = -1
 		}
-		m.moveSubagentSelection(delta)
+		if state.page == subagentPageMain || state.page == subagentPageBinding {
+			m.moveSubagentField(delta)
+		} else {
+			m.moveSubagentSelection(delta)
+		}
 		return nil
 	case tea.KeyUp:
 		m.moveSubagentSelection(-1)
@@ -106,6 +103,10 @@ func (m *Model) handleSubagentOverlayKey(msg tea.KeyMsg) tea.Cmd {
 	if m.editingSubagentField() {
 		m.appendSubagentField(text)
 		return nil
+	}
+	if strings.EqualFold(text, "f") && state.query == "" && m.currentSubagentRow().fastSupported &&
+		(state.page == subagentPageBinding || state.page == subagentPageMain && state.field == subagentFieldModel) {
+		return m.adjustSubagentControl(0, true)
 	}
 	if state.searchable() {
 		m.searchSubagentRows(state.query + text)
@@ -162,6 +163,7 @@ func (m *Model) handleSubagentOverlayMouse(msg tea.MouseMsg) (bool, tea.Cmd) {
 				state.notice = ""
 			}
 			state.index = index
+			m.focusSubagentCell(index, mouse.X)
 		}
 		return true, nil
 	case tea.MouseClickMsg:
@@ -176,6 +178,7 @@ func (m *Model) handleSubagentOverlayMouse(msg tea.MouseMsg) (bool, tea.Cmd) {
 		if index := subagentRowAtY(geometry.rows, mouse.Y); index >= 0 && index < len(state.rows) {
 			state.index = index
 			state.pressedKey = state.rows[index].key
+			state.pressedField, state.pressedDelta = m.focusSubagentCell(index, mouse.X)
 		} else {
 			state.pressedKey = ""
 		}
@@ -192,7 +195,14 @@ func (m *Model) handleSubagentOverlayMouse(msg tea.MouseMsg) (bool, tea.Cmd) {
 		}
 		if index := subagentRowAtY(geometry.rows, mouse.Y); index >= 0 && index < len(state.rows) {
 			state.index = index
-			if state.rows[index].key == pressed {
+			field, delta := m.focusSubagentCell(index, mouse.X)
+			if state.rows[index].key == pressed && field == state.pressedField && delta == state.pressedDelta {
+				if field == subagentFieldEffort {
+					return true, m.adjustSubagentControl(delta, false)
+				}
+				if field == subagentFieldFast {
+					return true, m.adjustSubagentControl(0, true)
+				}
 				return true, m.activateSubagentRow(state.rows[index])
 			}
 		}
@@ -227,40 +237,7 @@ func (m *Model) moveSubagentSelection(delta int) {
 	state.index = (state.index + delta + len(state.rows)) % len(state.rows)
 	state.notice = ""
 	state.pressedKey = ""
-}
-
-func (m *Model) moveSubagentEffort(delta int) {
-	state := m.subagentOverlay
-	if state == nil || state.page != subagentPageBinding || delta == 0 || len(state.rows) == 0 {
-		return
-	}
-	row := m.currentSubagentRow()
-	if state.fastFocus && row.fastSupported {
-		speed := "standard"
-		if delta > 0 {
-			speed = "fast"
-		}
-		if state.selectedSpeedByProfile == nil {
-			state.selectedSpeedByProfile = map[string]string{}
-		}
-		state.selectedSpeedByProfile[row.binding.ProfileID] = speed
-		state.rows[state.index].binding.Speed = speed
-		state.rows[state.index].fastMode = speed == "fast"
-		return
-	}
-	if len(row.efforts) < 2 || row.binding.ProfileID == "" {
-		return
-	}
-	index := clampInt(row.effortIndex+delta, 0, len(row.efforts)-1)
-	effort := row.efforts[index]
-	profileID := modelprofile.NormalizeID(row.binding.ProfileID)
-	if state.selectedEffortByProfile == nil {
-		state.selectedEffortByProfile = make(map[string]string)
-	}
-	state.selectedEffortByProfile[profileID] = effort
-	state.rows[state.index].effortIndex = index
-	state.rows[state.index].binding.Effort = effort
-	state.pressedKey = ""
+	m.normalizeSubagentField()
 }
 
 func (m *Model) activateSubagentRow(row subagentOverlayRow) tea.Cmd {
@@ -276,10 +253,12 @@ func (m *Model) activateSubagentRow(row subagentOverlayRow) tea.Cmd {
 			return m.chooseSubagentBinding(row)
 		}
 		state.bindingHandle = row.handle
+		if row.companion != nil && state.field == subagentFieldAuxiliary {
+			state.bindingHandle = row.companion.handle
+		}
 		state.creatingRole = false
 		state.selectedEffortByProfile = nil
 		state.selectedSpeedByProfile = nil
-		state.fastFocus = false
 		m.openSubagentPage(subagentPageBinding, 0)
 	case subagentActionNewRole:
 		m.openNewSubagentRole()
@@ -296,7 +275,6 @@ func (m *Model) activateSubagentRow(row subagentOverlayRow) tea.Cmd {
 		state.creatingRole = true
 		state.selectedEffortByProfile = nil
 		state.selectedSpeedByProfile = nil
-		state.fastFocus = false
 		m.openSubagentPage(subagentPageBinding, 0)
 	case subagentActionCreateRole:
 		return m.createSubagentRole()

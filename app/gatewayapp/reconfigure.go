@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/caelis-labs/caelis/agent-sdk/judgment"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
@@ -353,7 +354,10 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 	}
 	tools = append(tools, memoryTools...)
 	if len(mcpSpecs) > 0 {
-		tools = append(tools, toolsearch.NewSource(mcpMgr))
+		ranker := boundToolSearchRanker{resolve: func(ctx context.Context) (judgment.Evaluator, error) {
+			return s.boundJudgment(ctx, agentbinding.HandleToolSearch)
+		}}
+		tools = append(tools, toolsearch.NewSource(mcpMgr, ranker))
 	}
 	executionValidator, err := controlplane.NewExecutionValidator(controlplane.ExecutionValidatorConfig{
 		Sandbox: sandboxRuntime,
@@ -454,12 +458,11 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 		ModelLookup:       s.lookup,
 		Tools:             tools,
 		BaseMetadata:      cloneMap(effectiveBaseMetadata),
+		ApprovalJudgmentResolver: func(ctx context.Context, _ session.SessionRef) (judgment.Evaluator, error) {
+			return s.boundJudgment(ctx, agentbinding.HandleGuardianScreen)
+		},
 		ApprovalModelResolver: func(ctx context.Context, _ session.SessionRef) (model.LLM, bool, error) {
-			resolved, bound, err := s.resolveSystemAgentModel(ctx, agentbinding.HandleGuardian, runtimeCfg.ContextWindow)
-			if err != nil {
-				return nil, false, err
-			}
-			return withSystemAgentReasoningEffort(resolved), bound, nil
+			return s.resolveGuardianAgentModel(ctx, runtimeCfg.ContextWindow)
 		},
 		ToolAugmenter: func(ctx context.Context, req kernelimpl.ToolAugmentContext) (kernelimpl.ToolAugmentation, error) {
 			activeSession, err := s.sessions.Session(ctx, req.SessionRef)

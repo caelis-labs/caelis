@@ -83,11 +83,17 @@ func (s *controlCommandBackend) connectModelsAtRevision(ctx context.Context, con
 	// Provider lookup omits ACP defaults, so a still-valid unified default
 	// (ACP or provider) must be preserved instead of inferred from DefaultID.
 	if _, ok := modelprofile.Lookup(doc.ModelProfiles, doc.ModelProfiles.DefaultProfileID); !ok {
-		doc.ModelProfiles, err = modelprofile.SelectDefault(doc.ModelProfiles, profiles[0].ID, "")
-		if err != nil {
-			return result, fmt.Errorf("gatewayapp: select default model profile: %w", err)
+		for _, profile := range profiles {
+			if profile.Judgment {
+				continue
+			}
+			doc.ModelProfiles, err = modelprofile.SelectDefault(doc.ModelProfiles, profile.ID, "")
+			if err != nil {
+				return result, fmt.Errorf("gatewayapp: select default model profile: %w", err)
+			}
+			candidate.SetDefaultWithFastMode(profile.Backend.Provider.ModelConfigID, doc.ModelProfiles.DefaultEffort, doc.ModelProfiles.DefaultFastMode)
+			break
 		}
-		candidate.SetDefaultWithFastMode(modelIDs[0], doc.ModelProfiles.DefaultEffort, doc.ModelProfiles.DefaultFastMode)
 	}
 	doc.Models = candidate.Snapshot()
 
@@ -210,9 +216,15 @@ func (s *controlCommandBackend) deleteHostModelAtRevision(ctx context.Context, a
 	}
 	remaining := modelprofile.NormalizeConfiguration(doc.ModelProfiles)
 	if deletedDefault && remaining.DefaultProfileID == "" && len(remaining.Profiles) > 0 {
-		doc.ModelProfiles, err = modelprofile.SelectDefault(remaining, remaining.Profiles[0].ID, "")
-		if err != nil {
-			return result, err
+		for _, profile := range remaining.Profiles {
+			if profile.Judgment {
+				continue
+			}
+			doc.ModelProfiles, err = modelprofile.SelectDefault(remaining, profile.ID, "")
+			if err != nil {
+				return result, err
+			}
+			break
 		}
 	}
 	if candidate.DefaultID() != "" {

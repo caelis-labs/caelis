@@ -1,0 +1,24 @@
+╭──────────────────────────────────────────────────────────────────────────────────────────────╮
+│ /team · Team Configuration                                                                 × │
+│ / ▏Type to search                                                                            │
+│ ──────────────────────────────────────────────────────────────────────────────────────────── │
+│ Configuration                                                                                │
+│  · Binding set         Custom  ›                                                             │
+│ Participant profiles                                                                         │
+│  · self                Current Session controller and effort                                 │
+│  · breeze              Unbound                                                               │
+│  · orbit               openai-codex/gpt-5.6-sol [high] · Fast off                            │
+│  · zenith              Unbound                                                               │
+│ System Agents                                                                                │
+│  · ToolSearch          Lexical (zero-token)                                                  │
+│  › Guardian            openai-codex/gpt-5.6-sol [xhigh] · Fast off  Classifier Disabled ▾    │
+│  · Reviewer            Main Agent default                                                    │
+│  · Memory Steward      Static (zero-token)                          Verifier Disabled ▾      │
+│ Custom roles                                                                                 │
+│  · + new               Choose a name, purpose and model                                      │
+│ Snapshots                                                                                    │
+│  · Save binding set…   Snapshot all active bindings                                          │
+│ ──────────────────────────────────────────────────────────────────────────────────────────── │
+│ ↑↓ row  tab model/classifier  enter edit  esc close                                          │
+│ ctrl+n new  ctrl+p sets  ctrl+s save  del delete                                             │
+╰──────────────────────────────────────────────────────────────────────────────────────────────╯

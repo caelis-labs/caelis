@@ -58,6 +58,8 @@ type EffortCapability struct {
 
 // ModelProfile is one stable product-level selectable model identity.
 type ModelProfile struct {
+	// Judgment profiles evaluate typed questions and cannot control a Session.
+	Judgment    bool             `json:"judgment,omitempty"`
 	ID          string           `json:"id,omitempty"`
 	DisplayName string           `json:"display_name,omitempty"`
 	Backend     Backend          `json:"backend"`
@@ -102,6 +104,7 @@ func BuildACPID(agentID, remoteModelID string) string {
 // ACP wire values retain case.
 func Normalize(in ModelProfile) ModelProfile {
 	out := ModelProfile{
+		Judgment:    in.Judgment,
 		ID:          NormalizeID(in.ID),
 		DisplayName: strings.TrimSpace(in.DisplayName),
 		Effort:      normalizeEffort(in.Effort),
@@ -162,6 +165,9 @@ func Validate(raw ModelProfile) error {
 	}
 	if p.DisplayName == "" {
 		return fmt.Errorf("control/modelprofile: profile %q requires a display name", p.ID)
+	}
+	if p.Judgment && p.Kind() != BackendProvider {
+		return fmt.Errorf("control/modelprofile: typed judgments require a provider backend")
 	}
 	switch p.Kind() {
 	case BackendProvider:
@@ -238,6 +244,9 @@ func ValidateConfiguration(in Configuration) error {
 			return fmt.Errorf("control/modelprofile: default references unknown profile %q", defaultID)
 		}
 		profile, _ := Lookup(in, defaultID)
+		if profile.Judgment {
+			return fmt.Errorf("control/modelprofile: a judgment model cannot be the conversation default")
+		}
 		effort := modelcatalog.NormalizeReasoningEffort(in.DefaultEffort)
 		if effort == "" {
 			effort = profile.Effort.DefaultEffort
@@ -311,6 +320,9 @@ func SelectDefaultWithFastMode(current Configuration, profileID, effort string, 
 	profile, ok := Lookup(next, profileID)
 	if !ok {
 		return Configuration{}, fmt.Errorf("control/modelprofile: default references unknown profile %q", profileID)
+	}
+	if profile.Judgment {
+		return Configuration{}, fmt.Errorf("control/modelprofile: a judgment model cannot be the conversation default")
 	}
 	effort = modelcatalog.NormalizeReasoningEffort(effort)
 	if effort == "" {

@@ -62,6 +62,9 @@ func (s *runtimeComposition) ListModelAliases(ctx context.Context, ref session.S
 	}
 	aliases := make([]string, 0, len(choices))
 	for _, choice := range choices {
+		if choice.Judgment {
+			continue
+		}
 		aliases = append(aliases, choice.Alias)
 	}
 	return dedupeNonEmptyStrings(aliases), nil

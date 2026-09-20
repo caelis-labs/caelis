@@ -172,6 +172,9 @@ func (s *runtimeComposition) resolveSessionModelProfile(
 	if effort == "" {
 		effort = profile.Effort.DefaultEffort
 	}
+	if profile.Judgment {
+		return resolvedSessionModelProfile{}, false, fmt.Errorf("gatewayapp: judgment models cannot control a Session")
+	}
 	if !profile.SupportsEffort(effort) {
 		return resolvedSessionModelProfile{}, false, fmt.Errorf("gatewayapp: model profile %q does not support reasoning effort %q", profile.ID, effort)
 	}

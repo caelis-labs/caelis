@@ -181,7 +181,7 @@ replay reads the stored bytes and does not repeat a Memory call. Consistency
 cursors and provenance references remain in model-hidden Session state and
 ToolResult metadata.
 
-The only ordinary user choice is the `Memory Steward` row in `/team`.
+Semantic organization is selected through the `Memory Steward` row in `/team`.
 Without an explicit provider-model binding, Memory keeps its baseline durable
 receipt journal and lexical recall path and Caelis never invokes a model for
 Memory. Binding that fixed system Agent enables the provider-neutral Steward
@@ -192,6 +192,15 @@ The current Recall path does not invoke Steward or another model; it applies the
 caller's lexical query to baseline receipts and already-organized semantic
 records. Steward deliberately has no default-profile fallback, so an absent
 binding is a stable zero-token mode.
+
+An additional `Memory Verifier` binding optionally evaluates the generated
+proposal against those same appliance-supplied instructions and evidence.
+It does not parse or rewrite the proposal. A high-confidence semantic conflict
+fails enrichment; an inconclusive judgment retains Memory's ordinary validation
+path. Provider failures use Memory's existing bounded job retry policy. The
+immutable Remember receipt remains available even when enrichment fails.
+Binding only the verifier performs no model work. Recall still performs no
+inference, and Memory owns all authorization, revision and canonical Apply checks.
 
 Shutdown closes admission, cancels and drains producers, waits for routed
 mutations and Runtime cleanup, then closes stores and process resources.

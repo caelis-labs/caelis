@@ -79,6 +79,20 @@ The limit controls new PR creation, not CI reruns or already-open PRs.
 
 ## Change-scoped checks
 
+Jev evaluations are opt-in and send only repository synthetic fixtures. Set
+`JEV_API_KEY` in the test process environment and run the scenarios in order:
+
+```bash
+CAELIS_JEV_EVAL=1 go test ./agent-sdk/tool/builtin/toolsearch -run '^TestToolSearchJevEvaluation$' -count=1 -v
+CAELIS_JEV_EVAL=1 go test ./app/gatewayapp -run '^TestGuardianJevEvaluation$' -count=1 -v
+CAELIS_JEV_EVAL=1 go test ./app/gatewayapp -run '^TestMemoryJevEvaluation$' -count=1 -v
+```
+
+These tests report outcomes, token counts and elapsed time. A passing test means
+the evaluation completed; assess the reported semantic scores separately. Small
+synthetic samples do not establish production accuracy or adversarial robustness.
+Ordinary tests never load `.env` or make live Jev requests.
+
 The following checks remain explicit because repeating them for every change
 adds cost without improving unrelated changes:
 

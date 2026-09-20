@@ -1,0 +1,22 @@
+/team · Team Configuration                             ×
+/ ▏Type to search
+────────────────────────────────────────────────────────
+Configuration
+ · Binding set  Custom  ›
+Participant profiles
+ · self         Current Session c…
+ · breeze       Unbound
+ · orbit        openai-codex/gpt-…
+ · zenith       Unbound
+System Agents
+ · ToolSearch   Lexical (zero-tok…
+ › Guardian     openai-codex/gpt-…  Classifier Disable…
+ · Reviewer     Main Agent default
+ · Memory S...  Static (zero-toke…  Verifier Disabled ▾
+Custom roles
+ · + new        Choose a name, pu…
+Snapshots
+ · Save bin...  Snapshot all acti…
+────────────────────────────────────────────────────────
+↑↓ row  tab model/classifier  enter edit  esc close
+ctrl+n new  ctrl+p sets  ctrl+s save  del delete

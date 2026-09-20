@@ -207,7 +207,19 @@ policy, execution journal, and lifecycle behavior as static tools. The run pins
 each accepted definition together with its callable, so later catalog changes
 cannot redirect an already-bound name. Replay discoveries whose server is still
 initializing become visible only when that definition is ready, under the same
-budgets. WebSearch preserves `results` order for legacy
+budgets.
+
+An optional typed ranker scores ready MCP definitions before discovery. Exact
+name and source lookups remain deterministic. Invalid, unavailable or over-budget
+ranking falls back to lexical discovery; parent cancellation remains cancellation.
+The semantic path admits at most 256 candidates in batches of 24 under one
+10-second deadline. Each candidate contributes at most 700 runes of searchable
+metadata; the serialized batch is capped at 24,000 bytes. Scores below 1 on the three-level relevance rubric are omitted.
+Returned names are checked against the same ready snapshot before normal Runtime
+admission. Ranking never supplies tool definitions, grants execution permission or
+changes replay authority.
+
+WebSearch preserves `results` order for legacy
 positional references. Citation ranges use zero-based `result_indices` for
 matching sources instead of repeating their metadata; citation-only sources remain
 inline. Answer text and source metadata remain intact. Successful searches keep
@@ -235,6 +247,26 @@ Consumer setup and package layout live in
 [ACP Projection Contract](acp-projection-architecture.md).
 
 ### Guardian evidence and context
+
+An optional auxiliary judgment binding selects a tool-free first-stage classifier
+through the typed
+`approval.JudgmentResolver` contract. It consumes the canonical source projection
+and exact current action, retaining the same Control queue, cancellation and
+strict option settlement. It does not create a generative LLM or query sandbox.
+Its complete serialized input is limited to 24,000 bytes; excess evidence defers
+to Agent review without dropping user constraints. Decision
+confidence must be at least 0.9. A denial also requires a reason at that threshold
+and, for a task conflict, a selected canonical user instruction. Code renders
+the selected reason with the reviewed action and source evidence. These operating
+thresholds are abstention rules, not a correctness or authorization guarantee.
+
+A complete classifier decision settles through the common approval gate. An
+incomplete decision, provider error or screening timeout proceeds to Agent review
+under the original deadline; cancellation ends the review. The Agent model is
+resolved only when needed, using its independent Guardian binding or the current
+Session model. The Agent receives canonical evidence without classifier answers
+added to its prompt. Both stages persist their invocation receipts under the same
+review identity. The Agent follows the resident conversation contract below.
 
 Control assembles Guardian as a resident, private approval classifier with
 optional inspection tools. The Harness supplies the user task, constraints,

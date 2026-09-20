@@ -26,6 +26,7 @@ type Tool struct {
 	def     tool.Definition
 	entries []entry
 	source  tool.Source
+	ranker  Ranker
 }
 
 type entry struct {
@@ -82,13 +83,17 @@ func newTool(entries []entry) *Tool {
 
 // NewSource discovers only ready MCP tools from an asynchronous source. It is
 // present even while the source is empty so a running Agent can discover tools
-// that finish initialization later.
-func NewSource(source tool.Source) tool.Tool {
+// that finish initialization later. An optional ranker changes matching only;
+// invalid or unavailable ranking preserves lexical results.
+func NewSource(source tool.Source, rankers ...Ranker) tool.Tool {
 	if source == nil {
 		return nil
 	}
 	t := newTool(nil)
 	t.source = source
+	if len(rankers) > 0 {
+		t.ranker = rankers[0]
+	}
 	return t
 }
 
@@ -161,7 +166,7 @@ func (t *Tool) Definition() tool.Definition {
 	return def
 }
 
-func (t *Tool) Call(_ context.Context, call tool.Call) (tool.Result, error) {
+func (t *Tool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
 	if t == nil {
 		return tool.Result{}, tool.NewError(tool.ErrorCodeNotFound, "ToolSearch is unavailable")
 	}
@@ -169,8 +174,11 @@ func (t *Tool) Call(_ context.Context, call tool.Call) (tool.Result, error) {
 	if err != nil {
 		return tool.Result{}, err
 	}
-	snapshot := Tool{entries: t.currentEntries()}
-	matches := snapshot.search(args.Query, args.Limit)
+	snapshot := Tool{entries: t.currentEntries(), ranker: t.ranker}
+	matches, err := snapshot.rank(ctx, args.Query, args.Limit, snapshot.search(args.Query, args.Limit))
+	if err != nil {
+		return tool.Result{}, err
+	}
 	result := tool.ToolSearchResult{Tools: make([]tool.ToolSearchDiscoveredTool, 0, len(matches))}
 	for _, match := range matches {
 		result.Tools = append(result.Tools, tool.NewToolSearchDiscoveredTool(match.def))

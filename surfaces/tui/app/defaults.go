@@ -108,6 +108,8 @@ func connectWizard() WizardDef {
 			switch source {
 			case "account", "api-key":
 				next = connectModelWizard(source)
+			case "judgment":
+				next = connectJudgmentWizard()
 			case "acp":
 				next = connectACPWizard()
 			default:

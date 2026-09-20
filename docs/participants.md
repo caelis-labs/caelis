@@ -17,6 +17,12 @@ choose the main Session controller. External executables must already be on the
 Host's `PATH`. The ACP catalog includes a **Custom** command for other stdio
 agents; see [connection and endpoint setup](external-acp-agents.md#connect).
 
+For Jev, choose **Connect a judgment model** in `/connect`, then `typesafe`,
+the API key, and `jev-1.13.0`. This flow omits conversation-only controls.
+The key uses the same managed credential store as other providers. Judgment
+profiles appear in `/team` and `/disconnect`; they cannot become the main
+Session model, a participant, Reviewer, or Memory Steward.
+
 Open `/team` to configure the profiles available for collaboration:
 
 - `self` uses the current Session controller's model, reasoning effort, Fast selection,
@@ -29,15 +35,36 @@ Open `/team` to configure the profiles available for collaboration:
 - Custom roles give another profile a stable handle and capability description.
 - Binding sets save named snapshots of explicit profile bindings.
 
-On a capable profile, Tab switches between effort and Fast; left/right changes
-the focused choice. Fast off is explicit standard speed. Unsupported profiles
-hide the control. Binding sets preserve independent profile Fast choices.
+In the model picker, Tab and Shift+Tab cycle through the selected model's
+Model, Effort, and Fast cells. Up/down selects a model and retains the focused
+field when supported. Left/right adjusts effort (or speed while Fast is focused);
+F toggles Fast. Fixed effort and unsupported Fast controls are skipped. Click a
+model once or press Enter to apply; clicking effort or Fast edits the draft.
+Escape discards the draft. Fast off is explicit standard speed. Binding sets
+preserve independent profile Fast choices.
 
-The same overlay includes Guardian, Reviewer, and Memory Steward. These have
-fixed responsibilities rather than general-purpose participant profiles;
-configuring a binding does not start a conversation. Memory Steward has no
-default-model fallback: unbound Memory uses its durable journal and lexical
-recall without model calls.
+On the main list, Tab switches between a role's model and its auxiliary field.
+A single click opens either selector. Left/right and F also update effort and
+Fast directly on an explicitly bound model. Only the focused cell is highlighted;
+the filled dot in the picker marks the currently applied model.
+
+The same overlay includes fixed system roles; configuring a binding does not
+start a conversation:
+
+| Role | Binding behavior |
+| --- | --- |
+| ToolSearch | A judgment model ranks ready MCP tools. Unbound or unavailable evaluation retains lexical discovery. |
+| Guardian | Uses a provider model, or the Main Agent model when unbound. An auxiliary classifier selector, labeled `Classifier`, appears on the same row when a judgment model is connected; it is off until selected. |
+| Reviewer | Uses a provider model or ACP agent for the fixed review scene. |
+| Memory Steward | An explicit generation model enables semantic organization. Unbound Memory keeps its durable journal and lexical recall without model calls. |
+| Memory Verifier | An optional judgment model checks Steward proposals for clear semantic conflicts. The `Verifier` selector sits beside Memory Steward on the same row. It requires an enabled Steward and cannot generate or apply Memory changes. |
+
+On Guardian's row, use Tab or click the main model or auxiliary classifier to
+configure it. A selected classifier runs first. A complete decision settles the approval;
+uncertainty, missing denial evidence, an oversized input, or a provider failure
+continues to the existing Agent review within the same approval deadline.
+Changing or disabling screening preserves the Agent model selection. See [Guardian's evidence contract](agent-sdk-boundary.md#guardian-evidence-and-context)
+and [Memory composition](architecture.md#session-runtime-lifecycle).
 
 `/team` takes no arguments and opens the configuration overlay. The TUI accepts
 `/subagent` as an alias; completion shows one `/team (subagent)` entry. Likewise,

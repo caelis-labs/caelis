@@ -78,7 +78,7 @@ func (r *guardianApprovalReviewer) ReviewApproval(ctx context.Context, req kerne
 // strict model-output validation and must not pass through generic reviewer
 // reconciliation that guesses options or lets an option override its outcome.
 func (r *guardianApprovalReviewer) decide(ctx context.Context, req kernel.ApprovalReviewRequest) (result kernel.ApprovalReviewResult, resultErr error) {
-	if req.Model == nil {
+	if req.Model == nil && req.ResolveModel == nil && req.Judgment == nil {
 		return kernel.ApprovalReviewResult{}, fmt.Errorf("approval reviewer requires the current session model")
 	}
 	if r == nil || r.sessions == nil {
@@ -111,6 +111,37 @@ func (r *guardianApprovalReviewer) decide(ctx context.Context, req kernel.Approv
 			}
 		}
 	}()
+	if req.Judgment != nil {
+		decision, err := r.runGuardianJudgment(ctx, req, attempts)
+		if ctx.Err() != nil {
+			return kernel.ApprovalReviewResult{}, ctx.Err()
+		}
+		if err == nil {
+			return decision, nil
+		}
+		if errors.Is(err, context.Canceled) {
+			return kernel.ApprovalReviewResult{}, err
+		}
+		if r.diagnostics != nil {
+			r.diagnostics.Info("Guardian screening deferred to Agent review", "session_id", req.SessionRef.SessionID, "review_id", req.ReviewID)
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return kernel.ApprovalReviewResult{}, err
+	}
+	if req.ResolveModel != nil {
+		var err error
+		req.Model, err = req.ResolveModel(ctx)
+		if err != nil {
+			return kernel.ApprovalReviewResult{}, err
+		}
+	}
+	if req.Model == nil {
+		return kernel.ApprovalReviewResult{}, fmt.Errorf("approval reviewer requires the current session model")
+	}
+	// Only Agent receipts count here: a screening receipt cannot suppress the
+	// accounting fallback for an injected legacy Agent runner.
+	beforeAgent := len(attempts.snapshot())
 	promptItems, _, assistantEvent, parsed, err := r.runGuardianReview(ctx, req)
 	if err != nil {
 		return kernel.ApprovalReviewResult{}, err
@@ -120,7 +151,7 @@ func (r *guardianApprovalReviewer) decide(ctx context.Context, req kernel.Approv
 	}
 	// Compatibility for injected legacy runners that do not emit receipts. Drop
 	// this fallback when every supported system-agent runner uses model.Generate.
-	if len(attempts.snapshot()) == 0 {
+	if len(attempts.snapshot()) == beforeAgent {
 		r.storeApprovalReviewAccounting(approvalAccountingKey(req), approvalReviewAccountingFromEvent(assistantEvent))
 	}
 	return finalizeGuardianDecision(req.Approval, parsed)

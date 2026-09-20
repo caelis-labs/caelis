@@ -131,7 +131,7 @@ func (l *modelLookup) ListModelChoices() []ModelChoice {
 	}
 	rest := make([]ModelConfig, 0, len(l.configs))
 	for id, cfg := range l.configs {
-		if strings.EqualFold(id, l.defaultID) {
+		if modelconfig.IsJudgment(cfg) || strings.EqualFold(id, l.defaultID) {
 			continue
 		}
 		rest = append(rest, cfg)
@@ -213,37 +213,9 @@ func resolveModelFromConfig(
 	resolveTransportHTTPClient func(context.Context, ModelConfig) (*http.Client, error),
 	resolveAPIKey func(context.Context, string) (string, error),
 ) (kernelimpl.ModelResolution, error) {
-	if strings.TrimSpace(cfg.CredentialRef) != "" {
-		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(cfg.CredentialRef)), "apikey:") {
-			if resolveAPIKey == nil {
-				return kernelimpl.ModelResolution{}, fmt.Errorf("gatewayapp: managed model credential %q is unavailable", cfg.CredentialRef)
-			}
-			token, err := resolveAPIKey(ctx, cfg.CredentialRef)
-			if err != nil {
-				if errors.Is(err, credentialstore.ErrInvalidCredential) {
-					return kernelimpl.ModelResolution{}, errors.New("model credential is invalid; reconnect with /connect")
-				}
-				return kernelimpl.ModelResolution{}, fmt.Errorf("gatewayapp: resolve model credential %q: %w", cfg.CredentialRef, err)
-			}
-			cfg.Token = token
-			cfg.PersistToken = false
-		} else {
-			if resolveHTTPClient == nil {
-				return kernelimpl.ModelResolution{}, fmt.Errorf("gatewayapp: managed model credential %q is unavailable", cfg.CredentialRef)
-			}
-			client, err := resolveHTTPClient(ctx, cfg)
-			if err != nil {
-				return kernelimpl.ModelResolution{}, err
-			}
-			cfg.HTTPClient = client
-		}
-	}
-	if cfg.HTTPClient == nil && resolveTransportHTTPClient != nil {
-		client, err := resolveTransportHTTPClient(ctx, cfg)
-		if err != nil {
-			return kernelimpl.ModelResolution{}, fmt.Errorf("gatewayapp: resolve provider HTTP client: %w", err)
-		}
-		cfg.HTTPClient = client
+	cfg, err := resolveProviderCredentials(ctx, cfg, resolveHTTPClient, resolveTransportHTTPClient, resolveAPIKey)
+	if err != nil {
+		return kernelimpl.ModelResolution{}, err
 	}
 	resolved, err := modelconfig.BuildModel(cfg, fallbackContextWindow, contextWindow)
 	if err != nil {
@@ -328,12 +300,12 @@ func (l *modelLookup) upsertLocked(cfg ModelConfig, setDefault bool) (string, er
 	cfg.ProviderEndpointID = endpoint.ID
 	cfg = mergeModelConfigProviderEndpoint(cfg, endpoint)
 	l.configs[strings.ToLower(cfg.ID)] = cfg
-	if setDefault {
+	if setDefault && !modelconfig.IsJudgment(cfg) {
 		l.defaultID = cfg.ID
 		l.defaultEffort = firstNonEmpty(cfg.ReasoningEffort, cfg.DefaultReasoningEffort, "none")
 		l.defaultFastMode = false
 	}
-	if cfg.ContextWindowTokens > 0 {
+	if cfg.ContextWindowTokens > 0 && !modelconfig.IsJudgment(cfg) {
 		l.contextWindow = cfg.ContextWindowTokens
 	}
 	return cfg.ID, nil
@@ -401,8 +373,10 @@ func (l *modelLookup) Delete(alias string) error {
 		l.defaultEffort = ""
 		l.defaultFastMode = false
 		ids := make([]string, 0, len(l.configs))
-		for id := range l.configs {
-			ids = append(ids, id)
+		for id, candidate := range l.configs {
+			if !modelconfig.IsJudgment(candidate) {
+				ids = append(ids, id)
+			}
 		}
 		sort.Strings(ids)
 		if len(ids) > 0 {
@@ -640,4 +614,46 @@ func mergeModelConfigProviderEndpoint(cfg ModelConfig, endpoint ProviderEndpoint
 
 func modelConfigSupportsReasoningEffort(cfg ModelConfig, effort string) bool {
 	return modelconfig.SupportsReasoningEffort(cfg, effort)
+}
+
+// resolveProviderCredentials hydrates one activation-owned provider configuration
+// for either conversational generation or typed evaluation.
+func resolveProviderCredentials(ctx context.Context, cfg ModelConfig,
+	resolveHTTPClient func(context.Context, ModelConfig) (*http.Client, error),
+	resolveTransportHTTPClient func(context.Context, ModelConfig) (*http.Client, error),
+	resolveAPIKey func(context.Context, string) (string, error),
+) (ModelConfig, error) {
+	if strings.TrimSpace(cfg.CredentialRef) != "" {
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(cfg.CredentialRef)), "apikey:") {
+			if resolveAPIKey == nil {
+				return ModelConfig{}, fmt.Errorf("gatewayapp: managed model credential %q is unavailable", cfg.CredentialRef)
+			}
+			token, err := resolveAPIKey(ctx, cfg.CredentialRef)
+			if err != nil {
+				if errors.Is(err, credentialstore.ErrInvalidCredential) {
+					return ModelConfig{}, errors.New("model credential is invalid; reconnect with /connect")
+				}
+				return ModelConfig{}, fmt.Errorf("gatewayapp: resolve model credential %q: %w", cfg.CredentialRef, err)
+			}
+			cfg.Token = token
+			cfg.PersistToken = false
+		} else {
+			if resolveHTTPClient == nil {
+				return ModelConfig{}, fmt.Errorf("gatewayapp: managed model credential %q is unavailable", cfg.CredentialRef)
+			}
+			client, err := resolveHTTPClient(ctx, cfg)
+			if err != nil {
+				return ModelConfig{}, err
+			}
+			cfg.HTTPClient = client
+		}
+	}
+	if cfg.HTTPClient == nil && resolveTransportHTTPClient != nil {
+		client, err := resolveTransportHTTPClient(ctx, cfg)
+		if err != nil {
+			return ModelConfig{}, fmt.Errorf("gatewayapp: resolve provider HTTP client: %w", err)
+		}
+		cfg.HTTPClient = client
+	}
+	return cfg, nil
 }

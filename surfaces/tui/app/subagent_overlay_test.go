@@ -160,7 +160,7 @@ func TestSubagentOverlayBindingPickerUsesModelFirstLabels(t *testing.T) {
 		"openai-codex/gpt-5.6-sol",
 		"openai-codex/gpt-5.6-terra",
 		"Claude — Opus",
-		"■■■□□□  high",
+		"■■■□□□  ‹ high ›",
 		"(ACP)",
 	} {
 		if !strings.Contains(frame, want) {

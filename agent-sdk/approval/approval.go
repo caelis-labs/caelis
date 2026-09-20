@@ -9,6 +9,7 @@ import (
 
 	agentsdk "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/jsonvalue"
+	"github.com/caelis-labs/caelis/agent-sdk/judgment"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -83,12 +84,18 @@ type Payload struct {
 }
 
 type ReviewRequest struct {
-	SessionRef     session.SessionRef
-	RunID          string
-	TurnID         string
-	Mode           Mode
-	ReviewID       string
-	Model          model.LLM
+	SessionRef session.SessionRef
+	RunID      string
+	TurnID     string
+	Mode       Mode
+	ReviewID   string
+	Model      model.LLM
+	// Judgment optionally screens the action before Agent review. An incomplete
+	// judgment falls through to Model without changing the approval request.
+	Judgment judgment.Evaluator
+	// ResolveModel lazily supplies the Agent model when review needs it. When
+	// present it takes precedence over Model, within the same review context.
+	ResolveModel   func(context.Context) (model.LLM, error)
 	Approval       *Payload
 	RuntimeRequest agentsdk.ApprovalRequest
 }
@@ -109,6 +116,12 @@ type ReviewResult struct {
 // through FinalizeReviewResult or use ReviewerAdapter.
 type Reviewer interface {
 	ReviewApproval(context.Context, ReviewRequest) (ReviewResult, error)
+}
+
+// JudgmentResolver optionally selects a typed classifier for approval screening.
+// A nil evaluator or resolution error leaves the Agent review path in place.
+type JudgmentResolver interface {
+	ResolveApprovalJudgment(context.Context, session.SessionRef) (judgment.Evaluator, error)
 }
 
 type ModelResolver interface {
