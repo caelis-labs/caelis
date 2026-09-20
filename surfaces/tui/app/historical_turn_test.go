@@ -256,7 +256,7 @@ func TestRenderHistoricalTurnCompactsInlineParticipantAndLeavesChildPaneFull(t *
 	var childPaneBlocks []Block
 	for i := 1; i <= 3; i++ {
 		pane := NewParticipantTurnBlock("child-pane-"+strconv.Itoa(i), "reviewer")
-		pane.FullAgentMessages = true
+		pane.ChildPane = true
 		pane.Events = append([]SubagentEvent(nil), inline.Events...)
 		pane.Status = "completed"
 		pane.StartedAt = inline.StartedAt

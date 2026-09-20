@@ -21,7 +21,7 @@ func (m *Model) handleTranscriptEventsMsg(msg TranscriptEventsMsg) (tea.Model, t
 	// observed before a later SendMessage resolves that owner's public handle.
 	// Decorating the whole batch first would permanently erase the structured
 	// target before the earlier Spawn event had mounted its view.
-	msg.Events = expandCollaborationMessages(msg.Events)
+	msg.Events = m.expandCollaborationMessages(msg.Events)
 	previousHistoryReplay := m.historyReplay
 	m.historyReplay = msg.ReconnectReplay
 	defer func() { m.historyReplay = previousHistoryReplay }()
@@ -164,7 +164,7 @@ func (m *Model) applyTranscriptEvent(event TranscriptEvent, reconnectReplay bool
 
 func (m *Model) applyTranscriptAgentCommunication(event TranscriptEvent) (tea.Model, tea.Cmd) {
 	event.Text = strings.TrimSpace(tuikit.SanitizeLogText(event.Text))
-	if event.Text == "" {
+	if event.Text == "" || documentContainsAgentCommunication(m.doc, agentCommunicationSubagentEvent(event)) {
 		return m, nil
 	}
 	switch event.Scope {

@@ -16,6 +16,8 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
+	"github.com/caelis-labs/caelis/control/appserver/projection"
 	"github.com/caelis-labs/caelis/control/collaboration"
 	"github.com/caelis-labs/caelis/surfaces/headless"
 )
@@ -48,7 +50,8 @@ func TestCollaborationMailboxWakesIdleParentAndReplaysCanonicalContext(t *testin
 		t.Fatal(err)
 	}
 	event := waitHostedChildInputEvent(t, host, parent.SessionRef, m.Text)
-	assertHostedChildInputEvent(t, event)
+	assertHostedChildInputEvent(t, event, m.ID)
+	assertProjectedMailIdentity(t, event, m.ID)
 	waitHostedChildParentIdle(t, host, parent.SessionID)
 	if got, err := service.Receive(t.Context(), collaboration.Identity{Session: parent.SessionID, Member: "parent"}); err != nil || len(got) != 0 {
 		t.Fatalf("delivered mail remained: %v %v", got, err)
@@ -222,6 +225,7 @@ func TestCollaborationQueuedMultipleSendersUseOneTurnAndPersistModelContext(t *t
 	turn := initialTurn
 	for _, m := range mail {
 		event := waitHostedChildInputEvent(t, host, parent.SessionRef, m.Text)
+		assertProjectedMailIdentity(t, event, m.ID)
 		if communication := session.ProtocolAgentCommunicationOf(event); communication == nil || communication.Text != m.Text {
 			t.Fatalf("display exposed mailbox encoding: %#v", event)
 		}
@@ -272,6 +276,26 @@ func TestCollaborationQueuedMultipleSendersUseOneTurnAndPersistModelContext(t *t
 		t.Fatal(err)
 	}
 	defer reopened.Close()
+	// The file store retains each admitted mail record identity, so a reloaded
+	// Session projects the same identity the live delivery carried.
+	persisted, err := reopened.composition.sessions.Events(t.Context(), session.EventsRequest{SessionRef: parent.SessionRef})
+	if err != nil {
+		t.Fatal(err)
+	}
+	correlated := map[string]bool{}
+	for _, event := range persisted {
+		if event == nil || session.EventTypeOf(event) != session.EventTypeContext {
+			continue
+		}
+		for _, m := range mail {
+			if session.EventMessageID(event) == m.ID {
+				correlated[m.ID] = true
+			}
+		}
+	}
+	if len(correlated) != len(mail) {
+		t.Fatalf("reloaded correlation identities = %v, want all %d mail records", correlated, len(mail))
+	}
 	if _, err := runHeadlessOnceForGatewayAppTest(t.Context(), reopened, parent, parent.SessionID, "continue", headless.Options{}); err != nil {
 		t.Fatal(err)
 	}
@@ -300,6 +324,24 @@ func TestCollaborationQueuedMultipleSendersUseOneTurnAndPersistModelContext(t *t
 	}
 	if provider.CallCount() != 3 {
 		t.Fatalf("unexpected turns: %d", provider.CallCount())
+	}
+}
+
+// assertProjectedMailIdentity requires the canonical event's standard ACP
+// projection to carry the mailbox record ID. That projected MessageID is the
+// identity the TUI compares across delivery, shared-log reads, and returned mail.
+func assertProjectedMailIdentity(t *testing.T, event *session.Event, messageID string) {
+	t.Helper()
+	updates, err := projection.ProjectEvent(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(updates) != 1 {
+		t.Fatalf("projected updates = %#v", updates)
+	}
+	chunk, ok := updates[0].(eventstream.ContentChunk)
+	if !ok || chunk.MessageID != messageID {
+		t.Fatalf("projected mail identity = %#v, want %q", updates[0], messageID)
 	}
 }
 

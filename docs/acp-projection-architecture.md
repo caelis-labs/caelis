@@ -232,6 +232,9 @@ to command Tasks that advertise those capabilities. Agents use
 `SendMessage {to, message}`, which binds trusted source identity and queues
 mail through the [Control mailbox service](external-acp-agents.md). Its mailbox
 ID identifies the message, not a Task activity or an ACP delivery acknowledgement.
+The Host carries it as `MessageID` on Agent-input projections so a Surface can
+recognize the same mail across shared-log observation and direct delivery without
+changing mailbox delivery state.
 When the Host dispatches that input, the recipient sees a standard ACP
 `user_message_chunk`; display-only sender metadata
 lives under `_meta.caelis.agent_communication`. Control derives

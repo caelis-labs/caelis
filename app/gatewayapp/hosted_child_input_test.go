@@ -559,8 +559,15 @@ func waitHostedChildInputEvent(t *testing.T, host *Stack, ref session.SessionRef
 	return nil
 }
 
-func assertHostedChildInputEvent(t *testing.T, event *session.Event) {
+// wantMessageID is the optional embedding-supplied correlation identity carried
+// by the admission. Direct SendAgentInput/SubmitAgentInputBatch callers supply
+// none; mailbox delivery supplies the mailbox record ID.
+func assertHostedChildInputEvent(t *testing.T, event *session.Event, wantMessageID ...string) {
 	t.Helper()
+	want := ""
+	if len(wantMessageID) > 0 {
+		want = wantMessageID[0]
+	}
 	if event == nil || event.Actor.Kind != session.ActorKindParticipant || !strings.HasPrefix(event.Actor.ID, "child-agent-") {
 		t.Fatalf("input event actor = %#v, want trusted child participant", event)
 	}
@@ -578,8 +585,8 @@ func assertHostedChildInputEvent(t *testing.T, event *session.Event) {
 		!strings.Contains(event.Message.TextContent(), communication.Text) {
 		t.Fatalf("model message = %#v, want trusted sender header plus original text", event.Message)
 	}
-	if event.MessageID != "" || strings.Contains(event.IdempotencyKey, "agent-message") {
-		t.Fatalf("input event identity = message %q idempotency %q, want ordinary Turn input", event.MessageID, event.IdempotencyKey)
+	if session.EventMessageID(event) != want || strings.Contains(event.IdempotencyKey, "agent-message") {
+		t.Fatalf("input event identity = message %q idempotency %q, want correlation %q", session.EventMessageID(event), event.IdempotencyKey, want)
 	}
 }
 

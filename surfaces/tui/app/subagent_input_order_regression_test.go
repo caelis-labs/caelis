@@ -69,6 +69,8 @@ func TestRegressionSubagentInputKeepsItsPlaceWithinTurn(t *testing.T) {
 			_, _ = model.handleTaskStreamBatch(taskStreamBatchMsg{
 				sessionID: "session-1", taskID: "task-1", token: 7, events: events, replacement: replacement,
 			})
+			expandBlockAgentMessagesForTest(view.block)
+			view.touch(true)
 			view.prepareVisibleRender()
 			plain := strings.Join(renderedPlainRows(model.subagentOutputRows(view, 100, 40)), "\n")
 			previous := -1

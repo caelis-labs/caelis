@@ -32,6 +32,7 @@ func TestAgentMessageOverlayPreservesTrustedSourcesAndLiteralBody(t *testing.T) 
 			if len(view.block.Events) != 1 || view.block.Events[0].Kind != SEAgentCommunication || view.block.Events[0].Text != body {
 				t.Fatalf("received input changed: %#v", view.block.Events)
 			}
+			expandBlockAgentMessagesForTest(view.block)
 			rows := view.block.Render(model.blockRenderContext(40))
 			plain := renderedRowsPlain(rows)
 			compact := strings.Join(strings.Fields(plain), "")

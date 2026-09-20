@@ -36,7 +36,7 @@ func (m *Model) handleChildHistoryPage(msg taskStreamBatchMsg) (bool, tea.Cmd) {
 			return true, nil
 		}
 		for _, envelope := range msg.events {
-			for _, event := range expandCollaborationMessages(m.projectACPEventToTranscriptEvents(envelope)) {
+			for _, event := range m.expandCollaborationMessages(m.projectACPEventToTranscriptEvents(envelope)) {
 				if eventTargetsSubagentOutputView(event) && event.AnchorToolCallID == callID {
 					view.history.observeChildEvent(event)
 				}

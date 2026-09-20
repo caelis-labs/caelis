@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -46,8 +47,8 @@ func TestActiveInputBatchPersistenceFailureAndRoundTrip(t *testing.T) {
 					}
 				}()
 				inputs := []agent.AgentCommunicationInput{
-					{Source: session.ActorRef{Kind: session.ActorKindParticipant, ID: "one", Name: "one"}, Input: "first report", DisplayInput: "First report"},
-					{Source: session.ActorRef{Kind: session.ActorKindParticipant, ID: "two", Name: "two"}, Input: "second report", DisplayInput: "Second report"},
+					{Source: session.ActorRef{Kind: session.ActorKindParticipant, ID: "one", Name: "one"}, Input: "first report", DisplayInput: "First report", MessageID: "mail-one"},
+					{Source: session.ActorRef{Kind: session.ActorKindParticipant, ID: "two", Name: "two"}, Input: "second report", DisplayInput: "Second report", MessageID: "mail-two"},
 				}
 				probe := &steerRuntimeModel{started: make(chan struct{}), releaseFirst: make(chan struct{})}
 				remoteHandle := newTestControllerTurnHandle(nil)
@@ -127,6 +128,9 @@ func TestActiveInputBatchPersistenceFailureAndRoundTrip(t *testing.T) {
 					if !reflect.DeepEqual(event.Actor, inputs[i].Source) || event.Scope.TurnID != events[0].Scope.TurnID {
 						t.Fatalf("source/Turn changed: %#v", event)
 					}
+					if session.EventMessageID(event) != inputs[i].MessageID {
+						t.Fatalf("reopened correlation = %q, want %q", session.EventMessageID(event), inputs[i].MessageID)
+					}
 					message, _ := session.ModelMessageOf(event)
 					rebuilt = append(rebuilt, message)
 					parts = append(parts, model.ContentPartsFromParts(message.Parts)...)
@@ -204,8 +208,8 @@ func TestInputBatchPersistenceFailureAndRoundTrip(t *testing.T) {
 					}
 				}
 				inputs := []agent.AgentCommunicationInput{
-					{Source: session.ActorRef{Kind: session.ActorKindParticipant, ID: "first", Name: "first"}, Input: "first input"},
-					{Source: session.ActorRef{Kind: session.ActorKindParticipant, ID: "second", Name: "second"}, Input: "second input"},
+					{Source: session.ActorRef{Kind: session.ActorKindParticipant, ID: "first", Name: "first"}, Input: "first input", MessageID: "mail-first"},
+					{Source: session.ActorRef{Kind: session.ActorKindParticipant, ID: "second", Name: "second"}, Input: "second input", MessageID: "mail-second"},
 				}
 				probe := &durableIdentityModel{text: "ack"}
 				remoteCalls := 0
@@ -261,6 +265,9 @@ func TestInputBatchPersistenceFailureAndRoundTrip(t *testing.T) {
 					}
 					if !reflect.DeepEqual(event.Actor, inputs[i].Source) {
 						t.Fatalf("source %d changed: %#v", i, event.Actor)
+					}
+					if session.EventMessageID(event) != inputs[i].MessageID {
+						t.Fatalf("reopened correlation %d = %q, want %q", i, session.EventMessageID(event), inputs[i].MessageID)
 					}
 					rebuilt = append(rebuilt, message)
 					rebuiltParts = append(rebuiltParts, model.ContentPartsFromParts(message.Parts)...)
@@ -320,5 +327,41 @@ func TestInputBatchPersistenceRequiresAtomicStoreAndExactFence(t *testing.T) {
 	}
 	if len(contextEvents(loaded.Events)) != 0 {
 		t.Fatal("rejected input was persisted through fallback")
+	}
+}
+
+// The embedding's optional correlation identity travels only with Agent
+// communication. Ordinary conversation input keeps its existing identity shape,
+// an admission without a supplied correlation stays empty, and the correlation
+// never becomes the Turn or idempotency identity.
+func TestBuildRunInputEventsCarriesSuppliedAgentCorrelationOnly(t *testing.T) {
+	active := session.Session{SessionRef: session.SessionRef{SessionID: "correlation"}}
+	conversation, err := buildRunInputEvents(active, "turn-conversation", agent.RunRequest{
+		InputKind: agent.SubmissionKindConversation, Input: "hello",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(conversation) != 1 || session.EventMessageID(conversation[0]) != "" {
+		t.Fatalf("conversation identity = %#v, want no correlation", conversation)
+	}
+	actor := session.ActorRef{Kind: session.ActorKindParticipant, ID: "orbit", Name: "orbit"}
+	batch, err := buildRunInputEvents(active, "turn-batch", agent.RunRequest{
+		InputKind: agent.SubmissionKindAgentCommunication,
+		Inputs: []agent.AgentCommunicationInput{
+			{Source: actor, Input: "first", MessageID: "mail-1"},
+			{Source: actor, Input: "second"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(batch) != 2 || session.EventMessageID(batch[0]) != "mail-1" || session.EventMessageID(batch[1]) != "" {
+		t.Fatalf("agent correlations = %#v", batch)
+	}
+	for _, event := range batch {
+		if strings.Contains(event.IdempotencyKey, "mail-1") {
+			t.Fatalf("correlation leaked into Turn identity: %q", event.IdempotencyKey)
+		}
 	}
 }

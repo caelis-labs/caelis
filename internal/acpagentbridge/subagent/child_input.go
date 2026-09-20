@@ -211,7 +211,7 @@ func buildAgentCommunicationPrompt(req agent.ChildInputRequest) []json.RawMessag
 func (r *Runner) acceptedChildInputOutputs(slot *childSlot, run *childRun, req agent.ChildInputRequest, activityID string) []*output.Event {
 	var events []*output.Event
 	for _, message := range childInputMessages(req) {
-		if event := r.acceptedChildInputOutput(slot, run, agent.ChildInputRequest{UserInput: req.UserInput, Source: message.Source, Input: message.Input, DisplayInput: message.DisplayInput, ContentParts: message.ContentParts}, activityID); event != nil {
+		if event := r.acceptedChildInputOutput(slot, run, agent.ChildInputRequest{UserInput: req.UserInput, Source: message.Source, Input: message.Input, DisplayInput: message.DisplayInput, ContentParts: message.ContentParts}, activityID, message.MessageID); event != nil {
 			events = append(events, event)
 		}
 	}
@@ -226,6 +226,7 @@ func (r *Runner) acceptedChildInputOutput(
 	run *childRun,
 	req agent.ChildInputRequest,
 	activityID string,
+	messageID string,
 ) *output.Event {
 	if r == nil || slot == nil || run == nil {
 		return nil
@@ -245,6 +246,12 @@ func (r *Runner) acceptedChildInputOutput(
 		return nil
 	}
 	projectionID := slot.nextInputProjectionID(activityID)
+	// Delivery identity correlates mail with shared-log observations. The local
+	// projection ID still identifies this particular accepted input event.
+	messageID = strings.TrimSpace(messageID)
+	if req.UserInput || messageID == "" {
+		messageID = projectionID
+	}
 	content, err := json.Marshal(client.TextContent{Type: "text", Text: displayText})
 	if err != nil {
 		return nil
@@ -255,7 +262,7 @@ func (r *Runner) acceptedChildInputOutput(
 		SessionID: strings.TrimSpace(run.anchor.SessionID),
 		Update: client.ContentChunk{
 			SessionUpdate: client.UpdateUserMessage,
-			MessageID:     projectionID,
+			MessageID:     messageID,
 			Content:       content,
 		},
 	}, at)

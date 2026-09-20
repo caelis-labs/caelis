@@ -99,6 +99,13 @@ to discover the Session roster and `SendMessage` to send mail to another handle,
 including the reserved controller address `parent`. Follow-up messages reuse the
 same conversation rather than starting a new isolated task.
 
+`ReadMessages` lets each Agent observe explicit group messages, including mail
+addressed to other participants. The TUI shows only messages addressed to the
+Agent in that pane: `parent` in the main transcript, or the selected participant
+in a child pane. Successful reads with no matching messages leave no visible tool
+row; failed reads remain visible. This display filter does not change model
+context, read progress, or mail delivery. Outgoing `SendMessage` rows remain visible.
+
 Only the controller can start participants or observe their public results
 through thread tools. Participants receive discovery and messaging tools, not
 creation or handoff authority. Their private reasoning and full transcripts do
@@ -118,7 +125,8 @@ for the full guarantees and limits.
 Click the running/done count in the footer or a participant's label in the
 transcript to open one participant pane. Message rows split that click: the peer
 label (`handle[agent]`, or `@handle[agent]` when you send) opens the peer's pane,
-while the rest of the row expands or collapses the message in place. The name
+while the rest of the row expands or collapses the message in place. Long incoming
+messages start collapsed in both the main transcript and participant panes. The name
 dropdown switches participants;
 the layout dropdown chooses **Overlay**, **Split left/right**, or **Split up/down**.
 The dropdown lists Agents, not individual command Jobs.

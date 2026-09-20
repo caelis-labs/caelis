@@ -1,11 +1,14 @@
 package tuiapp
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"strings"
+)
 
 // Collaboration observations remain model-visible; only their TUI panels are hidden.
 func collaborationObservationTool(name string) bool {
 	switch name {
-	case "ListThreads", "ReadThread", "WaitThread", "ReceiveMessages":
+	case "ListThreads", "ReadThread", "WaitThread", "ReadMessages", "ReceiveMessages":
 		return true
 	default:
 		return false
@@ -14,9 +17,11 @@ func collaborationObservationTool(name string) bool {
 
 // Mailbox results reuse the existing incoming-message presentation. The message
 // ID supplies display identity; parsing here never consumes or delivers mail.
+// Shared-log reads show only mail addressed to the observing pane. The model's
+// complete result and Control's independent read/delivery state remain unchanged.
 // Delivered child input is already typed Agent communication; Surfaces do not
 // parse mailbox JSON out of user_message_chunk or Agent communication text.
-func expandCollaborationMessages(events []TranscriptEvent) []TranscriptEvent {
+func (m *Model) expandCollaborationMessages(events []TranscriptEvent) []TranscriptEvent {
 	var out []TranscriptEvent
 	for _, event := range events {
 		visible := event
@@ -26,12 +31,13 @@ func expandCollaborationMessages(events []TranscriptEvent) []TranscriptEvent {
 			visible.ToolOutputSynthetic = true
 		}
 		out = append(out, visible)
-		if event.Kind != TranscriptEventTool || !event.Final || event.ToolError {
+		if event.Kind != TranscriptEventTool || !event.Final || event.ToolError || strings.EqualFold(event.ToolStatus, "failed") {
 			continue
 		}
 		type message struct {
 			ID   string `json:"id"`
 			From string `json:"from"`
+			To   string `json:"to"`
 			Text string `json:"message"`
 		}
 		var messages []message
@@ -41,7 +47,7 @@ func expandCollaborationMessages(events []TranscriptEvent) []TranscriptEvent {
 			if json.Unmarshal([]byte(event.ToolOutput), &messages) != nil {
 				continue
 			}
-		case "SendMessage", "WaitThread":
+		case "SendMessage", "WaitThread", "ReadMessages":
 			var result struct {
 				Messages []message `json:"messages"`
 			}
@@ -52,7 +58,11 @@ func expandCollaborationMessages(events []TranscriptEvent) []TranscriptEvent {
 		default:
 			continue
 		}
+		recipient := m.collaborationDisplayRecipient(event)
 		for _, mail := range messages {
+			if event.ToolName == "ReadMessages" && (recipient == "" || mail.To != recipient) {
+				continue
+			}
 			if mail.ID == "" || mail.From == "" || mail.Text == "" {
 				continue
 			}
@@ -70,4 +80,18 @@ func expandCollaborationMessages(events []TranscriptEvent) []TranscriptEvent {
 		}
 	}
 	return out
+}
+
+// Resolve the public address from the pane's Host-resolved Spawn/Task relation,
+// never from an actor label, opaque participant ID, or MCP title.
+func (m *Model) collaborationDisplayRecipient(event TranscriptEvent) string {
+	if event.Scope == ACPProjectionMain {
+		return "parent"
+	}
+	if eventTargetsSubagentOutputView(event) {
+		if view := m.subagentOutputViews[event.AnchorToolCallID]; view != nil {
+			return view.taskHandle
+		}
+	}
+	return ""
 }

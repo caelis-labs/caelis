@@ -28,7 +28,7 @@ func buildRunInputEvents(
 	for index, item := range inputs {
 		event, err := buildInputEvent(
 			activeSession, turnID, req.InputKind, item.Input, item.DisplayInput,
-			item.ContentParts, item.Source, req.InputCompaction,
+			item.ContentParts, item.Source, item.MessageID, req.InputCompaction,
 		)
 		if err != nil {
 			return nil, err
@@ -72,6 +72,7 @@ func buildInputEvent(
 	displayInput string,
 	parts []model.ContentPart,
 	actor session.ActorRef,
+	messageID string,
 	compaction *session.EventCompactionContext,
 ) (*session.Event, error) {
 	if strings.TrimSpace(input) == "" && len(parts) == 0 {
@@ -80,6 +81,8 @@ func buildInputEvent(
 	message, displayText, meta := userdisplay.Resolve(input, displayInput, parts, nil)
 	inputKind = normalizeInputKind(inputKind)
 	eventType := session.EventTypeUser
+	// Conversation inputs do not adopt Agent communication correlation identities.
+	eventMessageID := ""
 	var protocol session.EventProtocol
 	switch inputKind {
 	case agent.SubmissionKindConversation:
@@ -100,6 +103,7 @@ func buildInputEvent(
 		}
 		message = prepared
 		eventType = session.EventTypeContext
+		eventMessageID = strings.TrimSpace(messageID)
 		protocol = session.NewAgentCommunicationProtocol(session.ProtocolAgentCommunication{Text: displayText})
 	default:
 		return nil, fmt.Errorf("agent-sdk/runtime: unsupported input kind %q", inputKind)
@@ -119,6 +123,7 @@ func buildInputEvent(
 		Actor:          actor,
 		Compaction:     compactionCopy,
 		Scope:          &scope,
+		MessageID:      eventMessageID,
 		Message:        &message,
 		Text:           displayText,
 		Meta:           meta,

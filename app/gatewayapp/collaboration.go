@@ -126,6 +126,9 @@ func (b *collaborationBackend) Deliver(ctx context.Context, id string, messages 
 		if m.ReplyTo != "" {
 			entries[i].Message.Input += "\nIn-Reply-To: " + m.ReplyTo
 		}
+		// Carry the mailbox record ID as typed correlation; the model-visible
+		// Message-ID footer remains separate.
+		entries[i].Message.MessageID = strings.TrimSpace(m.ID)
 		entries[i].Message.DisplayInput = m.Text
 		if m.From == "parent" {
 			entries[i].Message.Source = session.ControllerExecutor(active.Controller)

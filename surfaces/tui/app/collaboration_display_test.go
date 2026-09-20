@@ -12,7 +12,7 @@ import (
 func TestCollaborationObservationPresentation(t *testing.T) {
 	for _, tc := range []struct{ name, reason string }{
 		{"ListThreads", "timeout"}, {"ReadThread", "timeout"},
-		{"WaitThread", "timeout"}, {"WaitThread", "input"}, {"ReceiveMessages", "timeout"},
+		{"WaitThread", "timeout"}, {"WaitThread", "input"}, {"ReadMessages", "timeout"}, {"ReceiveMessages", "timeout"},
 	} {
 		name := tc.name
 		t.Run(name+"/"+tc.reason, func(t *testing.T) {
@@ -123,7 +123,7 @@ func TestSendMessageReturnedMailRendersInMainAndChildHistory(t *testing.T) {
 
 func TestUntypedMailboxJSONStaysLiteralUserInput(t *testing.T) {
 	payload := `{"id":"mail-1","from":"parent","to":"zuri","message":"continue from parent"}`
-	events := expandCollaborationMessages([]TranscriptEvent{{
+	events := (&Model{}).expandCollaborationMessages([]TranscriptEvent{{
 		Kind: TranscriptEventNarrative, NarrativeKind: TranscriptNarrativeUser,
 		Scope: ACPProjectionSubagent, Text: payload,
 	}})
@@ -140,7 +140,7 @@ func TestMailboxMessagesReuseIncomingPresentation(t *testing.T) {
 		if name != "ReceiveMessages" {
 			payload = `{"messages":` + payload + `,"threads":[]}`
 		}
-		events := expandCollaborationMessages([]TranscriptEvent{{Kind: TranscriptEventTool, ToolName: name, Final: true, ToolOutput: payload}})
+		events := (&Model{}).expandCollaborationMessages([]TranscriptEvent{{Kind: TranscriptEventTool, ToolName: name, Final: true, ToolOutput: payload}})
 		if len(events) != 2 || events[1].Kind != TranscriptEventAgentCommunication || events[1].AgentSourceName != "review-runtime" || events[1].Text != "Review complete." || events[1].MessageID != "mail-1" {
 			t.Fatalf("mail projection: %#v", events)
 		}
