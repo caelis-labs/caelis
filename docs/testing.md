@@ -174,21 +174,25 @@ Provider latency/cache counters are observations,
 not deterministic unit-test assertions or guarantees from the Harness.
 
 `CAELIS_BOT_E2E=1` enables `TestBotRealMimoConversation`, a bounded real-provider
-Bot conversation test. It copies the configured
+Bot notebook test. It copies the configured
 `provider:xiaomi@token-plan-cn/xiaomi/mimo-v2.5` profile and its credential into a
-disposable Store, leaving the user's Host, configuration, and conversation
-untouched. Exactly three prompts run with streaming, a description change, and a
-Host restart; the test asserts exactly three provider calls, that each request
-preserves the previous message prefix, and that no request exposes tools, within
-a two-minute budget.
+disposable Store, leaving the user's Host, configuration, and conversations
+untouched. Four synthetic prompts cover a natural preference, explicit saving,
+revision, and index-led reading after Host restart. The test checks actual note
+and index contents, canonical Read calls after restart, the exact five-tool
+notebook set, and unchanged provider message/tool prefixes. It reports natural
+note-taking selection separately from these reliability assertions. The budget
+is four minutes and at most 28 provider requests; no mock result substitutes for
+real model behavior.
 
 ```bash
-CAELIS_BOT_E2E=1 CAELIS_BOT_SOURCE_STORE=$HOME/.caelis CAELIS_BOT_E2E_OUT=/tmp/caelis-bot-evidence.json go test ./app/gatewayapp -run '^TestBotRealMimoConversation$' -count=1 -timeout=3m -v
+CAELIS_BOT_E2E=1 CAELIS_BOT_SOURCE_STORE=$HOME/.caelis CAELIS_BOT_E2E_OUT=/tmp/caelis-bot-evidence.json go test ./app/gatewayapp -run '^TestBotRealMimoConversation$' -count=1 -timeout=5m -v
 ```
 
 `CAELIS_BOT_SOURCE_STORE` selects the Store holding the configured provider and
 credential. `CAELIS_BOT_E2E_OUT` is optional; when set, it writes only the test's
-request and response payloads, never headers or credentials.
+synthetic request payloads, replies, note contents, and the natural note-taking
+observation, never headers or credentials.
 
 `make windows-check` runs Guardian's native evidence tests with deterministic
 model responses. They exercise PowerShell, temporary-only writes, file evidence,

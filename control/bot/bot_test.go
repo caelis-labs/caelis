@@ -2,6 +2,7 @@ package bot
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -20,15 +21,42 @@ func TestConfigurationRoundTripAndVersionGuard(t *testing.T) {
 	if err != nil || id != "stable-id" || decoded != config {
 		t.Fatalf("round trip: %q, %+v, %v", id, decoded, err)
 	}
+	if enabled, err := NotebookEnabled(state); err != nil || !enabled {
+		t.Fatalf("new Bot notebook = %t, %v", enabled, err)
+	}
 	for _, invalid := range []map[string]any{
 		nil,
 		{StateKey: map[string]any{"version": 2, "id": "id", "config": config}},
 		{StateKey: map[string]any{"version": 1, "id": "", "config": config}},
+		{StateKey: map[string]any{"version": 1, "id": "id", "config": config, "notebook_version": 2}},
+		{StateKey: map[string]any{"version": 1, "id": "id", "config": config, "notebook_version": -1}},
 		{StateKey: "not a configuration"},
 	} {
 		if _, err := Decode(invalid); err == nil {
 			t.Fatalf("accepted corrupt/unsupported record: %+v", invalid)
 		}
+	}
+}
+
+func TestLegacyNotebookDecodeDoesNotMigrateState(t *testing.T) {
+	state := map[string]any{StateKey: map[string]any{
+		"version": 1, "id": "stable-id", "config": Config{Name: "Legacy"},
+	}}
+	before, err := json.Marshal(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if _, err := Decode(state); err != nil {
+			t.Fatal(err)
+		}
+		if enabled, err := NotebookEnabled(state); err != nil || enabled {
+			t.Fatalf("legacy notebook = %t, %v", enabled, err)
+		}
+	}
+	after, err := json.Marshal(state)
+	if err != nil || !reflect.DeepEqual(before, after) {
+		t.Fatalf("read changed legacy state: before=%s after=%s err=%v", before, after, err)
 	}
 }
 

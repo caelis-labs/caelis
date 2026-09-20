@@ -154,6 +154,21 @@ func botGoldenSettingsFrame(t *testing.T, width, height int) string {
 	return model.View().Content
 }
 
+// botGoldenNotebookEnableFrame shows the focused, staged notebook opt-in. Its
+// row and footer must carry the new-context and history-kept boundary even at
+// the smallest supported terminal, where the wrapped explanation does not fit.
+func botGoldenNotebookEnableFrame(t *testing.T, width, height int) string {
+	t.Helper()
+	value := bot.Bot{ID: "bot-1", SessionID: "bot-chat-1", Revision: 4, Config: bot.Config{Name: "Ada", Description: "kind and brief", Model: "gpt-5", Effort: "high"}}
+	model, _ := botGoldenModel(t, width, height, []bot.Bot{value})
+	stageBotForGolden(model, value)
+	model.Update(model.startBotSettingsFlow(false)())
+	focusNotebookField(t, model)
+	model.Update(connectKey("enter"))
+	model.syncViewportContent()
+	return model.View().Content
+}
+
 // applyBotGoldenEnvelope feeds one ScopeMain envelope through the real
 // transcript path so committed and streaming content share production shapes.
 func applyBotGoldenEnvelope(t *testing.T, model *Model, env eventstream.Envelope) *Model {
@@ -284,6 +299,8 @@ func TestBotGoldenFrames(t *testing.T) {
 		{name: "create_80x24", width: 80, height: 24, build: botGoldenCreateFrame},
 		{name: "settings_40x12", width: 40, height: 12, build: botGoldenSettingsFrame},
 		{name: "settings_80x24", width: 80, height: 24, build: botGoldenSettingsFrame},
+		{name: "settings_enable_40x12", width: 40, height: 12, build: botGoldenNotebookEnableFrame},
+		{name: "settings_enable_80x24", width: 80, height: 24, build: botGoldenNotebookEnableFrame},
 		{name: "chat_40x12", width: 40, height: 12, build: botGoldenChatFrame},
 		{name: "description_40x12", width: 40, height: 12, build: botGoldenDescriptionFrame},
 		{name: "description_80x24", width: 80, height: 24, build: botGoldenDescriptionFrame},

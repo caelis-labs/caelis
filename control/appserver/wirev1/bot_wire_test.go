@@ -2,11 +2,13 @@ package wirev1
 
 import (
 	"bytes"
+	"encoding/json"
 	"math"
 	"reflect"
 	"testing"
 
 	appserver "github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/appserver/wirev1/generated"
 	"github.com/caelis-labs/caelis/control/bot"
 )
 
@@ -126,5 +128,55 @@ func TestBotWireRejectsNumericRevision(t *testing.T) {
 	var got bot.Bot
 	if err := Unmarshal([]byte(`{"id":"bot-1","session_id":"bot-chat-1","revision":7,"config":{"name":"Ada"}}`), &got); err == nil {
 		t.Fatal("numeric revision was accepted as a uint64 decimal string")
+	}
+}
+
+func TestBotNotebookAdmissionWireAndGeneratedClients(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		name := "legacy"
+		if enabled {
+			name = "enabled"
+		}
+		t.Run(name, func(t *testing.T) {
+			value := bot.Bot{ID: "bot-1", SessionID: "bot-chat-1", Revision: 3, Config: bot.Config{Name: "Ada"}, NotebookEnabled: enabled}
+			validateWireValue(t, "Bot", value)
+			raw, err := Marshal(value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var dto generated.Bot
+			if err := json.Unmarshal(raw, &dto); err != nil || dto.NotebookEnabled != enabled {
+				t.Fatalf("generated Bot notebook = %t, %v", dto.NotebookEnabled, err)
+			}
+			var decoded bot.Bot
+			if err := Unmarshal(raw, &decoded); err != nil || !reflect.DeepEqual(decoded, value) {
+				t.Fatalf("Bot round trip = %+v, %v", decoded, err)
+			}
+			revision := uint64(3)
+			request := appserver.UpdateBotRequest{
+				WriteBase: appserver.WriteBase{OperationID: "enable-1", SessionID: value.SessionID, ExpectedRevision: &revision},
+				BotID:     value.ID, Config: value.Config, EnableNotebook: enabled,
+			}
+			validateWireValue(t, "UpdateBotRequest", request)
+			raw, err = Marshal(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var requestDTO generated.UpdateBotRequest
+			if err := json.Unmarshal(raw, &requestDTO); err != nil {
+				t.Fatal(err)
+			}
+			if enabled {
+				if requestDTO.EnableNotebook == nil || !*requestDTO.EnableNotebook {
+					t.Fatalf("generated request lost enable intent: %s", raw)
+				}
+			} else if requestDTO.EnableNotebook != nil || bytes.Contains(raw, []byte("enable_notebook")) {
+				t.Fatalf("ordinary edit carried enable intent: %s", raw)
+			}
+			var decodedRequest appserver.UpdateBotRequest
+			if err := DecodeRequest(raw, &decodedRequest); err != nil || !reflect.DeepEqual(decodedRequest, request) {
+				t.Fatalf("request round trip = %+v, %v", decodedRequest, err)
+			}
+		})
 	}
 }

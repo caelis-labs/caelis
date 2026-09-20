@@ -35,7 +35,9 @@ func ParseToolCallArgs(raw string) (map[string]any, error) {
 
 // ParseToolCallArgsRaw parses tool-call argument JSON and returns valid object
 // JSON without decoding numbers through float64. It accepts the same
-// compatibility wrappers as ParseToolCallArgs.
+// compatibility wrappers as ParseToolCallArgs. The returned bytes use the same
+// whitespace and HTML escaping as durable JSON encoding, so a live tool-call
+// prefix is identical to its replayed form.
 func ParseToolCallArgsRaw(raw string) (json.RawMessage, error) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
@@ -106,7 +108,7 @@ func decodeJSONObjectRaw(input string) (json.RawMessage, error) {
 	if _, ok := decoded.(map[string]any); !ok {
 		return nil, fmt.Errorf("json: cannot unmarshal %T into Go value of type map[string]interface {}", decoded)
 	}
-	return json.RawMessage(trimmed), nil
+	return json.Marshal(json.RawMessage(trimmed))
 }
 
 func unquoteJSON(input string) (string, bool) {

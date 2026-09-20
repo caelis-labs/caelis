@@ -4,14 +4,14 @@
   ╭──────────────────────────────────────────────────────────────────────────╮
   │ /settings · Ada                                                        × │
   │ ──────────────────────────────────────────────────────────────────────── │
-  │  Name            Ada▏                                                    │
+  │  Name            Ada                                                     │
   │  Description     kind and brief                                          │
   │  Model           gpt-5  ›                                                │
-  │  Notebook        Off · new context                                       │
+  │  Notebook        Enable · new context                                    │
   │ Private notes for this Bot.                                              │
   │ Keeps your history; starts a new model context.                          │
   │ ──────────────────────────────────────────────────────────────────────── │
-  │ tab field  enter next  esc close                                  Save ↵ │
+  │ enter toggle · keeps history                                      Save ↵ │
   ╰──────────────────────────────────────────────────────────────────────────╯
 
 

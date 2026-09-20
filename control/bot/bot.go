@@ -22,6 +22,8 @@ const (
 	MetadataID = "control_bot_id"
 	// MaxDescriptionBytes bounds the UTF-8 byte length of a Bot description.
 	MaxDescriptionBytes = 64 * 1024
+	// notebookVersion pins the admitted notebook prompt and tool contract.
+	notebookVersion = 1
 )
 
 // Config is user-maintained configuration. Model is an existing provider model
@@ -43,6 +45,9 @@ type Bot struct {
 	SessionID string `json:"session_id"`
 	Revision  uint64 `json:"revision"`
 	Config    Config `json:"config"`
+	// NotebookEnabled reports Control's persisted notebook capability. It is
+	// changed only by creation or an explicit enable command, never Config edits.
+	NotebookEnabled bool `json:"notebook_enabled"`
 	// ModelSelector is Control's catalog-resolved public selector for
 	// Config.Model, for display only. It is never persisted and never replaces
 	// the durable Config.Model identity. An empty value means the configured
@@ -52,9 +57,10 @@ type Bot struct {
 }
 
 type record struct {
-	Version int    `json:"version"`
-	ID      string `json:"id"`
-	Config  Config `json:"config"`
+	Version         int    `json:"version"`
+	ID              string `json:"id"`
+	Config          Config `json:"config"`
+	NotebookVersion int    `json:"notebook_version,omitempty"`
 }
 
 // Normalize validates user-editable fields without resolving the Host model
@@ -72,9 +78,10 @@ func Normalize(config Config) (Config, error) {
 	return config, nil
 }
 
-// Encode produces the single durable configuration record for a Bot.
+// Encode produces the initial durable configuration record for a new Bot,
+// including its notebook capability. Existing records are changed only by Save.
 func Encode(id string, config Config) any {
-	return record{Version: 1, ID: id, Config: config}
+	return record{Version: 1, ID: id, Config: config, NotebookVersion: notebookVersion}
 }
 
 // Decode reads a complete, supported configuration. Missing or unknown records
@@ -86,26 +93,50 @@ func Decode(state map[string]any) (Config, error) {
 
 // ReadState returns stable identity and configuration from guarded Session state.
 func ReadState(state map[string]any) (string, Config, error) {
+	stored, err := readRecord(state)
+	return stored.ID, stored.Config, err
+}
+
+// NotebookEnabled reads the admitted capability without modifying state. Control
+// retains missing/zero notebook versions as the tool-free legacy contract until
+// an explicit enable command commits. This reader remains until no supported
+// Store contains an unenabled legacy Bot; ordinary saves never migrate it.
+func NotebookEnabled(state map[string]any) (bool, error) {
+	stored, err := readRecord(state)
+	return stored.NotebookVersion == notebookVersion, err
+}
+
+func readRecord(state map[string]any) (record, error) {
 	raw, ok := state[StateKey]
 	if !ok {
-		return "", Config{}, errors.New("bot: configuration is not initialized")
+		return record{}, errors.New("bot: configuration is not initialized")
 	}
 	data, err := json.Marshal(raw)
 	if err != nil {
-		return "", Config{}, err
+		return record{}, err
 	}
 	var stored record
 	if err := json.Unmarshal(data, &stored); err != nil {
-		return "", Config{}, fmt.Errorf("bot: decode configuration: %w", err)
+		return record{}, fmt.Errorf("bot: decode configuration: %w", err)
 	}
 	if stored.Version != 1 || strings.TrimSpace(stored.ID) == "" {
-		return "", Config{}, errors.New("bot: unsupported or invalid configuration record")
+		return record{}, errors.New("bot: unsupported or invalid configuration record")
+	}
+	if stored.NotebookVersion != 0 && stored.NotebookVersion != notebookVersion {
+		return record{}, errors.New("bot: unsupported notebook capability version")
 	}
 	config, err := Normalize(stored.Config)
 	if err != nil {
-		return "", Config{}, err
+		return record{}, err
 	}
-	return stored.ID, config, nil
+	stored.Config = config
+	return stored, nil
+}
+
+// NotebookEnableMessage records the user's notebook admission as ordinary
+// conversation history. The guarded capability record remains its authority.
+func NotebookEnableMessage() string {
+	return "The user enabled this Bot's private notebook. From this point onward, notebook tools are available. Existing conversation history is retained."
 }
 
 // ConfigurationMessage is appended as a canonical user message when the user

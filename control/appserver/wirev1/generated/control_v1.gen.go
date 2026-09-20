@@ -418,11 +418,12 @@ type BindAgentBindingRequest struct {
 }
 
 type Bot struct {
-	Config        BotConfig     `json:"config"`
-	Id            string        `json:"id"`
-	ModelSelector *string       `json:"model_selector,omitempty"`
-	Revision      Uint64Decimal `json:"revision"`
-	SessionId     string        `json:"session_id"`
+	Config          BotConfig     `json:"config"`
+	Id              string        `json:"id"`
+	ModelSelector   *string       `json:"model_selector,omitempty"`
+	NotebookEnabled bool          `json:"notebook_enabled"`
+	Revision        Uint64Decimal `json:"revision"`
+	SessionId       string        `json:"session_id"`
 }
 
 type BotConfig struct {
@@ -1848,6 +1849,7 @@ type Uint64Decimal string
 type UpdateBotRequest struct {
 	BotId                   string         `json:"bot_id"`
 	Config                  BotConfig      `json:"config"`
+	EnableNotebook          *bool          `json:"enable_notebook,omitempty"`
 	ExpectedControllerEpoch *string        `json:"expected_controller_epoch,omitempty"`
 	ExpectedRevision        *Uint64Decimal `json:"expected_revision,omitempty"`
 	OperationId             *string        `json:"operation_id,omitempty"`

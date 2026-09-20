@@ -13,7 +13,7 @@
    │  /model        Change this Bot's model                                   │
    │  /new          Create a new Bot                                          │
    │  /quit (exit)  Exit the Bot TUI                                          │
-   │  /settings     Edit this Bot's name, description, and model              │
+   │  /settings     Edit this Bot's name, description, model, and notebook    │
    │                                                                          │
    ╰──────────────────────────────────────────────────────────────────────────╯
       ↑↓/hover select click/enter apply  tab fill

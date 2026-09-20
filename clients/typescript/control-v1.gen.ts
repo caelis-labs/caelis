@@ -397,6 +397,7 @@ export interface Bot {
   config: BotConfig;
   id: string;
   model_selector?: string;
+  notebook_enabled: boolean;
   revision: Uint64Decimal;
   session_id: string;
 }
@@ -1704,6 +1705,7 @@ export type Uint64Decimal = string;
 export interface UpdateBotRequest {
   bot_id: string;
   config: BotConfig;
+  enable_notebook?: boolean;
   expected_controller_epoch?: string;
   expected_revision?: Uint64Decimal;
   operation_id?: string;

@@ -56,7 +56,7 @@ func TestBotCreationUnknownReceiptRecoversWithoutDuplicateConversation(t *testin
 		t.Fatalf("unknown creation duplicated Bot: %+v, %v", list, err)
 	}
 	loaded, err := stack.Sessions().LoadSession(ctx, session.LoadSessionRequest{SessionRef: session.SessionRef{SessionID: recovered.SessionID}})
-	if err != nil || len(loaded.Events) != 1 {
+	if err != nil || len(loaded.Events) != 2 {
 		t.Fatalf("recovery repeated configuration event: %+v, %v", loaded.Events, err)
 	}
 	// A fresh operation ledger models expiry of terminal receipts. The durable
@@ -208,7 +208,11 @@ func TestBotCommittedSaveKeepsNewModelPinWhenClientCancels(t *testing.T) {
 			if failRead && (result.Revision != 0 || result.Detail == "") {
 				t.Fatalf("unobserved revision fabricated: %+v", result)
 			}
-			resolver := &botTurnResolver{composition: &active.instance.runtimeComposition}
+			tools, err := active.instance.exec.(*bot.Notebook).Tools()
+			if err != nil {
+				t.Fatal(err)
+			}
+			resolver := &botTurnResolver{composition: &active.instance.runtimeComposition, notebookTools: tools}
 			if _, err := resolver.ResolveTurn(ctx, kernel.TurnIntent{SessionRef: session.SessionRef{SessionID: value.SessionID}}); err != nil {
 				t.Fatalf("committed model pin rolled back: %v", err)
 			}

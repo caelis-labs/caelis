@@ -134,6 +134,7 @@ func TestBotModelSearchUsesFilteredCatalog(t *testing.T) {
 			connectPress(m, "enter")
 			if !modelOnly {
 				connectPress(m, "tab")
+				connectPress(m, "tab")
 				connectPress(m, "enter")
 			}
 			if len(client.updated) != 1 || client.updated[0].Config.Model != "durable-flash" || client.updated[0].Config.Effort != "none" || client.updated[0].Config.Fast {
@@ -199,7 +200,7 @@ func TestBotModelUnavailableAndCatalogError(t *testing.T) {
 				t.Fatal("missing current silently rebound")
 			}
 			connectPress(m, "esc")
-			m.wizardOverlay.field = 3
+			m.wizardOverlay.field = len(m.wizardOverlay.fields)
 			connectPress(m, "enter")
 			if len(client.updated) != 1 || client.updated[0].Config.Model != "durable-sol" || !client.updated[0].Config.Fast {
 				t.Fatalf("metadata edit: %+v", client.updated)
@@ -213,7 +214,7 @@ func TestBotSettingsUnknownOutcomeCannotResubmit(t *testing.T) {
 	client.updateOutcome = appserver.OutcomeUnknown
 	runConnectTestCmd(m, m.startBotSettingsFlow(false))
 	connectPaste(m, " edited")
-	m.wizardOverlay.field = 3
+	m.wizardOverlay.field = len(m.wizardOverlay.fields)
 	connectPress(m, "enter")
 	if !m.wizardOverlay.blocked || len(client.updated) != 1 {
 		t.Fatal("unknown result not blocked")

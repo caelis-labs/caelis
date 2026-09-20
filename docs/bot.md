@@ -2,7 +2,7 @@
 
 A **Bot** is a persistent named assistant with one private conversation. Bot mode
 is a standalone window over the same Host and canonical Session infrastructure
-as the coding TUI, with an execution assembly limited to chat.
+as the coding TUI, with execution limited to chat and a private notebook.
 
 `caelis bot` launches the Bot TUI. It discovers or attaches to the same managed
 Host as `caelis`, so Bots, Sessions, credentials, and configuration live in the
@@ -21,7 +21,7 @@ not part of Bot mode.
 | --- | --- |
 | `/new` | Create a Bot. Asks for a name, then an optional description; Enter skips the description. |
 | `/bots` | Open the Bot selection overlay. |
-| `/settings` | Edit the active Bot's name, description, and model. |
+| `/settings` | Edit the active Bot's name, description, model, and notebook. |
 | `/model` | Choose a connected provider model for the active Bot. |
 | `/connect` | Connect a provider or external ACP Agent to the Host. |
 | `/disconnect` | Disconnect a provider or external ACP Agent from the Host. |
@@ -68,6 +68,18 @@ Left/Right adjusts effort; Tab switches to Fast when supported. Enter applies th
 model draft, and Create or Save commits the complete form. Esc closes without
 saving. `/bots` supports typing or pasting a search inside its selection overlay.
 
+New Bots have a private notebook. Bots created with the tool-free baseline stay
+tool-free until you enable it: open `/settings`, move to Notebook, press Enter
+to select **Enable**, then move to **Save** and press Enter. Esc discards the draft.
+Enabling retains canonical history and the current conversation's model-visible
+history, including any existing compaction checkpoint. It starts a new request
+baseline with notebook instructions and tools, so the old request-prefix cache
+is not preserved. This is a one-way capability change: ordinary conversation,
+renaming, model selection, and Runtime reactivation never enable a legacy Bot or
+disable an enabled notebook. The enable event and capability commit atomically;
+if saving fails or its outcome is unknown, refresh settings before trying a new
+operation. Other windows and later Host starts read the same durable capability.
+
 - A Bot's model must be an existing provider model from the configured catalog.
   Selection is explicit: Bot mode never silently binds a different provider or a
   non-provider backend. The UI displays the public model selector (for example,
@@ -89,13 +101,53 @@ saving. `/bots` supports typing or pasting a search inside its selection overlay
   conversation history. Bot mode never rewrites that history or the fixed system
   prefix, including after the Runtime is released and rebuilt.
 
+## Private notebook
+
+Tell the Bot a lasting preference or something you want to continue later. It
+can choose to retain useful information, but does not write after every message.
+For an explicit save, ask “Keep this preference in your notebook.” You can also
+ask it to show the saved notes, correct an old fact, or update an unfinished
+matter. After reopening, ask it to check its notebook before answering.
+
+Each Bot has `<Store>/bots/<Bot ID>/notebook/`, with `index.md` as the stable
+entry point. Renaming the Bot, changing startup directories, releasing its
+Runtime, or restarting the Host does not change this association. Markdown files
+are the notebook's content authority; there is no separate note-index database
+and no automatic copy to Workspace Memory. The Bot maintains links from the index
+to relevant notes. Direct TUI file browsing and editing are not available.
+
+Only `Read`, `Write`, `Patch`, `Glob`, and `Grep` are admitted. The actual file
+boundary confines reading, writing, listing, and searching to that Bot's notebook;
+paths outside it and symbolic-link access are rejected. Directory discovery skips
+symbolic links. Writes stage a private file before replacement. A stale `Write`
+revision or a failed `Patch` match returns an error without applying the edit;
+tool calls are serialized so their checks and writes cannot interleave. Individual
+file writes are atomic on supported local Unix filesystems, not a transaction
+across a note and its index. An index update failure must be repaired explicitly.
+External filesystem edits are not serialized with Bot tool calls.
+
+Notebook content is never injected into the system prefix or refreshed at the
+start of every Turn. The fixed guidance names `index.md`; new information enters
+only as ordinary tool results when the Bot reads it. Normal continuation and
+note edits therefore retain the committed model-request prefix. System watermark
+compaction may establish a new context baseline; the fixed notebook entry point
+remains discoverable without scanning every file. Missing or unreadable notes
+produce tool errors, not an invented memory, and Runtime activation never silently
+recreates a missing index. Ask the Bot to repair it if necessary.
+
+A tool error is not a successful save. Check the tool result when a save matters;
+model choices and verbal confirmations alone are not evidence of persistence.
+Revising a note does not erase earlier conversation or tool-result history.
+
 ## What a Bot conversation is
 
-A Bot conversation runs on the built-in controller with a fixed system prefix
-and no tools. It has no workspace access, and it does not admit Memory, plugin,
-or collaboration capability; a Bot conversation cannot carry a workspace Memory
-binding. Bot mode is a plain assistant, and it does not imply that Memory or
-background Workers are configured or available.
+A Bot conversation runs on the built-in controller. Its fixed instruction/tool
+baseline changes only at the explicit notebook enable boundary described above.
+Notebook text is evidence, not configuration or higher-priority instructions; it
+cannot change the user-maintained name, description, or permissions. The Bot has
+no shell, arbitrary workspace access, Workspace Memory, plugin installation,
+collaboration, or background Worker capability. Its canonical Session cannot carry
+a Workspace Memory binding.
 
 ## Leaving, switching, and cancelling
 

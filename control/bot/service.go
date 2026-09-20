@@ -97,24 +97,45 @@ func fromLoaded(loaded session.LoadedSession, id string) (Bot, error) {
 	if !sessionvisibility.IsBotSession(loaded.Session) || boundID != id {
 		return Bot{}, errorcode.New(errorcode.NotFound, "bot: identity not found")
 	}
-	storedID, config, err := ReadState(loaded.State)
+	stored, err := readRecord(loaded.State)
 	if err != nil {
 		return Bot{}, err
 	}
-	if storedID != id {
+	if stored.ID != id {
 		return Bot{}, errors.New("bot: configuration identity does not match its conversation")
 	}
-	return Bot{ID: id, SessionID: loaded.Session.SessionID, Revision: loaded.Session.Revision, Config: config}, nil
+	return Bot{ID: id, SessionID: loaded.Session.SessionID, Revision: loaded.Session.Revision, Config: stored.Config, NotebookEnabled: stored.NotebookVersion == notebookVersion}, nil
 }
 
 // Save atomically commits configuration and its user-instruction event. The
 // caller must serialize prompt admission and reject an already active Turn;
 // the persistence fence additionally excludes in-flight Runtime writes. A
-// nil previous value initializes a newly created private Session skeleton.
-func (s *Service) Save(ctx context.Context, active session.Session, id string, config Config, previous *Config, operationID, digest string) (session.Session, error) {
+// nil previous value initializes a newly created private Session skeleton with
+// notebook access. Existing Bots retain their capability unless enableNotebook
+// explicitly admits it. Admission appends a user event without compacting history.
+func (s *Service) Save(ctx context.Context, active session.Session, id string, config Config, previous *Config, enableNotebook bool, operationID, digest string) (session.Session, error) {
 	boundID, _ := active.Metadata[MetadataID].(string)
 	if !sessionvisibility.IsBotSession(active) || id != boundID {
 		return session.Session{}, errors.New("bot: invalid conversation binding")
+	}
+	version := notebookVersion
+	if previous != nil {
+		state, err := s.Sessions.SnapshotState(ctx, active.SessionRef)
+		if err != nil {
+			return active, err
+		}
+		stored, err := readRecord(state)
+		if err != nil {
+			return active, err
+		}
+		if stored.ID != id {
+			return active, errors.New("bot: configuration identity does not match its conversation")
+		}
+		version = stored.NotebookVersion
+	}
+	enabling := previous == nil || (enableNotebook && version == 0)
+	if enabling {
+		version = notebookVersion
 	}
 	var events []*session.Event
 	if previous == nil || previous.Name != config.Name || previous.Description != config.Description {
@@ -125,6 +146,15 @@ func (s *Service) Save(ctx context.Context, active session.Session, id string, c
 			Actor:   session.ActorRef{Kind: session.ActorKindUser, ID: active.UserID},
 			Message: &message,
 		}}
+	}
+	if enabling {
+		message := model.NewTextMessage(model.RoleUser, NotebookEnableMessage())
+		events = append(events, &session.Event{
+			ID: "bot-notebook-" + operationID, IdempotencyKey: "bot-notebook-" + operationID,
+			Type: session.EventTypeUser, Visibility: session.VisibilityCanonical,
+			Actor:   session.ActorRef{Kind: session.ActorKindUser, ID: active.UserID},
+			Message: &message,
+		})
 	}
 	store, ok := s.Sessions.(session.EventBatchStateService)
 	if !ok {
@@ -139,7 +169,7 @@ func (s *Service) Save(ctx context.Context, active session.Session, id string, c
 			if next == nil {
 				next = map[string]any{}
 			}
-			next[StateKey] = Encode(id, config)
+			next[StateKey] = record{Version: 1, ID: id, Config: config, NotebookVersion: version}
 			return next, nil
 		},
 	})

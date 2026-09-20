@@ -68,6 +68,17 @@ func (m *Model) renderWizardOverlay() string {
 			}
 		} else {
 			help = "tab field  enter next  esc close"
+			focusedNotebook := len(s.fields) > 0 && s.field < len(s.fields) && s.fields[s.field].key == botNotebookFieldKey
+			switch {
+			case s.bot.notebookOptIn:
+				// Keep the staged consequence visible even after focus moves to the
+				// Save action.
+				help = "enter toggle · keeps history"
+			case focusedNotebook && s.bot.current.NotebookEnabled:
+				help = "tab field  esc close"
+			case focusedNotebook:
+				help = "enter toggle · keeps history"
+			}
 		}
 	}
 	if s.err != "" && len(s.fields) == 0 {
@@ -236,6 +247,11 @@ func (m *Model) wizardBodyLines(width, offset, budget int) ([]string, []int) {
 	for i := range offsets {
 		offsets[i] = -1
 	}
+	// The notebook opt-in carries a wrapped explanation under its field. Show it
+	// only when every row still fits the budget, so a small terminal keeps the
+	// complete form instead of scrolling the explanation into view.
+	notebookHints := m.notebookHintRows(form, width)
+	showNotebookHints := len(notebookHints) > 0 && count+len(notebookHints) <= budget
 	// Scroll indicators share the body budget, never the fixed footer.
 	rowBudget := budget
 	if count > budget && budget >= 3 {
@@ -261,6 +277,9 @@ func (m *Model) wizardBodyLines(width, offset, budget int) ([]string, []int) {
 		offsets[i] = offset + len(lines)
 		if form {
 			lines = append(lines, m.renderWizardField(s.fields[i], i == s.field, width))
+			if showNotebookHints && s.fields[i].key == botNotebookFieldKey {
+				lines = append(lines, notebookHints...)
+			}
 			continue
 		}
 		label, detail := "+ Custom model", ""
@@ -363,6 +382,13 @@ func (m *Model) renderWizardField(field wizardField, selected bool, width int) s
 		if selected {
 			value = "‹ " + value + " ›"
 		}
+	} else if field.key == botNotebookFieldKey {
+		// The row always states the material consequence of enabling, so the
+		// smallest terminal shows the new context even without the wrapped
+		// explanation. An enabled notebook is a read-only display.
+		if field.value != botNotebookOn {
+			value += " · " + botNotebookRowHint
+		}
 	} else if field.key == "bot_model" {
 		if displayColumns(value) > available-3 {
 			value = "…" + truncateDisplayCellsFromEnd(value, max(1, available-4))
@@ -383,6 +409,39 @@ func (m *Model) renderWizardField(field wizardField, selected bool, width int) s
 	}
 	value = truncateDisplayCells(value, available)
 	return m.renderPickerColumnsLine(field.label, value, labelWidth, max(1, width-2), selected)
+}
+
+// notebookHintRows returns the wrapped notebook explanation rows, or nil when the
+// form has no notebook field.
+func (m *Model) notebookHintRows(form bool, width int) []string {
+	if !form {
+		return nil
+	}
+	for i := range m.wizardOverlay.fields {
+		if m.wizardOverlay.fields[i].key == botNotebookFieldKey {
+			return m.botNotebookHintLines(width)
+		}
+	}
+	return nil
+}
+
+// botNotebookHintLines wraps the notebook opt-in explanation to the form width
+// and renders it as subdued help text.
+func (m *Model) botNotebookHintLines(width int) []string {
+	if width <= 0 {
+		return nil
+	}
+	muted := m.theme.HelpHintTextStyle()
+	lines := make([]string, 0, len(botNotebookHint)+1)
+	for _, raw := range botNotebookHint {
+		for line := range strings.SplitSeq(hardWrapDisplayLine(raw, width), "\n") {
+			if strings.TrimSpace(line) == "" {
+				continue
+			}
+			lines = append(lines, muted.Render(line))
+		}
+	}
+	return lines
 }
 
 func (m *Model) connectDisplayEndpoint() string {
