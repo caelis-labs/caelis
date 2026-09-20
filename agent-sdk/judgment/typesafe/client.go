@@ -165,7 +165,7 @@ func validateResponse(request judgment.Request, result judgment.Response) error 
 			}
 			total += p
 		}
-		if math.Abs(total-1) > 0.01 {
+		if math.Abs(total-1) > 0.01+1e-9 {
 			return fmt.Errorf("typesafe: invalid probability sum")
 		}
 		criteria, err := json.Marshal(question.Criteria)

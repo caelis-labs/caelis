@@ -16,23 +16,18 @@ import (
 
 func TestGuardianScreeningCascadesToAgentWithinOriginalReview(t *testing.T) {
 	for _, tc := range []struct {
-		name, decision, reason string
-		source                 string
-		confidence             float64
-		failure                error
-		agentResponse          string
-		wantAgent, wantAllow   bool
+		name, decision       string
+		confidence           float64
+		failure              error
+		agentResponse        string
+		wantAgent, wantAllow bool
 	}{
-		{name: "allow without resolving Agent", decision: "0", reason: "none", confidence: 1, wantAllow: true},
-		{name: "deny without resolving Agent", decision: "1", reason: "constraint", source: "0", confidence: 1},
-		{name: "contradictory allow defers to Agent allow", decision: "0", reason: "constraint", confidence: 1, wantAgent: true, wantAllow: true},
-		{name: "contradictory allow defers to Agent deny", decision: "0", reason: "constraint", confidence: 1, agentResponse: `{"option_id":"reject_once","rationale":"The action contradicts the user's explicit constraint."}`, wantAgent: true},
-		{name: "source conflict defers to Agent allow", decision: "0", reason: "none", source: "0", confidence: 1, wantAgent: true, wantAllow: true},
-		{name: "source conflict defers to Agent deny", decision: "0", reason: "none", source: "0", confidence: 1, agentResponse: `{"option_id":"reject_once","rationale":"The action contradicts the user's explicit constraint."}`, wantAgent: true},
+		{name: "allow without resolving Agent", decision: "0", confidence: 1, wantAllow: true},
+		{name: "deny without resolving Agent", decision: "1", confidence: 1},
+		{name: "uncertain deny uses Agent explanation", decision: "1", confidence: .6, agentResponse: `{"option_id":"reject_once","rationale":"The action contradicts the user's explicit constraint."}`, wantAgent: true},
 		{name: "uncertain", decision: "0", confidence: .5, wantAgent: true, wantAllow: true},
 		{name: "missing evidence", decision: "unavailable", confidence: 1, wantAgent: true, wantAllow: true},
 		{name: "invalid answer", decision: "unknown", confidence: 1, wantAgent: true, wantAllow: true},
-		{name: "unexplained denial", decision: "1", reason: "none", confidence: 1, wantAgent: true, wantAllow: true},
 		{name: "provider failure", failure: errors.New("screen-only-provider-error"), wantAgent: true, wantAllow: true},
 		{name: "screening timeout", failure: context.DeadlineExceeded, wantAgent: true, wantAllow: true},
 	} {
@@ -59,12 +54,8 @@ func TestGuardianScreeningCascadesToAgentWithinOriginalReview(t *testing.T) {
 				if limit, ok := ctx.Deadline(); !ok || time.Until(limit) > 10*time.Second {
 					t.Error("screening omitted its bounded deadline")
 				}
-				source := tc.source
-				if source == "" {
-					source = "none"
-				}
 				return judgment.Response{Model: "screen-only-provider", Answers: map[string]judgment.Answer{
-					"decision": choiceAnswer(tc.decision, tc.confidence), "reason": choiceAnswer(tc.reason, 1), "source": choiceAnswer(source, 1),
+					"decision": choiceAnswer(tc.decision, tc.confidence),
 				}}, tc.failure
 			})
 			req.ResolveModel = func(ctx context.Context) (model.LLM, error) {
@@ -80,6 +71,9 @@ func TestGuardianScreeningCascadesToAgentWithinOriginalReview(t *testing.T) {
 			result, err := reviewer.Decide(parent, req)
 			if err != nil || result.Approved != tc.wantAllow || (resolved == 1) != tc.wantAgent || (len(llm.Requests()) == 1) != tc.wantAgent {
 				t.Fatalf("result=%+v err=%v resolved=%d calls=%d", result, err, resolved, len(llm.Requests()))
+			}
+			if !tc.wantAllow && ((tc.wantAgent && result.Rationale == "") || (!tc.wantAgent && (result.Rationale != "" || result.DisplayText != "denied"))) {
+				t.Fatalf("unexpected denial explanation: %+v", result)
 			}
 			if tc.wantAgent {
 				raw, _ := json.Marshal(llm.Requests())

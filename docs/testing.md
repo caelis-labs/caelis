@@ -79,12 +79,11 @@ The limit controls new PR creation, not CI reruns or already-open PRs.
 
 ## Change-scoped checks
 
-Jev evaluations are opt-in and send only repository synthetic fixtures. Set
+The following Jev evaluations are opt-in and send only repository synthetic fixtures. Set
 `JEV_API_KEY` in the test process environment and run the scenarios in order:
 
 ```bash
 CAELIS_JEV_EVAL=1 go test ./agent-sdk/tool/builtin/toolsearch -run '^TestToolSearchJevEvaluation$' -count=1 -v
-CAELIS_JEV_EVAL=1 go test ./app/gatewayapp -run '^TestGuardianJevEvaluation$' -count=1 -v
 CAELIS_JEV_EVAL=1 go test ./app/gatewayapp -run '^TestMemoryJevEvaluation$' -count=1 -v
 ```
 
@@ -92,6 +91,29 @@ These tests report outcomes, token counts and elapsed time. A passing test means
 the evaluation completed; assess the reported semantic scores separately. Small
 synthetic samples do not establish production accuracy or adversarial robustness.
 Ordinary tests never load `.env` or make live Jev requests.
+
+The opt-in `TestGuardianJevEscalationCalibration` and
+`TestGuardianJevEscalationHoldout` use `CAELIS_JEV_EVAL=1`
+and `JEV_API_KEY` to classify separate sets of 20 and 12 bounded escalation fixtures without executing
+their commands. Each fails on any wrong direct decision, provider failure, or
+direct-decision coverage below the 90% target. Intentional abstentions count in
+the denominator. `CAELIS_JEV_CALIBRATION_OUT` and `CAELIS_JEV_HOLDOUT_OUT` optionally record distributions
+and aggregate input measurements. These small samples do not establish
+production coverage or calibrated error rates.
+
+`TestGuardianSessionJevReplay` is a separate, explicit opt-in for an existing
+Session's evidence. Set `CAELIS_JEV_SESSION_E2E=1`, `JEV_API_KEY`, and
+`CAELIS_JEV_SESSION_EVENTS` to its `.events.jsonl` file; the adjacent `.json`
+metadata must exist. It reads the source, rebuilds approval checkpoints in a
+throwaway in-memory Session, and calls the real Jev classifier for at most eight
+approvals. It never executes historical tools or mutates the source Store.
+Use a Session whose approvals are known to be allowed. Confident denials and
+provider failures fail the check; low-confidence deferrals are reported separately
+and do not count as saved Agent requests. Set `CAELIS_JEV_SESSION_E2E_OUT` for a
+JSON report containing only decisions, scores, request sizes, usage and timing.
+This replay does not call the fallback Agent; deterministic cascade tests verify
+fallback and receipt persistence. It sends private Session evidence to the selected
+provider, so it must only be run for an explicitly selected, authorized Session.
 
 The following checks remain explicit because repeating them for every change
 adds cost without improving unrelated changes:

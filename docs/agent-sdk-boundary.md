@@ -250,20 +250,29 @@ Consumer setup and package layout live in
 
 An optional auxiliary judgment binding selects a tool-free first-stage classifier
 through the typed
-`approval.JudgmentResolver` contract. It consumes the canonical source projection
-and exact current action, retaining the same Control queue, cancellation and
-strict option settlement. It does not create a generative LLM or query sandbox.
-Its complete serialized input is limited to 24,000 bytes; excess evidence defers
-to Agent review without dropping user constraints. Decision
-confidence must be at least 0.9. A denial also requires a reason at that threshold
-and, for a task conflict, a selected canonical user instruction. Code renders
-the selected reason with the reviewed action and source evidence. These operating
-thresholds are abstention rules, not a correctness or authorization guarantee.
+`approval.JudgmentResolver` contract. It consumes the exact current action and an action-focused view of the canonical
+source projection, retaining the same Control queue, cancellation and strict
+option settlement. All retained user instructions remain verbatim and ordered.
+Only the most recent completed call/result pair for the same action is included;
+if there is no match, the latest completed pair supplies immediate context.
+Matching is a retrieval hint, never authorization equivalence. Omitted observations
+are explicitly unavailable; canonical sequence numbers preserve evidence identity.
+Agent fallback still receives its independent full source projection. It does not create a generative LLM or query sandbox.
+Its complete serialized input has a local 24,000-byte budget (not an API limit); excess evidence defers
+to Agent review without dropping user constraints. The classifier compares the
+complete supplied-option probability distribution, grouping only canonical allow
+or deny meanings while preserving the exact option IDs and permission scopes.
+It prefers a once option; persistent scope requires independent dominance of the
+exact persistent option. Provider confidence is not a settlement threshold.
+Routine once approvals require a normalized lead of 0.5 and odds of 3 over the
+runner-up. Other decisions require a lead of 0.9 and odds of 20. A separate
+consequence distribution identifies routine actions (lead 0.5, odds 4).
+These operating points are abstention rules, not correctness probabilities.
 
-A complete classifier decision settles through the common approval gate. An
-allow decision defers to Agent review when either the violation reason or a
-conflicting canonical user source has confidence 0.9 or higher. An incomplete
-decision, provider error or screening timeout also proceeds to Agent review under
+A complete classifier decision settles through the common approval gate. A clear
+refusal returns denied without inventing a rationale. There is no refusal-reason
+or explanation-source classification. Ambiguous distributions, missing material
+evidence, provider errors and screening timeouts proceed to Agent review under
 the original deadline; cancellation ends the review. The Agent model is resolved
 only when needed, using its independent Guardian binding or the current
 Session model. The Agent receives canonical evidence without classifier answers
