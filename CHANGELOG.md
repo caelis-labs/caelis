@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.59.0](https://github.com/caelis-labs/caelis/compare/v0.58.0...v0.59.0) (2026-09-20)
+
+
+### Features
+
+* add Bot notebooks and streamline Jev screening ([#59](https://github.com/caelis-labs/caelis/issues/59)) ([84392cd](https://github.com/caelis-labs/caelis/commit/84392cd5e94e00fba45d6f301ac5fa4b677a948a))
+* integrate Jev judgments with ToolSearch, Guardian and Memory ([#56](https://github.com/caelis-labs/caelis/issues/56)) ([f1ce9b4](https://github.com/caelis-labs/caelis/commit/f1ce9b44e728127a81b3a483e4295e885d1917d7))
+
+
+### Bug Fixes
+
+* gate Guardian screening on missing facts and visible violations ([#61](https://github.com/caelis-labs/caelis/issues/61)) ([eecc1e0](https://github.com/caelis-labs/caelis/commit/eecc1e0d90635ce3e284bbdfc92b846ce9f1d6ee))
+* scope collaboration message display to each agent pane ([#60](https://github.com/caelis-labs/caelis/issues/60)) ([7034ad0](https://github.com/caelis-labs/caelis/commit/7034ad0f9df8fd7c0b00afeb0be1c2e5a6e4def5))
+* **tui:** speed up resume and align agent message interactions ([#58](https://github.com/caelis-labs/caelis/issues/58)) ([0b1e0f2](https://github.com/caelis-labs/caelis/commit/0b1e0f2413378fcbcfb5a8bb45e110010ad5da56))
+
 ## [0.58.0](https://github.com/caelis-labs/caelis/compare/v0.57.0...v0.58.0) (2026-09-19)
 
 
