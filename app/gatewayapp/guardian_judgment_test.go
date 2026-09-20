@@ -26,22 +26,27 @@ func choiceAnswer(choice string, confidence float64) judgment.Answer {
 
 func TestGuardianJudgmentUsesCanonicalSourcesAndStrictSettlement(t *testing.T) {
 	for _, tc := range []struct {
-		name, decision, reason string
-		confidence             float64
-		wantErr, allow         bool
+		name, decision, reason, source string
+		confidence, sourceConfidence   float64
+		wantErr, allow                 bool
 	}{
-		{"allow", "0", "none", 1, false, true},
-		{"contradictory constraint", "0", "constraint", 1, true, false},
-		{"contradictory credentials", "0", "credentials", 1, true, false},
-		{"contradictory destruction", "0", "destruction", 1, true, false},
-		{"contradictory security", "0", "security", 1, true, false},
-		{"contradictory elevation", "0", "elevation", 1, true, false},
-		{"contradictory unrelated", "0", "unrelated", 1, true, false},
-		{"deny", "1", "constraint", 1, false, false},
-		{"uncertain", "0", "none", 0.5, true, false},
-		{"missing evidence", "unavailable", "none", 1, true, false},
-		{"unknown option", "injected", "none", 1, true, false},
-		{"unexplained denial", "1", "none", 1, true, false},
+		{"allow", "0", "none", "none", 1, 1, false, true},
+		{"contradictory constraint", "0", "constraint", "none", 1, 1, true, false},
+		{"contradictory credentials", "0", "credentials", "none", 1, 1, true, false},
+		{"contradictory destruction", "0", "destruction", "none", 1, 1, true, false},
+		{"contradictory security", "0", "security", "none", 1, 1, true, false},
+		{"contradictory elevation", "0", "elevation", "none", 1, 1, true, false},
+		{"contradictory unrelated", "0", "unrelated", "none", 1, 1, true, false},
+		{"contradictory source", "0", "none", "0", 1, 1, true, false},
+		{"contradictory source at threshold", "0", "none", "0", 1, 0.9, true, false},
+		{"uncertain source", "0", "none", "0", 1, 0.5, false, true},
+		{"deny", "1", "constraint", "0", 1, 1, false, false},
+		{"denial without source", "1", "constraint", "none", 1, 1, true, false},
+		{"denial with uncertain source", "1", "constraint", "0", 1, 0.5, true, false},
+		{"uncertain", "0", "none", "none", 0.5, 1, true, false},
+		{"missing evidence", "unavailable", "none", "none", 1, 1, true, false},
+		{"unknown option", "injected", "none", "none", 1, 1, true, false},
+		{"unexplained denial", "1", "none", "none", 1, 1, true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			service, active := newApprovalReviewerTestSession(t, t.Context())
@@ -49,16 +54,20 @@ func TestGuardianJudgmentUsesCanonicalSourcesAndStrictSettlement(t *testing.T) {
 			appendApprovalReviewerTextEvent(t, t.Context(), service, active, session.EventTypeAssistant, model.RoleAssistant, "UNTRUSTED_ASSISTANT_PERMISSION")
 			reviewer := newGuardianApprovalApprover(service)
 			defer reviewer.Close()
-			req := approvalReviewerTestRequest(active, nil, "inspect", map[string]any{"cmd": "rm README.md"})
+			command := "rm README.md"
+			if tc.allow {
+				command = "rg TODO ."
+			}
+			req := approvalReviewerTestRequest(active, nil, "inspect", map[string]any{"cmd": command})
 			req.Judgment = judgmentFunc(func(_ context.Context, r judgment.Request) (judgment.Response, error) {
 				raw, _ := json.Marshal(r)
 				if len(r.Questions) != 3 {
 					t.Error("classifier omitted decision, reason or source judgment")
 				}
-				if strings.Contains(string(raw), "UNTRUSTED_ASSISTANT_PERMISSION") || !strings.Contains(string(raw), "Do not delete files") || !strings.Contains(string(raw), "rm README.md") {
+				if strings.Contains(string(raw), "UNTRUSTED_ASSISTANT_PERMISSION") || !strings.Contains(string(raw), "Do not delete files") || !strings.Contains(string(raw), command) {
 					t.Errorf("invalid canonical projection")
 				}
-				return judgment.Response{Model: "fixture-classifier", Answers: map[string]judgment.Answer{"decision": choiceAnswer(tc.decision, tc.confidence), "reason": choiceAnswer(tc.reason, 1), "source": choiceAnswer("0", 1)}, Usage: judgment.Usage{InputTokens: 100}}, nil
+				return judgment.Response{Model: "fixture-classifier", Answers: map[string]judgment.Answer{"decision": choiceAnswer(tc.decision, tc.confidence), "reason": choiceAnswer(tc.reason, 1), "source": choiceAnswer(tc.source, tc.sourceConfidence)}, Usage: judgment.Usage{InputTokens: 100}}, nil
 			})
 			result, err := reviewer.runGuardianJudgment(t.Context(), req, &guardianInvocationCollector{})
 			if (err != nil) != tc.wantErr || result.Approved != tc.allow {

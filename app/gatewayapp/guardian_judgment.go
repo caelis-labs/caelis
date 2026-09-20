@@ -135,10 +135,14 @@ func guardianJudgmentDecision(req kernel.ApprovalReviewRequest, response judgmen
 	}
 	parsed := guardianReviewModelOutput{OptionID: selected.ID}
 	reason, hasReason := response.Answers["reason"]
-	// Answers are independent judgments. A confident violation conflicts with
-	// an allow decision and must defer to Agent review rather than settle it.
-	if meaning == approval.OptionDecisionAllow && hasReason && reason.Type == judgment.Choice && reason.Choice != "none" && reason.Confidence != nil && *reason.Confidence >= 0.9 {
-		return kernel.ApprovalReviewResult{}, fmt.Errorf("guardian classifier returned conflicting decision and reason")
+	source := response.Answers["source"]
+	sourceIndex, sourceErr := strconv.Atoi(source.Choice)
+	conflictingSource := sourceErr == nil && source.Type == judgment.Choice && source.Confidence != nil && *source.Confidence >= 0.9 && sourceIndex >= 0 && sourceIndex < len(events) && guardianIsUser(events[sourceIndex])
+	conflictingReason := hasReason && reason.Type == judgment.Choice && reason.Choice != "none" && reason.Confidence != nil && *reason.Confidence >= 0.9
+	// Answers are independent judgments. Either a confident violation reason
+	// or its user source conflicts with allow and must defer to Agent review.
+	if meaning == approval.OptionDecisionAllow && (conflictingReason || conflictingSource) {
+		return kernel.ApprovalReviewResult{}, fmt.Errorf("guardian classifier returned conflicting judgments")
 	}
 	if meaning == approval.OptionDecisionDeny {
 		text, known := guardianJudgmentReasons()[reason.Choice]
@@ -151,9 +155,7 @@ func guardianJudgmentDecision(req kernel.ApprovalReviewRequest, response judgmen
 		}
 		parsed.Rationale = text + " Reviewed action: " + guardianFold(strings.TrimSpace(action), 1200)
 		if reason.Choice == "constraint" || reason.Choice == "unrelated" {
-			source := response.Answers["source"]
-			sourceIndex, err := strconv.Atoi(source.Choice)
-			if err != nil || source.Type != judgment.Choice || source.Confidence == nil || *source.Confidence < 0.9 || sourceIndex < 0 || sourceIndex >= len(events) || !guardianIsUser(events[sourceIndex]) {
+			if !conflictingSource {
 				return kernel.ApprovalReviewResult{}, fmt.Errorf("guardian classifier could not identify the conflicting user instruction")
 			}
 			parsed.Rationale += " User constraint: " + guardianFold(session.EventText(events[sourceIndex]), 1200)

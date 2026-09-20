@@ -17,15 +17,18 @@ import (
 func TestGuardianScreeningCascadesToAgentWithinOriginalReview(t *testing.T) {
 	for _, tc := range []struct {
 		name, decision, reason string
+		source                 string
 		confidence             float64
 		failure                error
 		agentResponse          string
 		wantAgent, wantAllow   bool
 	}{
 		{name: "allow without resolving Agent", decision: "0", reason: "none", confidence: 1, wantAllow: true},
-		{name: "deny without resolving Agent", decision: "1", reason: "constraint", confidence: 1},
+		{name: "deny without resolving Agent", decision: "1", reason: "constraint", source: "0", confidence: 1},
 		{name: "contradictory allow defers to Agent allow", decision: "0", reason: "constraint", confidence: 1, wantAgent: true, wantAllow: true},
 		{name: "contradictory allow defers to Agent deny", decision: "0", reason: "constraint", confidence: 1, agentResponse: `{"option_id":"reject_once","rationale":"The action contradicts the user's explicit constraint."}`, wantAgent: true},
+		{name: "source conflict defers to Agent allow", decision: "0", reason: "none", source: "0", confidence: 1, wantAgent: true, wantAllow: true},
+		{name: "source conflict defers to Agent deny", decision: "0", reason: "none", source: "0", confidence: 1, agentResponse: `{"option_id":"reject_once","rationale":"The action contradicts the user's explicit constraint."}`, wantAgent: true},
 		{name: "uncertain", decision: "0", confidence: .5, wantAgent: true, wantAllow: true},
 		{name: "missing evidence", decision: "unavailable", confidence: 1, wantAgent: true, wantAllow: true},
 		{name: "invalid answer", decision: "unknown", confidence: 1, wantAgent: true, wantAllow: true},
@@ -42,7 +45,11 @@ func TestGuardianScreeningCascadesToAgentWithinOriginalReview(t *testing.T) {
 			if tc.agentResponse != "" {
 				llm.responses = []string{tc.agentResponse}
 			}
-			req := approvalReviewerTestRequest(active, nil, "inspect", map[string]any{"cmd": "rg TODO ."})
+			command := "rg TODO ."
+			if !tc.wantAllow {
+				command = "rm README.md"
+			}
+			req := approvalReviewerTestRequest(active, nil, "inspect", map[string]any{"cmd": command})
 			parent, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 			defer cancel()
 			deadline, _ := parent.Deadline()
@@ -52,8 +59,12 @@ func TestGuardianScreeningCascadesToAgentWithinOriginalReview(t *testing.T) {
 				if limit, ok := ctx.Deadline(); !ok || time.Until(limit) > 10*time.Second {
 					t.Error("screening omitted its bounded deadline")
 				}
+				source := tc.source
+				if source == "" {
+					source = "none"
+				}
 				return judgment.Response{Model: "screen-only-provider", Answers: map[string]judgment.Answer{
-					"decision": choiceAnswer(tc.decision, tc.confidence), "reason": choiceAnswer(tc.reason, 1), "source": choiceAnswer("0", 1),
+					"decision": choiceAnswer(tc.decision, tc.confidence), "reason": choiceAnswer(tc.reason, 1), "source": choiceAnswer(source, 1),
 				}}, tc.failure
 			})
 			req.ResolveModel = func(ctx context.Context) (model.LLM, error) {
@@ -72,7 +83,7 @@ func TestGuardianScreeningCascadesToAgentWithinOriginalReview(t *testing.T) {
 			}
 			if tc.wantAgent {
 				raw, _ := json.Marshal(llm.Requests())
-				if strings.Contains(string(raw), "screen-only") || !strings.Contains(string(raw), "Do not delete files") || !strings.Contains(string(raw), "rg TODO") {
+				if strings.Contains(string(raw), "screen-only") || !strings.Contains(string(raw), "Do not delete files") || !strings.Contains(string(raw), command) {
 					t.Fatal("Agent prompt lost canonical evidence or included classifier output")
 				}
 			}
