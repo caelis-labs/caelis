@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
+	"github.com/caelis-labs/caelis/agent-sdk/judgment"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
@@ -71,8 +72,14 @@ func TestGuardianScreenContextPreservesOnlyOriginalOptions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(request.Questions) != 1 {
-		t.Fatal("classifier must ask only the original-option decision")
+	if len(request.Questions) != 3 {
+		t.Fatal("classifier must ask the decision and two evidence questions")
+	}
+	for _, id := range []string{"material_unknown", "visible_violation"} {
+		question := request.Questions[id]
+		if question.Type != judgment.Noul || question.Instructions == nil {
+			t.Fatalf("%s must be a Noul question with instructions", id)
+		}
 	}
 	options := request.Questions["decision"].Criteria.(map[string]approval.Option)
 	if len(options) != len(req.Approval.Options) {

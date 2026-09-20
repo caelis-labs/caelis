@@ -19,14 +19,19 @@ func TestGuardianScreeningCascadesToAgentWithinOriginalReview(t *testing.T) {
 	for _, tc := range []struct {
 		name, decision       string
 		confidence           float64
+		unknown, violation   float64
 		failure              error
 		agentResponse        string
 		wantAgent, wantAllow bool
 	}{
 		{name: "allow without resolving Agent", decision: "allow_once", confidence: 1, wantAllow: true},
-		{name: "deny without resolving Agent", decision: "reject_once", confidence: 1},
-		{name: "uncertain deny uses Agent explanation", decision: "reject_once", confidence: .6, agentResponse: `{"option_id":"reject_once","rationale":"The action contradicts the user's explicit constraint."}`, wantAgent: true},
+		{name: "deny without resolving Agent", decision: "reject_once", confidence: 1, violation: 1},
+		{name: "visible denial despite unknown effects", decision: "reject_once", confidence: 1, unknown: 1, violation: 1},
+		{name: "uncertain deny uses Agent explanation", decision: "reject_once", confidence: .6, violation: 1, agentResponse: `{"option_id":"reject_once","rationale":"The action contradicts the user's explicit constraint."}`, wantAgent: true},
 		{name: "uncertain", decision: "allow_once", confidence: .5, wantAgent: true, wantAllow: true},
+		{name: "material unknown defers to Agent", decision: "allow_once", confidence: 1, unknown: 1, wantAgent: true, wantAllow: true},
+		{name: "visible violation conflict defers to Agent", decision: "allow_once", confidence: 1, violation: 1, wantAgent: true, wantAllow: true},
+		{name: "gray evidence defers to Agent", decision: "allow_once", confidence: 1, unknown: .5, violation: .5, wantAgent: true, wantAllow: true},
 		{name: "invalid answer", decision: "unknown", confidence: 1, wantAgent: true, wantAllow: true},
 		{name: "provider failure", failure: errors.New("screen-only-provider-error"), wantAgent: true, wantAllow: true},
 		{name: "screening timeout", failure: context.DeadlineExceeded, wantAgent: true, wantAllow: true},
@@ -34,6 +39,14 @@ func TestGuardianScreeningCascadesToAgentWithinOriginalReview(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			service, active := newApprovalReviewerTestSession(t, t.Context())
 			appendApprovalReviewerTextEvent(t, t.Context(), service, active, session.EventTypeUser, model.RoleUser, "Inspect the project. Do not delete files.")
+			observed := guardianSource(0, session.EventTypeToolResult, "")
+			observed.ID, observed.SessionID = "", active.SessionID
+			observed.Tool.Name = "Read"
+			observed.Tool.Input = map[string]any{"path": "README.md"}
+			observed.Tool.Output = map[string]any{"content": "INDEPENDENT_TOOL_EVIDENCE"}
+			if _, err := service.AppendEvent(t.Context(), session.AppendEventRequest{SessionRef: active.SessionRef, Event: observed}); err != nil {
+				t.Fatal(err)
+			}
 			reviewer := newGuardianApprovalApprover(service)
 			defer reviewer.Close()
 			llm := &approvalReviewerFakeModel{}
@@ -49,14 +62,16 @@ func TestGuardianScreeningCascadesToAgentWithinOriginalReview(t *testing.T) {
 			defer cancel()
 			deadline, _ := parent.Deadline()
 			screened, resolved := 0, 0
-			req.Judgment = judgmentFunc(func(ctx context.Context, _ judgment.Request) (judgment.Response, error) {
+			req.Judgment = judgmentFunc(func(ctx context.Context, request judgment.Request) (judgment.Response, error) {
 				screened++
+				raw, _ := json.Marshal(request)
+				if strings.Contains(string(raw), "INDEPENDENT_TOOL_EVIDENCE") {
+					t.Error("classifier received tool history")
+				}
 				if limit, ok := ctx.Deadline(); !ok || time.Until(limit) > 10*time.Second {
 					t.Error("screening omitted its bounded deadline")
 				}
-				return judgment.Response{Model: "screen-only-provider", Answers: map[string]judgment.Answer{
-					"decision": choiceAnswer(tc.decision, tc.confidence),
-				}}, tc.failure
+				return judgment.Response{Model: "screen-only-provider", Answers: guardianScreenAnswers(tc.decision, tc.confidence, tc.unknown, tc.violation)}, tc.failure
 			})
 			req.ResolveModel = func(ctx context.Context) (model.LLM, error) {
 				resolved++
@@ -77,8 +92,19 @@ func TestGuardianScreeningCascadesToAgentWithinOriginalReview(t *testing.T) {
 			}
 			if tc.wantAgent {
 				raw, _ := json.Marshal(llm.Requests())
-				if strings.Contains(string(raw), "screen-only") || !strings.Contains(string(raw), "Do not delete files") || !strings.Contains(string(raw), command) {
+				if strings.Contains(string(raw), "screen-only") || !strings.Contains(string(raw), "Do not delete files") || !strings.Contains(string(raw), command) || !strings.Contains(string(raw), "INDEPENDENT_TOOL_EVIDENCE") {
 					t.Fatal("Agent prompt lost canonical evidence or included classifier output")
+				}
+			}
+			if !tc.wantAgent {
+				for _, resident := range reviewer.residents {
+					for range len(resident.lanes) {
+						lane := <-resident.lanes
+						if lane != nil && lane.runtime != nil {
+							t.Fatal("direct screening initialized a query sandbox")
+						}
+						resident.lanes <- lane
+					}
 				}
 			}
 		})
@@ -176,7 +202,7 @@ func TestGuardianScreeningAndAgentReceiptsSurviveReopen(t *testing.T) {
 	defer reviewer.Close()
 	req := approvalReviewerTestRequest(active, llm, "inspect", map[string]any{"cmd": "echo approved"})
 	req.Judgment = judgmentFunc(func(context.Context, judgment.Request) (judgment.Response, error) {
-		return judgment.Response{Model: "screen", Answers: map[string]judgment.Answer{"decision": choiceAnswer("allow_once", .5)}, Usage: judgment.Usage{InputTokens: 100}}, nil
+		return judgment.Response{Model: "screen", Answers: guardianScreenAnswers("allow_once", .5, 0, 0), Usage: judgment.Usage{InputTokens: 100}}, nil
 	})
 	result, err := reviewer.Decide(t.Context(), req)
 	if err != nil || !result.Approved {

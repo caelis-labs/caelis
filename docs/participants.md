@@ -61,10 +61,13 @@ start a conversation:
 
 On Guardian's row, use Tab or click the main model or auxiliary classifier to
 configure it. A selected classifier runs first, choosing only among the original
-approval options. A decisive lead in approve versus deny probability mass settles
-the approval; a classifier refusal has no generated explanation. Close or malformed
-distributions, an oversized input, or a provider failure continue to Agent review
-within the same approval deadline. Protocol-valid options whose kinds are not
+approval options. Direct approval requires a decisive approve distribution and
+low probabilities of both missing decision-relevant facts and visible violations.
+Direct refusal requires a decisive deny distribution and a concrete visible
+violation; it has no generated explanation and can settle despite other missing
+facts. Otherwise, missing facts, conflicting or unclear judgments, malformed
+answers, an oversized input, or a provider failure continue to Agent review within
+the same approval deadline. Protocol-valid options whose kinds are not
 supported by screening go directly to the Agent; option names and IDs are never
 guessed. The Agent supplies a reason when its review rejects the action.
 Screening uses only user messages and the current approval ticket with its exact
