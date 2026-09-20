@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
+	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 )
 
 func TestCollaborationObservationPresentation(t *testing.T) {
@@ -43,7 +44,7 @@ func TestCollaborationObservationPresentation(t *testing.T) {
 }
 
 func TestSendMessageReturnedMailRendersInMainAndChildHistory(t *testing.T) {
-	for _, mode := range []string{"main", "child live", "child history"} {
+	for _, mode := range []string{"main", "child live", "child history", "child paged history", "child earlier history"} {
 		t.Run(mode, func(t *testing.T) {
 			m := NewModel(Config{NoColor: true, NoAnimation: true})
 			m.currentSessionID = "session-1"
@@ -54,6 +55,17 @@ func TestSendMessageReturnedMailRendersInMainAndChildHistory(t *testing.T) {
 			m.taskStreamIDsByCallID["spawn-1"] = "task-1"
 			view := m.ensureSubagentOutputView("spawn-1")
 			view.taskHandle, view.actor = "zuri", "zuri[breeze]"
+			var older *earlierHistoryBuild
+			switch mode {
+			case "child paged history":
+				m.handleTaskStreamBatch(taskStreamBatchMsg{sessionID: "session-1", taskID: "task-1", token: 7, phase: taskstream.DeliveryReplaceBegin})
+			case "child earlier history":
+				child := *view
+				child.resetForReplacement()
+				older = &earlierHistoryBuild{generation: m.viewGeneration, before: "older", child: &child, cancel: func() {}}
+				m.earlierHistory = map[string]*earlierHistoryBuild{"spawn-1": older}
+				view.historyBefore = older.before
+			}
 			completed := eventstream.ToolStatusCompleted
 			payload := `{"id":"out-1","status":"queued","messages":[{"id":"in-1","from":"reviewer","message":"Review complete."},{"id":"in-2","from":"tester","message":"Tests passed."}]}`
 			updates := []eventstream.Update{
@@ -70,7 +82,17 @@ func TestSendMessageReturnedMailRendersInMainAndChildHistory(t *testing.T) {
 				case "child live", "child history":
 					next, _ := m.handleTaskStreamBatch(taskStreamBatchMsg{sessionID: "session-1", taskID: "task-1", token: 7, replacement: mode == "child history" && index == 0, events: []eventstream.Envelope{env}})
 					m = next.(*Model)
+				case "child paged history":
+					m.handleTaskStreamBatch(taskStreamBatchMsg{sessionID: "session-1", taskID: "task-1", token: 7, phase: taskstream.DeliveryReplacePage, events: []eventstream.Envelope{env}})
+				case "child earlier history":
+					m.handleEarlierHistory(earlierHistoryMsg{callID: "spawn-1", build: older, message: taskStreamBatchMsg{events: []eventstream.Envelope{env}}})
 				}
+			}
+			switch mode {
+			case "child paged history":
+				m.handleTaskStreamBatch(taskStreamBatchMsg{sessionID: "session-1", taskID: "task-1", token: 7, phase: taskstream.DeliveryReplaceEnd})
+			case "child earlier history":
+				m.handleEarlierHistory(earlierHistoryMsg{callID: "spawn-1", build: older, done: true})
 			}
 			var rows []string
 			if mode == "main" {

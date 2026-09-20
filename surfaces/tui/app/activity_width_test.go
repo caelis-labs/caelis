@@ -71,7 +71,7 @@ func TestProjectedActivityHeadersStayWithinViewport(t *testing.T) {
 	}, "ran", "", width, ctx, false, false, true, false, acpTranscriptRenderOptions{})
 	spawned := renderACPSpawnToolRows("block", SubagentEvent{
 		Name: surfaceToolSpawn, Args: preview, FullArgs: fullArgs,
-	}, "spawned", width, ctx)
+	}, "spawned", width, ctx, acpTranscriptRenderOptions{})
 	sent := renderACPTerminalLifecycleRows("block", SubagentEvent{
 		Name: surfaceToolSendMessage, Args: preview, FullArgs: fullArgs,
 	}, "sent", "", width, ctx, false, false, true, false, acpTranscriptRenderOptions{})

@@ -99,7 +99,7 @@ func renderACPToolLifecycleRowsWithoutReview(blockID string, events []SubagentEv
 
 	spawnHeader := toolLifecycleHeaderEvent(start, final, hasFinal, settled, width)
 	if opts.SubagentOutputLinks && isSpawnToolEvent(spawnHeader) {
-		return renderACPSpawnToolRows(blockID, spawnHeader, callID, width, ctx), end
+		return renderACPSpawnToolRows(blockID, spawnHeader, callID, width, ctx, opts), end
 	}
 
 	if isTerminalPanelToolEvent(start) {
@@ -170,7 +170,7 @@ func renderACPToolLifecycleRowsWithoutReview(blockID string, events []SubagentEv
 
 func renderACPStandaloneFinalToolRows(blockID string, ev SubagentEvent, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions) []RenderedRow {
 	if opts.SubagentOutputLinks && isSpawnToolEvent(ev) {
-		return renderACPSpawnToolRows(blockID, ev, ev.CallID, width, ctx)
+		return renderACPSpawnToolRows(blockID, ev, ev.CallID, width, ctx, opts)
 	}
 	output := sanitizeRenderableText(ev.Output)
 	if opts.ToolOutputPanels && isTaskWriteInteractionEvent(ev) {
@@ -634,22 +634,29 @@ func acpTranscriptEventsHaveRunningTool(events []SubagentEvent) bool {
 	return false
 }
 
-// renderACPSpawnToolRows renders product-owned Main Spawn as a retained child
-// workspace link. Participant-owned Spawn remains in the standard tool-panel
+// renderACPSpawnToolRows keeps Main Spawn's child link separate from prompt
+// expansion. Participant-owned Spawn remains in the standard tool-panel
 // path because a Side ACP child is isolated behind its parent's ACP tool result.
-func renderACPSpawnToolRows(blockID string, ev SubagentEvent, callID string, width int, ctx BlockRenderContext) []RenderedRow {
-	if fullArgs := strings.TrimSpace(ev.FullArgs); fullArgs != "" {
-		ev.Args, _ = longCommandDisplayPreview(fullArgs, compactSingleLineBudget(width))
+func renderACPSpawnToolRows(blockID string, ev SubagentEvent, callID string, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions) []RenderedRow {
+	const prefix = "• Spawned "
+	fullArgs := surfaceSanitizeSpawnHeaderArgs(firstNonEmpty(ev.FullArgs, ev.Args))
+	detail, folded := longCommandDisplayPreview(fullArgs, maxInt(1, compactSingleLineBudget(width)-displayColumns(prefix)))
+	bodyToken := ""
+	if folded && strings.TrimSpace(callID) != "" {
+		key := "spawn:" + strings.TrimSpace(callID)
+		bodyToken = agentMessageFoldClickToken(key)
+		if opts.AgentMessageExpanded != nil && opts.AgentMessageExpanded(key) {
+			detail = fullArgs
+		}
 	}
-	header := terminalLifecycleHeader(ev)
-	if strings.TrimSpace(ev.FullArgs) != "" {
-		header = compactSingleLineHeader(header, width)
+	ev.Args = detail
+	row := renderACPTranscriptLinkedHeaderRow(blockID, terminalLifecycleHeader(ev), ctx, bodyToken)
+	target, _, _ := strings.Cut(fullArgs, ":")
+	row = bindAgentMessageTargets(row, displayColumns(prefix+strings.TrimSpace(target)), subagentOutputOverlayClickToken(callID))
+	if row.boundedClick() {
+		row.ClickStartCol = displayColumns(prefix)
 	}
-	token := subagentOutputOverlayClickToken(callID)
-	if token == "" {
-		return []RenderedRow{renderACPTranscriptHeaderRow(blockID, header, width, ctx, "")}
-	}
-	return []RenderedRow{renderACPTranscriptLinkedHeaderRow(blockID, header, ctx, token)}
+	return []RenderedRow{row}
 }
 
 func agentMessageTargetCanOpenOverlay(target string) bool {
