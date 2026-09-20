@@ -33,7 +33,6 @@ type acpTranscriptRenderOptions struct {
 	ReasoningExpanded       func(key string) bool
 	AgentMessageExpanded    func(key string) bool
 	AgentMessageTargetLinks bool
-	FullAgentMessages       bool
 	SubagentOutputLinks     bool
 }
 

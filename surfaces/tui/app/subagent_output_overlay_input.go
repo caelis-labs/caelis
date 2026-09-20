@@ -339,6 +339,14 @@ func (m *Model) toggleSubagentOutputRow(token string) bool {
 		}
 		var changed bool
 		switch {
+		case strings.HasPrefix(token, agentMessageFoldTokenPrefix):
+			key := strings.TrimPrefix(token, agentMessageFoldTokenPrefix)
+			for index, event := range visibleNarrativeEvents(block.Events, block.Status) {
+				if event.Kind == SEAgentCommunication && agentCommunicationFoldKey(event, index) == key {
+					changed = block.toggleAgentMessageExpanded(key)
+					break
+				}
+			}
 		case strings.HasPrefix(token, "acp_tool_panel:"):
 			callID := strings.TrimSpace(strings.TrimPrefix(token, "acp_tool_panel:"))
 			changed = block.toggleToolPanelClick(callID)

@@ -418,7 +418,7 @@ func (r *Runner) dispatchInitialPrompt(
 			acceptedInput := r.acceptedChildInputOutput(slot, run, agent.ChildInputRequest{
 				Source: session.ParentCommunicationActor(),
 				Input:  promptText,
-			}, strings.TrimSpace(run.spawn.ActivityID))
+			}, strings.TrimSpace(run.spawn.ActivityID), "")
 			if acceptedInput != nil {
 				slot.publishRunOutputLocked(run, *acceptedInput)
 			}

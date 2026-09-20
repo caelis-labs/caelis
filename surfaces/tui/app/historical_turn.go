@@ -25,7 +25,7 @@ func (m *Model) restoringHistory() bool {
 // restored Turn folds only once it is terminal. A Turn created by the live
 // Session is never folded just because a newer Turn began, so the execution
 // trace of the Turn the user just watched stays visible. User narrative,
-// welcome, dividers, and FullAgentMessages child-pane blocks are omitted.
+// welcome, dividers, and detached child-pane blocks are omitted.
 // Display-only: Events are not mutated.
 //
 // Logical turns start at a UserNarrativeBlock barrier, at the first
@@ -137,7 +137,7 @@ func collectHistoricalTurns(blocks []Block) []historicalTurn {
 			if open < 0 {
 				startTurn()
 			}
-			if b.FullAgentMessages {
+			if b.ChildPane {
 				continue
 			}
 			turns[open].blocks = append(turns[open].blocks, b)

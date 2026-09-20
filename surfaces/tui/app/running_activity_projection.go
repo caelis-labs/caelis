@@ -185,7 +185,7 @@ func applyToolActivity(tracker *runningHintTracker, event TranscriptEvent, targe
 		start(runningPhaseToolWait, runningTargetSubagent, key, event.ToolCallID)
 	case "WaitThread":
 		start(runningPhaseToolWait, runningTargetSubagent, key, event.ToolCallID)
-	case "ReadThread", "ListThreads", "ReceiveMessages":
+	case "ReadThread", "ListThreads", "ReadMessages", "ReceiveMessages":
 		// Observation has no long-running activity hint.
 	case surfaceToolTask:
 		action := strings.ToLower(strings.TrimSpace(event.ToolTaskAction))

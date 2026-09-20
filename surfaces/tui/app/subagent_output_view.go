@@ -156,7 +156,7 @@ func (m *Model) ensureSubagentOutputView(callID string) *subagentOutputView {
 		return existing
 	}
 	block := NewParticipantTurnBlock(callID, "")
-	block.FullAgentMessages = true
+	block.ChildPane = true
 	document := NewDocument()
 	document.Append(block)
 	view := &subagentOutputView{
@@ -178,7 +178,7 @@ func (v *subagentOutputView) resetForReplacement() {
 		return
 	}
 	block := NewParticipantTurnBlock(v.callID, v.actor)
-	block.FullAgentMessages = true
+	block.ChildPane = true
 	block.ParticipantID = v.taskHandle
 	document := NewDocument()
 	document.Append(block)
@@ -200,6 +200,9 @@ func (v *subagentOutputView) observeChildEvent(event TranscriptEvent) {
 		return
 	}
 	defer v.retainDisplayWindow()
+	if event.Kind == TranscriptEventAgentCommunication && documentContainsAgentCommunication(v.document, agentCommunicationSubagentEvent(event)) {
+		return
+	}
 	if projectionID := strings.TrimSpace(event.SourceProjectionID); projectionID != "" {
 		if _, seen := v.seenProjections[projectionID]; seen {
 			return
@@ -323,7 +326,7 @@ func (v *subagentOutputView) blockForEvent(event TranscriptEvent) *ParticipantTu
 	block := v.block
 	if v.turnID != "" || block == nil || len(block.Events) > 0 {
 		block = NewParticipantTurnBlock(turnID, v.actor)
-		block.FullAgentMessages = true
+		block.ChildPane = true
 		v.document.Append(block)
 	}
 	block.SessionID = turnID

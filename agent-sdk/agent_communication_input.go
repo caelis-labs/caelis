@@ -37,6 +37,13 @@ type AgentCommunicationInput struct {
 	Input        string              `json:"input,omitempty"`
 	DisplayInput string              `json:"display_input,omitempty"`
 	ContentParts []model.ContentPart `json:"content_parts,omitempty"`
+	// MessageID is an optional embedding-supplied correlation identity for this
+	// admitted message, such as an external mailbox record ID. It is
+	// presentation and correlation metadata only: it is not a delivery
+	// acknowledgement, and it carries no deduplication or execution authority.
+	// Runtime forwards it to session.Event.MessageID so a projection can
+	// recognize the same logical message across delivery and observation paths.
+	MessageID string `json:"message_id,omitempty"`
 }
 
 // CloneAgentCommunicationInputs detaches ordered input from its caller.

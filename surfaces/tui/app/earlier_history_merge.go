@@ -20,6 +20,7 @@ func (m *Model) prependSessionHistory(older *Model) {
 }
 
 func prependHistoryDocument(older, current *Document) *Document {
+	omitMountedAgentCommunications(older, current)
 	result := NewDocument()
 	if older != nil {
 		for _, block := range older.Blocks() {

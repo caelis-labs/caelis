@@ -401,8 +401,8 @@ func hasDeferredLiveTailCompactStage(events []SubagentEvent, status string) bool
 // ---------------------------------------------------------------------------
 
 type ParticipantTurnBlock struct {
-	// FullAgentMessages keeps received messages unabridged in detached overlays.
-	FullAgentMessages     bool
+	// ChildPane excludes detached workspace blocks from main history folding.
+	ChildPane             bool
 	Historical            bool
 	id                    string
 	SessionID             string
@@ -510,6 +510,9 @@ func subagentEventsContainAgentCommunication(events []SubagentEvent, incoming Su
 		if event.Kind != SEAgentCommunication {
 			continue
 		}
+		if incoming.MessageID != "" && event.MessageID == incoming.MessageID {
+			return true
+		}
 		if incoming.SourceProjectionID != "" && event.SourceProjectionID == incoming.SourceProjectionID {
 			return true
 		}
@@ -588,7 +591,6 @@ func (b *ParticipantTurnBlock) transcriptRenderOptions() acpTranscriptRenderOpti
 		ToolPanelScrollState:   b.toolPanelScrollState,
 		ReasoningExpanded:      b.reasoningExpanded,
 		AgentMessageExpanded:   b.agentMessageExpanded,
-		FullAgentMessages:      b.FullAgentMessages,
 	}
 }
 

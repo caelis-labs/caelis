@@ -846,7 +846,7 @@ func viewportBlockRenderKey(block Block, ctx BlockRenderContext) string {
 		builder.addString(b.Raw)
 	case *ParticipantTurnBlock:
 		builder.addString(b.SessionID)
-		builder.addBool(b.FullAgentMessages)
+		builder.addBool(b.ChildPane)
 		builder.addString(b.Actor)
 		builder.addString(b.Status)
 		builder.addTime(b.StartedAt)

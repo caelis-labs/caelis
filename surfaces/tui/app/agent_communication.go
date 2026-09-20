@@ -2,6 +2,7 @@ package tuiapp
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
@@ -22,6 +23,50 @@ func agentCommunicationSubagentEvent(event TranscriptEvent) SubagentEvent {
 		SourceEventID:      strings.TrimSpace(event.SourceEventID),
 		SourceProjectionID: strings.TrimSpace(event.SourceProjectionID),
 		MessageID:          strings.TrimSpace(event.MessageID),
+	}
+}
+
+// A pane can observe the same mail through shared-log reads, mailbox results,
+// and direct delivery in different Turns. Its document is the display-only
+// deduplication source; model history and mailbox state are never changed.
+func documentContainsAgentCommunication(doc *Document, incoming SubagentEvent) bool {
+	if doc == nil || incoming.MessageID == "" && incoming.SourceProjectionID == "" && incoming.SourceEventID == "" {
+		return false
+	}
+	for _, block := range doc.Blocks() {
+		var events []SubagentEvent
+		switch b := block.(type) {
+		case *MainACPTurnBlock:
+			events = b.Events
+		case *ParticipantTurnBlock:
+			events = b.Events
+		}
+		if subagentEventsContainAgentCommunication(events, incoming) {
+			return true
+		}
+	}
+	return false
+}
+
+// Earlier history builds independently. Keep already-mounted message rows when
+// a newly loaded older page contains another observation of the same mail.
+func omitMountedAgentCommunications(older, current *Document) {
+	if older == nil || current == nil {
+		return
+	}
+	for _, block := range older.Blocks() {
+		var events *[]SubagentEvent
+		switch b := block.(type) {
+		case *MainACPTurnBlock:
+			events = &b.Events
+		case *ParticipantTurnBlock:
+			events = &b.Events
+		default:
+			continue
+		}
+		*events = slices.DeleteFunc(*events, func(event SubagentEvent) bool {
+			return event.Kind == SEAgentCommunication && documentContainsAgentCommunication(current, event)
+		})
 	}
 }
 
@@ -142,9 +187,6 @@ func renderAgentCommunicationRows(blockID string, event SubagentEvent, eventInde
 		return nil
 	}
 	name := firstNonEmpty(event.SourceName, event.SourceID, "agent")
-	if opts.FullAgentMessages {
-		return wrapAgentMessageRows(renderAgentMessageRow(blockID, name, text, ctx, ""), width)
-	}
 	bodyBudget := maxInt(1, compactSingleLineBudget(width)-displayColumns("• "+name+": "))
 	displayText, folded := longCommandDisplayPreview(text, bodyBudget)
 	foldToken := ""

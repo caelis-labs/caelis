@@ -35,8 +35,8 @@ func TestIdleChildBatchStartsOnePromptAndProjectsEverySource(t *testing.T) {
 		t.Fatal("fixture unexpectedly supports steering")
 	}
 	inputs := []agent.AgentCommunicationInput{
-		{Source: session.ParentCommunicationActor(), Input: "first\n\nMessage-ID: mail-1", DisplayInput: "first"},
-		{Source: session.ActorRef{Kind: session.ActorKindParticipant, ID: "sibling", Name: "sibling"}, Input: "second\n\nMessage-ID: mail-2", DisplayInput: "second"},
+		{MessageID: "mail-1", Source: session.ParentCommunicationActor(), Input: "first\n\nMessage-ID: mail-1", DisplayInput: "first"},
+		{MessageID: "mail-2", Source: session.ActorRef{Kind: session.ActorKindParticipant, ID: "sibling", Name: "sibling"}, Input: "second\n\nMessage-ID: mail-2", DisplayInput: "second"},
 	}
 	result, err := submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{Target: run.slot.target, Messages: inputs})
 	if err != nil || !result.StartedActivity {
@@ -56,6 +56,9 @@ func TestIdleChildBatchStartsOnePromptAndProjectsEverySource(t *testing.T) {
 			}
 			if accepted >= len(inputs) || communication.Text != inputs[accepted].DisplayInput || frame.Event.Actor.ID != inputs[accepted].Source.ID {
 				t.Fatalf("source/order mismatch: %#v", frame.Event)
+			}
+			if session.EventMessageID(frame.Event) != inputs[accepted].MessageID || frame.Event.ID == inputs[accepted].MessageID {
+				t.Fatalf("mail identity missing or replaced projection identity: %#v", frame.Event)
 			}
 			accepted++
 		} else if frame.Event == nil || frame.Event.Text != "prompt output 2" {
@@ -91,8 +94,8 @@ func TestActiveChildBatchSteersOnceAndProjectsEverySource(t *testing.T) {
 		t.Fatal(err)
 	}
 	inputs := []agent.AgentCommunicationInput{
-		{Source: session.ParentCommunicationActor(), Input: "first report", DisplayInput: "First report"},
-		{Source: session.ActorRef{Kind: session.ActorKindParticipant, ID: "sibling", Name: "sibling"}, Input: "second report", DisplayInput: "Second report"},
+		{MessageID: "mail-active-1", Source: session.ParentCommunicationActor(), Input: "first report", DisplayInput: "First report"},
+		{MessageID: "mail-active-2", Source: session.ActorRef{Kind: session.ActorKindParticipant, ID: "sibling", Name: "sibling"}, Input: "second report", DisplayInput: "Second report"},
 	}
 	result, err := runner.SubmitChildInputBatch(ctx, agent.ChildInputRequest{Target: run.slot.target, Messages: inputs})
 	if err != nil || result.StartedActivity || result.ActivityID != spawn.ActivityID {
@@ -104,6 +107,9 @@ func TestActiveChildBatchSteersOnceAndProjectsEverySource(t *testing.T) {
 		if communication := session.ProtocolAgentCommunicationOf(frame.Event); communication != nil {
 			if accepted >= len(inputs) || communication.Text != inputs[accepted].DisplayInput || frame.Event.Actor.ID != inputs[accepted].Source.ID {
 				t.Fatalf("batch projection changed: %#v", frame.Event)
+			}
+			if session.EventMessageID(frame.Event) != inputs[accepted].MessageID || frame.Event.ID == inputs[accepted].MessageID {
+				t.Fatalf("mail identity missing or replaced projection identity: %#v", frame.Event)
 			}
 			accepted++
 		} else if frame.Event.Text != "steered output" {

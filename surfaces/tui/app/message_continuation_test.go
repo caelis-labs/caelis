@@ -35,6 +35,9 @@ func TestReceivedMessageContinuationPhysicalColors(t *testing.T) {
 						for _, event := range model.projectACPEventToTranscriptEvents(env) {
 							view.observeChildEvent(event)
 						}
+						if source != "user" {
+							expandBlockAgentMessagesForTest(view.block)
+						}
 						ctx := model.blockRenderContext(width)
 						rows := view.block.Render(ctx)
 						wrapped := model.wrapRenderedRowsForViewport(view.block, rows, width, ctx)
@@ -64,6 +67,23 @@ func TestExpandedAgentMessageContinuationColorsAndSelection(t *testing.T) {
 	}
 	wrapped := model.wrapRenderedRowsForViewport(NewMainACPTurnBlock("turn"), rows, 24, ctx)
 	assertMessagePhysicalColors(t, wrapped.styledLines, 24, "reviewer[orbit]", body, model.theme)
+}
+
+// expandBlockAgentMessagesForTest opens every received Agent message through
+// the same fold state the click path toggles. The pane now defaults to the
+// compact preview, so physical/order assertions that need the full body must
+// expand it explicitly instead of restoring default folding.
+func expandBlockAgentMessagesForTest(block *ParticipantTurnBlock) {
+	if block == nil {
+		return
+	}
+	visible := visibleNarrativeEvents(block.Events, block.Status)
+	for index, event := range visible {
+		if event.Kind != SEAgentCommunication {
+			continue
+		}
+		block.toggleAgentMessageExpanded(agentCommunicationFoldKey(event, index))
+	}
 }
 
 // Each row starts from reset SGR state: viewport scrolling and overlay borders
