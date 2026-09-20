@@ -37,8 +37,18 @@ func (m *Model) beginSessionHistory(start sessionViewStartMsg) tea.Cmd {
 	if !start.recovery {
 		m.sessionSwitchPending = true
 	}
+	return m.showSessionHistoryLoading()
+}
+
+func (m *Model) showSessionHistoryLoading() tea.Cmd {
+	if m.dismissWelcomeCard() {
+		m.syncViewportContent()
+	}
 	m.removeHintsByText(sessionHistoryLoadingHint)
-	return m.showHint(sessionHistoryLoadingHint, hintOptions{priority: HintPriorityHigh})
+	return tea.Batch(
+		m.showHint(sessionHistoryLoadingHint, hintOptions{priority: HintPriorityHigh}),
+		m.scheduleSpinnerTick(),
+	)
 }
 
 func (m *Model) abortSessionHistory() {

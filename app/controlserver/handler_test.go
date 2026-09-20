@@ -19,7 +19,6 @@ import (
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
-	"github.com/caelis-labs/caelis/agent-sdk/session"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/taskstream"
@@ -608,10 +607,10 @@ type fakeService struct {
 	inspectErr     error
 }
 
-func (s *fakeService) ListSessions(_ context.Context, _ appserver.Principal, req appserver.ListSessionsRequest) (session.SessionList, error) {
+func (s *fakeService) ListSessions(_ context.Context, _ appserver.Principal, req appserver.ListSessionsRequest) (appserver.SessionList, error) {
 	s.listCalls++
 	s.listed = req
-	return session.SessionList{}, nil
+	return appserver.SessionList{}, nil
 }
 func (s *fakeService) CreateSession(_ context.Context, principal appserver.Principal, req appserver.CreateSessionRequest) (appserver.CommandResult, error) {
 	s.principal = principal

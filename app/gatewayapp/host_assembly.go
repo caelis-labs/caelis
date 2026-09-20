@@ -93,6 +93,7 @@ func assembleHostControlServices(stack *Stack, cfg Config, storeDir string, curs
 		Authorizer:         sessionAuthorizer,
 		ParticipantHandles: participantHandles,
 		Sessions:           stack.composition.sessions,
+		SessionActivity:    runtimeStateReader,
 	})
 	if err != nil {
 		return hostControlAssembly{}, err

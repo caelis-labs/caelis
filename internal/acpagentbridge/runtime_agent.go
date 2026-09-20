@@ -379,10 +379,12 @@ func (a *RuntimeAgent) ListSessions(ctx context.Context, req acpsdk.ListSessions
 	var list session.SessionList
 	var err error
 	if a.sessionClient != nil {
-		list, err = a.sessionClient.ListSessions(ctx, appserver.ListSessionsRequest{
+		var result appserver.SessionList
+		result, err = a.sessionClient.ListSessions(ctx, appserver.ListSessionsRequest{
 			WorkspaceKey: a.workspaceKeyForCWD(cwd),
 			Cursor:       cursor,
 		})
+		list = session.SessionList{Sessions: result.Sessions, NextCursor: result.NextCursor}
 	} else {
 		list, err = a.sessions.ListSessions(ctx, session.ListSessionsRequest{
 			AppName:      a.appName,

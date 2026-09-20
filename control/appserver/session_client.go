@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
-	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
 // SessionClient is the principal-bound Control contract consumed by a
@@ -19,7 +18,7 @@ import (
 // embedded and HTTP transports.
 type SessionClient interface {
 	Initialize(context.Context) (ServerInfo, error)
-	ListSessions(context.Context, ListSessionsRequest) (session.SessionList, error)
+	ListSessions(context.Context, ListSessionsRequest) (SessionList, error)
 	CreateSession(context.Context, CreateSessionRequest) (CommandResult, error)
 	CloseSession(context.Context, CloseSessionRequest) (CommandResult, error)
 	CompactSession(context.Context, CompactSessionRequest) (CommandResult, error)
@@ -64,7 +63,7 @@ func (c *boundSessionClient) Initialize(ctx context.Context) (ServerInfo, error)
 	}, nil
 }
 
-func (c *boundSessionClient) ListSessions(ctx context.Context, request ListSessionsRequest) (session.SessionList, error) {
+func (c *boundSessionClient) ListSessions(ctx context.Context, request ListSessionsRequest) (SessionList, error) {
 	return c.service.ListSessions(ctx, c.boundPrincipal(), request)
 }
 

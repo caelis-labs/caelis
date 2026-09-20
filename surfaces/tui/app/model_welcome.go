@@ -57,13 +57,13 @@ func (m *Model) appendMainTranscriptBlock(block Block) {
 	m.doc.Append(block)
 }
 
-func (m *Model) dismissWelcomeCard() {
+func (m *Model) dismissWelcomeCard() bool {
 	if m == nil {
-		return
+		return false
 	}
 	m.welcomeCardPending = false
 	if m.doc == nil {
-		return
+		return false
 	}
 
 	blocks := m.doc.Blocks()
@@ -76,13 +76,14 @@ func (m *Model) dismissWelcomeCard() {
 		removed = m.doc.Remove(block.BlockID()) || removed
 	}
 	if !removed {
-		return
+		return false
 	}
 	if welcomeWasFirst {
 		m.trimLeadingWelcomeSpacing()
 	}
 	m.markViewportStructureDirty()
 	m.refreshHistoryTailState()
+	return true
 }
 
 func (m *Model) trimLeadingWelcomeSpacing() {

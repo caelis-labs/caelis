@@ -5,6 +5,7 @@ import "time"
 // ResumeCandidate is the product-owned Session list projection rendered by
 // presentation clients.
 type ResumeCandidate struct {
+	Running   bool      `json:"running,omitempty"`
 	SessionID string    `json:"session_id"`
 	Title     string    `json:"title,omitempty"`
 	Prompt    string    `json:"prompt,omitempty"`

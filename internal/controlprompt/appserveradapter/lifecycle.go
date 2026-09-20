@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -143,6 +144,7 @@ func (a *SessionClientAdapter) ListSessions(ctx context.Context, limit int) ([]c
 	for _, item := range result.Sessions {
 		out = append(out, controlprompt.ResumeCandidate{
 			SessionID: item.SessionID,
+			Running:   slices.Contains(result.RunningSessionIDs, item.SessionID),
 			Title:     strings.TrimSpace(item.Title),
 			Workspace: strings.TrimSpace(item.CWD),
 			Age:       formatResumeAge(item.UpdatedAt, time.Now()),

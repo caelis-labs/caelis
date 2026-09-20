@@ -161,7 +161,7 @@ func TestPendingSessionSwitchKeepsNewInputAsDraftAndFailureKeepsQueue(t *testing
 	if m.textarea.Value() != "draft for a" || len(m.pendingQueue) != 1 {
 		t.Fatal("pending switch consumed another Session's input")
 	}
-	m.Update(cmd())
+	applySessionSelectionCommandForTest(t, m, cmd)
 	if m.sessionSwitchPending || m.currentSessionID != "a" || !m.turnRunning() || len(m.pendingQueue) != 1 {
 		t.Fatal("failed switch changed the observed Session or discarded its pending input")
 	}
@@ -250,7 +250,7 @@ func TestQueuedNavigationFailureClearsPendingAfterFirstPromptAttach(t *testing.T
 	sender.replaceSessionView(context.Background(), "a")
 	m.Update(sessionViewStartMsg{generation: 1, state: appserver.SessionState{SessionID: "a", Run: appserver.RunState{Active: true}}, automatic: true})
 	m.Update(sessionHistoryReadyMsg{})
-	m.Update(cmd())
+	applySessionSelectionCommandForTest(t, m, cmd)
 	if m.sessionSwitchPending || m.currentSessionID != "a" || !m.turnRunning() {
 		t.Fatal("failed queued navigation left the composer blocked after automatic attachment")
 	}

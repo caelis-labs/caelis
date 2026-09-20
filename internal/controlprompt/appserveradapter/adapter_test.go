@@ -873,7 +873,7 @@ func TestAppServerAdapterRoutesSessionLifecycleThroughTypedClient(t *testing.T) 
 				EpochID: "epoch-1",
 			},
 		},
-		list: session.SessionList{Sessions: []session.SessionSummary{{
+		list: appserver.SessionList{RunningSessionIDs: []string{"session-listed"}, Sessions: []session.SessionSummary{{
 			SessionRef: session.SessionRef{SessionID: "session-listed"}, Title: "listed", CWD: t.TempDir(), UpdatedAt: time.Now(),
 		}}},
 	}
@@ -904,7 +904,7 @@ func TestAppServerAdapterRoutesSessionLifecycleThroughTypedClient(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(listed) != 1 || listed[0].SessionID != "session-listed" || listed[0].Title != "listed" {
+	if len(listed) != 1 || listed[0].SessionID != "session-listed" || listed[0].Title != "listed" || !listed[0].Running {
 		t.Fatalf("listed = %#v", listed)
 	}
 	resumed, err := adapter.ResumeSession(context.Background(), "session-resumed")
@@ -2428,7 +2428,7 @@ type sessionClientAdapterTestClient struct {
 	subscription           *sessionClientAdapterTestSubscription
 	reconnectSubscriptions []*sessionClientAdapterTestSubscription
 	state                  appserver.SessionState
-	list                   session.SessionList
+	list                   appserver.SessionList
 	createSessionID        string
 	reconnectErr           error
 	compactNoop            bool
@@ -2506,7 +2506,7 @@ func (*sessionClientAdapterTestClient) Initialize(context.Context) (appserver.Se
 	return appserver.ServerInfo{}, nil
 }
 
-func (c *sessionClientAdapterTestClient) ListSessions(context.Context, appserver.ListSessionsRequest) (session.SessionList, error) {
+func (c *sessionClientAdapterTestClient) ListSessions(context.Context, appserver.ListSessionsRequest) (appserver.SessionList, error) {
 	return c.list, nil
 }
 

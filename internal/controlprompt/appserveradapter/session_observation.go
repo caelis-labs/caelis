@@ -1,7 +1,6 @@
 package appserveradapter
 
 import (
-	"context"
 	"errors"
 	"strings"
 
@@ -12,12 +11,6 @@ import (
 
 // SessionID returns this presentation's selected durable Session address.
 func (a *SessionClientAdapter) SessionID() string { return a.clientSessionID() }
-
-// SessionRunning reads live activity without acquiring execution authority.
-func (a *SessionClientAdapter) SessionRunning(ctx context.Context, sessionID string) (bool, error) {
-	state, err := a.sessionClient.InspectSession(ctx, appserver.StateRequest{SessionID: sessionID})
-	return state.Run.Active || state.Approval.Active != nil, err
-}
 
 // ObserveEvent advances the selected view's exact input target from the same
 // live feed that drives its display. Replayed history must not call this method.

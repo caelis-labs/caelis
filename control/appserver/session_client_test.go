@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
-	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
 func TestBindSessionClientMatchesPrincipalBoundClientContract(t *testing.T) {
@@ -65,6 +64,6 @@ func (s *boundClientService) CreateSession(_ context.Context, principal Principa
 	}, nil
 }
 
-func (s *boundClientService) ListSessions(context.Context, Principal, ListSessionsRequest) (session.SessionList, error) {
-	return session.SessionList{}, nil
+func (s *boundClientService) ListSessions(context.Context, Principal, ListSessionsRequest) (SessionList, error) {
+	return SessionList{}, nil
 }

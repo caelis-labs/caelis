@@ -19,7 +19,6 @@ import (
 	"sync"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
-	"github.com/caelis-labs/caelis/agent-sdk/session"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/wirev1"
@@ -250,7 +249,7 @@ func (c *Client) hostStatus(ctx context.Context, path string, accepted ...int) (
 	return status, nil
 }
 
-func (c *Client) ListSessions(ctx context.Context, request appserver.ListSessionsRequest) (session.SessionList, error) {
+func (c *Client) ListSessions(ctx context.Context, request appserver.ListSessionsRequest) (appserver.SessionList, error) {
 	query := make(url.Values)
 	if request.WorkspaceKey != "" {
 		query.Set("workspace_key", request.WorkspaceKey)
@@ -266,16 +265,16 @@ func (c *Client) ListSessions(ctx context.Context, request appserver.ListSession
 	}
 	response, err := c.do(ctx, http.MethodGet, "/sessions", query, nil, nil)
 	if err != nil {
-		return session.SessionList{}, err
+		return appserver.SessionList{}, err
 	}
 	defer response.Body.Close()
 	raw, err := readRemoteResponse(response)
 	if err != nil {
-		return session.SessionList{}, err
+		return appserver.SessionList{}, err
 	}
-	var result session.SessionList
+	var result appserver.SessionList
 	if err := json.Unmarshal(raw, &result); err != nil {
-		return session.SessionList{}, fmt.Errorf("control http client: decode Session list: %w", err)
+		return appserver.SessionList{}, fmt.Errorf("control http client: decode Session list: %w", err)
 	}
 	return result, nil
 }

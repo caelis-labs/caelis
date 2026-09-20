@@ -15,6 +15,15 @@ type ListSessionsRequest struct {
 	Limit        int    `json:"limit,omitempty"`
 }
 
+// SessionList contains authorized directory metadata and a transient activity
+// snapshot. RunningSessionIDs only contains IDs in this page; it is sampled
+// from live Control handles without loading history or activating Runtimes.
+type SessionList struct {
+	Sessions          []session.SessionSummary `json:"sessions,omitempty"`
+	NextCursor        string                   `json:"next_cursor,omitempty"`
+	RunningSessionIDs []string                 `json:"running_session_ids,omitempty"`
+}
+
 // EventBatch is a finite replay prefix and its resumable feed boundary.
 type EventBatch struct {
 	Events         []eventstream.Envelope `json:"events,omitempty"`
@@ -26,7 +35,7 @@ type EventBatch struct {
 // product domains remain separate services instead of growing this aggregate.
 type Service interface {
 	CommandClient
-	ListSessions(context.Context, Principal, ListSessionsRequest) (session.SessionList, error)
+	ListSessions(context.Context, Principal, ListSessionsRequest) (SessionList, error)
 	InspectSession(context.Context, Principal, StateRequest) (SessionState, error)
 	Reconnect(context.Context, Principal, ReconnectRequest) (ReconnectResult, error)
 	Events(context.Context, Principal, SubscribeRequest) (EventBatch, error)

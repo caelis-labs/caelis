@@ -317,6 +317,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	if result, ok := msg.(TaskResultMsg); ok && result.sessionSelection {
 		m.sessionSwitchPending = false
+		if m.sessionHistory == nil {
+			m.removeHintsByText(sessionHistoryLoadingHint)
+		}
 		if result.Err != nil {
 			m.failPendingBot()
 		}

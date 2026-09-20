@@ -149,5 +149,5 @@ func (m *Model) runningIndicatorActive() bool {
 }
 
 func (m *Model) animationIndicatorActive() bool {
-	return m != nil && (m.runningIndicatorActive() || m.subagentOutputPulseActive())
+	return m != nil && (m.runningIndicatorActive() || m.subagentOutputPulseActive() || m.sessionSwitchPending || m.sessionHistory != nil)
 }

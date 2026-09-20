@@ -12,7 +12,6 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
-	"github.com/caelis-labs/caelis/agent-sdk/session"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 )
 
@@ -141,8 +140,8 @@ func (s *errorMappingService) result() (appserver.CommandResult, error) {
 	return appserver.CommandResult{OperationID: "operation-1", Outcome: outcome}, s.err
 }
 
-func (s *errorMappingService) ListSessions(context.Context, appserver.Principal, appserver.ListSessionsRequest) (session.SessionList, error) {
-	return session.SessionList{}, s.err
+func (s *errorMappingService) ListSessions(context.Context, appserver.Principal, appserver.ListSessionsRequest) (appserver.SessionList, error) {
+	return appserver.SessionList{}, s.err
 }
 func (s *errorMappingService) InspectSession(context.Context, appserver.Principal, appserver.StateRequest) (appserver.SessionState, error) {
 	return appserver.SessionState{}, s.err
