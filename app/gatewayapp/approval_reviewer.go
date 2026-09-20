@@ -123,7 +123,7 @@ func (r *guardianApprovalReviewer) decide(ctx context.Context, req kernel.Approv
 			return kernel.ApprovalReviewResult{}, err
 		}
 		if r.diagnostics != nil {
-			r.diagnostics.Info("Guardian screening deferred to Agent review", "session_id", req.SessionRef.SessionID, "review_id", req.ReviewID)
+			r.diagnostics.Info("Guardian screening deferred to Agent review", "session_id", req.SessionRef.SessionID, "review_id", req.ReviewID, "reason", guardianScreenReason(err))
 		}
 	}
 	if err := ctx.Err(); err != nil {

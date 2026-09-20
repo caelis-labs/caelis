@@ -217,7 +217,10 @@ func finalizeGuardianDecision(payload *kernel.ApprovalPayload, parsed guardianRe
 	approved := decision == approval.OptionDecisionAllow
 	display := "approved"
 	if !approved {
-		display = "denied: " + parsed.Rationale
+		display = "denied"
+		if parsed.Rationale != "" {
+			display += ": " + parsed.Rationale
+		}
 	}
 	return kernel.ApprovalReviewResult{Approved: approved, Outcome: string(kernel.ApprovalStatusSelected), OptionID: parsed.OptionID, Rationale: parsed.Rationale, DisplayText: display, DecisionSource: "auto-review"}, nil
 }

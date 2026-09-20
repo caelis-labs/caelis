@@ -2,6 +2,7 @@ package gatewayapp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"time"
@@ -59,6 +60,12 @@ type observedJudgment struct {
 
 func (e observedJudgment) ProviderName() string { return e.provider }
 func (e observedJudgment) Evaluate(ctx context.Context, request judgment.Request) (judgment.Response, error) {
+	requestBytes := 0
+	if e.diagnostics != nil {
+		if raw, err := json.Marshal(request); err == nil {
+			requestBytes = len(raw)
+		}
+	}
 	start := time.Now()
 	response, err := e.Evaluator.Evaluate(ctx, request)
 	if e.diagnostics != nil {
@@ -66,7 +73,7 @@ func (e observedJudgment) Evaluate(ctx context.Context, request judgment.Request
 		if err != nil {
 			outcome = "unavailable"
 		}
-		e.diagnostics.Info("Judgment evaluation", "handle", e.handle, "provider", e.provider, "model", firstNonEmpty(response.Model, e.Name()), "outcome", outcome, "elapsed_ms", time.Since(start).Milliseconds(), "input_tokens", response.Usage.InputTokens, "output_tokens", response.Usage.OutputTokens)
+		e.diagnostics.Info("Judgment evaluation", "handle", e.handle, "provider", e.provider, "model", firstNonEmpty(response.Model, e.Name()), "outcome", outcome, "request_bytes", requestBytes, "questions", len(request.Questions), "elapsed_ms", time.Since(start).Milliseconds(), "input_tokens", response.Usage.InputTokens, "output_tokens", response.Usage.OutputTokens)
 	}
 	return response, err
 }

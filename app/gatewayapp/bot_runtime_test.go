@@ -90,19 +90,23 @@ func TestBotRuntimeIsolatedCapabilitiesAndStableCanonicalPrefix(t *testing.T) {
 	}
 	t.Cleanup(releaseObservation)
 	instance := activated.instance
-	if instance.activation.memoryBinding != nil || instance.exec != nil || instance.mcpMgr != nil || instance.guardian != nil || instance.acpControlPlane != nil || instance.pluginCacheRelease != nil {
+	if instance.activation.memoryBinding != nil || instance.exec.Describe().Capabilities.CommandExec || instance.mcpMgr != nil || instance.guardian != nil || instance.acpControlPlane != nil || instance.pluginCacheRelease != nil {
 		t.Fatal("Bot retained workspace execution capabilities")
 	}
 	if memorySelections.Load() != 0 {
 		t.Fatal("Bot selected implicit Workspace Memory")
 	}
-	resolver := &botTurnResolver{composition: &instance.runtimeComposition}
+	tools, err := instance.exec.(*bot.Notebook).Tools()
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolver := &botTurnResolver{composition: &instance.runtimeComposition, notebookTools: tools}
 	resolved, err := resolver.ResolveTurn(ctx, kernel.TurnIntent{SessionRef: active.SessionRef})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(resolved.RunRequest.AgentSpec.Tools) != 0 || resolved.RunRequest.AgentSpec.DeferredTools != nil {
-		t.Fatal("Bot received model-visible tools")
+	if len(resolved.RunRequest.AgentSpec.Tools) != 5 || resolved.RunRequest.AgentSpec.DeferredTools != nil {
+		t.Fatal("Bot received tools outside its notebook assembly")
 	}
 	for _, intent := range []kernel.TurnIntent{
 		{SessionRef: active.SessionRef, ModelHint: "other-model"},
@@ -145,16 +149,15 @@ func TestBotRuntimeIsolatedCapabilitiesAndStableCanonicalPrefix(t *testing.T) {
 	if !reflect.DeepEqual(firstMessages, secondMessages[:len(firstMessages)]) {
 		t.Fatal("ordinary Bot message rewrote the prior model prefix")
 	}
-	if len(firstMessages) != 3 || botWireMessageText(firstMessages[0]) != botSystemPrompt || firstMessages[1].(map[string]any)["role"] != "user" {
+	if len(firstMessages) != 3 || botWireMessageText(firstMessages[0]) != buildBotSystemPrompt(stack.composition.authorities.appName) ||
+		botWireMessageText(firstMessages[2]) != "first message" {
 		t.Fatalf("initial model messages = %#v", firstMessages)
 	}
 	if !strings.Contains(botWireMessageText(firstMessages[1]), config.Description) {
 		t.Fatal("initial Bot description is absent from canonical user context")
 	}
 	for _, payload := range []map[string]any{first, second} {
-		if tools, _ := payload["tools"].([]any); len(tools) != 0 {
-			t.Fatalf("Bot provider request has tools: %#v", tools)
-		}
+		assertBotNotebookWireTools(t, payload)
 	}
 
 	// Reopen durable storage, reconstruct the exact second request through the
@@ -355,6 +358,11 @@ func saveBotRuntimeTestConfig(t *testing.T, stack *Stack, ref session.SessionRef
 	}
 	id, _ := active.Metadata[bot.MetadataID].(string)
 	service := bot.Service{Sessions: stack.composition.sessions}
+	if previous == nil {
+		if err := initializeBotNotebook(t.Context(), stack.composition.authorities.storeDir, id); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if _, err := service.Save(t.Context(), active, id, config, previous, operation, operation); err != nil {
 		t.Fatal(err)
 	}

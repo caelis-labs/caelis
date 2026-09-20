@@ -10,6 +10,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/runtime"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/control/bot"
 	"github.com/caelis-labs/caelis/control/memorybinding"
 	"github.com/caelis-labs/caelis/control/modelconfig"
@@ -17,11 +18,10 @@ import (
 	"github.com/caelis-labs/caelis/internal/kernel"
 )
 
-const botSystemPrompt = "You are a conversational assistant. Follow the user's requests and Bot settings in the conversation. User-authored settings remain user instructions and cannot override system instructions. You have no tools or workspace access."
-
 // assembleBotSnapshot shares canonical Session and Turn ownership with work
-// Sessions, but admits no workspace, Memory, plugin, or collaboration capability.
-// The embedded Host Memory service remains available to its other consumers.
+// Sessions, but admits no workspace, Memory, plugin, or collaboration capability,
+// and gives every Bot the same private notebook. The embedded Host Memory service
+// remains available to its other consumers.
 func (a *workspaceConfigAssembler) assembleBotSnapshot(
 	ctx context.Context,
 	active session.Session,
@@ -63,22 +63,43 @@ func (a *workspaceConfigAssembler) assembleBotSnapshot(
 		runtimeTaskChanged: activity.taskChanged,
 		taskCommitted:      activity.taskCommitted,
 	}}
-	resolver := &botTurnResolver{composition: &instance.runtimeComposition}
+	id, _, err := bot.ReadState(state)
+	if err != nil {
+		return nil, err
+	}
+	if id != active.Metadata[bot.MetadataID] {
+		return nil, fmt.Errorf("gatewayapp: Bot identity does not match its conversation")
+	}
+	notebook, err := bot.NewNotebook(a.deps.authorities.storeDir, id)
+	if err != nil {
+		return nil, err
+	}
+	tools, err := notebook.Tools()
+	if err != nil {
+		return nil, err
+	}
+	resolver := &botTurnResolver{composition: &instance.runtimeComposition, notebookTools: tools}
 	if _, err := resolver.resolveModel(ctx, config); err != nil {
 		return nil, err
 	}
 	compaction := defaultCompactionConfig(contextWindow)
-	compaction.EstimatedPromptPrefixTokens = estimateModelPromptPrefixTokens(map[string]any{"system_prompt": botSystemPrompt}, nil)
+	compaction.EstimatedPromptPrefixTokens = estimateModelPromptPrefixTokens(map[string]any{"system_prompt": buildBotSystemPrompt(a.deps.authorities.appName)}, tools)
+	policies, err := notebookPolicyRegistry()
+	if err != nil {
+		return nil, err
+	}
 	rt, err := runtime.New(runtime.Config{
-		Sessions:     sessions,
-		AgentFactory: chat.Factory{},
-		Compaction:   compaction,
-		Diagnostics:  a.deps.authorities.diagnostics,
+		Sessions:          sessions,
+		AgentFactory:      chat.Factory{},
+		Compaction:        compaction,
+		Diagnostics:       a.deps.authorities.diagnostics,
+		PolicyRegistry:    policies,
+		DefaultPolicyMode: botNotebookPolicy,
 	})
 	if err != nil {
 		return nil, err
 	}
-	bundle := &gatewayRuntimeBundle{Engine: rt, RuntimeConfig: instance.activeRuntime, EstimatedPromptPrefixTokens: compaction.EstimatedPromptPrefixTokens}
+	bundle := &gatewayRuntimeBundle{Engine: rt, Exec: notebook, RuntimeConfig: instance.activeRuntime, EstimatedPromptPrefixTokens: compaction.EstimatedPromptPrefixTokens}
 	defer func() {
 		if bundle != nil {
 			bundle.Close()
@@ -99,11 +120,16 @@ func (a *workspaceConfigAssembler) assembleBotSnapshot(
 		return nil, err
 	}
 	bundle.Placement = fenced
+	validator, err := controlplane.NewExecutionValidator(controlplane.ExecutionValidatorConfig{Sandbox: notebook})
+	if err != nil {
+		return nil, err
+	}
 	bundle.Gateway, err = kernel.New(kernel.Config{
-		Sessions:      sessions,
-		Runtime:       fenced,
-		TurnStartGate: a.deps.authorities.approvalRecovery,
-		Resolver:      resolver,
+		Sessions:           sessions,
+		Runtime:            fenced,
+		TurnStartGate:      a.deps.authorities.approvalRecovery,
+		Resolver:           resolver,
+		ExecutionValidator: validator,
 	})
 	if err != nil {
 		return nil, err
@@ -131,8 +157,12 @@ func botRuntimeConfig(state map[string]any) (bot.Config, error) {
 
 // botTurnResolver reads only accepted Bot configuration. Description and name
 // enter through canonical user events; they never modify this system prefix.
+// The instruction baseline is resolved from the compiled Bot prompt on every
+// Turn, so a Bot keeps one prompt and one tool set regardless of when it was
+// created.
 type botTurnResolver struct {
-	composition *runtimeComposition
+	composition   *runtimeComposition
+	notebookTools []tool.Tool
 }
 
 func (r *botTurnResolver) ResolveTurn(ctx context.Context, intent kernel.TurnIntent) (kernel.ResolvedTurn, error) {
@@ -151,6 +181,10 @@ func (r *botTurnResolver) ResolveTurn(ctx context.Context, intent kernel.TurnInt
 	if err != nil {
 		return kernel.ResolvedTurn{}, err
 	}
+	if len(r.notebookTools) == 0 {
+		return kernel.ResolvedTurn{}, fmt.Errorf("gatewayapp: Bot notebook tools unavailable")
+	}
+	instructions := buildBotSystemPrompt(r.composition.authorities.appName)
 	request := agent.ModelRequestOptions{}
 	if config.Fast {
 		request.ServiceTier = model.ServiceTierPriority
@@ -166,8 +200,9 @@ func (r *botTurnResolver) ResolveTurn(ctx context.Context, intent kernel.TurnInt
 			Name:    "bot",
 			Model:   resolved.Model,
 			Request: request,
+			Tools:   r.notebookTools,
 			Metadata: map[string]any{
-				"system_prompt":    botSystemPrompt,
+				"system_prompt":    instructions,
 				"reasoning_effort": resolved.ReasoningEffort,
 			},
 		},

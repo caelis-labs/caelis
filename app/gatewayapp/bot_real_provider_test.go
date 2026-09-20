@@ -8,18 +8,21 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/bot"
 )
 
-// TestBotRealMimoConversation copies one configured provider and its credential
-// into a disposable Store. It never changes the user's Host or conversation.
+// TestBotRealMimoConversation uses only synthetic preferences in a disposable
+// Store. Tool effects, provider-prefix stability, and spontaneous note selection
+// are separate observations; a fluent answer is not proof of a saved note.
 func TestBotRealMimoConversation(t *testing.T) {
 	if os.Getenv("CAELIS_BOT_E2E") != "1" {
 		t.Skip("set CAELIS_BOT_E2E=1 and CAELIS_BOT_SOURCE_STORE for bounded real-provider chat")
@@ -28,7 +31,7 @@ func TestBotRealMimoConversation(t *testing.T) {
 	if source == "" {
 		t.Fatal("CAELIS_BOT_SOURCE_STORE is required")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	defer cancel()
 	store := t.TempDir()
 	profile, effort := copyRealMimoConfiguration(t, ctx, source, store, defaultRealMimoProfile)
@@ -45,6 +48,10 @@ func TestBotRealMimoConversation(t *testing.T) {
 			var body map[string]any
 			if json.Unmarshal(data, &body) == nil && body["messages"] != nil {
 				mu.Lock()
+				if len(requests) >= 28 {
+					mu.Unlock()
+					return nil, fmt.Errorf("Bot evaluation exceeded 28 provider requests")
+				}
 				requests = append(requests, body)
 				mu.Unlock()
 			}
@@ -60,11 +67,15 @@ func TestBotRealMimoConversation(t *testing.T) {
 	}
 	defer func() { _ = stack.Close() }()
 	principal := appserver.Principal{ID: "local-user"}
-	result, err := stack.Bots().CreateBot(ctx, principal, appserver.CreateBotRequest{WriteBase: appserver.WriteBase{OperationID: "real-bot-create"}, Config: bot.Config{Name: "Birch", Description: "Reply concisely, in at most one short sentence. End each reply with BIRCH."}})
+	result, err := stack.Bots().CreateBot(ctx, principal, appserver.CreateBotRequest{WriteBase: appserver.WriteBase{OperationID: "real-bot-create"}, Config: bot.Config{Name: "Birch", Description: "Reply concisely. Distinguish saved notes from information that is only in the conversation."}})
 	if err != nil || result.Outcome != appserver.OutcomeCommitted || result.Resource == nil {
 		t.Fatalf("create: %+v, %v", result, err)
 	}
 	id, sessionID := result.Resource.Ref, result.SessionID
+	root, err := bot.NotebookRoot(store, id)
+	if err != nil {
+		t.Fatal(err)
+	}
 	var replies []string
 	prompt := func(index int, input string) {
 		t.Helper()
@@ -73,8 +84,6 @@ func TestBotRealMimoConversation(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		// Bootstrap is observation only. Drain the historical boundary before
-		// waiting for this prompt's terminal, rather than accepting an old one.
 		for {
 			select {
 			case delivery, ok := <-observation.Subscription.Deliveries():
@@ -100,19 +109,33 @@ func TestBotRealMimoConversation(t *testing.T) {
 		replies = append(replies, observed.finalText)
 		t.Logf("reply %d (%d envelopes): %s", index, observed.envelopes, observed.finalText)
 	}
-	prompt(1, "Our conversation's secret word is acorn. Acknowledge it briefly.")
-	prompt(2, "What was the word I just gave you?")
-	if !strings.Contains(strings.ToLower(replies[1]), "acorn") || !strings.Contains(replies[0], "BIRCH") {
-		t.Fatalf("real description or continuous conversation not followed: %q", replies)
-	}
-	value, err := stack.Bots().GetBot(ctx, principal, id)
+	prompt(1, "A lasting preference of mine: I prefer unsweetened jasmine tea when we plan breaks together.")
+	spontaneous := false
+	loaded, err := stack.composition.sessions.LoadSession(ctx, session.LoadSessionRequest{SessionRef: session.SessionRef{SessionID: sessionID}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	value.Config.Description = "Reply concisely, in at most one short sentence. End each reply with OAK instead of BIRCH."
-	updated, err := stack.Bots().UpdateBot(ctx, principal, appserver.UpdateBotRequest{WriteBase: appserver.WriteBase{OperationID: "real-bot-update", SessionID: sessionID, ExpectedRevision: &value.Revision}, BotID: id, Config: value.Config})
-	if err != nil || updated.Outcome != appserver.OutcomeCommitted {
-		t.Fatalf("settings: %+v, %v", updated, err)
+	for _, event := range loaded.Events {
+		if event.Message != nil {
+			for _, call := range event.Message.ToolCalls() {
+				spontaneous = spontaneous || call.Name == "Write" || call.Name == "Patch"
+			}
+		}
+	}
+	t.Logf("natural preference prompt chose note-taking tools: %t (not a reliability assertion)", spontaneous)
+	prompt(2, "Please save my stated jasmine tea preference in notes/preferences.md, with a relative link from index.md. Read any existing notes first, avoid duplicate claims, and confirm only after successful file tools.")
+	before, err := os.ReadFile(filepath.Join(root, "notes", "preferences.md"))
+	if err != nil || !strings.Contains(strings.ToLower(string(before)), "jasmine") {
+		t.Fatalf("preference was not saved: %q, %v", before, err)
+	}
+	index, err := os.ReadFile(filepath.Join(root, "index.md"))
+	if err != nil || !strings.Contains(string(index), "notes/preferences.md") {
+		t.Fatalf("index did not link the saved note: %q, %v", index, err)
+	}
+	prompt(3, "Correction: I now prefer unsweetened cocoa, not jasmine tea. Read and revise notes/preferences.md to replace the obsolete preference, and keep index.md accurate. Confirm only after the save succeeds.")
+	after, err := os.ReadFile(filepath.Join(root, "notes", "preferences.md"))
+	if err != nil || bytes.Equal(before, after) || !strings.Contains(strings.ToLower(string(after)), "cocoa") {
+		t.Fatalf("preference was not revised: %q, %v", after, err)
 	}
 	if err := stack.Close(); err != nil {
 		t.Fatal(err)
@@ -121,29 +144,38 @@ func TestBotRealMimoConversation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	prompt(3, "After reopening this conversation, what was my secret word?")
-	if !strings.Contains(strings.ToLower(replies[2]), "acorn") || !strings.Contains(replies[2], "OAK") {
-		t.Fatalf("real restart/settings response: %q", replies[2])
+	loaded, err = stack.composition.sessions.LoadSession(ctx, session.LoadSessionRequest{SessionRef: session.SessionRef{SessionID: sessionID}})
+	if err != nil {
+		t.Fatal(err)
 	}
-	mu.Lock()
-	defer mu.Unlock()
-	if len(requests) != 3 {
-		t.Fatalf("provider calls = %d, want exactly three (no prompt replay)", len(requests))
+	lastSeq := session.LastEventSeq(loaded.Events)
+	prompt(4, "After reopening, please read your notebook index, follow its relevant link, and tell me my current drink preference based on the saved note.")
+	if !strings.Contains(strings.ToLower(replies[3]), "cocoa") {
+		t.Fatalf("real notebook answer after restart: %q", replies[3])
 	}
-	for i, request := range requests {
-		if tools, ok := request["tools"].([]any); ok && len(tools) > 0 {
-			t.Fatalf("request %d exposed tools", i)
+	loaded, err = stack.composition.sessions.LoadSession(ctx, session.LoadSessionRequest{SessionRef: session.SessionRef{SessionID: sessionID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	readIndex, readNote := false, false
+	for _, event := range loaded.Events {
+		if event.Seq <= lastSeq || event.Message == nil {
+			continue
 		}
-		if i > 0 {
-			previous := requests[i-1]["messages"].([]any)
-			messages := request["messages"].([]any)
-			if len(messages) <= len(previous) || !reflect.DeepEqual(previous, messages[:len(previous)]) {
-				t.Fatalf("request %d rewrote provider history prefix", i)
+		for _, call := range event.Message.ToolCalls() {
+			if call.Name == "Read" {
+				readIndex = readIndex || strings.Contains(call.Args, "index.md")
+				readNote = readNote || strings.Contains(call.Args, "preferences.md")
 			}
 		}
 	}
+	if !readIndex || !readNote {
+		t.Fatalf("restart answered without reading index and note: index=%t note=%t", readIndex, readNote)
+	}
+	mu.Lock()
+	defer mu.Unlock()
 	if path := os.Getenv("CAELIS_BOT_E2E_OUT"); path != "" {
-		data, err := json.MarshalIndent(map[string]any{"profile": profile.ID, "requests": requests, "replies": replies}, "", "  ")
+		data, err := json.MarshalIndent(map[string]any{"profile": profile.ID, "requests": requests, "replies": replies, "spontaneous_note_tools": spontaneous, "note_before": string(before), "note_after": string(after)}, "", "  ")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -151,4 +183,15 @@ func TestBotRealMimoConversation(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	for i, request := range requests {
+		assertBotNotebookWireTools(t, request)
+		if i > 0 {
+			previous := requests[i-1]["messages"].([]any)
+			messages := request["messages"].([]any)
+			if len(messages) <= len(previous) || !reflect.DeepEqual(previous, messages[:len(previous)]) || !reflect.DeepEqual(requests[i-1]["tools"], request["tools"]) {
+				t.Fatalf("request %d rewrote provider history or tool prefix", i)
+			}
+		}
+	}
+	t.Logf("notebook save, revision, restart read, and stable prefixes verified across %d provider requests", len(requests))
 }

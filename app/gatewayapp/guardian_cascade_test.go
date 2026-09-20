@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/judgment"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -16,23 +17,17 @@ import (
 
 func TestGuardianScreeningCascadesToAgentWithinOriginalReview(t *testing.T) {
 	for _, tc := range []struct {
-		name, decision, reason string
-		source                 string
-		confidence             float64
-		failure                error
-		agentResponse          string
-		wantAgent, wantAllow   bool
+		name, decision       string
+		confidence           float64
+		failure              error
+		agentResponse        string
+		wantAgent, wantAllow bool
 	}{
-		{name: "allow without resolving Agent", decision: "0", reason: "none", confidence: 1, wantAllow: true},
-		{name: "deny without resolving Agent", decision: "1", reason: "constraint", source: "0", confidence: 1},
-		{name: "contradictory allow defers to Agent allow", decision: "0", reason: "constraint", confidence: 1, wantAgent: true, wantAllow: true},
-		{name: "contradictory allow defers to Agent deny", decision: "0", reason: "constraint", confidence: 1, agentResponse: `{"option_id":"reject_once","rationale":"The action contradicts the user's explicit constraint."}`, wantAgent: true},
-		{name: "source conflict defers to Agent allow", decision: "0", reason: "none", source: "0", confidence: 1, wantAgent: true, wantAllow: true},
-		{name: "source conflict defers to Agent deny", decision: "0", reason: "none", source: "0", confidence: 1, agentResponse: `{"option_id":"reject_once","rationale":"The action contradicts the user's explicit constraint."}`, wantAgent: true},
-		{name: "uncertain", decision: "0", confidence: .5, wantAgent: true, wantAllow: true},
-		{name: "missing evidence", decision: "unavailable", confidence: 1, wantAgent: true, wantAllow: true},
+		{name: "allow without resolving Agent", decision: "allow_once", confidence: 1, wantAllow: true},
+		{name: "deny without resolving Agent", decision: "reject_once", confidence: 1},
+		{name: "uncertain deny uses Agent explanation", decision: "reject_once", confidence: .6, agentResponse: `{"option_id":"reject_once","rationale":"The action contradicts the user's explicit constraint."}`, wantAgent: true},
+		{name: "uncertain", decision: "allow_once", confidence: .5, wantAgent: true, wantAllow: true},
 		{name: "invalid answer", decision: "unknown", confidence: 1, wantAgent: true, wantAllow: true},
-		{name: "unexplained denial", decision: "1", reason: "none", confidence: 1, wantAgent: true, wantAllow: true},
 		{name: "provider failure", failure: errors.New("screen-only-provider-error"), wantAgent: true, wantAllow: true},
 		{name: "screening timeout", failure: context.DeadlineExceeded, wantAgent: true, wantAllow: true},
 	} {
@@ -59,12 +54,8 @@ func TestGuardianScreeningCascadesToAgentWithinOriginalReview(t *testing.T) {
 				if limit, ok := ctx.Deadline(); !ok || time.Until(limit) > 10*time.Second {
 					t.Error("screening omitted its bounded deadline")
 				}
-				source := tc.source
-				if source == "" {
-					source = "none"
-				}
 				return judgment.Response{Model: "screen-only-provider", Answers: map[string]judgment.Answer{
-					"decision": choiceAnswer(tc.decision, tc.confidence), "reason": choiceAnswer(tc.reason, 1), "source": choiceAnswer(source, 1),
+					"decision": choiceAnswer(tc.decision, tc.confidence),
 				}}, tc.failure
 			})
 			req.ResolveModel = func(ctx context.Context) (model.LLM, error) {
@@ -81,11 +72,52 @@ func TestGuardianScreeningCascadesToAgentWithinOriginalReview(t *testing.T) {
 			if err != nil || result.Approved != tc.wantAllow || (resolved == 1) != tc.wantAgent || (len(llm.Requests()) == 1) != tc.wantAgent {
 				t.Fatalf("result=%+v err=%v resolved=%d calls=%d", result, err, resolved, len(llm.Requests()))
 			}
+			if !tc.wantAllow && ((tc.wantAgent && result.Rationale == "") || (!tc.wantAgent && (result.Rationale != "" || result.DisplayText != "denied"))) {
+				t.Fatalf("unexpected denial explanation: %+v", result)
+			}
 			if tc.wantAgent {
 				raw, _ := json.Marshal(llm.Requests())
 				if strings.Contains(string(raw), "screen-only") || !strings.Contains(string(raw), "Do not delete files") || !strings.Contains(string(raw), command) {
 					t.Fatal("Agent prompt lost canonical evidence or included classifier output")
 				}
+			}
+		})
+	}
+}
+
+func TestGuardianScreeningOptionEligibility(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		options []approval.Option
+		wantErr bool
+	}{
+		{"legal aliases skip classifier", []approval.Option{{ID: "allow_once", Kind: "allow"}, {ID: "reject_once", Kind: "deny"}}, false},
+		{"one outcome skips classifier", []approval.Option{{ID: "allow_once", Kind: "allow_once"}}, false},
+		{"missing ID fails protocol", []approval.Option{{Kind: "allow_once"}, {ID: "reject_once", Kind: "reject_once"}}, true},
+		{"duplicate ID fails protocol", []approval.Option{{ID: "allow_once", Kind: "allow_once"}, {ID: "allow_once", Kind: "reject_once"}}, true},
+		{"custom kind fails protocol", []approval.Option{{ID: "allow_once", Name: "Approve", Kind: "custom"}, {ID: "reject_once", Kind: "reject_once"}}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			service, active := newApprovalReviewerTestSession(t, t.Context())
+			reviewer := newGuardianApprovalApprover(service)
+			defer reviewer.Close()
+			llm := &approvalReviewerFakeModel{}
+			req := approvalReviewerTestRequest(active, llm, "inspect", map[string]any{"cmd": "rg TODO ."})
+			req.Approval.Options = tc.options
+			req.Judgment = judgmentFunc(func(context.Context, judgment.Request) (judgment.Response, error) {
+				t.Error("ineligible options sent to classifier")
+				return judgment.Response{}, nil
+			})
+			result, err := reviewer.Decide(t.Context(), req)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("result=%+v err=%v", result, err)
+			}
+			if tc.wantErr {
+				if len(llm.Requests()) != 0 {
+					t.Fatal("protocol-invalid request reached Agent")
+				}
+			} else if !result.Approved || len(llm.Requests()) != 1 {
+				t.Fatalf("valid options did not settle through Agent: %+v", result)
 			}
 		})
 	}
@@ -144,7 +176,7 @@ func TestGuardianScreeningAndAgentReceiptsSurviveReopen(t *testing.T) {
 	defer reviewer.Close()
 	req := approvalReviewerTestRequest(active, llm, "inspect", map[string]any{"cmd": "echo approved"})
 	req.Judgment = judgmentFunc(func(context.Context, judgment.Request) (judgment.Response, error) {
-		return judgment.Response{Model: "screen", Answers: map[string]judgment.Answer{"decision": choiceAnswer("unavailable", 1)}, Usage: judgment.Usage{InputTokens: 100}}, nil
+		return judgment.Response{Model: "screen", Answers: map[string]judgment.Answer{"decision": choiceAnswer("allow_once", .5)}, Usage: judgment.Usage{InputTokens: 100}}, nil
 	})
 	result, err := reviewer.Decide(t.Context(), req)
 	if err != nil || !result.Approved {

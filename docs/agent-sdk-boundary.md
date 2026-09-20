@@ -249,21 +249,31 @@ Consumer setup and package layout live in
 ### Guardian evidence and context
 
 An optional auxiliary judgment binding selects a tool-free first-stage classifier
-through the typed
-`approval.JudgmentResolver` contract. It consumes the canonical source projection
-and exact current action, retaining the same Control queue, cancellation and
-strict option settlement. It does not create a generative LLM or query sandbox.
-Its complete serialized input is limited to 24,000 bytes; excess evidence defers
-to Agent review without dropping user constraints. Decision
-confidence must be at least 0.9. A denial also requires a reason at that threshold
-and, for a task conflict, a selected canonical user instruction. Code renders
-the selected reason with the reviewed action and source evidence. These operating
-thresholds are abstention rules, not a correctness or authorization guarantee.
+through the typed `approval.JudgmentResolver` contract. Its input contains only
+chronological user messages and the current approval ticket: exact tool arguments,
+reason, justification, execution route and working directory when supplied. It
+never selects historical tool observations, matches prior actions, correlates or
+waits for Tasks. User text remains verbatim and ordered. Agent fallback retains
+its independent full source projection. Screening creates neither a generative
+LLM nor a query sandbox. Its complete serialized input has a local 24,000-byte
+budget (not an API limit); excess input defers to Agent review without dropping
+user constraints.
 
-A complete classifier decision settles through the common approval gate. An
-allow decision defers to Agent review when either the violation reason or a
-conflicting canonical user source has confidence 0.9 or higher. An incomplete
-decision, provider error or screening timeout also proceeds to Agent review under
+One Choice question contains exactly the original option IDs, names and kinds,
+without synthetic abstention options or auxiliary classifications. Screening
+supports the four ACP option kinds and requires both allow and reject outcomes.
+Other protocol-valid option sets bypass screening for Agent review; malformed
+options remain protocol errors. Names and IDs never establish option meaning.
+Control compares the complete probability distribution, grouping canonical allow
+versus deny mass. Settlement requires a normalized lead of 0.9 and odds of 20
+under one uniform rule. It prefers a once option; without one, the exact persistent
+option must independently dominate. Scalar confidence is not a settlement
+threshold. These are abstention rules, not correctness probabilities.
+
+A complete classifier decision settles through the common approval gate. A clear
+refusal returns denied without inventing a rationale. There is no refusal-reason
+or explanation-source classification. Close or malformed distributions,
+unsupported screening inputs, provider errors and screening timeouts proceed to Agent review under
 the original deadline; cancellation ends the review. The Agent model is resolved
 only when needed, using its independent Guardian binding or the current
 Session model. The Agent receives canonical evidence without classifier answers

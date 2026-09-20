@@ -20,6 +20,9 @@ func TestClientValidatesResponsesAndDoesNotExposeErrorBodies(t *testing.T) {
 		valid      bool
 	}{
 		{"valid", `{"model":"jev-1.13.0","answers":{"route":{"type":"choice","choice":"yes","confidence":1,"probabilities":{"yes":1,"no":0}}},"usage":{"input_tokens":30,"output_tokens":5}}`, 200, true},
+		{"rounded down", `{"model":"jev","answers":{"route":{"type":"choice","choice":"yes","confidence":0.8,"probabilities":{"yes":0.90,"no":0.09}}}}`, 200, true},
+		{"rounded up", `{"model":"jev","answers":{"route":{"type":"choice","choice":"yes","confidence":0.8,"probabilities":{"yes":0.92,"no":0.09}}}}`, 200, true},
+		{"beyond rounding tolerance", `{"model":"jev","answers":{"route":{"type":"choice","choice":"yes","confidence":0.8,"probabilities":{"yes":0.90,"no":0.08}}}}`, 200, false},
 		{"unknown choice", `{"model":"jev","answers":{"route":{"type":"choice","choice":"injected","confidence":1,"probabilities":{"yes":1,"no":0}}}}`, 200, false},
 		{"choice mismatch", `{"model":"jev","answers":{"route":{"type":"choice","choice":"yes","confidence":1,"probabilities":{"yes":0,"no":1}}}}`, 200, false},
 		{"missing answer", `{"model":"jev","answers":{}}`, 200, false},

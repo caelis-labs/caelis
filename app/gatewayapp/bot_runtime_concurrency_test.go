@@ -82,9 +82,7 @@ func TestBotRuntimeConcurrentInputCancelAndSettings(t *testing.T) {
 	}
 	select {
 	case request := <-entered:
-		if tools, _ := request["tools"].([]any); len(tools) != 0 {
-			t.Fatal("Bot request gained tools")
-		}
+		assertBotNotebookWireTools(t, request)
 	case <-ctx.Done():
 		t.Fatal("Bot provider never entered")
 	}

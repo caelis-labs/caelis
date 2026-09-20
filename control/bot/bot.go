@@ -72,11 +72,6 @@ func Normalize(config Config) (Config, error) {
 	return config, nil
 }
 
-// Encode produces the single durable configuration record for a Bot.
-func Encode(id string, config Config) any {
-	return record{Version: 1, ID: id, Config: config}
-}
-
 // Decode reads a complete, supported configuration. Missing or unknown records
 // fail closed rather than giving a Bot the ordinary work-mode assembly.
 func Decode(state map[string]any) (Config, error) {
@@ -86,26 +81,32 @@ func Decode(state map[string]any) (Config, error) {
 
 // ReadState returns stable identity and configuration from guarded Session state.
 func ReadState(state map[string]any) (string, Config, error) {
+	stored, err := readRecord(state)
+	return stored.ID, stored.Config, err
+}
+
+func readRecord(state map[string]any) (record, error) {
 	raw, ok := state[StateKey]
 	if !ok {
-		return "", Config{}, errors.New("bot: configuration is not initialized")
+		return record{}, errors.New("bot: configuration is not initialized")
 	}
 	data, err := json.Marshal(raw)
 	if err != nil {
-		return "", Config{}, err
+		return record{}, err
 	}
 	var stored record
 	if err := json.Unmarshal(data, &stored); err != nil {
-		return "", Config{}, fmt.Errorf("bot: decode configuration: %w", err)
+		return record{}, fmt.Errorf("bot: decode configuration: %w", err)
 	}
 	if stored.Version != 1 || strings.TrimSpace(stored.ID) == "" {
-		return "", Config{}, errors.New("bot: unsupported or invalid configuration record")
+		return record{}, errors.New("bot: unsupported or invalid configuration record")
 	}
 	config, err := Normalize(stored.Config)
 	if err != nil {
-		return "", Config{}, err
+		return record{}, err
 	}
-	return stored.ID, config, nil
+	stored.Config = config
+	return stored, nil
 }
 
 // ConfigurationMessage is appended as a canonical user message when the user

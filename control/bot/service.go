@@ -97,24 +97,41 @@ func fromLoaded(loaded session.LoadedSession, id string) (Bot, error) {
 	if !sessionvisibility.IsBotSession(loaded.Session) || boundID != id {
 		return Bot{}, errorcode.New(errorcode.NotFound, "bot: identity not found")
 	}
-	storedID, config, err := ReadState(loaded.State)
+	stored, err := readRecord(loaded.State)
 	if err != nil {
 		return Bot{}, err
 	}
-	if storedID != id {
+	if stored.ID != id {
 		return Bot{}, errors.New("bot: configuration identity does not match its conversation")
 	}
-	return Bot{ID: id, SessionID: loaded.Session.SessionID, Revision: loaded.Session.Revision, Config: config}, nil
+	return Bot{ID: id, SessionID: loaded.Session.SessionID, Revision: loaded.Session.Revision, Config: stored.Config}, nil
 }
 
 // Save atomically commits configuration and its user-instruction event. The
 // caller must serialize prompt admission and reject an already active Turn;
 // the persistence fence additionally excludes in-flight Runtime writes. A
 // nil previous value initializes a newly created private Session skeleton.
+// Every Bot has the same private notebook contract regardless of when it was
+// created. Admission appends a user event without compacting history.
 func (s *Service) Save(ctx context.Context, active session.Session, id string, config Config, previous *Config, operationID, digest string) (session.Session, error) {
 	boundID, _ := active.Metadata[MetadataID].(string)
 	if !sessionvisibility.IsBotSession(active) || id != boundID {
 		return session.Session{}, errors.New("bot: invalid conversation binding")
+	}
+	if previous != nil {
+		// The accepted record stays the authority: an unsupported or mismatched
+		// record fails closed instead of being replaced by an ordinary save.
+		state, err := s.Sessions.SnapshotState(ctx, active.SessionRef)
+		if err != nil {
+			return active, err
+		}
+		stored, err := readRecord(state)
+		if err != nil {
+			return active, err
+		}
+		if stored.ID != id {
+			return active, errors.New("bot: configuration identity does not match its conversation")
+		}
 	}
 	var events []*session.Event
 	if previous == nil || previous.Name != config.Name || previous.Description != config.Description {
@@ -139,7 +156,7 @@ func (s *Service) Save(ctx context.Context, active session.Session, id string, c
 			if next == nil {
 				next = map[string]any{}
 			}
-			next[StateKey] = Encode(id, config)
+			next[StateKey] = record{Version: 1, ID: id, Config: config}
 			return next, nil
 		},
 	})

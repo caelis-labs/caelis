@@ -149,7 +149,8 @@ func (m *Model) handleWizardOverlayKey(msg tea.KeyMsg) tea.Cmd {
 		m.moveWizardSelection(delta)
 	case tea.KeyEnter:
 		if s.bot != nil && len(s.fields) > 0 && s.field < len(s.fields) {
-			if s.fields[s.field].key == "bot_model" {
+			switch s.fields[s.field].key {
+			case "bot_model":
 				return m.openBotSettingsModels()
 			}
 			m.moveWizardSelection(1)

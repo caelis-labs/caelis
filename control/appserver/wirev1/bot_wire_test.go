@@ -2,11 +2,13 @@ package wirev1
 
 import (
 	"bytes"
+	"encoding/json"
 	"math"
 	"reflect"
 	"testing"
 
 	appserver "github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/appserver/wirev1/generated"
 	"github.com/caelis-labs/caelis/control/bot"
 )
 
@@ -126,5 +128,43 @@ func TestBotWireRejectsNumericRevision(t *testing.T) {
 	var got bot.Bot
 	if err := Unmarshal([]byte(`{"id":"bot-1","session_id":"bot-chat-1","revision":7,"config":{"name":"Ada"}}`), &got); err == nil {
 		t.Fatal("numeric revision was accepted as a uint64 decimal string")
+	}
+}
+
+// TestBotWireCarriesNoNotebookSwitch pins the unified Bot contract: every Bot
+// has the same private notebook, so the released per-Bot capability field is
+// absent from the source schema, the wire value, and the generated clients.
+func TestBotWireCarriesNoNotebookSwitch(t *testing.T) {
+	value := bot.Bot{ID: "bot-1", SessionID: "bot-chat-1", Revision: 3, Config: bot.Config{Name: "Ada"}}
+	validateWireValue(t, "Bot", value)
+	raw, err := Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var dto generated.Bot
+	if err := json.Unmarshal(raw, &dto); err != nil || dto.Id != value.ID || dto.SessionId != value.SessionID {
+		t.Fatalf("generated Bot = %+v, %v (%s)", dto, err, raw)
+	}
+	var decoded bot.Bot
+	if err := Unmarshal(raw, &decoded); err != nil || !reflect.DeepEqual(decoded, value) {
+		t.Fatalf("Bot round trip = %+v, %v", decoded, err)
+	}
+	revision := uint64(3)
+	request := appserver.UpdateBotRequest{
+		WriteBase: appserver.WriteBase{OperationID: "bot-update-1", SessionID: value.SessionID, ExpectedRevision: &revision},
+		BotID:     value.ID, Config: value.Config,
+	}
+	validateWireValue(t, "UpdateBotRequest", request)
+	raw, err = Marshal(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var requestDTO generated.UpdateBotRequest
+	if err := json.Unmarshal(raw, &requestDTO); err != nil || requestDTO.BotId != value.ID {
+		t.Fatalf("generated Bot update = %+v, %v (%s)", requestDTO, err, raw)
+	}
+	var decodedRequest appserver.UpdateBotRequest
+	if err := DecodeRequest(raw, &decodedRequest); err != nil || !reflect.DeepEqual(decodedRequest, request) {
+		t.Fatalf("request round trip = %+v, %v", decodedRequest, err)
 	}
 }

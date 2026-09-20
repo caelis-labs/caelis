@@ -53,7 +53,7 @@ and acceptance history belong in Git and CI, not in this map.
 | `control/streamspool`, `control/streamspool/file` | Product-neutral Control cache records and the bounded local append-only spool implementation |
 | `control/modelcatalog`, `modelconfig`, `modelprofile`, `placement`, `agentbinding` | Provider and model discovery, credentials/configuration, selectable profiles, placement, and fixed Agent bindings |
 | `control/agents` | External ACP Agent identity, preparation, connection, and configuration |
-| `control/bot` | Persistent tool-free Bot identity, configuration, and owner-scoped listing |
+| `control/bot` | Persistent Bot identity, user configuration, owner-scoped listing, and the private notebook contract: confined file boundary and instruction guidance |
 | `control/memorybinding` | Opaque host-selected Memory binding references, Runtime actor and audience delegation, and immutable logical snapshots |
 | `control/collaboration` | Session-scoped participant discovery, public-result observation, shared messages and reader positions, mailboxes, collaborator prompt slices, and expiring external grants |
 | `control/mcpconfig`, `control/plugin`, `control/status` | MCP assembly inputs, plugin lifecycle, and product status read models |
@@ -161,7 +161,7 @@ embedding-only selector; Memory still sees neither those product concepts nor
 their semantics. The mandatory workspace label cannot be removed by that
 extension. Later binding changes affect new Sessions, never a Session that has
 already admitted Memory authority. A new canonical Session that admits Memory
-pins its complete non-secret delegation and LabelSet at creation. Tool-free
+pins its complete non-secret delegation and LabelSet at creation.
 [Bot conversations](bot.md) do not select or admit Workspace Memory authority.
 A Session created before Memory was enabled is pinned before its first Memory call
 under the Runtime fence. Public or mixed-audience Runtime composition is invalid.
@@ -308,6 +308,7 @@ control/cursor.key          private cursor-signing secret
 control/spool/v1/           disposable append-only Session and Task delivery traces
 sessions/                   canonical Session documents and event JSONL plus derived SQLite indexes
 providers/                  private provider credential material
+bots/<Bot ID>/notebook/      private Markdown notes and index.md, owned by control/bot
 memory/credentials/         owner-only Memory issuer credentials behind opaque references
 memory/appliance/           embedded Memory package data and SQLite authority
 plugins/                    installed and marketplace content caches

@@ -53,17 +53,24 @@ start a conversation:
 
 | Role | Binding behavior |
 | --- | --- |
-| ToolSearch | A judgment model ranks ready MCP tools. Unbound or unavailable evaluation retains lexical discovery. |
+| ToolSearch | A judgment model ranks ready MCP tools in batches bounded by encoded input size. Unbound or unavailable evaluation retains lexical discovery. |
 | Guardian | Uses a provider model, or the Main Agent model when unbound. An auxiliary classifier selector, labeled `Classifier`, appears on the same row when a judgment model is connected; it is off until selected. |
 | Reviewer | Uses a provider model or ACP agent for the fixed review scene. |
 | Memory Steward | An explicit generation model enables semantic organization. Unbound Memory keeps its durable journal and lexical recall without model calls. |
 | Memory Verifier | An optional judgment model checks Steward proposals for clear semantic conflicts. The `Verifier` selector sits beside Memory Steward on the same row. It requires an enabled Steward and cannot generate or apply Memory changes. |
 
 On Guardian's row, use Tab or click the main model or auxiliary classifier to
-configure it. A selected classifier runs first. A complete decision settles the approval;
-uncertainty, missing denial evidence, an oversized input, or a provider failure
-continues to the existing Agent review within the same approval deadline.
-Changing or disabling screening preserves the Agent model selection. See [Guardian's evidence contract](agent-sdk-boundary.md#guardian-evidence-and-context)
+configure it. A selected classifier runs first, choosing only among the original
+approval options. A decisive lead in approve versus deny probability mass settles
+the approval; a classifier refusal has no generated explanation. Close or malformed
+distributions, an oversized input, or a provider failure continue to Agent review
+within the same approval deadline. Protocol-valid options whose kinds are not
+supported by screening go directly to the Agent; option names and IDs are never
+guessed. The Agent supplies a reason when its review rejects the action.
+Screening uses only user messages and the current approval ticket with its exact
+action. It receives no historical tool observations and never waits for Tasks.
+Diagnostics distinguish input-budget, option-eligibility, provider, and
+inconclusive-judgment fallbacks without recording request content. Changing or disabling screening preserves the Agent model selection. See [Guardian's evidence contract](agent-sdk-boundary.md#guardian-evidence-and-context)
 and [Memory composition](architecture.md#session-runtime-lifecycle).
 
 `/team` takes no arguments and opens the configuration overlay. The TUI accepts

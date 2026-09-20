@@ -3,7 +3,6 @@ package gatewayapp
 import (
 	"context"
 	"errors"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -72,10 +71,12 @@ func (b *controlCommandBackend) createBot(ctx context.Context, principal appserv
 	if err != nil {
 		return appserver.CommandResult{}, sessionConfigurationRejectedError(err)
 	}
-	cwd := filepath.Join(b.composition.authorities.storeDir, "bots", id)
-	if err := os.MkdirAll(cwd, 0o700); err != nil {
+	// Provision through the confined notebook owner, not ambient MkdirAll: even
+	// a tampered Bot-directory symlink must not create files outside its root.
+	if err := initializeBotNotebook(ctx, b.composition.authorities.storeDir, id); err != nil {
 		return appserver.CommandResult{}, classifyControlPreDispatchError(err)
 	}
+	cwd := filepath.Join(b.composition.authorities.storeDir, "bots", id)
 	workspace, err := canonicalWorkspaceRef(session.WorkspaceRef{Key: id, CWD: cwd}, session.WorkspaceRef{})
 	if err != nil {
 		return appserver.CommandResult{}, classifyControlPreDispatchError(err)

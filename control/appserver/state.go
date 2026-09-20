@@ -23,8 +23,9 @@ const (
 	CapabilityWorkspaceTrust          = "workspace-trust-v1"
 	CapabilityWorkspaceTrustPreflight = "workspace-trust-preflight-v1"
 	CapabilityHostReadiness           = "host-readiness-v1"
-	// CapabilityBotMode advertises persistent, tool-free Bot conversations and
-	// the focused configuration API. Older Hosts must not accept Bot clients.
+	// CapabilityBotMode advertises persistent Bot conversations with their own
+	// private notebook and the focused configuration API. Older Hosts must not
+	// accept Bot clients.
 	CapabilityBotMode = "bot-mode-v1"
 )
 

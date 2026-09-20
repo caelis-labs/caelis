@@ -79,12 +79,11 @@ The limit controls new PR creation, not CI reruns or already-open PRs.
 
 ## Change-scoped checks
 
-Jev evaluations are opt-in and send only repository synthetic fixtures. Set
+The following Jev evaluations are opt-in and send only repository synthetic fixtures. Set
 `JEV_API_KEY` in the test process environment and run the scenarios in order:
 
 ```bash
 CAELIS_JEV_EVAL=1 go test ./agent-sdk/tool/builtin/toolsearch -run '^TestToolSearchJevEvaluation$' -count=1 -v
-CAELIS_JEV_EVAL=1 go test ./app/gatewayapp -run '^TestGuardianJevEvaluation$' -count=1 -v
 CAELIS_JEV_EVAL=1 go test ./app/gatewayapp -run '^TestMemoryJevEvaluation$' -count=1 -v
 ```
 
@@ -92,6 +91,39 @@ These tests report outcomes, token counts and elapsed time. A passing test means
 the evaluation completed; assess the reported semantic scores separately. Small
 synthetic samples do not establish production accuracy or adversarial robustness.
 Ordinary tests never load `.env` or make live Jev requests.
+
+The opt-in `TestGuardianJevEscalationCalibration` and
+`TestGuardianJevEscalationHoldout` use `CAELIS_JEV_EVAL=1`
+and `JEV_API_KEY` to classify separate sets of 20 and 12 bounded escalation fixtures without executing
+their commands. Each fails on any wrong direct decision or provider failure.
+Direct-decision coverage is reported, not a pass threshold; intentional abstentions
+count in the denominator. `CAELIS_JEV_CALIBRATION_OUT` and
+`CAELIS_JEV_HOLDOUT_OUT` optionally record distributions and input measurements.
+These classifier-only samples do not establish production coverage or calibrated
+error rates.
+
+`TestGuardianJevCascadeE2E` uses `CAELIS_JEV_CASCADE_E2E=1`, `JEV_API_KEY`,
+and `CAELIS_GUARDIAN_E2E_MODEL` (a configured local generative model alias) to
+exercise the approval reviewer with real Jev and Agent providers. It records the
+rendered synthetic classifier request, distribution, actual route and final
+settlement. Legal non-screenable option aliases must reach the Agent without a
+Jev call; canonical options may settle directly or defer. Wrong decisions and
+provider failures fail the check, without a direct-coverage target. Proposed
+commands are never executed and no private Session is replayed.
+
+`TestGuardianSessionJevReplay` is a separate, explicit opt-in for an existing
+Session's evidence. Set `CAELIS_JEV_SESSION_E2E=1`, `JEV_API_KEY`, and
+`CAELIS_JEV_SESSION_EVENTS` to its `.events.jsonl` file; the adjacent `.json`
+metadata must exist. It reads the source, rebuilds approval checkpoints in a
+throwaway in-memory Session, and calls the real Jev classifier for at most eight
+approvals. It never executes historical tools or mutates the source Store.
+Use a Session whose approvals are known to be allowed. Confident denials and
+provider failures fail the check; low-confidence deferrals are reported separately
+and do not count as saved Agent requests. Set `CAELIS_JEV_SESSION_E2E_OUT` for a
+JSON report containing only decisions, scores, request sizes, usage and timing.
+This replay does not call the fallback Agent; deterministic cascade tests verify
+fallback and receipt persistence. It sends private Session evidence to the selected
+provider, so it must only be run for an explicitly selected, authorized Session.
 
 The following checks remain explicit because repeating them for every change
 adds cost without improving unrelated changes:
@@ -174,21 +206,31 @@ Provider latency/cache counters are observations,
 not deterministic unit-test assertions or guarantees from the Harness.
 
 `CAELIS_BOT_E2E=1` enables `TestBotRealMimoConversation`, a bounded real-provider
-Bot conversation test. It copies the configured
+Bot notebook test. It copies the configured
 `provider:xiaomi@token-plan-cn/xiaomi/mimo-v2.5` profile and its credential into a
-disposable Store, leaving the user's Host, configuration, and conversation
-untouched. Exactly three prompts run with streaming, a description change, and a
-Host restart; the test asserts exactly three provider calls, that each request
-preserves the previous message prefix, and that no request exposes tools, within
-a two-minute budget.
+disposable Store, leaving the user's Host, configuration, and conversations
+untouched. Four synthetic prompts cover a natural preference, explicit saving,
+revision, and index-led reading after Host restart. The test checks actual note
+and index contents, canonical Read calls after restart, the exact five-tool
+notebook set, and unchanged provider message/tool prefixes. It reports natural
+note-taking selection separately from these reliability assertions. The budget
+is four minutes and at most 28 provider requests; no mock result substitutes for
+real model behavior.
 
 ```bash
-CAELIS_BOT_E2E=1 CAELIS_BOT_SOURCE_STORE=$HOME/.caelis CAELIS_BOT_E2E_OUT=/tmp/caelis-bot-evidence.json go test ./app/gatewayapp -run '^TestBotRealMimoConversation$' -count=1 -timeout=3m -v
+CAELIS_BOT_E2E=1 CAELIS_BOT_SOURCE_STORE=$HOME/.caelis CAELIS_BOT_E2E_OUT=/tmp/caelis-bot-evidence.json go test ./app/gatewayapp -run '^TestBotRealMimoConversation$' -count=1 -timeout=5m -v
 ```
 
 `CAELIS_BOT_SOURCE_STORE` selects the Store holding the configured provider and
 credential. `CAELIS_BOT_E2E_OUT` is optional; when set, it writes only the test's
-request and response payloads, never headers or credentials.
+synthetic request payloads, replies, note contents, and the natural note-taking
+observation, never headers or credentials.
+
+Deterministic Bot coverage in the same package needs no provider. It provisions a
+Bot created before notebooks were universal on that owner's first prompt, proves
+the notebook is created exactly once and that a deleted `index.md` is never
+recreated, and rejects the prompt with an explicit error when the Store cannot be
+provisioned at all.
 
 `make windows-check` runs Guardian's native evidence tests with deterministic
 model responses. They exercise PowerShell, temporary-only writes, file evidence,

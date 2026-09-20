@@ -30,6 +30,26 @@ func botSettingsFixture(t *testing.T) (*Model, *fakeBotClient) {
 	return m, client
 }
 
+// TestBotSettingsUnchangedFormSavesNothing pins that opening /settings and
+// confirming an unchanged form neither writes configuration nor changes the
+// selected Bot and conversation.
+func TestBotSettingsUnchangedFormSavesNothing(t *testing.T) {
+	m, client := botSettingsFixture(t)
+	runConnectTestCmd(m, m.startBotSettingsFlow(false))
+	m.wizardOverlay.field = len(m.wizardOverlay.fields)
+	connectPress(m, "enter")
+	if len(client.updated) != 0 {
+		t.Fatalf("an unchanged form saved: %+v", client.updated)
+	}
+	if m.wizardOverlay != nil {
+		t.Fatal("an unchanged form did not close settings")
+	}
+	value, ok := m.activeBot()
+	if !ok || value.Config != client.bots[0].Config || value.SessionID != "chat-1" {
+		t.Fatalf("unchanged form changed the active Bot: %+v", value)
+	}
+}
+
 func TestBotSettingsFormKeepsDraftAndSavesOnce(t *testing.T) {
 	m, client := botSettingsFixture(t)
 	runConnectTestCmd(m, m.startBotSettingsFlow(false))
@@ -199,7 +219,7 @@ func TestBotModelUnavailableAndCatalogError(t *testing.T) {
 				t.Fatal("missing current silently rebound")
 			}
 			connectPress(m, "esc")
-			m.wizardOverlay.field = 3
+			m.wizardOverlay.field = len(m.wizardOverlay.fields)
 			connectPress(m, "enter")
 			if len(client.updated) != 1 || client.updated[0].Config.Model != "durable-sol" || !client.updated[0].Config.Fast {
 				t.Fatalf("metadata edit: %+v", client.updated)
@@ -213,7 +233,7 @@ func TestBotSettingsUnknownOutcomeCannotResubmit(t *testing.T) {
 	client.updateOutcome = appserver.OutcomeUnknown
 	runConnectTestCmd(m, m.startBotSettingsFlow(false))
 	connectPaste(m, " edited")
-	m.wizardOverlay.field = 3
+	m.wizardOverlay.field = len(m.wizardOverlay.fields)
 	connectPress(m, "enter")
 	if !m.wizardOverlay.blocked || len(client.updated) != 1 {
 		t.Fatal("unknown result not blocked")

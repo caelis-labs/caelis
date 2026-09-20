@@ -725,6 +725,8 @@ func botCommandDetail(result appserver.CommandResult, err error) string {
 	return "unknown error"
 }
 
+// runBotSettingsFlow saves one complete Bot configuration. It never changes the
+// Bot's identity, conversation, or notebook.
 func runBotSettingsFlow(ctx context.Context, client appserver.BotClient, current bot.Bot, config bot.Config, send func(tea.Msg)) {
 	revision := current.Revision
 	result, err := client.UpdateBot(ctx, appserver.UpdateBotRequest{
