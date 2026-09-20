@@ -8,61 +8,15 @@ import (
 	"github.com/caelis-labs/caelis/control/bot"
 )
 
-// The Notebook field's user-visible states. An existing Bot stays off until the
-// user explicitly enables its notebook; a newly created Bot is already on.
-const (
-	botNotebookOff      = "Off"
-	botNotebookEnable   = "Enable"
-	botNotebookOn       = "On"
-	botNotebookFieldKey = "bot_notebook"
-	// botNotebookRowHint keeps the material consequence of enabling on the
-	// Notebook row itself. It is short enough to fit the smallest supported
-	// terminal, where the wrapped explanation below cannot.
-	botNotebookRowHint = "new context"
-)
-
-// botNotebookHint is the opt-in explanation in user terms: private notes for the
-// Bot plus a fresh model context that still keeps the conversation. The lines are
-// pre-split so each phrase survives wrapping, and the wording stays free of
-// implementation jargon; the Bot Mode documentation states the prompt-cache
-// consequence explicitly. The row hint and footer help carry the same boundary
-// where this wrapped explanation does not fit.
-var botNotebookHint = []string{
-	"Private notes for this Bot.",
-	"Keeps your history; starts a new model context.",
-}
-
 // Bot edits use the shared overlay, but are saved only through BotClient.
 // The original revision remains fixed throughout an edit, including model search.
 type botSettingsDraft struct {
 	current                          bot.Bot
 	config                           bot.Config
 	create, modelOnly, choosingModel bool
-	// notebookOptIn stages an explicit notebook enable for the next save. It is
-	// never inferred from a rename, description, or model edit.
-	notebookOptIn bool
-	fields        []wizardField
-	loading       bool
-	cancel        context.CancelFunc
-}
-
-// notebookFieldValue is the Notebook field's display state. A saved enable reads
-// On and can no longer be turned off.
-func (d *botSettingsDraft) notebookFieldValue() string {
-	switch {
-	case d.current.NotebookEnabled:
-		return botNotebookOn
-	case d.notebookOptIn:
-		return botNotebookEnable
-	default:
-		return botNotebookOff
-	}
-}
-
-// notebookEnableRequested reports whether saving the current draft must ask
-// Control to enable the notebook. A model-only or metadata-only save never does.
-func (d *botSettingsDraft) notebookEnableRequested() bool {
-	return !d.current.NotebookEnabled && d.notebookOptIn
+	fields                           []wizardField
+	loading                          bool
+	cancel                           context.CancelFunc
 }
 
 type botSettingsLoadedMsg struct {
@@ -153,12 +107,6 @@ func (m *Model) showBotSettingsForm() {
 		{key: "description", label: "Description", value: d.config.Description, placeholder: "Optional"},
 		{key: "bot_model", label: "Model", value: firstNonEmpty(d.current.ModelSelector, d.config.Model, "Host default")},
 	}
-	// A configured Bot exposes the explicit notebook opt-in. Creating a Bot does
-	// not: a new Bot is notebook-enabled by Control, and the model-only flow has
-	// no form to opt in from.
-	if !d.create {
-		s.fields = append(s.fields, wizardField{key: botNotebookFieldKey, label: "Notebook", value: d.notebookFieldValue()})
-	}
 	if d.fields != nil {
 		s.fields = d.fields
 	}
@@ -237,26 +185,6 @@ func (m *Model) acceptBotSettings() tea.Cmd {
 	return m.saveBotSettings()
 }
 
-// toggleBotNotebook stages or clears the explicit notebook opt-in. It is a
-// no-op once the notebook is on, so an enabled Bot stays read-only.
-func (m *Model) toggleBotNotebook() {
-	d := m.wizardOverlay.bot
-	if d == nil || d.current.NotebookEnabled {
-		return
-	}
-	d.notebookOptIn = !d.notebookOptIn
-	m.syncBotNotebookField()
-}
-
-func (m *Model) syncBotNotebookField() {
-	d := m.wizardOverlay.bot
-	for i := range m.wizardOverlay.fields {
-		if m.wizardOverlay.fields[i].key == botNotebookFieldKey {
-			m.wizardOverlay.fields[i].value = d.notebookFieldValue()
-		}
-	}
-}
-
 func (m *Model) saveBotSettings() tea.Cmd {
 	s, d := m.wizardOverlay, m.wizardOverlay.bot
 	if m.turnRunning() {
@@ -270,8 +198,7 @@ func (m *Model) saveBotSettings() tea.Cmd {
 		s.err, s.field = "Enter a name", 0
 		return nil
 	}
-	enableNotebook := d.notebookEnableRequested()
-	if !d.create && d.current.Config == d.config && !enableNotebook {
+	if !d.create && d.current.Config == d.config {
 		m.clearWizard()
 		return nil
 	}
@@ -284,7 +211,7 @@ func (m *Model) saveBotSettings() tea.Cmd {
 		if create {
 			runBotCreateFlow(ctx, client, config, send)
 		} else {
-			runBotSettingsFlow(ctx, client, current, config, enableNotebook, send)
+			runBotSettingsFlow(ctx, client, current, config, send)
 		}
 		return botSettingsSavedMsg{s, messages}
 	}

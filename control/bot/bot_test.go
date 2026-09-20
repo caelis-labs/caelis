@@ -9,7 +9,7 @@ import (
 
 func TestConfigurationRoundTripAndVersionGuard(t *testing.T) {
 	config := Config{Name: "Birch", Description: "Speak plainly.\n用户维护。", Model: "configured-model", Effort: "low"}
-	data, err := json.Marshal(map[string]any{StateKey: Encode("stable-id", config)})
+	data, err := json.Marshal(map[string]any{StateKey: map[string]any{"version": 1, "id": "stable-id", "config": config}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -21,15 +21,10 @@ func TestConfigurationRoundTripAndVersionGuard(t *testing.T) {
 	if err != nil || id != "stable-id" || decoded != config {
 		t.Fatalf("round trip: %q, %+v, %v", id, decoded, err)
 	}
-	if enabled, err := NotebookEnabled(state); err != nil || !enabled {
-		t.Fatalf("new Bot notebook = %t, %v", enabled, err)
-	}
 	for _, invalid := range []map[string]any{
 		nil,
 		{StateKey: map[string]any{"version": 2, "id": "id", "config": config}},
 		{StateKey: map[string]any{"version": 1, "id": "", "config": config}},
-		{StateKey: map[string]any{"version": 1, "id": "id", "config": config, "notebook_version": 2}},
-		{StateKey: map[string]any{"version": 1, "id": "id", "config": config, "notebook_version": -1}},
 		{StateKey: "not a configuration"},
 	} {
 		if _, err := Decode(invalid); err == nil {
@@ -38,25 +33,30 @@ func TestConfigurationRoundTripAndVersionGuard(t *testing.T) {
 	}
 }
 
-func TestLegacyNotebookDecodeDoesNotMigrateState(t *testing.T) {
-	state := map[string]any{StateKey: map[string]any{
-		"version": 1, "id": "stable-id", "config": Config{Name: "Legacy"},
-	}}
-	before, err := json.Marshal(state)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for range 2 {
-		if _, err := Decode(state); err != nil {
-			t.Fatal(err)
-		}
-		if enabled, err := NotebookEnabled(state); err != nil || enabled {
-			t.Fatalf("legacy notebook = %t, %v", enabled, err)
-		}
-	}
-	after, err := json.Marshal(state)
-	if err != nil || !reflect.DeepEqual(before, after) {
-		t.Fatalf("read changed legacy state: before=%s after=%s err=%v", before, after, err)
+// TestReleasedRecordShapeStillDecodes pins the Store upgrade: records written by
+// the release that gated notebooks per Bot keep their configuration, so existing
+// Bots open unchanged, and a read never rewrites the stored bytes.
+func TestReleasedRecordShapeStillDecodes(t *testing.T) {
+	config := Config{Name: "Legacy", Description: "Preserve this.", Model: "configured-model"}
+	for name, stored := range map[string]map[string]any{
+		"tool-free baseline": {"version": 1, "id": "stable-id", "config": config},
+		"admitted notebook":  {"version": 1, "id": "stable-id", "config": config, "notebook_version": 1},
+	} {
+		t.Run(name, func(t *testing.T) {
+			state := map[string]any{StateKey: stored}
+			before, err := json.Marshal(state)
+			if err != nil {
+				t.Fatal(err)
+			}
+			id, decoded, err := ReadState(state)
+			if err != nil || id != "stable-id" || decoded != config {
+				t.Fatalf("released record = %q, %+v, %v", id, decoded, err)
+			}
+			after, err := json.Marshal(state)
+			if err != nil || !reflect.DeepEqual(before, after) {
+				t.Fatalf("read rewrote released state: before=%s after=%s err=%v", before, after, err)
+			}
+		})
 	}
 }
 

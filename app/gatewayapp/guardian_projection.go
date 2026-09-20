@@ -107,14 +107,6 @@ func guardianProjectEvent(e *session.Event) *session.Event {
 	one := guardianEvidenceEvent(text)
 	one.ID, one.Seq, one.SessionID = e.ID, e.Seq, e.SessionID
 	one.Meta[guardianSourceProjection] = true
-	if e.Tool != nil && !user {
-		one.Meta[guardianScreenCallID] = e.Tool.ID
-		if session.EventTypeOf(e) == session.EventTypeToolCall {
-			one.Meta[guardianScreenAction] = guardianScreenActionKey(e.Tool.Name, e.Tool.Input)
-		} else {
-			one.Meta[guardianScreenResult] = true
-		}
-	}
 	if user {
 		one.Meta[guardianUserSource] = fmt.Sprintf("%s:%d", e.SessionID, e.Seq)
 	} else {

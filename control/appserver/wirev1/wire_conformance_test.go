@@ -88,7 +88,6 @@ func TestProductionRequestAndResponseJSONConformsToOpenAPI(t *testing.T) {
 		"UpdateBotRequest": appserver.UpdateBotRequest{
 			WriteBase: appserver.WriteBase{OperationID: "bot-update-operation-1", SessionID: "bot-chat-1", ExpectedRevision: &revision},
 			BotID:     "bot-1", Config: bot.Config{Name: "Ada"},
-			EnableNotebook: true,
 		},
 		"CompletionRequest": appserver.CompletionRequest{
 			SessionID: "session-1", WorkspaceKey: "workspace-1", CWD: "/tmp/workspace",

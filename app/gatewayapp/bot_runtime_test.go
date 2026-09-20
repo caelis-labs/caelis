@@ -149,7 +149,8 @@ func TestBotRuntimeIsolatedCapabilitiesAndStableCanonicalPrefix(t *testing.T) {
 	if !reflect.DeepEqual(firstMessages, secondMessages[:len(firstMessages)]) {
 		t.Fatal("ordinary Bot message rewrote the prior model prefix")
 	}
-	if len(firstMessages) != 4 || botWireMessageText(firstMessages[0]) != bot.NotebookInstructions || firstMessages[1].(map[string]any)["role"] != "user" {
+	if len(firstMessages) != 3 || botWireMessageText(firstMessages[0]) != buildBotSystemPrompt(stack.composition.authorities.appName) ||
+		botWireMessageText(firstMessages[2]) != "first message" {
 		t.Fatalf("initial model messages = %#v", firstMessages)
 	}
 	if !strings.Contains(botWireMessageText(firstMessages[1]), config.Description) {
@@ -362,7 +363,7 @@ func saveBotRuntimeTestConfig(t *testing.T, stack *Stack, ref session.SessionRef
 			t.Fatal(err)
 		}
 	}
-	if _, err := service.Save(t.Context(), active, id, config, previous, false, operation, operation); err != nil {
+	if _, err := service.Save(t.Context(), active, id, config, previous, operation, operation); err != nil {
 		t.Fatal(err)
 	}
 }

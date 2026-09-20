@@ -21,7 +21,7 @@ not part of Bot mode.
 | --- | --- |
 | `/new` | Create a Bot. Asks for a name, then an optional description; Enter skips the description. |
 | `/bots` | Open the Bot selection overlay. |
-| `/settings` | Edit the active Bot's name, description, model, and notebook. |
+| `/settings` | Edit the active Bot's name, description, and model. |
 | `/model` | Choose a connected provider model for the active Bot. |
 | `/connect` | Connect a provider or external ACP Agent to the Host. |
 | `/disconnect` | Disconnect a provider or external ACP Agent from the Host. |
@@ -68,17 +68,15 @@ Left/Right adjusts effort; Tab switches to Fast when supported. Enter applies th
 model draft, and Create or Save commits the complete form. Esc closes without
 saving. `/bots` supports typing or pasting a search inside its selection overlay.
 
-New Bots have a private notebook. Bots created with the tool-free baseline stay
-tool-free until you enable it: open `/settings`, move to Notebook, press Enter
-to select **Enable**, then move to **Save** and press Enter. Esc discards the draft.
-Enabling retains canonical history and the current conversation's model-visible
-history, including any existing compaction checkpoint. It starts a new request
-baseline with notebook instructions and tools, so the old request-prefix cache
-is not preserved. This is a one-way capability change: ordinary conversation,
-renaming, model selection, and Runtime reactivation never enable a legacy Bot or
-disable an enabled notebook. The enable event and capability commit atomically;
-if saving fails or its outcome is unknown, refresh settings before trying a new
-operation. Other windows and later Host starts read the same durable capability.
+Every Bot has the same private notebook and the same five notebook file tools.
+There is no capability switch: the notebook is not something a Bot enables,
+inherits, or loses, and creating, renaming, selecting a model, or reactivating a
+Runtime never changes which tools a Bot has. A Bot created before notebooks were
+universal keeps its identity, history, and model, and receives its notebook on
+your next message to it. That one-time provisioning uses the same confined
+notebook owner as creation, so it never replaces existing notes and never
+recreates a deleted `index.md`. If it fails, sending the message fails with an
+explicit error instead of starting a reply whose tools cannot reach a notebook.
 
 - A Bot's model must be an existing provider model from the configured catalog.
   Selection is explicit: Bot mode never silently binds a different provider or a
@@ -126,14 +124,15 @@ file writes are atomic on supported local Unix filesystems, not a transaction
 across a note and its index. An index update failure must be repaired explicitly.
 External filesystem edits are not serialized with Bot tool calls.
 
-Notebook content is never injected into the system prefix or refreshed at the
-start of every Turn. The fixed guidance names `index.md`; new information enters
-only as ordinary tool results when the Bot reads it. Normal continuation and
-note edits therefore retain the committed model-request prefix. System watermark
-compaction may establish a new context baseline; the fixed notebook entry point
-remains discoverable without scanning every file. Missing or unreadable notes
-produce tool errors, not an invented memory, and Runtime activation never silently
-recreates a missing index. Ask the Bot to repair it if necessary.
+Notebook content is never injected into the instruction baseline or refreshed at
+the start of every Turn. The fixed guidance names `index.md`; new information
+enters only as ordinary tool results when the Bot reads it. Normal continuation
+and note edits therefore retain the committed model-request prefix. System
+watermark compaction may establish a new context baseline; the fixed notebook
+entry point remains discoverable without scanning every file. Missing or
+unreadable notes produce tool errors, not an invented memory, and nothing
+recreates a missing index while a Bot conversation continues. Ask the Bot to
+repair it if necessary.
 
 A tool error is not a successful save. Check the tool result when a save matters;
 model choices and verbal confirmations alone are not evidence of persistence.
@@ -141,13 +140,29 @@ Revising a note does not erase earlier conversation or tool-result history.
 
 ## What a Bot conversation is
 
-A Bot conversation runs on the built-in controller. Its fixed instruction/tool
-baseline changes only at the explicit notebook enable boundary described above.
-Notebook text is evidence, not configuration or higher-priority instructions; it
-cannot change the user-maintained name, description, or permissions. The Bot has
-no shell, arbitrary workspace access, Workspace Memory, plugin installation,
-collaboration, or background Worker capability. Its canonical Session cannot carry
-a Workspace Memory binding.
+A Bot conversation runs on the built-in controller. Every Bot resolves the same
+instruction baseline and the same five notebook tools for every Turn: shared
+identity and instruction/evidence principles plus Bot-specific identity,
+conversation, notebook, and capability guidance, naming no tool the request does
+not carry. Notebook text is evidence, not configuration or higher-priority
+instructions; it cannot change the user-maintained name, description, or
+permissions. The Bot has no shell, arbitrary workspace access, Workspace Memory,
+plugin installation, collaboration, or background Worker capability, and
+plugin-provided or workspace tools are not assembled into a Bot conversation.
+Its canonical Session cannot carry a Workspace Memory binding.
+
+### Instruction baseline and updates
+
+The baseline and the notebook tools are derived from the running Host rather
+than from a per-Bot capability record: the baseline is compiled and depends only
+on the Host application name, and the tools are bound to that Bot's own notebook.
+A Bot window left open therefore never pins an older baseline, and neither the
+Bot's configuration nor its conversation needs a migration or Runtime recycle
+for it. Upgrading the Host takes effect through the existing Host replacement
+path: the next Turn served by the new binary uses the new baseline, while the
+canonical history, compaction checkpoints, and provider message prefix stay as
+they were. A change that alters the visible instructions or tool schemas starts
+a new request baseline, so the earlier provider prefix is not reused verbatim.
 
 ## Leaving, switching, and cancelling
 

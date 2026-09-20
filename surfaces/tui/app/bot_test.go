@@ -78,9 +78,6 @@ func (f *fakeBotClient) CreateBot(_ context.Context, req appserver.CreateBotRequ
 		SessionID: "bot-chat-" + id,
 		Revision:  1,
 		Config:    req.Config,
-		// New Bots are notebook-enabled by Control; existing Bots stay legacy
-		// until an explicit opt-in.
-		NotebookEnabled: true,
 	})
 	return appserver.CommandResult{
 		OperationID: req.OperationID,
@@ -106,10 +103,6 @@ func (f *fakeBotClient) UpdateBot(_ context.Context, req appserver.UpdateBotRequ
 	for i, candidate := range f.bots {
 		if candidate.ID == req.BotID {
 			f.bots[i].Config = req.Config
-			// A notebook enable is one-way: it is never cleared by a later save.
-			if req.EnableNotebook {
-				f.bots[i].NotebookEnabled = true
-			}
 			f.bots[i].Revision++
 			return appserver.CommandResult{
 				OperationID: req.OperationID, Outcome: appserver.OutcomeCommitted,
@@ -484,7 +477,7 @@ func TestBotSettingsResultDoesNotOverrideSwitchedBot(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		runBotSettingsFlow(context.Background(), client, base.bots[0], bot.Config{Name: "Ada", Model: "claude-4"}, false, func(msg tea.Msg) { send <- msg })
+		runBotSettingsFlow(context.Background(), client, base.bots[0], bot.Config{Name: "Ada", Model: "claude-4"}, func(msg tea.Msg) { send <- msg })
 	}()
 	<-client.entered // Ada's save is now in flight inside UpdateBot
 
@@ -602,7 +595,7 @@ func runBotUpdateFlowResult(t *testing.T, client appserver.BotClient, model stri
 	config.Model, config.Effort, config.Fast = model, "", false
 	send := make(chan tea.Msg, 16)
 	done := make(chan struct{})
-	runBotSettingsFlow(t.Context(), client, current, config, false, func(msg tea.Msg) { send <- msg })
+	runBotSettingsFlow(t.Context(), client, current, config, func(msg tea.Msg) { send <- msg })
 	close(done)
 	return collectBotFlow(t, send, done)
 }

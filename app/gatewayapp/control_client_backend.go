@@ -53,6 +53,9 @@ func (s *controlCommandBackend) ExecuteControlCommand(ctx context.Context, princ
 		if sessionvisibility.IsBotSession(active) {
 			s.botAdmissionMu.Lock()
 			defer s.botAdmissionMu.Unlock()
+			if err := s.admitBotPrompt(ctx, active); err != nil {
+				return appserver.CommandResult{SessionID: active.SessionID}, classifyControlPreDispatchError(err)
+			}
 		}
 	}
 	if isHostConfigurationCommandRequest(request) {

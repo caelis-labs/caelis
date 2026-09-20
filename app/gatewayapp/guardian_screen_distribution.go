@@ -3,46 +3,59 @@ package gatewayapp
 import (
 	"fmt"
 	"math"
-	"strconv"
-	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/judgment"
 	"github.com/caelis-labs/caelis/internal/kernel"
 )
 
-// Selection compares the supplied option distribution after grouping only
-// canonically equivalent decisions. Probability split across permission scopes
-// is not disagreement about allow versus deny. Scope is selected separately and
-// never broadened by combining support for several options.
+// Screening supports the four ACP kinds, never guesses from names or IDs, and
+// needs both outcomes. Other valid option sets go directly to the Agent.
+func guardianScreenOptions(payload *approval.Payload) error {
+	fail := func() error {
+		return &guardianScreenError{reason: "options_not_screenable", cause: fmt.Errorf("classifier requires canonical allow and reject options (at most 255)")}
+	}
+	if payload == nil || len(payload.Options) > 255 || approval.ValidateACPOptions(payload.Options) != nil {
+		return fail()
+	}
+	allow, deny := false, false
+	for _, option := range payload.Options {
+		switch option.Kind {
+		case "allow_once", "allow_always":
+			allow = true
+		case "reject_once", "reject_always":
+			deny = true
+		}
+	}
+	if !allow || !deny {
+		return fail()
+	}
+	return nil
+}
+
+// Selection compares probability mass for allow versus deny. Scope is selected
+// separately: prefer once and never broaden authority by combining option mass.
 func guardianScreenSelection(req kernel.ApprovalReviewRequest, response judgment.Response) (approval.Option, error) {
 	fail := func() (approval.Option, error) {
 		return approval.Option{}, fmt.Errorf("guardian classifier decision distribution requires Agent review")
 	}
 	decision := response.Answers["decision"]
-	if req.Approval == nil || decision.Type != judgment.Choice || len(decision.Probabilities) != len(req.Approval.Options)+1 {
+	if guardianScreenOptions(req.Approval) != nil || decision.Type != judgment.Choice || len(decision.Probabilities) != len(req.Approval.Options) {
 		return fail()
 	}
-	if err := approval.ValidateStrictOptions(req.Approval.Options); err != nil {
-		return fail()
-	}
-	deferred, ok := decision.Probabilities["unavailable"]
-	if !ok {
-		return fail()
-	}
-	groups := map[string]float64{"allow": 0, "deny": 0, "defer": deferred}
-	kinds := make([]approval.OptionDecision, len(req.Approval.Options))
+	groups := map[string]float64{"allow": 0, "deny": 0}
+	kinds := make([]string, len(req.Approval.Options))
 	for index, option := range req.Approval.Options {
-		p, ok := decision.Probabilities[strconv.Itoa(index)]
+		p, ok := decision.Probabilities[option.ID]
 		if !ok || !guardianScreenProbability(p) {
 			return fail()
 		}
-		_, kind, err := approval.ResolveStrictOption(req.Approval.Options, option.ID)
-		if err != nil {
-			return fail()
+		kind := "deny"
+		if option.Kind == "allow_once" || option.Kind == "allow_always" {
+			kind = "allow"
 		}
 		kinds[index] = kind
-		groups[string(kind)] += p
+		groups[kind] += p
 	}
 	// Validate the complete answer, including the provider's stated top option.
 	chosen, ok := decision.Probabilities[decision.Choice]
@@ -54,47 +67,42 @@ func guardianScreenSelection(req kernel.ApprovalReviewRequest, response judgment
 			return fail()
 		}
 	}
-	winner := approval.OptionDecisionAllow
+	winner := "allow"
 	if groups["deny"] > groups["allow"] {
-		winner = approval.OptionDecisionDeny
+		winner = "deny"
+	}
+	if !guardianDistributionDominates(groups, winner, 20, .9) {
+		return fail()
 	}
 	selectedIndex := -1
 	for index, option := range req.Approval.Options {
 		if kinds[index] != winner {
 			continue
 		}
-		if selectedIndex < 0 || (strings.HasSuffix(option.Kind, "_once") && !strings.HasSuffix(req.Approval.Options[selectedIndex].Kind, "_once")) ||
-			(option.Kind == req.Approval.Options[selectedIndex].Kind && decision.Probabilities[strconv.Itoa(index)] > decision.Probabilities[strconv.Itoa(selectedIndex)]) {
+		once := option.Kind == "allow_once" || option.Kind == "reject_once"
+		if selectedIndex < 0 {
+			selectedIndex = index
+			continue
+		}
+		selected := req.Approval.Options[selectedIndex]
+		selectedOnce := selected.Kind == "allow_once" || selected.Kind == "reject_once"
+		if (once && !selectedOnce) || (once == selectedOnce && decision.Probabilities[option.ID] > decision.Probabilities[selected.ID]) {
 			selectedIndex = index
 		}
 	}
-	if selectedIndex < 0 {
-		return fail()
-	}
 	selected := req.Approval.Options[selectedIndex]
-	impact := response.Answers["consequences"]
-	_, hasHighImpact := impact.Probabilities["high_impact"]
-	_, hasUnknownImpact := impact.Probabilities["unknown"]
-	routine := impact.Type == judgment.Choice && impact.Choice == "routine" && len(impact.Probabilities) == 3 && hasHighImpact && hasUnknownImpact && guardianDistributionDominates(impact.Probabilities, "routine", 4, .5)
-	ratio, gap := 20.0, .9
-	if winner == approval.OptionDecisionAllow && selected.Kind == "allow_once" && routine {
-		ratio, gap = 3, .5
-	}
-	if !guardianDistributionDominates(groups, string(winner), ratio, gap) {
-		return fail()
-	}
-	// Without a once option, require clear support for the exact persistent
-	// option too: outcome agreement alone cannot establish permission scope.
-	if !strings.HasSuffix(selected.Kind, "_once") && !guardianDistributionDominates(decision.Probabilities, strconv.Itoa(selectedIndex), 20, .9) {
+	// Without a once option, outcome agreement cannot establish persistent scope:
+	// require a decisive lead for the exact persistent option as well.
+	if selected.Kind != "allow_once" && selected.Kind != "reject_once" && !guardianDistributionDominates(decision.Probabilities, selected.ID, 20, .9) {
 		return fail()
 	}
 	return selected, nil
 }
 
 // Compare normalized lead and odds over the runner-up. This uses the whole
-// distribution, tolerates decimal rounding, and rejects ties,
-// missing data and malformed probabilities. The operating points are measured
-// abstention rules, not calibrated correctness or authorization probabilities.
+// distribution, tolerates decimal rounding, and rejects ties, missing data and
+// malformed probabilities. These are abstention rules, not calibrated
+// correctness or authorization probabilities.
 func guardianDistributionDominates(values map[string]float64, selected string, ratio, gap float64) bool {
 	p, ok := values[selected]
 	if !ok || len(values) < 2 {

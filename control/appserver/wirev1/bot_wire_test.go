@@ -131,52 +131,40 @@ func TestBotWireRejectsNumericRevision(t *testing.T) {
 	}
 }
 
-func TestBotNotebookAdmissionWireAndGeneratedClients(t *testing.T) {
-	for _, enabled := range []bool{false, true} {
-		name := "legacy"
-		if enabled {
-			name = "enabled"
-		}
-		t.Run(name, func(t *testing.T) {
-			value := bot.Bot{ID: "bot-1", SessionID: "bot-chat-1", Revision: 3, Config: bot.Config{Name: "Ada"}, NotebookEnabled: enabled}
-			validateWireValue(t, "Bot", value)
-			raw, err := Marshal(value)
-			if err != nil {
-				t.Fatal(err)
-			}
-			var dto generated.Bot
-			if err := json.Unmarshal(raw, &dto); err != nil || dto.NotebookEnabled != enabled {
-				t.Fatalf("generated Bot notebook = %t, %v", dto.NotebookEnabled, err)
-			}
-			var decoded bot.Bot
-			if err := Unmarshal(raw, &decoded); err != nil || !reflect.DeepEqual(decoded, value) {
-				t.Fatalf("Bot round trip = %+v, %v", decoded, err)
-			}
-			revision := uint64(3)
-			request := appserver.UpdateBotRequest{
-				WriteBase: appserver.WriteBase{OperationID: "enable-1", SessionID: value.SessionID, ExpectedRevision: &revision},
-				BotID:     value.ID, Config: value.Config, EnableNotebook: enabled,
-			}
-			validateWireValue(t, "UpdateBotRequest", request)
-			raw, err = Marshal(request)
-			if err != nil {
-				t.Fatal(err)
-			}
-			var requestDTO generated.UpdateBotRequest
-			if err := json.Unmarshal(raw, &requestDTO); err != nil {
-				t.Fatal(err)
-			}
-			if enabled {
-				if requestDTO.EnableNotebook == nil || !*requestDTO.EnableNotebook {
-					t.Fatalf("generated request lost enable intent: %s", raw)
-				}
-			} else if requestDTO.EnableNotebook != nil || bytes.Contains(raw, []byte("enable_notebook")) {
-				t.Fatalf("ordinary edit carried enable intent: %s", raw)
-			}
-			var decodedRequest appserver.UpdateBotRequest
-			if err := DecodeRequest(raw, &decodedRequest); err != nil || !reflect.DeepEqual(decodedRequest, request) {
-				t.Fatalf("request round trip = %+v, %v", decodedRequest, err)
-			}
-		})
+// TestBotWireCarriesNoNotebookSwitch pins the unified Bot contract: every Bot
+// has the same private notebook, so the released per-Bot capability field is
+// absent from the source schema, the wire value, and the generated clients.
+func TestBotWireCarriesNoNotebookSwitch(t *testing.T) {
+	value := bot.Bot{ID: "bot-1", SessionID: "bot-chat-1", Revision: 3, Config: bot.Config{Name: "Ada"}}
+	validateWireValue(t, "Bot", value)
+	raw, err := Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var dto generated.Bot
+	if err := json.Unmarshal(raw, &dto); err != nil || dto.Id != value.ID || dto.SessionId != value.SessionID {
+		t.Fatalf("generated Bot = %+v, %v (%s)", dto, err, raw)
+	}
+	var decoded bot.Bot
+	if err := Unmarshal(raw, &decoded); err != nil || !reflect.DeepEqual(decoded, value) {
+		t.Fatalf("Bot round trip = %+v, %v", decoded, err)
+	}
+	revision := uint64(3)
+	request := appserver.UpdateBotRequest{
+		WriteBase: appserver.WriteBase{OperationID: "bot-update-1", SessionID: value.SessionID, ExpectedRevision: &revision},
+		BotID:     value.ID, Config: value.Config,
+	}
+	validateWireValue(t, "UpdateBotRequest", request)
+	raw, err = Marshal(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var requestDTO generated.UpdateBotRequest
+	if err := json.Unmarshal(raw, &requestDTO); err != nil || requestDTO.BotId != value.ID {
+		t.Fatalf("generated Bot update = %+v, %v (%s)", requestDTO, err, raw)
+	}
+	var decodedRequest appserver.UpdateBotRequest
+	if err := DecodeRequest(raw, &decodedRequest); err != nil || !reflect.DeepEqual(decodedRequest, request) {
+		t.Fatalf("request round trip = %+v, %v", decodedRequest, err)
 	}
 }

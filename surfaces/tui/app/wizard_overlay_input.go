@@ -123,7 +123,7 @@ func (m *Model) handleWizardOverlayKey(msg tea.KeyMsg) tea.Cmd {
 			}
 		case 'u', 'w':
 			if len(s.fields) > 0 {
-				if s.field < len(s.fields) && !s.fields[s.field].choice && s.fields[s.field].key != "bot_model" && s.fields[s.field].key != botNotebookFieldKey {
+				if s.field < len(s.fields) && !s.fields[s.field].choice && s.fields[s.field].key != "bot_model" {
 					m.setWizardFieldValue("")
 				}
 			} else {
@@ -152,11 +152,6 @@ func (m *Model) handleWizardOverlayKey(msg tea.KeyMsg) tea.Cmd {
 			switch s.fields[s.field].key {
 			case "bot_model":
 				return m.openBotSettingsModels()
-			case botNotebookFieldKey:
-				// Unlike a text field, Enter stages the notebook opt-in instead of
-				// advancing. An already-enabled notebook ignores it.
-				m.toggleBotNotebook()
-				return nil
 			}
 			m.moveWizardSelection(1)
 			return nil
@@ -185,7 +180,7 @@ func (m *Model) editWizardField(k tea.Key) {
 		return
 	}
 	f := &s.fields[s.field]
-	if f.key == "bot_model" || f.key == botNotebookFieldKey {
+	if f.key == "bot_model" {
 		return
 	}
 	if f.choice {

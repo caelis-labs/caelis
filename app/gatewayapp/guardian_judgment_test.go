@@ -19,14 +19,9 @@ func (f judgmentFunc) Evaluate(ctx context.Context, r judgment.Request) (judgmen
 }
 func choiceAnswer(choice string, confidence float64) judgment.Answer {
 	answer := judgment.Answer{Type: judgment.Choice, Choice: choice, Confidence: &confidence}
-	if choice == "0" || choice == "1" || choice == "unavailable" {
-		answer.Probabilities = map[string]float64{"0": 0, "1": 0, "unavailable": 0}
+	if choice == "allow_once" || choice == "reject_once" {
+		answer.Probabilities = map[string]float64{"allow_once": 1 - confidence, "reject_once": 1 - confidence}
 		answer.Probabilities[choice] = confidence
-		if choice == "unavailable" {
-			answer.Probabilities["0"] = 1 - confidence
-		} else {
-			answer.Probabilities["unavailable"] = 1 - confidence
-		}
 	}
 	return answer
 }
@@ -37,11 +32,10 @@ func TestGuardianJudgmentUsesCanonicalSourcesAndStrictSettlement(t *testing.T) {
 		confidence     float64
 		wantErr, allow bool
 	}{
-		{"allow", "0", 1, false, true},
-		{"deny without explanation", "1", 1, false, false},
-		{"uncertain allow", "0", .5, true, false},
-		{"uncertain deny", "1", .6, true, false},
-		{"missing evidence", "unavailable", 1, true, false},
+		{"allow", "allow_once", 1, false, true},
+		{"deny without explanation", "reject_once", 1, false, false},
+		{"uncertain allow", "allow_once", .5, true, false},
+		{"uncertain deny", "reject_once", .6, true, false},
 		{"unknown option", "injected", 1, true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -57,8 +51,8 @@ func TestGuardianJudgmentUsesCanonicalSourcesAndStrictSettlement(t *testing.T) {
 			req := approvalReviewerTestRequest(active, nil, "inspect", map[string]any{"cmd": command})
 			req.Judgment = judgmentFunc(func(_ context.Context, r judgment.Request) (judgment.Response, error) {
 				raw, _ := json.Marshal(r)
-				if len(r.Questions) != 2 {
-					t.Error("classifier must ask only decision and consequences")
+				if len(r.Questions) != 1 {
+					t.Error("classifier must ask only the original-option decision")
 				}
 				if strings.Contains(string(raw), "UNTRUSTED_ASSISTANT_PERMISSION") || !strings.Contains(string(raw), "Do not delete files") || !strings.Contains(string(raw), command) {
 					t.Errorf("invalid canonical projection")

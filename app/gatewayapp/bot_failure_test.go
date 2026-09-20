@@ -56,7 +56,7 @@ func TestBotCreationUnknownReceiptRecoversWithoutDuplicateConversation(t *testin
 		t.Fatalf("unknown creation duplicated Bot: %+v, %v", list, err)
 	}
 	loaded, err := stack.Sessions().LoadSession(ctx, session.LoadSessionRequest{SessionRef: session.SessionRef{SessionID: recovered.SessionID}})
-	if err != nil || len(loaded.Events) != 2 {
+	if err != nil || len(loaded.Events) != 1 || session.EventText(loaded.Events[0]) != bot.ConfigurationMessage(request.Config) {
 		t.Fatalf("recovery repeated configuration event: %+v, %v", loaded.Events, err)
 	}
 	// A fresh operation ledger models expiry of terminal receipts. The durable

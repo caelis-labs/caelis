@@ -32,7 +32,6 @@ func TestBotSettingsLongDescriptionNavigationPreservesValue(t *testing.T) {
 					}
 					connectPress(m, "tab")
 					connectPress(m, "tab")
-					connectPress(m, "tab")
 					connectPress(m, "enter")
 					if m.wizardOverlay != nil {
 						t.Fatal("save did not close settings")
@@ -130,7 +129,6 @@ func TestBotMultilineDescriptionCursorMatchesEditing(t *testing.T) {
 					t.Fatalf("step %d: missing %q in rendered form:\n%s", i, step.visual, frame)
 				}
 			}
-			connectPress(m, "tab")
 			connectPress(m, "tab")
 			connectPress(m, "tab")
 			connectPress(m, "enter")

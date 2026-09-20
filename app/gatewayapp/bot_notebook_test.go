@@ -236,7 +236,8 @@ func TestBotNotebookIndexDiscoverableAfterWatermarkCompaction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resolved.RunRequest.AgentSpec.Metadata["system_prompt"] != bot.NotebookInstructions || !strings.Contains(bot.NotebookInstructions, "index.md") || len(resolved.RunRequest.AgentSpec.Tools) != 5 {
+	instructions, _ := resolved.RunRequest.AgentSpec.Metadata["system_prompt"].(string)
+	if instructions != buildBotSystemPrompt(stack.composition.authorities.appName) || !strings.Contains(instructions, bot.NotebookIndex) || len(resolved.RunRequest.AgentSpec.Tools) != 5 {
 		t.Fatal("compaction removed the stable notebook entry point")
 	}
 }

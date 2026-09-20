@@ -18,6 +18,12 @@ func buildSystemPromptResult(cfg promptConfig) (promptResult, error) {
 	return promptassembly.BuildSystemPromptResult(cfg)
 }
 
+// buildBotSystemPrompt is the fixed Bot instruction baseline. It never reads
+// workspace instructions and depends only on the Host application name.
+func buildBotSystemPrompt(appName string) string {
+	return promptassembly.BuildBotSystemPrompt(appName)
+}
+
 func systemPromptWithCollaborationGuidance(prompt string) string {
 	return promptassembly.WithCollaborationGuidance(prompt)
 }

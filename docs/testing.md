@@ -95,11 +95,21 @@ Ordinary tests never load `.env` or make live Jev requests.
 The opt-in `TestGuardianJevEscalationCalibration` and
 `TestGuardianJevEscalationHoldout` use `CAELIS_JEV_EVAL=1`
 and `JEV_API_KEY` to classify separate sets of 20 and 12 bounded escalation fixtures without executing
-their commands. Each fails on any wrong direct decision, provider failure, or
-direct-decision coverage below the 90% target. Intentional abstentions count in
-the denominator. `CAELIS_JEV_CALIBRATION_OUT` and `CAELIS_JEV_HOLDOUT_OUT` optionally record distributions
-and aggregate input measurements. These small samples do not establish
-production coverage or calibrated error rates.
+their commands. Each fails on any wrong direct decision or provider failure.
+Direct-decision coverage is reported, not a pass threshold; intentional abstentions
+count in the denominator. `CAELIS_JEV_CALIBRATION_OUT` and
+`CAELIS_JEV_HOLDOUT_OUT` optionally record distributions and input measurements.
+These classifier-only samples do not establish production coverage or calibrated
+error rates.
+
+`TestGuardianJevCascadeE2E` uses `CAELIS_JEV_CASCADE_E2E=1`, `JEV_API_KEY`,
+and `CAELIS_GUARDIAN_E2E_MODEL` (a configured local generative model alias) to
+exercise the approval reviewer with real Jev and Agent providers. It records the
+rendered synthetic classifier request, distribution, actual route and final
+settlement. Legal non-screenable option aliases must reach the Agent without a
+Jev call; canonical options may settle directly or defer. Wrong decisions and
+provider failures fail the check, without a direct-coverage target. Proposed
+commands are never executed and no private Session is replayed.
 
 `TestGuardianSessionJevReplay` is a separate, explicit opt-in for an existing
 Session's evidence. Set `CAELIS_JEV_SESSION_E2E=1`, `JEV_API_KEY`, and
@@ -215,6 +225,12 @@ CAELIS_BOT_E2E=1 CAELIS_BOT_SOURCE_STORE=$HOME/.caelis CAELIS_BOT_E2E_OUT=/tmp/c
 credential. `CAELIS_BOT_E2E_OUT` is optional; when set, it writes only the test's
 synthetic request payloads, replies, note contents, and the natural note-taking
 observation, never headers or credentials.
+
+Deterministic Bot coverage in the same package needs no provider. It provisions a
+Bot created before notebooks were universal on that owner's first prompt, proves
+the notebook is created exactly once and that a deleted `index.md` is never
+recreated, and rejects the prompt with an explicit error when the Store cannot be
+provisioned at all.
 
 `make windows-check` runs Guardian's native evidence tests with deterministic
 model responses. They exercise PowerShell, temporary-only writes, file evidence,

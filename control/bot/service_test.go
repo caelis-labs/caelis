@@ -12,7 +12,7 @@ import (
 	"github.com/caelis-labs/caelis/control/sessionvisibility"
 )
 
-func TestNotebookSavePersistsExplicitAdmissionAndHistory(t *testing.T) {
+func TestSavePersistsConfigurationAndHistory(t *testing.T) {
 	root, store, active, id := notebookSaveFixture(t)
 	service := &Service{Sessions: store}
 	config := Config{Name: "Legacy", Model: "model-a"}
@@ -34,35 +34,24 @@ func TestNotebookSavePersistsExplicitAdmissionAndHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	var appendedExpectation string
 	for index, next := range []Config{
 		{Name: "Renamed", Description: "Use short replies.", Model: "model-a"},
 		{Name: "Renamed", Description: "Use short replies.", Model: "model-b"},
 	} {
 		operation := []string{"rename", "model"}[index]
-		active, err = service.Save(t.Context(), active, id, next, &config, false, operation, operation)
+		if index == 0 {
+			appendedExpectation = ConfigurationMessage(next)
+		}
+		active, err = service.Save(t.Context(), active, id, next, &config, operation, operation)
 		if err != nil {
 			t.Fatal(err)
 		}
 		config = next
 		value, err := service.GetBot(t.Context(), id)
-		if err != nil || value.NotebookEnabled {
-			t.Fatalf("ordinary Save enabled legacy Bot: %+v, %v", value, err)
+		if err != nil || value.Config != next || value.ID != id {
+			t.Fatalf("saved Bot = %+v, %v", value, err)
 		}
-	}
-	active, err = service.Save(t.Context(), active, id, config, &config, true, "enable", "enable")
-	if err != nil {
-		t.Fatal(err)
-	}
-	// A second explicit enable and an ordinary model edit preserve admission,
-	// without appending a second enable event.
-	active, err = service.Save(t.Context(), active, id, config, &config, true, "enabled-again", "enabled-again")
-	if err != nil {
-		t.Fatal(err)
-	}
-	next := config
-	next.Model = "model-c"
-	if _, err := service.Save(t.Context(), active, id, next, &config, false, "enabled-model", "enabled-model"); err != nil {
-		t.Fatal(err)
 	}
 	reopened := file.NewStore(file.Config{RootDir: root})
 	loaded, err := reopened.LoadSession(t.Context(), session.LoadSessionRequest{SessionRef: active.SessionRef})
@@ -70,33 +59,36 @@ func TestNotebookSavePersistsExplicitAdmissionAndHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 	value, err := (&Service{Sessions: reopened}).GetBot(t.Context(), id)
-	if err != nil || !value.NotebookEnabled || value.ID != id || value.SessionID != active.SessionID || value.Config != next {
-		t.Fatalf("reopened notebook Bot = %+v, %v", value, err)
+	if err != nil || value.ID != id || value.SessionID != active.SessionID || value.Config != config {
+		t.Fatalf("reopened Bot = %+v, %v", value, err)
 	}
 	if !reflect.DeepEqual(loaded.Events[:len(before.Events)], before.Events) || loaded.State["unrelated"] != "preserved" {
-		t.Fatal("notebook Save rewrote history or unrelated state")
+		t.Fatal("Save rewrote history or unrelated state")
 	}
-	if len(loaded.Events) != 3 {
-		t.Fatalf("events = %d, want original input, rename, and one enable", len(loaded.Events))
+	// One canonical user event per saved name/description change; a model-only
+	// edit appends none and rewrites no prefix.
+	if len(loaded.Events) != len(before.Events)+1 {
+		t.Fatalf("events = %d, want one appended user settings event", len(loaded.Events))
 	}
-	enabled := loaded.Events[2]
-	if enabled.Type != session.EventTypeUser || enabled.Actor.Kind != session.ActorKindUser || enabled.Actor.ID != active.UserID || session.EventText(enabled) != NotebookEnableMessage() {
-		t.Fatalf("enable event lost canonical user provenance: %+v", enabled)
+	appended := loaded.Events[len(before.Events)]
+	if appended.Type != session.EventTypeUser || appended.Actor.Kind != session.ActorKindUser || appended.Actor.ID != active.UserID || session.EventText(appended) != appendedExpectation {
+		t.Fatalf("settings event lost canonical user provenance: %+v", appended)
 	}
 	for _, event := range loaded.Events {
 		if event.Type == session.EventTypeCompact {
-			t.Fatal("notebook admission compacted history")
+			t.Fatal("Save compacted history")
 		}
 	}
 }
 
-func TestNewBotNotebookAdmissionIsDefaultAndTransactional(t *testing.T) {
+func TestNewBotSaveIsTransactional(t *testing.T) {
 	for _, mode := range []string{"success", "transaction_failure", "committed_read_failure"} {
 		t.Run(mode, func(t *testing.T) {
 			root, store, active, id := notebookSaveFixture(t)
 			fault := &notebookSaveFault{Service: store, failState: mode == "transaction_failure", failRead: mode == "committed_read_failure"}
 			service := &Service{Sessions: fault}
-			_, saveErr := service.Save(t.Context(), active, id, Config{Name: "New"}, nil, false, "create", "create")
+			config := Config{Name: "New"}
+			_, saveErr := service.Save(t.Context(), active, id, config, nil, "create", "create")
 			reopened := file.NewStore(file.Config{RootDir: root})
 			loaded, err := reopened.LoadSession(t.Context(), session.LoadSessionRequest{SessionRef: active.SessionRef})
 			if err != nil {
@@ -111,22 +103,22 @@ func TestNewBotNotebookAdmissionIsDefaultAndTransactional(t *testing.T) {
 			if (mode == "success" && saveErr != nil) || (mode == "committed_read_failure" && !session.IsCommitted(saveErr)) {
 				t.Fatalf("Save error = %v for %s", saveErr, mode)
 			}
-			enabled, err := NotebookEnabled(loaded.State)
-			if err != nil || !enabled || len(loaded.Events) != 2 || session.EventText(loaded.Events[1]) != NotebookEnableMessage() {
-				t.Fatalf("new Bot admission did not recover together: %+v, %v", loaded, err)
+			stored, err := Decode(loaded.State)
+			if err != nil || stored != config || len(loaded.Events) != 1 || session.EventText(loaded.Events[0]) != ConfigurationMessage(config) {
+				t.Fatalf("new Bot admission did not recover together: %+v, %+v, %v", loaded, stored, err)
 			}
 		})
 	}
 }
 
-func TestNotebookSaveRejectsStaleRevisionAndUnknownCapability(t *testing.T) {
-	for _, unknown := range []bool{false, true} {
-		t.Run(map[bool]string{false: "stale", true: "unknown_version"}[unknown], func(t *testing.T) {
+func TestSaveRejectsStaleAndUnsupportedRecords(t *testing.T) {
+	for _, unsupported := range []bool{false, true} {
+		t.Run(map[bool]string{false: "stale", true: "unsupported_version"}[unsupported], func(t *testing.T) {
 			_, store, active, id := notebookSaveFixture(t)
 			config := Config{Name: "Legacy"}
-			stored := record{Version: 1, ID: id, Config: config}
-			if unknown {
-				stored.NotebookVersion = 99
+			stored := map[string]any{"version": 1, "id": id, "config": config}
+			if unsupported {
+				stored["version"] = 99
 			}
 			_, err := store.UpdateState(t.Context(), session.UpdateStateRequest{
 				SessionRef: active.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest),
@@ -139,10 +131,10 @@ func TestNotebookSaveRejectsStaleRevisionAndUnknownCapability(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if unknown {
+			if unsupported {
 				active = before.Session
 			}
-			_, err = (&Service{Sessions: store}).Save(t.Context(), active, id, config, &config, true, "enable", "enable")
+			_, err = (&Service{Sessions: store}).Save(t.Context(), active, id, config, &config, "enable", "enable")
 			if err == nil || session.IsCommitted(err) {
 				t.Fatalf("invalid admission Save = %v", err)
 			}

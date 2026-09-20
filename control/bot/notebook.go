@@ -80,17 +80,44 @@ func NotebookRoot(storeDir, id string) (string, error) {
 	return filepath.Join(storeDir, notebookBotsDir, id, notebookDirName), nil
 }
 
-// Init provisions the notebook: it ensures the root directory exists and
-// writes NotebookIndex only when that file is absent. It never overwrites an
-// existing index and is meant to run once, on creation or on explicit
-// enablement. Ordinary activation uses Prepare and must not recreate a deleted
-// index.
+// Init provisions the notebook for a newly created Bot: it ensures the root
+// directory exists and writes NotebookIndex only when that file is absent. It
+// never overwrites an existing index. Ordinary activation uses Prepare and must
+// not recreate a deleted index.
 func (n *Notebook) Init(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	n.openMu.Lock()
 	defer n.openMu.Unlock()
+	return n.initLocked()
+}
+
+// ProvisionInitial gives a Bot created before notebooks were universal its
+// private notebook exactly once: it creates the root and seed index only when
+// the root is absent. An existing root is left exactly as found, so a deleted
+// index.md is never recreated, existing notes are never replaced, and a tampered
+// path is reported by the tool boundary instead of being repaired.
+func (n *Notebook) ProvisionInitial(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	root, err := NotebookRoot(n.storeDir, n.id)
+	if err != nil {
+		return err
+	}
+	switch _, err := os.Lstat(root); {
+	case err == nil:
+		return nil
+	case !errors.Is(err, os.ErrNotExist):
+		return err
+	}
+	n.openMu.Lock()
+	defer n.openMu.Unlock()
+	return n.initLocked()
+}
+
+func (n *Notebook) initLocked() error {
 	root, err := n.prepareLocked(true)
 	if err != nil {
 		return err

@@ -105,7 +105,9 @@ func TestBotIdentityIsolationPersistenceAndLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(before.Events) != 3 {
+	if len(before.Events) != 2 ||
+		session.EventText(before.Events[0]) != bot.ConfigurationMessage(first.Config) ||
+		session.EventText(before.Events[1]) != bot.ConfigurationMessage(updatedConfig) {
 		t.Fatalf("config or rejected prompt duplicated history: %+v", before.Events)
 	}
 	if err := stack.Close(); err != nil {

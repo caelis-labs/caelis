@@ -25,9 +25,6 @@ type UpdateBotRequest struct {
 	WriteBase
 	BotID  string     `json:"bot_id"`
 	Config bot.Config `json:"config"`
-	// EnableNotebook explicitly admits notebook access for a legacy Bot. False
-	// preserves the current capability; ordinary configuration edits cannot revoke it.
-	EnableNotebook bool `json:"enable_notebook,omitempty"`
 }
 
 // BotReader is the Host-provided Bot store. ListBots returns only the addressed

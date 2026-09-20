@@ -121,7 +121,7 @@ func BotCommandDetails() map[string]string {
 	return map[string]string{
 		"new":        "Create a new Bot",
 		"bots":       "Switch between Bots",
-		"settings":   "Edit this Bot's name, description, model, and notebook",
+		"settings":   "Edit this Bot's name, description, and model",
 		"model":      "Change this Bot's model",
 		"connect":    "Connect a provider or ACP Agent to the Host",
 		"disconnect": "Disconnect a provider or ACP Agent from the Host",
@@ -725,10 +725,9 @@ func botCommandDetail(result appserver.CommandResult, err error) string {
 	return "unknown error"
 }
 
-// runBotSettingsFlow saves one complete Bot configuration and, when the user
-// explicitly opted in, requests the one-way notebook enable. enableNotebook is
-// never inferred from a rename or model edit.
-func runBotSettingsFlow(ctx context.Context, client appserver.BotClient, current bot.Bot, config bot.Config, enableNotebook bool, send func(tea.Msg)) {
+// runBotSettingsFlow saves one complete Bot configuration. It never changes the
+// Bot's identity, conversation, or notebook.
+func runBotSettingsFlow(ctx context.Context, client appserver.BotClient, current bot.Bot, config bot.Config, send func(tea.Msg)) {
 	revision := current.Revision
 	result, err := client.UpdateBot(ctx, appserver.UpdateBotRequest{
 		WriteBase: appserver.WriteBase{
@@ -736,9 +735,8 @@ func runBotSettingsFlow(ctx context.Context, client appserver.BotClient, current
 			SessionID:        current.SessionID,
 			ExpectedRevision: &revision,
 		},
-		BotID:          current.ID,
-		Config:         config,
-		EnableNotebook: enableNotebook,
+		BotID:  current.ID,
+		Config: config,
 	})
 	switch botCommandStatusOf(result, err) {
 	case botCommandCommitted:

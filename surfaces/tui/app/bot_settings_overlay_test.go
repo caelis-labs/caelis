@@ -30,6 +30,26 @@ func botSettingsFixture(t *testing.T) (*Model, *fakeBotClient) {
 	return m, client
 }
 
+// TestBotSettingsUnchangedFormSavesNothing pins that opening /settings and
+// confirming an unchanged form neither writes configuration nor changes the
+// selected Bot and conversation.
+func TestBotSettingsUnchangedFormSavesNothing(t *testing.T) {
+	m, client := botSettingsFixture(t)
+	runConnectTestCmd(m, m.startBotSettingsFlow(false))
+	m.wizardOverlay.field = len(m.wizardOverlay.fields)
+	connectPress(m, "enter")
+	if len(client.updated) != 0 {
+		t.Fatalf("an unchanged form saved: %+v", client.updated)
+	}
+	if m.wizardOverlay != nil {
+		t.Fatal("an unchanged form did not close settings")
+	}
+	value, ok := m.activeBot()
+	if !ok || value.Config != client.bots[0].Config || value.SessionID != "chat-1" {
+		t.Fatalf("unchanged form changed the active Bot: %+v", value)
+	}
+}
+
 func TestBotSettingsFormKeepsDraftAndSavesOnce(t *testing.T) {
 	m, client := botSettingsFixture(t)
 	runConnectTestCmd(m, m.startBotSettingsFlow(false))
@@ -133,7 +153,6 @@ func TestBotModelSearchUsesFilteredCatalog(t *testing.T) {
 			}
 			connectPress(m, "enter")
 			if !modelOnly {
-				connectPress(m, "tab")
 				connectPress(m, "tab")
 				connectPress(m, "enter")
 			}

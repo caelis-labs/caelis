@@ -53,7 +53,7 @@ and acceptance history belong in Git and CI, not in this map.
 | `control/streamspool`, `control/streamspool/file` | Product-neutral Control cache records and the bounded local append-only spool implementation |
 | `control/modelcatalog`, `modelconfig`, `modelprofile`, `placement`, `agentbinding` | Provider and model discovery, credentials/configuration, selectable profiles, placement, and fixed Agent bindings |
 | `control/agents` | External ACP Agent identity, preparation, connection, and configuration |
-| `control/bot` | Persistent Bot identity, user configuration, explicit notebook admission, owner-scoped listing, and private notebook file boundary |
+| `control/bot` | Persistent Bot identity, user configuration, owner-scoped listing, and the private notebook contract: confined file boundary and instruction guidance |
 | `control/memorybinding` | Opaque host-selected Memory binding references, Runtime actor and audience delegation, and immutable logical snapshots |
 | `control/collaboration` | Session-scoped participant discovery, public-result observation, shared messages and reader positions, mailboxes, collaborator prompt slices, and expiring external grants |
 | `control/mcpconfig`, `control/plugin`, `control/status` | MCP assembly inputs, plugin lifecycle, and product status read models |

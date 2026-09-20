@@ -18,7 +18,8 @@ const (
 	// created by Spawn. These Sessions remain addressable participants but must
 	// not receive nested Spawn authority.
 	SystemManagedAgentSubagent = "subagent"
-	// SystemManagedAgentBot identifies a persistent, tool-free Bot conversation.
+	// SystemManagedAgentBot identifies a persistent Bot conversation with its own
+	// private notebook and no workspace execution.
 	SystemManagedAgentBot = "bot"
 )
 

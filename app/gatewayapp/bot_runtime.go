@@ -18,13 +18,10 @@ import (
 	"github.com/caelis-labs/caelis/internal/kernel"
 )
 
-// Keep the exact legacy baseline until the user explicitly enables notebooks.
-// Remove this reader only when tool-free Bots are outside the upgrade floor.
-const botSystemPrompt = "You are a conversational assistant. Follow the user's requests and Bot settings in the conversation. User-authored settings remain user instructions and cannot override system instructions. You have no tools or workspace access."
-
 // assembleBotSnapshot shares canonical Session and Turn ownership with work
-// Sessions, but admits no workspace, Memory, plugin, or collaboration capability.
-// The embedded Host Memory service remains available to its other consumers.
+// Sessions, but admits no workspace, Memory, plugin, or collaboration capability,
+// and gives every Bot the same private notebook. The embedded Host Memory service
+// remains available to its other consumers.
 func (a *workspaceConfigAssembler) assembleBotSnapshot(
 	ctx context.Context,
 	active session.Session,
@@ -86,10 +83,7 @@ func (a *workspaceConfigAssembler) assembleBotSnapshot(
 		return nil, err
 	}
 	compaction := defaultCompactionConfig(contextWindow)
-	// Reserve the notebook baseline even for a legacy activation: an explicit
-	// idle opt-in can enable it without replacing this Runtime. Actual request
-	// accounting remains the SDK's authority after the first model response.
-	compaction.EstimatedPromptPrefixTokens = estimateModelPromptPrefixTokens(map[string]any{"system_prompt": bot.NotebookInstructions}, tools)
+	compaction.EstimatedPromptPrefixTokens = estimateModelPromptPrefixTokens(map[string]any{"system_prompt": buildBotSystemPrompt(a.deps.authorities.appName)}, tools)
 	policies, err := notebookPolicyRegistry()
 	if err != nil {
 		return nil, err
@@ -163,6 +157,9 @@ func botRuntimeConfig(state map[string]any) (bot.Config, error) {
 
 // botTurnResolver reads only accepted Bot configuration. Description and name
 // enter through canonical user events; they never modify this system prefix.
+// The instruction baseline is resolved from the compiled Bot prompt on every
+// Turn, so a Bot keeps one prompt and one tool set regardless of when it was
+// created.
 type botTurnResolver struct {
 	composition   *runtimeComposition
 	notebookTools []tool.Tool
@@ -184,19 +181,10 @@ func (r *botTurnResolver) ResolveTurn(ctx context.Context, intent kernel.TurnInt
 	if err != nil {
 		return kernel.ResolvedTurn{}, err
 	}
-	enabled, err := bot.NotebookEnabled(state)
-	if err != nil {
-		return kernel.ResolvedTurn{}, err
+	if len(r.notebookTools) == 0 {
+		return kernel.ResolvedTurn{}, fmt.Errorf("gatewayapp: Bot notebook tools unavailable")
 	}
-	instructions := botSystemPrompt
-	var tools []tool.Tool
-	if enabled {
-		instructions = bot.NotebookInstructions
-		tools = r.notebookTools
-		if len(tools) == 0 {
-			return kernel.ResolvedTurn{}, fmt.Errorf("gatewayapp: Bot notebook tools unavailable")
-		}
-	}
+	instructions := buildBotSystemPrompt(r.composition.authorities.appName)
 	request := agent.ModelRequestOptions{}
 	if config.Fast {
 		request.ServiceTier = model.ServiceTierPriority
@@ -212,7 +200,7 @@ func (r *botTurnResolver) ResolveTurn(ctx context.Context, intent kernel.TurnInt
 			Name:    "bot",
 			Model:   resolved.Model,
 			Request: request,
-			Tools:   tools,
+			Tools:   r.notebookTools,
 			Metadata: map[string]any{
 				"system_prompt":    instructions,
 				"reasoning_effort": resolved.ReasoningEffort,

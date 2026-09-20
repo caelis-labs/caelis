@@ -94,7 +94,7 @@ func (b *controlCommandBackend) createBot(ctx context.Context, principal appserv
 		return botCommandResult(id, active), classifyControlBackendError(err)
 	}
 	// Bot creation deliberately does not admit Workspace Memory authority.
-	updated, err := service.Save(ctx, active, id, config, nil, false, req.OperationID, intent.Digest)
+	updated, err := service.Save(ctx, active, id, config, nil, req.OperationID, intent.Digest)
 	return botMutationResult(id, updated, err)
 }
 
@@ -133,11 +133,6 @@ func (b *controlCommandBackend) updateBot(ctx context.Context, req appserver.Upd
 	if err != nil {
 		return botCommandResult(value.ID, active), sessionConfigurationRejectedError(err)
 	}
-	if req.EnableNotebook && !value.NotebookEnabled {
-		if err := initializeBotNotebook(ctx, b.composition.authorities.storeDir, value.ID); err != nil {
-			return botCommandResult(value.ID, active), classifyControlPreDispatchError(err)
-		}
-	}
 	var finishPin func(bool)
 	if config.Model != "" && composition.activation != nil && composition.activation.modelCatalog != nil {
 		finishPin, err = composition.beginPinnedModelSelection(ctx, selected)
@@ -152,7 +147,7 @@ func (b *controlCommandBackend) updateBot(ctx context.Context, req appserver.Upd
 		}
 		return appserver.CommandResult{}, errors.New("gatewayapp: Bot update intent unavailable")
 	}
-	updated, err := service.Save(ctx, active, value.ID, config, &value.Config, req.EnableNotebook, req.OperationID, intent.Digest)
+	updated, err := service.Save(ctx, active, value.ID, config, &value.Config, req.OperationID, intent.Digest)
 	if finishPin != nil {
 		finishPin(err == nil || session.IsCommitted(err))
 	}
