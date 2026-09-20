@@ -128,16 +128,20 @@ delivery mode is transient; durability does not select a second Surface replay
 path. The document is published at the feed sync boundary, including replacement
 received after live output. Incomplete restoration retains the previous document.
 Only the final viewport is laid out; history loading does not animate prior output.
-The TUI initially requests the latest 16 complete Turns. Scrolling upward requests
-an older window through `history_before`; its finite subscription does not change
+The TUI initially requests the latest two complete Turns, then publishes their
+tail without prefetching older history. Scrolling upward requests up to 16 older
+Turns through `history_before`; that finite subscription does not change
 the live cursor or command target. Pages build privately and prepend only after
 completion, preserving the visible block and selection. Failed requests preserve
 both the document and the previous history token for retry.
 
 Control indexes source positions and Turn boundaries, never another copy of
 content. A window expands when interleaved Turns require earlier records; history
-without Turn identities falls back to the complete range. Indexes are rebuilt
-from the source after eviction or Host restart. Signed backward tokens bind the
+without Turn identities falls back to the complete range. Exact Session spool
+positions are indexed as the publisher accepts them. Canonical Session indexing
+uses Store provenance metadata when available, resolving unscoped reviewed
+decisions through the ordinary projector. Other sources rebuild from their
+records after index eviction. Signed backward tokens bind the
 Session, optional Task, source incarnation, and upper boundary. Session tokens
 arrive at `sync`, child tokens at `replace_end`; absence marks the earliest available boundary. They
 cannot be used as live cursors. A lost source rejects the older request rather

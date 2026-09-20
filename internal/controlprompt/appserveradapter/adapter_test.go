@@ -1097,6 +1097,9 @@ func TestTUIResumeAcceptsExternalMainControllerSession(t *testing.T) {
 	if resumed.SessionID != "retired-controller-session" || adapter.clientSessionID() != "retired-controller-session" {
 		t.Fatalf("ResumeSession(ACP controller) = %#v active=%q", resumed, adapter.clientSessionID())
 	}
+	if len(client.reconnectRequests) != 1 || client.reconnectRequests[0].HistoryTurns != 2 {
+		t.Fatalf("initial history requests=%+v", client.reconnectRequests)
+	}
 	if err := resumed.Reconnect.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -2434,6 +2437,7 @@ type sessionClientAdapterTestClient struct {
 	compactNoop            bool
 
 	mu                  sync.Mutex
+	reconnectRequests   []appserver.ReconnectRequest
 	prompt              appserver.PromptRequest
 	steer               appserver.SteerRequest
 	approval            appserver.ResolveApprovalRequest
@@ -2570,6 +2574,7 @@ func (c *sessionClientAdapterTestClient) Reconnect(_ context.Context, request ap
 	}
 	subscription := c.subscription
 	c.mu.Lock()
+	c.reconnectRequests = append(c.reconnectRequests, request)
 	if len(c.reconnectSubscriptions) > 0 {
 		subscription = c.reconnectSubscriptions[0]
 		c.reconnectSubscriptions = c.reconnectSubscriptions[1:]

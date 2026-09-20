@@ -55,7 +55,7 @@ func (a *SessionClientAdapter) ResumeSession(ctx context.Context, sessionID stri
 	stopAdmission := context.AfterFunc(ctx, cancelFeed)
 	historyTurns := 0
 	if a.surface == "cli-tui" {
-		historyTurns = 16
+		historyTurns = 2
 	}
 	result, err := a.sessionClient.Reconnect(feedCtx, appserver.ReconnectRequest{SessionID: strings.TrimSpace(sessionID), HistoryTurns: historyTurns})
 	stopAdmission()
