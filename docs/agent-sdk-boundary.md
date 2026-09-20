@@ -261,8 +261,9 @@ the selected reason with the reviewed action and source evidence. These operatin
 thresholds are abstention rules, not a correctness or authorization guarantee.
 
 A complete classifier decision settles through the common approval gate. An
-incomplete decision, provider error or screening timeout proceeds to Agent review
-under the original deadline; cancellation ends the review. The Agent model is
+allow decision with a violation reason at confidence 0.9 or higher defers to Agent
+review. An incomplete decision, provider error or screening timeout also proceeds
+to Agent review under the original deadline; cancellation ends the review. The Agent model is
 resolved only when needed, using its independent Guardian binding or the current
 Session model. The Agent receives canonical evidence without classifier answers
 added to its prompt. Both stages persist their invocation receipts under the same

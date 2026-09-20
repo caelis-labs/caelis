@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -26,14 +27,18 @@ import (
 )
 
 func TestMemoryVerifierRejectsEnrichmentWithoutLosingReceipt(t *testing.T) {
-	testMemoryVerifierEnrichment(t, 0.1, true)
+	testMemoryVerifierEnrichment(t, 0.1, true, 0)
 }
 
 func TestMemoryVerifierAcceptsEnrichmentWithoutLosingReceipt(t *testing.T) {
-	testMemoryVerifierEnrichment(t, 0.99, false)
+	testMemoryVerifierEnrichment(t, 0.99, false, 0)
 }
 
-func testMemoryVerifierEnrichment(t *testing.T, grounded float64, wantRejected bool) {
+func TestMemoryVerifierRetriesProviderInputRejectionWithoutLosingReceipt(t *testing.T) {
+	testMemoryVerifierEnrichment(t, 0.99, false, http.StatusRequestEntityTooLarge)
+}
+
+func testMemoryVerifierEnrichment(t *testing.T, grounded float64, wantRejected bool, firstStatus int) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
@@ -45,9 +50,13 @@ func testMemoryVerifierEnrichment(t *testing.T, grounded float64, wantRejected b
 	provider := newMemoryGoldenProvider(t)
 	provider.EnableSteward()
 	var calls atomic.Int32
+	wantCalls := int32(1)
+	if firstStatus != 0 {
+		wantCalls++
+	}
 	receipts := make(chan memoryv1alpha1.ReceiptID, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls.Add(1)
+		attempt := calls.Add(1)
 		if r.Method != http.MethodPost || r.URL.Path != "/systemone" || r.Header.Get("Authorization") != "Bearer fixture" {
 			t.Errorf("unexpected verifier request: %s %s", r.Method, r.URL.Path)
 		}
@@ -68,10 +77,14 @@ func testMemoryVerifierEnrichment(t *testing.T, grounded float64, wantRejected b
 		if err := json.Unmarshal([]byte(input.State.Input), &work); err != nil || work.Receipt.ReceiptID == "" || input.State.Proposal == "" {
 			t.Errorf("verification omitted receipt or proposal: %v", err)
 		}
-		select {
-		case receipts <- work.Receipt.ReceiptID:
-		default:
-			t.Error("verifier retried a valid completed judgment")
+		if attempt == 1 {
+			receipts <- work.Receipt.ReceiptID
+		} else if attempt > wantCalls {
+			t.Error("verifier exceeded expected attempts")
+		}
+		if attempt == 1 && firstStatus != 0 {
+			w.WriteHeader(firstStatus)
+			return
 		}
 		fmt.Fprintf(w, `{"model":"jev-1.13.0","answers":{"grounded":{"type":"noul","noul":%g},"compliant":{"type":"noul","noul":0.99}},"usage":{"input_tokens":100,"output_tokens":20}}`, grounded)
 	}))
@@ -128,8 +141,8 @@ func testMemoryVerifierEnrichment(t *testing.T, grounded float64, wantRejected b
 		}
 		return inspection.Steward.CompletedJobs == 1 && inspection.Steward.FailedJobs == 0 && inspection.Steward.ActiveRecords == 1
 	})
-	if got := calls.Load(); got != 1 {
-		t.Fatalf("verifier requests = %d, want exactly one completed judgment", got)
+	if got := calls.Load(); got != wantCalls {
+		t.Fatalf("verifier requests = %d, want %d", got, wantCalls)
 	}
 	binding, found, err := memorybinding.Resolve(document.Memory, memorybinding.RuntimeSelection{})
 	if err != nil || !found {
@@ -162,8 +175,77 @@ func testMemoryVerifierEnrichment(t *testing.T, grounded float64, wantRejected b
 	recalled := runMemoryGoldenSession(t, ctx, stack, "verified-recall")
 	assertMemoryGoldenResult(t, memoryGoldenToolResults(t, stack, recalled.SessionRef), memorytool.RecallToolName, "release review language is Chinese")
 	provider.AssertComplete(t)
-	if got := calls.Load(); got != 1 {
+	if got := calls.Load(); got != wantCalls {
 		t.Fatalf("Recall triggered another verification: %d requests", got)
+	}
+}
+
+func TestMemoryVerifierPreservesApplianceBoundedEvidence(t *testing.T) {
+	work := stewardv1alpha1.WorkRequest{
+		Protocol: stewardv1alpha1.ProtocolVersion,
+		Profile:  stewardworker.BuiltInProfile(),
+		Receipt: stewardv1alpha1.ReceiptInput{
+			ReceiptID: "receipt-1", Text: "The release review language is Chinese.", ReceivedAt: time.Now().UTC(),
+		},
+	}
+	for i := range work.Profile.MaxContextRecords {
+		work.Records = append(work.Records, stewardv1alpha1.RecordContext{
+			RecordID: stewardv1alpha1.RecordID(fmt.Sprintf("record-%d", i)), Revision: 1, Kind: "fact",
+			Text:         fmt.Sprintf("Record %d: ", i) + strings.Repeat("Release review context. ", 300),
+			EvidenceRefs: []memoryv1alpha1.ReceiptID{memoryv1alpha1.ReceiptID(fmt.Sprintf("prior-receipt-%d", i))},
+		})
+	}
+	request, err := stewardworker.PrepareGeneration(work)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(request.Input) <= 24000 || len(request.Input) > work.Profile.MaxInputBytes {
+		t.Fatalf("fixture input = %d bytes, want above 24 KB within appliance budget", len(request.Input))
+	}
+	response := stewardworker.GenerationResponse{
+		Text:      `{"operation":"ADD","kind":"fact","text":"The release review language is Chinese.","evidence_refs":["receipt-1"]}`,
+		ParseMode: stewardworker.ParseModeStrict,
+	}
+	for _, status := range []int{http.StatusOK, http.StatusRequestEntityTooLarge} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			var calls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				var input struct {
+					State map[string]string `json:"state"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+					t.Error(err)
+				}
+				if input.State["policy"] != request.Instructions || input.State["input"] != request.Input || input.State["proposal"] != response.Text {
+					t.Error("verifier did not receive the complete policy, evidence and proposal")
+				}
+				w.WriteHeader(status)
+				if status == http.StatusOK {
+					fmt.Fprint(w, `{"model":"jev-1.13.0","answers":{"grounded":{"type":"noul","noul":0.99},"compliant":{"type":"noul","noul":0.99}}}`)
+				}
+			}))
+			defer server.Close()
+			client, err := typesafe.New(typesafe.Config{BaseURL: server.URL, APIKey: "fixture", HTTPClient: server.Client()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = verifyMemoryGeneration(t.Context(), client, request, response)
+			if status == http.StatusOK {
+				if err != nil {
+					t.Fatalf("valid appliance input failed verification: %v", err)
+				}
+			} else {
+				var failure *stewardworker.GenerationError
+				var serviceError *typesafe.HTTPError
+				if !errors.As(err, &failure) || !failure.Retryable || failure.Code != "verification_unavailable" || !errors.As(err, &serviceError) || serviceError.StatusCode != status {
+					t.Fatalf("provider input rejection lost recoverable cause: %v", err)
+				}
+			}
+			if got := calls.Load(); got != 1 {
+				t.Fatalf("verifier requests = %d, want 1", got)
+			}
+		})
 	}
 }
 

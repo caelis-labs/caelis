@@ -31,6 +31,12 @@ func TestGuardianJudgmentUsesCanonicalSourcesAndStrictSettlement(t *testing.T) {
 		wantErr, allow         bool
 	}{
 		{"allow", "0", "none", 1, false, true},
+		{"contradictory constraint", "0", "constraint", 1, true, false},
+		{"contradictory credentials", "0", "credentials", 1, true, false},
+		{"contradictory destruction", "0", "destruction", 1, true, false},
+		{"contradictory security", "0", "security", 1, true, false},
+		{"contradictory elevation", "0", "elevation", 1, true, false},
+		{"contradictory unrelated", "0", "unrelated", 1, true, false},
 		{"deny", "1", "constraint", 1, false, false},
 		{"uncertain", "0", "none", 0.5, true, false},
 		{"missing evidence", "unavailable", "none", 1, true, false},

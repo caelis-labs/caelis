@@ -19,10 +19,13 @@ func TestGuardianScreeningCascadesToAgentWithinOriginalReview(t *testing.T) {
 		name, decision, reason string
 		confidence             float64
 		failure                error
+		agentResponse          string
 		wantAgent, wantAllow   bool
 	}{
 		{name: "allow without resolving Agent", decision: "0", reason: "none", confidence: 1, wantAllow: true},
 		{name: "deny without resolving Agent", decision: "1", reason: "constraint", confidence: 1},
+		{name: "contradictory allow defers to Agent allow", decision: "0", reason: "constraint", confidence: 1, wantAgent: true, wantAllow: true},
+		{name: "contradictory allow defers to Agent deny", decision: "0", reason: "constraint", confidence: 1, agentResponse: `{"option_id":"reject_once","rationale":"The action contradicts the user's explicit constraint."}`, wantAgent: true},
 		{name: "uncertain", decision: "0", confidence: .5, wantAgent: true, wantAllow: true},
 		{name: "missing evidence", decision: "unavailable", confidence: 1, wantAgent: true, wantAllow: true},
 		{name: "invalid answer", decision: "unknown", confidence: 1, wantAgent: true, wantAllow: true},
@@ -36,6 +39,9 @@ func TestGuardianScreeningCascadesToAgentWithinOriginalReview(t *testing.T) {
 			reviewer := newGuardianApprovalApprover(service)
 			defer reviewer.Close()
 			llm := &approvalReviewerFakeModel{}
+			if tc.agentResponse != "" {
+				llm.responses = []string{tc.agentResponse}
+			}
 			req := approvalReviewerTestRequest(active, nil, "inspect", map[string]any{"cmd": "rg TODO ."})
 			parent, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 			defer cancel()

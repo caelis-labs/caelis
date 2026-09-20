@@ -134,10 +134,15 @@ func guardianJudgmentDecision(req kernel.ApprovalReviewRequest, response judgmen
 		return kernel.ApprovalReviewResult{}, err
 	}
 	parsed := guardianReviewModelOutput{OptionID: selected.ID}
+	reason, hasReason := response.Answers["reason"]
+	// Answers are independent judgments. A confident violation conflicts with
+	// an allow decision and must defer to Agent review rather than settle it.
+	if meaning == approval.OptionDecisionAllow && hasReason && reason.Type == judgment.Choice && reason.Choice != "none" && reason.Confidence != nil && *reason.Confidence >= 0.9 {
+		return kernel.ApprovalReviewResult{}, fmt.Errorf("guardian classifier returned conflicting decision and reason")
+	}
 	if meaning == approval.OptionDecisionDeny {
-		reason, ok := response.Answers["reason"]
 		text, known := guardianJudgmentReasons()[reason.Choice]
-		if !ok || !known || reason.Type != judgment.Choice || reason.Choice == "none" || reason.Confidence == nil || *reason.Confidence < 0.9 {
+		if !hasReason || !known || reason.Type != judgment.Choice || reason.Choice == "none" || reason.Confidence == nil || *reason.Confidence < 0.9 {
 			return kernel.ApprovalReviewResult{}, fmt.Errorf("guardian classifier could not establish a rejection reason")
 		}
 		action, oversized, err := guardianPlannedActionJSON(req)

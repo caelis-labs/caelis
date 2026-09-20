@@ -194,11 +194,13 @@ records. Steward deliberately has no default-profile fallback, so an absent
 binding is a stable zero-token mode.
 
 An additional `Memory Verifier` binding optionally evaluates the generated
-proposal against those same appliance-supplied instructions and evidence.
+proposal against those same appliance-supplied instructions and complete bounded
+evidence, without imposing a separate input budget or truncating the evidence.
 It does not parse or rewrite the proposal. A high-confidence semantic conflict
 fails enrichment; an inconclusive judgment retains Memory's ordinary validation
-path. Provider failures use Memory's existing bounded job retry policy. The
-immutable Remember receipt remains available even when enrichment fails.
+path. Provider failures, including input-limit rejection, use Memory's existing
+bounded job retry policy. The immutable Remember receipt remains available even
+when enrichment fails.
 Binding only the verifier performs no model work. Recall still performs no
 inference, and Memory owns all authorization, revision and canonical Apply checks.
 
