@@ -10,11 +10,11 @@ require (
 	codeberg.org/readeck/go-readability/v2 v2.1.2
 	github.com/JohannesKaufmann/html-to-markdown/v2 v2.5.2
 	github.com/alecthomas/chroma/v2 v2.27.0
-	github.com/anthropics/anthropic-sdk-go v1.72.0
+	github.com/anthropics/anthropic-sdk-go v1.73.0
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1
 	github.com/aymanbagabas/go-udiff v0.4.1
 	github.com/caelis-labs/acp-go-sdk v1.4.0
-	github.com/caelis-labs/memory v0.5.2
+	github.com/caelis-labs/memory v0.6.0
 	github.com/charmbracelet/colorprofile v0.4.3
 	github.com/charmbracelet/ultraviolet v0.0.0-20260812204455-68fa937c71be
 	github.com/charmbracelet/x/ansi v0.11.8
@@ -32,7 +32,7 @@ require (
 	golang.org/x/sync v0.23.0
 	golang.org/x/sys v0.48.0
 	google.golang.org/genai v1.71.0
-	modernc.org/sqlite v1.58.0
+	modernc.org/sqlite v1.59.0
 )
 
 require (
@@ -102,7 +102,7 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260526163538-3dc84a4a5aaa // indirect
 	google.golang.org/grpc v1.83.2 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
-	modernc.org/libc v1.75.6 // indirect
+	modernc.org/libc v1.75.7 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
 )
