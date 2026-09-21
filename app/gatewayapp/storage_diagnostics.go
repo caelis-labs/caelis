@@ -10,7 +10,7 @@ import (
 	"strings"
 )
 
-// These names are the stable embedded Memory v0.5.x appliance layout. The
+// These names describe the embedded Memory schema-2 appliance layout. The
 // Memory package intentionally keeps its storage owner internals private; the
 // Caelis diagnostic contract records the layout without opening those files.
 const (
@@ -18,7 +18,7 @@ const (
 	embeddedMemoryOwnerLockFilename            = "memoryd.lock"
 	embeddedMemoryManagementCredentialFilename = "management.token"
 	embeddedMemoryStewardCredentialFilename    = "steward-worker.token"
-	embeddedMemoryCurrentSchemaVersion         = 1
+	embeddedMemoryCurrentSchemaVersion         = 2
 )
 
 // StoreDiagnostics is a read-only snapshot of the local durable Store
