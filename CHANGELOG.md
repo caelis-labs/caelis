@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.60.0](https://github.com/caelis-labs/caelis/compare/v0.59.0...v0.60.0) (2026-09-21)
+
+
+### Features
+
+* add Antigravity ACP and background participant workflows ([#62](https://github.com/caelis-labs/caelis/issues/62)) ([f7c2b4b](https://github.com/caelis-labs/caelis/commit/f7c2b4bdd56f4bcfd78f9956ed246cb5e587e16d))
+
 ## [0.59.0](https://github.com/caelis-labs/caelis/compare/v0.58.0...v0.59.0) (2026-09-20)
 
 
