@@ -7,25 +7,15 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/acppermission"
 	"github.com/caelis-labs/caelis/control/appserver"
-	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 )
 
 const maxApprovalResolveRetries = 5
 
-// approveCurrent resolves the active background approval head with safe conflict handling.
-// Both the foreground prompt and background feed can observe the same FIFO
-// head. Claim its request ID once, then resolve only that exact Host target.
-func (o *acpParticipantTasks) approveCurrent(ctx context.Context, requested eventstream.ApprovalRequestID) error {
-	active, err := o.claimApproval(ctx, requested)
-	if err != nil || active == nil {
+func (o *acpParticipantTasks) requestApproval(ctx context.Context, active *appserver.ActiveApproval) error {
+	if err := ctx.Err(); err != nil {
 		return err
 	}
-	defer func() {
-		o.mu.Lock()
-		delete(o.approvals, active.RequestID)
-		o.mu.Unlock()
-	}()
 	wire, err := acppermission.EncodePermissionRequest(session.SessionRef{SessionID: o.sessionID}, active.Permission, nil)
 	if err != nil {
 		return err
@@ -122,15 +112,7 @@ func (o *acpParticipantTasks) verifyActiveApprovalPending(
 	if err != nil {
 		return nil, false, err
 	}
-	if state.Approval.Active == nil || state.Approval.Active.RequestID != active.RequestID {
-		return &state, false, nil
-	}
-	if state.Approval.Active.Scope != active.Scope ||
-		state.Approval.Active.ScopeID != active.ScopeID ||
-		state.Approval.Active.Target != active.Target {
-		return &state, false, nil
-	}
-	return &state, true, nil
+	return &state, sameParticipantApproval(state.Approval.Active, active), nil
 }
 
 func isApprovalRevisionConflict(result appserver.CommandResult, err error) bool {

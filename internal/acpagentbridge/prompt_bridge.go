@@ -446,7 +446,8 @@ func (a *RuntimeAgent) emitControlEnvelope(ctx context.Context, cb PromptCallbac
 	switch env.Kind {
 	case eventstream.KindRequestPermission:
 		if observer := a.participantTaskObserver(sessionID, env.ScopeID); observer != nil && env.Scope == eventstream.ScopeSubagent {
-			return observer.approveCurrent(ctx, env.ApprovalRequestID)
+			observer.wakeApprovals()
+			return nil
 		}
 		if env.Permission == nil {
 			return nil

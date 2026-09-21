@@ -27,7 +27,6 @@ type acpParticipantTasks struct {
 	mux           *acpTaskStreamMux
 	mu            sync.Mutex
 	tasks         map[string]struct{}
-	approvals     map[eventstream.ApprovalRequestID]struct{}
 	inputReceipts map[string]participantInputReceipt
 }
 
@@ -48,8 +47,8 @@ func (a *RuntimeAgent) observeParticipantTask(ctx context.Context, child control
 		deliveryCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 		observer = &acpParticipantTasks{agent: a, sessionID: sessionID, ctx: deliveryCtx, cancel: cancel,
 			done: make(chan struct{}), wake: make(chan struct{}, 1), callbacks: cb,
-			mux:   newACPTaskStreamClientMux(deliveryCtx, a.taskStreamClient, sessionID),
-			tasks: make(map[string]struct{}), approvals: make(map[eventstream.ApprovalRequestID]struct{}),
+			mux:           newACPTaskStreamClientMux(deliveryCtx, a.taskStreamClient, sessionID),
+			tasks:         make(map[string]struct{}),
 			inputReceipts: make(map[string]participantInputReceipt),
 		}
 		a.participantTasks[sessionID] = observer
@@ -61,10 +60,7 @@ func (a *RuntimeAgent) observeParticipantTask(ctx context.Context, child control
 	observer.mu.Unlock()
 	observer.mux.ObserveTask(taskID)
 	a.mu.Unlock()
-	select {
-	case observer.wake <- struct{}{}:
-	default:
-	}
+	observer.wakeApprovals()
 	return nil
 }
 
@@ -129,19 +125,7 @@ func (o *acpParticipantTasks) forward() error {
 	approvalDone := make(chan struct{})
 	go func() {
 		defer close(approvalDone)
-		for {
-			select {
-			case <-approvalCtx.Done():
-				return
-			case <-o.wake:
-				if err := o.approveCurrent(approvalCtx, ""); err != nil && approvalCtx.Err() == nil {
-					_ = emitACPNotice(o.ctx, o.callbacks, o.sessionID, eventstream.Envelope{
-						Kind:   eventstream.KindNotice,
-						Notice: fmt.Sprintf("Background participant approval failed: %v", err),
-					}, "", nil)
-				}
-			}
-		}
+		o.forwardApprovals(approvalCtx)
 	}()
 	defer func() { cancelApprovals(); <-approvalDone }()
 	assembler := &appserver.FeedDeliveryAssembler{}
@@ -179,37 +163,8 @@ func (o *acpParticipantTasks) forward() error {
 				inspect = inspect || env.Kind == eventstream.KindRequestPermission || env.ApprovalRequestID != ""
 			}
 			if inspect {
-				select {
-				case o.wake <- struct{}{}:
-				default:
-				}
+				o.wakeApprovals()
 			}
 		}
 	}
-}
-
-// Inspect while holding the claim lock so a competing feed cannot reuse a
-// stale head after the first response has already committed.
-func (o *acpParticipantTasks) claimApproval(ctx context.Context, requested eventstream.ApprovalRequestID) (*appserver.ActiveApproval, error) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	state, err := o.agent.sessionClient.InspectSession(ctx, appserver.StateRequest{SessionID: o.sessionID})
-	if err != nil {
-		return nil, err
-	}
-	active := state.Approval.Active
-	if active == nil || active.Scope != eventstream.ScopeSubagent || (requested != "" && requested != active.RequestID) {
-		return nil, nil
-	}
-	if _, ok := o.tasks[active.ScopeID]; !ok {
-		return nil, nil
-	}
-	if _, seen := o.approvals[active.RequestID]; seen {
-		return nil, nil
-	}
-	if active.Permission == nil || active.Target.HandleID == "" {
-		return nil, errors.New("background approval has no permission or owner target")
-	}
-	o.approvals[active.RequestID] = struct{}{}
-	return active, nil
 }
