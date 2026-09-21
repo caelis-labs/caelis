@@ -91,9 +91,11 @@ func runHostedSubagentUserInput(t *testing.T, assemble func(*Stack) (appserver.A
 	restored := mode != "live"
 	provider := newHostedChildInputTestProvider(t, false)
 	finishProvider := make(chan struct{})
+	streamingProvider := make(chan context.Context, 1)
 	if restored {
 		provider.afterChunk = func(ctx context.Context, call int) {
 			if call == 2 {
+				streamingProvider <- ctx
 				select {
 				case <-finishProvider:
 				case <-ctx.Done():
@@ -130,6 +132,7 @@ func runHostedSubagentUserInput(t *testing.T, assemble func(*Stack) (appserver.A
 	server := httptest.NewServer(handler)
 	t.Cleanup(func() { _ = host.Close(); server.Close() })
 	host.SetBuiltInChildControl(server.URL, tokenFile)
+	startedAt := time.Now()
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 	parent, err := startGatewayAppTestSession(ctx, host, "parent-user-input")
@@ -246,8 +249,14 @@ func runHostedSubagentUserInput(t *testing.T, assemble func(*Stack) (appserver.A
 		}
 	}
 	if restored {
-		if _, err := active.instance.engine.WaitSubagentTask(ctx, parent.SessionRef, child.DelegationID, 5*time.Second); err != nil {
+		initial, err := active.instance.engine.WaitSubagentTask(ctx, parent.SessionRef, child.DelegationID, 5*time.Second)
+		if err != nil {
 			t.Fatal(err)
+		}
+		// A successful bounded wait can still return a running Task. Recovery
+		// must start from a completed Turn, not cancel unfinished setup work.
+		if initial.Running || initial.State != task.StateCompleted {
+			t.Fatalf("initial child Task did not complete before recovery: %+v", initial)
 		}
 		if err := host.sessionRuntimes.releaseSession(ctx, parent.SessionID); err != nil {
 			t.Fatal(err)
@@ -298,6 +307,7 @@ func runHostedSubagentUserInput(t *testing.T, assemble func(*Stack) (appserver.A
 		}
 	}
 recovered:
+	recoveryElapsed := time.Since(startedAt)
 	initialComplete = true
 	const imageData = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a5l8AAAAASUVORK5CYII="
 	for index, text := range []string{"user guidance one", "user followup two"} {
@@ -305,24 +315,44 @@ recovered:
 		if index == 0 {
 			req.ContentParts = []model.ContentPart{{Type: model.ContentPartText, Text: text}, {Type: model.ContentPartImage, MimeType: "image/png", Data: imageData}}
 		}
+		submittedAt := time.Now()
 		receipt, sendErr := services.SubagentInputs.Submit(ctx, appserver.Principal{ID: "owner"}, req)
 		err = sendErr
 		if err != nil {
 			t.Fatal(err)
 		}
 		if restored && index == 0 {
-			// The provider is parked before its stop chunk. Observe through the
-			// real ACP process, recorder, and public subscription before release.
+			failLiveOutput := func(reason string) {
+				t.Helper()
+				diagnosticCtx, cancel := context.WithTimeout(t.Context(), time.Second)
+				defer cancel()
+				statuses, statusErr := services.SubagentInputs.Statuses(diagnosticCtx, appserver.Principal{ID: "owner"}, appserver.SubagentInputStatusRequest{SessionID: parent.SessionID, IDs: []string{receipt.ID}})
+				t.Fatalf("%s: elapsed=%s, recovery=%s, input=%s, provider calls=%d, observed=%v, input statuses=%+v, status error=%v", reason, time.Since(startedAt), recoveryElapsed, time.Since(submittedAt), provider.CallCount(), observed, statuses, statusErr)
+			}
+			// The callback runs after flushing the delta. Keep its request alive
+			// until that delta crosses the real ACP process and public subscription;
+			// output arriving only after provider cancellation is not live evidence.
+			var providerCtx context.Context
+			select {
+			case providerCtx = <-streamingProvider:
+			case <-ctx.Done():
+				failLiveOutput("follow-up provider did not stream a chunk")
+			}
 			for observed["reply-2"] == 0 {
 				select {
 				case delivery, ok := <-stream:
 					if !ok {
-						t.Fatal("recovered stream ended before live output")
+						failLiveOutput("recovered stream ended before live output")
 					}
 					consume(delivery)
+				case <-providerCtx.Done():
+					failLiveOutput("provider request ended before live child output")
 				case <-ctx.Done():
-					t.Fatal("child output did not arrive before provider completion")
+					failLiveOutput("live child output did not arrive while provider was paused")
 				}
+			}
+			if providerCtx.Err() != nil {
+				failLiveOutput("provider request ended before live child output")
 			}
 			close(finishProvider)
 		}
