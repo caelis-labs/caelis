@@ -385,6 +385,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case subagentDirectoryOpenedMsg:
 		return m, m.handleSubagentDirectoryOpened(typed)
+	case participantTaskFocusMsg:
+		return m, m.focusParticipantTask(typed)
 
 	case subagentDirectorySnapshotMsg:
 		return m, m.handleSubagentDirectorySnapshot(typed)

@@ -390,6 +390,7 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 		TaskOutput:               s.authorities.taskOutput,
 		TaskActivityChanged:      s.runtimeTaskChanged,
 		TaskCommitted:            s.taskCommitted,
+		ChildApprovalRequester:   backgroundChildApprovalRequester{composition: s},
 	}
 	var acpControlPlane *acpassembly.ControlPlane
 	localCfg, acpControlPlane, err = injectACPControlPlane(

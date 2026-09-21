@@ -104,7 +104,10 @@ type RunState struct {
 
 // ActiveApproval is the one resolvable Control FIFO head.
 type ActiveApproval struct {
-	RequestID     eventstream.ApprovalRequestID   `json:"request_id"`
+	RequestID eventstream.ApprovalRequestID `json:"request_id"`
+	// Target identifies the approval's owner, which may be a background child
+	// rather than the Session's current foreground Run.
+	Target        TurnTarget                      `json:"target"`
 	Scope         eventstream.Scope               `json:"scope,omitempty"`
 	ScopeID       string                          `json:"scope_id,omitempty"`
 	ParticipantID string                          `json:"participant_id,omitempty"`

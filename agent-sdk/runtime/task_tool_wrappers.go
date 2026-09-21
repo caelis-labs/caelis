@@ -545,6 +545,9 @@ func newSubagentApprovalRequester(
 	activeSession session.Session,
 	sessionRef session.SessionRef,
 ) subagent.ApprovalRequester {
+	if requester == nil && runtime != nil {
+		requester = runtime.childApprovalRequester
+	}
 	if requester == nil && (runtime == nil || normalizePolicyMode(mode) != presets.ModeDangerFullAccess) {
 		return nil
 	}

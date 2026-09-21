@@ -14,6 +14,14 @@ import (
 // this cause permits cancelling a target whose admission arrives late.
 var ErrUserInterrupt = errors.New("user interrupted pending Turn admission")
 
+// AgentRunResult identifies a background participant Task. Turn is populated
+// only when continuing a legacy foreground ACP attachment.
+type AgentRunResult struct {
+	Turn      Turn
+	SessionID string
+	TaskID    string
+}
+
 type Turn interface {
 	HandleID() string
 	RunID() string
@@ -89,12 +97,12 @@ type SandboxService interface {
 type AgentService interface {
 	ListAgents(context.Context, int) ([]AgentCandidate, error)
 	AgentStatus(context.Context) (AgentStatusSnapshot, error)
-	StartAgentRun(context.Context, string, string, []Attachment) (Turn, error)
-	ContinueAgentRun(context.Context, string, string, []Attachment) (Turn, error)
+	StartAgentRun(context.Context, string, string, []Attachment) (AgentRunResult, error)
+	ContinueAgentRun(context.Context, string, string, []Attachment) (AgentRunResult, error)
 }
 
 type ReviewService interface {
-	StartReview(context.Context, string, []Attachment) (Turn, error)
+	StartReview(context.Context, string, []Attachment) (AgentRunResult, error)
 }
 
 type CompletionService interface {
@@ -131,9 +139,9 @@ type RouterService interface {
 	UseModel(context.Context, string, string, bool) (controlstatus.StatusSnapshot, error)
 	RepairSandbox(context.Context) (controlstatus.StatusSnapshot, error)
 	AgentStatus(context.Context) (AgentStatusSnapshot, error)
-	StartAgentRun(context.Context, string, string, []Attachment) (Turn, error)
-	ContinueAgentRun(context.Context, string, string, []Attachment) (Turn, error)
-	StartReview(context.Context, string, []Attachment) (Turn, error)
+	StartAgentRun(context.Context, string, string, []Attachment) (AgentRunResult, error)
+	ContinueAgentRun(context.Context, string, string, []Attachment) (AgentRunResult, error)
+	StartReview(context.Context, string, []Attachment) (AgentRunResult, error)
 }
 
 type LightweightStatusProvider interface {

@@ -46,6 +46,8 @@ func CustomRoleRunSource(handle agentbinding.Handle) string {
 func DirectRunHandleFromSource(source string) (agentbinding.Handle, bool) {
 	source = strings.ToLower(strings.TrimSpace(source))
 	switch {
+	case source == "slash_review":
+		return agentbinding.HandleReviewer, true
 	case strings.HasPrefix(source, directRunSourcePrefix):
 		handle := agentbinding.NormalizeHandle(agentbinding.Handle(strings.TrimPrefix(source, directRunSourcePrefix)))
 		return handle, IsRecoverableSourceHandle(handle) && agentbinding.IsDirectRun(handle)
@@ -58,13 +60,14 @@ func DirectRunHandleFromSource(source string) (agentbinding.Handle, bool) {
 }
 
 // DirectRunFromParticipant projects one attached profile participant into its
-// stable <handle>(<label>) address. Only ACP sidecars started through a
-// configured direct handle are addressable.
+// stable <handle>(<label>) address. Only Task or legacy ACP sidecars started through a
+// configured direct handle or /review are addressable.
 func DirectRunFromParticipant(label, kind, role, source string) Run {
 	handle, ok := DirectRunHandleFromSource(source)
+	kind = strings.ToLower(strings.TrimSpace(kind))
 	return Run{
 		Name:        FormatRunName(string(handle), label),
 		Agent:       string(handle),
-		Addressable: ok && strings.EqualFold(strings.TrimSpace(kind), "acp") && strings.EqualFold(strings.TrimSpace(role), "sidecar"),
+		Addressable: ok && (kind == "acp" || kind == "subagent") && strings.EqualFold(strings.TrimSpace(role), "sidecar"),
 	}
 }

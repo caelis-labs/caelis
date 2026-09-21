@@ -172,3 +172,29 @@ func TestSessionObservationKeepsPinnedEpochAfterHandoff(t *testing.T) {
 		t.Fatal("old input adopted latest authority")
 	}
 }
+
+func TestIdleSessionReconnectResolvesBackgroundApprovalTarget(t *testing.T) {
+	target := appserver.TurnTarget{HandleID: "child-h", RunID: "child-r", TurnID: "child-t"}
+	client := &sessionClientAdapterTestClient{
+		subscription: newSessionClientAdapterTestSubscription(),
+		state: appserver.SessionState{SessionID: "s", Revision: 4, Controller: session.ControllerBinding{EpochID: "e"},
+			Approval: appserver.ApprovalState{Active: &appserver.ActiveApproval{RequestID: "background-approval", Target: target,
+				Scope: eventstream.ScopeSubagent, ScopeID: "child-task", Permission: &session.ProtocolApproval{
+					ToolCall: session.ProtocolToolCall{ID: "write-1", Name: "Write"}, Options: []session.ProtocolApprovalOption{{ID: "allow", Name: "Allow once", Kind: "allow_once"}},
+				},
+			}},
+		},
+	}
+	adapter := newSessionClientAdapterForTest(t, client, &sessionClientAdapterTestParticipantClient{}, "s", "cli-tui")
+	snapshot, err := adapter.ResumeSession(t.Context(), "s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer adapter.Close()
+	if err := snapshot.Reconnect.SubmitApproval(t.Context(), controlprompt.ApprovalDecision{RequestID: "background-approval", OptionID: "allow", Approved: true}); err != nil {
+		t.Fatal(err)
+	}
+	if client.approval.Target != target {
+		t.Fatalf("approval used foreground target: %#v", client.approval)
+	}
+}

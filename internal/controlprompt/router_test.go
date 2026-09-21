@@ -611,7 +611,7 @@ func TestRouterReviewForwardsAttachmentsForPromptRange(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Route(/review) error = %v", err)
 	}
-	if result.Turn == nil || svc.reviewPrompt != "inspect screenshot" {
+	if result.Turn != nil || result.ParticipantTask == nil || result.ParticipantTask.TaskID != "review-task" || !result.RefreshCommands || !result.SuppressTurnDivider || svc.reviewPrompt != "inspect screenshot" {
 		t.Fatalf("review route turn=%#v prompt=%q", result.Turn, svc.reviewPrompt)
 	}
 	if len(svc.reviewAttachments) != 1 {
@@ -932,21 +932,21 @@ func (s *fakeService) AgentStatus(context.Context) (AgentStatusSnapshot, error) 
 	}
 	return status, nil
 }
-func (s *fakeService) StartAgentRun(_ context.Context, agent string, prompt string, attachments []Attachment) (Turn, error) {
+func (s *fakeService) StartAgentRun(_ context.Context, agent string, prompt string, attachments []Attachment) (AgentRunResult, error) {
 	s.startedAgent = agent
 	s.startedPrompt = prompt
 	s.startedAttachments = attachments
-	return s.turn, nil
+	return AgentRunResult{Turn: s.turn}, nil
 }
-func (s *fakeService) ContinueAgentRun(_ context.Context, handle string, prompt string, attachments []Attachment) (Turn, error) {
+func (s *fakeService) ContinueAgentRun(_ context.Context, handle string, prompt string, attachments []Attachment) (AgentRunResult, error) {
 	s.continuedHandle = handle
 	s.continuedPrompt = prompt
-	return s.turn, nil
+	return AgentRunResult{Turn: s.turn}, nil
 }
-func (s *fakeService) StartReview(_ context.Context, prompt string, attachments []Attachment) (Turn, error) {
+func (s *fakeService) StartReview(_ context.Context, prompt string, attachments []Attachment) (AgentRunResult, error) {
 	s.reviewPrompt = prompt
 	s.reviewAttachments = attachments
-	return s.turn, nil
+	return AgentRunResult{SessionID: "session-1", TaskID: "review-task"}, nil
 }
 func (s *fakeService) CompleteFile(context.Context, string, int) ([]CompletionCandidate, error) {
 	return nil, nil

@@ -73,8 +73,10 @@ func ValidateEventChildOrigin(in EventChildOrigin) error {
 		if in.TaskID == "" && in.DelegationID == "" {
 			return fmt.Errorf("subagent child origin task or delegation id is required: %w", ErrInvalidEvent)
 		}
-		if in.ParentTool.CallID == "" {
-			return fmt.Errorf("subagent child origin parent tool call is required: %w", ErrInvalidEvent)
+		// User-started Tasks have no creating tool call. A named relation must
+		// still identify a real call; do not manufacture one for those Tasks.
+		if in.ParentTool.CallID == "" && in.ParentTool.Name != "" {
+			return fmt.Errorf("subagent child origin named parent tool call is required: %w", ErrInvalidEvent)
 		}
 	}
 	return nil

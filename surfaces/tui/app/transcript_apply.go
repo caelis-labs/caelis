@@ -44,10 +44,10 @@ func (m *Model) handleTranscriptEventsMsg(msg TranscriptEventsMsg) (tea.Model, t
 	// Spawn views drive child subscription lifetime. The Task invocation does
 	// not own or redirect that stream.
 	m.reconcileSubagentOutputTaskStreams()
-	var subagentOutputCmd, subagentDirectoryCmd tea.Cmd
+	subagentDirectoryCmd := m.ensureSubagentDirectoryWatch()
+	var subagentOutputCmd tea.Cmd
 	if subagentOutputChanged {
 		subagentOutputCmd = m.requestSubagentOutputRender()
-		subagentDirectoryCmd = m.ensureSubagentDirectoryWatch()
 	}
 	return m, tea.Batch(transcriptCmd, subagentOutputCmd, subagentDirectoryCmd, m.resumeRunningAnimationIfNeeded())
 }
@@ -123,7 +123,7 @@ func (m *Model) applyTranscriptEvents(events []TranscriptEvent, reconnectReplay 
 	m.observeRunningActivityTargets(events)
 	var cmds []tea.Cmd
 	for _, event := range events {
-		if eventTargetsSubagentOutputView(event) {
+		if m.subagentOutputEventKey(event) != "" {
 			continue
 		}
 		model, cmd := m.applyTranscriptEvent(event, reconnectReplay)

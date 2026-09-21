@@ -108,6 +108,9 @@ func (s *runtimeComposition) resolveDelegationPlacement(req sdkdelegation.Target
 		return assembly.AgentConfig{}, fmt.Errorf("gatewayapp: validate frozen delegation placement: %w", err)
 	}
 
+	if target.Selector == string(agentbinding.HandleReviewer) {
+		return s.materializeReviewerAgent(context.Background(), target.Placement, runtimeCfg)
+	}
 	switch target.Placement.Kind {
 	case sdkplacement.KindModel:
 		// The selector is the public AgentHandle. The materialized child keeps

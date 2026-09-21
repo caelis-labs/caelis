@@ -423,75 +423,6 @@ func TestSessionClientAdapterReportsFailedCancelAfterAdmission(t *testing.T) {
 	}
 }
 
-func TestSessionClientAdapterInterruptsBlockedReviewAdmission(t *testing.T) {
-	t.Parallel()
-
-	target := appserver.TurnTarget{HandleID: "review-handle", RunID: "review-run", TurnID: "review-turn"}
-	started := make(chan struct{}, 1)
-	release := make(chan struct{})
-	client := &sessionClientAdapterTestClient{
-		target:       target,
-		subscription: newSessionClientAdapterTestSubscription(),
-		reconnectSubscriptions: []*sessionClientAdapterTestSubscription{
-			newSessionClientAdapterTestSubscription(),
-		},
-		state: appserver.SessionState{
-			SessionID: "session-1",
-			Revision:  3,
-			Controller: session.ControllerBinding{
-				EpochID: "epoch-review",
-			},
-		},
-	}
-	participants := &sessionClientAdapterTestParticipantClient{
-		target:       target,
-		startStarted: started,
-		startRelease: release,
-	}
-	adapter := newSessionClientAdapterForTest(t, client, participants, "session-1", "cli-tui")
-	done := make(chan struct {
-		turn controlprompt.Turn
-		err  error
-	}, 1)
-	go func() {
-		turn, err := adapter.StartReview(context.Background(), "check the change", nil)
-		done <- struct {
-			turn controlprompt.Turn
-			err  error
-		}{turn, err}
-	}()
-	select {
-	case <-started:
-	case <-time.After(time.Second):
-		t.Fatal("StartParticipant() did not start")
-	}
-	interruptDone := make(chan error, 1)
-	go func() {
-		interruptDone <- adapter.Interrupt(context.Background())
-	}()
-	close(release)
-	select {
-	case got := <-done:
-		if got.err != nil {
-			t.Fatalf("StartReview() = %v", got.err)
-		}
-		defer got.turn.Close()
-	case <-time.After(time.Second):
-		t.Fatal("StartReview() did not return")
-	}
-	select {
-	case err := <-interruptDone:
-		if err != nil {
-			t.Fatalf("Interrupt() = %v", err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("Interrupt() did not return after review admission")
-	}
-	if participants.cancel.Target != target {
-		t.Fatalf("CancelParticipant() = %#v, want %#v", participants.cancel.Target, target)
-	}
-}
-
 func TestSessionClientAdapterRetriesCancelAfterTransientFailure(t *testing.T) {
 	t.Parallel()
 
@@ -648,22 +579,22 @@ func TestSessionClientAdapterCreatesSessionOnlyWhenMainPromptStartsWork(t *testi
 func TestSessionClientAdapterParticipantPromptOwnsSessionCreation(t *testing.T) {
 	tests := []struct {
 		name  string
-		start func(*SessionClientAdapter, *sessionClientAdapterTestClient) (controlprompt.Turn, error)
+		start func(*SessionClientAdapter, *sessionClientAdapterTestClient) (controlprompt.AgentRunResult, error)
 	}{
 		{
 			name: "review",
-			start: func(adapter *SessionClientAdapter, _ *sessionClientAdapterTestClient) (controlprompt.Turn, error) {
+			start: func(adapter *SessionClientAdapter, _ *sessionClientAdapterTestClient) (controlprompt.AgentRunResult, error) {
 				return adapter.StartReview(context.Background(), "check the change", nil)
 			},
 		},
 		{
 			name: "direct Agent prompt",
-			start: func(adapter *SessionClientAdapter, sessions *sessionClientAdapterTestClient) (controlprompt.Turn, error) {
+			start: func(adapter *SessionClientAdapter, sessions *sessionClientAdapterTestClient) (controlprompt.AgentRunResult, error) {
 				if _, err := adapter.StartAgentRun(context.Background(), "orbit", "", nil); err == nil {
-					return nil, errors.New("empty direct Agent prompt succeeded")
+					return controlprompt.AgentRunResult{}, errors.New("empty direct Agent prompt succeeded")
 				}
 				if sessions.create.OperationID != "" {
-					return nil, fmt.Errorf("empty direct Agent prompt created Session: %#v", sessions.create)
+					return controlprompt.AgentRunResult{}, fmt.Errorf("empty direct Agent prompt created Session: %#v", sessions.create)
 				}
 				return adapter.StartAgentRun(context.Background(), "orbit", "inspect the change", nil)
 			},
@@ -687,61 +618,19 @@ func TestSessionClientAdapterParticipantPromptOwnsSessionCreation(t *testing.T) 
 			if err != nil {
 				t.Fatal(err)
 			}
-			if turn == nil {
+			if turn.Turn == nil && turn.TaskID == "" {
 				t.Fatal("participant Turn = nil")
 			}
 			if !strings.HasPrefix(sessions.create.OperationID, "session-participant-prompt-") ||
 				participants.start.SessionID != "session-participant" || sessions.prompt.OperationID != "" {
 				t.Fatalf("create=%#v participant=%#v mainPrompt=%#v", sessions.create, participants.start, sessions.prompt)
 			}
-			if err := turn.Close(); err != nil {
-				t.Fatal(err)
+			if turn.Turn != nil {
+				if err := turn.Turn.Close(); err != nil {
+					t.Fatal(err)
+				}
 			}
 		})
-	}
-}
-
-func TestSessionClientAdapterRoutesReviewThroughTypedParticipantClient(t *testing.T) {
-	target := appserver.TurnTarget{HandleID: "participant-handle", RunID: "participant-run", TurnID: "participant-turn"}
-	subscription := newSessionClientAdapterTestSubscription()
-	client := &sessionClientAdapterTestClient{
-		target:       target,
-		subscription: subscription,
-		state: appserver.SessionState{
-			SessionID: "session-1",
-			Revision:  7,
-			CWD:       t.TempDir(),
-			Controller: session.ControllerBinding{
-				EpochID: "epoch-1",
-			},
-		},
-	}
-	participants := &sessionClientAdapterTestParticipantClient{target: target}
-	adapter := newSessionClientAdapterForTest(t, client, participants, "session-1", "acp")
-	turn, err := adapter.StartReview(context.Background(), "inspect typed routing", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if turn == nil || turn.HandleID() != target.HandleID {
-		t.Fatalf("review Turn = %#v, want typed participant target", turn)
-	}
-	request := participants.start
-	if request.SessionID != "session-1" || request.Handle != "reviewer" ||
-		request.Source != "slash_review" || request.DisplayAddress != "/review" ||
-		!request.Transient || request.DetachSource != "side_agent_complete" ||
-		!strings.HasPrefix(request.Label, "@") ||
-		!strings.Contains(request.Input, "inspect typed routing") {
-		t.Fatalf("typed review request = %#v", request)
-	}
-	terminal := eventstream.TurnCompleted(target.HandleID, target.RunID, target.TurnID, time.Now())
-	terminal.SessionID = "session-1"
-	subscription.events <- terminal
-	subscription.finish()
-	if got := collectSessionClientAdapterEvents(turn.Events()); len(got) != 1 || !eventstream.IsTurnTerminalLifecycle(got[0]) {
-		t.Fatalf("review Turn events = %#v", got)
-	}
-	if err := turn.Close(); err != nil {
-		t.Fatal(err)
 	}
 }
 
@@ -762,13 +651,10 @@ func TestSessionClientAdapterRoutesSideAgentStartAndFollowUpThroughTypedClients(
 	if err != nil {
 		t.Fatal(err)
 	}
-	if started == nil || participants.start.SessionID != "session-1" ||
+	if started.TaskID != "task-1" || started.Turn != nil || !participants.start.Background || participants.start.SessionID != "session-1" ||
 		participants.start.Handle != "orbit" || participants.start.Source != "slash_profile_orbit" ||
 		participants.start.Role != session.ParticipantRoleSidecar || participants.start.Input != "inspect" {
 		t.Fatalf("typed participant start = %#v, Turn=%#v", participants.start, started)
-	}
-	if err := started.Close(); err != nil {
-		t.Fatal(err)
 	}
 
 	sessions.subscription = newSessionClientAdapterTestSubscription()
@@ -780,12 +666,12 @@ func TestSessionClientAdapterRoutesSideAgentStartAndFollowUpThroughTypedClients(
 	if err != nil {
 		t.Fatal(err)
 	}
-	if followUp == nil || participants.prompt.SessionID != "session-1" ||
+	if followUp.Turn == nil || participants.prompt.SessionID != "session-1" ||
 		participants.prompt.ParticipantID != "participant-1" || participants.prompt.Input != "continue" ||
 		participants.prompt.Source != "user_side_agent" {
 		t.Fatalf("typed participant follow-up = %#v, Turn=%#v", participants.prompt, followUp)
 	}
-	if err := followUp.Close(); err != nil {
+	if err := followUp.Turn.Close(); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -3118,6 +3004,9 @@ func (*sessionClientAdapterTestParticipantClient) Handles(context.Context, strin
 
 func (c *sessionClientAdapterTestParticipantClient) StartParticipant(ctx context.Context, request appserver.StartParticipantRequest) (appserver.CommandResult, error) {
 	c.start = request
+	if request.Background {
+		return appserver.CommandResult{Outcome: appserver.OutcomeCommitted, SessionID: request.SessionID, Resource: &appserver.CommandResource{Kind: appserver.CommandResourceParticipantTask, Ref: "task-1"}}, nil
+	}
 	if c.startStarted != nil {
 		select {
 		case c.startStarted <- struct{}{}:

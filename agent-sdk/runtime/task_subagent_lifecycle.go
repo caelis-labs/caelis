@@ -145,11 +145,15 @@ func (tm *taskRuntime) appendSideSubagentUserEvent(ctx context.Context, task *su
 		return nil
 	}
 	prompt = strings.TrimSpace(prompt)
-	if prompt == "" {
+	var parts []model.ContentPart
+	if task.turnSeq == 1 {
+		parts = task.contentParts
+	}
+	if prompt == "" && len(parts) == 0 {
 		return nil
 	}
 	role := subagentParticipantRole(task)
-	message := model.NewTextMessage(model.RoleUser, prompt)
+	message := model.MessageFromTextAndContentParts(model.RoleUser, prompt, parts)
 	err := tm.appendSubagentSagaEvent(ctx, task.sessionRef, &session.Event{
 		IdempotencyKey: fmt.Sprintf("subagent-dialogue:%s:%d:user", task.ref.TaskID, task.turnSeq),
 		Type:           session.EventTypeUser,

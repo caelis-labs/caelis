@@ -3,6 +3,7 @@ package tuiapp
 import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/caelis-labs/caelis/control/appserver"
+	"maps"
 )
 
 const sessionHistoryLoadingHint = "Loading session history…"
@@ -29,6 +30,9 @@ func (m *Model) beginSessionHistory(start sessionViewStartMsg) tea.Cmd {
 	builder.historyBuilding = true
 	builder.beginDeferredViewportSync()
 	builder.applySessionReconnectState(start.state)
+	if start.state.SessionID == m.currentSessionID {
+		builder.subagentRosterTasks = maps.Clone(m.subagentRosterTasks)
+	}
 	pending := m.sessionSwitchPending
 	if m.sessionHistory != nil {
 		pending = m.sessionHistory.pendingNavigation
@@ -80,6 +84,7 @@ func (m *Model) commitSessionHistory() tea.Cmd {
 	defer m.endDeferredViewportSync()
 	var cmd tea.Cmd
 	previousChildren := m.subagentOutputViews
+	sameSession := m.currentSessionID == build.start.state.SessionID
 	if build.start.recovery && m.currentSessionID == build.start.state.SessionID {
 		cmd = m.restoreSessionObservationState(build.start.state)
 	} else if !build.start.replacement {
@@ -102,7 +107,14 @@ func (m *Model) commitSessionHistory() tea.Cmd {
 	m.participantTurnIDs = b.participantTurnIDs
 	m.activeParticipantTurnSessionID = b.activeParticipantTurnSessionID
 	m.subagentOutputViews = b.subagentOutputViews
-	if build.start.replacement || build.start.recovery {
+	if sameSession && (build.start.replacement || build.start.recovery) {
+		// Directory-discovered children need not have a StartThread display
+		// event in the parent history (for example, an external ACP controller).
+		for callID, previous := range previousChildren {
+			if m.subagentOutputViews[callID] == nil {
+				m.subagentOutputViews[callID] = previous
+			}
+		}
 		for callID, view := range m.subagentOutputViews {
 			if previous := previousChildren[callID]; previous != nil && previous.taskHandle == view.taskHandle {
 				m.subagentOutputViews[callID] = previous
@@ -128,6 +140,7 @@ func (m *Model) commitSessionHistory() tea.Cmd {
 	m.seedReconnectReplayExploration()
 	m.markViewportStructureDirty()
 	m.syncViewportContent()
+	m.reconcileSubagentDirectoryViews()
 	m.reconcileSubagentOutputTaskStreams()
 	return tea.Batch(cmd, m.ensureSubagentDirectoryWatch())
 }

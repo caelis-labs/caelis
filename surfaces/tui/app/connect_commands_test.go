@@ -182,12 +182,14 @@ func TestAgentSlashCommandsHideRosterAndKeepProfileRunsSessionScoped(t *testing.
 		},
 		status: controlprompt.AgentStatusSnapshot{Participants: []controlprompt.AgentParticipantSnapshot{{
 			ID: "participant-1", Label: "@lina", AgentName: "codex", Kind: "acp", Role: "sidecar", Source: "slash_profile_breeze",
+		}, {
+			ID: "reviewer-1", Label: "@maya", AgentName: "reviewer", Kind: "subagent", Role: "sidecar", Source: "slash_review",
 		}}},
 		bindingStatus: subagentTestStatus(),
 	}
 
 	before := appendAgentSlashCommandsWithContext(context.Background(), service, DefaultCommands())
-	for _, command := range []string{"orbit", "breeze(lina)"} {
+	for _, command := range []string{"orbit", "breeze(lina)", "lina", "reviewer(maya)", "maya"} {
 		if !slices.Contains(before, command) {
 			t.Fatalf("commands before /new = %#v, want %q", before, command)
 		}
@@ -206,6 +208,9 @@ func TestAgentSlashCommandsHideRosterAndKeepProfileRunsSessionScoped(t *testing.
 	if details["breeze(lina)"] != "Continue /breeze as lina" {
 		t.Fatalf("run command details = %#v", details)
 	}
+	if details["lina"] != details["breeze(lina)"] || details["maya"] != "Continue /reviewer as maya" {
+		t.Fatalf("bare handle details = %#v", details)
+	}
 
 	service.status.Participants = nil
 	after := appendAgentSlashCommandsWithContext(context.Background(), service, DefaultCommands())
@@ -217,8 +222,10 @@ func TestAgentSlashCommandsHideRosterAndKeepProfileRunsSessionScoped(t *testing.
 			t.Fatalf("commands after /new = %#v, should hide unbound profile %q", after, hidden)
 		}
 	}
-	if slices.Contains(after, "breeze(lina)") {
-		t.Fatalf("commands after /new = %#v, want prior Session run removed", after)
+	for _, name := range []string{"breeze(lina)", "lina", "reviewer(maya)", "maya"} {
+		if slices.Contains(after, name) {
+			t.Fatalf("commands after /new = %#v, want prior Session run removed", after)
+		}
 	}
 }
 

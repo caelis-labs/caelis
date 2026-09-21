@@ -414,6 +414,7 @@ type Model struct {
 	// parent Spawn call. They are never persisted or used as Task identity.
 	subagentOutputViews             map[string]*subagentOutputView
 	subagentRosterTasks             map[string]taskstream.TaskDescriptor
+	subagentFocusTaskID             string
 	subagentDirectorySubscription   taskstream.DirectorySubscription
 	subagentDirectoryCancel         context.CancelFunc
 	subagentDirectoryStarting       bool

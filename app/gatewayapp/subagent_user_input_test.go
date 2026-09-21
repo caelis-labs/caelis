@@ -11,14 +11,16 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
-	"github.com/caelis-labs/caelis/agent-sdk/runtime"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/app/controlserver"
+	"github.com/caelis-labs/caelis/control/agentbinding"
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/taskstream"
+	"github.com/caelis-labs/caelis/control/collaboration"
 	"github.com/caelis-labs/caelis/control/streamspool"
+	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/surfaces/headless"
 )
 
@@ -73,12 +75,19 @@ func TestHostedChildUserPromptsRetainUserRoleAcrossContextReplay(t *testing.T) {
 // RunHostedSubagentUserInputTest supplies the production AppServer assembly from
 // the external test package, avoiding an import cycle through the local adapter.
 func RunHostedSubagentUserInputTest(t *testing.T, assemble func(*Stack) (appserver.AppServerServices, error)) {
-	for _, name := range []string{"live", "restored-spool", "retained-spool"} {
+	for _, name := range []string{"live", "restored-spool", "retained-spool", "reviewer-live", "reviewer-restored-spool"} {
 		t.Run(name, func(t *testing.T) { runHostedSubagentUserInput(t, assemble, name) })
 	}
 }
 
 func runHostedSubagentUserInput(t *testing.T, assemble func(*Stack) (appserver.AppServerServices, error), mode string) {
+	mode, reviewer := strings.CutPrefix(mode, "reviewer-")
+	handle, source, initialPrompt := agentbinding.HandleOrbit, "slash_profile_orbit", "initial assignment"
+	if reviewer {
+		handle, source = agentbinding.HandleReviewer, "slash_review"
+		initialPrompt, _ = controlprompt.ReviewPrompt("inspect initial change")
+	}
+	childHandle := string(handle) + "-user"
 	restored := mode != "live"
 	provider := newHostedChildInputTestProvider(t, false)
 	finishProvider := make(chan struct{})
@@ -93,6 +102,14 @@ func runHostedSubagentUserInput(t *testing.T, assemble func(*Stack) (appserver.A
 		}
 	}
 	host := newHostedChildInputTestStack(t, provider)
+	imageInput := true
+	profile, err := host.connectTestModel(ModelConfig{Provider: "openai-compatible", API: model.APIOpenAICompatible, Model: "hosted-child-input", BaseURL: provider.URL, HTTPClient: provider.Client(), Token: "test-token", AuthType: model.AuthBearerToken, ImageInput: &imageInput, ContextWindowTokens: 128000, MaxOutputTok: 1024})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := host.testAgentBindings().BindAgentBinding(t.Context(), agentbinding.Binding{Handle: handle, ProfileID: profile.ID, Effort: profile.Effort.DefaultEffort}); err != nil {
+		t.Fatal(err)
+	}
 	services, err := assemble(host)
 	if err != nil {
 		t.Fatal(err)
@@ -120,9 +137,30 @@ func runHostedSubagentUserInput(t *testing.T, assemble func(*Stack) (appserver.A
 		t.Fatal(err)
 	}
 	active := activateSessionRuntime(t, host, parent.SessionID)
-	_, err = active.instance.engine.StartSubagentWithOptions(ctx, parent.SessionRef, "self", "initial assignment", "test", runtime.StartSubagentOptions{SpawnID: "human-input-child"})
+	participants, err := appserver.BindParticipantClient(host.ControlParticipants(), appserver.Principal{ID: "owner"})
 	if err != nil {
 		t.Fatal(err)
+	}
+	fences := host.composition.sessions.(session.SessionFenceService)
+	fence, err := fences.AcquireSessionFence(ctx, session.AcquireSessionFenceRequest{SessionRef: parent.SessionRef, OwnerID: "concurrent-controller"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	started, err := participants.StartParticipant(ctx, appserver.StartParticipantRequest{
+		WriteBase:  appserver.WriteBase{OperationID: "human-input-child", SessionID: parent.SessionID},
+		Background: true, Handle: string(handle), Label: "@" + childHandle, Source: source, Input: initialPrompt,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if started.Resource == nil || started.Resource.Kind != appserver.CommandResourceParticipantTask || started.Resource.Ref == "" {
+		t.Fatalf("background start has no durable Task receipt: %#v", started)
+	}
+	if _, running := active.instance.currentGateway().ActiveTurn(parent.SessionID); running {
+		t.Fatal("background start occupied the main Turn")
+	}
+	if err := fences.ReleaseSessionFence(ctx, session.SessionFenceReleaseRequest(fence)); err != nil {
+		t.Fatalf("background start replaced the main fence: %v", err)
 	}
 	parent, err = host.composition.sessions.Session(ctx, parent.SessionRef)
 	if err != nil {
@@ -137,6 +175,22 @@ func runHostedSubagentUserInput(t *testing.T, assemble func(*Stack) (appserver.A
 	}
 	if child.ID == "" {
 		t.Fatal("Spawn did not attach child")
+	}
+	if child.DelegationID != started.Resource.Ref || child.ID != started.ParticipantID || child.Role != session.ParticipantRoleSidecar {
+		t.Fatalf("background Task did not retain sidecar identity: %#v", child)
+	}
+	threads, err := host.composition.authorities.collaboration.List(ctx, collaboration.Identity{Session: parent.SessionID, Member: "parent"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, thread := range threads {
+		if thread.ID == child.DelegationID && thread.Handle == childHandle {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("background Task missing from shared collaboration roster: %#v", threads)
 	}
 	// The first provider request proves ACP setup completed before inspecting
 	// the effective mode; attachment alone may precede configuration.
@@ -326,7 +380,60 @@ recovered:
 			}
 		}
 	}
+	if reviewer {
+		if _, err := host.composition.authorities.collaboration.Send(ctx, collaboration.Identity{Session: parent.SessionID, Member: "parent"}, childHandle, "controller requests another review", ""); err != nil {
+			t.Fatal(err)
+		}
+		ticker := time.NewTicker(10 * time.Millisecond)
+		defer ticker.Stop()
+		for !strings.Contains(string(provider.LastMessages()), "controller requests another review") {
+			select {
+			case <-ticker.C:
+			case <-ctx.Done():
+				t.Fatal("controller mail did not reach the Reviewer")
+			}
+		}
+		waitHostedChildParentIdle(t, host, child.SessionID)
+		for {
+			read, err := host.composition.authorities.collaboration.Read(ctx, collaboration.Identity{Session: parent.SessionID, Member: "parent"}, collaboration.Target{Handle: childHandle})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(read.Output, "reply-4") {
+				break
+			}
+			select {
+			case <-ticker.C:
+			case <-ctx.Done():
+				t.Fatal("controller could not observe the Reviewer's reply")
+			}
+		}
+	}
 	payload := string(provider.LastMessages())
+	escapedPrompt, err := json.Marshal(initialPrompt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var messages []struct {
+		Role    string          `json:"role"`
+		Content json.RawMessage `json:"content"`
+	}
+	if err := json.Unmarshal([]byte(payload), &messages); err != nil {
+		t.Fatal(err)
+	}
+	foundAssignment := false
+	for _, message := range messages {
+		var parts []model.ContentPart
+		if message.Role != "user" || json.Unmarshal(message.Content, &parts) != nil {
+			continue
+		}
+		for _, part := range parts {
+			foundAssignment = foundAssignment || strings.Contains(part.Text, string(escapedPrompt))
+		}
+	}
+	if !foundAssignment {
+		t.Fatalf("followup lost initial assignment or Reviewer instructions: %s", payload)
+	}
 	if !strings.Contains(payload, imageData) {
 		t.Fatal("next Turn model context lost the user's image")
 	}

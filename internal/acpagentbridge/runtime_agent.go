@@ -117,10 +117,11 @@ type RuntimeAgent struct {
 	workspaceCWD          string
 	agentInfo             *acpsdk.Implementation
 
-	mu              sync.Mutex
-	cancels         map[string]context.CancelFunc
-	managedSessions map[string]struct{}
-	taskMuxes       map[string]map[*acpTaskStreamMux]struct{}
+	mu               sync.Mutex
+	cancels          map[string]context.CancelFunc
+	managedSessions  map[string]struct{}
+	taskMuxes        map[string]map[*acpTaskStreamMux]struct{}
+	participantTasks map[string]*acpParticipantTasks
 }
 
 // New constructs the lower-level ACP bridge in typed-client or direct Runtime
@@ -558,6 +559,7 @@ func (a *RuntimeAgent) clearSessionDelivery(sessionID string) {
 	delete(a.cancels, sessionID)
 	a.mu.Unlock()
 	a.closeACPTaskStreamMuxes(sessionID)
+	a.closeParticipantTasks(sessionID)
 }
 
 func (a *RuntimeAgent) SetSessionMode(ctx context.Context, req acpsdk.SetSessionModeRequest) (acpsdk.SetSessionModeResponse, error) {

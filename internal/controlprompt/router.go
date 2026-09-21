@@ -82,15 +82,12 @@ func (r router) shouldDispatchSlash(ctx context.Context, cmd string) bool {
 		}
 		return true
 	}
-	if r.dynamicCommandAllowed != nil {
-		if r.isDirectAgentRun(ctx, cmd) {
-			if agent, _, ok := controlagents.ParseRunName(cmd); ok {
-				return r.dynamicSlashAllowed(ctx, agent)
-			}
-		}
-		return r.isConfiguredDirectHandle(ctx, cmd) && r.dynamicSlashAllowed(ctx, cmd)
+	// Configured role commands always start new work, even when a participant
+	// has the same handle. The qualified run name remains unambiguous.
+	if r.isConfiguredDirectHandle(ctx, cmd) {
+		return r.dynamicSlashAllowed(ctx, cmd)
 	}
-	return r.isConfiguredDirectHandle(ctx, cmd) || r.isDirectAgentRun(ctx, cmd)
+	return r.isDirectAgentRun(ctx, cmd)
 }
 
 func (r router) dispatchPrivateSlash(ctx context.Context, req PrivateSlashRequest) (Result, bool, error) {
@@ -149,7 +146,9 @@ func (r router) isDirectAgentRun(ctx context.Context, name string) bool {
 	if err != nil {
 		return false
 	}
-	return controlagents.RunNameAllowed(directAgentRuns(status), name, nil)
+	return controlagents.RunNameAllowed(directAgentRuns(status), name, func(agent string) bool {
+		return r.dynamicSlashAllowed(ctx, agent)
+	})
 }
 
 func (r router) isConfiguredDirectHandle(ctx context.Context, name string) bool {

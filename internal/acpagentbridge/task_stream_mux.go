@@ -164,6 +164,15 @@ func (m *acpTaskStreamMux) Observe(envelope eventstream.Envelope) {
 	go m.resolveAndForward(anchor, generation)
 }
 
+// ObserveTask follows an explicit background participant across activities.
+// Its key is local observation identity, never a fabricated parent tool call.
+func (m *acpTaskStreamMux) ObserveTask(taskID string) {
+	anchor := acpTaskStreamAnchor{callID: "task:" + taskID, taskID: taskID, kind: task.KindSubagent}
+	if generation := m.claimObservation(anchor.callID, true); generation != nil {
+		go m.resolveAndForward(anchor, generation)
+	}
+}
+
 type acpTaskStreamAnchor struct {
 	callID         string
 	handle         string

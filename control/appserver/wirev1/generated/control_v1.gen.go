@@ -232,6 +232,7 @@ type ActiveApproval struct {
 	RequestId     string              `json:"request_id"`
 	Scope         *string             `json:"scope,omitempty"`
 	ScopeId       *string             `json:"scope_id,omitempty"`
+	Target        *TurnTarget         `json:"target,omitempty"`
 }
 
 type ActorIdentity struct {
@@ -1556,6 +1557,7 @@ type SlashArgCandidate struct {
 type SlashArgCandidateList []SlashArgCandidate
 
 type StartParticipantRequest struct {
+	Background              *bool               `json:"background,omitempty"`
 	ContentParts            []PromptContentPart `json:"content_parts,omitempty"`
 	DetachSource            *string             `json:"detach_source,omitempty"`
 	DisplayAddress          *string             `json:"display_address,omitempty"`

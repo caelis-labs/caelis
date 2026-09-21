@@ -78,6 +78,9 @@ func acpTaskStreamEnvelopeAllowed(anchor acpTaskStreamAnchor, envelope eventstre
 	case task.KindCommand:
 		return envelope.Scope == eventstream.ScopeMain && envelope.Kind == eventstream.KindSessionUpdate && envelopeHasTerminalDelivery(envelope)
 	case task.KindSubagent:
+		if anchor.taskID != "" {
+			return envelope.Scope == eventstream.ScopeSubagent && envelope.ScopeID == anchor.taskID
+		}
 		if envelope.Scope != eventstream.ScopeSubagent || envelope.ParentTool == nil ||
 			strings.TrimSpace(envelope.ParentTool.ToolCallID) != anchor.callID ||
 			envelope.ParentTool.ToolName != spawn.ToolName {

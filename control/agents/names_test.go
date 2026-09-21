@@ -30,6 +30,22 @@ func TestAgentAndRunNamesAreDisjoint(t *testing.T) {
 	}
 }
 
+func TestBareRunHandlesAreUniqueAndDoNotDuplicateCommands(t *testing.T) {
+	runs := []Run{
+		{Name: "reviewer(lina)", Agent: "reviewer", Addressable: true},
+		{Name: "orbit(lina)", Agent: "orbit", Addressable: true},
+		{Name: "reviewer(review)", Agent: "reviewer", Addressable: true},
+	}
+	got := AppendRunNames([]string{"review"}, runs)
+	want := []string{"review", "reviewer(lina)", "orbit(lina)", "reviewer(review)"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("names = %#v, want %#v", got, want)
+	}
+	if RunNameAllowed(runs, "lina") || RunNameAllowed(runs, "lina", func(agent string) bool { return agent == "reviewer" }) {
+		t.Fatal("ambiguous bare handle became addressable")
+	}
+}
+
 func TestAppendRunNamesFiltersAddressabilityAndAgentIdentity(t *testing.T) {
 	runs := []Run{
 		{Name: "opus(lina)", Agent: "opus", Addressable: true},
@@ -38,7 +54,7 @@ func TestAppendRunNamesFiltersAddressabilityAndAgentIdentity(t *testing.T) {
 		{Name: "status(ava)", Agent: "status", Addressable: true},
 	}
 	got := AppendRunNames([]string{"help"}, runs, func(agent string) bool { return agent != "status" })
-	want := []string{"help", "opus(lina)"}
+	want := []string{"help", "opus(lina)", "lina"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("AppendRunNames() = %#v, want %#v", got, want)
 	}

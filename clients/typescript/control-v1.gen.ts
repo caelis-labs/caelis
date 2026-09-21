@@ -208,6 +208,7 @@ export interface ActiveApproval {
   request_id: string;
   scope?: "main" | "participant" | "subagent";
   scope_id?: string;
+  target?: TurnTarget;
 }
 
 export interface ActorIdentity {
@@ -1446,6 +1447,7 @@ export interface SlashArgCandidate {
 export type SlashArgCandidateList = Array<SlashArgCandidate>;
 
 export interface StartParticipantRequest {
+  background?: boolean;
   content_parts?: Array<PromptContentPart>;
   detach_source?: string;
   display_address?: string;

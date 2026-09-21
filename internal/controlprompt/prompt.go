@@ -77,6 +77,7 @@ type PrivateSlashHandler func(context.Context, PrivateSlashRequest) (Result, boo
 type Result struct {
 	Handled             bool
 	Turn                Turn
+	ParticipantTask     *AgentRunResult
 	Reconnect           SessionReconnect
 	Events              []eventstream.Envelope
 	SlashResult         *SlashCommandResult

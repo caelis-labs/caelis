@@ -12,6 +12,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	contextprompt "github.com/caelis-labs/caelis/agent-sdk/runtime/contexttransfer"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
@@ -178,8 +179,15 @@ func (tm *taskRuntime) startSubagentTarget(
 			}
 		}()
 		childPrompt := contextprompt.ComposeTextPrompt(spawnContextFromSpec(outcome.Entry.Spec), strings.TrimSpace(req.Prompt))
+		parts := append([]model.ContentPart(nil), req.ContentParts...)
+		if len(parts) > 0 {
+			if background := contextprompt.RenderBackground(spawnContextFromSpec(outcome.Entry.Spec)); background != "" {
+				parts = append(parts, model.ContentPart{Type: model.ContentPartText, Text: background})
+			}
+		}
 		spawnContext := subagent.SpawnContext{
-			SessionRef: session.NormalizeSessionRef(ref), Session: session.CloneSession(activeSession), CWD: strings.TrimSpace(activeSession.CWD),
+			ContentParts: parts,
+			SessionRef:   session.NormalizeSessionRef(ref), Session: session.CloneSession(activeSession), CWD: strings.TrimSpace(activeSession.CWD),
 			TaskID: taskID, ActivityID: activityID, Handle: handle, Role: role, ParentCallID: strings.TrimSpace(req.ParentCall), Mode: mode, ApprovalMode: strings.TrimSpace(req.ApprovalMode),
 			ApprovalRequester: req.Approval,
 			Output:            outputObserver,
@@ -301,6 +309,7 @@ func (tm *taskRuntime) beginSubagentSpawn(
 			"spawn_identity": strings.TrimSpace(spawnID), "spawn_request_digest": strings.TrimSpace(requestDigest),
 			"target":              target,
 			"prompt":              strings.TrimSpace(req.Prompt),
+			"content_parts":       req.ContentParts,
 			"include_context":     req.IncludeContext,
 			"context_unsupported": req.ContextUnsupported,
 			"context":             agent.CloneContextTransfer(req.Context),
@@ -440,6 +449,7 @@ func (tm *taskRuntime) failSubagentSpawnBeforeCreation(ctx context.Context, entr
 
 func subagentSpawnRequestDigest(req taskapi.SubagentStartRequest, mode string, role session.ParticipantRole) (string, error) {
 	payload := struct {
+		ContentParts []model.ContentPart     `json:"content_parts,omitempty"`
 		Agent        string                  `json:"agent"`
 		Prompt       string                  `json:"prompt"`
 		Handle       string                  `json:"handle,omitempty"`
@@ -449,7 +459,8 @@ func subagentSpawnRequestDigest(req taskapi.SubagentStartRequest, mode string, r
 		ParentCall   string                  `json:"parent_call"`
 		Role         session.ParticipantRole `json:"role"`
 	}{
-		Agent: strings.TrimSpace(req.Agent), Prompt: strings.TrimSpace(req.Prompt),
+		ContentParts: req.ContentParts,
+		Agent:        strings.TrimSpace(req.Agent), Prompt: strings.TrimSpace(req.Prompt),
 		Handle: strings.TrimSpace(req.Handle), Context: agent.CloneContextTransfer(req.Context), Mode: strings.TrimSpace(mode),
 		ApprovalMode: strings.TrimSpace(req.ApprovalMode), ParentCall: strings.TrimSpace(req.ParentCall), Role: role,
 	}
@@ -458,6 +469,7 @@ func subagentSpawnRequestDigest(req taskapi.SubagentStartRequest, mode string, r
 
 func subagentSpawnTargetRequestDigest(target delegation.Target, req taskapi.SubagentStartRequest, mode string, role session.ParticipantRole) (string, error) {
 	payload := struct {
+		ContentParts   []model.ContentPart     `json:"content_parts,omitempty"`
 		Target         delegation.Target       `json:"target"`
 		Prompt         string                  `json:"prompt"`
 		Handle         string                  `json:"handle,omitempty"`
@@ -467,7 +479,8 @@ func subagentSpawnTargetRequestDigest(target delegation.Target, req taskapi.Suba
 		ParentCall     string                  `json:"parent_call"`
 		Role           session.ParticipantRole `json:"role"`
 	}{
-		Target: delegation.NormalizeTarget(target), Prompt: strings.TrimSpace(req.Prompt),
+		ContentParts: req.ContentParts,
+		Target:       delegation.NormalizeTarget(target), Prompt: strings.TrimSpace(req.Prompt),
 		Handle: strings.TrimSpace(req.Handle), IncludeContext: req.IncludeContext, Mode: strings.TrimSpace(mode),
 		ApprovalMode: strings.TrimSpace(req.ApprovalMode), ParentCall: strings.TrimSpace(req.ParentCall), Role: role,
 	}
@@ -528,7 +541,7 @@ func newSubagentTaskFromSpawn(
 		ref:        taskapi.Ref{TaskID: taskID, SessionID: strings.TrimSpace(anchor.SessionID), TerminalID: subagentTerminalID(taskID)},
 		sessionRef: session.NormalizeSessionRef(ref), anchor: delegation.CloneAnchor(anchor), runner: runner,
 		agent: agentName, target: target, handle: handle, title: spawn.ToolName + " " + agentName,
-		prompt: strings.TrimSpace(req.Prompt), mode: strings.TrimSpace(mode),
+		prompt: strings.TrimSpace(req.Prompt), contentParts: append([]model.ContentPart(nil), req.ContentParts...), mode: strings.TrimSpace(mode),
 		approvalMode: strings.TrimSpace(req.ApprovalMode), createdAt: now, revision: revision,
 		state: taskStateFromDelegation(result.State), running: result.State == delegation.StateRunning, turnSeq: 1,
 		metadata: map[string]any{

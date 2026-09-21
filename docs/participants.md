@@ -125,6 +125,31 @@ for the full guarantees and limits.
 
 ## Participant workspace
 
+Enter `/orbit <task>` (or another configured role) to start a background
+participant and open its pane automatically. The main controller remains free
+to work. Use `/{handle} <message>`, `/orbit(handle) <message>`, or the pane's input
+to continue that same Task through its user-input mailbox. Initial input and follow-ups retain their
+user role and attachments. Child approvals use the Session approval queue,
+including while the main controller is idle.
+
+`/review [instructions]` starts a new background Reviewer and opens its pane.
+The fixed review scene and configured Reviewer model or ACP agent apply to every
+review. The child remains available after its first result: use its handle (for
+example `/lina recheck the fix`) or `/reviewer(lina) recheck the fix` to request
+another review with the same context. The main controller can discover these
+handles through `ListThreads` and contact them through `SendMessage`.
+Core commands and configured role commands take precedence over bare handles;
+qualified names such as `/reviewer(lina)` select the participant explicitly.
+
+Existing foreground ACP attachments remain addressable until detached;
+new direct starts, including reviews, use background Tasks.
+
+The TUI discovers child Tasks from the selected Session's Control directory,
+including children started by an external ACP controller through the collaboration
+MCP bridge. Discovery does not depend on a visible `StartThread` row or load child
+transcripts. Opening a participant pane subscribes to that child's content;
+hiding the pane releases its content subscription while status remains observed.
+
 Click the running/done count in the footer or a participant's label in the
 transcript to open one participant pane. Message rows split that click: the peer
 label (`handle[agent]`, or `@handle[agent]` when you send) opens the peer's pane,

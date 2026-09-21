@@ -396,10 +396,14 @@ func (r *Runner) callChildSteering(ctx context.Context, run *childRun, prompt []
 	if acpClient == nil || sessionID == "" {
 		return client.SessionSteeringResponse{}, errorcode.New(errorcode.Conflict, "Target Agent messaging transport is unavailable")
 	}
+	// Remote completion can beat local prompt settlement. Ask for an explicit
+	// no-injection receipt so the mailbox can keep the input queued until idle.
+	idleOptions, _ := json.Marshal(client.SessionSteeringOptions{IdleBehavior: client.SessionSteeringIdlePromptRequired})
+	meta := map[string]json.RawMessage{client.SessionSteeringMetaKey: idleOptions}
 	return authentication.RecoverConfiguredCall(
 		ctx, acpClient, methods, agentID, configured,
 		func(callCtx context.Context, activeClient *client.Client) (client.SessionSteeringResponse, error) {
-			return activeClient.SteerPartsWithAbort(callCtx, sessionID, prompt, nil, func() {
+			return activeClient.SteerPartsWithAbort(callCtx, sessionID, prompt, meta, func() {
 				_ = activeClient.Close(context.Background())
 			})
 		},

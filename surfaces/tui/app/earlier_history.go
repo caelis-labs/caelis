@@ -209,7 +209,7 @@ func (m *Model) handleEarlierHistory(msg earlierHistoryMsg) tea.Cmd {
 		build.next = event.before
 		for _, envelope := range event.events {
 			for _, projection := range m.expandCollaborationMessages(m.projectACPEventToTranscriptEvents(envelope)) {
-				if eventTargetsSubagentOutputView(projection) && projection.AnchorToolCallID == msg.callID {
+				if m.subagentOutputEventKey(projection) == msg.callID {
 					build.child.observeChildEvent(projection)
 				}
 			}

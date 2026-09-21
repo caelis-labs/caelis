@@ -11,6 +11,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
@@ -157,7 +158,7 @@ func (r *Runtime) StartSubagentWithOptions(
 	if err != nil {
 		return taskapi.Snapshot{}, err
 	}
-	if strings.TrimSpace(prompt) == "" {
+	if strings.TrimSpace(prompt) == "" && len(opts.ContentParts) == 0 {
 		return taskapi.Snapshot{}, fmt.Errorf("subagent prompt is required")
 	}
 	approvalMode := strings.TrimSpace(opts.ApprovalMode)
@@ -170,8 +171,10 @@ func (r *Runtime) StartSubagentWithOptions(
 	if err != nil {
 		return taskapi.Snapshot{}, err
 	}
-	snapshot, err := r.tasks.StartSubagent(ctx, activeSession, ref, r.subagents, taskapi.SubagentStartRequest{
+	req := taskapi.SubagentStartRequest{
 		SpawnID:      strings.TrimSpace(opts.SpawnID),
+		Handle:       strings.TrimPrefix(strings.TrimSpace(opts.Handle), "@"),
+		ContentParts: opts.ContentParts,
 		Agent:        strings.TrimSpace(agent),
 		Prompt:       strings.TrimSpace(prompt),
 		Context:      contextTransfer,
@@ -180,8 +183,14 @@ func (r *Runtime) StartSubagentWithOptions(
 		Mode:         strings.TrimSpace(r.defaultPolicyMode),
 		ApprovalMode: approvalMode,
 		Approval:     newSubagentApprovalRequester(r, r.defaultPolicyMode, opts.ApprovalRequester, activeSession, ref),
-	})
-	if err != nil || !snapshot.Running {
+	}
+	var snapshot taskapi.Snapshot
+	if opts.Target.Selector != "" {
+		snapshot, err = r.tasks.StartSubagentTarget(ctx, activeSession, ref, r.subagents, opts.Target, req)
+	} else {
+		snapshot, err = r.tasks.StartSubagent(ctx, activeSession, ref, r.subagents, req)
+	}
+	if err != nil || !snapshot.Running || opts.ReturnOnStart {
 		return snapshot, err
 	}
 	return r.tasks.Wait(ctx, ref, taskapi.ControlRequest{
@@ -592,6 +601,7 @@ func (tm *taskRuntime) rehydrateSubagentTask(entry *taskapi.Entry) *subagentTask
 		handle:          firstNonEmpty(entry.Handle, taskSpecString(entry.Spec, "handle"), taskStringValue(entry.Metadata["handle"])),
 		title:           strings.TrimSpace(entry.Title),
 		prompt:          taskSpecString(entry.Spec, "prompt"),
+		contentParts:    taskContentParts(entry.Spec),
 		mode:            taskSpecString(entry.Spec, "mode"),
 		approvalMode:    taskSpecString(entry.Spec, "approval_mode"),
 		createdAt:       entry.CreatedAt,
@@ -849,6 +859,7 @@ func (t *subagentTask) entrySnapshot(now time.Time) *taskapi.Entry {
 		Lease:          taskapi.CloneLease(t.lease),
 		ContextUsage:   taskapi.CloneContextUsageRecord(t.contextUsage),
 		Spec: map[string]any{
+			"content_parts":        t.contentParts,
 			"target":               delegation.NormalizeTarget(t.target),
 			"prompt":               t.prompt,
 			"include_context":      taskSpecBool(t.metadata, "include_context"),
@@ -883,6 +894,14 @@ func (t *subagentTask) entrySnapshot(now time.Time) *taskapi.Entry {
 	}
 	normalizeSubagentEntryResult(entry, taskRawStringValue(t.result["error"]))
 	return entry
+}
+
+func taskContentParts(spec map[string]any) []model.ContentPart {
+	var parts []model.ContentPart
+	if raw, err := json.Marshal(spec["content_parts"]); err == nil {
+		_ = json.Unmarshal(raw, &parts)
+	}
+	return parts
 }
 
 func taskSpecTarget(values map[string]any, key string) delegation.Target {

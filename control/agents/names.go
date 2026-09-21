@@ -94,31 +94,53 @@ type Run struct {
 // product surface, including command-name reservations.
 type NameFilter func(string) bool
 
-// AppendRunNames appends canonical addressable direct Agent run names while
-// preserving order and removing duplicates.
+// AppendRunNames appends qualified run names and unique bare handles, preserving
+// order and existing command names. Callers give core and configured role
+// commands precedence over bare handles.
 func AppendRunNames(base []string, runs []Run, filters ...NameFilter) []string {
 	out := append([]string(nil), base...)
 	seen := make(map[string]struct{}, len(out))
 	for _, name := range out {
 		seen[NormalizeName(name)] = struct{}{}
 	}
+	// Count before applying surface filters: filtering out one of two matching
+	// handles must not silently change which participant receives the input.
+	valid := make([]string, 0, len(runs))
+	handles := make(map[string]int)
+	qualified := make(map[string]bool)
 	for _, run := range runs {
 		if !run.Addressable {
 			continue
 		}
 		name := NormalizeName(run.Name)
-		agent, _, ok := ParseRunName(name)
-		if !ok || !nameAllowed(agent, filters...) {
+		agent, handle, ok := ParseRunName(name)
+		if !ok {
 			continue
 		}
 		if configured := NormalizeName(run.Agent); configured != "" && configured != agent {
 			continue
 		}
-		if _, exists := seen[name]; exists {
+		if !qualified[name] {
+			qualified[name] = true
+			valid = append(valid, name)
+			handles[handle]++
+		}
+	}
+	for _, name := range valid {
+		agent, handle, _ := ParseRunName(name)
+		if !nameAllowed(agent, filters...) {
 			continue
 		}
-		out = append(out, name)
-		seen[name] = struct{}{}
+		candidates := []string{name}
+		if handles[handle] == 1 {
+			candidates = append(candidates, handle)
+		}
+		for _, candidate := range candidates {
+			if _, exists := seen[candidate]; !exists {
+				out = append(out, candidate)
+				seen[candidate] = struct{}{}
+			}
+		}
 	}
 	return out
 }
@@ -127,9 +149,6 @@ func AppendRunNames(base []string, runs []Run, filters ...NameFilter) []string {
 // Agent run.
 func RunNameAllowed(runs []Run, command string, filters ...NameFilter) bool {
 	command = NormalizeName(command)
-	if _, _, ok := ParseRunName(command); !ok {
-		return false
-	}
 	for _, name := range AppendRunNames(nil, runs, filters...) {
 		if name == command {
 			return true

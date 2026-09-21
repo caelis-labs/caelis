@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
+	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
@@ -214,6 +215,19 @@ func TestReviewerACPBindingMaterializesHiddenReviewScene(t *testing.T) {
 	}
 	activated := activateFutureAssemblyRuntime(t, stack, "reviewer-acp-binding")
 	agents := append([]assembly.AgentConfig(nil), activated.activeRuntime.Assembly.Agents...)
+	placement, err := activated.resolveControlHandlePlacement(t.Context(), agentbinding.HandleReviewer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	background, err := activated.resolveDelegationPlacement(delegation.TargetRequest{Target: delegation.Target{Selector: "reviewer", Placement: placement}}, activated.activeRuntime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if background.Name != "reviewer" || background.SystemSceneID != "reviewer" {
+		t.Fatalf("background Reviewer lost its fixed scene: %#v", background)
+	}
+	agents = append(agents, background)
+	found := 0
 	for _, agent := range agents {
 		if agent.Name != string(agentbinding.HandleReviewer) {
 			continue
@@ -227,9 +241,11 @@ func TestReviewerACPBindingMaterializesHiddenReviewScene(t *testing.T) {
 		if agent.SessionOptions.ConfigValues["mode"] != "code" || agent.SessionOptions.ConfigValues["thought_level"] != "very-high" {
 			t.Fatalf("Reviewer ACP config values = %#v", agent.SessionOptions.ConfigValues)
 		}
-		return
+		found++
 	}
-	t.Fatalf("runtime assembly = %#v, want ACP-backed hidden Reviewer", agents)
+	if found != 2 {
+		t.Fatalf("runtime assembly = %#v, want foreground and background ACP-backed Reviewer", agents)
+	}
 }
 
 func TestSystemAgentBindingsApplySelectedModelAndEffort(t *testing.T) {
