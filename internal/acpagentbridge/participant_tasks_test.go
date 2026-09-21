@@ -2,7 +2,9 @@ package acpagentbridge
 
 import (
 	"context"
+	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -17,10 +19,11 @@ import (
 
 type participantSessionClient struct {
 	appserver.SessionClient
-	mu       sync.Mutex
-	state    appserver.SessionState
-	feed     *participantApprovalFeed
-	resolved chan appserver.ResolveApprovalRequest
+	mu                sync.Mutex
+	state             appserver.SessionState
+	feed              *participantApprovalFeed
+	resolved          chan appserver.ResolveApprovalRequest
+	resolveApprovalFn func(context.Context, appserver.ResolveApprovalRequest) (appserver.CommandResult, error)
 }
 
 func (c *participantSessionClient) InspectSession(context.Context, appserver.StateRequest) (appserver.SessionState, error) {
@@ -33,8 +36,13 @@ func (c *participantSessionClient) Reconnect(context.Context, appserver.Reconnec
 	defer c.mu.Unlock()
 	return appserver.ReconnectResult{State: c.state, Subscription: c.feed}, nil
 }
-func (c *participantSessionClient) ResolveApproval(_ context.Context, req appserver.ResolveApprovalRequest) (appserver.CommandResult, error) {
+func (c *participantSessionClient) ResolveApproval(ctx context.Context, req appserver.ResolveApprovalRequest) (appserver.CommandResult, error) {
 	c.mu.Lock()
+	if c.resolveApprovalFn != nil {
+		fn := c.resolveApprovalFn
+		c.mu.Unlock()
+		return fn(ctx, req)
+	}
 	c.state.Approval.Active = nil
 	c.mu.Unlock()
 	c.resolved <- req
@@ -213,5 +221,265 @@ func TestACPBackgroundParticipantCloseDismissesPendingApproval(t *testing.T) {
 	}
 	if !sub.closed() || len(sessions.resolved) != 0 {
 		t.Fatal("detach leaked subscription or answered permission")
+	}
+}
+
+type multiTaskStreamService struct {
+	mu       sync.Mutex
+	subs     map[string]*acpMuxTestSubscription
+	requests chan taskstream.SubscribeRequest
+}
+
+func (s *multiTaskStreamService) List(context.Context, taskstream.Principal, taskstream.ListRequest) (taskstream.ListResult, error) {
+	return taskstream.ListResult{}, nil
+}
+
+func (s *multiTaskStreamService) Events(context.Context, taskstream.Principal, taskstream.ReadRequest) (taskstream.ReadResult, error) {
+	return taskstream.ReadResult{}, nil
+}
+
+func (s *multiTaskStreamService) Subscribe(_ context.Context, _ taskstream.Principal, req taskstream.SubscribeRequest) (taskstream.SubscribeResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.requests != nil {
+		s.requests <- req
+	}
+	sub := s.subs[req.TaskID]
+	if sub == nil {
+		sub = &acpMuxTestSubscription{events: make(chan eventstream.Envelope, 8)}
+		if s.subs == nil {
+			s.subs = make(map[string]*acpMuxTestSubscription)
+		}
+		s.subs[req.TaskID] = sub
+	}
+	return taskstream.SubscribeResult{Subscription: sub}, nil
+}
+
+func TestACPBackgroundParticipantApprovalConflictRetriesAndPreservesOtherTasks(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	child1 := controlprompt.AgentRunResult{SessionID: "session-1", TaskID: "task-1"}
+	child2 := controlprompt.AgentRunResult{SessionID: "session-1", TaskID: "task-2"}
+	target1 := appserver.TurnTarget{HandleID: "child-h1", RunID: "child-r1", TurnID: "child-t1"}
+
+	sub1 := &acpMuxTestSubscription{events: make(chan eventstream.Envelope, 8)}
+	sub2 := &acpMuxTestSubscription{events: make(chan eventstream.Envelope, 8)}
+	multiService := &multiTaskStreamService{
+		subs: map[string]*acpMuxTestSubscription{
+			"task-1": sub1,
+			"task-2": sub2,
+		},
+		requests: make(chan taskstream.SubscribeRequest, 4),
+	}
+	client, err := taskstream.BindClient(multiService, taskstream.Principal{ID: "owner"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var conflictAttempts atomic.Int32
+	sessions := &participantSessionClient{
+		state: appserver.SessionState{
+			SessionID:  child1.SessionID,
+			Revision:   10,
+			Controller: session.ControllerBinding{EpochID: "epoch-1"},
+			Approval: appserver.ApprovalState{
+				Active: &appserver.ActiveApproval{
+					RequestID: "approval-1",
+					Scope:     eventstream.ScopeSubagent,
+					ScopeID:   child1.TaskID,
+					Target:    target1,
+					Permission: &session.ProtocolApproval{
+						ToolCall: session.ProtocolToolCall{ID: "cmd-1", Name: "RunCommand"},
+						Options:  []session.ProtocolApprovalOption{{ID: "allow", Name: "Allow once", Kind: "allow_once"}},
+					},
+				},
+			},
+		},
+		feed:     &participantApprovalFeed{deliveries: make(chan appserver.FeedDelivery, 4), closed: make(chan struct{})},
+		resolved: make(chan appserver.ResolveApprovalRequest, 2),
+	}
+
+	sessions.resolveApprovalFn = func(_ context.Context, req appserver.ResolveApprovalRequest) (appserver.CommandResult, error) {
+		sessions.mu.Lock()
+		defer sessions.mu.Unlock()
+		attempt := conflictAttempts.Add(1)
+		if attempt == 1 {
+			// Simulate a concurrent mutation advancing the revision
+			sessions.state.Revision = 11
+			return appserver.CommandResult{Outcome: appserver.OutcomeConflicted, Revision: 10}, appserver.ErrOperationConflict
+		}
+		if req.ExpectedRevision == nil || *req.ExpectedRevision != 11 {
+			t.Errorf("expected revision 11 on retry, got %#v", req.ExpectedRevision)
+		}
+		sessions.state.Approval.Active = nil
+		sessions.resolved <- req
+		return appserver.CommandResult{Outcome: appserver.OutcomeCommitted, Revision: 11}, nil
+	}
+
+	bridge := &RuntimeAgent{sessionClient: sessions, taskStreamClient: client}
+	callbacks := &participantCallbacks{
+		acpMuxPromptCallbacks: acpMuxPromptCallbacks{updates: make(chan eventstream.SessionNotification, 16)},
+		permissions:           make(chan acpsdk.RequestPermissionRequest, 4),
+		release:               make(chan struct{}),
+	}
+	defer bridge.clearSessionDelivery(child1.SessionID)
+
+	if err := bridge.observeParticipantTask(ctx, child1, callbacks); err != nil {
+		t.Fatal(err)
+	}
+	req1 := receiveACPTaskStreamRequest(t, multiService.requests)
+	if req1.TaskID != "task-1" {
+		t.Fatalf("wrong task subscription: %#v", req1)
+	}
+
+	if err := bridge.observeParticipantTask(ctx, child2, callbacks); err != nil {
+		t.Fatal(err)
+	}
+	req2 := receiveACPTaskStreamRequest(t, multiService.requests)
+	if req2.TaskID != "task-2" {
+		t.Fatalf("wrong task subscription: %#v", req2)
+	}
+
+	select {
+	case pReq := <-callbacks.permissions:
+		if pReq.ToolCall.ToolCallId != "cmd-1" {
+			t.Fatalf("unexpected permission request: %#v", pReq)
+		}
+	case <-ctx.Done():
+		t.Fatal("permission request missing")
+	}
+
+	close(callbacks.release)
+
+	select {
+	case res := <-sessions.resolved:
+		if res.Target != target1 || !res.Approved {
+			t.Fatalf("unexpected resolution: %#v", res)
+		}
+	case <-ctx.Done():
+		t.Fatal("approval was not resolved")
+	}
+
+	if got := conflictAttempts.Load(); got != 2 {
+		t.Fatalf("expected 2 resolve attempts (1 conflict + 1 retry), got %d", got)
+	}
+
+	// Verify task-2's output is received through callbacks.updates
+	task2Text := "output from task-2 after task-1 conflict"
+	env2 := acpMuxSubagentMessageEnvelope("", "turn-2", "turn-2-msg", task2Text)
+	env2.ScopeID = "task-2"
+	env2.ParentTool = nil
+	sub2.events <- env2
+
+	select {
+	case update := <-callbacks.updates:
+		chunk, ok := update.Update.(eventstream.ContentChunk)
+		content, _ := chunk.Content.(eventstream.TextContent)
+		if !ok || content.Text != task2Text {
+			t.Fatalf("unexpected update: %#v", update)
+		}
+	case <-ctx.Done():
+		t.Fatal("task-2 output missing after task-1 conflict")
+	}
+}
+
+func TestACPBackgroundParticipantApprovalFailureDoesNotStopOtherTasks(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	child1 := controlprompt.AgentRunResult{SessionID: "session-1", TaskID: "task-1"}
+	child2 := controlprompt.AgentRunResult{SessionID: "session-1", TaskID: "task-2"}
+	target1 := appserver.TurnTarget{HandleID: "child-h1", RunID: "child-r1", TurnID: "child-t1"}
+
+	sub1 := &acpMuxTestSubscription{events: make(chan eventstream.Envelope, 8)}
+	sub2 := &acpMuxTestSubscription{events: make(chan eventstream.Envelope, 8)}
+	multiService := &multiTaskStreamService{
+		subs: map[string]*acpMuxTestSubscription{
+			"task-1": sub1,
+			"task-2": sub2,
+		},
+		requests: make(chan taskstream.SubscribeRequest, 4),
+	}
+	client, err := taskstream.BindClient(multiService, taskstream.Principal{ID: "owner"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sessions := &participantSessionClient{
+		state: appserver.SessionState{
+			SessionID:  child1.SessionID,
+			Revision:   10,
+			Controller: session.ControllerBinding{EpochID: "epoch-1"},
+			Approval: appserver.ApprovalState{
+				Active: &appserver.ActiveApproval{
+					RequestID: "approval-1",
+					Scope:     eventstream.ScopeSubagent,
+					ScopeID:   child1.TaskID,
+					Target:    target1,
+					Permission: &session.ProtocolApproval{
+						ToolCall: session.ProtocolToolCall{ID: "cmd-1", Name: "RunCommand"},
+						Options:  []session.ProtocolApprovalOption{{ID: "allow", Name: "Allow once", Kind: "allow_once"}},
+					},
+				},
+			},
+		},
+		feed:     &participantApprovalFeed{deliveries: make(chan appserver.FeedDelivery, 4), closed: make(chan struct{})},
+		resolved: make(chan appserver.ResolveApprovalRequest, 2),
+	}
+
+	// Simulate unrecoverable rejection
+	sessions.resolveApprovalFn = func(_ context.Context, req appserver.ResolveApprovalRequest) (appserver.CommandResult, error) {
+		return appserver.CommandResult{
+			Outcome: appserver.OutcomeRejected,
+			Detail:  "permission rejected by policy",
+		}, errors.New("permission rejected by policy")
+	}
+
+	bridge := &RuntimeAgent{sessionClient: sessions, taskStreamClient: client}
+	callbacks := &participantCallbacks{
+		acpMuxPromptCallbacks: acpMuxPromptCallbacks{updates: make(chan eventstream.SessionNotification, 16)},
+		permissions:           make(chan acpsdk.RequestPermissionRequest, 4),
+		release:               make(chan struct{}),
+	}
+	defer bridge.clearSessionDelivery(child1.SessionID)
+
+	if err := bridge.observeParticipantTask(ctx, child1, callbacks); err != nil {
+		t.Fatal(err)
+	}
+	receiveACPTaskStreamRequest(t, multiService.requests)
+
+	if err := bridge.observeParticipantTask(ctx, child2, callbacks); err != nil {
+		t.Fatal(err)
+	}
+	receiveACPTaskStreamRequest(t, multiService.requests)
+
+	select {
+	case <-callbacks.permissions:
+	case <-ctx.Done():
+		t.Fatal("permission request missing")
+	}
+
+	close(callbacks.release)
+
+	// An ACP notice should be emitted about the failed approval
+	awaitReceiptNotice(t, ctx, callbacks.updates, "Background participant approval failed:")
+
+	// Verify task-2's output continues to be delivered despite task-1's approval failure
+	task2Text := "task 2 output unaffected by task 1 approval failure"
+	env2 := acpMuxSubagentMessageEnvelope("", "turn-2", "turn-2-msg", task2Text)
+	env2.ScopeID = "task-2"
+	env2.ParentTool = nil
+	sub2.events <- env2
+
+	select {
+	case update := <-callbacks.updates:
+		chunk, ok := update.Update.(eventstream.ContentChunk)
+		content, _ := chunk.Content.(eventstream.TextContent)
+		if !ok || content.Text != task2Text {
+			t.Fatalf("unexpected update: %#v", update)
+		}
+	case <-ctx.Done():
+		t.Fatal("task-2 output missing after task-1 approval failure")
 	}
 }

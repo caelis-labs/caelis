@@ -15,6 +15,7 @@ import (
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/taskstream"
+	"github.com/caelis-labs/caelis/control/collaboration"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
@@ -415,6 +416,7 @@ type Model struct {
 	subagentOutputViews             map[string]*subagentOutputView
 	subagentRosterTasks             map[string]taskstream.TaskDescriptor
 	subagentFocusTaskID             string
+	subagentPendingReceipts         map[string][]collaboration.UserInputStatus
 	subagentDirectorySubscription   taskstream.DirectorySubscription
 	subagentDirectoryCancel         context.CancelFunc
 	subagentDirectoryStarting       bool

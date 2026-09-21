@@ -130,7 +130,10 @@ participant and open its pane automatically. The main controller remains free
 to work. Use `/{handle} <message>`, `/orbit(handle) <message>`, or the pane's input
 to continue that same Task through its user-input mailbox. Initial input and follow-ups retain their
 user role and attachments. Child approvals use the Session approval queue,
-including while the main controller is idle.
+including while the main controller is idle. Follow-ups retain an input receipt:
+queued means waiting for admission, while sent means accepted by the child endpoint,
+not necessarily applied by its model. The participant pane and ACP output report
+delivery failures and uncertain outcomes; uncertain input is not automatically resent.
 
 `/review [instructions]` starts a new background Reviewer and opens its pane.
 The fixed review scene and configured Reviewer model or ACP agent apply to every

@@ -69,7 +69,7 @@ func TestReviewStartsPersistentTasksAndContinuesByHandle(t *testing.T) {
 
 func (r *participantInputRecorder) SubmitSubagentInput(_ context.Context, req appserver.SubagentInputRequest) (collaboration.UserInputStatus, error) {
 	r.request = req
-	return collaboration.UserInputStatus{}, nil
+	return collaboration.UserInputStatus{ID: req.OperationID, State: "queued"}, nil
 }
 
 func TestBackgroundParticipantFollowupUsesChildMailbox(t *testing.T) {
@@ -87,7 +87,7 @@ func TestBackgroundParticipantFollowupUsesChildMailbox(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Turn != nil || result.TaskID != "child-task" || result.SessionID != "parent" {
+	if result.Turn != nil || result.TaskID != "child-task" || result.SessionID != "parent" || result.InputReceipt == nil || result.InputReceipt.ID != input.request.OperationID || result.InputReceipt.State != "queued" {
 		t.Fatalf("unexpected background receipt: %#v", result)
 	}
 	if input.request.OperationID == "" || input.request.ParticipantID != "child-agent" || input.request.TaskID != "child-task" || input.request.Input != "follow up" {

@@ -143,8 +143,17 @@ func (m *Model) pollPaneInputs(tick paneInputTickMsg) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		statuses, err := client.SubagentInputStatuses(ctx, appserver.SubagentInputStatusRequest{SessionID: tick.sessionID, IDs: ids})
-		return paneInputPollMsg{sessionID: tick.sessionID, callID: tick.callID, poll: tick.poll, statuses: statuses, err: err}
+		var statuses []collaboration.UserInputStatus
+		for len(ids) > 0 {
+			batch := ids[:min(len(ids), 64)]
+			current, err := client.SubagentInputStatuses(ctx, appserver.SubagentInputStatusRequest{SessionID: tick.sessionID, IDs: batch})
+			if err != nil {
+				return paneInputPollMsg{sessionID: tick.sessionID, callID: tick.callID, poll: tick.poll, err: err}
+			}
+			statuses = append(statuses, current...)
+			ids = ids[len(batch):]
+		}
+		return paneInputPollMsg{sessionID: tick.sessionID, callID: tick.callID, poll: tick.poll, statuses: statuses}
 	}
 }
 func (m *Model) submitPanePrompt() tea.Cmd {

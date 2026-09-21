@@ -94,11 +94,11 @@ func (a *SessionClientAdapter) ContinueAgentRun(ctx context.Context, handle, pro
 		if a.subagentInputs == nil {
 			return controlprompt.AgentRunResult{}, errors.New("subagent input client is unavailable")
 		}
-		_, err := a.subagentInputs.SubmitSubagentInput(ctx, appserver.SubagentInputRequest{
+		receipt, err := a.subagentInputs.SubmitSubagentInput(ctx, appserver.SubagentInputRequest{
 			OperationID: "participant-input-" + uuid.NewString(), SessionID: state.SessionID,
 			ParticipantID: participantID, TaskID: participant.DelegationID, Input: strings.TrimSpace(prompt), ContentParts: parts,
 		})
-		return controlprompt.AgentRunResult{SessionID: state.SessionID, TaskID: participant.DelegationID}, err
+		return controlprompt.AgentRunResult{SessionID: state.SessionID, TaskID: participant.DelegationID, InputReceipt: &receipt}, err
 	}
 	turn, err := a.startAdmittedTurn(ctx, a.currentClientSessionState, func(startCtx context.Context, current appserver.SessionState) (appserver.TargetTurn, error) {
 		return a.participants.Prompt(startCtx, appserver.ParticipantTurnPromptRequest{

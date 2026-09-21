@@ -6,6 +6,7 @@ import (
 
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
+	"github.com/caelis-labs/caelis/control/collaboration"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
 )
 
@@ -20,6 +21,9 @@ type AgentRunResult struct {
 	Turn      Turn
 	SessionID string
 	TaskID    string
+	// InputReceipt tracks mailbox admission separately from eventual delivery.
+	// Surfaces observe its ID until sent, failed, or unknown; they never resend it.
+	InputReceipt *collaboration.UserInputStatus
 }
 
 type Turn interface {

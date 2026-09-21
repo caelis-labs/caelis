@@ -654,7 +654,11 @@ func executeControlPromptResult(ctx context.Context, service ControlServices, se
 			observeSelectedSession(ctx, sender, snapshot.Reconnect, true)
 		}
 		_, generation := sender.sessionView()
-		sender.sessionSend(generation)(participantTaskFocusMsg{sessionID: child.SessionID, taskID: child.TaskID})
+		sender.sessionSend(generation)(participantTaskFocusMsg{
+			sessionID: child.SessionID,
+			taskID:    child.TaskID,
+			receipt:   child.InputReceipt,
+		})
 	}
 	if result.Reconnect != nil {
 		if sender != nil {
