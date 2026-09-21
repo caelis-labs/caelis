@@ -135,6 +135,29 @@ func TestRetentionConcurrentTerminalRemovalDoesNotPoisonLiveWriter(t *testing.T)
 	}
 }
 
+func TestRetentionRemovalAcceptsAlreadyRemovedPartition(t *testing.T) {
+	store := newTestStore(t, Config{})
+	w := registerTestWriter(t, store, "session", "removed", true)
+	if _, err := w.Append(t.Context(), 1, time.Now(), []byte("done")); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Seal(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	p, err := store.lookup(t.Context(), w.Key())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Remove(t.Context(), w.Key()); err != nil {
+		t.Fatal(err)
+	}
+	// Collection may retain a partition pointer while another removal reclaims
+	// both its directory and its empty ancestors.
+	if err := store.removePartition(p, true); err != nil {
+		t.Fatalf("remove stale partition: %v", err)
+	}
+}
+
 // The small-budget tests exercise the same boundaries on every run. This
 // opt-in also checks the production allocation sizes and actual file footprint.
 func TestRetentionDefaultBudgetAcrossSessions(t *testing.T) {

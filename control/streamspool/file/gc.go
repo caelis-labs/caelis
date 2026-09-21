@@ -52,8 +52,19 @@ func (s *Store) removePartition(p *partition, gc bool) error {
 	if s == nil || p == nil {
 		return nil
 	}
+	s.admission.Lock()
+	defer s.admission.Unlock()
+	return s.removePartitionLocked(p, gc)
+}
+
+// removePartitionLocked requires Store.admission so ancestor pruning cannot
+// remove directories that another writer is still creating.
+func (s *Store) removePartitionLocked(p *partition, gc bool) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if p.state == streamspool.StateStoreClosed {
+		return nil
+	}
 	if p.readers > 0 || p.state == streamspool.StatePending || p.state == streamspool.StateOpen {
 		return streamspool.ErrInUse
 	}

@@ -83,7 +83,7 @@ func (p *partition) makeRoomLocked(bytes int64) error {
 		terminal := !c.part.writerActive && c.part.readers == 0
 		c.part.mu.Unlock()
 		if terminal {
-			_ = s.removePartition(c.part, false)
+			_ = s.removePartitionLocked(c.part, false)
 		}
 		if fits() {
 			return nil

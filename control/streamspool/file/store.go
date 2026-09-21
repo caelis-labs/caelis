@@ -87,8 +87,9 @@ type partition struct {
 
 // Store owns one process epoch and every writer/reader in it.
 type Store struct {
-	// Admission serializes append/pressure reclamation. Readers remain independent;
-	// no writer can reserve against space another writer is about to reclaim.
+	// Admission serializes appends and partition reclamation, including shared
+	// ancestor creation/pruning. Readers remain independent; no writer can reserve
+	// against space another writer is about to reclaim.
 	admission  sync.Mutex
 	writeCalls atomic.Uint64
 	writeBytes atomic.Uint64

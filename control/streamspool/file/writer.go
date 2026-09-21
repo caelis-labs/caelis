@@ -43,7 +43,7 @@ func (w *writer) AppendBatch(ctx context.Context, records []streamspool.Record) 
 		forget := p.state == streamspool.StatePoisoned && !p.physical && p.readers == 0
 		p.mu.Unlock()
 		if forget {
-			_ = p.store.removePartition(p, false)
+			_ = p.store.removePartitionLocked(p, false)
 		}
 	}()
 	if p.state != streamspool.StatePending && p.state != streamspool.StateOpen {
