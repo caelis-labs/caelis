@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/caelis-labs/memory/appliance"
 )
 
 func TestInspectStoreDiagnosticsIsReadOnlyAndDistinguishesUnknownHealth(t *testing.T) {
@@ -53,7 +55,7 @@ func TestInspectStoreDiagnosticsIsReadOnlyAndDistinguishesUnknownHealth(t *testi
 	if diagnostics.Memory.DatabaseState != diagnosticStatePresent || diagnostics.Memory.DatabaseFormat != "sqlite3" {
 		t.Fatalf("Memory database state = %#v", diagnostics.Memory)
 	}
-	if diagnostics.Memory.SchemaState != diagnosticStateUnknown || diagnostics.Memory.ExpectedSchemaVersion != embeddedMemoryCurrentSchemaVersion {
+	if diagnostics.Memory.SchemaState != diagnosticStateUnknown || diagnostics.Memory.ExpectedSchemaVersion != 2 {
 		t.Fatalf("Memory schema state = %#v", diagnostics.Memory)
 	}
 	if diagnostics.Memory.OwnerLockFileState != diagnosticStatePresent || diagnostics.Memory.OwnerLockState != diagnosticLockFree {
@@ -65,6 +67,9 @@ func TestInspectStoreDiagnosticsIsReadOnlyAndDistinguishesUnknownHealth(t *testi
 	encoded, err := json.Marshal(diagnostics)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), `"expected_schema_version":2`) {
+		t.Fatalf("diagnostics omitted the expected Memory schema: %s", encoded)
 	}
 	if strings.Contains(string(encoded), secret) {
 		t.Fatalf("diagnostics leaked credential content: %s", encoded)
@@ -88,6 +93,33 @@ func TestInspectStoreDiagnosticsIsReadOnlyAndDistinguishesUnknownHealth(t *testi
 		if !containsString(diagnostics.RecoveryAdvice, want) {
 			t.Fatalf("recovery advice = %#v, missing %q", diagnostics.RecoveryAdvice, want)
 		}
+	}
+}
+
+func TestInspectStoreDiagnosticsMatchesEmbeddedMemorySchema(t *testing.T) {
+	root := t.TempDir()
+	runtime, err := appliance.Open(t.Context(), appliance.Options{DataDir: filepath.Join(root, "memory", "appliance")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := runtime.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	inspection, err := runtime.Management().Inspect(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	diagnostics, err := InspectStoreDiagnostics(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if diagnostics.Memory.ExpectedSchemaVersion != inspection.SchemaVersion {
+		t.Fatalf("diagnostic schema = %d, embedded Memory schema = %d", diagnostics.Memory.ExpectedSchemaVersion, inspection.SchemaVersion)
+	}
+	if diagnostics.Memory.SchemaState != diagnosticStateUnknown {
+		t.Fatalf("read-only diagnostics inferred Memory health: %#v", diagnostics.Memory)
 	}
 }
 

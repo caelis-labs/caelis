@@ -152,7 +152,7 @@ func TestMemoryStewardSemanticEvaluationFixtureAndPolicy(t *testing.T) {
 	if len(cases) != 64 || len(groups) < 4 || len(digest) != 64 {
 		t.Fatalf("semantic fixture = cases:%d groups:%d digest:%q", len(cases), len(groups), digest)
 	}
-	if defaultMemoryStewardProfile.Version != 1 || defaultMemoryStewardProfile.ProfileID != "memory-default" || defaultMemoryStewardProfile.MaxContextRecords != 16 ||
+	if defaultMemoryStewardProfile.Version != 2 || defaultMemoryStewardProfile.ProfileID != "memory-default" || defaultMemoryStewardProfile.MaxContextRecords != 16 ||
 		defaultMemoryStewardProfile.MaxInputBytes != 128<<10 || defaultMemoryStewardProfile.MaxOutputBytes != 4<<10 {
 		t.Fatalf("Memory Steward policy bounds = %+v", defaultMemoryStewardProfile)
 	}

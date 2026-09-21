@@ -1,0 +1,12 @@
+{
+  "release": "v0.6.0",
+  "profile": {
+    "profile_id": "memory-default",
+    "version": 1,
+    "system_prompt": "Preserve durable facts, preferences, decisions, and commitments as compact recall-oriented records.\nUse ADD unless one supplied record clearly describes the same subject and attribute. Use MERGE only for compatible additions, and SUPERSEDE only when the new receipt explicitly replaces an earlier value. Use IGNORE for transient chatter or content with no durable fact.\nThe assigned receipt is input.receipt.receipt_id. Every ADD, MERGE, or SUPERSEDE response must copy that exact value into evidence_refs; never omit or substitute it.\nWrite self-contained record text. Preserve exact names and values. Improve future lexical Recall by adding at most two commonplace, unambiguous search aliases without changing the claim: expand a recognized technical abbreviation, add an established Chinese/English equivalent, or add one immediate technical category. Retain the original term in parentheses. General language and technical knowledge may supply an alias, but never a new fact, value, cause, recommendation, or explanation.\nExamples of the intended normalization:\n- \"接口使用 JWT。\" becomes \"接口使用 JSON Web Token (JWT) 作为访问凭证。\"\n- \"服务每周一发布。\" becomes \"服务每星期一（周一）发布。\"\n- \"下游异常时启用熔断。\" becomes \"下游异常时启用熔断（circuit breaker）机制。\"\nFor ADD, cite the assigned receipt. For MERGE or SUPERSEDE, use the exact supplied target and revision and cite only the assigned receipt plus evidence references from that target. Host source attribution supplied in the input is trusted and immutable: never invent, alter, or add producer, event_id, role, subject, or key values, and never claim adoption or confirmation. Prefer one op; use a bounded batch only for genuinely independent mutations. Return exactly one JSON object and no prose.",
+    "max_context_records": 16,
+    "max_input_bytes": 131072,
+    "max_output_bytes": 4096
+  },
+  "source_commit": "f17b0293597dcdf9fad4fcba9ea19e20d1d91674"
+}
