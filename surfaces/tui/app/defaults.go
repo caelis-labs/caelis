@@ -200,6 +200,13 @@ func connectACPWizard() WizardDef {
 				},
 			},
 			{
+				Key: "acp_install",
+				ShouldSkip: func(state map[string]string) bool {
+					return state["acp_launcher"] != "install" && state["acp_launcher"] != "manual"
+				},
+				CompletionCommand: func(state map[string]string) string { return "connect-acp-install:" + state["acp_agent"] },
+			},
+			{
 				Key: "acp_command", NoCompletion: true,
 				ShouldSkip: func(state map[string]string) bool {
 					launcher := strings.ToLower(strings.TrimSpace(state["acp_launcher"]))
@@ -214,6 +221,7 @@ func connectACPWizard() WizardDef {
 				},
 			},
 		},
+		OnStepConfirm: confirmACPSetupStep,
 		BuildExecLine: func(state map[string]string) string { return "/connect acp " + buildACPConnectWizardPayload(state) },
 	}
 }
@@ -341,6 +349,7 @@ func buildACPConnectWizardPayload(state map[string]string) string {
 		Launcher:    controlagents.LauncherChoice(strings.ToLower(strings.TrimSpace(state["acp_launcher"]))),
 		CommandLine: strings.TrimSpace(state["acp_command"]),
 		Model:       strings.TrimSpace(state["acp_model"]),
+		Install:     confirmedACPInstallation(state),
 	})
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -105,7 +106,7 @@ func (s *controlCommandBackend) prepareACPAtRevision(
 			return result, errors.New("gatewayapp: parent ACP preparation is not ready")
 		}
 		if loaded.Request.AdapterID != prepared.AdapterID || loaded.Request.Launcher != prepared.Launcher ||
-			loaded.Request.CommandLine != prepared.CommandLine || loaded.Request.CWD != prepared.CWD {
+			loaded.Request.CommandLine != prepared.CommandLine || loaded.Request.CWD != prepared.CWD || !reflect.DeepEqual(loaded.Request.Install, prepared.Install) {
 			return result, errors.New("gatewayapp: parent ACP preparation belongs to another endpoint")
 		}
 		connection = loaded.Connection
@@ -131,7 +132,11 @@ func (s *controlCommandBackend) prepareACPAtRevision(
 	}
 
 	if connection.ID == "" {
-		connection, err = s.resolveACPConnectionLauncher(ctx, connectRequestFromACPPrepare(prepared))
+		if prepared.Install != nil {
+			connection, result.EffectStarted, err = installACPConnection(ctx, prepared)
+		} else {
+			connection, err = s.resolveACPConnectionLauncher(ctx, connectRequestFromACPPrepare(prepared))
+		}
 		if err != nil {
 			return result, err
 		}

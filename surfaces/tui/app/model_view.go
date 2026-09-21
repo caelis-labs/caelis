@@ -120,7 +120,7 @@ func (m *Model) View() tea.View {
 		}
 	}
 
-	if m.sessionPicker == nil && m.activePrompt != nil && m.width > 0 && m.height > 0 {
+	if m.sessionPicker == nil && m.activePrompt != nil && !m.isWizardAuthChoice() && m.width > 0 && m.height > 0 {
 		if promptView := m.renderPromptModal(); promptView != "" {
 			normalizeBaseForOverlay()
 			if picker := m.themePicker; picker != nil && picker.prompt == m.activePrompt {
@@ -148,7 +148,7 @@ func (m *Model) View() tea.View {
 			view = overlayTopRight(view, progressView, m.width, sandboxProgressOverlayTopInset, sandboxProgressOverlayRightInset)
 		}
 	}
-	if m.wizardOverlay != nil && m.activePrompt == nil && m.width > 0 && m.height > 0 {
+	if m.wizardOverlay != nil && (m.activePrompt == nil || m.isWizardAuthChoice()) && m.width > 0 && m.height > 0 {
 		if overlay := m.renderWizardOverlay(); overlay != "" {
 			normalizeBaseForOverlay()
 			g := m.wizardOverlay.geometry
@@ -207,6 +207,9 @@ func (m *Model) View() tea.View {
 }
 
 func (m *Model) desiredMouseMode() tea.MouseMode {
+	if m.wizardOverlay != nil && (m.activePrompt == nil || m.isWizardAuthChoice()) {
+		return tea.MouseModeAllMotion
+	}
 	if m.sessionPicker != nil {
 		return tea.MouseModeAllMotion
 	}

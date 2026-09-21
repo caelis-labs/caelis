@@ -463,6 +463,7 @@ func ConfigFromControlService(service ControlServices, sender *ProgramSender, ba
 					NoAuth:                c.NoAuth,
 					ModelConfigID:         c.ModelConfigID,
 					ModelSelection:        c.ModelSelection,
+					RuntimeSetup:          c.RuntimeSetup,
 					ModelMetadataComplete: c.ModelMetadataComplete,
 					ModelImageInputKnown:  c.ModelImageInputKnown,
 				}

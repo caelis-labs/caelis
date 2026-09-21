@@ -88,7 +88,7 @@ func TestConnectableAgentsContainsBuiltInNativeACPCommandsAndCustom(t *testing.T
 	t.Parallel()
 
 	agents := ConnectableAgents()
-	if got, want := len(agents), 14; got != want {
+	if got, want := len(agents), 15; got != want {
 		t.Fatalf("ConnectableAgents() count = %d, want %d", got, want)
 	}
 	gotIDs := make([]string, 0, len(agents))
@@ -96,7 +96,7 @@ func TestConnectableAgentsContainsBuiltInNativeACPCommandsAndCustom(t *testing.T
 		gotIDs = append(gotIDs, agent.ID)
 	}
 	wantIDs := []string{
-		"codex", "grok", "kimi", "opencode", "copilot", "qoder", "gemini", "qwen-code",
+		"codex", "antigravity", "grok", "kimi", "opencode", "copilot", "qoder", "gemini", "qwen-code",
 		"auggie", "cline", "factory-droid", "goose", "kilo", "custom",
 	}
 	if !reflect.DeepEqual(gotIDs, wantIDs) {

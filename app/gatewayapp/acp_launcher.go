@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/agentregistry"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/control/plugin"
@@ -58,12 +59,13 @@ func (s *controlCommandBackend) resolveACPConnectionLauncher(ctx context.Context
 			return controlagents.Connection{}, catalogLauncherInconsistency(req.AdapterID, req.Launcher, "installed-command preset")
 		}
 		commands := agentregistry.InstalledAgentCommandCandidates(req.AdapterID)
-		selectedCommand := ""
-		for _, command := range commands {
-			if resolved, err := exec.LookPath(command); err == nil && strings.TrimSpace(resolved) != "" {
-				selectedCommand = command
-				break
-			}
+		var store *appConfigStore
+		if s != nil && s.composition != nil {
+			store = s.composition.authorities.store
+		}
+		selectedCommand, err := findInstalledACPCommand(ctx, store, req.AdapterID)
+		if err != nil {
+			return controlagents.Connection{}, err
 		}
 		if selectedCommand == "" {
 			return controlagents.Connection{}, installedACPCommandNotFound(req.AdapterID, commands)
@@ -79,18 +81,22 @@ func (s *controlCommandBackend) resolveACPConnectionLauncher(ctx context.Context
 }
 
 func installedACPCommandNotFound(adapterID string, commands []string) error {
+	// An unresolved catalog launcher is invalid setup input. Keep this curated
+	// diagnostic public for clients that bypass guided setup.
 	if len(commands) == 1 {
-		return fmt.Errorf("gatewayapp: install ACP agent %q so %q is available on PATH", adapterID, commands[0])
+		return errorcode.New(errorcode.InvalidArgument, fmt.Sprintf(
+			"%s is not installed. Open /connect to set up %s.", commands[0], adapterID,
+		))
 	}
 	quoted := make([]string, 0, len(commands))
 	for _, command := range commands {
 		quoted = append(quoted, fmt.Sprintf("%q", command))
 	}
-	return fmt.Errorf(
-		"gatewayapp: install ACP agent %q so one of %s is available on PATH",
+	return errorcode.New(errorcode.InvalidArgument, fmt.Sprintf(
+		"Install ACP agent %q so one of %s is available on PATH.",
 		adapterID,
 		strings.Join(quoted, ", "),
-	)
+	))
 }
 
 func catalogLauncherInconsistency(

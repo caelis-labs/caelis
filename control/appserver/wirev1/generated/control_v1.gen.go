@@ -164,12 +164,13 @@ type ACPPreparationRequest struct {
 }
 
 type ACPPrepareRequest struct {
-	AdapterId   *string           `json:"adapter_id,omitempty"`
-	CommandLine *string           `json:"command_line,omitempty"`
-	Cwd         *string           `json:"cwd,omitempty"`
-	Launcher    ACPLauncherChoice `json:"launcher,omitempty"`
-	ModelId     *string           `json:"model_id,omitempty"`
-	ParentRef   *string           `json:"parent_ref,omitempty"`
+	AdapterId   *string              `json:"adapter_id,omitempty"`
+	CommandLine *string              `json:"command_line,omitempty"`
+	Cwd         *string              `json:"cwd,omitempty"`
+	Install     *RuntimeInstallation `json:"install,omitempty"`
+	Launcher    ACPLauncherChoice    `json:"launcher,omitempty"`
+	ModelId     *string              `json:"model_id,omitempty"`
+	ParentRef   *string              `json:"parent_ref,omitempty"`
 }
 
 type ACPRawUpdate = json.RawMessage
@@ -1347,6 +1348,21 @@ type RunState struct {
 	WaitingApproval *bool      `json:"waiting_approval,omitempty"`
 }
 
+type RuntimeInstallation struct {
+	ArchiveUrl string  `json:"archive_url"`
+	Directory  string  `json:"directory"`
+	Sha256     *string `json:"sha256,omitempty"`
+}
+
+type RuntimeSetup struct {
+	ArchiveUrl    *string  `json:"archive_url,omitempty"`
+	Command       string   `json:"command"`
+	Directory     string   `json:"directory"`
+	InstallPrompt *string  `json:"install_prompt,omitempty"`
+	ManualSteps   []string `json:"manual_steps,omitempty"`
+	Sha256        *string  `json:"sha256,omitempty"`
+}
+
 type RuntimeStreamMetadata map[string]JSONValue
 
 type RuntimeTaskMetadata map[string]JSONValue
@@ -1533,6 +1549,7 @@ type SlashArgCandidate struct {
 	ModelMetadataComplete *bool           `json:"model_metadata_complete,omitempty"`
 	ModelSelection        *ModelSelection `json:"model_selection,omitempty"`
 	NoAuth                *bool           `json:"no_auth,omitempty"`
+	RuntimeSetup          *RuntimeSetup   `json:"runtime_setup,omitempty"`
 	Value                 string          `json:"value"`
 }
 

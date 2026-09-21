@@ -39,7 +39,18 @@ func completeConnectArgs(ctx context.Context, driver *assembler, command string,
 	case command == "connect-acp-agent":
 		return completeConnectACPAgents(query, limit), nil
 	case strings.HasPrefix(command, "connect-acp-launcher:"):
-		return completeConnectACPLaunchers(strings.TrimPrefix(command, "connect-acp-launcher:"), query, limit), nil
+		agent := strings.TrimPrefix(command, "connect-acp-launcher:")
+		installedCommand := ""
+		if driver != nil && driver.deps != nil && driver.deps.Agent.InstalledCommandFn != nil {
+			var err error
+			installedCommand, err = driver.deps.Agent.InstalledCommandFn(ctx, agent)
+			if err != nil {
+				return nil, err
+			}
+		}
+		return completeConnectACPLaunchers(agent, query, limit, installedCommand), nil
+	case strings.HasPrefix(command, "connect-acp-install:"):
+		return completeConnectACPInstall(ctx, strings.TrimPrefix(command, "connect-acp-install:"))
 	case strings.HasPrefix(command, "connect-baseurl:"):
 		return completeConnectBaseURL(ctx, driver, strings.TrimPrefix(command, "connect-baseurl:"), query, limit), nil
 	case strings.HasPrefix(command, "connect-apikey:"):
@@ -80,10 +91,19 @@ func completeConnectACPAgents(query string, limit int) []controlprompt.SlashArgC
 	return filterSlashArgCandidates(candidates, query, limit)
 }
 
-func completeConnectACPLaunchers(agent string, query string, limit int) []controlprompt.SlashArgCandidate {
+func completeConnectACPLaunchers(agent string, query string, limit int, installedCommand string) []controlprompt.SlashArgCandidate {
 	entry, ok := agentregistry.LookupConnectableAgent(agent)
 	if !ok {
 		return nil
+	}
+	if entry.Installation != nil && installedCommand == "" {
+		setup, err := entry.Installation.Setup()
+		if err == nil {
+			return filterSlashArgCandidates([]controlprompt.SlashArgCandidate{
+				{Value: "install", Display: "Install " + setup.Command, Detail: "Download the official runtime", RuntimeSetup: &setup},
+				{Value: "manual", Display: "Manual setup", Detail: "View download and installation steps", RuntimeSetup: &setup},
+			}, query, limit)
+		}
 	}
 	candidates := make([]controlprompt.SlashArgCandidate, 0, len(entry.Launchers))
 	for _, launcher := range entry.Launchers {

@@ -88,7 +88,7 @@ func TestDefaultConnectWizardSeparatesModelAndACPConnectionSteps(t *testing.T) {
 		{name: "account", def: connectModelWizard("account"), want: []string{"provider", "endpoint", "baseurl", "apikey", "model", "image_input", "context_window_tokens", "max_output_tokens", "reasoning_levels"}},
 		{name: "api-key", def: connectModelWizard("api-key"), want: []string{"provider", "endpoint", "baseurl", "apikey", "model", "image_input", "context_window_tokens", "max_output_tokens", "reasoning_levels"}},
 		{name: "judgment", def: connectJudgmentWizard(), want: []string{"provider", "endpoint", "baseurl", "apikey", "model"}},
-		{name: "acp", def: connectACPWizard(), want: []string{"acp_agent", "acp_launcher", "acp_command", "acp_model"}},
+		{name: "acp", def: connectACPWizard(), want: []string{"acp_agent", "acp_launcher", "acp_install", "acp_command", "acp_model"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

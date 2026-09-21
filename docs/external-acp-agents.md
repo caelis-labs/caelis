@@ -7,6 +7,13 @@ Layer ownership lives in [Architecture](architecture.md).
 
 ## Connect
 
+The `/connect` overlay, including authentication method choices, supports
+keyboard and mouse navigation. Hovering a
+catalog row selects it without activating it; hovering a form field highlights
+it without moving the editing cursor. Buttons have brackets and highlight on
+hover. A click activates only when the left mouse button is released on the
+same control. Read-only text supports drag-to-copy.
+
 Run `/connect` and choose an ACP agent. The guided flow:
 
 1. prepares the selected local command and discovers its capabilities;
@@ -429,6 +436,7 @@ Custom command:
 
 | Catalog ID | Command |
 | --- | --- |
+| `antigravity` | `agy_acp_server.par` on macOS; `agy_acp_server.par --uid=` on Linux; `agy_acp_server.exe` on Windows |
 | `grok` | `grok agent stdio` |
 | `kimi` | `kimi acp` |
 | `opencode` | `opencode acp` |
@@ -442,12 +450,96 @@ Custom command:
 | `goose` | `goose acp` |
 | `kilo` | `kilo acp` |
 
-The executable must already be visible on the Host process PATH. Caelis persists
-the logical command and arguments but does not install, update, version-pin, or
-repair third-party adapters. Use Custom for any other ACP stdio command.
+Installed commands are discovered on the Host process PATH. Antigravity also
+supports the explicit installation flow below and discovery in its default
+installation directory. Caelis persists ordinary commands and arguments; it does
+not pin runtime versions or run background updates. Use Custom for any other
+ACP stdio command.
 
 Executable discovery does not make an Agent available as a collaborator. Open
 `/team` to choose its participant profile and binding in the Team overlay.
+
+### Google Antigravity installation and updates
+
+`/connect` lists Google Antigravity immediately after Codex. It uses Google's
+standalone ACP runtime; installing the `agy` CLI alone does not supply this
+endpoint. When the runtime is missing, the wizard offers two actions:
+
+- **Install agy_acp_server.par** (`.exe` on Windows) checks the official
+  [ACP Registry entry](https://github.com/agentclientprotocol/registry/blob/main/antigravity-acp/agent.json)
+  for a download matching the Host's operating system and CPU architecture. The
+  confirmation page links to the archive and lets you edit the destination.
+  **Install and continue** downloads the complete bundle from Google, extracts
+  it, sets executable permissions where needed, and continues to authentication
+  and model selection. The runtime archive is downloaded only after this
+  confirmation.
+- **Manual setup** shows Caelis instructions inside the wizard: a direct ZIP
+  download link for the Host platform, the extraction directory, and executable
+  permission commands where needed. It does not open an editor-specific tutorial
+  or run those commands. After installing, choose **Check installation** to
+  continue. Drag over the download URL or instructions to select text; release
+  to copy it. Copied commands retain their original line breaks even when the
+  terminal wraps them. The overlay expands with the terminal; use the arrow
+  keys or mouse wheel to scroll on a small terminal. Dragging at the top or
+  bottom edge scrolls the selection.
+
+When the current Turn is idle and a model is configured, the manual page also
+offers **Send to agent**. It sends an installation task to
+the current Session's Agent, including the Host OS, CPU architecture, resolved
+destination, official archive, and launch arguments. The task asks the Agent to
+download and extract the complete bundle, apply platform-specific permissions,
+and verify an ACP initialize handshake. This uses ordinary prompt submission;
+it preserves the composer draft and attachments. The button is hidden while a
+Turn is running or no model is configured. The current Agent needs access to
+the Host and installation tools.
+Browser sign-in remains an interactive user step. Use Tab to switch between the
+footer actions, or click either button.
+
+The default destination is `~/.local/share/antigravity-acp` on macOS and Linux,
+and `%LOCALAPPDATA%\antigravity-acp` on Windows. The Host resolves these paths for
+its current user; the displayed directory is not a fixed username or a path
+derived from the TUI client's machine. The installer accepts a new or
+empty directory and preserves existing files by refusing to overwrite them.
+Failed downloads or extraction leave no published runtime. The connection uses
+an absolute executable path, reused when reconnecting, so this flow needs no
+PATH change. The directory is user-owned; Caelis has no adapter cache, version lock, or automatic update policy.
+
+For manual installation without another editor:
+
+1. Open **Manual setup** and download the ZIP from its Google download link.
+   The URL comes from the official ACP Registry entry and matches the Host
+   platform. If downloading from the registry yourself, select the matching
+   `distribution.binary` entry and open its `archive` URL.
+2. Create the default directory above and extract the **entire** ZIP into it. Keep companion
+   files such as `localharness_external` beside the runtime. On Windows, use
+   **Extract All**; on macOS or Linux, an archive utility or `unzip` works.
+3. On macOS or Linux, run the commands displayed in the wizard on the Host. For
+   the default directory, they are:
+
+   ```sh
+   cd "$HOME/.local/share/antigravity-acp"
+   chmod +x agy_acp_server.par
+   [ ! -f localharness_external ] || chmod +x localharness_external
+   ```
+
+4. Return to Caelis and choose **Check installation**. No PATH change is needed
+   for the default directory. For another directory, use Custom command below,
+   or add it to the Host's PATH and restart the Host from the updated environment
+   with `caelis service restart` before checking again.
+
+To use another existing directory without changing PATH, choose **Custom
+command** and enter the absolute executable path, quoted if it contains spaces.
+On Linux, append `--uid=`, for example:
+`"/path/to/antigravity/agy_acp_server.par" --uid=`. Custom connections retain their
+own generated identity.
+
+For manual updates, use a fresh ZIP link from Manual setup or the registry. Stop active Antigravity sessions, download
+the desired official archive, and replace the full bundle together. Keep the
+configured directory and command stable, or reconnect with the new path. New
+sessions use the replacement runtime. Authentication belongs to the official
+runtime; personal Google accounts use its Google sign-in option. Select the
+connected model in `/model` to use Antigravity as the main controller, or bind it
+in `/team` as a participant.
 
 ## Compatibility
 
@@ -463,6 +555,7 @@ observed message shape or advertised capabilities, never a guessed peer version.
 | Draft Session notices | The bridge accepts `session/update` with `sessionUpdate: "notice"`, required `severity` and non-empty `title`, and optional `description` and `_meta` | Replace the bridge decoder with the SDK Notice variant when available |
 | Codex Notice transport | The client advertises `_meta.session_notice: true`; the adapter sends `_session/notice` with the same `{sessionId, update}` payload as the draft standard notification | The pinned ACP SDK can encode the Notice variant; switch the adapter to `session/update` and remove the capability and extension method |
 | Codex MCP display identity | `_meta["codex/mcp_tool"]` names server `caelis-collaboration` and tool `SendMessage`, with no conflicting standard kind or existing exact display name | ACP supplies a standard structured MCP identity that replaces the provider hint |
+| Antigravity command output | A completed or failed command has no standard content or terminal stream metadata, and `rawOutput` contains typed `combinedOutput`, `commandLine`, `workingDir`, and `exitCode` fields; explicit content, including an empty collection, wins | Supported runtimes and retained traces supply standard content for these results |
 
 The [Session notices draft](https://github.com/agentclientprotocol/agent-client-protocol/pull/2004)
 defines advisory live events outside Session history. The standard update needs
@@ -478,6 +571,10 @@ tool content. Complete provider results, including `structuredContent` and
 unknown content blocks, remain in `rawOutput`. The Host-private bridge consumes
 the structured MCP display hint; it never derives a tool name from a title.
 Generic tools render standard input even without a recognized display profile.
+Antigravity command output compatibility preserves `rawOutput` and projects the
+complete text as a replaceable standard content collection. It never emits the
+complete result as a terminal delta or infers execution or permission authority
+from provider result fields.
 
 Older persisted connections may still use `package_exec` or `managed`
 launchers. Runtime keeps them read-compatible, but new onboarding cannot create

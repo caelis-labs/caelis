@@ -32,15 +32,17 @@ func (s PreparationState) Valid() bool {
 }
 
 // ACPPrepareRequest is the public, secret-free request used to start external
-// ACP onboarding. Config values, discovery snapshots, and authentication
+// ACP onboarding, including an optional explicit installation confirmation.
+// Config values, discovery snapshots, and authentication
 // selections enter only through later revision-bound preparation steps.
 type ACPPrepareRequest struct {
-	AdapterID   string         `json:"adapter_id,omitempty"`
-	Launcher    LauncherChoice `json:"launcher,omitempty"`
-	CommandLine string         `json:"command_line,omitempty"`
-	ModelID     string         `json:"model_id,omitempty"`
-	CWD         string         `json:"cwd,omitempty"`
-	ParentRef   string         `json:"parent_ref,omitempty"`
+	AdapterID   string               `json:"adapter_id,omitempty"`
+	Launcher    LauncherChoice       `json:"launcher,omitempty"`
+	CommandLine string               `json:"command_line,omitempty"`
+	ModelID     string               `json:"model_id,omitempty"`
+	CWD         string               `json:"cwd,omitempty"`
+	ParentRef   string               `json:"parent_ref,omitempty"`
+	Install     *RuntimeInstallation `json:"install,omitempty"`
 }
 
 // NormalizeACPPrepareRequest returns a detached canonical preparation request.
@@ -51,6 +53,7 @@ func NormalizeACPPrepareRequest(in ACPPrepareRequest) ACPPrepareRequest {
 		CommandLine: in.CommandLine,
 		ModelID:     in.ModelID,
 		CWD:         in.CWD,
+		Install:     in.Install,
 	})
 	return ACPPrepareRequest{
 		AdapterID:   request.AdapterID,
@@ -59,6 +62,7 @@ func NormalizeACPPrepareRequest(in ACPPrepareRequest) ACPPrepareRequest {
 		ModelID:     request.ModelID,
 		CWD:         request.CWD,
 		ParentRef:   strings.TrimSpace(in.ParentRef),
+		Install:     request.Install,
 	}
 }
 
@@ -296,6 +300,9 @@ func ValidateACPPreparation(in ACPPreparation) error {
 // launcher resolution or installation effect is attempted.
 func ValidateACPPrepareRequest(in ACPPrepareRequest) error {
 	in = NormalizeACPPrepareRequest(in)
+	if in.Install != nil && (in.Launcher != LauncherChoiceInstalled || in.Install.Directory == "" || in.Install.ArchiveURL == "") {
+		return errors.New("control/agents: runtime installation requires an installed launcher, archive, and destination")
+	}
 	if in.AdapterID == "" {
 		return errors.New("control/agents: ACP preparation adapter is required")
 	}

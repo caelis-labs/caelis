@@ -29,12 +29,13 @@ const (
 // request creates or updates exactly one Agent so model-dependent session
 // options cannot be shared accidentally across several Agent identities.
 type ConnectRequest struct {
-	AdapterID    string            `json:"adapter_id,omitempty"`
-	Launcher     LauncherChoice    `json:"launcher,omitempty"`
-	CommandLine  string            `json:"command_line,omitempty"`
-	ModelID      string            `json:"model_id,omitempty"`
-	ConfigValues map[string]string `json:"config_values,omitempty"`
-	CWD          string            `json:"cwd,omitempty"`
+	AdapterID    string               `json:"adapter_id,omitempty"`
+	Launcher     LauncherChoice       `json:"launcher,omitempty"`
+	CommandLine  string               `json:"command_line,omitempty"`
+	ModelID      string               `json:"model_id,omitempty"`
+	ConfigValues map[string]string    `json:"config_values,omitempty"`
+	CWD          string               `json:"cwd,omitempty"`
+	Install      *RuntimeInstallation `json:"install,omitempty"`
 }
 
 // NormalizeConnectRequest returns a detached canonical onboarding request.
@@ -45,6 +46,7 @@ func NormalizeConnectRequest(in ConnectRequest) ConnectRequest {
 		CommandLine: strings.TrimSpace(in.CommandLine),
 		ModelID:     strings.TrimSpace(in.ModelID),
 		CWD:         strings.TrimSpace(in.CWD),
+		Install:     NormalizeRuntimeInstallation(in.Install),
 	}
 	out.ConfigValues = NormalizeSessionOptions(SessionOptions{ConfigValues: in.ConfigValues}).ConfigValues
 	return out

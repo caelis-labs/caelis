@@ -1,12 +1,15 @@
 package tuiapp
 
 import (
+	"errors"
 	"fmt"
 	"maps"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/appserver/httpclient"
 )
 
 type wizardField struct {
@@ -31,6 +34,10 @@ type wizardOverlayState struct {
 	formAdvancing bool
 	geometry      wizardOverlayGeometry
 	pressed       string
+	runtimeSetup  *agents.RuntimeSetup
+	hovered       string
+	footerFocus   string
+	text          wizardTextSelection
 }
 
 type wizardStepDraft struct {
@@ -45,10 +52,14 @@ type wizardStepDraft struct {
 }
 
 type wizardOverlayGeometry struct {
-	x, y, width, height int
-	closeX, closeY      int
-	rows                []int
-	actionX, actionY    int
+	x, y, width, height              int
+	closeX, closeY                   int
+	rows                             []int
+	actionX, actionY                 int
+	actionWidth                      int
+	backX, backY, backWidth          int
+	sendX, sendY, sendWidth          int
+	contentX, contentY, contentWidth int
 }
 
 func (m *Model) wizardStepKey() string {
@@ -103,6 +114,11 @@ func (m *Model) openWizardStep(query string) {
 	s := m.wizardOverlay
 	s.fields, s.field, s.cursor, s.window = nil, 0, 0, 0
 	s.err, s.blocked = "", false
+	s.runtimeSetup = nil
+	s.hovered, s.pressed = "", ""
+	s.footerFocus = ""
+	s.text = wizardTextSelection{}
+	m.cancelSelectionAutoScroll()
 	s.submitID = 0
 	if s.formAdvancing {
 		return
@@ -123,6 +139,9 @@ func (m *Model) openWizardStep(query string) {
 
 func (m *Model) backWizardOverlay() tea.Cmd {
 	s := m.wizardOverlay
+	if m.isWizardAuthChoice() {
+		return m.handlePromptKey(tea.KeyPressMsg{Code: tea.KeyEscape})
+	}
 	if s == nil || s.pending {
 		return nil
 	}
@@ -169,12 +188,22 @@ func (m *Model) wizardCatalogReady(err error) tea.Cmd {
 	if s == nil {
 		return nil
 	}
+	s.hovered, s.pressed = "", ""
+	s.text.selecting = false
+	m.cancelSelectionAutoScroll()
 	if err != nil {
 		s.err = m.wizardErrorText(err)
 		s.blocked = shouldStopACPSetupAfterLoadError(m.slashArgCommand, err)
 		return nil
 	}
 	s.err = ""
+	if len(m.slashArgCandidates) > 0 && m.slashArgCandidates[0].RuntimeSetup != nil {
+		setup := *m.slashArgCandidates[0].RuntimeSetup
+		s.runtimeSetup = &setup
+		if m.wizardStepKey() == "acp_install" && !m.isACPManualSetup() {
+			m.initACPInstallationForm()
+		}
+	}
 	if m.wizardStepKey() == "acp_launcher" && m.slashArgQuery == "" && len(m.slashArgCandidates) == 1 {
 		candidate := m.slashArgCandidates[0]
 		// A single declared launcher needs no extra choice. Do not add that
@@ -242,7 +271,12 @@ func (m *Model) finishWizardSubmission(msg TaskResultMsg) {
 }
 
 func (m *Model) wizardErrorText(err error) string {
-	text := singleLineErrorText(err.Error())
+	detail := err.Error()
+	var remote *httpclient.RemoteError
+	if errors.As(err, &remote) && remote.Detail != "" {
+		detail = remote.Detail
+	}
+	text := singleLineErrorText(detail)
 	if command := m.slashArgCommand; command != "" {
 		text = strings.ReplaceAll(text, command, "/"+m.wizard.def.Command)
 	}
@@ -261,6 +295,15 @@ func (m *Model) wizardErrorText(err error) string {
 
 func (m *Model) wizardAction() string {
 	s := m.wizardOverlay
+	if m.isWizardAuthChoice() {
+		return "Continue"
+	}
+	if m.isACPManualSetup() && s.err == "" && !m.slashArgLoadPending {
+		return "Check installation"
+	}
+	if m.wizardStepKey() == "acp_install" && len(s.fields) > 0 {
+		return "Install and continue"
+	}
 	switch {
 	case s.pending:
 		return "Saving…"
@@ -304,6 +347,9 @@ func (m *Model) wizardAction() string {
 }
 
 func (m *Model) wizardSearch(query string) tea.Cmd {
+	if m.wizardOverlay.runtimeSetup != nil || m.wizardStepKey() == "acp_install" {
+		return nil
+	}
 	m.wizardOverlay.err, m.wizardOverlay.window = "", 0
 	m.wizardOverlay.submitID = 0
 	m.slashArgQuery, m.slashArgIndex = truncateRunes(query, 160), 0

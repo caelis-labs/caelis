@@ -1,11 +1,13 @@
 package tuiapp
 
 import (
+	"net/url"
 	"strings"
 
 	"charm.land/lipgloss/v2"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func (m *Model) renderWizardOverlay() string {
@@ -13,17 +15,49 @@ func (m *Model) renderWizardOverlay() string {
 	if s == nil {
 		return ""
 	}
+	s.text.lines, s.text.rows = nil, nil
 	width := min(112, max(16, m.width-4))
+	if m.isACPManualSetup() {
+		width = min(max(16, m.width-4), max(112, min(180, m.width*9/10)))
+	}
 	inner := max(8, width-m.overlayBorderChromeWidth())
+	border, inset := 0, 0
+	if m.overlayUsesBorder() {
+		border, inset = 1, 2
+	}
+	// Leave the fixed composer visible even when the form or catalog scrolls.
+	maxHeight := max(8, m.height-7)
+	if m.isACPManualSetup() {
+		maxHeight = max(8, m.height-5)
+	}
 	muted := m.theme.HelpHintTextStyle()
 	title := "/" + m.wizard.def.Command + " · " + m.wizardTitle()
-	body := []string{m.theme.TitleStyle().Render(padRightDisplay(truncateTailDisplay(title, inner-2), inner-1)) + muted.Render("×")}
+	body := []string{m.theme.TitleStyle().Render(padRightDisplay(truncateTailDisplay(title, inner-4), inner-3)) + m.wizardButtonStyle("close", m.wizardCloseEnabled(), false).Render("[×]")}
 	if context := m.connectContext(); context != "" {
 		body = append(body, muted.Render(truncateTailDisplay(context, inner)))
 	}
+	if m.isWizardAuthChoice() {
+		body = append(body, muted.Render(truncateTailDisplay(m.activePrompt.prompt, inner)))
+	}
 	body = append(body, muted.Render(strings.Repeat("─", inner)))
-	busy := s.pending || m.slashArgLoadPending || m.slashArgRequestPending
-	if len(s.fields) == 0 && !s.blocked && !m.slashArgLoadPending && !s.pending {
+	busy := m.wizardBusy()
+	if s.runtimeSetup != nil && !busy {
+		switch {
+		case m.wizardStepKey() == "acp_launcher":
+			body = append(body, muted.Render(truncateTailDisplay("The ACP runtime is not installed.", inner)))
+		case m.wizardStepKey() == "acp_install":
+			source, _ := url.Parse(s.runtimeSetup.ArchiveURL)
+			if source != nil && !m.isACPManualSetup() {
+				body = append(body, m.theme.LinkStyle().Hyperlink(tuikit.EscapeHyperlinkURI(s.runtimeSetup.ArchiveURL)).Render(truncateTailDisplay("Download from "+source.Hostname()+" ↗", inner)))
+			}
+			if m.isACPManualSetup() {
+				body = append(body, muted.Render(truncateTailDisplay("Drag to select text · release to copy", inner)))
+			} else {
+				body = append(body, muted.Render(truncateTailDisplay("New or empty directory on the Host.", inner)))
+			}
+		}
+	}
+	if len(s.fields) == 0 && s.runtimeSetup == nil && m.wizardStepKey() != "acp_install" && !s.blocked && !busy && !m.isWizardAuthChoice() {
 		search := "/ " + truncateDisplayCellsFromEnd(m.slashArgQuery, inner-3) + "▏"
 		if m.slashArgQuery == "" {
 			search += "Search"
@@ -37,7 +71,15 @@ func (m *Model) renderWizardOverlay() string {
 		}
 	}
 	if s.err != "" {
-		footer = append(footer, m.theme.ErrorStyle().Render(truncateTailDisplay(s.err, inner)))
+		// Keep diagnostics readable without pushing actions outside the overlay.
+		styled := m.theme.ErrorStyle().Render(tuikit.LinkifyText(tuikit.SanitizeLogText(s.err), m.theme.LinkStyle()))
+		lines := splitStyledPhysicalLines(ansi.Wrap(styled, inner, " "))
+		limit := max(1, maxHeight-len(body)-len(footer)-2*border-3)
+		if len(lines) > limit {
+			lines = lines[:limit]
+			lines[limit-1] = ansi.Truncate(lines[limit-1]+" …", inner, "…")
+		}
+		footer = append(footer, lines...)
 	}
 	help := "↑↓ select  esc back"
 	if len(s.parents) == 0 {
@@ -70,6 +112,15 @@ func (m *Model) renderWizardOverlay() string {
 			help = "tab field  enter next  esc close"
 		}
 	}
+	if m.isACPManualSetup() {
+		help = "↑↓ scroll  esc back"
+		if m.canSendACPInstallPrompt() {
+			help = "↑↓ scroll  tab action  esc back"
+		}
+	}
+	if m.isWizardAuthChoice() {
+		help = "↑↓ select  esc back"
+	}
 	if s.err != "" && len(s.fields) == 0 {
 		help = "esc back"
 	}
@@ -85,43 +136,20 @@ func (m *Model) renderWizardOverlay() string {
 	if s.blocked {
 		help = "esc close"
 	}
-	if displayColumns(help) > inner {
-		help = "↑↓  tab  enter  esc"
-	}
 	footer = append(footer, muted.Render(strings.Repeat("─", inner)))
-	action := m.wizardAction() + " ↵"
-	if busy {
-		action = ""
-	}
-	helpWidth := max(0, inner-displayColumns(action)-2)
-	if displayColumns(help) > helpWidth {
-		help = "↑↓  enter  esc"
-		if len(s.fields) > 0 {
-			help = "tab  enter  esc"
-		}
-		if m.wizardMultiSelectStep() {
-			help = "↑↓  space  esc"
-		}
-		if m.isBotSettingsModel() {
-			help = "↑↓  ←→  tab  esc"
-		}
-	}
-	actionStyle := m.theme.CommandStyle().Padding(0)
-	if len(s.fields) > 0 && s.field == len(s.fields) {
-		actionStyle = m.theme.SelectionStyle().Bold(true)
-	}
-	footer = append(footer, muted.Render(padRightDisplay(truncateTailDisplay(help, helpWidth), helpWidth))+"  "+actionStyle.Render(action))
-	border, inset := 0, 0
-	if m.overlayUsesBorder() {
-		border, inset = 1, 2
-	}
-	// Leave the fixed composer visible even when the form or catalog scrolls.
-	maxHeight := max(8, m.height-7)
+	buttons := m.renderWizardFooter(inner, help)
+	sendFooterOffset := len(footer)
+	footer = append(footer, buttons.lines...)
 	budget := max(1, maxHeight-len(body)-len(footer)-2*border)
 	rows, offsets := m.wizardBodyLines(inner, len(body), budget)
 	body = append(body, rows...)
+	sendOffset := len(body) + sendFooterOffset
 	actionOffset := len(body) + len(footer) - 1
 	body = append(body, footer...)
+	if !m.isACPManualSetup() || s.runtimeSetup == nil {
+		m.collectWizardReadonlyText(body, offsets)
+	}
+	m.renderWizardTextSelection(body)
 	frame := tuikit.RenderResponsiveOverlayFrame(m.theme, tuikit.ResponsiveOverlayFrameModel{Body: body, Width: width, UseBorder: m.overlayUsesBorder()})
 	w, h := lipgloss.Width(frame), lipgloss.Height(frame)
 	x, y := max(0, (m.width-w)/2), max(0, (m.height-5-h)/2)
@@ -130,12 +158,21 @@ func (m *Model) renderWizardOverlay() string {
 			offsets[i] += y + border
 		}
 	}
-	s.geometry = wizardOverlayGeometry{x: x, y: y, width: w, height: h, closeX: x + inset + inner - 1, closeY: y + border, rows: offsets, actionX: x + inset + inner - displayColumns(action), actionY: y + border + actionOffset}
+	s.geometry = wizardOverlayGeometry{
+		x: x, y: y, width: w, height: h, closeX: x + inset + inner - 3, closeY: y + border,
+		rows: offsets, actionX: x + inset + inner - buttons.actionRightInset - buttons.actionWidth, actionY: y + border + actionOffset, actionWidth: buttons.actionWidth,
+		backX: x + inset, backY: y + border + actionOffset, backWidth: buttons.backWidth,
+		sendX: x + inset + inner - buttons.sendWidth, sendY: y + border + sendOffset, sendWidth: buttons.sendWidth,
+		contentX: x + inset, contentY: y + border, contentWidth: inner,
+	}
 	return frame
 }
 
 func (m *Model) wizardTitle() string {
 	s := m.wizardOverlay
+	if m.isWizardAuthChoice() {
+		return m.activePrompt.title
+	}
 	if s.bot != nil {
 		return m.botSettingsTitle()
 	}
@@ -144,6 +181,12 @@ func (m *Model) wizardTitle() string {
 	}
 	switch {
 	case s.pending:
+		if m.wizard.def.Command == "disconnect" {
+			return "Disconnecting"
+		}
+		if m.wizard.def.Command == "connect" {
+			return "Connecting"
+		}
 		return "Saving"
 	case s.blocked:
 		return "Check result"
@@ -152,12 +195,21 @@ func (m *Model) wizardTitle() string {
 			return "Sign in"
 		}
 		if m.wizardStepKey() == "acp_model" {
+			if confirmedACPInstallation(m.wizard.state) != nil {
+				return "Installing and connecting"
+			}
 			return "Preparing Agent"
+		}
+		if m.wizardStepKey() == "acp_install" {
+			return "Checking official download"
 		}
 		return "Loading models"
 	case m.connectCapabilitiesForm():
 		return "Model details"
 	case len(s.fields) > 0 && m.wizardStepKey() != "acp_command":
+		if m.wizardStepKey() == "acp_install" {
+			return "Install runtime"
+		}
 		return "Connection"
 	}
 	if m.wizard.def.Command == "disconnect" {
@@ -183,9 +235,17 @@ func (m *Model) wizardTitle() string {
 	case "acp_agent":
 		return "ACP Agent"
 	case "acp_launcher":
+		if s.runtimeSetup != nil {
+			return "Set up runtime"
+		}
 		return "Launch method"
 	case "acp_command":
 		return "Command"
+	case "acp_install":
+		if m.isACPManualSetup() {
+			return "Manual setup"
+		}
+		return "Install runtime"
 	case "model", "acp_model":
 		return "Models"
 	}
@@ -195,18 +255,17 @@ func (m *Model) wizardTitle() string {
 func (m *Model) wizardBodyLines(width, offset, budget int) ([]string, []int) {
 	s := m.wizardOverlay
 	muted := m.theme.HelpHintTextStyle()
-	if s.pending {
-		return nil, nil
-	}
-
 	if s.blocked {
 		return []string{muted.Render(truncateTailDisplay(m.wizardResultHint(), width))}, nil
 	}
-	if m.slashArgLoadPending {
-		lines := []string{}
-		if m.slashArgLoadLabel != slashArgLoadLabel(m.slashArgCommand) {
-			lines = append(lines, muted.Render(truncateTailDisplay(m.slashArgLoadLabel, width)))
+	if m.wizardBusy() {
+		label := "Loading…"
+		if s.pending {
+			label = m.wizardTitle() + "…"
+		} else if m.slashArgLoadPending {
+			label = m.slashArgLoadStatusText()
 		}
+		lines := []string{m.theme.SpinnerStyle().Render(m.runningFrame()) + " " + muted.Render(truncateTailDisplay(label, max(1, width-2)))}
 		if code := m.slashArgLoadAuthCode; code != "" {
 			lines = append(lines, m.theme.TitleStyle().Render("Code: "+code))
 		}
@@ -215,20 +274,31 @@ func (m *Model) wizardBodyLines(width, offset, budget int) ([]string, []int) {
 		}
 		return lines[:min(len(lines), budget)], nil
 	}
-	count, index := len(m.slashArgCandidates), m.slashArgIndex
-	form := len(s.fields) > 0
+	if m.isACPManualSetup() && s.runtimeSetup != nil {
+		return m.acpManualBodyLines(width, offset, budget), nil
+	}
+	candidates, index := m.slashArgCandidates, m.slashArgIndex
+	if m.isWizardAuthChoice() {
+		candidates = nil
+		for _, choice := range m.visiblePromptChoices() {
+			candidates = append(candidates, SlashArgCandidate{Value: choice.value, Display: choice.label, Detail: choice.detail})
+		}
+		index = m.activePrompt.choiceIndex
+	}
+	count := len(candidates)
+	form := len(s.fields) > 0 && !m.isWizardAuthChoice()
 	if form {
 		count, index = len(s.fields), min(s.field, len(s.fields)-1)
-	} else if m.wizardStepKey() == "model" || m.wizardStepKey() == "endpoint" {
+	} else if !m.isWizardAuthChoice() && (m.wizardStepKey() == "model" || m.wizardStepKey() == "endpoint") {
 		count++
 	}
 	if count == 0 {
+		if m.wizardStepKey() == "acp_install" && s.err != "" {
+			return nil, nil
+		}
 		text := "No matches"
 		if m.slashArgQuery == "" {
 			text = "Nothing configured"
-		}
-		if m.slashArgRequestPending {
-			text = "Loading…"
 		}
 		return []string{muted.Render(text)}, nil
 	}
@@ -260,16 +330,20 @@ func (m *Model) wizardBodyLines(width, offset, budget int) ([]string, []int) {
 	for i := s.window; i < end; i++ {
 		offsets[i] = offset + len(lines)
 		if form {
-			lines = append(lines, m.renderWizardField(s.fields[i], i == s.field, width))
+			line := m.renderWizardField(s.fields[i], i == s.field, width)
+			if s.hovered == wizardRowTarget(i) && i != s.field {
+				line = m.theme.CommandActiveStyle().Padding(0).Render(padRightDisplay(ansi.Strip(line), width))
+			}
+			lines = append(lines, line)
 			continue
 		}
 		label, detail := "+ Custom model", ""
 		if m.wizardStepKey() == "endpoint" {
 			label = "+ Custom endpoint"
 		}
-		selected := i == m.slashArgIndex
-		if i < len(m.slashArgCandidates) {
-			candidate := m.slashArgCandidates[i]
+		selected := i == index
+		if i < len(candidates) {
+			candidate := candidates[i]
 			label, detail = slashArgCandidateIdentity(candidate), candidate.Detail
 			if m.isBotSettingsModel() {
 				detail = m.modelPickerControls(candidate, selected, width)
@@ -315,6 +389,10 @@ func (m *Model) wizardBodyLines(width, offset, budget int) ([]string, []int) {
 			marker = "› "
 		}
 		labelWidth := min(46, max(14, (width-4)*3/5))
+		if s.runtimeSetup != nil {
+			labelWidth = max(1, width-4)
+			detail = ""
+		}
 		if m.wizard.def.Command == "connect" && m.wizardStepKey() == "source" {
 			labelWidth = min(32, max(14, (width-4)*2/5), max(1, width-5))
 			// Keep examples visible on every row, with subdued text even when selected.

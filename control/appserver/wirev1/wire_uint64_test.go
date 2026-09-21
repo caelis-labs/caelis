@@ -303,7 +303,8 @@ func TestACPOnboardingWirePreservesHostRevisionAtUint64Boundary(t *testing.T) {
 			schema: "PrepareACPRequest",
 			request: appserver.PrepareACPRequest{
 				WriteBase: appserver.WriteBase{OperationID: "prepare-1", ExpectedRevision: &revision},
-				Request:   controlagents.ACPPrepareRequest{AdapterID: "codex", Launcher: controlagents.LauncherChoiceNPX},
+				Request: controlagents.ACPPrepareRequest{AdapterID: "antigravity", Launcher: controlagents.LauncherChoiceInstalled,
+					Install: &controlagents.RuntimeInstallation{Directory: "/runtime", ArchiveURL: "https://dl.google.com/runtime.zip"}},
 			},
 			decoded: &appserver.PrepareACPRequest{},
 		},

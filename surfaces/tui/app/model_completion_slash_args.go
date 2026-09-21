@@ -2,6 +2,7 @@ package tuiapp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -374,18 +375,20 @@ func asyncSlashArgCatalogKey(command string) string {
 	if err != nil {
 		return command
 	}
+	install, _ := json.Marshal(payload.Install)
 	return strings.Join([]string{
 		"model",
 		payload.Agent,
 		string(payload.Launcher),
 		payload.CommandLine,
 		payload.Model,
+		string(install),
 	}, "\x00")
 }
 
 func isAsyncSlashArgCommand(command string) bool {
 	command = strings.TrimSpace(command)
-	if strings.HasPrefix(command, "connect-acp-model:") {
+	if strings.HasPrefix(command, "connect-acp-model:") || strings.HasPrefix(command, "connect-acp-install:") {
 		return true
 	}
 	if !strings.HasPrefix(command, "connect-model:") {
@@ -397,6 +400,9 @@ func isAsyncSlashArgCommand(command string) bool {
 }
 
 func slashArgLoadLabel(command string) string {
+	if strings.HasPrefix(command, "connect-acp-install:") {
+		return "Checking official download"
+	}
 	if strings.HasPrefix(strings.TrimSpace(command), "connect-model:") {
 		payload := connectwizard.ParseConnectWizardStatePayload(strings.TrimPrefix(strings.TrimSpace(command), "connect-model:"))
 		provider := strings.TrimSpace(payload.Provider)
@@ -408,6 +414,9 @@ func slashArgLoadLabel(command string) string {
 	if strings.HasPrefix(command, "connect-acp-model:") {
 		raw := strings.TrimPrefix(command, "connect-acp-model:")
 		if payload, err := parseACPConnectWizardPayload(raw); err == nil && payload.Agent != "" {
+			if payload.Install != nil {
+				return "Installing " + acpSetupAdapterDisplayName(payload.Agent) + " runtime and connecting"
+			}
 			return "Preparing " + acpSetupAdapterDisplayName(payload.Agent) + " ACP Agent"
 		}
 	}

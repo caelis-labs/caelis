@@ -162,6 +162,7 @@ type StatusRuntimeDeps struct {
 // AgentRuntimeDeps carries ACP controller and registered-agent capabilities.
 // ControllerStatusFn is optional and degrades to the session binding.
 type AgentRuntimeDeps struct {
+	InstalledCommandFn     func(context.Context, string) (string, error)
 	ControllerStatusFn     func(context.Context, session.SessionRef) (controller.ControllerStatus, bool, error)
 	DisconnectCandidatesFn func(context.Context) ([]controlagents.DisconnectCandidate, error)
 	ListFn                 func() []ACPAgentInfo
