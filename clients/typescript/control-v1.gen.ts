@@ -140,6 +140,7 @@ export interface ACPPrepareRequest {
   adapter_id?: string;
   command_line?: string;
   cwd?: string;
+  install?: RuntimeInstallation;
   launcher?: ACPLauncherChoice;
   model_id?: string;
   parent_ref?: string;
@@ -207,6 +208,7 @@ export interface ActiveApproval {
   request_id: string;
   scope?: "main" | "participant" | "subagent";
   scope_id?: string;
+  target?: TurnTarget;
 }
 
 export interface ActorIdentity {
@@ -1216,6 +1218,21 @@ export interface RunState {
   waiting_approval?: boolean;
 }
 
+export interface RuntimeInstallation {
+  archive_url: string;
+  directory: string;
+  sha256?: string;
+}
+
+export interface RuntimeSetup {
+  archive_url?: string;
+  command: string;
+  directory: string;
+  install_prompt?: string;
+  manual_steps?: Array<string>;
+  sha256?: string;
+}
+
 export interface RuntimeStreamMetadata {
   truncated_before?: Uint64Decimal;
   [key: string]: JSONValue;
@@ -1423,12 +1440,14 @@ export interface SlashArgCandidate {
   model_metadata_complete?: boolean;
   model_selection?: ModelSelection;
   no_auth?: boolean;
+  runtime_setup?: RuntimeSetup;
   value: string;
 }
 
 export type SlashArgCandidateList = Array<SlashArgCandidate>;
 
 export interface StartParticipantRequest {
+  background?: boolean;
   content_parts?: Array<PromptContentPart>;
   detach_source?: string;
   display_address?: string;

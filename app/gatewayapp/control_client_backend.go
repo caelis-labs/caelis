@@ -451,6 +451,9 @@ func (s *runtimeComposition) executeControlCommand(ctx context.Context, principa
 		if err != nil {
 			return sessionCommandResult(active), classifyControlBackendError(err)
 		}
+		if req.Background {
+			return s.startBackgroundParticipant(ctx, active, req, placement)
+		}
 		agentName := strings.TrimSpace(placement.Agent)
 		if placement.Kind == sdkplacement.KindModel {
 			agentName = string(handle)

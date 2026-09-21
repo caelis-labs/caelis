@@ -32,7 +32,7 @@ func resolveParticipantID(participants []participantAddress, input string) (stri
 	runAgent, runHandle, directRun := controlagents.ParseRunName(input)
 	prefixMatches := make([]string, 0, 2)
 	for _, participant := range participants {
-		if participant.Kind != session.ParticipantKindACP || participant.Role != session.ParticipantRoleSidecar {
+		if (participant.Kind != session.ParticipantKindACP && participant.Kind != session.ParticipantKindSubagent) || participant.Role != session.ParticipantRoleSidecar {
 			continue
 		}
 		id := strings.TrimSpace(participant.ID)

@@ -33,16 +33,17 @@ func runBot(
 	}
 	sender := &tuiapp.ProgramSender{}
 	typedDriver, err := appserveradapter.NewAppServerAdapter(appserveradapter.AppServerAdapterConfig{
-		WorkspaceKey:  product.Workspace.WorkspaceKey,
-		WorkspaceDir:  product.Workspace.WorkspaceCWD,
-		Surface:       "cli-bot",
-		Sessions:      product.Clients.Sessions,
-		Participants:  product.Clients.Participants,
-		Status:        product.Clients.Status,
-		Configuration: product.Clients.Configuration,
-		Agents:        product.Clients.Agents,
-		Completion:    product.Clients.Completion,
-		Plugins:       product.Clients.Plugins,
+		WorkspaceKey:   product.Workspace.WorkspaceKey,
+		WorkspaceDir:   product.Workspace.WorkspaceCWD,
+		Surface:        "cli-bot",
+		Sessions:       product.Clients.Sessions,
+		Participants:   product.Clients.Participants,
+		SubagentInputs: product.Clients.SubagentInputs,
+		Status:         product.Clients.Status,
+		Configuration:  product.Clients.Configuration,
+		Agents:         product.Clients.Agents,
+		Completion:     product.Clients.Completion,
+		Plugins:        product.Clients.Plugins,
 		// A Bot conversation must be selected before any input; never allocate
 		// an implicit workspace Session for Bot mode.
 		RequireExistingSession: true,

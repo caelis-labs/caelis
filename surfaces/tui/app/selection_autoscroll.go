@@ -81,7 +81,8 @@ func (m *Model) advanceSelectionAutoScroll(token uint64) tea.Cmd {
 	m.selectionAutoScroll.tickScheduled = false
 	m.selectionAutoScroll.scheduledToken = 0
 	subagentOutputSelecting := m.subagentOutputOverlay != nil && m.subagentOutputOverlay.selecting
-	if (!m.selecting && !m.inputSelecting && !subagentOutputSelecting) || !m.selectionAutoScroll.active {
+	wizardSelecting := m.wizardOverlay != nil && m.wizardOverlay.text.selecting
+	if (!m.selecting && !m.inputSelecting && !subagentOutputSelecting && !wizardSelecting) || !m.selectionAutoScroll.active {
 		m.cancelSelectionAutoScroll()
 		return nil
 	}
@@ -89,7 +90,9 @@ func (m *Model) advanceSelectionAutoScroll(token uint64) tea.Cmd {
 		changed   bool
 		scrollCmd tea.Cmd
 	)
-	if subagentOutputSelecting {
+	if wizardSelecting {
+		changed, scrollCmd = m.scrollWizardSelectionBy(m.wizardSelectionScrollDelta(m.selectionAutoScroll.mouse), m.selectionAutoScroll.mouse)
+	} else if subagentOutputSelecting {
 		changed, scrollCmd = m.scrollSubagentOutputSelectionBy(
 			m.subagentOutputSelectionAutoScrollDelta(m.selectionAutoScroll.mouse),
 			m.selectionAutoScroll.mouse,

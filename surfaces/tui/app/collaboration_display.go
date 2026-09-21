@@ -88,8 +88,8 @@ func (m *Model) collaborationDisplayRecipient(event TranscriptEvent) string {
 	if event.Scope == ACPProjectionMain {
 		return "parent"
 	}
-	if eventTargetsSubagentOutputView(event) {
-		if view := m.subagentOutputViews[event.AnchorToolCallID]; view != nil {
+	if key := m.subagentOutputEventKey(event); key != "" {
+		if view := m.subagentOutputViews[key]; view != nil {
 			return view.taskHandle
 		}
 	}

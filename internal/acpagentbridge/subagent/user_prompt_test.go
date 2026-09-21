@@ -65,6 +65,8 @@ func TestUserInputHistoryRoundTripViaACP(t *testing.T) {
 	defer func() { _ = runner.Quiesce(context.Background()) }()
 	events := make(chan childInputTestEvent, 64)
 	spawn := childInputSpawnContext(t, "user-history-task", events)
+	spawn.Role = session.ParticipantRoleSidecar
+	spawn.ContentParts = []model.ContentPart{{Type: model.ContentPartText, Text: "initial"}, {Type: model.ContentPartImage, Data: "aW1hZ2U=", MimeType: "image/png"}}
 	anchor, _, err := runner.Spawn(ctx, spawn, delegation.Request{Agent: "helper", Prompt: "initial"})
 	if err != nil {
 		t.Fatal(err)
@@ -98,6 +100,17 @@ func TestUserInputHistoryRoundTripViaACP(t *testing.T) {
 			t.Fatal("missing live user input")
 		}
 	}
+	// A terminal output frame precedes producer cleanup. History replacement
+	// requires the settled endpoint, not merely its published terminal result.
+	latest := run.slot.currentRun()
+	latest.mu.RLock()
+	settled := latest.done
+	latest.mu.RUnlock()
+	select {
+	case <-settled:
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
 	loaded, err := runner.LoadHistory(ctx, tasksubagent.HistoryRequest{Anchor: anchor, Reconnect: tasksubagent.ReconnectRequest{Target: delegation.AgentTarget("helper"), Spawn: spawn}})
 	if err != nil {
 		t.Fatal(err)
@@ -118,7 +131,7 @@ func TestUserInputHistoryRoundTripViaACP(t *testing.T) {
 			images++
 		}
 	}
-	if strings.Join(humanText, "|") != strings.Join(texts, "|") || images != len(texts) {
+	if strings.Join(humanText, "|") != strings.Join(append([]string{"initial"}, texts...), "|") || images != len(texts)+1 {
 		t.Fatalf("ACP replay changed human history: %q images=%d", humanText, images)
 	}
 }

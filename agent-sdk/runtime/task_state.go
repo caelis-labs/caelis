@@ -9,6 +9,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/textstream"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -192,6 +193,7 @@ type subagentTask struct {
 	handle       string
 	title        string
 	prompt       string
+	contentParts []model.ContentPart
 	mode         string
 	approvalMode string
 	createdAt    time.Time
@@ -333,6 +335,13 @@ type runtimeToolContext struct {
 type StartSubagentOptions struct {
 	ApprovalRequester agent.ApprovalRequester
 	ApprovalMode      string
+	// ReturnOnStart skips the short completion wait after durable admission.
+	// Background callers observe subsequent progress through the Task stream.
+	ReturnOnStart bool
+	// Target is the immutable placement selected by the embedding host.
+	Target       delegation.Target
+	Handle       string
+	ContentParts []model.ContentPart
 	// SpawnID preserves one user/Control initiated spawn identity across retry.
 	// LLM-facing Spawn calls derive this from the stable tool-call ID.
 	SpawnID string

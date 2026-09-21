@@ -55,16 +55,17 @@ func runTUI(
 	}
 	sender := &tuiapp.ProgramSender{}
 	typedDriver, err := appserveradapter.NewAppServerAdapter(appserveradapter.AppServerAdapterConfig{
-		WorkspaceKey:  strings.TrimSpace(workspaceKey),
-		WorkspaceDir:  strings.TrimSpace(workspaceDir),
-		Surface:       "cli-tui",
-		Sessions:      clients.Sessions,
-		Participants:  clients.Participants,
-		Status:        clients.Status,
-		Configuration: clients.Configuration,
-		Agents:        clients.Agents,
-		Completion:    clients.Completion,
-		Plugins:       clients.Plugins,
+		WorkspaceKey:   strings.TrimSpace(workspaceKey),
+		WorkspaceDir:   strings.TrimSpace(workspaceDir),
+		Surface:        "cli-tui",
+		Sessions:       clients.Sessions,
+		Participants:   clients.Participants,
+		SubagentInputs: clients.SubagentInputs,
+		Status:         clients.Status,
+		Configuration:  clients.Configuration,
+		Agents:         clients.Agents,
+		Completion:     clients.Completion,
+		Plugins:        clients.Plugins,
 	})
 	if err != nil {
 		return err

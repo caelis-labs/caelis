@@ -213,12 +213,6 @@ func (s *runtimeComposition) withReviewerAgent(resolved assembly.ResolvedAssembl
 	if err != nil {
 		return assembly.ResolvedAssembly{}, fmt.Errorf("gatewayapp: materialize fixed Reviewer scene: %w", err)
 	}
-	reviewer.Name = reviewerAgentID
-	reviewer.Description = "Review current workspace changes"
-	reviewer.SystemSceneID = reviewerAgentID
-	if strings.TrimSpace(reviewer.HostedAdapterID) == "" {
-		reviewer.Env = withSystemSceneEnv(reviewer.Env, reviewerAgentID)
-	}
 	out.Agents = append(out.Agents, reviewer)
 	return out, nil
 }

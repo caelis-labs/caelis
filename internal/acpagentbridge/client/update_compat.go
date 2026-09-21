@@ -22,17 +22,19 @@ func NormalizeInboundUpdate(update Update) Update {
 		return typed
 	case ToolCall:
 		typed.Meta, typed.Kind = normalizeInboundToolDisplay(typed.Meta, typed.Kind)
+		typed.Content = antigravityCommandContent(typed.Content, typed.RawOutput, typed.Status, typed.Kind, typed.Meta)
 		return typed
 	case ToolCallUpdate:
 		if typed.Kind == nil {
 			typed.Meta = normalizeInboundToolMeta(typed.Meta)
-			return typed
+		} else {
+			kind := stringValue(typed.Kind)
+			typed.Meta, kind = normalizeInboundToolDisplay(typed.Meta, kind)
+			if kind != stringValue(typed.Kind) {
+				typed.Kind = &kind
+			}
 		}
-		kind := stringValue(typed.Kind)
-		typed.Meta, kind = normalizeInboundToolDisplay(typed.Meta, kind)
-		if kind != stringValue(typed.Kind) {
-			typed.Kind = &kind
-		}
+		typed.Content = antigravityCommandContent(typed.Content, typed.RawOutput, stringValue(typed.Status), stringValue(typed.Kind), typed.Meta)
 		return typed
 	default:
 		return update

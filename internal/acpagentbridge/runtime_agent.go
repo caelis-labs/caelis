@@ -73,6 +73,8 @@ type Config struct {
 	// SlashResultFormatter is required when PromptRouterFactory is configured.
 	SlashResultFormatter SlashResultFormatter
 	TaskStreamClient     taskstream.Client
+	// SubagentInputClient observes delivery receipts for background follow-ups.
+	SubagentInputClient appserver.SubagentInputClient
 	// TaskStreams and TaskStreamPrincipal are inputs to the lower-level direct
 	// Runtime conformance path. Product assembly binds TaskStreamClient once at
 	// the AppServer boundary instead of forwarding a selectable principal.
@@ -109,6 +111,7 @@ type RuntimeAgent struct {
 	promptRouterFactory   PromptRouterFactory
 	slashResultFormatter  SlashResultFormatter
 	taskStreamClient      taskstream.Client
+	subagentInputClient   appserver.SubagentInputClient
 	approvalReviewer      approval.Reviewer
 	approvalModelResolver ApprovalModelResolver
 	appName               string
@@ -117,10 +120,11 @@ type RuntimeAgent struct {
 	workspaceCWD          string
 	agentInfo             *acpsdk.Implementation
 
-	mu              sync.Mutex
-	cancels         map[string]context.CancelFunc
-	managedSessions map[string]struct{}
-	taskMuxes       map[string]map[*acpTaskStreamMux]struct{}
+	mu               sync.Mutex
+	cancels          map[string]context.CancelFunc
+	managedSessions  map[string]struct{}
+	taskMuxes        map[string]map[*acpTaskStreamMux]struct{}
+	participantTasks map[string]*acpParticipantTasks
 }
 
 // New constructs the lower-level ACP bridge in typed-client or direct Runtime
@@ -192,6 +196,7 @@ func New(cfg Config) (*RuntimeAgent, error) {
 		promptRouterFactory:   cfg.PromptRouterFactory,
 		slashResultFormatter:  cfg.SlashResultFormatter,
 		taskStreamClient:      taskStreamClient,
+		subagentInputClient:   cfg.SubagentInputClient,
 		approvalReviewer:      cfg.ApprovalReviewer,
 		approvalModelResolver: cfg.ApprovalModelResolver,
 		appName:               appName,
@@ -558,6 +563,7 @@ func (a *RuntimeAgent) clearSessionDelivery(sessionID string) {
 	delete(a.cancels, sessionID)
 	a.mu.Unlock()
 	a.closeACPTaskStreamMuxes(sessionID)
+	a.closeParticipantTasks(sessionID)
 }
 
 func (a *RuntimeAgent) SetSessionMode(ctx context.Context, req acpsdk.SetSessionModeRequest) (acpsdk.SetSessionModeResponse, error) {

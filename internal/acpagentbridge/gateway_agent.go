@@ -37,6 +37,7 @@ func NewGatewayAgent(cfg GatewayAgentConfig) (*RuntimeAgent, error) {
 		PromptRouterFactory:  newGatewayPromptRouterFactory(clients, systemSessionClient),
 		SlashResultFormatter: cfg.SlashResultFormatter,
 		TaskStreamClient:     clients.Tasks,
+		SubagentInputClient:  clients.SubagentInputs,
 		AppName:              firstNonEmptyGatewayValue(cfg.AppName, "caelis"),
 		UserID:               firstNonEmptyGatewayValue(cfg.UserID, "local-user"),
 		WorkspaceKey:         cfg.WorkspaceKey,

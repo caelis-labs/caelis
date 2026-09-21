@@ -74,7 +74,7 @@ func defaultSpecs() []CommandSpec {
 func defaultSharedSpecs() []CommandSpec {
 	specs := []CommandSpec{
 		{Name: "help", Usage: "/help", Description: "Show commands and shortcuts"},
-		{Name: "review", Usage: "/review [instructions]", Description: "Review current workspace changes with the system-managed Reviewer"},
+		{Name: "review", Usage: "/review [instructions]", Description: "Start a Reviewer task for current workspace changes"},
 		{Name: "breeze", Usage: "/breeze <prompt>", Description: "Run the bound Breeze profile"},
 		{Name: "orbit", Usage: "/orbit <prompt>", Description: "Run the bound Orbit profile"},
 		{Name: "zenith", Usage: "/zenith <prompt>", Description: "Run the bound Zenith profile"},

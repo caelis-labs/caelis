@@ -32,6 +32,11 @@ func (m *Model) finishPrompt(line string, err error) tea.Cmd {
 	if m.activePrompt == nil {
 		return nil
 	}
+	if m.isWizardAuthChoice() {
+		m.wizardOverlay.hovered, m.wizardOverlay.pressed = "", ""
+		m.wizardOverlay.text.selecting = false
+		m.wizardOverlay.window = 0
+	}
 	if m.activePrompt.approvalRequestID != "" && (m.sessionObservationRecovering || m.sessionHistoryFailed || m.sessionApprovalRefreshPending == m.activePrompt.approvalRequestID) {
 		return m.showHint("Session approval unavailable until observation reconnects.", hintOptions{priority: HintPriorityHigh})
 	}
@@ -62,6 +67,10 @@ func (m *Model) finishPrompt(line string, err error) tea.Cmd {
 func (m *Model) handlePromptKey(msg tea.KeyMsg) tea.Cmd {
 	if m.activePrompt == nil {
 		return nil
+	}
+	if m.isWizardAuthChoice() {
+		m.wizardOverlay.hovered, m.wizardOverlay.pressed = "", ""
+		m.wizardOverlay.text.selecting = false
 	}
 	if len(m.activePrompt.choices) > 0 {
 		if picker := m.themePicker; picker != nil && picker.prompt == m.activePrompt {

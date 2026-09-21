@@ -53,15 +53,19 @@ type Config struct {
 	// TaskCommitted reports a cloned Task entry after its durable mutation commits.
 	// Product Control may use it to advance a lightweight status index; the
 	// callback never owns Task lifecycle or content delivery.
-	TaskCommitted         func(*task.Entry)
-	Subagents             agent.SubagentRunner
-	LifecycleInterceptors []agent.LifecycleInterceptor
-	TraceSink             agent.TraceSink
-	Guardrails            []agent.GuardrailSpec
+	TaskCommitted func(*task.Entry)
+	Subagents     agent.SubagentRunner
+	// ChildApprovalRequester routes approvals independently of a parent Turn,
+	// including user-started children and child endpoints reattached after restart.
+	ChildApprovalRequester agent.ApprovalRequester
+	LifecycleInterceptors  []agent.LifecycleInterceptor
+	TraceSink              agent.TraceSink
+	Guardrails             []agent.GuardrailSpec
 }
 
 // Runtime is the baseline local runtime implementation.
 type Runtime struct {
+	childApprovalRequester   agent.ApprovalRequester
 	sessions                 session.Service
 	agentFactory             agent.AgentFactory
 	runIDGenerator           func() string
@@ -127,6 +131,7 @@ func New(cfg Config) (*Runtime, error) {
 		controllerRecovery:       cfg.ControllerRecovery,
 		controllerEventForwarder: cfg.ControllerEventForwarder,
 		subagents:                cfg.Subagents,
+		childApprovalRequester:   cfg.ChildApprovalRequester,
 		taskOutput:               cfg.TaskOutput,
 		runStates:                map[string]agent.RunState{},
 		activeRunners:            map[string]activeRun{},

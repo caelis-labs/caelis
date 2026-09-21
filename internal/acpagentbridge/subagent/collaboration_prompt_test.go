@@ -65,11 +65,11 @@ func TestACPChildPromptInjectsIdentityAndReportingWithoutSteering(t *testing.T) 
 	if terminal.Result == nil || terminal.Result.State != delegation.StateCompleted {
 		t.Fatalf("terminal = %#v, want completed", terminal.Result)
 	}
-	communication := session.ProtocolAgentCommunicationOf(frames[0].Event)
-	if communication == nil || communication.Text != "review the diff" {
+	input := frames[0].Event
+	if input.Actor.Kind != session.ActorKindUser || input.Text != "review the diff" || session.ProtocolAgentCommunicationOf(input) != nil {
 		t.Fatalf("display input = %#v, want original task prose", frames[0].Event)
 	}
-	if strings.Contains(communication.Text, collaboration.SliceOpenTag) || strings.Contains(communication.Text, "ReceiveMessages") {
+	if strings.Contains(input.Text, collaboration.SliceOpenTag) || strings.Contains(input.Text, "ReceiveMessages") {
 		t.Fatalf("Control slice leaked into display projection: %#v", frames[0].Event)
 	}
 	payloads := readCollaborationPromptTrace(t, trace)

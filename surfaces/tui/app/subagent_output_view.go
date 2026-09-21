@@ -92,10 +92,11 @@ func (m *Model) observeSubagentOutputEvents(events []TranscriptEvent) bool {
 			changed = true
 			continue
 		}
-		if !eventTargetsSubagentOutputView(event) {
+		callID := m.subagentOutputEventKey(event)
+		if callID == "" {
 			continue
 		}
-		view := m.ensureSubagentOutputView(event.AnchorToolCallID)
+		view := m.ensureSubagentOutputView(callID)
 		if view == nil {
 			continue
 		}
@@ -111,6 +112,18 @@ func (m *Model) observeSubagentOutputEvents(events []TranscriptEvent) bool {
 		m.retainChildDisplayViews(selected)
 	}
 	return changed
+}
+
+func (m *Model) subagentOutputEventKey(event TranscriptEvent) string {
+	if eventTargetsSubagentOutputView(event) {
+		return strings.TrimSpace(event.AnchorToolCallID)
+	}
+	if event.Scope == ACPProjectionSubagent && event.AnchorToolCallID == "" && strings.TrimSpace(event.ScopeID) != "" {
+		// Typed scope owns the content even before directory discovery, including
+		// cold Session replay. Directory metadata supplies labels, not routing.
+		return "task:" + strings.TrimSpace(event.ScopeID)
+	}
+	return ""
 }
 
 func (m *Model) observeSubagentOutputOwner(event TranscriptEvent) {

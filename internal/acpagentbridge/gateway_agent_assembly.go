@@ -20,17 +20,18 @@ func newGatewayPromptRouterFactory(clients appserver.AppServerClients, systemSes
 			turnSessions = systemSessionClient
 		}
 		driver, err := appserveradapter.NewAppServerAdapter(appserveradapter.AppServerAdapterConfig{
-			SessionID:     strings.TrimSpace(activeSession.SessionID),
-			WorkspaceKey:  strings.TrimSpace(activeSession.WorkspaceKey),
-			WorkspaceDir:  strings.TrimSpace(activeSession.CWD),
-			Surface:       "acp",
-			Sessions:      turnSessions,
-			Participants:  clients.Participants,
-			Status:        clients.Status,
-			Configuration: clients.Configuration,
-			Agents:        clients.Agents,
-			Completion:    clients.Completion,
-			Plugins:       clients.Plugins,
+			SessionID:      strings.TrimSpace(activeSession.SessionID),
+			WorkspaceKey:   strings.TrimSpace(activeSession.WorkspaceKey),
+			WorkspaceDir:   strings.TrimSpace(activeSession.CWD),
+			Surface:        "acp",
+			Sessions:       turnSessions,
+			Participants:   clients.Participants,
+			SubagentInputs: clients.SubagentInputs,
+			Status:         clients.Status,
+			Configuration:  clients.Configuration,
+			Agents:         clients.Agents,
+			Completion:     clients.Completion,
+			Plugins:        clients.Plugins,
 		})
 		if err != nil {
 			return nil, err

@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/google/uuid"
+
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/task/agenthandle"
@@ -15,16 +18,11 @@ import (
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 )
 
-// StartAgentRun routes an execution-bearing direct Agent command through the
-// Runtime fixed to the active Session.
-func (a *SessionClientAdapter) StartAgentRun(
-	ctx context.Context,
-	target string,
-	prompt string,
-	attachments []controlprompt.Attachment,
-) (controlprompt.Turn, error) {
-	if a == nil || a.participants == nil {
-		return nil, errors.New("app/gatewayapp/controladapter: participant client is unavailable")
+// StartAgentRun starts a background Task in the selected Session without
+// claiming its foreground Turn. Control owns placement, approval and lifetime.
+func (a *SessionClientAdapter) StartAgentRun(ctx context.Context, target, prompt string, attachments []controlprompt.Attachment) (controlprompt.AgentRunResult, error) {
+	if a == nil || a.participantClient == nil {
+		return controlprompt.AgentRunResult{}, errors.New("participant client is unavailable")
 	}
 	handle := agentbinding.NormalizeHandle(agentbinding.Handle(target))
 	source := controlagents.DirectRunSource(handle)
@@ -32,106 +30,95 @@ func (a *SessionClientAdapter) StartAgentRun(
 		source = controlagents.CustomRoleRunSource(handle)
 	}
 	if source == "" {
-		return nil, fmt.Errorf("app/gatewayapp/controladapter: /%s is not an addressable Agent", handle)
+		return controlprompt.AgentRunResult{}, fmt.Errorf("/%s is not an addressable Agent", handle)
 	}
-	contentParts, err := ContentPartsFromSubmission(prompt, attachments, a.WorkspaceDir())
+	parts, err := ContentPartsFromSubmission(prompt, attachments, a.WorkspaceDir())
 	if err != nil {
-		return nil, err
+		return controlprompt.AgentRunResult{}, err
 	}
-	if strings.TrimSpace(prompt) == "" && len(contentParts) == 0 {
-		return nil, errors.New("app/gatewayapp/controladapter: direct Agent prompt input is required")
+	if strings.TrimSpace(prompt) == "" && len(parts) == 0 {
+		return controlprompt.AgentRunResult{}, errors.New("direct Agent prompt input is required")
 	}
-	return a.startAdmittedTurn(ctx, a.ensureSessionForParticipantStart, func(startCtx context.Context, state appserver.SessionState) (appserver.TargetTurn, error) {
-		label := allocateParticipantLabel(state.Participants, string(handle))
-		displayAddress := "/" + string(handle)
-		if runName := controlagents.FormatRunName(string(handle), label); runName != "" {
-			displayAddress = "/" + runName
-		}
-		return a.participants.Start(startCtx, appserver.ParticipantTurnStartRequest{
-			SessionID:      state.SessionID,
-			Handle:         string(handle),
-			Role:           session.ParticipantRoleSidecar,
-			Label:          label,
-			Source:         source,
-			Input:          strings.TrimSpace(prompt),
-			DisplayInput:   displayInputWithAttachments(prompt, attachments),
-			DisplayAddress: displayAddress,
-			ContentParts:   contentParts,
-		})
-	})
+	return a.startBackgroundParticipant(ctx, handle, source, prompt, parts)
 }
 
-// ContinueAgentRun routes a follow-up to the participant attachment visible in
-// the typed Session snapshot instead of consulting the default Gateway.
-func (a *SessionClientAdapter) ContinueAgentRun(
-	ctx context.Context,
-	handle string,
-	prompt string,
-	attachments []controlprompt.Attachment,
-) (controlprompt.Turn, error) {
-	if a == nil || a.participants == nil {
-		return nil, errors.New("app/gatewayapp/controladapter: participant client is unavailable")
+func (a *SessionClientAdapter) startBackgroundParticipant(ctx context.Context, handle agentbinding.Handle, source, prompt string, parts []model.ContentPart) (controlprompt.AgentRunResult, error) {
+	if a == nil || a.participantClient == nil {
+		return controlprompt.AgentRunResult{}, errors.New("participant client is unavailable")
 	}
-	return a.startAdmittedTurn(ctx, a.currentClientSessionState, func(startCtx context.Context, state appserver.SessionState) (appserver.TargetTurn, error) {
-		participants := make([]participantAddress, 0, len(state.Participants))
-		for _, participant := range state.Participants {
-			participants = append(participants, participantAddress{
-				ID: participant.ID, Kind: participant.Kind, Role: participant.Role,
-				Label: participant.Label, SessionID: participant.SessionID, Source: participant.Source,
-			})
+	state, err := a.ensureSessionForParticipantStart(ctx)
+	if err != nil {
+		return controlprompt.AgentRunResult{}, err
+	}
+	result, err := a.participantClient.StartParticipant(ctx, appserver.StartParticipantRequest{
+		WriteBase: appserver.WriteBase{OperationID: "participant-task-" + uuid.NewString(), SessionID: state.SessionID,
+			ExpectedRevision: &state.Revision, ExpectedControllerEpoch: state.Controller.EpochID},
+		Background: true, Handle: string(handle), Role: session.ParticipantRoleSidecar,
+		Label: allocateParticipantLabel(state.Participants, string(handle)), Source: source,
+		Input: strings.TrimSpace(prompt), ContentParts: parts,
+	})
+	if err := appserver.CommandMutationError(result, err); err != nil {
+		return controlprompt.AgentRunResult{}, err
+	}
+	if result.Resource == nil || result.Resource.Kind != appserver.CommandResourceParticipantTask || strings.TrimSpace(result.Resource.Ref) == "" {
+		return controlprompt.AgentRunResult{}, errors.New("participant start returned no Task identity")
+	}
+	return controlprompt.AgentRunResult{SessionID: state.SessionID, TaskID: result.Resource.Ref}, nil
+}
+
+// ContinueAgentRun queues user input through the same child mailbox used by the
+// participant pane. Legacy ACP attachments keep their foreground continuation
+// until detached; newly started direct Agents always use Task identities.
+func (a *SessionClientAdapter) ContinueAgentRun(ctx context.Context, handle, prompt string, attachments []controlprompt.Attachment) (controlprompt.AgentRunResult, error) {
+	state, err := a.currentClientSessionState(ctx)
+	if err != nil {
+		return controlprompt.AgentRunResult{}, err
+	}
+	participants := make([]participantAddress, 0, len(state.Participants))
+	for _, participant := range state.Participants {
+		participants = append(participants, participantAddress{ID: participant.ID, Kind: participant.Kind, Role: participant.Role,
+			Label: participant.Label, SessionID: participant.SessionID, Source: participant.Source})
+	}
+	participantID, err := resolveParticipantID(participants, handle)
+	if err != nil {
+		return controlprompt.AgentRunResult{}, err
+	}
+	parts, err := ContentPartsFromSubmission(prompt, attachments, state.CWD)
+	if err != nil {
+		return controlprompt.AgentRunResult{}, err
+	}
+	for _, participant := range state.Participants {
+		if participant.ID != participantID || participant.Kind != session.ParticipantKindSubagent {
+			continue
 		}
-		participantID, err := resolveParticipantID(participants, handle)
-		if err != nil {
-			return nil, err
+		if a.subagentInputs == nil {
+			return controlprompt.AgentRunResult{}, errors.New("subagent input client is unavailable")
 		}
-		contentParts, err := ContentPartsFromSubmission(prompt, attachments, state.CWD)
-		if err != nil {
-			return nil, err
-		}
+		receipt, err := a.subagentInputs.SubmitSubagentInput(ctx, appserver.SubagentInputRequest{
+			OperationID: "participant-input-" + uuid.NewString(), SessionID: state.SessionID,
+			ParticipantID: participantID, TaskID: participant.DelegationID, Input: strings.TrimSpace(prompt), ContentParts: parts,
+		})
+		return controlprompt.AgentRunResult{SessionID: state.SessionID, TaskID: participant.DelegationID, InputReceipt: &receipt}, err
+	}
+	turn, err := a.startAdmittedTurn(ctx, a.currentClientSessionState, func(startCtx context.Context, current appserver.SessionState) (appserver.TargetTurn, error) {
 		return a.participants.Prompt(startCtx, appserver.ParticipantTurnPromptRequest{
-			SessionID:      state.SessionID,
-			ParticipantID:  participantID,
-			Input:          strings.TrimSpace(prompt),
-			DisplayInput:   displayInputWithAttachments(prompt, attachments),
-			DisplayAddress: "/" + strings.TrimPrefix(strings.TrimSpace(handle), "/"),
-			ContentParts:   contentParts,
-			Source:         "user_side_agent",
+			SessionID: current.SessionID, ParticipantID: participantID, Input: strings.TrimSpace(prompt),
+			DisplayInput: displayInputWithAttachments(prompt, attachments), DisplayAddress: "/" + strings.TrimPrefix(strings.TrimSpace(handle), "/"),
+			ContentParts: parts, Source: "user_side_agent",
 		})
 	})
+	return controlprompt.AgentRunResult{Turn: turn}, err
 }
 
-// StartReview keeps review execution in the active Session Runtime while
-// preserving the existing transient participant and display semantics.
-func (a *SessionClientAdapter) StartReview(
-	ctx context.Context,
-	instructions string,
-	attachments []controlprompt.Attachment,
-) (controlprompt.Turn, error) {
-	if a == nil || a.participants == nil {
-		return nil, errors.New("app/gatewayapp/controladapter: participant client is unavailable")
-	}
+// StartReview starts a persistent Reviewer Task with the fixed workspace review
+// prompt. Follow-ups use ContinueAgentRun and retain the same child context.
+func (a *SessionClientAdapter) StartReview(ctx context.Context, instructions string, attachments []controlprompt.Attachment) (controlprompt.AgentRunResult, error) {
 	prompt, attachmentOffset := controlprompt.ReviewPrompt(instructions)
-	shiftedAttachments := shiftControlAttachments(attachments, attachmentOffset)
-	contentParts, err := ContentPartsFromSubmission(prompt, shiftedAttachments, a.WorkspaceDir())
+	parts, err := ContentPartsFromSubmission(prompt, shiftControlAttachments(attachments, attachmentOffset), a.WorkspaceDir())
 	if err != nil {
-		return nil, err
+		return controlprompt.AgentRunResult{}, err
 	}
-	return a.startAdmittedTurn(ctx, a.ensureSessionForParticipantStart, func(startCtx context.Context, state appserver.SessionState) (appserver.TargetTurn, error) {
-		return a.participants.Start(startCtx, appserver.ParticipantTurnStartRequest{
-			SessionID:      state.SessionID,
-			Handle:         string(agentbinding.HandleReviewer),
-			Role:           session.ParticipantRoleSidecar,
-			Label:          allocateParticipantLabel(state.Participants, string(agentbinding.HandleReviewer)),
-			Source:         "slash_review",
-			Input:          prompt,
-			DisplayInput:   displayInputWithAttachments(instructions, attachments),
-			DisplayAddress: "/review",
-			DisplayTitle:   reviewDisplayTitle(instructions),
-			ContentParts:   contentParts,
-			Transient:      true,
-			DetachSource:   "side_agent_complete",
-		})
-	})
+	return a.startBackgroundParticipant(ctx, agentbinding.HandleReviewer, "slash_review", prompt, parts)
 }
 
 func (a *SessionClientAdapter) currentClientSessionState(ctx context.Context) (appserver.SessionState, error) {
@@ -153,13 +140,6 @@ func allocateParticipantLabel(participants []session.ParticipantBinding, handle 
 		}
 	}
 	return "@" + agenthandle.Allocate(used, handle)
-}
-
-func reviewDisplayTitle(instructions string) string {
-	if strings.TrimSpace(instructions) != "" {
-		return ""
-	}
-	return "Code review requested"
 }
 
 func shiftControlAttachments(items []controlprompt.Attachment, offset int) []controlprompt.Attachment {

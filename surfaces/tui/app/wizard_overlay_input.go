@@ -2,7 +2,6 @@ package tuiapp
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -22,6 +21,14 @@ func (m *Model) wizardRowCount() int {
 
 func (m *Model) moveWizardSelection(delta int) {
 	s := m.wizardOverlay
+	if m.isWizardAuthChoice() {
+		m.activePrompt.choiceIndex = wrapSelectionIndex(m.activePrompt.choiceIndex, len(m.visiblePromptChoices()), delta)
+		return
+	}
+	if m.isACPManualSetup() {
+		s.window = max(0, s.window+delta)
+		return
+	}
 	if count := m.wizardRowCount(); count > 0 {
 		if len(s.fields) > 0 {
 			s.field = (s.field + delta + count) % count
@@ -40,6 +47,9 @@ func (m *Model) moveWizardSelection(delta int) {
 
 func (m *Model) acceptWizardOverlay() tea.Cmd {
 	s := m.wizardOverlay
+	if m.isWizardAuthChoice() {
+		return m.handlePromptKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	}
 	if s.pending || m.slashArgLoadPending || m.slashArgRequestPending {
 		return nil
 	}
@@ -47,6 +57,19 @@ func (m *Model) acceptWizardOverlay() tea.Cmd {
 		m.clearWizard()
 		return nil
 	}
+	if m.isACPManualSetup() {
+		if s.footerFocus == "send" {
+			return m.sendACPInstallPrompt()
+		}
+		if s.err != "" {
+			return m.requestCurrentSlashArgCompletion()
+		}
+		return m.backWizardOverlay()
+	}
+	if m.wizardStepKey() == "acp_install" && len(s.fields) > 0 {
+		return m.submitACPInstallation()
+	}
+
 	if s.bot != nil {
 		if s.err != "" && s.bot.choosingModel {
 			s.err = ""
@@ -103,6 +126,9 @@ func (m *Model) handleWizardOverlayKey(msg tea.KeyMsg) tea.Cmd {
 		return nil
 	}
 	k := msg.Key()
+	s.hovered, s.pressed = "", ""
+	s.text.selecting = false
+	m.cancelSelectionAutoScroll()
 	if k.Code == tea.KeyEscape {
 		return m.backWizardOverlay()
 	}
@@ -142,6 +168,14 @@ func (m *Model) handleWizardOverlayKey(msg tea.KeyMsg) tea.Cmd {
 	case tea.KeyDown:
 		m.moveWizardSelection(1)
 	case tea.KeyTab:
+		if m.canSendACPInstallPrompt() {
+			if s.footerFocus == "send" {
+				s.footerFocus = "action"
+			} else {
+				s.footerFocus = "send"
+			}
+			return nil
+		}
 		delta := 1
 		if k.Mod.Contains(tea.ModShift) {
 			delta = -1
@@ -271,74 +305,4 @@ func (m *Model) handleWizardOverlayPaste(msg tea.PasteMsg) tea.Cmd {
 		return nil
 	}
 	return m.wizardSearch(m.slashArgQuery + text)
-}
-
-func (m *Model) handleWizardOverlayMouse(msg tea.MouseMsg) tea.Cmd {
-	s := m.wizardOverlay
-	if s.pending && (s.bot == nil || !s.bot.loading) {
-		return nil
-	}
-	mouse, g := msg.Mouse(), s.geometry
-	inside := mouse.X >= g.x && mouse.X < g.x+g.width && mouse.Y >= g.y && mouse.Y < g.y+g.height
-	target := ""
-	if inside {
-		switch {
-		case mouse.Y == g.closeY && mouse.X >= g.closeX-1:
-			target = "close"
-		case mouse.Y == g.actionY && mouse.X >= g.actionX:
-			target = "action"
-		default:
-			if index := subagentRowAtY(g.rows, mouse.Y); index >= 0 {
-				target = "row:" + strconv.Itoa(index)
-			}
-		}
-	}
-	switch msg.(type) {
-	case tea.MouseWheelMsg:
-		if inside && !m.slashArgLoadPending && !s.blocked {
-			if mouse.Button == tea.MouseWheelUp {
-				m.moveWizardSelection(-1)
-			}
-			if mouse.Button == tea.MouseWheelDown {
-				m.moveWizardSelection(1)
-			}
-		}
-	case tea.MouseClickMsg:
-		if mouse.Button == tea.MouseLeft {
-			s.pressed = target
-		}
-	case tea.MouseReleaseMsg:
-		pressed := s.pressed
-		s.pressed = ""
-		if target == "" || target != pressed {
-			return nil
-		}
-		if target == "close" {
-			m.clearWizard()
-			return nil
-		}
-		if target == "action" {
-			return m.acceptWizardOverlay()
-		}
-		if index := subagentRowAtY(g.rows, mouse.Y); index >= 0 && !m.slashArgLoadPending && !s.blocked {
-			if len(s.fields) > 0 {
-				s.field, s.cursor = index, len([]rune(s.fields[index].value))
-				if s.fields[index].key == "bot_model" {
-					return m.openBotSettingsModels()
-				}
-				if s.fields[index].choice {
-					m.editWizardField(tea.Key{Code: tea.KeySpace})
-				}
-			} else {
-				m.slashArgIndex = index
-				if m.wizardMultiSelectStep() && index < len(m.slashArgCandidates) {
-					if handled, cmd := m.toggleWizardMultiSelectCandidate(m.slashArgCandidates[index]); handled {
-						return cmd
-					}
-				}
-				return m.acceptWizardOverlay()
-			}
-		}
-	}
-	return nil
 }

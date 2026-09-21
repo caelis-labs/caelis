@@ -20,9 +20,6 @@ func (m *Model) paneDivider(rect paneRect) string {
 
 func (m *Model) renderPaneHint(view *subagentOutputView, state *subagentOutputOverlayState, width int) string {
 	notice := state.inputStatus
-	if notice == "Sent" {
-		notice = ""
-	}
 	label := ""
 	if view != nil {
 		switch m.subagentOutputCurrentStatus(view) {

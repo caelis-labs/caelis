@@ -1139,13 +1139,18 @@ func TestHiddenTaskBoundaryIsSymmetricForParticipantAndSubagentLanes(t *testing.
 				},
 			}
 
-			next, _ := model.applyTranscriptEvents(events, false)
+			next, _ := model.handleTranscriptEventsMsg(TranscriptEventsMsg{Events: events})
 			model = next.(*Model)
 			var block *ParticipantTurnBlock
 			for _, docBlock := range model.doc.Blocks() {
 				if candidate, ok := docBlock.(*ParticipantTurnBlock); ok {
 					block = candidate
 					break
+				}
+			}
+			if test.scope == ACPProjectionSubagent {
+				if view := model.subagentOutputViews["task:"+test.scopeID]; view != nil {
+					block = view.block
 				}
 			}
 			if block == nil {
@@ -1392,7 +1397,7 @@ func TestTranscriptNarrativeIdentityFlowsAcrossMainParticipantAndSubagentScopes(
 				},
 			}
 
-			next, _ := model.applyTranscriptEvents(events, false)
+			next, _ := model.handleTranscriptEventsMsg(TranscriptEventsMsg{Events: events})
 			model = next.(*Model)
 			var narratives []SubagentEvent
 			for _, docBlock := range model.doc.Blocks() {
@@ -1405,6 +1410,11 @@ func TestTranscriptNarrativeIdentityFlowsAcrossMainParticipantAndSubagentScopes(
 					if test.scope != ACPProjectionMain {
 						narratives = block.Events
 					}
+				}
+			}
+			if test.scope == ACPProjectionSubagent {
+				if view := model.subagentOutputViews["task:"+test.scopeID]; view != nil {
+					narratives = view.block.Events
 				}
 			}
 			if len(narratives) != 1 || narratives[0].Kind != SEAssistant || narratives[0].Text != "canonical answer" {

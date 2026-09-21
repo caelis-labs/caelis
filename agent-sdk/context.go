@@ -261,6 +261,8 @@ type SubagentApprovalRequester interface {
 // SubagentSpawnContext is the system-controlled parent context inherited by a
 // child endpoint. None of these fields are model-controlled tool arguments.
 type SubagentSpawnContext struct {
+	// ContentParts preserves the user request's structured text and attachments.
+	ContentParts      []model.ContentPart       `json:"content_parts,omitempty"`
 	SessionRef        session.SessionRef        `json:"session_ref,omitempty"`
 	Session           session.Session           `json:"session,omitempty"`
 	CWD               string                    `json:"cwd,omitempty"`

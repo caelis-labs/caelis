@@ -1,0 +1,5 @@
+[
+  {"sessionUpdate":"tool_call","toolCallId":"echo-1","title":"echo AGY_OUTPUT_OK","kind":"execute","status":"pending","rawInput":{"CommandLine":"echo AGY_OUTPUT_OK","Cwd":"/workspace","WaitMsBeforeAsync":5000}},
+  {"sessionUpdate":"tool_call_update","toolCallId":"echo-1","title":"echo AGY_OUTPUT_OK","kind":"execute","status":"in_progress","rawInput":{"command_line":"echo AGY_OUTPUT_OK","working_dir":"/workspace"}},
+  {"sessionUpdate":"tool_call_update","toolCallId":"echo-1","status":"completed","rawOutput":{"combinedOutput":"AGY_OUTPUT_OK\n","commandLine":"echo AGY_OUTPUT_OK","exitCode":0,"exit_code":0,"formatted_output":"AGY_OUTPUT_OK\n","workingDir":"/workspace"}}
+]

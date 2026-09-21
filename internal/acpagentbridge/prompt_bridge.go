@@ -92,6 +92,11 @@ func (a *RuntimeAgent) emitPromptRouterResult(ctx context.Context, activeSession
 		return nil
 	}
 	sessionID := promptRouterResultSessionID(activeSession, result)
+	if child := result.ParticipantTask; child != nil && child.TaskID != "" {
+		if err := a.observeParticipantTask(ctx, *child, cb); err != nil {
+			return err
+		}
+	}
 	outboundFilter := newACPNarrativeFilter(suppressUserEcho)
 	taskMux := a.startACPTaskStreamMux(ctx, sessionID)
 	taskEvents := taskMux.Events()
@@ -440,6 +445,10 @@ func (a *RuntimeAgent) emitControlEnvelope(ctx context.Context, cb PromptCallbac
 	sessionID := acpEnvelopeSessionID(env, fallbackSessionID)
 	switch env.Kind {
 	case eventstream.KindRequestPermission:
+		if observer := a.participantTaskObserver(sessionID, env.ScopeID); observer != nil && env.Scope == eventstream.ScopeSubagent {
+			observer.wakeApprovals()
+			return nil
+		}
 		if env.Permission == nil {
 			return nil
 		}

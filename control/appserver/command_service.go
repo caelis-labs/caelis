@@ -300,6 +300,9 @@ func validateCommandRequest(action Action, request any) error {
 			return errors.New("controlclient: participant profile_id and effort are required")
 		}
 	case StartParticipantRequest:
+		if typed.Background && (typed.Transient || typed.Role != "" && typed.Role != session.ParticipantRoleSidecar) {
+			return errors.New("controlclient: background participant must be a persistent sidecar")
+		}
 		if err := requireSession(typed.SessionID); err != nil {
 			return err
 		}

@@ -234,10 +234,9 @@ func (p gatewayPresentationSource) AvailableCommands(ctx context.Context, sessio
 			if _, exists := seen[name]; exists {
 				continue
 			}
-			agent, _, _ := controlagents.ParseRunName(name)
 			commands = append(commands, appserver.PresentationCommand{
 				Name:        name,
-				Description: "Continue the " + agent + " Agent run",
+				Description: "Continue participant " + name,
 				Input:       commandInput("prompt"),
 			})
 			seen[name] = struct{}{}

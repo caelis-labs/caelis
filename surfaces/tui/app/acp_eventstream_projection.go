@@ -12,10 +12,9 @@ func ProjectACPEventToTranscriptEvents(env eventstream.Envelope) []TranscriptEve
 	return transcript.ProjectACPEventToEvents(env, tuiTranscriptProjector{})
 }
 
-// projectACPEventToTranscriptEvents translates the TaskStream's internal
-// TaskID into the Session-scoped Handle used by transcript panels. The source
-// Envelope remains untouched and retains its typed TaskID authorization and
-// cursor identity.
+// projectACPEventToTranscriptEvents resolves display handles without changing
+// ScopeID: routing and replay use the same Task identity before and after the
+// directory or Task subscription arrives.
 func (m *Model) projectACPEventToTranscriptEvents(env eventstream.Envelope) []TranscriptEvent {
 	events := ProjectACPEventToTranscriptEvents(env)
 	if m == nil || env.Scope != eventstream.ScopeSubagent {
@@ -26,9 +25,6 @@ func (m *Model) projectACPEventToTranscriptEvents(env eventstream.Envelope) []Tr
 		return events
 	}
 	for index := range events {
-		if strings.TrimSpace(events[index].ScopeID) == strings.TrimSpace(env.ScopeID) {
-			events[index].ScopeID = handle
-		}
 		if strings.TrimSpace(events[index].ToolTaskHandle) == strings.TrimSpace(env.ScopeID) {
 			events[index].ToolTaskHandle = handle
 		}

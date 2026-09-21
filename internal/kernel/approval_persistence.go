@@ -78,8 +78,12 @@ func approvalChildOrigin(req *agent.ApprovalRequest, origin *EventOrigin, reques
 	switch origin.Scope {
 	case EventScopeSubagent:
 		parent := approvalParentToolRelation(req)
-		if scopeID == "" || parent == nil || strings.TrimSpace(parent.ToolCallID) == "" {
+		if scopeID == "" {
 			return nil
+		}
+		var parentTool session.EventParentTool
+		if parent != nil && strings.TrimSpace(parent.ToolCallID) != "" {
+			parentTool = session.EventParentTool{CallID: strings.TrimSpace(parent.ToolCallID), Name: strings.TrimSpace(parent.ToolName)}
 		}
 		taskID := firstNonEmpty(metadataString(req.Metadata, "task_id"), metadataString(req.Metadata, "parent_task_id"), scopeID)
 		return &session.EventChildOrigin{
@@ -87,7 +91,7 @@ func approvalChildOrigin(req *agent.ApprovalRequest, origin *EventOrigin, reques
 			DelegationID:  firstNonEmpty(metadataString(req.Metadata, "delegation_id"), taskID),
 			ParticipantID: strings.TrimSpace(origin.ParticipantID), ACPSessionID: strings.TrimSpace(origin.ParticipantSessionID),
 			SourceEventID: strings.TrimSpace(string(requestID)),
-			ParentTool:    session.EventParentTool{CallID: strings.TrimSpace(parent.ToolCallID), Name: strings.TrimSpace(parent.ToolName)},
+			ParentTool:    parentTool,
 		}
 	case EventScopeParticipant:
 		if scopeID == "" {

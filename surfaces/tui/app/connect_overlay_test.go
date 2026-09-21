@@ -350,7 +350,7 @@ func TestWizardOverlayMouseActionDoesNotIncludeHelp(t *testing.T) {
 		_, cmd := m.Update(tea.MouseReleaseMsg{X: x, Y: y, Button: tea.MouseLeft})
 		runConnectTestCmd(m, cmd)
 	}
-	click(g.x+3, g.actionY)
+	click(g.backX+g.backWidth+1, g.actionY)
 	if m.wizardStepKey() != "source" {
 		t.Fatal("help text click submitted the step")
 	}

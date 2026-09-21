@@ -271,6 +271,11 @@ func (r *Runner) SpawnTarget(ctx context.Context, spawn subagent.SpawnContext, r
 		closeErr := acpcleanup.CloseClient(ctx, acpClient)
 		return delegation.Anchor{}, delegation.Result{}, markSpawnNotStartedAfterCleanup(setupErr, closeErr)
 	}
+	if acputil.ContentPartsContainImage(spawn.ContentParts) && !initialize.AgentCapabilities.PromptCapabilities.Image {
+		childCancel()
+		closeErr := acpcleanup.CloseClient(ctx, acpClient)
+		return delegation.Anchor{}, delegation.Result{}, markSpawnNotStartedAfterCleanup(errorcode.New(errorcode.Unsupported, "Target Agent does not accept image input."), closeErr)
+	}
 	authenticationMethods := authentication.Methods(initialize)
 	recovered, err := authentication.OpenNewSession(ctx, authentication.RecoveryConfig{
 		Mode:           authentication.RecoveryConfigured,
@@ -378,7 +383,12 @@ func (r *Runner) dispatchInitialPrompt(
 	dispatchDone chan struct{},
 	promptText string,
 ) {
-	prompt := r.withCollaborationPromptSlice(run, acputil.BuildPromptParts(promptText+session.AgentCommunicationPromptFooter(session.ParentCommunicationActor()), nil))
+	input := agent.ChildInputRequest{Source: session.ParentCommunicationActor(), Input: promptText, ContentParts: run.spawn.ContentParts}
+	if run.spawn.Role == session.ParticipantRoleSidecar {
+		input.Source = session.ActorRef{Kind: session.ActorKindUser, ID: "user", Name: "user"}
+		input.UserInput = true
+	}
+	prompt := r.withCollaborationPromptSlice(run, buildAgentCommunicationPrompt(input))
 	responseCtx, cancelResponse := context.WithCancel(producerCtx)
 	prepared, err := run.client.PreparePromptParts(run.anchor.SessionID, prompt, nil)
 	fence := r.newPromptAuthRetryFence(run.spawn.SessionRef, slot, dispatchDone, cancelResponse)
@@ -395,7 +405,7 @@ func (r *Runner) dispatchInitialPrompt(
 		run.mu.Lock()
 		previousInputActor := run.inputActor
 		previousSuppressInputEcho := run.suppressInputEcho
-		run.inputActor = session.ParentCommunicationActor()
+		run.inputActor = input.Source
 		run.suppressInputEcho = true
 		run.mu.Unlock()
 		restoreInputEcho := func() {
@@ -415,10 +425,7 @@ func (r *Runner) dispatchInitialPrompt(
 			_ = run.client.Close(context.Background())
 		})
 		if err == nil {
-			acceptedInput := r.acceptedChildInputOutput(slot, run, agent.ChildInputRequest{
-				Source: session.ParentCommunicationActor(),
-				Input:  promptText,
-			}, strings.TrimSpace(run.spawn.ActivityID), "")
+			acceptedInput := r.acceptedChildInputOutput(slot, run, input, strings.TrimSpace(run.spawn.ActivityID), "")
 			if acceptedInput != nil {
 				slot.publishRunOutputLocked(run, *acceptedInput)
 			}

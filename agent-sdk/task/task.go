@@ -9,6 +9,7 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/jsonvalue"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
@@ -116,9 +117,10 @@ type CommandStartRequest struct {
 // participant relationship selected by Control. Source is audit provenance and
 // is never interpreted as authorization or role policy.
 type SubagentStartRequest struct {
-	SpawnID string `json:"spawn_id,omitempty"`
-	Agent   string `json:"agent,omitempty"`
-	Prompt  string `json:"prompt,omitempty"`
+	SpawnID      string              `json:"spawn_id,omitempty"`
+	Agent        string              `json:"agent,omitempty"`
+	Prompt       string              `json:"prompt,omitempty"`
+	ContentParts []model.ContentPart `json:"content_parts,omitempty"`
 	// Handle is an optional Session-unique public identity. Empty lets Runtime
 	// assign one. A supplied value is canonicalized and must not collide with
 	// another Task in the same Session.

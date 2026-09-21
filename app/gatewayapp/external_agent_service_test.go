@@ -9,7 +9,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/caelis-labs/caelis/app/gatewayapp/internal/agentregistry"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
+	"github.com/caelis-labs/caelis/internal/controlassembly"
 )
 
 func TestResolveACPConnectionLauncherUsesInstalledNativeACPCommand(t *testing.T) {
@@ -88,8 +90,34 @@ func TestResolveACPConnectionLauncherRequiresNativeCommandOnPATH(t *testing.T) {
 	connection, err := (&controlCommandBackend{}).resolveACPConnectionLauncher(context.Background(), controlagents.ConnectRequest{
 		AdapterID: "grok", Launcher: controlagents.LauncherChoiceInstalled,
 	})
-	if err == nil || !strings.Contains(err.Error(), `"grok" is available on PATH`) || connection.Launcher.Command != "" {
+	if err == nil || !strings.Contains(err.Error(), "grok is not installed") || connection.Launcher.Command != "" {
 		t.Fatalf("resolveACPConnectionLauncher() = %#v, %v", connection, err)
+	}
+}
+
+func TestAntigravityRequiresStandaloneRuntime(t *testing.T) {
+	binDir := t.TempDir()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("LOCALAPPDATA", t.TempDir())
+	writeExternalAgentExecutable(t, binDir, "agy")
+	t.Setenv("PATH", binDir)
+	req := controlagents.ConnectRequest{AdapterID: "antigravity", Launcher: controlagents.LauncherChoiceInstalled}
+	connection, err := (&controlCommandBackend{}).resolveACPConnectionLauncher(t.Context(), req)
+	if err == nil || connection.Launcher.Command != "" {
+		t.Fatalf("agy CLI must not satisfy ACP runtime discovery: %#v, %v", connection, err)
+	}
+	for _, want := range []string{"not installed", "Open /connect"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("missing %q in installation help: %v", want, err)
+		}
+	}
+	preset, _ := agentregistry.LookupInstalledAgent("antigravity")
+	if err := os.WriteFile(filepath.Join(binDir, preset.Command), []byte("runtime fixture\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	connection, err = (&controlCommandBackend{}).resolveACPConnectionLauncher(t.Context(), req)
+	if err != nil || connection.ID != "antigravity" || connection.Launcher.Kind != controlagents.LaunchKindExecutable || connection.Launcher.Command != preset.Command || !reflect.DeepEqual(connection.Launcher.Args, preset.Args) {
+		t.Fatalf("retry after installation = %#v, %v", connection, err)
 	}
 }
 
@@ -174,7 +202,7 @@ func storedACPAgentInfo(values []ACPAgentInfo, name string) (ACPAgentInfo, bool)
 
 func writeExternalAgentExecutable(t *testing.T, dir string, name string) string {
 	t.Helper()
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == "windows" && !strings.EqualFold(filepath.Ext(name), ".exe") {
 		name += ".exe"
 	}
 	path := filepath.Join(dir, name)
@@ -186,4 +214,65 @@ func writeExternalAgentExecutable(t *testing.T, dir string, name string) string 
 		t.Fatalf("Abs(%s) error = %v", path, err)
 	}
 	return abs
+}
+
+func TestAntigravityReusesUserChosenInstallationDirectory(t *testing.T) {
+	preset, _ := agentregistry.LookupInstalledAgent("antigravity")
+	for _, test := range []struct {
+		name, command string
+		wantInstalled bool
+	}{
+		{"exact", preset.Command, true},
+		{"uppercase", strings.ToUpper(preset.Command), runtime.GOOS == "windows"},
+		{"mixed case", strings.Replace(preset.Command, "agy_acp_server", "Agy_Acp_Server", 1), runtime.GOOS == "windows"},
+		{"different executable", "other_" + preset.Command, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			testAntigravityInstallationDirectory(t, test.command, test.wantInstalled)
+		})
+	}
+}
+
+func testAntigravityInstallationDirectory(t *testing.T, filename string, wantInstalled bool) {
+	t.Helper()
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("LOCALAPPDATA", t.TempDir())
+	t.Setenv("PATH", t.TempDir())
+	stack := newStackForToolTestWithoutProfiles(t, controlassembly.ResolvedAssembly{})
+	preset, _ := agentregistry.LookupInstalledAgent("antigravity")
+	dir := t.TempDir()
+	command := writeExternalAgentExecutable(t, dir, filename)
+	doc, err := stack.composition.authorities.store.LoadContext(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc.ExternalAgents.Connections = append(doc.ExternalAgents.Connections, controlagents.Connection{
+		ID: "antigravity", Launcher: controlagents.Launcher{Kind: controlagents.LaunchKindExecutable, Command: command, Args: preset.Args},
+	})
+	if err := stack.composition.authorities.store.Save(doc); err != nil {
+		t.Fatal(err)
+	}
+	read := stack.composition.Agents()
+	if !wantInstalled {
+		if got, err := read.InstalledCommand(t.Context(), "antigravity"); err != nil || got != "" {
+			t.Fatalf("unmatched executable detected as installed: %s, %v", got, err)
+		}
+		if _, err := stack.commandBackend.resolveACPConnectionLauncher(t.Context(), controlagents.ConnectRequest{AdapterID: "antigravity", Launcher: controlagents.LauncherChoiceInstalled}); err == nil {
+			t.Fatal("reconnection accepted an unmatched executable")
+		}
+		return
+	}
+	if got, err := read.InstalledCommand(t.Context(), "antigravity"); err != nil || got != command {
+		t.Fatalf("setup lost chosen directory: %s, %v", got, err)
+	}
+	connection, err := stack.commandBackend.resolveACPConnectionLauncher(t.Context(), controlagents.ConnectRequest{AdapterID: "antigravity", Launcher: controlagents.LauncherChoiceInstalled})
+	if err != nil || connection.Launcher.Command != command {
+		t.Fatalf("reconnection lost chosen directory: %#v, %v", connection, err)
+	}
+	if err := os.Remove(command); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := read.InstalledCommand(t.Context(), "antigravity"); err != nil || got != "" {
+		t.Fatalf("removed runtime is still installed: %s, %v", got, err)
+	}
 }

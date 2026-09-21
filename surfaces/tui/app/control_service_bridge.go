@@ -463,6 +463,7 @@ func ConfigFromControlService(service ControlServices, sender *ProgramSender, ba
 					NoAuth:                c.NoAuth,
 					ModelConfigID:         c.ModelConfigID,
 					ModelSelection:        c.ModelSelection,
+					RuntimeSetup:          c.RuntimeSetup,
 					ModelMetadataComplete: c.ModelMetadataComplete,
 					ModelImageInputKnown:  c.ModelImageInputKnown,
 				}
@@ -640,6 +641,25 @@ func executeLineViaControlServiceWithContextResult(ctx context.Context, service 
 
 func executeControlPromptResult(ctx context.Context, service ControlServices, sender *ProgramSender, result controlprompt.Result) executeLineResult {
 	send := sender.sendFunc()
+	if child := result.ParticipantTask; child != nil && child.TaskID != "" && sender != nil {
+		selected, _ := sender.sessionView()
+		if selected == "" {
+			snapshot, err := service.ResumeSession(ctx, child.SessionID)
+			if err != nil {
+				return executeLineResult{completion: TaskResultMsg{Err: err}}
+			}
+			if snapshot.Reconnect == nil {
+				return executeLineResult{completion: TaskResultMsg{Err: fmt.Errorf("participant Session observation is unavailable")}}
+			}
+			observeSelectedSession(ctx, sender, snapshot.Reconnect, true)
+		}
+		_, generation := sender.sessionView()
+		sender.sessionSend(generation)(participantTaskFocusMsg{
+			sessionID: child.SessionID,
+			taskID:    child.TaskID,
+			receipt:   child.InputReceipt,
+		})
+	}
 	if result.Reconnect != nil {
 		if sender != nil {
 			observed := observeSelectedSession(ctx, sender, result.Reconnect, false)
@@ -753,7 +773,8 @@ func profileCommandDetailsWithContext(ctx context.Context, service controlprompt
 		}
 	}
 	if status, err := service.AgentStatus(ctx); err == nil {
-		for _, run := range tuiDirectAgentRuns(status) {
+		runs := tuiDirectAgentRuns(status)
+		for _, run := range runs {
 			if !run.Addressable {
 				continue
 			}
@@ -762,6 +783,9 @@ func profileCommandDetailsWithContext(ctx context.Context, service controlprompt
 				continue
 			}
 			details[run.Name] = fmt.Sprintf("Continue /%s as %s", agent, handle)
+			if _, configured := details[handle]; !configured && !controlprompt.IsKnown(handle) && controlagents.RunNameAllowed(runs, handle) {
+				details[handle] = details[run.Name]
+			}
 		}
 	}
 	if len(details) == 0 {

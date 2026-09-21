@@ -2,6 +2,7 @@ package appserveradapter
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -123,6 +124,7 @@ func (a *SessionClientAdapter) prepareACPConnectionLocked(ctx context.Context, r
 				AdapterID: request.AdapterID, Launcher: request.Launcher,
 				CommandLine: request.CommandLine, ModelID: request.ModelID,
 				CWD: request.CWD, ParentRef: parentRef,
+				Install: request.Install,
 			},
 		})
 		preparation, err = a.observeCommittedACPPreparation(
@@ -196,8 +198,9 @@ func selectACPPreparationAuthentication(ctx context.Context, preparation control
 
 func acpPreparationCacheKey(request controlagents.ConnectRequest) string {
 	request = controlagents.NormalizeConnectRequest(request)
+	install, _ := json.Marshal(request.Install)
 	return strings.Join([]string{
-		request.AdapterID, string(request.Launcher), request.CommandLine, request.CWD, request.ModelID,
+		request.AdapterID, string(request.Launcher), request.CommandLine, request.CWD, request.ModelID, string(install),
 	}, "\x00")
 }
 

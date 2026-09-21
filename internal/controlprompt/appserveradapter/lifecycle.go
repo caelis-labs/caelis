@@ -93,7 +93,7 @@ func (a *SessionClientAdapter) ResumeSession(ctx context.Context, sessionID stri
 	if strings.TrimSpace(result.State.SessionID) != strings.TrimSpace(sessionID) {
 		return controlprompt.SessionSnapshot{}, errors.New("app/gatewayapp/controladapter: reconnect state belongs to another Session")
 	}
-	registerActive := result.State.Run.Active || result.State.Approval.Active != nil
+	registerActive := result.State.Run.Active
 	if registerActive {
 		target := reconnect.target()
 		if target.HandleID == "" || target.RunID == "" || target.TurnID == "" {
@@ -236,13 +236,23 @@ func (r *clientSessionReconnect) SubmitApproval(ctx context.Context, decision co
 		return errors.New("app/gatewayapp/controladapter: reconnect client is unavailable")
 	}
 	state := r.State()
-	base, err := r.writeBase(ctx, "reconnect-approval", state)
+	current, err := r.client.InspectSession(ctx, appserver.StateRequest{SessionID: state.SessionID})
 	if err != nil {
 		return err
 	}
+	target := reconnectTarget(state)
+	if active := current.Approval.Active; active != nil && active.RequestID == decision.RequestID && active.Target.HandleID != "" {
+		target = active.Target
+	}
+	epoch, err := r.observedControllerEpoch(state, current)
+	if err != nil {
+		return err
+	}
+	base := appserver.WriteBase{OperationID: "reconnect-approval-" + uuid.NewString(), SessionID: state.SessionID,
+		ExpectedRevision: &current.Revision, ExpectedControllerEpoch: epoch}
 	_, err = r.client.ResolveApproval(ctx, appserver.ResolveApprovalRequest{
 		WriteBase:         base,
-		Target:            reconnectTarget(state),
+		Target:            target,
 		ApprovalRequestID: string(decision.RequestID), Outcome: strings.TrimSpace(decision.Outcome),
 		OptionID: strings.TrimSpace(decision.OptionID), Approved: decision.Approved,
 		Reason: strings.TrimSpace(decision.Reason), ReviewText: strings.TrimSpace(decision.ReviewText),

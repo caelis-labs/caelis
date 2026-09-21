@@ -36,11 +36,11 @@ func (r router) dispatchSlash(ctx context.Context, cmd string, args string, args
 
 func (r router) dispatchReview(ctx context.Context, args string, argsStart int, fullText string, attachments []Attachment) (Result, error) {
 	promptAttachments := AttachmentsForPromptRange(attachments, argsStart, len([]rune(strings.TrimSpace(fullText))))
-	turn, err := r.service.StartReview(ctx, strings.TrimSpace(args), promptAttachments)
+	result, err := r.service.StartReview(ctx, strings.TrimSpace(args), promptAttachments)
 	if err != nil {
 		return Result{}, FriendlyCommandError("review", err)
 	}
-	return Result{Handled: true, Turn: turn}, nil
+	return Result{Handled: true, ParticipantTask: &result, RefreshCommands: true, SuppressTurnDivider: true}, nil
 }
 
 func (r router) dispatchNew(ctx context.Context) (Result, error) {
@@ -185,18 +185,18 @@ func (r router) dispatchAgentRun(ctx context.Context, command string, promptText
 		}
 		return r.noticeResult(fmt.Sprintf("Unknown command: /%s", command)), nil
 	}
-	if r.isDirectAgentRun(ctx, command) {
+	if !r.isConfiguredDirectHandle(ctx, command) && r.isDirectAgentRun(ctx, command) {
 		turn, err := r.service.ContinueAgentRun(ctx, command, promptText, attachments)
 		if err != nil {
 			return Result{}, FriendlyCommandError("/"+command, err)
 		}
-		return Result{Handled: true, Turn: turn}, nil
+		return Result{Handled: true, Turn: turn.Turn, ParticipantTask: &turn, SuppressTurnDivider: turn.TaskID != ""}, nil
 	}
 	turn, err := r.service.StartAgentRun(ctx, command, promptText, attachments)
 	if err != nil {
 		return Result{}, FriendlyCommandError("/"+command, err)
 	}
-	return Result{Handled: true, Turn: turn, RefreshCommands: true}, nil
+	return Result{Handled: true, Turn: turn.Turn, ParticipantTask: &turn, RefreshCommands: true, SuppressTurnDivider: true}, nil
 }
 
 func parseModelSelectionArgs(args string) (alias string, reasoning string, fastMode bool, ok bool) {

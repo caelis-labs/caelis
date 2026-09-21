@@ -385,6 +385,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case subagentDirectoryOpenedMsg:
 		return m, m.handleSubagentDirectoryOpened(typed)
+	case participantTaskFocusMsg:
+		return m, m.focusParticipantTask(typed)
 
 	case subagentDirectorySnapshotMsg:
 		return m, m.handleSubagentDirectorySnapshot(typed)
@@ -397,6 +399,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.WindowSizeMsg:
 		m.cancelPaneResize()
+		if s := m.wizardOverlay; s != nil {
+			s.pressed, s.hovered = "", ""
+			s.text.selecting = false
+			m.cancelSelectionAutoScroll()
+		}
 		widthChanged := typed.Width != m.width
 		heightChanged := typed.Height != m.height
 		if widthChanged {

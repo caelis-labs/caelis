@@ -19,16 +19,18 @@ import (
 // contains no Runtime or Stack handle; every semantic operation is routed
 // through a focused typed client.
 type SessionClientAdapter struct {
-	turns            *appserver.SessionTurnClient
-	participants     *appserver.ParticipantTurnClient
-	sessionClient    appserver.SessionClient
-	statusClient     appserver.StatusClient
-	configClient     appserver.ConfigurationClient
-	agentClient      appserver.AgentClient
-	completionClient appserver.CompletionClient
-	pluginClient     appserver.PluginClient
-	surface          string
-	preferredID      string
+	turns             *appserver.SessionTurnClient
+	participants      *appserver.ParticipantTurnClient
+	participantClient appserver.ParticipantClient
+	subagentInputs    appserver.SubagentInputClient
+	sessionClient     appserver.SessionClient
+	statusClient      appserver.StatusClient
+	configClient      appserver.ConfigurationClient
+	agentClient       appserver.AgentClient
+	completionClient  appserver.CompletionClient
+	pluginClient      appserver.PluginClient
+	surface           string
+	preferredID       string
 	// requireExistingSession forbids implicit Session creation. A surface that
 	// must never allocate an ordinary workspace Session (the Bot TUI) sets it so
 	// work-bearing submissions fail closed until an addressable Session exists.
@@ -67,6 +69,7 @@ type AppServerAdapterConfig struct {
 	Surface            string
 	Sessions           appserver.SessionClient
 	Participants       appserver.ParticipantClient
+	SubagentInputs     appserver.SubagentInputClient
 	Status             appserver.StatusClient
 	Configuration      appserver.ConfigurationClient
 	Agents             appserver.AgentClient
@@ -106,6 +109,7 @@ func NewAppServerAdapter(config AppServerAdapterConfig) (*SessionClientAdapter, 
 	}
 	return &SessionClientAdapter{
 		turns: turns, participants: participantTurns, sessionClient: config.Sessions,
+		participantClient: config.Participants, subagentInputs: config.SubagentInputs,
 		statusClient: config.Status, configClient: config.Configuration,
 		agentClient: config.Agents, completionClient: config.Completion, pluginClient: config.Plugins,
 		surface:     strings.TrimSpace(config.Surface),

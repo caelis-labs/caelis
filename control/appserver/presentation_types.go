@@ -1,6 +1,10 @@
 package appserver
 
-import "time"
+import (
+	"time"
+
+	"github.com/caelis-labs/caelis/control/agents"
+)
 
 // ResumeCandidate is the product-owned Session list projection rendered by
 // presentation clients.
@@ -37,6 +41,8 @@ type SlashArgCandidate struct {
 	// other non-provider candidates.
 	ModelConfigID  string          `json:"model_config_id,omitempty"`
 	ModelSelection *ModelSelection `json:"model_selection,omitempty"`
+	// RuntimeSetup identifies an ACP installation or manual-setup action.
+	RuntimeSetup *agents.RuntimeSetup `json:"runtime_setup,omitempty"`
 }
 
 // ModelSelection projects the configured capabilities and initial selection of

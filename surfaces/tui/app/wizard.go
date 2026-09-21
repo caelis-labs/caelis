@@ -297,6 +297,9 @@ func (m *Model) wizardSubmit() tea.Cmd {
 
 // clearWizard resets all wizard and slash-arg state.
 func (m *Model) clearWizard() {
+	if m.wizardOverlay != nil && m.wizardOverlay.text.selecting {
+		m.cancelSelectionAutoScroll()
+	}
 	if s := m.wizardOverlay; s != nil && s.bot != nil && s.bot.cancel != nil {
 		s.bot.cancel()
 	}

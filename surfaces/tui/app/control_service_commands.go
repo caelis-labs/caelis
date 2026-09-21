@@ -82,6 +82,7 @@ func slashConnectWithContext(ctx context.Context, service ControlServices, agent
 			AdapterID: payload.Agent, Launcher: payload.Launcher,
 			CommandLine: payload.CommandLine, ModelID: payload.Model,
 			ConfigValues: payload.ConfigValues,
+			Install:      payload.Install,
 		})
 		if err != nil {
 			return TaskResultMsg{Err: controlprompt.FriendlyCommandError("connect ACP agent", err)}

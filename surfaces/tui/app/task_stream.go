@@ -290,7 +290,7 @@ func (m *Model) startTaskStreamResolver(sessionID, callID, handle string, token 
 			var matched *taskstream.TaskDescriptor
 			for index := range result.Tasks {
 				descriptor := &result.Tasks[index]
-				if strings.TrimSpace(descriptor.ParentTool.ToolCallID) != callID {
+				if subagentDirectoryViewKey(*descriptor) != callID {
 					continue
 				}
 				if matched != nil && strings.TrimSpace(matched.TaskID) != strings.TrimSpace(descriptor.TaskID) {

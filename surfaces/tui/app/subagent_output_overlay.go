@@ -161,22 +161,28 @@ func (m *Model) openSubagentOutputOverlayView(callID string, view *subagentOutpu
 	m.showPalette = false
 	m.subagentOverlay = nil
 	m.subagentRosterPressed = false
-	newPane := view.pane == nil
-	if newPane {
-		view.pane = &subagentOutputOverlayState{callID: callID, followTail: true, selectStart: textSelectionPoint{line: -1, col: -1}, selectEnd: textSelectionPoint{line: -1, col: -1}}
-	}
+	m.ensureSubagentOutputPane(callID, view)
 	m.subagentOutputOverlay = view.pane
 	m.workspace.childFocused = true
 	m.workspace.lastCallID = callID
-	m.ensureSubagentEditor(view.pane)
-	if newPane {
-		m.restoreChildSessionDraft(view.pane)
-	}
 	m.resizeWorkspace()
 
 	view.prepareVisibleRender()
 	m.reconcileTaskStreamOwner(callID, view.taskHandle)
 	return true
+}
+
+// Receipt observation can create a retained pane before it becomes visible.
+// Initialize its editor and restore its draft through the same owner as opening.
+func (m *Model) ensureSubagentOutputPane(callID string, view *subagentOutputView) {
+	newPane := view.pane == nil
+	if newPane {
+		view.pane = &subagentOutputOverlayState{callID: callID, followTail: true, selectStart: textSelectionPoint{line: -1, col: -1}, selectEnd: textSelectionPoint{line: -1, col: -1}}
+	}
+	m.ensureSubagentEditor(view.pane)
+	if newPane {
+		m.restoreChildSessionDraft(view.pane)
+	}
 }
 
 func (m *Model) openSubagentOutputOverlayForMessage(blockID, messageCallID string) bool {

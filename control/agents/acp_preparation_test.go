@@ -177,3 +177,24 @@ func bytesOf(fill byte, count int) []byte {
 	}
 	return out
 }
+
+func TestACPPreparationBindsDetachedInstallationConfirmation(t *testing.T) {
+	in := ACPPrepareRequest{AdapterID: "antigravity", Launcher: LauncherChoiceInstalled,
+		Install: &RuntimeInstallation{Directory: " /tools/antigravity ", ArchiveURL: " https://dl.google.com/runtime.zip ", SHA256: strings.Repeat("A", 64)}}
+	normalized := NormalizeACPPrepareRequest(in)
+	in.Install.Directory = "/changed"
+	if normalized.Install.Directory != "/tools/antigravity" || normalized.Install.SHA256 != strings.Repeat("a", 64) {
+		t.Fatalf("confirmation not normalized/detached: %#v", normalized.Install)
+	}
+	p := sealACPPreparationForTest(t, ACPPreparation{Ref: acpPreparationRefForTest(9), State: PreparationStatePlanned,
+		PrincipalID: "owner", OperationID: "install", IntentDigest: strings.Repeat("a", 64), Request: normalized,
+		CreatedAt: time.Now().UTC(), ExpiresAt: time.Now().UTC().Add(time.Hour)})
+	tampered := NormalizeACPPreparation(p)
+	tampered.Request.Install.Directory = "/other"
+	if err := ValidateACPPreparation(tampered); err == nil {
+		t.Fatal("destination change did not invalidate preparation")
+	}
+	if err := ValidateACPPreparation(p); err != nil {
+		t.Fatalf("copy modified original preparation: %v", err)
+	}
+}

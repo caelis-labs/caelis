@@ -99,14 +99,14 @@ func (*interruptBridgeStub) ListAgents(context.Context, int) ([]controlprompt.Ag
 func (*interruptBridgeStub) AgentStatus(context.Context) (controlprompt.AgentStatusSnapshot, error) {
 	return controlprompt.AgentStatusSnapshot{}, nil
 }
-func (*interruptBridgeStub) StartAgentRun(context.Context, string, string, []controlprompt.Attachment) (controlprompt.Turn, error) {
-	return nil, nil
+func (*interruptBridgeStub) StartAgentRun(context.Context, string, string, []controlprompt.Attachment) (controlprompt.AgentRunResult, error) {
+	return controlprompt.AgentRunResult{}, nil
 }
-func (*interruptBridgeStub) ContinueAgentRun(context.Context, string, string, []controlprompt.Attachment) (controlprompt.Turn, error) {
-	return nil, nil
+func (*interruptBridgeStub) ContinueAgentRun(context.Context, string, string, []controlprompt.Attachment) (controlprompt.AgentRunResult, error) {
+	return controlprompt.AgentRunResult{}, nil
 }
-func (*interruptBridgeStub) StartReview(context.Context, string, []controlprompt.Attachment) (controlprompt.Turn, error) {
-	return nil, nil
+func (*interruptBridgeStub) StartReview(context.Context, string, []controlprompt.Attachment) (controlprompt.AgentRunResult, error) {
+	return controlprompt.AgentRunResult{}, nil
 }
 func (*interruptBridgeStub) CompleteFile(context.Context, string, int) ([]controlprompt.CompletionCandidate, error) {
 	return nil, nil

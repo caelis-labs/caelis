@@ -158,11 +158,12 @@ type CommandResource struct {
 }
 
 const (
-	CommandResourceACPPreparation = "acp_preparation"
-	CommandResourceModelProfile   = "model_profile"
-	CommandResourcePlugin         = "plugin"
-	CommandResourceMarketplace    = "plugin_marketplace"
-	CommandResourceBot            = "bot"
+	CommandResourceACPPreparation  = "acp_preparation"
+	CommandResourceModelProfile    = "model_profile"
+	CommandResourcePlugin          = "plugin"
+	CommandResourceMarketplace     = "plugin_marketplace"
+	CommandResourceBot             = "bot"
+	CommandResourceParticipantTask = "participant_task"
 )
 
 type CreateSessionRequest struct {
@@ -222,11 +223,14 @@ type AttachParticipantRequest struct {
 }
 
 // StartParticipantRequest atomically attaches one handle-selected participant
-// and starts its first Turn. Handle resolution occurs inside the addressed
+// and starts its first input, either in a foreground Turn or a background Task.
+// Handle resolution occurs inside the addressed
 // Session Runtime so an active workspace composition cannot observe later Host
 // configuration changes.
 type StartParticipantRequest struct {
 	WriteBase
+	// Background starts a durable child Task without claiming the main Turn.
+	Background     bool                    `json:"background,omitempty"`
 	Handle         string                  `json:"handle"`
 	Role           session.ParticipantRole `json:"role,omitempty"`
 	Label          string                  `json:"label,omitempty"`

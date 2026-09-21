@@ -98,6 +98,7 @@ func applyControlApprovalState(out *appserver.RuntimeState, coordinator *approva
 		origin := canonicalOriginFromApproval(active.request, ref, fallbackTurnID)
 		item := &appserver.ActiveApproval{
 			RequestID: active.id, Scope: eventstream.ScopeMain, ScopeID: ref.SessionID,
+			Target:     appserver.TurnTarget{HandleID: active.owner.HandleID(), RunID: active.owner.RunID(), TurnID: active.owner.TurnID()},
 			Permission: approval.ProtocolApprovalFromPayload(payload),
 		}
 		if origin != nil {

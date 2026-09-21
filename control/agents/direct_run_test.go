@@ -47,7 +47,7 @@ func TestCustomRoleDirectRunSourceUsesDistinctTypedPrefix(t *testing.T) {
 	}
 }
 
-func TestDirectRunFromParticipantRequiresACPSidecar(t *testing.T) {
+func TestDirectRunFromParticipantRequiresAddressableSidecar(t *testing.T) {
 	t.Parallel()
 
 	source := DirectRunSource(agentbinding.HandleOrbit)
@@ -55,10 +55,23 @@ func TestDirectRunFromParticipantRequiresACPSidecar(t *testing.T) {
 	if got.Name != "orbit(lina)" || got.Agent != "orbit" || !got.Addressable {
 		t.Fatalf("DirectRunFromParticipant() = %#v", got)
 	}
+	if !DirectRunFromParticipant("lina", "subagent", "sidecar", source).Addressable || DirectRunFromParticipant("lina", "subagent", "delegated", source).Addressable {
+		t.Fatal("Task sidecar and controller-delegated Task have incorrect direct addresses")
+	}
 	if DirectRunFromParticipant("lina", "model", "sidecar", source).Addressable {
 		t.Fatal("model participant was addressable as a direct ACP run")
 	}
 	if DirectRunFromParticipant("lina", "acp", "controller", source).Addressable {
 		t.Fatal("controller participant was addressable as a direct sidecar run")
+	}
+}
+
+func TestReviewerTaskRemainsAddressable(t *testing.T) {
+	run := DirectRunFromParticipant("@lina", "subagent", "sidecar", "slash_review")
+	if run.Name != "reviewer(lina)" || run.Agent != "reviewer" || !run.Addressable {
+		t.Fatalf("reviewer projection: %#v", run)
+	}
+	if !RunNameAllowed([]Run{run}, "lina") || !RunNameAllowed([]Run{run}, "reviewer(lina)") {
+		t.Fatal("reviewer handle is not addressable")
 	}
 }

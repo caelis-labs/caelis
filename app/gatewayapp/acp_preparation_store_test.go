@@ -303,3 +303,24 @@ func testReadyACPPreparation(planned controlagents.ACPPreparation) controlagents
 	}
 	return planned
 }
+
+func TestACPPreparationStoreRetainsInstallationConfirmationAfterRestart(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	store := newTestACPPreparationStore(t, dir)
+	planned := testPlannedACPPreparation("owner", "install-runtime", "e")
+	planned.Request.Launcher = controlagents.LauncherChoiceInstalled
+	planned.Request.Install = &controlagents.RuntimeInstallation{Directory: "/tools/antigravity", ArchiveURL: "https://dl.google.com/runtime.zip"}
+	created, err := store.CreatePlanned(t.Context(), planned)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	restarted := newTestACPPreparationStore(t, dir)
+	loaded, err := restarted.Get(t.Context(), created.Ref)
+	if err != nil || !reflect.DeepEqual(loaded, created) {
+		t.Fatalf("confirmation after restart: %#v, %v", loaded, err)
+	}
+}

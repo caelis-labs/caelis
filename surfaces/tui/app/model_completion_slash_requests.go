@@ -59,7 +59,7 @@ func (m *Model) requestSlashArgCompletion() tea.Cmd {
 	m.slashArgRequestPending = true
 	m.slashArgRequestCancel = cancel
 	complete := m.cfg.SlashArgComplete
-	return func() tea.Msg {
+	request := func() tea.Msg {
 		started := time.Now()
 		candidates, err := complete(requestCtx, command, query, 200)
 		return slashArgCompletionResultMsg{
@@ -68,6 +68,10 @@ func (m *Model) requestSlashArgCompletion() tea.Cmd {
 			err:        err, latency: time.Since(started),
 		}
 	}
+	if m.wizardOverlay != nil {
+		return tea.Batch(request, m.scheduleSpinnerTick())
+	}
+	return request
 }
 
 func (m *Model) handleSlashArgCompletionResultMsg(msg slashArgCompletionResultMsg) (tea.Model, tea.Cmd) {

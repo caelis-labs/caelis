@@ -3,12 +3,14 @@ package tuiapp
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/caelis-labs/caelis/control/appserver/taskstream"
+	"github.com/caelis-labs/caelis/control/collaboration"
 )
 
 type subagentDirectoryOpenedMsg struct {
@@ -34,13 +36,119 @@ type subagentDirectoryRetryMsg struct {
 	generation uint64
 }
 
+type participantTaskFocusMsg struct {
+	sessionID string
+	taskID    string
+	receipt   *collaboration.UserInputStatus
+}
+
+func (m *Model) focusParticipantTask(msg participantTaskFocusMsg) tea.Cmd {
+	if msg.sessionID != m.currentSessionID {
+		return nil
+	}
+	m.subagentFocusTaskID = msg.taskID
+	if msg.receipt != nil && msg.receipt.ID != "" {
+		m.enqueueSubagentPendingReceipt(msg.taskID, *msg.receipt)
+	}
+	pollCmd := m.openRequestedParticipantTask()
+	return tea.Batch(m.ensureSubagentDirectoryWatch(), pollCmd)
+}
+
+func (m *Model) openRequestedParticipantTask() tea.Cmd {
+	if m.subagentFocusTaskID == "" {
+		return nil
+	}
+	for key, task := range m.subagentRosterTasks {
+		if task.TaskID == m.subagentFocusTaskID && m.openSubagentOutputOverlayView(key, m.subagentOutputViews[key]) {
+			m.subagentFocusTaskID = ""
+			return m.attachPendingSubagentReceipts(task.TaskID, key)
+		}
+	}
+	return nil
+}
+
+func (m *Model) enqueueSubagentPendingReceipt(taskID string, receipt collaboration.UserInputStatus) {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" || strings.TrimSpace(receipt.ID) == "" {
+		return
+	}
+	if m.subagentPendingReceipts == nil {
+		m.subagentPendingReceipts = make(map[string][]collaboration.UserInputStatus)
+	}
+	list := m.subagentPendingReceipts[taskID]
+	for i, existing := range list {
+		if existing.ID == receipt.ID {
+			list[i] = receipt
+			m.subagentPendingReceipts[taskID] = list
+			return
+		}
+	}
+	m.subagentPendingReceipts[taskID] = append(list, receipt)
+}
+
+func (m *Model) attachPendingSubagentReceipts(taskID, callID string) tea.Cmd {
+	if m == nil || m.subagentPendingReceipts == nil {
+		return nil
+	}
+	pending, ok := m.subagentPendingReceipts[taskID]
+	if !ok || len(pending) == 0 {
+		return nil
+	}
+
+	view := m.subagentOutputViews[callID]
+	if view == nil || view.pane == nil {
+		return nil
+	}
+	delete(m.subagentPendingReceipts, taskID)
+
+	state := view.pane
+	needsPoll := false
+	for _, receipt := range pending {
+		state.inputStatus = paneReceiptLabel(receipt)
+		if receipt.State == "queued" || receipt.State == "sending" {
+			if !slices.Contains(state.receipts, receipt.ID) {
+				state.receipts = append(state.receipts, receipt.ID)
+				needsPoll = true
+			}
+		} else {
+			state.receipts = removePaneReceipt(state.receipts, receipt.ID)
+		}
+	}
+	if needsPoll {
+		return m.schedulePaneInputPoll(m.currentSessionID, callID, false)
+	}
+	return nil
+}
+
+func (m *Model) drainPendingSubagentReceipts() tea.Cmd {
+	if m == nil || len(m.subagentPendingReceipts) == 0 {
+		return nil
+	}
+	var batch []tea.Cmd
+	for callID, descriptor := range m.subagentRosterTasks {
+		taskID := descriptor.TaskID
+		if taskID == "" {
+			continue
+		}
+		if len(m.subagentPendingReceipts[taskID]) == 0 {
+			continue
+		}
+		view := m.ensureSubagentOutputView(callID)
+		m.ensureSubagentOutputPane(callID, view)
+		if cmd := m.attachPendingSubagentReceipts(taskID, callID); cmd != nil {
+			batch = append(batch, cmd)
+		}
+	}
+	return tea.Batch(batch...)
+}
+
 // ensureSubagentDirectoryWatch attaches one lightweight Session status
 // observer for this TUI. It never subscribes to child content or advances Task
 // lifecycle; visible overlays reconcile their own independent content demand
 // from the resulting snapshots.
 func (m *Model) ensureSubagentDirectoryWatch() tea.Cmd {
 	if m == nil || m.cfg.TaskStreams == nil || m.cfg.ProgramSender == nil ||
-		m.subagentRosterCount() == 0 || m.subagentDirectoryStarting ||
+		m.subagentDirectoryStarting ||
 		m.subagentDirectorySubscription != nil || m.subagentDirectoryRetryScheduled {
 		return nil
 	}
@@ -149,13 +257,31 @@ func (m *Model) handleSubagentDirectorySnapshot(msg subagentDirectorySnapshotMsg
 	m.subagentDirectoryRevision = msg.snapshot.Revision
 	m.subagentDirectoryRetries = 0
 	m.subagentRosterTasks = subagentRosterTasksByCallID(msg.snapshot.Tasks)
-	for callID, view := range m.subagentOutputViews {
-		if view == nil {
+	m.reconcileSubagentDirectoryViews()
+	pollCmd := m.openRequestedParticipantTask()
+	drainCmd := m.drainPendingSubagentReceipts()
+	m.reconcileSubagentOutputTaskStreams()
+	return tea.Batch(m.requestSubagentOutputRender(), m.resumeRunningAnimationIfNeeded(), pollCmd, drainCmd)
+}
+
+// The Control directory discovers children independently of the controller's
+// tool names or transcript window. Creating a shell never reads child content.
+func (m *Model) reconcileSubagentDirectoryViews() {
+	for callID, descriptor := range m.subagentRosterTasks {
+		if descriptor.SessionID != "" && descriptor.SessionID != m.currentSessionID {
 			continue
 		}
-		descriptor, ok := m.subagentRosterTasks[callID]
-		if !ok {
-			continue
+		view := m.ensureSubagentOutputView(callID)
+		view.taskHandle = normalizeTaskStreamHandle(descriptor.Handle)
+		if view.title == "" {
+			view.title = descriptor.Title
+		}
+		if view.actor == "" {
+			view.actor = view.taskHandle
+			if agent := strings.TrimSpace(descriptor.AgentHandle); agent != "" {
+				view.actor += "[" + agent + "]"
+			}
+			view.block.Actor = participantActorDisplayName(view.actor)
 		}
 		activityID := subagentRosterDescriptorActivityID(descriptor)
 		newActivity := subagentRosterDescriptorIsNewActivity(descriptor, view)
@@ -170,10 +296,6 @@ func (m *Model) handleSubagentDirectorySnapshot(msg subagentDirectorySnapshotMsg
 		}
 		view.touch(true)
 	}
-	// Directory metadata never mutates transcript content. It only starts or
-	// stops the content subscription owned by an already-visible overlay.
-	m.reconcileSubagentOutputTaskStreams()
-	return tea.Batch(m.requestSubagentOutputRender(), m.resumeRunningAnimationIfNeeded())
 }
 
 func (m *Model) handleSubagentDirectoryClosed(msg subagentDirectoryClosedMsg) tea.Cmd {
@@ -195,7 +317,7 @@ func (m *Model) handleSubagentDirectoryClosed(msg subagentDirectoryClosedMsg) te
 	m.subagentDirectoryRevision = 0
 	m.subagentDirectoryGeneration++
 	retryGeneration := m.subagentDirectoryGeneration
-	if m.subagentRosterCount() == 0 || errors.Is(msg.err, context.Canceled) {
+	if errors.Is(msg.err, context.Canceled) {
 		return nil
 	}
 	if msg.err != nil && !taskStreamRetryable(msg.err) {
@@ -238,6 +360,8 @@ func (m *Model) resetSubagentDirectoryWatch() {
 	m.subagentDirectoryRetries = 0
 	m.subagentDirectoryRevision = 0
 	m.subagentRosterTasks = map[string]taskstream.TaskDescriptor{}
+	m.subagentFocusTaskID = ""
+	m.subagentPendingReceipts = nil
 }
 
 func (m *Model) subagentRosterViewState(callID string, view *subagentOutputView) (subagentOutputStatus, time.Time, time.Time) {
@@ -293,7 +417,7 @@ func subagentRosterTasksByCallID(tasks []taskstream.TaskDescriptor) map[string]t
 	byCallID := make(map[string]taskstream.TaskDescriptor)
 	ambiguous := make(map[string]bool)
 	for _, descriptor := range tasks {
-		callID := strings.TrimSpace(descriptor.ParentTool.ToolCallID)
+		callID := subagentDirectoryViewKey(descriptor)
 		if callID == "" || strings.TrimSpace(string(descriptor.Kind)) != "subagent" || ambiguous[callID] {
 			continue
 		}
@@ -306,4 +430,14 @@ func subagentRosterTasksByCallID(tasks []taskstream.TaskDescriptor) map[string]t
 		byCallID[callID] = descriptor
 	}
 	return byCallID
+}
+
+func subagentDirectoryViewKey(descriptor taskstream.TaskDescriptor) string {
+	if callID := strings.TrimSpace(descriptor.ParentTool.ToolCallID); callID != "" {
+		return callID
+	}
+	if taskID := strings.TrimSpace(descriptor.TaskID); taskID != "" {
+		return "task:" + taskID
+	}
+	return ""
 }

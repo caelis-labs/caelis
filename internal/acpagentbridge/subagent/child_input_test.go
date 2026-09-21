@@ -249,6 +249,47 @@ func TestRejectedChildSteeringReleasesOriginalActivityUpdates(t *testing.T) {
 	}
 }
 
+func TestFinishingChildSteeringRetainsInputForNextPrompt(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	runner := childInputTestRunner(t, "prompt-required")
+	events := make(chan childInputTestEvent, 24)
+	spawn := childInputSpawnContext(t, "task-finishing-input", events)
+	anchor, _, err := runner.Spawn(ctx, spawn, delegation.Request{Agent: "helper", Prompt: "initial"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	consumeSpawnInitialInput(t, ctx, events, spawn.ActivityID, "initial")
+	run, err := runner.lookup(anchor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := agent.ChildInputRequest{Target: run.slot.target, UserInput: true, Source: session.ActorRef{Kind: session.ActorKindUser, ID: "owner"}, Input: "recheck the fix"}
+	if _, err := submitChildInputTest(runner, events, ctx, req); !errors.Is(err, agent.ErrChildInputNotReady) {
+		t.Fatalf("finishing input = %v, want proven no-injection for mailbox deferral", err)
+	}
+	frames, _ := waitChildActivityFramesUntilTerminalFor(t, ctx, events, spawn.ActivityID)
+	for _, frame := range frames {
+		if frame.Event != nil && frame.Event.Type == session.EventTypeUser && strings.Contains(session.EventText(frame.Event), "recheck the fix") {
+			t.Fatal("deferred input appeared as accepted")
+		}
+	}
+	run.mu.RLock()
+	done := run.done
+	run.mu.RUnlock()
+	select {
+	case <-done:
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	result, err := submitChildInputTest(runner, events, ctx, req)
+	if err != nil || !result.StartedActivity {
+		t.Fatalf("idle followup = %#v %v", result, err)
+	}
+	waitChildActivityTerminalFor(t, ctx, events, result.ActivityID)
+}
+
 func TestIdleChildInputStartsPromptOnExistingSession(t *testing.T) {
 	t.Parallel()
 
@@ -1210,7 +1251,7 @@ func TestChildInputHelperProcess(t *testing.T) {
 				}
 				return client.PromptResponse{StopReason: string(acpsdk.StopReasonEndTurn)}, nil
 			}
-			if (mode == "active" || mode == "active-echo" || mode == "unknown" || mode == "image" || mode == "failed" || mode == "failed-echo" || mode == "malformed-steering") && count == 1 || mode == "second-active" && count == 2 {
+			if (mode == "active" || mode == "active-echo" || mode == "unknown" || mode == "image" || mode == "failed" || mode == "failed-echo" || mode == "malformed-steering" || mode == "prompt-required") && count == 1 || mode == "second-active" && count == 2 {
 				select {
 				case <-steered:
 				case <-time.After(4 * time.Second):
@@ -1231,6 +1272,21 @@ func TestChildInputHelperProcess(t *testing.T) {
 			}
 			return client.PromptResponse{StopReason: string(acpsdk.StopReasonEndTurn)}, nil
 		case client.MethodSessionSteering:
+			if mode == "prompt-required" {
+				var request client.SessionSteeringRequest
+				var options client.SessionSteeringOptions
+				if err := json.Unmarshal(message.Params, &request); err != nil {
+					return nil, &jsonrpc.RPCError{Code: -32602, Message: err.Error()}
+				}
+				if err := json.Unmarshal(request.Meta[client.SessionSteeringMetaKey], &options); err != nil {
+					return nil, &jsonrpc.RPCError{Code: -32602, Message: err.Error()}
+				}
+				if options.IdleBehavior != client.SessionSteeringIdlePromptRequired {
+					return client.SessionSteeringResponse{Outcome: client.SessionSteeringFailed}, nil
+				}
+				steerOnce.Do(func() { close(steered) })
+				return client.SessionSteeringResponse{Outcome: client.SessionSteeringPromptRequired, Reason: "noRunningTurn"}, nil
+			}
 			if strings.HasPrefix(mode, "auth-") {
 				if err := appendChildInputTestFile(os.Getenv("CAELIS_ACP_CHILD_INPUT_STEER_MARKER"), "steer\n"); err != nil {
 					return nil, &jsonrpc.RPCError{Code: -32000, Message: err.Error()}
