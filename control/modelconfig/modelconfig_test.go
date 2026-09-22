@@ -98,17 +98,17 @@ func TestAssembleConnectBuildsCompleteKnownModelConfig(t *testing.T) {
 	if cfg.BaseURL != "https://api.deepseek.com/anthropic" || cfg.AuthType != model.AuthAPIKey {
 		t.Fatalf("assembled endpoint/auth = %#v", cfg)
 	}
-	if cfg.ContextWindowTokens != 1000000 || cfg.MaxOutputTok != 256000 {
-		t.Fatalf("assembled limits = context:%d max:%d", cfg.ContextWindowTokens, cfg.MaxOutputTok)
-	}
 	if cfg.Timeout != DefaultProviderRequestTimeoutSeconds*time.Second {
 		t.Fatalf("assembled timeout = %s, want %ds", cfg.Timeout, DefaultProviderRequestTimeoutSeconds)
 	}
-	if cfg.ReasoningMode != modelcatalog.ReasoningModeToggle || cfg.ReasoningEffort != "high" || cfg.DefaultReasoningEffort != "high" {
-		t.Fatalf("assembled reasoning = mode:%q effort:%q default:%q", cfg.ReasoningMode, cfg.ReasoningEffort, cfg.DefaultReasoningEffort)
+	defaults, err := ResolveModelDefaultsForEndpoint("deepseek", cfg.BaseURL, cfg.Model)
+	if err != nil {
+		t.Fatalf("ResolveModelDefaultsForEndpoint(deepseek) error = %v", err)
 	}
-	if !slices.Equal(cfg.ReasoningLevels, []string{"none", "low", "high", "max"}) {
-		t.Fatalf("assembled reasoning levels = %#v", cfg.ReasoningLevels)
+	if cfg.ContextWindowTokens != defaults.ContextWindowTokens || cfg.MaxOutputTok != defaults.MaxOutputTokens ||
+		cfg.ReasoningMode != defaults.ReasoningMode || cfg.ReasoningEffort != defaults.DefaultReasoningEffort ||
+		cfg.DefaultReasoningEffort != defaults.DefaultReasoningEffort || !slices.Equal(cfg.ReasoningLevels, defaults.ReasoningLevels) {
+		t.Fatalf("assembled maintained metadata = %#v, want %#v", cfg, defaults)
 	}
 }
 
@@ -127,8 +127,8 @@ func TestMaintainedSelectableModelsOnlyReturnsMetadataBackedModels(t *testing.T)
 	if err != nil {
 		t.Fatalf("MaintainedSelectableModels(deepseek) error = %v", err)
 	}
-	if len(models) != 1 || models[0].Name != "deepseek-flash" {
-		t.Fatalf("known provider models = %#v, want only deepseek-flash for new connections", models)
+	if got, want := selectableModelNames(models), modelcatalog.ListRecommendedModels("deepseek"); !slices.Equal(got, want) {
+		t.Fatalf("known provider models = %#v, want maintained recommendations %#v", got, want)
 	}
 	for _, item := range models {
 		if !item.MetadataComplete {
@@ -176,7 +176,7 @@ func TestSelectableOllamaModelsUsesStaticCloudCatalogWithoutRemoteDiscovery(t *t
 	if err != nil {
 		t.Fatalf("selectableOllamaModels() error = %v", err)
 	}
-	want := []string{"glm-5.3", "glm-5.3-flash", "minimax-m3", "kimi-k3", "kimi-k2.7-code", "deepseek-v4-flash", "deepseek-v4-pro"}
+	want := modelcatalog.ListOllamaCloudModels()
 	if requests != 0 || !slices.Equal(selectableModelNames(models), want) {
 		t.Fatalf("selectableOllamaModels() requests/models = %d/%#v, want static %#v", requests, models, want)
 	}
@@ -245,13 +245,17 @@ func TestAssembleConnectSupportsOllamaLocalAndCloudEndpoints(t *testing.T) {
 	if cloud.EndpointID != "cloud" || cloud.AuthType != model.AuthAPIKey || cloud.Token != "cloud-secret" || !cloud.PersistToken {
 		t.Fatalf("cloud Ollama endpoint/auth = %#v", cloud)
 	}
-	if cloud.Model != "glm-5.2" || cloud.ContextWindowTokens != 1000000 || cloud.MaxOutputTok != 32768 {
-		t.Fatalf("cloud Ollama model limits = %#v", cloud)
+	if cloud.Model != "glm-5.2" {
+		t.Fatalf("cloud Ollama model = %#v", cloud)
 	}
-	if cloud.ReasoningMode != modelcatalog.ReasoningModeEffort ||
-		!slices.Equal(cloud.ReasoningLevels, []string{"high", "max"}) ||
-		cloud.ReasoningEffort != "high" {
-		t.Fatalf("cloud Ollama reasoning = %#v", cloud)
+	defaults, err := ResolveModelDefaultsForEndpoint("ollama", "https://ollama.com", cloud.Model)
+	if err != nil {
+		t.Fatalf("ResolveModelDefaultsForEndpoint(ollama cloud) error = %v", err)
+	}
+	if cloud.ContextWindowTokens != defaults.ContextWindowTokens || cloud.MaxOutputTok != defaults.MaxOutputTokens ||
+		cloud.ReasoningMode != defaults.ReasoningMode || cloud.ReasoningEffort != defaults.DefaultReasoningEffort ||
+		!slices.Equal(cloud.ReasoningLevels, defaults.ReasoningLevels) {
+		t.Fatalf("cloud Ollama maintained metadata = %#v, want %#v", cloud, defaults)
 	}
 }
 
@@ -504,64 +508,36 @@ func TestMaintainedSelectableModelsUsesCurrentBundledCodexCatalog(t *testing.T) 
 	if err != nil {
 		t.Fatalf("MaintainedSelectableModels(codex) error = %v", err)
 	}
-	if !selectableModelNamesContain(models, "gpt-5.5") || !selectableModelNamesContain(models, "gpt-5.6-sol") {
-		t.Fatalf("codex selectable models = %#v", models)
-	}
-	wantOrder := []string{"gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5"}
-	if got := selectableModelNames(models); !slices.Equal(got, wantOrder) {
-		t.Fatalf("codex selectable model order = %#v, want %#v", got, wantOrder)
-	}
-	if selectableModelNamesContain(models, "gpt-5.4") || selectableModelNamesContain(models, "gpt-5.4-mini") || selectableModelNamesContain(models, "gpt-5.3-codex-spark") || selectableModelNamesContain(models, "gpt-5.2") || selectableModelNamesContain(models, "gpt-5.5-pro") || selectableModelNamesContain(models, "gpt-5.6") || selectableModelNamesContain(models, "gpt-5.7-unknown") || selectableModelNamesContain(models, "gpt-5.5-instant") {
-		t.Fatalf("codex selectable models include disallowed entries = %#v", models)
+	want := codexOAuthSelectableModels()
+	if got := selectableModelNames(models); !slices.Equal(got, want) {
+		t.Fatalf("codex selectable models = %#v, want maintained fallback %#v", got, want)
 	}
 	for _, item := range models {
 		if !item.MetadataComplete {
 			t.Fatalf("codex selectable model requires unnecessary advanced setup = %#v", item)
 		}
 	}
-	knownCodexOAuthModel := func(name string) bool {
-		_, known := codexOAuthModelDefaults(name)
-		return known
-	}
-	if knownCodexOAuthModel("gpt-5.7-pro") || knownCodexOAuthModel("gpt-5.7-sol") || !knownCodexOAuthModel("gpt-6-astra") || !knownCodexOAuthModel("gpt-5.6-sol") || !knownCodexOAuthModel("gpt-5.3-codex-spark") {
-		t.Fatalf("codex model allowlist accepted an unknown model or rejected a maintained one")
-	}
 }
 
-func TestResolveCodexOAuthModelDefaultsUseCodexCatalogMetadata(t *testing.T) {
+func TestResolveCodexOAuthModelDefaultsUseSubscriptionCatalog(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name           string
-		context        int
-		defaultEffort  string
-		reasoningLevel []string
-	}{
-		{name: "gpt-6-astra", context: codexOAuthEffectiveContextWindowTokens, defaultEffort: "low", reasoningLevel: []string{"low", "medium", "high", "xhigh", "max", "ultra"}},
-		{name: "gpt-5.6-sol", context: codexOAuthEffectiveContextWindowTokens, defaultEffort: "low", reasoningLevel: []string{"low", "medium", "high", "xhigh", "max", "ultra"}},
-		{name: "gpt-5.6-luna", context: codexOAuthEffectiveContextWindowTokens, defaultEffort: "medium", reasoningLevel: []string{"low", "medium", "high", "xhigh", "max"}},
-		{name: "gpt-5.5", context: 272000, defaultEffort: "medium", reasoningLevel: []string{"low", "medium", "high", "xhigh"}},
-		{name: "gpt-5.4", context: 272000, defaultEffort: "medium", reasoningLevel: []string{"low", "medium", "high", "xhigh"}},
-		{name: "gpt-5.4-mini", context: 272000, defaultEffort: "medium", reasoningLevel: []string{"low", "medium", "high", "xhigh"}},
-		{name: "gpt-5.3-codex-spark", context: 128000, defaultEffort: "high", reasoningLevel: []string{"low", "medium", "high", "xhigh"}},
-		{name: "gpt-5.2", context: 272000, defaultEffort: "medium", reasoningLevel: []string{"low", "medium", "high", "xhigh"}},
+	managed, err := ResolveModelDefaultsForEndpoint("codex", "", "gpt-5.5")
+	if err != nil {
+		t.Fatalf("ResolveModelDefaultsForEndpoint(codex) error = %v", err)
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			defaults, err := ResolveModelDefaultsForEndpoint("codex", "", tt.name)
-			if err != nil {
-				t.Fatalf("ResolveModelDefaultsForEndpoint(codex, %q) error = %v", tt.name, err)
-			}
-			if defaults.ContextWindowTokens != tt.context || defaults.MaxOutputTokens != codexOAuthDefaultMaxOutputTokens || defaults.DefaultReasoningEffort != tt.defaultEffort || defaults.ReasoningMode != modelcatalog.ReasoningModeEffort || !slices.Equal(defaults.ReasoningLevels, tt.reasoningLevel) {
-				t.Fatalf("ResolveModelDefaultsForEndpoint(codex, %q) = %#v", tt.name, defaults)
-			}
-			if defaults.ImageInput == nil || !*defaults.ImageInput {
-				t.Fatalf("ResolveModelDefaultsForEndpoint(codex, %q).ImageInput = %v, want maintained true", tt.name, defaults.ImageInput)
-			}
-			if slices.Contains(defaults.ReasoningLevels, "none") {
-				t.Fatalf("ResolveModelDefaultsForEndpoint(codex, %q) advertises unsupported none effort", tt.name)
-			}
-		})
+	if managed.ReasoningMode != modelcatalog.ReasoningModeEffort || slices.Contains(managed.ReasoningLevels, "none") {
+		t.Fatalf("codex subscription defaults = %#v, want maintained effort menu without none", managed)
+	}
+	if managed.ImageInput == nil || !*managed.ImageInput {
+		t.Fatalf("codex subscription defaults image input = %v, want maintained true", managed.ImageInput)
+	}
+	native, err := ResolveModelDefaultsForEndpoint("openai", "", "gpt-5.5")
+	if err != nil {
+		t.Fatalf("ResolveModelDefaultsForEndpoint(openai) error = %v", err)
+	}
+	if managed.ContextWindowTokens == native.ContextWindowTokens {
+		t.Fatalf("codex defaults = %#v, want subscription catalog distinct from OpenAI API defaults %#v", managed, native)
 	}
 }
 

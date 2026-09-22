@@ -14,7 +14,24 @@ var builtinCatalog = []catalogEntry{
 	// ── xAI ───────────────────────────────────────────────────────────────
 	{
 		provider: "xai",
-		pattern:  "grok-4.6",
+		pattern:  "grok-4.7",
+		// https://docs.x.ai/developers/models/grok-4.7 does not publish an output cap.
+		caps: ModelCapabilities{
+			ContextWindowTokens:    500000,
+			DefaultMaxOutputTokens: 32768,
+			SupportsImages:         true,
+			SupportsToolCalls:      true,
+			SupportsReasoning:      true,
+			ReasoningMode:          ReasoningModeEffort,
+			ReasoningEfforts:       []string{"low", "medium", "high", "xhigh"},
+			DefaultReasoningEffort: "high",
+			SupportsJSONOutput:     true,
+		},
+	},
+	{
+		provider:                  "xai",
+		pattern:                   "grok-4.6",
+		hiddenFromRecommendations: true,
 		caps: ModelCapabilities{
 			ContextWindowTokens:    500000,
 			DefaultMaxOutputTokens: 32768,
@@ -47,8 +64,10 @@ var builtinCatalog = []catalogEntry{
 	{
 		provider: "deepseek",
 		pattern:  "deepseek-flash",
+		// https://api-docs.deepseek.com/api/create-chat-completion
 		caps: ModelCapabilities{
 			ContextWindowTokens:    1000000,
+			MaxOutputTokens:        393216,
 			DefaultMaxOutputTokens: 256000,
 			SupportsToolCalls:      true,
 			SupportsReasoning:      true,
@@ -938,10 +957,13 @@ var builtinCatalog = []catalogEntry{
 			SupportsImages:         true,
 		},
 	},
-	// ── Mimo ──────────────────────────────────────────────────────────────
+	// ── MiMo ──────────────────────────────────────────────────────────────
+	// https://mimo.mi.com/models/en-US/mimo-v2.6-pro
+	// https://mimo.mi.com/models/en-US/mimo-v2.6-flash
+	// https://mimo.mi.com/docs/en-US/api/chat/openai-api
 	{
 		provider: "xiaomi",
-		pattern:  "mimo-v2.5-pro",
+		pattern:  "mimo-v2.6-pro",
 		caps: ModelCapabilities{
 			ContextWindowTokens:    1048576,
 			MaxOutputTokens:        131072,
@@ -950,12 +972,12 @@ var builtinCatalog = []catalogEntry{
 			SupportsReasoning:      true,
 			ReasoningMode:          ReasoningModeToggle,
 			SupportsJSONOutput:     true,
-			SupportsImages:         false,
+			SupportsImages:         true,
 		},
 	},
 	{
 		provider: "xiaomi",
-		pattern:  "mimo-v2.5",
+		pattern:  "mimo-v2.6-flash",
 		caps: ModelCapabilities{
 			ContextWindowTokens:    1048576,
 			MaxOutputTokens:        131072,

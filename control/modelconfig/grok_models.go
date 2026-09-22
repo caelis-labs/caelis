@@ -12,9 +12,9 @@ const (
 )
 
 // grokOAuthModelSpecs is the maintained fallback when xAI's account model
-// directory is unavailable. xAI's official Grok Build catalog currently uses
-// grok-4.6 over the Responses API; older defaults remain available only for
-// persisted or explicitly typed configurations.
+// directory is unavailable. Grok 4.7 is documented for Grok Build at
+// https://x.ai/news/grok-4-7; account availability still belongs to xAI.
+// Older defaults remain available for persisted or explicitly typed configurations.
 var grokOAuthModelSpecs = []struct {
 	name                   string
 	defaultReasoningEffort string
@@ -22,7 +22,8 @@ var grokOAuthModelSpecs = []struct {
 	imageInput             bool
 	fallbackSelectable     bool
 }{
-	{name: "grok-4.6", defaultReasoningEffort: "high", reasoningLevels: []string{"low", "medium", "high", "xhigh"}, imageInput: true, fallbackSelectable: true},
+	{name: "grok-4.7", defaultReasoningEffort: "high", reasoningLevels: []string{"low", "medium", "high", "xhigh"}, imageInput: true, fallbackSelectable: true},
+	{name: "grok-4.6", defaultReasoningEffort: "high", reasoningLevels: []string{"low", "medium", "high", "xhigh"}, imageInput: true},
 	{name: "grok-4.5", defaultReasoningEffort: "high", reasoningLevels: []string{"low", "medium", "high"}, imageInput: true},
 }
 

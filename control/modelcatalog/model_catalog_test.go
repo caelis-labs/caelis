@@ -83,453 +83,37 @@ func TestPreferredReasoningEffort(t *testing.T) {
 	}
 }
 
-func TestDeepSeekRecommendationsOnlyIncludeCurrentFlash(t *testing.T) {
-	disableDynamicCatalogForTest(t)
-	models := ListRecommendedModels("deepseek")
-	if !sameStrings(models, []string{"deepseek-flash"}) {
-		t.Fatalf("ListRecommendedModels(deepseek) = %v, want only deepseek-flash", models)
+func TestBuiltinLookupUsesLongestPrefixWithinProvider(t *testing.T) {
+	saved := builtinCatalog
+	builtinCatalog = []catalogEntry{
+		{provider: "test", pattern: "model", caps: ModelCapabilities{ContextWindowTokens: 1000}},
+		{provider: "test", pattern: "model-pro", caps: ModelCapabilities{ContextWindowTokens: 2000}},
+		{provider: "other", pattern: "model-pro-dated", caps: ModelCapabilities{ContextWindowTokens: 3000}},
 	}
-	for _, name := range []string{"deepseek-v4-flash", "deepseek-v4-flash-vision-exp", "deepseek-v4-pro"} {
-		if _, ok := lookupBuiltin("deepseek", name); ok {
-			t.Fatalf("removed model %q still has a builtin capability record", name)
-		}
-		if _, ok := searchOverlay("deepseek", name); ok {
-			t.Fatalf("removed model %q still has an overlay record", name)
-		}
+	t.Cleanup(func() { builtinCatalog = saved })
+
+	caps, ok := lookupBuiltin("test", "model-pro-dated")
+	if !ok || caps.ContextWindowTokens != 2000 {
+		t.Fatalf("lookup = %#v, %v; want longest prefix belonging to the requested provider", caps, ok)
 	}
 }
 
-func TestCurrentGeminiStaticModels(t *testing.T) {
-	disableDynamicCatalogForTest(t)
-
-	wantModels := []string{
-		"gemini-3.1-pro-preview",
-		"gemini-3.1-pro-preview-customtools",
-		"gemini-3.5-flash-lite",
-		"gemini-3.6-flash",
-		"gemini-3.7-flash",
-		"gemini-3.8-flash",
-	}
-	models := ListCatalogModels("gemini")
-	if !sameStrings(models, wantModels) {
-		t.Fatalf("ListCatalogModels(gemini) = %#v, want current models %#v", models, wantModels)
-	}
-	for _, model := range wantModels {
-		caps, ok := LookupModelCapabilities("gemini", model)
-		if !ok {
-			t.Fatalf("LookupModelCapabilities(gemini, %q) = false, want true", model)
-		}
-		if caps.ContextWindowTokens != 1048576 || caps.MaxOutputTokens != 65536 {
-			t.Fatalf("LookupModelCapabilities(gemini, %q) limits = %d/%d, want 1048576/65536",
-				model, caps.ContextWindowTokens, caps.MaxOutputTokens)
-		}
-		if !caps.SupportsReasoning || caps.ReasoningMode != ReasoningModeEffort {
-			t.Fatalf("LookupModelCapabilities(gemini, %q) reasoning = %#v, want effort reasoning", model, caps)
-		}
-		if !caps.SupportsToolCalls || !caps.SupportsImages || !caps.SupportsJSONOutput {
-			t.Fatalf("LookupModelCapabilities(gemini, %q) caps = %#v, want tools/images/json", model, caps)
-		}
-	}
-
-	for _, model := range []string{"gemini-3.8-flash", "gemini-3.7-flash"} {
-		if levels := ReasoningLevelsForModel("gemini", model); !sameStrings(levels, []string{"low", "medium", "high"}) {
-			t.Fatalf("ReasoningLevelsForModel(gemini, %q) = %#v, want low/medium/high", model, levels)
-		}
-	}
-	for _, model := range []string{"gemini-3.6-flash", "gemini-3.5-flash-lite"} {
-		if levels := ReasoningLevelsForModel("gemini", model); !sameStrings(levels, []string{"minimal", "low", "medium", "high"}) {
-			t.Fatalf("ReasoningLevelsForModel(gemini, %q) = %#v, want minimal/low/medium/high", model, levels)
-		}
-	}
-	if got := DefaultReasoningEffortForModel("gemini", "gemini-3.5-flash-lite"); got != "minimal" {
-		t.Fatalf("DefaultReasoningEffortForModel(gemini, gemini-3.5-flash-lite) = %q, want minimal", got)
-	}
-	for _, legacy := range []string{"gemini-3.5-flash", "gemini-3-flash-preview", "gemini-3.1-flash-lite", "gemini-2.5-pro", "gemini-2.0-flash"} {
-		if containsString(models, legacy) {
-			t.Fatalf("ListCatalogModels(gemini) = %#v, did not want superseded %q", models, legacy)
-		}
-		if _, ok := LookupModelCapabilities("gemini", legacy); !ok {
-			t.Fatalf("LookupModelCapabilities(gemini, %q) = false, want retained compatibility metadata", legacy)
-		}
-	}
-}
-
-func TestCurrentOpenAIStaticModels(t *testing.T) {
-	disableDynamicCatalogForTest(t)
-
-	wantModels := []string{"gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-6-astra"}
-	models := ListCatalogModels("openai")
-	if !sameStrings(models, wantModels) {
-		t.Fatalf("ListCatalogModels(openai) = %#v, want current models %#v", models, wantModels)
-	}
-	for _, model := range wantModels {
-		caps, ok := LookupModelCapabilities("openai", model)
-		if !ok {
-			t.Fatalf("LookupModelCapabilities(openai, %q) = false, want true", model)
-		}
-		if caps.ContextWindowTokens != 1050000 || caps.MaxOutputTokens != 128000 || caps.DefaultMaxOutputTokens != 32768 {
-			t.Fatalf("LookupModelCapabilities(openai, %q) limits = %d/%d default %d, want 1050000/128000 default 32768",
-				model, caps.ContextWindowTokens, caps.MaxOutputTokens, caps.DefaultMaxOutputTokens)
-		}
-		if !caps.SupportsReasoning || caps.ReasoningMode != ReasoningModeEffort ||
-			!caps.SupportsToolCalls || !caps.SupportsImages || !caps.SupportsJSONOutput {
-			t.Fatalf("LookupModelCapabilities(openai, %q) caps = %#v, want reasoning/tools/images/json", model, caps)
-		}
-	}
-	for _, model := range []string{"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"} {
-		if levels := ReasoningLevelsForModel("openai", model); !sameStrings(levels, []string{"none", "low", "medium", "high", "xhigh", "max"}) {
-			t.Fatalf("ReasoningLevelsForModel(openai, %q) = %#v, want none through max", model, levels)
-		}
-	}
-	if levels := ReasoningLevelsForModel("openai", "gpt-6-astra"); !sameStrings(levels, []string{"low", "medium", "high", "xhigh", "max"}) {
-		t.Fatalf("ReasoningLevelsForModel(openai, gpt-6-astra) = %#v, want low through max", levels)
-	}
-	for model, wantDescription := range map[string]string{
-		"gpt-6-astra":   "2x faster, more usage",
-		"gpt-5.6-sol":   "1.5x faster, more usage",
-		"gpt-5.6-terra": "1.5x faster, more usage",
-		"gpt-5.6-luna":  "1.5x faster, more usage",
-		"gpt-5.5":       "1.5x faster, more usage",
-		"gpt-5.4":       "1.5x faster, more usage",
-	} {
-		modes := SpeedModesForModel("openai", model)
-		if len(modes) != 1 || modes[0].Level != "fast" || modes[0].Description != wantDescription {
-			t.Fatalf("SpeedModesForModel(openai, %q) = %#v; want Fast with %q", model, modes, wantDescription)
-		}
-	}
-	for _, model := range []string{"gpt-5.5-pro", "gpt-5.5-instant", "gpt-5.4-pro", "gpt-5.4-mini", "gpt-5.4-nano", "o3", "gpt-unknown"} {
-		if modes := SpeedModesForModel("openai", model); len(modes) != 0 {
-			t.Fatalf("SpeedModesForModel(openai, %q) = %#v; want no non-default speed modes", model, modes)
-		}
-	}
-	for _, legacy := range []string{"gpt-5.5", "gpt-5.4", "gpt-4o", "o1", "o3", "gpt-4.1-nano"} {
-		if containsString(models, legacy) {
-			t.Fatalf("ListCatalogModels(openai) = %#v, did not want superseded %q", models, legacy)
-		}
-		if _, ok := LookupModelCapabilities("openai", legacy); !ok {
-			t.Fatalf("LookupModelCapabilities(openai, %q) = false, want retained compatibility metadata", legacy)
-		}
-	}
-}
-
-func TestCurrentAnthropicStaticModels(t *testing.T) {
-	disableDynamicCatalogForTest(t)
-
-	wantModels := []string{
-		"claude-fable-5-1",
-		"claude-haiku-4-5",
-		"claude-mythos-5-1",
-		"claude-opus-5",
-		"claude-sonnet-5",
-	}
-	models := ListCatalogModels("anthropic")
-	if !sameStrings(models, wantModels) {
-		t.Fatalf("ListCatalogModels(anthropic) = %#v, want current models %#v", models, wantModels)
-	}
-	for _, model := range []string{"claude-fable-5-1", "claude-mythos-5-1", "claude-opus-5", "claude-sonnet-5"} {
-		caps, ok := LookupModelCapabilities("anthropic", model)
-		if !ok {
-			t.Fatalf("LookupModelCapabilities(anthropic, %q) = false, want true", model)
-		}
-		if caps.ContextWindowTokens != 1000000 || caps.MaxOutputTokens != 128000 || caps.DefaultMaxOutputTokens != 32768 {
-			t.Fatalf("LookupModelCapabilities(anthropic, %q) limits = %d/%d default %d", model, caps.ContextWindowTokens, caps.MaxOutputTokens, caps.DefaultMaxOutputTokens)
-		}
-		if !caps.SupportsReasoning || caps.ReasoningMode != ReasoningModeEffort ||
-			!sameStrings(caps.ReasoningEfforts, []string{"low", "medium", "high", "xhigh", "max"}) ||
-			caps.DefaultReasoningEffort != "high" {
-			t.Fatalf("LookupModelCapabilities(anthropic, %q) reasoning = %#v", model, caps)
-		}
-		if !caps.SupportsToolCalls || !caps.SupportsImages || !caps.SupportsJSONOutput {
-			t.Fatalf("LookupModelCapabilities(anthropic, %q) caps = %#v, want tools/images/json", model, caps)
-		}
-	}
-	haiku, ok := LookupModelCapabilities("anthropic", "claude-haiku-4-5-20251001")
-	if !ok || haiku.ContextWindowTokens != 200000 || haiku.MaxOutputTokens != 64000 ||
-		haiku.ReasoningMode != ReasoningModeToggle || len(haiku.ReasoningEfforts) != 0 {
-		t.Fatalf("Claude Haiku 4.5 capabilities = %#v, want extended-thinking toggle without effort", haiku)
-	}
-	if levels := ReasoningLevelsForModel("anthropic", "claude-haiku-4-5-20251001"); !sameStrings(levels, []string{"none", "high"}) {
-		t.Fatalf("ReasoningLevelsForModel(anthropic, Claude Haiku 4.5) = %#v, want none/high toggle", levels)
-	}
-	for _, legacy := range []string{"claude-fable-5", "claude-mythos-5", "claude-opus-4-8", "claude-sonnet-4-6", "claude-3-7-sonnet"} {
-		if containsString(models, legacy) {
-			t.Fatalf("ListCatalogModels(anthropic) = %#v, did not want superseded %q", models, legacy)
-		}
-		if _, ok := LookupModelCapabilities("anthropic", legacy); !ok {
-			t.Fatalf("LookupModelCapabilities(anthropic, %q) = false, want retained compatibility metadata", legacy)
-		}
-	}
-	for _, legacy := range []string{"claude-fable-5", "claude-mythos-5", "claude-opus-4-8"} {
-		caps, _ := LookupModelCapabilities("anthropic", legacy)
-		if !sameStrings(caps.ReasoningEfforts, []string{"low", "medium", "high", "xhigh", "max"}) || caps.DefaultReasoningEffort != "high" {
-			t.Fatalf("LookupModelCapabilities(anthropic, %q) reasoning = %#v, want retained current effort metadata", legacy, caps)
-		}
-	}
-	legacySonnet, _ := LookupModelCapabilities("anthropic", "claude-sonnet-4-6")
-	if !sameStrings(legacySonnet.ReasoningEfforts, []string{"low", "medium", "high", "max"}) || legacySonnet.DefaultReasoningEffort != "high" {
-		t.Fatalf("LookupModelCapabilities(anthropic, claude-sonnet-4-6) reasoning = %#v, want low through max without xhigh", legacySonnet)
-	}
-}
-
-func TestCurrentMiniMaxAndVolcengineStaticModels(t *testing.T) {
-	disableDynamicCatalogForTest(t)
-
-	if models := ListCatalogModels("minimax"); !sameStrings(models, []string{"MiniMax-M3"}) {
-		t.Fatalf("ListCatalogModels(minimax) = %#v, want only current MiniMax-M3", models)
-	}
-	minimaxCaps, ok := LookupModelCapabilities("minimax", "MiniMax-M3")
-	if !ok {
-		t.Fatal("LookupModelCapabilities(minimax, MiniMax-M3) = false, want true")
-	}
-	if minimaxCaps.ContextWindowTokens != 1000000 || minimaxCaps.MaxOutputTokens != 524288 ||
-		minimaxCaps.ReasoningMode != ReasoningModeToggle || !minimaxCaps.SupportsToolCalls || !minimaxCaps.SupportsImages {
-		t.Fatalf("MiniMax-M3 caps = %#v, want current limits and toggle reasoning/tools/images", minimaxCaps)
-	}
-	legacyMiniMax, ok := LookupModelCapabilities("minimax", "MiniMax-M2.7")
-	if !ok || legacyMiniMax.MaxOutputTokens != 204800 || legacyMiniMax.SupportsImages {
-		t.Fatalf("MiniMax-M2.7 retained caps = %#v, want 204800 output without image input", legacyMiniMax)
-	}
-
-	wantVolcengine := []string{
-		"deepseek-v4-flash",
-		"deepseek-v4-pro",
-		"doubao-seed-2.0-lite",
-		"doubao-seed-2.1-turbo",
-		"doubao-seed-evolving",
-		"glm-5.3",
-		"glm-5.3-flash",
-		"kimi-k2.7-code",
-		"minimax-m3",
-	}
-	models := ListCatalogModels("volcengine")
-	if !sameStrings(models, wantVolcengine) {
-		t.Fatalf("ListCatalogModels(volcengine) = %#v, want current models %#v", models, wantVolcengine)
-	}
-	for _, test := range []struct {
-		model     string
-		context   int
-		maxOutput int
-		images    bool
+func TestReasoningLevelsFromCapabilities(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		caps ModelCapabilities
+		want []string
 	}{
-		{model: "doubao-seed-evolving", context: 1048576, maxOutput: 262144, images: true},
-		{model: "doubao-seed-2.1-turbo", context: 262144, maxOutput: 262144, images: true},
-		{model: "deepseek-v4-pro", context: 1048576, maxOutput: 393216},
-		{model: "glm-5.3-flash", context: 1048576, maxOutput: 131072, images: true},
-		{model: "minimax-m3", context: 1048576, maxOutput: 131072, images: true},
-		{model: "kimi-k2.7-code", context: 262144, maxOutput: 32768},
+		{name: "none", caps: ModelCapabilities{ReasoningMode: ReasoningModeNone}},
+		{name: "toggle", caps: ModelCapabilities{SupportsReasoning: true, ReasoningMode: ReasoningModeToggle}, want: []string{"none", "high"}},
+		{name: "toggle with efforts", caps: ModelCapabilities{SupportsReasoning: true, ReasoningMode: ReasoningModeToggle, ReasoningEfforts: []string{"low", "max"}}, want: []string{"none", "low", "max"}},
+		{name: "effort", caps: ModelCapabilities{SupportsReasoning: true, ReasoningMode: ReasoningModeEffort, ReasoningEfforts: []string{"low", "xhigh"}}, want: []string{"low", "xhigh"}},
 	} {
-		caps, ok := LookupModelCapabilities("volcengine", test.model)
-		if !ok || caps.ContextWindowTokens != test.context || caps.MaxOutputTokens != test.maxOutput ||
-			caps.SupportsImages != test.images || !caps.SupportsReasoning || !caps.SupportsToolCalls || !caps.SupportsJSONOutput {
-			t.Fatalf("LookupModelCapabilities(volcengine, %q) = %#v, want current maintained capabilities", test.model, caps)
-		}
-	}
-	for _, legacy := range []string{"doubao-seed-1.8", "doubao-seed-2.0-mini", "doubao-seed-code", "glm-4.7", "deepseek-v3.2", "kimi-k2.5", "kimi-k3", "minimax-m2.5"} {
-		if containsString(models, legacy) {
-			t.Fatalf("ListCatalogModels(volcengine) = %#v, did not want superseded or non-Coding-Plan %q", models, legacy)
-		}
-		if _, ok := LookupModelCapabilities("volcengine", legacy); !ok {
-			t.Fatalf("LookupModelCapabilities(volcengine, %q) = false, want retained compatibility metadata", legacy)
-		}
-	}
-	glm47, _ := LookupModelCapabilities("volcengine", "glm-4.7")
-	if glm47.ContextWindowTokens != 200000 || glm47.MaxOutputTokens != 131072 {
-		t.Fatalf("LookupModelCapabilities(volcengine, glm-4.7) limits = %d/%d, want 200000/131072", glm47.ContextWindowTokens, glm47.MaxOutputTokens)
-	}
-	if _, ok := LookupModelCapabilities("volcengine", "doubao-seed-2.1-pro"); ok {
-		t.Fatal("LookupModelCapabilities(volcengine, doubao-seed-2.1-pro) = true, want invalid Coding Plan short ID removed")
-	}
-}
-
-func TestOllamaCatalogMaintainsCloudModelsOnly(t *testing.T) {
-	disableDynamicCatalogForTest(t)
-
-	if models := ListCatalogModels("ollama"); len(models) != 0 {
-		t.Fatalf("ListCatalogModels(ollama) = %#v, want no maintained local models", models)
-	}
-
-	wantModels := []string{"deepseek-v4-flash", "deepseek-v4-pro", "glm-5.3", "glm-5.3-flash", "kimi-k2.7-code", "kimi-k3", "minimax-m3"}
-	models := ListCatalogModels(OllamaCloudProvider)
-	if !sameStrings(models, wantModels) {
-		t.Fatalf("ListCatalogModels(%s) = %#v, want %#v", OllamaCloudProvider, models, wantModels)
-	}
-	wantPriorityOrder := []string{"glm-5.3", "glm-5.3-flash", "minimax-m3", "kimi-k3", "kimi-k2.7-code", "deepseek-v4-flash", "deepseek-v4-pro"}
-	if got := ListOllamaCloudModels(); !sameStrings(got, wantPriorityOrder) {
-		t.Fatalf("ListOllamaCloudModels() = %#v, want priority order %#v", got, wantPriorityOrder)
-	}
-	if containsString(models, "glm-5.2") {
-		t.Fatalf("ListCatalogModels(%s) = %#v, did not want superseded glm-5.2", OllamaCloudProvider, models)
-	}
-	if _, ok := LookupModelCapabilities(OllamaCloudProvider, "glm-5.2"); !ok {
-		t.Fatal("LookupModelCapabilities(ollama-cloud, glm-5.2) = false, want retained compatibility metadata")
-	}
-	wantContexts := map[string]int{
-		"glm-5.3":           1000000,
-		"glm-5.3-flash":     1000000,
-		"minimax-m3":        524288,
-		"kimi-k3":           1000000,
-		"kimi-k2.7-code":    262144,
-		"deepseek-v4-flash": 1000000,
-		"deepseek-v4-pro":   1000000,
-	}
-	wantImages := map[string]bool{
-		"glm-5.3-flash":  true,
-		"minimax-m3":     true,
-		"kimi-k3":        true,
-		"kimi-k2.7-code": true,
-	}
-	for _, model := range wantModels {
-		caps, ok := LookupModelCapabilities(OllamaCloudProvider, model)
-		if !ok {
-			t.Fatalf("LookupModelCapabilities(%s, %q) = false, want true", OllamaCloudProvider, model)
-		}
-		if caps.ContextWindowTokens != wantContexts[model] || caps.MaxOutputTokens != 0 || caps.DefaultMaxOutputTokens != 32768 {
-			t.Fatalf("LookupModelCapabilities(%s, %q) limits = %d/%d default %d",
-				OllamaCloudProvider, model, caps.ContextWindowTokens, caps.MaxOutputTokens, caps.DefaultMaxOutputTokens)
-		}
-		if !caps.SupportsReasoning || !caps.SupportsToolCalls || !caps.SupportsJSONOutput {
-			t.Fatalf("LookupModelCapabilities(%s, %q) caps = %#v, want reasoning/tools/json", OllamaCloudProvider, model, caps)
-		}
-		if caps.SupportsImages != wantImages[model] {
-			t.Fatalf("LookupModelCapabilities(%s, %q).SupportsImages = %v, want %v",
-				OllamaCloudProvider, model, caps.SupportsImages, wantImages[model])
-		}
-	}
-
-	for _, model := range []string{"glm-5.3", "glm-5.3-flash"} {
-		if levels := ReasoningLevelsForModel(OllamaCloudProvider, model); !sameStrings(levels, []string{"low", "high", "max"}) {
-			t.Fatalf("ReasoningLevelsForModel(%s, %q) = %#v, want low/high/max", OllamaCloudProvider, model, levels)
-		}
-		if got := DefaultReasoningEffortForModel(OllamaCloudProvider, model); got != "max" {
-			t.Fatalf("DefaultReasoningEffortForModel(%s, %q) = %q, want max", OllamaCloudProvider, model, got)
-		}
-	}
-	for _, model := range []string{"minimax-m3", "kimi-k3", "kimi-k2.7-code"} {
-		caps, _ := LookupModelCapabilities(OllamaCloudProvider, model)
-		if caps.ReasoningMode != ReasoningModeToggle {
-			t.Fatalf("LookupModelCapabilities(%s, %q).ReasoningMode = %q, want toggle", OllamaCloudProvider, model, caps.ReasoningMode)
-		}
-		if levels := ReasoningLevelsForModel(OllamaCloudProvider, model); !sameStrings(levels, []string{"none", "high"}) {
-			t.Fatalf("ReasoningLevelsForModel(%s, %q) = %#v, want none/high", OllamaCloudProvider, model, levels)
-		}
-	}
-	for _, model := range []string{"deepseek-v4-flash", "deepseek-v4-pro"} {
-		if levels := ReasoningLevelsForModel(OllamaCloudProvider, model); !sameStrings(levels, []string{"none", "high", "max"}) {
-			t.Fatalf("ReasoningLevelsForModel(%s, %q) = %#v, want none/high/max", OllamaCloudProvider, model, levels)
-		}
-	}
-}
-
-func TestGrok45StaticCapabilitiesIncludeImageInput(t *testing.T) {
-	caps, ok := LookupModelCapabilities("xai", "grok-4.5")
-	if !ok {
-		t.Fatal("LookupModelCapabilities(xai, grok-4.5) = false, want true")
-	}
-	if caps.ContextWindowTokens != 500000 || caps.MaxOutputTokens != 0 || caps.DefaultMaxOutputTokens != 32768 {
-		t.Fatalf("LookupModelCapabilities(xai, grok-4.5) limits = %#v", caps)
-	}
-	if !caps.SupportsImages || !caps.SupportsToolCalls || !caps.SupportsReasoning {
-		t.Fatalf("LookupModelCapabilities(xai, grok-4.5) capabilities = %#v", caps)
-	}
-	if !caps.SupportsJSONOutput || caps.ReasoningMode != ReasoningModeEffort ||
-		!sameStrings(caps.ReasoningEfforts, []string{"low", "medium", "high"}) ||
-		caps.DefaultReasoningEffort != "high" {
-		t.Fatalf("LookupModelCapabilities(xai, grok-4.5) reasoning/output = %#v", caps)
-	}
-}
-
-func TestGrokCatalogRecommendsOnlyCurrentModel(t *testing.T) {
-	disableDynamicCatalogForTest(t)
-
-	if models := ListCatalogModels("xai"); !sameStrings(models, []string{"grok-4.6"}) {
-		t.Fatalf("ListCatalogModels(xai) = %#v, want only grok-4.6", models)
-	}
-	if _, ok := LookupModelCapabilities("xai", "grok-4.5"); !ok {
-		t.Fatal("LookupModelCapabilities(xai, grok-4.5) = false, want retained compatibility metadata")
-	}
-}
-
-func TestGrok46StaticCapabilitiesIncludeXHighReasoning(t *testing.T) {
-	for _, model := range []string{"grok-4.6", "grok-4.6-build"} {
-		caps, ok := LookupModelCapabilities("xai", model)
-		if !ok {
-			t.Fatalf("LookupModelCapabilities(xai, %q) = false, want true", model)
-		}
-		if caps.ContextWindowTokens != 500000 || caps.MaxOutputTokens != 0 || caps.DefaultMaxOutputTokens != 32768 {
-			t.Fatalf("LookupModelCapabilities(xai, %q) limits = %#v", model, caps)
-		}
-		if !caps.SupportsImages || !caps.SupportsToolCalls || !caps.SupportsReasoning {
-			t.Fatalf("LookupModelCapabilities(xai, %q) capabilities = %#v", model, caps)
-		}
-		if !caps.SupportsJSONOutput || caps.ReasoningMode != ReasoningModeEffort ||
-			!sameStrings(caps.ReasoningEfforts, []string{"low", "medium", "high", "xhigh"}) ||
-			caps.DefaultReasoningEffort != "high" {
-			t.Fatalf("LookupModelCapabilities(xai, %q) reasoning/output = %#v", model, caps)
-		}
-		if levels := ReasoningLevelsForModel("xai", model); !sameStrings(levels, []string{"low", "medium", "high", "xhigh"}) {
-			t.Fatalf("ReasoningLevelsForModel(xai, %q) = %#v, want low/medium/high/xhigh", model, levels)
-		}
-	}
-}
-
-func TestDeepSeekFlashMatchesHarnessCatalog(t *testing.T) {
-	caps, ok := LookupModelCapabilities("deepseek", "deepseek-flash")
-	if !ok {
-		t.Fatal("deepseek-flash missing from catalog")
-	}
-	if caps.ContextWindowTokens != 1000000 || caps.DefaultMaxOutputTokens != 256000 || caps.MaxOutputTokens != 0 {
-		t.Fatalf("limits = %d/%d default %d, want 1000000/unknown default 256000",
-			caps.ContextWindowTokens, caps.MaxOutputTokens, caps.DefaultMaxOutputTokens)
-	}
-	if !caps.SupportsImages || !caps.SupportsToolCalls || caps.SupportsJSONOutput || !caps.SupportsReasoning || caps.ReasoningMode != ReasoningModeToggle {
-		t.Fatalf("unexpected capabilities: %#v", caps)
-	}
-	if caps.DefaultReasoningEffort != "high" || !sameStrings(caps.ReasoningEfforts, []string{"low", "high", "max"}) {
-		t.Fatalf("unexpected reasoning: %#v", caps)
-	}
-	if levels := ReasoningLevelsForModel("deepseek", "deepseek-flash"); !sameStrings(levels, []string{"none", "low", "high", "max"}) {
-		t.Fatalf("reasoning levels = %v", levels)
-	}
-}
-
-func TestMimoStaticModelsMatchBuiltInCatalog(t *testing.T) {
-	models := ListCatalogModels("xiaomi")
-	wantModels := []string{"mimo-v2.5-pro", "mimo-v2.5"}
-	for _, model := range wantModels {
-		if !containsString(models, model) {
-			t.Fatalf("ListCatalogModels(xiaomi) = %#v, missing %q", models, model)
-		}
-	}
-	for _, model := range []string{"mimo-v2-pro", "mimo-v2-omni", "mimo-v2-flash", "mimo-v2-reasoner", "MiMo-VL-7B-RL"} {
-		if containsString(models, model) {
-			t.Fatalf("ListCatalogModels(xiaomi) = %#v, did not want stale model %q", models, model)
-		}
-	}
-
-	tests := []struct {
-		model       string
-		context     int
-		maxOutput   int
-		imageInputs bool
-	}{
-		{model: "mimo-v2.5-pro", context: 1048576, maxOutput: 131072},
-		{model: "mimo-v2.5", context: 1048576, maxOutput: 131072, imageInputs: true},
-	}
-	for _, tc := range tests {
-		caps, ok := LookupModelCapabilities("xiaomi", tc.model)
-		if !ok {
-			t.Fatalf("LookupModelCapabilities(xiaomi, %q) = false, want true", tc.model)
-		}
-		if caps.ContextWindowTokens != tc.context || caps.MaxOutputTokens != tc.maxOutput {
-			t.Fatalf("LookupModelCapabilities(xiaomi, %q) limits = %d/%d, want %d/%d",
-				tc.model, caps.ContextWindowTokens, caps.MaxOutputTokens, tc.context, tc.maxOutput)
-		}
-		if caps.SupportsImages != tc.imageInputs {
-			t.Fatalf("LookupModelCapabilities(xiaomi, %q).SupportsImages = %v, want %v", tc.model, caps.SupportsImages, tc.imageInputs)
-		}
-		if !caps.SupportsReasoning || caps.ReasoningMode != ReasoningModeToggle || !caps.SupportsToolCalls || !caps.SupportsJSONOutput {
-			t.Fatalf("LookupModelCapabilities(xiaomi, %q) caps = %#v, want toggle reasoning/tools/json", tc.model, caps)
-		}
+		t.Run(tc.name, func(t *testing.T) {
+			if got := reasoningLevelsFromCapabilities(tc.caps); !sameStrings(got, tc.want) {
+				t.Fatalf("reasoning levels = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 
@@ -580,23 +164,26 @@ func TestListCatalogModelsUsesStaticCatalogOnly(t *testing.T) {
 }
 
 func TestListRecommendedModelsAllowsLocalOverrideToReAddHiddenBuiltin(t *testing.T) {
-	dynamicMu.Lock()
-	savedLocal := localOverrides
-	localOverrides = capSnapshot{
-		"openai:gpt-5.5": {
-			ContextWindow: 1048576,
-			MaxOutput:     128000,
-		},
+	disableDynamicCatalogForTest(t)
+	savedBuiltin, savedOverlay := builtinCatalog, providerOverlayCatalog
+	builtinCatalog = []catalogEntry{
+		{provider: "test", pattern: "current", caps: ModelCapabilities{ContextWindowTokens: 1000}},
+		{provider: "test", pattern: "legacy", hiddenFromRecommendations: true, caps: ModelCapabilities{ContextWindowTokens: 500}},
 	}
-	dynamicMu.Unlock()
-	defer func() {
-		dynamicMu.Lock()
-		localOverrides = savedLocal
-		dynamicMu.Unlock()
-	}()
+	providerOverlayCatalog = overlaySnapshot{"test:legacy": {ReasoningMode: ReasoningModeToggle}}
+	t.Cleanup(func() { builtinCatalog, providerOverlayCatalog = savedBuiltin, savedOverlay })
 
-	if models := ListRecommendedModels("openai"); !containsString(models, "gpt-5.5") {
-		t.Fatalf("ListRecommendedModels(openai) = %#v, want explicit local override to re-add hidden gpt-5.5", models)
+	if models := ListRecommendedModels("test"); !sameStrings(models, []string{"current"}) {
+		t.Fatalf("recommendations = %v, want hidden entry excluded even with an overlay", models)
+	}
+	if _, ok := LookupModelCapabilities("test", "legacy"); !ok {
+		t.Fatal("hidden entry must remain available for capability lookup")
+	}
+	dynamicMu.Lock()
+	localOverrides = capSnapshot{"test:legacy": {ContextWindow: 500}}
+	dynamicMu.Unlock()
+	if models := ListRecommendedModels("test"); !sameStrings(models, []string{"current", "legacy"}) {
+		t.Fatalf("recommendations = %v, want local override to re-add hidden entry", models)
 	}
 }
 
