@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.60.1](https://github.com/caelis-labs/caelis/compare/v0.60.0...v0.60.1) (2026-09-22)
+
+
+### Bug Fixes
+
+* **models:** refresh MiMo, Grok, and DeepSeek catalogs ([#65](https://github.com/caelis-labs/caelis/issues/65)) ([af85843](https://github.com/caelis-labs/caelis/commit/af8584342b65c383a9dee70aa82edeee474afcee))
+
 ## [0.60.0](https://github.com/caelis-labs/caelis/compare/v0.59.0...v0.60.0) (2026-09-21)
 
 
