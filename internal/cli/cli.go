@@ -495,11 +495,11 @@ func runControlHost(ctx context.Context, cfg gatewayapp.Config, serverConfig con
 	if err := stack.WaitApprovalRecovery(ctx); err != nil {
 		return err
 	}
-	instanceID := uuid.NewString()
+	instanceID := stack.BotWork().Store.InstanceID
 	startedAt := time.Now().UTC()
 	build := version.BuildInfo()
 	serverConfig.ServerInfo = appserver.ServerInfo{
-		ServerID: appserver.ServerIdentity, InstanceID: instanceID,
+		ServerID: appserver.ServerIdentity, StoreID: stack.BotWork().Store.StoreID, InstanceID: instanceID,
 		DistributionVersion: build.Version, BuildID: build.BuildID, BuildKind: build.BuildKind,
 		Capabilities: appserver.RequiredManagedHostCapabilities(),
 	}

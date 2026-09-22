@@ -204,6 +204,14 @@ func marshalWireValueUnchecked(value any) ([]byte, error) {
 		return marshalWriteRequest(typed, typed.ExpectedRevision)
 	case appserver.RemovePluginRequest:
 		return marshalWriteRequest(typed, typed.ExpectedRevision)
+	case appserver.BotReminderRequest:
+		return marshalWriteRequest(typed, typed.ExpectedRevision)
+	case appserver.BotClientExitRequest:
+		return marshalWriteRequest(typed, typed.ExpectedRevision)
+	case appserver.RegisterBotClientRequest:
+		return marshalWriteRequest(typed, typed.ExpectedRevision)
+	case appserver.BotWorkRequest:
+		return marshalWriteRequest(typed, typed.ExpectedRevision)
 	case appserver.CreateBotRequest:
 		return marshalWriteRequest(typed, typed.ExpectedRevision)
 	case appserver.UpdateBotRequest:

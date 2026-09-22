@@ -22,6 +22,7 @@ type AppServerServices struct {
 	Configuration ConfigurationService
 	Agents        AgentService
 	Bots          BotService
+	BotWork       *BotWorkService
 	Completion    CompletionService
 	Plugins       PluginService
 	Presentation  PresentationService
@@ -72,6 +73,8 @@ type AppServerClients struct {
 	Configuration  ConfigurationClient
 	Agents         AgentClient
 	Bots           BotClient
+	BotWork        BotWorkClient
+	BotDesktop     BotDesktopClient
 	Completion     CompletionClient
 	Plugins        PluginClient
 	Presentation   PresentationClient
@@ -81,6 +84,9 @@ type AppServerClients struct {
 
 // BindAppServerClients binds one trusted principal to a complete AppServer.
 func BindAppServerClients(services AppServerServices, principal Principal) (AppServerClients, error) {
+	if principal.ClientID != "" {
+		return AppServerClients{}, errors.New("controlclient: scoped Bot credentials require the authenticated Bot HTTP surface")
+	}
 	if err := services.Validate(); err != nil {
 		return AppServerClients{}, err
 	}
@@ -136,6 +142,9 @@ func BindAppServerClients(services AppServerServices, principal Principal) (AppS
 		Sessions:       sessions, Participants: participants, Status: status,
 		Configuration: configuration, Agents: agents, Bots: bots, Completion: completion, Plugins: plugins,
 		Presentation: presentation, Terminal: terminal, Tasks: tasks,
+	}
+	if services.BotWork != nil {
+		clients.BotWork = &boundBotWorkClient{s: services.BotWork, p: principal}
 	}
 	if err := clients.Validate(); err != nil {
 		return AppServerClients{}, err

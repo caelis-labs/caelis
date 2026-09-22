@@ -14,7 +14,7 @@ import (
 	"unicode"
 )
 
-const generatorVersion = "caelis-client-protocol-gen/v2.8.0"
+const generatorVersion = "caelis-client-protocol-gen/v2.9.0"
 
 var check = flag.Bool("check", false, "verify generated output without writing")
 
@@ -104,8 +104,8 @@ func validateSpec(spec openAPISpec) error {
 	if spec.OpenAPI != "3.1.0" {
 		return fmt.Errorf("openapi version = %q, want 3.1.0", spec.OpenAPI)
 	}
-	if len(operationIDs(spec)) != 93 {
-		return fmt.Errorf("operation count = %d, want 93", len(operationIDs(spec)))
+	if len(operationIDs(spec)) != 116 {
+		return fmt.Errorf("operation count = %d, want 116", len(operationIDs(spec)))
 	}
 	required := []string{
 		"CreateSessionRequest", "CloseSessionRequest", "CompactSessionRequest", "PromptRequest", "SteerRequest", "CancelRequest",
@@ -116,6 +116,7 @@ func validateSpec(spec openAPISpec) error {
 		"AgentRequest", "HandoffAgentRequest", "ConnectACPRequest", "DisconnectACPRequest", "DisconnectCandidatesSnapshot",
 		"BindAgentBindingRequest", "ResetAgentBindingRequest", "CreateAgentRoleRequest", "DeleteAgentRoleRequest", "AgentBindingSetRequest",
 		"Bot", "BotConfig", "BotList", "CreateBotRequest", "UpdateBotRequest",
+		"BotExecution", "BotRequestSource", "BotWork", "BotWorkList", "BotWorkOperation", "BotCompletion", "BotCompletionList", "BotWorkRequest", "BotClient", "BotClientRegistration", "BotClientExitRequest", "BotReminderRequest", "RegisterBotClientRequest", "BotDesktopSnapshot", "BotDesktopReceipt", "BotReminderGrantList",
 		"CompletionRequest", "PluginRequest", "AddMarketplaceRequest", "UpdateMarketplaceRequest", "RemoveMarketplaceRequest",
 		"AddPluginPathRequest", "InstallPluginRequest", "EnablePluginRequest", "DisablePluginRequest", "RemovePluginRequest",
 		"AgentStatusSnapshot", "PluginSnapshot", "MarketplaceSnapshot",

@@ -111,8 +111,8 @@ func fromLoaded(loaded session.LoadedSession, id string) (Bot, error) {
 // caller must serialize prompt admission and reject an already active Turn;
 // the persistence fence additionally excludes in-flight Runtime writes. A
 // nil previous value initializes a newly created private Session skeleton.
-// Every Bot has the same private notebook contract regardless of when it was
-// created. Admission appends a user event without compacting history.
+// Configuration admission appends a user event without compacting history.
+// Capability changes remain explicit configuration, never inferred from notes.
 func (s *Service) Save(ctx context.Context, active session.Session, id string, config Config, previous *Config, operationID, digest string) (session.Session, error) {
 	boundID, _ := active.Metadata[MetadataID].(string)
 	if !sessionvisibility.IsBotSession(active) || id != boundID {

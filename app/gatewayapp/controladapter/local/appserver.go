@@ -112,6 +112,7 @@ func NewAppServer(host *gatewayapp.Stack) (*AppServer, error) {
 	server := &AppServer{
 		Services: appserver.AppServerServices{
 			Bots:           host.Bots(),
+			BotWork:        host.BotWork(),
 			Collaboration:  host.CollaborationService(),
 			SubagentInputs: &appserver.SubagentInputService{Authorizer: appserver.SessionAuthorizer{Sessions: dependencies.Sessions}, Mailbox: host.CollaborationService()},
 			UIPreferences:  &appserver.UIPreferencesService{Store: dependencies.UIPreferences},

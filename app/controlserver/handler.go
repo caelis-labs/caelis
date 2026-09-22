@@ -69,7 +69,7 @@ func New(config HandlerConfig) (*Server, error) {
 	if config.Heartbeat <= 0 {
 		config.Heartbeat = 15 * time.Second
 	}
-	config.ServerInfo = normalizeServerInfo(config.ServerInfo)
+	config.ServerInfo = botServerInfo(config.ServerInfo, config.Services)
 	if config.Ready == nil {
 		config.Ready = func() bool { return true }
 	}
@@ -181,6 +181,10 @@ func normalizeServerInfo(info appserver.ServerInfo) appserver.ServerInfo {
 }
 
 func (s *Server) principal(request *http.Request) (appserver.Principal, error) {
+	scheme, token, hasToken := strings.Cut(request.Header.Get("Authorization"), " ")
+	if hasToken && strings.EqualFold(scheme, "Bearer") && strings.HasPrefix(token, "bot-client-") {
+		return s.botClientPrincipal(request, token)
+	}
 	principal, err := s.config.Authenticator.Authenticate(request)
 	if err != nil {
 		return appserver.Principal{}, errorcode.Wrap(errorcode.Unauthenticated, "controlserver: authentication failed", err)

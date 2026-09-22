@@ -24,6 +24,7 @@ import (
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter/local"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/appserver/httpclient"
 	"github.com/caelis-labs/caelis/internal/controlprompt/appserveradapter"
 	"github.com/caelis-labs/caelis/internal/productpaths"
 	"github.com/caelis-labs/caelis/internal/servicelifecycle"
@@ -96,6 +97,14 @@ func TestManagedLocalHostStartsOnceAndSharesSessionsAcrossWorkspaces(t *testing.
 		t.Fatal(err)
 	}
 	server := testenv.NewHTTPServer(t, handler)
+	remote, err := httpclient.New(httpclient.Config{BaseURL: server.URL, BearerToken: token, HTTPClient: server.Client(), Compatibility: appserver.CurrentCompatibility()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err = remote.Initialize(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
 	var starts atomic.Int32
 	start := func(request localHostStartRequest) (servicelifecycle.LaunchedProcess, error) {
 		starts.Add(1)

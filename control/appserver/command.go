@@ -14,6 +14,11 @@ import (
 // Principal is trusted adapter context. It is never decoded from a command
 // body or query parameter.
 type Principal struct {
+	// ClientID and BotID are set only by authenticated Bot client enrollment.
+	// They are trusted call context, never request-body or query parameters.
+	ClientID string
+	BotID    string
+
 	ID    string   `json:"id"`
 	Roles []string `json:"roles,omitempty"`
 }

@@ -38,6 +38,28 @@ func TestBuildBwrapArgsPreservesHostReadsAndManagedMounts(t *testing.T) {
 	assertBwrapManagedMountsNotReadOnly(t, args)
 }
 
+func TestBuildBwrapArgsReadCeilingRejectsAmbientRoot(t *testing.T) {
+	workDir := t.TempDir()
+	for _, roots := range [][]string{{}, {workDir, "/usr", "/bin"}} {
+		p := policy.Default(sandbox.Config{ResourceLimits: &sandbox.ResourceLimits{ReadPaths: roots, WritePaths: []string{workDir}, Network: sandbox.NetworkDisabled}}, sandbox.Constraints{Permission: sandbox.PermissionFullAccess, Network: sandbox.NetworkEnabled})
+		args, err := buildBwrapArgs(p, workDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if hasBwrapPair(args, "--ro-bind", "/", "/") || !containsString(args, "--unshare-net") {
+			t.Fatalf("mandatory ceiling widened: %v", args)
+		}
+		for _, root := range roots {
+			if !hasBwrapPair(args, "--ro-bind", root, root) {
+				t.Fatalf("missing explicit system/work mount: %s", root)
+			}
+		}
+	}
+	if _, err := buildBwrapArgs(policy.Policy{ResourceLimits: &sandbox.ResourceLimits{ReadPaths: []string{"/"}}}, workDir); err == nil {
+		t.Fatal("ambient root read grant accepted")
+	}
+}
+
 func TestBuildBwrapArgsDoesNotTreatCWDAsImplicitWritableRoot(t *testing.T) {
 	workDir := t.TempDir()
 	p := policy.Default(sandbox.Config{CWD: workDir}, sandbox.Constraints{

@@ -21,6 +21,8 @@ const (
 	// SystemManagedAgentBot identifies a persistent Bot conversation with its own
 	// private notebook and no workspace execution.
 	SystemManagedAgentBot = "bot"
+	// SystemManagedAgentBotWork is an isolated Bot-owned work Session.
+	SystemManagedAgentBotWork = "bot-work"
 )
 
 // IsSystemManagedMetadata reports whether product Session metadata marks a
@@ -53,4 +55,9 @@ func IsBotSession(active session.Session) bool {
 // product-owned and therefore excluded from user-facing resume candidates.
 func IsSystemManagedSummary(summary session.SessionSummary) bool {
 	return IsSystemManagedMetadata(summary.Metadata)
+}
+
+// IsBotWorkSession identifies work that can only be dispatched by its Bot owner.
+func IsBotWorkSession(active session.Session) bool {
+	return active.Metadata[MetadataSystemManagedAgent] == SystemManagedAgentBotWork
 }

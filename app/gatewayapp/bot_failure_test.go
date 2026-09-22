@@ -208,11 +208,11 @@ func TestBotCommittedSaveKeepsNewModelPinWhenClientCancels(t *testing.T) {
 			if failRead && (result.Revision != 0 || result.Detail == "") {
 				t.Fatalf("unobserved revision fabricated: %+v", result)
 			}
-			tools, err := active.instance.exec.(*bot.Notebook).Tools()
+			tools, err := active.instance.exec.(*bot.Files).Tools()
 			if err != nil {
 				t.Fatal(err)
 			}
-			resolver := &botTurnResolver{composition: &active.instance.runtimeComposition, notebookTools: tools}
+			resolver := &botTurnResolver{composition: &active.instance.runtimeComposition, privateFileTools: tools}
 			if _, err := resolver.ResolveTurn(ctx, kernel.TurnIntent{SessionRef: session.SessionRef{SessionID: value.SessionID}}); err != nil {
 				t.Fatalf("committed model pin rolled back: %v", err)
 			}

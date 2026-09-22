@@ -14,6 +14,7 @@ import (
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/bot"
 	controlplacement "github.com/caelis-labs/caelis/control/placement"
 	"github.com/caelis-labs/caelis/control/sessionvisibility"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
@@ -42,10 +43,19 @@ func (s *controlCommandBackend) ExecuteControlCommand(ctx context.Context, princ
 	if create, ok := request.(appserver.CreateSessionRequest); ok && isReservedBotCreation(create) {
 		return appserver.CommandResult{}, appserver.NewOutcomeError(appserver.OutcomeRejected, appserver.ErrUnauthorized)
 	}
+	if req, ok := request.(appserver.BotReminderRequest); ok {
+		return s.fireBotReminder(ctx, principal, req)
+	}
+	if req, ok := request.(appserver.BotClientExitRequest); ok {
+		return s.exitBotClient(ctx, principal, req)
+	}
+	if req, ok := request.(appserver.BotWorkRequest); ok {
+		return s.executeBotWork(ctx, principal, action, req)
+	}
 	if action == appserver.ActionBotCreate || action == appserver.ActionBotUpdate {
 		return s.executeBotCommand(ctx, principal, request)
 	}
-	if action == appserver.ActionPrompt {
+	if action == appserver.ActionPrompt || action == appserver.ActionCancel {
 		active, err := s.composition.sessions.Session(ctx, session.SessionRef{SessionID: controlCommandSessionID(request)})
 		if err != nil {
 			return appserver.CommandResult{}, classifyControlPreDispatchError(err)
@@ -53,9 +63,26 @@ func (s *controlCommandBackend) ExecuteControlCommand(ctx context.Context, princ
 		if sessionvisibility.IsBotSession(active) {
 			s.botAdmissionMu.Lock()
 			defer s.botAdmissionMu.Unlock()
-			if err := s.admitBotPrompt(ctx, active); err != nil {
-				return appserver.CommandResult{SessionID: active.SessionID}, classifyControlPreDispatchError(err)
+			if action == appserver.ActionPrompt {
+				if err := s.admitBotPrompt(ctx, active); err != nil {
+					return appserver.CommandResult{SessionID: active.SessionID}, classifyControlPreDispatchError(err)
+				}
+				var admission *botTurnAdmission
+				ctx, admission, err = s.admitBotRequest(ctx, principal, active, request.(appserver.PromptRequest))
+				if err != nil {
+					if errorcode.CodeOf(err) == errorcode.UnknownOutcome {
+						return appserver.CommandResult{SessionID: active.SessionID}, appserver.NewOutcomeError(appserver.OutcomeUnknown, err)
+					}
+					return appserver.CommandResult{}, classifyControlPreDispatchError(err)
+				}
+				defer func() {
+					if err := s.finishBotRequest(ctx, admission, result); err != nil {
+						result.Outcome = appserver.OutcomeUnknown
+						commandErr = errors.Join(commandErr, appserver.NewOutcomeError(appserver.OutcomeUnknown, err))
+					}
+				}()
 			}
+
 		}
 	}
 	if isHostConfigurationCommandRequest(request) {
@@ -373,7 +400,22 @@ func (s *runtimeComposition) executeControlCommand(ctx context.Context, principa
 			Metadata:       map[string]any{"operation_id": req.OperationID},
 			Observer:       observer,
 		})
-		retainControlTurn(result.Handle, releaseTurn)
+		if sessionvisibility.IsBotSession(active) && result.Handle != nil && s.authorities.botReportReady != nil {
+			handle := result.Handle
+			go func() {
+				defer releaseTurn()
+				_ = handle.WaitCompletion(context.Background())
+				if s.authorities.lifecycleCtx.Err() != nil {
+					return
+				}
+				reportCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+				id, _ := active.Metadata[bot.MetadataID].(string)
+				s.authorities.botReportReady(reportCtx, active.UserID, id)
+			}()
+		} else {
+			retainControlTurn(result.Handle, releaseTurn)
+		}
 		out := sessionCommandResult(result.Session)
 		if result.Handle != nil {
 			out.Target = appserver.TurnTarget{HandleID: result.Handle.HandleID(), RunID: result.Handle.RunID(), TurnID: result.Handle.TurnID()}
@@ -408,6 +450,12 @@ func (s *runtimeComposition) executeControlCommand(ctx context.Context, principa
 		active, err := s.checkControlTurnTarget(ctx, req.WriteBase, req.Target)
 		if err != nil {
 			return sessionCommandResult(active), classifyControlBackendError(err)
+		}
+		if sessionvisibility.IsBotSession(active) && s.authorities.botWork != nil {
+			id, _ := active.Metadata[bot.MetadataID].(string)
+			if err := s.authorities.botWork.PauseReports(ctx, active.UserID, id, true); err != nil {
+				return sessionCommandResult(active), classifyControlPreDispatchError(err)
+			}
 		}
 		err = gw.Interrupt(ctx, kernelimpl.InterruptRequest{
 			SessionRef: active.SessionRef, Reason: req.Reason,

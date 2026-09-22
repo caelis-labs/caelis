@@ -85,6 +85,13 @@ func (s *botService) ListBots(ctx context.Context, principal Principal) ([]bot.B
 	if ownerID == "" {
 		return nil, ErrUnauthorized
 	}
+	if principal.ClientID != "" {
+		value, err := s.GetBot(ctx, principal, principal.BotID)
+		if err != nil {
+			return nil, err
+		}
+		return []bot.Bot{value}, nil
+	}
 	return s.config.Reader.ListBots(ctx, ownerID)
 }
 
@@ -93,6 +100,9 @@ func (s *botService) GetBot(ctx context.Context, principal Principal, botID stri
 		return bot.Bot{}, ErrUnauthorized
 	}
 	botID = strings.TrimSpace(botID)
+	if principal.ClientID != "" && botID != principal.BotID {
+		return bot.Bot{}, ErrUnauthorized
+	}
 	if botID == "" {
 		return bot.Bot{}, errors.New("controlclient: bot id is required")
 	}

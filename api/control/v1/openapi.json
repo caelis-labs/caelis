@@ -1833,6 +1833,1079 @@
           }
         }
       }
+    },
+    "/bots/{bot_id}/work": {
+      "get": {
+        "operationId": "listBotWork",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/BotID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BotWorkList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/bots/{bot_id}/work/{work_id}": {
+      "get": {
+        "operationId": "getBotWork",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/BotID"
+          },
+          {
+            "name": "work_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BotWork"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/bots/{bot_id}/requests/{operation_id}": {
+      "get": {
+        "operationId": "getBotRequest",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/BotID"
+          },
+          {
+            "name": "operation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BotRequestSource"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/bots/{bot_id}/work-operations/{operation_id}": {
+      "get": {
+        "operationId": "getBotWorkOperation",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/BotID"
+          },
+          {
+            "name": "operation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BotWorkOperation"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/bots/{bot_id}/completions": {
+      "get": {
+        "operationId": "listBotCompletions",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/BotID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BotCompletionList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/bots/{bot_id}/work/create": {
+      "post": {
+        "operationId": "createBotWork",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/BotID"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BotWorkRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/CommandCommitted"
+          },
+          "202": {
+            "$ref": "#/components/responses/CommandAccepted"
+          },
+          "400": {
+            "$ref": "#/components/responses/CommandBadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/CommandConflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/bots/{bot_id}/work/continue": {
+      "post": {
+        "operationId": "continueBotWork",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/BotID"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BotWorkRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/CommandCommitted"
+          },
+          "202": {
+            "$ref": "#/components/responses/CommandAccepted"
+          },
+          "400": {
+            "$ref": "#/components/responses/CommandBadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/CommandConflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/bots/{bot_id}/work/steer": {
+      "post": {
+        "operationId": "steerBotWork",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/BotID"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BotWorkRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/CommandCommitted"
+          },
+          "202": {
+            "$ref": "#/components/responses/CommandAccepted"
+          },
+          "400": {
+            "$ref": "#/components/responses/CommandBadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/CommandConflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/bots/{bot_id}/work/cancel": {
+      "post": {
+        "operationId": "cancelBotWork",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/BotID"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BotWorkRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/CommandCommitted"
+          },
+          "202": {
+            "$ref": "#/components/responses/CommandAccepted"
+          },
+          "400": {
+            "$ref": "#/components/responses/CommandBadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/CommandConflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/bots/{bot_id}/work/acknowledge": {
+      "post": {
+        "operationId": "acknowledgeBotCompletion",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/BotID"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BotWorkRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/CommandCommitted"
+          },
+          "202": {
+            "$ref": "#/components/responses/CommandAccepted"
+          },
+          "400": {
+            "$ref": "#/components/responses/CommandBadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/CommandConflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/bots/{bot_id}/client": {
+      "get": {
+        "operationId": "getBotClient",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/BotID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Scoped Bot state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BotClient"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
+    },
+    "/bots/{bot_id}/client/actions": {
+      "get": {
+        "operationId": "botDesktopSnapshot",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/BotID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Scoped Bot state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BotDesktopSnapshot"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
+    },
+    "/bots/{bot_id}/client/actions/{action_id}": {
+      "get": {
+        "operationId": "getBotDesktopCall",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/BotID"
+          },
+          {
+            "$ref": "#/components/parameters/ActionID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Scoped Bot state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BotDesktopCall"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
+    },
+    "/bots/{bot_id}/client/reminders": {
+      "get": {
+        "operationId": "listBotReminders",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/BotID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Scoped Bot state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BotReminderGrantList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
+    },
+    "/bots/{bot_id}/clients/register": {
+      "post": {
+        "operationId": "registerBotClient",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/BotID"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterBotClientRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authenticated connection receipt.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BotClientRegistration"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/CommandBadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/CommandConflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/bots/{bot_id}/client/activate": {
+      "post": {
+        "operationId": "activateBotClient",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/BotID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BotEmptyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authenticated connection receipt.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BotClient"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/CommandBadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/CommandConflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/bots/{bot_id}/client/renew": {
+      "post": {
+        "operationId": "renewBotClient",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/BotID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BotEmptyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authenticated connection receipt.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BotClient"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/CommandBadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/CommandConflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/bots/{bot_id}/client/actions/{action_id}/claim": {
+      "post": {
+        "operationId": "claimBotDesktopCall",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/BotID"
+          },
+          {
+            "$ref": "#/components/parameters/ActionID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BotEmptyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authenticated connection receipt.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BotDesktopClaim"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/CommandBadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/CommandConflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/bots/{bot_id}/client/actions/{action_id}/result": {
+      "post": {
+        "operationId": "completeBotDesktopCall",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/BotID"
+          },
+          {
+            "$ref": "#/components/parameters/ActionID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BotDesktopReceipt"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authenticated connection receipt.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BotDesktopCall"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/CommandBadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/CommandConflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/bots/{bot_id}/client/exit": {
+      "post": {
+        "operationId": "exitBotClient",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/BotID"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BotClientExitRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/CommandCommitted"
+          },
+          "202": {
+            "$ref": "#/components/responses/CommandAccepted"
+          },
+          "400": {
+            "$ref": "#/components/responses/CommandBadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/CommandConflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/bots/{bot_id}/client/reminders/fire": {
+      "post": {
+        "operationId": "fireBotReminder",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/BotID"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BotReminderRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/CommandCommitted"
+          },
+          "202": {
+            "$ref": "#/components/responses/CommandAccepted"
+          },
+          "400": {
+            "$ref": "#/components/responses/CommandBadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/CommandConflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/bots/{bot_id}/client/actions/events": {
+      "get": {
+        "operationId": "watchBotDesktop",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/BotID"
+          },
+          {
+            "name": "Last-Event-ID",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Complete pending mailbox snapshots. Event bot.desktop.snapshot; SSE id equals cursor. A snapshot never authorizes execution.",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/BotDesktopSnapshot"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
+    },
+    "/bots/{bot_id}/client/reminder-occurrences": {
+      "get": {
+        "operationId": "listBotReminderOccurrences",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/BotID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Scoped Bot state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BotReminderFireList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1845,7 +2918,15 @@
       "BotID": {"name": "bot_id", "in": "path", "required": true, "schema": {"type": "string", "minLength": 1}},
       "IdempotencyKey": {"name": "Idempotency-Key", "in": "header", "required": true, "schema": {"type": "string", "minLength": 1}},
       "IfMatch": {"name": "If-Match", "in": "header", "schema": {"type": "string"}},
-      "After": {"name": "after", "in": "query", "schema": {"type": "string"}}
+      "After": {"name": "after", "in": "query", "schema": {"type": "string"}},
+      "ActionID": {
+        "name": "action_id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string"
+        }
+      }
     },
     "requestBodies": {
       "CloseSession": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/CloseSessionRequest"}}}},
@@ -2056,7 +3137,23 @@
     },
       "AgentCandidate": {"type":"object","required":["name"],"properties":{"name":{"type":"string"},"description":{"type":"string"}},"additionalProperties":false},
       "AgentCandidateList": {"type":"array","items":{"$ref":"#/components/schemas/AgentCandidate"}},
-      "BotConfig": {"type":"object","required":["name"],"properties":{"name":{"type":"string"},"description":{"type":"string"},"model":{"type":"string"},"effort":{"type":"string"},"fast":{"type":"boolean"}},"additionalProperties":false},
+      "BotConfig": {"type":"object","required":["name"],"properties":{"name":{"type":"string"},"description":{"type":"string"},"model":{"type":"string"},"effort":{"type":"string"},"fast":{"type":"boolean"},
+          "managed_work": {
+            "type": "boolean",
+            "default": false
+          },
+          "desktop_actions": {
+            "type": "boolean",
+            "default": false
+          },
+          "work_permission": {
+            "type": "string",
+            "enum": [
+              "",
+              "workspace-write"
+            ]
+          }
+        },"additionalProperties":false},
       "Bot": {"type":"object","required":["id","session_id","revision","config"],"properties":{"id":{"type":"string"},"session_id":{"type":"string"},"revision":{"$ref":"#/components/schemas/Uint64Decimal"},"config":{"$ref":"#/components/schemas/BotConfig"},"model_selector":{"type":"string"}},"additionalProperties":false},
       "BotList": {"type":"array","items":{"$ref":"#/components/schemas/Bot"}},
       "CreateBotRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["config"],"properties":{"config":{"$ref":"#/components/schemas/BotConfig"}}}],"unevaluatedProperties":false},
@@ -2111,7 +3208,12 @@
         "properties": {
           "output_cursor": {"$ref": "#/components/schemas/Uint64Decimal"},
           "event_cursor": {"$ref": "#/components/schemas/Uint64Decimal"},
-          "turn_seq": {"$ref": "#/components/schemas/Uint64Decimal"}
+          "turn_seq": {"$ref": "#/components/schemas/Uint64Decimal"},
+          "managed_work": {
+            "type": "boolean",
+            "default": false,
+            "description": "Explicitly enable isolated managed work; absent is disabled."
+          }
         },
         "additionalProperties": {"$ref": "#/components/schemas/JSONValue"}
       },
@@ -2655,10 +3757,707 @@
           "approval": {"$ref": "#/components/schemas/ApprovalState"}, "capabilities": {"$ref": "#/components/schemas/ClientCapabilities"}
         }
       },
-      "ServerInfo": {"type": "object", "additionalProperties": false, "required": ["protocol_version", "envelope_version", "api_version"], "properties": {"protocol_version": {"type": "integer"}, "envelope_version": {"type": "string"}, "api_version": {"type": "string"}, "distribution_version": {"type": "string"}, "build_id": {"type": "string"}, "build_kind": {"type": "string", "enum": ["dev", "release"]}, "server_id": {"type": "string"}, "instance_id": {"type": "string"}, "capabilities": {"type": "array", "items": {"type": "string"}}, "transports": {"type": "array", "items": {"type": "string"}}}},
+      "ServerInfo": {"type": "object", "additionalProperties": false, "required": ["protocol_version", "envelope_version", "api_version"], "properties": {"protocol_version": {"type": "integer"}, "envelope_version": {"type": "string"}, "api_version": {"type": "string"}, "distribution_version": {"type": "string"}, "build_id": {"type": "string"}, "build_kind": {"type": "string", "enum": ["dev", "release"]}, "server_id": {"type": "string"}, "instance_id": {"type": "string"}, "capabilities": {"type": "array", "items": {"type": "string"}}, "transports": {"type": "array", "items": {"type": "string"}},
+          "store_id": {
+            "type": "string"
+          }
+        }},
       "HostStatus": {"type": "object", "additionalProperties": false, "required": ["server_id", "instance_id", "ready"], "properties": {"server_id": {"type": "string"}, "instance_id": {"type": "string"}, "ready": {"type": "boolean"}}},
       "SessionSummary": {"type": "object", "additionalProperties": false, "properties": {"app_name": {"type": "string"}, "user_id": {"type": "string"}, "session_id": {"type": "string"}, "workspace_key": {"type": "string"}, "cwd": {"type": "string"}, "title": {"type": "string"}, "metadata": {"$ref": "#/components/schemas/JSONObject"}, "updated_at": {"type": "string", "format": "date-time"}}},
-      "SessionList": {"type": "object", "additionalProperties": false, "properties": {"sessions": {"type": "array", "items": {"$ref": "#/components/schemas/SessionSummary"}}, "next_cursor": {"type": "string"}, "running_session_ids": {"type": "array", "items": {"type": "string"}}}}
+      "SessionList": {"type": "object", "additionalProperties": false, "properties": {"sessions": {"type": "array", "items": {"$ref": "#/components/schemas/SessionSummary"}}, "next_cursor": {"type": "string"}, "running_session_ids": {"type": "array", "items": {"type": "string"}}}},
+      "BotExecution": {
+        "type": "object",
+        "properties": {
+          "instance_id": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "handle_id": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "turn_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "instance_id",
+          "session_id",
+          "handle_id",
+          "run_id",
+          "turn_id"
+        ],
+        "additionalProperties": false
+      },
+      "BotRequestSource": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "principal_id": {
+            "type": "string"
+          },
+          "bot_id": {
+            "type": "string"
+          },
+          "operation_id": {
+            "type": "string"
+          },
+          "digest": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "execution": {
+            "$ref": "#/components/schemas/BotExecution"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "user_request",
+              "reminder"
+            ]
+          },
+          "original_request_id": {
+            "type": "string"
+          },
+          "client_id": {
+            "type": "string"
+          },
+          "content_parts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PromptContentPart"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "principal_id",
+          "bot_id",
+          "operation_id",
+          "digest",
+          "text",
+          "execution",
+          "kind"
+        ],
+        "additionalProperties": false
+      },
+      "BotWork": {
+        "type": "object",
+        "properties": {
+          "result": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "principal_id": {
+            "type": "string"
+          },
+          "bot_id": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "workspace_key": {
+            "type": "string"
+          },
+          "source_id": {
+            "type": "string"
+          },
+          "assignment": {
+            "type": "string"
+          },
+          "creation_operation_id": {
+            "type": "string"
+          },
+          "creation_digest": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "config": {
+            "$ref": "#/components/schemas/BotConfig"
+          },
+          "execution": {
+            "$ref": "#/components/schemas/BotExecution"
+          },
+          "client_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "principal_id",
+          "bot_id",
+          "session_id",
+          "workspace_key",
+          "source_id",
+          "assignment",
+          "creation_operation_id",
+          "creation_digest",
+          "status",
+          "config",
+          "execution"
+        ],
+        "additionalProperties": false
+      },
+      "BotWorkList": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/BotWork"
+        }
+      },
+      "BotWorkOperation": {
+        "type": "object",
+        "properties": {
+          "principal_id": {
+            "type": "string"
+          },
+          "bot_id": {
+            "type": "string"
+          },
+          "work_id": {
+            "type": "string"
+          },
+          "operation_id": {
+            "type": "string"
+          },
+          "digest": {
+            "type": "string"
+          },
+          "outcome": {
+            "type": "string"
+          },
+          "execution": {
+            "$ref": "#/components/schemas/BotExecution"
+          },
+          "source_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "principal_id",
+          "bot_id",
+          "work_id",
+          "operation_id",
+          "digest",
+          "outcome",
+          "execution"
+        ],
+        "additionalProperties": false
+      },
+      "BotCompletion": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "principal_id": {
+            "type": "string"
+          },
+          "bot_id": {
+            "type": "string"
+          },
+          "work_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "report_state": {
+            "type": "string"
+          },
+          "execution": {
+            "$ref": "#/components/schemas/BotExecution"
+          },
+          "report_execution": {
+            "$ref": "#/components/schemas/BotExecution"
+          },
+          "acknowledged": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "principal_id",
+          "bot_id",
+          "work_id",
+          "status",
+          "summary",
+          "report_state",
+          "execution",
+          "report_execution",
+          "acknowledged"
+        ],
+        "additionalProperties": false
+      },
+      "BotCompletionList": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/BotCompletion"
+        }
+      },
+      "BotWorkRequest": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/WriteBase"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "bot_id": {
+                "type": "string"
+              },
+              "work_id": {
+                "type": "string"
+              },
+              "source_id": {
+                "type": "string"
+              },
+              "assignment": {
+                "type": "string",
+                "maxLength": 65536
+              },
+              "target": {
+                "$ref": "#/components/schemas/BotExecution"
+              }
+            },
+            "required": [
+              "bot_id"
+            ]
+          }
+        ],
+        "unevaluatedProperties": false
+      },
+      "RegisterBotClientRequest": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/WriteBase"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "bot_id": {
+                "type": "string"
+              },
+              "actions": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "clock",
+                    "reminders",
+                    "gesture"
+                  ]
+                },
+                "uniqueItems": true
+              }
+            },
+            "required": [
+              "bot_id",
+              "actions"
+            ]
+          }
+        ],
+        "unevaluatedProperties": false
+      },
+      "BotClientExitRequest": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/WriteBase"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "bot_id": {
+                "type": "string"
+              },
+              "activation_id": {
+                "type": "string"
+              },
+              "cancel_owned_work": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "bot_id",
+              "activation_id"
+            ]
+          }
+        ],
+        "unevaluatedProperties": false
+      },
+      "BotReminderRequest": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/WriteBase"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "bot_id": {
+                "type": "string"
+              },
+              "grant_id": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              },
+              "due": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "bot_id",
+              "grant_id",
+              "version",
+              "due"
+            ]
+          }
+        ],
+        "unevaluatedProperties": false
+      },
+      "BotClient": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "principal_id": {
+            "type": "string"
+          },
+          "bot_id": {
+            "type": "string"
+          },
+          "instance_id": {
+            "type": "string"
+          },
+          "activation_id": {
+            "type": "string"
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "activated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "actions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "principal_id",
+          "bot_id",
+          "instance_id",
+          "activation_id",
+          "active",
+          "expires_at",
+          "activated_at",
+          "actions"
+        ],
+        "additionalProperties": false
+      },
+      "BotClientRegistration": {
+        "type": "object",
+        "properties": {
+          "client": {
+            "$ref": "#/components/schemas/BotClient"
+          },
+          "token": {
+            "type": "string",
+            "writeOnly": false,
+            "description": "Returned once. Store only in native credential storage; never expose to models."
+          }
+        },
+        "required": [
+          "client",
+          "token"
+        ],
+        "additionalProperties": false
+      },
+      "BotDesktopArguments": {
+        "type": "object",
+        "properties": {
+          "operation": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "at": {
+            "type": "string"
+          },
+          "daily": {
+            "type": "string"
+          },
+          "time_zone": {
+            "type": "string"
+          },
+          "gesture": {
+            "type": "string"
+          },
+          "every_minutes": {
+            "type": "integer"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "BotDesktopCall": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "client_id": {
+            "type": "string"
+          },
+          "bot_id": {
+            "type": "string"
+          },
+          "principal_id": {
+            "type": "string"
+          },
+          "activation_id": {
+            "type": "string"
+          },
+          "item_id": {
+            "type": "string"
+          },
+          "source_id": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "execution": {
+            "$ref": "#/components/schemas/BotExecution"
+          },
+          "arguments": {
+            "$ref": "#/components/schemas/BotDesktopArguments"
+          },
+          "result": {},
+          "is_error": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "client_id",
+          "bot_id",
+          "principal_id",
+          "activation_id",
+          "item_id",
+          "source_id",
+          "action",
+          "state",
+          "execution",
+          "arguments"
+        ],
+        "additionalProperties": false
+      },
+      "BotDesktopSnapshot": {
+        "type": "object",
+        "properties": {
+          "cursor": {
+            "type": "string"
+          },
+          "calls": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BotDesktopCall"
+            }
+          }
+        },
+        "required": [
+          "cursor",
+          "calls"
+        ],
+        "additionalProperties": false
+      },
+      "BotDesktopClaim": {
+        "type": "object",
+        "properties": {
+          "call": {
+            "$ref": "#/components/schemas/BotDesktopCall"
+          },
+          "token": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "call",
+          "token"
+        ],
+        "additionalProperties": false
+      },
+      "BotDesktopReceipt": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string"
+          },
+          "result": {},
+          "is_error": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "token",
+          "result"
+        ],
+        "additionalProperties": false
+      },
+      "BotEmptyRequest": {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "additionalProperties": false
+      },
+      "BotReminderGrant": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "client_id": {
+            "type": "string"
+          },
+          "principal_id": {
+            "type": "string"
+          },
+          "bot_id": {
+            "type": "string"
+          },
+          "source_id": {
+            "type": "string"
+          },
+          "arguments": {
+            "$ref": "#/components/schemas/BotDesktopArguments"
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_occurrence": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "version",
+          "client_id",
+          "principal_id",
+          "bot_id",
+          "source_id",
+          "arguments",
+          "active",
+          "created_at",
+          "last_occurrence"
+        ],
+        "additionalProperties": false
+      },
+      "BotReminderGrantList": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/BotReminderGrant"
+        }
+      },
+      "BotReminderFire": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "grant_id": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "principal_id": {
+            "type": "string"
+          },
+          "bot_id": {
+            "type": "string"
+          },
+          "client_id": {
+            "type": "string"
+          },
+          "source_id": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "due": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "execution": {
+            "$ref": "#/components/schemas/BotExecution"
+          }
+        },
+        "required": [
+          "id",
+          "grant_id",
+          "version",
+          "principal_id",
+          "bot_id",
+          "client_id",
+          "source_id",
+          "state",
+          "due",
+          "execution"
+        ],
+        "additionalProperties": false
+      },
+      "BotReminderFireList": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/BotReminderFire"
+        }
+      }
     }
   },
   "security": [{"bearerAuth": []}]

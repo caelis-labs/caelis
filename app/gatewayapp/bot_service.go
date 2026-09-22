@@ -19,6 +19,8 @@ const botCreationDigest = "control_bot_creation_digest"
 
 func isReservedBotCreation(req appserver.CreateSessionRequest) bool {
 	return sessionvisibility.IsBotSession(session.Session{Metadata: req.Metadata}) ||
+		sessionvisibility.IsBotWorkSession(session.Session{Metadata: req.Metadata}) ||
+		strings.HasPrefix(strings.TrimSpace(req.PreferredSessionID), "bot-work-") ||
 		req.Metadata[bot.MetadataID] != nil ||
 		strings.HasPrefix(strings.TrimSpace(req.PreferredSessionID), "bot-chat-")
 }
@@ -71,9 +73,9 @@ func (b *controlCommandBackend) createBot(ctx context.Context, principal appserv
 	if err != nil {
 		return appserver.CommandResult{}, sessionConfigurationRejectedError(err)
 	}
-	// Provision through the confined notebook owner, not ambient MkdirAll: even
+	// Provision through the confined file owner, not ambient MkdirAll: even
 	// a tampered Bot-directory symlink must not create files outside its root.
-	if err := initializeBotNotebook(ctx, b.composition.authorities.storeDir, id); err != nil {
+	if err := initializeBotFiles(ctx, b.composition.authorities.storeDir, id); err != nil {
 		return appserver.CommandResult{}, classifyControlPreDispatchError(err)
 	}
 	cwd := filepath.Join(b.composition.authorities.storeDir, "bots", id)

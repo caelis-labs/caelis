@@ -29,3 +29,20 @@ func TestExplicitWriteRootsNeverAddCacheOrWorkspaceAndPreserveNetwork(t *testing
 		}
 	}
 }
+
+func TestExplicitReadCeilingNeverBecomesAmbientReadAccess(t *testing.T) {
+	for _, roots := range [][]string{{}, {"/private/tmp/work", "/usr/bin"}} {
+		cfg := sandbox.Config{ResourceLimits: &sandbox.ResourceLimits{ReadPaths: roots, WritePaths: []string{"/private/tmp/work"}, Network: sandbox.NetworkDisabled}}
+		p := policy.Default(cfg, sandbox.Constraints{Permission: sandbox.PermissionFullAccess, Network: sandbox.NetworkEnabled})
+		profile, err := buildSeatbeltProfile(p, "/private/tmp/work")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(profile, "(allow file-read*)\n") || strings.Contains(profile, "(allow network*)") {
+			t.Fatal("mandatory read/network ceiling widened")
+		}
+	}
+	if _, err := buildSeatbeltProfile(policy.Policy{ResourceLimits: &sandbox.ResourceLimits{ReadPaths: []string{"/"}}}, "/work"); err == nil {
+		t.Fatal("root read grant accepted")
+	}
+}

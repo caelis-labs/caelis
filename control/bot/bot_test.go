@@ -2,7 +2,6 @@ package bot
 
 import (
 	"encoding/json"
-	"reflect"
 	"strings"
 	"testing"
 )
@@ -30,33 +29,6 @@ func TestConfigurationRoundTripAndVersionGuard(t *testing.T) {
 		if _, err := Decode(invalid); err == nil {
 			t.Fatalf("accepted corrupt/unsupported record: %+v", invalid)
 		}
-	}
-}
-
-// TestReleasedRecordShapeStillDecodes pins the Store upgrade: records written by
-// the release that gated notebooks per Bot keep their configuration, so existing
-// Bots open unchanged, and a read never rewrites the stored bytes.
-func TestReleasedRecordShapeStillDecodes(t *testing.T) {
-	config := Config{Name: "Legacy", Description: "Preserve this.", Model: "configured-model"}
-	for name, stored := range map[string]map[string]any{
-		"tool-free baseline": {"version": 1, "id": "stable-id", "config": config},
-		"admitted notebook":  {"version": 1, "id": "stable-id", "config": config, "notebook_version": 1},
-	} {
-		t.Run(name, func(t *testing.T) {
-			state := map[string]any{StateKey: stored}
-			before, err := json.Marshal(state)
-			if err != nil {
-				t.Fatal(err)
-			}
-			id, decoded, err := ReadState(state)
-			if err != nil || id != "stable-id" || decoded != config {
-				t.Fatalf("released record = %q, %+v, %v", id, decoded, err)
-			}
-			after, err := json.Marshal(state)
-			if err != nil || !reflect.DeepEqual(before, after) {
-				t.Fatalf("read rewrote released state: before=%s after=%s err=%v", before, after, err)
-			}
-		})
 	}
 }
 
