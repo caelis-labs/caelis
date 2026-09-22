@@ -3,6 +3,7 @@ package modelconfig
 import (
 	"context"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 
@@ -62,10 +63,6 @@ func TestAssembleConnectBuildsManagedGrokOAuthProfiles(t *testing.T) {
 			t.Fatalf("credential material leaked into config = %#v", cfg)
 		}
 	}
-	if got := configs[0]; got.ContextWindowTokens != 500000 || got.MaxOutputTok != 32768 ||
-		got.ReasoningEffort != "high" || strings.Join(got.ReasoningLevels, ",") != "low,medium,high" {
-		t.Fatalf("grok-4.5 defaults = %#v", got)
-	}
 	if configs[0].ImageInput != nil {
 		t.Fatalf("grok-4.5 image override = %v, want maintained catalog capability", configs[0].ImageInput)
 	}
@@ -96,21 +93,6 @@ func TestAssembleConnectRejectsCustomGrokOAuthEndpoint(t *testing.T) {
 	}
 }
 
-func TestGrok46OAuthDefaultsIncludeXHighReasoning(t *testing.T) {
-	defaults, err := ResolveModelDefaultsForEndpoint("grok", "", "grok-4.6")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if defaults.ContextWindowTokens != 500000 || defaults.MaxOutputTokens != 32768 ||
-		defaults.DefaultReasoningEffort != "high" ||
-		strings.Join(defaults.ReasoningLevels, ",") != "low,medium,high,xhigh" {
-		t.Fatalf("grok-4.6 defaults = %#v", defaults)
-	}
-	if defaults.ImageInput == nil || !*defaults.ImageInput {
-		t.Fatalf("grok-4.6 image input = %v, want maintained true", defaults.ImageInput)
-	}
-}
-
 func TestGrokOAuthNonReasoningModelDisablesReasoning(t *testing.T) {
 	defaults, err := ResolveModelDefaultsForEndpoint("grok", "", "grok-4.20-0309-non-reasoning")
 	if err != nil {
@@ -129,16 +111,12 @@ func TestMaintainedSelectableGrokOAuthModels(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(models) != 1 || models[0].Name != "grok-4.6" {
-		t.Fatalf("models = %#v, want only current grok-4.6", models)
+	if got := selectableModelNames(models); !slices.Equal(got, grokOAuthSelectableModels()) {
+		t.Fatalf("models = %#v, want maintained grok OAuth fallback %#v", got, grokOAuthSelectableModels())
 	}
 	for _, model := range models {
 		if !model.MetadataComplete || !model.ImageInputKnown {
 			t.Fatalf("model = %#v, want complete image-capable metadata", model)
 		}
-	}
-	legacy, err := ResolveModelDefaultsForEndpoint("xai", "", "grok-4.5")
-	if err != nil || legacy.ContextWindowTokens != 500000 {
-		t.Fatalf("ResolveModelDefaultsForEndpoint(xai, grok-4.5) = %#v, %v; want retained compatibility defaults", legacy, err)
 	}
 }

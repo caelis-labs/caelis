@@ -64,6 +64,15 @@ var ollamaCloudModels = []ollamaCloudModel{
 		DefaultReasoningEffort: "high",
 	},
 	{
+		// https://ollama.com/library/deepseek-v4.1-flash
+		Name:                   "deepseek-v4.1-flash",
+		ContextWindowTokens:    1000000,
+		SupportsImages:         true,
+		ReasoningMode:          ReasoningModeToggle,
+		ReasoningEfforts:       []string{"high", "max"},
+		DefaultReasoningEffort: "high",
+	},
+	{
 		Name:                   "deepseek-v4-flash",
 		ContextWindowTokens:    1000000,
 		ReasoningMode:          ReasoningModeToggle,
