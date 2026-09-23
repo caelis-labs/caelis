@@ -78,6 +78,36 @@ func TestOpenAILegacyModelsRetainRuntimeCapabilitiesWithoutRecommendations(t *te
 	}
 }
 
+func TestAnthropicCatalogRecommendsCurrentModels(t *testing.T) {
+	disableDynamicCatalogForTest(t)
+	want := []string{"claude-fable-5-1", "claude-haiku-4-5", "claude-mythos-5-1", "claude-opus-5-5", "claude-sonnet-5"}
+	if got := ListRecommendedModels("anthropic"); !sameStrings(got, want) {
+		t.Fatalf("Anthropic recommendations = %v, want %v", got, want)
+	}
+
+	for _, tc := range []struct {
+		name   string
+		effort string
+	}{
+		{name: "claude-opus-5-5", effort: "medium"},
+		{name: "claude-opus-5", effort: "high"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			caps, ok := LookupModelCapabilities("anthropic", tc.name)
+			if !ok || caps.ContextWindowTokens != 1000000 || caps.MaxOutputTokens != 128000 || caps.DefaultMaxOutputTokens != 32768 {
+				t.Fatalf("limits = %+v, found=%v", caps, ok)
+			}
+			if !caps.SupportsImages || !caps.SupportsToolCalls || !caps.SupportsJSONOutput || !caps.SupportsReasoning {
+				t.Fatalf("capabilities = %+v, want vision, tools, JSON, and reasoning", caps)
+			}
+			if caps.ReasoningMode != ReasoningModeEffort || caps.DefaultReasoningEffort != tc.effort ||
+				!sameStrings(ReasoningLevelsForModel("anthropic", tc.name), []string{"low", "medium", "high", "xhigh", "max"}) {
+				t.Fatalf("reasoning = %+v, want effort control with default %q and no off option", caps, tc.effort)
+			}
+		})
+	}
+}
+
 func TestLookupSuggestedModelCapabilitiesDoesNotInheritVendorForCompatibleEndpoints(t *testing.T) {
 	for _, test := range []struct {
 		provider string

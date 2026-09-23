@@ -1,7 +1,9 @@
 package tuiapp
 
 import (
+	"context"
 	"image/color"
+	"slices"
 	"strings"
 	"testing"
 
@@ -10,6 +12,7 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/internal/controlprompt/connectwizard"
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 )
@@ -97,6 +100,37 @@ func TestRenderConnectModelPickerShowsMaintainedCatalogModels(t *testing.T) {
 	for _, removed := range []string{"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"} {
 		if strings.Contains(rendered, removed) {
 			t.Fatalf("renderInputOverlay() = %q, should not paint removed model %q", rendered, removed)
+		}
+	}
+}
+
+func TestRenderConnectModelPickerShowsCurrentAnthropicCatalog(t *testing.T) {
+	models, err := modelconfig.MaintainedSelectableModels(context.Background(), "anthropic", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	model := NewModel(Config{Commands: DefaultCommands()})
+	model.width = 120
+	model.slashArgActive = true
+	model.slashArgCommand = "connect-model:" + (connectwizard.ConnectWizardState{Provider: "anthropic"}).EncodeCompletionState()
+	for _, item := range models {
+		model.slashArgCandidates = append(model.slashArgCandidates, SlashArgCandidate{
+			Value: item.Name, Display: item.Name, Detail: item.Detail,
+			ModelMetadataComplete: item.MetadataComplete, ModelImageInputKnown: true,
+		})
+	}
+
+	rendered := ansi.Strip(model.renderInputOverlay())
+	t.Logf("Anthropic model menu:\n%s", rendered)
+	fields := strings.Fields(rendered)
+	for _, want := range []string{"claude-opus-5-5", "claude-sonnet-5", "claude-haiku-4-5"} {
+		if !slices.Contains(fields, want) {
+			t.Fatalf("renderInputOverlay() = %q, want current model %q", rendered, want)
+		}
+	}
+	for _, retired := range []string{"claude-opus-5", "claude-opus-4-8", "claude-sonnet-4-6"} {
+		if slices.Contains(fields, retired) {
+			t.Fatalf("renderInputOverlay() = %q, must not recommend retired model %q", rendered, retired)
 		}
 	}
 }

@@ -112,6 +112,36 @@ func TestAssembleConnectBuildsCompleteKnownModelConfig(t *testing.T) {
 	}
 }
 
+func TestAssembleConnectAnthropicOpusDefaults(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		model  string
+		effort string
+	}{
+		{model: "claude-opus-5-5", effort: "medium"},
+		{model: "claude-opus-5", effort: "high"},
+	} {
+		t.Run(tc.model, func(t *testing.T) {
+			configs, err := AssembleConnect(context.Background(), ConnectRequest{
+				Provider: "anthropic",
+				Models:   []ModelSelection{{Name: tc.model}},
+				APIKey:   "secret",
+			}, ConnectOptions{})
+			if err != nil || len(configs) != 1 {
+				t.Fatalf("AssembleConnect() = %#v, %v, want one config", configs, err)
+			}
+			cfg := configs[0]
+			if cfg.Model != tc.model || cfg.API != model.APIAnthropic || cfg.ContextWindowTokens != 1000000 || cfg.MaxOutputTok != 32768 {
+				t.Fatalf("assembled model = %#v", cfg)
+			}
+			if cfg.ReasoningMode != modelcatalog.ReasoningModeEffort || cfg.ReasoningEffort != tc.effort ||
+				cfg.DefaultReasoningEffort != tc.effort || !slices.Equal(cfg.ReasoningLevels, []string{"low", "medium", "high", "xhigh", "max"}) {
+				t.Fatalf("assembled reasoning = %#v, want default %q without an off option", cfg, tc.effort)
+			}
+		})
+	}
+}
+
 func TestMaintainedSelectableModelsOnlyReturnsMetadataBackedModels(t *testing.T) {
 	t.Parallel()
 
