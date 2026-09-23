@@ -58,6 +58,7 @@ func TestAnthropicBuildRequestUsesAdaptiveThinkingForSupportedModels(t *testing.
 		provider string
 		model    string
 	}{
+		{name: "Opus 5.5", provider: "anthropic", model: "claude-opus-5-5"},
 		{name: "current Claude 5", provider: "anthropic", model: "claude-sonnet-5"},
 		{name: "legacy Claude 4", provider: "anthropic", model: "claude-opus-4-8"},
 		{name: "compatible endpoint", provider: "anthropic-compatible", model: "claude-fable-5-1"},
@@ -176,20 +177,76 @@ func TestMiniMaxM2BuildRequestKeepsManualThinkingBudget(t *testing.T) {
 	}
 }
 
-func TestAnthropicBuildRequestKeepsThinkingOnForLegacyFable(t *testing.T) {
-	llm := newAnthropic(Config{Provider: "anthropic", Model: "claude-fable-5"}, "anthropic-token").(*anthropicSDKLLM)
-
-	params, err := llm.buildRequest(&model.Request{
-		Messages:  []model.Message{model.NewTextMessage(model.RoleUser, "answer briefly")},
-		Reasoning: model.ReasoningConfig{Effort: "none"},
-	})
-	if err != nil {
-		t.Fatalf("buildRequest() error = %v", err)
+func TestAnthropicBuildRequestHandlesThinkingOffByModel(t *testing.T) {
+	for _, tc := range []struct {
+		model   string
+		want    string
+		display any
+	}{
+		{model: "claude-fable-5", want: "adaptive"},
+		{model: "claude-opus-5-5", want: "adaptive", display: "summarized"},
+		{model: "claude-opus-5", want: "disabled"},
+		{model: "claude-sonnet-5", want: "disabled"},
+	} {
+		for _, effort := range []string{"none", "off", "disabled"} {
+			t.Run(tc.model+"/"+effort, func(t *testing.T) {
+				llm := newAnthropic(Config{Provider: "anthropic", Model: tc.model}, "anthropic-token").(*anthropicSDKLLM)
+				params, err := llm.buildRequest(&model.Request{
+					Messages:  []model.Message{model.NewTextMessage(model.RoleUser, "answer briefly")},
+					Reasoning: model.ReasoningConfig{Effort: effort},
+				})
+				if err != nil {
+					t.Fatalf("buildRequest() error = %v", err)
+				}
+				payload := marshalAnthropicParamsForTest(t, params)
+				thinking := nestedMapForTest(t, payload, "thinking")
+				if got := thinking["type"]; got != tc.want {
+					t.Fatalf("thinking.type = %#v, want %s", got, tc.want)
+				}
+				if got := thinking["display"]; got != tc.display {
+					t.Fatalf("thinking.display = %#v, want %#v", got, tc.display)
+				}
+				if _, ok := payload["output_config"]; ok {
+					t.Fatalf("output_config = %#v, must not send an off effort", payload["output_config"])
+				}
+			})
+		}
 	}
+}
 
-	thinking := nestedMapForTest(t, marshalAnthropicParamsForTest(t, params), "thinking")
-	if got := thinking["type"]; got != "adaptive" {
-		t.Fatalf("thinking.type = %#v, want always-on adaptive thinking", got)
+func TestAnthropicOpus55BuildRequestUsesAdaptiveEffortWithoutManualBudget(t *testing.T) {
+	llm := newAnthropic(Config{Provider: "anthropic", Model: "claude-opus-5-5"}, "anthropic-token").(*anthropicSDKLLM)
+	for _, reasoning := range []model.ReasoningConfig{
+		{},
+		{BudgetTokens: 4096},
+		{Effort: "low"},
+		{Effort: "medium"},
+		{Effort: "high", BudgetTokens: 4096},
+		{Effort: "xhigh"},
+		{Effort: "max"},
+	} {
+		t.Run(reasoning.Effort, func(t *testing.T) {
+			params, err := llm.buildRequest(&model.Request{
+				Messages:  []model.Message{model.NewTextMessage(model.RoleUser, "reason carefully")},
+				Reasoning: reasoning,
+			})
+			if err != nil {
+				t.Fatalf("buildRequest() error = %v", err)
+			}
+			payload := marshalAnthropicParamsForTest(t, params)
+			thinking := nestedMapForTest(t, payload, "thinking")
+			if thinking["type"] != "adaptive" || thinking["budget_tokens"] != nil || thinking["display"] != "summarized" {
+				t.Fatalf("thinking = %#v, want summarized adaptive thinking without manual budget", thinking)
+			}
+			effort := reasoning.Effort
+			if effort == "" {
+				if _, ok := payload["output_config"]; ok {
+					t.Fatalf("output_config = %#v, want provider default effort", payload["output_config"])
+				}
+			} else if got := nestedMapForTest(t, payload, "output_config")["effort"]; got != effort {
+				t.Fatalf("output_config.effort = %#v, want %s", got, effort)
+			}
+		})
 	}
 }
 

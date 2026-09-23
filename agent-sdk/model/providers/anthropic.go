@@ -438,7 +438,7 @@ func isAnthropicAdaptiveThinkingModel(modelName string) bool {
 
 func isAnthropicAlwaysOnThinkingModel(modelName string) bool {
 	modelName = strings.ToLower(strings.TrimSpace(modelName))
-	for _, prefix := range []string{"claude-fable-5", "claude-mythos-5", "claude-mythos-preview"} {
+	for _, prefix := range []string{"claude-fable-5", "claude-mythos-5", "claude-mythos-preview", "claude-opus-5-5"} {
 		if modelName == prefix || strings.HasPrefix(modelName, prefix+"-") {
 			return true
 		}
@@ -450,10 +450,17 @@ func applyAnthropicAdaptiveThinking(params *anthropic.MessageNewParams, modelNam
 	if params == nil {
 		return
 	}
+	adaptive := &anthropic.ThinkingConfigAdaptiveParam{}
+	modelName = strings.ToLower(strings.TrimSpace(modelName))
+	if modelName == "claude-opus-5-5" || strings.HasPrefix(modelName, "claude-opus-5-5-") {
+		// Opus 5.5 omits thinking text by default, including progress updates.
+		adaptive.Display = anthropic.ThinkingConfigAdaptiveDisplaySummarized
+		params.Thinking.OfAdaptive = adaptive
+	}
 	effort := strings.ToLower(strings.TrimSpace(reasoning.Effort))
 	if effort == "none" || effort == "off" || effort == "disabled" {
 		if isAnthropicAlwaysOnThinkingModel(modelName) {
-			params.Thinking.OfAdaptive = &anthropic.ThinkingConfigAdaptiveParam{}
+			params.Thinking.OfAdaptive = adaptive
 			return
 		}
 		disabled := anthropic.NewThinkingConfigDisabledParam()
@@ -463,7 +470,7 @@ func applyAnthropicAdaptiveThinking(params *anthropic.MessageNewParams, modelNam
 	if effort == "" && reasoning.BudgetTokens <= 0 {
 		return
 	}
-	params.Thinking.OfAdaptive = &anthropic.ThinkingConfigAdaptiveParam{}
+	params.Thinking.OfAdaptive = adaptive
 	switch effort {
 	case "low", "medium", "high", "xhigh", "max":
 		params.OutputConfig.Effort = anthropic.OutputConfigEffort(effort)

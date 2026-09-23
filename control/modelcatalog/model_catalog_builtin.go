@@ -507,7 +507,27 @@ var builtinCatalog = []catalogEntry{
 	},
 	{
 		provider: "anthropic",
-		pattern:  "claude-opus-5",
+		pattern:  "claude-opus-5-5",
+		// https://platform.claude.com/docs/en/models/opus-5-5/overview
+		caps: ModelCapabilities{
+			ContextWindowTokens:    1000000,
+			MaxOutputTokens:        128000,
+			DefaultMaxOutputTokens: 32768,
+			SupportsToolCalls:      true,
+			SupportsReasoning:      true,
+			ReasoningMode:          ReasoningModeEffort,
+			ReasoningEfforts:       []string{"low", "medium", "high", "xhigh", "max"},
+			DefaultReasoningEffort: "medium",
+			SupportsJSONOutput:     true,
+			SupportsImages:         true,
+		},
+	},
+	// Control retains Opus 5 capabilities for saved profiles. Remove this entry
+	// only when a configuration migration preserves or retires those profiles.
+	{
+		provider:                  "anthropic",
+		pattern:                   "claude-opus-5",
+		hiddenFromRecommendations: true,
 		caps: ModelCapabilities{
 			ContextWindowTokens:    1000000,
 			MaxOutputTokens:        128000,
