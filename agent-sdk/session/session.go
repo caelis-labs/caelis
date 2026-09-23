@@ -577,9 +577,11 @@ type ListSessionsRequest struct {
 	// the caller's Control principal. WorkspaceKey is the reusable SDK namespace.
 	UserID       string `json:"user_id,omitempty"`
 	WorkspaceKey string `json:"workspace_key,omitempty"`
-	CWD          string `json:"cwd,omitempty"`
-	Cursor       string `json:"cursor,omitempty"`
-	Limit        int    `json:"limit,omitempty"`
+	// CWD filters by lexically cleaned native paths, ignoring case on Windows.
+	// Matching does not resolve symlinks or change persisted workspace identity.
+	CWD    string `json:"cwd,omitempty"`
+	Cursor string `json:"cursor,omitempty"`
+	Limit  int    `json:"limit,omitempty"`
 }
 
 // ActorRef identifies the actor associated with one event.

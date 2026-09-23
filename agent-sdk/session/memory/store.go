@@ -2,7 +2,6 @@ package inmemory
 
 import (
 	"context"
-	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -10,6 +9,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/internal/identity"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/agent-sdk/session/internal/cwdpath"
 )
 
 // Config defines one in-memory session store and service instance.
@@ -138,7 +138,7 @@ func (s *Store) ListSessions(
 		if req.WorkspaceKey != "" && record.session.WorkspaceKey != strings.TrimSpace(req.WorkspaceKey) {
 			continue
 		}
-		if req.CWD != "" && filepath.Clean(record.session.CWD) != filepath.Clean(strings.TrimSpace(req.CWD)) {
+		if strings.TrimSpace(req.CWD) != "" && cwdpath.Compare(record.session.CWD, req.CWD) != 0 {
 			continue
 		}
 		rows = append(rows, session.SessionSummary{

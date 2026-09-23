@@ -11,8 +11,13 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	_ "modernc.org/sqlite"
+	"github.com/caelis-labs/caelis/agent-sdk/session/internal/cwdpath"
+	"modernc.org/sqlite"
 )
+
+func init() {
+	sqlite.MustRegisterCollationUtf8("caelis_session_cwd", cwdpath.Compare)
+}
 
 type sessionIndexEntry struct {
 	Session   session.SessionSummary
@@ -47,8 +52,10 @@ func (s *Store) listFromSessionIndex(req session.ListSessionsRequest) (session.S
 		args = append(args, workspaceKey)
 	}
 	if cwd := strings.TrimSpace(req.CWD); cwd != "" {
-		clauses = append(clauses, "cwd = ?")
-		args = append(args, filepath.Clean(cwd))
+		// Compare both spellings before LIMIT, including rows written by older
+		// clients. Keep the stored CWD and workspace identity unchanged.
+		clauses = append(clauses, "cwd = ? COLLATE caelis_session_cwd")
+		args = append(args, cwd)
 	}
 	if encoded := strings.TrimSpace(req.Cursor); encoded != "" {
 		cursor, err := session.DecodeSessionListCursor(encoded)
