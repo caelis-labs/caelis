@@ -23,12 +23,38 @@ func TestLookupModelCapabilitiesFallsBackToBuiltinWhenDynamicCatalogUnavailable(
 		dynamicMu.Unlock()
 	}()
 
-	caps, ok := LookupModelCapabilities("openai", "gpt-4o")
+	caps, ok := LookupModelCapabilities("openai", "gpt-6-sol")
 	if !ok {
-		t.Fatal("LookupModelCapabilities(openai, gpt-4o) = false, want builtin fallback")
+		t.Fatal("LookupModelCapabilities(openai, gpt-6-sol) = false, want builtin fallback")
 	}
 	if caps.ContextWindowTokens <= 0 || caps.DefaultMaxOutputTokens <= 0 {
 		t.Fatalf("caps = %#v, want populated builtin fallback", caps)
+	}
+}
+
+func TestOpenAICatalogMaintainsOnlyCurrentModels(t *testing.T) {
+	disableDynamicCatalogForTest(t)
+	want := []string{"gpt-6-astra", "gpt-6-luna", "gpt-6-sol"}
+	if got := ListCatalogModels("openai"); !sameStrings(got, want) {
+		t.Fatalf("OpenAI catalog = %v, want %v", got, want)
+	}
+	if got := ListRecommendedModels("openai"); !sameStrings(got, want) {
+		t.Fatalf("OpenAI recommendations = %v, want %v", got, want)
+	}
+	for _, name := range []string{"gpt-6-sol", "gpt-6-luna"} {
+		t.Run(name, func(t *testing.T) {
+			caps, ok := LookupModelCapabilities("openai", name)
+			if !ok || caps.ContextWindowTokens != 1050000 || caps.MaxOutputTokens != 128000 || caps.DefaultMaxOutputTokens != 32768 {
+				t.Fatalf("limits = %+v, found=%v", caps, ok)
+			}
+			if !caps.SupportsImages || !caps.SupportsToolCalls || !caps.SupportsJSONOutput || !caps.SupportsReasoning {
+				t.Fatalf("capabilities = %+v, want vision, tools, JSON, and reasoning", caps)
+			}
+			if caps.ReasoningMode != ReasoningModeEffort || caps.DefaultReasoningEffort != "medium" ||
+				!sameStrings(caps.ReasoningEfforts, []string{"none", "low", "medium", "high", "xhigh", "max"}) {
+				t.Fatalf("API reasoning = %+v", caps)
+			}
+		})
 	}
 }
 
@@ -191,7 +217,7 @@ func TestSpeedModesForModelUsesLocalOverrideMetadata(t *testing.T) {
 	dynamicMu.Lock()
 	savedLocal := localOverrides
 	localOverrides = parseSnapshotBytes([]byte(`{
-		"openai:gpt-5.6-sol": {
+		"openai:gpt-6-sol": {
 			"speed_modes": [
 				{"level": "FAST", "description": "local priority hint"}
 			]
@@ -209,9 +235,9 @@ func TestSpeedModesForModelUsesLocalOverrideMetadata(t *testing.T) {
 		dynamicMu.Unlock()
 	})
 
-	modes := SpeedModesForModel("openai", "gpt-5.6-sol")
+	modes := SpeedModesForModel("openai", "gpt-6-sol")
 	if len(modes) != 1 || modes[0].Level != "fast" || modes[0].Description != "local priority hint" {
-		t.Fatalf("SpeedModesForModel(openai, gpt-5.6-sol) = %#v; want normalized local override", modes)
+		t.Fatalf("SpeedModesForModel(openai, gpt-6-sol) = %#v; want normalized local override", modes)
 	}
 	if modes := SpeedModesForModel("openai", "gpt-6-astra"); len(modes) != 0 {
 		t.Fatalf("SpeedModesForModel(openai, gpt-6-astra) = %#v; want incomplete local override rejected", modes)
@@ -294,7 +320,7 @@ func TestLookupModelCapabilitiesPrefersBuiltinOverSnapshot(t *testing.T) {
 	savedEmbedded := embeddedCatalog
 	savedLocal := localOverrides
 	remoteCatalog = capSnapshot{
-		"openai:gpt-4o": {
+		"openai:gpt-6-sol": {
 			ContextWindow: 1,
 			MaxOutput:     1,
 		},
@@ -310,9 +336,9 @@ func TestLookupModelCapabilitiesPrefersBuiltinOverSnapshot(t *testing.T) {
 		dynamicMu.Unlock()
 	}()
 
-	caps, ok := LookupModelCapabilities("openai", "gpt-4o")
+	caps, ok := LookupModelCapabilities("openai", "gpt-6-sol")
 	if !ok {
-		t.Fatal("LookupModelCapabilities(openai, gpt-4o) = false, want builtin")
+		t.Fatal("LookupModelCapabilities(openai, gpt-6-sol) = false, want builtin")
 	}
 	if caps.ContextWindowTokens <= 1 || caps.MaxOutputTokens <= 1 {
 		t.Fatalf("caps = %#v, want builtin values instead of snapshot values", caps)

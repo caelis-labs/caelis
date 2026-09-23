@@ -101,7 +101,7 @@ func TestSessionModelCommandPersistsExplicitFastMode(t *testing.T) {
 	connected, err := stack.ConfigurationCommands().ConnectModel(ctx, principal, appserver.ConnectModelRequest{
 		WriteBase: appserver.WriteBase{OperationID: "session-fast-connect", ExpectedRevision: &hostRevision},
 		Config: appserver.ConnectConfig{
-			Provider: "openai", Model: "gpt-5.6-sol", BaseURL: "https://api.openai.com/v1", APIKey: "session-fast-secret",
+			Provider: "openai", Model: "gpt-6-sol", BaseURL: "https://api.openai.com/v1", APIKey: "session-fast-secret",
 			ReasoningEffort: "xhigh", ReasoningLevels: []string{"low", "high", "xhigh"},
 		},
 	})
@@ -116,7 +116,7 @@ func TestSessionModelCommandPersistsExplicitFastMode(t *testing.T) {
 			OperationID: "session-fast-select", SessionID: active.SessionID, ExpectedRevision: &revision,
 			ExpectedControllerEpoch: active.Controller.EpochID,
 		},
-		Model: "openai/gpt-5.6-sol", ReasoningEffort: "xhigh", FastMode: true,
+		Model: "openai/gpt-6-sol", ReasoningEffort: "xhigh", FastMode: true,
 	})
 	if err != nil || selected.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("UseSessionModel(fast) = %#v, %v", selected, err)
@@ -140,7 +140,7 @@ func TestSessionModelCommandPersistsExplicitFastMode(t *testing.T) {
 			OperationID: "session-fast-disable", SessionID: active.SessionID, ExpectedRevision: &revision,
 			ExpectedControllerEpoch: active.Controller.EpochID,
 		},
-		Model: "openai/gpt-5.6-sol", ReasoningEffort: "xhigh",
+		Model: "openai/gpt-6-sol", ReasoningEffort: "xhigh",
 	})
 	if err != nil || standard.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("UseSessionModel(default speed) = %#v, %v", standard, err)

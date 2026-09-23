@@ -73,7 +73,7 @@ func RunLiveControllerCollaborationTest(t *testing.T, assemble func(*Stack) (app
 	nativeProfile := doc.ModelProfiles.DefaultProfileID
 	modelID := os.Getenv("CAELIS_CODEX_TIER_MODEL")
 	if modelID == "" {
-		modelID = "gpt-5.6-luna"
+		modelID = "gpt-6-luna"
 	}
 	connection := agents.Connection{ID: "codex", Name: "Codex", Launcher: agents.Launcher{Kind: agents.LaunchKindHostedAdapter, AdapterID: "codex"}}
 	external, profiles := disconnectTestCatalog(connection, "codex", modelID)

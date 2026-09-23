@@ -15,7 +15,7 @@ func TestCompleteModelSpeedModesOffersFastOnlyForSupportedGPT(t *testing.T) {
 	t.Parallel()
 
 	configs := map[string]ModelConfig{
-		"openai/gpt-5.6-sol": {Provider: "openai", Model: "gpt-5.6-sol"},
+		"openai/gpt-6-sol":   {Provider: "openai", Model: "gpt-6-sol"},
 		"openai/gpt-6-astra": {Provider: "openai", Model: "gpt-6-astra"},
 		"openai/gpt-5.5-pro": {Provider: "openai", Model: "gpt-5.5-pro"},
 	}
@@ -26,14 +26,14 @@ func TestCompleteModelSpeedModesOffersFastOnlyForSupportedGPT(t *testing.T) {
 		},
 		ListChoicesFn: func(context.Context, session.SessionRef) ([]ModelChoice, error) {
 			return []ModelChoice{
-				{ID: "openai/gpt-5.6-sol", Alias: "openai/gpt-5.6-sol", ReasoningLevels: []string{"xhigh"}},
+				{ID: "openai/gpt-6-sol", Alias: "openai/gpt-6-sol", ReasoningLevels: []string{"xhigh"}},
 				{ID: "openai/gpt-6-astra", Alias: "openai/gpt-6-astra", ReasoningLevels: []string{"xhigh"}},
 				{ID: "openai/gpt-5.5-pro", Alias: "openai/gpt-5.5-pro", ReasoningLevels: []string{"xhigh"}},
 			}, nil
 		},
 	}}}
 
-	fast, err := driver.CompleteSlashArg(context.Background(), "model openai/gpt-5.6-sol xhigh", "", 8)
+	fast, err := driver.CompleteSlashArg(context.Background(), "model openai/gpt-6-sol xhigh", "", 8)
 	if err != nil {
 		t.Fatal(err)
 	}

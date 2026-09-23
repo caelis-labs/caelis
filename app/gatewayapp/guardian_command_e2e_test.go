@@ -56,7 +56,7 @@ func TestGuardianCommandE2E(t *testing.T) {
 			t.Fatal("Guardian E2E repetitions must be between 1 and 5")
 		}
 	}
-	aliases := []string{"deepseek-v4-flash", "gpt-5.6-luna"}
+	aliases := []string{"deepseek-v4-flash", "gpt-6-luna"}
 	if raw := strings.TrimSpace(os.Getenv("CAELIS_GUARDIAN_COMMAND_E2E_MODELS")); raw != "" {
 		aliases = strings.Split(raw, ",")
 		for i := range aliases {

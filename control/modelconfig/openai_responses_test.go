@@ -355,6 +355,77 @@ func TestOpenAIConnectRoundTripDispatchesResponsesVersusChatCompletions(t *testi
 	}
 }
 
+func TestCurrentOpenAIModelsDispatchReasoningAndToolsThroughResponses(t *testing.T) {
+	t.Parallel()
+
+	for _, provider := range []string{"openai", "codex"} {
+		for _, name := range []string{"gpt-6-sol", "gpt-6-luna"} {
+			t.Run(provider+"/"+name, func(t *testing.T) {
+				t.Parallel()
+				configs, err := AssembleConnect(context.Background(), ConnectRequest{
+					Provider: provider,
+					APIKey:   "test-key",
+					Models:   []ModelSelection{{Name: name}},
+				}, ConnectOptions{Authenticate: func(context.Context, AuthenticateRequest) error { return nil }})
+				if err != nil {
+					t.Fatal(err)
+				}
+				cfg := configs[0]
+				var body struct {
+					Model     string                        `json:"model"`
+					Reasoning struct{ Effort string }       `json:"reasoning"`
+					Tools     []struct{ Type, Name string } `json:"tools"`
+				}
+				var path string
+				cfg.HTTPClient = &http.Client{Transport: modelconfigRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+					path = r.URL.Path
+					if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+						return nil, err
+					}
+					response := modelconfigHTTPResponse(r, http.StatusOK, `data: {"type":"response.completed","response":{"status":"completed","output":[{"id":"msg_1","type":"message","content":[{"type":"output_text","text":"ok"}]}]}}`+"\n\n")
+					response.Header.Set("Content-Type", "text/event-stream")
+					return response, nil
+				})}
+				resolved, err := BuildModel(cfg, 0, 0)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if resolved.Model.Name() != name {
+					t.Fatalf("built model = %s, want %s", resolved.Model.Name(), name)
+				}
+				capabilities, declared := model.CapabilitiesOf(resolved.Model)
+				if !declared || !capabilities.ImageInput {
+					t.Fatalf("built model capabilities = %+v, declared=%v", capabilities, declared)
+				}
+				var text string
+				for event, err := range resolved.Model.Generate(context.Background(), &model.Request{
+					Messages:  []model.Message{model.NewTextMessage(model.RoleUser, "hi")},
+					Reasoning: model.ReasoningConfig{Effort: resolved.ReasoningEffort},
+					Tools: []model.ToolSpec{model.NewFunctionToolSpec("lookup", "look up a value", map[string]any{
+						"type": "object", "properties": map[string]any{},
+					})},
+					Stream: true,
+				}) {
+					if err != nil {
+						t.Fatal(err)
+					}
+					if event != nil && event.Response != nil {
+						text = event.Response.Message.TextContent()
+					}
+				}
+				wantPath := "/v1/responses"
+				if provider == "codex" {
+					wantPath = "/backend-api/codex/responses"
+				}
+				if path != wantPath || body.Model != name || body.Reasoning.Effort != "medium" ||
+					len(body.Tools) != 1 || body.Tools[0].Type != "function" || body.Tools[0].Name != "lookup" || text != "ok" {
+					t.Fatalf("Responses exchange: path=%q body=%+v text=%q", path, body, text)
+				}
+			})
+		}
+	}
+}
+
 func TestMaintainedSelectableModelsDoNotInheritVendorCatalogForResponsesCompatible(t *testing.T) {
 	t.Parallel()
 

@@ -74,9 +74,9 @@ func TestConnectModelCompletionRefreshesAfterConnectAndDisconnect(t *testing.T) 
 			t.Fatalf("limited model candidates = %#v, want %q", got, want)
 		}
 	}
-	assertFirst("gpt-5.6-sol")
-	configured = append(configured, ModelChoice{Provider: "openai-codex", Model: "gpt-5.6-sol"})
-	assertFirst("gpt-5.6-terra")
+	assertFirst("gpt-6-sol")
+	configured = append(configured, ModelChoice{Provider: "openai-codex", Model: "gpt-6-sol"})
+	assertFirst("gpt-6-luna")
 	configured = configured[1:]
 	assertFirst("gpt-6-astra")
 }

@@ -36,9 +36,9 @@ func TestDisconnectModelsRefreshesHostCatalogAndSelectedSession(t *testing.T) {
 	}
 	revision := status.Configuration.Revision
 	for i, cfg := range []appserver.ConnectConfig{
-		{Provider: "openai", Model: "gpt-5.6-sol", APIKey: "test-provider-key"},
+		{Provider: "openai", Model: "gpt-6-sol", APIKey: "test-provider-key"},
 		{Provider: "deepseek", Model: "deepseek-v4-flash", APIKey: "test-provider-key"},
-		{Provider: "openai", Model: "gpt-5.6-luna"},
+		{Provider: "openai", Model: "gpt-6-luna"},
 	} {
 		result, err := clients.Configuration.ConnectModel(ctx, appserver.ConnectModelRequest{
 			WriteBase: appserver.WriteBase{OperationID: fmt.Sprintf("connect-%d", i), ExpectedRevision: &revision}, Config: cfg,
@@ -57,7 +57,7 @@ func TestDisconnectModelsRefreshesHostCatalogAndSelectedSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	targets := []string{"openai/gpt-5.6-sol", "deepseek/deepseek-v4-flash"}
+	targets := []string{"openai/gpt-6-sol", "deepseek/deepseek-v4-flash"}
 	completed, err := adapter.DeleteModels(ctx, targets)
 	if err != nil || !slices.Equal(completed, targets) {
 		t.Fatalf("DeleteModels = %v, %v", completed, err)
@@ -65,12 +65,12 @@ func TestDisconnectModelsRefreshesHostCatalogAndSelectedSession(t *testing.T) {
 	for _, target := range targets {
 		assertSlashArgCandidate(t, clients.Completion, sessionID, "disconnect-provider", target, false)
 	}
-	assertSlashArgCandidate(t, clients.Completion, sessionID, "disconnect-provider", "openai/gpt-5.6-luna", true)
+	assertSlashArgCandidate(t, clients.Completion, sessionID, "disconnect-provider", "openai/gpt-6-luna", true)
 	after, err := adapter.Status(ctx)
-	if err != nil || after.ModelStatus.Alias != "openai/gpt-5.6-luna" {
+	if err != nil || after.ModelStatus.Alias != "openai/gpt-6-luna" {
 		t.Fatalf("selected Session status = %#v, %v", after.ModelStatus, err)
 	}
-	completed, err = adapter.DeleteModels(ctx, []string{"openai/gpt-5.6-luna"})
+	completed, err = adapter.DeleteModels(ctx, []string{"openai/gpt-6-luna"})
 	if err != nil || len(completed) != 1 {
 		t.Fatalf("DeleteModels(final) = %v, %v", completed, err)
 	}

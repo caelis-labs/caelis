@@ -28,7 +28,7 @@ func TestGuardianResidentE2E(t *testing.T) {
 	if os.Getenv("CAELIS_GUARDIAN_RESIDENT_E2E") != "1" {
 		t.Skip("live resident Guardian E2E opt-in required")
 	}
-	llm, _ := guardianCommandE2EModel(t, "gpt-5.6-luna")
+	llm, _ := guardianCommandE2EModel(t, "gpt-6-luna")
 	service, active := newApprovalReviewerTestSession(t, t.Context())
 	reviewer := newGuardianApprovalApprover(service)
 	reviewer.queryNetwork = sandbox.NetworkEnabled
