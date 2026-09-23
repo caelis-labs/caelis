@@ -14,7 +14,6 @@ import (
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/internal/eventmeta"
-	"github.com/caelis-labs/caelis/control/bot"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
 	"github.com/caelis-labs/caelis/control/workspacetrust"
 )
@@ -130,6 +129,12 @@ func marshalWireValueUnchecked(value any) ([]byte, error) {
 		return marshalWriteRequest(typed, typed.ExpectedRevision)
 	case appserver.PromptRequest:
 		return marshalWriteRequest(typed, typed.ExpectedRevision)
+	case appserver.CreateApplicationSessionRequest:
+		return marshalWriteRequest(typed, typed.ExpectedRevision)
+	case appserver.ApplicationPromptRequest:
+		return marshalWriteRequest(typed, typed.ExpectedRevision)
+	case appserver.ApplicationResourceRequest:
+		return marshalWriteRequest(typed, typed.ExpectedRevision)
 	case appserver.SteerRequest:
 		return marshalWriteRequest(typed, typed.ExpectedRevision)
 	case appserver.CancelRequest:
@@ -204,18 +209,6 @@ func marshalWireValueUnchecked(value any) ([]byte, error) {
 		return marshalWriteRequest(typed, typed.ExpectedRevision)
 	case appserver.RemovePluginRequest:
 		return marshalWriteRequest(typed, typed.ExpectedRevision)
-	case appserver.BotReminderRequest:
-		return marshalWriteRequest(typed, typed.ExpectedRevision)
-	case appserver.BotClientExitRequest:
-		return marshalWriteRequest(typed, typed.ExpectedRevision)
-	case appserver.RegisterBotClientRequest:
-		return marshalWriteRequest(typed, typed.ExpectedRevision)
-	case appserver.BotWorkRequest:
-		return marshalWriteRequest(typed, typed.ExpectedRevision)
-	case appserver.CreateBotRequest:
-		return marshalWriteRequest(typed, typed.ExpectedRevision)
-	case appserver.UpdateBotRequest:
-		return marshalWriteRequest(typed, typed.ExpectedRevision)
 	case appserver.DisconnectCandidatesSnapshot:
 		return marshalDisconnectCandidatesSnapshot(typed)
 	case controlagents.ACPPreparation:
@@ -226,10 +219,6 @@ func marshalWireValueUnchecked(value any) ([]byte, error) {
 		return marshalSessionState(typed)
 	case controlstatus.StatusSnapshot:
 		return marshalStatusSnapshot(typed)
-	case bot.Bot:
-		return marshalBot(typed)
-	case []bot.Bot:
-		return marshalBotList(typed)
 	case eventstream.Envelope:
 		return marshalEnvelope(typed)
 	default:
@@ -256,30 +245,6 @@ func marshalDisconnectCandidatesSnapshot(snapshot appserver.DisconnectCandidates
 	}
 	fields["revision"] = decimalRaw(snapshot.Revision)
 	return json.Marshal(fields)
-}
-
-func marshalBot(value bot.Bot) ([]byte, error) {
-	fields, err := marshalObject(value)
-	if err != nil {
-		return nil, err
-	}
-	fields["revision"] = decimalRaw(value.Revision)
-	return json.Marshal(fields)
-}
-
-func marshalBotList(values []bot.Bot) ([]byte, error) {
-	if values == nil {
-		values = []bot.Bot{}
-	}
-	out := make([]json.RawMessage, 0, len(values))
-	for _, value := range values {
-		raw, err := marshalBot(value)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, raw)
-	}
-	return json.Marshal(out)
 }
 
 func marshalStatusSnapshot(status controlstatus.StatusSnapshot) ([]byte, error) {

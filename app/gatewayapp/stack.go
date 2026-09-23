@@ -142,6 +142,7 @@ type KernelControlPlaneReader interface {
 const DefaultControlOperationRetention = appserver.DefaultOperationTerminalRetention
 
 type Stack struct {
+	identity                  controlHostIdentity
 	composition               runtimeComposition
 	adapterHost               *adapterhostimpl.Manager
 	controlOperationRetention time.Duration
@@ -150,7 +151,7 @@ type Stack struct {
 	configurationCommands     appserver.ConfigurationCommandService
 	agentCommands             appserver.AgentCommandService
 	pluginCommands            appserver.PluginCommandService
-	bots                      appserver.BotService
+	applications              *appserver.ApplicationService
 	taskStreams               acptaskstream.Service
 	operations                appserver.DurableOperationStore
 	lifecycleCancel           context.CancelFunc
@@ -697,7 +698,7 @@ func (s *Stack) WaitApprovalRecovery(ctx context.Context) error {
 	if err := s.composition.authorities.approvalRecovery.Wait(ctx); err != nil {
 		return err
 	}
-	return s.commandBackend.recoverBotWorkReports(ctx)
+	return nil
 }
 
 func newStackFenceOwnerID() (string, error) {
@@ -843,11 +844,11 @@ func (s *Stack) closeWithQuiesceTimeout(timeout time.Duration) error {
 	s.composition.mu.Unlock()
 
 	var errs []error
-	if work := s.composition.authorities.botWork; work != nil {
-		if err := work.Close(); err != nil {
+	if store := s.composition.authorities.applications; store != nil {
+		if err := store.Close(); err != nil {
 			errs = append(errs, err)
 		}
-		s.composition.authorities.botWork = nil
+		s.composition.authorities.applications = nil
 	}
 	if mailboxes := s.composition.authorities.collaboration; mailboxes != nil {
 		if err := mailboxes.Close(); err != nil {

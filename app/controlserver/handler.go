@@ -69,7 +69,7 @@ func New(config HandlerConfig) (*Server, error) {
 	if config.Heartbeat <= 0 {
 		config.Heartbeat = 15 * time.Second
 	}
-	config.ServerInfo = botServerInfo(config.ServerInfo, config.Services)
+	config.ServerInfo = applicationServerInfo(config.ServerInfo, config.Services)
 	if config.Ready == nil {
 		config.Ready = func() bool { return true }
 	}
@@ -119,6 +119,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET "+apiPrefix+"/sessions/{session_id}/tasks/{task_id}/events", s.taskEvents)
 	s.mux.HandleFunc("GET "+apiPrefix+"/sessions/{session_id}/tasks/{task_id}/subscribe", s.subscribeTask)
 	s.focusedRoutes()
+	s.applicationRoutes()
 	s.adapterRoutes()
 }
 
@@ -181,9 +182,8 @@ func normalizeServerInfo(info appserver.ServerInfo) appserver.ServerInfo {
 }
 
 func (s *Server) principal(request *http.Request) (appserver.Principal, error) {
-	scheme, token, hasToken := strings.Cut(request.Header.Get("Authorization"), " ")
-	if hasToken && strings.EqualFold(scheme, "Bearer") && strings.HasPrefix(token, "bot-client-") {
-		return s.botClientPrincipal(request, token)
+	if principal, handled, err := s.applicationPrincipal(request); handled {
+		return principal, err
 	}
 	principal, err := s.config.Authenticator.Authenticate(request)
 	if err != nil {

@@ -17,10 +17,10 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/agentbinding"
+	"github.com/caelis-labs/caelis/control/application"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/wirev1/generated"
-	"github.com/caelis-labs/caelis/control/bot"
 	"github.com/caelis-labs/caelis/control/modelprofile"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
 	"github.com/caelis-labs/caelis/control/workspacetrust"
@@ -81,14 +81,6 @@ func TestProductionRequestAndResponseJSONConformsToOpenAPI(t *testing.T) {
 			WriteBase: appserver.WriteBase{OperationID: "agent-binding-set-operation-1", ExpectedRevision: &revision},
 			SetName:   "baseline",
 		},
-		"CreateBotRequest": appserver.CreateBotRequest{
-			WriteBase: appserver.WriteBase{OperationID: "bot-create-operation-1"},
-			Config:    bot.Config{Name: "Ada", Description: "Investigate unfamiliar systems.", Model: "mimo", Effort: "high", Fast: true},
-		},
-		"UpdateBotRequest": appserver.UpdateBotRequest{
-			WriteBase: appserver.WriteBase{OperationID: "bot-update-operation-1", SessionID: "bot-chat-1", ExpectedRevision: &revision},
-			BotID:     "bot-1", Config: bot.Config{Name: "Ada"},
-		},
 		"CompletionRequest": appserver.CompletionRequest{
 			SessionID: "session-1", WorkspaceKey: "workspace-1", CWD: "/tmp/workspace",
 			Surface: "tui", Query: "read", Command: "model", Name: "review", Limit: 10,
@@ -135,8 +127,6 @@ func TestProductionRequestAndResponseJSONConformsToOpenAPI(t *testing.T) {
 	}
 	validateWireValue(t, "SessionState", state)
 	validateWireValue(t, "ModelProfile", modelprofile.ModelProfile{ID: "provider:jev", Judgment: true, Backend: modelprofile.Backend{Provider: &modelprofile.ProviderBackend{ModelConfigID: "jev"}}, Effort: modelprofile.EffortCapability{DefaultEffort: "none", Choices: []modelprofile.EffortChoice{{Canonical: "none"}}}})
-	validateWireValue(t, "Bot", bot.Bot{ID: "bot-1", SessionID: "bot-chat-1", Revision: math.MaxUint64, Config: bot.Config{Name: "Ada", Fast: true}})
-	validateWireValue(t, "BotList", []bot.Bot{{ID: "bot-1", SessionID: "bot-chat-1", Revision: 4, Config: bot.Config{Name: "Ada"}}})
 	validateWireValue(t, "StatusSnapshot", controlstatus.StatusSnapshot{
 		Configuration: controlstatus.StatusConfiguration{Revision: math.MaxUint64, WorkspaceTrust: workspacetrust.Unknown},
 		Usage: controlstatus.StatusUsage{
@@ -482,6 +472,42 @@ func compactNoticeEnvelope() eventstream.Envelope {
 }
 
 func stringPointer(value string) *string { return &value }
+
+func TestApplicationRequestAndResponseJSONConformsToOpenAPI(t *testing.T) {
+	profile := application.Profile{
+		Version: "example-role/1", Instructions: "Use the callback.", Model: "configured-model",
+		ToolsVersion: "example-tools/1", Execution: "tools-only",
+		Tools: []application.ToolDefinition{{Name: "ExampleLookup", Description: "Look up a key.", InputSchema: map[string]any{
+			"type": "object", "properties": map[string]any{"key": map[string]any{"type": "string"}},
+		}}},
+	}
+	scope := application.Scope{PrincipalID: "owner", ApplicationID: "app-1", ConnectionID: "connection-1"}
+	binding := application.Binding{Scope: scope, SessionID: "session-1", Profile: profile, CreationDigest: "sha256:profile"}
+	base := appserver.WriteBase{OperationID: "operation-1", SessionID: "session-1"}
+	resource := application.Resource{ID: "resource-1", SessionID: "session-1", Name: "report", MediaType: "text/plain", Size: 5, SHA256: "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"}
+	for name, value := range map[string]any{
+		"ApplicationRegistration":         application.Registration{OperationID: "register-1", Name: "Example", Credential: "app-client-" + strings.Repeat("a", 64)},
+		"ApplicationConnection":           application.Connection{Scope: scope, Name: "Example", ExpiresAt: time.Unix(100, 0).UTC()},
+		"CreateApplicationSessionRequest": appserver.CreateApplicationSessionRequest{WriteBase: appserver.WriteBase{OperationID: "create-1"}, Profile: profile},
+		"ApplicationPromptRequest":        appserver.ApplicationPromptRequest{PromptRequest: appserver.PromptRequest{WriteBase: base, Input: "Hello"}, SourceKind: "user"},
+		"ApplicationBinding":              binding,
+		"ApplicationBindingList":          []application.Binding{binding},
+		"ApplicationOperation":            appserver.ApplicationOperation{OperationID: "operation-1", Outcome: appserver.OutcomeUnknown},
+		"ApplicationCall":                 application.Call{ID: "receipt-1", CallContext: application.CallContext{Scope: scope, SessionID: "session-1", TurnID: "turn-1", ItemID: "item-1", CallID: "native-call-1", ToolsVersion: profile.ToolsVersion, Source: application.Source{Kind: "user", OperationID: "prompt-1"}}, Name: "ExampleLookup", Arguments: json.RawMessage(`{"key":"example"}`), State: "pending"},
+		"ApplicationCallResult":           application.CallResult{Outcome: "succeeded", Content: json.RawMessage(`{"found":true}`)},
+		"ApplicationResourceRequest":      appserver.ApplicationResourceRequest{WriteBase: base, Name: "report", MediaType: "text/plain", Data: []byte("hello"), SHA256: resource.SHA256},
+		"ApplicationResource":             resource,
+		"ApplicationResourceContent":      appserver.ApplicationResourceContent{Resource: resource, Data: []byte("hello")},
+	} {
+		t.Run(name, func(t *testing.T) { validateWireValue(t, name, value) })
+	}
+	for _, tools := range [][]application.ToolDefinition{nil, {}} {
+		profile.Tools = tools
+		validateWireValue(t, "CreateApplicationSessionRequest", appserver.CreateApplicationSessionRequest{WriteBase: appserver.WriteBase{OperationID: "no-callbacks"}, Profile: profile})
+		binding.Profile = profile
+		validateWireValue(t, "ApplicationBinding", binding)
+	}
+}
 
 func validateWireValue(t *testing.T, schemaName string, value any) {
 	t.Helper()

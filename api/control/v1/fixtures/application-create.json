@@ -1,0 +1,26 @@
+{
+  "operation_id": "create-example-1",
+  "profile": {
+    "version": "example-role/1",
+    "instructions": "Use the example application tool to answer the request.",
+    "model": "configured-provider-model-id",
+    "tools_version": "example-tools/1",
+    "execution": "tools-only",
+    "inherit": {
+      "cwd_instructions": false,
+      "mcp": false,
+      "skills": false,
+      "workspace_memory": false
+    },
+    "tools": [{
+      "name": "ExampleLookup",
+      "description": "Read an application-owned example value.",
+      "input_schema": {
+        "type": "object",
+        "properties": {"key": {"type": "string"}},
+        "required": ["key"],
+        "additionalProperties": false
+      }
+    }]
+  }
+}

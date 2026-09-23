@@ -18,9 +18,9 @@ local drafts until Create role is confirmed. Tab/Shift+Tab moves between form
 fields, and Enter advances a text field. Ctrl+N creates a role, Ctrl+P opens
 binding sets, Ctrl+S saves a set, and Delete opens deletion confirmation. Ctrl+W
 clears a list search. Saving blocks further edits until the Host responds;
-failures retain the draft for correction or retry. The same overlay configures
-the connected Host in Bot mode. See [Participants](../../docs/participants.md)
-for role, system-agent and binding-set semantics.
+failures retain the draft for correction or retry. See
+[Participants](../../docs/participants.md) for role, system-agent and binding-set
+semantics.
 
 `/connect` uses a multi-step overlay above the fixed composer. Search stays
 inside the overlay; Esc returns to the previous step with its draft intact, and
@@ -41,10 +41,8 @@ installation, removal and marketplace actions; installation sources are entered
 in a form. Enable/disable uses the shared multi-select prompt. Completed commands
 leave the composer clear; full commands with arguments remain available.
 
-`/resume` and Bot mode's `/bots` search inside their overlays. Search survives
-catalog refreshes and never changes the composer draft. Up/Down selects, Enter
-opens, and Esc closes. Bot `/new`, `/settings` and `/model` use the shared form
-and model controls through the Bot client; see [Bot Mode](../../docs/bot.md).
+`/resume` searches inside its overlay. Search survives catalog refreshes and
+never changes the composer draft. Up/Down selects, Enter opens, and Esc closes.
 
 `/theme` opens a centered local theme picker. Up/Down and clicks update the
 selection immediately; after a short pause, the latest selection is previewed

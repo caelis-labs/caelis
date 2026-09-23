@@ -2,6 +2,7 @@ package appserver
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/caelis-labs/caelis/control/appserver/taskstream"
@@ -42,6 +43,25 @@ func TestBindAppServerClientsIncludesPrincipalBoundTaskObservation(t *testing.T)
 	}
 }
 
+func TestApplicationScopeIsTrustedAndNotBoundToOrdinaryAppServerClients(t *testing.T) {
+	principal := Principal{ID: "owner", ApplicationID: "app-1", ConnectionID: "connection-1"}
+	encoded, err := json.Marshal(principal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(encoded) != `{"id":"owner"}` {
+		t.Fatalf("application scope leaked into JSON principal: %s", encoded)
+	}
+	if _, err := BindAppServerClients(appServerTestServices(&appServerTestTasks{}), principal); err == nil {
+		t.Fatal("scoped application principal bound ordinary product clients")
+	}
+	for _, partial := range []Principal{{ID: "owner", ApplicationID: "app-1"}, {ID: "owner", ConnectionID: "connection-1"}} {
+		if _, err := BindAppServerClients(appServerTestServices(&appServerTestTasks{}), partial); err == nil {
+			t.Fatalf("partially scoped application principal %#v bound ordinary product clients", partial)
+		}
+	}
+}
+
 func TestAppServerAggregateRejectsMissingTaskCapability(t *testing.T) {
 	services := appServerTestServices(nil)
 	if err := services.Validate(); err == nil {
@@ -67,7 +87,6 @@ func appServerTestServices(tasks taskstream.Service) AppServerServices {
 		Status:         struct{ StatusService }{},
 		Configuration:  struct{ ConfigurationService }{},
 		Agents:         struct{ AgentService }{},
-		Bots:           struct{ BotService }{},
 		Completion:     struct{ CompletionService }{},
 		Plugins:        struct{ PluginService }{},
 		Presentation:   struct{ PresentationService }{},

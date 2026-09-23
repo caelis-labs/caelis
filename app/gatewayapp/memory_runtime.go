@@ -17,7 +17,7 @@ import (
 )
 
 func (s *runtimeComposition) admitCreatedMemorySession(ctx context.Context, created session.Session) (session.Session, error) {
-	if sessionvisibility.IsBotSession(created) {
+	if sessionvisibility.IsApplicationSession(created) || sessionvisibility.IsRetiredSession(created) {
 		return created, nil
 	}
 	if s == nil || s.process == nil || s.authorities.store == nil || s.sessions == nil {

@@ -18,11 +18,8 @@ const (
 	// created by Spawn. These Sessions remain addressable participants but must
 	// not receive nested Spawn authority.
 	SystemManagedAgentSubagent = "subagent"
-	// SystemManagedAgentBot identifies a persistent Bot conversation with its own
-	// private notebook and no workspace execution.
-	SystemManagedAgentBot = "bot"
-	// SystemManagedAgentBotWork is an isolated Bot-owned work Session.
-	SystemManagedAgentBotWork = "bot-work"
+	// SystemManagedAgentApplication identifies an application-owned Session.
+	SystemManagedAgentApplication = "application"
 )
 
 // IsSystemManagedMetadata reports whether product Session metadata marks a
@@ -45,19 +42,28 @@ func IsSpawnedSubagentSession(active session.Session) bool {
 	return strings.EqualFold(strings.TrimSpace(value), SystemManagedAgentSubagent)
 }
 
-// IsBotSession reports whether a canonical Session belongs to a persistent Bot.
-func IsBotSession(active session.Session) bool {
+// IsApplicationSession reports whether the Session is application-owned. The
+// canonical Binding, not this untrusted metadata, decides execution authority.
+func IsApplicationSession(active session.Session) bool {
 	value, _ := active.Metadata[MetadataSystemManagedAgent].(string)
-	return strings.EqualFold(strings.TrimSpace(value), SystemManagedAgentBot)
+	return strings.EqualFold(strings.TrimSpace(value), SystemManagedAgentApplication)
+}
+
+// IsRetiredSession identifies historical product-owned Sessions whose execution
+// owner has been removed. Their durable history is preserved but must never fall
+// through to an ordinary workspace Runtime.
+func IsRetiredSession(active session.Session) bool {
+	value, _ := active.Metadata[MetadataSystemManagedAgent].(string)
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "bot", "bot-work":
+		return true
+	default:
+		return false
+	}
 }
 
 // IsSystemManagedSummary reports whether a Session directory entry is
 // product-owned and therefore excluded from user-facing resume candidates.
 func IsSystemManagedSummary(summary session.SessionSummary) bool {
 	return IsSystemManagedMetadata(summary.Metadata)
-}
-
-// IsBotWorkSession identifies work that can only be dispatched by its Bot owner.
-func IsBotWorkSession(active session.Session) bool {
-	return active.Metadata[MetadataSystemManagedAgent] == SystemManagedAgentBotWork
 }

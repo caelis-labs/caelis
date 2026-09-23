@@ -55,8 +55,11 @@ func (a *workspaceConfigAssembler) assembleSnapshot(
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if sessionvisibility.IsBotSession(active) || sessionvisibility.IsBotWorkSession(active) {
-		return a.assembleBotSnapshot(ctx, active, activity, sessions)
+	if sessionvisibility.IsRetiredSession(active) {
+		return nil, fmt.Errorf("gatewayapp: retired product Session is read-only")
+	}
+	if sessionvisibility.IsApplicationSession(active) {
+		return a.assembleApplicationSnapshot(ctx, active, activity, sessions)
 	}
 
 	deps := a.deps

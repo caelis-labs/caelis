@@ -145,9 +145,11 @@ func TestOneTurnScopesRepeatedProviderToolCallIDByStep(t *testing.T) {
 			return policy.Decision{Action: policy.ActionAllow}, nil
 		},
 	}}
+	var observed []tool.InvocationContext
 	target := tool.NamedTool{
 		Def: tool.Definition{Name: "ECHO", InputSchema: map[string]any{"type": "object"}},
 		Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
+			observed = append(observed, call.Execution)
 			return tool.Result{ID: call.ID, Name: call.Name, Content: []model.Part{model.NewJSONPart([]byte(`{"value":"ok"}`))}}, nil
 		},
 	}
@@ -190,6 +192,35 @@ func TestOneTurnScopesRepeatedProviderToolCallIDByStep(t *testing.T) {
 	}
 	if len(callKeys) != 2 || len(resultKeys) != 2 || len(stepIDs) != 2 {
 		t.Fatalf("scoped identities: calls=%v results=%v steps=%v", callKeys, resultKeys, stepIDs)
+	}
+	if len(observed) != 2 || observed[0].ItemID == observed[1].ItemID {
+		t.Fatalf("callback invocation identities = %#v, want distinct steps", observed)
+	}
+	for _, execution := range observed {
+		if execution.SessionID != active.SessionID || execution.TurnID == "" || !stepIDs[execution.ItemID] {
+			t.Fatalf("callback identity = %#v, want canonical session/turn/journal step", execution)
+		}
+		matchedJournal := false
+		matchedResult := false
+		for _, event := range loaded.Events {
+			if event.Journal == nil || event.Journal.ToolExecution == nil || event.Journal.ToolExecution.Key.StepID != execution.ItemID {
+				continue
+			}
+			key := event.Journal.ToolExecution.Key
+			if key.SessionID != execution.SessionID || key.TurnID != execution.TurnID {
+				t.Fatalf("callback identity = %#v, durable journal key = %#v", execution, key)
+			}
+			matchedJournal = true
+			if session.EventTypeOf(event) == session.EventTypeToolResult && event.Visibility == session.VisibilityCanonical {
+				if event.SessionID != execution.SessionID || event.Scope == nil || event.Scope.TurnID != execution.TurnID {
+					t.Fatalf("callback identity = %#v, canonical result scope = %#v", execution, event)
+				}
+				matchedResult = true
+			}
+		}
+		if !matchedJournal || !matchedResult {
+			t.Fatalf("callback identity %#v lacks matching journal/result: journal=%v result=%v", execution, matchedJournal, matchedResult)
+		}
 	}
 }
 

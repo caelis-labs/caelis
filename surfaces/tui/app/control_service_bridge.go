@@ -294,24 +294,12 @@ func ConfigFromControlService(service ControlServices, sender *ProgramSender, ba
 		base.ProgramSender = sender
 		sender.resumeSession = service.ResumeSession
 	}
-	if base.Bot != nil {
-		// Bot mode exposes only its own command set; worker, memory, and coding
-		// commands never enter the shared router surface.
-		base.Commands = BotCommands()
+	base.Commands = appendAgentSlashCommandsWithContext(ctx, service, base.Commands)
+	for name, detail := range profileCommandDetailsWithContext(ctx, service) {
 		if base.CommandDetails == nil {
 			base.CommandDetails = map[string]string{}
 		}
-		for name, detail := range BotCommandDetails() {
-			base.CommandDetails[name] = detail
-		}
-	} else {
-		base.Commands = appendAgentSlashCommandsWithContext(ctx, service, base.Commands)
-		for name, detail := range profileCommandDetailsWithContext(ctx, service) {
-			if base.CommandDetails == nil {
-				base.CommandDetails = map[string]string{}
-			}
-			base.CommandDetails[name] = detail
-		}
+		base.CommandDetails[name] = detail
 	}
 	promptRouterFactory := base.PromptRouterFactory
 	var cachedModeLabel string
@@ -349,11 +337,7 @@ func ConfigFromControlService(service ControlServices, sender *ProgramSender, ba
 			return runExecuteLine(sub).commandMessage()
 		}
 	}
-	if base.Bot != nil {
-		// A Bot conversation never steers a running Turn; continuous input is
-		// queued locally and dispatched once the reply finishes.
-		base.CanSubmitRunningPrompt = func() bool { return false }
-	} else if base.CanSubmitRunningPrompt == nil {
+	if base.CanSubmitRunningPrompt == nil {
 		base.CanSubmitRunningPrompt = service.CanSubmitRunningPrompt
 	}
 
@@ -424,7 +408,7 @@ func ConfigFromControlService(service ControlServices, sender *ProgramSender, ba
 		}
 	}
 
-	if base.Bot == nil && base.SkillComplete == nil {
+	if base.SkillComplete == nil {
 		base.SkillComplete = func(query string, limit int) ([]CompletionCandidate, error) {
 			candidates, err := service.CompleteSkill(ctx, query, limit)
 			if err != nil {

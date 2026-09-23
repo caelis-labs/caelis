@@ -60,9 +60,6 @@ func (m *Model) handleWizardOverlayMouse(msg tea.MouseMsg) tea.Cmd {
 				return nil
 			}
 			m.slashArgIndex = subagentRowAtY(g.rows, mouse.Y)
-			if m.isBotSettingsModel() && m.slashArgIndex < len(m.slashArgCandidates) {
-				m.modelPicker.selected = m.slashArgCandidates[m.slashArgIndex].Value
-			}
 		}
 	case tea.MouseWheelMsg:
 		s.pressed, s.hovered = "", ""
@@ -135,9 +132,6 @@ func (m *Model) handleWizardOverlayMouse(msg tea.MouseMsg) tea.Cmd {
 			}
 			if len(s.fields) > 0 {
 				s.field, s.cursor = index, len([]rune(s.fields[index].value))
-				if s.fields[index].key == "bot_model" {
-					return m.openBotSettingsModels()
-				}
 				if s.fields[index].choice {
 					m.editWizardField(tea.Key{Code: tea.KeySpace})
 				}

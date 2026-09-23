@@ -38,11 +38,30 @@ func TestExplicitReadCeilingNeverBecomesAmbientReadAccess(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if strings.Contains(profile, "(allow file-read*)\n") || strings.Contains(profile, "(allow network*)") {
-			t.Fatal("mandatory read/network ceiling widened")
+		for _, ambient := range []string{"(allow file-read*)\n", "(allow network*)", "(allow process*)", "(allow sysctl-read)", "system.sb", "com.apple.app-sandbox", "/Applications", "/Library/Preferences", "/opt/homebrew/lib", "/usr/local/lib", "/private/var/run/syslog", "/cores"} {
+			if strings.Contains(profile, ambient) {
+				t.Fatalf("mandatory read/network ceiling widened by %q: %s", ambient, profile)
+			}
+		}
+		if !strings.Contains(profile, "(allow sysctl-read (sysctl-name \"hw.pagesize_compat\"))") {
+			t.Fatal("explicit ceiling lacks the bounded Go allocator bootstrap query")
+		}
+		for _, root := range roots {
+			if !strings.Contains(profile, "(allow file-read* file-map-executable (subpath "+sbplString(root)+"))") {
+				t.Fatalf("explicit executable/read root missing: %s", root)
+			}
 		}
 	}
 	if _, err := buildSeatbeltProfile(policy.Policy{ResourceLimits: &sandbox.ResourceLimits{ReadPaths: []string{"/"}}}, "/work"); err == nil {
 		t.Fatal("root read grant accepted")
+	}
+	ordinary, err := buildSeatbeltProfile(policy.Default(sandbox.Config{}, sandbox.Constraints{}), "/work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, retained := range []string{"(allow process*)", "(allow sysctl-read)", "system.sb"} {
+		if !strings.Contains(ordinary, retained) {
+			t.Fatalf("ordinary nil read ceiling lost backend default %q", retained)
+		}
 	}
 }

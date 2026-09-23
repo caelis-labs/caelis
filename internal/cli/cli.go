@@ -114,8 +114,13 @@ func runWithProductClientOpener(
 	if openClients == nil {
 		return errors.New("cli: product client opener is required")
 	}
-	if len(args) > 0 && strings.EqualFold(strings.TrimSpace(args[0]), "version") {
-		return runVersionSubcommand(args[1:], stdout)
+	if len(args) > 0 {
+		switch strings.ToLower(strings.TrimSpace(args[0])) {
+		case "version":
+			return runVersionSubcommand(args[1:], stdout)
+		case "bot":
+			return errors.New("cli: bot mode has been removed; run caelis for the ordinary TUI")
+		}
 	}
 	cwd, err := getWorkingDirectory()
 	if err != nil {
@@ -139,10 +144,6 @@ func runWithProductClientOpener(
 	}
 	doctorSubcommand := len(args) > 0 && strings.EqualFold(strings.TrimSpace(args[0]), "doctor")
 	if doctorSubcommand {
-		args = args[1:]
-	}
-	botSubcommand := len(args) > 0 && strings.EqualFold(strings.TrimSpace(args[0]), "bot")
-	if botSubcommand {
 		args = args[1:]
 	}
 	controlServerSubcommand := len(args) > 0 && (strings.EqualFold(strings.TrimSpace(args[0]), "serve") || strings.EqualFold(strings.TrimSpace(args[0]), "server"))
@@ -231,7 +232,6 @@ func runWithProductClientOpener(
 	headlessCandidate := !acpSubcommand &&
 		!controlServerSubcommand &&
 		!doctorSubcommand &&
-		!botSubcommand &&
 		serviceSubcommand == "" &&
 		sandboxSubcommand == "" &&
 		!*forceInteractive &&
@@ -444,12 +444,6 @@ func runWithProductClientOpener(
 		headlessResultWritten = err == nil
 		return err
 	}
-	if botSubcommand {
-		return runBot(ctx, product, tuiOptions{
-			NoAnimation:                *noAnimation,
-			DangerouslySkipPermissions: cfg.DangerouslySkipPermissions,
-		}, stdin, stdout, stderr)
-	}
 	return runInteractive(ctx, product, preferredInteractiveSessionID(*sessionID), renderModelText(cfg), tuiOptions{
 		NoAnimation:                *noAnimation,
 		DangerouslySkipPermissions: cfg.DangerouslySkipPermissions,
@@ -495,11 +489,11 @@ func runControlHost(ctx context.Context, cfg gatewayapp.Config, serverConfig con
 	if err := stack.WaitApprovalRecovery(ctx); err != nil {
 		return err
 	}
-	instanceID := stack.BotWork().Store.InstanceID
+	instanceID := stack.InstanceID()
 	startedAt := time.Now().UTC()
 	build := version.BuildInfo()
 	serverConfig.ServerInfo = appserver.ServerInfo{
-		ServerID: appserver.ServerIdentity, StoreID: stack.BotWork().Store.StoreID, InstanceID: instanceID,
+		ServerID: appserver.ServerIdentity, StoreID: stack.StoreID(), InstanceID: instanceID,
 		DistributionVersion: build.Version, BuildID: build.BuildID, BuildKind: build.BuildKind,
 		Capabilities: appserver.RequiredManagedHostCapabilities(),
 	}

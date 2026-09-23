@@ -10,7 +10,6 @@ type testFocusedServices struct {
 	appserver.ParticipantService
 	appserver.ConfigurationService
 	appserver.AgentService
-	appserver.BotService
 	appserver.CompletionService
 	appserver.PluginService
 	appserver.PresentationService
@@ -23,7 +22,7 @@ func testAppServerServices(sessions appserver.Service, status appserver.StatusSe
 		SubagentInputs: &appserver.SubagentInputService{},
 		UIPreferences:  &appserver.UIPreferencesService{},
 		Sessions:       sessions, Participants: focused, Status: status, Configuration: focused,
-		Agents: focused, Bots: focused, Completion: focused, Plugins: focused,
+		Agents: focused, Completion: focused, Plugins: focused,
 		Presentation: focused, Terminal: focused, Tasks: &fakeTaskService{},
 	}
 }

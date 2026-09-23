@@ -410,9 +410,6 @@ func (m *Model) handleSetStatusMsg(msg SetStatusMsg) tea.Model {
 
 func (m *Model) handleStatusRefreshResultMsg(msg StatusRefreshResultMsg) tea.Model {
 	m.statusRefreshInFlight = false
-	if msg.botConfiguration != nil {
-		m.applyBotConfiguration(*msg.botConfiguration)
-	}
 	usageIdentityChanged := false
 	if msg.HasUsageIdentity {
 		usageIdentityChanged = m.observeStatusUsageIdentity(msg.UsageControllerEpoch)
@@ -527,8 +524,7 @@ func (m *Model) hasStatusRefreshCallbacks() bool {
 			m.cfg.RefreshStatus != nil ||
 			m.cfg.RefreshStatusUsage != nil ||
 			m.cfg.RefreshStatusView != nil ||
-			m.cfg.ModeLabel != nil ||
-			(m.botMode() && m.bot.hasActive && m.bot.client != nil))
+			m.cfg.ModeLabel != nil)
 }
 
 func (m *Model) statusRefreshCmd() tea.Cmd {
@@ -537,16 +533,12 @@ func (m *Model) statusRefreshCmd() tea.Cmd {
 	}
 	cfg := m.cfg
 	generation := m.viewGeneration
-	readBot := m.botConfigurationReader()
 	return func() tea.Msg {
 		if cfg.ProgramSender != nil {
 			cfg.ProgramSender.statusReads.Lock()
 			defer cfg.ProgramSender.statusReads.Unlock()
 		}
 		msg := StatusRefreshResultMsg{viewGeneration: generation}
-		if readBot != nil {
-			msg.botConfiguration = readBot()
-		}
 		if cfg.RefreshWorkspace != nil {
 			msg.Workspace = strings.TrimSpace(cfg.RefreshWorkspace())
 			msg.HasWorkspace = true

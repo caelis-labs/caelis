@@ -361,6 +361,135 @@ type AgentStatusSnapshot struct {
 	SessionId                 *string                    `json:"session_id,omitempty"`
 }
 
+type ApplicationBinding struct {
+	ApplicationId  string             `json:"application_id"`
+	Archived       bool               `json:"archived"`
+	ConnectionId   string             `json:"connection_id"`
+	CreationDigest string             `json:"creation_digest"`
+	PrincipalId    string             `json:"principal_id"`
+	Profile        ApplicationProfile `json:"profile"`
+	SessionId      string             `json:"session_id"`
+}
+
+type ApplicationBindingList []ApplicationBinding
+
+type ApplicationCall struct {
+	ApplicationId string                 `json:"application_id"`
+	Arguments     JSONValue              `json:"arguments"`
+	CallId        string                 `json:"call_id"`
+	ConnectionId  string                 `json:"connection_id"`
+	Id            string                 `json:"id"`
+	ItemId        string                 `json:"item_id"`
+	Name          string                 `json:"name"`
+	PrincipalId   string                 `json:"principal_id"`
+	Result        *ApplicationCallResult `json:"result,omitempty"`
+	SessionId     string                 `json:"session_id"`
+	Source        ApplicationSource      `json:"source"`
+	State         string                 `json:"state"`
+	ToolsVersion  string                 `json:"tools_version"`
+	TurnId        string                 `json:"turn_id"`
+}
+
+type ApplicationCallList []ApplicationCall
+
+type ApplicationCallResult struct {
+	Content JSONValue `json:"content"`
+	Outcome string    `json:"outcome"`
+}
+
+type ApplicationConnection struct {
+	ApplicationId string    `json:"application_id"`
+	ConnectionId  string    `json:"connection_id"`
+	ExpiresAt     time.Time `json:"expires_at"`
+	Name          string    `json:"name"`
+	PrincipalId   string    `json:"principal_id"`
+	Revoked       bool      `json:"revoked"`
+}
+
+type ApplicationEmptyRequest map[string]any
+
+type ApplicationInheritance struct {
+	CwdInstructions bool `json:"cwd_instructions"`
+	Mcp             bool `json:"mcp"`
+	Skills          bool `json:"skills"`
+	WorkspaceMemory bool `json:"workspace_memory"`
+}
+
+type ApplicationOperation struct {
+	OperationId string         `json:"operation_id"`
+	Outcome     Outcome        `json:"outcome"`
+	Result      *CommandResult `json:"result,omitempty"`
+}
+
+type ApplicationProfile struct {
+	Execution    string                      `json:"execution"`
+	Inherit      ApplicationInheritance      `json:"inherit"`
+	Instructions string                      `json:"instructions"`
+	Model        string                      `json:"model"`
+	Tools        []ApplicationToolDefinition `json:"tools,omitempty"`
+	ToolsVersion string                      `json:"tools_version"`
+	Version      string                      `json:"version"`
+}
+
+type ApplicationPromptRequest struct {
+	ContentParts            []PromptContentPart `json:"content_parts,omitempty"`
+	DisplayInput            *string             `json:"display_input,omitempty"`
+	ExpectedControllerEpoch *string             `json:"expected_controller_epoch,omitempty"`
+	ExpectedRevision        *Uint64Decimal      `json:"expected_revision,omitempty"`
+	Input                   *string             `json:"input,omitempty"`
+	OperationId             *string             `json:"operation_id,omitempty"`
+	SessionId               *string             `json:"session_id,omitempty"`
+	SourceKind              string              `json:"source_kind"`
+}
+
+type ApplicationRegistration struct {
+	Credential  string `json:"credential"`
+	Name        string `json:"name"`
+	OperationId string `json:"operation_id"`
+}
+
+type ApplicationResource struct {
+	Id        string `json:"id"`
+	MediaType string `json:"media_type"`
+	Name      string `json:"name"`
+	SessionId string `json:"session_id"`
+	Sha256    string `json:"sha256"`
+	Size      int    `json:"size"`
+}
+
+type ApplicationResourceContent struct {
+	Data     string              `json:"data"`
+	Resource ApplicationResource `json:"resource"`
+}
+
+type ApplicationResourceRequest struct {
+	Data                    string         `json:"data"`
+	ExpectedControllerEpoch *string        `json:"expected_controller_epoch,omitempty"`
+	ExpectedRevision        *Uint64Decimal `json:"expected_revision,omitempty"`
+	MediaType               string         `json:"media_type"`
+	Name                    string         `json:"name"`
+	OperationId             *string        `json:"operation_id,omitempty"`
+	SessionId               *string        `json:"session_id,omitempty"`
+	Sha256                  string         `json:"sha256"`
+}
+
+type ApplicationScope struct {
+	ApplicationId string `json:"application_id"`
+	ConnectionId  string `json:"connection_id"`
+	PrincipalId   string `json:"principal_id"`
+}
+
+type ApplicationSource struct {
+	Kind        string `json:"kind"`
+	OperationId string `json:"operation_id"`
+}
+
+type ApplicationToolDefinition struct {
+	Description string     `json:"description"`
+	InputSchema JSONObject `json:"input_schema"`
+	Name        string     `json:"name"`
+}
+
 type ApprovalReview struct {
 	Authorization *string    `json:"authorization,omitempty"`
 	RawInput      JSONObject `json:"raw_input,omitempty"`
@@ -417,221 +546,6 @@ type BindAgentBindingRequest struct {
 	ExpectedRevision        *Uint64Decimal `json:"expected_revision,omitempty"`
 	OperationId             *string        `json:"operation_id,omitempty"`
 	SessionId               *string        `json:"session_id,omitempty"`
-}
-
-type Bot struct {
-	Config        BotConfig     `json:"config"`
-	Id            string        `json:"id"`
-	ModelSelector *string       `json:"model_selector,omitempty"`
-	Revision      Uint64Decimal `json:"revision"`
-	SessionId     string        `json:"session_id"`
-}
-
-type BotClient struct {
-	Actions      []string  `json:"actions"`
-	ActivatedAt  time.Time `json:"activated_at"`
-	ActivationId string    `json:"activation_id"`
-	Active       bool      `json:"active"`
-	BotId        string    `json:"bot_id"`
-	ExpiresAt    time.Time `json:"expires_at"`
-	Id           string    `json:"id"`
-	InstanceId   string    `json:"instance_id"`
-	PrincipalId  string    `json:"principal_id"`
-}
-
-type BotClientExitRequest struct {
-	ActivationId            string         `json:"activation_id"`
-	BotId                   string         `json:"bot_id"`
-	CancelOwnedWork         *bool          `json:"cancel_owned_work,omitempty"`
-	ExpectedControllerEpoch *string        `json:"expected_controller_epoch,omitempty"`
-	ExpectedRevision        *Uint64Decimal `json:"expected_revision,omitempty"`
-	OperationId             *string        `json:"operation_id,omitempty"`
-	SessionId               *string        `json:"session_id,omitempty"`
-}
-
-type BotClientRegistration struct {
-	Client BotClient `json:"client"`
-	Token  string    `json:"token"`
-}
-
-type BotCompletion struct {
-	Acknowledged    bool         `json:"acknowledged"`
-	BotId           string       `json:"bot_id"`
-	Execution       BotExecution `json:"execution"`
-	Id              string       `json:"id"`
-	PrincipalId     string       `json:"principal_id"`
-	ReportExecution BotExecution `json:"report_execution"`
-	ReportState     string       `json:"report_state"`
-	Status          string       `json:"status"`
-	Summary         string       `json:"summary"`
-	WorkId          string       `json:"work_id"`
-}
-
-type BotCompletionList []BotCompletion
-
-type BotConfig struct {
-	Description    *string `json:"description,omitempty"`
-	DesktopActions *bool   `json:"desktop_actions,omitempty"`
-	Effort         *string `json:"effort,omitempty"`
-	Fast           *bool   `json:"fast,omitempty"`
-	ManagedWork    *bool   `json:"managed_work,omitempty"`
-	Model          *string `json:"model,omitempty"`
-	Name           string  `json:"name"`
-	WorkPermission *string `json:"work_permission,omitempty"`
-}
-
-type BotDesktopArguments struct {
-	At           *string `json:"at,omitempty"`
-	Daily        *string `json:"daily,omitempty"`
-	EveryMinutes *int    `json:"every_minutes,omitempty"`
-	Gesture      *string `json:"gesture,omitempty"`
-	Id           *string `json:"id,omitempty"`
-	Label        *string `json:"label,omitempty"`
-	Operation    *string `json:"operation,omitempty"`
-	Prompt       *string `json:"prompt,omitempty"`
-	TimeZone     *string `json:"time_zone,omitempty"`
-}
-
-type BotDesktopCall struct {
-	Action       string              `json:"action"`
-	ActivationId string              `json:"activation_id"`
-	Arguments    BotDesktopArguments `json:"arguments"`
-	BotId        string              `json:"bot_id"`
-	ClientId     string              `json:"client_id"`
-	Execution    BotExecution        `json:"execution"`
-	Id           string              `json:"id"`
-	IsError      *bool               `json:"is_error,omitempty"`
-	ItemId       string              `json:"item_id"`
-	PrincipalId  string              `json:"principal_id"`
-	Result       any                 `json:"result,omitempty"`
-	SourceId     string              `json:"source_id"`
-	State        string              `json:"state"`
-}
-
-type BotDesktopClaim struct {
-	Call  BotDesktopCall `json:"call"`
-	Token string         `json:"token"`
-}
-
-type BotDesktopReceipt struct {
-	IsError *bool  `json:"is_error,omitempty"`
-	Result  any    `json:"result"`
-	Token   string `json:"token"`
-}
-
-type BotDesktopSnapshot struct {
-	Calls  []BotDesktopCall `json:"calls"`
-	Cursor string           `json:"cursor"`
-}
-
-type BotEmptyRequest map[string]any
-
-type BotExecution struct {
-	HandleId   string `json:"handle_id"`
-	InstanceId string `json:"instance_id"`
-	RunId      string `json:"run_id"`
-	SessionId  string `json:"session_id"`
-	TurnId     string `json:"turn_id"`
-}
-
-type BotList []Bot
-
-type BotReminderFire struct {
-	BotId       string       `json:"bot_id"`
-	ClientId    string       `json:"client_id"`
-	Due         time.Time    `json:"due"`
-	Execution   BotExecution `json:"execution"`
-	GrantId     string       `json:"grant_id"`
-	Id          string       `json:"id"`
-	PrincipalId string       `json:"principal_id"`
-	SourceId    string       `json:"source_id"`
-	State       string       `json:"state"`
-	Version     string       `json:"version"`
-}
-
-type BotReminderFireList []BotReminderFire
-
-type BotReminderGrant struct {
-	Active           bool                `json:"active"`
-	Arguments        BotDesktopArguments `json:"arguments"`
-	BotId            string              `json:"bot_id"`
-	ClientId         string              `json:"client_id"`
-	CoalescedThrough time.Time           `json:"coalesced_through"`
-	CreatedAt        time.Time           `json:"created_at"`
-	Id               string              `json:"id"`
-	LastOccurrence   time.Time           `json:"last_occurrence"`
-	PrincipalId      string              `json:"principal_id"`
-	SourceId         string              `json:"source_id"`
-	Version          string              `json:"version"`
-}
-
-type BotReminderGrantList []BotReminderGrant
-
-type BotReminderRequest struct {
-	BotId                   string         `json:"bot_id"`
-	Due                     time.Time      `json:"due"`
-	ExpectedControllerEpoch *string        `json:"expected_controller_epoch,omitempty"`
-	ExpectedRevision        *Uint64Decimal `json:"expected_revision,omitempty"`
-	GrantId                 string         `json:"grant_id"`
-	OperationId             *string        `json:"operation_id,omitempty"`
-	SessionId               *string        `json:"session_id,omitempty"`
-	Version                 string         `json:"version"`
-}
-
-type BotRequestSource struct {
-	BotId             string              `json:"bot_id"`
-	ClientId          *string             `json:"client_id,omitempty"`
-	ContentParts      []PromptContentPart `json:"content_parts,omitempty"`
-	Digest            string              `json:"digest"`
-	Execution         BotExecution        `json:"execution"`
-	Id                string              `json:"id"`
-	Kind              string              `json:"kind"`
-	OperationId       string              `json:"operation_id"`
-	OriginalRequestId *string             `json:"original_request_id,omitempty"`
-	PrincipalId       string              `json:"principal_id"`
-	Text              string              `json:"text"`
-}
-
-type BotWork struct {
-	Assignment          string       `json:"assignment"`
-	BotId               string       `json:"bot_id"`
-	ClientId            *string      `json:"client_id,omitempty"`
-	Config              BotConfig    `json:"config"`
-	CreationDigest      string       `json:"creation_digest"`
-	CreationOperationId string       `json:"creation_operation_id"`
-	Execution           BotExecution `json:"execution"`
-	Id                  string       `json:"id"`
-	PrincipalId         string       `json:"principal_id"`
-	Result              *string      `json:"result,omitempty"`
-	SessionId           string       `json:"session_id"`
-	SourceId            string       `json:"source_id"`
-	Status              string       `json:"status"`
-	WorkspaceKey        string       `json:"workspace_key"`
-}
-
-type BotWorkList []BotWork
-
-type BotWorkOperation struct {
-	BotId       string       `json:"bot_id"`
-	Digest      string       `json:"digest"`
-	Execution   BotExecution `json:"execution"`
-	OperationId string       `json:"operation_id"`
-	Outcome     string       `json:"outcome"`
-	PrincipalId string       `json:"principal_id"`
-	SourceId    *string      `json:"source_id,omitempty"`
-	WorkId      string       `json:"work_id"`
-}
-
-type BotWorkRequest struct {
-	Assignment              *string        `json:"assignment,omitempty"`
-	BotId                   string         `json:"bot_id"`
-	ExpectedControllerEpoch *string        `json:"expected_controller_epoch,omitempty"`
-	ExpectedRevision        *Uint64Decimal `json:"expected_revision,omitempty"`
-	OperationId             *string        `json:"operation_id,omitempty"`
-	SessionId               *string        `json:"session_id,omitempty"`
-	SourceId                *string        `json:"source_id,omitempty"`
-	Target                  *BotExecution  `json:"target,omitempty"`
-	WorkId                  *string        `json:"work_id,omitempty"`
 }
 
 type CaelisMetadata map[string]JSONValue
@@ -797,12 +711,12 @@ type CreateAgentRoleRequest struct {
 	SessionId               *string        `json:"session_id,omitempty"`
 }
 
-type CreateBotRequest struct {
-	Config                  BotConfig      `json:"config"`
-	ExpectedControllerEpoch *string        `json:"expected_controller_epoch,omitempty"`
-	ExpectedRevision        *Uint64Decimal `json:"expected_revision,omitempty"`
-	OperationId             *string        `json:"operation_id,omitempty"`
-	SessionId               *string        `json:"session_id,omitempty"`
+type CreateApplicationSessionRequest struct {
+	ExpectedControllerEpoch *string            `json:"expected_controller_epoch,omitempty"`
+	ExpectedRevision        *Uint64Decimal     `json:"expected_revision,omitempty"`
+	OperationId             *string            `json:"operation_id,omitempty"`
+	Profile                 ApplicationProfile `json:"profile"`
+	SessionId               *string            `json:"session_id,omitempty"`
 }
 
 type CreateSessionRequest struct {
@@ -1446,15 +1360,6 @@ type PromptTextContentPart struct {
 	Type string `json:"type"`
 }
 
-type RegisterBotClientRequest struct {
-	Actions                 []string       `json:"actions"`
-	BotId                   string         `json:"bot_id"`
-	ExpectedControllerEpoch *string        `json:"expected_controller_epoch,omitempty"`
-	ExpectedRevision        *Uint64Decimal `json:"expected_revision,omitempty"`
-	OperationId             *string        `json:"operation_id,omitempty"`
-	SessionId               *string        `json:"session_id,omitempty"`
-}
-
 type RemoveMarketplaceRequest struct {
 	ExpectedControllerEpoch *string        `json:"expected_controller_epoch,omitempty"`
 	ExpectedRevision        *Uint64Decimal `json:"expected_revision,omitempty"`
@@ -2071,15 +1976,6 @@ type UIPreferences struct {
 
 type Uint64Decimal string
 
-type UpdateBotRequest struct {
-	BotId                   string         `json:"bot_id"`
-	Config                  BotConfig      `json:"config"`
-	ExpectedControllerEpoch *string        `json:"expected_controller_epoch,omitempty"`
-	ExpectedRevision        *Uint64Decimal `json:"expected_revision,omitempty"`
-	OperationId             *string        `json:"operation_id,omitempty"`
-	SessionId               *string        `json:"session_id,omitempty"`
-}
-
 type UpdateMarketplaceRequest struct {
 	ExpectedControllerEpoch *string        `json:"expected_controller_epoch,omitempty"`
 	ExpectedRevision        *Uint64Decimal `json:"expected_revision,omitempty"`
@@ -2151,4 +2047,4 @@ type WriteBase struct {
 	SessionId               *string        `json:"session_id,omitempty"`
 }
 
-var OperationIDs = []string{"acknowledgeBotCompletion", "activateBotClient", "botDesktopSnapshot", "cancelBotWork", "cancelParticipant", "cancelSessionTurn", "claimBotDesktopCall", "closeSession", "compactSession", "completeBotDesktopCall", "completeFiles", "completeSessions", "completeSkills", "completeSlashArguments", "configureSessionControllerMode", "configureSessionMode", "configureSessionPresentation", "configureSessionPresentationMode", "continueBotWork", "createBotWork", "createSession", "exitBotClient", "fireBotReminder", "getAgentStatus", "getBot", "getBotClient", "getBotDesktopCall", "getBotRequest", "getBotWork", "getBotWorkOperation", "getHostStatus", "getPresentationCapabilities", "getSessionPresentation", "getSessionState", "getSessionStatus", "getTerminalOutput", "handoffAgent", "hostAddMarketplace", "hostAddPluginPath", "hostApplyAgentBindingSet", "hostBindAgent", "hostCompleteFiles", "hostCompleteSessions", "hostCompleteSkills", "hostCompleteSlashArguments", "hostConnectACP", "hostConnectModel", "hostCreateAgentRole", "hostCreateBot", "hostDeleteAgentBindingSet", "hostDeleteAgentRole", "hostDeleteModel", "hostDisablePlugin", "hostDisconnectACP", "hostEnablePlugin", "hostGetACPPreparation", "hostGetAgentBindingStatus", "hostGetAgentStatus", "hostInspectPlugin", "hostInstallPlugin", "hostListAgents", "hostListDisconnectCandidates", "hostListMarketplaces", "hostListPlugins", "hostPrepareACP", "hostPrepareACPAuthentication", "hostRemoveMarketplace", "hostRemovePlugin", "hostResetAgentBinding", "hostResolveSkill", "hostSaveAgentBindingSet", "hostUpdateMarketplace", "hostUseModel", "initializeClient", "inspectPlugin", "killTerminal", "listAgents", "listBotCompletions", "listBotReminderOccurrences", "listBotReminders", "listBotWork", "listBots", "listMarketplaces", "listParticipantHandles", "listPlugins", "listSessionTasks", "listSessions", "loadUIPreferences", "prepareSandbox", "promptParticipant", "promptSession", "readTaskEvents", "reconnectSession", "refreshSandbox", "registerBotClient", "releaseTerminal", "renewBotClient", "repairSandbox", "resetSandbox", "resolveApproval", "resolveSkill", "saveUIPreferences", "setSandboxBackend", "setWorkspaceTrust", "shutdownHost", "startParticipant", "steerBotWork", "steerSession", "subagentInputStatuses", "submitSubagentInput", "subscribeTaskEvents", "updateBot", "useSessionModel", "waitTerminal", "watchBotDesktop", "watchSessionTaskDirectory"}
+var OperationIDs = []string{"archiveApplicationSession", "cancelParticipant", "cancelSessionTurn", "claimApplicationCall", "closeSession", "compactSession", "completeApplicationCall", "completeFiles", "completeSessions", "completeSkills", "completeSlashArguments", "configureSessionControllerMode", "configureSessionMode", "configureSessionPresentation", "configureSessionPresentationMode", "createApplicationResource", "createApplicationSession", "createSession", "getAgentStatus", "getApplicationCall", "getApplicationConnection", "getApplicationOperation", "getApplicationResource", "getApplicationSession", "getHostStatus", "getPresentationCapabilities", "getSessionPresentation", "getSessionState", "getSessionStatus", "getTerminalOutput", "handoffAgent", "hostAddMarketplace", "hostAddPluginPath", "hostApplyAgentBindingSet", "hostBindAgent", "hostCompleteFiles", "hostCompleteSessions", "hostCompleteSkills", "hostCompleteSlashArguments", "hostConnectACP", "hostConnectModel", "hostCreateAgentRole", "hostDeleteAgentBindingSet", "hostDeleteAgentRole", "hostDeleteModel", "hostDisablePlugin", "hostDisconnectACP", "hostEnablePlugin", "hostGetACPPreparation", "hostGetAgentBindingStatus", "hostGetAgentStatus", "hostInspectPlugin", "hostInstallPlugin", "hostListAgents", "hostListDisconnectCandidates", "hostListMarketplaces", "hostListPlugins", "hostPrepareACP", "hostPrepareACPAuthentication", "hostRemoveMarketplace", "hostRemovePlugin", "hostResetAgentBinding", "hostResolveSkill", "hostSaveAgentBindingSet", "hostUpdateMarketplace", "hostUseModel", "initializeClient", "inspectPlugin", "killTerminal", "listAgents", "listApplicationCalls", "listApplicationSessions", "listMarketplaces", "listParticipantHandles", "listPlugins", "listSessionTasks", "listSessions", "loadUIPreferences", "prepareSandbox", "promptApplicationSession", "promptParticipant", "promptSession", "readApplicationResource", "readTaskEvents", "reconnectSession", "refreshSandbox", "registerApplication", "releaseTerminal", "renewApplicationConnection", "repairSandbox", "resetSandbox", "resolveApproval", "resolveSkill", "revokeApplicationConnection", "saveUIPreferences", "setSandboxBackend", "setWorkspaceTrust", "shutdownHost", "startParticipant", "steerSession", "subagentInputStatuses", "submitSubagentInput", "subscribeTaskEvents", "useSessionModel", "waitTerminal", "watchSessionTaskDirectory"}

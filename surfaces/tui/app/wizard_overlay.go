@@ -20,7 +20,6 @@ type wizardField struct {
 // Configuration overlays share the wizard's commands and catalog requests. Its local history
 // stores presentation drafts only; authentication and mutations stay in Control.
 type wizardOverlayState struct {
-	bot           *botSettingsDraft
 	parents       []wizardStepDraft
 	drafts        map[string]wizardStepDraft
 	fields        []wizardField
@@ -143,10 +142,6 @@ func (m *Model) backWizardOverlay() tea.Cmd {
 		return m.handlePromptKey(tea.KeyPressMsg{Code: tea.KeyEscape})
 	}
 	if s == nil || s.pending {
-		return nil
-	}
-	if s.bot != nil && s.bot.choosingModel && !s.bot.modelOnly && !s.blocked {
-		m.showBotSettingsForm()
 		return nil
 	}
 	if s.blocked || len(s.parents) == 0 {
@@ -313,14 +308,6 @@ func (m *Model) wizardAction() string {
 		return "Retry"
 	case m.slashArgLoadPending || m.slashArgRequestPending:
 		return "Loading…"
-	case s.bot != nil:
-		if s.bot.choosingModel {
-			return "Apply"
-		}
-		if s.bot.create {
-			return "Create"
-		}
-		return "Save"
 	case m.wizard.def.Command == "disconnect" && m.wizardMultiSelectStep():
 		count := len(m.wizard.multiSelections[m.wizardStepKey()])
 		if count > 0 {

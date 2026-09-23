@@ -23,22 +23,6 @@ const (
 	CapabilityWorkspaceTrust          = "workspace-trust-v1"
 	CapabilityWorkspaceTrustPreflight = "workspace-trust-preflight-v1"
 	CapabilityHostReadiness           = "host-readiness-v1"
-	// CapabilityBotMode advertises persistent Bot conversations with their own
-	// private files and the focused configuration API. Managed work and desktop
-	// connections require their additional capability identifiers.
-	CapabilityBotMode = "bot-mode-v1"
-	// CapabilityBotManagedWork advertises owned work, durable request sources and exact execution targets.
-	CapabilityBotManagedWork = "bot-managed-work-v1"
-	// CapabilityBotFiles advertises general private files; notes are one use.
-	CapabilityBotFiles = "bot-private-files-v1"
-	// CapabilityBotDesktop advertises authenticated fixed-action desktop leases.
-	CapabilityBotDesktop = "bot-desktop-actions-v1"
-	// CapabilityBotReminders advertises persisted schedule grants and occurrence admission.
-	CapabilityBotReminders = "bot-reminder-grants-v1"
-	// CapabilityBotImages covers bounded prompt images, including source-preserving delegation.
-	CapabilityBotImages = "bot-image-input-v1"
-	// CapabilityBotTextResults covers bounded textual work results, not file downloads.
-	CapabilityBotTextResults = "bot-text-results-v1"
 )
 
 var ErrStateRevisionConflict = errorcode.New(errorcode.Conflict, "controlclient: session state changed during bootstrap")
@@ -80,7 +64,6 @@ func RequiredManagedHostCapabilities() []string {
 		CapabilityWorkspaceTrust,
 		CapabilityWorkspaceTrustPreflight,
 		CapabilityHostReadiness,
-		CapabilityBotMode,
 	}
 }
 

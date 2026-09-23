@@ -1,11 +1,9 @@
 package tuiapp
 
 import (
-	"fmt"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/caelis-labs/caelis/control/bot"
 )
 
 func (m *Model) wizardRowCount() int {
@@ -37,9 +35,6 @@ func (m *Model) moveWizardSelection(delta int) {
 			}
 		} else {
 			m.slashArgIndex = (m.slashArgIndex + delta + count) % count
-			if m.isBotSettingsModel() && m.slashArgIndex < len(m.slashArgCandidates) {
-				m.modelPicker.selected = m.slashArgCandidates[m.slashArgIndex].Value
-			}
 		}
 	}
 	s.err, s.pressed = "", ""
@@ -70,13 +65,6 @@ func (m *Model) acceptWizardOverlay() tea.Cmd {
 		return m.submitACPInstallation()
 	}
 
-	if s.bot != nil {
-		if s.err != "" && s.bot.choosingModel {
-			s.err = ""
-			return m.requestCurrentSlashArgCompletion()
-		}
-		return m.acceptBotSettings()
-	}
 	if len(s.fields) > 0 {
 		if m.wizard.def.Command == "plugin" {
 			value := strings.TrimSpace(s.fields[0].value)
@@ -117,9 +105,6 @@ func (m *Model) handleWizardOverlayKey(msg tea.KeyMsg) tea.Cmd {
 		return nil
 	}
 	if s.pending {
-		if s.bot != nil && s.bot.loading && msg.Key().Code == tea.KeyEscape {
-			m.clearWizard()
-		}
 		return nil
 	}
 	if _, release := msg.(tea.KeyReleaseMsg); release {
@@ -149,7 +134,7 @@ func (m *Model) handleWizardOverlayKey(msg tea.KeyMsg) tea.Cmd {
 			}
 		case 'u', 'w':
 			if len(s.fields) > 0 {
-				if s.field < len(s.fields) && !s.fields[s.field].choice && s.fields[s.field].key != "bot_model" {
+				if s.field < len(s.fields) && !s.fields[s.field].choice {
 					m.setWizardFieldValue("")
 				}
 			} else {
@@ -157,10 +142,6 @@ func (m *Model) handleWizardOverlayKey(msg tea.KeyMsg) tea.Cmd {
 			}
 		}
 		return nil
-	}
-	if m.isBotSettingsModel() && (k.Code == tea.KeyLeft || k.Code == tea.KeyRight || k.Code == tea.KeyTab) {
-		_, cmd := m.handleModelPickerKey(msg)
-		return cmd
 	}
 	switch k.Code {
 	case tea.KeyUp:
@@ -182,14 +163,6 @@ func (m *Model) handleWizardOverlayKey(msg tea.KeyMsg) tea.Cmd {
 		}
 		m.moveWizardSelection(delta)
 	case tea.KeyEnter:
-		if s.bot != nil && len(s.fields) > 0 && s.field < len(s.fields) {
-			switch s.fields[s.field].key {
-			case "bot_model":
-				return m.openBotSettingsModels()
-			}
-			m.moveWizardSelection(1)
-			return nil
-		}
 		return m.acceptWizardOverlay()
 	default:
 		if len(s.fields) > 0 {
@@ -214,9 +187,6 @@ func (m *Model) editWizardField(k tea.Key) {
 		return
 	}
 	f := &s.fields[s.field]
-	if f.key == "bot_model" {
-		return
-	}
 	if f.choice {
 		if k.Code == tea.KeyLeft || k.Code == tea.KeyRight || k.Code == tea.KeySpace {
 			if f.value == "true" {
@@ -269,15 +239,7 @@ func (m *Model) editWizardField(k tea.Key) {
 func (m *Model) setWizardFieldValue(value string) bool {
 	s := m.wizardOverlay
 	f := &s.fields[s.field]
-	updated := value
-	if s.bot != nil && f.key == "description" {
-		if len(value) > bot.MaxDescriptionBytes {
-			s.err = fmt.Sprintf("Description exceeds %d KiB", bot.MaxDescriptionBytes/1024)
-			return false
-		}
-	} else {
-		updated = truncateRunes(value, 8192)
-	}
+	updated := truncateRunes(value, 8192)
 	if (f.key == "baseurl" || f.key == "endpoint") && updated != f.value {
 		for i := range s.fields {
 			if s.fields[i].secret {
@@ -297,9 +259,7 @@ func (m *Model) handleWizardOverlayPaste(msg tea.PasteMsg) tea.Cmd {
 		return nil
 	}
 	text := normalizeClipboardText(msg.String())
-	if s.bot == nil || s.field >= len(s.fields) || s.fields[s.field].key != "description" {
-		text = strings.ReplaceAll(text, "\n", " ")
-	}
+	text = strings.ReplaceAll(text, "\n", " ")
 	if len(s.fields) > 0 {
 		m.editWizardField(tea.Key{Text: text})
 		return nil

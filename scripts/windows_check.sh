@@ -11,7 +11,7 @@ fi
 go test -count=1 -p=2 -timeout "${GO_TEST_TIMEOUT:-5m}" \
   ./platform/winproc \
   ./internal/filelock ./internal/productpaths ./internal/servicelifecycle ./internal/updater \
-  ./control/appserver/httpclient ./control/bot \
+  ./control/appserver/httpclient ./control/application \
   ./agent-sdk/atomicfile ./agent-sdk/policy/presets \
   ./agent-sdk/sandbox/consoleoutput ./agent-sdk/sandbox/internal/conpty \
   ./agent-sdk/sandbox/host ./agent-sdk/sandbox/backend/cmdsession \

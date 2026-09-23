@@ -21,13 +21,13 @@ type AppServerServices struct {
 	Status        StatusService
 	Configuration ConfigurationService
 	Agents        AgentService
-	Bots          BotService
-	BotWork       *BotWorkService
-	Completion    CompletionService
-	Plugins       PluginService
-	Presentation  PresentationService
-	Terminal      TerminalService
-	Tasks         taskstream.Service
+	// Applications is a scoped HTTP capability, not a presentation aggregate client.
+	Applications *ApplicationService
+	Completion   CompletionService
+	Plugins      PluginService
+	Presentation PresentationService
+	Terminal     TerminalService
+	Tasks        taskstream.Service
 }
 
 // Validate rejects partial AppServer assemblies. A transport adapter may use a
@@ -46,7 +46,6 @@ func (s AppServerServices) Validate() error {
 		{name: "status", value: s.Status},
 		{name: "configuration", value: s.Configuration},
 		{name: "Agent", value: s.Agents},
-		{name: "Bot", value: s.Bots},
 		{name: "completion", value: s.Completion},
 		{name: "plugin", value: s.Plugins},
 		{name: "presentation", value: s.Presentation},
@@ -72,9 +71,6 @@ type AppServerClients struct {
 	Status         StatusClient
 	Configuration  ConfigurationClient
 	Agents         AgentClient
-	Bots           BotClient
-	BotWork        BotWorkClient
-	BotDesktop     BotDesktopClient
 	Completion     CompletionClient
 	Plugins        PluginClient
 	Presentation   PresentationClient
@@ -84,8 +80,8 @@ type AppServerClients struct {
 
 // BindAppServerClients binds one trusted principal to a complete AppServer.
 func BindAppServerClients(services AppServerServices, principal Principal) (AppServerClients, error) {
-	if principal.ClientID != "" {
-		return AppServerClients{}, errors.New("controlclient: scoped Bot credentials require the authenticated Bot HTTP surface")
+	if principal.ApplicationID != "" || principal.ConnectionID != "" {
+		return AppServerClients{}, errors.New("controlclient: scoped application credentials require the authenticated application HTTP surface")
 	}
 	if err := services.Validate(); err != nil {
 		return AppServerClients{}, err
@@ -107,10 +103,6 @@ func BindAppServerClients(services AppServerServices, principal Principal) (AppS
 		return AppServerClients{}, err
 	}
 	agents, err := BindAgentClient(services.Agents, principal)
-	if err != nil {
-		return AppServerClients{}, err
-	}
-	bots, err := BindBotClient(services.Bots, principal)
 	if err != nil {
 		return AppServerClients{}, err
 	}
@@ -140,11 +132,8 @@ func BindAppServerClients(services AppServerServices, principal Principal) (AppS
 		SubagentInputs: &boundSubagentInputClient{service: services.SubagentInputs, principal: Principal{ID: principal.ID, Roles: append([]string(nil), principal.Roles...)}},
 		UIPreferences:  &boundUIPreferencesClient{service: services.UIPreferences, principal: Principal{ID: principal.ID, Roles: append([]string(nil), principal.Roles...)}},
 		Sessions:       sessions, Participants: participants, Status: status,
-		Configuration: configuration, Agents: agents, Bots: bots, Completion: completion, Plugins: plugins,
+		Configuration: configuration, Agents: agents, Completion: completion, Plugins: plugins,
 		Presentation: presentation, Terminal: terminal, Tasks: tasks,
-	}
-	if services.BotWork != nil {
-		clients.BotWork = &boundBotWorkClient{s: services.BotWork, p: principal}
 	}
 	if err := clients.Validate(); err != nil {
 		return AppServerClients{}, err
@@ -155,7 +144,7 @@ func BindAppServerClients(services AppServerServices, principal Principal) (AppS
 // Validate rejects a partial presentation client facade.
 func (c AppServerClients) Validate() error {
 	if c.SubagentInputs == nil || c.UIPreferences == nil || c.Sessions == nil || c.Participants == nil || c.Status == nil || c.Configuration == nil ||
-		c.Agents == nil || c.Bots == nil || c.Completion == nil || c.Plugins == nil || c.Presentation == nil || c.Terminal == nil || c.Tasks == nil {
+		c.Agents == nil || c.Completion == nil || c.Plugins == nil || c.Presentation == nil || c.Terminal == nil || c.Tasks == nil {
 		return errors.New("controlclient: complete AppServer clients are required")
 	}
 	return nil

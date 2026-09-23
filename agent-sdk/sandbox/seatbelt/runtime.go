@@ -352,23 +352,53 @@ func buildSeatbeltProfile(p policy.Policy, workDir string) (string, error) {
 	var b strings.Builder
 	b.WriteString("(version 1)\n")
 	b.WriteString("(deny default)\n")
-	b.WriteString("(import \"system.sb\")\n")
-	b.WriteString("(allow process*)\n")
+	restrictedReads := p.ResourceLimits != nil && p.ResourceLimits.ReadPaths != nil
+	if !restrictedReads {
+		// system.sb and the development compatibility sections grant ambient
+		// filesystem and local-network access. Explicit read ceilings must not
+		// import them, including when the ceiling is an empty set.
+		b.WriteString("(import \"system.sb\")\n")
+	}
+	if restrictedReads {
+		// Do not grant process inspection or unrestricted sysctl reads here.
+		// These restrictions still do not isolate same-user environments:
+		// numeric KERN_PROCARGS2 can expose them despite a filesystem ceiling.
+		b.WriteString("(allow process-fork process-exec)\n")
+		// Go allocator startup uses numeric HW_PAGESIZE, whose XNU name is
+		// hw.pagesize_compat rather than the newer size_t-valued hw.pagesize.
+		b.WriteString("(allow sysctl-read (sysctl-name \"hw.pagesize_compat\"))\n")
+	} else {
+		b.WriteString("(allow process*)\n")
+		b.WriteString("(allow sysctl-read)\n")
+	}
 	b.WriteString("(allow signal (target same-sandbox))\n")
-	b.WriteString("(allow sysctl-read)\n")
-	if p.ResourceLimits == nil || p.ResourceLimits.ReadPaths == nil {
+	if !restrictedReads {
 		b.WriteString("(allow file-read*)\n")
 	} else {
 		for _, root := range p.ResourceLimits.ReadPaths {
 			if !filepath.IsAbs(root) || filepath.Clean(root) == "/" {
 				return "", fmt.Errorf("seatbelt: read ceiling requires absolute non-root paths")
 			}
-			fmt.Fprintf(&b, "(allow file-read* (subpath %s))\n", sbplString(root))
+			fmt.Fprintf(&b, "(allow file-read* file-map-executable (subpath %s))\n", sbplString(root))
 		}
 	}
-	b.WriteString(seatbeltCoreExtensions)
-	b.WriteString(seatbeltMachServices)
-	b.WriteString(seatbeltDeviceAndFramework)
+	if restrictedReads {
+		// Loader bootstrap needs a root directory descriptor, not a root
+		// subtree grant. File contents, including dyld cryptex data, remain
+		// explicit above; no network or write capability is added.
+		b.WriteString(`; dyld libignition opens the filesystem root as a directory descriptor.
+; This literal does not grant any descendant file or writable path.
+(allow file-read-data file-read-metadata (require-all (literal "/") (vnode-type DIRECTORY)))
+(allow system-fcntl (fcntl-command F_ADDFILESIGS_RETURN F_CHECK_LV F_GETPATH))
+(allow system-mac-syscall (require-all (mac-policy-name "Sandbox") (mac-syscall-number 2)))
+(allow system-mac-syscall (require-all (mac-policy-name "Sandbox") (mac-syscall-number 67)))
+(allow system-mac-syscall (mac-policy-name "vnguard"))
+`)
+	} else {
+		b.WriteString(seatbeltCoreExtensions)
+		b.WriteString(seatbeltMachServices)
+		b.WriteString(seatbeltDeviceAndFramework)
+	}
 	if p.NetworkAccess {
 		b.WriteString("(allow network*)\n")
 		b.WriteString(seatbeltNetworkExtensions)

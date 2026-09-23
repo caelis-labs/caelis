@@ -2,12 +2,11 @@ package gatewayapp
 
 import (
 	"context"
-	"github.com/google/uuid"
 	"path/filepath"
 
+	"github.com/caelis-labs/caelis/control/application"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	acptaskstream "github.com/caelis-labs/caelis/control/appserver/taskstream"
-	"github.com/caelis-labs/caelis/control/bot"
 	"github.com/caelis-labs/caelis/control/collaboration"
 	controltaskstream "github.com/caelis-labs/caelis/control/taskstream"
 )
@@ -79,15 +78,16 @@ func assembleHostControlServices(stack *Stack, cfg Config, storeDir string, curs
 		return hostControlAssembly{}, err
 	}
 	stack.controlOperationRetention = effectiveOperationRetention
-	stack.composition.authorities.botWork, err = bot.OpenWorkStore(controlStoreDatabasePath(storeDir))
+	stack.identity, err = openControlHostIdentity(context.Background(), controlStoreDatabasePath(storeDir))
+	if err != nil {
+		return hostControlAssembly{}, err
+	}
+	stack.composition.authorities.applications, err = application.Open(controlStoreDatabasePath(storeDir))
 	if err != nil {
 		return hostControlAssembly{}, err
 	}
 
-	stack.composition.authorities.botWork.Sessions = stack.composition.sessions
-	stack.composition.authorities.botWork.InstanceID = uuid.NewString()
-
-	sessionAuthorizer := appserver.SessionAuthorizer{Sessions: stack.composition.sessions}
+	sessionAuthorizer := appserver.SessionAuthorizer{Sessions: stack.composition.sessions, Applications: stack.composition.authorities.applications}
 	controlCommands, err := appserver.NewCommandService(appserver.CommandServiceConfig{
 		Authorizer: appserver.ProductCommandAuthorizer{Sessions: sessionAuthorizer},
 		Operations: controlOperations,
@@ -108,16 +108,10 @@ func assembleHostControlServices(stack *Stack, cfg Config, storeDir string, curs
 	}
 	stack.controlClient = controlClient
 	stack.configurationCommands = controlCommands
-	stack.composition.authorities.botWorkCommands = controlCommands
-	stack.composition.authorities.botReportReady = stack.commandBackend.deliverBotActivity
 	stack.agentCommands = controlCommands
 	stack.pluginCommands = controlCommands
-	stack.bots, err = appserver.NewBotService(appserver.BotServiceConfig{
-		Reader: botModelSelectorProjector{
-			reader: &bot.Service{Sessions: stack.composition.sessions},
-			lookup: stack.composition.lookup,
-		}, Commands: controlCommands,
-		Authorizer: sessionAuthorizer,
+	stack.applications, err = appserver.NewApplicationService(appserver.ApplicationServiceConfig{
+		Store: stack.composition.authorities.applications, Commands: controlCommands, Sessions: controlClient,
 	})
 	if err != nil {
 		return hostControlAssembly{}, err

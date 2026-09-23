@@ -67,10 +67,6 @@ func (m *Model) activateSlashArgPickerStateFromInput(command string) bool {
 	if cmd == "" {
 		return false
 	}
-	if m.botMode() && isBotManagedCommand(cmd) {
-		// Bot commands own their own flow; never open a coding-shell picker.
-		return false
-	}
 	if m.slashArgActive && strings.TrimSpace(m.slashArgCommand) == cmd && !m.isWizardActive() {
 		return true
 	}
@@ -166,9 +162,6 @@ func (m *Model) dropStaleSlashArgCandidates() {
 }
 
 func (m *Model) applySlashArgCandidates(command string, query string, candidates []SlashArgCandidate, err error) {
-	if m.isBotSettingsModel() {
-		candidates = m.botSettingsCandidates(query, candidates)
-	}
 	if command == "model" {
 		m.updateModelPickerCandidates(candidates, err)
 	}
@@ -190,7 +183,7 @@ func (m *Model) applySlashArgCandidates(command string, query string, candidates
 	m.slashArgIndex = normalizeFilteredSelection(m.slashArgIndex, query, m.slashArgQuery, len(filtered))
 	m.slashArgQuery = query
 	m.slashArgCandidates = filtered
-	if (m.isModelPicker() || m.isBotSettingsModel()) && m.modelPicker != nil {
+	if m.isModelPicker() && m.modelPicker != nil {
 		m.restoreModelPickerSelection(filtered)
 	}
 }

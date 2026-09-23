@@ -8,7 +8,7 @@ import (
 
 func (m *Model) wizardCloseEnabled() bool {
 	s := m.wizardOverlay
-	return !s.pending || s.bot != nil && s.bot.loading
+	return !s.pending
 }
 
 func (m *Model) wizardActionEnabled() bool {
@@ -39,7 +39,7 @@ type wizardFooterLayout struct {
 func (m *Model) renderWizardFooter(width int, hint string) wizardFooterLayout {
 	s := m.wizardOverlay
 	back := "[esc back]"
-	if len(s.parents) == 0 && (s.bot == nil || !s.bot.choosingModel || s.bot.modelOnly) || s.blocked {
+	if len(s.parents) == 0 || s.blocked {
 		back = "[esc close]"
 	}
 	hint = strings.TrimSpace(strings.TrimSuffix(strings.TrimSuffix(hint, "esc back"), "esc close"))

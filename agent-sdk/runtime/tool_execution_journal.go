@@ -43,6 +43,11 @@ func (t journaledTool) Call(ctx context.Context, call tool.Call) (tool.Result, e
 	if t.sequence != nil {
 		stepID = fmt.Sprintf("tool-step-%d:%s", t.sequence.Add(1), stepID)
 	}
+	// The journal key, not caller-controlled Call fields, is the single
+	// authority for both durable execution and the callback's identity.
+	call.Execution = tool.InvocationContext{
+		SessionID: t.sessionRef.SessionID, TurnID: t.turnID, ItemID: stepID,
+	}
 	var mu sync.Mutex
 	record := session.NormalizeToolExecution(session.ToolExecution{
 		Schema:      session.ToolExecutionSchemaVersion,
@@ -307,7 +312,10 @@ func reconcileToolExecution(ctx context.Context, record session.ToolExecution, t
 		}
 		result, err := recoverer.Recover(ctx, tool.RecoveryRequest{
 			ExecutionIdentity: record.Identity,
-			Call:              tool.Call{ID: record.Key.ToolCallID, Name: recoveryName, Input: append(json.RawMessage(nil), record.Input...)},
+			Call: tool.Call{
+				ID: record.Key.ToolCallID, Name: recoveryName, Input: append(json.RawMessage(nil), record.Input...),
+				Execution: tool.InvocationContext{SessionID: record.Key.SessionID, TurnID: record.Key.TurnID, ItemID: record.Key.StepID},
+			},
 		})
 		if err != nil {
 			return tool.RecoveryResult{Status: tool.RecoveryUnknown}, "recovery failed: " + err.Error()

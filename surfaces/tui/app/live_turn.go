@@ -50,7 +50,6 @@ func (m *Model) finishLiveTurnFromEnvelope(env eventstream.Envelope) (tea.Cmd, b
 	if m == nil || !isMainTurnTerminalLifecycle(env) {
 		return nil, false
 	}
-	m.setBotRunStatus(env.SessionID, env.Lifecycle.State)
 	err := errorFromTerminalLifecycle(env)
 	interrupted := err == nil && liveTurnLifecycleInterrupted(env)
 	cmd := m.finishLiveTurn(liveTurnEndedAt(env), interrupted, err)

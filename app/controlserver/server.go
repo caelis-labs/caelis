@@ -97,7 +97,6 @@ func listenAndServe(
 	readiness := &atomic.Bool{}
 	serveCtx, stopServing := context.WithCancel(ctx)
 	defer stopServing()
-	resolved.ServerInfo = botServerInfo(resolved.ServerInfo, deps.Services)
 	resolved.Ready = readiness.Load
 	resolved.Shutdown = stopServing
 	handler, err := Handler(deps, resolved)
@@ -121,7 +120,7 @@ func listenAndServe(
 	if resolved.OnListening != nil {
 		if err := resolved.OnListening(ListenerInfo{
 			Endpoint: endpoint, Address: listener.Addr().String(),
-			ServerInfo: normalizeServerInfo(resolved.ServerInfo),
+			ServerInfo: applicationServerInfo(resolved.ServerInfo, deps.Services),
 		}); err != nil {
 			readiness.Store(false)
 			_ = listener.Close()

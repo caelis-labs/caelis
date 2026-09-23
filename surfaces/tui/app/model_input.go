@@ -606,9 +606,6 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.handleSessionPickerKey(msg)
 	}
 	if m.wizardOverlay == nil && msg.String() == "ctrl+o" {
-		if m.botMode() {
-			return m, m.openBotPicker()
-		}
 		return m, m.openSessionPicker()
 	}
 	if m.activePrompt != nil && m.activePrompt.approvalRequestID != "" && m.turnRunning() && key.Matches(msg, m.keys.Interrupt) {
@@ -1256,11 +1253,6 @@ func (m *Model) submitInteractiveLine(execLine string, displayLine string, attac
 	if isTUIExitLine(execLine) {
 		m.quit = true
 		return m, tea.Quit
-	}
-	if m.botMode() {
-		if next, cmd, handled := m.submitBotLine(execLine, displayLine, attachments); handled {
-			return next, cmd
-		}
 	}
 	if execLine == "/resume" {
 		m.resetComposerAfterOverlayOpen()

@@ -11,6 +11,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
+	"github.com/caelis-labs/caelis/control/application"
 	"github.com/caelis-labs/caelis/control/workspacetrust"
 )
 
@@ -1068,6 +1069,10 @@ func operationIDOf(request any) string {
 		return req.OperationID
 	case PromptRequest:
 		return req.OperationID
+	case ApplicationPromptRequest:
+		return req.OperationID
+	case CreateApplicationSessionRequest:
+		return req.OperationID
 	case SteerRequest:
 		return req.OperationID
 	case CancelRequest:
@@ -1140,12 +1145,44 @@ func operationIDOf(request any) string {
 		return req.OperationID
 	case RemovePluginRequest:
 		return req.OperationID
-	case CreateBotRequest:
-		return req.OperationID
-	case UpdateBotRequest:
-		return req.OperationID
 	default:
 		return ""
+	}
+}
+
+func TestApplicationCommandScopeAndValidation(t *testing.T) {
+	backend := &recordingCommandBackend{}
+	service := newTestCommandService(t, allowAuthorizer{}, NewMemoryOperationStore(), backend)
+	principal := Principal{ID: "owner", ApplicationID: "app-1", ConnectionID: "connection-1"}
+	request := ApplicationPromptRequest{PromptRequest: PromptRequest{
+		WriteBase: WriteBase{OperationID: "prompt-1", SessionID: "session-1"}, Input: "hello",
+	}, SourceKind: "user"}
+	first, err := service.PromptApplication(context.Background(), principal, request)
+	if err != nil || first.Outcome != OutcomeCommitted || backend.calls != 1 {
+		t.Fatalf("first prompt = %#v, %v; backend calls = %d", first, err, backend.calls)
+	}
+	retry, err := service.PromptApplication(context.Background(), principal, request)
+	if err != nil || retry != first || backend.calls != 1 {
+		t.Fatalf("same-scope retry = %#v, %v; backend calls = %d", retry, err, backend.calls)
+	}
+	for index, other := range []Principal{
+		{ID: "owner", ApplicationID: "app-2", ConnectionID: principal.ConnectionID},
+		{ID: "owner", ApplicationID: principal.ApplicationID, ConnectionID: "connection-2"},
+	} {
+		result, err := service.PromptApplication(context.Background(), other, request)
+		if err != nil || result.Outcome != OutcomeCommitted || backend.calls != index+2 {
+			t.Fatalf("independent scope operation = %#v, %v; backend calls = %d", result, err, backend.calls)
+		}
+	}
+	request.OperationID = "invalid-source"
+	request.SourceKind = "background"
+	if result, err := service.PromptApplication(context.Background(), principal, request); err == nil || result.Outcome != OutcomeRejected || backend.calls != 3 {
+		t.Fatalf("invalid source = %#v, %v; backend calls = %d", result, err, backend.calls)
+	}
+	if result, err := service.CreateApplicationSession(context.Background(), principal, CreateApplicationSessionRequest{
+		WriteBase: WriteBase{OperationID: "invalid-profile"}, Profile: application.Profile{},
+	}); err == nil || result.Outcome != OutcomeRejected || backend.calls != 3 {
+		t.Fatalf("invalid profile = %#v, %v; backend calls = %d", result, err, backend.calls)
 	}
 }
 

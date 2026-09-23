@@ -180,9 +180,6 @@ type Config struct {
 	// owned by the TUI frame scheduler.
 	RenderFPS    int
 	ColorProfile colorprofile.Profile
-	// Bot selects the standalone Bot product mode. Nil keeps the ordinary
-	// coding surface.
-	Bot *BotSurface
 }
 
 type CompletionCandidate struct {
@@ -334,7 +331,6 @@ type sandboxProgressState struct {
 
 type Model struct {
 	uiPreferences uiPreferencesState
-	bot           *botSurfaceState
 	workspace     subagentWorkspaceState
 	cfg           Config
 	theme         tuikit.Theme

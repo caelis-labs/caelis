@@ -102,16 +102,6 @@ func (m *Model) renderWizardOverlay() string {
 	if m.wizardStepKey() == "acp_model" {
 		help = "↑↓ select  esc back"
 	}
-	if s.bot != nil {
-		if s.bot.choosingModel {
-			help = "↑↓ select  ←→ effort  esc back"
-			if c, ok := m.currentSlashArgCandidate(); ok && c.ModelSelection != nil && c.ModelSelection.FastSupported {
-				help = "↑↓ select  tab field  ←→ change  esc back"
-			}
-		} else {
-			help = "tab field  enter next  esc close"
-		}
-	}
 	if m.isACPManualSetup() {
 		help = "↑↓ scroll  esc back"
 		if m.canSendACPInstallPrompt() {
@@ -129,9 +119,6 @@ func (m *Model) renderWizardOverlay() string {
 	}
 	if s.pending {
 		help = ""
-		if s.bot != nil && s.bot.loading {
-			help = "esc close"
-		}
 	}
 	if s.blocked {
 		help = "esc close"
@@ -172,9 +159,6 @@ func (m *Model) wizardTitle() string {
 	s := m.wizardOverlay
 	if m.isWizardAuthChoice() {
 		return m.activePrompt.title
-	}
-	if s.bot != nil {
-		return m.botSettingsTitle()
 	}
 	if m.wizard.def.Command == "plugin" && !s.pending && !s.blocked {
 		return m.pluginWizardTitle()
@@ -345,12 +329,7 @@ func (m *Model) wizardBodyLines(width, offset, budget int) ([]string, []int) {
 		if i < len(candidates) {
 			candidate := candidates[i]
 			label, detail = slashArgCandidateIdentity(candidate), candidate.Detail
-			if m.isBotSettingsModel() {
-				detail = m.modelPickerControls(candidate, selected, width)
-				if candidate.ModelConfigID == s.bot.config.Model {
-					label = "● " + label
-				}
-			} else if !selected {
+			if !selected {
 				detail = ""
 			}
 			if m.wizard.def.Command == "plugin" && m.wizardStepKey() != "target" {
@@ -441,11 +420,6 @@ func (m *Model) renderWizardField(field wizardField, selected bool, width int) s
 		if selected {
 			value = "‹ " + value + " ›"
 		}
-	} else if field.key == "bot_model" {
-		if displayColumns(value) > available-3 {
-			value = "…" + truncateDisplayCellsFromEnd(value, max(1, available-4))
-		}
-		value += "  ›"
 	} else if selected {
 		runes := []rune(field.value)
 		cursor := clampInt(m.wizardOverlay.cursor, 0, len(runes))
@@ -474,9 +448,6 @@ func (m *Model) connectDisplayEndpoint() string {
 }
 
 func (m *Model) wizardResultHint() string {
-	if m.wizardOverlay.bot != nil {
-		return "Reopen /settings or /bots to review."
-	}
 	if m.wizard.def.Command == "plugin" {
 		return "Review /plugin before retrying."
 	}
