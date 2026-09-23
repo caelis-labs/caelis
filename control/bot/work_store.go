@@ -124,6 +124,11 @@ func (s *workSQL) compare(ctx context.Context, kind, id string, old, next any) (
 	return n == 1, err
 }
 
+const activeClientSQL = `SELECT 1 FROM bot_authority c WHERE c.kind='client' AND c.id=?
+ AND json_extract(c.body,'$.client.principal_id')=? AND json_extract(c.body,'$.client.bot_id')=?
+ AND json_extract(c.body,'$.client.activation_id')=? AND json_extract(c.body,'$.client.instance_id')=?
+ AND json_extract(c.body,'$.client.active')=1 AND julianday(json_extract(c.body,'$.client.expires_at'))>julianday('now')`
+
 // compareActive makes dispatch admission and lease validation one SQLite write.
 // Exit and claim therefore have a definite order even on concurrent transports.
 func (s *workSQL) compareActive(ctx context.Context, kind, id string, old, next any, client Client) (bool, error) {
@@ -135,11 +140,7 @@ func (s *workSQL) compareActive(ctx context.Context, kind, id string, old, next 
 	if err != nil {
 		return false, err
 	}
-	result, err := s.db.ExecContext(ctx, `UPDATE bot_authority SET body=? WHERE kind=? AND id=? AND body=? AND EXISTS (
- SELECT 1 FROM bot_authority c WHERE c.kind='client' AND c.id=?
- AND json_extract(c.body,'$.client.principal_id')=? AND json_extract(c.body,'$.client.bot_id')=?
- AND json_extract(c.body,'$.client.activation_id')=? AND json_extract(c.body,'$.client.instance_id')=?
- AND json_extract(c.body,'$.client.active')=1 AND julianday(json_extract(c.body,'$.client.expires_at'))>julianday('now'))`, string(after), kind, id, string(before), client.ID, client.PrincipalID, client.BotID, client.ActivationID, client.InstanceID)
+	result, err := s.db.ExecContext(ctx, `UPDATE bot_authority SET body=? WHERE kind=? AND id=? AND body=? AND EXISTS (`+activeClientSQL+`)`, string(after), kind, id, string(before), client.ID, client.PrincipalID, client.BotID, client.ActivationID, client.InstanceID)
 	if err != nil {
 		return false, err
 	}

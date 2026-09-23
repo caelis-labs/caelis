@@ -40,7 +40,7 @@ func TestBotManagedWorkAndDesktopWireConformance(t *testing.T) {
 		"BotDesktopSnapshot":       bot.DesktopSnapshot{Cursor: "cursor", Calls: []bot.DesktopCall{call}},
 		"BotDesktopClaim":          bot.DesktopClaim{Call: call, Token: "native-only"},
 		"BotDesktopReceipt":        bot.DesktopReceipt{Token: "native-only", Result: call.Result},
-		"BotReminderGrant":         bot.ReminderGrant{ID: "grant", Version: "version", ClientID: "client", PrincipalID: "owner", BotID: "bot", SourceID: "source", Arguments: bot.DesktopArguments{Operation: "save", ID: "native", Label: "Report", Prompt: "Read it", EveryMinutes: 60}, Active: true},
+		"BotReminderGrant":         bot.ReminderGrant{ID: "grant", Version: "version", ClientID: "client", PrincipalID: "owner", BotID: "bot", SourceID: "source", Arguments: bot.DesktopArguments{Operation: "save", ID: "native", Label: "Report", Prompt: "Read it", EveryMinutes: 60}, Active: true, LastOccurrence: time.Unix(123, 0).UTC(), CoalescedThrough: time.Unix(456, 0).UTC()},
 		"BotReminderFireList":      []bot.ReminderFire{{ID: "fire", GrantID: "grant", Version: "version", PrincipalID: "owner", BotID: "bot", ClientID: "client", SourceID: "source", State: "claimed", Due: time.Unix(123, 0).UTC(), Execution: target}},
 	}
 	for name, value := range values {

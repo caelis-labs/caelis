@@ -12,16 +12,19 @@ import (
 // ReminderGrant retains the real request behind a native resident schedule.
 // Desktop owns scheduling; this record governs what a scheduled wake may do.
 type ReminderGrant struct {
-	ID             string           `json:"id"`
-	Version        string           `json:"version"`
-	ClientID       string           `json:"client_id"`
-	PrincipalID    string           `json:"principal_id"`
-	BotID          string           `json:"bot_id"`
-	SourceID       string           `json:"source_id"`
-	Arguments      DesktopArguments `json:"arguments"`
-	Active         bool             `json:"active"`
-	CreatedAt      time.Time        `json:"created_at"`
-	LastOccurrence time.Time        `json:"last_occurrence"`
+	ID          string           `json:"id"`
+	Version     string           `json:"version"`
+	ClientID    string           `json:"client_id"`
+	PrincipalID string           `json:"principal_id"`
+	BotID       string           `json:"bot_id"`
+	SourceID    string           `json:"source_id"`
+	Arguments   DesktopArguments `json:"arguments"`
+	Active      bool             `json:"active"`
+	CreatedAt   time.Time        `json:"created_at"`
+	// LastOccurrence is the consumed scheduled time, not its receipt time.
+	LastOccurrence time.Time `json:"last_occurrence"`
+	// CoalescedThrough excludes backlog through the last accepted receipt time.
+	CoalescedThrough time.Time `json:"coalesced_through"`
 }
 
 // ReminderFire is an accepted occurrence, distinct from an LLM execution.
@@ -60,7 +63,7 @@ func (s *WorkStore) completeReminder(ctx context.Context, previous, next desktop
 		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	result, err := tx.ExecContext(ctx, `UPDATE bot_authority SET body=? WHERE kind='desktop' AND id=? AND body=? AND EXISTS (SELECT 1 FROM bot_authority c WHERE c.kind='client' AND c.id=? AND json_extract(c.body,'$.client.active')=1 AND json_extract(c.body,'$.client.activation_id')=? AND json_extract(c.body,'$.client.instance_id')=? AND julianday(json_extract(c.body,'$.client.expires_at'))>julianday('now'))`, string(after), next.Call.ID, string(before), client.ID, client.ActivationID, client.InstanceID)
+	result, err := tx.ExecContext(ctx, `UPDATE bot_authority SET body=? WHERE kind='desktop' AND id=? AND body=? AND EXISTS (`+activeClientSQL+`)`, string(after), next.Call.ID, string(before), client.ID, client.PrincipalID, client.BotID, client.ActivationID, client.InstanceID)
 	if err != nil {
 		return false, err
 	}
@@ -128,9 +131,13 @@ func (s *WorkStore) ReminderOccurrences(ctx context.Context, client Client) ([]R
 }
 
 // QueueReminderOccurrence validates one scheduler notification without accepting
-// any caller-supplied prompt or assignment. LastOccurrence coalesces missed
-// schedules and is committed atomically with the durable pending occurrence.
+// any caller-supplied prompt or assignment. The scheduled time and catch-up
+// cutoff are committed atomically with the durable pending occurrence.
 func (s *WorkStore) QueueReminderOccurrence(ctx context.Context, client Client, grantID, version string, due time.Time) (ReminderFire, error) {
+	return s.queueReminderOccurrence(ctx, client, grantID, version, due, time.Now().UTC())
+}
+
+func (s *WorkStore) queueReminderOccurrence(ctx context.Context, client Client, grantID, version string, due, now time.Time) (ReminderFire, error) {
 	client, err := s.ActiveClient(ctx, client.PrincipalID, client.BotID, client.ID)
 	if err != nil {
 		return ReminderFire{}, err
@@ -152,9 +159,8 @@ func (s *WorkStore) QueueReminderOccurrence(ctx context.Context, client Client, 
 	if !grant.Active || grant.Version != version || grant.ClientID != client.ID || grant.BotID != client.BotID || grant.PrincipalID != client.PrincipalID {
 		return ReminderFire{}, errorcode.New(errorcode.PermissionDenied, "bot: reminder grant is not active")
 	}
-	now := time.Now().UTC()
 	due = due.UTC()
-	if due.After(now) || due.Before(client.ActivatedAt) || !due.After(grant.LastOccurrence) {
+	if due.After(now) || due.Before(client.ActivatedAt) || !due.After(grant.LastOccurrence) || !due.After(grant.CoalescedThrough) {
 		return ReminderFire{}, errorcode.New(errorcode.Conflict, "bot: occurrence is future, stopped, or already consumed")
 	}
 	switch {
@@ -166,8 +172,8 @@ func (s *WorkStore) QueueReminderOccurrence(ctx context.Context, client Client, 
 	case grant.Arguments.EveryMinutes > 0:
 		interval := time.Duration(grant.Arguments.EveryMinutes) * time.Minute
 		earliest := grant.CreatedAt.Add(interval)
-		if !grant.LastOccurrence.IsZero() {
-			earliest = grant.LastOccurrence.Add(interval)
+		if !grant.CoalescedThrough.IsZero() {
+			earliest = grant.CoalescedThrough.Add(interval)
 		}
 		if due.Before(earliest.Add(-time.Second)) {
 			return ReminderFire{}, errors.New("bot: occurrence precedes the authorized interval")
@@ -185,7 +191,8 @@ func (s *WorkStore) QueueReminderOccurrence(ctx context.Context, client Client, 
 	// One native catch-up notification represents the missed interval. Advancing
 	// to now prevents a burst of old occurrences from creating repeated turns.
 	next := grant
-	next.LastOccurrence = now
+	next.LastOccurrence = due
+	next.CoalescedThrough = now.UTC()
 	before, _ := json.Marshal(grant)
 	after, _ := json.Marshal(next)
 	data, _ := json.Marshal(fire)
@@ -246,13 +253,41 @@ func (s *WorkStore) ClaimReminder(ctx context.Context, fire ReminderFire) (Remin
 	if err := s.db.Get(ctx, "reminder", fire.GrantID, &grant); err != nil {
 		return grant, false, err
 	}
-	if !grant.Active || grant.Version != fire.Version {
+	if !grant.Active || grant.Version != fire.Version || grant.ClientID != fire.ClientID || grant.PrincipalID != fire.PrincipalID || grant.BotID != fire.BotID {
 		return grant, false, errorcode.New(errorcode.PermissionDenied, "bot: reminder grant was revoked")
+	}
+	ok, err := s.claimReminder(ctx, client, fire, grant)
+	return grant, ok, err
+}
+
+func (s *WorkStore) claimReminder(ctx context.Context, client Client, fire ReminderFire, grant ReminderGrant) (bool, error) {
+	if fire.State != "pending" {
+		return false, nil
 	}
 	next := fire
 	next.State = "claimed"
-	ok, err := s.db.compareActive(ctx, "reminder_fire", fire.ID, fire, next, client)
-	return grant, ok, err
+	before, err := json.Marshal(fire)
+	if err != nil {
+		return false, err
+	}
+	after, err := json.Marshal(next)
+	if err != nil {
+		return false, err
+	}
+	// Grant replacement/revocation and dispatch admission must have one order.
+	// The earlier grant read supplies the assignment only after this CAS succeeds.
+	result, err := s.db.db.ExecContext(ctx, `UPDATE bot_authority SET body=? WHERE kind='reminder_fire' AND id=? AND body=?
+ AND EXISTS (`+activeClientSQL+`)
+ AND EXISTS (SELECT 1 FROM bot_authority g WHERE g.kind='reminder' AND g.id=?
+ AND json_extract(g.body,'$.active')=1 AND json_extract(g.body,'$.version')=?
+ AND json_extract(g.body,'$.client_id')=? AND json_extract(g.body,'$.principal_id')=? AND json_extract(g.body,'$.bot_id')=?)`,
+		string(after), fire.ID, string(before), client.ID, client.PrincipalID, client.BotID, client.ActivationID, client.InstanceID,
+		grant.ID, grant.Version, client.ID, client.PrincipalID, client.BotID)
+	if err != nil {
+		return false, err
+	}
+	count, err := result.RowsAffected()
+	return count == 1, err
 }
 
 // AdmitReminder stores an exact scheduled execution target, without replay.

@@ -552,16 +552,17 @@ type BotReminderFire struct {
 type BotReminderFireList []BotReminderFire
 
 type BotReminderGrant struct {
-	Active         bool                `json:"active"`
-	Arguments      BotDesktopArguments `json:"arguments"`
-	BotId          string              `json:"bot_id"`
-	ClientId       string              `json:"client_id"`
-	CreatedAt      time.Time           `json:"created_at"`
-	Id             string              `json:"id"`
-	LastOccurrence time.Time           `json:"last_occurrence"`
-	PrincipalId    string              `json:"principal_id"`
-	SourceId       string              `json:"source_id"`
-	Version        string              `json:"version"`
+	Active           bool                `json:"active"`
+	Arguments        BotDesktopArguments `json:"arguments"`
+	BotId            string              `json:"bot_id"`
+	ClientId         string              `json:"client_id"`
+	CoalescedThrough time.Time           `json:"coalesced_through"`
+	CreatedAt        time.Time           `json:"created_at"`
+	Id               string              `json:"id"`
+	LastOccurrence   time.Time           `json:"last_occurrence"`
+	PrincipalId      string              `json:"principal_id"`
+	SourceId         string              `json:"source_id"`
+	Version          string              `json:"version"`
 }
 
 type BotReminderGrantList []BotReminderGrant

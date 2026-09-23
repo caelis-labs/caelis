@@ -207,6 +207,10 @@ HH:MM `daily` with IANA `time_zone`. Only a direct user request can save or remo
 a reminder; scheduled prompts cannot create more schedule authority. Successful
 native save/remove receipts update the grant atomically. Unknown native changes
 keep the previous grant and prevent a second unresolved change of the same ID.
+Exit or activation replacement atomically suppresses unclaimed actions and
+releases their reminder IDs. Suppressed actions remain queryable and cannot be
+claimed. Claimed actions retain their unknown outcome and continue to fence
+conflicting reminder changes; a new activation does not authorize replay.
 
 Desktop owns timers and persists native receipts. Control validates the exact
 saved version and due time; it accepts no prompt in a fire request. The original
@@ -216,6 +220,13 @@ wake; busy conversations defer it until completion. Explicit main-Turn cancellat
 pauses pending wakes until the next accepted user message. Daily occurrences use whole
 minutes; an interval's first eligible occurrence is `created_at + interval`.
 The desktop should use returned Control grant timing for reconciliation.
+`last_occurrence` records the consumed scheduled time; `coalesced_through` records
+the receipt-time cutoff for missed occurrences. A daily catch-up before today's
+scheduled time does not consume today's future occurrence. Interval scheduling
+uses the cutoff plus the interval for the next eligible occurrence. Grant version,
+active status, ownership, and client lease are checked atomically when an
+occurrence is claimed. Revocation prevents later claims without retroactively
+cancelling an already admitted claim.
 
 ## Exit and recovery
 

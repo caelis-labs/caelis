@@ -4380,7 +4380,13 @@
           },
           "last_occurrence": {
             "type": "string",
-            "format": "date-time"
+            "format": "date-time",
+            "description": "Scheduled time of the last consumed occurrence."
+          },
+          "coalesced_through": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Catch-up cutoff: earlier due times cannot create additional occurrences."
           }
         },
         "required": [
@@ -4393,7 +4399,8 @@
           "arguments",
           "active",
           "created_at",
-          "last_occurrence"
+          "last_occurrence",
+          "coalesced_through"
         ],
         "additionalProperties": false
       },

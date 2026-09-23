@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"slices"
 	"strings"
@@ -131,13 +132,14 @@ func (s *WorkStore) ActivateClient(ctx context.Context, client Client) (Client, 
 	next.Client.Active = true
 	next.Client.InstanceID = s.InstanceID
 	next.Client.ExpiresAt = now.Add(10 * time.Minute)
-	changed, err := s.db.compare(ctx, "client", client.ID, record, next)
+	changed, err := s.compareClient(ctx, record, next)
 	if err != nil {
 		return Client{}, err
 	}
 	if !changed {
 		return Client{}, errorcode.New(errorcode.Conflict, "bot: client activation changed")
 	}
+	s.desktop.wake()
 	return next.Client, nil
 }
 
@@ -186,7 +188,7 @@ func (s *WorkStore) ExitClient(ctx context.Context, client Client) error {
 		}
 		next := record
 		next.Client.Active = false
-		changed, err := s.db.compare(ctx, "client", client.ID, record, next)
+		changed, err := s.compareClient(ctx, record, next)
 		if err != nil || changed {
 			if changed {
 				s.desktop.wake()
@@ -195,4 +197,38 @@ func (s *WorkStore) ExitClient(ctx context.Context, client Client) error {
 		}
 	}
 	return errors.New("bot: client exit contention")
+}
+
+// compareClient revokes unclaimed actions in the same transaction as their
+// activation. Claimed actions keep their unknown outcome and reminder fence.
+func (s *WorkStore) compareClient(ctx context.Context, previous, next clientCredential) (bool, error) {
+	before, err := json.Marshal(previous)
+	if err != nil {
+		return false, err
+	}
+	after, err := json.Marshal(next)
+	if err != nil {
+		return false, err
+	}
+	tx, err := s.db.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	result, err := tx.ExecContext(ctx, `UPDATE bot_authority SET body=? WHERE kind='client' AND id=? AND body=?`, string(after), previous.Client.ID, string(before))
+	if err != nil {
+		return false, err
+	}
+	count, err := result.RowsAffected()
+	if err != nil || count != 1 {
+		return false, err
+	}
+	if !next.Client.Active || next.Client.ActivationID != previous.Client.ActivationID {
+		if _, err := tx.ExecContext(ctx, `UPDATE bot_authority SET body=json_set(body,'$.call.state','suppressed')
+ WHERE kind='desktop' AND json_extract(body,'$.call.client_id')=?
+ AND json_extract(body,'$.call.activation_id')=? AND json_extract(body,'$.call.state')='queued'`, previous.Client.ID, previous.Client.ActivationID); err != nil {
+			return false, err
+		}
+	}
+	return true, tx.Commit()
 }

@@ -532,6 +532,7 @@ export interface BotReminderGrant {
   arguments: BotDesktopArguments;
   bot_id: string;
   client_id: string;
+  coalesced_through: string;
   created_at: string;
   id: string;
   last_occurrence: string;

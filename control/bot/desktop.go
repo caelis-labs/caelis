@@ -230,19 +230,38 @@ func (s *WorkStore) QueueDesktop(ctx context.Context, source RequestSource, item
 	data, _ := json.Marshal(args)
 	id := opaqueID("bot-action-", source.ID, action, string(data))
 	call := DesktopCall{ID: id, ClientID: client.ID, BotID: source.BotID, PrincipalID: source.PrincipalID, ActivationID: client.ActivationID, Execution: source.Execution, ItemID: itemID, SourceID: source.ID, Action: action, Arguments: args, State: "queued"}
-	fresh, err := s.db.Put(ctx, "desktop", id, desktopRecord{Call: call})
+	fresh, err := s.queueDesktop(ctx, client, call)
 	if err != nil {
 		return DesktopCall{}, err
 	}
 	if !fresh {
 		var previous desktopRecord
 		if err := s.db.Get(ctx, "desktop", id, &previous); err != nil {
+			if errorcode.CodeOf(err) == errorcode.NotFound {
+				return DesktopCall{}, errorcode.New(errorcode.Conflict, "bot: client activation changed before queuing action")
+			}
 			return DesktopCall{}, err
 		}
 		return previous.Call, nil
 	}
 	s.desktop.wake()
 	return call, nil
+}
+
+// queueDesktop cannot insert an old activation's action after exit or
+// replacement has suppressed its mailbox and released pending reminder IDs.
+func (s *WorkStore) queueDesktop(ctx context.Context, client Client, call DesktopCall) (bool, error) {
+	data, err := json.Marshal(desktopRecord{Call: call})
+	if err != nil {
+		return false, err
+	}
+	result, err := s.db.db.ExecContext(ctx, `INSERT INTO bot_authority(kind,id,body)
+ SELECT 'desktop',?,? WHERE EXISTS (`+activeClientSQL+`) ON CONFLICT(kind,id) DO NOTHING`, call.ID, string(data), client.ID, client.PrincipalID, client.BotID, client.ActivationID, client.InstanceID)
+	if err != nil {
+		return false, err
+	}
+	count, err := result.RowsAffected()
+	return count == 1, err
 }
 
 // DesktopCalls returns the client's action mailbox. It includes claimed calls
@@ -262,7 +281,7 @@ func (s *WorkStore) DesktopCalls(ctx context.Context, client Client) ([]DesktopC
 		if err := json.Unmarshal(row, &value); err != nil {
 			return nil, err
 		}
-		if value.Call.ClientID == current.ID && value.Call.ActivationID == current.ActivationID && value.Call.State != "completed" {
+		if value.Call.ClientID == current.ID && value.Call.ActivationID == current.ActivationID && (value.Call.State == "queued" || value.Call.State == "claimed") {
 			out = append(out, value.Call)
 		}
 	}
@@ -366,7 +385,7 @@ func (s *WorkStore) AwaitDesktop(ctx context.Context, id string) (DesktopCall, e
 		if err := s.db.Get(ctx, "desktop", id, &value); err != nil {
 			return DesktopCall{}, err
 		}
-		if value.Call.State == "completed" {
+		if value.Call.State == "completed" || value.Call.State == "suppressed" {
 			return value.Call, nil
 		}
 		select {
