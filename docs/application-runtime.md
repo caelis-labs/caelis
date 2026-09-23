@@ -98,7 +98,10 @@ schema 1 is a supported upgrade source. Old creation requests preserve their
 original serialized digest and recover their stored receipt without redispatch.
 An older schema-1 binary cannot open schema 2. Preserve a complete stopped-Host
 Store backup before an upgrade when rollback is required; downgrading a binary
-alone does not downgrade stored data.
+alone does not downgrade stored data. This is independent of the embedded
+Memory database migration described in [Release](release.md#embedded-memory-upgrades-and-recovery).
+Installing a binary does not upgrade an already-running Host; activation follows
+the [managed Host contract](architecture.md#product-host-and-clients).
 
 ## Execution profile and dynamic configuration
 
@@ -193,8 +196,12 @@ distinguishes the two catalogs: profile reads omit `tools` when it is empty
 (absent and `[]` mean the same empty catalog), while a cleared `native_tools`
 selection is echoed as `[]` and omission means the default native set —
 `native_tools: null` is invalid at creation too, never a silent default. An
-unsupported model/effort/tier combination returns an explicit error and is
-never silently ignored. A no-op or same-value update commits a durable
+unsupported effort or service-tier combination returns HTTP 400 with code
+`unsupported`; the message identifies the model and rejected field/value. An
+unconfigured or ambiguous model selector returns HTTP 400 `invalid_argument`.
+Selections are never silently ignored or downgraded. These rejections do not
+change desired configuration, revision or any issued request. Internal failures
+and provider unavailability retain their 5xx classification. A no-op or same-value update commits a durable
 operation receipt without creating a new revision; concurrent writers are
 ordered by the revision compare-and-swap.
 
@@ -214,6 +221,13 @@ operation ID never dispatches twice. The generic
 configuration update IDs with `unsupported` so a typed configuration receipt is
 never misread as a `CommandResult`; always read configuration update receipts
 through the typed route.
+
+Validation rejections occur before the atomic configuration/operation commit and
+create no successful operation receipt. A received 400 is a definite rejection;
+a lost response or transport failure is not. After a lost response, query the
+original operation ID. A 404 means no committed receipt is visible, not proof
+that an outstanding request can never commit; retain the original request and ID
+when reconciling rather than submitting a different operation.
 
 An accepted update takes effect at the next not-yet-issued model request,
 including later tool rounds of the same Turn; already-issued requests complete
@@ -343,6 +357,12 @@ operation fields. The limit is 8 MiB per resource. A descriptor has opaque `id`,
 `session_id`, `name`, `media_type`, byte `size`, and `sha256`. Ownership is inherited
 from the authenticated binding. Immutable bytes live behind the public API, not
 in a guessed worker path. Reusing an upload ID with changed bytes conflicts.
+There is currently no read-only lookup of a resource descriptor by upload
+operation ID. If the upload response and opaque resource ID are both lost, the
+resource read routes cannot recover the descriptor by operation ID; the generic
+command receipt route does not supply that upload receipt. Retain confirmed
+descriptors and unresolved upload intent, and do not guess IDs or retry under
+a new ID to conceal an unknown result.
 
 A `workspace-write` model receives:
 
@@ -372,7 +392,7 @@ execution completion.
 | `not_found` | No record in the authenticated scope |
 | `conflict` | ID payload conflict, already-claimed effect, stale native target or revision |
 | `failed_precondition` | Lease expired or binding revoked; inspect lifecycle |
-| `unsupported` | Inheritance `true`, generic operation lookup for a configuration update, or a platform without the requested native capability |
+| `unsupported` | HTTP 400: unsupported model effort/tier, inheritance `true`, generic operation lookup for a configuration update, or a platform without the requested native capability |
 | `unknown_outcome` / command `unknown` | Intent/effect cannot be proven; reconcile without redispatch |
 
 ## Public client and isolated Host

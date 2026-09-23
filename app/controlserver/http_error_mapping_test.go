@@ -21,6 +21,7 @@ func TestHTTPStatusMappingUsesTypedErrorsNotMessages(t *testing.T) {
 		status int
 	}{
 		{err: errorcode.New(errorcode.InvalidArgument, "bad"), status: http.StatusBadRequest},
+		{err: errorcode.New(errorcode.Unsupported, "unsupported combination"), status: http.StatusBadRequest},
 		{err: errorcode.New(errorcode.Unauthenticated, "bad"), status: http.StatusUnauthorized},
 		{err: errorcode.New(errorcode.PermissionDenied, "bad"), status: http.StatusForbidden},
 		{err: errorcode.New(errorcode.Conflict, "bad"), status: http.StatusConflict},
@@ -190,4 +191,28 @@ func (s *errorMappingService) DetachParticipant(context.Context, appserver.Princ
 }
 func (s *errorMappingService) Handoff(context.Context, appserver.Principal, appserver.HandoffRequest) (appserver.CommandResult, error) {
 	return s.result()
+}
+
+func TestHTTPErrorDetailKeepsInternalCausesPrivate(t *testing.T) {
+	for _, test := range []struct {
+		err    error
+		status int
+		detail string
+	}{
+		{errorcode.Wrap(errorcode.Unsupported, "model example does not support service_tier priority", errors.New("credential=private-sentinel")), http.StatusBadRequest, "model example does not support service_tier priority"},
+		{errors.New("provider failed: credential=private-sentinel unsupported"), http.StatusInternalServerError, "internal server error"},
+		{errorcode.New(errorcode.Unavailable, "provider failed: credential=private-sentinel"), http.StatusServiceUnavailable, "service unavailable"},
+	} {
+		recorder := httptest.NewRecorder()
+		writeMappedError(recorder, test.err)
+		var body struct {
+			Error string `json:"error"`
+		}
+		if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		if recorder.Code != test.status || body.Error != test.detail || strings.Contains(recorder.Body.String(), "private-sentinel") {
+			t.Fatalf("error response = %d %s", recorder.Code, recorder.Body.String())
+		}
+	}
 }

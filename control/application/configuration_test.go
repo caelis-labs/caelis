@@ -388,6 +388,33 @@ func TestConfigurationMigratesSchemaOneBindings(t *testing.T) {
 	}
 	owner := testConnection(t, s, 1)
 	binding := testBinding(t, s, owner, "legacy")
+	legacyRequest := json.RawMessage(`{"operation_id":"legacy-create","profile":{"version":"v1"}}`)
+	if _, _, err := s.BeginOperation(t.Context(), owner.Scope, "legacy-create", legacyRequest); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CompleteOperation(t.Context(), owner.Scope, "legacy-create", json.RawMessage(`{"operation_id":"legacy-create","session_id":"legacy","outcome":"committed"}`)); err != nil {
+		t.Fatal(err)
+	}
+	operation, err := s.GetOperation(t.Context(), owner.Scope, "legacy-create")
+	if err != nil {
+		t.Fatal(err)
+	}
+	callID := enqueueTest(t, s, testCall(binding))
+	if _, err := s.ClaimCall(t.Context(), owner.Scope, binding.SessionID, callID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CompleteCall(t.Context(), owner.Scope, binding.SessionID, callID, testResult()); err != nil {
+		t.Fatal(err)
+	}
+	call, err := s.GetCall(t.Context(), owner.Scope, binding.SessionID, callID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := []byte("schema-one-resource\x00bytes")
+	resource, err := s.CreateResource(t.Context(), owner.Scope, binding.SessionID, "legacy-upload", "input.bin", "application/octet-stream", content)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err = s.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -427,7 +454,20 @@ func TestConfigurationMigratesSchemaOneBindings(t *testing.T) {
 	if err != nil || baseline.Revision != 1 || !reflect.DeepEqual(baseline.Profile, binding.Profile) {
 		t.Fatalf("migration %+v %v", baseline, err)
 	}
+	recovered, fresh, err := s.BeginOperation(t.Context(), owner.Scope, "legacy-create", legacyRequest)
+	if err != nil || fresh || !reflect.DeepEqual(recovered, operation) {
+		t.Fatalf("migration changed operation or redispatched: %+v %v %v", recovered, fresh, err)
+	}
+	recoveredCall, err := s.GetCall(t.Context(), owner.Scope, binding.SessionID, callID)
+	if err != nil || !reflect.DeepEqual(recoveredCall, call) {
+		t.Fatalf("migration changed callback receipt: %+v %v", recoveredCall, err)
+	}
+	recoveredResource, data, err := s.ReadResource(t.Context(), owner.Scope, binding.SessionID, resource.ID)
+	if err != nil || recoveredResource != resource || string(data) != string(content) {
+		t.Fatalf("migration changed resource: %+v %q %v", recoveredResource, data, err)
+	}
 	old := testCall(binding)
+	old.ItemID = "after-migration"
 	if _, err = s.enqueue(t.Context(), old, "WriteNote", json.RawMessage(`{"note":"old"}`)); err != nil {
 		t.Fatalf("legacy callback: %v", err)
 	}

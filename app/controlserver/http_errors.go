@@ -18,7 +18,7 @@ func statusForError(err error) int {
 		return http.StatusBadRequest
 	}
 	switch errorcode.CodeOf(err) {
-	case errorcode.InvalidArgument:
+	case errorcode.InvalidArgument, errorcode.Unsupported:
 		return http.StatusBadRequest
 	case errorcode.Unauthenticated:
 		return http.StatusUnauthorized
