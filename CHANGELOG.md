@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.61.0](https://github.com/caelis-labs/caelis/compare/v0.60.1...v0.61.0) (2026-09-23)
+
+
+### ⚠ BREAKING CHANGES
+
+* **application:** Remove legacy Bot Mode and its CLI/TUI, dedicated APIs, tools and scheduler without compatibility entry points. Applications own identity, Notebook, business tools and scheduling. Application Store schema 1 to 2 preserves bindings, Sessions, operation digests and receipts, callbacks and resource bytes; old native Sessions retain RunCommand/Task plus the resource bridge. Schema-1 binaries cannot open schema 2: stop the Host and keep a complete protected Store backup before upgrade when rollback is required. This migration is independent of embedded Memory. Installing a new binary does not activate an already-running Host. CWD/inherit/execution/permissions remain creation-bound; model/effort/tier/instructions/tools support hot configuration. Real-model and Fast positive-path acceptance remain pending. See docs/application-runtime.md and docs/release.md.
+
+### Features
+
+* **application:** replace Bot mode with generic application runtime ([#72](https://github.com/caelis-labs/caelis/issues/72)) ([4a3c059](https://github.com/caelis-labs/caelis/commit/4a3c05964d6d240ec55414e189205930588ef099))
+* **bot:** add owned work and scoped desktop capabilities ([#67](https://github.com/caelis-labs/caelis/issues/67)) ([f3019f2](https://github.com/caelis-labs/caelis/commit/f3019f24bb412d39a9e0146d270837adf26d591b))
+* **models:** add Claude Opus 5.5 and retire Opus 5 recommendations ([#71](https://github.com/caelis-labs/caelis/issues/71)) ([5aebbc6](https://github.com/caelis-labs/caelis/commit/5aebbc6a750b8b2d472a0987fbf2e0942062c6d9))
+* **models:** support GPT-6 Sol and Luna ([#69](https://github.com/caelis-labs/caelis/issues/69)) ([e8f568e](https://github.com/caelis-labs/caelis/commit/e8f568e568114dfa56252672baad5551d3d9034b))
+
+
+### Bug Fixes
+
+* **application:** preserve native receipts and recover archive completion ([#73](https://github.com/caelis-labs/caelis/issues/73)) ([12d4924](https://github.com/caelis-labs/caelis/commit/12d49240feee60f841b9e69f27a77ce7ffb1a82f))
+* **resume:** match equivalent workspace paths when listing sessions ([#70](https://github.com/caelis-labs/caelis/issues/70)) ([b4e2e72](https://github.com/caelis-labs/caelis/commit/b4e2e72fc4a2c1dced71cfc905852981aac6416e))
+
 ## [0.60.1](https://github.com/caelis-labs/caelis/compare/v0.60.0...v0.60.1) (2026-09-22)
 
 
