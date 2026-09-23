@@ -48,6 +48,12 @@ func (e streamResponseHeaderTimeoutError) Retryable() bool {
 }
 
 func (e streamResponseHeaderTimeoutError) RetryMaxRetries() int {
+	if e.trace.gotConn && !e.trace.wroteRequest && !e.trace.gotFirstResponseByte {
+		// A blocked connection/request write is a transport failure, not a
+		// provider that consumed the full response wait. Keep the caller's
+		// ordinary retry budget; the retry hook retires the stalled pool.
+		return -1
+	}
 	return streamTimeoutMaxRetries
 }
 

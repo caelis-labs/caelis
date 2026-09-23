@@ -26,6 +26,14 @@ func (t *authenticatedTransport) CloseIdleConnections() {
 	}
 }
 
+func (t *authenticatedTransport) ResetConnectionsForRetry(cause error) {
+	if resetter, ok := t.base.(interface{ ResetConnectionsForRetry(error) }); ok {
+		resetter.ResetConnectionsForRetry(cause)
+		return
+	}
+	t.CloseIdleConnections()
+}
+
 func (t *authenticatedTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 	if request == nil {
 		return nil, fmt.Errorf("codexauth: request is nil")

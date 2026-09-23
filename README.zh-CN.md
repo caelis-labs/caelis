@@ -94,7 +94,6 @@ caelis
 | 目标 | 命令 |
 | --- | --- |
 | 启动 TUI | `caelis` |
-| 打开独立 Bot TUI | `caelis bot` |
 | 执行一次提示 | `caelis -p "概述这个仓库。"` |
 | 返回结构化结果 | `caelis -p "审查这些改动。" -format json` |
 | 流式输出 ACP Envelope | `caelis -p "运行测试。" -format jsonl` |
@@ -132,6 +131,7 @@ ChatGPT 订阅登录使用社区兼容的 Codex OAuth 流程，而非 OpenAI 文
 - [外部 ACP Agent](docs/external-acp-agents.md)：连接、能力和消息契约。
 - [Agent SDK](agent-sdk/README.md)：嵌入或扩展可复用的 Go Runtime。
 - [架构](docs/architecture.md)：代码归属与依赖边界。
+- [Application Runtime](docs/application-runtime.md)：应用注册、Session 执行配置、回调回执与资源。
 - [测试](docs/testing.md)：默认检查与按影响范围选择的验证。
 - [发布](docs/release.md)：官方产物的发布与验收流程。
 

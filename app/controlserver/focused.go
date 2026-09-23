@@ -23,12 +23,6 @@ func (s *Server) focusedRoutes() {
 	s.mux.HandleFunc("POST "+apiPrefix+"/sessions/{session_id}/participants/prompt", s.promptParticipant)
 	s.mux.HandleFunc("POST "+apiPrefix+"/sessions/{session_id}/participants/cancel", s.cancelParticipant)
 
-	s.botWorkRoutes()
-	s.mux.HandleFunc("GET "+apiPrefix+"/bots", s.listBots)
-	s.mux.HandleFunc("GET "+apiPrefix+"/bots/{bot_id}", s.getBot)
-	s.mux.HandleFunc("POST "+apiPrefix+"/bots/create", s.createBot)
-	s.mux.HandleFunc("POST "+apiPrefix+"/sessions/{session_id}/bots/update", s.updateBot)
-
 	s.mux.HandleFunc("POST "+apiPrefix+"/sessions/{session_id}/configuration/session-mode", s.configurationHandler("session-mode"))
 	s.mux.HandleFunc("POST "+apiPrefix+"/sessions/{session_id}/configuration/model", s.configurationHandler("session-model"))
 	s.mux.HandleFunc("POST "+apiPrefix+"/sessions/{session_id}/configuration/controller-mode", s.configurationHandler("controller-mode"))
@@ -194,50 +188,6 @@ func (s *Server) cancelParticipant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result, err := s.config.Services.Participants.CancelParticipant(r.Context(), principal, req)
-	writeCommandResult(w, result, err)
-}
-
-func (s *Server) listBots(w http.ResponseWriter, r *http.Request) {
-	principal, ok := s.requirePrincipal(w, r)
-	if !ok {
-		return
-	}
-	result, err := s.config.Services.Bots.ListBots(r.Context(), principal)
-	writeJSONResult(w, result, err)
-}
-
-func (s *Server) getBot(w http.ResponseWriter, r *http.Request) {
-	principal, ok := s.requirePrincipal(w, r)
-	if !ok {
-		return
-	}
-	result, err := s.config.Services.Bots.GetBot(r.Context(), principal, r.PathValue("bot_id"))
-	writeJSONResult(w, result, err)
-}
-
-func (s *Server) createBot(w http.ResponseWriter, r *http.Request) {
-	principal, ok := s.requirePrincipal(w, r)
-	if !ok {
-		return
-	}
-	var req appserver.CreateBotRequest
-	if !decodeBody(w, r, &req) || !applyHostWriteHeaders(w, r, &req.WriteBase) {
-		return
-	}
-	result, err := s.config.Services.Bots.CreateBot(r.Context(), principal, req)
-	writeCommandResult(w, result, err)
-}
-
-func (s *Server) updateBot(w http.ResponseWriter, r *http.Request) {
-	principal, ok := s.requirePrincipal(w, r)
-	if !ok {
-		return
-	}
-	var req appserver.UpdateBotRequest
-	if !decodeBody(w, r, &req) || !applyWriteHeaders(w, r, &req.WriteBase, r.PathValue("session_id")) {
-		return
-	}
-	result, err := s.config.Services.Bots.UpdateBot(r.Context(), principal, req)
 	writeCommandResult(w, result, err)
 }
 

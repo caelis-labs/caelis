@@ -31,6 +31,28 @@ import (
 	"github.com/caelis-labs/caelis/internal/version"
 )
 
+func TestRunRejectsRemovedBotModeBeforeStartingHost(t *testing.T) {
+	for _, args := range [][]string{{"bot"}, {"BoT", "--embedded"}, {"bot", "--help"}} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			err := runWithProductClientOpener(context.Background(), args, strings.NewReader(""), &stdout, &stderr,
+				func(context.Context, gatewayapp.Config, productClientOptions) (*productClients, error) {
+					t.Fatal("removed bot mode opened a product Host")
+					return nil, nil
+				})
+			if err == nil {
+				t.Fatal("removed bot mode succeeded")
+			}
+			if got, want := err.Error(), "cli: bot mode has been removed; run caelis for the ordinary TUI"; got != want {
+				t.Fatalf("run(%q) = %q, want %q", args, got, want)
+			}
+			if stdout.Len() != 0 || stderr.Len() != 0 {
+				t.Fatalf("removed command wrote output: stdout=%q stderr=%q", stdout.String(), stderr.String())
+			}
+		})
+	}
+}
+
 func TestRunServeStartsProductControlServer(t *testing.T) {
 	t.Setenv("CAELIS_CONTROL_TOKEN", "0123456789abcdef0123456789abcdef0123456789abcdef")
 	previous := runControlServerCommand

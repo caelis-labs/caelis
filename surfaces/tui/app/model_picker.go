@@ -24,7 +24,7 @@ type modelPickerState struct {
 }
 
 func (m *Model) isModelPicker() bool {
-	if !m.slashArgActive || m.slashArgCommand != "model" || m.isWizardActive() || m.botMode() {
+	if !m.slashArgActive || m.slashArgCommand != "model" || m.isWizardActive() {
 		return false
 	}
 	// Older Hosts omit model_selection. Their candidates keep the existing

@@ -13,6 +13,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/control/application"
 )
 
 type CommandServiceConfig struct {
@@ -89,20 +90,30 @@ func (s *CommandService) execute(ctx context.Context, principal Principal, actio
 		return commandFailure(operationID, sessionID, OutcomeRejected, publicCommandDetail(err, OutcomeRejected), err), err
 	}
 	digestRequest := request
-	if principal.ClientID != "" {
+	if principal.ApplicationID != "" || principal.ConnectionID != "" {
 		digestRequest = struct {
-			ClientID string
-			BotID    string
-			Request  any
-		}{principal.ClientID, principal.BotID, request}
+			ApplicationID string
+			ConnectionID  string
+			Request       any
+		}{principal.ApplicationID, principal.ConnectionID, request}
 	}
 	digest, err := requestDigest(digestRequest)
 	if err != nil {
 		coded := errorcode.Wrap(errorcode.InvalidArgument, err.Error(), err)
 		return commandFailure(operationID, sessionID, OutcomeRejected, publicCommandDetail(coded, OutcomeRejected), coded), coded
 	}
+	ledgerPrincipal := strings.TrimSpace(principal.ID)
+	if principal.ApplicationID != "" || principal.ConnectionID != "" {
+		// Applications have independent operation namespaces under one Host
+		// principal. The backend still receives the original authenticated owner.
+		ledgerPrincipal, err = requestDigest([]string{principal.ID, principal.ApplicationID, principal.ConnectionID})
+		if err != nil {
+			return CommandResult{}, err
+		}
+		ledgerPrincipal = "application-scope:" + ledgerPrincipal
+	}
 	intent := OperationIntent{
-		PrincipalID: strings.TrimSpace(principal.ID), OperationID: operationID, Action: action,
+		PrincipalID: ledgerPrincipal, OperationID: operationID, Action: action,
 		SessionID: sessionID, Target: strings.TrimSpace(target), Digest: digest,
 	}
 	recovery, recoveryBackend := s.config.Backend.(CommandRecoveryBackend)
@@ -346,16 +357,16 @@ func validateCommandRequest(action Action, request any) error {
 		}
 	case HandoffRequest:
 		return validateHandoffRequest(typed)
-	case BotReminderRequest:
-		return validateBotReminder(action, typed)
-	case BotClientExitRequest:
-		return validateBotClientExit(action, typed)
-	case BotWorkRequest:
-		return validateBotWorkRequest(action, typed)
-	case CreateBotRequest:
-		return validateCreateBotCommandRequest(action, typed)
-	case UpdateBotRequest:
-		return validateUpdateBotCommandRequest(action, typed)
+	case CreateApplicationSessionRequest:
+		if action != ActionApplicationCreate {
+			return errors.New("controlclient: invalid application creation action")
+		}
+		return application.ValidateProfile(typed.Profile)
+	case ApplicationPromptRequest:
+		if action != ActionApplicationPrompt {
+			return errors.New("controlclient: invalid application prompt action")
+		}
+		return validateApplicationPrompt(typed)
 	case SessionModeRequest:
 		return validateSessionModeRequest(typed)
 	case SessionModelRequest:

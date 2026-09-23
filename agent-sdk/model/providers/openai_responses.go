@@ -60,10 +60,12 @@ func newOpenAIResponses(cfg Config, token string) *openAIResponsesLLM {
 	}
 }
 
-func (l *openAIResponsesLLM) Name() string                   { return l.name }
-func (l *openAIResponsesLLM) ProviderName() string           { return l.provider }
-func (l *openAIResponsesLLM) ContextWindowTokens() int       { return l.contextWindowTokens }
-func (l *openAIResponsesLLM) ResetConnectionsForRetry(error) { l.client.CloseIdleConnections() }
+func (l *openAIResponsesLLM) Name() string             { return l.name }
+func (l *openAIResponsesLLM) ProviderName() string     { return l.provider }
+func (l *openAIResponsesLLM) ContextWindowTokens() int { return l.contextWindowTokens }
+func (l *openAIResponsesLLM) ResetConnectionsForRetry(cause error) {
+	resetHTTPConnectionsForRetry(l.client, cause)
+}
 
 func (l *openAIResponsesLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
 	return func(yield func(*model.StreamEvent, error) bool) {

@@ -35,6 +35,10 @@ type Agent struct {
 	reasoning           model.ReasoningConfig
 	request             agent.ModelRequestOptions
 	toolResultArtifacts *toolResultArtifactStore
+	resolveModelRequest agent.ModelRequestResolver
+	instructions        []model.Part
+	admitModelRequest   func(context.Context, agent.ModelRequestAdmission) error
+	discoveredTools     []string
 }
 
 // New returns one concrete chat agent.
@@ -84,6 +88,13 @@ func NewWithTools(name string, model model.LLM, tools []tool.Tool, systemPrompt 
 
 // NewAgent constructs one chat agent from one runtime.AgentSpec.
 func (f Factory) NewAgent(_ context.Context, spec agent.AgentSpec) (agent.Agent, error) {
+	if spec.ResolveModelRequest != nil {
+		name := strings.TrimSpace(spec.Name)
+		if name == "" {
+			name = "chat"
+		}
+		return &Agent{name: name, resolveModelRequest: spec.ResolveModelRequest, toolResultArtifacts: defaultToolResultArtifactStore()}, nil
+	}
 	systemPrompt := ""
 	if raw, ok := spec.Metadata["system_prompt"].(string); ok {
 		systemPrompt = strings.TrimSpace(raw)
@@ -107,8 +118,11 @@ func (a *Agent) Name() string {
 
 func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 	return func(yield func(*session.Event, error) bool) {
+		// A request snapshot belongs to this Run, never to the shared factory
+		// product. Its tools remain fixed until their response has been executed.
+		runAgent := *a
+		a := &runAgent
 		messages := messagesFromContext(ctx)
-		stream := a.request.StreamEnabled(false)
 		watchdog := newDefaultGenerationWatchdog()
 		visibility := tool.NewToolVisibilityForModel(a.tools, a.model)
 		a.refreshDeferredTools(&visibility)
@@ -121,7 +135,7 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 			}
 		}
 		for {
-			assistantMessage, calls, final, messageID, requestPrefix, ok, err := a.collectCanonicalModelStep(ctx, messages, stream, watchdog, &visibility, func(event *session.Event) bool {
+			assistantMessage, calls, final, messageID, requestPrefix, ok, err := a.collectCanonicalModelStep(ctx, messages, watchdog, &visibility, func(event *session.Event) bool {
 				return yield(event, nil)
 			})
 			if !ok {
@@ -179,6 +193,7 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 			for _, toolEvent := range toolEvents {
 				if toolEvent != nil && toolEvent.Tool != nil {
 					visibility.ApplyToolResult(toolEvent.Tool.Name, toolEvent.Tool.Output)
+					a.rememberRequestToolDiscovery(toolEvent)
 				}
 				if !yield(toolEvent, nil) {
 					return
@@ -202,13 +217,20 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 func (a *Agent) collectCanonicalModelStep(
 	ctx agent.Context,
 	messages []model.Message,
-	stream bool,
 	watchdog *generationWatchdog,
 	visibility *tool.ToolVisibility,
 	yield func(*session.Event) bool,
 ) (model.Message, []model.ToolCall, *model.Response, string, prefixusage.Snapshot, bool, error) {
-	for attempt := 0; ; attempt++ {
+	invalidAttempts := 0
+	for {
+		if err := ctx.Err(); err != nil {
+			return model.Message{}, nil, nil, "", prefixusage.Snapshot{}, true, err
+		}
+		if err := a.refreshModelRequest(ctx, visibility); err != nil {
+			return model.Message{}, nil, nil, "", prefixusage.Snapshot{}, true, err
+		}
 		a.refreshDeferredTools(visibility)
+		stream := a.request.StreamEnabled(false)
 		messageID := uuid.NewString()
 		request := &model.Request{
 			Messages:    messages,
@@ -218,13 +240,22 @@ func (a *Agent) collectCanonicalModelStep(
 			ServiceTier: a.request.ServiceTier,
 			Stream:      stream,
 		}
-		request.Instructions = append(request.Instructions, instructionsFromContext(ctx, a.systemPrompt)...)
+		if a.resolveModelRequest != nil {
+			request.Instructions = model.CloneParts(a.instructions)
+		} else {
+			request.Instructions = instructionsFromContext(ctx, a.systemPrompt)
+		}
 
 		modelCtx := model.WithProviderRequestMetadata(ctx, model.ProviderRequestMetadata{
 			SessionAffinity: ctx.Session().SessionID,
 		})
 		var receipts []model.Invocation
 		modelCtx = model.WithInvocationObserver(modelCtx, func(in model.Invocation) { receipts = append(receipts, in) })
+		if admit := a.admitModelRequest; admit != nil {
+			modelCtx = model.WithInvocationAdmission(modelCtx, func(ctx context.Context, _ *model.Request) error {
+				return admit(ctx, agent.ModelRequestAdmission{RequestID: uuid.NewString()})
+			})
+		}
 		final, err := collectFinalResponse(modelCtx, a.model, request, messageID, watchdog, yield)
 		for _, receipt := range receipts {
 			if yield != nil && !yield(session.NewModelInvocationReceipt(receipt, "chat")) {
@@ -232,6 +263,10 @@ func (a *Agent) collectCanonicalModelStep(
 			}
 		}
 		if err != nil {
+			if a.resolveModelRequest != nil && errors.Is(err, agent.ErrModelRequestSnapshotStale) {
+				watchdog.resetAll()
+				continue
+			}
 			return model.Message{}, nil, nil, "", prefixusage.Snapshot{}, true, err
 		}
 		final.Message = normalizeAssistantCitations(final.Message, messages)
@@ -240,10 +275,11 @@ func (a *Agent) collectCanonicalModelStep(
 		if err == nil {
 			return assistantMessage, calls, final, messageID, prefixusage.ForRequest(request), true, nil
 		}
-		if attempt >= maxInvalidToolCallRepairAttempts {
+		if invalidAttempts >= maxInvalidToolCallRepairAttempts {
 			return model.Message{}, nil, nil, "", prefixusage.Snapshot{}, true, err
 		}
-		if reset := invalidToolCallAttemptResetEvent(attempt + 1); reset != nil {
+		invalidAttempts++
+		if reset := invalidToolCallAttemptResetEvent(invalidAttempts); reset != nil {
 			if yield != nil && !yield(reset) {
 				return model.Message{}, nil, nil, "", prefixusage.Snapshot{}, false, nil
 			}

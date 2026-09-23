@@ -19,12 +19,6 @@ import (
 
 func (m *Model) windowTitle() string {
 	title := workspaceWindowTitle(m.headerWorkspaceText())
-	if m.botMode() {
-		title = m.botName()
-		if title == "" {
-			title = "Bots"
-		}
-	}
 	if title == "" {
 		title = "CAELIS"
 	}
@@ -533,10 +527,6 @@ func (m *Model) renderHintRowStyledText() string {
 }
 
 func (m *Model) headerWorkspaceText() string {
-	if m.botMode() {
-		// Bot mode never shows the workspace, branch, or Session identity.
-		return ""
-	}
 	if workspace := strings.TrimSpace(m.statusView.Workspace); workspace != "" {
 		return workspace
 	}
@@ -773,9 +763,6 @@ func (m *Model) footerYoloText() string {
 }
 
 func (m *Model) footerIdentityText() string {
-	if m.botMode() {
-		return m.botIdentityText()
-	}
 	workspace := m.headerWorkspaceText()
 	model := m.headerModelText()
 	if model == "" && workspace == "" {

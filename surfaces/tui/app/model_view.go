@@ -164,9 +164,6 @@ func (m *Model) View() tea.View {
 	if m.sessionPicker != nil && m.width > 0 && m.height > 0 {
 		normalizeBaseForOverlay()
 		picker := m.renderSessionPicker()
-		if m.sessionPicker.botPicker {
-			picker = m.renderBotPicker()
-		}
 		view = tuikit.OverlayCenter(view, picker, m.width, m.height)
 	}
 	var finalTrim int

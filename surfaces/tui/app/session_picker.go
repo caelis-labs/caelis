@@ -13,18 +13,17 @@ import (
 )
 
 type sessionPickerState struct {
-	rows      []ResumeCandidate
-	allRows   []ResumeCandidate
-	query     string
-	index     int
-	offset    int
-	loading   bool
-	err       string
-	request   uint64
-	cancel    context.CancelFunc
-	geometry  subagentOverlayGeometry
-	pressed   string
-	botPicker bool
+	rows     []ResumeCandidate
+	allRows  []ResumeCandidate
+	query    string
+	index    int
+	offset   int
+	loading  bool
+	err      string
+	request  uint64
+	cancel   context.CancelFunc
+	geometry subagentOverlayGeometry
+	pressed  string
 }
 
 type sessionPickerResultMsg struct {
@@ -56,9 +55,6 @@ func (m *Model) loadSessionPicker() tea.Cmd {
 	state := m.sessionPicker
 	if state == nil || state.loading {
 		return nil
-	}
-	if state.botPicker {
-		return m.loadBotPicker()
 	}
 	if m.cfg.ListSessions == nil {
 		return nil
@@ -110,14 +106,6 @@ func (m *Model) selectSessionPicker() tea.Cmd {
 		return nil
 	}
 	id := state.rows[state.index].SessionID
-	if state.botPicker {
-		m.closeSessionPicker()
-		value, ok := m.botBySessionID(id)
-		if !ok {
-			return nil
-		}
-		return m.selectBot(value)
-	}
 	m.closeSessionPicker()
 	return m.executeLineCmd(Submission{Text: "/resume " + id})
 }

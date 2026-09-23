@@ -154,7 +154,11 @@ type Descriptor struct {
 // behavior; NetworkDisabled does not disable network access on Windows.
 type ResourceLimits struct {
 	// ReadPaths is a mandatory read ceiling on Seatbelt and Bubblewrap. An
-	// explicitly empty list grants no ordinary file reads. Other backends reject it.
+	// explicitly empty list grants no ordinary file reads. Seatbelt also permits
+	// a read-only descriptor for the root directory itself for loader bootstrap,
+	// not reads of its descendants. A Seatbelt filesystem ceiling does not
+	// isolate same-user process environments; it is insufficient when that
+	// credential boundary is required. Other backends reject explicit read ceilings.
 	ReadPaths  []string
 	WritePaths []string
 	Network    Network

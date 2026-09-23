@@ -26,9 +26,6 @@ func AppServerClients(client *Client) (appserver.AppServerClients, error) {
 		Status:         client,
 		Configuration:  client,
 		Agents:         client,
-		Bots:           client,
-		BotWork:        client,
-		BotDesktop:     client,
 		Completion:     client,
 		Plugins:        client,
 		Presentation:   client,
@@ -47,7 +44,6 @@ var (
 	_ appserver.StatusClient        = (*Client)(nil)
 	_ appserver.ConfigurationClient = (*Client)(nil)
 	_ appserver.AgentClient         = (*Client)(nil)
-	_ appserver.BotClient           = (*Client)(nil)
 	_ appserver.CompletionClient    = (*Client)(nil)
 	_ appserver.PluginClient        = (*Client)(nil)
 	_ appserver.PresentationClient  = (*Client)(nil)

@@ -13,7 +13,7 @@ func TestStackPublicMethodsStayAtDeclaredHostBoundary(t *testing.T) {
 		"ACPPreparationReads": true, "AgentBindings": true,
 		"AdapterHost":   true,
 		"AgentCommands": true, "Agents": true,
-		"AppName": true, "Close": true, "Bots": true, "BotWork": true,
+		"AppName": true, "Close": true, "Applications": true, "StoreID": true, "InstanceID": true,
 		"ConfigurationCommands": true,
 		"ControlClient":         true,
 		"CollaborationService":  true,

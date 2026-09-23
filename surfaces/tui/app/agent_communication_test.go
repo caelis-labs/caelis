@@ -220,7 +220,7 @@ func TestWrappedAgentCommunicationLabelKeepsItsWorkspaceLink(t *testing.T) {
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
 		Update: eventstream.ToolCallUpdate{
 			SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "spawn-1", Status: &running,
-			RawOutput: map[string]any{"handle": "bot-cli-smoke", "state": "running"}, Meta: acpToolNameMeta("StartThread"),
+			RawOutput: map[string]any{"handle": "peer-cli-smoke", "state": "running"}, Meta: acpToolNameMeta("StartThread"),
 		},
 	})
 	view := requireSubagentOutputViewForTest(t, model, "spawn-1")
@@ -228,13 +228,13 @@ func TestWrappedAgentCommunicationLabelKeepsItsWorkspaceLink(t *testing.T) {
 	message := "start " + strings.Repeat("payload ", 18) + "middle-marker " + strings.Repeat("tail ", 18)
 	model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{
 		Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "turn-1", Scope: eventstream.ScopeMain,
-		AgentCommunicationSource: &eventstream.ActorIdentity{Kind: "participant", ID: "participant-1", Role: "delegated", Name: "breeze(bot-cli-smoke)"},
+		AgentCommunicationSource: &eventstream.ActorIdentity{Kind: "participant", ID: "participant-1", Role: "delegated", Name: "breeze(peer-cli-smoke)"},
 		Update: eventstream.ContentChunk{
 			SessionUpdate: eventstream.UpdateUserMessage,
 			Content:       eventstream.TextContent{Type: "text", Text: message},
 			MessageID:     "agent-message-1",
 			Meta: map[string]any{"caelis": map[string]any{"agent_communication": map[string]any{
-				"source": map[string]any{"kind": "participant", "id": "participant-1", "role": "delegated", "name": "breeze(bot-cli-smoke)"},
+				"source": map[string]any{"kind": "participant", "id": "participant-1", "role": "delegated", "name": "breeze(peer-cli-smoke)"},
 			}}},
 		},
 	})
@@ -242,7 +242,7 @@ func TestWrappedAgentCommunicationLabelKeepsItsWorkspaceLink(t *testing.T) {
 	model.syncViewportContent()
 	labelLine, continuation := -1, -1
 	for index, line := range model.viewportPlainLines {
-		if strings.HasPrefix(line, "• bot-cli-") {
+		if strings.HasPrefix(line, "• peer-cli-") {
 			labelLine, continuation = index, index+1
 			break
 		}

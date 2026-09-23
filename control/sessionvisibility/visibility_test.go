@@ -19,7 +19,8 @@ func TestSystemManagedSessionClassification(t *testing.T) {
 		{name: "wrong marker type", metadata: map[string]any{MetadataSystemManagedAgent: true}},
 		{name: "subagent", metadata: map[string]any{MetadataSystemManagedAgent: "subagent"}, want: true},
 		{name: "guardian", metadata: map[string]any{MetadataSystemManagedAgent: "guardian"}, want: true},
-		{name: "bot", metadata: map[string]any{MetadataSystemManagedAgent: SystemManagedAgentBot}, want: true},
+		{name: "application", metadata: map[string]any{MetadataSystemManagedAgent: SystemManagedAgentApplication}, want: true},
+		{name: "retired product", metadata: map[string]any{MetadataSystemManagedAgent: "bot"}, want: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
@@ -36,13 +37,28 @@ func TestSystemManagedSessionClassification(t *testing.T) {
 	}
 }
 
-func TestIsBotSessionRequiresBotClass(t *testing.T) {
+func TestApplicationAndRetiredSessionClassification(t *testing.T) {
 	t.Parallel()
-	for _, marker := range []string{"bot", " Bot ", "subagent", "guardian", ""} {
-		active := session.Session{Metadata: map[string]any{MetadataSystemManagedAgent: marker}}
-		want := marker == "bot" || marker == " Bot "
-		if got := IsBotSession(active); got != want {
-			t.Errorf("IsBotSession(%q) = %v, want %v", marker, got, want)
+	for _, test := range []struct {
+		marker      string
+		application bool
+		retired     bool
+	}{
+		{marker: "application", application: true},
+		{marker: " Application ", application: true},
+		{marker: "bot", retired: true},
+		{marker: " Bot ", retired: true},
+		{marker: "bot-work", retired: true},
+		{marker: "subagent"},
+		{marker: "guardian"},
+		{marker: ""},
+	} {
+		active := session.Session{Metadata: map[string]any{MetadataSystemManagedAgent: test.marker}}
+		if got := IsApplicationSession(active); got != test.application {
+			t.Errorf("IsApplicationSession(%q) = %v, want %v", test.marker, got, test.application)
+		}
+		if got := IsRetiredSession(active); got != test.retired {
+			t.Errorf("IsRetiredSession(%q) = %v, want %v", test.marker, got, test.retired)
 		}
 	}
 }

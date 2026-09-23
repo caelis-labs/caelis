@@ -1715,7 +1715,7 @@ func findAndRunTaskResult(msg tea.Msg, m *Model) bool {
 		return true
 	}
 	switch msg.(type) {
-	case botSettingsSavedMsg, clipboardCopyResultMsg:
+	case clipboardCopyResultMsg:
 		m.Update(msg)
 		return true
 	case submissionDispatchMsg:
@@ -1724,7 +1724,7 @@ func findAndRunTaskResult(msg tea.Msg, m *Model) bool {
 			return false
 		}
 		return findAndRunTaskResult(nextCmd(), m)
-	case slashArgLoadResultMsg, slashArgCompletionResultMsg, botSettingsLoadedMsg:
+	case slashArgLoadResultMsg, slashArgCompletionResultMsg:
 		_, nextCmd := m.Update(msg)
 		runConnectTestCmd(m, nextCmd)
 		return false

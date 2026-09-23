@@ -105,25 +105,21 @@ func TestDisconnectSubstringSearchConfirmsHighlightedModel(t *testing.T) {
 }
 
 func TestSessionPickerSearchOwnsTypingPasteAndRefresh(t *testing.T) {
-	for _, bots := range []bool{false, true} {
-		m := NewModel(Config{})
-		rows := []ResumeCandidate{{SessionID: "1", Title: "Jack"}, {SessionID: "2", Title: "Kate"}}
-		m.sessionPicker = &sessionPickerState{rows: rows, allRows: rows, botPicker: bots, request: 7}
-		m.handleSessionPickerKey(tea.KeyPressMsg(tea.Key{Text: "K", Code: 'K'}))
-		m.handlePaste(tea.PasteMsg{Content: "ate"})
-		if len(m.sessionPicker.rows) != 1 || m.sessionPicker.rows[0].SessionID != "2" || m.textarea.Value() != "" {
-			t.Fatal("search leaked into composer")
-		}
-		if !bots {
-			m.applySessionPickerResult(sessionPickerResultMsg{request: 7, rows: rows})
-			if m.sessionPicker.query != "Kate" || len(m.sessionPicker.rows) != 1 {
-				t.Fatal("refresh lost search")
-			}
-		}
-		m.Update(tea.KeyPressMsg(tea.Key{Code: 'u', Mod: tea.ModCtrl}))
-		if len(m.sessionPicker.rows) != 2 {
-			t.Fatal("clear did not restore rows")
-		}
+	m := NewModel(Config{})
+	rows := []ResumeCandidate{{SessionID: "1", Title: "Jack"}, {SessionID: "2", Title: "Kate"}}
+	m.sessionPicker = &sessionPickerState{rows: rows, allRows: rows, request: 7}
+	m.handleSessionPickerKey(tea.KeyPressMsg(tea.Key{Text: "K", Code: 'K'}))
+	m.handlePaste(tea.PasteMsg{Content: "ate"})
+	if len(m.sessionPicker.rows) != 1 || m.sessionPicker.rows[0].SessionID != "2" || m.textarea.Value() != "" {
+		t.Fatal("search leaked into composer")
+	}
+	m.applySessionPickerResult(sessionPickerResultMsg{request: 7, rows: rows})
+	if m.sessionPicker.query != "Kate" || len(m.sessionPicker.rows) != 1 {
+		t.Fatal("refresh lost search")
+	}
+	m.Update(tea.KeyPressMsg(tea.Key{Code: 'u', Mod: tea.ModCtrl}))
+	if len(m.sessionPicker.rows) != 2 {
+		t.Fatal("clear did not restore rows")
 	}
 }
 

@@ -110,7 +110,6 @@ requirements and delivery guarantees.
 | Goal | Command |
 | --- | --- |
 | Start the TUI | `caelis` |
-| Open the standalone Bot TUI | `caelis bot` |
 | Observe an existing Session in another terminal | `caelis -session <session-id>` |
 | Run one prompt | `caelis -p "Summarize this repository."` |
 | Return one structured result | `caelis -p "Review the changes." -format json` |
@@ -167,6 +166,7 @@ particular, `CAELIS_STARTUP_WORKSPACE_IDENTITY_CONFLICT` is repaired by
 - [External ACP agents](docs/external-acp-agents.md): connection, capabilities, and messaging contracts.
 - [Agent SDK](agent-sdk/README.md): embed or extend the reusable Go runtime.
 - [Architecture](docs/architecture.md): repository ownership and dependency boundaries.
+- [Application Runtime](docs/application-runtime.md): application enrollment, Session profiles, callback receipts, and resources.
 - [Testing](docs/testing.md): default and change-scoped validation.
 - [Release](docs/release.md): publish and verify official artifacts.
 

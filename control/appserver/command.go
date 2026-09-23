@@ -14,10 +14,10 @@ import (
 // Principal is trusted adapter context. It is never decoded from a command
 // body or query parameter.
 type Principal struct {
-	// ClientID and BotID are set only by authenticated Bot client enrollment.
-	// They are trusted call context, never request-body or query parameters.
-	ClientID string
-	BotID    string
+	// ApplicationID and ConnectionID are trusted adapter context, not decoded
+	// from JSON command bodies or query parameters.
+	ApplicationID string `json:"-"`
+	ConnectionID  string `json:"-"`
 
 	ID    string   `json:"id"`
 	Roles []string `json:"roles,omitempty"`
@@ -106,12 +106,6 @@ const (
 	ActionPluginEnable              Action = "configuration.plugin.enable"
 	ActionPluginDisable             Action = "configuration.plugin.disable"
 	ActionPluginRemove              Action = "configuration.plugin.remove"
-	// ActionBotCreate creates a Host-owned Bot without addressing a Session;
-	// ActionBotUpdate edits one Bot through its bound Session; ActionBotGet is the
-	// read action used to authorize access through the Bot's bound Session.
-	ActionBotCreate Action = "bot.create"
-	ActionBotUpdate Action = "bot.update"
-	ActionBotGet    Action = "bot.get"
 )
 
 type Outcome string
@@ -167,7 +161,6 @@ const (
 	CommandResourceModelProfile    = "model_profile"
 	CommandResourcePlugin          = "plugin"
 	CommandResourceMarketplace     = "plugin_marketplace"
-	CommandResourceBot             = "bot"
 	CommandResourceParticipantTask = "participant_task"
 )
 

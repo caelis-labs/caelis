@@ -199,7 +199,13 @@ func (g *Gateway) runTurn(
 	}
 	normalizeRunRequestPolicyProfile(&runReq)
 	runReq.ApprovalRequester = approvalRequesterFunc(func(approvalCtx context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
-		return g.resolveApprovalRequest(ctx, approvalCtx, handle, &req, runReq.AgentSpec.Model)
+		reviewModel := runReq.AgentSpec.Model
+		if req.Call.RuntimeModel != nil {
+			// A later model request can select a different model during this
+			// Turn. Approval keeps the model pinned to the producing tool call.
+			reviewModel = req.Call.RuntimeModel
+		}
+		return g.resolveApprovalRequest(ctx, approvalCtx, handle, &req, reviewModel)
 	})
 	runReq.SourceObserver = agent.SourceEventObserverFunc(func(observeCtx context.Context, event agent.SourceEvent) error {
 		return g.observeSourceEvent(observeCtx, session, handle, event)

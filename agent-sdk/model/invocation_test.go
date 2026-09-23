@@ -3,6 +3,7 @@ package model
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -84,5 +85,33 @@ func TestInvocationAdmissionStopsRetriesBeforeProviderAndReceipt(t *testing.T) {
 	}
 	if !errors.Is(last, exhausted) || inner.calls != 1 || receipts != 1 {
 		t.Fatalf("err=%v calls=%d receipts=%d", last, inner.calls, receipts)
+	}
+}
+
+func TestInvocationAdmissionRunsAtIteratorDispatch(t *testing.T) {
+	for _, observe := range []bool{false, true} {
+		t.Run(fmt.Sprint(observe), func(t *testing.T) {
+			inner := &retryTestLLM{events: [][]*StreamEvent{{StreamEventFromResponse(&Response{TurnComplete: true})}}}
+			admitted, receipts := 0, 0
+			ctx := WithInvocationAdmission(t.Context(), func(context.Context, *Request) error {
+				admitted++
+				return nil
+			})
+			if observe {
+				ctx = WithInvocationObserver(ctx, func(Invocation) { receipts++ })
+			}
+			stream := Generate(ctx, inner, &Request{})
+			if admitted != 0 || inner.calls != 0 || receipts != 0 {
+				t.Fatal("constructing an unsent iterator admitted a provider request")
+			}
+			for _, err := range stream {
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if admitted != 1 || inner.calls != 1 || (observe && receipts != 1) {
+				t.Fatalf("admissions=%d calls=%d receipts=%d", admitted, inner.calls, receipts)
+			}
+		})
 	}
 }

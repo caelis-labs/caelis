@@ -11,10 +11,10 @@ import (
 	"strconv"
 
 	controlagents "github.com/caelis-labs/caelis/control/agents"
+	"github.com/caelis-labs/caelis/control/application"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/internal/eventmeta"
-	"github.com/caelis-labs/caelis/control/bot"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
 	"github.com/caelis-labs/caelis/control/workspacetrust"
 )
@@ -130,6 +130,20 @@ func marshalWireValueUnchecked(value any) ([]byte, error) {
 		return marshalWriteRequest(typed, typed.ExpectedRevision)
 	case appserver.PromptRequest:
 		return marshalWriteRequest(typed, typed.ExpectedRevision)
+	case appserver.CreateApplicationSessionRequest:
+		return marshalWriteRequest(typed, typed.ExpectedRevision)
+	case appserver.ApplicationPromptRequest:
+		return marshalWriteRequest(typed, typed.ExpectedRevision)
+	case appserver.ApplicationResourceRequest:
+		return marshalWriteRequest(typed, typed.ExpectedRevision)
+	case application.Call:
+		return marshalApplicationCall(typed)
+	case []application.Call:
+		return marshalApplicationCallList(typed)
+	case application.Configuration:
+		return marshalApplicationConfiguration(typed)
+	case application.UpdateConfigurationRequest:
+		return marshalUpdateConfigurationRequest(typed)
 	case appserver.SteerRequest:
 		return marshalWriteRequest(typed, typed.ExpectedRevision)
 	case appserver.CancelRequest:
@@ -204,18 +218,6 @@ func marshalWireValueUnchecked(value any) ([]byte, error) {
 		return marshalWriteRequest(typed, typed.ExpectedRevision)
 	case appserver.RemovePluginRequest:
 		return marshalWriteRequest(typed, typed.ExpectedRevision)
-	case appserver.BotReminderRequest:
-		return marshalWriteRequest(typed, typed.ExpectedRevision)
-	case appserver.BotClientExitRequest:
-		return marshalWriteRequest(typed, typed.ExpectedRevision)
-	case appserver.RegisterBotClientRequest:
-		return marshalWriteRequest(typed, typed.ExpectedRevision)
-	case appserver.BotWorkRequest:
-		return marshalWriteRequest(typed, typed.ExpectedRevision)
-	case appserver.CreateBotRequest:
-		return marshalWriteRequest(typed, typed.ExpectedRevision)
-	case appserver.UpdateBotRequest:
-		return marshalWriteRequest(typed, typed.ExpectedRevision)
 	case appserver.DisconnectCandidatesSnapshot:
 		return marshalDisconnectCandidatesSnapshot(typed)
 	case controlagents.ACPPreparation:
@@ -226,15 +228,61 @@ func marshalWireValueUnchecked(value any) ([]byte, error) {
 		return marshalSessionState(typed)
 	case controlstatus.StatusSnapshot:
 		return marshalStatusSnapshot(typed)
-	case bot.Bot:
-		return marshalBot(typed)
-	case []bot.Bot:
-		return marshalBotList(typed)
 	case eventstream.Envelope:
 		return marshalEnvelope(typed)
 	default:
 		return json.Marshal(value)
 	}
+}
+
+func marshalApplicationCall(call application.Call) ([]byte, error) {
+	fields, err := marshalObject(call)
+	if err != nil {
+		return nil, err
+	}
+	fields["configuration_revision"] = decimalRaw(call.ConfigurationRevision)
+	return json.Marshal(fields)
+}
+
+func marshalApplicationCallList(calls []application.Call) ([]byte, error) {
+	values := make([]json.RawMessage, 0, len(calls))
+	for _, call := range calls {
+		raw, err := marshalApplicationCall(call)
+		if err != nil {
+			return nil, err
+		}
+		values = append(values, raw)
+	}
+	return json.Marshal(values)
+}
+
+func marshalApplicationConfiguration(configuration application.Configuration) ([]byte, error) {
+	fields, err := marshalObject(configuration)
+	if err != nil {
+		return nil, err
+	}
+	fields["revision"] = decimalRaw(configuration.Revision)
+	if configuration.LastRequest != nil {
+		last, marshalErr := marshalObject(configuration.LastRequest)
+		if marshalErr != nil {
+			return nil, marshalErr
+		}
+		last["revision"] = decimalRaw(configuration.LastRequest.Revision)
+		fields["last_request"], err = json.Marshal(last)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return json.Marshal(fields)
+}
+
+func marshalUpdateConfigurationRequest(request application.UpdateConfigurationRequest) ([]byte, error) {
+	fields, err := marshalObject(request)
+	if err != nil {
+		return nil, err
+	}
+	fields["expected_configuration_revision"] = decimalRaw(request.ExpectedConfigurationRevision)
+	return json.Marshal(fields)
 }
 
 func marshalACPPreparation(preparation controlagents.ACPPreparation) ([]byte, error) {
@@ -256,30 +304,6 @@ func marshalDisconnectCandidatesSnapshot(snapshot appserver.DisconnectCandidates
 	}
 	fields["revision"] = decimalRaw(snapshot.Revision)
 	return json.Marshal(fields)
-}
-
-func marshalBot(value bot.Bot) ([]byte, error) {
-	fields, err := marshalObject(value)
-	if err != nil {
-		return nil, err
-	}
-	fields["revision"] = decimalRaw(value.Revision)
-	return json.Marshal(fields)
-}
-
-func marshalBotList(values []bot.Bot) ([]byte, error) {
-	if values == nil {
-		values = []bot.Bot{}
-	}
-	out := make([]json.RawMessage, 0, len(values))
-	for _, value := range values {
-		raw, err := marshalBot(value)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, raw)
-	}
-	return json.Marshal(out)
 }
 
 func marshalStatusSnapshot(status controlstatus.StatusSnapshot) ([]byte, error) {
@@ -725,6 +749,17 @@ func decodeWireRequest(raw json.RawMessage, target any) error {
 			return fmt.Errorf("invalid expected_revision: %w", err)
 		}
 		fields["expected_revision"] = json.RawMessage(strconv.FormatUint(revision, 10))
+	}
+	if revisionRaw, ok := fields["expected_configuration_revision"]; ok {
+		var decimal string
+		if err := json.Unmarshal(revisionRaw, &decimal); err != nil {
+			return fmt.Errorf("expected_configuration_revision must be a decimal string")
+		}
+		revision, err := parseUint64Decimal(decimal)
+		if err != nil {
+			return fmt.Errorf("invalid expected_configuration_revision: %w", err)
+		}
+		fields["expected_configuration_revision"] = json.RawMessage(strconv.FormatUint(revision, 10))
 	}
 	normalized, err := json.Marshal(fields)
 	if err != nil {

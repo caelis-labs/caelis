@@ -28,3 +28,19 @@ func (p *closeIdleTransportProbe) RoundTrip(*http.Request) (*http.Response, erro
 func (p *closeIdleTransportProbe) CloseIdleConnections() {
 	p.calls.Add(1)
 }
+
+func TestAuthenticatedTransportForwardsRetryPoolReset(t *testing.T) {
+	base := &retryPoolProbe{}
+	transport := &authenticatedTransport{base: base}
+	transport.ResetConnectionsForRetry(nil)
+	if base.resets != 1 || base.calls.Load() != 0 {
+		t.Fatalf("resets=%d idle=%d", base.resets, base.calls.Load())
+	}
+}
+
+type retryPoolProbe struct {
+	closeIdleTransportProbe
+	resets int
+}
+
+func (p *retryPoolProbe) ResetConnectionsForRetry(error) { p.resets++ }

@@ -24,7 +24,6 @@ func (m *Model) handleACPEventEnvelope(env eventstream.Envelope) (tea.Model, tea
 			m.beginLiveTurn(SubmissionModeDefault, true, env.OccurredAt)
 		}
 		m.liveTurn.observed = m.viewGeneration != 0
-		m.setBotRunStatus(env.SessionID, eventstream.LifecycleStateRunning)
 	}
 	if env.Err != nil || env.Kind == eventstream.KindError {
 		if text := display.UserVisibleError(env.Err); text != "" {

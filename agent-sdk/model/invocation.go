@@ -93,17 +93,28 @@ func Generate(ctx context.Context, llm LLM, req *Request) iter.Seq2[*StreamEvent
 	if _, ok := llm.(InvocationTracker); ok {
 		return llm.Generate(ctx, req)
 	}
-	if admit, ok := ctx.Value(invocationAdmissionKey{}).(func(context.Context, *Request) error); ok {
-		if err := admit(ctx, CloneRequest(req)); err != nil {
-			return func(yield func(*StreamEvent, error) bool) { yield(nil, err) }
-		}
-	}
-	if observer, _ := ctx.Value(invocationObserverKey{}).(func(Invocation)); observer == nil {
+	admit, _ := ctx.Value(invocationAdmissionKey{}).(func(context.Context, *Request) error)
+	observer, _ := ctx.Value(invocationObserverKey{}).(func(Invocation))
+	if admit == nil && observer == nil {
 		return llm.Generate(ctx, CloneRequest(req))
 	}
 	return func(yield func(*StreamEvent, error) bool) {
 		if err := ctx.Err(); err != nil {
 			yield(nil, err)
+			return
+		}
+		if admit != nil {
+			if err := admit(ctx, CloneRequest(req)); err != nil {
+				yield(nil, err)
+				return
+			}
+		}
+		if observer == nil {
+			for event, err := range llm.Generate(ctx, CloneRequest(req)) {
+				if !yield(event, err) {
+					return
+				}
+			}
 			return
 		}
 		receipt := Invocation{ID: uuid.NewString(), Model: strings.TrimSpace(llm.Name()), Outcome: "failed"}

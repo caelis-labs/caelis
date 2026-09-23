@@ -26,6 +26,36 @@ Release builds stamp the distribution version, commit, build time, BuildID, and
 `build_kind=release`. Local or unstamped builds remain development builds and use
 their isolated default Store.
 
+## Application Runtime upgrades
+
+The application protocol replaces the removed Bot Mode; there is no legacy Bot
+CLI, scheduler, storage API or compatibility entry point. Applications own
+identity, Notebook, business tools and scheduling. Caelis provides generic
+execution, permissions, observation and recovery. See
+[Application Runtime](application-runtime.md) for the public contract.
+
+The Application Store migration is separate from embedded Memory below. Its
+schema 1 → 2 upgrade preserves bindings, Session identities, operation
+requests/digests/receipts, callback receipts and resource bytes. Existing native
+Sessions retain their old RunCommand/Task catalog plus the resource bridge;
+new file tools are selected explicitly rather than silently granted. The
+[compatibility contract](application-runtime.md#persistence-compatibility) owns
+the supported upgrade source and immutable creation retry behavior.
+
+A schema-1 binary cannot open the upgraded Application Store. Before upgrading
+when rollback is required, stop the Host, prevent client restarts and keep a
+complete protected Store backup, including database WAL/SHM files, configuration
+and credentials. Verify the backup in isolation. Downgrading the executable
+alone cannot undo either database migration; reconcile post-upgrade writes
+before restoring a backup.
+
+CWD, inheritance, execution and permissions remain bound at Session creation.
+Model, reasoning effort, supported service tier, instructions and tools can
+change at the next unissued model request, including within a Turn. A provider's
+support for priority is not a promise that every model supports Fast. Synthetic
+provider acceptance does not establish real-model or Fast service behavior;
+record those results separately before claiming them in release acceptance.
+
 ## Embedded Memory upgrades and recovery
 
 The embedded Memory database uses schema 2. Opening a supported v0.5.2

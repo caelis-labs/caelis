@@ -43,36 +43,10 @@ func (r *Runtime) resolveAgent(
 	}
 	spec := cloneAgentSpec(req.AgentSpec)
 	spec.Request = req.Request.WithDefaults(spec.Request)
-	if err := validateAgentSpecCapabilities(
-		spec.Model,
-		spec.Tools,
-		spec.Request.OutputSpec(),
-		spec.Request.StreamEnabled(false),
-		spec.RequiredModelCapabilities,
-	); err != nil {
+	if spec.ResolveModelRequest != nil {
+		spec.ResolveModelRequest = r.wrapModelRequestResolver(ctx, activeSession, ref, state, spec, req, runID, turnID, toolStepSequence)
+	} else if err := r.prepareAgentSpec(ctx, activeSession, ref, state, &spec, req, runID, turnID, toolStepSequence); err != nil {
 		return nil, err
-	}
-	modeName, _ := r.policyForName(ctx, r.policyMode(spec))
-	spec.Model = r.wrapModelForAutoCompaction(ref, spec.Model)
-	spec.Model = r.wrapModelForLifecycle(spec.Model)
-	spec.Tools = r.wrapToolsForRuntime(activeSession, ref, spec, runtimeToolContext{
-		mode:              modeName,
-		approvalMode:      string(r.currentApprovalMode(state)),
-		approvalRequester: req.ApprovalRequester,
-		runID:             strings.TrimSpace(runID),
-		turnID:            strings.TrimSpace(turnID),
-		inputSender:       agent.AgentInputSenderFromContext(ctx),
-	})
-	wrappingSpec := spec
-	wrap := func(tools []tool.Tool) []tool.Tool {
-		bound := wrappingSpec
-		bound.Tools = tools
-		bound.Tools = r.wrapTurnTools(ctx, activeSession, ref, state, bound, req.ApprovalRequester, runID, turnID, toolStepSequence)
-		return bound.Tools
-	}
-	spec.Tools = wrap(spec.Tools)
-	if spec.DeferredTools != nil {
-		spec.DeferredTools = &deferredToolSource{source: spec.DeferredTools, wrap: wrap}
 	}
 
 	return r.agentFactory.NewAgent(ctx, spec)

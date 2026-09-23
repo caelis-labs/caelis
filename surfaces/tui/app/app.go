@@ -127,9 +127,6 @@ func newModelWithTheme(cfg Config, theme tuikit.Theme) *Model {
 		subagentRosterTasks:      map[string]taskstream.TaskDescriptor{},
 		runningHintTracker:       newRunningHintTracker(),
 	}
-	if cfg.Bot != nil {
-		m.bot = &botSurfaceState{client: cfg.Bot.Client}
-	}
 	m.help = help.New()
 	m.applyTheme(theme)
 	if cfg.ToggleMode == nil {
@@ -172,12 +169,6 @@ func (m *Model) setCommands(commands []string) {
 	if m == nil {
 		return
 	}
-	if m.botMode() {
-		// Host refreshes may include workspace commands and named Agents. Bot
-		// mode keeps its own catalog, including shared Host configuration.
-		commands = BotCommands()
-		m.cfg.CommandDetails = BotCommandDetails()
-	}
 	m.cfg.Commands = append([]string(nil), commands...)
 	m.cacheCommandCompletionDetails(m.cfg.Commands)
 	items := make([]list.Item, 0, len(m.cfg.Commands))
@@ -209,11 +200,7 @@ func (m *Model) Init() tea.Cmd {
 	m.hasCommittedLine = m.doc.Len() > 0
 	m.syncViewportContent()
 	cmds := []tea.Cmd{tickStatusCmd(), m.loadUIPreferences()}
-	if m.botMode() {
-		if cmd := m.beginBotBootstrap(); cmd != nil {
-			cmds = append(cmds, cmd)
-		}
-	} else if m.cfg.InitialSessionID != "" {
+	if m.cfg.InitialSessionID != "" {
 		cmds = append(cmds, m.executeLineCmd(Submission{Text: "/resume " + m.cfg.InitialSessionID}))
 	}
 	if cmd := m.beginStatusRefreshCmd(); cmd != nil {
@@ -264,7 +251,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.renderDrainTickScheduled = false
 		m.viewGeneration = scoped.generation
 		m.sessionObservationRecovering = scoped.recovery
-		m.publishPendingBot(scoped.state.SessionID)
 		return m, m.beginSessionHistory(scoped)
 	}
 	if failure, ok := msg.(sessionObservationErrorMsg); ok {
@@ -273,7 +259,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.sessionSwitchPending = pendingNavigation
 		m.sessionObservationRecovering = false
 		m.sessionHistoryFailed = true
-		m.failPendingBot()
 		m.removeHintsByText(sessionObservationRecoveryHint)
 		return m, m.showHint(failure.err.Error(), hintOptions{priority: HintPriorityHigh})
 	}
@@ -320,9 +305,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.sessionHistory == nil {
 			m.removeHintsByText(sessionHistoryLoadingHint)
 		}
-		if result.Err != nil {
-			m.failPendingBot()
-		}
 	}
 
 	if handled, cmd := m.updateSubagentWorkspace(msg); handled {
@@ -346,17 +328,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(commitCmd, m.beginStatusRefreshCmd())
 	case sessionPickerResultMsg:
 		return m, m.applySessionPickerResult(typed)
-	case botListMsg:
-		return m, m.handleBotList(typed)
-	case botPickerResultMsg:
-		m.applyBotPickerResult(typed)
-		return m, nil
-	case botSettingsLoadedMsg:
-		return m, m.handleBotSettingsLoaded(typed)
-	case botSettingsSavedMsg:
-		return m, m.handleBotSettingsSaved(typed)
-	case botFlowResultMsg:
-		return m, m.handleBotFlowResult(typed)
 	case sessionPickerRefreshMsg:
 		if m.sessionPicker != nil && m.sessionPicker.request == typed.request {
 			return m, m.loadSessionPicker()

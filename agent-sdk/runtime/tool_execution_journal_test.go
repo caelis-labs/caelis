@@ -7,6 +7,7 @@ import (
 	"iter"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -19,6 +20,57 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session/memory"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
+
+func TestJournaledToolOverwritesUntrustedInvocationIdentity(t *testing.T) {
+	t.Parallel()
+
+	service, active := newJournalTestSession(t, "trusted-tool-identity")
+	var observed tool.Call
+	wrapped := journaledTool{
+		base: tool.NamedTool{Def: tool.Definition{Name: "Write", EffectClass: tool.EffectNonIdempotent}, Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
+			observed = call
+			return tool.Result{ID: call.ID, Name: call.Name}, nil
+		}},
+		sessions: service, sessionRef: active.SessionRef, runID: "run-canonical", turnID: "turn-canonical",
+		now: func() time.Time { return time.Unix(100, 0) }, sequence: new(atomic.Uint64),
+	}
+	forged := tool.InvocationContext{SessionID: "attacker-session", TurnID: "attacker-turn", ItemID: "attacker-item"}
+	call := tool.Call{
+		ID: "provider-reused", Name: "Write",
+		Input:    []byte(`{"execution":{"session_id":"attacker-session","turn_id":"attacker-turn","item_id":"attacker-item"}}`),
+		Metadata: map[string]any{"execution": forged}, Execution: forged,
+	}
+	if _, err := wrapped.Call(context.Background(), call); err != nil {
+		t.Fatal(err)
+	}
+	want := tool.InvocationContext{SessionID: active.SessionID, TurnID: "turn-canonical", ItemID: "tool-step-1:provider-reused"}
+	if observed.Execution != want {
+		t.Fatalf("callback Execution = %#v, want %#v", observed.Execution, want)
+	}
+	if !reflect.DeepEqual(observed.Metadata["execution"], forged) || string(observed.Input) != string(call.Input) {
+		t.Fatalf("model input/metadata were unexpectedly used or mutated: %#v", observed)
+	}
+	encoded, err := json.Marshal(observed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "turn-canonical") || strings.Contains(string(encoded), active.SessionID) {
+		t.Fatalf("trusted execution identity leaked into Call JSON: %s", encoded)
+	}
+	events, err := service.Events(context.Background(), session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range events {
+		if event.Journal == nil || event.Journal.ToolExecution == nil {
+			continue
+		}
+		key := event.Journal.ToolExecution.Key
+		if key.SessionID != want.SessionID || key.TurnID != want.TurnID || key.StepID != want.ItemID {
+			t.Fatalf("durable execution key = %#v, want %#v", key, want)
+		}
+	}
+}
 
 func TestJournaledToolPersistsLifecycleAndCancellationRequest(t *testing.T) {
 	t.Parallel()
@@ -171,9 +223,13 @@ func TestToolRecoveryStatusRemainsCanonicalWithEmptyResult(t *testing.T) {
 			}
 
 			runtime := &Runtime{sessions: service, clock: func() time.Time { return time.Unix(300, 0) }}
-			recoverer := recoveryStatusTool{result: tt.result, err: tt.recoverErr}
+			var recoveredRequest tool.RecoveryRequest
+			recoverer := recoveryStatusTool{result: tt.result, err: tt.recoverErr, observed: &recoveredRequest}
 			if err := runtime.recoverIncompleteToolExecutions(context.Background(), active.SessionRef, recoverer); err != nil {
 				t.Fatal(err)
+			}
+			if want := (tool.InvocationContext{SessionID: active.SessionID, TurnID: "turn-old", ItemID: "call-recovery"}); recoveredRequest.Call.Execution != want {
+				t.Fatalf("recovered invocation identity = %#v, want %#v", recoveredRequest.Call.Execution, want)
 			}
 			events, err := service.Events(context.Background(), session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
 			if err != nil {
@@ -228,8 +284,9 @@ func TestToolRecoveryStatusRemainsCanonicalWithEmptyResult(t *testing.T) {
 }
 
 type recoveryStatusTool struct {
-	result tool.RecoveryResult
-	err    error
+	result   tool.RecoveryResult
+	err      error
+	observed *tool.RecoveryRequest
 }
 
 func (recoveryStatusTool) Definition() tool.Definition {
@@ -240,7 +297,10 @@ func (recoveryStatusTool) Call(context.Context, tool.Call) (tool.Result, error) 
 	return tool.Result{}, errors.New("must not execute during recovery")
 }
 
-func (t recoveryStatusTool) Recover(context.Context, tool.RecoveryRequest) (tool.RecoveryResult, error) {
+func (t recoveryStatusTool) Recover(_ context.Context, req tool.RecoveryRequest) (tool.RecoveryResult, error) {
+	if t.observed != nil {
+		*t.observed = req
+	}
 	return t.result, t.err
 }
 

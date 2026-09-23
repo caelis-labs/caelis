@@ -227,6 +227,42 @@ func (t *streamTimeoutTestTransport) CloseIdleConnections() {
 	t.closeIdle.Add(1)
 }
 
+func TestHeaderWriteTimeoutKeepsNormalRetryBudget(t *testing.T) {
+	transport := &streamTimeoutTestTransport{}
+	transport.roundTrip = func(req *http.Request) (*http.Response, error) {
+		if transport.requests.Load() <= 2 {
+			return nil, streamResponseHeaderTimeoutError{trace: streamHeaderTraceSnapshot{gotConn: true, reused: true}}
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"text/event-stream"}},
+			Body: io.NopCloser(strings.NewReader("data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"recovered\"}]}]}}\n\n")), Request: req}, nil
+	}
+	llm := newTimeoutTestLLM(t, APIOpenAICodex, transport, Config{})
+	resets, err := runTimeoutTestLLM(llm)
+	if err != nil || resets != 2 || transport.requests.Load() != 3 {
+		t.Fatalf("retry recovery: requests=%d resets=%d error=%v", transport.requests.Load(), resets, err)
+	}
+}
+
+type retryResetTransport struct {
+	streamTimeoutTestTransport
+	resets int
+}
+
+func (t *retryResetTransport) ResetConnectionsForRetry(error) { t.resets++ }
+
+func TestHeaderTimeoutResetsActivePoolThroughTransportCapability(t *testing.T) {
+	transport := &retryResetTransport{}
+	client := &http.Client{Transport: transport}
+	resetHTTPConnectionsForRetry(client, streamResponseHeaderTimeoutError{})
+	if transport.resets != 1 || transport.closeIdle.Load() != 0 {
+		t.Fatalf("header reset=%d idle=%d", transport.resets, transport.closeIdle.Load())
+	}
+	resetHTTPConnectionsForRetry(client, errors.New("other failure"))
+	if transport.resets != 1 || transport.closeIdle.Load() != 1 {
+		t.Fatalf("ordinary reset=%d idle=%d", transport.resets, transport.closeIdle.Load())
+	}
+}
+
 type blockingSSEBody struct {
 	prefix *strings.Reader
 	closed chan struct{}

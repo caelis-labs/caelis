@@ -7,6 +7,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/control/application"
 	"github.com/caelis-labs/caelis/control/sessionvisibility"
 )
 
@@ -16,24 +17,34 @@ type Authorizer interface {
 	Authorize(context.Context, Principal, Action, string) error
 }
 
-// SessionAuthorizer enforces owner-by-principal access to an explicit Session
-// ID. Admin is the only role that bypasses owner equality.
+// SessionAuthorizer enforces canonical owner equality and application bindings.
+// An application credential cannot acquire another Session through metadata, a
+// client-selected ID, or the ordinary Host principal's administrative role.
 type SessionAuthorizer struct {
 	Sessions interface {
 		Session(context.Context, session.SessionRef) (session.Session, error)
 	}
+	Applications *application.Store
 }
 
-func (a SessionAuthorizer) Authorize(ctx context.Context, principal Principal, action Action, sessionID string) error {
-	principal.ID = strings.TrimSpace(principal.ID)
-	if principal.ID == "" {
+func (a SessionAuthorizer) Authorize(ctx context.Context, p Principal, action Action, sessionID string) error {
+	p.ID = strings.TrimSpace(p.ID)
+	if p.ID == "" {
 		return ErrUnauthorized
 	}
-	if principal.ClientID != "" && (action == ActionSessionCreate || action == ActionSessionList) {
-		return ErrUnauthorized
+	scoped := p.ApplicationID != "" || p.ConnectionID != ""
+	if action == ActionApplicationCreate {
+		scope, err := ApplicationScope(p)
+		if err != nil || a.Applications == nil {
+			return ErrUnauthorized
+		}
+		return a.Applications.CheckActive(ctx, scope)
 	}
 	switch action {
 	case ActionSessionCreate, ActionSessionList:
+		if scoped {
+			return ErrUnauthorized
+		}
 		return nil
 	}
 	if a.Sessions == nil || strings.TrimSpace(sessionID) == "" {
@@ -49,29 +60,45 @@ func (a SessionAuthorizer) Authorize(ctx context.Context, principal Principal, a
 		}
 		return errorcode.Wrap(errorcode.Internal, "controlclient: load session for authorization", err)
 	}
-	if !principal.HasRole("admin") && strings.TrimSpace(active.UserID) != principal.ID {
+	if !p.HasRole("admin") && strings.TrimSpace(active.UserID) != p.ID {
 		return ErrUnauthorized
 	}
-	if principal.ClientID != "" && active.Metadata["control_bot_id"] != principal.BotID {
-		return ErrUnauthorized
+	if sessionvisibility.IsRetiredSession(active) {
+		return errorcode.New(errorcode.Unsupported, "controlclient: legacy Bot Mode has been removed; stored data is not migrated or deleted")
 	}
-	if sessionvisibility.IsBotWorkSession(active) {
+	var binding application.Binding
+	bound := false
+	if a.Applications != nil {
+		binding, err = a.Applications.BindingForSession(ctx, active.SessionID)
+		if err == nil {
+			bound = true
+		} else if !errors.Is(err, application.ErrNotFound) {
+			return err
+		}
+	}
+	if scoped {
+		scope, scopeErr := ApplicationScope(p)
+		if scopeErr != nil || !bound || binding.Scope != scope || active.UserID != scope.PrincipalID {
+			return ErrUnauthorized
+		}
 		switch action {
-		case ActionSessionInspect, ActionApprovalResolve:
+		case ActionSessionInspect:
+			return nil
+		case ActionApplicationPrompt, ActionCancel, ActionApprovalResolve, ActionSessionClose:
+			if err = a.Applications.CheckActive(ctx, scope); err != nil {
+				return err
+			}
 		default:
 			return ErrUnauthorized
 		}
-	}
-	if sessionvisibility.IsBotSession(active) {
-		// Bot conversation lifecycle and configuration belong to the focused
-		// service. Knowing its Session ID does not grant workspace commands,
-		// participant access, steering, handoff, or close authority.
-		switch action {
-		case ActionSessionInspect, ActionPrompt, ActionCancel, ActionBotGet, ActionBotUpdate, ActionBotWorkCreate, ActionBotWorkContinue, ActionBotWorkSteer, ActionBotWorkCancel, ActionBotCompletionAck, ActionBotClientExit, ActionBotReminderFire:
-		default:
+		if binding.Archived && action != ActionSessionClose {
+			return ErrSessionClosed
+		}
+	} else if bound {
+		if !p.HasRole(RoleSystemSessionRuntime) || action != ActionSessionInspect {
 			return ErrUnauthorized
 		}
-	} else if action == ActionBotGet || action == ActionBotUpdate {
+	} else if action == ActionApplicationPrompt || active.Metadata[sessionvisibility.MetadataSystemManagedAgent] == application.MetadataKind {
 		return ErrUnauthorized
 	}
 	if action != ActionSessionInspect && action != ActionSessionClose {
@@ -91,10 +118,8 @@ func (a SessionAuthorizer) Authorize(ctx context.Context, principal Principal, a
 }
 
 // ProductCommandAuthorizer owns Host product-command authorization while
-// delegating Session-scoped commands to the existing Session authorizer.
-type ProductCommandAuthorizer struct {
-	Sessions Authorizer
-}
+// delegating Session-scoped commands to the Session authorizer.
+type ProductCommandAuthorizer struct{ Sessions Authorizer }
 
 // ConfigurationAuthorizer is retained for embedded clients compiled against
 // the pre-AgentBinding command contract. Remove this source-compatibility alias
@@ -102,12 +127,9 @@ type ProductCommandAuthorizer struct {
 // Deprecated: use ProductCommandAuthorizer.
 type ConfigurationAuthorizer = ProductCommandAuthorizer
 
-func (a ProductCommandAuthorizer) Authorize(ctx context.Context, principal Principal, action Action, sessionID string) error {
-	if principal.ClientID != "" && isHostProductAction(action) {
-		return ErrUnauthorized
-	}
+func (a ProductCommandAuthorizer) Authorize(ctx context.Context, p Principal, action Action, sessionID string) error {
 	if isHostProductAction(action) {
-		if strings.TrimSpace(principal.ID) == "" || strings.TrimSpace(sessionID) != "" {
+		if p.ApplicationID != "" || p.ConnectionID != "" || strings.TrimSpace(p.ID) == "" || strings.TrimSpace(sessionID) != "" {
 			return ErrUnauthorized
 		}
 		return nil
@@ -115,19 +137,16 @@ func (a ProductCommandAuthorizer) Authorize(ctx context.Context, principal Princ
 	if a.Sessions == nil {
 		return ErrUnauthorized
 	}
-	return a.Sessions.Authorize(ctx, principal, action, sessionID)
+	return a.Sessions.Authorize(ctx, p, action, sessionID)
 }
-
 func isHostProductAction(action Action) bool {
 	switch action {
 	case ActionModelConnect, ActionModelUse, ActionModelDelete,
 		ActionSandboxBackend, ActionSandboxPrepare, ActionSandboxRepair, ActionSandboxReset, ActionSandboxRefresh,
 		ActionWorkspaceTrust,
-		ActionBotCreate,
 		ActionAgentBindingBind, ActionAgentBindingReset, ActionAgentRoleCreate, ActionAgentRoleDelete,
 		ActionAgentBindingSetSave, ActionAgentBindingSetApply, ActionAgentBindingSetDelete,
-		ActionACPAgentPrepare, ActionACPAgentPrepareAuth, ActionACPAgentConnect,
-		ActionACPAgentDisconnect,
+		ActionACPAgentPrepare, ActionACPAgentPrepareAuth, ActionACPAgentConnect, ActionACPAgentDisconnect,
 		ActionPluginMarketplaceAdd, ActionPluginMarketplaceUpdate, ActionPluginMarketplaceRemove,
 		ActionPluginAddPath, ActionPluginInstall, ActionPluginEnable, ActionPluginDisable, ActionPluginRemove:
 		return true

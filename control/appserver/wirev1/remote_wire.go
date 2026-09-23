@@ -8,9 +8,9 @@ import (
 	"math"
 
 	controlagents "github.com/caelis-labs/caelis/control/agents"
+	"github.com/caelis-labs/caelis/control/application"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/control/bot"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
 	"github.com/caelis-labs/caelis/control/workspacetrust"
 )
@@ -47,14 +47,20 @@ func unmarshalWireValue(raw []byte, target any) error {
 			return err
 		}
 		return unmarshalStrict(normalized, typed)
-	case *bot.Bot:
-		normalized, err := normalizeObjectUint64Fields(raw, "revision")
+	case *application.Configuration:
+		normalized, err := normalizeApplicationConfigurationJSON(raw)
 		if err != nil {
 			return err
 		}
 		return unmarshalStrict(normalized, typed)
-	case *[]bot.Bot:
-		normalized, err := normalizeBotListJSON(raw)
+	case *application.Call:
+		normalized, err := normalizeObjectUint64Fields(raw, "configuration_revision")
+		if err != nil {
+			return err
+		}
+		return unmarshalStrict(normalized, typed)
+	case *[]application.Call:
+		normalized, err := normalizeApplicationCallListJSON(raw)
 		if err != nil {
 			return err
 		}
@@ -89,6 +95,43 @@ func normalizeStatusSnapshotJSON(raw []byte) ([]byte, error) {
 		return nil, err
 	}
 	return json.Marshal(fields)
+}
+
+func normalizeApplicationConfigurationJSON(raw []byte) ([]byte, error) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return nil, err
+	}
+	normalized, err := normalizeObjectUint64Fields(raw, "revision")
+	if err != nil {
+		return nil, err
+	}
+	if err = json.Unmarshal(normalized, &fields); err != nil {
+		return nil, err
+	}
+	if lastRequest, ok := fields["last_request"]; ok {
+		normalizedLast, normalizeErr := normalizeObjectUint64Fields(lastRequest, "revision")
+		if normalizeErr != nil {
+			return nil, normalizeErr
+		}
+		fields["last_request"] = normalizedLast
+	}
+	return json.Marshal(fields)
+}
+
+func normalizeApplicationCallListJSON(raw []byte) ([]byte, error) {
+	var values []json.RawMessage
+	if err := json.Unmarshal(raw, &values); err != nil {
+		return nil, err
+	}
+	for index := range values {
+		normalized, err := normalizeObjectUint64Fields(values[index], "configuration_revision")
+		if err != nil {
+			return nil, err
+		}
+		values[index] = normalized
+	}
+	return json.Marshal(values)
 }
 
 // Unmarshal decodes one Control value according to the v1 JSON contract.
@@ -339,21 +382,6 @@ func normalizeObjectUint64Fields(raw json.RawMessage, names ...string) (json.Raw
 		}
 	}
 	return json.Marshal(fields)
-}
-
-func normalizeBotListJSON(raw json.RawMessage) (json.RawMessage, error) {
-	var values []json.RawMessage
-	if err := json.Unmarshal(raw, &values); err != nil {
-		return nil, err
-	}
-	for index := range values {
-		normalized, err := normalizeObjectUint64Fields(values[index], "revision")
-		if err != nil {
-			return nil, err
-		}
-		values[index] = normalized
-	}
-	return json.Marshal(values)
 }
 
 func normalizeRawUint64Field(fields map[string]json.RawMessage, name string) error {
