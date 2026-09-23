@@ -485,6 +485,10 @@ func TestApplicationRequestAndResponseJSONConformsToOpenAPI(t *testing.T) {
 	binding := application.Binding{Scope: scope, SessionID: "session-1", Profile: profile, CreationDigest: "sha256:profile"}
 	base := appserver.WriteBase{OperationID: "operation-1", SessionID: "session-1"}
 	resource := application.Resource{ID: "resource-1", SessionID: "session-1", Name: "report", MediaType: "text/plain", Size: 5, SHA256: "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"}
+	grant := application.BackgroundGrant{ID: "grant-1", Scope: scope, SessionID: "session-1", Source: "authorized-timer-42", AuthorizationOperationID: "user-opt-in-42"}
+	model := "configured-model"
+	nativeTools := []string{"Read", "Bash"}
+	emptyTools := []application.ToolDefinition{}
 	for name, value := range map[string]any{
 		"ApplicationRegistration":         application.Registration{OperationID: "register-1", Name: "Example", Credential: "app-client-" + strings.Repeat("a", 64)},
 		"ApplicationConnection":           application.Connection{Scope: scope, Name: "Example", ExpiresAt: time.Unix(100, 0).UTC()},
@@ -493,11 +497,22 @@ func TestApplicationRequestAndResponseJSONConformsToOpenAPI(t *testing.T) {
 		"ApplicationBinding":              binding,
 		"ApplicationBindingList":          []application.Binding{binding},
 		"ApplicationOperation":            appserver.ApplicationOperation{OperationID: "operation-1", Outcome: appserver.OutcomeUnknown},
-		"ApplicationCall":                 application.Call{ID: "receipt-1", CallContext: application.CallContext{Scope: scope, SessionID: "session-1", TurnID: "turn-1", ItemID: "item-1", CallID: "native-call-1", ToolsVersion: profile.ToolsVersion, Source: application.Source{Kind: "user", OperationID: "prompt-1"}}, Name: "ExampleLookup", Arguments: json.RawMessage(`{"key":"example"}`), State: "pending"},
+		"ApplicationCall":                 application.Call{ID: "receipt-1", CallContext: application.CallContext{Scope: scope, SessionID: "session-1", TurnID: "turn-1", ItemID: "item-1", CallID: "native-call-1", ToolsVersion: profile.ToolsVersion, ConfigurationRevision: 7, Source: application.Source{Kind: "user", OperationID: "prompt-1"}}, Name: "ExampleLookup", Arguments: json.RawMessage(`{"key":"example"}`), State: "pending"},
 		"ApplicationCallResult":           application.CallResult{Outcome: "succeeded", Content: json.RawMessage(`{"found":true}`)},
-		"ApplicationResourceRequest":      appserver.ApplicationResourceRequest{WriteBase: base, Name: "report", MediaType: "text/plain", Data: []byte("hello"), SHA256: resource.SHA256},
-		"ApplicationResource":             resource,
-		"ApplicationResourceContent":      appserver.ApplicationResourceContent{Resource: resource, Data: []byte("hello")},
+		"ApplicationConfiguration": application.Configuration{
+			SessionID: "session-1", Revision: 7, Profile: profile,
+			LastRequest: &application.RequestConfiguration{Revision: 7, RequestID: "operation-1", TurnID: "turn-1"},
+		},
+		"UpdateApplicationConfigurationRequest": application.UpdateConfigurationRequest{
+			OperationID: "update-1", ExpectedConfigurationRevision: 7,
+			Patch: application.ConfigurationPatch{Model: &model, NativeTools: &nativeTools, Tools: &emptyTools},
+		},
+		"ApplicationBackgroundGrant":        grant,
+		"ApplicationBackgroundGrantList":    []application.BackgroundGrant{grant},
+		"ApplicationBackgroundGrantRequest": application.BackgroundGrantRequest{OperationID: "grant-op", Source: "authorized-timer-42", AuthorizationOperationID: "user-opt-in-42"},
+		"ApplicationResourceRequest":        appserver.ApplicationResourceRequest{WriteBase: base, Name: "report", MediaType: "text/plain", Data: []byte("hello"), SHA256: resource.SHA256},
+		"ApplicationResource":               resource,
+		"ApplicationResourceContent":        appserver.ApplicationResourceContent{Resource: resource, Data: []byte("hello")},
 	} {
 		t.Run(name, func(t *testing.T) { validateWireValue(t, name, value) })
 	}
@@ -507,6 +522,12 @@ func TestApplicationRequestAndResponseJSONConformsToOpenAPI(t *testing.T) {
 		binding.Profile = profile
 		validateWireValue(t, "ApplicationBinding", binding)
 	}
+	t.Run("ApplicationPromptRequest/authorized_background", func(t *testing.T) {
+		validateWireValue(t, "ApplicationPromptRequest", appserver.ApplicationPromptRequest{
+			PromptRequest: appserver.PromptRequest{WriteBase: base, Input: "Run the scheduled task."},
+			SourceKind:    "authorized_background", GrantID: "grant-1",
+		})
+	})
 }
 
 func validateWireValue(t *testing.T, schemaName string, value any) {

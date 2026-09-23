@@ -18,6 +18,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/caelis-labs/caelis/control/modelconfig/internal/retrytransport"
 )
 
 const (
@@ -258,7 +260,7 @@ func (m *Manager) AuthenticatedClient(base *http.Client) (*http.Client, error) {
 	if transport == nil {
 		transport = http.DefaultTransport
 	}
-	clone.Transport = &authenticatedTransport{manager: m, base: transport}
+	clone.Transport = &authenticatedTransport{manager: m, base: retrytransport.Wrap(transport)}
 	return &clone, nil
 }
 

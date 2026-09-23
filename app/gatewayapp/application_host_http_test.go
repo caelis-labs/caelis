@@ -128,7 +128,7 @@ type applicationHTTPHost struct {
 	app    func(string) *httpclient.Client
 }
 
-func startApplicationHTTPHost(t *testing.T, store, workspace string, provider *applicationHTTPModel) *applicationHTTPHost {
+func startApplicationHTTPHost(t *testing.T, store, workspace string, provider http.RoundTripper) *applicationHTTPHost {
 	t.Helper()
 	stack, err := gatewayapp.NewLocalStack(gatewayapp.Config{
 		AppName: "caelis-test", UserID: "owner", StoreDir: store, WorkspaceCWD: workspace,

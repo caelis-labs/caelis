@@ -164,6 +164,10 @@ completion writes use bounded cancellation cleanup. Runtime-owned attempts retai
 their original fence; detached Guardian reviews use explicit approval mutation
 authority. Failures stay explicit and are not blindly retried. These terminal
 receipts do not establish completeness for attempts interrupted by process crashes.
+Compaction receipts append under their original mutation authority independently
+of the source revision. A checkpoint may advance past concurrent journal writes
+only after verifying unchanged model-visible history and Session state; its
+commit still uses revision CAS and the original fence.
 Historical responses without a matching receipt remain readable until the supported
 upgrade floor requires receipts; equal token values alone never prove duplicate calls.
 

@@ -9,6 +9,11 @@ import (
 func validateRunRequestAgentSpec(req agent.RunRequest) error {
 	spec := cloneAgentSpec(req.AgentSpec)
 	spec.Request = req.Request.WithDefaults(spec.Request)
+	if spec.ResolveModelRequest != nil {
+		// The complete model and tool capability check occurs on each resolved
+		// snapshot, before its provider attempt can be admitted.
+		return model.ValidateOutputSpec(spec.Request.OutputSpec())
+	}
 	return validateAgentSpecCapabilities(
 		spec.Model,
 		spec.Tools,

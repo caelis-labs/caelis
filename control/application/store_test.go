@@ -443,7 +443,11 @@ func TestA06InvokeIntentClaimCompleteAndNativeIdentity(t *testing.T) {
 	c := testConnection(t, s, 1)
 	b := testBinding(t, s, c, "s")
 	source := Source{Kind: "user", OperationID: "prompt"}
-	tools, err := s.Tools(t.Context(), b, source)
+	configuration, err := s.Configuration(t.Context(), c.Scope, b.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tools, err := s.ToolsForConfiguration(t.Context(), b, configuration, source)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -6,15 +6,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"regexp"
+	"strings"
 
 	"github.com/google/jsonschema-go/jsonschema"
 )
 
 var toolName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_.-]{0,127}$`)
 
-// ValidateProfile requires a complete immutable profile. No Host settings are
-// inherited and no execution mode, model, or version is silently defaulted.
+// ValidateProfile requires a complete profile. Execution authority is separate
+// from hot configuration; no Host context, model or catalog is silently inherited.
 func ValidateProfile(p Profile) error {
 	if !validID(p.Version) || !validID(p.Model) || !validID(p.ToolsVersion) {
 		return fmt.Errorf("%w: explicit profile version, model and tools_version required", ErrInvalid)
@@ -25,8 +27,46 @@ func ValidateProfile(p Profile) error {
 	if p.Inherit != (Inheritance{}) {
 		return fmt.Errorf("%w: configuration inheritance is unavailable", ErrUnsupported)
 	}
+	if p.Workspace.CWD != "" && (!filepath.IsAbs(p.Workspace.CWD) || strings.TrimSpace(p.Workspace.CWD) != p.Workspace.CWD) {
+		return fmt.Errorf("%w: workspace cwd must be an absolute path", ErrInvalid)
+	}
+	if len(p.Workspace.Access) > 32 {
+		return fmt.Errorf("%w: too many workspace access directories", ErrInvalid)
+	}
+	for _, access := range p.Workspace.Access {
+		if !filepath.IsAbs(access.Path) || strings.TrimSpace(access.Path) != access.Path || (access.Mode != "read-only" && access.Mode != "read-write") {
+			return fmt.Errorf("%w: workspace access requires an absolute path and read-only or read-write mode", ErrInvalid)
+		}
+	}
+	switch p.Permissions.Mode {
+	case "", "workspace-write":
+	case "danger-full-access":
+		if p.Execution != "workspace-write" {
+			return fmt.Errorf("%w: full access requires native workspace-write execution", ErrUnsupported)
+		}
+	default:
+		return fmt.Errorf("%w: unsupported application permission mode", ErrUnsupported)
+	}
+	if p.Permissions.ApprovalMode != "" && p.Permissions.ApprovalMode != "manual" {
+		return fmt.Errorf("%w: application approval mode requires an available approval reviewer", ErrUnsupported)
+	}
 	if len(p.Instructions) > 1<<20 || len(p.Tools) > 128 {
 		return fmt.Errorf("%w: profile size limit", ErrInvalid)
+	}
+	if p.Execution == "tools-only" && len(p.NativeTools) != 0 {
+		return fmt.Errorf("%w: native tools require workspace-write execution", ErrInvalid)
+	}
+	knownNative := map[string]bool{"Read": true, "ViewImage": true, "Write": true, "Patch": true, "Glob": true, "Grep": true, "RunCommand": true, "Task": true}
+	seenNative := make(map[string]bool, len(p.NativeTools))
+	for _, name := range p.NativeTools {
+		if !knownNative[name] || seenNative[name] {
+			return fmt.Errorf("%w: unknown or duplicate native tool %q", ErrInvalid, name)
+		}
+		seenNative[name] = true
+	}
+	availableNative := seenNative
+	if p.NativeTools == nil {
+		availableNative = knownNative
 	}
 	seen := map[string]bool{}
 	for _, def := range p.Tools {
@@ -34,6 +74,11 @@ func ValidateProfile(p Profile) error {
 			return fmt.Errorf("%w: duplicate or invalid tool name", ErrInvalid)
 		}
 		seen[def.Name] = true
+		// SDK tool dispatch is exact-case. Only actually selected native
+		// names and the always-present resource bridge are reserved.
+		if p.Execution == "workspace-write" && (availableNative[def.Name] || def.Name == "ReadResource" || def.Name == "PublishArtifact") {
+			return fmt.Errorf("%w: callback collides with a native execution tool", ErrInvalid)
+		}
 		if len(def.Description) > 65536 {
 			return ErrInvalid
 		}
@@ -62,18 +107,25 @@ func resolveSchema(value map[string]any) (*jsonschema.Resolved, error) {
 	return schema.Resolve(nil)
 }
 
-// ValidateSource permits explicit input provenance only; background grants are
-// deliberately absent from version 1. Source is supplied by trusted Control.
+// ValidateSource verifies Control-bound prompt provenance, not background grant
+// liveness. Only AdmitBackgroundSource can attach an authorized background source.
 func ValidateSource(source Source) error {
 	if !validID(source.OperationID) {
 		return fmt.Errorf("%w: source operation required", ErrInvalid)
 	}
 	switch source.Kind {
 	case "user", "application_summary", "external_material":
-		return nil
+		if source.GrantID != "" || source.AuthorizedSource != "" {
+			return ErrInvalid
+		}
+	case "authorized_background":
+		if !validID(source.GrantID) || !validID(source.AuthorizedSource) {
+			return ErrInvalid
+		}
 	default:
 		return fmt.Errorf("%w: unsupported input source", ErrUnsupported)
 	}
+	return nil
 }
 
 // PutBinding persists a Host-created Session binding. Every field, including the
@@ -81,9 +133,6 @@ func ValidateSource(source Source) error {
 func (s *Store) PutBinding(ctx context.Context, b Binding) error {
 	if !validID(b.SessionID) || !validID(b.CreationDigest) || b.Archived {
 		return ErrInvalid
-	}
-	if err := ValidateProfile(b.Profile); err != nil {
-		return err
 	}
 	body, err := encode(b)
 	if err != nil {
@@ -97,7 +146,17 @@ func (s *Store) PutBinding(ctx context.Context, b Binding) error {
 	var previous []byte
 	err = s.db.QueryRowContext(ctx, `SELECT body FROM app_bindings WHERE session=?`, b.SessionID).Scan(&previous)
 	if err == nil {
-		if !bytes.Equal(previous, body) {
+		// Compare the decoded immutable value, not historical encoder key
+		// order or the current tool catalog's rules for new bindings.
+		var old Binding
+		if err = json.Unmarshal(previous, &old); err != nil {
+			return err
+		}
+		canonical, err := encode(old)
+		if err != nil {
+			return err
+		}
+		if !bytes.Equal(canonical, body) {
 			return ErrConflict
 		}
 		return nil
@@ -105,8 +164,26 @@ func (s *Store) PutBinding(ctx context.Context, b Binding) error {
 	if !errors.Is(notFound(err), ErrNotFound) {
 		return err
 	}
-	_, err = s.db.ExecContext(ctx, `INSERT INTO app_bindings(session,principal,application,connection,body) VALUES(?,?,?,?,?)`, b.SessionID, b.PrincipalID, b.ApplicationID, b.ConnectionID, body)
-	return err
+	if err := ValidateProfile(b.Profile); err != nil {
+		return err
+	}
+	config := Configuration{SessionID: b.SessionID, Revision: 1, Profile: b.Profile}
+	configBody, err := encode(config)
+	if err != nil {
+		return err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err = tx.ExecContext(ctx, `INSERT INTO app_bindings(session,principal,application,connection,body) VALUES(?,?,?,?,?)`, b.SessionID, b.PrincipalID, b.ApplicationID, b.ConnectionID, body); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `INSERT INTO app_configurations(session,revision,body) VALUES(?,?,?)`, b.SessionID, config.Revision, configBody); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 func (s *Store) binding(ctx context.Context, scope Scope, id string) (Binding, error) {
 	if _, err := s.connection(ctx, scope); err != nil {
@@ -122,7 +199,8 @@ func (s *Store) binding(ctx context.Context, scope Scope, id string) (Binding, e
 	return b, err
 }
 
-// GetBinding returns only a binding in the caller's exact connection scope.
+// GetBinding returns the immutable creation profile and ownership in the caller's
+// exact connection scope. Configuration is the authoritative desired profile.
 func (s *Store) GetBinding(ctx context.Context, scope Scope, id string) (Binding, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -146,7 +224,8 @@ func (s *Store) BindingForSession(ctx context.Context, id string) (Binding, erro
 	return b, err
 }
 
-// ListBindings returns only bindings owned by this exact connection.
+// ListBindings returns creation profiles, not latest desired configurations, for
+// bindings owned by this exact connection.
 func (s *Store) ListBindings(ctx context.Context, scope Scope) ([]Binding, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

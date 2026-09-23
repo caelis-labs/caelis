@@ -89,6 +89,7 @@ type approvalRuntime struct {
 	session    session.Session
 	requests   int
 	mode       string
+	model      model.LLM
 	executions atomic.Int64
 }
 
@@ -107,7 +108,7 @@ func (r *approvalRuntime) Run(ctx context.Context, req agent.RunRequest) (agent.
 			RunID:      "run-1",
 			TurnID:     "turn-1",
 			Tool:       tool.Definition{Name: "RunCommand"},
-			Call:       tool.Call{ID: "approval-call", Name: "RunCommand"},
+			Call:       tool.Call{ID: "approval-call", Name: "RunCommand", RuntimeModel: r.model},
 			Approval: &session.ProtocolApproval{
 				ToolCall: session.ProtocolToolCall{
 					ID:     "approval-call",

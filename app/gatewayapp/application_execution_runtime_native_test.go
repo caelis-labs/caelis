@@ -3,91 +3,135 @@
 package gatewayapp
 
 import (
-	"errors"
+	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
-	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
-	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
+	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/control/application"
-	"github.com/caelis-labs/caelis/control/appserver"
-	"github.com/caelis-labs/caelis/control/sessionvisibility"
 )
 
-// TestApplicationWorkspaceWriteFailsClosedOnDarwin proves canonical creation,
-// direct native construction and reactivation cannot grant workspace-write on
-// a platform where native process-info reads can reveal Host credentials.
-func TestApplicationWorkspaceWriteFailsClosedOnDarwin(t *testing.T) {
-	storeDir := t.TempDir()
-	stack, err := newGatewayAppTestStack(t, Config{
-		AppName: "caelis", UserID: "owner", StoreDir: storeDir,
-		WorkspaceCWD: t.TempDir(),
-	})
-	if err != nil {
-		t.Fatal(err)
+func TestApplicationDarwinNativeWorkspaceAccess(t *testing.T) {
+	if err := validateApplicationExecutionPlatform("workspace-write"); err != nil {
+		t.Fatalf("same-user Seatbelt native execution should be available: %v", err)
 	}
-	credential := "app-client-" + strings.Repeat("ca", 32)
-	connection, err := stack.Applications().Register(t.Context(), appserver.Principal{ID: "owner"}, application.Registration{
-		OperationID: "register-fail-closed", Name: "synthetic", Credential: credential,
-	})
-	if err != nil {
-		t.Fatal(err)
+	root := t.TempDir()
+	notebook := filepath.Join(root, "notebook")
+	extra := filepath.Join(root, "extra")
+	readOnly := filepath.Join(root, "read-only")
+	for _, path := range []string{notebook, extra, readOnly} {
+		if err := os.Mkdir(path, 0700); err != nil {
+			t.Fatal(err)
+		}
 	}
-	principal := appserver.Principal{ID: connection.PrincipalID, ApplicationID: connection.ApplicationID, ConnectionID: connection.ConnectionID}
-	profile := application.Profile{Version: "v1", Instructions: "synthetic", Model: "unconfigured-model", ToolsVersion: "v1", Execution: "workspace-write"}
-	rejected, err := stack.Applications().Create(t.Context(), principal, appserver.CreateApplicationSessionRequest{
-		WriteBase: appserver.WriteBase{OperationID: "rejected-create"}, Profile: profile,
-	})
-	if errorcode.CodeOf(err) != errorcode.Unsupported || !strings.Contains(err.Error(), "process-information read isolation") || rejected.Outcome != appserver.OutcomeRejected {
-		t.Fatalf("workspace-write creation = %+v, %v, want rejected unsupported platform ceiling", rejected, err)
+	profile := application.Workspace{CWD: notebook, Access: []application.WorkspaceAccess{{Path: extra, Mode: "read-write"}, {Path: readOnly, Mode: "read-only"}}}
+	ref, err := applicationSessionWorkspace(profile, filepath.Join(root, "store"), "session-one")
+	resolvedNotebook, resolveErr := filepath.EvalSymlinks(notebook)
+	if resolveErr != nil {
+		t.Fatal(resolveErr)
 	}
-	id := application.SessionID(connection.Scope, "rejected-create")
-	if _, err := stack.Sessions().Session(t.Context(), session.SessionRef{SessionID: id}); !errors.Is(err, session.ErrSessionNotFound) {
-		t.Fatalf("unsupported profile allocated canonical Session: %v", err)
+	if err != nil || ref.CWD != resolvedNotebook || ref.Key != "session-one" {
+		t.Fatalf("pinned Notebook workspace = %+v, %v", ref, err)
 	}
-	if _, err := os.Lstat(filepath.Join(storeDir, "applications")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("unsupported profile allocated execution directory: %v", err)
+	writable, access, err := applicationWorkspaceAccess(profile.Access, ref.CWD)
+	resolvedExtra, resolveErr := filepath.EvalSymlinks(extra)
+	if resolveErr != nil {
+		t.Fatal(resolveErr)
 	}
-	if _, err := newIsolatedExecutionRuntime("", "", nil, application.Scope{}); errorcode.CodeOf(err) != errorcode.Unsupported {
-		t.Fatalf("direct native construction = %v, want unsupported before filesystem or backend work", err)
+	resolvedReadOnly, resolveErr := filepath.EvalSymlinks(readOnly)
+	if resolveErr != nil {
+		t.Fatal(resolveErr)
 	}
-	if err := validateApplicationExecutionPlatform("tools-only"); err != nil {
-		t.Fatalf("tools-only must remain available: %v", err)
+	if err != nil || !slices.Equal(writable, []string{resolvedNotebook, resolvedExtra}) || !slices.Equal(access, []string{resolvedExtra, resolvedReadOnly}) {
+		t.Fatalf("directory grants = writable:%v access:%v error:%v", writable, access, err)
 	}
+	if _, _, err := applicationWorkspaceAccess([]application.WorkspaceAccess{{Path: readOnly, Mode: "read-only"}, {Path: readOnly, Mode: "read-write"}}, ref.CWD); err == nil {
+		t.Fatal("conflicting access modes accepted")
+	}
+	if _, _, err := applicationWorkspaceAccess([]application.WorkspaceAccess{{Path: "../other", Mode: "read-write"}}, ref.CWD); err == nil {
+		t.Fatal("relative application grant accepted")
+	}
+}
 
-	// Simulate a durable Session admitted on another Host. Reopen/activation
-	// must reject it without rewriting or deleting its canonical user data.
-	persistedID := application.SessionID(connection.Scope, "persisted")
-	cwd, err := createApplicationWorkspace(storeDir, persistedID)
+// TestApplicationNativeToolEffectsOnDarwin is opt-in because outer sandboxes
+// may prohibit sandbox_apply. It exercises ordinary SDK tools, native Seatbelt
+// command execution and real persistent Notebook bytes, not merely registration.
+func TestApplicationNativeToolEffectsOnDarwin(t *testing.T) {
+	if os.Getenv("CAELIS_TEST_APPLICATION_NATIVE") != "1" {
+		t.Skip("set CAELIS_TEST_APPLICATION_NATIVE=1 for native Seatbelt execution")
+	}
+	root := t.TempDir()
+	cwd := filepath.Join(root, "notebook")
+	if err := os.Mkdir(cwd, 0700); err != nil {
+		t.Fatal(err)
+	}
+	cwd, err := filepath.EvalSymlinks(cwd)
 	if err != nil {
 		t.Fatal(err)
 	}
-	workspace, err := canonicalWorkspaceRef(session.WorkspaceRef{Key: persistedID, CWD: cwd}, session.WorkspaceRef{})
+	store, err := application.Open(filepath.Join(root, "application.sqlite"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	active, err := stack.Sessions().StartSession(t.Context(), session.StartSessionRequest{
-		AppName: stack.AppName(), UserID: connection.PrincipalID, PreferredSessionID: persistedID,
-		Workspace: workspace, Controller: initialKernelControllerBinding("application"),
-		Metadata: map[string]any{
-			sessionvisibility.MetadataSystemManagedAgent: sessionvisibility.SystemManagedAgentApplication,
-			application.StateKey:                         connection.ApplicationID,
-		},
-	})
+	defer store.Close()
+	connection, err := store.Register(t.Context(), "owner", application.Registration{OperationID: "register", Name: "native", Credential: "app-client-" + strings.Repeat("ab", 32)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := stack.Applications().Store().PutBinding(t.Context(), application.Binding{
-		Scope: connection.Scope, SessionID: persistedID, Profile: profile, CreationDigest: "persisted-digest",
-	}); err != nil {
+	profile := application.Profile{Version: "v1", Model: "configured-model", ToolsVersion: "v1", Execution: "workspace-write", Workspace: application.Workspace{CWD: cwd}}
+	runtime, err := newApplicationExecutionRuntime(cwd, root, store, connection.Scope, profile)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := stack.sessionRuntimes.activateSession(t.Context(), persistedID); errorcode.CodeOf(err) != errorcode.Unsupported {
-		t.Fatalf("persisted workspace-write activation = %v, want unsupported", err)
+	defer runtime.Close()
+	binding := application.Binding{Scope: connection.Scope, SessionID: "session-native", Profile: profile, CreationDigest: "digest"}
+	if err := store.PutBinding(t.Context(), binding); err != nil {
+		t.Fatal(err)
 	}
-	if _, err := stack.Sessions().Session(t.Context(), active.SessionRef); err != nil {
-		t.Fatalf("rejected activation changed canonical Session: %v", err)
+	tools, err := newApplicationNativeTools(runtime, store, binding, cwd, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	call := func(name, input string) {
+		t.Helper()
+		for _, candidate := range tools {
+			if candidate.Definition().Name != name {
+				continue
+			}
+			result, err := candidate.Call(t.Context(), tool.Call{Name: name, Input: json.RawMessage(input), Execution: tool.InvocationContext{SessionID: binding.SessionID, TurnID: "turn", ItemID: name}})
+			if err != nil {
+				t.Fatalf("%s: %v", name, err)
+			}
+			if len(result.Content) == 0 {
+				t.Fatalf("%s empty result", name)
+			}
+			return
+		}
+		t.Fatalf("ordinary tool %s not assembled", name)
+	}
+	call("Write", `{"path":"MEMORY.md","content":"notebook identity"}`)
+	call("Read", `{"path":"MEMORY.md"}`)
+	call("RunCommand", `{"command":"/bin/cat MEMORY.md > output.txt"}`)
+	got, err := os.ReadFile(filepath.Join(cwd, "output.txt"))
+	if err != nil || string(got) != "notebook identity" {
+		t.Fatalf("native command effect = %q, %v", got, err)
+	}
+	if err := store.Revoke(context.Background(), connection.Scope); err != nil {
+		t.Fatal(err)
+	}
+	if err := runtime.FileSystem().WriteFile(filepath.Join(cwd, "after-revoke.txt"), []byte("effect"), 0600); err == nil {
+		t.Fatal("revoked lease allowed delayed filesystem effect")
+	}
+	if _, err := os.Stat(filepath.Join(cwd, "after-revoke.txt")); !os.IsNotExist(err) {
+		t.Fatalf("revoked effect created file: %v", err)
+	}
+	_, err = runtime.Run(t.Context(), sandbox.CommandRequest{Command: "/bin/echo revoked", Dir: cwd})
+	if err == nil {
+		t.Fatal("revoked lease allowed command")
 	}
 }

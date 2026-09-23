@@ -71,7 +71,7 @@ func TestApplicationLeaseWithdrawalPreventsDelayedNativeEffects(t *testing.T) {
 		t.Fatal(err)
 	}
 	probe := &applicationRunnerProbe{}
-	runtime := &isolatedExecutionRuntime{Runtime: probe, cwd: cwd, lease: store, scope: connection.Scope}
+	runtime := &applicationExecutionRuntime{Runtime: probe, cwd: cwd, lease: store, scope: connection.Scope}
 	request := sandbox.CommandRequest{Dir: cwd}
 	started, err := runtime.Start(ctx, request)
 	if err != nil || probe.launches != 1 {

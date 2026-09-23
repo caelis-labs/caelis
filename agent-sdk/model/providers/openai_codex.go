@@ -75,9 +75,9 @@ func (l *openAICodexLLM) ContextWindowTokens() int {
 	return l.contextWindowTokens
 }
 
-func (l *openAICodexLLM) ResetConnectionsForRetry(error) {
+func (l *openAICodexLLM) ResetConnectionsForRetry(cause error) {
 	if l != nil && l.client != nil {
-		l.client.CloseIdleConnections()
+		resetHTTPConnectionsForRetry(l.client, cause)
 	}
 }
 

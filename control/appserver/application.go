@@ -23,10 +23,12 @@ type CreateApplicationSessionRequest struct {
 }
 
 // ApplicationPromptRequest preserves the origin of admitted input. Summary and
-// external material are evidence, never additional user authorization.
+// external material are evidence, never additional user authorization. Only a
+// live, exact-Session grant admits authorized_background input.
 type ApplicationPromptRequest struct {
 	PromptRequest
 	SourceKind string `json:"source_kind"`
+	GrantID    string `json:"grant_id,omitempty"`
 }
 
 // ApplicationResourceRequest uploads an immutable byte snapshot, not a path.
@@ -59,6 +61,11 @@ type ApplicationServiceConfig struct {
 	Store    *application.Store
 	Commands *CommandService
 	Sessions Service
+	// ValidateProfile checks provider capabilities without modifying Host settings.
+	// Configuration updates are unavailable unless this admission owner is bound.
+	ValidateProfile func(context.Context, application.Profile) error
+	// NativeExecution reports the Host platform's ordinary native sandbox support.
+	NativeExecution bool
 }
 
 // ApplicationService owns scoped application admission; it does not execute
@@ -94,10 +101,14 @@ func (s *ApplicationService) Create(ctx context.Context, p Principal, req Create
 	if req.SessionID != "" || req.ExpectedRevision != nil || req.ExpectedControllerEpoch != "" {
 		return CommandResult{}, errorcode.New(errorcode.InvalidArgument, "application: creation cannot select a Session or revision")
 	}
-	if err := application.ValidateProfile(req.Profile); err != nil {
-		return CommandResult{}, err
-	}
-	return s.execute(ctx, p, req.OperationID, req, func() (CommandResult, error) { return s.config.Commands.CreateApplicationSession(ctx, p, req) })
+	return s.execute(ctx, p, req.OperationID, req, func() (CommandResult, error) {
+		// An unchanged creation retry must recover its original receipt even
+		// when the current native catalog has grown since that creation.
+		if err := application.ValidateProfile(req.Profile); err != nil {
+			return CommandResult{}, err
+		}
+		return s.config.Commands.CreateApplicationSession(ctx, p, req)
+	})
 }
 
 func (s *ApplicationService) Prompt(ctx context.Context, p Principal, req ApplicationPromptRequest) (CommandResult, error) {
@@ -202,6 +213,15 @@ func (s *ApplicationService) execute(ctx context.Context, p Principal, id string
 // unknown; a read never manufactures an execution terminal or a new grant.
 func (s *ApplicationService) observeOperation(ctx context.Context, p Principal, scope application.Scope, op application.Operation) (ApplicationOperation, error) {
 	out := ApplicationOperation{OperationID: op.ID, Outcome: OutcomeUnknown}
+	var kind struct {
+		Kind string `json:"kind"`
+	}
+	if err := json.Unmarshal(op.Request, &kind); err != nil {
+		return ApplicationOperation{}, err
+	}
+	if kind.Kind == "configuration_update" {
+		return ApplicationOperation{}, errorcode.New(errorcode.Unsupported, "configuration update receipts use the configuration-operations endpoint")
+	}
 	if len(op.Result) > 0 {
 		out.Result = new(CommandResult)
 		if err := json.Unmarshal(op.Result, out.Result); err != nil {
@@ -244,8 +264,15 @@ func (s *ApplicationService) observeOperation(ctx context.Context, p Principal, 
 func validateApplicationPrompt(req ApplicationPromptRequest) error {
 	switch req.SourceKind {
 	case "user", "application_summary", "external_material":
+		if req.GrantID != "" {
+			return errorcode.New(errorcode.InvalidArgument, "application: grant_id requires authorized_background source_kind")
+		}
+	case "authorized_background":
+		if req.GrantID == "" || strings.TrimSpace(req.GrantID) != req.GrantID {
+			return errorcode.New(errorcode.InvalidArgument, "application: authorized_background requires grant_id")
+		}
 	default:
-		return errorcode.New(errorcode.InvalidArgument, "application: unsupported source_kind; background triggers require a grant and are unsupported")
+		return errorcode.New(errorcode.InvalidArgument, "application: unsupported source_kind")
 	}
 	if strings.TrimSpace(req.SessionID) == "" {
 		return errorcode.New(errorcode.InvalidArgument, "application: session_id is required")

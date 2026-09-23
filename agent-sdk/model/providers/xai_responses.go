@@ -85,9 +85,9 @@ func (l *xAIResponsesLLM) ContextWindowTokens() int {
 	return l.contextWindowTokens
 }
 
-func (l *xAIResponsesLLM) ResetConnectionsForRetry(error) {
+func (l *xAIResponsesLLM) ResetConnectionsForRetry(cause error) {
 	if l != nil && l.client != nil {
-		l.client.CloseIdleConnections()
+		resetHTTPConnectionsForRetry(l.client, cause)
 	}
 }
 

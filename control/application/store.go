@@ -21,16 +21,17 @@ const LeaseDuration = 10 * time.Minute
 
 // Store errors distinguish ownership, admission, idempotency, and lifecycle failures.
 var (
-	ErrUnauthorized   = errorcode.New(errorcode.PermissionDenied, "application scope is unauthorized")
-	ErrLeaseExpired   = errorcode.New(errorcode.FailedPrecondition, "application lease expired")
-	ErrRevoked        = errorcode.New(errorcode.FailedPrecondition, "application connection revoked")
-	ErrConflict       = errorcode.New(errorcode.Conflict, "application operation conflicts with durable intent")
-	ErrNotFound       = errorcode.New(errorcode.NotFound, "application record not found")
-	ErrInvalid        = errorcode.New(errorcode.InvalidArgument, "invalid application request")
-	ErrAlreadyClaimed = errorcode.New(errorcode.Conflict, "application call already claimed or terminal")
-	ErrClosed         = errorcode.New(errorcode.Unavailable, "application store closed")
-	ErrUnsupported    = errorcode.New(errorcode.Unsupported, "unsupported application capability")
-	ErrCancelled      = errorcode.New(errorcode.Cancelled, "application call cancelled")
+	ErrUnauthorized       = errorcode.New(errorcode.PermissionDenied, "application scope is unauthorized")
+	ErrLeaseExpired       = errorcode.New(errorcode.FailedPrecondition, "application lease expired")
+	ErrRevoked            = errorcode.New(errorcode.FailedPrecondition, "application connection revoked")
+	ErrConflict           = errorcode.New(errorcode.Conflict, "application operation conflicts with durable intent")
+	ErrNotFound           = errorcode.New(errorcode.NotFound, "application record not found")
+	ErrInvalid            = errorcode.New(errorcode.InvalidArgument, "invalid application request")
+	ErrAlreadyClaimed     = errorcode.New(errorcode.Conflict, "application call already claimed or terminal")
+	ErrClosed             = errorcode.New(errorcode.Unavailable, "application store closed")
+	ErrUnsupported        = errorcode.New(errorcode.Unsupported, "unsupported application capability")
+	ErrCancelled          = errorcode.New(errorcode.Cancelled, "application call cancelled")
+	ErrConfigurationStale = errorcode.New(errorcode.Conflict, "application configuration revision is stale")
 )
 
 // Store owns additive app_* tables in the Host database. One live Host owns the
@@ -79,7 +80,8 @@ func Open(path string) (*Store, error) {
 			return fail(fmt.Errorf("%w: unversioned application tables", ErrInvalid))
 		}
 		_, err = tx.Exec(`INSERT INTO app_schema(singleton,version) VALUES(1,1)`)
-	} else if err == nil && version != 1 {
+		version = 1
+	} else if err == nil && version != 1 && version != 2 {
 		return fail(fmt.Errorf("%w: unsupported application schema %d", ErrInvalid, version))
 	}
 	if err != nil {
@@ -113,6 +115,12 @@ func Open(path string) (*Store, error) {
   UNIQUE(connection,session,operation)
  );`)
 	if err != nil {
+		return fail(err)
+	}
+	if err = migrateConfigurations(tx, version); err != nil {
+		return fail(err)
+	}
+	if err = migrateBackgroundSchema(tx); err != nil {
 		return fail(err)
 	}
 	// Version 1 requires complete mutation intent. Reject an incompatible

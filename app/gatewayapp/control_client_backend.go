@@ -379,6 +379,9 @@ func (s *runtimeComposition) executeControlCommand(ctx context.Context, principa
 		if source, ok := ctx.Value(applicationSourceContextKey{}).(application.Source); ok && source.Kind != "user" {
 			turn.InputKind = kernelimpl.SubmissionKindAgentCommunication
 			turn.InputActor = session.ActorRef{Kind: session.ActorKindSystem, ID: source.Kind, Name: "Application evidence"}
+			if source.Kind == "authorized_background" {
+				turn.InputActor = session.ActorRef{Kind: session.ActorKindSystem, ID: source.GrantID, Name: "Authorized background: " + source.AuthorizedSource}
+			}
 		}
 		result, err := gw.BeginTurn(ctx, turn)
 		retainControlTurn(result.Handle, releaseTurn)

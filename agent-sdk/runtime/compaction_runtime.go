@@ -3,7 +3,6 @@ package runtime
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
@@ -38,6 +37,15 @@ func (r *Runtime) prepareInvocationContext(
 	if state == nil {
 		state = map[string]any{}
 	}
+	if req.AgentSpec.ResolveModelRequest != nil {
+		// Dynamic model and prefix selection happens at the request boundary.
+		// Its ordinary watermark gate owns proactive compaction; a stale Turn
+		// bootstrap must not compact history before that snapshot is resolved.
+		return invocationContext{
+			PromptEvents: promptEventsWithToolVisibilityMetadata(compact.PromptEventsFromLatestCompact(events), events),
+			State:        state,
+		}, nil
+	}
 	appendix, err := r.runtimeCompactionAppendix(ctx, ref, state)
 	if err != nil {
 		return invocationContext{}, err
@@ -59,7 +67,7 @@ func (r *Runtime) prepareInvocationContext(
 		return invocationContext{}, wrapCompactionFailure("prepare", err)
 	}
 	if result.Compacted && result.CompactEvent != nil {
-		persisted, appendErr := r.persistCompactionArtifacts(ctx, loaded.Session, ref, turnID, loaded.Session.Revision, result)
+		persisted, appendErr := r.persistCompactionArtifacts(ctx, &loaded.Session, loaded, turnID, result)
 		if appendErr != nil {
 			return invocationContext{}, wrapCompactionFailure("persist", appendErr)
 		}
@@ -157,10 +165,9 @@ func (r *Runtime) Compact(ctx context.Context, req CompactRequest) (CompactResul
 		}
 		persisted, compactErr = r.persistCompactionArtifacts(
 			callCtx,
-			activeSession,
-			ref,
+			&activeSession,
+			loaded,
 			"",
-			activeSession.Revision,
 			result,
 		)
 		return compactErr
@@ -186,36 +193,6 @@ func (r *Runtime) Compact(ctx context.Context, req CompactRequest) (CompactResul
 func (r *Runtime) updateCompactionUsageFromBatch(_ context.Context, ref session.SessionRef, events []*session.Event) error {
 	r.advanceCompactionRequest(ref, session.LastEventSeq(mainInvocationEvents(events)))
 	return nil
-}
-
-func (r *Runtime) persistCompactionArtifacts(
-	ctx context.Context,
-	activeSession session.Session,
-	ref session.SessionRef,
-	turnID string,
-	admittedRevision uint64,
-	result compact.Result,
-) (*session.Event, error) {
-	if result.CompactEvent == nil {
-		return nil, errors.New("agent-sdk/runtime: compact event is required")
-	}
-	compactEvent := normalizeEvent(activeSession, turnID, result.CompactEvent)
-	if strings.TrimSpace(compactEvent.IdempotencyKey) == "" {
-		if data, ok := compact.CompactEventDataFromEvent(compactEvent); ok && data.SummarizedThroughSeq > 0 {
-			compactEvent.IdempotencyKey = fmt.Sprintf("compact:%d:%s:%s", data.SummarizedThroughSeq, data.Generator, data.Trigger)
-		}
-	}
-	persisted, err := r.sessions.AppendEvent(ctx, session.AppendEventRequest{
-		SessionRef:       ref,
-		ExpectedRevision: &admittedRevision,
-		MutationGuard:    session.RuntimeMutationGuard(ctx),
-		Event:            compactEvent,
-	})
-	if err != nil {
-		return nil, err
-	}
-	r.clearCompactionRequest(ref)
-	return persisted, nil
 }
 
 func (r *Runtime) compactAfterOverflow(
@@ -371,7 +348,7 @@ func (r *Runtime) compactAndNotify(
 	if progress := compactionProgressFromEvent(result.CompactEvent); progress.hasCompactData && !progress.hasSourceProgress() {
 		return compactionProgress{}, true, nil
 	}
-	persisted, err := r.persistCompactionArtifacts(ctx, activeSession, ref, turnID, activeSession.Revision, result)
+	persisted, err := r.persistCompactionArtifacts(ctx, &activeSession, loaded, turnID, result)
 	if err != nil {
 		r.publishCompactFailureNotice(activeSession, turnID, sink, err)
 		return compactionProgress{}, false, err

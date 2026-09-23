@@ -32,20 +32,24 @@ func (b *controlCommandBackend) createApplicationSession(ctx context.Context, pr
 	if err := application.ValidateProfile(req.Profile); err != nil {
 		return appserver.CommandResult{}, err
 	}
+	// Persist resolved paths, not mutable /var or symlink aliases. The
+	// operation anchor still identifies the original authenticated request.
+	if req.Profile.Workspace.CWD != "" {
+		resolved, err := filepath.EvalSymlinks(req.Profile.Workspace.CWD)
+		if err != nil {
+			return appserver.CommandResult{}, classifyControlPreDispatchError(err)
+		}
+		req.Profile.Workspace.CWD = resolved
+	}
+	for i := range req.Profile.Workspace.Access {
+		resolved, err := filepath.EvalSymlinks(req.Profile.Workspace.Access[i].Path)
+		if err != nil {
+			return appserver.CommandResult{}, classifyControlPreDispatchError(err)
+		}
+		req.Profile.Workspace.Access[i].Path = resolved
+	}
 	if err := validateApplicationExecutionPlatform(req.Profile.Execution); err != nil {
 		return appserver.CommandResult{}, classifyControlPreDispatchError(err)
-	}
-	seenTools := make(map[string]bool, len(req.Profile.Tools))
-	for _, def := range req.Profile.Tools {
-		name := strings.ToLower(def.Name)
-		if seenTools[name] {
-			return appserver.CommandResult{}, errorcode.New(errorcode.InvalidArgument, "gatewayapp: application callback names must be distinct")
-		}
-		seenTools[name] = true
-		switch name {
-		case "runcommand", "task", "readresource", "publishartifact":
-			return appserver.CommandResult{}, errorcode.New(errorcode.InvalidArgument, "gatewayapp: application callback collides with a native execution tool")
-		}
 	}
 	// The permanent application anchor, not the expiring shared ledger digest,
 	// is the immutable creation identity recovered after an uncertain dispatch.
@@ -69,14 +73,10 @@ func (b *controlCommandBackend) createApplicationSession(ctx context.Context, pr
 	}
 	// Fail before Session admission when the explicitly pinned model cannot be
 	// resolved. Never replace it with the Host's ordinary default profile.
-	if _, err := b.composition.lookup.ResolveConfig(req.Profile.Model); err != nil {
+	if err := b.composition.validateApplicationProfile(ctx, req.Profile); err != nil {
 		return appserver.CommandResult{}, classifyControlPreDispatchError(err)
 	}
-	cwd, err := createApplicationWorkspace(b.composition.authorities.storeDir, id)
-	if err != nil {
-		return appserver.CommandResult{}, classifyControlPreDispatchError(err)
-	}
-	workspace, err := canonicalWorkspaceRef(session.WorkspaceRef{Key: id, CWD: cwd}, session.WorkspaceRef{})
+	workspace, err := applicationSessionWorkspace(req.Profile.Workspace, b.composition.authorities.storeDir, id)
 	if err != nil {
 		return appserver.CommandResult{}, classifyControlPreDispatchError(err)
 	}
@@ -95,6 +95,28 @@ func (b *controlCommandBackend) createApplicationSession(ctx context.Context, pr
 		return sessionCommandResult(active), appserver.NewOutcomeError(appserver.OutcomeUnknown, fmt.Errorf("gatewayapp: Session created but application binding failed: %w", err))
 	}
 	return sessionCommandResult(active), nil
+}
+
+// applicationSessionWorkspace pins the authenticated application's working
+// directory in the canonical Session. Profile workspace selection does not load
+// CWD instructions or any ambient skill, MCP or Memory configuration.
+func applicationSessionWorkspace(profile application.Workspace, storeDir, sessionID string) (session.WorkspaceRef, error) {
+	cwd := profile.CWD
+	if cwd == "" {
+		var err error
+		cwd, err = createApplicationWorkspace(storeDir, sessionID)
+		if err != nil {
+			return session.WorkspaceRef{}, err
+		}
+	}
+	workspace, err := canonicalWorkspaceRef(session.WorkspaceRef{Key: sessionID, CWD: cwd}, session.WorkspaceRef{})
+	if err != nil {
+		return session.WorkspaceRef{}, err
+	}
+	if _, _, err := applicationWorkspaceAccess(profile.Access, workspace.CWD); err != nil {
+		return session.WorkspaceRef{}, err
+	}
+	return workspace, nil
 }
 
 func createApplicationWorkspace(storeDir, sessionID string) (string, error) {
@@ -128,6 +150,12 @@ func (b *controlCommandBackend) admitApplicationPrompt(ctx context.Context, prin
 		return ctx, appserver.PromptRequest{}, appserver.ErrSessionClosed
 	}
 	source := application.Source{Kind: strings.TrimSpace(req.SourceKind), OperationID: req.OperationID}
+	if source.Kind == "authorized_background" {
+		source, err = store.AdmitBackgroundSource(ctx, scope, req.SessionID, req.GrantID, req.OperationID)
+		if err != nil {
+			return ctx, appserver.PromptRequest{}, err
+		}
+	}
 	if err := application.ValidateSource(source); err != nil {
 		return ctx, appserver.PromptRequest{}, errorcode.Wrap(errorcode.InvalidArgument, "gatewayapp: invalid application prompt source", err)
 	}

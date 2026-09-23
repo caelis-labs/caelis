@@ -14,12 +14,15 @@ import (
 func applicationServerInfo(info appserver.ServerInfo, services appserver.AppServerServices) appserver.ServerInfo {
 	info = normalizeServerInfo(info)
 	if services.Applications != nil {
-		for _, capability := range info.Capabilities {
-			if capability == application.Capability {
-				return info
+		for _, capability := range services.Applications.Capabilities() {
+			found := false
+			for _, existing := range info.Capabilities {
+				found = found || existing == capability
+			}
+			if !found {
+				info.Capabilities = append(info.Capabilities, capability)
 			}
 		}
-		info.Capabilities = append(info.Capabilities, application.Capability)
 	}
 	return info
 }
@@ -76,6 +79,7 @@ func (s *Server) applicationRoutes() {
 	}
 	service := s.config.Services.Applications
 	store := service.Store()
+	s.applicationConfigurationRoutes()
 	s.mux.HandleFunc("POST "+apiPrefix+"/applications/register", func(w http.ResponseWriter, r *http.Request) {
 		p, ok := s.requirePrincipal(w, r)
 		if !ok {
@@ -252,6 +256,7 @@ func (s *Server) applicationRoutes() {
 		resource, data, err := store.ReadResource(r.Context(), scope, r.PathValue("session_id"), r.PathValue("resource_id"))
 		writeJSONResult(w, appserver.ApplicationResourceContent{Resource: resource, Data: data}, err)
 	})
+	s.applicationBackgroundRoutes()
 }
 
 func (s *Server) requireApplication(w http.ResponseWriter, r *http.Request) (appserver.Principal, application.Scope, bool) {

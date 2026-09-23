@@ -24,7 +24,10 @@ type autoCompactDecision struct {
 
 type autoCompactRequiredError struct {
 	decision autoCompactDecision
+	cause    error
 }
+
+func (e *autoCompactRequiredError) Unwrap() error { return e.cause }
 
 func (e *autoCompactRequiredError) Error() string {
 	if e == nil {
@@ -119,6 +122,13 @@ func (l *autoCompactGatedLLM) Generate(ctx context.Context, req *model.Request) 
 		for event, err := range model.Generate(ctx, l.inner, req) {
 			if err != nil {
 				failed = true
+				if model.IsContextOverflow(err) {
+					yield(nil, &autoCompactRequiredError{decision: autoCompactDecision{
+						Kind: compactionRecoveryKindOverflow, Reason: "model_request_context_overflow",
+						Model: l.inner, Request: model.CloneRequest(req), SourceThroughSeq: decision.SourceThroughSeq,
+					}, cause: err})
+					return
+				}
 				if decision, compact, decisionErr := l.runtime.autoCompactDecisionAfterModelRequestFailure(ctx, l.sessionRef, l.inner, req, err); decisionErr != nil {
 					yield(nil, decisionErr)
 					return

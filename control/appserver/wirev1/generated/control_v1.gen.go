@@ -361,6 +361,25 @@ type AgentStatusSnapshot struct {
 	SessionId                 *string                    `json:"session_id,omitempty"`
 }
 
+type ApplicationBackgroundGrant struct {
+	ApplicationId            string `json:"application_id"`
+	AuthorizationOperationId string `json:"authorization_operation_id"`
+	ConnectionId             string `json:"connection_id"`
+	Id                       string `json:"id"`
+	PrincipalId              string `json:"principal_id"`
+	Revoked                  bool   `json:"revoked"`
+	SessionId                string `json:"session_id"`
+	Source                   string `json:"source"`
+}
+
+type ApplicationBackgroundGrantList []ApplicationBackgroundGrant
+
+type ApplicationBackgroundGrantRequest struct {
+	AuthorizationOperationId string `json:"authorization_operation_id"`
+	OperationId              string `json:"operation_id"`
+	Source                   string `json:"source"`
+}
+
 type ApplicationBinding struct {
 	ApplicationId  string             `json:"application_id"`
 	Archived       bool               `json:"archived"`
@@ -374,20 +393,21 @@ type ApplicationBinding struct {
 type ApplicationBindingList []ApplicationBinding
 
 type ApplicationCall struct {
-	ApplicationId string                 `json:"application_id"`
-	Arguments     JSONValue              `json:"arguments"`
-	CallId        string                 `json:"call_id"`
-	ConnectionId  string                 `json:"connection_id"`
-	Id            string                 `json:"id"`
-	ItemId        string                 `json:"item_id"`
-	Name          string                 `json:"name"`
-	PrincipalId   string                 `json:"principal_id"`
-	Result        *ApplicationCallResult `json:"result,omitempty"`
-	SessionId     string                 `json:"session_id"`
-	Source        ApplicationSource      `json:"source"`
-	State         string                 `json:"state"`
-	ToolsVersion  string                 `json:"tools_version"`
-	TurnId        string                 `json:"turn_id"`
+	ApplicationId         string                 `json:"application_id"`
+	Arguments             JSONValue              `json:"arguments"`
+	CallId                string                 `json:"call_id"`
+	ConfigurationRevision Uint64Decimal          `json:"configuration_revision"`
+	ConnectionId          string                 `json:"connection_id"`
+	Id                    string                 `json:"id"`
+	ItemId                string                 `json:"item_id"`
+	Name                  string                 `json:"name"`
+	PrincipalId           string                 `json:"principal_id"`
+	Result                *ApplicationCallResult `json:"result,omitempty"`
+	SessionId             string                 `json:"session_id"`
+	Source                ApplicationSource      `json:"source"`
+	State                 string                 `json:"state"`
+	ToolsVersion          string                 `json:"tools_version"`
+	TurnId                string                 `json:"turn_id"`
 }
 
 type ApplicationCallList []ApplicationCall
@@ -395,6 +415,33 @@ type ApplicationCallList []ApplicationCall
 type ApplicationCallResult struct {
 	Content JSONValue `json:"content"`
 	Outcome string    `json:"outcome"`
+}
+
+type ApplicationConfiguration struct {
+	LastRequest *ApplicationConfigurationRequest `json:"last_request,omitempty"`
+	Profile     ApplicationProfile               `json:"profile"`
+	Revision    Uint64Decimal                    `json:"revision"`
+	SessionId   string                           `json:"session_id"`
+}
+
+type ApplicationConfigurationPatch struct {
+	Instructions    *string                     `json:"instructions,omitempty"`
+	Model           *string                     `json:"model,omitempty"`
+	NativeTools     []string                    `json:"native_tools,omitempty"`
+	ReasoningEffort *string                     `json:"reasoning_effort,omitempty"`
+	ServiceTier     *string                     `json:"service_tier,omitempty"`
+	Tools           []ApplicationToolDefinition `json:"tools,omitempty"`
+	ToolsVersion    *string                     `json:"tools_version,omitempty"`
+}
+
+type ApplicationConfigurationRequest struct {
+	Model           *string       `json:"model,omitempty"`
+	ReasoningEffort *string       `json:"reasoning_effort,omitempty"`
+	RequestId       string        `json:"request_id"`
+	Revision        Uint64Decimal `json:"revision"`
+	ServiceTier     *string       `json:"service_tier,omitempty"`
+	ToolsVersion    *string       `json:"tools_version,omitempty"`
+	TurnId          string        `json:"turn_id"`
 }
 
 type ApplicationConnection struct {
@@ -421,14 +468,24 @@ type ApplicationOperation struct {
 	Result      *CommandResult `json:"result,omitempty"`
 }
 
+type ApplicationPermissions struct {
+	ApprovalMode *string `json:"approval_mode,omitempty"`
+	Mode         *string `json:"mode,omitempty"`
+}
+
 type ApplicationProfile struct {
-	Execution    string                      `json:"execution"`
-	Inherit      ApplicationInheritance      `json:"inherit"`
-	Instructions string                      `json:"instructions"`
-	Model        string                      `json:"model"`
-	Tools        []ApplicationToolDefinition `json:"tools,omitempty"`
-	ToolsVersion string                      `json:"tools_version"`
-	Version      string                      `json:"version"`
+	Execution       string                      `json:"execution"`
+	Inherit         ApplicationInheritance      `json:"inherit"`
+	Instructions    string                      `json:"instructions"`
+	Model           string                      `json:"model"`
+	NativeTools     []string                    `json:"native_tools,omitempty"`
+	Permissions     *ApplicationPermissions     `json:"permissions,omitempty"`
+	ReasoningEffort *string                     `json:"reasoning_effort,omitempty"`
+	ServiceTier     *string                     `json:"service_tier,omitempty"`
+	Tools           []ApplicationToolDefinition `json:"tools,omitempty"`
+	ToolsVersion    string                      `json:"tools_version"`
+	Version         string                      `json:"version"`
+	Workspace       *ApplicationWorkspace       `json:"workspace,omitempty"`
 }
 
 type ApplicationPromptRequest struct {
@@ -436,6 +493,7 @@ type ApplicationPromptRequest struct {
 	DisplayInput            *string             `json:"display_input,omitempty"`
 	ExpectedControllerEpoch *string             `json:"expected_controller_epoch,omitempty"`
 	ExpectedRevision        *Uint64Decimal      `json:"expected_revision,omitempty"`
+	GrantId                 *string             `json:"grant_id,omitempty"`
 	Input                   *string             `json:"input,omitempty"`
 	OperationId             *string             `json:"operation_id,omitempty"`
 	SessionId               *string             `json:"session_id,omitempty"`
@@ -480,14 +538,26 @@ type ApplicationScope struct {
 }
 
 type ApplicationSource struct {
-	Kind        string `json:"kind"`
-	OperationId string `json:"operation_id"`
+	AuthorizedSource *string `json:"authorized_source,omitempty"`
+	GrantId          *string `json:"grant_id,omitempty"`
+	Kind             string  `json:"kind"`
+	OperationId      string  `json:"operation_id"`
 }
 
 type ApplicationToolDefinition struct {
 	Description string     `json:"description"`
 	InputSchema JSONObject `json:"input_schema"`
 	Name        string     `json:"name"`
+}
+
+type ApplicationWorkspace struct {
+	Access []ApplicationWorkspaceAccess `json:"access,omitempty"`
+	Cwd    *string                      `json:"cwd,omitempty"`
+}
+
+type ApplicationWorkspaceAccess struct {
+	Mode string `json:"mode"`
+	Path string `json:"path"`
 }
 
 type ApprovalReview struct {
@@ -1976,6 +2046,12 @@ type UIPreferences struct {
 
 type Uint64Decimal string
 
+type UpdateApplicationConfigurationRequest struct {
+	ExpectedConfigurationRevision PositiveUint64Decimal         `json:"expected_configuration_revision"`
+	OperationId                   string                        `json:"operation_id"`
+	Patch                         ApplicationConfigurationPatch `json:"patch"`
+}
+
 type UpdateMarketplaceRequest struct {
 	ExpectedControllerEpoch *string        `json:"expected_controller_epoch,omitempty"`
 	ExpectedRevision        *Uint64Decimal `json:"expected_revision,omitempty"`
@@ -2047,4 +2123,4 @@ type WriteBase struct {
 	SessionId               *string        `json:"session_id,omitempty"`
 }
 
-var OperationIDs = []string{"archiveApplicationSession", "cancelParticipant", "cancelSessionTurn", "claimApplicationCall", "closeSession", "compactSession", "completeApplicationCall", "completeFiles", "completeSessions", "completeSkills", "completeSlashArguments", "configureSessionControllerMode", "configureSessionMode", "configureSessionPresentation", "configureSessionPresentationMode", "createApplicationResource", "createApplicationSession", "createSession", "getAgentStatus", "getApplicationCall", "getApplicationConnection", "getApplicationOperation", "getApplicationResource", "getApplicationSession", "getHostStatus", "getPresentationCapabilities", "getSessionPresentation", "getSessionState", "getSessionStatus", "getTerminalOutput", "handoffAgent", "hostAddMarketplace", "hostAddPluginPath", "hostApplyAgentBindingSet", "hostBindAgent", "hostCompleteFiles", "hostCompleteSessions", "hostCompleteSkills", "hostCompleteSlashArguments", "hostConnectACP", "hostConnectModel", "hostCreateAgentRole", "hostDeleteAgentBindingSet", "hostDeleteAgentRole", "hostDeleteModel", "hostDisablePlugin", "hostDisconnectACP", "hostEnablePlugin", "hostGetACPPreparation", "hostGetAgentBindingStatus", "hostGetAgentStatus", "hostInspectPlugin", "hostInstallPlugin", "hostListAgents", "hostListDisconnectCandidates", "hostListMarketplaces", "hostListPlugins", "hostPrepareACP", "hostPrepareACPAuthentication", "hostRemoveMarketplace", "hostRemovePlugin", "hostResetAgentBinding", "hostResolveSkill", "hostSaveAgentBindingSet", "hostUpdateMarketplace", "hostUseModel", "initializeClient", "inspectPlugin", "killTerminal", "listAgents", "listApplicationCalls", "listApplicationSessions", "listMarketplaces", "listParticipantHandles", "listPlugins", "listSessionTasks", "listSessions", "loadUIPreferences", "prepareSandbox", "promptApplicationSession", "promptParticipant", "promptSession", "readApplicationResource", "readTaskEvents", "reconnectSession", "refreshSandbox", "registerApplication", "releaseTerminal", "renewApplicationConnection", "repairSandbox", "resetSandbox", "resolveApproval", "resolveSkill", "revokeApplicationConnection", "saveUIPreferences", "setSandboxBackend", "setWorkspaceTrust", "shutdownHost", "startParticipant", "steerSession", "subagentInputStatuses", "submitSubagentInput", "subscribeTaskEvents", "useSessionModel", "waitTerminal", "watchSessionTaskDirectory"}
+var OperationIDs = []string{"archiveApplicationSession", "cancelParticipant", "cancelSessionTurn", "claimApplicationCall", "closeSession", "compactSession", "completeApplicationCall", "completeFiles", "completeSessions", "completeSkills", "completeSlashArguments", "configureSessionControllerMode", "configureSessionMode", "configureSessionPresentation", "configureSessionPresentationMode", "createApplicationBackgroundGrant", "createApplicationResource", "createApplicationSession", "createSession", "getAgentStatus", "getApplicationBackgroundGrant", "getApplicationCall", "getApplicationConfiguration", "getApplicationConfigurationOperation", "getApplicationConnection", "getApplicationOperation", "getApplicationResource", "getApplicationSession", "getHostStatus", "getPresentationCapabilities", "getSessionPresentation", "getSessionState", "getSessionStatus", "getTerminalOutput", "handoffAgent", "hostAddMarketplace", "hostAddPluginPath", "hostApplyAgentBindingSet", "hostBindAgent", "hostCompleteFiles", "hostCompleteSessions", "hostCompleteSkills", "hostCompleteSlashArguments", "hostConnectACP", "hostConnectModel", "hostCreateAgentRole", "hostDeleteAgentBindingSet", "hostDeleteAgentRole", "hostDeleteModel", "hostDisablePlugin", "hostDisconnectACP", "hostEnablePlugin", "hostGetACPPreparation", "hostGetAgentBindingStatus", "hostGetAgentStatus", "hostInspectPlugin", "hostInstallPlugin", "hostListAgents", "hostListDisconnectCandidates", "hostListMarketplaces", "hostListPlugins", "hostPrepareACP", "hostPrepareACPAuthentication", "hostRemoveMarketplace", "hostRemovePlugin", "hostResetAgentBinding", "hostResolveSkill", "hostSaveAgentBindingSet", "hostUpdateMarketplace", "hostUseModel", "initializeClient", "inspectPlugin", "killTerminal", "listAgents", "listApplicationBackgroundGrants", "listApplicationCalls", "listApplicationSessions", "listMarketplaces", "listParticipantHandles", "listPlugins", "listSessionTasks", "listSessions", "loadUIPreferences", "prepareSandbox", "promptApplicationSession", "promptParticipant", "promptSession", "readApplicationResource", "readTaskEvents", "reconnectSession", "refreshSandbox", "registerApplication", "releaseTerminal", "renewApplicationConnection", "repairSandbox", "resetSandbox", "resolveApproval", "resolveSkill", "revokeApplicationBackgroundGrant", "revokeApplicationConnection", "saveUIPreferences", "setSandboxBackend", "setWorkspaceTrust", "shutdownHost", "startParticipant", "steerSession", "subagentInputStatuses", "submitSubagentInput", "subscribeTaskEvents", "updateApplicationConfiguration", "useSessionModel", "waitTerminal", "watchSessionTaskDirectory"}

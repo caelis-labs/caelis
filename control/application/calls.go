@@ -81,11 +81,21 @@ func (s *Store) enqueue(ctx context.Context, c CallContext, name string, args js
 	if binding.Archived {
 		return "", ErrRevoked
 	}
-	if c.ToolsVersion != binding.Profile.ToolsVersion {
+	// Revision zero is the pre-revision baseline callback representation.
+	// Existing in-flight calls still bind to creation revision 1 after upgrade.
+	revision := c.ConfigurationRevision
+	if revision == 0 {
+		revision = 1
+	}
+	configuration, err := s.configuration(ctx, c.SessionID, revision)
+	if err != nil {
+		return "", err
+	}
+	if c.ToolsVersion != configuration.Profile.ToolsVersion {
 		return "", ErrConflict
 	}
 	found := false
-	for _, def := range binding.Profile.Tools {
+	for _, def := range configuration.Profile.Tools {
 		if def.Name != name {
 			continue
 		}

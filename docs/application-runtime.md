@@ -17,6 +17,11 @@ No sibling repository or private Store access is needed.
 `GET /api/control/v1/initialize` returns `api_version: "v1"`, protocol and envelope
 versions, `store_id`, `instance_id`, build identity and capabilities. Require
 `application-runtime-v1`; do not fall back to an ordinary coding Session if absent.
+Feature capabilities refine the baseline: `application-hot-configuration-v1`,
+`application-native-execution-v1`, `application-workspace-binding-v1`,
+`application-background-activation-v1` and `application-resource-transfer-v1`.
+Require the capability guarding the feature you need instead of probing with
+destructive trial calls.
 Store identity persists across Host replacement; instance identity does not.
 
 An authenticated Host principal enrolls an application using
@@ -41,10 +46,17 @@ The following paths are relative to `/api/control/v1`:
 | `GET /application/connection` | Read connection and lease, including after revocation |
 | `POST /application/connection/renew` | Renew the ten-minute tool-host lease; body `{}` |
 | `POST /application/connection/revoke` | Permanently revoke; body `{}`; does not stop Host |
-| `POST /application/sessions` | Create a Session with an immutable explicit profile |
+| `POST /application/sessions` | Create a Session with a creation-bound explicit profile |
 | `GET /application/sessions` | List this exact application connection's bindings |
-| `GET /application/sessions/{session_id}` | Read immutable profile, ownership and archive state |
+| `GET /application/sessions/{session_id}` | Read creation-bound profile, ownership and archive state |
 | `POST /application/sessions/{session_id}/prompt` | Admit source-typed input |
+| `GET /application/sessions/{session_id}/configuration` | Read the latest desired configuration and revision |
+| `POST /application/sessions/{session_id}/configuration` | Compare-and-swap update; returns the committed configuration |
+| `GET /application/configuration-operations/{operation_id}` | Exact committed configuration update result |
+| `GET /application/sessions/{session_id}/background-grants` | List this connection's background grants |
+| `POST /application/sessions/{session_id}/background-grants` | Record a background activation grant |
+| `GET /application/sessions/{session_id}/background-grants/{grant_id}` | Read one background grant |
+| `POST /application/sessions/{session_id}/background-grants/{grant_id}/revoke` | Permanently revoke; body `{}` |
 | `POST /application/sessions/{session_id}/archive` | Close canonical admission, retain history and resources |
 | `GET /application/operations/{operation_id}` | Permanent mutation intent/receipt |
 | `GET /application/sessions/{session_id}/calls` | Durable callback snapshot; `?wait=true` waits for pending calls |
@@ -63,12 +75,32 @@ Reconnect atomically restores state and the existing Envelope feed; `history_tur
 and `history_before` page canonical history. Closing an observation is not Cancel.
 Archive is not deletion. A completion sentence is not a native Turn terminal.
 
-Create, prompt, archive and upload require matching `Idempotency-Key` and
-`operation_id`. Existing `expected_revision` fields use decimal strings, not JSON
-numbers. Approval and cancellation retain the exact native Session/handle/run/turn
-identity and approval options. Do not convert an approval into a general Boolean.
+Create, prompt, archive, upload, configuration update and background grant
+create require matching `Idempotency-Key` and `operation_id`. Existing
+`expected_revision` and `expected_configuration_revision` fields use decimal
+strings, not JSON numbers. Approval and cancellation retain the exact native
+Session/handle/run/turn identity and approval options. Do not convert an
+approval into a general Boolean.
 
-## Explicit execution profile
+## Persistence compatibility
+
+The application Store accepts schema 1 and transactionally upgrades it to schema
+2. Existing bindings, Session identities, operation digests, callback receipts and
+resource bytes are retained. Each existing binding receives desired configuration
+revision 1; schema-1 native Sessions explicitly retain `RunCommand` and `Task`
+plus the resource bridge, rather than silently receiving the expanded file-tool
+catalog. They can select additional native tools through a configuration update,
+provided the selected names do not collide with application callbacks. New
+Sessions with omitted `native_tools` use the complete default native set.
+
+The schema-1 reader is owned by `control/application` and remains necessary while
+schema 1 is a supported upgrade source. Old creation requests preserve their
+original serialized digest and recover their stored receipt without redispatch.
+An older schema-1 binary cannot open schema 2. Preserve a complete stopped-Host
+Store backup before an upgrade when rollback is required; downgrading a binary
+alone does not downgrade stored data.
+
+## Execution profile and dynamic configuration
 
 Example creation body (also available as a
 [machine-readable fixture](../api/control/v1/fixtures/application-create.json)):
@@ -104,34 +136,116 @@ Example creation body (also available as a
 
 `model` references Host-managed configuration, never a raw API key. Profiles do not
 inherit CWD AGENTS, global MCP, skills, plugins or Workspace Memory. Version 1
-rejects any enabled inheritance flag. No model-selected or client-provided Host
-root is accepted. Control allocates the execution directory.
+rejects any enabled inheritance flag. A resident working directory comes from
+authenticated application configuration (`workspace.cwd`); when omitted, Control
+allocates the execution directory. No model-selected root is accepted.
+
+A creation profile has two lifetimes:
+
+- **Creation-bound**: `version`, `execution`, `inherit`, `workspace` and
+  `permissions` are fixed at Session creation. A configuration update that
+  carries them is rejected; changing them requires a new Session.
+- **Revisioned desired configuration**: `instructions`, `model`,
+  `reasoning_effort`, `service_tier`, `tools_version`, `tools` and
+  `native_tools` are read from and updated through
+  `GET/POST /application/sessions/{session_id}/configuration`.
+
+### Workspace and permissions (creation-bound)
+
+`workspace.access` names additional absolute directories with mode `read-only`
+or `read-write`. Ordinary `workspace-write` execution has broad ambient
+filesystem reads, so a `read-only` entry grants no additional write access; the
+CWD and explicit `read-write` roots are writable. `permissions.mode` defaults
+when omitted to `workspace-write`; `danger-full-access` is an explicit opt-in
+that selects the Host without a native sandbox and is accepted only when the
+platform's native agent implements it — the Host registers that mode on opt-in,
+never silently. `permissions.approval_mode` defaults to `manual`; manual is the
+only currently supported mode. Ordinary per-call `require_escalated` requests
+still surface Host approval.
+
+### Dynamic configuration update
+
+The update body is [the fixture](../api/control/v1/fixtures/application-configuration-update.json):
+
+```json
+{
+  "operation_id": "update-example-1",
+  "expected_configuration_revision": "1",
+  "patch": {"model": "configured-provider-model-id", "instructions": ""}
+}
+```
+
+Send it with a matching `Idempotency-Key`. Patch semantics:
+
+| Patch field | Absent | Explicit value |
+| --- | --- | --- |
+| `instructions` | preserve | replaces; `""` clears role instructions |
+| `model` | preserve | nonempty Host-managed model reference |
+| `reasoning_effort` | preserve | `""` restores the model default effort |
+| `service_tier` | preserve | `""` restores the provider default tier; `priority` is the only explicit value and requires model support |
+| `tools_version` | preserve | nonempty catalog version |
+| `tools` | preserve | replaces the callback catalog; `[]` clears it |
+| `native_tools` | preserve (including the default set) | replaces the native selection; `[]` selects no native tools |
+
+Explicit JSON `null` in a patch field is invalid, as are unknown fields —
+`workspace` and `permissions` are creation-bound and rejected here. Readback
+distinguishes the two catalogs: profile reads omit `tools` when it is empty
+(absent and `[]` mean the same empty catalog), while a cleared `native_tools`
+selection is echoed as `[]` and omission means the default native set —
+`native_tools: null` is invalid at creation too, never a silent default. An
+unsupported model/effort/tier combination returns an explicit error and is
+never silently ignored. A no-op or same-value update commits a durable
+operation receipt without creating a new revision; concurrent writers are
+ordered by the revision compare-and-swap.
+
+`GET .../configuration` returns `ApplicationConfiguration`: `session_id`,
+decimal-string `revision`, the full `profile`, and optional `last_request`
+(`revision`, `request_id`, `turn_id`, plus the resolved `model`,
+`reasoning_effort`, `service_tier` and `tools_version` selectors when recorded;
+pre-upgrade records omit them) marking the latest request admitted across
+desired-configuration updates; its own `revision` field identifies the revision
+that request actually ran under. The creation `Binding.profile` remains the immutable
+creation snapshot; the configuration read is the sole current desired profile.
+`GET /application/configuration-operations/{operation_id}` returns the exact
+committed result for that operation, including a no-op — never a later mutable
+latest configuration. Use it to reconcile a lost update response; the same
+operation ID never dispatches twice. The generic
+`GET /application/operations/{operation_id}` deliberately rejects
+configuration update IDs with `unsupported` so a typed configuration receipt is
+never misread as a `CommandResult`; always read configuration update receipts
+through the typed route.
+
+An accepted update takes effect at the next not-yet-issued model request,
+including later tool rounds of the same Turn; already-issued requests complete
+against their old snapshot. Distinguish committed-but-not-yet-executed
+(POST response revision) from used-by-execution (`last_request.revision`). Hot
+updates never touch `workspace` or `permissions`, so they cannot reset user
+approval selections.
 
 `tools-only` admits only the declared callback tools; omitting `tools` declares an
-empty callback catalog. `workspace-write` adds
-confined native filesystem/command tools and resource transfer tools, but requires
-Linux with a native backend enforcing the explicit read ceiling. Other platforms
-reject this mode before Session creation and again before activation. Linux native
-execution still requires platform acceptance; compilation alone is not that evidence.
-
-macOS application native execution is unsupported: Seatbelt filesystem isolation
-does not prevent direct same-user process environment access through numeric
-`KERN_PROCARGS2`, even with an explicit named `sysctl` deny. A filesystem-only
-success is not a credential boundary. This restriction does not change ordinary
-CLI/TUI sandbox behavior or application `tools-only` execution.
+empty callback catalog. `workspace-write` adds confined native
+filesystem/command tools and resource transfer tools, enforced by the platform's
+ordinary native sandbox (for example Seatbelt on macOS) together with the
+creation-bound workspace bindings. A platform without a supported native
+backend rejects this mode before Session creation and again before activation;
+an unsupported native sandbox fails closed, not through an unrestricted
+fallback. Native platform acceptance requires more than compilation.
 
 Native commands do not inherit Host environment values or arbitrary installed
-toolchains; system runtime access is platform-defined. Execution has a mandatory
-filesystem/network ceiling; an approval cannot grant Host execution or remove it.
-Application-owned callback approval does not authorize a shell command, arbitrary
-MCP tool, or external write. An unsupported native sandbox fails closed, not
-through an unrestricted fallback.
+toolchains; system runtime access is platform-defined. `workspace-write` is the
+ordinary broad-read workspace sandbox: the CWD and explicit `read-write` roots
+are writable, and an ordinary per-call `require_escalated` request can seek
+explicit Host approval for that call — approval is per-call, not a standing
+bypass. `danger-full-access` selects the Host without a native sandbox.
+Application-owned callback approval does not authorize a shell command,
+arbitrary MCP tool, or external write.
 
-The profile and catalog versions are immutable for a Session. A changed profile
-requires a new Session in version 1; in-place profile upgrade is unsupported.
-Application notes and Memory change through ordinary new tool results, not by
-rewriting committed model prefixes or triggering implicit compaction. Bot embeds
-its own Memory store and exposes its own tools; Workspace Memory is not admitted.
+Only the desired-configuration fields above are hot-updatable; `version`,
+`execution`, `inherit`, `workspace` and `permissions` stay the immutable
+creation binding. Application notes and Memory change through ordinary new tool
+results, not by rewriting committed model prefixes or triggering implicit
+compaction. Bot embeds its own Memory store and exposes its own tools; Workspace
+Memory is not admitted.
 
 ## Source and callback authority
 
@@ -141,15 +255,47 @@ Prompt body example:
 {"operation_id":"prompt-example-1","source_kind":"user","input":"Look up the example value."}
 ```
 
-`source_kind` is `user`, `application_summary`, or `external_material`. The
+`source_kind` is `user`, `application_summary`, `external_material`, or
+`authorized_background` (with `grant_id`, see below). The
 application credential is trusted to distinguish actual collected user input from
 application evidence. Summaries and external material enter as non-user
-communication, not additional authorization. Background grants/triggers are not
-implemented in version 1 and are rejected. Never relabel model-generated task
+communication, not additional authorization. Never relabel model-generated task
 instructions as a user request.
 
+### Background activation grants
+
+Core records authorization, not schedules: the application owns any timer or
+scheduler, creates a grant once, and activates within it.
+
+- `POST /application/sessions/{session_id}/background-grants` with
+  `{operation_id, source, authorization_operation_id}` and a matching
+  `Idempotency-Key` returns a `BackgroundGrant`; a repeat with the same
+  operation and changed parameters conflicts, an unchanged repeat returns the
+  existing grant with its current revocation state.
+- `GET .../background-grants` lists this connection's grants; a single grant is
+  readable by `{grant_id}`.
+- `POST .../background-grants/{grant_id}/revoke` with body `{}` permanently
+  revokes; later activations under it are rejected and the response reports
+  `revoked: true`.
+
+A grant embeds server-derived `principal_id`, `application_id` and
+`connection_id` plus `session_id`, the application-declared `source`, and
+`authorization_operation_id`. Activate with `source_kind:
+"authorized_background"` and `grant_id` required; `grant_id` is forbidden for
+other kinds. Callbacks and history carry `grant_id` together with
+`authorized_source`, which Control copies from the durable grant, so replay
+distinguishes the authorized source without trusting model-generated text.
+These prompts enter history as their own source, distinct from
+user input, summaries and external material, and Core never promotes an
+`application_summary` or external material into an authorized trigger. Core
+holds no cron expressions, reminder lists or scheduling loop.
+
 A callback contains server-bound principal/application/connection, Session,
-Turn, canonical item, provider call ID, catalog version and source operation.
+Turn, canonical item, provider call ID, catalog version, configuration revision
+and source operation. Callbacks dispatched under an older
+`configuration_revision` keep routing by their original `tools_version`; a
+catalog update does not reroute in-flight calls, and the next model request
+receives the new catalog.
 The callback's opaque `id` is distinct from `call_id`; address HTTP receipt routes
 with `id`. Provider call IDs can repeat across Turns. Runtime binds canonical item
 identity before dispatch and overwrites caller-supplied execution context; model
@@ -205,12 +351,12 @@ A `workspace-write` model receives:
 - `PublishArtifact({"path":"relative-output.txt","name":"output.txt","media_type":"text/plain"})`:
   snapshot an allowed regular file; return the structured descriptor.
 
-Paths must remain in the allocated workspace. Absolute paths, traversal,
+Artifact paths must remain in the bound workspace. Absolute paths, traversal,
 symlinks, nonregular files, oversize files and detected copy-time changes fail.
 A model's path is not access authority. Read output through the resource content
 route; the typed client verifies size and digest. Archive preserves immutable
-snapshots. Resource expiry/deletion and arbitrary host-directory adoption are not
-supported; no user file cleanup is performed.
+snapshots. Resource expiry/deletion and paths outside the bound artifact workspace
+are not supported; no user file cleanup is performed.
 
 ## Error and recovery semantics
 
@@ -226,7 +372,7 @@ execution completion.
 | `not_found` | No record in the authenticated scope |
 | `conflict` | ID payload conflict, already-claimed effect, stale native target or revision |
 | `failed_precondition` | Lease expired or binding revoked; inspect lifecycle |
-| `unsupported` | Inheritance, background grant, profile mode or platform not implemented |
+| `unsupported` | Inheritance `true`, generic operation lookup for a configuration update, or a platform without the requested native capability |
 | `unknown_outcome` / command `unknown` | Intent/effect cannot be proven; reconcile without redispatch |
 
 ## Public client and isolated Host
@@ -296,18 +442,29 @@ go test ./agent-sdk/runtime -run 'Test.*Invocation|Test.*Recovery' -count=1
 make client-protocol-check
 ```
 
-On macOS, the opt-in SDK probes distinguish the filesystem ceiling from the
-stronger process-credential boundary required by application native execution:
+On macOS, the opt-in SDK probes distinguish the ordinary sandbox filesystem
+ceiling from the stronger same-user process-credential boundary, which
+application native execution does not claim:
 
 ```sh
 CAELIS_TEST_APPLICATION_NATIVE=1 go test ./agent-sdk/sandbox/seatbelt -run '^TestExplicit(ReadCeiling|ProcessIsolation)Native$' -count=1 -v
 ```
 
+The public HTTP application path has a separate native acceptance test for file
+and command effects, a bound Notebook directory, and resource upload-to-artifact
+byte and digest verification:
+
+```sh
+CAELIS_TEST_APPLICATION_NATIVE=1 go test ./app/gatewayapp -run '^TestApplicationNativeHTTPB01B02B10$' -count=1 -timeout=3m -v
+```
+
 `TestExplicitProcessIsolationNative` is a known failing security probe on current
 macOS: it uses only an exact test-owned process with a synthetic environment and
-requires positive controls before checking denial. It is not a passing application
-acceptance gate. The product instead rejects application native execution on this
-platform. The filesystem probe alone must not be used to enable it.
+requires positive controls before checking denial. It is not an application
+acceptance gate and does not gate `workspace-write` execution, which uses the
+ordinary workspace sandbox — a filesystem ceiling, not same-user credential
+isolation. Do not cite the filesystem probe as evidence of a credential
+boundary, in either direction.
 
 A containing sandbox can reject `sandbox_apply`; run only in an environment
 explicitly authorized for native sandbox construction, not with a product bypass.

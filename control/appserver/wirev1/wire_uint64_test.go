@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"math"
 	"os"
+	"reflect"
 	"regexp"
 	"strconv"
 	"testing"
@@ -14,6 +15,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
+	"github.com/caelis-labs/caelis/control/application"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/wirev1/generated"
@@ -286,6 +288,101 @@ func TestUint64WireRoundTripAtJavaScriptBoundary(t *testing.T) {
 			}
 			assertKnownMetadataDecimals(t, envelopeJSON, decimal)
 		})
+	}
+}
+
+func TestApplicationConfigurationWirePreservesRevisionAsDecimal(t *testing.T) {
+	decimal := strconv.FormatUint(math.MaxUint64, 10)
+	profile := application.Profile{
+		Version: "example-role/1", Instructions: "Use the callback.", Model: "configured-model",
+		ToolsVersion: "example-tools/1", Execution: "tools-only",
+	}
+	want := application.Configuration{
+		SessionID: "session-1", Revision: math.MaxUint64, Profile: profile,
+		LastRequest: &application.RequestConfiguration{Revision: math.MaxUint64, RequestID: "operation-1", TurnID: "turn-1"},
+	}
+	raw := mustMarshalWire(t, want)
+	if !bytes.Contains(raw, []byte(`"revision":"`+decimal+`"`)) {
+		t.Fatalf("wire JSON = %s, want decimal string revision", raw)
+	}
+	var generatedConfiguration generated.ApplicationConfiguration
+	if err := json.Unmarshal(raw, &generatedConfiguration); err != nil {
+		t.Fatal(err)
+	}
+	if string(generatedConfiguration.Revision) != decimal {
+		t.Fatalf("generated revision = %q, want %q", generatedConfiguration.Revision, decimal)
+	}
+	var got application.Configuration
+	if err := Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("round trip = %#v, want %#v", got, want)
+	}
+
+	update := application.UpdateConfigurationRequest{
+		OperationID: "update-1", ExpectedConfigurationRevision: math.MaxUint64,
+		Patch: application.ConfigurationPatch{Model: stringPointer("other-model")},
+	}
+	updateJSON := mustMarshalWire(t, update)
+	if !bytes.Contains(updateJSON, []byte(`"expected_configuration_revision":"`+decimal+`"`)) {
+		t.Fatalf("wire JSON = %s, want decimal string expected_configuration_revision", updateJSON)
+	}
+	var generatedUpdate generated.UpdateApplicationConfigurationRequest
+	if err := json.Unmarshal(updateJSON, &generatedUpdate); err != nil {
+		t.Fatal(err)
+	}
+	if string(generatedUpdate.ExpectedConfigurationRevision) != decimal {
+		t.Fatalf("generated expected_configuration_revision = %q, want %q", generatedUpdate.ExpectedConfigurationRevision, decimal)
+	}
+	var decodedUpdate application.UpdateConfigurationRequest
+	if err := DecodeRequest(updateJSON, &decodedUpdate); err != nil {
+		t.Fatal(err)
+	}
+	if decodedUpdate.ExpectedConfigurationRevision != math.MaxUint64 {
+		t.Fatalf("decoded expected_configuration_revision = %d, want %d", decodedUpdate.ExpectedConfigurationRevision, uint64(math.MaxUint64))
+	}
+	if decodedUpdate.Patch.Model == nil || *decodedUpdate.Patch.Model != "other-model" {
+		t.Fatalf("decoded patch = %#v", decodedUpdate.Patch)
+	}
+
+	call := application.Call{
+		ID: "receipt-1", CallContext: application.CallContext{
+			Scope:     application.Scope{PrincipalID: "owner", ApplicationID: "app-1", ConnectionID: "connection-1"},
+			SessionID: "session-1", TurnID: "turn-1", ItemID: "item-1", CallID: "native-call-1",
+			ToolsVersion: profile.ToolsVersion, ConfigurationRevision: math.MaxUint64,
+			Source: application.Source{Kind: "user", OperationID: "prompt-1"},
+		},
+		Name: "ExampleLookup", Arguments: json.RawMessage(`{"key":"example"}`), State: "pending",
+	}
+	callJSON := mustMarshalWire(t, call)
+	if !bytes.Contains(callJSON, []byte(`"configuration_revision":"`+decimal+`"`)) {
+		t.Fatalf("wire JSON = %s, want decimal string configuration_revision", callJSON)
+	}
+	var generatedCall generated.ApplicationCall
+	if err := json.Unmarshal(callJSON, &generatedCall); err != nil {
+		t.Fatal(err)
+	}
+	if string(generatedCall.ConfigurationRevision) != decimal {
+		t.Fatalf("generated configuration_revision = %q, want %q", generatedCall.ConfigurationRevision, decimal)
+	}
+	var gotCall application.Call
+	if err := Unmarshal(callJSON, &gotCall); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(gotCall, call) {
+		t.Fatalf("call round trip = %#v, want %#v", gotCall, call)
+	}
+	listJSON := mustMarshalWire(t, []application.Call{call})
+	if !bytes.Contains(listJSON, []byte(`"configuration_revision":"`+decimal+`"`)) {
+		t.Fatalf("wire JSON = %s, want decimal string configuration_revision", listJSON)
+	}
+	var gotList []application.Call
+	if err := Unmarshal(listJSON, &gotList); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(gotList, []application.Call{call}) {
+		t.Fatalf("list round trip = %#v", gotList)
 	}
 }
 
@@ -748,6 +845,8 @@ func TestGeneratedTypeScriptUsesDecimalStringForUint64WireFields(t *testing.T) {
 		"seq: Uint64Decimal;",
 		"sequence: PositiveUint64Decimal;",
 		"context_sync_seq?: Uint64Decimal;",
+		"expected_configuration_revision: PositiveUint64Decimal;",
+		"configuration_revision: Uint64Decimal;",
 		"output_cursor?: Uint64Decimal;",
 		"event_cursor?: Uint64Decimal;",
 		"turn_seq?: Uint64Decimal;",

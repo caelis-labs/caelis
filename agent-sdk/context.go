@@ -297,8 +297,8 @@ type Agent interface {
 	Run(Context) iter.Seq2[*session.Event, error]
 }
 
-// AgentSpec describes the concrete execution capabilities assembled into one
-// agent instance before invocation begins.
+// AgentSpec describes execution capabilities assembled before invocation. Its
+// optional resolver selects model-facing snapshots within that same authority.
 type AgentSpec struct {
 	Name  string      `json:"name,omitempty"`
 	Model model.LLM   `json:"-"`
@@ -306,14 +306,17 @@ type AgentSpec struct {
 	// DeferredTools supplies MCP tools as their background initialization finishes.
 	// Runtime applies the same execution journal, policy and lifecycle wrappers
 	// as static tools. A run pins each accepted definition and callable together.
-	DeferredTools             tool.Source    `json:"-"`
-	SubagentRunner            SubagentRunner `json:"-"`
+	DeferredTools tool.Source `json:"-"`
+	// ResolveModelRequest optionally replaces model-facing configuration at
+	// every unsent request boundary. Runtime authority and policy remain fixed.
+	ResolveModelRequest       ModelRequestResolver `json:"-"`
+	SubagentRunner            SubagentRunner       `json:"-"`
 	Request                   ModelRequestOptions
 	RequiredModelCapabilities model.Capabilities `json:"required_model_capabilities,omitempty"`
 	Metadata                  map[string]any     `json:"metadata,omitempty"`
 }
 
-// ModelRequestOptions controls per-turn model request behavior independent of
+// ModelRequestOptions controls model request behavior independent of
 // provider implementation.
 type ModelRequestOptions struct {
 	Stream      *bool             `json:"stream,omitempty"`
