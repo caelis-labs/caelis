@@ -114,7 +114,7 @@ func TestSlashConnectMapsACPWizardSelectionToConnector(t *testing.T) {
 func TestConnectIsHandledAsLocalAppConfiguration(t *testing.T) {
 	service := &modelConnectControlStub{}
 	result, handled := executeTUIPrivateSlashCommandWithContext(
-		context.Background(), service, nil, "connect", "codex gpt-5.6-sol",
+		context.Background(), service, nil, "connect", "codex gpt-6-sol",
 	)
 	if !handled {
 		t.Fatal("executeTUIPrivateSlashCommandWithContext(connect) was not handled as local App configuration")
@@ -122,7 +122,7 @@ func TestConnectIsHandledAsLocalAppConfiguration(t *testing.T) {
 	if result.completion.Err != nil {
 		t.Fatalf("execute connect error = %v", result.completion.Err)
 	}
-	if service.connected.Provider != "codex" || service.connected.Model != "gpt-5.6-sol" {
+	if service.connected.Provider != "codex" || service.connected.Model != "gpt-6-sol" {
 		t.Fatalf("Connect() config = %#v, want local App model connection", service.connected)
 	}
 }
@@ -152,7 +152,7 @@ func TestSlashConnectModelKeepsUnboundProfilesHiddenWithoutExposingAgentSlash(t 
 		case SlashNoticeMsg:
 			notice = update
 		}
-	}, "codex gpt-5.6-sol")
+	}, "codex gpt-6-sol")
 	if result.Err != nil {
 		t.Fatalf("slashConnectWithContext() error = %v", result.Err)
 	}
@@ -164,7 +164,7 @@ func TestSlashConnectModelKeepsUnboundProfilesHiddenWithoutExposingAgentSlash(t 
 	if slices.Contains(commands.Commands, "sol") {
 		t.Fatalf("refreshed commands = %#v, should hide model Agent ID sol", commands.Commands)
 	}
-	if !strings.Contains(notice.Text, "Connected openai-codex/gpt-5.6-sol") {
+	if !strings.Contains(notice.Text, "Connected openai-codex/gpt-6-sol") {
 		t.Fatalf("connect notice = %#v, want canonical connected model", notice)
 	}
 	if notice.Placement != SlashNoticeFeedback {

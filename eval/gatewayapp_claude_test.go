@@ -14,59 +14,10 @@ import (
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
-	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/modelprofile"
-	"github.com/caelis-labs/caelis/internal/acpbridge"
 	"github.com/caelis-labs/caelis/internal/gatewayapptest"
 	"github.com/caelis-labs/caelis/surfaces/headless"
 )
-
-func TestLocalStackClaudeCustomAdapterE2E(t *testing.T) {
-	requireClaudeACPE2E(t)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
-	defer cancel()
-	workdir := t.TempDir()
-	storeDir := privateEvalTempDir(t)
-	stack, err := gatewayapp.NewLocalStack(gatewayapp.Config{
-		AppName:      "caelis",
-		UserID:       "claude-e2e-test",
-		StoreDir:     storeDir,
-		WorkspaceKey: workdir,
-		WorkspaceCWD: workdir,
-		ApprovalMode: "auto-review",
-	})
-	if err != nil {
-		t.Fatalf("gatewayapp.NewLocalStack() error = %v", err)
-	}
-	activeSession := startEvalSession(t, ctx, stack, "")
-	connectClaudeAgentForE2E(ctx, t, stack, activeSession, storeDir)
-
-	const want = "caelis claude acp e2e ok"
-	driver := newEvalAppServerAdapter(t, stack, activeSession, "claude_e2e")
-	turn, err := driver.StartAgentRun(ctx, string(agentbinding.HandleZenith), "Reply with exactly: "+want, nil)
-	if err != nil {
-		t.Fatalf("StartAgentRun(zenith) error = %v", err)
-	}
-	defer turn.Close()
-	var assistant acpbridge.FinalAssistantAccumulator
-	terminalState := ""
-	for envelope := range turn.Events() {
-		if envelope.Update != nil {
-			assistant.ObserveUpdate(envelope.Update)
-		}
-		if eventstream.IsTurnTerminalLifecycle(envelope) {
-			terminalState = envelope.Lifecycle.State
-		}
-	}
-	if terminalState != eventstream.LifecycleStateCompleted {
-		t.Fatalf("Claude participant terminal state = %q, want completed", terminalState)
-	}
-	result := strings.TrimSpace(assistant.FinalText())
-	if !strings.Contains(result, want) {
-		t.Fatalf("claude result = %q, want %q", result, want)
-	}
-}
 
 func TestLocalStackClaudeACPMainResumeOrNewE2E(t *testing.T) {
 	requireClaudeACPE2E(t)

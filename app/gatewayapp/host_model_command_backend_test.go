@@ -113,7 +113,7 @@ func TestHostModelCommandPersistsSupportedFastModeDefault(t *testing.T) {
 	connected, err := stack.ConfigurationCommands().ConnectModel(ctx, principal, appserver.ConnectModelRequest{
 		WriteBase: appserver.WriteBase{OperationID: "host-fast-connect", ExpectedRevision: &revision},
 		Config: appserver.ConnectConfig{
-			Provider: "openai", Model: "gpt-5.6-sol", BaseURL: "https://api.openai.com/v1", APIKey: "fast-test-secret",
+			Provider: "openai", Model: "gpt-6-sol", BaseURL: "https://api.openai.com/v1", APIKey: "fast-test-secret",
 			ReasoningEffort: "xhigh", ReasoningLevels: []string{"low", "high", "xhigh"},
 		},
 	})
@@ -122,7 +122,7 @@ func TestHostModelCommandPersistsSupportedFastModeDefault(t *testing.T) {
 	}
 	selected, err := stack.ConfigurationCommands().UseModel(ctx, principal, appserver.UseModelRequest{
 		WriteBase: appserver.WriteBase{OperationID: "host-fast-select", ExpectedRevision: &connected.Revision},
-		Model:     "openai/gpt-5.6-sol", ReasoningEffort: "xhigh", FastMode: true,
+		Model:     "openai/gpt-6-sol", ReasoningEffort: "xhigh", FastMode: true,
 	})
 	if err != nil || selected.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("UseModel(fast) = %#v, %v", selected, err)
@@ -160,7 +160,7 @@ func TestHostModelCommandPersistsSupportedFastModeDefault(t *testing.T) {
 
 	deleted, err := stack.ConfigurationCommands().DeleteModel(ctx, principal, appserver.DeleteModelRequest{
 		WriteBase: appserver.WriteBase{OperationID: "host-fast-delete", ExpectedRevision: &unrelatedDeleted.Revision},
-		Model:     "openai/gpt-5.6-sol",
+		Model:     "openai/gpt-6-sol",
 	})
 	if err != nil || deleted.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("DeleteModel(fast default) = %#v, %v", deleted, err)
@@ -751,7 +751,7 @@ func TestHostModelConnectRejectsConcurrentOAuthWithoutSecondEffect(t *testing.T)
 	credentialPath := filepath.Join(stack.composition.authorities.storeDir, "providers", "codex", "auth.json")
 	result, commandErr := stack.ConfigurationCommands().ConnectModel(ctx, appserver.Principal{ID: stack.composition.authorities.userID}, appserver.ConnectModelRequest{
 		WriteBase: appserver.WriteBase{OperationID: "host-model-concurrent-oauth", ExpectedRevision: &expected},
-		Config:    appserver.ConnectConfig{Provider: "codex", Model: "gpt-5.6-sol"},
+		Config:    appserver.ConnectConfig{Provider: "codex", Model: "gpt-6-sol"},
 	})
 	if commandErr == nil || result.Outcome != appserver.OutcomeConflicted || errorcode.CodeOf(commandErr) != errorcode.Conflict {
 		t.Fatalf("ConnectModel(concurrent OAuth) = %#v, %v", result, commandErr)

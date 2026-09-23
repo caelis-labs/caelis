@@ -460,7 +460,7 @@ func TestAssembleConnectBuildsManagedCodexOAuthProfile(t *testing.T) {
 	authCalls := 0
 	configs, err := AssembleConnect(context.Background(), ConnectRequest{
 		Provider: "codex",
-		Models:   []ModelSelection{{Name: "gpt-5.5"}},
+		Models:   []ModelSelection{{Name: "gpt-6-sol"}},
 	}, ConnectOptions{Authenticate: func(_ context.Context, req AuthenticateRequest) error {
 		authCalls++
 		if req.Provider != "openai-codex" || req.BaseURL != CodexOAuthBaseURL {
@@ -492,7 +492,7 @@ func TestAssembleConnectRejectsCustomCodexOAuthEndpoint(t *testing.T) {
 	_, err := AssembleConnect(context.Background(), ConnectRequest{
 		Provider: "codex",
 		BaseURL:  "https://proxy.example.test/backend-api/codex",
-		Models:   []ModelSelection{{Name: "gpt-5.5"}},
+		Models:   []ModelSelection{{Name: "gpt-6-sol"}},
 	}, ConnectOptions{Authenticate: func(context.Context, AuthenticateRequest) error {
 		return nil
 	}})
@@ -508,13 +508,13 @@ func TestMaintainedSelectableModelsUsesCurrentBundledCodexCatalog(t *testing.T) 
 	if err != nil {
 		t.Fatalf("MaintainedSelectableModels(codex) error = %v", err)
 	}
-	want := codexOAuthSelectableModels()
+	want := []string{"gpt-6-astra", "gpt-6-sol", "gpt-6-luna"}
 	if got := selectableModelNames(models); !slices.Equal(got, want) {
 		t.Fatalf("codex selectable models = %#v, want maintained fallback %#v", got, want)
 	}
 	for _, item := range models {
-		if !item.MetadataComplete {
-			t.Fatalf("codex selectable model requires unnecessary advanced setup = %#v", item)
+		if !item.MetadataComplete || !item.ImageInputKnown {
+			t.Fatalf("codex selectable model lacks maintained metadata = %#v", item)
 		}
 	}
 }
@@ -522,22 +522,68 @@ func TestMaintainedSelectableModelsUsesCurrentBundledCodexCatalog(t *testing.T) 
 func TestResolveCodexOAuthModelDefaultsUseSubscriptionCatalog(t *testing.T) {
 	t.Parallel()
 
-	managed, err := ResolveModelDefaultsForEndpoint("codex", "", "gpt-5.5")
-	if err != nil {
-		t.Fatalf("ResolveModelDefaultsForEndpoint(codex) error = %v", err)
+	for _, name := range []string{"gpt-6-sol", "gpt-6-luna"} {
+		t.Run(name, func(t *testing.T) {
+			managed, err := ResolveModelDefaultsForEndpoint("codex", "", name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			levels := []string{"low", "medium", "high", "xhigh", "max"}
+			if name == "gpt-6-sol" {
+				levels = append(levels, "ultra")
+			}
+			if managed.ContextWindowTokens != 258400 || managed.MaxOutputTokens != 32768 ||
+				managed.ReasoningMode != modelcatalog.ReasoningModeEffort || managed.DefaultReasoningEffort != "medium" ||
+				!slices.Equal(managed.ReasoningLevels, levels) {
+				t.Fatalf("Codex subscription defaults = %#v", managed)
+			}
+			if managed.ImageInput == nil || !*managed.ImageInput {
+				t.Fatalf("Codex image input = %v, want maintained true", managed.ImageInput)
+			}
+			native, err := ResolveModelDefaultsForEndpoint("openai", "", name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if native.ContextWindowTokens != 1050000 || native.DefaultReasoningEffort != "medium" ||
+				!slices.Equal(native.ReasoningLevels, []string{"none", "low", "medium", "high", "xhigh", "max"}) {
+				t.Fatalf("OpenAI API defaults = %#v, want API rather than subscription metadata", native)
+			}
+		})
 	}
-	if managed.ReasoningMode != modelcatalog.ReasoningModeEffort || slices.Contains(managed.ReasoningLevels, "none") {
-		t.Fatalf("codex subscription defaults = %#v, want maintained effort menu without none", managed)
-	}
-	if managed.ImageInput == nil || !*managed.ImageInput {
-		t.Fatalf("codex subscription defaults image input = %v, want maintained true", managed.ImageInput)
-	}
-	native, err := ResolveModelDefaultsForEndpoint("openai", "", "gpt-5.5")
-	if err != nil {
-		t.Fatalf("ResolveModelDefaultsForEndpoint(openai) error = %v", err)
-	}
-	if managed.ContextWindowTokens == native.ContextWindowTokens {
-		t.Fatalf("codex defaults = %#v, want subscription catalog distinct from OpenAI API defaults %#v", managed, native)
+}
+
+func TestCodexOAuthLegacyModelsRetainSubscriptionDefaults(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		name    string
+		context int
+		effort  string
+		levels  []string
+	}{
+		{"gpt-5.6-sol", 258400, "low", []string{"low", "medium", "high", "xhigh", "max", "ultra"}},
+		{"gpt-5.6-terra", 258400, "medium", []string{"low", "medium", "high", "xhigh", "max", "ultra"}},
+		{"gpt-5.6-luna", 258400, "medium", []string{"low", "medium", "high", "xhigh", "max"}},
+		{"gpt-5.5", 272000, "medium", []string{"low", "medium", "high", "xhigh"}},
+		{"gpt-5.4", 272000, "medium", []string{"low", "medium", "high", "xhigh"}},
+		{"gpt-5.4-mini", 272000, "medium", []string{"low", "medium", "high", "xhigh"}},
+		{"gpt-5.3-codex-spark", 128000, "high", []string{"low", "medium", "high", "xhigh"}},
+		{"gpt-5.2", 272000, "medium", []string{"low", "medium", "high", "xhigh"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			defaults, err := ResolveModelDefaultsForEndpoint("codex", "", tt.name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if defaults.ContextWindowTokens != tt.context || defaults.MaxOutputTokens != 32768 ||
+				defaults.DefaultReasoningEffort != tt.effort || defaults.ReasoningMode != modelcatalog.ReasoningModeEffort ||
+				!slices.Equal(defaults.ReasoningLevels, tt.levels) || defaults.ImageInput == nil || !*defaults.ImageInput {
+				t.Fatalf("legacy Codex defaults = %+v, want original subscription capabilities", defaults)
+			}
+			if slices.Contains(codexOAuthSelectableModels(), tt.name) {
+				t.Fatalf("legacy Codex model %q must not be recommended", tt.name)
+			}
+		})
 	}
 }
 
@@ -655,7 +701,7 @@ func TestBuildModelPropagatesMaintainedImageInputCapability(t *testing.T) {
 		{
 			Provider:   "openai-codex",
 			API:        model.APIOpenAICodex,
-			Model:      "gpt-5.6-sol",
+			Model:      "gpt-6-sol",
 			BaseURL:    CodexOAuthBaseURL,
 			Token:      "test-token",
 			AuthType:   model.AuthOAuthToken,
@@ -729,7 +775,7 @@ func TestMaintainedImageCapabilityOverridesConfig(t *testing.T) {
 	disabled := false
 	if !ModelSupportsImages(Config{
 		Provider:   "openai",
-		Model:      "gpt-4o",
+		Model:      "gpt-6-sol",
 		BaseURL:    "https://api.openai.com/v1",
 		ImageInput: &disabled,
 	}) {
@@ -782,7 +828,7 @@ func TestAssembleConnectPersistsImageInputOnlyForUnknownModels(t *testing.T) {
 		Provider: "openai",
 		APIKey:   "secret",
 		Models: []ModelSelection{{
-			Name:       "gpt-4o",
+			Name:       "gpt-6-sol",
 			ImageInput: &disabled,
 		}},
 	}, ConnectOptions{})
@@ -824,19 +870,21 @@ func TestSpeedModesForConfig(t *testing.T) {
 		want     bool
 		wantHint string
 	}{
-		{name: "openai gpt uses responses", cfg: Config{Provider: "openai", API: model.APIOpenAI, Model: "gpt-5.4"}, want: true, wantHint: "1.5x faster, more usage"},
-		{name: "openai-codex gpt uses responses", cfg: Config{Provider: "openai-codex", API: model.APIOpenAICodex, Model: "gpt-5.6-sol"}, want: true, wantHint: "1.5x faster, more usage"},
+		{name: "openai gpt uses responses", cfg: Config{Provider: "openai", API: model.APIOpenAI, Model: "gpt-6-sol"}, want: true, wantHint: "1.5x faster, more usage"},
+		{name: "openai-codex gpt uses responses", cfg: Config{Provider: "openai-codex", API: model.APIOpenAICodex, Model: "gpt-6-sol"}, want: true, wantHint: "1.5x faster, more usage"},
+		{name: "openai luna uses responses", cfg: Config{Provider: "openai", API: model.APIOpenAI, Model: "gpt-6-luna"}, want: true, wantHint: "1.5x faster, more usage"},
+		{name: "codex luna uses responses", cfg: Config{Provider: "openai-codex", API: model.APIOpenAICodex, Model: "gpt-6-luna"}, want: true, wantHint: "1.5x faster, more usage"},
 		{name: "astra has model-specific hint", cfg: Config{Provider: "openai-codex", API: model.APIOpenAICodex, Model: "gpt-6-astra"}, want: true, wantHint: "2x faster, more usage"},
-		{name: "normalizes official openai gpt identity", cfg: Config{Provider: " OpenAI ", Model: "GPT-5.4", BaseURL: "https://api.openai.com/v1/"}, want: true, wantHint: "1.5x faster, more usage"},
+		{name: "normalizes official openai gpt identity", cfg: Config{Provider: " OpenAI ", Model: "GPT-6-SOL", BaseURL: "https://api.openai.com/v1/"}, want: true, wantHint: "1.5x faster, more usage"},
 		{name: "rejects unknown gpt model", cfg: Config{Provider: "openai", API: model.APIOpenAI, Model: "gpt-unknown"}},
 		{name: "rejects unsupported catalog variant", cfg: Config{Provider: "openai", API: model.APIOpenAI, Model: "gpt-5.5-pro"}},
-		{name: "rejects custom openai endpoint", cfg: Config{Provider: "openai", API: model.APIOpenAI, Model: "gpt-5.4", BaseURL: "https://proxy.example/v1"}},
-		{name: "rejects custom openai-codex endpoint", cfg: Config{Provider: "openai-codex", API: model.APIOpenAICodex, Model: "gpt-5.6-sol", BaseURL: "https://proxy.example/codex"}},
+		{name: "rejects custom openai endpoint", cfg: Config{Provider: "openai", API: model.APIOpenAI, Model: "gpt-6-sol", BaseURL: "https://proxy.example/v1"}},
+		{name: "rejects custom openai-codex endpoint", cfg: Config{Provider: "openai-codex", API: model.APIOpenAICodex, Model: "gpt-6-sol", BaseURL: "https://proxy.example/codex"}},
 		{name: "rejects non-gpt openai model", cfg: Config{Provider: "openai", API: model.APIOpenAI, Model: "o3"}},
-		{name: "rejects openai-compatible gpt", cfg: Config{Provider: "openai-compatible", API: model.APIOpenAICompatible, Model: "gpt-5.4"}},
-		{name: "rejects openai-responses-compatible gpt", cfg: Config{Provider: "openai-responses-compatible", API: model.APIOpenAIResponses, Model: "gpt-5.4"}},
-		{name: "rejects openai gpt on compatible api", cfg: Config{Provider: "openai", API: model.APIOpenAICompatible, Model: "gpt-5.4"}},
-		{name: "rejects openai-codex gpt on chat api", cfg: Config{Provider: "openai-codex", API: model.APIOpenAI, Model: "gpt-5.4"}},
+		{name: "rejects openai-compatible gpt", cfg: Config{Provider: "openai-compatible", API: model.APIOpenAICompatible, Model: "gpt-6-sol"}},
+		{name: "rejects openai-responses-compatible gpt", cfg: Config{Provider: "openai-responses-compatible", API: model.APIOpenAIResponses, Model: "gpt-6-sol"}},
+		{name: "rejects openai gpt on compatible api", cfg: Config{Provider: "openai", API: model.APIOpenAICompatible, Model: "gpt-6-sol"}},
+		{name: "rejects openai-codex gpt on chat api", cfg: Config{Provider: "openai-codex", API: model.APIOpenAI, Model: "gpt-6-sol"}},
 		{name: "rejects xai grok", cfg: Config{Provider: "xai", Model: "grok-4.6"}},
 	}
 	for _, tt := range tests {

@@ -82,7 +82,7 @@ func TestLiveCodexServiceTiers(t *testing.T) {
 	}
 	modelID := os.Getenv("CAELIS_CODEX_TIER_MODEL")
 	if modelID == "" {
-		modelID = "gpt-5.6-luna"
+		modelID = "gpt-6-luna"
 	}
 	set := func(id, value string) []acp.SessionConfigOption {
 		t.Helper()

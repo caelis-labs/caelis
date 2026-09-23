@@ -25,7 +25,7 @@ func TestCustomRegistryAdapterModelCatalogE2E(t *testing.T) {
 	}{
 		{
 			name: "codex", commandEnv: "CAELIS_CODEX_ACP_CATALOG_E2E_BIN", commandName: "codex-acp",
-			models: []string{"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"}, configOption: "reasoning_effort",
+			models: []string{"gpt-6-astra", "gpt-6-sol", "gpt-6-luna"}, configOption: "reasoning_effort",
 		},
 		{
 			name: "claude", commandEnv: "CAELIS_CLAUDE_ACP_CATALOG_E2E_BIN", commandName: "claude-agent-acp",

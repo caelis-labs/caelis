@@ -42,7 +42,7 @@ func TestConnectModelPickerTracksHostConfiguration(t *testing.T) {
 	initial, err := clients.Configuration.ConnectModel(ctx, appserver.ConnectModelRequest{
 		WriteBase: appserver.WriteBase{OperationID: "connect-initial", ExpectedRevision: &status.Configuration.Revision},
 		Config: appserver.ConnectConfig{
-			Provider: "openai", Model: "gpt-5.6-sol", APIKey: "test-provider-key",
+			Provider: "openai", Model: "gpt-6-sol", APIKey: "test-provider-key",
 		},
 	})
 	if err != nil || initial.Outcome != appserver.OutcomeCommitted {
@@ -52,7 +52,7 @@ func TestConnectModelPickerTracksHostConfiguration(t *testing.T) {
 	remote := bindAppServerHTTPTestClient(t, appServer, "local-user")
 	state := connectwizard.ConnectWizardState{Provider: "openai"}
 	command := "connect-model:" + state.EncodeCompletionState()
-	assertSlashArgCandidate(t, clients.Completion, "", command, "gpt-5.6-sol", false)
+	assertSlashArgCandidate(t, clients.Completion, "", command, "gpt-6-sol", false)
 	assertSlashArgCandidate(t, remote, sessionID, command, "gpt-6-astra", true)
 
 	connected, err := clients.Configuration.ConnectModel(ctx, appserver.ConnectModelRequest{
@@ -74,5 +74,5 @@ func TestConnectModelPickerTracksHostConfiguration(t *testing.T) {
 		t.Fatalf("DeleteModel(astra) = %#v, %v", deleted, err)
 	}
 	assertSlashArgCandidate(t, remote, sessionID, command, "gpt-6-astra", true)
-	assertSlashArgCandidate(t, remote, sessionID, command, "gpt-5.6-sol", false)
+	assertSlashArgCandidate(t, remote, sessionID, command, "gpt-6-sol", false)
 }

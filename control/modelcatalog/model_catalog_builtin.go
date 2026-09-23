@@ -79,6 +79,8 @@ var builtinCatalog = []catalogEntry{
 		},
 	},
 	// ── OpenAI ────────────────────────────────────────────────────────────
+	// https://developers.openai.com/api/docs/models/gpt-6-sol
+	// https://developers.openai.com/api/docs/models/gpt-6-luna
 	{
 		provider: "openai",
 		pattern:  "gpt-6-astra",
@@ -100,7 +102,7 @@ var builtinCatalog = []catalogEntry{
 	},
 	{
 		provider: "openai",
-		pattern:  "gpt-5.6-sol",
+		pattern:  "gpt-6-sol",
 		caps: ModelCapabilities{
 			ContextWindowTokens:    1050000,
 			MaxOutputTokens:        128000,
@@ -119,7 +121,31 @@ var builtinCatalog = []catalogEntry{
 	},
 	{
 		provider: "openai",
-		pattern:  "gpt-5.6-terra",
+		pattern:  "gpt-6-luna",
+		caps: ModelCapabilities{
+			ContextWindowTokens:    1050000,
+			MaxOutputTokens:        128000,
+			DefaultMaxOutputTokens: 32768,
+			SupportsToolCalls:      true,
+			SupportsReasoning:      true,
+			ReasoningMode:          ReasoningModeEffort,
+			ReasoningEfforts:       []string{"none", "low", "medium", "high", "xhigh", "max"},
+			DefaultReasoningEffort: "medium",
+			SpeedModes: []SpeedMode{
+				{Level: "fast", Description: "1.5x faster, more usage"},
+			},
+			SupportsJSONOutput: true,
+			SupportsImages:     true,
+		},
+	},
+	// Control retains these hidden entries for saved profiles that derive runtime
+	// capabilities from this catalog, including default Fast mode. Remove them
+	// only with a configuration migration that preserves those capabilities or
+	// explicitly retires the affected profiles before validation.
+	{
+		provider:                  "openai",
+		pattern:                   "gpt-5.6-sol",
+		hiddenFromRecommendations: true,
 		caps: ModelCapabilities{
 			ContextWindowTokens:    1050000,
 			MaxOutputTokens:        128000,
@@ -137,8 +163,29 @@ var builtinCatalog = []catalogEntry{
 		},
 	},
 	{
-		provider: "openai",
-		pattern:  "gpt-5.6-luna",
+		provider:                  "openai",
+		pattern:                   "gpt-5.6-terra",
+		hiddenFromRecommendations: true,
+		caps: ModelCapabilities{
+			ContextWindowTokens:    1050000,
+			MaxOutputTokens:        128000,
+			DefaultMaxOutputTokens: 32768,
+			SupportsToolCalls:      true,
+			SupportsReasoning:      true,
+			ReasoningMode:          ReasoningModeEffort,
+			ReasoningEfforts:       []string{"none", "low", "medium", "high", "xhigh", "max"},
+			DefaultReasoningEffort: "medium",
+			SpeedModes: []SpeedMode{
+				{Level: "fast", Description: "1.5x faster, more usage"},
+			},
+			SupportsJSONOutput: true,
+			SupportsImages:     true,
+		},
+	},
+	{
+		provider:                  "openai",
+		pattern:                   "gpt-5.6-luna",
+		hiddenFromRecommendations: true,
 		caps: ModelCapabilities{
 			ContextWindowTokens:    1050000,
 			MaxOutputTokens:        128000,

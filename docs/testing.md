@@ -169,7 +169,7 @@ Both require an installed Codex CLI and authenticated account. They copy only
 authentication into a temporary `CODEX_HOME`, leaving the user's configuration
 and conversations unchanged. They make real model requests; the tier test
 includes Fast requests. `CAELIS_CODEX_TIER_MODEL` selects the model (default
-`gpt-5.6-luna`). Optional `CAELIS_CODEX_TIER_E2E_OUT` records service-tier request
+`gpt-6-luna`). Optional `CAELIS_CODEX_TIER_E2E_OUT` records service-tier request
 and response fields; `CAELIS_CODEX_COLLABORATION_E2E_OUT` records canonical
 participants, Tasks, creation journals and explicit peer messages, without
 credentials. The collaboration test uses a real Codex controller and ACP child
@@ -184,7 +184,7 @@ CAELIS_GUARDIAN_COMMAND_E2E=1 go test ./app/gatewayapp -run '^TestGuardianComman
 ```
 
 It defaults to locally configured `deepseek-v4-flash` with thinking disabled and
-`gpt-5.6-luna` without an effort override. Set
+`gpt-6-luna` without an effort override. Set
 `CAELIS_GUARDIAN_COMMAND_E2E_MODELS` to comma-separated local model names to select
 other configured aliases. A deterministic caller drives policy, Guardian,
 and native command execution against disposable files and loopback scripts.
@@ -197,7 +197,7 @@ and records time to the first result separately from approval and execution.
 `CAELIS_GUARDIAN_COMMAND_E2E_REPETITIONS` repeats each scenario up to five times.
 
 `CAELIS_GUARDIAN_RESIDENT_E2E=1` enables `TestGuardianResidentE2E` with the local
-`gpt-5.6-luna` alias. It exercises 48 successive development approvals across
+`gpt-6-luna` alias. It exercises 48 successive development approvals across
 built-in and external main/subagent origins, concurrent review queueing, task
 conflicts, injected tool output and evidence failures. Failure scenarios select a
 reproducible tool operation before the real model makes its judgment. The output

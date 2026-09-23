@@ -10,6 +10,7 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/caelis-labs/caelis/internal/controlprompt/connectwizard"
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 )
 
@@ -61,7 +62,7 @@ func TestRenderModelSpeedPickerShowsCatalogDescription(t *testing.T) {
 	model := NewModel(Config{Commands: DefaultCommands()})
 	model.width = 100
 	model.slashArgActive = true
-	model.slashArgCommand = "model openai/gpt-5.6-sol xhigh"
+	model.slashArgCommand = "model openai/gpt-6-sol xhigh"
 	model.slashArgCandidates = []SlashArgCandidate{
 		{Value: "default", Display: "Default", Detail: "standard request speed"},
 		{Value: "fast", Display: "Fast", Detail: "1.5x faster, more usage"},
@@ -71,6 +72,31 @@ func TestRenderModelSpeedPickerShowsCatalogDescription(t *testing.T) {
 	for _, want := range []string{"Fast", "1.5x faster, more usage"} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("renderInputOverlay() = %q, want %q", rendered, want)
+		}
+	}
+}
+
+func TestRenderConnectModelPickerShowsMaintainedCatalogModels(t *testing.T) {
+	model := NewModel(Config{Commands: DefaultCommands()})
+	model.width = 120
+	model.slashArgActive = true
+	model.slashArgCommand = "connect-model:" + (connectwizard.ConnectWizardState{Provider: "codex"}).EncodeCompletionState()
+	model.slashArgCandidates = []SlashArgCandidate{
+		{Value: "gpt-6-astra", Display: "gpt-6-astra", ModelMetadataComplete: true, ModelImageInputKnown: true},
+		{Value: "gpt-6-sol", Display: "gpt-6-sol", ModelMetadataComplete: true, ModelImageInputKnown: true},
+		{Value: "gpt-6-luna", Display: "gpt-6-luna", ModelMetadataComplete: true, ModelImageInputKnown: true},
+	}
+	model.slashArgIndex = 0
+
+	rendered := ansi.Strip(model.renderInputOverlay())
+	for _, want := range []string{"gpt-6-sol", "gpt-6-luna"} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("renderInputOverlay() = %q, want maintained model %q", rendered, want)
+		}
+	}
+	for _, removed := range []string{"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"} {
+		if strings.Contains(rendered, removed) {
+			t.Fatalf("renderInputOverlay() = %q, should not paint removed model %q", rendered, removed)
 		}
 	}
 }
