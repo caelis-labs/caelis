@@ -2,6 +2,7 @@ package application
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"testing"
 )
 
@@ -20,7 +21,8 @@ func TestApplicationProfileJSONRejectsUnknownAndNullNativeAuthority(t *testing.T
 }
 
 func TestApplicationWorkspaceAndPermissionsProfileValidation(t *testing.T) {
-	profile := Profile{Version: "v1", Model: "configured", ToolsVersion: "v1", Execution: "workspace-write", Workspace: Workspace{CWD: "/tmp/application-notebook", Access: []WorkspaceAccess{{Path: "/tmp/extras", Mode: "read-only"}, {Path: "/tmp/output", Mode: "read-write"}}}, Permissions: Permissions{Mode: "workspace-write", ApprovalMode: "manual"}, NativeTools: []string{"Read", "Write", "RunCommand"}}
+	root := t.TempDir()
+	profile := Profile{Version: "v1", Model: "configured", ToolsVersion: "v1", Execution: "workspace-write", Workspace: Workspace{CWD: filepath.Join(root, "application-notebook"), Access: []WorkspaceAccess{{Path: filepath.Join(root, "extras"), Mode: "read-only"}, {Path: filepath.Join(root, "output"), Mode: "read-write"}}}, Permissions: Permissions{Mode: "workspace-write", ApprovalMode: "manual"}, NativeTools: []string{"Read", "Write", "RunCommand"}}
 	if err := ValidateProfile(profile); err != nil {
 		t.Fatalf("explicit native profile rejected: %v", err)
 	}
