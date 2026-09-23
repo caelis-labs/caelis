@@ -2,6 +2,7 @@ package gatewayapp
 
 import (
 	"context"
+	"github.com/google/uuid"
 	"path/filepath"
 
 	appserver "github.com/caelis-labs/caelis/control/appserver"
@@ -78,6 +79,13 @@ func assembleHostControlServices(stack *Stack, cfg Config, storeDir string, curs
 		return hostControlAssembly{}, err
 	}
 	stack.controlOperationRetention = effectiveOperationRetention
+	stack.composition.authorities.botWork, err = bot.OpenWorkStore(controlStoreDatabasePath(storeDir))
+	if err != nil {
+		return hostControlAssembly{}, err
+	}
+
+	stack.composition.authorities.botWork.Sessions = stack.composition.sessions
+	stack.composition.authorities.botWork.InstanceID = uuid.NewString()
 
 	sessionAuthorizer := appserver.SessionAuthorizer{Sessions: stack.composition.sessions}
 	controlCommands, err := appserver.NewCommandService(appserver.CommandServiceConfig{
@@ -100,6 +108,8 @@ func assembleHostControlServices(stack *Stack, cfg Config, storeDir string, curs
 	}
 	stack.controlClient = controlClient
 	stack.configurationCommands = controlCommands
+	stack.composition.authorities.botWorkCommands = controlCommands
+	stack.composition.authorities.botReportReady = stack.commandBackend.deliverBotActivity
 	stack.agentCommands = controlCommands
 	stack.pluginCommands = controlCommands
 	stack.bots, err = appserver.NewBotService(appserver.BotServiceConfig{

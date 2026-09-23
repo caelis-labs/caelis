@@ -24,9 +24,21 @@ const (
 	CapabilityWorkspaceTrustPreflight = "workspace-trust-preflight-v1"
 	CapabilityHostReadiness           = "host-readiness-v1"
 	// CapabilityBotMode advertises persistent Bot conversations with their own
-	// private notebook and the focused configuration API. Older Hosts must not
-	// accept Bot clients.
+	// private files and the focused configuration API. Managed work and desktop
+	// connections require their additional capability identifiers.
 	CapabilityBotMode = "bot-mode-v1"
+	// CapabilityBotManagedWork advertises owned work, durable request sources and exact execution targets.
+	CapabilityBotManagedWork = "bot-managed-work-v1"
+	// CapabilityBotFiles advertises general private files; notes are one use.
+	CapabilityBotFiles = "bot-private-files-v1"
+	// CapabilityBotDesktop advertises authenticated fixed-action desktop leases.
+	CapabilityBotDesktop = "bot-desktop-actions-v1"
+	// CapabilityBotReminders advertises persisted schedule grants and occurrence admission.
+	CapabilityBotReminders = "bot-reminder-grants-v1"
+	// CapabilityBotImages covers bounded prompt images, including source-preserving delegation.
+	CapabilityBotImages = "bot-image-input-v1"
+	// CapabilityBotTextResults covers bounded textual work results, not file downloads.
+	CapabilityBotTextResults = "bot-text-results-v1"
 )
 
 var ErrStateRevisionConflict = errorcode.New(errorcode.Conflict, "controlclient: session state changed during bootstrap")
@@ -41,6 +53,7 @@ type ServerInfo struct {
 	BuildID             string   `json:"build_id,omitempty"`
 	BuildKind           string   `json:"build_kind,omitempty"`
 	ServerID            string   `json:"server_id,omitempty"`
+	StoreID             string   `json:"store_id,omitempty"`
 	InstanceID          string   `json:"instance_id,omitempty"`
 	Capabilities        []string `json:"capabilities,omitempty"`
 	Transports          []string `json:"transports,omitempty"`

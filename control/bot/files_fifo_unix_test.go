@@ -14,16 +14,16 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
-// A FIFO is the one special file a plain open can block on. The notebook opens
+// A FIFO is the one special file a plain open can block on. The files opens
 // with O_NONBLOCK and rejects the opened type, so Read and Grep must fail
 // promptly instead of waiting for a writer.
-func TestNotebookRejectsFIFOWithoutBlocking(t *testing.T) {
-	notebook := newTestNotebook(t, t.TempDir())
-	mustInitNotebook(t, notebook)
-	if err := syscall.Mkfifo(filepath.Join(notebookBase(t, notebook), "blocked.fifo"), 0o600); err != nil {
+func TestFilesRejectsFIFOWithoutBlocking(t *testing.T) {
+	files := newTestFiles(t, t.TempDir())
+	mustInitFiles(t, files)
+	if err := syscall.Mkfifo(filepath.Join(filesBase(t, files), "blocked.fifo"), 0o600); err != nil {
 		t.Fatalf("Mkfifo() error = %v", err)
 	}
-	tools := notebookToolSet(t, notebook)
+	tools := privateFileToolSet(t, files)
 
 	for _, name := range []string{"Read", "Grep"} {
 		args := map[string]any{"path": "blocked.fifo"}

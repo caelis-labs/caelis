@@ -23,6 +23,7 @@ func (s *Server) focusedRoutes() {
 	s.mux.HandleFunc("POST "+apiPrefix+"/sessions/{session_id}/participants/prompt", s.promptParticipant)
 	s.mux.HandleFunc("POST "+apiPrefix+"/sessions/{session_id}/participants/cancel", s.cancelParticipant)
 
+	s.botWorkRoutes()
 	s.mux.HandleFunc("GET "+apiPrefix+"/bots", s.listBots)
 	s.mux.HandleFunc("GET "+apiPrefix+"/bots/{bot_id}", s.getBot)
 	s.mux.HandleFunc("POST "+apiPrefix+"/bots/create", s.createBot)

@@ -131,9 +131,7 @@ func TestBotWireRejectsNumericRevision(t *testing.T) {
 	}
 }
 
-// TestBotWireCarriesNoNotebookSwitch pins the unified Bot contract: every Bot
-// has the same private notebook, so the released per-Bot capability field is
-// absent from the source schema, the wire value, and the generated clients.
+// TestBotWireCarriesNoNotebookSwitch pins the common private-file capability.
 func TestBotWireCarriesNoNotebookSwitch(t *testing.T) {
 	value := bot.Bot{ID: "bot-1", SessionID: "bot-chat-1", Revision: 3, Config: bot.Config{Name: "Ada"}}
 	validateWireValue(t, "Bot", value)

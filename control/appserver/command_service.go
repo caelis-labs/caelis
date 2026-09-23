@@ -88,7 +88,15 @@ func (s *CommandService) execute(ctx context.Context, principal Principal, actio
 	if err := s.config.Authorizer.Authorize(ctx, principal, action, sessionID); err != nil {
 		return commandFailure(operationID, sessionID, OutcomeRejected, publicCommandDetail(err, OutcomeRejected), err), err
 	}
-	digest, err := requestDigest(request)
+	digestRequest := request
+	if principal.ClientID != "" {
+		digestRequest = struct {
+			ClientID string
+			BotID    string
+			Request  any
+		}{principal.ClientID, principal.BotID, request}
+	}
+	digest, err := requestDigest(digestRequest)
 	if err != nil {
 		coded := errorcode.Wrap(errorcode.InvalidArgument, err.Error(), err)
 		return commandFailure(operationID, sessionID, OutcomeRejected, publicCommandDetail(coded, OutcomeRejected), coded), coded
@@ -338,6 +346,12 @@ func validateCommandRequest(action Action, request any) error {
 		}
 	case HandoffRequest:
 		return validateHandoffRequest(typed)
+	case BotReminderRequest:
+		return validateBotReminder(action, typed)
+	case BotClientExitRequest:
+		return validateBotClientExit(action, typed)
+	case BotWorkRequest:
+		return validateBotWorkRequest(action, typed)
 	case CreateBotRequest:
 		return validateCreateBotCommandRequest(action, typed)
 	case UpdateBotRequest:

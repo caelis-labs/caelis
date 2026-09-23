@@ -29,6 +29,9 @@ func (a SessionAuthorizer) Authorize(ctx context.Context, principal Principal, a
 	if principal.ID == "" {
 		return ErrUnauthorized
 	}
+	if principal.ClientID != "" && (action == ActionSessionCreate || action == ActionSessionList) {
+		return ErrUnauthorized
+	}
 	switch action {
 	case ActionSessionCreate, ActionSessionList:
 		return nil
@@ -49,12 +52,22 @@ func (a SessionAuthorizer) Authorize(ctx context.Context, principal Principal, a
 	if !principal.HasRole("admin") && strings.TrimSpace(active.UserID) != principal.ID {
 		return ErrUnauthorized
 	}
+	if principal.ClientID != "" && active.Metadata["control_bot_id"] != principal.BotID {
+		return ErrUnauthorized
+	}
+	if sessionvisibility.IsBotWorkSession(active) {
+		switch action {
+		case ActionSessionInspect, ActionApprovalResolve:
+		default:
+			return ErrUnauthorized
+		}
+	}
 	if sessionvisibility.IsBotSession(active) {
 		// Bot conversation lifecycle and configuration belong to the focused
 		// service. Knowing its Session ID does not grant workspace commands,
 		// participant access, steering, handoff, or close authority.
 		switch action {
-		case ActionSessionInspect, ActionPrompt, ActionCancel, ActionBotGet, ActionBotUpdate:
+		case ActionSessionInspect, ActionPrompt, ActionCancel, ActionBotGet, ActionBotUpdate, ActionBotWorkCreate, ActionBotWorkContinue, ActionBotWorkSteer, ActionBotWorkCancel, ActionBotCompletionAck, ActionBotClientExit, ActionBotReminderFire:
 		default:
 			return ErrUnauthorized
 		}
@@ -90,6 +103,9 @@ type ProductCommandAuthorizer struct {
 type ConfigurationAuthorizer = ProductCommandAuthorizer
 
 func (a ProductCommandAuthorizer) Authorize(ctx context.Context, principal Principal, action Action, sessionID string) error {
+	if principal.ClientID != "" && isHostProductAction(action) {
+		return ErrUnauthorized
+	}
 	if isHostProductAction(action) {
 		if strings.TrimSpace(principal.ID) == "" || strings.TrimSpace(sessionID) != "" {
 			return ErrUnauthorized

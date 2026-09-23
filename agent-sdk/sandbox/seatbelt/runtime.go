@@ -356,7 +356,16 @@ func buildSeatbeltProfile(p policy.Policy, workDir string) (string, error) {
 	b.WriteString("(allow process*)\n")
 	b.WriteString("(allow signal (target same-sandbox))\n")
 	b.WriteString("(allow sysctl-read)\n")
-	b.WriteString("(allow file-read*)\n")
+	if p.ResourceLimits == nil || p.ResourceLimits.ReadPaths == nil {
+		b.WriteString("(allow file-read*)\n")
+	} else {
+		for _, root := range p.ResourceLimits.ReadPaths {
+			if !filepath.IsAbs(root) || filepath.Clean(root) == "/" {
+				return "", fmt.Errorf("seatbelt: read ceiling requires absolute non-root paths")
+			}
+			fmt.Fprintf(&b, "(allow file-read* (subpath %s))\n", sbplString(root))
+		}
+	}
 	b.WriteString(seatbeltCoreExtensions)
 	b.WriteString(seatbeltMachServices)
 	b.WriteString(seatbeltDeviceAndFramework)

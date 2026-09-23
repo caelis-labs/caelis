@@ -27,6 +27,8 @@ func AppServerClients(client *Client) (appserver.AppServerClients, error) {
 		Configuration:  client,
 		Agents:         client,
 		Bots:           client,
+		BotWork:        client,
+		BotDesktop:     client,
 		Completion:     client,
 		Plugins:        client,
 		Presentation:   client,

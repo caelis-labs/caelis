@@ -2,7 +2,9 @@
 
 A **Bot** is a persistent named assistant with one private conversation. Bot mode
 is a standalone window over the same Host and canonical Session infrastructure
-as the coding TUI, with execution limited to chat and a private notebook.
+as the coding TUI. It is a personal Agent independent of any user project.
+Private documents and notes are routine tools; explicitly enabled managed work
+runs in separate Control-owned Sessions and workspaces.
 
 `caelis bot` launches the Bot TUI. It discovers or attaches to the same managed
 Host as `caelis`, so Bots, Sessions, credentials, and configuration live in the
@@ -14,8 +16,9 @@ coding TUI.
 ## Commands
 
 Bot mode exposes Bot chat commands and shared Host configuration. `/help` lists
-both. Workspace execution, participant prompts, Memory, and Worker commands are
-not part of Bot mode.
+both. The TUI presents one conversation. Managed work and desktop connections use the
+[Bot backend contract](bot-backend.md); ordinary participant and project commands
+remain outside this conversation.
 
 | Command | Effect |
 | --- | --- |
@@ -53,8 +56,8 @@ one before sending.
   opening or editing one is authorized against the owner of its conversation.
 - A Bot conversation is product-owned and hidden from ordinary Session lists and
   resume candidates. Knowing its Session ID does not grant workspace commands:
-  a Bot conversation accepts only inspection, prompting, Turn cancel, and Bot
-  reads and edits. Close, session/config, and participant commands are rejected.
+  a Bot conversation accepts inspection, prompting, Turn cancel, Bot reads and
+  edits, and the focused managed-work and client commands. Close, session/config, and participant commands are rejected.
 - On startup Bot mode lists your Bots and reconciles: no Bots opens the create
   flow, exactly one opens that Bot, and several open the selection overlay.
 
@@ -68,15 +71,16 @@ Left/Right adjusts effort; Tab switches to Fast when supported. Enter applies th
 model draft, and Create or Save commits the complete form. Esc closes without
 saving. `/bots` supports typing or pasting a search inside its selection overlay.
 
-Every Bot has the same private notebook and the same five notebook file tools.
-There is no capability switch: the notebook is not something a Bot enables,
-inherits, or loses, and creating, renaming, selecting a model, or reactivating a
-Runtime never changes which tools a Bot has. A Bot created before notebooks were
-universal keeps its identity, history, and model, and receives its notebook on
-your next message to it. That one-time provisioning uses the same confined
-notebook owner as creation, so it never replaces existing notes and never
-recreates a deleted `index.md`. If it fails, sending the message fails with an
-explicit error instead of starting a reply whose tools cannot reach a notebook.
+Every Bot has a private file area and the five bounded file tools. The complete
+Bot configuration also carries `managed_work`, `desktop_actions`, and
+`work_permission`. The two capability flags default to false; turning them on
+requires an explicit Bot configuration save. `work_permission` accepts only
+`workspace-write` (also the default when omitted). Unsupported permissions,
+reasoning effort, and speed options are rejected. The TUI settings form currently
+covers identity and model settings; the backend API exposes the capability flags.
+Existing conversations retain false capability flags when omitted. The private
+file area is `<Store>/bots/<Bot ID>/files/`; older notebook directories are not
+read, copied, or migrated.
 
 - A Bot's model must be an existing provider model from the configured catalog.
   Selection is explicit: Bot mode never silently binds a different provider or a
@@ -99,7 +103,7 @@ explicit error instead of starting a reply whose tools cannot reach a notebook.
   conversation history. Bot mode never rewrites that history or the fixed system
   prefix, including after the Runtime is released and rebuilt.
 
-## Private notebook
+## Private files and notes
 
 Tell the Bot a lasting preference or something you want to continue later. It
 can choose to retain useful information, but does not write after every message.
@@ -107,15 +111,16 @@ For an explicit save, ask “Keep this preference in your notebook.” You can a
 ask it to show the saved notes, correct an old fact, or update an unfinished
 matter. After reopening, ask it to check its notebook before answering.
 
-Each Bot has `<Store>/bots/<Bot ID>/notebook/`, with `index.md` as the stable
-entry point. Renaming the Bot, changing startup directories, releasing its
+Each Bot has `<Store>/bots/<Bot ID>/files/`. Use this area for documents,
+drafts, task materials, and a Markdown notebook. `index.md` is the notebook entry
+point, seeded once for a new file area. Renaming the Bot, changing startup directories, releasing its
 Runtime, or restarting the Host does not change this association. Markdown files
 are the notebook's content authority; there is no separate note-index database
 and no automatic copy to Workspace Memory. The Bot maintains links from the index
 to relevant notes. Direct TUI file browsing and editing are not available.
 
-Only `Read`, `Write`, `Patch`, `Glob`, and `Grep` are admitted. The actual file
-boundary confines reading, writing, listing, and searching to that Bot's notebook;
+The file tools are `Read`, `Write`, `Patch`, `Glob`, and `Grep`. Their boundary
+confines reading, writing, listing, and searching to that Bot's private area;
 paths outside it and symbolic-link access are rejected. Directory discovery skips
 symbolic links. Writes stage a private file before replacement. A stale `Write`
 revision or a failed `Patch` match returns an error without applying the edit;
@@ -140,29 +145,28 @@ Revising a note does not erase earlier conversation or tool-result history.
 
 ## What a Bot conversation is
 
-A Bot conversation runs on the built-in controller. Every Bot resolves the same
-instruction baseline and the same five notebook tools for every Turn: shared
-identity and instruction/evidence principles plus Bot-specific identity,
-conversation, notebook, and capability guidance, naming no tool the request does
-not carry. Notebook text is evidence, not configuration or higher-priority
-instructions; it cannot change the user-maintained name, description, or
-permissions. The Bot has no shell, arbitrary workspace access, Workspace Memory,
-plugin installation, collaboration, or background Worker capability, and
-plugin-provided or workspace tools are not assembled into a Bot conversation.
-Its canonical Session cannot carry a Workspace Memory binding.
+A Bot conversation runs on the built-in controller with an explicit tool
+allowlist. Enabling managed work adds owned list/read/create/continue/steer/interrupt
+tools. Mutations bind the current persisted user request from trusted Control
+admission; the model cannot select a source, principal, workspace directory, or
+operation ID. Enabling desktop actions permits only registered clock, reminder,
+and gesture tools while their authenticated client lease is active.
 
-### Instruction baseline and updates
+Substantial work receives an independent Session, private directory, native
+execution lifecycle, and applicable workspace-write policy and approvals.
+Approval cannot widen its mandatory filesystem or network ceiling. Existing
+project adoption is not supported. Project configuration, plugins, global MCP
+credentials, and Workspace Memory are not loaded into either Bot runtime.
+Workspace trust therefore grants no project configuration authority to managed
+work. The shared Host remains available to its other consumers.
 
-The baseline and the notebook tools are derived from the running Host rather
-than from a per-Bot capability record: the baseline is compiled and depends only
-on the Host application name, and the tools are bound to that Bot's own notebook.
-A Bot window left open therefore never pins an older baseline, and neither the
-Bot's configuration nor its conversation needs a migration or Runtime recycle
-for it. Upgrading the Host takes effect through the existing Host replacement
-path: the next Turn served by the new binary uses the new baseline, while the
-canonical history, compaction checkpoints, and provider message prefix stay as
-they were. A change that alters the visible instructions or tool schemas starts
-a new request baseline, so the earlier provider prefix is not reused verbatim.
+The fixed instruction baseline and explicit tool schemas come from the running
+Host. File contents and results enter as ordinary evidence through tools, never
+as configuration or new user authorization. Upgrading the Host does not enable
+managed work or desktop actions. Work handles, request sources, operation anchors,
+completion notifications, client activations, and reminder grants are owned by
+`control/bot` in the secured Control database. Native Session journals remain the
+execution authority; the shared AppServer ledger remains the command dispatcher.
 
 ## Leaving, switching, and cancelling
 
@@ -172,7 +176,8 @@ These are distinct:
   conversation the window shows. It does not cancel the previous Bot's work,
   which continues on the Host.
 - **Cancel** — pressing `Esc` while a Turn is running requests an interrupt for
-  the active Bot's current Turn. It cancels only that Turn. Inside the Bot
+  the active Bot's current Turn. It cancels that Turn and pauses automatic completion reports until the next
+  accepted user message. Owned work has a separate exact interrupt command. Inside the Bot
   overlay, `Esc` closes the overlay instead.
 - **Quit** — `/quit`, `/exit`, `Ctrl+D`, or two presses of `Ctrl+C` close the Bot
   TUI. Quitting does not cancel an accepted Turn and does not stop the Host.
@@ -185,6 +190,9 @@ interrupted; an execution without a durable terminal result is shown as an
 unknown outcome. Neither is automatically resumed. `/status` reports the same
 completed, failed, or interrupted reply state during live observation and after
 reconnecting.
+
+Desktop connection loss, explicit desktop exit, and Host restart have separate
+semantics; see [the backend lifecycle contract](bot-backend.md#exit-and-recovery).
 
 ## Related
 

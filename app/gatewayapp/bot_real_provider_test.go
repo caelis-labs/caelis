@@ -72,7 +72,7 @@ func TestBotRealMimoConversation(t *testing.T) {
 		t.Fatalf("create: %+v, %v", result, err)
 	}
 	id, sessionID := result.Resource.Ref, result.SessionID
-	root, err := bot.NotebookRoot(store, id)
+	root, err := bot.FilesRoot(store, id)
 	if err != nil {
 		t.Fatal(err)
 	}

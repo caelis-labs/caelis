@@ -96,11 +96,11 @@ func TestBotRuntimeIsolatedCapabilitiesAndStableCanonicalPrefix(t *testing.T) {
 	if memorySelections.Load() != 0 {
 		t.Fatal("Bot selected implicit Workspace Memory")
 	}
-	tools, err := instance.exec.(*bot.Notebook).Tools()
+	tools, err := instance.exec.(*bot.Files).Tools()
 	if err != nil {
 		t.Fatal(err)
 	}
-	resolver := &botTurnResolver{composition: &instance.runtimeComposition, notebookTools: tools}
+	resolver := &botTurnResolver{composition: &instance.runtimeComposition, privateFileTools: tools}
 	resolved, err := resolver.ResolveTurn(ctx, kernel.TurnIntent{SessionRef: active.SessionRef})
 	if err != nil {
 		t.Fatal(err)
@@ -359,7 +359,7 @@ func saveBotRuntimeTestConfig(t *testing.T, stack *Stack, ref session.SessionRef
 	id, _ := active.Metadata[bot.MetadataID].(string)
 	service := bot.Service{Sessions: stack.composition.sessions}
 	if previous == nil {
-		if err := initializeBotNotebook(t.Context(), stack.composition.authorities.storeDir, id); err != nil {
+		if err := initializeBotFiles(t.Context(), stack.composition.authorities.storeDir, id); err != nil {
 			t.Fatal(err)
 		}
 	}

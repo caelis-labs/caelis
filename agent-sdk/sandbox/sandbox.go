@@ -147,11 +147,15 @@ type Descriptor struct {
 }
 
 // ResourceLimits is an embedding-owned mandatory resource ceiling. It cannot
-// be widened by command constraints or a Host/full-access request. Reads retain
-// the backend default. Backends without enforcement reject construction.
+// be widened by command constraints or a Host/full-access request. ReadPaths
+// optionally restricts reads to explicit roots (nil keeps backend defaults).
+// Backends without enforcement reject construction.
 // Windows enforces directory write limits but keeps its online-only network
 // behavior; NetworkDisabled does not disable network access on Windows.
 type ResourceLimits struct {
+	// ReadPaths is a mandatory read ceiling on Seatbelt and Bubblewrap. An
+	// explicitly empty list grants no ordinary file reads. Other backends reject it.
+	ReadPaths  []string
 	WritePaths []string
 	Network    Network
 }

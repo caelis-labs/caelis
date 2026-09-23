@@ -55,7 +55,7 @@ func (a *workspaceConfigAssembler) assembleSnapshot(
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if sessionvisibility.IsBotSession(active) {
+	if sessionvisibility.IsBotSession(active) || sessionvisibility.IsBotWorkSession(active) {
 		return a.assembleBotSnapshot(ctx, active, activity, sessions)
 	}
 

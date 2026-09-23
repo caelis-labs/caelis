@@ -364,7 +364,17 @@ func buildBwrapArgs(p policy.Policy, workDir string) ([]string, error) {
 	if !p.NetworkAccess {
 		args = append(args, "--unshare-net")
 	}
-	args = append(args, "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc")
+	if p.ResourceLimits == nil || p.ResourceLimits.ReadPaths == nil {
+		args = append(args, "--ro-bind", "/", "/")
+	} else {
+		for _, root := range p.ResourceLimits.ReadPaths {
+			if !filepath.IsAbs(root) || filepath.Clean(root) == "/" {
+				return nil, fmt.Errorf("bwrap: read ceiling requires absolute non-root paths")
+			}
+			args = append(args, "--ro-bind", root, root)
+		}
+	}
+	args = append(args, "--dev", "/dev", "--proc", "/proc")
 	if p.Type != policy.TypeReadOnly {
 		writableRoots, err := bwrapWritableRoots(p, workDir)
 		if err != nil {

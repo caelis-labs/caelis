@@ -11,6 +11,7 @@ import (
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/memoryhost"
 	controladapterhost "github.com/caelis-labs/caelis/control/adapterhost"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/bot"
 	"github.com/caelis-labs/caelis/control/collaboration"
 	"github.com/caelis-labs/caelis/control/memorybinding"
 	"github.com/caelis-labs/caelis/control/modelconfig/codexauth"
@@ -41,6 +42,9 @@ type taskOutputLifecycle interface {
 // the Host root and detached Session Runtime instances. Copying this value
 // copies references only; Runtime compositions never own these lifecycles.
 type runtimeHostAuthorities struct {
+	botWork           *bot.WorkStore
+	botWorkCommands   appserver.BotWorkCommands
+	botReportReady    func(context.Context, string, string)
 	collaboration     *collaboration.Service
 	collaborationDone <-chan struct{}
 	appName           string

@@ -106,7 +106,7 @@ func TestBotNotebookToolEffectsPrefixAndContextRoundTrip(t *testing.T) {
 	prompt("save my preference")
 	prompt("revise my preference")
 	prompt("ordinary continuation after editing")
-	root, err := bot.NotebookRoot(storeDir, created.Resource.Ref)
+	root, err := bot.FilesRoot(storeDir, created.Resource.Ref)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,11 +155,11 @@ func TestBotNotebookToolEffectsPrefixAndContextRoundTrip(t *testing.T) {
 			break
 		}
 	}
-	tools, err := active.instance.exec.(*bot.Notebook).Tools()
+	tools, err := active.instance.exec.(*bot.Files).Tools()
 	if err != nil {
 		t.Fatal(err)
 	}
-	resolved, err := (&botTurnResolver{composition: &active.instance.runtimeComposition, notebookTools: tools}).ResolveTurn(ctx, kernel.TurnIntent{SessionRef: ref})
+	resolved, err := (&botTurnResolver{composition: &active.instance.runtimeComposition, privateFileTools: tools}).ResolveTurn(ctx, kernel.TurnIntent{SessionRef: ref})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,11 +228,11 @@ func TestBotNotebookIndexDiscoverableAfterWatermarkCompaction(t *testing.T) {
 	if _, _, ok := compact.LatestCompactEvent(loaded.Events); !ok || server.compactionCalls.Load() == 0 {
 		t.Fatal("system watermark did not compact Bot context")
 	}
-	tools, err := instance.exec.(*bot.Notebook).Tools()
+	tools, err := instance.exec.(*bot.Files).Tools()
 	if err != nil {
 		t.Fatal(err)
 	}
-	resolved, err := (&botTurnResolver{composition: &instance.runtimeComposition, notebookTools: tools}).ResolveTurn(ctx, kernel.TurnIntent{SessionRef: active.SessionRef})
+	resolved, err := (&botTurnResolver{composition: &instance.runtimeComposition, privateFileTools: tools}).ResolveTurn(ctx, kernel.TurnIntent{SessionRef: active.SessionRef})
 	if err != nil {
 		t.Fatal(err)
 	}

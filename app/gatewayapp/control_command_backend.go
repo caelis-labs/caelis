@@ -22,7 +22,8 @@ type controlCommandBackend struct {
 
 	// botAdmissionMu serializes Bot settings with prompt reservation, not reply
 	// execution. Runtime fences then reject edits during an admitted Turn.
-	botAdmissionMu sync.Mutex
+	botAdmissionMu     sync.Mutex
+	botWorkAdmissionMu sync.Mutex
 
 	hostAuthenticationMu sync.Mutex
 	hostAuthentications  map[string]struct{}

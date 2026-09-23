@@ -694,7 +694,10 @@ func (s *Stack) WaitApprovalRecovery(ctx context.Context) error {
 	if s == nil || s.composition.authorities.approvalRecovery == nil {
 		return nil
 	}
-	return s.composition.authorities.approvalRecovery.Wait(ctx)
+	if err := s.composition.authorities.approvalRecovery.Wait(ctx); err != nil {
+		return err
+	}
+	return s.commandBackend.recoverBotWorkReports(ctx)
 }
 
 func newStackFenceOwnerID() (string, error) {
@@ -840,6 +843,12 @@ func (s *Stack) closeWithQuiesceTimeout(timeout time.Duration) error {
 	s.composition.mu.Unlock()
 
 	var errs []error
+	if work := s.composition.authorities.botWork; work != nil {
+		if err := work.Close(); err != nil {
+			errs = append(errs, err)
+		}
+		s.composition.authorities.botWork = nil
+	}
 	if mailboxes := s.composition.authorities.collaboration; mailboxes != nil {
 		if err := mailboxes.Close(); err != nil {
 			errs = append(errs, err)

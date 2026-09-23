@@ -37,6 +37,9 @@ func Default(cfg sandbox.Config, constraints sandbox.Constraints) Policy {
 	if cfg.ResourceLimits != nil {
 		limits := *cfg.ResourceLimits
 		limits.WritePaths = append([]string(nil), limits.WritePaths...)
+		if limits.ReadPaths != nil {
+			limits.ReadPaths = append([]string{}, limits.ReadPaths...)
+		}
 		return Policy{Type: TypeWorkspaceWrite, ResourceLimits: &limits, NetworkAccess: limits.Network != sandbox.NetworkDisabled, WritableRoots: limits.WritePaths}
 	}
 

@@ -33,6 +33,12 @@ type Config struct {
 	Model       string `json:"model"`
 	Effort      string `json:"effort,omitempty"`
 	Fast        bool   `json:"fast,omitempty"`
+	// ManagedWork explicitly enables delegation to isolated work Sessions.
+	ManagedWork bool `json:"managed_work,omitempty"`
+	// WorkPermission selects the bounded worker policy. Host execution is unsupported.
+	WorkPermission string `json:"work_permission,omitempty"`
+	// DesktopActions enables fixed routine actions through an authenticated client lease.
+	DesktopActions bool `json:"desktop_actions,omitempty"`
 }
 
 // Bot is the current configuration and its canonical conversation address.
@@ -63,6 +69,9 @@ func Normalize(config Config) (Config, error) {
 	config.Name = strings.TrimSpace(config.Name)
 	config.Model = strings.TrimSpace(config.Model)
 	config.Effort = strings.TrimSpace(config.Effort)
+	if config.WorkPermission != "" && config.WorkPermission != "workspace-write" {
+		return Config{}, errorcode.New(errorcode.Unsupported, "bot: work_permission supports only workspace-write")
+	}
 	if config.Name == "" || utf8.RuneCountInString(config.Name) > 100 || strings.IndexFunc(config.Name, func(r rune) bool { return unicode.IsControl(r) || r == '\u2028' || r == '\u2029' }) >= 0 {
 		return Config{}, errorcode.New(errorcode.InvalidArgument, "bot: name must be one line of 1–100 characters")
 	}

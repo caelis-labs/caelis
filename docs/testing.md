@@ -222,8 +222,8 @@ Bot notebook test. It copies the configured
 disposable Store, leaving the user's Host, configuration, and conversations
 untouched. Four synthetic prompts cover a natural preference, explicit saving,
 revision, and index-led reading after Host restart. The test checks actual note
-and index contents, canonical Read calls after restart, the exact five-tool
-notebook set, and unchanged provider message/tool prefixes. It reports natural
+and index contents, canonical Read calls after restart, the five private-file
+tools, and unchanged provider message/tool prefixes. It reports natural
 note-taking selection separately from these reliability assertions. The budget
 is four minutes and at most 28 provider requests; no mock result substitutes for
 real model behavior.
@@ -238,10 +238,25 @@ synthetic request payloads, replies, note contents, and the natural note-taking
 observation, never headers or credentials.
 
 Deterministic Bot coverage in the same package needs no provider. It provisions a
-Bot created before notebooks were universal on that owner's first prompt, proves
-the notebook is created exactly once and that a deleted `index.md` is never
+Bot's private files on that owner's first prompt, proves
+the file area is created exactly once and that a deleted `index.md` is never
 recreated, and rejects the prompt with an explicit error when the Store cannot be
 provisioned at all.
+
+Managed Bot work and its native sandbox have an explicit controlled-provider gate:
+
+```bash
+CAELIS_TEST_BOT_NATIVE=1 go test ./app/gatewayapp -run '^TestBot(ManagedWorkParallelAndSourceIsolation|WorkNativeCredentialAndPathCeiling|NativeHostHTTPWorkApprovalReportAndRecovery|NativeModelDelegationUsesBoundRequest)$' -count=1 -v
+```
+
+It uses disposable data directories and requires native Seatbelt or Bubblewrap
+permission. It checks parallel work with a responsive main Bot, command credential
+and path isolation, and the actual Host HTTP approval/result/report/restart path.
+Work restart compares the reconstructed model prefix with the runtime-produced
+request. It does not use a real model or the desktop product adapter. Ordinary
+`control/bot` tests cover durable sources, receipts, report claims, client leases,
+and reminder provenance. `TestBotHostHTTPDesktopLeaseSSEAndExit` covers the typed
+client and HTTP/SSE action bridge without native process execution.
 
 `make windows-check` runs Guardian's native evidence tests with deterministic
 model responses. They exercise PowerShell, temporary-only writes, file evidence,
