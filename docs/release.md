@@ -53,8 +53,11 @@ CWD, inheritance, execution and permissions remain bound at Session creation.
 Model, reasoning effort, supported service tier, instructions and tools can
 change at the next unissued model request, including within a Turn. A provider's
 support for priority is not a promise that every model supports Fast. Synthetic
-provider acceptance does not establish real-model or Fast service behavior;
-record those results separately before claiming them in release acceptance.
+provider checks cannot establish real-model or Fast service behavior. Release
+notes must distinguish actual model requests from deterministic recovery tests
+and limit live acceptance to the exercised models, adapter, and request paths;
+a successful priority request does not establish latency, billing, or GUI and
+distribution acceptance.
 
 ## Embedded Memory upgrades and recovery
 

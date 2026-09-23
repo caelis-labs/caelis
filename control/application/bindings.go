@@ -252,14 +252,13 @@ func (s *Store) ListBindings(ctx context.Context, scope Scope) ([]Binding, error
 	return out, rows.Err()
 }
 
-// ArchiveBinding seals a binding after the Host closes the canonical Session.
+// ArchiveBinding seals a binding after the Host proves the canonical close.
+// This trusted completion does not require a live lease or grant new admission;
+// the caller must retain the original operation's committed close receipt.
 // Read-only history and resources remain available under the original scope.
 func (s *Store) ArchiveBinding(ctx context.Context, scope Scope, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, err := s.active(ctx, scope); err != nil {
-		return err
-	}
 	b, err := s.binding(ctx, scope, id)
 	if err != nil {
 		return err

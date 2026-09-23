@@ -71,7 +71,9 @@ func (s *Store) GetOperation(ctx context.Context, scope Scope, id string) (Opera
 	return s.operation(ctx, scope, id)
 }
 
-// CompleteOperation records one immutable dispatch result; changed late results conflict.
+// CompleteOperation records one immutable result for an admitted operation in
+// the exact connection scope, even after lease expiry or revocation. Trusted
+// completion does not grant fresh dispatch; changed late results conflict.
 func (s *Store) CompleteOperation(ctx context.Context, scope Scope, id string, result json.RawMessage) error {
 	if !json.Valid(result) {
 		return ErrInvalid
@@ -82,7 +84,7 @@ func (s *Store) CompleteOperation(ctx context.Context, scope Scope, id string, r
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, err = s.active(ctx, scope); err != nil {
+	if _, err = s.connection(ctx, scope); err != nil {
 		return err
 	}
 	op, err := s.operation(ctx, scope, id)

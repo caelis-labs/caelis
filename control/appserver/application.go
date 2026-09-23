@@ -129,28 +129,6 @@ func (s *ApplicationService) Prompt(ctx context.Context, p Principal, req Applic
 	return s.execute(ctx, p, req.OperationID, req, func() (CommandResult, error) { return s.config.Commands.PromptApplication(ctx, p, req) })
 }
 
-// Archive closes canonical Session admission without deleting history/resources.
-// Observation detach and application connection revocation never call Archive.
-func (s *ApplicationService) Archive(ctx context.Context, p Principal, req CloseSessionRequest) (CommandResult, error) {
-	scope, err := ApplicationScope(p)
-	if err != nil {
-		return CommandResult{}, err
-	}
-	if _, err = s.config.Store.GetBinding(ctx, scope, req.SessionID); err != nil {
-		return CommandResult{}, err
-	}
-	return s.execute(ctx, p, req.OperationID, struct {
-		Action  string
-		Request CloseSessionRequest
-	}{"archive", req}, func() (CommandResult, error) {
-		out, err := s.config.Sessions.CloseSession(ctx, p, req)
-		if err == nil && out.Outcome == OutcomeCommitted {
-			err = s.config.Store.ArchiveBinding(ctx, scope, req.SessionID)
-		}
-		return out, err
-	})
-}
-
 func (s *ApplicationService) Operation(ctx context.Context, p Principal, id string) (ApplicationOperation, error) {
 	scope, err := ApplicationScope(p)
 	if err != nil {
@@ -209,8 +187,9 @@ func (s *ApplicationService) execute(ctx context.Context, p Principal, id string
 }
 
 // observeOperation reconciles creation from the immutable binding and canonical
-// Session without redispatch. Other effect kinds with missing receipts stay
-// unknown; a read never manufactures an execution terminal or a new grant.
+// Session, and finishes archiving from the original close receipt, without
+// redispatch. Other missing receipts stay unknown; a read never manufactures an
+// execution terminal or a new grant.
 func (s *ApplicationService) observeOperation(ctx context.Context, p Principal, scope application.Scope, op application.Operation) (ApplicationOperation, error) {
 	out := ApplicationOperation{OperationID: op.ID, Outcome: OutcomeUnknown}
 	var kind struct {
@@ -226,6 +205,18 @@ func (s *ApplicationService) observeOperation(ctx context.Context, p Principal, 
 		out.Result = new(CommandResult)
 		if err := json.Unmarshal(op.Result, out.Result); err != nil {
 			return ApplicationOperation{}, err
+		}
+		var archive applicationArchiveRequest
+		if err := json.Unmarshal(op.Request, &archive); err != nil {
+			return ApplicationOperation{}, err
+		}
+		if archive.Action == "archive" {
+			if archive.Request.OperationID != op.ID {
+				return ApplicationOperation{}, application.ErrConflict
+			}
+			if err := s.finishArchive(ctx, scope, archive.Request, *out.Result); err != nil {
+				return ApplicationOperation{}, err
+			}
 		}
 		out.Outcome = out.Result.Outcome
 		return out, nil
