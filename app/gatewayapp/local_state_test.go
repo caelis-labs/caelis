@@ -500,7 +500,7 @@ func TestSessionFastModePersistsAcrossRestartIntoResolvedModelRequest(t *testing
 		ApprovalMode: "auto-review",
 		Assembly:     assembly.ResolvedAssembly{},
 		Model: ModelConfig{
-			Provider: "openai", API: providers.APIOpenAI, Model: "gpt-6-sol",
+			Provider: "openai", API: providers.APIOpenAI, Model: "gpt-5.6-sol",
 			BaseURL: "https://api.openai.com/v1", Token: "fast-round-trip-secret",
 			ReasoningEffort: "xhigh", ReasoningLevels: []string{"low", "high", "xhigh"},
 		},

@@ -32,11 +32,11 @@ func TestLookupModelCapabilitiesFallsBackToBuiltinWhenDynamicCatalogUnavailable(
 	}
 }
 
-func TestOpenAICatalogMaintainsOnlyCurrentModels(t *testing.T) {
+func TestOpenAICatalogRecommendsOnlyCurrentModels(t *testing.T) {
 	disableDynamicCatalogForTest(t)
 	want := []string{"gpt-6-astra", "gpt-6-luna", "gpt-6-sol"}
 	if got := ListCatalogModels("openai"); !sameStrings(got, want) {
-		t.Fatalf("OpenAI catalog = %v, want %v", got, want)
+		t.Fatalf("OpenAI catalog recommendations = %v, want %v", got, want)
 	}
 	if got := ListRecommendedModels("openai"); !sameStrings(got, want) {
 		t.Fatalf("OpenAI recommendations = %v, want %v", got, want)
@@ -53,6 +53,26 @@ func TestOpenAICatalogMaintainsOnlyCurrentModels(t *testing.T) {
 			if caps.ReasoningMode != ReasoningModeEffort || caps.DefaultReasoningEffort != "medium" ||
 				!sameStrings(caps.ReasoningEfforts, []string{"none", "low", "medium", "high", "xhigh", "max"}) {
 				t.Fatalf("API reasoning = %+v", caps)
+			}
+		})
+	}
+}
+
+func TestOpenAILegacyModelsRetainRuntimeCapabilitiesWithoutRecommendations(t *testing.T) {
+	disableDynamicCatalogForTest(t)
+	for _, name := range []string{"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.4"} {
+		t.Run(name, func(t *testing.T) {
+			caps, ok := LookupModelCapabilities("openai", name)
+			if !ok || !caps.SupportsImages || !caps.SupportsToolCalls || !caps.SupportsReasoning ||
+				caps.ContextWindowTokens != 1050000 || caps.MaxOutputTokens != 128000 || caps.DefaultMaxOutputTokens != 32768 {
+				t.Fatalf("legacy runtime capabilities = %+v, found=%v", caps, ok)
+			}
+			modes := SpeedModesForModel("openai", name)
+			if len(modes) != 1 || modes[0].Level != "fast" {
+				t.Fatalf("legacy speed modes = %+v, want Fast for existing profiles", modes)
+			}
+			if containsString(ListRecommendedModels("openai"), name) {
+				t.Fatalf("%s must remain in capability lookup but not recommendations", name)
 			}
 		})
 	}

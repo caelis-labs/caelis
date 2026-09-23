@@ -550,10 +550,40 @@ func TestResolveCodexOAuthModelDefaultsUseSubscriptionCatalog(t *testing.T) {
 			}
 		})
 	}
-	for _, name := range []string{"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex-spark", "gpt-5.2"} {
-		if _, ok := codexOAuthModelDefaults(name); ok {
-			t.Fatalf("superseded model %q still has dedicated Codex defaults", name)
-		}
+}
+
+func TestCodexOAuthLegacyModelsRetainSubscriptionDefaults(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		name    string
+		context int
+		effort  string
+		levels  []string
+	}{
+		{"gpt-5.6-sol", 258400, "low", []string{"low", "medium", "high", "xhigh", "max", "ultra"}},
+		{"gpt-5.6-terra", 258400, "medium", []string{"low", "medium", "high", "xhigh", "max", "ultra"}},
+		{"gpt-5.6-luna", 258400, "medium", []string{"low", "medium", "high", "xhigh", "max"}},
+		{"gpt-5.5", 272000, "medium", []string{"low", "medium", "high", "xhigh"}},
+		{"gpt-5.4", 272000, "medium", []string{"low", "medium", "high", "xhigh"}},
+		{"gpt-5.4-mini", 272000, "medium", []string{"low", "medium", "high", "xhigh"}},
+		{"gpt-5.3-codex-spark", 128000, "high", []string{"low", "medium", "high", "xhigh"}},
+		{"gpt-5.2", 272000, "medium", []string{"low", "medium", "high", "xhigh"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			defaults, err := ResolveModelDefaultsForEndpoint("codex", "", tt.name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if defaults.ContextWindowTokens != tt.context || defaults.MaxOutputTokens != 32768 ||
+				defaults.DefaultReasoningEffort != tt.effort || defaults.ReasoningMode != modelcatalog.ReasoningModeEffort ||
+				!slices.Equal(defaults.ReasoningLevels, tt.levels) || defaults.ImageInput == nil || !*defaults.ImageInput {
+				t.Fatalf("legacy Codex defaults = %+v, want original subscription capabilities", defaults)
+			}
+			if slices.Contains(codexOAuthSelectableModels(), tt.name) {
+				t.Fatalf("legacy Codex model %q must not be recommended", tt.name)
+			}
+		})
 	}
 }
 

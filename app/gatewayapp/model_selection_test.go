@@ -72,7 +72,7 @@ func TestModelChoicesProjectConfirmedSessionSelection(t *testing.T) {
 
 func TestModelChoiceFastCapabilityRespectsEndpoint(t *testing.T) {
 	for _, baseURL := range []string{"", "https://api.openai.com/v1", "https://custom.invalid/v1"} {
-		cfg := ModelConfig{Provider: "openai", API: providers.APIOpenAI, Model: "gpt-6-sol", BaseURL: baseURL, ReasoningEffort: "medium"}
+		cfg := ModelConfig{Provider: "openai", API: providers.APIOpenAI, Model: "gpt-5.6-sol", BaseURL: baseURL, ReasoningEffort: "medium"}
 		choice := modelChoiceFromConfig(cfg)
 		if choice.FastSupported != modelconfig.SupportsSpeedMode(cfg, "fast") || choice.FastSupported != (baseURL != "https://custom.invalid/v1") {
 			t.Fatalf("endpoint %q fast = %v", baseURL, choice.FastSupported)
