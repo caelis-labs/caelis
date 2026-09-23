@@ -11,6 +11,44 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver"
 )
 
+func TestSessionListIncludesRecentCWDSpellings(t *testing.T) {
+	workspace, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	stack, err := NewLocalStack(Config{
+		StoreDir: t.TempDir(), WorkspaceKey: "workspace", WorkspaceCWD: workspace,
+		SkillDirs: []string{}, Sandbox: SandboxConfig{RequestedType: "host"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = stack.Close() })
+	client := newWorkspaceRuntimeHTTPClient(t, stack, "local-user")
+	createWorkspaceRuntimeTestSession(t, client, "create-old", "older-session", "workspace", workspace)
+	// The Store can contain non-canonical CWD spellings. The same directory
+	// filter used by /resume must include them before applying its page limit.
+	if _, err := stack.Sessions().StartSession(t.Context(), session.StartSessionRequest{
+		AppName: stack.AppName(), UserID: stack.UserID(),
+		Workspace: session.WorkspaceRef{
+			Key: "persisted-workspace", CWD: workspace + string(filepath.Separator) + ".",
+		},
+		PreferredSessionID: "recent-session",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	listed, err := client.ListSessions(t.Context(), appserver.ListSessionsRequest{CWD: workspace, Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed.Sessions) != 1 || listed.Sessions[0].SessionID != "recent-session" || listed.NextCursor == "" {
+		t.Fatalf("recent directory page = %#v, want recent-session followed by older-session", listed)
+	}
+	if _, loaded := stack.sessionRuntimes.loaded("recent-session"); loaded {
+		t.Fatal("listing activated recent-session")
+	}
+}
+
 func TestSessionListDoesNotReadColdHistoryOrActivateRuntime(t *testing.T) {
 	ctx := context.Background()
 	workspace, err := filepath.EvalSymlinks(t.TempDir())
