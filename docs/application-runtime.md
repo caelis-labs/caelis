@@ -346,9 +346,22 @@ fence or implicit Turn cancellation. Cancel canonical work when that behavior is
 required. Revocation is permanent, is allowed after expiry, and cannot be renewed.
 
 Create/prompt/archive permanent intent anchors outlive the shared command receipt
-retention. Repeating an uncertain ID does not dispatch again. Query native state
-and the same operation ID; do not invent a new ID as a retry. Application Sessions
-are not ordinary workspace resume candidates.
+retention. Known native results are recorded and remain readable under the original
+scope even if the connection expires or is revoked after admission. This completion
+does not restore mutation authority or relax late callback rejection.
+
+Archive persists the original committed CloseSession receipt before sealing the
+binding, with client-independent, five-second-bounded completion writes. If binding
+completion fails, querying the same operation (including after revocation) or
+repeating it under a live lease finishes the archive without native redispatch,
+including after Host restart. A committed archive response requires the binding to
+be sealed. An intent alone, an unknown receipt, or a closed Session without the
+original operation's committed receipt cannot prove that archive succeeded; a crash
+before that receipt is durable remains unknown.
+
+Repeating an uncertain ID does not dispatch again. Query native state and the same
+operation ID; do not invent a new ID as a retry. Application Sessions are not
+ordinary workspace resume candidates.
 
 ## Resources
 
