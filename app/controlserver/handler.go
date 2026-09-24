@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
@@ -53,9 +54,11 @@ type HandlerConfig struct {
 }
 
 type Server struct {
-	config HandlerConfig
-	mux    *http.ServeMux
-	policy *requestPolicy
+	authMu        sync.Mutex
+	authExchanges map[modelAuthKey]*modelAuthExchange
+	config        HandlerConfig
+	mux           *http.ServeMux
+	policy        *requestPolicy
 }
 
 // New constructs the authenticated Control HTTP handler.

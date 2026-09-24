@@ -7,7 +7,7 @@ import (
 )
 
 // LauncherChoice is the requested onboarding strategy for a local ACP
-// endpoint. New product catalogs declare only Installed or Command. The npx,
+// endpoint. New product catalogs declare Hosted, Installed or Command. The npx,
 // global, and managed values remain wire-readable for persisted preparations
 // created by older Caelis versions and must not be offered by new onboarding.
 type LauncherChoice string

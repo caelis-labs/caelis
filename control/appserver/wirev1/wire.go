@@ -224,6 +224,20 @@ func marshalWireValueUnchecked(value any) ([]byte, error) {
 		return marshalDisconnectCandidatesSnapshot(typed)
 	case controlagents.ACPPreparation:
 		return marshalACPPreparation(typed)
+	case appserver.ModelAuthenticationSnapshot:
+		fields, err := marshalObject(typed)
+		if err != nil {
+			return nil, err
+		}
+		fields["sequence"], _ = json.Marshal(strconv.FormatUint(typed.Sequence, 10))
+		if typed.Result != nil {
+			raw, err := marshalCommandResult(*typed.Result)
+			if err != nil {
+				return nil, err
+			}
+			fields["result"] = raw
+		}
+		return json.Marshal(fields)
 	case appserver.CommandResult:
 		return marshalCommandResult(typed)
 	case appserver.SessionState:

@@ -12,6 +12,7 @@ import (
 // command or slash dispatch endpoint.
 func (s *Server) focusedRoutes() {
 	s.subagentWorkspaceRoutes()
+	s.mux.HandleFunc("POST "+apiPrefix+"/configuration/operations/{operation_id}/auth-input", s.modelAuthenticationInput)
 	s.mux.HandleFunc("GET "+apiPrefix+"/presentation/capabilities", s.presentationCapabilities)
 	s.mux.HandleFunc("GET "+apiPrefix+"/sessions/{session_id}/presentation", s.presentationSnapshot)
 	s.mux.HandleFunc("POST "+apiPrefix+"/sessions/{session_id}/terminals/output", s.terminalOutput)
@@ -232,6 +233,10 @@ func (s *Server) configurationHandler(action string) http.HandlerFunc {
 		case "connect-model":
 			var req appserver.ConnectModelRequest
 			if decodeBody(w, r, &req) && applyHostWriteHeaders(w, r, &req.WriteBase) {
+				if strings.TrimSpace(r.Header.Get("Accept")) == "text/event-stream" {
+					s.connectModelStream(w, r, principal, req)
+					return
+				}
 				result, err := s.config.Services.Configuration.ConnectModel(r.Context(), principal, req)
 				writeCommandResult(w, result, err)
 			}
@@ -300,8 +305,7 @@ func (s *Server) agentHandler(action string) http.HandlerFunc {
 				result, err := s.config.Services.Agents.AgentStatus(r.Context(), principal, req)
 				writeJSONResult(w, result, err)
 			case "binding-status":
-				result, err := s.config.Services.Agents.AgentBindingStatus(r.Context(), principal, req)
-				writeJSONResult(w, result, err)
+				s.agentBindingStatus(w, r, principal, req)
 			}
 		case "handoff":
 			var req appserver.HandoffAgentRequest

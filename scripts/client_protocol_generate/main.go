@@ -104,8 +104,8 @@ func validateSpec(spec openAPISpec) error {
 	if spec.OpenAPI != "3.1.0" {
 		return fmt.Errorf("openapi version = %q, want 3.1.0", spec.OpenAPI)
 	}
-	if len(operationIDs(spec)) != 115 {
-		return fmt.Errorf("operation count = %d, want 115", len(operationIDs(spec)))
+	if len(operationIDs(spec)) != 116 {
+		return fmt.Errorf("operation count = %d, want 116", len(operationIDs(spec)))
 	}
 	required := []string{
 		"CreateSessionRequest", "CloseSessionRequest", "CompactSessionRequest", "PromptRequest", "SteerRequest", "CancelRequest",
@@ -113,6 +113,7 @@ func validateSpec(spec openAPISpec) error {
 		"UIPreferences", "SubagentInputRequest", "SubagentInputStatusRequest", "SubagentInputStatus", "SubagentInputStatuses", "TaskDescriptor", "TaskList", "TaskDirectorySnapshot", "TaskEventBatch", "StartParticipantRequest", "PromptParticipantRequest", "CancelParticipantRequest",
 		"SessionModeRequest", "SessionModelRequest", "SessionControllerModeRequest", "SessionPresentationModeRequest",
 		"SessionPresentationConfigRequest", "ConnectModelRequest", "UseModelRequest", "DeleteModelRequest", "SandboxRequest", "WorkspaceTrustRequest",
+		"ModelAuthenticationSnapshot", "ModelAuthenticationInput",
 		"AgentRequest", "HandoffAgentRequest", "ConnectACPRequest", "DisconnectACPRequest", "DisconnectCandidatesSnapshot",
 		"BindAgentBindingRequest", "ResetAgentBindingRequest", "CreateAgentRoleRequest", "DeleteAgentRoleRequest", "AgentBindingSetRequest",
 		"CompletionRequest", "PluginRequest", "AddMarketplaceRequest", "UpdateMarketplaceRequest", "RemoveMarketplaceRequest",

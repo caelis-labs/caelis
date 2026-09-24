@@ -6,6 +6,52 @@
   },
   "servers": [{"url": "/api/control/v1"}],
   "paths": {
+    "/configuration/operations/{operation_id}/auth-input": {
+      "post": {
+        "operationId": "submitModelAuthenticationInput",
+        "description": "Respond to one active authentication challenge from a streamed ConnectModel call. Host authority and exact originating principal required. Secret input is consumed once and never retained. Loopback completion or cancellation invalidates the challenge.",
+        "parameters": [
+          {
+            "name": "operation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelAuthenticationInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Input delivered to the active authentication request; this does not imply authentication or configuration success."
+          },
+          "409": {
+            "description": "Challenge no longer active."
+          },
+          "403": {
+            "description": "Host authority required."
+          },
+          "400": {
+            "$ref": "#/components/responses/CommandBadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
+    },
     "/application/workers": {
       "post": {
         "operationId": "createWorker",
@@ -708,6 +754,8 @@
     "/agents/binding-status": {
       "post": {
         "operationId": "hostGetAgentBindingStatus",
+        "description": "Returns the original v1 response shape by default. Request include=eligible_profile_ids to receive each handle's eligible model IDs. Hosts without this feature may ignore the query; absent eligibility must not be inferred locally.",
+        "parameters": [{"name":"include","in":"query","required":false,"schema":{"type":"string","enum":["eligible_profile_ids"]},"description":"Explicitly opts into per-handle eligible_profile_ids. Without this selection the field is omitted for strict v1 clients."}],
         "requestBody": {
           "content": {
             "application/json": {
@@ -1244,8 +1292,21 @@
       "post": {
         "operationId": "hostConnectModel",
         "parameters": [
-          {"$ref": "#/components/parameters/IdempotencyKey"},
-          {"$ref": "#/components/parameters/IfMatch"}
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/IfMatch"
+          },
+          {
+            "in": "header",
+            "name": "Accept",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "text/event-stream opts into model_authentication SSE snapshots, including authorization progress, a challenge_id for input, and a terminal CommandResult. Requires model-auth-stream-v1. The stream owns only this interactive request; disconnect cancels authentication and the durable command ledger retains the outcome."
+          }
         ],
         "requestBody": {
           "content": {
@@ -1258,8 +1319,24 @@
           "required": true
         },
         "responses": {
-          "200": {"$ref": "#/components/responses/CommandCommitted"},
-          "202": {"$ref": "#/components/responses/CommandAccepted"},
+          "200": {
+            "description": "JSON command result, or interactive model_authentication SSE snapshots. Opening a stream does not imply success; its terminal result owns the command outcome.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandResult"
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelAuthenticationSnapshot"
+                }
+              }
+            }
+          },
+          "202": {
+            "$ref": "#/components/responses/CommandAccepted"
+          },
           "400": {
             "$ref": "#/components/responses/CommandBadRequest"
           },
@@ -1926,6 +2003,61 @@
       "ServiceUnavailable": {"description": "Host is shutting down or temporarily unavailable", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}}
     },
     "schemas": {
+      "ModelAuthenticationSnapshot": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Transient initiating-client authentication state. Tokens and submitted input are never included. Result is the existing ConnectModel command receipt. A dropped stream is not proof of failure and never authorizes a fresh mutation.",
+        "properties": {
+          "operation_id": {
+            "type": "string"
+          },
+          "sequence": {
+            "$ref": "#/components/schemas/Uint64Decimal"
+          },
+          "phase": {
+            "type": "string"
+          },
+          "verification_url": {
+            "type": "string"
+          },
+          "user_code": {
+            "type": "string"
+          },
+          "challenge_id": {
+            "type": "string"
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "result": {
+            "$ref": "#/components/schemas/CommandResult"
+          }
+        },
+        "required": [
+          "operation_id",
+          "sequence",
+          "phase"
+        ]
+      },
+      "ModelAuthenticationInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Write-only input to one live principal-bound challenge; never persisted in command history or echoed in errors. Input is limited to 16384 UTF-8 bytes. A stale or consumed challenge returns 409.",
+        "properties": {
+          "challenge_id": {
+            "type": "string"
+          },
+          "input": {
+            "type": "string",
+            "maxLength": 16384,
+            "writeOnly": true
+          }
+        },
+        "required": [
+          "challenge_id",
+          "input"
+        ]
+      },
       "CreateWorkerRequest": {
         "allOf": [
           {
@@ -2059,7 +2191,7 @@
       },
       "AgentRequest": {"type":"object","properties":{"session_id":{"type":"string"},"surface":{"type":"string"},"limit":{"type":"integer"}},"additionalProperties":false},
       "HandoffAgentRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["target"],"properties":{"target":{"type":"string"}}}],"unevaluatedProperties":false},
-      "ACPLauncherChoice": {"type":"string","enum":["npx","global","managed","installed","command"]},
+      "ACPLauncherChoice": {"type":"string","enum":["hosted","npx","global","managed","installed","command"]},
       "ACPLaunchKind": {"type":"string","enum":["executable","package_exec","managed"]},
       "ACPAuthenticationType": {"type":"string","enum":["agent","terminal"]},
       "ACPAuthentication": {"type":"object","properties":{"method_id":{"type":"string"},"type":{"$ref":"#/components/schemas/ACPAuthenticationType"}},"additionalProperties":false},
@@ -2088,7 +2220,7 @@
       "ModelEffortChoice": {"type":"object","properties":{"canonical":{"type":"string"},"wire_value":{"type":"string"}},"required":[],"additionalProperties":false},
       "ModelEffortCapability": {"type":"object","properties":{"default_effort":{"type":"string"},"choices":{"type":"array","items":{"$ref":"#/components/schemas/ModelEffortChoice"}},"acp_config_id":{"type":"string"}},"required":[],"additionalProperties":false},
       "ModelProfile": {"type":"object","properties":{"judgment":{"type":"boolean"},"id":{"type":"string"},"display_name":{"type":"string"},"backend":{"$ref":"#/components/schemas/JSONObject"},"effort":{"$ref":"#/components/schemas/ModelEffortCapability"},"speed":{"$ref":"#/components/schemas/ModelSpeedCapability"}},"required":["backend","effort"],"additionalProperties":false},
-      "AgentHandleStatus": {"type":"object","properties":{"Definition":{"$ref":"#/components/schemas/JSONObject"},"Binding":{"$ref":"#/components/schemas/AgentBinding"},"Profile":{"$ref":"#/components/schemas/ModelProfile"}},"required":["Definition","Binding","Profile"],"additionalProperties":false},
+      "AgentHandleStatus": {"type":"object","properties":{"Definition":{"$ref":"#/components/schemas/JSONObject"},"Binding":{"$ref":"#/components/schemas/AgentBinding"},"Profile":{"$ref":"#/components/schemas/ModelProfile"},"eligible_profile_ids":{"type":"array","items":{"type":"string"},"description":"Present only when include=eligible_profile_ids is requested. Current Targets allowed for this handle by Host binding rules; an empty array means no eligible target. Mutations still validate the current configuration."}},"required":["Definition","Binding","Profile"],"additionalProperties":false},
       "AgentBindingSetStatus": {"type":"object","properties":{"Name":{"type":"string"},"Bindings":{"type":"array","items":{"$ref":"#/components/schemas/AgentBinding"}},"Active":{"type":"boolean"},"Available":{"type":"boolean"},"Problem":{"type":"string"}},"required":["Name","Bindings","Active","Available","Problem"],"additionalProperties":false},
       "BindAgentBindingRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["binding"],"properties":{"binding":{"$ref":"#/components/schemas/AgentBinding"}}}],"unevaluatedProperties":false},
       "ResetAgentBindingRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["handle"],"properties":{"handle":{"type":"string"}}}],"unevaluatedProperties":false},
