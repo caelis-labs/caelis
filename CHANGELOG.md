@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.62.0](https://github.com/caelis-labs/caelis/compare/v0.61.0...v0.62.0) (2026-09-24)
+
+
+### Features
+
+* expose interactive Host model settings to clients ([#77](https://github.com/caelis-labs/caelis/issues/77)) ([395fe10](https://github.com/caelis-labs/caelis/commit/395fe102c53e0740b59f8138d81aac684c3d040f))
+* share native Worker sessions across Bot and TUI ([#75](https://github.com/caelis-labs/caelis/issues/75)) ([276159e](https://github.com/caelis-labs/caelis/commit/276159e01ccfb588a65153db9195f570d10d0273))
+
 ## [0.61.0](https://github.com/caelis-labs/caelis/compare/v0.60.1...v0.61.0) (2026-09-23)
 
 
