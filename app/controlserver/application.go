@@ -55,17 +55,23 @@ func (s *Server) applicationPrincipal(r *http.Request) (appserver.Principal, boo
 		permitted := false
 		if r.Method == http.MethodGet && len(parts) == 3 {
 			switch parts[2] {
-			case "state", "reconnect", "events", "subscribe":
+			case "state", "reconnect", "events", "subscribe", "tasks":
 				permitted = true
 			}
 		}
-		if r.Method == http.MethodPost && len(parts) == 3 && parts[2] == "cancel" {
+		if r.Method == http.MethodGet && parts[2] == "tasks" {
+			permitted = len(parts) == 3 || len(parts) == 4 && parts[3] == "watch" || len(parts) == 5 && (parts[4] == "events" || parts[4] == "subscribe")
+		}
+		if r.Method == http.MethodPost && len(parts) == 3 && (parts[2] == "cancel" || parts[2] == "steer" || parts[2] == "prompt") {
 			permitted = true
 		}
 		if r.Method == http.MethodPost && len(parts) == 5 && parts[2] == "approvals" && parts[4] == "resolve" {
 			permitted = true
 		}
 		if permitted {
+			if _, workerErr := service.Store().Worker(r.Context(), scope, parts[1]); workerErr == nil {
+				return p, true, nil
+			}
 			_, err = service.Store().GetBinding(r.Context(), scope, parts[1])
 			return p, true, err
 		}
@@ -80,6 +86,7 @@ func (s *Server) applicationRoutes() {
 	service := s.config.Services.Applications
 	store := service.Store()
 	s.applicationConfigurationRoutes()
+	s.workerRoutes()
 	s.mux.HandleFunc("POST "+apiPrefix+"/applications/register", func(w http.ResponseWriter, r *http.Request) {
 		p, ok := s.requirePrincipal(w, r)
 		if !ok {

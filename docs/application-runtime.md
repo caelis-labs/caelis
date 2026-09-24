@@ -1,5 +1,10 @@
 # Application Runtime
 
+For Bot work that needs the user's ordinary tools, environment and concurrent
+TUI access, use [shared native Worker Sessions](shared-workers.md). The execution
+profiles below remain isolated Application Sessions; they do not become native
+Workers merely because their caller calls them a task.
+
 Caelis applications own their product identity, notes, Memory, business tools and
 scheduling. Control owns canonical Sessions, Turns, tool history, native approvals,
 sandbox policy and recovery. The SDK has no application or Bot product dependency.

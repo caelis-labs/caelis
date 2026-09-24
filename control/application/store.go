@@ -88,6 +88,10 @@ func Open(path string) (*Store, error) {
 		return fail(err)
 	}
 	_, err = tx.Exec(`
+ CREATE TABLE IF NOT EXISTS app_workers (
+  session TEXT PRIMARY KEY, principal TEXT NOT NULL, application TEXT NOT NULL,
+  connection TEXT NOT NULL
+ );
  CREATE TABLE IF NOT EXISTS app_connections (
   principal TEXT NOT NULL, application TEXT NOT NULL, connection TEXT PRIMARY KEY,
   operation TEXT NOT NULL, digest TEXT NOT NULL, credential_hash TEXT NOT NULL UNIQUE,

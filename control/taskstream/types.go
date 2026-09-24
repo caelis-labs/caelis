@@ -10,8 +10,10 @@ import (
 // Principal is trusted Control-host context. Transport adapters construct it
 // from their authenticated principal; it is never decoded from a request body.
 type Principal struct {
-	ID    string
-	Roles []string
+	ID            string
+	Roles         []string
+	ApplicationID string
+	ConnectionID  string
 }
 
 type SourceClass string

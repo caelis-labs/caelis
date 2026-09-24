@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"strings"
 	"time"
 	"unicode"
@@ -20,6 +21,8 @@ type CommandServiceConfig struct {
 	Authorizer Authorizer
 	Operations OperationStore
 	Backend    CommandBackend
+	// Diagnostics receives classification and correlation IDs only, never bodies or errors.
+	Diagnostics *slog.Logger
 }
 
 type CommandService struct{ config CommandServiceConfig }
@@ -75,7 +78,22 @@ func (s *CommandService) Handoff(ctx context.Context, principal Principal, req H
 	return s.execute(ctx, principal, ActionControllerHandoff, req.WriteBase, string(req.Kind)+":"+req.Agent, req)
 }
 
-func (s *CommandService) execute(ctx context.Context, principal Principal, action Action, base WriteBase, target string, request any) (CommandResult, error) {
+func (s *CommandService) execute(ctx context.Context, principal Principal, action Action, base WriteBase, target string, request any) (out CommandResult, returnedErr error) {
+	defer func() {
+		if s.config.Diagnostics != nil && (returnedErr != nil || out.Outcome == OutcomeUnknown || out.Outcome == OutcomeConflicted || out.Outcome == OutcomeRejected) {
+			turn := out.Target.TurnID
+			switch req := request.(type) {
+			case SteerRequest:
+				turn = req.Target.TurnID
+			case CancelRequest:
+				turn = req.Target.TurnID
+			case ResolveApprovalRequest:
+				turn = req.Target.TurnID
+			}
+			s.config.Diagnostics.WarnContext(ctx, "Control command failed", "action", action, "session_id", out.SessionID,
+				"turn_id", turn, "operation_id", base.OperationID, "outcome", out.Outcome, "code", errorcode.CodeOf(returnedErr))
+		}
+	}()
 	operationID := strings.TrimSpace(base.OperationID)
 	sessionID := strings.TrimSpace(base.SessionID)
 	if operationID == "" {
@@ -282,7 +300,12 @@ func commandFailure(operationID, sessionID string, outcome Outcome, detail strin
 
 func validateCommandRequest(action Action, request any) error {
 	switch typed := request.(type) {
+	case CreateWorkerRequest:
+		return nil // Validated by the application admission service.
 	case CreateSessionRequest:
+		if strings.HasPrefix(typed.PreferredSessionID, "worker-") {
+			return errors.New("controlclient: worker Session IDs are allocated by the Host")
+		}
 		return nil
 	case CloseSessionRequest:
 		return requireSession(typed.SessionID)

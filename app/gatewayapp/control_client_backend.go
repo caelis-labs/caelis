@@ -46,6 +46,9 @@ func (s *controlCommandBackend) ExecuteControlCommand(ctx context.Context, princ
 	if action == appserver.ActionApplicationCreate {
 		return s.createApplicationSession(ctx, principal, request.(appserver.CreateApplicationSessionRequest))
 	}
+	if action == appserver.ActionWorkerCreate {
+		return s.createWorkerSession(ctx, principal, request.(appserver.CreateWorkerRequest))
+	}
 	if action == appserver.ActionApplicationPrompt {
 		var err error
 		ctx, request, err = s.admitApplicationPrompt(ctx, principal, request.(appserver.ApplicationPromptRequest))
@@ -370,7 +373,7 @@ func (s *runtimeComposition) executeControlCommand(ctx context.Context, principa
 		if err != nil {
 			return sessionCommandResult(active), classifyControlBackendError(err)
 		}
-		observer, releaseTurn := s.controlTurnObserver(active.SessionRef)
+		observer, releaseTurn := s.controlTurnObserver(active.SessionRef, req.OperationID)
 		turn := kernelimpl.BeginTurnRequest{
 			SessionRef: active.SessionRef, RuntimeContext: s.controlRuntimeContext(ctx, active),
 			Input: req.Input, DisplayInput: req.DisplayInput, ContentParts: req.ContentParts,
@@ -402,9 +405,14 @@ func (s *runtimeComposition) executeControlCommand(ctx context.Context, principa
 			TurnID:     req.Target.TurnID,
 			Kind:       kernelimpl.SubmissionKindConversation,
 			Text:       req.Input, DisplayText: req.DisplayInput, ContentParts: req.ContentParts,
-			Metadata: map[string]any{"operation_id": req.OperationID},
+			Metadata: map[string]any{"operation_id": req.OperationID, "steering_operation_id": req.OperationID},
 		})
-		return sessionCommandResult(active), classifyControlSteerError(err)
+		out := sessionCommandResult(active)
+		out.Target = req.Target
+		if err == nil {
+			out.InputStatus = "accepted"
+		}
+		return out, classifyControlSteerError(err)
 	case appserver.CompactSessionRequest:
 		active, err := s.checkControlCommandCAS(ctx, req.WriteBase)
 		if err != nil {
@@ -484,7 +492,7 @@ func (s *runtimeComposition) executeControlCommand(ctx context.Context, principa
 			Source:         req.Source,
 			DetachSource:   req.DetachSource,
 		}
-		observer, releaseTurn := s.controlTurnObserver(active.SessionRef)
+		observer, releaseTurn := s.controlTurnObserver(active.SessionRef, req.OperationID)
 		startReq.Observer = observer
 		if req.Transient {
 			startReq.Lifecycle = kernelimpl.ParticipantLifecycleTransient
@@ -502,7 +510,7 @@ func (s *runtimeComposition) executeControlCommand(ctx context.Context, principa
 		if err != nil {
 			return sessionCommandResult(active), classifyControlBackendError(err)
 		}
-		observer, releaseTurn := s.controlTurnObserver(active.SessionRef)
+		observer, releaseTurn := s.controlTurnObserver(active.SessionRef, req.OperationID)
 		result, err := gw.PromptParticipant(ctx, kernelimpl.PromptParticipantRequest{
 			SessionRef:     active.SessionRef,
 			RuntimeContext: s.controlRuntimeContext(ctx, active),

@@ -17,6 +17,7 @@ type taskStreamAuthorizer struct {
 func (a taskStreamAuthorizer) AuthorizeTaskStream(ctx context.Context, principal controltaskstream.Principal, sessionID string) error {
 	return a.inner.Authorize(ctx, appserver.Principal{
 		ID: principal.ID, Roles: append([]string(nil), principal.Roles...),
+		ApplicationID: principal.ApplicationID, ConnectionID: principal.ConnectionID,
 	}, appserver.ActionSessionInspect, sessionID)
 }
 

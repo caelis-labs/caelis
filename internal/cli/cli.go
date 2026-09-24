@@ -139,6 +139,10 @@ func runWithProductClientOpener(
 		}
 	}
 	acpSubcommand := len(args) > 0 && strings.EqualFold(strings.TrimSpace(args[0]), "acp")
+	attachSubcommand := len(args) > 0 && strings.EqualFold(strings.TrimSpace(args[0]), "attach")
+	if attachSubcommand {
+		args = args[1:]
+	}
 	if acpSubcommand {
 		args = args[1:]
 	}
@@ -206,6 +210,12 @@ func runWithProductClientOpener(
 			return nil
 		}
 		return err
+	}
+	if attachSubcommand {
+		if strings.TrimSpace(*controlURL) == "" || strings.TrimSpace(*sessionID) == "" || *embeddedHost || strings.TrimSpace(*prompt) != "" || fs.NArg() != 0 || *dangerouslySkipPermissions {
+			return errors.New("cli: attach requires --control-url and --session; it accepts no prompt, --embedded, or permission override")
+		}
+		*forceInteractive = true
 	}
 	workspaceKey, workspaceCWD, err := workspaceAddressFromCWD(cwd)
 	if err != nil {
@@ -443,6 +453,16 @@ func runWithProductClientOpener(
 		}
 		headlessResultWritten = err == nil
 		return err
+	}
+	if attachSubcommand {
+		state, err := product.Clients.Sessions.InspectSession(ctx, appserver.StateRequest{SessionID: strings.TrimSpace(*sessionID)})
+		if err != nil {
+			return err
+		}
+		if state.SessionID != strings.TrimSpace(*sessionID) || state.CWD == "" {
+			return errors.New("cli: attach returned a mismatched Session or missing workspace")
+		}
+		product.Workspace.WorkspaceKey, product.Workspace.WorkspaceCWD = state.WorkspaceKey, state.CWD
 	}
 	return runInteractive(ctx, product, preferredInteractiveSessionID(*sessionID), renderModelText(cfg), tuiOptions{
 		NoAnimation:                *noAnimation,

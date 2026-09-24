@@ -276,6 +276,9 @@ type HandoffRequest struct {
 
 // CommandResult is the typed recovery result persisted by the operation ledger.
 type CommandResult struct {
+	// InputStatus is accepted when steering is admitted to the exact Turn.
+	// Application at a safe point is reported by a canonical feed input receipt.
+	InputStatus   string           `json:"input_status,omitempty"`
 	OperationID   string           `json:"operation_id"`
 	Outcome       Outcome          `json:"outcome"`
 	SessionID     string           `json:"session_id,omitempty"`
