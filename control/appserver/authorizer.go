@@ -33,7 +33,7 @@ func (a SessionAuthorizer) Authorize(ctx context.Context, p Principal, action Ac
 		return ErrUnauthorized
 	}
 	scoped := p.ApplicationID != "" || p.ConnectionID != ""
-	if action == ActionApplicationCreate {
+	if action == ActionApplicationCreate || action == ActionWorkerCreate {
 		scope, err := ApplicationScope(p)
 		if err != nil || a.Applications == nil {
 			return ErrUnauthorized
@@ -78,21 +78,38 @@ func (a SessionAuthorizer) Authorize(ctx context.Context, p Principal, action Ac
 	}
 	if scoped {
 		scope, scopeErr := ApplicationScope(p)
-		if scopeErr != nil || !bound || binding.Scope != scope || active.UserID != scope.PrincipalID {
-			return ErrUnauthorized
-		}
-		switch action {
-		case ActionSessionInspect:
-			return nil
-		case ActionApplicationPrompt, ActionCancel, ActionApprovalResolve, ActionSessionClose:
-			if err = a.Applications.CheckActive(ctx, scope); err != nil {
-				return err
+		if scopeErr == nil && !bound && a.Applications != nil {
+			if _, err := a.Applications.Worker(ctx, scope, active.SessionID); err != nil {
+				return ErrUnauthorized
 			}
-		default:
-			return ErrUnauthorized
-		}
-		if binding.Archived && action != ActionSessionClose {
-			return ErrSessionClosed
+			switch action {
+			case ActionSessionInspect:
+				return nil
+			case ActionPrompt, ActionSteer, ActionCancel, ActionApprovalResolve:
+				if err := a.Applications.CheckActive(ctx, scope); err != nil {
+					return err
+				}
+			default:
+				return ErrUnauthorized
+			}
+			// Continue through the canonical Session closure check.
+		} else {
+			if scopeErr != nil || !bound || binding.Scope != scope || active.UserID != scope.PrincipalID {
+				return ErrUnauthorized
+			}
+			switch action {
+			case ActionSessionInspect:
+				return nil
+			case ActionApplicationPrompt, ActionSteer, ActionCancel, ActionApprovalResolve, ActionSessionClose:
+				if err = a.Applications.CheckActive(ctx, scope); err != nil {
+					return err
+				}
+			default:
+				return ErrUnauthorized
+			}
+			if binding.Archived && action != ActionSessionClose {
+				return ErrSessionClosed
+			}
 		}
 	} else if bound {
 		if !p.HasRole(RoleSystemSessionRuntime) || action != ActionSessionInspect {

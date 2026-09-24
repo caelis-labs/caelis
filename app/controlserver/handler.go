@@ -413,7 +413,13 @@ func (s *Server) prompt(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, &req) || !applyWriteHeaders(w, r, &req.WriteBase, r.PathValue("session_id")) {
 		return
 	}
-	result, err := s.config.Services.Sessions.Prompt(r.Context(), principal, req)
+	var result appserver.CommandResult
+	var err error
+	if principal.ApplicationID != "" {
+		result, err = s.config.Services.Applications.WorkerPrompt(r.Context(), principal, req)
+	} else {
+		result, err = s.config.Services.Sessions.Prompt(r.Context(), principal, req)
+	}
 	writeCommandResult(w, result, err)
 }
 func (s *Server) steer(w http.ResponseWriter, r *http.Request) {
@@ -425,7 +431,13 @@ func (s *Server) steer(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, &req) || !applyWriteHeaders(w, r, &req.WriteBase, r.PathValue("session_id")) {
 		return
 	}
-	result, err := s.config.Services.Sessions.Steer(r.Context(), principal, req)
+	var result appserver.CommandResult
+	var err error
+	if principal.ApplicationID != "" {
+		result, err = s.config.Services.Applications.Steer(r.Context(), principal, req)
+	} else {
+		result, err = s.config.Services.Sessions.Steer(r.Context(), principal, req)
+	}
 	writeCommandResult(w, result, err)
 }
 func (s *Server) cancel(w http.ResponseWriter, r *http.Request) {

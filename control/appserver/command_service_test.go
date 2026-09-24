@@ -1,8 +1,10 @@
 package appserver
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -14,6 +16,34 @@ import (
 	"github.com/caelis-labs/caelis/control/application"
 	"github.com/caelis-labs/caelis/control/workspacetrust"
 )
+
+func TestCommandDiagnosticsCorrelateWithoutPrivateContent(t *testing.T) {
+	var log bytes.Buffer
+	s, err := NewCommandService(CommandServiceConfig{
+		Authorizer: allowAuthorizer{}, Operations: NewMemoryOperationStore(),
+		Backend:     &recordingCommandBackend{err: errors.New("PRIVATE_ERROR_SENTINEL")},
+		Diagnostics: slog.New(slog.NewJSONHandler(&log, nil)),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.Steer(t.Context(), Principal{ID: "owner"}, SteerRequest{
+		WriteBase: WriteBase{SessionID: "session-diagnostic", OperationID: "operation-diagnostic"},
+		Target:    TurnTarget{HandleID: "handle", RunID: "run", TurnID: "turn-diagnostic"},
+		Input:     "PRIVATE_INPUT_SENTINEL",
+	})
+	if err == nil {
+		t.Fatal("expected backend failure")
+	}
+	for _, want := range []string{"session-diagnostic", "operation-diagnostic", "turn-diagnostic", `"outcome":"unknown"`, `"code":`} {
+		if !strings.Contains(log.String(), want) {
+			t.Fatalf("missing correlation %s: %s", want, log.String())
+		}
+	}
+	if strings.Contains(log.String(), "PRIVATE_") {
+		t.Fatal("diagnostics exposed private input or backend error")
+	}
+}
 
 func TestEveryWriteCommandAuthorizationIdempotencyCASAndUnknownOutcome(t *testing.T) {
 	revision := uint64(4)

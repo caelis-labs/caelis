@@ -122,6 +122,8 @@ func DecodeRequest(raw json.RawMessage, target any) error {
 
 func marshalWireValueUnchecked(value any) ([]byte, error) {
 	switch typed := value.(type) {
+	case appserver.CreateWorkerRequest:
+		return marshalWriteRequest(typed, typed.ExpectedRevision)
 	case appserver.CreateSessionRequest:
 		return marshalWriteRequest(typed, typed.ExpectedRevision)
 	case appserver.CloseSessionRequest:

@@ -39,6 +39,7 @@ func TestProductionRequestAndResponseJSONConformsToOpenAPI(t *testing.T) {
 		"CreateSessionRequest":   appserver.CreateSessionRequest{WriteBase: base, PreferredSessionID: "session-1", WorkspaceKey: "workspace-1", CWD: "/tmp/workspace", Title: "Session", Metadata: map[string]any{"source": "test"}},
 		"CloseSessionRequest":    appserver.CloseSessionRequest{WriteBase: base},
 		"PromptRequest":          appserver.PromptRequest{WriteBase: base, Input: "hello", DisplayInput: "hello", ContentParts: contentParts},
+		"CreateWorkerRequest":    appserver.CreateWorkerRequest{WriteBase: base, CWD: "/workspace"},
 		"SteerRequest":           appserver.SteerRequest{WriteBase: base, Target: target, ContentParts: contentParts},
 		"CancelRequest":          appserver.CancelRequest{WriteBase: base, Target: target, Reason: "stop"},
 		"ResolveApprovalRequest": appserver.ResolveApprovalRequest{WriteBase: base, Target: target, ApprovalRequestID: "approval-1", Outcome: "selected", OptionID: string(acpsdk.PermissionOptionKindAllowOnce), Approved: true},

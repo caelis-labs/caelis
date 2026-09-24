@@ -36,6 +36,16 @@ func (c *Client) ListApplicationSessions(ctx context.Context) ([]application.Bin
 func (c *Client) CreateApplicationSession(ctx context.Context, req appserver.CreateApplicationSessionRequest) (appserver.CommandResult, error) {
 	return c.doCommand(ctx, http.MethodPost, "/application/sessions", req.WriteBase, req)
 }
+
+// CreateWorker creates a native Session shared with the local user, scoped to this application.
+func (c *Client) CreateWorker(ctx context.Context, req appserver.CreateWorkerRequest) (appserver.CommandResult, error) {
+	return c.doCommand(ctx, http.MethodPost, "/application/workers", req.WriteBase, req)
+}
+
+// Workers reads this application's durable native Session grants.
+func (c *Client) Workers(ctx context.Context) ([]application.Worker, error) {
+	return doFocusedJSON[[]application.Worker](ctx, c, http.MethodGet, "/application/workers", nil)
+}
 func (c *Client) ApplicationSession(ctx context.Context, id string) (application.Binding, error) {
 	return doFocusedJSON[application.Binding](ctx, c, http.MethodGet, applicationSessionPath(id), nil)
 }

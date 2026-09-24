@@ -189,15 +189,19 @@ func UsageEnvelopeReplacesContext(env Envelope) bool {
 }
 
 type Envelope struct {
-	Kind         Kind          `json:"kind"`
-	Cursor       string        `json:"cursor,omitempty"`
-	EventID      string        `json:"event_id,omitempty"`
-	ProjectionID string        `json:"projection_id,omitempty"`
-	Position     *FeedPosition `json:"position,omitempty"`
-	SessionID    string        `json:"session_id,omitempty"`
-	HandleID     string        `json:"handle_id,omitempty"`
-	RunID        string        `json:"run_id,omitempty"`
-	TurnID       string        `json:"turn_id,omitempty"`
+	// InputOperationID correlates a canonical safe-point input with its command.
+	// InputStatus=applied proves incorporation into the current Turn's context.
+	InputOperationID string        `json:"input_operation_id,omitempty"`
+	InputStatus      string        `json:"input_status,omitempty"`
+	Kind             Kind          `json:"kind"`
+	Cursor           string        `json:"cursor,omitempty"`
+	EventID          string        `json:"event_id,omitempty"`
+	ProjectionID     string        `json:"projection_id,omitempty"`
+	Position         *FeedPosition `json:"position,omitempty"`
+	SessionID        string        `json:"session_id,omitempty"`
+	HandleID         string        `json:"handle_id,omitempty"`
+	RunID            string        `json:"run_id,omitempty"`
+	TurnID           string        `json:"turn_id,omitempty"`
 	// ActivityID identifies the Control-owned execution activity represented by
 	// a Task-stream Envelope. It is empty on ordinary Session feed Envelopes.
 	ActivityID string    `json:"activity_id,omitempty"`

@@ -74,7 +74,7 @@ func TestApplicationAuthorizerUsesDurableScopeNotMetadata(t *testing.T) {
 		{"admin-not-app", Principal{ID: "owner", Roles: []string{"admin"}}, ActionPrompt, "owned", false},
 		{"ordinary-retained", Principal{ID: "owner"}, ActionPrompt, "ordinary", true},
 		{"internal-observer", Principal{ID: "owner", Roles: []string{RoleSystemSessionRuntime}}, ActionSessionInspect, "owned", true},
-		{"participant-escape", a, ActionParticipantStart, "owned", false}, {"steer-unsupported", a, ActionSteer, "owned", false},
+		{"participant-escape", a, ActionParticipantStart, "owned", false}, {"own-steer", a, ActionSteer, "owned", true},
 		{"retired-mode", Principal{ID: "owner"}, ActionPrompt, "retired", false},
 	}
 	for _, test := range tests {

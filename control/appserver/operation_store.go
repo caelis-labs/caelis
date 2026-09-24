@@ -38,6 +38,8 @@ type OperationRecord struct {
 
 type OperationStore interface {
 	AcquireExecution(context.Context, OperationIntent) (OperationExecutionLease, error)
+	// Lookup reads only an existing, unexpired exact intent; it never admits work.
+	Lookup(context.Context, OperationIntent) (OperationRecord, bool, error)
 	Begin(context.Context, OperationIntent) (OperationRecord, bool, error)
 	Complete(context.Context, OperationIntent, CommandResult) (OperationRecord, error)
 }
@@ -161,6 +163,31 @@ func NewMemoryOperationStoreWithConfig(config OperationRetentionConfig) (*Memory
 func (s *MemoryOperationStore) AcquireExecution(ctx context.Context, intent OperationIntent) (OperationExecutionLease, error) {
 	key := fmt.Sprintf("memory:%p:%s", s, operationKey(intent.PrincipalID, intent.OperationID))
 	return acquireOperationExecutionGate(ctx, key)
+}
+
+// Lookup observes an exact retained operation without admitting or refreshing it.
+func (s *MemoryOperationStore) Lookup(ctx context.Context, intent OperationIntent) (OperationRecord, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := contextError(ctx); err != nil {
+		return OperationRecord{}, false, err
+	}
+	record, found := s.records[operationKey(intent.PrincipalID, intent.OperationID)]
+	if !found {
+		return OperationRecord{}, false, nil
+	}
+	return lookupOperationRecord(record, intent, operationStoreNow(s.now), s.retention.TerminalRetention)
+}
+
+func lookupOperationRecord(record OperationRecord, intent OperationIntent, now time.Time, retention time.Duration) (OperationRecord, bool, error) {
+	disposition, _, err := classifyOperationRecord(record, now, retention)
+	if err != nil || disposition == operationRecordExpiredTerminal {
+		return OperationRecord{}, false, err
+	}
+	if !sameOperationIntent(record.Intent, intent) {
+		return OperationRecord{}, false, ErrOperationConflict
+	}
+	return cloneOperationRecord(record), true, nil
 }
 
 func (s *MemoryOperationStore) Begin(ctx context.Context, intent OperationIntent) (OperationRecord, bool, error) {

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"strings"
 	"time"
 	"unicode"
@@ -20,6 +21,8 @@ type CommandServiceConfig struct {
 	Authorizer Authorizer
 	Operations OperationStore
 	Backend    CommandBackend
+	// Diagnostics receives classification and correlation IDs only, never bodies or errors.
+	Diagnostics *slog.Logger
 }
 
 type CommandService struct{ config CommandServiceConfig }
@@ -75,7 +78,22 @@ func (s *CommandService) Handoff(ctx context.Context, principal Principal, req H
 	return s.execute(ctx, principal, ActionControllerHandoff, req.WriteBase, string(req.Kind)+":"+req.Agent, req)
 }
 
-func (s *CommandService) execute(ctx context.Context, principal Principal, action Action, base WriteBase, target string, request any) (CommandResult, error) {
+func (s *CommandService) execute(ctx context.Context, principal Principal, action Action, base WriteBase, target string, request any) (out CommandResult, returnedErr error) {
+	defer func() {
+		if s.config.Diagnostics != nil && (returnedErr != nil || out.Outcome == OutcomeUnknown || out.Outcome == OutcomeConflicted || out.Outcome == OutcomeRejected) {
+			turn := out.Target.TurnID
+			switch req := request.(type) {
+			case SteerRequest:
+				turn = req.Target.TurnID
+			case CancelRequest:
+				turn = req.Target.TurnID
+			case ResolveApprovalRequest:
+				turn = req.Target.TurnID
+			}
+			s.config.Diagnostics.WarnContext(ctx, "Control command failed", "action", action, "session_id", out.SessionID,
+				"turn_id", turn, "operation_id", base.OperationID, "outcome", out.Outcome, "code", errorcode.CodeOf(returnedErr))
+		}
+	}()
 	operationID := strings.TrimSpace(base.OperationID)
 	sessionID := strings.TrimSpace(base.SessionID)
 	if operationID == "" {
@@ -89,32 +107,10 @@ func (s *CommandService) execute(ctx context.Context, principal Principal, actio
 	if err := s.config.Authorizer.Authorize(ctx, principal, action, sessionID); err != nil {
 		return commandFailure(operationID, sessionID, OutcomeRejected, publicCommandDetail(err, OutcomeRejected), err), err
 	}
-	digestRequest := request
-	if principal.ApplicationID != "" || principal.ConnectionID != "" {
-		digestRequest = struct {
-			ApplicationID string
-			ConnectionID  string
-			Request       any
-		}{principal.ApplicationID, principal.ConnectionID, request}
-	}
-	digest, err := requestDigest(digestRequest)
+	intent, err := commandOperationIntent(principal, action, base, target, request)
 	if err != nil {
 		coded := errorcode.Wrap(errorcode.InvalidArgument, err.Error(), err)
 		return commandFailure(operationID, sessionID, OutcomeRejected, publicCommandDetail(coded, OutcomeRejected), coded), coded
-	}
-	ledgerPrincipal := strings.TrimSpace(principal.ID)
-	if principal.ApplicationID != "" || principal.ConnectionID != "" {
-		// Applications have independent operation namespaces under one Host
-		// principal. The backend still receives the original authenticated owner.
-		ledgerPrincipal, err = requestDigest([]string{principal.ID, principal.ApplicationID, principal.ConnectionID})
-		if err != nil {
-			return CommandResult{}, err
-		}
-		ledgerPrincipal = "application-scope:" + ledgerPrincipal
-	}
-	intent := OperationIntent{
-		PrincipalID: ledgerPrincipal, OperationID: operationID, Action: action,
-		SessionID: sessionID, Target: strings.TrimSpace(target), Digest: digest,
 	}
 	recovery, recoveryBackend := s.config.Backend.(CommandRecoveryBackend)
 	recoverable := recoveryBackend && recovery.CanRecoverControlCommand(action)
@@ -282,7 +278,12 @@ func commandFailure(operationID, sessionID string, outcome Outcome, detail strin
 
 func validateCommandRequest(action Action, request any) error {
 	switch typed := request.(type) {
+	case CreateWorkerRequest:
+		return nil // Validated by the application admission service.
 	case CreateSessionRequest:
+		if strings.HasPrefix(typed.PreferredSessionID, "worker-") {
+			return errors.New("controlclient: worker Session IDs are allocated by the Host")
+		}
 		return nil
 	case CloseSessionRequest:
 		return requireSession(typed.SessionID)

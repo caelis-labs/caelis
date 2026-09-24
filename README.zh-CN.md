@@ -106,6 +106,10 @@ caelis
 使用 `-session` 指定持久会话，`-store-dir` 指定数据目录，`-control-url` 连接指定 Host，
 或用 `-embedded` 显式启用单进程运行。
 
+用 `caelis attach --control-url <endpoint> --session <session-id> --control-token-file <path>`
+进入指定 Host 的同一会话。attach 不创建会话、不重复发送 prompt，关闭终端后后台工作继续。
+Bot 创建、双方 steering、审批与断线恢复见[共享 Worker 协议](docs/shared-workers.md)。
+
 ## 安全与本地数据
 
 Caelis 默认使用 `auto-review` 模式，由 Guardian 审查工具请求；无法得出有效决策时拒绝执行。

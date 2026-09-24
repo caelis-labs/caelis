@@ -6,6 +6,90 @@
   },
   "servers": [{"url": "/api/control/v1"}],
   "paths": {
+    "/application/workers": {
+      "post": {
+        "operationId": "createWorker",
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/CommandCommitted"
+          },
+          "400": {
+            "$ref": "#/components/responses/CommandBadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/CommandConflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          },
+          "202": {
+            "$ref": "#/components/responses/CommandAccepted"
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateWorkerRequest"
+              }
+            }
+          }
+        },
+        "summary": "Create a shared native Worker Session"
+      },
+      "get": {
+        "operationId": "listWorkers",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ApplicationWorker"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        },
+        "summary": "List native Worker grants owned by this application"
+      }
+    },
     "/sessions/{session_id}/subagents/input": {
       "post": {
         "operationId": "submitSubagentInput",
@@ -1842,6 +1926,52 @@
       "ServiceUnavailable": {"description": "Host is shutting down or temporarily unavailable", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}}}
     },
     "schemas": {
+      "CreateWorkerRequest": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/WriteBase"
+          },
+          {
+            "type": "object",
+            "required": [
+              "cwd"
+            ],
+            "properties": {
+              "cwd": {
+                "type": "string",
+                "description": "Absolute workspace directory on the Host."
+              },
+              "title": {"type": "string"},
+              "model": {"type": "string"},
+              "reasoning_effort": {"type": "string"},
+              "fast_mode": {"type": "boolean"}
+            }
+          }
+        ]
+      },
+      "ApplicationWorker": {
+        "type": "object",
+        "required": [
+          "principal_id",
+          "application_id",
+          "connection_id",
+          "session_id"
+        ],
+        "properties": {
+          "principal_id": {
+            "type": "string"
+          },
+          "application_id": {
+            "type": "string"
+          },
+          "connection_id": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          }
+        }
+      },
       "SubagentInputRequest": {
         "type": "object",
         "additionalProperties": false,
@@ -2420,6 +2550,7 @@
         "additionalProperties": false,
         "required": ["operation_id", "outcome"],
         "properties": {
+        "input_status": {"type": "string", "enum": ["accepted"], "description": "Steering admission, not safe-point application. Correlate the canonical input receipt by operation ID."},
           "operation_id": {"type": "string"},
           "outcome": {"$ref": "#/components/schemas/Outcome"},
           "session_id": {"type": "string"},
@@ -2512,6 +2643,8 @@
         "type": "object",
         "required": ["kind", "delivery"],
         "properties": {
+        "input_status": {"type": "string", "enum": ["applied"]},
+        "input_operation_id": {"type": "string"},
           "kind": {"$ref": "#/components/schemas/EnvelopeKind"}, "cursor": {"type": "string", "minLength": 1},
           "event_id": {"type": "string"}, "projection_id": {"type": "string"}, "position": {"$ref": "#/components/schemas/FeedPosition"},
           "session_id": {"type": "string"}, "handle_id": {"type": "string"}, "run_id": {"type": "string"}, "turn_id": {"type": "string"},

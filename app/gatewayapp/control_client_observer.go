@@ -3,6 +3,7 @@ package gatewayapp
 import (
 	"context"
 
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
@@ -43,7 +44,7 @@ func (s *runtimeComposition) releaseControlSessionResources(ctx context.Context,
 // controlTurnObserver resolves the Control-owned Session spool ingress before
 // a producer starts. A missing feed degrades live observation only; canonical
 // Session state remains available for replay.
-func (s *runtimeComposition) controlTurnObserver(ref session.SessionRef) (kernel.TurnEventObserver, func()) {
+func (s *runtimeComposition) controlTurnObserver(ref session.SessionRef, operationID string) (kernel.TurnEventObserver, func()) {
 	release := func() {}
 	if s != nil && s.retainRuntimeWork != nil {
 		release = s.retainRuntimeWork(ref)
@@ -55,7 +56,15 @@ func (s *runtimeComposition) controlTurnObserver(ref session.SessionRef) (kernel
 	if err != nil || feed == nil {
 		return nil, release
 	}
-	return kernel.TurnEventObserverFunc(func(_ context.Context, envelope eventstream.Envelope) error {
+	return kernel.TurnEventObserverFunc(func(ctx context.Context, envelope eventstream.Envelope) error {
+		if eventstream.IsTurnTerminalLifecycle(envelope) && (envelope.Lifecycle.State == "failed" || envelope.Lifecycle.State == "unknown") && s.authorities.diagnostics != nil {
+			// The command may already have a successful admission receipt. Record
+			// the later execution failure with the original operation identity.
+			// Peer reasons and errors can contain private content; classify only.
+			s.authorities.diagnostics.WarnContext(ctx, "Control Turn failed",
+				"session_id", ref.SessionID, "turn_id", envelope.TurnID, "operation_id", operationID,
+				"state", envelope.Lifecycle.State, "code", errorcode.CodeOf(envelope.Err))
+		}
 		// Session delivery is a lossy observation aid. Validation, canonical
 		// replay, or spool I/O failure must not cancel the producing Turn; clients
 		// recover from Session truth on their next fresh attachment.

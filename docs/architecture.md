@@ -35,6 +35,8 @@ uses them.
 - [Application Runtime](application-runtime.md) owns application enrollment,
   Session profiles, revisioned configuration, background grants, callback
   receipts, resources, and the legacy Bot Mode removal.
+- [Shared Workers](shared-workers.md) owns scoped native Worker creation,
+  concurrent TUI attach, steering receipts and Bot subscription integration.
 - [External ACP Agents](external-acp-agents.md) owns onboarding, authentication,
   model selection, endpoint compatibility, and disconnect behavior.
 - [Testing](testing.md) and [Release](release.md) own their procedures.

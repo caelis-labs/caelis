@@ -105,6 +105,11 @@ func EnvelopeBaseFromSessionEvent(ref session.SessionRef, event *session.Event, 
 	base.Final = event.Visibility != session.VisibilityUIOnly && !isLiveStreamingNarrativeEvent(event)
 	base.Delivery = sessionEventDelivery(event)
 	base.Meta = cloneAnyMap(event.Meta)
+	if event.Visibility == session.VisibilityCanonical && event.Seq > 0 && event.Type == session.EventTypeUser {
+		if id, ok := event.Meta["steering_operation_id"].(string); ok && id != "" {
+			base.InputOperationID, base.InputStatus = id, "applied"
+		}
+	}
 	base.Actor = firstNonEmpty(strings.TrimSpace(event.Actor.Name), strings.TrimSpace(event.Actor.ID))
 	base.ParentTool = canonicalTaskParentToolRelation(event)
 	if event.ChildOrigin != nil {

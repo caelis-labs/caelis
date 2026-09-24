@@ -237,6 +237,22 @@ func (s *SQLiteOperationStore) AcquireExecution(ctx context.Context, intent Oper
 	return acquireOperationExecutionGate(ctx, key)
 }
 
+// Lookup observes an exact retained operation without admitting or refreshing it.
+func (s *SQLiteOperationStore) Lookup(ctx context.Context, intent OperationIntent) (OperationRecord, bool, error) {
+	retention, err := s.ensureRetentionPolicy(ctx)
+	if err != nil {
+		return OperationRecord{}, false, err
+	}
+	record, _, err := s.loadOperationRecord(contextOrBackground(ctx), strings.TrimSpace(intent.PrincipalID), strings.TrimSpace(intent.OperationID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return OperationRecord{}, false, nil
+	}
+	if err != nil {
+		return OperationRecord{}, false, err
+	}
+	return lookupOperationRecord(record, intent, operationStoreNow(s.now), retention)
+}
+
 func (s *SQLiteOperationStore) Begin(ctx context.Context, intent OperationIntent) (OperationRecord, bool, error) {
 	s.opportunisticSweep(ctx)
 	retention, err := s.ensureRetentionPolicy(ctx)

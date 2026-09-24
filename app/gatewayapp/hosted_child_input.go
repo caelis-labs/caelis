@@ -132,7 +132,7 @@ func routeHostedChildInputToParent(
 			}
 			continue
 		}
-		observer, releaseTurn := composition.controlTurnObserver(active.SessionRef)
+		observer, releaseTurn := composition.controlTurnObserver(active.SessionRef, "")
 		result, err := gw.BeginTurn(ctx, kernel.BeginTurnRequest{
 			SessionRef:     active.SessionRef,
 			RuntimeContext: composition.controlRuntimeContext(context.Background(), active),
@@ -193,7 +193,7 @@ func routeHostedChildInputBatchToParent(
 			}
 			continue
 		}
-		observer, releaseTurn := composition.controlTurnObserver(active.SessionRef)
+		observer, releaseTurn := composition.controlTurnObserver(active.SessionRef, "")
 		result, err := gw.BeginTurn(ctx, kernel.BeginTurnRequest{
 			SessionRef:     active.SessionRef,
 			RuntimeContext: composition.controlRuntimeContext(context.Background(), active),

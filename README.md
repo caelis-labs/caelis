@@ -111,6 +111,7 @@ requirements and delivery guarantees.
 | --- | --- |
 | Start the TUI | `caelis` |
 | Observe an existing Session in another terminal | `caelis -session <session-id>` |
+| Attach to an exact Session on a specific Host | `caelis attach --control-url <endpoint> --session <session-id> --control-token-file <path>` |
 | Run one prompt | `caelis -p "Summarize this repository."` |
 | Return one structured result | `caelis -p "Review the changes." -format json` |
 | Stream ACP envelopes | `caelis -p "Run the tests." -format jsonl` |
@@ -123,6 +124,10 @@ requirements and delivery guarantees.
 Use `-session` to target a durable Session, `-store-dir` to choose another data
 root, `-control-url` to attach to a specific Host, and `-embedded` for explicit
 single-process operation.
+
+`attach` never creates a Session or submits a prompt; closing the terminal leaves
+accepted work running. See [Shared Workers](docs/shared-workers.md) for Bot
+creation, concurrent steering, approval decisions and reconnect examples.
 
 In the TUI, `/resume` or `Ctrl+O` opens the Session list, with active Sessions
 marked `running`. Selecting a Session changes the view while its work continues

@@ -46,7 +46,7 @@ func (r backgroundChildApprovalRequester) RequestApproval(ctx context.Context, r
 	if s == nil || s.currentGateway() == nil || strings.TrimSpace(req.SessionRef.SessionID) == "" {
 		return agent.ApprovalResponse{}, errors.New("child approval service is unavailable")
 	}
-	observer, release := s.controlTurnObserver(req.SessionRef)
+	observer, release := s.controlTurnObserver(req.SessionRef, "")
 	defer release()
 	return s.currentGateway().RequestChildApproval(ctx, req, observer)
 }
