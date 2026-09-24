@@ -13,6 +13,9 @@ type HandleStatus struct {
 	Definition Definition
 	Binding    Binding
 	Profile    modelprofile.ModelProfile
+	// EligibleProfileIDs contains current Targets allowed for this handle.
+	// An empty array means no eligible target; it does not bypass write validation.
+	EligibleProfileIDs []string `json:"eligible_profile_ids"`
 }
 
 // IsBound reports whether a configurable handle has an explicit
@@ -106,8 +109,8 @@ func ProjectBoundDirectNames(base []string, status Status) []string {
 }
 
 // Status is the complete handle-binding view used by Control surfaces.
-// Targets contains standard ModelProfiles; SupportsProfile decides eligibility
-// for a particular handle.
+// Targets contains standard ModelProfiles. Each handle projects its eligible
+// target IDs using SupportsProfile so remote surfaces use the same rules.
 type Status struct {
 	Handles []HandleStatus
 	Targets []modelprofile.ModelProfile

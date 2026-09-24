@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
@@ -13,6 +14,9 @@ import (
 
 func applicationServerInfo(info appserver.ServerInfo, services appserver.AppServerServices) appserver.ServerInfo {
 	info = normalizeServerInfo(info)
+	if !slices.Contains(info.Capabilities, appserver.CapabilityModelAuthStream) {
+		info.Capabilities = append(info.Capabilities, appserver.CapabilityModelAuthStream)
+	}
 	if services.Applications != nil {
 		for _, capability := range services.Applications.Capabilities() {
 			found := false

@@ -4,6 +4,8 @@ This document owns the product contract for local external ACP Agent onboarding,
 authentication, model selection, input, disconnect, and endpoint compatibility.
 For collaboration setup and workspace controls, see [Participants](participants.md).
 Layer ownership lives in [Architecture](architecture.md).
+For Host settings clients and model-provider OAuth, see
+[Model Connections](model-connections.md).
 
 ## Connect
 

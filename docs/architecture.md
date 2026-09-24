@@ -37,6 +37,8 @@ uses them.
   receipts, resources, and the legacy Bot Mode removal.
 - [Shared Workers](shared-workers.md) owns scoped native Worker creation,
   concurrent TUI attach, steering receipts and Bot subscription integration.
+- [Model Connections](model-connections.md) owns Host settings clients and
+  interactive provider authentication over HTTP.
 - [External ACP Agents](external-acp-agents.md) owns onboarding, authentication,
   model selection, endpoint compatibility, and disconnect behavior.
 - [Testing](testing.md) and [Release](release.md) own their procedures.

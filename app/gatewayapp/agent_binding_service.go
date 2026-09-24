@@ -45,11 +45,19 @@ func agentBindingStatusFromConfig(
 	bindings agentbinding.Configuration,
 	profiles modelprofile.Configuration,
 ) agentbinding.Status {
-	status := agentbinding.Status{}
+	status := agentbinding.Status{Targets: modelprofile.NormalizeConfiguration(profiles).Profiles}
 	for _, definition := range agentbinding.CatalogFor(bindings).Definitions() {
 		item := agentbinding.HandleStatus{
-			Definition: definition,
-			Binding:    agentbinding.Binding{Handle: definition.Handle},
+			Definition:         definition,
+			Binding:            agentbinding.Binding{Handle: definition.Handle},
+			EligibleProfileIDs: []string{},
+		}
+		if definition.Configurable {
+			for _, profile := range status.Targets {
+				if agentbinding.SupportsProfile(definition.Handle, profile) {
+					item.EligibleProfileIDs = append(item.EligibleProfileIDs, profile.ID)
+				}
+			}
 		}
 		if binding, ok := agentbinding.Lookup(bindings, definition.Handle); ok {
 			item.Binding = binding
@@ -57,7 +65,6 @@ func agentBindingStatusFromConfig(
 		}
 		status.Handles = append(status.Handles, item)
 	}
-	status.Targets = append(status.Targets, modelprofile.NormalizeConfiguration(profiles).Profiles...)
 	status.Sets = agentbinding.BindingSetStatuses(bindings, profiles)
 	return status
 }

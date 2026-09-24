@@ -17,6 +17,26 @@ import (
 
 func unmarshalWireValue(raw []byte, target any) error {
 	switch typed := target.(type) {
+	case *appserver.ModelAuthenticationSnapshot:
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &fields); err != nil {
+			return err
+		}
+		if err := normalizeRawUint64Field(fields, "sequence"); err != nil {
+			return err
+		}
+		if result, ok := fields["result"]; ok {
+			normalized, err := normalizeObjectUint64Fields(result, "revision")
+			if err != nil {
+				return err
+			}
+			fields["result"] = normalized
+		}
+		normalized, err := json.Marshal(fields)
+		if err != nil {
+			return err
+		}
+		return unmarshalStrict(normalized, typed)
 	case *appserver.CommandResult:
 		normalized, err := normalizeObjectUint64Fields(raw, "revision")
 		if err != nil {
