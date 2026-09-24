@@ -305,8 +305,7 @@ func (s *Server) agentHandler(action string) http.HandlerFunc {
 				result, err := s.config.Services.Agents.AgentStatus(r.Context(), principal, req)
 				writeJSONResult(w, result, err)
 			case "binding-status":
-				result, err := s.config.Services.Agents.AgentBindingStatus(r.Context(), principal, req)
-				writeJSONResult(w, result, err)
+				s.agentBindingStatus(w, r, principal, req)
 			}
 		case "handoff":
 			var req appserver.HandoffAgentRequest

@@ -304,7 +304,7 @@ export interface AgentHandleStatus {
   Binding: AgentBinding;
   Definition: JSONObject;
   Profile: ModelProfile;
-  eligible_profile_ids: Array<string>;
+  eligible_profile_ids?: Array<string>;
 }
 
 export interface AgentParticipantSnapshot {

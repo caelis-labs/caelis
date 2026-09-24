@@ -181,7 +181,7 @@ func (c *Client) AgentBindingStatus(ctx context.Context, req appserver.AgentRequ
 	if strings.TrimSpace(req.SessionID) != "" {
 		return agentbinding.Status{}, errors.New("control http client: Agent binding status is Host-scoped")
 	}
-	return doFocusedJSON[agentbinding.Status](ctx, c, http.MethodPost, "/agents/binding-status", req)
+	return doFocusedQueryJSON[agentbinding.Status](ctx, c, http.MethodPost, "/agents/binding-status", url.Values{"include": {"eligible_profile_ids"}}, req)
 }
 func (c *Client) BindAgentBinding(ctx context.Context, req appserver.BindAgentBindingRequest) (appserver.CommandResult, error) {
 	return c.doCommand(ctx, http.MethodPost, "/agents/bind", req.WriteBase, req)
@@ -280,8 +280,12 @@ func focusedSessionPath(sessionID, suffix string) (string, error) {
 }
 
 func doFocusedJSON[T any](ctx context.Context, client *Client, method, path string, body any) (T, error) {
+	return doFocusedQueryJSON[T](ctx, client, method, path, nil, body)
+}
+
+func doFocusedQueryJSON[T any](ctx context.Context, client *Client, method, path string, query url.Values, body any) (T, error) {
 	var result T
-	response, err := client.do(ctx, method, path, nil, body, nil)
+	response, err := client.do(ctx, method, path, query, body, nil)
 	if err != nil {
 		return result, err
 	}

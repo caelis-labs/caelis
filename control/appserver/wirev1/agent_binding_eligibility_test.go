@@ -11,7 +11,7 @@ import (
 )
 
 func TestAgentBindingEligibilityPreservesEmptyAndPresentCandidates(t *testing.T) {
-	for _, ids := range [][]string{{}, {"provider:model", "acp:agent"}} {
+	for _, ids := range [][]string{nil, {}, {"provider:model", "acp:agent"}} {
 		status := agentbinding.HandleStatus{EligibleProfileIDs: ids}
 		validateWireValue(t, "AgentHandleStatus", status)
 		raw := mustMarshalWire(t, status)
@@ -23,8 +23,11 @@ func TestAgentBindingEligibilityPreservesEmptyAndPresentCandidates(t *testing.T)
 		if err := json.Unmarshal(raw, &dto); err != nil || !reflect.DeepEqual(dto.EligibleProfileIds, ids) {
 			t.Fatalf("generated eligibility = %#v, %v; want %#v", dto.EligibleProfileIds, err, ids)
 		}
-		if len(ids) == 0 && !bytes.Contains(raw, []byte(`"eligible_profile_ids":[]`)) {
+		if ids != nil && len(ids) == 0 && !bytes.Contains(raw, []byte(`"eligible_profile_ids":[]`)) {
 			t.Fatalf("empty candidates did not produce an array: %s", raw)
+		}
+		if ids == nil && bytes.Contains(raw, []byte(`"eligible_profile_ids"`)) {
+			t.Fatalf("unnegotiated candidates entered wire response: %s", raw)
 		}
 	}
 	var legacy agentbinding.HandleStatus

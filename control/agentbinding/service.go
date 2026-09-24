@@ -14,8 +14,9 @@ type HandleStatus struct {
 	Binding    Binding
 	Profile    modelprofile.ModelProfile
 	// EligibleProfileIDs contains current Targets allowed for this handle.
-	// An empty array means no eligible target; it does not bypass write validation.
-	EligibleProfileIDs []string `json:"eligible_profile_ids"`
+	// Empty means no eligible target; nil means the HTTP client did not negotiate
+	// this projection. Candidates never bypass write validation.
+	EligibleProfileIDs []string `json:"eligible_profile_ids,omitzero"`
 }
 
 // IsBound reports whether a configurable handle has an explicit

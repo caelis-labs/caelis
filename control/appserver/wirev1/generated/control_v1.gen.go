@@ -329,7 +329,7 @@ type AgentHandleStatus struct {
 	Binding            AgentBinding `json:"Binding"`
 	Definition         JSONObject   `json:"Definition"`
 	Profile            ModelProfile `json:"Profile"`
-	EligibleProfileIds []string     `json:"eligible_profile_ids"`
+	EligibleProfileIds []string     `json:"eligible_profile_ids,omitempty"`
 }
 
 type AgentParticipantSnapshot struct {

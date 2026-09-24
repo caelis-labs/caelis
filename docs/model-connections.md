@@ -12,12 +12,16 @@ use the `/agents/*` endpoints in the [OpenAPI contract](../api/control/v1/openap
 These operations update the ordinary Host configuration shared with the TUI.
 They do not select a private team for each Worker.
 
-`POST /agents/binding-status` returns the current profile catalog in `Targets`
-and each handle's allowed choices in `eligible_profile_ids`. Resolve those IDs
-against `Targets`; an empty array means no eligible model. If an older Host
-omits this field, do not infer eligibility locally. Refresh the projection after
-configuration changes and submit an explicit supported effort with a binding.
-The Host revalidates eligibility and the configuration revision on writes.
+`POST /agents/binding-status?include=eligible_profile_ids` returns the current
+profile catalog in `Targets` and each handle's allowed choices in
+`eligible_profile_ids`. Resolve those IDs against `Targets`; an empty array
+means no eligible model. Without that query selection, the Host omits the new
+field so strict v1 clients can keep reading their original response shape.
+The Go HTTP client's `AgentBindingStatus` method requests the expanded shape.
+An older Host may ignore the query and omit eligibility; do not infer candidates
+locally when the field is absent. Refresh the projection after configuration
+changes and submit an explicit supported effort with a binding. The Host
+revalidates eligibility and the configuration revision on writes.
 
 ## Interactive provider authentication
 
