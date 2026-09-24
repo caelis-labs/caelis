@@ -187,9 +187,9 @@ func (s *ApplicationService) execute(ctx context.Context, p Principal, id string
 }
 
 // observeOperation reconciles creation from the immutable binding and canonical
-// Session, and finishes archiving from the original close receipt, without
-// redispatch. Other missing receipts stay unknown; a read never manufactures an
-// execution terminal or a new grant.
+// Session, recovers Workers from exact command receipts, and finishes archiving
+// from the original close receipt, without redispatch. Other missing receipts
+// stay unknown; a read never manufactures an execution terminal or a new grant.
 func (s *ApplicationService) observeOperation(ctx context.Context, p Principal, scope application.Scope, op application.Operation) (ApplicationOperation, error) {
 	out := ApplicationOperation{OperationID: op.ID, Outcome: OutcomeUnknown}
 	var kind struct {
@@ -220,6 +220,9 @@ func (s *ApplicationService) observeOperation(ctx context.Context, p Principal, 
 		}
 		out.Outcome = out.Result.Outcome
 		return out, nil
+	}
+	if kind.Kind == string(ActionWorkerCreate) {
+		return s.observeWorkerCreation(ctx, p, scope, op)
 	}
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(op.Request, &fields); err != nil {

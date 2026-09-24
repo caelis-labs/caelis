@@ -107,32 +107,10 @@ func (s *CommandService) execute(ctx context.Context, principal Principal, actio
 	if err := s.config.Authorizer.Authorize(ctx, principal, action, sessionID); err != nil {
 		return commandFailure(operationID, sessionID, OutcomeRejected, publicCommandDetail(err, OutcomeRejected), err), err
 	}
-	digestRequest := request
-	if principal.ApplicationID != "" || principal.ConnectionID != "" {
-		digestRequest = struct {
-			ApplicationID string
-			ConnectionID  string
-			Request       any
-		}{principal.ApplicationID, principal.ConnectionID, request}
-	}
-	digest, err := requestDigest(digestRequest)
+	intent, err := commandOperationIntent(principal, action, base, target, request)
 	if err != nil {
 		coded := errorcode.Wrap(errorcode.InvalidArgument, err.Error(), err)
 		return commandFailure(operationID, sessionID, OutcomeRejected, publicCommandDetail(coded, OutcomeRejected), coded), coded
-	}
-	ledgerPrincipal := strings.TrimSpace(principal.ID)
-	if principal.ApplicationID != "" || principal.ConnectionID != "" {
-		// Applications have independent operation namespaces under one Host
-		// principal. The backend still receives the original authenticated owner.
-		ledgerPrincipal, err = requestDigest([]string{principal.ID, principal.ApplicationID, principal.ConnectionID})
-		if err != nil {
-			return CommandResult{}, err
-		}
-		ledgerPrincipal = "application-scope:" + ledgerPrincipal
-	}
-	intent := OperationIntent{
-		PrincipalID: ledgerPrincipal, OperationID: operationID, Action: action,
-		SessionID: sessionID, Target: strings.TrimSpace(target), Digest: digest,
 	}
 	recovery, recoveryBackend := s.config.Backend.(CommandRecoveryBackend)
 	recoverable := recoveryBackend && recovery.CanRecoverControlCommand(action)

@@ -3,6 +3,7 @@ package gatewayapp
 import (
 	"context"
 
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver"
 )
 
@@ -23,10 +24,15 @@ func (b *controlCommandBackend) createWorkerSession(ctx context.Context, p appse
 	if err != nil || req.Model == "" {
 		return created, err
 	}
-	result, err := b.ExecuteControlCommand(ctx, p, appserver.ActionSessionModel, appserver.SessionModelRequest{
-		WriteBase: appserver.WriteBase{OperationID: req.OperationID, SessionID: created.SessionID, ExpectedRevision: &created.Revision},
-		Model:     req.Model, ReasoningEffort: req.ReasoningEffort, FastMode: req.FastMode,
-	})
+	active, err := b.composition.sessions.Session(ctx, session.SessionRef{SessionID: created.SessionID})
+	var result appserver.CommandResult
+	if err == nil {
+		result, err = b.ExecuteControlCommand(ctx, p, appserver.ActionSessionModel, appserver.SessionModelRequest{
+			WriteBase: appserver.WriteBase{OperationID: req.OperationID, SessionID: active.SessionID,
+				ExpectedRevision: &active.Revision, ExpectedControllerEpoch: active.Controller.EpochID},
+			Model: req.Model, ReasoningEffort: req.ReasoningEffort, FastMode: req.FastMode,
+		})
+	}
 	if err != nil {
 		// Creation already happened. Preserve its address; a failed configuration
 		// cannot be represented as no effect or invite a new creation retry.

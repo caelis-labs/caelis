@@ -37,6 +37,13 @@ the new Session. No credentials, callback tools, Bot instructions or memory are
 copied. A model configuration failure after creation retains the Session address
 with an unknown operation outcome; it must not trigger another creation.
 
+If the Host loses the application receipt after the complete create-and-configure
+command commits, operation queries and identical retries recover its retained
+command receipt and Session ID. Recovery requires the exact application scope,
+operation, action and request. A Worker grant or an existing Session alone is
+insufficient; missing or expired command evidence keeps the outcome unknown and
+never redispatches creation.
+
 Use the returned Session ID unchanged:
 
 ```sh
