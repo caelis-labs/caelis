@@ -96,7 +96,11 @@ The internal Task service remains the lifecycle and final-result abstraction. Co
 separate Task capability; Agent communication never falls back to Task input.
 The SDK may expose a bounded current/final command result and ACP child final
 result, but it does not retain Surface replay history or understand how a
-consumer resumes it.
+consumer resumes it. Bounded terminal inspection reports the producer exit even
+when a yielded Task still has a running durable snapshot; it does not consume
+the model result or finalize that Task. A committed terminal Task outcome retains
+precedence over a later process status read, including cancellation and unknown
+outcomes. Observation does not resume a finished Run or invoke the model.
 
 Running command Task results may expose a bounded point-in-time output preview
 for explicit model-facing Task control. This is not a Surface stream, child

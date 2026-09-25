@@ -48,7 +48,19 @@ func (s *terminalService) Read(ctx context.Context, ref terminal.Ref) (terminal.
 	}
 	task.mu.Lock()
 	snapshot := terminalCommandSnapshotLocked(task, status)
+	producerPending := task.running && !taskapi.IsTerminalState(task.state)
 	task.mu.Unlock()
+	// A yielded Task's durable lifecycle may still say running. Terminal reads
+	// inspect the producer without consuming model output or finalizing the
+	// Task. An observed process exit is nevertheless authoritative for this
+	// point-in-time terminal snapshot.
+	if producerPending && commandSession != nil && !status.Running {
+		snapshot.Running = false
+		snapshot.SupportsInput = false
+		snapshot.State = string(stateFromStatus(status))
+		code := status.ExitCode
+		snapshot.ExitCode = &code
+	}
 	return snapshot, nil
 }
 
