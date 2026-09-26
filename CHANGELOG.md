@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.62.1](https://github.com/caelis-labs/caelis/compare/v0.62.0...v0.62.1) (2026-09-26)
+
+
+### Bug Fixes
+
+* report yielded command exits without consuming task results ([#78](https://github.com/caelis-labs/caelis/issues/78)) ([dd1cb96](https://github.com/caelis-labs/caelis/commit/dd1cb96d58b6355a9b3eb8b6eddba530e911ae4b))
+
 ## [0.62.0](https://github.com/caelis-labs/caelis/compare/v0.61.0...v0.62.0) (2026-09-24)
 
 
