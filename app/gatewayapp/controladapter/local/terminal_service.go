@@ -43,6 +43,9 @@ func (s *TerminalService) TerminalOutput(ctx context.Context, principal appserve
 }
 
 func (s *TerminalService) WaitTerminal(ctx context.Context, principal appserver.Principal, req appserver.TerminalRequest) (appserver.TerminalExitStatus, error) {
+	if principal.ApplicationID != "" {
+		return appserver.TerminalExitStatus{}, appserver.ErrUnauthorized
+	}
 	ref, err := s.resolve(ctx, principal, req)
 	if err != nil {
 		return appserver.TerminalExitStatus{}, err
@@ -60,6 +63,9 @@ func (s *TerminalService) WaitTerminal(ctx context.Context, principal appserver.
 }
 
 func (s *TerminalService) KillTerminal(ctx context.Context, principal appserver.Principal, req appserver.TerminalRequest) error {
+	if principal.ApplicationID != "" {
+		return appserver.ErrUnauthorized
+	}
 	ref, err := s.resolve(ctx, principal, req)
 	if err != nil {
 		return err
@@ -68,6 +74,9 @@ func (s *TerminalService) KillTerminal(ctx context.Context, principal appserver.
 }
 
 func (s *TerminalService) ReleaseTerminal(ctx context.Context, principal appserver.Principal, req appserver.TerminalRequest) error {
+	if principal.ApplicationID != "" {
+		return appserver.ErrUnauthorized
+	}
 	ref, err := s.resolve(ctx, principal, req)
 	if err != nil {
 		return err
@@ -81,7 +90,7 @@ func (s *TerminalService) resolve(ctx context.Context, principal appserver.Princ
 	if sessionID == "" || terminalID == "" {
 		return terminal.Ref{}, errorcode.New(errorcode.InvalidArgument, "appserver terminal requires Session and terminal IDs")
 	}
-	list, err := s.tasks.List(ctx, taskstream.Principal{ID: principal.ID, Roles: append([]string(nil), principal.Roles...)}, taskstream.ListRequest{SessionID: sessionID})
+	list, err := s.tasks.List(ctx, taskstream.Principal{ID: principal.ID, ApplicationID: principal.ApplicationID, ConnectionID: principal.ConnectionID, Roles: append([]string(nil), principal.Roles...)}, taskstream.ListRequest{SessionID: sessionID})
 	if err != nil {
 		return terminal.Ref{}, err
 	}

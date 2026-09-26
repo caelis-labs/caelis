@@ -81,3 +81,39 @@ func (s *recordingTerminalStreams) Release(_ context.Context, ref terminal.Ref) 
 }
 
 var _ terminal.Controller = (*recordingTerminalStreams)(nil)
+
+type applicationTerminalDirectory struct {
+	terminalTaskDirectory
+	seen taskstream.Principal
+}
+
+func (d *applicationTerminalDirectory) List(ctx context.Context, p taskstream.Principal, r taskstream.ListRequest) (taskstream.ListResult, error) {
+	d.seen = p
+	if p.ApplicationID != "application" || p.ConnectionID != "connection" {
+		return taskstream.ListResult{}, context.Canceled
+	}
+	return d.terminalTaskDirectory.List(ctx, p, r)
+}
+func TestTerminalObservationPreservesApplicationPrincipal(t *testing.T) {
+	directory := &applicationTerminalDirectory{}
+	service, err := NewTerminalService(directory, &recordingTerminalStreams{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = service.TerminalOutput(t.Context(), appserver.Principal{ID: "owner", ApplicationID: "application", ConnectionID: "connection"}, appserver.TerminalRequest{SessionID: "session-1", TerminalID: "tool-call-1"})
+	if err != nil {
+		t.Fatal("application context lost", err)
+	}
+	p := appserver.Principal{ID: "owner", ApplicationID: "application", ConnectionID: "connection"}
+	req := appserver.TerminalRequest{SessionID: "session-1", TerminalID: "tool-call-1"}
+	if _, err = service.WaitTerminal(t.Context(), p, req); err == nil {
+		t.Fatal("application acquired wait authority")
+	}
+	if err = service.KillTerminal(t.Context(), p, req); err == nil {
+		t.Fatal("application acquired kill authority")
+	}
+	if err = service.ReleaseTerminal(t.Context(), p, req); err == nil {
+		t.Fatal("application acquired release authority")
+	}
+
+}

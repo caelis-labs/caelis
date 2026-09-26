@@ -514,3 +514,24 @@ Legacy Bot Mode, its TUI and dedicated APIs/tools/scheduler are not supported.
 Historical Bot data is retained, not imported, executed or automatically deleted.
 Normal workspace Sessions, credentials and Memory data are not migrated into the
 application namespace.
+
+## Application terminal observation
+
+Hosts advertising `application-terminal-observation-v1` allow an application
+credential to call `POST /sessions/{session_id}/terminals/output` for its own
+binding or worker. Transport and the Task directory both retain the authenticated
+application and connection scope. Terminal wait, kill and release remain outside
+application authority. Revocation preserves the existing read-only receipt
+observation contract; it grants no new command execution.
+
+The bounded terminal snapshot reports the live producer's exit even when an
+asynchronously yielded Task has not yet committed its terminal result. Inspecting
+it does not consume model output, finalize the Task or redispatch work. This lets
+an application wake its assistant once an already approved command finishes,
+then read the retained Task result through the ordinary native tool.
+
+This capability is an optional observation extension, not a prerequisite for
+application connections, worker workspaces or approvals. It does not change
+normal Session turn completion, restart a finished model Run or add automatic
+model requests. Applications choose whether to consume the observation; generic
+command continuation semantics remain owned by the Runtime.

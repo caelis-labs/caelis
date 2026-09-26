@@ -6,6 +6,10 @@ import (
 	"strings"
 )
 
+// CapabilityApplicationTerminalObservation permits bounded terminal output reads
+// for application-owned Sessions and workers, without terminal mutation rights.
+const CapabilityApplicationTerminalObservation = "application-terminal-observation-v1"
+
 type TerminalRequest struct {
 	SessionID  string `json:"session_id"`
 	TerminalID string `json:"terminal_id"`

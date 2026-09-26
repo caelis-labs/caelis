@@ -381,6 +381,10 @@ type Session interface {
 	// part of the requested range, callers detect the gap with OutputReadWindow.
 	ReadOutput(ctx context.Context, stdoutMarker, stderrMarker int64) (stdout, stderr []byte, newStdoutMarker, newStderrMarker int64, err error)
 	AwaitOutput(ctx context.Context, cursor OutputCursor) (OutputObservation, error)
+	// Status reports the current producer state. A non-running status is a
+	// settled exit: the process has exited, output reading has completed, and
+	// ExitCode is final. A termination request by itself is not an exit and must
+	// keep reporting Running.
 	Status(ctx context.Context) (SessionStatus, error)
 	Wait(ctx context.Context, timeout time.Duration) (SessionStatus, error)
 	Result(ctx context.Context) (CommandResult, error)

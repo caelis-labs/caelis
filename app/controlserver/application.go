@@ -27,6 +27,9 @@ func applicationServerInfo(info appserver.ServerInfo, services appserver.AppServ
 				info.Capabilities = append(info.Capabilities, capability)
 			}
 		}
+		if services.Terminal != nil && !slices.Contains(info.Capabilities, appserver.CapabilityApplicationTerminalObservation) {
+			info.Capabilities = append(info.Capabilities, appserver.CapabilityApplicationTerminalObservation)
+		}
 	}
 	return info
 }
@@ -70,6 +73,12 @@ func (s *Server) applicationPrincipal(r *http.Request) (appserver.Principal, boo
 			permitted = true
 		}
 		if r.Method == http.MethodPost && len(parts) == 5 && parts[2] == "approvals" && parts[4] == "resolve" {
+			permitted = true
+		}
+		// Output is bounded, read-only producer inspection. Keep wait/kill/release
+		// outside application transport authority; ownership is checked below and
+		// the terminal service resolves the task through the scoped directory.
+		if r.Method == http.MethodPost && len(parts) == 4 && parts[2] == "terminals" && parts[3] == "output" {
 			permitted = true
 		}
 		if permitted {
