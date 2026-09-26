@@ -316,7 +316,6 @@ func (s *AsyncSession) waitForExit() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.exited.Store(true)
 	s.exitErr = err
 
 	exitCode := 0
@@ -333,6 +332,11 @@ func (s *AsyncSession) waitForExit() {
 	if s.state.Load() == SessionStateRunning {
 		s.state.Store(SessionStateCompleted)
 	}
+
+	// Publish the exit last: a reader that observes exited also observes the
+	// settled exit code, the final state, and fully drained output. Status and
+	// Wait callers rely on that ordering instead of a later reconciliation.
+	s.exited.Store(true)
 
 	// Close stdin writer
 	s.closeStdin()
@@ -459,9 +463,6 @@ func (s *AsyncSession) AwaitOutput(ctx context.Context, cursor sandbox.OutputCur
 		if !exited && s.exited.Load() {
 			return outputwait.Snapshot[SessionStatus]{Retry: true}
 		}
-		if !exited {
-			status.State = SessionStateRunning
-		}
 		return outputwait.Snapshot[SessionStatus]{
 			Signal:    signal,
 			Published: available,
@@ -486,8 +487,17 @@ func (s *AsyncSession) ExitChannel() <-chan int {
 	return s.exitChan
 }
 
-// Status returns the current status of the session.
+// Status returns the current status of the session. A non-running state is a
+// settled exit: Terminate and the timeouts store SessionStateTerminated before
+// waitForExit drains the output readers and settles the exit code, so Status
+// keeps reporting running until that exit is observable. The exit observation
+// is read first, so a settled exit also reports final buffer counts.
 func (s *AsyncSession) Status() SessionStatus {
+	exited := s.exited.Load()
+	state := SessionStateRunning
+	if exited {
+		state = s.state.Load().(SessionState)
+	}
 	stdout, stderr := "", ""
 	if s.stdoutBuffer != nil {
 		stdout = string(s.stdoutBuffer.ReadAll())
@@ -495,7 +505,6 @@ func (s *AsyncSession) Status() SessionStatus {
 	if s.stderrBuffer != nil {
 		stderr = string(s.stderrBuffer.ReadAll())
 	}
-	state := s.state.Load().(SessionState)
 
 	status := SessionStatus{
 		ID:                   s.ID,

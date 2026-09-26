@@ -98,7 +98,9 @@ The SDK may expose a bounded current/final command result and ACP child final
 result, but it does not retain Surface replay history or understand how a
 consumer resumes it. Bounded terminal inspection reports the producer exit even
 when a yielded Task still has a running durable snapshot; it does not consume
-the model result or finalize that Task. A committed terminal Task outcome retains
+the model result or finalize that Task. A producer exit becomes observable only
+once the process exited and its output completed; a requested termination alone
+still reads as running. A committed terminal Task outcome retains
 precedence over a later process status read, including cancellation and unknown
 outcomes. Observation does not resume a finished Run or invoke the model.
 
