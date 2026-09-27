@@ -235,7 +235,9 @@ When `application-model-capabilities-v1` is advertised, the scoped read
 selector, and optional Boolean `image_input`. `true` confirms image input;
 `false` declares a text-only model; omission means unknown. Resolution uses the
 same maintained model metadata and explicit custom-model declarations as
-execution. Never substitute Host-wide union capabilities, the immutable creation
+execution. Each read reloads canonical AppConfig, including model declaration
+changes that do not change the application selector or revision. A failed read
+returns an error rather than a stale process-catalog fallback. Never substitute Host-wide union capabilities, the immutable creation
 profile, a worker model, or a model-name heuristic.
 
 This read does not activate a Runtime, call a provider or resolve credentials.
