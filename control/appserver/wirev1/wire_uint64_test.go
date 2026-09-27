@@ -965,3 +965,23 @@ func TestTaskDescriptorContextGaugeMatchesGeneratedWire(t *testing.T) {
 		t.Fatalf("roundtrip=%#v", restored)
 	}
 }
+
+func TestApplicationModelCapabilitiesRoundTrip(t *testing.T) {
+	yes, no := true, false
+	for _, supported := range []*bool{nil, &no, &yes} {
+		want := application.ModelCapabilities{SessionID: "session-1", Model: "selected-model", ConfigurationRevision: math.MaxUint64, ImageInput: supported}
+		raw := mustMarshalWire(t, want)
+		validateWireValue(t, "ApplicationModelCapabilities", want)
+		var wire generated.ApplicationModelCapabilities
+		if err := json.Unmarshal(raw, &wire); err != nil {
+			t.Fatal(err)
+		}
+		if string(wire.ConfigurationRevision) != strconv.FormatUint(math.MaxUint64, 10) || (wire.ImageInput == nil) != (supported == nil) || supported != nil && *wire.ImageInput != *supported {
+			t.Fatalf("wire capability lost: %s", raw)
+		}
+		var got application.ModelCapabilities
+		if err := Unmarshal(raw, &got); err != nil || !reflect.DeepEqual(got, want) {
+			t.Fatal(got, err)
+		}
+	}
+}

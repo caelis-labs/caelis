@@ -142,6 +142,13 @@ func marshalWireValueUnchecked(value any) ([]byte, error) {
 		return marshalApplicationCall(typed)
 	case []application.Call:
 		return marshalApplicationCallList(typed)
+	case application.ModelCapabilities:
+		fields, err := marshalObject(typed)
+		if err != nil {
+			return nil, err
+		}
+		fields["configuration_revision"] = decimalRaw(typed.ConfigurationRevision)
+		return json.Marshal(fields)
 	case application.Configuration:
 		return marshalApplicationConfiguration(typed)
 	case application.UpdateConfigurationRequest:

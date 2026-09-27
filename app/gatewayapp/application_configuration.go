@@ -76,3 +76,25 @@ func (r *applicationTurnResolver) resolveProfileModel(ctx context.Context, profi
 	}
 	return lookup.ResolveModelConfig(ctx, configured, r.composition.activeRuntime.ContextWindow)
 }
+
+// applicationModelImageInput observes canonical model declarations even when a
+// committed change's process-catalog refresh failed. The metadata-only lookup
+// has no credential or HTTP resolvers and does not create an execution snapshot.
+func (s *runtimeComposition) applicationModelImageInput(ctx context.Context, profile application.Profile) (*bool, error) {
+	if s == nil || s.authorities.store == nil {
+		return nil, errors.New("gatewayapp: app config store unavailable")
+	}
+	doc, err := s.authorities.store.LoadContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	lookup, err := newModelLookupFromDocument(doc, 0)
+	if err != nil {
+		return nil, err
+	}
+	configured, err := applicationModelConfig(lookup, profile)
+	if err != nil {
+		return nil, err
+	}
+	return modelconfig.ModelImageInput(configured), nil
+}
