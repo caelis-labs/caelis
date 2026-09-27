@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.63.0](https://github.com/caelis-labs/caelis/compare/v0.62.0...v0.63.0) (2026-09-27)
+
+
+### Features
+
+* **control:** expose scoped application model capabilities ([#80](https://github.com/caelis-labs/caelis/issues/80)) ([f3298a8](https://github.com/caelis-labs/caelis/commit/f3298a842315781702f6c8948a6c12d019711b40))
+
+
+### Bug Fixes
+
+* report yielded command exits without consuming task results ([#78](https://github.com/caelis-labs/caelis/issues/78)) ([dd1cb96](https://github.com/caelis-labs/caelis/commit/dd1cb96d58b6355a9b3eb8b6eddba530e911ae4b))
+
 ## [0.62.0](https://github.com/caelis-labs/caelis/compare/v0.61.0...v0.62.0) (2026-09-24)
 
 
