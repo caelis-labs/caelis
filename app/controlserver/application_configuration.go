@@ -9,6 +9,14 @@ import (
 
 func (s *Server) applicationConfigurationRoutes() {
 	service := s.config.Services.Applications
+	s.mux.HandleFunc("GET "+apiPrefix+"/application/sessions/{session_id}/model-capabilities", func(w http.ResponseWriter, r *http.Request) {
+		p, _, ok := s.requireApplication(w, r)
+		if !ok {
+			return
+		}
+		out, err := service.ApplicationModelCapabilities(r.Context(), p, r.PathValue("session_id"))
+		writeJSONResult(w, out, err)
+	})
 	s.mux.HandleFunc("GET "+apiPrefix+"/application/sessions/{session_id}/configuration", func(w http.ResponseWriter, r *http.Request) {
 		p, _, ok := s.requireApplication(w, r)
 		if !ok {

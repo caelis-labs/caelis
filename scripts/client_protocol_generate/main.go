@@ -104,8 +104,8 @@ func validateSpec(spec openAPISpec) error {
 	if spec.OpenAPI != "3.1.0" {
 		return fmt.Errorf("openapi version = %q, want 3.1.0", spec.OpenAPI)
 	}
-	if len(operationIDs(spec)) != 116 {
-		return fmt.Errorf("operation count = %d, want 116", len(operationIDs(spec)))
+	if len(operationIDs(spec)) != 117 {
+		return fmt.Errorf("operation count = %d, want 117", len(operationIDs(spec)))
 	}
 	required := []string{
 		"CreateSessionRequest", "CloseSessionRequest", "CompactSessionRequest", "PromptRequest", "SteerRequest", "CancelRequest",
@@ -120,7 +120,7 @@ func validateSpec(spec openAPISpec) error {
 		"AddPluginPathRequest", "InstallPluginRequest", "EnablePluginRequest", "DisablePluginRequest", "RemovePluginRequest",
 		"ApplicationRegistration", "ApplicationConnection", "ApplicationProfile", "ApplicationToolDefinition", "ApplicationInheritance",
 		"ApplicationBinding", "ApplicationBindingList", "CreateApplicationSessionRequest", "ApplicationPromptRequest",
-		"ApplicationConfiguration", "ApplicationConfigurationPatch", "UpdateApplicationConfigurationRequest",
+		"ApplicationModelCapabilities", "ApplicationConfiguration", "ApplicationConfigurationPatch", "UpdateApplicationConfigurationRequest",
 		"ApplicationWorkspace", "ApplicationWorkspaceAccess", "ApplicationPermissions",
 		"ApplicationBackgroundGrant", "ApplicationBackgroundGrantList", "ApplicationBackgroundGrantRequest",
 		"ApplicationOperation", "ApplicationCall", "ApplicationCallList", "ApplicationCallResult",

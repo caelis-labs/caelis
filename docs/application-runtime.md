@@ -24,7 +24,8 @@ versions, `store_id`, `instance_id`, build identity and capabilities. Require
 `application-runtime-v1`; do not fall back to an ordinary coding Session if absent.
 Feature capabilities refine the baseline: `application-hot-configuration-v1`,
 `application-native-execution-v1`, `application-workspace-binding-v1`,
-`application-background-activation-v1` and `application-resource-transfer-v1`.
+`application-background-activation-v1`, `application-resource-transfer-v1` and
+`application-model-capabilities-v1`.
 Require the capability guarding the feature you need instead of probing with
 destructive trial calls.
 Store identity persists across Host replacement; instance identity does not.
@@ -57,6 +58,7 @@ The following paths are relative to `/api/control/v1`:
 | `POST /application/sessions/{session_id}/prompt` | Admit source-typed input |
 | `GET /application/sessions/{session_id}/configuration` | Read the latest desired configuration and revision |
 | `POST /application/sessions/{session_id}/configuration` | Compare-and-swap update; returns the committed configuration |
+| `GET /application/sessions/{session_id}/model-capabilities` | Observe the current desired model and its declared image support |
 | `GET /application/configuration-operations/{operation_id}` | Exact committed configuration update result |
 | `GET /application/sessions/{session_id}/background-grants` | List this connection's background grants |
 | `POST /application/sessions/{session_id}/background-grants` | Record a background activation grant |
@@ -226,6 +228,25 @@ operation ID never dispatches twice. The generic
 configuration update IDs with `unsupported` so a typed configuration receipt is
 never misread as a `CommandResult`; always read configuration update receipts
 through the typed route.
+
+When `application-model-capabilities-v1` is advertised, the scoped read
+`GET /application/sessions/{session_id}/model-capabilities` returns
+`session_id`, decimal-string `configuration_revision`, the desired `model`
+selector, and optional Boolean `image_input`. `true` confirms image input;
+`false` declares a text-only model; omission means unknown. Resolution uses the
+same maintained model metadata and explicit custom-model declarations as
+execution. Never substitute Host-wide union capabilities, the immutable creation
+profile, a worker model, or a model-name heuristic.
+
+This read does not activate a Runtime, call a provider or resolve credentials.
+It observes the model for subsequent requests, not an already-issued request.
+The revision versions the application profile, not the model catalog. Reads
+are not dispatch grants: configuration may change after observation, and normal
+Runtime validation still applies. Re-read before offering or submitting image
+input; older Hosts without the capability may continue text-only application
+workflows. The application credential must own the exact Session; neither a
+foreign application nor a Host credential can substitute that scope. Capability
+metadata is deliberately separate from durable configuration-update receipts.
 
 Validation rejections occur before the atomic configuration/operation commit and
 create no successful operation receipt. A received 400 is a definite rejection;

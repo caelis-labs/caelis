@@ -10,6 +10,9 @@ import (
 // caller's lease, per-Session permissions and current execution state.
 func (s *ApplicationService) Capabilities() []string {
 	out := []string{application.Capability, application.CapabilityResourceTransfer, application.CapabilityBackgroundActivation, CapabilitySharedWorkers, CapabilityTurnSteering}
+	if s.config.ModelImageInput != nil {
+		out = append(out, application.CapabilityModelCapabilities)
+	}
 	if s.config.ValidateProfile != nil {
 		out = append(out, application.CapabilityHotConfiguration)
 	}

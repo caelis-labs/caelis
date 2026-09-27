@@ -76,3 +76,13 @@ func (r *applicationTurnResolver) resolveProfileModel(ctx context.Context, profi
 	}
 	return lookup.ResolveModelConfig(ctx, configured, r.composition.activeRuntime.ContextWindow)
 }
+
+// applicationModelImageInput reuses the model assembly owner without resolving
+// credentials, creating a Runtime or making an inference request.
+func (s *runtimeComposition) applicationModelImageInput(_ context.Context, profile application.Profile) (*bool, error) {
+	configured, err := applicationModelConfig(s.lookup, profile)
+	if err != nil {
+		return nil, err
+	}
+	return modelconfig.ModelImageInput(configured), nil
+}

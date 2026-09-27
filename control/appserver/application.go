@@ -64,6 +64,9 @@ type ApplicationServiceConfig struct {
 	// ValidateProfile checks provider capabilities without modifying Host settings.
 	// Configuration updates are unavailable unless this admission owner is bound.
 	ValidateProfile func(context.Context, application.Profile) error
+	// ModelImageInput reads the selected model without activation or model calls.
+	// Nil capability means unknown; an unbound reader leaves negotiation absent.
+	ModelImageInput func(context.Context, application.Profile) (*bool, error)
 	// NativeExecution reports the Host platform's ordinary native sandbox support.
 	NativeExecution bool
 }

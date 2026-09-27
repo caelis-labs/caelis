@@ -26,3 +26,10 @@ func (c *Client) UpdateApplicationConfiguration(ctx context.Context, sessionID s
 func (c *Client) ApplicationConfigurationOperation(ctx context.Context, operationID string) (application.Configuration, error) {
 	return doFocusedJSON[application.Configuration](ctx, c, http.MethodGet, "/application/configuration-operations/"+url.PathEscape(operationID), nil)
 }
+
+// ApplicationModelCapabilities observes image input support for this application's
+// selected model. Call only after negotiating application-model-capabilities-v1;
+// absent ImageInput means unknown and this observation is not dispatch authority.
+func (c *Client) ApplicationModelCapabilities(ctx context.Context, sessionID string) (application.ModelCapabilities, error) {
+	return doFocusedJSON[application.ModelCapabilities](ctx, c, http.MethodGet, applicationSessionPath(sessionID)+"/model-capabilities", nil)
+}

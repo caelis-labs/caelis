@@ -67,6 +67,12 @@ func unmarshalWireValue(raw []byte, target any) error {
 			return err
 		}
 		return unmarshalStrict(normalized, typed)
+	case *application.ModelCapabilities:
+		normalized, err := normalizeObjectUint64Fields(raw, "configuration_revision")
+		if err != nil {
+			return err
+		}
+		return unmarshalStrict(normalized, typed)
 	case *application.Configuration:
 		normalized, err := normalizeApplicationConfigurationJSON(raw)
 		if err != nil {

@@ -43,14 +43,23 @@ func DefaultReasoningEffortForConfig(cfg Config) string {
 // Maintained metadata is authoritative; an explicit config value is used only
 // when the directory has no declaration for the selected model.
 func ModelSupportsImages(cfg Config) bool {
-	if defaults, err := ResolveModelDefaultsForEndpoint(cfg.Provider, cfg.BaseURL, cfg.Model); err == nil &&
-		defaults.ImageInput != nil {
-		return *defaults.ImageInput
+	capability := ModelImageInput(cfg)
+	return capability != nil && *capability
+}
+
+// ModelImageInput returns the same endpoint-scoped declaration used for model
+// assembly. Nil means unknown, distinct from an explicit text-only declaration.
+// Maintained metadata takes precedence over an override for an unknown model.
+func ModelImageInput(cfg Config) *bool {
+	if defaults, err := ResolveModelDefaultsForEndpoint(cfg.Provider, cfg.BaseURL, cfg.Model); err == nil && defaults.ImageInput != nil {
+		value := *defaults.ImageInput
+		return &value
 	}
 	if cfg.ImageInput != nil {
-		return *cfg.ImageInput
+		value := *cfg.ImageInput
+		return &value
 	}
-	return false
+	return nil
 }
 
 func selectableModelDetail(provider string, baseURL string, modelName string) string {
