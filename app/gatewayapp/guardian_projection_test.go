@@ -97,7 +97,7 @@ func TestGuardianProjectionRoundTripPreservesCutAcrossApprovalCadence(t *testing
 	var rebuilt guardianProjection
 	reopened := &guardianPagedOnlyStore{Service: sessionfile.NewStore(sessionfile.Config{RootDir: root})}
 	b, restoredCut, err := rebuilt.read(t.Context(), reopened, active.SessionRef)
-	if err != nil || cut != restoredCut || !reflect.DeepEqual(guardianModelRequest(a, "next action", nil), guardianModelRequest(b, "next action", nil)) {
+	if err != nil || cut != restoredCut || !reflect.DeepEqual(guardianModelRequest(a, "next action", nil, true), guardianModelRequest(b, "next action", nil, true)) {
 		t.Fatalf("model context changed after reopening source: cut=%+v/%+v err=%v", cut, restoredCut, err)
 	}
 	text := guardianEventsText(a)

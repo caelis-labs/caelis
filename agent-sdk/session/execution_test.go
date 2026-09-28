@@ -65,7 +65,7 @@ func TestPauseTokenTransitionContract(t *testing.T) {
 	t.Parallel()
 	pending := PauseToken{
 		Schema: ExecutionJournalSchemaVersion, TokenID: "pause-1", SessionID: "s1", RunID: "r1", TurnID: "t1",
-		Revision: 1, Status: PauseTokenPending,
+		ItemID: "item-1", Revision: 1, Status: PauseTokenPending,
 	}
 	resolved := pending
 	resolved.Revision++
@@ -75,6 +75,24 @@ func TestPauseTokenTransitionContract(t *testing.T) {
 	}
 	if err := ValidatePauseTokenTransition(pending, resolved); err != nil {
 		t.Fatalf("resolved pause transition error = %v", err)
+	}
+	changedItem := resolved
+	changedItem.ItemID = "item-2"
+	if err := ValidatePauseTokenTransition(pending, changedItem); err == nil {
+		t.Fatal("changed item identity was accepted")
+	}
+	legacy := pending
+	legacy.ItemID = ""
+	legacyResolved := resolved
+	legacyResolved.ItemID = ""
+	if err := ValidatePauseTokenTransition(legacy, legacyResolved); err != nil {
+		t.Fatalf("legacy missing item identity rejected: %v", err)
+	}
+	if err := ValidatePauseTokenTransition(legacy, resolved); err == nil {
+		t.Fatal("added item identity to legacy pause was accepted")
+	}
+	if got := ClonePauseToken(PauseToken{ItemID: "  item-1  "}).ItemID; got != "item-1" {
+		t.Fatalf("normalized item id = %q", got)
 	}
 	invalid := resolved
 	invalid.Revision++

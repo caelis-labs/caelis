@@ -1,0 +1,6 @@
+{
+  "session_id": "session-reviewed-1",
+  "approval_mode": "auto-review",
+  "reviewer": {"kind": "guardian", "model": "configured-reviewer-model"},
+  "status": "ready"
+}

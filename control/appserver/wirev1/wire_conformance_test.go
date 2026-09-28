@@ -297,7 +297,8 @@ func TestEveryProductionEnvelopeVariantConformsToOpenAPI(t *testing.T) {
 		Text:   "review complete",
 	}
 	review := baseEnvelope(eventstream.KindApprovalReview)
-	review.ApprovalReview = &eventstream.ApprovalReview{ToolCallID: "tool-1", Status: "completed", RawInput: map[string]any{"path": "README.md"}}
+	review.ApprovalRequestID = "approval-token-1"
+	review.ApprovalReview = &eventstream.ApprovalReview{ToolCallID: "tool-1", ItemID: "item-1", Status: "completed", RawInput: map[string]any{"path": "README.md"}}
 	failure := baseEnvelope(eventstream.KindError)
 	failure.Error = "failed"
 	for name, envelope := range map[string]eventstream.Envelope{

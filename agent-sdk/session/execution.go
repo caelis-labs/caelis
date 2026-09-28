@@ -38,7 +38,8 @@ const (
 )
 
 // PauseToken is the durable handoff between a waiting run and an approval
-// resolver. It contains only semantic request/decision data.
+// resolver. It contains only semantic request/decision data. ItemID identifies
+// the Runtime-admitted tool step when available; older tokens omit it.
 type PauseToken struct {
 	Schema     int               `json:"schema"`
 	TokenID    string            `json:"token_id"`
@@ -47,6 +48,7 @@ type PauseToken struct {
 	TurnID     string            `json:"turn_id"`
 	ToolCallID string            `json:"tool_call_id"`
 	ToolName   string            `json:"tool_name"`
+	ItemID     string            `json:"item_id,omitempty"`
 	Revision   uint64            `json:"revision"`
 	Status     PauseTokenStatus  `json:"status"`
 	Input      json.RawMessage   `json:"input,omitempty"`
@@ -253,6 +255,7 @@ func ClonePauseToken(in PauseToken) PauseToken {
 	out.TurnID = strings.TrimSpace(in.TurnID)
 	out.ToolCallID = strings.TrimSpace(in.ToolCallID)
 	out.ToolName = strings.TrimSpace(in.ToolName)
+	out.ItemID = strings.TrimSpace(in.ItemID)
 	out.Status = PauseTokenStatus(strings.TrimSpace(string(in.Status)))
 	out.Input = append(json.RawMessage(nil), in.Input...)
 	if in.Approval != nil {
@@ -283,7 +286,7 @@ func ValidatePauseTokenTransition(previous PauseToken, next PauseToken) error {
 		}
 		return invalid("first record must be pending revision 1")
 	}
-	if previous.TokenID != next.TokenID || previous.SessionID != next.SessionID || previous.RunID != next.RunID || next.Revision != previous.Revision+1 {
+	if previous.TokenID != next.TokenID || previous.SessionID != next.SessionID || previous.RunID != next.RunID || previous.ItemID != next.ItemID || next.Revision != previous.Revision+1 {
 		return invalid("identity or revision mismatch")
 	}
 	if previous.Status != PauseTokenPending || (next.Status != PauseTokenResolved && next.Status != PauseTokenCancelled) {

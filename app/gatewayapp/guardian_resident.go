@@ -93,7 +93,7 @@ func (r *guardianApprovalReviewer) acquireResident(ctx context.Context, ref sess
 		}
 	}
 	if q == nil {
-		q = &guardianQueries{network: r.queryNetwork}
+		q = &guardianQueries{network: r.queryNetwork, queryTools: r.queryTools}
 		if runner, ok := r.systemAgents.(*systemManagedAgentRuntime); ok {
 			q.runner = &systemManagedAgentRuntime{config: runner.config, resident: true}
 		}

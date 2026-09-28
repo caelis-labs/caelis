@@ -55,8 +55,8 @@ func ValidateProfile(p Profile) error {
 	default:
 		return fmt.Errorf("%w: unsupported application permission mode", ErrUnsupported)
 	}
-	if p.Permissions.ApprovalMode != "" && p.Permissions.ApprovalMode != "manual" {
-		return fmt.Errorf("%w: application approval mode requires an available approval reviewer", ErrUnsupported)
+	if err := validateReviewer(p); err != nil {
+		return err
 	}
 	if len(p.Instructions) > 1<<20 || len(p.Tools) > 128 {
 		return fmt.Errorf("%w: profile size limit", ErrInvalid)
@@ -82,6 +82,9 @@ func ValidateProfile(p Profile) error {
 			return fmt.Errorf("%w: duplicate or invalid tool name", ErrInvalid)
 		}
 		seen[def.Name] = true
+		if def.ApprovalPolicy != "" && def.ApprovalPolicy != "direct" && def.ApprovalPolicy != "required" {
+			return fmt.Errorf("%w: unsupported callback approval_policy for %s", ErrInvalid, def.Name)
+		}
 		// SDK tool dispatch is exact-case. Only actually selected native
 		// names and the always-present resource bridge are reserved.
 		if p.Execution == "workspace-write" && (availableNative[def.Name] || def.Name == "ReadResource" || def.Name == "PublishArtifact") {

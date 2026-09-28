@@ -159,6 +159,15 @@ func (c *approvalCoordinator) submit(ctx context.Context, decision ApprovalDecis
 	if pending == nil {
 		return c.approvalNotPendingErrorLocked(requestID)
 	}
+	// Only a published manual permission is caller-resolvable. The Guardian
+	// settles its own auto-review through resolve(pending); a client must not
+	// race its decision, even if it knows the pending pause token and Turn.
+	if !pending.publishOnActivate {
+		return &Error{
+			Kind: KindConflict, Code: CodeApprovalNotPending, UserVisible: true,
+			Message: "gateway: automatic approval is not caller-resolvable",
+		}
+	}
 	return c.resolveLocked(pending, decision)
 }
 

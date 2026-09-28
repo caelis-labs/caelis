@@ -45,6 +45,9 @@ type Profile struct {
 	// ExecutionConfig is creation-bound process configuration, independent of
 	// workspace permissions and the revisioned model/tool configuration.
 	ExecutionConfig *sandbox.ExecutionConfig `json:"execution_config,omitempty"`
+	// Reviewer is an explicit, creation-bound automatic reviewer. It never
+	// inherits the Host's Guardian binding or another Session's model.
+	Reviewer *Reviewer `json:"reviewer,omitempty"`
 }
 
 // MarshalJSON keeps the original creation-profile field order and omission
@@ -194,6 +197,9 @@ type ToolDefinition struct {
 	Name        string         `json:"name"`
 	Description string         `json:"description"`
 	InputSchema map[string]any `json:"input_schema"`
+	// ApprovalPolicy controls per-invocation callback dispatch. Omitted or "direct"
+	// dispatches directly; "required" requests canonical approval first.
+	ApprovalPolicy string `json:"approval_policy,omitempty"`
 	// ResultFormat pins result interpretation with the tool catalog. Empty keeps
 	// the baseline opaque JSON contract; content-v1 admits typed content blocks.
 	ResultFormat string         `json:"result_format,omitempty"`

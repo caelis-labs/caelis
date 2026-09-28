@@ -174,14 +174,14 @@ func TestRequestDurableApprovalExposesPauseTokenIDToRequester(t *testing.T) {
 	}
 
 	var observed agent.ApprovalRequest
-	decision := agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_once", Approved: true}
+	decision := agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_once", Approved: true, ReviewText: "review approved"}
 	got, err := runtime.requestDurableApproval(context.Background(), agent.ApprovalRequest{
 		SessionRef: activeSession.SessionRef,
 		Session:    activeSession,
 		RunID:      runID,
 		TurnID:     turnID,
 		Tool:       tool.Definition{Name: "Write"},
-		Call:       tool.Call{ID: "call-approval-request-id", Name: "Write"},
+		Call:       tool.Call{ID: "call-approval-request-id", Name: "Write", Execution: tool.InvocationContext{ItemID: "item-approval-request-id"}},
 	}, approvalRequesterFunc(func(_ context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
 		observed = req
 		return decision, nil
@@ -203,13 +203,28 @@ func TestRequestDurableApprovalExposesPauseTokenIDToRequester(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Events() error = %v", err)
 	}
+	var pending, resolved *session.PauseToken
 	for _, event := range events {
 		token := pauseTokenFromEvent(event)
-		if token != nil && token.TokenID == observed.PauseTokenID {
-			return
+		if token == nil || token.TokenID != observed.PauseTokenID {
+			continue
+		}
+		switch token.Status {
+		case session.PauseTokenPending:
+			pending = token
+		case session.PauseTokenResolved:
+			resolved = token
 		}
 	}
-	t.Fatalf("requester pause token id %q was not persisted", observed.PauseTokenID)
+	if pending == nil || resolved == nil || pending.ItemID != "item-approval-request-id" || resolved.ItemID != pending.ItemID || resolved.TurnID != turnID || resolved.ToolCallID != "call-approval-request-id" {
+		t.Fatalf("persisted pause token correlation = pending %v, resolved %v", pending, resolved)
+	}
+	if got := session.PageEvents(events, session.EventPageRequest{Visibility: session.EventPageCanonical}); len(got.Events) != 0 {
+		t.Fatalf("approval journal entered model context: %#v", got.Events)
+	}
+	if got := session.PageEvents(events, session.EventPageRequest{Visibility: session.EventPageClientReplay}); len(got.Events) != 1 || session.ResolvedApprovalReview(got.Events[0]) == nil || got.Events[0].Journal.PauseToken.ItemID != pending.ItemID {
+		t.Fatalf("resolved decision replay = %#v", got.Events)
+	}
 }
 
 func TestRequestDurableApprovalRequesterFailureLeavesStartedJournal(t *testing.T) {
@@ -532,7 +547,7 @@ func TestResolveApprovalRecoversCommittedDecisionAfterResolverCancellation(t *te
 			go func() {
 				_, requestErr := runtime.requestDurableApproval(context.Background(), agent.ApprovalRequest{
 					SessionRef: active.SessionRef, Session: active, RunID: runID, TurnID: turnID,
-					Tool: tool.Definition{Name: "Write"}, Call: tool.Call{ID: "call-" + kind, Name: "Write"},
+					Tool: tool.Definition{Name: "Write"}, Call: tool.Call{ID: "call-" + kind, Name: "Write", Execution: tool.InvocationContext{ItemID: "item-" + kind}},
 				}, nil)
 				result <- requestErr
 			}()
@@ -553,7 +568,7 @@ func TestResolveApprovalRecoversCommittedDecisionAfterResolverCancellation(t *te
 				t.Fatal("approval waiter did not persist a pause token")
 			}
 
-			decision := agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_once", Approved: true}
+			decision := agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_once", Approved: true, ReviewText: "review approved"}
 			sessions.armed.Store(true)
 			if err := runtime.ResolveApproval(resolverCtx, agent.ResolveApprovalRequest{SessionRef: active.SessionRef, TokenID: tokenID, Decision: decision}); err != nil {
 				t.Fatalf("ResolveApproval() error = %v", err)
@@ -571,6 +586,32 @@ func TestResolveApprovalRecoversCommittedDecisionAfterResolverCancellation(t *te
 			}
 			if err := runtime.ResolveApproval(context.Background(), agent.ResolveApprovalRequest{SessionRef: active.SessionRef, TokenID: tokenID, Decision: decision}); err != nil {
 				t.Fatalf("matching idempotent retry error = %v", err)
+			}
+			all, err := sessions.Events(context.Background(), session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var pending, resolved *session.PauseToken
+			for _, event := range all {
+				if token := pauseTokenFromEvent(event); token != nil && token.TokenID == tokenID {
+					switch token.Status {
+					case session.PauseTokenPending:
+						pending = token
+					case session.PauseTokenResolved:
+						resolved = token
+					}
+				}
+			}
+			if pending == nil || resolved == nil || pending.ItemID != "item-"+kind || resolved.ItemID != pending.ItemID {
+				t.Fatalf("%s persisted correlation: pending %v, resolved %v", kind, pending, resolved)
+			}
+			page, err := base.(session.PagedReader).EventsPage(context.Background(), session.EventPageRequest{SessionRef: active.SessionRef, Visibility: session.EventPageClientReplay})
+			if err != nil || len(page.Events) != 1 || session.ResolvedApprovalReview(page.Events[0]) == nil || page.Events[0].Journal.PauseToken.ItemID != pending.ItemID {
+				t.Fatalf("%s replay page = %#v, error %v", kind, page.Events, err)
+			}
+			canonical, err := base.(session.PagedReader).EventsPage(context.Background(), session.EventPageRequest{SessionRef: active.SessionRef, Visibility: session.EventPageCanonical})
+			if err != nil || len(canonical.Events) != 0 {
+				t.Fatalf("%s model context page = %#v, error %v", kind, canonical.Events, err)
 			}
 			conflict := decision
 			conflict.OptionID = "reject_once"

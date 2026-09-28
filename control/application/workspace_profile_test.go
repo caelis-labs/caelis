@@ -36,7 +36,7 @@ func TestApplicationWorkspaceAndPermissionsProfileValidation(t *testing.T) {
 		{"unknown native tool", func(p *Profile) { p.NativeTools = []string{"CustomExecutor"} }},
 		{"duplicate native tool", func(p *Profile) { p.NativeTools = []string{"Write", "Write"} }},
 		{"unsupported read only policy", func(p *Profile) { p.Permissions.Mode = "read-only" }},
-		{"unsupported approval mode", func(p *Profile) { p.Permissions.ApprovalMode = "auto-review" }},
+		{"auto review without reviewer", func(p *Profile) { p.Permissions.ApprovalMode = "auto-review" }},
 		{"native tools without execution", func(p *Profile) { p.Execution = "tools-only" }},
 	} {
 		t.Run(mutate.name, func(t *testing.T) {

@@ -17,6 +17,8 @@ import (
 func TestApplicationContentFixturesConformToOpenAPI(t *testing.T) {
 	for _, fixture := range []struct{ file, schema string }{
 		{"application-create.json", "CreateApplicationSessionRequest"},
+		{"application-guardian-create.json", "CreateApplicationSessionRequest"},
+		{"application-reviewer-state.json", "ApplicationReviewerState"},
 		{"application-tool-content-v1.json", "ApplicationToolDefinition"},
 		{"application-result-legacy.json", "ApplicationCallResult"},
 		{"application-result-legacy-text.json", "ApplicationCallResult"},

@@ -21,6 +21,7 @@ const guardianAssessmentMaxAttempts = 2
 
 type guardianApprovalReviewer struct {
 	queryNetwork  sandbox.Network
+	queryTools    bool
 	sessions      session.Service
 	systemAgents  systemManagedAgentRunner
 	conversations *guardianConversationManager
@@ -55,6 +56,14 @@ func newGuardianApprovalReviewer(service session.Service) kernel.ApprovalReviewe
 }
 
 func newGuardianApprovalApprover(service session.Service, diagnostics ...*slog.Logger) *guardianApprovalReviewer {
+	reviewer := newApplicationGuardianApprover(service, diagnostics...)
+	reviewer.queryTools = true
+	return reviewer
+}
+
+// newApplicationGuardianApprover uses the same Guardian decision and Session
+// evidence path, without granting ambient filesystem, shell or network queries.
+func newApplicationGuardianApprover(service session.Service, diagnostics ...*slog.Logger) *guardianApprovalReviewer {
 	var logger *slog.Logger
 	if len(diagnostics) > 0 {
 		logger = diagnostics[0]
@@ -274,9 +283,16 @@ func (r *guardianApprovalReviewer) runGuardianAgent(
 		if queryArgs[0].queries.runner != nil {
 			runner = queryArgs[0].queries.runner
 		}
-		tools = queryArgs[0].queries.tools()
-		profile = systemManagedAgentCapabilityReadOnly
-		instructions = guardianEnvironmentContext(queryArgs[0].queries.network)
+		if r.queryTools {
+			tools = queryArgs[0].queries.tools()
+			profile = systemManagedAgentCapabilityReadOnly
+			instructions = guardianEnvironmentContext(queryArgs[0].queries.network)
+		}
+	}
+	if instructions != "" {
+		instructions = guardianPolicySupplement(true) + "\n\n" + instructions
+	} else {
+		instructions = guardianPolicySupplement(false)
 	}
 
 	result, err := runner.Run(ctx, systemManagedAgentRunRequest{

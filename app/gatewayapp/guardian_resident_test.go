@@ -198,14 +198,14 @@ func TestGuardianProjectionIncludesLateResultAndIgnoresPendingAction(t *testing.
 		t.Fatalf("result evidence=%s", text)
 	}
 	first := guardianWindowRequest(t, "first")
-	a, items, err := guardianWindow(guardianConversationSnapshot{ParentEvents: []*session.Event{call}}, first, nil)
+	a, items, err := guardianWindow(guardianConversationSnapshot{ParentEvents: []*session.Event{call}}, first, nil, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	second := first
 	second.ReviewID = "second"
 	second.RuntimeRequest.Call.ID = call.Tool.ID
-	b, _, err := guardianWindow(guardianConversationSnapshot{Events: a, ParentCursor: items.ParentCursor, ParentEvents: []*session.Event{call, result}}, second, nil)
+	b, _, err := guardianWindow(guardianConversationSnapshot{Events: a, ParentCursor: items.ParentCursor, ParentEvents: []*session.Event{call, result}}, second, nil, true)
 	if err != nil {
 		t.Fatal(err)
 	}

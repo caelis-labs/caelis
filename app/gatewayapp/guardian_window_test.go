@@ -38,7 +38,7 @@ func TestGuardianWindowAppendsAndDoesNotRepeatOperations(t *testing.T) {
 	for i := uint64(2); i <= 6; i++ {
 		source = append(source, guardianSource(i, session.EventTypeToolCall, fmt.Sprint(i)))
 	}
-	out, items, err := guardianWindow(guardianConversationSnapshot{ParentEvents: source}, req, nil)
+	out, items, err := guardianWindow(guardianConversationSnapshot{ParentEvents: source}, req, nil, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +50,7 @@ func TestGuardianWindowAppendsAndDoesNotRepeatOperations(t *testing.T) {
 	}
 	snapshot := guardianConversationSnapshot{Events: out, ParentCursor: items.ParentCursor, Version: 1, ParentEvents: append(source, guardianSource(7, session.EventTypeUser, "B steering"), guardianSource(8, session.EventTypeToolCall, "new"))}
 	req.ReviewID = "T2"
-	next, _, err := guardianWindow(snapshot, req, nil)
+	next, _, err := guardianWindow(snapshot, req, nil, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func TestGuardianWindowAppendsAndDoesNotRepeatOperations(t *testing.T) {
 	snapshot.Events = trimmed
 	snapshot.ParentCursor = guardianParentCanonicalCursor{EventID: "8", EventSeq: 8}
 	snapshot.Version = 2
-	again, _, err := guardianWindow(snapshot, req, nil)
+	again, _, err := guardianWindow(snapshot, req, nil, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -243,11 +243,11 @@ func TestGuardianReusedCallIDsRemainDistinctSourceOperations(t *testing.T) {
 	first := guardianSource(1, session.EventTypeToolCall, "first")
 	next := guardianSource(2, session.EventTypeToolCall, "second")
 	next.Tool.ID = first.Tool.ID
-	initial, items, err := guardianWindow(guardianConversationSnapshot{ParentEvents: []*session.Event{first}}, req, nil)
+	initial, items, err := guardianWindow(guardianConversationSnapshot{ParentEvents: []*session.Event{first}}, req, nil, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	out, _, err := guardianWindow(guardianConversationSnapshot{Events: initial, ParentCursor: items.ParentCursor, ParentEvents: []*session.Event{first, next}}, req, nil)
+	out, _, err := guardianWindow(guardianConversationSnapshot{Events: initial, ParentCursor: items.ParentCursor, ParentEvents: []*session.Event{first, next}}, req, nil, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -256,7 +256,7 @@ func TestGuardianReusedCallIDsRemainDistinctSourceOperations(t *testing.T) {
 	}
 	// Approval history never changes how canonical calls are projected.
 	pending := guardianEvidenceEvent("previous approval")
-	out, _, err = guardianWindow(guardianConversationSnapshot{Events: []*session.Event{pending}, ParentEvents: []*session.Event{first, next}}, req, nil)
+	out, _, err = guardianWindow(guardianConversationSnapshot{Events: []*session.Event{pending}, ParentEvents: []*session.Event{first, next}}, req, nil, true)
 	if err != nil {
 		t.Fatal(err)
 	}

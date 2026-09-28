@@ -267,6 +267,7 @@ func (e *Envelope) UnmarshalJSON(raw []byte) error {
 type ApprovalReview struct {
 	ToolCallID    string         `json:"tool_call_id,omitempty"`
 	ToolName      string         `json:"tool_name,omitempty"`
+	ItemID        string         `json:"item_id,omitempty"`
 	RawInput      map[string]any `json:"raw_input,omitempty"`
 	Status        string         `json:"status,omitempty"`
 	Text          string         `json:"text,omitempty"`

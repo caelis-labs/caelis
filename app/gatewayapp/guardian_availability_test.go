@@ -75,7 +75,7 @@ func TestGuardianWindowKeepsLongUserMiddleWhenCapacityFits(t *testing.T) {
 	text := strings.Repeat("User context. ", 2500) + "Never delete the original ledger." + strings.Repeat("More context. ", 2500)
 	req := guardianWindowRequest(t, "long-user")
 	source := guardianSource(1, session.EventTypeUser, text)
-	history, items, err := guardianWindow(guardianConversationSnapshot{ParentEvents: []*session.Event{source}}, req, nil)
+	history, items, err := guardianWindow(guardianConversationSnapshot{ParentEvents: []*session.Event{source}}, req, nil, true)
 	if err != nil || items.MandatoryInputTooLarge || items.ContextTrimmed || !strings.Contains(guardianEventsText(history), text) {
 		t.Fatalf("premature user trimming: %+v %v", items, err)
 	}

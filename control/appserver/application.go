@@ -70,6 +70,10 @@ type ApplicationServiceConfig struct {
 	// ModelImageInput reads the selected model without activation or model calls.
 	// Nil capability means unknown; an unbound reader leaves negotiation absent.
 	ModelImageInput func(context.Context, application.Profile) (*bool, error)
+	// ReviewerState reports local reviewer readiness from the creation-bound
+	// profile without activating a Runtime or contacting the provider. Nil
+	// disables Guardian review admission and capability negotiation.
+	ReviewerState func(context.Context, application.Profile) (application.ReviewerState, error)
 	// NativeExecution reports the Host platform's ordinary native sandbox support.
 	NativeExecution bool
 }
@@ -104,6 +108,9 @@ func (s *ApplicationService) Register(ctx context.Context, p Principal, req appl
 }
 
 func (s *ApplicationService) Create(ctx context.Context, p Principal, req CreateApplicationSessionRequest) (CommandResult, error) {
+	if s.config.ReviewerState == nil && (req.Profile.Reviewer != nil || requiresApplicationCallbackApproval(req.Profile.Tools)) {
+		return CommandResult{}, application.ErrUnsupported
+	}
 	if req.SessionID != "" || req.ExpectedRevision != nil || req.ExpectedControllerEpoch != "" {
 		return CommandResult{}, errorcode.New(errorcode.InvalidArgument, "application: creation cannot select a Session or revision")
 	}
@@ -115,6 +122,17 @@ func (s *ApplicationService) Create(ctx context.Context, p Principal, req Create
 		}
 		return s.config.Commands.CreateApplicationSession(ctx, p, req)
 	})
+}
+
+// requiresApplicationCallbackApproval identifies callback catalogs that need the
+// negotiated Guardian review capability, including manual approval routing.
+func requiresApplicationCallbackApproval(tools []application.ToolDefinition) bool {
+	for _, tool := range tools {
+		if tool.ApprovalPolicy == "required" {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *ApplicationService) Prompt(ctx context.Context, p Principal, req ApplicationPromptRequest) (CommandResult, error) {

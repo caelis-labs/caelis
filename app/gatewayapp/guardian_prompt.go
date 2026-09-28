@@ -35,7 +35,7 @@ The Harness supplies incremental source records in sequence order. Calls and res
 
 Decision:
 ` + guardianDecisionPolicy() + `
-For Host escalation, use the supplied boundary and actual results to assess necessity. Deny needless elevation when trusted boundary facts establish the action can already run in the requested scope. A required write inside a bound read_only_subpath can justify escalation without a failed probe. Unknown external sandbox facts do not inherit the parent's restrictions. The Guardian query sandbox is different: a command failing there does not establish a failure in the requesting environment. Approval preserves the original action and execution route.`
+For Host escalation, use the supplied boundary and actual results to assess necessity. Deny needless elevation when trusted boundary facts establish the action can already run in the requested scope. A required write inside a bound read_only_subpath can justify escalation without a failed probe. Unknown external sandbox facts do not inherit the parent's restrictions. Approval preserves the original action and execution route.`
 }
 
 func guardianDecisionPolicy() string {
@@ -52,13 +52,24 @@ Use only the supplied user messages and current action. There are no historical 
 }
 
 func guardianPolicyPrompt() string {
-	return guardianPolicyCore() + `
+	return guardianPolicyCore() + "\n\n" + guardianPolicySupplement(true)
+}
+
+func guardianPolicySupplement(queryTools bool) string {
+	if !queryTools {
+		return `Evidence is limited to the supplied canonical Session messages, tool calls and results, and the exact current action. No filesystem, shell, network, external tools or independent retrieval are available to Guardian. Do not claim to inspect files or infer unseen contents. Decide from supplied evidence; missing evidence alone does not require rejection. No Host escalation, recursive approval or agent communication capability is available to Guardian.` + "\n\n" + guardianDecisionOutput()
+	}
+	return `The Guardian query sandbox is different from the requesting environment: a command failing there does not establish a failure in the requesting environment.
 
 Optional evidence:
 Additional retrieval and evidence gathering are optional. Use a tool only for a specific missing fact that could change the decision; for example, read a remote script as text when its effects matter to the user's constraints. Reuse supplied evidence, stop when it is sufficient, and do not repeat equivalent queries. Do not search Session transcripts or reconstruct task history. Never read credential contents merely to decide an unauthorized export.
 Read, Grep and RunCommand provide current file or command observations, not historical snapshots. A tool error, unavailable backend, permission failure or truncated output is an evidence limitation. Decide from the remaining facts; uncertainty alone does not require rejection. All work shares a 90-second approval deadline. Do not request a fresh review or ask the main agent to repair Guardian.
 Only temporary directories are writable. The query network policy is inherited from the main Agent subject to the actual backend capabilities stated in environment_context. Use the supplied shell and temporary-file syntax. There is no Host escalation, recursive approval or agent communication capability.
 
-Output:
+` + guardianDecisionOutput()
+}
+
+func guardianDecisionOutput() string {
+	return `Output:
 Return exactly one JSON object. Allow: {"option_id":"listed allow option"}, without rationale. Deny: {"option_id":"listed reject option","rationale":"specific risk and task or authorization conflict"}. Do not output risk_level, user_authorization or outcome. Option kind defines allow/reject and once/always scope; never infer meaning from names or IDs. Prefer once unless persistent authorization is established. Control handles missing options; never invent an option.`
 }

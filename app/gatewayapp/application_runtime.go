@@ -53,8 +53,8 @@ func (a *workspaceConfigAssembler) assembleApplicationSnapshot(ctx context.Conte
 	if err != nil {
 		return nil, err
 	}
-	// Only the selected provider model and its credential are loaded from Host
-	// configuration. No workspace configuration may alter the application prefix.
+	// Model selection is explicit for both the application and its reviewer.
+	// No workspace configuration may alter the application prefix.
 	_, lookup, err := a.loadRuntimeModelSnapshot(ctx, active)
 	if err != nil {
 		return nil, err
@@ -63,7 +63,7 @@ func (a *workspaceConfigAssembler) assembleApplicationSnapshot(ctx context.Conte
 	instance := &sessionRuntimeInstance{runtimeComposition: runtimeComposition{
 		authorities: a.deps.authorities, sessions: sessions, workspace: workspace, lookup: lookup,
 		activation:        &sessionRuntimeActivation{modelCatalog: a.deps.modelCatalog, sessionRef: active.SessionRef},
-		activeRuntime:     stackRuntimeConfig{ContextWindow: contextWindow},
+		activeRuntime:     stackRuntimeConfig{ContextWindow: contextWindow, ApprovalMode: application.EffectiveApprovalMode(binding.Profile)},
 		executionConfig:   sandbox.CloneExecutionConfig(active.ExecutionConfig),
 		retainRuntimeWork: activity.retainWork, runtimeTaskChanged: activity.taskChanged, taskCommitted: activity.taskCommitted,
 	}}
@@ -156,9 +156,16 @@ func (a *workspaceConfigAssembler) assembleApplicationSnapshot(ctx context.Conte
 	if err != nil {
 		return nil, err
 	}
+	var approver kernel.ApprovalApprover
+	if binding.Profile.Reviewer != nil {
+		bundle.Guardian = newApplicationGuardianApprover(sessions, a.deps.authorities.diagnostics)
+		approver = bundle.Guardian
+	}
 	bundle.Gateway, err = kernel.New(kernel.Config{
 		Sessions: sessions, Runtime: fenced, TurnStartGate: a.deps.authorities.approvalRecovery,
-		Resolver: resolver, ExecutionValidator: validator, DefaultApprovalMode: kernel.ApprovalModeManual,
+		Resolver: resolver, ExecutionValidator: validator,
+		DefaultApprovalMode: kernel.ApprovalMode(application.EffectiveApprovalMode(binding.Profile)),
+		ApprovalApprover:    approver,
 	})
 	if err != nil {
 		return nil, err
@@ -286,20 +293,23 @@ func (r *applicationTurnResolver) resolveModelRequest(ctx context.Context, sourc
 }
 
 func applicationPolicyRegistry(profile application.Profile) (policy.Registry, string, error) {
+	mode := "application-tools-only"
+	var native policy.Mode
 	if profile.Execution == "workspace-write" {
+		native = presets.WorkspaceWriteMode()
 		if profile.Permissions.Mode == presets.ModeDangerFullAccess {
-			registry, err := policy.NewMemory(presets.DangerFullAccessMode())
-			return registry, presets.ModeDangerFullAccess, err
+			native = presets.DangerFullAccessMode()
 		}
-		registry, err := presets.NewRegistry()
-		return registry, presets.ModeWorkspaceWrite, err
+		mode = native.Name()
 	}
-	const mode = "application-tools-only"
-	registry, err := policy.NewMemory(policy.NamedMode{ID: mode, Decide: func(_ context.Context, input policy.ToolContext) (policy.Decision, error) {
-		// The selected, stored catalog is the admission owner. Each request
-		// receives only its immutable callbacks, including after hot updates.
-		if external, _ := input.Tool.Metadata[tool.MetadataExternalCapability].(bool); external {
-			return policy.Decision{Action: policy.ActionAllow}, nil
+	registry, err := policy.NewMemory(policy.NamedMode{ID: mode, Decide: func(ctx context.Context, input policy.ToolContext) (policy.Decision, error) {
+		// Only the stored, request-pinned callback catalog supplies callback
+		// policy; names and model arguments cannot opt into this path.
+		if decision, handled, err := application.CallbackPolicyDecision(input); handled || err != nil {
+			return decision, err
+		}
+		if native != nil {
+			return native.DecideTool(ctx, input)
 		}
 		return policy.Decision{Action: policy.ActionDeny, Reason: "tools-only application execution admits only stored callbacks"}, nil
 	}})

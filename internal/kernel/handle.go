@@ -399,6 +399,10 @@ func (h *turnHandle) approvalReviewEnvelopes(req *agent.ApprovalRequest, payload
 	if review := approvalReviewFromPayload(payload); review != nil {
 		next := base
 		next.Kind = eventstream.KindApprovalReview
+		if req != nil {
+			next.ApprovalRequestID = eventstream.ApprovalRequestID(strings.TrimSpace(req.PauseTokenID))
+			review.ItemID = strings.TrimSpace(req.Call.Execution.ItemID)
+		}
 		next.ApprovalReview = review
 		return []eventstream.Envelope{next}
 	}
