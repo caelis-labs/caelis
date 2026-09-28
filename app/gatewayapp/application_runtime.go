@@ -64,12 +64,13 @@ func (a *workspaceConfigAssembler) assembleApplicationSnapshot(ctx context.Conte
 		authorities: a.deps.authorities, sessions: sessions, workspace: workspace, lookup: lookup,
 		activation:        &sessionRuntimeActivation{modelCatalog: a.deps.modelCatalog, sessionRef: active.SessionRef},
 		activeRuntime:     stackRuntimeConfig{ContextWindow: contextWindow},
+		executionConfig:   sandbox.CloneExecutionConfig(active.ExecutionConfig),
 		retainRuntimeWork: activity.retainWork, runtimeTaskChanged: activity.taskChanged, taskCommitted: activity.taskCommitted,
 	}}
 	var execRuntime *applicationExecutionRuntime
 	var sandboxDescriptor sandbox.DescriptorProvider = applicationNoNativeExecution{}
 	if binding.Profile.Execution == "workspace-write" {
-		execRuntime, err = newApplicationExecutionRuntime(workspace.CWD, a.deps.authorities.storeDir, store, binding.Scope, binding.Profile)
+		execRuntime, err = newApplicationExecutionRuntime(workspace.CWD, a.deps.authorities.storeDir, store, binding.Scope, binding.Profile, instance.executionConfig)
 		if err != nil {
 			return nil, err
 		}

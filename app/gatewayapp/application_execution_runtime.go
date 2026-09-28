@@ -44,7 +44,7 @@ type applicationExecutionRuntime struct {
 	scope      application.Scope
 }
 
-func newApplicationExecutionRuntime(cwd, storeDir string, lease *application.Store, scope application.Scope, profile application.Profile) (*applicationExecutionRuntime, error) {
+func newApplicationExecutionRuntime(cwd, storeDir string, lease *application.Store, scope application.Scope, profile application.Profile, execution *sandbox.ExecutionConfig) (*applicationExecutionRuntime, error) {
 	if err := validateApplicationExecutionPlatform("workspace-write"); err != nil {
 		return nil, err
 	}
@@ -74,6 +74,7 @@ func newApplicationExecutionRuntime(cwd, storeDir string, lease *application.Sto
 	// escalation. CWD and explicitly selected read-write directories are the
 	// default write grants; read-only directories add no write authority.
 	rt, err := sandbox.New(sandbox.Config{CWD: securedCWD, StateDir: storeDir,
+		Execution: execution, BaseEnv: runtimeCommandEnvironment(),
 		RequestedBackend: route.Backend, BackendCandidates: route.BackendCandidates,
 		FallbackInstallHint: route.InstallHint, WritableRoots: writable})
 	if err != nil {
@@ -145,17 +146,6 @@ func (r *applicationExecutionRuntime) command(req sandbox.CommandRequest) (sandb
 		return req, errors.New("gatewayapp: command working directory is outside configured application directories")
 	}
 	req.Dir = resolved
-	// Native runners merge overrides with the ambient environment. Clear each
-	// inherited value before adding only fixed, non-credential process settings.
-	req.Env = map[string]string{}
-	for _, entry := range os.Environ() {
-		key, _, _ := strings.Cut(entry, "=")
-		req.Env[key] = ""
-	}
-	req.Env["PATH"] = "/usr/bin:/bin"
-	req.Env["HOME"] = r.cwd
-	req.Env["TMPDIR"] = r.cwd
-	req.Env["ZDOTDIR"] = r.cwd
 	return req, nil
 }
 

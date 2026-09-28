@@ -14,6 +14,98 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 )
 
+func TestExecutionConfigurationSmoke(t *testing.T) {
+	if os.Getenv("CAELIS_LINUX_SANDBOX_SMOKE_E2E") != "1" {
+		t.Skip("set CAELIS_LINUX_SANDBOX_SMOKE_E2E=1 to run native bwrap execution configuration tests")
+	}
+	t.Setenv("CAELIS_BWRAP_INHERITED", "inherited")
+	t.Setenv("CAELIS_BWRAP_DROP", "drop")
+	inherit := false
+	for _, tt := range []struct {
+		name      string
+		execution *sandbox.ExecutionConfig
+		overrides map[string]string
+		command   string
+		want      string
+	}{
+		{
+			name:    "default",
+			command: `printf '%s|%s' "$0" "$CAELIS_BWRAP_INHERITED"`,
+			want:    "/bin/bash|inherited",
+		},
+		{
+			name: "configured-shell-and-environment",
+			execution: &sandbox.ExecutionConfig{
+				Shell: sandbox.ShellConfig{Path: "/bin/sh"},
+				Environment: sandbox.EnvironmentConfig{
+					Unset: []string{"CAELIS_BWRAP_INHERITED"},
+					Set: map[string]string{
+						"HOME": "/configured/home", "PATH": "/configured/bin",
+						"VALUE": "configuration", "EMPTY": "", "LITERAL": "--\nwith spaces",
+					},
+				},
+			},
+			overrides: map[string]string{"VALUE": "command"},
+			command:   `test -z "${CAELIS_BWRAP_INHERITED+x}${CAELIS_BWRAP_DROP+x}" && printf '%s|%s|%s|%s|%s|%s' "$0" "$HOME" "$PATH" "$VALUE" "${EMPTY+x}" "$LITERAL"`,
+			want:      "/bin/sh|/configured/home|/configured/bin|command|x|--\nwith spaces",
+		},
+		{
+			name:      "no-inheritance",
+			execution: &sandbox.ExecutionConfig{Environment: sandbox.EnvironmentConfig{Inherit: &inherit}},
+			overrides: map[string]string{"VALUE": "command"},
+			command:   `test -z "${CAELIS_BWRAP_INHERITED+x}${CAELIS_BWRAP_DROP+x}" && printf '%s|%s' "$0" "$VALUE"`,
+			want:      "/bin/bash|command",
+		},
+		{
+			name:      "empty-environment",
+			execution: &sandbox.ExecutionConfig{Environment: sandbox.EnvironmentConfig{Inherit: &inherit}},
+			command:   `test -z "${CAELIS_BWRAP_INHERITED+x}${CAELIS_BWRAP_DROP+x}${VALUE+x}" && printf '%s' "$0"`,
+			want:      "/bin/bash",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			workspace := t.TempDir()
+			rt, err := New(sandbox.Config{CWD: workspace, Execution: tt.execution})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer rt.Close()
+			for _, mode := range []string{"Run", "Start", "TTY"} {
+				t.Run(mode, func(t *testing.T) {
+					ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+					defer cancel()
+					req := sandbox.CommandRequest{
+						Command: tt.command, Dir: workspace,
+						Env: tt.overrides, UnsetEnv: []string{"CAELIS_BWRAP_DROP"},
+						Constraints: sandbox.Constraints{Route: sandbox.RouteSandbox, Permission: sandbox.PermissionWorkspaceWrite},
+					}
+					var result sandbox.CommandResult
+					var err error
+					if mode == "Run" {
+						result, err = rt.Run(ctx, req)
+					} else {
+						req.TTY = mode == "TTY"
+						session, startErr := rt.Start(ctx, req)
+						if startErr != nil {
+							t.Fatal(startErr)
+						}
+						if _, waitErr := session.Wait(ctx, 10*time.Second); waitErr != nil {
+							t.Fatal(waitErr)
+						}
+						result, err = session.Result(ctx)
+					}
+					if err != nil || result.ExitCode != 0 || result.Backend != sandbox.BackendBwrap || result.Route != sandbox.RouteSandbox {
+						t.Fatalf("command error = %v; result=%+v", err, result)
+					}
+					if got := strings.ReplaceAll(result.Stdout, "\r\n", "\n"); got != tt.want || result.Stderr != "" {
+						t.Fatalf("output = %q, stderr = %q; want %q", got, result.Stderr, tt.want)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestSandboxedCommandSmoke(t *testing.T) {
 	if os.Getenv("CAELIS_LINUX_SANDBOX_SMOKE_E2E") != "1" {
 		t.Skip("set CAELIS_LINUX_SANDBOX_SMOKE_E2E=1 to run the Linux bwrap sandbox smoke test")

@@ -116,7 +116,7 @@ func (q *guardianQueries) open() error {
 			return err
 		}
 	}
-	cfg := sandbox.Config{CWD: scratch, ResourceLimits: &sandbox.ResourceLimits{WritePaths: []string{scratch}, Network: q.network}}
+	cfg := sandbox.Config{CWD: scratch, BaseEnv: runtimeCommandEnvironment(), ResourceLimits: &sandbox.ResourceLimits{WritePaths: []string{scratch}, Network: q.network}}
 	var rt sandbox.Runtime
 	switch runtime.GOOS {
 	case "darwin":

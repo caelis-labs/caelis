@@ -23,6 +23,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/backend/procutil"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/backend/runnerruntime"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/host"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox/internal/envfd"
 )
 
 const (
@@ -51,12 +52,16 @@ type bwrapRunner struct {
 	stat           func(string) (os.FileInfo, error)
 	goos           string
 	cfg            Config
+	env            sandbox.EnvironmentSnapshot
 	sessionManager *cmdsession.SessionManager
 	closed         atomic.Bool
 }
 
 func New(cfg Config) (sandbox.Runtime, error) {
 	cfg = sandbox.NormalizeConfig(cfg)
+	if err := sandbox.ValidateConfig(cfg); err != nil {
+		return nil, err
+	}
 	runner := &bwrapRunner{
 		execCommand:    exec.CommandContext,
 		lookPath:       exec.LookPath,
@@ -64,18 +69,20 @@ func New(cfg Config) (sandbox.Runtime, error) {
 		stat:           os.Stat,
 		goos:           stdruntime.GOOS,
 		cfg:            cfg,
+		env:            sandbox.NewEnvironmentSnapshot(cfg.Execution, cfg.BaseEnv),
 		sessionManager: cmdsession.NewSessionManager(cmdsession.DefaultSessionManagerConfig()),
 	}
 	if err := runner.probe(context.Background()); err != nil {
 		_ = runner.Close()
 		return nil, err
 	}
-	hostRuntime, err := host.New(host.Config{CWD: cfg.CWD})
+	hostRuntime, err := host.New(host.Config{CWD: cfg.CWD, Execution: cfg.Execution, BaseEnv: cfg.BaseEnv})
 	if err != nil {
 		_ = runner.Close()
 		return nil, err
 	}
 	return runnerruntime.New(runnerruntime.Config{
+		CWD:     cfg.CWD,
 		Backend: sandbox.BackendBwrap,
 		Descriptor: sandbox.Descriptor{
 			Backend:   sandbox.BackendBwrap,
@@ -117,8 +124,9 @@ func (b *bwrapRunner) probe(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("bwrap sandbox unavailable: bwrap not found: %w; %s", err, bubblewrapInstallHint(b.readFile))
 	}
-	if _, err := b.lookPath("bash"); err != nil {
-		return fmt.Errorf("bwrap sandbox unavailable: bash not found: %w", err)
+	shell, _ := sandbox.ShellArgs(b.cfg.Execution, "")
+	if _, err := b.stat(shell); err != nil {
+		return fmt.Errorf("bwrap sandbox unavailable: shell %q not found: %w", shell, err)
 	}
 	probeArgs := []string{
 		"--ro-bind", "/", "/",
@@ -139,6 +147,7 @@ func (b *bwrapRunner) probe(ctx context.Context) error {
 	probeCtx, cancel := context.WithTimeout(ctx, bwrapProbeTimeout)
 	defer cancel()
 	cmd := b.execCommand(probeCtx, "bwrap", probeArgs...)
+	cmd.Env = []string{}
 	procutil.ApplyNonInteractiveCommandDefaults(cmd)
 	cmd.WaitDelay = bwrapProbeWaitDelay
 	cmd.Stdout = io.Discard
@@ -182,13 +191,17 @@ func (b *bwrapRunner) Run(ctx context.Context, req runnerruntime.Request) (sandb
 	if err != nil {
 		return sandbox.CommandResult{}, fmt.Errorf("tool: prepare bwrap sandbox policy failed: %w", err)
 	}
-	bwrapArgs = append(bwrapArgs, "--", "bash", "-lc", req.Command)
-	cmd := b.execCommand(runCtx, "bwrap", bwrapArgs...)
+	shell, args := sandbox.ShellArgs(b.cfg.Execution, req.Command)
+	bwrapArgs = appendBwrapEnvironment(bwrapArgs, b.env.Build(req.UnsetEnv, req.EnvOverrides))
+	cmd, payload, err := b.commandWithArgs(runCtx, bwrapArgs, shell, args)
+	if err != nil {
+		return sandbox.CommandResult{}, err
+	}
+	defer payload.Close()
 	procutil.ApplyNonInteractiveCommandDefaults(cmd)
 	if strings.TrimSpace(req.Dir) != "" {
 		cmd.Dir = req.Dir
 	}
-	cmd.Env = mergeCommandEnv(req.EnvOverrides)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	lastOutput := atomic.Int64{}
@@ -246,10 +259,16 @@ func (b *bwrapRunner) StartAsync(_ context.Context, req runnerruntime.Request) (
 		return "", fmt.Errorf("tool: resolve bwrap workdir failed: %w", err)
 	}
 	effectivePolicy := policy.Default(b.cfg, req.Constraints)
+	var payload *os.File
+	defer func() {
+		if payload != nil {
+			_ = payload.Close()
+		}
+	}()
 	session, err := manager.StartSession(cmdsession.AsyncSessionConfig{
 		Command:         req.Command,
 		Dir:             req.Dir,
-		Env:             mergeCommandEnv(req.EnvOverrides),
+		Env:             b.env.Build(req.UnsetEnv, req.EnvOverrides),
 		OutputBufferCap: 256 * 1024,
 		Timeout:         req.Timeout,
 		IdleTimeout:     req.IdleTimeout,
@@ -260,12 +279,16 @@ func (b *bwrapRunner) StartAsync(_ context.Context, req runnerruntime.Request) (
 			if err != nil {
 				return nil, fmt.Errorf("tool: prepare bwrap sandbox policy failed: %w", err)
 			}
-			args = append(args, "--", "bash", "-lc", cfg.Command)
-			cmd := b.execCommand(ctx, "bwrap", args...)
+			shell, shellArgs := sandbox.ShellArgs(b.cfg.Execution, cfg.Command)
+			args = appendBwrapEnvironment(args, cfg.Env)
+			cmd, file, err := b.commandWithArgs(ctx, args, shell, shellArgs)
+			if err != nil {
+				return nil, err
+			}
+			payload = file
 			if strings.TrimSpace(cfg.Dir) != "" {
 				cmd.Dir = cfg.Dir
 			}
-			cmd.Env = append([]string(nil), cfg.Env...)
 			return cmd, nil
 		},
 	})
@@ -459,15 +482,33 @@ func normalizeStringList(values []string) []string {
 	return out
 }
 
-func mergeCommandEnv(extra map[string]string) []string {
-	env := os.Environ()
-	for key, value := range extra {
-		if key == "" {
-			continue
-		}
-		env = append(env, key+"="+value)
+// appendBwrapEnvironment prepares target-only environment options, passed over
+// a private descriptor rather than exposed on the launcher argv.
+func appendBwrapEnvironment(args, env []string) []string {
+	args = append(args, "--clearenv")
+	for _, item := range env {
+		key, value, _ := strings.Cut(item, "=")
+		args = append(args, "--setenv", key, value)
 	}
-	return env
+	return args
+}
+
+func (b *bwrapRunner) commandWithArgs(ctx context.Context, options []string, shell string, shellArgs []string) (*exec.Cmd, *os.File, error) {
+	data, err := envfd.PackNUL(options)
+	if err != nil {
+		return nil, nil, err
+	}
+	payload, err := envfd.Open(data)
+	if err != nil {
+		return nil, nil, err
+	}
+	// bwrap parses --args recursively as options only; a command in that file
+	// is discarded. Keep the target command on the outer argv.
+	args := append([]string{"--args", "3", "--", shell}, shellArgs...)
+	cmd := b.execCommand(ctx, "bwrap", args...)
+	cmd.Env = []string{}
+	cmd.ExtraFiles = append(cmd.ExtraFiles, payload)
+	return cmd, payload, nil
 }
 
 func resolveExitCode(err error) int {

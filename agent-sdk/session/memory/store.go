@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/internal/identity"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/session/internal/cwdpath"
 )
@@ -69,6 +70,9 @@ func (s *Store) StartSession(
 	if err := session.ValidateMetadata(req.Metadata); err != nil {
 		return session.Session{}, err
 	}
+	if err := sandbox.ValidateExecutionConfig(req.ExecutionConfig); err != nil {
+		return session.Session{}, err
+	}
 	ref := session.NormalizeSessionRef(session.SessionRef{
 		AppName:      req.AppName,
 		UserID:       req.UserID,
@@ -86,19 +90,23 @@ func (s *Store) StartSession(
 	defer s.mu.Unlock()
 
 	if existing, ok := s.sessions[ref.SessionID]; ok {
+		if !session.EqualExecutionConfig(existing.session.ExecutionConfig, req.ExecutionConfig) {
+			return session.Session{}, session.ErrInvalidSession
+		}
 		return existing.cloneSession(), nil
 	}
 
 	now := s.now()
 	createdSession := session.Session{
-		SessionRef:   ref,
-		CWD:          strings.TrimSpace(req.Workspace.CWD),
-		Title:        strings.TrimSpace(req.Title),
-		Metadata:     session.CloneState(req.Metadata),
-		Controller:   session.CloneControllerBinding(req.Controller),
-		Participants: nil,
-		CreatedAt:    now,
-		UpdatedAt:    now,
+		SessionRef:      ref,
+		CWD:             strings.TrimSpace(req.Workspace.CWD),
+		ExecutionConfig: sandbox.CloneExecutionConfig(req.ExecutionConfig),
+		Title:           strings.TrimSpace(req.Title),
+		Metadata:        session.CloneState(req.Metadata),
+		Controller:      session.CloneControllerBinding(req.Controller),
+		Participants:    nil,
+		CreatedAt:       now,
+		UpdatedAt:       now,
 	}
 	s.sessions[ref.SessionID] = &record{
 		session: createdSession,

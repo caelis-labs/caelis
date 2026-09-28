@@ -5,6 +5,7 @@ package seatbelt
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -23,6 +24,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/backend/procutil"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/backend/runnerruntime"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/host"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox/internal/envfd"
 )
 
 const (
@@ -47,30 +49,53 @@ type seatbeltRunner struct {
 	execCommand    func(context.Context, string, ...string) *exec.Cmd
 	lookPath       func(string) (string, error)
 	goos           string
+	helperPath     string
 	cfg            Config
+	env            sandbox.EnvironmentSnapshot
 	sessionManager *cmdsession.SessionManager
 	closed         atomic.Bool
 }
 
 func New(cfg Config) (sandbox.Runtime, error) {
 	cfg = sandbox.NormalizeConfig(cfg)
+	if err := sandbox.ValidateConfig(cfg); err != nil {
+		return nil, err
+	}
+	helperPath := cfg.HelperPath
+	if helperPath == "" {
+		var err error
+		helperPath, err = os.Executable()
+		if err != nil {
+			return nil, fmt.Errorf("seatbelt helper executable: %w", err)
+		}
+	}
+	if cfg.ResourceLimits != nil && cfg.ResourceLimits.ReadPaths != nil && !helperAllowedByReadCeiling(helperPath, cfg.ResourceLimits.ReadPaths) {
+		return nil, fmt.Errorf("seatbelt helper %q must be inside mandatory read ceiling", helperPath)
+	}
 	runner := &seatbeltRunner{
 		execCommand:    exec.CommandContext,
 		lookPath:       exec.LookPath,
 		goos:           stdruntime.GOOS,
+		helperPath:     helperPath,
 		cfg:            cfg,
+		env:            sandbox.NewEnvironmentSnapshot(cfg.Execution, cfg.BaseEnv),
 		sessionManager: cmdsession.NewSessionManager(cmdsession.DefaultSessionManagerConfig()),
+	}
+	if err := runner.probeHelper(context.Background()); err != nil {
+		_ = runner.Close()
+		return nil, err
 	}
 	if err := runner.probe(context.Background()); err != nil {
 		_ = runner.Close()
 		return nil, err
 	}
-	hostRuntime, err := host.New(host.Config{CWD: cfg.CWD})
+	hostRuntime, err := host.New(host.Config{CWD: cfg.CWD, Execution: cfg.Execution, BaseEnv: cfg.BaseEnv})
 	if err != nil {
 		_ = runner.Close()
 		return nil, err
 	}
 	return runnerruntime.New(runnerruntime.Config{
+		CWD:     cfg.CWD,
 		Backend: sandbox.BackendSeatbelt,
 		Descriptor: sandbox.Descriptor{
 			Backend:   sandbox.BackendSeatbelt,
@@ -128,6 +153,7 @@ func (s *seatbeltRunner) probe(ctx context.Context) error {
 	probeCtx, cancel := context.WithTimeout(ctx, seatbeltProbeTimeout)
 	defer cancel()
 	cmd := s.execCommand(probeCtx, "sandbox-exec", "-p", profile, seatbeltProbeExecutable)
+	cmd.Env = []string{}
 	procutil.ApplyNonInteractiveCommandDefaults(cmd)
 	cmd.WaitDelay = seatbeltProbeWaitDelay
 	cmd.Stdout = io.Discard
@@ -169,13 +195,16 @@ func (s *seatbeltRunner) Run(ctx context.Context, req runnerruntime.Request) (sa
 		return sandbox.CommandResult{}, fmt.Errorf("tool: prepare seatbelt sandbox policy failed: %w", err)
 	}
 
-	args := []string{"-p", profile, "bash", seatbeltShellFlag(s.cfg), req.Command}
-	cmd := s.execCommand(runCtx, "sandbox-exec", args...)
+	shell, shellArgs := sandbox.ShellArgs(s.cfg.Execution, req.Command)
+	cmd, payload, err := s.seatbeltCommand(runCtx, profile, shell, shellArgs, s.env.Build(req.UnsetEnv, req.EnvOverrides))
+	if err != nil {
+		return sandbox.CommandResult{}, err
+	}
+	defer payload.Close()
 	procutil.ApplyNonInteractiveCommandDefaults(cmd)
 	if strings.TrimSpace(req.Dir) != "" {
 		cmd.Dir = req.Dir
 	}
-	cmd.Env = mergeCommandEnv(req.EnvOverrides)
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -236,10 +265,16 @@ func (s *seatbeltRunner) StartAsync(_ context.Context, req runnerruntime.Request
 		return "", fmt.Errorf("tool: resolve seatbelt workdir failed: %w", err)
 	}
 	effectivePolicy := policy.Default(s.cfg, req.Constraints)
+	var payload *os.File
+	defer func() {
+		if payload != nil {
+			_ = payload.Close()
+		}
+	}()
 	session, err := manager.StartSession(cmdsession.AsyncSessionConfig{
 		Command:         req.Command,
 		Dir:             req.Dir,
-		Env:             mergeCommandEnv(req.EnvOverrides),
+		Env:             s.env.Build(req.UnsetEnv, req.EnvOverrides),
 		OutputBufferCap: 256 * 1024,
 		Timeout:         req.Timeout,
 		IdleTimeout:     req.IdleTimeout,
@@ -250,11 +285,15 @@ func (s *seatbeltRunner) StartAsync(_ context.Context, req runnerruntime.Request
 			if err != nil {
 				return nil, fmt.Errorf("tool: prepare seatbelt sandbox policy failed: %w", err)
 			}
-			cmd := s.execCommand(ctx, "sandbox-exec", "-p", profile, "bash", "-lc", cfg.Command)
+			shell, shellArgs := sandbox.ShellArgs(s.cfg.Execution, cfg.Command)
+			cmd, file, err := s.seatbeltCommand(ctx, profile, shell, shellArgs, cfg.Env)
+			if err != nil {
+				return nil, err
+			}
+			payload = file
 			if strings.TrimSpace(cfg.Dir) != "" {
 				cmd.Dir = cfg.Dir
 			}
-			cmd.Env = append([]string(nil), cfg.Env...)
 			return cmd, nil
 		},
 	})
@@ -491,17 +530,6 @@ func normalizeStringList(values []string) []string {
 	return out
 }
 
-func mergeCommandEnv(extra map[string]string) []string {
-	env := os.Environ()
-	for key, value := range extra {
-		if key == "" {
-			continue
-		}
-		env = append(env, key+"="+value)
-	}
-	return env
-}
-
 func resolveExitCode(err error) int {
 	if err == nil {
 		return 0
@@ -541,9 +569,31 @@ func init() {
 	sandbox.RegisterBuiltInBackendFactory(backendFactory{})
 }
 
-func seatbeltShellFlag(cfg Config) string {
-	if cfg.ResourceLimits != nil {
-		return "-c"
+// seatbeltCommand keeps command environment off the sandbox-exec launcher and
+// argv. The self-exec helper reads FD3 inside Seatbelt and execs the shell with
+// the assembled environment without narrowing allowed variable names.
+func (s *seatbeltRunner) seatbeltCommand(ctx context.Context, profile, shell string, shellArgs, env []string) (*exec.Cmd, *os.File, error) {
+	payload, err := json.Marshal(env)
+	if err != nil {
+		return nil, nil, err
 	}
-	return "-lc"
+	file, err := envfd.Open(payload)
+	if err != nil {
+		return nil, nil, err
+	}
+	args := []string{"-p", profile, s.helperPath, seatbeltHelperCommand, "--shell", shell, "--shell-flag", shellArgs[0], "--command", shellArgs[1], "--env-fd", "3"}
+	cmd := s.execCommand(ctx, "sandbox-exec", args...)
+	cmd.Env = []string{}
+	cmd.ExtraFiles = append(cmd.ExtraFiles, file)
+	return cmd, file, nil
+}
+
+func helperAllowedByReadCeiling(path string, roots []string) bool {
+	for _, root := range roots {
+		rel, err := filepath.Rel(root, path)
+		if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
 }

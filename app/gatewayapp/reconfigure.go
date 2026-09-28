@@ -258,6 +258,8 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 	}
 	sandboxPortConfig := sandbox.Config{
 		CWD:                 s.workspace.CWD,
+		Execution:           sandbox.CloneExecutionConfig(s.executionConfig),
+		BaseEnv:             runtimeCommandEnvironment(),
 		RequestedBackend:    route.Backend,
 		BackendCandidates:   route.BackendCandidates,
 		FallbackInstallHint: route.InstallHint,

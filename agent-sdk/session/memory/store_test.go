@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/session/sessiontest"
 )
@@ -79,6 +80,25 @@ func TestStoreAppendAndListCanonicalEvents(t *testing.T) {
 	}
 	if got, want := len(allEvents), 1; got != want {
 		t.Fatalf("len(allEvents) = %d, want %d; memory store must not persist transient notices", got, want)
+	}
+}
+
+func TestStoreExecutionConfigCreationBoundAndDetached(t *testing.T) {
+	store := NewStore(Config{})
+	ctx := context.Background()
+	config := &sandbox.ExecutionConfig{Environment: sandbox.EnvironmentConfig{Set: map[string]string{"MODE": "test"}}}
+	active, err := store.StartSession(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "user", ExecutionConfig: config})
+	if err != nil {
+		t.Fatal(err)
+	}
+	config.Environment.Set["MODE"] = "changed input"
+	active.ExecutionConfig.Environment.Set["MODE"] = "changed result"
+	loaded, err := store.Session(ctx, active.SessionRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.ExecutionConfig == nil || loaded.ExecutionConfig.Environment.Set["MODE"] != "test" {
+		t.Fatalf("stored execution config = %#v, want creation-bound detached value", loaded.ExecutionConfig)
 	}
 }
 

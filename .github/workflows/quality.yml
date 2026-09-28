@@ -66,7 +66,9 @@ jobs:
   go-quality:
     needs: changes
     if: needs.changes.outputs.full == 'true'
-    runs-on: ubuntu-latest
+    # Native bwrap tests need unprivileged user namespaces without the 24.04
+    # AppArmor restriction; do not disable that restriction runner-wide.
+    runs-on: ubuntu-22.04
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7
@@ -85,6 +87,14 @@ jobs:
 
       - name: Test
         run: make test
+
+      - name: Install bubblewrap
+        run: sudo apt-get update && sudo apt-get install -y bubblewrap
+
+      - name: Native bwrap execution tests
+        env:
+          CAELIS_LINUX_SANDBOX_SMOKE_E2E: '1'
+        run: go test -count=1 -timeout=3m ./agent-sdk/sandbox/bwrap
 
       - name: Build
         run: make build

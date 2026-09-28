@@ -18,6 +18,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/session/sessiontest"
 )
@@ -96,6 +97,57 @@ func TestStoreAppendAndPersistCanonicalEvents(t *testing.T) {
 	}
 	if strings.Contains(logText, "retrying") {
 		t.Fatal("event log must not contain transient notice text")
+	}
+}
+
+func TestStoreExecutionConfigCreationBoundRoundTrip(t *testing.T) {
+	root := t.TempDir()
+	ctx := context.Background()
+	store := NewStore(Config{RootDir: root})
+	inherit := false
+	requested := &sandbox.ExecutionConfig{
+		Environment: sandbox.EnvironmentConfig{Inherit: &inherit, Set: map[string]string{"APP_MODE": "test", "MODEL_HIDDEN_SECRET": "should-not-enter-context"}, Unset: []string{"SECRET"}},
+	}
+	active, err := store.StartSession(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "user", ExecutionConfig: requested})
+	if err != nil {
+		t.Fatal(err)
+	}
+	message := model.NewTextMessage(model.RoleUser, "runtime-authored turn input")
+	if _, err := store.AppendEvent(ctx, session.AppendEventRequest{SessionRef: active.SessionRef, Event: &session.Event{
+		Type: session.EventTypeUser, Message: &message,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	requested.Environment.Set["APP_MODE"] = "modified"
+	*requested.Environment.Inherit = true
+	active.ExecutionConfig.Environment.Unset[0] = "modified"
+	loaded, err := NewStore(Config{RootDir: root}).LoadSession(ctx, session.LoadSessionRequest{SessionRef: active.SessionRef})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Session.ExecutionConfig == nil || loaded.Session.ExecutionConfig.Environment.Inherit == nil ||
+		*loaded.Session.ExecutionConfig.Environment.Inherit || loaded.Session.ExecutionConfig.Environment.Set["APP_MODE"] != "test" ||
+		!reflect.DeepEqual(loaded.Session.ExecutionConfig.Environment.Unset, []string{"SECRET"}) {
+		t.Fatalf("loaded creation-bound execution config = %#v", loaded.Session.ExecutionConfig)
+	}
+	if len(loaded.Events) != 1 {
+		t.Fatalf("replayed events = %#v, want one canonical message", loaded.Events)
+	}
+	replayed, ok := session.ModelMessageOf(loaded.Events[0])
+	if !ok || !reflect.DeepEqual(replayed, message) {
+		t.Fatalf("replayed model context = %#v, want only canonical turn input %#v", replayed, message)
+	}
+	same := sandbox.CloneExecutionConfig(loaded.Session.ExecutionConfig)
+	if _, err := store.StartSession(ctx, session.StartSessionRequest{
+		AppName: "caelis", UserID: "user", PreferredSessionID: active.SessionID, ExecutionConfig: same,
+	}); err != nil {
+		t.Fatalf("reusing identical creation config: %v", err)
+	}
+	same.Environment.Set["APP_MODE"] = "changed"
+	if _, err := store.StartSession(ctx, session.StartSessionRequest{
+		AppName: "caelis", UserID: "user", PreferredSessionID: active.SessionID, ExecutionConfig: same,
+	}); !errors.Is(err, session.ErrInvalidSession) {
+		t.Fatalf("reusing Session ID with different creation config: %v", err)
 	}
 }
 

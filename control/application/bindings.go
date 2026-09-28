@@ -10,19 +10,27 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/google/jsonschema-go/jsonschema"
 )
 
 var toolName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_.-]{0,127}$`)
 
 // ValidateProfile requires a complete profile. Execution authority is separate
-// from hot configuration; no Host context, model or catalog is silently inherited.
+// from hot configuration; Host instructions, models and catalogs are not inherited.
+// Process environment inheritance follows the separate SDK execution contract.
 func ValidateProfile(p Profile) error {
 	if !validID(p.Version) || !validID(p.Model) || !validID(p.ToolsVersion) {
 		return fmt.Errorf("%w: explicit profile version, model and tools_version required", ErrInvalid)
 	}
 	if p.Execution != "tools-only" && p.Execution != "workspace-write" {
 		return fmt.Errorf("%w: execution must be tools-only or workspace-write", ErrInvalid)
+	}
+	if p.ExecutionConfig != nil && p.Execution != "workspace-write" {
+		return fmt.Errorf("%w: execution_config requires native workspace-write execution", ErrInvalid)
+	}
+	if err := sandbox.ValidateExecutionConfig(p.ExecutionConfig); err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalid, err)
 	}
 	if p.Inherit != (Inheritance{}) {
 		return fmt.Errorf("%w: configuration inheritance is unavailable", ErrUnsupported)

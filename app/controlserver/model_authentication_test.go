@@ -189,7 +189,13 @@ func TestModelAuthenticationCapabilityIsAddedOnce(t *testing.T) {
 	info := appserver.ServerInfo{Capabilities: []string{appserver.CapabilityModelAuthStream}}
 	info = applicationServerInfo(info, appserver.AppServerServices{})
 	info = applicationServerInfo(info, appserver.AppServerServices{})
-	if len(info.Capabilities) != 1 || info.Capabilities[0] != appserver.CapabilityModelAuthStream {
-		t.Fatalf("duplicated authentication capability: %+v", info.Capabilities)
+	count := 0
+	for _, capability := range info.Capabilities {
+		if capability == appserver.CapabilityModelAuthStream {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("authentication capability count = %d, want 1", count)
 	}
 }

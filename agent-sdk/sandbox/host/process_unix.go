@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"syscall"
 
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/creack/pty"
 )
 
@@ -17,8 +18,9 @@ const (
 	hostTTYRows    = 24
 )
 
-func newShellCommand(ctx context.Context, command string, _ bool) *exec.Cmd {
-	return exec.CommandContext(ctx, "/bin/sh", "-c", command)
+func newShellCommand(ctx context.Context, command string, _ bool, cfg *sandbox.ExecutionConfig) *exec.Cmd {
+	path, args := sandbox.ShellArgs(cfg, command)
+	return exec.CommandContext(ctx, path, args...)
 }
 
 func setProcessGroup(cmd *exec.Cmd) {

@@ -484,6 +484,7 @@ export interface ApplicationPermissions {
 
 export interface ApplicationProfile {
   execution: "tools-only" | "workspace-write";
+  execution_config?: ExecutionConfig | null;
   inherit: ApplicationInheritance;
   instructions: string;
   model: string;
@@ -834,6 +835,7 @@ export interface CreateApplicationSessionRequest {
 
 export interface CreateSessionRequest {
   cwd?: string;
+  execution_config?: ExecutionConfig | null;
   expected_controller_epoch?: string;
   expected_revision?: Uint64Decimal;
   metadata?: JSONObject;
@@ -952,6 +954,12 @@ export interface EnvelopeBase {
 
 export type EnvelopeKind = "session/update" | "session/request_permission" | "caelis/notice" | "caelis/participant" | "caelis/lifecycle" | "caelis/agent_communication" | "caelis/approval_review" | "caelis/error";
 
+export interface EnvironmentConfig {
+  inherit?: boolean | null;
+  set?: Record<string, JSONValue> | null;
+  unset?: Array<string> | null;
+}
+
 export type ErrorCode = "unknown" | "invalid_argument" | "not_found" | "already_exists" | "conflict" | "permission_denied" | "unauthenticated" | "failed_precondition" | "resource_exhausted" | "rate_limited" | "overloaded" | "timeout" | "cancelled" | "interrupted" | "unavailable" | "unsupported" | "unknown_outcome" | "internal";
 
 export interface ErrorEnvelope {
@@ -985,6 +993,11 @@ export interface ErrorResponse {
   code: ErrorCode;
   error: string;
   kind?: ErrorKind;
+}
+
+export interface ExecutionConfig {
+  environment?: EnvironmentConfig | null;
+  shell?: ShellConfig | null;
 }
 
 export type FeedPosition = { durable: DurableFeedPosition } | { transient: TransientFeedPosition };
@@ -1666,6 +1679,7 @@ export interface SessionState {
   controller: ControllerBinding;
   cwd?: string;
   envelope_version: string;
+  execution_config?: ExecutionConfig | null;
   metadata?: JSONObject;
   participants?: Array<ParticipantBinding>;
   protocol_version: number;
@@ -1712,6 +1726,11 @@ export interface SessionUpdateEnvelope {
   turn_id?: string;
   update: ACPUpdate;
   usage_semantics?: UsageSemantics;
+}
+
+export interface ShellConfig {
+  login?: boolean | null;
+  path?: string | null;
 }
 
 export interface SkillResolveResult {

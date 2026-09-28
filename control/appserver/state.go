@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 )
@@ -23,6 +24,9 @@ const (
 	CapabilityWorkspaceTrust          = "workspace-trust-v1"
 	CapabilityWorkspaceTrustPreflight = "workspace-trust-preflight-v1"
 	CapabilityHostReadiness           = "host-readiness-v1"
+	// CapabilityExecutionConfiguration permits creation-bound native command
+	// environment and shell overrides for ordinary and application Sessions.
+	CapabilityExecutionConfiguration = "execution-configuration-v1"
 )
 
 var ErrStateRevisionConflict = errorcode.New(errorcode.Conflict, "controlclient: session state changed during bootstrap")
@@ -137,6 +141,7 @@ type SessionState struct {
 	Revision         uint64                       `json:"revision"`
 	WorkspaceKey     string                       `json:"workspace_key,omitempty"`
 	CWD              string                       `json:"cwd,omitempty"`
+	ExecutionConfig  *sandbox.ExecutionConfig     `json:"execution_config,omitempty"`
 	Title            string                       `json:"title,omitempty"`
 	Metadata         map[string]any               `json:"metadata,omitempty"`
 	BoundaryCursor   string                       `json:"boundary_cursor,omitempty"`

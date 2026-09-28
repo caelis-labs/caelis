@@ -43,6 +43,12 @@ func backendRegistrationError() error {
 
 func New(cfg Config) (Runtime, error) {
 	cfg = NormalizeConfig(cfg)
+	if err := ValidateConfig(cfg); err != nil {
+		return nil, err
+	}
+	if cfg.BaseEnv == nil {
+		cfg.BaseEnv = os.Environ()
+	}
 	if cfg.ResourceLimits != nil && cfg.ResourceLimits.ReadPaths != nil && cfg.RequestedBackend != BackendSeatbelt && cfg.RequestedBackend != BackendBwrap {
 		return nil, fmt.Errorf("sandbox: mandatory read limits require Seatbelt or Bubblewrap")
 	}
@@ -119,14 +125,7 @@ func New(cfg Config) (Runtime, error) {
 }
 
 func NormalizeConfig(cfg Config) Config {
-	if cfg.ResourceLimits != nil {
-		limits := *cfg.ResourceLimits
-		limits.WritePaths = append([]string(nil), limits.WritePaths...)
-		if limits.ReadPaths != nil {
-			limits.ReadPaths = append([]string{}, limits.ReadPaths...)
-		}
-		cfg.ResourceLimits = &limits
-	}
+	cfg = CloneConfig(cfg)
 	cfg.CWD = strings.TrimSpace(cfg.CWD)
 	if cfg.CWD == "" {
 		if cwd, err := os.Getwd(); err == nil {

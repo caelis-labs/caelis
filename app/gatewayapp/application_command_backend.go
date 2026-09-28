@@ -83,6 +83,7 @@ func (b *controlCommandBackend) createApplicationSession(ctx context.Context, pr
 	active, err := b.composition.sessions.StartSession(ctx, session.StartSessionRequest{
 		AppName: b.composition.authorities.appName, UserID: scope.PrincipalID,
 		PreferredSessionID: id, Workspace: workspace, Controller: initialKernelControllerBinding("application"),
+		ExecutionConfig: req.Profile.ExecutionConfig,
 		Metadata: map[string]any{
 			sessionvisibility.MetadataSystemManagedAgent: sessionvisibility.SystemManagedAgentApplication,
 			application.StateKey:                         scope.ApplicationID, "application_creation_digest": operation.Digest,

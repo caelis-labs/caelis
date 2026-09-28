@@ -13,6 +13,7 @@ func (s *ApplicationService) Capabilities() []string {
 		application.Capability, application.CapabilityResourceTransfer,
 		application.CapabilityToolResultContent, application.CapabilityMediaResources,
 		application.CapabilityBackgroundActivation, CapabilitySharedWorkers, CapabilityTurnSteering,
+		CapabilityExecutionConfiguration,
 	}
 	if s.config.ModelImageInput != nil {
 		out = append(out, application.CapabilityModelCapabilities)

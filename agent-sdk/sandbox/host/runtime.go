@@ -26,12 +26,16 @@ const hostTerminateDrain = 500 * time.Millisecond
 
 // Config defines one host-backed sandbox runtime.
 type Config struct {
-	CWD string
+	CWD       string
+	Execution *sandbox.ExecutionConfig
+	BaseEnv   []string
 }
 
 // Runtime is the minimal host-backed sandbox runtime implementation.
 type Runtime struct {
-	fs hostFS
+	fs        hostFS
+	env       sandbox.EnvironmentSnapshot
+	execution *sandbox.ExecutionConfig
 
 	mu       sync.RWMutex
 	sessions map[string]*hostSession
@@ -40,6 +44,9 @@ type Runtime struct {
 
 // New returns one host-backed sandbox runtime.
 func New(cfg Config) (*Runtime, error) {
+	if err := sandbox.ValidateExecutionConfig(cfg.Execution); err != nil {
+		return nil, err
+	}
 	cwd := cfg.CWD
 	if cwd == "" {
 		var err error
@@ -53,8 +60,10 @@ func New(cfg Config) (*Runtime, error) {
 		return nil, err
 	}
 	return &Runtime{
-		fs:       hostFS{cwd: cwd},
-		sessions: map[string]*hostSession{},
+		fs:        hostFS{cwd: cwd},
+		env:       sandbox.NewEnvironmentSnapshot(cfg.Execution, cfg.BaseEnv),
+		execution: sandbox.CloneExecutionConfig(cfg.Execution),
+		sessions:  map[string]*hostSession{},
 		status: sandbox.Status{
 			RequestedBackend: sandbox.BackendHost,
 			ResolvedBackend:  sandbox.BackendHost,
@@ -95,6 +104,9 @@ func (r *Runtime) Describe() sandbox.Descriptor {
 
 func (r *Runtime) Run(ctx context.Context, req sandbox.CommandRequest) (sandbox.CommandResult, error) {
 	req = sandbox.CloneRequest(req)
+	if err := sandbox.ValidateCommandEnvironment(req); err != nil {
+		return sandbox.CommandResult{}, err
+	}
 	if req.TTY {
 		session, err := r.Start(ctx, req)
 		if err != nil {
@@ -102,10 +114,7 @@ func (r *Runtime) Run(ctx context.Context, req sandbox.CommandRequest) (sandbox.
 		}
 		return sessionrun.Wait(ctx, session, req.Stdin)
 	}
-	dir := req.Dir
-	if dir == "" {
-		dir = r.fs.cwd
-	}
+	dir := sandbox.CommandDirectory(r.fs.cwd, req.Dir)
 	runCtx := ctx
 	var cancel context.CancelFunc
 	if req.Timeout > 0 {
@@ -113,9 +122,9 @@ func (r *Runtime) Run(ctx context.Context, req sandbox.CommandRequest) (sandbox.
 		defer cancel()
 	}
 
-	cmd := newShellCommand(runCtx, req.Command, len(req.Stdin) > 0)
+	cmd := newShellCommand(runCtx, req.Command, len(req.Stdin) > 0, r.execution)
 	cmd.Dir = dir
-	cmd.Env = mergeEnv(req.Env)
+	cmd.Env = r.env.ForCommand(req)
 	if len(req.Stdin) > 0 {
 		cmd.Stdin = bytes.NewReader(req.Stdin)
 	}
@@ -150,13 +159,13 @@ func (r *Runtime) Start(ctx context.Context, req sandbox.CommandRequest) (sandbo
 		return nil, err
 	}
 	req = sandbox.CloneRequest(req)
+	if err := sandbox.ValidateCommandEnvironment(req); err != nil {
+		return nil, err
+	}
 	if req.TTY && !hostTTYSupported() {
 		return nil, errors.New("impl/sandbox/host: async tty is not supported")
 	}
-	dir := strings.TrimSpace(req.Dir)
-	if dir == "" {
-		dir = r.fs.cwd
-	}
+	dir := sandbox.CommandDirectory(r.fs.cwd, req.Dir)
 	sessionID, err := newID("exec")
 	if err != nil {
 		return nil, err
@@ -170,9 +179,9 @@ func (r *Runtime) Start(ctx context.Context, req sandbox.CommandRequest) (sandbo
 	if req.Timeout > 0 {
 		cmdCtx, cancel = context.WithTimeout(cmdCtx, req.Timeout)
 	}
-	cmd := newShellCommand(cmdCtx, req.Command, req.TTY)
+	cmd := newShellCommand(cmdCtx, req.Command, req.TTY, r.execution)
 	cmd.Dir = dir
-	cmd.Env = mergeEnv(req.Env)
+	cmd.Env = r.env.ForCommand(req)
 	if !req.TTY {
 		setProcessGroup(cmd)
 	}
@@ -674,17 +683,6 @@ func (h hostFS) Glob(pattern string) ([]string, error) { return filepath.Glob(pa
 
 func (h hostFS) WalkDir(root string, fn fs.WalkDirFunc) error { return filepath.WalkDir(root, fn) }
 
-func mergeEnv(extra map[string]string) []string {
-	env := os.Environ()
-	for key, value := range extra {
-		if key == "" {
-			continue
-		}
-		env = append(env, key+"="+value)
-	}
-	return env
-}
-
 const hostOutputCap = 1024 * 1024
 
 var _ sandbox.Runtime = (*Runtime)(nil)
@@ -695,7 +693,7 @@ type factory struct{}
 func (factory) Backend() sandbox.Backend { return sandbox.BackendHost }
 
 func (factory) Build(cfg sandbox.Config) (sandbox.Runtime, error) {
-	return New(Config{CWD: cfg.CWD})
+	return New(Config{CWD: cfg.CWD, Execution: cfg.Execution, BaseEnv: cfg.BaseEnv})
 }
 
 func init() {

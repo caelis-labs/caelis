@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 )
@@ -147,6 +148,7 @@ func sessionStateAtFeedCut(
 		Revision:         activeSession.Revision,
 		WorkspaceKey:     activeSession.WorkspaceKey,
 		CWD:              activeSession.CWD,
+		ExecutionConfig:  sandbox.CloneExecutionConfig(activeSession.ExecutionConfig),
 		Title:            activeSession.Title,
 		Metadata:         cloneAnyMap(activeSession.Metadata),
 		BoundaryCursor:   subscribed.BoundaryCursor,

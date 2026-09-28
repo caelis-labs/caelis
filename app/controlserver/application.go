@@ -17,6 +17,9 @@ func applicationServerInfo(info appserver.ServerInfo, services appserver.AppServ
 	if !slices.Contains(info.Capabilities, appserver.CapabilityModelAuthStream) {
 		info.Capabilities = append(info.Capabilities, appserver.CapabilityModelAuthStream)
 	}
+	if !slices.Contains(info.Capabilities, appserver.CapabilityExecutionConfiguration) {
+		info.Capabilities = append(info.Capabilities, appserver.CapabilityExecutionConfiguration)
+	}
 	if services.Applications != nil {
 		for _, capability := range services.Applications.Capabilities() {
 			found := false

@@ -9,12 +9,13 @@ import (
 	"os/exec"
 	"syscall"
 
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/internal/conpty"
 )
 
 const createNoWindow = 0x08000000
 
-func newShellCommand(ctx context.Context, command string, interactive bool) *exec.Cmd {
+func newShellCommand(ctx context.Context, command string, interactive bool, _ *sandbox.ExecutionConfig) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, "powershell.exe", powershellArgs(command, powershellOptions{Interactive: interactive})...)
 	configureHiddenConsole(cmd)
 	return cmd

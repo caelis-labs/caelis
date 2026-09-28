@@ -1,9 +1,9 @@
 # Application Runtime
 
-For Bot work that needs the user's ordinary tools, environment and concurrent
-TUI access, use [shared native Worker Sessions](shared-workers.md). The execution
-profiles below remain isolated Application Sessions; they do not become native
-Workers merely because their caller calls them a task.
+For work that needs concurrent TUI attachment, use
+[shared native Worker Sessions](shared-workers.md). The execution profiles below
+remain Application Sessions with their own authority and tool catalog; they do
+not become native Workers merely because their caller calls them a task.
 
 Caelis applications own their product identity, notes, Memory, business tools and
 scheduling. Control owns canonical Sessions, Turns, tool history, native approvals,
@@ -153,8 +153,8 @@ allocates the execution directory. No model-selected root is accepted.
 
 A creation profile has two lifetimes:
 
-- **Creation-bound**: `version`, `execution`, `inherit`, `workspace` and
-  `permissions` are fixed at Session creation. A configuration update that
+- **Creation-bound**: `version`, `execution`, `inherit`, `workspace`,
+  `permissions` and `execution_config` are fixed at Session creation. A configuration update that
   carries them is rejected; changing them requires a new Session.
 - **Revisioned desired configuration**: `instructions`, `model`,
   `reasoning_effort`, `service_tier`, `tools_version`, `tools` and
@@ -173,6 +173,16 @@ platform's native agent implements it — the Host registers that mode on opt-in
 never silently. `permissions.approval_mode` defaults to `manual`; manual is the
 only currently supported mode. Ordinary per-call `require_escalated` requests
 still surface Host approval.
+
+### Process environment (creation-bound)
+
+`execution-configuration-v1` enables `profile.execution_config` for native
+execution. It uses the same [execution configuration](execution-configuration.md)
+as ordinary Sessions: environment inheritance or an empty base, explicit variable
+settings/deletions, and shell/login initialization. This is independent of the
+profile's instruction/tool `inherit` flags. CWD and HOME are independent.
+The linked contract defines defaults, precedence, restart behavior and credential
+handling; environment configuration does not grant additional filesystem access.
 
 ### Dynamic configuration update
 
@@ -262,8 +272,8 @@ An accepted update takes effect at the next not-yet-issued model request,
 including later tool rounds of the same Turn; already-issued requests complete
 against their old snapshot. Distinguish committed-but-not-yet-executed
 (POST response revision) from used-by-execution (`last_request.revision`). Hot
-updates never touch `workspace` or `permissions`, so they cannot reset user
-approval selections.
+updates never touch `workspace`, `permissions` or `execution_config`, so they
+cannot reset user approval selections or process configuration.
 
 `tools-only` admits only the declared callback tools; omitting `tools` declares an
 empty callback catalog. `workspace-write` adds confined native
@@ -274,8 +284,8 @@ backend rejects this mode before Session creation and again before activation;
 an unsupported native sandbox fails closed, not through an unrestricted
 fallback. Native platform acceptance requires more than compilation.
 
-Native commands do not inherit Host environment values or arbitrary installed
-toolchains; system runtime access is platform-defined. `workspace-write` is the
+Native process initialization follows the
+[execution configuration](execution-configuration.md). `workspace-write` is the
 ordinary broad-read workspace sandbox: the CWD and explicit `read-write` roots
 are writable, and an ordinary per-call `require_escalated` request can seek
 explicit Host approval for that call — approval is per-call, not a standing
@@ -284,8 +294,8 @@ Application-owned callback approval does not authorize a shell command,
 arbitrary MCP tool, or external write.
 
 Only the desired-configuration fields above are hot-updatable; `version`,
-`execution`, `inherit`, `workspace` and `permissions` stay the immutable
-creation binding. Application notes and Memory change through ordinary new tool
+`execution`, `inherit`, `workspace`, `permissions` and `execution_config` stay the
+immutable creation binding. Application notes and Memory change through ordinary new tool
 results, not by rewriting committed model prefixes or triggering implicit
 compaction. Bot embeds its own Memory store and exposes its own tools; Workspace
 Memory is not admitted.

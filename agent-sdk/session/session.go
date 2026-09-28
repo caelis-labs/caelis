@@ -10,6 +10,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/jsonvalue"
 	"github.com/caelis-labs/caelis/agent-sdk/placement"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 )
 
 var (
@@ -327,14 +328,16 @@ type ParticipantBinding struct {
 // Session describes one session row.
 type Session struct {
 	SessionRef
-	Revision     uint64               `json:"revision,omitempty"`
-	CWD          string               `json:"cwd,omitempty"`
-	Title        string               `json:"title,omitempty"`
-	Metadata     map[string]any       `json:"metadata,omitempty"`
-	Controller   ControllerBinding    `json:"controller,omitempty"`
-	Participants []ParticipantBinding `json:"participants,omitempty"`
-	CreatedAt    time.Time            `json:"created_at,omitempty"`
-	UpdatedAt    time.Time            `json:"updated_at,omitempty"`
+	Revision uint64 `json:"revision,omitempty"`
+	CWD      string `json:"cwd,omitempty"`
+	// ExecutionConfig is the creation-bound native command environment and shell.
+	ExecutionConfig *sandbox.ExecutionConfig `json:"execution_config,omitempty"`
+	Title           string                   `json:"title,omitempty"`
+	Metadata        map[string]any           `json:"metadata,omitempty"`
+	Controller      ControllerBinding        `json:"controller,omitempty"`
+	Participants    []ParticipantBinding     `json:"participants,omitempty"`
+	CreatedAt       time.Time                `json:"created_at,omitempty"`
+	UpdatedAt       time.Time                `json:"updated_at,omitempty"`
 }
 
 // SessionFenceIsHeld reports whether a fence currently protects Session writes.
@@ -407,6 +410,9 @@ type StartSessionRequest struct {
 	PreferredSessionID string         `json:"preferred_session_id,omitempty"`
 	Title              string         `json:"title,omitempty"`
 	Metadata           map[string]any `json:"metadata,omitempty"`
+	// ExecutionConfig pins command environment and shell selection at creation.
+	// Nil retains the sandbox defaults across later Runtime activations.
+	ExecutionConfig *sandbox.ExecutionConfig `json:"execution_config,omitempty"`
 	// Controller optionally installs the Control-selected initial owner. An ACP
 	// binding may be dormant until the first Turn reattaches its endpoint.
 	Controller ControllerBinding `json:"controller,omitzero"`

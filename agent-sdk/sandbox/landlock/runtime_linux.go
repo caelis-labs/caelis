@@ -25,6 +25,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/backend/procutil"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/backend/runnerruntime"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/host"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox/internal/envfd"
 	"golang.org/x/sys/unix"
 )
 
@@ -41,12 +42,16 @@ type landlockRunner struct {
 	probe          func() error
 	goos           string
 	cfg            Config
+	env            sandbox.EnvironmentSnapshot
 	sessionManager *cmdsession.SessionManager
 	closed         atomic.Bool
 }
 
 func newRuntime(cfg Config) (sandbox.Runtime, error) {
 	cfg = sandbox.NormalizeConfig(cfg)
+	if err := sandbox.ValidateConfig(cfg); err != nil {
+		return nil, err
+	}
 	runner := &landlockRunner{
 		execCommand:    exec.CommandContext,
 		executablePath: os.Executable,
@@ -54,6 +59,7 @@ func newRuntime(cfg Config) (sandbox.Runtime, error) {
 		probe:          probeLandlockSupport,
 		goos:           stdruntime.GOOS,
 		cfg:            cfg,
+		env:            sandbox.NewEnvironmentSnapshot(cfg.Execution, cfg.BaseEnv),
 		sessionManager: cmdsession.NewSessionManager(cmdsession.DefaultSessionManagerConfig()),
 	}
 	probeCtx, cancel := context.WithTimeout(context.Background(), landlockProbeTimeout)
@@ -62,12 +68,13 @@ func newRuntime(cfg Config) (sandbox.Runtime, error) {
 		_ = runner.Close()
 		return nil, err
 	}
-	hostRuntime, err := host.New(host.Config{CWD: cfg.CWD})
+	hostRuntime, err := host.New(host.Config{CWD: cfg.CWD, Execution: cfg.Execution, BaseEnv: cfg.BaseEnv})
 	if err != nil {
 		_ = runner.Close()
 		return nil, err
 	}
 	return runnerruntime.New(runnerruntime.Config{
+		CWD:     cfg.CWD,
 		Backend: sandbox.BackendLandlock,
 		Descriptor: sandbox.Descriptor{
 			Backend:   sandbox.BackendLandlock,
@@ -136,14 +143,17 @@ func (l *landlockRunner) Run(ctx context.Context, req runnerruntime.Request) (sa
 	if err != nil {
 		return sandbox.CommandResult{}, fmt.Errorf("tool: resolve landlock helper path failed: %w", err)
 	}
-	helperArgs, err := buildLandlockHelperArgs(effectivePolicy, policyCWD, policyCWD, req.Command)
+	helperArgs, err := buildLandlockHelperArgs(effectivePolicy, policyCWD, policyCWD, req.Command, l.cfg.Execution)
 	if err != nil {
 		return sandbox.CommandResult{}, fmt.Errorf("tool: build landlock helper args failed: %w", err)
 	}
 
-	cmd := l.execCommand(runCtx, exePath, helperArgs...)
+	cmd, payload, err := l.helperCommand(runCtx, exePath, helperArgs, l.env.Build(req.UnsetEnv, req.EnvOverrides))
+	if err != nil {
+		return sandbox.CommandResult{}, err
+	}
+	defer payload.Close()
 	procutil.ApplyNonInteractiveCommandDefaults(cmd)
-	cmd.Env = mergeCommandEnv(req.EnvOverrides)
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -198,23 +208,29 @@ func (l *landlockRunner) StartAsync(_ context.Context, req runnerruntime.Request
 	if err != nil {
 		return "", fmt.Errorf("tool: resolve landlock helper path failed: %w", err)
 	}
+	var payload *os.File
+	defer func() {
+		if payload != nil {
+			_ = payload.Close()
+		}
+	}()
 	session, err := manager.StartSession(cmdsession.AsyncSessionConfig{
 		Command:         req.Command,
 		Dir:             req.Dir,
-		Env:             mergeCommandEnv(req.EnvOverrides),
+		Env:             l.env.Build(req.UnsetEnv, req.EnvOverrides),
 		OutputBufferCap: 256 * 1024,
 		Timeout:         req.Timeout,
 		IdleTimeout:     req.IdleTimeout,
 		TTY:             req.TTY,
 		OnOutput:        runnerruntime.UTF8OutputForwarder(req.OnOutput),
 		BuildCommand: func(ctx context.Context, cfg cmdsession.AsyncSessionConfig) (*exec.Cmd, error) {
-			helperArgs, err := buildLandlockHelperArgs(effectivePolicy, policyCWD, policyCWD, cfg.Command)
+			helperArgs, err := buildLandlockHelperArgs(effectivePolicy, policyCWD, policyCWD, cfg.Command, l.cfg.Execution)
 			if err != nil {
 				return nil, err
 			}
-			cmd := l.execCommand(ctx, exePath, helperArgs...)
-			cmd.Env = append([]string(nil), cfg.Env...)
-			return cmd, nil
+			cmd, file, err := l.helperCommand(ctx, exePath, helperArgs, cfg.Env)
+			payload = file
+			return cmd, err
 		},
 	})
 	if err != nil {
@@ -307,13 +323,17 @@ func (l *landlockRunner) asyncSessionManager() (*cmdsession.SessionManager, erro
 	return l.sessionManager, nil
 }
 
-func buildLandlockHelperArgs(p policy.Policy, policyCWD, commandCWD, command string) ([]string, error) {
+func buildLandlockHelperArgs(p policy.Policy, policyCWD, commandCWD, command string, execution *sandbox.ExecutionConfig) ([]string, error) {
 	policyJSON, err := json.Marshal(p)
 	if err != nil {
 		return nil, err
 	}
+	shell, args := sandbox.ShellArgs(execution, command)
 	return []string{
 		internalHelperCommand,
+		"--shell", shell,
+		"--shell-flag", args[0],
+		"--env-fd", "3",
 		"--policy-json", string(policyJSON),
 		"--policy-cwd", policyCWD,
 		"--command-cwd", commandCWD,
@@ -338,6 +358,7 @@ func (l *landlockRunner) probeHelper(ctx context.Context) error {
 		return fmt.Errorf("landlock helper probe requires context")
 	}
 	cmd := l.execCommand(ctx, helperPath, internalHelperCommand, "--probe")
+	cmd.Env = []string{}
 	cmd.WaitDelay = landlockProbeWaitDelay
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -385,6 +406,9 @@ type internalHelperConfig struct {
 	PolicyCWD  string
 	CommandCWD string
 	Command    string
+	Shell      string
+	ShellFlag  string
+	EnvFD      int
 }
 
 func runInternalHelper(args []string) error {
@@ -399,6 +423,9 @@ func runInternalHelper(args []string) error {
 	fs.StringVar(&cfg.PolicyCWD, "policy-cwd", "", "sandbox policy cwd")
 	fs.StringVar(&cfg.CommandCWD, "command-cwd", "", "command cwd")
 	fs.StringVar(&cfg.Command, "command", "", "command to execute")
+	fs.StringVar(&cfg.Shell, "shell", "/bin/bash", "POSIX shell")
+	fs.StringVar(&cfg.ShellFlag, "shell-flag", "-c", "shell flag")
+	fs.IntVar(&cfg.EnvFD, "env-fd", -1, "target environment descriptor")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -439,11 +466,26 @@ func runInternalHelper(args []string) error {
 		}
 	}
 
-	shellPath, err := exec.LookPath("bash")
-	if err != nil {
-		return fmt.Errorf("resolve bash: %w", err)
+	if cfg.EnvFD < 0 {
+		return fmt.Errorf("target environment descriptor is required")
 	}
-	return unix.Exec(shellPath, []string{"bash", "-lc", cfg.Command}, os.Environ())
+	file := os.NewFile(uintptr(cfg.EnvFD), "target environment")
+	if file == nil {
+		return fmt.Errorf("target environment descriptor is unavailable")
+	}
+	defer file.Close()
+	payload, err := io.ReadAll(io.LimitReader(file, 8<<20))
+	if err != nil {
+		return fmt.Errorf("read target environment: %w", err)
+	}
+	var targetEnv []string
+	if err := json.Unmarshal(payload, &targetEnv); err != nil {
+		return fmt.Errorf("decode target environment: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("close target environment descriptor: %w", err)
+	}
+	return unix.Exec(cfg.Shell, []string{cfg.Shell, cfg.ShellFlag, cfg.Command}, targetEnv)
 }
 
 func applyLandlockFilesystemPolicy(p policy.Policy, policyCWD string) error {
@@ -716,15 +758,19 @@ const (
 	seccompDataOffsetArg0 = 16
 )
 
-func mergeCommandEnv(extra map[string]string) []string {
-	env := os.Environ()
-	for key, value := range extra {
-		if key == "" {
-			continue
-		}
-		env = append(env, key+"="+value)
+func (l *landlockRunner) helperCommand(ctx context.Context, path string, args, env []string) (*exec.Cmd, *os.File, error) {
+	payload, err := json.Marshal(env)
+	if err != nil {
+		return nil, nil, err
 	}
-	return env
+	file, err := envfd.Open(payload)
+	if err != nil {
+		return nil, nil, err
+	}
+	cmd := l.execCommand(ctx, path, args...)
+	cmd.Env = []string{}
+	cmd.ExtraFiles = append(cmd.ExtraFiles, file)
+	return cmd, file, nil
 }
 
 func resolveExitCode(err error) int {

@@ -164,16 +164,45 @@ type ResourceLimits struct {
 	Network    Network
 }
 
+// ExecutionConfig controls the environment and shell of commands on every route.
+type ExecutionConfig struct {
+	Environment EnvironmentConfig `json:"environment,omitempty"`
+	Shell       ShellConfig       `json:"shell,omitempty"`
+}
+
+// EnvironmentConfig applies to the inherited environment at runtime creation.
+// A nil Inherit defaults to true; false starts from an empty environment.
+type EnvironmentConfig struct {
+	Inherit *bool             `json:"inherit,omitempty"`
+	Set     map[string]string `json:"set,omitempty"`
+	Unset   []string          `json:"unset,omitempty"`
+}
+
+// ShellConfig selects a POSIX shell and opts into login initialization.
+// The default is /bin/bash -c; login uses -lc. Windows uses PowerShell and
+// rejects non-default shell options.
+type ShellConfig struct {
+	Path  string `json:"path,omitempty"`
+	Login bool   `json:"login,omitempty"`
+}
+
 // Config configures one composed sandbox runtime.
 type Config struct {
-	ResourceLimits *ResourceLimits `json:"-"`
+	ResourceLimits *ResourceLimits  `json:"-"`
+	Execution      *ExecutionConfig `json:"execution,omitempty"`
+	// BaseEnv replaces the ambient environment at runtime creation when non-nil.
+	// An explicitly empty slice starts from no inherited entries.
+	BaseEnv []string `json:"-"`
 
 	CWD                 string    `json:"cwd,omitempty"`
 	RequestedBackend    Backend   `json:"requested_backend,omitempty"`
 	BackendCandidates   []Backend `json:"backend_candidates,omitempty"`
 	FallbackInstallHint string    `json:"fallback_install_hint,omitempty"`
-	HelperPath          string    `json:"helper_path,omitempty"`
-	StateDir            string    `json:"state_dir,omitempty"`
+	// HelperPath selects a trusted self-exec binary for Landlock and Seatbelt.
+	// Seatbelt requires its process entry to dispatch seatbelt.MaybeRunInternalHelper;
+	// the helper executable must be inside an explicit ResourceLimits.ReadPaths.
+	HelperPath string `json:"helper_path,omitempty"`
+	StateDir   string `json:"state_dir,omitempty"`
 	// HostAuthorityDir optionally selects the Host-user authority base used by
 	// platform sandboxes for cross-StateDir coordination. It is process
 	// configuration, not workspace policy, and must remain outside every
@@ -292,9 +321,10 @@ type CommandRequest struct {
 	// TTY allocates a platform terminal (PTY on Unix, ConPTY on Windows),
 	// merges terminal output into stdout, and keeps stdin available while the
 	// session runs. Non-TTY asynchronous commands start with stdin closed.
-	TTY   bool              `json:"tty,omitempty"`
-	Env   map[string]string `json:"env,omitempty"`
-	Stdin []byte            `json:"stdin,omitempty"`
+	TTY      bool              `json:"tty,omitempty"`
+	Env      map[string]string `json:"env,omitempty"`
+	UnsetEnv []string          `json:"unset_env,omitempty"`
+	Stdin    []byte            `json:"stdin,omitempty"`
 
 	// Legacy compatibility fields. New callers should prefer Constraints.
 	Permission Permission `json:"permission,omitempty"`
@@ -522,6 +552,7 @@ func CloneRequest(in CommandRequest) CommandRequest {
 	out.Command = strings.TrimSpace(in.Command)
 	out.Dir = strings.TrimSpace(in.Dir)
 	out.Env = maps.Clone(in.Env)
+	out.UnsetEnv = slices.Clone(in.UnsetEnv)
 	out.Stdin = append([]byte(nil), in.Stdin...)
 	out.Backend = Backend(strings.TrimSpace(string(in.Backend)))
 	out.Constraints = NormalizeConstraints(in.Constraints)

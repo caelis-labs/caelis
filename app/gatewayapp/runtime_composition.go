@@ -52,6 +52,7 @@ type runtimeComposition struct {
 	// that explicit provider removal revokes the deleted model for later work.
 	activeRuntime      stackRuntimeConfig
 	sandbox            SandboxConfig
+	executionConfig    *sandbox.ExecutionConfig
 	exec               sandbox.Runtime
 	engine             *runtime.Runtime
 	guardian           *guardianApprovalReviewer

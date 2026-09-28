@@ -14,10 +14,15 @@ go test -count=1 -p=2 -timeout "${GO_TEST_TIMEOUT:-5m}" \
   ./control/appserver/httpclient ./control/application \
   ./agent-sdk/atomicfile ./agent-sdk/policy/presets \
   ./agent-sdk/sandbox/consoleoutput ./agent-sdk/sandbox/internal/conpty \
-  ./agent-sdk/sandbox/host ./agent-sdk/sandbox/backend/cmdsession \
+  ./agent-sdk/sandbox ./agent-sdk/sandbox/host ./agent-sdk/sandbox/backend/cmdsession \
   ./agent-sdk/sandbox/windows/... \
   ./control/workspacetrust ./control/modelconfig/credentialstore \
   ./app/gatewayapp/internal/configstore ./app/gatewayapp/internal/adapterhost
+
+# Exercise execution settings through real restricted-token processes, including
+# ConPTY and the Python 3.13+ site customization. Do not enable unrelated E2Es.
+CAELIS_WINDOWS_SANDBOX_E2E=1 bash ./scripts/go_test_nonempty.sh \
+  ./agent-sdk/sandbox/windows '^TestRestrictedToken(ExecutionConfig|PythonEnvironment)E2E$' windows-execution-config -count=1
 
 # Large packages run only native process, storage, path, and clipboard contracts.
 # Selectors must match tests, so renames cannot silently remove this coverage.

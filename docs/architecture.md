@@ -35,6 +35,8 @@ uses them.
 - [Application Runtime](application-runtime.md) owns application enrollment,
   Session profiles, revisioned configuration, background grants, callback
   receipts, resources, and the legacy Bot Mode removal.
+- [Execution Configuration](execution-configuration.md) owns native process
+  environment and shell assembly, creation-bound scope, and restart defaults.
 - [Shared Workers](shared-workers.md) owns scoped native Worker creation,
   concurrent TUI attach, steering receipts and Bot subscription integration.
 - [Model Connections](model-connections.md) owns Host settings clients and
