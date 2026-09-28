@@ -35,8 +35,10 @@ type EventLifecycle struct {
 const LifecycleStatusContextCompacting = "context_compacting"
 
 // EventTool is the durable SDK tool-execution payload for one tool call or
-// result event. ACP wire shapes are derived from this payload by surface
-// projectors; they are not the storage contract.
+// result event. Input decodes numbers as json.Number so observation tokens
+// survive durable reload; Output and other open maps retain their established decoding.
+// ACP wire shapes are derived from this payload by surface projectors; they are
+// not the storage contract.
 type EventTool struct {
 	ID        string              `json:"id,omitempty"`
 	Name      string              `json:"name,omitempty"`
@@ -47,6 +49,31 @@ type EventTool struct {
 	Output    map[string]any      `json:"output,omitempty"`
 	Content   []EventToolContent  `json:"content,omitempty"`
 	Locations []EventToolLocation `json:"locations,omitempty"`
+}
+
+// UnmarshalJSON preserves numeric tokens only in the observed tool input. The
+// rest of the payload retains ordinary json.Unmarshal decoding semantics.
+func (t *EventTool) UnmarshalJSON(data []byte) error {
+	type toolAlias EventTool
+	var decoded toolAlias
+	// Shadow Input so the ordinary decoder never converts its numbers to
+	// float64 (which can reject a valid JSON number such as 1e1000).
+	fields := struct {
+		*toolAlias
+		Input json.RawMessage `json:"input"`
+	}{toolAlias: &decoded}
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	if len(fields.Input) > 0 && string(fields.Input) != "null" {
+		decoder := json.NewDecoder(bytes.NewReader(fields.Input))
+		decoder.UseNumber()
+		if err := decoder.Decode(&decoded.Input); err != nil {
+			return err
+		}
+	}
+	*t = EventTool(decoded)
+	return nil
 }
 
 // EventToolLocation points at one file location involved in a tool event.
@@ -111,7 +138,8 @@ type Event struct {
 
 // UnmarshalJSON preserves numeric tokens in the open durable metadata map.
 // Typed event fields and other open payloads retain their established decoder
-// behavior; metadata consumers can distinguish an exact json.Number from a
+// behavior, except EventTool.Input's own token-preserving decoder. Metadata
+// consumers can distinguish an exact json.Number from a
 // legacy float64 value that may already have lost integer precision.
 func (e *Event) UnmarshalJSON(data []byte) error {
 	type eventAlias Event

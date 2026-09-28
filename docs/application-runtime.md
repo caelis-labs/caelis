@@ -191,6 +191,12 @@ canonical approval gate before callback intent dispatch. `required` requires
 `application-guardian-review-v1` even in a manual profile; unsupported services
 reject it at creation and configuration update. With manual routing a user can
 resolve the approval; with auto-review the creation-bound Guardian reviews it.
+Required callbacks reject numeric arguments outside the Control v1 range
+`[-9007199254740991, 9007199254740991]` before creating an approval or callback
+intent, including numbers nested in objects or arrays. Validation preserves
+accepted numeric tokens and never converts invocation numbers to strings.
+An `integer` schema does not extend the wire range; larger identifiers require
+an application-defined string schema and string arguments.
 Guardian evidence is limited to the Session: it receives no ambient filesystem
 tools or Host credentials. Ordinary per-call `require_escalated` requests still
 surface Host approval under manual routing. Tool names, descriptions, generated

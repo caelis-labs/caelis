@@ -166,6 +166,15 @@ replay. Experimental v2 nullable-field semantics do not apply to this path.
 Terminal status settles the call even without displayable result content and
 never reopens on a later sparse update.
 
+Control HTTP/SSE v1 omits the optional `rawInput` display field on `tool_call`
+and `tool_call_update` when it contains numbers outside the wire's JavaScript-safe
+range. Proposed calls are observable before policy admission, including calls
+that policy rejects. Their identity, status, and result still arrive; unsupported
+inputs are neither rounded nor stringified for display. This transport omission
+does not rewrite canonical model arguments or execution inputs. Permission and
+approval-review payloads retain strict numeric validation; action evidence is
+never silently removed from an approval.
+
 Assistant, thought, and terminal output chunks are ordered deltas. Consumers
 append each payload exactly once. They never compare text overlap or reconcile a
 cumulative value.

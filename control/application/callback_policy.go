@@ -7,6 +7,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/control/internal/jsonvalue"
 )
 
 const callbackPolicyMetadataKey = "caelis.application.callback_policy"
@@ -41,6 +42,12 @@ func CallbackPolicyDecision(input policy.ToolContext) (decision policy.Decision,
 		}
 		if !json.Valid(input.Call.Input) {
 			return policy.Decision{}, true, fmt.Errorf("%w: malformed callback arguments", ErrInvalid)
+		}
+		// Review inputs must fit the same numeric contract as public approval
+		// and callback delivery. Reject before minting any approval authority;
+		// converting numeric arguments to strings would change the invocation.
+		if err := jsonvalue.ValidateNumbers(input.Call.Input); err != nil {
+			return policy.Decision{}, true, fmt.Errorf("%w: callback arguments: %w", ErrInvalid, err)
 		}
 		var args map[string]any
 		decoder := json.NewDecoder(bytes.NewReader(input.Call.Input))

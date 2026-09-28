@@ -169,8 +169,32 @@ func TestCallbackPolicyOnlyTrustedMetadataAndPreapprovalValidation(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	decision, handled, err := CallbackPolicyDecision(policy.ToolContext{Tool: tools[0].Definition(), Call: tool.Call{ID: "big-number", Name: "WriteNote", Input: json.RawMessage(`{"id":9007199254740993}`)}})
-	if err != nil || !handled || decision.Approval == nil || decision.Approval.ToolCall.RawInput["id"] != json.Number("9007199254740993") {
-		t.Fatalf("approval rounded exact numeric argument: %+v %v %v", decision, handled, err)
+	for _, number := range []string{"9007199254740991", "-9007199254740991", "9.007199254740991e15"} {
+		input := json.RawMessage(`{"id":` + number + `}`)
+		decision, handled, err := CallbackPolicyDecision(policy.ToolContext{Tool: tools[0].Definition(), Call: tool.Call{ID: "safe-number", Name: "WriteNote", Input: input}})
+		if err != nil || !handled || decision.Approval == nil || decision.Approval.ToolCall.RawInput["id"] != json.Number(number) {
+			t.Fatalf("approval changed numeric argument %s: %+v %v %v", number, decision, handled, err)
+		}
+	}
+	// The transport bound is recursive and compares decimal/exponent tokens
+	// exactly, including values which float64 would round onto the safe bound.
+	for _, input := range []string{
+		`{"id":9007199254740993}`, `{"id":-9007199254740993}`,
+		`{"id":9.007199254740993e15}`, `{"id":9007199254740991.1}`,
+		`{"id":1,"nested":[{"id":9007199254740993}]}`,
+		`{"id":9007199254740993,"id":1}`,
+	} {
+		// Use an unconstrained schema so only the numeric transport rule can
+		// reject nested, fractional, and integer arguments.
+		definition := tools[0].Definition()
+		definition.InputSchema = map[string]any{"type": "object"}
+		call := tool.Call{ID: "unsafe-number", Name: "WriteNote", Input: json.RawMessage(input)}
+		decision, handled, err := CallbackPolicyDecision(policy.ToolContext{Tool: definition, Call: call})
+		if !handled || !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), "exceeds the exact JavaScript range") || decision.Approval != nil || decision.Action != "" {
+			t.Fatalf("unsafe input %s reached approval: %+v %v %v", input, decision, handled, err)
+		}
+		if string(call.Input) != input {
+			t.Fatalf("rejection rewrote invocation arguments: %s", call.Input)
+		}
 	}
 }

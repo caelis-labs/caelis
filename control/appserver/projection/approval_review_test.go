@@ -1,4 +1,4 @@
-package projection
+package projection_test
 
 import (
 	"encoding/json"
@@ -7,6 +7,8 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
+	"github.com/caelis-labs/caelis/control/appserver/projection"
+	"github.com/caelis-labs/caelis/control/appserver/wirev1"
 )
 
 func TestApprovalDecisionJournalProjectsDisplayWithoutControlState(t *testing.T) {
@@ -17,14 +19,14 @@ func TestApprovalDecisionJournalProjectsDisplayWithoutControlState(t *testing.T)
 				Journal: &session.ExecutionJournalEntry{Kind: session.JournalKindPauseToken, PauseToken: &session.PauseToken{
 					TokenID: "public-manual-token", RunID: "private-run", TurnID: "turn-1", ToolCallID: "call-1", ToolName: "RunCommand", ItemID: "step-1",
 					Status: session.PauseTokenResolved, Approved: approved, ReviewText: "review complete",
-					Input: json.RawMessage(`{"command":"git status","exact":9007199254740993}`), Metadata: map[string]any{"private": "must-not-leak"},
+					Input: json.RawMessage(`{"command":"git status","exact":9007199254740991}`), Metadata: map[string]any{"private": "must-not-leak"},
 				}},
 			}
 			if child {
 				event.Journal.PauseToken.Metadata = map[string]any{"subagent": true, "task_id": "task-1", "parent_call_id": "spawn-1", "parent_tool": "StartThread", "agent": "reviewer"}
 			}
-			base := EnvelopeBaseFromSessionEvent(session.SessionRef{SessionID: "session-1"}, event, SessionEventTransport{})
-			out := ProjectSessionEventEnvelope(base, event)
+			base := projection.EnvelopeBaseFromSessionEvent(session.SessionRef{SessionID: "session-1"}, event, projection.SessionEventTransport{})
+			out := projection.ProjectSessionEventEnvelope(base, event)
 			if len(out) != 1 {
 				t.Fatalf("projection = %#v", out)
 			}
@@ -36,18 +38,26 @@ func TestApprovalDecisionJournalProjectsDisplayWithoutControlState(t *testing.T)
 			if env.Kind != eventstream.KindApprovalReview || env.TurnID != "turn-1" || env.ApprovalReview.Status != want || env.ApprovalReview.RawInput["command"] != "git status" || env.Delivery.Mode != eventstream.DeliveryMirror || env.Position.Durable.Seq != 17 {
 				t.Fatalf("decision projection = %#v", env)
 			}
-			if env.ApprovalRequestID != "public-manual-token" || env.ApprovalReview.ItemID != "step-1" || env.ApprovalReview.ToolCallID != "call-1" || env.ApprovalReview.RawInput["exact"] != json.Number("9007199254740993") {
+			if env.ApprovalRequestID != "public-manual-token" || env.ApprovalReview.ItemID != "step-1" || env.ApprovalReview.ToolCallID != "call-1" || env.ApprovalReview.RawInput["exact"] != json.Number("9007199254740991") {
 				t.Fatalf("decision projection = %#v", env)
 			}
 			if child && (env.Scope != eventstream.ScopeSubagent || env.ScopeID != "task-1" || env.ParentTool == nil || env.ParentTool.ToolCallID != "spawn-1" || env.Actor != "reviewer") {
 				t.Fatalf("child decision routed to parent: %#v", env)
 			}
-			data, err := json.Marshal(env)
+			data, err := wirev1.MarshalEnvelope(env)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !strings.Contains(string(data), `"approval_request_id":"public-manual-token"`) || !strings.Contains(string(data), `"exact":9007199254740993`) {
+			if !strings.Contains(string(data), `"approval_request_id":"public-manual-token"`) || !strings.Contains(string(data), `"exact":9007199254740991`) {
 				t.Fatalf("review wire correlation or exact arguments lost: %s", data)
+			}
+			decoded, err := wirev1.UnmarshalEnvelope(data)
+			if err != nil {
+				t.Fatal(err)
+			}
+			roundTrip, err := wirev1.MarshalEnvelope(decoded)
+			if err != nil || string(roundTrip) != string(data) {
+				t.Fatalf("review wire round trip = %s, %v; want %s", roundTrip, err, data)
 			}
 			// The same manual approval token is public correlation; journal metadata
 			// and other private execution state must still be excluded.
@@ -67,7 +77,7 @@ func TestLegacyApprovalDecisionProjectsWithoutItemID(t *testing.T) {
 			Status: session.PauseTokenResolved, ReviewText: "approved",
 		}},
 	}
-	out := ProjectSessionEventEnvelope(EnvelopeBaseFromSessionEvent(session.SessionRef{SessionID: "s1"}, event, SessionEventTransport{}), event)
+	out := projection.ProjectSessionEventEnvelope(projection.EnvelopeBaseFromSessionEvent(session.SessionRef{SessionID: "s1"}, event, projection.SessionEventTransport{}), event)
 	if len(out) != 1 || out[0].ApprovalRequestID != "legacy-token" || out[0].ApprovalReview == nil || out[0].ApprovalReview.ItemID != "" {
 		t.Fatalf("legacy decision = %#v", out)
 	}

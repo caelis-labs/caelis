@@ -119,7 +119,11 @@ func setupReviewerHTTP(t *testing.T, ctx context.Context, root string, provider 
 	profile.Permissions.ApprovalMode = "auto-review"
 	profile.Reviewer = &application.Reviewer{Kind: "guardian", Model: "openai-compatible/reviewer-model"}
 	profile.Tools[0].ApprovalPolicy = "required"
-	profile.Tools[0].InputSchema = map[string]any{"type": "object", "properties": map[string]any{"key": map[string]any{"type": "string"}}, "required": []any{"key"}, "additionalProperties": false}
+	profile.Tools[0].InputSchema = map[string]any{"type": "object", "properties": map[string]any{
+		"key":   map[string]any{"type": "string"},
+		"id":    map[string]any{"type": "integer"},
+		"range": map[string]any{"type": "object", "properties": map[string]any{"min": map[string]any{"type": "integer"}}, "additionalProperties": false},
+	}, "required": []any{"key"}, "additionalProperties": false}
 	created, err := client.CreateApplicationSession(ctx, appserver.CreateApplicationSessionRequest{WriteBase: appserver.WriteBase{OperationID: "create-reviewed"}, Profile: profile})
 	if err != nil || created.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("create: %+v %v", created, err)
@@ -185,6 +189,25 @@ func reviewerHTTPLiveStatus(history []eventstream.Envelope, status string) bool 
 	return false
 }
 
+func reviewerHTTPExactNumericReview(t *testing.T, events []eventstream.Envelope, status string) {
+	t.Helper()
+	const want = `{"id":9007199254740991,"key":"one","range":{"min":-9007199254740991}}`
+	found := false
+	for _, env := range events {
+		if env.Kind != eventstream.KindApprovalReview || env.ApprovalReview == nil || env.ApprovalReview.Status != status {
+			continue
+		}
+		found = true
+		raw, err := json.Marshal(env.ApprovalReview.RawInput)
+		if err != nil || string(raw) != want || env.ApprovalReview.ToolCallID != "reviewed-provider-tool-id" || env.TurnID == "" {
+			t.Fatalf("%s review changed safe numeric arguments/identity: %+v; input=%s; err=%v", status, env, raw, err)
+		}
+	}
+	if !found {
+		t.Fatalf("missing %s review: %+v", status, reviewerHTTPReviewSummary(events))
+	}
+}
+
 func reviewerHTTPNoCallbacks(t *testing.T, ctx context.Context, client *httpclient.Client, session string) {
 	t.Helper()
 	calls, err := client.ApplicationCalls(ctx, session)
@@ -197,7 +220,8 @@ func TestApplicationReviewerHTTPAllowClaimReplayAndRestart(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
 	defer cancel()
 	root := t.TempDir()
-	provider := &reviewerHTTPProvider{toolName: "ApplicationLookup", args: `{"key":"one"}`, decision: `{"option_id":"allow_once"}`,
+	const args = `{"key":"one","id":9007199254740991,"range":{"min":-9007199254740991}}`
+	provider := &reviewerHTTPProvider{toolName: "ApplicationLookup", args: args, decision: `{"option_id":"allow_once"}`,
 		entered: make(chan struct{}), release: make(chan struct{})}
 	host, client, session := setupReviewerHTTP(t, ctx, root, provider)
 	defer func() {
@@ -250,17 +274,19 @@ synced:
 			t.Fatal("live approval review missing")
 		}
 	}
+	reviewerHTTPExactNumericReview(t, live, "in_progress")
 	close(provider.release)
 	calls, err := client.WaitApplicationCalls(ctx, session)
 	if err != nil || len(calls) != 1 || calls[0].State != "pending" {
 		t.Fatalf("approved callback intent: %+v %v; requests=%+v", calls, err, provider.snapshot())
 	}
 	call := calls[0]
-	if call.CallID != "reviewed-provider-tool-id" || call.ConfigurationRevision != 1 || call.ToolsVersion != applicationHTTPProfile().ToolsVersion || string(call.Arguments) != `{"key":"one"}` {
+	if call.CallID != "reviewed-provider-tool-id" || call.ConfigurationRevision != 1 || call.ToolsVersion != applicationHTTPProfile().ToolsVersion || string(call.Arguments) != args {
 		t.Fatalf("approved callback not pinned to submitted catalog/args: %+v", call)
 	}
-	if _, err := client.ClaimApplicationCall(ctx, session, call.ID); err != nil {
-		t.Fatal(err)
+	claimed, err := client.ClaimApplicationCall(ctx, session, call.ID)
+	if err != nil || claimed.State != "claimed" || claimed.ID != call.ID || claimed.CallID != call.CallID || claimed.TurnID != call.TurnID || string(claimed.Arguments) != args {
+		t.Fatalf("claimed callback changed arguments/identity: %+v %v", claimed, err)
 	}
 	if _, err := client.ClaimApplicationCall(ctx, session, call.ID); err == nil {
 		t.Fatal("duplicate effect claim authorized")
@@ -288,7 +314,9 @@ synced:
 			t.Fatal("approved live review missing")
 		}
 	}
+	reviewerHTTPExactNumericReview(t, live, "approved")
 	history := applicationHTTPHistory(t, ctx, client, session)
+	reviewerHTTPExactNumericReview(t, history, "approved")
 	approved := reviewerHTTPReviewEvents(t, history, "approved")
 	if len(approved) != 1 || approved[0].TurnID != call.TurnID {
 		t.Fatalf("canonical terminal review replay incomplete: approved=%+v call=%+v", approved, call)
@@ -304,7 +332,9 @@ synced:
 		t.Fatal(err)
 	}
 	client = host.app(string(secret))
-	for _, env := range applicationHTTPHistory(t, ctx, client, session) {
+	restartedHistory := applicationHTTPHistory(t, ctx, client, session)
+	reviewerHTTPExactNumericReview(t, restartedHistory, "approved")
+	for _, env := range restartedHistory {
 		if env.Kind == eventstream.KindApprovalReview && env.ApprovalReview != nil && mirrorIDs[env.EventID] {
 			delete(mirrorIDs, env.EventID)
 		}
@@ -313,11 +343,179 @@ synced:
 		t.Fatalf("review event IDs changed across Host restart: %+v", mirrorIDs)
 	}
 	replayed, err := client.ApplicationCall(ctx, session, call.ID)
-	if err != nil || replayed.State != "completed" {
-		t.Fatalf("original callback receipt after restart: %+v %v", replayed, err)
+	if err != nil || replayed.State != "completed" || replayed.ID != call.ID || replayed.CallID != call.CallID || replayed.TurnID != call.TurnID || string(replayed.Arguments) != args {
+		t.Fatalf("original callback receipt after restart changed arguments/identity: %+v %v", replayed, err)
 	}
 	if len(provider.snapshot()) != 3 {
 		t.Fatalf("expected main/reviewer/main, got provider requests: %+v", provider.snapshot())
+	}
+}
+
+// reviewerHTTPUnsafeTool checks only optional tool observation payloads; the
+// original provider arguments remain unmodified even when v1 cannot display them.
+func reviewerHTTPUnsafeTool(t *testing.T, events []eventstream.Envelope, turnID string) (proposed, failed bool, ids map[string]bool) {
+	t.Helper()
+	ids = make(map[string]bool)
+	for _, env := range events {
+		if env.TurnID != turnID {
+			continue
+		}
+		if env.Kind == eventstream.KindApprovalReview {
+			t.Fatalf("unsafe callback reached approval review: %+v", env)
+		}
+		var rawInput any
+		switch update := env.Update.(type) {
+		case eventstream.ToolCall:
+			if update.ToolCallID != "reviewed-provider-tool-id" {
+				continue
+			}
+			proposed = true
+			rawInput = update.RawInput
+		case eventstream.ToolCallUpdate:
+			if update.ToolCallID != "reviewed-provider-tool-id" {
+				continue
+			}
+			rawInput = update.RawInput
+			if update.Status != nil && *update.Status == "failed" {
+				failed = true
+				raw, err := json.Marshal(update)
+				if err != nil || !strings.Contains(string(raw), "exceeds the exact JavaScript range") {
+					t.Fatalf("failed tool lacks explicit numeric rejection: %+v; err=%v", update, err)
+				}
+			}
+		default:
+			continue
+		}
+		if rawInput != nil {
+			t.Fatalf("unsafe rawInput exposed on v1 tool observation: %+v", env)
+		}
+		if env.EventID != "" {
+			ids[env.EventID] = true
+		}
+	}
+	return proposed, failed, ids
+}
+
+func TestApplicationReviewerHTTPUnsafeNumberRejectedBeforeApproval(t *testing.T) {
+	for _, tc := range []struct{ name, args string }{
+		{"integer", `{"key":"one","id":9007199254740993}`},
+		{"decimal-rounded-to-safe-bound", `{"key":"one","id":9007199254740991.1}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
+			defer cancel()
+			root := t.TempDir()
+			provider := &reviewerHTTPProvider{toolName: "ApplicationLookup", args: tc.args, decision: `{"option_id":"allow_once"}`}
+			host, client, session := setupReviewerHTTP(t, ctx, root, provider)
+			defer func() {
+				if host != nil {
+					host.close(t)
+				}
+			}()
+			feed, err := client.Reconnect(ctx, appserver.ReconnectRequest{SessionID: session})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer feed.Subscription.Close()
+			var assembler appserver.FeedDeliveryAssembler
+			for {
+				select {
+				case delivery, ok := <-feed.Subscription.Deliveries():
+					if !ok {
+						t.Fatalf("unsafe review feed closed before sync: %v", feed.Subscription.Err())
+					}
+					if _, _, err := assembler.Accept(delivery); err != nil {
+						t.Fatal(err)
+					}
+					if delivery.Kind == appserver.FeedDeliverySync {
+						goto synced
+					}
+				case <-ctx.Done():
+					t.Fatal(ctx.Err())
+				}
+			}
+		synced:
+			prompted := promptReviewerHTTP(t, ctx, client, session, "prompt-reviewed-unsafe-number")
+			var live []eventstream.Envelope
+			for {
+				proposed, failed, _ := reviewerHTTPUnsafeTool(t, live, prompted.Target.TurnID)
+				if proposed && failed {
+					break
+				}
+				select {
+				case delivery, ok := <-feed.Subscription.Deliveries():
+					if !ok {
+						t.Fatalf("unsafe tool live feed closed: %v", feed.Subscription.Err())
+					}
+					events, _, err := assembler.Accept(delivery)
+					if err != nil {
+						t.Fatal(err)
+					}
+					live = append(live, events...)
+				case <-ctx.Done():
+					t.Fatal("unsafe numeric tool rejection missing from live SSE")
+				}
+			}
+			waitApplicationHTTPIdle(t, ctx, client, session)
+			reviewerHTTPNoCallbacks(t, ctx, client, session)
+			history := applicationHTTPHistory(t, ctx, client, session)
+			proposed, failed, replayIDs := reviewerHTTPUnsafeTool(t, history, prompted.Target.TurnID)
+			if !proposed || !failed || len(replayIDs) == 0 {
+				t.Fatalf("unsafe numeric rejection missing from reconnect: proposed=%v failed=%v ids=%+v", proposed, failed, replayIDs)
+			}
+			requests := provider.snapshot()
+			if len(requests) != 2 || requests[0]["model"] != "gpt-4.1" || requests[1]["model"] != "gpt-4.1" {
+				t.Fatalf("unsafe call invoked Guardian or did not return tool error to model: %+v", requests)
+			}
+			messages, _ := requests[1]["messages"].([]any)
+			if len(messages) == 0 {
+				t.Fatalf("provider follow-up missing rejected tool result: %+v", requests[1])
+			}
+			last, _ := messages[len(messages)-1].(map[string]any)
+			if last["role"] != "tool" || !strings.Contains(fmt.Sprint(last["content"]), "exceeds the exact JavaScript range") {
+				t.Fatalf("provider did not receive explicit rejected tool result: %+v", last)
+			}
+			originalArguments := false
+			for _, item := range messages {
+				message, _ := item.(map[string]any)
+				if message["role"] != "assistant" {
+					continue
+				}
+				toolCalls, _ := message["tool_calls"].([]any)
+				for _, toolCall := range toolCalls {
+					call, _ := toolCall.(map[string]any)
+					function, _ := call["function"].(map[string]any)
+					originalArguments = originalArguments || function["arguments"] == tc.args
+				}
+			}
+			if !originalArguments {
+				t.Fatalf("model context lost original unsafe numeric argument: %+v", messages)
+			}
+			if err := feed.Subscription.Close(); err != nil {
+				t.Fatal(err)
+			}
+			host.close(t)
+			host = startApplicationHTTPHost(t, filepath.Join(root, "store"), filepath.Join(root, "workspace"), provider)
+			secret, err := os.ReadFile(filepath.Join(root, "application.credential"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			client = host.app(string(secret))
+			restarted := applicationHTTPHistory(t, ctx, client, session)
+			proposed, failed, restartedIDs := reviewerHTTPUnsafeTool(t, restarted, prompted.Target.TurnID)
+			if !proposed || !failed || len(replayIDs) != len(restartedIDs) {
+				t.Fatalf("unsafe tool replay changed after restart: proposed=%v failed=%v before=%+v after=%+v", proposed, failed, replayIDs, restartedIDs)
+			}
+			for id := range replayIDs {
+				if !restartedIDs[id] {
+					t.Fatalf("unsafe tool event ID %s changed after restart: before=%+v after=%+v", id, replayIDs, restartedIDs)
+				}
+			}
+			reviewerHTTPNoCallbacks(t, ctx, client, session)
+			if len(provider.snapshot()) != 2 {
+				t.Fatalf("restart repeated rejected call: %+v", provider.snapshot())
+			}
+		})
 	}
 }
 

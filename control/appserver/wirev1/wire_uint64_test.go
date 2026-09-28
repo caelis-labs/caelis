@@ -808,6 +808,8 @@ func TestWireNumberGuardComparesDecimalBoundsWithoutFloatRounding(t *testing.T) 
 		json.RawMessage(`{"value":-9007199254740991.1}`),
 		json.RawMessage(`{"value":9.0071992547409911e15}`),
 		json.RawMessage(`{"value":1e1000000000}`),
+		json.RawMessage(`{"value":9007199254740993,"value":1}`),
+		json.RawMessage(`{"value":{"nested":9007199254740993},"value":null}`),
 	} {
 		if err := ValidateJSONNumbers(raw); err == nil {
 			t.Fatalf("unsafe numeric token accepted: %s", raw)

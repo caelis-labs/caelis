@@ -5,9 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"math"
-	"math/big"
 	"strconv"
 
 	controlagents "github.com/caelis-labs/caelis/control/agents"
@@ -15,6 +13,7 @@ import (
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/internal/eventmeta"
+	"github.com/caelis-labs/caelis/control/internal/jsonvalue"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
 	"github.com/caelis-labs/caelis/control/workspacetrust"
 )
@@ -39,7 +38,7 @@ type FeedDelivery struct {
 }
 
 const (
-	maxSafeJSONInteger                  = uint64(1<<53 - 1)
+	maxSafeJSONInteger                  = jsonvalue.MaxSafeInteger
 	runtimeStreamTruncatedBeforeMetaKey = "truncated_before"
 )
 
@@ -51,7 +50,7 @@ func ParseUint64Decimal(value string) (uint64, error) {
 // ValidateJSONNumbers rejects JSON numeric tokens outside the wire's exact
 // cross-language integer range.
 func ValidateJSONNumbers(raw []byte) error {
-	return validateWireJSONNumbers(raw)
+	return jsonvalue.ValidateNumbers(raw)
 }
 
 type wireDurableFeedPosition struct {
@@ -99,7 +98,7 @@ func marshalWireValue(value any) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := validateWireJSONNumbers(raw); err != nil {
+	if err := ValidateJSONNumbers(raw); err != nil {
 		return nil, err
 	}
 	return raw, nil
@@ -361,7 +360,7 @@ func marshalWriteRequest(request any, expectedRevision *uint64) ([]byte, error) 
 	if err != nil {
 		return nil, err
 	}
-	if err := validateWireJSONNumbers(raw); err != nil {
+	if err := ValidateJSONNumbers(raw); err != nil {
 		return nil, err
 	}
 	return raw, nil
@@ -460,7 +459,7 @@ func marshalEnvelope(envelope eventstream.Envelope) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := validateWireJSONNumbers(raw); err != nil {
+	if err := ValidateJSONNumbers(raw); err != nil {
 		return nil, err
 	}
 	return raw, nil
@@ -480,12 +479,14 @@ func prepareEnvelopeMetadata(envelope *eventstream.Envelope) error {
 		update.Meta, err = decimalizeKnownMetadata(update.Meta)
 		envelope.Update = update
 	case eventstream.ToolCall:
+		update.RawInput = observableToolInput(update.RawInput)
 		err = validateLocations(update.Locations)
 		if err == nil {
 			update.Meta, err = decimalizeKnownMetadata(update.Meta)
 		}
 		envelope.Update = update
 	case eventstream.ToolCallUpdate:
+		update.RawInput = observableToolInput(update.RawInput)
 		err = validateLocations(update.Locations)
 		if err == nil {
 			update.Meta, err = decimalizeKnownMetadata(update.Meta)
@@ -755,7 +756,7 @@ func decimalString(value any) (string, error) {
 }
 
 func decodeWireRequest(raw json.RawMessage, target any) error {
-	if err := validateWireJSONNumbers(raw); err != nil {
+	if err := ValidateJSONNumbers(raw); err != nil {
 		return err
 	}
 	var fields map[string]json.RawMessage
@@ -818,53 +819,4 @@ func marshalObject(value any) (map[string]json.RawMessage, error) {
 
 func decimalRaw(value uint64) json.RawMessage {
 	return json.RawMessage(strconv.Quote(strconv.FormatUint(value, 10)))
-}
-
-func validateWireJSONNumbers(raw []byte) error {
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.UseNumber()
-	var value any
-	if err := decoder.Decode(&value); err != nil {
-		return fmt.Errorf("control wire v1: decode marshaled wire JSON: %w", err)
-	}
-	if err := decoder.Decode(&struct{}{}); err != io.EOF {
-		return fmt.Errorf("control wire v1: marshaled wire JSON contains trailing data")
-	}
-	return validateWireJSONValue(value)
-}
-
-func validateWireJSONValue(value any) error {
-	switch typed := value.(type) {
-	case json.Number:
-		text := typed.String()
-		approximate, err := strconv.ParseFloat(text, 64)
-		magnitude := math.Abs(approximate)
-		if math.IsInf(approximate, 0) || math.IsNaN(approximate) || err != nil && magnitude != 0 {
-			return fmt.Errorf("control wire v1: JSON number %q exceeds the exact JavaScript range; encode it as a string", typed)
-		}
-		maximum := float64(maxSafeJSONInteger)
-		if magnitude < maximum {
-			return nil
-		}
-		if magnitude > maximum || len(text) > 128 {
-			return fmt.Errorf("control wire v1: JSON number %q exceeds the exact JavaScript range; encode it as a string", typed)
-		}
-		number, ok := new(big.Rat).SetString(text)
-		if !ok || new(big.Rat).Abs(number).Cmp(big.NewRat(int64(maxSafeJSONInteger), 1)) > 0 {
-			return fmt.Errorf("control wire v1: JSON number %q exceeds the exact JavaScript range; encode it as a string", typed)
-		}
-	case []any:
-		for _, item := range typed {
-			if err := validateWireJSONValue(item); err != nil {
-				return err
-			}
-		}
-	case map[string]any:
-		for _, item := range typed {
-			if err := validateWireJSONValue(item); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
 }
