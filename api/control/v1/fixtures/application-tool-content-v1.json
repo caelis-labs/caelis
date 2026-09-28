@@ -1,0 +1,7 @@
+{
+  "name": "ExampleLookup",
+  "description": "Read an application-owned value.",
+  "input_schema": {"type": "object", "properties": {"key": {"type": "string"}}},
+  "result_format": "content-v1",
+  "output_schema": {"type": "object", "properties": {"count": {"type": "integer"}}, "required": ["count"], "additionalProperties": false}
+}

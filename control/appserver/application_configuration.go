@@ -9,7 +9,11 @@ import (
 // Capabilities reports implemented application features, independent of the
 // caller's lease, per-Session permissions and current execution state.
 func (s *ApplicationService) Capabilities() []string {
-	out := []string{application.Capability, application.CapabilityResourceTransfer, application.CapabilityBackgroundActivation, CapabilitySharedWorkers, CapabilityTurnSteering}
+	out := []string{
+		application.Capability, application.CapabilityResourceTransfer,
+		application.CapabilityToolResultContent, application.CapabilityMediaResources,
+		application.CapabilityBackgroundActivation, CapabilitySharedWorkers, CapabilityTurnSteering,
+	}
 	if s.config.ModelImageInput != nil {
 		out = append(out, application.CapabilityModelCapabilities)
 	}

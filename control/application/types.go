@@ -189,6 +189,10 @@ type ToolDefinition struct {
 	Name        string         `json:"name"`
 	Description string         `json:"description"`
 	InputSchema map[string]any `json:"input_schema"`
+	// ResultFormat pins result interpretation with the tool catalog. Empty keeps
+	// the baseline opaque JSON contract; content-v1 admits typed content blocks.
+	ResultFormat string         `json:"result_format,omitempty"`
+	OutputSchema map[string]any `json:"output_schema,omitempty"`
 }
 
 // Registration enrolls one application using an externally persisted random
@@ -255,6 +259,13 @@ type Call struct {
 type CallResult struct {
 	Outcome string          `json:"outcome"` // succeeded, failed, unknown
 	Content json.RawMessage `json:"content"`
+	// ResultFormat must match the claimed tool's immutable catalog revision.
+	// Content is an ordered ContentBlock array only for content-v1. Baseline
+	// clients retain opaque JSON until they explicitly negotiate that format.
+	ResultFormat string `json:"result_format,omitempty"`
+	// StructuredContent preserves absent versus empty objects and decodes JSON
+	// numbers as json.Number so the durable receipt does not round integers.
+	StructuredContent map[string]any `json:"structuredContent,omitzero"`
 }
 
 // Resource is an immutable owned byte snapshot, independent of worker paths.
@@ -265,4 +276,7 @@ type Resource struct {
 	MediaType string `json:"media_type"`
 	Size      int64  `json:"size"`
 	SHA256    string `json:"sha256"`
+	// ExpiresAt bounds new byte reads, not the historical snapshots already
+	// delivered to a model. Absence retains permanent baseline artifacts.
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 }

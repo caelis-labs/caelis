@@ -136,9 +136,6 @@ func (a *Agent) executeToolCallAdmitted(
 	if err != nil {
 		result = modelVisibleToolErrorResult(call, result, err)
 	}
-	if err := model.ValidateRequestCapabilities(a.model, &model.Request{Instructions: result.Content}); err != nil {
-		result = modelVisibleToolErrorResult(call, result, err)
-	}
 	if tool.IsToolSearchDefinition(selectedTool.Definition()) {
 		a.refreshDeferredTools(visibility)
 	}

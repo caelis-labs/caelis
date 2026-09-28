@@ -1,0 +1,10 @@
+{
+  "outcome": "succeeded",
+  "result_format": "content-v1",
+  "content": [
+    {"type": "text", "text": "Screenshot and linked image"},
+    {"type": "image", "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC", "mimeType": "image/png"},
+    {"type": "resource_link", "uri": "application-resource:app-resource-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", "name": "chart.png", "mimeType": "image/png", "sha256": "b1ff9c8ea3a780bad09b346c423d2d0e46815926879b18e841d928376a946640"}
+  ],
+  "structuredContent": {"count": 2}
+}

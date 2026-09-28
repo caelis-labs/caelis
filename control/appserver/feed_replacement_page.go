@@ -10,7 +10,7 @@ import (
 const (
 	// feedReplacementPageEventLimit and feedReplacementPageByteLimit bound one
 	// canonical ReplacePage SSE payload. They stay well below the HTTP client's
-	// 8 MiB scanner cap and the assembler hard caps (8192 events / 32 MiB). A
+	// 64 MiB scanner cap and the assembler hard caps (8192 events / 32 MiB). A
 	// single envelope larger than the transport byte bound is still emitted
 	// alone when it fits the assembler byte cap.
 	feedReplacementPageEventLimit = 256
@@ -50,8 +50,8 @@ func (b *feedReplacementPageBuilder) byteLimit() int {
 	if limit <= 0 {
 		limit = feedReplacementPageByteLimit
 	}
-	if limit > maxFeedReplacementPageBytes {
-		return maxFeedReplacementPageBytes
+	if limit > MaxFeedReplacementPageBytes {
+		return MaxFeedReplacementPageBytes
 	}
 	return limit
 }
@@ -73,7 +73,7 @@ func (b *feedReplacementPageBuilder) add(envelope eventstream.Envelope) (FeedDel
 	if err != nil {
 		return FeedDelivery{}, false, err
 	}
-	if len(raw) > maxFeedReplacementPageBytes {
+	if len(raw) > MaxFeedReplacementPageBytes {
 		return FeedDelivery{}, false, errorcode.New(errorcode.ResourceExhausted, "controlclient: Session replacement page exceeds byte limit")
 	}
 	if len(b.pending) > 0 && (len(b.pending) >= b.eventLimit() || b.bytes+len(raw) > b.byteLimit()) {

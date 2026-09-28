@@ -8,10 +8,12 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 )
 
-const (
-	maxFeedReplacementPageEvents = 8192
-	maxFeedReplacementPageBytes  = 32 << 20
-)
+const maxFeedReplacementPageEvents = 8192
+
+// MaxFeedReplacementPageBytes bounds the total serialized Envelope bytes in one
+// replacement page, excluding delivery framing. Exact-replay spools must admit
+// an individual Envelope up to this limit so it can use either delivery path.
+const MaxFeedReplacementPageBytes = 32 << 20
 
 // FeedDeliveryAssembler applies the common append/replacement transaction
 // contract for Session consumers. Replacement pages remain private until end.
@@ -86,7 +88,7 @@ func (a *FeedDeliveryAssembler) accept(delivery FeedDelivery, retain bool) ([]ev
 				return nil, false, err
 			}
 			pageBytes += len(raw)
-			if pageBytes > maxFeedReplacementPageBytes {
+			if pageBytes > MaxFeedReplacementPageBytes {
 				a.Reset()
 				return nil, false, errorcode.New(errorcode.ResourceExhausted, "Session replacement page exceeds byte limit")
 			}

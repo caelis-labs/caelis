@@ -346,18 +346,57 @@ func (l *ollamaLLM) fromKernelMessages(instructions []model.Part, messages []mod
 		messages = append([]model.Message{model.NewMessage(model.RoleSystem, instructions...)}, messages...)
 	}
 	out := make([]ollamaChatMessage, 0, len(messages))
+	var pendingToolMedia []ollamaChatMessage
 	for _, msg := range messages {
-		out = append(out, l.fromKernelMessage(msg))
+		if msg.Role != model.RoleTool {
+			out = append(out, pendingToolMedia...)
+			pendingToolMedia = nil
+		}
+		converted := l.fromKernelMessage(msg)
+		if msg.Role == model.RoleTool && len(inlineToolResultImages(msg)) > 0 {
+			// Ollama keeps images separate from a message's text, so one
+			// message cannot represent an interleaved tool result. Send the
+			// function reply first, followed by ordered user-role parts.
+			converted.Images = nil
+			converted.Content = "Multimodal result follows in associated messages."
+			for _, result := range msg.ToolResults() {
+				for index, part := range result.Content {
+					bridge := ollamaChatMessage{Role: string(model.RoleUser), Content: fmt.Sprintf("%s, part %d: ", toolResultEvidenceLabel(result.ToolUseID, result.Name), index+1)}
+					switch part.Kind {
+					case model.PartKindText:
+						if part.Text != nil {
+							bridge.Content += part.Text.Text
+						}
+					case model.PartKindJSON:
+						if part.JSON != nil {
+							bridge.Content += string(part.JSON.Value)
+						}
+					case model.PartKindMedia:
+						if part.Media != nil && part.Media.Modality == model.MediaModalityImage && part.Media.Source.Kind == model.MediaSourceInline {
+							bridge.Images = []string{part.Media.Source.Data}
+						}
+					default:
+						continue
+					}
+					pendingToolMedia = append(pendingToolMedia, bridge)
+				}
+			}
+		}
+		out = append(out, converted)
 	}
-	return out
+	return append(out, pendingToolMedia...)
 }
 
 func (l *ollamaLLM) fromKernelMessage(msg model.Message) ollamaChatMessage {
 	if resp := msg.ToolResponse(); resp != nil {
 		raw, _ := json.Marshal(resp.Result)
+		content := string(raw)
+		if rawText, ok := toolResultText(msg); ok {
+			content = rawText
+		}
 		chat := ollamaChatMessage{
 			Role:     string(model.RoleTool),
-			Content:  string(raw),
+			Content:  content,
 			ToolName: resp.Name,
 		}
 		for _, image := range inlineToolResultImages(msg) {

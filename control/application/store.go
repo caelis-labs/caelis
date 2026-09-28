@@ -23,6 +23,7 @@ const LeaseDuration = 10 * time.Minute
 var (
 	ErrUnauthorized       = errorcode.New(errorcode.PermissionDenied, "application scope is unauthorized")
 	ErrLeaseExpired       = errorcode.New(errorcode.FailedPrecondition, "application lease expired")
+	ErrResourceExpired    = errorcode.New(errorcode.FailedPrecondition, "application resource expired")
 	ErrRevoked            = errorcode.New(errorcode.FailedPrecondition, "application connection revoked")
 	ErrConflict           = errorcode.New(errorcode.Conflict, "application operation conflicts with durable intent")
 	ErrNotFound           = errorcode.New(errorcode.NotFound, "application record not found")

@@ -1,0 +1,8 @@
+{
+  "operation_id": "upload-image-1",
+  "name": "chart.png",
+  "media_type": "image/png",
+  "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC",
+  "sha256": "b1ff9c8ea3a780bad09b346c423d2d0e46815926879b18e841d928376a946640",
+  "expires_at": "2030-01-01T00:00:00Z"
+}

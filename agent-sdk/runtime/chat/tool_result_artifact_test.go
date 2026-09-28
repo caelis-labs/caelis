@@ -489,6 +489,103 @@ func TestForgedReservedNamespaceCollisionRoundTripsAsEventProvenance(t *testing.
 	}
 }
 
+func TestMixedToolResultModelContextSurvivesSessionFileRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	call := model.ToolCall{ID: "application-1", Name: "ApplicationLookup", Args: `{}`}
+	result := tool.Result{
+		Content: []model.Part{
+			model.NewTextPart("Evidence from application"),
+			model.NewMediaPart(model.MediaModalityImage, model.MediaSource{Kind: model.MediaSourceInline, Data: "aW1n"}, "image/png", "evidence.png"),
+			model.NewJSONPart(mustJSON(map[string]any{"outcome": "succeeded", "structuredContent": map[string]any{"score": 1}, "resources": []any{"resource-1"}})),
+		},
+		Metadata: map[string]any{"application": map[string]any{"call_id": "receipt-1"}},
+	}
+	canonical, eventMeta := canonicalToolResult(result, nil)
+	message := toolResultMessageFromCanonical(call, canonical)
+	resultEvent := toolResultEvent(call, canonical, &message, eventMeta)
+	assistant := model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{call}, "")
+
+	store := sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir(), SessionIDGenerator: func() string { return "sess-mixed-result" }})
+	active, err := store.StartSession(context.Background(), session.StartSessionRequest{
+		AppName: "caelis", UserID: "user", Workspace: session.WorkspaceRef{Key: "ws", CWD: t.TempDir()},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range append(modelToolCallEvents(assistant, &model.Response{Message: assistant}, "", nil), resultEvent) {
+		if _, err := store.AppendEvent(context.Background(), session.AppendEventRequest{SessionRef: active.SessionRef, Event: event}); err != nil {
+			t.Fatalf("AppendEvent() error = %v", err)
+		}
+	}
+	loaded, err := store.LoadSession(context.Background(), session.LoadSessionRequest{SessionRef: active.SessionRef})
+	if err != nil {
+		t.Fatal(err)
+	}
+	replayed := messagesFromContext(agent.NewContext(agent.ContextSpec{Context: context.Background(), Session: active, Events: loaded.Events}))
+	if want := []model.Message{assistant, message}; !reflect.DeepEqual(replayed, want) {
+		t.Fatalf("model context changed across file reload\n got: %#v\nwant: %#v", replayed, want)
+	}
+	for _, event := range loaded.Events {
+		if session.EventTypeOf(event) == session.EventTypeToolResult {
+			actual, err := json.Marshal(struct {
+				Output map[string]any
+				Meta   map[string]any
+			}{event.Tool.Output, event.Meta})
+			if err != nil {
+				t.Fatal(err)
+			}
+			want, err := json.Marshal(struct {
+				Output map[string]any
+				Meta   map[string]any
+			}{resultEvent.Tool.Output, resultEvent.Meta})
+			if err != nil || string(actual) != string(want) {
+				t.Fatalf("result receipt or provenance changed across reload: got %s want %s (%v)", actual, want, err)
+			}
+			return
+		}
+	}
+	t.Fatal("reloaded tool result not found")
+}
+
+func TestLargeInlineImageResultSurvivesSessionFileReload(t *testing.T) {
+	// The application aggregate permits 16 MiB of compressed image bytes;
+	// base64 and a canonical JSONL event consequently exceed 20 MiB.
+	encoded := strings.Repeat("AAAA", (16<<20)/3)
+	call := model.ToolCall{ID: "large-image-1", Name: "ApplicationLookup", Args: `{}`}
+	result := tool.Result{Content: []model.Part{
+		model.NewMediaPart(model.MediaModalityImage, model.MediaSource{Kind: model.MediaSourceInline, Data: encoded}, "image/png", "large.png"),
+		model.NewJSONPart(mustJSON(map[string]any{"outcome": "succeeded"})),
+	}}
+	canonical, _ := canonicalToolResult(result, nil)
+	message := toolResultMessageFromCanonical(call, canonical)
+	event := toolResultEvent(call, canonical, &message)
+	store := sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir(), SessionIDGenerator: func() string { return "sess-large-result" }})
+	active, err := store.StartSession(context.Background(), session.StartSessionRequest{
+		AppName: "caelis", UserID: "user", Workspace: session.WorkspaceRef{Key: "ws", CWD: t.TempDir()},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.AppendEvent(context.Background(), session.AppendEventRequest{SessionRef: active.SessionRef, Event: event}); err != nil {
+		t.Fatalf("AppendEvent(large image) error = %v", err)
+	}
+	loaded, err := store.LoadSession(context.Background(), session.LoadSessionRequest{SessionRef: active.SessionRef})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.Events) != 1 || loaded.Events[0].Message == nil {
+		t.Fatalf("reloaded event = %#v", loaded.Events)
+	}
+	resultParts := loaded.Events[0].Message.ToolResults()
+	if len(resultParts) != 1 || len(resultParts[0].Content) != 2 || resultParts[0].Content[0].Media == nil || resultParts[0].Content[0].Media.Source.Data != encoded {
+		t.Fatal("large image was lost or truncated in canonical Session JSONL")
+	}
+	if !reflect.DeepEqual(message, *loaded.Events[0].Message) {
+		t.Fatal("large result model context changed across Session reload")
+	}
+}
+
 func TestCanonicalArtifactMetadataPreservesTaskStateAndInvocationStatus(t *testing.T) {
 	t.Parallel()
 

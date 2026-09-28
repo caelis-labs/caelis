@@ -85,6 +85,17 @@ func ValidateProfile(p Profile) error {
 		if _, err := resolveSchema(def.InputSchema); err != nil {
 			return fmt.Errorf("%w: tool %s: %w", ErrInvalid, def.Name, err)
 		}
+		if def.ResultFormat != "" && def.ResultFormat != ResultFormatContentV1 {
+			return fmt.Errorf("%w: tool result_format", ErrUnsupported)
+		}
+		if def.OutputSchema != nil {
+			if def.ResultFormat != ResultFormatContentV1 {
+				return fmt.Errorf("%w: output_schema requires content-v1", ErrInvalid)
+			}
+			if _, err := resolveSchema(def.OutputSchema); err != nil {
+				return fmt.Errorf("%w: invalid tool output_schema", ErrInvalid)
+			}
+		}
 	}
 	return nil
 }

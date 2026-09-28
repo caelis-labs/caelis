@@ -257,7 +257,7 @@ func (s *Server) applicationRoutes() {
 			writeJSONResult(w, nil, errorcode.New(errorcode.InvalidArgument, "resource SHA256 mismatch"))
 			return
 		}
-		out, err := store.CreateResource(r.Context(), scope, req.SessionID, req.OperationID, req.Name, req.MediaType, req.Data)
+		out, err := store.CreateResourceWithExpiry(r.Context(), scope, req.SessionID, req.OperationID, req.Name, req.MediaType, req.Data, req.ExpiresAt)
 		writeJSONResult(w, out, err)
 	})
 	s.mux.HandleFunc("GET "+apiPrefix+"/application/sessions/{session_id}/resources/{resource_id}", func(w http.ResponseWriter, r *http.Request) {

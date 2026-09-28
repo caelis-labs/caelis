@@ -391,10 +391,7 @@ export interface ApplicationCall {
 
 export type ApplicationCallList = Array<ApplicationCall>;
 
-export interface ApplicationCallResult {
-  content: JSONValue;
-  outcome: "succeeded" | "failed" | "unknown";
-}
+export type ApplicationCallResult = ApplicationContentCallResult | ApplicationLegacyCallResult;
 
 export interface ApplicationConfiguration {
   last_request?: ApplicationConfigurationRequest;
@@ -432,6 +429,21 @@ export interface ApplicationConnection {
   revoked: boolean;
 }
 
+export interface ApplicationContentCallResult {
+  content: Array<ApplicationResultContentBlock>;
+  outcome: "succeeded" | "failed" | "unknown";
+  result_format: "content-v1";
+  structuredContent?: JSONObject;
+}
+
+export interface ApplicationContentToolDefinition {
+  description: string;
+  input_schema: JSONObject;
+  name: string;
+  output_schema?: JSONObject;
+  result_format: "content-v1";
+}
+
 export type ApplicationEmptyRequest = {  };
 
 export interface ApplicationInheritance {
@@ -439,6 +451,17 @@ export interface ApplicationInheritance {
   mcp: false;
   skills: false;
   workspace_memory: false;
+}
+
+export interface ApplicationLegacyCallResult {
+  content: JSONValue;
+  outcome: "succeeded" | "failed" | "unknown";
+}
+
+export interface ApplicationLegacyToolDefinition {
+  description: string;
+  input_schema: JSONObject;
+  name: string;
 }
 
 export interface ApplicationModelCapabilities {
@@ -493,6 +516,7 @@ export interface ApplicationRegistration {
 }
 
 export interface ApplicationResource {
+  expires_at?: string;
   id: string;
   media_type: string;
   name: string;
@@ -510,11 +534,33 @@ export interface ApplicationResourceRequest {
   data: string;
   expected_controller_epoch?: string;
   expected_revision?: Uint64Decimal;
+  expires_at?: string;
   media_type: string;
   name: string;
   operation_id?: string;
   session_id?: string;
   sha256: string;
+}
+
+export type ApplicationResultContentBlock = ApplicationResultTextBlock | ApplicationResultImageBlock | ApplicationResultResourceLinkBlock;
+
+export interface ApplicationResultImageBlock {
+  data: string;
+  mimeType: "image/png" | "image/jpeg";
+  type: "image";
+}
+
+export interface ApplicationResultResourceLinkBlock {
+  mimeType: "image/png" | "image/jpeg";
+  name: string;
+  sha256: string;
+  type: "resource_link";
+  uri: string;
+}
+
+export interface ApplicationResultTextBlock {
+  text: string;
+  type: "text";
 }
 
 export interface ApplicationScope {
@@ -530,11 +576,7 @@ export interface ApplicationSource {
   operation_id: string;
 }
 
-export interface ApplicationToolDefinition {
-  description: string;
-  input_schema: JSONObject;
-  name: string;
-}
+export type ApplicationToolDefinition = ApplicationLegacyToolDefinition | ApplicationContentToolDefinition;
 
 export interface ApplicationWorker {
   application_id: string;

@@ -340,6 +340,16 @@ func (s *Store) CompleteCall(ctx context.Context, scope Scope, session, id strin
 	if err != nil {
 		return err
 	}
+	if result.ResultFormat != "" && len(body) > maxCallBytes {
+		return fmt.Errorf("%w: callback result exceeds byte limit", ErrInvalid)
+	}
+	// Validate precisely the immutable bytes that will be stored, not aliases
+	// of the embedding caller's maps or RawMessage slices.
+	var snapshot CallResult
+	if err = json.Unmarshal(body, &snapshot); err != nil {
+		return ErrInvalid
+	}
+	result = snapshot
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, err = s.active(ctx, scope); err != nil {
@@ -358,6 +368,9 @@ func (s *Store) CompleteCall(ctx context.Context, scope Scope, session, id strin
 	}
 	if call.State != "claimed" {
 		return ErrAlreadyClaimed
+	}
+	if err = s.validateCallResult(ctx, call, result); err != nil {
+		return err
 	}
 	res, err := s.db.ExecContext(ctx, `UPDATE app_calls SET state='completed',result=? WHERE connection=? AND session=? AND call=? AND state='claimed'`, body, scope.ConnectionID, session, id)
 	if err != nil {
