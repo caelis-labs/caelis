@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.64.0](https://github.com/caelis-labs/caelis/compare/v0.63.0...v0.64.0) (2026-09-28)
+
+
+### Features
+
+* **application:** support multimodal callback results ([#82](https://github.com/caelis-labs/caelis/issues/82)) ([369cd58](https://github.com/caelis-labs/caelis/commit/369cd58b6d26cfd43057e0393fcab7d7c2c84cd8))
+
 ## [0.63.0](https://github.com/caelis-labs/caelis/compare/v0.62.0...v0.63.0) (2026-09-27)
 
 
