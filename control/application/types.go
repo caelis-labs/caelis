@@ -7,6 +7,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"time"
+
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 )
 
 // Capability identifies the supported application contract in Host discovery.
@@ -40,6 +42,9 @@ type Profile struct {
 	Inherit         Inheritance      `json:"inherit"`
 	Workspace       Workspace        `json:"workspace,omitempty"`
 	Permissions     Permissions      `json:"permissions,omitempty"`
+	// ExecutionConfig is creation-bound process configuration, independent of
+	// workspace permissions and the revisioned model/tool configuration.
+	ExecutionConfig *sandbox.ExecutionConfig `json:"execution_config,omitempty"`
 }
 
 // MarshalJSON keeps the original creation-profile field order and omission

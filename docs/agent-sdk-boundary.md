@@ -28,6 +28,11 @@ Hosts inject model, tool, Session, sandbox, task, policy, and endpoint
 implementations. Runtime validates the assembled capabilities and fails closed
 when a required feature is absent.
 
+`sandbox.ExecutionConfig` owns reusable native command environment and shell
+configuration. Hosts supply it through `sandbox.Config.Execution`, independently
+of CWD and filesystem authority. The product's creation-bound assembly and
+restart contract is documented in [Execution Configuration](execution-configuration.md).
+
 The assembled Tool set is the execution-admission boundary. Product policy may
 further restrict an admitted invocation, but tool names do not form a second
 allowlist. A StartThread-created collaborator receives only `ListThreads` and `SendMessage`

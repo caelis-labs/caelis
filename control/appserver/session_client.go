@@ -58,7 +58,7 @@ func (c *boundSessionClient) Initialize(ctx context.Context) (ServerInfo, error)
 		EnvelopeVersion: EnvelopeVersion,
 		APIVersion:      HTTPAPIVersion,
 		ServerID:        ServerIdentity,
-		Capabilities:    RequiredManagedHostCapabilities(),
+		Capabilities:    append(RequiredManagedHostCapabilities(), CapabilityExecutionConfiguration),
 		Transports:      []string{"embedded"},
 	}, nil
 }

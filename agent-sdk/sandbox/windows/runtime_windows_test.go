@@ -1989,9 +1989,9 @@ func TestSandboxEnvironmentPreservesHostUserDirsAndRedirectsToolCaches(t *testin
 	t.Setenv("PYTHONPATH", hostPythonPath)
 	unsetEnvForTest(t, "NUGET_PACKAGES", "pnpm_config_store_dir", "npm_config_store_dir", "YARN_CACHE_FOLDER")
 
-	env, err := sandboxEnvironment(workspacePolicy{SandboxEnvRoot: envRoot}, map[string]string{
+	env, err := sandboxEnvironment(workspacePolicy{SandboxEnvRoot: envRoot}, sandbox.Config{}, sandbox.CommandRequest{Env: map[string]string{
 		"PYTHONPATH": extraPythonPath,
-	})
+	}})
 	if err != nil {
 		t.Fatalf("sandboxEnvironment() error = %v", err)
 	}
@@ -2021,7 +2021,7 @@ func TestSandboxEnvironmentPreservesHostUserDirsAndRedirectsToolCaches(t *testin
 		"npm_config_store_dir":      filepath.Join(cacheRoot, "pnpm-store"),
 		"YARN_CACHE_FOLDER":         filepath.Join(cacheRoot, "yarn"),
 		"PSModuleAnalysisCachePath": filepath.Join(sandboxPowerShellCacheDir(envRoot), "PowerShell_AnalysisCache"),
-		"PYTHONPATH":                prependEnvPath(sandboxPythonSiteDir(envRoot), extraPythonPath),
+		"PYTHONPATH":                extraPythonPath,
 	} {
 		if got, ok := envValue(env, key); !ok || got != want {
 			t.Fatalf("env[%s] = %q/%v, want %q", key, got, ok, want)
@@ -2054,12 +2054,47 @@ func TestSandboxEnvironmentPreservesHostUserDirsAndRedirectsToolCaches(t *testin
 	}
 }
 
+func TestSandboxEnvironmentExplicitOverridesWinOverNativeDefaults(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "sandbox-env")
+	base := []string{"HOST=visible", "TEMP=host-temp", "PATH=host-path", "PYTHONPATH=host-python"}
+	inherit := false
+	cfg := sandbox.Config{BaseEnv: base, Execution: &sandbox.ExecutionConfig{Environment: sandbox.EnvironmentConfig{
+		Inherit: &inherit, Set: map[string]string{"TEMP": "config-temp", "CONFIG": "config"}, Unset: []string{"PATH"},
+	}}}
+	req := sandbox.CommandRequest{Env: map[string]string{"TEMP": "request-temp", "CONFIG": "request"}, UnsetEnv: []string{"PYTHONPATH", "GOCACHE"}}
+	env, err := sandboxEnvironment(workspacePolicy{SandboxEnvRoot: root}, cfg, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"HOST", "PATH", "PYTHONPATH", "GOCACHE", "SystemRoot", "CAELIS_SANDBOX_TEMP", "TMP"} {
+		if value, ok := envValue(env, name); ok {
+			t.Fatalf("%s = %q, want absent with inherit=false", name, value)
+		}
+	}
+	for name, want := range map[string]string{"TEMP": "request-temp", "CONFIG": "request"} {
+		if got, ok := envValue(env, name); !ok || got != want {
+			t.Fatalf("%s = %q/%v, want %q", name, got, ok, want)
+		}
+	}
+	cfg.Execution.Environment.Inherit = nil
+	env, err = sandboxEnvironment(workspacePolicy{SandboxEnvRoot: root}, cfg, sandbox.CommandRequest{UnsetEnv: []string{"TEMP"}, Env: map[string]string{"TEMP": "explicit"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := envValue(env, "TEMP"); !ok || got != "explicit" {
+		t.Fatalf("request TEMP = %q/%v", got, ok)
+	}
+	if got, ok := envValue(env, "PATH"); ok {
+		t.Fatalf("config PATH unset did not remove host value: %q", got)
+	}
+}
+
 func TestSandboxEnvironmentUsesNativeOpenSSHForGitWhenAvailable(t *testing.T) {
 	unsetEnvForTest(t, "GIT_SSH_COMMAND", "GIT_SSH")
 	envRoot := filepath.Join(t.TempDir(), "sandbox-env")
 	_, sshPath := withFakeSystemOpenSSH(t)
 
-	env, err := sandboxEnvironment(workspacePolicy{SandboxEnvRoot: envRoot}, nil)
+	env, err := sandboxEnvironment(workspacePolicy{SandboxEnvRoot: envRoot}, sandbox.Config{}, sandbox.CommandRequest{})
 	if err != nil {
 		t.Fatalf("sandboxEnvironment() error = %v", err)
 	}
@@ -2075,9 +2110,9 @@ func TestSandboxEnvironmentDoesNotOverrideGitSSHSelection(t *testing.T) {
 	envRoot := filepath.Join(t.TempDir(), "sandbox-env")
 	withFakeSystemOpenSSH(t)
 
-	env, err := sandboxEnvironment(workspacePolicy{SandboxEnvRoot: envRoot}, map[string]string{
+	env, err := sandboxEnvironment(workspacePolicy{SandboxEnvRoot: envRoot}, sandbox.Config{}, sandbox.CommandRequest{Env: map[string]string{
 		"GIT_SSH_COMMAND": "C:/custom/ssh.exe -F C:/custom/config",
-	})
+	}})
 	if err != nil {
 		t.Fatalf("sandboxEnvironment(command override) error = %v", err)
 	}
@@ -2085,9 +2120,9 @@ func TestSandboxEnvironmentDoesNotOverrideGitSSHSelection(t *testing.T) {
 		t.Fatalf("env[GIT_SSH_COMMAND] = %q/%v, want command override", got, ok)
 	}
 
-	env, err = sandboxEnvironment(workspacePolicy{SandboxEnvRoot: envRoot}, map[string]string{
+	env, err = sandboxEnvironment(workspacePolicy{SandboxEnvRoot: envRoot}, sandbox.Config{}, sandbox.CommandRequest{Env: map[string]string{
 		"GIT_SSH": "C:/custom/ssh.exe",
-	})
+	}})
 	if err != nil {
 		t.Fatalf("sandboxEnvironment(path override) error = %v", err)
 	}
@@ -2104,7 +2139,7 @@ func TestSandboxEnvironmentSkipsGitOpenSSHWhenUnavailable(t *testing.T) {
 	envRoot := filepath.Join(t.TempDir(), "sandbox-env")
 	t.Setenv("SystemRoot", filepath.Join(t.TempDir(), "Windows"))
 
-	env, err := sandboxEnvironment(workspacePolicy{SandboxEnvRoot: envRoot}, nil)
+	env, err := sandboxEnvironment(workspacePolicy{SandboxEnvRoot: envRoot}, sandbox.Config{}, sandbox.CommandRequest{})
 	if err != nil {
 		t.Fatalf("sandboxEnvironment() error = %v", err)
 	}
@@ -2129,7 +2164,7 @@ func TestSandboxEnvironmentPreservesToolCacheOverrides(t *testing.T) {
 		"YARN_CACHE_FOLDER":     filepath.Join(t.TempDir(), "yarn"),
 	}
 
-	env, err := sandboxEnvironment(workspacePolicy{SandboxEnvRoot: envRoot}, extra)
+	env, err := sandboxEnvironment(workspacePolicy{SandboxEnvRoot: envRoot}, sandbox.Config{}, sandbox.CommandRequest{Env: extra})
 	if err != nil {
 		t.Fatalf("sandboxEnvironment() error = %v", err)
 	}
@@ -2164,7 +2199,7 @@ func TestSandboxEnvironmentPreservesHostDefaultCacheOverridesAndRedirectsForcedC
 	t.Setenv("npm_config_store_dir", hostPnpm)
 	t.Setenv("YARN_CACHE_FOLDER", hostYarn)
 
-	env, err := sandboxEnvironment(workspacePolicy{SandboxEnvRoot: envRoot}, nil)
+	env, err := sandboxEnvironment(workspacePolicy{SandboxEnvRoot: envRoot}, sandbox.Config{}, sandbox.CommandRequest{})
 	if err != nil {
 		t.Fatalf("sandboxEnvironment() error = %v", err)
 	}

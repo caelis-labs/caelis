@@ -1,12 +1,15 @@
 package session
 
 import (
+	"bytes"
+	"encoding/json"
 	"slices"
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/internal/jsonvalue"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/placement"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 )
 
 // NormalizeSessionRef returns one normalized session ref.
@@ -24,11 +27,20 @@ func CloneSession(in Session) Session {
 	out := in
 	out.SessionRef = NormalizeSessionRef(in.SessionRef)
 	out.CWD = strings.TrimSpace(in.CWD)
+	out.ExecutionConfig = sandbox.CloneExecutionConfig(in.ExecutionConfig)
 	out.Title = strings.TrimSpace(in.Title)
 	out.Metadata = jsonvalue.CloneMap(in.Metadata)
 	out.Controller = CloneControllerBinding(in.Controller)
 	out.Participants = CloneParticipantBindings(in.Participants)
 	return out
+}
+
+// EqualExecutionConfig compares creation-bound execution settings after their
+// durable JSON encoding, where nil and empty collections both mean no override.
+func EqualExecutionConfig(a, b *sandbox.ExecutionConfig) bool {
+	left, leftErr := json.Marshal(a)
+	right, rightErr := json.Marshal(b)
+	return leftErr == nil && rightErr == nil && bytes.Equal(left, right)
 }
 
 // CloneEvent returns one deep copy of one event.

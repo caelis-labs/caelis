@@ -27,6 +27,7 @@ type Request struct {
 	IdleTimeout  time.Duration
 	TTY          bool
 	EnvOverrides map[string]string
+	UnsetEnv     []string
 	Stdin        []byte
 	Constraints  sandbox.Constraints
 	OnOutput     func(OutputChunk)
@@ -45,6 +46,7 @@ type Runner interface {
 }
 
 type Config struct {
+	CWD        string
 	Backend    sandbox.Backend
 	Descriptor sandbox.Descriptor
 	Status     sandbox.Status
@@ -54,6 +56,7 @@ type Config struct {
 }
 
 type Runtime struct {
+	cwd        string
 	backend    sandbox.Backend
 	descriptor sandbox.Descriptor
 	status     sandbox.Status
@@ -64,6 +67,7 @@ type Runtime struct {
 
 func New(cfg Config) *Runtime {
 	return &Runtime{
+		cwd:        cfg.CWD,
 		backend:    cfg.Backend,
 		descriptor: sandbox.CloneDescriptor(cfg.Descriptor),
 		status:     sandbox.CloneStatus(cfg.Status),
@@ -91,6 +95,10 @@ func (r *Runtime) FileSystemFor(constraints sandbox.Constraints) sandbox.FileSys
 }
 
 func (r *Runtime) Run(ctx context.Context, req sandbox.CommandRequest) (sandbox.CommandResult, error) {
+	if err := sandbox.ValidateCommandEnvironment(req); err != nil {
+		return sandbox.CommandResult{}, err
+	}
+	req.Dir = sandbox.CommandDirectory(r.cwd, req.Dir)
 	if req.TTY {
 		session, err := r.Start(ctx, req)
 		if err != nil {
@@ -112,6 +120,10 @@ func (r *Runtime) Run(ctx context.Context, req sandbox.CommandRequest) (sandbox.
 }
 
 func (r *Runtime) Start(ctx context.Context, req sandbox.CommandRequest) (sandbox.Session, error) {
+	if err := sandbox.ValidateCommandEnvironment(req); err != nil {
+		return nil, err
+	}
+	req.Dir = sandbox.CommandDirectory(r.cwd, req.Dir)
 	if r.runner == nil {
 		return nil, fmt.Errorf("ports/sandbox: backend %q runner is unavailable", r.backend)
 	}
@@ -254,6 +266,7 @@ func translateRequest(req sandbox.CommandRequest) Request {
 		IdleTimeout:  req.IdleTimeout,
 		TTY:          req.TTY,
 		EnvOverrides: req.Env,
+		UnsetEnv:     req.UnsetEnv,
 		Stdin:        append([]byte(nil), req.Stdin...),
 		Constraints:  sandbox.EffectiveConstraints(req),
 		OnOutput: func(chunk OutputChunk) {

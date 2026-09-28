@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
@@ -147,6 +148,9 @@ func (s *Store) StartSession(
 	if err := session.ValidateMetadata(req.Metadata); err != nil {
 		return session.Session{}, err
 	}
+	if err := sandbox.ValidateExecutionConfig(req.ExecutionConfig); err != nil {
+		return session.Session{}, err
+	}
 	ref := session.NormalizeSessionRef(session.SessionRef{
 		AppName:      req.AppName,
 		UserID:       req.UserID,
@@ -170,9 +174,9 @@ func (s *Store) StartSession(
 		doc, err := s.readDocument(ref.SessionID)
 		switch {
 		case err == nil:
-			if !matchesRef(doc.Session, ref) {
+			if !matchesRef(doc.Session, ref) || !session.EqualExecutionConfig(doc.Session.ExecutionConfig, req.ExecutionConfig) {
 				return fmt.Errorf(
-					"agent-sdk/session/file: session %q already exists with different identity: %w",
+					"agent-sdk/session/file: session %q already exists with different identity or execution configuration: %w",
 					ref.SessionID,
 					session.ErrInvalidSession,
 				)
@@ -185,14 +189,15 @@ func (s *Store) StartSession(
 
 		now := s.now()
 		createdSession := session.Session{
-			SessionRef:   ref,
-			CWD:          strings.TrimSpace(req.Workspace.CWD),
-			Title:        strings.TrimSpace(req.Title),
-			Metadata:     cloneMap(req.Metadata),
-			Controller:   session.CloneControllerBinding(req.Controller),
-			CreatedAt:    now,
-			UpdatedAt:    now,
-			Participants: nil,
+			SessionRef:      ref,
+			CWD:             strings.TrimSpace(req.Workspace.CWD),
+			ExecutionConfig: sandbox.CloneExecutionConfig(req.ExecutionConfig),
+			Title:           strings.TrimSpace(req.Title),
+			Metadata:        cloneMap(req.Metadata),
+			Controller:      session.CloneControllerBinding(req.Controller),
+			CreatedAt:       now,
+			UpdatedAt:       now,
+			Participants:    nil,
 		}
 		doc = persistedDocument{
 			Kind:             documentKind,

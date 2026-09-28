@@ -10,6 +10,7 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	sdkplacement "github.com/caelis-labs/caelis/agent-sdk/placement"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/control/agentbinding"
@@ -331,12 +332,23 @@ func (s *runtimeComposition) executeControlCommand(ctx context.Context, principa
 				return sessionCommandResult(session.Session{}), classifyControlBackendError(controllerErr)
 			}
 		}
+		if req.ExecutionConfig != nil && controller.Kind == session.ControllerKindACP {
+			return appserver.CommandResult{Outcome: appserver.OutcomeRejected}, classifyControlPreDispatchError(
+				errorcode.New(errorcode.Unsupported, "gatewayapp: native execution configuration is unavailable for an ACP-controlled Session"))
+		}
+		if err := sandbox.ValidateExecutionConfig(req.ExecutionConfig); err != nil {
+			return appserver.CommandResult{Outcome: appserver.OutcomeRejected}, classifyControlPreDispatchError(
+				errorcode.Wrap(errorcode.InvalidArgument, "gatewayapp: invalid Session execution configuration", err))
+		}
 		created, err := s.sessions.StartSession(ctx, session.StartSessionRequest{
 			AppName: s.authorities.appName, UserID: strings.TrimSpace(principal.ID),
 			Workspace:          session.WorkspaceRef{Key: strings.TrimSpace(req.WorkspaceKey), CWD: strings.TrimSpace(req.CWD)},
 			PreferredSessionID: strings.TrimSpace(req.PreferredSessionID), Title: strings.TrimSpace(req.Title), Metadata: req.Metadata,
-			Controller: controller,
+			ExecutionConfig: req.ExecutionConfig, Controller: controller,
 		})
+		if errors.Is(err, session.ErrInvalidSession) {
+			return appserver.CommandResult{Outcome: appserver.OutcomeRejected}, classifyControlPreDispatchError(err)
+		}
 		if err == nil {
 			created, err = s.admitCreatedMemorySession(ctx, created)
 		}

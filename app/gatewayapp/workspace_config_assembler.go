@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
@@ -126,6 +127,7 @@ func (a *workspaceConfigAssembler) assembleSnapshot(
 			placementCache:     placement,
 			activeRuntime:      runtimeConfig,
 			sandbox:            sandboxConfig,
+			executionConfig:    sandbox.CloneExecutionConfig(active.ExecutionConfig),
 			retainRuntimeWork:  activity.retainWork,
 			runtimeTaskChanged: activity.taskChanged,
 			taskCommitted:      activity.taskCommitted,

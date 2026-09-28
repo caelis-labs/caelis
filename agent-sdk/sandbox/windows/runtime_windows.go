@@ -61,6 +61,9 @@ const (
 
 func newRuntime(cfg Config) (sandbox.Runtime, error) {
 	cfg = sandbox.NormalizeConfig(cfg)
+	if err := sandbox.ValidateConfig(cfg); err != nil {
+		return nil, err
+	}
 	hostUserSID, err := win32.CurrentProcessUserSID()
 	if err != nil {
 		return nil, fmt.Errorf("impl/sandbox/windows: resolve current Host user SID: %w", err)
@@ -83,6 +86,12 @@ func newRuntime(cfg Config) (sandbox.Runtime, error) {
 
 func newRuntimeWithHostIdentity(cfg Config, hostUserSID, authorityRoot string) (sandbox.Runtime, error) {
 	cfg = sandbox.NormalizeConfig(cfg)
+	if err := sandbox.ValidateConfig(cfg); err != nil {
+		return nil, err
+	}
+	if cfg.BaseEnv == nil {
+		cfg.BaseEnv = os.Environ()
+	}
 	var err error
 	cfg, err = normalizeResourceLimits(cfg)
 	if err != nil {
@@ -100,7 +109,7 @@ func newRuntimeWithHostIdentity(cfg Config, hostUserSID, authorityRoot string) (
 	if authorityRoot == "" || !filepath.IsAbs(authorityRoot) {
 		return nil, fmt.Errorf("impl/sandbox/windows: canonical absolute Host ACL receipt authority is required")
 	}
-	hostRuntime, err := host.New(host.Config{CWD: cfg.CWD})
+	hostRuntime, err := host.New(host.Config{CWD: cfg.CWD, Execution: cfg.Execution, BaseEnv: cfg.BaseEnv})
 	if err != nil {
 		return nil, err
 	}
@@ -253,6 +262,10 @@ func (r *runtime) Run(ctx context.Context, req sandbox.CommandRequest) (sandbox.
 		ctx = context.Background()
 	}
 	req = sandbox.CloneRequest(req)
+	if err := sandbox.ValidateCommandEnvironment(req); err != nil {
+		return sandbox.CommandResult{}, err
+	}
+	req.Dir = sandbox.CommandDirectory(r.cfg.CWD, req.Dir)
 	if req.TTY {
 		session, err := r.Start(ctx, req)
 		if err != nil {
@@ -318,6 +331,10 @@ func (r *runtime) Start(ctx context.Context, req sandbox.CommandRequest) (sandbo
 		return nil, err
 	}
 	req = sandbox.CloneRequest(req)
+	if err := sandbox.ValidateCommandEnvironment(req); err != nil {
+		return nil, err
+	}
+	req.Dir = sandbox.CommandDirectory(r.cfg.CWD, req.Dir)
 	releaseUse, err := r.beginRuntimeUse()
 	if err != nil {
 		return nil, fmt.Errorf("impl/sandbox/windows: start command: %w", err)
@@ -482,7 +499,7 @@ func (r *runtime) restrictedShellCommand(ctx context.Context, req sandbox.Comman
 		dir = r.cfg.CWD
 	}
 	cmd.Dir = dir
-	env, err := sandboxEnvironment(policy, req.Env)
+	env, err := sandboxEnvironment(policy, r.cfg, req)
 	if err != nil {
 		_ = token.Close()
 		return nil, 0, err

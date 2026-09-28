@@ -84,7 +84,7 @@ func TestApplicationNativeToolEffectsOnDarwin(t *testing.T) {
 		t.Fatal(err)
 	}
 	profile := application.Profile{Version: "v1", Model: "configured-model", ToolsVersion: "v1", Execution: "workspace-write", Workspace: application.Workspace{CWD: cwd}}
-	runtime, err := newApplicationExecutionRuntime(cwd, root, store, connection.Scope, profile)
+	runtime, err := newApplicationExecutionRuntime(cwd, root, store, connection.Scope, profile, profile.ExecutionConfig)
 	if err != nil {
 		t.Fatal(err)
 	}

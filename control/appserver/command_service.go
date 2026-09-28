@@ -13,6 +13,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/application"
 )
@@ -284,7 +285,7 @@ func validateCommandRequest(action Action, request any) error {
 		if strings.HasPrefix(typed.PreferredSessionID, "worker-") {
 			return errors.New("controlclient: worker Session IDs are allocated by the Host")
 		}
-		return nil
+		return sandbox.ValidateExecutionConfig(typed.ExecutionConfig)
 	case CloseSessionRequest:
 		return requireSession(typed.SessionID)
 	case CompactSessionRequest:

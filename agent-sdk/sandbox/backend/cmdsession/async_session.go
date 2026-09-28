@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -136,7 +137,7 @@ func NewAsyncSession(cfg AsyncSessionConfig) *AsyncSession {
 		ID:           uuid.New().String(),
 		Command:      cfg.Command,
 		Dir:          cfg.Dir,
-		Env:          append([]string(nil), cfg.Env...),
+		Env:          slices.Clone(cfg.Env),
 		StartTime:    time.Now(),
 		stdoutBuffer: NewRingBuffer(cfg.OutputBufferCap),
 		stderrBuffer: NewRingBuffer(cfg.OutputBufferCap),
@@ -166,7 +167,7 @@ func (s *AsyncSession) Start() error {
 	cfg := AsyncSessionConfig{
 		Command:      s.Command,
 		Dir:          s.Dir,
-		Env:          append([]string(nil), s.Env...),
+		Env:          slices.Clone(s.Env),
 		Timeout:      s.timeout,
 		IdleTimeout:  s.idleTimeout,
 		TTY:          s.tty,
@@ -188,10 +189,10 @@ func (s *AsyncSession) Start() error {
 	}
 
 	// Set up environment
-	if len(cmd.Env) == 0 && len(cfg.Env) > 0 {
-		cmd.Env = append([]string(nil), cfg.Env...)
+	if cmd.Env == nil && cfg.Env != nil {
+		cmd.Env = slices.Clone(cfg.Env)
 	}
-	if len(cmd.Env) == 0 {
+	if cmd.Env == nil {
 		cmd.Env = append(os.Environ(), procutil.DefaultCommandEnvVars...)
 	}
 

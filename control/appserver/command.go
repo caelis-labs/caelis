@@ -8,6 +8,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
@@ -166,11 +167,12 @@ const (
 
 type CreateSessionRequest struct {
 	WriteBase
-	PreferredSessionID string         `json:"preferred_session_id,omitempty"`
-	WorkspaceKey       string         `json:"workspace_key,omitempty"`
-	CWD                string         `json:"cwd,omitempty"`
-	Title              string         `json:"title,omitempty"`
-	Metadata           map[string]any `json:"metadata,omitempty"`
+	PreferredSessionID string                   `json:"preferred_session_id,omitempty"`
+	WorkspaceKey       string                   `json:"workspace_key,omitempty"`
+	CWD                string                   `json:"cwd,omitempty"`
+	ExecutionConfig    *sandbox.ExecutionConfig `json:"execution_config,omitempty"`
+	Title              string                   `json:"title,omitempty"`
+	Metadata           map[string]any           `json:"metadata,omitempty"`
 }
 
 type CloseSessionRequest struct{ WriteBase }

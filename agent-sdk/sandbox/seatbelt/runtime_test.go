@@ -193,8 +193,11 @@ func TestWaitSessionTimeoutDoesNotConsumeExitForLaterResultWait(t *testing.T) {
 	runner := &seatbeltRunner{
 		execCommand: func(ctx context.Context, _ string, args ...string) *exec.Cmd {
 			command := ""
-			if len(args) > 0 {
-				command = args[len(args)-1]
+			for i := 0; i+1 < len(args); i++ {
+				if args[i] == "--command" {
+					command = args[i+1]
+					break
+				}
 			}
 			return exec.CommandContext(ctx, "sh", "-c", command)
 		},

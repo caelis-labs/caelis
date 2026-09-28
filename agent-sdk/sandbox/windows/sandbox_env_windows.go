@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/windows/internal/pathutil"
 )
 
@@ -84,7 +84,15 @@ func sandboxSubdir(envRoot string, parts ...string) string {
 	return filepath.Join(append([]string{envRoot}, parts...)...)
 }
 
-func sandboxEnvironment(policy workspacePolicy, extra map[string]string) ([]string, error) {
+// sandboxEnvironment adds Windows sandbox convenience defaults to the captured
+// base BEFORE config and command overrides. Neither defaults nor host entries
+// survive inherit=false; explicit unset/set always wins. ACLs, not env values,
+// enforce sandbox policy.
+func sandboxEnvironment(policy workspacePolicy, cfg sandbox.Config, req sandbox.CommandRequest) ([]string, error) {
+	base := sandbox.NewEnvironmentSnapshot(nil, cfg.BaseEnv).Build(nil, nil)
+	baseValues := environmentValues(base)
+	selected := sandbox.NewEnvironmentSnapshot(cfg.Execution, base).ForCommand(req)
+	selectedValues := environmentValues(selected)
 	envRoot := strings.TrimSpace(policy.SandboxEnvRoot)
 	if envRoot == "" {
 		return nil, fmt.Errorf("impl/sandbox/windows: sandbox environment root is required")
@@ -109,28 +117,41 @@ func sandboxEnvironment(policy workspacePolicy, extra map[string]string) ([]stri
 		"GOTMPDIR":                    tempRoot,
 		"CAELIS_SANDBOX_TEMP":         tempRoot,
 		"GOTELEMETRY":                 "off",
-		"PYTHONPATH":                  prependEnvPath(pythonSiteDir, commandEnvValue(extra, "PYTHONPATH")),
+		"PYTHONPATH":                  prependEnvPath(pythonSiteDir, commandEnvValue(baseValues, "PYTHONPATH")),
 		"PSModuleAnalysisCachePath":   filepath.Join(psCacheDir, "PowerShell_AnalysisCache"),
 		"POWERSHELL_TELEMETRY_OPTOUT": "1",
 	}
-	addSandboxCacheEnv(forced, extra, cacheRoot)
-	if gitSSHCommand, ok := defaultGitOpenSSHCommand(extra); ok {
+	addSandboxCacheEnv(forced, selectedValues, cacheRoot)
+	systemRoot := resolveSystemRoot(baseValues)
+	if gitSSHCommand, ok := defaultGitOpenSSHCommand(selectedValues, systemRoot); ok {
 		forced["GIT_SSH_COMMAND"] = gitSSHCommand
 	}
 	if skillsDir := hostUserSkillsDir(); skillsDir != "" {
 		forced["CAELIS_SKILLS_DIR"] = skillsDir
 	}
-	forced["SystemRoot"] = resolveSystemRoot()
-	if strings.TrimSpace(os.Getenv("WINDIR")) == "" {
+	forced["SystemRoot"] = systemRoot
+	if _, ok := lookupCommandEnv(baseValues, "WINDIR"); !ok {
 		forced["WINDIR"] = forced["SystemRoot"]
 	}
-	if strings.TrimSpace(os.Getenv("ComSpec")) == "" {
+	if _, ok := lookupCommandEnv(baseValues, "ComSpec"); !ok {
 		forced["ComSpec"] = filepath.Join(forced["SystemRoot"], "System32", "cmd.exe")
 	}
-	if strings.TrimSpace(os.Getenv("PATHEXT")) == "" {
+	if _, ok := lookupCommandEnv(baseValues, "PATHEXT"); !ok {
 		forced["PATHEXT"] = `.COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC`
 	}
-	return mergeEnv(extra, forced), nil
+	baseline := sandbox.NewEnvironmentSnapshot(nil, base).Build(nil, forced)
+	return sandbox.NewEnvironmentSnapshot(cfg.Execution, baseline).ForCommand(req), nil
+}
+
+func environmentValues(env []string) map[string]string {
+	values := make(map[string]string, len(env))
+	for _, item := range env {
+		key, value, ok := strings.Cut(item, "=")
+		if ok {
+			values[key] = value
+		}
+	}
+	return values
 }
 
 func addSandboxCacheEnv(forced map[string]string, extra map[string]string, cacheRoot string) {
@@ -157,9 +178,6 @@ func resolveCacheEnv(spec sandboxCacheEnvSpec, extra map[string]string, cacheRoo
 	}
 	switch spec.Mode {
 	case sandboxCacheEnvForce:
-		if _, ok := lookupExtraCommandEnv(extra, spec.Key); ok {
-			return "", false
-		}
 		return value, true
 	case sandboxCacheEnvDefault:
 		if spec.AliasGroup != "" && presentGroups[spec.AliasGroup] {
@@ -180,14 +198,14 @@ func sandboxCacheEnvPath(cacheRoot string, spec sandboxCacheEnvSpec) string {
 	return sandboxSubdir(cacheRoot, spec.PathParts...)
 }
 
-func defaultGitOpenSSHCommand(extra map[string]string) (string, bool) {
+func defaultGitOpenSSHCommand(extra map[string]string, systemRoot string) (string, bool) {
 	if _, ok := lookupCommandEnv(extra, "GIT_SSH_COMMAND"); ok {
 		return "", false
 	}
 	if _, ok := lookupCommandEnv(extra, "GIT_SSH"); ok {
 		return "", false
 	}
-	path := defaultWindowsOpenSSHPath()
+	path := filepath.Join(systemRoot, "System32", "OpenSSH", "ssh.exe")
 	if path == "" {
 		return "", false
 	}
@@ -198,15 +216,11 @@ func defaultGitOpenSSHCommand(extra map[string]string) (string, bool) {
 	return filepath.ToSlash(path), true
 }
 
-func defaultWindowsOpenSSHPath() string {
-	return filepath.Join(resolveSystemRoot(), "System32", "OpenSSH", "ssh.exe")
-}
-
-func resolveSystemRoot() string {
-	if systemRoot := strings.TrimSpace(os.Getenv("SystemRoot")); systemRoot != "" {
+func resolveSystemRoot(base map[string]string) string {
+	if systemRoot := strings.TrimSpace(commandEnvValue(base, "SystemRoot")); systemRoot != "" {
 		return systemRoot
 	}
-	if windir := strings.TrimSpace(os.Getenv("WINDIR")); windir != "" {
+	if windir := strings.TrimSpace(commandEnvValue(base, "WINDIR")); windir != "" {
 		return windir
 	}
 	return `C:\Windows`
@@ -233,46 +247,6 @@ func hostUserSkillsDir() string {
 	return filepath.Join(home, ".caelis", "skills")
 }
 
-func mergeEnv(extra map[string]string, forced map[string]string) []string {
-	values := map[string]string{}
-	names := map[string]string{}
-	set := func(key string, value string) {
-		key = strings.TrimSpace(key)
-		if key == "" {
-			return
-		}
-		canonical := strings.ToUpper(key)
-		if existing := names[canonical]; existing != "" && existing != key {
-			delete(values, existing)
-		}
-		names[canonical] = key
-		values[key] = value
-	}
-	for _, item := range os.Environ() {
-		key, value, ok := strings.Cut(item, "=")
-		if !ok {
-			continue
-		}
-		set(key, value)
-	}
-	for key, value := range extra {
-		set(key, value)
-	}
-	for key, value := range forced {
-		set(key, value)
-	}
-	keys := make([]string, 0, len(values))
-	for key := range values {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	env := make([]string, 0, len(keys))
-	for _, key := range keys {
-		env = append(env, key+"="+values[key])
-	}
-	return env
-}
-
 func commandEnvValue(extra map[string]string, key string) string {
 	value, _ := lookupCommandEnv(extra, key)
 	return value
@@ -292,17 +266,7 @@ func lookupExtraCommandEnv(extra map[string]string, key string) (string, bool) {
 }
 
 func lookupCommandEnv(extra map[string]string, key string) (string, bool) {
-	if value, ok := lookupExtraCommandEnv(extra, key); ok {
-		return value, true
-	}
-	key = strings.TrimSpace(key)
-	for _, item := range os.Environ() {
-		name, value, ok := strings.Cut(item, "=")
-		if ok && strings.EqualFold(strings.TrimSpace(name), key) {
-			return value, true
-		}
-	}
-	return "", false
+	return lookupExtraCommandEnv(extra, key)
 }
 
 func prependEnvPath(first string, rest string) string {

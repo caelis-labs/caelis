@@ -405,6 +405,9 @@ func goType(value *schema, schemas map[string]*schema) string {
 	if value == nil {
 		return "any"
 	}
+	if nonNull := nullableNonNullSchema(value); nonNull != nil {
+		return goType(nonNull, schemas)
+	}
 	if value.Ref != "" {
 		return refName(value.Ref)
 	}
@@ -450,6 +453,21 @@ func goType(value *schema, schemas map[string]*schema) string {
 		}
 		return "any"
 	}
+}
+
+// nullableNonNullSchema recognizes the OpenAPI 3.1 nullable oneOf shape so
+// generated Go keeps concrete DTO fields while TypeScript retains explicit null.
+func nullableNonNullSchema(value *schema) *schema {
+	if value == nil || len(value.OneOf) != 2 {
+		return nil
+	}
+	if value.OneOf[0].Type == "null" {
+		return value.OneOf[1]
+	}
+	if value.OneOf[1].Type == "null" {
+		return value.OneOf[0]
+	}
+	return nil
 }
 
 func goNeedsPointer(value *schema, typeName string, schemas map[string]*schema) bool {
@@ -530,6 +548,9 @@ func tsType(value *schema, schemas map[string]*schema) string {
 	if value == nil {
 		return "unknown"
 	}
+	if nonNull := nullableNonNullSchema(value); nonNull != nil {
+		return tsType(nonNull, schemas) + " | null"
+	}
 	if value.Ref != "" {
 		return refName(value.Ref)
 	}
@@ -557,6 +578,8 @@ func tsType(value *schema, schemas map[string]*schema) string {
 		return "number"
 	case "boolean":
 		return "boolean"
+	case "null":
+		return "null"
 	case "array":
 		return "Array<" + tsType(value.Items, schemas) + ">"
 	case "object":

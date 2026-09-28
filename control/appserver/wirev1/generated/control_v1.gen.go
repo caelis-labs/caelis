@@ -514,6 +514,7 @@ type ApplicationPermissions struct {
 
 type ApplicationProfile struct {
 	Execution       string                      `json:"execution"`
+	ExecutionConfig *ExecutionConfig            `json:"execution_config,omitempty"`
 	Inherit         ApplicationInheritance      `json:"inherit"`
 	Instructions    string                      `json:"instructions"`
 	Model           string                      `json:"model"`
@@ -872,15 +873,16 @@ type CreateApplicationSessionRequest struct {
 }
 
 type CreateSessionRequest struct {
-	Cwd                     *string        `json:"cwd,omitempty"`
-	ExpectedControllerEpoch *string        `json:"expected_controller_epoch,omitempty"`
-	ExpectedRevision        *Uint64Decimal `json:"expected_revision,omitempty"`
-	Metadata                JSONObject     `json:"metadata,omitempty"`
-	OperationId             *string        `json:"operation_id,omitempty"`
-	PreferredSessionId      *string        `json:"preferred_session_id,omitempty"`
-	SessionId               *string        `json:"session_id,omitempty"`
-	Title                   *string        `json:"title,omitempty"`
-	WorkspaceKey            *string        `json:"workspace_key,omitempty"`
+	Cwd                     *string          `json:"cwd,omitempty"`
+	ExecutionConfig         *ExecutionConfig `json:"execution_config,omitempty"`
+	ExpectedControllerEpoch *string          `json:"expected_controller_epoch,omitempty"`
+	ExpectedRevision        *Uint64Decimal   `json:"expected_revision,omitempty"`
+	Metadata                JSONObject       `json:"metadata,omitempty"`
+	OperationId             *string          `json:"operation_id,omitempty"`
+	PreferredSessionId      *string          `json:"preferred_session_id,omitempty"`
+	SessionId               *string          `json:"session_id,omitempty"`
+	Title                   *string          `json:"title,omitempty"`
+	WorkspaceKey            *string          `json:"workspace_key,omitempty"`
 }
 
 type CreateWorkerRequest struct {
@@ -1042,6 +1044,12 @@ const (
 	EnvelopeKindCaelisError              EnvelopeKind = "caelis/error"
 )
 
+type EnvironmentConfig struct {
+	Inherit *bool          `json:"inherit,omitempty"`
+	Set     map[string]any `json:"set,omitempty"`
+	Unset   []string       `json:"unset,omitempty"`
+}
+
 type ErrorCode string
 
 const (
@@ -1103,6 +1111,11 @@ type ErrorResponse struct {
 	Code  ErrorCode `json:"code"`
 	Error string    `json:"error"`
 	Kind  ErrorKind `json:"kind,omitempty"`
+}
+
+type ExecutionConfig struct {
+	Environment *EnvironmentConfig `json:"environment,omitempty"`
+	Shell       *ShellConfig       `json:"shell,omitempty"`
 }
 
 type FeedPosition struct {
@@ -1797,6 +1810,7 @@ type SessionState struct {
 	Controller       ControllerBinding    `json:"controller"`
 	Cwd              *string              `json:"cwd,omitempty"`
 	EnvelopeVersion  string               `json:"envelope_version"`
+	ExecutionConfig  *ExecutionConfig     `json:"execution_config,omitempty"`
 	Metadata         JSONObject           `json:"metadata,omitempty"`
 	Participants     []ParticipantBinding `json:"participants,omitempty"`
 	ProtocolVersion  int                  `json:"protocol_version"`
@@ -1843,6 +1857,11 @@ type SessionUpdateEnvelope struct {
 	TurnId                   *string             `json:"turn_id,omitempty"`
 	Update                   ACPUpdate           `json:"update"`
 	UsageSemantics           UsageSemantics      `json:"usage_semantics,omitempty"`
+}
+
+type ShellConfig struct {
+	Login *bool   `json:"login,omitempty"`
+	Path  *string `json:"path,omitempty"`
 }
 
 type SkillResolveResult struct {
