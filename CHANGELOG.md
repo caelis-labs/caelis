@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.65.0](https://github.com/caelis-labs/caelis/compare/v0.64.0...v0.65.0) (2026-09-28)
+
+
+### ⚠ BREAKING CHANGES
+
+* **runtime:** Unix command execution defaults to a non-login Bash shell and application commands inherit the configured user environment. Seatbelt SDK embeddings must dispatch the self-exec helper or provide a compatible HelperPath.
+
+### Features
+
+* **application:** expose composable Guardian auto-review ([#89](https://github.com/caelis-labs/caelis/issues/89)) ([c11e74b](https://github.com/caelis-labs/caelis/commit/c11e74b1ea44e8ff16ae3ffc440bca2bcabd762e))
+* **runtime:** expose composable execution configuration ([#85](https://github.com/caelis-labs/caelis/issues/85)) ([bdebd8d](https://github.com/caelis-labs/caelis/commit/bdebd8d2d4bfe6b1bec455fca0f19da49b673c8f))
+
+
+### Bug Fixes
+
+* **runtime:** preserve invocation identity through approval review ([#91](https://github.com/caelis-labs/caelis/issues/91)) ([e8281aa](https://github.com/caelis-labs/caelis/commit/e8281aa7bb89b0ae330044eb5bd6a13916fd68fc))
+
 ## [0.64.0](https://github.com/caelis-labs/caelis/compare/v0.63.0...v0.64.0) (2026-09-28)
 
 
