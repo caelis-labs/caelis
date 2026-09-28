@@ -121,6 +121,19 @@ func TestCommandApprovalYieldsWithinRunAndPreservesCanonicalHistory(t *testing.T
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
+	identity := approval.Call.Execution
+	if identity.SessionID != active.SessionID || identity.TurnID != approval.TurnID || identity.ItemID == "" {
+		t.Fatalf("approval invocation identity = %#v", identity)
+	}
+	pendingEvents, err := sessions.Events(ctx, session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range pendingEvents {
+		if event.Journal != nil && event.Journal.ToolExecution != nil {
+			t.Fatalf("execution journal started before approval: %#v", event.Journal.ToolExecution)
+		}
+	}
 	var pendingRequest *model.Request
 	select {
 	case pendingRequest = <-continued:
@@ -170,7 +183,7 @@ func TestCommandApprovalYieldsWithinRunAndPreservesCanonicalHistory(t *testing.T
 	for _, event := range events {
 		if token := session.ResolvedApprovalReview(event); token != nil {
 			reviewed++
-			if !session.IsClientReplayEvent(event) || session.IsCanonicalHistoryEvent(event) || token.ToolCallID != "pending-command" {
+			if !session.IsClientReplayEvent(event) || session.IsCanonicalHistoryEvent(event) || token.ToolCallID != "pending-command" || token.ItemID != identity.ItemID {
 				t.Fatalf("review visibility or identity changed: %#v", event)
 			}
 		}
@@ -179,6 +192,10 @@ func TestCommandApprovalYieldsWithinRunAndPreservesCanonicalHistory(t *testing.T
 		}
 		if event.Journal != nil && event.Journal.ToolExecution != nil && event.Journal.ToolExecution.Key.ToolCallID == "pending-command" && event.Journal.ToolExecution.Status == session.ToolExecutionSucceeded {
 			terminalReceipts++
+			key := event.Journal.ToolExecution.Key
+			if key.SessionID != identity.SessionID || key.TurnID != identity.TurnID || key.StepID != identity.ItemID {
+				t.Fatalf("continuation identity = %#v, approval identity = %#v", key, identity)
+			}
 		}
 	}
 	if results != 1 || terminalReceipts != 1 || reviewed != 1 {
@@ -195,7 +212,7 @@ func TestCommandApprovalYieldsWithinRunAndPreservesCanonicalHistory(t *testing.T
 		for _, event := range page.Events {
 			if token := session.ResolvedApprovalReview(event); token != nil {
 				reviewed++
-				if !token.Approved || token.ToolCallID != "pending-command" {
+				if !token.Approved || token.ToolCallID != "pending-command" || token.ItemID != identity.ItemID {
 					t.Fatalf("reopened decision = %#v", token)
 				}
 			}

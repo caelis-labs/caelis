@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	sessionapi "github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/application"
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
@@ -66,7 +67,7 @@ func TestApplicationReviewerNativeApprovalContinuation(t *testing.T) {
 				}
 				provider := &reviewerHTTPProvider{toolName: name, args: string(raw), decision: decision}
 				host, client, _ := setupReviewerHTTP(t, ctx, root, provider)
-				defer host.close(t)
+				defer func() { host.close(t) }()
 				profile := application.Profile{Version: "native-review/1", Model: "openai-compatible/gpt-4.1", ToolsVersion: "native/1",
 					Execution: "workspace-write", Workspace: application.Workspace{CWD: workspace}, NativeTools: []string{name, "Task"},
 					Permissions: application.Permissions{Mode: "workspace-write", ApprovalMode: "auto-review"},
@@ -93,14 +94,45 @@ func TestApplicationReviewerNativeApprovalContinuation(t *testing.T) {
 				if allow {
 					wantStatus = "approved"
 				}
+				step := reviewerHTTPPauseItem(t, ctx, host, created.SessionID, result.Target.TurnID, name, sessionapi.PauseTokenResolved)
+				if allow {
+					if journalStep := reviewerHTTPExecutionStep(t, ctx, host, created.SessionID, result.Target.TurnID, name); journalStep != step {
+						t.Fatalf("native review step %q differs from invocation step %q", step, journalStep)
+					}
+				}
 				found := false
 				for _, event := range applicationHTTPHistory(t, ctx, client, created.SessionID) {
 					if event.Kind == eventstream.KindApprovalReview && event.ApprovalReview != nil && event.ApprovalReview.Status == wantStatus && event.TurnID == result.Target.TurnID && event.ApprovalReview.ToolName == name {
 						found = true
+						if event.ApprovalReview.ItemID != step || step == "" || event.ApprovalReview.ToolCallID != "reviewed-provider-tool-id" {
+							t.Fatalf("native %s review lost invocation step %q: %+v", wantStatus, step, event)
+						}
 					}
 				}
 				if !found {
 					t.Fatal("missing native review outcome")
+				}
+				host.close(t)
+				host = startApplicationHTTPHost(t, filepath.Join(root, "store"), workspace, provider)
+				secret, err := os.ReadFile(filepath.Join(root, "application.credential"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				client = host.app(string(secret))
+				if restarted := reviewerHTTPPauseItem(t, ctx, host, created.SessionID, result.Target.TurnID, name, sessionapi.PauseTokenResolved); restarted != step {
+					t.Fatalf("native Host restart changed review identity: %q -> %q", step, restarted)
+				}
+				found = false
+				for _, event := range applicationHTTPHistory(t, ctx, client, created.SessionID) {
+					if event.Kind == eventstream.KindApprovalReview && event.ApprovalReview != nil && event.ApprovalReview.Status == wantStatus && event.TurnID == result.Target.TurnID && event.ApprovalReview.ToolName == name {
+						found = true
+						if event.ApprovalReview.ItemID != step {
+							t.Fatalf("native review ItemID changed across Host restart: %+v", event)
+						}
+					}
+				}
+				if !found {
+					t.Fatal("missing native review after Host restart")
 				}
 			})
 		}

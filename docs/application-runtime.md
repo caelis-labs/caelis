@@ -89,10 +89,16 @@ create require matching `Idempotency-Key` and `operation_id`. Existing
 `expected_revision` and `expected_configuration_revision` fields use decimal
 strings, not JSON numbers. Approval and cancellation retain the exact native
 Session/handle/run/turn identity and approval options. Do not convert an
-approval into a general Boolean. Guardian review Envelopes may include the
-reviewed `item_id` and carry the same public `approval_request_id` token used
-for manual approvals; these correlate live and replayed Session observation,
-not private review-journal identity or a new authorization grant.
+approval into a general Boolean. Native Runtime Guardian review Envelopes include
+an `item_id` assigned before policy admission, including for denied actions.
+The Session/Turn/`item_id` identifies the invocation and matches the approved
+callback or native execution; a provider's reusable `tool_call_id` is not a
+substitute. The persisted decision retains the same identity for reconnect and
+Host restart. Older stored decisions and external Agent paths without a Runtime
+invocation identity may omit `item_id`; Control does not synthesize one.
+Reviews carry the same public `approval_request_id` token used for manual
+approvals. These fields correlate Session observation, not private review-journal
+identity or a new authorization grant.
 
 ## Persistence compatibility
 
