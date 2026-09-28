@@ -441,7 +441,25 @@ func (g *Gateway) approvalReviewModel(ctx context.Context, ref session.SessionRe
 	return resolved, true, nil
 }
 
+// approvalModeResolver owns routing for creation-bound execution profiles. When
+// present it is authoritative; mutable ordinary-Session overrides do not apply.
+type approvalModeResolver interface {
+	ResolveApprovalMode(context.Context, session.SessionRef) (ApprovalMode, error)
+}
+
 func (g *Gateway) currentApprovalMode(ctx context.Context, ref session.SessionRef) (ApprovalMode, error) {
+	if g != nil {
+		if resolver, ok := g.resolver.(approvalModeResolver); ok {
+			mode, err := resolver.ResolveApprovalMode(ctx, ref)
+			if err != nil {
+				return "", err
+			}
+			if mode != ApprovalModeManual && mode != ApprovalModeAutoReview {
+				return "", fmt.Errorf("gateway: invalid resolved approval mode %q", mode)
+			}
+			return mode, nil
+		}
+	}
 	if g == nil || g.sessions == nil {
 		return ApprovalModeAutoReview, fmt.Errorf("gateway: sessions service unavailable")
 	}

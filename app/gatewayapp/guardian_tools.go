@@ -30,6 +30,7 @@ type guardianQueries struct {
 	mu                                            sync.Mutex
 	model                                         model.LLM
 	network                                       sandbox.Network
+	queryTools                                    bool
 	root, scratch, work                           string
 	runtime                                       sandbox.Runtime
 	runner                                        systemManagedAgentRunner
@@ -160,7 +161,7 @@ func (q *guardianQueries) admit(ctx context.Context, req *model.Request) error {
 		return err
 	}
 	if q.model != nil {
-		usage := sdkruntime.EvaluateModelRequestBudget(q.model, req, guardianCompactionConfig(q.model, req.Output)).Usage
+		usage := sdkruntime.EvaluateModelRequestBudget(q.model, req, guardianCompactionConfig(q.model, req.Output, q.queryTools)).Usage
 		q.resultBytes = max(1024, min(64*1024, (usage.EffectiveInputBudget-usage.TotalTokens)/2))
 		q.maxRequestTokens = max(q.maxRequestTokens, usage.TotalTokens)
 		q.inputBudget = usage.EffectiveInputBudget

@@ -1,6 +1,7 @@
 package projection
 
 import (
+	"bytes"
 	"encoding/json"
 	"strings"
 
@@ -21,13 +22,16 @@ func projectApprovalReview(base eventstream.Envelope, event *session.Event) []ev
 		status = "approved"
 	}
 	var input map[string]any
-	_ = json.Unmarshal(token.Input, &input)
+	decoder := json.NewDecoder(bytes.NewReader(token.Input))
+	decoder.UseNumber()
+	_ = decoder.Decode(&input)
 	base.Kind = eventstream.KindApprovalReview
 	base.Delivery = &eventstream.Delivery{Mode: eventstream.DeliveryMirror}
 	base.TurnID = strings.TrimSpace(token.TurnID)
+	base.ApprovalRequestID = eventstream.ApprovalRequestID(strings.TrimSpace(token.TokenID))
 	base.Meta = nil
 	base.ApprovalReview = &eventstream.ApprovalReview{
-		ToolCallID: strings.TrimSpace(token.ToolCallID), ToolName: strings.TrimSpace(token.ToolName),
+		ToolCallID: strings.TrimSpace(token.ToolCallID), ToolName: strings.TrimSpace(token.ToolName), ItemID: strings.TrimSpace(token.ItemID),
 		RawInput: input, Status: status, Text: strings.TrimSpace(token.ReviewText),
 	}
 	return []eventstream.Envelope{base}

@@ -9,10 +9,10 @@ import (
 // One full-request evaluation owns capacity. User authorization is reduced only
 // under physical input pressure, after non-user history. The SDK's
 // model-size watermarks trigger batched eviction instead of per-pool byte caps.
-func guardianFitHistory(events []*session.Event, llm model.LLM, input string, output *model.OutputSpec, current string) ([]*session.Event, bool) {
-	cfg := guardianCompactionConfig(llm, output)
+func guardianFitHistory(events []*session.Event, llm model.LLM, input string, output *model.OutputSpec, current string, queryTools bool) ([]*session.Event, bool) {
+	cfg := guardianCompactionConfig(llm, output, queryTools)
 	evaluate := func() sdkruntime.ModelRequestBudget {
-		return sdkruntime.EvaluateModelRequestBudget(llm, guardianModelRequest(events, input, output), cfg)
+		return sdkruntime.EvaluateModelRequestBudget(llm, guardianModelRequest(events, input, output, queryTools), cfg)
 	}
 	budget := evaluate()
 	if !budget.Compaction.ShouldCompact && budget.Usage.TotalTokens <= budget.Usage.EffectiveInputBudget {

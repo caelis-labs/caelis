@@ -1,0 +1,24 @@
+{
+  "operation_id": "create-reviewed-1",
+  "profile": {
+    "version": "reviewed-role/1",
+    "instructions": "Use the application callback.",
+    "model": "configured-main-model",
+    "tools_version": "reviewed-tools/1",
+    "execution": "tools-only",
+    "inherit": {
+      "cwd_instructions": false,
+      "mcp": false,
+      "skills": false,
+      "workspace_memory": false
+    },
+    "permissions": {"approval_mode": "auto-review"},
+    "reviewer": {"kind": "guardian", "model": "configured-reviewer-model"},
+    "tools": [{
+      "name": "ExampleWrite",
+      "description": "Write an application-owned value.",
+      "input_schema": {"type": "object"},
+      "approval_policy": "required"
+    }]
+  }
+}

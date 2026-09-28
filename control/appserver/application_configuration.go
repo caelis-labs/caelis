@@ -18,6 +18,9 @@ func (s *ApplicationService) Capabilities() []string {
 	if s.config.ModelImageInput != nil {
 		out = append(out, application.CapabilityModelCapabilities)
 	}
+	if s.config.ReviewerState != nil {
+		out = append(out, application.CapabilityGuardianReview)
+	}
 	if s.config.ValidateProfile != nil {
 		out = append(out, application.CapabilityHotConfiguration)
 	}
@@ -46,6 +49,9 @@ func (s *ApplicationService) UpdateApplicationConfiguration(ctx context.Context,
 		return application.Configuration{}, err
 	}
 	if s.config.ValidateProfile == nil {
+		return application.Configuration{}, application.ErrUnsupported
+	}
+	if s.config.ReviewerState == nil && req.Patch.Tools != nil && requiresApplicationCallbackApproval(*req.Patch.Tools) {
 		return application.Configuration{}, application.ErrUnsupported
 	}
 	return s.config.Store.UpdateConfiguration(ctx, scope, sessionID, req, s.config.ValidateProfile)

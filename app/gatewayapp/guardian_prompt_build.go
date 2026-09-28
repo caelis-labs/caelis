@@ -28,14 +28,14 @@ type guardianPromptItems struct {
 	ContextTrimmed         bool
 }
 
-func guardianCompactionConfig(llm model.LLM, output *model.OutputSpec) sdkruntime.CompactionConfig {
+func guardianCompactionConfig(llm model.LLM, output *model.OutputSpec, queryTools bool) sdkruntime.CompactionConfig {
 	contextWindow := 0
 	if provider, ok := llm.(interface{ ContextWindowTokens() int }); ok {
 		contextWindow = provider.ContextWindowTokens()
 	}
 	cfg := defaultCompactionConfig(contextWindow)
 	prefix := sdkruntime.EvaluateModelRequestBudget(llm, &model.Request{
-		Instructions: []model.Part{model.NewTextPart(guardianPolicyPrompt())},
+		Instructions: []model.Part{model.NewTextPart(guardianPolicyCore() + "\n\n" + guardianPolicySupplement(queryTools))},
 		Output:       model.CloneOutputSpec(output),
 	}, cfg)
 	cfg.EstimatedPromptPrefixTokens = prefix.Usage.TotalTokens
@@ -54,7 +54,7 @@ func guardianVisibleText(event *session.Event) string {
 	return session.EventText(event)
 }
 
-func guardianModelRequest(history []*session.Event, input string, output *model.OutputSpec) *model.Request {
+func guardianModelRequest(history []*session.Event, input string, output *model.OutputSpec, queryTools bool) *model.Request {
 	messages := make([]model.Message, 0, len(history)+1)
 	for _, event := range compact.PromptEventsFromLatestCompact(history) {
 		if event == nil {
@@ -86,12 +86,16 @@ func guardianModelRequest(history []*session.Event, input string, output *model.
 		messages = append(messages, model.NewTextMessage(model.RoleUser, input))
 	}
 	var tools []model.ToolSpec
-	for _, t := range (&guardianQueries{}).tools() {
-		definition := t.Definition()
-		tools = append(tools, model.NewFunctionToolSpec(definition.Name, definition.Description, definition.InputSchema))
+	instructions := guardianPolicyCore() + "\n\n" + guardianPolicySupplement(queryTools)
+	if queryTools {
+		for _, t := range (&guardianQueries{}).tools() {
+			definition := t.Definition()
+			tools = append(tools, model.NewFunctionToolSpec(definition.Name, definition.Description, definition.InputSchema))
+		}
+		instructions += "\n\n" + guardianEnvironmentContext(sandbox.NetworkEnabled)
 	}
 	return &model.Request{
-		Instructions: []model.Part{model.NewTextPart(guardianPolicyPrompt() + "\n\n" + guardianEnvironmentContext(sandbox.NetworkEnabled))},
+		Instructions: []model.Part{model.NewTextPart(instructions)},
 		Messages:     messages,
 		Tools:        tools,
 		Output:       model.CloneOutputSpec(output),

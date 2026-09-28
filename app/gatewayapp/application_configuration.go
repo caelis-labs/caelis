@@ -61,7 +61,12 @@ func (s *runtimeComposition) validateApplicationProfile(ctx context.Context, pro
 	}
 	// Building checks credentials and provider request support without issuing a
 	// request. A rejected combination cannot become a saved but unusable choice.
-	_, err = s.lookup.ResolveModelConfig(ctx, configured, s.activeRuntime.ContextWindow)
+	if _, err = s.lookup.ResolveModelConfig(ctx, configured, s.activeRuntime.ContextWindow); err != nil {
+		return err
+	}
+	if profile.Reviewer != nil {
+		_, err = resolveApplicationReviewer(ctx, s.lookup, profile, s.activeRuntime.ContextWindow)
+	}
 	return err
 }
 

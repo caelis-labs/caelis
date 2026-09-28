@@ -104,7 +104,7 @@ func (r *Runtime) requestDurableApproval(
 	token := session.ClonePauseToken(session.PauseToken{
 		Schema:  session.ExecutionJournalSchemaVersion,
 		TokenID: tokenID, SessionID: req.SessionRef.SessionID, RunID: req.RunID, TurnID: req.TurnID,
-		ToolCallID: req.Call.ID, ToolName: req.Tool.Name, Revision: 1, Status: session.PauseTokenPending,
+		ToolCallID: req.Call.ID, ToolName: req.Tool.Name, ItemID: req.Call.Execution.ItemID, Revision: 1, Status: session.PauseTokenPending,
 		Input: req.Call.Input, Approval: req.Approval, Metadata: req.Metadata, CreatedAt: now, UpdatedAt: now,
 	})
 	waiter := make(chan agent.ApprovalResponse, 1)

@@ -95,8 +95,8 @@ func (r *guardianApprovalReviewer) runGuardianReview(
 	turnKey := fmt.Sprintf("%d:%s", conversation.Version, req.ReviewID)
 	windowReq := req
 	windowReq.ReviewID = turnKey
-	compactionCfg := guardianCompactionConfig(req.Model, outputSpec)
-	historyEvents, promptItems, err := guardianWindow(conversation, windowReq, outputSpec)
+	compactionCfg := guardianCompactionConfig(req.Model, outputSpec, r.queryTools)
+	historyEvents, promptItems, err := guardianWindow(conversation, windowReq, outputSpec, r.queryTools)
 	metrics.ContextTrimmed = promptItems.ContextTrimmed
 	if err != nil {
 		return guardianPromptItems{}, nil, nil, guardianReviewModelOutput{}, err

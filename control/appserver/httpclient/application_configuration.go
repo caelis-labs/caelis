@@ -27,6 +27,14 @@ func (c *Client) ApplicationConfigurationOperation(ctx context.Context, operatio
 	return doFocusedJSON[application.Configuration](ctx, c, http.MethodGet, "/application/configuration-operations/"+url.PathEscape(operationID), nil)
 }
 
+// ApplicationReviewerState observes the creation-bound review route and its
+// local readiness for this connection's Session. Negotiate
+// application-guardian-review-v1 first. This does not contact the provider or
+// activate a Runtime; readiness is not a guarantee of provider health.
+func (c *Client) ApplicationReviewerState(ctx context.Context, sessionID string) (application.ReviewerState, error) {
+	return doFocusedJSON[application.ReviewerState](ctx, c, http.MethodGet, applicationSessionPath(sessionID)+"/reviewer-state", nil)
+}
+
 // ApplicationModelCapabilities observes image input support for this application's
 // selected model. Call only after negotiating application-model-capabilities-v1;
 // absent ImageInput means unknown and this observation is not dispatch authority.

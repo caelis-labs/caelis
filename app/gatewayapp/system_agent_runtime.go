@@ -548,7 +548,7 @@ func systemManagedAgentSpecFor(agentID string) (systemManagedAgentSpec, bool) {
 func guardianSystemManagedAgentSpec() systemManagedAgentSpec {
 	return systemManagedAgentSpec{
 		ID:                guardianSceneID,
-		Instructions:      guardianPolicyPrompt(),
+		Instructions:      guardianPolicyCore(),
 		SessionSuffix:     "approval-review",
 		Purpose:           systemManagedAgentPurposeApprovalReview,
 		CapabilityProfile: systemManagedAgentCapabilityNone,

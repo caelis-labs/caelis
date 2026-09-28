@@ -18,7 +18,7 @@ const guardianTurnKey = "guardian_turn"
 
 // guardianWindow prepares an append-only input sequence. Source users survive
 // completed-turn eviction and are folded only under physical capacity pressure.
-func guardianWindow(snapshot guardianConversationSnapshot, req kernel.ApprovalReviewRequest, output *model.OutputSpec) ([]*session.Event, guardianPromptItems, error) {
+func guardianWindow(snapshot guardianConversationSnapshot, req kernel.ApprovalReviewRequest, output *model.OutputSpec, queryTools bool) ([]*session.Event, guardianPromptItems, error) {
 	history := session.CloneEvents(snapshot.Events)
 	items := guardianPromptItems{ParentCursor: snapshot.ParentCursor}
 	for _, e := range snapshot.ParentEvents {
@@ -52,7 +52,7 @@ func guardianWindow(snapshot guardianConversationSnapshot, req kernel.ApprovalRe
 		return history, items, nil
 	}
 	beforeRetention := session.CloneEvents(history)
-	history, fits := guardianFitHistory(history, req.Model, items.Text, output, req.ReviewID)
+	history, fits := guardianFitHistory(history, req.Model, items.Text, output, req.ReviewID, queryTools)
 	items.MandatoryInputTooLarge = !fits
 	items.ContextTrimmed = !reflect.DeepEqual(beforeRetention, history)
 	return history, items, nil

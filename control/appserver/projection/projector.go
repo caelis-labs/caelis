@@ -785,12 +785,13 @@ func reasoningForAssistantEvent(event *session.Event) string {
 }
 
 func parseObject(raw string) map[string]any {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
+	if !json.Valid([]byte(raw)) {
 		return nil
 	}
 	var out map[string]any
-	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+	decoder := json.NewDecoder(strings.NewReader(raw))
+	decoder.UseNumber()
+	if err := decoder.Decode(&out); err != nil {
 		return nil
 	}
 	return out

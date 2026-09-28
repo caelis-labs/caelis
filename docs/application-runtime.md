@@ -25,8 +25,8 @@ versions, `store_id`, `instance_id`, build identity and capabilities. Require
 Feature capabilities refine the baseline: `application-hot-configuration-v1`,
 `application-native-execution-v1`, `application-workspace-binding-v1`,
 `application-background-activation-v1`, `application-resource-transfer-v1` and
-`application-model-capabilities-v1`, `application-tool-result-content-v1` and
-`application-media-resources-v1`.
+`application-model-capabilities-v1`, `application-tool-result-content-v1`,
+`application-media-resources-v1` and `application-guardian-review-v1`.
 Require the capability guarding the feature you need instead of probing with
 destructive trial calls.
 Store identity persists across Host replacement; instance identity does not.
@@ -60,6 +60,7 @@ The following paths are relative to `/api/control/v1`:
 | `GET /application/sessions/{session_id}/configuration` | Read the latest desired configuration and revision |
 | `POST /application/sessions/{session_id}/configuration` | Compare-and-swap update; returns the committed configuration |
 | `GET /application/sessions/{session_id}/model-capabilities` | Observe the current desired model and its declared image support |
+| `GET /application/sessions/{session_id}/reviewer-state` | Observe the creation-bound review route and local reviewer readiness |
 | `GET /application/configuration-operations/{operation_id}` | Exact committed configuration update result |
 | `GET /application/sessions/{session_id}/background-grants` | List this connection's background grants |
 | `POST /application/sessions/{session_id}/background-grants` | Record a background activation grant |
@@ -88,7 +89,10 @@ create require matching `Idempotency-Key` and `operation_id`. Existing
 `expected_revision` and `expected_configuration_revision` fields use decimal
 strings, not JSON numbers. Approval and cancellation retain the exact native
 Session/handle/run/turn identity and approval options. Do not convert an
-approval into a general Boolean.
+approval into a general Boolean. Guardian review Envelopes may include the
+reviewed `item_id` and carry the same public `approval_request_id` token used
+for manual approvals; these correlate live and replayed Session observation,
+not private review-journal identity or a new authorization grant.
 
 ## Persistence compatibility
 
@@ -154,7 +158,7 @@ allocates the execution directory. No model-selected root is accepted.
 A creation profile has two lifetimes:
 
 - **Creation-bound**: `version`, `execution`, `inherit`, `workspace`,
-  `permissions` and `execution_config` are fixed at Session creation. A configuration update that
+  `permissions`, `reviewer` and `execution_config` are fixed at Session creation. A configuration update that
   carries them is rejected; changing them requires a new Session.
 - **Revisioned desired configuration**: `instructions`, `model`,
   `reasoning_effort`, `service_tier`, `tools_version`, `tools` and
@@ -170,9 +174,55 @@ CWD and explicit `read-write` roots are writable. `permissions.mode` defaults
 when omitted to `workspace-write`; `danger-full-access` is an explicit opt-in
 that selects the Host without a native sandbox and is accepted only when the
 platform's native agent implements it — the Host registers that mode on opt-in,
-never silently. `permissions.approval_mode` defaults to `manual`; manual is the
-only currently supported mode. Ordinary per-call `require_escalated` requests
-still surface Host approval.
+never silently. `permissions.approval_mode` defaults to `manual`; `auto-review` requires an
+explicit `reviewer: {"kind":"guardian","model":"<Host-configured-model-ref>"}`.
+`manual` rejects a reviewer. Reviewer selection is creation-bound and never
+inherits the main application `model` or a global default. Applications must
+negotiate `application-guardian-review-v1` before creating a reviewer profile
+or requesting reviewer state; unsupported services reject reviewer creation
+rather than accepting a configuration they cannot honor.
+
+Sandbox policy (`permissions.mode` and `workspace`) controls where native tools
+may act; approval routing (`approval_mode`) decides who reviews native requests;
+`reviewer` selects the configured Guardian model. None of these alone grants a
+callback authority. Callback tool `approval_policy` is `direct` when omitted
+(or explicitly `direct`), preserving legacy dispatch; `required` requests a
+canonical approval gate before callback intent dispatch. `required` requires
+`application-guardian-review-v1` even in a manual profile; unsupported services
+reject it at creation and configuration update. With manual routing a user can
+resolve the approval; with auto-review the creation-bound Guardian reviews it.
+Required callbacks reject numeric arguments outside the Control v1 range
+`[-9007199254740991, 9007199254740991]` before creating an approval or callback
+intent, including numbers nested in objects or arrays. Validation preserves
+accepted numeric tokens and never converts invocation numbers to strings.
+An `integer` schema does not extend the wire range; larger identifiers require
+an application-defined string schema and string arguments.
+Guardian evidence is limited to the Session: it receives no ambient filesystem
+tools or Host credentials. Ordinary per-call `require_escalated` requests still
+surface Host approval under manual routing. Tool names, descriptions, generated
+justifications and callback results are not authorization. A `direct` callback
+has not been reviewed by Guardian. The application must keep credentials outside
+model-facing arguments and results, and execute only the exact claimed action;
+Core cannot inspect or constrain an application's business-effect implementation.
+Operating-system permissions, account login and missing user information still
+use their corresponding native or application interaction flows, not Guardian.
+
+`GET /application/sessions/{session_id}/reviewer-state` checks the exact
+application connection's binding and reports `approval_mode`, optional
+`reviewer`, and status `manual`, `ready` or `unavailable`, with an optional
+non-secret reason. It checks local assembly readiness without activating the
+Session Runtime or probing provider health; `ready` cannot guarantee a later
+review succeeds. Automatic-review failures remain fail-closed: no user approval
+is forged and no manual fallback approval is created. Live automatic reviews
+cannot be manually resolved; failure and timeout progress is transient, not a
+synthetic approval-decision mirror. Only decided approvals and denials are
+mirrored in canonical history. `caelis/approval_review` exposes `in_progress`,
+`approved`, `denied`, `timed_out` and `failed`, with review text where needed.
+The Session/Turn, `item_id`, `approval_request_id` and exact action correlate the
+review with its original invocation; these facts are not a reusable grant.
+A denial executes nothing. A failure or timeout is an unavailable review, not a
+model denial. Recovery requires new explicit user input and a new invocation,
+or a new manual Session; neither replay nor reconnect repeats an effect.
 
 ### Process environment (creation-bound)
 
@@ -294,7 +344,7 @@ Application-owned callback approval does not authorize a shell command,
 arbitrary MCP tool, or external write.
 
 Only the desired-configuration fields above are hot-updatable; `version`,
-`execution`, `inherit`, `workspace`, `permissions` and `execution_config` stay the
+`execution`, `inherit`, `workspace`, `permissions`, `reviewer` and `execution_config` stay the
 immutable creation binding. Application notes and Memory change through ordinary new tool
 results, not by rewriting committed model prefixes or triggering implicit
 compaction. Bot embeds its own Memory store and exposes its own tools; Workspace
