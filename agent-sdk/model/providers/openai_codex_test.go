@@ -252,6 +252,42 @@ func TestOpenAIResponsesInputsCarryViewImageToolResult(t *testing.T) {
 	}
 }
 
+func TestOpenAIResponsesToolOutputPreservesTextImageAndStructuredReceiptOrder(t *testing.T) {
+	t.Parallel()
+	assistant := model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{ID: "call-1", Name: "ApplicationLookup", Args: `{}`}}, "")
+	result := model.NewMessage(model.RoleTool, model.Part{Kind: model.PartKindToolResult, ToolResult: &model.ToolResultPart{
+		ToolUseID: "call-1", Name: "ApplicationLookup", Content: []model.Part{
+			model.NewTextPart("Evidence"),
+			model.NewMediaPart(model.MediaModalityImage, model.MediaSource{Kind: model.MediaSourceInline, Data: "aW1n"}, "image/png", "evidence.png"),
+			model.NewJSONPart(json.RawMessage(`{"outcome":"failed","structuredContent":{"reason":"not found"}}`)),
+		},
+	}})
+	_, inputs, err := openAICodexInputs(nil, []model.Message{assistant, result})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(inputs) != 2 {
+		t.Fatalf("inputs = %#v", inputs)
+	}
+	output, ok := inputs[1].(openAICodexFunctionOutputInput)
+	if !ok || output.CallID != "call-1" {
+		t.Fatalf("function output = %#v", inputs[1])
+	}
+	parts, ok := output.Output.([]any)
+	if !ok || len(parts) != 3 {
+		t.Fatalf("function content = %#v", output.Output)
+	}
+	if first, ok := parts[0].(openAICodexInputText); !ok || first.Text != "Evidence" {
+		t.Fatalf("first part = %#v", parts[0])
+	}
+	if image, ok := parts[1].(openAICodexInputImage); !ok || image.ImageURL != "data:image/png;base64,aW1n" {
+		t.Fatalf("image part = %#v", parts[1])
+	}
+	if receipt, ok := parts[2].(openAICodexInputText); !ok || receipt.Text != `{"outcome":"failed","structuredContent":{"reason":"not found"}}` {
+		t.Fatalf("receipt part = %#v", parts[2])
+	}
+}
+
 func TestOpenAICodexOutputTextPreservesURLCitations(t *testing.T) {
 	t.Parallel()
 

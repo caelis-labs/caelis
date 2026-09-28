@@ -710,8 +710,18 @@ func toGeminiContents(instructions []model.Part, messages []model.Message) (stri
 		systemLines = append(systemLines, system)
 	}
 	out := make([]*genai.Content, 0, len(messages))
+	var pendingToolMedia []*genai.Part
+	flushToolMedia := func() {
+		if len(pendingToolMedia) > 0 {
+			out = append(out, &genai.Content{Role: "user", Parts: pendingToolMedia})
+			pendingToolMedia = nil
+		}
+	}
 
 	for _, m := range messages {
+		if m.Role != model.RoleTool {
+			flushToolMedia()
+		}
 		switch m.Role {
 		case model.RoleSystem:
 			if text := strings.TrimSpace(m.TextContent()); text != "" {
@@ -752,28 +762,40 @@ func toGeminiContents(instructions []model.Part, messages []model.Message) (stri
 			if resp == nil {
 				continue
 			}
-			images := inlineToolResultImages(m)
-			var responseParts []*genai.FunctionResponsePart
-			if len(images) > 0 {
-				responseParts = make([]*genai.FunctionResponsePart, 0, len(images))
-			}
-			for _, image := range images {
-				data, err := decodeBase64Image(image.Source.Data)
-				if err != nil {
-					return "", nil, err
-				}
-				responseParts = append(
-					responseParts,
-					genai.NewFunctionResponsePartFromBytes(data, image.MimeType),
-				)
-			}
-			part := genai.NewPartFromFunctionResponseWithParts(resp.Name, resp.Result, responseParts)
+			part := genai.NewPartFromFunctionResponse(resp.Name, toolResultObject(m, resp.Result))
 			if strings.TrimSpace(resp.ID) != "" {
 				part.FunctionResponse.ID = resp.ID
 			}
 			out = append(out, &genai.Content{Role: "user", Parts: []*genai.Part{part}})
+			for _, result := range m.ToolResults() {
+				if len(result.Content) == 1 && result.Content[0].Kind != model.PartKindMedia {
+					continue // Legacy one-part output is already in FunctionResponse.
+				}
+				pendingToolMedia = append(pendingToolMedia, genai.NewPartFromText(toolResultEvidenceLabel(result.ToolUseID, result.Name)+":"))
+				for _, item := range result.Content {
+					switch item.Kind {
+					case model.PartKindText:
+						if item.Text != nil {
+							pendingToolMedia = append(pendingToolMedia, genai.NewPartFromText(item.Text.Text))
+						}
+					case model.PartKindJSON:
+						if item.JSON != nil {
+							pendingToolMedia = append(pendingToolMedia, genai.NewPartFromText(string(item.JSON.Value)))
+						}
+					case model.PartKindMedia:
+						if item.Media != nil && item.Media.Modality == model.MediaModalityImage && item.Media.Source.Kind == model.MediaSourceInline {
+							data, err := decodeBase64Image(item.Media.Source.Data)
+							if err != nil {
+								return "", nil, err
+							}
+							pendingToolMedia = append(pendingToolMedia, &genai.Part{InlineData: &genai.Blob{MIMEType: item.Media.MimeType, Data: data}})
+						}
+					}
+				}
+			}
 		}
 	}
+	flushToolMedia()
 	return strings.Join(systemLines, "\n\n"), out, nil
 }
 

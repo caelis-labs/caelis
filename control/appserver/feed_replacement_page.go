@@ -10,7 +10,7 @@ import (
 const (
 	// feedReplacementPageEventLimit and feedReplacementPageByteLimit bound one
 	// canonical ReplacePage SSE payload. They stay well below the HTTP client's
-	// 8 MiB scanner cap and the assembler hard caps (8192 events / 32 MiB). A
+	// 64 MiB scanner cap and the assembler hard caps (8192 events / 32 MiB). A
 	// single envelope larger than the transport byte bound is still emitted
 	// alone when it fits the assembler byte cap.
 	feedReplacementPageEventLimit = 256

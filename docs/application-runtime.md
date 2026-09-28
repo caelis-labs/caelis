@@ -25,7 +25,8 @@ versions, `store_id`, `instance_id`, build identity and capabilities. Require
 Feature capabilities refine the baseline: `application-hot-configuration-v1`,
 `application-native-execution-v1`, `application-workspace-binding-v1`,
 `application-background-activation-v1`, `application-resource-transfer-v1` and
-`application-model-capabilities-v1`.
+`application-model-capabilities-v1`, `application-tool-result-content-v1` and
+`application-media-resources-v1`.
 Require the capability guarding the feature you need instead of probing with
 destructive trial calls.
 Store identity persists across Host replacement; instance identity does not.
@@ -69,7 +70,7 @@ The following paths are relative to `/api/control/v1`:
 | `GET /application/sessions/{session_id}/calls` | Durable callback snapshot; `?wait=true` waits for pending calls |
 | `GET /application/sessions/{session_id}/calls/{call_id}` | Recover one opaque callback receipt |
 | `POST /application/sessions/{session_id}/calls/{call_id}/claim` | Claim effect once, body `{}` |
-| `POST /application/sessions/{session_id}/calls/{call_id}/result` | Idempotently submit `outcome` and JSON `content` |
+| `POST /application/sessions/{session_id}/calls/{call_id}/result` | Idempotently submit an effect outcome and negotiated result content |
 | `POST /application/sessions/{session_id}/resources` | Upload owned immutable bytes |
 | `GET /application/sessions/{session_id}/resources/{resource_id}` | Read resource descriptor |
 | `GET /application/sessions/{session_id}/resources/{resource_id}/content` | Read descriptor and base64 bytes |
@@ -391,13 +392,116 @@ Repeating an uncertain ID does not dispatch again. Query native state and the sa
 operation ID; do not invent a new ID as a retry. Application Sessions are not
 ordinary workspace resume candidates.
 
+## Multimodal callback results
+
+Require `application-tool-result-content-v1` before declaring a tool with
+`result_format: "content-v1"`. Its optional `output_schema` is an object JSON
+Schema validated against successful `structuredContent`; failed and unknown
+receipts need not supply that object. An explicit empty object is preserved.
+The public wire's JavaScript-safe number rule also applies to `structuredContent`;
+encode larger integer identifiers as strings. Schema resolution never downloads
+remote references. Both fields belong to the revisioned tool catalog: a changed format
+or schema requires a new `tools_version` and takes effect only at the existing
+model-request configuration boundary. In-flight calls retain their original
+format and schema.
+
+A [tool declaration](../api/control/v1/fixtures/application-tool-content-v1.json)
+and [result fixture](../api/control/v1/fixtures/application-result-content-v1.json)
+show the public shapes. The result retains `outcome` independently of its content:
+
+```json
+{
+  "outcome": "succeeded",
+  "result_format": "content-v1",
+  "content": [
+    {"type": "text", "text": "Observed the application window."},
+    {"type": "image", "mimeType": "image/png", "data": "<base64 PNG bytes>"}
+  ],
+  "structuredContent": {"window_found": true}
+}
+```
+
+`content` follows the MCP 2025-06-18 text/image/resource-link semantics, without
+changing the application callback transport. The admitted variants are:
+
+- `text`: required `text` string, including an empty string.
+- `image`: required canonical Base64 `data` and exact `mimeType` of `image/png` or
+  `image/jpeg`. The Host checks the decoded format, dimensions and full decode.
+- `resource_link`: required `uri: "application-resource:<resource-id>"`, `name`,
+  image `mimeType` and lowercase `sha256`. Require `application-media-resources-v1`
+  and upload an expiring resource first. The Host verifies the resource's exact
+  owner, connection, Session, expiration, name, MIME, byte size and digest before
+  decoding. HTTP/file URLs and local absolute paths are not accepted or fetched.
+
+Fields from another variant, null fields and unknown variants are rejected.
+Limits are fixed by these capability versions:
+
+| Limit | Value |
+| --- | --- |
+| Entire content-v1 callback JSON | 1 MiB |
+| Ordered content blocks | 64 |
+| Decoded inline image bytes | 256 KiB per image |
+| Resource image bytes | 8 MiB per resource |
+| Decoded raster pixels | 16,000,000 per image |
+| Total image bytes after Base64 decoding/resource retrieval | 16 MiB |
+| Model-visible text plus serialized effect/structured/resource-reference receipt | 32 KiB |
+
+The last limit keeps accepted structured results below Runtime's tool truncation
+budget. Oversize or invalid results receive an explicit protocol error without
+completing the claim; they are not converted into `outcome: "failed"`. Retain the
+original effect ledger when correcting a rejected result; never rerun the effect.
+Diagnostics do not include screen text, Base64 or structured values.
+
+Control projects blocks in order to native text and image parts, then appends a
+JSON receipt containing `outcome`, the opaque `receipt_id`, optional
+`structuredContent` and resource references. Providers serialize that JSON as
+compatible text where needed, never stringify image bytes as the result.
+Anthropic and Responses use native multimodal tool results. Chat Completions,
+Gemini and Ollama carry images through ordered adjacent user-role wire messages
+labelled as tool-result evidence and associated with the original call. This
+provider encoding does not turn callback content into user instructions or native
+authorization. Native metadata retains the original call identity and source. Tool `is_error` does not
+replace `outcome`: an unknown effect remains machine-readable `unknown`, not proof
+that nothing happened or permission to retry.
+
+Read the selected model's `image_input` before offering media workflows. Runtime
+also checks the actual next model request, including images in tool history. A
+false or unknown capability produces an explicit capability error before provider
+I/O; the genuine tool result remains in canonical history. A hot model change
+cannot silently discard an earlier screenshot. Canonical replay and ACP/client
+projection retain typed content and call association.
+
+Resource bytes resolved into canonical history are historical snapshots, not live
+screenshots or renewable read grants. Replay uses those bytes without calling the
+application or retrieving the resource again. If a resource expires after result
+submission but before projection, the model receives an explicit `content_error`
+with the original effect outcome and reference, not an invented image or execution
+failure. New retrievals of an expired resource fail even when history still holds
+an earlier observation.
+
+The baseline path remains opaque JSON text when `result_format` is absent, even
+if that JSON resembles an image block. `control/application` owns this compatibility
+path for as long as `application-runtime-v1` is supported. Older consumers stay on
+that path; clients connected to a Host missing the media capabilities must disable
+media workflows rather than treat Base64 text as a seen image. Neither schemas,
+images nor tool descriptions grant filesystem, network, approval or Session
+access. Native Workers do not inherit resident application callbacks or credentials.
+Desktop drivers and OS permissions remain the application's responsibility.
+
 ## Resources
 
 Upload `name`, `media_type`, base64 `data`, lowercase SHA-256 `sha256`, and the
-operation fields. The limit is 8 MiB per resource. A descriptor has opaque `id`,
-`session_id`, `name`, `media_type`, byte `size`, and `sha256`. Ownership is inherited
+operation fields, optionally with an RFC 3339 `expires_at` deadline when
+`application-media-resources-v1` is advertised. The deadline must be in the future
+for a new upload. The limit is 8 MiB per resource. A descriptor has opaque `id`,
+`session_id`, `name`, `media_type`, byte `size`, `sha256`, and optional `expires_at`.
+Ownership is inherited
 from the authenticated binding. Immutable bytes live behind the public API, not
-in a guessed worker path. Reusing an upload ID with changed bytes conflicts.
+in a guessed worker path. Reusing an upload ID with changed bytes, metadata or
+expiration conflicts. An exact upload retry returns the original descriptor even
+after expiry; it never extends the deadline. Expired descriptors remain readable,
+but content reads return `failed_precondition`. Omitted expiry preserves permanent
+artifacts; media callback references require an expiring resource.
 There is currently no read-only lookup of a resource descriptor by upload
 operation ID. If the upload response and opaque resource ID are both lost, the
 resource read routes cannot recover the descriptor by operation ID; the generic
@@ -416,8 +520,9 @@ Artifact paths must remain in the bound workspace. Absolute paths, traversal,
 symlinks, nonregular files, oversize files and detected copy-time changes fail.
 A model's path is not access authority. Read output through the resource content
 route; the typed client verifies size and digest. Archive preserves immutable
-snapshots. Resource expiry/deletion and paths outside the bound artifact workspace
-are not supported; no user file cleanup is performed.
+snapshots. Expiry prevents new byte reads; it does not erase already-delivered
+snapshots or delete user files. Resource deletion and paths outside the bound
+artifact workspace are not supported.
 
 ## Error and recovery semantics
 
@@ -432,7 +537,7 @@ execution completion.
 | `unauthenticated` / `permission_denied` | Invalid credential or ownership; never fall back to a broader credential |
 | `not_found` | No record in the authenticated scope |
 | `conflict` | ID payload conflict, already-claimed effect, stale native target or revision |
-| `failed_precondition` | Lease expired or binding revoked; inspect lifecycle |
+| `failed_precondition` | Lease/resource expired or binding revoked; inspect lifecycle |
 | `unsupported` | HTTP 400: unsupported model effort/tier, inheritance `true`, generic operation lookup for a configuration update, or a platform without the requested native capability |
 | `unknown_outcome` / command `unknown` | Intent/effect cannot be proven; reconcile without redispatch |
 

@@ -466,7 +466,13 @@ func toolCallUpdateForEvent(event *session.Event) (eventstream.ToolCallUpdate, b
 		return eventstream.ToolCallUpdate{}, false, nil
 	}
 	if event.Tool != nil {
-		return toolCallUpdateFromEventToolPayload(event.Tool, event.Meta), true, nil
+		update := toolCallUpdateFromEventToolPayload(event.Tool, event.Meta)
+		if len(event.Tool.Content) == 0 {
+			if content := projectedMultimodalToolResultContent(event.Message); len(content) > 0 {
+				update.Content = content
+			}
+		}
+		return update, true, nil
 	}
 	if update := session.ProtocolUpdateOf(event); update != nil && normalizeUpdateType(update.SessionUpdate) == eventstream.UpdateToolCallInfo {
 		projected, err := toolCallUpdateFromProtocolUpdate(event, update)
@@ -499,6 +505,9 @@ func toolCallUpdateForEvent(event *session.Event) (eventstream.ToolCallUpdate, b
 	}
 	if title := projectedToolLifecycleTitle(name, nil, status, ""); projectedToolTitleTracksLifecycle(name) && title != "" {
 		out.Title = stringPtr(title)
+	}
+	if content := projectedMultimodalToolResultContent(event.Message); len(content) > 0 {
+		out.Content = content
 	}
 	out = withDisplayTerminalUpdate(out, resp.ID, name)
 	return withRuntimeCommandObservation(out, event.Meta, name), true, nil

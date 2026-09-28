@@ -9,4 +9,6 @@ const (
 	CapabilityWorkspaceBinding     = "application-workspace-binding-v1"
 	CapabilityBackgroundActivation = "application-background-activation-v1"
 	CapabilityResourceTransfer     = "application-resource-transfer-v1"
+	CapabilityToolResultContent    = "application-tool-result-content-v1"
+	CapabilityMediaResources       = "application-media-resources-v1"
 )

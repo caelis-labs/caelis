@@ -417,8 +417,10 @@ type ApplicationCall struct {
 type ApplicationCallList []ApplicationCall
 
 type ApplicationCallResult struct {
-	Content JSONValue `json:"content"`
-	Outcome string    `json:"outcome"`
+	Content           JSONValue  `json:"content"`
+	Outcome           string     `json:"outcome"`
+	ResultFormat      *string    `json:"result_format,omitempty"`
+	StructuredContent JSONObject `json:"structuredContent,omitzero"`
 }
 
 type ApplicationConfiguration struct {
@@ -457,6 +459,21 @@ type ApplicationConnection struct {
 	Revoked       bool      `json:"revoked"`
 }
 
+type ApplicationContentCallResult struct {
+	Content           []ApplicationResultContentBlock `json:"content"`
+	Outcome           string                          `json:"outcome"`
+	ResultFormat      string                          `json:"result_format"`
+	StructuredContent JSONObject                      `json:"structuredContent,omitzero"`
+}
+
+type ApplicationContentToolDefinition struct {
+	Description  string     `json:"description"`
+	InputSchema  JSONObject `json:"input_schema"`
+	Name         string     `json:"name"`
+	OutputSchema JSONObject `json:"output_schema,omitempty"`
+	ResultFormat string     `json:"result_format"`
+}
+
 type ApplicationEmptyRequest map[string]any
 
 type ApplicationInheritance struct {
@@ -464,6 +481,17 @@ type ApplicationInheritance struct {
 	Mcp             bool `json:"mcp"`
 	Skills          bool `json:"skills"`
 	WorkspaceMemory bool `json:"workspace_memory"`
+}
+
+type ApplicationLegacyCallResult struct {
+	Content JSONValue `json:"content"`
+	Outcome string    `json:"outcome"`
+}
+
+type ApplicationLegacyToolDefinition struct {
+	Description string     `json:"description"`
+	InputSchema JSONObject `json:"input_schema"`
+	Name        string     `json:"name"`
 }
 
 type ApplicationModelCapabilities struct {
@@ -518,12 +546,13 @@ type ApplicationRegistration struct {
 }
 
 type ApplicationResource struct {
-	Id        string `json:"id"`
-	MediaType string `json:"media_type"`
-	Name      string `json:"name"`
-	SessionId string `json:"session_id"`
-	Sha256    string `json:"sha256"`
-	Size      int    `json:"size"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	Id        string     `json:"id"`
+	MediaType string     `json:"media_type"`
+	Name      string     `json:"name"`
+	SessionId string     `json:"session_id"`
+	Sha256    string     `json:"sha256"`
+	Size      int        `json:"size"`
 }
 
 type ApplicationResourceContent struct {
@@ -535,11 +564,41 @@ type ApplicationResourceRequest struct {
 	Data                    string         `json:"data"`
 	ExpectedControllerEpoch *string        `json:"expected_controller_epoch,omitempty"`
 	ExpectedRevision        *Uint64Decimal `json:"expected_revision,omitempty"`
+	ExpiresAt               *time.Time     `json:"expires_at,omitempty"`
 	MediaType               string         `json:"media_type"`
 	Name                    string         `json:"name"`
 	OperationId             *string        `json:"operation_id,omitempty"`
 	SessionId               *string        `json:"session_id,omitempty"`
 	Sha256                  string         `json:"sha256"`
+}
+
+type ApplicationResultContentBlock struct {
+	Data     *string `json:"data,omitempty"`
+	MimeType *string `json:"mimeType,omitempty"`
+	Name     *string `json:"name,omitempty"`
+	Sha256   *string `json:"sha256,omitempty"`
+	Text     *string `json:"text,omitempty"`
+	Type     string  `json:"type"`
+	Uri      *string `json:"uri,omitempty"`
+}
+
+type ApplicationResultImageBlock struct {
+	Data     string `json:"data"`
+	MimeType string `json:"mimeType"`
+	Type     string `json:"type"`
+}
+
+type ApplicationResultResourceLinkBlock struct {
+	MimeType string `json:"mimeType"`
+	Name     string `json:"name"`
+	Sha256   string `json:"sha256"`
+	Type     string `json:"type"`
+	Uri      string `json:"uri"`
+}
+
+type ApplicationResultTextBlock struct {
+	Text string `json:"text"`
+	Type string `json:"type"`
 }
 
 type ApplicationScope struct {
@@ -556,9 +615,11 @@ type ApplicationSource struct {
 }
 
 type ApplicationToolDefinition struct {
-	Description string     `json:"description"`
-	InputSchema JSONObject `json:"input_schema"`
-	Name        string     `json:"name"`
+	Description  string     `json:"description"`
+	InputSchema  JSONObject `json:"input_schema"`
+	Name         string     `json:"name"`
+	OutputSchema JSONObject `json:"output_schema,omitempty"`
+	ResultFormat *string    `json:"result_format,omitempty"`
 }
 
 type ApplicationWorker struct {

@@ -180,13 +180,39 @@ func (l *openAICompatLLM) fromKernelMessages(instructions []model.Part, messages
 }
 
 func appendOpenAICompatToolImages(parts []openAIContentPart, message model.Message) []openAIContentPart {
-	for _, image := range inlineToolResultImages(message) {
-		parts = append(parts, openAIContentPart{
-			Type: "image_url",
-			ImageURL: &openAIImageURL{
-				URL: fmt.Sprintf("data:%s;base64,%s", image.MimeType, image.Source.Data),
-			},
-		})
+	for _, result := range message.ToolResults() {
+		hasImage := false
+		for _, part := range result.Content {
+			if part.Kind == model.PartKindMedia && part.Media != nil &&
+				part.Media.Modality == model.MediaModalityImage && part.Media.Source.Kind == model.MediaSourceInline &&
+				strings.TrimSpace(part.Media.Source.Data) != "" {
+				hasImage = true
+			}
+		}
+		if !hasImage {
+			continue
+		}
+		parts = append(parts, openAIContentPart{Type: "text", Text: toolResultEvidenceLabel(result.ToolUseID, result.Name) + ":"})
+		for _, part := range result.Content {
+			switch part.Kind {
+			case model.PartKindText:
+				if part.Text != nil {
+					parts = append(parts, openAIContentPart{Type: "text", Text: part.Text.Text})
+				}
+			case model.PartKindJSON:
+				if part.JSON != nil {
+					parts = append(parts, openAIContentPart{Type: "text", Text: string(part.JSON.Value)})
+				}
+			case model.PartKindMedia:
+				if part.Media != nil && part.Media.Modality == model.MediaModalityImage && part.Media.Source.Kind == model.MediaSourceInline &&
+					strings.TrimSpace(part.Media.Source.Data) != "" {
+					parts = append(parts, openAIContentPart{
+						Type:     "image_url",
+						ImageURL: &openAIImageURL{URL: fmt.Sprintf("data:%s;base64,%s", part.Media.MimeType, part.Media.Source.Data)},
+					})
+				}
+			}
+		}
 	}
 	return parts
 }
@@ -194,10 +220,14 @@ func appendOpenAICompatToolImages(parts []openAIContentPart, message model.Messa
 func (l *openAICompatLLM) fromKernelMessage(m model.Message) openAICompatReqMsg {
 	if resp := m.ToolResponse(); resp != nil {
 		raw, _ := json.Marshal(resp.Result)
+		content := string(raw)
+		if rawText, ok := toolResultText(m); ok {
+			content = rawText
+		}
 		return openAICompatReqMsg{
 			Role:       string(model.RoleTool),
 			ToolCallID: resp.ID,
-			Content:    string(raw),
+			Content:    content,
 		}
 	}
 	if callsIn := m.ToolCalls(); len(callsIn) > 0 {

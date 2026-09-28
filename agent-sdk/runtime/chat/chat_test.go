@@ -461,7 +461,7 @@ func TestChatAgentRunsMinimalToolLoop(t *testing.T) {
 	}
 }
 
-func TestChatAgentReplacesUnsupportedImageToolResultBeforeNextModelRequest(t *testing.T) {
+func TestChatAgentRetainsUnsupportedImageToolResultBeforeRejectingNextModelRequest(t *testing.T) {
 	t.Parallel()
 
 	testModel := &toolLoopModel{}
@@ -501,47 +501,29 @@ func TestChatAgentReplacesUnsupportedImageToolResultBeforeNextModelRequest(t *te
 	})
 
 	var events []*session.Event
-	for event, runErr := range chatAgent.Run(ctx) {
-		if runErr != nil {
-			t.Fatalf("Run() error = %v", runErr)
-		}
-		if session.IsModelInvocationReceipt(event) {
+	var runError error
+	for event, err := range chatAgent.Run(ctx) {
+		if err != nil {
+			runError = err
 			continue
 		}
-		events = append(events, event)
-	}
-
-	if got, want := len(testModel.requests), 2; got != want {
-		t.Fatalf("len(testModel.requests) = %d, want %d", got, want)
-	}
-	var result model.ToolResultPart
-	for _, message := range testModel.requests[1].Messages {
-		results := message.ToolResults()
-		if len(results) == 1 {
-			result = results[0]
-			break
+		if !session.IsModelInvocationReceipt(event) {
+			events = append(events, event)
 		}
 	}
-	if !result.IsError {
-		t.Fatalf("second request tool result = %#v, want model-visible error", result)
+	var capabilityErr *model.CapabilityError
+	if !errors.As(runError, &capabilityErr) || capabilityErr.Capability != model.CapabilityImageInput {
+		t.Fatalf("Run() error = %v, want image-input capability error", runError)
 	}
-	if len(result.Content) != 1 || result.Content[0].JSON == nil {
-		t.Fatalf("second request tool result content = %#v, want one JSON error", result.Content)
+	if got := len(testModel.requests); got != 1 {
+		t.Fatalf("len(testModel.requests) = %d, want no second provider call", got)
 	}
-	var payload map[string]any
-	if err := json.Unmarshal(result.Content[0].JSON.Value, &payload); err != nil {
-		t.Fatalf("Unmarshal(tool result) error = %v", err)
+	if len(events) != 2 || events[1].Type != session.EventTypeToolResult || events[1].Tool == nil || events[1].Tool.Status != "completed" {
+		t.Fatalf("events = %#v, want true completed tool result before rejection", events)
 	}
-	if got := payload["error_code"]; got != string(tool.ErrorCodeUnsupported) {
-		t.Fatalf("error_code = %#v, want %q", got, tool.ErrorCodeUnsupported)
-	}
-	for _, part := range result.Content {
-		if part.Media != nil {
-			t.Fatalf("second request contains unsupported media = %#v", part.Media)
-		}
-	}
-	if len(events) != 3 || events[1].Type != session.EventTypeToolResult || events[1].Tool == nil || events[1].Tool.Status != "failed" {
-		t.Fatalf("events = %#v, want failed tool result followed by final assistant response", events)
+	result := events[1].Message.ToolResults()
+	if len(result) != 1 || result[0].IsError || len(result[0].Content) != 2 || result[0].Content[1].Media == nil {
+		t.Fatalf("canonical tool result = %#v, want original text and image", result)
 	}
 }
 

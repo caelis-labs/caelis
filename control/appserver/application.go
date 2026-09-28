@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/control/application"
@@ -33,12 +34,14 @@ type ApplicationPromptRequest struct {
 
 // ApplicationResourceRequest uploads an immutable byte snapshot, not a path.
 // Data uses standard JSON base64 encoding. SHA256 is required and verified.
+// ExpiresAt, when set, must be future at first upload and is immutable on retry.
 type ApplicationResourceRequest struct {
 	WriteBase
-	Name      string `json:"name"`
-	MediaType string `json:"media_type"`
-	Data      []byte `json:"data"`
-	SHA256    string `json:"sha256"`
+	Name      string     `json:"name"`
+	MediaType string     `json:"media_type"`
+	Data      []byte     `json:"data"`
+	SHA256    string     `json:"sha256"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 }
 
 // ApplicationResourceContent is the public byte-transfer response.

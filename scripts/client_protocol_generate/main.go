@@ -61,6 +61,7 @@ type schema struct {
 	AnyOf                []*schema          `json:"anyOf"`
 	AllOf                []*schema          `json:"allOf"`
 	AdditionalProperties json.RawMessage    `json:"additionalProperties"`
+	GoOmitZero           bool               `json:"x-go-omitzero"`
 }
 
 type objectShape struct {
@@ -352,7 +353,12 @@ func writeGoSchema(out *strings.Builder, name string, value *schema, schemas map
 		}
 		tag := property
 		if !required {
-			tag += ",omitempty"
+			if propertySchema.GoOmitZero {
+				// A present empty map can be semantically different from omission.
+				tag += ",omitzero"
+			} else {
+				tag += ",omitempty"
+			}
 		}
 		out.WriteString("\t" + goName(property) + " " + typeName + " `json:\"" + tag + "\"`\n")
 	}

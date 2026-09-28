@@ -27,17 +27,21 @@ import (
 
 const (
 	defaultRemoteEventBuffer = 128
-	defaultRemoteMaxEvent    = 8 << 20
-	maxRemoteResponseBody    = 4 << 20
+	// Canonical replacement can carry one 32 MiB Envelope in a single SSE
+	// data line. Leave room for delivery framing and JSON without raising the
+	// disposable spool's independent record limit.
+	defaultRemoteMaxEvent = 64 << 20
+	maxRemoteResponseBody = 4 << 20
 )
 
 // Config configures one authenticated, principal-bound Control
 // client. BaseURL is the server origin, without the Control API prefix.
 type Config struct {
-	BaseURL       string
-	BearerToken   string
-	HTTPClient    *http.Client
-	EventBuffer   int
+	BaseURL     string
+	BearerToken string
+	HTTPClient  *http.Client
+	EventBuffer int
+	// MaxEventBytes bounds a single SSE line; zero uses the 64 MiB default.
 	MaxEventBytes int
 	Compatibility appserver.CompatibilityPolicy
 }
