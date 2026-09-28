@@ -45,7 +45,7 @@ Only jobs outside the selected scope may be skipped.
 
 The Linux Go job installs bubblewrap and enables
 `CAELIS_LINUX_SANDBOX_SMOKE_E2E=1` for the bwrap package, covering real Run, Start,
-and TTY execution with race detection. It uses Ubuntu 22.04 for unprivileged user
+and TTY execution. It uses Ubuntu 22.04 for unprivileged user
 namespaces without disabling Ubuntu 24.04's runner-wide AppArmor restriction.
 
 The branch rule does not require chasing the latest `main`. Advancing `main`

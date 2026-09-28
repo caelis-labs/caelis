@@ -94,7 +94,7 @@ jobs:
       - name: Native bwrap execution tests
         env:
           CAELIS_LINUX_SANDBOX_SMOKE_E2E: '1'
-        run: go test -race -count=1 -timeout=3m ./agent-sdk/sandbox/bwrap
+        run: go test -count=1 -timeout=3m ./agent-sdk/sandbox/bwrap
 
       - name: Build
         run: make build

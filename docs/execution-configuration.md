@@ -105,7 +105,12 @@ endpoint processes keep their own configuration contracts.
   Mandatory SDK resource-limit runtimes reject login initialization.
 
 These rules configure the supplied environment. The shell and operating system
-can subsequently create their own variables, such as PWD and SHLVL.
+can subsequently create their own variables, such as PWD and SHLVL. A shell can
+also require particular variables to start: Windows PowerShell needs a valid
+`SystemRoot` to load its CLR. With `inherit: false` on the Windows sandbox, callers
+must explicitly set `SystemRoot` (normally the Host's Windows directory); an empty
+environment is passed as requested but cannot start Windows PowerShell. The
+backend does not silently restore removed variables.
 
 Clients omitting the field inherit the Host user environment and use the default
 non-login shell. This includes application clients: there is no automatic HOME

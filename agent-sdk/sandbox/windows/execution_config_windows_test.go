@@ -85,14 +85,16 @@ func TestRestrictedTokenExecutionConfigE2E(t *testing.T) {
 			name: "inherit false",
 			execution: &sandbox.ExecutionConfig{Environment: sandbox.EnvironmentConfig{
 				Inherit: &inherit,
-				Set:     map[string]string{"CAELIS_EXEC_E2E_SET": "explicit 空 格", "CAELIS_EXEC_E2E_ORDER": "config"},
+				// Windows PowerShell's CLR requires SystemRoot even when the caller
+				// deliberately excludes the rest of the host environment.
+				Set: map[string]string{"SystemRoot": os.Getenv("SystemRoot"), "CAELIS_EXEC_E2E_SET": "explicit 空 格", "CAELIS_EXEC_E2E_ORDER": "config"},
 			}},
 			req: sandbox.CommandRequest{
 				UnsetEnv: []string{"CAELIS_EXEC_E2E_ORDER"},
 				Env:      map[string]string{"caelis_exec_e2e_order": "request 值", "CAELIS_EXEC_E2E_EMPTY": ""},
 			},
 			want: map[string]string{
-				"CAELIS_EXEC_E2E_SET": "explicit 空 格", "CAELIS_EXEC_E2E_ORDER": "request 值", "CAELIS_EXEC_E2E_EMPTY": "",
+				"SystemRoot": os.Getenv("SystemRoot"), "CAELIS_EXEC_E2E_SET": "explicit 空 格", "CAELIS_EXEC_E2E_ORDER": "request 值", "CAELIS_EXEC_E2E_EMPTY": "",
 			},
 			absent: []string{"CAELIS_EXEC_E2E_BASE", "CAELIS_EXEC_E2E_CONFIG_UNSET", "CAELIS_SANDBOX_TEMP"},
 		},
@@ -113,7 +115,7 @@ func TestRestrictedTokenExecutionConfigE2E(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer rt.Close()
+			defer closeRestrictedExecutionConfigRuntime(t, rt)
 			for _, route := range []string{"run", "start", "conpty"} {
 				t.Run(route, func(t *testing.T) {
 					marker := "caelis-execution-config-" + route
@@ -190,7 +192,7 @@ print("caelis-python-replacement")
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer rt.Close()
+			defer closeRestrictedExecutionConfigRuntime(t, rt)
 			req := sandbox.CloneRequest(tc.req)
 			req.Command = pythonCommand + strings.ReplaceAll(scriptPath, "'", "''") + "'"
 			result, err := runRestrictedExecutionConfigCommand(t, rt, "run", req)
@@ -215,14 +217,36 @@ func restrictedEnvironmentCheckCommand(want map[string]string, absent []string, 
 	}
 	sort.Strings(keys)
 	checks := []string{"$ErrorActionPreference='Stop'"}
+	// .NET Framework's single-value getter can return null for a present empty
+	// variable. Check presence separately, then compare its string value.
 	for _, key := range keys {
-		checks = append(checks, fmt.Sprintf("if (-not (@([Environment]::GetEnvironmentVariables().Keys) -contains '%s') -or [Environment]::GetEnvironmentVariable('%s') -cne '%s') { exit 41 }", key, key, strings.ReplaceAll(want[key], "'", "''")))
+		checks = append(checks, fmt.Sprintf("if (-not (@([Environment]::GetEnvironmentVariables().Keys) -contains '%s') -or [string][Environment]::GetEnvironmentVariable('%s') -cne '%s') { [Console]::Error.WriteLine('environment mismatch: %s'); exit 41 }", key, key, strings.ReplaceAll(want[key], "'", "''"), key))
 	}
 	for _, key := range absent {
 		checks = append(checks, fmt.Sprintf("if (@([Environment]::GetEnvironmentVariables().Keys) -contains '%s') { exit 42 }", key))
 	}
 	checks = append(checks, "if (-not (Test-Path -LiteralPath '.\\cwd-marker')) { exit 43 }", "Write-Output '"+marker+"'")
 	return strings.Join(checks, "; ")
+}
+
+// Background manifest refresh may outlive a command and Close. Wait before
+// t.TempDir removes the fixture's state directory, as in the workspace E2E.
+func closeRestrictedExecutionConfigRuntime(t *testing.T, rt sandbox.Runtime) {
+	t.Helper()
+	defer rt.Close()
+	windowsRT := rt.(*runtime)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		running, _, _, _, _ := windowsRT.refreshSnapshot()
+		if !running {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Error("background refresh remained active before fixture cleanup")
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 func runRestrictedExecutionConfigCommand(t *testing.T, rt sandbox.Runtime, route string, req sandbox.CommandRequest) (sandbox.CommandResult, error) {

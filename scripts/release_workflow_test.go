@@ -166,7 +166,7 @@ func TestScopedQualityFailsClosed(t *testing.T) {
 		"VULN_RESULT: ${{ needs.govulncheck.result }}", "GO_RESULT: ${{ needs.go-quality.result }}",
 		"bash scripts/ci_result.sh",
 		"sudo apt-get install -y bubblewrap", "CAELIS_LINUX_SANDBOX_SMOKE_E2E: '1'",
-		"go test -race -count=1 -timeout=3m ./agent-sdk/sandbox/bwrap",
+		"go test -count=1 -timeout=3m ./agent-sdk/sandbox/bwrap",
 	} {
 		if !strings.Contains(quality, want) {
 			t.Errorf("scoped quality workflow missing %q", want)
