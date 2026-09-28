@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	sessionapi "github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/application"
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
@@ -166,6 +167,84 @@ func reviewerHTTPReviewEvents(t *testing.T, history []eventstream.Envelope, stat
 	return matching
 }
 
+func reviewerHTTPJournal(t *testing.T, ctx context.Context, host *applicationHTTPHost, sessionID string) []*sessionapi.Event {
+	t.Helper()
+	active, err := host.stack.Sessions().Session(ctx, sessionapi.SessionRef{SessionID: sessionID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events, err := host.stack.Sessions().Events(ctx, sessionapi.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return events
+}
+
+// reviewerHTTPExecutionStep reads the real Runtime's durable invocation journal,
+// not a provider tool_call_id (which can be reused on later Turns).
+func reviewerHTTPExecutionStep(t *testing.T, ctx context.Context, host *applicationHTTPHost, sessionID, turnID, toolName string) string {
+	t.Helper()
+	step := ""
+	events := reviewerHTTPJournal(t, ctx, host, sessionID)
+	for _, event := range events {
+		if event.Journal == nil || event.Journal.ToolExecution == nil {
+			continue
+		}
+		execution := event.Journal.ToolExecution
+		key := execution.Key
+		if key.TurnID != turnID || execution.ToolName != toolName || key.ToolCallID != "reviewed-provider-tool-id" {
+			continue
+		}
+		if key.SessionID != sessionID || key.StepID == "" || (step != "" && step != key.StepID) {
+			t.Fatalf("invalid invocation journal identity: %+v; prior step=%q", key, step)
+		}
+		step = key.StepID
+	}
+	if step == "" {
+		t.Fatalf("no journal invocation for Session %s Turn %s tool %s", sessionID, turnID, toolName)
+	}
+	return step
+}
+
+func reviewerHTTPPauseItem(t *testing.T, ctx context.Context, host *applicationHTTPHost, sessionID, turnID, toolName string, status sessionapi.PauseTokenStatus) string {
+	t.Helper()
+	item := ""
+	for _, event := range reviewerHTTPJournal(t, ctx, host, sessionID) {
+		if event.Journal == nil || event.Journal.PauseToken == nil {
+			continue
+		}
+		token := event.Journal.PauseToken
+		if token.TurnID != turnID || token.ToolName != toolName || token.Status != status {
+			continue
+		}
+		if token.SessionID != sessionID || token.ToolCallID != "reviewed-provider-tool-id" || token.ItemID == "" || (item != "" && item != token.ItemID) {
+			t.Fatalf("invalid persisted approval identity: %+v", token)
+		}
+		item = token.ItemID
+	}
+	if item == "" {
+		t.Fatalf("no %s approval token for Session %s Turn %s tool %s", status, sessionID, turnID, toolName)
+	}
+	return item
+}
+
+func reviewerHTTPReviewItem(t *testing.T, events []eventstream.Envelope, turnID, status, step string) {
+	t.Helper()
+	found := false
+	for _, env := range events {
+		if env.Kind != eventstream.KindApprovalReview || env.ApprovalReview == nil || env.TurnID != turnID || env.ApprovalReview.Status != status {
+			continue
+		}
+		found = true
+		if step == "" || env.ApprovalReview.ItemID != step || env.ApprovalReview.ToolCallID != "reviewed-provider-tool-id" {
+			t.Fatalf("%s review must identify invocation step %q, not provider call: %+v", status, step, env)
+		}
+	}
+	if !found {
+		t.Fatalf("missing %s review of Turn %s: %+v", status, turnID, reviewerHTTPReviewSummary(events))
+	}
+}
+
 func reviewerHTTPReviewSummary(history []eventstream.Envelope) []string {
 	var out []string
 	for _, env := range history {
@@ -249,7 +328,7 @@ func TestApplicationReviewerHTTPAllowClaimReplayAndRestart(t *testing.T) {
 		}
 	}
 synced:
-	promptReviewerHTTP(t, ctx, client, session, "prompt-reviewed-allow")
+	prompted := promptReviewerHTTP(t, ctx, client, session, "prompt-reviewed-allow")
 	select {
 	case <-provider.entered:
 	case <-ctx.Done():
@@ -274,14 +353,19 @@ synced:
 			t.Fatal("live approval review missing")
 		}
 	}
+	step := reviewerHTTPPauseItem(t, ctx, host, session, prompted.Target.TurnID, "ApplicationLookup", sessionapi.PauseTokenPending)
 	reviewerHTTPExactNumericReview(t, live, "in_progress")
+	reviewerHTTPReviewItem(t, live, prompted.Target.TurnID, "in_progress", step)
 	close(provider.release)
 	calls, err := client.WaitApplicationCalls(ctx, session)
 	if err != nil || len(calls) != 1 || calls[0].State != "pending" {
 		t.Fatalf("approved callback intent: %+v %v; requests=%+v", calls, err, provider.snapshot())
 	}
 	call := calls[0]
-	if call.CallID != "reviewed-provider-tool-id" || call.ConfigurationRevision != 1 || call.ToolsVersion != applicationHTTPProfile().ToolsVersion || string(call.Arguments) != args {
+	if journalStep := reviewerHTTPExecutionStep(t, ctx, host, session, call.TurnID, "ApplicationLookup"); journalStep != step {
+		t.Fatalf("approved callback step %q differs from durable invocation step %q", step, journalStep)
+	}
+	if call.CallID != "reviewed-provider-tool-id" || call.ItemID != step || call.TurnID != prompted.Target.TurnID || call.ConfigurationRevision != 1 || call.ToolsVersion != applicationHTTPProfile().ToolsVersion || string(call.Arguments) != args {
 		t.Fatalf("approved callback not pinned to submitted catalog/args: %+v", call)
 	}
 	claimed, err := client.ClaimApplicationCall(ctx, session, call.ID)
@@ -315,8 +399,10 @@ synced:
 		}
 	}
 	reviewerHTTPExactNumericReview(t, live, "approved")
+	reviewerHTTPReviewItem(t, live, call.TurnID, "approved", step)
 	history := applicationHTTPHistory(t, ctx, client, session)
 	reviewerHTTPExactNumericReview(t, history, "approved")
+	reviewerHTTPReviewItem(t, history, call.TurnID, "approved", step)
 	approved := reviewerHTTPReviewEvents(t, history, "approved")
 	if len(approved) != 1 || approved[0].TurnID != call.TurnID {
 		t.Fatalf("canonical terminal review replay incomplete: approved=%+v call=%+v", approved, call)
@@ -334,6 +420,10 @@ synced:
 	client = host.app(string(secret))
 	restartedHistory := applicationHTTPHistory(t, ctx, client, session)
 	reviewerHTTPExactNumericReview(t, restartedHistory, "approved")
+	reviewerHTTPReviewItem(t, restartedHistory, call.TurnID, "approved", step)
+	if restartedStep := reviewerHTTPExecutionStep(t, ctx, host, session, call.TurnID, "ApplicationLookup"); restartedStep != step {
+		t.Fatalf("Host restart changed invocation step: %q -> %q", step, restartedStep)
+	}
 	for _, env := range restartedHistory {
 		if env.Kind == eventstream.KindApprovalReview && env.ApprovalReview != nil && mirrorIDs[env.EventID] {
 			delete(mirrorIDs, env.EventID)
@@ -343,12 +433,35 @@ synced:
 		t.Fatalf("review event IDs changed across Host restart: %+v", mirrorIDs)
 	}
 	replayed, err := client.ApplicationCall(ctx, session, call.ID)
-	if err != nil || replayed.State != "completed" || replayed.ID != call.ID || replayed.CallID != call.CallID || replayed.TurnID != call.TurnID || string(replayed.Arguments) != args {
+	if err != nil || replayed.State != "completed" || replayed.ID != call.ID || replayed.CallID != call.CallID || replayed.TurnID != call.TurnID || replayed.ItemID != step || string(replayed.Arguments) != args {
 		t.Fatalf("original callback receipt after restart changed arguments/identity: %+v %v", replayed, err)
 	}
 	if len(provider.snapshot()) != 3 {
 		t.Fatalf("expected main/reviewer/main, got provider requests: %+v", provider.snapshot())
 	}
+	// The provider reuses its tool_call_id on a later Turn, even after Host
+	// replacement. Session/Turn/item, not the provider ID or bare item,
+	// identifies each invocation.
+	second := promptReviewerHTTP(t, ctx, client, session, "prompt-reviewed-reused-id")
+	secondCalls, err := client.WaitApplicationCalls(ctx, session)
+	if err != nil || len(secondCalls) != 1 || secondCalls[0].State != "pending" {
+		t.Fatalf("second reviewed callback: %+v %v", secondCalls, err)
+	}
+	secondCall := secondCalls[0]
+	secondStep := reviewerHTTPExecutionStep(t, ctx, host, session, second.Target.TurnID, "ApplicationLookup")
+	if secondCall.ItemID != secondStep || secondCall.CallID != call.CallID || secondCall.TurnID == call.TurnID || secondCall.ID == call.ID {
+		t.Fatalf("provider ID reuse collapsed invocation identity: first=%+v second=%+v steps=%q/%q", call, secondCall, step, secondStep)
+	}
+	if _, err := client.ClaimApplicationCall(ctx, session, secondCall.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.CompleteApplicationCall(ctx, session, secondCall.ID, result); err != nil {
+		t.Fatal(err)
+	}
+	waitApplicationHTTPIdle(t, ctx, client, session)
+	reusedHistory := applicationHTTPHistory(t, ctx, client, session)
+	reviewerHTTPReviewItem(t, reusedHistory, call.TurnID, "approved", step)
+	reviewerHTTPReviewItem(t, reusedHistory, secondCall.TurnID, "approved", secondStep)
 }
 
 // reviewerHTTPUnsafeTool checks only optional tool observation payloads; the
@@ -530,14 +643,35 @@ func TestApplicationReviewerHTTPDenyAndFailureNeverDispatch(t *testing.T) {
 			root := t.TempDir()
 			provider := &reviewerHTTPProvider{toolName: "ApplicationLookup", args: `{"key":"one"}`, decision: tc.decision}
 			host, client, session := setupReviewerHTTP(t, ctx, root, provider)
-			defer host.close(t)
-			promptReviewerHTTP(t, ctx, client, session, "prompt-reviewed-"+tc.name)
+			defer func() { host.close(t) }()
+			prompted := promptReviewerHTTP(t, ctx, client, session, "prompt-reviewed-"+tc.name)
 			waitApplicationHTTPIdle(t, ctx, client, session)
 			reviewerHTTPNoCallbacks(t, ctx, client, session)
 			history := applicationHTTPHistory(t, ctx, client, session)
 			if tc.name == "deny" && len(reviewerHTTPReviewEvents(t, history, tc.wantStatus)) != 1 ||
 				tc.name == "failed" && !reviewerHTTPLiveStatus(history, tc.wantStatus) {
 				t.Fatalf("terminal review not observed on %s: reviews=%+v; requests=%+v", tc.name, reviewerHTTPReviewSummary(history), provider.snapshot())
+			}
+			if tc.name == "deny" {
+				step := reviewerHTTPPauseItem(t, ctx, host, session, prompted.Target.TurnID, "ApplicationLookup", sessionapi.PauseTokenResolved)
+				reviewerHTTPReviewItem(t, history, prompted.Target.TurnID, "denied", step)
+				for _, event := range reviewerHTTPJournal(t, ctx, host, session) {
+					if event.Journal != nil && event.Journal.ToolExecution != nil && event.Journal.ToolExecution.Key.TurnID == prompted.Target.TurnID {
+						t.Fatalf("denied callback wrote execution journal: %+v", event.Journal.ToolExecution)
+					}
+				}
+				host.close(t)
+				host = startApplicationHTTPHost(t, filepath.Join(root, "store"), filepath.Join(root, "workspace"), provider)
+				secret, err := os.ReadFile(filepath.Join(root, "application.credential"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				client = host.app(string(secret))
+				reviewerHTTPNoCallbacks(t, ctx, client, session)
+				reviewerHTTPReviewItem(t, applicationHTTPHistory(t, ctx, client, session), prompted.Target.TurnID, "denied", step)
+				if reopened := reviewerHTTPPauseItem(t, ctx, host, session, prompted.Target.TurnID, "ApplicationLookup", sessionapi.PauseTokenResolved); reopened != step {
+					t.Fatalf("Host restart changed denied invocation item: %q -> %q", step, reopened)
+				}
 			}
 			for _, req := range provider.snapshot() {
 				if req["model"] == "reviewer-model" && req["tools"] != nil {

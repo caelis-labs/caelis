@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
@@ -23,7 +22,6 @@ type journaledTool struct {
 	runID      string
 	turnID     string
 	now        func() time.Time
-	sequence   *atomic.Uint64
 }
 
 func (t journaledTool) Definition() tool.Definition { return tool.CloneDefinition(t.base.Definition()) }
@@ -39,15 +37,8 @@ func (t journaledTool) Call(ctx context.Context, call tool.Call) (tool.Result, e
 		now = time.Now
 	}
 	createdAt := now()
-	stepID := strings.TrimSpace(call.ID)
-	if t.sequence != nil {
-		stepID = fmt.Sprintf("tool-step-%d:%s", t.sequence.Add(1), stepID)
-	}
-	// The journal key, not caller-controlled Call fields, is the single
-	// authority for both durable execution and the callback's identity.
-	call.Execution = tool.InvocationContext{
-		SessionID: t.sessionRef.SessionID, TurnID: t.turnID, ItemID: stepID,
-	}
+	// Identity was bound before policy admission and survives approval unchanged.
+	stepID := call.Execution.ItemID
 	var mu sync.Mutex
 	record := session.NormalizeToolExecution(session.ToolExecution{
 		Schema:      session.ToolExecutionSchemaVersion,
@@ -229,16 +220,13 @@ func (t journaledTool) appendEntry(
 	return err
 }
 
-func (r *Runtime) wrapToolsForExecutionJournal(ref session.SessionRef, runID string, turnID string, sequence *atomic.Uint64, tools []tool.Tool) []tool.Tool {
+func (r *Runtime) wrapToolsForExecutionJournal(ref session.SessionRef, runID string, turnID string, tools []tool.Tool) []tool.Tool {
 	out := make([]tool.Tool, 0, len(tools))
-	if sequence == nil {
-		sequence = &atomic.Uint64{}
-	}
 	for _, item := range tools {
 		if item == nil {
 			continue
 		}
-		out = append(out, journaledTool{base: item, sessions: r.sessions, sessionRef: session.NormalizeSessionRef(ref), runID: strings.TrimSpace(runID), turnID: strings.TrimSpace(turnID), now: r.now, sequence: sequence})
+		out = append(out, journaledTool{base: item, sessions: r.sessions, sessionRef: session.NormalizeSessionRef(ref), runID: strings.TrimSpace(runID), turnID: strings.TrimSpace(turnID), now: r.now})
 	}
 	return out
 }

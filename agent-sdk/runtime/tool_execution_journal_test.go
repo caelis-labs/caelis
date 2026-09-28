@@ -21,19 +21,30 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
-func TestJournaledToolOverwritesUntrustedInvocationIdentity(t *testing.T) {
+func TestTurnToolOverwritesUntrustedInvocationIdentityBeforePolicy(t *testing.T) {
 	t.Parallel()
 
 	service, active := newJournalTestSession(t, "trusted-tool-identity")
-	var observed tool.Call
-	wrapped := journaledTool{
-		base: tool.NamedTool{Def: tool.Definition{Name: "Write", EffectClass: tool.EffectNonIdempotent}, Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
-			observed = call
-			return tool.Result{ID: call.ID, Name: call.Name}, nil
+	var observed, policyCall tool.Call
+	core, err := New(Config{
+		Sessions: service, AgentFactory: chat.Factory{},
+		PolicyRegistry: staticPolicyRegistry{mode: policy.NamedMode{
+			ID: "allow",
+			Decide: func(_ context.Context, input policy.ToolContext) (policy.Decision, error) {
+				policyCall = input.Call
+				return policy.Decision{Action: policy.ActionAllow}, nil
+			},
 		}},
-		sessions: service, sessionRef: active.SessionRef, runID: "run-canonical", turnID: "turn-canonical",
-		now: func() time.Time { return time.Unix(100, 0) }, sequence: new(atomic.Uint64),
+		DefaultPolicyMode: "allow",
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
+	base := tool.NamedTool{Def: tool.Definition{Name: "Write", EffectClass: tool.EffectNonIdempotent}, Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
+		observed = call
+		return tool.Result{ID: call.ID, Name: call.Name}, nil
+	}}
+	wrapped := core.wrapTurnTools(t.Context(), active, active.SessionRef, nil, agent.AgentSpec{Tools: []tool.Tool{base}}, nil, "run-canonical", "turn-canonical", new(atomic.Uint64))[0]
 	forged := tool.InvocationContext{SessionID: "attacker-session", TurnID: "attacker-turn", ItemID: "attacker-item"}
 	call := tool.Call{
 		ID: "provider-reused", Name: "Write",
@@ -44,8 +55,8 @@ func TestJournaledToolOverwritesUntrustedInvocationIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := tool.InvocationContext{SessionID: active.SessionID, TurnID: "turn-canonical", ItemID: "tool-step-1:provider-reused"}
-	if observed.Execution != want {
-		t.Fatalf("callback Execution = %#v, want %#v", observed.Execution, want)
+	if observed.Execution != want || policyCall.Execution != want {
+		t.Fatalf("callback Execution = %#v, policy Execution = %#v, want %#v", observed.Execution, policyCall.Execution, want)
 	}
 	if !reflect.DeepEqual(observed.Metadata["execution"], forged) || string(observed.Input) != string(call.Input) {
 		t.Fatalf("model input/metadata were unexpectedly used or mutated: %#v", observed)
@@ -112,7 +123,7 @@ func TestJournaledToolPersistsLifecycleAndCancellationRequest(t *testing.T) {
 				base:     tool.NamedTool{Def: tool.Definition{Name: "Write", EffectClass: tool.EffectNonIdempotent}, Invoke: tt.invoke},
 				sessions: service, sessionRef: active.SessionRef, runID: "run-1", turnID: "turn-1", now: func() time.Time { return time.Unix(100, 0) },
 			}
-			result, _ := wrapped.Call(tt.ctx(), tool.Call{ID: "call-1", Name: "Write", Input: []byte(`{"path":"a"}`)})
+			result, _ := wrapped.Call(tt.ctx(), tool.Call{ID: "call-1", Name: "Write", Input: []byte(`{"path":"a"}`), Execution: tool.InvocationContext{SessionID: active.SessionID, TurnID: "turn-1", ItemID: "step-1"}})
 			loadedEvents, err := service.Events(context.Background(), session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
 			if err != nil {
 				t.Fatalf("Events() error = %v", err)
@@ -353,7 +364,7 @@ func TestJournaledToolPersistsCancelRequestBeforeExecutionTerminates(t *testing.
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		defer close(returned)
-		_, _ = wrapped.Call(ctx, tool.Call{ID: "call-live", Name: "Write"})
+		_, _ = wrapped.Call(ctx, tool.Call{ID: "call-live", Name: "Write", Execution: tool.InvocationContext{SessionID: active.SessionID, TurnID: "turn-live", ItemID: "step-live"}})
 	}()
 	<-started
 	cancel()

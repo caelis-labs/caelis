@@ -139,10 +139,12 @@ func TestOneTurnScopesRepeatedProviderToolCallIDByStep(t *testing.T) {
 	t.Parallel()
 
 	service, active := newTestSessionService(t, "provider-local-step-ids")
-	allow := staticPolicyRegistry{mode: policy.NamedMode{
-		ID: "allow",
-		Decide: func(context.Context, policy.ToolContext) (policy.Decision, error) {
-			return policy.Decision{Action: policy.ActionAllow}, nil
+	ask := staticPolicyRegistry{mode: policy.NamedMode{
+		ID: "ask",
+		Decide: func(_ context.Context, input policy.ToolContext) (policy.Decision, error) {
+			return policy.Decision{Action: policy.ActionAskApproval, Approval: &session.ProtocolApproval{
+				ToolCall: session.ProtocolToolCall{ID: input.Call.ID, Name: input.Call.Name},
+			}}, nil
 		},
 	}}
 	var observed []tool.InvocationContext
@@ -155,13 +157,18 @@ func TestOneTurnScopesRepeatedProviderToolCallIDByStep(t *testing.T) {
 	}
 	core, err := New(Config{
 		Sessions: service, AgentFactory: chat.Factory{},
-		PolicyRegistry: allow, DefaultPolicyMode: "allow",
+		PolicyRegistry: ask, DefaultPolicyMode: "ask",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	var approvals []agent.ApprovalRequest
 	run, err := core.Run(context.Background(), agent.RunRequest{
 		SessionRef: active.SessionRef, Input: "two steps",
+		ApprovalRequester: approvalRequesterFunc(func(_ context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+			approvals = append(approvals, req)
+			return agent.ApprovalResponse{Approved: true, Outcome: "selected", OptionID: "allow_once", ReviewText: "approved"}, nil
+		}),
 		AgentSpec: agent.AgentSpec{Name: "chat", Model: &repeatedProviderToolIDModel{}, Tools: []tool.Tool{target}},
 	})
 	if err != nil {
@@ -170,7 +177,7 @@ func TestOneTurnScopesRepeatedProviderToolCallIDByStep(t *testing.T) {
 	if _, err := drainRunnerEvents(t, run.Handle); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := service.LoadSession(context.Background(), session.LoadSessionRequest{SessionRef: active.SessionRef})
+	loaded, err := service.LoadSession(context.Background(), session.LoadSessionRequest{SessionRef: active.SessionRef, IncludeTransient: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,7 +203,28 @@ func TestOneTurnScopesRepeatedProviderToolCallIDByStep(t *testing.T) {
 	if len(observed) != 2 || observed[0].ItemID == observed[1].ItemID {
 		t.Fatalf("callback invocation identities = %#v, want distinct steps", observed)
 	}
-	for _, execution := range observed {
+	if len(approvals) != len(observed) {
+		t.Fatalf("approvals = %d, invocations = %d", len(approvals), len(observed))
+	}
+	for i, execution := range observed {
+		if approvals[i].Call.Execution != execution {
+			t.Fatalf("approval identity = %#v, callback identity = %#v", approvals[i].Call.Execution, execution)
+		}
+		var pending, resolved bool
+		for _, event := range loaded.Events {
+			if event.Journal == nil || event.Journal.PauseToken == nil || event.Journal.PauseToken.TokenID != approvals[i].PauseTokenID {
+				continue
+			}
+			token := event.Journal.PauseToken
+			if token.ItemID != execution.ItemID || token.SessionID != execution.SessionID || token.TurnID != execution.TurnID {
+				t.Fatalf("pause identity = %#v, callback identity = %#v", token, execution)
+			}
+			pending = pending || token.Status == session.PauseTokenPending
+			resolved = resolved || token.Status == session.PauseTokenResolved
+		}
+		if !pending || !resolved {
+			t.Fatalf("missing approval lifecycle: pending=%v resolved=%v", pending, resolved)
+		}
 		if execution.SessionID != active.SessionID || execution.TurnID == "" || !stepIDs[execution.ItemID] {
 			t.Fatalf("callback identity = %#v, want canonical session/turn/journal step", execution)
 		}
@@ -260,10 +288,19 @@ func TestSharedToolStepSequenceSurvivesOverflowStyleRebind(t *testing.T) {
 	t.Parallel()
 
 	// Overflow recovery re-resolves the Agent (and rewraps tools) while the same
-	// run/turn continues. A fresh journal counter would reissue tool-step-1 for
+	// run/turn continues. A fresh invocation counter would reissue tool-step-1 for
 	// a reused provider-local call ID; the shared sequence must keep advancing.
 	service, active := newTestSessionService(t, "shared-tool-step-sequence")
-	core, err := New(Config{Sessions: service, AgentFactory: chat.Factory{}})
+	core, err := New(Config{
+		Sessions: service, AgentFactory: chat.Factory{},
+		PolicyRegistry: staticPolicyRegistry{mode: policy.NamedMode{
+			ID: "allow",
+			Decide: func(context.Context, policy.ToolContext) (policy.Decision, error) {
+				return policy.Decision{Action: policy.ActionAllow}, nil
+			},
+		}},
+		DefaultPolicyMode: "allow",
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -274,8 +311,8 @@ func TestSharedToolStepSequenceSurvivesOverflowStyleRebind(t *testing.T) {
 			return tool.Result{ID: call.ID, Name: call.Name, Content: []model.Part{model.NewJSONPart([]byte(`{"value":"ok"}`))}}, nil
 		},
 	}
-	firstWrap := core.wrapToolsForExecutionJournal(active.SessionRef, "run-1", "turn-1", sequence, []tool.Tool{base})
-	secondWrap := core.wrapToolsForExecutionJournal(active.SessionRef, "run-1", "turn-1", sequence, []tool.Tool{base})
+	firstWrap := core.wrapTurnTools(t.Context(), active, active.SessionRef, nil, agent.AgentSpec{Tools: []tool.Tool{base}}, nil, "run-1", "turn-1", sequence)
+	secondWrap := core.wrapTurnTools(t.Context(), active, active.SessionRef, nil, agent.AgentSpec{Tools: []tool.Tool{base}}, nil, "run-1", "turn-1", sequence)
 	if len(firstWrap) != 1 || len(secondWrap) != 1 {
 		t.Fatalf("wrapped tools = %d/%d, want 1 each", len(firstWrap), len(secondWrap))
 	}
