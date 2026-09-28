@@ -462,6 +462,10 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	var controlSpool streamspool.Store
 	fileSpool, spoolErr := streamspoolfile.New(context.Background(), streamspoolfile.Config{
 		RootDir: controlStreamSpoolRoot(storeDir),
+		// Admit every envelope that fits a replacement page, including media.
+		// Retention needs additional room for record and allocation overhead.
+		MaxRecordBytes: appserver.MaxFeedReplacementPageBytes,
+		MaxStreamBytes: 2 * int64(appserver.MaxFeedReplacementPageBytes),
 	})
 	if spoolErr != nil {
 		runtimeDiagnostics.Warn("Control stream spool unavailable; using authoritative result replay", "error", spoolErr)

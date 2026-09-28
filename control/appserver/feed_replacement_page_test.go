@@ -193,7 +193,7 @@ func TestFeedBrokerCanonicalReplacementSplitsOnByteLimit(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(raw) <= feedReplacementPageByteLimit/2 || len(raw) > maxFeedReplacementPageBytes {
+		if len(raw) <= feedReplacementPageByteLimit/2 || len(raw) > MaxFeedReplacementPageBytes {
 			t.Fatalf("byte page %d encoded size = %d", i, len(raw))
 		}
 	}

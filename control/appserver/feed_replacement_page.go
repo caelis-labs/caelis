@@ -50,8 +50,8 @@ func (b *feedReplacementPageBuilder) byteLimit() int {
 	if limit <= 0 {
 		limit = feedReplacementPageByteLimit
 	}
-	if limit > maxFeedReplacementPageBytes {
-		return maxFeedReplacementPageBytes
+	if limit > MaxFeedReplacementPageBytes {
+		return MaxFeedReplacementPageBytes
 	}
 	return limit
 }
@@ -73,7 +73,7 @@ func (b *feedReplacementPageBuilder) add(envelope eventstream.Envelope) (FeedDel
 	if err != nil {
 		return FeedDelivery{}, false, err
 	}
-	if len(raw) > maxFeedReplacementPageBytes {
+	if len(raw) > MaxFeedReplacementPageBytes {
 		return FeedDelivery{}, false, errorcode.New(errorcode.ResourceExhausted, "controlclient: Session replacement page exceeds byte limit")
 	}
 	if len(b.pending) > 0 && (len(b.pending) >= b.eventLimit() || b.bytes+len(raw) > b.byteLimit()) {
