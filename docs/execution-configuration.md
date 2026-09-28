@@ -107,10 +107,14 @@ endpoint processes keep their own configuration contracts.
 These rules configure the supplied environment. The shell and operating system
 can subsequently create their own variables, such as PWD and SHLVL. A shell can
 also require particular variables to start: Windows PowerShell needs a valid
-`SystemRoot` to load its CLR. With `inherit: false` on the Windows sandbox, callers
-must explicitly set `SystemRoot` (normally the Host's Windows directory); an empty
-environment is passed as requested but cannot start Windows PowerShell. The
-backend does not silently restore removed variables.
+`SystemRoot` to load its CLR and writable temporary storage for startup policy
+probes. With `inherit: false` on the Windows sandbox, callers must explicitly set
+`SystemRoot` (normally the Host's Windows directory) and `TEMP`/`TMP` to an existing
+sandbox-writable directory. These settings do not grant filesystem access or
+change Windows application-control policy. Without writable temporary storage,
+PowerShell can enter constrained language mode; an entirely empty environment
+cannot start Windows PowerShell. The backend passes the supplied environment
+without silently restoring removed variables.
 
 Clients omitting the field inherit the Host user environment and use the default
 non-login shell. This includes application clients: there is no automatic HOME

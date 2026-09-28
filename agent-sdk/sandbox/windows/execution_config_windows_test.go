@@ -48,6 +48,17 @@ func TestSandboxEnvironmentPythonPathExplicitAuthority(t *testing.T) {
 
 func TestRestrictedTokenExecutionConfigE2E(t *testing.T) {
 	requireRestrictedExecutionConfigE2E(t)
+	workspace := t.TempDir()
+	child := filepath.Join(workspace, "child")
+	temp := filepath.Join(workspace, "tmp")
+	for _, dir := range []string{child, temp} {
+		if err := os.Mkdir(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(child, "cwd-marker"), []byte("ok"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	base := append(os.Environ(),
 		"CAELIS_EXEC_E2E_BASE=base space 雪",
 		"CAELIS_EXEC_E2E_CONFIG_UNSET=base",
@@ -85,29 +96,25 @@ func TestRestrictedTokenExecutionConfigE2E(t *testing.T) {
 			name: "inherit false",
 			execution: &sandbox.ExecutionConfig{Environment: sandbox.EnvironmentConfig{
 				Inherit: &inherit,
-				// Windows PowerShell's CLR requires SystemRoot even when the caller
-				// deliberately excludes the rest of the host environment.
-				Set: map[string]string{"SystemRoot": os.Getenv("SystemRoot"), "CAELIS_EXEC_E2E_SET": "explicit 空 格", "CAELIS_EXEC_E2E_ORDER": "config"},
+				// PowerShell needs SystemRoot and writable temporary storage even
+				// when the caller excludes the rest of the host environment.
+				Set: map[string]string{
+					"SystemRoot": os.Getenv("SystemRoot"), "TEMP": temp, "TMP": temp,
+					"CAELIS_EXEC_E2E_SET": "explicit 空 格", "CAELIS_EXEC_E2E_ORDER": "config",
+				},
 			}},
 			req: sandbox.CommandRequest{
 				UnsetEnv: []string{"CAELIS_EXEC_E2E_ORDER"},
 				Env:      map[string]string{"caelis_exec_e2e_order": "request 值", "CAELIS_EXEC_E2E_EMPTY": ""},
 			},
 			want: map[string]string{
-				"SystemRoot": os.Getenv("SystemRoot"), "CAELIS_EXEC_E2E_SET": "explicit 空 格", "CAELIS_EXEC_E2E_ORDER": "request 值", "CAELIS_EXEC_E2E_EMPTY": "",
+				"SystemRoot": os.Getenv("SystemRoot"), "TEMP": temp, "TMP": temp,
+				"CAELIS_EXEC_E2E_SET": "explicit 空 格", "CAELIS_EXEC_E2E_ORDER": "request 值", "CAELIS_EXEC_E2E_EMPTY": "",
 			},
 			absent: []string{"CAELIS_EXEC_E2E_BASE", "CAELIS_EXEC_E2E_CONFIG_UNSET", "CAELIS_SANDBOX_TEMP"},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			workspace := t.TempDir()
-			child := filepath.Join(workspace, "child")
-			if err := os.Mkdir(child, 0o700); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(filepath.Join(child, "cwd-marker"), []byte("ok"), 0o600); err != nil {
-				t.Fatal(err)
-			}
 			rt, err := New(sandbox.Config{
 				CWD: workspace, StateDir: t.TempDir(), WritableRoots: []string{workspace},
 				BaseEnv: base, Execution: tc.execution,
