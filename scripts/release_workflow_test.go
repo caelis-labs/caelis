@@ -165,6 +165,8 @@ func TestScopedQualityFailsClosed(t *testing.T) {
 		"CHANGES_RESULT: ${{ needs.changes.result }}", "FULL: ${{ needs.changes.outputs.full }}",
 		"VULN_RESULT: ${{ needs.govulncheck.result }}", "GO_RESULT: ${{ needs.go-quality.result }}",
 		"bash scripts/ci_result.sh",
+		"sudo apt-get install -y bubblewrap", "CAELIS_LINUX_SANDBOX_SMOKE_E2E: '1'",
+		"go test -race -count=1 -timeout=3m ./agent-sdk/sandbox/bwrap",
 	} {
 		if !strings.Contains(quality, want) {
 			t.Errorf("scoped quality workflow missing %q", want)
@@ -249,6 +251,7 @@ func TestWindowsQualityUsesFocusedNativeGate(t *testing.T) {
 		"GOWORK: 'off'",
 		"GOFLAGS: -mod=readonly -p=2",
 		"run: make windows-check",
+		"uses: actions/setup-python@v6", "python-version: '3.13'",
 	} {
 		if !strings.Contains(windows, want) {
 			t.Errorf("Windows quality check missing %q", want)
@@ -262,6 +265,8 @@ func TestWindowsQualityUsesFocusedNativeGate(t *testing.T) {
 	gate := readWorkflow(t, "./windows_check.sh")
 	for _, want := range []string{
 		`"$(go env GOHOSTOS)" != windows`,
+		"CAELIS_WINDOWS_SANDBOX_E2E=1 bash ./scripts/go_test_nonempty.sh",
+		"./agent-sdk/sandbox/windows '^TestRestrictedToken(ExecutionConfig|PythonEnvironment)E2E$' windows-execution-config -count=1",
 		"CGO_ENABLED=0 go build ./...",
 		"CGO_ENABLED=0 GO_TEST_TIMEOUT=10m bash ./scripts/go_test_nonempty.sh",
 		"./app/gatewayapp/internal/memoryhost '^TestEmbeddedHostBindsSDKClient$' windows-memory-open -count=1",

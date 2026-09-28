@@ -192,8 +192,8 @@ func (b *bwrapRunner) Run(ctx context.Context, req runnerruntime.Request) (sandb
 		return sandbox.CommandResult{}, fmt.Errorf("tool: prepare bwrap sandbox policy failed: %w", err)
 	}
 	shell, args := sandbox.ShellArgs(b.cfg.Execution, req.Command)
-	bwrapArgs = appendBwrapCommand(bwrapArgs, b.env.Build(req.UnsetEnv, req.EnvOverrides), shell, args)
-	cmd, payload, err := b.commandWithArgs(runCtx, bwrapArgs)
+	bwrapArgs = appendBwrapEnvironment(bwrapArgs, b.env.Build(req.UnsetEnv, req.EnvOverrides))
+	cmd, payload, err := b.commandWithArgs(runCtx, bwrapArgs, shell, args)
 	if err != nil {
 		return sandbox.CommandResult{}, err
 	}
@@ -280,8 +280,8 @@ func (b *bwrapRunner) StartAsync(_ context.Context, req runnerruntime.Request) (
 				return nil, fmt.Errorf("tool: prepare bwrap sandbox policy failed: %w", err)
 			}
 			shell, shellArgs := sandbox.ShellArgs(b.cfg.Execution, cfg.Command)
-			args = appendBwrapCommand(args, cfg.Env, shell, shellArgs)
-			cmd, file, err := b.commandWithArgs(ctx, args)
+			args = appendBwrapEnvironment(args, cfg.Env)
+			cmd, file, err := b.commandWithArgs(ctx, args, shell, shellArgs)
 			if err != nil {
 				return nil, err
 			}
@@ -482,19 +482,19 @@ func normalizeStringList(values []string) []string {
 	return out
 }
 
-// appendBwrapCommand prepares target-only environment options. The complete
-// options are passed over a private descriptor, never on the launcher argv.
-func appendBwrapCommand(args, env []string, shell string, shellArgs []string) []string {
+// appendBwrapEnvironment prepares target-only environment options, passed over
+// a private descriptor rather than exposed on the launcher argv.
+func appendBwrapEnvironment(args, env []string) []string {
 	args = append(args, "--clearenv")
 	for _, item := range env {
 		key, value, _ := strings.Cut(item, "=")
 		args = append(args, "--setenv", key, value)
 	}
-	return append(append(args, "--", shell), shellArgs...)
+	return args
 }
 
-func (b *bwrapRunner) commandWithArgs(ctx context.Context, args []string) (*exec.Cmd, *os.File, error) {
-	data, err := envfd.PackNUL(args)
+func (b *bwrapRunner) commandWithArgs(ctx context.Context, options []string, shell string, shellArgs []string) (*exec.Cmd, *os.File, error) {
+	data, err := envfd.PackNUL(options)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -502,7 +502,10 @@ func (b *bwrapRunner) commandWithArgs(ctx context.Context, args []string) (*exec
 	if err != nil {
 		return nil, nil, err
 	}
-	cmd := b.execCommand(ctx, "bwrap", "--args", "3")
+	// bwrap parses --args recursively as options only; a command in that file
+	// is discarded. Keep the target command on the outer argv.
+	args := append([]string{"--args", "3", "--", shell}, shellArgs...)
+	cmd := b.execCommand(ctx, "bwrap", args...)
 	cmd.Env = []string{}
 	cmd.ExtraFiles = append(cmd.ExtraFiles, payload)
 	return cmd, payload, nil

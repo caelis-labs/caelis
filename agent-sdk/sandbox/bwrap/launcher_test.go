@@ -78,11 +78,9 @@ func checkClosedPayload(t *testing.T, cmd *exec.Cmd) {
 }
 
 func TestBwrapTargetEnvOnlyOnPrivateFD(t *testing.T) {
-	runner := &bwrapRunner{execCommand: func(ctx context.Context, _ string, _ ...string) *exec.Cmd {
-		return exec.CommandContext(ctx, "/usr/bin/true")
-	}}
-	args := appendBwrapCommand(nil, []string{"LD_PRELOAD=/private.so", "EMPTY="}, "/bin/bash", []string{"-c", "echo ok"})
-	cmd, payload, err := runner.commandWithArgs(context.Background(), args)
+	runner := &bwrapRunner{execCommand: exec.CommandContext}
+	options := appendBwrapEnvironment(nil, []string{"LD_PRELOAD=/private.so", "EMPTY=", "VALUE=--\nwith spaces"})
+	cmd, payload, err := runner.commandWithArgs(context.Background(), options, "/chosen/shell", []string{"-lc", "echo ok"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,8 +92,13 @@ func TestBwrapTargetEnvOnlyOnPrivateFD(t *testing.T) {
 	if strings.Contains(strings.Join(cmd.Args, " "), "/private.so") {
 		t.Fatalf("launcher argv leaks target environment: %q", cmd.Args)
 	}
-	if !strings.Contains(string(data), "--setenv\x00LD_PRELOAD\x00/private.so\x00") || !strings.Contains(string(data), "--clearenv\x00") {
-		t.Fatalf("private arguments missing: %q", data)
+	wantArgs := []string{"bwrap", "--args", "3", "--", "/chosen/shell", "-lc", "echo ok"}
+	if !slices.Equal(cmd.Args, wantArgs) {
+		t.Fatalf("launcher argv = %q, want %q", cmd.Args, wantArgs)
+	}
+	wantOptions := "--clearenv\x00--setenv\x00LD_PRELOAD\x00/private.so\x00--setenv\x00EMPTY\x00\x00--setenv\x00VALUE\x00--\nwith spaces\x00"
+	if string(data) != wantOptions {
+		t.Fatalf("private options = %q, want %q", data, wantOptions)
 	}
 }
 
@@ -104,8 +107,8 @@ func checkBwrapLauncher(t *testing.T, cmd *exec.Cmd, args []string) {
 	if cmd.Env == nil || len(cmd.Env) != 0 {
 		t.Fatalf("launcher Env = %#v", cmd.Env)
 	}
-	if !slices.Equal(args, []string{"--args", "3"}) {
-		t.Fatalf("launcher argv leaked options: %q", args)
+	if !slices.Equal(args, []string{"--args", "3", "--", "/bin/bash", "-c", "echo ok"}) {
+		t.Fatalf("launcher argv missing target command or leaked options: %q", args)
 	}
 	if len(cmd.ExtraFiles) != 1 {
 		t.Fatalf("launcher private fds = %d", len(cmd.ExtraFiles))

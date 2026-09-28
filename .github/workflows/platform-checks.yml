@@ -30,6 +30,10 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
       - name: Windows platform checks
         shell: bash
         run: make windows-check

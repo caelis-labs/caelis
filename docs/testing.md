@@ -34,7 +34,7 @@ or branch name:
 | --- | --- |
 | Root README files, `AGENTS.md`, `agent-sdk/README.md`, `docs/**/*.md` | Maintained Markdown links |
 | `.release-please-manifest.json`, `CHANGELOG.md` | Valid root version, increasing version when changed, matching first changelog heading, regular file types |
-| Any other path, or executable/symlink prose | Linux lint, full untagged tests, build, reachable-vulnerability scan |
+| Any other path, or executable/symlink prose | Linux lint, full untagged tests, native bwrap execution tests, build, reachable-vulnerability scan |
 | Mixed changes | All applicable checks above |
 
 Embedded prompts, test fixtures, Go dependencies, scripts, and workflow changes
@@ -42,6 +42,11 @@ receive full checks. Release-only PRs need neither a Go toolchain nor manual CI
 approval. The single required `quality` result fails if classification, metadata
 validation, documentation validation, or any selected job fails or is cancelled.
 Only jobs outside the selected scope may be skipped.
+
+The Linux Go job installs bubblewrap and enables
+`CAELIS_LINUX_SANDBOX_SMOKE_E2E=1` for the bwrap package, covering real Run, Start,
+and TTY execution with race detection. It uses Ubuntu 22.04 for unprivileged user
+namespaces without disabling Ubuntu 24.04's runner-wide AppArmor restriction.
 
 The branch rule does not require chasing the latest `main`. Advancing `main`
 alone does not force another PR update and rerun. Checks prove the merge tree
@@ -57,6 +62,11 @@ Guardian/model invocation race tests, and `make windows-check` on native Windows
 These jobs are outside the ordinary PR merge gate; platform or race regressions
 can therefore be discovered after merging. Run the workflow before merging when
 a change specifically needs native platform evidence.
+
+The Windows gate requires Python 3.13+ and runs restricted-token execution
+configuration tests through Run, Start, and ConPTY, including default Python
+temp-directory compatibility and explicit `PYTHONPATH` replacement semantics.
+The workflow installs Python 3.13. Other opt-in sandbox E2Es remain disabled.
 
 The Windows gate covers process trees, ConPTY, sandboxing, paths, file locks,
 atomic replacement, WAL recovery, Host persistence and replacement, client

@@ -96,9 +96,13 @@ endpoint processes keep their own configuration contracts.
 - Windows retains its platform PowerShell execution contract. Its native backend
   adds existing temporary/cache, Python site customization and system-directory
   defaults to the inherited base, before explicit configuration and command
-  overrides. `inherit: false` discards those defaults too. Custom shell paths and
-  login initialization are rejected rather than silently ignored. Mandatory SDK
-  resource-limit runtimes reject login initialization.
+  overrides. `inherit: false` discards those defaults too. Replacing or unsetting
+  `PYTHONPATH` removes the bundled Python site customization; Python 3.13+ temp
+  directories can then fail under the Windows restricted token because their
+  private DACLs do not grant the sandbox write SID. Overriding temporary/cache
+  paths likewise does not grant filesystem access to those paths. Custom shell
+  paths and login initialization are rejected rather than silently ignored.
+  Mandatory SDK resource-limit runtimes reject login initialization.
 
 These rules configure the supplied environment. The shell and operating system
 can subsequently create their own variables, such as PWD and SHLVL.
