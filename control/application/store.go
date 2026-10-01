@@ -133,6 +133,12 @@ func Open(path string) (*Store, error) {
 	if _, err = tx.Exec(`SELECT request FROM app_operations LIMIT 0`); err != nil {
 		return fail(fmt.Errorf("%w: incompatible application operation schema: %w", ErrInvalid, err))
 	}
+	// Add this derived index to both supported schemas without changing their
+	// durable representation. Partial membership shrinks as calls leave pending;
+	// equal scope keys retain rowid order without sorting completed history.
+	if _, err = tx.Exec(`CREATE INDEX IF NOT EXISTS app_calls_pending ON app_calls(principal,application,connection,session) WHERE state='pending'`); err != nil {
+		return fail(err)
+	}
 	if _, err = tx.Exec(`UPDATE app_calls SET state=CASE state WHEN 'pending' THEN 'cancelled' ELSE 'unknown' END WHERE state IN ('pending','claimed')`); err != nil {
 		return fail(err)
 	}
