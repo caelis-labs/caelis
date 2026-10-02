@@ -23,6 +23,36 @@ locally when the field is absent. Refresh the projection after configuration
 changes and submit an explicit supported effort with a binding. The Host
 revalidates eligibility and the configuration revision on writes.
 
+## Managed chat model presets
+
+`openai` uses the Responses API, including for `gpt-6.1-sol` tool calls.
+The API preset has a 1,050,000-token context, a 128,000-token output ceiling,
+and efforts `low`, `medium` (default), `high`, `xhigh`, and `max`.
+The `codex` subscription preset uses its separate maintained Codex catalog:
+258,400 usable context tokens, a 32,768-token configured output default,
+`low` default effort, and an additional `ultra` effort. Subscription model
+selection does not establish account entitlement. See the
+[OpenAI model specification](https://developers.openai.com/api/docs/models/gpt-6.1-sol).
+
+`anthropic` includes `claude-sonnet-5-5`, with a 1,000,000-token context,
+128,000-token output ceiling and `high` default effort. Caelis requests
+summarized adaptive thinking so progress between tool calls remains visible.
+SDK requests that turn thinking off use `between_tools`, which still permits
+thinking between tool calls; manual token budgets are not sent. On that wire
+path, Caelis omits prior thinking blocks because `between_tools` cannot use
+Anthropic's prefix mismatch control. Canonical Session history retains them.
+The adapter uses automatic tool selection (or `none` when tools are disabled)
+and leaves sampling parameters unset.
+
+Sonnet 5.5 thinking blocks are bound to their preceding instructions, tools and
+history. Caelis requests `drop_block` with the public
+`thinking-binding-controls-2026-08-01` beta header for adaptive thinking, so
+tool discovery or refreshed instructions let Anthropic drop invalid thinking
+instead of rejecting the next request. Valid blocks remain available; dropped
+reasoning may need to be generated again. Changing a model or account also does
+not guarantee retention of its thinking. See
+[Anthropic's preserved thinking contract](https://platform.claude.com/docs/en/build-with-claude/preserved-thinking).
+
 ## Interactive provider authentication
 
 Hosts advertising `model-auth-stream-v1` accept `Accept: text/event-stream` on

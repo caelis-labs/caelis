@@ -24,7 +24,7 @@ func TestCodexConnectCompletionUsesMaintainedCatalogWithoutAuthentication(t *tes
 	if err != nil {
 		t.Fatalf("CompleteSlashArg(connect-model:codex) error = %v", err)
 	}
-	for _, name := range []string{"gpt-6-astra", "gpt-6-sol", "gpt-6-luna"} {
+	for _, name := range []string{"gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna"} {
 		if !slashCandidatesHaveValue(models, name) {
 			t.Fatalf("Codex model candidates = %#v, missing %q", models, name)
 		}
@@ -34,7 +34,7 @@ func TestCodexConnectCompletionUsesMaintainedCatalogWithoutAuthentication(t *tes
 			t.Fatalf("Codex account model candidates retained hidden %q = %#v", hidden, models)
 		}
 	}
-	wantOrder := []string{"gpt-6-astra", "gpt-6-sol", "gpt-6-luna"}
+	wantOrder := []string{"gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna"}
 	if got := slashCandidateValues(models); !slices.Equal(got, wantOrder) {
 		t.Fatalf("Codex account model candidate order = %#v, want %#v", got, wantOrder)
 	}

@@ -100,6 +100,27 @@ var builtinCatalog = []catalogEntry{
 			SupportsImages:     true,
 		},
 	},
+	// https://developers.openai.com/api/docs/models/gpt-6.1-sol (2026-09-29).
+	// Tool calling uses Responses; API efforts differ from the Codex catalog.
+	{
+		provider: "openai",
+		pattern:  "gpt-6.1-sol",
+		caps: ModelCapabilities{
+			ContextWindowTokens:    1050000,
+			MaxOutputTokens:        128000,
+			DefaultMaxOutputTokens: 32768,
+			SupportsToolCalls:      true,
+			SupportsReasoning:      true,
+			ReasoningMode:          ReasoningModeEffort,
+			ReasoningEfforts:       []string{"low", "medium", "high", "xhigh", "max"},
+			DefaultReasoningEffort: "medium",
+			SpeedModes: []SpeedMode{
+				{Level: "fast", Description: "Faster responses, increased usage"},
+			},
+			SupportsJSONOutput: true,
+			SupportsImages:     true,
+		},
+	},
 	{
 		provider: "openai",
 		pattern:  "gpt-6-sol",
@@ -528,6 +549,23 @@ var builtinCatalog = []catalogEntry{
 		provider:                  "anthropic",
 		pattern:                   "claude-opus-5",
 		hiddenFromRecommendations: true,
+		caps: ModelCapabilities{
+			ContextWindowTokens:    1000000,
+			MaxOutputTokens:        128000,
+			DefaultMaxOutputTokens: 32768,
+			SupportsToolCalls:      true,
+			SupportsReasoning:      true,
+			ReasoningMode:          ReasoningModeEffort,
+			ReasoningEfforts:       []string{"low", "medium", "high", "xhigh", "max"},
+			DefaultReasoningEffort: "high",
+			SupportsJSONOutput:     true,
+			SupportsImages:         true,
+		},
+	},
+	// https://platform.claude.com/docs/en/models/sonnet-5-5/overview (2026-09-28).
+	{
+		provider: "anthropic",
+		pattern:  "claude-sonnet-5-5",
 		caps: ModelCapabilities{
 			ContextWindowTokens:    1000000,
 			MaxOutputTokens:        128000,

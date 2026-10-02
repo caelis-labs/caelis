@@ -187,6 +187,8 @@ func TestAnthropicBuildRequestHandlesThinkingOffByModel(t *testing.T) {
 		{model: "claude-opus-5-5", want: "adaptive", display: "summarized"},
 		{model: "claude-opus-5", want: "disabled"},
 		{model: "claude-sonnet-5", want: "disabled"},
+		{model: "claude-sonnet-5-5", want: "between_tools"},
+		{model: "claude-sonnet-5-5-20260928", want: "between_tools"},
 	} {
 		for _, effort := range []string{"none", "off", "disabled"} {
 			t.Run(tc.model+"/"+effort, func(t *testing.T) {
@@ -214,39 +216,47 @@ func TestAnthropicBuildRequestHandlesThinkingOffByModel(t *testing.T) {
 	}
 }
 
-func TestAnthropicOpus55BuildRequestUsesAdaptiveEffortWithoutManualBudget(t *testing.T) {
-	llm := newAnthropic(Config{Provider: "anthropic", Model: "claude-opus-5-5"}, "anthropic-token").(*anthropicSDKLLM)
-	for _, reasoning := range []model.ReasoningConfig{
-		{},
-		{BudgetTokens: 4096},
-		{Effort: "low"},
-		{Effort: "medium"},
-		{Effort: "high", BudgetTokens: 4096},
-		{Effort: "xhigh"},
-		{Effort: "max"},
-	} {
-		t.Run(reasoning.Effort, func(t *testing.T) {
-			params, err := llm.buildRequest(&model.Request{
-				Messages:  []model.Message{model.NewTextMessage(model.RoleUser, "reason carefully")},
-				Reasoning: reasoning,
-			})
-			if err != nil {
-				t.Fatalf("buildRequest() error = %v", err)
-			}
-			payload := marshalAnthropicParamsForTest(t, params)
-			thinking := nestedMapForTest(t, payload, "thinking")
-			if thinking["type"] != "adaptive" || thinking["budget_tokens"] != nil || thinking["display"] != "summarized" {
-				t.Fatalf("thinking = %#v, want summarized adaptive thinking without manual budget", thinking)
-			}
-			effort := reasoning.Effort
-			if effort == "" {
-				if _, ok := payload["output_config"]; ok {
-					t.Fatalf("output_config = %#v, want provider default effort", payload["output_config"])
+func TestAnthropic55BuildRequestUsesAdaptiveEffortWithoutManualBudget(t *testing.T) {
+	for _, name := range []string{"claude-opus-5-5", "claude-sonnet-5-5"} {
+		llm := newAnthropic(Config{Provider: "anthropic", Model: name}, "anthropic-token").(*anthropicSDKLLM)
+		for _, reasoning := range []model.ReasoningConfig{
+			{},
+			{BudgetTokens: 4096},
+			{Effort: "low"},
+			{Effort: "medium"},
+			{Effort: "high", BudgetTokens: 4096},
+			{Effort: "xhigh"},
+			{Effort: "max"},
+		} {
+			t.Run(name+"/"+reasoning.Effort, func(t *testing.T) {
+				params, err := llm.buildRequest(&model.Request{
+					Messages:  []model.Message{model.NewTextMessage(model.RoleUser, "reason carefully")},
+					Reasoning: reasoning,
+					Tools:     []model.ToolSpec{model.NewFunctionToolSpec("lookup", "look up a value", map[string]any{"type": "object", "properties": map[string]any{}})},
+				})
+				if err != nil {
+					t.Fatalf("buildRequest() error = %v", err)
 				}
-			} else if got := nestedMapForTest(t, payload, "output_config")["effort"]; got != effort {
-				t.Fatalf("output_config.effort = %#v, want %s", got, effort)
-			}
-		})
+				payload := marshalAnthropicParamsForTest(t, params)
+				for _, field := range []string{"tool_choice", "temperature", "top_p", "top_k"} {
+					if _, ok := payload[field]; ok {
+						t.Fatalf("%s = %#v, want provider default", field, payload[field])
+					}
+				}
+				thinking := nestedMapForTest(t, payload, "thinking")
+				if thinking["type"] != "adaptive" || thinking["budget_tokens"] != nil || thinking["display"] != "summarized" {
+					t.Fatalf("thinking = %#v, want summarized adaptive thinking without manual budget", thinking)
+				}
+				effort := reasoning.Effort
+				if effort == "" {
+					if _, ok := payload["output_config"]; ok {
+						t.Fatalf("output_config = %#v, want provider default effort", payload["output_config"])
+					}
+				} else if got := nestedMapForTest(t, payload, "output_config")["effort"]; got != effort {
+					t.Fatalf("output_config.effort = %#v, want %s", got, effort)
+				}
+			})
+		}
 	}
 }
 

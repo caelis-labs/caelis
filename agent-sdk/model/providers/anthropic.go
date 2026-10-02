@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"iter"
+	"slices"
 	"strings"
 	"time"
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
+	"github.com/anthropics/anthropic-sdk-go/packages/param"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 )
@@ -17,6 +19,7 @@ import (
 const anthropicReplayKindThinkingSignature = "thinking_signature"
 
 const defaultAnthropicBaseURL = "https://api.anthropic.com"
+const anthropicThinkingBindingBeta = "thinking-binding-controls-2026-08-01"
 
 type anthropicProviderDefaults struct {
 	provider     string
@@ -74,6 +77,15 @@ func newAnthropicWithDefaults(cfg Config, token string, defaults anthropicProvid
 			continue
 		}
 		opts = append(opts, option.WithHeader(key, value))
+	}
+	if isAnthropicSonnet55Model(cfg.Model) {
+		betas := []string{anthropicThinkingBindingBeta}
+		for key, value := range cfg.Headers {
+			if strings.EqualFold(strings.TrimSpace(key), "anthropic-beta") && strings.TrimSpace(value) != "" {
+				betas = append(betas, strings.TrimSpace(value))
+			}
+		}
+		opts = append(opts, option.WithHeader("anthropic-beta", strings.Join(betas, ",")))
 	}
 	client := anthropic.NewClient(opts...)
 	return &anthropicSDKLLM{
@@ -318,10 +330,23 @@ func anthropicReplayMeta(provider string, token string) *model.ReplayMeta {
 }
 
 func (l *anthropicSDKLLM) buildRequest(req *model.Request) (anthropic.MessageNewParams, error) {
+	messages := req.Messages
+	if isAnthropicSonnet55Model(l.name) && anthropicThinkingOff(req.Reasoning.Effort) {
+		// between_tools cannot use the provider's drop_block control. Callers
+		// may refresh instructions or discover tools, so omit all signed
+		// thinking on this wire path rather than replaying an invalid prefix.
+		// Canonical history remains intact, including for other models.
+		messages = model.CloneMessages(messages)
+		for i := range messages {
+			messages[i].Parts = slices.DeleteFunc(messages[i].Parts, func(part model.Part) bool {
+				return part.Kind == model.PartKindReasoning
+			})
+		}
+	}
 	params := anthropic.MessageNewParams{
 		Model:     l.name,
 		MaxTokens: int64(l.maxOutputTok),
-		Messages:  toAnthropicMessages(req.Messages),
+		Messages:  toAnthropicMessages(messages),
 		System:    toAnthropicSystem(req.Instructions),
 		Tools:     toAnthropicTools(req.Tools),
 	}
@@ -446,19 +471,46 @@ func isAnthropicAlwaysOnThinkingModel(modelName string) bool {
 	return false
 }
 
+func isAnthropicSonnet55Model(modelName string) bool {
+	modelName = strings.ToLower(strings.TrimSpace(modelName))
+	return modelName == "claude-sonnet-5-5" || strings.HasPrefix(modelName, "claude-sonnet-5-5-")
+}
+
+func anthropicThinkingOff(effort string) bool {
+	switch strings.ToLower(strings.TrimSpace(effort)) {
+	case "none", "off", "disabled":
+		return true
+	default:
+		return false
+	}
+}
+
 func applyAnthropicAdaptiveThinking(params *anthropic.MessageNewParams, modelName string, reasoning model.ReasoningConfig) {
 	if params == nil {
 		return
 	}
 	adaptive := &anthropic.ThinkingConfigAdaptiveParam{}
 	modelName = strings.ToLower(strings.TrimSpace(modelName))
-	if modelName == "claude-opus-5-5" || strings.HasPrefix(modelName, "claude-opus-5-5-") {
-		// Opus 5.5 omits thinking text by default, including progress updates.
+	sonnet55 := isAnthropicSonnet55Model(modelName)
+	if sonnet55 {
+		// Tool discovery and refreshed instructions can change signed prefixes.
+		// Let Anthropic retain valid thinking and drop only invalid blocks.
+		// https://platform.claude.com/docs/en/build-with-claude/preserved-thinking
+		adaptive.SetExtraFields(map[string]any{"block_binding": map[string]any{"prefix_mismatch_behavior": "drop_block"}})
+	}
+	if sonnet55 || modelName == "claude-opus-5-5" || strings.HasPrefix(modelName, "claude-opus-5-5-") {
+		// These models omit thinking text by default, including progress updates.
 		adaptive.Display = anthropic.ThinkingConfigAdaptiveDisplaySummarized
 		params.Thinking.OfAdaptive = adaptive
 	}
 	effort := strings.ToLower(strings.TrimSpace(reasoning.Effort))
-	if effort == "none" || effort == "off" || effort == "disabled" {
+	if anthropicThinkingOff(effort) {
+		if sonnet55 {
+			// Sonnet 5.5 rejects disabled and manual budgets. Its lowest
+			// setting still returns signed thinking between tool calls.
+			params.Thinking = param.Override[anthropic.ThinkingConfigParamUnion](map[string]any{"type": "between_tools"})
+			return
+		}
 		if isAnthropicAlwaysOnThinkingModel(modelName) {
 			params.Thinking.OfAdaptive = adaptive
 			return
