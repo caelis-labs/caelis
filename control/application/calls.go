@@ -11,6 +11,8 @@ import (
 
 const maxCallBytes = 1 << 20
 
+const pendingCallsQuery = `SELECT body,state,result FROM app_calls WHERE principal=? AND application=? AND connection=? AND session=? AND state='pending' ORDER BY rowid`
+
 func callID(c CallContext) string {
 	return stableID("app-call-", c.PrincipalID, c.ApplicationID, c.ConnectionID, c.SessionID, c.TurnID, c.ItemID)
 }
@@ -212,6 +214,17 @@ func (s *Store) ListCalls(ctx context.Context, scope Scope, session string) ([]C
 	return s.listCalls(ctx, scope, session)
 }
 func (s *Store) listCalls(ctx context.Context, scope Scope, session string) ([]Call, error) {
+	return s.queryCalls(ctx, scope, session, `SELECT body,state,result FROM app_calls WHERE principal=? AND application=? AND connection=? AND session=? ORDER BY rowid`)
+}
+
+// pendingCalls is called under s.mu. SQL excludes historical payloads before
+// decoding; app_calls_pending also avoids scanning completed history when no
+// candidate exists. Lease and ownership checks are shared with history reads.
+func (s *Store) pendingCalls(ctx context.Context, scope Scope, session string) ([]Call, error) {
+	return s.queryCalls(ctx, scope, session, pendingCallsQuery)
+}
+
+func (s *Store) queryCalls(ctx context.Context, scope Scope, session, query string) ([]Call, error) {
 	c, err := s.connection(ctx, scope)
 	if err != nil {
 		return nil, err
@@ -224,7 +237,7 @@ func (s *Store) listCalls(ctx context.Context, scope Scope, session string) ([]C
 			return nil, err
 		}
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT body,state,result FROM app_calls WHERE principal=? AND application=? AND connection=? AND session=? ORDER BY rowid`, scope.PrincipalID, scope.ApplicationID, scope.ConnectionID, session)
+	rows, err := s.db.QueryContext(ctx, query, scope.PrincipalID, scope.ApplicationID, scope.ConnectionID, session)
 	if err != nil {
 		return nil, err
 	}
@@ -260,22 +273,18 @@ func (s *Store) WaitCalls(ctx context.Context, scope Scope, session string) ([]C
 		c, err := s.active(ctx, scope)
 		var calls []Call
 		if err == nil {
-			calls, err = s.listCalls(ctx, scope, session)
+			calls, err = s.pendingCalls(ctx, scope, session)
 		}
+		// Read candidates and subscribe under the same lock as enqueue/signal so
+		// an insertion between the empty scan and select cannot be lost.
 		changed := s.changed
 		remaining := c.ExpiresAt.Sub(s.now())
 		s.mu.Unlock()
 		if err != nil {
 			return nil, err
 		}
-		pending := []Call{}
-		for _, call := range calls {
-			if call.State == "pending" {
-				pending = append(pending, call)
-			}
-		}
-		if len(pending) > 0 {
-			return pending, nil
+		if len(calls) > 0 {
+			return calls, nil
 		}
 		timer := time.NewTimer(remaining)
 		select {
