@@ -538,7 +538,7 @@ func TestMaintainedSelectableModelsUsesCurrentBundledCodexCatalog(t *testing.T) 
 	if err != nil {
 		t.Fatalf("MaintainedSelectableModels(codex) error = %v", err)
 	}
-	want := []string{"gpt-6-astra", "gpt-6-sol", "gpt-6-luna"}
+	want := []string{"gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna"}
 	if got := selectableModelNames(models); !slices.Equal(got, want) {
 		t.Fatalf("codex selectable models = %#v, want maintained fallback %#v", got, want)
 	}
@@ -552,18 +552,22 @@ func TestMaintainedSelectableModelsUsesCurrentBundledCodexCatalog(t *testing.T) 
 func TestResolveCodexOAuthModelDefaultsUseSubscriptionCatalog(t *testing.T) {
 	t.Parallel()
 
-	for _, name := range []string{"gpt-6-sol", "gpt-6-luna"} {
+	for _, name := range []string{"gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna"} {
 		t.Run(name, func(t *testing.T) {
 			managed, err := ResolveModelDefaultsForEndpoint("codex", "", name)
 			if err != nil {
 				t.Fatal(err)
 			}
 			levels := []string{"low", "medium", "high", "xhigh", "max"}
-			if name == "gpt-6-sol" {
+			if name == "gpt-6-sol" || name == "gpt-6.1-sol" {
 				levels = append(levels, "ultra")
 			}
+			defaultEffort := "medium"
+			if name == "gpt-6.1-sol" {
+				defaultEffort = "low"
+			}
 			if managed.ContextWindowTokens != 258400 || managed.MaxOutputTokens != 32768 ||
-				managed.ReasoningMode != modelcatalog.ReasoningModeEffort || managed.DefaultReasoningEffort != "medium" ||
+				managed.ReasoningMode != modelcatalog.ReasoningModeEffort || managed.DefaultReasoningEffort != defaultEffort ||
 				!slices.Equal(managed.ReasoningLevels, levels) {
 				t.Fatalf("Codex subscription defaults = %#v", managed)
 			}
@@ -574,8 +578,12 @@ func TestResolveCodexOAuthModelDefaultsUseSubscriptionCatalog(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			apiLevels := []string{"none", "low", "medium", "high", "xhigh", "max"}
+			if name == "gpt-6.1-sol" {
+				apiLevels = apiLevels[1:]
+			}
 			if native.ContextWindowTokens != 1050000 || native.DefaultReasoningEffort != "medium" ||
-				!slices.Equal(native.ReasoningLevels, []string{"none", "low", "medium", "high", "xhigh", "max"}) {
+				!slices.Equal(native.ReasoningLevels, apiLevels) {
 				t.Fatalf("OpenAI API defaults = %#v, want API rather than subscription metadata", native)
 			}
 		})
@@ -900,6 +908,8 @@ func TestSpeedModesForConfig(t *testing.T) {
 		want     bool
 		wantHint string
 	}{
+		{name: "openai Sol 6.1 uses responses", cfg: Config{Provider: "openai", API: model.APIOpenAI, Model: "gpt-6.1-sol"}, want: true, wantHint: "Faster responses, increased usage"},
+		{name: "codex Sol 6.1 uses responses", cfg: Config{Provider: "openai-codex", API: model.APIOpenAICodex, Model: "gpt-6.1-sol"}, want: true, wantHint: "Faster responses, increased usage"},
 		{name: "openai gpt uses responses", cfg: Config{Provider: "openai", API: model.APIOpenAI, Model: "gpt-6-sol"}, want: true, wantHint: "1.5x faster, more usage"},
 		{name: "openai-codex gpt uses responses", cfg: Config{Provider: "openai-codex", API: model.APIOpenAICodex, Model: "gpt-6-sol"}, want: true, wantHint: "1.5x faster, more usage"},
 		{name: "openai luna uses responses", cfg: Config{Provider: "openai", API: model.APIOpenAI, Model: "gpt-6-luna"}, want: true, wantHint: "1.5x faster, more usage"},

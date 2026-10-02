@@ -13,7 +13,7 @@ const codexOAuthEffectiveContextWindowTokens = 258400
 // Availability and capabilities differ from the OpenAI API catalog, so these
 // entries must not be inferred from provider=openai metadata.
 //
-// Capability source for selectable models (bundled snapshot 24462234b2ae):
+// Capability sources for the GPT-6 and retained model metadata:
 // https://github.com/openai/codex/blob/24462234b2ae/codex-rs/models-manager/models.json
 // https://github.com/openai/codex/blob/24462234b2ae/codex-rs/protocol/src/openai_models.rs
 //
@@ -34,6 +34,9 @@ type codexOAuthModelSpec struct {
 }
 
 var codexOAuthModelSpecs = []codexOAuthModelSpec{
+	// GPT-6.1 Sol subscription metadata (checked 2026-10-02):
+	// https://github.com/openai/codex/blob/d25c114d494ddb693290b76bf5e5f64ecbdb38fc/codex-rs/models-manager/models.json
+	{name: "gpt-6.1-sol", contextWindowTokens: codexOAuthEffectiveContextWindowTokens, defaultReasoningEffort: "low", reasoningLevels: []string{"low", "medium", "high", "xhigh", "max", "ultra"}, imageInput: true, fallbackSelectable: true},
 	{name: "gpt-6-astra", contextWindowTokens: codexOAuthEffectiveContextWindowTokens, defaultReasoningEffort: "low", reasoningLevels: []string{"low", "medium", "high", "xhigh", "max", "ultra"}, imageInput: true, fallbackSelectable: true},
 	{name: "gpt-6-sol", contextWindowTokens: codexOAuthEffectiveContextWindowTokens, defaultReasoningEffort: "medium", reasoningLevels: []string{"low", "medium", "high", "xhigh", "max", "ultra"}, imageInput: true, fallbackSelectable: true},
 	{name: "gpt-6-luna", contextWindowTokens: codexOAuthEffectiveContextWindowTokens, defaultReasoningEffort: "medium", reasoningLevels: []string{"low", "medium", "high", "xhigh", "max"}, imageInput: true, fallbackSelectable: true},

@@ -34,14 +34,14 @@ func TestLookupModelCapabilitiesFallsBackToBuiltinWhenDynamicCatalogUnavailable(
 
 func TestOpenAICatalogRecommendsOnlyCurrentModels(t *testing.T) {
 	disableDynamicCatalogForTest(t)
-	want := []string{"gpt-6-astra", "gpt-6-luna", "gpt-6-sol"}
+	want := []string{"gpt-6-astra", "gpt-6-luna", "gpt-6-sol", "gpt-6.1-sol"}
 	if got := ListCatalogModels("openai"); !sameStrings(got, want) {
 		t.Fatalf("OpenAI catalog recommendations = %v, want %v", got, want)
 	}
 	if got := ListRecommendedModels("openai"); !sameStrings(got, want) {
 		t.Fatalf("OpenAI recommendations = %v, want %v", got, want)
 	}
-	for _, name := range []string{"gpt-6-sol", "gpt-6-luna"} {
+	for _, name := range []string{"gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna"} {
 		t.Run(name, func(t *testing.T) {
 			caps, ok := LookupModelCapabilities("openai", name)
 			if !ok || caps.ContextWindowTokens != 1050000 || caps.MaxOutputTokens != 128000 || caps.DefaultMaxOutputTokens != 32768 {
@@ -50,8 +50,12 @@ func TestOpenAICatalogRecommendsOnlyCurrentModels(t *testing.T) {
 			if !caps.SupportsImages || !caps.SupportsToolCalls || !caps.SupportsJSONOutput || !caps.SupportsReasoning {
 				t.Fatalf("capabilities = %+v, want vision, tools, JSON, and reasoning", caps)
 			}
+			levels := []string{"none", "low", "medium", "high", "xhigh", "max"}
+			if name == "gpt-6.1-sol" {
+				levels = levels[1:]
+			}
 			if caps.ReasoningMode != ReasoningModeEffort || caps.DefaultReasoningEffort != "medium" ||
-				!sameStrings(caps.ReasoningEfforts, []string{"none", "low", "medium", "high", "xhigh", "max"}) {
+				!sameStrings(caps.ReasoningEfforts, levels) {
 				t.Fatalf("API reasoning = %+v", caps)
 			}
 		})
@@ -80,7 +84,7 @@ func TestOpenAILegacyModelsRetainRuntimeCapabilitiesWithoutRecommendations(t *te
 
 func TestAnthropicCatalogRecommendsCurrentModels(t *testing.T) {
 	disableDynamicCatalogForTest(t)
-	want := []string{"claude-fable-5-1", "claude-haiku-4-5", "claude-mythos-5-1", "claude-opus-5-5", "claude-sonnet-5"}
+	want := []string{"claude-fable-5-1", "claude-haiku-4-5", "claude-mythos-5-1", "claude-opus-5-5", "claude-sonnet-5", "claude-sonnet-5-5"}
 	if got := ListRecommendedModels("anthropic"); !sameStrings(got, want) {
 		t.Fatalf("Anthropic recommendations = %v, want %v", got, want)
 	}
@@ -90,6 +94,7 @@ func TestAnthropicCatalogRecommendsCurrentModels(t *testing.T) {
 		effort string
 	}{
 		{name: "claude-opus-5-5", effort: "medium"},
+		{name: "claude-sonnet-5-5", effort: "high"},
 		{name: "claude-opus-5", effort: "high"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

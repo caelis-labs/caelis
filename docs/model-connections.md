@@ -23,6 +23,31 @@ locally when the field is absent. Refresh the projection after configuration
 changes and submit an explicit supported effort with a binding. The Host
 revalidates eligibility and the configuration revision on writes.
 
+## Managed chat model presets
+
+`openai` uses the Responses API, including for `gpt-6.1-sol` tool calls.
+The API preset has a 1,050,000-token context, a 128,000-token output ceiling,
+and efforts `low`, `medium` (default), `high`, `xhigh`, and `max`.
+The `codex` subscription preset uses its separate maintained Codex catalog:
+258,400 usable context tokens, a 32,768-token configured output default,
+`low` default effort, and an additional `ultra` effort. Subscription model
+selection does not establish account entitlement. See the
+[OpenAI model specification](https://developers.openai.com/api/docs/models/gpt-6.1-sol).
+
+`anthropic` includes `claude-sonnet-5-5`, with a 1,000,000-token context,
+128,000-token output ceiling and `high` default effort. Caelis requests
+summarized adaptive thinking so progress between tool calls remains visible.
+SDK requests that turn thinking off use `between_tools`, which still permits
+thinking between tool calls; manual token budgets are not sent. The adapter
+uses automatic tool selection (or `none` when tools are disabled) and leaves
+sampling parameters unset.
+
+Sonnet 5.5 thinking blocks are bound to their preceding instructions, tools and
+history. On accounts where Anthropic enforces prefix binding, replaying a block
+after editing that prefix can fail. Keep that history append-only; changing a
+model or account does not guarantee retention of its thinking. See
+[Sonnet 5.5 migration requirements](https://platform.claude.com/docs/en/models/sonnet-5-5/whats-new-sonnet-5-5).
+
 ## Interactive provider authentication
 
 Hosts advertising `model-auth-stream-v1` accept `Accept: text/event-stream` on

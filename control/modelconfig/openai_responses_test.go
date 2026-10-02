@@ -359,7 +359,7 @@ func TestCurrentOpenAIModelsDispatchReasoningAndToolsThroughResponses(t *testing
 	t.Parallel()
 
 	for _, provider := range []string{"openai", "codex"} {
-		for _, name := range []string{"gpt-6-sol", "gpt-6-luna"} {
+		for _, name := range []string{"gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna"} {
 			t.Run(provider+"/"+name, func(t *testing.T) {
 				t.Parallel()
 				configs, err := AssembleConnect(context.Background(), ConnectRequest{
@@ -417,7 +417,11 @@ func TestCurrentOpenAIModelsDispatchReasoningAndToolsThroughResponses(t *testing
 				if provider == "codex" {
 					wantPath = "/backend-api/codex/responses"
 				}
-				if path != wantPath || body.Model != name || body.Reasoning.Effort != "medium" ||
+				wantEffort := "medium"
+				if provider == "codex" && name == "gpt-6.1-sol" {
+					wantEffort = "low"
+				}
+				if path != wantPath || body.Model != name || body.Reasoning.Effort != wantEffort ||
 					len(body.Tools) != 1 || body.Tools[0].Type != "function" || body.Tools[0].Name != "lookup" || text != "ok" {
 					t.Fatalf("Responses exchange: path=%q body=%+v text=%q", path, body, text)
 				}

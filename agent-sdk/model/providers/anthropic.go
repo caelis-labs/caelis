@@ -10,6 +10,7 @@ import (
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
+	"github.com/anthropics/anthropic-sdk-go/packages/param"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 )
@@ -452,13 +453,20 @@ func applyAnthropicAdaptiveThinking(params *anthropic.MessageNewParams, modelNam
 	}
 	adaptive := &anthropic.ThinkingConfigAdaptiveParam{}
 	modelName = strings.ToLower(strings.TrimSpace(modelName))
-	if modelName == "claude-opus-5-5" || strings.HasPrefix(modelName, "claude-opus-5-5-") {
-		// Opus 5.5 omits thinking text by default, including progress updates.
+	sonnet55 := modelName == "claude-sonnet-5-5" || strings.HasPrefix(modelName, "claude-sonnet-5-5-")
+	if sonnet55 || modelName == "claude-opus-5-5" || strings.HasPrefix(modelName, "claude-opus-5-5-") {
+		// These models omit thinking text by default, including progress updates.
 		adaptive.Display = anthropic.ThinkingConfigAdaptiveDisplaySummarized
 		params.Thinking.OfAdaptive = adaptive
 	}
 	effort := strings.ToLower(strings.TrimSpace(reasoning.Effort))
 	if effort == "none" || effort == "off" || effort == "disabled" {
+		if sonnet55 {
+			// Sonnet 5.5 rejects disabled and manual budgets. Its lowest
+			// setting still returns signed thinking between tool calls.
+			params.Thinking = param.Override[anthropic.ThinkingConfigParamUnion](map[string]any{"type": "between_tools"})
+			return
+		}
 		if isAnthropicAlwaysOnThinkingModel(modelName) {
 			params.Thinking.OfAdaptive = adaptive
 			return
