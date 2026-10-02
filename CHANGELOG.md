@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.66.0](https://github.com/caelis-labs/caelis/compare/v0.65.0...v0.66.0) (2026-10-02)
+
+
+### Features
+
+* **models:** add GPT-6.1 Sol and Claude Sonnet 5.5 ([#94](https://github.com/caelis-labs/caelis/issues/94)) ([51c0b19](https://github.com/caelis-labs/caelis/commit/51c0b19a9b139cffcf37a73443d91d2c290da804))
+
+
+### Performance Improvements
+
+* **application:** query indexed pending receipts in WaitCalls ([#93](https://github.com/caelis-labs/caelis/issues/93)) ([491138f](https://github.com/caelis-labs/caelis/commit/491138f8e1a10c29e0cbf656aeb7004b4b5492b4)), closes [#92](https://github.com/caelis-labs/caelis/issues/92)
+
 ## [0.65.0](https://github.com/caelis-labs/caelis/compare/v0.64.0...v0.65.0) (2026-09-28)
 
 
