@@ -251,7 +251,7 @@ func TestWindowsQualityUsesFocusedNativeGate(t *testing.T) {
 		"GOWORK: 'off'",
 		"GOFLAGS: -mod=readonly -p=2",
 		"run: make windows-check",
-		"uses: actions/setup-python@v6", "python-version: '3.13'",
+		"uses: actions/setup-python@v7", "python-version: '3.13'",
 	} {
 		if !strings.Contains(windows, want) {
 			t.Errorf("Windows quality check missing %q", want)
