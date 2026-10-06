@@ -40,6 +40,11 @@ type sessionRuntime struct {
 	useAdmissions uint64
 	usesIdle      chan struct{}
 	workIdle      chan struct{}
+	// One retry loop owns idle Task checks for this activation. New activity
+	// cancels its probe; the generation and pending flag fence a late callback.
+	idleReleaseCancel     context.CancelFunc
+	idleReleaseGeneration uint64
+	idleReleasePending    bool
 }
 
 // sessionRuntimeRegistry is the app-scoped owner of live Session execution
@@ -570,6 +575,7 @@ func (r *sessionRuntimeRegistry) acquireControlRuntime(
 // retainRuntimeLocked records one routed synchronous command. The caller holds
 // r.mu and owns the returned idempotent release function.
 func (r *sessionRuntimeRegistry) retainRuntimeLocked(runtime *sessionRuntime) func() {
+	r.cancelIdleReleaseLocked(runtime)
 	if runtime.inUse == 0 {
 		runtime.usesIdle = make(chan struct{})
 	}
@@ -615,6 +621,7 @@ func (r *sessionRuntimeRegistry) retainObservation(ref session.SessionRef) (func
 		r.mu.Unlock()
 		return nil, sessionRuntimeHostClosingError()
 	}
+	r.cancelIdleReleaseLocked(r.sessions[sessionID])
 	r.observers[sessionID]++
 	r.mu.Unlock()
 
@@ -651,6 +658,7 @@ func (r *sessionRuntimeRegistry) retainRuntimeWork(
 	if runtime.workRefs == 0 {
 		runtime.workIdle = make(chan struct{})
 	}
+	r.cancelIdleReleaseLocked(runtime)
 	runtime.workRefs++
 	r.mu.Unlock()
 
@@ -677,24 +685,79 @@ func (r *sessionRuntimeRegistry) scheduleIdleRelease(
 		return
 	}
 	r.mu.Lock()
-	eligible := !r.closed && r.sessions[runtime.sessionID] == runtime &&
-		!runtime.releasing && runtime.useAdmissions > 0 &&
-		runtime.inUse == 0 && runtime.workRefs == 0 &&
-		r.observers[runtime.sessionID] == 0
-	if !eligible {
+	if !r.runtimeMayReleaseLocked(runtime) {
 		r.mu.Unlock()
 		return
 	}
+	if runtime.idleReleaseCancel != nil {
+		runtime.idleReleasePending = true
+		r.mu.Unlock()
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	runtime.idleReleaseCancel = cancel
+	runtime.idleReleaseGeneration++
+	generation := runtime.idleReleaseGeneration
 	r.idleReleases.Add(1)
 	r.mu.Unlock()
 	go func() {
 		defer r.idleReleases.Done()
-		_ = r.releaseRuntimeIfIdle(context.Background(), runtime)
+		defer func() {
+			r.mu.Lock()
+			if runtime.idleReleaseGeneration != generation {
+				r.mu.Unlock()
+				return
+			}
+			runtime.idleReleaseCancel = nil
+			requested := runtime.idleReleasePending || ctx.Err() != nil
+			runtime.idleReleasePending = false
+			eligible := requested && r.runtimeMayReleaseLocked(runtime)
+			r.mu.Unlock()
+			cancel()
+			if eligible {
+				r.scheduleIdleRelease(runtime, ref)
+			}
+		}()
+		retryDelay := 100 * time.Millisecond
+		for {
+			err := r.releaseRuntimeIfIdleWithCloseContext(ctx, context.Background(), runtime)
+			if err == nil || ctx.Err() != nil || !r.runtimeMayRelease(runtime) {
+				return
+			}
+			timer := time.NewTimer(retryDelay)
+			select {
+			case <-timer.C:
+			case <-ctx.Done():
+				timer.Stop()
+				return
+			}
+			if retryDelay < 5*time.Second {
+				retryDelay *= 2
+				if retryDelay > 5*time.Second {
+					retryDelay = 5 * time.Second
+				}
+			}
+		}
 	}()
+}
+
+// cancelIdleReleaseLocked stops an unclaimed idle probe. The loop clears its
+// own slot, so a detach that races cancellation can request another check.
+func (r *sessionRuntimeRegistry) cancelIdleReleaseLocked(runtime *sessionRuntime) {
+	if runtime != nil && runtime.idleReleaseCancel != nil && !runtime.releasing {
+		runtime.idleReleaseCancel()
+	}
 }
 
 func (r *sessionRuntimeRegistry) releaseRuntimeIfIdle(
 	ctx context.Context,
+	runtime *sessionRuntime,
+) error {
+	return r.releaseRuntimeIfIdleWithCloseContext(ctx, ctx, runtime)
+}
+
+func (r *sessionRuntimeRegistry) releaseRuntimeIfIdleWithCloseContext(
+	ctx, closeCtx context.Context,
 	runtime *sessionRuntime,
 ) error {
 	if r == nil || runtime == nil {
@@ -702,6 +765,9 @@ func (r *sessionRuntimeRegistry) releaseRuntimeIfIdle(
 	}
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	if closeCtx == nil {
+		closeCtx = ctx
 	}
 	if !r.runtimeMayRelease(runtime) {
 		return nil
@@ -731,15 +797,15 @@ func (r *sessionRuntimeRegistry) releaseRuntimeIfIdle(
 	}
 
 	r.mu.Lock()
-	if !r.runtimeMayReleaseLocked(runtime) {
+	if ctx.Err() != nil || !r.runtimeMayReleaseLocked(runtime) {
 		r.mu.Unlock()
-		return nil
+		return ctx.Err()
 	}
 	runtime.releasing = true
 	runtime.releaseDone = make(chan struct{})
 	done := runtime.releaseDone
 	r.mu.Unlock()
-	return r.completeRuntimeRelease(ctx, runtime, done, false)
+	return r.completeRuntimeRelease(closeCtx, runtime, done, false)
 }
 
 func (r *sessionRuntimeRegistry) runtimeMayRelease(runtime *sessionRuntime) bool {
@@ -814,6 +880,7 @@ func (r *sessionRuntimeRegistry) release(ctx context.Context, sessionID string) 
 			return ctx.Err()
 		}
 	}
+	r.cancelIdleReleaseLocked(runtime)
 	runtime.releasing = true
 	runtime.releaseDone = make(chan struct{})
 	done := runtime.releaseDone
@@ -946,6 +1013,9 @@ func (r *sessionRuntimeRegistry) closeAdmission(ctx context.Context) ([]*session
 	}
 	r.mu.Lock()
 	r.closed = true
+	for _, runtime := range r.sessions {
+		r.cancelIdleReleaseLocked(runtime)
+	}
 	buildsIdle := r.buildsIdle
 	r.mu.Unlock()
 	select {

@@ -2412,6 +2412,366 @@ func TestSessionRuntimeIdleReleaseRetriesTransientTaskReadFailure(t *testing.T) 
 	}
 }
 
+func TestSessionRuntimeIdleReleaseRetriesAfterTaskReaderRecovers(t *testing.T) {
+	ctx := context.Background()
+	workspace := newWorkspaceRuntimeTestDir(t, "task-read-recovery", "Task read recovery rule.")
+	stack, err := NewLocalStack(Config{
+		StoreDir: t.TempDir(), WorkspaceKey: "task-read-recovery", WorkspaceCWD: workspace,
+		SkillDirs: []string{}, Sandbox: SandboxConfig{RequestedType: "host"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = stack.Close() })
+	client, err := appserver.BindSessionClient(stack.ControlClient(), appserver.Principal{ID: "local-user"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionID := createWorkspaceRuntimeTestSession(
+		t, client, "create-task-read-recovery", "task-read-recovery", "task-read-recovery", workspace,
+	)
+	observed, err := client.Reconnect(ctx, appserver.ReconnectRequest{SessionID: sessionID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := activateSessionRuntime(t, stack, sessionID)
+	var resourceCloses atomic.Int32
+	runtime.instance.mu.Lock()
+	originalClose := runtime.instance.pluginCacheRelease
+	runtime.instance.pluginCacheRelease = func() error {
+		resourceCloses.Add(1)
+		if originalClose != nil {
+			return originalClose()
+		}
+		return nil
+	}
+	runtime.instance.mu.Unlock()
+	releaseUse, err := stack.sessionRuntimes.acquireRuntimeUse(runtime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	releaseUse()
+	reader := &controlledListTaskStore{Store: stack.composition.authorities.taskStore}
+	reader.failing.Store(true)
+	stack.sessionRuntimes.tasks = reader
+	if err := observed.Subscription.Close(); err != nil {
+		t.Fatal(err)
+	}
+	waitForTaskReadCalls(t, reader, 3)
+	if current, loaded := stack.sessionRuntimes.loaded(sessionID); !loaded || current != runtime {
+		t.Fatal("failed Task reads released a Runtime with unknown durable work")
+	}
+	reader.failing.Store(false)
+	waitForSessionRuntimeUnloaded(t, stack.sessionRuntimes, sessionID)
+	if got := reader.calls.Load(); got < 4 {
+		t.Fatalf("Task reads = %d, want a later recovery check", got)
+	}
+	if got := resourceCloses.Load(); got != 1 {
+		t.Fatalf("workspace resource closes = %d, want exactly one", got)
+	}
+}
+
+func TestSessionRuntimeIdleReleaseRetryRespectsNewActivity(t *testing.T) {
+	workspace := newWorkspaceRuntimeTestDir(t, "task-read-activity", "Task read activity rule.")
+	stack, err := NewLocalStack(Config{
+		StoreDir: t.TempDir(), WorkspaceKey: "task-read-activity", WorkspaceCWD: workspace,
+		SkillDirs: []string{}, Sandbox: SandboxConfig{RequestedType: "host"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = stack.Close() })
+	active, err := stack.composition.sessions.StartSession(context.Background(), session.StartSessionRequest{
+		AppName: stack.composition.authorities.appName, UserID: stack.composition.authorities.userID,
+		Workspace:          session.WorkspaceRef{Key: "task-read-activity", CWD: workspace},
+		PreferredSessionID: "task-read-activity-session",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := activateSessionRuntime(t, stack, active.SessionID)
+	reader := &controlledListTaskStore{Store: stack.composition.authorities.taskStore}
+	reader.failing.Store(true)
+	stack.sessionRuntimes.tasks = reader
+	releaseUse, err := stack.sessionRuntimes.acquireRuntimeUse(runtime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	releaseUse()
+	waitForTaskReadCalls(t, reader, 3)
+	releaseObservation, err := stack.sessionRuntimes.retainObservation(session.SessionRef{SessionID: active.SessionID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer releaseObservation()
+	releaseUse, err = stack.sessionRuntimes.acquireRuntimeUse(runtime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer releaseUse()
+	reader.failing.Store(false)
+	// The canceled retry timer must not quiesce a newly observed or used Runtime.
+	time.Sleep(175 * time.Millisecond)
+	if current, loaded := stack.sessionRuntimes.loaded(active.SessionID); !loaded || current != runtime {
+		t.Fatal("Task-reader recovery released a Runtime with new activity")
+	}
+	releaseObservation()
+	if _, loaded := stack.sessionRuntimes.loaded(active.SessionID); !loaded {
+		t.Fatal("observer detach released a Runtime with an active command")
+	}
+	releaseUse()
+	waitForSessionRuntimeUnloaded(t, stack.sessionRuntimes, active.SessionID)
+}
+
+func TestSessionRuntimeIdleReleaseRetryKeepsDurableTask(t *testing.T) {
+	ctx := context.Background()
+	workspace := newWorkspaceRuntimeTestDir(t, "task-read-running", "Task read running rule.")
+	stack, err := NewLocalStack(Config{
+		StoreDir: t.TempDir(), WorkspaceKey: "task-read-running", WorkspaceCWD: workspace,
+		SkillDirs: []string{}, Sandbox: SandboxConfig{RequestedType: "host"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = stack.Close() })
+	active, err := stack.composition.sessions.StartSession(ctx, session.StartSessionRequest{
+		AppName: stack.composition.authorities.appName, UserID: stack.composition.authorities.userID,
+		Workspace:          session.WorkspaceRef{Key: "task-read-running", CWD: workspace},
+		PreferredSessionID: "task-read-running-session",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := activateSessionRuntime(t, stack, active.SessionID)
+	entry := &taskapi.Entry{
+		TaskID: "running-during-task-read-recovery", Kind: taskapi.KindSubagent,
+		Session: session.SessionRef{SessionID: active.SessionID}, State: taskapi.StateRunning, Running: true,
+	}
+	if err := stack.composition.authorities.taskStore.Upsert(ctx, entry); err != nil {
+		t.Fatal(err)
+	}
+	reader := &controlledListTaskStore{Store: stack.composition.authorities.taskStore}
+	reader.failing.Store(true)
+	stack.sessionRuntimes.tasks = reader
+	releaseUse, err := stack.sessionRuntimes.acquireRuntimeUse(runtime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	releaseUse()
+	waitForTaskReadCalls(t, reader, 3)
+	reader.failing.Store(false)
+	waitForTaskReadCalls(t, reader, 4)
+	if current, loaded := stack.sessionRuntimes.loaded(active.SessionID); !loaded || current != runtime {
+		t.Fatal("recovered Task reader released a Runtime with a durable running Task")
+	}
+	entry.State = taskapi.StateCompleted
+	entry.Running = false
+	if err := stack.composition.authorities.taskStore.Upsert(ctx, entry); err != nil {
+		t.Fatal(err)
+	}
+	runtime.instance.runtimeTaskChanged(session.SessionRef{SessionID: active.SessionID})
+	waitForSessionRuntimeUnloaded(t, stack.sessionRuntimes, active.SessionID)
+}
+
+func TestSessionRuntimeIdleReleaseSeesTaskTerminalDuringRead(t *testing.T) {
+	ctx := context.Background()
+	workspace := newWorkspaceRuntimeTestDir(t, "task-terminal-race", "Task terminal race rule.")
+	stack, err := NewLocalStack(Config{
+		StoreDir: t.TempDir(), WorkspaceKey: "task-terminal-race", WorkspaceCWD: workspace,
+		SkillDirs: []string{}, Sandbox: SandboxConfig{RequestedType: "host"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = stack.Close() })
+	active, err := stack.composition.sessions.StartSession(ctx, session.StartSessionRequest{
+		AppName: stack.composition.authorities.appName, UserID: stack.composition.authorities.userID,
+		Workspace:          session.WorkspaceRef{Key: "task-terminal-race", CWD: workspace},
+		PreferredSessionID: "task-terminal-race-session",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := activateSessionRuntime(t, stack, active.SessionID)
+	entry := &taskapi.Entry{
+		TaskID: "task-terminal-during-read", Kind: taskapi.KindSubagent,
+		Session: session.SessionRef{SessionID: active.SessionID}, State: taskapi.StateRunning, Running: true,
+	}
+	if err := stack.composition.authorities.taskStore.Upsert(ctx, entry); err != nil {
+		t.Fatal(err)
+	}
+	reader := &staleRunningTaskReader{
+		Store:    stack.composition.authorities.taskStore,
+		captured: make(chan struct{}), resume: make(chan struct{}),
+	}
+	stack.sessionRuntimes.tasks = reader
+	releaseUse, err := stack.sessionRuntimes.acquireRuntimeUse(runtime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	releaseUse()
+	select {
+	case <-reader.captured:
+	case <-time.After(2 * time.Second):
+		t.Fatal("idle check did not capture the running Task")
+	}
+	entry.State = taskapi.StateCompleted
+	entry.Running = false
+	if err := stack.composition.authorities.taskStore.Upsert(ctx, entry); err != nil {
+		t.Fatal(err)
+	}
+	runtime.instance.runtimeTaskChanged(session.SessionRef{SessionID: active.SessionID})
+	close(reader.resume)
+	waitForSessionRuntimeUnloaded(t, stack.sessionRuntimes, active.SessionID)
+}
+
+func TestSessionRuntimeIdleReleaseRetryStopsOnQuiesce(t *testing.T) {
+	workspace := newWorkspaceRuntimeTestDir(t, "task-read-quiesce", "Task read quiesce rule.")
+	stack, err := NewLocalStack(Config{
+		StoreDir: t.TempDir(), WorkspaceKey: "task-read-quiesce", WorkspaceCWD: workspace,
+		SkillDirs: []string{}, Sandbox: SandboxConfig{RequestedType: "host"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = stack.Close() })
+	active, err := stack.composition.sessions.StartSession(context.Background(), session.StartSessionRequest{
+		AppName: stack.composition.authorities.appName, UserID: stack.composition.authorities.userID,
+		Workspace:          session.WorkspaceRef{Key: "task-read-quiesce", CWD: workspace},
+		PreferredSessionID: "task-read-quiesce-session",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := activateSessionRuntime(t, stack, active.SessionID)
+	reader := &controlledListTaskStore{Store: stack.composition.authorities.taskStore}
+	reader.failing.Store(true)
+	stack.sessionRuntimes.tasks = reader
+	releaseUse, err := stack.sessionRuntimes.acquireRuntimeUse(runtime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	releaseUse()
+	waitForTaskReadCalls(t, reader, 3)
+	closeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if _, err := stack.sessionRuntimes.closeAdmission(closeCtx); err != nil {
+		t.Fatalf("closeAdmission() while retrying = %v", err)
+	}
+	stack.sessionRuntimes.mu.RLock()
+	retryActive := runtime.idleReleaseCancel != nil
+	stack.sessionRuntimes.mu.RUnlock()
+	if retryActive {
+		t.Fatal("idle Task retry remained scheduled after Host admission closed")
+	}
+}
+
+func TestSessionRuntimeIdleReleaseRetryFencesNewActivation(t *testing.T) {
+	ctx := context.Background()
+	workspace := newWorkspaceRuntimeTestDir(t, "task-read-generation", "Task read generation rule.")
+	stack, err := NewLocalStack(Config{
+		StoreDir: t.TempDir(), WorkspaceKey: "task-read-generation", WorkspaceCWD: workspace,
+		SkillDirs: []string{}, Sandbox: SandboxConfig{RequestedType: "host"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = stack.Close() })
+	active, err := stack.composition.sessions.StartSession(ctx, session.StartSessionRequest{
+		AppName: stack.composition.authorities.appName, UserID: stack.composition.authorities.userID,
+		Workspace:          session.WorkspaceRef{Key: "task-read-generation", CWD: workspace},
+		PreferredSessionID: "task-read-generation-session",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldRuntime := activateSessionRuntime(t, stack, active.SessionID)
+	reader := &controlledListTaskStore{Store: stack.composition.authorities.taskStore}
+	reader.failing.Store(true)
+	stack.sessionRuntimes.tasks = reader
+	releaseUse, err := stack.sessionRuntimes.acquireRuntimeUse(oldRuntime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	releaseUse()
+	waitForTaskReadCalls(t, reader, 3)
+	if err := stack.sessionRuntimes.release(ctx, active.SessionID); err != nil {
+		t.Fatal(err)
+	}
+	reader.failing.Store(false)
+	newRuntime := activateSessionRuntime(t, stack, active.SessionID)
+	if newRuntime == oldRuntime {
+		t.Fatal("new activation reused the released Runtime generation")
+	}
+	releaseObservation, err := stack.sessionRuntimes.retainObservation(session.SessionRef{SessionID: active.SessionID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer releaseObservation()
+	releaseUse, err = stack.sessionRuntimes.acquireRuntimeUse(newRuntime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	releaseUse()
+	time.Sleep(175 * time.Millisecond)
+	if current, loaded := stack.sessionRuntimes.loaded(active.SessionID); !loaded || current != newRuntime {
+		t.Fatal("old idle retry released a new Runtime activation")
+	}
+	releaseObservation()
+	waitForSessionRuntimeUnloaded(t, stack.sessionRuntimes, active.SessionID)
+}
+
+type controlledListTaskStore struct {
+	taskapi.Store
+	failing atomic.Bool
+	calls   atomic.Int32
+}
+
+func (s *controlledListTaskStore) ListSession(ctx context.Context, ref session.SessionRef) ([]*taskapi.Entry, error) {
+	s.calls.Add(1)
+	if s.failing.Load() {
+		return nil, errors.New("controlled Task index read failure")
+	}
+	return s.Store.ListSession(ctx, ref)
+}
+
+func waitForTaskReadCalls(t *testing.T, reader *controlledListTaskStore, want int32) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for reader.calls.Load() < want {
+		if time.Now().After(deadline) {
+			t.Fatalf("Task reads = %d, want at least %d", reader.calls.Load(), want)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+type staleRunningTaskReader struct {
+	taskapi.Store
+	captured chan struct{}
+	resume   chan struct{}
+	blocked  atomic.Bool
+}
+
+func (s *staleRunningTaskReader) ListSession(ctx context.Context, ref session.SessionRef) ([]*taskapi.Entry, error) {
+	entries, err := s.Store.ListSession(ctx, ref)
+	if err != nil {
+		return nil, err
+	}
+	for _, entry := range entries {
+		if entry != nil && entry.Running && s.blocked.CompareAndSwap(false, true) {
+			close(s.captured)
+			select {
+			case <-s.resume:
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+			break
+		}
+	}
+	return entries, nil
+}
+
 type transientListTaskStore struct {
 	taskapi.Store
 	mu           sync.Mutex
