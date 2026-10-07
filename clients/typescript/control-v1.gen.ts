@@ -402,10 +402,13 @@ export interface ApplicationConfiguration {
 
 export interface ApplicationConfigurationPatch {
   instructions?: string;
+  mcp_servers?: Array<ApplicationMCPServer>;
   model?: string;
   native_tools?: Array<string>;
   reasoning_effort?: string;
   service_tier?: string;
+  skill_dirs?: Array<string>;
+  skill_roots?: Array<string>;
   tools?: Array<ApplicationToolDefinition>;
   tools_version?: string;
 }
@@ -512,12 +515,15 @@ export interface ApplicationProfile {
   execution_config?: ExecutionConfig | null;
   inherit: ApplicationInheritance;
   instructions: string;
+  mcp_servers?: Array<ApplicationMCPServer>;
   model: string;
   native_tools?: Array<string>;
   permissions?: ApplicationPermissions;
   reasoning_effort?: string;
   reviewer?: ApplicationReviewer;
   service_tier?: string;
+  skill_dirs?: Array<string>;
+  skill_roots?: Array<string>;
   tools?: Array<ApplicationToolDefinition>;
   tools_version: string;
   version: string;

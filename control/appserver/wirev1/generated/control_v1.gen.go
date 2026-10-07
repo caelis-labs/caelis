@@ -432,11 +432,14 @@ type ApplicationConfiguration struct {
 
 type ApplicationConfigurationPatch struct {
 	Instructions    *string                     `json:"instructions,omitempty"`
+	McpServers      []ApplicationMCPServer      `json:"mcp_servers,omitzero"`
 	Model           *string                     `json:"model,omitempty"`
-	NativeTools     []string                    `json:"native_tools,omitempty"`
+	NativeTools     []string                    `json:"native_tools,omitzero"`
 	ReasoningEffort *string                     `json:"reasoning_effort,omitempty"`
 	ServiceTier     *string                     `json:"service_tier,omitempty"`
-	Tools           []ApplicationToolDefinition `json:"tools,omitempty"`
+	SkillDirs       []string                    `json:"skill_dirs,omitzero"`
+	SkillRoots      []string                    `json:"skill_roots,omitzero"`
+	Tools           []ApplicationToolDefinition `json:"tools,omitzero"`
 	ToolsVersion    *string                     `json:"tools_version,omitempty"`
 }
 
@@ -542,12 +545,15 @@ type ApplicationProfile struct {
 	ExecutionConfig *ExecutionConfig            `json:"execution_config,omitempty"`
 	Inherit         ApplicationInheritance      `json:"inherit"`
 	Instructions    string                      `json:"instructions"`
+	McpServers      []ApplicationMCPServer      `json:"mcp_servers,omitempty"`
 	Model           string                      `json:"model"`
-	NativeTools     []string                    `json:"native_tools,omitempty"`
+	NativeTools     []string                    `json:"native_tools,omitzero"`
 	Permissions     *ApplicationPermissions     `json:"permissions,omitempty"`
 	ReasoningEffort *string                     `json:"reasoning_effort,omitempty"`
 	Reviewer        *ApplicationReviewer        `json:"reviewer,omitempty"`
 	ServiceTier     *string                     `json:"service_tier,omitempty"`
+	SkillDirs       []string                    `json:"skill_dirs,omitempty"`
+	SkillRoots      []string                    `json:"skill_roots,omitempty"`
 	Tools           []ApplicationToolDefinition `json:"tools,omitempty"`
 	ToolsVersion    string                      `json:"tools_version"`
 	Version         string                      `json:"version"`

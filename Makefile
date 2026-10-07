@@ -90,6 +90,7 @@ client-protocol-generate: cache-dirs
 
 client-protocol-check: cache-dirs
 	go run ./scripts/client_protocol_generate -check
+	go test ./control/appserver/wirev1 -run '^TestApplicationRequestAndResponseJSONConformsToOpenAPI$$' -count=1
 
 quality: lint test build
 

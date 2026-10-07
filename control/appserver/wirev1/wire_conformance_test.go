@@ -479,6 +479,8 @@ func TestApplicationRequestAndResponseJSONConformsToOpenAPI(t *testing.T) {
 	profile := application.Profile{
 		Version: "example-role/1", Instructions: "Use the callback.", Model: "configured-model",
 		ToolsVersion: "example-tools/1", Execution: "tools-only",
+		MCPServers: []application.MCPServer{{Name: "documents", Transport: "stdio", Command: "synthetic-mcp", WorkDir: "/tmp"}},
+		SkillDirs:  []string{"/tmp/selected-skills"}, SkillRoots: []string{"/tmp/selected-skill"},
 		Tools: []application.ToolDefinition{{Name: "ExampleLookup", Description: "Look up a key.", InputSchema: map[string]any{
 			"type": "object", "properties": map[string]any{"key": map[string]any{"type": "string"}},
 		}}},
@@ -491,6 +493,9 @@ func TestApplicationRequestAndResponseJSONConformsToOpenAPI(t *testing.T) {
 	model := "configured-model"
 	nativeTools := []string{"Read", "Bash"}
 	emptyTools := []application.ToolDefinition{}
+	services := []application.MCPServer{{Name: "documents", Transport: "stdio", Command: "synthetic-mcp", WorkDir: "/tmp"}}
+	dirs := []string{"/tmp/selected-skills"}
+	roots := []string{"/tmp/selected-skill"}
 	for name, value := range map[string]any{
 		"ApplicationRegistration":         application.Registration{OperationID: "register-1", Name: "Example", Credential: "app-client-" + strings.Repeat("a", 64)},
 		"ApplicationConnection":           application.Connection{Scope: scope, Name: "Example", ExpiresAt: time.Unix(100, 0).UTC()},
@@ -505,9 +510,14 @@ func TestApplicationRequestAndResponseJSONConformsToOpenAPI(t *testing.T) {
 			SessionID: "session-1", Revision: 7, Profile: profile,
 			LastRequest: &application.RequestConfiguration{Revision: 7, RequestID: "operation-1", TurnID: "turn-1"},
 		},
+		"ApplicationMCPStatus": application.MCPStatus{
+			SessionID: "session-1", ConfigurationRevision: "7",
+			Servers: []application.MCPServerStatus{{Name: "documents", Status: "running", Tools: []string{"documents__lookup"}}},
+			Skills:  []application.SkillStatus{{Path: "/tmp/selected-skills", Kind: "directory", Status: "ready"}, {Path: "/tmp/selected-skill", Kind: "skill", Name: "selected-skill", Status: "failed", Warning: "synthetic metadata failure"}},
+		},
 		"UpdateApplicationConfigurationRequest": application.UpdateConfigurationRequest{
 			OperationID: "update-1", ExpectedConfigurationRevision: 7,
-			Patch: application.ConfigurationPatch{Model: &model, NativeTools: &nativeTools, Tools: &emptyTools},
+			Patch: application.ConfigurationPatch{Model: &model, NativeTools: &nativeTools, Tools: &emptyTools, MCPServers: &services, SkillDirs: &dirs, SkillRoots: &roots},
 		},
 		"ApplicationBackgroundGrant":        grant,
 		"ApplicationBackgroundGrantList":    []application.BackgroundGrant{grant},
