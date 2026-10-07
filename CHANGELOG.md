@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.67.0](https://github.com/caelis-labs/caelis/compare/v0.66.0...v0.67.0) (2026-10-07)
+
+
+### Features
+
+* **application:** assemble explicit MCP and Skills per revision ([f9698de](https://github.com/caelis-labs/caelis/commit/f9698de1f8f5d3fafe4277b85921e9025098a850))
+
+
+### Bug Fixes
+
+* **gatewayapp:** retry idle Runtime retirement after Task read errors ([#99](https://github.com/caelis-labs/caelis/issues/99)) ([454f0e8](https://github.com/caelis-labs/caelis/commit/454f0e89aa61e0302c08f217ecf616d0c4682e1d))
+
 ## [0.66.0](https://github.com/caelis-labs/caelis/compare/v0.65.0...v0.66.0) (2026-10-02)
 
 
