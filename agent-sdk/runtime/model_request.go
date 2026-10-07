@@ -30,6 +30,9 @@ func (r *Runtime) wrapModelRequestResolver(ctx context.Context, active session.S
 		bound.DeferredTools = snapshot.DeferredTools
 		bound.ResolveModelRequest = nil
 		if err := r.prepareAgentSpec(ctx, active, ref, state, &bound, req, runID, turnID, sequence); err != nil {
+			if snapshot.Release != nil {
+				snapshot.Release()
+			}
 			return agent.ModelRequestSnapshot{}, err
 		}
 		snapshot.Model, snapshot.Tools, snapshot.DeferredTools = bound.Model, bound.Tools, bound.DeferredTools

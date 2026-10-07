@@ -9,6 +9,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
+	"github.com/caelis-labs/caelis/control/application"
 	"github.com/caelis-labs/caelis/control/memorybinding"
 	acpassembly "github.com/caelis-labs/caelis/internal/acpagentbridge/assembly"
 	"github.com/caelis-labs/caelis/internal/controlplane"
@@ -61,6 +62,9 @@ type runtimeComposition struct {
 	closing            atomic.Bool
 	gateway            *kernelimpl.Gateway
 	mcpMgr             *mcp.Manager
+	capabilityClose    func()
+	capabilityStatus   func(uint64) application.MCPStatus
+	capabilityUpdated  func(application.Configuration)
 	pluginCacheRelease func() error
 	retainRuntimeWork  func(session.SessionRef) func()
 	runtimeTaskChanged func(session.SessionRef)

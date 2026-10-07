@@ -11,4 +11,5 @@ const (
 	CapabilityResourceTransfer     = "application-resource-transfer-v1"
 	CapabilityToolResultContent    = "application-tool-result-content-v1"
 	CapabilityMediaResources       = "application-media-resources-v1"
+	CapabilityAtomicCapabilities   = "application-atomic-capabilities-v1"
 )

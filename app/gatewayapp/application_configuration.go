@@ -55,6 +55,9 @@ func (s *runtimeComposition) validateApplicationProfile(ctx context.Context, pro
 	if err := application.ValidateProfile(profile); err != nil {
 		return err
 	}
+	if _, err := applicationSkillCatalog(profile); err != nil {
+		return errorcode.Wrap(errorcode.InvalidArgument, "application Skill selection is invalid", err)
+	}
 	configured, err := applicationModelConfig(s.lookup, profile)
 	if err != nil {
 		return err

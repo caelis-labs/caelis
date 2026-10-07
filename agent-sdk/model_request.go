@@ -33,6 +33,9 @@ type ModelRequestSnapshot struct {
 	// A successful admission pins this snapshot through response tool execution;
 	// the hook must not retain its update lock for the provider stream lifetime.
 	Admit func(context.Context, ModelRequestAdmission) error
+	// Release relinquishes resources held by this snapshot after its provider
+	// response and all resulting tool calls finish. The resolver owns this hook.
+	Release func()
 }
 
 // ModelRequestAdmission identifies one attempt at the provider dispatch boundary.
@@ -57,7 +60,7 @@ func (modelRequestSnapshotStaleError) Error() string {
 func (modelRequestSnapshotStaleError) Retryable() bool { return false }
 
 // CloneModelRequestSnapshot detaches the snapshot's containers. Models, tool
-// callables, deferred sources and admission hooks retain their identity.
+// callables, deferred sources and lifecycle hooks retain their identity.
 func CloneModelRequestSnapshot(in ModelRequestSnapshot) ModelRequestSnapshot {
 	out := in
 	out.Tools = append([]tool.Tool(nil), in.Tools...)

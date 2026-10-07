@@ -7,6 +7,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
@@ -89,6 +90,11 @@ func (a *workspaceConfigAssembler) assembleApplicationSnapshot(ctx context.Conte
 			return lookup, err
 		},
 	}
+	defer func() {
+		if !bundleCreated {
+			resolver.closeCapabilities()
+		}
+	}()
 	configuration, err := store.Configuration(ctx, binding.Scope, binding.SessionID)
 	if err != nil {
 		return nil, err
@@ -106,7 +112,12 @@ func (a *workspaceConfigAssembler) assembleApplicationSnapshot(ctx context.Conte
 	compaction := defaultCompactionConfig(contextWindow)
 	// The complete tool set is independent of Turn source. An unavailable
 	// callback provenance is rejected during resolution, never silently widened.
-	estimateTools, err := resolver.tools(ctx, configuration, application.Source{Kind: "user", OperationID: "estimate"})
+	estimateCapabilities, releaseEstimate, err := resolver.acquireCapabilities(ctx, configuration)
+	if err != nil {
+		return nil, err
+	}
+	estimateTools, err := resolver.tools(ctx, configuration, application.Source{Kind: "user", OperationID: "estimate"}, estimateCapabilities)
+	releaseEstimate()
 	if err != nil {
 		return nil, err
 	}
@@ -131,6 +142,9 @@ func (a *workspaceConfigAssembler) assembleApplicationSnapshot(ctx context.Conte
 		return nil, err
 	}
 	bundle := &gatewayRuntimeBundle{Engine: rt, RuntimeConfig: instance.activeRuntime, EstimatedPromptPrefixTokens: compaction.EstimatedPromptPrefixTokens}
+	bundle.CloseCapabilities = resolver.closeCapabilities
+	bundle.CapabilityStatus = resolver.capabilityStatus
+	bundle.CapabilityUpdated = resolver.configurationCommitted
 	if execRuntime != nil {
 		bundle.Exec = execRuntime
 	}
@@ -206,10 +220,15 @@ type applicationTurnResolver struct {
 	execution   *applicationExecutionRuntime
 	// Each request pins the current Host provider catalog, not the catalog
 	// detached when this Session's native executor was activated.
-	modelLookup func(context.Context) (*modelLookup, error)
+	modelLookup        func(context.Context) (*modelLookup, error)
+	capabilitiesMu     sync.Mutex
+	capabilities       map[uint64]*applicationCapabilities
+	currentMCP         *applicationMCPResource
+	desiredRevision    uint64
+	capabilitiesClosed bool
 }
 
-func (r *applicationTurnResolver) tools(ctx context.Context, configuration application.Configuration, source application.Source) ([]tool.Tool, error) {
+func (r *applicationTurnResolver) tools(ctx context.Context, configuration application.Configuration, source application.Source, capabilities *applicationCapabilities) ([]tool.Tool, error) {
 	tools, err := r.composition.authorities.applications.ToolsForConfiguration(ctx, r.binding, configuration, source)
 	if err != nil {
 		return nil, err
@@ -220,6 +239,12 @@ func (r *applicationTurnResolver) tools(ctx context.Context, configuration appli
 			return nil, err
 		}
 		tools = append(tools, native...)
+	}
+	if len(capabilities.catalog.Metas()) > 0 {
+		tools = append(tools, applicationLeasedTool{Tool: capabilities.skillTool, store: r.composition.authorities.applications, scope: r.binding.Scope})
+	}
+	if capabilities.source != nil {
+		tools = append(tools, applicationLeasedTool{Tool: capabilities.searchTool, store: r.composition.authorities.applications, scope: r.binding.Scope})
 	}
 	return tools, nil
 }
@@ -235,6 +260,9 @@ func (r *applicationTurnResolver) ResolveTurn(ctx context.Context, intent kernel
 	snapshot, err := r.resolveModelRequest(ctx, source)
 	if err != nil {
 		return kernel.ResolvedTurn{}, err
+	}
+	if snapshot.Release != nil {
+		defer snapshot.Release()
 	}
 	metadata := map[string]any{}
 	if r.execution != nil {
@@ -266,7 +294,17 @@ func (r *applicationTurnResolver) resolveModelRequest(ctx context.Context, sourc
 	if err != nil {
 		return agent.ModelRequestSnapshot{}, err
 	}
-	tools, err := r.tools(ctx, configuration, source)
+	capabilities, release, err := r.acquireCapabilities(ctx, configuration)
+	if err != nil {
+		return agent.ModelRequestSnapshot{}, err
+	}
+	keep := false
+	defer func() {
+		if !keep {
+			release()
+		}
+	}()
+	tools, err := r.tools(ctx, configuration, source, capabilities)
 	if err != nil {
 		return agent.ModelRequestSnapshot{}, err
 	}
@@ -274,10 +312,15 @@ func (r *applicationTurnResolver) resolveModelRequest(ctx context.Context, sourc
 	if configuration.Profile.Instructions != "" {
 		instructions = []model.Part{model.NewTextPart(configuration.Profile.Instructions)}
 	}
+	if metadata := applicationSkillMetadata(capabilities.catalog); metadata != "" {
+		instructions = append(instructions, model.NewTextPart(metadata))
+	}
+	keep = true
 	return agent.ModelRequestSnapshot{
-		Revision: strconv.FormatUint(configuration.Revision, 10), Model: resolved.Model, Tools: tools,
+		Revision: strconv.FormatUint(configuration.Revision, 10), Model: resolved.Model, Tools: tools, DeferredTools: capabilities.source,
 		Instructions: instructions, Reasoning: model.ReasoningConfig{Effort: resolved.ReasoningEffort},
 		Request: agent.ModelRequestOptions{ServiceTier: model.ServiceTier(configuration.Profile.ServiceTier)},
+		Release: release,
 		Admit: func(ctx context.Context, request agent.ModelRequestAdmission) error {
 			err := store.AdmitRequest(ctx, r.binding.Scope, r.binding.SessionID, application.RequestConfiguration{
 				Revision: configuration.Revision, RequestID: request.RequestID, TurnID: request.TurnID,
@@ -307,6 +350,9 @@ func applicationPolicyRegistry(profile application.Profile) (policy.Registry, st
 		// policy; names and model arguments cannot opt into this path.
 		if decision, handled, err := application.CallbackPolicyDecision(input); handled || err != nil {
 			return decision, err
+		}
+		if tool.IsMCPDefinition(input.Tool) || tool.IsToolSearchDefinition(input.Tool) || input.Tool.Name == "Skill" {
+			return policy.Decision{Action: policy.ActionAllow}, nil
 		}
 		if native != nil {
 			return native.DecideTool(ctx, input)

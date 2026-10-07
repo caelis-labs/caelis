@@ -38,6 +38,9 @@ type Profile struct {
 	ToolsVersion    string           `json:"tools_version"`
 	Tools           []ToolDefinition `json:"tools,omitempty"`
 	NativeTools     []string         `json:"native_tools,omitempty"`
+	MCPServers      []MCPServer      `json:"mcp_servers,omitempty"`
+	SkillDirs       []string         `json:"skill_dirs,omitempty"`
+	SkillRoots      []string         `json:"skill_roots,omitempty"`
 	Execution       string           `json:"execution"` // tools-only or workspace-write
 	Inherit         Inheritance      `json:"inherit"`
 	Workspace       Workspace        `json:"workspace,omitempty"`
@@ -80,7 +83,7 @@ func (p Profile) MarshalJSON() ([]byte, error) {
 // the default native tool set rather than the explicit empty selection.
 func (p *Profile) UnmarshalJSON(data []byte) error {
 	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(data, &fields); err != nil || fields == nil || string(fields["native_tools"]) == "null" {
+	if err := json.Unmarshal(data, &fields); err != nil || fields == nil || string(fields["native_tools"]) == "null" || string(fields["mcp_servers"]) == "null" || string(fields["skill_dirs"]) == "null" || string(fields["skill_roots"]) == "null" {
 		return ErrInvalid
 	}
 	type alias Profile
@@ -124,6 +127,9 @@ type ConfigurationPatch struct {
 	ToolsVersion    *string           `json:"tools_version,omitempty"`
 	Tools           *[]ToolDefinition `json:"tools,omitempty"`
 	NativeTools     *[]string         `json:"native_tools,omitempty"`
+	MCPServers      *[]MCPServer      `json:"mcp_servers,omitempty"`
+	SkillDirs       *[]string         `json:"skill_dirs,omitempty"`
+	SkillRoots      *[]string         `json:"skill_roots,omitempty"`
 }
 
 // UnmarshalJSON rejects null fields rather than treating them as absence.
@@ -134,7 +140,7 @@ func (p *ConfigurationPatch) UnmarshalJSON(data []byte) error {
 	}
 	for key, value := range fields {
 		switch key {
-		case "instructions", "model", "reasoning_effort", "service_tier", "tools_version", "tools", "native_tools":
+		case "instructions", "model", "reasoning_effort", "service_tier", "tools_version", "tools", "native_tools", "mcp_servers", "skill_dirs", "skill_roots":
 		default:
 			return ErrInvalid
 		}
@@ -148,6 +154,33 @@ func (p *ConfigurationPatch) UnmarshalJSON(data []byte) error {
 		return ErrInvalid
 	}
 	*p = ConfigurationPatch(result)
+	return nil
+}
+
+// MCPServer is an already authorized application service. Credentials and
+// package installation remain with the application; Core stores only this
+// connection/launch declaration with the revisioned Session profile.
+type MCPServer struct {
+	Name      string   `json:"name"`
+	Transport string   `json:"transport"` // stdio, streamable_http, or sse
+	Command   string   `json:"command,omitempty"`
+	Args      []string `json:"args,omitempty"`
+	WorkDir   string   `json:"work_dir,omitempty"`
+	URL       string   `json:"url,omitempty"`
+}
+
+// UnmarshalJSON rejects undeclared launch and connection fields. In particular,
+// applications cannot pass credential headers or environment values through a
+// profile field that Core would persist without a private-secret contract.
+func (s *MCPServer) UnmarshalJSON(data []byte) error {
+	type alias MCPServer
+	var value alias
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&value); err != nil {
+		return err
+	}
+	*s = MCPServer(value)
 	return nil
 }
 

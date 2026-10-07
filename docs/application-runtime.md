@@ -8,7 +8,9 @@ not become native Workers merely because their caller calls them a task.
 Caelis applications own their product identity, notes, Memory, business tools and
 scheduling. Control owns canonical Sessions, Turns, tool history, native approvals,
 sandbox policy and recovery. The SDK has no application or Bot product dependency.
-Ordinary CLI/TUI, Workspace Memory, MCP and ACP remain separate capabilities.
+Ordinary CLI/TUI, Workspace Memory and ACP remain separate capabilities.
+Applications may explicitly assemble their own MCP services and Skills without
+inheriting ordinary workspace or Host configuration.
 
 ## Protocol and authentication
 
@@ -26,7 +28,9 @@ Feature capabilities refine the baseline: `application-hot-configuration-v1`,
 `application-native-execution-v1`, `application-workspace-binding-v1`,
 `application-background-activation-v1`, `application-resource-transfer-v1` and
 `application-model-capabilities-v1`, `application-tool-result-content-v1`,
-`application-media-resources-v1` and `application-guardian-review-v1`.
+`application-media-resources-v1`, `application-guardian-review-v1` and
+`application-atomic-capabilities-v1`. The last capability guards explicit
+MCP/Skill assembly and per-service status.
 Require the capability guarding the feature you need instead of probing with
 destructive trial calls.
 Store identity persists across Host replacement; instance identity does not.
@@ -60,6 +64,7 @@ The following paths are relative to `/api/control/v1`:
 | `GET /application/sessions/{session_id}/configuration` | Read the latest desired configuration and revision |
 | `POST /application/sessions/{session_id}/configuration` | Compare-and-swap update; returns the committed configuration |
 | `GET /application/sessions/{session_id}/model-capabilities` | Observe the current desired model and its declared image support |
+| `GET /application/sessions/{session_id}/mcp-status` | Observe desired-revision MCP and selected Skill health without activating execution |
 | `GET /application/sessions/{session_id}/reviewer-state` | Observe the creation-bound review route and local reviewer readiness |
 | `GET /application/configuration-operations/{operation_id}` | Exact committed configuration update result |
 | `GET /application/sessions/{session_id}/background-grants` | List this connection's background grants |
@@ -161,6 +166,46 @@ rejects any enabled inheritance flag. A resident working directory comes from
 authenticated application configuration (`workspace.cwd`); when omitted, Control
 allocates the execution directory. No model-selected root is accepted.
 
+With `application-atomic-capabilities-v1`, an application may supply
+`mcp_servers`, `skill_dirs` and/or `skill_roots` on creation or through a
+configuration patch. They are explicit capability selection, independent of
+`inherit`. `skill_dirs` contains absolute directories of named Skill roots;
+`skill_roots` names individual absolute directories containing `SKILL.md`.
+Omission or `[]` selects none. Core reads only these paths for an Application
+Session, never Skill directories from CWD, the user account, or ordinary Runtime
+configuration. Skill names and descriptions enter the model request; the SDK
+`Skill` tool loads the selected body only when called. The application owns
+package validation, installation, enable state, storage and OAuth. Core does not
+interpret plugin manifests, install packages or execute installation scripts.
+
+Each `mcp_servers` entry has a unique lowercase domain `name` (up to 32
+characters) and an explicit `transport`: `stdio`, `streamable_http`, or `sse`.
+Stdio requires `command` and absolute `work_dir`, with optional `args`; HTTP
+requires an `http` or `https` `url`. Core persists these declared values in the
+revisioned profile, so callers must supply already authorized launch or
+connection details without putting credentials in paths, arguments or URLs.
+The existing SDK MCP manager starts every service independently. Projected
+tool names use `<server>__<tool>`; `ToolSearch` discovers ready MCP tools.
+Application callbacks cannot use the `Skill` or `ToolSearch` name while the
+corresponding capability is selected, or a selected MCP service's tool
+namespace. Core rejects these collisions before commit. Callback claims and
+receipts keep their original ownership and approval policy; MCP calls are SDK
+tool calls, not callback dispatches.
+
+`GET .../mcp-status` returns `session_id`, decimal-string
+`configuration_revision`, `servers`, and `skills`. Each desired MCP service has
+`inactive`, `connecting`, `running`, or `failed` status, with ready tool names
+and bounded warnings where available. `skills` reports each explicit directory
+and its immediate candidate Skill roots, plus each explicit `skill_root`, by
+absolute `path`, `kind` (`directory` or `skill`), and `status` (`inactive`,
+`ready`, or `failed`). Healthy Skill records include `name`; failed records
+include a bounded `warning` and are excluded from the model-facing catalog.
+`ready` records metadata at assembly time; it does not promise that a later
+on-demand body read will succeed.
+Before assembly, each explicit selection is `inactive`; status reads do not
+scan files, start services, retry failures, or grant authority. A failed MCP
+service or Skill does not remove healthy abilities or basic model dialogue.
+
 A creation profile has two lifetimes:
 
 - **Creation-bound**: `version`, `execution`, `inherit`, `workspace`,
@@ -168,7 +213,7 @@ A creation profile has two lifetimes:
   carries them is rejected; changing them requires a new Session.
 - **Revisioned desired configuration**: `instructions`, `model`,
   `reasoning_effort`, `service_tier`, `tools_version`, `tools` and
-  `native_tools` are read from and updated through
+  `native_tools`, `mcp_servers`, `skill_dirs` and `skill_roots` are read from and updated through
   `GET/POST /application/sessions/{session_id}/configuration`.
 
 ### Workspace and permissions (creation-bound)
@@ -263,6 +308,8 @@ Send it with a matching `Idempotency-Key`. Patch semantics:
 | `tools_version` | preserve | nonempty catalog version |
 | `tools` | preserve | replaces the callback catalog; `[]` clears it |
 | `native_tools` | preserve (including the default set) | replaces the native selection; `[]` selects no native tools |
+| `mcp_servers` | preserve | replaces the independent service set; `[]` disables it |
+| `skill_dirs`, `skill_roots` | preserve | replace the explicit Skill paths; `[]` clears each selection |
 
 Explicit JSON `null` in a patch field is invalid, as are unknown fields —
 `workspace` and `permissions` are creation-bound and rejected here. Readback
@@ -270,10 +317,34 @@ distinguishes the two catalogs: profile reads omit `tools` when it is empty
 (absent and `[]` mean the same empty catalog), while a cleared `native_tools`
 selection is echoed as `[]` and omission means the default native set —
 `native_tools: null` is invalid at creation too, never a silent default. An
-unsupported effort or service-tier combination returns HTTP 400 with code
+explicit MCP/Skill change is one revision: request admission cannot combine
+services from one revision with Skill metadata from another. Validation of
+paths, names and tool namespaces happens before commit; a rejected update
+leaves the previous revision and its receipt state intact. If a previously
+accepted Skill path disappears or its metadata becomes invalid before that
+revision is assembled, only that directory or candidate Skill root reports
+`failed` in `mcp-status`; healthy roots remain in the catalog. The catalog and
+status are pinned together for the revision. If a body disappears after
+metadata assembly, its on-demand `Skill` call returns a tool error without
+stopping later model requests. Core does not watch these files or silently
+retry a failed item: restore it and commit an explicit new revision to detect
+it again. A no-op update leaves the cached catalog unchanged. New MCP service
+startup failures are also isolated and visible in `mcp-status`. An already
+admitted request retains its original revision and callable ownership. A
+configuration commit notifies an active Runtime to retire superseded MCP
+connections. It closes an old connection when the last request snapshot using
+it finishes its model response and resulting tool calls; no reconnect or
+activation shutdown is needed. Revisions with the same complete `mcp_servers`
+selection reuse the live manager, including instructions/model-only changes.
+Without a live request, disabling a service closes its manager on commit.
+An active Session rejects a simultaneous second Prompt with a definite
+conflict; the next admitted Prompt uses the new revision. Core never replays an
+accepted or unknown tool effect on reconfiguration or restart.
+An unsupported effort or service-tier combination returns HTTP 400 with code
 `unsupported`; the message identifies the model and rejected field/value. An
 unconfigured or ambiguous model selector returns HTTP 400 `invalid_argument`.
-Selections are never silently ignored or downgraded. These rejections do not
+Invalid submitted selections are never silently ignored or downgraded; after
+commit, damaged filesystem items are reported as failed. Rejections do not
 change desired configuration, revision or any issued request. Internal failures
 and provider unavailability retain their 5xx classification. A no-op or same-value update commits a durable
 operation receipt without creating a new revision; concurrent writers are
