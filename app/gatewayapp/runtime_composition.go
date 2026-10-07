@@ -63,7 +63,7 @@ type runtimeComposition struct {
 	gateway            *kernelimpl.Gateway
 	mcpMgr             *mcp.Manager
 	capabilityClose    func()
-	capabilityStatus   func(uint64) []application.MCPServerStatus
+	capabilityStatus   func(uint64) application.MCPStatus
 	capabilityUpdated  func(application.Configuration)
 	pluginCacheRelease func() error
 	retainRuntimeWork  func(session.SessionRef) func()

@@ -131,6 +131,10 @@ func (p *atomicCapabilityProvider) RoundTrip(req *http.Request) (*http.Response,
 	case latestTool == "ToolSearch" && strings.Contains(latestUser, "UTIL"):
 		name, args = "utilities__lookup", `{}`
 	case latestTool != "":
+	case strings.Contains(latestUser, "HEALTHY_SKILL"):
+		name, args = "Skill", `{"name":"healthy-skill"}`
+	case strings.Contains(latestUser, "BODY_SKILL"):
+		name, args = "Skill", `{"name":"body-skill"}`
 	case strings.Contains(latestUser, "SKILL"):
 		name, args = "Skill", `{"name":"atomic-skill"}`
 	case strings.Contains(latestUser, "CALLFAIL"):
@@ -254,6 +258,210 @@ func atomicAssertLiveService(t *testing.T, path, service string, want int) {
 	}
 	if live != want {
 		t.Fatalf("%s live audited processes = %d, want %d; audit: %s", service, live, want, audit)
+	}
+}
+
+func writeAtomicSkill(t *testing.T, root, name, body string) {
+	t.Helper()
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	content := fmt.Sprintf("---\nname: %s\ndescription: Synthetic %s instructions.\n---\n%s\n", name, name, body)
+	if err := os.WriteFile(filepath.Join(root, "SKILL.md"), []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func atomicSkillStatusesByPath(status application.MCPStatus) map[string]application.SkillStatus {
+	byPath := make(map[string]application.SkillStatus, len(status.Skills))
+	for _, item := range status.Skills {
+		byPath[item.Path] = item
+	}
+	return byPath
+}
+
+func TestApplicationAtomicSkillFailureIsolationHTTP(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
+	defer cancel()
+	root := t.TempDir()
+	audit := filepath.Join(root, "audit")
+	t.Setenv("CAELIS_ATOMIC_MCP_HELPER", "1")
+	t.Setenv("CAELIS_ATOMIC_MCP_AUDIT", audit)
+	dir := filepath.Join(root, "selected-skills")
+	healthy := filepath.Join(dir, "healthy")
+	corrupt := filepath.Join(dir, "corrupt")
+	body := filepath.Join(dir, "body")
+	vanishedDir := filepath.Join(root, "vanished-dir")
+	vanishedChild := filepath.Join(vanishedDir, "vanished")
+	missing := filepath.Join(root, "explicit-root")
+	writeAtomicSkill(t, healthy, "healthy-skill", "HEALTHY_BODY_953")
+	writeAtomicSkill(t, corrupt, "corrupt-skill", "CORRUPT_BODY_217")
+	writeAtomicSkill(t, body, "body-skill", "BODY_BEFORE_REMOVAL_418")
+	writeAtomicSkill(t, vanishedChild, "vanished-skill", "VANISHED_BODY_612")
+	writeAtomicSkill(t, missing, "missing-skill", "MISSING_BODY_809")
+	provider := &atomicCapabilityProvider{}
+	host := startApplicationHTTPHost(t, filepath.Join(root, "store"), root, provider)
+	defer host.close(t)
+	hostStatus, err := host.host.SessionStatus(ctx, appserver.StatusRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := host.host.ConnectModel(ctx, appserver.ConnectModelRequest{WriteBase: appserver.WriteBase{OperationID: "skill-isolation-model", ExpectedRevision: &hostStatus.Configuration.Revision}, Config: appserver.ConnectConfig{
+		Provider: "openai-compatible", Model: "gpt-4.1", BaseURL: "https://provider.invalid/v1", APIKey: "SYNTHETIC_ONLY",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	client, _ := registerApplicationHTTP(t, ctx, host, "skill-isolation", filepath.Join(root, "app.credential"))
+	profile := applicationHTTPProfile()
+	profile.SkillDirs = []string{dir, vanishedDir}
+	profile.SkillRoots = []string{missing}
+	profile.MCPServers = []application.MCPServer{
+		{Name: "documents", Transport: "stdio", Command: os.Args[0], Args: []string{"-test.run=^TestAtomicDocumentsMCPHelper$"}, WorkDir: root},
+		{Name: "utilities", Transport: "stdio", Command: os.Args[0], Args: []string{"-test.run=^TestAtomicUtilitiesMCPHelper$"}, WorkDir: root},
+	}
+	created, err := client.CreateApplicationSession(ctx, appserver.CreateApplicationSessionRequest{WriteBase: appserver.WriteBase{OperationID: "skill-isolation-create"}, Profile: profile})
+	if err != nil || created.SessionID == "" {
+		t.Fatalf("create = %+v, %v", created, err)
+	}
+	feed, err := client.Reconnect(ctx, appserver.ReconnectRequest{SessionID: created.SessionID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer feed.Subscription.Close()
+	before, err := client.ApplicationMCPStatus(ctx, created.SessionID)
+	if err != nil || len(before.Skills) != 3 || before.Skills[0].Status != "inactive" || before.Skills[1].Status != "inactive" || before.Skills[2].Status != "inactive" {
+		t.Fatalf("status read activated Skills: %+v, %v", before, err)
+	}
+	// Both failures happen after a valid commit but before first assembly.
+	if err := os.Remove(filepath.Join(missing, "SKILL.md")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(corrupt, "SKILL.md"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(vanishedDir); err != nil {
+		t.Fatal(err)
+	}
+	promptAtomicCapabilityClient(t, ctx, client, created.SessionID, "skill-isolation-basic", "BASIC")
+	first := provider.requestAt(0)
+	if !strings.Contains(first, "healthy-skill") || !strings.Contains(first, "body-skill") || strings.Contains(first, "corrupt-skill") || strings.Contains(first, "missing-skill") || strings.Contains(first, "vanished-skill") || strings.Contains(first, "HEALTHY_BODY_953") {
+		t.Fatalf("model-facing Skill catalog was incomplete or included failed/body content: %s", first)
+	}
+	status, err := client.ApplicationMCPStatus(ctx, created.SessionID)
+	if err != nil || status.ConfigurationRevision != "1" {
+		t.Fatalf("skill status = %+v, %v", status, err)
+	}
+	byPath := atomicSkillStatusesByPath(status)
+	if byPath[dir].Status != "ready" || byPath[healthy].Status != "ready" || byPath[body].Status != "ready" || byPath[corrupt].Status != "failed" || byPath[missing].Status != "failed" || byPath[vanishedDir].Status != "failed" || byPath[corrupt].Warning == "" || byPath[missing].Warning == "" || byPath[vanishedDir].Warning == "" {
+		t.Fatalf("per-Skill failure was hidden or healthy Skills lost: %+v", status.Skills)
+	}
+	invalidInstructions := "Cannot commit while selected Skill metadata is broken."
+	if _, err := client.UpdateApplicationConfiguration(ctx, created.SessionID, application.UpdateConfigurationRequest{
+		OperationID: "skill-isolation-reject-invalid", ExpectedConfigurationRevision: 1,
+		Patch: application.ConfigurationPatch{Instructions: &invalidInstructions},
+	}); err == nil {
+		t.Fatal("deterministically invalid Skill metadata was committed")
+	}
+	unchanged, err := client.ApplicationConfiguration(ctx, created.SessionID)
+	if err != nil || unchanged.Revision != 1 {
+		t.Fatalf("invalid update changed revision: %+v, %v", unchanged, err)
+	}
+	deadline := time.NewTicker(20 * time.Millisecond)
+	defer deadline.Stop()
+	for {
+		status, err = client.ApplicationMCPStatus(ctx, created.SessionID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(status.Servers) == 2 && status.Servers[0].Status == "running" && status.Servers[1].Status == "running" {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("healthy MCP services did not initialize: %+v", status.Servers)
+		case <-deadline.C:
+		}
+	}
+	promptAtomicCapabilityClient(t, ctx, client, created.SessionID, "skill-isolation-healthy", "HEALTHY_SKILL")
+	promptAtomicCapabilityClient(t, ctx, client, created.SessionID, "skill-isolation-doc", "DOC")
+	promptAtomicCapabilityClient(t, ctx, client, created.SessionID, "skill-isolation-util", "UTIL")
+	if got := atomicAudit(audit); strings.Count(got, "documents:call:") != 1 || strings.Count(got, "utilities:call:") != 1 {
+		t.Fatalf("healthy MCP services were blocked: %s", got)
+	}
+	if !strings.Contains(provider.snapshot(), "HEALTHY_BODY_953") {
+		t.Fatal("healthy Skill body was not loaded on demand")
+	}
+	if err := os.Remove(filepath.Join(body, "SKILL.md")); err != nil {
+		t.Fatal(err)
+	}
+	promptAtomicCapabilityClient(t, ctx, client, created.SessionID, "skill-isolation-body-fail", "BODY_SKILL")
+	if got := provider.lastRequest(); !strings.Contains(got, "body-skill") || !strings.Contains(got, "load skill") {
+		t.Fatalf("on-demand body failure was not returned to the model: %.2000s", got)
+	}
+	promptAtomicCapabilityClient(t, ctx, client, created.SessionID, "skill-isolation-basic-after-fail", "BASIC")
+	promptAtomicCapabilityClient(t, ctx, client, created.SessionID, "skill-isolation-healthy-after-fail", "HEALTHY_SKILL")
+	worker, err := client.CreateWorker(ctx, appserver.CreateWorkerRequest{WriteBase: appserver.WriteBase{OperationID: "skill-isolation-worker"}, CWD: root, Model: "openai-compatible/gpt-4.1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Prompt(ctx, appserver.PromptRequest{WriteBase: appserver.WriteBase{OperationID: "skill-isolation-worker-prompt", SessionID: worker.SessionID}, Input: "BASIC"}); err != nil {
+		t.Fatal(err)
+	}
+	waitApplicationHTTPIdle(t, ctx, client, worker.SessionID)
+	if last := provider.lastRequest(); strings.Contains(last, "healthy-skill") || strings.Contains(last, "documents__lookup") || strings.Contains(last, "utilities__lookup") {
+		t.Fatalf("ordinary Worker inherited application abilities: %s", last)
+	}
+	writeAtomicSkill(t, corrupt, "corrupt-skill", "CORRUPT_BODY_RESTORED_217")
+	writeAtomicSkill(t, missing, "missing-skill", "MISSING_BODY_RESTORED_809")
+	writeAtomicSkill(t, body, "body-skill", "BODY_RESTORED_418")
+	writeAtomicSkill(t, vanishedChild, "vanished-skill", "VANISHED_BODY_RESTORED_612")
+	configuration, err := client.ApplicationConfiguration(ctx, created.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	instructions := "Refresh authorized Skill metadata after restoring files."
+	updated, err := client.UpdateApplicationConfiguration(ctx, created.SessionID, application.UpdateConfigurationRequest{
+		OperationID: "skill-isolation-refresh", ExpectedConfigurationRevision: configuration.Revision,
+		Patch: application.ConfigurationPatch{Instructions: &instructions},
+	})
+	if err != nil || updated.Revision != 2 {
+		t.Fatalf("explicit recovery revision = %+v, %v", updated, err)
+	}
+	pending, err := client.ApplicationMCPStatus(ctx, created.SessionID)
+	if err != nil || pending.ConfigurationRevision != "2" || len(pending.Skills) != 3 || pending.Skills[0].Status != "inactive" {
+		t.Fatalf("new revision status reused old catalog: %+v, %v", pending, err)
+	}
+	promptAtomicCapabilityClient(t, ctx, client, created.SessionID, "skill-isolation-refreshed", "BASIC")
+	recovered, err := client.ApplicationMCPStatus(ctx, created.SessionID)
+	if err != nil || recovered.ConfigurationRevision != "2" {
+		t.Fatalf("recovered status = %+v, %v", recovered, err)
+	}
+	for _, path := range []string{healthy, corrupt, body, missing, vanishedChild} {
+		if got := atomicSkillStatusesByPath(recovered)[path]; got.Status != "ready" || got.Name == "" {
+			t.Fatalf("repaired Skill %s = %+v", path, got)
+		}
+	}
+	// A Skills-only selection with no surviving Skill must still admit dialogue.
+	only := filepath.Join(root, "skills-only")
+	writeAtomicSkill(t, only, "only-skill", "ONLY_BODY_274")
+	onlyProfile := applicationHTTPProfile()
+	onlyProfile.SkillRoots = []string{only}
+	onlySession, err := client.CreateApplicationSession(ctx, appserver.CreateApplicationSessionRequest{
+		WriteBase: appserver.WriteBase{OperationID: "skill-isolation-only-create"}, Profile: onlyProfile,
+	})
+	if err != nil || onlySession.SessionID == "" {
+		t.Fatalf("Skills-only create = %+v, %v", onlySession, err)
+	}
+	if err := os.Remove(filepath.Join(only, "SKILL.md")); err != nil {
+		t.Fatal(err)
+	}
+	promptAtomicCapabilityClient(t, ctx, client, onlySession.SessionID, "skill-isolation-only-basic", "BASIC")
+	onlyStatus, err := client.ApplicationMCPStatus(ctx, onlySession.SessionID)
+	if err != nil || len(onlyStatus.Servers) != 0 || len(onlyStatus.Skills) != 1 || onlyStatus.Skills[0].Status != "failed" {
+		t.Fatalf("Skills-only failure blocked dialogue or was hidden: %+v, %v", onlyStatus, err)
+	}
+	if last := provider.lastRequest(); strings.Contains(last, "only-skill") || strings.Contains(provider.lastTools(), "\"name\":\"Skill\"") {
+		t.Fatalf("failed Skills-only root entered the model request: %.2000s", last)
 	}
 }
 

@@ -64,7 +64,7 @@ The following paths are relative to `/api/control/v1`:
 | `GET /application/sessions/{session_id}/configuration` | Read the latest desired configuration and revision |
 | `POST /application/sessions/{session_id}/configuration` | Compare-and-swap update; returns the committed configuration |
 | `GET /application/sessions/{session_id}/model-capabilities` | Observe the current desired model and its declared image support |
-| `GET /application/sessions/{session_id}/mcp-status` | Observe desired-revision health for each explicit MCP service without activating execution |
+| `GET /application/sessions/{session_id}/mcp-status` | Observe desired-revision MCP and selected Skill health without activating execution |
 | `GET /application/sessions/{session_id}/reviewer-state` | Observe the creation-bound review route and local reviewer readiness |
 | `GET /application/configuration-operations/{operation_id}` | Exact committed configuration update result |
 | `GET /application/sessions/{session_id}/background-grants` | List this connection's background grants |
@@ -193,12 +193,18 @@ receipts keep their original ownership and approval policy; MCP calls are SDK
 tool calls, not callback dispatches.
 
 `GET .../mcp-status` returns `session_id`, decimal-string
-`configuration_revision`, and one record per desired service with `status`
-`inactive`, `connecting`, `running`, or `failed`, plus ready tool names and
-bounded warnings where available. `inactive` means no resident Runtime has
-started that revision. Status reads do not start services, retry failed calls,
-or grant authority. A failed service does not remove another service or basic
-model dialogue.
+`configuration_revision`, `servers`, and `skills`. Each desired MCP service has
+`inactive`, `connecting`, `running`, or `failed` status, with ready tool names
+and bounded warnings where available. `skills` reports each explicit directory
+and its immediate candidate Skill roots, plus each explicit `skill_root`, by
+absolute `path`, `kind` (`directory` or `skill`), and `status` (`inactive`,
+`ready`, or `failed`). Healthy Skill records include `name`; failed records
+include a bounded `warning` and are excluded from the model-facing catalog.
+`ready` records metadata at assembly time; it does not promise that a later
+on-demand body read will succeed.
+Before assembly, each explicit selection is `inactive`; status reads do not
+scan files, start services, retry failures, or grant authority. A failed MCP
+service or Skill does not remove healthy abilities or basic model dialogue.
 
 A creation profile has two lifetimes:
 
@@ -315,13 +321,15 @@ explicit MCP/Skill change is one revision: request admission cannot combine
 services from one revision with Skill metadata from another. Validation of
 paths, names and tool namespaces happens before commit; a rejected update
 leaves the previous revision and its receipt state intact. If a previously
-accepted Skill path disappears before metadata for that revision is assembled,
-the whole model request fails until the application restores the path or clears
-the selection through a new configuration update. If metadata was already
-assembled, loading that Skill body reports a tool error. There is no per-Skill
-health status yet, and a bad selected Skill is not isolated during metadata
-assembly. New MCP service startup failures are isolated and visible in
-`mcp-status`; a healthy service or basic dialogue can continue. An already
+accepted Skill path disappears or its metadata becomes invalid before that
+revision is assembled, only that directory or candidate Skill root reports
+`failed` in `mcp-status`; healthy roots remain in the catalog. The catalog and
+status are pinned together for the revision. If a body disappears after
+metadata assembly, its on-demand `Skill` call returns a tool error without
+stopping later model requests. Core does not watch these files or silently
+retry a failed item: restore it and commit an explicit new revision to detect
+it again. A no-op update leaves the cached catalog unchanged. New MCP service
+startup failures are also isolated and visible in `mcp-status`. An already
 admitted request retains its original revision and callable ownership. A
 configuration commit notifies an active Runtime to retire superseded MCP
 connections. It closes an old connection when the last request snapshot using
@@ -335,7 +343,8 @@ accepted or unknown tool effect on reconfiguration or restart.
 An unsupported effort or service-tier combination returns HTTP 400 with code
 `unsupported`; the message identifies the model and rejected field/value. An
 unconfigured or ambiguous model selector returns HTTP 400 `invalid_argument`.
-Selections are never silently ignored or downgraded. These rejections do not
+Invalid submitted selections are never silently ignored or downgraded; after
+commit, damaged filesystem items are reported as failed. Rejections do not
 change desired configuration, revision or any issued request. Internal failures
 and provider unavailability retain their 5xx classification. A no-op or same-value update commits a durable
 operation receipt without creating a new revision; concurrent writers are

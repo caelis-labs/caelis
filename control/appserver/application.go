@@ -72,7 +72,7 @@ type ApplicationServiceConfig struct {
 	ModelImageInput func(context.Context, application.Profile) (*bool, error)
 	// MCPStatus observes resident per-service health without activating a
 	// Session Runtime. The application Store remains the authorization owner.
-	MCPStatus func(context.Context, string, uint64) []application.MCPServerStatus
+	MCPStatus func(context.Context, string, uint64) application.MCPStatus
 	// ConfigurationCommitted retires resident resources after a successful
 	// Store CAS. It is a best-effort notification, not a second commit gate.
 	ConfigurationCommitted func(context.Context, string, application.Configuration)

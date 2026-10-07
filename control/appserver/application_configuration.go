@@ -44,8 +44,8 @@ func (s *ApplicationService) ApplicationConfiguration(ctx context.Context, p Pri
 	return s.config.Store.Configuration(ctx, scope, sessionID)
 }
 
-// ApplicationMCPStatus reads only this connection's desired service names and
-// optional resident health. Reading it never starts or retries an MCP service.
+// ApplicationMCPStatus reads this connection's desired MCP and Skill selections
+// with optional resident health. Reading it never starts services or scans files.
 func (s *ApplicationService) ApplicationMCPStatus(ctx context.Context, p Principal, sessionID string) (application.MCPStatus, error) {
 	scope, err := ApplicationScope(p)
 	if err != nil {
@@ -59,8 +59,8 @@ func (s *ApplicationService) ApplicationMCPStatus(ctx context.Context, p Princip
 		return application.MCPStatus{}, err
 	}
 	observed := s.config.MCPStatus(ctx, sessionID, configuration.Revision)
-	byName := make(map[string]application.MCPServerStatus, len(observed))
-	for _, server := range observed {
+	byName := make(map[string]application.MCPServerStatus, len(observed.Servers))
+	for _, server := range observed.Servers {
 		byName[server.Name] = server
 	}
 	status := application.MCPStatus{SessionID: sessionID, ConfigurationRevision: strconv.FormatUint(configuration.Revision, 10), Servers: make([]application.MCPServerStatus, 0, len(configuration.Profile.MCPServers))}
@@ -70,6 +70,16 @@ func (s *ApplicationService) ApplicationMCPStatus(ctx context.Context, p Princip
 			server = application.MCPServerStatus{Name: declared.Name, Status: "inactive"}
 		}
 		status.Servers = append(status.Servers, server)
+	}
+	status.Skills = make([]application.SkillStatus, 0, len(configuration.Profile.SkillDirs)+len(configuration.Profile.SkillRoots))
+	status.Skills = append(status.Skills, observed.Skills...)
+	if len(status.Skills) == 0 {
+		for _, path := range configuration.Profile.SkillDirs {
+			status.Skills = append(status.Skills, application.SkillStatus{Path: path, Kind: "directory", Status: "inactive"})
+		}
+		for _, path := range configuration.Profile.SkillRoots {
+			status.Skills = append(status.Skills, application.SkillStatus{Path: path, Kind: "skill", Status: "inactive"})
+		}
 	}
 	return status, nil
 }

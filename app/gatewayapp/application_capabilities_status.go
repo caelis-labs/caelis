@@ -9,16 +9,16 @@ import (
 // applicationMCPStatus observes an already resident activation. Status reads
 // must never activate a Session, start a service, or borrow another Session's
 // manager. The Application Store checks connection ownership before this call.
-func (s *Stack) applicationMCPStatus(_ context.Context, sessionID string, revision uint64) []application.MCPServerStatus {
+func (s *Stack) applicationMCPStatus(_ context.Context, sessionID string, revision uint64) application.MCPStatus {
 	if s == nil || s.sessionRuntimes == nil {
-		return nil
+		return application.MCPStatus{}
 	}
 	registry := s.sessionRuntimes
 	registry.mu.RLock()
 	active := registry.sessions[sessionID]
 	if active == nil || active.releasing || active.instance == nil {
 		registry.mu.RUnlock()
-		return nil
+		return application.MCPStatus{}
 	}
 	composition := &active.instance.runtimeComposition
 	registry.mu.RUnlock()
@@ -26,7 +26,7 @@ func (s *Stack) applicationMCPStatus(_ context.Context, sessionID string, revisi
 	read := composition.capabilityStatus
 	composition.mu.RUnlock()
 	if read == nil {
-		return nil
+		return application.MCPStatus{}
 	}
 	return read(revision)
 }

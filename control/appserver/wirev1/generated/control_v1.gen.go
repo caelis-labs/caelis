@@ -516,6 +516,7 @@ type ApplicationMCPStatus struct {
 	ConfigurationRevision Uint64Decimal                `json:"configuration_revision"`
 	Servers               []ApplicationMCPServerStatus `json:"servers"`
 	SessionId             string                       `json:"session_id"`
+	Skills                []ApplicationSkillStatus     `json:"skills"`
 }
 
 type ApplicationModelCapabilities struct {
@@ -644,6 +645,14 @@ type ApplicationScope struct {
 	ApplicationId string `json:"application_id"`
 	ConnectionId  string `json:"connection_id"`
 	PrincipalId   string `json:"principal_id"`
+}
+
+type ApplicationSkillStatus struct {
+	Kind    string  `json:"kind"`
+	Name    *string `json:"name,omitempty"`
+	Path    string  `json:"path"`
+	Status  string  `json:"status"`
+	Warning *string `json:"warning,omitempty"`
 }
 
 type ApplicationSource struct {

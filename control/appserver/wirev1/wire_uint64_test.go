@@ -987,3 +987,25 @@ func TestApplicationModelCapabilitiesRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+func TestApplicationSkillStatusRoundTrip(t *testing.T) {
+	want := application.MCPStatus{
+		SessionID: "session-1", ConfigurationRevision: "2",
+		Servers: []application.MCPServerStatus{{Name: "documents", Status: "running", Tools: []string{"documents__lookup"}}},
+		Skills: []application.SkillStatus{
+			{Path: "/selected", Kind: "directory", Status: "ready"},
+			{Path: "/selected/healthy", Kind: "skill", Name: "healthy", Status: "ready"},
+			{Path: "/selected/broken", Kind: "skill", Status: "failed", Warning: "selected Skill metadata is invalid or unreadable"},
+		},
+	}
+	raw := mustMarshalWire(t, want)
+	validateWireValue(t, "ApplicationMCPStatus", want)
+	var wire generated.ApplicationMCPStatus
+	if err := json.Unmarshal(raw, &wire); err != nil || len(wire.Skills) != 3 || wire.Skills[2].Status != "failed" {
+		t.Fatalf("generated status = %+v, %v", wire, err)
+	}
+	var got application.MCPStatus
+	if err := Unmarshal(raw, &got); err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("roundtrip = %+v, %v", got, err)
+	}
+}

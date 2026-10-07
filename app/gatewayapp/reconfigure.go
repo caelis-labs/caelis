@@ -134,7 +134,7 @@ type gatewayRuntimeBundle struct {
 	ACPControlPlane             *acpassembly.ControlPlane
 	MCP                         *mcp.Manager
 	CloseCapabilities           func()
-	CapabilityStatus            func(uint64) []application.MCPServerStatus
+	CapabilityStatus            func(uint64) application.MCPStatus
 	CapabilityUpdated           func(application.Configuration)
 	RuntimeConfig               stackRuntimeConfig
 	EstimatedPromptPrefixTokens int

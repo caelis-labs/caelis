@@ -42,8 +42,9 @@ func (c *Client) ApplicationModelCapabilities(ctx context.Context, sessionID str
 	return doFocusedJSON[application.ModelCapabilities](ctx, c, http.MethodGet, applicationSessionPath(sessionID)+"/model-capabilities", nil)
 }
 
-// ApplicationMCPStatus observes this Session's current desired service health
-// without starting a Runtime. Negotiate application-atomic-capabilities-v1.
+// ApplicationMCPStatus observes this Session's desired MCP and Skill health
+// without starting a Runtime or scanning files. Negotiate
+// application-atomic-capabilities-v1.
 func (c *Client) ApplicationMCPStatus(ctx context.Context, sessionID string) (application.MCPStatus, error) {
 	return doFocusedJSON[application.MCPStatus](ctx, c, http.MethodGet, applicationSessionPath(sessionID)+"/mcp-status", nil)
 }

@@ -486,6 +486,7 @@ export interface ApplicationMCPStatus {
   configuration_revision: Uint64Decimal;
   servers: Array<ApplicationMCPServerStatus>;
   session_id: string;
+  skills: Array<ApplicationSkillStatus>;
 }
 
 export interface ApplicationModelCapabilities {
@@ -606,6 +607,14 @@ export interface ApplicationScope {
   application_id: string;
   connection_id: string;
   principal_id: string;
+}
+
+export interface ApplicationSkillStatus {
+  kind: "directory" | "skill";
+  name?: string;
+  path: string;
+  status: "inactive" | "ready" | "failed";
+  warning?: string;
 }
 
 export interface ApplicationSource {

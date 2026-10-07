@@ -2,8 +2,10 @@ package gatewayapp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 
@@ -21,6 +23,7 @@ import (
 // Runtime; only Control's explicit selection and lifetime differ.
 type applicationCapabilities struct {
 	catalog    skill.Catalog
+	skills     []application.SkillStatus
 	skillTool  tool.Tool
 	searchTool tool.Tool
 	source     tool.Source
@@ -52,39 +55,82 @@ func (s applicationMCPSource) Tools() []tool.Tool {
 }
 
 func applicationSkillCatalog(profile application.Profile) (skill.Catalog, error) {
+	catalog, _, err := assembleApplicationSkills(profile, true)
+	return catalog, err
+}
+
+// assembleApplicationSkills is the single scanner for admission and Runtime
+// assembly. Admission rejects invalid selections; after commit, one damaged
+// selected item is reported and omitted without suppressing healthy siblings.
+func assembleApplicationSkills(profile application.Profile, strict bool) (skill.Catalog, []application.SkillStatus, error) {
 	var metas []skill.Meta
-	if len(profile.SkillDirs) != 0 {
-		for _, dir := range profile.SkillDirs {
-			info, err := os.Stat(dir)
-			if err != nil {
-				return skill.Catalog{}, fmt.Errorf("application Skill directory %q: %w", dir, err)
-			}
-			if !info.IsDir() {
-				return skill.Catalog{}, fmt.Errorf("application Skill directory %q is not a directory", dir)
-			}
-		}
-		found, err := skillfs.DiscoverMetaRequest(skill.DiscoverRequest{Dirs: profile.SkillDirs})
-		if err != nil {
-			return skill.Catalog{}, err
-		}
-		metas = append(metas, found...)
-	}
-	for _, root := range profile.SkillRoots {
+	statuses := make([]application.SkillStatus, 0, len(profile.SkillDirs)+len(profile.SkillRoots))
+	seen := map[string]bool{}
+	addRoot := func(root string, direct bool) error {
 		meta, err := skillfs.DiscoverRootMeta(root)
 		if err != nil {
-			return skill.Catalog{}, fmt.Errorf("application Skill root %q: %w", root, err)
+			if strict {
+				// An arbitrary non-Skill subdirectory has never been part of
+				// directory discovery. Explicit roots are always required.
+				if !direct && errors.Is(err, os.ErrNotExist) {
+					return nil
+				}
+				return fmt.Errorf("application Skill root %q: %w", root, err)
+			}
+			statuses = append(statuses, application.SkillStatus{Path: root, Kind: "skill", Status: "failed", Warning: applicationSkillWarning(err)})
+			return nil
 		}
+		key := strings.ToLower(meta.Name)
+		if seen[key] {
+			if strict {
+				return fmt.Errorf("application Skill name %q is duplicated", meta.Name)
+			}
+			statuses = append(statuses, application.SkillStatus{Path: root, Kind: "skill", Name: meta.Name, Status: "failed", Warning: "Skill name conflicts with another selected Skill"})
+			return nil
+		}
+		seen[key] = true
 		metas = append(metas, meta)
+		statuses = append(statuses, application.SkillStatus{Path: root, Kind: "skill", Name: meta.Name, Status: "ready"})
+		return nil
 	}
-	seen := make(map[string]bool, len(metas))
-	for _, meta := range metas {
-		name := strings.ToLower(meta.Name)
-		if seen[name] {
-			return skill.Catalog{}, fmt.Errorf("application Skill name %q is duplicated", meta.Name)
+	for _, dir := range profile.SkillDirs {
+		info, err := os.Stat(dir)
+		if err == nil && !info.IsDir() {
+			err = fmt.Errorf("not a directory")
 		}
-		seen[name] = true
+		var entries []os.DirEntry
+		if err == nil {
+			entries, err = os.ReadDir(dir)
+		}
+		if err != nil {
+			if strict {
+				return skill.Catalog{}, nil, fmt.Errorf("application Skill directory %q: %w", dir, err)
+			}
+			statuses = append(statuses, application.SkillStatus{Path: dir, Kind: "directory", Status: "failed", Warning: applicationSkillWarning(err)})
+			continue
+		}
+		statuses = append(statuses, application.SkillStatus{Path: dir, Kind: "directory", Status: "ready"})
+		for _, entry := range entries {
+			if entry.IsDir() {
+				if err := addRoot(filepath.Join(dir, entry.Name()), false); err != nil {
+					return skill.Catalog{}, nil, err
+				}
+			}
+		}
 	}
-	return skill.NewCatalog(metas), nil
+	for _, root := range profile.SkillRoots {
+		if err := addRoot(root, true); err != nil {
+			return skill.Catalog{}, nil, err
+		}
+	}
+	return skill.NewCatalog(metas), statuses, nil
+}
+
+func applicationSkillWarning(err error) string {
+	if errors.Is(err, os.ErrNotExist) {
+		return "selected Skill path is missing"
+	}
+	return "selected Skill metadata is invalid or unreadable"
 }
 
 func applicationSkillMetadata(catalog skill.Catalog) string {
@@ -133,11 +179,11 @@ func (r *applicationTurnResolver) acquireCapabilities(ctx context.Context, confi
 	if err := ctx.Err(); err != nil {
 		return nil, nil, err
 	}
-	catalog, err := applicationSkillCatalog(configuration.Profile)
+	catalog, skills, err := assembleApplicationSkills(configuration.Profile, false)
 	if err != nil {
 		return nil, nil, err
 	}
-	assembled := &applicationCapabilities{catalog: catalog}
+	assembled := &applicationCapabilities{catalog: catalog, skills: skills}
 	if len(catalog.Metas()) != 0 {
 		assembled.skillTool = skilltool.New(skilltool.Config{Loader: skillfs.Loader{}, Catalog: catalog})
 	}
@@ -232,24 +278,25 @@ func (r *applicationTurnResolver) closeCapabilities() {
 	r.capabilitiesMu.Unlock()
 }
 
-func (r *applicationTurnResolver) capabilityStatus(revision uint64) []application.MCPServerStatus {
+func (r *applicationTurnResolver) capabilityStatus(revision uint64) application.MCPStatus {
 	r.capabilitiesMu.Lock()
+	defer r.capabilitiesMu.Unlock()
 	capability := r.capabilities[revision]
 	current := r.currentMCP
-	desired := r.desiredRevision
-	r.capabilitiesMu.Unlock()
+	status := application.MCPStatus{}
 	if capability != nil {
 		current = capability.resource
-	} else if revision != desired {
+		status.Skills = append([]application.SkillStatus(nil), capability.skills...)
+	} else if revision != r.desiredRevision {
 		current = nil
 	}
 	if current == nil {
-		return nil
+		return status
 	}
 	infos := current.manager.GetServerInfos("application")
-	result := make([]application.MCPServerStatus, 0, len(infos))
+	status.Servers = make([]application.MCPServerStatus, 0, len(infos))
 	for _, info := range infos {
-		result = append(result, application.MCPServerStatus{Name: info.Name, Status: info.Status, Tools: info.Tools, Warning: info.Warning})
+		status.Servers = append(status.Servers, application.MCPServerStatus{Name: info.Name, Status: info.Status, Tools: info.Tools, Warning: info.Warning})
 	}
-	return result
+	return status
 }
