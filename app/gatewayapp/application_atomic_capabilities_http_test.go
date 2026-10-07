@@ -452,6 +452,11 @@ func TestApplicationAtomicSkillFailureIsolationHTTP(t *testing.T) {
 	if err != nil || onlySession.SessionID == "" {
 		t.Fatalf("Skills-only create = %+v, %v", onlySession, err)
 	}
+	onlyFeed, err := client.Reconnect(ctx, appserver.ReconnectRequest{SessionID: onlySession.SessionID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer onlyFeed.Subscription.Close()
 	if err := os.Remove(filepath.Join(only, "SKILL.md")); err != nil {
 		t.Fatal(err)
 	}
@@ -498,12 +503,12 @@ func TestApplicationAtomicMCPRevisionLifecycleHTTP(t *testing.T) {
 	provider := &atomicCapabilityProvider{}
 	host, client, session := startAtomicLifecycleSession(t, ctx, root, provider, []application.MCPServer{server})
 	defer host.close(t)
-	promptAtomicCapabilityClient(t, ctx, client, session, "lifecycle-warm", "BASIC")
 	feed, err := client.Reconnect(ctx, appserver.ReconnectRequest{SessionID: session})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer feed.Subscription.Close()
+	promptAtomicCapabilityClient(t, ctx, client, session, "lifecycle-warm", "BASIC")
 	waitAtomicAuditCount(t, audit, "documents:start:", 1)
 	configuration, err := client.ApplicationConfiguration(ctx, session)
 	if err != nil {
@@ -570,6 +575,8 @@ func TestApplicationAtomicMCPRevisionLifecycleHTTP(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		promptAtomicCapabilityClient(t, ctx, client, session, fmt.Sprintf("lifecycle-reenabled-warm-%d", i), "BASIC")
+		waitAtomicApplicationMCPRunning(t, ctx, client, session, "documents")
 		promptAtomicCapabilityClient(t, ctx, client, session, fmt.Sprintf("lifecycle-doc-%d", i), "DOC")
 		waitAtomicAuditCount(t, audit, "documents:start:", i+2)
 		atomicAssertLiveService(t, audit, "documents", 1)
@@ -593,12 +600,13 @@ func TestApplicationAtomicMCPPinnedCallAcrossRevisionHTTP(t *testing.T) {
 	host, client, session := startAtomicLifecycleSession(t, ctx, root, provider, []application.MCPServer{blocking})
 	defer host.close(t)
 	defer func() { _ = os.WriteFile(releasePath, []byte("release"), 0o600) }()
-	promptAtomicCapabilityClient(t, ctx, client, session, "pinned-warm", "BASIC")
 	feed, err := client.Reconnect(ctx, appserver.ReconnectRequest{SessionID: session})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer feed.Subscription.Close()
+	promptAtomicCapabilityClient(t, ctx, client, session, "pinned-warm", "BASIC")
+	waitAtomicApplicationMCPRunning(t, ctx, client, session, "blocking")
 	result, err := client.PromptApplication(ctx, appserver.ApplicationPromptRequest{PromptRequest: appserver.PromptRequest{
 		WriteBase: appserver.WriteBase{SessionID: session, OperationID: "pinned-old"}, Input: "BLOCK",
 	}, SourceKind: "user"})
@@ -606,7 +614,6 @@ func TestApplicationAtomicMCPPinnedCallAcrossRevisionHTTP(t *testing.T) {
 		t.Fatalf("old prompt = %+v, %v", result, err)
 	}
 	waitAtomicAuditCount(t, audit, "blocking:call:", 1)
-	// The warm request may have retired a different process before this call.
 	// Track the exact process that accepted the blocked tool invocation.
 	callPID := ""
 	for _, line := range strings.Split(atomicAudit(audit), "\n") {
@@ -674,11 +681,11 @@ func TestApplicationAtomicMCPFailedUpdateConcurrentCloseHTTP(t *testing.T) {
 	t.Setenv("CAELIS_ATOMIC_MCP_AUDIT", audit)
 	server := application.MCPServer{Name: "documents", Transport: "stdio", Command: os.Args[0], Args: []string{"-test.run=^TestAtomicDocumentsMCPHelper$"}, WorkDir: root}
 	host, client, session := startAtomicLifecycleSession(t, ctx, root, &atomicCapabilityProvider{}, []application.MCPServer{server})
-	promptAtomicCapabilityClient(t, ctx, client, session, "close-race-warm", "BASIC")
 	feed, err := client.Reconnect(ctx, appserver.ReconnectRequest{SessionID: session})
 	if err != nil {
 		t.Fatal(err)
 	}
+	promptAtomicCapabilityClient(t, ctx, client, session, "close-race-warm", "BASIC")
 	waitAtomicAuditCount(t, audit, "documents:start:", 1)
 	configuration, err := client.ApplicationConfiguration(ctx, session)
 	if err != nil {
@@ -769,6 +776,11 @@ func TestApplicationAtomicCapabilitiesHTTP(t *testing.T) {
 	if _, err := other.ApplicationMCPStatus(ctx, created.SessionID); err == nil {
 		t.Fatal("another application read MCP service health")
 	}
+	feed, err := client.Reconnect(ctx, appserver.ReconnectRequest{SessionID: created.SessionID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer feed.Subscription.Close()
 	// The real HTTP -> Control -> Runtime -> SDK path must expose metadata and
 	// load the Skill body only after the model calls the Skill tool.
 	promptAtomicCapabilityClient(t, ctx, client, created.SessionID, "atomic-skill", "SKILL")
@@ -780,8 +792,8 @@ func TestApplicationAtomicCapabilitiesHTTP(t *testing.T) {
 	if !strings.Contains(requests, "atomic-skill") || !strings.Contains(requests, "ATOMIC_SKILL_BODY_731") || strings.Contains(requests, "AMBIENT_LEAK") {
 		t.Fatalf("Skill metadata/body or isolation missing: %s", requests)
 	}
-	waitAtomicAudit(t, audit, "documents:start")
-	waitAtomicAudit(t, audit, "utilities:start")
+	waitAtomicApplicationMCPRunning(t, ctx, client, created.SessionID, "documents")
+	waitAtomicApplicationMCPRunning(t, ctx, client, created.SessionID, "utilities")
 	promptAtomicCapabilityClient(t, ctx, client, created.SessionID, "atomic-doc", "DOC")
 	promptAtomicCapabilityClient(t, ctx, client, created.SessionID, "atomic-util", "UTIL")
 	if got := atomicAudit(audit); strings.Count(got, "documents:call") != 1 || strings.Count(got, "utilities:call") != 1 {
@@ -815,6 +827,7 @@ func TestApplicationAtomicCapabilitiesHTTP(t *testing.T) {
 		t.Fatalf("reenable = %+v, %v", reenabled, err)
 	}
 	promptAtomicCapabilityClient(t, ctx, client, created.SessionID, "atomic-warm", "BASIC")
+	waitAtomicApplicationMCPRunning(t, ctx, client, created.SessionID, "documents")
 	promptAtomicCapabilityClient(t, ctx, client, created.SessionID, "atomic-doc-again", "DOC")
 	if got := atomicAudit(audit); strings.Count(got, "documents:call") != 2 {
 		t.Fatalf("reenabled service call count: %s; requests: %s", got, provider.snapshot())
@@ -831,6 +844,9 @@ func TestApplicationAtomicCapabilitiesHTTP(t *testing.T) {
 		t.Fatalf("ordinary Worker inherited Application capabilities: %s", last)
 	}
 	beforeRecoveryCalls := strings.Count(atomicAudit(audit), "documents:call")
+	if err := feed.Subscription.Close(); err != nil {
+		t.Fatal(err)
+	}
 	host.close(t)
 	host = nil
 	recoveredHost := startApplicationHTTPHost(t, filepath.Join(root, "store"), workspace, provider)
@@ -840,13 +856,11 @@ func TestApplicationAtomicCapabilitiesHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 	recovered := recoveredHost.app(string(credential))
-	feed, err := recovered.Reconnect(ctx, appserver.ReconnectRequest{SessionID: created.SessionID})
+	recoveredFeed, err := recovered.Reconnect(ctx, appserver.ReconnectRequest{SessionID: created.SessionID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := feed.Subscription.Close(); err != nil {
-		t.Fatal(err)
-	}
+	defer recoveredFeed.Subscription.Close()
 	if got := strings.Count(atomicAudit(audit), "documents:call"); got != beforeRecoveryCalls {
 		t.Fatalf("reconnect replayed an MCP effect: before=%d after=%d", beforeRecoveryCalls, got)
 	}
@@ -855,10 +869,38 @@ func TestApplicationAtomicCapabilitiesHTTP(t *testing.T) {
 		t.Fatalf("recovered desired configuration = %+v, %v", recoveryStatus, err)
 	}
 	promptAtomicCapabilityClient(t, ctx, recovered, created.SessionID, "atomic-recovery-warm", "BASIC")
-	waitAtomicAudit(t, audit, "documents:start")
+	waitAtomicApplicationMCPRunning(t, ctx, recovered, created.SessionID, "documents")
 	promptAtomicCapabilityClient(t, ctx, recovered, created.SessionID, "atomic-recovery-doc", "DOC")
 	if got := strings.Count(atomicAudit(audit), "documents:call"); got != beforeRecoveryCalls+1 {
 		t.Fatalf("recovered Session made %d document calls, want %d", got, beforeRecoveryCalls+1)
+	}
+}
+
+func waitAtomicApplicationMCPRunning(t *testing.T, ctx context.Context, client *httpclient.Client, session, name string) {
+	t.Helper()
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		status, err := client.ApplicationMCPStatus(ctx, session)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, server := range status.Servers {
+			if server.Name != name {
+				continue
+			}
+			if server.Status == "running" {
+				return
+			}
+			if server.Status == "failed" {
+				t.Fatalf("MCP service %q failed to start: %+v", name, server)
+			}
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("MCP service %q did not become ready: %+v: %v", name, status.Servers, ctx.Err())
+		case <-ticker.C:
+		}
 	}
 }
 
@@ -894,6 +936,11 @@ func TestApplicationAtomicMCPFailureIsolationHTTP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	feed, err := client.Reconnect(ctx, appserver.ReconnectRequest{SessionID: created.SessionID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer feed.Subscription.Close()
 	result, err := client.PromptApplication(ctx, appserver.ApplicationPromptRequest{PromptRequest: appserver.PromptRequest{WriteBase: appserver.WriteBase{OperationID: "failure-prompt", SessionID: created.SessionID}, Input: "BASIC"}, SourceKind: "user"})
 	if err != nil || (result.Outcome != appserver.OutcomeAccepted && result.Outcome != appserver.OutcomeCommitted) {
 		t.Fatalf("basic prompt = %+v, %v", result, err)
