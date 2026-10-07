@@ -30,3 +30,24 @@ func (s *Stack) applicationMCPStatus(_ context.Context, sessionID string, revisi
 	}
 	return read(revision)
 }
+
+func (s *Stack) applicationConfigurationCommitted(_ context.Context, sessionID string, configuration application.Configuration) {
+	if s == nil || s.sessionRuntimes == nil {
+		return
+	}
+	registry := s.sessionRuntimes
+	registry.mu.RLock()
+	active := registry.sessions[sessionID]
+	if active == nil || active.releasing || active.instance == nil {
+		registry.mu.RUnlock()
+		return
+	}
+	composition := &active.instance.runtimeComposition
+	registry.mu.RUnlock()
+	composition.mu.RLock()
+	update := composition.capabilityUpdated
+	composition.mu.RUnlock()
+	if update != nil {
+		update(configuration)
+	}
+}

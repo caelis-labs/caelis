@@ -315,13 +315,23 @@ explicit MCP/Skill change is one revision: request admission cannot combine
 services from one revision with Skill metadata from another. Validation of
 paths, names and tool namespaces happens before commit; a rejected update
 leaves the previous revision and its receipt state intact. If a previously
-accepted Skill path disappears later, requests for that desired revision fail
-until the application restores the path or clears the selection through a new
-configuration update. New service startup failures are isolated and visible in
+accepted Skill path disappears before metadata for that revision is assembled,
+the whole model request fails until the application restores the path or clears
+the selection through a new configuration update. If metadata was already
+assembled, loading that Skill body reports a tool error. There is no per-Skill
+health status yet, and a bad selected Skill is not isolated during metadata
+assembly. New MCP service startup failures are isolated and visible in
 `mcp-status`; a healthy service or basic dialogue can continue. An already
-admitted request retains its original revision and callable ownership. Old MCP
-clients remain alive until that Runtime activation drains, then close; Core
-never replays an accepted or unknown tool effect on reconfiguration or restart.
+admitted request retains its original revision and callable ownership. A
+configuration commit notifies an active Runtime to retire superseded MCP
+connections. It closes an old connection when the last request snapshot using
+it finishes its model response and resulting tool calls; no reconnect or
+activation shutdown is needed. Revisions with the same complete `mcp_servers`
+selection reuse the live manager, including instructions/model-only changes.
+Without a live request, disabling a service closes its manager on commit.
+An active Session rejects a simultaneous second Prompt with a definite
+conflict; the next admitted Prompt uses the new revision. Core never replays an
+accepted or unknown tool effect on reconfiguration or restart.
 An unsupported effort or service-tier combination returns HTTP 400 with code
 `unsupported`; the message identifies the model and rejected field/value. An
 unconfigured or ambiguous model selector returns HTTP 400 `invalid_argument`.

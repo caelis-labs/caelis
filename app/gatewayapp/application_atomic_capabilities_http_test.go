@@ -27,7 +27,7 @@ func atomicMCPAudit(service, action string) {
 	}
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err == nil {
-		_, _ = fmt.Fprintf(file, "%s:%s\n", service, action)
+		_, _ = fmt.Fprintf(file, "%s:%s:%d\n", service, action, os.Getpid())
 		_ = file.Close()
 	}
 }
@@ -41,6 +41,15 @@ func runAtomicMCPHelper(t *testing.T, service string) {
 	mcpsdk.AddTool[map[string]any, any](server, &mcpsdk.Tool{Name: "lookup", Description: "Look up a synthetic " + service + " value"},
 		func(_ context.Context, _ *mcpsdk.CallToolRequest, _ map[string]any) (*mcpsdk.CallToolResult, any, error) {
 			atomicMCPAudit(service, "call")
+			if service == "blocking" {
+				release := os.Getenv("CAELIS_ATOMIC_MCP_RELEASE")
+				for {
+					if _, err := os.Stat(release); err == nil {
+						break
+					}
+					time.Sleep(15 * time.Millisecond)
+				}
+			}
 			if service == "callfail" {
 				os.Exit(3)
 			}
@@ -55,6 +64,7 @@ func runAtomicMCPHelper(t *testing.T, service string) {
 func TestAtomicDocumentsMCPHelper(t *testing.T) { runAtomicMCPHelper(t, "documents") }
 func TestAtomicUtilitiesMCPHelper(t *testing.T) { runAtomicMCPHelper(t, "utilities") }
 func TestAtomicCallFailMCPHelper(t *testing.T)  { runAtomicMCPHelper(t, "callfail") }
+func TestAtomicBlockingMCPHelper(t *testing.T)  { runAtomicMCPHelper(t, "blocking") }
 func TestAtomicFailedMCPHelper(t *testing.T) {
 	if os.Getenv("CAELIS_ATOMIC_MCP_HELPER") == "1" {
 		atomicMCPAudit("failed", "start")
@@ -114,6 +124,8 @@ func (p *atomicCapabilityProvider) RoundTrip(req *http.Request) (*http.Response,
 	switch {
 	case latestTool == "ToolSearch" && strings.Contains(latestUser, "CALLFAIL"):
 		name, args = "callfail__lookup", `{}`
+	case latestTool == "ToolSearch" && strings.Contains(latestUser, "BLOCK"):
+		name, args = "blocking__lookup", `{}`
 	case latestTool == "ToolSearch" && strings.Contains(latestUser, "DOC"):
 		name, args = "documents__lookup", `{}`
 	case latestTool == "ToolSearch" && strings.Contains(latestUser, "UTIL"):
@@ -123,6 +135,8 @@ func (p *atomicCapabilityProvider) RoundTrip(req *http.Request) (*http.Response,
 		name, args = "Skill", `{"name":"atomic-skill"}`
 	case strings.Contains(latestUser, "CALLFAIL"):
 		name, args = "ToolSearch", `{"query":"callfail lookup"}`
+	case strings.Contains(latestUser, "BLOCK"):
+		name, args = "ToolSearch", `{"query":"blocking lookup"}`
 	case strings.Contains(latestUser, "DOC"):
 		name, args = "ToolSearch", `{"query":"documents lookup"}`
 	case strings.Contains(latestUser, "UTIL"):
@@ -202,6 +216,267 @@ func waitAtomicAudit(t *testing.T, path, marker string) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatalf("MCP service %q did not start; audit: %s", marker, atomicAudit(path))
+}
+
+func waitAtomicAuditCount(t *testing.T, path, marker string, want int) {
+	t.Helper()
+	deadline := time.Now().Add(8 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Count(atomicAudit(path), marker) >= want {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("audit %q count = %d, want %d; audit: %s", marker, strings.Count(atomicAudit(path), marker), want, atomicAudit(path))
+}
+
+func atomicAssertLiveService(t *testing.T, path, service string, want int) {
+	t.Helper()
+	audit := atomicAudit(path)
+	starts, stops := map[string]bool{}, map[string]bool{}
+	for _, line := range strings.Split(strings.TrimSpace(audit), "\n") {
+		parts := strings.Split(line, ":")
+		if len(parts) != 3 || parts[0] != service {
+			continue
+		}
+		switch parts[1] {
+		case "start":
+			starts[parts[2]] = true
+		case "stop":
+			stops[parts[2]] = true
+		}
+	}
+	live := 0
+	for pid := range starts {
+		if !stops[pid] {
+			live++
+		}
+	}
+	if live != want {
+		t.Fatalf("%s live audited processes = %d, want %d; audit: %s", service, live, want, audit)
+	}
+}
+
+func startAtomicLifecycleSession(t *testing.T, ctx context.Context, root string, provider http.RoundTripper, servers []application.MCPServer) (*applicationHTTPHost, *httpclient.Client, string) {
+	t.Helper()
+	host := startApplicationHTTPHost(t, filepath.Join(root, "store"), root, provider)
+	status, err := host.host.SessionStatus(ctx, appserver.StatusRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := host.host.ConnectModel(ctx, appserver.ConnectModelRequest{WriteBase: appserver.WriteBase{OperationID: "lifecycle-model", ExpectedRevision: &status.Configuration.Revision}, Config: appserver.ConnectConfig{
+		Provider: "openai-compatible", Model: "gpt-4.1", BaseURL: "https://provider.invalid/v1", APIKey: "SYNTHETIC_ONLY",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	client, _ := registerApplicationHTTP(t, ctx, host, "lifecycle", filepath.Join(root, "app.credential"))
+	profile := applicationHTTPProfile()
+	profile.MCPServers = servers
+	created, err := client.CreateApplicationSession(ctx, appserver.CreateApplicationSessionRequest{WriteBase: appserver.WriteBase{OperationID: "lifecycle-create"}, Profile: profile})
+	if err != nil || created.SessionID == "" {
+		t.Fatalf("create = %+v, %v", created, err)
+	}
+	return host, client, created.SessionID
+}
+
+func TestApplicationAtomicMCPRevisionLifecycleHTTP(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
+	defer cancel()
+	root := t.TempDir()
+	audit := filepath.Join(root, "audit")
+	t.Setenv("CAELIS_ATOMIC_MCP_HELPER", "1")
+	t.Setenv("CAELIS_ATOMIC_MCP_AUDIT", audit)
+	server := application.MCPServer{Name: "documents", Transport: "stdio", Command: os.Args[0], Args: []string{"-test.run=^TestAtomicDocumentsMCPHelper$"}, WorkDir: root}
+	provider := &atomicCapabilityProvider{}
+	host, client, session := startAtomicLifecycleSession(t, ctx, root, provider, []application.MCPServer{server})
+	defer host.close(t)
+	promptAtomicCapabilityClient(t, ctx, client, session, "lifecycle-warm", "BASIC")
+	feed, err := client.Reconnect(ctx, appserver.ReconnectRequest{SessionID: session})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer feed.Subscription.Close()
+	waitAtomicAuditCount(t, audit, "documents:start:", 1)
+	configuration, err := client.ApplicationConfiguration(ctx, session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hostStatus, err := host.host.SessionStatus(ctx, appserver.StatusRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := host.host.ConnectModel(ctx, appserver.ConnectModelRequest{WriteBase: appserver.WriteBase{
+		OperationID: "lifecycle-second-model", ExpectedRevision: &hostStatus.Configuration.Revision,
+	}, Config: appserver.ConnectConfig{Provider: "openai-compatible", Model: "gpt-4.2", BaseURL: "https://provider.invalid/v1", APIKey: "SYNTHETIC_ONLY"}}); err != nil {
+		t.Fatal(err)
+	}
+	modelName := "openai-compatible/gpt-4.2"
+	configuration, err = client.UpdateApplicationConfiguration(ctx, session, application.UpdateConfigurationRequest{
+		OperationID: "lifecycle-model-only", ExpectedConfigurationRevision: configuration.Revision,
+		Patch: application.ConfigurationPatch{Model: &modelName},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	promptAtomicCapabilityClient(t, ctx, client, session, "lifecycle-after-model", "BASIC")
+	if got := atomicAudit(audit); strings.Count(got, "documents:start:") != 1 || strings.Contains(got, "documents:stop:") {
+		t.Fatalf("model-only revision restarted MCP: %s", got)
+	}
+	for i := 0; i < 3; i++ {
+		instructions := fmt.Sprintf("revision %d", i)
+		configuration, err = client.UpdateApplicationConfiguration(ctx, session, application.UpdateConfigurationRequest{
+			OperationID: fmt.Sprintf("lifecycle-instructions-%d", i), ExpectedConfigurationRevision: configuration.Revision,
+			Patch: application.ConfigurationPatch{Instructions: &instructions},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		status, err := client.ApplicationMCPStatus(ctx, session)
+		if err != nil || len(status.Servers) != 1 || status.Servers[0].Status != "running" {
+			t.Fatalf("same MCP selection lost resident health after unrelated revision: %+v, %v", status, err)
+		}
+		promptAtomicCapabilityClient(t, ctx, client, session, fmt.Sprintf("lifecycle-basic-%d", i), "BASIC")
+		if got := atomicAudit(audit); strings.Count(got, "documents:start:") != i+1 || strings.Count(got, "documents:stop:") != i {
+			t.Fatalf("unrelated revision restarted MCP: %s", got)
+		}
+		atomicAssertLiveService(t, audit, "documents", 1)
+		empty := []application.MCPServer{}
+		configuration, err = client.UpdateApplicationConfiguration(ctx, session, application.UpdateConfigurationRequest{
+			OperationID: fmt.Sprintf("lifecycle-disable-%d", i), ExpectedConfigurationRevision: configuration.Revision,
+			Patch: application.ConfigurationPatch{MCPServers: &empty},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		waitAtomicAuditCount(t, audit, "documents:stop:", i+1)
+		atomicAssertLiveService(t, audit, "documents", 0)
+		promptAtomicCapabilityClient(t, ctx, client, session, fmt.Sprintf("lifecycle-disabled-%d", i), "BASIC")
+		if strings.Contains(provider.lastTools(), "ToolSearch") {
+			t.Fatal("disabled tool appeared in a new request")
+		}
+		servers := []application.MCPServer{server}
+		configuration, err = client.UpdateApplicationConfiguration(ctx, session, application.UpdateConfigurationRequest{
+			OperationID: fmt.Sprintf("lifecycle-enable-%d", i), ExpectedConfigurationRevision: configuration.Revision,
+			Patch: application.ConfigurationPatch{MCPServers: &servers},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		promptAtomicCapabilityClient(t, ctx, client, session, fmt.Sprintf("lifecycle-doc-%d", i), "DOC")
+		waitAtomicAuditCount(t, audit, "documents:start:", i+2)
+		atomicAssertLiveService(t, audit, "documents", 1)
+	}
+	if got := atomicAudit(audit); strings.Count(got, "documents:call:") != 3 {
+		t.Fatalf("MCP effects were duplicated: %s", got)
+	}
+}
+
+func TestApplicationAtomicMCPPinnedCallAcrossRevisionHTTP(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 35*time.Second)
+	defer cancel()
+	root := t.TempDir()
+	audit := filepath.Join(root, "audit")
+	releasePath := filepath.Join(root, "release")
+	t.Setenv("CAELIS_ATOMIC_MCP_HELPER", "1")
+	t.Setenv("CAELIS_ATOMIC_MCP_AUDIT", audit)
+	t.Setenv("CAELIS_ATOMIC_MCP_RELEASE", releasePath)
+	blocking := application.MCPServer{Name: "blocking", Transport: "stdio", Command: os.Args[0], Args: []string{"-test.run=^TestAtomicBlockingMCPHelper$"}, WorkDir: root}
+	provider := &atomicCapabilityProvider{}
+	host, client, session := startAtomicLifecycleSession(t, ctx, root, provider, []application.MCPServer{blocking})
+	defer host.close(t)
+	defer func() { _ = os.WriteFile(releasePath, []byte("release"), 0o600) }()
+	promptAtomicCapabilityClient(t, ctx, client, session, "pinned-warm", "BASIC")
+	feed, err := client.Reconnect(ctx, appserver.ReconnectRequest{SessionID: session})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer feed.Subscription.Close()
+	result, err := client.PromptApplication(ctx, appserver.ApplicationPromptRequest{PromptRequest: appserver.PromptRequest{
+		WriteBase: appserver.WriteBase{SessionID: session, OperationID: "pinned-old"}, Input: "BLOCK",
+	}, SourceKind: "user"})
+	if err != nil || (result.Outcome != appserver.OutcomeAccepted && result.Outcome != appserver.OutcomeCommitted) {
+		t.Fatalf("old prompt = %+v, %v", result, err)
+	}
+	waitAtomicAuditCount(t, audit, "blocking:call:", 1)
+	configuration, err := client.ApplicationConfiguration(ctx, session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	utilities := []application.MCPServer{{Name: "utilities", Transport: "stdio", Command: os.Args[0], Args: []string{"-test.run=^TestAtomicUtilitiesMCPHelper$"}, WorkDir: root}}
+	updated, err := client.UpdateApplicationConfiguration(ctx, session, application.UpdateConfigurationRequest{
+		OperationID: "pinned-change", ExpectedConfigurationRevision: configuration.Revision,
+		Patch: application.ConfigurationPatch{MCPServers: &utilities},
+	})
+	if err != nil || updated.Revision != configuration.Revision+1 {
+		t.Fatalf("update = %+v, %v", updated, err)
+	}
+	if got := atomicAudit(audit); strings.Contains(got, "blocking:stop:") {
+		t.Fatalf("old MCP closed during an admitted call: %s", got)
+	}
+	atomicAssertLiveService(t, audit, "blocking", 1)
+	// This Session rejects concurrent inputs while the old Turn is active.
+	// The conflict is a definite rejection, so no second effect is dispatched.
+	newResult, newErr := client.PromptApplication(ctx, appserver.ApplicationPromptRequest{PromptRequest: appserver.PromptRequest{
+		WriteBase: appserver.WriteBase{SessionID: session, OperationID: "pinned-new"}, Input: "UTIL",
+	}, SourceKind: "user"})
+	if newErr == nil || newResult.Outcome != appserver.OutcomeConflicted {
+		t.Fatalf("concurrent prompt = %+v, %v; want definite conflict", newResult, newErr)
+	}
+	if err := os.WriteFile(releasePath, []byte("release"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	waitApplicationHTTPIdle(t, ctx, client, session)
+	waitAtomicAuditCount(t, audit, "blocking:stop:", 1)
+	promptAtomicCapabilityClient(t, ctx, client, session, "pinned-new-after-old", "UTIL")
+	waitAtomicAuditCount(t, audit, "utilities:call:", 1)
+	if got := atomicAudit(audit); strings.Count(got, "blocking:call:") != 1 || strings.Count(got, "utilities:call:") != 1 {
+		t.Fatalf("old or new effect replayed: %s", got)
+	}
+	atomicAssertLiveService(t, audit, "blocking", 0)
+	atomicAssertLiveService(t, audit, "utilities", 1)
+	if !strings.Contains(provider.snapshot(), "blocking_RESULT") || !strings.Contains(provider.snapshot(), "utilities_RESULT") {
+		t.Fatalf("old response or new ability missing: %s", provider.snapshot())
+	}
+}
+
+func TestApplicationAtomicMCPFailedUpdateConcurrentCloseHTTP(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 25*time.Second)
+	defer cancel()
+	root := t.TempDir()
+	audit := filepath.Join(root, "audit")
+	t.Setenv("CAELIS_ATOMIC_MCP_HELPER", "1")
+	t.Setenv("CAELIS_ATOMIC_MCP_AUDIT", audit)
+	server := application.MCPServer{Name: "documents", Transport: "stdio", Command: os.Args[0], Args: []string{"-test.run=^TestAtomicDocumentsMCPHelper$"}, WorkDir: root}
+	host, client, session := startAtomicLifecycleSession(t, ctx, root, &atomicCapabilityProvider{}, []application.MCPServer{server})
+	promptAtomicCapabilityClient(t, ctx, client, session, "close-race-warm", "BASIC")
+	feed, err := client.Reconnect(ctx, appserver.ReconnectRequest{SessionID: session})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitAtomicAuditCount(t, audit, "documents:start:", 1)
+	configuration, err := client.ApplicationConfiguration(ctx, session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := make(chan struct{})
+	finished := make(chan error, 1)
+	go func() {
+		close(started)
+		missing := []string{filepath.Join(root, "missing-skill-root")}
+		_, updateErr := client.UpdateApplicationConfiguration(ctx, session, application.UpdateConfigurationRequest{
+			OperationID: "close-race-invalid", ExpectedConfigurationRevision: configuration.Revision,
+			Patch: application.ConfigurationPatch{SkillRoots: &missing},
+		})
+		finished <- updateErr
+	}()
+	<-started
+	host.close(t)
+	_ = feed.Subscription.Close()
+	if updateErr := <-finished; updateErr == nil {
+		t.Fatal("invalid concurrent update succeeded")
+	}
+	waitAtomicAuditCount(t, audit, "documents:stop:", 1)
+	atomicAssertLiveService(t, audit, "documents", 0)
 }
 
 func TestApplicationAtomicCapabilitiesHTTP(t *testing.T) {

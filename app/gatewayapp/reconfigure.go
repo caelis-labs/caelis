@@ -135,6 +135,7 @@ type gatewayRuntimeBundle struct {
 	MCP                         *mcp.Manager
 	CloseCapabilities           func()
 	CapabilityStatus            func(uint64) []application.MCPServerStatus
+	CapabilityUpdated           func(application.Configuration)
 	RuntimeConfig               stackRuntimeConfig
 	EstimatedPromptPrefixTokens int
 	ReleasePluginCache          func() error
@@ -620,8 +621,10 @@ func (s *runtimeComposition) swapGatewayRuntime(bundle *gatewayRuntimeBundle) {
 	s.mcpMgr = bundle.MCP
 	s.capabilityClose = bundle.CloseCapabilities
 	s.capabilityStatus = bundle.CapabilityStatus
+	s.capabilityUpdated = bundle.CapabilityUpdated
 	bundle.CloseCapabilities = nil
 	bundle.CapabilityStatus = nil
+	bundle.CapabilityUpdated = nil
 	s.pluginCacheRelease = bundle.ReleasePluginCache
 	bundle.ReleasePluginCache = nil
 	s.mu.Unlock()

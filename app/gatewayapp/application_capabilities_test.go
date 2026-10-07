@@ -44,3 +44,18 @@ func TestApplicationSkillRootLoadsOnlySelectedMetadataThenBody(t *testing.T) {
 		t.Fatalf("on-demand body = %+v, %v", loaded, err)
 	}
 }
+
+func TestApplicationSkillCatalogDoesNotSilentlyDropMissingSelectedRoot(t *testing.T) {
+	root := t.TempDir()
+	healthy := filepath.Join(root, "healthy")
+	if err := os.Mkdir(healthy, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(healthy, "SKILL.md"), []byte("---\nname: healthy\ndescription: Healthy synthetic skill.\n---\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	missing := filepath.Join(root, "selected-but-missing")
+	if _, err := applicationSkillCatalog(application.Profile{SkillRoots: []string{healthy, missing}}); err == nil || !strings.Contains(err.Error(), missing) {
+		t.Fatalf("missing selected Skill was silently omitted: %v", err)
+	}
+}

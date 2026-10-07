@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"reflect"
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
@@ -23,7 +24,17 @@ type applicationCapabilities struct {
 	skillTool  tool.Tool
 	searchTool tool.Tool
 	source     tool.Source
-	manager    *mcp.Manager
+	resource   *applicationMCPResource
+}
+
+// The resolver owns the current MCP configuration; each model snapshot also
+// holds a reference until its response and tool calls have completed.
+type applicationMCPResource struct {
+	servers []application.MCPServer
+	manager *mcp.Manager
+	refs    int
+	retired bool
+	closed  bool
 }
 
 type applicationMCPSource struct {
@@ -101,59 +112,141 @@ func applicationMCPSpecs(profile application.Profile) []mcp.ServerSpec {
 	return specs
 }
 
-func (r *applicationTurnResolver) capabilitiesFor(ctx context.Context, configuration application.Configuration) (*applicationCapabilities, error) {
+func (r *applicationTurnResolver) acquireCapabilities(ctx context.Context, configuration application.Configuration) (*applicationCapabilities, func(), error) {
 	r.capabilitiesMu.Lock()
 	defer r.capabilitiesMu.Unlock()
+	if r.capabilitiesClosed {
+		return nil, nil, fmt.Errorf("application capabilities are closed")
+	}
+	var obsolete *mcp.Manager
+	if configuration.Revision > r.desiredRevision {
+		obsolete = r.setDesiredCapabilitiesLocked(configuration)
+	}
+	if obsolete != nil {
+		// No admitted snapshot references this manager. Closing while holding
+		// the resolver lock keeps a later acquisition from racing its shutdown.
+		_ = obsolete.Close()
+	}
 	if existing := r.capabilities[configuration.Revision]; existing != nil {
-		return existing, nil
+		return existing, r.retainCapabilitiesLocked(existing), nil
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	catalog, err := applicationSkillCatalog(configuration.Profile)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	assembled := &applicationCapabilities{catalog: catalog}
 	if len(catalog.Metas()) != 0 {
 		assembled.skillTool = skilltool.New(skilltool.Config{Loader: skillfs.Loader{}, Catalog: catalog})
 	}
 	if len(configuration.Profile.MCPServers) != 0 {
-		manager, err := mcp.NewManager(context.WithoutCancel(ctx), applicationMCPSpecs(configuration.Profile), nil)
-		if err != nil {
-			return nil, err
+		resource := r.currentMCP
+		if resource == nil || !reflect.DeepEqual(resource.servers, configuration.Profile.MCPServers) {
+			manager, err := mcp.NewManager(context.WithoutCancel(ctx), applicationMCPSpecs(configuration.Profile), nil)
+			if err != nil {
+				return nil, nil, err
+			}
+			resource = &applicationMCPResource{servers: append([]application.MCPServer(nil), configuration.Profile.MCPServers...), manager: manager, retired: configuration.Revision < r.desiredRevision}
+			if !resource.retired {
+				r.currentMCP = resource
+			}
 		}
-		assembled.manager = manager
-		assembled.source = applicationMCPSource{manager: manager, store: r.composition.authorities.applications, scope: r.binding.Scope}
+		assembled.resource = resource
+		assembled.source = applicationMCPSource{manager: resource.manager, store: r.composition.authorities.applications, scope: r.binding.Scope}
 		assembled.searchTool = toolsearch.NewSource(assembled.source)
 	}
-	if r.capabilities == nil {
+	if configuration.Revision >= r.desiredRevision && r.capabilities == nil {
 		r.capabilities = map[uint64]*applicationCapabilities{}
 	}
-	r.capabilities[configuration.Revision] = assembled
-	return assembled, nil
+	if configuration.Revision >= r.desiredRevision {
+		r.capabilities[configuration.Revision] = assembled
+	}
+	return assembled, r.retainCapabilitiesLocked(assembled), nil
+}
+
+func (r *applicationTurnResolver) retainCapabilitiesLocked(capability *applicationCapabilities) func() {
+	if capability.resource == nil {
+		return func() {}
+	}
+	resource := capability.resource
+	resource.refs++
+	return func() {
+		r.capabilitiesMu.Lock()
+		resource.refs--
+		closeManager := resource.retired && resource.refs == 0 && !resource.closed
+		if closeManager {
+			resource.closed = true
+			// Serialize shutdown with activation close and new acquisitions.
+			_ = resource.manager.Close()
+		}
+		r.capabilitiesMu.Unlock()
+	}
+}
+
+func (r *applicationTurnResolver) setDesiredCapabilitiesLocked(configuration application.Configuration) *mcp.Manager {
+	r.desiredRevision = configuration.Revision
+	for revision := range r.capabilities {
+		if revision < configuration.Revision {
+			delete(r.capabilities, revision)
+		}
+	}
+	current := r.currentMCP
+	if current == nil || reflect.DeepEqual(current.servers, configuration.Profile.MCPServers) {
+		return nil
+	}
+	r.currentMCP = nil
+	current.retired = true
+	if current.refs == 0 {
+		current.closed = true
+		return current.manager
+	}
+	return nil
+}
+
+func (r *applicationTurnResolver) configurationCommitted(configuration application.Configuration) {
+	r.capabilitiesMu.Lock()
+	if !r.capabilitiesClosed && configuration.Revision > r.desiredRevision {
+		if obsolete := r.setDesiredCapabilitiesLocked(configuration); obsolete != nil {
+			_ = obsolete.Close()
+		}
+	}
+	r.capabilitiesMu.Unlock()
 }
 
 func (r *applicationTurnResolver) closeCapabilities() {
 	r.capabilitiesMu.Lock()
-	assembled := r.capabilities
+	r.capabilitiesClosed = true
 	r.capabilities = nil
-	r.capabilitiesMu.Unlock()
-	for _, capability := range assembled {
-		if capability.manager != nil {
-			_ = capability.manager.Close()
-		}
+	current := r.currentMCP
+	r.currentMCP = nil
+	if current != nil {
+		current.retired = true
 	}
+	closeManager := current != nil && current.refs == 0 && !current.closed
+	if closeManager {
+		current.closed = true
+		_ = current.manager.Close()
+	}
+	r.capabilitiesMu.Unlock()
 }
 
 func (r *applicationTurnResolver) capabilityStatus(revision uint64) []application.MCPServerStatus {
 	r.capabilitiesMu.Lock()
 	capability := r.capabilities[revision]
+	current := r.currentMCP
+	desired := r.desiredRevision
 	r.capabilitiesMu.Unlock()
-	if capability == nil || capability.manager == nil {
+	if capability != nil {
+		current = capability.resource
+	} else if revision != desired {
+		current = nil
+	}
+	if current == nil {
 		return nil
 	}
-	infos := capability.manager.GetServerInfos("application")
+	infos := current.manager.GetServerInfos("application")
 	result := make([]application.MCPServerStatus, 0, len(infos))
 	for _, info := range infos {
 		result = append(result, application.MCPServerStatus{Name: info.Name, Status: info.Status, Tools: info.Tools, Warning: info.Warning})

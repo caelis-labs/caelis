@@ -38,6 +38,7 @@ type Agent struct {
 	resolveModelRequest agent.ModelRequestResolver
 	instructions        []model.Part
 	admitModelRequest   func(context.Context, agent.ModelRequestAdmission) error
+	releaseModelRequest func()
 	discoveredTools     []string
 }
 
@@ -122,6 +123,11 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 		// product. Its tools remain fixed until their response has been executed.
 		runAgent := *a
 		a := &runAgent
+		defer func() {
+			if a.releaseModelRequest != nil {
+				a.releaseModelRequest()
+			}
+		}()
 		messages := messagesFromContext(ctx)
 		watchdog := newDefaultGenerationWatchdog()
 		visibility := tool.NewToolVisibilityForModel(a.tools, a.model)

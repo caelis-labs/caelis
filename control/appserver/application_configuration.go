@@ -88,7 +88,11 @@ func (s *ApplicationService) UpdateApplicationConfiguration(ctx context.Context,
 	if s.config.ReviewerState == nil && req.Patch.Tools != nil && requiresApplicationCallbackApproval(*req.Patch.Tools) {
 		return application.Configuration{}, application.ErrUnsupported
 	}
-	return s.config.Store.UpdateConfiguration(ctx, scope, sessionID, req, s.config.ValidateProfile)
+	updated, err := s.config.Store.UpdateConfiguration(ctx, scope, sessionID, req, s.config.ValidateProfile)
+	if err == nil && s.config.ConfigurationCommitted != nil {
+		s.config.ConfigurationCommitted(ctx, sessionID, updated)
+	}
+	return updated, err
 }
 
 // ApplicationConfigurationOperation returns the original atomic update receipt,

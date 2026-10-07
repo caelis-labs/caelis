@@ -64,6 +64,7 @@ type runtimeComposition struct {
 	mcpMgr             *mcp.Manager
 	capabilityClose    func()
 	capabilityStatus   func(uint64) []application.MCPServerStatus
+	capabilityUpdated  func(application.Configuration)
 	pluginCacheRelease func() error
 	retainRuntimeWork  func(session.SessionRef) func()
 	runtimeTaskChanged func(session.SessionRef)

@@ -113,11 +113,12 @@ func assembleHostControlServices(stack *Stack, cfg Config, storeDir string, curs
 	stack.pluginCommands = controlCommands
 	stack.applications, err = appserver.NewApplicationService(appserver.ApplicationServiceConfig{
 		Store: stack.composition.authorities.applications, Commands: controlCommands, Sessions: controlClient,
-		ValidateProfile: stack.composition.validateApplicationProfile,
-		ModelImageInput: stack.composition.applicationModelImageInput,
-		MCPStatus:       stack.applicationMCPStatus,
-		ReviewerState:   stack.composition.applicationReviewerState,
-		NativeExecution: validateApplicationExecutionPlatform("workspace-write") == nil,
+		ValidateProfile:        stack.composition.validateApplicationProfile,
+		ModelImageInput:        stack.composition.applicationModelImageInput,
+		MCPStatus:              stack.applicationMCPStatus,
+		ConfigurationCommitted: stack.applicationConfigurationCommitted,
+		ReviewerState:          stack.composition.applicationReviewerState,
+		NativeExecution:        validateApplicationExecutionPlatform("workspace-write") == nil,
 	})
 	if err != nil {
 		return hostControlAssembly{}, err
