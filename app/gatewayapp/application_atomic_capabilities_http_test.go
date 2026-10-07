@@ -606,6 +606,24 @@ func TestApplicationAtomicMCPPinnedCallAcrossRevisionHTTP(t *testing.T) {
 		t.Fatalf("old prompt = %+v, %v", result, err)
 	}
 	waitAtomicAuditCount(t, audit, "blocking:call:", 1)
+	// The warm request may have retired a different process before this call.
+	// Track the exact process that accepted the blocked tool invocation.
+	callPID := ""
+	for _, line := range strings.Split(atomicAudit(audit), "\n") {
+		pid, ok := strings.CutPrefix(line, "blocking:call:")
+		if !ok {
+			continue
+		}
+		if pid == "" || callPID != "" {
+			t.Fatalf("expected one complete blocked-call PID; audit: %s", atomicAudit(audit))
+		}
+		callPID = pid
+	}
+	if callPID == "" {
+		t.Fatalf("missing blocked-call PID; audit: %s", atomicAudit(audit))
+	}
+	callStart := "blocking:start:" + callPID + "\n"
+	callStop := "blocking:stop:" + callPID + "\n"
 	configuration, err := client.ApplicationConfiguration(ctx, session)
 	if err != nil {
 		t.Fatal(err)
@@ -618,8 +636,8 @@ func TestApplicationAtomicMCPPinnedCallAcrossRevisionHTTP(t *testing.T) {
 	if err != nil || updated.Revision != configuration.Revision+1 {
 		t.Fatalf("update = %+v, %v", updated, err)
 	}
-	if got := atomicAudit(audit); strings.Contains(got, "blocking:stop:") {
-		t.Fatalf("old MCP closed during an admitted call: %s", got)
+	if got := atomicAudit(audit); !strings.Contains(got, callStart) || strings.Contains(got, callStop) {
+		t.Fatalf("MCP process holding admitted call is not alive: %s", got)
 	}
 	atomicAssertLiveService(t, audit, "blocking", 1)
 	// This Session rejects concurrent inputs while the old Turn is active.
@@ -634,7 +652,7 @@ func TestApplicationAtomicMCPPinnedCallAcrossRevisionHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitApplicationHTTPIdle(t, ctx, client, session)
-	waitAtomicAuditCount(t, audit, "blocking:stop:", 1)
+	waitAtomicAudit(t, audit, callStop)
 	promptAtomicCapabilityClient(t, ctx, client, session, "pinned-new-after-old", "UTIL")
 	waitAtomicAuditCount(t, audit, "utilities:call:", 1)
 	if got := atomicAudit(audit); strings.Count(got, "blocking:call:") != 1 || strings.Count(got, "utilities:call:") != 1 {
