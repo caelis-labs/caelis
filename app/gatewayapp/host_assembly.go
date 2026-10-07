@@ -115,6 +115,7 @@ func assembleHostControlServices(stack *Stack, cfg Config, storeDir string, curs
 		Store: stack.composition.authorities.applications, Commands: controlCommands, Sessions: controlClient,
 		ValidateProfile: stack.composition.validateApplicationProfile,
 		ModelImageInput: stack.composition.applicationModelImageInput,
+		MCPStatus:       stack.applicationMCPStatus,
 		ReviewerState:   stack.composition.applicationReviewerState,
 		NativeExecution: validateApplicationExecutionPlatform("workspace-write") == nil,
 	})

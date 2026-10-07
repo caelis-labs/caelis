@@ -2,6 +2,7 @@ package appserver
 
 import (
 	"context"
+	"strconv"
 
 	"github.com/caelis-labs/caelis/control/application"
 )
@@ -23,6 +24,9 @@ func (s *ApplicationService) Capabilities() []string {
 	}
 	if s.config.ValidateProfile != nil {
 		out = append(out, application.CapabilityHotConfiguration)
+		if s.config.MCPStatus != nil {
+			out = append(out, application.CapabilityAtomicCapabilities)
+		}
 	}
 	if s.config.NativeExecution {
 		out = append(out, application.CapabilityNativeExecution, application.CapabilityWorkspaceBinding)
@@ -38,6 +42,36 @@ func (s *ApplicationService) ApplicationConfiguration(ctx context.Context, p Pri
 		return application.Configuration{}, err
 	}
 	return s.config.Store.Configuration(ctx, scope, sessionID)
+}
+
+// ApplicationMCPStatus reads only this connection's desired service names and
+// optional resident health. Reading it never starts or retries an MCP service.
+func (s *ApplicationService) ApplicationMCPStatus(ctx context.Context, p Principal, sessionID string) (application.MCPStatus, error) {
+	scope, err := ApplicationScope(p)
+	if err != nil {
+		return application.MCPStatus{}, err
+	}
+	if s.config.MCPStatus == nil {
+		return application.MCPStatus{}, application.ErrUnsupported
+	}
+	configuration, err := s.config.Store.Configuration(ctx, scope, sessionID)
+	if err != nil {
+		return application.MCPStatus{}, err
+	}
+	observed := s.config.MCPStatus(ctx, sessionID, configuration.Revision)
+	byName := make(map[string]application.MCPServerStatus, len(observed))
+	for _, server := range observed {
+		byName[server.Name] = server
+	}
+	status := application.MCPStatus{SessionID: sessionID, ConfigurationRevision: strconv.FormatUint(configuration.Revision, 10), Servers: make([]application.MCPServerStatus, 0, len(configuration.Profile.MCPServers))}
+	for _, declared := range configuration.Profile.MCPServers {
+		server, ok := byName[declared.Name]
+		if !ok {
+			server = application.MCPServerStatus{Name: declared.Name, Status: "inactive"}
+		}
+		status.Servers = append(status.Servers, server)
+	}
+	return status, nil
 }
 
 // UpdateApplicationConfiguration commits a validated profile without submitting

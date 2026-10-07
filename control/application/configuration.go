@@ -181,6 +181,24 @@ func applyConfigurationPatch(p Profile, patch ConfigurationPatch) (Profile, erro
 		}
 		p.NativeTools = *patch.NativeTools
 	}
+	if patch.MCPServers != nil {
+		if *patch.MCPServers == nil {
+			return Profile{}, ErrInvalid
+		}
+		p.MCPServers = *patch.MCPServers
+	}
+	if patch.SkillDirs != nil {
+		if *patch.SkillDirs == nil {
+			return Profile{}, ErrInvalid
+		}
+		p.SkillDirs = *patch.SkillDirs
+	}
+	if patch.SkillRoots != nil {
+		if *patch.SkillRoots == nil {
+			return Profile{}, ErrInvalid
+		}
+		p.SkillRoots = *patch.SkillRoots
+	}
 	if err := ValidateProfile(p); err != nil {
 		return Profile{}, err
 	}

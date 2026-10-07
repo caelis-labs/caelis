@@ -936,6 +936,9 @@ func (s *runtimeComposition) closeWorkspaceResources() error {
 	s.guardian = nil
 	mcpMgr := s.mcpMgr
 	s.mcpMgr = nil
+	capabilityClose := s.capabilityClose
+	s.capabilityClose = nil
+	s.capabilityStatus = nil
 	pluginCacheRelease := s.pluginCacheRelease
 	s.mu.Unlock()
 
@@ -950,6 +953,9 @@ func (s *runtimeComposition) closeWorkspaceResources() error {
 	var mcpErr error
 	if mcpMgr != nil {
 		mcpErr = mcpMgr.Close()
+	}
+	if capabilityClose != nil {
+		capabilityClose()
 	}
 	if execErr != nil || mcpErr != nil {
 		s.mu.Lock()

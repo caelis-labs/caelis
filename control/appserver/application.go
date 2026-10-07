@@ -70,6 +70,9 @@ type ApplicationServiceConfig struct {
 	// ModelImageInput reads the selected model without activation or model calls.
 	// Nil capability means unknown; an unbound reader leaves negotiation absent.
 	ModelImageInput func(context.Context, application.Profile) (*bool, error)
+	// MCPStatus observes resident per-service health without activating a
+	// Session Runtime. The application Store remains the authorization owner.
+	MCPStatus func(context.Context, string, uint64) []application.MCPServerStatus
 	// ReviewerState reports local reviewer readiness from the creation-bound
 	// profile without activating a Runtime or contacting the provider. Nil
 	// disables Guardian review admission and capability negotiation.

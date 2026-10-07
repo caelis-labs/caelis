@@ -105,8 +105,8 @@ func validateSpec(spec openAPISpec) error {
 	if spec.OpenAPI != "3.1.0" {
 		return fmt.Errorf("openapi version = %q, want 3.1.0", spec.OpenAPI)
 	}
-	if len(operationIDs(spec)) != 118 {
-		return fmt.Errorf("operation count = %d, want 118", len(operationIDs(spec)))
+	if len(operationIDs(spec)) != 119 {
+		return fmt.Errorf("operation count = %d, want 119", len(operationIDs(spec)))
 	}
 	required := []string{
 		"CreateSessionRequest", "CloseSessionRequest", "CompactSessionRequest", "PromptRequest", "SteerRequest", "CancelRequest",
@@ -120,7 +120,7 @@ func validateSpec(spec openAPISpec) error {
 		"CompletionRequest", "PluginRequest", "AddMarketplaceRequest", "UpdateMarketplaceRequest", "RemoveMarketplaceRequest",
 		"AddPluginPathRequest", "InstallPluginRequest", "EnablePluginRequest", "DisablePluginRequest", "RemovePluginRequest",
 		"ApplicationRegistration", "ApplicationConnection", "ApplicationProfile", "ApplicationToolDefinition", "ApplicationInheritance",
-		"ApplicationBinding", "ApplicationBindingList", "CreateApplicationSessionRequest", "ApplicationPromptRequest",
+		"ApplicationMCPServer", "ApplicationMCPStatus", "ApplicationMCPServerStatus", "ApplicationBinding", "ApplicationBindingList", "CreateApplicationSessionRequest", "ApplicationPromptRequest",
 		"ApplicationModelCapabilities", "ApplicationConfiguration", "ApplicationConfigurationPatch", "UpdateApplicationConfigurationRequest",
 		"ApplicationWorkspace", "ApplicationWorkspaceAccess", "ApplicationPermissions",
 		"ApplicationBackgroundGrant", "ApplicationBackgroundGrantList", "ApplicationBackgroundGrantRequest",

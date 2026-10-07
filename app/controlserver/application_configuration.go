@@ -25,6 +25,14 @@ func (s *Server) applicationConfigurationRoutes() {
 		out, err := service.ApplicationModelCapabilities(r.Context(), p, r.PathValue("session_id"))
 		writeJSONResult(w, out, err)
 	})
+	s.mux.HandleFunc("GET "+apiPrefix+"/application/sessions/{session_id}/mcp-status", func(w http.ResponseWriter, r *http.Request) {
+		p, _, ok := s.requireApplication(w, r)
+		if !ok {
+			return
+		}
+		out, err := service.ApplicationMCPStatus(r.Context(), p, r.PathValue("session_id"))
+		writeJSONResult(w, out, err)
+	})
 	s.mux.HandleFunc("GET "+apiPrefix+"/application/sessions/{session_id}/configuration", func(w http.ResponseWriter, r *http.Request) {
 		p, _, ok := s.requireApplication(w, r)
 		if !ok {

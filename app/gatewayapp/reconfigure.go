@@ -26,6 +26,7 @@ import (
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/sandboxpolicy"
 	"github.com/caelis-labs/caelis/control/agentbinding"
+	"github.com/caelis-labs/caelis/control/application"
 	"github.com/caelis-labs/caelis/control/plugin"
 	"github.com/caelis-labs/caelis/control/sessionvisibility"
 	acpassembly "github.com/caelis-labs/caelis/internal/acpagentbridge/assembly"
@@ -132,6 +133,8 @@ type gatewayRuntimeBundle struct {
 	Placement                   controlplane.PlacementExecutor
 	ACPControlPlane             *acpassembly.ControlPlane
 	MCP                         *mcp.Manager
+	CloseCapabilities           func()
+	CapabilityStatus            func(uint64) []application.MCPServerStatus
 	RuntimeConfig               stackRuntimeConfig
 	EstimatedPromptPrefixTokens int
 	ReleasePluginCache          func() error
@@ -160,6 +163,10 @@ func (b *gatewayRuntimeBundle) Close() {
 	if b.MCP != nil {
 		_ = b.MCP.Close()
 		b.MCP = nil
+	}
+	if b.CloseCapabilities != nil {
+		b.CloseCapabilities()
+		b.CloseCapabilities = nil
 	}
 	if b.ReleasePluginCache != nil {
 		_ = b.ReleasePluginCache()
@@ -598,6 +605,7 @@ func (s *runtimeComposition) swapGatewayRuntime(bundle *gatewayRuntimeBundle) {
 	oldExec := s.exec
 	oldGuardian := s.guardian
 	oldMcpMgr := s.mcpMgr
+	oldCapabilityClose := s.capabilityClose
 	oldPluginCacheRelease := s.pluginCacheRelease
 	currentRuntime := cloneActiveRuntimeConfig(bundle.RuntimeConfig)
 	currentRuntime.EstimatedPromptPrefixTokens = bundle.EstimatedPromptPrefixTokens
@@ -610,6 +618,10 @@ func (s *runtimeComposition) swapGatewayRuntime(bundle *gatewayRuntimeBundle) {
 	s.placement = bundle.Placement
 	s.acpControlPlane = bundle.ACPControlPlane
 	s.mcpMgr = bundle.MCP
+	s.capabilityClose = bundle.CloseCapabilities
+	s.capabilityStatus = bundle.CapabilityStatus
+	bundle.CloseCapabilities = nil
+	bundle.CapabilityStatus = nil
 	s.pluginCacheRelease = bundle.ReleasePluginCache
 	bundle.ReleasePluginCache = nil
 	s.mu.Unlock()
@@ -621,6 +633,9 @@ func (s *runtimeComposition) swapGatewayRuntime(bundle *gatewayRuntimeBundle) {
 	}
 	if oldMcpMgr != nil {
 		_ = oldMcpMgr.Close()
+	}
+	if oldCapabilityClose != nil {
+		oldCapabilityClose()
 	}
 	if oldPluginCacheRelease != nil {
 		_ = oldPluginCacheRelease()

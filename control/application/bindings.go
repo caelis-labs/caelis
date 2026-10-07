@@ -6,15 +6,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"path/filepath"
 	"regexp"
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
+	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/google/jsonschema-go/jsonschema"
 )
 
 var toolName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_.-]{0,127}$`)
+var mcpServerName = regexp.MustCompile(`^[a-z][a-z0-9_]{0,31}$`)
 
 // ValidateProfile requires a complete profile. Execution authority is separate
 // from hot configuration; Host instructions, models and catalogs are not inherited.
@@ -58,8 +61,44 @@ func ValidateProfile(p Profile) error {
 	if err := validateReviewer(p); err != nil {
 		return err
 	}
-	if len(p.Instructions) > 1<<20 || len(p.Tools) > 128 {
+	if len(p.Instructions) > 1<<20 || len(p.Tools) > 128 || len(p.MCPServers) > 16 || len(p.SkillDirs)+len(p.SkillRoots) > 64 {
 		return fmt.Errorf("%w: profile size limit", ErrInvalid)
+	}
+	seenServers := map[string]bool{}
+	for _, server := range p.MCPServers {
+		if !mcpServerName.MatchString(server.Name) || seenServers[server.Name] {
+			return fmt.Errorf("%w: duplicate or invalid MCP server name %q", ErrInvalid, server.Name)
+		}
+		seenServers[server.Name] = true
+		if len(server.Command) > 4096 || len(server.WorkDir) > 4096 || len(server.URL) > 8192 {
+			return fmt.Errorf("%w: MCP launch or URL field is too long", ErrInvalid)
+		}
+		if len(server.Args) > 64 {
+			return fmt.Errorf("%w: too many MCP arguments", ErrInvalid)
+		}
+		for _, arg := range server.Args {
+			if len(arg) > 4096 {
+				return fmt.Errorf("%w: MCP argument is too long", ErrInvalid)
+			}
+		}
+		switch server.Transport {
+		case "stdio":
+			if strings.TrimSpace(server.Command) == "" || !filepath.IsAbs(server.WorkDir) || server.URL != "" {
+				return fmt.Errorf("%w: stdio MCP requires command and absolute work_dir without url", ErrInvalid)
+			}
+		case "streamable_http", "sse":
+			endpoint, err := url.Parse(server.URL)
+			if err != nil || endpoint.Host == "" || endpoint.User != nil || (endpoint.Scheme != "http" && endpoint.Scheme != "https") || server.Command != "" || server.WorkDir != "" || len(server.Args) != 0 {
+				return fmt.Errorf("%w: remote MCP requires an HTTP url without command fields", ErrInvalid)
+			}
+		default:
+			return fmt.Errorf("%w: unsupported MCP transport", ErrUnsupported)
+		}
+	}
+	for _, path := range append(append([]string(nil), p.SkillDirs...), p.SkillRoots...) {
+		if !filepath.IsAbs(path) || strings.TrimSpace(path) != path || path == "" {
+			return fmt.Errorf("%w: Skill directories and roots must be absolute paths", ErrInvalid)
+		}
 	}
 	if p.Execution == "tools-only" && len(p.NativeTools) != 0 {
 		return fmt.Errorf("%w: native tools require workspace-write execution", ErrInvalid)
@@ -82,6 +121,14 @@ func ValidateProfile(p Profile) error {
 			return fmt.Errorf("%w: duplicate or invalid tool name", ErrInvalid)
 		}
 		seen[def.Name] = true
+		if (len(p.SkillDirs)+len(p.SkillRoots) > 0 && def.Name == "Skill") || (len(p.MCPServers) > 0 && def.Name == tool.ToolSearchToolName) {
+			return fmt.Errorf("%w: callback collides with an assembled capability tool", ErrInvalid)
+		}
+		for _, server := range p.MCPServers {
+			if strings.HasPrefix(strings.ToLower(def.Name), server.Name+"__") {
+				return fmt.Errorf("%w: callback name %q reserves MCP server %q namespace", ErrInvalid, def.Name, server.Name)
+			}
+		}
 		if def.ApprovalPolicy != "" && def.ApprovalPolicy != "direct" && def.ApprovalPolicy != "required" {
 			return fmt.Errorf("%w: unsupported callback approval_policy for %s", ErrInvalid, def.Name)
 		}
