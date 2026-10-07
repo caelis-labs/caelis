@@ -163,6 +163,11 @@ adds cost without improving unrelated changes:
 | npm launcher or package handoff | `npm --prefix npm test` |
 | Release assembly | `make release-dry-run` |
 
+`client-protocol-check` verifies generated files and checks selected production
+Application request/response JSON against OpenAPI. The generated Application
+MCP/Skill DTOs also have a separate production HTTP round-trip fixture under
+`app/gatewayapp`; that fixture requires local loopback access.
+
 Concurrency, lease, persistence, broker, and lifecycle changes also require the
 narrowest relevant `go test -race` package. File locking, atomic replacement,
 and WAL recovery require native Windows evidence when Windows behavior changes;

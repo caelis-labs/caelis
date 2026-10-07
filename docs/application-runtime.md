@@ -177,6 +177,10 @@ configuration. Skill names and descriptions enter the model request; the SDK
 `Skill` tool loads the selected body only when called. The application owns
 package validation, installation, enable state, storage and OAuth. Core does not
 interpret plugin manifests, install packages or execute installation scripts.
+The published `ApplicationProfile` and `ApplicationConfigurationPatch` schemas
+and generated Go/TypeScript DTOs include all three selections. In a generated
+Go configuration patch, a nil slice preserves the previous selection; a
+non-nil empty slice sends `[]` and clears it.
 
 Each `mcp_servers` entry has a unique lowercase domain `name` (up to 32
 characters) and an explicit `transport`: `stdio`, `streamable_http`, or `sse`.
