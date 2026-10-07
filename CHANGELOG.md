@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.67.1](https://github.com/caelis-labs/caelis/compare/v0.67.0...v0.67.1) (2026-10-07)
+
+
+### Bug Fixes
+
+* **application:** publish atomic capability fields in v1 schema ([da36cd9](https://github.com/caelis-labs/caelis/commit/da36cd966d90e226acb8ece899beaec8cf9d6a80))
+
 ## [0.67.0](https://github.com/caelis-labs/caelis/compare/v0.66.0...v0.67.0) (2026-10-07)
 
 
