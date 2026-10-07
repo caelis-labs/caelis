@@ -84,6 +84,34 @@ func DiscoverMetaRequest(req skill.DiscoverRequest) ([]Meta, error) {
 	return out, nil
 }
 
+// DiscoverRootMeta reads metadata for one explicitly selected Skill root. It
+// does not scan siblings or load the Skill body into a model prompt.
+func DiscoverRootMeta(root string) (Meta, error) {
+	resolved, err := ResolvePath(root)
+	if err != nil {
+		return Meta{}, err
+	}
+	info, err := os.Stat(resolved)
+	if err != nil {
+		return Meta{}, err
+	}
+	if !info.IsDir() {
+		return Meta{}, fmt.Errorf("skill root is not a directory: %s", resolved)
+	}
+	path := filepath.Join(resolved, "SKILL.md")
+	info, err = os.Stat(path)
+	if err != nil {
+		return Meta{}, err
+	}
+	meta, _, err := parseMetaHashCached(path, info)
+	if err != nil {
+		return Meta{}, err
+	}
+	meta.Source = skill.SourceRegular
+	meta.LocalName = meta.Name
+	return meta, nil
+}
+
 func DiscoverLegacyPluginCopies(req skill.DiscoverRequest) ([]Meta, error) {
 	dirs := discoveryDirs(req.Dirs, req.WorkspaceDir)
 	_, suppressedRegular, err := discoverPluginBundleMeta(req.PluginBundles)
