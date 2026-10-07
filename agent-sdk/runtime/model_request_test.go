@@ -136,9 +136,12 @@ func TestRuntimeModelRequestSnapshotsPinInflightToolsAndRefreshSameTurn(t *testi
 	}
 	oldModel, newModel := newRequestSnapshotModel("old-model"), newRequestSnapshotModel("new-model")
 	oldCalls, newCalls := make(chan tool.Call, 1), make(chan tool.Call, 1)
+	var oldReleases, newReleases atomic.Int64
 	oldConfig := snapshotTestConfig("old", oldModel, snapshotTestTool("old", oldCalls))
 	oldConfig.Request.ServiceTier = model.ServiceTierPriority
+	oldConfig.Release = func() { oldReleases.Add(1) }
 	newConfig := snapshotTestConfig("new", newModel, snapshotTestTool("new", newCalls))
+	newConfig.Release = func() { newReleases.Add(1) }
 	source := &requestSnapshotSource{}
 	source.set(oldConfig)
 	var policyCalls atomic.Int64
@@ -160,15 +163,27 @@ func TestRuntimeModelRequestSnapshotsPinInflightToolsAndRefreshSameTurn(t *testi
 	}
 	first := receiveSnapshotValue(t, oldModel.requests)
 	source.set(newConfig) // Commits while the old provider is blocked in flight.
+	if got := oldReleases.Load(); got != 0 {
+		t.Fatalf("in-flight old snapshot released %d times", got)
+	}
 	oldModel.responses <- snapshotResponse{response: toolCallResponse("reused-call", "shared")}
 	oldCall := receiveSnapshotValue(t, oldCalls)
 	second := receiveSnapshotValue(t, newModel.requests)
+	if oldReleases.Load() != 1 || newReleases.Load() != 0 {
+		t.Fatalf("release after old tool: old=%d new=%d", oldReleases.Load(), newReleases.Load())
+	}
 	newModel.responses <- snapshotResponse{response: toolCallResponse("reused-call", "shared")}
 	newCall := receiveSnapshotValue(t, newCalls)
 	third := receiveSnapshotValue(t, newModel.requests)
+	if got := newReleases.Load(); got != 1 {
+		t.Fatalf("release after new tool = %d, want 1", got)
+	}
 	newModel.responses <- snapshotResponse{response: textResponse("done", model.Usage{})}
 	if err := run.Handle.WaitCompletion(t.Context()); err != nil {
 		t.Fatal(err)
+	}
+	if oldReleases.Load() != 1 || newReleases.Load() != 2 {
+		t.Fatalf("terminal snapshot releases: old=%d new=%d", oldReleases.Load(), newReleases.Load())
 	}
 	for index, request := range []*model.Request{first, second, third} {
 		revision, tier := "new", model.ServiceTier("")
@@ -266,7 +281,10 @@ func TestRuntimeModelRequestSnapshotRefreshesBeforeFinalAdmission(t *testing.T) 
 	sessions, active := newJournalTestSession(t, "snapshot-build-race")
 	oldModel, newModel := newRequestSnapshotModel("old"), newRequestSnapshotModel("new")
 	source := &requestSnapshotSource{}
-	source.set(snapshotTestConfig("old", oldModel))
+	var oldReleases, newReleases atomic.Int64
+	oldSnapshot := snapshotTestConfig("old", oldModel)
+	oldSnapshot.Release = func() { oldReleases.Add(1) }
+	source.set(oldSnapshot)
 	barrier := &snapshotLifecycleBarrier{entered: make(chan struct{}), release: make(chan struct{})}
 	rt, err := New(Config{Sessions: sessions, AgentFactory: chat.Factory{}, LifecycleInterceptors: []agent.LifecycleInterceptor{barrier}})
 	if err != nil {
@@ -279,7 +297,7 @@ func TestRuntimeModelRequestSnapshotRefreshesBeforeFinalAdmission(t *testing.T) 
 	receiveSnapshotValue(t, barrier.entered)
 	// Request construction has finished; only final attempt admission remains.
 	// Clearing every optional field must not recover defaults from the old spec.
-	source.set(agent.ModelRequestSnapshot{Revision: "new", Model: newModel})
+	source.set(agent.ModelRequestSnapshot{Revision: "new", Model: newModel, Release: func() { newReleases.Add(1) }})
 	close(barrier.release)
 	request := receiveSnapshotValue(t, newModel.requests)
 	newModel.responses <- snapshotResponse{response: textResponse("done", model.Usage{})}
@@ -289,13 +307,19 @@ func TestRuntimeModelRequestSnapshotRefreshesBeforeFinalAdmission(t *testing.T) 
 	if oldModel.calls.Load() != 0 || newModel.calls.Load() != 1 || source.resolved.Load() != 2 || len(request.Instructions) != 0 || len(request.Tools) != 0 || request.Reasoning != (model.ReasoningConfig{}) || request.ServiceTier != "" {
 		t.Fatalf("stale request sent or clear lost: old=%d new=%d resolves=%d request=%#v", oldModel.calls.Load(), newModel.calls.Load(), source.resolved.Load(), request)
 	}
+	if oldReleases.Load() != 1 || newReleases.Load() != 1 {
+		t.Fatalf("stale/final snapshot releases: old=%d new=%d", oldReleases.Load(), newReleases.Load())
+	}
 }
 
 func TestRuntimeModelRequestSnapshotRefreshesBeforeProviderRetry(t *testing.T) {
 	sessions, active := newJournalTestSession(t, "snapshot-retry-race")
 	oldModel, newModel := newRequestSnapshotModel("old"), newRequestSnapshotModel("new")
 	source := &requestSnapshotSource{}
-	source.set(snapshotTestConfig("old", model.WithRetry(oldModel, model.RetryConfig{MaxRetries: 2, BaseDelay: time.Nanosecond, MaxDelay: time.Nanosecond})))
+	var oldReleases, newReleases atomic.Int64
+	oldSnapshot := snapshotTestConfig("old", model.WithRetry(oldModel, model.RetryConfig{MaxRetries: 2, BaseDelay: time.Nanosecond, MaxDelay: time.Nanosecond}))
+	oldSnapshot.Release = func() { oldReleases.Add(1) }
+	source.set(oldSnapshot)
 	rt, err := New(Config{Sessions: sessions, AgentFactory: chat.Factory{}})
 	if err != nil {
 		t.Fatal(err)
@@ -305,7 +329,9 @@ func TestRuntimeModelRequestSnapshotRefreshesBeforeProviderRetry(t *testing.T) {
 		t.Fatal(err)
 	}
 	receiveSnapshotValue(t, oldModel.requests)
-	source.set(snapshotTestConfig("new", newModel))
+	newSnapshot := snapshotTestConfig("new", newModel)
+	newSnapshot.Release = func() { newReleases.Add(1) }
+	source.set(newSnapshot)
 	oldModel.responses <- snapshotResponse{err: errors.New("retryable provider failure")}
 	receiveSnapshotValue(t, newModel.requests)
 	newModel.responses <- snapshotResponse{response: textResponse("done", model.Usage{})}
@@ -314,6 +340,9 @@ func TestRuntimeModelRequestSnapshotRefreshesBeforeProviderRetry(t *testing.T) {
 	}
 	if oldModel.calls.Load() != 1 || newModel.calls.Load() != 1 {
 		t.Fatalf("old provider retried after update: old=%d new=%d", oldModel.calls.Load(), newModel.calls.Load())
+	}
+	if oldReleases.Load() != 1 || newReleases.Load() != 1 {
+		t.Fatalf("retry/final snapshot releases: old=%d new=%d", oldReleases.Load(), newReleases.Load())
 	}
 	events, err := sessions.Events(t.Context(), session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
 	if err != nil {
@@ -330,6 +359,60 @@ func TestRuntimeModelRequestSnapshotRefreshesBeforeProviderRetry(t *testing.T) {
 	}
 	if receipts != 2 {
 		t.Fatalf("receipts=%d want only two dispatched attempts", receipts)
+	}
+}
+
+func TestRuntimeModelRequestSnapshotReleasesOnPreparationFailure(t *testing.T) {
+	sessions, active := newJournalTestSession(t, "snapshot-prepare-failure")
+	llm := newRequestSnapshotModel("unused")
+	var releases atomic.Int64
+	rt, err := New(Config{Sessions: sessions, AgentFactory: chat.Factory{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := rt.Run(t.Context(), agent.RunRequest{SessionRef: active.SessionRef, Input: "inspect", AgentSpec: agent.AgentSpec{
+		ResolveModelRequest: func(context.Context) (agent.ModelRequestSnapshot, error) {
+			return agent.ModelRequestSnapshot{
+				Model:   llm,
+				Tools:   []tool.Tool{snapshotTestTool("first", nil), snapshotTestTool("second", nil)},
+				Release: func() { releases.Add(1) },
+			}, nil
+		},
+	}})
+	if err == nil {
+		err = run.Handle.WaitCompletion(t.Context())
+	}
+	if err == nil || !strings.Contains(err.Error(), "duplicate tool") {
+		t.Fatalf("preparation error = %v, want duplicate tool", err)
+	}
+	if releases.Load() != 1 || llm.calls.Load() != 0 {
+		t.Fatalf("failed snapshot release=%d provider calls=%d", releases.Load(), llm.calls.Load())
+	}
+}
+
+func TestRuntimeModelRequestSnapshotReleasesOnCancellation(t *testing.T) {
+	sessions, active := newJournalTestSession(t, "snapshot-cancel")
+	llm := newRequestSnapshotModel("blocking")
+	var releases atomic.Int64
+	rt, err := New(Config{Sessions: sessions, AgentFactory: chat.Factory{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	run, err := rt.Run(ctx, agent.RunRequest{SessionRef: active.SessionRef, Input: "inspect", AgentSpec: agent.AgentSpec{
+		ResolveModelRequest: func(context.Context) (agent.ModelRequestSnapshot, error) {
+			return agent.ModelRequestSnapshot{Model: llm, Release: func() { releases.Add(1) }}, nil
+		},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	receiveSnapshotValue(t, llm.requests)
+	cancel()
+	_ = run.Handle.WaitCompletion(t.Context())
+	if releases.Load() != 1 {
+		t.Fatalf("cancelled snapshot releases = %d, want 1", releases.Load())
 	}
 }
 
