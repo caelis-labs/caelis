@@ -204,6 +204,16 @@ func (l *lifecycleLLM) WebSearchUnavailableReason() string {
 
 func (*lifecycleLLM) TracksInvocations() {}
 
+// AuxiliaryModel retains lifecycle authorization around a private request
+// while allowing an inner Runtime gate to supply its independent model path.
+func (l *lifecycleLLM) AuxiliaryModel() model.LLM {
+	auxiliary, ok := l.inner.(interface{ AuxiliaryModel() model.LLM })
+	if !ok {
+		return l
+	}
+	return &lifecycleLLM{inner: auxiliary.AuxiliaryModel(), runtime: l.runtime}
+}
+
 func (l *lifecycleLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
 	return func(yield func(*model.StreamEvent, error) bool) {
 		if l == nil || l.inner == nil {

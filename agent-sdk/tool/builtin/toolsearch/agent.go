@@ -25,6 +25,20 @@ const (
 
 type agentRanker struct{}
 
+type invocationAccountingKey struct{}
+
+type invocationAccounting struct {
+	observer func(model.Invocation)
+	admit    func(context.Context, *model.Request) error
+}
+
+// WithInvocationAccounting attaches the parent Session's accounting hooks to
+// private selector model attempts, excluding any approval model used before
+// the ToolSearch call reaches the selector.
+func WithInvocationAccounting(ctx context.Context, observer func(model.Invocation), admit func(context.Context, *model.Request) error) context.Context {
+	return context.WithValue(ctx, invocationAccountingKey{}, invocationAccounting{observer: observer, admit: admit})
+}
+
 // NewAgentRanker runs an isolated model conversation with exactly one tool:
 // inspecting the registered schema of a named candidate. It cannot call the
 // candidate, delegate, read files, or inherit the main conversation.
@@ -39,6 +53,12 @@ func (agentRanker) Rank(ctx context.Context, query string, definitions []tool.De
 	}
 	if selected.ReadSchema == nil {
 		return nil, fmt.Errorf("ToolSearch schema reader is unavailable")
+	}
+	if auxiliary, ok := selected.Model.(interface{ AuxiliaryModel() model.LLM }); ok {
+		selected.Model = auxiliary.AuxiliaryModel()
+		if selected.Model == nil {
+			return nil, fmt.Errorf("ToolSearch auxiliary model is unavailable")
+		}
 	}
 	type candidate struct {
 		Name        string `json:"name"`
@@ -66,6 +86,11 @@ func (agentRanker) Rank(ctx context.Context, query string, definitions []tool.De
 	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
+	modelCtx := ctx
+	if accounting, ok := ctx.Value(invocationAccountingKey{}).(invocationAccounting); ok {
+		modelCtx = model.WithInvocationObserver(modelCtx, accounting.observer)
+		modelCtx = model.WithInvocationAdmission(modelCtx, accounting.admit)
+	}
 	messages := []model.Message{model.NewTextMessage(model.RoleUser, string(initial))}
 	inspect := model.NewFunctionToolSpec(inspectSchemaToolName, "Read the current input schema of one candidate by its exact name. This never executes the candidate.", map[string]any{
 		"type": "object", "additionalProperties": false, "required": []string{"name"},
@@ -81,7 +106,7 @@ func (agentRanker) Rank(ctx context.Context, query string, definitions []tool.De
 			return nil, fmt.Errorf("ToolSearch model capability: %w", err)
 		}
 		var response *model.Response
-		for event, err := range model.Generate(ctx, selected.Model, req) {
+		for event, err := range model.Generate(modelCtx, selected.Model, req) {
 			if err != nil {
 				return nil, fmt.Errorf("ToolSearch model failed: %w", err)
 			}

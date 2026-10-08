@@ -83,5 +83,12 @@ func (s *runtimeComposition) boundToolSearchAgentModel(ctx context.Context) (mod
 	if err != nil {
 		return nil, err
 	}
+	if binding.Speed != "" {
+		wire, ok := profile.WireSpeed(binding.Speed)
+		if !ok {
+			return nil, fmt.Errorf("gatewayapp: ToolSearch binding speed %q is unavailable", binding.Speed)
+		}
+		resolved.FastMode = wire == string(model.ServiceTierPriority)
+	}
 	return withSystemAgentReasoningEffort(resolved), nil
 }

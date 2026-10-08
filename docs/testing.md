@@ -110,6 +110,10 @@ errors, invalid names, and distinct empty results. The Application and plugin
 HTTP fixtures use synthetic providers and MCP servers to exercise revision,
 Worker isolation, search admission, and recovery. These do not measure real
 model recall or provider cost.
+The Runtime fixture also checks that selector calls bypass the main Session's
+compaction watermark while retaining admission and durable usage receipts.
+Application fixtures cover a consistent activation model catalog and explicit
+ToolSearch Fast/standard provider request encoding.
 
 The following Jev evaluations are opt-in and send only repository synthetic fixtures. Set
 `JEV_API_KEY` in the test process environment and run the scenarios in order:

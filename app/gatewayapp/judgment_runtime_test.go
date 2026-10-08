@@ -2,9 +2,12 @@ package gatewayapp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -224,5 +227,68 @@ func TestToolSearchProviderBindingUsesSharedModelResolution(t *testing.T) {
 	resolved, err = stack.composition.boundToolSearchAgentModel(t.Context())
 	if err != nil || resolved != nil {
 		t.Fatalf("reset ToolSearch model = %v, err=%v", resolved, err)
+	}
+}
+
+func TestToolSearchProviderBindingEncodesExplicitSpeed(t *testing.T) {
+	// The canonical OpenAI endpoint advertises Fast. Block any default-client
+	// request if the synthetic transport is accidentally disconnected.
+	t.Setenv("HTTPS_PROXY", "http://127.0.0.1:1")
+	t.Setenv("NO_PROXY", "")
+	stack := newLocalStateTestHost(t, &runtimeMemoryHostStub{})
+	profile, err := stack.connectTestModel(ModelConfig{
+		Provider: "openai", API: providers.APIOpenAI, Model: "gpt-6-sol", BaseURL: "https://api.openai.com/v1", Token: "fixture",
+		ReasoningEffort: "high", ReasoningLevels: []string{"low", "high"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !profile.SupportsFast() {
+		t.Fatalf("connected profile does not advertise Fast: %+v", profile.Speed)
+	}
+	var requests []map[string]any
+	stack.composition.lookup.resolveTransportHTTPClient = func(context.Context, ModelConfig) (*http.Client, error) {
+		return &http.Client{Transport: gatewayAppRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+			raw, err := io.ReadAll(req.Body)
+			if err != nil {
+				return nil, err
+			}
+			var body map[string]any
+			if err := json.Unmarshal(raw, &body); err != nil {
+				return nil, err
+			}
+			requests = append(requests, body)
+			return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"model":"gpt-6-sol","status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"ok"}]}]}`)), Request: req}, nil
+		})}, nil
+	}
+	for _, speed := range []string{"fast", "standard"} {
+		if _, err := stack.testAgentBindings().BindAgentBinding(t.Context(), agentbinding.Binding{
+			Handle: agentbinding.HandleToolSearch, ProfileID: profile.ID, Effort: "high", Speed: speed,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		llm, err := stack.composition.boundToolSearchAgentModel(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, err := range model.Generate(t.Context(), llm, &model.Request{Reasoning: model.ReasoningConfig{Effort: "low"}, ServiceTier: model.ServiceTierPriority}) {
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		if len(requests) == 0 {
+			t.Fatal("bound ToolSearch model did not reach provider")
+		}
+		body := requests[len(requests)-1]
+		reasoning, _ := body["reasoning"].(map[string]any)
+		if reasoning["effort"] != "high" {
+			t.Fatalf("speed=%s reasoning=%#v, want high", speed, reasoning)
+		}
+		if speed == "fast" && body["service_tier"] != "priority" {
+			t.Fatalf("fast request service_tier=%#v, want priority", body["service_tier"])
+		}
+		if speed == "standard" && body["service_tier"] != nil {
+			t.Fatalf("standard request service_tier=%#v, want omitted", body["service_tier"])
+		}
 	}
 }

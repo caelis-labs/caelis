@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caelis-labs/caelis/control/agentbinding"
 	"github.com/caelis-labs/caelis/control/application"
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/httpclient"
@@ -899,6 +900,60 @@ func TestApplicationAtomicCapabilitiesHTTP(t *testing.T) {
 	promptAtomicCapabilityClient(t, ctx, recovered, created.SessionID, "atomic-recovery-doc", "DOC")
 	if got := strings.Count(atomicAudit(audit), "documents:call"); got != beforeRecoveryCalls+1 {
 		t.Fatalf("recovered Session made %d document calls, want %d", got, beforeRecoveryCalls+1)
+	}
+}
+
+func TestApplicationFirstToolSearchUsesConsistentActivationModelCatalog(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 25*time.Second)
+	defer cancel()
+	root := t.TempDir()
+	audit := filepath.Join(root, "audit")
+	t.Setenv("CAELIS_ATOMIC_MCP_HELPER", "1")
+	t.Setenv("CAELIS_ATOMIC_MCP_AUDIT", audit)
+	server := application.MCPServer{Name: "documents", Transport: "stdio", Command: os.Args[0], Args: []string{"-test.run=^TestAtomicDocumentsMCPHelper$"}, WorkDir: root}
+	host, client, sessionID := startAtomicLifecycleSession(t, ctx, root, &atomicCapabilityProvider{}, []application.MCPServer{server})
+	defer host.close(t)
+	feed, err := client.Reconnect(ctx, appserver.ReconnectRequest{SessionID: sessionID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer feed.Subscription.Close()
+	promptAtomicCapabilityClient(t, ctx, client, sessionID, "activate-before-binding", "BASIC")
+	waitAtomicApplicationMCPRunning(t, ctx, client, sessionID, "documents")
+
+	status, err := host.host.SessionStatus(ctx, appserver.StatusRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	connected, err := host.host.ConnectModel(ctx, appserver.ConnectModelRequest{WriteBase: appserver.WriteBase{
+		OperationID: "late-toolsearch-model", ExpectedRevision: &status.Configuration.Revision,
+	}, Config: appserver.ConnectConfig{Provider: "openai-compatible", Model: "gpt-4.2", BaseURL: "https://provider.invalid/v1", APIKey: "SYNTHETIC_ONLY"}})
+	if err != nil || connected.Outcome != appserver.OutcomeCommitted {
+		t.Fatalf("connect late model = %+v, %v", connected, err)
+	}
+	bindings, err := host.host.AgentBindingStatus(ctx, appserver.AgentRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	profileID := ""
+	for _, target := range bindings.Targets {
+		if target.Backend.Provider != nil && strings.HasSuffix(target.Backend.Provider.ModelConfigID, "/gpt-4.2") {
+			profileID = target.ID
+		}
+	}
+	if profileID == "" {
+		t.Fatalf("late model missing from binding targets: %+v", bindings.Targets)
+	}
+	bound, err := host.host.BindAgentBinding(ctx, appserver.BindAgentBindingRequest{WriteBase: appserver.WriteBase{
+		OperationID: "late-toolsearch-binding", ExpectedRevision: &connected.Revision,
+	}, Binding: agentbinding.Binding{Handle: agentbinding.HandleToolSearch, ProfileID: profileID, Effort: "none"}})
+	if err != nil || bound.Outcome != appserver.OutcomeCommitted {
+		t.Fatalf("bind late ToolSearch model = %+v, %v", bound, err)
+	}
+
+	promptAtomicCapabilityClient(t, ctx, client, sessionID, "first-search-after-binding", "DOC")
+	if got := strings.Count(atomicAudit(audit), "documents:call:"); got != 1 {
+		t.Fatalf("first search after Host binding made %d document calls, want 1; audit: %s", got, atomicAudit(audit))
 	}
 }
 

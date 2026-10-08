@@ -194,6 +194,8 @@ The restricted selector receives only this Application's ready MCP catalog and
 the active request's resolved provider model settings when unbound. It has no
 native or callback tools; an explicit ToolSearch provider or Jev binding may
 override the model. Search errors do not expose schemas or run MCP calls.
+The activation samples the ToolSearch binding and provider catalog together;
+model and binding changes made afterward take effect on the next activation.
 Each schema read and the final selection publication recheck the Application's
 active lease and desired configuration revision; a changed revision fails the
 in-flight search before any stale name is published.

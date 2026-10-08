@@ -145,6 +145,29 @@ func TestAgentSearchChangedSchemaFails(t *testing.T) {
 	}
 }
 
+func TestAgentSearchAllowsReplayAliasRefresh(t *testing.T) {
+	definition := mcpCandidate("docs__echo", "Echo docs", "preferred", "docs", "echo", map[string]any{"type": "object"}).Definition()
+	definition.Metadata[tool.MetadataReplayAliases] = []string{"mcp__preferred__docs__echo"}
+	source := &mutableSearchSource{tools: []tool.Tool{tool.NamedTool{Def: definition}}}
+	llm := &selectionModel{respond: func(index int, _ *model.Request) (*model.Response, error) {
+		if index == 0 {
+			updated := tool.CloneDefinition(definition)
+			updated.Metadata[tool.MetadataReplayAliases] = []string{"mcp__preferred__docs__echo", "mcp__fallback__docs__echo"}
+			source.tools = []tool.Tool{tool.NamedTool{Def: updated}}
+			return &model.Response{Message: model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{ID: "read", Name: inspectSchemaToolName, Args: `{"name":"docs__echo"}`}}, ""), TurnComplete: true}, nil
+		}
+		return &model.Response{Message: model.NewTextMessage(model.RoleAssistant, `{"tools":["docs__echo"]}`), TurnComplete: true}, nil
+	}}
+	result, err := NewSource(source).Call(t.Context(), tool.Call{Input: json.RawMessage(`{"query":"echo docs"}`), RuntimeModel: llm})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output tool.ToolSearchResult
+	if err := json.Unmarshal(result.Content[0].JSON.Value, &output); err != nil || output.Count != 1 || output.Tools[0].Name != "docs__echo" {
+		t.Fatalf("replay alias refresh result=%#v err=%v", output, err)
+	}
+}
+
 func TestAgentSearchRejectsRevisionChangeBeforePublishing(t *testing.T) {
 	source := &checkedSearchSource{mutableSearchSource: mutableSearchSource{tools: []tool.Tool{mcpCandidate("calendar", "Calendar", "", "calendar", "list", nil)}}}
 	llm := &selectionModel{respond: func(_ int, _ *model.Request) (*model.Response, error) {

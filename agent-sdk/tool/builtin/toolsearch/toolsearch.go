@@ -230,7 +230,7 @@ func (t *Tool) readSchema(ctx context.Context, name string) (tool.Definition, er
 		if t.source != nil {
 			current := buildEntries(t.source.Tools())
 			for _, item := range current {
-				if item.def.Name == name && reflect.DeepEqual(item.def, candidate.def) {
+				if item.def.Name == name && sameSearchDefinition(item.def, candidate.def) {
 					return tool.CloneDefinition(candidate.def), nil
 				}
 			}
@@ -239,6 +239,21 @@ func (t *Tool) readSchema(ctx context.Context, name string) (tool.Definition, er
 		return tool.CloneDefinition(candidate.def), nil
 	}
 	return tool.Definition{}, fmt.Errorf("ToolSearch schema for %q is outside the current scope", name)
+}
+
+// Replay aliases only translate historical tool names. They do not change the
+// selected tool's schema, execution identity, or current authorization scope.
+func sameSearchDefinition(a, b tool.Definition) bool {
+	a, b = tool.CloneDefinition(a), tool.CloneDefinition(b)
+	delete(a.Metadata, tool.MetadataReplayAliases)
+	delete(b.Metadata, tool.MetadataReplayAliases)
+	if len(a.Metadata) == 0 {
+		a.Metadata = nil
+	}
+	if len(b.Metadata) == 0 {
+		b.Metadata = nil
+	}
+	return reflect.DeepEqual(a, b)
 }
 
 func parseRequest(raw json.RawMessage) (request, error) {
