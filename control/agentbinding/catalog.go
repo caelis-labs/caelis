@@ -48,7 +48,7 @@ var definitions = []Definition{
 		Description:  "Deep architecture, difficult debugging, and high-risk analysis.",
 		Configurable: true,
 	},
-	{Handle: HandleToolSearch, Class: HandleClassSystem, Name: "ToolSearch", Description: "Ranks MCP tools by relevance when bound; otherwise uses lexical matching.", Configurable: true},
+	{Handle: HandleToolSearch, Class: HandleClassSystem, Name: "ToolSearch", Description: "Uses a restricted model selector by default; bind a provider model or Jev judgment to override it.", Configurable: true},
 	{
 		Handle:       HandleGuardian,
 		Class:        HandleClassSystem,

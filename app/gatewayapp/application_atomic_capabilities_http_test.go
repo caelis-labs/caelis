@@ -97,6 +97,11 @@ func (p *atomicCapabilityProvider) RoundTrip(req *http.Request) (*http.Response,
 		}
 	}
 	var payload struct {
+		Tools []struct {
+			Function struct {
+				Name string `json:"name"`
+			} `json:"function"`
+		} `json:"tools"`
 		Messages []struct {
 			Role      string `json:"role"`
 			Content   any    `json:"content"`
@@ -121,6 +126,26 @@ func (p *atomicCapabilityProvider) RoundTrip(req *http.Request) (*http.Response,
 		}
 	}
 	name, args := "", ""
+	if len(payload.Tools) == 1 && payload.Tools[0].Function.Name == "InspectToolSchema" {
+		selected := ""
+		switch {
+		case strings.Contains(latestUser, "CALLFAIL"):
+			selected = "callfail__lookup"
+		case strings.Contains(latestUser, "BLOCK"):
+			selected = "blocking__lookup"
+		case strings.Contains(latestUser, "DOC"):
+			selected = "documents__lookup"
+		case strings.Contains(latestUser, "UTIL"):
+			selected = "utilities__lookup"
+		}
+		selection, _ := json.Marshal(map[string]any{"tools": []string{selected}})
+		if selected == "" {
+			selection = []byte(`{"tools":[]}`)
+		}
+		encoded, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"index": 0, "message": map[string]any{"role": "assistant", "content": string(selection)}, "finish_reason": "stop"}}})
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}},
+			Body: io.NopCloser(strings.NewReader(string(encoded))), Request: req}, nil
+	}
 	switch {
 	case latestTool == "ToolSearch" && strings.Contains(latestUser, "CALLFAIL"):
 		name, args = "callfail__lookup", `{}`

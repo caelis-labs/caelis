@@ -17,10 +17,10 @@ type rankingSource []tool.Tool
 
 func (s rankingSource) Tools() []tool.Tool { return s }
 
-type rankerFunc func(context.Context, string, []tool.Definition, int) ([]string, error)
+type rankerFunc func(context.Context, string, []tool.Definition, int, SearchModel) ([]string, error)
 
-func (f rankerFunc) Rank(ctx context.Context, q string, ds []tool.Definition, n int) ([]string, error) {
-	return f(ctx, q, ds, n)
+func (f rankerFunc) Rank(ctx context.Context, q string, ds []tool.Definition, n int, m SearchModel) ([]string, error) {
+	return f(ctx, q, ds, n, m)
 }
 
 func rankedNames(t *testing.T, search tool.Tool, query string) []string {
@@ -45,34 +45,35 @@ func TestRankerCannotAdmitUnknownOrDuplicateTools(t *testing.T) {
 	for _, names := range [][]string{{"unknown"}, {"calendar", "calendar"}} {
 		t.Run(fmt.Sprint(names), func(t *testing.T) {
 			source := rankingSource{mcpCandidate("calendar", "Create calendar events", "calendar", "demo", "create", nil), tool.NamedTool{Def: tool.Definition{Name: "private"}}}
-			ranker := rankerFunc(func(_ context.Context, _ string, ds []tool.Definition, _ int) ([]string, error) {
+			ranker := rankerFunc(func(_ context.Context, _ string, ds []tool.Definition, _ int, _ SearchModel) ([]string, error) {
 				if len(ds) != 1 || ds[0].Name != "calendar" {
 					t.Fatalf("non-MCP candidate leaked: %#v", ds)
 				}
 				return names, nil
 			})
-			got := rankedNames(t, NewSource(source, ranker), "events")
-			if len(got) != 1 || got[0] != "calendar" {
-				t.Fatalf("fallback = %v", got)
+			_, err := NewSource(source, ranker).Call(t.Context(), tool.Call{Input: json.RawMessage(`{"query":"events"}`)})
+			if err == nil {
+				t.Fatal("invalid selection succeeded")
 			}
 		})
 	}
 }
 
-func TestRankingFailureAndExactLookupPreserveLexicalDiscovery(t *testing.T) {
+func TestRankingFailureDoesNotFallBackToLexicalDiscovery(t *testing.T) {
 	calls := 0
 	source := rankingSource{mcpCandidate("calendar", "Create calendar events", "calendar", "demo", "create", nil)}
-	search := NewSource(source, rankerFunc(func(context.Context, string, []tool.Definition, int) ([]string, error) {
+	search := NewSource(source, rankerFunc(func(context.Context, string, []tool.Definition, int, SearchModel) ([]string, error) {
 		calls++
 		return nil, fmt.Errorf("unavailable")
 	}))
 	for _, query := range []string{"calendar", "calendar/demo", "events"} {
-		if got := rankedNames(t, search, query); len(got) != 1 || got[0] != "calendar" {
-			t.Fatalf("%s: %v", query, got)
+		input, _ := json.Marshal(map[string]any{"query": query})
+		if _, err := search.Call(t.Context(), tool.Call{Input: input}); err == nil {
+			t.Fatalf("%s fell back after selector failure", query)
 		}
 	}
-	if calls != 1 {
-		t.Fatalf("exact lookups invoked model: %d", calls)
+	if calls != 3 {
+		t.Fatalf("selector calls = %d", calls)
 	}
 }
 
@@ -120,13 +121,11 @@ func TestToolSearchJevEvaluation(t *testing.T) {
 	}
 	measured := &measuredEvaluator{Evaluator: client}
 	semantic := NewSource(source, NewSemanticRanker(measured))
-	lexical := NewSource(source)
-	semOK, lexOK := 0, 0
+	semOK := 0
 	for _, c := range cases {
 		start := time.Now()
 		got := rankedNames(t, semantic, c.query)
 		elapsed := time.Since(start)
-		baseline := rankedNames(t, lexical, c.query)
 		match := func(ns []string) bool {
 			if c.want == "" {
 				return len(ns) == 0
@@ -136,10 +135,7 @@ func TestToolSearchJevEvaluation(t *testing.T) {
 		if match(got) {
 			semOK++
 		}
-		if match(baseline) {
-			lexOK++
-		}
-		t.Logf("query=%q semantic=%v lexical=%v expected=%q elapsed_ms=%d", c.query, got, baseline, c.want, elapsed.Milliseconds())
+		t.Logf("query=%q semantic=%v expected=%q elapsed_ms=%d", c.query, got, c.want, elapsed.Milliseconds())
 	}
-	t.Logf("RESULT model=%s cases=%d semantic_top1=%d lexical_top1=%d requests=%d input_tokens=%d cost_usd=%.8f", client.Name(), len(cases), semOK, lexOK, measured.calls, measured.tokens, float64(measured.tokens)*0.042/1e6)
+	t.Logf("RESULT model=%s cases=%d semantic_top1=%d requests=%d input_tokens=%d cost_usd=%.8f", client.Name(), len(cases), semOK, measured.calls, measured.tokens, float64(measured.tokens)*0.042/1e6)
 }

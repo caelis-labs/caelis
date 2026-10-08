@@ -187,6 +187,8 @@ type pluginSystemE2EProvider struct {
 	*gatewayTestHTTPServer
 	mu                  sync.Mutex
 	calls               int
+	selectorCalls       int
+	sawSelectorBoundary bool
 	payloadSummaries    []string
 	sawSkill            bool
 	sawHook             bool
@@ -213,6 +215,22 @@ func (p *pluginSystemE2EProvider) handle(w http.ResponseWriter, r *http.Request)
 	var payload map[string]any
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if pluginE2ESelectorRequest(payload) {
+		p.mu.Lock()
+		p.selectorCalls++
+		selectorRaw, _ := json.Marshal(payload)
+		messages, _ := payload["messages"].([]any)
+		p.sawSelectorBoundary = strings.TrimSpace(r.Header.Get("Authorization")) == "Bearer plugin-e2e-token" &&
+			len(messages) == 2 && strings.Contains(string(selectorRaw), pluginE2EToolName) &&
+			!strings.Contains(string(selectorRaw), pluginE2ESkillMarker) && !strings.Contains(string(selectorRaw), pluginE2EHookMarker)
+		p.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id": "plugin-e2e-selector", "object": "chat.completion", "model": "plugin-e2e-model",
+			"choices": []map[string]any{{"index": 0, "message": map[string]any{"role": "assistant", "content": `{"tools":["` + pluginE2EToolName + `"]}`}, "finish_reason": "stop"}},
+		})
 		return
 	}
 	p.mu.Lock()
@@ -338,6 +356,16 @@ func (p *pluginSystemE2EProvider) handle(w http.ResponseWriter, r *http.Request)
 	_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
 }
 
+func pluginE2ESelectorRequest(payload map[string]any) bool {
+	tools, _ := payload["tools"].([]any)
+	if len(tools) != 1 {
+		return false
+	}
+	entry, _ := tools[0].(map[string]any)
+	fn, _ := entry["function"].(map[string]any)
+	return fn["name"] == "InspectToolSchema"
+}
+
 func (p *pluginSystemE2EProvider) observePayload(callIndex int, payload map[string]any) {
 	raw, _ := json.Marshal(payload)
 	text := string(raw)
@@ -385,6 +413,12 @@ func (p *pluginSystemE2EProvider) Assert(t *testing.T, events string) {
 	defer p.mu.Unlock()
 	if p.calls != 3 {
 		t.Fatalf("provider calls = %d, want 3; %s; events=%s", p.calls, p.summaryLocked(), events)
+	}
+	if p.selectorCalls != 1 {
+		t.Fatalf("selector calls = %d, want 1", p.selectorCalls)
+	}
+	if !p.sawSelectorBoundary {
+		t.Fatal("selector did not inherit the configured provider while retaining its private tool and history boundary")
 	}
 	if !p.sawAuthorization {
 		t.Fatalf("provider did not observe Authorization header; %s; events=%s", p.summaryLocked(), events)

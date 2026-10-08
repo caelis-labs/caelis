@@ -14,6 +14,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/control/modelprofile"
@@ -190,16 +191,38 @@ func TestBoundToolSearchRankerRevokesDeletedProvider(t *testing.T) {
 		return stack.composition.boundJudgment(ctx, agentbinding.HandleToolSearch)
 	}}
 	candidates := []tool.Definition{{Name: "calendar", Description: "List meetings"}}
-	if _, err := ranker.Rank(t.Context(), "appointments", candidates, 1); err != nil {
+	if _, err := ranker.Rank(t.Context(), "appointments", candidates, 1, toolsearch.SearchModel{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := stack.deleteTestHostModel(t.Context(), session.SessionRef{}, profile.Backend.Provider.ModelConfigID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ranker.Rank(t.Context(), "appointments", candidates, 1); err == nil {
+	if _, err := ranker.Rank(t.Context(), "appointments", candidates, 1, toolsearch.SearchModel{}); err == nil {
 		t.Fatal("deleted provider remains reachable through ranker")
 	}
 	if calls.Load() != 1 {
 		t.Fatalf("provider calls after deletion = %d", calls.Load())
+	}
+}
+
+func TestToolSearchProviderBindingUsesSharedModelResolution(t *testing.T) {
+	stack := newLocalStateTestHost(t, &runtimeMemoryHostStub{})
+	profile, err := stack.connectTestModel(ModelConfig{Provider: "ollama", API: providers.APIOllama, Model: "tool-specialist"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stack.testAgentBindings().BindAgentBinding(t.Context(), agentbinding.Binding{Handle: agentbinding.HandleToolSearch, ProfileID: profile.ID, Effort: "none"}); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := stack.composition.boundToolSearchAgentModel(t.Context())
+	if err != nil || resolved == nil || resolved.Name() != "tool-specialist" {
+		t.Fatalf("bound ToolSearch model = %v, err=%v", resolved, err)
+	}
+	if _, err := stack.testAgentBindings().ResetAgentBinding(t.Context(), agentbinding.HandleToolSearch); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err = stack.composition.boundToolSearchAgentModel(t.Context())
+	if err != nil || resolved != nil {
+		t.Fatalf("reset ToolSearch model = %v, err=%v", resolved, err)
 	}
 }

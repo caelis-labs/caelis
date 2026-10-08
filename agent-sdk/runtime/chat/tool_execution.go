@@ -126,12 +126,14 @@ func (a *Agent) executeToolCallAdmitted(
 	}
 
 	result, err := selectedTool.Call(ctx, tool.Call{
-		ID:           strings.TrimSpace(call.ID),
-		Name:         strings.TrimSpace(call.Name),
-		Input:        json.RawMessage(strings.TrimSpace(call.Args)),
-		ModelStep:    step,
-		RuntimeModel: a.model,
-		Observer:     observer,
+		ID:                 strings.TrimSpace(call.ID),
+		Name:               strings.TrimSpace(call.Name),
+		Input:              json.RawMessage(strings.TrimSpace(call.Args)),
+		ModelStep:          step,
+		RuntimeModel:       a.model,
+		RuntimeReasoning:   a.reasoning,
+		RuntimeServiceTier: a.request.ServiceTier,
+		Observer:           observer,
 	})
 	if err != nil {
 		result = modelVisibleToolErrorResult(call, result, err)

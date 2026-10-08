@@ -190,6 +190,13 @@ revisioned profile, so callers must supply already authorized launch or
 connection details without putting credentials in paths, arguments or URLs.
 The existing SDK MCP manager starts every service independently. Projected
 tool names use `<server>__<tool>`; `ToolSearch` discovers ready MCP tools.
+The restricted selector receives only this Application's ready MCP catalog and
+the active request's resolved provider model settings when unbound. It has no
+native or callback tools; an explicit ToolSearch provider or Jev binding may
+override the model. Search errors do not expose schemas or run MCP calls.
+Each schema read and the final selection publication recheck the Application's
+active lease and desired configuration revision; a changed revision fails the
+in-flight search before any stale name is published.
 Application callbacks cannot use the `Skill` or `ToolSearch` name while the
 corresponding capability is selected, or a selected MCP service's tool
 namespace. Core rejects these collisions before commit. Callback claims and

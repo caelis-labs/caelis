@@ -129,14 +129,18 @@ type BindingSetStatus struct {
 }
 
 // SupportsProfile reports whether a profile may back one persisted handle.
-// ToolSearch, Guardian Screening and Memory Verifier require typed judgments.
+// ToolSearch accepts a provider generation model or a typed judgment.
+// Guardian Screening and Memory Verifier require typed judgments.
 // Guardian and Steward require provider generation models.
 func SupportsProfile(handle Handle, profile modelprofile.ModelProfile) bool {
 	handle = NormalizeHandle(handle)
 	if !isPersistedHandle(handle) && ValidateCustomHandle(handle) != nil {
 		return false
 	}
-	if handle == HandleToolSearch || handle == HandleGuardianScreen || handle == HandleMemoryVerifier {
+	if handle == HandleToolSearch {
+		return profile.Kind() == modelprofile.BackendProvider
+	}
+	if handle == HandleGuardianScreen || handle == HandleMemoryVerifier {
 		return profile.Judgment && profile.Kind() == modelprofile.BackendProvider
 	}
 	if profile.Judgment {

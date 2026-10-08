@@ -104,6 +104,13 @@ The limit controls new PR creation, not CI reruns or already-open PRs.
 
 ## Change-scoped checks
 
+ToolSearch's offline selector fixtures assert the complete scoped catalog,
+on-demand schema messages, no business call, inherited model settings, budget
+errors, invalid names, and distinct empty results. The Application and plugin
+HTTP fixtures use synthetic providers and MCP servers to exercise revision,
+Worker isolation, search admission, and recovery. These do not measure real
+model recall or provider cost.
+
 The following Jev evaluations are opt-in and send only repository synthetic fixtures. Set
 `JEV_API_KEY` in the test process environment and run the scenarios in order:
 

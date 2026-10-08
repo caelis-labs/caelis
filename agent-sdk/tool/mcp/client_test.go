@@ -564,7 +564,7 @@ func TestMCPManagerCompactNamesUseFirstAcceptedToolAndKeepLaterUniqueTools(t *te
 		t.Fatalf("compact extra definition = %#v, want later unique plugin tool", extra)
 	}
 
-	search := builtintoolsearch.New(tools)
+	search := builtintoolsearch.NewWithRanker(tools, builtintoolsearch.NewLexicalRanker())
 	result, err := search.Call(ctx, tool.Call{Name: tool.ToolSearchToolName, Input: json.RawMessage(`{"query":"echo"}`)})
 	if err != nil {
 		t.Fatalf("ToolSearch.Call() error = %v", err)
