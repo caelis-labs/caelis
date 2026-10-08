@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.67.2](https://github.com/caelis-labs/caelis/compare/v0.67.1...v0.67.2) (2026-10-08)
+
+
+### Bug Fixes
+
+* enable native Windows application execution ([#105](https://github.com/caelis-labs/caelis/issues/105)) ([c2de3c8](https://github.com/caelis-labs/caelis/commit/c2de3c823cb6a4271a174ba5aa2ae08f5cb1c50e))
+
 ## [0.67.1](https://github.com/caelis-labs/caelis/compare/v0.67.0...v0.67.1) (2026-10-07)
 
 
