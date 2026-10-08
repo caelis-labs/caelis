@@ -728,8 +728,9 @@ func TestApplicationAtomicMCPFailedUpdateConcurrentCloseHTTP(t *testing.T) {
 		finished <- updateErr
 	}()
 	<-started
-	host.close(t)
+	// Close the SSE stream before the test server, which waits for active clients.
 	_ = feed.Subscription.Close()
+	host.close(t)
 	if updateErr := <-finished; updateErr == nil {
 		t.Fatal("invalid concurrent update succeeded")
 	}

@@ -21,7 +21,7 @@ func TestAgentBindingStatusProjectsNativeProfileEligibility(t *testing.T) {
 		agentbinding.HandleBreeze:         {"acp:agent", "provider:model"},
 		agentbinding.HandleGuardian:       {"provider:model"},
 		agentbinding.HandleSteward:        {"provider:model"},
-		agentbinding.HandleToolSearch:     {"provider:judge"},
+		agentbinding.HandleToolSearch:     {"provider:judge", "provider:model"},
 		agentbinding.HandleGuardianScreen: {"provider:judge"},
 		agentbinding.HandleMemoryVerifier: {"provider:judge"},
 		"reviewer":                        {"acp:agent", "provider:model"},
