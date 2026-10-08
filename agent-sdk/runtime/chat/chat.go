@@ -186,9 +186,24 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 			toolCtx := model.WithProviderRequestMetadata(ctx, model.ProviderRequestMetadata{
 				SessionAffinity: ctx.Session().SessionID,
 			})
+			var receiptMu sync.Mutex
+			var toolReceipts []model.Invocation
+			toolCtx = context.WithValue(toolCtx, toolSearchInvocationObserverKey{}, func(in model.Invocation) {
+				receiptMu.Lock()
+				toolReceipts = append(toolReceipts, in)
+				receiptMu.Unlock()
+			})
 			toolMessages, toolEvents, ok, err := a.executeStepToolCalls(toolCtx, messageID, calls, func(event *session.Event) bool {
 				return yield(event, nil)
 			}, &visibility)
+			receiptMu.Lock()
+			receipts := append([]model.Invocation(nil), toolReceipts...)
+			receiptMu.Unlock()
+			for _, receipt := range receipts {
+				if !yield(session.NewModelInvocationReceipt(receipt, "tool"), nil) {
+					return
+				}
+			}
 			if !ok {
 				return
 			}

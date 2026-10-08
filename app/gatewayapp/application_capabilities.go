@@ -41,9 +41,27 @@ type applicationMCPResource struct {
 }
 
 type applicationMCPSource struct {
-	manager *mcp.Manager
-	store   *application.Store
-	scope   application.Scope
+	manager   *mcp.Manager
+	store     *application.Store
+	scope     application.Scope
+	sessionID string
+	revision  uint64
+}
+
+// CheckSearchScope closes schema reads and result publication when a lease is
+// revoked or this Application's desired catalog revision has changed.
+func (s applicationMCPSource) CheckSearchScope(ctx context.Context) error {
+	if err := s.store.CheckActive(ctx, s.scope); err != nil {
+		return err
+	}
+	current, err := s.store.Configuration(ctx, s.scope, s.sessionID)
+	if err != nil {
+		return err
+	}
+	if current.Revision != s.revision {
+		return fmt.Errorf("ToolSearch Application configuration changed: %w", application.ErrConfigurationStale)
+	}
+	return nil
 }
 
 func (s applicationMCPSource) Tools() []tool.Tool {
@@ -200,8 +218,8 @@ func (r *applicationTurnResolver) acquireCapabilities(ctx context.Context, confi
 			}
 		}
 		assembled.resource = resource
-		assembled.source = applicationMCPSource{manager: resource.manager, store: r.composition.authorities.applications, scope: r.binding.Scope}
-		assembled.searchTool = toolsearch.NewSource(assembled.source)
+		assembled.source = applicationMCPSource{manager: resource.manager, store: r.composition.authorities.applications, scope: r.binding.Scope, sessionID: r.binding.SessionID, revision: configuration.Revision}
+		assembled.searchTool = toolsearch.NewSource(assembled.source, newBoundToolSearchRanker(r.composition))
 	}
 	if configuration.Revision >= r.desiredRevision && r.capabilities == nil {
 		r.capabilities = map[uint64]*applicationCapabilities{}

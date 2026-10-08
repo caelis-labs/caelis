@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 	"unicode"
@@ -30,8 +31,7 @@ type Tool struct {
 }
 
 type entry struct {
-	def        tool.Definition
-	searchText string
+	def tool.Definition
 }
 
 type request struct {
@@ -42,11 +42,19 @@ type request struct {
 // New returns a discovery tool for deferred MCP tools. A nil result means there
 // are no deferred MCP tools to discover.
 func New(tools []tool.Tool) tool.Tool {
+	return NewWithRanker(tools, nil)
+}
+
+// NewWithRanker supplies an explicit selector for a fixed catalog. Passing
+// nil uses the restricted model selector, just like NewSource.
+func NewWithRanker(tools []tool.Tool, ranker Ranker) tool.Tool {
 	entries := buildEntries(tools)
 	if len(entries) == 0 {
 		return nil
 	}
-	return newTool(entries)
+	t := newTool(entries)
+	t.ranker = ranker
+	return t
 }
 
 func newTool(entries []entry) *Tool {
@@ -82,9 +90,8 @@ func newTool(entries []entry) *Tool {
 }
 
 // NewSource discovers only ready MCP tools from an asynchronous source. It is
-// present even while the source is empty so a running Agent can discover tools
-// that finish initialization later. An optional ranker changes matching only;
-// invalid or unavailable ranking preserves lexical results.
+// present while the source is empty so later ready tools can be discovered.
+// Without an explicit ranker, search uses a restricted model selector.
 func NewSource(source tool.Source, rankers ...Ranker) tool.Tool {
 	if source == nil {
 		return nil
@@ -114,10 +121,7 @@ func buildEntries(tools []tool.Tool) []entry {
 		if !tool.IsMCPDefinition(def) {
 			continue
 		}
-		entries = append(entries, entry{
-			def:        tool.CloneDefinition(def),
-			searchText: searchText(def),
-		})
+		entries = append(entries, entry{def: tool.CloneDefinition(def)})
 	}
 	sort.SliceStable(entries, func(i, j int) bool {
 		return entries[i].def.Name < entries[j].def.Name
@@ -174,8 +178,10 @@ func (t *Tool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
 	if err != nil {
 		return tool.Result{}, err
 	}
-	snapshot := Tool{entries: t.currentEntries(), ranker: t.ranker}
-	matches, err := snapshot.rank(ctx, args.Query, args.Limit, snapshot.search(args.Query, args.Limit))
+	snapshot := Tool{entries: t.currentEntries(), source: t.source, ranker: t.ranker}
+	matches, err := snapshot.rank(ctx, args.Query, args.Limit, SearchModel{
+		Model: call.RuntimeModel, Reasoning: call.RuntimeReasoning, ServiceTier: call.RuntimeServiceTier,
+	})
 	if err != nil {
 		return tool.Result{}, err
 	}
@@ -201,6 +207,53 @@ func (t *Tool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
 			model.NewJSONPart(raw),
 		},
 	}, nil
+}
+
+// readSchema validates that one explicit name still has the definition in the
+// current scoped source captured for this search. A changed or removed schema
+// cannot be substituted into an in-progress selector conversation.
+func (t *Tool) checkSource(ctx context.Context) error {
+	if checker, ok := t.source.(interface{ CheckSearchScope(context.Context) error }); ok {
+		return checker.CheckSearchScope(ctx)
+	}
+	return nil
+}
+
+func (t *Tool) readSchema(ctx context.Context, name string) (tool.Definition, error) {
+	if err := t.checkSource(ctx); err != nil {
+		return tool.Definition{}, err
+	}
+	for _, candidate := range t.entries {
+		if candidate.def.Name != name {
+			continue
+		}
+		if t.source != nil {
+			current := buildEntries(t.source.Tools())
+			for _, item := range current {
+				if item.def.Name == name && sameSearchDefinition(item.def, candidate.def) {
+					return tool.CloneDefinition(candidate.def), nil
+				}
+			}
+			return tool.Definition{}, fmt.Errorf("ToolSearch schema for %q changed or became unavailable", name)
+		}
+		return tool.CloneDefinition(candidate.def), nil
+	}
+	return tool.Definition{}, fmt.Errorf("ToolSearch schema for %q is outside the current scope", name)
+}
+
+// Replay aliases only translate historical tool names. They do not change the
+// selected tool's schema, execution identity, or current authorization scope.
+func sameSearchDefinition(a, b tool.Definition) bool {
+	a, b = tool.CloneDefinition(a), tool.CloneDefinition(b)
+	delete(a.Metadata, tool.MetadataReplayAliases)
+	delete(b.Metadata, tool.MetadataReplayAliases)
+	if len(a.Metadata) == 0 {
+		a.Metadata = nil
+	}
+	if len(b.Metadata) == 0 {
+		b.Metadata = nil
+	}
+	return reflect.DeepEqual(a, b)
 }
 
 func parseRequest(raw json.RawMessage) (request, error) {
@@ -249,7 +302,7 @@ func (t *Tool) search(query string, limit int) []entry {
 	}
 	scoredEntries := make([]scored, 0, len(t.entries))
 	for _, item := range t.entries {
-		score := scoreText(item.searchText, terms)
+		score := scoreText(searchText(item.def), terms)
 		if score <= 0 {
 			continue
 		}

@@ -102,6 +102,10 @@ func (l *autoCompactGatedLLM) WebSearchUnavailableReason() string {
 
 func (*autoCompactGatedLLM) TracksInvocations() {}
 
+// AuxiliaryModel keeps the same resolved provider while leaving the parent
+// Session's context watermark and compaction snapshot out of a private request.
+func (l *autoCompactGatedLLM) AuxiliaryModel() model.LLM { return l.inner }
+
 func (l *autoCompactGatedLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
 	return func(yield func(*model.StreamEvent, error) bool) {
 		if l == nil || l.inner == nil {

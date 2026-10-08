@@ -364,9 +364,7 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 	}
 	tools = append(tools, memoryTools...)
 	if len(mcpSpecs) > 0 {
-		ranker := boundToolSearchRanker{resolve: func(ctx context.Context) (judgment.Evaluator, error) {
-			return s.boundJudgment(ctx, agentbinding.HandleToolSearch)
-		}}
+		ranker := newBoundToolSearchRanker(s)
 		tools = append(tools, toolsearch.NewSource(mcpMgr, ranker))
 	}
 	executionValidator, err := controlplane.NewExecutionValidator(controlplane.ExecutionValidatorConfig{

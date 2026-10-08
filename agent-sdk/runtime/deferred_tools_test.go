@@ -91,7 +91,7 @@ func TestRuntimeLateMCPUsesPolicyAndExecutionJournal(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			run, err := runtime.Run(t.Context(), agent.RunRequest{SessionRef: active.SessionRef, Input: "read docs", AgentSpec: agent.AgentSpec{Model: llm, Tools: []tool.Tool{toolsearch.NewSource(source)}, DeferredTools: source}})
+			run, err := runtime.Run(t.Context(), agent.RunRequest{SessionRef: active.SessionRef, Input: "read docs", AgentSpec: agent.AgentSpec{Model: llm, Tools: []tool.Tool{toolsearch.NewSource(source, toolsearch.NewLexicalRanker())}, DeferredTools: source}})
 			if err != nil {
 				t.Fatal(err)
 			}

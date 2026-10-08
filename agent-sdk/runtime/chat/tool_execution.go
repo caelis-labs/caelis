@@ -7,13 +7,18 @@ import (
 	"strings"
 	"time"
 
+	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
+	"github.com/google/uuid"
 )
 
 const toolCancellationDrainGrace = 100 * time.Millisecond
+
+type toolSearchInvocationObserverKey struct{}
 
 type toolObserver struct {
 	results chan<- tool.Result
@@ -125,13 +130,25 @@ func (a *Agent) executeToolCallAdmitted(
 		return message, toolResultEvent(call, canonical, &message, truncationMeta), nil
 	}
 
+	if tool.IsToolSearchDefinition(selectedTool.Definition()) {
+		observer, _ := ctx.Value(toolSearchInvocationObserverKey{}).(func(model.Invocation))
+		var admission func(context.Context, *model.Request) error
+		if admit := a.admitModelRequest; admit != nil {
+			admission = func(ctx context.Context, _ *model.Request) error {
+				return admit(ctx, agent.ModelRequestAdmission{RequestID: uuid.NewString()})
+			}
+		}
+		ctx = toolsearch.WithInvocationAccounting(ctx, observer, admission)
+	}
 	result, err := selectedTool.Call(ctx, tool.Call{
-		ID:           strings.TrimSpace(call.ID),
-		Name:         strings.TrimSpace(call.Name),
-		Input:        json.RawMessage(strings.TrimSpace(call.Args)),
-		ModelStep:    step,
-		RuntimeModel: a.model,
-		Observer:     observer,
+		ID:                 strings.TrimSpace(call.ID),
+		Name:               strings.TrimSpace(call.Name),
+		Input:              json.RawMessage(strings.TrimSpace(call.Args)),
+		ModelStep:          step,
+		RuntimeModel:       a.model,
+		RuntimeReasoning:   a.reasoning,
+		RuntimeServiceTier: a.request.ServiceTier,
+		Observer:           observer,
 	})
 	if err != nil {
 		result = modelVisibleToolErrorResult(call, result, err)

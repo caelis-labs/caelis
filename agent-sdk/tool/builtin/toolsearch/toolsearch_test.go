@@ -23,7 +23,7 @@ func TestNewReturnsNilWithoutMCPTools(t *testing.T) {
 func TestToolSearchFindsDeferredMCPTools(t *testing.T) {
 	t.Parallel()
 
-	searchTool := New([]tool.Tool{
+	searchTool := lexicalSearchForTest([]tool.Tool{
 		mcpCandidate("mcp__calendar__demo__create_event", "Create calendar events", "calendar", "demo", "create_event", map[string]any{
 			"type":                 "object",
 			"additionalProperties": false,
@@ -114,7 +114,7 @@ func TestToolSearchHeavySchemasDoNotBloatDiscoveryResult(t *testing.T) {
 			map[string]any{"type": "object"},
 		))
 	}
-	searchTool := New(tools)
+	searchTool := lexicalSearchForTest(tools)
 	result, err := searchTool.Call(context.Background(), tool.Call{
 		Name:  tool.ToolSearchToolName,
 		Input: []byte(`{"query":"heavy","limit":16}`),
@@ -150,7 +150,7 @@ func TestToolSearchBoundsProjectedSourceMetadataAndDescription(t *testing.T) {
 			map[string]any{"type": "object"},
 		))
 	}
-	searchTool := New(tools)
+	searchTool := lexicalSearchForTest(tools)
 	description := searchTool.Definition().Description
 	if got := utf8.RuneCountInString(description); got > maxToolSearchDescriptionRunes {
 		t.Fatalf("ToolSearch description runes = %d, want <= %d", got, maxToolSearchDescriptionRunes)
@@ -198,7 +198,7 @@ func TestToolSearchFindsCollaborationByStableServerKey(t *testing.T) {
 	for _, name := range []string{"ListThreads", "SendMessage", "ReceiveMessages", "ReadThread", "WaitThread"} {
 		candidates = append(candidates, mcpCandidate("collab__"+name, "Agent mail", "", "caelis-collaboration", name, map[string]any{"type": "object"}))
 	}
-	result, err := New(candidates).Call(t.Context(), tool.Call{Input: json.RawMessage(`{"query":"caelis-collaboration"}`)})
+	result, err := lexicalSearchForTest(candidates).Call(t.Context(), tool.Call{Input: json.RawMessage(`{"query":"caelis-collaboration"}`)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,4 +206,19 @@ func TestToolSearchFindsCollaborationByStableServerKey(t *testing.T) {
 	if err := json.Unmarshal(result.Content[0].JSON.Value, &payload); err != nil || len(payload.Tools) != 5 {
 		t.Fatalf("stable collaboration key = %#v, %v", payload, err)
 	}
+}
+
+// Legacy matching is kept in these projection tests as an explicitly selected
+// fixture. Production ToolSearch never applies it before a model decision.
+func lexicalSearchForTest(tools []tool.Tool) tool.Tool {
+	entries := buildEntries(tools)
+	ranker := rankerFunc(func(_ context.Context, query string, _ []tool.Definition, limit int, _ SearchModel) ([]string, error) {
+		matches := (&Tool{entries: entries}).search(query, limit)
+		names := make([]string, len(matches))
+		for i, match := range matches {
+			names[i] = match.def.Name
+		}
+		return names, nil
+	})
+	return NewSource(rankingSource(tools), ranker)
 }

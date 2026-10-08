@@ -177,7 +177,7 @@ func TestRegressionFileStoreRoundTripDeferredMCPToolVisibility(t *testing.T) {
 			}, nil
 		},
 	}
-	searchTool := toolsearch.New([]tool.Tool{mcpTool})
+	searchTool := toolsearch.NewWithRanker([]tool.Tool{mcpTool}, toolsearch.NewLexicalRanker())
 	if searchTool == nil {
 		t.Fatal("toolsearch.New(MCP tool) = nil")
 	}

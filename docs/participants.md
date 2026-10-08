@@ -53,11 +53,16 @@ start a conversation:
 
 | Role | Binding behavior |
 | --- | --- |
-| ToolSearch | A judgment model ranks ready MCP tools in batches bounded by encoded input size. Unbound or unavailable evaluation retains lexical discovery. |
+| ToolSearch | A restricted selector inherits the Main Agent's resolved provider model when unbound. Bind a separate provider model or Jev judgment to override it. An explicit provider binding retains its effort and Fast setting. Jev scores the scoped name/description catalog; search failures are reported without keyword fallback. |
 | Guardian | Uses a provider model, or the Main Agent model when unbound. An auxiliary classifier selector, labeled `Classifier`, appears on the same row when a judgment model is connected; it is off until selected. |
 | Reviewer | Uses a provider model or ACP agent for the fixed review scene. |
 | Memory Steward | An explicit generation model enables semantic organization. Unbound Memory keeps its durable journal and lexical recall without model calls. |
 | Memory Verifier | An optional judgment model checks Steward proposals for clear semantic conflicts. The `Verifier` selector sits beside Memory Steward on the same row. It requires an enabled Steward and cannot generate or apply Memory changes. |
+
+ToolSearch's private model requests use their own context capacity and do not
+trigger the main Session's compaction watermark. Their provider attempts and
+reported usage enter the Session journal without adding selector messages to
+the main model conversation.
 
 On Guardian's row, use Tab or click the main model or auxiliary classifier to
 configure it. A selected classifier runs first, choosing only among the original

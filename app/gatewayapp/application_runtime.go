@@ -20,6 +20,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/control/application"
 	"github.com/caelis-labs/caelis/control/memorybinding"
+	controlplacement "github.com/caelis-labs/caelis/control/placement"
 	"github.com/caelis-labs/caelis/control/sessionvisibility"
 	"github.com/caelis-labs/caelis/internal/controlplane"
 	"github.com/caelis-labs/caelis/internal/kernel"
@@ -56,13 +57,18 @@ func (a *workspaceConfigAssembler) assembleApplicationSnapshot(ctx context.Conte
 	}
 	// Model selection is explicit for both the application and its reviewer.
 	// No workspace configuration may alter the application prefix.
-	_, lookup, err := a.loadRuntimeModelSnapshot(ctx, active)
+	modelDocument, lookup, err := a.loadRuntimeModelSnapshot(ctx, active)
 	if err != nil {
+		return nil, err
+	}
+	placement := newPlacementSnapshot(modelDocument)
+	if err := controlplacement.ValidateSnapshot(placement.placement); err != nil {
 		return nil, err
 	}
 	contextWindow := a.deps.processConfig.snapshot().runtime.ContextWindow
 	instance := &sessionRuntimeInstance{runtimeComposition: runtimeComposition{
 		authorities: a.deps.authorities, sessions: sessions, workspace: workspace, lookup: lookup,
+		placementCache:    placement,
 		activation:        &sessionRuntimeActivation{modelCatalog: a.deps.modelCatalog, sessionRef: active.SessionRef},
 		activeRuntime:     stackRuntimeConfig{ContextWindow: contextWindow, ApprovalMode: application.EffectiveApprovalMode(binding.Profile)},
 		executionConfig:   sandbox.CloneExecutionConfig(active.ExecutionConfig),

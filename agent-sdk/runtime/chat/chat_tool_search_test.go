@@ -21,7 +21,7 @@ func TestChatAgentLoadsDeferredMCPToolsAfterToolSearch(t *testing.T) {
 	const mcpToolName = "mcp__calendar__demo__create_event"
 	testModel := &toolSearchLoopModel{mcpToolName: mcpToolName}
 	mcpTool := mcpToolForTest(mcpToolName)
-	searchTool := toolsearch.New([]tool.Tool{mcpTool})
+	searchTool := toolsearch.NewSource(&readyMCPSource{tools: []tool.Tool{mcpTool}}, fixtureSearchRanker{})
 	chatAgent, err := NewWithTools("chat", testModel, []tool.Tool{searchTool, mcpTool}, "")
 	if err != nil {
 		t.Fatalf("NewWithTools() error = %v", err)
@@ -137,7 +137,7 @@ func TestChatAgentRestoresDeferredMCPVisibilityAfterSessionStoreRoundTrip(t *tes
 	liveModel := &toolSearchLoopModel{mcpToolName: mcpToolName}
 	source := &readyMCPSource{}
 	mcpTool := mcpToolForTest(mcpToolName)
-	searchTool := toolsearch.NewSource(source)
+	searchTool := toolsearch.NewSource(source, fixtureSearchRanker{})
 	liveModel.onFirst = func() { source.tools = []tool.Tool{mcpTool} }
 	liveAgent, err := NewWithTools("chat", liveModel, []tool.Tool{searchTool}, "")
 	if liveAgent != nil {
@@ -372,12 +372,21 @@ type readyMCPSource struct{ tools []tool.Tool }
 
 func (s *readyMCPSource) Tools() []tool.Tool { return append([]tool.Tool(nil), s.tools...) }
 
+type fixtureSearchRanker struct{}
+
+func (fixtureSearchRanker) Rank(_ context.Context, _ string, candidates []tool.Definition, _ int, _ toolsearch.SearchModel) ([]string, error) {
+	if len(candidates) == 0 {
+		return nil, nil
+	}
+	return []string{candidates[0].Name}, nil
+}
+
 func TestChatDiscoversAndCallsMCPReadyDuringFirstModelRequest(t *testing.T) {
 	t.Parallel()
 	const name = "calendar__create_event"
 	source := &readyMCPSource{}
 	llm := &toolSearchLoopModel{mcpToolName: name, onFirst: func() { source.tools = []tool.Tool{mcpToolForTest(name)} }}
-	created, err := (Factory{}).NewAgent(t.Context(), agent.AgentSpec{Model: llm, Tools: []tool.Tool{toolsearch.NewSource(source)}, DeferredTools: source})
+	created, err := (Factory{}).NewAgent(t.Context(), agent.AgentSpec{Model: llm, Tools: []tool.Tool{toolsearch.NewSource(source, fixtureSearchRanker{})}, DeferredTools: source})
 	if err != nil {
 		t.Fatal(err)
 	}

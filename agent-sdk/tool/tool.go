@@ -128,7 +128,12 @@ type Call struct {
 	// provider or serialized as part of the tool call.
 	ModelStep    *ModelStepRef `json:"-"`
 	RuntimeModel model.LLM     `json:"-"`
-	Observer     Observer      `json:"-"`
+	// RuntimeReasoning and RuntimeServiceTier are the complete resolved request
+	// settings available to private model-backed tools. They grant no tools or
+	// access to the parent conversation.
+	RuntimeReasoning   model.ReasoningConfig `json:"-"`
+	RuntimeServiceTier model.ServiceTier     `json:"-"`
+	Observer           Observer              `json:"-"`
 }
 
 // ModelStepRef identifies one tool call within a model-emitted tool-call

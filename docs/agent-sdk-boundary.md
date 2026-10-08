@@ -224,15 +224,25 @@ cannot redirect an already-bound name. Replay discoveries whose server is still
 initializing become visible only when that definition is ready, under the same
 budgets.
 
-An optional typed ranker scores ready MCP definitions before discovery. Exact
-name and source lookups remain deterministic. Invalid, unavailable or over-budget
-ranking falls back to lexical discovery; parent cancellation remains cancellation.
-The semantic path admits at most 256 candidates in batches of 24 under one
-10-second deadline. Each candidate contributes at most 700 runes of searchable
-metadata; the serialized batch is capped at 24,000 bytes. Scores below 1 on the three-level relevance rubric are omitted.
-Returned names are checked against the same ready snapshot before normal Runtime
-admission. Ranking never supplies tool definitions, grants execution permission or
-changes replay authority.
+ToolSearch defaults to a private model selector. Its first request contains the
+natural-language need and every ready tool's name and description in the current
+scope, with no tool schemas or parent conversation. Its only callable tool reads
+one named candidate's current schema. It can read at most four schemas in five
+model steps; the complete initial catalog is capped at 96 KiB and checked against
+the model context window when declared. An over-budget catalog fails explicitly.
+The selector inherits the main request's resolved model, reasoning and service
+tier unless Control binds a separate provider model. It never inherits main tools.
+
+An explicit ToolSearch Jev binding uses typed relevance scores over the same
+complete name/description catalog. Jev has no conversational tool loop and does
+not inspect schemas. It evaluates at most 256 candidates, in question batches of
+24; each request repeats the complete catalog and is capped at 24,000 encoded
+bytes under a 10-second deadline. An empty valid selection means no match.
+Model, Jev, schema, budget, and invalid-selection errors remain errors; they do
+not fall back to keyword matching. `NewLexicalRanker` is only an explicit SDK
+auxiliary and is never selected by Core assembly. Returned names must still match
+the current scoped registered definitions before normal Runtime admission.
+Selection never grants execution permission or changes replay authority.
 
 WebSearch preserves `results` order for legacy
 positional references. Citation ranges use zero-based `result_indices` for
