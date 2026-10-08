@@ -38,12 +38,12 @@ func (m *nativeModelScript) RoundTrip(req *http.Request) (*http.Response, error)
 	// Resolve its returned path once, rather than manufacturing a Host path
 	// from resource IDs or exposing the Store's internal directory.
 	if m.index == 1 && len(m.calls) > 0 && m.calls[0].Name == "ReadResource" {
-		match := regexp.MustCompile(`\.resources/[a-f0-9]{64}`).Find(raw)
+		match := regexp.MustCompile(`\.resources(?:/|\\+)[a-f0-9]{64}`).Find(raw)
 		if len(match) == 0 {
 			m.mu.Unlock()
 			return nil, fmt.Errorf("ReadResource returned no model-visible relative path")
 		}
-		m.resourcePath = string(match)
+		m.resourcePath = ".resources/" + string(match[len(match)-64:])
 	}
 	var message map[string]any
 	finish := "stop"

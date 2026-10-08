@@ -6,27 +6,26 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	goruntime "runtime"
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/control/application"
 	"github.com/caelis-labs/caelis/internal/sandboxrouter"
+	"github.com/caelis-labs/caelis/internal/workspaceidentity"
 )
 
 // validateApplicationExecutionPlatform requires an ordinary native backend for
-// application execution. macOS Seatbelt follows the same-user personal-assistant
-// trust model: its filesystem sandbox is not process-credential isolation.
+// application execution, using the same platform selection as ordinary Sessions.
 func validateApplicationExecutionPlatform(execution string) error {
 	switch execution {
 	case "tools-only":
 		return nil
 	case "workspace-write":
-		if goruntime.GOOS == "linux" || goruntime.GOOS == "darwin" {
-			return nil
+		if _, err := sandboxrouter.Current(""); err != nil {
+			return errorcode.Wrap(errorcode.Unsupported, "gatewayapp: application native execution requires a supported native sandbox", err)
 		}
-		return errorcode.New(errorcode.Unsupported, "gatewayapp: application native execution requires a supported Linux or macOS sandbox")
+		return nil
 	default:
 		return errorcode.New(errorcode.InvalidArgument, "gatewayapp: invalid application execution profile")
 	}
@@ -44,20 +43,22 @@ type applicationExecutionRuntime struct {
 	scope      application.Scope
 }
 
-func newApplicationExecutionRuntime(cwd, storeDir string, lease *application.Store, scope application.Scope, profile application.Profile, execution *sandbox.ExecutionConfig) (*applicationExecutionRuntime, error) {
+func newApplicationExecutionRuntime(cwd, storeDir, authorityDir string, lease *application.Store, scope application.Scope, profile application.Profile, execution *sandbox.ExecutionConfig) (*applicationExecutionRuntime, error) {
 	if err := validateApplicationExecutionPlatform("workspace-write"); err != nil {
 		return nil, err
 	}
 	if lease == nil {
 		return nil, errors.New("gatewayapp: application execution lease is required")
 	}
-	securedCWD, err := filepath.EvalSymlinks(cwd)
-	if err != nil {
+	if err := validateApplicationDirectory(cwd); err != nil {
 		return nil, err
 	}
-	if securedCWD != filepath.Clean(cwd) {
-		return nil, errors.New("gatewayapp: application CWD changed since Session admission")
+	for _, entry := range profile.Workspace.Access {
+		if err := validateApplicationDirectory(entry.Path); err != nil {
+			return nil, err
+		}
 	}
+	securedCWD := filepath.Clean(cwd)
 	writable, access, err := applicationWorkspaceAccess(profile.Workspace.Access, securedCWD)
 	if err != nil {
 		return nil, err
@@ -74,13 +75,27 @@ func newApplicationExecutionRuntime(cwd, storeDir string, lease *application.Sto
 	// escalation. CWD and explicitly selected read-write directories are the
 	// default write grants; read-only directories add no write authority.
 	rt, err := sandbox.New(sandbox.Config{CWD: securedCWD, StateDir: storeDir,
-		Execution: execution, BaseEnv: runtimeCommandEnvironment(),
+		HostAuthorityDir: authorityDir,
+		Execution:        execution, BaseEnv: runtimeCommandEnvironment(),
 		RequestedBackend: route.Backend, BackendCandidates: route.BackendCandidates,
 		FallbackInstallHint: route.InstallHint, WritableRoots: writable})
 	if err != nil {
 		return nil, err
 	}
 	return &applicationExecutionRuntime{Runtime: rt, cwd: securedCWD, access: access, fullAccess: backend == sandbox.BackendHost, lease: lease, scope: scope}, nil
+}
+
+// validateApplicationDirectory rejects redirection of a creation-bound canonical
+// directory, including Windows junctions, at activation and before later effects.
+func validateApplicationDirectory(path string) error {
+	resolved, err := workspaceidentity.CanonicalDirectory(path)
+	if err != nil {
+		return err
+	}
+	if resolved != filepath.Clean(path) {
+		return errors.New("gatewayapp: application directory binding changed since Session admission")
+	}
+	return nil
 }
 
 // applicationWorkspaceAccess resolves and verifies additional directories at
@@ -94,16 +109,9 @@ func applicationWorkspaceAccess(entries []application.WorkspaceAccess, cwd strin
 		if !filepath.IsAbs(entry.Path) || (entry.Mode != "read-only" && entry.Mode != "read-write") {
 			return nil, nil, errors.New("gatewayapp: application access requires absolute directory and supported mode")
 		}
-		resolved, err := filepath.EvalSymlinks(entry.Path)
+		resolved, err := workspaceidentity.CanonicalDirectory(entry.Path)
 		if err != nil {
 			return nil, nil, err
-		}
-		info, err := os.Stat(resolved)
-		if err != nil {
-			return nil, nil, err
-		}
-		if !info.IsDir() {
-			return nil, nil, errors.New("gatewayapp: application access directory must be an existing directory")
 		}
 		if previous, exists := seen[resolved]; exists {
 			if previous != entry.Mode {
@@ -132,7 +140,7 @@ func (r *applicationExecutionRuntime) command(req sandbox.CommandRequest) (sandb
 	if !filepath.IsAbs(req.Dir) {
 		req.Dir = filepath.Join(r.cwd, req.Dir)
 	}
-	resolved, err := filepath.EvalSymlinks(req.Dir)
+	resolved, err := workspaceidentity.CanonicalDirectory(req.Dir)
 	if err != nil {
 		return req, err
 	}
@@ -231,7 +239,18 @@ func (r *applicationExecutionRuntime) checkActive(ctx context.Context) error {
 	if r.lease == nil {
 		return errors.New("gatewayapp: application execution lease is unavailable")
 	}
-	return r.lease.CheckActive(ctx, r.scope)
+	if err := r.lease.CheckActive(ctx, r.scope); err != nil {
+		return err
+	}
+	if err := validateApplicationDirectory(r.cwd); err != nil {
+		return err
+	}
+	for _, root := range r.access {
+		if err := validateApplicationDirectory(root); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (r *applicationExecutionRuntime) Run(ctx context.Context, req sandbox.CommandRequest) (sandbox.CommandResult, error) {

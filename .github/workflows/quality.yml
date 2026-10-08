@@ -96,6 +96,11 @@ jobs:
           CAELIS_LINUX_SANDBOX_SMOKE_E2E: '1'
         run: go test -count=1 -timeout=3m ./agent-sdk/sandbox/bwrap
 
+      - name: Native application execution tests
+        env:
+          CAELIS_TEST_APPLICATION_NATIVE: '1'
+        run: bash scripts/go_test_nonempty.sh ./app/gatewayapp '^Test(Application(Native|DirectoryBindings|LeaseWithdrawal|ResourceBridge|PublishArtifact|ReadResource|ArtifactChanged|ReviewerNative|ExecutionEnvironmentAfterHostApproval)|ExternalExecutionClientHTTP|SharedWorkerNativeHTTP)' linux-application-native -count=1
+
       - name: Build
         run: make build
 

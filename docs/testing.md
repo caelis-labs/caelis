@@ -76,6 +76,21 @@ that fail if no tests match. Implicit vet remains enabled. Tests use at most two
 packages concurrently with a five-minute package timeout. A build of all packages
 and embedded Memory Open use `CGO_ENABLED=0`, matching the release configuration.
 
+The gate also enables `CAELIS_TEST_APPLICATION_NATIVE=1` for application and
+shared Worker HTTP acceptance: native file/PowerShell effects, resource transfer,
+creation-bound execution configuration, directory redirection rejection, manual
+and Guardian approvals, and receipt recovery. Provider responses are deterministic;
+these checks exercise real Windows processes without live model requests.
+The same opt-in application tests run on Linux and macOS with their native backend.
+
+`CAELIS_APPLICATION_LIVE_E2E=1` enables `TestApplicationLiveNativeHTTP` with the
+locally configured Codex model `gpt-6-luna`; `CAELIS_APPLICATION_LIVE_MODEL`
+selects another configured Codex model. It snapshots only that model's endpoint
+and OAuth credentials into a disposable Store, then uses the public application
+HTTP protocol for enrollment, configuration, activation and native file/command
+effects in a directory with spaces and Chinese characters. It makes real model
+requests using synthetic work; ordinary platform checks leave it disabled.
+
 ## Dependency update CI
 
 Dependabot PRs run the same required checks as other PRs; review does not

@@ -5,11 +5,13 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox/backend/fsboundary"
 )
 
 // Normalize returns one stable Windows-oriented path spelling for policy use.
-// Existing paths are resolved through EvalSymlinks so short names and junctions
-// collapse where the OS can resolve them.
+// Existing paths use the filesystem boundary resolver so short names and
+// junctions collapse where the OS can resolve them.
 func Normalize(path string) string {
 	normalized, _ := NormalizeWithBase("", path)
 	return normalized
@@ -35,7 +37,7 @@ func NormalizeWithBase(base string, path string) (string, error) {
 		value = abs
 	}
 	value = filepath.Clean(value)
-	if resolved, err := filepath.EvalSymlinks(value); err == nil && strings.TrimSpace(resolved) != "" {
+	if resolved, err := fsboundary.ResolveExistingPath(value); err == nil && strings.TrimSpace(resolved) != "" {
 		value = filepath.Clean(resolved)
 	} else if resolved := resolveExistingAncestor(value); resolved != "" {
 		value = resolved
@@ -51,7 +53,7 @@ func resolveExistingAncestor(path string) string {
 	current := path
 	var missing []string
 	for {
-		if resolved, err := filepath.EvalSymlinks(current); err == nil && strings.TrimSpace(resolved) != "" {
+		if resolved, err := fsboundary.ResolveExistingPath(current); err == nil && strings.TrimSpace(resolved) != "" {
 			out := filepath.Clean(resolved)
 			for i := len(missing) - 1; i >= 0; i-- {
 				out = filepath.Join(out, missing[i])

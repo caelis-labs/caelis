@@ -69,7 +69,7 @@ func ResolvePathWithSymlinks(path string) string {
 		return ""
 	}
 	clean := filepath.Clean(path)
-	if resolved, err := filepath.EvalSymlinks(clean); err == nil {
+	if resolved, err := ResolveExistingPath(clean); err == nil {
 		return filepath.Clean(resolved)
 	}
 
@@ -80,7 +80,7 @@ func ResolvePathWithSymlinks(path string) string {
 			return clean
 		}
 		if _, err := os.Lstat(cur); err == nil {
-			resolved, err := filepath.EvalSymlinks(cur)
+			resolved, err := ResolveExistingPath(cur)
 			if err != nil {
 				return clean
 			}

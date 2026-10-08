@@ -1,4 +1,4 @@
-//go:build darwin
+//go:build darwin || linux
 
 package gatewayapp
 
@@ -11,16 +11,14 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/control/application"
+	"github.com/caelis-labs/caelis/internal/sandboxrouter"
 )
 
 func TestApplicationNativeExecutionEnvironment(t *testing.T) {
 	if os.Getenv("CAELIS_TEST_APPLICATION_NATIVE") != "1" {
-		t.Skip("set CAELIS_TEST_APPLICATION_NATIVE=1 for native Seatbelt execution")
+		t.Skip("set CAELIS_TEST_APPLICATION_NATIVE=1 for native application execution")
 	}
-	root, err := filepath.EvalSymlinks(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
+	root := applicationNativePolicyRoot(t)
 	home, cwd, tools := filepath.Join(root, "home"), filepath.Join(root, "work"), filepath.Join(root, "tools")
 	for _, dir := range []string{home, cwd, tools, filepath.Join(cwd, "tmp"), filepath.Join(cwd, ".git")} {
 		if err := os.MkdirAll(dir, 0700); err != nil {
@@ -52,19 +50,23 @@ func TestApplicationNativeExecutionEnvironment(t *testing.T) {
 	profile := application.Profile{Version: "v1", Model: "configured-model", ToolsVersion: "v1", Execution: "workspace-write", Workspace: application.Workspace{CWD: cwd}, ExecutionConfig: &sandbox.ExecutionConfig{Environment: sandbox.EnvironmentConfig{
 		Set: map[string]string{"SESSION_VALUE": "first", "OVERRIDE": "configured", "ZDOTDIR": home}, Unset: []string{"REMOVE_AT_CONFIG"},
 	}}}
-	first, err := newApplicationExecutionRuntime(cwd, root, store, connection.Scope, profile, profile.ExecutionConfig)
+	first, err := newApplicationExecutionRuntime(cwd, root, filepath.Join(root, "authority"), store, connection.Scope, profile, profile.ExecutionConfig)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer first.Close()
 	profile.ExecutionConfig = sandbox.CloneExecutionConfig(profile.ExecutionConfig)
 	profile.ExecutionConfig.Environment.Set["SESSION_VALUE"] = "second"
-	second, err := newApplicationExecutionRuntime(cwd, root, store, connection.Scope, profile, profile.ExecutionConfig)
+	second, err := newApplicationExecutionRuntime(cwd, root, filepath.Join(root, "authority"), store, connection.Scope, profile, profile.ExecutionConfig)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer second.Close()
-	ordinary, err := sandbox.New(sandbox.Config{CWD: cwd, RequestedBackend: sandbox.BackendSeatbelt, WritableRoots: []string{cwd}, BaseEnv: runtimeCommandEnvironment(), Execution: &sandbox.ExecutionConfig{Environment: sandbox.EnvironmentConfig{Set: map[string]string{"SESSION_VALUE": "ordinary"}, Unset: []string{"REMOVE_AT_CONFIG"}}}})
+	route, err := sandboxrouter.Current("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ordinary, err := sandbox.New(sandbox.Config{CWD: cwd, RequestedBackend: route.Backend, WritableRoots: []string{cwd}, BaseEnv: runtimeCommandEnvironment(), Execution: &sandbox.ExecutionConfig{Environment: sandbox.EnvironmentConfig{Set: map[string]string{"SESSION_VALUE": "ordinary"}, Unset: []string{"REMOVE_AT_CONFIG"}}}})
 	if err != nil {
 		t.Fatal(err)
 	}

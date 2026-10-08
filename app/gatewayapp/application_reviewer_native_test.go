@@ -1,4 +1,4 @@
-//go:build darwin || linux
+//go:build darwin || linux || windows
 
 package gatewayapp_test
 
@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -54,8 +55,12 @@ func TestApplicationReviewerNativeApprovalContinuation(t *testing.T) {
 				}
 				args := map[string]any{"path": target, "content": "NATIVE_ONCE\n"}
 				if name == "RunCommand" {
-					args = map[string]any{"command": "printf 'NATIVE_ONCE\\n' >> " + "'" + strings.ReplaceAll(target, "'", "'\\''") + "'",
-						"sandbox_permissions": "require_escalated", "justification": "Write the requested synthetic fixture outside the workspace", "yield_time_ms": 1000}
+					command := "printf 'NATIVE_ONCE\\n' >> " + "'" + strings.ReplaceAll(target, "'", "'\\''") + "'"
+					if runtime.GOOS == "windows" {
+						command = "[IO.File]::AppendAllText('" + strings.ReplaceAll(target, "'", "''") + "', \"NATIVE_ONCE`n\")"
+					}
+					args = map[string]any{"command": command,
+						"sandbox_permissions": "require_escalated", "justification": "Write the requested synthetic fixture outside the workspace"}
 				}
 				raw, err := json.Marshal(args)
 				if err != nil {

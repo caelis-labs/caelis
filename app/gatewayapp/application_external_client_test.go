@@ -1,4 +1,4 @@
-//go:build darwin
+//go:build darwin || linux || windows
 
 package gatewayapp_test
 
@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -20,14 +21,17 @@ import (
 
 // TestExternalExecutionClientHTTP uses an independently compiled client with
 // public imports only against the real HTTP Host and deterministic model. It
-// requires native Seatbelt execution, which an outer sandbox may disallow.
+// requires native sandbox execution, which an outer sandbox may disallow.
 func TestExternalExecutionClientHTTP(t *testing.T) {
 	if os.Getenv("CAELIS_TEST_APPLICATION_NATIVE") != "1" {
-		t.Skip("set CAELIS_TEST_APPLICATION_NATIVE=1 for native macOS acceptance")
+		t.Skip("set CAELIS_TEST_APPLICATION_NATIVE=1 for native application acceptance")
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
 	binary := filepath.Join(t.TempDir(), "execution-client")
+	if runtime.GOOS == "windows" {
+		binary += ".exe"
+	}
 	build := exec.CommandContext(ctx, "go", "build", "-o", binary, "./app/gatewayapp/testdata/execution_client")
 	build.Dir = filepath.Join("..", "..")
 	if output, err := build.CombinedOutput(); err != nil {
@@ -75,8 +79,13 @@ func TestExternalExecutionClientHTTP(t *testing.T) {
 		if err := json.Unmarshal(run("inspect", created.SessionID), &got); err != nil {
 			t.Fatal(err)
 		}
+		wantEnv := map[string]string{"CAELIS_EXTERNAL_FIXTURE": "external-value"}
+		if runtime.GOOS == "windows" {
+			wantEnv["SystemRoot"] = os.Getenv("SystemRoot")
+			wantEnv["TEMP"], wantEnv["TMP"] = workspace, workspace
+		}
 		for _, cfg := range []*sandbox.ExecutionConfig{got.Binding.Profile.ExecutionConfig, got.State.ExecutionConfig} {
-			if cfg == nil || cfg.Environment.Inherit == nil || *cfg.Environment.Inherit || !reflect.DeepEqual(cfg.Environment.Set, map[string]string{"CAELIS_EXTERNAL_FIXTURE": "external-value"}) {
+			if cfg == nil || cfg.Environment.Inherit == nil || *cfg.Environment.Inherit || !reflect.DeepEqual(cfg.Environment.Set, wantEnv) {
 				t.Fatalf("external profile/Session readback diverged: %+v", got)
 			}
 		}
@@ -92,7 +101,11 @@ func TestExternalExecutionClientHTTP(t *testing.T) {
 			inspect()
 		}
 		filename := action + ".txt"
-		input, err := json.Marshal(map[string]string{"command": `printf '%s' "$CAELIS_EXTERNAL_FIXTURE" > ` + filename})
+		command := `printf '%s' "$CAELIS_EXTERNAL_FIXTURE" > ` + filename
+		if runtime.GOOS == "windows" {
+			command = "[IO.File]::WriteAllText('" + filename + "', $env:CAELIS_EXTERNAL_FIXTURE)"
+		}
+		input, err := json.Marshal(map[string]string{"command": command})
 		if err != nil {
 			t.Fatal(err)
 		}

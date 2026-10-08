@@ -13,6 +13,7 @@ import (
 	"github.com/caelis-labs/caelis/control/application"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/sessionvisibility"
+	"github.com/caelis-labs/caelis/internal/workspaceidentity"
 )
 
 // applicationSourceContextKey carries Control-admitted provenance only between
@@ -35,14 +36,14 @@ func (b *controlCommandBackend) createApplicationSession(ctx context.Context, pr
 	// Persist resolved paths, not mutable /var or symlink aliases. The
 	// operation anchor still identifies the original authenticated request.
 	if req.Profile.Workspace.CWD != "" {
-		resolved, err := filepath.EvalSymlinks(req.Profile.Workspace.CWD)
+		resolved, err := workspaceidentity.CanonicalDirectory(req.Profile.Workspace.CWD)
 		if err != nil {
 			return appserver.CommandResult{}, classifyControlPreDispatchError(err)
 		}
 		req.Profile.Workspace.CWD = resolved
 	}
 	for i := range req.Profile.Workspace.Access {
-		resolved, err := filepath.EvalSymlinks(req.Profile.Workspace.Access[i].Path)
+		resolved, err := workspaceidentity.CanonicalDirectory(req.Profile.Workspace.Access[i].Path)
 		if err != nil {
 			return appserver.CommandResult{}, classifyControlPreDispatchError(err)
 		}

@@ -415,6 +415,16 @@ backend rejects this mode before Session creation and again before activation;
 an unsupported native sandbox fails closed, not through an unrestricted
 fallback. Native platform acceptance requires more than compilation.
 
+Linux uses Bubblewrap, macOS uses Seatbelt, and Windows uses the ordinary
+current-user restricted-token sandbox with workspace ACLs and PowerShell.
+Windows retains the native backend's temporary/cache grants and always-enabled
+network behavior. Process environment and shell restrictions follow
+[Execution Configuration](execution-configuration.md). Capabilities report the
+implemented platform path; sandbox initialization or execution can still fail.
+Creation resolves directory aliases, including Windows junctions, into canonical
+paths. Activation and native file, command, interactive-input and resource effects
+recheck those bindings; redirecting a bound directory requires a new Session.
+
 Native process initialization follows the
 [execution configuration](execution-configuration.md). `workspace-write` is the
 ordinary broad-read workspace sandbox: the CWD and explicit `read-write` roots

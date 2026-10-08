@@ -177,8 +177,8 @@ func readStableWorkspaceFile(root *os.Root, path string, beforeOpen, afterRead f
 	if beforeOpen != nil {
 		beforeOpen()
 	}
-	// Never use Root.Open here: a FIFO swapped in after Lstat can block
-	// forever before fstat gets a chance to reject it.
+	// Use the platform-confined opener: on Unix, a FIFO swapped in after
+	// Lstat must not block before fstat gets a chance to reject it.
 	file, err := openConfinedArtifact(root, path)
 	if err != nil {
 		return nil, err
