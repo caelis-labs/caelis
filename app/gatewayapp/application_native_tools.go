@@ -1,6 +1,7 @@
 package gatewayapp
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -43,9 +44,21 @@ func newApplicationNativeTools(exec *applicationExecutionRuntime, store *applica
 	}
 	for _, resource := range newApplicationResourceTools(store, binding, workspace) {
 		// Resource transfer uses Host filesystem calls, not the SDK sandbox
-		// filesystem. A pending approval must recheck the live lease before any
-		// materialization or publication after it resumes.
-		result = append(result, applicationLeasedTool{Tool: resource, store: store, scope: binding.Scope})
+		// filesystem. Recheck the lease and directory bindings before any
+		// materialization or publication, including after approval resumes.
+		result = append(result, applicationBoundResourceTool{Tool: resource, runtime: exec})
 	}
 	return result, nil
+}
+
+type applicationBoundResourceTool struct {
+	tool.Tool
+	runtime *applicationExecutionRuntime
+}
+
+func (t applicationBoundResourceTool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
+	if err := t.runtime.checkActive(ctx); err != nil {
+		return tool.Result{}, err
+	}
+	return t.Tool.Call(ctx, call)
 }

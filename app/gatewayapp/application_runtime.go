@@ -71,7 +71,7 @@ func (a *workspaceConfigAssembler) assembleApplicationSnapshot(ctx context.Conte
 	var execRuntime *applicationExecutionRuntime
 	var sandboxDescriptor sandbox.DescriptorProvider = applicationNoNativeExecution{}
 	if binding.Profile.Execution == "workspace-write" {
-		execRuntime, err = newApplicationExecutionRuntime(workspace.CWD, a.deps.authorities.storeDir, store, binding.Scope, binding.Profile, instance.executionConfig)
+		execRuntime, err = newApplicationExecutionRuntime(active.CWD, a.deps.authorities.storeDir, a.deps.authorities.sandboxHostAuthorityDir, store, binding.Scope, binding.Profile, instance.executionConfig)
 		if err != nil {
 			return nil, err
 		}

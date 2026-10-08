@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -14,6 +13,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/internal/workspaceidentity"
 )
 
 // sessionRuntime owns one in-memory execution activation. Its assembled
@@ -1326,30 +1326,12 @@ func canonicalWorkspaceRef(
 	if cwd == "" {
 		return session.WorkspaceRef{}, errorcode.New(errorcode.InvalidArgument, "gatewayapp: workspace CWD is required")
 	}
-	absolute, err := filepath.Abs(cwd)
-	if err != nil {
-		return session.WorkspaceRef{}, errorcode.Wrap(errorcode.InvalidArgument, "gatewayapp: resolve workspace CWD", err)
-	}
-	resolved, err := filepath.EvalSymlinks(absolute)
+	resolved, err := workspaceidentity.CanonicalDirectory(cwd)
 	if err != nil {
 		return session.WorkspaceRef{}, errorcode.Wrap(
 			errorcode.InvalidArgument,
 			fmt.Sprintf("gatewayapp: resolve workspace CWD %q", cwd),
 			err,
-		)
-	}
-	info, err := os.Stat(resolved)
-	if err != nil {
-		return session.WorkspaceRef{}, errorcode.Wrap(
-			errorcode.InvalidArgument,
-			fmt.Sprintf("gatewayapp: inspect workspace CWD %q", resolved),
-			err,
-		)
-	}
-	if !info.IsDir() {
-		return session.WorkspaceRef{}, errorcode.New(
-			errorcode.InvalidArgument,
-			fmt.Sprintf("gatewayapp: workspace CWD %q is not a directory", resolved),
 		)
 	}
 	if key == "" {

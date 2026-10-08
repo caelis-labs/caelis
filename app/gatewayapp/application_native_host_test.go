@@ -1,4 +1,4 @@
-//go:build darwin
+//go:build darwin || linux || windows
 
 package gatewayapp_test
 
@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -57,6 +58,15 @@ func TestApplicationNativeProviderUsesReturnedResourcePath(t *testing.T) {
 
 func nativeHostSession(t *testing.T, ctx context.Context, host *applicationHTTPHost, cwd string) (*httpclient.Client, string) {
 	t.Helper()
+	info, err := host.host.Initialize(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, capability := range []string{application.CapabilityNativeExecution, application.CapabilityWorkspaceBinding} {
+		if !slices.Contains(info.Capabilities, capability) {
+			t.Fatalf("native Host does not advertise %s", capability)
+		}
+	}
 	status, err := host.host.SessionStatus(ctx, appserver.StatusRequest{})
 	if err != nil {
 		t.Fatal(err)
@@ -91,16 +101,16 @@ func nativePrompt(t *testing.T, ctx context.Context, client *httpclient.Client, 
 }
 
 // TestApplicationNativeHTTPB01B02B10 exercises the public HTTP Host and
-// controlled provider with real Seatbelt effects; outer sandbox may disallow
-// sandbox_apply, so native platform acceptance is explicit opt-in.
+// controlled provider with real native sandbox effects. An outer sandbox may
+// prohibit native execution, so platform acceptance is explicit opt-in.
 func TestApplicationNativeHTTPB01B02B10(t *testing.T) {
 	if os.Getenv("CAELIS_TEST_APPLICATION_NATIVE") != "1" {
-		t.Skip("set CAELIS_TEST_APPLICATION_NATIVE=1 for native macOS acceptance")
+		t.Skip("set CAELIS_TEST_APPLICATION_NATIVE=1 for native application acceptance")
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
 	defer cancel()
 	root := t.TempDir()
-	cwd := filepath.Join(root, "notebook")
+	cwd := filepath.Join(root, "notebook 空 格")
 	if err := os.Mkdir(cwd, 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +121,7 @@ func TestApplicationNativeHTTPB01B02B10(t *testing.T) {
 	host := startApplicationHTTPHost(t, filepath.Join(root, "store"), cwd, provider)
 	defer host.close(t)
 	client, id := nativeHostSession(t, ctx, host, cwd)
-	provider.set(nativeModelTool{"Write", `{"path":"MEMORY.md","content":"notebook identity"}`}, nativeModelTool{"Write", `{"path":"2026/01/02/diary.md","content":"daily note"}`}, nativeModelTool{"RunCommand", `{"command":"/bin/cat MEMORY.md 2026/01/02/diary.md > command-output.txt"}`})
+	provider.set(nativeModelTool{"Write", `{"path":"MEMORY.md","content":"notebook identity"}`}, nativeModelTool{"Write", `{"path":"2026/01/02/diary.md","content":"daily note"}`}, nativeCommandTool(t, nativeCopyCommand([]string{"MEMORY.md", "2026/01/02/diary.md"}, "command-output.txt")))
 	nativePrompt(t, ctx, client, id, "notebook-write")
 	for path, want := range map[string]string{"MEMORY.md": "notebook identity", "2026/01/02/diary.md": "daily note", "command-output.txt": "notebook identitydaily note"} {
 		got, err := os.ReadFile(filepath.Join(cwd, path))
@@ -148,13 +158,16 @@ func TestApplicationNativeHTTPB01B02B10(t *testing.T) {
 	if err := os.Mkdir(worker, 0700); err != nil {
 		t.Fatal(err)
 	}
-	workerProfile := application.Profile{Version: "worker/1", Instructions: "Separate worker", Model: "openai-compatible/gpt-4.1", ToolsVersion: "worker/1", Execution: "workspace-write", Workspace: application.Workspace{CWD: worker}, NativeTools: []string{}}
+	workerProfile := application.Profile{Version: "worker/1", Instructions: "Separate worker", Model: "openai-compatible/gpt-4.1", ToolsVersion: "worker/1", Execution: "workspace-write", Workspace: application.Workspace{CWD: worker}, NativeTools: []string{"Write", "RunCommand", "Task"}}
 	workerResult, err := client.CreateApplicationSession(ctx, appserver.CreateApplicationSessionRequest{WriteBase: appserver.WriteBase{OperationID: "create-worker"}, Profile: workerProfile})
 	if err != nil || workerResult.SessionID == "" {
 		t.Fatalf("worker create = %+v, %v", workerResult, err)
 	}
-	provider.set()
+	provider.set(nativeModelTool{"Write", `{"path":"worker.txt","content":"worker-only"}`}, nativeCommandTool(t, nativeCopyCommand([]string{"worker.txt"}, "worker-result.txt")))
 	nativePrompt(t, ctx, client, workerResult.SessionID, "worker-independent")
+	if data, err := os.ReadFile(filepath.Join(worker, "worker-result.txt")); err != nil || string(data) != "worker-only" {
+		t.Fatalf("application worker command = %q, %v", data, err)
+	}
 	if _, err := os.Stat(filepath.Join(worker, "MEMORY.md")); !os.IsNotExist(err) {
 		t.Fatalf("worker unexpectedly inherited Notebook file: %v", err)
 	}
@@ -166,7 +179,7 @@ func TestApplicationNativeHTTPB01B02B10(t *testing.T) {
 	}
 	// The controlled model takes the relative path from the ReadResource
 	// result in its next request. No application code guesses a Store path.
-	provider.set(nativeModelTool{"ReadResource", fmt.Sprintf(`{"resource_id":%q}`, uploaded.ID)}, nativeModelTool{"Read", `{"path":"$RESOURCE_PATH"}`}, nativeModelTool{"RunCommand", `{"command":"/bin/cat $RESOURCE_PATH > result.txt"}`}, nativeModelTool{"PublishArtifact", `{"path":"result.txt","name":"result.txt","media_type":"text/plain"}`})
+	provider.set(nativeModelTool{"ReadResource", fmt.Sprintf(`{"resource_id":%q}`, uploaded.ID)}, nativeModelTool{"Read", `{"path":"$RESOURCE_PATH"}`}, nativeCommandTool(t, nativeCopyCommand([]string{"$RESOURCE_PATH"}, "result.txt")), nativeModelTool{"PublishArtifact", `{"path":"result.txt","name":"result.txt","media_type":"text/plain"}`})
 	nativePrompt(t, ctx, client, id, "native-resource")
 	got, err := os.ReadFile(filepath.Join(cwd, "result.txt"))
 	if err != nil || string(got) != string(resourceBytes) {

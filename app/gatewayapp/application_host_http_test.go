@@ -130,9 +130,15 @@ type applicationHTTPHost struct {
 
 func startApplicationHTTPHost(t *testing.T, store, workspace string, provider http.RoundTripper) *applicationHTTPHost {
 	t.Helper()
+	return startApplicationHTTPHostWithSandbox(t, store, workspace, provider, "host")
+}
+
+func startApplicationHTTPHostWithSandbox(t *testing.T, store, workspace string, provider http.RoundTripper, backend string) *applicationHTTPHost {
+	t.Helper()
 	stack, err := gatewayapp.NewLocalStack(gatewayapp.Config{
 		AppName: "caelis-test", UserID: "owner", StoreDir: store, WorkspaceCWD: workspace,
-		SkillDirs: []string{}, Sandbox: gatewayapp.SandboxConfig{RequestedType: "host"},
+		SandboxHostAuthorityDir: filepath.Join(store, "sandbox-authority"),
+		SkillDirs:               []string{}, Sandbox: gatewayapp.SandboxConfig{RequestedType: backend},
 		ResolveProviderHTTPClient: func(context.Context, gatewayapp.ModelConfig) (*http.Client, error) {
 			return &http.Client{Transport: provider}, nil
 		},

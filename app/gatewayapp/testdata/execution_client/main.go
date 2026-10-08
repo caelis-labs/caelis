@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 	"time"
 
@@ -39,24 +40,31 @@ func run(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	found := false
-	for _, capability := range info.Capabilities {
-		if capability == appserver.CapabilityExecutionConfiguration {
-			found = true
+	for _, required := range []string{appserver.CapabilityExecutionConfiguration, application.CapabilityNativeExecution, application.CapabilityWorkspaceBinding} {
+		found := false
+		for _, capability := range info.Capabilities {
+			if capability == required {
+				found = true
+			}
 		}
-	}
-	if !found {
-		return fmt.Errorf("host does not advertise execution-configuration-v1")
+		if !found {
+			return fmt.Errorf("host does not advertise %s", required)
+		}
 	}
 	switch args[0] {
 	case "create":
 		inherit := false
+		environment := map[string]string{"CAELIS_EXTERNAL_FIXTURE": "external-value"}
+		if runtime.GOOS == "windows" {
+			environment["SystemRoot"] = os.Getenv("SystemRoot")
+			environment["TEMP"], environment["TMP"] = args[3], args[3]
+		}
 		profile := application.Profile{
 			Version: "external-client/1", Instructions: "Execute the controlled native command.",
 			Model: "openai-compatible/gpt-4.1", ToolsVersion: "external-client/1", Execution: "workspace-write",
 			Workspace: application.Workspace{CWD: args[3]},
 			ExecutionConfig: &sandbox.ExecutionConfig{Environment: sandbox.EnvironmentConfig{
-				Inherit: &inherit, Set: map[string]string{"CAELIS_EXTERNAL_FIXTURE": "external-value"},
+				Inherit: &inherit, Set: environment,
 			}},
 		}
 		result, err := client.CreateApplicationSession(ctx, appserver.CreateApplicationSessionRequest{WriteBase: appserver.WriteBase{OperationID: "external-create"}, Profile: profile})

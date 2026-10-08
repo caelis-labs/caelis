@@ -66,9 +66,6 @@ func testResourceBridge(t *testing.T, workspace string, store *resourceBridgeSto
 }
 
 func TestApplicationResourceBridgeRoundTrip(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("native workspace-write artifact reads unavailable on Windows")
-	}
 	workspace := t.TempDir()
 	data := []byte{0, 1, 0xff, 'A', '\n'}
 	store := &resourceBridgeStore{resources: map[string][]byte{"resource-1": data}}
@@ -128,18 +125,21 @@ func TestApplicationPublishArtifactConfinesPaths(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(outside, "outside.txt"), []byte("outside"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(filepath.Join(outside, "outside.txt"), filepath.Join(workspace, "link.txt")); err != nil {
+	paths := []string{"../outside.txt", filepath.Join(outside, "outside.txt"), filepath.Join("linkdir", "outside.txt"), "directory", ".", "a/../directory"}
+	if err := os.Symlink(filepath.Join(outside, "outside.txt"), filepath.Join(workspace, "link.txt")); err == nil {
+		paths = append(paths, "link.txt")
+	} else if runtime.GOOS != "windows" {
 		t.Fatal(err)
+	} else {
+		t.Logf("file symlink fixture unavailable; directory junction confinement is still exercised: %v", err)
 	}
-	if err := os.Symlink(outside, filepath.Join(workspace, "linkdir")); err != nil {
-		t.Fatal(err)
-	}
+	applicationDirectoryLink(t, filepath.Join(workspace, "linkdir"), outside)
 	if err := os.Mkdir(filepath.Join(workspace, "directory"), 0700); err != nil {
 		t.Fatal(err)
 	}
 	store := &resourceBridgeStore{}
 	_, publish := testResourceBridge(t, workspace, store)
-	for _, path := range []string{"../outside.txt", filepath.Join(outside, "outside.txt"), "link.txt", filepath.Join("linkdir", "outside.txt"), "directory", ".", "a/../directory"} {
+	for _, path := range paths {
 		t.Run(path, func(t *testing.T) {
 			_, err := publish.Call(t.Context(), testResourceCall(t, "PublishArtifact", map[string]string{"path": path, "name": "name", "media_type": "text/plain"}))
 			if err == nil {
@@ -153,17 +153,12 @@ func TestApplicationPublishArtifactConfinesPaths(t *testing.T) {
 }
 
 func TestApplicationReadResourceRejectsMalformedAndSymlinkDelivery(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("native workspace-write artifact reads unavailable on Windows")
-	}
 	workspace := t.TempDir()
 	outside := t.TempDir()
 	store := &resourceBridgeStore{resources: map[string][]byte{"resource-1": []byte("safe")}}
 	read, _ := testResourceBridge(t, workspace, store)
 	call := testResourceCall(t, "ReadResource", map[string]string{"resource_id": "resource-1"})
-	if err := os.Symlink(outside, filepath.Join(workspace, ".resources")); err != nil {
-		t.Fatal(err)
-	}
+	applicationDirectoryLink(t, filepath.Join(workspace, ".resources"), outside)
 	if _, err := read.Call(t.Context(), call); !errors.Is(err, application.ErrInvalid) {
 		t.Fatalf("symlink resource directory accepted: %v", err)
 	}
@@ -185,9 +180,6 @@ func TestApplicationReadResourceRejectsMalformedAndSymlinkDelivery(t *testing.T)
 }
 
 func TestApplicationArtifactChangedDuringSnapshot(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("native workspace-write artifact reads unavailable on Windows")
-	}
 	workspace := t.TempDir()
 	path := filepath.Join(workspace, "output.txt")
 	if err := os.WriteFile(path, []byte("before"), 0600); err != nil {

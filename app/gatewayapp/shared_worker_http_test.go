@@ -333,7 +333,7 @@ func TestSharedWorkerHTTPApprovalCompetition(t *testing.T) {
 	defer cancel()
 	root := t.TempDir()
 	p := &nativeModelScript{}
-	p.set(nativeModelTool{"RunCommand", `{"command":"printf approval-fixture","sandbox_permissions":"require_escalated","justification":"Synthetic approval race"}`})
+	p.set(nativeModelTool{"RunCommand", `{"command":"echo approval-fixture","sandbox_permissions":"require_escalated","justification":"Synthetic approval race"}`})
 	h := startApplicationHTTPHost(t, filepath.Join(root, "store"), root, p)
 	defer h.close(t)
 	defer cancel()

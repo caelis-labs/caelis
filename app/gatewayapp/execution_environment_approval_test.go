@@ -1,4 +1,4 @@
-//go:build darwin
+//go:build darwin || linux || windows
 
 package gatewayapp_test
 
@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -19,7 +20,7 @@ import (
 
 func TestApplicationExecutionEnvironmentAfterHostApproval(t *testing.T) {
 	if os.Getenv("CAELIS_TEST_APPLICATION_NATIVE") != "1" {
-		t.Skip("set CAELIS_TEST_APPLICATION_NATIVE=1 for native Seatbelt execution")
+		t.Skip("set CAELIS_TEST_APPLICATION_NATIVE=1 for native application execution")
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
 	defer cancel()
@@ -43,7 +44,15 @@ func TestApplicationExecutionEnvironmentAfterHostApproval(t *testing.T) {
 	}
 	client, _ := registerApplicationHTTP(t, ctx, host, "environment", filepath.Join(root, "application.credential"))
 	inherit := false
-	profile := application.Profile{Version: "v1", Model: "openai-compatible/gpt-4.1", ToolsVersion: "v1", Execution: "workspace-write", Workspace: application.Workspace{CWD: cwd}, ExecutionConfig: &sandbox.ExecutionConfig{Environment: sandbox.EnvironmentConfig{Inherit: &inherit, Set: map[string]string{"HOME": home, "PATH": "/usr/bin:/bin", "CONFIG_VALUE": "configured"}}}}
+	environment := map[string]string{"HOME": home, "PATH": "/usr/bin:/bin", "CONFIG_VALUE": "configured"}
+	command := `printf '%s|%s|%s' "$HOME" "$PWD" "$CONFIG_VALUE" > approved-env`
+	if runtime.GOOS == "windows" {
+		environment["SystemRoot"] = os.Getenv("SystemRoot")
+		environment["TEMP"], environment["TMP"] = cwd, cwd
+		delete(environment, "PATH")
+		command = "[IO.File]::WriteAllText('approved-env', ($env:HOME+'|'+(Get-Location).Path+'|'+$env:CONFIG_VALUE))"
+	}
+	profile := application.Profile{Version: "v1", Model: "openai-compatible/gpt-4.1", ToolsVersion: "v1", Execution: "workspace-write", Workspace: application.Workspace{CWD: cwd}, ExecutionConfig: &sandbox.ExecutionConfig{Environment: sandbox.EnvironmentConfig{Inherit: &inherit, Set: environment}}}
 	created, err := client.CreateApplicationSession(ctx, appserver.CreateApplicationSessionRequest{WriteBase: appserver.WriteBase{OperationID: "create"}, Profile: profile})
 	if err != nil {
 		t.Fatal(err)
@@ -53,7 +62,7 @@ func TestApplicationExecutionEnvironmentAfterHostApproval(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer feed.Subscription.Close()
-	input, err := json.Marshal(map[string]any{"command": `printf '%s|%s|%s' "$HOME" "$PWD" "$CONFIG_VALUE" > approved-env`, "sandbox_permissions": "require_escalated", "justification": "Verify the synthetic Host-route environment after explicit approval."})
+	input, err := json.Marshal(map[string]any{"command": command, "sandbox_permissions": "require_escalated", "justification": "Verify the synthetic Host-route environment after explicit approval."})
 	if err != nil {
 		t.Fatal(err)
 	}
