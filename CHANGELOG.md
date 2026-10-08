@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.68.0](https://github.com/caelis-labs/caelis/compare/v0.67.2...v0.68.0) (2026-10-08)
+
+
+### Features
+
+* **toolsearch:** add restricted semantic discovery ([#108](https://github.com/caelis-labs/caelis/issues/108)) ([75a8051](https://github.com/caelis-labs/caelis/commit/75a80511dfa887c406340f4c531e1963e3ab4034))
+
 ## [0.67.2](https://github.com/caelis-labs/caelis/compare/v0.67.1...v0.67.2) (2026-10-08)
 
 
