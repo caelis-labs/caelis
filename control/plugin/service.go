@@ -233,14 +233,18 @@ func (s Service) addPath(ctx context.Context, path string, opts pluginAddPathOpt
 		return Info{}, fmt.Errorf("plugin service: path is not a directory: %s", absPath)
 	}
 
-	id := pluginConfigID(absPath, opts.ConfigID)
-	p, err := ParseConfigured(Config{
-		ID:   id,
-		Root: absPath,
-	})
+	p, err := ParsePlugin(absPath)
 	if err != nil {
 		return Info{}, fmt.Errorf("plugin service: parse plugin failed: %w", err)
 	}
+	id := pluginConfigID(absPath, opts.ConfigID)
+	// A standard package's extracted directory commonly includes a version and
+	// platform. Its manifest name is the stable installed identity, so package
+	// updates retain the same private PLUGIN_DATA and replace the same server.
+	if p.Kind == ManifestKindAgentPlugin && strings.TrimSpace(opts.ConfigID) == "" {
+		id = p.Name
+	}
+	p = pluginWithConfiguredID(p, id)
 
 	next := Config{
 		ID:          id,
@@ -388,6 +392,9 @@ func (s Service) enrichPluginInfoFromManifest(info *Info, pCfg Config) {
 	info.Name = firstNonEmpty(info.Name, p.Name)
 	info.Version = firstNonEmpty(info.Version, p.Version)
 	info.Description = firstNonEmpty(info.Description, p.Description)
+	if len(p.Warnings) > 0 {
+		info.Warning = strings.Join(p.Warnings, "; ")
+	}
 	info.Skills = pluginSkillDisplayNames(p)
 	for _, hook := range p.Hooks {
 		info.Hooks = append(info.Hooks, string(hook.Event))
@@ -446,11 +453,12 @@ func pluginSkillBundles(p InstalledPlugin, enabled bool) []skill.PluginBundle {
 			continue
 		}
 		out = append(out, skill.PluginBundle{
-			Plugin:    p.ID,
-			Namespace: contribution.Namespace,
-			Root:      contribution.Root,
-			Disabled:  append([]string(nil), contribution.Disabled...),
-			Enabled:   enabled,
+			Plugin:      p.ID,
+			Namespace:   contribution.Namespace,
+			Root:        contribution.Root,
+			Disabled:    append([]string(nil), contribution.Disabled...),
+			Enabled:     enabled,
+			SkipInvalid: p.Kind == ManifestKindAgentPlugin,
 		})
 	}
 	return out

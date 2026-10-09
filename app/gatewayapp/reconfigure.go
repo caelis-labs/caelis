@@ -197,7 +197,7 @@ func (s *runtimeComposition) loadGatewayBuildPlan(sandboxCfg SandboxConfig, runt
 		}
 	}()
 	skillDirs := stackSkillDiscoveryDirs(s.workspace.CWD, runtimeCfg.SkillDirs)
-	contribs, err := resolveGatewayPluginContributions(doc.Plugins)
+	contribs, err := resolveGatewayPluginContributions(doc.Plugins, s.authorities.storeDir, s.workspace.CWD)
 	if err != nil {
 		return gatewayBuildPlan{}, err
 	}
@@ -652,8 +652,8 @@ func stackSkillDiscoveryDirs(workspaceDir string, configured []string) []string 
 
 // resolveGatewayPluginContributions gives persisted configuration failures an
 // application-boundary prefix at initial assembly and pre-commit validation.
-func resolveGatewayPluginContributions(configs []PluginConfig) (plugin.Contributions, error) {
-	contributions, err := plugin.ResolveContributions(configs)
+func resolveGatewayPluginContributions(configs []PluginConfig, storeDir, workspaceDir string) (plugin.Contributions, error) {
+	contributions, err := plugin.ResolveContributions(configs, plugin.RuntimePaths{StoreDir: storeDir, WorkspaceDir: workspaceDir})
 	if err != nil {
 		return plugin.Contributions{}, fmt.Errorf("gatewayapp: %w", err)
 	}

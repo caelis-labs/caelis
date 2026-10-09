@@ -318,10 +318,17 @@ func parseFrontMatter(content string) (map[string]string, string) {
 	rest := strings.TrimPrefix(trimmed, "---\n")
 	idx := strings.Index(rest, "\n---\n")
 	if idx < 0 {
-		return map[string]string{}, content
+		if strings.HasSuffix(rest, "\n---") {
+			idx = len(rest) - len("\n---")
+		} else {
+			return map[string]string{}, content
+		}
 	}
 	front := rest[:idx]
-	body := rest[idx+len("\n---\n"):]
+	body := ""
+	if idx+len("\n---\n") <= len(rest) {
+		body = rest[idx+len("\n---\n"):]
+	}
 	values := map[string]string{}
 	for _, line := range strings.Split(front, "\n") {
 		line = strings.TrimSpace(line)

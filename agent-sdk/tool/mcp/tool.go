@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
@@ -62,6 +63,7 @@ func (t *MCPTool) Call(ctx context.Context, call tool.Call) (tool.Result, error)
 	})
 	if err != nil {
 		return tool.Result{
+			ID:      call.ID,
 			Name:    call.Name,
 			IsError: true,
 			Content: []model.Part{
@@ -70,81 +72,32 @@ func (t *MCPTool) Call(ctx context.Context, call tool.Call) (tool.Result, error)
 		}, nil
 	}
 
-	parts := mcpContentParts(resp.Content)
-	if len(parts) == 0 && resp.StructuredContent != nil {
-		parts = append(parts, structuredContentPart(resp.StructuredContent))
+	if resp == nil {
+		return tool.Result{ID: call.ID, Name: call.Name, IsError: true,
+			Content: []model.Part{model.NewTextPart("MCP server returned no tool result")}}, nil
+	}
+	parts, contentErr := mcpContentParts(resp.Content)
+	if resp.StructuredContent != nil {
+		structured, err := structuredContentPart(resp.StructuredContent)
+		if err != nil {
+			contentErr = errors.Join(contentErr, err)
+		} else {
+			parts = append(parts, structured)
+		}
+	}
+	if contentErr != nil {
+		parts = append(parts, model.NewTextPart("MCP content not delivered: "+contentErr.Error()))
 	}
 	if len(parts) == 0 {
 		parts = append(parts, model.NewTextPart(""))
 	}
 
 	return tool.Result{
+		ID:      call.ID,
 		Name:    call.Name,
 		Content: parts,
-		IsError: resp.IsError,
+		IsError: resp.IsError || contentErr != nil,
 	}, nil
-}
-
-func mcpContentParts(contents []mcpsdk.Content) []model.Part {
-	var parts []model.Part
-	for _, content := range contents {
-		if content == nil {
-			continue
-		}
-		switch c := content.(type) {
-		case *mcpsdk.TextContent:
-			parts = append(parts, model.NewTextPart(c.Text))
-		case *mcpsdk.ImageContent:
-			parts = append(parts, model.NewMediaPart(model.MediaModalityImage, model.MediaSource{
-				Kind: model.MediaSourceInline,
-				Data: string(c.Data),
-			}, c.MIMEType, ""))
-		case *mcpsdk.AudioContent:
-			parts = append(parts, model.NewMediaPart(model.MediaModalityAudio, model.MediaSource{
-				Kind: model.MediaSourceInline,
-				Data: string(c.Data),
-			}, c.MIMEType, ""))
-		case *mcpsdk.ResourceLink:
-			parts = append(parts, model.NewTextPart(formatResourceLink(c)))
-		case *mcpsdk.EmbeddedResource:
-			parts = append(parts, marshalJSONPart(c))
-		default:
-			parts = append(parts, marshalJSONPart(content))
-		}
-	}
-	return parts
-}
-
-func structuredContentPart(value any) model.Part {
-	return marshalJSONPart(value)
-}
-
-func marshalJSONPart(value any) model.Part {
-	raw, err := json.Marshal(value)
-	if err != nil || !json.Valid(raw) {
-		return model.NewTextPart(fmt.Sprintf("%v", value))
-	}
-	return model.NewJSONPart(raw)
-}
-
-func formatResourceLink(link *mcpsdk.ResourceLink) string {
-	if link == nil {
-		return ""
-	}
-	label := firstNonEmpty(link.Title, link.Name, link.URI)
-	if label == link.URI {
-		return fmt.Sprintf("MCP resource: %s", link.URI)
-	}
-	return fmt.Sprintf("MCP resource: %s (%s)", label, link.URI)
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if value != "" {
-			return value
-		}
-	}
-	return ""
 }
 
 var _ tool.Tool = (*MCPTool)(nil)

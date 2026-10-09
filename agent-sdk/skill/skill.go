@@ -46,6 +46,9 @@ type PluginBundle struct {
 	Root      string
 	Disabled  []string
 	Enabled   bool
+	// SkipInvalid keeps one malformed skill in a standard Agent Plugin from
+	// hiding its other Skills or MCP servers.
+	SkipInvalid bool
 }
 
 type ResolveStatus string

@@ -383,6 +383,17 @@ Runtime release cancels and drains pending initialization and closes its clients
 Plugin configuration is also canonical AppConfig state. Managed plugin content
 is immutable and pinned while an active Runtime uses it; configuration mutation
 and installation effects remain on the principal-bound Control command path.
+Agent Plugins 1.0 root `plugin.json`/`mcp.json` and Claude plugin root
+`.mcp.json`/inline `mcpServers` normalize into the same Skill and MCP assembly.
+The standard manifest wins if both formats exist in one package. A standard
+plugin's `PLUGIN_DATA` lives under the Host Store by plugin identity, persists
+across package updates, and is created only when its stdio server starts. Its
+process receives a small platform environment and explicit package/Host values,
+not the Host's complete environment. A Runtime owns one MCP client per server;
+tool calls and Turns reuse that connection until the Runtime is released or the
+connection fails. Failed clients are removed from the callable catalog without
+replaying a call or promoting a lower-priority colliding server. See
+[Plugin integration](plugins.md) for supported content and authentication limits.
 
 Memory AppConfig contains one default `BindingRef` and opaque actor, principal,
 issuer-credential, View, Grant, and

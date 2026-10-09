@@ -343,7 +343,17 @@ func (m *Manager) Tools() []tool.Tool {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return append([]tool.Tool(nil), m.tools...)
+	// Keep the original priority winner pinned for this Runtime. A failed
+	// process removes its callable without silently promoting another server
+	// under the same projected name or restarting the original process.
+	var ready []tool.Tool
+	for _, candidate := range m.tools {
+		if remote, ok := candidate.(*MCPTool); ok && remote.client.closedError() != nil {
+			continue
+		}
+		ready = append(ready, candidate)
+	}
+	return ready
 }
 
 // Close cancels pending startup and waits for its producers before closing
