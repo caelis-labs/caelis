@@ -40,15 +40,16 @@ const LifecycleStatusContextCompacting = "context_compacting"
 // ACP wire shapes are derived from this payload by surface projectors; they are
 // not the storage contract.
 type EventTool struct {
-	ID        string              `json:"id,omitempty"`
-	Name      string              `json:"name,omitempty"`
-	Kind      string              `json:"kind,omitempty"`
-	Title     string              `json:"title,omitempty"`
-	Status    string              `json:"status,omitempty"`
-	Input     map[string]any      `json:"input,omitempty"`
-	Output    map[string]any      `json:"output,omitempty"`
-	Content   []EventToolContent  `json:"content,omitempty"`
-	Locations []EventToolLocation `json:"locations,omitempty"`
+	ID           string              `json:"id,omitempty"`
+	TurnComplete bool                `json:"turn_complete,omitempty"`
+	Name         string              `json:"name,omitempty"`
+	Kind         string              `json:"kind,omitempty"`
+	Title        string              `json:"title,omitempty"`
+	Status       string              `json:"status,omitempty"`
+	Input        map[string]any      `json:"input,omitempty"`
+	Output       map[string]any      `json:"output,omitempty"`
+	Content      []EventToolContent  `json:"content,omitempty"`
+	Locations    []EventToolLocation `json:"locations,omitempty"`
 }
 
 // UnmarshalJSON preserves numeric tokens only in the observed tool input. The

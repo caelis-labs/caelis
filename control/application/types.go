@@ -303,6 +303,9 @@ type Call struct {
 type CallResult struct {
 	Outcome string          `json:"outcome"` // succeeded, failed, unknown
 	Content json.RawMessage `json:"content"`
+	// TurnComplete ends the originating Turn after this completed callback result
+	// is recorded. It is valid only for a succeeded outcome.
+	TurnComplete bool `json:"turn_complete,omitempty"`
 	// ResultFormat must match the claimed tool's immutable catalog revision.
 	// Content is an ordered ContentBlock array only for content-v1. Baseline
 	// clients retain opaque JSON until they explicitly negotiate that format.

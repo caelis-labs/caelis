@@ -994,6 +994,48 @@ func TestChatAgentExecutesMixedSameStepToolCallsSerially(t *testing.T) {
 	}
 }
 
+func TestChatAgentTerminalToolResultStopsSameBatchAndNextModelStep(t *testing.T) {
+	t.Parallel()
+	testModel := &contextStabilityModel{toolNames: []string{"bot_dream", "side_effect"}}
+	var sideEffects int
+	chatAgent, err := NewWithTools("chat", testModel, []tool.Tool{
+		tool.NamedTool{Def: tool.Definition{Name: "bot_dream", InputSchema: map[string]any{"type": "object"}}, Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
+			return tool.Result{ID: call.ID, Name: call.Name, TurnComplete: true, Content: []model.Part{model.NewJSONPart([]byte(`{"accepted":true}`))}}, nil
+		}},
+		tool.NamedTool{Def: tool.Definition{Name: "side_effect", InputSchema: map[string]any{"type": "object"}}, Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
+			sideEffects++
+			return tool.Result{ID: call.ID, Name: call.Name}, nil
+		}},
+	}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := agent.NewContext(agent.ContextSpec{Context: context.Background(), Session: session.Session{SessionRef: session.SessionRef{SessionID: "s"}}, Events: []*session.Event{{Type: session.EventTypeUser, Message: ptrMessage(model.NewTextMessage(model.RoleUser, "rotate"))}}})
+	var terminal *session.Event
+	for event, runErr := range chatAgent.Run(ctx) {
+		if runErr != nil {
+			t.Fatal(runErr)
+		}
+		if event != nil && event.Type == session.EventTypeToolResult {
+			terminal = event
+		}
+	}
+	if sideEffects != 0 || len(testModel.requests) != 1 {
+		t.Fatalf("side effects = %d, model requests = %d; want 0 and 1", sideEffects, len(testModel.requests))
+	}
+	if terminal == nil || terminal.Tool == nil || terminal.Tool.ID != "call-alpha" || !terminal.Tool.TurnComplete || terminal.Tool.Status != "completed" {
+		t.Fatalf("terminal result = %+v", terminal)
+	}
+	raw, err := json.Marshal(terminal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var restored session.Event
+	if err := json.Unmarshal(raw, &restored); err != nil || restored.Tool == nil || !restored.Tool.TurnComplete {
+		t.Fatalf("durable terminal result = %+v, %v", restored.Tool, err)
+	}
+}
+
 func TestChatAgentDrainsPendingUserSubmissionAfterToolResults(t *testing.T) {
 	t.Parallel()
 

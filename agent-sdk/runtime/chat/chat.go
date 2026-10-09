@@ -219,6 +219,11 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 				if !yield(toolEvent, nil) {
 					return
 				}
+				if toolEvent != nil && toolEvent.Tool != nil && toolEvent.Tool.TurnComplete {
+					// The terminal callback receipt is durable before this Run exits.
+					// Do not consume queued input or issue another model request.
+					return
+				}
 			}
 			messages = append(messages, toolMessages...)
 			accepted, drainErr := a.drainPendingSubmissions(ctx, &messages, func(event *session.Event) bool {
@@ -443,6 +448,9 @@ func (a *Agent) executeStepToolCallsSerial(
 		}
 		messages = append(messages, toolMessage)
 		events = append(events, toolEvent)
+		if toolEvent != nil && toolEvent.Tool != nil && toolEvent.Tool.TurnComplete {
+			break
+		}
 	}
 	return messages, events, true, nil
 }

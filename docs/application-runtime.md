@@ -521,6 +521,15 @@ The application must:
 4. Submit `{"outcome":"succeeded","content":{...}}`, `failed`, or `unknown`.
    A byte-equivalent receipt is idempotent; a conflicting receipt is rejected.
 
+An application may set `turn_complete: true` only on a `succeeded` callback
+result. Core records it with the original opaque callback `id`, emits the
+canonical tool result, then completes that Turn before another serial tool
+effect or model request. The callback catalog is not parallel-safe, so its
+same-step siblings have not started; unexecuted siblings receive no effect or
+claim. The terminal result does not authorize a new Session or move queued user
+input. On a lost result response, reconcile the original `id` and resubmit only
+the identical result bytes. A failed or unknown result cannot complete the Turn.
+
 A lost claim response remains uncertain and cannot be reclaimed. A lost result
 response can be queried or resent with the same result. Core does not promise
 exactly-once external effects. It never retries an unknown effect, promotes

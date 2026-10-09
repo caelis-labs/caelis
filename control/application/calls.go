@@ -342,6 +342,9 @@ func (s *Store) CompleteCall(ctx context.Context, scope Scope, session, id strin
 	if result.Outcome != "succeeded" && result.Outcome != "failed" && result.Outcome != "unknown" {
 		return ErrInvalid
 	}
+	if result.TurnComplete && result.Outcome != "succeeded" {
+		return ErrInvalid
+	}
 	if !json.Valid(result.Content) || len(result.Content) > maxCallBytes {
 		return ErrInvalid
 	}

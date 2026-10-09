@@ -63,6 +63,42 @@ func enqueueTest(t *testing.T, s *Store, c CallContext) string {
 func testResult() CallResult {
 	return CallResult{Outcome: "succeeded", Content: json.RawMessage(`{"recorded":true}`)}
 }
+
+func TestApplicationTerminalResultPersistsOnOriginalCall(t *testing.T) {
+	s, path := testStore(t)
+	connection := testConnection(t, s, 9123)
+	binding := testBinding(t, s, connection, "terminal-session")
+	provenance := testCall(binding)
+	id := enqueueTest(t, s, provenance)
+	if _, err := s.ClaimCall(t.Context(), connection.Scope, binding.SessionID, id); err != nil {
+		t.Fatal(err)
+	}
+	invalid := CallResult{Outcome: "unknown", Content: json.RawMessage(`null`), TurnComplete: true}
+	assertError(t, s.CompleteCall(t.Context(), connection.Scope, binding.SessionID, id, invalid), ErrInvalid)
+	result := CallResult{Outcome: "succeeded", Content: json.RawMessage(`{"accepted":true}`), TurnComplete: true}
+	if err := s.CompleteCall(t.Context(), connection.Scope, binding.SessionID, id, result); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CompleteCall(t.Context(), connection.Scope, binding.SessionID, id, result); err != nil {
+		t.Fatalf("same original receipt was not idempotent: %v", err)
+	}
+	if err := s.db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	call, err := reopened.GetCall(t.Context(), connection.Scope, binding.SessionID, id)
+	if err != nil || call.State != "completed" || call.Result == nil || !call.Result.TurnComplete || call.ID != id {
+		t.Fatalf("recovered original call = %+v, %v", call, err)
+	}
+	projected, err := reopened.projectResult(t.Context(), provenance, "WriteNote", "", *call.Result)
+	if err != nil || !projected.TurnComplete || projected.ID != provenance.CallID {
+		t.Fatalf("projected terminal result = %+v, %v", projected, err)
+	}
+}
 func assertError(t *testing.T, err, want error) {
 	t.Helper()
 	if !errors.Is(err, want) {
