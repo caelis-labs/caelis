@@ -98,7 +98,8 @@ requirements and delivery guarantees.
 - **Model choice:** ChatGPT Codex sign-in, API-key and local providers, and
   ACP agents in one model picker.
 - **Workspace extensions:** MCP servers, skills, and plugins; project MCP
-  configuration requires workspace trust.
+  configuration requires workspace trust. [Install standard Agent Plugins and
+  Claude plugins](docs/plugins.md) through the same Plugin manager.
 - **Durable sessions and memory:** resume conversations and use built-in
   `Remember` and `Recall`. Memory needs no separate installation and invokes no
   model unless you explicitly bind the Memory Steward in `/team`.

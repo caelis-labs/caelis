@@ -5,9 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -64,13 +67,24 @@ func startClientWithHTTPClient(ctx context.Context, spec ServerSpec, httpClient 
 		cancel()
 		return nil, fmt.Errorf("connect %s MCP server %s/%s: %w", transportName, spec.PluginID, spec.Name, err)
 	}
-	return &Client{
+	connected := &Client{
 		spec:      spec,
 		session:   session,
 		transport: transportName,
 		cancel:    cancel,
 		closed:    make(chan struct{}),
-	}, nil
+	}
+	// Observe process/connection exit independently of tool calls. A cancelled
+	// DTW script can leave its supervisor alive; only the connection closing
+	// marks the client failed, and no operation is retried here.
+	go func() {
+		if err := session.Wait(); err != nil {
+			connected.markFailed(err)
+		} else {
+			connected.markFailed(errors.New("MCP server connection closed"))
+		}
+	}()
+	return connected, nil
 }
 
 func connectWithTimeout(ctx context.Context, client *mcpsdk.Client, lifetimeCtx context.Context, cancel context.CancelFunc, transport mcpsdk.Transport, timeout time.Duration) (*mcpsdk.ClientSession, error) {
@@ -118,11 +132,25 @@ func transportForSpecWithHTTPClient(spec ServerSpec, httpClient *http.Client) (m
 		if command == "" {
 			return nil, "", fmt.Errorf("command is required for stdio MCP server %s/%s", spec.PluginID, spec.Name)
 		}
+		if spec.DataDir != "" {
+			if err := ensurePluginDataDir(spec.DataDir, workDir); err != nil {
+				return nil, "", fmt.Errorf("plugin data directory: %w", err)
+			}
+		}
 		cmd := exec.Command(resolveExecutable(command, workDir), spec.Args...)
 		cmd.Dir = workDir
-		cmd.Env = os.Environ()
-		for k, v := range spec.Env {
-			cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", k, v))
+		if spec.CleanEnvironment {
+			cmd.Env = pluginBaseEnvironment()
+		} else {
+			cmd.Env = os.Environ()
+		}
+		keys := make([]string, 0, len(spec.Env))
+		for key := range spec.Env {
+			keys = append(keys, key)
+		}
+		slices.Sort(keys)
+		for _, key := range keys {
+			cmd.Env = setProcessEnvironment(cmd.Env, key, spec.Env[key])
 		}
 		return &mcpsdk.CommandTransport{Command: cmd}, transportName, nil
 	case TransportStreamableHTTP:
@@ -132,7 +160,7 @@ func transportForSpecWithHTTPClient(spec ServerSpec, httpClient *http.Client) (m
 		}
 		return &mcpsdk.StreamableClientTransport{
 			Endpoint:             endpoint,
-			HTTPClient:           httpClientWithHeaders(httpClient, spec.Headers),
+			HTTPClient:           httpClientWithHeaders(httpClient, endpoint, spec.Headers),
 			DisableStandaloneSSE: true,
 		}, transportName, nil
 	case TransportSSE:
@@ -142,14 +170,123 @@ func transportForSpecWithHTTPClient(spec ServerSpec, httpClient *http.Client) (m
 		}
 		return &mcpsdk.SSEClientTransport{
 			Endpoint:   endpoint,
-			HTTPClient: httpClientWithHeaders(httpClient, spec.Headers),
+			HTTPClient: httpClientWithHeaders(httpClient, endpoint, spec.Headers),
 		}, transportName, nil
 	default:
 		return nil, "", fmt.Errorf("unsupported transport %q for MCP server %s/%s", spec.Transport, spec.PluginID, spec.Name)
 	}
 }
 
-func httpClientWithHeaders(client *http.Client, headers map[string]string) *http.Client {
+func ensurePluginDataDir(dataDir, workDir string) error {
+	if !filepath.IsAbs(dataDir) {
+		return fmt.Errorf("data directory must be absolute")
+	}
+	storeDir := filepath.Dir(filepath.Dir(filepath.Dir(dataDir)))
+	if err := makePrivateChildDirs(storeDir, filepath.Join("plugins", "data", filepath.Base(dataDir))); err != nil {
+		return err
+	}
+	info, err := os.Lstat(dataDir)
+	if err != nil || !info.IsDir() {
+		return fmt.Errorf("data directory is not a real directory")
+	}
+	realData, err := filepath.EvalSymlinks(dataDir)
+	if err != nil {
+		return err
+	}
+	if !pathInside(dataDir, workDir) {
+		return nil // the plugin root is a valid immutable working directory
+	}
+	rel, _ := filepath.Rel(dataDir, workDir)
+	if err := makePrivateChildDirs(dataDir, rel); err != nil {
+		return err
+	}
+	realWorkDir, err := filepath.EvalSymlinks(workDir)
+	if err != nil {
+		return err
+	}
+	if !pathInside(realData, realWorkDir) {
+		return fmt.Errorf("working directory escapes plugin data directory")
+	}
+	return nil
+}
+
+func makePrivateChildDirs(root, relative string) error {
+	if !filepath.IsAbs(root) || !pathInside(root, filepath.Join(root, relative)) {
+		return fmt.Errorf("private directory escapes host root")
+	}
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		return err
+	}
+	current := root
+	if relative == "." {
+		return nil
+	}
+	for _, part := range strings.Split(relative, string(filepath.Separator)) {
+		if part == "" || part == "." || part == ".." {
+			return fmt.Errorf("invalid private directory component")
+		}
+		current = filepath.Join(current, part)
+		if err := os.Mkdir(current, 0o700); err != nil && !os.IsExist(err) {
+			return err
+		}
+		info, err := os.Lstat(current)
+		if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("private directory is not a real directory: %s", current)
+		}
+	}
+	return nil
+}
+
+func pathInside(root, target string) bool {
+	rel, err := filepath.Rel(root, target)
+	return err == nil && (rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)))
+}
+
+func pluginBaseEnvironment() []string {
+	allowed := []string{"PATH", "HOME", "USER", "TMPDIR", "TMP", "TEMP", "LANG", "LC_ALL"}
+	if runtime.GOOS == "windows" {
+		allowed = append(allowed, "SYSTEMROOT", "WINDIR", "APPDATA", "LOCALAPPDATA", "USERPROFILE")
+	}
+	var out []string
+	for _, key := range allowed {
+		if value, ok := os.LookupEnv(key); ok {
+			out = append(out, key+"="+value)
+		}
+	}
+	return out
+}
+
+func setProcessEnvironment(base []string, key, value string) []string {
+	return setProcessEnvironmentForOS(base, key, value, runtime.GOOS)
+}
+
+func setProcessEnvironmentForOS(base []string, key, value, targetOS string) []string {
+	if key == "" || strings.ContainsAny(key, "=\x00") || strings.ContainsRune(value, '\x00') {
+		return base
+	}
+	if targetOS == "windows" {
+		// Remove every case variant, including duplicates inherited from the
+		// process. A single final key survives regardless of the base ordering.
+		out := base[:0]
+		for _, entry := range base {
+			name, _, _ := strings.Cut(entry, "=")
+			if !strings.EqualFold(name, key) {
+				out = append(out, entry)
+			}
+		}
+		return append(out, key+"="+value)
+	}
+	for i, entry := range base {
+		name, _, _ := strings.Cut(entry, "=")
+		if name == key {
+			base[i] = key + "=" + value
+			return base
+		}
+	}
+	return append(base, key+"="+value)
+}
+
+func httpClientWithHeaders(client *http.Client, endpoint string, headers map[string]string) *http.Client {
 	if len(headers) == 0 {
 		return client
 	}
@@ -157,9 +294,14 @@ func httpClientWithHeaders(client *http.Client, headers map[string]string) *http
 		client = &http.Client{}
 	}
 	cloned := *client
+	origin, err := url.Parse(endpoint)
+	if err != nil {
+		return &cloned
+	}
 	cloned.Transport = headerRoundTripper{
 		base:    client.Transport,
 		headers: headers,
+		origin:  origin.Scheme + "://" + origin.Host,
 	}
 	return &cloned
 }
@@ -167,6 +309,7 @@ func httpClientWithHeaders(client *http.Client, headers map[string]string) *http
 type headerRoundTripper struct {
 	base    http.RoundTripper
 	headers map[string]string
+	origin  string
 }
 
 func (rt headerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -175,13 +318,27 @@ func (rt headerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error
 		base = http.DefaultTransport
 	}
 	cloned := req.Clone(req.Context())
+	if !strings.EqualFold(cloned.URL.Scheme+"://"+cloned.URL.Host, rt.origin) {
+		return base.RoundTrip(cloned)
+	}
 	for k, v := range rt.headers {
 		if strings.TrimSpace(k) == "" {
 			continue
 		}
-		cloned.Header.Set(k, v)
+		if !hasHeaderFold(cloned.Header, k) {
+			cloned.Header.Set(k, v)
+		}
 	}
 	return base.RoundTrip(cloned)
+}
+
+func hasHeaderFold(headers http.Header, name string) bool {
+	for existing := range headers {
+		if strings.EqualFold(existing, name) {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *Client) ListTools(ctx context.Context) ([]*mcpsdk.Tool, error) {

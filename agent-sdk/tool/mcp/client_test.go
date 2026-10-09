@@ -1,12 +1,18 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/color"
+	"image/png"
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -24,6 +30,18 @@ const (
 	mcpLegacyProtocolVersion   = "2025-11-25"
 )
 
+func TestProcessEnvironmentTargetOSCaseSemantics(t *testing.T) {
+	base := []string{"PATH=/bin", "dtw_node_path=/package", "DTW_NODE_PATH=/stale"}
+	windows := setProcessEnvironmentForOS(slices.Clone(base), "DTW_NODE_PATH", "/host", "windows")
+	if !slices.Equal(windows, []string{"PATH=/bin", "DTW_NODE_PATH=/host"}) {
+		t.Fatalf("Windows environment = %v", windows)
+	}
+	unix := setProcessEnvironmentForOS(slices.Clone(base), "DTW_NODE_PATH", "/host", "linux")
+	if !slices.Equal(unix, []string{"PATH=/bin", "dtw_node_path=/package", "DTW_NODE_PATH=/host"}) {
+		t.Fatalf("Unix environment = %v", unix)
+	}
+}
+
 func TestMCPServerHelperProcess(t *testing.T) {
 	if os.Getenv("CAELIS_MCP_HELPER") != "1" {
 		return
@@ -33,6 +51,34 @@ func TestMCPServerHelperProcess(t *testing.T) {
 		Val string `json:"val"`
 	}
 	server := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "test-server", Version: "1.0.0"}, nil)
+	if mode == "persistent_media" {
+		var state int
+		server.AddTool(&mcpsdk.Tool{Name: "desktop_exec", Description: "Execute one approved script.", InputSchema: map[string]any{"type": "object"}}, func(_ context.Context, _ *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+			state++
+			var imageBytes bytes.Buffer
+			pixel := image.NewRGBA(image.Rect(0, 0, 1, 1))
+			pixel.Set(0, 0, color.RGBA{R: 255, A: 255})
+			if err := png.Encode(&imageBytes, pixel); err != nil {
+				return nil, err
+			}
+			return &mcpsdk.CallToolResult{Content: []mcpsdk.Content{
+				&mcpsdk.TextContent{Text: fmt.Sprintf("execution:%d", state)},
+				&mcpsdk.ImageContent{MIMEType: "image/png", Data: imageBytes.Bytes()},
+			}, StructuredContent: map[string]any{"native_receipts": []any{map[string]any{"request_id": "original-1", "outcome": "succeeded"}}, "state": state}}, nil
+		})
+		server.AddTool(&mcpsdk.Tool{Name: "desktop_status", Description: "Inspect the persistent supervisor.", InputSchema: map[string]any{"type": "object"}}, func(_ context.Context, _ *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+			return &mcpsdk.CallToolResult{Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: fmt.Sprintf("state:%d secret:%s", state, os.Getenv("CAELIS_PRIVATE_SECRET"))}}}, nil
+		})
+	}
+	if mode == "large_receipt" {
+		server.AddTool(&mcpsdk.Tool{Name: "receipt", InputSchema: map[string]any{"type": "object"}}, func(_ context.Context, _ *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+			const exact = `{"receipt_id":9223372036854775807}`
+			return &mcpsdk.CallToolResult{
+				Content:           []mcpsdk.Content{&mcpsdk.TextContent{Text: exact}},
+				StructuredContent: map[string]any{"receipt_id": int64(9223372036854775807)},
+			}, nil
+		})
+	}
 	mcpsdk.AddTool[echoArgs, any](server, &mcpsdk.Tool{
 		Name:        "echo",
 		Description: "Echoes input",
@@ -70,6 +116,93 @@ func TestMCPServerHelperProcess(t *testing.T) {
 		os.Exit(1)
 	}
 	os.Exit(0)
+}
+
+func TestMCPStructuredReceiptRetainsExactIntegerAcrossStdio(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	dataDir := filepath.Join(t.TempDir(), "plugins", "data", "receipt")
+	mgr, err := newInitializedTestManager(ctx, []ServerSpec{{
+		PluginID: "receipts", Name: "receipts", Command: os.Args[0],
+		Args:    []string{"-test.run=^TestMCPServerHelperProcess$"},
+		Env:     map[string]string{"CAELIS_MCP_HELPER": "1", "CAELIS_MCP_HELPER_MODE": "large_receipt"},
+		WorkDir: dataDir, DataDir: dataDir, CleanEnvironment: true,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mgr.Close()
+	var receiptTool tool.Tool
+	for _, candidate := range mgr.Tools() {
+		if candidate.Definition().Name == "receipts__receipt" {
+			receiptTool = candidate
+		}
+	}
+	if receiptTool == nil {
+		t.Fatal("receipt tool not ready")
+	}
+	result, err := receiptTool.Call(ctx, tool.Call{ID: "original-receipt-call", Name: receiptTool.Definition().Name, Input: []byte(`{}`)})
+	const exact = `{"receipt_id":9223372036854775807}`
+	if err != nil || result.IsError || result.ID != "original-receipt-call" || len(result.Content) != 2 ||
+		result.Content[0].Text == nil || result.Content[0].Text.Text != exact ||
+		result.Content[1].JSON == nil || string(result.Content[1].JSON.Value) != exact {
+		t.Fatalf("lossy MCP receipt = %+v, %v", result, err)
+	}
+	history, err := json.Marshal(result)
+	if err != nil || !bytes.Contains(history, []byte(exact)) || bytes.Contains(history, []byte(`9223372036854776000`)) {
+		t.Fatalf("lossy serialized history = %s, %v", history, err)
+	}
+}
+
+func TestMCPPersistentProcessKeepsImageStructuredReceiptAndOriginalCallID(t *testing.T) {
+	t.Setenv("CAELIS_PRIVATE_SECRET", "must-not-inherit")
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	dataDir := filepath.Join(t.TempDir(), "plugins", "data", "instance")
+	mgr, err := newInitializedTestManager(ctx, []ServerSpec{{
+		PluginID: "desktop-world", Name: "desktop-world", Command: os.Args[0],
+		Args:    []string{"-test.run=^TestMCPServerHelperProcess$"},
+		Env:     map[string]string{"CAELIS_MCP_HELPER": "1", "CAELIS_MCP_HELPER_MODE": "persistent_media"},
+		WorkDir: dataDir, DataDir: dataDir, CleanEnvironment: true,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mgr.Close()
+	toolsByName := map[string]tool.Tool{}
+	for _, candidate := range mgr.Tools() {
+		toolsByName[candidate.Definition().Name] = candidate
+	}
+	execTool, statusTool := toolsByName["desktop_world__desktop_exec"], toolsByName["desktop_world__desktop_status"]
+	if execTool == nil || statusTool == nil {
+		t.Fatalf("tools = %v", toolsByName)
+	}
+	for number := 1; number <= 2; number++ {
+		result, err := execTool.Call(ctx, tool.Call{ID: fmt.Sprintf("call-%d", number), Name: execTool.Definition().Name, Input: []byte(`{}`)})
+		if err != nil || result.IsError || result.ID != fmt.Sprintf("call-%d", number) || len(result.Content) != 3 {
+			t.Fatalf("exec %d = %+v, %v", number, result, err)
+		}
+		if result.Content[0].Text == nil || result.Content[0].Text.Text != fmt.Sprintf("execution:%d", number) {
+			t.Fatalf("text = %+v", result.Content)
+		}
+		if result.Content[1].Media == nil || result.Content[1].Media.MimeType != "image/png" {
+			t.Fatalf("image = %+v", result.Content[1])
+		}
+		decoded, err := base64.StdEncoding.DecodeString(result.Content[1].Media.Source.Data)
+		if err != nil || !bytes.HasPrefix(decoded, []byte("\x89PNG\r\n\x1a\n")) {
+			t.Fatalf("PNG decode = %v", err)
+		}
+		if result.Content[2].JSON == nil || !bytes.Contains(result.Content[2].JSON.Value, []byte(`"request_id":"original-1"`)) {
+			t.Fatalf("native receipt = %+v", result.Content[2])
+		}
+		status, err := statusTool.Call(ctx, tool.Call{ID: "status", Name: statusTool.Definition().Name, Input: []byte(`{}`)})
+		if err != nil || status.IsError || status.Content[0].Text == nil || status.Content[0].Text.Text != fmt.Sprintf("state:%d secret:", number) {
+			t.Fatalf("status = %+v, %v", status, err)
+		}
+	}
+	if _, err := os.Stat(dataDir); err != nil {
+		t.Fatalf("PLUGIN_DATA was not created: %v", err)
+	}
 }
 
 func TestMCPManagerQuarantinesOnlyMalformedToolAndReportsWarning(t *testing.T) {
@@ -137,17 +270,25 @@ func TestMCPToolCallServerExitReturnsErrorResult(t *testing.T) {
 		t.Fatalf("expected 1 tool, got %d", len(tools))
 	}
 	res, err := tools[0].Call(ctx, tool.Call{
+		ID:    "original-call",
 		Name:  tools[0].Definition().Name,
 		Input: []byte(`{"val":"hello"}`),
 	})
 	if err != nil {
 		t.Fatalf("tool call returned transport error, want error result: %v", err)
 	}
-	if !res.IsError {
+	if !res.IsError || res.ID != "original-call" {
 		t.Fatalf("tool call IsError = false, want true")
 	}
 	if len(res.Content) == 0 || res.Content[0].Text == nil {
 		t.Fatalf("tool call content = %#v, want text error", res.Content)
+	}
+	for len(mgr.Tools()) != 0 && ctx.Err() == nil {
+		time.Sleep(5 * time.Millisecond)
+	}
+	infos := mgr.GetServerInfos("myplugin")
+	if len(mgr.Tools()) != 0 || len(infos) != 1 || infos[0].Status != "failed" || len(infos[0].Tools) != 0 {
+		t.Fatalf("exited server remains callable: tools=%v infos=%+v", mgr.Tools(), infos)
 	}
 }
 
@@ -385,6 +526,43 @@ func TestMCPManagerSSE(t *testing.T) {
 		t.Fatal("SSE MCP server did not receive configured header")
 	}
 }
+
+func TestStandardPluginHeadersStayAtConfiguredOriginAndPreserveClientAuthorization(t *testing.T) {
+	var sent []http.Header
+	base := &http.Client{Transport: mcpTestRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		sent = append(sent, req.Header.Clone())
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("ok")), Request: req}, nil
+	})}
+	client := httpClientWithHeaders(base, "https://mcp.example.test/api", map[string]string{"X-Package": "public", "Authorization": "package-must-not-win"})
+	for _, endpoint := range []string{"https://mcp.example.test/api", "https://other.example.test/api"} {
+		req, err := http.NewRequest(http.MethodGet, endpoint, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header["authorization"] = []string{"Bearer client-owned"}
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+	}
+	if len(sent) != 2 || sent[0].Get("X-Package") != "public" || headerValueFold(sent[0], "Authorization") != "Bearer client-owned" || sent[1].Get("X-Package") != "" || headerValueFold(sent[1], "Authorization") != "Bearer client-owned" {
+		t.Fatalf("configured headers crossed origin or replaced client auth: %+v", sent)
+	}
+}
+
+func headerValueFold(headers http.Header, name string) string {
+	for key, values := range headers {
+		if strings.EqualFold(key, name) && len(values) > 0 {
+			return values[0]
+		}
+	}
+	return ""
+}
+
+type mcpTestRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn mcpTestRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { return fn(req) }
 
 func requireNegotiatedProtocolVersion(t *testing.T, mgr *Manager, pluginID, serverName, want string) {
 	t.Helper()

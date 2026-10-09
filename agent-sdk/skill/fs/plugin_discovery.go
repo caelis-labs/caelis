@@ -3,7 +3,9 @@ package fs
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
 )
@@ -49,8 +51,17 @@ func discoverPluginBundleMeta(bundles []skill.PluginBundle) ([]Meta, map[string]
 			continue
 		}
 		for _, entry := range entries {
-			if entry == nil || !entry.IsDir() {
+			if entry == nil {
 				continue
+			}
+			if !entry.IsDir() {
+				if !bundle.SkipInvalid {
+					continue
+				}
+				entryInfo, err := os.Stat(filepath.Join(resolvedDir, entry.Name()))
+				if err != nil || !entryInfo.IsDir() {
+					continue
+				}
 			}
 			skillPath := filepath.Join(resolvedDir, entry.Name(), "SKILL.md")
 			info, err := os.Stat(skillPath)
@@ -60,10 +71,27 @@ func discoverPluginBundleMeta(bundles []skill.PluginBundle) ([]Meta, map[string]
 				}
 				continue
 			}
+			if bundle.SkipInvalid {
+				if !info.Mode().IsRegular() {
+					continue
+				}
+				boundary := resolvedDir
+				if bundle.PluginRoot != "" {
+					boundary = bundle.PluginRoot
+				}
+				realRoot, rootErr := filepath.EvalSymlinks(boundary)
+				realSkill, skillErr := filepath.EvalSymlinks(skillPath)
+				if rootErr != nil || skillErr != nil || !pathWithinPluginSkillRoot(realRoot, realSkill) {
+					continue
+				}
+				if !validStandardPluginSkill(skillPath, entry.Name()) {
+					continue
+				}
+			}
 			skillPath = filepath.Clean(skillPath)
 			meta, hash, err := parseMetaHashCached(skillPath, info)
 			if err != nil {
-				if bundle.Enabled {
+				if bundle.Enabled && !bundle.SkipInvalid {
 					return nil, nil, err
 				}
 				continue
@@ -108,6 +136,23 @@ func discoverPluginBundleMeta(bundles []skill.PluginBundle) ([]Meta, map[string]
 	return out, suppressedRegular, nil
 }
 
+var standardSkillName = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$`)
+
+func validStandardPluginSkill(path, directory string) bool {
+	raw, err := os.ReadFile(path)
+	if err != nil || len(raw) == 0 {
+		return false
+	}
+	front, _, err := parseFrontMatter(normalizeText(string(raw)))
+	if err != nil {
+		return false
+	}
+	name, description := strings.TrimSpace(front["name"]), strings.TrimSpace(front["description"])
+	descriptionCharacters := utf8.RuneCountInString(description)
+	return name == directory && len(name) <= 64 && standardSkillName.MatchString(name) &&
+		!strings.Contains(name, "--") && descriptionCharacters >= 1 && descriptionCharacters <= 1024
+}
+
 func mergePluginBundles(in []skill.PluginBundle) []skill.PluginBundle {
 	if len(in) == 0 {
 		return nil
@@ -123,9 +168,11 @@ func mergePluginBundles(in []skill.PluginBundle) []skill.PluginBundle {
 			pluginBundlePlugin(bundle),
 			pluginBundleNamespace(bundle),
 			filepath.Clean(root),
+			filepath.Clean(bundle.PluginRoot),
 		}, "\x00"))
 		if idx, ok := seen[key]; ok {
 			out[idx].Enabled = out[idx].Enabled || bundle.Enabled
+			out[idx].SkipInvalid = out[idx].SkipInvalid || bundle.SkipInvalid
 			out[idx].Disabled = append(out[idx].Disabled, bundle.Disabled...)
 			continue
 		}
@@ -134,6 +181,11 @@ func mergePluginBundles(in []skill.PluginBundle) []skill.PluginBundle {
 		out = append(out, bundle)
 	}
 	return out
+}
+
+func pathWithinPluginSkillRoot(root, target string) bool {
+	rel, err := filepath.Rel(root, target)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
 }
 
 func pluginBundlePlugin(bundle skill.PluginBundle) string {

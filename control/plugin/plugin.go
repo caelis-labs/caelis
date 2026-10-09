@@ -8,8 +8,9 @@ import sdkmcp "github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 type ManifestKind string
 
 const (
-	ManifestKindCaelis ManifestKind = "caelis"
-	ManifestKindClaude ManifestKind = "claude"
+	ManifestKindCaelis      ManifestKind = "caelis"
+	ManifestKindClaude      ManifestKind = "claude"
+	ManifestKindAgentPlugin ManifestKind = "agent_plugin_v1"
 )
 
 // InstalledPlugin is the normalized product view of one installed plugin.
@@ -22,6 +23,7 @@ type InstalledPlugin struct {
 	Kind        ManifestKind
 	Enabled     bool
 	Description string
+	Warnings    []string
 	Skills      []SkillContribution
 	Hooks       []HookSpec
 	MCPServers  []MCPServerSpec

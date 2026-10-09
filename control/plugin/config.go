@@ -19,6 +19,10 @@ type Config struct {
 	Description string       `json:"description,omitempty"`
 	Managed     bool         `json:"managed,omitempty"`
 	CacheRoot   string       `json:"cache_root,omitempty"`
+	// ExecutableEnv contains explicit, non-secret absolute executable paths
+	// supplied by the trusted host, such as a Lite plugin's Node selection.
+	// Package mcp.json cannot read arbitrary process environment variables.
+	ExecutableEnv map[string]string `json:"executable_env,omitempty"`
 }
 
 // MarketplaceConfig is the persisted configuration for one plugin marketplace.
@@ -42,8 +46,12 @@ type State struct {
 
 // Clone returns a detached copy suitable for mutation.
 func (s State) Clone() State {
+	plugins := append([]Config(nil), s.Plugins...)
+	for i := range plugins {
+		plugins[i].ExecutableEnv = cloneStringMap(plugins[i].ExecutableEnv)
+	}
 	return State{
-		Plugins:      append([]Config(nil), s.Plugins...),
+		Plugins:      plugins,
 		Marketplaces: cloneMarketplaceConfigs(s.Marketplaces),
 	}
 }
@@ -80,6 +88,7 @@ func NormalizeConfig(in Config) Config {
 	out.Version = strings.TrimSpace(in.Version)
 	out.Description = strings.TrimSpace(in.Description)
 	out.CacheRoot = strings.TrimSpace(in.CacheRoot)
+	out.ExecutableEnv = cloneStringMap(in.ExecutableEnv)
 	if !out.Managed {
 		out.CacheRoot = ""
 	}

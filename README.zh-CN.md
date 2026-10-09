@@ -84,6 +84,7 @@ caelis
 - **仓库工具：** 查看和编辑文件、搜索代码、执行命令，工具请求和审批过程可见。
 - **模型选择：** 在同一个模型选择器中使用 ChatGPT Codex 登录、API 服务、本地模型或 ACP Agent。
 - **工作空间扩展：** 支持 MCP Server、Skill 和插件；项目级 MCP 配置需要先获得工作空间信任。
+  标准 Agent Plugin 与 Claude 插件的安装和兼容边界见[插件指南](docs/plugins.md)。
 - **持久会话与记忆：** 恢复历史对话，使用内置的 `Remember` 和 `Recall`。
   记忆功能无需单独安装；除非在 `/team` 中显式绑定 Memory Steward，否则不会为记忆调用模型。
 - **交互与自动化：** 提供 TUI、文本、版本化 JSON、流式 JSONL 和 ACP Server，

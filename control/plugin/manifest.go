@@ -40,6 +40,7 @@ type CaelisMCPServerSpec struct {
 	Args      []string          `json:"args"`
 	Env       map[string]string `json:"env"`
 	WorkDir   string            `json:"workDir"`
+	CWD       string            `json:"cwd"`
 	URL       string            `json:"url"`
 	Headers   map[string]string `json:"headers"`
 }
@@ -54,9 +55,10 @@ type CaelisAgentContribution struct {
 }
 
 type ClaudePluginJSON struct {
-	Name        string `json:"name"`
-	Version     string `json:"version"`
-	Description string `json:"description"`
+	Name        string          `json:"name"`
+	Version     string          `json:"version"`
+	Description string          `json:"description"`
+	MCPServers  json.RawMessage `json:"mcpServers"`
 }
 
 type ClaudeHooksJSON struct {
@@ -169,6 +171,13 @@ func pathContainsSymlink(root, target string) bool {
 func ParsePlugin(root string) (InstalledPlugin, error) {
 	root = filepath.Clean(root)
 	pluginID := strings.ToLower(filepath.Base(root))
+	// Agent Plugins 1.0 has one authoritative root manifest and fixed component
+	// locations. Do not merge legacy manifests from the same package: that would
+	// start a second copy of a server declared in mcp.json.
+	standardPath := filepath.Join(root, "plugin.json")
+	if _, err := os.Stat(standardPath); err == nil {
+		return parseAgentPlugin(root)
+	}
 
 	p := InstalledPlugin{
 		ID:   pluginID,
@@ -229,8 +238,22 @@ func mergeInstalledPlugin(dest *InstalledPlugin, src InstalledPlugin) {
 	}
 	dest.Skills = append(dest.Skills, src.Skills...)
 	dest.Hooks = append(dest.Hooks, src.Hooks...)
-	dest.MCPServers = append(dest.MCPServers, src.MCPServers...)
+	for _, candidate := range src.MCPServers {
+		duplicate := false
+		for _, existing := range dest.MCPServers {
+			if existing.Name == candidate.Name {
+				duplicate = true
+				break
+			}
+		}
+		if duplicate {
+			dest.Warnings = append(dest.Warnings, fmt.Sprintf("duplicate MCP server %q ignored from later manifest", candidate.Name))
+			continue
+		}
+		dest.MCPServers = append(dest.MCPServers, candidate)
+	}
 	dest.Agents = append(dest.Agents, src.Agents...)
+	dest.Warnings = append(dest.Warnings, src.Warnings...)
 }
 
 func parseCaelisPluginRaw(root, manifestPath string) (InstalledPlugin, error) {
@@ -284,25 +307,27 @@ func parseCaelisPluginRaw(root, manifestPath string) (InstalledPlugin, error) {
 func buildMCPServerSpec(root, pluginID, name string, mcp CaelisMCPServerSpec) (MCPServerSpec, error) {
 	transport := NormalizeMCPTransport(firstNonEmpty(mcp.Transport, mcp.Type), mcp.Command, mcp.URL)
 	resolvedWorkDir := ""
-	if mcp.WorkDir != "" {
+	if mcp.WorkDir != "" || mcp.CWD != "" {
 		var err error
-		resolvedWorkDir, err = ResolveSafePath(root, mcp.WorkDir)
+		configuredWorkDir := firstNonEmpty(mcp.WorkDir, mcp.CWD)
+		resolvedWorkDir, err = ResolveSafePath(root, configuredWorkDir)
 		if err != nil {
-			return MCPServerSpec{}, fmt.Errorf("plugin manifest: invalid workDir %q: %w", mcp.WorkDir, err)
+			return MCPServerSpec{}, fmt.Errorf("plugin manifest: invalid workDir %q: %w", configuredWorkDir, err)
 		}
 	} else if transport == MCPTransportStdio {
 		resolvedWorkDir = root
 	}
 	return MCPServerSpec{
-		PluginID:  pluginID,
-		Name:      name,
-		Transport: transport,
-		Command:   mcp.Command,
-		Args:      mcp.Args,
-		Env:       mcp.Env,
-		WorkDir:   resolvedWorkDir,
-		URL:       mcp.URL,
-		Headers:   mcp.Headers,
+		PluginID:         pluginID,
+		Name:             name,
+		Transport:        transport,
+		Command:          mcp.Command,
+		Args:             mcp.Args,
+		Env:              mcp.Env,
+		WorkDir:          resolvedWorkDir,
+		URL:              mcp.URL,
+		Headers:          mcp.Headers,
+		CleanEnvironment: transport == MCPTransportStdio,
 	}, nil
 }
 
@@ -332,6 +357,9 @@ func parseClaudePluginRaw(root, manifestPath string) (InstalledPlugin, error) {
 		return InstalledPlugin{}, err
 	}
 	p.Hooks = append(p.Hooks, hooks...)
+	mcpSpecs, warnings := parseClaudeMCPServers(root, pluginID, manifest.MCPServers)
+	p.MCPServers = append(p.MCPServers, mcpSpecs...)
+	p.Warnings = append(p.Warnings, warnings...)
 
 	return p, nil
 }

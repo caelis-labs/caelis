@@ -10,6 +10,7 @@ func upsertLocalPluginConfig(state *State, next Config) {
 		return
 	}
 	if idx := pluginConfigIndexByID(state.Plugins, next.ID); idx >= 0 {
+		next.ExecutableEnv = cloneStringMap(state.Plugins[idx].ExecutableEnv)
 		state.Plugins[idx] = next
 		return
 	}
@@ -25,10 +26,14 @@ func upsertMarketplacePluginConfig(state *State, next Config) error {
 		if idIdx := pluginConfigIndexByID(state.Plugins, next.ID); idIdx >= 0 && idIdx != rootIdx {
 			return fmt.Errorf("plugin service: plugin id %q already exists at %s; cannot rename marketplace plugin at %s", strings.TrimSpace(next.ID), state.Plugins[idIdx].Root, next.Root)
 		}
+		if strings.EqualFold(state.Plugins[rootIdx].ID, next.ID) {
+			next.ExecutableEnv = cloneStringMap(state.Plugins[rootIdx].ExecutableEnv)
+		}
 		state.Plugins[rootIdx] = next
 		return nil
 	}
 	if idIdx := pluginConfigIndexByID(state.Plugins, next.ID); idIdx >= 0 {
+		next.ExecutableEnv = cloneStringMap(state.Plugins[idIdx].ExecutableEnv)
 		state.Plugins[idIdx] = next
 		return nil
 	}

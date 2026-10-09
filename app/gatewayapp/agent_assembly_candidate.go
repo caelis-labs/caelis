@@ -30,7 +30,7 @@ func (s *runtimeComposition) validateAgentAssemblyCandidate(doc AppConfig) error
 		}
 	}
 
-	contributions, err := resolveGatewayPluginContributions(doc.Plugins)
+	contributions, err := resolveGatewayPluginContributions(doc.Plugins, s.authorities.storeDir, s.workspace.CWD)
 	if err != nil {
 		return err
 	}
