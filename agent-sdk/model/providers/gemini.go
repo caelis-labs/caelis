@@ -415,6 +415,11 @@ func geminiStreamPartDelta(part model.Part) *model.PartDelta {
 			return nil
 		}
 		return &model.PartDelta{Kind: model.PartKindReasoning, TextDelta: text}
+	case model.PartKindToolUse:
+		if part.ToolUse == nil {
+			return nil
+		}
+		return &model.PartDelta{Kind: model.PartKindToolUse, InputDelta: string(part.ToolUse.Input)}
 	default:
 		return nil
 	}

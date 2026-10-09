@@ -255,6 +255,13 @@ func (l *ollamaLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 					return err
 				}
 				acc.toolCalls = append(acc.toolCalls, calls...)
+				for _, call := range calls {
+					if !yield(&model.StreamEvent{Type: model.StreamEventPartDelta,
+						PartDelta: &model.PartDelta{Kind: model.PartKindToolUse, InputDelta: call.Args}}, nil) {
+						stopped = true
+						return errStopSSE
+					}
+				}
 			}
 			return nil
 		}); err != nil {

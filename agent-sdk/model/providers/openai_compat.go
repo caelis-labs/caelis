@@ -298,6 +298,18 @@ func (l *openAICompatLLM) Generate(ctx context.Context, req *model.Request) iter
 					entry.Function.Name = tc.Function.Name
 				}
 				entry.Function.Arguments += tc.Function.Arguments
+				// Argument fragments are model progress too. Publishing a delta
+				// does not authorize or execute the eventual tool call; only the
+				// completed response can do that.
+				if tc.ID != "" || tc.Function.Name != "" || tc.Function.Arguments != "" {
+					if !yield(&model.StreamEvent{
+						Type:      model.StreamEventPartDelta,
+						PartDelta: &model.PartDelta{Index: tc.Index, Kind: model.PartKindToolUse, InputDelta: tc.Function.Arguments},
+					}, nil) {
+						stopped = true
+						return errStopSSE
+					}
+				}
 			}
 			return nil
 		}, func() { done = true }); err != nil {

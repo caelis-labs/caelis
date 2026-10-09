@@ -285,6 +285,9 @@ func (l *anthropicSDKLLM) emitStreamingStartBlock(ev anthropic.ContentBlockStart
 	case anthropic.ThinkingBlock:
 		replay := anthropicReplayMeta(l.provider, strings.TrimSpace(block.Signature))
 		return l.emitStreamingTextDelta(int(ev.Index), model.PartKindReasoning, block.Thinking, replay, yield)
+	case anthropic.ToolUseBlock:
+		return yield(&model.StreamEvent{Type: model.StreamEventPartDelta,
+			PartDelta: &model.PartDelta{Index: int(ev.Index), Kind: model.PartKindToolUse}}, nil)
 	default:
 		return true
 	}
@@ -296,6 +299,12 @@ func (l *anthropicSDKLLM) emitStreamingDeltaBlock(ev anthropic.ContentBlockDelta
 		return l.emitStreamingTextDelta(int(ev.Index), model.PartKindText, delta.Text, nil, yield)
 	case anthropic.ThinkingDelta:
 		return l.emitStreamingTextDelta(int(ev.Index), model.PartKindReasoning, delta.Thinking, nil, yield)
+	case anthropic.InputJSONDelta:
+		if delta.PartialJSON == "" {
+			return true
+		}
+		return yield(&model.StreamEvent{Type: model.StreamEventPartDelta,
+			PartDelta: &model.PartDelta{Index: int(ev.Index), Kind: model.PartKindToolUse, InputDelta: delta.PartialJSON}}, nil)
 	case anthropic.SignatureDelta:
 		return yield(&model.StreamEvent{
 			Type: model.StreamEventPartDelta,

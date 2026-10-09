@@ -209,7 +209,7 @@ func (m *delayedSelectionModel) Generate(ctx context.Context, req *model.Request
 	}
 }
 
-func TestAgentSearchUsesOneNinetySecondBudget(t *testing.T) {
+func TestAgentSearchRespectsOnlyCallerDeadline(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
 		delays      []time.Duration
@@ -219,7 +219,7 @@ func TestAgentSearchUsesOneNinetySecondBudget(t *testing.T) {
 	}{
 		{"slow valid final", []time.Duration{35 * time.Second}, 0, 35 * time.Second, nil},
 		{"two model steps", []time.Duration{35 * time.Second, 35 * time.Second}, 0, 70 * time.Second, nil},
-		{"total selector timeout", []time.Duration{91 * time.Second}, 0, 90 * time.Second, context.DeadlineExceeded},
+		{"slow valid final beyond old budget", []time.Duration{91 * time.Second}, 0, 91 * time.Second, nil},
 		{"shorter caller deadline", []time.Duration{35 * time.Second}, 12 * time.Second, 12 * time.Second, context.DeadlineExceeded},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -237,8 +237,11 @@ func TestAgentSearchUsesOneNinetySecondBudget(t *testing.T) {
 				if time.Since(started) != tc.wantElapsed || !errors.Is(err, tc.wantErr) {
 					t.Fatalf("elapsed=%s error=%v want elapsed=%s error=%v", time.Since(started), err, tc.wantElapsed, tc.wantErr)
 				}
-				if tc.wantErr == nil && len(tc.delays) > 1 && (len(llm.remaining) != 2 || llm.remaining[0] != 90*time.Second || llm.remaining[1] != 55*time.Second) {
-					t.Fatalf("step budgets=%v, want 90s then 55s", llm.remaining)
+				if tc.callerLimit == 0 && len(llm.remaining) != 0 {
+					t.Fatalf("unexpected private selector deadline: %v", llm.remaining)
+				}
+				if tc.callerLimit > 0 && (len(llm.remaining) != 1 || llm.remaining[0] != tc.callerLimit) {
+					t.Fatalf("caller deadline not propagated: %v", llm.remaining)
 				}
 			})
 		})
@@ -338,10 +341,10 @@ func TestAgentSearchCannotInspectForeignScope(t *testing.T) {
 	}
 }
 
-func TestAgentSearchCatalogBudgetFailsBeforeDispatch(t *testing.T) {
+func TestAgentSearchCoverageBudgetFailsBeforeDispatch(t *testing.T) {
 	source := &mutableSearchSource{}
 	for i := range 200 {
-		source.tools = append(source.tools, mcpCandidate(fmt.Sprintf("tool_%03d", i), strings.Repeat("wide", 250), "", "", "", nil))
+		source.tools = append(source.tools, mcpCandidate(fmt.Sprintf("tool_%03d", i), strings.Repeat("wide", 5500), "", "", "", nil))
 	}
 	llm := &selectionModel{}
 	if _, err := NewSource(source).Call(t.Context(), tool.Call{Input: json.RawMessage(`{"query":"anything"}`), RuntimeModel: llm}); err == nil || !strings.Contains(err.Error(), "budget") {
