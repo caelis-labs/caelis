@@ -126,6 +126,32 @@ func TestAgentPluginSkipsOneInvalidSkillWithoutHidingOtherSkills(t *testing.T) {
 	}
 }
 
+func TestAgentPluginSkillDescriptionUnicodeCharacterBoundary(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		characters int
+		want       int
+	}{
+		{"chinese-400", 400, 1},
+		{"chinese-1024", 1024, 1},
+		{"chinese-1025", 1025, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := filepath.Join(t.TempDir(), "plugin")
+			writeAgentPluginFile(t, root, "plugin.json", `{"$schema":"https://agent-plugins.org/schemas/1.0.0/plugin.schema.json","name":"example"}`)
+			writeAgentPluginFile(t, root, "skills/example/SKILL.md", "---\nname: example\ndescription: "+strings.Repeat("中", tc.characters)+"\n---\n")
+			contributions, err := ResolveContributions([]Config{{ID: "example", Root: root, Enabled: true}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			metas, err := skillfs.DiscoverPluginBundleMeta(contributions.SkillBundles)
+			if err != nil || len(metas) != tc.want {
+				t.Fatalf("%d Chinese characters: Skills = %+v, %v; want %d", tc.characters, metas, err, tc.want)
+			}
+		})
+	}
+}
+
 func TestAgentPluginRejectsEscapingPackagePathAndUnknownManifestSchema(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "plugin")
 	writeAgentPluginFile(t, root, "plugin.json", `{"$schema":"https://agent-plugins.org/schemas/1.0.0/plugin.schema.json","name":"example"}`)
@@ -173,6 +199,65 @@ func TestClaudePluginMCPMapOverrideAndProjectVariable(t *testing.T) {
 	}
 }
 
+func TestClaudePluginCommandStaysWithinRootThroughContributions(t *testing.T) {
+	parent := t.TempDir()
+	root := filepath.Join(parent, "claude")
+	outside := filepath.Join(parent, "outside")
+	writeAgentPluginFile(t, parent, "outside", "outside")
+	writeAgentPluginFile(t, root, "bin/good", "inside")
+	realRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	symlinkErr := os.Symlink(outside, filepath.Join(root, "bin", "escape"))
+	cases := []struct {
+		name, command string
+		inline        bool
+		wantServer    bool
+		wantCommand   string
+	}{
+		{"parent", "../outside", true, false, ""},
+		{"backslash-parent", `..\outside`, false, false, ""},
+		{"root-variable-parent", "${CLAUDE_PLUGIN_ROOT}/../outside", true, false, ""},
+		{"symlink", "bin/escape", false, false, ""},
+		{"dot-relative-inside", "./bin/good", false, true, filepath.Join(realRoot, "bin", "good")},
+		{"relative-inside", "bin/good", true, true, filepath.Join(realRoot, "bin", "good")},
+		{"backslash-inside", `bin\good`, false, true, filepath.Join(realRoot, "bin", "good")},
+		{"root-variable-inside", "${CLAUDE_PLUGIN_ROOT}/bin/good", false, true, filepath.Join(realRoot, "bin", "good")},
+		{"explicit-absolute", outside, true, true, outside},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.name == "symlink" && symlinkErr != nil {
+				t.Skipf("symlink escape case unavailable: %v", symlinkErr)
+			}
+			server := fmt.Sprintf(`{"entry":{"command":%q}}`, tc.command)
+			manifest := `{"name":"claude"}`
+			mcpFile := `{"mcpServers":` + server + `}`
+			if tc.inline {
+				manifest = `{"name":"claude","mcpServers":` + server + `}`
+				mcpFile = `{"mcpServers":{}}`
+			}
+			writeAgentPluginFile(t, root, ".claude-plugin/plugin.json", manifest)
+			writeAgentPluginFile(t, root, ".mcp.json", mcpFile)
+			contributions, err := ResolveContributions([]Config{{ID: "claude", Root: root, Enabled: true}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantCount := 0
+			if tc.wantServer {
+				wantCount = 1
+			}
+			if got := len(contributions.MCPServerSpecs); got != wantCount {
+				t.Fatalf("command %q: accepted %d servers; want %d", tc.command, got, wantCount)
+			}
+			if tc.wantServer && contributions.MCPServerSpecs[0].Command != tc.wantCommand {
+				t.Fatalf("command %q resolved to %q, want %q", tc.command, contributions.MCPServerSpecs[0].Command, tc.wantCommand)
+			}
+		})
+	}
+}
+
 func TestAgentPluginHostExecutablePathIsExplicit(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "lite")
 	writeAgentPluginFile(t, root, "plugin.json", `{"$schema":"https://agent-plugins.org/schemas/1.0.0/plugin.schema.json","name":"lite"}`)
@@ -191,6 +276,42 @@ func TestAgentPluginHostExecutablePathIsExplicit(t *testing.T) {
 	_, err = ResolveContributions([]Config{{ID: "lite", Root: root, Enabled: true, ExecutableEnv: map[string]string{"DTW_NODE_PATH": "node"}}}, RuntimePaths{StoreDir: t.TempDir()})
 	if err == nil || !strings.Contains(err.Error(), "absolute path") {
 		t.Fatalf("relative host executable accepted: %v", err)
+	}
+}
+
+func TestAgentPluginHostExecutableEnvTargetOSPriority(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "lite")
+	writeAgentPluginFile(t, root, "plugin.json", `{"$schema":"https://agent-plugins.org/schemas/1.0.0/plugin.schema.json","name":"lite"}`)
+	writeAgentPluginFile(t, root, "mcp.json", `{"$schema":"https://agent-plugins.org/schemas/1.0.0/mcp.schema.json","mcpServers":{"desktop-world":{"type":"stdio","command":"./bin/dtw","env":{"dtw_node_path":"/package-choice"}}}}`)
+	writeAgentPluginFile(t, root, "bin/dtw", "launcher")
+	trusted := filepath.Join(t.TempDir(), "node")
+	writeAgentPluginFile(t, filepath.Dir(trusted), filepath.Base(trusted), "host executable")
+	realTrusted, err := filepath.EvalSymlinks(trusted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := Config{ID: "lite", Root: root, Enabled: true, ExecutableEnv: map[string]string{"DTW_NODE_PATH": trusted}}
+	for _, tc := range []struct {
+		os              string
+		wantPackageCase bool
+	}{
+		{"windows", false},
+		{"linux", true},
+	} {
+		t.Run(tc.os, func(t *testing.T) {
+			got, err := ResolveContributions([]Config{config}, RuntimePaths{StoreDir: t.TempDir(), TargetOS: tc.os})
+			if err != nil || len(got.MCPServerSpecs) != 1 {
+				t.Fatalf("assembly = %+v, %v", got, err)
+			}
+			env := got.MCPServerSpecs[0].Env
+			if env["DTW_NODE_PATH"] != realTrusted {
+				t.Fatalf("Host selection missing: %+v", env)
+			}
+			_, hasPackageCase := env["dtw_node_path"]
+			if hasPackageCase != tc.wantPackageCase {
+				t.Fatalf("package case retained=%v, want %v: %+v", hasPackageCase, tc.wantPackageCase, env)
+			}
+		})
 	}
 }
 

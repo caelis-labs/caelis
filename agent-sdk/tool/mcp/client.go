@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -143,8 +144,13 @@ func transportForSpecWithHTTPClient(spec ServerSpec, httpClient *http.Client) (m
 		} else {
 			cmd.Env = os.Environ()
 		}
-		for k, v := range spec.Env {
-			cmd.Env = setProcessEnvironment(cmd.Env, k, v)
+		keys := make([]string, 0, len(spec.Env))
+		for key := range spec.Env {
+			keys = append(keys, key)
+		}
+		slices.Sort(keys)
+		for _, key := range keys {
+			cmd.Env = setProcessEnvironment(cmd.Env, key, spec.Env[key])
 		}
 		return &mcpsdk.CommandTransport{Command: cmd}, transportName, nil
 	case TransportStreamableHTTP:
@@ -251,12 +257,28 @@ func pluginBaseEnvironment() []string {
 }
 
 func setProcessEnvironment(base []string, key, value string) []string {
+	return setProcessEnvironmentForOS(base, key, value, runtime.GOOS)
+}
+
+func setProcessEnvironmentForOS(base []string, key, value, targetOS string) []string {
 	if key == "" || strings.ContainsAny(key, "=\x00") || strings.ContainsRune(value, '\x00') {
 		return base
 	}
+	if targetOS == "windows" {
+		// Remove every case variant, including duplicates inherited from the
+		// process. A single final key survives regardless of the base ordering.
+		out := base[:0]
+		for _, entry := range base {
+			name, _, _ := strings.Cut(entry, "=")
+			if !strings.EqualFold(name, key) {
+				out = append(out, entry)
+			}
+		}
+		return append(out, key+"="+value)
+	}
 	for i, entry := range base {
 		name, _, _ := strings.Cut(entry, "=")
-		if name == key || (runtime.GOOS == "windows" && strings.EqualFold(name, key)) {
+		if name == key {
 			base[i] = key + "=" + value
 			return base
 		}

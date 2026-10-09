@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
 )
@@ -131,8 +132,9 @@ func validStandardPluginSkill(path, directory string) bool {
 	}
 	front, _ := parseFrontMatter(normalizeText(string(raw)))
 	name, description := strings.TrimSpace(front["name"]), strings.TrimSpace(front["description"])
+	descriptionCharacters := utf8.RuneCountInString(description)
 	return name == directory && len(name) <= 64 && standardSkillName.MatchString(name) &&
-		!strings.Contains(name, "--") && len(description) >= 1 && len(description) <= 1024
+		!strings.Contains(name, "--") && descriptionCharacters >= 1 && descriptionCharacters <= 1024
 }
 
 func mergePluginBundles(in []skill.PluginBundle) []skill.PluginBundle {

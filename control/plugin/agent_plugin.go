@@ -384,15 +384,32 @@ func instantiateAgentPluginMCP(spec MCPServerSpec, root, dataDir string) (MCPSer
 	return spec, nil
 }
 
-func applyHostExecutableEnv(spec MCPServerSpec, paths map[string]string) (MCPServerSpec, error) {
-	if spec.Transport != MCPTransportStdio || len(paths) == 0 {
+func applyHostExecutableEnv(spec MCPServerSpec, paths map[string]string, targetOS string) (MCPServerSpec, error) {
+	if spec.Transport != MCPTransportStdio {
 		return spec, nil
 	}
-	for name, configuredPath := range paths {
+	// Windows environment names are case-insensitive. Choose a stable package
+	// value for case variants, then let explicit Host paths take precedence.
+	if targetOS == "windows" {
+		normalized := make(map[string]string, len(spec.Env))
+		for _, name := range sortedKeys(spec.Env) {
+			if !hasFoldedEnvironmentKey(normalized, name) {
+				normalized[name] = spec.Env[name]
+			}
+		}
+		spec.Env = normalized
+	}
+	seenHost := map[string]bool{}
+	for _, name := range sortedKeys(paths) {
+		configuredPath := paths[name]
 		if !executableEnvName.MatchString(name) || strings.EqualFold(name, "PLUGIN_ROOT") || strings.EqualFold(name, "PLUGIN_DATA") {
 			return MCPServerSpec{}, fmt.Errorf("invalid host executable environment name %q", name)
 		}
-		if _, exists := spec.Env[name]; exists {
+		if targetOS == "windows" && seenHost[strings.ToUpper(name)] {
+			return MCPServerSpec{}, fmt.Errorf("host executable environment %q conflicts with another host name", name)
+		}
+		seenHost[strings.ToUpper(name)] = true
+		if _, exists := spec.Env[name]; exists && targetOS != "windows" {
 			return MCPServerSpec{}, fmt.Errorf("host executable environment %q conflicts with package configuration", name)
 		}
 		if !filepath.IsAbs(configuredPath) {
@@ -406,7 +423,23 @@ func applyHostExecutableEnv(spec MCPServerSpec, paths map[string]string) (MCPSer
 		if err != nil || !info.Mode().IsRegular() {
 			return MCPServerSpec{}, fmt.Errorf("host executable environment %q is not a file", name)
 		}
+		if targetOS == "windows" {
+			for packageName := range spec.Env {
+				if strings.EqualFold(packageName, name) {
+					delete(spec.Env, packageName)
+				}
+			}
+		}
 		spec.Env[name] = resolved
 	}
 	return spec, nil
+}
+
+func hasFoldedEnvironmentKey(env map[string]string, key string) bool {
+	for existing := range env {
+		if strings.EqualFold(existing, key) {
+			return true
+		}
+	}
+	return false
 }

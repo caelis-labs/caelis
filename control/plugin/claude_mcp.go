@@ -87,15 +87,29 @@ func buildClaudeMCPServerSpec(root, pluginID, name string, cfg CaelisMCPServerSp
 		if strings.Contains(command, "${CLAUDE_PROJECT_DIR}") {
 			return MCPServerSpec{}, fmt.Errorf("project-owned executable is not supported")
 		}
-		if strings.HasPrefix(cfg.Command, "./") || strings.HasPrefix(cfg.Command, "${CLAUDE_PLUGIN_ROOT}/") {
-			relative := cfg.Command
-			if strings.HasPrefix(cfg.Command, "${CLAUDE_PLUGIN_ROOT}/") {
-				relative = strings.TrimPrefix(command, rootValue+string(filepath.Separator))
+		const rootVariable = "${CLAUDE_PLUGIN_ROOT}"
+		switch {
+		case strings.HasPrefix(cfg.Command, rootVariable):
+			relative := strings.TrimPrefix(cfg.Command, rootVariable)
+			if relative == "" || (relative[0] != '/' && relative[0] != '\\') {
+				return MCPServerSpec{}, fmt.Errorf("invalid CLAUDE_PLUGIN_ROOT command path")
+			}
+			relative = strings.ReplaceAll(relative[1:], `\`, string(filepath.Separator))
+			if filepath.IsAbs(relative) || filepath.VolumeName(relative) != "" {
+				return MCPServerSpec{}, fmt.Errorf("invalid relative command path")
 			}
 			command, err = ResolveSafePath(rootValue, relative)
-			if err != nil {
-				return MCPServerSpec{}, err
+		case strings.Contains(cfg.Command, rootVariable):
+			return MCPServerSpec{}, fmt.Errorf("CLAUDE_PLUGIN_ROOT command must start at plugin root")
+		case !filepath.IsAbs(command) && strings.ContainsAny(command, `/\`):
+			relative := strings.ReplaceAll(command, `\`, string(filepath.Separator))
+			if filepath.IsAbs(relative) || filepath.VolumeName(relative) != "" {
+				return MCPServerSpec{}, fmt.Errorf("invalid relative command path")
 			}
+			command, err = ResolveSafePath(rootValue, relative)
+		}
+		if err != nil {
+			return MCPServerSpec{}, err
 		}
 		spec.Command = command
 		cwd := firstNonEmpty(cfg.WorkDir, cfg.CWD)

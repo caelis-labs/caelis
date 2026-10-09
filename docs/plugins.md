@@ -51,9 +51,15 @@ the Caelis Store, remains across package updates, and is created at MCP startup.
 It is not the workspace. The standard stdio process receives essential platform
 variables plus package values and explicitly configured Host executable paths;
 it does not inherit arbitrary Bot tokens or process environment variables.
+On Windows, environment names are matched without case: an explicit Host
+executable path replaces any package value with the same name in another case.
+On Unix, differently cased names remain distinct.
 Claude values expand `${CLAUDE_PLUGIN_ROOT}`; `${CLAUDE_PROJECT_DIR}` resolves
-to the exact Session workspace only when that value is used. These package
-files do not replace the separately trusted workspace `.mcp.json` overlay.
+to the exact Session workspace only when that value is used. Relative Claude
+`command` paths, including paths written with backslashes, stay within the
+plugin root after symlinks are resolved. An explicit absolute command retains
+its declared path. Plugin files do not replace the separately trusted
+workspace `.mcp.json` overlay.
 Project overlays still require trust of that exact canonical workspace and
 retain their existing priority and Session snapshot behavior.
 

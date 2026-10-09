@@ -30,6 +30,18 @@ const (
 	mcpLegacyProtocolVersion   = "2025-11-25"
 )
 
+func TestProcessEnvironmentTargetOSCaseSemantics(t *testing.T) {
+	base := []string{"PATH=/bin", "dtw_node_path=/package", "DTW_NODE_PATH=/stale"}
+	windows := setProcessEnvironmentForOS(slices.Clone(base), "DTW_NODE_PATH", "/host", "windows")
+	if !slices.Equal(windows, []string{"PATH=/bin", "DTW_NODE_PATH=/host"}) {
+		t.Fatalf("Windows environment = %v", windows)
+	}
+	unix := setProcessEnvironmentForOS(slices.Clone(base), "DTW_NODE_PATH", "/host", "linux")
+	if !slices.Equal(unix, []string{"PATH=/bin", "dtw_node_path=/package", "DTW_NODE_PATH=/host"}) {
+		t.Fatalf("Unix environment = %v", unix)
+	}
+}
+
 func TestMCPServerHelperProcess(t *testing.T) {
 	if os.Getenv("CAELIS_MCP_HELPER") != "1" {
 		return

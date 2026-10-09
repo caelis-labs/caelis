@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"fmt"
+	"runtime"
 
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
 )
@@ -26,6 +27,9 @@ type AgentRegistration struct {
 type RuntimePaths struct {
 	StoreDir     string
 	WorkspaceDir string
+	// TargetOS defaults to the current OS; an explicit value permits portable
+	// verification of process environment semantics during assembly.
+	TargetOS string
 }
 
 // ResolveContributions parses configured plugins and projects the contributions
@@ -36,6 +40,9 @@ func ResolveContributions(configs []Config, paths ...RuntimePaths) (Contribution
 	var runtimePaths RuntimePaths
 	if len(paths) > 0 {
 		runtimePaths = paths[0]
+	}
+	if runtimePaths.TargetOS == "" {
+		runtimePaths.TargetOS = runtime.GOOS
 	}
 	for _, configured := range configs {
 		installed, err := ParseConfigured(configured)
@@ -64,7 +71,7 @@ func ResolveContributions(configs []Config, paths ...RuntimePaths) (Contribution
 				if err != nil {
 					return out, fmt.Errorf("plugin %q MCP server %q: %w", installed.ID, spec.Name, err)
 				}
-				spec, err = applyHostExecutableEnv(spec, configured.ExecutableEnv)
+				spec, err = applyHostExecutableEnv(spec, configured.ExecutableEnv, runtimePaths.TargetOS)
 				if err != nil {
 					return out, fmt.Errorf("plugin %q MCP server %q: %w", installed.ID, spec.Name, err)
 				}
