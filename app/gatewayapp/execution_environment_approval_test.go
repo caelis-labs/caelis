@@ -16,6 +16,8 @@ import (
 	"github.com/caelis-labs/caelis/control/application"
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
+	"github.com/caelis-labs/caelis/control/appserver/httpclient"
+	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 )
 
 func TestApplicationExecutionEnvironmentAfterHostApproval(t *testing.T) {
@@ -66,7 +68,7 @@ func TestApplicationExecutionEnvironmentAfterHostApproval(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	provider.set(nativeModelTool{"RunCommand", string(input)})
+	provider.set(nativeModelTool{"RunCommand", string(input)}, nativeModelTool{"Task", `{"action":"wait","handle":"command"}`})
 	_, err = client.PromptApplication(ctx, appserver.ApplicationPromptRequest{PromptRequest: appserver.PromptRequest{WriteBase: appserver.WriteBase{OperationID: "prompt", SessionID: created.SessionID}, Input: "Run the synthetic environment check after approval."}, SourceKind: "user"})
 	if err != nil {
 		t.Fatal(err)
@@ -113,6 +115,29 @@ func TestApplicationExecutionEnvironmentAfterHostApproval(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitApplicationHTTPIdle(t, ctx, client, created.SessionID)
+	clients, err := httpclient.AppServerClients(client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var settled taskstream.TaskDescriptor
+	for {
+		listed, err := clients.Tasks.List(ctx, taskstream.ListRequest{SessionID: created.SessionID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(listed.Tasks) == 1 && !listed.Tasks[0].Running {
+			settled = listed.Tasks[0]
+			break
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("approved command did not settle: %+v, %v", listed, ctx.Err())
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+	if settled.State != "completed" {
+		t.Fatalf("approved command failed: %+v", settled)
+	}
 	resolvedCWD, err := filepath.EvalSymlinks(cwd)
 	if err != nil {
 		t.Fatal(err)
