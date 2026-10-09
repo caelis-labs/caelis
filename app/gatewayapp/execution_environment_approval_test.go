@@ -16,6 +16,8 @@ import (
 	"github.com/caelis-labs/caelis/control/application"
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
+	"github.com/caelis-labs/caelis/control/appserver/httpclient"
+	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 )
 
 func TestApplicationExecutionEnvironmentAfterHostApproval(t *testing.T) {
@@ -113,18 +115,35 @@ func TestApplicationExecutionEnvironmentAfterHostApproval(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitApplicationHTTPIdle(t, ctx, client, created.SessionID)
+	clients, err := httpclient.AppServerClients(client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var settled taskstream.TaskDescriptor
+	for {
+		listed, err := clients.Tasks.List(ctx, taskstream.ListRequest{SessionID: created.SessionID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(listed.Tasks) == 1 && !listed.Tasks[0].Running {
+			settled = listed.Tasks[0]
+			break
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("approved command did not settle: %+v, %v", listed, ctx.Err())
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+	if settled.State != "completed" {
+		t.Fatalf("approved command failed: %+v", settled)
+	}
 	resolvedCWD, err := filepath.EvalSymlinks(cwd)
 	if err != nil {
 		t.Fatal(err)
 	}
 	got, err := os.ReadFile(output)
 	if err != nil || string(got) != home+"|"+resolvedCWD+"|configured" {
-		var updates []eventstream.Envelope
-		for _, event := range applicationHTTPHistory(t, ctx, client, created.SessionID) {
-			if _, ok := event.Update.(eventstream.ToolCallUpdate); ok {
-				updates = append(updates, event)
-			}
-		}
-		t.Fatalf("approved command lost the pinned environment: %q, %v; tool updates=%+v", got, err, updates)
+		t.Fatalf("approved command lost the pinned environment: %q, %v", got, err)
 	}
 }
