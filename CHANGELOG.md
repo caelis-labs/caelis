@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.69.0](https://github.com/caelis-labs/caelis/compare/v0.68.0...v0.69.0) (2026-10-09)
+
+
+### Features
+
+* **application:** complete Turn from terminal callback result ([#117](https://github.com/caelis-labs/caelis/issues/117)) ([b9923a9](https://github.com/caelis-labs/caelis/commit/b9923a9a819ffe08f225d0135a9385f860252fba)), closes [#116](https://github.com/caelis-labs/caelis/issues/116)
+* **mcp:** expose accepted tool descriptions in status ([#114](https://github.com/caelis-labs/caelis/issues/114)) ([fc40797](https://github.com/caelis-labs/caelis/commit/fc407972e504e95e92fcc2009b1660a8a30e178a))
+* **plugin:** Agent Plugins 1.0 MCP compatibility and bounded tool media ([#119](https://github.com/caelis-labs/caelis/issues/119)) ([8e5d75b](https://github.com/caelis-labs/caelis/commit/8e5d75b197ea5d398ec603b14656462a24389b4b))
+
+  Plugin MCP results now retain bounded PNG/JPEG images and structured receipts. The official Go MCP SDK is pinned to its unreleased upstream commit `3785c500b581` (`v1.8.1-0.20260916072216-3785c500b581`) to preserve large JSON integers. MCP OAuth client sign-in remains deferred until Core has a consent callback and protected token store.
+
+
+### Bug Fixes
+
+* stream ToolSearch and cover full scoped MCP catalogs ([#111](https://github.com/caelis-labs/caelis/issues/111)) ([073a662](https://github.com/caelis-labs/caelis/commit/073a662ae2d6e39de33314dffe4d3c7a30b70684))
+* **toolsearch:** handle bounded parallel schema inspections ([#118](https://github.com/caelis-labs/caelis/issues/118)) ([6cf3bc9](https://github.com/caelis-labs/caelis/commit/6cf3bc978349556099ad8c5b3da7e33f07203009))
+
 ## [0.68.0](https://github.com/caelis-labs/caelis/compare/v0.67.2...v0.68.0) (2026-10-08)
 
 
