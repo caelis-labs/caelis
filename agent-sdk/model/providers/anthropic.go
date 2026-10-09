@@ -396,20 +396,13 @@ func applyDeepSeekAnthropicThinking(params *anthropic.MessageNewParams, reasonin
 	if requested == "" && reasoning.BudgetTokens <= 0 {
 		return nil // DeepSeek's documented default is high.
 	}
-	effort := ""
-	switch requested {
-	case "":
-		// A budget alone enables thinking; DeepSeek ignores its numeric value.
-	case "none", "off", "disabled":
+	effort := normalizeDeepSeekReasoningEffort(requested)
+	switch effort {
+	case "none":
 		disabled := anthropic.NewThinkingConfigDisabledParam()
 		params.Thinking.OfDisabled = &disabled
 		return nil
-	case "minimal", "low":
-		effort = "low"
-	case "medium", "high", "xhigh", "very_high", "very-high", "veryhigh":
-		effort = "high"
-	case "max", "maximum", "ultra":
-		effort = "max"
+	case "low", "high", "max":
 	default:
 		return fmt.Errorf("providers: unsupported DeepSeek Anthropic reasoning effort %q", reasoning.Effort)
 	}
@@ -421,7 +414,7 @@ func applyDeepSeekAnthropicThinking(params *anthropic.MessageNewParams, reasonin
 	}
 	params.Thinking = *thinking
 	applyAnthropicMaxTokensForThinking(params)
-	if effort != "" {
+	if requested != "" {
 		params.OutputConfig.Effort = anthropic.OutputConfigEffort(effort)
 	}
 	return nil

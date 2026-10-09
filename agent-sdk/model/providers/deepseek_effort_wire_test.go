@@ -22,6 +22,10 @@ func TestDeepSeekAnthropicStreamingEffortWire(t *testing.T) {
 		{"low", "enabled", "low"},
 		{"high", "enabled", "high"},
 		{"max", "enabled", "max"},
+		{"minimal", "enabled", "low"},
+		{"medium", "enabled", "high"},
+		{"xhigh", "enabled", "high"},
+		{"ultra", "enabled", "max"},
 	} {
 		t.Run("effort="+tc.effort, func(t *testing.T) {
 			requests := 0

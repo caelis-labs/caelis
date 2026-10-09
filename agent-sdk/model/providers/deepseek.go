@@ -81,14 +81,18 @@ func applyDeepSeekCompatThinkingReasoning(payload *openAICompatRequest, cfg mode
 
 func normalizeDeepSeekReasoningEffort(effort string) string {
 	switch strings.ToLower(strings.TrimSpace(effort)) {
-	case "none":
+	case "none", "off", "disabled":
 		return "none"
-	case "max", "xhigh", "very_high", "very-high", "veryhigh":
+	case "minimal", "low":
+		return "low"
+	case "max", "maximum", "ultra", "very_high", "very-high", "veryhigh":
 		return "max"
-	case "", "minimal", "low", "medium", "high":
+	case "", "medium", "high", "xhigh":
 		return "high"
 	default:
-		return "high"
+		// Let a provider reject an unsupported explicit value instead of
+		// silently changing the user's requested effort to high.
+		return strings.ToLower(strings.TrimSpace(effort))
 	}
 }
 
@@ -105,7 +109,7 @@ func clearDeepSeekCompatReasoningFields(payload *openAICompatRequest) {
 
 func deepSeekModelSupportsThinking(modelName string) bool {
 	switch strings.ToLower(strings.TrimSpace(modelName)) {
-	case "deepseek-v4-flash", "deepseek-v4-flash-vision-exp", "deepseek-v4-pro":
+	case "deepseek-flash", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp", "deepseek-v4-pro":
 		return true
 	default:
 		return false
