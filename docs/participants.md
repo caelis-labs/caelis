@@ -53,7 +53,7 @@ start a conversation:
 
 | Role | Binding behavior |
 | --- | --- |
-| ToolSearch | A restricted selector inherits the Main Agent's resolved provider model when unbound. Bind a separate provider model or Jev judgment to override it. An explicit provider binding retains its effort and Fast setting. Jev scores the scoped name/description catalog; search failures are reported without keyword fallback. |
+| ToolSearch | A restricted selector inherits the Main Agent's resolved provider model when unbound and can consume model tokens when candidates are ready. Bind a separate provider model or Jev judgment to override it. An explicit provider binding retains its effort and Fast setting. Jev scores the scoped name/description catalog; search failures are reported without keyword fallback. |
 | Guardian | Uses a provider model, or the Main Agent model when unbound. An auxiliary classifier selector, labeled `Classifier`, appears on the same row when a judgment model is connected; it is off until selected. |
 | Reviewer | Uses a provider model or ACP agent for the fixed review scene. |
 | Memory Steward | An explicit generation model enables semantic organization. Unbound Memory keeps its durable journal and lexical recall without model calls. |

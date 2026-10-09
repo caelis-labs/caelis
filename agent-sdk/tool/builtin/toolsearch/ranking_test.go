@@ -59,6 +59,22 @@ func TestRankerCannotAdmitUnknownOrDuplicateTools(t *testing.T) {
 	}
 }
 
+func TestRankingRejectsAmbiguousScopedSourceNamesBeforeDispatch(t *testing.T) {
+	called := false
+	source := rankingSource{
+		mcpCandidate("docs__lookup", "First source", "one", "docs", "lookup", nil),
+		mcpCandidate("docs__lookup", "Second source", "two", "docs", "lookup", nil),
+	}
+	search := NewSource(source, rankerFunc(func(context.Context, string, []tool.Definition, int, SearchModel) ([]string, error) {
+		called = true
+		return []string{"docs__lookup"}, nil
+	}))
+	_, err := search.Call(t.Context(), tool.Call{Input: json.RawMessage(`{"query":"lookup"}`)})
+	if err == nil || called {
+		t.Fatalf("ambiguous scoped source error=%v ranker_called=%t", err, called)
+	}
+}
+
 func TestRankingFailureDoesNotFallBackToLexicalDiscovery(t *testing.T) {
 	calls := 0
 	source := rankingSource{mcpCandidate("calendar", "Create calendar events", "calendar", "demo", "create", nil)}

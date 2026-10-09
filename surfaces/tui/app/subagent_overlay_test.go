@@ -112,6 +112,20 @@ func TestSubagentOverlayStewardDefaultIsStatic(t *testing.T) {
 	}
 }
 
+func TestSubagentOverlayToolSearchDefaultUsesMainAgentModel(t *testing.T) {
+	model, _ := newSubagentOverlayTestModel(t)
+	selectSubagentTestRow(t, model, "handle:tool-search")
+	frame := ansi.Strip(model.renderSubagentOverlay())
+	if !strings.Contains(frame, "Main Agent model") || strings.Contains(frame, "Lexical (zero-token)") {
+		t.Fatalf("ToolSearch default row is misleading\n%s", frame)
+	}
+	_ = model.handleSubagentOverlayKey(subagentSpecialKey(tea.KeyEnter))
+	frame = ansi.Strip(model.renderSubagentOverlay())
+	if !strings.Contains(frame, "Use the Main Agent model for MCP discovery") || strings.Contains(frame, "Lexical (zero-token)") {
+		t.Fatalf("ToolSearch reset choice is misleading\n%s", frame)
+	}
+}
+
 func TestSubagentOverlayDismissesWelcomeCardOnOpen(t *testing.T) {
 	service := &subagentDelegationStub{status: subagentTestStatus()}
 	model := NewModel(Config{

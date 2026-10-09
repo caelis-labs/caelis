@@ -25,6 +25,7 @@ type anthropicProviderDefaults struct {
 	provider     string
 	baseURL      string
 	maxOutputTok int
+	deepSeek     bool
 }
 
 type anthropicSDKLLM struct {
@@ -39,6 +40,7 @@ type anthropicSDKLLM struct {
 	maxOutputTok        int
 	contextWindowTokens int
 	imageInput          bool
+	deepSeek            bool
 }
 
 func newAnthropic(cfg Config, token string) model.LLM {
@@ -100,6 +102,7 @@ func newAnthropicWithDefaults(cfg Config, token string, defaults anthropicProvid
 		maxOutputTok:        maxTok,
 		contextWindowTokens: cfg.ContextWindowTokens,
 		imageInput:          cfg.ImageInput,
+		deepSeek:            defaults.deepSeek,
 	}
 }
 
@@ -193,6 +196,7 @@ func (l *anthropicSDKLLM) generateStreaming(ctx context.Context, params anthropi
 	defer stream.Close()
 
 	acc := anthropic.Message{}
+	messageStopped := false
 	for stream.Next() {
 		event := stream.Current()
 		if stop, ok := event.AsAny().(anthropic.ContentBlockStopEvent); ok {
@@ -203,6 +207,8 @@ func (l *anthropicSDKLLM) generateStreaming(ctx context.Context, params anthropi
 			return
 		}
 		switch ev := event.AsAny().(type) {
+		case anthropic.MessageStopEvent:
+			messageStopped = true
 		case anthropic.MessageDeltaEvent:
 			if ev.Usage.JSON.InputTokens.Valid() {
 				acc.Usage.InputTokens = ev.Usage.InputTokens
@@ -234,6 +240,10 @@ func (l *anthropicSDKLLM) generateStreaming(ctx context.Context, params anthropi
 	}
 	if err := stream.Err(); err != nil {
 		yield(nil, err)
+		return
+	}
+	if !messageStopped {
+		yield(nil, fmt.Errorf("providers: anthropic stream ended before message_stop"))
 		return
 	}
 	msg, finishReason, rawFinishReason, usage, err := anthropicMessageToKernel(l.provider, &acc)
@@ -278,6 +288,9 @@ func (l *anthropicSDKLLM) emitStreamingStartBlock(ev anthropic.ContentBlockStart
 	case anthropic.ThinkingBlock:
 		replay := anthropicReplayMeta(l.provider, strings.TrimSpace(block.Signature))
 		return l.emitStreamingTextDelta(int(ev.Index), model.PartKindReasoning, block.Thinking, replay, yield)
+	case anthropic.ToolUseBlock:
+		return yield(&model.StreamEvent{Type: model.StreamEventPartDelta,
+			PartDelta: &model.PartDelta{Index: int(ev.Index), Kind: model.PartKindToolUse}}, nil)
 	default:
 		return true
 	}
@@ -289,6 +302,12 @@ func (l *anthropicSDKLLM) emitStreamingDeltaBlock(ev anthropic.ContentBlockDelta
 		return l.emitStreamingTextDelta(int(ev.Index), model.PartKindText, delta.Text, nil, yield)
 	case anthropic.ThinkingDelta:
 		return l.emitStreamingTextDelta(int(ev.Index), model.PartKindReasoning, delta.Thinking, nil, yield)
+	case anthropic.InputJSONDelta:
+		if delta.PartialJSON == "" {
+			return true
+		}
+		return yield(&model.StreamEvent{Type: model.StreamEventPartDelta,
+			PartDelta: &model.PartDelta{Index: int(ev.Index), Kind: model.PartKindToolUse, InputDelta: delta.PartialJSON}}, nil)
 	case anthropic.SignatureDelta:
 		return yield(&model.StreamEvent{
 			Type: model.StreamEventPartDelta,
@@ -357,7 +376,11 @@ func (l *anthropicSDKLLM) buildRequest(req *model.Request) (anthropic.MessageNew
 		params.MaxTokens = int64(req.Output.MaxOutputTokens)
 	}
 	applyAnthropicOutputConfig(&params, req.Output)
-	if isMiniMaxAdaptiveThinkingModel(l.provider, l.name) {
+	if l.deepSeek {
+		if err := applyDeepSeekAnthropicThinking(&params, req.Reasoning); err != nil {
+			return anthropic.MessageNewParams{}, err
+		}
+	} else if isMiniMaxAdaptiveThinkingModel(l.provider, l.name) {
 		applyMiniMaxAdaptiveThinking(&params, req.Reasoning)
 	} else if isAnthropicAdaptiveThinkingModel(l.name) {
 		applyAnthropicAdaptiveThinking(&params, l.name, req.Reasoning)
@@ -366,6 +389,35 @@ func (l *anthropicSDKLLM) buildRequest(req *model.Request) (anthropic.MessageNew
 		applyAnthropicMaxTokensForThinking(&params)
 	}
 	return params, nil
+}
+
+func applyDeepSeekAnthropicThinking(params *anthropic.MessageNewParams, reasoning model.ReasoningConfig) error {
+	requested := strings.ToLower(strings.TrimSpace(reasoning.Effort))
+	if requested == "" && reasoning.BudgetTokens <= 0 {
+		return nil // DeepSeek's documented default is high.
+	}
+	effort := normalizeDeepSeekReasoningEffort(requested)
+	switch effort {
+	case "none":
+		disabled := anthropic.NewThinkingConfigDisabledParam()
+		params.Thinking.OfDisabled = &disabled
+		return nil
+	case "low", "high", "max":
+	default:
+		return fmt.Errorf("providers: unsupported DeepSeek Anthropic reasoning effort %q", reasoning.Effort)
+	}
+	// The Anthropic SDK requires a manual budget for enabled thinking. DeepSeek
+	// ignores the budget and uses output_config.effort for actual intensity.
+	thinking := anthropicThinkingConfig("deepseek", reasoning)
+	if thinking == nil {
+		thinking = anthropicThinkingConfig("deepseek", model.ReasoningConfig{Effort: "high"})
+	}
+	params.Thinking = *thinking
+	applyAnthropicMaxTokensForThinking(params)
+	if requested != "" {
+		params.OutputConfig.Effort = anthropic.OutputConfigEffort(effort)
+	}
+	return nil
 }
 
 func applyAnthropicOutputConfig(params *anthropic.MessageNewParams, output *model.OutputSpec) {

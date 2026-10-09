@@ -83,6 +83,7 @@ type ollamaChatResponse struct {
 	Model           string            `json:"model"`
 	Message         ollamaChatMessage `json:"message"`
 	Done            bool              `json:"done"`
+	DoneReason      string            `json:"done_reason"`
 	PromptEvalCount int               `json:"prompt_eval_count"`
 	EvalCount       int               `json:"eval_count"`
 }
@@ -189,6 +190,11 @@ func (l *ollamaLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 				return
 			}
 			model.RecordInvocationUsage(ctx, ollamaUsage(out))
+			finishReason, err := ollamaTerminalFinishReason(out.Done, out.DoneReason)
+			if err != nil {
+				yield(nil, err)
+				return
+			}
 			msg, err := ollamaToKernelMessage(out.Message)
 			if err != nil {
 				yield(nil, err)
@@ -197,13 +203,15 @@ func (l *ollamaLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 			yield(&model.StreamEvent{
 				Type: model.StreamEventTurnDone,
 				Response: &model.Response{
-					Message:      msg,
-					TurnComplete: true,
-					StepComplete: true,
-					Status:       model.ResponseStatusCompleted,
-					Model:        out.Model,
-					Provider:     l.provider,
-					Usage:        ollamaUsage(out),
+					Message:         msg,
+					TurnComplete:    true,
+					StepComplete:    true,
+					Status:          model.ResponseStatusCompleted,
+					FinishReason:    finishReason,
+					RawFinishReason: out.DoneReason,
+					Model:           out.Model,
+					Provider:        l.provider,
+					Usage:           ollamaUsage(out),
 				},
 			}, nil)
 			return
@@ -213,11 +221,17 @@ func (l *ollamaLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 			toolCalls: []model.ToolCall{},
 		}
 		var (
-			usage   model.Usage
-			modelID = l.name
-			stopped bool
+			usage      model.Usage
+			modelID    = l.name
+			stopped    bool
+			done       bool
+			doneReason string
 		)
 		if err := readOllamaStreamWithFirstEventTimeout(resp.Body, l.firstEventTimeout, func(chunk ollamaChatResponse) error {
+			if chunk.Done {
+				done = true
+				doneReason = chunk.DoneReason
+			}
 			if strings.TrimSpace(chunk.Model) != "" {
 				modelID = chunk.Model
 			}
@@ -251,6 +265,13 @@ func (l *ollamaLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 					return err
 				}
 				acc.toolCalls = append(acc.toolCalls, calls...)
+				for _, call := range calls {
+					if !yield(&model.StreamEvent{Type: model.StreamEventPartDelta,
+						PartDelta: &model.PartDelta{Kind: model.PartKindToolUse, InputDelta: call.Args}}, nil) {
+						stopped = true
+						return errStopSSE
+					}
+				}
 			}
 			return nil
 		}); err != nil {
@@ -260,19 +281,42 @@ func (l *ollamaLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 			yield(nil, err)
 			return
 		}
+		finishReason, err := ollamaTerminalFinishReason(done, doneReason)
+		if err != nil {
+			yield(nil, err)
+			return
+		}
 
 		yield(&model.StreamEvent{
 			Type: model.StreamEventTurnDone,
 			Response: &model.Response{
-				Message:      model.MessageFromAssistantParts(acc.text.String(), acc.reasoning.String(), dedupToolCalls(acc.toolCalls)),
-				TurnComplete: true,
-				StepComplete: true,
-				Status:       model.ResponseStatusCompleted,
-				Model:        modelID,
-				Provider:     l.provider,
-				Usage:        usage,
+				Message:         model.MessageFromAssistantParts(acc.text.String(), acc.reasoning.String(), dedupToolCalls(acc.toolCalls)),
+				TurnComplete:    true,
+				StepComplete:    true,
+				Status:          model.ResponseStatusCompleted,
+				FinishReason:    finishReason,
+				RawFinishReason: doneReason,
+				Model:           modelID,
+				Provider:        l.provider,
+				Usage:           usage,
 			},
 		}, nil)
+	}
+}
+
+// Older Ollama servers omit done_reason on successful responses. Every
+// nonempty reason must be a known natural stop before content is committed.
+func ollamaTerminalFinishReason(done bool, reason string) (model.FinishReason, error) {
+	if !done {
+		return model.FinishReasonUnknown, fmt.Errorf("model: ollama response ended before done")
+	}
+	switch strings.ToLower(strings.TrimSpace(reason)) {
+	case "", "stop":
+		return model.FinishReasonStop, nil
+	case "length":
+		return model.FinishReasonLength, fmt.Errorf("model: ollama response reached output length limit")
+	default:
+		return model.FinishReasonUnknown, fmt.Errorf("model: ollama response ended with unknown done_reason %q", reason)
 	}
 }
 

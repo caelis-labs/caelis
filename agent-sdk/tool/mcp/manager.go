@@ -173,7 +173,6 @@ func (mgr *Manager) rebuildToolsLocked() {
 			}
 			return toolInfos[i].Name < toolInfos[j].Name
 		})
-		acceptedForServer := 0
 		for _, info := range toolInfos {
 			if info == nil || strings.TrimSpace(info.Name) == "" {
 				continue
@@ -181,10 +180,6 @@ func (mgr *Manager) rebuildToolsLocked() {
 			toolLabel := mcpWarningToolName(info.Name)
 			if err := validateMCPIdentity("remote tool name", info.Name, maxMCPRemoteToolNameRunes); err != nil {
 				mgr.addWarning(key, fmt.Sprintf("tool %s quarantined: %v", toolLabel, err))
-				continue
-			}
-			if acceptedForServer >= maxMCPToolsPerServer || len(mgr.tools) >= maxMCPToolsPerManager {
-				mgr.addWarning(key, fmt.Sprintf("tool %s quarantined: MCP tool count limit reached", toolLabel))
 				continue
 			}
 			name := formatToolName(spec.Name, info.Name)
@@ -220,7 +215,6 @@ func (mgr *Manager) rebuildToolsLocked() {
 			}
 			toolsByProjectedName[name] = t
 			mgr.tools = append(mgr.tools, t)
-			acceptedForServer++
 		}
 	}
 	sort.SliceStable(mgr.tools, func(i, j int) bool { return mgr.tools[i].Definition().Name < mgr.tools[j].Definition().Name })

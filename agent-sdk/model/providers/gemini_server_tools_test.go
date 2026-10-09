@@ -45,7 +45,7 @@ func TestGeminiRequest_DoesNotIncludeGoogleSearchByDefaultForCurrentModels(t *te
 			t.Fatalf("decode request payload: %v", err)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprint(w, `{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]}}]}`)
+		_, _ = fmt.Fprint(w, `{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]},"finishReason":"STOP"}]}`)
 	}))
 	defer server.Close()
 
@@ -80,7 +80,7 @@ func TestGeminiRequest_DisabledProviderSpecOptOutSkipsDefaultGoogleSearch(t *tes
 			t.Fatalf("decode request payload: %v", err)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprint(w, `{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]}}]}`)
+		_, _ = fmt.Fprint(w, `{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]},"finishReason":"STOP"}]}`)
 	}))
 	defer server.Close()
 
@@ -120,7 +120,7 @@ func TestGeminiRequest_DoesNotDefaultGoogleSearchForLegacyModels(t *testing.T) {
 			t.Fatalf("decode request payload: %v", err)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprint(w, `{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]}}]}`)
+		_, _ = fmt.Fprint(w, `{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]},"finishReason":"STOP"}]}`)
 	}))
 	defer server.Close()
 
@@ -152,7 +152,7 @@ func TestGeminiRequest_ProviderExecutedGoogleSearchCombinesWithFunctionTools(t *
 			t.Fatalf("decode request payload: %v", err)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprint(w, `{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]}}]}`)
+		_, _ = fmt.Fprint(w, `{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]},"finishReason":"STOP"}]}`)
 	}))
 	defer server.Close()
 
@@ -239,7 +239,7 @@ func TestGeminiStream_PreservesInterleavedPartOrderForReplay(t *testing.T) {
 			`{"candidates":[{"content":{"role":"model","parts":[{"text":"mid-"}]}}]}`,
 			`{"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"id":"call-1","name":"lookup","args":{"query":"release"}},"thoughtSignature":"c2lnLWNhbGwtMQ=="}]}}]}`,
 			`{"candidates":[{"content":{"role":"model","parts":[{"toolResponse":{"id":"search-1","toolType":"GOOGLE_SEARCH_WEB","response":{"status":"ok"}}}]}}]}`,
-			`{"candidates":[{"content":{"role":"model","parts":[{"text":"done"}]}}]}`,
+			`{"candidates":[{"content":{"role":"model","parts":[{"text":"done"}]},"finishReason":"STOP"}]}`,
 		}
 		for _, chunk := range chunks {
 			_, _ = fmt.Fprintf(w, "data: %s\n\n", chunk)

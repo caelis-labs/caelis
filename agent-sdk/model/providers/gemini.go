@@ -126,6 +126,10 @@ func (l *geminiLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 				return
 			}
 			model.RecordInvocationUsage(runCtx, geminiUsageFromResponse(out))
+			if err := geminiTerminalError(out); err != nil {
+				yield(nil, err)
+				return
+			}
 			msg, usage, err := geminiResponseToMessage(out)
 			if err != nil {
 				yield(nil, err)
@@ -134,13 +138,15 @@ func (l *geminiLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 			yield(&model.StreamEvent{
 				Type: model.StreamEventTurnDone,
 				Response: &model.Response{
-					Message:      msg,
-					TurnComplete: true,
-					StepComplete: true,
-					Status:       model.ResponseStatusCompleted,
-					Model:        l.name,
-					Provider:     l.provider,
-					Usage:        usage,
+					Message:         msg,
+					TurnComplete:    true,
+					StepComplete:    true,
+					Status:          model.ResponseStatusCompleted,
+					FinishReason:    model.FinishReasonStop,
+					RawFinishReason: string(genai.FinishReasonStop),
+					Model:           l.name,
+					Provider:        l.provider,
+					Usage:           usage,
 				},
 			}, nil)
 			return
@@ -150,6 +156,8 @@ func (l *geminiLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 			role: model.RoleAssistant,
 		}
 		var usage model.Usage
+		finishReason := genai.FinishReason("")
+		var abnormalReason genai.FinishReason
 		for out, err := range client.Models.GenerateContentStream(runCtx, l.name, contents, cfg) {
 			if err != nil {
 				yield(nil, err)
@@ -160,6 +168,14 @@ func (l *geminiLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 			}
 			usage = mergeGeminiUsage(usage, geminiUsageFromResponse(out))
 			model.RecordInvocationUsage(runCtx, usage)
+			if len(out.Candidates) > 0 && out.Candidates[0] != nil {
+				if reason := out.Candidates[0].FinishReason; reason != "" && reason != genai.FinishReasonUnspecified {
+					finishReason = reason
+					if reason != genai.FinishReasonStop {
+						abnormalReason = reason
+					}
+				}
+			}
 
 			msg, _, convErr := geminiResponseToMessage(out)
 			if convErr != nil {
@@ -190,18 +206,52 @@ func (l *geminiLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 			yield(nil, err)
 			return
 		}
+		if finishReason == "" {
+			yield(nil, fmt.Errorf("model: gemini stream ended before candidate finishReason"))
+			return
+		}
+		if abnormalReason != "" || finishReason != genai.FinishReasonStop {
+			yield(nil, fmt.Errorf("model: gemini candidate ended with non-success finishReason %q", abnormalReason))
+			return
+		}
 		yield(&model.StreamEvent{
 			Type: model.StreamEventTurnDone,
 			Response: &model.Response{
-				Message:      acc.message(),
-				TurnComplete: true,
-				StepComplete: true,
-				Status:       model.ResponseStatusCompleted,
-				Model:        l.name,
-				Provider:     l.provider,
-				Usage:        usage,
+				Message:         acc.message(),
+				TurnComplete:    true,
+				StepComplete:    true,
+				Status:          model.ResponseStatusCompleted,
+				FinishReason:    geminiFinishReasonToKernel(finishReason),
+				RawFinishReason: string(finishReason),
+				Model:           l.name,
+				Provider:        l.provider,
+				Usage:           usage,
 			},
 		}, nil)
+	}
+}
+
+func geminiTerminalError(out *genai.GenerateContentResponse) error {
+	if out == nil || len(out.Candidates) == 0 || out.Candidates[0] == nil {
+		return errGeminiNoCandidates
+	}
+	reason := out.Candidates[0].FinishReason
+	if reason != genai.FinishReasonStop {
+		return fmt.Errorf("model: gemini candidate ended with non-success finishReason %q", reason)
+	}
+	return nil
+}
+
+func geminiFinishReasonToKernel(reason genai.FinishReason) model.FinishReason {
+	switch reason {
+	case genai.FinishReasonStop:
+		return model.FinishReasonStop
+	case genai.FinishReasonMaxTokens:
+		return model.FinishReasonLength
+	case genai.FinishReasonSafety, genai.FinishReasonBlocklist, genai.FinishReasonProhibitedContent:
+		return model.FinishReasonContentFilter
+	default:
+		return model.FinishReasonUnknown
 	}
 }
 
@@ -390,6 +440,11 @@ func geminiStreamPartDelta(part model.Part) *model.PartDelta {
 			return nil
 		}
 		return &model.PartDelta{Kind: model.PartKindReasoning, TextDelta: text}
+	case model.PartKindToolUse:
+		if part.ToolUse == nil {
+			return nil
+		}
+		return &model.PartDelta{Kind: model.PartKindToolUse, InputDelta: string(part.ToolUse.Input)}
 	default:
 		return nil
 	}

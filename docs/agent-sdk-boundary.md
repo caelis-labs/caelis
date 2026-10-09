@@ -224,20 +224,34 @@ cannot redirect an already-bound name. Replay discoveries whose server is still
 initializing become visible only when that definition is ready, under the same
 budgets.
 
-ToolSearch defaults to a private model selector. Its first request contains the
-natural-language need and every ready tool's name and description in the current
-scope, with no tool schemas or parent conversation. Its only callable tool reads
-one named candidate's current schema. It can read at most four schemas in five
-model steps; the complete initial catalog is capped at 96 KiB and checked against
-the model context window when declared. An over-budget catalog fails explicitly.
+ToolSearch defaults to a private model selector. Every ready tool's name and
+description in the current scope is considered, with no initial tool schemas or
+parent conversation. A model request holds at most 96 KiB of catalog metadata
+and respects the declared model context window; larger catalogs are covered in
+bounded batches, then batch selections are compared. A complete catalog above
+4 MiB or a single candidate that cannot fit one request fails explicitly. Its
+only callable tool reads one named candidate's current schema, from that
+request's catalog. It can read at most four schemas in five model steps per
+batch.
 The selector inherits the main request's resolved model, reasoning and service
 tier unless Control binds a separate provider model. It never inherits main tools.
+Its model requests stream privately and use only completed responses for schema
+reads and final selection. There is no ToolSearch total-duration deadline. The
+caller can cancel the work; a six-minute period without streamed model progress
+also cancels the current request. Reasoning and tool-argument deltas count as
+progress; empty protocol frames do not. Provider retry and attempt accounting
+remain in the shared model path.
+Provider adapters require their protocol's terminal signal before publishing a
+streamed final response; a transport EOF after partial output is an error.
 
 An explicit ToolSearch Jev binding uses typed relevance scores over the same
 complete name/description catalog. Jev has no conversational tool loop and does
-not inspect schemas. It evaluates at most 256 candidates, in question batches of
-24; each request repeats the complete catalog and is capped at 24,000 encoded
-bytes under a 10-second deadline. An empty valid selection means no match.
+not inspect schemas. Every candidate is scored once in a batch of at most 24
+questions and 24,000 encoded bytes. At most four batch requests run together;
+each has a 10-second deadline. The complete catalog has the same 4 MiB coverage
+budget. An empty valid selection means no match. MCP Manager retains all ready
+tools without a fixed per-server or aggregate count cap; malformed individual
+definitions still fail their normal validation.
 Model, Jev, schema, budget, and invalid-selection errors remain errors; they do
 not fall back to keyword matching. `NewLexicalRanker` is only an explicit SDK
 auxiliary and is never selected by Core assembly. Returned names must still match

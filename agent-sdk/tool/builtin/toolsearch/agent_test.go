@@ -8,6 +8,8 @@ import (
 	"iter"
 	"strings"
 	"testing"
+	"testing/synctest"
+	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -66,6 +68,9 @@ func TestAgentSearchProgressiveSchemaAndNoBusinessExecution(t *testing.T) {
 		}, Invoke: func(context.Context, tool.Call) (tool.Result, error) { called++; return tool.Result{}, nil }})
 	}
 	llm := &selectionModel{respond: func(index int, req *model.Request) (*model.Response, error) {
+		if !req.Stream {
+			t.Fatal("private ToolSearch model request must stream")
+		}
 		if len(req.Tools) != 1 || req.Tools[0].Function == nil || req.Tools[0].Function.Name != inspectSchemaToolName {
 			t.Fatalf("selector tools=%#v", req.Tools)
 		}
@@ -97,6 +102,149 @@ func TestAgentSearchProgressiveSchemaAndNoBusinessExecution(t *testing.T) {
 	}
 	if called != 0 || len(llm.requests) != 2 || llm.requests[0].Reasoning.Effort != "high" || llm.requests[0].ServiceTier != model.ServiceTierPriority {
 		t.Fatalf("business calls=%d requests=%d settings=%#v", called, len(llm.requests), llm.requests[0])
+	}
+}
+
+type streamingSelectionModel struct{ calls int }
+
+func (*streamingSelectionModel) Name() string { return "streaming-selector" }
+func (*streamingSelectionModel) Capabilities() model.Capabilities {
+	return model.Capabilities{ToolCalls: true, Streaming: true}
+}
+func (m *streamingSelectionModel) Generate(_ context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
+	return func(yield func(*model.StreamEvent, error) bool) {
+		m.calls++
+		if !req.Stream {
+			yield(nil, errors.New("selector did not stream"))
+			return
+		}
+		// Deltas and non-final responses may contain an apparently valid choice
+		// or tool call. Only the provider's final semantic result is authoritative.
+		yield(&model.StreamEvent{Type: model.StreamEventPartDelta, PartDelta: &model.PartDelta{Kind: model.PartKindText, TextDelta: `{"tools":["other"]}`}}, nil)
+		if m.calls == 1 {
+			yield(model.StreamEventFromResponse(&model.Response{Message: model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{ID: "early", Name: "other", Args: `{}`}}, ""), StepComplete: true}), nil)
+			yield(model.StreamEventFromResponse(&model.Response{Message: model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{ID: "inspect", Name: inspectSchemaToolName, Args: `{"name":"docs__lookup"}`}}, ""), TurnComplete: true, Status: model.ResponseStatusCompleted, FinishReason: model.FinishReasonToolCalls}), nil)
+			return
+		}
+		yield(model.StreamEventFromResponse(&model.Response{Message: model.NewTextMessage(model.RoleAssistant, `{"tools":["docs__lookup"]}`), TurnComplete: true, Status: model.ResponseStatusCompleted, FinishReason: model.FinishReasonStop}), nil)
+	}
+}
+
+func TestAgentSearchUsesOnlyCompletedStreamResponses(t *testing.T) {
+	called := 0
+	candidate := mcpCandidate("docs__lookup", "Find a synthetic record", "", "docs", "lookup", map[string]any{"type": "object"})
+	source := &mutableSearchSource{tools: []tool.Tool{tool.NamedTool{Def: candidate.Definition(), Invoke: func(context.Context, tool.Call) (tool.Result, error) {
+		called++
+		return tool.Result{}, nil
+	}}}}
+	llm := &streamingSelectionModel{}
+	result, err := NewSource(source).Call(t.Context(), tool.Call{Input: json.RawMessage(`{"query":"find a record"}`), RuntimeModel: llm})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output tool.ToolSearchResult
+	if err := json.Unmarshal(result.Content[0].JSON.Value, &output); err != nil || output.Count != 1 || output.Tools[0].Name != "docs__lookup" || llm.calls != 2 || called != 0 {
+		t.Fatalf("stream result=%+v decode=%v model_calls=%d business_calls=%d", output, err, llm.calls, called)
+	}
+}
+
+func TestAgentSearchRejectsIncompleteFinalStream(t *testing.T) {
+	candidate := mcpCandidate("docs__lookup", "Find a synthetic record", "", "docs", "lookup", nil)
+	for _, tc := range []struct {
+		name     string
+		response model.Response
+	}{
+		{"no final response", model.Response{Message: model.NewTextMessage(model.RoleAssistant, `{"tools":["docs__lookup"]}`), StepComplete: true}},
+		{"truncated final", model.Response{Message: model.NewTextMessage(model.RoleAssistant, `{"tools":["docs__lookup"]}`), TurnComplete: true, FinishReason: model.FinishReasonLength}},
+		{"failed final", model.Response{Message: model.NewTextMessage(model.RoleAssistant, `{"tools":["docs__lookup"]}`), TurnComplete: true, Status: model.ResponseStatusFailed}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			llm := &selectionModel{respond: func(_ int, _ *model.Request) (*model.Response, error) { return &tc.response, nil }}
+			if _, err := NewSource(&mutableSearchSource{tools: []tool.Tool{candidate}}).Call(t.Context(), tool.Call{Input: json.RawMessage(`{"query":"record"}`), RuntimeModel: llm}); err == nil {
+				t.Fatal("incomplete stream was accepted")
+			}
+		})
+	}
+}
+
+func TestAgentSearchEmptyCatalogDoesNotCallModel(t *testing.T) {
+	llm := &selectionModel{}
+	result, err := NewSource(&mutableSearchSource{}).Call(t.Context(), tool.Call{Input: json.RawMessage(`{"query":"record"}`), RuntimeModel: llm})
+	if err != nil || len(llm.requests) != 0 {
+		t.Fatalf("empty catalog: result=%+v error=%v model_calls=%d", result, err, len(llm.requests))
+	}
+}
+
+type delayedSelectionModel struct {
+	delays    []time.Duration
+	calls     int
+	remaining []time.Duration
+}
+
+func (*delayedSelectionModel) Name() string { return "delayed-selector" }
+func (*delayedSelectionModel) Capabilities() model.Capabilities {
+	return model.Capabilities{ToolCalls: true, Streaming: true}
+}
+func (m *delayedSelectionModel) Generate(ctx context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
+	return func(yield func(*model.StreamEvent, error) bool) {
+		m.calls++
+		if !req.Stream {
+			yield(nil, errors.New("selector did not stream"))
+			return
+		}
+		if deadline, ok := ctx.Deadline(); ok {
+			m.remaining = append(m.remaining, time.Until(deadline))
+		}
+		select {
+		case <-ctx.Done():
+			yield(nil, ctx.Err())
+			return
+		case <-time.After(m.delays[min(m.calls-1, len(m.delays)-1)]):
+		}
+		response := &model.Response{Message: model.NewTextMessage(model.RoleAssistant, `{"tools":["docs__lookup"]}`), TurnComplete: true}
+		if m.calls == 1 && len(m.delays) > 1 {
+			response.Message = model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{ID: "inspect", Name: inspectSchemaToolName, Args: `{"name":"docs__lookup"}`}}, "")
+		}
+		yield(model.StreamEventFromResponse(response), nil)
+	}
+}
+
+func TestAgentSearchRespectsOnlyCallerDeadline(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		delays      []time.Duration
+		callerLimit time.Duration
+		wantElapsed time.Duration
+		wantErr     error
+	}{
+		{"slow valid final", []time.Duration{35 * time.Second}, 0, 35 * time.Second, nil},
+		{"two model steps", []time.Duration{35 * time.Second, 35 * time.Second}, 0, 70 * time.Second, nil},
+		{"slow valid final beyond old budget", []time.Duration{91 * time.Second}, 0, 91 * time.Second, nil},
+		{"shorter caller deadline", []time.Duration{35 * time.Second}, 12 * time.Second, 12 * time.Second, context.DeadlineExceeded},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				ctx := t.Context()
+				if tc.callerLimit > 0 {
+					var cancel context.CancelFunc
+					ctx, cancel = context.WithTimeout(ctx, tc.callerLimit)
+					defer cancel()
+				}
+				llm := &delayedSelectionModel{delays: tc.delays}
+				candidate := mcpCandidate("docs__lookup", "Find a synthetic record", "", "docs", "lookup", nil)
+				started := time.Now()
+				_, err := NewSource(&mutableSearchSource{tools: []tool.Tool{candidate}}).Call(ctx, tool.Call{Input: json.RawMessage(`{"query":"record"}`), RuntimeModel: llm})
+				if time.Since(started) != tc.wantElapsed || !errors.Is(err, tc.wantErr) {
+					t.Fatalf("elapsed=%s error=%v want elapsed=%s error=%v", time.Since(started), err, tc.wantElapsed, tc.wantErr)
+				}
+				if tc.callerLimit == 0 && len(llm.remaining) != 0 {
+					t.Fatalf("unexpected private selector deadline: %v", llm.remaining)
+				}
+				if tc.callerLimit > 0 && (len(llm.remaining) != 1 || llm.remaining[0] != tc.callerLimit) {
+					t.Fatalf("caller deadline not propagated: %v", llm.remaining)
+				}
+			})
+		})
 	}
 }
 
@@ -193,10 +341,10 @@ func TestAgentSearchCannotInspectForeignScope(t *testing.T) {
 	}
 }
 
-func TestAgentSearchCatalogBudgetFailsBeforeDispatch(t *testing.T) {
+func TestAgentSearchCoverageBudgetFailsBeforeDispatch(t *testing.T) {
 	source := &mutableSearchSource{}
 	for i := range 200 {
-		source.tools = append(source.tools, mcpCandidate(fmt.Sprintf("tool_%03d", i), strings.Repeat("wide", 250), "", "", "", nil))
+		source.tools = append(source.tools, mcpCandidate(fmt.Sprintf("tool_%03d", i), strings.Repeat("wide", 5500), "", "", "", nil))
 	}
 	llm := &selectionModel{}
 	if _, err := NewSource(source).Call(t.Context(), tool.Call{Input: json.RawMessage(`{"query":"anything"}`), RuntimeModel: llm}); err == nil || !strings.Contains(err.Error(), "budget") {
