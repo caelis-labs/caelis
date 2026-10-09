@@ -105,6 +105,95 @@ func TestAgentSearchProgressiveSchemaAndNoBusinessExecution(t *testing.T) {
 	}
 }
 
+func TestAgentSearchAnswersParallelSchemaInspections(t *testing.T) {
+	definitions := []tool.Definition{
+		{Name: "drive__search", Description: "Find a document", InputSchema: map[string]any{"type": "object", "title": "drive schema"}},
+		{Name: "issues__create", Description: "Create an issue", InputSchema: map[string]any{"type": "object", "title": "issues schema"}},
+	}
+	reads := []string{}
+	llm := &selectionModel{respond: func(index int, req *model.Request) (*model.Response, error) {
+		if index == 0 {
+			if len(req.Instructions) != 1 || req.Instructions[0].Text == nil || !strings.Contains(req.Instructions[0].Text.Text, "at most 4 candidate schemas") {
+				t.Fatalf("first step did not communicate schema budget: %#v", req.Instructions)
+			}
+			return &model.Response{Message: model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{
+				{ID: "drive-call", Name: inspectSchemaToolName, Args: `{"name":"drive__search"}`},
+				{ID: "issues-call", Name: inspectSchemaToolName, Args: `{"name":"issues__create"}`},
+			}, ""), TurnComplete: true, Status: model.ResponseStatusCompleted, FinishReason: model.FinishReasonToolCalls}, nil
+		}
+		if index != 1 || len(req.Messages) != 4 {
+			t.Fatalf("follow-up step=%d messages=%d, want two schema results", index, len(req.Messages))
+		}
+		if len(req.Instructions) != 1 || req.Instructions[0].Text == nil || !strings.Contains(req.Instructions[0].Text.Text, "at most 2 candidate schemas") {
+			t.Fatalf("follow-up step did not communicate remaining schema budget: %#v", req.Instructions)
+		}
+		for i, wantID := range []string{"drive-call", "issues-call"} {
+			results := req.Messages[i+2].ToolResults()
+			if len(results) != 1 || results[0].ToolUseID != wantID {
+				t.Fatalf("result %d = %#v, want call %q", i, results, wantID)
+			}
+		}
+		return &model.Response{Message: model.NewTextMessage(model.RoleAssistant, `{"tools":["drive__search","issues__create"]}`), TurnComplete: true, Status: model.ResponseStatusCompleted, FinishReason: model.FinishReasonStop}, nil
+	}}
+	got, err := NewAgentRanker().Rank(t.Context(), "find a document and open an issue", definitions, 2, SearchModel{
+		Model: llm, ReadSchema: func(_ context.Context, name string) (tool.Definition, error) {
+			reads = append(reads, name)
+			for _, def := range definitions {
+				if def.Name == name {
+					return def, nil
+				}
+			}
+			return tool.Definition{}, fmt.Errorf("unexpected schema name %q", name)
+		},
+	})
+	if err != nil || len(got) != 2 || got[0] != definitions[0].Name || got[1] != definitions[1].Name || len(reads) != 2 || len(llm.requests) != 2 {
+		t.Fatalf("result=%v error=%v reads=%v requests=%d", got, err, reads, len(llm.requests))
+	}
+}
+
+func TestAgentSearchValidatesParallelSchemaCallsBeforeReading(t *testing.T) {
+	for _, tc := range []struct {
+		name, wantError string
+		calls           []model.ToolCall
+	}{
+		{"over budget", "schema read budget exceeded", []model.ToolCall{
+			{ID: "1", Name: inspectSchemaToolName, Args: `{"name":"drive__search"}`},
+			{ID: "2", Name: inspectSchemaToolName, Args: `{"name":"issues__create"}`},
+			{ID: "3", Name: inspectSchemaToolName, Args: `{"name":"drive__search"}`},
+			{ID: "4", Name: inspectSchemaToolName, Args: `{"name":"issues__create"}`},
+			{ID: "5", Name: inspectSchemaToolName, Args: `{"name":"drive__search"}`},
+		}},
+		{"foreign candidate", "outside the current scope", []model.ToolCall{
+			{ID: "1", Name: inspectSchemaToolName, Args: `{"name":"drive__search"}`},
+			{ID: "2", Name: inspectSchemaToolName, Args: `{"name":"foreign__search"}`},
+		}},
+		{"invalid args", "invalid schema request", []model.ToolCall{
+			{ID: "1", Name: inspectSchemaToolName, Args: `{"name":"drive__search"}`},
+			{ID: "2", Name: inspectSchemaToolName, Args: `{"name":42}`},
+		}},
+		{"duplicate call ID", "duplicate tool call", []model.ToolCall{
+			{ID: "1", Name: inspectSchemaToolName, Args: `{"name":"drive__search"}`},
+			{ID: "1", Name: inspectSchemaToolName, Args: `{"name":"issues__create"}`},
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			llm := &selectionModel{respond: func(_ int, _ *model.Request) (*model.Response, error) {
+				return &model.Response{Message: model.MessageFromToolCalls(model.RoleAssistant, tc.calls, ""), TurnComplete: true, Status: model.ResponseStatusCompleted, FinishReason: model.FinishReasonToolCalls}, nil
+			}}
+			reads := 0
+			_, err := NewAgentRanker().Rank(t.Context(), "find and create", []tool.Definition{{Name: "drive__search"}, {Name: "issues__create"}}, 2, SearchModel{
+				Model: llm, ReadSchema: func(context.Context, string) (tool.Definition, error) {
+					reads++
+					return tool.Definition{}, nil
+				},
+			})
+			if err == nil || !strings.Contains(err.Error(), tc.wantError) || reads != 0 {
+				t.Fatalf("error=%v reads=%d", err, reads)
+			}
+		})
+	}
+}
+
 type streamingSelectionModel struct{ calls int }
 
 func (*streamingSelectionModel) Name() string { return "streaming-selector" }
