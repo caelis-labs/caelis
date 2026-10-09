@@ -375,7 +375,7 @@ func TestGeminiRequest_IncludesMaxOutputTokens(t *testing.T) {
 			}
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprint(w, `{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]}}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1,"thoughtsTokenCount":7,"totalTokenCount":2}}`)
+		_, _ = fmt.Fprint(w, `{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1,"thoughtsTokenCount":7,"totalTokenCount":2}}`)
 	}))
 	defer server.Close()
 
@@ -446,7 +446,7 @@ func TestGeminiRequest_Pre3UsesThinkingBudget(t *testing.T) {
 			}
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprint(w, `{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]}}]}`)
+		_, _ = fmt.Fprint(w, `{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]},"finishReason":"STOP"}]}`)
 	}))
 	defer server.Close()
 
@@ -494,7 +494,7 @@ func TestGeminiRequest_Pre3DisableReasoningUsesZeroBudget(t *testing.T) {
 			}
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprint(w, `{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]}}]}`)
+		_, _ = fmt.Fprint(w, `{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]},"finishReason":"STOP"}]}`)
 	}))
 	defer server.Close()
 
@@ -531,7 +531,7 @@ func TestGeminiRequest_BaseURLWithVersionPath(t *testing.T) {
 	server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprint(w, `{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]}}]}`)
+		_, _ = fmt.Fprint(w, `{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]},"finishReason":"STOP"}]}`)
 	}))
 	defer server.Close()
 
@@ -570,7 +570,7 @@ func TestGeminiRequest_XHighEffortFallsBackToHighLevel(t *testing.T) {
 			}
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprint(w, `{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]}}]}`)
+		_, _ = fmt.Fprint(w, `{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]},"finishReason":"STOP"}]}`)
 	}))
 	defer server.Close()
 
@@ -1534,7 +1534,7 @@ func TestGeminiGenerateSendsExactLargeIntegerToolReceipt(t *testing.T) {
 			t.Errorf("read provider request: %v", err)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprint(w, `{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]}}]}`)
+		_, _ = fmt.Fprint(w, `{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]},"finishReason":"STOP"}]}`)
 	}))
 	defer server.Close()
 	llm := newGemini(Config{Provider: "gemini", Model: "test-model", BaseURL: server.URL, HTTPClient: server.Client(), Timeout: 2 * time.Second}, "token")
