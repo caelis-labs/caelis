@@ -119,6 +119,12 @@ func TestApplicationExecutionEnvironmentAfterHostApproval(t *testing.T) {
 	}
 	got, err := os.ReadFile(output)
 	if err != nil || string(got) != home+"|"+resolvedCWD+"|configured" {
-		t.Fatalf("approved command lost the pinned environment: %q, %v", got, err)
+		var updates []eventstream.Envelope
+		for _, event := range applicationHTTPHistory(t, ctx, client, created.SessionID) {
+			if _, ok := event.Update.(eventstream.ToolCallUpdate); ok {
+				updates = append(updates, event)
+			}
+		}
+		t.Fatalf("approved command lost the pinned environment: %q, %v; tool updates=%+v", got, err, updates)
 	}
 }
