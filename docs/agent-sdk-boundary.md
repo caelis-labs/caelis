@@ -235,6 +235,8 @@ tier unless Control binds a separate provider model. It never inherits main tool
 Its model requests stream privately and use only completed responses for schema
 reads and final selection. All model steps, schema reads and provider retries share
 one 90-second deadline, shortened by the caller's deadline or cancellation.
+Provider adapters require their protocol's terminal signal before publishing a
+streamed final response; a transport EOF after partial output is an error.
 
 An explicit ToolSearch Jev binding uses typed relevance scores over the same
 complete name/description catalog. Jev has no conversational tool loop and does

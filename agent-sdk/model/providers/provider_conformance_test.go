@@ -143,7 +143,7 @@ func TestProviderConformanceMatrixStreamingSemantics(t *testing.T) {
 					return
 				}
 				w.Header().Set("Content-Type", "text/event-stream")
-				_, _ = fmt.Fprint(w, `data: {"candidates":[{"content":{"role":"model","parts":[{"text":"think ","thought":true},{"functionCall":{"id":"call_1","name":"lookup","args":{"query":"x"}}},{"text":"answer"}]}}],"usageMetadata":{"promptTokenCount":11,"candidatesTokenCount":7,"thoughtsTokenCount":3,"totalTokenCount":18}}`+"\n\n")
+				_, _ = fmt.Fprint(w, `data: {"candidates":[{"content":{"role":"model","parts":[{"text":"think ","thought":true},{"functionCall":{"id":"call_1","name":"lookup","args":{"query":"x"}}},{"text":"answer"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":11,"candidatesTokenCount":7,"thoughtsTokenCount":3,"totalTokenCount":18}}`+"\n\n")
 			},
 			wantProvider: "gemini",
 			wantModel:    "gemini-2.5-flash",

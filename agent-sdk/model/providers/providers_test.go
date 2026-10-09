@@ -133,7 +133,7 @@ func TestGeminiStream_DoesNotApplyRequestTimeout(t *testing.T) {
 			flusher.Flush()
 		}
 		time.Sleep(150 * time.Millisecond)
-		_, _ = fmt.Fprint(w, "data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"!\"}]}}],\"usageMetadata\":{\"promptTokenCount\":1,\"candidatesTokenCount\":2,\"totalTokenCount\":3}}\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"!\"}]},\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":1,\"candidatesTokenCount\":2,\"totalTokenCount\":3}}\n\n")
 		if flusher != nil {
 			flusher.Flush()
 		}
@@ -251,7 +251,7 @@ func TestGeminiStream_PreservesDetailedUsageAcrossChunks(t *testing.T) {
 		if flusher != nil {
 			flusher.Flush()
 		}
-		_, _ = fmt.Fprint(w, "data: {\"usageMetadata\":{\"promptTokenCount\":11,\"candidatesTokenCount\":2,\"totalTokenCount\":18}}\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"candidates\":[{\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":11,\"candidatesTokenCount\":2,\"totalTokenCount\":18}}\n\n")
 		if flusher != nil {
 			flusher.Flush()
 		}
@@ -300,7 +300,7 @@ func TestGeminiStream_EmitsReasoningChunks(t *testing.T) {
 		if flusher != nil {
 			flusher.Flush()
 		}
-		_, _ = fmt.Fprint(w, "data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"think-2\",\"thought\":true},{\"text\":\"!\"}]}}]}\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"think-2\",\"thought\":true},{\"text\":\"!\"}]},\"finishReason\":\"STOP\"}]}\n\n")
 		if flusher != nil {
 			flusher.Flush()
 		}

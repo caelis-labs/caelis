@@ -240,8 +240,9 @@ func (l *openAICompatLLM) Generate(ctx context.Context, req *model.Request) iter
 		}
 		var usage model.Usage
 		finishReason := model.FinishReasonUnknown
+		done := false
 		stopped := false
-		if err := readSSEWithFirstEventTimeout(resp.Body, l.firstEventTimeout, func(data []byte) error {
+		if err := readSSEWithFirstEventTimeoutOnDone(resp.Body, l.firstEventTimeout, func(data []byte) error {
 			var chunk openAICompatStreamChunk
 			if err := json.Unmarshal(data, &chunk); err != nil {
 				return err
@@ -299,11 +300,15 @@ func (l *openAICompatLLM) Generate(ctx context.Context, req *model.Request) iter
 				entry.Function.Arguments += tc.Function.Arguments
 			}
 			return nil
-		}); err != nil {
+		}, func() { done = true }); err != nil {
 			yield(nil, err)
 			return
 		}
 		if stopped {
+			return
+		}
+		if !done && finishReason == model.FinishReasonUnknown {
+			yield(nil, fmt.Errorf("model: openai-compatible stream ended before a terminal response"))
 			return
 		}
 		finalMsg, err := acc.message()

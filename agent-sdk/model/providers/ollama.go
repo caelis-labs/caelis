@@ -216,8 +216,12 @@ func (l *ollamaLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 			usage   model.Usage
 			modelID = l.name
 			stopped bool
+			done    bool
 		)
 		if err := readOllamaStreamWithFirstEventTimeout(resp.Body, l.firstEventTimeout, func(chunk ollamaChatResponse) error {
+			if chunk.Done {
+				done = true
+			}
 			if strings.TrimSpace(chunk.Model) != "" {
 				modelID = chunk.Model
 			}
@@ -258,6 +262,10 @@ func (l *ollamaLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 				return
 			}
 			yield(nil, err)
+			return
+		}
+		if !done {
+			yield(nil, fmt.Errorf("model: ollama stream ended before done"))
 			return
 		}
 

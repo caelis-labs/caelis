@@ -193,6 +193,7 @@ func (l *anthropicSDKLLM) generateStreaming(ctx context.Context, params anthropi
 	defer stream.Close()
 
 	acc := anthropic.Message{}
+	messageStopped := false
 	for stream.Next() {
 		event := stream.Current()
 		if stop, ok := event.AsAny().(anthropic.ContentBlockStopEvent); ok {
@@ -203,6 +204,8 @@ func (l *anthropicSDKLLM) generateStreaming(ctx context.Context, params anthropi
 			return
 		}
 		switch ev := event.AsAny().(type) {
+		case anthropic.MessageStopEvent:
+			messageStopped = true
 		case anthropic.MessageDeltaEvent:
 			if ev.Usage.JSON.InputTokens.Valid() {
 				acc.Usage.InputTokens = ev.Usage.InputTokens
@@ -234,6 +237,10 @@ func (l *anthropicSDKLLM) generateStreaming(ctx context.Context, params anthropi
 	}
 	if err := stream.Err(); err != nil {
 		yield(nil, err)
+		return
+	}
+	if !messageStopped {
+		yield(nil, fmt.Errorf("providers: anthropic stream ended before message_stop"))
 		return
 	}
 	msg, finishReason, rawFinishReason, usage, err := anthropicMessageToKernel(l.provider, &acc)

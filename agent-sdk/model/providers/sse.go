@@ -106,14 +106,20 @@ func newStreamIdleTimeoutError(timeout time.Duration) error {
 // readSSEWithFirstEventTimeout only bounds the initial wait for a model-visible
 // data event. Once a stream starts, caller cancellation owns the lifetime.
 func readSSEWithFirstEventTimeout(reader io.Reader, timeout time.Duration, onData func([]byte) error) error {
+	return readSSEWithFirstEventTimeoutOnDone(reader, timeout, onData, nil)
+}
+
+// readSSEWithFirstEventTimeoutOnDone lets protocols that use [DONE] as a
+// completion marker distinguish it from a transport EOF after partial output.
+func readSSEWithFirstEventTimeoutOnDone(reader io.Reader, timeout time.Duration, onData func([]byte) error, onDone func()) error {
 	if timeout <= 0 {
-		return readSSE(reader, onData)
+		return readSSEWithDone(reader, onData, onDone)
 	}
 	errCh := make(chan error, 1)
 	firstEventCh := make(chan struct{}, 1)
 	seenFirstEvent := false
 	go func() {
-		errCh <- readSSE(reader, func(data []byte) error {
+		errCh <- readSSEWithDone(reader, func(data []byte) error {
 			if !seenFirstEvent {
 				seenFirstEvent = true
 				select {
@@ -122,7 +128,7 @@ func readSSEWithFirstEventTimeout(reader io.Reader, timeout time.Duration, onDat
 				}
 			}
 			return onData(data)
-		})
+		}, onDone)
 	}()
 
 	timer := time.NewTimer(timeout)
@@ -237,6 +243,10 @@ func readSSEWithActivityTimeout(
 }
 
 func readSSE(reader io.Reader, onData func([]byte) error) error {
+	return readSSEWithDone(reader, onData, nil)
+}
+
+func readSSEWithDone(reader io.Reader, onData func([]byte) error, onDone func()) error {
 	scanner := bufio.NewScanner(reader)
 	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
 
@@ -252,6 +262,9 @@ func readSSE(reader io.Reader, onData func([]byte) error) error {
 			return nil
 		}
 		if chunk == "[DONE]" {
+			if onDone != nil {
+				onDone()
+			}
 			return errStopSSE
 		}
 		return onData([]byte(chunk))
