@@ -68,7 +68,7 @@ func TestApplicationExecutionEnvironmentAfterHostApproval(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	provider.set(nativeModelTool{"RunCommand", string(input)})
+	provider.set(nativeModelTool{"RunCommand", string(input)}, nativeModelTool{"Task", `{"action":"wait","handle":"command"}`})
 	_, err = client.PromptApplication(ctx, appserver.ApplicationPromptRequest{PromptRequest: appserver.PromptRequest{WriteBase: appserver.WriteBase{OperationID: "prompt", SessionID: created.SessionID}, Input: "Run the synthetic environment check after approval."}, SourceKind: "user"})
 	if err != nil {
 		t.Fatal(err)
