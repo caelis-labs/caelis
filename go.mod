@@ -1,6 +1,6 @@
 module github.com/caelis-labs/caelis
 
-go 1.26.8
+go 1.26.9
 
 require (
 	charm.land/bubbles/v2 v2.2.1
@@ -28,7 +28,7 @@ require (
 	github.com/rivo/uniseg v0.4.7
 	github.com/yuin/goldmark v1.8.6
 	golang.org/x/mod v0.41.0
-	golang.org/x/net v0.59.0
+	golang.org/x/net v0.60.0
 	golang.org/x/sync v0.23.0
 	golang.org/x/sys v0.48.0
 	google.golang.org/genai v1.72.0
