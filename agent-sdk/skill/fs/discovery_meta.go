@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
+	"gopkg.in/yaml.v3"
 )
 
 type Meta = skill.Meta
@@ -289,7 +290,10 @@ func parseSkillContent(path string, raw []byte) (Meta, string, error) {
 	if content == "" {
 		return Meta{}, "", fmt.Errorf("empty SKILL.md: %s", path)
 	}
-	frontMatter, body := parseFrontMatter(content)
+	frontMatter, body, err := parseFrontMatter(content)
+	if err != nil {
+		return Meta{}, "", fmt.Errorf("invalid skill frontmatter %s: %w", path, err)
+	}
 	name := firstNonEmpty(
 		frontMatter["name"],
 		firstHeading(body),
@@ -310,10 +314,10 @@ func parseSkillContent(path string, raw []byte) (Meta, string, error) {
 	}, strings.TrimSpace(body), nil
 }
 
-func parseFrontMatter(content string) (map[string]string, string) {
+func parseFrontMatter(content string) (map[string]string, string, error) {
 	trimmed := strings.TrimLeft(content, "\n\r\t ")
 	if !strings.HasPrefix(trimmed, "---\n") {
-		return map[string]string{}, content
+		return map[string]string{}, content, nil
 	}
 	rest := strings.TrimPrefix(trimmed, "---\n")
 	idx := strings.Index(rest, "\n---\n")
@@ -321,7 +325,7 @@ func parseFrontMatter(content string) (map[string]string, string) {
 		if strings.HasSuffix(rest, "\n---") {
 			idx = len(rest) - len("\n---")
 		} else {
-			return map[string]string{}, content
+			return map[string]string{}, content, nil
 		}
 	}
 	front := rest[:idx]
@@ -329,21 +333,14 @@ func parseFrontMatter(content string) (map[string]string, string) {
 	if idx+len("\n---\n") <= len(rest) {
 		body = rest[idx+len("\n---\n"):]
 	}
-	values := map[string]string{}
-	for _, line := range strings.Split(front, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		parts := strings.SplitN(line, ":", 2)
-		if len(parts) != 2 {
-			continue
-		}
-		key := strings.TrimSpace(strings.ToLower(parts[0]))
-		value := strings.TrimSpace(parts[1])
-		values[key] = strings.Trim(value, `"'`)
+	var fields struct {
+		Name        string `yaml:"name"`
+		Description string `yaml:"description"`
 	}
-	return values, body
+	if err := yaml.Unmarshal([]byte(front), &fields); err != nil {
+		return nil, "", err
+	}
+	return map[string]string{"name": fields.Name, "description": fields.Description}, body, nil
 }
 
 func firstHeading(content string) string {

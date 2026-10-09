@@ -456,6 +456,7 @@ func pluginSkillBundles(p InstalledPlugin, enabled bool) []skill.PluginBundle {
 			Plugin:      p.ID,
 			Namespace:   contribution.Namespace,
 			Root:        contribution.Root,
+			PluginRoot:  p.Root,
 			Disabled:    append([]string(nil), contribution.Disabled...),
 			Enabled:     enabled,
 			SkipInvalid: p.Kind == ManifestKindAgentPlugin,

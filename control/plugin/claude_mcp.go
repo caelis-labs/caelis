@@ -12,7 +12,7 @@ import (
 // inline manifest map. A manifest entry wins by server name. Both feed the
 // existing MCP contribution and Manager path, never a second plugin runtime.
 func parseClaudeMCPServers(root, pluginID string, inline json.RawMessage) ([]MCPServerSpec, []string) {
-	merged := map[string]CaelisMCPServerSpec{}
+	merged := map[string]MCPServerSpec{}
 	var warnings []string
 	path, err := ResolveSafePath(root, ".mcp.json")
 	if err != nil {
@@ -26,8 +26,7 @@ func parseClaudeMCPServers(root, pluginID string, inline json.RawMessage) ([]MCP
 			if raw, ok := top["mcpServers"]; ok {
 				servers = raw
 			}
-			if err := json.Unmarshal(servers, &merged); err != nil || merged == nil {
-				merged = map[string]CaelisMCPServerSpec{}
+			if err := mergeClaudeMCPServerMap(merged, servers, root, pluginID, &warnings, "Claude .mcp.json"); err != nil {
 				warnings = append(warnings, "Claude .mcp.json ignored: invalid mcpServers map")
 			}
 		}
@@ -35,25 +34,36 @@ func parseClaudeMCPServers(root, pluginID string, inline json.RawMessage) ([]MCP
 		warnings = append(warnings, fmt.Sprintf("Claude .mcp.json ignored: %v", err))
 	}
 	if len(inline) > 0 && string(inline) != "null" {
-		var overrides map[string]CaelisMCPServerSpec
-		if err := json.Unmarshal(inline, &overrides); err != nil || overrides == nil {
+		if err := mergeClaudeMCPServerMap(merged, inline, root, pluginID, &warnings, "Claude manifest mcpServers"); err != nil {
 			warnings = append(warnings, "Claude manifest mcpServers ignored: only inline server maps are supported")
-		} else {
-			for name, cfg := range overrides {
-				merged[name] = cfg
-			}
 		}
 	}
 	var out []MCPServerSpec
 	for _, name := range sortedKeys(merged) {
-		spec, err := buildClaudeMCPServerSpec(root, pluginID, name, merged[name])
-		if err != nil {
-			warnings = append(warnings, fmt.Sprintf("Claude MCP server %q skipped: %v", name, err))
-			continue
-		}
-		out = append(out, spec)
+		out = append(out, merged[name])
 	}
 	return out, warnings
+}
+
+func mergeClaudeMCPServerMap(merged map[string]MCPServerSpec, raw json.RawMessage, root, pluginID string, warnings *[]string, source string) error {
+	var entries map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &entries); err != nil || entries == nil {
+		return fmt.Errorf("mcpServers must be an object")
+	}
+	for _, name := range sortedKeys(entries) {
+		var cfg CaelisMCPServerSpec
+		if err := json.Unmarshal(entries[name], &cfg); err != nil || string(entries[name]) == "null" {
+			*warnings = append(*warnings, fmt.Sprintf("%s server %q skipped: invalid server configuration", source, name))
+			continue
+		}
+		spec, err := buildClaudeMCPServerSpec(root, pluginID, name, cfg)
+		if err != nil {
+			*warnings = append(*warnings, fmt.Sprintf("%s server %q skipped: %v", source, name, err))
+			continue
+		}
+		merged[name] = spec
+	}
+	return nil
 }
 
 func buildClaudeMCPServerSpec(root, pluginID, name string, cfg CaelisMCPServerSpec) (MCPServerSpec, error) {
@@ -127,7 +137,10 @@ func buildClaudeMCPServerSpec(root, pluginID, name string, cfg CaelisMCPServerSp
 					if !PathWithinRoot(rootValue, cwd) {
 						return MCPServerSpec{}, fmt.Errorf("cwd escapes plugin root")
 					}
-					cwd = strings.TrimPrefix(cwd, rootValue+string(filepath.Separator))
+					cwd, err = filepath.Rel(rootValue, cwd)
+					if err != nil {
+						return MCPServerSpec{}, err
+					}
 				}
 				spec.WorkDir, err = ResolveSafePath(rootValue, cwd)
 				if err != nil {
@@ -142,14 +155,18 @@ func buildClaudeMCPServerSpec(root, pluginID, name string, cfg CaelisMCPServerSp
 			}
 			spec.Args = append(spec.Args, expanded)
 		}
-		spec.Env = make(map[string]string, len(cfg.Env))
+		spec.Env = make(map[string]string, len(cfg.Env)+1)
 		for key, value := range cfg.Env {
+			if strings.EqualFold(key, "CLAUDE_PLUGIN_ROOT") {
+				continue // the canonical package root belongs to the Host
+			}
 			expanded, err := expand(value)
 			if err != nil {
 				return MCPServerSpec{}, err
 			}
 			spec.Env[key] = expanded
 		}
+		spec.Env["CLAUDE_PLUGIN_ROOT"] = rootValue
 		spec.CleanEnvironment = true
 	} else {
 		var err error

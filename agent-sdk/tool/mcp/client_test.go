@@ -70,6 +70,15 @@ func TestMCPServerHelperProcess(t *testing.T) {
 			return &mcpsdk.CallToolResult{Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: fmt.Sprintf("state:%d secret:%s", state, os.Getenv("CAELIS_PRIVATE_SECRET"))}}}, nil
 		})
 	}
+	if mode == "large_receipt" {
+		server.AddTool(&mcpsdk.Tool{Name: "receipt", InputSchema: map[string]any{"type": "object"}}, func(_ context.Context, _ *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+			const exact = `{"receipt_id":9223372036854775807}`
+			return &mcpsdk.CallToolResult{
+				Content:           []mcpsdk.Content{&mcpsdk.TextContent{Text: exact}},
+				StructuredContent: map[string]any{"receipt_id": int64(9223372036854775807)},
+			}, nil
+		})
+	}
 	mcpsdk.AddTool[echoArgs, any](server, &mcpsdk.Tool{
 		Name:        "echo",
 		Description: "Echoes input",
@@ -107,6 +116,42 @@ func TestMCPServerHelperProcess(t *testing.T) {
 		os.Exit(1)
 	}
 	os.Exit(0)
+}
+
+func TestMCPStructuredReceiptRetainsExactIntegerAcrossStdio(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	dataDir := filepath.Join(t.TempDir(), "plugins", "data", "receipt")
+	mgr, err := newInitializedTestManager(ctx, []ServerSpec{{
+		PluginID: "receipts", Name: "receipts", Command: os.Args[0],
+		Args:    []string{"-test.run=^TestMCPServerHelperProcess$"},
+		Env:     map[string]string{"CAELIS_MCP_HELPER": "1", "CAELIS_MCP_HELPER_MODE": "large_receipt"},
+		WorkDir: dataDir, DataDir: dataDir, CleanEnvironment: true,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mgr.Close()
+	var receiptTool tool.Tool
+	for _, candidate := range mgr.Tools() {
+		if candidate.Definition().Name == "receipts__receipt" {
+			receiptTool = candidate
+		}
+	}
+	if receiptTool == nil {
+		t.Fatal("receipt tool not ready")
+	}
+	result, err := receiptTool.Call(ctx, tool.Call{ID: "original-receipt-call", Name: receiptTool.Definition().Name, Input: []byte(`{}`)})
+	const exact = `{"receipt_id":9223372036854775807}`
+	if err != nil || result.IsError || result.ID != "original-receipt-call" || len(result.Content) != 2 ||
+		result.Content[0].Text == nil || result.Content[0].Text.Text != exact ||
+		result.Content[1].JSON == nil || string(result.Content[1].JSON.Value) != exact {
+		t.Fatalf("lossy MCP receipt = %+v, %v", result, err)
+	}
+	history, err := json.Marshal(result)
+	if err != nil || !bytes.Contains(history, []byte(exact)) || bytes.Contains(history, []byte(`9223372036854776000`)) {
+		t.Fatalf("lossy serialized history = %s, %v", history, err)
+	}
 }
 
 func TestMCPPersistentProcessKeepsImageStructuredReceiptAndOriginalCallID(t *testing.T) {

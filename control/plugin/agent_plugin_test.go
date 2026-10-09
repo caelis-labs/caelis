@@ -7,8 +7,12 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	skillfs "github.com/caelis-labs/caelis/agent-sdk/skill/fs"
+	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
+	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func TestAgentPluginLocalUpgradeKeepsManifestIdentityAndData(t *testing.T) {
@@ -116,7 +120,11 @@ func TestAgentPluginSkipsOneInvalidSkillWithoutHidingOtherSkills(t *testing.T) {
 	if err := os.Symlink(filepath.Join(outside, "SKILL.md"), filepath.Join(root, "skills", "linked-file", "SKILL.md")); err != nil {
 		t.Fatal(err)
 	}
-	contributions, err := ResolveContributions([]Config{{ID: "example", Root: root, Enabled: true}})
+	host := &memoryHost{dir: t.TempDir()}
+	if _, err := NewService(host).Install(t.Context(), root); err != nil {
+		t.Fatalf("install package with mixed Skills: %v", err)
+	}
+	contributions, err := ResolveContributions(host.state.Plugins)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,6 +157,65 @@ func TestAgentPluginSkillDescriptionUnicodeCharacterBoundary(t *testing.T) {
 				t.Fatalf("%d Chinese characters: Skills = %+v, %v; want %d", tc.characters, metas, err, tc.want)
 			}
 		})
+	}
+}
+
+func TestAgentPluginSkillYAMLFrontmatterThroughContributions(t *testing.T) {
+	for _, tc := range []struct {
+		name, front, description string
+	}{
+		{"comment", "name: example # stable identifier\ndescription: Commented name", "Commented name"},
+		{"metadata", "name: example\ndescription: Example skill\nmetadata:\n  name: Display Name", "Example skill"},
+		{"folded", "name: example\ndescription: >-\n  Use this skill to inspect\n  plugin state.", "Use this skill to inspect plugin state."},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := filepath.Join(t.TempDir(), "plugin")
+			writeAgentPluginFile(t, root, "plugin.json", `{"$schema":"https://agent-plugins.org/schemas/1.0.0/plugin.schema.json","name":"example"}`)
+			writeAgentPluginFile(t, root, "skills/example/SKILL.md", "---\n"+tc.front+"\n---\n# Body\n")
+			contributions, err := ResolveContributions([]Config{{ID: "example", Root: root, Enabled: true}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			metas, err := skillfs.DiscoverPluginBundleMeta(contributions.SkillBundles)
+			if err != nil || len(metas) != 1 || metas[0].Name != "example:example" || metas[0].Description != tc.description {
+				t.Fatalf("YAML metadata = %+v, %v; want %q", metas, err, tc.description)
+			}
+		})
+	}
+}
+
+func TestAgentPluginSkillSymlinkBoundaryIsPackageRoot(t *testing.T) {
+	parent := t.TempDir()
+	root := filepath.Join(parent, "plugin")
+	writeAgentPluginFile(t, root, "plugin.json", `{"$schema":"https://agent-plugins.org/schemas/1.0.0/plugin.schema.json","name":"example"}`)
+	writeAgentPluginFile(t, root, "shared/deploy/SKILL.md", "---\nname: deploy\ndescription: Bundled skill\n---\n")
+	writeAgentPluginFile(t, root, "shared/linked/SKILL.md", "---\nname: linked\ndescription: Linked directory\n---\n")
+	writeAgentPluginFile(t, parent, "outside/SKILL.md", "---\nname: outside\ndescription: Escaped skill\n---\n")
+	for _, name := range []string{"deploy", "outside"} {
+		if err := os.MkdirAll(filepath.Join(root, "skills", name), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(filepath.Join(root, "shared", "deploy", "SKILL.md"), filepath.Join(root, "skills", "deploy", "SKILL.md")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(parent, "outside", "SKILL.md"), filepath.Join(root, "skills", "outside", "SKILL.md")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(root, "shared", "linked"), filepath.Join(root, "skills", "linked")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	host := &memoryHost{dir: t.TempDir()}
+	if _, err := NewService(host).Install(t.Context(), root); err != nil {
+		t.Fatalf("install package with internal Skill links: %v", err)
+	}
+	contributions, err := ResolveContributions(host.state.Plugins)
+	if err != nil {
+		t.Fatal(err)
+	}
+	metas, err := skillfs.DiscoverPluginBundleMeta(contributions.SkillBundles)
+	if err != nil || len(metas) != 2 || metas[0].Name != "example:deploy" || metas[1].Name != "example:linked" {
+		t.Fatalf("package symlink boundary = %+v, %v", metas, err)
 	}
 }
 
@@ -196,6 +263,78 @@ func TestClaudePluginMCPMapOverrideAndProjectVariable(t *testing.T) {
 		got.MCPServerSpecs[0].Args[0] != filepath.Join(realWorkspace, "file") ||
 		got.MCPServerSpecs[0].Env["PROJECT"] != realWorkspace {
 		t.Fatalf("Claude override/expansion = %+v", got.MCPServerSpecs)
+	}
+}
+
+func TestClaudePluginBadServerIsolatedAcrossRootAndInlineMaps(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "claude")
+	writeAgentPluginFile(t, root, ".claude-plugin/plugin.json", `{"name":"claude","mcpServers":{"bad-inline":{"command":42},"root-good":{"command":""},"inline-good":{"command":"python"}}}`)
+	writeAgentPluginFile(t, root, ".mcp.json", `{"mcpServers":{"bad-root":{"command":42},"root-good":{"command":"node"}}}`)
+	contributions, err := ResolveContributions([]Config{{ID: "claude", Root: root, Enabled: true}})
+	if err != nil || len(contributions.MCPServerSpecs) != 2 ||
+		contributions.MCPServerSpecs[0].Name != "inline-good" || contributions.MCPServerSpecs[0].Command != "python" ||
+		contributions.MCPServerSpecs[1].Name != "root-good" || contributions.MCPServerSpecs[1].Command != "node" {
+		t.Fatalf("server isolation/precedence = %+v, %v", contributions.MCPServerSpecs, err)
+	}
+	parsed, err := ParsePlugin(root)
+	if err != nil || len(parsed.Warnings) < 2 {
+		t.Fatalf("invalid entries lacked diagnostics: %+v, %v", parsed.Warnings, err)
+	}
+}
+
+func TestClaudePluginHelperProcess(t *testing.T) {
+	if os.Getenv("CAELIS_CLAUDE_ENV_HELPER") != "1" {
+		return
+	}
+	server := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "claude-env-test", Version: "1"}, nil)
+	server.AddTool(&mcpsdk.Tool{Name: "environment", InputSchema: map[string]any{"type": "object"}}, func(_ context.Context, _ *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return nil, err
+		}
+		return &mcpsdk.CallToolResult{Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: os.Getenv("CLAUDE_PLUGIN_ROOT") + "|" + cwd}}}, nil
+	})
+	if err := server.Run(context.Background(), &mcpsdk.StdioTransport{}); err != nil {
+		os.Exit(1)
+	}
+	os.Exit(0)
+}
+
+func TestClaudePluginRootCWDAndEnvironmentReachSubprocess(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "claude")
+	manifest := fmt.Sprintf(`{"name":"claude","mcpServers":{"env":{"command":%q,"args":["-test.run=^TestClaudePluginHelperProcess$"],"cwd":"${CLAUDE_PLUGIN_ROOT}","env":{"CAELIS_CLAUDE_ENV_HELPER":"1","CLAUDE_PLUGIN_ROOT":"/package-override"}}}}`, os.Args[0])
+	writeAgentPluginFile(t, root, ".claude-plugin/plugin.json", manifest)
+	contributions, err := ResolveContributions([]Config{{ID: "claude", Root: root, Enabled: true}})
+	realRoot, rootErr := filepath.EvalSymlinks(root)
+	if err != nil || rootErr != nil || len(contributions.MCPServerSpecs) != 1 ||
+		contributions.MCPServerSpecs[0].WorkDir != realRoot || contributions.MCPServerSpecs[0].Env["CLAUDE_PLUGIN_ROOT"] != realRoot {
+		t.Fatalf("Claude assembly = %+v, %v, %v", contributions.MCPServerSpecs, err, rootErr)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	mgr, err := mcp.NewManager(ctx, contributions.MCPServerSpecs, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mgr.Close()
+	select {
+	case <-mgr.Initialized():
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	var envTool tool.Tool
+	for _, candidate := range mgr.Tools() {
+		if candidate.Definition().Name == "env__environment" {
+			envTool = candidate
+		}
+	}
+	if envTool == nil {
+		t.Fatalf("Claude environment tool not ready: %+v", mgr.GetServerInfos("claude"))
+	}
+	result, err := envTool.Call(ctx, tool.Call{ID: "env-call", Name: envTool.Definition().Name, Input: []byte(`{}`)})
+	if err != nil || result.IsError || len(result.Content) != 1 || result.Content[0].Text == nil ||
+		result.Content[0].Text.Text != realRoot+"|"+realRoot {
+		t.Fatalf("Claude child environment = %+v, %v", result, err)
 	}
 }
 

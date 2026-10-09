@@ -44,8 +44,11 @@ type PluginBundle struct {
 	Plugin    string
 	Namespace string
 	Root      string
-	Disabled  []string
-	Enabled   bool
+	// PluginRoot bounds resolved Skill paths for standard packages. Root remains
+	// the fixed skills/ discovery location.
+	PluginRoot string
+	Disabled   []string
+	Enabled    bool
 	// SkipInvalid keeps one malformed skill in a standard Agent Plugin from
 	// hiding its other Skills or MCP servers.
 	SkipInvalid bool
