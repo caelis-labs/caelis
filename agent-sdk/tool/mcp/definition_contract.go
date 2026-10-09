@@ -22,8 +22,6 @@ const (
 	maxMCPEnumValues          = 128
 	maxMCPUnionBranches       = 16
 	maxMCPToolPromptTokens    = 2048
-	maxMCPToolsPerServer      = 256
-	maxMCPToolsPerManager     = 512
 	maxMCPWarningsPerServer   = 32
 )
 
