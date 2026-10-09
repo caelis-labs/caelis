@@ -509,10 +509,11 @@ type ApplicationMCPServer struct {
 }
 
 type ApplicationMCPServerStatus struct {
-	Name    string   `json:"name"`
-	Status  string   `json:"status"`
-	Tools   []string `json:"tools,omitempty"`
-	Warning *string  `json:"warning,omitempty"`
+	Name        string          `json:"name"`
+	Status      string          `json:"status"`
+	ToolDetails []MCPToolDetail `json:"tool_details,omitempty"`
+	Tools       []string        `json:"tools,omitempty"`
+	Warning     *string         `json:"warning,omitempty"`
 }
 
 type ApplicationMCPStatus struct {
@@ -1245,10 +1246,16 @@ type LifecycleEvent struct {
 }
 
 type MCPServerSnapshot struct {
-	Name    string   `json:"name"`
-	Status  string   `json:"status"`
-	Tools   []string `json:"tools,omitempty"`
-	Warning *string  `json:"warning,omitempty"`
+	Name        string          `json:"name"`
+	Status      string          `json:"status"`
+	ToolDetails []MCPToolDetail `json:"tool_details,omitempty"`
+	Tools       []string        `json:"tools,omitempty"`
+	Warning     *string         `json:"warning,omitempty"`
+}
+
+type MCPToolDetail struct {
+	Description string `json:"description"`
+	Name        string `json:"name"`
 }
 
 type MarketplaceSnapshot struct {

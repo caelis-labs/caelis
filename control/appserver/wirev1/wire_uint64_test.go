@@ -13,6 +13,8 @@ import (
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/control/application"
@@ -991,7 +993,7 @@ func TestApplicationModelCapabilitiesRoundTrip(t *testing.T) {
 func TestApplicationSkillStatusRoundTrip(t *testing.T) {
 	want := application.MCPStatus{
 		SessionID: "session-1", ConfigurationRevision: "2",
-		Servers: []application.MCPServerStatus{{Name: "documents", Status: "running", Tools: []string{"documents__lookup"}}},
+		Servers: []application.MCPServerStatus{{Name: "documents", Status: "running", Tools: []string{"lookup"}, ToolDetails: []mcp.MCPToolDetail{{Name: "lookup", Description: tool.ExternalCapabilityDescriptionPrefix + " Look up a document"}}}},
 		Skills: []application.SkillStatus{
 			{Path: "/selected", Kind: "directory", Status: "ready"},
 			{Path: "/selected/healthy", Kind: "skill", Name: "healthy", Status: "ready"},
@@ -1001,8 +1003,16 @@ func TestApplicationSkillStatusRoundTrip(t *testing.T) {
 	raw := mustMarshalWire(t, want)
 	validateWireValue(t, "ApplicationMCPStatus", want)
 	var wire generated.ApplicationMCPStatus
-	if err := json.Unmarshal(raw, &wire); err != nil || len(wire.Skills) != 3 || wire.Skills[2].Status != "failed" {
+	if err := json.Unmarshal(raw, &wire); err != nil || len(wire.Skills) != 3 || wire.Skills[2].Status != "failed" || len(wire.Servers[0].ToolDetails) != 1 || wire.Servers[0].ToolDetails[0].Name != "lookup" {
 		t.Fatalf("generated status = %+v, %v", wire, err)
+	}
+	var oldClient struct {
+		Servers []struct {
+			Tools []string `json:"tools"`
+		} `json:"servers"`
+	}
+	if err := json.Unmarshal(raw, &oldClient); err != nil || len(oldClient.Servers) != 1 || !reflect.DeepEqual(oldClient.Servers[0].Tools, []string{"lookup"}) {
+		t.Fatalf("old tools-only client = %+v, %v", oldClient, err)
 	}
 	var got application.MCPStatus
 	if err := Unmarshal(raw, &got); err != nil || !reflect.DeepEqual(got, want) {

@@ -208,7 +208,15 @@ tool calls, not callback dispatches.
 `GET .../mcp-status` returns `session_id`, decimal-string
 `configuration_revision`, `servers`, and `skills`. Each desired MCP service has
 `inactive`, `connecting`, `running`, or `failed` status, with ready tool names
-and bounded warnings where available. `skills` reports each explicit directory
+in `tools` and bounded warnings where available. Running services may also
+include `tool_details`, an optional array of `{name, description}` for exactly
+the accepted tools in `tools`. `name` keeps the remote tool name; `description`
+is the bounded, non-authorizing text from that tool's current callable Runtime
+definition. The status projection adds no input schema, credentials, or tool
+results. An inactive, connecting, or failed service has no tool details. The same optional
+field appears on ordinary Session plugin MCP server snapshots. Older clients
+can continue reading `tools` as an array of strings. `skills` reports each
+explicit directory
 and its immediate candidate Skill roots, plus each explicit `skill_root`, by
 absolute `path`, `kind` (`directory` or `skill`), and `status` (`inactive`,
 `ready`, or `failed`). Healthy Skill records include `name`; failed records

@@ -71,6 +71,19 @@ func TestManagerInitializesServersIndependentlyAndPublishesWholeLists(t *testing
 		if len(failures) != 1 {
 			t.Fatalf("failures = %d", len(failures))
 		}
+		infos := mgr.GetServerInfos("p")
+		for _, info := range infos {
+			switch info.Name {
+			case "fast":
+				if info.Status != "running" || !slices.Equal(info.Tools, []string{"echo"}) || len(info.ToolDetails) != 1 || info.ToolDetails[0].Description != mgr.Tools()[0].Definition().Description {
+					t.Fatalf("ready status differs from callable catalog: %#v", info)
+				}
+			case "slow", "broken":
+				if len(info.Tools) != 0 || len(info.ToolDetails) != 0 {
+					t.Fatalf("unready status published tool data: %#v", info)
+				}
+			}
+		}
 		close(gate)
 		<-mgr.Initialized()
 		if tools := mgr.Tools(); len(tools) != 2 {
@@ -132,6 +145,9 @@ func TestManagerCloseDrainsLateSuccessfulConnection(t *testing.T) {
 		}
 		if len(mgr.Tools()) != 0 || len(failures) != 0 {
 			t.Fatal("close published tools or cancellation notice")
+		}
+		if infos := mgr.GetServerInfos("p"); len(infos) != 1 || len(infos[0].Tools) != 0 || len(infos[0].ToolDetails) != 0 {
+			t.Fatalf("closed manager retained public tool details: %#v", infos)
 		}
 		if err := mgr.Close(); err != nil {
 			t.Fatal(err)
