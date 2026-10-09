@@ -9,6 +9,8 @@
 * **mcp:** expose accepted tool descriptions in status ([#114](https://github.com/caelis-labs/caelis/issues/114)) ([fc40797](https://github.com/caelis-labs/caelis/commit/fc407972e504e95e92fcc2009b1660a8a30e178a))
 * **plugin:** Agent Plugins 1.0 MCP compatibility and bounded tool media ([#119](https://github.com/caelis-labs/caelis/issues/119)) ([8e5d75b](https://github.com/caelis-labs/caelis/commit/8e5d75b197ea5d398ec603b14656462a24389b4b))
 
+  Plugin MCP results now retain bounded PNG/JPEG images and structured receipts. The official Go MCP SDK is pinned to its unreleased upstream commit `3785c500b581` (`v1.8.1-0.20260916072216-3785c500b581`) to preserve large JSON integers. MCP OAuth client sign-in remains deferred until Core has a consent callback and protected token store.
+
 
 ### Bug Fixes
 
