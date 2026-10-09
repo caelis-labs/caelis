@@ -10,7 +10,7 @@
 │  · orbit               openai-codex/gpt-5.6-sol [high] · Fast off                                                │
 │  · zenith              Unbound                                                                                   │
 │ System Agents                                                                                                    │
-│  · ToolSearch          Lexical (zero-token)                                                                      │
+│  · ToolSearch          Main Agent model                                                                          │
 │  › Guardian            openai-codex/gpt-5.6-sol [xhigh] · Fast off  Classifier Disabled ▾                        │
 │  · Reviewer            Main Agent default                                                                        │
 │  · Memory Steward      Static (zero-token)                          Verifier Disabled ▾                          │

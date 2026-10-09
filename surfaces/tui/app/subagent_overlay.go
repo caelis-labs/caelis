@@ -312,7 +312,7 @@ func (m *Model) subagentBindingRows() []subagentOverlayRow {
 	case agentbinding.HandleMemoryVerifier:
 		resetDetail = "Disable extra Memory proposal checks"
 	case agentbinding.HandleToolSearch:
-		resetDetail = "Use lexical MCP discovery (zero-token)"
+		resetDetail = "Use the Main Agent model for MCP discovery"
 	case agentbinding.HandleGuardian:
 		resetDetail = "Use the Main Agent model"
 	case agentbinding.HandleReviewer:
@@ -461,7 +461,7 @@ func subagentBindingDetail(item agentbinding.HandleStatus) string {
 		case agentbinding.HandleMemoryVerifier, agentbinding.HandleGuardianScreen:
 			return "Disabled"
 		case agentbinding.HandleToolSearch:
-			return "Lexical (zero-token)"
+			return "Main Agent model"
 		case agentbinding.HandleGuardian:
 			return "Main Agent default"
 		case agentbinding.HandleSteward:

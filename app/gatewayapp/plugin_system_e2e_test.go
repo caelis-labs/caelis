@@ -223,14 +223,19 @@ func (p *pluginSystemE2EProvider) handle(w http.ResponseWriter, r *http.Request)
 		selectorRaw, _ := json.Marshal(payload)
 		messages, _ := payload["messages"].([]any)
 		p.sawSelectorBoundary = strings.TrimSpace(r.Header.Get("Authorization")) == "Bearer plugin-e2e-token" &&
-			len(messages) == 2 && strings.Contains(string(selectorRaw), pluginE2EToolName) &&
+			payload["stream"] == true && len(messages) == 2 && strings.Contains(string(selectorRaw), pluginE2EToolName) &&
 			!strings.Contains(string(selectorRaw), pluginE2ESkillMarker) && !strings.Contains(string(selectorRaw), pluginE2EHookMarker)
 		p.mu.Unlock()
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"id": "plugin-e2e-selector", "object": "chat.completion", "model": "plugin-e2e-model",
-			"choices": []map[string]any{{"index": 0, "message": map[string]any{"role": "assistant", "content": `{"tools":["` + pluginE2EToolName + `"]}`}, "finish_reason": "stop"}},
+		w.Header().Set("Content-Type", "text/event-stream")
+		writePluginSystemE2ESSE(w, map[string]any{
+			"id": "plugin-e2e-selector", "object": "chat.completion.chunk", "model": "plugin-e2e-model",
+			"choices": []map[string]any{{"index": 0, "delta": map[string]any{"role": "assistant", "content": `{"tools":["` + pluginE2EToolName + `"]}`}}},
 		})
+		writePluginSystemE2ESSE(w, map[string]any{
+			"id": "plugin-e2e-selector", "object": "chat.completion.chunk", "model": "plugin-e2e-model",
+			"choices": []map[string]any{{"index": 0, "delta": map[string]any{}, "finish_reason": "stop"}},
+		})
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
 		return
 	}
 	p.mu.Lock()

@@ -98,7 +98,8 @@ func (p *atomicCapabilityProvider) RoundTrip(req *http.Request) (*http.Response,
 		}
 	}
 	var payload struct {
-		Tools []struct {
+		Stream bool `json:"stream"`
+		Tools  []struct {
 			Function struct {
 				Name string `json:"name"`
 			} `json:"function"`
@@ -143,9 +144,12 @@ func (p *atomicCapabilityProvider) RoundTrip(req *http.Request) (*http.Response,
 		if selected == "" {
 			selection = []byte(`{"tools":[]}`)
 		}
-		encoded, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"index": 0, "message": map[string]any{"role": "assistant", "content": string(selection)}, "finish_reason": "stop"}}})
-		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}},
-			Body: io.NopCloser(strings.NewReader(string(encoded))), Request: req}, nil
+		if !payload.Stream {
+			return nil, fmt.Errorf("ToolSearch selector must request a stream")
+		}
+		encoded, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"index": 0, "delta": map[string]any{"role": "assistant", "content": string(selection)}, "finish_reason": "stop"}}})
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"text/event-stream"}},
+			Body: io.NopCloser(strings.NewReader("data: " + string(encoded) + "\n\ndata: [DONE]\n\n")), Request: req}, nil
 	}
 	switch {
 	case latestTool == "ToolSearch" && strings.Contains(latestUser, "CALLFAIL"):

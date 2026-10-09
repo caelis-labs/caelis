@@ -232,6 +232,9 @@ model steps; the complete initial catalog is capped at 96 KiB and checked agains
 the model context window when declared. An over-budget catalog fails explicitly.
 The selector inherits the main request's resolved model, reasoning and service
 tier unless Control binds a separate provider model. It never inherits main tools.
+Its model requests stream privately and use only completed responses for schema
+reads and final selection. All model steps, schema reads and provider retries share
+one 90-second deadline, shortened by the caller's deadline or cancellation.
 
 An explicit ToolSearch Jev binding uses typed relevance scores over the same
 complete name/description catalog. Jev has no conversational tool loop and does
