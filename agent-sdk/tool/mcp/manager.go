@@ -15,10 +15,19 @@ import (
 )
 
 type MCPServerInfo struct {
-	Name    string
-	Status  string
-	Tools   []string
-	Warning string
+	Name        string
+	Status      string
+	Tools       []string
+	ToolDetails []MCPToolDetail
+	Warning     string
+}
+
+// MCPToolDetail describes one accepted tool in the current ready Runtime catalog.
+// Name is the remote name also present in MCPServerInfo.Tools; Description is
+// the bounded, non-authorizing description in the callable definition.
+type MCPToolDetail struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
 }
 
 // ServerFailure describes one failed initialization attempt. Err is private
@@ -391,18 +400,24 @@ func (m *Manager) GetServerInfos(pluginID string) []MCPServerInfo {
 		}
 
 		var tools []string
-		for _, t := range m.tools {
-			if mcpTool, ok := t.(*MCPTool); ok && mcpTool.client == client {
-				tools = append(tools, mcpTool.origName)
+		var details []MCPToolDetail
+		if status == "running" {
+			for _, t := range m.tools {
+				if mcpTool, ok := t.(*MCPTool); ok && mcpTool.client == client {
+					tools = append(tools, mcpTool.origName)
+					details = append(details, MCPToolDetail{Name: mcpTool.origName, Description: mcpTool.def.Description})
+				}
 			}
 		}
 		sort.Strings(tools)
+		sort.Slice(details, func(i, j int) bool { return details[i].Name < details[j].Name })
 
 		infos = append(infos, MCPServerInfo{
-			Name:    serverName,
-			Status:  status,
-			Tools:   tools,
-			Warning: strings.Join(warnings, "; "),
+			Name:        serverName,
+			Status:      status,
+			Tools:       tools,
+			ToolDetails: details,
+			Warning:     strings.Join(warnings, "; "),
 		})
 	}
 	sort.SliceStable(infos, func(i, j int) bool {

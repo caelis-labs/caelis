@@ -105,6 +105,9 @@ func TestMCPManagerQuarantinesOnlyMalformedToolAndReportsWarning(t *testing.T) {
 	if len(infos) != 1 || !strings.Contains(infos[0].Warning, `tool "bad" quarantined`) {
 		t.Fatalf("server infos = %#v, want bad-tool quarantine warning", infos)
 	}
+	if !slices.Equal(infos[0].Tools, []string{"echo"}) || len(infos[0].ToolDetails) != 1 || infos[0].ToolDetails[0].Name != "echo" || infos[0].ToolDetails[0].Description != tools[0].Definition().Description {
+		t.Fatalf("status details include quarantined or non-callable definitions: %#v", infos[0])
+	}
 }
 
 func TestMCPToolCallServerExitReturnsErrorResult(t *testing.T) {
@@ -215,6 +218,16 @@ func TestMCPManagerAndTool(t *testing.T) {
 	}
 	if len(info.Tools) != 1 || info.Tools[0] != "echo" {
 		t.Errorf("unexpected tool status in server info: %v", info.Tools)
+	}
+	if len(info.ToolDetails) != 1 || info.ToolDetails[0].Name != "echo" || info.ToolDetails[0].Description != def.Description {
+		t.Errorf("status details differ from ready callable definition: %#v", info.ToolDetails)
+	}
+	if err := oneTool.(*MCPTool).client.Close(); err != nil {
+		t.Fatal(err)
+	}
+	disconnected := mgr.GetServerInfos("myplugin")
+	if len(disconnected) != 1 || disconnected[0].Status != "failed" || len(disconnected[0].Tools) != 0 || len(disconnected[0].ToolDetails) != 0 {
+		t.Fatalf("disconnected service exposed stale tool data: %#v", disconnected)
 	}
 }
 

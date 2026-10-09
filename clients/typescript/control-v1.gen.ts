@@ -481,6 +481,7 @@ export interface ApplicationMCPServer {
 export interface ApplicationMCPServerStatus {
   name: string;
   status: "inactive" | "connecting" | "running" | "failed";
+  tool_details?: Array<MCPToolDetail>;
   tools?: Array<string>;
   warning?: string;
 }
@@ -1128,8 +1129,14 @@ export interface LifecycleEvent {
 export interface MCPServerSnapshot {
   name: string;
   status: string;
+  tool_details?: Array<MCPToolDetail>;
   tools?: Array<string>;
   warning?: string;
+}
+
+export interface MCPToolDetail {
+  description: string;
+  name: string;
 }
 
 export interface MarketplaceSnapshot {

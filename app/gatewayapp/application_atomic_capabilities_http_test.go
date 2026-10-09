@@ -578,6 +578,9 @@ func TestApplicationAtomicMCPRevisionLifecycleHTTP(t *testing.T) {
 		if err != nil || len(status.Servers) != 1 || status.Servers[0].Status != "running" {
 			t.Fatalf("same MCP selection lost resident health after unrelated revision: %+v, %v", status, err)
 		}
+		if server := status.Servers[0]; !slices.Equal(server.Tools, []string{"lookup"}) || len(server.ToolDetails) != 1 || server.ToolDetails[0].Name != "lookup" || !strings.Contains(server.ToolDetails[0].Description, "Look up a synthetic documents value") {
+			t.Fatalf("ready status lost accepted tool description: %+v", server)
+		}
 		promptAtomicCapabilityClient(t, ctx, client, session, fmt.Sprintf("lifecycle-basic-%d", i), "BASIC")
 		if got := atomicAudit(audit); strings.Count(got, "documents:start:") != i+1 || strings.Count(got, "documents:stop:") != i {
 			t.Fatalf("unrelated revision restarted MCP: %s", got)
@@ -590,6 +593,10 @@ func TestApplicationAtomicMCPRevisionLifecycleHTTP(t *testing.T) {
 		})
 		if err != nil {
 			t.Fatal(err)
+		}
+		disabledStatus, err := client.ApplicationMCPStatus(ctx, session)
+		if err != nil || disabledStatus.ConfigurationRevision != fmt.Sprint(configuration.Revision) || len(disabledStatus.Servers) != 0 {
+			t.Fatalf("disabled revision retained public MCP tools: %+v, %v", disabledStatus, err)
 		}
 		waitAtomicAuditCount(t, audit, "documents:stop:", i+1)
 		atomicAssertLiveService(t, audit, "documents", 0)
@@ -605,8 +612,22 @@ func TestApplicationAtomicMCPRevisionLifecycleHTTP(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		pending, err := client.ApplicationMCPStatus(ctx, session)
+		if err != nil || pending.ConfigurationRevision != fmt.Sprint(configuration.Revision) || len(pending.Servers) != 1 {
+			t.Fatalf("reloaded generation reused stale descriptions: %+v, %v", pending, err)
+		}
+		if pending.Servers[0].Status != "running" && len(pending.Servers[0].ToolDetails) != 0 {
+			t.Fatalf("unready generation exposed tool details: %+v", pending.Servers[0])
+		}
+		if pending.Servers[0].Status == "running" && strings.Count(atomicAudit(audit), "documents:start:") < i+2 {
+			t.Fatalf("old generation leaked into status: %+v", pending.Servers[0])
+		}
 		promptAtomicCapabilityClient(t, ctx, client, session, fmt.Sprintf("lifecycle-reenabled-warm-%d", i), "BASIC")
 		waitAtomicApplicationMCPRunning(t, ctx, client, session, "documents")
+		reloaded, err := client.ApplicationMCPStatus(ctx, session)
+		if err != nil || len(reloaded.Servers) != 1 || len(reloaded.Servers[0].ToolDetails) != 1 || reloaded.Servers[0].ToolDetails[0].Name != "lookup" {
+			t.Fatalf("reloaded ready generation lost tool details: %+v, %v", reloaded, err)
+		}
 		promptAtomicCapabilityClient(t, ctx, client, session, fmt.Sprintf("lifecycle-doc-%d", i), "DOC")
 		waitAtomicAuditCount(t, audit, "documents:start:", i+2)
 		atomicAssertLiveService(t, audit, "documents", 1)
@@ -1045,6 +1066,9 @@ func TestApplicationAtomicMCPFailureIsolationHTTP(t *testing.T) {
 		states := map[string]string{}
 		for _, server := range health.Servers {
 			states[server.Name] = server.Status
+			if server.Name == "failed" && (len(server.Tools) != 0 || len(server.ToolDetails) != 0) {
+				t.Fatalf("failed service exposed tool details: %+v", server)
+			}
 		}
 		if states["documents"] == "running" && states["utilities"] == "running" && states["callfail"] == "running" && states["failed"] == "failed" {
 			break

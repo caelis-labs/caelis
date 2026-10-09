@@ -1,5 +1,7 @@
 package application
 
+import "github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
+
 // MCPStatus reports the current desired revision's MCP services and explicitly
 // selected Skills. Inactive means no resident Runtime has assembled that
 // revision. Reading status does not activate a Runtime or grant authority.
@@ -11,10 +13,11 @@ type MCPStatus struct {
 }
 
 type MCPServerStatus struct {
-	Name    string   `json:"name"`
-	Status  string   `json:"status"` // inactive, connecting, running, failed
-	Tools   []string `json:"tools,omitempty"`
-	Warning string   `json:"warning,omitempty"`
+	Name        string              `json:"name"`
+	Status      string              `json:"status"` // inactive, connecting, running, failed
+	Tools       []string            `json:"tools,omitempty"`
+	ToolDetails []mcp.MCPToolDetail `json:"tool_details,omitempty"`
+	Warning     string              `json:"warning,omitempty"`
 }
 
 // SkillStatus describes one selected directory or one candidate Skill root.

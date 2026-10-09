@@ -314,7 +314,7 @@ func (r *applicationTurnResolver) capabilityStatus(revision uint64) application.
 	infos := current.manager.GetServerInfos("application")
 	status.Servers = make([]application.MCPServerStatus, 0, len(infos))
 	for _, info := range infos {
-		status.Servers = append(status.Servers, application.MCPServerStatus{Name: info.Name, Status: info.Status, Tools: info.Tools, Warning: info.Warning})
+		status.Servers = append(status.Servers, application.MCPServerStatus{Name: info.Name, Status: info.Status, Tools: info.Tools, ToolDetails: info.ToolDetails, Warning: info.Warning})
 	}
 	return status
 }

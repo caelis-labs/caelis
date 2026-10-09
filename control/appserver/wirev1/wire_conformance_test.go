@@ -16,6 +16,8 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	"github.com/caelis-labs/caelis/control/application"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
@@ -134,6 +136,10 @@ func TestProductionRequestAndResponseJSONConformsToOpenAPI(t *testing.T) {
 			TotalTokens: 42, ContextWindowTokens: 200000,
 			ContextUsageAvailable: true, ContextUsageReplace: true, ContextUsageControllerEpoch: "epoch-1",
 		},
+	})
+	validateWireValue(t, "MCPServerSnapshot", appserver.MCPServerSnapshot{
+		Name: "documents", Status: "running", Tools: []string{"lookup"},
+		ToolDetails: []mcp.MCPToolDetail{{Name: "lookup", Description: tool.ExternalCapabilityDescriptionPrefix + " Look up a document"}},
 	})
 }
 
@@ -512,7 +518,7 @@ func TestApplicationRequestAndResponseJSONConformsToOpenAPI(t *testing.T) {
 		},
 		"ApplicationMCPStatus": application.MCPStatus{
 			SessionID: "session-1", ConfigurationRevision: "7",
-			Servers: []application.MCPServerStatus{{Name: "documents", Status: "running", Tools: []string{"documents__lookup"}}},
+			Servers: []application.MCPServerStatus{{Name: "documents", Status: "running", Tools: []string{"lookup"}, ToolDetails: []mcp.MCPToolDetail{{Name: "lookup", Description: tool.ExternalCapabilityDescriptionPrefix + " Look up a document"}}}},
 			Skills:  []application.SkillStatus{{Path: "/tmp/selected-skills", Kind: "directory", Status: "ready"}, {Path: "/tmp/selected-skill", Kind: "skill", Name: "selected-skill", Status: "failed", Warning: "synthetic metadata failure"}},
 		},
 		"UpdateApplicationConfigurationRequest": application.UpdateConfigurationRequest{

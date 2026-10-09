@@ -3,6 +3,7 @@ package appserver
 import (
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 	"github.com/caelis-labs/caelis/control/agents"
 )
 
@@ -114,10 +115,11 @@ type ConnectConfig struct {
 }
 
 type MCPServerSnapshot struct {
-	Name    string   `json:"name"`
-	Status  string   `json:"status"`
-	Tools   []string `json:"tools,omitempty"`
-	Warning string   `json:"warning,omitempty"`
+	Name        string              `json:"name"`
+	Status      string              `json:"status"`
+	Tools       []string            `json:"tools,omitempty"`
+	ToolDetails []mcp.MCPToolDetail `json:"tool_details,omitempty"`
+	Warning     string              `json:"warning,omitempty"`
 }
 
 type PluginSnapshot struct {
