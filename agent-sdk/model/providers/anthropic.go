@@ -25,6 +25,7 @@ type anthropicProviderDefaults struct {
 	provider     string
 	baseURL      string
 	maxOutputTok int
+	deepSeek     bool
 }
 
 type anthropicSDKLLM struct {
@@ -39,6 +40,7 @@ type anthropicSDKLLM struct {
 	maxOutputTok        int
 	contextWindowTokens int
 	imageInput          bool
+	deepSeek            bool
 }
 
 func newAnthropic(cfg Config, token string) model.LLM {
@@ -100,6 +102,7 @@ func newAnthropicWithDefaults(cfg Config, token string, defaults anthropicProvid
 		maxOutputTok:        maxTok,
 		contextWindowTokens: cfg.ContextWindowTokens,
 		imageInput:          cfg.ImageInput,
+		deepSeek:            defaults.deepSeek,
 	}
 }
 
@@ -373,7 +376,11 @@ func (l *anthropicSDKLLM) buildRequest(req *model.Request) (anthropic.MessageNew
 		params.MaxTokens = int64(req.Output.MaxOutputTokens)
 	}
 	applyAnthropicOutputConfig(&params, req.Output)
-	if isMiniMaxAdaptiveThinkingModel(l.provider, l.name) {
+	if l.deepSeek {
+		if err := applyDeepSeekAnthropicThinking(&params, req.Reasoning); err != nil {
+			return anthropic.MessageNewParams{}, err
+		}
+	} else if isMiniMaxAdaptiveThinkingModel(l.provider, l.name) {
 		applyMiniMaxAdaptiveThinking(&params, req.Reasoning)
 	} else if isAnthropicAdaptiveThinkingModel(l.name) {
 		applyAnthropicAdaptiveThinking(&params, l.name, req.Reasoning)
@@ -382,6 +389,42 @@ func (l *anthropicSDKLLM) buildRequest(req *model.Request) (anthropic.MessageNew
 		applyAnthropicMaxTokensForThinking(&params)
 	}
 	return params, nil
+}
+
+func applyDeepSeekAnthropicThinking(params *anthropic.MessageNewParams, reasoning model.ReasoningConfig) error {
+	requested := strings.ToLower(strings.TrimSpace(reasoning.Effort))
+	if requested == "" && reasoning.BudgetTokens <= 0 {
+		return nil // DeepSeek's documented default is high.
+	}
+	effort := ""
+	switch requested {
+	case "":
+		// A budget alone enables thinking; DeepSeek ignores its numeric value.
+	case "none", "off", "disabled":
+		disabled := anthropic.NewThinkingConfigDisabledParam()
+		params.Thinking.OfDisabled = &disabled
+		return nil
+	case "minimal", "low":
+		effort = "low"
+	case "medium", "high", "xhigh", "very_high", "very-high", "veryhigh":
+		effort = "high"
+	case "max", "maximum", "ultra":
+		effort = "max"
+	default:
+		return fmt.Errorf("providers: unsupported DeepSeek Anthropic reasoning effort %q", reasoning.Effort)
+	}
+	// The Anthropic SDK requires a manual budget for enabled thinking. DeepSeek
+	// ignores the budget and uses output_config.effort for actual intensity.
+	thinking := anthropicThinkingConfig("deepseek", reasoning)
+	if thinking == nil {
+		thinking = anthropicThinkingConfig("deepseek", model.ReasoningConfig{Effort: "high"})
+	}
+	params.Thinking = *thinking
+	applyAnthropicMaxTokensForThinking(params)
+	if effort != "" {
+		params.OutputConfig.Effort = anthropic.OutputConfigEffort(effort)
+	}
+	return nil
 }
 
 func applyAnthropicOutputConfig(params *anthropic.MessageNewParams, output *model.OutputSpec) {

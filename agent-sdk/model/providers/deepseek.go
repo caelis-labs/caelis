@@ -31,6 +31,7 @@ func newDeepSeek(cfg Config, token string) model.LLM {
 		provider:     "deepseek",
 		baseURL:      deepSeekDefaultAnthropicBaseURL,
 		maxOutputTok: deepSeekDefaultMaxTokens,
+		deepSeek:     true,
 	})
 }
 
