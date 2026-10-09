@@ -13,7 +13,7 @@ import (
 // media availability. Once resolved, media bytes are historical evidence in
 // canonical Session content; replay never fetches resources or repeats effects.
 func (s *Store) projectResult(ctx context.Context, c CallContext, name, format string, result CallResult) (tool.Result, error) {
-	out := tool.Result{ID: c.CallID, Name: name, IsError: result.Outcome != "succeeded"}
+	out := tool.Result{ID: c.CallID, Name: name, IsError: result.Outcome != "succeeded", TurnComplete: result.TurnComplete}
 	provenance, err := json.Marshal(c)
 	if err != nil {
 		return tool.Result{}, err
@@ -24,6 +24,9 @@ func (s *Store) projectResult(ctx context.Context, c CallContext, name, format s
 	}
 	metadata["receipt_id"] = callID(c)
 	metadata["outcome"] = result.Outcome
+	if result.TurnComplete {
+		metadata["turn_complete"] = true
+	}
 	out.Metadata = map[string]any{"application_call": metadata}
 	if format == "" {
 		// The baseline application-runtime-v1 format is opaque JSON text.

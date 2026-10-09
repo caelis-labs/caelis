@@ -32,8 +32,9 @@ import (
 // Runtime, and public HTTP client. It returns a callback for each user turn and
 // a terminal answer only after the native tool result enters the model context.
 type applicationHTTPModel struct {
-	mu       sync.Mutex
-	requests [][]byte
+	mu            sync.Mutex
+	requests      [][]byte
+	terminalBatch bool
 }
 
 func (m *applicationHTTPModel) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -43,6 +44,7 @@ func (m *applicationHTTPModel) RoundTrip(req *http.Request) (*http.Response, err
 	}
 	m.mu.Lock()
 	m.requests = append(m.requests, append([]byte(nil), raw...))
+	terminalBatch := m.terminalBatch
 	m.mu.Unlock()
 	var decoded struct {
 		Messages []struct {
@@ -64,6 +66,13 @@ func (m *applicationHTTPModel) RoundTrip(req *http.Request) (*http.Response, err
 				"name": "ApplicationLookup", "arguments": `{"key":"one","execution":{"session_id":"forged-session","turn_id":"forged-turn","item_id":"forged-item"}}`,
 			},
 		}}}
+		if terminalBatch {
+			message["tool_calls"] = append(message["tool_calls"].([]any), map[string]any{
+				"id": "provider-later-id", "index": 1, "type": "function", "function": map[string]any{
+					"name": "ApplicationLookup", "arguments": `{"key":"must-not-run"}`,
+				},
+			})
+		}
 		finish = "tool_calls"
 	}
 	payload, err := json.Marshal(map[string]any{"choices": []any{map[string]any{"index": 0, "delta": message, "finish_reason": finish}}})
@@ -626,5 +635,85 @@ func TestApplicationHostHTTPA01A02A03A09A10(t *testing.T) {
 	content, err = appA.ReadApplicationResource(ctx, sessionA, resource.ID)
 	if err != nil || string(content.Data) != string(data) {
 		t.Fatalf("archive lost immutable resource = %#v, %v", content, err)
+	}
+}
+
+func TestApplicationHTTPCallbackCompletesOriginalTurnBeforeSibling(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 40*time.Second)
+	defer cancel()
+	root := t.TempDir()
+	workspace := filepath.Join(root, "workspace")
+	if err := os.MkdirAll(workspace, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	provider := &applicationHTTPModel{terminalBatch: true}
+	store := filepath.Join(root, "store")
+	host := startApplicationHTTPHost(t, store, workspace, provider)
+	status, err := host.host.SessionStatus(ctx, appserver.StatusRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	connected, err := host.host.ConnectModel(ctx, appserver.ConnectModelRequest{
+		WriteBase: appserver.WriteBase{OperationID: "connect-terminal-model", ExpectedRevision: &status.Configuration.Revision},
+		Config:    appserver.ConnectConfig{Provider: "openai-compatible", Model: "gpt-4.1", BaseURL: "https://provider.invalid/v1", APIKey: "SYNTHETIC_KEY"},
+	})
+	if err != nil || connected.Outcome != appserver.OutcomeCommitted {
+		t.Fatalf("ConnectModel = %+v, %v", connected, err)
+	}
+	credentialPath := filepath.Join(root, "application.credential")
+	client, _ := registerApplicationHTTP(t, ctx, host, "terminal", credentialPath)
+	sessionID := createApplicationHTTPSession(t, ctx, client, "terminal")
+	prompt, err := client.PromptApplication(ctx, appserver.ApplicationPromptRequest{PromptRequest: appserver.PromptRequest{
+		WriteBase: appserver.WriteBase{SessionID: sessionID, OperationID: "prompt-terminal"}, Input: "Finish after the first callback."}, SourceKind: "user"})
+	if err != nil || (prompt.Outcome != appserver.OutcomeCommitted && prompt.Outcome != appserver.OutcomeAccepted) {
+		t.Fatalf("PromptApplication = %+v, %v", prompt, err)
+	}
+	calls, err := client.WaitApplicationCalls(ctx, sessionID)
+	if err != nil || len(calls) != 1 {
+		t.Fatalf("initial calls = %+v, %v", calls, err)
+	}
+	call := calls[0]
+	if call.CallID != "provider-reused-id" {
+		t.Fatalf("original call = %+v", call)
+	}
+	if _, err := client.ClaimApplicationCall(ctx, sessionID, call.ID); err != nil {
+		t.Fatal(err)
+	}
+	result := application.CallResult{Outcome: "succeeded", Content: json.RawMessage(`{"accepted":true}`), TurnComplete: true}
+	if err := client.CompleteApplicationCall(ctx, sessionID, call.ID, result); err != nil {
+		t.Fatal(err)
+	}
+	waitApplicationHTTPIdle(t, ctx, client, sessionID)
+	state, err := client.InspectSession(ctx, appserver.StateRequest{SessionID: sessionID})
+	if err != nil || state.Run.Status != "completed" {
+		t.Fatalf("terminal Turn state = %+v, %v", state.Run, err)
+	}
+	calls, err = client.ApplicationCalls(ctx, sessionID)
+	if err != nil || len(calls) != 1 || calls[0].ID != call.ID || calls[0].State != "completed" || calls[0].Result == nil || !calls[0].Result.TurnComplete {
+		t.Fatalf("callback receipts = %+v, %v", calls, err)
+	}
+	if provider.requestCount() != 1 {
+		t.Fatalf("model requests = %d, want 1", provider.requestCount())
+	}
+	var turnCompleted bool
+	for _, event := range applicationHTTPHistory(t, ctx, client, sessionID) {
+		if event.TurnID == call.TurnID && event.Lifecycle != nil && event.Lifecycle.State == eventstream.LifecycleStateCompleted {
+			turnCompleted = true
+		}
+	}
+	if !turnCompleted {
+		t.Fatal("original Turn has no canonical completed lifecycle")
+	}
+	host.close(t)
+	host = startApplicationHTTPHost(t, store, workspace, provider)
+	defer host.close(t)
+	secret, err := os.ReadFile(credentialPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client = host.app(string(secret))
+	restored, err := client.ApplicationCall(ctx, sessionID, call.ID)
+	if err != nil || restored.State != "completed" || restored.Result == nil || !restored.Result.TurnComplete {
+		t.Fatalf("restarted original receipt = %+v, %v", restored, err)
 	}
 }

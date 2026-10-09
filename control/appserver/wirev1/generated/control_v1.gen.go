@@ -421,6 +421,7 @@ type ApplicationCallResult struct {
 	Outcome           string     `json:"outcome"`
 	ResultFormat      *string    `json:"result_format,omitempty"`
 	StructuredContent JSONObject `json:"structuredContent,omitzero"`
+	TurnComplete      *bool      `json:"turn_complete,omitempty"`
 }
 
 type ApplicationConfiguration struct {
@@ -467,6 +468,7 @@ type ApplicationContentCallResult struct {
 	Outcome           string                          `json:"outcome"`
 	ResultFormat      string                          `json:"result_format"`
 	StructuredContent JSONObject                      `json:"structuredContent,omitzero"`
+	TurnComplete      *bool                           `json:"turn_complete,omitempty"`
 }
 
 type ApplicationContentToolDefinition struct {
@@ -488,8 +490,9 @@ type ApplicationInheritance struct {
 }
 
 type ApplicationLegacyCallResult struct {
-	Content JSONValue `json:"content"`
-	Outcome string    `json:"outcome"`
+	Content      JSONValue `json:"content"`
+	Outcome      string    `json:"outcome"`
+	TurnComplete *bool     `json:"turn_complete,omitempty"`
 }
 
 type ApplicationLegacyToolDefinition struct {

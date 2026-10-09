@@ -203,12 +203,15 @@ func (r *ModelStepRef) AdmissionDone() <-chan struct{} {
 
 // Result is one provider-neutral tool execution result.
 type Result struct {
-	ID       string         `json:"id,omitempty"`
-	Name     string         `json:"name,omitempty"`
-	Content  []model.Part   `json:"content,omitempty"`
-	Meta     map[string]any `json:"meta,omitempty"`
-	IsError  bool           `json:"is_error,omitempty"`
-	Metadata map[string]any `json:"metadata,omitempty"`
+	ID      string       `json:"id,omitempty"`
+	Name    string       `json:"name,omitempty"`
+	Content []model.Part `json:"content,omitempty"`
+	// TurnComplete is a trusted host tool disposition. A completed result stops
+	// this Run before another serial tool effect or model request.
+	TurnComplete bool           `json:"turn_complete,omitempty"`
+	Meta         map[string]any `json:"meta,omitempty"`
+	IsError      bool           `json:"is_error,omitempty"`
+	Metadata     map[string]any `json:"metadata,omitempty"`
 }
 
 // Tool is the minimal tool execution contract.

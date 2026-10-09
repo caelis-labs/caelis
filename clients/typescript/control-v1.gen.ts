@@ -437,6 +437,7 @@ export interface ApplicationContentCallResult {
   outcome: "succeeded" | "failed" | "unknown";
   result_format: "content-v1";
   structuredContent?: JSONObject;
+  turn_complete?: boolean;
 }
 
 export interface ApplicationContentToolDefinition {
@@ -460,6 +461,7 @@ export interface ApplicationInheritance {
 export interface ApplicationLegacyCallResult {
   content: JSONValue;
   outcome: "succeeded" | "failed" | "unknown";
+  turn_complete?: boolean;
 }
 
 export interface ApplicationLegacyToolDefinition {

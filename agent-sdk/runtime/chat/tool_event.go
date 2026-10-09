@@ -41,6 +41,9 @@ func toolEvent(call model.ToolCall, result tool.Result, message *model.Message, 
 		Tool: toolEventPayload(call, status, rawInput, rawOutput, nil),
 		Meta: meta,
 	}
+	if statusOverride == "" && !result.IsError {
+		event.Tool.TurnComplete = result.TurnComplete
+	}
 	if journal != nil {
 		event.Journal = journal
 	}
