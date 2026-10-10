@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.69.1](https://github.com/caelis-labs/caelis/compare/v0.69.0...v0.69.1) (2026-10-10)
+
+
+### Bug Fixes
+
+* **runtime:** require scoped approval for MCP calls ([#121](https://github.com/caelis-labs/caelis/issues/121)) ([93fc125](https://github.com/caelis-labs/caelis/commit/93fc1257b9dd1d5db407fdb01f1600c44e5a764a))
+
 ## [0.69.0](https://github.com/caelis-labs/caelis/compare/v0.68.0...v0.69.0) (2026-10-09)
 
 
