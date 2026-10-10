@@ -12,6 +12,23 @@ import (
 	"github.com/caelis-labs/caelis/control/application"
 )
 
+func TestApplicationMCPGrantOwnerUsesAuthenticatedConnectionScope(t *testing.T) {
+	owner := application.Scope{PrincipalID: "principal", ApplicationID: "application-a", ConnectionID: "connection-a"}
+	if applicationMCPGrantOwner(owner) == "" {
+		t.Fatal("authenticated connection has no MCP grant owner")
+	}
+	other := owner
+	other.ConnectionID = "connection-b"
+	if applicationMCPGrantOwner(owner) == applicationMCPGrantOwner(other) {
+		t.Fatal("independent connection shared MCP grant owner")
+	}
+	other = owner
+	other.ApplicationID = "application-b"
+	if applicationMCPGrantOwner(owner) == applicationMCPGrantOwner(other) {
+		t.Fatal("independent Application shared MCP grant owner")
+	}
+}
+
 func TestApplicationSkillRootLoadsOnlySelectedMetadataThenBody(t *testing.T) {
 	root := t.TempDir()
 	selected := filepath.Join(root, "selected")

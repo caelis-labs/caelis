@@ -228,10 +228,20 @@ Every MCP invocation reaches Runtime policy admission, including tools loaded
 through ToolSearch, plugins, and injected MCP sources. A ready connection,
 discovery, or `readOnlyHint` is not execution approval. The default MCP approval
 offers Allow Once, Allow this session, Allow Always, and Cancel. Session grants
-bind the current canonical Session ID and creation time across Turns. Always grants bind the Host
-workspace, plugin, server, projected and remote tool names, and fingerprint of the accepted server
-configuration, declared server version, and tool definition across Sessions and restarts. A changed
-source or schema needs new approval. The Host keeps grants in
+bind the current canonical Session ID and creation time across Turns. Always
+grants bind the trusted configuration owner, workspace, plugin, server,
+projected and remote tool names, and fingerprint of the accepted server
+configuration, declared server version, and tool definition across Sessions and
+restarts. Ordinary Sessions share the Host configuration owner; Application
+Sessions use their authenticated connection scope, so independently owned
+configurations cannot share a grant merely by selecting the same directory and
+MCP server values. Sessions under one Application connection may share an Always
+grant when the workspace and exact MCP source also match. For stdio, the source
+fingerprint includes a digest of the effective environment frozen when the
+process transport is created, without exposing environment values in metadata.
+A changed source or schema needs new approval. A cached MCP grant only satisfies
+the source gate; a custom policy's per-call approval still applies to that call.
+The Host keeps grants in
 `control/mcp-grants.json`; stopping the Host and deleting that file revokes all
 grants. The Host-owned `MCPGrantStore.Revoke` API removes an individual grant
 while running. Only a selected matching option authorizes the remote call;

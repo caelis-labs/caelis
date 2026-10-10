@@ -44,6 +44,7 @@ type policyWrappedTool struct {
 	tool          tool.Tool
 	approval      approvalContext
 	mcpGrants     *MCPGrantStore
+	mcpGrantOwner string
 }
 
 type rejectedPolicyMode struct {
@@ -89,6 +90,7 @@ func (r *Runtime) wrapToolsForPolicy(
 			tool:          one,
 			approval:      approval,
 			mcpGrants:     r.mcpGrants,
+			mcpGrantOwner: r.mcpGrantOwner,
 		})
 	}
 	return out
@@ -159,31 +161,32 @@ func (t policyWrappedTool) Call(ctx context.Context, call tool.Call) (tool.Resul
 	if err != nil {
 		return tool.Result{}, err
 	}
-	// MCP is a mandatory execution boundary, including custom and explicit
-	// full-access policy profiles. ToolSearch and server setup grant no authority.
+	// The Host's MCP source grant is independent of this call's policy. In
+	// particular, a cached source grant cannot satisfy a custom per-call Ask.
 	if tool.IsMCPDefinition(input.Tool) && decision.Action != policy.ActionDeny {
 		grant, err := mcpGrantFor(input.Tool, t.session)
 		if err != nil {
 			return tool.Result{}, err
 		}
-		if allowed, err := t.mcpGrants.Allows(grant, t.sessionRef.SessionID); err != nil {
+		grant.Owner = t.mcpGrantOwner
+		allowed, err := t.mcpGrants.Allows(grant, t.sessionRef.SessionID)
+		if err != nil {
 			return tool.Result{}, err
-		} else if allowed {
-			decision.Action = policy.ActionAllow
-		} else {
-			original := decision
-			decision, err = presets.MCPApprovalDecision(input, original.Constraints)
+		}
+		if !allowed {
+			gate, err := presets.MCPApprovalDecision(input, decision.Constraints)
 			if err != nil {
 				return tool.Result{}, err
 			}
-			for key, value := range original.Metadata {
-				if decision.Metadata == nil {
-					decision.Metadata = map[string]any{}
-				}
-				decision.Metadata[key] = value
-			}
+			return t.requestApprovalWithContinuation(ctx, call, gate, &grant, func(ctx context.Context, _ tool.Call) (tool.Result, error) {
+				return t.applyPolicyDecision(ctx, call, decision)
+			})
 		}
 	}
+	return t.applyPolicyDecision(ctx, call, decision)
+}
+
+func (t policyWrappedTool) applyPolicyDecision(ctx context.Context, call tool.Call, decision policy.Decision) (tool.Result, error) {
 	switch decision.Action {
 	case policy.ActionAllow:
 		call.ModelStep.MarkAdmissionComplete()
@@ -205,8 +208,21 @@ func (t policyWrappedTool) requestApproval(
 	call tool.Call,
 	decision policy.Decision,
 ) (tool.Result, error) {
+	return t.requestApprovalWithContinuation(ctx, call, decision, nil, nil)
+}
+
+func (t policyWrappedTool) requestApprovalWithContinuation(
+	ctx context.Context,
+	call tool.Call,
+	decision policy.Decision,
+	gate *MCPGrant,
+	afterApproved approvedToolCall,
+) (tool.Result, error) {
 	if decision.Approval == nil || (t.approval.requester == nil && t.approval.runtime == nil) {
 		return policyDecisionResult(call, t.tool.Definition(), decision), nil
+	}
+	if afterApproved == nil {
+		afterApproved = t.tool.Call
 	}
 	request := agent.ApprovalRequest{
 		Origin:     &agent.ApprovalOrigin{WorkingDirectory: t.session.CWD, Role: agent.ApprovalRoleMain, Endpoint: agent.ApprovalEndpointBuiltin, SessionID: t.sessionRef.SessionID, ToolCallID: call.ID},
@@ -226,25 +242,27 @@ func (t policyWrappedTool) requestApproval(
 	approvedCall := tool.CloneCall(call)
 	approvedCall.Metadata = mergeCallMetadata(approvedCall.Metadata, decision)
 	started, _ := ctx.Value(taskInvocationStartKey{}).(taskInvocationStart)
-	if result, handled, err := submitTaskApproval(ctx, approvedCall, taskApproval{
-		owner: t.approval.ctx, request: request, resolve: t.resolveApproval, started: started.time, generation: started.generation,
-	}, t.tool); handled {
-		return result, err
+	if gate == nil {
+		if result, handled, err := submitTaskApproval(ctx, approvedCall, taskApproval{
+			owner: t.approval.ctx, request: request, resolve: t.resolveApproval, started: started.time, generation: started.generation,
+		}, t.tool); handled {
+			return result, err
+		}
 	}
 	resp, err := t.resolveApproval(ctx, request)
 	if err != nil {
 		return tool.Result{}, err
 	}
-	if tool.IsMCPDefinition(t.tool.Definition()) {
-		return t.resolveMCPApproval(ctx, call, approvedCall, decision, resp)
+	if gate != nil {
+		return t.resolveMCPApproval(ctx, call, approvedCall, decision, resp, *gate, afterApproved)
 	}
 	if resp.Approved {
-		return t.tool.Call(ctx, approvedCall)
+		return afterApproved(ctx, approvedCall)
 	}
 	return policyDecisionResultWithOutcome(call, t.tool.Definition(), decision, resp), nil
 }
 
-func (t policyWrappedTool) resolveMCPApproval(ctx context.Context, call, approvedCall tool.Call, decision policy.Decision, resp agent.ApprovalResponse) (tool.Result, error) {
+func (t policyWrappedTool) resolveMCPApproval(ctx context.Context, call, approvedCall tool.Call, decision policy.Decision, resp agent.ApprovalResponse, grant MCPGrant, afterApproved approvedToolCall) (tool.Result, error) {
 	if resp.Outcome != "selected" {
 		return policyDecisionResultWithOutcome(call, t.tool.Definition(), decision, resp), nil
 	}
@@ -254,10 +272,6 @@ func (t policyWrappedTool) resolveMCPApproval(ctx context.Context, call, approve
 	}
 	if meaning != approval.OptionDecisionAllow {
 		return policyDecisionResultWithOutcome(call, t.tool.Definition(), decision, resp), nil
-	}
-	grant, err := mcpGrantFor(t.tool.Definition(), t.session)
-	if err != nil {
-		return tool.Result{}, err
 	}
 	switch option.ID {
 	case "allow_once":
@@ -272,7 +286,7 @@ func (t policyWrappedTool) resolveMCPApproval(ctx context.Context, call, approve
 	default:
 		return tool.Result{}, errors.New("unknown MCP approval scope")
 	}
-	return t.tool.Call(ctx, approvedCall)
+	return afterApproved(ctx, approvedCall)
 }
 
 func (t policyWrappedTool) resolveApproval(ctx context.Context, request agent.ApprovalRequest) (agent.ApprovalResponse, error) {

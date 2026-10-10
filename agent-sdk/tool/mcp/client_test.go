@@ -42,6 +42,44 @@ func TestProcessEnvironmentTargetOSCaseSemantics(t *testing.T) {
 	}
 }
 
+func TestMCPStdioLaunchIdentityFreezesEffectiveEnvironment(t *testing.T) {
+	root := t.TempDir()
+	key := "CAELIS_MCP_SYNTHETIC_ACCOUNT"
+	t.Setenv(key, "inherited-a")
+	spec := ServerSpec{PluginID: "fixture", Name: "docs", Command: os.Args[0], WorkDir: root, Env: map[string]string{key: "selected-b"}}
+	transport, _, first, err := transportForSpecWithIdentity(spec, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := transport.(*mcpsdk.CommandTransport).Command
+	if !slices.Contains(command.Env, key+"=selected-b") {
+		t.Fatal("stdio command did not freeze effective override")
+	}
+	t.Setenv(key, "selected-b")
+	withoutOverride := spec
+	withoutOverride.Env = nil
+	_, _, equivalent, err := transportForSpecWithIdentity(withoutOverride, nil)
+	if err != nil || first != equivalent {
+		t.Fatalf("equivalent effective environments differ: %s %s %v", first, equivalent, err)
+	}
+	t.Setenv(key, "inherited-c")
+	_, _, changed, err := transportForSpecWithIdentity(withoutOverride, nil)
+	if err != nil || changed == first || !slices.Contains(command.Env, key+"=selected-b") {
+		t.Fatalf("changed parent environment mutated launch snapshot: first=%s changed=%s err=%v", first, changed, err)
+	}
+	clean := withoutOverride
+	clean.CleanEnvironment = true
+	_, _, cleanA, err := transportForSpecWithIdentity(clean, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(key, "inherited-d")
+	_, _, cleanB, err := transportForSpecWithIdentity(clean, nil)
+	if err != nil || cleanA != cleanB {
+		t.Fatalf("clean environment inherited unrelated account: %s %s %v", cleanA, cleanB, err)
+	}
+}
+
 func TestMCPServerHelperProcess(t *testing.T) {
 	if os.Getenv("CAELIS_MCP_HELPER") != "1" {
 		return

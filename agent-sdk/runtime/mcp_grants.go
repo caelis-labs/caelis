@@ -53,10 +53,14 @@ func NewMCPGrantStore(path string) (*MCPGrantStore, error) {
 	return s, nil
 }
 
-// MCPGrant identifies exactly one ready MCP tool and one workspace. The source
-// fingerprint binds the accepted server configuration and remote definition;
-// a connection, tool, or schema change does not reuse an earlier grant.
+// MCPGrant identifies exactly one ready MCP tool, workspace, and trusted
+// configuration owner. The source fingerprint binds the accepted server
+// configuration and remote definition; a connection, tool, or schema change
+// does not reuse an earlier grant.
 type MCPGrant struct {
+	// Owner is supplied by the embedding Host, never by a tool or approval
+	// response. Empty selects the ordinary Host configuration owner.
+	Owner     string
 	Workspace string
 	PluginID  string
 	Server    string
@@ -102,7 +106,11 @@ func (g MCPGrant) key(scope, sessionID string) (string, error) {
 	if scope == "session" {
 		epoch = g.SessionEpoch
 	}
-	raw, err := json.Marshal([]string{scope, sessionID, epoch, g.Workspace, g.PluginID, g.Server, g.Tool, g.Projected, g.Source})
+	owner := strings.TrimSpace(g.Owner)
+	if owner == "" {
+		owner = "host"
+	}
+	raw, err := json.Marshal([]string{scope, sessionID, epoch, owner, g.Workspace, g.PluginID, g.Server, g.Tool, g.Projected, g.Source})
 	if err != nil {
 		return "", err
 	}

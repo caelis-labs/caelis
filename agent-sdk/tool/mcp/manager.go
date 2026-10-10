@@ -201,12 +201,20 @@ func (mgr *Manager) rebuildToolsLocked() {
 					implementation, protocolVersion = initialized.ServerInfo, initialized.ProtocolVersion
 				}
 			}
+			identitySpec := spec
+			if client.transport == TransportStdio && client.launchIdentity != "" {
+				// The effective startup snapshot, not the pre-merge Env map or
+				// clean/inherit flag, identifies the environment the child saw.
+				identitySpec.Env = nil
+				identitySpec.CleanEnvironment = false
+			}
 			sourceBytes, err := json.Marshal(struct {
 				Server          ServerSpec
+				LaunchIdentity  string
 				Implementation  *mcpsdk.Implementation
 				ProtocolVersion string
 				Tool            *mcpsdk.Tool
-			}{spec, implementation, protocolVersion, info})
+			}{identitySpec, client.launchIdentity, implementation, protocolVersion, info})
 			if err != nil {
 				mgr.addWarning(key, fmt.Sprintf("tool %s quarantined: cannot identify source: %v", toolLabel, err))
 				continue

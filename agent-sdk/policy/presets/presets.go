@@ -64,9 +64,6 @@ func WorkspaceWriteMode() policy.Mode {
 		ID: ModeWorkspaceWrite,
 		Decide: func(_ context.Context, input policy.ToolContext) (policy.Decision, error) {
 			def := workspaceWriteConstraints(input.Options)
-			if tool.IsMCPDefinition(input.Tool) {
-				return MCPApprovalDecision(input, def)
-			}
 			switch policyClass(input) {
 			case builtinPolicyReadPath, builtinPolicySearchPath, builtinPolicyGlobPath:
 				if err := ensureReadPathsOutsideDefaultHiddenRoots(input); err != nil {

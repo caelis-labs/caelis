@@ -73,6 +73,92 @@ func TestAtomicFailedMCPHelper(t *testing.T) {
 	}
 }
 
+func TestApplicationMCPAlwaysRespectsAuthenticatedConfigurationOwnerHTTP(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
+	defer cancel()
+	root := t.TempDir()
+	workspace := filepath.Join(root, "shared-workspace")
+	if err := os.Mkdir(workspace, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	audit := filepath.Join(root, "mcp-audit")
+	t.Setenv("CAELIS_ATOMIC_MCP_HELPER", "1")
+	t.Setenv("CAELIS_ATOMIC_MCP_AUDIT", audit)
+	host := startApplicationHTTPHost(t, filepath.Join(root, "store"), workspace, &atomicCapabilityProvider{})
+	defer host.close(t)
+	status, err := host.host.SessionStatus(ctx, appserver.StatusRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := host.host.ConnectModel(ctx, appserver.ConnectModelRequest{WriteBase: appserver.WriteBase{OperationID: "owner-model", ExpectedRevision: &status.Configuration.Revision}, Config: appserver.ConnectConfig{
+		Provider: "openai-compatible", Model: "gpt-4.1", BaseURL: "https://provider.invalid/v1", APIKey: "SYNTHETIC_ONLY",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	a, _ := registerApplicationHTTP(t, ctx, host, "owner-a", filepath.Join(root, "a.credential"))
+	b, _ := registerApplicationHTTP(t, ctx, host, "owner-b", filepath.Join(root, "b.credential"))
+	profile := applicationHTTPProfile()
+	profile.Workspace.CWD = workspace
+	profile.MCPServers = []application.MCPServer{{Name: "documents", Transport: "stdio", Command: os.Args[0], Args: []string{"-test.run=^TestAtomicDocumentsMCPHelper$"}, WorkDir: root}}
+	create := func(client *httpclient.Client, operation string) string {
+		t.Helper()
+		result, err := client.CreateApplicationSession(ctx, appserver.CreateApplicationSessionRequest{WriteBase: appserver.WriteBase{OperationID: operation}, Profile: profile})
+		if err != nil || result.SessionID == "" {
+			t.Fatalf("create %s: %+v, %v", operation, result, err)
+		}
+		return result.SessionID
+	}
+	aFirst, aSecond, bFirst := create(a, "owner-a-first"), create(a, "owner-a-second"), create(b, "owner-b-first")
+	if got := promptAtomicCapabilityClientWithMCPApproval(t, ctx, a, aFirst, "a-always", "DOC", "allow_always"); got != 1 {
+		t.Fatalf("A approval count = %d, want 1", got)
+	}
+	if got := strings.Count(atomicAudit(audit), "documents:call:"); got != 1 {
+		t.Fatalf("A remote calls = %d, want 1", got)
+	}
+	result, err := b.PromptApplication(ctx, appserver.ApplicationPromptRequest{PromptRequest: appserver.PromptRequest{WriteBase: appserver.WriteBase{SessionID: bFirst, OperationID: "b-cancel"}, Input: "DOC"}, SourceKind: "user"})
+	if err != nil || (result.Outcome != appserver.OutcomeAccepted && result.Outcome != appserver.OutcomeCommitted) {
+		t.Fatalf("B prompt = %+v, %v", result, err)
+	}
+	var pending *appserver.ActiveApproval
+	for pending == nil {
+		state, err := b.InspectSession(ctx, appserver.StateRequest{SessionID: bFirst})
+		if err != nil {
+			t.Fatal(err)
+		}
+		pending = state.Approval.Active
+		if pending == nil {
+			select {
+			case <-ctx.Done():
+				t.Fatal("independent Application skipped MCP approval")
+			case <-time.After(15 * time.Millisecond):
+			}
+		}
+	}
+	if pending.Permission == nil || len(pending.Permission.Options) != 4 || pending.Permission.Options[2].ID != "allow_always" {
+		t.Fatalf("B MCP approval lost four options: %+v", pending)
+	}
+	request := appserver.ResolveApprovalRequest{WriteBase: appserver.WriteBase{OperationID: "foreign-b-approval", SessionID: bFirst}, Target: pending.Target,
+		ApprovalRequestID: string(pending.RequestID), Outcome: "selected", OptionID: "allow_always", Approved: true}
+	if _, err := a.ResolveApproval(ctx, request); err == nil {
+		t.Fatal("A was able to resolve B's pending approval")
+	}
+	request.OperationID = "b-cancel-approval"
+	request.OptionID, request.Approved = "cancel", false
+	if _, err := b.ResolveApproval(ctx, request); err != nil {
+		t.Fatal(err)
+	}
+	waitApplicationHTTPIdle(t, ctx, b, bFirst)
+	if got := strings.Count(atomicAudit(audit), "documents:call:"); got != 1 {
+		t.Fatalf("B cancel executed remote call: %d", got)
+	}
+	if got := promptAtomicCapabilityClientWithMCPApproval(t, ctx, a, aSecond, "a-same-owner", "DOC", ""); got != 0 {
+		t.Fatalf("same Application owner was re-prompted: %d", got)
+	}
+	if got := strings.Count(atomicAudit(audit), "documents:call:"); got != 2 {
+		t.Fatalf("same owner failed to reuse grant: calls=%d", got)
+	}
+}
+
 type atomicCapabilityProvider struct {
 	mu       sync.Mutex
 	requests [][]byte
@@ -664,6 +750,28 @@ func TestApplicationAtomicMCPPinnedCallAcrossRevisionHTTP(t *testing.T) {
 	if err != nil || (result.Outcome != appserver.OutcomeAccepted && result.Outcome != appserver.OutcomeCommitted) {
 		t.Fatalf("old prompt = %+v, %v", result, err)
 	}
+	for {
+		state, err := client.InspectSession(ctx, appserver.StateRequest{SessionID: session})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if active := state.Approval.Active; active != nil {
+			if active.Permission == nil || len(active.Permission.Options) != 4 || active.Permission.ToolCall.Name != "blocking__lookup" {
+				t.Fatalf("blocking MCP approval = %+v", active)
+			}
+			_, err := client.ResolveApproval(ctx, appserver.ResolveApprovalRequest{WriteBase: appserver.WriteBase{OperationID: "pinned-old-approval", SessionID: session},
+				Target: active.Target, ApprovalRequestID: string(active.RequestID), Outcome: "selected", OptionID: "allow_once", Approved: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			break
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatal("blocking MCP call never requested approval")
+		case <-time.After(15 * time.Millisecond):
+		}
+	}
 	waitAtomicAuditCount(t, audit, "blocking:call:", 1)
 	// Track the exact process that accepted the blocked tool invocation.
 	callPID := ""
@@ -1096,11 +1204,54 @@ func TestApplicationAtomicMCPFailureIsolationHTTP(t *testing.T) {
 
 func promptAtomicCapabilityClient(t *testing.T, ctx context.Context, client *httpclient.Client, session, operation, input string) {
 	t.Helper()
+	promptAtomicCapabilityClientWithMCPApproval(t, ctx, client, session, operation, input, "allow_once")
+}
+
+// promptAtomicCapabilityClientWithMCPApproval resolves only the synthetic MCP
+// fixture's real pending approval. An empty option asserts no approval is due.
+func promptAtomicCapabilityClientWithMCPApproval(t *testing.T, ctx context.Context, client *httpclient.Client, session, operation, input, option string) int {
+	t.Helper()
 	result, err := client.PromptApplication(ctx, appserver.ApplicationPromptRequest{
 		PromptRequest: appserver.PromptRequest{WriteBase: appserver.WriteBase{SessionID: session, OperationID: operation}, Input: input}, SourceKind: "user",
 	})
 	if err != nil || (result.Outcome != appserver.OutcomeAccepted && result.Outcome != appserver.OutcomeCommitted) {
 		t.Fatalf("prompt %s = %+v, %v", operation, result, err)
 	}
-	waitApplicationHTTPIdle(t, ctx, client, session)
+	ticker := time.NewTicker(15 * time.Millisecond)
+	defer ticker.Stop()
+	resolved := 0
+	for {
+		state, err := client.InspectSession(ctx, appserver.StateRequest{SessionID: session})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if active := state.Approval.Active; active != nil {
+			if option == "" || active.Permission == nil || !strings.Contains(active.Permission.ToolCall.Name, "__") {
+				t.Fatalf("unexpected pending approval: %+v", active)
+			}
+			found := false
+			for _, offered := range active.Permission.Options {
+				found = found || offered.ID == option
+			}
+			if !found || len(active.Permission.Options) != 4 {
+				t.Fatalf("MCP option %q missing from %+v", option, active.Permission.Options)
+			}
+			resolved++
+			_, err := client.ResolveApproval(ctx, appserver.ResolveApprovalRequest{
+				WriteBase: appserver.WriteBase{OperationID: fmt.Sprintf("%s-mcp-approval-%d", operation, resolved), SessionID: session},
+				Target:    active.Target, ApprovalRequestID: string(active.RequestID), Outcome: "selected", OptionID: option, Approved: option != "cancel",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		if !state.Run.Active {
+			return resolved
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("waiting for Session %s completion: %v", session, ctx.Err())
+		case <-ticker.C:
+		}
+	}
 }

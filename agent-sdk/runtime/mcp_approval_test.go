@@ -13,6 +13,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -182,6 +183,90 @@ func TestMCPApprovalOverridesExplicitFullAccessPolicy(t *testing.T) {
 	}
 }
 
+func TestMCPGrantOwnerSeparatesIndependentConfigurations(t *testing.T) {
+	store, err := NewMCPGrantStore(filepath.Join(t.TempDir(), "grants.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspace := t.TempDir()
+	active := session.Session{SessionRef: session.SessionRef{SessionID: "application-a"}, CWD: workspace, CreatedAt: time.Now()}
+	other := active
+	other.SessionID = "application-b"
+	def := fixtureMCPDefinition("same-source-and-schema")
+	var approvalsA, approvalsB, approvalsSame, calls atomic.Int32
+	a := fixtureMCPWrapped(t, store, active, def, []string{"allow_always"}, &approvalsA, &calls)
+	a.mcpGrantOwner = "application-owner-a"
+	callFixtureMCP(t, a)
+	b := fixtureMCPWrapped(t, store, other, def, []string{"cancel"}, &approvalsB, &calls)
+	b.mcpGrantOwner = "application-owner-b"
+	if result := callFixtureMCP(t, b); !result.IsError || calls.Load() != 1 {
+		t.Fatalf("independent configuration inherited grant: result=%#v calls=%d", result, calls.Load())
+	}
+	sameOwner := fixtureMCPWrapped(t, store, other, def, nil, &approvalsSame, &calls)
+	sameOwner.mcpGrantOwner = a.mcpGrantOwner
+	callFixtureMCP(t, sameOwner)
+	if calls.Load() != 2 || approvalsA.Load() != 1 || approvalsB.Load() != 1 || approvalsSame.Load() != 0 {
+		t.Fatalf("same owner did not share grant: calls=%d approvals A/B/same=%d/%d/%d", calls.Load(), approvalsA.Load(), approvalsB.Load(), approvalsSame.Load())
+	}
+}
+
+func TestMCPGrantCannotSatisfyCustomCallApproval(t *testing.T) {
+	store, err := NewMCPGrantStore(filepath.Join(t.TempDir(), "grants.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	active := session.Session{SessionRef: session.SessionRef{SessionID: "custom"}, CWD: t.TempDir(), CreatedAt: time.Now()}
+	def := fixtureMCPDefinition("custom-source")
+	grant, err := mcpGrantFor(def, active)
+	if err != nil {
+		t.Fatal(err)
+	}
+	custom := policy.NamedMode{ID: "custom-mcp", Decide: func(_ context.Context, input policy.ToolContext) (policy.Decision, error) {
+		return policy.Decision{Action: policy.ActionAskApproval, Reason: "sensitive parameters require confirmation", Approval: &session.ProtocolApproval{
+			ToolCall: session.ProtocolToolCall{ID: input.Call.ID, Name: input.Tool.Name, Kind: "other", RawInput: map[string]any{"value": "sensitive"}},
+			Options:  []session.ProtocolApprovalOption{{ID: "confirm_sensitive", Name: "Confirm sensitive call", Kind: "allow_once"}, {ID: "cancel_sensitive", Name: "Reject sensitive call", Kind: "reject_once"}},
+		}}, nil
+	}}
+	for _, existingGrant := range []bool{true, false} {
+		if existingGrant {
+			if err := store.Grant(grant, "always", ""); err != nil {
+				t.Fatal(err)
+			}
+		} else if err := store.Revoke(grant, "always", ""); err != nil {
+			t.Fatal(err)
+		}
+		var calls, approvals atomic.Int32
+		wrapped := policyWrappedTool{tool: tool.NamedTool{Def: def, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
+			calls.Add(1)
+			return tool.Result{Name: def.Name}, nil
+		}}, policy: custom, mode: custom.Name(), session: active, sessionRef: active.SessionRef, mcpGrants: store,
+			approval: approvalContext{requester: approvalRequesterFunc(func(_ context.Context, request agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+				approvals.Add(1)
+				if len(request.Approval.Options) == 4 {
+					if existingGrant || request.Approval.Options[1].ID != "allow_session" {
+						t.Errorf("unexpected source gate: %#v", request.Approval)
+					}
+					return agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_session", Approved: true}, nil
+				}
+				if request.Approval.Options[0].ID != "confirm_sensitive" || request.Approval.Options[1].ID != "cancel_sensitive" || request.Approval.ToolCall.RawInput["value"] != "sensitive" {
+					t.Errorf("custom policy approval was replaced: %#v", request.Approval)
+				}
+				return agent.ApprovalResponse{Outcome: "selected", OptionID: "cancel_sensitive", Approved: false}, nil
+			})},
+		}
+		if result := callFixtureMCP(t, wrapped); !result.IsError || calls.Load() != 0 {
+			t.Fatalf("custom denial executed remote: result=%#v calls=%d", result, calls.Load())
+		}
+		wantApprovals := int32(2)
+		if existingGrant {
+			wantApprovals = 1
+		}
+		if approvals.Load() != wantApprovals {
+			t.Fatalf("existingGrant=%v approvals=%d want=%d", existingGrant, approvals.Load(), wantApprovals)
+		}
+	}
+}
+
 func TestMCPGrantStoreConcurrentScopesSurviveRestart(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "grants.json")
 	store, err := NewMCPGrantStore(path)
@@ -227,6 +312,11 @@ func TestMCPApprovalFixtureProcess(t *testing.T) {
 	if os.Getenv("CAELIS_APPROVAL_MCP_FIXTURE") != "1" {
 		return
 	}
+	if path := os.Getenv("CAELIS_APPROVAL_MCP_ENV_AUDIT"); path != "" {
+		if err := os.WriteFile(path, []byte(os.Getenv("CAELIS_APPROVAL_MCP_ACCOUNT")+"/"+os.Getenv("CAELIS_APPROVAL_MCP_ENDPOINT")), 0o600); err != nil {
+			os.Exit(2)
+		}
+	}
 	server := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "approval-fixture", Version: "1"}, nil)
 	count := 0
 	server.AddTool(&mcpsdk.Tool{Name: "read", InputSchema: map[string]any{"type": "object"}}, func(context.Context, *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
@@ -245,9 +335,13 @@ func TestMCPApprovalFixtureProcess(t *testing.T) {
 func TestRuntimeMCPToolSearchApprovalBeforeLocalServerCall(t *testing.T) {
 	root := t.TempDir()
 	countPath := filepath.Join(root, "remote-count")
-	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	envAudit := filepath.Join(root, "environment-audit")
+	t.Setenv("CAELIS_APPROVAL_MCP_ACCOUNT", "synthetic-account-a")
+	t.Setenv("CAELIS_APPROVAL_MCP_ENDPOINT", "synthetic-endpoint-a")
+	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
 	defer cancel()
-	mgr, err := mcp.NewManager(ctx, []mcp.ServerSpec{{PluginID: "fixture", Name: "docs", Command: os.Args[0], Args: []string{"-test.run=^TestMCPApprovalFixtureProcess$"}, WorkDir: root, CleanEnvironment: true, Env: map[string]string{"CAELIS_APPROVAL_MCP_FIXTURE": "1", "CAELIS_APPROVAL_MCP_COUNT": countPath}}}, nil)
+	spec := mcp.ServerSpec{PluginID: "fixture", Name: "docs", Command: os.Args[0], Args: []string{"-test.run=^TestMCPApprovalFixtureProcess$"}, WorkDir: root, Env: map[string]string{"CAELIS_APPROVAL_MCP_FIXTURE": "1", "CAELIS_APPROVAL_MCP_COUNT": countPath, "CAELIS_APPROVAL_MCP_ENV_AUDIT": envAudit}}
+	mgr, err := mcp.NewManager(ctx, []mcp.ServerSpec{spec}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -260,6 +354,9 @@ func TestRuntimeMCPToolSearchApprovalBeforeLocalServerCall(t *testing.T) {
 	ready := mgr.Tools()
 	if len(ready) != 1 || !tool.IsMCPDefinition(ready[0].Definition()) {
 		t.Fatalf("ready MCP tools = %#v", ready)
+	}
+	if raw, err := os.ReadFile(envAudit); err != nil || string(raw) != "synthetic-account-a/synthetic-endpoint-a" {
+		t.Fatalf("stdio child did not receive original inherited environment: %q, %v", raw, err)
 	}
 	service := sessionfile.NewStore(sessionfile.Config{RootDir: filepath.Join(root, "sessions"), SessionIDGenerator: func() string { return "approval-runtime" }})
 	active, err := service.StartSession(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "fixture", Workspace: session.WorkspaceRef{Key: "fixture", CWD: root}})
@@ -369,5 +466,93 @@ func TestRuntimeMCPToolSearchApprovalBeforeLocalServerCall(t *testing.T) {
 	}
 	if raw, err := os.ReadFile(countPath); err != nil || string(raw) != "6" {
 		t.Fatalf("restart remote count=%q err=%v", raw, err)
+	}
+	// Same spec, declared server version and schema, but a different inherited
+	// account/endpoint must not reuse the earlier Always grant.
+	t.Setenv("CAELIS_APPROVAL_MCP_ACCOUNT", "synthetic-account-b")
+	t.Setenv("CAELIS_APPROVAL_MCP_ENDPOINT", "synthetic-endpoint-b")
+	changed, err := mcp.NewManager(ctx, []mcp.ServerSpec{spec}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer changed.Close()
+	select {
+	case <-changed.Initialized():
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	changedTools := changed.Tools()
+	if len(changedTools) != 1 || reflect.DeepEqual(ready[0].Definition().Metadata[tool.MetadataMCPSourceFingerprint], changedTools[0].Definition().Metadata[tool.MetadataMCPSourceFingerprint]) || !reflect.DeepEqual(ready[0].Definition().InputSchema, changedTools[0].Definition().InputSchema) {
+		t.Fatalf("effective environment did not change only source identity: before=%#v after=%#v", ready, changedTools)
+	}
+	if raw, err := os.ReadFile(envAudit); err != nil || string(raw) != "synthetic-account-b/synthetic-endpoint-b" {
+		t.Fatalf("stdio child did not receive changed inherited environment: %q, %v", raw, err)
+	}
+	changedSource := &runtimeDeferredSource{}
+	changedModel := &deferredRuntimeModel{source: changedSource, late: changedTools[0]}
+	approvals := 0
+	run, err = restarted.Run(ctx, agent.RunRequest{SessionRef: last.SessionRef, Input: "read changed account", ApprovalRequester: approvalRequesterFunc(func(_ context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+		approvals++
+		if req.Approval == nil || len(req.Approval.Options) != 4 {
+			t.Errorf("changed source approval = %#v", req.Approval)
+		}
+		return agent.ApprovalResponse{Outcome: "selected", OptionID: "cancel", Approved: false}, nil
+	}), AgentSpec: agent.AgentSpec{Model: changedModel, Tools: []tool.Tool{toolsearch.NewSource(changedSource, toolsearch.NewLexicalRanker())}, DeferredTools: changedSource}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := drainRunnerEvents(t, run.Handle); err != nil {
+		t.Fatal(err)
+	}
+	if raw, err := os.ReadFile(countPath); err != nil || string(raw) != "6" || approvals != 1 {
+		t.Fatalf("changed environment reused old grant: calls=%q approvals=%d err=%v", raw, approvals, err)
+	}
+	custom := policy.NamedMode{ID: "custom-mcp", Decide: func(_ context.Context, input policy.ToolContext) (policy.Decision, error) {
+		if input.Tool.Name != "docs__read" {
+			return policy.Decision{Action: policy.ActionAllow}, nil
+		}
+		return policy.Decision{Action: policy.ActionAskApproval, Reason: "confirm sensitive arguments", Approval: &session.ProtocolApproval{
+			ToolCall: session.ProtocolToolCall{ID: input.Call.ID, Name: input.Tool.Name, Kind: "other", RawInput: map[string]any{"sensitive": true}},
+			Options:  []session.ProtocolApprovalOption{{ID: "confirm_sensitive", Kind: "allow_once"}, {ID: "cancel_sensitive", Kind: "reject_once"}},
+		}}, nil
+	}}
+	customRuntime, err := New(Config{Sessions: restartedSessions, AgentFactory: chat.Factory{}, MCPGrants: restartedGrants,
+		PolicyRegistry: staticPolicyRegistry{mode: custom}, DefaultPolicyMode: custom.Name()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	customSource := &runtimeDeferredSource{}
+	customModel := &deferredRuntimeModel{source: customSource, late: changedTools[0]}
+	var tokens []string
+	var selected []string
+	run, err = customRuntime.Run(ctx, agent.RunRequest{SessionRef: last.SessionRef, Input: "sensitive changed-account read", ApprovalRequester: approvalRequesterFunc(func(_ context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+		tokens = append(tokens, req.PauseTokenID)
+		if len(req.Approval.Options) == 4 {
+			selected = append(selected, "allow_session")
+			return agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_session", Approved: true}, nil
+		}
+		if len(req.Approval.Options) != 2 || req.Approval.Options[0].ID != "confirm_sensitive" || req.Approval.ToolCall.RawInput["sensitive"] != true {
+			t.Errorf("custom per-call approval replaced: %#v", req.Approval)
+		}
+		selected = append(selected, "cancel_sensitive")
+		return agent.ApprovalResponse{Outcome: "selected", OptionID: "cancel_sensitive", Approved: false}, nil
+	}), AgentSpec: agent.AgentSpec{Model: customModel, Tools: []tool.Tool{toolsearch.NewSource(customSource, toolsearch.NewLexicalRanker())}, DeferredTools: customSource}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := drainRunnerEvents(t, run.Handle); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(selected, []string{"allow_session", "cancel_sensitive"}) || len(tokens) != 2 || tokens[0] == tokens[1] {
+		t.Fatalf("independent durable approvals = %v, tokens=%v", selected, tokens)
+	}
+	for i, tokenID := range tokens {
+		token, err := customRuntime.pauseToken(ctx, last.SessionRef, tokenID)
+		if err != nil || token.Status != session.PauseTokenResolved || token.OptionID != selected[i] {
+			t.Fatalf("durable condition %d = %#v, %v", i, token, err)
+		}
+	}
+	if raw, err := os.ReadFile(countPath); err != nil || string(raw) != "6" {
+		t.Fatalf("custom denial executed remote MCP call: count=%q, %v", raw, err)
 	}
 }

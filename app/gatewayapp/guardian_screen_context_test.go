@@ -114,6 +114,15 @@ func TestGuardianMCPActionIncludesSourceAndFourScopes(t *testing.T) {
 	if !strings.Contains(planned, `"allow_session"`) || !strings.Contains(planned, `"source-1"`) {
 		t.Fatalf("Guardian action = %s", planned)
 	}
+	req.Approval.Options = []approval.Option{{ID: "confirm_sensitive", Kind: "allow_once"}, {ID: "cancel_sensitive", Kind: "reject_once"}}
+	state, err = guardianScreenState(req, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source = state["action"].(map[string]any)["mcp_source"].(map[string]any)
+	if _, offered := source["scope_options"]; offered {
+		t.Fatal("custom per-call MCP approval inherited native source grant scopes")
+	}
 }
 
 func TestGuardianScreenContextNeverTruncatesUserOrAction(t *testing.T) {

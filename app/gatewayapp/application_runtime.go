@@ -2,6 +2,9 @@ package gatewayapp
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -140,6 +143,7 @@ func (a *workspaceConfigAssembler) assembleApplicationSnapshot(ctx context.Conte
 		Sessions: sessions, AgentFactory: chat.Factory{}, Compaction: compaction,
 		Diagnostics: a.deps.authorities.diagnostics, PolicyRegistry: policies, DefaultPolicyMode: mode,
 		MCPGrants:     a.deps.authorities.mcpGrants,
+		MCPGrantOwner: applicationMCPGrantOwner(binding.Scope),
 		SandboxPolicy: sandboxPolicy,
 		TaskStore:     a.deps.authorities.taskStore, TaskOutput: a.deps.authorities.taskOutput,
 		TaskActivityChanged: activity.taskChanged, TaskCommitted: activity.taskCommitted,
@@ -196,6 +200,15 @@ func (a *workspaceConfigAssembler) assembleApplicationSnapshot(ctx context.Conte
 	}
 	bundle = nil
 	return instance, nil
+}
+
+// applicationMCPGrantOwner binds reusable grants to the authenticated owner
+// of this independently revisioned Application configuration. Equal CWD and
+// server values from another connection do not transfer approval.
+func applicationMCPGrantOwner(scope application.Scope) string {
+	raw, _ := json.Marshal([]string{scope.PrincipalID, scope.ApplicationID, scope.ConnectionID})
+	hash := sha256.Sum256(raw)
+	return "application:" + hex.EncodeToString(hash[:])
 }
 
 // applicationNoNativeExecution advertises no filesystem/process capabilities.

@@ -83,7 +83,7 @@ func TestDefaultRegistryDoesNotExposeDangerFullAccessMode(t *testing.T) {
 	}
 }
 
-func TestWorkspaceWriteMCPRequiresFourChoiceApproval(t *testing.T) {
+func TestWorkspaceWriteMCPGateIsRuntimeOwned(t *testing.T) {
 	input := policy.ToolContext{Tool: tool.Definition{Name: "docs__read", Metadata: map[string]any{
 		tool.MetadataToolKind: tool.MetadataToolKindMCP, tool.MetadataPluginID: "fixture",
 		tool.MetadataMCPServer: "docs", tool.MetadataMCPTool: "read",
@@ -92,11 +92,18 @@ func TestWorkspaceWriteMCPRequiresFourChoiceApproval(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.Action != policy.ActionAskApproval || decision.Approval == nil || len(decision.Approval.Options) != 4 {
-		t.Fatalf("MCP decision = %#v", decision)
+	if decision.Action != policy.ActionAllow {
+		t.Fatalf("preset policy decision = %#v", decision)
 	}
-	if decision.Approval.Options[1].ID != "allow_session" || decision.Approval.Options[1].Kind != "allow_once" || decision.Approval.Options[2].Kind != "allow_always" || decision.Approval.Options[3].ID != "cancel" {
-		t.Fatalf("MCP options = %#v", decision.Approval.Options)
+	gate, err := MCPApprovalDecision(input, decision.Constraints)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gate.Action != policy.ActionAskApproval || gate.Approval == nil || len(gate.Approval.Options) != 4 {
+		t.Fatalf("Runtime MCP gate = %#v", gate)
+	}
+	if gate.Approval.Options[1].ID != "allow_session" || gate.Approval.Options[1].Kind != "allow_once" || gate.Approval.Options[2].Kind != "allow_always" || gate.Approval.Options[3].ID != "cancel" {
+		t.Fatalf("MCP options = %#v", gate.Approval.Options)
 	}
 }
 

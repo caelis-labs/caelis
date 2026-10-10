@@ -48,7 +48,7 @@ func guardianScreenPrompt() string {
 
 ` + guardianDecisionPolicy() + `
 
-Use only the supplied user messages and current action. There are no historical tool observations or additional tools in this classification. Option kind defines allow or reject. For MCP, the supplied mcp_source.scope_options defines each exact duration: allow_session uses ACP allow_once kind but grants only the current Session. Otherwise use kind for once or always. Never guess a scope from arbitrary names or IDs. Prefer once unless broader authorization is established. Choose only a supplied option; do not invent an abstention option or produce rationale.`
+Use only the supplied user messages and current action. There are no historical tool observations or additional tools in this classification. Option kind defines allow or reject. When mcp_source.scope_options is supplied, it defines each exact duration: allow_session uses ACP allow_once kind but grants only the current Session. Otherwise use kind for once or always. Never guess a scope from arbitrary names or IDs. Prefer once unless broader authorization is established. Choose only a supplied option; do not invent an abstention option or produce rationale.`
 }
 
 func guardianPolicyPrompt() string {
@@ -71,5 +71,5 @@ Only temporary directories are writable. The query network policy is inherited f
 
 func guardianDecisionOutput() string {
 	return `Output:
-Return exactly one JSON object. Allow: {"option_id":"listed allow option"}, without rationale. Deny: {"option_id":"listed reject option","rationale":"specific risk and task or authorization conflict"}. Do not output risk_level, user_authorization or outcome. Option kind defines allow/reject; for MCP use the supplied mcp_source.scope_options for exact duration, including current Session. For other approvals use the kind for once/always. Never guess from arbitrary names or IDs. Prefer once unless broader authorization is established. Control handles missing options; never invent an option.`
+Return exactly one JSON object. Allow: {"option_id":"listed allow option"}, without rationale. Deny: {"option_id":"listed reject option","rationale":"specific risk and task or authorization conflict"}. Do not output risk_level, user_authorization or outcome. Option kind defines allow/reject; when mcp_source.scope_options is supplied, use it for exact duration, including current Session. Otherwise use the kind for once/always. Never guess from arbitrary names or IDs. Prefer once unless broader authorization is established. Control handles missing options; never invent an option.`
 }

@@ -190,6 +190,10 @@ revisioned profile, so callers must supply already authorized launch or
 connection details without putting credentials in paths, arguments or URLs.
 The existing SDK MCP manager starts every service independently. Projected
 tool names use `<server>__<tool>`; `ToolSearch` discovers ready MCP tools.
+MCP Allow Always approval is reusable across Sessions of the authenticated
+connection only when they also select the same workspace and exact server/tool
+source. Equal directory paths and server values in another Application's
+independently owned configuration do not transfer approval.
 The restricted selector receives only this Application's ready MCP catalog and
 the active request's resolved provider model settings when unbound. It has no
 native or callback tools; an explicit ToolSearch provider or Jev binding may

@@ -39,7 +39,11 @@ type Config struct {
 	SandboxPolicy       sandbox.PolicySnapshot
 	DefaultApprovalMode string
 	// MCPGrants is shared by all Session Runtime activations in one Host.
-	MCPGrants                *MCPGrantStore
+	MCPGrants *MCPGrantStore
+	// MCPGrantOwner is a trusted configuration owner for durable MCP grants.
+	// Empty uses the ordinary Host owner; applications bind their authenticated
+	// connection scope here so independent configurations never share grants.
+	MCPGrantOwner            string
 	Controllers              controller.Backend
 	ControllerContextRouter  controller.ContextRouter
 	ControllerRecovery       controller.RecoveryCoordinator
@@ -82,6 +86,7 @@ type Runtime struct {
 	sandboxPolicy            sandbox.PolicySnapshot
 	defaultApprovalMode      approval.Mode
 	mcpGrants                *MCPGrantStore
+	mcpGrantOwner            string
 	controllers              controller.Backend
 	controllerContextRouter  controller.ContextRouter
 	controllerRecovery       controller.RecoveryCoordinator
@@ -130,6 +135,7 @@ func New(cfg Config) (*Runtime, error) {
 		sandboxPolicy:            sandbox.ClonePolicySnapshot(cfg.SandboxPolicy),
 		defaultApprovalMode:      approval.NormalizeMode(cfg.DefaultApprovalMode),
 		mcpGrants:                cfg.MCPGrants,
+		mcpGrantOwner:            strings.TrimSpace(cfg.MCPGrantOwner),
 		controllers:              cfg.Controllers,
 		controllerContextRouter:  cfg.ControllerContextRouter,
 		controllerRecovery:       cfg.ControllerRecovery,

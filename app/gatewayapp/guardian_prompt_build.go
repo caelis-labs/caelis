@@ -113,7 +113,7 @@ func guardianPlannedActionJSON(req kernel.ApprovalReviewRequest) (string, bool, 
 	}
 	toolName = firstNonEmpty(toolName, strings.TrimSpace(req.RuntimeRequest.Tool.Name), strings.TrimSpace(req.RuntimeRequest.Call.Name))
 	action["tool"] = firstNonEmpty(toolName, "unknown")
-	if source := guardianMCPSource(req.RuntimeRequest.Tool); source != nil {
+	if source := guardianMCPSource(req); source != nil {
 		action["mcp_source"] = source
 	}
 	if req.Approval != nil {

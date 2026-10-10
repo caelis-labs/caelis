@@ -6,6 +6,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/judgment"
+	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/internal/kernel"
 )
 
@@ -75,29 +76,47 @@ func guardianScreenSelection(req kernel.ApprovalReviewRequest, response judgment
 	if !guardianDistributionDominates(groups, winner, 20, .9) || !guardianScreenEvidenceSupports(winner, response.Answers) {
 		return fail()
 	}
-	selectedIndex := -1
+	nativeMCP := guardianNativeMCPScopeOptions(req)
+	onceIndex, expandedIndex := -1, -1
 	for index, option := range req.Approval.Options {
 		if kinds[index] != winner {
 			continue
 		}
-		once := option.Kind == "allow_once" || option.Kind == "reject_once"
-		if selectedIndex < 0 {
-			selectedIndex = index
-			continue
-		}
-		selected := req.Approval.Options[selectedIndex]
-		selectedOnce := selected.Kind == "allow_once" || selected.Kind == "reject_once"
-		if (once && !selectedOnce) || (once == selectedOnce && decision.Probabilities[option.ID] > decision.Probabilities[selected.ID]) {
-			selectedIndex = index
+		isOnce := option.Kind == "allow_once" || option.Kind == "reject_once"
+		isNativeSession := nativeMCP && option.ID == "allow_session"
+		if isOnce && !isNativeSession {
+			if onceIndex < 0 || decision.Probabilities[option.ID] > decision.Probabilities[req.Approval.Options[onceIndex].ID] {
+				onceIndex = index
+			}
+		} else if expandedIndex < 0 || decision.Probabilities[option.ID] > decision.Probabilities[req.Approval.Options[expandedIndex].ID] {
+			expandedIndex = index
 		}
 	}
-	selected := req.Approval.Options[selectedIndex]
-	// Without a once option, outcome agreement cannot establish persistent scope:
-	// require a decisive lead for the exact persistent option as well.
-	if selected.Kind != "allow_once" && selected.Kind != "reject_once" && !guardianDistributionDominates(decision.Probabilities, selected.ID, 20, .9) {
+	// Outcome agreement can support only a genuine once option. A broader
+	// scope needs a decisive lead for that exact option, even when ACP carries
+	// its native Session scope under allow_once kind.
+	if expandedIndex >= 0 && guardianDistributionDominates(decision.Probabilities, req.Approval.Options[expandedIndex].ID, 20, .9) {
+		return req.Approval.Options[expandedIndex], nil
+	}
+	if onceIndex < 0 {
 		return fail()
 	}
-	return selected, nil
+	return req.Approval.Options[onceIndex], nil
+}
+
+// Only the Runtime's exact four MCP options have a Session scope. Arbitrary
+// external option IDs retain their standard ACP kind semantics.
+func guardianNativeMCPScopeOptions(req kernel.ApprovalReviewRequest) bool {
+	if req.Approval == nil || !tool.IsMCPDefinition(req.RuntimeRequest.Tool) || len(req.Approval.Options) != 4 {
+		return false
+	}
+	want := [4]struct{ id, kind string }{{"allow_once", "allow_once"}, {"allow_session", "allow_once"}, {"allow_always", "allow_always"}, {"cancel", "reject_once"}}
+	for i, option := range req.Approval.Options {
+		if option.ID != want[i].id || option.Kind != want[i].kind {
+			return false
+		}
+	}
+	return true
 }
 
 // Compare normalized lead and odds over the runner-up. This uses the whole

@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -39,7 +40,7 @@ func TestPluginSystemE2E(t *testing.T) {
 	}
 	pluginRoot := filepath.Join(tmp, "caelis-e2e-plugin")
 	writePluginSystemE2EPlugin(t, pluginRoot)
-	base := AppConfig{Plugins: []PluginConfig{{
+	base := AppConfig{Runtime: RuntimeConfig{ApprovalMode: "manual"}, Plugins: []PluginConfig{{
 		ID:          "caelis-e2e-plugin",
 		Name:        "caelis-e2e-plugin",
 		Version:     "1.0.0",
@@ -58,6 +59,7 @@ func TestPluginSystemE2E(t *testing.T) {
 		StoreDir:     storeDir,
 		WorkspaceKey: "plugin-e2e-workspace",
 		WorkspaceCWD: workspaceDir,
+		ApprovalMode: "manual",
 		SkillDirs:    []string{filepath.Join(tmp, "skills")},
 		Sandbox:      SandboxConfig{RequestedType: "host"},
 		Model: ModelConfig{
@@ -105,7 +107,14 @@ func TestPluginSystemE2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
 	}
-	result, err := runHeadlessOnceForGatewayAppTest(context.Background(), stack, session, "plugin-e2e", "Run the Caelis plugin system E2E. Use the available MCP tool.", headless.Options{})
+	result, err := runHeadlessOnceForGatewayAppTest(context.Background(), stack, session, "plugin-e2e", "Run the Caelis plugin system E2E. Use the available MCP tool.", headless.Options{
+		ResolveApproval: func(_ context.Context, request headless.ApprovalRequest) (approval.Decision, error) {
+			if request.Payload == nil || request.Payload.ToolName != pluginE2EToolName {
+				t.Fatalf("unexpected E2E approval request: %+v", request.Payload)
+			}
+			return approval.Decision{OptionID: "allow_once"}, nil
+		},
+	})
 	if err != nil {
 		t.Fatalf("headless RunSessionOnce() error = %v", err)
 	}
