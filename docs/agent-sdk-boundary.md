@@ -224,6 +224,21 @@ cannot redirect an already-bound name. Replay discoveries whose server is still
 initializing become visible only when that definition is ready, under the same
 budgets.
 
+Every MCP invocation reaches Runtime policy admission, including tools loaded
+through ToolSearch, plugins, and injected MCP sources. A ready connection,
+discovery, or `readOnlyHint` is not execution approval. The default MCP approval
+offers Allow Once, Allow this session, Allow Always, and Cancel. Session grants
+bind the current canonical Session ID and creation time across Turns. Always grants bind the Host
+workspace, plugin, server, projected and remote tool names, and fingerprint of the accepted server
+configuration, declared server version, and tool definition across Sessions and restarts. A changed
+source or schema needs new approval. The Host keeps grants in
+`control/mcp-grants.json`; stopping the Host and deleting that file revokes all
+grants. The Host-owned `MCPGrantStore.Revoke` API removes an individual grant
+while running. Only a selected matching option authorizes the remote call;
+approval failure, cancellation, and invalid responses fail closed. Explicit
+full-access policy still requires this MCP approval; its existing built-in
+tool behavior is unchanged.
+
 ToolSearch defaults to a private model selector. Every ready tool's name and
 description in the current scope is considered, with no initial tool schemas or
 parent conversation. A model request holds at most 96 KiB of catalog metadata

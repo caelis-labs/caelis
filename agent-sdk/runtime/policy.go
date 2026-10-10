@@ -3,12 +3,16 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"strings"
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
+	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -39,6 +43,7 @@ type policyWrappedTool struct {
 	sandboxPolicy sandbox.PolicySnapshot
 	tool          tool.Tool
 	approval      approvalContext
+	mcpGrants     *MCPGrantStore
 }
 
 type rejectedPolicyMode struct {
@@ -83,6 +88,7 @@ func (r *Runtime) wrapToolsForPolicy(
 			sandboxPolicy: sandbox.ClonePolicySnapshot(r.sandboxPolicy),
 			tool:          one,
 			approval:      approval,
+			mcpGrants:     r.mcpGrants,
 		})
 	}
 	return out
@@ -153,6 +159,31 @@ func (t policyWrappedTool) Call(ctx context.Context, call tool.Call) (tool.Resul
 	if err != nil {
 		return tool.Result{}, err
 	}
+	// MCP is a mandatory execution boundary, including custom and explicit
+	// full-access policy profiles. ToolSearch and server setup grant no authority.
+	if tool.IsMCPDefinition(input.Tool) && decision.Action != policy.ActionDeny {
+		grant, err := mcpGrantFor(input.Tool, t.session)
+		if err != nil {
+			return tool.Result{}, err
+		}
+		if allowed, err := t.mcpGrants.Allows(grant, t.sessionRef.SessionID); err != nil {
+			return tool.Result{}, err
+		} else if allowed {
+			decision.Action = policy.ActionAllow
+		} else {
+			original := decision
+			decision, err = presets.MCPApprovalDecision(input, original.Constraints)
+			if err != nil {
+				return tool.Result{}, err
+			}
+			for key, value := range original.Metadata {
+				if decision.Metadata == nil {
+					decision.Metadata = map[string]any{}
+				}
+				decision.Metadata[key] = value
+			}
+		}
+	}
 	switch decision.Action {
 	case policy.ActionAllow:
 		call.ModelStep.MarkAdmissionComplete()
@@ -204,10 +235,44 @@ func (t policyWrappedTool) requestApproval(
 	if err != nil {
 		return tool.Result{}, err
 	}
+	if tool.IsMCPDefinition(t.tool.Definition()) {
+		return t.resolveMCPApproval(ctx, call, approvedCall, decision, resp)
+	}
 	if resp.Approved {
 		return t.tool.Call(ctx, approvedCall)
 	}
 	return policyDecisionResultWithOutcome(call, t.tool.Definition(), decision, resp), nil
+}
+
+func (t policyWrappedTool) resolveMCPApproval(ctx context.Context, call, approvedCall tool.Call, decision policy.Decision, resp agent.ApprovalResponse) (tool.Result, error) {
+	if resp.Outcome != "selected" {
+		return policyDecisionResultWithOutcome(call, t.tool.Definition(), decision, resp), nil
+	}
+	option, meaning, err := approval.ResolveStrictOption(approval.NormalizeProtocolOptions(decision.Approval.Options), resp.OptionID)
+	if err != nil || (meaning == approval.OptionDecisionAllow) != resp.Approved {
+		return tool.Result{}, fmt.Errorf("invalid MCP approval decision: %w", errors.Join(err, errors.New("option and approval result disagree")))
+	}
+	if meaning != approval.OptionDecisionAllow {
+		return policyDecisionResultWithOutcome(call, t.tool.Definition(), decision, resp), nil
+	}
+	grant, err := mcpGrantFor(t.tool.Definition(), t.session)
+	if err != nil {
+		return tool.Result{}, err
+	}
+	switch option.ID {
+	case "allow_once":
+	case "allow_session":
+		if err := t.mcpGrants.Grant(grant, "session", t.sessionRef.SessionID); err != nil {
+			return tool.Result{}, err
+		}
+	case "allow_always":
+		if err := t.mcpGrants.Grant(grant, "always", ""); err != nil {
+			return tool.Result{}, err
+		}
+	default:
+		return tool.Result{}, errors.New("unknown MCP approval scope")
+	}
+	return t.tool.Call(ctx, approvedCall)
 }
 
 func (t policyWrappedTool) resolveApproval(ctx context.Context, request agent.ApprovalRequest) (agent.ApprovalResponse, error) {

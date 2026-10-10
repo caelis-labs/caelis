@@ -66,6 +66,28 @@ func TestApprovalDecisionFromPromptPreservesRequestID(t *testing.T) {
 	}
 }
 
+func TestMCPApprovalFourChoicesRetainScopeInTUI(t *testing.T) {
+	req := &approvalPayload{RequestID: "mcp-approval", ToolName: "docs__read", RawInput: map[string]any{"key": "fixture"}, Options: []approvalOption{
+		{ID: "allow_once", Name: "Allow Once", Kind: "allow_once"},
+		{ID: "allow_session", Name: "Allow this session", Kind: "allow_once"},
+		{ID: "allow_always", Name: "Allow Always", Kind: "allow_always"},
+		{ID: "cancel", Name: "Cancel", Kind: "reject_once"},
+	}}
+	prompt := approvalToPromptRequest(req, make(chan PromptResponse, 1))
+	if len(prompt.Choices) != 4 || prompt.AllowFreeformInput {
+		t.Fatalf("TUI choices = %#v", prompt.Choices)
+	}
+	for i, choice := range req.Options {
+		if prompt.Choices[i].Value != choice.ID || prompt.Choices[i].Label != choice.Name || prompt.Choices[i].Detail != choice.Kind {
+			t.Fatalf("TUI choice = %#v, want %#v", prompt.Choices[i], choice)
+		}
+		decision := approvalDecisionFromPrompt(req, PromptResponse{Line: choice.ID})
+		if decision.RequestID != req.RequestID || decision.OptionID != choice.ID || decision.Approved != (i < 3) {
+			t.Fatalf("TUI decision = %#v", decision)
+		}
+	}
+}
+
 func hasPromptDetail(details []PromptDetail, want PromptDetail) bool {
 	for _, detail := range details {
 		if detail.Label == want.Label && detail.Value == want.Value && detail.Emphasis == want.Emphasis {

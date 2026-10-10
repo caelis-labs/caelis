@@ -10,6 +10,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/filesystem"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/sendmessage"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
@@ -63,6 +64,9 @@ func WorkspaceWriteMode() policy.Mode {
 		ID: ModeWorkspaceWrite,
 		Decide: func(_ context.Context, input policy.ToolContext) (policy.Decision, error) {
 			def := workspaceWriteConstraints(input.Options)
+			if tool.IsMCPDefinition(input.Tool) {
+				return MCPApprovalDecision(input, def)
+			}
 			switch policyClass(input) {
 			case builtinPolicyReadPath, builtinPolicySearchPath, builtinPolicyGlobPath:
 				if err := ensureReadPathsOutsideDefaultHiddenRoots(input); err != nil {
@@ -83,10 +87,32 @@ func WorkspaceWriteMode() policy.Mode {
 	}
 }
 
-// DangerFullAccessMode allows every assembled tool to execute directly on the
-// Host without policy approval or command filtering. Callers must register
-// this exceptional mode explicitly; it is not a substitute for sandbox
-// isolation.
+// MCPApprovalDecision requests one of the four executable MCP scopes. ACP
+// carries Session under allow_once kind and Cancel under reject_once kind;
+// the stable option IDs preserve the distinct choices through every Surface.
+func MCPApprovalDecision(input policy.ToolContext, constraints sandbox.Constraints) (policy.Decision, error) {
+	decision, err := askApproval("MCP tool call requires approval", constraints, input)
+	if err != nil {
+		return policy.Decision{}, err
+	}
+	decision.Approval.ToolCall.Kind = "other" // ACP tool-call kind; MCP identity stays in trusted metadata.
+	plugin, _ := input.Tool.Metadata[tool.MetadataPluginID].(string)
+	server, _ := input.Tool.Metadata[tool.MetadataMCPServer].(string)
+	remote, _ := input.Tool.Metadata[tool.MetadataMCPTool].(string)
+	decision.Approval.ToolCall.Title = "MCP " + strings.TrimSpace(plugin+"/"+server+"/"+remote)
+	decision.Approval.Options = []session.ProtocolApprovalOption{
+		{ID: "allow_once", Name: "Allow Once", Kind: "allow_once"},
+		{ID: "allow_session", Name: "Allow this session", Kind: "allow_once"},
+		{ID: "allow_always", Name: "Allow Always", Kind: "allow_always"},
+		{ID: "cancel", Name: "Cancel", Kind: "reject_once"},
+	}
+	return decision, nil
+}
+
+// DangerFullAccessMode allows assembled tools on the Host without this preset's
+// approval or command filtering. Runtime still requires MCP approval. Callers
+// must register this exceptional mode explicitly; it is not a substitute for
+// sandbox isolation.
 func DangerFullAccessMode() policy.Mode {
 	return policy.NamedMode{
 		ID: ModeDangerFullAccess,

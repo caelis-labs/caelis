@@ -139,6 +139,7 @@ func (a *workspaceConfigAssembler) assembleApplicationSnapshot(ctx context.Conte
 	rt, err := runtime.New(runtime.Config{
 		Sessions: sessions, AgentFactory: chat.Factory{}, Compaction: compaction,
 		Diagnostics: a.deps.authorities.diagnostics, PolicyRegistry: policies, DefaultPolicyMode: mode,
+		MCPGrants:     a.deps.authorities.mcpGrants,
 		SandboxPolicy: sandboxPolicy,
 		TaskStore:     a.deps.authorities.taskStore, TaskOutput: a.deps.authorities.taskOutput,
 		TaskActivityChanged: activity.taskChanged, TaskCommitted: activity.taskCommitted,

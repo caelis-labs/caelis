@@ -33,11 +33,13 @@ type Config struct {
 	Compactor      compact.Engine
 	// Diagnostics receives fixed Runtime classifications only. Callers must not
 	// attach user content, Session identities, or workspace paths.
-	Diagnostics              *slog.Logger
-	PolicyRegistry           policy.Registry
-	DefaultPolicyMode        string
-	SandboxPolicy            sandbox.PolicySnapshot
-	DefaultApprovalMode      string
+	Diagnostics         *slog.Logger
+	PolicyRegistry      policy.Registry
+	DefaultPolicyMode   string
+	SandboxPolicy       sandbox.PolicySnapshot
+	DefaultApprovalMode string
+	// MCPGrants is shared by all Session Runtime activations in one Host.
+	MCPGrants                *MCPGrantStore
 	Controllers              controller.Backend
 	ControllerContextRouter  controller.ContextRouter
 	ControllerRecovery       controller.RecoveryCoordinator
@@ -79,6 +81,7 @@ type Runtime struct {
 	defaultPolicyMode        string
 	sandboxPolicy            sandbox.PolicySnapshot
 	defaultApprovalMode      approval.Mode
+	mcpGrants                *MCPGrantStore
 	controllers              controller.Backend
 	controllerContextRouter  controller.ContextRouter
 	controllerRecovery       controller.RecoveryCoordinator
@@ -126,6 +129,7 @@ func New(cfg Config) (*Runtime, error) {
 		defaultPolicyMode:        strings.TrimSpace(cfg.DefaultPolicyMode),
 		sandboxPolicy:            sandbox.ClonePolicySnapshot(cfg.SandboxPolicy),
 		defaultApprovalMode:      approval.NormalizeMode(cfg.DefaultApprovalMode),
+		mcpGrants:                cfg.MCPGrants,
 		controllers:              cfg.Controllers,
 		controllerContextRouter:  cfg.ControllerContextRouter,
 		controllerRecovery:       cfg.ControllerRecovery,

@@ -92,6 +92,32 @@ func TestSDKPermissionRequestFromApprovalUsesStrictStandardWire(t *testing.T) {
 	}
 }
 
+func TestMCPApprovalScopesSurviveACPWireAndSelection(t *testing.T) {
+	options := []session.ProtocolApprovalOption{
+		{ID: "allow_once", Name: "Allow Once", Kind: "allow_once"},
+		{ID: "allow_session", Name: "Allow this session", Kind: "allow_once"},
+		{ID: "allow_always", Name: "Allow Always", Kind: "allow_always"},
+		{ID: "cancel", Name: "Cancel", Kind: "reject_once"},
+	}
+	approval := &session.ProtocolApproval{ToolCall: session.ProtocolToolCall{ID: "mcp-1", Name: "docs__read", Kind: "other", RawInput: map[string]any{"key": "fixture"}}, Options: options}
+	request, err := sdkPermissionRequestFromApproval(session.SessionRef{SessionID: "session-1"}, approval, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(request.Options) != len(options) {
+		t.Fatalf("ACP options = %#v", request.Options)
+	}
+	for i, option := range options {
+		if string(request.Options[i].OptionId) != option.ID || string(request.Options[i].Kind) != option.Kind || request.Options[i].Name != option.Name {
+			t.Fatalf("ACP option %d = %#v, want %#v", i, request.Options[i], option)
+		}
+		response := approvalResponseFromSDK(acpsdk.RequestPermissionResponse{Outcome: acpsdk.NewRequestPermissionOutcomeSelected(acpsdk.PermissionOptionId(option.ID))}, approval)
+		if response.OptionID != option.ID || response.Approved != (i < 3) {
+			t.Fatalf("ACP response = %#v", response)
+		}
+	}
+}
+
 func TestSDKPermissionRequestFromApprovalRejectsInvalidWire(t *testing.T) {
 	t.Parallel()
 

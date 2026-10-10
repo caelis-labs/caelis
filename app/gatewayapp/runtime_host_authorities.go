@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 
+	"github.com/caelis-labs/caelis/agent-sdk/runtime"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/task/output"
@@ -62,6 +63,7 @@ type runtimeHostAuthorities struct {
 	controlFeeds            appserver.FeedRegistry
 	controlFeedLifecycle    appserver.FeedRegistryLifecycle
 	approvalRecovery        *appserver.ApprovalRecoveryGate
+	mcpGrants               *runtime.MCPGrantStore
 	codexAuth               *codexauth.Manager
 	grokAuth                *grokauth.Manager
 	apiKeyCredentials       *credentialstore.Store

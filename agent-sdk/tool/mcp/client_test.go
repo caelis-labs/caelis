@@ -269,6 +269,9 @@ func TestMCPToolCallServerExitReturnsErrorResult(t *testing.T) {
 	if len(tools) != 1 {
 		t.Fatalf("expected 1 tool, got %d", len(tools))
 	}
+	if source, _ := tools[0].Definition().Metadata[tool.MetadataMCPSourceFingerprint].(string); len(source) != 64 {
+		t.Fatalf("ready MCP tool has no source fingerprint: %q", source)
+	}
 	res, err := tools[0].Call(ctx, tool.Call{
 		ID:    "original-call",
 		Name:  tools[0].Definition().Name,

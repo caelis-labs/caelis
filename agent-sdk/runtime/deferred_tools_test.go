@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"iter"
+	"path/filepath"
 	"slices"
 	"sync"
 	"testing"
@@ -12,6 +13,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	inmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
 )
@@ -70,10 +72,14 @@ func TestRuntimeLateMCPUsesPolicyAndExecutionJournal(t *testing.T) {
 			name = "denied"
 		}
 		t.Run(name, func(t *testing.T) {
-			service, active := newJournalTestSession(t, "late-mcp-"+name)
+			service := inmemory.NewStore(inmemory.Config{SessionIDGenerator: func() string { return "late-mcp-" + name }})
+			active, err := service.StartSession(t.Context(), session.StartSessionRequest{AppName: "caelis", UserID: "user-1", Workspace: session.WorkspaceRef{Key: "fixture", CWD: t.TempDir()}})
+			if err != nil {
+				t.Fatal(err)
+			}
 			source := &runtimeDeferredSource{}
 			invoked, decisions := 0, 0
-			late := tool.NamedTool{Def: tool.Definition{Name: "docs__read", Description: "Read docs", InputSchema: map[string]any{"type": "object"}, Metadata: map[string]any{tool.MetadataToolKind: tool.MetadataToolKindMCP}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
+			late := tool.NamedTool{Def: tool.Definition{Name: "docs__read", Description: "Read docs", InputSchema: map[string]any{"type": "object"}, Metadata: map[string]any{tool.MetadataToolKind: tool.MetadataToolKindMCP, tool.MetadataPluginID: "fixture", tool.MetadataMCPServer: "docs", tool.MetadataMCPTool: "read", tool.MetadataMCPSourceFingerprint: "fixture-v1"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
 				invoked++
 				return tool.Result{Content: []model.Part{model.NewTextPart("read")}}, nil
 			}}
@@ -87,7 +93,20 @@ func TestRuntimeLateMCPUsesPolicyAndExecutionJournal(t *testing.T) {
 				}
 				return policy.Decision{Action: policy.ActionAllow}, nil
 			}}}
-			runtime, err := New(Config{Sessions: service, AgentFactory: chat.Factory{}, PolicyRegistry: registry, DefaultPolicyMode: "test"})
+			grants, err := NewMCPGrantStore(filepath.Join(t.TempDir(), "mcp-grants.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !deny {
+				grant, err := mcpGrantFor(late.Definition(), active)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := grants.Grant(grant, "session", active.SessionID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			runtime, err := New(Config{Sessions: service, AgentFactory: chat.Factory{}, PolicyRegistry: registry, DefaultPolicyMode: "test", MCPGrants: grants})
 			if err != nil {
 				t.Fatal(err)
 			}

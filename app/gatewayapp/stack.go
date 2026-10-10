@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/runtime"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
@@ -451,6 +452,10 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	approvalRecovery := appserver.NewApprovalRecoveryGate(appserver.ApprovalRecoveryGateConfig{
 		Store: sessions, FenceOwnerID: fenceOwnerID, PriorHostFences: priorHostFences, Diagnostics: runtimeDiagnostics,
 	})
+	mcpGrants, err := runtime.NewMCPGrantStore(filepath.Join(storeDir, "control", "mcp-grants.json"))
+	if err != nil {
+		return nil, fmt.Errorf("gatewayapp: open MCP grants: %w", err)
+	}
 	cursorSecret, err := loadOrCreateControlClientCursorSecret(storeDir)
 	if err != nil {
 		return nil, err
@@ -582,6 +587,7 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 				controlFeeds:            controlFeeds,
 				controlFeedLifecycle:    controlFeeds,
 				approvalRecovery:        approvalRecovery,
+				mcpGrants:               mcpGrants,
 				codexAuth:               codexAuth,
 				grokAuth:                grokAuth,
 				apiKeyCredentials:       apiKeyCredentials,
