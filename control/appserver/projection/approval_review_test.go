@@ -86,3 +86,36 @@ func TestLegacyApprovalDecisionProjectsWithoutItemID(t *testing.T) {
 		t.Fatalf("legacy review JSON = %s, %v", data, err)
 	}
 }
+
+func TestMCPApprovalOptionsSurviveAppServerProjectionAndWire(t *testing.T) {
+	options := []session.ProtocolApprovalOption{
+		{ID: "allow_once", Name: "Allow Once", Kind: "allow_once"},
+		{ID: "allow_session", Name: "Allow this session", Kind: "allow_once"},
+		{ID: "allow_always", Name: "Allow Always", Kind: "allow_always"},
+		{ID: "cancel", Name: "Cancel", Kind: "reject_once"},
+	}
+	event := &session.Event{ID: "mcp-approval", SessionID: "session-1", Type: session.EventTypeLifecycle,
+		Protocol: &session.EventProtocol{Method: session.ProtocolMethodRequestPermission, Permission: &session.ProtocolApproval{
+			ToolCall: session.ProtocolToolCall{ID: "mcp-call", Name: "docs__read", Kind: "other", RawInput: map[string]any{"key": "fixture"}},
+			Options:  options,
+		}},
+	}
+	projected := projection.ProjectSessionEventEnvelope(eventstream.Envelope{SessionID: "session-1"}, event)
+	if len(projected) != 1 || projected[0].Permission == nil || len(projected[0].Permission.Options) != len(options) {
+		t.Fatalf("app-server MCP approval projection = %#v", projected)
+	}
+	wire, err := wirev1.MarshalEnvelope(projected[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := wirev1.UnmarshalEnvelope(wire)
+	if err != nil || decoded.Permission == nil || len(decoded.Permission.Options) != len(options) {
+		t.Fatalf("app-server MCP approval wire = %#v, %v", decoded, err)
+	}
+	for i, option := range options {
+		actual := decoded.Permission.Options[i]
+		if string(actual.OptionId) != option.ID || actual.Name != option.Name || string(actual.Kind) != option.Kind {
+			t.Fatalf("app-server MCP option %d = %#v, want %#v", i, actual, option)
+		}
+	}
+}

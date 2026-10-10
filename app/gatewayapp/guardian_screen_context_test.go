@@ -9,6 +9,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/judgment"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
 func TestGuardianScreenContextExcludesAllToolHistory(t *testing.T) {
@@ -89,6 +90,38 @@ func TestGuardianScreenContextPreservesOnlyOriginalOptions(t *testing.T) {
 		if options[option.ID] != option {
 			t.Fatalf("option changed: %v", option)
 		}
+	}
+}
+
+func TestGuardianMCPActionIncludesSourceAndFourScopes(t *testing.T) {
+	req := guardianWindowRequest(t, "mcp")
+	req.Approval.ToolName = "docs__read"
+	req.Approval.RawInput = map[string]any{"key": "fixture"}
+	req.Approval.Options = []approval.Option{{ID: "allow_once", Kind: "allow_once"}, {ID: "allow_session", Kind: "allow_once"}, {ID: "allow_always", Kind: "allow_always"}, {ID: "cancel", Kind: "reject_once"}}
+	req.RuntimeRequest.Tool = tool.Definition{Name: "docs__read", Metadata: map[string]any{tool.MetadataToolKind: tool.MetadataToolKindMCP, tool.MetadataPluginID: "fixture", tool.MetadataMCPServer: "docs", tool.MetadataMCPTool: "read", tool.MetadataMCPSourceFingerprint: "source-1"}}
+	state, err := guardianScreenState(req, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := state["action"].(map[string]any)["mcp_source"].(map[string]any)
+	if source["plugin"] != "fixture" || source["server"] != "docs" || source["remote_tool"] != "read" || len(source["scope_options"].(map[string]any)) != 4 {
+		t.Fatalf("Guardian screening source = %#v", source)
+	}
+	planned, _, err := guardianPlannedActionJSON(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(planned, `"allow_session"`) || !strings.Contains(planned, `"source-1"`) {
+		t.Fatalf("Guardian action = %s", planned)
+	}
+	req.Approval.Options = []approval.Option{{ID: "confirm_sensitive", Kind: "allow_once"}, {ID: "cancel_sensitive", Kind: "reject_once"}}
+	state, err = guardianScreenState(req, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source = state["action"].(map[string]any)["mcp_source"].(map[string]any)
+	if _, offered := source["scope_options"]; offered {
+		t.Fatal("custom per-call MCP approval inherited native source grant scopes")
 	}
 }
 

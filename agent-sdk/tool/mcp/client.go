@@ -2,6 +2,9 @@ package mcp
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -25,7 +28,10 @@ type Client struct {
 	spec      ServerSpec
 	session   *mcpsdk.ClientSession
 	transport string
-	cancel    context.CancelFunc
+	// launchIdentity is computed from the stdio command's effective startup
+	// environment, before Connect. It contains no environment values.
+	launchIdentity string
+	cancel         context.CancelFunc
 
 	closeOnce sync.Once
 	closed    chan struct{}
@@ -50,7 +56,7 @@ func StartClient(ctx context.Context, spec ServerSpec) (*Client, error) {
 }
 
 func startClientWithHTTPClient(ctx context.Context, spec ServerSpec, httpClient *http.Client) (*Client, error) {
-	transport, transportName, err := transportForSpecWithHTTPClient(spec, httpClient)
+	transport, transportName, launchIdentity, err := transportForSpecWithIdentity(spec, httpClient)
 	if err != nil {
 		return nil, err
 	}
@@ -68,11 +74,12 @@ func startClientWithHTTPClient(ctx context.Context, spec ServerSpec, httpClient 
 		return nil, fmt.Errorf("connect %s MCP server %s/%s: %w", transportName, spec.PluginID, spec.Name, err)
 	}
 	connected := &Client{
-		spec:      spec,
-		session:   session,
-		transport: transportName,
-		cancel:    cancel,
-		closed:    make(chan struct{}),
+		spec:           spec,
+		session:        session,
+		transport:      transportName,
+		launchIdentity: launchIdentity,
+		cancel:         cancel,
+		closed:         make(chan struct{}),
 	}
 	// Observe process/connection exit independently of tool calls. A cancelled
 	// DTW script can leave its supervisor alive; only the connection closing
@@ -121,20 +128,25 @@ func connectWithTimeout(ctx context.Context, client *mcpsdk.Client, lifetimeCtx 
 }
 
 func transportForSpecWithHTTPClient(spec ServerSpec, httpClient *http.Client) (mcpsdk.Transport, string, error) {
+	transport, name, _, err := transportForSpecWithIdentity(spec, httpClient)
+	return transport, name, err
+}
+
+func transportForSpecWithIdentity(spec ServerSpec, httpClient *http.Client) (mcpsdk.Transport, string, string, error) {
 	transportName := NormalizeTransport(spec.Transport, spec.Command, spec.URL)
 	switch transportName {
 	case TransportStdio:
 		workDir := strings.TrimSpace(spec.WorkDir)
 		if workDir == "" {
-			return nil, "", fmt.Errorf("workDir is required for stdio MCP server %s/%s", spec.PluginID, spec.Name)
+			return nil, "", "", fmt.Errorf("workDir is required for stdio MCP server %s/%s", spec.PluginID, spec.Name)
 		}
 		command := strings.TrimSpace(spec.Command)
 		if command == "" {
-			return nil, "", fmt.Errorf("command is required for stdio MCP server %s/%s", spec.PluginID, spec.Name)
+			return nil, "", "", fmt.Errorf("command is required for stdio MCP server %s/%s", spec.PluginID, spec.Name)
 		}
 		if spec.DataDir != "" {
 			if err := ensurePluginDataDir(spec.DataDir, workDir); err != nil {
-				return nil, "", fmt.Errorf("plugin data directory: %w", err)
+				return nil, "", "", fmt.Errorf("plugin data directory: %w", err)
 			}
 		}
 		cmd := exec.Command(resolveExecutable(command, workDir), spec.Args...)
@@ -152,29 +164,61 @@ func transportForSpecWithHTTPClient(spec ServerSpec, httpClient *http.Client) (m
 		for _, key := range keys {
 			cmd.Env = setProcessEnvironment(cmd.Env, key, spec.Env[key])
 		}
-		return &mcpsdk.CommandTransport{Command: cmd}, transportName, nil
+		// Environ applies exec's actual deduplication and PWD handling. Freeze
+		// those bytes on the Command and hash a stable ordering for approval;
+		// rebuilding the tool list must not sample os.Environ again.
+		cmd.Env = cmd.Environ()
+		identity, err := stdioLaunchIdentity(cmd.Path, cmd.Env)
+		if err != nil {
+			return nil, "", "", err
+		}
+		return &mcpsdk.CommandTransport{Command: cmd}, transportName, identity, nil
 	case TransportStreamableHTTP:
 		endpoint := strings.TrimSpace(spec.URL)
 		if endpoint == "" {
-			return nil, "", fmt.Errorf("URL is required for streamable HTTP MCP server %s/%s", spec.PluginID, spec.Name)
+			return nil, "", "", fmt.Errorf("URL is required for streamable HTTP MCP server %s/%s", spec.PluginID, spec.Name)
 		}
 		return &mcpsdk.StreamableClientTransport{
 			Endpoint:             endpoint,
 			HTTPClient:           httpClientWithHeaders(httpClient, endpoint, spec.Headers),
 			DisableStandaloneSSE: true,
-		}, transportName, nil
+		}, transportName, "", nil
 	case TransportSSE:
 		endpoint := strings.TrimSpace(spec.URL)
 		if endpoint == "" {
-			return nil, "", fmt.Errorf("URL is required for SSE MCP server %s/%s", spec.PluginID, spec.Name)
+			return nil, "", "", fmt.Errorf("URL is required for SSE MCP server %s/%s", spec.PluginID, spec.Name)
 		}
 		return &mcpsdk.SSEClientTransport{
 			Endpoint:   endpoint,
 			HTTPClient: httpClientWithHeaders(httpClient, endpoint, spec.Headers),
-		}, transportName, nil
+		}, transportName, "", nil
 	default:
-		return nil, "", fmt.Errorf("unsupported transport %q for MCP server %s/%s", spec.Transport, spec.PluginID, spec.Name)
+		return nil, "", "", fmt.Errorf("unsupported transport %q for MCP server %s/%s", spec.Transport, spec.PluginID, spec.Name)
 	}
+}
+
+func stdioLaunchIdentity(path string, environment []string) (string, error) {
+	entries := make([]string, 0, len(environment))
+	for _, entry := range environment {
+		key, value, ok := strings.Cut(entry, "=")
+		if !ok {
+			return "", errors.New("invalid stdio MCP environment entry")
+		}
+		if runtime.GOOS == "windows" {
+			key = strings.ToUpper(key)
+		}
+		entries = append(entries, key+"="+value)
+	}
+	slices.Sort(entries)
+	raw, err := json.Marshal(struct {
+		Path string
+		Env  []string
+	}{path, entries})
+	if err != nil {
+		return "", err
+	}
+	hash := sha256.Sum256(raw)
+	return hex.EncodeToString(hash[:]), nil
 }
 
 func ensurePluginDataDir(dataDir, workDir string) error {

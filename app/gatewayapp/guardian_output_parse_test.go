@@ -151,6 +151,31 @@ func TestParseGuardianAssessmentForModePreservesStrictDecisionValidation(t *test
 	}
 }
 
+func TestGuardianRetainsExactMCPScopeChoice(t *testing.T) {
+	options := []kernel.ApprovalOption{{ID: "allow_once", Kind: "allow_once"}, {ID: "allow_session", Kind: "allow_once"}, {ID: "allow_always", Kind: "allow_always"}, {ID: "cancel", Kind: "reject_once"}}
+	payload := &kernel.ApprovalPayload{Options: options}
+	for _, tc := range []struct {
+		id       string
+		approved bool
+	}{{"allow_once", true}, {"allow_session", true}, {"allow_always", true}, {"cancel", false}} {
+		decisionJSON := `{"option_id":"` + tc.id + `"}`
+		if !tc.approved {
+			decisionJSON = `{"option_id":"` + tc.id + `","rationale":"The current tool call is not authorized."}`
+		}
+		parsed, err := parseGuardianAssessmentForMode(decisionJSON, model.OutputModeSchema, options)
+		if err != nil {
+			t.Fatal(err)
+		}
+		decision, err := finalizeGuardianDecision(payload, parsed)
+		if err != nil || decision.OptionID != tc.id || decision.Approved != tc.approved {
+			t.Fatalf("Guardian choice %s = %#v, %v", tc.id, decision, err)
+		}
+	}
+	if _, err := parseGuardianAssessmentForMode(`{"option_id":"not_offered"}`, model.OutputModeSchema, options); err == nil {
+		t.Fatal("unoffered Guardian choice accepted")
+	}
+}
+
 func TestParseGuardianAssessmentForModeRejectsUnsupportedMode(t *testing.T) {
 	t.Parallel()
 

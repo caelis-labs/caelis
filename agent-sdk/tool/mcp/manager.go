@@ -3,6 +3,8 @@ package mcp
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"maps"
 	"sort"
@@ -192,6 +194,32 @@ func (mgr *Manager) rebuildToolsLocked() {
 				continue
 			}
 			name := formatToolName(spec.Name, info.Name)
+			var implementation *mcpsdk.Implementation
+			var protocolVersion string
+			if client.session != nil {
+				if initialized := client.session.InitializeResult(); initialized != nil {
+					implementation, protocolVersion = initialized.ServerInfo, initialized.ProtocolVersion
+				}
+			}
+			identitySpec := spec
+			if client.transport == TransportStdio && client.launchIdentity != "" {
+				// The effective startup snapshot, not the pre-merge Env map or
+				// clean/inherit flag, identifies the environment the child saw.
+				identitySpec.Env = nil
+				identitySpec.CleanEnvironment = false
+			}
+			sourceBytes, err := json.Marshal(struct {
+				Server          ServerSpec
+				LaunchIdentity  string
+				Implementation  *mcpsdk.Implementation
+				ProtocolVersion string
+				Tool            *mcpsdk.Tool
+			}{identitySpec, client.launchIdentity, implementation, protocolVersion, info})
+			if err != nil {
+				mgr.addWarning(key, fmt.Sprintf("tool %s quarantined: cannot identify source: %v", toolLabel, err))
+				continue
+			}
+			sourceHash := sha256.Sum256(sourceBytes)
 			legacyNames := legacyToolNames(spec, info.Name)
 			if winner := toolsByProjectedName[name]; winner != nil {
 				winner.addReplayAliases(legacyNames)
@@ -201,11 +229,12 @@ func (mgr *Manager) rebuildToolsLocked() {
 				Name:        name,
 				Description: info.Description,
 				Metadata: map[string]any{
-					tool.MetadataToolKind:      tool.MetadataToolKindMCP,
-					tool.MetadataPluginID:      spec.PluginID,
-					tool.MetadataMCPServer:     spec.Name,
-					tool.MetadataMCPTool:       info.Name,
-					tool.MetadataReplayAliases: legacyNames,
+					tool.MetadataToolKind:             tool.MetadataToolKindMCP,
+					tool.MetadataPluginID:             spec.PluginID,
+					tool.MetadataMCPServer:            spec.Name,
+					tool.MetadataMCPTool:              info.Name,
+					tool.MetadataMCPSourceFingerprint: hex.EncodeToString(sourceHash[:]),
+					tool.MetadataReplayAliases:        legacyNames,
 				},
 			}, info.InputSchema)
 			if warning != "" {

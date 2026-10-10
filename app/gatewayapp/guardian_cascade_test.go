@@ -13,7 +13,53 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
+	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
+
+func TestGuardianMCPScreeningSettlesOnlySupportedScope(t *testing.T) {
+	for _, tc := range []struct {
+		name, choice, want string
+		probabilities      map[string]float64
+		mcp                bool
+	}{
+		{"split MCP allow stays once", "allow_session", "allow_once", map[string]float64{"allow_once": .46, "allow_session": .49, "allow_always": .04, "cancel": .01}, true},
+		{"decisive MCP Session", "allow_session", "allow_session", map[string]float64{"allow_once": .01, "allow_session": .98, "allow_always": .005, "cancel": .005}, true},
+		{"decisive MCP Always", "allow_always", "allow_always", map[string]float64{"allow_once": .01, "allow_session": .005, "allow_always": .98, "cancel": .005}, true},
+		{"external alias keeps ACP kind", "allow_session", "allow_session", map[string]float64{"allow_once": .46, "allow_session": .49, "allow_always": .04, "cancel": .01}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			service, active := newApprovalReviewerTestSession(t, t.Context())
+			reviewer := newGuardianApprovalApprover(service)
+			defer reviewer.Close()
+			req := approvalReviewerTestRequest(active, nil, "read documents", map[string]any{"key": "fixture"})
+			req.Approval.ToolName = "docs__read"
+			req.Approval.Options = []approval.Option{
+				{ID: "allow_once", Name: "Allow Once", Kind: "allow_once"},
+				{ID: "allow_session", Name: "Allow this session", Kind: "allow_once"},
+				{ID: "allow_always", Name: "Allow Always", Kind: "allow_always"},
+				{ID: "cancel", Name: "Cancel", Kind: "reject_once"},
+			}
+			req.RuntimeRequest.Tool.Name = "docs__read"
+			if tc.mcp {
+				req.RuntimeRequest.Tool.Metadata = map[string]any{
+					tool.MetadataToolKind: tool.MetadataToolKindMCP, tool.MetadataPluginID: "fixture",
+					tool.MetadataMCPServer: "docs", tool.MetadataMCPTool: "read", tool.MetadataMCPSourceFingerprint: "fixture-v1",
+				}
+			}
+			req.ResolveModel = func(context.Context) (model.LLM, error) {
+				t.Fatal("decisive screening must not request Agent fallback")
+				return nil, nil
+			}
+			req.Judgment = judgmentFunc(func(context.Context, judgment.Request) (judgment.Response, error) {
+				return judgment.Response{Answers: guardianScreenAnswersWith(judgment.Answer{Type: judgment.Choice, Choice: tc.choice, Probabilities: tc.probabilities}, 0, 0)}, nil
+			})
+			result, err := reviewer.Decide(t.Context(), req)
+			if err != nil || result.OptionID != tc.want || !result.Approved {
+				t.Fatalf("screen settlement = %+v, %v; want %s", result, err, tc.want)
+			}
+		})
+	}
+}
 
 func TestGuardianScreeningCascadesToAgentWithinOriginalReview(t *testing.T) {
 	for _, tc := range []struct {

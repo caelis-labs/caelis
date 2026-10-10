@@ -86,6 +86,7 @@ const (
 	MetadataPluginID             = "caelis.plugin.id"
 	MetadataMCPServer            = "caelis.mcp.server"
 	MetadataMCPTool              = "caelis.mcp.tool"
+	MetadataMCPSourceFingerprint = "caelis.mcp.source_fingerprint"
 	MetadataExternalCapability   = "caelis.external.capability"
 	MetadataDescriptionAuthority = "caelis.description.authority"
 	MetadataDiscoveredToolNames  = "caelis.tool.discovered_names"

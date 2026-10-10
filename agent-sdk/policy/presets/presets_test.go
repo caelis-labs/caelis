@@ -83,6 +83,30 @@ func TestDefaultRegistryDoesNotExposeDangerFullAccessMode(t *testing.T) {
 	}
 }
 
+func TestWorkspaceWriteMCPGateIsRuntimeOwned(t *testing.T) {
+	input := policy.ToolContext{Tool: tool.Definition{Name: "docs__read", Metadata: map[string]any{
+		tool.MetadataToolKind: tool.MetadataToolKindMCP, tool.MetadataPluginID: "fixture",
+		tool.MetadataMCPServer: "docs", tool.MetadataMCPTool: "read",
+	}}, Call: tool.Call{ID: "call", Name: "docs__read", Input: []byte(`{"key":"fixture"}`)}}
+	decision, err := WorkspaceWriteMode().DecideTool(t.Context(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Action != policy.ActionAllow {
+		t.Fatalf("preset policy decision = %#v", decision)
+	}
+	gate, err := MCPApprovalDecision(input, decision.Constraints)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gate.Action != policy.ActionAskApproval || gate.Approval == nil || len(gate.Approval.Options) != 4 {
+		t.Fatalf("Runtime MCP gate = %#v", gate)
+	}
+	if gate.Approval.Options[1].ID != "allow_session" || gate.Approval.Options[1].Kind != "allow_once" || gate.Approval.Options[2].Kind != "allow_always" || gate.Approval.Options[3].ID != "cancel" {
+		t.Fatalf("MCP options = %#v", gate.Approval.Options)
+	}
+}
+
 func TestDangerFullAccessModeAllowsHostWithoutApproval(t *testing.T) {
 	t.Parallel()
 
@@ -190,7 +214,7 @@ func TestDefaultModeRejectsMalformedToolInput(t *testing.T) {
 	}
 }
 
-func TestDefaultModeAllowsExplicitWebAndMCPTools(t *testing.T) {
+func TestDefaultModeAllowsExplicitNonMCPTools(t *testing.T) {
 	t.Parallel()
 
 	tests := []policy.ToolContext{
@@ -201,10 +225,6 @@ func TestDefaultModeAllowsExplicitWebAndMCPTools(t *testing.T) {
 		{
 			Tool: policyToolSearchDefinition(),
 			Call: policyToolCall(tool.ToolSearchToolName, map[string]any{"query": "calendar"}),
-		},
-		{
-			Tool: policyMCPToolDefinition("mcp__plugin__server__read_fixture"),
-			Call: policyToolCall("mcp__plugin__server__read_fixture", map[string]any{"name": "fixture"}),
 		},
 		{
 			Tool: policyToolDefinition("WebSearch"),

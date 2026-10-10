@@ -390,6 +390,7 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 		SandboxPolicy:            sandboxPolicySnapshot,
 		PolicyRegistry:           policyRegistry,
 		DefaultApprovalMode:      string(kernelimpl.NormalizeApprovalMode(runtimeCfg.ApprovalMode)),
+		MCPGrants:                s.authorities.mcpGrants,
 		Compaction:               compactionCfg,
 		Diagnostics:              s.authorities.diagnostics,
 		ControllerContextRouter:  contextRouter,

@@ -313,6 +313,7 @@ content assets:
 ```text
 config.json                 canonical product configuration
 control/control.sqlite      Control operations, ACP preparation, pending Agent mail
+control/mcp-grants.json      Host-owned MCP Session and workspace approval grants
 control/cursor.key          private cursor-signing secret
 control/spool/v1/           disposable append-only Session and Task delivery traces
 sessions/                   canonical Session documents and event JSONL plus derived SQLite indexes

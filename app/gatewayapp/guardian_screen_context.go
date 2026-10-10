@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/internal/kernel"
 )
 
@@ -22,6 +23,9 @@ func guardianScreenState(req kernel.ApprovalReviewRequest, events []*session.Eve
 		return nil, &guardianScreenError{reason: "input_invalid", cause: fmt.Errorf("classifier requires the exact tool and arguments")}
 	}
 	action := map[string]any{"tool": name, "arguments": input}
+	if source := guardianMCPSource(req); source != nil {
+		action["mcp_source"] = source
+	}
 	if payload.Reason != "" {
 		action["reason"] = payload.Reason
 	}
@@ -44,6 +48,28 @@ func guardianScreenState(req kernel.ApprovalReviewRequest, events []*session.Eve
 		}
 	}
 	return map[string]any{"user_messages": users, "action": action}, nil
+}
+
+func guardianMCPSource(req kernel.ApprovalReviewRequest) map[string]any {
+	def := req.RuntimeRequest.Tool
+	if !tool.IsMCPDefinition(def) {
+		return nil
+	}
+	source := map[string]any{
+		"plugin":             def.Metadata[tool.MetadataPluginID],
+		"server":             def.Metadata[tool.MetadataMCPServer],
+		"remote_tool":        def.Metadata[tool.MetadataMCPTool],
+		"source_fingerprint": def.Metadata[tool.MetadataMCPSourceFingerprint],
+	}
+	if guardianNativeMCPScopeOptions(req) {
+		source["scope_options"] = map[string]any{
+			"allow_once":    "this call only",
+			"allow_session": "this real Session only, across Turns",
+			"allow_always":  "this workspace and exact MCP source, across Sessions and restarts until revoked",
+			"cancel":        "no remote call",
+		}
+	}
+	return source
 }
 
 type guardianScreenError struct {
