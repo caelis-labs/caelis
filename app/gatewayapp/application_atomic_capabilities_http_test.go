@@ -109,11 +109,22 @@ func TestApplicationMCPAlwaysRespectsAuthenticatedConfigurationOwnerHTTP(t *test
 		return result.SessionID
 	}
 	aFirst, aSecond, bFirst := create(a, "owner-a-first"), create(a, "owner-a-second"), create(b, "owner-b-first")
+	// ToolSearch starts each Application's MCP activation. Warm each distinct
+	// Session through a real synthetic call before comparing grant ownership;
+	// background startup may otherwise finish after its first ToolSearch Turn.
+	for _, entry := range []struct {
+		client  *httpclient.Client
+		session string
+	}{{a, aFirst}, {a, aSecond}, {b, bFirst}} {
+		promptAtomicCapabilityClientWithMCPApproval(t, ctx, entry.client, entry.session, "warm-"+entry.session, "DOC", "allow_once")
+		waitAtomicApplicationMCPRunning(t, ctx, entry.client, entry.session, "documents")
+	}
+	baseline := strings.Count(atomicAudit(audit), "documents:call:")
 	if got := promptAtomicCapabilityClientWithMCPApproval(t, ctx, a, aFirst, "a-always", "DOC", "allow_always"); got != 1 {
 		t.Fatalf("A approval count = %d, want 1", got)
 	}
-	if got := strings.Count(atomicAudit(audit), "documents:call:"); got != 1 {
-		t.Fatalf("A remote calls = %d, want 1", got)
+	if got := strings.Count(atomicAudit(audit), "documents:call:"); got != baseline+1 {
+		t.Fatalf("A remote calls = %d, want %d", got, baseline+1)
 	}
 	result, err := b.PromptApplication(ctx, appserver.ApplicationPromptRequest{PromptRequest: appserver.PromptRequest{WriteBase: appserver.WriteBase{SessionID: bFirst, OperationID: "b-cancel"}, Input: "DOC"}, SourceKind: "user"})
 	if err != nil || (result.Outcome != appserver.OutcomeAccepted && result.Outcome != appserver.OutcomeCommitted) {
@@ -148,13 +159,13 @@ func TestApplicationMCPAlwaysRespectsAuthenticatedConfigurationOwnerHTTP(t *test
 		t.Fatal(err)
 	}
 	waitApplicationHTTPIdle(t, ctx, b, bFirst)
-	if got := strings.Count(atomicAudit(audit), "documents:call:"); got != 1 {
+	if got := strings.Count(atomicAudit(audit), "documents:call:"); got != baseline+1 {
 		t.Fatalf("B cancel executed remote call: %d", got)
 	}
 	if got := promptAtomicCapabilityClientWithMCPApproval(t, ctx, a, aSecond, "a-same-owner", "DOC", ""); got != 0 {
 		t.Fatalf("same Application owner was re-prompted: %d", got)
 	}
-	if got := strings.Count(atomicAudit(audit), "documents:call:"); got != 2 {
+	if got := strings.Count(atomicAudit(audit), "documents:call:"); got != baseline+2 {
 		t.Fatalf("same owner failed to reuse grant: calls=%d", got)
 	}
 }
