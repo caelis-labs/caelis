@@ -72,7 +72,7 @@ func NewAppServer(host *gatewayapp.Stack) (*AppServer, error) {
 	agents, err := newAgentService(agentServiceDeps{
 		hostDeps: &agentDeps, acquireRuntime: runtimes.Acquire, handoff: control.Handoff,
 		preparation: preparationReads.Preparation, disconnectCandidates: agentReads.DisconnectCandidatesSnapshot,
-		bindingStatus: bindingStatus.AgentBindingStatus, commands: agentCommands,
+		bindingStatus: bindingStatus.AgentBindingStatus, commands: agentCommands, sessions: control,
 	})
 	if err != nil {
 		return nil, err
@@ -105,7 +105,9 @@ func NewAppServer(host *gatewayapp.Stack) (*AppServer, error) {
 	if err != nil {
 		return nil, err
 	}
-	terminal, err := NewTerminalService(tasks, terminalStreams)
+	sessionAuthorizer := appserver.SessionAuthorizer{Sessions: dependencies.Sessions, Applications: host.Applications().Store()}
+	presentation.authorizer = sessionAuthorizer
+	terminal, err := NewTerminalService(tasks, terminalStreams, sessionAuthorizer)
 	if err != nil {
 		return nil, err
 	}
@@ -113,7 +115,7 @@ func NewAppServer(host *gatewayapp.Stack) (*AppServer, error) {
 		Services: appserver.AppServerServices{
 			Applications:   host.Applications(),
 			Collaboration:  host.CollaborationService(),
-			SubagentInputs: &appserver.SubagentInputService{Authorizer: appserver.SessionAuthorizer{Sessions: dependencies.Sessions}, Mailbox: host.CollaborationService()},
+			SubagentInputs: &appserver.SubagentInputService{Authorizer: sessionAuthorizer, Mailbox: host.CollaborationService()},
 			UIPreferences:  &appserver.UIPreferencesService{Store: dependencies.UIPreferences},
 			Sessions:       control, Participants: participants, Status: status,
 			Configuration: configuration, Agents: agents, Completion: completion, Plugins: plugins,
@@ -123,6 +125,9 @@ func NewAppServer(host *gatewayapp.Stack) (*AppServer, error) {
 	if err := server.Services.Validate(); err != nil {
 		return nil, err
 	}
+	host.ControlRuntimes().BindApplicationChildClients(func(principal appserver.Principal) (appserver.AppServerClients, error) {
+		return appserver.BindAppServerClients(server.Services, principal)
+	})
 	return server, nil
 }
 

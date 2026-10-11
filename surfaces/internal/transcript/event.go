@@ -90,6 +90,7 @@ type Event struct {
 	MessageID     string
 	Text          string
 	Final         bool
+	Replacement   bool
 	Citations     []Citation
 
 	AgentSourceKind string
@@ -111,10 +112,13 @@ type Event struct {
 	// ToolStatusExplicit reports whether the source ACP update supplied status.
 	// Reducers use it to distinguish a stale lifecycle downgrade from a sparse
 	// content patch whose missing status must retain the settled lifecycle.
-	ToolStatusExplicit  bool
-	ToolError           bool
-	ToolTerminal        bool
-	ToolOutputSynthetic bool
+	ToolStatusExplicit       bool
+	ToolReplacedFields       []string
+	ToolOutputReplacement    bool
+	ToolError                bool
+	ToolTerminal             bool
+	ToolOutputSynthetic      bool
+	ToolClearSyntheticOutput bool
 	// ToolOutputCollection marks a present standard ACP content collection.
 	// Reducers replace the prior collection even when ToolOutput is empty.
 	ToolOutputCollection bool

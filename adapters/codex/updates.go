@@ -32,6 +32,7 @@ func stableID(threadID, itemID, role string) string {
 }
 
 type threadItem struct {
+	ClientID          string             `json:"clientId"`
 	ID                string             `json:"id"`
 	Type              string             `json:"type"`
 	Text              string             `json:"text"`

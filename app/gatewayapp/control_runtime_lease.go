@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/control/application"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 )
 
@@ -33,8 +34,11 @@ type ControlRuntimeLease struct {
 // by AppServer adapters to acquire an authorized Session Runtime snapshot. It
 // retains the registry and Session authority, never the concrete Host Stack.
 type ControlRuntimeService struct {
-	registry *sessionRuntimeRegistry
-	sessions session.Service
+	registry           *sessionRuntimeRegistry
+	sessions           session.Service
+	applications       *application.Store
+	childClients       *applicationChildClientFactory
+	applicationService *appserver.ApplicationService
 }
 
 // ControlRuntimes returns the focused Runtime lease authority for AppServer
@@ -43,7 +47,18 @@ func (s *Stack) ControlRuntimes() ControlRuntimeService {
 	if s == nil {
 		return ControlRuntimeService{}
 	}
-	return ControlRuntimeService{registry: s.sessionRuntimes, sessions: s.composition.sessions}
+	return ControlRuntimeService{registry: s.sessionRuntimes, sessions: s.composition.sessions, applications: s.composition.authorities.applications, childClients: s.composition.authorities.applicationChildClients, applicationService: s.Applications()}
+}
+
+// BindApplicationChildClients connects the local profile endpoint to the
+// original principal-bound AppServer services, without retaining a Host Stack.
+func (s ControlRuntimeService) BindApplicationChildClients(bind func(appserver.Principal) (appserver.AppServerClients, error)) {
+	if s.childClients == nil {
+		return
+	}
+	s.childClients.mu.Lock()
+	defer s.childClients.mu.Unlock()
+	s.childClients.bind, s.childClients.applications = bind, s.applicationService
 }
 
 // Acquire authorizes and resolves one Session Runtime snapshot.
@@ -58,7 +73,7 @@ func (s ControlRuntimeService) Acquire(
 		return nil, errors.New("gatewayapp: Control Runtime service is unavailable")
 	}
 	sessionID = strings.TrimSpace(sessionID)
-	authorizer := appserver.SessionAuthorizer{Sessions: s.sessions}
+	authorizer := appserver.SessionAuthorizer{Sessions: s.sessions, Applications: s.applications}
 	if err := authorizer.Authorize(ctx, principal, action, sessionID); err != nil {
 		return nil, err
 	}

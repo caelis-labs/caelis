@@ -6,8 +6,10 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/sessionvisibility"
 )
 
 // participantHandleReader is the focused Runtime projection supplied to the
@@ -83,6 +85,20 @@ func (r *participantHandleReader) ParticipantHandles(ctx context.Context, sessio
 	}
 	if release != nil {
 		defer release()
+	}
+	active, err := composition.sessions.Session(ctx, session.SessionRef{SessionID: sessionID})
+	if err != nil {
+		return nil, err
+	}
+	if sessionvisibility.IsApplicationSession(active) {
+		if composition.applicationChildren != nil {
+			return composition.applicationChildren.handles(ctx)
+		}
+		binding, err := composition.authorities.applications.BindingForSession(ctx, sessionID)
+		if err != nil {
+			return nil, err
+		}
+		return (&applicationChildren{composition: composition, binding: binding, active: active}).handles(ctx)
 	}
 
 	snapshot, err := composition.placementSnapshot(ctx)

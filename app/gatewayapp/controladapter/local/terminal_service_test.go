@@ -2,9 +2,15 @@ package local
 
 import (
 	"context"
+	"errors"
+	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/caelis-labs/caelis/agent-sdk/session"
+	inmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
 	"github.com/caelis-labs/caelis/agent-sdk/task/terminal"
+	"github.com/caelis-labs/caelis/control/application"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 )
@@ -37,6 +43,82 @@ func TestTerminalServiceResolvesDisplayIDThroughTaskDirectory(t *testing.T) {
 	}
 	if err := service.ReleaseTerminal(context.Background(), appserver.Principal{ID: "owner"}, request); err != nil {
 		t.Fatal(err)
+	}
+}
+
+type scopedTerminalTaskDirectory struct {
+	terminalTaskDirectory
+	owner appserver.Principal
+}
+
+func (d scopedTerminalTaskDirectory) List(ctx context.Context, p taskstream.Principal, req taskstream.ListRequest) (taskstream.ListResult, error) {
+	if p.ID != d.owner.ID || p.ApplicationID != d.owner.ApplicationID || p.ConnectionID != d.owner.ConnectionID {
+		return taskstream.ListResult{}, appserver.ErrUnauthorized
+	}
+	return d.terminalTaskDirectory.List(ctx, p, req)
+}
+
+func TestTerminalMutationUsesNativeApplicationScopeAndLeaseOwner(t *testing.T) {
+	store, err := application.Open(filepath.Join(t.TempDir(), "control.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	connection, err := store.Register(t.Context(), "owner", application.Registration{OperationID: "app", Name: "app", Credential: "app-client-" + strings.Repeat("a", 64)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	principal := appserver.Principal{ID: "owner", ApplicationID: connection.ApplicationID, ConnectionID: connection.ConnectionID}
+	scope, _ := appserver.ApplicationScope(principal)
+	if err := store.PutBinding(t.Context(), application.Binding{Scope: scope, SessionID: "session-1", CreationDigest: "creation", Profile: application.Profile{Version: "role/1", Instructions: "test", Model: "test", Execution: "tools-only", ToolsVersion: "tools/1"}}); err != nil {
+		t.Fatal(err)
+	}
+	sessions := inmemory.NewStore(inmemory.Config{})
+	if _, err := sessions.StartSession(t.Context(), session.StartSessionRequest{AppName: "test", UserID: "owner", PreferredSessionID: "session-1"}); err != nil {
+		t.Fatal(err)
+	}
+	streams := &recordingTerminalStreams{}
+	service, err := NewTerminalService(scopedTerminalTaskDirectory{owner: principal}, streams, appserver.SessionAuthorizer{Sessions: sessions, Applications: store})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := appserver.TerminalRequest{SessionID: "session-1", TerminalID: "tool-call-1"}
+	for _, mutate := range []func(context.Context, appserver.Principal, appserver.TerminalRequest) error{service.KillTerminal, service.ReleaseTerminal} {
+		if err := mutate(t.Context(), principal, req); err != nil {
+			t.Fatal(err)
+		}
+		if streams.ref != (terminal.Ref{SessionID: "session-1", TaskID: "task-1", TerminalID: "runtime-terminal-1"}) {
+			t.Fatalf("native target changed: %+v", streams.ref)
+		}
+		wrong := principal
+		wrong.ConnectionID = "foreign"
+		streams.ref = terminal.Ref{}
+		if err := mutate(t.Context(), wrong, req); !errors.Is(err, appserver.ErrUnauthorized) || streams.ref.TaskID != "" {
+			t.Fatalf("foreign connection reached native terminal: %+v, %v", streams.ref, err)
+		}
+	}
+	if err := store.Revoke(t.Context(), scope); err != nil {
+		t.Fatal(err)
+	}
+	for _, observe := range []func(context.Context, appserver.Principal, appserver.TerminalRequest) error{
+		func(ctx context.Context, p appserver.Principal, r appserver.TerminalRequest) error {
+			_, err := service.TerminalOutput(ctx, p, r)
+			return err
+		},
+		func(ctx context.Context, p appserver.Principal, r appserver.TerminalRequest) error {
+			_, err := service.WaitTerminal(ctx, p, r)
+			return err
+		},
+	} {
+		if err := observe(t.Context(), principal, req); err != nil {
+			t.Fatalf("revoked observation: %v", err)
+		}
+	}
+	for _, mutate := range []func(context.Context, appserver.Principal, appserver.TerminalRequest) error{service.KillTerminal, service.ReleaseTerminal} {
+		streams.ref = terminal.Ref{}
+		if err := mutate(t.Context(), principal, req); !errors.Is(err, application.ErrRevoked) || streams.ref.TaskID != "" {
+			t.Fatalf("revoked mutation reached terminal: %+v, %v", streams.ref, err)
+		}
 	}
 }
 
@@ -106,8 +188,8 @@ func TestTerminalObservationPreservesApplicationPrincipal(t *testing.T) {
 	}
 	p := appserver.Principal{ID: "owner", ApplicationID: "application", ConnectionID: "connection"}
 	req := appserver.TerminalRequest{SessionID: "session-1", TerminalID: "tool-call-1"}
-	if _, err = service.WaitTerminal(t.Context(), p, req); err == nil {
-		t.Fatal("application acquired wait authority")
+	if _, err = service.WaitTerminal(t.Context(), p, req); err != nil {
+		t.Fatal("application lost scoped terminal observation", err)
 	}
 	if err = service.KillTerminal(t.Context(), p, req); err == nil {
 		t.Fatal("application acquired kill authority")

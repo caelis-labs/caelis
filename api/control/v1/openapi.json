@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Caelis Control Client API",
-    "version": "1.0.0-m3"
+    "version": "1.0.0-m4"
   },
   "servers": [{"url": "/api/control/v1"}],
   "paths": {
@@ -281,6 +281,59 @@
           "500": {"$ref": "#/components/responses/InternalServerError"},
           "503": {"$ref": "#/components/responses/ServiceUnavailable"}
         }
+      }
+    },
+    "/sessions/{session_id}/interactions": {
+      "post": {
+        "operationId": "recordConversationInteraction",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/SessionID"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "$ref": "#/components/parameters/IfMatch"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecordInteractionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/CommandCommitted"
+          },
+          "202": {
+            "$ref": "#/components/responses/CommandAccepted"
+          },
+          "400": {
+            "$ref": "#/components/responses/CommandBadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/CommandConflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalServerError"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        },
+        "description": "Persist display-only command input before shared command dispatch. Uses the original Session authorizer, operation ledger and CAS; does not admit a model Turn or add model context. CommandResource.ref is the durable conversation message identity."
       }
     },
     "/sessions/{session_id}/compact": {
@@ -2491,6 +2544,31 @@
       "EnvironmentConfig": {"type": "object", "additionalProperties": false, "properties": {"inherit": {"oneOf": [{"type": "boolean"}, {"type": "null"}], "description": "Null or omitted inherits the host environment snapshot; false starts from an empty environment."}, "set": {"oneOf": [{"type": "object", "additionalProperties": {"type": "string"}}, {"type": "null"}], "description": "Applied after unset; null or omitted sets no variables."}, "unset": {"oneOf": [{"type": "array", "items": {"type": "string"}}, {"type": "null"}], "description": "Applied before set; null or omitted unsets no variables."}}},
       "ShellConfig": {"type": "object", "additionalProperties": false, "properties": {"path": {"oneOf": [{"type": "string"}, {"type": "null"}], "description": "Absolute POSIX shell path; null or omitted uses /bin/bash. Windows supports only the platform-default shell."}, "login": {"oneOf": [{"type": "boolean"}, {"type": "null"}], "description": "Null or omitted defaults to false (-c); true selects -lc on Unix. Windows rejects true."}}},
       "CloseSessionRequest": {"allOf": [{"$ref": "#/components/schemas/WriteBase"}], "unevaluatedProperties": false},
+      "RecordInteractionRequest": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/WriteBase"
+          },
+          {
+            "type": "object",
+            "required": [
+              "text"
+            ],
+            "properties": {
+              "text": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1048576
+              },
+              "require_idle_run": {
+                "type": "boolean",
+                "description": "Reject before append if a native Turn or execution fence is active."
+              }
+            }
+          }
+        ],
+        "unevaluatedProperties": false
+      },
       "CompactSessionRequest": {"allOf": [{"$ref": "#/components/schemas/WriteBase"}], "unevaluatedProperties": false},
       "StatusSession": {
         "type": "object", "additionalProperties": false,
@@ -2669,8 +2747,8 @@
           "target": {"$ref": "#/components/schemas/TurnTarget"},
           "approval_request_id": {"type": "string", "minLength": 1},
           "outcome": {"type": "string", "minLength": 1},
-          "option_id": {"type": "string"},
-          "approved": {"type": "boolean"},
+          "option_id": {"type": "string", "description": "For selected decisions, the exact ID from the original permission options. Invalid or missing selections do not settle the pending approval. Display subjects and labels do not identify grants."},
+          "approved": {"type": "boolean", "description": "Legacy outcome hint. When an original option is selected, its native kind determines the decision and this value is normalized. A cancelled decision grants no permission."},
           "reason": {"type": "string"},
           "review_text": {"type": "string"}
         }}],
@@ -2735,9 +2813,9 @@
       "ContentBlock": {"oneOf": [{"$ref": "#/components/schemas/TextContent"}, {"$ref": "#/components/schemas/ImageContent"}, {"$ref": "#/components/schemas/AudioContent"}, {"$ref": "#/components/schemas/ResourceContent"}], "discriminator": {"propertyName": "type"}},
       "ToolCallLocation": {"type": "object", "additionalProperties": false, "required": ["path"], "properties": {"path": {"type": "string"}, "line": {"type": "integer", "minimum": 0, "maximum": 9007199254740991}}},
       "ToolCallContent": {"type": "object", "additionalProperties": false, "required": ["type"], "properties": {"type": {"type": "string"}, "content": {"$ref": "#/components/schemas/JSONValue"}, "terminalId": {"type": "string"}, "path": {"type": "string"}, "oldText": {"type": "string"}, "newText": {"type": "string"}}},
-      "ACPContentChunk": {"type": "object", "additionalProperties": false, "required": ["sessionUpdate", "content"], "properties": {"sessionUpdate": {"enum": ["user_message_chunk", "agent_message_chunk", "agent_thought_chunk", "compact"]}, "content": {"$ref": "#/components/schemas/ContentBlock"}, "messageId": {"type": "string"}, "_meta": {"$ref": "#/components/schemas/ACPMetadata"}}},
+      "ACPContentChunk": {"type": "object", "additionalProperties": false, "required": ["sessionUpdate", "content"], "properties": {"sessionUpdate": {"enum": ["user_message_chunk", "agent_message_chunk", "agent_thought_chunk", "compact"]}, "content": {"$ref": "#/components/schemas/ContentBlock"}, "messageId": {"type": "string"}, "replacement": {"type": "boolean", "description": "Complete current content for the same messageId, including empty text. Does not finalize the turn."}, "replacedFields": {"type": "array", "items": {"type": "string", "enum": ["_meta"]}, "description": "Explicit narrative display metadata replacement, including a clear when _meta is absent. An empty text delta with only this patch does not change message content or finalize the turn."}, "_meta": {"$ref": "#/components/schemas/ACPMetadata"}}},
       "ACPToolCall": {"type": "object", "additionalProperties": false, "required": ["sessionUpdate", "toolCallId", "title"], "properties": {"sessionUpdate": {"const": "tool_call"}, "toolCallId": {"type": "string"}, "name": {"type": "string", "description": "Programmatic tool name. Omission retains the previous name in ACP v1."}, "title": {"type": "string"}, "kind": {"type": "string"}, "status": {"type": "string"}, "rawInput": {"$ref": "#/components/schemas/JSONValue"}, "rawOutput": {"$ref": "#/components/schemas/JSONValue"}, "content": {"type": "array", "items": {"$ref": "#/components/schemas/ToolCallContent"}}, "locations": {"type": "array", "items": {"$ref": "#/components/schemas/ToolCallLocation"}}, "_meta": {"$ref": "#/components/schemas/ACPMetadata"}}},
-      "ACPToolCallUpdate": {"type": "object", "additionalProperties": false, "required": ["sessionUpdate", "toolCallId"], "properties": {"sessionUpdate": {"const": "tool_call_update"}, "toolCallId": {"type": "string"}, "name": {"type": "string", "description": "Programmatic tool name. Omission retains the previous name in ACP v1."}, "title": {"type": "string"}, "kind": {"type": "string"}, "status": {"type": "string"}, "rawInput": {"$ref": "#/components/schemas/JSONValue"}, "rawOutput": {"$ref": "#/components/schemas/JSONValue"}, "content": {"type": "array", "items": {"$ref": "#/components/schemas/ToolCallContent"}}, "locations": {"type": "array", "items": {"$ref": "#/components/schemas/ToolCallLocation"}}, "_meta": {"$ref": "#/components/schemas/ACPMetadata"}}},
+      "ACPToolCallUpdate": {"type": "object", "additionalProperties": false, "required": ["sessionUpdate", "toolCallId"], "properties": {"sessionUpdate": {"const": "tool_call_update"}, "toolCallId": {"type": "string"}, "replacedFields": {"type": "array", "items": {"type": "string", "enum": ["name", "title", "kind", "status", "rawInput", "rawOutput", "content", "locations", "_meta"]}, "description": "Present display fields whose empty or null values replace prior values. Missing fields retain prior values and this grants no execution authority."}, "name": {"type": "string", "description": "Programmatic tool name. Omission retains the previous name in ACP v1."}, "title": {"type": "string"}, "kind": {"type": "string"}, "status": {"type": "string"}, "rawInput": {"$ref": "#/components/schemas/JSONValue"}, "rawOutput": {"$ref": "#/components/schemas/JSONValue"}, "content": {"type": "array", "items": {"$ref": "#/components/schemas/ToolCallContent"}}, "locations": {"type": "array", "items": {"$ref": "#/components/schemas/ToolCallLocation"}}, "_meta": {"$ref": "#/components/schemas/ACPMetadata"}}},
       "PlanEntry": {"type": "object", "additionalProperties": false, "required": ["content", "status", "priority"], "properties": {"content": {"type": "string"}, "status": {"type": "string"}, "priority": {"type": "string"}}},
       "ACPPlanUpdate": {"type": "object", "additionalProperties": false, "required": ["sessionUpdate", "entries"], "properties": {"sessionUpdate": {"const": "plan"}, "entries": {"type": "array", "items": {"$ref": "#/components/schemas/PlanEntry"}}}},
       "UsageCost": {"type": "object", "additionalProperties": false, "properties": {"amount": {"type": "number", "minimum": -9007199254740991, "maximum": 9007199254740991}, "currency": {"type": "string"}, "input": {"type": "number", "minimum": -9007199254740991, "maximum": 9007199254740991}, "output": {"type": "number", "minimum": -9007199254740991, "maximum": 9007199254740991}, "cache_read": {"type": "number", "minimum": -9007199254740991, "maximum": 9007199254740991}, "cache_write": {"type": "number", "minimum": -9007199254740991, "maximum": 9007199254740991}, "total": {"type": "number", "minimum": -9007199254740991, "maximum": 9007199254740991}, "_meta": {"$ref": "#/components/schemas/ACPMetadata"}}},
@@ -2772,7 +2850,11 @@
         "discriminator": {"propertyName": "sessionUpdate"}
       },
       "PermissionOption": {"type": "object", "additionalProperties": false, "required": ["optionId", "name", "kind"], "properties": {"_meta": {"$ref": "#/components/schemas/ACPMetadata"}, "optionId": {"type": "string"}, "name": {"type": "string"}, "kind": {"type": "string"}}},
-      "RequestPermission": {"type": "object", "additionalProperties": false, "required": ["sessionId", "toolCall", "options"], "properties": {"sessionId": {"type": "string"}, "toolCall": {"$ref": "#/components/schemas/ACPToolCallUpdate"}, "options": {"type": "array", "items": {"$ref": "#/components/schemas/PermissionOption"}}, "_meta": {"$ref": "#/components/schemas/ACPMetadata"}}},
+      "RequestPermission": {"type": "object", "additionalProperties": false, "required": ["sessionId", "options"], "properties": {"sessionId": {"type": "string"}, "toolCall": {"$ref": "#/components/schemas/ACPToolCallUpdate", "description":"Present only when the native permission names an actual tool call; independent or opaque permission subjects never acquire a fabricated toolCallId."}, "title":{"type":"string","maxLength":512},"description":{"type":"string","maxLength":512}, "options": {"type": "array", "items": {"$ref": "#/components/schemas/PermissionOption"}}, "_meta": {"$ref": "#/components/schemas/ACPMetadata"}}},
+      "ApprovalFieldState": {"type":"string","enum":["known","unavailable","truncated","opaque"]},
+      "ApprovalField": {"type":"object","additionalProperties":false,"required":["state"],"properties":{"state":{"$ref":"#/components/schemas/ApprovalFieldState"},"text":{"type":"string","maxLength":512},"sensitive":{"type":"boolean","description":"Presence only; marked values never appear in text."}}},
+      "ApprovalGrant": {"type":"object","additionalProperties":false,"required":["option_id","scope"],"properties":{"option_id":{"type":"string","description":"Display join to an original native option, never grant authority."},"scope":{"$ref":"#/components/schemas/ApprovalField"}}},
+      "ApprovalSubject": {"type":"object","additionalProperties":false,"required":["kind","tool","operation","targets","effect","scope"],"properties":{"title":{"$ref":"#/components/schemas/ApprovalField"},"description":{"$ref":"#/components/schemas/ApprovalField"},"kind":{"type":"string","enum":["command","file","network","app_access","opaque"]},"tool":{"$ref":"#/components/schemas/ApprovalField"},"operation":{"$ref":"#/components/schemas/ApprovalField"},"targets":{"type":"array","minItems":1,"maxItems":16,"items":{"$ref":"#/components/schemas/ApprovalField"}},"effect":{"$ref":"#/components/schemas/ApprovalField"},"scope":{"$ref":"#/components/schemas/ApprovalField"},"grants":{"type":"array","maxItems":32,"items":{"$ref":"#/components/schemas/ApprovalGrant"}},"targets_truncated":{"type":"boolean"},"grants_truncated":{"type":"boolean"},"sensitive_input":{"type":"boolean","description":"Explicitly marked input values were omitted from the display snapshot; private review/execution evidence is unchanged."},"opaque_input":{"type":"boolean","description":"Uninterpreted action evidence was retained privately; public raw input and derived review text are withheld."},"reported":{"type":"boolean","description":"Remote presentation claims, independently of the canonical action and native offered options; never automatic review or grant authority."}},"description":"approval-subjects-v1: owner-supplied bounded decision context, identical on live permission and recovered state. Unknown structures stay opaque. The original request, options and resolve target remain authoritative."},
       "ApprovalReview": {"type": "object", "additionalProperties": false, "properties": {"tool_call_id": {"type": "string"}, "item_id": {"type": "string", "description": "Canonical Session item ID for the reviewed tool call when available; approval_request_id on the enclosing Envelope is the public approval token."}, "tool_name": {"type": "string"}, "raw_input": {"$ref": "#/components/schemas/JSONObject"}, "status": {"type": "string"}, "text": {"type": "string"}, "risk": {"type": "string"}, "authorization": {"type": "string"}}},
       "ParticipantEvent": {"type": "object", "additionalProperties": false, "required": ["state"], "properties": {"state": {"type": "string"}}},
       "LifecycleEvent": {"type": "object", "additionalProperties": false, "required": ["state"], "properties": {"state": {"type": "string"}, "reason": {"type": "string"}, "stopReason": {"type": "string"}}},
@@ -2796,12 +2878,12 @@
         }
       },
       "SessionUpdateEnvelope": {"allOf": [{"$ref": "#/components/schemas/EnvelopeBase"}, {"type": "object", "required": ["update"], "properties": {"kind": {"const": "session/update"}, "usage_semantics": {"$ref": "#/components/schemas/UsageSemantics"}, "agent_communication_source": {"$ref": "#/components/schemas/ActorIdentity"}, "update": {"$ref": "#/components/schemas/ACPUpdate"}}}], "unevaluatedProperties": false},
-      "RequestPermissionEnvelope": {"allOf": [{"$ref": "#/components/schemas/EnvelopeBase"}, {"type": "object", "required": ["approval_request_id", "permission"], "properties": {"kind": {"const": "session/request_permission"}, "approval_request_id": {"type": "string", "minLength": 1}, "permission": {"$ref": "#/components/schemas/RequestPermission"}}}], "unevaluatedProperties": false},
+      "RequestPermissionEnvelope": {"allOf": [{"$ref": "#/components/schemas/EnvelopeBase"}, {"type": "object", "required": ["approval_request_id", "permission"], "properties": {"kind": {"const": "session/request_permission"}, "approval_request_id": {"type": "string", "minLength": 1}, "approval_subject": {"$ref":"#/components/schemas/ApprovalSubject"}, "permission": {"$ref": "#/components/schemas/RequestPermission"}}}], "unevaluatedProperties": false},
       "NoticeEnvelope": {"allOf": [{"$ref": "#/components/schemas/EnvelopeBase"}, {"type": "object", "required": ["notice"], "properties": {"kind": {"const": "caelis/notice"}, "notice": {"type": "string"}, "notice_kind": {"$ref": "#/components/schemas/NoticeKind"}}}], "unevaluatedProperties": false},
       "ParticipantEnvelope": {"allOf": [{"$ref": "#/components/schemas/EnvelopeBase"}, {"type": "object", "required": ["participant"], "properties": {"kind": {"const": "caelis/participant"}, "participant": {"$ref": "#/components/schemas/ParticipantEvent"}}}], "unevaluatedProperties": false},
       "LifecycleEnvelope": {"allOf": [{"$ref": "#/components/schemas/EnvelopeBase"}, {"type": "object", "required": ["lifecycle"], "properties": {"kind": {"const": "caelis/lifecycle"}, "lifecycle": {"$ref": "#/components/schemas/LifecycleEvent"}}}], "unevaluatedProperties": false},
       "AgentCommunicationEnvelope": {"allOf": [{"$ref": "#/components/schemas/EnvelopeBase"}, {"type": "object", "required": ["agent_communication"], "properties": {"kind": {"const": "caelis/agent_communication"}, "agent_communication": {"$ref": "#/components/schemas/AgentCommunication"}}}], "unevaluatedProperties": false},
-      "ApprovalReviewEnvelope": {"allOf": [{"$ref": "#/components/schemas/EnvelopeBase"}, {"type": "object", "required": ["approval_review"], "properties": {"kind": {"const": "caelis/approval_review"}, "approval_request_id": {"type": "string", "minLength": 1, "description": "Public canonical approval token when available; usable to correlate review progress across live and replay."}, "approval_review": {"$ref": "#/components/schemas/ApprovalReview"}}}], "unevaluatedProperties": false},
+      "ApprovalReviewEnvelope": {"allOf": [{"$ref": "#/components/schemas/EnvelopeBase"}, {"type": "object", "required": ["approval_review"], "properties": {"kind": {"const": "caelis/approval_review"}, "approval_request_id": {"type": "string", "minLength": 1, "description": "Public canonical approval token when available; usable to correlate review progress across live and replay."}, "approval_subject": {"$ref":"#/components/schemas/ApprovalSubject"}, "approval_review": {"$ref": "#/components/schemas/ApprovalReview"}}}], "unevaluatedProperties": false},
       "ErrorEnvelope": {"allOf": [{"$ref": "#/components/schemas/EnvelopeBase"}, {"type": "object", "required": ["error"], "properties": {"kind": {"const": "caelis/error"}, "error": {"type": "string"}}}], "unevaluatedProperties": false},
       "Envelope": {
         "oneOf": [
@@ -2881,7 +2963,7 @@
       "ControllerBinding": {"type": "object", "additionalProperties": false, "properties": {"kind": {"$ref": "#/components/schemas/ControllerKind"}, "controller_id": {"type": "string"}, "agent_name": {"type": "string"}, "label": {"type": "string"}, "placement": {"$ref": "#/components/schemas/Placement"}, "epoch_id": {"type": "string"}, "remote_session_id": {"type": "string"}, "context_sync_seq": {"$ref": "#/components/schemas/Uint64Decimal"}, "attached_at": {"type": "string", "format": "date-time"}, "source": {"type": "string"}}},
       "ParticipantBinding": {"type": "object", "additionalProperties": false, "properties": {"id": {"type": "string"}, "kind": {"$ref": "#/components/schemas/ParticipantKind"}, "role": {"$ref": "#/components/schemas/ParticipantRole"}, "agent_name": {"type": "string"}, "label": {"type": "string"}, "session_id": {"type": "string"}, "source": {"type": "string"}, "parent_turn_id": {"type": "string"}, "delegation_id": {"type": "string"}, "attachment_generation": {"type": "string"}, "context_sync_seq": {"$ref": "#/components/schemas/Uint64Decimal"}, "attached_at": {"type": "string", "format": "date-time"}, "controller_ref": {"type": "string"}}},
       "RunState": {"type": "object", "additionalProperties": false, "properties": {"status": {"type": "string"}, "waiting_approval": {"type": "boolean"}, "active": {"type": "boolean"}, "kind": {"type": "string"}, "handle_id": {"type": "string"}, "run_id": {"type": "string"}, "turn_id": {"type": "string"}, "started_at": {"type": "string", "format": "date-time"}}},
-      "ActiveApproval": {"type": "object", "additionalProperties": false, "required": ["request_id", "permission"], "properties": {"target": {"$ref": "#/components/schemas/TurnTarget"}, "request_id": {"type": "string"}, "scope": {"type": "string", "enum": ["main", "participant", "subagent"]}, "scope_id": {"type": "string"}, "participant_id": {"type": "string"}, "parent_tool": {"$ref": "#/components/schemas/ParentToolRelation"}, "permission": {"$ref": "#/components/schemas/JSONObject"}}},
+      "ActiveApproval": {"type": "object", "additionalProperties": false, "required": ["request_id", "permission"], "properties": {"target": {"$ref": "#/components/schemas/TurnTarget"}, "request_id": {"type": "string"}, "scope": {"type": "string", "enum": ["main", "participant", "subagent"]}, "scope_id": {"type": "string"}, "participant_id": {"type": "string"}, "parent_tool": {"$ref": "#/components/schemas/ParentToolRelation"}, "permission": {"$ref": "#/components/schemas/JSONObject"}, "subject": {"$ref":"#/components/schemas/ApprovalSubject"}}},
       "ApprovalState": {"type": "object", "additionalProperties": false, "properties": {"active": {"$ref": "#/components/schemas/ActiveApproval"}, "queued_count": {"type": "integer", "minimum": 0, "maximum": 9007199254740991}}},
       "ClientCapabilities": {"type": "object", "additionalProperties": false, "required": ["client_managed_terminal", "caelis_terminal_stream", "goal_bootstrap_supported", "manage_loop_bootstrap_supported"], "properties": {"client_managed_terminal": {"type": "boolean", "const": false}, "caelis_terminal_stream": {"type": "boolean", "const": true}, "goal_bootstrap_supported": {"type": "boolean", "const": false}, "manage_loop_bootstrap_supported": {"type": "boolean", "const": false}}},
       "SessionState": {
@@ -2897,7 +2979,7 @@
           "approval": {"$ref": "#/components/schemas/ApprovalState"}, "capabilities": {"$ref": "#/components/schemas/ClientCapabilities"}
         }
       },
-      "ServerInfo": {"type": "object", "additionalProperties": false, "required": ["protocol_version", "envelope_version", "api_version"], "properties": {"protocol_version": {"type": "integer"}, "envelope_version": {"type": "string"}, "api_version": {"type": "string"}, "distribution_version": {"type": "string"}, "build_id": {"type": "string"}, "build_kind": {"type": "string", "enum": ["dev", "release"]}, "server_id": {"type": "string"}, "instance_id": {"type": "string"}, "capabilities": {"type": "array", "items": {"type": "string"}}, "transports": {"type": "array", "items": {"type": "string"}},
+      "ServerInfo": {"type": "object", "additionalProperties": false, "required": ["protocol_version", "envelope_version", "api_version"], "properties": {"protocol_version": {"type": "integer"}, "envelope_version": {"type": "string"}, "api_version": {"type": "string"}, "distribution_version": {"type": "string"}, "build_id": {"type": "string"}, "build_kind": {"type": "string", "enum": ["dev", "release"]}, "server_id": {"type": "string"}, "instance_id": {"type": "string"}, "capabilities": {"type": "array", "items": {"type": "string"}, "description": "Additive capability names. display-replacements-v1 supplies same-ID complete narrative replacement, explicit narrative metadata replacement and empty tool-display patches; conversation-interactions-v1 supplies durable command-input receipts without model context or a model Turn. approval-subjects-v1 supplies common bounded approval context on live events and recovered state. application-session-control-v1 supplies profile-aware main Session controls; shared-worker-session-control-v1 supplies scoped Worker Session controls; application-terminal-wait-v1 supplies non-consuming terminal waits; application-terminal-control-v1 supplies authorized terminal kill/release. These capabilities preserve native principal, approval and operation authority."}, "transports": {"type": "array", "items": {"type": "string"}},
           "store_id": {
             "type": "string"
           }
@@ -2930,7 +3012,8 @@
       "ApplicationBackgroundGrant": {"type":"object","additionalProperties":false,"required":["id","principal_id","application_id","connection_id","session_id","source","authorization_operation_id","revoked"],"properties":{"id":{"type":"string"},"principal_id":{"type":"string"},"application_id":{"type":"string"},"connection_id":{"type":"string"},"session_id":{"type":"string"},"source":{"type":"string","description":"Application-declared authorization source recorded with the grant."},"authorization_operation_id":{"type":"string"},"revoked":{"type":"boolean"}}},
       "ApplicationBackgroundGrantList": {"type":"array","items":{"$ref":"#/components/schemas/ApplicationBackgroundGrant"}},
       "ApplicationBackgroundGrantRequest": {"type":"object","additionalProperties":false,"required":["operation_id","source","authorization_operation_id"],"properties":{"operation_id":{"type":"string","minLength":1},"source":{"type":"string","minLength":1},"authorization_operation_id":{"type":"string","minLength":1}}},
-      "ApplicationBinding": {"type":"object","additionalProperties":false,"required":["principal_id","application_id","connection_id","session_id","profile","creation_digest","archived"],"properties":{"principal_id":{"type":"string"},"application_id":{"type":"string"},"connection_id":{"type":"string"},"session_id":{"type":"string"},"profile":{"$ref":"#/components/schemas/ApplicationProfile"},"creation_digest":{"type":"string"},"archived":{"type":"boolean"}}},
+      "ApplicationBinding": {"type":"object","additionalProperties":false,"required":["principal_id","application_id","connection_id","session_id","profile","creation_digest","archived"],"properties":{"principal_id":{"type":"string"},"application_id":{"type":"string"},"connection_id":{"type":"string"},"session_id":{"type":"string"},"profile":{"$ref":"#/components/schemas/ApplicationProfile"},"creation_digest":{"type":"string"},"archived":{"type":"boolean"},"child":{"$ref":"#/components/schemas/ApplicationChildRelation"}}},
+      "ApplicationChildRelation": {"type":"object","additionalProperties":false,"required":["root_session_id","parent_session_id","source"],"description":"Host-admitted native child relationship. Clients cannot create or grant authority by supplying this read-only projection.","properties":{"root_session_id":{"type":"string"},"parent_session_id":{"type":"string"},"parent_task_id":{"type":"string"},"source":{"$ref":"#/components/schemas/ApplicationSource"}}},
       "ApplicationBindingList": {"type":"array","items":{"$ref":"#/components/schemas/ApplicationBinding"}},
       "ApplicationSource": {"type":"object","additionalProperties":false,"required":["kind","operation_id"],"properties":{"kind":{"type":"string","enum":["user","application_summary","external_material","authorized_background"]},"operation_id":{"type":"string"},"grant_id":{"type":"string","description":"Required when kind is authorized_background and forbidden otherwise; names the background grant that authorized this input."},"authorized_source":{"type":"string","description":"Required when kind is authorized_background; Control copies it from the durable grant so replay keeps the authorized source distinct from user input and summaries."}}},
       "ApplicationCallResult": {"oneOf":[{"$ref":"#/components/schemas/ApplicationContentCallResult"},{"$ref":"#/components/schemas/ApplicationLegacyCallResult"}],"description":"The original callback receipt remains arbitrary JSON when result_format is absent. content-v1 receipts use ordered typed blocks; the serialized callback JSON bound remains 1 MiB."},

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
@@ -383,6 +384,11 @@ func (t runtimeSpawnTool) Call(ctx context.Context, call tool.Call) (tool.Result
 	if t.runner == nil {
 		return tool.Result{}, fmt.Errorf("subagent execution is unavailable")
 	}
+	if admission, ok := t.base.(interface{ Admit(context.Context) error }); ok {
+		if err := admission.Admit(ctx); err != nil {
+			return tool.Result{}, err
+		}
+	}
 	args, err := decodeJSONMap(call.Input)
 	if err != nil {
 		return tool.Result{}, err
@@ -627,6 +633,7 @@ func (r subagentApprovalRequester) RequestSubagentApproval(
 			"parent_tool":    spawn.ToolName,
 		},
 	}
+	runtimeRequest = preserveEndpointApproval(runtimeRequest, req.Approval)
 	if r.runtime != nil {
 		mode := firstNonEmpty(req.Mode, r.mode)
 		if response, handled, err := r.runtime.resolveEndpointApprovalByPolicy(ctx, mode, runtimeRequest); handled {
@@ -636,7 +643,12 @@ func (r subagentApprovalRequester) RequestSubagentApproval(
 	if r.requester == nil {
 		return subagent.ApprovalResponse{}, nil
 	}
+	permission := cloneApproval(runtimeRequest.Approval)
 	resp, err := r.requester.RequestApproval(ctx, runtimeRequest)
+	if err != nil {
+		return subagent.ApprovalResponse{}, err
+	}
+	resp, err = approval.ResolveNativeResponse(permission, resp)
 	if err != nil {
 		return subagent.ApprovalResponse{}, err
 	}

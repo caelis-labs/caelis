@@ -16,3 +16,14 @@ func authorizeHostCapability(principal appserver.Principal) error {
 	}
 	return nil
 }
+
+// A Session grant cannot observe or mutate Host-global configuration objects.
+func authorizeUnscopedHostCapability(principal appserver.Principal) error {
+	if err := authorizeHostCapability(principal); err != nil {
+		return err
+	}
+	if principal.ApplicationID != "" || principal.ConnectionID != "" {
+		return appserver.ErrUnauthorized
+	}
+	return nil
+}

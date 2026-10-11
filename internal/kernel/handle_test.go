@@ -1073,7 +1073,8 @@ func TestTurnHandleConcurrentApprovalSubmissionsOnlyResolveActiveHead(t *testing
 		Kind: SubmissionKindApproval,
 		Approval: &ApprovalDecision{
 			RequestID: pendings[0].id,
-			Outcome:   "outcome-0",
+			Outcome:   "approved",
+			Reason:    "outcome-0",
 			Approved:  true,
 		},
 	}); err != nil {
@@ -1081,7 +1082,7 @@ func TestTurnHandleConcurrentApprovalSubmissionsOnlyResolveActiveHead(t *testing
 	}
 	select {
 	case got := <-pendings[0].decisions:
-		if got.RequestID != pendings[0].id || got.Outcome != "outcome-0" || !got.Approved {
+		if got.RequestID != pendings[0].id || got.Reason != "outcome-0" || !got.Approved {
 			t.Fatalf("active decision = %+v, want request %q exact response", got, pendings[0].id)
 		}
 	case <-time.After(time.Second):
@@ -1089,11 +1090,16 @@ func TestTurnHandleConcurrentApprovalSubmissionsOnlyResolveActiveHead(t *testing
 	}
 	for index, pending := range pendings[1:] {
 		wantIndex := index + 1
+		outcome := "rejected"
+		if wantIndex%2 == 0 {
+			outcome = "approved"
+		}
 		if err := handle.Submit(context.Background(), SubmitRequest{
 			Kind: SubmissionKindApproval,
 			Approval: &ApprovalDecision{
 				RequestID: pending.id,
-				Outcome:   fmt.Sprintf("outcome-%d", wantIndex),
+				Outcome:   outcome,
+				Reason:    fmt.Sprintf("outcome-%d", wantIndex),
 				Approved:  wantIndex%2 == 0,
 			},
 		}); err != nil {
@@ -1101,7 +1107,7 @@ func TestTurnHandleConcurrentApprovalSubmissionsOnlyResolveActiveHead(t *testing
 		}
 		select {
 		case got := <-pending.decisions:
-			if got.RequestID != pending.id || got.Outcome != fmt.Sprintf("outcome-%d", wantIndex) || got.Approved != (wantIndex%2 == 0) {
+			if got.RequestID != pending.id || got.Reason != fmt.Sprintf("outcome-%d", wantIndex) || got.Approved != (wantIndex%2 == 0) {
 				t.Fatalf("decision %d = %+v, want request %q exact response", wantIndex, got, pending.id)
 			}
 		case <-time.After(time.Second):
@@ -1131,7 +1137,8 @@ func TestTurnHandleConcurrentApprovalSubmissionsFirstDecisionWins(t *testing.T) 
 				Kind: SubmissionKindApproval,
 				Approval: &ApprovalDecision{
 					RequestID: pending.id,
-					Outcome:   outcome,
+					Outcome:   "approved",
+					Reason:    outcome,
 					Approved:  true,
 				},
 			})

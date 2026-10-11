@@ -115,7 +115,7 @@ func assertRevisionPrefix(t *testing.T, body map[string]any, model, effort, tier
 		}
 	}
 	tools, _ := body["tools"].([]any)
-	if len(tools) != 1 {
+	if len(tools) != 7 {
 		t.Fatalf("tools = %#v", body["tools"])
 	}
 	tool, _ := tools[0].(map[string]any)

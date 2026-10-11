@@ -241,8 +241,9 @@ func (s SkillService) Discover(ctx context.Context, workspaceDir string) ([]Skil
 	})
 }
 
-// Snapshot returns the skill catalog captured when the current runtime prompt
-// was assembled. It is stable for the runtime lifetime.
+// Snapshot returns the ordinary Runtime's pinned Skill catalog or an
+// Application's explicitly selected desired catalog. Application completions
+// share its scanner without activating MCP services or an execution Runtime.
 func (s SkillService) Snapshot() skill.Catalog {
 	if s.composition == nil {
 		return skill.Catalog{}
@@ -253,6 +254,9 @@ func (s SkillService) Snapshot() skill.Catalog {
 func (s *runtimeComposition) skillCatalogSnapshot() skill.Catalog {
 	if s == nil {
 		return skill.Catalog{}
+	}
+	if catalog, application := s.applicationCompletionSkills(); application {
+		return catalog
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()

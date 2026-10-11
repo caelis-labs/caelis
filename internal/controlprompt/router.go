@@ -50,9 +50,15 @@ func (r router) Route(ctx context.Context, req Request) (Result, error) {
 			return result, err
 		}
 		if r.shouldDispatchSlash(ctx, cmd) {
-			return r.dispatchSlash(ctx, cmd, args, argsStart, text, req.Submission.Attachments)
+			id, err := r.recordInteraction(ctx, req, text)
+			if err != nil {
+				return Result{InteractionMessageID: id}, err
+			}
+			result, err := r.dispatchSlash(ctx, cmd, args, argsStart, text, req.Submission.Attachments)
+			result.InteractionMessageID = id
+			return result, err
 		}
-		if result, handled, err := r.dispatchDirectSkill(ctx, cmd, args, argsStart, req.Submission); handled || err != nil {
+		if result, handled, err := r.dispatchDirectSkill(ctx, cmd, args, argsStart, req); handled || err != nil {
 			return result, err
 		}
 		// Best-effort: slash-like prose that does not exactly resolve a
@@ -66,6 +72,37 @@ func (r router) Route(ctx context.Context, req Request) (Result, error) {
 		return Result{Handled: true, ContinueRunning: true, SuppressTurnDivider: true}, nil
 	}
 	return Result{Handled: true, Turn: turn}, nil
+}
+
+func (r router) recordInteraction(ctx context.Context, req Request, text string) (string, error) {
+	if !req.RequireInteractionReceipt {
+		return "", nil
+	}
+	recorder, ok := r.service.(InteractionRecorder)
+	if !ok {
+		return "", fmt.Errorf("control prompt: durable conversation receipt is unavailable")
+	}
+	var id string
+	var err error
+	if req.RequireIdleRun {
+		guarded, ok := r.service.(GuardedInteractionRecorder)
+		if !ok {
+			return "", fmt.Errorf("control prompt: atomic idle conversation admission is unavailable")
+		}
+		id, err = guarded.RecordInteractionIfIdle(ctx, text)
+	} else {
+		id, err = recorder.RecordInteraction(ctx, text)
+	}
+	if err != nil {
+		return id, err
+	}
+	if id == "" {
+		return "", fmt.Errorf("control prompt: durable conversation receipt is unavailable")
+	}
+	if req.InteractionObserver != nil {
+		return id, req.InteractionObserver(ctx, id)
+	}
+	return id, nil
 }
 
 func (r router) shouldDispatchSlash(ctx context.Context, cmd string) bool {

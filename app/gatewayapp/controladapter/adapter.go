@@ -240,13 +240,7 @@ func (d *assembler) AgentStatus(ctx context.Context) (controlprompt.AgentStatusS
 	if !ok {
 		return status, nil
 	}
-	gw, err := d.gatewayControlPlane()
-	if err != nil {
-		return controlprompt.AgentStatusSnapshot{}, err
-	}
-	state, err := gw.ControlPlaneState(ctx, kernel.ControlPlaneStateRequest{
-		SessionRef: activeSession.SessionRef,
-	})
+	state, activeKind, err := d.agentStateForSession(ctx, activeSession.SessionRef)
 	if err != nil {
 		return controlprompt.AgentStatusSnapshot{}, err
 	}
@@ -255,6 +249,7 @@ func (d *assembler) AgentStatus(ctx context.Context) (controlprompt.AgentStatusS
 	status.ControllerLabel = strings.TrimSpace(firstNonEmpty(state.Controller.AgentName, state.Controller.Label, state.Controller.ControllerID, string(state.Controller.Kind)))
 	status.ControllerEpoch = strings.TrimSpace(state.Controller.EpochID)
 	status.HasActiveTurn = state.HasActiveTurn
+	status.ActiveTurnKind = activeKind
 	if turns, err := d.gatewayTurns(); err == nil && turns != nil {
 		if kind, ok := activeTurnKindForSession(turns.ActiveTurns(), activeSession.SessionRef); ok {
 			status.HasActiveTurn = true

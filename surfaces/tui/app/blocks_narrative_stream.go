@@ -62,6 +62,14 @@ func (b *MainACPTurnBlock) ReplaceFinalStreamEvent(kind SubagentEventKind, chunk
 	replaceFinalNarrativeStreamEvent(&b.Events, &b.narrativeStream, kind, chunk, source, narrativeEventTime(occurredAt...))
 }
 
+// ReplaceStreamEvent repairs a live message without closing its append route.
+func (b *MainACPTurnBlock) ReplaceStreamEvent(kind SubagentEventKind, text string, source narrativeSourceIdentity, occurredAt ...time.Time) {
+	if b != nil {
+		clearModelRetryNotices(&b.Events)
+		b.Events = b.narrativeStream.replace(b.Events, kind, text, source, narrativeEventTime(occurredAt...))
+	}
+}
+
 func (b *MainACPTurnBlock) ClearActiveBuffers() {
 	if b == nil {
 		return
@@ -114,6 +122,14 @@ func (b *ParticipantTurnBlock) ReplaceFinalStreamEvent(kind SubagentEventKind, c
 		return
 	}
 	replaceFinalNarrativeStreamEvent(&b.Events, &b.narrativeStream, kind, chunk, source, narrativeEventTime(occurredAt...))
+}
+
+// ReplaceStreamEvent repairs a live message without settling the participant.
+func (b *ParticipantTurnBlock) ReplaceStreamEvent(kind SubagentEventKind, text string, source narrativeSourceIdentity, occurredAt ...time.Time) {
+	if b != nil {
+		clearModelRetryNotices(&b.Events)
+		b.Events = b.narrativeStream.replace(b.Events, kind, text, source, narrativeEventTime(occurredAt...))
+	}
 }
 
 func (b *ParticipantTurnBlock) advanceNarrativeBoundary() {
@@ -203,9 +219,30 @@ func (s *narrativeStreamState) append(events []SubagentEvent, kind SubagentEvent
 	return events
 }
 
+func (s *narrativeStreamState) replace(events []SubagentEvent, kind SubagentEventKind, text string, source narrativeSourceIdentity, at time.Time) []SubagentEvent {
+	identity := source.stableKey()
+	if s.prepareRun(kind, identity) {
+		sealNarrativeBuffers(events)
+	}
+	target := s.target(kind, identity)
+	delete(s.pending, target)
+	idx, found := s.targetIndex(events, target)
+	if !found && identity != "" {
+		idx, found = s.finalTargetIndex(events, kind, identity)
+	}
+	if !found {
+		events = append(events, SubagentEvent{Kind: kind})
+		idx = len(events) - 1
+	}
+	replaceNarrativeEventFinal(&events[idx], text, at)
+	bindNarrativeTarget(&events[idx], target, false)
+	s.rememberTarget(target, idx)
+	return events
+}
+
 func (s *narrativeStreamState) replaceFinal(events []SubagentEvent, kind SubagentEventKind, chunk string, source narrativeSourceIdentity, at time.Time) []SubagentEvent {
 	identity := source.stableKey()
-	if identity != "" && renderableTextHasContent(chunk) {
+	if identity != "" {
 		// A final is a snapshot repair, not a live delta. Keep its latest typed
 		// owner even when another run is active; never reopen that owner for
 		// append or disturb the current run's pending prefix.

@@ -179,7 +179,9 @@ func TestBuildSystemPromptCoreContractIsConciseAndToolAgnostic(t *testing.T) {
 			t.Fatalf("system instructions missing %q:\n%s", want, systemBlock)
 		}
 	}
-	toolNeutralPrompt := strings.ReplaceAll(prompt, "Read-only", "")
+	// Discovered skill descriptions are external metadata and may legitimately
+	// name tools. This contract applies to the Caelis-owned system instructions.
+	toolNeutralPrompt := strings.ReplaceAll(systemBlock, "Read-only", "")
 	for _, forbidden := range []string{
 		"terminal-first",
 		"RunCommand",

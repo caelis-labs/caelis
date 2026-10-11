@@ -7,13 +7,22 @@ import (
 	"github.com/caelis-labs/caelis/control/application"
 )
 
+// CapabilityApplicationSessionControl exposes profile-aware status,
+// presentation, native Agent state/catalog, model/Skill completion, fenced
+// Session compaction and closure through the original Application Archive.
+const CapabilityApplicationSessionControl = "application-session-control-v1"
+
+// CapabilityApplicationProfileChildren exposes native participant and Spawn
+// execution with independent Sessions inheriting the admitted Application profile.
+const CapabilityApplicationProfileChildren = "application-profile-children-v1"
+
 // Capabilities reports implemented application features, independent of the
 // caller's lease, per-Session permissions and current execution state.
 func (s *ApplicationService) Capabilities() []string {
 	out := []string{
 		application.Capability, application.CapabilityResourceTransfer,
 		application.CapabilityToolResultContent, application.CapabilityMediaResources,
-		application.CapabilityBackgroundActivation, CapabilitySharedWorkers, CapabilityTurnSteering,
+		application.CapabilityBackgroundActivation, CapabilitySharedWorkers, CapabilityTurnSteering, CapabilitySharedWorkerSessionControl, CapabilityApplicationSessionControl,
 		CapabilityExecutionConfiguration,
 	}
 	if s.config.ModelImageInput != nil {
@@ -30,6 +39,9 @@ func (s *ApplicationService) Capabilities() []string {
 	}
 	if s.config.NativeExecution {
 		out = append(out, application.CapabilityNativeExecution, application.CapabilityWorkspaceBinding)
+	}
+	if s.config.NativeProfileChildren {
+		out = append(out, CapabilityApplicationProfileChildren)
 	}
 	return out
 }

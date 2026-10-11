@@ -3,6 +3,7 @@ package appserver
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
@@ -31,8 +32,10 @@ type SessionClient interface {
 }
 
 type boundSessionClient struct {
-	service   Service
-	principal Principal
+	service      Service
+	principal    Principal
+	applications *ApplicationService
+	capabilities []string
 }
 
 // BindSessionClient binds one trusted principal to the in-process Control
@@ -53,14 +56,23 @@ func (c *boundSessionClient) Initialize(ctx context.Context) (ServerInfo, error)
 	if err := ctx.Err(); err != nil {
 		return ServerInfo{}, err
 	}
-	return ServerInfo{
+	info := ServerInfo{
 		ProtocolVersion: acpsdk.ProtocolVersionNumber,
 		EnvelopeVersion: EnvelopeVersion,
 		APIVersion:      HTTPAPIVersion,
 		ServerID:        ServerIdentity,
-		Capabilities:    append(RequiredManagedHostCapabilities(), CapabilityExecutionConfiguration),
+		Capabilities:    append(RequiredManagedHostCapabilities(), CapabilityExecutionConfiguration, CapabilityApprovalSubjects, CapabilityDisplayReplacements),
 		Transports:      []string{"embedded"},
-	}, nil
+	}
+	if SupportsConversationInteractions(c.service) {
+		info.Capabilities = append(info.Capabilities, CapabilityConversationInteractions)
+	}
+	for _, capability := range c.capabilities {
+		if !slices.Contains(info.Capabilities, capability) {
+			info.Capabilities = append(info.Capabilities, capability)
+		}
+	}
+	return info, nil
 }
 
 func (c *boundSessionClient) ListSessions(ctx context.Context, request ListSessionsRequest) (SessionList, error) {
@@ -72,6 +84,9 @@ func (c *boundSessionClient) CreateSession(ctx context.Context, request CreateSe
 }
 
 func (c *boundSessionClient) CloseSession(ctx context.Context, request CloseSessionRequest) (CommandResult, error) {
+	if c.applications != nil && (c.principal.ApplicationID != "" || c.principal.ConnectionID != "") {
+		return c.applications.CloseSession(ctx, c.boundPrincipal(), request)
+	}
 	return c.service.CloseSession(ctx, c.boundPrincipal(), request)
 }
 

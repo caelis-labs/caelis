@@ -6,6 +6,7 @@ import (
 
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/internal/acpagentenv"
+	"github.com/caelis-labs/caelis/internal/acpdraft"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 )
@@ -65,6 +66,7 @@ func configuredSelfAgent(cfg DefaultSelfConfig) (assembly.AgentConfig, error) {
 	}
 	args := []string{
 		"acp",
+		"--acp-draft=" + acpdraft.SchemaTag,
 		"-store-dir", strings.TrimSpace(cfg.StoreDir),
 	}
 	if controlURL := strings.TrimSpace(cfg.ControlURL); controlURL != "" {
@@ -84,6 +86,7 @@ func configuredSelfAgent(cfg DefaultSelfConfig) (assembly.AgentConfig, error) {
 	// supplied explicitly through the protected token-file argument above.
 	return assembly.AgentConfig{
 		BuiltinRuntime: true,
+		ACPDraftSchema: acpdraft.SchemaTag,
 		Name:           "self",
 		Description:    "Caelis self ACP agent",
 		Command:        executable,

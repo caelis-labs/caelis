@@ -71,21 +71,28 @@ type ProtocolToolCallContent struct {
 // ProtocolUpdate is the normalized ACP session/update payload carried by one
 // canonical event. Caelis-specific projection data belongs under Meta["caelis"]
 // and is serialized as the standard payload's private _meta field.
-// Name follows ACP v1: absent or null leaves the current tool name unchanged.
+// Name follows ACP v1: absent or null leaves the current tool name unchanged,
+// unless normalized display patch presence explicitly includes "name".
 type ProtocolUpdate struct {
-	SessionUpdate string                     `json:"sessionUpdate,omitempty"`
-	Content       any                        `json:"content,omitempty"`
-	MessageID     string                     `json:"messageId,omitempty"`
-	ToolCallID    string                     `json:"toolCallId,omitempty"`
-	Name          *string                    `json:"name,omitempty"`
-	Title         string                     `json:"title,omitempty"`
-	Kind          string                     `json:"kind,omitempty"`
-	Status        string                     `json:"status,omitempty"`
-	RawInput      map[string]any             `json:"rawInput,omitempty"`
-	RawOutput     map[string]any             `json:"rawOutput,omitempty"`
-	Locations     []ProtocolToolCallLocation `json:"locations,omitempty"`
-	Entries       []ProtocolPlanEntry        `json:"entries,omitempty"`
-	Meta          map[string]any             `json:"_meta,omitempty"`
+	SessionUpdate string `json:"sessionUpdate,omitempty"`
+	Content       any    `json:"content,omitempty"`
+	MessageID     string `json:"messageId,omitempty"`
+	// Replacement replaces the identified narrative, including with empty text.
+	// It does not settle its Turn or grant execution authority.
+	Replacement bool `json:"replacement,omitempty"`
+	// ReplacedFields identifies present display fields, including null or empty
+	// values. Absent fields retain their current value; this grants no authority.
+	ReplacedFields []string                   `json:"replacedFields,omitempty"`
+	ToolCallID     string                     `json:"toolCallId,omitempty"`
+	Name           *string                    `json:"name,omitempty"`
+	Title          string                     `json:"title,omitempty"`
+	Kind           string                     `json:"kind,omitempty"`
+	Status         string                     `json:"status,omitempty"`
+	RawInput       map[string]any             `json:"rawInput,omitempty"`
+	RawOutput      map[string]any             `json:"rawOutput,omitempty"`
+	Locations      []ProtocolToolCallLocation `json:"locations,omitempty"`
+	Entries        []ProtocolPlanEntry        `json:"entries,omitempty"`
+	Meta           map[string]any             `json:"_meta,omitempty"`
 }
 
 // ProtocolTextContent returns the standard ACP text content payload.
@@ -136,6 +143,11 @@ type ProtocolApprovalOption struct {
 type ProtocolApproval struct {
 	ToolCall ProtocolToolCall         `json:"tool_call,omitempty"`
 	Options  []ProtocolApprovalOption `json:"options,omitempty"`
+	// Subject is normalized SDK display evidence, outside standard ACP fields.
+	Subject *ApprovalSubject `json:"subject,omitempty"`
+	// Context is independent permission evidence for endpoints whose request
+	// does not necessarily refer to a tool call.
+	Context *PermissionContext `json:"context,omitempty"`
 }
 
 // ProtocolParticipant is the participant lifecycle payload for one event.
@@ -326,12 +338,29 @@ func ProtocolAgentCommunicationOf(event *Event) *ProtocolAgentCommunication {
 		!protocolUpdateHasAgentCommunicationMeta(normalized.Update) {
 		return nil
 	}
-	text := strings.TrimSpace(textFromProtocolContent(normalized.Update.Content))
-	if text == "" {
-		text = strings.TrimSpace(event.Text)
+	text := textFromProtocolContent(normalized.Update.Content)
+	observation := IsUIOnly(event) || IsMirror(event)
+	if observation && normalized.Update.Content == nil && event.Message != nil {
+		// Storage may remove a duplicate display projection while preserving
+		// its observed Message. Explicit empty content never uses this path.
+		text = event.Message.TextContent()
+	}
+	if !observation {
+		text = strings.TrimSpace(text)
 	}
 	if text == "" {
-		return nil
+		text = event.Text
+		if !observation {
+			text = strings.TrimSpace(text)
+		}
+	}
+	if text == "" {
+		// Empty observed patches repair display only. Canonical admitted mail
+		// retains its nonempty text and actor validation requirements.
+		if !observation || EventMessageID(event) == "" ||
+			(!normalized.Update.Replacement && !slices.Contains(normalized.Update.ReplacedFields, "_meta")) {
+			return nil
+		}
 	}
 	return &ProtocolAgentCommunication{Text: text}
 }
@@ -384,6 +413,8 @@ func protocolUpdateHasOnlySessionUpdate(update *ProtocolUpdate) bool {
 		strings.TrimSpace(update.Kind) == "" &&
 		strings.TrimSpace(update.Status) == "" &&
 		strings.TrimSpace(update.MessageID) == "" &&
+		!update.Replacement &&
+		len(update.ReplacedFields) == 0 &&
 		update.Content == nil &&
 		len(update.RawInput) == 0 &&
 		len(update.RawOutput) == 0 &&
@@ -566,16 +597,18 @@ func CloneEventProtocol(in EventProtocol) EventProtocol {
 
 func cloneProtocolUpdate(in ProtocolUpdate) ProtocolUpdate {
 	out := ProtocolUpdate{
-		SessionUpdate: strings.TrimSpace(in.SessionUpdate),
-		Content:       cloneProtocolAny(in.Content),
-		MessageID:     strings.TrimSpace(in.MessageID),
-		ToolCallID:    strings.TrimSpace(in.ToolCallID),
-		Title:         strings.TrimSpace(in.Title),
-		Kind:          strings.TrimSpace(in.Kind),
-		Status:        strings.TrimSpace(in.Status),
-		RawInput:      jsonvalue.CloneMap(in.RawInput),
-		RawOutput:     jsonvalue.CloneMap(in.RawOutput),
-		Meta:          cloneProtocolAnyMap(in.Meta),
+		SessionUpdate:  strings.TrimSpace(in.SessionUpdate),
+		Content:        cloneProtocolAny(in.Content),
+		MessageID:      strings.TrimSpace(in.MessageID),
+		Replacement:    in.Replacement,
+		ReplacedFields: slices.Clone(in.ReplacedFields),
+		ToolCallID:     strings.TrimSpace(in.ToolCallID),
+		Title:          strings.TrimSpace(in.Title),
+		Kind:           strings.TrimSpace(in.Kind),
+		Status:         strings.TrimSpace(in.Status),
+		RawInput:       jsonvalue.CloneMap(in.RawInput),
+		RawOutput:      jsonvalue.CloneMap(in.RawOutput),
+		Meta:           cloneProtocolAnyMap(in.Meta),
 	}
 	if in.Name != nil {
 		name := *in.Name
@@ -629,6 +662,11 @@ func cloneProtocolToolCallContents(in []ProtocolToolCallContent) []ProtocolToolC
 func cloneProtocolApproval(in ProtocolApproval) ProtocolApproval {
 	out := ProtocolApproval{
 		ToolCall: cloneProtocolToolCall(in.ToolCall),
+		Subject:  CloneApprovalSubject(in.Subject),
+		Context:  ClonePermissionContext(in.Context),
+	}
+	if in.Context != nil {
+		out.ToolCall.ID, out.ToolCall.Name, out.ToolCall.Kind, out.ToolCall.Title, out.ToolCall.Status = in.ToolCall.ID, in.ToolCall.Name, in.ToolCall.Kind, in.ToolCall.Title, in.ToolCall.Status
 	}
 	if len(in.Options) > 0 {
 		out.Options = make([]ProtocolApprovalOption, 0, len(in.Options))
@@ -638,6 +676,9 @@ func cloneProtocolApproval(in ProtocolApproval) ProtocolApproval {
 				Name: strings.TrimSpace(item.Name),
 				Kind: strings.TrimSpace(item.Kind),
 			})
+			if in.Context != nil {
+				out.Options[len(out.Options)-1].Name = item.Name
+			}
 		}
 	}
 	return out

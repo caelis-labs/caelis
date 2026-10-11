@@ -14,6 +14,7 @@ import (
 	"time"
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
+	v2 "github.com/caelis-labs/acp-go-sdk/experimental/v2"
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	sdkplacement "github.com/caelis-labs/caelis/agent-sdk/placement"
@@ -254,7 +255,7 @@ func (m *Manager) Activate(ctx context.Context, req controller.HandoffRequest) (
 		run.cfg = cfg
 	}
 	resumeRemoteSessionID := reusableControllerRemoteSessionID(req.Session, cfg.Name)
-	client, remoteSessionID, state, err := m.startClient(ctx, req.Session.CWD, cfg, resumeRemoteSessionID,
+	client, remoteSessionID, state, err := m.startClient(withDraftPermissionHandler(ctx, run.draftPermissionHandler), req.Session.CWD, cfg, resumeRemoteSessionID,
 		func(env client.UpdateEnvelope) {
 			run.handleUpdate(m.clock, env)
 		},
@@ -573,7 +574,7 @@ func (m *Manager) reconnectControllerRun(ctx context.Context, run *controllerRun
 		run.cfg = cfg
 		run.mu.Unlock()
 	}
-	acpClient, remoteSessionID, state, err := m.startClient(ctx, cwd, cfg, resumeRemoteSessionID,
+	acpClient, remoteSessionID, state, err := m.startClient(withDraftPermissionHandler(ctx, run.draftPermissionHandler), cwd, cfg, resumeRemoteSessionID,
 		func(env client.UpdateEnvelope) {
 			run.handleUpdate(m.clock, env)
 		},
@@ -918,7 +919,9 @@ func (m *Manager) startParticipant(
 		return nil, err
 	}
 	resumeRemoteSessionID := strings.TrimSpace(existing.SessionID)
-	client, remoteSessionID, state, err := m.startClient(ctx, parentSession.CWD, cfg, resumeRemoteSessionID, func(env client.UpdateEnvelope) {
+	client, remoteSessionID, state, err := m.startClient(withDraftPermissionHandler(ctx, func(ctx context.Context, req v2.RequestPermissionRequest) (v2.RequestPermissionResponse, error) {
+		return run.draftPermissionHandler(ctx, req)
+	}), parentSession.CWD, cfg, resumeRemoteSessionID, func(env client.UpdateEnvelope) {
 		if run != nil {
 			run.handleUpdate(m.clock, env)
 		}
@@ -1024,6 +1027,8 @@ func (m *Manager) startACPClient(
 	}
 	acpClient, err := client.Start(context.WithoutCancel(ctx), client.Config{
 		HostedAdapterID: cfg.HostedAdapterID,
+		ModelImageInput: cfg.PinnedModelImageInput(),
+		ACPDraftSchema:  cfg.ACPDraftSchema,
 		MCPServers:      cfg.MCPServers, MCPGrant: cfg.MCPGrant,
 		ConnectionID:     cfg.Name,
 		EndpointResolver: m.endpointResolver,
@@ -1036,6 +1041,10 @@ func (m *Manager) startACPClient(
 		OnPermissionRequest: func(ctx context.Context, req client.RequestPermissionRequest) (client.RequestPermissionResponse, error) {
 			return onPermission(ctx, req)
 		},
+		OnDraftPermissionRequest: func() draftPermissionHandler {
+			handler, _ := ctx.Value(draftPermissionSetupKey{}).(draftPermissionHandler)
+			return handler
+		}(),
 	})
 	if err != nil {
 		return nil, "", controllerClientState{}, err

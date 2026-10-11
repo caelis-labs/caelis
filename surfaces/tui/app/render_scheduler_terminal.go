@@ -15,6 +15,12 @@ func eventStreamTerminalBatchKey(env eventstream.Envelope) (string, bool) {
 	if !ok {
 		return "", false
 	}
+	if output, present := transcript.ReadTerminalOutput(update.Meta); present && output.Replacement {
+		return "", false
+	}
+	if len(update.ReplacedFields) > 0 {
+		return "", false
+	}
 	if transcript.StringFromPtr(update.Status) != eventstream.ToolStatusInProgress {
 		return "", false
 	}

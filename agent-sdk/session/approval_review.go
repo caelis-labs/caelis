@@ -11,7 +11,10 @@ func ResolvedApprovalReview(event *Event) *PauseToken {
 		return nil
 	}
 	token := event.Journal.PauseToken
-	if token == nil || token.Status != PauseTokenResolved || strings.TrimSpace(token.ToolCallID) == "" || strings.TrimSpace(token.ReviewText) == "" {
+	if token == nil || token.Status != PauseTokenResolved || strings.TrimSpace(token.ReviewText) == "" {
+		return nil
+	}
+	if strings.TrimSpace(token.ToolCallID) == "" && (token.Approval == nil || token.Approval.Context == nil) {
 		return nil
 	}
 	return token

@@ -2,10 +2,12 @@ package gatewayapp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/control/application"
 	"github.com/caelis-labs/caelis/internal/kernel"
 )
 
@@ -29,11 +31,22 @@ func (s *runtimeComposition) updateSessionStateAtRevision(
 	})
 }
 
-// SessionRuntimeState returns the current per-session runtime overrides backed
-// by session state.
+// SessionRuntimeState returns the current per-session selection. Ordinary
+// Sessions use state overrides; Application Sessions use their desired profile
+// and creation-bound policy. Application Configuration.LastRequest separately
+// identifies the exact snapshot last admitted to a model request.
 func (s *runtimeComposition) SessionRuntimeState(ctx context.Context, ref session.SessionRef) (SessionRuntimeState, error) {
 	if s == nil || s.sessions == nil {
 		return SessionRuntimeState{}, fmt.Errorf("gatewayapp: sessions service unavailable")
+	}
+	if s.authorities.applications != nil {
+		binding, err := s.authorities.applications.BindingForSession(ctx, ref.SessionID)
+		if err == nil {
+			return s.applicationRuntimeState(ctx, binding)
+		}
+		if !errors.Is(err, application.ErrNotFound) {
+			return SessionRuntimeState{}, err
+		}
 	}
 	state, err := s.sessions.SnapshotState(ctx, ref)
 	if err != nil {

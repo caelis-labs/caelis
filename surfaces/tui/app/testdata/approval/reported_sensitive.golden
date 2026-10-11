@@ -1,0 +1,19 @@
+╭──────────────────────────────────────────────────────────────────────────────────╮
+│ Approval Required                                                                │
+│                                                                                  │
+│ DESCRIPTION:       [opaque]                                                      │
+│ SOURCE:            Context reported by the remote agent.                         │
+│ OPERATION:         [opaque]                                                      │
+│ COMMAND:           [sensitive field supplied]                                    │
+│ WORKING DIRECTORY: [opaque]                                                      │
+│ EFFECT:            [opaque]                                                      │
+│ SCOPE:             [opaque]                                                      │
+│ SENSITIVE INPUT:   Sensitive values are hidden.                                  │
+│ CONTEXT:           Incomplete or opaque; inspect the original request before gra │
+│                    nting access.                                                 │
+│ DEFAULT:           Reject                                                        │
+│                                                                                  │
+│   Allow once  allow_once; scope: [opaque]                                        │
+│ ▎ Reject      reject_once; scope: [opaque]                                       │
+╰──────────────────────────────────────────────────────────────────────────────────╯
+   ↑/↓ select  enter confirm  esc cancel

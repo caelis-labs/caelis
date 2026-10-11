@@ -14,10 +14,12 @@ import (
 	"sync"
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
+	"github.com/caelis-labs/acp-go-sdk/experimental/v2"
 	sdkstdio "github.com/caelis-labs/acp-go-sdk/transport/stdio"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/endpoint"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpmeta"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/steeringwire"
+	"github.com/caelis-labs/caelis/internal/acpdraft"
 )
 
 const maxFrameSize = 64 * 1024 * 1024
@@ -31,26 +33,34 @@ type Config struct {
 		Close()
 		Valid() bool
 	}
-	HostedAdapterID     string
-	ConnectionID        string
-	EndpointResolver    endpoint.Resolver
-	Command             string
-	Args                []string
-	Env                 map[string]string
-	WorkDir             string
-	ClientInfo          *acpsdk.Implementation
-	OnUpdate            func(UpdateEnvelope)
-	OnPermissionRequest PermissionHandler
-	TerminalAuth        bool
+	HostedAdapterID string
+	// ModelImageInput is a Host-frozen native capability for local presentation.
+	ModelImageInput *bool
+	// ACPDraftSchema explicitly selects the controlled v2 draft profile. Empty
+	// keeps stable v1; a selected draft never falls back to stable semantics.
+	ACPDraftSchema           string
+	ConnectionID             string
+	EndpointResolver         endpoint.Resolver
+	Command                  string
+	Args                     []string
+	Env                      map[string]string
+	WorkDir                  string
+	ClientInfo               *acpsdk.Implementation
+	OnUpdate                 func(UpdateEnvelope)
+	OnPermissionRequest      PermissionHandler
+	OnDraftPermissionRequest func(context.Context, v2.RequestPermissionRequest) (v2.RequestPermissionResponse, error)
+	TerminalAuth             bool
 }
 
 // Client owns the Caelis policy around one SDK connection and optional SDK
 // subprocess. JSON-RPC ordering, request lifecycle, and process waiting stay
 // owned by acp-go-sdk.
 type Client struct {
-	conn *acpsdk.Connection
-	proc *sdkstdio.Process
-	cfg  Config
+	conn   *acpsdk.Connection
+	proc   *sdkstdio.Process
+	stream *endpoint.Stream
+	cfg    Config
+	draft  *draftClient
 
 	stderrMu    sync.Mutex
 	stderrBuf   bytes.Buffer
@@ -74,7 +84,7 @@ func Start(ctx context.Context, cfg Config) (started *Client, startErr error) {
 			return nil, errors.New("acp client: hosted endpoint cannot include a process declaration")
 		}
 		process, err := endpoint.Resolve(ctx, cfg.EndpointResolver, endpoint.Request{
-			AdapterID: adapterID, ConnectionID: firstNonEmpty(cfg.ConnectionID, adapterID), CWD: cfg.WorkDir,
+			AdapterID: adapterID, ConnectionID: firstNonEmpty(cfg.ConnectionID, adapterID), CWD: cfg.WorkDir, ACPDraftSchema: cfg.ACPDraftSchema, ModelImageInput: cfg.ModelImageInput,
 		})
 		if err != nil {
 			return nil, err
@@ -84,6 +94,39 @@ func Start(ctx context.Context, cfg Config) (started *Client, startErr error) {
 		cfg.Env = process.Env
 		cfg.WorkDir = firstNonEmpty(process.WorkDir, cfg.WorkDir)
 		client := &Client{cfg: cfg, release: process.Release}
+		if process.Open != nil {
+			stream, err := process.Open(ctx)
+			if err != nil {
+				client.releaseEndpoint()
+				return nil, err
+			}
+			client.stream = &stream
+			if stream.Input == nil || stream.Output == nil || stream.Close == nil || stream.Wait == nil {
+				var cleanupErr error
+				if stream.Close != nil {
+					cleanupErr = stream.Close()
+				} else {
+					if stream.Input != nil {
+						cleanupErr = errors.Join(cleanupErr, stream.Input.Close())
+					}
+					if stream.Output != nil {
+						cleanupErr = errors.Join(cleanupErr, stream.Output.Close())
+					}
+				}
+				if stream.Wait != nil {
+					cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), DefaultProcessExitGrace)
+					cleanupErr = errors.Join(cleanupErr, stream.Wait(cleanupCtx))
+					cancel()
+				}
+				client.releaseEndpoint()
+				return nil, errors.Join(errors.New("acp client: incomplete owned local stream"), cleanupErr)
+			}
+			if err := client.bind(stream.Input, stream.Output); err != nil {
+				// Startup cancellation does not waive the owned server join proof.
+				return nil, errors.Join(err, client.Close(context.WithoutCancel(ctx)))
+			}
+			return client, nil
+		}
 		return client.start(ctx)
 	}
 	client := &Client{cfg: cfg}
@@ -127,6 +170,12 @@ func NewStreamClient(peerInput io.Writer, peerOutput io.Reader, cfg Config) (*Cl
 }
 
 func (c *Client) bind(peerInput io.Writer, peerOutput io.Reader) error {
+	if c.cfg.ACPDraftSchema != "" {
+		if c.cfg.ACPDraftSchema != acpdraft.SchemaTag {
+			return fmt.Errorf("acp client: unsupported draft schema %q", c.cfg.ACPDraftSchema)
+		}
+		c.draft = newDraftClient(c)
+	}
 	conn, err := acpsdk.NewConnectionWithOptions(
 		c.handleMethod,
 		peerInput,
@@ -135,7 +184,7 @@ func (c *Client) bind(peerInput io.Writer, peerOutput io.Reader) error {
 		// runs. The independent byte cap prevents the frame limit multiplying into
 		// unbounded queue memory. Unsupported extension methods use no queue slots.
 		acpsdk.ConnectionOptions{MaxFrameSize: maxFrameSize, MaxQueuedNotifications: 8192, MaxNotificationBytes: 32 << 20,
-			AcceptNotification: func(method string) bool { return method == MethodSessionUpdate || method == sessionNoticeMethod },
+			AcceptNotification: func(method string) bool { return method == MethodSessionUpdate },
 		},
 	)
 	if err != nil {
@@ -149,24 +198,40 @@ func (c *Client) bind(peerInput io.Writer, peerOutput io.Reader) error {
 }
 
 func (c *Client) Initialize(ctx context.Context) (InitializeResponse, error) {
+	if c.draft != nil {
+		return c.draft.initialize(ctx)
+	}
 	clientCapabilities := acpsdk.ClientCapabilities{
 		Meta: map[string]json.RawMessage{
 			acpmeta.TerminalOutputKey: json.RawMessage("true"),
-			sessionNoticeCapability:   json.RawMessage("true"),
 		},
+		Session: &acpsdk.ClientSessionCapabilities{Notices: &acpsdk.NoticeCapabilities{}},
 	}
 	if c.cfg.TerminalAuth {
 		clientCapabilities.Auth.Terminal = true
 	}
-	return sendRequest[InitializeResponse](c, ctx, MethodInitialize, acpsdk.InitializeRequest{
+	response, err := sendRequest[InitializeResponse](c, ctx, MethodInitialize, acpsdk.InitializeRequest{
 		ProtocolVersion:    acpsdk.ProtocolVersionNumber,
 		ClientCapabilities: clientCapabilities,
 		ClientInfo:         c.cfg.ClientInfo,
 	})
+	if err != nil {
+		return InitializeResponse{}, err
+	}
+	// This client owns stable v1 lifecycle and permission semantics. A v2
+	// response can otherwise decode into the tolerant DTO with empty v1
+	// capabilities, accidentally admitting an incompatible endpoint.
+	if response.ProtocolVersion != int(acpsdk.ProtocolVersionNumber) {
+		return InitializeResponse{}, fmt.Errorf("acp client: unsupported negotiated protocol version %d; requires stable v%d", response.ProtocolVersion, acpsdk.ProtocolVersionNumber)
+	}
+	return response, nil
 }
 
 // Authenticate invokes the stable ACP v1 agent-managed authentication flow.
 func (c *Client) Authenticate(ctx context.Context, methodID string) error {
+	if c.draft != nil {
+		return c.draft.authenticate(ctx, methodID)
+	}
 	_, err := sendRequest[AuthenticateResponse](c, ctx, MethodAuthenticate, AuthenticateRequest{
 		MethodId: acpsdk.AuthMethodId(strings.TrimSpace(methodID)),
 	})
@@ -174,6 +239,9 @@ func (c *Client) Authenticate(ctx context.Context, methodID string) error {
 }
 
 func (c *Client) NewSession(ctx context.Context, cwd string, meta map[string]any) (NewSessionResponse, error) {
+	if c.draft != nil {
+		return c.draft.newSession(ctx, cwd, meta)
+	}
 	rawMeta, err := rawMessagesFromValues(meta)
 	if err != nil {
 		return NewSessionResponse{}, err
@@ -190,6 +258,9 @@ func (c *Client) NewSession(ctx context.Context, cwd string, meta map[string]any
 }
 
 func (c *Client) ListSessions(ctx context.Context, req acpsdk.ListSessionsRequest) (acpsdk.ListSessionsResponse, error) {
+	if c.draft != nil {
+		return c.draft.listSessions(ctx, req)
+	}
 	return sendRequest[acpsdk.ListSessionsResponse](c, ctx, MethodSessionList, req)
 }
 
@@ -200,6 +271,9 @@ func (c *Client) LoadSession(ctx context.Context, sessionID string, cwd string, 
 // LoadSessionWithReplayEnd marks the ordered boundary between complete replay
 // and later notifications. replayEnd must not wait for later connection output.
 func (c *Client) LoadSessionWithReplayEnd(ctx context.Context, sessionID string, cwd string, meta map[string]any, replayEnd func(context.Context) error) (LoadSessionResponse, error) {
+	if c.draft != nil {
+		return c.draft.loadSession(ctx, sessionID, cwd, meta, replayEnd)
+	}
 	if c == nil || c.conn == nil {
 		return LoadSessionResponse{}, errors.New("acp client is unavailable")
 	}
@@ -225,6 +299,9 @@ func (c *Client) LoadSessionWithReplayEnd(ctx context.Context, sessionID string,
 }
 
 func (c *Client) ResumeSession(ctx context.Context, sessionID string, cwd string, meta map[string]any) (ResumeSessionResponse, error) {
+	if c.draft != nil {
+		return c.draft.resumeSession(ctx, sessionID, cwd, meta)
+	}
 	rawMeta, err := rawMessagesFromValues(meta)
 	if err != nil {
 		return ResumeSessionResponse{}, err
@@ -252,6 +329,10 @@ func (c *Client) CloseSession(ctx context.Context, sessionID string) error {
 }
 
 func (c *Client) SetMode(ctx context.Context, sessionID string, modeID string) error {
+	if c.draft != nil {
+		_, err := c.draft.setConfig(ctx, sessionID, "mode", modeID)
+		return err
+	}
 	_, err := sendRequest[SetSessionModeResponse](c, ctx, MethodSessionSetMode, SetSessionModeRequest{
 		SessionId: acpsdk.SessionId(sessionID),
 		ModeId:    acpsdk.SessionModeId(modeID),
@@ -260,6 +341,9 @@ func (c *Client) SetMode(ctx context.Context, sessionID string, modeID string) e
 }
 
 func (c *Client) SetConfigOption(ctx context.Context, sessionID string, configID string, value any) (SetSessionConfigOptionResponse, error) {
+	if c.draft != nil {
+		return c.draft.setConfig(ctx, sessionID, configID, value)
+	}
 	request := SetSessionConfigOptionRequest{}
 	switch typed := value.(type) {
 	case string:
@@ -286,6 +370,10 @@ func (c *Client) SetConfigOption(ctx context.Context, sessionID string, configID
 }
 
 func (c *Client) SetModel(ctx context.Context, sessionID string, modelID string) error {
+	if c.draft != nil {
+		_, err := c.draft.setConfig(ctx, sessionID, "model", modelID)
+		return err
+	}
 	_, err := sendRequest[SetSessionModelResponse](c, ctx, MethodSessionSetModel, SetSessionModelRequest{
 		SessionID: sessionID,
 		ModelID:   modelID,
@@ -327,9 +415,13 @@ func (c *Client) PromptParts(ctx context.Context, sessionID string, prompt []jso
 // producer without transferring transport ownership.
 type PromptCall struct {
 	inner *acpsdk.PreparedRequest[PromptResponse]
+	draft *draftPromptCall
 }
 
 func (c *Client) PreparePromptParts(sessionID string, prompt []json.RawMessage, meta map[string]any) (*PromptCall, error) {
+	if c.draft != nil {
+		return c.draft.preparePrompt(sessionID, prompt, meta)
+	}
 	if c == nil || c.conn == nil {
 		return nil, errors.New("acp client is unavailable")
 	}
@@ -345,6 +437,9 @@ func (c *Client) PreparePromptParts(sessionID string, prompt []json.RawMessage, 
 }
 
 func (c *PromptCall) Dispatch(ctx context.Context) error {
+	if c != nil && c.draft != nil {
+		return c.draft.inner.Dispatch(ctx, acpsdk.DispatchOptions{})
+	}
 	if c == nil || c.inner == nil {
 		return errors.New("acp prompt call is unavailable")
 	}
@@ -352,6 +447,9 @@ func (c *PromptCall) Dispatch(ctx context.Context) error {
 }
 
 func (c *PromptCall) DispatchWithAbort(ctx context.Context, abort func()) error {
+	if c != nil && c.draft != nil {
+		return c.draft.inner.Dispatch(ctx, acpsdk.DispatchOptions{Abort: adaptAbort(abort)})
+	}
 	if c == nil || c.inner == nil {
 		return errors.New("acp prompt call is unavailable")
 	}
@@ -359,6 +457,9 @@ func (c *PromptCall) DispatchWithAbort(ctx context.Context, abort func()) error 
 }
 
 func (c *PromptCall) ObserveAuthRequired(observer func() error) error {
+	if c != nil && c.draft != nil {
+		return c.draft.observeAuthRequired(observer)
+	}
 	if c == nil || c.inner == nil {
 		return errors.New("acp prompt call is unavailable")
 	}
@@ -371,6 +472,9 @@ func (c *PromptCall) ObserveAuthRequired(observer func() error) error {
 }
 
 func (c *PromptCall) Wait(ctx context.Context) (PromptResponse, error) {
+	if c != nil && c.draft != nil {
+		return c.draft.wait(ctx)
+	}
 	if c == nil || c.inner == nil {
 		return PromptResponse{}, errors.New("acp prompt call is unavailable")
 	}
@@ -378,6 +482,10 @@ func (c *PromptCall) Wait(ctx context.Context) (PromptResponse, error) {
 }
 
 func (c *PromptCall) Abandon() {
+	if c != nil && c.draft != nil {
+		c.draft.abandon()
+		return
+	}
 	if c != nil && c.inner != nil {
 		c.inner.Abandon()
 	}
@@ -390,6 +498,9 @@ func (c *Client) SteerPartsWithAbort(
 	meta map[string]json.RawMessage,
 	abort func(),
 ) (SessionSteeringResponse, error) {
+	if c.draft != nil {
+		return c.draft.steer(ctx, sessionID, prompt, abort)
+	}
 	if c == nil || c.conn == nil {
 		return SessionSteeringResponse{}, errors.New("acp client is unavailable")
 	}
@@ -495,6 +606,9 @@ func (c *Client) handleMethod(ctx context.Context, method string, params json.Ra
 }
 
 func (c *Client) handleRequest(ctx context.Context, method string, params json.RawMessage) (any, *acpsdk.RequestError) {
+	if c.draft != nil {
+		return c.draft.handleRequest(ctx, method, params)
+	}
 	switch method {
 	case MethodSessionReqPermission:
 		var req RequestPermissionRequest
@@ -519,9 +633,6 @@ func (c *Client) handleRequest(ctx context.Context, method string, params json.R
 
 func (c *Client) handleNotification(method string, params json.RawMessage) (any, *acpsdk.RequestError) {
 	switch method {
-	case sessionNoticeMethod:
-		c.handleNotice(params)
-		return nil, nil
 	case MethodSessionUpdate:
 		c.handleUpdate(params)
 		return nil, nil
@@ -531,6 +642,10 @@ func (c *Client) handleNotification(method string, params json.RawMessage) (any,
 }
 
 func (c *Client) handleUpdate(params json.RawMessage) {
+	if c != nil && c.draft != nil {
+		c.draft.handleUpdate(params)
+		return
+	}
 	if c == nil || c.cfg.OnUpdate == nil {
 		return
 	}
@@ -576,6 +691,10 @@ func DispatchMayHaveCommitted(err error) bool {
 	if err == nil {
 		return false
 	}
+	var insertion *draftInsertionOutcomeError
+	if errors.As(err, &insertion) {
+		return true
+	}
 	var requestErr *acpsdk.RequestError
 	if errors.As(err, &requestErr) {
 		return false
@@ -595,6 +714,14 @@ func DispatchMayHaveCommitted(err error) bool {
 // or product-specific ACP error code participates in this decision.
 func PromptOutcomeUnknown(err error) bool {
 	if err == nil {
+		return false
+	}
+	var insertion *draftInsertionOutcomeError
+	if errors.As(err, &insertion) {
+		return true
+	}
+	var settled *draftActivityError
+	if errors.As(err, &settled) {
 		return false
 	}
 	var requestErr *acpsdk.RequestError

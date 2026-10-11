@@ -7,6 +7,7 @@ import (
 	"github.com/caelis-labs/caelis/adapters/codex"
 	adapterhostimpl "github.com/caelis-labs/caelis/app/gatewayapp/internal/adapterhost"
 	controladapterhost "github.com/caelis-labs/caelis/control/adapterhost"
+	"github.com/caelis-labs/caelis/internal/acpdraft"
 )
 
 type codexHostedBackend struct {
@@ -28,10 +29,21 @@ func (b codexHostedBackend) ServeACP(
 	}, input, output)
 }
 
+func (b codexHostedBackend) ServeACPDraft(ctx context.Context, channel controladapterhost.ChannelContext, schema string, input io.Reader, output io.Writer) error {
+	return b.Backend.ServeACPDraft(ctx, codex.ConnectionOptions{
+		ConnectionID: channel.ConnectionID,
+		Workspace: codex.WorkspacePolicy{
+			AllowedRoots:  append([]string(nil), channel.AllowedRoots...),
+			WritableRoots: append([]string(nil), channel.WritableRoots...),
+		},
+	}, schema, input, output)
+}
+
 func newHostedAdapterManager() (*adapterhostimpl.Manager, error) {
 	return adapterhostimpl.NewManager(adapterhostimpl.Registration{
 		ID: controladapterhost.CodexAdapterID, Name: "Codex",
 		Command: "codex", Args: []string{"app-server", "--stdio"},
+		ACPDraftSchemas: []string{acpdraft.SchemaTag},
 		NewBackend: func(ctx context.Context, input io.Reader, output io.Writer) (adapterhostimpl.Backend, error) {
 			backend, err := codex.NewBackend(ctx, input, output)
 			if err != nil {

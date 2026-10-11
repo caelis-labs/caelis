@@ -105,11 +105,11 @@ func validateSpec(spec openAPISpec) error {
 	if spec.OpenAPI != "3.1.0" {
 		return fmt.Errorf("openapi version = %q, want 3.1.0", spec.OpenAPI)
 	}
-	if len(operationIDs(spec)) != 119 {
-		return fmt.Errorf("operation count = %d, want 119", len(operationIDs(spec)))
+	if len(operationIDs(spec)) != 120 {
+		return fmt.Errorf("operation count = %d, want 120", len(operationIDs(spec)))
 	}
 	required := []string{
-		"CreateSessionRequest", "CloseSessionRequest", "CompactSessionRequest", "PromptRequest", "SteerRequest", "CancelRequest",
+		"CreateSessionRequest", "CloseSessionRequest", "CompactSessionRequest", "RecordInteractionRequest", "PromptRequest", "SteerRequest", "CancelRequest",
 		"ResolveApprovalRequest", "CommandResult", "ServerInfo", "HostStatus", "SessionState", "StatusSnapshot", "Envelope",
 		"UIPreferences", "SubagentInputRequest", "SubagentInputStatusRequest", "SubagentInputStatus", "SubagentInputStatuses", "TaskDescriptor", "TaskList", "TaskDirectorySnapshot", "TaskEventBatch", "StartParticipantRequest", "PromptParticipantRequest", "CancelParticipantRequest",
 		"SessionModeRequest", "SessionModelRequest", "SessionControllerModeRequest", "SessionPresentationModeRequest",
@@ -120,7 +120,7 @@ func validateSpec(spec openAPISpec) error {
 		"CompletionRequest", "PluginRequest", "AddMarketplaceRequest", "UpdateMarketplaceRequest", "RemoveMarketplaceRequest",
 		"AddPluginPathRequest", "InstallPluginRequest", "EnablePluginRequest", "DisablePluginRequest", "RemovePluginRequest",
 		"ApplicationRegistration", "ApplicationConnection", "ApplicationProfile", "ApplicationToolDefinition", "ApplicationInheritance",
-		"ApplicationMCPServer", "ApplicationMCPStatus", "ApplicationMCPServerStatus", "ApplicationBinding", "ApplicationBindingList", "CreateApplicationSessionRequest", "ApplicationPromptRequest",
+		"ApplicationMCPServer", "ApplicationMCPStatus", "ApplicationMCPServerStatus", "ApplicationBinding", "ApplicationBindingList", "ApplicationChildRelation", "CreateApplicationSessionRequest", "ApplicationPromptRequest",
 		"ApplicationModelCapabilities", "ApplicationConfiguration", "ApplicationConfigurationPatch", "UpdateApplicationConfigurationRequest",
 		"ApplicationWorkspace", "ApplicationWorkspaceAccess", "ApplicationPermissions",
 		"ApplicationBackgroundGrant", "ApplicationBackgroundGrantList", "ApplicationBackgroundGrantRequest",

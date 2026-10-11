@@ -219,6 +219,9 @@ type Envelope struct {
 	// through the Caelis Control command. It deliberately sits beside the ACP
 	// payload so standard RequestPermissionRequest wire shape remains unchanged.
 	ApprovalRequestID ApprovalRequestID `json:"approval_request_id,omitempty"`
+	// ApprovalSubject is a bounded Control projection beside the standard ACP
+	// payload. It is display evidence and cannot authorize a permission grant.
+	ApprovalSubject *session.ApprovalSubject `json:"approval_subject,omitempty"`
 
 	// AgentCommunicationSource identifies a Control-projected Agent input.
 	// ACP _meta may describe a sender but cannot populate this authority.
@@ -391,6 +394,7 @@ func IsTerminalLifecycleState(state string) bool {
 func CloneEnvelope(in Envelope) Envelope {
 	out := in
 	out.Position = CloneFeedPosition(in.Position)
+	out.ApprovalSubject = session.CloneApprovalSubject(in.ApprovalSubject)
 	out.Meta = cloneAnyMap(in.Meta)
 	if in.ParentTool != nil {
 		parentTool := *in.ParentTool
@@ -402,6 +406,9 @@ func CloneEnvelope(in Envelope) Envelope {
 	}
 	if in.Permission != nil {
 		permission := *in.Permission
+		if in.Permission.Description != nil {
+			permission.Description = new(*in.Permission.Description)
+		}
 		permission.Options = append([]acpsdk.PermissionOption(nil), in.Permission.Options...)
 		for index := range permission.Options {
 			permission.Options[index].Meta = cloneRawMessageMap(permission.Options[index].Meta)
@@ -530,6 +537,7 @@ func CloneUpdate(update Update) Update {
 	case ContentChunk:
 		typed.Content = cloneAny(typed.Content)
 		typed.Meta = cloneAnyMap(typed.Meta)
+		typed.ReplacedFields = append([]string(nil), typed.ReplacedFields...)
 		return typed
 	case ToolCall:
 		typed.Name = cloneStringPtr(typed.Name)
@@ -540,6 +548,7 @@ func CloneUpdate(update Update) Update {
 		typed.Meta = cloneAnyMap(typed.Meta)
 		return typed
 	case ToolCallUpdate:
+		typed.ReplacedFields = append([]string(nil), typed.ReplacedFields...)
 		typed.Name = cloneStringPtr(typed.Name)
 		typed.Title = cloneStringPtr(typed.Title)
 		typed.Kind = cloneStringPtr(typed.Kind)
@@ -592,6 +601,7 @@ func UpdateMeta(update Update) map[string]any {
 }
 
 func cloneToolCallUpdate(in ToolCallUpdate) ToolCallUpdate {
+	in.ReplacedFields = append([]string(nil), in.ReplacedFields...)
 	in.Name = cloneStringPtr(in.Name)
 	in.Title = cloneStringPtr(in.Title)
 	in.Kind = cloneStringPtr(in.Kind)

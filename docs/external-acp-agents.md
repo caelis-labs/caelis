@@ -7,6 +7,83 @@ Layer ownership lives in [Architecture](architecture.md).
 For Host settings clients and model-provider OAuth, see
 [Model Connections](model-connections.md).
 
+## Protocol versions
+
+The default public ACP endpoint and unselected third-party processes use stable
+ACP v1. Stable initialization negotiates v1 when a client requests version 1 or
+newer; version 0 is invalid. A stable outbound client requires the negotiated
+response to be exactly v1 before Session work. The AppServer user API and
+Application integrations keep their existing stable types independently of the
+ACP wire profile.
+
+Repo-owned subprocess children use the explicitly selected
+`schema-v2.0.0-alpha.8` profile. The hosted Codex adapter keeps stable v1 by
+default. Direct native main/child delegation stays
+inside Control and Runtime and does not acquire an ACP transport. User-provided
+process overrides remain stable unless their link explicitly selects a draft.
+The Host-owned adapter descriptor, one-use channel grant and helper invocation
+carry the same exact schema. An unsupported schema fails before granting or
+serving the channel; the selected draft never falls back to v1.
+
+`caelis acp --acp-draft=schema-v2.0.0-alpha.8` serves product Sessions through the
+existing principal-bound Control clients. Initialization requires protocol
+version 2, the v2 `info` shape and an exact
+`_meta["caelis/acp_schema"]` tag. Responses advertise the implemented Session
+capabilities and the conditional-prompt profile described below. Initialization
+is pinned once per connection. Unknown methods and unimplemented optional
+features fail explicitly. Only actual image/MCP/configuration support is
+advertised; native ACP Sessions do not accept lifecycle MCP server declarations
+or additional directories that their existing owner cannot apply.
+
+The Codex draft channel requires native app-server 0.160.0 or newer with
+`clientUserMessageId` correlation. The adapter assigns a private submission token
+and acknowledges only the corresponding actual native user item. Older or
+unverifiable native versions fail this selected channel without a stable
+fallback. Codex authentication remains Host-owned; neither product draft endpoint
+advertises remote authentication or elicitation without an implementing owner.
+It serves standard v2 lifecycle and active-only insertion as an explicit
+experimental channel, but advertises `idleOnly: false`: native multi-agent input
+can start an owned Thread independently, and native `turn/start` lacks atomic
+start-only-if-idle admission. The controlled Caelis client rejects this missing
+capability during initialization. Safe default migration needs that native
+admission contract; it does not disable native multi-agent behavior or silently
+fall back after selecting a draft.
+
+Draft `session/prompt` acknowledges insertion with a real `messageId`, echoed in
+a live user-message update and kept unchanged when retained and replayed. This
+acknowledgement is distinct from queue acceptance and foreground completion.
+`state_update` reports running, requires-action and idle; only the matching idle
+state settles the internal synchronous producer. `session/cancel` requests
+cancellation and still waits for the actual state. Each Session has independent
+foreground state, receipt and permission ownership. Reconnect uses standard
+`session/resume`, with `replayFrom: {type: "start"}` when replay is needed, and
+keeps the existing ordered replay barrier. Transport loss before settlement
+remains `unknown_outcome`; there is no automatic resubmission.
+
+Native permission requests keep the same original options and resolution owner.
+Where alpha.8 cannot express completeness, sensitivity or per-option scope, the
+bounded public approval subject travels in `_meta["caelis/approval_subject"]`.
+The receiver stores it as a reported display hint, joins only the original
+option identities and marks remote claims in presentation. Guardian continues
+using the canonical standard subject and private native evidence; the hint does
+not grant authority or change resolution.
+
+Full message/tool/terminal updates retain absent versus explicit null/empty
+patch semantics. Message replacements reuse their message identity, terminal
+chunks append only their decoded bytes, and terminal snapshots replace existing
+output, including an empty snapshot. These are normalized into the same live,
+canonical and recovery projections used by stable clients.
+
+The selected draft retains message identities for later repairs and settled
+Activity identities to reject reuse. Its private display cache has a 32 MiB
+serialized budget per Session and 128 MiB per connection, with at most 4,096
+message, terminal and settled Activity records of each kind per Session and
+1,024 Sessions per connection. Exhaustion is explicit and closes the channel;
+it does not evict old identities and reinterpret a repair as new work. Accepted
+work then stays `unknown_outcome`. Already projected terminal bytes remain with
+the canonical terminal owner; the private cache buffers only output awaiting its
+first tool association, then releases those bytes.
+
 ## Connect
 
 The `/connect` overlay, including authentication method choices, supports
@@ -107,10 +184,41 @@ Session overrides do not mutate Codex's global configuration or another thread.
 ## Input and collaborator Sessions
 
 An idle external collaborator receives `session/prompt` on its existing ACP
-Session. A running collaborator receives `_session/steering` only when the Agent
-advertised `_meta.steering.supported`. This is a negotiated custom extension,
-not a standard ACP v1 method. Direct running input remains unsupported without
-it. StartThread reports this capability as `supports_steering`.
+Session. On the controlled draft links, running input also uses standard
+`session/prompt`. Initialization negotiates
+`_meta["caelis/conditional_prompt"] = {version: 1, activeOnly: true, idleOnly: true}`. State
+updates carry the owner-assigned Activity identity in
+`_meta["caelis/activity_id"]`; running-only input sends
+`_meta["caelis/active_only"] = {activityId: "observed identity"}`. The peer
+atomically checks the actual active native Turn before insertion. Initial
+foreground calls send `_meta["caelis/active_only"] = {idleOnly: true}` instead;
+the actual owner admits them only while idle, so another caller starting work
+cannot turn the initial prompt into mid-turn injection. Both conditions in one
+guard are invalid. An unmet condition returns the profile's structured
+`promptRequired` no-effect error. Callers do not silently retry it as a different
+operation. Ordinary unguarded external v2 prompts keep standard insertion
+behavior. ACP alpha.8 has no equivalent running-only or idle-only admission/CAS
+field, so this minimal negotiated metadata remains. Pure
+commands may use their durable interaction identity as an opaque Activity ID;
+that ID never authorizes steering into a native Turn.
+
+Each successful controlled-draft `PromptResponse` also carries
+`_meta["caelis/activity_id"]`: the actual admitted native Turn, or the durable
+interaction identity for a command that creates no Turn. Its standard
+`messageId` identifies the canonical inserted input and the mandatory same-ID
+live user echo. Callers bind completion to this receipt's Activity and its true
+terminal state, including when state notifications arrive before the response.
+Another caller's running/idle pair cannot complete the request. Missing receipt
+identity is an unknown outcome; callers do not infer it from ambient Session
+state or retry the input.
+
+Stable v1 collaborators receive `_session/steering` only when they advertised
+`_meta.steering.supported`. That maintained v1 extension remains available for
+third-party peers; direct running input stays unsupported without it. StartThread
+reports the effective link capability as `supports_steering`. Product mailbox,
+input queue, receipt and Task lifecycles remain Control-owned: a v2 inserted
+message receipt does not replace their separate queued/sent/applied or durable
+Task states.
 
 Control appends a tagged collaboration setup block to the child's initial
 `session/prompt`, after the task body and sender. It names the assigned handle,
@@ -210,7 +318,7 @@ pending messages that fit the encoded batch budget and submits them as one
 input admission, preserving their order and individual source identities. The
 same rule applies to the parent: a running local controller accepts the batch
 at its next safe model boundary, and a running ACP controller receives one
-negotiated steering request. Local safe boundaries follow a completed model
+negotiated running-input request. Local safe boundaries follow a completed model
 response or tool step; mail does not cancel an in-flight tool. Accepted local
 batches are committed atomically before entering model context. A final empty
 drain closes input admission so late mail can select the next Turn without
@@ -287,7 +395,8 @@ Delivered input follows the ordinary Agent-communication context path. The
 model receives the task body followed by mail reference lines (`Message-ID` and
 optional `In-Reply-To`) and a single `From` footer, without an embedded mailbox
 JSON object or repeated recipient identity. Typed source identity and the original
-display body remain separate from this text. Accepted input is projected as ACP `session/update` with `user_message_chunk`; display-only
+display body remain separate from this text. Accepted input is projected as ACP `session/update` with `user_message_chunk`
+on v1 and the corresponding canonical `user_message` on the controlled draft; display-only
 source metadata may use `_meta.caelis.agent_communication`, while typed event
 identity remains authoritative. Caelis mailbox IDs are separate from peer-owned
 ACP message IDs. Delivered context remains in canonical Session history after
@@ -299,7 +408,7 @@ reader once supported external histories no longer contain header-format prompts
 Direct user input quotes each text block as a JSON string inside a
 `<caelis_user_input version="1">` prompt envelope. ACP peers need not retain
 custom content metadata, so this text encoding distinguishes user content from
-mail syntax across `session/load`. The child model receives the envelope; the
+mail syntax across retained history (`session/load` on v1 and `session/resume` on v2). The child model receives the envelope; the
 Task transcript decodes it once and displays the original text with a user
 source. Images remain ordinary ACP content blocks. The envelope carries no
 principal identifier and grants no authority. Replay joins fragmented envelope
@@ -307,8 +416,9 @@ text before decoding and never interprets its decoded body as mail or setup.
 Unmarked retained history still uses the legacy display parser; an already
 stored ambiguous message has no reliable evidence for retroactive attribution.
 
-An admitted `session/prompt` remains open until its execution reaches a Turn
-terminal. If ACP forwarding fails, the bridge can no longer reliably service
+A stable v1 `session/prompt` remains open until its execution reaches a Turn
+terminal. A draft prompt acknowledges insertion earlier; the internal producer
+still observes its matching foreground settlement separately. If ACP forwarding fails, the bridge can no longer reliably service
 permissions: it requests Control cancellation and waits for the actual terminal,
 rather than silently draining a Run that may be waiting for approval. Cancellation
 requests do not prove cancellation completion. If observation is lost, or
@@ -554,18 +664,15 @@ observed message shape or advertised capabilities, never a guessed peer version.
 | Legacy `models` and `session/set_model` | No standard model option is advertised and the requested model exists in the legacy catalog | Every supported selectable peer uses standard model configuration and no fixture needs the legacy channel |
 | Legacy tool names | Standard `name` is absent or null; projection reads retained tool-name metadata, and permission conversion falls back to metadata, title, then kind. The main-controller bridge uses raw output/input names, then kind, when only a title/kind fallback is available | Supported peers and retained histories all supply standard tool names |
 | Prompt image `name` | Standard image content is valid and a non-empty top-level name supplies display metadata only | Supported peers use standard image URI/reference metadata |
-| Draft Session notices | The bridge accepts `session/update` with `sessionUpdate: "notice"`, required `severity` and non-empty `title`, and optional `description` and `_meta` | Replace the bridge decoder with the SDK Notice variant when available |
-| Codex Notice transport | The client advertises `_meta.session_notice: true`; the adapter sends `_session/notice` with the same `{sessionId, update}` payload as the draft standard notification | The pinned ACP SDK can encode the Notice variant; switch the adapter to `session/update` and remove the capability and extension method |
 | Codex MCP display identity | `_meta["codex/mcp_tool"]` names server `caelis-collaboration` and tool `SendMessage`, with no conflicting standard kind or existing exact display name | ACP supplies a standard structured MCP identity that replaces the provider hint |
 | Antigravity command output | A completed or failed command has no standard content or terminal stream metadata, and `rawOutput` contains typed `combinedOutput`, `commandLine`, `workingDir`, and `exitCode` fields; explicit content, including an empty collection, wins | Supported runtimes and retained traces supply standard content for these results |
 
-The [Session notices draft](https://github.com/agentclientprotocol/agent-client-protocol/pull/2004)
-defines advisory live events outside Session history. The standard update needs
-no capability negotiation; only the temporary Codex transport does. Unsupported
-clients may ignore notices. Unknown severity strings remain presentation hints,
-and malformed optional fields are ignored. The bridge projects notices through
-the existing transient Notice event, never reasoning, model input, public child
-results, or approval authority.
+Standard ACP v1 Session notices use `session/update` and are sent only when the
+client advertises `clientCapabilities.session.notices`. The SDK validates the
+wire shape. Unknown severity strings remain presentation hints, and malformed
+optional fields are ignored. The bridge projects notices through the existing
+transient Notice event, never reasoning, model input, public child results, or
+approval authority.
 
 Codex MCP compatibility belongs to the built-in adapter: `arguments` becomes
 standard `rawInput`, and supported `result.content` blocks become standard ACP

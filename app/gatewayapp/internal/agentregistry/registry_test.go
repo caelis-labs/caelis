@@ -7,6 +7,7 @@ import (
 
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/internal/acpagentenv"
+	"github.com/caelis-labs/caelis/internal/acpdraft"
 )
 
 func TestConfiguredSelfAgentAttachesManagedHostAndCarriesSessionOptions(t *testing.T) {
@@ -28,10 +29,13 @@ func TestConfiguredSelfAgentAttachesManagedHostAndCarriesSessionOptions(t *testi
 		t.Fatal(err)
 	}
 	if got, want := agent.Args, []string{
-		"acp", "-store-dir", "/store",
+		"acp", "--acp-draft=" + acpdraft.SchemaTag, "-store-dir", "/store",
 		"-control-url", "http://127.0.0.1:1234", "-control-token-file", "/run/caelis/child-token",
 	}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("configuredSelfAgent() args = %#v, want managed attach args %#v", got, want)
+	}
+	if agent.ACPDraftSchema != acpdraft.SchemaTag {
+		t.Fatalf("configured child wire profile = %q", agent.ACPDraftSchema)
 	}
 	joined := strings.Join(agent.Args, " ")
 	for _, forbidden := range []string{

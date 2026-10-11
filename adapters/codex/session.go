@@ -62,6 +62,7 @@ type sessionState struct {
 	// used before any app-server request must not unsubscribe another owner.
 	subscribed bool
 
+	draftLoading bool
 	activeTurnID string
 	turnDone     chan turnResult
 	route        *sessionRoute

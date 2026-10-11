@@ -9,6 +9,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
@@ -370,6 +371,16 @@ func (h *turnHandle) publishApprovalReviewPayloadWithInvocation(req *agent.Appro
 
 func (h *turnHandle) approvalReviewEnvelopes(req *agent.ApprovalRequest, payload *ApprovalPayload, invocation *session.EventInvocation) []eventstream.Envelope {
 	payload = cloneApprovalPayload(payload)
+	if req != nil && payload != nil {
+		if display := approval.DisplayPayloadFromRuntimeRequest(*req); display != nil {
+			payload.RawInput = display.RawInput
+			payload.Subject = display.Subject
+			payload.ReviewText = approval.DisplayReviewText(payload.ReviewText, display.Subject)
+			if display.Subject != nil && (display.Subject.SensitiveInput || display.Subject.OpaqueInput) {
+				payload.Risk, payload.Authorization = "", ""
+			}
+		}
+	}
 	base := eventstream.Envelope{
 		SessionID:  h.sessionRef.SessionID,
 		HandleID:   h.handleID,
@@ -404,6 +415,7 @@ func (h *turnHandle) approvalReviewEnvelopes(req *agent.ApprovalRequest, payload
 			review.ItemID = strings.TrimSpace(req.Call.Execution.ItemID)
 		}
 		next.ApprovalReview = review
+		next.ApprovalSubject = session.CloneApprovalSubject(payload.Subject)
 		return []eventstream.Envelope{next}
 	}
 	return nil

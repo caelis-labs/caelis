@@ -2,6 +2,7 @@ package appserver
 
 import (
 	"context"
+	"errors"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/control/application"
@@ -11,6 +12,27 @@ import (
 type applicationArchiveRequest struct {
 	Action  string
 	Request CloseSessionRequest
+}
+
+// CloseSession uses the canonical lifecycle for the exact scoped object.
+// Application sessions retain Archive's durable receipt and binding update;
+// shared Workers close through the native Session command owner.
+func (s *ApplicationService) CloseSession(ctx context.Context, p Principal, req CloseSessionRequest) (CommandResult, error) {
+	scope, err := ApplicationScope(p)
+	if err != nil {
+		return CommandResult{}, err
+	}
+	if _, err := s.config.Store.Worker(ctx, scope, req.SessionID); err == nil {
+		return s.config.Sessions.CloseSession(ctx, p, req)
+	} else if !errors.Is(err, application.ErrNotFound) {
+		return CommandResult{}, err
+	}
+	if bound, err := s.config.Store.GetBinding(ctx, scope, req.SessionID); err != nil {
+		return CommandResult{}, err
+	} else if bound.Child != nil {
+		return s.config.Sessions.CloseSession(ctx, p, req)
+	}
+	return s.Archive(ctx, p, req)
 }
 
 // Archive closes canonical Session admission without deleting history/resources.

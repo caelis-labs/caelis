@@ -173,10 +173,16 @@ type ToolCallContent struct {
 }
 
 type ContentChunk struct {
-	SessionUpdate string         `json:"sessionUpdate"`
-	Content       any            `json:"content"`
-	MessageID     string         `json:"messageId,omitempty"`
-	Meta          map[string]any `json:"_meta,omitempty"`
+	SessionUpdate string `json:"sessionUpdate"`
+	Content       any    `json:"content"`
+	MessageID     string `json:"messageId,omitempty"`
+	// Replacement carries the complete current narrative for MessageID. Empty
+	// content clears that message; Final independently owns settlement.
+	Replacement bool           `json:"replacement,omitempty"`
+	Meta        map[string]any `json:"_meta,omitempty"`
+	// ReplacedFields recognizes "_meta" as a present metadata patch, including
+	// a clear carried by nil Meta and an empty content delta.
+	ReplacedFields []string `json:"replacedFields,omitempty"`
 }
 
 func (u ContentChunk) SessionUpdateType() string { return u.SessionUpdate }
@@ -211,6 +217,8 @@ type ToolCallUpdate struct {
 	Content       []ToolCallContent  `json:"content,omitempty"`
 	Locations     []ToolCallLocation `json:"locations,omitempty"`
 	Meta          map[string]any     `json:"_meta,omitempty"`
+	// ReplacedFields preserves present display patches when their value is empty.
+	ReplacedFields []string `json:"replacedFields,omitempty"`
 }
 
 func (u ToolCallUpdate) SessionUpdateType() string { return u.SessionUpdate }
@@ -221,29 +229,31 @@ func (u ToolCallUpdate) MarshalJSON() ([]byte, error) {
 		content = &u.Content
 	}
 	return json.Marshal(struct {
-		SessionUpdate string             `json:"sessionUpdate"`
-		ToolCallID    string             `json:"toolCallId"`
-		Name          *string            `json:"name,omitempty"`
-		Title         *string            `json:"title,omitempty"`
-		Kind          *string            `json:"kind,omitempty"`
-		Status        *string            `json:"status,omitempty"`
-		RawInput      any                `json:"rawInput,omitempty"`
-		RawOutput     any                `json:"rawOutput,omitempty"`
-		Content       *[]ToolCallContent `json:"content,omitempty"`
-		Locations     []ToolCallLocation `json:"locations,omitempty"`
-		Meta          map[string]any     `json:"_meta,omitempty"`
+		SessionUpdate  string             `json:"sessionUpdate"`
+		ToolCallID     string             `json:"toolCallId"`
+		Name           *string            `json:"name,omitempty"`
+		Title          *string            `json:"title,omitempty"`
+		Kind           *string            `json:"kind,omitempty"`
+		Status         *string            `json:"status,omitempty"`
+		RawInput       any                `json:"rawInput,omitempty"`
+		RawOutput      any                `json:"rawOutput,omitempty"`
+		Content        *[]ToolCallContent `json:"content,omitempty"`
+		Locations      []ToolCallLocation `json:"locations,omitempty"`
+		Meta           map[string]any     `json:"_meta,omitempty"`
+		ReplacedFields []string           `json:"replacedFields,omitempty"`
 	}{
-		SessionUpdate: u.SessionUpdate,
-		ToolCallID:    u.ToolCallID,
-		Name:          u.Name,
-		Title:         u.Title,
-		Kind:          u.Kind,
-		Status:        u.Status,
-		RawInput:      u.RawInput,
-		RawOutput:     u.RawOutput,
-		Content:       content,
-		Locations:     u.Locations,
-		Meta:          u.Meta,
+		SessionUpdate:  u.SessionUpdate,
+		ToolCallID:     u.ToolCallID,
+		Name:           u.Name,
+		Title:          u.Title,
+		Kind:           u.Kind,
+		Status:         u.Status,
+		RawInput:       u.RawInput,
+		RawOutput:      u.RawOutput,
+		Content:        content,
+		Locations:      u.Locations,
+		Meta:           u.Meta,
+		ReplacedFields: u.ReplacedFields,
 	})
 }
 
@@ -271,8 +281,12 @@ type UsageUpdate struct {
 func (u UsageUpdate) SessionUpdateType() string { return u.SessionUpdate }
 
 type RequestPermissionRequest struct {
-	SessionID string                    `json:"sessionId"`
-	ToolCall  ToolCallUpdate            `json:"toolCall"`
-	Options   []acpsdk.PermissionOption `json:"options"`
-	Meta      map[string]any            `json:"_meta,omitempty"`
+	SessionID string         `json:"sessionId"`
+	ToolCall  ToolCallUpdate `json:"toolCall,omitzero"`
+	// Title and Description belong to the permission prompt independently of
+	// an optional tool call; they do not change a tool's displayed title.
+	Title       string                    `json:"title,omitempty"`
+	Description *string                   `json:"description,omitempty"`
+	Options     []acpsdk.PermissionOption `json:"options"`
+	Meta        map[string]any            `json:"_meta,omitempty"`
 }

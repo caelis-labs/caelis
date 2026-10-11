@@ -46,6 +46,23 @@ func ValidateArgs(args map[string]any) error {
 type Tool struct {
 	agents  []delegation.Agent
 	targets map[string]Target
+	admit   func(context.Context) error
+}
+
+// WithAdmission binds a trusted host admission check to the native Spawn tool.
+// Runtime calls it immediately before starting a durable child Task. It is not
+// a policy decision or an approval resolver; nil preserves generic SDK behavior.
+func (t Tool) WithAdmission(admit func(context.Context) error) Tool {
+	t.admit = admit
+	return t
+}
+
+// Admit checks the current host lease before Runtime commits a Spawn intent.
+func (t Tool) Admit(ctx context.Context) error {
+	if t.admit != nil {
+		return t.admit(ctx)
+	}
+	return nil
 }
 
 // Target is the typed execution placement behind one model-visible Spawn

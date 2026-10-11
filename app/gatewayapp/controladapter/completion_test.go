@@ -4,12 +4,100 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/internal/kernel"
 )
+
+func TestWorkspaceFileCompletionContainsQuerySymlinks(t *testing.T) {
+	root, outside := t.TempDir(), t.TempDir()
+	for _, directory := range []string{filepath.Join(root, "nested"), filepath.Join(outside, "nested")} {
+		if err := os.MkdirAll(directory, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, path := range []string{filepath.Join(root, "nested", "inside-sentinel.txt"), filepath.Join(outside, "nested", "outside-sentinel.txt")} {
+		if err := os.WriteFile(path, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "external")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if err := os.Symlink("nested", filepath.Join(root, "internal")); err != nil {
+		t.Fatal(err)
+	}
+	for _, query := range []string{"external/nested/outside", "../nested/outside"} {
+		got, err := completeWorkspaceFiles(t.Context(), root, query, 16)
+		if err != nil || len(got) != 0 {
+			t.Fatalf("query escaped workspace %q: %+v, %v", query, got, err)
+		}
+	}
+	for _, query := range []string{"nested/inside", "internal/inside"} {
+		got, err := completeWorkspaceFiles(t.Context(), root, query, 16)
+		if err != nil || len(got) != 1 || filepath.Base(got[0].Path) != "inside-sentinel.txt" {
+			t.Fatalf("owned query %q: %+v, %v", query, got, err)
+		}
+	}
+	t.Run("directory exchange", func(t *testing.T) {
+		selected, parked := filepath.Join(root, "selected"), filepath.Join(root, ".parked")
+		if err := os.Mkdir(selected, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(selected, "inside-sentinel.txt"), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		ctx, stop := context.WithCancel(t.Context())
+		done, failed := make(chan struct{}), make(chan error, 1)
+		go func() {
+			defer close(done)
+			for ctx.Err() == nil {
+				if err := os.Rename(selected, parked); err != nil {
+					failed <- err
+					return
+				}
+				if err := os.Symlink(filepath.Join(outside, "nested"), selected); err != nil {
+					failed <- err
+					return
+				}
+				runtime.Gosched()
+				if err := os.Remove(selected); err != nil {
+					failed <- err
+					return
+				}
+				if err := os.Rename(parked, selected); err != nil {
+					failed <- err
+					return
+				}
+			}
+		}()
+		defer func() {
+			stop()
+			<-done
+			select {
+			case err := <-failed:
+				t.Errorf("directory exchange fixture failed: %v", err)
+			default:
+			}
+		}()
+		for range 100 {
+			got, err := completeWorkspaceFiles(t.Context(), root, "selected/sentinel", 16)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, item := range got {
+				if filepath.Base(item.Path) == "outside-sentinel.txt" {
+					t.Fatalf("directory exchange escaped rooted observation: %+v", got)
+				}
+			}
+		}
+	})
+}
 
 func TestCompleteModelSpeedModesOffersFastOnlyForSupportedGPT(t *testing.T) {
 	t.Parallel()

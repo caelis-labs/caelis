@@ -113,6 +113,9 @@ func (s *runtimeComposition) sandboxStatus(includeRuntime bool) SandboxStatus {
 	exec := s.exec
 	s.mu.RUnlock()
 	process := s.runtimeProcessSnapshot()
+	if process.runtime.PolicyProfile == "application-tools-only" {
+		return SandboxStatus{RequestedBackend: "none", ResolvedBackend: "none", Route: "none", SecuritySummary: "tools-only"}
+	}
 	override := process.sandboxOverride
 	securityPosture := resolveProcessSecurityPosture(process.runtime)
 	if !includeRuntime {

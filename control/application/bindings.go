@@ -203,6 +203,9 @@ func (s *Store) PutBinding(ctx context.Context, b Binding) error {
 	if !validID(b.SessionID) || !validID(b.CreationDigest) || b.Archived {
 		return ErrInvalid
 	}
+	if b.Child != nil && (!validID(b.Child.RootSessionID) || !validID(b.Child.ParentSessionID) || b.Child.ParentSessionID == b.SessionID || ValidateSource(b.Child.Source) != nil) {
+		return ErrInvalid
+	}
 	body, err := encode(b)
 	if err != nil {
 		return err

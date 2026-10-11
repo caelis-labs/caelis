@@ -214,3 +214,48 @@ func TestFinalAssistantAccumulatorSeparatesMessageIDs(t *testing.T) {
 		t.Fatalf("updates = %#v / %#v final = %q, want message-id reset", first, second, acc.FinalText())
 	}
 }
+
+func TestFinalAssistantAccumulatorLatestIdentifiedMessageResumesAfterBarrier(t *testing.T) {
+	for _, barrier := range []eventstream.Update{
+		eventstream.ToolCall{SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "tool"},
+		eventstream.PlanUpdate{SessionUpdate: eventstream.UpdatePlan},
+		eventstream.ContentChunk{SessionUpdate: eventstream.UpdateAgentThought, Content: eventstream.TextContent{Type: "text", Text: "thinking"}},
+	} {
+		t.Run(barrier.SessionUpdateType(), func(t *testing.T) {
+			var acc FinalAssistantAccumulator
+			acc.ObserveFrame("older", "old progress")
+			acc.ObserveFrame("latest", "progress")
+			acc.ObserveUpdate(barrier)
+			if acc.FinalText() != "" {
+				t.Fatalf("barrier retained eligible final: %q", acc.FinalText())
+			}
+			old := acc.ObserveFrame("older", " late delta")
+			if old.Text != "" || acc.FinalText() != "" {
+				t.Fatalf("older repair restored a final: %#v", old)
+			}
+			acc.ObserveFrame("latest", "")
+			if acc.FinalText() != "" {
+				t.Fatal("empty append restored a final")
+			}
+			latest := acc.ObserveFrame("latest", " suffix")
+			if latest.MessageID != "latest" || latest.Delta != " suffix" || acc.FinalText() != "progress suffix" {
+				t.Fatalf("latest identified continuation lost: %#v final=%q", latest, acc.FinalText())
+			}
+			acc.ObserveUpdate(barrier)
+			latest = acc.ObserveReplacement("latest", "final answer")
+			if latest.MessageID != "latest" || !latest.Replacement || acc.FinalText() != "final answer" {
+				t.Fatalf("latest identified snapshot lost: %#v final=%q", latest, acc.FinalText())
+			}
+		})
+	}
+}
+
+func TestFinalAssistantAccumulatorAcceptsNewProviderIdentityAfterAnonymousBarrier(t *testing.T) {
+	var acc FinalAssistantAccumulator
+	first := acc.ObserveFrame("", "progress")
+	acc.AdvanceBoundary()
+	final := acc.ObserveFrame("provider-final", "final answer")
+	if first.MessageID == "" || final.MessageID != "provider-final" || final.Text != "final answer" || acc.FinalText() != "final answer" {
+		t.Fatalf("new provider identity aliased an expired anonymous segment: %#v / %#v", first, final)
+	}
+}

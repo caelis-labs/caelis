@@ -2,19 +2,20 @@ package gatewayapp
 
 import (
 	"context"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
+	"github.com/caelis-labs/acp-go-sdk/experimental/v2"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/modelconfig"
-	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
-	"github.com/caelis-labs/caelis/internal/acptest/jsonrpc"
+	"github.com/caelis-labs/caelis/internal/acpdraft"
+	"github.com/caelis-labs/caelis/internal/acptest/draftpeer"
 	"github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/internal/kernel"
 )
@@ -67,6 +68,9 @@ func TestDirectParticipantPinsProviderModelBeforeACPStartup(t *testing.T) {
 			published := modelconfig.PublicSelector(*cfg.PinnedModel)
 			if published == cfg.PinnedModel.ID {
 				t.Fatal("fixture does not exercise distinct durable and public model IDs")
+			}
+			if cfg.ACPDraftSchema != acpdraft.SchemaTag {
+				t.Fatalf("self participant schema = %q, want explicit alpha.8", cfg.ACPDraftSchema)
 			}
 			cfg.Command = os.Args[0]
 			cfg.Args = []string{"-test.run=^TestParticipantModelStartupHelperProcess$", "--"}
@@ -163,52 +167,56 @@ func TestParticipantModelStartupHelperProcess(t *testing.T) {
 		return
 	}
 	selector := os.Getenv("CAELIS_PARTICIPANT_MODEL_SELECTOR")
-	manual := false
-	options := func(mode string) []client.SessionConfigOption {
-		return []client.SessionConfigOption{
-			{ID: "model", Name: "Model", Type: "select", Category: "model", CurrentValue: selector,
-				Options: []client.SessionConfigSelectOption{{Value: selector, Name: "Selected model"}}},
-			{ID: "mode", Name: "Mode", Type: "select", CurrentValue: mode,
-				Options: []client.SessionConfigSelectOption{{Value: "auto-review", Name: "Auto review"}, {Value: "manual", Name: "Manual"}}},
+	var manual atomic.Bool
+	options := func(mode string) []v2.SessionConfigOption {
+		modelCategory := v2.SessionConfigOptionCategory("model")
+		modelOptions := v2.SessionConfigSelectOptionsUngrouped{{Value: v2.SessionConfigValueId(selector), Name: "Selected model"}}
+		modeOptions := v2.SessionConfigSelectOptionsUngrouped{{Value: "auto-review", Name: "Auto review"}, {Value: "manual", Name: "Manual"}}
+		return []v2.SessionConfigOption{
+			{Select: &v2.SessionConfigOptionSelect{ConfigId: "model", Name: "Model", Type: "select", Category: &modelCategory, CurrentValue: v2.SessionConfigValueId(selector), Options: v2.SessionConfigSelectOptions{Ungrouped: &modelOptions}}},
+			{Select: &v2.SessionConfigOptionSelect{ConfigId: "mode", Name: "Mode", Type: "select", CurrentValue: v2.SessionConfigValueId(mode), Options: v2.SessionConfigSelectOptions{Ungrouped: &modeOptions}}},
 		}
 	}
-	conn := jsonrpc.New(os.Stdin, os.Stdout)
-	_ = conn.Serve(context.Background(), func(_ context.Context, msg jsonrpc.Message) (any, *jsonrpc.RPCError) {
-		switch msg.Method {
-		case client.MethodInitialize:
-			return client.InitializeResponse{ProtocolVersion: 1, AgentCapabilities: client.AgentCapabilities{
-				SessionCapabilities: map[string]json.RawMessage{"resume": json.RawMessage(`{}`)},
-			}}, nil
-		case client.MethodSessionNew:
-			recordParticipantModelSessionCall("new")
-			return client.NewSessionResponse{
-				SessionID:     os.Getenv("CAELIS_PARTICIPANT_MODEL_SESSION"),
-				ConfigOptions: options("auto-review"),
-			}, nil
-		case client.MethodSessionResume:
-			recordParticipantModelSessionCall("resume")
-			return client.ResumeSessionResponse{ConfigOptions: options("auto-review")}, nil
-		case client.MethodSessionPrompt:
-			if !manual {
-				return nil, &jsonrpc.RPCError{Code: -32602, Message: "parent permission bridge was not configured"}
-			}
-			return client.PromptResponse{StopReason: string(acpsdk.StopReasonEndTurn)}, nil
-		case client.MethodSessionSetConfig:
-			var req client.SetSessionConfigOptionRequest
-			// Explicit mode defaults are reasserted before permission bridging;
-			// provider model and effort configuration must still stay in Control.
-			if err := json.Unmarshal(msg.Params, &req); err != nil || req.ValueId == nil || req.ValueId.ConfigId != "mode" || (req.ValueId.Value != "auto-review" && req.ValueId.Value != "manual") {
-				return nil, &jsonrpc.RPCError{Code: -32602, Message: "only mode configuration may cross ACP"}
-			}
-			mode := string(req.ValueId.Value)
-			manual = mode == "manual"
-			return client.SetSessionConfigOptionResponse{ConfigOptions: options(mode)}, nil
-		case client.MethodSessionSetModel:
-			return nil, &jsonrpc.RPCError{Code: -32602, Message: "provider configuration must stay in Control"}
-		default:
-			return nil, &jsonrpc.RPCError{Code: -32601, Message: "method not found"}
+	peer := &draftpeer.Peer{SessionID: os.Getenv("CAELIS_PARTICIPANT_MODEL_SESSION")}
+	peer.OnNew = func(v2.NewSessionRequest) (v2.NewSessionResponse, error) {
+		recordParticipantModelSessionCall("new")
+		return v2.NewSessionResponse{SessionId: v2.SessionId(peer.SessionID), ConfigOptions: options("auto-review")}, nil
+	}
+	peer.OnResume = func(v2.ResumeSessionRequest) (v2.ResumeSessionResponse, error) {
+		recordParticipantModelSessionCall("resume")
+		return v2.ResumeSessionResponse{ConfigOptions: options("auto-review")}, nil
+	}
+	peer.OnConfig = func(req v2.SetSessionConfigOptionRequest) (v2.SetSessionConfigOptionResponse, error) {
+		// Explicit mode defaults are reasserted before permission bridging;
+		// provider model and effort configuration must still stay in Control.
+		if req.Id == nil || req.Id.ConfigId != "mode" || (req.Id.Value != "auto-review" && req.Id.Value != "manual") {
+			return v2.SetSessionConfigOptionResponse{}, acpsdk.NewInvalidParams("only mode configuration may cross ACP")
 		}
-	}, nil)
+		mode := string(req.Id.Value)
+		manual.Store(mode == "manual")
+		return v2.SetSessionConfigOptionResponse{ConfigOptions: options(mode)}, nil
+	}
+	peer.OnPrompt = func(ctx context.Context, req v2.PromptRequest, activity, message string) (v2.PromptResponse, error) {
+		if !manual.Load() {
+			return v2.PromptResponse{}, acpsdk.NewInvalidParams("parent permission bridge was not configured")
+		}
+		if err := peer.State(ctx, req.SessionId, activity, "running", ""); err != nil {
+			return v2.PromptResponse{}, err
+		}
+		if err := peer.Echo(ctx, req.SessionId, message, "review input"); err != nil {
+			return v2.PromptResponse{}, err
+		}
+		if err := peer.State(ctx, req.SessionId, activity, "idle", "end_turn"); err != nil {
+			return v2.PromptResponse{}, err
+		}
+		return v2.PromptResponse{MessageId: v2.MessageId(message), Meta: acpdraft.ActivityMeta(activity)}, nil
+	}
+	conn, err := peer.Serve(os.Stdin, os.Stdout)
+	if err != nil {
+		os.Exit(1)
+	}
+	<-conn.Done()
+
 	os.Exit(0)
 }
 

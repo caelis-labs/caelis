@@ -17,11 +17,20 @@ func protocolUpdateFromContentChunk(chunk client.ContentChunk) (*session.Protoco
 		}
 	}
 	return cloneProtocolUpdate(session.ProtocolUpdate{
-		SessionUpdate: strings.TrimSpace(chunk.SessionUpdate),
-		Content:       content,
-		MessageID:     strings.TrimSpace(chunk.MessageID),
-		Meta:          chunk.Meta,
+		SessionUpdate:  strings.TrimSpace(chunk.SessionUpdate),
+		Content:        content,
+		MessageID:      strings.TrimSpace(chunk.MessageID),
+		Replacement:    chunk.Replacement,
+		Meta:           chunk.Meta,
+		ReplacedFields: narrativeReplacedFields(chunk.MetaPresent),
 	}), nil
+}
+
+func narrativeReplacedFields(metaPresent bool) []string {
+	if metaPresent {
+		return []string{"_meta"}
+	}
+	return nil
 }
 
 func protocolUpdateFromToolCall(call client.ToolCall) *session.ProtocolUpdate {
@@ -42,17 +51,18 @@ func protocolUpdateFromToolCall(call client.ToolCall) *session.ProtocolUpdate {
 
 func protocolUpdateFromToolCallUpdate(update client.ToolCallUpdate) *session.ProtocolUpdate {
 	return cloneProtocolUpdate(session.ProtocolUpdate{
-		SessionUpdate: update.SessionUpdate,
-		ToolCallID:    update.ToolCallID,
-		Name:          update.Name,
-		Title:         stringValue(update.Title),
-		Kind:          stringValue(update.Kind),
-		Status:        stringValue(update.Status),
-		RawInput:      session.NormalizeProtocolRawMap(update.RawInput),
-		RawOutput:     session.NormalizeProtocolRawMap(update.RawOutput),
-		Content:       protocolToolContentFromWire(update.Content),
-		Locations:     protocolLocationsFromWire(update.Locations),
-		Meta:          update.Meta,
+		SessionUpdate:  update.SessionUpdate,
+		ToolCallID:     update.ToolCallID,
+		Name:           update.Name,
+		Title:          stringValue(update.Title),
+		Kind:           stringValue(update.Kind),
+		Status:         stringValue(update.Status),
+		RawInput:       session.NormalizeProtocolRawMap(update.RawInput),
+		RawOutput:      session.NormalizeProtocolRawMap(update.RawOutput),
+		Content:        protocolToolContentFromWire(update.Content),
+		Locations:      protocolLocationsFromWire(update.Locations),
+		Meta:           update.Meta,
+		ReplacedFields: replacedToolFields(update.RawPatch),
 	})
 }
 
@@ -140,4 +150,14 @@ func stringValue(in *string) string {
 		return ""
 	}
 	return *in
+}
+
+func replacedToolFields(patch map[string]json.RawMessage) []string {
+	var fields []string
+	for _, field := range []string{"name", "title", "kind", "status", "rawInput", "rawOutput", "content", "locations", "_meta"} {
+		if _, present := patch[field]; present {
+			fields = append(fields, field)
+		}
+	}
+	return fields
 }

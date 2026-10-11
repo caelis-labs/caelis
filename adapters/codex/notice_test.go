@@ -11,27 +11,17 @@ import (
 
 type recordingNoticeClient struct {
 	recordingACPClient
-	notices []struct {
-		SessionID string        `json:"sessionId"`
-		Update    sessionNotice `json:"update"`
-	}
+	notices []acp.SessionNotification
 }
 
-func (c *recordingNoticeClient) HandleExtensionMethod(_ context.Context, method string, raw json.RawMessage) (any, error) {
-	if method != sessionNoticeMethod {
-		return nil, acp.NewMethodNotFound(method)
-	}
-	var note struct {
-		SessionID string        `json:"sessionId"`
-		Update    sessionNotice `json:"update"`
-	}
-	if err := json.Unmarshal(raw, &note); err != nil {
-		return nil, err
+func (c *recordingNoticeClient) SessionUpdate(ctx context.Context, note acp.SessionNotification) error {
+	if note.Update.Notice == nil {
+		return c.recordingACPClient.SessionUpdate(ctx, note)
 	}
 	c.mu.Lock()
 	c.notices = append(c.notices, note)
 	c.mu.Unlock()
-	return nil, nil
+	return nil
 }
 
 func TestCodexNoticesNeverBecomeReasoning(t *testing.T) {
@@ -43,16 +33,23 @@ func TestCodexNoticesNeverBecomeReasoning(t *testing.T) {
 	} {
 		notification := appserver.Notification{Method: tc.method, Params: json.RawMessage(tc.params)}
 		notice := codexNotice(notification)
-		if notice == nil || notice.Title != tc.title || notice.Description != tc.description || notice.SessionUpdate != "notice" || notice.Severity != "warning" {
+		if notice == nil || notice.Title != tc.title || stringPointerValue(notice.Description) != tc.description || notice.SessionUpdate != "notice" || notice.Severity != "warning" {
 			t.Fatalf("notice = %#v", notice)
 		}
 		route := &sessionRoute{agent: &agent{}, state: &sessionState{threadID: "child"}}
 		if updates, _, err := route.translateNotification(notification); err != nil || len(updates) != 0 {
 			t.Fatalf("notice leaked to text: %#v, %v", updates, err)
 		}
-		// An unnegotiated client may ignore notices; no fallback thought or text.
+		// Clients without standard notices capability receive no notice or fallback text.
 		if err := route.publish(notification); err != nil {
 			t.Fatal(err)
 		}
 	}
+}
+
+func stringPointerValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }

@@ -43,6 +43,12 @@ type ContentChunk struct {
 	Content       json.RawMessage `json:"content"`
 	MessageID     string          `json:"messageId,omitempty"`
 	Meta          map[string]any  `json:"_meta,omitempty"`
+	// Replacement is an internal materialized message snapshot, including an
+	// explicit empty snapshot. It is never a fabricated ACP v1 delta.
+	Replacement bool `json:"-"`
+	// MetaPresent preserves an explicit metadata patch, including null, without
+	// changing content or treating an empty metadata delta as a new answer.
+	MetaPresent bool `json:"-"`
 }
 
 type TextContent struct {
@@ -99,6 +105,9 @@ type ToolCallUpdate struct {
 	Content       []ToolCallContent  `json:"content,omitempty"`
 	Locations     []ToolCallLocation `json:"locations,omitempty"`
 	Meta          map[string]any     `json:"_meta,omitempty"`
+	// RawPatch retains standard draft field presence, including explicit clears.
+	// It is display projection evidence, never permission or execution authority.
+	RawPatch map[string]json.RawMessage `json:"-"`
 }
 
 type PlanEntry struct {

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	controladapterhost "github.com/caelis-labs/caelis/control/adapterhost"
@@ -63,17 +64,22 @@ func (r *Resolver) ResolveACPProcess(ctx context.Context, request endpoint.Reque
 	if !descriptor.Available {
 		return endpoint.Process{}, errors.New(strings.TrimSpace(descriptor.Diagnostic))
 	}
+	if request.ACPDraftSchema != "" && !slices.Contains(descriptor.ACPDraftSchemas, request.ACPDraftSchema) {
+		return endpoint.Process{}, errors.New("gatewayapp acpendpoint: hosted adapter does not support the requested ACP draft schema")
+	}
 	grant, err := r.service.IssueGrant(ctx, "host-runtime", request.AdapterID, controladapterhost.GrantRequest{
-		ConnectionID:  request.ConnectionID,
-		CWD:           request.CWD,
-		AllowedRoots:  []string{request.CWD},
-		WritableRoots: []string{request.CWD},
+		ConnectionID:   request.ConnectionID,
+		CWD:            request.CWD,
+		AllowedRoots:   []string{request.CWD},
+		WritableRoots:  []string{request.CWD},
+		ACPDraftSchema: request.ACPDraftSchema,
 	})
 	if err != nil {
 		return endpoint.Process{}, err
 	}
 	grantFile, err := adapterhostclient.WriteChannelGrantFile(r.grantDir, adapterhostclient.ChannelGrantFile{
 		Endpoint: controlURL, AdapterID: request.AdapterID, Token: grant.Token,
+		ACPDraftSchema: request.ACPDraftSchema,
 	})
 	if err != nil {
 		return endpoint.Process{}, err
@@ -83,9 +89,13 @@ func (r *Resolver) ResolveACPProcess(ctx context.Context, request endpoint.Reque
 		_ = os.Remove(grantFile)
 		return endpoint.Process{}, errors.New("gatewayapp acpendpoint: resolve Caelis executable")
 	}
+	args := []string{"acp", "--adapter", request.AdapterID, "--adapter-grant-file", grantFile}
+	if request.ACPDraftSchema != "" {
+		args = append(args, "--acp-draft="+request.ACPDraftSchema)
+	}
 	return endpoint.Process{
 		Command: executable,
-		Args:    []string{"acp", "--adapter", request.AdapterID, "--adapter-grant-file", grantFile},
+		Args:    args,
 		WorkDir: request.CWD,
 		Release: func() { _ = os.Remove(grantFile) },
 	}, nil

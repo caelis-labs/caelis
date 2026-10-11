@@ -98,6 +98,15 @@ func TestRuntimeMainControllerSteeringWaitsForAdmissionAndCommitsCanonicalInput(
 		steer.ContentParts[0].Text != "guide active controller\n\nFrom: @child" {
 		t.Fatalf("main steering prompt = input %q parts %#v, want trusted Agent header", steer.Input, steer.ContentParts)
 	}
+	if err := inputRunner.SubmitContext(ctx, agent.Submission{
+		Kind: agent.SubmissionKindConversation, Text: "guide from user", DisplayInput: "display user guidance",
+		Metadata: map[string]any{
+			"operation_id": "main-steer-operation", "steering_operation_id": "main-steer-operation",
+			"actor": "forged-child", "message_id": "forged-message", "caelis": map[string]any{"agent_communication": true},
+		},
+	}); err != nil {
+		t.Fatalf("conversation SubmitContext() error = %v", err)
+	}
 
 	controllerHandle.finish()
 	if err := result.Handle.WaitCompletion(ctx); err != nil {
@@ -117,12 +126,16 @@ func TestRuntimeMainControllerSteeringWaitsForAdmissionAndCommitsCanonicalInput(
 			communications = append(communications, event)
 		}
 	}
-	if len(userInputs) != 1 || session.EventText(userInputs[0]) != "initial" || len(communications) != 1 ||
+	if len(userInputs) != 2 || session.EventText(userInputs[0]) != "initial" || session.EventText(userInputs[1]) != "guide from user" || len(communications) != 1 ||
 		session.ProtocolAgentCommunicationOf(communications[0]).Text != "guide active controller" {
 		t.Fatalf("published inputs = users %#v communications %#v", userInputs, communications)
 	}
 	if communications[0].Actor.Kind != session.ActorKindParticipant || communications[0].Actor.ID != "child-1" {
 		t.Fatalf("steering Actor = %#v, want trusted participant provenance", communications[0].Actor)
+	}
+	assertCommittedSteeringCorrelation(t, userInputs[1], "main-steer-operation")
+	if userInputs[1].Actor.Kind != session.ActorKindUser || userInputs[1].Actor.ID != "" {
+		t.Fatalf("user steering adopted metadata Actor: %#v", userInputs[1].Actor)
 	}
 	durable, err := sessions.Events(ctx, session.EventsRequest{SessionRef: active.SessionRef})
 	if err != nil {
@@ -133,12 +146,18 @@ func TestRuntimeMainControllerSteeringWaitsForAdmissionAndCommitsCanonicalInput(
 	for _, event := range durable {
 		if event != nil && session.EventTypeOf(event) == session.EventTypeUser {
 			durableUsers = append(durableUsers, session.EventText(event))
+			if session.EventText(event) == "guide from user" {
+				assertCommittedSteeringCorrelation(t, event, "main-steer-operation")
+				if event.ID != userInputs[1].ID {
+					t.Fatalf("recovered steering event identity %q differs from live %q", event.ID, userInputs[1].ID)
+				}
+			}
 		}
 		if communication := session.ProtocolAgentCommunicationOf(event); communication != nil {
 			durableCommunications = append(durableCommunications, communication.Text)
 		}
 	}
-	if len(durableUsers) != 1 || durableUsers[0] != "initial" ||
+	if len(durableUsers) != 2 || durableUsers[0] != "initial" || durableUsers[1] != "guide from user" ||
 		len(durableCommunications) != 1 || durableCommunications[0] != "guide active controller" {
 		t.Fatalf("durable inputs = users %#v communications %#v, want typed canonical FIFO", durableUsers, durableCommunications)
 	}

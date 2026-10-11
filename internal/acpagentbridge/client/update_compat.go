@@ -114,7 +114,7 @@ func normalizeInboundTerminalOutput(meta map[string]any) map[string]any {
 	out := jsonvalue.CloneMap(meta)
 	if output, ok := acpmeta.ReadTerminalOutput(out); ok {
 		delete(out, acpmeta.TerminalOutputDeltaKey)
-		return acpmeta.WithTerminalOutput(out, output.TerminalID, output.Data)
+		return acpmeta.WithTerminalOutput(out, output.TerminalID, output.Data, output.Replacement)
 	}
 	output, ok := inboundTerminalOutputAlias(out)
 	delete(out, acpmeta.TerminalOutputDeltaKey)
@@ -124,7 +124,7 @@ func normalizeInboundTerminalOutput(meta map[string]any) map[string]any {
 		}
 		return out
 	}
-	return acpmeta.WithTerminalOutput(out, output.TerminalID, output.Data)
+	return acpmeta.WithTerminalOutput(out, output.TerminalID, output.Data, output.Replacement)
 }
 
 func inboundTerminalOutputAlias(meta map[string]any) (acpmeta.TerminalOutput, bool) {

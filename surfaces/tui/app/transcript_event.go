@@ -40,6 +40,9 @@ func directedParticipantUserDisplay(event TranscriptEvent) string {
 	if event.Scope != ACPProjectionParticipant {
 		return ""
 	}
+	if event.Replacement && event.Text == "" {
+		return ""
+	}
 	address := firstNonEmpty(
 		strings.TrimSpace(asString(event.Meta[userdisplay.MetaDisplayAddress])),
 		participantRunSlashName(event),

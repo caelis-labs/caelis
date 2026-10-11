@@ -19,6 +19,7 @@ type PresentationService struct {
 	source           gatewayapp.PresentationSource
 	controllerStatus func(context.Context, session.SessionRef) (controller.ControllerStatus, bool, error)
 	modeWriteTarget  string
+	authorizer       appserver.Authorizer
 }
 
 func newPresentationService(
@@ -36,6 +37,7 @@ func newPresentationService(
 	}
 	return &PresentationService{
 		sessions: sessions, source: source, controllerStatus: controllerStatus, modeWriteTarget: modeWriteTarget,
+		authorizer: appserver.SessionAuthorizer{Sessions: sessions},
 	}, nil
 }
 
@@ -88,8 +90,8 @@ func (s *PresentationService) PresentationSnapshot(ctx context.Context, principa
 }
 
 func (s *PresentationService) PresentationCapabilities(ctx context.Context, principal appserver.Principal) (appserver.PresentationCapabilities, error) {
-	if strings.TrimSpace(principal.ID) == "" {
-		return appserver.PresentationCapabilities{}, errors.New("app/gatewayapp/controladapter/local: principal ID is required")
+	if err := authorizeUnscopedHostCapability(principal); err != nil {
+		return appserver.PresentationCapabilities{}, err
 	}
 	caps, err := s.source.PromptCapabilities(ctx)
 	if err != nil {
@@ -103,7 +105,7 @@ func (s *PresentationService) authorizedSession(ctx context.Context, principal a
 		return session.Session{}, errors.New("app/gatewayapp/controladapter/local: presentation service is unavailable")
 	}
 	sessionID = strings.TrimSpace(sessionID)
-	if err := (appserver.SessionAuthorizer{Sessions: s.sessions}).Authorize(ctx, principal, action, sessionID); err != nil {
+	if err := s.authorizer.Authorize(ctx, principal, action, sessionID); err != nil {
 		return session.Session{}, err
 	}
 	return s.sessions.Session(ctx, session.SessionRef{SessionID: sessionID})

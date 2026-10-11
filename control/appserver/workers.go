@@ -15,6 +15,10 @@ const ActionWorkerCreate Action = "worker.create"
 const (
 	CapabilitySharedWorkers = "shared-native-workers-v1"
 	CapabilityTurnSteering  = "turn-steering-receipts-v1"
+	// CapabilitySharedWorkerSessionControl exposes native Session-local compact,
+	// configuration/controller selection, presentation, completion, closure and
+	// participant/user-input APIs under the authenticated Worker grant.
+	CapabilitySharedWorkerSessionControl = "shared-worker-session-control-v1"
 )
 
 // CreateWorkerRequest creates an ordinary Host-configured Session with a scoped

@@ -101,10 +101,13 @@ func (r *Runner) loadChildEndpointLocked(
 		MCPGrant:        cfg.MCPGrant,
 		MCPServers:      cfg.MCPServers,
 		HostedAdapterID: cfg.HostedAdapterID, ConnectionID: cfg.Name, EndpointResolver: r.endpointResolver,
-		Command: cfg.Command, Args: append([]string(nil), cfg.Args...), Env: launchEnv,
+		ACPDraftSchema:  cfg.ACPDraftSchema,
+		ModelImageInput: cfg.PinnedModelImageInput(),
+		Command:         cfg.Command, Args: append([]string(nil), cfg.Args...), Env: launchEnv,
 		WorkDir: pickWorkDir(cfg.WorkDir, spawn.CWD), ClientInfo: r.clientInfo,
-		OnUpdate:            func(env client.UpdateEnvelope) { r.handleRecoveredUpdate(run, env) },
-		OnPermissionRequest: boundChildPermissionHandler(run, r.permissionCallback(spawn, cfg, anchor.AgentID)),
+		OnUpdate:                 func(env client.UpdateEnvelope) { r.handleRecoveredUpdate(run, env) },
+		OnPermissionRequest:      boundChildPermissionHandler(run, r.permissionCallback(spawn, cfg, anchor.AgentID)),
+		OnDraftPermissionRequest: r.boundDraftPermissionHandler(run, spawn, cfg, anchor.AgentID),
 	})
 	if err != nil {
 		childCancel()

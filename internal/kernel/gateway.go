@@ -183,6 +183,21 @@ func (g *Gateway) Resolver() *AssemblyResolver {
 	return r
 }
 
+// ResolveCompaction resolves only the model selection needed by canonical
+// compaction. A source-bound resolver may implement this separately so a
+// Control operation never fabricates a work-bearing Turn source.
+func (g *Gateway) ResolveCompaction(ctx context.Context, ref session.SessionRef) (ResolvedTurn, error) {
+	if g == nil || g.resolver == nil {
+		return ResolvedTurn{}, fmt.Errorf("gateway: turn resolver is unavailable")
+	}
+	if resolver, ok := g.resolver.(interface {
+		ResolveCompaction(context.Context, session.SessionRef) (ResolvedTurn, error)
+	}); ok {
+		return resolver.ResolveCompaction(ctx, ref)
+	}
+	return g.resolver.ResolveTurn(ctx, TurnIntent{SessionRef: ref})
+}
+
 func (g *Gateway) Interrupt(ctx context.Context, req InterruptRequest) error {
 	if ctx == nil {
 		ctx = context.Background()

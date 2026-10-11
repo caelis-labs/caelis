@@ -12,6 +12,13 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 )
 
+// acpTaskStreamDelivery retains a native replacement boundary only for
+// protocols capable of standard upserts. It is never sent as ACP metadata.
+type acpTaskStreamDelivery struct {
+	envelope      eventstream.Envelope
+	replacementID string
+}
+
 // acpTaskStreamMux keeps the standard ACP bridge compatible with mounted
 // RunCommand and Spawn terminals without flattening subagent semantics into
 // the main session/update stream. After its parent prompt is sealed, active
@@ -19,11 +26,12 @@ import (
 // their terminal boundary; later subagent activities belong to a later Prompt.
 // Stopping the mux closes only delivery subscriptions, never Tasks.
 type acpTaskStreamMux struct {
-	ctx       context.Context
-	cancel    context.CancelFunc
-	client    taskstream.Client
-	sessionID string
-	events    chan eventstream.Envelope
+	ctx             context.Context
+	cancel          context.CancelFunc
+	client          taskstream.Client
+	sessionID       string
+	events          chan eventstream.Envelope
+	draftDeliveries chan acpTaskStreamDelivery
 
 	mu           sync.Mutex
 	observations map[string]*acpTaskStreamObservation
@@ -61,12 +69,19 @@ func newACPTaskStreamClientMux(parent context.Context, client taskstream.Client,
 }
 
 func (a *RuntimeAgent) startACPTaskStreamMux(parent context.Context, sessionID string) *acpTaskStreamMux {
+	return a.startACPTaskStreamMuxProfile(parent, sessionID, false)
+}
+
+func (a *RuntimeAgent) startACPTaskStreamMuxProfile(parent context.Context, sessionID string, draft bool) *acpTaskStreamMux {
 	if a == nil {
 		return nil
 	}
 	mux := newACPTaskStreamClientMux(context.WithoutCancel(parent), a.taskStreamClient, sessionID)
 	if mux == nil {
 		return nil
+	}
+	if draft {
+		mux.draftDeliveries = make(chan acpTaskStreamDelivery)
 	}
 	sessionID = strings.TrimSpace(sessionID)
 	a.mu.Lock()
@@ -279,13 +294,13 @@ func (m *acpTaskStreamMux) forwardUntilClose(
 				}
 				return committedCursor, subscription.Err()
 			}
-			if delivery.Source == taskstream.SourceReplacement && !replacementAllowed {
+			if delivery.Source == taskstream.SourceReplacement && !replacementAllowed && m.draftDeliveries == nil {
 				return committedCursor, errorcode.New(
 					errorcode.Conflict,
 					"Task stream replacement cannot follow output already delivered over ACP",
 				)
 			}
-			events, _, deliveryErr := assembler.Accept(delivery)
+			events, replaced, deliveryErr := assembler.Accept(delivery)
 			if deliveryErr != nil {
 				return committedCursor, deliveryErr
 			}
@@ -294,7 +309,11 @@ func (m *acpTaskStreamMux) forwardUntilClose(
 			}
 			sealedTerminal := false
 			for _, envelope := range events {
-				terminal, sealed, forwardErr := m.forwardTaskEnvelope(deliveryCtx, anchor, generation, envelope)
+				replacementID := ""
+				if replaced {
+					replacementID = delivery.SnapshotID
+				}
+				terminal, sealed, forwardErr := m.forwardTaskEnvelope(deliveryCtx, anchor, generation, envelope, replacementID)
 				if forwardErr != nil {
 					return committedCursor, forwardErr
 				}
@@ -321,14 +340,27 @@ func (m *acpTaskStreamMux) forwardTaskEnvelope(
 	anchor acpTaskStreamAnchor,
 	generation *acpTaskStreamObservationGeneration,
 	envelope eventstream.Envelope,
+	replacementIDs ...string,
 ) (bool, bool, error) {
 	if !acpTaskStreamEnvelopeAllowed(anchor, envelope) {
 		return false, false, nil
 	}
-	select {
-	case <-ctx.Done():
-		return false, false, ctx.Err()
-	case m.events <- envelope:
+	if m.draftDeliveries != nil {
+		replacementID := ""
+		if len(replacementIDs) > 0 {
+			replacementID = replacementIDs[0]
+		}
+		select {
+		case <-ctx.Done():
+			return false, false, ctx.Err()
+		case m.draftDeliveries <- acpTaskStreamDelivery{envelope: envelope, replacementID: replacementID}:
+		}
+	} else {
+		select {
+		case <-ctx.Done():
+			return false, false, ctx.Err()
+		case m.events <- envelope:
+		}
 	}
 	if anchor.kind != task.KindSubagent || envelope.Kind != eventstream.KindLifecycle || envelope.Lifecycle == nil {
 		return false, false, nil
@@ -492,9 +524,16 @@ func (m *acpTaskStreamMux) reportNoticeOnce(
 		return
 	}
 	notice := buildACPTaskStreamNotice(m.sessionID, facts)
-	select {
-	case <-generation.ctx.Done():
-	case m.events <- notice:
+	if m.draftDeliveries != nil {
+		select {
+		case <-generation.ctx.Done():
+		case m.draftDeliveries <- acpTaskStreamDelivery{envelope: notice}:
+		}
+	} else {
+		select {
+		case <-generation.ctx.Done():
+		case m.events <- notice:
+		}
 	}
 }
 
@@ -559,5 +598,10 @@ func (m *acpTaskStreamMux) closeEvents() {
 	if m == nil {
 		return
 	}
-	m.eventsOnce.Do(func() { close(m.events) })
+	m.eventsOnce.Do(func() {
+		close(m.events)
+		if m.draftDeliveries != nil {
+			close(m.draftDeliveries)
+		}
+	})
 }

@@ -141,6 +141,7 @@ func (r *Runtime) commitParticipantSteering(
 	if event == nil {
 		return errorcode.New(errorcode.InvalidArgument, "agent-sdk/runtime: participant steering input is required")
 	}
+	preserveSteeringCorrelation(event, submission.Metadata)
 	persisted, err := r.sessions.AppendEvent(commitCtx, session.AppendEventRequest{
 		SessionRef:    ref,
 		MutationGuard: session.RuntimeMutationGuard(producerCtx),

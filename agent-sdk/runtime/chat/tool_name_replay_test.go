@@ -32,6 +32,7 @@ func TestToolNamePersistencePreservesRuntimeModelContext(t *testing.T) {
 		t.Fatal(err)
 	}
 	name := "external_display_tool"
+	subject := session.CloneApprovalSubject(&session.ApprovalSubject{Kind: "file", Tool: session.KnownApprovalField("probe"), Operation: session.KnownApprovalField("read"), Targets: []session.ApprovalField{session.KnownApprovalField("README.md")}, Effect: session.KnownApprovalField("read the exact path"), Scope: session.KnownApprovalField("this invocation")})
 	live = append(live, &session.Event{
 		Type: session.EventTypeToolCall, Visibility: session.VisibilityMirror,
 		Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
@@ -43,7 +44,7 @@ func TestToolNamePersistencePreservesRuntimeModelContext(t *testing.T) {
 			Type: session.EventTypeLifecycle,
 			Protocol: &session.EventProtocol{
 				Method: session.ProtocolMethodRequestPermission,
-				Permission: &session.ProtocolApproval{ToolCall: session.ProtocolToolCall{
+				Permission: &session.ProtocolApproval{Subject: subject, ToolCall: session.ProtocolToolCall{
 					ID: "remote-1", NamePresent: new(present),
 				}},
 			},
@@ -71,6 +72,9 @@ func TestToolNamePersistencePreservesRuntimeModelContext(t *testing.T) {
 		approval := session.ProtocolPermissionOf(loaded.Events[len(live)-2+i])
 		if approval == nil || approval.ToolCall.NamePresent == nil || *approval.ToolCall.NamePresent != present {
 			t.Fatalf("replayed approval = %#v, want name presence %t", approval, present)
+		}
+		if !reflect.DeepEqual(approval.Subject, subject) {
+			t.Fatalf("approval display facts changed during model-context round trip: %+v", approval.Subject)
 		}
 	}
 }

@@ -1,0 +1,24 @@
+╭──────────────────────────────────────────────────────────────────────────────────╮
+│ Approval Required                                                                │
+│                                                                                  │
+│ OPERATION:         execute                                                       │
+│ COMMAND:           long-command long-command long-command long-command long-comm │
+│                    and long-command long-command long-command long-command long- │
+│                    command long-command long-command long-command long-command l │
+│                    ong-command long-command long-command long-command long-comma │
+│                    nd long-command long-command long-command long-command long-c │
+│                    ommand long-command long-command long-command long-command lo │
+│                    ng-command long-command long-command long-command long-comman │
+│                    d long-command long-command long-command long-command long-co │
+│                    mmand long-command lo... [truncated]                          │
+│ WORKING DIRECTORY: /workspace                                                    │
+│ EFFECT:            run the supplied command                                      │
+│ SCOPE:             route: host; permission: danger_full_access; network: inherit │
+│ CONTEXT:           Incomplete or opaque; inspect the original request before gra │
+│                    nting access.                                                 │
+│ DEFAULT:           Reject                                                        │
+│                                                                                  │
+│   Allow once  allow_once; scope: this invocation                                 │
+│ ▎ Reject      reject_once; scope: no grant                                       │
+╰──────────────────────────────────────────────────────────────────────────────────╯
+   ↑/↓ select  enter confirm  esc cancel

@@ -84,16 +84,30 @@ func eventstreamUpdateFromClient(env client.UpdateEnvelope) eventstream.Update {
 		// Notices use the normalized transient Event projection only.
 		return nil
 	case client.ContentChunk:
+		var replacedFields []string
+		if typed.MetaPresent {
+			replacedFields = []string{"_meta"}
+		}
 		return eventstream.ContentChunk{
-			SessionUpdate: strings.TrimSpace(typed.SessionUpdate),
-			Content:       rawContentValue(typed.Content),
-			MessageID:     strings.TrimSpace(typed.MessageID),
-			Meta:          jsonvalue.CloneMap(typed.Meta),
+			SessionUpdate:  strings.TrimSpace(typed.SessionUpdate),
+			Content:        rawContentValue(typed.Content),
+			MessageID:      strings.TrimSpace(typed.MessageID),
+			Replacement:    typed.Replacement,
+			Meta:           jsonvalue.CloneMap(typed.Meta),
+			ReplacedFields: replacedFields,
 		}
 	case client.ToolCall:
 		return decodeEventstreamUpdate(typed, env.Raw)
 	case client.ToolCallUpdate:
-		return decodeEventstreamUpdate(typed, env.Raw)
+		if projected, ok := decodeEventstreamUpdate(typed, env.Raw).(eventstream.ToolCallUpdate); ok {
+			for _, field := range []string{"name", "title", "kind", "status", "rawInput", "rawOutput", "content", "locations", "_meta"} {
+				if _, present := typed.RawPatch[field]; present {
+					projected.ReplacedFields = append(projected.ReplacedFields, field)
+				}
+			}
+			return projected
+		}
+		return nil
 	case client.PlanUpdate:
 		return decodeEventstreamUpdate(typed, env.Raw)
 	case client.UsageUpdate:

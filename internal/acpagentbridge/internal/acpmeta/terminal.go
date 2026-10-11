@@ -21,8 +21,9 @@ type TerminalInfo struct {
 }
 
 type TerminalOutput struct {
-	TerminalID string
-	Data       string
+	TerminalID  string
+	Data        string
+	Replacement bool
 }
 
 type TerminalExit struct {
@@ -39,15 +40,17 @@ func WithTerminalInfo(meta map[string]any, terminalID string) map[string]any {
 	return withTerminalMeta(meta, TerminalInfoKey, map[string]any{"terminal_id": terminalID})
 }
 
-func WithTerminalOutput(meta map[string]any, terminalID string, data string) map[string]any {
+func WithTerminalOutput(meta map[string]any, terminalID string, data string, replacement ...bool) map[string]any {
 	terminalID = strings.TrimSpace(terminalID)
-	if terminalID == "" || data == "" {
+	replace := len(replacement) > 0 && replacement[0]
+	if terminalID == "" || data == "" && !replace {
 		return jsonvalue.CloneMap(meta)
 	}
-	return withTerminalMeta(WithoutTerminalOutput(meta), TerminalOutputKey, map[string]any{
-		"terminal_id": terminalID,
-		"data":        data,
-	})
+	values := map[string]any{"terminal_id": terminalID, "data": data}
+	if replace {
+		values["replacement"] = true
+	}
+	return withTerminalMeta(WithoutTerminalOutput(meta), TerminalOutputKey, values)
 }
 
 func WithoutTerminalOutput(meta map[string]any) map[string]any {
@@ -87,11 +90,12 @@ func ReadTerminalInfo(meta map[string]any) (TerminalInfo, bool) {
 func ReadTerminalOutput(meta map[string]any) (TerminalOutput, bool) {
 	values := terminalMeta(meta, TerminalOutputKey)
 	id := strings.TrimSpace(stringAt(values, "terminal_id"))
-	data, _ := values["data"].(string)
-	if id == "" || data == "" {
+	data, present := values["data"].(string)
+	replacement, _ := values["replacement"].(bool)
+	if id == "" || !present || data == "" && !replacement {
 		return TerminalOutput{}, false
 	}
-	return TerminalOutput{TerminalID: id, Data: data}, true
+	return TerminalOutput{TerminalID: id, Data: data, Replacement: replacement}, true
 }
 
 func ReadTerminalExit(meta map[string]any) (TerminalExit, bool) {

@@ -17,8 +17,9 @@ type TerminalInfoMeta struct {
 }
 
 type TerminalOutputMeta struct {
-	TerminalID string
-	Data       string
+	TerminalID  string
+	Data        string
+	Replacement bool
 }
 
 type TerminalExitMeta struct {
@@ -39,11 +40,12 @@ func ReadTerminalInfo(meta map[string]any) (TerminalInfoMeta, bool) {
 func ReadTerminalOutput(meta map[string]any) (TerminalOutputMeta, bool) {
 	values := terminalMeta(meta, terminalOutputMetaKey)
 	id := strings.TrimSpace(terminalString(values, "terminal_id"))
-	data, _ := values["data"].(string)
-	if id == "" || data == "" {
+	data, present := values["data"].(string)
+	replacement, _ := values["replacement"].(bool)
+	if id == "" || !present || data == "" && !replacement {
 		return TerminalOutputMeta{}, false
 	}
-	return TerminalOutputMeta{TerminalID: id, Data: data}, true
+	return TerminalOutputMeta{TerminalID: id, Data: data, Replacement: replacement}, true
 }
 
 func ReadTerminalExit(meta map[string]any) (TerminalExitMeta, bool) {
@@ -64,9 +66,10 @@ func ReadTerminalExit(meta map[string]any) (TerminalExitMeta, bool) {
 
 // WithTerminalOutput updates the Surface-owned batching snapshot. Canonical
 // output wins over the maintained provider alias.
-func WithTerminalOutput(meta map[string]any, terminalID, data string) map[string]any {
+func WithTerminalOutput(meta map[string]any, terminalID, data string, replacement ...bool) map[string]any {
 	terminalID = strings.TrimSpace(terminalID)
-	if terminalID == "" || data == "" {
+	replace := len(replacement) > 0 && replacement[0]
+	if terminalID == "" || data == "" && !replace {
 		return CloneAnyMap(meta)
 	}
 	out := CloneAnyMap(meta)
@@ -74,10 +77,11 @@ func WithTerminalOutput(meta map[string]any, terminalID, data string) map[string
 		out = map[string]any{}
 	}
 	delete(out, terminalOutputDeltaMetaKey)
-	out[terminalOutputMetaKey] = map[string]any{
-		"terminal_id": terminalID,
-		"data":        data,
+	values := map[string]any{"terminal_id": terminalID, "data": data}
+	if replace {
+		values["replacement"] = true
 	}
+	out[terminalOutputMetaKey] = values
 	return out
 }
 

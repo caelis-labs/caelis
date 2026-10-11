@@ -96,15 +96,8 @@ func walkRootForQuery(root string, query string) (string, string, bool) {
 		base = filepath.Join(root, filepath.FromSlash(dirPart))
 	}
 	relBase, err := filepath.Rel(root, base)
-	if err != nil || strings.HasPrefix(relBase, "..") {
+	if err != nil || relBase == ".." || strings.HasPrefix(relBase, ".."+string(filepath.Separator)) {
 		return "", "", false
-	}
-	info, err := os.Stat(base)
-	if err != nil || !info.IsDir() {
-		if dirPart == "" {
-			return root, query, true
-		}
-		return root, query, true
 	}
 	return base, filePart, true
 }
@@ -301,11 +294,36 @@ func completeWorkspaceFiles(ctx context.Context, root string, query string, limi
 	if !ok {
 		return []controlprompt.CompletionCandidate{}, nil
 	}
+	// Bind filesystem observation to directory handles. A query can select a
+	// directory below a symlink, and path prechecks cannot constrain a symlink
+	// or rename exchanged between validation and traversal.
+	workspaceRoot, err := os.OpenRoot(root)
+	if err != nil {
+		return []controlprompt.CompletionCandidate{}, nil
+	}
+	defer workspaceRoot.Close()
+	scanRoot := workspaceRoot
+	relBase, err := filepath.Rel(root, base)
+	if err != nil {
+		return []controlprompt.CompletionCandidate{}, nil
+	}
+	if relBase != "." {
+		scanRoot, err = workspaceRoot.OpenRoot(relBase)
+		if err != nil {
+			if !errors.Is(err, fs.ErrNotExist) {
+				return []controlprompt.CompletionCandidate{}, nil
+			}
+			// An unfinished directory query retains ordinary workspace fuzzy
+			// completion. It never probes or traverses a second filesystem root.
+			scanRoot, base, needle = workspaceRoot, root, trimCompletionQuery(query)
+		} else {
+			defer scanRoot.Close()
+		}
+	}
 	entries := make([]scoredCompletion, 0, limit*2)
 	seen := map[string]struct{}{}
-	baseDepth := strings.Count(filepath.Clean(base), string(filepath.Separator))
 
-	err := filepath.WalkDir(base, func(path string, entry fs.DirEntry, walkErr error) error {
+	err = fs.WalkDir(scanRoot.FS(), ".", func(relative string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			if entry != nil && entry.IsDir() {
 				return filepath.SkipDir
@@ -315,20 +333,21 @@ func completeWorkspaceFiles(ctx context.Context, root string, query string, limi
 		if ctx.Err() != nil {
 			return errCompletionStopped
 		}
-		if path == base {
+		if relative == "." {
 			return nil
 		}
 		name := strings.TrimSpace(entry.Name())
 		if entry.IsDir() && shouldIgnoreCompletionDir(name) {
 			return filepath.SkipDir
 		}
-		depth := strings.Count(filepath.Clean(path), string(filepath.Separator)) - baseDepth
+		depth := 1 + strings.Count(relative, "/")
 		if depth > fileCompletionMaxDepth {
 			if entry.IsDir() {
 				return filepath.SkipDir
 			}
 			return nil
 		}
+		path := filepath.Join(base, filepath.FromSlash(relative))
 		display := relativeDisplayPath(root, path, entry.IsDir())
 		if display == "" {
 			return nil

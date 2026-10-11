@@ -209,6 +209,12 @@ func (r *sessionRoute) lastSequence() uint64 {
 }
 
 func (r *sessionRoute) publish(notification appserver.Notification) error {
+	if r.agent.draft != nil {
+		handled, err := r.agent.draft.publishNative(r, notification)
+		if handled || err != nil {
+			return err
+		}
+	}
 	if notice := codexNotice(notification); notice != nil {
 		return r.publishNotice(notice)
 	}
@@ -239,6 +245,9 @@ func (r *sessionRoute) publish(notification appserver.Notification) error {
 }
 
 func (r *sessionRoute) handleRequest(ctx context.Context, request appserver.Request) (any, error) {
+	if r.agent.draft != nil && !r.agent.draft.preparePermission(r, request) {
+		return appServerFallbackResponse(request.Method)
+	}
 	if r.agent.connection == nil {
 		return appServerFallbackResponse(request.Method)
 	}

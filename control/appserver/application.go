@@ -82,6 +82,9 @@ type ApplicationServiceConfig struct {
 	ReviewerState func(context.Context, application.Profile) (application.ReviewerState, error)
 	// NativeExecution reports the Host platform's ordinary native sandbox support.
 	NativeExecution bool
+	// NativeProfileChildren reports a Host assembly with scoped profile child
+	// endpoints backed by the original native participant, Task and approval owners.
+	NativeProfileChildren bool
 }
 
 // ApplicationService owns scoped application admission; it does not execute

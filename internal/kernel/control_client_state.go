@@ -94,13 +94,15 @@ func applyControlApprovalState(out *appserver.RuntimeState, coordinator *approva
 	out.Approval.QueuedCount = queued
 	out.Run.WaitingApproval = out.Run.WaitingApproval || active != nil
 	if active != nil {
-		payload := approval.PayloadFromRuntimeRequest(*active.request)
+		payload := approval.DisplayPayloadFromRuntimeRequest(*active.request)
 		origin := canonicalOriginFromApproval(active.request, ref, fallbackTurnID)
 		item := &appserver.ActiveApproval{
 			RequestID: active.id, Scope: eventstream.ScopeMain, ScopeID: ref.SessionID,
 			Target:     appserver.TurnTarget{HandleID: active.owner.HandleID(), RunID: active.owner.RunID(), TurnID: active.owner.TurnID()},
 			Permission: approval.ProtocolApprovalFromPayload(payload),
 		}
+		item.Subject = session.ApprovalSubjectOf(item.Permission)
+		item.Permission.Subject = nil // Display facts have one public typed slot.
 		if origin != nil {
 			item.Scope = eventstream.Scope(origin.Scope)
 			item.ScopeID = firstNonEmpty(strings.TrimSpace(origin.ScopeID), item.ScopeID)

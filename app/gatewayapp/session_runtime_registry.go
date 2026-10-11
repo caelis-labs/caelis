@@ -559,7 +559,14 @@ func (r *sessionRuntimeRegistry) acquireControlRuntime(
 	if err := r.validateWorkspaceIdentity(workspace); err != nil {
 		return nil, active, nil, err
 	}
-	instance, err := r.assembler.assembleSnapshot(buildCtx, active, sessionRuntimeActivity{}, sessions)
+	var instance *sessionRuntimeInstance
+	if observer, ok := r.assembler.(interface {
+		assembleObservationSnapshot(context.Context, session.Session, session.Service) (*sessionRuntimeInstance, error)
+	}); ok {
+		instance, err = observer.assembleObservationSnapshot(buildCtx, active, sessions)
+	} else {
+		instance, err = r.assembler.assembleSnapshot(buildCtx, active, sessionRuntimeActivity{}, sessions)
+	}
 	if err != nil {
 		return nil, active, nil, err
 	}

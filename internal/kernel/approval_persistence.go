@@ -30,7 +30,7 @@ func (g *Gateway) persistApprovalRequest(req *agent.ApprovalRequest, fallbackRef
 	if g == nil || g.sessions == nil || req == nil {
 		return nil, fmt.Errorf("gateway: approval persistence is unavailable")
 	}
-	payload := approval.PayloadFromRuntimeRequest(*req)
+	payload := approval.DisplayPayloadFromRuntimeRequest(*req)
 	permission := approval.ProtocolApprovalFromPayload(payload)
 	if permission == nil {
 		return nil, fmt.Errorf("gateway: approval request %q has no normalized permission payload", requestID)

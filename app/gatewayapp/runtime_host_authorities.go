@@ -43,11 +43,12 @@ type taskOutputLifecycle interface {
 // the Host root and detached Session Runtime instances. Copying this value
 // copies references only; Runtime compositions never own these lifecycles.
 type runtimeHostAuthorities struct {
-	applications      *application.Store
-	collaboration     *collaboration.Service
-	collaborationDone <-chan struct{}
-	appName           string
-	userID            string
+	applications            *application.Store
+	applicationChildClients *applicationChildClientFactory
+	collaboration           *collaboration.Service
+	collaborationDone       <-chan struct{}
+	appName                 string
+	userID                  string
 	// store is used only as a configuration reader in detached Runtime values;
 	// only the Host root uses the write-hooked store instance.
 	store                   *appConfigStore

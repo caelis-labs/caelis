@@ -317,6 +317,7 @@ func projectSessionEventToACPEnvelopes(base eventstream.Envelope, sessionEvent *
 			permission.ToolCall.Meta = mergeACPEventMeta(permission.ToolCall.Meta, meta)
 		}
 		next.Permission = permission
+		next.ApprovalSubject = session.ApprovalDisplaySubjectOf(session.ProtocolPermissionOf(sessionEvent))
 		out = append(out, next)
 	}
 	updates, err := ProjectEvent(sessionEvent)
@@ -518,6 +519,12 @@ func permissionRequestFromProtocol(sessionID string, meta map[string]any, approv
 	req, err := acppermission.EncodePermissionRequest(session.SessionRef{SessionID: sessionID}, approval, meta)
 	if err != nil {
 		return nil
+	}
+	if approval.Context != nil {
+		// Independent permissions preserve an optional actual tool call and
+		// bounded prompt facts. Display defaults must not fabricate a tool or
+		// refill fields deliberately withheld by the approval owner.
+		return &req
 	}
 	// Permission wire semantics come from acppermission.EncodePermissionRequest.
 	// Projection may add display-only defaults without changing canonical

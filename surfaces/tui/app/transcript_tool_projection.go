@@ -59,6 +59,7 @@ func projectTranscriptToolCall(input transcript.ToolProjectionInput) TranscriptE
 		ToolOutput:           toolOutput,
 		ToolStatus:           status,
 		ToolStatusExplicit:   input.StatusExplicit,
+		ToolReplacedFields:   append([]string(nil), input.ReplacedFields...),
 		ToolTerminal:         toolTerminal,
 		ToolOutputCollection: toolOutputCollection,
 		ToolTaskHandle:       toolTaskHandle,
@@ -115,21 +116,24 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 		Status:    status,
 		Error:     toolErr,
 	}
-	terminalOutput := transcript.TerminalRuntimeOutputText(input.Meta)
-	if terminalOutput == "" && !suppressRunningSnapshotOutput {
+	terminalData, terminalPresent := transcript.ReadTerminalOutput(input.Meta)
+	exit, exitPresent := transcript.ReadTerminalExit(input.Meta)
+	clearExit := containsToolField(input.ReplacedFields, "_meta") && exitPresent && exit.ExitCode == nil && exit.Signal == nil
+	terminalOutput := terminalData.Data
+	if !terminalPresent && !suppressRunningSnapshotOutput {
 		terminalOutput = transcript.TerminalToolOutputText(fallbackInput)
 	}
-	if terminalOutput != "" {
+	if terminalPresent || terminalOutput != "" {
 		toolOutputHasTerminalData = toolTerminal
 		if strings.TrimSpace(toolOutput) == "" {
 			toolOutput = terminalOutput
 			toolOutputCollection = false
 		}
 	}
-	if !toolOutputCollection && strings.TrimSpace(toolOutput) == "" && !toolOutputHasTerminalData {
+	if !toolOutputCollection && strings.TrimSpace(toolOutput) == "" && !toolOutputHasTerminalData && !clearExit && !containsToolField(input.ReplacedFields, "rawOutput") {
 		toolOutput = transcript.DelegatedTaskResultText(fallbackInput)
 	}
-	if !toolOutputCollection && strings.TrimSpace(toolOutput) == "" && !toolOutputHasTerminalData {
+	if !toolOutputCollection && strings.TrimSpace(toolOutput) == "" && !toolOutputHasTerminalData && !clearExit && !containsToolField(input.ReplacedFields, "rawOutput") {
 		if exitText := transcript.TerminalExitCodeOutputText(fallbackInput); exitText != "" {
 			toolOutput = exitText
 			toolOutputSynthetic = true
@@ -216,36 +220,39 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 		toolOutputSynthetic = false
 	}
 	return TranscriptEvent{
-		Kind:                 TranscriptEventTool,
-		Scope:                input.Scope,
-		ScopeID:              input.ScopeID,
-		Actor:                input.Actor,
-		OccurredAt:           input.OccurredAt,
-		Meta:                 transcript.CloneAnyMap(input.Meta),
-		ToolCallID:           strings.TrimSpace(input.CallID),
-		ToolName:             toolName,
-		ToolNameExplicit:     input.ToolNameExplicit,
-		ToolKind:             strings.TrimSpace(input.ToolKind),
-		ToolTitle:            strings.TrimSpace(input.ToolTitle),
-		ToolExplorationVerb:  explorationVerb,
-		ToolArgs:             toolArgs,
-		ToolFullArgs:         toolFullArgs,
-		ToolOutput:           toolOutput,
-		ToolStream:           transcript.ToolStream(status, toolErr),
-		ToolStatus:           status,
-		ToolStatusExplicit:   input.StatusExplicit,
-		ToolError:            toolErr,
-		ToolTerminal:         toolTerminal,
-		ToolOutputSynthetic:  toolOutputSynthetic,
-		ToolOutputCollection: toolOutputCollection,
-		ToolOutputTerminal:   toolOutputHasTerminalData,
-		ToolTaskHandle:       toolTaskHandle,
-		ToolTaskAction:       toolTaskAction,
-		ToolTaskInput:        toolTaskInput,
-		ToolTaskTargetKind:   toolTaskTargetKind,
-		ToolTaskState:        toolTaskState,
-		ToolMessageTarget:    toolMessageTarget,
-		Final:                transcript.ToolStatusFinal(status, toolErr),
+		Kind:                     TranscriptEventTool,
+		Scope:                    input.Scope,
+		ScopeID:                  input.ScopeID,
+		Actor:                    input.Actor,
+		OccurredAt:               input.OccurredAt,
+		Meta:                     transcript.CloneAnyMap(input.Meta),
+		ToolCallID:               strings.TrimSpace(input.CallID),
+		ToolName:                 toolName,
+		ToolNameExplicit:         input.ToolNameExplicit,
+		ToolKind:                 strings.TrimSpace(input.ToolKind),
+		ToolTitle:                strings.TrimSpace(input.ToolTitle),
+		ToolExplorationVerb:      explorationVerb,
+		ToolArgs:                 toolArgs,
+		ToolFullArgs:             toolFullArgs,
+		ToolOutput:               toolOutput,
+		ToolStream:               transcript.ToolStream(status, toolErr),
+		ToolStatus:               status,
+		ToolStatusExplicit:       input.StatusExplicit,
+		ToolReplacedFields:       append([]string(nil), input.ReplacedFields...),
+		ToolError:                toolErr,
+		ToolTerminal:             toolTerminal,
+		ToolOutputSynthetic:      toolOutputSynthetic,
+		ToolClearSyntheticOutput: clearExit,
+		ToolOutputCollection:     toolOutputCollection,
+		ToolOutputTerminal:       toolOutputHasTerminalData,
+		ToolOutputReplacement:    terminalData.Replacement || containsToolField(input.ReplacedFields, "rawOutput"),
+		ToolTaskHandle:           toolTaskHandle,
+		ToolTaskAction:           toolTaskAction,
+		ToolTaskInput:            toolTaskInput,
+		ToolTaskTargetKind:       toolTaskTargetKind,
+		ToolTaskState:            toolTaskState,
+		ToolMessageTarget:        toolMessageTarget,
+		Final:                    transcript.ToolStatusFinal(status, toolErr),
 	}, true
 }
 
@@ -317,4 +324,13 @@ func suppressRunningTerminalSnapshotOutput(toolName string, meta map[string]any,
 	}
 	taskMeta := transcript.RuntimeTaskMeta(meta)
 	return firstNonEmpty(asString(taskMeta["task_id"]), asString(taskMeta["internal_task_id"]), asString(taskMeta["terminal_id"])) != ""
+}
+
+func containsToolField(fields []string, want string) bool {
+	for _, field := range fields {
+		if field == want {
+			return true
+		}
+	}
+	return false
 }

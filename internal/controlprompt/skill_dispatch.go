@@ -16,7 +16,8 @@ type SkillResolver interface {
 
 type SkillResolveResult = appserver.SkillResolveResult
 
-func (r router) dispatchDirectSkill(ctx context.Context, command string, args string, argsStart int, submission Submission) (Result, bool, error) {
+func (r router) dispatchDirectSkill(ctx context.Context, command string, args string, argsStart int, req Request) (Result, bool, error) {
+	submission := req.Submission
 	if r.skillResolver == nil {
 		return Result{}, false, nil
 	}
@@ -25,12 +26,23 @@ func (r router) dispatchDirectSkill(ctx context.Context, command string, args st
 		return Result{}, true, FriendlyCommandError("skill", err)
 	}
 	if resolution.Canonical == "" && len(resolution.Matches) > 0 {
-		return r.skillResolutionNotice(command, resolution.Matches), true, nil
+		id, err := r.recordInteraction(ctx, req, submission.Text)
+		if err != nil {
+			return Result{InteractionMessageID: id}, true, err
+		}
+		result := r.skillResolutionNotice(command, resolution.Matches)
+		result.InteractionMessageID = id
+		return result, true, nil
 	}
 	if resolution.Canonical == "" {
 		return Result{}, false, nil
 	}
+	id, err := r.recordInteraction(ctx, req, submission.Text)
+	if err != nil {
+		return Result{InteractionMessageID: id}, true, err
+	}
 	result, err := r.submitResolvedSkill(ctx, submission, resolution.Canonical, args, argsStart)
+	result.InteractionMessageID = id
 	return result, true, err
 }
 

@@ -77,6 +77,14 @@ func (c *Client) close(ctx context.Context) error {
 	defer c.releaseEndpoint()
 
 	var errs []error
+	if c.stream != nil {
+		if err := c.stream.Close(); err != nil {
+			errs = append(errs, &CloseError{Stage: CloseStageConnectionClose, Err: err})
+		}
+		if err := c.stream.Wait(ctx); err != nil {
+			errs = append(errs, &CloseError{Stage: CloseStageConnectionJoin, Err: err})
+		}
+	}
 	if c.proc != nil {
 		// On Windows, closing an os.File that has a blocked pipe read waits for
 		// that read to finish. Closing the SDK connection first would therefore

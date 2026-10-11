@@ -75,10 +75,21 @@ func (f *ControllerForwarder) forwardSourceEvent(ctx context.Context, req agents
 		}
 	}
 	normalized := normalize(req.ActiveSession, req.TurnID, sourceEvent.Canonical)
+	userObservation := false
+	if normalized != nil {
+		if update := session.ProtocolUpdateOf(normalized); update != nil && eventUpdateType(normalized) == string(session.ProtocolUpdateTypeUserMessage) {
+			userObservation = accumulator.userObservation(update)
+		}
+	}
 	if normalized != nil && req.IsUserEcho != nil && req.IsUserEcho(normalized) {
 		return nil
 	}
 	if normalized != nil {
+		if userObservation {
+			// A provider's edited conversation observation cannot rewrite the
+			// native user input already admitted to this Runtime.
+			normalized.Visibility = session.VisibilityMirror
+		}
 		if _, liveEvent, ok := accumulator.normalize(normalized); ok {
 			if liveEvent != nil {
 				updateType := eventUpdateType(liveEvent)

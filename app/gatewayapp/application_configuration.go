@@ -5,9 +5,12 @@ import (
 	"errors"
 	"fmt"
 
+	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/application"
+	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/control/modelprofile/builder"
 	"github.com/caelis-labs/caelis/internal/kernel"
@@ -83,6 +86,29 @@ func (r *applicationTurnResolver) resolveProfileModel(ctx context.Context, profi
 		return kernel.ModelResolution{}, err
 	}
 	return lookup.ResolveModelConfig(ctx, configured, r.composition.activeRuntime.ContextWindow)
+}
+
+// ResolveCompaction selects the application's desired model without fabricating
+// a user/background Turn source or admitting callback capabilities. Compaction
+// remains the ordinary fenced Runtime operation and cannot dispatch tools.
+func (r *applicationTurnResolver) ResolveCompaction(ctx context.Context, ref session.SessionRef) (kernel.ResolvedTurn, error) {
+	if ref.SessionID != r.binding.SessionID {
+		return kernel.ResolvedTurn{}, appserver.ErrUnauthorized
+	}
+	store := r.composition.authorities.applications
+	if err := store.CheckActive(ctx, r.binding.Scope); err != nil {
+		return kernel.ResolvedTurn{}, err
+	}
+	configuration, err := store.Configuration(ctx, r.binding.Scope, r.binding.SessionID)
+	if err != nil {
+		return kernel.ResolvedTurn{}, err
+	}
+	resolved, err := r.resolveProfileModel(ctx, configuration.Profile)
+	if err != nil {
+		return kernel.ResolvedTurn{}, err
+	}
+	return kernel.ResolvedTurn{RunRequest: agent.RunRequest{AgentSpec: agent.AgentSpec{Model: resolved.Model,
+		Request: agent.ModelRequestOptions{ServiceTier: model.ServiceTier(configuration.Profile.ServiceTier)}}}}, nil
 }
 
 // applicationModelImageInput observes canonical model declarations even when a

@@ -2,14 +2,59 @@ package projection_test
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
+	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/projection"
 	"github.com/caelis-labs/caelis/control/appserver/wirev1"
 )
+
+func TestApprovalReviewReplayUsesSafePresentationAndPreservesVerdict(t *testing.T) {
+	original := &session.ProtocolApproval{ToolCall: session.ProtocolToolCall{ID: "call", Name: "custom", RawInput: map[string]any{"credential": "REPLAY-MARKED-SECRET"}}, Options: []session.ProtocolApprovalOption{{ID: "native-allow", Kind: "allow_once"}}}
+	presentation := approval.ProtocolApprovalFromPayload(approval.DisplayPayloadFromRuntimeRequest(agent.ApprovalRequest{Tool: tool.Definition{Name: "custom", InputSchema: map[string]any{"properties": map[string]any{"credential": map[string]any{"writeOnly": true}}}}, Approval: original}))
+	event := &session.Event{ID: "review", Type: session.EventTypeLifecycle, Visibility: session.VisibilityJournal, Journal: &session.ExecutionJournalEntry{Kind: session.JournalKindPauseToken, PauseToken: &session.PauseToken{
+		TokenID: "native-request", TurnID: "turn", ToolCallID: "call", ToolName: "custom", Status: session.PauseTokenResolved, Approved: true, OptionID: "native-allow",
+		Input: json.RawMessage(`{"credential":"REPLAY-MARKED-SECRET"}`), Approval: original, Presentation: presentation, ReviewText: "REPLAY-MARKED-SECRET rationale",
+	}}}
+	// A process-independent JSON round trip exercises the durable snapshot,
+	// including the explicit sensitivity bit used for derived review text.
+	rawEvent, _ := json.Marshal(event)
+	var restored session.Event
+	if err := json.Unmarshal(rawEvent, &restored); err != nil {
+		t.Fatal(err)
+	}
+	out := projection.ProjectSessionEventEnvelope(eventstream.Envelope{SessionID: "session"}, &restored)
+	if len(out) != 1 || out[0].ApprovalReview.Status != "approved" || out[0].ApprovalRequestID != "native-request" || !reflect.DeepEqual(out[0].ApprovalSubject, presentation.Subject) {
+		t.Fatalf("replay identity or verdict changed: %+v", out)
+	}
+	raw, err := wirev1.MarshalEnvelope(out[0])
+	if err != nil || strings.Contains(string(raw), "REPLAY-MARKED-SECRET") || out[0].ApprovalReview.Text != "Sensitive action details withheld." {
+		t.Fatalf("private review leaked: %s, %v", raw, err)
+	}
+	if restored.Journal.PauseToken.Approval.ToolCall.RawInput["credential"] != "REPLAY-MARKED-SECRET" || restored.Journal.PauseToken.OptionID != "native-allow" {
+		t.Fatal("display changed private action or grant evidence")
+	}
+}
+
+func TestIndependentPermissionReviewReplayNeedsNoToolCall(t *testing.T) {
+	original := &session.ProtocolApproval{Context: &session.PermissionContext{Title: "Original", RawSubject: json.RawMessage(`{"type":"_private","secret":"PRIVATE-DRAFT-EVIDENCE"}`)}, Subject: &session.ApprovalSubject{Kind: "opaque", OpaqueInput: true}, Options: []session.ProtocolApprovalOption{{ID: "native-reject", Name: "Reject", Kind: "reject_once"}}}
+	presentation := approval.ProtocolApprovalFromPayload(approval.DisplayPayloadFromRuntimeRequest(agent.ApprovalRequest{Approval: original}))
+	event := &session.Event{ID: "review", Type: session.EventTypeLifecycle, Visibility: session.VisibilityJournal, Journal: &session.ExecutionJournalEntry{Kind: session.JournalKindPauseToken, PauseToken: &session.PauseToken{TokenID: "native-request", TurnID: "turn", Status: session.PauseTokenResolved, OptionID: "native-reject", Approval: original, Presentation: presentation, ReviewText: "PRIVATE-DRAFT-EVIDENCE reviewed"}}}
+	projected := projection.ProjectSessionEventEnvelope(eventstream.Envelope{SessionID: "owner"}, event)
+	if len(projected) != 1 || projected[0].ApprovalRequestID != "native-request" || projected[0].ApprovalReview.ToolCallID != "" || projected[0].ApprovalReview.Status != "denied" || projected[0].ApprovalReview.Text != "Opaque action details withheld." {
+		t.Fatalf("independent reviewed decision lost or gained a tool: %+v", projected)
+	}
+	raw, err := wirev1.MarshalEnvelope(projected[0])
+	if err != nil || strings.Contains(string(raw), "PRIVATE-DRAFT-EVIDENCE") || strings.Contains(string(raw), "raw_subject") {
+		t.Fatalf("private independent evidence escaped replay: %s %v", raw, err)
+	}
+}
 
 func TestApprovalDecisionJournalProjectsDisplayWithoutControlState(t *testing.T) {
 	for _, approved := range []bool{true, false} {

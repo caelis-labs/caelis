@@ -213,8 +213,15 @@ func (v *subagentOutputView) observeChildEvent(event TranscriptEvent) {
 		return
 	}
 	defer v.retainDisplayWindow()
-	if event.Kind == TranscriptEventAgentCommunication && documentContainsAgentCommunication(v.document, agentCommunicationSubagentEvent(event)) {
-		return
+	if event.Kind == TranscriptEventAgentCommunication {
+		incoming := agentCommunicationSubagentEvent(event)
+		if _, patched := patchDocumentAgentCommunication(v.document, incoming); patched {
+			v.touch(false)
+			return
+		}
+		if !event.Replacement && documentContainsAgentCommunication(v.document, incoming) {
+			return
+		}
 	}
 	if projectionID := strings.TrimSpace(event.SourceProjectionID); projectionID != "" {
 		if _, seen := v.seenProjections[projectionID]; seen {
@@ -363,12 +370,24 @@ func (v *subagentOutputView) appendInput(event TranscriptEvent) {
 		return
 	}
 	text := strings.TrimSpace(transcriptNarrativeText(event))
-	if text == "" {
+	if text == "" && !event.Replacement {
 		return
 	}
 	block := v.blockForEvent(event)
 	if block == nil {
 		return
+	}
+	if event.MessageID != "" {
+		for i := range block.Events {
+			if block.Events[i].Kind == SEUserInput && block.Events[i].MessageID == event.MessageID {
+				if event.Replacement {
+					block.Events[i].Text = text
+				} else {
+					block.Events[i].Text += transcriptNarrativeText(event)
+				}
+				return
+			}
+		}
 	}
 	// Input is a visible narrative boundary, not a new child Turn. Keep tool
 	// identity and lifecycle on the existing block while placing subsequent

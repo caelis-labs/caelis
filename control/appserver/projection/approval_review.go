@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 )
@@ -25,6 +26,10 @@ func projectApprovalReview(base eventstream.Envelope, event *session.Event) []ev
 	decoder := json.NewDecoder(bytes.NewReader(token.Input))
 	decoder.UseNumber()
 	_ = decoder.Decode(&input)
+	if token.Presentation != nil {
+		input = session.CloneState(token.Presentation.ToolCall.RawInput)
+		base.ApprovalSubject = session.ApprovalSubjectOf(token.Presentation)
+	}
 	base.Kind = eventstream.KindApprovalReview
 	base.Delivery = &eventstream.Delivery{Mode: eventstream.DeliveryMirror}
 	base.TurnID = strings.TrimSpace(token.TurnID)
@@ -32,7 +37,10 @@ func projectApprovalReview(base eventstream.Envelope, event *session.Event) []ev
 	base.Meta = nil
 	base.ApprovalReview = &eventstream.ApprovalReview{
 		ToolCallID: strings.TrimSpace(token.ToolCallID), ToolName: strings.TrimSpace(token.ToolName), ItemID: strings.TrimSpace(token.ItemID),
-		RawInput: input, Status: status, Text: strings.TrimSpace(token.ReviewText),
+		RawInput: input, Status: status, Text: strings.TrimSpace(approval.DisplayReviewText(token.ReviewText, base.ApprovalSubject)),
+	}
+	if token.Presentation != nil && token.Presentation.Context != nil {
+		base.ApprovalReview.ToolCallID, base.ApprovalReview.ToolName = token.Presentation.ToolCall.ID, token.Presentation.ToolCall.Name
 	}
 	return []eventstream.Envelope{base}
 }

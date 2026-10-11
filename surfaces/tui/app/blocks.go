@@ -50,8 +50,10 @@ func NewSpacerBlock() *TranscriptBlock {
 // ---------------------------------------------------------------------------
 
 type UserNarrativeBlock struct {
-	id  string
-	Raw string // user's display text (without the "> " prefix)
+	observedMessage     string
+	observedReplacement bool
+	id                  string
+	Raw                 string // user's display text (without the "> " prefix)
 }
 
 func NewUserNarrativeBlock(text string) *UserNarrativeBlock {
@@ -61,6 +63,9 @@ func NewUserNarrativeBlock(text string) *UserNarrativeBlock {
 func (b *UserNarrativeBlock) BlockID() string { return b.id }
 func (b *UserNarrativeBlock) Kind() BlockKind { return BlockTranscript }
 func (b *UserNarrativeBlock) Render(ctx BlockRenderContext) []RenderedRow {
+	if b.Raw == "" {
+		return nil
+	}
 	return RenderTextWithContext(ctx, TextRenderRequest{
 		Kind:           TextUser,
 		Mode:           RenderPlain,
@@ -225,10 +230,13 @@ func (b *MainACPTurnBlock) UpdatePlan(entries []planEntryState) {
 }
 
 func (b *MainACPTurnBlock) AddAgentCommunication(event SubagentEvent) {
-	if b == nil || event.Kind != SEAgentCommunication || strings.TrimSpace(event.Text) == "" {
+	if b == nil || event.Kind != SEAgentCommunication {
 		return
 	}
-	if subagentEventsContainAgentCommunication(b.Events, event) {
+	if patchAgentCommunicationEvents(b.Events, event) {
+		return
+	}
+	if !event.communicationReplacement && (strings.TrimSpace(event.Text) == "" || subagentEventsContainAgentCommunication(b.Events, event)) {
 		return
 	}
 	b.clearTransientRetryNotice()
@@ -493,10 +501,13 @@ func (b *ParticipantTurnBlock) UpdatePlan(entries []planEntryState) {
 }
 
 func (b *ParticipantTurnBlock) AddAgentCommunication(event SubagentEvent) {
-	if b == nil || event.Kind != SEAgentCommunication || strings.TrimSpace(event.Text) == "" {
+	if b == nil || event.Kind != SEAgentCommunication {
 		return
 	}
-	if subagentEventsContainAgentCommunication(b.Events, event) {
+	if patchAgentCommunicationEvents(b.Events, event) {
+		return
+	}
+	if !event.communicationReplacement && (strings.TrimSpace(event.Text) == "" || subagentEventsContainAgentCommunication(b.Events, event)) {
 		return
 	}
 	b.clearTransientRetryNotice()

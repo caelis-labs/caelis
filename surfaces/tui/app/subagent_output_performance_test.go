@@ -2,6 +2,7 @@ package tuiapp
 
 import (
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -167,6 +168,10 @@ func assertSubagentOutputCacheMatchesFresh(t *testing.T, m *Model) {
 
 func TestSubagentOutputCachedCompositionTracksBackgroundAndWheel(t *testing.T) {
 	m := newSubagentOutputPerformanceModel(t, 120, 32, 2)
+	// Both views keep the active Responding hint. Rendering under -race may
+	// cross its 100ms elapsed bucket; compare cache composition independently
+	// of that live clock while retaining every style and other output byte.
+	elapsed := regexp.MustCompile(`Responding · [0-9]+\.[0-9]+s`)
 	for index := range 6 {
 		if index == 2 {
 			m.doc.Append(NewUserNarrativeBlock("changed parent background"))
@@ -177,7 +182,10 @@ func TestSubagentOutputCachedCompositionTracksBackgroundAndWheel(t *testing.T) {
 		cached := m.View().Content
 		m.subagentOutputOverlay.composition = centeredOverlayCache{}
 		fresh := m.View().Content
-		if cached != fresh {
+		if !elapsed.MatchString(cached) || !elapsed.MatchString(fresh) {
+			t.Fatal("active Responding hint missing")
+		}
+		if elapsed.ReplaceAllString(cached, "Responding · 0.0s") != elapsed.ReplaceAllString(fresh, "Responding · 0.0s") {
 			t.Fatal("overlay composition retained an obsolete frame")
 		}
 	}

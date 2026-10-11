@@ -17,6 +17,19 @@ type Router interface {
 // RouterFactory builds a prompt router from a shared configuration.
 type RouterFactory func(RouterConfig) Router
 
+// InteractionRecorder admits command input to durable conversation history
+// without adding it to model context. Command dispatch remains the Router's
+// responsibility; this receipt does not assert that the command succeeded.
+type InteractionRecorder interface {
+	RecordInteraction(context.Context, string) (string, error)
+}
+
+// GuardedInteractionRecorder admits display-only command input only while the
+// native foreground is idle. The condition is checked by the mutation owner.
+type GuardedInteractionRecorder interface {
+	RecordInteractionIfIdle(context.Context, string) (string, error)
+}
+
 // RouterConfig configures a prompt router implementation.
 type RouterConfig struct {
 	Service RouterService
@@ -39,6 +52,15 @@ type RouterConfig struct {
 // Request carries one prompt submission into a control prompt router.
 type Request struct {
 	Submission Submission
+	// RequireInteractionReceipt admits a durable display-only command before
+	// dispatch. Stable surfaces keep their existing command behavior by default.
+	RequireInteractionReceipt bool
+	// RequireIdleRun adds an atomic idle condition to command-input admission.
+	// Ordinary submissions already use the native new-Turn admission owner.
+	RequireIdleRun bool
+	// InteractionObserver projects the admitted receipt before command effects.
+	// A projection failure blocks effects but cannot undo the durable receipt.
+	InteractionObserver func(context.Context, string) error
 }
 
 // PrivateSlashRequest carries a surface-owned slash command after shared
@@ -75,20 +97,23 @@ type PrivateSlashHandler func(context.Context, PrivateSlashRequest) (Result, boo
 // PrivateResult is only populated by a PrivateSlashHandler and must be
 // interpreted by the surface that installed that handler.
 type Result struct {
-	Handled             bool
-	Turn                Turn
-	ParticipantTask     *AgentRunResult
-	Reconnect           SessionReconnect
-	Events              []eventstream.Envelope
-	SlashResult         *SlashCommandResult
-	ClearHistory        bool
-	RefreshCommands     bool
-	ActiveSessionID     string
-	RefreshStatus       bool
-	StatusUpdate        *controlstatus.StatusSnapshot
-	SuppressTurnDivider bool
-	ContinueRunning     bool
-	PrivateResult       any
+	// InteractionMessageID is the canonical admitted command message, including
+	// when later dispatch fails. It is not a queued task or operation identifier.
+	InteractionMessageID string
+	Handled              bool
+	Turn                 Turn
+	ParticipantTask      *AgentRunResult
+	Reconnect            SessionReconnect
+	Events               []eventstream.Envelope
+	SlashResult          *SlashCommandResult
+	ClearHistory         bool
+	RefreshCommands      bool
+	ActiveSessionID      string
+	RefreshStatus        bool
+	StatusUpdate         *controlstatus.StatusSnapshot
+	SuppressTurnDivider  bool
+	ContinueRunning      bool
+	PrivateResult        any
 }
 
 // ParseSlash parses a slash command into command and argument text.

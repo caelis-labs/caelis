@@ -17,8 +17,9 @@ type TerminalInfoMeta struct {
 }
 
 type TerminalOutputMeta struct {
-	TerminalID string
-	Data       string
+	TerminalID  string
+	Data        string
+	Replacement bool
 }
 
 type TerminalExitMeta struct {
@@ -35,15 +36,17 @@ func WithTerminalInfo(meta map[string]any, terminalID string) map[string]any {
 	return withTopLevelTerminalMeta(meta, TerminalInfoKey, map[string]any{"terminal_id": terminalID})
 }
 
-func WithTerminalOutput(meta map[string]any, terminalID string, data string) map[string]any {
+func WithTerminalOutput(meta map[string]any, terminalID string, data string, replacement ...bool) map[string]any {
 	terminalID = strings.TrimSpace(terminalID)
-	if terminalID == "" || data == "" {
+	replace := len(replacement) > 0 && replacement[0]
+	if terminalID == "" || data == "" && !replace {
 		return CloneMap(meta)
 	}
-	return withTopLevelTerminalMeta(WithoutTerminalOutput(meta), TerminalOutputKey, map[string]any{
-		"terminal_id": terminalID,
-		"data":        data,
-	})
+	values := map[string]any{"terminal_id": terminalID, "data": data}
+	if replace {
+		values["replacement"] = true
+	}
+	return withTopLevelTerminalMeta(WithoutTerminalOutput(meta), TerminalOutputKey, values)
 }
 
 func WithoutTerminalOutput(meta map[string]any) map[string]any {
@@ -83,11 +86,12 @@ func TerminalInfo(meta map[string]any) (TerminalInfoMeta, bool) {
 func TerminalOutput(meta map[string]any) (TerminalOutputMeta, bool) {
 	values := topLevelTerminalMeta(meta, TerminalOutputKey)
 	id := strings.TrimSpace(stringAt(values, "terminal_id"))
-	data, _ := values["data"].(string)
-	if id == "" || data == "" {
+	data, present := values["data"].(string)
+	replacement, _ := values["replacement"].(bool)
+	if id == "" || !present || data == "" && !replacement {
 		return TerminalOutputMeta{}, false
 	}
-	return TerminalOutputMeta{TerminalID: id, Data: data}, true
+	return TerminalOutputMeta{TerminalID: id, Data: data, Replacement: replacement}, true
 }
 
 func TerminalExit(meta map[string]any) (TerminalExitMeta, bool) {

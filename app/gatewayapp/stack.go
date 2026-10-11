@@ -574,6 +574,7 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	stack := &Stack{
 		composition: runtimeComposition{
 			authorities: runtimeHostAuthorities{
+				applicationChildClients: &applicationChildClientFactory{},
 				appName:                 appName,
 				userID:                  userID,
 				store:                   configStore,

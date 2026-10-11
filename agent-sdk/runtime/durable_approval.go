@@ -8,6 +8,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
@@ -106,6 +107,7 @@ func (r *Runtime) requestDurableApproval(
 		TokenID: tokenID, SessionID: req.SessionRef.SessionID, RunID: req.RunID, TurnID: req.TurnID,
 		ToolCallID: req.Call.ID, ToolName: req.Tool.Name, ItemID: req.Call.Execution.ItemID, Revision: 1, Status: session.PauseTokenPending,
 		Input: req.Call.Input, Approval: req.Approval, Metadata: req.Metadata, CreatedAt: now, UpdatedAt: now,
+		Presentation: approval.ProtocolApprovalFromPayload(approval.DisplayPayloadFromRuntimeRequest(req)),
 	})
 	waiter := make(chan agent.ApprovalResponse, 1)
 	if err := session.ValidatePauseTokenTransition(session.PauseToken{}, token); err != nil {
@@ -254,6 +256,11 @@ func (r *Runtime) ResolveApproval(ctx context.Context, req agent.ResolveApproval
 	if err != nil {
 		return err
 	}
+	decision, err := approval.ResolveNativeResponse(token.Approval, req.Decision)
+	if err != nil {
+		return fmt.Errorf("agent-sdk/runtime: invalid approval decision: %w", err)
+	}
+	req.Decision = decision
 	if token.Status == session.PauseTokenResolved {
 		if pauseDecisionEqual(token, req.Decision) {
 			r.deliverApprovalDecision(token)
