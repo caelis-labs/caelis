@@ -122,6 +122,12 @@ type Event struct {
 	// ToolOutputCollection marks a present standard ACP content collection.
 	// Reducers replace the prior collection even when ToolOutput is empty.
 	ToolOutputCollection bool
+	// ToolOutputExact preserves rendered structured-diff bytes. Only typed
+	// changes presence sets this display flag; it grants no terminal ownership.
+	ToolOutputExact bool
+	// ToolDiffSummary is a typed affected-file display summary. It follows
+	// content collection replacement and never replaces invocation arguments.
+	ToolDiffSummary string
 	// ToolOutputTerminal marks an exact terminal byte delta. Control orders and
 	// resumes these records; the Surface only appends the bytes it receives.
 	ToolOutputTerminal bool

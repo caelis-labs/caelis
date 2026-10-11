@@ -159,6 +159,17 @@ func (s *draftSession) relay(replay bool, ready chan<- error) {
 				}
 				mux.Observe(env)
 			}
+			if replacement || delivery.Kind == appserver.FeedDeliverySync {
+				// Session history identity bookkeeping is needed only while its
+				// replay is in flight. Task replacement epochs remain independent.
+				s.projectionMu.Lock()
+				for key := range s.narrativeResets {
+					if strings.HasPrefix(key, "session:") {
+						delete(s.narrativeResets, key)
+					}
+				}
+				s.projectionMu.Unlock()
+			}
 			if delivery.Kind == appserver.FeedDeliverySync && !synced {
 				if err := s.emitCurrentRuntimeState(); err != nil {
 					fail(err)
@@ -219,11 +230,35 @@ func (s *draftSession) emitEnvelope(env eventstream.Envelope, replay, task bool,
 		if env.Update.SessionUpdateType() == eventstream.UpdateCurrentMode {
 			return s.agent.draftRefreshPresentation(s.ctx, s.id, false)
 		}
-		update, err := draftEnvelopeUpdate(env, replay)
+		update, err := draftEnvelopeUpdate(env)
 		if err != nil {
 			return err
 		}
 		if update != nil {
+			if replay {
+				key, reset, err := draftNarrativeReplayReset(*update)
+				if err != nil {
+					return err
+				}
+				if key != "" {
+					prefix := "session:"
+					if task {
+						prefix = "task:"
+					}
+					key = prefix + key
+				}
+				if key != "" && s.narrativeResets[key] != replacementID {
+					if reset != nil {
+						if err := s.agent.callbacks.SessionUpdate(s.ctx, v2.UpdateSessionNotification{SessionId: v2.SessionId(s.id), Update: *reset}); err != nil {
+							return err
+						}
+					}
+					if s.narrativeResets == nil {
+						s.narrativeResets = make(map[string]string)
+					}
+					s.narrativeResets[key] = replacementID
+				}
+			}
 			if err := s.agent.callbacks.SessionUpdate(s.ctx, v2.UpdateSessionNotification{SessionId: v2.SessionId(s.id), Update: *update}); err != nil {
 				return err
 			}

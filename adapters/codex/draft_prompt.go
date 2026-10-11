@@ -59,7 +59,11 @@ func (d *draftAgent) Prompt(ctx context.Context, request v2.PromptRequest) (v2.P
 		return v2.PromptResponse{}, acpdraft.InactivePromptError()
 	}
 	session := d.session(state.threadID)
-	pending := &draftInsertion{turnID: turnID, token: rand.Text(), changed: make(chan struct{}, 1)}
+	startCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	nativeCtx, nativeCancel := context.WithCancelCause(startCtx)
+	defer nativeCancel(nil)
+	pending := &draftInsertion{turnID: turnID, token: rand.Text(), changed: make(chan struct{}, 1), nativeCancel: nativeCancel}
 	session.mu.Lock()
 	session.pending = pending
 	if turnID == "" {
@@ -73,13 +77,11 @@ func (d *draftAgent) Prompt(ctx context.Context, request v2.PromptRequest) (v2.P
 		}
 		session.mu.Unlock()
 	}()
-	startCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
-	defer cancel()
 	if turnID != "" {
 		var response struct {
 			TurnID string `json:"turnId"`
 		}
-		err = d.core.backend.rpc.Request(startCtx, "turn/steer", map[string]any{"threadId": state.threadID, "expectedTurnId": turnID, "input": input, "clientUserMessageId": pending.token}, &response)
+		err = d.core.backend.rpc.Request(nativeCtx, "turn/steer", map[string]any{"threadId": state.threadID, "expectedTurnId": turnID, "input": input, "clientUserMessageId": pending.token}, &response)
 		if err == nil && strings.TrimSpace(response.TurnID) != turnID {
 			err = errors.New("codex adapter: steering acknowledgement does not identify the expected Turn; insertion outcome is unknown")
 		}
@@ -102,7 +104,7 @@ func (d *draftAgent) Prompt(ctx context.Context, request v2.PromptRequest) (v2.P
 				ID string `json:"id"`
 			} `json:"turn"`
 		}
-		err = d.core.backend.rpc.Request(startCtx, "turn/start", params, &response)
+		err = d.core.backend.rpc.Request(nativeCtx, "turn/start", params, &response)
 		turnID = strings.TrimSpace(response.Turn.ID)
 		if err == nil && turnID == "" {
 			err = errors.New("codex adapter: app-server returned an empty Turn ID")

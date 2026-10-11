@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 
 	acp "github.com/caelis-labs/acp-go-sdk"
@@ -45,7 +46,7 @@ func draftPromptContent(req v2.PromptRequest) (string, []model.ContentPart, erro
 	return input, parts, err
 }
 
-func draftEnvelopeUpdate(env eventstream.Envelope, replacement bool) (*v2.SessionUpdate, error) {
+func draftEnvelopeUpdate(env eventstream.Envelope) (*v2.SessionUpdate, error) {
 	env.Update = draftNormalizeTerminalContent(env.Update)
 	raw, err := json.Marshal(env.Update)
 	if err != nil {
@@ -73,7 +74,25 @@ func draftEnvelopeUpdate(env eventstream.Envelope, replacement bool) (*v2.Sessio
 		var replaces bool
 		_ = json.Unmarshal(object["replacement"], &replaces)
 		delete(object, "replacement")
-		if env.Final || replacement || replaces {
+		var clears []string
+		_ = json.Unmarshal(object["replacedFields"], &clears)
+		metaPresent := slices.Contains(clears, "_meta")
+		if _, present := object["_meta"]; metaPresent && !present {
+			object["_meta"] = draftRaw(nil)
+		}
+		delete(object, "replacedFields")
+		var content struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		}
+		_ = json.Unmarshal(object["content"], &content)
+		metadataOnly := metaPresent && !replaces && content.Type == "text" && content.Text == ""
+		if metadataOnly {
+			// Native metadata-only patches use an empty placeholder delta.
+			// Standard v2 preserves content absence independently of metadata.
+			object["sessionUpdate"] = draftRaw(strings.TrimSuffix(kind, "_chunk"))
+			delete(object, "content")
+		} else if env.Final || replaces {
 			object["sessionUpdate"] = draftRaw(strings.TrimSuffix(kind, "_chunk"))
 			if content, present := object["content"]; present {
 				object["content"] = draftRaw([]json.RawMessage{content})
@@ -81,6 +100,12 @@ func draftEnvelopeUpdate(env eventstream.Envelope, replacement bool) (*v2.Sessio
 		}
 	case eventstream.UpdateToolCall, eventstream.UpdateToolCallInfo:
 		object["sessionUpdate"] = draftRaw("tool_call_update")
+		if content, present := object["content"]; present {
+			object["content"], err = draftDiffToolContent(content)
+			if err != nil {
+				return nil, err
+			}
+		}
 		var clears []string
 		_ = json.Unmarshal(object["replacedFields"], &clears)
 		for _, field := range clears {
@@ -130,6 +155,10 @@ func draftEnvelopeUpdate(env eventstream.Envelope, replacement bool) (*v2.Sessio
 		// carries the same native selection through config_option_update.
 		return nil, nil
 	}
+	return draftValidatedUpdate(object)
+}
+
+func draftValidatedUpdate(object map[string]json.RawMessage) (*v2.SessionUpdate, error) {
 	var update v2.SessionUpdate
 	encoded, err := json.Marshal(object)
 	if err != nil {
@@ -145,6 +174,34 @@ func draftEnvelopeUpdate(env eventstream.Envelope, replacement bool) (*v2.Sessio
 	// Preserve the validated standard payload through its raw union branch.
 	wire := json.RawMessage(encoded)
 	return &v2.SessionUpdate{Other: &wire}, nil
+}
+
+// Replay resets each standard message once, then retains the exact append or
+// replacement semantics of its original records. A replay flag is not evidence
+// that an individual historical chunk contains the complete message.
+func draftNarrativeReplayReset(update v2.SessionUpdate) (string, *v2.SessionUpdate, error) {
+	var fields struct {
+		Kind    string          `json:"sessionUpdate"`
+		ID      string          `json:"messageId"`
+		Content json.RawMessage `json:"content"`
+	}
+	if err := draftJSONConvert(update, &fields); err != nil {
+		return "", nil, err
+	}
+	kind := strings.TrimSuffix(fields.Kind, "_chunk")
+	if kind != "user_message" && kind != "agent_message" && kind != "agent_thought" {
+		return "", nil, nil
+	}
+	key := kind + ":" + fields.ID
+	if fields.Kind == kind && len(fields.Content) != 0 {
+		// A genuine full-content record already supplies the replay boundary.
+		return key, nil, nil
+	}
+	reset, err := draftValidatedUpdate(map[string]json.RawMessage{
+		"sessionUpdate": draftRaw(kind), "messageId": draftRaw(fields.ID),
+		"content": draftRaw([]any{}), "_meta": draftRaw(nil),
+	})
+	return key, reset, err
 }
 
 func draftNormalizeTerminalContent(update eventstream.Update) eventstream.Update {
@@ -253,8 +310,18 @@ func draftPermissionRequest(sessionID string, approval *session.ProtocolApproval
 		"caelis/approval_subject": draftRaw(session.ApprovalDisplaySubjectOf(approval)),
 	}}
 	if wire.ToolCall.ToolCallID != "" {
+		var fields map[string]json.RawMessage
+		if err := draftJSONConvert(wire.ToolCall, &fields); err != nil {
+			return request, err
+		}
+		if content, present := fields["content"]; present {
+			fields["content"], err = draftDiffToolContent(content)
+			if err != nil {
+				return request, err
+			}
+		}
 		var tool v2.ToolCallUpdate
-		if err := draftJSONConvert(wire.ToolCall, &tool); err != nil {
+		if err := draftJSONConvert(fields, &tool); err != nil {
 			return request, err
 		}
 		request.Subject = &v2.RequestPermissionSubject{ToolCall: &v2.RequestPermissionSubjectToolCall{Type: "tool_call", ToolCall: tool}}

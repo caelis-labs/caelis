@@ -61,7 +61,6 @@ func (s *subagentActionSummary) observeThought(messageID string, delta string, r
 	if s == nil {
 		return
 	}
-	messageID = strings.TrimSpace(messageID)
 	if len(replacement) > 0 && replacement[0] || !s.thoughtOpen || (messageID != "" && s.thoughtMessageID != "" && messageID != s.thoughtMessageID) {
 		s.thoughtBuffer = ""
 	}

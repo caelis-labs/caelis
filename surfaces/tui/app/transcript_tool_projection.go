@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/display"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/surfaces/internal/transcript"
 	"github.com/caelis-labs/caelis/surfaces/tui/acpprojector"
 )
@@ -62,6 +63,8 @@ func projectTranscriptToolCall(input transcript.ToolProjectionInput) TranscriptE
 		ToolReplacedFields:   append([]string(nil), input.ReplacedFields...),
 		ToolTerminal:         toolTerminal,
 		ToolOutputCollection: toolOutputCollection,
+		ToolOutputExact:      toolOutputCollection && transcriptToolContentHasStructuredDiff(content),
+		ToolDiffSummary:      transcriptToolDiffSummary(content),
 		ToolTaskHandle:       toolTaskHandle,
 		ToolTaskAction:       display.ToolTaskAction(rawInput, nil, input.Meta),
 		ToolTaskInput:        display.ToolTaskInput(rawInput, nil, input.Meta),
@@ -244,6 +247,8 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 		ToolOutputSynthetic:      toolOutputSynthetic,
 		ToolClearSyntheticOutput: clearExit,
 		ToolOutputCollection:     toolOutputCollection,
+		ToolOutputExact:          toolOutputCollection && transcriptToolContentHasStructuredDiff(content),
+		ToolDiffSummary:          transcriptToolDiffSummary(content),
 		ToolOutputTerminal:       toolOutputHasTerminalData,
 		ToolOutputReplacement:    terminalData.Replacement || containsToolField(input.ReplacedFields, "rawOutput"),
 		ToolTaskHandle:           toolTaskHandle,
@@ -254,6 +259,27 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 		ToolMessageTarget:        toolMessageTarget,
 		Final:                    transcript.ToolStatusFinal(status, toolErr),
 	}, true
+}
+
+func transcriptToolContentHasStructuredDiff(content []acpprojector.ToolContent) bool {
+	for _, item := range content {
+		if item.Type == "diff" && item.Changes != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func transcriptToolDiffSummary(content []acpprojector.ToolContent) string {
+	var parts []string
+	for _, item := range content {
+		if item.Type == "diff" && item.Changes != nil {
+			if summary := session.StructuredDiffText(item.Changes, nil); summary != "" {
+				parts = append(parts, strings.ReplaceAll(summary, "\n", "; "))
+			}
+		}
+	}
+	return strings.Join(parts, "; ")
 }
 
 func transcriptRecoveredToolInput(meta map[string]any) map[string]any {

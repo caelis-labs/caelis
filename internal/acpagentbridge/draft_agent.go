@@ -63,6 +63,7 @@ type draftSession struct {
 	mux               *acpTaskStreamMux
 	childTerminal     *acpChildTerminalProjector
 	terminalResets    map[string]string
+	narrativeResets   map[string]string // projection-only replay epochs, protected by projectionMu
 	childReplacements map[string]string
 }
 

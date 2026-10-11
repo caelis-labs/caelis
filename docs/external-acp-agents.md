@@ -74,6 +74,23 @@ chunks append only their decoded bytes, and terminal snapshots replace existing
 output, including an empty snapshot. These are normalized into the same live,
 canonical and recovery projections used by stable clients.
 
+Exact retained narrative chunks remain deltas during `session/resume` catch-up.
+Each replay epoch resets an identified narrative once before its first retained
+delta; it does not replace the message with each chunk. Repeating a resume on
+the same client therefore reconstructs the same text without duplicate appends.
+Session message ownership survives Activity boundaries: repairing a message from
+an earlier Activity updates its display without taking the new Activity's result.
+
+The explicit Codex draft channel preserves native skill and mention references
+by their supplied name and path without reading those paths. Native negative
+command exit sentinels produce an exit status without an unsigned exit code.
+If a route fails before native completion is confirmed, alpha.8 cannot express
+an Agent-side Session closure. The affected ACP connection closes observably,
+pending native requests are cancelled and the owner attempts interruption of
+the actual native Turn. Sessions on that connection become unknown outcomes;
+other ACP connections and the shared native backend remain independent. Cleanup
+does not manufacture a successful idle state.
+
 The selected draft retains message identities for later repairs and settled
 Activity identities to reject reuse. Its private display cache has a 32 MiB
 serialized budget per Session and 128 MiB per connection, with at most 4,096

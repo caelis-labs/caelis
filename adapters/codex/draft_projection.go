@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 
 	acp "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/acp-go-sdk/experimental/v2"
@@ -187,13 +188,23 @@ func draftTerminalUpdates(meta map[string]json.RawMessage) ([]v2.SessionUpdate, 
 	if raw, present := meta[terminalExitMetaKey]; present {
 		var exit struct {
 			TerminalID string  `json:"terminal_id"`
-			ExitCode   *uint32 `json:"exit_code"`
+			ExitCode   *int64  `json:"exit_code"`
 			Signal     *string `json:"signal"`
 		}
 		if err := json.Unmarshal(raw, &exit); err != nil || exit.TerminalID == "" {
 			return nil, errors.New("codex adapter: invalid terminal exit")
 		}
-		updates = append(updates, v2.SessionUpdate{TerminalUpdate: &v2.SessionTerminalUpdate{SessionUpdate: "terminal_update", TerminalId: v2.TerminalId(exit.TerminalID), ExitStatus: &v2.TerminalExitStatus{ExitCode: exit.ExitCode, Signal: exit.Signal}}})
+		// Native command execution uses signed exit codes, including -1 when
+		// no process exit code is available. ACP represents that fact with an
+		// exitStatus whose optional exitCode is absent; never wrap the sentinel.
+		var code *uint32
+		if exit.ExitCode != nil && *exit.ExitCode >= 0 {
+			if *exit.ExitCode > math.MaxUint32 {
+				return nil, errors.New("codex adapter: terminal exit exceeds the ACP exit-code range")
+			}
+			code = acp.Ptr(uint32(*exit.ExitCode))
+		}
+		updates = append(updates, v2.SessionUpdate{TerminalUpdate: &v2.SessionTerminalUpdate{SessionUpdate: "terminal_update", TerminalId: v2.TerminalId(exit.TerminalID), ExitStatus: &v2.TerminalExitStatus{ExitCode: code, Signal: exit.Signal}}})
 	}
 	return updates, nil
 }

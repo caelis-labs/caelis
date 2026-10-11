@@ -634,6 +634,9 @@ func cloneToolCallContent(in []ToolCallContent) []ToolCallContent {
 			copy.OldText = &value
 		}
 		copy.Content = cloneAny(item.Content)
+		copy.Changes = session.CloneProtocolDiffChanges(item.Changes)
+		copy.Patch = session.CloneProtocolDiffPatch(item.Patch)
+		copy.Meta = cloneAnyMap(item.Meta)
 		out = append(out, copy)
 	}
 	return out

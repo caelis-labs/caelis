@@ -77,9 +77,12 @@ type SubagentEvent struct {
 	ExplorationVerb string
 	Args            string
 	// StartArgs keeps live exploration rows stable when final summaries arrive.
-	StartArgs       string
-	FullArgs        string
-	Output          string
+	StartArgs string
+	FullArgs  string
+	Output    string
+	// DiffSummary displays typed affected-file operations separately from the
+	// original invocation Args. It belongs to the current content collection.
+	DiffSummary     string
 	OutputMessageID string
 	OutputMessage   string
 	// Activity is the latest deterministic child tool signal shown only while
@@ -215,8 +218,6 @@ func mergeSubagentNarrativeChunk(existing string, existingMessageID string, exis
 	if incoming == "" {
 		return existing, existingMessage
 	}
-	existingMessageID = strings.TrimSpace(existingMessageID)
-	incomingMessageID = strings.TrimSpace(incomingMessageID)
 	if existingMessageID != "" && incomingMessageID != "" && existingMessageID != incomingMessageID {
 		return joinSubagentNarrativeMessages(existing, incoming), incoming
 	}

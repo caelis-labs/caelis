@@ -6,7 +6,7 @@ import (
 )
 
 // narrativeSourceIdentity is transient Surface reducer state. MessageID is the
-// canonical ACP message identity when present. SourceEventID and
+// exact opaque ACP message identity when present. SourceEventID and
 // SourceProjectionID are retained for diagnostics but are not merge keys:
 // every delta has a distinct transport event identity. Live deltas, with or
 // without MessageID, are correlated only inside the current presentation run.
@@ -18,14 +18,14 @@ type narrativeSourceIdentity struct {
 
 func newNarrativeSourceIdentity(messageID, sourceEventID, sourceProjectionID string) narrativeSourceIdentity {
 	return narrativeSourceIdentity{
-		MessageID:          strings.TrimSpace(messageID),
+		MessageID:          messageID,
 		SourceEventID:      strings.TrimSpace(sourceEventID),
 		SourceProjectionID: strings.TrimSpace(sourceProjectionID),
 	}
 }
 
 func (s narrativeSourceIdentity) stableKey() string {
-	if messageID := strings.TrimSpace(s.MessageID); messageID != "" {
+	if messageID := s.MessageID; messageID != "" {
 		return "message:" + messageID
 	}
 	return ""

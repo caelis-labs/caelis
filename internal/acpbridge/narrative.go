@@ -26,10 +26,10 @@ func (a *narrativeAccumulator) normalize(event *session.Event) (*session.Event, 
 	metaPatch := event.Protocol.Update != nil && slices.Contains(event.Protocol.Update.ReplacedFields, "_meta")
 	contentChanged := raw != "" || replacement
 	if updateType == string(session.ProtocolUpdateTypeAgentMessage) {
-		if contentChanged {
+		update := a.final.observeFrame(narrativeMessageID(event), raw, replacement, event.Protocol.Update.PreviouslyObserved)
+		if contentChanged && update.MessageID == a.final.messageID {
 			a.reasoning.AdvanceBoundary()
 		}
-		update := a.final.observeFrame(narrativeMessageID(event), raw, replacement)
 		identified := withNarrativeMessageID(event, update.MessageID)
 		a.lastNarrativeEvent = session.CloneEvent(identified)
 		if update.MessageID == a.final.messageID {
@@ -47,10 +47,8 @@ func (a *narrativeAccumulator) normalize(event *session.Event) (*session.Event, 
 		setNarrativeEventText(live, updateType, update.Delta)
 		return nil, live, true
 	}
-	if contentChanged {
-		a.final.AdvanceBoundary()
-	}
-	update := a.reasoning.observeFrame(narrativeMessageID(event), raw, replacement)
+	a.final.observeContentChunk(updateType, raw, narrativeMessageID(event), replacement, event.Protocol.Update.PreviouslyObserved)
+	update := a.reasoning.observeFrame(narrativeMessageID(event), raw, replacement, event.Protocol.Update.PreviouslyObserved)
 	identified := withNarrativeMessageID(event, update.MessageID)
 	a.lastNarrativeEvent = session.CloneEvent(identified)
 	if update.Text == "" && update.Delta == "" && !replacement && !metaPatch {
@@ -71,7 +69,16 @@ func (a *narrativeAccumulator) observeBarrier(event *session.Event) {
 		return
 	}
 	switch eventUpdateType(event) {
-	case string(session.ProtocolUpdateTypeToolCall), string(session.ProtocolUpdateTypeToolUpdate), string(session.ProtocolUpdateTypePlan):
+	case string(session.ProtocolUpdateTypeToolCall), string(session.ProtocolUpdateTypeToolUpdate):
+		update := session.ProtocolUpdateOf(event)
+		id, previous := "", false
+		if update != nil {
+			id, previous = update.ToolCallID, update.PreviouslyObserved
+		}
+		if a.final.observeToolCall(id, previous).Barrier {
+			a.reasoning.AdvanceBoundary()
+		}
+	case string(session.ProtocolUpdateTypePlan):
 		a.final.AdvanceBoundary()
 		a.reasoning.AdvanceBoundary()
 	}
@@ -81,12 +88,11 @@ func narrativeMessageID(event *session.Event) string {
 	if event == nil || event.Protocol == nil || event.Protocol.Update == nil {
 		return ""
 	}
-	return strings.TrimSpace(event.Protocol.Update.MessageID)
+	return event.Protocol.Update.MessageID
 }
 
 func withNarrativeMessageID(event *session.Event, messageID string) *session.Event {
 	identified := session.CloneEvent(event)
-	messageID = strings.TrimSpace(messageID)
 	if identified == nil || messageID == "" {
 		return identified
 	}
@@ -203,7 +209,7 @@ func (a *narrativeAccumulator) userObservation(update *session.ProtocolUpdate) b
 	if a == nil || update == nil {
 		return false
 	}
-	id := strings.TrimSpace(update.MessageID)
+	id := update.MessageID
 	if update.Replacement || slices.Contains(update.ReplacedFields, "_meta") {
 		if id != "" {
 			if a.userObservations == nil {

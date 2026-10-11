@@ -45,6 +45,7 @@ type draftSession struct {
 	changed            chan struct{}
 	messages           map[string]*draftMessage
 	terminals          map[string]*draftTerminal
+	tools              map[string]struct{}
 	narrativeKey       string
 	settledActivities  map[string]draftActivitySettlement
 	activitySequence   uint64

@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 
 	acp "github.com/caelis-labs/acp-go-sdk"
@@ -58,6 +59,7 @@ func draftHistoryUpdates(thread historyThread, outputMode terminalOutputMode) ([
 func draftUserContent(raw json.RawMessage) (acp.ContentBlock, error) {
 	var value struct {
 		Type string `json:"type"`
+		Name string `json:"name"`
 		Text string `json:"text"`
 		URL  string `json:"url"`
 		Path string `json:"path"`
@@ -87,11 +89,36 @@ func draftUserContent(raw json.RawMessage) (acp.ContentBlock, error) {
 			return acp.ResourceLinkBlock("Image", "file://"+value.Path), nil
 		}
 	case "skill", "mention":
+		if value.Name != "" && value.Path != "" {
+			// Native selections contain references, not copied file contents.
+			// Keep app/mcp/skill/plugin URIs intact and escape local file paths.
+			return acp.ResourceLinkBlock(value.Name, draftNativeReferenceURI(value.Path)), nil
+		}
 		if value.Text != "" {
 			return acp.TextBlock(value.Text), nil
 		}
 	}
 	return acp.ContentBlock{}, fmt.Errorf("codex adapter: unsupported draft user content %q", value.Type)
+}
+
+// draftNativeReferenceURI recognizes native absolute path syntax independently
+// of the adapter's OS. It neither resolves a relative reference nor reads its
+// target. Drive letters are URI path components; UNC servers are authorities.
+func draftNativeReferenceURI(path string) string {
+	if len(path) >= 3 && path[1] == ':' && (path[2] == '\\' || path[2] == '/') &&
+		(path[0] >= 'A' && path[0] <= 'Z' || path[0] >= 'a' && path[0] <= 'z') {
+		return (&url.URL{Scheme: "file", Path: "/" + strings.ReplaceAll(path, `\`, "/")}).String()
+	}
+	if strings.HasPrefix(path, `\\`) || strings.HasPrefix(path, "//") {
+		host, share, ok := strings.Cut(strings.ReplaceAll(path[2:], `\`, "/"), "/")
+		if ok && host != "" && share != "" {
+			return (&url.URL{Scheme: "file", Host: host, Path: "/" + share}).String()
+		}
+	}
+	if strings.HasPrefix(path, "/") {
+		return (&url.URL{Scheme: "file", Path: path}).String()
+	}
+	return path
 }
 
 // acceptHistoryState runs behind the existing native replay barrier, before

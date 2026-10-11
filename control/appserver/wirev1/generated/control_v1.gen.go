@@ -2286,17 +2286,34 @@ type TextContent struct {
 }
 
 type ToolCallContent struct {
-	Content    JSONValue `json:"content,omitempty"`
-	NewText    *string   `json:"newText,omitempty"`
-	OldText    *string   `json:"oldText,omitempty"`
-	Path       *string   `json:"path,omitempty"`
-	TerminalId *string   `json:"terminalId,omitempty"`
-	Type       string    `json:"type"`
+	Meta       JSONObject       `json:"_meta,omitempty"`
+	Changes    []ToolDiffChange `json:"changes,omitzero"`
+	Content    JSONValue        `json:"content,omitempty"`
+	NewText    *string          `json:"newText,omitempty"`
+	OldText    *string          `json:"oldText,omitempty"`
+	Patch      *ToolDiffPatch   `json:"patch,omitempty"`
+	Path       *string          `json:"path,omitempty"`
+	TerminalId *string          `json:"terminalId,omitempty"`
+	Type       string           `json:"type"`
 }
 
 type ToolCallLocation struct {
 	Line *int   `json:"line,omitempty"`
 	Path string `json:"path"`
+}
+
+type ToolDiffChange struct {
+	Meta      JSONObject `json:"_meta,omitempty"`
+	FileType  *string    `json:"fileType,omitempty"`
+	MimeType  *string    `json:"mimeType,omitempty"`
+	OldPath   *string    `json:"oldPath,omitempty"`
+	Operation string     `json:"operation"`
+	Path      string     `json:"path"`
+}
+
+type ToolDiffPatch struct {
+	Format string `json:"format"`
+	Text   string `json:"text"`
 }
 
 type TransientFeedPosition struct {

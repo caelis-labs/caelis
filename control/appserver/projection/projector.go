@@ -89,7 +89,7 @@ func projectPermissionRequest(event *session.Event) (*eventstream.RequestPermiss
 func permissionToolCallUpdateFromProtocol(call session.ProtocolToolCall) eventstream.ToolCallUpdate {
 	update := eventstream.ToolCallUpdate{
 		SessionUpdate: eventstream.UpdateToolCallInfo,
-		ToolCallID:    strings.TrimSpace(call.ID),
+		ToolCallID:    call.ID,
 		Name:          stringPtr(call.Name),
 	}
 	if title := projectedToolLifecycleTitle(call.Name, call.RawInput, call.Status, call.Title); title != "" {
@@ -290,7 +290,7 @@ func inferredToolCallUpdates(event *session.Event) []eventstream.Update {
 		args := parseObject(call.Args)
 		update := eventstream.ToolCall{
 			SessionUpdate: eventstream.UpdateToolCall,
-			ToolCallID:    strings.TrimSpace(call.ID),
+			ToolCallID:    call.ID,
 			Name:          stringPtr(call.Name),
 			Title:         projectedToolTitle(call.Name, args, eventstream.ToolStatusPending),
 			Kind:          projectedToolKind(call.Name),
@@ -416,7 +416,7 @@ func toolCallForEvent(event *session.Event) (eventstream.ToolCall, bool, error) 
 	args := parseObject(calls[0].Args)
 	call := eventstream.ToolCall{
 		SessionUpdate: eventstream.UpdateToolCall,
-		ToolCallID:    strings.TrimSpace(calls[0].ID),
+		ToolCallID:    calls[0].ID,
 		Name:          stringPtr(calls[0].Name),
 		Title:         projectedToolTitle(calls[0].Name, args, eventstream.ToolStatusPending),
 		Kind:          projectedToolKind(calls[0].Name),
@@ -435,7 +435,7 @@ func toolCallFromEventToolPayload(tool *session.EventTool) eventstream.ToolCall 
 	displayTerminalID, _ := projectedDisplayTerminalID(tool.ID, tool.Name)
 	call := eventstream.ToolCall{
 		SessionUpdate: eventstream.UpdateToolCall,
-		ToolCallID:    strings.TrimSpace(tool.ID),
+		ToolCallID:    tool.ID,
 		Name:          stringPtr(tool.Name),
 		Title:         projectedToolLifecycleTitle(tool.Name, rawInput, tool.Status, tool.Title),
 		Kind:          firstNonEmpty(strings.TrimSpace(tool.Kind), projectedToolKind(tool.Name)),
@@ -510,7 +510,7 @@ func toolCallUpdateForEvent(event *session.Event) (eventstream.ToolCallUpdate, b
 	kind := projectedToolKind(name)
 	out := eventstream.ToolCallUpdate{
 		SessionUpdate: eventstream.UpdateToolCallInfo,
-		ToolCallID:    strings.TrimSpace(resp.ID),
+		ToolCallID:    resp.ID,
 		Name:          stringPtr(name),
 		Kind:          stringPtr(kind),
 		Status:        stringPtr(status),
@@ -534,7 +534,7 @@ func toolCallUpdateFromEventToolPayload(tool *session.EventTool, meta map[string
 	displayTerminalID, _ := projectedDisplayTerminalID(tool.ID, tool.Name)
 	out := eventstream.ToolCallUpdate{
 		SessionUpdate: eventstream.UpdateToolCallInfo,
-		ToolCallID:    strings.TrimSpace(tool.ID),
+		ToolCallID:    tool.ID,
 		Name:          stringPtr(tool.Name),
 		RawInput:      cloneAnyMapPayload(tool.Input),
 		RawOutput:     cloneAnyMapPayload(tool.Output),
@@ -559,7 +559,7 @@ func toolCallUpdateFromEventToolPayload(tool *session.EventTool, meta map[string
 
 func toolCallUpdateFromProtocolUpdate(event *session.Event, update *session.ProtocolUpdate) (eventstream.ToolCallUpdate, error) {
 	update = cloneProtocolUpdateForProjection(update)
-	id := strings.TrimSpace(update.ToolCallID)
+	id := update.ToolCallID
 	if id == "" {
 		return eventstream.ToolCallUpdate{}, fmt.Errorf("control/appserver/projection: tool update missing tool call id")
 	}
@@ -647,6 +647,9 @@ func projectEventToolContent(content []session.EventToolContent, displayTerminal
 			Path:       strings.TrimSpace(item.Path),
 			OldText:    oldText,
 			NewText:    item.NewText,
+			Changes:    session.CloneProtocolDiffChanges(item.Changes),
+			Patch:      session.CloneProtocolDiffPatch(item.Patch),
+			Meta:       session.CloneState(item.Meta),
 		})
 	}
 	return out
@@ -678,6 +681,9 @@ func projectToolContent(content []session.ProtocolToolCallContent, displayTermin
 			Path:       strings.TrimSpace(item.Path),
 			OldText:    oldText,
 			NewText:    item.NewText,
+			Changes:    session.CloneProtocolDiffChanges(item.Changes),
+			Patch:      session.CloneProtocolDiffPatch(item.Patch),
+			Meta:       session.CloneState(item.Meta),
 		})
 	}
 	return out

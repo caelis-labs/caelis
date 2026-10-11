@@ -131,13 +131,13 @@ func (c *historyCollector) observe(env client.UpdateEnvelope) {
 	updateType := historyUpdateType(env.Update)
 	newInputTurn := false
 	messageKey := ""
-	if chunk, ok := env.Update.(client.ContentChunk); ok && strings.TrimSpace(chunk.MessageID) != "" {
-		messageKey = updateType + ":" + strings.TrimSpace(chunk.MessageID)
+	if chunk, ok := env.Update.(client.ContentChunk); ok && chunk.MessageID != "" {
+		messageKey = updateType + ":" + chunk.MessageID
 	}
 	if updateType == client.UpdateUserMessage {
 		messageID := ""
 		if chunk, ok := env.Update.(client.ContentChunk); ok {
-			messageID = strings.TrimSpace(chunk.MessageID)
+			messageID = chunk.MessageID
 		}
 		if c.lastUpdateType != client.UpdateUserMessage || messageID != "" && messageID != c.lastUserMessageID {
 			c.flushUserText()
@@ -290,8 +290,8 @@ func (c *historyCollector) appendHistoryEvent(event *session.Event) {
 		event.Scope = &session.EventScope{}
 	}
 	turn := c.turnSeq
-	if update := session.ProtocolUpdateOf(event); update != nil && strings.TrimSpace(update.MessageID) != "" {
-		if original := c.messageTurns[update.SessionUpdate+":"+strings.TrimSpace(update.MessageID)]; original > 0 {
+	if update := session.ProtocolUpdateOf(event); update != nil && update.MessageID != "" {
+		if original := c.messageTurns[update.SessionUpdate+":"+update.MessageID]; original > 0 {
 			turn = original
 		}
 	}

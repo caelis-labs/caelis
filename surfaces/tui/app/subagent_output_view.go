@@ -289,7 +289,7 @@ func (v *subagentOutputView) shouldAppendFinalNarrative(block *ParticipantTurnBl
 		(event.NarrativeKind != TranscriptNarrativeAssistant && event.NarrativeKind != TranscriptNarrativeReasoning) {
 		return true
 	}
-	messageID := strings.TrimSpace(event.MessageID)
+	messageID := event.MessageID
 	if messageID == "" {
 		return true
 	}

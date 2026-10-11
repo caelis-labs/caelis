@@ -66,11 +66,17 @@ type ProtocolToolCallContent struct {
 	Path       string  `json:"path,omitempty"`
 	OldText    *string `json:"oldText,omitempty"`
 	NewText    string  `json:"newText,omitempty"`
+	// Changes and Patch preserve structured diffs. Legacy OldText/NewText keep
+	// their whole-file meaning; a rendered patch is never assigned to NewText.
+	Changes *[]ProtocolDiffChange `json:"changes,omitempty"`
+	Patch   *ProtocolDiffPatch    `json:"patch,omitempty"`
+	Meta    map[string]any        `json:"_meta,omitempty"`
 }
 
 // ProtocolUpdate is the normalized ACP session/update payload carried by one
 // canonical event. Caelis-specific projection data belongs under Meta["caelis"]
 // and is serialized as the standard payload's private _meta field.
+// MessageID and ToolCallID are opaque Session identities; preserve exact bytes.
 // Name follows ACP v1: absent or null leaves the current tool name unchanged,
 // unless normalized display patch presence explicitly includes "name".
 type ProtocolUpdate struct {
@@ -80,6 +86,9 @@ type ProtocolUpdate struct {
 	// Replacement replaces the identified narrative, including with empty text.
 	// It does not settle its Turn or grant execution authority.
 	Replacement bool `json:"replacement,omitempty"`
+	// PreviouslyObserved is a process-local display observation from the Session
+	// narrative/tool owner. It cannot be supplied by a peer or recovered from storage.
+	PreviouslyObserved bool `json:"-"`
 	// ReplacedFields identifies present display fields, including null or empty
 	// values. Absent fields retain their current value; this grants no authority.
 	ReplacedFields []string                   `json:"replacedFields,omitempty"`
@@ -407,12 +416,12 @@ func protocolUpdateHasOnlySessionUpdate(update *ProtocolUpdate) bool {
 	if update == nil {
 		return true
 	}
-	return strings.TrimSpace(update.ToolCallID) == "" &&
+	return update.ToolCallID == "" &&
 		update.Name == nil &&
 		strings.TrimSpace(update.Title) == "" &&
 		strings.TrimSpace(update.Kind) == "" &&
 		strings.TrimSpace(update.Status) == "" &&
-		strings.TrimSpace(update.MessageID) == "" &&
+		update.MessageID == "" &&
 		!update.Replacement &&
 		len(update.ReplacedFields) == 0 &&
 		update.Content == nil &&
@@ -524,6 +533,14 @@ func protocolToolCallContentItemFromAny(item any) (ProtocolToolCallContent, bool
 			Path:       strings.TrimSpace(protocolContentString(typed["path"])),
 		}
 		out.NewText, _ = protocolRawString(typed["newText"])
+		if raw, err := json.Marshal(typed); err == nil {
+			var structured ProtocolToolCallContent
+			if json.Unmarshal(raw, &structured) == nil {
+				out.Changes = CloneProtocolDiffChanges(structured.Changes)
+				out.Patch = CloneProtocolDiffPatch(structured.Patch)
+				out.Meta = CloneState(structured.Meta)
+			}
+		}
 		if out.TerminalID == "" {
 			out.TerminalID = strings.TrimSpace(protocolContentString(typed["terminal_id"]))
 		}
@@ -597,18 +614,19 @@ func CloneEventProtocol(in EventProtocol) EventProtocol {
 
 func cloneProtocolUpdate(in ProtocolUpdate) ProtocolUpdate {
 	out := ProtocolUpdate{
-		SessionUpdate:  strings.TrimSpace(in.SessionUpdate),
-		Content:        cloneProtocolAny(in.Content),
-		MessageID:      strings.TrimSpace(in.MessageID),
-		Replacement:    in.Replacement,
-		ReplacedFields: slices.Clone(in.ReplacedFields),
-		ToolCallID:     strings.TrimSpace(in.ToolCallID),
-		Title:          strings.TrimSpace(in.Title),
-		Kind:           strings.TrimSpace(in.Kind),
-		Status:         strings.TrimSpace(in.Status),
-		RawInput:       jsonvalue.CloneMap(in.RawInput),
-		RawOutput:      jsonvalue.CloneMap(in.RawOutput),
-		Meta:           cloneProtocolAnyMap(in.Meta),
+		SessionUpdate:      strings.TrimSpace(in.SessionUpdate),
+		Content:            cloneProtocolAny(in.Content),
+		MessageID:          in.MessageID,
+		Replacement:        in.Replacement,
+		PreviouslyObserved: in.PreviouslyObserved,
+		ReplacedFields:     slices.Clone(in.ReplacedFields),
+		ToolCallID:         in.ToolCallID,
+		Title:              strings.TrimSpace(in.Title),
+		Kind:               strings.TrimSpace(in.Kind),
+		Status:             strings.TrimSpace(in.Status),
+		RawInput:           jsonvalue.CloneMap(in.RawInput),
+		RawOutput:          jsonvalue.CloneMap(in.RawOutput),
+		Meta:               cloneProtocolAnyMap(in.Meta),
 	}
 	if in.Name != nil {
 		name := *in.Name
@@ -654,6 +672,9 @@ func cloneProtocolToolCallContents(in []ProtocolToolCallContent) []ProtocolToolC
 			Path:       strings.TrimSpace(item.Path),
 			OldText:    oldText,
 			NewText:    item.NewText,
+			Changes:    CloneProtocolDiffChanges(item.Changes),
+			Patch:      CloneProtocolDiffPatch(item.Patch),
+			Meta:       CloneState(item.Meta),
 		})
 	}
 	return out

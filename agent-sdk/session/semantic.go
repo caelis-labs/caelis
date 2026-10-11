@@ -40,7 +40,6 @@ func EventToolProjection(event *Event) *EventTool {
 		return nil
 	}
 	out := *event.Tool
-	out.ID = strings.TrimSpace(out.ID)
 	out.Name = strings.TrimSpace(out.Name)
 	out.Kind = strings.TrimSpace(out.Kind)
 	out.Title = strings.TrimSpace(out.Title)
@@ -79,10 +78,10 @@ func messageToolCallName(event *Event, update *ProtocolUpdate) string {
 	}
 	callID := ""
 	if update != nil {
-		callID = strings.TrimSpace(update.ToolCallID)
+		callID = update.ToolCallID
 	}
 	if callID == "" && event.Tool != nil {
-		callID = strings.TrimSpace(event.Tool.ID)
+		callID = event.Tool.ID
 	}
 	calls := event.Message.ToolCalls()
 	if len(calls) == 0 {
@@ -90,7 +89,7 @@ func messageToolCallName(event *Event, update *ProtocolUpdate) string {
 	}
 	if callID != "" {
 		for _, call := range calls {
-			if strings.TrimSpace(call.ID) != callID {
+			if call.ID != callID {
 				continue
 			}
 			return strings.TrimSpace(call.Name)
@@ -125,6 +124,9 @@ func cloneEventToolContent(in []EventToolContent) []EventToolContent {
 	out := make([]EventToolContent, 0, len(in))
 	for _, item := range in {
 		cp := item
+		cp.Changes = CloneProtocolDiffChanges(item.Changes)
+		cp.Patch = CloneProtocolDiffPatch(item.Patch)
+		cp.Meta = CloneState(item.Meta)
 		if item.OldText != nil {
 			value := *item.OldText
 			cp.OldText = &value

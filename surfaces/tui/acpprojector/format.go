@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/aymanbagabas/go-udiff/lcs"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
 type ToolContent struct {
@@ -15,6 +16,8 @@ type ToolContent struct {
 	Path       string
 	OldText    *string
 	NewText    string
+	Changes    *[]session.ProtocolDiffChange
+	Patch      *session.ProtocolDiffPatch
 }
 
 func FormatToolStart(name string, args map[string]any) string {
@@ -44,6 +47,9 @@ func FormatToolContent(content []ToolContent) string {
 }
 
 func toolDiffText(item ToolContent) string {
+	if item.Changes != nil {
+		return session.StructuredDiffText(item.Changes, item.Patch)
+	}
 	oldText := ""
 	if item.OldText != nil {
 		oldText = *item.OldText

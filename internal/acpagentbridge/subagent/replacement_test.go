@@ -1,14 +1,19 @@
 package subagent
 
 import (
+	"context"
 	"encoding/json"
 	"slices"
 	"testing"
 	"time"
 
+	"github.com/caelis-labs/acp-go-sdk/experimental/v2"
+	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
+	"github.com/caelis-labs/caelis/internal/acpdraft"
+	"github.com/caelis-labs/caelis/internal/acptest/draftpeer"
 )
 
 func TestChildReplacementClearAndReloadIdentity(t *testing.T) {
@@ -17,7 +22,7 @@ func TestChildReplacementClearAndReloadIdentity(t *testing.T) {
 		text    string
 		replace bool
 	}{{"stale", false}, {"snapshot", true}, {"", true}, {"current", false}} {
-		text, id := run.appendAgentMessageChunkLocked("message", f.text, f.replace)
+		text, id := run.appendAgentMessageChunkLocked(client.ContentChunk{MessageID: "message", Replacement: f.replace}, f.text)
 		if text != f.text || id != "message" {
 			t.Fatalf("child frame = %q %q", text, id)
 		}
@@ -57,22 +62,261 @@ func TestChildReplacementClearAndReloadIdentity(t *testing.T) {
 
 func TestChildOldMessageRepairDoesNotReplaceCurrentTaskResult(t *testing.T) {
 	var run childRun
-	run.appendAgentMessageChunkLocked("old", "progress", true)
+	run.appendAgentMessageChunkLocked(client.ContentChunk{MessageID: "old", Replacement: true}, "progress")
 	run.clearFinalAssistantLocked()
-	run.appendAgentMessageChunkLocked("current", "final answer", true)
+	run.appendAgentMessageChunkLocked(client.ContentChunk{MessageID: "current", Replacement: true}, "final answer")
 	for _, frame := range []struct {
 		text    string
 		replace bool
 	}{{" late delta", false}, {"repair", true}, {" suffix", false}, {"", true}} {
-		delta, id := run.appendAgentMessageChunkLocked("old", frame.text, frame.replace)
+		delta, id := run.appendAgentMessageChunkLocked(client.ContentChunk{MessageID: "old", Replacement: frame.replace}, frame.text)
 		if delta != frame.text || id != "old" || run.agentText != "final answer" || run.result != "final answer" {
 			t.Fatalf("old repair stole task result: delta=%q id=%q result=%q", delta, id, run.result)
 		}
 	}
 	run.finalAssistant.Reset()
-	run.appendAgentMessageChunkLocked("old", "new producer turn", true)
-	if run.result != "new producer turn" {
-		t.Fatalf("Turn reset retained old introduction: %q", run.result)
+	run.appendAgentMessageChunkLocked(client.ContentChunk{MessageID: "old", Replacement: true}, "new producer Session")
+	if run.result != "new producer Session" {
+		t.Fatalf("Session reset retained old introduction: %q", run.result)
+	}
+}
+
+func TestDraftChildPreviousActivityRevisionKeepsCurrentResult(t *testing.T) {
+	for _, test := range []struct {
+		name          string
+		before, after bool
+		current       bool
+	}{
+		{name: "before new answer", before: true, current: true},
+		{name: "after new answer", after: true, current: true},
+		{name: "before and after new answer", before: true, after: true, current: true},
+		{name: "previous revision without new answer", before: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			peer := &draftpeer.Peer{SessionID: "child-remote"}
+			continueAnswer := make(chan struct{})
+			peer.OnPrompt = func(ctx context.Context, req v2.PromptRequest, activity, message string) (v2.PromptResponse, error) {
+				if err := peer.State(ctx, req.SessionId, activity, "running", ""); err != nil {
+					return v2.PromptResponse{}, err
+				}
+				if err := peer.Echo(ctx, req.SessionId, message, "input"); err != nil {
+					return v2.PromptResponse{}, err
+				}
+				emit := func(id, text string) error {
+					return peer.Update(ctx, req.SessionId, map[string]any{"sessionUpdate": "agent_message", "messageId": id, "content": []any{map[string]any{"type": "text", "text": text}}})
+				}
+				if peer.Prompts.Load() == 1 {
+					if err := emit("answer-one", "first activity result"); err != nil {
+						return v2.PromptResponse{}, err
+					}
+				} else {
+					if test.before {
+						if err := emit("answer-one", "revised first before current"); err != nil {
+							return v2.PromptResponse{}, err
+						}
+						select {
+						case <-continueAnswer:
+						case <-ctx.Done():
+							return v2.PromptResponse{}, ctx.Err()
+						}
+					}
+					if test.current {
+						if err := emit("answer-two", "second activity result"); err != nil {
+							return v2.PromptResponse{}, err
+						}
+					}
+					if test.after {
+						if err := emit("answer-one", "revised first after current"); err != nil {
+							return v2.PromptResponse{}, err
+						}
+					}
+				}
+				if err := peer.State(ctx, req.SessionId, activity, "idle", "end_turn"); err != nil {
+					return v2.PromptResponse{}, err
+				}
+				return v2.PromptResponse{MessageId: v2.MessageId(message), Meta: acpdraft.ActivityMeta(activity)}, nil
+			}
+			runner := replacementDraftRunner(t, peer)
+			events := make(chan childInputTestEvent, 64)
+			spawn := childInputSpawnContext(t, "original-task", events)
+			anchor, _, err := runner.Spawn(ctx, spawn, delegation.Request{Agent: "helper", Prompt: "first input"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			first := waitChildActivityTerminalFor(t, ctx, events, spawn.ActivityID)
+			if first.Result == nil || first.Result.Result != "first activity result" {
+				t.Fatalf("first result = %+v", first)
+			}
+			run, err := runner.lookup(anchor)
+			if err != nil {
+				t.Fatal(err)
+			}
+			started, err := submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{Target: run.slot.target, Source: session.ActorRef{Kind: session.ActorKindController, ID: "controller"}, Input: "second input"})
+			if err != nil || !started.StartedActivity || started.ActivityID == spawn.ActivityID {
+				t.Fatalf("new Activity admission = %+v, %v", started, err)
+			}
+			observedRevisions := 0
+			if test.before {
+				for observedRevisions == 0 {
+					select {
+					case event := <-events:
+						if event.Frame == nil || event.Frame.Event == nil || event.Frame.Event.Text != "revised first before current" {
+							continue
+						}
+						update := session.ProtocolUpdateOf(event.Frame.Event)
+						if update == nil || update.MessageID != "answer-one" || !update.Replacement || !session.IsUIOnly(event.Frame.Event) {
+							t.Fatalf("old revision lost its display identity: %+v", event)
+						}
+						observedRevisions++
+					case <-ctx.Done():
+						t.Fatal(ctx.Err())
+					}
+				}
+				run.mu.RLock()
+				premature := run.result
+				run.mu.RUnlock()
+				if premature != "" {
+					t.Fatalf("old revision became new Activity answer before new content: %q", premature)
+				}
+				close(continueAnswer)
+			}
+			frames, second := waitChildActivityFramesUntilTerminalFor(t, ctx, events, started.ActivityID)
+			for _, frame := range frames {
+				if frame.Event == nil || frame.Event.Text != "revised first after current" {
+					continue
+				}
+				update := session.ProtocolUpdateOf(frame.Event)
+				if update == nil || update.MessageID != "answer-one" || !update.Replacement || !session.IsUIOnly(frame.Event) {
+					t.Fatalf("old revision lost its display identity: %+v", frame)
+				}
+				observedRevisions++
+			}
+			want := ""
+			if test.current {
+				want = "second activity result"
+			}
+			wantRevisions := 0
+			if test.before {
+				wantRevisions++
+			}
+			if test.after {
+				wantRevisions++
+			}
+			if second.Result == nil || second.Result.State != delegation.StateCompleted || second.Result.TaskID != anchor.TaskID || second.Result.Result != want || observedRevisions != wantRevisions {
+				t.Fatalf("old message revision replaced current Activity or vanished: result=%+v revisions=%d", second.Result, observedRevisions)
+			}
+		})
+	}
+}
+
+func TestDraftChildNewSessionCanReuseMessageIdentity(t *testing.T) {
+	for _, remote := range []string{"first-session", "new-session"} {
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		peer := &draftpeer.Peer{SessionID: remote}
+		peer.OnPrompt = func(ctx context.Context, req v2.PromptRequest, activity, message string) (v2.PromptResponse, error) {
+			if err := peer.State(ctx, req.SessionId, activity, "running", ""); err != nil {
+				return v2.PromptResponse{}, err
+			}
+			if err := peer.Echo(ctx, req.SessionId, message, "input"); err != nil {
+				return v2.PromptResponse{}, err
+			}
+			if err := peer.Update(ctx, req.SessionId, map[string]any{"sessionUpdate": "agent_message", "messageId": "reused-answer", "content": []any{map[string]any{"type": "text", "text": remote + " answer"}}}); err != nil {
+				return v2.PromptResponse{}, err
+			}
+			if err := peer.State(ctx, req.SessionId, activity, "idle", "end_turn"); err != nil {
+				return v2.PromptResponse{}, err
+			}
+			return v2.PromptResponse{MessageId: v2.MessageId(message), Meta: acpdraft.ActivityMeta(activity)}, nil
+		}
+		runner := replacementDraftRunner(t, peer)
+		events := make(chan childInputTestEvent, 64)
+		spawn := childInputSpawnContext(t, "task-"+remote, events)
+		anchor, _, err := runner.Spawn(ctx, spawn, delegation.Request{Agent: "helper", Prompt: "input"})
+		if err != nil {
+			cancel()
+			t.Fatal(err)
+		}
+		terminal := waitChildActivityTerminalFor(t, ctx, events, spawn.ActivityID)
+		cancel()
+		if terminal.Result == nil || terminal.Result.Result != remote+" answer" || anchor.SessionID != remote {
+			t.Fatalf("new Session reused identity incorrectly: anchor=%+v result=%+v", anchor, terminal.Result)
+		}
+	}
+}
+
+func replacementDraftRunner(t *testing.T, peer *draftpeer.Peer) *Runner {
+	t.Helper()
+	registry, err := NewRegistry([]AgentConfig{{Name: "helper", HostedAdapterID: "fixture", ACPDraftSchema: acpdraft.SchemaTag}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner, err := NewRunner(RunnerConfig{Registry: registry, EndpointResolver: peer})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = runner.Quiesce(context.Background()) })
+	return runner
+}
+
+func TestDraftChildPreviousThoughtRevisionKeepsCurrentResult(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	peer := &draftpeer.Peer{SessionID: "thought-revisions"}
+	peer.OnPrompt = func(ctx context.Context, req v2.PromptRequest, activity, message string) (v2.PromptResponse, error) {
+		if err := peer.State(ctx, req.SessionId, activity, "running", ""); err != nil {
+			return v2.PromptResponse{}, err
+		}
+		if err := peer.Echo(ctx, req.SessionId, message, "input"); err != nil {
+			return v2.PromptResponse{}, err
+		}
+		frames := []struct{ kind, id, text string }{{"agent_thought", "shared-id", "first thought"}, {"agent_message", "answer-one", "first answer"}}
+		if peer.Prompts.Load() == 2 {
+			// Message kinds have separate identity namespaces. This assistant ID
+			// must not admit the old thought as a current-Activity barrier.
+			frames = []struct{ kind, id, text string }{{"agent_message", "shared-id", "second answer"}, {"agent_thought", "shared-id", "revised first thought"}}
+		}
+		for _, frame := range frames {
+			if err := peer.Update(ctx, req.SessionId, map[string]any{"sessionUpdate": frame.kind, "messageId": frame.id, "content": []any{map[string]any{"type": "text", "text": frame.text}}}); err != nil {
+				return v2.PromptResponse{}, err
+			}
+		}
+		if err := peer.State(ctx, req.SessionId, activity, "idle", "end_turn"); err != nil {
+			return v2.PromptResponse{}, err
+		}
+		return v2.PromptResponse{MessageId: v2.MessageId(message), Meta: acpdraft.ActivityMeta(activity)}, nil
+	}
+	runner := replacementDraftRunner(t, peer)
+	events := make(chan childInputTestEvent, 64)
+	spawn := childInputSpawnContext(t, "thought-task", events)
+	anchor, _, err := runner.Spawn(ctx, spawn, delegation.Request{Agent: "helper", Prompt: "first input"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := waitChildActivityTerminalFor(t, ctx, events, spawn.ActivityID)
+	if first.Result == nil || first.Result.Result != "first answer" {
+		t.Fatalf("first result = %+v", first.Result)
+	}
+	run, err := runner.lookup(anchor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	started, err := submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{Target: run.slot.target, Source: session.ParentCommunicationActor(), Input: "second input"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	frames, second := waitChildActivityFramesUntilTerminalFor(t, ctx, events, started.ActivityID)
+	observedRevision := false
+	for _, frame := range frames {
+		if frame.Event == nil || frame.Event.Text != "revised first thought" {
+			continue
+		}
+		update := session.ProtocolUpdateOf(frame.Event)
+		observedRevision = update != nil && update.MessageID == "shared-id" && update.PreviouslyObserved && update.Replacement && session.IsUIOnly(frame.Event)
+	}
+	if second.Result == nil || second.Result.Result != "second answer" || !observedRevision {
+		t.Fatalf("old thought revision cleared current answer or display: result=%+v observed=%t", second.Result, observedRevision)
 	}
 }
 
@@ -83,14 +327,14 @@ func TestChildLatestIdentifiedMessageResumesTaskResultAfterTool(t *testing.T) {
 	}{{"delta", " suffix", "progress suffix", false}, {"snapshot", "final answer", "final answer", true}} {
 		t.Run(test.name, func(t *testing.T) {
 			var run childRun
-			run.appendAgentMessageChunkLocked("old", "old progress", true)
-			run.appendAgentMessageChunkLocked("latest", "progress", true)
+			run.appendAgentMessageChunkLocked(client.ContentChunk{MessageID: "old", Replacement: true}, "old progress")
+			run.appendAgentMessageChunkLocked(client.ContentChunk{MessageID: "latest", Replacement: true}, "progress")
 			run.clearFinalAssistantLocked()
-			run.appendAgentMessageChunkLocked("old", " late delta", false)
+			run.appendAgentMessageChunkLocked(client.ContentChunk{MessageID: "old", Replacement: false}, " late delta")
 			if run.result != "" {
 				t.Fatalf("older repair restored task result: %q", run.result)
 			}
-			delta, id := run.appendAgentMessageChunkLocked("latest", test.text, test.replace)
+			delta, id := run.appendAgentMessageChunkLocked(client.ContentChunk{MessageID: "latest", Replacement: test.replace}, test.text)
 			if delta != test.text || id != "latest" || run.agentText != test.want || run.result != test.want {
 				t.Fatalf("latest post-tool task result lost: delta=%q id=%q result=%q", delta, id, run.result)
 			}
@@ -101,7 +345,7 @@ func TestChildLatestIdentifiedMessageResumesTaskResultAfterTool(t *testing.T) {
 func TestChildMetadataOnlyNarrativePatchDoesNotChangeTaskResult(t *testing.T) {
 	run := &childRun{running: true}
 	runner := &Runner{clock: time.Now}
-	run.appendAgentMessageChunkLocked("latest", "progress", true)
+	run.appendAgentMessageChunkLocked(client.ContentChunk{MessageID: "latest", Replacement: true}, "progress")
 	patch := client.ContentChunk{SessionUpdate: client.UpdateAgentThought, MessageID: "thought", Content: json.RawMessage(`{"type":"text","text":""}`), MetaPresent: true}
 	runner.handleUpdate(run, client.UpdateEnvelope{Update: patch})
 	if run.result != "progress" {
@@ -117,7 +361,7 @@ func TestChildMetadataOnlyNarrativePatchDoesNotChangeTaskResult(t *testing.T) {
 	if event == nil || !slices.Contains(event.Protocol.Update.ReplacedFields, "_meta") || event.Protocol.Update.Meta != nil {
 		t.Fatalf("child metadata clear was dropped: %#v", event)
 	}
-	run.appendAgentMessageChunkLocked("latest", " suffix", false)
+	run.appendAgentMessageChunkLocked(client.ContentChunk{MessageID: "latest", Replacement: false}, " suffix")
 	if run.result != "progress suffix" {
 		t.Fatalf("metadata clear erased latest retained body: %q", run.result)
 	}

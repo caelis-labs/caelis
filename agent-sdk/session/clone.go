@@ -52,7 +52,7 @@ func CloneEvent(in *Event) *Event {
 	out.ID = strings.TrimSpace(in.ID)
 	out.IdempotencyKey = strings.TrimSpace(in.IdempotencyKey)
 	out.SessionID = strings.TrimSpace(in.SessionID)
-	out.MessageID = strings.TrimSpace(in.MessageID)
+	out.MessageID = in.MessageID
 	out.Text = in.Text
 	out.Meta = cloneProtocolAnyMap(in.Meta)
 	out.Actor = CloneActorRef(in.Actor)
@@ -246,7 +246,7 @@ func CloneEventScope(in EventScope) EventScope {
 // CloneEventTool returns one normalized copy of a durable tool payload.
 func CloneEventTool(in EventTool) EventTool {
 	out := EventTool{
-		ID:     strings.TrimSpace(in.ID),
+		ID:     in.ID,
 		Name:   strings.TrimSpace(in.Name),
 		Kind:   strings.TrimSpace(in.Kind),
 		Title:  strings.TrimSpace(in.Title),
@@ -269,6 +269,9 @@ func CloneEventTool(in EventTool) EventTool {
 				Path:       strings.TrimSpace(item.Path),
 				OldText:    oldText,
 				NewText:    item.NewText,
+				Changes:    CloneProtocolDiffChanges(item.Changes),
+				Patch:      CloneProtocolDiffPatch(item.Patch),
+				Meta:       CloneState(item.Meta),
 			})
 		}
 	}

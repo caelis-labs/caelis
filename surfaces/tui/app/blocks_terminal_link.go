@@ -99,7 +99,7 @@ func mergeLinkedSubagentOutput(ev *SubagentEvent, output string, messageID strin
 		}
 	} else if len(replacement) > 0 && replacement[0] {
 		ev.Output, ev.OutputMessage = replaceSubagentNarrativeChunk(ev.Output, ev.OutputMessageID, ev.OutputMessage, output, messageID)
-		if messageID = strings.TrimSpace(messageID); messageID != "" {
+		if messageID != "" {
 			ev.OutputMessageID = messageID
 		}
 	} else if outputNarrative || ev.OutputNarrative {
@@ -110,7 +110,7 @@ func mergeLinkedSubagentOutput(ev *SubagentEvent, output string, messageID strin
 			output,
 			messageID,
 		)
-		if messageID = strings.TrimSpace(messageID); messageID != "" {
+		if messageID != "" {
 			ev.OutputMessageID = messageID
 		}
 	} else {

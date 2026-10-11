@@ -9,6 +9,44 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 )
 
+func TestSessionNotificationForWireProjectsStructuredDiffAsStableContent(t *testing.T) {
+	t.Parallel()
+	changes := []eventstream.ToolDiffChange{{Operation: "modify", Path: " exact file.txt "}}
+	patch := "-old\r\n+new\r\n\r\n"
+	structured := eventstream.ToolCallContent{Type: "diff", Changes: &changes, Patch: &eventstream.ToolDiffPatch{Format: "git_patch", Text: patch}}
+	old := "old\n"
+	legacy := eventstream.ToolCallContent{Type: "diff", Path: "legacy.txt", OldText: &old, NewText: "new\n"}
+	for _, update := range []eventstream.Update{
+		eventstream.ToolCall{SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "edit", Title: "Edit", Content: []eventstream.ToolCallContent{structured, legacy}},
+		eventstream.ToolCallUpdate{SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "edit", Content: []eventstream.ToolCallContent{structured, legacy}},
+	} {
+		wire, err := sessionNotificationForWire(eventstream.SessionNotification{SessionID: "s", Update: update})
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, err := json.Marshal(wire)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var restored struct {
+			Update struct {
+				Content []eventstream.ToolCallContent `json:"content"`
+			} `json:"update"`
+		}
+		if err := json.Unmarshal(raw, &restored); err != nil {
+			t.Fatal(err)
+		}
+		first := restored.Update.Content[0]
+		text := first.Content.(map[string]any)["text"]
+		if first.Type != "content" || text != "modify  exact file.txt \n"+patch {
+			t.Fatalf("stable structured projection = %#v", first)
+		}
+		if !reflect.DeepEqual(restored.Update.Content[1], legacy) {
+			t.Fatalf("legacy meaning changed: %#v", restored.Update.Content[1])
+		}
+	}
+}
+
 func TestSessionNotificationForWirePreservesToolNamesV1(t *testing.T) {
 	t.Parallel()
 	for _, updateType := range []string{eventstream.UpdateToolCall, eventstream.UpdateToolCallInfo} {

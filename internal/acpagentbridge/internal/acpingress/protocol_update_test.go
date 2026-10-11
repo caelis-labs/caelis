@@ -25,7 +25,7 @@ func TestProtocolUpdateFromContentChunkNormalizesRawJSON(t *testing.T) {
 	want := &session.ProtocolUpdate{
 		SessionUpdate: client.UpdateAgentMessage,
 		Content:       map[string]any{"type": "text", "text": "external"},
-		MessageID:     "message-1",
+		MessageID:     " message-1 ",
 		Meta:          map[string]any{"provider": map[string]any{"sequence": float64(3)}},
 	}
 	if !reflect.DeepEqual(update, want) {

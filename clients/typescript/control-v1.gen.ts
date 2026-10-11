@@ -2111,9 +2111,12 @@ export interface TextContent {
 }
 
 export interface ToolCallContent {
+  _meta?: JSONObject;
+  changes?: Array<ToolDiffChange>;
   content?: JSONValue;
   newText?: string;
   oldText?: string;
+  patch?: ToolDiffPatch | null;
   path?: string;
   terminalId?: string;
   type: string;
@@ -2122,6 +2125,20 @@ export interface ToolCallContent {
 export interface ToolCallLocation {
   line?: number;
   path: string;
+}
+
+export interface ToolDiffChange {
+  _meta?: JSONObject;
+  fileType?: string;
+  mimeType?: string;
+  oldPath?: string;
+  operation: "add" | "modify" | "delete" | "move" | "copy";
+  path: string;
+}
+
+export interface ToolDiffPatch {
+  format: string;
+  text: string;
 }
 
 export interface TransientFeedPosition {

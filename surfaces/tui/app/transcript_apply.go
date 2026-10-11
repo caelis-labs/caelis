@@ -622,7 +622,7 @@ func (m *Model) applyAnchoredSubagentNarrativeToTool(event TranscriptEvent) (tea
 	meta := ToolUpdateMeta{
 		ToolKind:          "execute",
 		TaskHandle:        strings.TrimSpace(event.ScopeID),
-		MessageID:         strings.TrimSpace(event.MessageID),
+		MessageID:         event.MessageID,
 		OutputNarrative:   true,
 		OutputReplacement: event.Replacement,
 	}
@@ -734,6 +734,8 @@ func transcriptToolUpdateMeta(event TranscriptEvent) ToolUpdateMeta {
 		OutputSynthetic:      event.ToolOutputSynthetic,
 		ClearSyntheticOutput: event.ToolClearSyntheticOutput,
 		OutputCollection:     event.ToolOutputCollection,
+		OutputExact:          event.ToolOutputExact,
+		DiffSummary:          event.ToolDiffSummary,
 		OutputTerminal:       event.ToolOutputTerminal,
 	}
 }

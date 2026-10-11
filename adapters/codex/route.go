@@ -112,6 +112,9 @@ func (r *sessionRoute) close(err error) {
 		return
 	}
 	if r.agent != nil {
+		if r.agent.draft != nil {
+			r.agent.draft.routeClosed(r, err)
+		}
 		// Release app-server ownership before exposing the Turn failure. A
 		// caller that immediately opens the same Codex Thread in another
 		// Surface must not race the stale loaded subscription.

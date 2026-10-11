@@ -41,7 +41,7 @@ func userNarrativeBlockID(event TranscriptEvent) string {
 	if id := strings.TrimSpace(event.SourceProjectionID); id != "" {
 		return fmt.Sprintf("user:projection:%q:%q:%q", event.Scope, event.ScopeID, id)
 	}
-	if id := strings.TrimSpace(event.MessageID); id != "" {
+	if id := event.MessageID; id != "" {
 		return fmt.Sprintf("user:message:%q:%q:%q:%q", event.Scope, event.ScopeID, event.TurnID, id)
 	}
 	return ""
@@ -53,7 +53,7 @@ func userNarrativeBlockID(event TranscriptEvent) string {
 func (m *Model) applyGatewayUserEcho(opts gatewayUserEchoOptions) tea.Model {
 	displayLine := strings.TrimSpace(opts.displayLine)
 	messageKey := ""
-	if id := strings.TrimSpace(opts.event.MessageID); id != "" {
+	if id := opts.event.MessageID; id != "" {
 		messageKey = fmt.Sprintf("%q:%q:%q:%q", opts.event.Scope, opts.event.ScopeID, opts.event.TurnID, id)
 	}
 	if messageKey != "" {

@@ -40,11 +40,45 @@ clears its previous display value, while absent metadata retains it. An empty
 metadata-only delta leaves the body and final-answer eligibility unchanged.
 
 The final-answer owner retains only the latest introduced assistant identity and
-its current text snapshot, plus known identities within the producer Turn. A
+its current text snapshot, plus known provider identities within the Session. A
 tool, thought or plan boundary makes that candidate ineligible until it receives
 more content. Explicit continuation of the same latest identity resumes it;
 updates to older identities repair display only. Anonymous post-boundary v1
-content starts a new segment, and a new producer Turn clears the identity set.
+content starts a new segment. A new Activity clears the candidate but retains
+provider identities and aliases; a complete Session reset clears both. Purely
+anonymous generated segments do not accumulate in the Session identity history.
+
+The draft client's existing bounded Session materialization cache supplies a
+process-local `PreviouslyObserved` observation when it has already emitted content
+for an identity. New Turn and reconnected final-answer owners use that observation
+to recognize old display revisions before selecting their first answer. A
+metadata-only introduction does not count as emitted content, and updates to an
+already selected current identity still apply. This observation has `json:"-"`;
+it is neither peer metadata nor durable authority. Resume/replay reconstructs it
+through the same materialization cache, whose explicit record and byte exhaustion
+errors remain unchanged. Durable model history retains the final answer selected
+by its native Turn owner, while provider revisions remain display observations.
+The final owner also tracks thought identities introduced in its current Activity,
+in a separate namespace from assistant identities. Prior-Activity thought
+revisions remain visible without invalidating the current answer; new thoughts
+and their same-Activity continuations retain their barrier behavior. Activity and
+Session reset both clear this current-Activity set. Anonymous stable-v1 thoughts
+retain their original barrier behavior.
+Tools follow the same Activity boundary: the draft Session cache retains only
+observed tool IDs, using the existing record and byte budgets with explicit
+exhaustion. Tool updates and associated terminal projections carry the private
+Session observation; the final owner tracks tools introduced in its current
+Activity separately from narrative IDs. Old Session tool display repairs do not
+invalidate a new answer, while new tools and same-Activity sparse/status/terminal
+updates retain their barriers. Neither wire fields nor `_meta` can supply this
+observation, and it is omitted from public and durable JSON. Stable-v1 tool
+notifications retain their existing behavior.
+
+ACP message and tool-call IDs are opaque Session-scoped strings. Their exact
+bytes are preserved through ingress, result selection, canonical storage and
+Control live/replay projection; surrounding whitespace is not an alias. Message,
+thought and tool namespaces remain separate. Narrative Surface keys use the same
+exact message ID without changing native source, request or approval identities.
 
 Tool display patches retain a bounded vocabulary of `replacedFields` so an
 explicit empty or null field can clear its previous presentation while an absent
@@ -67,6 +101,16 @@ resume token.
 `_meta` is limited to documented display, diagnostics, and bounded
 compatibility. It cannot grant authorization, establish ownership, repair
 identity, or become an ordering source. Typed fields always win over fallbacks.
+
+Structured tool diffs preserve affected-file operations, exact paths, optional
+old paths and file descriptions, and a separately typed rendered patch in live,
+canonical and recovery projections. A rendered patch is never complete new file
+contents. Legacy whole-file `path`/`oldText`/`newText` diffs keep their meaning.
+At a stable ACP v1 boundary, structured diffs become standard text containing
+the affected-file summary and supplied patch; public Control clients retain the
+structured fields. At the selected draft boundary, legacy whole-file diffs are
+converted to affected-file changes and an actual rendered patch. Empty new text
+means a cleared file, and does not by itself prove deletion.
 
 ## Approval decision context
 

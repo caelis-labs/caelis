@@ -87,12 +87,15 @@ type EventToolLocation struct {
 // avoids ACP's content envelope; ACP projectors map it to standard
 // tool_call_update content and _meta terminal updates.
 type EventToolContent struct {
-	Type       string  `json:"type,omitempty"`
-	Text       string  `json:"text,omitempty"`
-	TerminalID string  `json:"terminal_id,omitempty"`
-	Path       string  `json:"path,omitempty"`
-	OldText    *string `json:"old_text,omitempty"`
-	NewText    string  `json:"new_text,omitempty"`
+	Type       string                `json:"type,omitempty"`
+	Text       string                `json:"text,omitempty"`
+	TerminalID string                `json:"terminal_id,omitempty"`
+	Path       string                `json:"path,omitempty"`
+	OldText    *string               `json:"old_text,omitempty"`
+	NewText    string                `json:"new_text,omitempty"`
+	Changes    *[]ProtocolDiffChange `json:"changes,omitempty"`
+	Patch      *ProtocolDiffPatch    `json:"patch,omitempty"`
+	Meta       map[string]any        `json:"_meta,omitempty"`
 }
 
 // EventCompactionContext carries typed provenance needed only when Runtime
@@ -270,14 +273,14 @@ func EventMessageID(event *Event) string {
 	if event == nil {
 		return ""
 	}
-	if messageID := strings.TrimSpace(event.MessageID); messageID != "" {
+	if messageID := event.MessageID; messageID != "" {
 		return messageID
 	}
 	update := ProtocolUpdateOf(event)
 	if !protocolUpdateCarriesMessageIdentity(update) {
 		return ""
 	}
-	return strings.TrimSpace(update.MessageID)
+	return update.MessageID
 }
 
 // EventDisplayText returns the user-visible text for display-only consumers

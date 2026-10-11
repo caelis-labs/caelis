@@ -57,3 +57,22 @@ func (d *draftClient) accountTerminalLocked(session *draftSession, id string, te
 	terminal.cacheBytes = size
 	return nil
 }
+
+// observeToolLocked retains only the emitted tool identity in the existing
+// Session cache owner. Display bodies and execution/approval state live elsewhere.
+func (d *draftClient) observeToolLocked(session *draftSession, id string) (bool, error) {
+	if _, known := session.tools[id]; known {
+		return true, nil
+	}
+	if len(session.tools) >= draftMaxSessionRecords {
+		return false, errors.New("acp draft: retained tool identity limit exceeded")
+	}
+	if err := d.reserveCacheLocked(session, len(id)+128, 0); err != nil {
+		return false, err
+	}
+	if session.tools == nil {
+		session.tools = make(map[string]struct{})
+	}
+	session.tools[id] = struct{}{}
+	return false, nil
+}

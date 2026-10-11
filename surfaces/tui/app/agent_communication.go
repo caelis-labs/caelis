@@ -22,7 +22,7 @@ func agentCommunicationSubagentEvent(event TranscriptEvent) SubagentEvent {
 		SourceID:                 agentCommunicationIdentityField(event.AgentSourceID),
 		SourceEventID:            strings.TrimSpace(event.SourceEventID),
 		SourceProjectionID:       strings.TrimSpace(event.SourceProjectionID),
-		MessageID:                strings.TrimSpace(event.MessageID),
+		MessageID:                event.MessageID,
 		communicationOwner:       strings.Join([]string{string(event.Scope), event.ScopeID, event.ParticipantID, event.TurnID}, "\x00"),
 		communicationSourceKind:  event.AgentSourceKind,
 		communicationReplacement: event.Replacement,
@@ -257,7 +257,7 @@ func renderAgentCommunicationRows(blockID string, event SubagentEvent, eventInde
 }
 
 func agentCommunicationFoldKey(event SubagentEvent, eventIndex int) string {
-	if value := strings.TrimSpace(event.MessageID); value != "" {
+	if value := event.MessageID; value != "" {
 		return "message:" + value
 	}
 	if value := strings.TrimSpace(event.SourceProjectionID); value != "" {

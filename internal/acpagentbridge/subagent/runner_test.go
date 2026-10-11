@@ -1072,10 +1072,10 @@ func TestRunnerAgentMessageDeltaMergeDoesNotUseOverlapHeuristic(t *testing.T) {
 	t.Parallel()
 
 	run := &childRun{}
-	if got, _ := run.appendAgentMessageChunkLocked("", "abcabc"); got != "abcabc" {
+	if got, _ := run.appendAgentMessageChunkLocked(client.ContentChunk{MessageID: "", Replacement: false}, "abcabc"); got != "abcabc" {
 		t.Fatalf("first delta = %q, want abcabc", got)
 	}
-	if got, _ := run.appendAgentMessageChunkLocked("", "abcXYZ"); got != "abcXYZ" {
+	if got, _ := run.appendAgentMessageChunkLocked(client.ContentChunk{MessageID: "", Replacement: false}, "abcXYZ"); got != "abcXYZ" {
 		t.Fatalf("overlapping delta = %q, want full incoming chunk", got)
 	}
 	if run.result != "abcabcabcXYZ" {
@@ -1083,10 +1083,10 @@ func TestRunnerAgentMessageDeltaMergeDoesNotUseOverlapHeuristic(t *testing.T) {
 	}
 
 	prefixGrowing := &childRun{}
-	if got, _ := prefixGrowing.appendAgentMessageChunkLocked("", "a"); got != "a" {
+	if got, _ := prefixGrowing.appendAgentMessageChunkLocked(client.ContentChunk{MessageID: "", Replacement: false}, "a"); got != "a" {
 		t.Fatalf("first prefix-growing delta = %q, want a", got)
 	}
-	if got, _ := prefixGrowing.appendAgentMessageChunkLocked("", "ab"); got != "ab" {
+	if got, _ := prefixGrowing.appendAgentMessageChunkLocked(client.ContentChunk{MessageID: "", Replacement: false}, "ab"); got != "ab" {
 		t.Fatalf("second prefix-growing delta = %q, want exact ab", got)
 	}
 	if prefixGrowing.result != "aab" {
@@ -1105,7 +1105,7 @@ func TestRunnerAgentMessageDeltaMergePreservesMixedLanguageChunks(t *testing.T) 
 	run := &childRun{}
 	var rendered string
 	for _, chunk := range chunks {
-		delta, _ := run.appendAgentMessageChunkLocked("", chunk)
+		delta, _ := run.appendAgentMessageChunkLocked(client.ContentChunk{MessageID: "", Replacement: false}, chunk)
 		rendered += delta
 	}
 	want := strings.Join(chunks, "")

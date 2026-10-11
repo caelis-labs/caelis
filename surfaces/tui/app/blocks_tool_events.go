@@ -28,7 +28,11 @@ type ToolUpdateMeta struct {
 	OutputSynthetic      bool
 	ClearSyntheticOutput bool
 	OutputCollection     bool
-	OutputTerminal       bool
+	// OutputExact preserves typed structured-diff display bytes without
+	// changing collection replacement or terminal append ownership.
+	OutputExact    bool
+	OutputTerminal bool
+	DiffSummary    string
 }
 
 type toolEventUpdate struct {
@@ -51,7 +55,7 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 	toolTitle := strings.TrimSpace(update.Meta.ToolTitle)
 	explorationVerb := strings.TrimSpace(update.Meta.ExplorationVerb)
 	fullArgs := strings.TrimSpace(update.Meta.FullArgs)
-	messageID := strings.TrimSpace(update.Meta.MessageID)
+	messageID := update.Meta.MessageID
 	taskHandle := strings.TrimSpace(update.Meta.TaskHandle)
 	taskAction := strings.ToLower(strings.TrimSpace(update.Meta.TaskAction))
 	taskInput := strings.TrimSpace(update.Meta.TaskInput)
@@ -77,10 +81,11 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 		applyReplacedToolFields(&out[existingIdx], name, toolKind, toolTitle, args, fullArgs, update.Meta)
 		if update.Meta.OutputReplacement {
 			out[existingIdx].Output = ""
+			out[existingIdx].DiffSummary = ""
 			out[existingIdx].OutputMessage = ""
 		}
 	}
-	output := normalizeToolEventOutput(update.Output, effectiveName, update.Meta.Terminal)
+	output := normalizeToolEventOutput(update.Output, effectiveName, update.Meta.Terminal, update.Meta.OutputExact)
 	if semanticName == surfaceToolTask && taskAction == "cancel" {
 		args = taskCancelArgsWithLinkedCommand(args, out, taskHandle)
 	}
@@ -125,6 +130,7 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 			StartArgs:        args,
 			FullArgs:         fullArgs,
 			Output:           output,
+			DiffSummary:      update.Meta.DiffSummary,
 			OutputMessageID:  messageID,
 			OutputMessage:    output,
 			OutputNarrative:  update.Meta.OutputNarrative,
@@ -154,6 +160,7 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 		StartArgs:        args,
 		FullArgs:         fullArgs,
 		Output:           output,
+		DiffSummary:      update.Meta.DiffSummary,
 		OutputMessageID:  messageID,
 		OutputMessage:    output,
 		OutputNarrative:  update.Meta.OutputNarrative,
@@ -229,8 +236,8 @@ func completedToolSnapshotsShareCallID(existing SubagentEvent, incoming Subagent
 	return true
 }
 
-func normalizeToolEventOutput(output string, effectiveName string, terminal bool) string {
-	if terminal || surfaceIsTerminalPanelTool(effectiveName) {
+func normalizeToolEventOutput(output string, effectiveName string, terminal, exact bool) string {
+	if terminal || exact || surfaceIsTerminalPanelTool(effectiveName) {
 		return output
 	}
 	return strings.TrimSpace(output)
@@ -362,6 +369,7 @@ func mergeOpenToolEvent(ev *SubagentEvent, name, toolKind, toolTitle, args, full
 		if replaceCollection {
 			resetToolEventOutputMode(ev)
 			ev.Output = output
+			ev.DiffSummary = meta.DiffSummary
 			ev.OutputCollection = meta.OutputCollection
 			ev.OutputTerminal = meta.OutputTerminal
 		} else if terminalOutput {
@@ -401,6 +409,7 @@ func mergeOpenToolEvent(ev *SubagentEvent, name, toolKind, toolTitle, args, full
 			// Standard ToolCallUpdate.Content replaces the content collection.
 			// Only explicit child narrative and terminal byte streams append.
 			ev.Output = output
+			ev.DiffSummary = ""
 			ev.OutputMessage = ""
 			ev.OutputMessageID = ""
 			ev.OutputCollection = false
@@ -416,6 +425,7 @@ func resetToolEventOutputMode(ev *SubagentEvent) {
 		return
 	}
 	ev.Output = ""
+	ev.DiffSummary = ""
 	ev.OutputMessage = ""
 	ev.OutputMessageID = ""
 	ev.OutputSynthetic = false
@@ -565,6 +575,7 @@ func mergeFinalToolEvent(ev *SubagentEvent, finalEvent *SubagentEvent, authorita
 	clearTaskWriteTerminalOwnership(ev)
 	if finalToolOutputShouldReplace(*ev, *finalEvent, authoritativeFinal) {
 		ev.Output = finalEvent.Output
+		ev.DiffSummary = finalEvent.DiffSummary
 		ev.OutputMessageID = finalEvent.OutputMessageID
 		ev.OutputMessage = finalEvent.OutputMessage
 		ev.OutputSynthetic = finalEvent.OutputSynthetic

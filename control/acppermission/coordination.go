@@ -110,6 +110,9 @@ func permissionToolCallFromWire(wire eventstream.ToolCallUpdate) session.Protoco
 			Path:       item.Path,
 			OldText:    permissionStringPointer(item.OldText),
 			NewText:    item.NewText,
+			Changes:    session.CloneProtocolDiffChanges(item.Changes),
+			Patch:      session.CloneProtocolDiffPatch(item.Patch),
+			Meta:       session.CloneState(item.Meta),
 		})
 	}
 	return session.ProtocolToolCall{
@@ -137,6 +140,9 @@ func permissionToolContentToWire(in []session.ProtocolToolCallContent) []eventst
 			Path:       item.Path,
 			OldText:    permissionStringPointer(item.OldText),
 			NewText:    item.NewText,
+			Changes:    session.CloneProtocolDiffChanges(item.Changes),
+			Patch:      session.CloneProtocolDiffPatch(item.Patch),
+			Meta:       session.CloneState(item.Meta),
 		})
 	}
 	return out

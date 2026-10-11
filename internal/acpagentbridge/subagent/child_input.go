@@ -643,7 +643,7 @@ func (r *Runner) submitIdleChildInput(
 	run.failureDetail = ""
 	run.result = ""
 	run.agentText = ""
-	run.finalAssistant.Reset()
+	run.finalAssistant.ResetActivity()
 	run.output = req.Output
 	if req.Completion != nil {
 		run.completion = req.Completion

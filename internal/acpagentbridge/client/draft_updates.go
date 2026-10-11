@@ -120,12 +120,25 @@ func (d *draftClient) decodeUpdates(sessionID, kind string, fields map[string]js
 		if err := json.Unmarshal(raw, &update); err != nil {
 			return nil, err
 		}
+		if content, present := fields["content"]; present {
+			var err error
+			update.Content, err = decodeDraftToolContent(content)
+			if err != nil {
+				return nil, err
+			}
+		}
 		update.RawPatch = make(map[string]json.RawMessage, len(fields))
 		for key, value := range fields {
 			update.RawPatch[key] = append(json.RawMessage(nil), value...)
 		}
 		d.mu.Lock()
 		session := d.sessionLocked(sessionID)
+		previous, err := d.observeToolLocked(session, update.ToolCallID)
+		if err != nil {
+			d.mu.Unlock()
+			return nil, err
+		}
+		update.PreviouslyObserved = previous
 		updates := []Update{update}
 		for _, content := range update.Content {
 			if content.Type == "terminal" && content.TerminalID != "" {
@@ -148,7 +161,7 @@ func (d *draftClient) decodeUpdates(sessionID, kind string, fields map[string]js
 					if terminal.exitPresent {
 						meta = draftTerminalExitMeta(meta, content.TerminalID, terminal.exit)
 					}
-					updates = append(updates, ToolCallUpdate{SessionUpdate: UpdateToolCallState, ToolCallID: update.ToolCallID, Meta: meta})
+					updates = append(updates, ToolCallUpdate{SessionUpdate: UpdateToolCallState, ToolCallID: update.ToolCallID, Meta: meta, PreviouslyObserved: true})
 					terminal.output, terminal.outputPresent = nil, false
 				}
 				if err := d.accountTerminalLocked(session, content.TerminalID, terminal); err != nil {
@@ -167,14 +180,61 @@ func (d *draftClient) decodeUpdates(sessionID, kind string, fields map[string]js
 		if update == nil {
 			return nil, nil
 		}
+		if tool, ok := update.(ToolCall); ok {
+			d.mu.Lock()
+			previous, err := d.observeToolLocked(d.sessionLocked(sessionID), tool.ToolCallID)
+			d.mu.Unlock()
+			if err != nil {
+				return nil, err
+			}
+			tool.PreviouslyObserved = previous
+			update = tool
+		}
 		return []Update{update}, nil
 	}
+}
+
+// decodeDraftToolContent maps the draft's structured file changes into the
+// common durable representation. A git patch is rendered text, never NewText.
+func decodeDraftToolContent(raw json.RawMessage) ([]ToolCallContent, error) {
+	var contents []v2.ToolCallContent
+	if err := json.Unmarshal(raw, &contents); err != nil {
+		return nil, err
+	}
+	if contents == nil {
+		return nil, nil
+	}
+	out := make([]ToolCallContent, 0, len(contents))
+	for _, content := range contents {
+		if content.Diff == nil {
+			item, err := draftConvert[ToolCallContent](content)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, item)
+			continue
+		}
+		changes, err := draftConvert[[]ToolDiffChange](content.Diff.Changes)
+		if err != nil {
+			return nil, err
+		}
+		meta, err := draftConvert[map[string]any](content.Diff.Meta)
+		if err != nil {
+			return nil, err
+		}
+		item := ToolCallContent{Type: "diff", Changes: &changes, Meta: meta}
+		if patch := content.Diff.Patch; patch != nil {
+			item.Patch = &ToolDiffPatch{Format: string(patch.Format), Text: patch.Text}
+		}
+		out = append(out, item)
+	}
+	return out, nil
 }
 
 func (d *draftClient) decodeMessage(sessionID, kind string, fields map[string]json.RawMessage) ([]Update, error) {
 	var messageID string
 	_ = json.Unmarshal(fields["messageId"], &messageID)
-	if strings.TrimSpace(messageID) == "" {
+	if messageID == "" {
 		return nil, errors.New("acp draft: message update has no identity")
 	}
 	replacement := !strings.HasSuffix(kind, "_chunk")
@@ -193,6 +253,7 @@ func (d *draftClient) decodeMessage(sessionID, kind string, fields map[string]js
 		message = &draftMessage{}
 		session.messages[key] = message
 	}
+	previouslyObserved := message.hasContent
 	_, metaPresent := fields["_meta"]
 	if meta, present := fields["_meta"]; present {
 		message.meta = nil
@@ -226,7 +287,7 @@ func (d *draftClient) decodeMessage(sessionID, kind string, fields map[string]js
 		if err := d.accountMessageLocked(session, key, message); err != nil {
 			return nil, err
 		}
-		return []Update{ContentChunk{SessionUpdate: chunkKind, MessageID: messageID, Content: json.RawMessage(`{"type":"text","text":""}`), Meta: message.meta, MetaPresent: true}}, nil
+		return []Update{ContentChunk{SessionUpdate: chunkKind, MessageID: messageID, Content: json.RawMessage(`{"type":"text","text":""}`), Meta: message.meta, MetaPresent: true, PreviouslyObserved: previouslyObserved}}, nil
 	} else if replacement {
 		if !bytes.Equal(bytes.TrimSpace(content), []byte("null")) {
 			if err := json.Unmarshal(content, &blocks); err != nil {
@@ -256,7 +317,7 @@ func (d *draftClient) decodeMessage(sessionID, kind string, fields map[string]js
 	}
 	updates := make([]Update, 0, len(blocks))
 	for index, block := range blocks {
-		updates = append(updates, ContentChunk{SessionUpdate: chunkKind, MessageID: messageID, Content: block, Meta: message.meta, Replacement: replacement && index == 0, MetaPresent: metaPresent && index == 0})
+		updates = append(updates, ContentChunk{SessionUpdate: chunkKind, MessageID: messageID, Content: block, Meta: message.meta, Replacement: replacement && index == 0, MetaPresent: metaPresent && index == 0, PreviouslyObserved: previouslyObserved})
 	}
 	return updates, nil
 }
@@ -360,7 +421,8 @@ func (d *draftClient) decodeTerminal(sessionID, kind string, fields map[string]j
 	if _, present := fields["exitStatus"]; present {
 		meta = draftTerminalExitMeta(meta, id, terminal.exit)
 	}
-	return []Update{ToolCallUpdate{SessionUpdate: UpdateToolCallState, ToolCallID: terminal.toolID, Meta: meta}}, nil
+	_, previous := session.tools[terminal.toolID]
+	return []Update{ToolCallUpdate{SessionUpdate: UpdateToolCallState, ToolCallID: terminal.toolID, Meta: meta, PreviouslyObserved: previous}}, nil
 }
 
 func (d *draftClient) terminalMetaLocked(id string, terminal *draftTerminal) map[string]any {

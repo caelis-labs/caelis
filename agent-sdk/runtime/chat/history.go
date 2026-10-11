@@ -345,6 +345,24 @@ func toolResultContextPayload(toolPayload *session.EventTool) map[string]any {
 	if len(toolPayload.Output) > 0 {
 		return session.CloneState(toolPayload.Output)
 	}
+	var diffs []session.EventToolContent
+	for _, item := range toolPayload.Content {
+		if item.Type == "diff" && item.Changes != nil {
+			diffs = append(diffs, session.EventToolContent{
+				Type:    "diff",
+				Changes: session.CloneProtocolDiffChanges(item.Changes),
+				Patch:   session.CloneProtocolDiffPatch(item.Patch),
+				Meta:    session.CloneState(item.Meta),
+			})
+		}
+	}
+	if len(diffs) > 0 {
+		payload := map[string]any{"content": diffs}
+		if text := eventToolContentText(toolPayload.Content); text != "" {
+			payload["result"] = text
+		}
+		return payload
+	}
 	if text := eventToolContentText(toolPayload.Content); text != "" {
 		return map[string]any{"result": text}
 	}

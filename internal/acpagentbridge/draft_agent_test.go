@@ -295,7 +295,7 @@ func (p *draftNativePeer) RequestPermission(ctx context.Context, r v2.RequestPer
 	}
 }
 
-func connectDraftNative(t *testing.T, f *draftNativeFixture) (*v2.ClientSideConnection, *DraftAgent, *draftNativePeer) {
+func connectDraftNative(t *testing.T, f *draftNativeFixture, wrapClient ...func(net.Conn) net.Conn) (*v2.ClientSideConnection, *DraftAgent, *draftNativePeer) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(t.Context())
 	inner := &RuntimeAgent{sessionClient: f, presentationClient: draftNativePresentation{}, appName: "draft-fixture", userID: "owner", agentInfo: &acp.Implementation{Name: "fixture", Version: "test"}, managedSessions: make(map[string]struct{})}
@@ -304,6 +304,9 @@ func connectDraftNative(t *testing.T, f *draftNativeFixture) (*v2.ClientSideConn
 	}
 	agent := &DraftAgent{inner: inner, ctx: ctx, cancel: cancel, ready: make(chan struct{}), sessions: make(map[string]*draftSession)}
 	serverPipe, clientPipe := net.Pipe()
+	if len(wrapClient) != 0 {
+		clientPipe = wrapClient[0](clientPipe)
+	}
 	server, err := v2.NewAgentSideConnection(agent, serverPipe, serverPipe)
 	if err != nil {
 		t.Fatal(err)

@@ -101,6 +101,9 @@ type draftInsertion struct {
 	echoTurn  string
 	messageID v2.MessageId
 	changed   chan struct{}
+	// Native acknowledgement can still be pending when its projection fails.
+	// The original request is cancelled without claiming it was not accepted.
+	nativeCancel context.CancelCauseFunc
 }
 
 func (d *draftAgent) session(id string) *draftSession {
@@ -325,6 +328,10 @@ func (d *draftAgent) closeAll() {
 	}
 	d.core.mu.Unlock()
 	for _, state := range states {
+		if state.route.failure() != nil {
+			// The failed route owns cancellation and its targeted interrupt.
+			continue
+		}
 		_ = d.Cancel(ctx, v2.CancelSessionNotification{SessionId: v2.SessionId(state.threadID)})
 	}
 	d.core.closeAll()

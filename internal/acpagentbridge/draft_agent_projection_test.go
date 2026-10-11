@@ -19,7 +19,7 @@ func TestDraftProjectionPreservesExplicitNarrativeAndToolReplacement(t *testing.
 		eventstream.ContentChunk{SessionUpdate: eventstream.UpdateAgentMessage, MessageID: "native-message", Replacement: true, Content: eventstream.TextContent{Type: "text", Text: "replacement"}},
 		eventstream.ToolCallUpdate{SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "native-tool", Content: []eventstream.ToolCallContent{}, ReplacedFields: []string{"name", "locations", "rawInput", "rawOutput"}},
 	} {
-		projected, err := draftEnvelopeUpdate(eventstream.Envelope{SessionID: "session", Update: update}, false)
+		projected, err := draftEnvelopeUpdate(eventstream.Envelope{SessionID: "session", Update: update})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -98,7 +98,7 @@ func TestDraftProjectionUsesStandardTerminalAndPlanSnapshots(t *testing.T) {
 	unknown := -1
 	meta := acpmeta.WithTerminalExit(acpmeta.WithTerminalOutput(acpmeta.WithTerminalInfo(nil, "terminal"), "terminal", "output", true), "terminal", &unknown, nil)
 	env := eventstream.Envelope{SessionID: "session", Update: eventstream.ToolCallUpdate{SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "native-tool", Meta: meta}}
-	tool, err := draftEnvelopeUpdate(env, false)
+	tool, err := draftEnvelopeUpdate(env)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +118,7 @@ func TestDraftProjectionUsesStandardTerminalAndPlanSnapshots(t *testing.T) {
 	if strings.Contains(string(raw), "caelis/exit_code") || strings.Contains(string(raw), "-1") {
 		t.Fatalf("unknown native exit fabricated a code: %s", raw)
 	}
-	plan, err := draftEnvelopeUpdate(eventstream.Envelope{SessionID: "session", ScopeID: "child", Update: eventstream.PlanUpdate{SessionUpdate: eventstream.UpdatePlan}}, true)
+	plan, err := draftEnvelopeUpdate(eventstream.Envelope{SessionID: "session", ScopeID: "child", Update: eventstream.PlanUpdate{SessionUpdate: eventstream.UpdatePlan}})
 	if err != nil {
 		t.Fatal(err)
 	}

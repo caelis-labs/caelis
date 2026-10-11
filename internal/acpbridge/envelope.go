@@ -17,11 +17,12 @@ func envelopeWithNarrativeText(env *eventstream.Envelope, updateType string, tex
 	out := eventstream.CloneEnvelope(*env)
 	out.Kind = eventstream.KindSessionUpdate
 	out.Update = eventstream.ContentChunk{
-		SessionUpdate:  strings.TrimSpace(updateType),
-		MessageID:      strings.TrimSpace(messageID),
-		Replacement:    narrativeEnvelopeReplacement(env.Update),
-		Meta:           eventstream.UpdateMeta(env.Update),
-		ReplacedFields: narrativeEnvelopeReplacedFields(env.Update),
+		SessionUpdate:      strings.TrimSpace(updateType),
+		MessageID:          messageID,
+		Replacement:        narrativeEnvelopeReplacement(env.Update),
+		PreviouslyObserved: narrativeEnvelopePreviouslyObserved(env.Update),
+		Meta:               eventstream.UpdateMeta(env.Update),
+		ReplacedFields:     narrativeEnvelopeReplacedFields(env.Update),
 		Content: eventstream.TextContent{
 			Type: "text",
 			Text: text,
@@ -31,6 +32,16 @@ func envelopeWithNarrativeText(env *eventstream.Envelope, updateType string, tex
 		out.Meta = eventstream.UpdateMeta(env.Update)
 	}
 	return &out
+}
+
+func narrativeEnvelopePreviouslyObserved(update eventstream.Update) bool {
+	switch typed := update.(type) {
+	case eventstream.ContentChunk:
+		return typed.PreviouslyObserved
+	case *eventstream.ContentChunk:
+		return typed != nil && typed.PreviouslyObserved
+	}
+	return false
 }
 
 func narrativeEnvelopeReplacedFields(update eventstream.Update) []string {
@@ -58,10 +69,10 @@ func narrativeEnvelopeReplacement(update eventstream.Update) bool {
 func narrativeEnvelopeMessageID(update eventstream.Update) string {
 	switch typed := update.(type) {
 	case eventstream.ContentChunk:
-		return strings.TrimSpace(typed.MessageID)
+		return typed.MessageID
 	case *eventstream.ContentChunk:
 		if typed != nil {
-			return strings.TrimSpace(typed.MessageID)
+			return typed.MessageID
 		}
 	}
 	return ""

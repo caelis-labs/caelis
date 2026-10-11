@@ -244,7 +244,7 @@ func eventStreamNarrativeBatchKey(env eventstream.Envelope) (string, bool) {
 		strings.TrimSpace(env.ParticipantID),
 		strings.TrimSpace(env.Actor),
 		updateType,
-		strings.TrimSpace(update.MessageID),
+		update.MessageID,
 	}, "\x00"), true
 }
 

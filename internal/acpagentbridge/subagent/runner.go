@@ -1050,7 +1050,7 @@ func (r *Runner) handleUpdate(run *childRun, env client.UpdateEnvelope) {
 				}
 			case client.UpdateAgentMessage:
 				if acceptOutput {
-					textOverride, messageID := run.appendAgentMessageChunkLocked(update.MessageID, text, update.Replacement)
+					textOverride, messageID := run.appendAgentMessageChunkLocked(update, text)
 					update.MessageID = messageID
 					env.Update = update
 					run.actionSummary.observeAssistant(messageID, run.agentText)
@@ -1061,7 +1061,13 @@ func (r *Runner) handleUpdate(run *childRun, env client.UpdateEnvelope) {
 				}
 			case client.UpdateAgentThought:
 				if acceptOutput && (text != "" || update.Replacement) {
-					run.clearFinalAssistantLocked()
+					thought := run.finalAssistant.ObserveUpdate(eventstream.ContentChunk{
+						SessionUpdate: eventstream.UpdateAgentThought, MessageID: update.MessageID,
+						Content: text, Replacement: update.Replacement, PreviouslyObserved: update.PreviouslyObserved,
+					})
+					if thought.Barrier {
+						run.clearFinalAssistantLocked()
+					}
 					run.actionSummary.observeThought(update.MessageID, text, update.Replacement)
 					run.outputPreview = run.actionSummary.previewOrEmpty()
 				}
@@ -1072,14 +1078,18 @@ func (r *Runner) handleUpdate(run *childRun, env client.UpdateEnvelope) {
 		}
 	case client.ToolCall:
 		if acceptOutput {
-			run.clearFinalAssistantLocked()
+			if run.finalAssistant.ObserveUpdate(eventstream.ToolCall{ToolCallID: update.ToolCallID, PreviouslyObserved: update.PreviouslyObserved}).Barrier {
+				run.clearFinalAssistantLocked()
+			}
 			run.actionSummary.observeTool(update.ToolCallID, toolActivity(update.Title, update.Kind, update.Status), toolContentActivity(update.Content))
 			run.outputPreview = run.actionSummary.previewOrEmpty()
 		}
 		event = run.acpUpdateEvent(env, run.updatedAt)
 	case client.ToolCallUpdate:
 		if acceptOutput {
-			run.clearFinalAssistantLocked()
+			if run.finalAssistant.ObserveUpdate(eventstream.ToolCallUpdate{ToolCallID: update.ToolCallID, PreviouslyObserved: update.PreviouslyObserved}).Barrier {
+				run.clearFinalAssistantLocked()
+			}
 			run.actionSummary.observeTool(update.ToolCallID, toolActivity(derefString(update.Title), derefString(update.Kind), derefString(update.Status)), toolContentActivity(update.Content))
 			run.outputPreview = run.actionSummary.previewOrEmpty()
 		}
@@ -1140,7 +1150,7 @@ func markSubagentInputEvent(event *session.Event, source session.ActorRef) sessi
 	protocol := session.NewAgentCommunicationProtocol(session.ProtocolAgentCommunication{Text: event.Text})
 	if protocol.Update != nil {
 		if original != nil {
-			protocol.Update.MessageID = strings.TrimSpace(original.MessageID)
+			protocol.Update.MessageID = original.MessageID
 			protocol.Update.Replacement = original.Replacement
 			protocol.Update.ReplacedFields = append([]string(nil), original.ReplacedFields...)
 			// Keep the observed display body after the existing trusted mail
@@ -1224,15 +1234,16 @@ func (run *childRun) acpUpdateEvent(env client.UpdateEnvelope, at time.Time, tex
 	return acpingress.NormalizeUpdate(env.Update, opts)
 }
 
-func (run *childRun) appendAgentMessageChunkLocked(messageID string, text string, replacement ...bool) (string, string) {
+func (run *childRun) appendAgentMessageChunkLocked(chunk client.ContentChunk, text string) (string, string) {
 	if run == nil {
 		return "", ""
 	}
 	update := run.finalAssistant.ObserveUpdate(eventstream.ContentChunk{
-		SessionUpdate: eventstream.UpdateAgentMessage,
-		MessageID:     strings.TrimSpace(messageID),
-		Replacement:   len(replacement) > 0 && replacement[0],
-		Content:       text,
+		SessionUpdate:      eventstream.UpdateAgentMessage,
+		MessageID:          chunk.MessageID,
+		Replacement:        chunk.Replacement,
+		PreviouslyObserved: chunk.PreviouslyObserved,
+		Content:            text,
 	})
 	run.agentText = run.finalAssistant.FinalText()
 	run.result = run.agentText
