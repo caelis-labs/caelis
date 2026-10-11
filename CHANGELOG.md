@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.70.0](https://github.com/caelis-labs/caelis/compare/v0.69.1...v0.70.0) (2026-10-11)
+
+
+### Features
+
+* add pinned ACP v2 and shared Application projections ([dc4cbc8](https://github.com/caelis-labs/caelis/commit/dc4cbc8a39286ba923d1a92562a3a950d90231f5))
+
+
+### Bug Fixes
+
+* preserve draft session revisions and structured tool projections ([bff506c](https://github.com/caelis-labs/caelis/commit/bff506c2f09cf6987be21b5e9b9a1d9c218821cf))
+
 ## [0.69.1](https://github.com/caelis-labs/caelis/compare/v0.69.0...v0.69.1) (2026-10-10)
 
 
