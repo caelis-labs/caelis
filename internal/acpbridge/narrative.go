@@ -1,6 +1,7 @@
 package acpbridge
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
@@ -12,6 +13,7 @@ type narrativeAccumulator struct {
 	reasoning          FinalAssistantAccumulator
 	lastNarrativeEvent *session.Event
 	lastAssistantEvent *session.Event
+	userObservations   map[string]struct{}
 }
 
 func (a *narrativeAccumulator) normalize(event *session.Event) (*session.Event, *session.Event, bool) {
@@ -20,16 +22,23 @@ func (a *narrativeAccumulator) normalize(event *session.Event) (*session.Event, 
 	}
 	updateType := eventUpdateType(event)
 	raw := narrativeEventText(event, updateType)
+	replacement := event.Protocol.Update != nil && event.Protocol.Update.Replacement
+	metaPatch := event.Protocol.Update != nil && slices.Contains(event.Protocol.Update.ReplacedFields, "_meta")
+	contentChanged := raw != "" || replacement
 	if updateType == string(session.ProtocolUpdateTypeAgentMessage) {
-		a.reasoning.Reset()
-		update := a.final.ObserveFrame(narrativeMessageID(event), raw)
+		update := a.final.observeFrame(narrativeMessageID(event), raw, replacement, event.Protocol.Update.PreviouslyObserved)
+		if contentChanged && update.MessageID == a.final.messageID {
+			a.reasoning.AdvanceBoundary()
+		}
 		identified := withNarrativeMessageID(event, update.MessageID)
 		a.lastNarrativeEvent = session.CloneEvent(identified)
-		a.lastAssistantEvent = session.CloneEvent(identified)
-		if update.Text == "" && update.Delta == "" {
+		if update.MessageID == a.final.messageID {
+			a.lastAssistantEvent = session.CloneEvent(identified)
+		}
+		if update.Text == "" && update.Delta == "" && !replacement && !metaPatch {
 			return nil, nil, true
 		}
-		if update.Delta == "" {
+		if update.Delta == "" && !replacement && !metaPatch {
 			return nil, nil, true
 		}
 		live := session.CloneEvent(identified)
@@ -38,14 +47,14 @@ func (a *narrativeAccumulator) normalize(event *session.Event) (*session.Event, 
 		setNarrativeEventText(live, updateType, update.Delta)
 		return nil, live, true
 	}
-	a.final.Reset()
-	update := a.reasoning.ObserveFrame(narrativeMessageID(event), raw)
+	a.final.observeContentChunk(updateType, raw, narrativeMessageID(event), replacement, event.Protocol.Update.PreviouslyObserved)
+	update := a.reasoning.observeFrame(narrativeMessageID(event), raw, replacement, event.Protocol.Update.PreviouslyObserved)
 	identified := withNarrativeMessageID(event, update.MessageID)
 	a.lastNarrativeEvent = session.CloneEvent(identified)
-	if update.Text == "" && update.Delta == "" {
+	if update.Text == "" && update.Delta == "" && !replacement && !metaPatch {
 		return nil, nil, true
 	}
-	if update.Delta == "" {
+	if update.Delta == "" && !replacement && !metaPatch {
 		return nil, nil, true
 	}
 	live := session.CloneEvent(identified)
@@ -60,9 +69,18 @@ func (a *narrativeAccumulator) observeBarrier(event *session.Event) {
 		return
 	}
 	switch eventUpdateType(event) {
-	case string(session.ProtocolUpdateTypeToolCall), string(session.ProtocolUpdateTypeToolUpdate), string(session.ProtocolUpdateTypePlan):
-		a.final.Reset()
-		a.reasoning.Reset()
+	case string(session.ProtocolUpdateTypeToolCall), string(session.ProtocolUpdateTypeToolUpdate):
+		update := session.ProtocolUpdateOf(event)
+		id, previous := "", false
+		if update != nil {
+			id, previous = update.ToolCallID, update.PreviouslyObserved
+		}
+		if a.final.observeToolCall(id, previous).Barrier {
+			a.reasoning.AdvanceBoundary()
+		}
+	case string(session.ProtocolUpdateTypePlan):
+		a.final.AdvanceBoundary()
+		a.reasoning.AdvanceBoundary()
 	}
 }
 
@@ -70,12 +88,11 @@ func narrativeMessageID(event *session.Event) string {
 	if event == nil || event.Protocol == nil || event.Protocol.Update == nil {
 		return ""
 	}
-	return strings.TrimSpace(event.Protocol.Update.MessageID)
+	return event.Protocol.Update.MessageID
 }
 
 func withNarrativeMessageID(event *session.Event, messageID string) *session.Event {
 	identified := session.CloneEvent(event)
-	messageID = strings.TrimSpace(messageID)
 	if identified == nil || messageID == "" {
 		return identified
 	}
@@ -126,6 +143,9 @@ func shouldPersistExternalACPEvent(event *session.Event) bool {
 	if event.ContextUsage != nil && session.IsMirror(event) {
 		return true
 	}
+	if session.IsMirror(event) && eventUpdateType(event) == string(session.ProtocolUpdateTypeUserMessage) {
+		return true
+	}
 	if !session.IsCanonicalHistoryEvent(event) {
 		return false
 	}
@@ -168,6 +188,9 @@ func setNarrativeEventText(event *session.Event, updateType string, text string)
 		}
 		protocol.Update.SessionUpdate = strings.TrimSpace(updateType)
 		protocol.Update.Content = session.ProtocolTextContent(text)
+		if text == "" && (protocol.Update.Replacement || slices.Contains(protocol.Update.ReplacedFields, "_meta")) {
+			protocol.Update.Content = map[string]any{"type": "text", "text": ""}
+		}
 		event.Protocol = &protocol
 	}
 	switch strings.TrimSpace(updateType) {
@@ -178,4 +201,24 @@ func setNarrativeEventText(event *session.Event, updateType string, text string)
 		message := model.NewTextMessage(model.RoleAssistant, text)
 		event.Message = &message
 	}
+}
+
+// userObservation follows an edited provider message's display frames. It never
+// turns those observations into a new native input or an execution receipt.
+func (a *narrativeAccumulator) userObservation(update *session.ProtocolUpdate) bool {
+	if a == nil || update == nil {
+		return false
+	}
+	id := update.MessageID
+	if update.Replacement || slices.Contains(update.ReplacedFields, "_meta") {
+		if id != "" {
+			if a.userObservations == nil {
+				a.userObservations = map[string]struct{}{}
+			}
+			a.userObservations[id] = struct{}{}
+		}
+		return true
+	}
+	_, found := a.userObservations[id]
+	return id != "" && found
 }

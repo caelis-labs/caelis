@@ -221,7 +221,13 @@ func admitObservedTurn(
 		return nil, unknownTurnAdmissionError(result, err)
 	}
 	if err != nil {
+		if result.Outcome == OutcomeConflicted || result.Outcome == OutcomeRejected {
+			return nil, &CommandReceiptError{Receipt: result, Err: err}
+		}
 		return nil, err
+	}
+	if result.Outcome == OutcomeConflicted || result.Outcome == OutcomeRejected {
+		return nil, &CommandReceiptError{Receipt: result, Err: fmt.Errorf("controlclient: operation %q ended with outcome %q", result.OperationID, result.Outcome)}
 	}
 	return nil, fmt.Errorf(
 		"controlclient: operation %q ended with outcome %q",

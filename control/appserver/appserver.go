@@ -1,6 +1,7 @@
 package appserver
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -21,7 +22,8 @@ type AppServerServices struct {
 	Status        StatusService
 	Configuration ConfigurationService
 	Agents        AgentService
-	// Applications is a scoped HTTP capability, not a presentation aggregate client.
+	// Applications supplies the same scoped admission and lifecycle owner to
+	// embedded and HTTP adapters.
 	Applications *ApplicationService
 	Completion   CompletionService
 	Plugins      PluginService
@@ -80,15 +82,27 @@ type AppServerClients struct {
 
 // BindAppServerClients binds one trusted principal to a complete AppServer.
 func BindAppServerClients(services AppServerServices, principal Principal) (AppServerClients, error) {
-	if principal.ApplicationID != "" || principal.ConnectionID != "" {
-		return AppServerClients{}, errors.New("controlclient: scoped application credentials require the authenticated application HTTP surface")
-	}
 	if err := services.Validate(); err != nil {
 		return AppServerClients{}, err
+	}
+	if principal.ApplicationID != "" || principal.ConnectionID != "" {
+		scope, err := ApplicationScope(principal)
+		if err != nil || services.Applications == nil {
+			return AppServerClients{}, ErrUnauthorized
+		}
+		if _, err := services.Applications.Store().Connection(context.Background(), scope); err != nil {
+			return AppServerClients{}, err
+		}
 	}
 	sessions, err := BindSessionClient(services.Sessions, principal)
 	if err != nil {
 		return AppServerClients{}, err
+	}
+	bound := sessions.(*boundSessionClient)
+	bound.applications = services.Applications
+	if services.Applications != nil {
+		bound.capabilities = append(bound.capabilities, services.Applications.Capabilities()...)
+		bound.capabilities = append(bound.capabilities, CapabilityApplicationTerminalObservation, CapabilityApplicationTerminalWait, CapabilityApplicationTerminalControl)
 	}
 	participants, err := BindParticipantClient(services.Participants, principal)
 	if err != nil {
@@ -124,13 +138,15 @@ func BindAppServerClients(services AppServerServices, principal Principal) (AppS
 	}
 	tasks, err := taskstream.BindClient(services.Tasks, taskstream.Principal{
 		ID: principal.ID, Roles: append([]string(nil), principal.Roles...),
+		ApplicationID: principal.ApplicationID, ConnectionID: principal.ConnectionID,
 	})
 	if err != nil {
 		return AppServerClients{}, err
 	}
+	principal.Roles = append([]string(nil), principal.Roles...)
 	clients := AppServerClients{
-		SubagentInputs: &boundSubagentInputClient{service: services.SubagentInputs, principal: Principal{ID: principal.ID, Roles: append([]string(nil), principal.Roles...)}},
-		UIPreferences:  &boundUIPreferencesClient{service: services.UIPreferences, principal: Principal{ID: principal.ID, Roles: append([]string(nil), principal.Roles...)}},
+		SubagentInputs: &boundSubagentInputClient{service: services.SubagentInputs, principal: principal},
+		UIPreferences:  &boundUIPreferencesClient{service: services.UIPreferences, principal: principal},
 		Sessions:       sessions, Participants: participants, Status: status,
 		Configuration: configuration, Agents: agents, Completion: completion, Plugins: plugins,
 		Presentation: presentation, Terminal: terminal, Tasks: tasks,

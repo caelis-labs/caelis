@@ -9,6 +9,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
 	controladapter "github.com/caelis-labs/caelis/app/gatewayapp/controladapter"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/sessionvisibility"
 	"github.com/caelis-labs/caelis/internal/kernel"
 )
 
@@ -42,7 +43,7 @@ func newCompletionService(deps completionServiceDeps) (*CompletionService, error
 }
 
 func (s *CompletionService) CompleteFile(ctx context.Context, principal appserver.Principal, req appserver.CompletionRequest) ([]appserver.CompletionCandidate, error) {
-	driver, closeDriver, err := s.runtimeAdapter(ctx, principal, req)
+	driver, closeDriver, err := s.runtimeAdapterForCapability(ctx, principal, req, true)
 	if err != nil {
 		return nil, err
 	}
@@ -92,6 +93,13 @@ func (s *CompletionService) slashArgAdapter(
 	if err := authorizeHostCapability(principal); err != nil {
 		return nil, nil, err
 	}
+	if principal.ApplicationID != "" || principal.ConnectionID != "" {
+		fields := strings.Fields(req.Command)
+		if strings.TrimSpace(req.SessionID) == "" || len(fields) == 0 || (!strings.EqualFold(fields[0], "model") && !strings.EqualFold(fields[0], "mode") && !strings.EqualFold(fields[0], "agent")) {
+			return nil, nil, appserver.ErrUnauthorized
+		}
+		return s.runtimeAdapter(ctx, principal, req)
+	}
 	deps := s.controlRuntimeDeps(principal)
 	workspace, err := s.workspaceAddress(req.WorkspaceKey, req.CWD)
 	if err != nil {
@@ -132,6 +140,9 @@ func (s *CompletionService) skillRuntimeAdapter(
 	if err := authorizeHostCapability(principal); err != nil {
 		return nil, nil, err
 	}
+	if principal.ApplicationID != "" || principal.ConnectionID != "" {
+		return nil, nil, appserver.ErrUnauthorized
+	}
 	workspace, err := s.workspaceAddress(req.WorkspaceKey, req.CWD)
 	if err != nil {
 		return nil, nil, err
@@ -152,6 +163,10 @@ func (s *CompletionService) skillRuntimeAdapter(
 }
 
 func (s *CompletionService) runtimeAdapter(ctx context.Context, principal appserver.Principal, req appserver.CompletionRequest) (controladapter.CompletionAssembler, func(), error) {
+	return s.runtimeAdapterForCapability(ctx, principal, req, false)
+}
+
+func (s *CompletionService) runtimeAdapterForCapability(ctx context.Context, principal appserver.Principal, req appserver.CompletionRequest, files bool) (controladapter.CompletionAssembler, func(), error) {
 	if s == nil || s.hostDeps == nil {
 		return nil, nil, errors.New("app/gatewayapp/controladapter/local: completion service is unavailable")
 	}
@@ -160,6 +175,9 @@ func (s *CompletionService) runtimeAdapter(ctx context.Context, principal appser
 	}
 	deps := s.controlRuntimeDeps(principal)
 	if strings.TrimSpace(req.SessionID) == "" {
+		if principal.ApplicationID != "" || principal.ConnectionID != "" {
+			return nil, nil, appserver.ErrUnauthorized
+		}
 		workspace, err := s.workspaceAddress(req.WorkspaceKey, req.CWD)
 		if err != nil {
 			return nil, nil, err
@@ -174,6 +192,22 @@ func (s *CompletionService) runtimeAdapter(ctx context.Context, principal appser
 	lease, err := s.acquireRuntime(ctx, principal, appserver.ActionSessionInspect, req.SessionID, false)
 	if err != nil {
 		return nil, nil, err
+	}
+	if (principal.ApplicationID != "" || principal.ConnectionID != "") && sessionvisibility.IsApplicationSession(lease.Session()) && strings.TrimSpace(req.Command) != "" {
+		if fields := strings.Fields(req.Command); !strings.EqualFold(fields[0], "model") {
+			_ = lease.Close(context.Background())
+			return nil, nil, appserver.ErrUnauthorized
+		}
+	}
+	if files && sessionvisibility.IsApplicationSession(lease.Session()) {
+		state, err := lease.Status().SessionRuntimeState(ctx, lease.Session().SessionRef)
+		if err != nil || state.PolicyProfile == "application-tools-only" {
+			_ = lease.Close(context.Background())
+			if err != nil {
+				return nil, nil, err
+			}
+			return nil, nil, appserver.ErrUnauthorized
+		}
 	}
 	assemblyDeps := completionAssemblyDepsFromLease(lease)
 	if assemblyDeps == nil {

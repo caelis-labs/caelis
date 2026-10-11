@@ -1,6 +1,7 @@
 package controlprompt
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -68,10 +69,15 @@ func ModeToggleHint(status controlstatus.StatusSnapshot) string {
 }
 
 // FriendlyCommandError adds actionable product guidance to command failures.
-func FriendlyCommandError(action string, err error) error {
+func FriendlyCommandError(action string, err error) (friendly error) {
 	if err == nil {
 		return nil
 	}
+	defer func() {
+		if friendly != nil && !errors.Is(friendly, err) {
+			friendly = &friendlyCommandError{text: friendly.Error(), cause: err}
+		}
+	}()
 	raw := strings.TrimSpace(err.Error())
 	lower := strings.ToLower(raw)
 	switch {
@@ -113,6 +119,14 @@ func FriendlyCommandError(action string, err error) error {
 		return fmt.Errorf("%s: %w", action, err)
 	}
 }
+
+type friendlyCommandError struct {
+	text  string
+	cause error
+}
+
+func (e *friendlyCommandError) Error() string { return e.text }
+func (e *friendlyCommandError) Unwrap() error { return e.cause }
 
 func dashAsEmpty(value string) string {
 	value = strings.TrimSpace(value)

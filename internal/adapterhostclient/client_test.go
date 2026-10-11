@@ -51,3 +51,23 @@ func TestConsumeChannelGrantFileRejectsNonRegularPath(t *testing.T) {
 		t.Fatal("ConsumeChannelGrantFile() accepted a directory")
 	}
 }
+
+func TestChannelGrantFilePreservesExplicitDraftConstraint(t *testing.T) {
+	const schema = "schema-v2.0.0-alpha.8"
+	path, err := WriteChannelGrantFile(t.TempDir(), ChannelGrantFile{
+		Endpoint: "http://127.0.0.1:7777", AdapterID: "codex", Token: "one-use", ACPDraftSchema: schema,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	grant, err := ConsumeChannelGrantFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if grant.ACPDraftSchema != schema {
+		t.Fatalf("draft constraint = %q", grant.ACPDraftSchema)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("grant remains: %v", err)
+	}
+}

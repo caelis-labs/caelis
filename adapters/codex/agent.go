@@ -15,7 +15,8 @@ import (
 type agent struct {
 	backend    *Backend
 	options    ConnectionOptions
-	connection *acp.AgentSideConnection
+	connection agentConnection
+	draft      *draftAgent
 	// connectionReady closes after the SDK connection has been published. The
 	// SDK starts its reader during construction, so handlers must cross this
 	// barrier before they can use the back-reference.
@@ -31,12 +32,24 @@ type agent struct {
 	sessionNotices bool
 }
 
+// agentConnection keeps the app-server Session owner independent of the ACP
+// version selected for this channel. Both transports use the same native
+// permission options and Session lifecycle; the draft bridge only projects them.
+type agentConnection interface {
+	SessionUpdate(context.Context, acp.SessionNotification) error
+	RequestPermission(context.Context, acp.RequestPermissionRequest) (acp.RequestPermissionResponse, error)
+	Close() error
+}
+
 const (
 	sessionSteeringMethod         = "_session/steering"
 	codexThreadUnsubscribeTimeout = 2 * time.Second
 )
 
 func (a *agent) Initialize(ctx context.Context, request acp.InitializeRequest) (acp.InitializeResponse, error) {
+	if request.ProtocolVersion < 1 {
+		return acp.InitializeResponse{}, acp.NewInvalidParams(map[string]any{"error": "ACP protocolVersion must be positive"})
+	}
 	if err := a.waitConnection(ctx); err != nil {
 		return acp.InitializeResponse{}, err
 	}
@@ -50,20 +63,15 @@ func (a *agent) Initialize(ctx context.Context, request acp.InitializeRequest) (
 	}
 	a.mu.Lock()
 	a.terminalMode = terminalOutputModeForCapabilities(request.ClientCapabilities)
-	a.sessionNotices = false
-	_ = json.Unmarshal(request.ClientCapabilities.Meta[sessionNoticeCapability], &a.sessionNotices)
+	a.sessionNotices = request.ClientCapabilities.Session != nil && request.ClientCapabilities.Session.Notices != nil
 	if account.Account != nil {
 		a.accountType = strings.TrimSpace(account.Account.Type)
 	} else {
 		a.accountType = ""
 	}
 	a.mu.Unlock()
-	protocol := acp.ProtocolVersion(acp.WireProtocolVersion)
-	if request.ProtocolVersion < protocol {
-		protocol = request.ProtocolVersion
-	}
 	return acp.InitializeResponse{
-		ProtocolVersion: protocol,
+		ProtocolVersion: acp.ProtocolVersionNumber,
 		Meta: map[string]json.RawMessage{
 			"steering": json.RawMessage(`{"supported":true}`),
 		},
@@ -260,25 +268,8 @@ func (a *agent) Prompt(ctx context.Context, request acp.PromptRequest) (acp.Prom
 	}
 	state.turnDone = make(chan turnResult, 1)
 	done := state.turnDone
-	model, effort := state.model, state.effort
-	serviceTier := state.serviceTier
-	summary := state.reasoningSummaryModeLocked(accountType)
 	state.mu.Unlock()
-	params := map[string]any{
-		"threadId": state.threadID,
-		"input":    input,
-		"cwd":      state.cwd,
-		"summary":  summary,
-	}
-	if model != "" {
-		params["model"] = model
-	}
-	if effort != "" {
-		params["effort"] = effort
-	}
-	if serviceTier != nil {
-		params["serviceTier"] = *serviceTier
-	}
+	params := state.promptParams(accountType, input)
 	var response struct {
 		Turn struct {
 			ID string `json:"id"`
@@ -536,7 +527,7 @@ func (a *agent) installSession(response threadOpenResponse, cwd string, roots []
 }
 
 func (a *agent) reserveSession(threadID, cwd string, roots []string, mode routeMode) (*sessionRoute, error) {
-	state := &sessionState{threadID: threadID, cwd: strings.TrimSpace(cwd), roots: append([]string(nil), roots...)}
+	state := &sessionState{threadID: threadID, cwd: strings.TrimSpace(cwd), roots: append([]string(nil), roots...), draftLoading: a.draft != nil}
 	route := newSessionRoute(a, state, mode)
 	state.route = route
 	if err := a.backend.acquire(threadID, route); err != nil {

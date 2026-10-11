@@ -62,6 +62,8 @@ type Option struct {
 }
 
 type Payload struct {
+	Context            *session.PermissionContext        `json:"context,omitempty"`
+	Subject            *session.ApprovalSubject          `json:"subject,omitempty"`
 	ToolCallID         string                            `json:"tool_call_id,omitempty"`
 	ToolName           string                            `json:"tool_name,omitempty"`
 	ToolKind           string                            `json:"tool_kind,omitempty"`
@@ -138,6 +140,13 @@ func PayloadFromRuntimeRequest(req agentsdk.ApprovalRequest) *Payload {
 		payload.ToolName = strings.TrimSpace(req.Call.Name)
 	}
 	if req.Approval != nil {
+		payload.Context = session.ClonePermissionContext(req.Approval.Context)
+		if payload.Context != nil {
+			// Cosmetic remote claims are not part of the canonical review
+			// action, its cache identity, or the evidence sent to a reviewer.
+			payload.Context.DisplaySubjectHint = nil
+		}
+		payload.Subject = session.ApprovalSubjectOf(req.Approval)
 		if callID := strings.TrimSpace(req.Approval.ToolCall.ID); callID != "" {
 			payload.ToolCallID = callID
 		}
@@ -147,11 +156,22 @@ func PayloadFromRuntimeRequest(req agentsdk.ApprovalRequest) *Payload {
 		payload.ToolKind = strings.TrimSpace(req.Approval.ToolCall.Kind)
 		payload.ToolTitle = strings.TrimSpace(req.Approval.ToolCall.Title)
 		payload.ToolStatus = strings.TrimSpace(req.Approval.ToolCall.Status)
+		if req.Approval.Context != nil {
+			// Independent permissions carry original endpoint evidence, including
+			// an optional actual tool call. Do not normalize its identity or text.
+			payload.ToolCallID, payload.ToolName = req.Approval.ToolCall.ID, req.Approval.ToolCall.Name
+			payload.ToolKind, payload.ToolTitle, payload.ToolStatus = req.Approval.ToolCall.Kind, req.Approval.ToolCall.Title, req.Approval.ToolCall.Status
+		}
 		payload.RawInput = jsonvalue.CloneMap(req.Approval.ToolCall.RawInput)
 		payload.RawOutput = jsonvalue.CloneMap(req.Approval.ToolCall.RawOutput)
 		payload.Content = session.CloneProtocolToolCallContent(req.Approval.ToolCall.Content)
 		if len(req.Approval.Options) > 0 {
 			payload.Options = NormalizeProtocolOptions(req.Approval.Options)
+			if req.Approval.Context != nil {
+				for i, option := range req.Approval.Options {
+					payload.Options[i] = Option{ID: option.ID, Name: option.Name, Kind: option.Kind}
+				}
+			}
 		}
 	}
 	if len(payload.RawInput) == 0 {
@@ -164,6 +184,82 @@ func PayloadFromRuntimeRequest(req agentsdk.ApprovalRequest) *Payload {
 		return nil
 	}
 	return payload
+}
+
+// DisplayPayloadFromRuntimeRequest creates a separate presentation snapshot.
+// Reviewers and execution/resolve must use PayloadFromRuntimeRequest instead.
+func DisplayPayloadFromRuntimeRequest(req agentsdk.ApprovalRequest) *Payload {
+	payload := PayloadFromRuntimeRequest(req)
+	if payload == nil {
+		return nil
+	}
+	if req.Approval != nil {
+		payload.Subject = session.ApprovalDisplaySubjectOf(req.Approval)
+	}
+	redactedInput, sensitive := RedactInputForDisplay(payload.RawInput, req.Tool.InputSchema)
+	payload.RawInput = redactedInput
+	sensitive = sensitive || (payload.Subject != nil && payload.Subject.SensitiveInput)
+	opaqueInput := payload.Subject != nil && payload.Subject.OpaqueInput
+	if sensitive || opaqueInput {
+		// Titles, output and content may quote the marked arguments. The
+		// authoritative Runtime request remains intact, outside this display copy.
+		payload.ToolTitle = payload.ToolName
+		payload.RawInput = nil
+		payload.Reason = sensitiveInputDisplay
+		if !sensitive {
+			payload.Reason = "[opaque input withheld]"
+		}
+		payload.Justification = ""
+		payload.SandboxPermissions = ""
+		payload.RawOutput = nil
+		payload.Content = nil
+	}
+	if !sensitive && !opaqueInput {
+		payload.Reason = firstNonEmpty(metadataString(req.Metadata, "approval_reason"), rawString(payload.RawInput, "approval_reason"))
+		payload.Justification = firstNonEmpty(metadataString(req.Metadata, "justification"), rawString(payload.RawInput, "justification"))
+		payload.SandboxPermissions = firstNonEmpty(metadataString(req.Metadata, "sandbox_permissions"), rawString(payload.RawInput, "sandbox_permissions"))
+	}
+	if InputFieldSensitive(req.Tool.InputSchema, "approval_reason") {
+		payload.Reason = sensitiveInputDisplay
+	}
+	if InputFieldSensitive(req.Tool.InputSchema, "justification") {
+		payload.Justification = sensitiveInputDisplay
+	}
+	if InputFieldSensitive(req.Tool.InputSchema, "sandbox_permissions") {
+		payload.SandboxPermissions = sensitiveInputDisplay
+	}
+	if payload.Subject == nil {
+		payload.Subject = session.ApprovalSubjectOf(ProtocolApprovalFromPayload(payload))
+	}
+	payload.Subject.SensitiveInput = payload.Subject.SensitiveInput || sensitive
+	payload.Subject = session.CloneApprovalSubject(payload.Subject)
+	if payload.Context != nil {
+		payload.Context.RawSubject, payload.Context.NativeRequestID = nil, nil
+		payload.Context.Title = ""
+		payload.Context.Description = nil
+		if !sensitive && !payload.Subject.OpaqueInput {
+			if payload.Subject.Title != nil {
+				payload.Context.Title = payload.Subject.Title.Text
+			}
+			if payload.Subject.Description != nil {
+				payload.Context.Description = new(payload.Subject.Description.Text)
+			}
+		}
+	}
+	return payload
+}
+
+// DisplayReviewText keeps model-produced rationale out of ordinary presentation
+// when it could quote explicitly marked request values. The typed verdict stays
+// available; private review evidence remains unchanged.
+func DisplayReviewText(text string, subject *session.ApprovalSubject) string {
+	if subject != nil && subject.SensitiveInput {
+		return "Sensitive action details withheld."
+	}
+	if subject != nil && subject.OpaqueInput {
+		return "Opaque action details withheld."
+	}
+	return text
 }
 
 // CloneRuntimeRequest returns an isolated approval request snapshot for a
@@ -205,21 +301,41 @@ func ProtocolApprovalFromPayload(payload *Payload) *session.ProtocolApproval {
 		options = append(options, session.ProtocolApprovalOption{
 			ID: strings.TrimSpace(option.ID), Name: strings.TrimSpace(option.Name), Kind: strings.TrimSpace(option.Kind),
 		})
+		if payload.Context != nil {
+			options[len(options)-1].Name = option.Name
+		}
 	}
 	rawInput := jsonvalue.CloneMap(payload.RawInput)
 	rawInput = putRawStringIfMissing(rawInput, "approval_reason", payload.Reason)
 	rawInput = putRawStringIfMissing(rawInput, "justification", payload.Justification)
 	rawInput = putRawStringIfMissing(rawInput, "sandbox_permissions", payload.SandboxPermissions)
-	return &session.ProtocolApproval{
+	if payload.Context != nil && payload.ToolCallID == "" && payload.ToolName == "" {
+		rawInput = nil
+	}
+	out := &session.ProtocolApproval{
+		Context: session.ClonePermissionContext(payload.Context),
+		Subject: session.CloneApprovalSubject(payload.Subject),
 		ToolCall: session.ProtocolToolCall{
 			ID: strings.TrimSpace(payload.ToolCallID), Name: strings.TrimSpace(payload.ToolName),
 			Kind: strings.TrimSpace(payload.ToolKind), Title: strings.TrimSpace(payload.ToolTitle),
-			Status:   firstNonEmpty(strings.TrimSpace(payload.ToolStatus), strings.TrimSpace(string(payload.Status))),
+			Status:   approvalToolStatus(payload),
 			RawInput: rawInput, RawOutput: jsonvalue.CloneMap(payload.RawOutput),
 			Content: session.CloneProtocolToolCallContent(payload.Content),
 		},
 		Options: options,
 	}
+	if payload.Context != nil {
+		out.ToolCall.ID, out.ToolCall.Name = payload.ToolCallID, payload.ToolName
+		out.ToolCall.Kind, out.ToolCall.Title, out.ToolCall.Status = payload.ToolKind, payload.ToolTitle, payload.ToolStatus
+	}
+	return out
+}
+
+func approvalToolStatus(payload *Payload) string {
+	if payload.Context != nil {
+		return payload.ToolStatus
+	}
+	return firstNonEmpty(strings.TrimSpace(payload.ToolStatus), strings.TrimSpace(string(payload.Status)))
 }
 
 func putRawStringIfMissing(values map[string]any, key string, value string) map[string]any {
@@ -349,6 +465,8 @@ func ClonePayload(in *Payload) *Payload {
 		return nil
 	}
 	out := *in
+	out.Context = session.ClonePermissionContext(in.Context)
+	out.Subject = session.CloneApprovalSubject(in.Subject)
 	out.RawInput = jsonvalue.CloneMap(in.RawInput)
 	out.RawOutput = jsonvalue.CloneMap(in.RawOutput)
 	out.Content = session.CloneProtocolToolCallContent(in.Content)

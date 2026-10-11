@@ -133,7 +133,7 @@ func normalizeContentChunk(chunk client.ContentChunk, opts Options) *session.Eve
 		text = opts.TextOverride
 	}
 	msg := messageForContentChunk(chunk, text)
-	if text == "" && len(msg.Parts) == 0 {
+	if text == "" && len(msg.Parts) == 0 && !chunk.Replacement && !chunk.MetaPresent {
 		return nil
 	}
 	eventType := session.EventTypeAssistant

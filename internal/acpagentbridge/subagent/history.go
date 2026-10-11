@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"slices"
 	"strings"
 	"sync"
 	"unicode/utf8"
@@ -15,6 +16,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	tasksubagent "github.com/caelis-labs/caelis/agent-sdk/task/subagent"
 	"github.com/caelis-labs/caelis/control/collaboration"
+	"github.com/caelis-labs/caelis/control/history"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/client"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acputil"
 	"github.com/google/uuid"
@@ -74,6 +76,8 @@ type historyCollector struct {
 	runner            *Runner
 	run               childRun
 	turnSeq           int64
+	messageTurns      map[string]int64
+	messageTurnOrder  []string
 	lastUpdateType    string
 	lastUserMessageID string
 	inputStart        int
@@ -126,21 +130,42 @@ func (c *historyCollector) observe(env client.UpdateEnvelope) {
 	env.Update = acputil.StripTerminalConsoleFenceUpdate(env.Update)
 	updateType := historyUpdateType(env.Update)
 	newInputTurn := false
+	messageKey := ""
+	if chunk, ok := env.Update.(client.ContentChunk); ok && chunk.MessageID != "" {
+		messageKey = updateType + ":" + chunk.MessageID
+	}
 	if updateType == client.UpdateUserMessage {
 		messageID := ""
 		if chunk, ok := env.Update.(client.ContentChunk); ok {
-			messageID = strings.TrimSpace(chunk.MessageID)
+			messageID = chunk.MessageID
 		}
 		if c.lastUpdateType != client.UpdateUserMessage || messageID != "" && messageID != c.lastUserMessageID {
 			c.flushUserText()
 			c.projectEvents()
-			c.turnSeq++
+			// Existing message updates retain their original display Turn;
+			// they do not advance execution or create another input group.
+			if messageKey == "" || c.messageTurns[messageKey] <= 0 {
+				c.turnSeq++
+			}
 			newInputTurn = true
 		}
 		c.lastUserMessageID = messageID
 	}
 	if c.turnSeq <= 0 {
 		c.turnSeq = 1
+	}
+	if messageKey != "" {
+		if c.messageTurns == nil {
+			c.messageTurns = make(map[string]int64)
+		}
+		if c.messageTurns[messageKey] <= 0 {
+			c.messageTurns[messageKey] = c.turnSeq
+			c.messageTurnOrder = append(c.messageTurnOrder, messageKey)
+			if len(c.messageTurnOrder) > history.TranscriptEvents {
+				delete(c.messageTurns, c.messageTurnOrder[0])
+				c.messageTurnOrder = c.messageTurnOrder[1:]
+			}
+		}
 	}
 	if updateType != client.UpdateUserMessage {
 		c.flushUserText()
@@ -180,6 +205,10 @@ func (c *historyCollector) observe(env client.UpdateEnvelope) {
 				c.userText = event
 			}
 			previousBytes := c.userTextBody.Len()
+			if update := session.ProtocolUpdateOf(event); update != nil && update.Replacement {
+				c.userTextBody.Reset()
+				previousBytes = 0
+			}
 			c.userTextBody.WriteString(event.Text)
 			if c.userTextBody.Len() > 256<<10 {
 				body := c.userTextBody.String()
@@ -219,7 +248,7 @@ func (c *historyCollector) observe(env client.UpdateEnvelope) {
 		if !quotedUser {
 			event.Text = stripLoadedCollaborationSetup(event.Text)
 		}
-		if strings.TrimSpace(event.Text) == "" && !media {
+		if strings.TrimSpace(event.Text) == "" && !media && !historyReplacement(event) && !historyMetaPatch(event) {
 			c.lastUpdateType = updateType
 			return
 		}
@@ -245,6 +274,9 @@ func (c *historyCollector) observe(env client.UpdateEnvelope) {
 			event.Message = &message
 			if event.Protocol != nil && event.Protocol.Update != nil {
 				event.Protocol.Update.Content = session.ProtocolTextContent(event.Text)
+				if event.Text == "" && (event.Protocol.Update.Replacement || historyMetaPatch(event)) {
+					event.Protocol.Update.Content = map[string]any{"type": "text", "text": ""}
+				}
 			}
 		}
 		c.run.inputActor = markSubagentInputEvent(event, c.run.inputActor)
@@ -257,7 +289,13 @@ func (c *historyCollector) appendHistoryEvent(event *session.Event) {
 	if event.Scope == nil {
 		event.Scope = &session.EventScope{}
 	}
-	event.Scope.TurnID = fmt.Sprintf("%s:%d", strings.TrimSpace(c.run.taskID), c.turnSeq)
+	turn := c.turnSeq
+	if update := session.ProtocolUpdateOf(event); update != nil && update.MessageID != "" {
+		if original := c.messageTurns[update.SessionUpdate+":"+update.MessageID]; original > 0 {
+			turn = original
+		}
+	}
+	event.Scope.TurnID = fmt.Sprintf("%s:%d", strings.TrimSpace(c.run.taskID), turn)
 	event.SessionID = strings.TrimSpace(c.run.anchor.SessionID)
 	c.eventCount++
 	event.ID = fmt.Sprintf("subagent-load:%s:%d", strings.TrimSpace(c.run.taskID), c.eventCount)
@@ -277,6 +315,9 @@ func (c *historyCollector) flushUserText() {
 	event.Message = &message
 	if event.Protocol != nil && event.Protocol.Update != nil {
 		event.Protocol.Update.Content = session.ProtocolTextContent(event.Text)
+		if event.Text == "" && (event.Protocol.Update.Replacement || historyMetaPatch(event)) {
+			event.Protocol.Update.Content = map[string]any{"type": "text", "text": ""}
+		}
 	}
 	markSubagentInputEvent(event, session.ActorRef{Kind: session.ActorKindUser, Name: "user"})
 	c.appendHistoryEvent(event)
@@ -419,3 +460,13 @@ func (c *historyCollector) errSnapshot() error {
 }
 
 var _ tasksubagent.HistoryRunner = (*Runner)(nil)
+
+func historyReplacement(event *session.Event) bool {
+	update := session.ProtocolUpdateOf(event)
+	return update != nil && update.Replacement
+}
+
+func historyMetaPatch(event *session.Event) bool {
+	update := session.ProtocolUpdateOf(event)
+	return update != nil && slices.Contains(update.ReplacedFields, "_meta")
+}

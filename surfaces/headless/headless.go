@@ -280,7 +280,7 @@ func (r *assistantOutputReducer) Observe(env eventstream.Envelope) (string, bool
 		r.assistant.Reset()
 	}
 	update := r.assistant.ObserveUpdate(env.Update)
-	return update.Text, update.Assistant && update.Text != ""
+	return update.Text, update.Assistant && (update.Text != "" || update.Replacement)
 }
 
 func assistantMessageUpdate(update eventstream.Update) bool {

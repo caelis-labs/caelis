@@ -83,9 +83,13 @@ func (a SessionAuthorizer) Authorize(ctx context.Context, p Principal, action Ac
 				return ErrUnauthorized
 			}
 			switch action {
-			case ActionSessionInspect:
+			case ActionSessionInspect, ActionParticipantList:
 				return nil
-			case ActionPrompt, ActionSteer, ActionCancel, ActionApprovalResolve:
+			case ActionPrompt, ActionConversationInteraction, ActionSteer, ActionCancel, ActionApprovalResolve,
+				ActionSessionCompact, ActionSessionModel, ActionParticipantStart,
+				ActionParticipantPrompt, ActionParticipantCancel, ActionSubagentInput,
+				ActionSessionClose, ActionSessionApprovalMode, ActionSessionControllerMode,
+				ActionSessionPresentationMode, ActionSessionPresentationConfig, ActionControllerHandoff:
 				if err := a.Applications.CheckActive(ctx, scope); err != nil {
 					return err
 				}
@@ -98,9 +102,10 @@ func (a SessionAuthorizer) Authorize(ctx context.Context, p Principal, action Ac
 				return ErrUnauthorized
 			}
 			switch action {
-			case ActionSessionInspect:
+			case ActionSessionInspect, ActionParticipantList:
 				return nil
-			case ActionApplicationPrompt, ActionSteer, ActionCancel, ActionApprovalResolve, ActionSessionClose:
+			case ActionApplicationPrompt, ActionConversationInteraction, ActionSteer, ActionCancel, ActionApprovalResolve, ActionSessionClose, ActionSessionCompact,
+				ActionParticipantStart, ActionParticipantPrompt, ActionParticipantCancel, ActionSubagentInput:
 				if err = a.Applications.CheckActive(ctx, scope); err != nil {
 					return err
 				}

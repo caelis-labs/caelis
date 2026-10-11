@@ -10,6 +10,14 @@ import (
 // for application-owned Sessions and workers, without terminal mutation rights.
 const CapabilityApplicationTerminalObservation = "application-terminal-observation-v1"
 
+// CapabilityApplicationTerminalWait permits cancellation-aware producer exit
+// observation without consuming model Task output or granting process control.
+const CapabilityApplicationTerminalWait = "application-terminal-wait-v1"
+
+// CapabilityApplicationTerminalControl enables kill/release with the native
+// Session mutation authorizer and exact scoped Task directory mapping.
+const CapabilityApplicationTerminalControl = "application-terminal-control-v1"
+
 type TerminalRequest struct {
 	SessionID  string `json:"session_id"`
 	TerminalID string `json:"terminal_id"`

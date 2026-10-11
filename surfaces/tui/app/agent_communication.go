@@ -13,17 +13,63 @@ import (
 
 func agentCommunicationSubagentEvent(event TranscriptEvent) SubagentEvent {
 	return SubagentEvent{
-		Kind:               SEAgentCommunication,
-		Text:               strings.TrimSpace(tuikit.SanitizeLogText(event.Text)),
-		StartedAt:          event.OccurredAt,
-		EndedAt:            event.OccurredAt,
-		SourceName:         agentCommunicationDisplayIdentity(firstNonEmpty(event.AgentSourceName, event.Actor), event.AgentSourceID),
-		SourceRole:         agentCommunicationIdentityField(event.AgentSourceRole),
-		SourceID:           agentCommunicationIdentityField(event.AgentSourceID),
-		SourceEventID:      strings.TrimSpace(event.SourceEventID),
-		SourceProjectionID: strings.TrimSpace(event.SourceProjectionID),
-		MessageID:          strings.TrimSpace(event.MessageID),
+		Kind:                     SEAgentCommunication,
+		Text:                     tuikit.SanitizeLogText(event.Text),
+		StartedAt:                event.OccurredAt,
+		EndedAt:                  event.OccurredAt,
+		SourceName:               agentCommunicationDisplayIdentity(firstNonEmpty(event.AgentSourceName, event.Actor), event.AgentSourceID),
+		SourceRole:               agentCommunicationIdentityField(event.AgentSourceRole),
+		SourceID:                 agentCommunicationIdentityField(event.AgentSourceID),
+		SourceEventID:            strings.TrimSpace(event.SourceEventID),
+		SourceProjectionID:       strings.TrimSpace(event.SourceProjectionID),
+		MessageID:                event.MessageID,
+		communicationOwner:       strings.Join([]string{string(event.Scope), event.ScopeID, event.ParticipantID, event.TurnID}, "\x00"),
+		communicationSourceKind:  event.AgentSourceKind,
+		communicationReplacement: event.Replacement,
 	}
+}
+
+func patchAgentCommunicationEvents(events []SubagentEvent, incoming SubagentEvent) bool {
+	if incoming.MessageID == "" {
+		return false
+	}
+	for i := range events {
+		current := &events[i]
+		if current.Kind != SEAgentCommunication || current.MessageID != incoming.MessageID ||
+			current.communicationOwner != incoming.communicationOwner || current.SourceID != incoming.SourceID ||
+			current.SourceRole != incoming.SourceRole || current.communicationSourceKind != incoming.communicationSourceKind ||
+			(current.SourceID == "" && current.SourceName != incoming.SourceName) ||
+			(!incoming.communicationReplacement && !current.communicationReplacement) {
+			continue
+		}
+		if incoming.communicationReplacement {
+			current.Text = incoming.Text
+		} else {
+			current.Text += incoming.Text
+		}
+		current.communicationReplacement = true
+		return true
+	}
+	return false
+}
+
+func patchDocumentAgentCommunication(doc *Document, incoming SubagentEvent) (string, bool) {
+	if doc == nil {
+		return "", false
+	}
+	for _, block := range doc.Blocks() {
+		var events []SubagentEvent
+		switch b := block.(type) {
+		case *MainACPTurnBlock:
+			events = b.Events
+		case *ParticipantTurnBlock:
+			events = b.Events
+		}
+		if patchAgentCommunicationEvents(events, incoming) {
+			return block.BlockID(), true
+		}
+	}
+	return "", false
 }
 
 // A pane can observe the same mail through shared-log reads, mailbox results,
@@ -211,7 +257,7 @@ func renderAgentCommunicationRows(blockID string, event SubagentEvent, eventInde
 }
 
 func agentCommunicationFoldKey(event SubagentEvent, eventIndex int) string {
-	if value := strings.TrimSpace(event.MessageID); value != "" {
+	if value := event.MessageID; value != "" {
 		return "message:" + value
 	}
 	if value := strings.TrimSpace(event.SourceProjectionID); value != "" {

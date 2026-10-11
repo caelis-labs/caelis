@@ -109,6 +109,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST "+apiPrefix+"/sessions", s.createSession)
 	s.mux.HandleFunc("DELETE "+apiPrefix+"/sessions/{session_id}", s.closeSession)
 	s.mux.HandleFunc("POST "+apiPrefix+"/sessions/{session_id}/compact", s.compactSession)
+	s.mux.HandleFunc("POST "+apiPrefix+"/sessions/{session_id}/interactions", s.recordInteraction)
 	s.mux.HandleFunc("GET "+apiPrefix+"/sessions/{session_id}/state", s.sessionState)
 	s.mux.HandleFunc("GET "+apiPrefix+"/status", s.sessionStatus)
 	s.mux.HandleFunc("GET "+apiPrefix+"/sessions/{session_id}/status", s.sessionStatus)
@@ -243,7 +244,13 @@ func (s *Server) closeSession(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, &req) || !applyWriteHeaders(w, r, &req.WriteBase, r.PathValue("session_id")) {
 		return
 	}
-	result, err := s.config.Services.Sessions.CloseSession(r.Context(), principal, req)
+	var result appserver.CommandResult
+	var err error
+	if s.config.Services.Applications != nil && (principal.ApplicationID != "" || principal.ConnectionID != "") {
+		result, err = s.config.Services.Applications.CloseSession(r.Context(), principal, req)
+	} else {
+		result, err = s.config.Services.Sessions.CloseSession(r.Context(), principal, req)
+	}
 	writeCommandResult(w, result, err)
 }
 

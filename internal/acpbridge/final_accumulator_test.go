@@ -214,3 +214,227 @@ func TestFinalAssistantAccumulatorSeparatesMessageIDs(t *testing.T) {
 		t.Fatalf("updates = %#v / %#v final = %q, want message-id reset", first, second, acc.FinalText())
 	}
 }
+
+func TestFinalAssistantAccumulatorLatestIdentifiedMessageResumesAfterBarrier(t *testing.T) {
+	for _, barrier := range []eventstream.Update{
+		eventstream.ToolCall{SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "tool"},
+		eventstream.PlanUpdate{SessionUpdate: eventstream.UpdatePlan},
+		eventstream.ContentChunk{SessionUpdate: eventstream.UpdateAgentThought, Content: eventstream.TextContent{Type: "text", Text: "thinking"}},
+	} {
+		t.Run(barrier.SessionUpdateType(), func(t *testing.T) {
+			var acc FinalAssistantAccumulator
+			acc.ObserveFrame("older", "old progress")
+			acc.ObserveFrame("latest", "progress")
+			acc.ObserveUpdate(barrier)
+			if acc.FinalText() != "" {
+				t.Fatalf("barrier retained eligible final: %q", acc.FinalText())
+			}
+			old := acc.ObserveFrame("older", " late delta")
+			if old.Text != "" || acc.FinalText() != "" {
+				t.Fatalf("older repair restored a final: %#v", old)
+			}
+			acc.ObserveFrame("latest", "")
+			if acc.FinalText() != "" {
+				t.Fatal("empty append restored a final")
+			}
+			latest := acc.ObserveFrame("latest", " suffix")
+			if latest.MessageID != "latest" || latest.Delta != " suffix" || acc.FinalText() != "progress suffix" {
+				t.Fatalf("latest identified continuation lost: %#v final=%q", latest, acc.FinalText())
+			}
+			acc.ObserveUpdate(barrier)
+			latest = acc.ObserveReplacement("latest", "final answer")
+			if latest.MessageID != "latest" || !latest.Replacement || acc.FinalText() != "final answer" {
+				t.Fatalf("latest identified snapshot lost: %#v final=%q", latest, acc.FinalText())
+			}
+		})
+	}
+}
+
+func TestFinalAssistantAccumulatorAcceptsNewProviderIdentityAfterAnonymousBarrier(t *testing.T) {
+	var acc FinalAssistantAccumulator
+	first := acc.ObserveFrame("", "progress")
+	acc.AdvanceBoundary()
+	final := acc.ObserveFrame("provider-final", "final answer")
+	if first.MessageID == "" || final.MessageID != "provider-final" || final.Text != "final answer" || acc.FinalText() != "final answer" {
+		t.Fatalf("new provider identity aliased an expired anonymous segment: %#v / %#v", first, final)
+	}
+}
+
+func TestFinalAssistantAccumulatorActivityResetRetainsSessionIdentities(t *testing.T) {
+	for _, aliased := range []bool{false, true} {
+		t.Run(map[bool]string{false: "identified", true: "generated alias"}[aliased], func(t *testing.T) {
+			var acc FinalAssistantAccumulator
+			oldID := "previous-message"
+			if aliased {
+				oldID = acc.ObserveFrame("", "anonymous prefix").MessageID
+			}
+			acc.ObserveFrame("previous-message", "previous answer")
+			checkpoint := acc
+			acc.ResetActivity()
+			for _, replacement := range []bool{false, true} {
+				patch := acc.observeFrame("previous-message", "old revision", replacement)
+				if patch.MessageID != oldID || patch.Delta != "old revision" || patch.Text != "" || acc.FinalText() != "" {
+					t.Fatalf("old revision selected before new answer: %#v final=%q", patch, acc.FinalText())
+				}
+			}
+			current := acc.ObserveFrame("current-message", "current answer")
+			for _, replacement := range []bool{false, true} {
+				patch := acc.observeFrame("previous-message", "", replacement)
+				if patch.MessageID != oldID || patch.Text != "current answer" || acc.FinalText() != "current answer" {
+					t.Fatalf("old revision stole current answer: %#v final=%q", patch, acc.FinalText())
+				}
+			}
+			if current.MessageID != "current-message" || checkpoint.FinalText() == "" {
+				t.Fatal("activity reset changed checkpoint or new answer identity")
+			}
+			if _, found := checkpoint.introduced["current-message"]; found {
+				t.Fatal("new activity mutated the pre-dispatch checkpoint")
+			}
+			acc.Reset()
+			reused := acc.ObserveFrame("previous-message", "new Session answer")
+			if reused.MessageID != "previous-message" || reused.Text != "new Session answer" || acc.FinalText() != "new Session answer" {
+				t.Fatalf("full Session reset retained old identity: %#v", reused)
+			}
+		})
+	}
+}
+
+func TestFinalAssistantAccumulatorActivityResetPreservesAnonymousV1Segments(t *testing.T) {
+	var acc FinalAssistantAccumulator
+	first := acc.ObserveFrame("", "first")
+	acc.ResetActivity()
+	second := acc.ObserveFrame("", "second")
+	if first.MessageID == "" || second.MessageID == "" || second.MessageID == first.MessageID || second.Text != "second" {
+		t.Fatalf("anonymous v1 activity did not start a fresh segment: %#v / %#v", first, second)
+	}
+	acc.AdvanceBoundary()
+	third := acc.ObserveFrame("", "post-tool")
+	if third.MessageID == second.MessageID || third.Text != "post-tool" {
+		t.Fatalf("anonymous v1 tool boundary changed: %#v", third)
+	}
+	if len(acc.introduced) != 0 {
+		t.Fatal("anonymous v1 segments accumulated Session identity history")
+	}
+}
+
+func TestFinalAssistantAccumulatorSessionObservationKeepsRevisionsDisplayOnly(t *testing.T) {
+	var acc FinalAssistantAccumulator
+	observe := func(id, text string, replacement, previous bool) AssistantTextUpdate {
+		return acc.ObserveUpdate(eventstream.ContentChunk{
+			SessionUpdate: eventstream.UpdateAgentMessage, MessageID: id,
+			Content:     eventstream.TextContent{Type: "text", Text: text},
+			Replacement: replacement, PreviouslyObserved: previous,
+		})
+	}
+	for _, replacement := range []bool{false, true} {
+		old := observe("previous-message", "old revision", replacement, true)
+		if old.MessageID != "previous-message" || old.Delta != "old revision" || old.Text != "" || acc.FinalText() != "" {
+			t.Fatalf("previous Session observation selected an answer: %#v", old)
+		}
+	}
+	observe("current-message", "current", true, false)
+	observe("current-message", " continuation", false, true)
+	if acc.FinalText() != "current continuation" {
+		t.Fatal("Session observation suppressed the selected current message")
+	}
+	old := observe("previous-message", "", true, true)
+	if !old.Replacement || old.MessageID != "previous-message" || acc.FinalText() != "current continuation" {
+		t.Fatalf("previous clear changed the selected answer: %#v", old)
+	}
+	acc.AdvanceBoundary()
+	observe("current-message", "", false, true)
+	if acc.FinalText() != "" {
+		t.Fatal("metadata-only observation restored final eligibility")
+	}
+	observe("current-message", "complete current answer", true, true)
+	if acc.FinalText() != "complete current answer" {
+		t.Fatal("current replacement lost eligibility after a boundary")
+	}
+}
+
+func TestFinalAssistantAccumulatorThoughtObservationIsScopedToActivity(t *testing.T) {
+	var acc FinalAssistantAccumulator
+	thought := func(previous bool) AssistantTextUpdate {
+		return acc.ObserveUpdate(eventstream.ContentChunk{
+			SessionUpdate: eventstream.UpdateAgentThought, MessageID: "shared-id",
+			Content: "thought", Replacement: true, PreviouslyObserved: previous,
+		})
+	}
+	if !thought(false).Barrier {
+		t.Fatal("new thought lost its barrier")
+	}
+	acc.ObserveFrame("shared-id", "first answer")
+	if !thought(true).Barrier || acc.FinalText() != "" {
+		t.Fatal("current Activity thought continuation lost its barrier")
+	}
+	checkpoint := acc
+	acc.ResetActivity()
+	acc.ObserveFrame("next-answer", "second answer")
+	if thought(true).Barrier || acc.FinalText() != "second answer" {
+		t.Fatal("prior Activity thought invalidated current answer")
+	}
+	if _, previous := checkpoint.activityThoughts["shared-id"]; !previous || len(acc.activityThoughts) != 0 {
+		t.Fatal("thought Activity reset changed its checkpoint or retained ownership")
+	}
+	acc.Reset()
+	acc.ObserveFrame("new-session-answer", "new Session answer")
+	if !thought(false).Barrier || acc.FinalText() != "" {
+		t.Fatal("new Session thought identity lost its barrier")
+	}
+}
+
+func TestFinalAssistantAccumulatorToolObservationIsScopedToActivity(t *testing.T) {
+	var acc FinalAssistantAccumulator
+	acc.ObserveFrame("old-tool", "current answer")
+	old := eventstream.ToolCallUpdate{ToolCallID: "old-tool", PreviouslyObserved: true}
+	if acc.ObserveUpdate(old).Barrier || acc.FinalText() != "current answer" {
+		t.Fatal("old tool revision invalidated an assistant with the same ID")
+	}
+	tool := eventstream.ToolCallUpdate{ToolCallID: "current-tool"}
+	if !acc.ObserveUpdate(tool).Barrier || acc.FinalText() != "" {
+		t.Fatal("new sparse tool lost its barrier")
+	}
+	acc.ObserveFrame("answer-two", "second answer")
+	tool.PreviouslyObserved = true
+	if !acc.ObserveUpdate(&tool).Barrier || acc.FinalText() != "" {
+		t.Fatal("current sparse tool continuation lost its barrier")
+	}
+	checkpoint := acc
+	acc.ResetActivity()
+	acc.ObserveFrame("answer-three", "third answer")
+	if acc.ObserveUpdate(tool).Barrier || acc.FinalText() != "third answer" {
+		t.Fatal("prior Activity tool revision invalidated current answer")
+	}
+	if _, known := checkpoint.activityTools[tool.ToolCallID]; !known || len(acc.activityTools) != 0 {
+		t.Fatal("tool Activity reset corrupted checkpoint or retained ownership")
+	}
+	acc.Reset()
+	acc.ObserveFrame("new-answer", "new Session answer")
+	tool.PreviouslyObserved = false
+	if !acc.ObserveUpdate(tool).Barrier {
+		t.Fatal("new Session tool identity lost its barrier")
+	}
+	acc.ObserveFrame("stable-answer", "stable answer")
+	if !acc.ObserveUpdate(eventstream.ToolCallUpdate{ToolCallID: "old-tool"}).Barrier {
+		t.Fatal("stable v1 tool without observation lost its barrier")
+	}
+}
+
+func TestFinalAssistantAccumulatorOpaqueAliasesStayDistinctAcrossActivities(t *testing.T) {
+	var acc FinalAssistantAccumulator
+	generated := acc.ObserveFrame("", "original").MessageID
+	if got := acc.ObserveFrame(" answer ", " suffix"); got.MessageID != generated {
+		t.Fatal("anonymous v1 segment lost its provider alias")
+	}
+	acc.ResetActivity()
+	if got := acc.ObserveReplacement("answer", "current"); got.MessageID != "answer" {
+		t.Fatalf("distinct provider identity adopted old alias: %#v", got)
+	}
+	if got := acc.ObserveReplacement(" answer ", "old revision"); got.MessageID != generated || acc.FinalText() != "current" {
+		t.Fatalf("old opaque alias stole current result: %#v final=%q", got, acc.FinalText())
+	}
+	acc.Reset()
+	if got := acc.ObserveReplacement(" answer ", "new Session"); got.MessageID != " answer " || acc.FinalText() != "new Session" {
+		t.Fatalf("full reset retained prior Session alias: %#v", got)
+	}
+}

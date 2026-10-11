@@ -187,6 +187,15 @@ func (c *approvalCoordinator) resolveLocked(pending *pendingApproval, decision A
 	if !c.isActiveLocked(pending) {
 		return c.approvalNotActiveErrorLocked(pending.id)
 	}
+	var permission *session.ProtocolApproval
+	if pending.request != nil {
+		permission = pending.request.Approval
+	}
+	response, err := approval.ResolveNativeResponse(permission, agent.ApprovalResponse{Outcome: decision.Outcome, OptionID: decision.OptionID, Approved: decision.Approved, Reason: decision.Reason, ReviewText: decision.ReviewText})
+	if err != nil {
+		return &Error{Kind: KindValidation, Code: CodeInvalidRequest, UserVisible: true, Message: "gateway: invalid approval decision", Cause: err}
+	}
+	decision.Outcome, decision.OptionID, decision.Approved = response.Outcome, response.OptionID, response.Approved
 	if err := c.settleLocked(pending, "resolved"); err != nil {
 		return err
 	}

@@ -246,15 +246,15 @@ func protocolCanonicalEventToolName(event *session.Event, update *session.Protoc
 	}
 	callID := ""
 	if update != nil {
-		callID = strings.TrimSpace(update.ToolCallID)
+		callID = update.ToolCallID
 	}
 	if callID == "" && event.Tool != nil {
-		callID = strings.TrimSpace(event.Tool.ID)
+		callID = event.Tool.ID
 	}
 	calls := event.Message.ToolCalls()
 	if callID != "" {
 		for _, call := range calls {
-			if strings.TrimSpace(call.ID) == callID {
+			if call.ID == callID {
 				return strings.TrimSpace(call.Name)
 			}
 		}

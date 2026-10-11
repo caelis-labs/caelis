@@ -26,7 +26,7 @@ func TestNoticeWirePreservesOrderAcrossThoughtAndToolBoundaries(t *testing.T) {
 		}
 		var request acpsdk.InitializeRequest
 		_ = json.Unmarshal(raw, &request)
-		capability <- string(request.ClientCapabilities.Meta[sessionNoticeCapability]) == "true"
+		capability <- request.ClientCapabilities.Session != nil && request.ClientCapabilities.Session.Notices != nil
 		return acpsdk.InitializeResponse{ProtocolVersion: acpsdk.ProtocolVersionNumber}, nil
 	}, remote, remote)
 	defer peer.Close()
@@ -36,18 +36,15 @@ func TestNoticeWirePreservesOrderAcrossThoughtAndToolBoundaries(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !<-capability {
-		t.Fatal("notice fallback capability was not advertised")
+		t.Fatal("standard notices capability was not advertised")
 	}
-	for i, update := range []string{
+	for _, update := range []string{
 		`{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":"Thinking"}}`,
 		`{"sessionUpdate":"notice","severity":"info","title":"Review approved"}`,
 		`{"sessionUpdate":"notice","severity":"info","title":"Review approved"}`,
 		`{"sessionUpdate":"tool_call","toolCallId":"send-1","title":"SendMessage","rawInput":{"to":"parent","message":"report"}}`,
 	} {
 		method := MethodSessionUpdate
-		if i == 2 {
-			method = sessionNoticeMethod
-		}
 		if err := peer.SendNotification(ctx, method, json.RawMessage(`{"sessionId":"child","update":`+update+`}`)); err != nil {
 			t.Fatal(err)
 		}
@@ -78,8 +75,8 @@ func TestNoticeWirePreservesOrderAcrossThoughtAndToolBoundaries(t *testing.T) {
 	}
 }
 
-func TestNoticeDraftAndNegotiatedFallbackShareDecoder(t *testing.T) {
-	for _, method := range []string{MethodSessionUpdate, sessionNoticeMethod} {
+func TestStandardNoticeUsesSDKDecoder(t *testing.T) {
+	for _, method := range []string{MethodSessionUpdate} {
 		t.Run(method, func(t *testing.T) {
 			var updates []UpdateEnvelope
 			c := &Client{cfg: Config{OnUpdate: func(env UpdateEnvelope) { updates = append(updates, env) }}}
@@ -106,7 +103,7 @@ func TestNoticeDraftAndNegotiatedFallbackShareDecoder(t *testing.T) {
 	}
 }
 
-func TestNoticeRejectsMissingRequiredFieldsAndFallbackNonNotice(t *testing.T) {
+func TestNoticeRejectsMissingRequiredFieldsAndObsoleteExtension(t *testing.T) {
 	for _, raw := range []string{
 		`{"sessionUpdate":"notice","title":"title"}`,
 		`{"sessionUpdate":"notice","severity":null,"title":"title"}`,
@@ -118,5 +115,5 @@ func TestNoticeRejectsMissingRequiredFieldsAndFallbackNonNotice(t *testing.T) {
 		}
 	}
 	c := &Client{cfg: Config{OnUpdate: func(UpdateEnvelope) { t.Fatal("extension accepted non-notice") }}}
-	_, _ = c.handleNotification(sessionNoticeMethod, json.RawMessage(`{"sessionId":"child","update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":"forged"}}}`))
+	_, _ = c.handleNotification("_session/notice", json.RawMessage(`{"sessionId":"child","update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":"forged"}}}`))
 }

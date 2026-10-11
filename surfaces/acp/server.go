@@ -77,6 +77,9 @@ type serverAgent struct {
 }
 
 func (a *serverAgent) Initialize(ctx context.Context, req acpsdk.InitializeRequest) (acpsdk.InitializeResponse, error) {
+	if req.ProtocolVersion < 1 {
+		return acpsdk.InitializeResponse{}, acpsdk.NewInvalidParams(map[string]any{"error": "ACP protocolVersion must be positive"})
+	}
 	resp, err := a.agent.Initialize(ctx, req)
 	return resp, productMethodError(acpsdk.AgentMethodInitialize, err)
 }

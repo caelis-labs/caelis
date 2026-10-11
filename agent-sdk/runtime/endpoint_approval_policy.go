@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -10,6 +11,26 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
+
+func preserveEndpointApproval(request agent.ApprovalRequest, permission *session.ProtocolApproval) agent.ApprovalRequest {
+	if permission == nil {
+		return request
+	}
+	exact := session.CloneProtocolApproval(*permission)
+	request.Approval = &exact
+	request.Call.ID = exact.ToolCall.ID
+	request.Call.Name, request.Tool.Name, request.Call.Input = "", "", nil
+	if exact.ToolCall.NamePresent == nil || *exact.ToolCall.NamePresent {
+		request.Call.Name, request.Tool.Name = exact.ToolCall.Name, exact.ToolCall.Name
+	}
+	if len(exact.ToolCall.RawInput) > 0 {
+		request.Call.Input, _ = json.Marshal(exact.ToolCall.RawInput)
+	}
+	if request.Origin != nil {
+		request.Origin.ToolCallID = exact.ToolCall.ID
+	}
+	return request
+}
 
 // resolveEndpointApprovalByPolicy handles process-owned policy decisions for
 // ACP controllers, participants, and spawned subagents before they can enter

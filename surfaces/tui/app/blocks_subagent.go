@@ -48,6 +48,11 @@ type SubagentEvent struct {
 	// It is presentation-only and lets the compact row reuse the existing
 	// whole-row child-workspace navigation without parsing its rendered label.
 	SourceCallID string
+	// Communication repair stays within its original display scope and typed
+	// source. Canonical mail observations continue to use their existing dedupe.
+	communicationOwner       string
+	communicationSourceKind  string
+	communicationReplacement bool
 
 	// ActiveBuffer is transient UI state derived from Text for streaming
 	// narrative rendering. It is not canonical session data.
@@ -72,9 +77,12 @@ type SubagentEvent struct {
 	ExplorationVerb string
 	Args            string
 	// StartArgs keeps live exploration rows stable when final summaries arrive.
-	StartArgs       string
-	FullArgs        string
-	Output          string
+	StartArgs string
+	FullArgs  string
+	Output    string
+	// DiffSummary displays typed affected-file operations separately from the
+	// original invocation Args. It belongs to the current content collection.
+	DiffSummary     string
 	OutputMessageID string
 	OutputMessage   string
 	// Activity is the latest deterministic child tool signal shown only while
@@ -210,8 +218,6 @@ func mergeSubagentNarrativeChunk(existing string, existingMessageID string, exis
 	if incoming == "" {
 		return existing, existingMessage
 	}
-	existingMessageID = strings.TrimSpace(existingMessageID)
-	incomingMessageID = strings.TrimSpace(incomingMessageID)
 	if existingMessageID != "" && incomingMessageID != "" && existingMessageID != incomingMessageID {
 		return joinSubagentNarrativeMessages(existing, incoming), incoming
 	}
@@ -220,6 +226,16 @@ func mergeSubagentNarrativeChunk(existing string, existingMessageID string, exis
 	// the current-message accumulator used when reconciling the parent result;
 	// it must not turn the Surface into a second cumulative-stream normalizer.
 	return existing + incoming, existingMessage + incoming
+}
+
+// replaceSubagentNarrativeChunk replaces only the identified current child
+// message, preserving any earlier messages in the parent's Spawn display.
+func replaceSubagentNarrativeChunk(existing, existingMessageID, existingMessage, incoming, incomingMessageID string) (string, string) {
+	if existingMessageID != "" && incomingMessageID != "" && existingMessageID != incomingMessageID {
+		return joinSubagentNarrativeMessages(existing, incoming), incoming
+	}
+	prefix := strings.TrimSuffix(existing, existingMessage)
+	return prefix + incoming, incoming
 }
 
 // joinSubagentNarrativeMessages preserves the semantic boundary between two

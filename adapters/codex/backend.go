@@ -20,7 +20,8 @@ const adapterVersion = "0.1.0"
 // Backend is one shared Codex app-server JSON-RPC generation. It multiplexes
 // independent ACP connections and enforces a single live owner per Thread.
 type Backend struct {
-	rpc *appserver.Connection
+	rpc             *appserver.Connection
+	nativeUserAgent string
 
 	mu     sync.Mutex
 	routes map[string]*sessionRoute
@@ -41,6 +42,7 @@ func NewBackend(ctx context.Context, input io.Reader, output io.Writer) (*Backen
 	defer cancel()
 	var response struct {
 		CodexHome string `json:"codexHome"`
+		UserAgent string `json:"userAgent"`
 	}
 	err = rpc.Request(initCtx, "initialize", map[string]any{
 		"clientInfo": map[string]any{
@@ -52,6 +54,7 @@ func NewBackend(ctx context.Context, input io.Reader, output io.Writer) (*Backen
 		_ = rpc.Close()
 		return nil, fmt.Errorf("codex adapter: initialize app-server: %w", err)
 	}
+	b.nativeUserAgent = response.UserAgent
 	return b, nil
 }
 
@@ -204,7 +207,9 @@ func appServerFallbackResponse(method string) (any, error) {
 	case "item/permissions/requestApproval":
 		return map[string]any{"permissions": map[string]any{}, "scope": "turn", "strictAutoReview": false}, nil
 	case "item/tool/requestUserInput":
-		return map[string]any{"answers": map[string]any{}}, nil
+		// No shared structured-input owner exists yet. An empty successful
+		// response would claim that the user answered a question never shown.
+		return nil, &appserver.Error{Code: -32601, Message: "unsupported method: " + method + ": structured user input is unavailable"}
 	case "mcpServer/elicitation/request":
 		return map[string]any{"action": "cancel", "content": nil, "_meta": nil}, nil
 	default:

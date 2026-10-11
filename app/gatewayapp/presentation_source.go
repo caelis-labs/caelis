@@ -13,6 +13,7 @@ import (
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/modelcatalog"
 	"github.com/caelis-labs/caelis/control/modelconfig"
+	"github.com/caelis-labs/caelis/control/sessionvisibility"
 	controller "github.com/caelis-labs/caelis/internal/acpagentbridge/controller"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 )
@@ -76,6 +77,18 @@ func newGatewayPresentationSource(deps gatewayPresentationSourceDeps, fallbackMo
 }
 
 func (p gatewayPresentationSource) SessionModes(ctx context.Context, session session.Session) (*appserver.PresentationModeState, error) {
+	if sessionvisibility.IsApplicationSession(session) {
+		if p.runtimeStateFn == nil {
+			return nil, fmt.Errorf("gatewayapp: Session Runtime state is unavailable")
+		}
+		state, err := p.runtimeStateFn(ctx, session.SessionRef)
+		if err != nil {
+			return nil, err
+		}
+		// Application permissions are creation-bound. Present their effective
+		// policy without offering the ordinary Host policy mutation path.
+		return &appserver.PresentationModeState{CurrentModeID: state.SessionMode}, nil
+	}
 	if p.fullAccessMode() {
 		return &appserver.PresentationModeState{CurrentModeID: dangerouslySkipPermissionsModeLabel}, nil
 	}
@@ -113,7 +126,7 @@ func (p gatewayPresentationSource) SessionConfigOptions(ctx context.Context, ses
 		return nil, err
 	}
 	options = append(options, modelOptions...)
-	if p.fallbackConfig != nil {
+	if p.fallbackConfig != nil && !sessionvisibility.IsApplicationSession(session) {
 		fallback, err := p.fallbackConfig.SessionConfigOptions(ctx, session)
 		if err != nil {
 			return nil, err
@@ -183,6 +196,10 @@ func (p gatewayPresentationSource) AvailableCommands(ctx context.Context, sessio
 			return nil, err
 		}
 		hasActiveSession = true
+	}
+	if hasActiveSession && sessionvisibility.IsApplicationSession(activeSession) {
+		spec, _ := controlprompt.LookupACP("compact")
+		return []appserver.PresentationCommand{{Name: spec.Name, Description: spec.Description}}, nil
 	}
 	var bindingStatus agentbinding.Status
 	boundProfiles := map[string]agentbinding.HandleStatus{}

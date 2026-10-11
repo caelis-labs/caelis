@@ -31,7 +31,7 @@ func (*controlCommandBackend) CanRecoverControlCommand(action appserver.Action) 
 
 func recoverableACPCommandAction(action appserver.Action) bool {
 	switch action {
-	case appserver.ActionACPAgentPrepare, appserver.ActionACPAgentPrepareAuth:
+	case appserver.ActionACPAgentPrepare, appserver.ActionACPAgentPrepareAuth, appserver.ActionConversationInteraction:
 		return true
 	default:
 		return false
@@ -48,6 +48,9 @@ func (s *controlCommandBackend) RecoverControlCommand(
 	intent appserver.OperationIntent,
 	_ any,
 ) (appserver.CommandResult, bool, error) {
+	if intent.Action == appserver.ActionConversationInteraction {
+		return s.recoverControlInteraction(ctx, intent)
+	}
 	if !recoverableACPCommandAction(intent.Action) {
 		return appserver.CommandResult{}, false, nil
 	}

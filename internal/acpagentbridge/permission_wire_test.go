@@ -2,6 +2,7 @@ package acpagentbridge
 
 import (
 	"context"
+	"encoding/json"
 	"reflect"
 	"testing"
 
@@ -10,6 +11,34 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 )
+
+func TestSDKPermissionWireKeepsStructuredDiffReadableAndOptionsExact(t *testing.T) {
+	t.Parallel()
+	changes := []session.ProtocolDiffChange{{Operation: "modify", Path: " exact file.txt "}}
+	patch := "-old\r\n+new\r\n"
+	approval := &session.ProtocolApproval{ToolCall: session.ProtocolToolCall{ID: "edit", Content: []session.ProtocolToolCallContent{{Type: "diff", Changes: &changes, Patch: &session.ProtocolDiffPatch{Format: "git_patch", Text: patch}}}}, Options: []session.ProtocolApprovalOption{{ID: "original-allow", Name: "Allow once", Kind: "allow_once"}, {ID: "original-deny", Name: "Reject", Kind: "reject_once"}}}
+	wire, err := sdkPermissionRequestFromApproval(session.SessionRef{SessionID: "s"}, approval, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := wire.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(wire.ToolCall.Content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var content []eventstream.ToolCallContent
+	if err := json.Unmarshal(raw, &content); err != nil {
+		t.Fatal(err)
+	}
+	if content[0].Content.(map[string]any)["text"] != "modify  exact file.txt \n"+patch || string(wire.Options[0].OptionId) != "original-allow" || string(wire.Options[1].OptionId) != "original-deny" {
+		t.Fatalf("wire changed display/options: %#v", wire)
+	}
+	if approval.ToolCall.Content[0].Changes == nil || approval.ToolCall.Content[0].NewText != "" {
+		t.Fatal("stable projection mutated source diff")
+	}
+}
 
 func TestEmitControlPermissionEnvelopePreservesStandardWire(t *testing.T) {
 	t.Parallel()

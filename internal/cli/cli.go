@@ -203,6 +203,7 @@ func runWithProductClientOpener(
 		controlTLSCert   = fs.String("control-tls-cert", envOr("CAELIS_CONTROL_TLS_CERT", ""), "TLS certificate file for the Control server")
 		controlTLSKey    = fs.String("control-tls-key", envOr("CAELIS_CONTROL_TLS_KEY", ""), "TLS private key file for the Control server")
 		acpAdapter       = fs.String("adapter", "", "Serve a built-in ACP adapter (codex)")
+		acpDraft         = fs.String("acp-draft", "", "Experimental asynchronous ACP; requires acp and exact schema-v2.0.0-alpha.8")
 		adapterGrantFile = fs.String("adapter-grant-file", "", "Internal one-use built-in adapter channel grant")
 	)
 	if err := fs.Parse(args); err != nil {
@@ -210,6 +211,11 @@ func runWithProductClientOpener(
 			return nil
 		}
 		return err
+	}
+	if strings.TrimSpace(*acpDraft) != "" {
+		if !acpSubcommand || strings.TrimSpace(*prompt) != "" || fs.NArg() != 0 || strings.TrimSpace(*acpDraft) != surfaceacp.DraftSchemaTag {
+			return errors.New("cli: --acp-draft requires the acp subcommand, exact schema-v2.0.0-alpha.8, and accepts no prompt")
+		}
 	}
 	if attachSubcommand {
 		if strings.TrimSpace(*controlURL) == "" || strings.TrimSpace(*sessionID) == "" || *embeddedHost || strings.TrimSpace(*prompt) != "" || fs.NArg() != 0 || *dangerouslySkipPermissions {
@@ -222,6 +228,7 @@ func runWithProductClientOpener(
 		return err
 	}
 	if acpSubcommand {
+
 		workspaceKey = envOr(acpagentenv.EnvWorkspaceKey, workspaceKey)
 		workspaceCWD = envOr(acpagentenv.EnvWorkspaceCWD, workspaceCWD)
 	}
@@ -321,7 +328,7 @@ func runWithProductClientOpener(
 			Token: strings.TrimSpace(os.Getenv("CAELIS_CONTROL_TOKEN")), TokenFile: strings.TrimSpace(*controlTokenFile),
 			StoreDir: cfg.StoreDir, WorkspaceKey: cfg.WorkspaceKey, WorkspaceCWD: cfg.WorkspaceCWD,
 			UserID: cfg.UserID, AppName: cfg.AppName,
-		}, strings.TrimSpace(*acpAdapter), strings.TrimSpace(*adapterGrantFile), stdin, stdout)
+		}, strings.TrimSpace(*acpAdapter), strings.TrimSpace(*adapterGrantFile), strings.TrimSpace(*acpDraft), stdin, stdout)
 	}
 	if strings.TrimSpace(*adapterGrantFile) != "" {
 		return errors.New("cli: --adapter-grant-file requires caelis acp --adapter")
@@ -420,6 +427,16 @@ func runWithProductClientOpener(
 		}
 	}
 	if acpSubcommand {
+		if strings.TrimSpace(*acpDraft) != "" {
+			agent, err := surfaceacp.NewDraftFromClients(ctx, surfaceacp.ClientsConfig{
+				Clients: product.Clients, AppName: product.Workspace.AppName, UserID: product.Workspace.UserID,
+				WorkspaceKey: product.Workspace.WorkspaceKey, WorkspaceCWD: product.Workspace.WorkspaceCWD,
+			})
+			if err != nil {
+				return err
+			}
+			return surfaceacp.ServeDraftProductStdio(ctx, agent, stdin, stdout)
+		}
 		agent, err := surfaceacp.NewFromClients(surfaceacp.ClientsConfig{
 			Clients: product.Clients,
 			AppName: product.Workspace.AppName, UserID: product.Workspace.UserID,

@@ -17,42 +17,55 @@ func protocolUpdateFromContentChunk(chunk client.ContentChunk) (*session.Protoco
 		}
 	}
 	return cloneProtocolUpdate(session.ProtocolUpdate{
-		SessionUpdate: strings.TrimSpace(chunk.SessionUpdate),
-		Content:       content,
-		MessageID:     strings.TrimSpace(chunk.MessageID),
-		Meta:          chunk.Meta,
+		SessionUpdate:      strings.TrimSpace(chunk.SessionUpdate),
+		Content:            content,
+		MessageID:          chunk.MessageID,
+		Replacement:        chunk.Replacement,
+		PreviouslyObserved: chunk.PreviouslyObserved,
+		Meta:               chunk.Meta,
+		ReplacedFields:     narrativeReplacedFields(chunk.MetaPresent),
 	}), nil
+}
+
+func narrativeReplacedFields(metaPresent bool) []string {
+	if metaPresent {
+		return []string{"_meta"}
+	}
+	return nil
 }
 
 func protocolUpdateFromToolCall(call client.ToolCall) *session.ProtocolUpdate {
 	return cloneProtocolUpdate(session.ProtocolUpdate{
-		SessionUpdate: call.SessionUpdate,
-		ToolCallID:    call.ToolCallID,
-		Name:          call.Name,
-		Title:         call.Title,
-		Kind:          call.Kind,
-		Status:        call.Status,
-		RawInput:      session.NormalizeProtocolRawMap(call.RawInput),
-		RawOutput:     session.NormalizeProtocolRawMap(call.RawOutput),
-		Content:       protocolToolContentFromWire(call.Content),
-		Locations:     protocolLocationsFromWire(call.Locations),
-		Meta:          call.Meta,
+		SessionUpdate:      call.SessionUpdate,
+		PreviouslyObserved: call.PreviouslyObserved,
+		ToolCallID:         call.ToolCallID,
+		Name:               call.Name,
+		Title:              call.Title,
+		Kind:               call.Kind,
+		Status:             call.Status,
+		RawInput:           session.NormalizeProtocolRawMap(call.RawInput),
+		RawOutput:          session.NormalizeProtocolRawMap(call.RawOutput),
+		Content:            protocolToolContentFromWire(call.Content),
+		Locations:          protocolLocationsFromWire(call.Locations),
+		Meta:               call.Meta,
 	})
 }
 
 func protocolUpdateFromToolCallUpdate(update client.ToolCallUpdate) *session.ProtocolUpdate {
 	return cloneProtocolUpdate(session.ProtocolUpdate{
-		SessionUpdate: update.SessionUpdate,
-		ToolCallID:    update.ToolCallID,
-		Name:          update.Name,
-		Title:         stringValue(update.Title),
-		Kind:          stringValue(update.Kind),
-		Status:        stringValue(update.Status),
-		RawInput:      session.NormalizeProtocolRawMap(update.RawInput),
-		RawOutput:     session.NormalizeProtocolRawMap(update.RawOutput),
-		Content:       protocolToolContentFromWire(update.Content),
-		Locations:     protocolLocationsFromWire(update.Locations),
-		Meta:          update.Meta,
+		SessionUpdate:      update.SessionUpdate,
+		PreviouslyObserved: update.PreviouslyObserved,
+		ToolCallID:         update.ToolCallID,
+		Name:               update.Name,
+		Title:              stringValue(update.Title),
+		Kind:               stringValue(update.Kind),
+		Status:             stringValue(update.Status),
+		RawInput:           session.NormalizeProtocolRawMap(update.RawInput),
+		RawOutput:          session.NormalizeProtocolRawMap(update.RawOutput),
+		Content:            protocolToolContentFromWire(update.Content),
+		Locations:          protocolLocationsFromWire(update.Locations),
+		Meta:               update.Meta,
+		ReplacedFields:     replacedToolFields(update.RawPatch),
 	})
 }
 
@@ -84,6 +97,9 @@ func protocolToolContentFromWire(in []client.ToolCallContent) []session.Protocol
 			Path:       item.Path,
 			OldText:    cloneProtocolString(item.OldText),
 			NewText:    item.NewText,
+			Changes:    session.CloneProtocolDiffChanges(item.Changes),
+			Patch:      session.CloneProtocolDiffPatch(item.Patch),
+			Meta:       session.CloneState(item.Meta),
 		})
 	}
 	return out
@@ -140,4 +156,14 @@ func stringValue(in *string) string {
 		return ""
 	}
 	return *in
+}
+
+func replacedToolFields(patch map[string]json.RawMessage) []string {
+	var fields []string
+	for _, field := range []string{"name", "title", "kind", "status", "rawInput", "rawOutput", "content", "locations", "_meta"} {
+		if _, present := patch[field]; present {
+			fields = append(fields, field)
+		}
+	}
+	return fields
 }

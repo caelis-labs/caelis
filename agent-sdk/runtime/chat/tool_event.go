@@ -330,6 +330,9 @@ func cloneEventToolContent(in []session.EventToolContent) []session.EventToolCon
 			Path:       strings.TrimSpace(item.Path),
 			OldText:    oldText,
 			NewText:    item.NewText,
+			Changes:    session.CloneProtocolDiffChanges(item.Changes),
+			Patch:      session.CloneProtocolDiffPatch(item.Patch),
+			Meta:       session.CloneState(item.Meta),
 		})
 	}
 	return out

@@ -33,10 +33,11 @@ type Config struct {
 // ChannelGrantFile is the one-use launch material passed to an internal stdio
 // proxy. The file contains no general Control bearer credential.
 type ChannelGrantFile struct {
-	SchemaVersion int    `json:"schema_version"`
-	Endpoint      string `json:"endpoint"`
-	AdapterID     string `json:"adapter_id"`
-	Token         string `json:"token"`
+	SchemaVersion  int    `json:"schema_version"`
+	Endpoint       string `json:"endpoint"`
+	AdapterID      string `json:"adapter_id"`
+	Token          string `json:"token"`
+	ACPDraftSchema string `json:"acp_draft_schema,omitempty"`
 }
 
 const channelGrantFileSchemaVersion = 1
@@ -47,6 +48,7 @@ func WriteChannelGrantFile(dir string, grant ChannelGrantFile) (string, error) {
 	grant.Endpoint = strings.TrimSpace(grant.Endpoint)
 	grant.AdapterID = strings.ToLower(strings.TrimSpace(grant.AdapterID))
 	grant.Token = strings.TrimSpace(grant.Token)
+	grant.ACPDraftSchema = strings.TrimSpace(grant.ACPDraftSchema)
 	if grant.Endpoint == "" || grant.AdapterID == "" || grant.Token == "" {
 		return "", errors.New("adapterhostclient: complete channel grant is required")
 	}

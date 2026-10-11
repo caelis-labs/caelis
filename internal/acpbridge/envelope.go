@@ -17,8 +17,12 @@ func envelopeWithNarrativeText(env *eventstream.Envelope, updateType string, tex
 	out := eventstream.CloneEnvelope(*env)
 	out.Kind = eventstream.KindSessionUpdate
 	out.Update = eventstream.ContentChunk{
-		SessionUpdate: strings.TrimSpace(updateType),
-		MessageID:     strings.TrimSpace(messageID),
+		SessionUpdate:      strings.TrimSpace(updateType),
+		MessageID:          messageID,
+		Replacement:        narrativeEnvelopeReplacement(env.Update),
+		PreviouslyObserved: narrativeEnvelopePreviouslyObserved(env.Update),
+		Meta:               eventstream.UpdateMeta(env.Update),
+		ReplacedFields:     narrativeEnvelopeReplacedFields(env.Update),
 		Content: eventstream.TextContent{
 			Type: "text",
 			Text: text,
@@ -30,13 +34,45 @@ func envelopeWithNarrativeText(env *eventstream.Envelope, updateType string, tex
 	return &out
 }
 
+func narrativeEnvelopePreviouslyObserved(update eventstream.Update) bool {
+	switch typed := update.(type) {
+	case eventstream.ContentChunk:
+		return typed.PreviouslyObserved
+	case *eventstream.ContentChunk:
+		return typed != nil && typed.PreviouslyObserved
+	}
+	return false
+}
+
+func narrativeEnvelopeReplacedFields(update eventstream.Update) []string {
+	switch typed := update.(type) {
+	case eventstream.ContentChunk:
+		return append([]string(nil), typed.ReplacedFields...)
+	case *eventstream.ContentChunk:
+		if typed != nil {
+			return append([]string(nil), typed.ReplacedFields...)
+		}
+	}
+	return nil
+}
+
+func narrativeEnvelopeReplacement(update eventstream.Update) bool {
+	switch typed := update.(type) {
+	case eventstream.ContentChunk:
+		return typed.Replacement
+	case *eventstream.ContentChunk:
+		return typed != nil && typed.Replacement
+	}
+	return false
+}
+
 func narrativeEnvelopeMessageID(update eventstream.Update) string {
 	switch typed := update.(type) {
 	case eventstream.ContentChunk:
-		return strings.TrimSpace(typed.MessageID)
+		return typed.MessageID
 	case *eventstream.ContentChunk:
 		if typed != nil {
-			return strings.TrimSpace(typed.MessageID)
+			return typed.MessageID
 		}
 	}
 	return ""

@@ -27,7 +27,7 @@ type participantTurnTranscriptResult struct {
 
 func (m *Model) applyTranscriptNarrativeToParticipantTurn(event TranscriptEvent) (tea.Model, tea.Cmd) {
 	text := tuikit.SanitizeLogText(transcriptNarrativeText(event))
-	if text == "" && !event.Final {
+	if text == "" && !event.Final && !event.Replacement {
 		return m, nil
 	}
 	block := m.ensureParticipantTurnBlock(transcriptParticipantTurnKey(event), participantTurnTranscriptActor(event))
@@ -162,13 +162,15 @@ func applyTranscriptNarrativeToParticipantTurn(
 		return participantTurnTranscriptResult{changed: true}
 	}
 	text := tuikit.SanitizeLogText(transcriptNarrativeText(event))
-	if text == "" && !event.Final {
+	if text == "" && !event.Final && !event.Replacement {
 		return participantTurnTranscriptResult{}
 	}
 	source := narrativeSourceIdentityFromTranscriptEvent(event)
 	switch event.NarrativeKind {
 	case TranscriptNarrativeReasoning:
-		if policy.appendFinalNarrative || !event.Final {
+		if event.Replacement && !event.Final {
+			block.ReplaceStreamEvent(SEReasoning, text, source, event.OccurredAt)
+		} else if policy.appendFinalNarrative || !event.Final {
 			if text != "" {
 				block.AppendStreamEvent(SEReasoning, text, source, event.OccurredAt)
 			}
@@ -179,6 +181,8 @@ func applyTranscriptNarrativeToParticipantTurn(
 		if event.Final && !policy.appendFinalNarrative {
 			closeLatestReasoningTiming(block.Events, event.OccurredAt)
 			block.ReplaceFinalStreamEvent(SEAssistant, text, source, event.OccurredAt)
+		} else if event.Replacement {
+			block.ReplaceStreamEvent(SEAssistant, text, source, event.OccurredAt)
 		} else if text != "" {
 			block.AppendStreamEvent(SEAssistant, text, source, event.OccurredAt)
 		}

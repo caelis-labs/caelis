@@ -3,6 +3,7 @@ package history
 import (
 	"encoding/json"
 	"reflect"
+	"slices"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -139,10 +140,10 @@ func transcriptDialogue(e *session.Event) bool {
 func mergeTranscriptText(a, b *session.Event) bool {
 	ua, ub := session.ProtocolUpdateOf(a), session.ProtocolUpdateOf(b)
 	if ua == nil || ub == nil || ua.SessionUpdate != ub.SessionUpdate ||
-		a.Visibility != session.VisibilityUIOnly || b.Visibility != session.VisibilityUIOnly ||
+		a.Visibility != b.Visibility || (a.Visibility != session.VisibilityUIOnly && a.Visibility != session.VisibilityMirror) ||
 		!transcriptDialogue(a) || transcriptTurn(a) != transcriptTurn(b) ||
 		session.EventMessageID(a) != session.EventMessageID(b) || !reflect.DeepEqual(a.Actor, b.Actor) ||
-		!reflect.DeepEqual(a.ChildOrigin, b.ChildOrigin) {
+		!reflect.DeepEqual(a.ChildOrigin, b.ChildOrigin) || !reflect.DeepEqual(a.Scope, b.Scope) {
 		return false
 	}
 	var ca, cb struct {
@@ -155,11 +156,22 @@ func mergeTranscriptText(a, b *session.Event) bool {
 		return false
 	}
 	text := session.EventText(a) + session.EventText(b)
+	if ub.Replacement {
+		text = session.EventText(b)
+	}
+	if ub.Replacement || slices.Contains(ub.ReplacedFields, "_meta") {
+		a.Meta = session.CloneEvent(b).Meta
+		a.Protocol.Update.Meta = session.CloneEvent(b).Protocol.Update.Meta
+		if slices.Contains(ub.ReplacedFields, "_meta") && !slices.Contains(ua.ReplacedFields, "_meta") {
+			a.Protocol.Update.ReplacedFields = append(a.Protocol.Update.ReplacedFields, "_meta")
+		}
+	}
 	a.Text = text
 	if a.Message != nil {
 		message := model.NewTextMessage(a.Message.Role, text)
 		a.Message = &message
 	}
-	a.Protocol.Update.Content = session.ProtocolTextContent(text)
+	a.Protocol.Update.Content = map[string]any{"type": "text", "text": text}
+	a.Protocol.Update.Replacement = ua.Replacement || ub.Replacement
 	return true
 }

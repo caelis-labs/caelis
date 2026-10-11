@@ -33,6 +33,7 @@ type ToolProjectionInput struct {
 	// StatusExplicit distinguishes a producer-supplied lifecycle value from
 	// the Surface default used to materialize a sparse tool_call_update.
 	StatusExplicit bool
+	ReplacedFields []string
 
 	RawInput  map[string]any
 	RawOutput any
@@ -318,8 +319,8 @@ func projectACPSessionUpdate(env eventstream.Envelope, meta map[string]any, scop
 			OccurredAt:        env.OccurredAt,
 			Meta:              meta,
 			CallID:            update.ToolCallID,
-			ToolName:          ToolNameFromUpdate(update.Name, meta),
-			ToolNameExplicit:  update.Name != nil,
+			ToolName:          toolPatchName(update, meta),
+			ToolNameExplicit:  update.Name != nil || hasReplacedField(update.ReplacedFields, "name"),
 			ToolKind:          kind,
 			ToolTitle:         title,
 			Status:            StringFromPtr(update.Status),
@@ -327,7 +328,8 @@ func projectACPSessionUpdate(env eventstream.Envelope, meta map[string]any, scop
 			RawInput:          RawMap(update.RawInput),
 			RawOutput:         update.RawOutput,
 			Content:           update.Content,
-			ContentPresent:    update.Content != nil,
+			ContentPresent:    update.Content != nil || hasReplacedField(update.ReplacedFields, "content"),
+			ReplacedFields:    append([]string(nil), update.ReplacedFields...),
 			Locations:         update.Locations,
 			Error:             ToolUpdateError(update),
 			GatewayProjection: GatewayProjection(meta),
@@ -397,7 +399,7 @@ func firstNonEmptyString(values ...string) string {
 
 func projectACPContentChunk(env eventstream.Envelope, update eventstream.ContentChunk, meta map[string]any, scope Scope, scopeID string) []Event {
 	text := ProtocolTextContent(update.Content)
-	if text == "" {
+	if text == "" && !update.Replacement {
 		return nil
 	}
 	switch strings.TrimSpace(update.SessionUpdate) {
@@ -417,9 +419,10 @@ func projectACPContentChunk(env eventstream.Envelope, update eventstream.Content
 				Actor:           firstNonEmptyString(source.Name, source.ID, strings.TrimSpace(env.Actor)),
 				OccurredAt:      env.OccurredAt,
 				Meta:            communicationMeta,
-				MessageID:       strings.TrimSpace(update.MessageID),
-				Text:            strings.TrimSpace(text),
+				MessageID:       update.MessageID,
+				Text:            text,
 				Final:           true,
+				Replacement:     update.Replacement,
 				AgentSourceKind: source.Kind,
 				AgentSourceID:   source.ID,
 				AgentSourceRole: source.Role,
@@ -434,9 +437,10 @@ func projectACPContentChunk(env eventstream.Envelope, update eventstream.Content
 			OccurredAt:    env.OccurredAt,
 			Meta:          meta,
 			NarrativeKind: NarrativeUser,
-			MessageID:     strings.TrimSpace(update.MessageID),
-			Text:          strings.TrimSpace(text),
+			MessageID:     update.MessageID,
+			Text:          text,
 			Final:         true,
+			Replacement:   update.Replacement,
 		}}
 	case eventstream.UpdateAgentMessage:
 		return []Event{{
@@ -447,9 +451,10 @@ func projectACPContentChunk(env eventstream.Envelope, update eventstream.Content
 			OccurredAt:    env.OccurredAt,
 			Meta:          meta,
 			NarrativeKind: NarrativeAssistant,
-			MessageID:     strings.TrimSpace(update.MessageID),
+			MessageID:     update.MessageID,
 			Text:          text,
 			Final:         env.Final,
+			Replacement:   update.Replacement,
 			Citations:     CitationsFromMeta(meta, text),
 		}}
 	case eventstream.UpdateAgentThought:
@@ -461,9 +466,10 @@ func projectACPContentChunk(env eventstream.Envelope, update eventstream.Content
 			OccurredAt:    env.OccurredAt,
 			Meta:          meta,
 			NarrativeKind: NarrativeReasoning,
-			MessageID:     strings.TrimSpace(update.MessageID),
+			MessageID:     update.MessageID,
 			Text:          text,
 			Final:         env.Final,
+			Replacement:   update.Replacement,
 		}}
 	case eventstream.UpdateCompact:
 		return []Event{{
@@ -477,6 +483,7 @@ func projectACPContentChunk(env eventstream.Envelope, update eventstream.Content
 			NoticeKind:    NoticeKindCompact,
 			Text:          CompactNoticeLabel,
 			Final:         true,
+			Replacement:   update.Replacement,
 		}}
 	default:
 		return nil
@@ -492,7 +499,12 @@ func projectACPApprovalReview(env eventstream.Envelope, meta map[string]any, sco
 		return Event{}, false
 	}
 	preview := ""
-	if surface != nil {
+	if subject := session.CloneApprovalSubject(env.ApprovalSubject); subject != nil {
+		if subject.Kind == "command" && len(subject.Targets) > 0 && subject.Targets[0].State == session.ApprovalFieldKnown {
+			preview = subject.Targets[0].Text
+		}
+	} else if surface != nil {
+		// Compatibility display for reviewed decisions written before subjects.
 		preview = surface.ApprovalCommandPreview(env.ApprovalReview.RawInput)
 	}
 	display := ApprovalReviewDisplayParts(env.ApprovalReview.Status, text)
@@ -701,4 +713,20 @@ func FirstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func hasReplacedField(fields []string, want string) bool {
+	for _, field := range fields {
+		if field == want {
+			return true
+		}
+	}
+	return false
+}
+
+func toolPatchName(update eventstream.ToolCallUpdate, meta map[string]any) string {
+	if update.Name == nil && hasReplacedField(update.ReplacedFields, "name") {
+		return ""
+	}
+	return ToolNameFromUpdate(update.Name, meta)
 }

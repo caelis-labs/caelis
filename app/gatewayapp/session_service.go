@@ -12,7 +12,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
-	"github.com/caelis-labs/caelis/internal/kernel"
 )
 
 // compactSession forces a model-backed checkpoint compaction for the given
@@ -24,23 +23,19 @@ func (s *runtimeComposition) compactSession(ctx context.Context, ref session.Ses
 	s.mu.RLock()
 	gw := s.gateway
 	s.mu.RUnlock()
-	if gw == nil || gw.Resolver() == nil {
+	if gw == nil {
 		return session.Session{}, fmt.Errorf("gatewayapp: resolver is unavailable")
 	}
-	resolved, err := gw.Resolver().ResolveTurn(ctx, kernel.TurnIntent{SessionRef: ref})
+	request := sdkruntime.CompactRequest{SessionRef: ref, ExpectedRevision: expectedRevision, Trigger: "manual"}
+	resolved, err := gw.ResolveCompaction(ctx, ref)
 	if err != nil {
 		return session.Session{}, err
 	}
+	request.Model, request.ServiceTier = resolved.RunRequest.AgentSpec.Model, resolved.RunRequest.AgentSpec.Request.ServiceTier
 	var compacted sdkruntime.CompactResult
 	err = s.withPlaced(ctx, ref, func(runCtx context.Context, engine *sdkruntime.Runtime) error {
 		var compactErr error
-		compacted, compactErr = engine.Compact(runCtx, sdkruntime.CompactRequest{
-			SessionRef:       ref,
-			ExpectedRevision: expectedRevision,
-			Model:            resolved.RunRequest.AgentSpec.Model,
-			ServiceTier:      resolved.RunRequest.AgentSpec.Request.ServiceTier,
-			Trigger:          "manual",
-		})
+		compacted, compactErr = engine.Compact(runCtx, request)
 		return compactErr
 	})
 	return compacted.Session, err

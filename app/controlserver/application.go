@@ -20,6 +20,15 @@ func applicationServerInfo(info appserver.ServerInfo, services appserver.AppServ
 	if !slices.Contains(info.Capabilities, appserver.CapabilityExecutionConfiguration) {
 		info.Capabilities = append(info.Capabilities, appserver.CapabilityExecutionConfiguration)
 	}
+	if !slices.Contains(info.Capabilities, appserver.CapabilityApprovalSubjects) {
+		info.Capabilities = append(info.Capabilities, appserver.CapabilityApprovalSubjects)
+	}
+	if !slices.Contains(info.Capabilities, appserver.CapabilityDisplayReplacements) {
+		info.Capabilities = append(info.Capabilities, appserver.CapabilityDisplayReplacements)
+	}
+	if appserver.SupportsConversationInteractions(services.Sessions) && !slices.Contains(info.Capabilities, appserver.CapabilityConversationInteractions) {
+		info.Capabilities = append(info.Capabilities, appserver.CapabilityConversationInteractions)
+	}
 	if services.Applications != nil {
 		for _, capability := range services.Applications.Capabilities() {
 			found := false
@@ -32,6 +41,12 @@ func applicationServerInfo(info appserver.ServerInfo, services appserver.AppServ
 		}
 		if services.Terminal != nil && !slices.Contains(info.Capabilities, appserver.CapabilityApplicationTerminalObservation) {
 			info.Capabilities = append(info.Capabilities, appserver.CapabilityApplicationTerminalObservation)
+		}
+		if services.Terminal != nil && !slices.Contains(info.Capabilities, appserver.CapabilityApplicationTerminalWait) {
+			info.Capabilities = append(info.Capabilities, appserver.CapabilityApplicationTerminalWait)
+		}
+		if services.Terminal != nil && !slices.Contains(info.Capabilities, appserver.CapabilityApplicationTerminalControl) {
+			info.Capabilities = append(info.Capabilities, appserver.CapabilityApplicationTerminalControl)
 		}
 	}
 	return info
@@ -61,32 +76,65 @@ func (s *Server) applicationPrincipal(r *http.Request) (appserver.Principal, boo
 	// Native state, replay, cancellation and precise approval remain with their
 	// canonical owner. All other ordinary routes are denied before dispatch.
 	parts := strings.Split(strings.Trim(path, "/"), "/")
-	if len(parts) >= 3 && parts[0] == "sessions" {
+	if len(parts) >= 2 && parts[0] == "sessions" {
 		permitted := false
+		workerOnly := false
+		if r.Method == http.MethodDelete && len(parts) == 2 {
+			permitted = true
+		}
 		if r.Method == http.MethodGet && len(parts) == 3 {
 			switch parts[2] {
 			case "state", "reconnect", "events", "subscribe", "tasks":
 				permitted = true
+			case "status", "presentation":
+				permitted = true
 			}
 		}
-		if r.Method == http.MethodGet && parts[2] == "tasks" {
+		if r.Method == http.MethodGet && len(parts) >= 3 && parts[2] == "tasks" {
 			permitted = len(parts) == 3 || len(parts) == 4 && parts[3] == "watch" || len(parts) == 5 && (parts[4] == "events" || parts[4] == "subscribe")
 		}
-		if r.Method == http.MethodPost && len(parts) == 3 && (parts[2] == "cancel" || parts[2] == "steer" || parts[2] == "prompt") {
+		if r.Method == http.MethodPost && len(parts) == 3 && (parts[2] == "cancel" || parts[2] == "steer" || parts[2] == "prompt" || parts[2] == "compact" || parts[2] == "interactions") {
 			permitted = true
 		}
 		if r.Method == http.MethodPost && len(parts) == 5 && parts[2] == "approvals" && parts[4] == "resolve" {
 			permitted = true
 		}
-		// Output is bounded, read-only producer inspection. Keep wait/kill/release
-		// outside application transport authority; ownership is checked below and
-		// the terminal service resolves the task through the scoped directory.
-		if r.Method == http.MethodPost && len(parts) == 4 && parts[2] == "terminals" && parts[3] == "output" {
+		// Terminal reads preserve producer/model output ownership. Kill/release
+		// additionally authorize native Session mutation before resolving the
+		// exact Task through the scoped directory without activating execution.
+		if r.Method == http.MethodPost && len(parts) == 4 && parts[2] == "terminals" && (parts[3] == "output" || parts[3] == "wait" || parts[3] == "kill" || parts[3] == "release") {
 			permitted = true
+		}
+		// Workers are ordinary native Sessions. Their scoped application grant
+		// permits the same Session-local capabilities as the attached user; it
+		// never supplies Host configuration or Application-profile inheritance.
+		if len(parts) == 4 {
+			if r.Method == http.MethodGet && parts[2] == "participants" && parts[3] == "handles" {
+				permitted = true
+			}
+			if r.Method == http.MethodPost {
+				switch parts[2] {
+				case "participants":
+					permitted = parts[3] == "start" || parts[3] == "prompt" || parts[3] == "cancel"
+				case "subagents":
+					permitted = parts[3] == "input" || parts[3] == "input-status"
+				case "completion":
+					permitted = parts[3] == "files" || parts[3] == "skills" || parts[3] == "resolve-skill" || parts[3] == "slash-arguments"
+				case "configuration":
+					permitted = parts[3] == "model" || parts[3] == "session-mode" || parts[3] == "controller-mode" || parts[3] == "presentation-mode" || parts[3] == "presentation-config"
+					workerOnly = true
+				case "agents":
+					permitted = parts[3] == "list" || parts[3] == "status" || parts[3] == "handoff"
+					workerOnly = parts[3] == "handoff"
+				}
+			}
 		}
 		if permitted {
 			if _, workerErr := service.Store().Worker(r.Context(), scope, parts[1]); workerErr == nil {
 				return p, true, nil
+			}
+			if workerOnly {
+				return appserver.Principal{}, true, appserver.ErrUnauthorized
 			}
 			_, err = service.Store().GetBinding(r.Context(), scope, parts[1])
 			return p, true, err

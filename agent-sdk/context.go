@@ -241,15 +241,18 @@ type SubagentApprovalToolCall = EndpointApprovalToolCall
 // SubagentApprovalRequest is one child permission request bridged into the
 // parent runtime approval surface.
 type SubagentApprovalRequest struct {
-	Origin       ApprovalOrigin           `json:"origin"`
-	SessionRef   session.SessionRef       `json:"session_ref,omitempty"`
-	Session      session.Session          `json:"session,omitempty"`
-	TaskID       string                   `json:"task_id,omitempty"`
-	ParentCallID string                   `json:"parent_call_id,omitempty"`
-	Agent        string                   `json:"agent,omitempty"`
-	Mode         string                   `json:"mode,omitempty"`
-	ToolCall     EndpointApprovalToolCall `json:"tool_call,omitempty"`
-	Options      []ApprovalOption         `json:"options,omitempty"`
+	// Approval preserves independent endpoint context when no tool invocation
+	// exists. The legacy ToolCall/Options projection is used only when nil.
+	Approval     *session.ProtocolApproval `json:"approval,omitempty"`
+	Origin       ApprovalOrigin            `json:"origin"`
+	SessionRef   session.SessionRef        `json:"session_ref,omitempty"`
+	Session      session.Session           `json:"session,omitempty"`
+	TaskID       string                    `json:"task_id,omitempty"`
+	ParentCallID string                    `json:"parent_call_id,omitempty"`
+	Agent        string                    `json:"agent,omitempty"`
+	Mode         string                    `json:"mode,omitempty"`
+	ToolCall     EndpointApprovalToolCall  `json:"tool_call,omitempty"`
+	Options      []ApprovalOption          `json:"options,omitempty"`
 }
 
 // SubagentApprovalRequester bridges child permission requests into the parent

@@ -26,6 +26,7 @@ func (m *Model) appendUserNarrativeBlock(block *UserNarrativeBlock) {
 
 type gatewayUserEchoOptions struct {
 	displayLine    string
+	appendLine     string
 	dequeueNeedles []string
 	event          TranscriptEvent
 }
@@ -40,7 +41,7 @@ func userNarrativeBlockID(event TranscriptEvent) string {
 	if id := strings.TrimSpace(event.SourceProjectionID); id != "" {
 		return fmt.Sprintf("user:projection:%q:%q:%q", event.Scope, event.ScopeID, id)
 	}
-	if id := strings.TrimSpace(event.MessageID); id != "" {
+	if id := event.MessageID; id != "" {
 		return fmt.Sprintf("user:message:%q:%q:%q:%q", event.Scope, event.ScopeID, event.TurnID, id)
 	}
 	return ""
@@ -51,7 +52,33 @@ func userNarrativeBlockID(event TranscriptEvent) string {
 // text. Queue matching affects status only, not whether a message is displayed.
 func (m *Model) applyGatewayUserEcho(opts gatewayUserEchoOptions) tea.Model {
 	displayLine := strings.TrimSpace(opts.displayLine)
-	if displayLine == "" {
+	messageKey := ""
+	if id := opts.event.MessageID; id != "" {
+		messageKey = fmt.Sprintf("%q:%q:%q:%q", opts.event.Scope, opts.event.ScopeID, opts.event.TurnID, id)
+	}
+	if messageKey != "" {
+		for _, item := range m.doc.Blocks() {
+			block, ok := item.(*UserNarrativeBlock)
+			if !ok || block.observedMessage != messageKey || (!opts.event.Replacement && !block.observedReplacement) {
+				continue
+			}
+			if opts.event.Replacement {
+				block.Raw = displayLine
+			} else {
+				line := opts.displayLine
+				if opts.appendLine != "" {
+					line = opts.appendLine
+				}
+				block.Raw += line
+			}
+			block.observedReplacement = true
+			m.markViewportBlockDirty(block.BlockID())
+			m.ensureViewportLayout()
+			m.syncViewportContent()
+			return m
+		}
+	}
+	if displayLine == "" && !opts.event.Replacement {
 		return m
 	}
 	blockID := userNarrativeBlockID(opts.event)
@@ -62,8 +89,12 @@ func (m *Model) applyGatewayUserEcho(opts gatewayUserEchoOptions) tea.Model {
 	}
 	needles := append([]string(nil), opts.dequeueNeedles...)
 	needles = append(needles, displayLine)
-	m.pendingQueue.matchGatewayEcho(needles...)
+	if !opts.event.Replacement {
+		m.pendingQueue.matchGatewayEcho(needles...)
+	}
 	block := NewUserNarrativeBlock(displayLine)
+	block.observedMessage = messageKey
+	block.observedReplacement = opts.event.Replacement
 	if blockID != "" {
 		block.id = blockID
 	}

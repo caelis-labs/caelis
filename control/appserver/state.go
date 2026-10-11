@@ -27,6 +27,11 @@ const (
 	// CapabilityExecutionConfiguration permits creation-bound native command
 	// environment and shell overrides for ordinary and application Sessions.
 	CapabilityExecutionConfiguration = "execution-configuration-v1"
+	// CapabilityApprovalSubjects exposes common bounded approval decision context.
+	CapabilityApprovalSubjects = "approval-subjects-v1"
+	// CapabilityDisplayReplacements exposes complete narrative replacement and
+	// explicit empty tool-display patches without changing canonical input.
+	CapabilityDisplayReplacements = "display-replacements-v1"
 )
 
 var ErrStateRevisionConflict = errorcode.New(errorcode.Conflict, "controlclient: session state changed during bootstrap")
@@ -113,6 +118,7 @@ type ActiveApproval struct {
 	ParticipantID string                          `json:"participant_id,omitempty"`
 	ParentTool    *eventstream.ParentToolRelation `json:"parent_tool,omitempty"`
 	Permission    *session.ProtocolApproval       `json:"permission"`
+	Subject       *session.ApprovalSubject        `json:"subject,omitempty"`
 }
 
 // ApprovalState exposes only the active request details and queued count.

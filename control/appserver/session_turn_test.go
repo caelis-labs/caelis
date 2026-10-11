@@ -107,6 +107,24 @@ func TestSessionTurnClientAttachesBeforePromptAndFiltersExactTarget(t *testing.T
 	}
 }
 
+func TestAdmitObservedTurnRetainsNoEffectReceiptForGuardedCallers(t *testing.T) {
+	for _, outcome := range []Outcome{OutcomeConflicted, OutcomeRejected} {
+		for _, commandErr := range []error{nil, errors.New("original native admission failure")} {
+			sub := newSessionTurnTestSubscription(nil, nil, nil)
+			closed := false
+			result := CommandResult{OperationID: "real-operation", Outcome: outcome, SessionID: "real-session"}
+			turn, err := admitObservedTurn(nil, result.SessionID, ReconnectResult{Subscription: sub}, t.Context(), func() { closed = true }, result, commandErr, nil)
+			var receipt *CommandReceiptError
+			if turn != nil || !errors.As(err, &receipt) || receipt.Receipt.Outcome != outcome || receipt.Receipt.OperationID != result.OperationID || !closed {
+				t.Fatalf("outcome=%s turn=%v error=%v closed=%v", outcome, turn, err, closed)
+			}
+			if commandErr != nil && !errors.Is(err, commandErr) {
+				t.Fatal("original mutation error was lost")
+			}
+		}
+	}
+}
+
 func TestSessionTurnWithoutSpoolCorrelatesCanonicalTargetByDurableTurnID(t *testing.T) {
 	t.Parallel()
 

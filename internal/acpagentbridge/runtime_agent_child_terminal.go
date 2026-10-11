@@ -299,3 +299,30 @@ func childTerminalSessionID(sessionID string, fallbackSessionID string) string {
 	}
 	return strings.TrimSpace(fallbackSessionID)
 }
+
+// resetParent starts one authoritative presentation replacement. Actual child
+// identities and Runtime lifecycle ownership remain on the incoming envelopes.
+func (p *acpChildTerminalProjector) resetParent(sessionID, toolCallID string) {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	parent := acpChildParentKey{SessionID: sessionID, ToolCallID: toolCallID}
+	delete(p.current, parent)
+	for key := range p.turns {
+		if key.acpChildParentKey == parent {
+			delete(p.turns, key)
+		}
+	}
+	for key := range p.closed {
+		if key.acpChildParentKey == parent {
+			delete(p.closed, key)
+		}
+	}
+	for key := range p.closedThrough {
+		if key.acpChildParentKey == parent {
+			delete(p.closedThrough, key)
+		}
+	}
+}

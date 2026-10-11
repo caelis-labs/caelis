@@ -41,16 +41,28 @@ type AgentConfig struct {
 	// Command, Args, Env, and WorkDir must remain empty and are resolved only at
 	// each process launch boundary.
 	HostedAdapterID string
-	Command         string
-	Args            []string
-	Env             map[string]string
-	WorkDir         string
-	Authentication  controlagents.Authentication
-	SessionOptions  controlagents.SessionOptions
+	// ACPDraftSchema selects an explicitly negotiated experimental wire profile.
+	// Empty keeps stable v1 for externally supplied process declarations.
+	ACPDraftSchema string
+	Command        string
+	Args           []string
+	Env            map[string]string
+	WorkDir        string
+	Authentication controlagents.Authentication
+	SessionOptions controlagents.SessionOptions
 	// PinnedModel carries one Control-resolved provider configuration for a
 	// built-in child. It never crosses ACP or process boundaries; the owning
 	// Host consumes it through the in-process child Session preparation hook.
 	PinnedModel *modelconfig.Config
+}
+
+// PinnedModelImageInput projects the frozen native model's declared input
+// capability. Unknown remains unknown; it grants no tool or Session authority.
+func (c AgentConfig) PinnedModelImageInput() *bool {
+	if c.PinnedModel == nil {
+		return nil
+	}
+	return modelconfig.ModelImageInput(*c.PinnedModel)
 }
 
 // SkillBundle is one pure skill-bundle declaration resolved by the app layer.

@@ -30,7 +30,12 @@ Feature capabilities refine the baseline: `application-hot-configuration-v1`,
 `application-model-capabilities-v1`, `application-tool-result-content-v1`,
 `application-media-resources-v1`, `application-guardian-review-v1` and
 `application-atomic-capabilities-v1`. The last capability guards explicit
-MCP/Skill assembly and per-service status.
+MCP/Skill assembly and per-service status. `application-session-control-v1`
+guards profile-aware status/presentation, native Agent state/catalog, explicit
+Skill and model completion, fenced compaction and closure through Archive.
+`application-terminal-wait-v1` guards
+producer exit observation; `application-terminal-control-v1` guards scoped
+kill/release with the native Session mutation authorizer.
 Require the capability guarding the feature you need instead of probing with
 destructive trial calls.
 Store identity persists across Host replacement; instance identity does not.
@@ -48,6 +53,13 @@ The server derives principal/application/connection scope from authentication.
 Request metadata, names, absolute paths and Session IDs do not grant ownership.
 Application credentials cannot enroll other applications, stop the shared Host,
 modify Host credentials/settings, or use ordinary Session creation/steering.
+
+Trusted in-process adapters bind the same complete principal through
+`BindAppServerClients`. Task streams, child input and every focused client retain
+the Application and Connection IDs. Binding a revoked connection permits retained
+observations; native mutation owners still check its active lease. Global UI
+preferences, plugin installation/marketplace catalogs, Agent onboarding/bindings
+and Host-wide presentation capabilities require a Host principal.
 
 The following paths are relative to `/api/control/v1`:
 
@@ -85,6 +97,58 @@ Canonical observation and control use the existing scoped paths:
 `GET /sessions/{session_id}/state`, `/reconnect`, `/events`, `/subscribe`,
 `POST /sessions/{session_id}/cancel`, and
 `POST /sessions/{session_id}/approvals/{approval_request_id}/resolve`.
+With `application-session-control-v1`, read `/status` and `/presentation`, use
+`/completion/skills`, `/completion/resolve-skill` and
+`/completion/slash-arguments` for the complete `model` argument sequence, and
+submit native `/compact`. Status and presentation show desired model selections
+and creation-bound permissions. The configuration's `last_request` separately
+identifies the exact revision/model/effort/tier/tools admitted to execution.
+Idle observation does not activate a provider, sandbox or MCP service. Skill
+completion scans only explicitly selected Skill roots/directories using the
+same catalog scanner as execution. File completion is available only with an
+explicit `workspace-write` profile; `tools-only` cannot inspect an incidental
+Host workspace. Host diagnostics, other active Session IDs and provider account
+limits are outside a scoped Session projection.
+`/agents/list` reads the selected Runtime's declared Agent catalog; `/agents/status`
+uses canonical Control state, including for an idle Application profile.
+`DELETE /sessions/{session_id}` uses the original Application Archive owner and
+its permanent operation receipt for a main Session, or native closure for a Worker.
+
+Terminal output/wait/kill/release use `/sessions/{session_id}/terminals/...` and
+resolve display IDs through the scoped native Task directory. Output/wait retain
+the model's output cursor and remain readable after lease expiry or revocation.
+Kill/release require active native mutation authority; release keeps its normal
+Task-output retention behavior. Waiting does not create an execution Runtime or
+cancel the producer when its request context closes.
+
+`application-profile-children-v1` exposes the original participant start/prompt/
+cancel APIs and model-facing StartThread, ReadThread, WaitThread, ListThreads,
+SendMessage and ReadMessages. Self and named registered native provider handles
+create independent canonical child Sessions and native Tasks through a local
+ACP endpoint. Children snapshot the parent's explicit profile, including tools,
+instructions, MCP, Skills, reviewer and execution authority. Their configuration,
+history, approvals, callback IDs and resource IDs remain independently owned.
+Model overrides use the existing frozen native placement owner; an external ACP
+launcher requires a profile-bound authority contract before it can be selected.
+Children follow the ordinary native delegation policy: foreground participants
+can delegate with an immediate parent relation; a background Task child uses the
+existing spawned-child policy that disables further spawning. This policy is
+shared with ordinary native Sessions. Image negotiation uses the frozen child's
+actual model capability, including named model overrides and unknown capability.
+
+The optional `Binding.child` projects the durable root Session, immediate parent,
+native parent Task when present, and original prompt source. Background children
+validate their original grant against the root Session. Delegation, resumed
+approvals and collaboration calls recheck the original connection lease and source;
+reattachment cannot relabel background work as user input. Explicit resources use
+the exact child Session API; a parent resource ID is not a child resource grant.
+Host replacement restores the same relation, canonical history and receipts.
+
+Ordinary Host policy modes and global plugin catalogs are not inherited by a main
+Application Session. Model/tool/instruction/MCP/Skill updates use its explicit
+configuration owner. Main closure uses the Application archive owner; child
+closure uses the original native Session owner. A native Worker exposes ordinary Session-local
+controller, participant and configuration controls under its existing grant.
 Reconnect atomically restores state and the existing Envelope feed; `history_turns`
 and `history_before` page canonical history. Closing an observation is not Cancel.
 Archive is not deletion. A completion sentence is not a native Turn terminal.

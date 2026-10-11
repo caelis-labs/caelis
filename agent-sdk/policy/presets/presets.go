@@ -103,6 +103,7 @@ func MCPApprovalDecision(input policy.ToolContext, constraints sandbox.Constrain
 		{ID: "allow_always", Name: "Allow Always", Kind: "allow_always"},
 		{ID: "cancel", Name: "Cancel", Kind: "reject_once"},
 	}
+	decision.Approval.Subject = mcpApprovalSubject(input)
 	return decision, nil
 }
 
@@ -160,6 +161,7 @@ func askApproval(reason string, constraints sandbox.Constraints, input policy.To
 		Reason:      strings.TrimSpace(reason),
 		Constraints: constraints,
 		Approval: &session.ProtocolApproval{
+			Subject: approvalSubject(input, constraints, call),
 			ToolCall: session.ProtocolToolCall{
 				ID:       strings.TrimSpace(input.Call.ID),
 				Name:     name,

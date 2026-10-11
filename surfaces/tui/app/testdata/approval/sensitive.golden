@@ -1,0 +1,17 @@
+╭──────────────────────────────────────────────────────────────────────────────────╮
+│ Approval Required                                                                │
+│                                                                                  │
+│ OPERATION:         execute                                                       │
+│ COMMAND:           [sensitive field supplied]                                    │
+│ WORKING DIRECTORY: /workspace                                                    │
+│ EFFECT:            run the supplied command                                      │
+│ SCOPE:             route: host; permission: danger_full_access; network: inherit │
+│ SENSITIVE INPUT:   Sensitive values are hidden.                                  │
+│ CONTEXT:           Incomplete or opaque; inspect the original request before gra │
+│                    nting access.                                                 │
+│ DEFAULT:           Reject                                                        │
+│                                                                                  │
+│   Allow once  allow_once; scope: this invocation                                 │
+│ ▎ Reject      reject_once; scope: no grant                                       │
+╰──────────────────────────────────────────────────────────────────────────────────╯
+   ↑/↓ select  enter confirm  esc cancel

@@ -109,6 +109,16 @@ func guardianPlannedActionJSON(req kernel.ApprovalReviewRequest) (string, bool, 
 	}
 	toolName := ""
 	if req.Approval != nil {
+		if req.Approval.Context != nil {
+			// Independent endpoint permission evidence is exact and private.
+			// It is not a tool invocation and must not be replaced by display facts.
+			permission := req.Approval.Context
+			context := map[string]any{"title": permission.Title, "subject": permission.RawSubject}
+			if permission.Description != nil {
+				context["description"] = *permission.Description
+			}
+			action["permission_context"] = context
+		}
 		toolName = strings.TrimSpace(req.Approval.ToolName)
 	}
 	toolName = firstNonEmpty(toolName, strings.TrimSpace(req.RuntimeRequest.Tool.Name), strings.TrimSpace(req.RuntimeRequest.Call.Name))

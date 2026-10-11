@@ -153,10 +153,23 @@ func (b *controlCommandBackend) admitApplicationPrompt(ctx context.Context, prin
 	}
 	source := application.Source{Kind: strings.TrimSpace(req.SourceKind), OperationID: req.OperationID}
 	if source.Kind == "authorized_background" {
-		source, err = store.AdmitBackgroundSource(ctx, scope, req.SessionID, req.GrantID, req.OperationID)
+		grantSession := req.SessionID
+		if binding.Child != nil {
+			grantSession = binding.Child.RootSessionID
+		}
+		source, err = store.AdmitBackgroundSource(ctx, scope, grantSession, req.GrantID, req.OperationID)
 		if err != nil {
 			return ctx, appserver.PromptRequest{}, err
 		}
+	}
+	if binding.Child != nil {
+		// A child channel inherits the parent's source; it cannot relabel
+		// background work or non-authorizing evidence as a new user request.
+		original := binding.Child.Source
+		if source.Kind != original.Kind || source.GrantID != original.GrantID || source.AuthorizedSource != original.AuthorizedSource {
+			return ctx, appserver.PromptRequest{}, appserver.ErrUnauthorized
+		}
+		source = original
 	}
 	if err := application.ValidateSource(source); err != nil {
 		return ctx, appserver.PromptRequest{}, errorcode.Wrap(errorcode.InvalidArgument, "gatewayapp: invalid application prompt source", err)

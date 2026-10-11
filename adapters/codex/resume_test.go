@@ -51,7 +51,7 @@ func TestResumeSessionPreservesHandshakeNotificationsAndPolicy(t *testing.T) {
 	recorder := &recordingNoticeClient{}
 	client := acp.NewClientSideConnection(recorder, clientToAgentWriter, agentToClientReader)
 	defer client.Close()
-	if _, err := client.Initialize(ctx, acp.InitializeRequest{ProtocolVersion: acp.ProtocolVersion(acp.WireProtocolVersion), ClientCapabilities: acp.ClientCapabilities{Meta: map[string]json.RawMessage{sessionNoticeCapability: json.RawMessage("true")}}}); err != nil {
+	if _, err := client.Initialize(ctx, acp.InitializeRequest{ProtocolVersion: acp.ProtocolVersion(acp.WireProtocolVersion), ClientCapabilities: acp.ClientCapabilities{Session: &acp.ClientSessionCapabilities{Notices: &acp.NoticeCapabilities{}}}}); err != nil {
 		t.Fatal(err)
 	}
 	response, err := client.ResumeSession(ctx, acp.ResumeSessionRequest{
@@ -65,7 +65,7 @@ func TestResumeSessionPreservesHandshakeNotificationsAndPolicy(t *testing.T) {
 	}
 	updates := recorder.snapshot()
 	recorder.mu.Lock()
-	if len(updates) != 0 || len(recorder.notices) != 1 || recorder.notices[0].SessionID != "thread-resume-1" || recorder.notices[0].Update.Title != "resume warning" {
+	if len(updates) != 0 || len(recorder.notices) != 1 || recorder.notices[0].SessionId != "thread-resume-1" || recorder.notices[0].Update.Notice.Title != "resume warning" {
 		t.Fatalf("resume handshake = %#v, notices = %#v", updates, recorder.notices)
 	}
 	recorder.mu.Unlock()

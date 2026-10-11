@@ -29,6 +29,64 @@ Agent and Runtime ownership lives in
 Provider input is normalized once before it reaches durable state or the common
 Envelope vocabulary. It must not create a parallel semantic schema.
 
+The common narrative projection distinguishes exact append deltas from complete
+message replacements. `ContentChunk.replacement` and SDK `ProtocolUpdate.Replacement`
+replace the content of the same scoped `messageId`, including empty text, without
+settling its Turn. Display batching preserves that boundary and replay retains the
+current content. A provider's edited user message is a durable client-replay mirror;
+it cannot rewrite admitted native input, model context or an input receipt.
+Narrative `replacedFields` recognizes only `_meta`: explicit empty or null metadata
+clears its previous display value, while absent metadata retains it. An empty
+metadata-only delta leaves the body and final-answer eligibility unchanged.
+
+The final-answer owner retains only the latest introduced assistant identity and
+its current text snapshot, plus known provider identities within the Session. A
+tool, thought or plan boundary makes that candidate ineligible until it receives
+more content. Explicit continuation of the same latest identity resumes it;
+updates to older identities repair display only. Anonymous post-boundary v1
+content starts a new segment. A new Activity clears the candidate but retains
+provider identities and aliases; a complete Session reset clears both. Purely
+anonymous generated segments do not accumulate in the Session identity history.
+
+The draft client's existing bounded Session materialization cache supplies a
+process-local `PreviouslyObserved` observation when it has already emitted content
+for an identity. New Turn and reconnected final-answer owners use that observation
+to recognize old display revisions before selecting their first answer. A
+metadata-only introduction does not count as emitted content, and updates to an
+already selected current identity still apply. This observation has `json:"-"`;
+it is neither peer metadata nor durable authority. Resume/replay reconstructs it
+through the same materialization cache, whose explicit record and byte exhaustion
+errors remain unchanged. Durable model history retains the final answer selected
+by its native Turn owner, while provider revisions remain display observations.
+The final owner also tracks thought identities introduced in its current Activity,
+in a separate namespace from assistant identities. Prior-Activity thought
+revisions remain visible without invalidating the current answer; new thoughts
+and their same-Activity continuations retain their barrier behavior. Activity and
+Session reset both clear this current-Activity set. Anonymous stable-v1 thoughts
+retain their original barrier behavior.
+Tools follow the same Activity boundary: the draft Session cache retains only
+observed tool IDs, using the existing record and byte budgets with explicit
+exhaustion. Tool updates and associated terminal projections carry the private
+Session observation; the final owner tracks tools introduced in its current
+Activity separately from narrative IDs. Old Session tool display repairs do not
+invalidate a new answer, while new tools and same-Activity sparse/status/terminal
+updates retain their barriers. Neither wire fields nor `_meta` can supply this
+observation, and it is omitted from public and durable JSON. Stable-v1 tool
+notifications retain their existing behavior.
+
+ACP message and tool-call IDs are opaque Session-scoped strings. Their exact
+bytes are preserved through ingress, result selection, canonical storage and
+Control live/replay projection; surrounding whitespace is not an alias. Message,
+thought and tool namespaces remain separate. Narrative Surface keys use the same
+exact message ID without changing native source, request or approval identities.
+
+Tool display patches retain a bounded vocabulary of `replacedFields` so an
+explicit empty or null field can clear its previous presentation while an absent
+field retains it. Native approval and execution evidence remain independent.
+Terminal output deltas append exact bytes; a terminal output projection marked
+`replacement: true` carries a complete snapshot, including an empty snapshot.
+Neither marker grants permission or changes source identity or lifecycle ownership.
+
 ## Envelope authority
 
 An Envelope is a projection and delivery record, not a second Session store.
@@ -43,6 +101,86 @@ resume token.
 `_meta` is limited to documented display, diagnostics, and bounded
 compatibility. It cannot grant authorization, establish ownership, repair
 identity, or become an ordering source. Typed fields always win over fallbacks.
+
+Structured tool diffs preserve affected-file operations, exact paths, optional
+old paths and file descriptions, and a separately typed rendered patch in live,
+canonical and recovery projections. A rendered patch is never complete new file
+contents. Legacy whole-file `path`/`oldText`/`newText` diffs keep their meaning.
+At a stable ACP v1 boundary, structured diffs become standard text containing
+the affected-file summary and supplied patch; public Control clients retain the
+structured fields. At the selected draft boundary, legacy whole-file diffs are
+converted to affected-file changes and an actual rendered patch. Empty new text
+means a cleared file, and does not by itself prove deletion.
+
+## Approval decision context
+
+`approval-subjects-v1` adds one bounded SDK `ApprovalSubject` projection to
+permission and review Envelopes (`approval_subject`) and active state
+(`subject`). Runtime policy supplies the facts where it interprets the action;
+Session preserves them and Control projects the same snapshot for live output,
+state recovery and durable replay. TUI consumes that projection. Application
+and HTTP clients receive the same contract.
+
+| Subject | Facts supplied by the existing semantic owner |
+| --- | --- |
+| Command | Command, work directory and normalized execution constraints from native command policy |
+| File | Exact candidate paths and read/write operation from native path policy |
+| Network | URL and fetch operation when supplied by a network approval owner; this does not introduce a new WebFetch approval gate |
+| App access | Ready MCP tool, workspace, declared effect and invocation/session/persistent configuration grant scopes |
+| Opaque | Legacy, remote or custom requests without owner-supplied facts |
+
+Negotiated draft permissions enter this same owner through a neutral private
+`PermissionContext`: original title, description, subject JSON and native RPC
+identity remain canonical review evidence. A command subject supplies only its
+defined command and work directory; an absent or unknown subject does not
+acquire a tool call, operation or grant. An actual tool call is retained only
+when the endpoint supplied it. Public requests may omit `toolCall` and instead
+carry bounded title/description and the common subject projection. Uninterpreted
+subject input is marked `opaque_input` and withheld from public raw and derived
+review text; private evidence and native option resolution remain intact. Draft
+schema selection stays at the negotiated endpoint boundary, outside this
+stable display contract.
+
+Every field states `known`, `unavailable`, `truncated` or `opaque`. Text is
+bounded at 512 Unicode code points, targets at 16 and grant facts at 32; omitted
+tails are explicit. No Surface infers operation, target or scope from model
+titles, arbitrary input keys or option labels. Grant descriptions join solely
+by the original option ID and order. The native request/tool/session identity,
+option IDs, labels, kinds and ordering, resolve path, authorization and receipts
+remain authoritative. Display facts never grant access or reopen a settled
+request. Incomplete context is visible and the TUI selects an offered reject
+choice by default when one exists.
+
+Resolution checks the original private permission before queue settlement,
+durable publication or execution wake-up. `selected` requires an exact offered
+option ID; the original option kind determines allow or deny, and the legacy
+`approved` boolean cannot change that meaning. `cancelled` selects no option
+and grants nothing. Invalid selections leave the same request pending. Legacy
+outcome-only approval and denial remain supported; approvals with an option
+contract still require an originally offered allow choice. Older SDK requests
+and journals without an option contract retain their outcome/boolean semantics.
+Main, child, HTTP and recovered approvals use the same validator.
+
+The approval owner maintains separate canonical review evidence and a display
+snapshot. Execution and Guardian retain the exact original action, constraints
+and review rationale. Explicit `writeOnly` schema annotations and sensitive
+subject fields carry presence only into presentation. Schema traversal supports
+local references, composition, object/pattern/additional/unevaluated fields and
+array items, with a shared 4,096-operation budget and depth limit of 64. It is a
+conservative display redactor, not a schema evaluator or authorization policy;
+unclassifiable annotated input becomes opaque. Unmarked arbitrary inputs are
+preserved for compatibility and are not claimed sanitized.
+
+When marked input is present, public raw input/output/content and derived
+title/reason/justification are withheld because they may quote the value.
+`sensitive_input` persists that fact without storing the value, allowing live
+and replay review text to be withheld while preserving the typed verdict and
+native options. The private pause token keeps action evidence; its separate
+`presentation` snapshot supplies client replay. Older journals without a
+presentation snapshot retain their existing replay behavior; missing historic
+schema annotations cannot be reconstructed safely. Both the retained direct
+RuntimeAgent permission callback and Control use the approval owner's display
+copy while resolving against the original request.
 
 A projection may claim durable delivery only after storage supplies its Event ID
 and Session sequence. Unstored live output is transient; invalid durable claims
@@ -172,18 +310,20 @@ range. Proposed calls are observable before policy admission, including calls
 that policy rejects. Their identity, status, and result still arrive; unsupported
 inputs are neither rounded nor stringified for display. This transport omission
 does not rewrite canonical model arguments or execution inputs. Permission and
-approval-review payloads retain strict numeric validation; action evidence is
-never silently removed from an approval.
+approval-review payloads retain strict numeric validation. Explicitly marked
+sensitive presentation values use the approval display boundary described
+above; canonical action evidence remains intact.
 
-Assistant, thought, and terminal output chunks are ordered deltas. Consumers
-append each payload exactly once. They never compare text overlap or reconcile a
-cumulative value.
+Assistant, thought, and terminal output chunks are ordered deltas unless they
+carry the explicit complete-replacement projection described above. Consumers
+append each delta exactly once or apply that replacement. They never compare
+text overlap or infer a cumulative value.
 
 A contiguous text run retains one typed message identity. An anonymous prefix may
 be promoted when a later chunk supplies the identity for that same run. A
-thought/tool/plan/lifecycle/notice boundary ends the run and clears both content
-and active identity; later text starts a new run. Identity is never carried
-through a semantic barrier.
+thought/tool/plan/lifecycle/notice boundary ends legacy live append routing;
+later anonymous or append-only content starts a new run. An explicit identified
+replacement can repair its existing display message across that boundary.
 
 Surface live append targets are run-scoped even when an Agent reuses a message
 ID. A typed canonical final repairs the latest matching run in place; this does
@@ -244,6 +384,10 @@ ID identifies the message, not a Task activity or an ACP delivery acknowledgemen
 The Host carries it as `MessageID` on Agent-input projections so a Surface can
 recognize the same mail across shared-log observation and direct delivery without
 changing mailbox delivery state.
+Observed Agent-input replacements and clears retain that same scoped message and
+typed sender identity. They update UI-only or mirror display without changing
+canonical admitted mail, its model input, or its delivery receipt. Canonical mail
+still requires a validated Agent actor and nonempty text.
 When the Host dispatches that input, the recipient sees a standard ACP
 `user_message_chunk`; display-only sender metadata
 lives under `_meta.caelis.agent_communication`. Control derives
@@ -332,7 +476,7 @@ message queue. Filesystem errors or a single record exceeding admission limits
 remain explicit failures.
 
 Only implemented notification methods enter the ACP client's ordered queue;
-standard `session/update` and the supported notice extension remain enabled.
+standard `session/update`, including negotiated notices, remains enabled.
 Both notification count and bytes are bounded. Request/response handling and
 cancellation do not pass through this notification filter.
 
@@ -344,7 +488,8 @@ The canonical StartThread result closes the creation tool once and exposes the
 persistent thread identity. Producer completion owns participant results; the
 creation result does not replace them. A completion hint may notify the exact
 active parent Run. ReadThread and WaitThread observe public output on demand.
-Child participants receive no StartThread or removal capability. Task continues
+Background Task children receive no StartThread or removal capability. Foreground
+participants retain ordinary native delegation capabilities. Task continues
 to observe individual Jobs, independently from the Session feed.
 
 Permission requests are Session-feed interactions, not Task frames. Control

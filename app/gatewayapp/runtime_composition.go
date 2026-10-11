@@ -23,9 +23,10 @@ import (
 type runtimeComposition struct {
 	// authorities are borrowed process services. The value contains references
 	// only; one Runtime composition never owns or replaces their lifecycle.
-	authorities runtimeHostAuthorities
-	sessions    session.Service
-	workspace   session.WorkspaceRef
+	authorities         runtimeHostAuthorities
+	applicationChildren *applicationChildren
+	sessions            session.Service
+	workspace           session.WorkspaceRef
 
 	// process is present only on the Host root. Detached Session Runtime
 	// instances receive activation instead and never retain mutable process

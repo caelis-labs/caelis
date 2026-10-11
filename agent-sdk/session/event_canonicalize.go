@@ -40,7 +40,7 @@ func ensureProtocolText(event *Event) {
 		protocol.Update.SessionUpdate = updateType
 	}
 	if protocol.Update.MessageID == "" && protocolUpdateCarriesMessageIdentity(protocol.Update) {
-		protocol.Update.MessageID = strings.TrimSpace(event.MessageID)
+		protocol.Update.MessageID = event.MessageID
 	}
 	if protocol.Update.Content == nil {
 		protocol.Update.Content = ProtocolTextContent(text)
@@ -61,8 +61,8 @@ func removeModelProjectionContent(event *Event) {
 		protocol.Update.Content = nil
 	}
 	if protocolUpdateCarriesMessageIdentity(protocol.Update) &&
-		strings.TrimSpace(event.MessageID) != "" &&
-		strings.TrimSpace(protocol.Update.MessageID) == strings.TrimSpace(event.MessageID) {
+		event.MessageID != "" &&
+		protocol.Update.MessageID == event.MessageID {
 		protocol.Update.MessageID = ""
 	}
 	switch EventTypeOf(event) {

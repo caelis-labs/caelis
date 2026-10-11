@@ -290,6 +290,16 @@ func validateCommandRequest(action Action, request any) error {
 		return requireSession(typed.SessionID)
 	case CompactSessionRequest:
 		return requireSession(typed.SessionID)
+	case RecordInteractionRequest:
+		if err := requireSession(typed.SessionID); err != nil {
+			return err
+		}
+		if strings.TrimSpace(typed.Text) == "" {
+			return errors.New("controlclient: interaction text is required")
+		}
+		if len(typed.Text) > 1<<20 {
+			return errors.New("controlclient: interaction text exceeds 1 MiB")
+		}
 	case PromptRequest:
 		if err := requireSession(typed.SessionID); err != nil {
 			return err

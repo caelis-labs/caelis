@@ -237,18 +237,21 @@ func (r *Runner) SpawnTarget(ctx context.Context, spawn subagent.SpawnContext, r
 		launchEnv["SDK_ACP_CHILD_NO_SPAWN"] = "1"
 	}
 	acpClient, err := client.Start(childCtx, client.Config{
-		MCPGrant:            cfg.MCPGrant,
-		MCPServers:          cfg.MCPServers,
-		HostedAdapterID:     cfg.HostedAdapterID,
-		ConnectionID:        cfg.Name,
-		EndpointResolver:    r.endpointResolver,
-		Command:             cfg.Command,
-		Args:                append([]string(nil), cfg.Args...),
-		Env:                 launchEnv,
-		WorkDir:             pickWorkDir(cfg.WorkDir, spawn.CWD),
-		ClientInfo:          r.clientInfo,
-		OnUpdate:            func(env client.UpdateEnvelope) { r.handleUpdate(run, env) },
-		OnPermissionRequest: boundChildPermissionHandler(run, r.permissionCallback(spawn, cfg, agentID)),
+		MCPGrant:                 cfg.MCPGrant,
+		MCPServers:               cfg.MCPServers,
+		HostedAdapterID:          cfg.HostedAdapterID,
+		ModelImageInput:          cfg.PinnedModelImageInput(),
+		ACPDraftSchema:           cfg.ACPDraftSchema,
+		ConnectionID:             cfg.Name,
+		EndpointResolver:         r.endpointResolver,
+		Command:                  cfg.Command,
+		Args:                     append([]string(nil), cfg.Args...),
+		Env:                      launchEnv,
+		WorkDir:                  pickWorkDir(cfg.WorkDir, spawn.CWD),
+		ClientInfo:               r.clientInfo,
+		OnUpdate:                 func(env client.UpdateEnvelope) { r.handleUpdate(run, env) },
+		OnPermissionRequest:      boundChildPermissionHandler(run, r.permissionCallback(spawn, cfg, agentID)),
+		OnDraftPermissionRequest: r.boundDraftPermissionHandler(run, spawn, cfg, agentID),
 	})
 	if err != nil {
 		childCancel()
@@ -1035,7 +1038,7 @@ func (r *Runner) handleUpdate(run *childRun, env client.UpdateEnvelope) {
 	run.updatedAt = r.clock()
 	switch update := env.Update.(type) {
 	case client.ContentChunk:
-		if text := chunkText(update); text != "" {
+		if text := chunkText(update); text != "" || update.Replacement || update.MetaPresent {
 			switch strings.TrimSpace(update.SessionUpdate) {
 			case client.UpdateUserMessage:
 				if !run.suppressInputEcho {
@@ -1047,19 +1050,25 @@ func (r *Runner) handleUpdate(run *childRun, env client.UpdateEnvelope) {
 				}
 			case client.UpdateAgentMessage:
 				if acceptOutput {
-					textOverride, messageID := run.appendAgentMessageChunkLocked(update.MessageID, text)
+					textOverride, messageID := run.appendAgentMessageChunkLocked(update, text)
 					update.MessageID = messageID
 					env.Update = update
 					run.actionSummary.observeAssistant(messageID, run.agentText)
 					run.outputPreview = run.actionSummary.previewOrEmpty()
-					if textOverride != "" {
+					if textOverride != "" || update.Replacement || update.MetaPresent {
 						event = run.acpUpdateEvent(env, run.updatedAt, textOverride)
 					}
 				}
 			case client.UpdateAgentThought:
-				if acceptOutput {
-					run.clearFinalAssistantLocked()
-					run.actionSummary.observeThought(update.MessageID, text)
+				if acceptOutput && (text != "" || update.Replacement) {
+					thought := run.finalAssistant.ObserveUpdate(eventstream.ContentChunk{
+						SessionUpdate: eventstream.UpdateAgentThought, MessageID: update.MessageID,
+						Content: text, Replacement: update.Replacement, PreviouslyObserved: update.PreviouslyObserved,
+					})
+					if thought.Barrier {
+						run.clearFinalAssistantLocked()
+					}
+					run.actionSummary.observeThought(update.MessageID, text, update.Replacement)
 					run.outputPreview = run.actionSummary.previewOrEmpty()
 				}
 				event = run.acpUpdateEvent(env, run.updatedAt)
@@ -1069,14 +1078,18 @@ func (r *Runner) handleUpdate(run *childRun, env client.UpdateEnvelope) {
 		}
 	case client.ToolCall:
 		if acceptOutput {
-			run.clearFinalAssistantLocked()
+			if run.finalAssistant.ObserveUpdate(eventstream.ToolCall{ToolCallID: update.ToolCallID, PreviouslyObserved: update.PreviouslyObserved}).Barrier {
+				run.clearFinalAssistantLocked()
+			}
 			run.actionSummary.observeTool(update.ToolCallID, toolActivity(update.Title, update.Kind, update.Status), toolContentActivity(update.Content))
 			run.outputPreview = run.actionSummary.previewOrEmpty()
 		}
 		event = run.acpUpdateEvent(env, run.updatedAt)
 	case client.ToolCallUpdate:
 		if acceptOutput {
-			run.clearFinalAssistantLocked()
+			if run.finalAssistant.ObserveUpdate(eventstream.ToolCallUpdate{ToolCallID: update.ToolCallID, PreviouslyObserved: update.PreviouslyObserved}).Barrier {
+				run.clearFinalAssistantLocked()
+			}
 			run.actionSummary.observeTool(update.ToolCallID, toolActivity(derefString(update.Title), derefString(update.Kind), derefString(update.Status)), toolContentActivity(update.Content))
 			run.outputPreview = run.actionSummary.previewOrEmpty()
 		}
@@ -1129,16 +1142,33 @@ func markSubagentInputEvent(event *session.Event, source session.ActorRef) sessi
 		source = session.ParentCommunicationActor()
 	}
 	event.Actor = session.CloneActorRef(source)
-	messageID := ""
+	var original *session.ProtocolUpdate
 	if event.Protocol != nil {
 		existing := session.CloneEventProtocol(*event.Protocol)
-		if existing.Update != nil {
-			messageID = strings.TrimSpace(existing.Update.MessageID)
-		}
+		original = existing.Update
 	}
 	protocol := session.NewAgentCommunicationProtocol(session.ProtocolAgentCommunication{Text: event.Text})
 	if protocol.Update != nil {
-		protocol.Update.MessageID = messageID
+		if original != nil {
+			protocol.Update.MessageID = original.MessageID
+			protocol.Update.Replacement = original.Replacement
+			protocol.Update.ReplacedFields = append([]string(nil), original.ReplacedFields...)
+			// Keep the observed display body after the existing trusted mail
+			// footer removal; no new input or mail is admitted here.
+			protocol.Update.Content = session.ProtocolTextContent(event.Text)
+			meta := original.Meta
+			if meta == nil {
+				meta = map[string]any{}
+			}
+			caelis, _ := meta["caelis"].(map[string]any)
+			caelis = maps.Clone(caelis)
+			if caelis == nil {
+				caelis = map[string]any{}
+			}
+			caelis[session.AgentCommunicationMetaKey] = map[string]any{}
+			meta["caelis"] = caelis
+			protocol.Update.Meta = meta
+		}
 		if event.Message != nil && acputil.ContentPartsContainImage(model.ContentPartsFromParts(event.Message.Parts)) && event.Protocol != nil && event.Protocol.Update != nil {
 			protocol.Update.Content = session.CloneEventProtocol(*event.Protocol).Update.Content
 		}
@@ -1204,17 +1234,19 @@ func (run *childRun) acpUpdateEvent(env client.UpdateEnvelope, at time.Time, tex
 	return acpingress.NormalizeUpdate(env.Update, opts)
 }
 
-func (run *childRun) appendAgentMessageChunkLocked(messageID string, text string) (string, string) {
+func (run *childRun) appendAgentMessageChunkLocked(chunk client.ContentChunk, text string) (string, string) {
 	if run == nil {
 		return "", ""
 	}
 	update := run.finalAssistant.ObserveUpdate(eventstream.ContentChunk{
-		SessionUpdate: eventstream.UpdateAgentMessage,
-		MessageID:     strings.TrimSpace(messageID),
-		Content:       text,
+		SessionUpdate:      eventstream.UpdateAgentMessage,
+		MessageID:          chunk.MessageID,
+		Replacement:        chunk.Replacement,
+		PreviouslyObserved: chunk.PreviouslyObserved,
+		Content:            text,
 	})
-	run.agentText = update.Text
-	run.result = update.Text
+	run.agentText = run.finalAssistant.FinalText()
+	run.result = run.agentText
 	return update.Delta, update.MessageID
 }
 
@@ -1224,7 +1256,7 @@ func (run *childRun) clearFinalAssistantLocked() {
 	}
 	run.agentText = ""
 	run.result = ""
-	run.finalAssistant.Reset()
+	run.finalAssistant.AdvanceBoundary()
 }
 
 func chunkText(chunk client.ContentChunk) string {

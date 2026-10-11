@@ -7,6 +7,7 @@ import (
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
+	"github.com/caelis-labs/caelis/control/appserver/projection"
 )
 
 func sessionNotificationForWire(notification eventstream.SessionNotification) (any, error) {
@@ -19,6 +20,14 @@ func sessionNotificationForWire(notification eventstream.SessionNotification) (a
 	}
 	if !standardSessionUpdateType(updateType) {
 		return notification, nil
+	}
+	switch update := notification.Update.(type) {
+	case eventstream.ToolCall:
+		update.Content = projection.ToolContentForACPv1(update.Content)
+		notification.Update = update
+	case eventstream.ToolCallUpdate:
+		update.Content = projection.ToolContentForACPv1(update.Content)
+		notification.Update = update
 	}
 	raw, err := json.Marshal(notification)
 	if err != nil {

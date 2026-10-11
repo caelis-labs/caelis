@@ -1104,8 +1104,12 @@ func TestManagerSteeringCapabilityHelperProcess(t *testing.T) {
 	err := conn.Serve(context.Background(), func(_ context.Context, message jsonrpc.Message) (any, *jsonrpc.RPCError) {
 		switch message.Method {
 		case client.MethodInitialize:
+			protocolVersion := 1
+			if os.Getenv("CAELIS_ACP_TEST_PROTOCOL_VERSION") == "2" {
+				protocolVersion = 2
+			}
 			return client.InitializeResponse{
-				ProtocolVersion: 1,
+				ProtocolVersion: protocolVersion,
 				AgentCapabilities: client.AgentCapabilities{SessionCapabilities: map[string]json.RawMessage{
 					"resume": json.RawMessage(`{}`),
 				}},

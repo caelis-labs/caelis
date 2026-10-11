@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/caelis-labs/caelis/agent-sdk/display"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 	"github.com/caelis-labs/caelis/surfaces/internal/transcript"
@@ -146,6 +147,7 @@ func approvalPayloadFromACPEvent(env eventstream.Envelope) *approvalPayload {
 		})
 	}
 	return &approvalPayload{
+		Subject:    session.CloneApprovalSubject(env.ApprovalSubject),
 		RequestID:  env.ApprovalRequestID,
 		ToolCallID: strings.TrimSpace(tool.ToolCallID),
 		ToolName: firstNonEmpty(
@@ -221,6 +223,9 @@ func eventStreamNarrativeBatchKey(env eventstream.Envelope) (string, bool) {
 	if !ok {
 		return "", false
 	}
+	if update.Replacement || len(update.ReplacedFields) > 0 {
+		return "", false
+	}
 	text := transcript.ProtocolTextContent(update.Content)
 	if text == "" {
 		return "", false
@@ -239,7 +244,7 @@ func eventStreamNarrativeBatchKey(env eventstream.Envelope) (string, bool) {
 		strings.TrimSpace(env.ParticipantID),
 		strings.TrimSpace(env.Actor),
 		updateType,
-		strings.TrimSpace(update.MessageID),
+		update.MessageID,
 	}, "\x00"), true
 }
 

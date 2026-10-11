@@ -259,10 +259,20 @@ type Connection struct {
 // Binding is the immutable, server-created ownership record for a native Session.
 type Binding struct {
 	Scope
-	SessionID      string  `json:"session_id"`
-	Profile        Profile `json:"profile"`
-	CreationDigest string  `json:"creation_digest"`
-	Archived       bool    `json:"archived"`
+	SessionID      string         `json:"session_id"`
+	Profile        Profile        `json:"profile"`
+	CreationDigest string         `json:"creation_digest"`
+	Archived       bool           `json:"archived"`
+	Child          *ChildRelation `json:"child,omitempty"`
+}
+
+// ChildRelation is a Host-admitted profile child, never caller-selected
+// authority. Source retains the original parent admission across recovery.
+type ChildRelation struct {
+	RootSessionID   string `json:"root_session_id"`
+	ParentSessionID string `json:"parent_session_id"`
+	ParentTaskID    string `json:"parent_task_id,omitempty"`
+	Source          Source `json:"source"`
 }
 
 // Source distinguishes user input, non-authorizing evidence, and admitted

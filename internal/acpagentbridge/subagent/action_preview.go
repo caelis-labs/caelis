@@ -51,17 +51,17 @@ func (s *subagentActionSummary) observeAssistant(messageID string, text string) 
 	s.thoughtOpen = false
 	text = compactActivityText(text, maxSubagentActivityBlockBytes)
 	if text == "" {
+		s.removeBlock(activityKey("assistant", messageID))
 		return
 	}
 	s.upsertBlock(activityKey("assistant", messageID), "Assistant: "+text, "")
 }
 
-func (s *subagentActionSummary) observeThought(messageID string, delta string) {
+func (s *subagentActionSummary) observeThought(messageID string, delta string, replacement ...bool) {
 	if s == nil {
 		return
 	}
-	messageID = strings.TrimSpace(messageID)
-	if !s.thoughtOpen || (messageID != "" && s.thoughtMessageID != "" && messageID != s.thoughtMessageID) {
+	if len(replacement) > 0 && replacement[0] || !s.thoughtOpen || (messageID != "" && s.thoughtMessageID != "" && messageID != s.thoughtMessageID) {
 		s.thoughtBuffer = ""
 	}
 	s.thoughtOpen = true
@@ -71,6 +71,7 @@ func (s *subagentActionSummary) observeThought(messageID string, delta string) {
 	s.thoughtBuffer = appendBoundedActivity(s.thoughtBuffer, delta)
 	text := compactActivityText(s.thoughtBuffer, maxSubagentActivityBlockBytes)
 	if text == "" {
+		s.removeBlock(activityKey("reasoning", messageID))
 		return
 	}
 	s.upsertBlock(activityKey("reasoning", messageID), "Reasoning: "+text, "")
@@ -321,4 +322,13 @@ func planActivity(entries []client.PlanEntry) string {
 		}
 	}
 	return "Updating plan"
+}
+
+func (s *subagentActionSummary) removeBlock(key string) {
+	for i, block := range s.blocks {
+		if block.key == key {
+			s.blocks = append(s.blocks[:i], s.blocks[i+1:]...)
+			return
+		}
+	}
 }

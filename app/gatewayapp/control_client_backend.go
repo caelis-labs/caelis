@@ -147,7 +147,7 @@ func (s *controlCommandBackend) ExecuteControlCommand(ctx context.Context, princ
 		}
 	}()
 	switch {
-	case controlActionConfiguresSession(action):
+	case action == appserver.ActionConversationInteraction, controlActionConfiguresSession(action):
 		runtime, _, closeRuntime, err := runtimes.acquireControlRuntime(ctx, sessionID, false)
 		if err != nil {
 			return appserver.CommandResult{SessionID: sessionID}, classifyControlPreDispatchError(err)
@@ -290,6 +290,9 @@ func (s *runtimeComposition) executeControlCommand(ctx context.Context, principa
 				appserver.OutcomeRejected,
 				errorcode.New(errorcode.Unavailable, "gatewayapp: host is closing"),
 			)
+	}
+	if action == appserver.ActionConversationInteraction {
+		return s.recordControlInteraction(ctx, principal, request.(appserver.RecordInteractionRequest))
 	}
 	gw := s.currentGateway()
 	if gw == nil {
@@ -482,6 +485,12 @@ func (s *runtimeComposition) executeControlCommand(ctx context.Context, principa
 		if err != nil {
 			return sessionCommandResult(active), classifyControlBackendError(err)
 		}
+		if s.applicationChildren != nil {
+			ctx, err = s.applicationChildren.admitParticipant(ctx, req.OperationID)
+			if err != nil {
+				return sessionCommandResult(active), classifyControlBackendError(err)
+			}
+		}
 		if req.Background {
 			return s.startBackgroundParticipant(ctx, active, req, placement)
 		}
@@ -521,6 +530,12 @@ func (s *runtimeComposition) executeControlCommand(ctx context.Context, principa
 		active, err := s.checkControlCommandCAS(ctx, req.WriteBase)
 		if err != nil {
 			return sessionCommandResult(active), classifyControlBackendError(err)
+		}
+		if s.applicationChildren != nil {
+			ctx, err = s.applicationChildren.admitParticipant(ctx, req.OperationID)
+			if err != nil {
+				return sessionCommandResult(active), classifyControlBackendError(err)
+			}
 		}
 		observer, releaseTurn := s.controlTurnObserver(active.SessionRef, req.OperationID)
 		result, err := gw.PromptParticipant(ctx, kernelimpl.PromptParticipantRequest{
@@ -620,6 +635,8 @@ func controlParticipantTaskID(participants []session.ParticipantBinding, partici
 
 func controlCommandSessionID(request any) string {
 	switch typed := request.(type) {
+	case appserver.RecordInteractionRequest:
+		return strings.TrimSpace(typed.SessionID)
 	case appserver.CloseSessionRequest:
 		return strings.TrimSpace(typed.SessionID)
 	case appserver.CompactSessionRequest:
@@ -718,6 +735,9 @@ func (s *runtimeComposition) controlRuntimeContext(fallback context.Context, act
 	// cancellation parent is the Stack lifecycle. Preserve only the negotiated
 	// Agent-input transport from the request context: it is a trusted host
 	// capability required by ACP child turns, not arbitrary request state.
+	if source, ok := fallback.Value(applicationSourceContextKey{}).(application.Source); ok {
+		runtimeCtx = context.WithValue(runtimeCtx, applicationSourceContextKey{}, source)
+	}
 	if sender := agent.AgentInputSenderFromContext(fallback); sender != nil {
 		runtimeCtx = agent.WithAgentInputSender(runtimeCtx, sender)
 		return runtimeCtx
@@ -756,6 +776,9 @@ func (s *runtimeComposition) resolveControlHandlePlacement(ctx context.Context, 
 	}
 	if err := ctx.Err(); err != nil {
 		return sdkplacement.Placement{}, err
+	}
+	if s.applicationChildren != nil {
+		return s.applicationChildren.placement(ctx, handle)
 	}
 	snapshot, err := s.placementSnapshot(ctx)
 	if err != nil {

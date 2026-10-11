@@ -2,7 +2,10 @@ package controlprompt
 
 import (
 	"errors"
+	"strings"
 	"testing"
+
+	"github.com/caelis-labs/caelis/control/appserver"
 )
 
 func TestFriendlyCommandErrorAmbiguousModelSelector(t *testing.T) {
@@ -10,6 +13,15 @@ func TestFriendlyCommandErrorAmbiguousModelSelector(t *testing.T) {
 	const want = "select model: model selector is ambiguous. Use an endpoint-qualified selector or a full model ID"
 	if err == nil || err.Error() != want {
 		t.Fatalf("FriendlyCommandError = %v, want %q", err, want)
+	}
+}
+
+func TestFriendlyCommandErrorPreservesNativeAdmissionOutcome(t *testing.T) {
+	original := appserver.NewOutcomeError(appserver.OutcomeConflicted, errors.New("active turn"))
+	friendly := FriendlyCommandError("submit", original)
+	var classified *appserver.OutcomeError
+	if !errors.As(friendly, &classified) || classified.Outcome != appserver.OutcomeConflicted || !errors.Is(friendly, original) || !strings.Contains(friendly.Error(), "another turn is still running") {
+		t.Fatalf("admission outcome was erased: %v", friendly)
 	}
 }
 

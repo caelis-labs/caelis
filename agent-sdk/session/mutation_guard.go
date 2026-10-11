@@ -31,6 +31,12 @@ const (
 	ControlMutationPurposeConfiguration ControlMutationPurpose = "session_configuration"
 	ControlMutationPurposeTest          ControlMutationPurpose = "test"
 	ControlMutationPurposeSystemCommit  ControlMutationPurpose = "system_commit"
+	// ControlMutationPurposeInteraction appends display-only conversation input
+	// without changing Runtime execution, model context or authorization.
+	ControlMutationPurposeInteraction ControlMutationPurpose = "conversation_interaction"
+	// ControlMutationPurposeIdleInteraction atomically rejects the same display
+	// append when an execution fence is held by any producer.
+	ControlMutationPurposeIdleInteraction ControlMutationPurpose = "idle_conversation_interaction"
 	// ControlMutationPurposeSubagentCompletion owns the asynchronous terminal
 	// Task and side-participant commit after the spawning Turn may have ended.
 	ControlMutationPurposeSubagentCompletion ControlMutationPurpose = "subagent_completion"
@@ -200,6 +206,7 @@ func sessionFenceMutationAuthorized(active SessionFence, guard MutationGuard) bo
 func ControlMutationMayOverlapRuntimeFence(purpose ControlMutationPurpose) bool {
 	switch ControlMutationPurpose(strings.TrimSpace(string(purpose))) {
 	case ControlMutationPurposeApproval,
+		ControlMutationPurposeInteraction,
 		ControlMutationPurposeParticipant,
 		ControlMutationPurposeSystemCommit,
 		ControlMutationPurposeSubagentCompletion,
@@ -214,6 +221,8 @@ func ControlMutationMayOverlapRuntimeFence(purpose ControlMutationPurpose) bool 
 func knownControlMutationPurpose(purpose ControlMutationPurpose) bool {
 	switch purpose {
 	case ControlMutationPurposeApproval,
+		ControlMutationPurposeInteraction,
+		ControlMutationPurposeIdleInteraction,
 		ControlMutationPurposeHandoff,
 		ControlMutationPurposeCoordinator,
 		ControlMutationPurposeParticipant,

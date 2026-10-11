@@ -53,14 +53,17 @@ type PauseToken struct {
 	Status     PauseTokenStatus  `json:"status"`
 	Input      json.RawMessage   `json:"input,omitempty"`
 	Approval   *ProtocolApproval `json:"approval,omitempty"`
-	Metadata   map[string]any    `json:"metadata,omitempty"`
-	Outcome    string            `json:"outcome,omitempty"`
-	OptionID   string            `json:"option_id,omitempty"`
-	Approved   bool              `json:"approved,omitempty"`
-	Reason     string            `json:"reason,omitempty"`
-	ReviewText string            `json:"review_text,omitempty"`
-	CreatedAt  time.Time         `json:"created_at"`
-	UpdatedAt  time.Time         `json:"updated_at"`
+	// Presentation is the owner-redacted approval snapshot used by display
+	// replay. Input and Approval retain the original private execution evidence.
+	Presentation *ProtocolApproval `json:"presentation,omitempty"`
+	Metadata     map[string]any    `json:"metadata,omitempty"`
+	Outcome      string            `json:"outcome,omitempty"`
+	OptionID     string            `json:"option_id,omitempty"`
+	Approved     bool              `json:"approved,omitempty"`
+	Reason       string            `json:"reason,omitempty"`
+	ReviewText   string            `json:"review_text,omitempty"`
+	CreatedAt    time.Time         `json:"created_at"`
+	UpdatedAt    time.Time         `json:"updated_at"`
 }
 
 // ExecutionStatus identifies one durable Run, Turn, or Step state.
@@ -261,6 +264,13 @@ func ClonePauseToken(in PauseToken) PauseToken {
 	if in.Approval != nil {
 		approval := CloneProtocolApproval(*in.Approval)
 		out.Approval = &approval
+		if in.Approval.Context != nil {
+			out.ToolCallID, out.ToolName = in.ToolCallID, in.ToolName
+		}
+	}
+	if in.Presentation != nil {
+		presentation := CloneProtocolApproval(*in.Presentation)
+		out.Presentation = &presentation
 	}
 	out.Metadata = CloneState(in.Metadata)
 	out.Outcome = strings.TrimSpace(in.Outcome)

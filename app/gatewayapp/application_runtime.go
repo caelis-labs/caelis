@@ -25,6 +25,8 @@ import (
 	"github.com/caelis-labs/caelis/control/memorybinding"
 	controlplacement "github.com/caelis-labs/caelis/control/placement"
 	"github.com/caelis-labs/caelis/control/sessionvisibility"
+	"github.com/caelis-labs/caelis/internal/acpbridge"
+	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/internal/controlplane"
 	"github.com/caelis-labs/caelis/internal/kernel"
 )
@@ -77,6 +79,11 @@ func (a *workspaceConfigAssembler) assembleApplicationSnapshot(ctx context.Conte
 		executionConfig:   sandbox.CloneExecutionConfig(active.ExecutionConfig),
 		retainRuntimeWork: activity.retainWork, runtimeTaskChanged: activity.taskChanged, taskCommitted: activity.taskCommitted,
 	}}
+	children := &applicationChildren{composition: &instance.runtimeComposition, binding: binding, active: active,
+		modelSnapshot: func(ctx context.Context) (AppConfig, *modelLookup, error) {
+			return a.loadRuntimeModelSnapshot(ctx, active)
+		}}
+	instance.applicationChildren = children
 	var execRuntime *applicationExecutionRuntime
 	var sandboxDescriptor sandbox.DescriptorProvider = applicationNoNativeExecution{}
 	if binding.Profile.Execution == "workspace-write" {
@@ -118,6 +125,7 @@ func (a *workspaceConfigAssembler) assembleApplicationSnapshot(ctx context.Conte
 	if err != nil {
 		return nil, err
 	}
+	instance.activeRuntime.PolicyProfile = mode
 	compaction := defaultCompactionConfig(contextWindow)
 	// The complete tool set is independent of Turn source. An unavailable
 	// callback provenance is rejected during resolution, never silently widened.
@@ -139,7 +147,16 @@ func (a *workspaceConfigAssembler) assembleApplicationSnapshot(ctx context.Conte
 		}
 		sandboxPolicy = presets.EffectiveSandboxPolicy(mode, sandbox.Config{CWD: workspace.CWD, WritableRoots: writable}, execRuntime.Describe(), policy.ModeOptions{WorkspaceRoot: workspace.CWD, TempRoot: os.TempDir(), WritableRoots: writable})
 	}
-	rt, err := runtime.New(runtime.Config{
+	contextRouter, err := controlplane.NewContextRouter(sessions)
+	if err != nil {
+		return nil, err
+	}
+	agents, err := children.agents(ctx)
+	if err != nil {
+		return nil, err
+	}
+	instance.activeRuntime.Assembly.Agents = agents
+	localConfig := runtime.Config{
 		Sessions: sessions, AgentFactory: chat.Factory{}, Compaction: compaction,
 		Diagnostics: a.deps.authorities.diagnostics, PolicyRegistry: policies, DefaultPolicyMode: mode,
 		MCPGrants:     a.deps.authorities.mcpGrants,
@@ -147,12 +164,23 @@ func (a *workspaceConfigAssembler) assembleApplicationSnapshot(ctx context.Conte
 		SandboxPolicy: sandboxPolicy,
 		TaskStore:     a.deps.authorities.taskStore, TaskOutput: a.deps.authorities.taskOutput,
 		TaskActivityChanged: activity.taskChanged, TaskCommitted: activity.taskCommitted,
-		ChildApprovalRequester: backgroundChildApprovalRequester{composition: &instance.runtimeComposition},
-	})
+		ChildApprovalRequester:  backgroundChildApprovalRequester{composition: &instance.runtimeComposition},
+		ControllerContextRouter: contextRouter, ControllerEventForwarder: acpbridge.NewControllerForwarder(sessions),
+	}
+	localConfig, childPlane, err := injectACPControlPlane(localConfig, assembly.ResolvedAssembly{Agents: agents}, children.resolve, children.prepare, children, activity.retainWork)
 	if err != nil {
 		return nil, err
 	}
-	bundle := &gatewayRuntimeBundle{Engine: rt, RuntimeConfig: instance.activeRuntime, EstimatedPromptPrefixTokens: compaction.EstimatedPromptPrefixTokens}
+	coordinator, err := controlplane.NewCoordinator(controlplane.CoordinatorConfig{Sessions: sessions, Controllers: localConfig.Controllers, Context: contextRouter, FenceOwnerID: a.deps.authorities.fenceOwnerID, LifecycleContext: a.deps.authorities.lifecycleCtx, Diagnostics: a.deps.authorities.diagnostics})
+	if err != nil {
+		return nil, err
+	}
+	localConfig.ControllerRecovery = coordinator
+	rt, err := runtime.New(localConfig)
+	if err != nil {
+		return nil, err
+	}
+	bundle := &gatewayRuntimeBundle{Engine: rt, ACPControlPlane: childPlane, RuntimeConfig: instance.activeRuntime, EstimatedPromptPrefixTokens: compaction.EstimatedPromptPrefixTokens}
 	bundle.CloseCapabilities = resolver.closeCapabilities
 	bundle.CapabilityStatus = resolver.capabilityStatus
 	bundle.CapabilityUpdated = resolver.configurationCommitted
@@ -186,11 +214,16 @@ func (a *workspaceConfigAssembler) assembleApplicationSnapshot(ctx context.Conte
 		bundle.Guardian = newApplicationGuardianApprover(sessions, a.deps.authorities.diagnostics)
 		approver = bundle.Guardian
 	}
+	sessionControl, err := controlplane.NewSessionControl(controlplane.SessionControlConfig{Controllers: coordinator, Participants: fenced})
+	if err != nil {
+		return nil, err
+	}
 	bundle.Gateway, err = kernel.New(kernel.Config{
 		Sessions: sessions, Runtime: fenced, TurnStartGate: a.deps.authorities.approvalRecovery,
 		Resolver: resolver, ExecutionValidator: validator,
 		DefaultApprovalMode: kernel.ApprovalMode(application.EffectiveApprovalMode(binding.Profile)),
 		ApprovalApprover:    approver,
+		Control:             sessionControl,
 	})
 	if err != nil {
 		return nil, err
@@ -265,6 +298,19 @@ func (r *applicationTurnResolver) tools(ctx context.Context, configuration appli
 	}
 	if capabilities.source != nil {
 		tools = append(tools, applicationLeasedTool{Tool: capabilities.searchTool, store: r.composition.authorities.applications, scope: r.binding.Scope})
+	}
+	children, err := r.composition.applicationChildren.tools(ctx)
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]bool, len(tools))
+	for _, t := range tools {
+		seen[t.Definition().Name] = true
+	}
+	for _, t := range children {
+		if !seen[t.Definition().Name] {
+			tools = append(tools, t)
+		}
 	}
 	return tools, nil
 }
@@ -372,6 +418,10 @@ func applicationPolicyRegistry(profile application.Profile) (policy.Registry, st
 			return decision, err
 		}
 		if tool.IsMCPDefinition(input.Tool) || tool.IsToolSearchDefinition(input.Tool) || input.Tool.Name == "Skill" {
+			return policy.Decision{Action: policy.ActionAllow}, nil
+		}
+		switch input.Tool.Name {
+		case "StartThread", "ReadMessages", "ListThreads", "SendMessage", "ReadThread", "WaitThread":
 			return policy.Decision{Action: policy.ActionAllow}, nil
 		}
 		if native != nil {

@@ -296,7 +296,11 @@ func (t policyWrappedTool) resolveApproval(ctx context.Context, request agent.Ap
 		if t.approval.runtime != nil {
 			resp, err = t.approval.runtime.requestDurableApproval(callCtx, request, t.approval.requester)
 		} else {
+			permission := cloneApproval(request.Approval)
 			resp, err = t.approval.requester.RequestApproval(callCtx, request)
+			if err == nil {
+				resp, err = approval.ResolveNativeResponse(permission, resp)
+			}
 		}
 		return err
 	}

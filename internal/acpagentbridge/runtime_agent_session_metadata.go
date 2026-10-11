@@ -56,15 +56,12 @@ func normalizedACPSessionMetadata(meta map[string]any) map[string]any {
 // authorization by itself: callers also require the principal-authorized
 // Host Session client or direct bridge ownership.
 func matchesManagedSubagentRelationClaim(active session.Session, meta map[string]any) bool {
-	if !sessionvisibility.IsSystemManagedSession(active) ||
-		!strings.EqualFold(
-			strings.TrimSpace(sessionMetadataString(active.Metadata, sessionvisibility.MetadataSystemManagedAgent)),
-			systemManagedSubagentSessionKind,
-		) {
+	if !sessionvisibility.IsSpawnedSubagentSession(active) &&
+		(!sessionvisibility.IsApplicationSession(active) || strings.TrimSpace(sessionMetadataString(active.Metadata, sessionvisibility.MetadataSystemManagedParent)) == "") {
 		return false
 	}
 	claim, ok := acputil.ParseSubagentSessionMeta(meta)
-	return ok && claim.ParentSessionID != "" && claim.TaskID != "" &&
+	return ok && claim.ParentSessionID != "" && (claim.TaskID != "" || sessionvisibility.IsApplicationSession(active)) &&
 		claim.ParentSessionID == strings.TrimSpace(sessionMetadataString(active.Metadata, sessionvisibility.MetadataSystemManagedParent)) &&
 		claim.TaskID == strings.TrimSpace(sessionMetadataString(active.Metadata, sessionvisibility.MetadataSystemManagedTask))
 }

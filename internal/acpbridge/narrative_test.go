@@ -73,6 +73,22 @@ func TestNarrativeAccumulatorThoughtChunksEmitDeltasAndResetFinal(t *testing.T) 
 	}
 }
 
+func TestNarrativeAccumulatorPreviousThoughtRevisionPreservesCurrentAnswer(t *testing.T) {
+	acc := &narrativeAccumulator{}
+	current := acpNarrativeEvent(session.ProtocolUpdateTypeAgentMessage, "current answer")
+	current.Protocol.Update.MessageID = "shared-id"
+	acc.normalize(current)
+	old := acpNarrativeEvent(session.ProtocolUpdateTypeAgentThought, "old thought revision")
+	old.Protocol.Update.MessageID = "shared-id"
+	old.Protocol.Update.Replacement = true
+	old.Protocol.Update.PreviouslyObserved = true
+	_, live, handled := acc.normalize(old)
+	final := acc.finalAssistantEvent()
+	if !handled || live == nil || session.EventText(live) != "old thought revision" || final == nil || session.EventText(final) != "current answer" {
+		t.Fatalf("old thought changed current canonical result: live=%#v final=%#v", live, final)
+	}
+}
+
 func TestNarrativeAccumulatorThoughtUsesExactACPDeltaSemantics(t *testing.T) {
 	t.Parallel()
 

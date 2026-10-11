@@ -11,6 +11,7 @@ import (
 	"io"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -28,13 +29,20 @@ type Backend interface {
 	Close() error
 }
 
+// DraftBackend serves an explicitly granted experimental schema. Draft
+// channels never fall back to the Backend's stable ACP handler.
+type DraftBackend interface {
+	ServeACPDraft(context.Context, controladapterhost.ChannelContext, string, io.Reader, io.Writer) error
+}
+
 // Registration is one statically composed hosted adapter.
 type Registration struct {
-	ID         string
-	Name       string
-	Command    string
-	Args       []string
-	NewBackend func(context.Context, io.Reader, io.Writer) (Backend, error)
+	ID              string
+	Name            string
+	Command         string
+	Args            []string
+	NewBackend      func(context.Context, io.Reader, io.Writer) (Backend, error)
+	ACPDraftSchemas []string
 }
 
 type channelGrant struct {
@@ -93,6 +101,7 @@ func normalizeRegistration(in Registration) Registration {
 	in.Name = strings.TrimSpace(in.Name)
 	in.Command = strings.TrimSpace(in.Command)
 	in.Args = append([]string(nil), in.Args...)
+	in.ACPDraftSchemas = append([]string(nil), in.ACPDraftSchemas...)
 	return in
 }
 
@@ -109,7 +118,8 @@ func (m *Manager) Inspect(_ context.Context, adapterID string) (controladapterho
 	if !ok {
 		return controladapterhost.Descriptor{}, fmt.Errorf("gatewayapp adapterhost: unknown adapter %q", adapterID)
 	}
-	descriptor := controladapterhost.Descriptor{ID: registration.ID, Name: registration.Name, BackendState: "stopped"}
+	descriptor := controladapterhost.Descriptor{ID: registration.ID, Name: registration.Name, BackendState: "stopped",
+		ACPDraftSchemas: append([]string(nil), registration.ACPDraftSchemas...)}
 	if closed {
 		descriptor.Diagnostic = "Host adapter service is shutting down"
 		return descriptor, nil
@@ -142,7 +152,7 @@ func (m *Manager) IssueGrant(_ context.Context, principalID, adapterID string, r
 		return controladapterhost.Grant{}, errors.New("gatewayapp adapterhost: principal and connection identity are required")
 	}
 	m.mu.Lock()
-	_, registered := m.registrations[adapterID]
+	registration, registered := m.registrations[adapterID]
 	closed := m.closed
 	m.mu.Unlock()
 	if !registered {
@@ -150,6 +160,10 @@ func (m *Manager) IssueGrant(_ context.Context, principalID, adapterID string, r
 	}
 	if closed {
 		return controladapterhost.Grant{}, errors.New("gatewayapp adapterhost: service is shutting down")
+	}
+	schema := strings.TrimSpace(request.ACPDraftSchema)
+	if schema != "" && !slices.Contains(registration.ACPDraftSchemas, schema) {
+		return controladapterhost.Grant{}, fmt.Errorf("gatewayapp adapterhost: unsupported ACP draft schema %q", schema)
 	}
 	roots, err := normalizeGrantRoots(request.CWD, request.AllowedRoots)
 	if err != nil {
@@ -179,6 +193,7 @@ func (m *Manager) IssueGrant(_ context.Context, principalID, adapterID string, r
 		context: controladapterhost.ChannelContext{
 			PrincipalID: principalID, ConnectionID: strings.TrimSpace(request.ConnectionID),
 			AllowedRoots: roots, WritableRoots: writable,
+			ACPDraftSchema: schema,
 		},
 	}
 	m.mu.Unlock()
@@ -201,6 +216,13 @@ func (m *Manager) ServeChannel(ctx context.Context, adapterID, token string, inp
 	backend, err := m.ensureBackend(ctx, adapterID)
 	if err != nil {
 		return err
+	}
+	if schema := grant.context.ACPDraftSchema; schema != "" {
+		draft, ok := backend.(DraftBackend)
+		if !ok {
+			return errors.New("gatewayapp adapterhost: registered ACP draft backend is unavailable")
+		}
+		return draft.ServeACPDraft(ctx, grant.context, schema, input, output)
 	}
 	return backend.ServeACP(ctx, grant.context, input, output)
 }

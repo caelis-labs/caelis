@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	controladapterhost "github.com/caelis-labs/caelis/control/adapterhost"
@@ -83,4 +84,98 @@ func equalStrings(left, right []string) bool {
 		}
 	}
 	return true
+}
+
+type recordingProtocolBackend struct {
+	unusedBackend
+	stableCalls int
+	draftCalls  int
+	schema      string
+	channel     controladapterhost.ChannelContext
+}
+
+func (b *recordingProtocolBackend) ServeACP(_ context.Context, channel controladapterhost.ChannelContext, _ io.Reader, _ io.Writer) error {
+	b.stableCalls++
+	b.channel = channel
+	return nil
+}
+
+func (b *recordingProtocolBackend) ServeACPDraft(_ context.Context, channel controladapterhost.ChannelContext, schema string, _ io.Reader, _ io.Writer) error {
+	b.draftCalls++
+	b.schema, b.channel = schema, channel
+	return nil
+}
+
+func TestDraftChannelUsesOnlyGrantedSchemaAndOriginalWorkspace(t *testing.T) {
+	const schema = "schema-v2.0.0-alpha.8"
+	manager := newGrantTestManager(t)
+	manager.mu.Lock()
+	registration := manager.registrations["test"]
+	registration.ACPDraftSchemas = []string{schema}
+	manager.registrations["test"] = registration
+	backend := &recordingProtocolBackend{}
+	manager.running["test"] = &runningBackend{backend: backend}
+	manager.mu.Unlock()
+	// This fixture injects a backend with no OS process; leave the existing
+	// supervisor cleanup to its process-owning tests.
+	t.Cleanup(func() {
+		manager.mu.Lock()
+		delete(manager.running, "test")
+		manager.mu.Unlock()
+	})
+	root := t.TempDir()
+	request := controladapterhost.GrantRequest{ConnectionID: "connection", CWD: root, WritableRoots: []string{root}, ACPDraftSchema: "schema-v2.0.0-alpha.7"}
+	if _, err := manager.IssueGrant(t.Context(), "principal", "test", request); err == nil {
+		t.Fatal("unsupported draft was granted")
+	}
+	request.ACPDraftSchema = schema
+	grant, err := manager.IssueGrant(t.Context(), "principal", "test", request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.ServeChannel(t.Context(), "test", grant.Token, strings.NewReader(""), io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if backend.stableCalls != 0 || backend.draftCalls != 1 || backend.schema != schema || backend.channel.ACPDraftSchema != schema {
+		t.Fatalf("draft dispatch = %#v", backend)
+	}
+	if backend.channel.PrincipalID != "principal" || backend.channel.ConnectionID != "connection" || !equalStrings(backend.channel.AllowedRoots, []string{root}) || !equalStrings(backend.channel.WritableRoots, []string{root}) {
+		t.Fatalf("draft changed authority = %#v", backend.channel)
+	}
+	if err := manager.ServeChannel(t.Context(), "test", grant.Token, nil, nil); err == nil {
+		t.Fatal("draft grant reused")
+	}
+	request.ACPDraftSchema = ""
+	stable, err := manager.IssueGrant(t.Context(), "principal", "test", request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.ServeChannel(t.Context(), "test", stable.Token, strings.NewReader(""), io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if backend.stableCalls != 1 || backend.draftCalls != 1 || backend.channel.ACPDraftSchema != "" {
+		t.Fatalf("stable dispatch = %#v", backend)
+	}
+}
+
+func TestDraftChannelNeverFallsBackToStableBackend(t *testing.T) {
+	manager := newGrantTestManager(t)
+	manager.mu.Lock()
+	registration := manager.registrations["test"]
+	registration.ACPDraftSchemas = []string{"fixture-draft"}
+	manager.registrations["test"] = registration
+	manager.running["test"] = &runningBackend{backend: unusedBackend{}}
+	manager.mu.Unlock()
+	t.Cleanup(func() {
+		manager.mu.Lock()
+		delete(manager.running, "test")
+		manager.mu.Unlock()
+	})
+	grant, err := manager.IssueGrant(t.Context(), "principal", "test", controladapterhost.GrantRequest{ConnectionID: "connection", CWD: t.TempDir(), ACPDraftSchema: "fixture-draft"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.ServeChannel(t.Context(), "test", grant.Token, nil, nil); err == nil || !strings.Contains(err.Error(), "draft backend is unavailable") {
+		t.Fatalf("draft fell back or wrong rejection: %v", err)
+	}
 }

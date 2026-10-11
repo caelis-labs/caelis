@@ -72,6 +72,21 @@ func EncodePermissionRequest(ref session.SessionRef, approval *session.ProtocolA
 		},
 		Meta: session.CloneState(meta),
 	}
+	if normalized.Context != nil {
+		subject := session.ApprovalDisplaySubjectOf(&normalized)
+		if subject.Title != nil {
+			wire.Title = subject.Title.Text
+		}
+		if subject.Description != nil {
+			wire.Description = new(subject.Description.Text)
+		}
+		if subject.SensitiveInput || subject.OpaqueInput {
+			wire.ToolCall.Title, wire.ToolCall.RawInput, wire.ToolCall.RawOutput, wire.ToolCall.Content = nil, nil, nil, nil
+		}
+		if normalized.ToolCall.ID == "" {
+			wire.ToolCall = eventstream.ToolCallUpdate{}
+		}
+	}
 	for _, option := range normalized.Options {
 		wire.Options = append(wire.Options, acpsdk.PermissionOption{
 			OptionId: acpsdk.PermissionOptionId(option.ID),
@@ -95,6 +110,9 @@ func permissionToolCallFromWire(wire eventstream.ToolCallUpdate) session.Protoco
 			Path:       item.Path,
 			OldText:    permissionStringPointer(item.OldText),
 			NewText:    item.NewText,
+			Changes:    session.CloneProtocolDiffChanges(item.Changes),
+			Patch:      session.CloneProtocolDiffPatch(item.Patch),
+			Meta:       session.CloneState(item.Meta),
 		})
 	}
 	return session.ProtocolToolCall{
@@ -122,6 +140,9 @@ func permissionToolContentToWire(in []session.ProtocolToolCallContent) []eventst
 			Path:       item.Path,
 			OldText:    permissionStringPointer(item.OldText),
 			NewText:    item.NewText,
+			Changes:    session.CloneProtocolDiffChanges(item.Changes),
+			Patch:      session.CloneProtocolDiffPatch(item.Patch),
+			Meta:       session.CloneState(item.Meta),
 		})
 	}
 	return out

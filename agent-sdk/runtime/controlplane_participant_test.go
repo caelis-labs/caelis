@@ -634,6 +634,10 @@ func TestRuntimeParticipantSteeringWaitsForAdmissionAndCommitsFIFOInputs(t *test
 	go func() {
 		firstResult <- contextual.SubmitContext(context.Background(), agent.Submission{
 			Kind: agent.SubmissionKindConversation, Text: "guide one", DisplayInput: "display one",
+			Metadata: map[string]any{
+				"operation_id": "participant-steer-one", "steering_operation_id": "participant-steer-one",
+				"actor": "forged-child", "participant_id": "forged-participant", "message_id": "forged-message",
+			},
 		})
 	}()
 	select {
@@ -651,6 +655,7 @@ func TestRuntimeParticipantSteeringWaitsForAdmissionAndCommitsFIFOInputs(t *test
 	go func() {
 		secondResult <- contextual.SubmitContext(context.Background(), agent.Submission{
 			Kind: agent.SubmissionKindConversation, Text: "guide two", DisplayInput: "display two",
+			Metadata: map[string]any{"operation_id": "participant-steer-two", "steering_operation_id": "participant-steer-two"},
 		})
 	}()
 	select {
@@ -687,6 +692,16 @@ func TestRuntimeParticipantSteeringWaitsForAdmissionAndCommitsFIFOInputs(t *test
 	for _, event := range published {
 		if event != nil && event.Type == session.EventTypeUser && event.Scope != nil && event.Scope.TurnID == steerRequests[0].TurnID && event.Message != nil {
 			publishedInputs = append(publishedInputs, event.Message.TextContent())
+			if event.Message.TextContent() == "guide one" || event.Message.TextContent() == "guide two" {
+				op := "participant-steer-one"
+				if event.Message.TextContent() == "guide two" {
+					op = "participant-steer-two"
+				}
+				assertCommittedSteeringCorrelation(t, event, op)
+				if event.Scope.Participant.ID != binding.ID || event.Scope.Source != "user_side_agent" || event.Actor.Kind != session.ActorKindUser {
+					t.Fatalf("steering changed native participant/source/actor: %#v", event)
+				}
+			}
 		}
 	}
 	if len(publishedInputs) != 3 || publishedInputs[0] != "initial" || publishedInputs[1] != "guide one" || publishedInputs[2] != "guide two" {
@@ -700,6 +715,12 @@ func TestRuntimeParticipantSteeringWaitsForAdmissionAndCommitsFIFOInputs(t *test
 	for _, event := range durable {
 		if event != nil && event.Type == session.EventTypeUser && event.Scope != nil && event.Scope.TurnID == steerRequests[0].TurnID && event.Message != nil {
 			durableInputs = append(durableInputs, event.Message.TextContent())
+			if event.Message.TextContent() == "guide one" {
+				assertCommittedSteeringCorrelation(t, event, "participant-steer-one")
+			}
+			if event.Message.TextContent() == "guide two" {
+				assertCommittedSteeringCorrelation(t, event, "participant-steer-two")
+			}
 		}
 	}
 	if len(durableInputs) != 3 || durableInputs[0] != "initial" || durableInputs[1] != "guide one" || durableInputs[2] != "guide two" {

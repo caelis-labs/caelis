@@ -23,6 +23,7 @@ type AgentService struct {
 	disconnectCandidates func(context.Context) (appserver.DisconnectCandidatesSnapshot, error)
 	bindingStatus        func(context.Context) (agentbinding.Status, error)
 	commands             appserver.AgentCommandService
+	sessions             appserver.Service
 }
 
 type agentServiceDeps struct {
@@ -33,6 +34,7 @@ type agentServiceDeps struct {
 	disconnectCandidates func(context.Context) (appserver.DisconnectCandidatesSnapshot, error)
 	bindingStatus        func(context.Context) (agentbinding.Status, error)
 	commands             appserver.AgentCommandService
+	sessions             appserver.Service
 }
 
 func newAgentService(deps agentServiceDeps) (*AgentService, error) {
@@ -43,11 +45,19 @@ func newAgentService(deps agentServiceDeps) (*AgentService, error) {
 	return &AgentService{
 		hostDeps: deps.hostDeps, acquireRuntime: deps.acquireRuntime, handoff: deps.handoff,
 		preparation: deps.preparation, disconnectCandidates: deps.disconnectCandidates,
-		bindingStatus: deps.bindingStatus, commands: deps.commands,
+		bindingStatus: deps.bindingStatus, commands: deps.commands, sessions: deps.sessions,
 	}, nil
 }
 
 func (s *AgentService) ListAgents(ctx context.Context, principal appserver.Principal, req appserver.AgentRequest) ([]appserver.AgentCandidate, error) {
+	if strings.TrimSpace(req.SessionID) != "" {
+		driver, closeDriver, err := s.runtimeAdapter(ctx, principal, req.SessionID, req.Surface, false)
+		if err != nil {
+			return nil, err
+		}
+		defer closeDriver()
+		return driver.ListAgents(ctx, req.Limit)
+	}
 	driver, err := s.hostAdapter(principal, req.Surface)
 	if err != nil {
 		return nil, err
@@ -94,7 +104,7 @@ func (s *AgentService) PrepareACPAuthentication(ctx context.Context, principal a
 }
 
 func (s *AgentService) ACPPreparation(ctx context.Context, principal appserver.Principal, req appserver.ACPPreparationRequest) (controlagents.ACPPreparation, error) {
-	if err := authorizeHostCapability(principal); err != nil {
+	if err := authorizeUnscopedHostCapability(principal); err != nil {
 		return controlagents.ACPPreparation{}, err
 	}
 	return s.preparation(ctx, principal.ID, req.Ref)
@@ -105,7 +115,7 @@ func (s *AgentService) ConnectACP(ctx context.Context, principal appserver.Princ
 }
 
 func (s *AgentService) DisconnectCandidates(ctx context.Context, principal appserver.Principal, req appserver.AgentRequest) (appserver.DisconnectCandidatesSnapshot, error) {
-	if err := authorizeHostCapability(principal); err != nil {
+	if err := authorizeUnscopedHostCapability(principal); err != nil {
 		return appserver.DisconnectCandidatesSnapshot{}, err
 	}
 	if strings.TrimSpace(req.SessionID) != "" {
@@ -119,7 +129,7 @@ func (s *AgentService) DisconnectACP(ctx context.Context, principal appserver.Pr
 }
 
 func (s *AgentService) AgentBindingStatus(ctx context.Context, principal appserver.Principal, req appserver.AgentRequest) (agentbinding.Status, error) {
-	if err := authorizeHostCapability(principal); err != nil {
+	if err := authorizeUnscopedHostCapability(principal); err != nil {
 		return agentbinding.Status{}, err
 	}
 	if strings.TrimSpace(req.SessionID) != "" {
@@ -160,7 +170,7 @@ func (s *AgentService) hostAdapter(principal appserver.Principal, surface string
 	if s == nil || s.hostDeps == nil {
 		return nil, errors.New("app/gatewayapp/controladapter/local: Agent service is unavailable")
 	}
-	if err := authorizeHostCapability(principal); err != nil {
+	if err := authorizeUnscopedHostCapability(principal); err != nil {
 		return nil, err
 	}
 	return controladapter.NewAgentAssemblerForHost(*s.hostDeps, strings.TrimSpace(surface), ""), nil
@@ -178,6 +188,11 @@ func (s *AgentService) runtimeAdapter(ctx context.Context, principal appserver.P
 	if deps == nil {
 		_ = lease.Close(ctx)
 		return nil, nil, errors.New("app/gatewayapp/controladapter/local: Agent Runtime projection is unavailable")
+	}
+	if s.sessions != nil {
+		deps.Agent.SessionStateFn = func(ctx context.Context, ref session.SessionRef) (appserver.SessionState, error) {
+			return s.sessions.InspectSession(ctx, principal, appserver.StateRequest{SessionID: ref.SessionID})
+		}
 	}
 	driver, err := controladapter.NewAgentAssemblerForSession(ctx, *deps, lease.Session(), strings.TrimSpace(surface), "")
 	if err != nil {

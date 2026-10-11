@@ -326,11 +326,10 @@ func runningActivityTaskHandles(value string) []string {
 }
 
 func runningNarrativeActivityKey(prefix string, event TranscriptEvent) string {
-	identity := firstNonEmpty(
-		strings.TrimSpace(event.MessageID),
-		strings.TrimSpace(event.SourceProjectionID),
-		strings.TrimSpace(event.SourceEventID),
-	)
+	identity := event.MessageID
+	if identity == "" {
+		identity = firstNonEmpty(strings.TrimSpace(event.SourceProjectionID), strings.TrimSpace(event.SourceEventID))
+	}
 	if identity == "" {
 		return strings.TrimSpace(prefix)
 	}

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -173,6 +174,7 @@ func (r controllerApprovalRequester) RequestControllerApproval(ctx context.Conte
 		},
 		Metadata: metadata,
 	}
+	runtimeRequest = preserveEndpointApproval(runtimeRequest, req.Approval)
 	if r.runtime != nil {
 		if response, handled, err := r.runtime.resolveEndpointApprovalByPolicy(ctx, req.Mode, runtimeRequest); handled {
 			return response, err
@@ -181,7 +183,12 @@ func (r controllerApprovalRequester) RequestControllerApproval(ctx context.Conte
 	if r.requester == nil {
 		return controller.ApprovalResponse{}, nil
 	}
+	permission := cloneApproval(runtimeRequest.Approval)
 	resp, err := r.requester.RequestApproval(ctx, runtimeRequest)
+	if err != nil {
+		return controller.ApprovalResponse{}, err
+	}
+	resp, err = approval.ResolveNativeResponse(permission, resp)
 	if err != nil {
 		return controller.ApprovalResponse{}, err
 	}

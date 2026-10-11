@@ -29,6 +29,10 @@ type historyThread struct {
 }
 
 func (a *agent) loadSession(ctx context.Context, request acp.LoadSessionRequest) (acp.LoadSessionResponse, error) {
+	return a.loadSessionWithReplay(ctx, request, true)
+}
+
+func (a *agent) loadSessionWithReplay(ctx context.Context, request acp.LoadSessionRequest, replay bool) (acp.LoadSessionResponse, error) {
 	config, configErr := mcpConfig(request.McpServers)
 	if configErr != nil {
 		return acp.LoadSessionResponse{}, acp.NewInvalidParams(map[string]any{"error": configErr.Error()})
@@ -84,7 +88,14 @@ func (a *agent) loadSession(ctx context.Context, request acp.LoadSessionRequest)
 	if storedErr != nil || requestedErr != nil || stored != requested {
 		return fail(acp.NewInvalidRequest(map[string]any{"error": "loaded Codex Thread cwd changed during authorization"}), false)
 	}
-	updates, err := historyUpdates(thread, a.negotiatedTerminalOutputMode())
+	var updates []acp.SessionUpdate
+	if replay {
+		if a.draft != nil {
+			updates, err = draftHistoryUpdates(thread, a.negotiatedTerminalOutputMode())
+		} else {
+			updates, err = historyUpdates(thread, a.negotiatedTerminalOutputMode())
+		}
+	}
 	if err != nil {
 		return fail(err, false)
 	}
@@ -101,6 +112,11 @@ func (a *agent) loadSession(ctx context.Context, request acp.LoadSessionRequest)
 			SessionId: request.SessionId, Update: update,
 		}); err != nil {
 			return fail(fmt.Errorf("codex adapter: replay history: %w", err), replayStarted)
+		}
+	}
+	if a.draft != nil {
+		if err := a.draft.acceptHistoryState(route, thread); err != nil {
+			return fail(err, replayStarted)
 		}
 	}
 	for {

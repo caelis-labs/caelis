@@ -204,7 +204,10 @@ func validateJSONMap(scope string, value map[string]any) error {
 type EventType string
 
 const (
-	EventTypeUser        EventType = "user"
+	EventTypeUser EventType = "user"
+	// EventTypeInteraction is durable conversation input dispatched by Control
+	// as a command. Mirror visibility excludes it from model context.
+	EventTypeInteraction EventType = "interaction"
 	EventTypeAssistant   EventType = "assistant"
 	EventTypePlan        EventType = "plan"
 	EventTypeToolCall    EventType = "tool_call"

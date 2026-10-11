@@ -951,6 +951,7 @@ func writeSubagentEvents(builder *blockKeyBuilder, events []SubagentEvent, ctx B
 		builder.addString(event.Args)
 		builder.addString(event.StartArgs)
 		builder.addString(event.FullArgs)
+		builder.addString(event.DiffSummary)
 		if event.Kind == SEToolCall && isTerminalPanelToolEvent(event) && !toolPanelFullOutput(fullOutput, event.CallID) {
 			builder.addString(toolOutputRenderKey(event.Name, true, event.Output, ctx.Width))
 		} else {

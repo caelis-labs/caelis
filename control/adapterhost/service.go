@@ -20,14 +20,18 @@ type Descriptor struct {
 	Available    bool   `json:"available"`
 	BackendState string `json:"backend_state"`
 	Diagnostic   string `json:"diagnostic,omitempty"`
+	// ACPDraftSchemas lists exact experimental schemas available on separately
+	// granted channels. An empty grant continues to select stable ACP v1.
+	ACPDraftSchemas []string `json:"acp_draft_schemas,omitempty"`
 }
 
 // GrantRequest asks the Host to authorize exactly one adapter channel.
 type GrantRequest struct {
-	ConnectionID  string   `json:"connection_id"`
-	CWD           string   `json:"cwd"`
-	AllowedRoots  []string `json:"allowed_roots"`
-	WritableRoots []string `json:"writable_roots,omitempty"`
+	ConnectionID   string   `json:"connection_id"`
+	CWD            string   `json:"cwd"`
+	AllowedRoots   []string `json:"allowed_roots"`
+	WritableRoots  []string `json:"writable_roots,omitempty"`
+	ACPDraftSchema string   `json:"acp_draft_schema,omitempty"`
 }
 
 // Grant is a short-lived, single-use channel credential.
@@ -39,10 +43,11 @@ type Grant struct {
 // ChannelContext is the fully authorized Host projection supplied to a
 // provider-neutral backend hook.
 type ChannelContext struct {
-	PrincipalID   string
-	ConnectionID  string
-	AllowedRoots  []string
-	WritableRoots []string
+	PrincipalID    string
+	ConnectionID   string
+	AllowedRoots   []string
+	WritableRoots  []string
+	ACPDraftSchema string
 }
 
 // Service is the focused Host capability exposed by the private adapter API.

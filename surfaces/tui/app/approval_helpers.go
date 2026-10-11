@@ -3,6 +3,7 @@ package tuiapp
 import (
 	"strings"
 
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 )
 
@@ -13,6 +14,7 @@ const (
 )
 
 type approvalPayload struct {
+	Subject            *session.ApprovalSubject
 	RequestID          eventstream.ApprovalRequestID
 	ToolCallID         string
 	ToolName           string
@@ -37,21 +39,46 @@ type approvalOption struct {
 }
 
 func approvalToPromptRequest(req *approvalPayload, response chan PromptResponse) PromptRequestMsg {
-	toolName, command := approvalToolSummary(req)
-	msg := PromptRequestMsg{
-		Title:         "Approval Required",
-		Prompt:        firstNonEmpty(toolName, "approval required"),
-		Response:      response,
-		Choices:       nil,
-		DefaultChoice: "",
-	}
-	if command != "" {
-		msg.Details = append(msg.Details, PromptDetail{Label: "Action", Value: approvalActionLabel(req)})
-		msg.Details = append(msg.Details, PromptDetail{Label: "Command", Value: command, Emphasis: true})
-	} else if action := approvalActionLabel(req); action != "" {
-		msg.Details = append(msg.Details, PromptDetail{Label: "Action", Value: action})
-	}
+	subject := (*session.ApprovalSubject)(nil)
 	if req != nil {
+		subject = session.CloneApprovalSubject(req.Subject)
+	}
+	if subject == nil {
+		subject = session.ApprovalSubjectOf(nil)
+	}
+	msg := PromptRequestMsg{
+		Title: "Approval Required", Prompt: approvalFieldDisplay(subject.Tool), Response: response,
+	}
+	if subject.Title != nil && (subject.Title.State == session.ApprovalFieldKnown || subject.Title.State == session.ApprovalFieldTruncated) {
+		msg.Title = approvalFieldDisplay(*subject.Title)
+	}
+	if subject.Description != nil {
+		msg.Details = append(msg.Details, PromptDetail{Label: "Description", Value: approvalFieldDisplay(*subject.Description)})
+	}
+	if subject.Reported {
+		msg.Details = append(msg.Details, PromptDetail{Label: "Source", Value: "Context reported by the remote agent.", Tone: PromptToneWarning})
+	}
+	msg.Details = append(msg.Details, PromptDetail{Label: "Operation", Value: approvalFieldDisplay(subject.Operation)})
+	for i, target := range subject.Targets {
+		label := "Target"
+		if subject.Kind == "command" {
+			if i == 0 {
+				label = "Command"
+			} else {
+				label = "Working directory"
+			}
+		}
+		msg.Details = append(msg.Details, PromptDetail{Label: label, Value: approvalFieldDisplay(target), Emphasis: true})
+	}
+	msg.Details = append(msg.Details, PromptDetail{Label: "Effect", Value: approvalFieldDisplay(subject.Effect)}, PromptDetail{Label: "Scope", Value: approvalFieldDisplay(subject.Scope)})
+	incomplete := approvalSubjectIncomplete(subject)
+	if subject.SensitiveInput {
+		msg.Details = append(msg.Details, PromptDetail{Label: "Sensitive input", Value: "Sensitive values are hidden."})
+	}
+	if incomplete {
+		msg.Details = append(msg.Details, PromptDetail{Label: "Context", Value: "Incomplete or opaque; inspect the original request before granting access.", Tone: PromptToneWarning})
+	}
+	if req != nil && !subject.SensitiveInput && !subject.OpaqueInput {
 		if risk := approvalRiskLabel(req); risk != "" {
 			msg.Details = append(msg.Details, PromptDetail{Label: "Risk", Value: risk, Emphasis: true})
 		}
@@ -64,6 +91,8 @@ func approvalToPromptRequest(req *approvalPayload, response chan PromptResponse)
 		if value := strings.TrimSpace(req.SandboxPermissions); value != "" {
 			msg.Details = append(msg.Details, PromptDetail{Label: "Sandbox", Value: value})
 		}
+	}
+	if req != nil {
 		msg.Choices = make([]PromptChoice, 0, len(req.Options))
 		for i, opt := range req.Options {
 			value := strings.TrimSpace(opt.ID)
@@ -73,10 +102,19 @@ func approvalToPromptRequest(req *approvalPayload, response chan PromptResponse)
 			msg.Choices = append(msg.Choices, PromptChoice{
 				Label:  firstNonEmpty(strings.TrimSpace(opt.Name), value),
 				Value:  value,
-				Detail: strings.TrimSpace(opt.Kind),
+				Detail: approvalChoiceDetail(subject, opt),
 			})
 			if i == 0 && msg.DefaultChoice == "" {
 				msg.DefaultChoice = value
+			}
+		}
+		if incomplete {
+			msg.DefaultChoice = ""
+			for _, opt := range req.Options {
+				if opt.Kind == "reject_once" || opt.Kind == "reject_always" {
+					msg.DefaultChoice = opt.ID
+					break
+				}
 			}
 		}
 		if defaultChoice := approvalDefaultChoiceLabel(msg.Choices, msg.DefaultChoice); defaultChoice != "" {
@@ -87,13 +125,49 @@ func approvalToPromptRequest(req *approvalPayload, response chan PromptResponse)
 	return msg
 }
 
-func approvalToolSummary(req *approvalPayload) (string, string) {
-	if req == nil {
-		return "", ""
+func approvalFieldDisplay(field session.ApprovalField) string {
+	if field.Sensitive {
+		return "[sensitive field supplied]"
 	}
-	return approvalToolDisplayLabel(req.ToolName), approvalCommandPreview(req.RawInput)
+	switch field.State {
+	case session.ApprovalFieldKnown:
+		return field.Text
+	case session.ApprovalFieldTruncated:
+		return field.Text + " [truncated]"
+	case session.ApprovalFieldOpaque:
+		return "[opaque]"
+	default:
+		return "[unavailable]"
+	}
 }
 
+func approvalSubjectIncomplete(subject *session.ApprovalSubject) bool {
+	if subject == nil || subject.Kind == "opaque" || subject.Reported || subject.TargetsTruncated || subject.GrantsTruncated {
+		return true
+	}
+	fields := append([]session.ApprovalField{subject.Tool, subject.Operation, subject.Effect, subject.Scope}, subject.Targets...)
+	for _, grant := range subject.Grants {
+		fields = append(fields, grant.Scope)
+	}
+	for _, field := range fields {
+		if field.State != session.ApprovalFieldKnown || field.Sensitive {
+			return true
+		}
+	}
+	return false
+}
+
+func approvalChoiceDetail(subject *session.ApprovalSubject, opt approvalOption) string {
+	for _, grant := range subject.Grants {
+		if grant.OptionID == opt.ID {
+			return opt.Kind + "; scope: " + approvalFieldDisplay(grant.Scope)
+		}
+	}
+	return opt.Kind + "; scope: [unavailable]"
+}
+
+// Legacy review preview is limited to completed decisions predating typed
+// subjects; new permission prompts use only their common Subject.
 func approvalKnownInputPreview(raw map[string]any) string {
 	if len(raw) == 0 {
 		return ""
@@ -134,42 +208,11 @@ func approvalToolDisplayLabel(toolName string) string {
 	}
 }
 
-func approvalActionLabel(req *approvalPayload) string {
-	if req == nil {
-		return ""
-	}
-	switch req.ToolName {
-	case surfaceToolWrite, surfaceToolPatch:
-		return "write"
-	case surfaceToolRunCommand, surfaceToolSpawn, surfaceToolSendMessage:
-		return "execute"
-	case surfaceToolRead, surfaceToolViewImage, surfaceToolGlob, surfaceToolGrep,
-		surfaceToolSkill, surfaceToolWebSearch, surfaceToolWebFetch:
-		return "read"
-	}
-	tool := strings.TrimSpace(req.ToolName)
-	switch {
-	case strings.TrimSpace(req.SandboxPermissions) != "":
-		return "permission change"
-	case tool != "":
-		return tool
-	default:
-		return "approval"
-	}
-}
-
 func approvalRiskLabel(req *approvalPayload) string {
 	if req == nil {
 		return ""
 	}
-	if value := strings.TrimSpace(req.Risk); value != "" {
-		return value
-	}
-	parts := []string{}
-	if strings.Contains(strings.ToLower(req.SandboxPermissions), "host") {
-		parts = append(parts, "host execution")
-	}
-	return strings.Join(parts, "; ")
+	return strings.TrimSpace(req.Risk)
 }
 
 func approvalDefaultChoiceLabel(choices []PromptChoice, selected string) string {

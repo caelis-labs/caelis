@@ -163,8 +163,13 @@ func (m *Model) applyTranscriptEvent(event TranscriptEvent, reconnectReplay bool
 }
 
 func (m *Model) applyTranscriptAgentCommunication(event TranscriptEvent) (tea.Model, tea.Cmd) {
-	event.Text = strings.TrimSpace(tuikit.SanitizeLogText(event.Text))
-	if event.Text == "" || documentContainsAgentCommunication(m.doc, agentCommunicationSubagentEvent(event)) {
+	event.Text = tuikit.SanitizeLogText(event.Text)
+	incoming := agentCommunicationSubagentEvent(event)
+	if blockID, patched := patchDocumentAgentCommunication(m.doc, incoming); patched {
+		m.markViewportBlockDirty(blockID)
+		return m, m.requestStreamViewportSync()
+	}
+	if !event.Replacement && (event.Text == "" || documentContainsAgentCommunication(m.doc, incoming)) {
 		return m, nil
 	}
 	switch event.Scope {
@@ -335,13 +340,14 @@ func (m *Model) applyTranscriptNarrative(event TranscriptEvent) (tea.Model, tea.
 
 func (m *Model) handleDirectedParticipantUserMessage(event TranscriptEvent) tea.Model {
 	text := directedParticipantUserDisplay(event)
-	if text == "" {
+	if text == "" && !event.Replacement {
 		return m
 	}
 	// Participant echoes are directed side-agent prompts; they must not close
 	// or finalize any active main ACP turn.
 	return m.applyGatewayUserEcho(gatewayUserEchoOptions{
 		displayLine:    text,
+		appendLine:     event.Text,
 		dequeueNeedles: []string{directedParticipantUserDequeueText(event)},
 		event:          event,
 	})
@@ -360,6 +366,8 @@ func (m *Model) applyTranscriptMainNarrative(event TranscriptEvent) (tea.Model, 
 	if event.NarrativeKind == TranscriptNarrativeReasoning {
 		if event.Final {
 			block.ReplaceFinalStreamEvent(SEReasoning, text, source, event.OccurredAt)
+		} else if event.Replacement {
+			block.ReplaceStreamEvent(SEReasoning, text, source, event.OccurredAt)
 		} else if text != "" {
 			block.AppendStreamEvent(SEReasoning, text, source, event.OccurredAt)
 		}
@@ -372,6 +380,8 @@ func (m *Model) applyTranscriptMainNarrative(event TranscriptEvent) (tea.Model, 
 			if !m.turnRunning() {
 				m.closeMainTimelineTailWithState(block, event.OccurredAt, "completed")
 			}
+		} else if event.Replacement {
+			block.ReplaceStreamEvent(SEAssistant, text, source, event.OccurredAt)
 		} else if text != "" {
 			block.AppendStreamEvent(SEAssistant, text, source, event.OccurredAt)
 		}
@@ -602,7 +612,7 @@ func (m *Model) applyAnchoredSubagentNarrativeToTool(event TranscriptEvent) (tea
 		return m, nil
 	}
 	text := tuikit.SanitizeLogText(transcriptNarrativeText(event))
-	if strings.TrimSpace(text) == "" {
+	if strings.TrimSpace(text) == "" && !event.Replacement {
 		return m, nil
 	}
 	toolName := strings.TrimSpace(event.AnchorToolName)
@@ -610,10 +620,11 @@ func (m *Model) applyAnchoredSubagentNarrativeToTool(event TranscriptEvent) (tea
 		return m, nil
 	}
 	meta := ToolUpdateMeta{
-		ToolKind:        "execute",
-		TaskHandle:      strings.TrimSpace(event.ScopeID),
-		MessageID:       strings.TrimSpace(event.MessageID),
-		OutputNarrative: true,
+		ToolKind:          "execute",
+		TaskHandle:        strings.TrimSpace(event.ScopeID),
+		MessageID:         event.MessageID,
+		OutputNarrative:   true,
+		OutputReplacement: event.Replacement,
 	}
 	for _, docBlock := range m.doc.Blocks() {
 		block, ok := docBlock.(*MainACPTurnBlock)
@@ -705,21 +716,26 @@ func transcriptParticipantTurnKey(event TranscriptEvent) string {
 
 func transcriptToolUpdateMeta(event TranscriptEvent) ToolUpdateMeta {
 	return ToolUpdateMeta{
-		ToolNameExplicit:   event.ToolNameExplicit,
-		TaskHandle:         event.ToolTaskHandle,
-		TaskAction:         event.ToolTaskAction,
-		TaskInput:          event.ToolTaskInput,
-		TaskTargetKind:     event.ToolTaskTargetKind,
-		MessageTarget:      event.ToolMessageTarget,
-		ToolKind:           event.ToolKind,
-		ToolTitle:          event.ToolTitle,
-		ExplorationVerb:    event.ToolExplorationVerb,
-		FullArgs:           event.ToolFullArgs,
-		ToolStatus:         event.ToolStatus,
-		ToolStatusExplicit: event.ToolStatusExplicit,
-		Terminal:           event.ToolTerminal,
-		OutputSynthetic:    event.ToolOutputSynthetic,
-		OutputCollection:   event.ToolOutputCollection,
-		OutputTerminal:     event.ToolOutputTerminal,
+		ToolNameExplicit:     event.ToolNameExplicit,
+		TaskHandle:           event.ToolTaskHandle,
+		TaskAction:           event.ToolTaskAction,
+		TaskInput:            event.ToolTaskInput,
+		TaskTargetKind:       event.ToolTaskTargetKind,
+		MessageTarget:        event.ToolMessageTarget,
+		ToolKind:             event.ToolKind,
+		ToolTitle:            event.ToolTitle,
+		ExplorationVerb:      event.ToolExplorationVerb,
+		FullArgs:             event.ToolFullArgs,
+		ToolStatus:           event.ToolStatus,
+		ToolStatusExplicit:   event.ToolStatusExplicit,
+		ReplacedFields:       append([]string(nil), event.ToolReplacedFields...),
+		OutputReplacement:    event.ToolOutputReplacement,
+		Terminal:             event.ToolTerminal,
+		OutputSynthetic:      event.ToolOutputSynthetic,
+		ClearSyntheticOutput: event.ToolClearSyntheticOutput,
+		OutputCollection:     event.ToolOutputCollection,
+		OutputExact:          event.ToolOutputExact,
+		DiffSummary:          event.ToolDiffSummary,
+		OutputTerminal:       event.ToolOutputTerminal,
 	}
 }

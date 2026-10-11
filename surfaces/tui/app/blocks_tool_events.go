@@ -19,13 +19,20 @@ type ToolUpdateMeta struct {
 	ToolStatus         string
 	ToolStatusExplicit bool
 	OutputNarrative    bool
+	OutputReplacement  bool
+	ReplacedFields     []string
 	// OutputAuthoritative marks a canonical semantic final that must replace a
 	// transient preview for the same physical task panel.
-	OutputAuthoritative bool
-	Terminal            bool
-	OutputSynthetic     bool
-	OutputCollection    bool
-	OutputTerminal      bool
+	OutputAuthoritative  bool
+	Terminal             bool
+	OutputSynthetic      bool
+	ClearSyntheticOutput bool
+	OutputCollection     bool
+	// OutputExact preserves typed structured-diff display bytes without
+	// changing collection replacement or terminal append ownership.
+	OutputExact    bool
+	OutputTerminal bool
+	DiffSummary    string
 }
 
 type toolEventUpdate struct {
@@ -48,7 +55,7 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 	toolTitle := strings.TrimSpace(update.Meta.ToolTitle)
 	explorationVerb := strings.TrimSpace(update.Meta.ExplorationVerb)
 	fullArgs := strings.TrimSpace(update.Meta.FullArgs)
-	messageID := strings.TrimSpace(update.Meta.MessageID)
+	messageID := update.Meta.MessageID
 	taskHandle := strings.TrimSpace(update.Meta.TaskHandle)
 	taskAction := strings.ToLower(strings.TrimSpace(update.Meta.TaskAction))
 	taskInput := strings.TrimSpace(update.Meta.TaskInput)
@@ -62,13 +69,23 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 	if existingIdx < 0 {
 		existingIdx = settledIdx
 	}
-	if existingIdx >= 0 && !update.Meta.ToolNameExplicit && (effectiveName == "" || out[existingIdx].NameExplicit) {
+	if existingIdx >= 0 && !containsToolField(update.Meta.ReplacedFields, "name") && !update.Meta.ToolNameExplicit && (effectiveName == "" || out[existingIdx].NameExplicit) {
 		effectiveName = strings.TrimSpace(out[existingIdx].Name)
 		name = effectiveName
 		update.Meta.ToolNameExplicit = out[existingIdx].NameExplicit
 	}
 	semanticName := effectiveName
-	output := normalizeToolEventOutput(update.Output, effectiveName, update.Meta.Terminal)
+	if existingIdx >= 0 && update.Final {
+		// Patch presence is display state and also applies to final snapshots.
+		// Clear first so sparse-final recovery cannot resurrect removed fields.
+		applyReplacedToolFields(&out[existingIdx], name, toolKind, toolTitle, args, fullArgs, update.Meta)
+		if update.Meta.OutputReplacement {
+			out[existingIdx].Output = ""
+			out[existingIdx].DiffSummary = ""
+			out[existingIdx].OutputMessage = ""
+		}
+	}
+	output := normalizeToolEventOutput(update.Output, effectiveName, update.Meta.Terminal, update.Meta.OutputExact)
 	if semanticName == surfaceToolTask && taskAction == "cancel" {
 		args = taskCancelArgsWithLinkedCommand(args, out, taskHandle)
 	}
@@ -113,6 +130,7 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 			StartArgs:        args,
 			FullArgs:         fullArgs,
 			Output:           output,
+			DiffSummary:      update.Meta.DiffSummary,
 			OutputMessageID:  messageID,
 			OutputMessage:    output,
 			OutputNarrative:  update.Meta.OutputNarrative,
@@ -142,6 +160,7 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 		StartArgs:        args,
 		FullArgs:         fullArgs,
 		Output:           output,
+		DiffSummary:      update.Meta.DiffSummary,
 		OutputMessageID:  messageID,
 		OutputMessage:    output,
 		OutputNarrative:  update.Meta.OutputNarrative,
@@ -217,8 +236,8 @@ func completedToolSnapshotsShareCallID(existing SubagentEvent, incoming Subagent
 	return true
 }
 
-func normalizeToolEventOutput(output string, effectiveName string, terminal bool) string {
-	if terminal || surfaceIsTerminalPanelTool(effectiveName) {
+func normalizeToolEventOutput(output string, effectiveName string, terminal, exact bool) string {
+	if terminal || exact || surfaceIsTerminalPanelTool(effectiveName) {
 		return output
 	}
 	return strings.TrimSpace(output)
@@ -289,6 +308,14 @@ func mergeOpenToolEvent(ev *SubagentEvent, name, toolKind, toolTitle, args, full
 	if ev == nil {
 		return
 	}
+	applyReplacedToolFields(ev, name, toolKind, toolTitle, args, fullArgs, meta)
+	if meta.ClearSyntheticOutput && ev.OutputSynthetic {
+		// Clearing an exit observation removes only its derived placeholder;
+		// exact process bytes remain owned by their independent output stream.
+		resetToolEventOutputMode(ev)
+		ev.Output = ""
+		ev.OutputSynthetic = false
+	}
 	if meta.ToolNameExplicit || (strings.TrimSpace(ev.Name) == "" && strings.TrimSpace(name) != "") {
 		ev.Name = name
 		ev.NameExplicit = meta.ToolNameExplicit
@@ -336,13 +363,15 @@ func mergeOpenToolEvent(ev *SubagentEvent, name, toolKind, toolTitle, args, full
 	// is structured child narrative rather than terminal bytes and must retain
 	// message scope.
 	terminalOutput := toolUpdateOwnsTerminalOutput(*ev, meta)
-	replaceCollection := meta.OutputCollection && !meta.OutputNarrative
-	preserveCollection := ev.OutputCollection && !meta.OutputCollection && !meta.OutputTerminal && !meta.OutputNarrative
-	if !preserveCollection && (replaceCollection || shouldMergeOpenToolOutput(semanticName, output, terminalOutput)) {
+	replaceCollection := (meta.OutputCollection || meta.OutputReplacement) && !meta.OutputNarrative
+	preserveCollection := ev.OutputCollection && !meta.OutputCollection && !meta.OutputReplacement && !meta.OutputTerminal && !meta.OutputNarrative
+	if !preserveCollection && (replaceCollection || meta.OutputReplacement || shouldMergeOpenToolOutput(semanticName, output, terminalOutput)) {
 		if replaceCollection {
 			resetToolEventOutputMode(ev)
 			ev.Output = output
-			ev.OutputCollection = true
+			ev.DiffSummary = meta.DiffSummary
+			ev.OutputCollection = meta.OutputCollection
+			ev.OutputTerminal = meta.OutputTerminal
 		} else if terminalOutput {
 			if meta.OutputTerminal && !ev.OutputTerminal && (semanticName != surfaceToolRunCommand || ev.OutputCollection) {
 				resetToolEventOutputMode(ev)
@@ -362,7 +391,10 @@ func mergeOpenToolEvent(ev *SubagentEvent, name, toolKind, toolTitle, args, full
 			if meta.OutputNarrative && ev.OutputCollection {
 				resetToolEventOutputMode(ev)
 			}
-			if meta.OutputNarrative && ev.OutputNarrativeBoundary {
+			if meta.OutputNarrative && meta.OutputReplacement {
+				ev.Output, ev.OutputMessage = replaceSubagentNarrativeChunk(ev.Output, ev.OutputMessageID, ev.OutputMessage, output, messageID)
+				ev.OutputNarrativeBoundary = false
+			} else if meta.OutputNarrative && ev.OutputNarrativeBoundary {
 				ev.Output = joinSubagentNarrativeMessages(ev.Output, output)
 				ev.OutputMessage = output
 				ev.OutputMessageID = ""
@@ -377,6 +409,7 @@ func mergeOpenToolEvent(ev *SubagentEvent, name, toolKind, toolTitle, args, full
 			// Standard ToolCallUpdate.Content replaces the content collection.
 			// Only explicit child narrative and terminal byte streams append.
 			ev.Output = output
+			ev.DiffSummary = ""
 			ev.OutputMessage = ""
 			ev.OutputMessageID = ""
 			ev.OutputCollection = false
@@ -392,6 +425,7 @@ func resetToolEventOutputMode(ev *SubagentEvent) {
 		return
 	}
 	ev.Output = ""
+	ev.DiffSummary = ""
 	ev.OutputMessage = ""
 	ev.OutputMessageID = ""
 	ev.OutputSynthetic = false
@@ -541,6 +575,7 @@ func mergeFinalToolEvent(ev *SubagentEvent, finalEvent *SubagentEvent, authorita
 	clearTaskWriteTerminalOwnership(ev)
 	if finalToolOutputShouldReplace(*ev, *finalEvent, authoritativeFinal) {
 		ev.Output = finalEvent.Output
+		ev.DiffSummary = finalEvent.DiffSummary
 		ev.OutputMessageID = finalEvent.OutputMessageID
 		ev.OutputMessage = finalEvent.OutputMessage
 		ev.OutputSynthetic = finalEvent.OutputSynthetic
@@ -696,4 +731,22 @@ func preferredDisplayTaskHandle(current string, candidate string) string {
 		return candidate
 	}
 	return current
+}
+
+func applyReplacedToolFields(ev *SubagentEvent, name, kind, title, args, fullArgs string, meta ToolUpdateMeta) {
+	if ev == nil {
+		return
+	}
+	for _, field := range meta.ReplacedFields {
+		switch field {
+		case "name":
+			ev.Name, ev.NameExplicit = name, meta.ToolNameExplicit
+		case "title":
+			ev.Title = title
+		case "kind":
+			ev.ToolKind = kind
+		case "rawInput":
+			ev.Args, ev.FullArgs, ev.StartArgs = args, fullArgs, args
+		}
+	}
 }

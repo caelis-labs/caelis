@@ -43,9 +43,12 @@ func TestApplicationTerminalObservationHasExactScope(t *testing.T) {
 	}{
 		{"/sessions/owned/terminals/output", "POST", true},
 		{"/sessions/other/terminals/output", "POST", false},
-		{"/sessions/owned/terminals/wait", "POST", false},
-		{"/sessions/owned/terminals/kill", "POST", false},
-		{"/sessions/owned/terminals/release", "POST", false},
+		{"/sessions/owned/terminals/wait", "POST", true},
+		{"/sessions/other/terminals/wait", "POST", false},
+		{"/sessions/owned/terminals/kill", "POST", true},
+		{"/sessions/owned/terminals/release", "POST", true},
+		{"/sessions/other/terminals/kill", "POST", false},
+		{"/sessions/other/terminals/release", "POST", false},
 		{"/sessions/owned/terminals/output/extra", "POST", false},
 		{"/sessions/owned/terminals/output", http.MethodGet, false},
 	} {

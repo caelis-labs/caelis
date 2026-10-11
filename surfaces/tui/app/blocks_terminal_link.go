@@ -9,14 +9,15 @@ func updateLinkedTerminalEvent(events []SubagentEvent, callID string, toolName s
 	taskID = strings.TrimSpace(taskID)
 	authoritativeFinal := toolFinalOutputAuthoritative(err, meta.ToolStatus)
 	if toolName == surfaceToolSpawn {
-		return updateLinkedSpawnEvent(events, strings.TrimSpace(callID), taskID, output, meta.MessageID, final, err, meta.Terminal, meta.OutputNarrative, authoritativeFinal)
+		return updateLinkedSpawnEvent(events, strings.TrimSpace(callID), taskID, output, meta.MessageID, final, err, meta.Terminal, meta.OutputNarrative, authoritativeFinal, meta.OutputReplacement)
 	}
 	return false
 }
 
-func updateLinkedSpawnEvent(events []SubagentEvent, callID string, taskID string, output string, messageID string, final bool, err bool, terminal bool, outputNarrative bool, authoritativeFinal bool) bool {
+func updateLinkedSpawnEvent(events []SubagentEvent, callID string, taskID string, output string, messageID string, final bool, err bool, terminal bool, outputNarrative bool, authoritativeFinal bool, replacement ...bool) bool {
 	taskID = strings.TrimSpace(taskID)
-	mergeOutput := shouldMergeOpenToolOutput("", output, terminal)
+	replace := len(replacement) > 0 && replacement[0]
+	mergeOutput := replace || shouldMergeOpenToolOutput("", output, terminal)
 	if taskID == "" || (!mergeOutput && !final) {
 		return false
 	}
@@ -33,7 +34,7 @@ func updateLinkedSpawnEvent(events []SubagentEvent, callID string, taskID string
 		}
 		wasDone := ev.Done
 		if mergeOutput {
-			mergeLinkedSubagentOutput(ev, output, messageID, final, outputNarrative, authoritativeFinal)
+			mergeLinkedSubagentOutput(ev, output, messageID, final, outputNarrative, authoritativeFinal, replace)
 		}
 		if terminal {
 			ev.Terminal = true
@@ -85,7 +86,7 @@ func linkedTerminalCommandForTask(events []SubagentEvent, taskID string) string 
 	return ""
 }
 
-func mergeLinkedSubagentOutput(ev *SubagentEvent, output string, messageID string, final bool, outputNarrative bool, authoritativeFinal bool) {
+func mergeLinkedSubagentOutput(ev *SubagentEvent, output string, messageID string, final bool, outputNarrative bool, authoritativeFinal bool, replacement ...bool) {
 	if ev == nil {
 		return
 	}
@@ -96,6 +97,11 @@ func mergeLinkedSubagentOutput(ev *SubagentEvent, output string, messageID strin
 		if (authoritativeFinal && renderableTextHasContent(output)) || !ev.OutputNarrative || subagentFinalOutputShouldReplace(ev.Output, output) {
 			ev.Output = output
 		}
+	} else if len(replacement) > 0 && replacement[0] {
+		ev.Output, ev.OutputMessage = replaceSubagentNarrativeChunk(ev.Output, ev.OutputMessageID, ev.OutputMessage, output, messageID)
+		if messageID != "" {
+			ev.OutputMessageID = messageID
+		}
 	} else if outputNarrative || ev.OutputNarrative {
 		ev.Output, ev.OutputMessage = mergeSubagentNarrativeChunk(
 			ev.Output,
@@ -104,7 +110,7 @@ func mergeLinkedSubagentOutput(ev *SubagentEvent, output string, messageID strin
 			output,
 			messageID,
 		)
-		if messageID = strings.TrimSpace(messageID); messageID != "" {
+		if messageID != "" {
 			ev.OutputMessageID = messageID
 		}
 	} else {

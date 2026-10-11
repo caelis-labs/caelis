@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
 const (
@@ -43,6 +44,16 @@ type ContentChunk struct {
 	Content       json.RawMessage `json:"content"`
 	MessageID     string          `json:"messageId,omitempty"`
 	Meta          map[string]any  `json:"_meta,omitempty"`
+	// Replacement is an internal materialized message snapshot, including an
+	// explicit empty snapshot. It is never a fabricated ACP v1 delta.
+	Replacement bool `json:"-"`
+	// MetaPresent preserves an explicit metadata patch, including null, without
+	// changing content or treating an empty metadata delta as a new answer.
+	MetaPresent bool `json:"-"`
+	// PreviouslyObserved means this Session's materialization owner has already
+	// emitted content for MessageID. It distinguishes old display revisions
+	// from a new answer after an Activity or forwarding owner is recreated.
+	PreviouslyObserved bool `json:"-"`
 }
 
 type TextContent struct {
@@ -60,45 +71,60 @@ type ToolCallLocation struct {
 	Line *int   `json:"line,omitempty"`
 }
 
+// ToolDiffChange and ToolDiffPatch use the shared transport-independent display
+// representation so file changes survive canonical storage and replay.
+type ToolDiffChange = session.ProtocolDiffChange
+type ToolDiffPatch = session.ProtocolDiffPatch
+
 type ToolCallContent struct {
-	Type       string  `json:"type"`
-	Content    any     `json:"content,omitempty"`
-	TerminalID string  `json:"terminalId,omitempty"`
-	Path       string  `json:"path,omitempty"`
-	OldText    *string `json:"oldText,omitempty"`
-	NewText    string  `json:"newText,omitempty"`
+	Type       string            `json:"type"`
+	Content    any               `json:"content,omitempty"`
+	TerminalID string            `json:"terminalId,omitempty"`
+	Path       string            `json:"path,omitempty"`
+	OldText    *string           `json:"oldText,omitempty"`
+	NewText    string            `json:"newText,omitempty"`
+	Changes    *[]ToolDiffChange `json:"changes,omitempty"`
+	Patch      *ToolDiffPatch    `json:"patch,omitempty"`
+	Meta       map[string]any    `json:"_meta,omitempty"`
 }
 
 // ToolCall is the tolerant external-Agent tool-call representation. Standard
 // values are projected into Control eventstream types only after ingress
 // compatibility and trust normalization have run.
 type ToolCall struct {
-	SessionUpdate string             `json:"sessionUpdate"`
-	ToolCallID    string             `json:"toolCallId"`
-	Name          *string            `json:"name,omitempty"`
-	Title         string             `json:"title"`
-	Kind          string             `json:"kind,omitempty"`
-	Status        string             `json:"status,omitempty"`
-	RawInput      any                `json:"rawInput,omitempty"`
-	RawOutput     any                `json:"rawOutput,omitempty"`
-	Content       []ToolCallContent  `json:"content,omitempty"`
-	Locations     []ToolCallLocation `json:"locations,omitempty"`
-	Meta          map[string]any     `json:"_meta,omitempty"`
+	// PreviouslyObserved comes only from the draft Session observation owner.
+	PreviouslyObserved bool               `json:"-"`
+	SessionUpdate      string             `json:"sessionUpdate"`
+	ToolCallID         string             `json:"toolCallId"`
+	Name               *string            `json:"name,omitempty"`
+	Title              string             `json:"title"`
+	Kind               string             `json:"kind,omitempty"`
+	Status             string             `json:"status,omitempty"`
+	RawInput           any                `json:"rawInput,omitempty"`
+	RawOutput          any                `json:"rawOutput,omitempty"`
+	Content            []ToolCallContent  `json:"content,omitempty"`
+	Locations          []ToolCallLocation `json:"locations,omitempty"`
+	Meta               map[string]any     `json:"_meta,omitempty"`
 }
 
 // ToolCallUpdate is the tolerant sparse external-Agent tool update.
 type ToolCallUpdate struct {
-	SessionUpdate string             `json:"sessionUpdate"`
-	ToolCallID    string             `json:"toolCallId"`
-	Name          *string            `json:"name,omitempty"`
-	Title         *string            `json:"title,omitempty"`
-	Kind          *string            `json:"kind,omitempty"`
-	Status        *string            `json:"status,omitempty"`
-	RawInput      any                `json:"rawInput,omitempty"`
-	RawOutput     any                `json:"rawOutput,omitempty"`
-	Content       []ToolCallContent  `json:"content,omitempty"`
-	Locations     []ToolCallLocation `json:"locations,omitempty"`
-	Meta          map[string]any     `json:"_meta,omitempty"`
+	// PreviouslyObserved comes only from the draft Session observation owner.
+	PreviouslyObserved bool               `json:"-"`
+	SessionUpdate      string             `json:"sessionUpdate"`
+	ToolCallID         string             `json:"toolCallId"`
+	Name               *string            `json:"name,omitempty"`
+	Title              *string            `json:"title,omitempty"`
+	Kind               *string            `json:"kind,omitempty"`
+	Status             *string            `json:"status,omitempty"`
+	RawInput           any                `json:"rawInput,omitempty"`
+	RawOutput          any                `json:"rawOutput,omitempty"`
+	Content            []ToolCallContent  `json:"content,omitempty"`
+	Locations          []ToolCallLocation `json:"locations,omitempty"`
+	Meta               map[string]any     `json:"_meta,omitempty"`
+	// RawPatch retains standard draft field presence, including explicit clears.
+	// It is display projection evidence, never permission or execution authority.
+	RawPatch map[string]json.RawMessage `json:"-"`
 }
 
 type PlanEntry struct {

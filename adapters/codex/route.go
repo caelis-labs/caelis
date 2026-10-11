@@ -112,6 +112,9 @@ func (r *sessionRoute) close(err error) {
 		return
 	}
 	if r.agent != nil {
+		if r.agent.draft != nil {
+			r.agent.draft.routeClosed(r, err)
+		}
 		// Release app-server ownership before exposing the Turn failure. A
 		// caller that immediately opens the same Codex Thread in another
 		// Surface must not race the stale loaded subscription.
@@ -209,6 +212,12 @@ func (r *sessionRoute) lastSequence() uint64 {
 }
 
 func (r *sessionRoute) publish(notification appserver.Notification) error {
+	if r.agent.draft != nil {
+		handled, err := r.agent.draft.publishNative(r, notification)
+		if handled || err != nil {
+			return err
+		}
+	}
 	if notice := codexNotice(notification); notice != nil {
 		return r.publishNotice(notice)
 	}
@@ -239,6 +248,9 @@ func (r *sessionRoute) publish(notification appserver.Notification) error {
 }
 
 func (r *sessionRoute) handleRequest(ctx context.Context, request appserver.Request) (any, error) {
+	if r.agent.draft != nil && !r.agent.draft.preparePermission(r, request) {
+		return appServerFallbackResponse(request.Method)
+	}
 	if r.agent.connection == nil {
 		return appServerFallbackResponse(request.Method)
 	}

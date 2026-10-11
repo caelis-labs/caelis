@@ -341,6 +341,35 @@ func TestRegressionProjectionGoldenFullEnvelopes(t *testing.T) {
     "scope": "main",
     "scope_id": "sess-proj-full",
     "final": true,
+    "approval_subject": {
+      "kind": "opaque",
+      "tool": {
+        "state": "known",
+        "text": "RunCommand"
+      },
+      "operation": {
+        "state": "opaque"
+      },
+      "targets": [
+        {
+          "state": "opaque"
+        }
+      ],
+      "effect": {
+        "state": "opaque"
+      },
+      "scope": {
+        "state": "opaque"
+      },
+      "grants": [
+        {
+          "option_id": "allow_once",
+          "scope": {
+            "state": "opaque"
+          }
+        }
+      ]
+    },
     "permission": {
       "sessionId": "sess-proj-full",
       "toolCall": {

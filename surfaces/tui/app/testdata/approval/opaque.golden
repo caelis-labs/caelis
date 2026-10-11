@@ -1,0 +1,15 @@
+╭──────────────────────────────────────────────────────────────────────────────────╮
+│ Approval Required                                                                │
+│                                                                                  │
+│ OPERATION: [opaque]                                                              │
+│ TARGET:    [opaque]                                                              │
+│ EFFECT:    [opaque]                                                              │
+│ SCOPE:     [opaque]                                                              │
+│ CONTEXT:   Incomplete or opaque; inspect the original request before granting ac │
+│            cess.                                                                 │
+│ DEFAULT:   Reject                                                                │
+│                                                                                  │
+│   Allow once  allow_once; scope: [unavailable]                                   │
+│ ▎ Reject      reject_once; scope: [unavailable]                                  │
+╰──────────────────────────────────────────────────────────────────────────────────╯
+   ↑/↓ select  enter confirm  esc cancel

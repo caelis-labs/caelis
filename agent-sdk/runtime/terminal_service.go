@@ -67,20 +67,39 @@ func (s *terminalService) Read(ctx context.Context, ref terminal.Ref) (terminal.
 
 func (s *terminalService) Wait(ctx context.Context, ref terminal.Ref) (terminal.Snapshot, error) {
 	ref = terminal.NormalizeRef(ref)
-	task, err := s.resolveTerminalCommand(ctx, ref)
-	if err != nil {
-		return terminal.Snapshot{}, err
-	}
 	for {
+		task, err := s.resolveTerminalCommand(ctx, ref)
+		if err != nil {
+			return terminal.Snapshot{}, err
+		}
+		task.mu.Lock()
+		settled := taskapi.IsTerminalState(task.state)
+		task.mu.Unlock()
+		if settled {
+			return s.Read(ctx, ref)
+		}
 		if task.commandOutcomeUnattached() || (task.observableCommandSession() == nil && !task.hasLiveContinuation()) {
 			return s.Read(ctx, ref)
 		}
-		observed, waitErr := s.tasks.waitCommandTask(ctx, task.sessionRef, task, taskapi.ControlRequest{Yield: taskWaitMaxYield})
-		if waitErr != nil {
-			return terminal.Snapshot{}, waitErr
+		process := task.observableCommandSession()
+		if process == nil {
+			if !task.waitForCommandProducer(ctx, taskWaitMaxYield) && ctx.Err() != nil {
+				return terminal.Snapshot{}, ctx.Err()
+			}
+			continue
+		}
+		// Terminal clients observe the producer. Task wait is model-facing and
+		// consumes its output cursor; using it here loses output for a later Task
+		// call and can finalize the Task before the model receives its result.
+		if _, err := process.Wait(ctx, taskWaitMaxYield); err != nil {
+			return terminal.Snapshot{}, err
+		}
+		observed, err := s.Read(ctx, ref)
+		if err != nil {
+			return terminal.Snapshot{}, err
 		}
 		if !observed.Running {
-			return terminalSnapshotFromTaskSnapshot(observed), nil
+			return observed, nil
 		}
 	}
 }

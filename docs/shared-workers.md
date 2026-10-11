@@ -113,11 +113,36 @@ the native permission/approval policy. Bot-private Application Session state,
 callback catalogs and private Memory are not inherited. A workspace path grants
 no extra tool privileges; normal workspace trust and approvals still apply.
 
+An owned Worker grant exposes the native Session controls used by the local
+user. Require `shared-worker-session-control-v1` for Session compaction, model and
+approval/controller/presentation selection, controller handoff, closure,
+status/presentation, file/Skill/model completion, participant start/prompt/cancel,
+and exact child input/receipts. These calls use the ordinary `/sessions/{id}`
+focused APIs, native revision/controller checks and operation receipts.
+They do not mutate the Host's model default, credential store or agent bindings.
+Trusted embedded adapters may bind the same scoped principal with
+`BindAppServerClients`; the bound Task, child-input and focused clients retain the
+exact Application and Connection scope. Selected-Session Agent discovery reads
+its Runtime catalog. Host-global catalogs and UI preferences require a Host grant.
+
 The application can inspect, prompt, steer, interrupt and resolve approvals only
-for its own Worker grants. It cannot adopt an arbitrary Session ID, mutate Host
-configuration or acquire another application's Worker. Lease expiry or revocation
-removes its mutation authority without cancelling the user's native Session.
-The user retains access. Application main Sessions keep their separate isolation.
+for its own Worker grants. It cannot adopt an arbitrary Session ID or acquire
+another application's Worker, including another connection of the same owner.
+Lease expiry or revocation removes mutation authority without cancelling the
+user's native Session. Retained state, handles and input receipts remain readable;
+the user retains access. Application main Sessions retain their creation profile
+and use the [Application configuration](application-runtime.md) owner.
+They also support independent children through the same native participant/Task
+owners. Those children inherit the explicit Application profile and connection
+scope, rather than the ordinary Worker's ambient Host assembly. A child's durable
+relation preserves its root authorization source and native Task identity.
+
+Require `application-terminal-wait-v1` to wait for producer exit through the
+scoped Task directory. Output and wait do not consume the model's Task output
+cursor or invent an exit for an unknown outcome. Cancelling a waiter closes only
+that observation. `application-terminal-control-v1` permits kill/release after
+the native Session mutation authorizer checks the grant, lease and lifecycle;
+the terminal display ID must still map to an exact Task in that Session.
 
 Both clients resolve the current approval FIFO head with its request ID and exact
 target. Only the first valid decision wins; stale or competing decisions cannot

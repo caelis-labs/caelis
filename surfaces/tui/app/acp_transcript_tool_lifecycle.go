@@ -794,12 +794,12 @@ func mutationPanelTextIsHeaderOnly(ev SubagentEvent, text string) bool {
 	if text == "" || strings.Contains(text, "\n") {
 		return false
 	}
-	return strings.EqualFold(text, strings.TrimSpace(ev.Args))
+	return strings.EqualFold(text, strings.TrimSpace(firstNonEmpty(ev.DiffSummary, ev.Args)))
 }
 
 func mutationLifecycleHeader(ev SubagentEvent, err bool) string {
 	name := ev.Name
-	args := strings.TrimSpace(ev.Args)
+	args := strings.TrimSpace(firstNonEmpty(ev.DiffSummary, ev.Args))
 	switch name {
 	case surfaceToolWrite, surfaceToolPatch:
 		return standardVerbLifecycleHeader("Edit", args, err)

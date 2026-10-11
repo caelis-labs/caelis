@@ -14,15 +14,26 @@ import (
 // TerminalService resolves ACP display terminal IDs through the authorized
 // Task directory, then controls the Session-routed Runtime stream.
 type TerminalService struct {
-	tasks     taskstream.Service
-	terminals terminal.Controller
+	tasks      taskstream.Service
+	terminals  terminal.Controller
+	authorizer appserver.Authorizer
 }
 
-func NewTerminalService(tasks taskstream.Service, terminals terminal.Controller) (*TerminalService, error) {
+// NewTerminalService accepts the canonical Session mutation authorizer. Legacy
+// unscoped embeddings may omit it; scoped terminal mutation fails closed until
+// its binding/grant owner is supplied.
+func NewTerminalService(tasks taskstream.Service, terminals terminal.Controller, authorizers ...appserver.Authorizer) (*TerminalService, error) {
 	if tasks == nil || terminals == nil {
 		return nil, errors.New("app/gatewayapp/controladapter/local: Task directory and terminal control are required")
 	}
-	return &TerminalService{tasks: tasks, terminals: terminals}, nil
+	if len(authorizers) > 1 || len(authorizers) == 1 && authorizers[0] == nil {
+		return nil, errors.New("app/gatewayapp/controladapter/local: one terminal mutation authorizer is required")
+	}
+	s := &TerminalService{tasks: tasks, terminals: terminals}
+	if len(authorizers) == 1 {
+		s.authorizer = authorizers[0]
+	}
+	return s, nil
 }
 
 func (s *TerminalService) TerminalOutput(ctx context.Context, principal appserver.Principal, req appserver.TerminalRequest) (appserver.TerminalOutput, error) {
@@ -43,9 +54,6 @@ func (s *TerminalService) TerminalOutput(ctx context.Context, principal appserve
 }
 
 func (s *TerminalService) WaitTerminal(ctx context.Context, principal appserver.Principal, req appserver.TerminalRequest) (appserver.TerminalExitStatus, error) {
-	if principal.ApplicationID != "" {
-		return appserver.TerminalExitStatus{}, appserver.ErrUnauthorized
-	}
 	ref, err := s.resolve(ctx, principal, req)
 	if err != nil {
 		return appserver.TerminalExitStatus{}, err
@@ -63,8 +71,8 @@ func (s *TerminalService) WaitTerminal(ctx context.Context, principal appserver.
 }
 
 func (s *TerminalService) KillTerminal(ctx context.Context, principal appserver.Principal, req appserver.TerminalRequest) error {
-	if principal.ApplicationID != "" {
-		return appserver.ErrUnauthorized
+	if err := s.authorizeMutation(ctx, principal, req.SessionID); err != nil {
+		return err
 	}
 	ref, err := s.resolve(ctx, principal, req)
 	if err != nil {
@@ -74,14 +82,24 @@ func (s *TerminalService) KillTerminal(ctx context.Context, principal appserver.
 }
 
 func (s *TerminalService) ReleaseTerminal(ctx context.Context, principal appserver.Principal, req appserver.TerminalRequest) error {
-	if principal.ApplicationID != "" {
-		return appserver.ErrUnauthorized
+	if err := s.authorizeMutation(ctx, principal, req.SessionID); err != nil {
+		return err
 	}
 	ref, err := s.resolve(ctx, principal, req)
 	if err != nil {
 		return err
 	}
 	return s.terminals.Release(ctx, ref)
+}
+
+func (s *TerminalService) authorizeMutation(ctx context.Context, principal appserver.Principal, sessionID string) error {
+	if s.authorizer != nil {
+		return s.authorizer.Authorize(ctx, principal, appserver.ActionCancel, sessionID)
+	}
+	if principal.ApplicationID != "" || principal.ConnectionID != "" {
+		return appserver.ErrUnauthorized
+	}
+	return nil
 }
 
 func (s *TerminalService) resolve(ctx context.Context, principal appserver.Principal, req appserver.TerminalRequest) (terminal.Ref, error) {

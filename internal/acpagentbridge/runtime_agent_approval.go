@@ -60,7 +60,8 @@ func (r approvalRequester) requestClientPermission(
 	if r.callbacks == nil || req.Approval == nil {
 		return agent.ApprovalResponse{}, nil
 	}
-	request, err := sdkPermissionRequestFromApproval(req.SessionRef, req.Approval, nil)
+	display := approval.ProtocolApprovalFromPayload(approval.DisplayPayloadFromRuntimeRequest(req))
+	request, err := sdkPermissionRequestFromApproval(req.SessionRef, display, nil)
 	if err != nil {
 		return agent.ApprovalResponse{}, err
 	}

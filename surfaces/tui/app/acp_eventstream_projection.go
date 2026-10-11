@@ -59,6 +59,8 @@ func acpToolContentToDisplay(in []eventstream.ToolCallContent) []acpprojector.To
 			Path:       strings.TrimSpace(item.Path),
 			OldText:    item.OldText,
 			NewText:    item.NewText,
+			Changes:    item.Changes,
+			Patch:      item.Patch,
 		})
 	}
 	return out

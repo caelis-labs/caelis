@@ -20,6 +20,7 @@ func runAdapterACPProxy(
 	options productClientOptions,
 	adapterID string,
 	grantFile string,
+	draftSchema string,
 	input io.Reader,
 	output io.Writer,
 ) error {
@@ -34,6 +35,9 @@ func runAdapterACPProxy(
 		}
 		if !strings.EqualFold(grant.AdapterID, adapterID) {
 			return errors.New("cli: built-in adapter grant identity does not match --adapter")
+		}
+		if grant.ACPDraftSchema != draftSchema {
+			return errors.New("cli: built-in adapter grant ACP schema does not match --acp-draft")
 		}
 		client, err := adapterhostclient.NewChannel(grant.Endpoint, options.HTTPClient)
 		if err != nil {
@@ -70,6 +74,7 @@ func runAdapterACPProxy(
 	grant, err := client.IssueGrant(ctx, adapterID, controladapterhost.GrantRequest{
 		ConnectionID: adapterID, CWD: cfg.WorkspaceCWD,
 		AllowedRoots: []string{cfg.WorkspaceCWD}, WritableRoots: []string{cfg.WorkspaceCWD},
+		ACPDraftSchema: draftSchema,
 	})
 	if err != nil {
 		return fmt.Errorf("cli: authorize built-in %s adapter: %w", adapterID, err)

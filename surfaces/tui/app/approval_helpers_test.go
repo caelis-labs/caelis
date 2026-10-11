@@ -2,12 +2,15 @@ package tuiapp
 
 import (
 	"testing"
+
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
 func TestApprovalToPromptRequestIncludesSandboxDetails(t *testing.T) {
 	t.Parallel()
 
 	msg := approvalToPromptRequest(&approvalPayload{
+		Subject:            &session.ApprovalSubject{Kind: "command", Tool: session.KnownApprovalField("RunCommand"), Operation: session.KnownApprovalField("execute"), Targets: []session.ApprovalField{session.KnownApprovalField("git fetch"), session.KnownApprovalField("/workspace")}, Effect: session.KnownApprovalField("run the supplied command"), Scope: session.KnownApprovalField("host execution"), Grants: []session.ApprovalGrant{{OptionID: "allow_once", Scope: session.KnownApprovalField("this invocation")}}},
 		ToolName:           "RunCommand",
 		RawInput:           map[string]any{"command": "git fetch"},
 		Reason:             "host execution requires user approval",
@@ -19,8 +22,8 @@ func TestApprovalToPromptRequestIncludesSandboxDetails(t *testing.T) {
 	}, make(chan PromptResponse, 1))
 
 	for _, want := range []PromptDetail{
-		{Label: "Action", Value: "execute"},
-		{Label: "Command", Value: "command: git fetch", Emphasis: true},
+		{Label: "Operation", Value: "execute"},
+		{Label: "Command", Value: "git fetch", Emphasis: true},
 		{Label: "Reason", Value: "host execution requires user approval"},
 		{Label: "Justification", Value: "Do you want to run git fetch on the host?"},
 		{Label: "Sandbox", Value: "require_escalated"},
@@ -33,16 +36,8 @@ func TestApprovalToPromptRequestIncludesSandboxDetails(t *testing.T) {
 	if msg.DefaultChoice != "allow_once" {
 		t.Fatalf("DefaultChoice = %q, want allow_once", msg.DefaultChoice)
 	}
-	if msg.Prompt != "Ran" {
+	if msg.Prompt != "RunCommand" {
 		t.Fatalf("Prompt = %q, want display label", msg.Prompt)
-	}
-}
-
-func TestApprovalActionLabelDoesNotClassifyTaskAsExecute(t *testing.T) {
-	t.Parallel()
-
-	if got := approvalActionLabel(&approvalPayload{ToolName: surfaceToolTask}); got != surfaceToolTask {
-		t.Fatalf("approvalActionLabel(Task) = %q, want exact Task label", got)
 	}
 }
 
@@ -78,7 +73,7 @@ func TestMCPApprovalFourChoicesRetainScopeInTUI(t *testing.T) {
 		t.Fatalf("TUI choices = %#v", prompt.Choices)
 	}
 	for i, choice := range req.Options {
-		if prompt.Choices[i].Value != choice.ID || prompt.Choices[i].Label != choice.Name || prompt.Choices[i].Detail != choice.Kind {
+		if prompt.Choices[i].Value != choice.ID || prompt.Choices[i].Label != choice.Name || prompt.Choices[i].Detail != choice.Kind+"; scope: [unavailable]" {
 			t.Fatalf("TUI choice = %#v, want %#v", prompt.Choices[i], choice)
 		}
 		decision := approvalDecisionFromPrompt(req, PromptResponse{Line: choice.ID})

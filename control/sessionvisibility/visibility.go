@@ -39,7 +39,13 @@ func IsSystemManagedSession(active session.Session) bool {
 // identity created by Spawn rather than an ordinary or other system Session.
 func IsSpawnedSubagentSession(active session.Session) bool {
 	value, _ := active.Metadata[MetadataSystemManagedAgent].(string)
-	return strings.EqualFold(strings.TrimSpace(value), SystemManagedAgentSubagent)
+	return strings.EqualFold(strings.TrimSpace(value), SystemManagedAgentSubagent) ||
+		(IsApplicationSession(active) && metadataString(active.Metadata, MetadataSystemManagedParent) != "" && metadataString(active.Metadata, MetadataSystemManagedTask) != "")
+}
+
+func metadataString(metadata map[string]any, key string) string {
+	value, _ := metadata[key].(string)
+	return strings.TrimSpace(value)
 }
 
 // IsApplicationSession reports whether the Session is application-owned. The

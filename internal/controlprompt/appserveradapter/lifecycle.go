@@ -227,6 +227,7 @@ func (r *clientSessionReconnect) prepareBootstrapEvents() error {
 		HandleID: strings.TrimSpace(r.state.Run.HandleID), RunID: strings.TrimSpace(r.state.Run.RunID), TurnID: strings.TrimSpace(r.state.Run.TurnID),
 		Scope: active.Scope, ScopeID: active.ScopeID, ParticipantID: active.ParticipantID,
 		ParentTool: cloneReconnectParentTool(active.ParentTool), ApprovalRequestID: active.RequestID, Permission: &wirePermission,
+		ApprovalSubject: session.CloneApprovalSubject(active.Subject),
 	}}
 	return nil
 }
@@ -360,6 +361,7 @@ func cloneReconnectState(in appserver.SessionState) appserver.SessionState {
 	if in.Approval.Active != nil {
 		active := *in.Approval.Active
 		active.ParentTool = cloneReconnectParentTool(in.Approval.Active.ParentTool)
+		active.Subject = session.CloneApprovalSubject(in.Approval.Active.Subject)
 		if in.Approval.Active.Permission != nil {
 			permission := session.CloneProtocolApproval(*in.Approval.Active.Permission)
 			active.Permission = &permission

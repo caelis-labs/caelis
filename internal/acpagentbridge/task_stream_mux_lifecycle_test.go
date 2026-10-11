@@ -201,6 +201,50 @@ func TestACPTaskStreamMuxRejectsReplacementAfterForwardedPrefix(t *testing.T) {
 	}
 }
 
+func TestDraftTaskStreamMuxCommitsReplacementAfterLivePrefix(t *testing.T) {
+	first := &acpMuxTestSubscription{events: make(chan eventstream.Envelope, 2)}
+	replacement := &acpMuxTestSubscription{deliveries: make(chan taskstream.Delivery, 3)}
+	service := newACPMuxReconnectService([]acpMuxSubscribeStep{{sub: first}, {sub: replacement}})
+	mux := newACPTaskStreamMux(t.Context(), service, taskstream.Principal{ID: "user-1"}, "session-1")
+	mux.draftDeliveries = make(chan acpTaskStreamDelivery)
+	defer mux.Close()
+	mux.Observe(acpMuxCommandAnchor("command"))
+	_ = receiveACPTaskStreamRequest(t, service.requests)
+	first.events <- acpMuxCommandOutputEnvelope("cursor-prefix", "old prefix")
+	select {
+	case frame := <-mux.draftDeliveries:
+		if frame.replacementID != "" {
+			t.Fatal("live append gained a replacement identity")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("draft live prefix was not forwarded")
+	}
+	first.finish(errorcode.New(errorcode.Unavailable, "trace expired"))
+	request := receiveACPTaskStreamRequest(t, service.requests)
+	if request.Cursor != "cursor-prefix" {
+		t.Fatalf("resume lost exact prefix cursor: %#v", request)
+	}
+	env := acpMuxCommandOutputEnvelope("", "replacement output")
+	env.Cursor, env.Position = "", nil
+	replacement.deliveries <- taskstream.Delivery{Kind: taskstream.DeliveryReplaceBegin, Source: taskstream.SourceReplacement, SnapshotID: "native-snapshot"}
+	replacement.deliveries <- taskstream.Delivery{Kind: taskstream.DeliveryReplacePage, Source: taskstream.SourceReplacement, SnapshotID: "native-snapshot", Events: []eventstream.Envelope{env}}
+	select {
+	case frame := <-mux.draftDeliveries:
+		t.Fatalf("uncommitted replacement was visible: %#v", frame)
+	case <-time.After(30 * time.Millisecond):
+	}
+	replacement.deliveries <- taskstream.Delivery{Kind: taskstream.DeliveryReplaceEnd, Source: taskstream.SourceReplacement, SnapshotID: "native-snapshot", Page: 1}
+	select {
+	case frame := <-mux.draftDeliveries:
+		output, ok := acpmeta.ReadTerminalOutput(eventstream.UpdateMeta(frame.envelope.Update))
+		if frame.replacementID != "native-snapshot" || !ok || output.Data != "replacement output" || frame.envelope.Cursor != "" {
+			t.Fatalf("replacement identity/output was lost: %#v", frame)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("committed replacement was rejected after draft prefix")
+	}
+}
+
 func TestACPTaskStreamMuxResumesAfterUnexpectedEOFFromLastAcceptedCursor(t *testing.T) {
 	t.Parallel()
 
