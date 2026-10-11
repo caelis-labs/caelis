@@ -87,7 +87,14 @@ func TestApplicationProfileChildHTTPIsolationAndRecovery(t *testing.T) {
 	writeAtomicSkill(t, selectedSkill, "profile-child-skill", "PROFILE_CHILD_SKILL_BODY")
 	profile.SkillRoots = []string{selectedSkill}
 	t.Setenv("CAELIS_ATOMIC_MCP_HELPER", "1")
-	profile.MCPServers = []application.MCPServer{{Name: "documents", Transport: "stdio", Command: os.Args[0], Args: []string{"-test.run=^TestAtomicDocumentsMCPHelper$"}, WorkDir: root}}
+	startupRelease := filepath.Join(root, "child-mcp-startup-release")
+	t.Setenv("CAELIS_APPLICATION_CHILD_MCP_START_RELEASE", startupRelease)
+	defer func() {
+		if err := os.WriteFile(startupRelease, nil, 0o600); err != nil {
+			t.Error(err)
+		}
+	}()
+	profile.MCPServers = []application.MCPServer{{Name: "documents", Transport: "stdio", Command: os.Args[0], Args: []string{"-test.run=^TestApplicationChildMCPStartupHelper$"}, WorkDir: root}}
 	created, err := client.CreateApplicationSession(ctx, appserver.CreateApplicationSessionRequest{WriteBase: appserver.WriteBase{OperationID: "parent"}, Profile: profile})
 	if err != nil {
 		t.Fatal(err)
@@ -153,9 +160,36 @@ func TestApplicationProfileChildHTTPIsolationAndRecovery(t *testing.T) {
 	if call.SessionID != child || call.Source != bound.Child.Source || call.TurnID == "" || call.ItemID == "" {
 		t.Fatalf("child callback provenance: %+v", call)
 	}
+	// A callback can arrive while the independently initialized MCP service
+	// is still connecting. Hold its startup to make this ordering deterministic.
 	health, err := client.ApplicationMCPStatus(ctx, child)
-	if err != nil || len(health.Servers) != 1 || health.Servers[0].Name != "documents" || health.Servers[0].Status != "running" || len(health.Skills) != 1 || health.Skills[0].Name != "profile-child-skill" || health.Skills[0].Status != "ready" {
-		t.Fatalf("child MCP/Skill assembly: %+v %v", health, err)
+	if err != nil || health.SessionID != child || health.ConfigurationRevision == "" || len(health.Servers) != 1 || health.Servers[0].Name != "documents" || health.Servers[0].Status != "connecting" || len(health.Skills) != 1 || health.Skills[0].Name != "profile-child-skill" || health.Skills[0].Status != "ready" {
+		t.Fatalf("held child MCP/Skill assembly: %+v %v", health, err)
+	}
+	healthRevision := health.ConfigurationRevision
+	if err := os.WriteFile(startupRelease, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		health, err = client.ApplicationMCPStatus(ctx, child)
+		if err != nil || health.SessionID != child || health.ConfigurationRevision != healthRevision || len(health.Servers) != 1 || health.Servers[0].Name != "documents" {
+			t.Fatalf("child MCP health lost its exact owner: %+v %v", health, err)
+		}
+		if health.Servers[0].Status == "running" {
+			break
+		}
+		if health.Servers[0].Status != "connecting" {
+			t.Fatalf("child MCP initialization failed: %+v", health)
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("child MCP did not finish initialization: %+v", health)
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	server := health.Servers[0]
+	if !slices.Equal(server.Tools, []string{"lookup"}) || len(server.ToolDetails) != 1 || server.ToolDetails[0].Name != "lookup" || !strings.Contains(server.ToolDetails[0].Description, "Look up a synthetic documents value") || len(health.Skills) != 1 || health.Skills[0].Name != "profile-child-skill" || health.Skills[0].Status != "ready" {
+		t.Fatalf("child MCP/Skill assembly: %+v", health)
 	}
 	if _, err = client.ApplicationCall(ctx, created.SessionID, call.ID); err == nil {
 		t.Fatal("parent addressed child callback as its own")
@@ -223,4 +257,31 @@ func TestApplicationProfileChildHTTPIsolationAndRecovery(t *testing.T) {
 	if err != nil || retained.State != "completed" || retained.Source != call.Source {
 		t.Fatalf("retained callback receipt: %+v %v", retained, err)
 	}
+}
+
+// TestApplicationChildMCPStartupHelper keeps initialization pending until the
+// parent observes its independent callback and explicitly releases this fixture.
+func TestApplicationChildMCPStartupHelper(t *testing.T) {
+	if os.Getenv("CAELIS_ATOMIC_MCP_HELPER") != "1" {
+		return
+	}
+	release := os.Getenv("CAELIS_APPLICATION_CHILD_MCP_START_RELEASE")
+	if release == "" {
+		t.Fatal("MCP startup release path missing")
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	for {
+		if _, err := os.Stat(release); err == nil {
+			break
+		} else if !os.IsNotExist(err) {
+			t.Fatal(err)
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatal("MCP startup fixture was not released")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	runAtomicMCPHelper(t, "documents")
 }
