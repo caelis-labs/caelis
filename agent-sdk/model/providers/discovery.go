@@ -18,6 +18,11 @@ type RemoteModel struct {
 	ContextWindowTokens int
 	MaxOutputTokens     int
 	Capabilities        []string
+	// Kind distinguishes non-conversational models when the endpoint declares it.
+	Kind            string
+	ImageInput      *bool
+	Reasoning       *bool
+	ReasoningLevels []string
 }
 
 // DiscoverModels queries provider list-model APIs using one provider config.
@@ -76,18 +81,27 @@ func discoverOpenAIModels(ctx context.Context, client *http.Client, cfg Config, 
 	}
 	var payload struct {
 		Data []struct {
-			ID                  string `json:"id"`
-			ContextWindow       any    `json:"context_window"`
-			MaxOutputTokens     any    `json:"max_output_tokens"`
-			InputTokenLimit     any    `json:"input_token_limit"`
-			OutputTokenLimit    any    `json:"output_token_limit"`
-			ContextLength       any    `json:"context_length"`
-			MaxCompletionTokens any    `json:"max_completion_tokens"`
-			Capabilities        any    `json:"capabilities"`
-			SupportedMethods    any    `json:"supported_generation_methods"`
-			SupportedParameters any    `json:"supported_parameters"`
-			SupportsReasoning   any    `json:"supports_reasoning"`
-			ReasoningSupported  any    `json:"reasoning_supported"`
+			ID              string `json:"id"`
+			Kind            string `json:"kind"`
+			Reasoning       *bool  `json:"reasoning"`
+			ReasoningLevels []struct {
+				Effort string `json:"effort"`
+			} `json:"supported_reasoning_levels"`
+			Modalities struct {
+				Input  []string `json:"input"`
+				Output []string `json:"output"`
+			} `json:"modalities"`
+			ContextWindow       any `json:"context_window"`
+			MaxOutputTokens     any `json:"max_output_tokens"`
+			InputTokenLimit     any `json:"input_token_limit"`
+			OutputTokenLimit    any `json:"output_token_limit"`
+			ContextLength       any `json:"context_length"`
+			MaxCompletionTokens any `json:"max_completion_tokens"`
+			Capabilities        any `json:"capabilities"`
+			SupportedMethods    any `json:"supported_generation_methods"`
+			SupportedParameters any `json:"supported_parameters"`
+			SupportsReasoning   any `json:"supports_reasoning"`
+			ReasoningSupported  any `json:"reasoning_supported"`
 			Architecture        struct {
 				InputModalities  any `json:"input_modalities"`
 				OutputModalities any `json:"output_modalities"`
@@ -130,11 +144,27 @@ func discoverOpenAIModels(ctx context.Context, client *http.Client, cfg Config, 
 		if supportsReasoningParameter(item.SupportedParameters) {
 			caps = appendUniqueStrings(caps, "reasoning")
 		}
+		var imageInput *bool
+		if item.Modalities.Input != nil {
+			value := false
+			for _, modality := range item.Modalities.Input {
+				if modality == "image" {
+					value = true
+				}
+			}
+			imageInput = &value
+		}
+		var levels []string
+		for _, level := range item.ReasoningLevels {
+			levels = appendUniqueStrings(levels, level.Effort)
+		}
 		models = append(models, RemoteModel{
 			Name:                name,
 			ContextWindowTokens: ctxWindow,
 			MaxOutputTokens:     maxOutput,
 			Capabilities:        caps,
+			Kind:                item.Kind, ImageInput: imageInput, Reasoning: item.Reasoning,
+			ReasoningLevels: levels,
 		})
 	}
 	return normalizeRemoteModels(models), nil

@@ -2,7 +2,7 @@ package modelconfig
 
 import "testing"
 
-func TestModelImageInputPreservesUnknownAndCatalogAuthority(t *testing.T) {
+func TestModelImageInputPreservesUnknownAndAcceptedSnapshot(t *testing.T) {
 	yes, no := true, false
 	for _, tc := range []struct {
 		name string
@@ -12,7 +12,7 @@ func TestModelImageInputPreservesUnknownAndCatalogAuthority(t *testing.T) {
 		{"unknown", Config{Provider: "openai-compatible", BaseURL: "https://private.invalid/v1", Model: "unlisted-fixture"}, nil},
 		{"explicit-yes", Config{Provider: "openai-compatible", BaseURL: "https://private.invalid/v1", Model: "unlisted-fixture", ImageInput: &yes}, &yes},
 		{"explicit-no", Config{Provider: "openai-compatible", BaseURL: "https://private.invalid/v1", Model: "unlisted-fixture", ImageInput: &no}, &no},
-		{"maintained-wins", Config{Provider: "openai", Model: "gpt-4.1", ImageInput: &no}, &yes},
+		{"saved-wins", Config{Provider: "openai-codex", Model: "gpt-6.1-sol", ImageInput: &no}, &no},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := ModelImageInput(tc.cfg)
@@ -24,7 +24,7 @@ func TestModelImageInputPreservesUnknownAndCatalogAuthority(t *testing.T) {
 			}
 			if got != nil {
 				*got = !*got
-				if tc.cfg.ImageInput != nil && *tc.cfg.ImageInput != *tc.want && tc.name != "maintained-wins" {
+				if tc.cfg.ImageInput != nil && *tc.cfg.ImageInput != *tc.want {
 					t.Fatal("returned alias into model configuration")
 				}
 			}

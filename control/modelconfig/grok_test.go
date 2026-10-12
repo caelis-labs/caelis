@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/control/modelcatalog"
 )
 
 func TestGrokOAuthProviderTemplate(t *testing.T) {
@@ -18,7 +19,7 @@ func TestGrokOAuthProviderTemplate(t *testing.T) {
 	if template.Provider != "xai" || template.API != model.APIXAIResponses || template.AuthType != model.AuthOAuthToken {
 		t.Fatalf("template = %#v", template)
 	}
-	if template.AuthFlow != AuthFlowGrokOAuth || template.DefaultBaseURL != GrokOAuthBaseURL || !template.PreserveModelOrder {
+	if template.AuthFlow != AuthFlowGrokOAuth || template.DefaultBaseURL != GrokOAuthBaseURL {
 		t.Fatalf("oauth template = %#v", template)
 	}
 	alias, ok := LookupProvider("xai")
@@ -34,7 +35,7 @@ func TestAssembleConnectBuildsManagedGrokOAuthProfiles(t *testing.T) {
 		Provider:   "grok",
 		HTTPClient: &http.Client{},
 		Models: []ModelSelection{
-			{Name: "grok-4.5"},
+			{Name: "grok-4.7"},
 			{Name: "grok-account-preview", ReasoningEffort: "medium", ImageInput: &imageInput},
 		},
 	}, ConnectOptions{
@@ -63,7 +64,7 @@ func TestAssembleConnectBuildsManagedGrokOAuthProfiles(t *testing.T) {
 			t.Fatalf("credential material leaked into config = %#v", cfg)
 		}
 	}
-	if configs[0].ImageInput != nil {
+	if configs[0].ImageInput == nil || !*configs[0].ImageInput {
 		t.Fatalf("grok-4.5 image override = %v, want maintained catalog capability", configs[0].ImageInput)
 	}
 	if configs[1].ImageInput == nil || !*configs[1].ImageInput {
@@ -83,7 +84,7 @@ func TestAssembleConnectRejectsCustomGrokOAuthEndpoint(t *testing.T) {
 	_, err := AssembleConnect(context.Background(), ConnectRequest{
 		Provider: "grok",
 		BaseURL:  "https://proxy.example/v1",
-		Models:   []ModelSelection{{Name: "grok-4.5"}},
+		Models:   []ModelSelection{{Name: "grok-4.7"}},
 	}, ConnectOptions{Authenticate: func(context.Context, AuthenticateRequest) error {
 		t.Fatal("authentication ran before endpoint validation")
 		return nil
@@ -93,26 +94,13 @@ func TestAssembleConnectRejectsCustomGrokOAuthEndpoint(t *testing.T) {
 	}
 }
 
-func TestGrokOAuthNonReasoningModelDisablesReasoning(t *testing.T) {
-	defaults, err := ResolveModelDefaultsForEndpoint("grok", "", "grok-4.20-0309-non-reasoning")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if defaults.ReasoningMode != "none" || defaults.DefaultReasoningEffort != "" || len(defaults.ReasoningLevels) != 0 {
-		t.Fatalf("non-reasoning defaults = %#v", defaults)
-	}
-	if defaults.ImageInput == nil || !*defaults.ImageInput {
-		t.Fatalf("non-reasoning image input = %v, want maintained true", defaults.ImageInput)
-	}
-}
-
 func TestMaintainedSelectableGrokOAuthModels(t *testing.T) {
-	models, err := MaintainedSelectableModels(context.Background(), "xai", "")
+	models, err := SelectableModels(context.Background(), ConnectRequest{Provider: "xai", BaseURL: ""})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := selectableModelNames(models); !slices.Equal(got, grokOAuthSelectableModels()) {
-		t.Fatalf("models = %#v, want maintained grok OAuth fallback %#v", got, grokOAuthSelectableModels())
+	if got := selectableModelNames(models); !slices.Equal(got, modelcatalog.ListRecommendedModels("xai")) {
+		t.Fatalf("models = %#v, want maintained grok OAuth fallback %#v", got, modelcatalog.ListRecommendedModels("xai"))
 	}
 	for _, model := range models {
 		if !model.MetadataComplete || !model.ImageInputKnown {

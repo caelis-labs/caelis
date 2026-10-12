@@ -1,0 +1,203 @@
+[
+  {
+    "provider": "openai-codex",
+    "model": "gpt-6.1-sol",
+    "context_window": 475000,
+    "default_max_output": 32768,
+    "images": true,
+    "tool_calls": true,
+    "reasoning": true,
+    "reasoning_mode": "effort",
+    "reasoning_efforts": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+      "ultra"
+    ],
+    "default_reasoning_effort": "low",
+    "speed_modes": [
+      {
+        "level": "fast",
+        "description": "Faster responses, increased usage"
+      }
+    ]
+  },
+  {
+    "provider": "openai-codex",
+    "model": "gpt-6-astra",
+    "context_window": 258400,
+    "default_max_output": 32768,
+    "images": true,
+    "tool_calls": true,
+    "reasoning": true,
+    "reasoning_mode": "effort",
+    "reasoning_efforts": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+      "ultra"
+    ],
+    "default_reasoning_effort": "low",
+    "speed_modes": [
+      {
+        "level": "fast",
+        "description": "2x faster, more usage"
+      }
+    ]
+  },
+  {
+    "provider": "openai-codex",
+    "model": "gpt-6-sol",
+    "context_window": 258400,
+    "default_max_output": 32768,
+    "images": true,
+    "tool_calls": true,
+    "reasoning": true,
+    "reasoning_mode": "effort",
+    "reasoning_efforts": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+      "ultra"
+    ],
+    "default_reasoning_effort": "medium",
+    "speed_modes": [
+      {
+        "level": "fast",
+        "description": "1.5x faster, more usage"
+      }
+    ]
+  },
+  {
+    "provider": "openai-codex",
+    "model": "gpt-6-luna",
+    "context_window": 258400,
+    "default_max_output": 32768,
+    "images": true,
+    "tool_calls": true,
+    "reasoning": true,
+    "reasoning_mode": "effort",
+    "reasoning_efforts": [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max"
+    ],
+    "default_reasoning_effort": "medium",
+    "speed_modes": [
+      {
+        "level": "fast",
+        "description": "1.5x faster, more usage"
+      }
+    ]
+  },
+  {
+    "provider": "xai",
+    "model": "grok-4.7",
+    "context_window": 500000,
+    "max_output": 0,
+    "default_max_output": 32768,
+    "images": true,
+    "tool_calls": true,
+    "reasoning": true,
+    "reasoning_mode": "effort",
+    "reasoning_efforts": [
+      "low",
+      "medium",
+      "high",
+      "xhigh"
+    ],
+    "default_reasoning_effort": "high",
+    "json_output": true
+  },
+  {
+    "provider": "deepseek",
+    "model": "deepseek-flash",
+    "context_window": 1000000,
+    "max_output": 393216,
+    "default_max_output": 256000,
+    "images": true,
+    "tool_calls": true,
+    "reasoning": true,
+    "reasoning_mode": "toggle",
+    "reasoning_efforts": [
+      "low",
+      "high",
+      "max"
+    ],
+    "default_reasoning_effort": "high",
+    "json_output": false
+  },
+  {
+    "provider": "deepseek",
+    "model": "deepseek-v4-pro",
+    "context_window": 1048576,
+    "max_output": 393216,
+    "default_max_output": 32768,
+    "images": false,
+    "tool_calls": true,
+    "reasoning": true,
+    "reasoning_mode": "toggle",
+    "default_reasoning_effort": "",
+    "json_output": true
+  },
+  {
+    "provider": "xiaomi",
+    "model": "mimo-v2.6-flash",
+    "context_window": 1048576,
+    "max_output": 131072,
+    "default_max_output": 32768,
+    "images": true,
+    "tool_calls": true,
+    "reasoning": true,
+    "reasoning_mode": "toggle",
+    "default_reasoning_effort": "",
+    "json_output": true
+  },
+  {
+    "provider": "xiaomi",
+    "model": "mimo-v2.6-pro",
+    "context_window": 1048576,
+    "max_output": 131072,
+    "default_max_output": 32768,
+    "images": true,
+    "tool_calls": true,
+    "reasoning": true,
+    "reasoning_mode": "toggle",
+    "default_reasoning_effort": "",
+    "json_output": true
+  },
+  {
+    "provider": "xiaomi",
+    "model": "mimo-v2.5",
+    "context_window": 1050000,
+    "max_output": 131100,
+    "default_max_output": 32768,
+    "images": true,
+    "tool_calls": true,
+    "reasoning": true,
+    "reasoning_mode": "toggle",
+    "default_reasoning_effort": "",
+    "json_output": true
+  },
+  {
+    "provider": "xiaomi",
+    "model": "mimo-v2.5-pro",
+    "context_window": 1050000,
+    "max_output": 131072,
+    "default_max_output": 32768,
+    "images": true,
+    "tool_calls": true,
+    "reasoning": true,
+    "reasoning_mode": "toggle",
+    "default_reasoning_effort": "",
+    "json_output": true
+  }
+]

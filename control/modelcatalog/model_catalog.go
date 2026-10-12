@@ -3,8 +3,6 @@ package modelcatalog
 import (
 	"sort"
 	"strings"
-
-	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 )
 
 // SpeedMode describes one non-default request-speed level supported by a model.
@@ -16,32 +14,32 @@ type SpeedMode struct {
 // ModelCapabilities describes known capabilities and limits for a specific model.
 type ModelCapabilities struct {
 	// ContextWindowTokens is the maximum input context window size.
-	ContextWindowTokens int
+	ContextWindowTokens int `json:"context_window"`
 	// MaxOutputTokens is the maximum output tokens the model can generate.
-	MaxOutputTokens int
+	MaxOutputTokens int `json:"max_output"`
 	// DefaultMaxOutputTokens is the default output token limit if not explicitly set.
 	// API providers may use their own default if this is 0.
-	DefaultMaxOutputTokens int
+	DefaultMaxOutputTokens int `json:"default_max_output"`
 	// SupportsImages indicates whether the model accepts image inputs.
-	SupportsImages bool
+	SupportsImages bool `json:"images"`
 	// SupportsToolCalls indicates whether the model supports function/tool calling.
-	SupportsToolCalls bool
+	SupportsToolCalls bool `json:"tool_calls"`
 	// SupportsReasoning indicates whether the model supports thinking/reasoning mode.
-	SupportsReasoning bool
+	SupportsReasoning bool `json:"reasoning"`
 	// ReasoningMode describes how reasoning is controlled: none|toggle|effort|fixed.
-	ReasoningMode string
+	ReasoningMode string `json:"reasoning_mode"`
 	// ReasoningEfforts lists supported reasoning effort levels (for example:
 	// low|medium|high|xhigh). Empty means the model uses toggle/budget-only
 	// reasoning or the effort set is unknown.
-	ReasoningEfforts []string
+	ReasoningEfforts []string `json:"reasoning_efforts"`
 	// DefaultReasoningEffort is the recommended default effort when the model
 	// uses effort-based reasoning.
-	DefaultReasoningEffort string
+	DefaultReasoningEffort string `json:"default_reasoning_effort"`
 	// SpeedModes lists non-default request-speed levels and their user-facing
 	// tradeoffs. An empty list means no speed selector should be offered.
-	SpeedModes []SpeedMode
+	SpeedModes []SpeedMode `json:"speed_modes"`
 	// SupportsJSONOutput indicates whether the model supports structured JSON output.
-	SupportsJSONOutput bool
+	SupportsJSONOutput bool `json:"json_output"`
 }
 
 const (
@@ -94,188 +92,6 @@ func RecommendedFallbackMaxOutputTokens(contextWindow int, suggested int, reason
 		return suggested
 	}
 	return conservative
-}
-
-// LookupModelCapabilities searches the built-in catalog for capabilities
-// matching the given provider and model name. It uses prefix matching:
-// a catalog entry with pattern "gpt-4o" matches "gpt-4o-2024-08-06".
-// More specific (longer) patterns take priority over shorter ones.
-//
-// Lookup priority (highest to lowest):
-//  1. Local user override file  (loaded by InitModelCatalog)
-//  2. Hard-coded builtinCatalog
-//  3. Remote models.dev data / embedded snapshot fallback for custom models
-//
-// Returns the matched capabilities and true, or DefaultModelCapabilities()
-// and false if no match is found.
-func LookupBaseCatalogCapabilities(provider, modelName string) (ModelCapabilities, bool) {
-	provider = strings.ToLower(strings.TrimSpace(provider))
-	modelName = strings.ToLower(strings.TrimSpace(modelName))
-	if provider == "" || modelName == "" {
-		return DefaultModelCapabilities(), false
-	}
-
-	if caps, ok := lookupLocalOverride(provider, modelName); ok {
-		if caps.DefaultMaxOutputTokens <= 0 {
-			caps.DefaultMaxOutputTokens = defaultMaxOutputHeuristic(caps.MaxOutputTokens, caps.ContextWindowTokens, caps.SupportsReasoning)
-		}
-		return caps, true
-	}
-	if caps, ok := lookupBuiltin(provider, modelName); ok {
-		return caps, true
-	}
-	if caps, ok := lookupRemoteOrEmbedded(provider, modelName); ok {
-		if caps.DefaultMaxOutputTokens <= 0 {
-			caps.DefaultMaxOutputTokens = defaultMaxOutputHeuristic(caps.MaxOutputTokens, caps.ContextWindowTokens, caps.SupportsReasoning)
-		}
-		return caps, true
-	}
-	return ModelCapabilities{}, false
-}
-
-// LookupModelCapabilities resolves model capabilities from the layered catalog:
-// local override -> builtin -> remote/embedded custom fallback -> provider overlay.
-func LookupModelCapabilities(provider, modelName string) (ModelCapabilities, bool) {
-	provider = strings.ToLower(strings.TrimSpace(provider))
-	modelName = strings.ToLower(strings.TrimSpace(modelName))
-	if provider == "" || modelName == "" {
-		return DefaultModelCapabilities(), false
-	}
-	if caps, ok := LookupBaseCatalogCapabilities(provider, modelName); ok {
-		if overlay, overlayOK := searchOverlay(provider, modelName); overlayOK {
-			caps = mergeCapabilities(caps, overlay)
-		}
-		return caps, true
-	}
-	return DefaultModelCapabilities(), false
-}
-
-// LookupSuggestedModelCapabilities returns the best-effort suggested defaults
-// for one provider/model pair, including provider overlay fallbacks for models
-// that are not present in the base catalog.
-func LookupSuggestedModelCapabilities(provider, modelName string) (ModelCapabilities, bool) {
-	if caps, ok := LookupModelCapabilities(provider, modelName); ok {
-		return caps, true
-	}
-	return lookupOverlayModelCapabilities(provider, modelName)
-}
-
-// SpeedModesForModel returns the maintained non-default request-speed levels
-// for one model. Entries without both a level and description are omitted.
-func SpeedModesForModel(provider, modelName string) []SpeedMode {
-	caps, ok := LookupModelCapabilities(provider, modelName)
-	if !ok {
-		return nil
-	}
-	return normalizeSpeedModes(caps.SpeedModes)
-}
-
-func normalizeSpeedModes(modes []SpeedMode) []SpeedMode {
-	if len(modes) == 0 {
-		return nil
-	}
-	out := make([]SpeedMode, 0, len(modes))
-	seen := make(map[string]struct{}, len(modes))
-	for _, mode := range modes {
-		level := strings.ToLower(strings.TrimSpace(mode.Level))
-		description := strings.TrimSpace(mode.Description)
-		if level == "" || description == "" {
-			continue
-		}
-		if _, ok := seen[level]; ok {
-			continue
-		}
-		seen[level] = struct{}{}
-		out = append(out, SpeedMode{Level: level, Description: description})
-	}
-	return out
-}
-
-// lookupBuiltin searches only the hard-coded builtinCatalog.
-func lookupBuiltin(provider, modelName string) (ModelCapabilities, bool) {
-	entry := findBuiltinEntry(provider, modelName)
-	if entry == nil {
-		return DefaultModelCapabilities(), false
-	}
-	out := entry.caps
-	normalizeModelCapabilitiesReasoning(&out)
-	return out, true
-}
-
-func findBuiltinEntry(provider, modelName string) *catalogEntry {
-	var best *catalogEntry
-	bestLen := 0
-
-	for i := range builtinCatalog {
-		entry := &builtinCatalog[i]
-		entryProvider := strings.ToLower(entry.provider)
-		entryPattern := strings.ToLower(entry.pattern)
-
-		// Provider identity is authoritative. Generic compatible endpoints must
-		// not inherit a vendor catalog merely because their names contain it.
-		if entryProvider != provider {
-			continue
-		}
-		// Model name must match exactly or start with the pattern.
-		if modelName != entryPattern && !strings.HasPrefix(modelName, entryPattern) {
-			continue
-		}
-		// Prefer the longest (most specific) pattern match.
-		if len(entryPattern) > bestLen {
-			best = entry
-			bestLen = len(entryPattern)
-		}
-	}
-	return best
-}
-
-// ApplyConfigDefaults enriches the given provider config with capabilities from the
-// built-in catalog when the config does not already have explicit values.
-// This is called when registering a provider config so that runtime parameters
-// are automatically filled in for known models.
-func ApplyConfigDefaults(cfg *providers.Config) {
-	if cfg == nil {
-		return
-	}
-	caps, found := LookupModelCapabilities(cfg.Provider, cfg.Model)
-	if !found {
-		if suggested, ok := LookupSuggestedModelCapabilities(cfg.Provider, cfg.Model); ok {
-			caps = suggested
-			found = true
-		} else {
-			// Apply conservative defaults for completely unknown models.
-			defaults := DefaultModelCapabilities()
-			if cfg.ContextWindowTokens <= 0 {
-				cfg.ContextWindowTokens = defaults.ContextWindowTokens
-			}
-			if cfg.MaxOutputTok <= 0 {
-				cfg.MaxOutputTok = RecommendedFallbackMaxOutputTokens(cfg.ContextWindowTokens, defaults.DefaultMaxOutputTokens, defaults.SupportsReasoning)
-			}
-			return
-		}
-	}
-	if cfg.ContextWindowTokens <= 0 {
-		cfg.ContextWindowTokens = caps.ContextWindowTokens
-	}
-	if cfg.MaxOutputTok <= 0 {
-		if found {
-			cfg.MaxOutputTok = caps.DefaultMaxOutputTokens
-		} else {
-			cfg.MaxOutputTok = RecommendedFallbackMaxOutputTokens(cfg.ContextWindowTokens, caps.DefaultMaxOutputTokens, caps.SupportsReasoning)
-		}
-	}
-	if strings.TrimSpace(cfg.ReasoningMode) == "" {
-		cfg.ReasoningMode = caps.ReasoningMode
-	}
-	if len(cfg.SupportedReasoningEfforts) == 0 {
-		cfg.SupportedReasoningEfforts = append([]string(nil), caps.ReasoningEfforts...)
-	}
-	if strings.TrimSpace(cfg.DefaultReasoningEffort) == "" {
-		cfg.DefaultReasoningEffort = caps.DefaultReasoningEffort
-	}
-	if len(cfg.ReasoningLevels) == 0 {
-		cfg.ReasoningLevels = reasoningLevelsFromCapabilities(caps)
-	}
 }
 
 // NormalizeReasoningEffort canonicalizes one reasoning effort value.
@@ -377,93 +193,6 @@ func reasoningEffortRank(value string) (int, bool) {
 	}
 }
 
-// SupportedReasoningEfforts returns supported effort levels for the model.
-// Empty means no effort levels are supported (toggle/budget-only) or unknown.
-func SupportedReasoningEfforts(provider, modelName string) []string {
-	caps, found := LookupModelCapabilities(provider, modelName)
-	if found {
-		mode := NormalizeReasoningMode(caps.ReasoningMode)
-		if !caps.SupportsReasoning || (mode != ReasoningModeEffort && mode != ReasoningModeToggle) {
-			return nil
-		}
-		if normalized := normalizeReasoningEffortList(caps.ReasoningEfforts); len(normalized) > 0 {
-			return normalized
-		}
-	}
-	return inferReasoningEfforts(provider, modelName)
-}
-
-// SupportsReasoningEffort reports whether one model supports a specific effort.
-func SupportsReasoningEffort(provider, modelName, effort string) bool {
-	normalized := NormalizeReasoningEffort(effort)
-	if normalized == "" {
-		return false
-	}
-	levels := SupportedReasoningEfforts(provider, modelName)
-	if len(levels) == 0 {
-		return false
-	}
-	for _, one := range levels {
-		if one == normalized {
-			return true
-		}
-	}
-	return false
-}
-
-// ReasoningLevelsForModel returns user-selectable reasoning levels for a model.
-// Empty means the model does not expose a reasoning choice.
-func ReasoningLevelsForModel(provider, modelName string) []string {
-	caps, found := LookupModelCapabilities(provider, modelName)
-	if !found {
-		caps, found = LookupSuggestedModelCapabilities(provider, modelName)
-	}
-	if !found {
-		return nil
-	}
-	return reasoningLevelsFromCapabilities(caps)
-}
-
-func ReasoningModeForModel(provider, modelName string) string {
-	caps, found := LookupModelCapabilities(provider, modelName)
-	if !found {
-		caps, found = LookupSuggestedModelCapabilities(provider, modelName)
-	}
-	if found {
-		normalizeModelCapabilitiesReasoning(&caps)
-		if mode := NormalizeReasoningMode(caps.ReasoningMode); mode != "" && (mode != ReasoningModeNone || caps.SupportsReasoning) {
-			return mode
-		}
-	}
-	provider = strings.ToLower(strings.TrimSpace(provider))
-	if len(inferReasoningEfforts(provider, modelName)) > 0 {
-		return ReasoningModeEffort
-	}
-	return ReasoningModeNone
-}
-
-func DefaultReasoningEffortForModel(provider, modelName string) string {
-	caps, found := LookupModelCapabilities(provider, modelName)
-	if !found {
-		caps, found = LookupSuggestedModelCapabilities(provider, modelName)
-	}
-	if !found {
-		return PreferredReasoningEffort(inferReasoningEfforts(provider, modelName))
-	}
-	normalizeModelCapabilitiesReasoning(&caps)
-	mode := NormalizeReasoningMode(caps.ReasoningMode)
-	if mode == ReasoningModeNone {
-		return ""
-	}
-	if mode != ReasoningModeEffort && mode != ReasoningModeToggle {
-		return PreferredReasoningEffort(inferReasoningEfforts(provider, modelName))
-	}
-	if normalized := NormalizeReasoningEffort(caps.DefaultReasoningEffort); normalized != "" {
-		return normalized
-	}
-	return PreferredReasoningEffort(caps.ReasoningEfforts)
-}
-
 func NormalizeReasoningMode(input string) string {
 	switch strings.ToLower(strings.TrimSpace(input)) {
 	case ReasoningModeNone:
@@ -497,19 +226,6 @@ func normalizeReasoningEffortList(in []string) []string {
 		out = append(out, normalized)
 	}
 	return out
-}
-
-func inferReasoningEfforts(provider, modelName string) []string {
-	provider = strings.ToLower(strings.TrimSpace(provider))
-	if provider == "" && strings.TrimSpace(modelName) == "" {
-		return nil
-	}
-
-	if provider == "openai-compatible" || provider == "openrouter" {
-		return []string{"none", "minimal", "low", "medium", "high", "xhigh"}
-	}
-
-	return nil
 }
 
 func normalizeModelCapabilitiesReasoning(caps *ModelCapabilities) {

@@ -23,73 +23,83 @@ locally when the field is absent. Refresh the projection after configuration
 changes and submit an explicit supported effort with a binding. The Host
 revalidates eligibility and the configuration revision on writes.
 
-## Managed chat model presets
+## Connection presets and model discovery
 
-`openai` uses the Responses API, including for `gpt-6.1-sol` tool calls.
-The API preset has a 1,050,000-token context, a 128,000-token output ceiling,
-and efforts `low`, `medium` (default), `high`, `xhigh`, and `max`.
-The `codex` subscription preset uses its separate maintained Codex catalog:
-475,000 usable context tokens, a 32,768-token configured output default, `low`
-default effort, and an additional `ultra` effort. The window uses the
-user-provided announcement screenshot's 500,000 tokens and the existing 95%
-utilization convention. Public
-[Codex fallback metadata](https://github.com/openai/codex/blob/a9b0815167c27ab13719dd12d13b63e02b70d221/codex-rs/models-manager/models.json)
-still reports 272,000 tokens; authenticated account metadata was unavailable
-to confirm the announced change. Subscription model selection does not
-establish account entitlement. See the
-[OpenAI model specification](https://developers.openai.com/api/docs/models/gpt-6.1-sol).
+The native presets are `codex`, `grok`, `deepseek` and `xiaomi` (MiMo).
+`magpie` and `ollama` discover models from the selected local gateway.
+`custom` offers one protocol choice: Responses, Chat Completions, Anthropic
+Messages or System One. External ACP Agent onboarding remains separate.
 
-Subscription presets are maintained locally, independently of the API catalog
-and the built-in Codex CLI adapter's account metadata. A positive saved
-`context_window_tokens` value takes precedence over a refreshed preset; omitted
-values use the current preset. An explicit Runtime context-window override
-takes precedence over both. Caelis subtracts its output reserve and safety
-margin before applying Runtime compaction watermarks, so the preset window is
-not the automatic compaction threshold.
+`control/modelconfig` owns connection policy, discovery and assembly. The TUI
+and HTTP commands use the same `AssembleConnect` path. Accepted model settings
+become the ordinary provider configuration and ModelProfile catalog; Runtime
+uses that complete configuration without fetching another model directory.
+A failed gateway discovery fails the connection instead of publishing a guessed
+catalog. An existing configuration remains readable while its gateway is offline.
 
-Recommendations favor current model lines. Superseded recommendations retain
-capability lookup for explicit model IDs and saved configurations; hiding a
-recommendation does not mean its provider has stopped serving it. Claude Haiku
-5.5 is the current Haiku recommendation, with a 1,000,000-token context,
-128,000-token output ceiling and `medium` default effort. See
-[Haiku 5.5 specifications](https://platform.claude.com/docs/en/models/haiku-5-5/overview).
+### Maintaining native models
 
-The OpenRouter directory includes text-output models supporting tools in the
-[official model list](https://openrouter.ai/api/v1/models), excluding batch
-routes. Other routes retain historical capability lookup. Absence from this
-public list does not establish that a service has stopped. Directory defaults
-use the smaller positive model and primary-provider context limit as a conservative
-default, and the primary-provider published output limit; these are not limits
-shared by every route. Historical entries absent from the selectable directory
-retain their capability metadata. Effort choices follow the endpoint's explicit
-reasoning metadata; omitted controls preserve the service default. Local
-capability overrides and positive saved window values retain precedence.
-`reasoning_mode: "none"` with
-no declared levels means no provider selector: the internal `none` choice
-omits a wire disable command. Explicit configured levels or an effort/toggle
-mode retain manual control.
+[The native catalog](../control/modelcatalog/catalog.json) is the single editable
+source for recommendation order, limits, image input, reasoning controls and
+request-speed choices. Entries use the connection namespace (`openai-codex`,
+`xai`, `deepseek` or `xiaomi`) and the upstream model ID. The most specific model
+prefix wins within that namespace. Custom and gateway endpoints do not inherit
+metadata from an upstream vendor name.
 
-`anthropic` includes `claude-sonnet-5-5`, with a 1,000,000-token context,
-128,000-token output ceiling and `high` default effort. Caelis requests
-summarized adaptive thinking so progress between tool calls remains visible.
-SDK requests that turn thinking off use `between_tools`, which still permits
-thinking between tool calls; manual token budgets are not sent. On that wire
-path, Caelis omits prior thinking blocks because `between_tools` cannot use
-Anthropic's prefix mismatch control. Canonical Session history retains them.
-The adapter uses automatic tool selection (or `none` when tools are disabled)
-and leaves sampling parameters unset.
+Edit this JSON directly to add or update a native model; no generator, remote
+models.dev feed or overlay is involved. Keep `default_max_output` distinct from
+the provider's `max_output` ceiling, and declare only supported reasoning levels.
+Run `go test ./control/modelcatalog ./control/modelconfig` after an edit. The
+catalog test rejects duplicate entries, unsupported namespaces, missing limits
+and default efforts outside the declared set.
 
-Sonnet 5.5 and Haiku 5.5 thinking blocks are bound to their preceding
-instructions, tools and history. Caelis requests `drop_block` with the public
-`thinking-binding-controls-2026-08-01` beta header for adaptive thinking, so
-tool discovery or refreshed instructions let Anthropic drop invalid thinking
-instead of rejecting the next request. Valid blocks remain available; dropped
-reasoning may need to be generated again. Changing a model or account also does
-not guarantee retention of its thinking. See
-[Anthropic's preserved thinking contract](https://platform.claude.com/docs/en/build-with-claude/preserved-thinking).
-Haiku 5.5 also requests summarized adaptive thinking. When thinking is disabled,
-its request omits prior thinking blocks while canonical history retains them.
-See the [Haiku migration guide](https://platform.claude.com/docs/en/models/haiku-5-5/migration-guide).
+Connection assembly pins accepted context, output budget, image input and
+reasoning controls. Directory edits affect new connections; reconnect a saved
+model to accept refreshed defaults. Explicit model settings and Runtime context
+window overrides retain their precedence. The context window is not a compaction
+threshold: Runtime subtracts its output reserve and safety margin first.
+
+### Magpie
+
+The default Host-side address is `http://127.0.0.1:3425/v1`. The local preset
+requires no user-entered API key; a non-default authenticated gateway requires its
+own gateway key. The address is resolved on the Caelis Host, which must be able
+to reach the running Magpie instance.
+
+Chat models are discovered through `GET /v1/models` and use the existing
+Responses adapter. Preserve the full returned ID, such as `xiaomi/mimo-v2.5` or
+`group/daily`, in the request. Magpie owns upstream providers, credentials and
+routing. Caelis stores its own endpoint/profile identity separately.
+
+Judgment discovery adds `X-Magpie-Deciders: 1` and selects entries marked
+`kind: "decision"`. `/connect`'s judgment source offers Magpie and a custom System
+One endpoint. The command spelling is `magpie-judgment`; HTTP clients may use
+`provider: "magpie"` with `endpoint_id: "judgment"`. These produce an ordinary
+judgment ModelProfile and use the existing `/v1/systemone` client; they are not
+chat choices in `/model`.
+
+Discovery imports declared context/output limits, image modality and reasoning
+levels. Missing metadata remains unknown and the wizard collects advanced
+settings. A reasoning model with no declared effort levels exposes no invented
+selector. Output defaults use a conservative budget bounded by the declared
+maximum. Chat and judgment endpoints have separate protocol identities.
+
+### Custom and retained configuration
+
+A custom connection selects `custom-responses`, `custom-chat`, `custom-messages`
+or `custom-judgment`. Protocol and address participate in endpoint identity,
+so the same model ID on two endpoints or protocols remains two distinct profiles.
+The endpoint stores its explicit protocol and authentication; model records
+store accepted capabilities. Credentials remain in the existing credential store.
+
+Control retains frozen pre-pinned provider defaults and capability data only
+for old configuration loading and input aliases. They never populate connection
+menus or recommendations, and have no refresh/generation workflow. Loading fills
+omitted fields without changing IDs, credential references or bindings; the next
+ordinary configuration save persists them. Remove this reader and its aliases
+when the minimum supported upgrade source is a release that persists these
+explicit endpoint and capability fields. Existing SDK wire adapters remain usable
+by retained configurations and independent SDK consumers.
 
 ## Interactive provider authentication
 

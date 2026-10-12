@@ -66,6 +66,7 @@ func modelRuntimeDeps(models gatewayapp.ModelService) controladapter.ModelRuntim
 		ListAliasesFn:          models.ListAliases,
 		ListChoicesFn:          models.ListChoices,
 		HasReusableAuthFn:      models.HasReusableAuth,
+		ConnectionModelsFn:     models.ConnectionModels,
 	}
 }
 

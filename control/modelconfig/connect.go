@@ -5,11 +5,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"sort"
 	"strings"
 	"time"
 
-	"github.com/caelis-labs/caelis/agent-sdk/judgment/typesafe"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/control/modelcatalog"
 )
@@ -81,6 +79,9 @@ const DefaultProviderRequestTimeoutSeconds = 300
 type ConnectOptions struct {
 	HasReusableAuth func(context.Context, string, string) bool
 	Authenticate    AuthenticateFunc
+	// ResolveDiscoveryToken reads an already validated retained credential for an
+	// authenticated gateway list request. It is not persisted as a new credential.
+	ResolveDiscoveryToken func(context.Context) (string, error)
 }
 
 // ModelDefaults contains Control-selected limits, reasoning behavior, and
@@ -91,21 +92,23 @@ type ModelDefaults struct {
 	ReasoningLevels        []string
 	ReasoningMode          string
 	DefaultReasoningEffort string
-	// ImageInput is non-nil only when the maintained model directory declares
-	// image-input support or non-support for this exact provider/model.
+	// ImageInput is non-nil when the selected endpoint or native preset declares
+	// image-input support or non-support for this model.
 	ImageInput *bool
+	SpeedModes []modelcatalog.SpeedMode
 }
 
-// SelectableModel is one Control-maintained model choice. MetadataComplete is
+// SelectableModel is one endpoint-scoped model choice. MetadataComplete is
 // true only when Control can assemble limits and reasoning behavior without
 // asking the user for advanced configuration. ImageInputKnown separately
-// reports whether the maintained directory declares image-input support or
+// reports whether the selected source declares image-input support or
 // non-support for this exact model.
 type SelectableModel struct {
 	Name             string
 	Detail           string
 	MetadataComplete bool
 	ImageInputKnown  bool
+	Defaults         ModelDefaults
 }
 
 // ResolveModelDefaultsForEndpoint resolves maintained metadata with the
@@ -119,23 +122,16 @@ func ResolveModelDefaultsForEndpoint(provider string, baseURL string, modelName 
 	if template.API == APISystemOne {
 		return ModelDefaults{ContextWindowTokens: 32000, MaxOutputTokens: 4096, DefaultReasoningEffort: "none", ImageInput: boolPointer(false)}, nil
 	}
-	if template.AuthFlow == AuthFlowCodexOAuth {
-		if defaults, known := codexOAuthModelDefaults(modelName); known {
-			return defaults, nil
-		}
-	}
-	if template.AuthFlow == AuthFlowGrokOAuth {
-		if defaults, known := grokOAuthModelDefaults(modelName); known {
-			return defaults, nil
-		}
-	}
-	catalogProvider := CatalogProviderFor(template.Provider, baseURL)
+	catalogProvider := catalogProviderFor(template.Provider)
 	caps, known := modelcatalog.LookupModelCapabilities(catalogProvider, modelName)
+	// Explicit retained input IDs use the frozen upgrade reader, never a second
+	// selectable directory. New native recommendations come only from catalog.json.
+	if !known {
+		caps, known = legacyModelCapabilities(template.Provider, baseURL, modelName)
+	}
 	var imageInput *bool
 	if known {
 		imageInput = boolPointer(caps.SupportsImages)
-	} else if suggested, suggestedKnown := modelcatalog.LookupSuggestedModelCapabilities(catalogProvider, modelName); suggestedKnown {
-		imageInput = boolPointer(suggested.SupportsImages)
 	}
 	if !known {
 		caps = modelcatalog.DefaultModelCapabilities()
@@ -146,16 +142,7 @@ func ResolveModelDefaultsForEndpoint(provider string, baseURL string, modelName 
 			caps.MaxOutputTokens = template.DefaultMaxOutputTokens
 			caps.DefaultMaxOutputTokens = template.DefaultMaxOutputTokens
 		}
-		if levels := NormalizeReasoningLevels(template.DefaultReasoningLevels); len(levels) > 0 {
-			caps.SupportsReasoning = true
-			caps.ReasoningEfforts = levels
-		}
-		if mode := modelcatalog.NormalizeReasoningMode(template.DefaultReasoningMode); mode != "" {
-			caps.ReasoningMode = mode
-		}
-		if effort := modelcatalog.NormalizeReasoningEffort(template.DefaultReasoningEffort); effort != "" {
-			caps.DefaultReasoningEffort = effort
-		}
+
 	}
 	contextWindow := caps.ContextWindowTokens
 	if contextWindow <= 0 {
@@ -189,6 +176,7 @@ func ResolveModelDefaultsForEndpoint(provider string, baseURL string, modelName 
 		ReasoningMode:          reasoningMode,
 		DefaultReasoningEffort: modelcatalog.NormalizeReasoningEffort(caps.DefaultReasoningEffort),
 		ImageInput:             imageInput,
+		SpeedModes:             caps.SpeedModes,
 	}, nil
 }
 
@@ -199,6 +187,9 @@ func AssembleConnect(ctx context.Context, req ConnectRequest, opts ConnectOption
 	template, ok := LookupProvider(req.Provider)
 	if !ok {
 		return nil, fmt.Errorf("provider %q is not supported", strings.TrimSpace(req.Provider))
+	}
+	if template.Provider == "magpie" && req.EndpointID == "judgment" {
+		template, _ = LookupProvider("magpie-judgment")
 	}
 	req.Provider = template.Provider
 	req.Models = normalizeModelSelections(req.Models)
@@ -211,6 +202,12 @@ func AssembleConnect(ctx context.Context, req ConnectRequest, opts ConnectOption
 		req.BaseURL = template.DefaultBaseURL
 	}
 	endpoint, hasEndpoint := EndpointForBaseURL(template, req.BaseURL)
+	if template.Provider == "magpie" && template.API == APISystemOne {
+		endpoint.API = APISystemOne
+		if NormalizeBaseURL(req.BaseURL) == "http://127.0.0.1:3425/v1" {
+			endpoint.AuthType, endpoint.NoAuthRequired, hasEndpoint = model.AuthNone, true, true
+		}
+	}
 	if strings.TrimSpace(req.EndpointID) == "" && hasEndpoint {
 		req.EndpointID = endpoint.ID
 	}
@@ -237,15 +234,47 @@ func AssembleConnect(ctx context.Context, req ConnectRequest, opts ConnectOption
 		api = endpoint.API
 	}
 	authType := connectAuthType(template, endpoint, hasEndpoint, req.AuthType)
+	// A supplied or retained gateway key can scope a loopback catalog too.
+	if template.Provider == "magpie" && (req.APIKey != "" || reusableAuth) && req.AuthType != string(model.AuthNone) {
+		authType = model.AuthAPIKey
+	}
 	timeout := time.Duration(req.TimeoutSeconds) * time.Second
 	if req.TimeoutSeconds <= 0 {
 		timeout = DefaultProviderRequestTimeoutSeconds * time.Second
 	}
-	out := make([]Config, 0, len(req.Models))
-	for _, selection := range req.Models {
-		defaults, err := ResolveModelDefaultsForEndpoint(template.Provider, req.BaseURL, selection.Name)
+	var discovered []SelectableModel
+	if template.Provider == "magpie" {
+		discoveryToken := req.APIKey
+		if discoveryToken == "" && reusableAuth && opts.ResolveDiscoveryToken != nil {
+			var err error
+			discoveryToken, err = opts.ResolveDiscoveryToken(ctx)
+			if err != nil {
+				return nil, err
+			}
+		}
+		var err error
+		discovered, err = selectableMagpieModels(ctx, template, req.BaseURL, req.HTTPClient, discoveryToken)
 		if err != nil {
 			return nil, err
+		}
+	}
+	out := make([]Config, 0, len(req.Models))
+	for _, selection := range req.Models {
+		defaults, err := ResolveModelDefaultsForEndpoint(template.Label, req.BaseURL, selection.Name)
+		if err != nil {
+			return nil, err
+		}
+		if template.Provider == "magpie" {
+			found := false
+			for _, entry := range discovered {
+				if entry.Name == selection.Name {
+					defaults, found = entry.Defaults, true
+					break
+				}
+			}
+			if !found {
+				return nil, fmt.Errorf("modelconfig: model %q is absent from the selected Magpie catalog", selection.Name)
+			}
 		}
 		contextWindow := selection.ContextWindowTokens
 		if contextWindow <= 0 {
@@ -282,11 +311,10 @@ func AssembleConnect(ctx context.Context, req ConnectRequest, opts ConnectOption
 			reasoningEffort = ""
 		}
 		imageInput := selection.ImageInput
-		if defaults.ImageInput != nil {
-			// Maintained model metadata is authoritative and remains derivable;
-			// persist overrides only for models unknown to the directory.
-			imageInput = nil
+		if imageInput == nil {
+			imageInput = defaults.ImageInput
 		}
+
 		out = append(out, NormalizeConfig(Config{
 			Provider:                template.Provider,
 			EndpointID:              strings.TrimSpace(req.EndpointID),
@@ -304,6 +332,7 @@ func AssembleConnect(ctx context.Context, req ConnectRequest, opts ConnectOption
 			ReasoningLevels:         reasoningLevels,
 			ReasoningMode:           reasoningMode,
 			ImageInput:              imageInput,
+			SpeedModes:              defaults.SpeedModes,
 			MaxOutputTok:            maxOutput,
 			Timeout:                 timeout,
 			StreamFirstEventTimeout: time.Duration(req.StreamFirstEventTimeoutSeconds) * time.Second,
@@ -312,30 +341,26 @@ func AssembleConnect(ctx context.Context, req ConnectRequest, opts ConnectOption
 	return out, nil
 }
 
-// MaintainedSelectableModels returns the read-only catalog used by completion.
+// SelectableModels returns the endpoint-scoped choices used by completion.
 // Managed OAuth providers use their bundled fallback without opening a browser,
 // refreshing a token, or writing credentials; authentication belongs to the
 // explicit ConnectModel command.
-func MaintainedSelectableModels(ctx context.Context, provider string, baseURL string) ([]SelectableModel, error) {
-	template, ok := LookupProvider(provider)
+func SelectableModels(ctx context.Context, req ConnectRequest) ([]SelectableModel, error) {
+	template, ok := LookupProvider(req.Provider)
+	baseURL := req.BaseURL
 	if !ok {
 		return nil, nil
 	}
-	var maintained []string
-	switch {
-	case template.API == APISystemOne:
-		return []SelectableModel{{Name: typesafe.DefaultModel, Detail: "Jev · typed judgments", MetadataComplete: true, ImageInputKnown: true}}, nil
-	case template.AuthFlow == AuthFlowCodexOAuth:
-		maintained = codexOAuthSelectableModels()
-	case template.AuthFlow == AuthFlowGrokOAuth:
-		maintained = grokOAuthSelectableModels()
-	case template.API == model.APIOllama:
-		return selectableOllamaModels(ctx, firstNonEmpty(baseURL, template.DefaultBaseURL), nil)
-	case template.UseModelDirectory:
-		maintained = modelcatalog.ListModelDirectoryModels(template.Provider)
-	default:
-		maintained = modelcatalog.ListRecommendedModels(template.Provider)
+	if template.Provider == "magpie" {
+		return selectableMagpieModels(ctx, template, firstNonEmpty(baseURL, template.DefaultBaseURL), req.HTTPClient, req.APIKey)
 	}
+	if template.API == model.APIOllama {
+		return selectableOllamaModels(ctx, firstNonEmpty(baseURL, template.DefaultBaseURL), nil)
+	}
+	if template.API == APISystemOne {
+		return nil, nil
+	}
+	maintained := modelcatalog.ListRecommendedModels(template.Provider)
 	return selectableModelsFromMaintained(template, baseURL, maintained), nil
 }
 
@@ -343,24 +368,17 @@ func selectableModelsFromMaintained(template ProviderTemplate, baseURL string, m
 	models := make([]SelectableModel, 0, len(maintained))
 	for _, name := range maintained {
 		metadataComplete := hasCompleteModelMetadataForEndpoint(template.Provider, baseURL, name)
-		if template.AuthFlow == AuthFlowCodexOAuth || template.AuthFlow == AuthFlowGrokOAuth {
-			// Fixed managed OAuth profiles supply conservative context, output,
-			// and reasoning defaults for every accepted account-catalog entry.
-			metadataComplete = true
-		}
+		defaults, _ := ResolveModelDefaultsForEndpoint(template.Label, baseURL, name)
+
 		models = append(models, SelectableModel{
 			Name:             name,
 			Detail:           selectableModelDetail(template.Provider, baseURL, name),
 			MetadataComplete: metadataComplete,
 			ImageInputKnown:  hasKnownImageInputForEndpoint(template.Provider, baseURL, name),
+			Defaults:         defaults,
 		})
 	}
-	if template.PreserveModelOrder {
-		// Managed account catalogs and their fallbacks may be maintained in
-		// product priority order. Do not re-sort version-like model IDs here.
-		return uniqueSelectableModels(models)
-	}
-	return sortedUniqueSelectableModels(models)
+	return uniqueSelectableModels(models)
 }
 
 // NormalizeReasoningLevels normalizes a user- or catalog-provided effort list.
@@ -385,6 +403,9 @@ func NormalizeReasoningLevels(levels []string) []string {
 }
 
 func validateConnectRequest(template ProviderTemplate, req ConnectRequest, reusableAuth bool) error {
+	if template.PromptForBaseURL && req.BaseURL == "" {
+		return fmt.Errorf("base URL is required for a custom endpoint")
+	}
 	if len(req.Models) == 0 {
 		return fmt.Errorf("model is required; use /connect and choose or type a model name")
 	}
@@ -466,7 +487,7 @@ func cloneBoolPointer(value *bool) *bool {
 }
 
 func hasCompleteModelMetadataForEndpoint(provider string, baseURL string, modelName string) bool {
-	catalogProvider := CatalogProviderFor(provider, baseURL)
+	catalogProvider := catalogProviderFor(provider)
 	caps, ok := modelcatalog.LookupModelCapabilities(catalogProvider, modelName)
 	if !ok || caps.ContextWindowTokens <= 0 {
 		return false
@@ -480,12 +501,6 @@ func hasCompleteModelMetadataForEndpoint(provider string, baseURL string, modelN
 func hasKnownImageInputForEndpoint(provider string, baseURL string, modelName string) bool {
 	defaults, err := ResolveModelDefaultsForEndpoint(provider, baseURL, modelName)
 	return err == nil && defaults.ImageInput != nil
-}
-
-func sortedUniqueSelectableModels(values []SelectableModel) []SelectableModel {
-	out := uniqueSelectableModels(values)
-	sort.Slice(out, func(i, j int) bool { return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name) })
-	return out
 }
 
 func uniqueSelectableModels(values []SelectableModel) []SelectableModel {

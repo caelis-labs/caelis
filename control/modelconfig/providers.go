@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
-	"github.com/caelis-labs/caelis/control/modelcatalog"
 )
 
 const (
@@ -48,9 +47,6 @@ type EndpointTemplate struct {
 	API            model.APIType
 	AuthType       model.AuthType
 	NoAuthRequired bool
-	// CatalogProvider selects the capability-catalog namespace for this
-	// endpoint. Empty inherits ProviderTemplate.Provider.
-	CatalogProvider string
 }
 
 // ProviderTemplate is Control's maintained onboarding policy for one provider.
@@ -64,46 +60,31 @@ type ProviderTemplate struct {
 	AuthType                   model.AuthType
 	AuthFlow                   AuthFlow
 	AuthDisplay                string
-	PreserveModelOrder         bool
 	DefaultEndpointID          string
 	DefaultBaseURL             string
 	DefaultBaseURLAliases      []string
 	DefaultContextWindowTokens int
 	DefaultMaxOutputTokens     int
-	DefaultReasoningLevels     []string
-	DefaultReasoningMode       string
-	DefaultReasoningEffort     string
 	NoAuthRequired             bool
 	PromptForBaseURL           bool
-	UseModelDirectory          bool
 	Endpoints                  []EndpointTemplate
 }
 
 var providerTemplates = []ProviderTemplate{
-	{Label: "typesafe", Provider: "typesafe", API: APISystemOne, AuthType: model.AuthBearerToken, Description: "Jev typed judgments and relevance scores", DefaultBaseURL: "https://api.typesafe.ai/v1", DefaultContextWindowTokens: 32000, DefaultMaxOutputTokens: 4096},
-	{Label: "codex", API: model.APIOpenAICodex, AuthType: model.AuthOAuthToken, AuthFlow: AuthFlowCodexOAuth, AuthDisplay: "browser/device oauth", PreserveModelOrder: true, Provider: "openai-codex", Description: "ChatGPT subscription models through Codex", DefaultBaseURL: CodexOAuthBaseURL, DefaultContextWindowTokens: 272000, DefaultMaxOutputTokens: 32768, DefaultReasoningLevels: []string{"low", "medium", "high", "xhigh"}, DefaultReasoningMode: "effort", DefaultReasoningEffort: "medium"},
-	{Label: "grok", API: model.APIXAIResponses, AuthType: model.AuthOAuthToken, AuthFlow: AuthFlowGrokOAuth, AuthDisplay: "browser/device oauth", PreserveModelOrder: true, Provider: "xai", Description: "Grok models through an eligible xAI subscription", DefaultBaseURL: GrokOAuthBaseURL, DefaultContextWindowTokens: 500000, DefaultMaxOutputTokens: 32768, DefaultReasoningLevels: []string{"low", "medium", "high"}, DefaultReasoningMode: "effort", DefaultReasoningEffort: "high"},
-	{Label: "openai", API: model.APIOpenAI, AuthType: model.AuthAPIKey, Provider: "openai", Description: "OpenAI-hosted models through the Responses API", DefaultBaseURL: "https://api.openai.com/v1", DefaultContextWindowTokens: 128000},
-	{Label: "openai-responses-compatible", API: model.APIOpenAIResponses, AuthType: model.AuthAPIKey, Provider: "openai-responses-compatible", Description: "OpenAI Responses API compatible proxy or self-hosted endpoint", DefaultBaseURL: "https://api.openai.com/v1", DefaultContextWindowTokens: 262144, DefaultMaxOutputTokens: 32768, DefaultReasoningLevels: []string{"none", "minimal", "low", "medium", "high", "xhigh"}, DefaultReasoningMode: "effort", DefaultReasoningEffort: "medium", PromptForBaseURL: true},
-	{Label: "openai-chat-compatible", API: model.APIOpenAICompatible, AuthType: model.AuthAPIKey, Provider: "openai-compatible", Description: "OpenAI Chat Completions compatible proxy or self-hosted endpoint", DefaultBaseURL: "https://api.openai.com/v1", DefaultContextWindowTokens: 262144, DefaultMaxOutputTokens: 32768, DefaultReasoningLevels: []string{"none", "minimal", "low", "medium", "high", "xhigh"}, DefaultReasoningMode: "effort", DefaultReasoningEffort: "medium", PromptForBaseURL: true},
-	{Label: "openrouter", API: model.APIOpenRouter, AuthType: model.AuthAPIKey, Provider: "openrouter", Description: "OpenRouter multi-provider routing", DefaultBaseURL: "https://openrouter.ai/api/v1", DefaultContextWindowTokens: 262144, UseModelDirectory: true},
-	{Label: "gemini", API: model.APIGemini, AuthType: model.AuthAPIKey, Provider: "gemini", Description: "Google Gemini API", DefaultBaseURL: "https://generativelanguage.googleapis.com/v1beta", DefaultContextWindowTokens: 128000},
-	{Label: "anthropic", API: model.APIAnthropic, AuthType: model.AuthAPIKey, Provider: "anthropic", Description: "Anthropic Claude API", DefaultBaseURL: "https://api.anthropic.com", DefaultContextWindowTokens: 200000, DefaultMaxOutputTokens: 1024},
-	{Label: "anthropic-compatible", API: model.APIAnthropicCompatible, AuthType: model.AuthAPIKey, Provider: "anthropic-compatible", Description: "Anthropic-compatible proxy or self-hosted endpoint", DefaultBaseURL: "https://api.anthropic.com", DefaultContextWindowTokens: 200000, DefaultMaxOutputTokens: 32768, DefaultReasoningLevels: []string{"none", "minimal", "low", "medium", "high", "max"}, DefaultReasoningMode: "effort", DefaultReasoningEffort: "medium", PromptForBaseURL: true},
-	{Label: "deepseek", API: model.APIDeepSeek, AuthType: model.AuthAPIKey, Provider: "deepseek", Description: "DeepSeek V4 models", DefaultBaseURL: "https://api.deepseek.com/anthropic", DefaultBaseURLAliases: []string{"https://api.deepseek.com/v1"}, DefaultContextWindowTokens: 1048576},
-	{Label: "xiaomi", API: model.APIMimo, AuthType: model.AuthAPIKey, Provider: "xiaomi", Description: "Xiaomi Mimo models", DefaultEndpointID: "api-cn", DefaultBaseURL: XiaomiAPIBaseURL, DefaultContextWindowTokens: 262144, Endpoints: []EndpointTemplate{
-		{ID: "api-cn", BaseURL: XiaomiAPIBaseURL, Display: "api cn", Detail: "Xiaomi MiMo API CN · OpenAI-compatible", API: model.APIMimo},
-		{ID: "token-plan-cn", BaseURL: XiaomiTokenPlanCNBaseURL, Display: "token plan cn", Detail: "Xiaomi MiMo Token Plan CN · OpenAI-compatible", API: model.APIMimo},
+	{Label: "codex", Provider: "openai-codex", API: model.APIOpenAICodex, AuthType: model.AuthOAuthToken, AuthFlow: AuthFlowCodexOAuth, AuthDisplay: "browser/device oauth", Description: "ChatGPT subscription", DefaultBaseURL: CodexOAuthBaseURL, DefaultContextWindowTokens: 258400, DefaultMaxOutputTokens: 32768},
+	{Label: "grok", Provider: "xai", API: model.APIXAIResponses, AuthType: model.AuthOAuthToken, AuthFlow: AuthFlowGrokOAuth, AuthDisplay: "browser/device oauth", Description: "Grok subscription", DefaultBaseURL: GrokOAuthBaseURL, DefaultContextWindowTokens: 500000, DefaultMaxOutputTokens: 32768},
+	{Label: "deepseek", Provider: "deepseek", API: model.APIDeepSeek, AuthType: model.AuthAPIKey, Description: "DeepSeek API", DefaultBaseURL: "https://api.deepseek.com/anthropic", DefaultBaseURLAliases: []string{"https://api.deepseek.com/v1"}, DefaultContextWindowTokens: 1048576},
+	{Label: "xiaomi", Provider: "xiaomi", API: model.APIMimo, AuthType: model.AuthAPIKey, Description: "MiMo API or Token Plan", DefaultEndpointID: "api-cn", DefaultBaseURL: XiaomiAPIBaseURL, DefaultContextWindowTokens: 262144, Endpoints: []EndpointTemplate{
+		{ID: "api-cn", BaseURL: XiaomiAPIBaseURL, Display: "api cn", Detail: "MiMo API", API: model.APIMimo},
+		{ID: "token-plan-cn", BaseURL: XiaomiTokenPlanCNBaseURL, Display: "token plan cn", Detail: "MiMo Token Plan", API: model.APIMimo},
 	}},
-	{Label: "minimax", API: model.APIMiniMax, AuthType: model.AuthBearerToken, Provider: "minimax", Description: "MiniMax models over an Anthropic-compatible API", DefaultBaseURL: "https://api.minimaxi.com/anthropic", DefaultContextWindowTokens: 204800, DefaultMaxOutputTokens: 8192},
-	{Label: "volcengine", API: model.APIVolcengine, AuthType: model.AuthAPIKey, Provider: "volcengine", Description: "Volcengine Ark models", DefaultEndpointID: "standard", DefaultBaseURL: "https://ark.cn-beijing.volces.com/api/v3", DefaultContextWindowTokens: 128000, Endpoints: []EndpointTemplate{
-		{ID: "standard", BaseURL: "https://ark.cn-beijing.volces.com/api/v3", Display: "standard api", Detail: "regular Ark endpoint", API: model.APIVolcengine},
-		{ID: "coding-plan", BaseURL: "https://ark.cn-beijing.volces.com/api/coding/v3", Display: "coding plan", Detail: "Ark coding-plan endpoint", API: model.APIVolcengineCoding},
+	{Label: "magpie", Provider: "magpie", API: model.APIOpenAIResponses, AuthType: model.AuthAPIKey, Description: "Local gateway · chat and judgment models", DefaultEndpointID: "local", DefaultBaseURL: "http://127.0.0.1:3425/v1", DefaultContextWindowTokens: 128000, Endpoints: []EndpointTemplate{
+		{ID: "local", BaseURL: "http://127.0.0.1:3425/v1", Display: "local", Detail: "Running Magpie gateway", API: model.APIOpenAIResponses, AuthType: model.AuthNone, NoAuthRequired: true},
 	}},
-	{Label: "ollama", API: model.APIOllama, AuthType: model.AuthNone, Provider: "ollama", Description: "Local Ollama runtime or direct Ollama Cloud API", PreserveModelOrder: true, DefaultEndpointID: "local", DefaultBaseURL: "http://localhost:11434", DefaultContextWindowTokens: 128000, Endpoints: []EndpointTemplate{
-		{ID: "local", BaseURL: "http://localhost:11434", Display: "local", Detail: "Installed models through the local Ollama service", API: model.APIOllama, AuthType: model.AuthNone, NoAuthRequired: true},
-		{ID: "cloud", BaseURL: "https://ollama.com", Display: "cloud api", Detail: "Frontier models directly through Ollama Cloud", API: model.APIOllama, AuthType: model.AuthAPIKey, CatalogProvider: modelcatalog.OllamaCloudProvider},
+	{Label: "ollama", Provider: "ollama", API: model.APIOllama, AuthType: model.AuthNone, Description: "Local Ollama models", DefaultEndpointID: "local", DefaultBaseURL: "http://localhost:11434", DefaultContextWindowTokens: 128000, Endpoints: []EndpointTemplate{
+		{ID: "local", BaseURL: "http://localhost:11434", Display: "local", Detail: "Installed Ollama models", API: model.APIOllama, AuthType: model.AuthNone, NoAuthRequired: true},
 	}},
+	{Label: "custom", Provider: "custom", API: model.APIOpenAIResponses, AuthType: model.AuthAPIKey, Description: "Custom API endpoint", PromptForBaseURL: true, DefaultContextWindowTokens: 128000, DefaultMaxOutputTokens: 8192},
 }
 
 // ProviderTemplates returns an isolated copy of the maintained provider list.
@@ -115,7 +96,7 @@ func ProviderTemplates() []ProviderTemplate {
 	return out
 }
 
-// LookupProvider resolves a provider label or maintained alias.
+// LookupProvider resolves a preset, protocol choice or retained input alias.
 func LookupProvider(value string) (ProviderTemplate, bool) {
 	value = strings.ToLower(strings.TrimSpace(value))
 	for _, template := range providerTemplates {
@@ -123,13 +104,36 @@ func LookupProvider(value string) (ProviderTemplate, bool) {
 			return cloneProviderTemplate(template), true
 		}
 	}
+	if value == "mimo" {
+		return LookupProvider("xiaomi")
+	}
 	if value == XiaomiTokenPlanCNAlias {
 		template, _ := LookupProvider("xiaomi")
 		template.Label = XiaomiTokenPlanCNAlias
-		template.DefaultEndpointID = "token-plan-cn"
-		template.DefaultBaseURL = XiaomiTokenPlanCNBaseURL
-		template.DefaultContextWindowTokens = 1048576
+		template.DefaultEndpointID, template.DefaultBaseURL = "token-plan-cn", XiaomiTokenPlanCNBaseURL
 		return template, true
+	}
+	if value == "magpie-judgment" {
+		template, _ := LookupProvider("magpie")
+		template.Label, template.API, template.DefaultEndpointID = value, APISystemOne, "judgment"
+		template.Endpoints = []EndpointTemplate{{ID: "judgment", BaseURL: template.DefaultBaseURL, Display: "local", Detail: "Magpie judgment models", API: APISystemOne, AuthType: model.AuthNone, NoAuthRequired: true}}
+		return template, true
+	}
+	for _, protocol := range customProtocols {
+		if protocol.Label != value {
+			continue
+		}
+		api := protocol.API
+		template, _ := LookupProvider("custom")
+		template.Label, template.API, template.DefaultEndpointID = value, api, strings.TrimPrefix(value, "custom-")
+		return template, true
+	}
+	// Retained input aliases share the ordinary connection assembler. They are
+	// absent from ProviderTemplates and have no maintained model directory.
+	// Remove with the pre-pinned configuration reader once its upgrade floor moves.
+	if legacy, ok := legacyProviders[value]; ok {
+		legacy.DefaultContextWindowTokens, legacy.DefaultMaxOutputTokens = 128000, 8192
+		return cloneProviderTemplate(legacy), true
 	}
 	return ProviderTemplate{}, false
 }
@@ -185,6 +189,25 @@ func NormalizeBaseURL(baseURL string) string {
 func cloneProviderTemplate(template ProviderTemplate) ProviderTemplate {
 	template.Endpoints = append([]EndpointTemplate(nil), template.Endpoints...)
 	template.DefaultBaseURLAliases = append([]string(nil), template.DefaultBaseURLAliases...)
-	template.DefaultReasoningLevels = append([]string(nil), template.DefaultReasoningLevels...)
 	return template
+}
+
+// CustomProtocols returns the protocol labels accepted by the single custom
+// connection preset. They select transport, not another provider catalog.
+func CustomProtocols() []string {
+	out := make([]string, 0, len(customProtocols))
+	for _, protocol := range customProtocols {
+		out = append(out, protocol.Label)
+	}
+	return out
+}
+
+var customProtocols = []struct {
+	Label string
+	API   model.APIType
+}{
+	{"custom-responses", model.APIOpenAIResponses},
+	{"custom-chat", model.APIOpenAICompatible},
+	{"custom-messages", model.APIAnthropicCompatible},
+	{"custom-judgment", APISystemOne},
 }

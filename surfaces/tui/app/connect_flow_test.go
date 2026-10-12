@@ -65,12 +65,12 @@ func TestConnectEnterSubmitsWhenCommandUnavailable(t *testing.T) {
 		Wizards: DefaultWizards(),
 		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			if command == "connect" {
-				return []SlashArgCandidate{{Value: "openai-compatible", Display: "openai-compatible"}}, nil
+				return []SlashArgCandidate{{Value: "custom-chat", Display: "custom-chat"}}, nil
 			}
 			return nil, nil
 		},
 	})
-	m.setInputText("/connect openai-compatible")
+	m.setInputText("/connect custom-chat")
 	m.syncTextareaFromInput()
 	_, cmd := m.Update(keyPress("enter"))
 	if cmd != nil {
@@ -79,7 +79,7 @@ func TestConnectEnterSubmitsWhenCommandUnavailable(t *testing.T) {
 	if m.isWizardActive() {
 		t.Fatal("connect wizard should not start when /connect is unavailable")
 	}
-	if called != "/connect openai-compatible" {
+	if called != "/connect custom-chat" {
 		t.Fatalf("ExecuteLine called with %q, want submitted ACP command", called)
 	}
 }
@@ -810,8 +810,8 @@ func TestConnectWizardKeepsBaseURLStepForCompatibleProviders(t *testing.T) {
 			case "connect":
 				return []SlashArgCandidate{{Value: "api-key", Display: "Use an API key"}}, nil
 			case "connect-provider-api-key":
-				return []SlashArgCandidate{{Value: "openai-compatible", Display: "openai-compatible"}}, nil
-			case "connect-baseurl:openai-compatible":
+				return []SlashArgCandidate{{Value: "custom-chat", Display: "custom-chat"}}, nil
+			case "connect-baseurl:custom-chat":
 				return []SlashArgCandidate{{Value: "https://api.openai.com/v1", Display: "https://api.openai.com/v1"}}, nil
 			default:
 				return nil, nil
@@ -827,16 +827,16 @@ func TestConnectWizardKeepsBaseURLStepForCompatibleProviders(t *testing.T) {
 		t.Fatal("provider selection was not handled")
 	}
 	runConnectTestCmd(m, cmd)
-	if got := strings.TrimSpace(m.slashArgCommand); got != "connect-baseurl:openai-compatible" {
-		t.Fatalf("slashArgCommand after openai-compatible provider = %q, want connect-baseurl:openai-compatible", got)
+	if got := strings.TrimSpace(m.slashArgCommand); got != "connect-baseurl:custom-chat" {
+		t.Fatalf("slashArgCommand after custom-chat provider = %q, want connect-baseurl:custom-chat", got)
 	}
 	if got := m.textarea.Value(); got != "" {
-		t.Fatalf("textarea after openai-compatible provider = %q, want empty wizard input", got)
+		t.Fatalf("textarea after custom-chat provider = %q, want empty wizard input", got)
 	}
 }
 
 func TestConnectWizardKeepsBaseURLStepForOpenAIProtocolProviders(t *testing.T) {
-	for _, provider := range []string{"openai-chat-compatible", "openai-responses-compatible", "openai-compatible"} {
+	for _, provider := range []string{"custom-chat", "custom-responses", "custom-chat"} {
 		t.Run(provider, func(t *testing.T) {
 			m := NewModel(Config{
 				Wizards: DefaultWizards(),
@@ -879,13 +879,13 @@ func TestConnectWizardSkipsAPIKeyForReusableBaseURLAuth(t *testing.T) {
 			case "connect":
 				return []SlashArgCandidate{{Value: "api-key", Display: "Use an API key"}}, nil
 			case "connect-provider-api-key":
-				return []SlashArgCandidate{{Value: "openai-compatible", Display: "openai-compatible"}}, nil
-			case "connect-baseurl:openai-compatible":
+				return []SlashArgCandidate{{Value: "custom-chat", Display: "custom-chat"}}, nil
+			case "connect-baseurl:custom-chat":
 				return []SlashArgCandidate{{Value: baseURL, Display: baseURL, Detail: "configured auth", NoAuth: true}}, nil
 			default:
 				state, ok := connectModelCommandState(command)
-				if ok && state.Provider == "openai-compatible" && state.BaseURL == baseURL {
-					return []SlashArgCandidate{{Value: "gpt-4o-mini", Display: "openai-compatible/gpt-4o-mini"}}, nil
+				if ok && state.Provider == "custom-chat" && state.BaseURL == baseURL {
+					return []SlashArgCandidate{{Value: "gpt-4o-mini", Display: "custom-chat/gpt-4o-mini"}}, nil
 				}
 				return nil, nil
 			}
@@ -906,7 +906,7 @@ func TestConnectWizardSkipsAPIKeyForReusableBaseURLAuth(t *testing.T) {
 	}
 	runConnectTestCmd(m, cmd)
 	state := requireConnectModelCommandState(t, m.slashArgCommand)
-	if state.Provider != "openai-compatible" || state.BaseURL != baseURL || state.TokenRef != "" {
+	if state.Provider != "custom-chat" || state.BaseURL != baseURL || state.TokenRef != "" {
 		t.Fatalf("connect model state after reusable baseurl = %#v, want model step without API key", state)
 	}
 }
@@ -1485,8 +1485,8 @@ func TestConnectWizardKeepsAdvancedStepsForCustomCompatibleModel(t *testing.T) {
 			case "connect":
 				return []SlashArgCandidate{{Value: "api-key", Display: "Use an API key"}}, nil
 			case "connect-provider-api-key":
-				return []SlashArgCandidate{{Value: "openai-compatible", Display: "openai-compatible"}}, nil
-			case "connect-baseurl:openai-compatible":
+				return []SlashArgCandidate{{Value: "custom-chat", Display: "custom-chat"}}, nil
+			case "connect-baseurl:custom-chat":
 				return []SlashArgCandidate{{Value: baseURL, Display: baseURL, NoAuth: true}}, nil
 			default:
 				if strings.HasPrefix(command, "connect-image-input:") {
@@ -1563,7 +1563,7 @@ func TestConnectWizardKeepsAdvancedStepsForCustomCompatibleModel(t *testing.T) {
 		t.Fatal("expected TaskResultMsg in batch")
 	}
 	want := fmt.Sprintf(
-		"/connect openai-compatible acme-reasoning-model %s %d - 131072 8192 low,high - false",
+		"/connect custom-chat acme-reasoning-model %s %d - 131072 8192 low,high - false",
 		baseURL,
 		connectwizard.DefaultConnectTimeoutSeconds,
 	)

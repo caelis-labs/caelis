@@ -6,42 +6,42 @@ import (
 	"github.com/caelis-labs/caelis/control/modelcatalog"
 )
 
-// CatalogProviderFor resolves the capability-catalog namespace owned by one
-// provider endpoint. Providers without an endpoint override use their normal
-// product provider identity.
-func CatalogProviderFor(provider string, baseURL string) string {
-	provider = strings.TrimSpace(provider)
-	template, ok := LookupProvider(provider)
-	if !ok {
-		return provider
+// catalogProviderFor returns the native connection's capability namespace.
+// Gateway and custom connections keep their own identity.
+func catalogProviderFor(provider string) string {
+	if template, ok := LookupProvider(provider); ok {
+		return template.Provider
 	}
-	if endpoint, found := EndpointForBaseURL(template, baseURL); found {
-		if catalogProvider := strings.TrimSpace(endpoint.CatalogProvider); catalogProvider != "" {
-			return catalogProvider
-		}
-	}
-	return template.Provider
+	return strings.TrimSpace(provider)
 }
 
 // ReasoningLevelsForConfig returns endpoint-scoped catalog reasoning choices.
 func ReasoningLevelsForConfig(cfg Config) []string {
+	if cfg.ReasoningMode == modelcatalog.ReasoningModeNone {
+		return nil
+	}
+	if cfg.ReasoningLevels != nil {
+		return NormalizeReasoningLevels(cfg.ReasoningLevels)
+	}
 	return NormalizeReasoningLevels(modelcatalog.ReasoningLevelsForModel(
-		CatalogProviderFor(cfg.Provider, cfg.BaseURL),
+		catalogProviderFor(cfg.Provider),
 		cfg.Model,
 	))
 }
 
 // DefaultReasoningEffortForConfig returns the endpoint-scoped catalog default.
 func DefaultReasoningEffortForConfig(cfg Config) string {
+	if cfg.DefaultReasoningEffort != "" || cfg.ReasoningEffort != "" {
+		return modelcatalog.NormalizeReasoningEffort(firstNonEmpty(cfg.DefaultReasoningEffort, cfg.ReasoningEffort))
+	}
 	return modelcatalog.DefaultReasoningEffortForModel(
-		CatalogProviderFor(cfg.Provider, cfg.BaseURL),
+		catalogProviderFor(cfg.Provider),
 		cfg.Model,
 	)
 }
 
 // ModelSupportsImages reports endpoint-scoped catalog image-input support.
-// Maintained metadata is authoritative; an explicit config value is used only
-// when the directory has no declaration for the selected model.
+// Accepted configuration capabilities remain stable across directory updates.
 func ModelSupportsImages(cfg Config) bool {
 	capability := ModelImageInput(cfg)
 	return capability != nil && *capability
@@ -49,17 +49,21 @@ func ModelSupportsImages(cfg Config) bool {
 
 // ModelImageInput returns the same endpoint-scoped declaration used for model
 // assembly. Nil means unknown, distinct from an explicit text-only declaration.
-// Maintained metadata takes precedence over an override for an unknown model.
+// Saved capabilities take precedence over current onboarding defaults.
 func ModelImageInput(cfg Config) *bool {
-	if defaults, err := ResolveModelDefaultsForEndpoint(cfg.Provider, cfg.BaseURL, cfg.Model); err == nil && defaults.ImageInput != nil {
-		value := *defaults.ImageInput
-		return &value
-	}
 	if cfg.ImageInput != nil {
 		value := *cfg.ImageInput
 		return &value
 	}
-	return nil
+	if IsJudgment(cfg) {
+		return boolPointer(false)
+	}
+	if defaults, err := ResolveModelDefaultsForEndpoint(cfg.Provider, cfg.BaseURL, cfg.Model); err == nil {
+		if defaults.ImageInput != nil {
+			return defaults.ImageInput
+		}
+	}
+	return RestoreSavedCapabilities(cfg).ImageInput
 }
 
 func selectableModelDetail(provider string, baseURL string, modelName string) string {
@@ -67,19 +71,12 @@ func selectableModelDetail(provider string, baseURL string, modelName string) st
 	if !ok {
 		return "suggested model"
 	}
-	catalogProvider := CatalogProviderFor(template.Provider, baseURL)
+	catalogProvider := catalogProviderFor(template.Provider)
 	caps, known := modelcatalog.LookupModelCapabilities(catalogProvider, modelName)
 	if !known {
 		return "suggested model"
 	}
-	prefix := "catalog preset"
-	if template.UseModelDirectory {
-		prefix = "model directory"
-	} else if endpoint, found := EndpointForBaseURL(template, baseURL); found &&
-		strings.TrimSpace(endpoint.CatalogProvider) != "" &&
-		strings.TrimSpace(endpoint.Display) != "" {
-		prefix = strings.TrimSpace(endpoint.Display)
-	}
+	prefix := "native preset"
 	parts := []string{prefix}
 	if caps.SupportsReasoning {
 		parts = append(parts, "reasoning")

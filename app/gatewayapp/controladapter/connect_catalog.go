@@ -3,7 +3,6 @@ package controladapter
 import (
 	"context"
 	"fmt"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -51,6 +50,12 @@ func completeConnectArgs(ctx context.Context, driver *assembler, command string,
 		return completeConnectACPLaunchers(agent, query, limit, installedCommand), nil
 	case strings.HasPrefix(command, "connect-acp-install:"):
 		return completeConnectACPInstall(ctx, strings.TrimPrefix(command, "connect-acp-install:"))
+	case command == "connect-custom-protocol":
+		var candidates []controlprompt.SlashArgCandidate
+		for _, protocol := range modelconfig.CustomProtocols() {
+			candidates = append(candidates, controlprompt.SlashArgCandidate{Value: protocol, Display: strings.TrimPrefix(protocol, "custom-"), Detail: "Endpoint API protocol"})
+		}
+		return filterSlashArgCandidates(candidates, query, limit), nil
 	case strings.HasPrefix(command, "connect-baseurl:"):
 		return completeConnectBaseURL(ctx, driver, strings.TrimPrefix(command, "connect-baseurl:"), query, limit), nil
 	case strings.HasPrefix(command, "connect-apikey:"):
@@ -73,8 +78,8 @@ func completeConnectArgs(ctx context.Context, driver *assembler, command string,
 func completeConnectSources(query string, limit int) []controlprompt.SlashArgCandidate {
 	candidates := []controlprompt.SlashArgCandidate{
 		{Value: "account", Display: "Sign in with an account", Detail: "ChatGPT, Grok · account sign-in (OAuth)"},
-		{Value: "api-key", Display: "Use an API key", Detail: "OpenAI, DeepSeek, Ollama · API key or local server"},
-		{Value: "judgment", Display: "Connect a judgment model", Detail: "Jev · classification and relevance scoring"},
+		{Value: "api-key", Display: "Use an API key", Detail: "DeepSeek, MiMo, Magpie, Ollama · API or local gateway"},
+		{Value: "judgment", Display: "Connect a judgment model", Detail: "Magpie or custom System One endpoint · Jev scoring"},
 		{Value: "acp", Display: "Use a local ACP Agent", Detail: "Codex CLI, Gemini CLI · run a local agent"},
 	}
 	return filterSlashArgCandidates(candidates, query, limit)
@@ -168,7 +173,13 @@ func completeConnectProviders(ctx context.Context, driver *assembler, authSource
 	templates := modelconfig.ProviderTemplates()
 	out := make([]controlprompt.SlashArgCandidate, 0, len(templates))
 	for _, template := range templates {
-		if (authSource == "judgment") != (template.API == modelconfig.APISystemOne) {
+		if authSource == "judgment" {
+			label := modelconfig.JudgmentProvider(template.Label)
+			if !modelconfig.IsJudgmentProvider(label) {
+				continue
+			}
+			template, _ = modelconfig.LookupProvider(label)
+		} else if template.API == modelconfig.APISystemOne {
 			continue
 		}
 		accountProvider := strings.TrimSpace(string(template.AuthFlow)) != ""
@@ -187,9 +198,13 @@ func completeConnectProviders(ctx context.Context, driver *assembler, authSource
 		if reusableAuth {
 			detail = strings.Join(compactNonEmpty([]string{detail, "configured auth"}), " · ")
 		}
+		display := template.Label
+		if authSource == "judgment" {
+			display = template.Provider
+		}
 		out = append(out, controlprompt.SlashArgCandidate{
 			Value:   template.Label,
-			Display: template.Label,
+			Display: display,
 			Detail:  detail,
 			NoAuth:  template.NoAuthRequired || template.AuthFlow != "" || reusableAuth,
 		})
@@ -210,7 +225,7 @@ func completeConnectBaseURL(ctx context.Context, driver *assembler, provider str
 		candidates = append(candidates, controlprompt.SlashArgCandidate{Value: template.DefaultBaseURL, Display: template.DefaultBaseURL, Detail: "default base URL"})
 	}
 	for i := range candidates {
-		if driver != nil && driver.hasReusableConnectAuth(ctx, template.Provider, candidates[i].Value) {
+		if driver != nil && driver.hasReusableConnectAuth(ctx, template.Label, candidates[i].Value) {
 			candidates[i].NoAuth = true
 			candidates[i].Detail = strings.Join(compactNonEmpty([]string{strings.TrimSpace(candidates[i].Detail), "configured auth"}), " · ")
 		}
@@ -239,7 +254,7 @@ func completeConnectModels(ctx context.Context, driver *assembler, payload conne
 	if !ok {
 		return nil, nil
 	}
-	models, err := modelconfig.MaintainedSelectableModels(ctx, template.Provider, payload.BaseURL)
+	models, err := connectModelCatalog(ctx, driver, payload)
 	if err != nil {
 		return nil, err
 	}
@@ -300,9 +315,7 @@ func completeConnectImageInput(query string, limit int) []controlprompt.SlashArg
 }
 
 func completeConnectContext(ctx context.Context, driver *assembler, payload connectWizardPayload, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
-	_ = ctx
-	_ = driver
-	defaults, err := modelconfig.ResolveModelDefaultsForEndpoint(payload.Provider, payload.BaseURL, payload.Model)
+	defaults, err := connectModelDefaults(ctx, driver, payload)
 	if err != nil {
 		return nil, err
 	}
@@ -310,9 +323,7 @@ func completeConnectContext(ctx context.Context, driver *assembler, payload conn
 }
 
 func completeConnectMaxOutput(ctx context.Context, driver *assembler, payload connectWizardPayload, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
-	_ = ctx
-	_ = driver
-	defaults, err := modelconfig.ResolveModelDefaultsForEndpoint(payload.Provider, payload.BaseURL, payload.Model)
+	defaults, err := connectModelDefaults(ctx, driver, payload)
 	if err != nil {
 		return nil, err
 	}
@@ -320,9 +331,7 @@ func completeConnectMaxOutput(ctx context.Context, driver *assembler, payload co
 }
 
 func completeConnectReasoningLevels(ctx context.Context, driver *assembler, payload connectWizardPayload, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
-	_ = ctx
-	_ = driver
-	defaults, err := modelconfig.ResolveModelDefaultsForEndpoint(payload.Provider, payload.BaseURL, payload.Model)
+	defaults, err := connectModelDefaults(ctx, driver, payload)
 	if err != nil {
 		return nil, err
 	}
@@ -395,12 +404,7 @@ func buildConnectModelChoices(provider string, fallbackModels []modelconfig.Sele
 	for _, item := range fallbackModels {
 		add(item)
 	}
-	template, maintainedProvider := modelconfig.LookupProvider(provider)
-	if !maintainedProvider || !template.PreserveModelOrder {
-		sort.SliceStable(out, func(i, j int) bool {
-			return strings.ToLower(out[i].Display) < strings.ToLower(out[j].Display)
-		})
-	}
+
 	return out
 }
 
@@ -429,4 +433,24 @@ func compactNonEmpty(values []string) []string {
 		out = append(out, trimmed)
 	}
 	return out
+}
+
+func connectModelCatalog(ctx context.Context, driver *assembler, payload connectWizardPayload) ([]modelconfig.SelectableModel, error) {
+	req := modelconfig.ConnectRequest{Provider: payload.Provider, BaseURL: payload.BaseURL, APIKey: payload.TokenRef}
+	if driver != nil && driver.deps != nil && driver.deps.Model.ConnectionModelsFn != nil {
+		return driver.deps.Model.ConnectionModelsFn(ctx, req)
+	}
+	return modelconfig.SelectableModels(ctx, req)
+}
+func connectModelDefaults(ctx context.Context, driver *assembler, payload connectWizardPayload) (modelconfig.ModelDefaults, error) {
+	models, err := connectModelCatalog(ctx, driver, payload)
+	if err != nil {
+		return modelconfig.ModelDefaults{}, err
+	}
+	for _, entry := range models {
+		if entry.Name == payload.Model {
+			return entry.Defaults, nil
+		}
+	}
+	return modelconfig.ResolveModelDefaultsForEndpoint(payload.Provider, payload.BaseURL, payload.Model)
 }

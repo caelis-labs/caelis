@@ -42,12 +42,14 @@ type Config struct {
 	DefaultReasoningEffort string             `json:"default_reasoning_effort,omitempty"`
 	ReasoningLevels        []string           `json:"reasoning_levels,omitempty"`
 	ReasoningMode          string             `json:"reasoning_mode,omitempty"`
-	// ImageInput declares image-input support for a custom or locally hosted
-	// model. Maintained model-directory metadata takes precedence when present.
-	ImageInput              *bool         `json:"image_input,omitempty"`
-	MaxOutputTok            int           `json:"max_output_tokens,omitempty"`
-	Timeout                 time.Duration `json:"timeout,omitempty"`
-	StreamFirstEventTimeout time.Duration `json:"stream_first_event_timeout,omitempty"`
+	// ImageInput pins the accepted model's image capability. Nil is reserved for
+	// incomplete or older configurations and is distinct from explicit false.
+	ImageInput *bool `json:"image_input,omitempty"`
+	// SpeedModes is the accepted endpoint's request-speed capability snapshot.
+	SpeedModes              []modelcatalog.SpeedMode `json:"speed_modes,omitempty"`
+	MaxOutputTok            int                      `json:"max_output_tokens,omitempty"`
+	Timeout                 time.Duration            `json:"timeout,omitempty"`
+	StreamFirstEventTimeout time.Duration            `json:"stream_first_event_timeout,omitempty"`
 }
 
 // ProviderEndpointConfig stores endpoint and credential data shared by
@@ -110,15 +112,21 @@ func SpeedModesForConfig(cfg Config) []modelcatalog.SpeedMode {
 	if cfg.Provider != provider {
 		return nil
 	}
-	template, ok := LookupProvider(provider)
-	if !ok {
-		return nil
-	}
 	baseURL := NormalizeBaseURL(cfg.BaseURL)
-	if baseURL != "" && baseURL != NormalizeBaseURL(template.DefaultBaseURL) {
+	root := CodexOAuthBaseURL
+	if provider == "openai" {
+		root = "https://api.openai.com/v1"
+	}
+	if baseURL != "" && baseURL != NormalizeBaseURL(root) {
 		return nil
 	}
-	return modelcatalog.SpeedModesForModel("openai", cfg.Model)
+	if cfg.SpeedModes != nil {
+		return append([]modelcatalog.SpeedMode(nil), cfg.SpeedModes...)
+	}
+	if modes := modelcatalog.SpeedModesForModel(provider, cfg.Model); len(modes) > 0 {
+		return modes
+	}
+	return RestoreSavedCapabilities(cfg).SpeedModes
 }
 
 // SupportsSpeedMode reports whether level is present in the configured model's
@@ -136,6 +144,7 @@ func SupportsSpeedMode(cfg Config, level string) bool {
 // NormalizeConfig canonicalizes identifiers, endpoint defaults, credentials,
 // and model limits.
 func NormalizeConfig(cfg Config) Config {
+	cfg.SpeedModes = append([]modelcatalog.SpeedMode(nil), cfg.SpeedModes...)
 	if cfg.ImageInput != nil {
 		value := *cfg.ImageInput
 		cfg.ImageInput = &value
@@ -166,10 +175,13 @@ func NormalizeConfig(cfg Config) Config {
 		cfg.DefaultReasoningEffort = cfg.ReasoningEffort
 	}
 	if cfg.ReasoningMode == "" && cfg.Provider != "" && cfg.Model != "" {
-		cfg.ReasoningMode = modelcatalog.ReasoningModeForModel(
-			CatalogProviderFor(cfg.Provider, cfg.BaseURL),
-			cfg.Model,
-		)
+		restored := RestoreSavedCapabilities(cfg)
+		cfg.ImageInput, cfg.SpeedModes = restored.ImageInput, restored.SpeedModes
+		cfg.ReasoningLevels, cfg.DefaultReasoningEffort = restored.ReasoningLevels, restored.DefaultReasoningEffort
+		cfg.ReasoningMode = restored.ReasoningMode
+		if cfg.ReasoningMode == "" {
+			cfg.ReasoningMode = modelcatalog.ReasoningModeForModel(catalogProviderFor(cfg.Provider), cfg.Model)
+		}
 	}
 	if cfg.MaxOutputTok <= 0 {
 		cfg.MaxOutputTok = 4096
@@ -340,18 +352,12 @@ func DefaultAPIForProvider(provider string) providers.APIType {
 	if template, ok := LookupProvider(provider); ok {
 		return template.API
 	}
-	return ""
+	return legacyProviders[strings.ToLower(strings.TrimSpace(provider))].API
 }
 
 // SanitizePersistedConfig removes profile-owned and derivable runtime fields.
 func SanitizePersistedConfig(cfg Config) Config {
 	cfg = NormalizeConfig(cfg)
-	if cfg.ReasoningMode == modelcatalog.ReasoningModeForModel(
-		CatalogProviderFor(cfg.Provider, cfg.BaseURL),
-		cfg.Model,
-	) {
-		cfg.ReasoningMode = ""
-	}
 	if cfg.ProviderEndpointID != "" {
 		cfg.Provider = ""
 		cfg.EndpointID = ""
@@ -368,12 +374,6 @@ func SanitizePersistedConfig(cfg Config) Config {
 	}
 	if !cfg.PersistToken {
 		cfg.Token = ""
-	}
-	if cfg.API == DefaultAPIForProvider(cfg.Provider) {
-		cfg.API = ""
-	}
-	if cfg.AuthType == DefaultAuthTypeForEndpoint(cfg.Provider, cfg.BaseURL) {
-		cfg.AuthType = ""
 	}
 	if cfg.DefaultReasoningEffort == cfg.ReasoningEffort {
 		cfg.DefaultReasoningEffort = ""
@@ -396,12 +396,6 @@ func SanitizePersistedProviderEndpoint(endpoint ProviderEndpointConfig) Provider
 	} else if !endpoint.PersistToken {
 		endpoint.Token = ""
 	}
-	if endpoint.API == DefaultAPIForProvider(endpoint.Provider) {
-		endpoint.API = ""
-	}
-	if endpoint.AuthType == DefaultAuthTypeForEndpoint(endpoint.Provider, endpoint.BaseURL) {
-		endpoint.AuthType = ""
-	}
 	endpoint.PersistToken = false
 	endpoint.HTTPClient = nil
 	endpoint.Timeout = 0
@@ -412,6 +406,9 @@ func SanitizePersistedProviderEndpoint(endpoint ProviderEndpointConfig) Provider
 func DefaultAuthTypeForProvider(provider string) providers.AuthType {
 	template, ok := LookupProvider(provider)
 	if !ok {
+		if legacy := legacyProviders[strings.ToLower(strings.TrimSpace(provider))]; legacy.AuthType != "" {
+			return legacy.AuthType
+		}
 		return providers.AuthAPIKey
 	}
 	if template.AuthType == "" {
@@ -432,6 +429,11 @@ func DefaultAuthTypeForEndpoint(provider string, baseURL string) providers.AuthT
 			return providers.AuthNone
 		}
 		if endpoint.AuthType != "" {
+			return endpoint.AuthType
+		}
+	}
+	if legacy, ok := legacyProviders[provider]; ok {
+		if endpoint, found := EndpointForBaseURL(legacy, baseURL); found && endpoint.AuthType != "" {
 			return endpoint.AuthType
 		}
 	}
@@ -491,11 +493,34 @@ func NormalizeEndpointID(provider string, endpointID string, baseURL string, api
 		return endpointID
 	}
 	normalizedBaseURL := normalizedConfigBaseURL(baseURL)
+	if provider == "custom" {
+		protocol := "responses"
+		switch api {
+		case providers.APIOpenAICompatible:
+			protocol = "chat"
+		case providers.APIAnthropicCompatible:
+			protocol = "messages"
+		case APISystemOne:
+			protocol = "judgment"
+		}
+		return protocol + "-" + shortConfigHash(normalizedBaseURL)
+	}
+	if provider == "magpie" && api == APISystemOne {
+		if normalizedBaseURL == "" || normalizedBaseURL == "http://127.0.0.1:3425/v1" {
+			return "judgment"
+		}
+		return "judgment-" + shortConfigHash(normalizedBaseURL)
+	}
 	if provider == "volcengine" && api == providers.APIVolcengineCoding {
 		return "coding-plan"
 	}
 	if template, ok := LookupProvider(provider); ok {
 		if endpoint, found := EndpointForBaseURL(template, baseURL); found {
+			return sanitizeConfigIDPart(endpoint.ID)
+		}
+	}
+	if legacy, ok := legacyProviders[provider]; ok {
+		if endpoint, found := EndpointForBaseURL(legacy, baseURL); found {
 			return sanitizeConfigIDPart(endpoint.ID)
 		}
 	}

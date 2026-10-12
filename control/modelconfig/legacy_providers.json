@@ -1,0 +1,227 @@
+{
+  "typesafe": {
+    "API": "typesafe-system-one",
+    "AuthType": "bearer_token",
+    "DefaultBaseURL": "https://api.typesafe.ai/v1",
+    "DefaultEndpointID": "",
+    "Endpoints": [],
+    "Provider": "typesafe",
+    "Label": "typesafe",
+    "PromptForBaseURL": false
+  },
+  "openai-codex": {
+    "API": "openai_codex",
+    "AuthType": "oauth_token",
+    "DefaultBaseURL": "https://chatgpt.com/backend-api/codex",
+    "DefaultEndpointID": "",
+    "Endpoints": [],
+    "Provider": "openai-codex",
+    "Label": "codex",
+    "PromptForBaseURL": false
+  },
+  "codex": {
+    "API": "openai_codex",
+    "AuthType": "oauth_token",
+    "DefaultBaseURL": "https://chatgpt.com/backend-api/codex",
+    "DefaultEndpointID": "",
+    "Endpoints": [],
+    "Provider": "openai-codex",
+    "Label": "codex",
+    "PromptForBaseURL": false
+  },
+  "xai": {
+    "API": "xai_responses",
+    "AuthType": "oauth_token",
+    "DefaultBaseURL": "https://cli-chat-proxy.grok.com/v1",
+    "DefaultEndpointID": "",
+    "Endpoints": [],
+    "Provider": "xai",
+    "Label": "grok",
+    "PromptForBaseURL": false
+  },
+  "grok": {
+    "API": "xai_responses",
+    "AuthType": "oauth_token",
+    "DefaultBaseURL": "https://cli-chat-proxy.grok.com/v1",
+    "DefaultEndpointID": "",
+    "Endpoints": [],
+    "Provider": "xai",
+    "Label": "grok",
+    "PromptForBaseURL": false
+  },
+  "openai": {
+    "API": "openai",
+    "AuthType": "api_key",
+    "DefaultBaseURL": "https://api.openai.com/v1",
+    "DefaultEndpointID": "",
+    "Endpoints": [],
+    "Provider": "openai",
+    "Label": "openai",
+    "PromptForBaseURL": false
+  },
+  "openai-responses-compatible": {
+    "API": "openai_responses",
+    "AuthType": "api_key",
+    "DefaultBaseURL": "https://api.openai.com/v1",
+    "DefaultEndpointID": "",
+    "Endpoints": [],
+    "Provider": "openai-responses-compatible",
+    "Label": "openai-responses-compatible",
+    "PromptForBaseURL": true
+  },
+  "openai-compatible": {
+    "API": "openai_compatible",
+    "AuthType": "api_key",
+    "DefaultBaseURL": "https://api.openai.com/v1",
+    "DefaultEndpointID": "",
+    "Endpoints": [],
+    "Provider": "openai-compatible",
+    "Label": "openai-chat-compatible",
+    "PromptForBaseURL": true
+  },
+  "openai-chat-compatible": {
+    "API": "openai_compatible",
+    "AuthType": "api_key",
+    "DefaultBaseURL": "https://api.openai.com/v1",
+    "DefaultEndpointID": "",
+    "Endpoints": [],
+    "Provider": "openai-compatible",
+    "Label": "openai-chat-compatible",
+    "PromptForBaseURL": true
+  },
+  "openrouter": {
+    "API": "openrouter",
+    "AuthType": "api_key",
+    "DefaultBaseURL": "https://openrouter.ai/api/v1",
+    "DefaultEndpointID": "",
+    "Endpoints": [],
+    "Provider": "openrouter",
+    "Label": "openrouter",
+    "PromptForBaseURL": false
+  },
+  "gemini": {
+    "API": "gemini",
+    "AuthType": "api_key",
+    "DefaultBaseURL": "https://generativelanguage.googleapis.com/v1beta",
+    "DefaultEndpointID": "",
+    "Endpoints": [],
+    "Provider": "gemini",
+    "Label": "gemini",
+    "PromptForBaseURL": false
+  },
+  "anthropic": {
+    "API": "anthropic",
+    "AuthType": "api_key",
+    "DefaultBaseURL": "https://api.anthropic.com",
+    "DefaultEndpointID": "",
+    "Endpoints": [],
+    "Provider": "anthropic",
+    "Label": "anthropic",
+    "PromptForBaseURL": false
+  },
+  "anthropic-compatible": {
+    "API": "anthropic_compatible",
+    "AuthType": "api_key",
+    "DefaultBaseURL": "https://api.anthropic.com",
+    "DefaultEndpointID": "",
+    "Endpoints": [],
+    "Provider": "anthropic-compatible",
+    "Label": "anthropic-compatible",
+    "PromptForBaseURL": true
+  },
+  "deepseek": {
+    "API": "deepseek",
+    "AuthType": "api_key",
+    "DefaultBaseURL": "https://api.deepseek.com/anthropic",
+    "DefaultEndpointID": "",
+    "Endpoints": [],
+    "Provider": "deepseek",
+    "Label": "deepseek",
+    "PromptForBaseURL": false
+  },
+  "xiaomi": {
+    "API": "mimo",
+    "AuthType": "api_key",
+    "DefaultBaseURL": "https://api.xiaomimimo.com/v1",
+    "DefaultEndpointID": "api-cn",
+    "Endpoints": [
+      {
+        "ID": "api-cn",
+        "BaseURL": "https://api.xiaomimimo.com/v1",
+        "API": "mimo",
+        "AuthType": "",
+        "NoAuthRequired": false
+      },
+      {
+        "ID": "token-plan-cn",
+        "BaseURL": "https://token-plan-cn.xiaomimimo.com/v1",
+        "API": "mimo",
+        "AuthType": "",
+        "NoAuthRequired": false
+      }
+    ],
+    "Provider": "xiaomi",
+    "Label": "xiaomi",
+    "PromptForBaseURL": false
+  },
+  "minimax": {
+    "API": "minimax",
+    "AuthType": "bearer_token",
+    "DefaultBaseURL": "https://api.minimaxi.com/anthropic",
+    "DefaultEndpointID": "",
+    "Endpoints": [],
+    "Provider": "minimax",
+    "Label": "minimax",
+    "PromptForBaseURL": false
+  },
+  "volcengine": {
+    "API": "volcengine",
+    "AuthType": "api_key",
+    "DefaultBaseURL": "https://ark.cn-beijing.volces.com/api/v3",
+    "DefaultEndpointID": "standard",
+    "Endpoints": [
+      {
+        "ID": "standard",
+        "BaseURL": "https://ark.cn-beijing.volces.com/api/v3",
+        "API": "volcengine",
+        "AuthType": "",
+        "NoAuthRequired": false
+      },
+      {
+        "ID": "coding-plan",
+        "BaseURL": "https://ark.cn-beijing.volces.com/api/coding/v3",
+        "API": "volcengine_coding_plan",
+        "AuthType": "",
+        "NoAuthRequired": false
+      }
+    ],
+    "Provider": "volcengine",
+    "Label": "volcengine",
+    "PromptForBaseURL": false
+  },
+  "ollama": {
+    "API": "ollama",
+    "AuthType": "none",
+    "DefaultBaseURL": "http://localhost:11434",
+    "DefaultEndpointID": "local",
+    "Endpoints": [
+      {
+        "ID": "local",
+        "BaseURL": "http://localhost:11434",
+        "API": "ollama",
+        "AuthType": "none",
+        "NoAuthRequired": true
+      },
+      {
+        "ID": "cloud",
+        "BaseURL": "https://ollama.com",
+        "API": "ollama",
+        "AuthType": "api_key",
+        "NoAuthRequired": false
+      }
+    ],
+    "Provider": "ollama",
+    "Label": "ollama",
+    "PromptForBaseURL": false
+  }
+}

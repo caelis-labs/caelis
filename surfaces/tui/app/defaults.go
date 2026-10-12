@@ -131,6 +131,11 @@ func connectModelWizard(authSource string) WizardDef {
 				CompletionCommand: func(map[string]string) string { return providerCommand },
 			},
 			{
+				Key: "protocol", RequireCandidate: true,
+				CompletionCommand: func(map[string]string) string { return "connect-custom-protocol" },
+				ShouldSkip:        func(state map[string]string) bool { return state["provider"] != "custom" },
+			},
+			{
 				Key:               "endpoint",
 				CompletionCommand: func(state map[string]string) string { return "connect-baseurl:" + state["provider"] },
 				ShouldSkip:        func(state map[string]string) bool { return !connectWizardProviderHasEndpointStep(state["provider"]) },
@@ -289,6 +294,8 @@ func confirmConnectModelStep(stepKey string, value string, candidate *SlashArgCa
 		if candidate != nil && candidate.NoAuth {
 			state["_noauth"] = "true"
 		}
+	case "protocol":
+		state["provider"] = value
 	case "endpoint":
 		state["baseurl"] = strings.TrimSpace(value)
 		if candidate != nil && candidate.NoAuth ||

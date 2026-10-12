@@ -185,6 +185,7 @@ type ModelRuntimeDeps struct {
 	ListAliasesFn          func(context.Context, session.SessionRef) ([]string, error)
 	ListChoicesFn          func(context.Context, session.SessionRef) ([]ModelChoice, error)
 	HasReusableAuthFn      func(context.Context, string, string) bool
+	ConnectionModelsFn     func(context.Context, modelconfig.ConnectRequest) ([]modelconfig.SelectableModel, error)
 }
 
 // SkillRuntimeDeps carries access to the current runtime skill catalog used for

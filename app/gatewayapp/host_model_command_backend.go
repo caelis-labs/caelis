@@ -157,9 +157,13 @@ func (s *controlCommandBackend) assembleHostModelConnect(ctx context.Context, cf
 			}
 			var reusable bool
 			reusableCredentialRef, reusable = s.composition.reusableProviderCredentialRef(
-				ctx, candidate.lookup, candidate.profiles, provider, cfg.EndpointID, baseURL,
+				ctx, candidate.lookup, candidate.profiles, cfg.Provider, cfg.EndpointID, baseURL,
 			)
 			return reusable
+		},
+		ResolveDiscoveryToken: func(ctx context.Context) (string, error) {
+			source, err := s.composition.authorities.apiKeyCredentials.LookupSource(ctx, reusableCredentialRef)
+			return source.APIKey, err
 		},
 		Authenticate: authenticate,
 	})
@@ -256,6 +260,9 @@ func retainedAPIKeyReference(provider, endpointID, baseURL string) string {
 func retainedProviderEndpointID(provider, endpointID, baseURL string) string {
 	provider = strings.ToLower(strings.TrimSpace(provider))
 	api := modelconfig.DefaultAPIForProvider(provider)
+	if template, ok := modelconfig.LookupProvider(provider); ok {
+		provider, api = template.Provider, template.API
+	}
 	endpointID = modelconfig.NormalizeEndpointID(provider, endpointID, baseURL, api)
 	return modelconfig.BuildProviderEndpointID(provider, endpointID, baseURL)
 }

@@ -250,6 +250,7 @@ func TestValidateRejectsUnsupportedFastModeDefault(t *testing.T) {
 	}
 
 	doc.Models.Configs[0].Model = "not-a-gpt-model"
+	doc.Models.Configs[0].SpeedModes = nil
 	if err := Validate(doc); err == nil || !strings.Contains(err.Error(), "does not support fast mode") {
 		t.Fatalf("Validate(unsupported fast default) error = %v", err)
 	}
