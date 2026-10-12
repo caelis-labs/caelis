@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.71.0](https://github.com/caelis-labs/caelis/compare/v0.70.0...v0.71.0) (2026-10-12)
+
+
+### Features
+
+* **cli:** expose headless local plugin lifecycle ([#131](https://github.com/caelis-labs/caelis/issues/131)) ([c493a5e](https://github.com/caelis-labs/caelis/commit/c493a5e581979d8403ad916dc5f02f389d76d3f1)), closes [#129](https://github.com/caelis-labs/caelis/issues/129)
+* **model:** unify connection onboarding and separate route labels ([#130](https://github.com/caelis-labs/caelis/issues/130)) ([14128ca](https://github.com/caelis-labs/caelis/commit/14128ca9e8c53913f2d7398d566a319ec2b2dbcb))
+
+
+### Bug Fixes
+
+* **models:** align Sol context and refresh recommendations ([5ae94c2](https://github.com/caelis-labs/caelis/commit/5ae94c270de4e9b2ace088591812e50e585cfaaf))
+* **models:** refresh context defaults and provider catalogs ([a850c50](https://github.com/caelis-labs/caelis/commit/a850c509bb3ecec4a0004546b50a53a1c2939307))
+* **models:** refresh routed metadata and thinking contracts ([ab7a269](https://github.com/caelis-labs/caelis/commit/ab7a2698d6d6cdf81e21149386aee0a37de98023))
+* resolve connection review findings and trim legacy support ([2af0787](https://github.com/caelis-labs/caelis/commit/2af07870ef2923a07bf775ba37bfed1114e3a13f))
+* **tui:** avoid duplicate child summaries and require model checks ([#132](https://github.com/caelis-labs/caelis/issues/132)) ([24608a3](https://github.com/caelis-labs/caelis/commit/24608a394f0087b9a19fd5256a74e73d9712b430))
+
 ## [0.70.0](https://github.com/caelis-labs/caelis/compare/v0.69.1...v0.70.0) (2026-10-11)
 
 
