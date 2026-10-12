@@ -70,9 +70,9 @@ func TestAssembleConnectBuildsCompleteKnownModelConfig(t *testing.T) {
 func TestSelectableModelsOnlyReturnsMetadataBackedModels(t *testing.T) {
 	t.Parallel()
 
-	models, err := SelectableModels(context.Background(), ConnectRequest{Provider: "openai-compatible", BaseURL: "https://proxy.example/v1"})
+	models, err := SelectableModels(context.Background(), ConnectRequest{Provider: "custom-chat", BaseURL: "https://proxy.example/v1"})
 	if err != nil {
-		t.Fatalf("SelectableModels(openai-compatible) error = %v", err)
+		t.Fatalf("SelectableModels(custom-chat) error = %v", err)
 	}
 	if selectableModelNamesContain(models, "acme-reasoning-model") {
 		t.Fatalf("generic compatible models = %#v, configured unknown model must remain custom", models)

@@ -35,7 +35,7 @@ bash ./scripts/go_test_nonempty.sh ./agent-sdk/session/file \
 bash ./scripts/go_test_nonempty.sh ./agent-sdk/runtime \
   '^Test(Runtime(CommandTTYDefaultTaskWriteSubmitsWindowsLine|SpawnToolIsParallelSafeAndConcurrentAttachmentsConverge)|CommandApproval|CommandExecutionSpec|TaskContinuation)' windows-runtime -count=1
 bash ./scripts/go_test_nonempty.sh ./app/gatewayapp \
-  '^Test(WindowsOpenRouterReconnectPreservesCustomReasoningLevels|HostModelConnectUsesCanonicalDocumentAndDoesNotPersistSecretInLedger|ACPPrepareCommandRecoversIntentOnlyReceiptWithoutRepeatingProcess|NewLocalStackProductionBootstrapDoesNotPersistSandboxNetworkDefault|AntigravityReusesUserChosenInstallationDirectory|SessionListIncludesRecentCWDSpellings)$' windows-host-persistence -count=1
+  '^Test(WindowsCustomReconnectPreservesReasoningLevels|HostModelConnectUsesCanonicalDocumentAndDoesNotPersistSecretInLedger|ACPPrepareCommandRecoversIntentOnlyReceiptWithoutRepeatingProcess|NewLocalStackProductionBootstrapDoesNotPersistSandboxNetworkDefault|AntigravityReusesUserChosenInstallationDirectory|SessionListIncludesRecentCWDSpellings)$' windows-host-persistence -count=1
 CAELIS_TEST_GUARDIAN_NATIVE=1 bash ./scripts/go_test_nonempty.sh ./app/gatewayapp \
   '^TestGuardian(Native|Environment|Harness|ActiveOverflow|BoundedResult)' windows-guardian -count=1
 bash ./scripts/go_test_nonempty.sh ./internal/cli \

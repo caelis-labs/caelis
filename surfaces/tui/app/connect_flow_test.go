@@ -622,39 +622,6 @@ func TestConnectWizardInstalledLauncherDoesNotAskForCommand(t *testing.T) {
 	}
 }
 
-func TestConnectWizardSkipsDirectlyToAPIKeyForMiniMax(t *testing.T) {
-	m := NewModel(Config{
-		Wizards: DefaultWizards(),
-		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
-			switch command {
-			case "connect":
-				return []SlashArgCandidate{{Value: "api-key", Display: "Use an API key"}}, nil
-			case "connect-provider-api-key":
-				return []SlashArgCandidate{{Value: "minimax", Display: "minimax"}}, nil
-			case "connect-apikey:minimax":
-				return nil, nil
-			default:
-				return nil, nil
-			}
-		},
-	})
-	openModelConnectWizard(t, m)
-	if !m.isWizardActive() {
-		t.Fatal("expected connect wizard to start")
-	}
-	handled, cmd := m.handleWizardEnter()
-	if !handled {
-		t.Fatal("provider selection was not handled")
-	}
-	runConnectTestCmd(m, cmd)
-	if got := strings.TrimSpace(m.slashArgCommand); got != "connect-apikey:minimax" {
-		t.Fatalf("slashArgCommand after minimax provider = %q, want connect-apikey:minimax", got)
-	}
-	if got := m.textarea.Value(); got != "" {
-		t.Fatalf("textarea after minimax provider = %q, want empty wizard input", got)
-	}
-}
-
 func TestConnectWizardOllamaLocalEndpointSkipsAPIKey(t *testing.T) {
 	const localBaseURL = "http://localhost:11434"
 	m := NewModel(Config{
@@ -668,7 +635,7 @@ func TestConnectWizardOllamaLocalEndpointSkipsAPIKey(t *testing.T) {
 			case "connect-baseurl:ollama":
 				return []SlashArgCandidate{
 					{Value: localBaseURL, Display: "local", NoAuth: true},
-					{Value: "https://ollama.com", Display: "cloud api"},
+					{Value: "http://localhost:11435", Display: "another local endpoint", NoAuth: true},
 				}, nil
 			default:
 				state, ok := connectModelCommandState(command)
@@ -719,7 +686,7 @@ func TestConnectWizardOllamaCustomEndpointSkipsAPIKey(t *testing.T) {
 			case "connect-baseurl:ollama":
 				return []SlashArgCandidate{
 					{Value: "http://localhost:11434", Display: "local", NoAuth: true},
-					{Value: "https://ollama.com", Display: "cloud api"},
+					{Value: "http://localhost:11435", Display: "another local endpoint", NoAuth: true},
 				}, nil
 			default:
 				state, ok := connectModelCommandState(command)
@@ -745,60 +712,6 @@ func TestConnectWizardOllamaCustomEndpointSkipsAPIKey(t *testing.T) {
 	state := requireConnectModelCommandState(t, m.slashArgCommand)
 	if state.Provider != "ollama" || state.BaseURL != customBaseURL || state.TokenRef != "" {
 		t.Fatalf("connect model state after custom Ollama endpoint = %#v, want no API-key step", state)
-	}
-}
-
-func TestConnectWizardOllamaCloudEndpointRequiresAPIKey(t *testing.T) {
-	const cloudBaseURL = "https://ollama.com"
-	m := NewModel(Config{
-		Wizards: DefaultWizards(),
-		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
-			switch command {
-			case "connect":
-				return []SlashArgCandidate{{Value: "api-key", Display: "Use an API key"}}, nil
-			case "connect-provider-api-key":
-				return []SlashArgCandidate{{Value: "ollama", Display: "ollama"}}, nil
-			case "connect-baseurl:ollama":
-				return []SlashArgCandidate{
-					{Value: "http://localhost:11434", Display: "local", NoAuth: true},
-					{Value: cloudBaseURL, Display: "cloud api"},
-				}, nil
-			case "connect-apikey:ollama":
-				return nil, nil
-			default:
-				state, ok := connectModelCommandState(command)
-				if ok && state.Provider == "ollama" && state.BaseURL == cloudBaseURL && state.TokenRef == "ollama-secret" {
-					return []SlashArgCandidate{{Value: "glm-5.2", Display: "ollama/glm-5.2", ModelMetadataComplete: true, ModelImageInputKnown: true}}, nil
-				}
-				return nil, nil
-			}
-		},
-	})
-	openModelConnectWizard(t, m)
-	if handled, cmd := m.handleWizardEnter(); !handled {
-		t.Fatal("provider selection was not handled")
-	} else {
-		runConnectTestCmd(m, cmd)
-	}
-	m.slashArgIndex = 1
-	handled, cmd := m.handleWizardEnter()
-	if !handled {
-		t.Fatal("Cloud endpoint selection was not handled")
-	}
-	runConnectTestCmd(m, cmd)
-	if got := strings.TrimSpace(m.slashArgCommand); got != "connect-apikey:ollama" {
-		t.Fatalf("slashArgCommand after Ollama Cloud endpoint = %q, want API key step", got)
-	}
-
-	m.slashArgQuery = "ollama-secret"
-	handled, cmd = m.handleWizardEnter()
-	if !handled {
-		t.Fatal("Cloud API key entry was not handled")
-	}
-	runConnectTestCmd(m, cmd)
-	state := requireConnectModelCommandState(t, m.slashArgCommand)
-	if state.Provider != "ollama" || state.BaseURL != cloudBaseURL || state.TokenRef != "ollama-secret" {
-		t.Fatalf("connect model state after Ollama Cloud API key = %#v", state)
 	}
 }
 
@@ -1240,11 +1153,11 @@ func TestConnectWizardSkipsAdvancedStepsForKnownModelCandidate(t *testing.T) {
 			case "connect":
 				return []SlashArgCandidate{{Value: "api-key", Display: "Use an API key"}}, nil
 			case "connect-provider-api-key":
-				return []SlashArgCandidate{{Value: "minimax", Display: "minimax"}}, nil
+				return []SlashArgCandidate{{Value: "deepseek", Display: "deepseek"}}, nil
 			default:
 				state, ok := connectModelCommandState(command)
-				if ok && state.Provider == "minimax" && state.TokenRef == "sk-test" {
-					return []SlashArgCandidate{{Value: "MiniMax-M2.7-highspeed", Display: "minimax/MiniMax-M2.7-highspeed", ModelMetadataComplete: true, ModelImageInputKnown: true}}, nil
+				if ok && state.Provider == "deepseek" && state.TokenRef == "sk-test" {
+					return []SlashArgCandidate{{Value: "deepseek-flash", Display: "deepseek/deepseek-flash", ModelMetadataComplete: true, ModelImageInputKnown: true}}, nil
 				}
 				return nil, nil
 			}
@@ -1263,8 +1176,8 @@ func TestConnectWizardSkipsAdvancedStepsForKnownModelCandidate(t *testing.T) {
 	}
 	runConnectTestCmd(m, cmd)
 	state := requireConnectModelCommandState(t, m.slashArgCommand)
-	if state.Provider != "minimax" || state.TokenRef != "sk-test" {
-		t.Fatalf("connect model state after api key = %#v, want minimax token state", state)
+	if state.Provider != "deepseek" || state.TokenRef != "sk-test" {
+		t.Fatalf("connect model state after api key = %#v, want deepseek token state", state)
 	}
 	handled, cmd = m.handleWizardEnter() // model -> submit
 	if !handled {
@@ -1278,7 +1191,7 @@ func TestConnectWizardSkipsAdvancedStepsForKnownModelCandidate(t *testing.T) {
 		t.Fatal("expected TaskResultMsg in batch")
 	}
 	want := fmt.Sprintf(
-		"/connect minimax MiniMax-M2.7-highspeed - %d sk-test - - auto",
+		"/connect deepseek deepseek-flash - %d sk-test - - auto",
 		connectwizard.DefaultConnectTimeoutSeconds,
 	)
 	if called != want {
@@ -1299,15 +1212,15 @@ func TestConnectWizardAsksImageCapabilityWhenOtherModelMetadataIsKnown(t *testin
 			case command == "connect":
 				return []SlashArgCandidate{{Value: "api-key", Display: "Use an API key"}}, nil
 			case command == "connect-provider-api-key":
-				return []SlashArgCandidate{{Value: "minimax", Display: "minimax"}}, nil
+				return []SlashArgCandidate{{Value: "deepseek", Display: "deepseek"}}, nil
 			case strings.HasPrefix(command, "connect-image-input:"):
 				return []SlashArgCandidate{{Value: "false"}, {Value: "true"}}, nil
 			default:
 				state, ok := connectModelCommandState(command)
-				if ok && state.Provider == "minimax" && state.TokenRef == "sk-test" {
+				if ok && state.Provider == "deepseek" && state.TokenRef == "sk-test" {
 					return []SlashArgCandidate{{
 						Value:                 "account-catalog-model",
-						Display:               "minimax/account-catalog-model",
+						Display:               "deepseek/account-catalog-model",
 						ModelMetadataComplete: true,
 						ModelImageInputKnown:  false,
 					}}, nil
@@ -1350,7 +1263,7 @@ func TestConnectWizardAsksImageCapabilityWhenOtherModelMetadataIsKnown(t *testin
 		t.Fatal("expected TaskResultMsg in batch")
 	}
 	want := fmt.Sprintf(
-		"/connect minimax account-catalog-model - %d sk-test - - auto - true",
+		"/connect deepseek account-catalog-model - %d sk-test - - auto - true",
 		connectwizard.DefaultConnectTimeoutSeconds,
 	)
 	if called != want {
@@ -1371,13 +1284,13 @@ func TestConnectWizardSelectsMultipleMetadataBackedModels(t *testing.T) {
 			case "connect":
 				return []SlashArgCandidate{{Value: "api-key", Display: "Use an API key"}}, nil
 			case "connect-provider-api-key":
-				return []SlashArgCandidate{{Value: "minimax", Display: "minimax"}}, nil
+				return []SlashArgCandidate{{Value: "deepseek", Display: "deepseek"}}, nil
 			default:
 				state, ok := connectModelCommandState(command)
-				if ok && state.Provider == "minimax" && state.TokenRef == "sk-test" {
+				if ok && state.Provider == "deepseek" && state.TokenRef == "sk-test" {
 					return []SlashArgCandidate{
-						{Value: "MiniMax-M2.7", Display: "minimax/MiniMax-M2.7", ModelMetadataComplete: true, ModelImageInputKnown: true},
-						{Value: "MiniMax-M2.7-highspeed", Display: "minimax/MiniMax-M2.7-highspeed", ModelMetadataComplete: true, ModelImageInputKnown: true},
+						{Value: "deepseek-v4-pro", Display: "deepseek/deepseek-v4-pro", ModelMetadataComplete: true, ModelImageInputKnown: true},
+						{Value: "deepseek-flash", Display: "deepseek/deepseek-flash", ModelMetadataComplete: true, ModelImageInputKnown: true},
 					}, nil
 				}
 				return nil, nil
@@ -1401,7 +1314,7 @@ func TestConnectWizardSelectsMultipleMetadataBackedModels(t *testing.T) {
 		t.Fatalf("model candidates = %#v", m.slashArgCandidates)
 	}
 	plain := ansi.Strip(m.renderWizardOverlay())
-	if !strings.Contains(plain, "[ ] minimax/MiniMax-M2.7") || !strings.Contains(plain, "[ ] minimax/MiniMax-M2.7-highspeed") {
+	if !strings.Contains(plain, "[ ] deepseek/deepseek-v4-pro") || !strings.Contains(plain, "[ ] deepseek/deepseek-flash") {
 		t.Fatalf("initial model picker missing unchecked boxes:\n%s", plain)
 	}
 	if handled, cmd := m.handleSlashArgKey(tea.KeyPressMsg(tea.Key{Code: tea.KeySpace})); !handled {
@@ -1409,14 +1322,14 @@ func TestConnectWizardSelectsMultipleMetadataBackedModels(t *testing.T) {
 	} else {
 		runConnectTestCmd(m, cmd)
 	}
-	if got := m.wizard.state["model"]; got != "MiniMax-M2.7" {
+	if got := m.wizard.state["model"]; got != "deepseek-v4-pro" {
 		t.Fatalf("first selected model = %q", got)
 	}
 	if len(m.slashArgCandidates) != 2 {
 		t.Fatalf("model candidates after first toggle = %#v, want checked row retained", m.slashArgCandidates)
 	}
 	plain = ansi.Strip(m.renderWizardOverlay())
-	if !strings.Contains(plain, "[x] minimax/MiniMax-M2.7") {
+	if !strings.Contains(plain, "[x] deepseek/deepseek-v4-pro") {
 		t.Fatalf("model picker missing checked first model:\n%s", plain)
 	}
 	if handled, cmd := m.handleSlashArgKey(tea.KeyPressMsg(tea.Key{Code: tea.KeySpace})); !handled {
@@ -1448,7 +1361,7 @@ func TestConnectWizardSelectsMultipleMetadataBackedModels(t *testing.T) {
 	if got := m.slashArgIndex; got != 1 {
 		t.Fatalf("model checkbox selection after toggle = %d, want second row preserved", got)
 	}
-	if got := m.wizard.state["model"]; got != "MiniMax-M2.7,MiniMax-M2.7-highspeed" {
+	if got := m.wizard.state["model"]; got != "deepseek-v4-pro,deepseek-flash" {
 		t.Fatalf("selected models = %q", got)
 	}
 	plain = ansi.Strip(m.renderWizardOverlay())
@@ -1463,7 +1376,7 @@ func TestConnectWizardSelectsMultipleMetadataBackedModels(t *testing.T) {
 		t.Fatal("expected TaskResultMsg in batch")
 	}
 	want := fmt.Sprintf(
-		"/connect minimax MiniMax-M2.7,MiniMax-M2.7-highspeed - %d sk-test - - auto",
+		"/connect deepseek deepseek-v4-pro,deepseek-flash - %d sk-test - - auto",
 		connectwizard.DefaultConnectTimeoutSeconds,
 	)
 	if called != want {
@@ -1585,11 +1498,11 @@ func TestConnectWizardTypedKnownModelAlsoSkipsAdvancedSteps(t *testing.T) {
 			case "connect":
 				return []SlashArgCandidate{{Value: "api-key", Display: "Use an API key"}}, nil
 			case "connect-provider-api-key":
-				return []SlashArgCandidate{{Value: "minimax", Display: "minimax"}}, nil
+				return []SlashArgCandidate{{Value: "deepseek", Display: "deepseek"}}, nil
 			default:
 				state, ok := connectModelCommandState(command)
-				if ok && state.Provider == "minimax" && state.TokenRef == "sk-test" {
-					return []SlashArgCandidate{{Value: "MiniMax-M2.7-highspeed", Display: "minimax/MiniMax-M2.7-highspeed", ModelMetadataComplete: true, ModelImageInputKnown: true}}, nil
+				if ok && state.Provider == "deepseek" && state.TokenRef == "sk-test" {
+					return []SlashArgCandidate{{Value: "deepseek-flash", Display: "deepseek/deepseek-flash", ModelMetadataComplete: true, ModelImageInputKnown: true}}, nil
 				}
 				return nil, nil
 			}
@@ -1607,7 +1520,7 @@ func TestConnectWizardTypedKnownModelAlsoSkipsAdvancedSteps(t *testing.T) {
 		t.Fatal("apikey step was not handled")
 	}
 	runConnectTestCmd(m, cmd)
-	m.slashArgQuery = "minimax/MiniMax-M2.7-highspeed"
+	m.slashArgQuery = "deepseek/deepseek-flash"
 	handled, cmd = m.handleWizardEnter() // typed display match -> submit
 	if !handled {
 		t.Fatal("typed model step was not handled")
@@ -1620,7 +1533,7 @@ func TestConnectWizardTypedKnownModelAlsoSkipsAdvancedSteps(t *testing.T) {
 		t.Fatal("expected TaskResultMsg in batch")
 	}
 	want := fmt.Sprintf(
-		"/connect minimax MiniMax-M2.7-highspeed - %d sk-test - - auto",
+		"/connect deepseek deepseek-flash - %d sk-test - - auto",
 		connectwizard.DefaultConnectTimeoutSeconds,
 	)
 	if called != want {

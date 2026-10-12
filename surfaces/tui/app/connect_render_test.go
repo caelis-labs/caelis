@@ -28,11 +28,11 @@ func TestRenderSlashArgListUsesWizardHintInsteadOfInternalConnectPayload(t *test
 	}
 	model.slashArgActive = true
 	model.slashArgCommand = "connect-context:" + connectwizard.ConnectWizardState{
-		Provider:       "minimax",
-		BaseURL:        "https://api.minimaxi.com/anthropic",
+		Provider:       "xiaomi",
+		BaseURL:        modelconfig.XiaomiAPIBaseURL,
 		TimeoutSeconds: connectwizard.DefaultConnectTimeoutSeconds,
 		TokenRef:       "sk-secret",
-		Model:          "MiniMax-M2.7-highspeed",
+		Model:          "mimo-v2.6-flash",
 	}.EncodeCompletionState()
 	model.slashArgCandidates = []SlashArgCandidate{{
 		Value:   "204800",

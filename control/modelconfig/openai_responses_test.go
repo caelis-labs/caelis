@@ -174,15 +174,3 @@ func TestOpenAIConnectRoundTripDispatchesResponsesVersusChatCompletions(t *testi
 		})
 	}
 }
-
-func TestSelectableModelsDoNotInheritVendorCatalogForResponsesCompatible(t *testing.T) {
-	t.Parallel()
-
-	models, err := SelectableModels(context.Background(), ConnectRequest{Provider: "openai-responses-compatible", BaseURL: "https://proxy.example/v1"})
-	if err != nil {
-		t.Fatalf("SelectableModels(openai-responses-compatible) error = %v", err)
-	}
-	if selectableModelNamesContain(models, "gpt-4o-mini") || selectableModelNamesContain(models, "gpt-4o") {
-		t.Fatalf("responses compatible models = %#v, want no OpenAI vendor catalog inheritance", models)
-	}
-}

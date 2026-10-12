@@ -24,7 +24,7 @@ func wizardOverlayFixture(t *testing.T) (*Model, *[]Submission) {
 			case command == "connect":
 				candidates = []SlashArgCandidate{{Value: "api-key", Display: "API key"}, {Value: "acp", Display: "Local ACP Agent"}}
 			case command == "connect-provider-api-key":
-				candidates = []SlashArgCandidate{{Value: "custom-responses", Display: "Responses API"}, {Value: "openai", Display: "OpenAI"}, {Value: "xiaomi", Display: "Xiaomi"}}
+				candidates = []SlashArgCandidate{{Value: "custom-responses", Display: "Responses API"}, {Value: "deepseek", Display: "DeepSeek"}, {Value: "xiaomi", Display: "Xiaomi"}}
 			case strings.HasPrefix(command, "connect-baseurl:"):
 				candidates = []SlashArgCandidate{{Value: "https://api.example/v1", Display: "Default endpoint"}, {Value: "https://saved.example/v1", Display: "Saved endpoint", NoAuth: true}}
 			case strings.HasPrefix(command, "connect-model:"):

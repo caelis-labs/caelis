@@ -117,7 +117,7 @@ func TestHeadlessEmbeddedAppServerCoversCreateResumeAndFormats(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = host.Close() })
 	if _, err := gatewayapptest.ConnectModel(context.Background(), host, gatewayapp.ModelConfig{
-		Provider:   "openai-compatible",
+		Provider:   "custom-chat",
 		API:        providers.APIOpenAICompatible,
 		Model:      "headless-test",
 		BaseURL:    provider.URL,

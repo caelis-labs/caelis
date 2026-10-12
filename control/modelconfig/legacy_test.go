@@ -3,6 +3,11 @@ package modelconfig
 import "testing"
 
 func TestRetiredProvidersRejectNewConnections(t *testing.T) {
+	t.Run("ollama-cloud", func(t *testing.T) {
+		if _, err := AssembleConnect(t.Context(), ConnectRequest{Provider: "ollama", BaseURL: "https://ollama.com", APIKey: "fixture", Models: []ModelSelection{{Name: "fixture"}}}, ConnectOptions{}); err == nil {
+			t.Fatal("retired Ollama Cloud endpoint accepted a new connection")
+		}
+	})
 	for _, provider := range []string{"openai", "openai-compatible", "openai-chat-compatible", "openai-responses-compatible", "anthropic", "anthropic-compatible", "gemini", "openrouter", "typesafe", "minimax", "volcengine"} {
 		t.Run(provider, func(t *testing.T) {
 			if _, ok := LookupProvider(provider); ok {

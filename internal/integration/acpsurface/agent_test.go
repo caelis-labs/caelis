@@ -141,7 +141,7 @@ func TestNewFromClientsRunCommandPublishesTerminalBytesOnce(t *testing.T) {
 		WorkspaceKey: workspace, WorkspaceCWD: workspace, ApprovalMode: "manual",
 		SkillDirs: []string{t.TempDir()}, Sandbox: gatewayapp.SandboxConfig{RequestedType: "host"},
 		Model: gatewayapp.ModelConfig{
-			Provider: "openai-compatible", API: providers.APIOpenAICompatible,
+			Provider: "custom-chat", API: providers.APIOpenAICompatible,
 			Model: "run-command-test", BaseURL: provider.URL, HTTPClient: provider.Client(),
 			Token: "run-command-token", AuthType: model.AuthBearerToken, Timeout: 2 * time.Second,
 		},
@@ -296,7 +296,7 @@ func TestNewFromClientsHidesManagedSubagentSessionFromResume(t *testing.T) {
 		SkillDirs:    []string{t.TempDir()},
 		Sandbox:      gatewayapp.SandboxConfig{RequestedType: "host"},
 		Model: gatewayapp.ModelConfig{
-			Provider: "openai-compatible", API: providers.APIOpenAICompatible,
+			Provider: "custom-chat", API: providers.APIOpenAICompatible,
 			Model: "managed-child-test", BaseURL: provider.URL, HTTPClient: provider.Client(),
 			Token: "managed-child-token", AuthType: model.AuthBearerToken, Timeout: 2 * time.Second,
 		},
@@ -411,7 +411,7 @@ func TestNewFromClientsUsesTypedSessionLifecycleAndPrompt(t *testing.T) {
 		SkillDirs:    []string{t.TempDir()},
 		Sandbox:      gatewayapp.SandboxConfig{RequestedType: "host"},
 		Model: gatewayapp.ModelConfig{
-			Provider:   "openai-compatible",
+			Provider:   "custom-chat",
 			API:        providers.APIOpenAICompatible,
 			Model:      "typed-test",
 			BaseURL:    provider.URL,
