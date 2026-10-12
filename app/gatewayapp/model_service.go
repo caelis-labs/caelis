@@ -118,6 +118,7 @@ func (s *runtimeComposition) ListModelChoices(ctx context.Context, ref session.S
 			}
 			choice := modelChoiceFromConfig(cfg)
 			choice.ProfileID = profile.ID
+			choice.DisplayName = profile.DisplayName
 			choice.ReasoningLevels = modelProfileEfforts(profile)
 			choices = append(choices, choice)
 		case modelprofile.BackendACP:
@@ -231,6 +232,11 @@ func (s *runtimeComposition) EffectiveModelAlias() string {
 		}
 	}
 	if profile, ok := s.cachedModelProfile(runtimeProfileID); ok {
+		if profile.Backend.Provider != nil && s.lookup != nil {
+			if cfg, found := s.lookup.Config(profile.Backend.Provider.ModelConfigID); found {
+				return cfg.Alias
+			}
+		}
 		return profile.DisplayName
 	}
 	return s.DefaultModelAlias()

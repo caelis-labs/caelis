@@ -30,6 +30,12 @@ The native presets are `codex`, `grok`, `deepseek` and `xiaomi` (MiMo).
 `custom` offers one protocol choice: Responses, Chat Completions, Anthropic
 Messages or System One. External ACP Agent onboarding remains separate.
 
+The TUI `/connect` menu lists these connections directly. Authentication follows
+the selected connection. Its Magpie model menu includes chat and judgment models;
+model type is confirmed after model selection. Type follows the advertised
+protocol rather than an arbitrary user classification. The existing `judgment`
+Profile field and role eligibility remain the public contract.
+
 `control/modelconfig` owns connection policy, discovery and assembly. The TUI
 and HTTP commands use the same `AssembleConnect` path. Accepted model settings
 become the ordinary provider configuration and ModelProfile catalog; Runtime
@@ -71,12 +77,23 @@ Responses adapter. Preserve the full returned ID, such as `xiaomi/mimo-v2.5` or
 `group/daily`, in the request. Magpie owns upstream providers, credentials and
 routing. Caelis stores its own endpoint/profile identity separately.
 
-Judgment discovery adds `X-Magpie-Deciders: 1` and selects entries marked
-`kind: "decision"`. `/connect`'s judgment source offers Magpie and a custom System
-One endpoint. The command spelling is `magpie-judgment`; HTTP clients may use
+Unified discovery adds `X-Magpie-Deciders: 1`; entries marked `kind: "decision"`
+use System One. One connection may select both chat and judgment models, each
+retaining its protocol-specific endpoint identity. Custom System One endpoints
+remain available through the custom protocol choice.
+
+The judgment command spelling remains `magpie-judgment`; HTTP clients may use
 `provider: "magpie"` with `endpoint_id: "judgment"`. These produce an ordinary
 judgment ModelProfile and use the existing `/v1/systemone` client; they are not
 chat choices in `/model`.
+
+Model labels use the upstream ID, such as `codex/gpt-6-luna`, without a Magpie
+prefix. Selection menus show concise route notes to distinguish direct and
+gateway connections. Labels never replace public selectors, durable model IDs,
+Profile IDs or credential references. Saved connections use the same labels
+without contacting the gateway. The original `connect-model:` completion keeps
+its chat-only menu for existing clients; `connect-models:` is the unified TUI
+menu. Both use the same discovery and assembly owner.
 
 Discovery imports declared context/output limits, image modality and reasoning
 levels. Missing metadata remains unknown and the wizard collects advanced

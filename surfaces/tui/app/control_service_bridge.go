@@ -438,6 +438,14 @@ func ConfigFromControlService(service ControlServices, sender *ProgramSender, ba
 			if err != nil {
 				return nil, err
 			}
+			// TUI owns this fallback for Hosts with only the original source menu;
+			// remove it when those Hosts are no longer supported.
+			if command == "connect-presets" && query == "" && len(candidates) == 0 {
+				candidates, err = service.CompleteSlashArg(contextOrBackground(requestCtx), "connect", query, limit)
+				if err != nil {
+					return nil, err
+				}
+			}
 			out := make([]SlashArgCandidate, len(candidates))
 			for i, c := range candidates {
 				out[i] = SlashArgCandidate{

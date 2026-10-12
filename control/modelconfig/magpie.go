@@ -11,10 +11,10 @@ import (
 
 // Magpie is a connection/discovery preset. Its chat and judgment requests use
 // existing SDK protocols; upstream IDs remain opaque to Caelis.
-func selectableMagpieModels(ctx context.Context, template ProviderTemplate, baseURL string, client *http.Client, token string) ([]SelectableModel, error) {
+func selectableMagpieModels(ctx context.Context, template ProviderTemplate, baseURL string, client *http.Client, token string, includeJudgments bool) ([]SelectableModel, error) {
 	headers := map[string]string{}
-	judgment := template.API == APISystemOne
-	if judgment {
+	judgmentOnly := template.API == APISystemOne
+	if judgmentOnly || includeJudgments {
 		headers["X-Magpie-Deciders"] = "1"
 	}
 	auth := providers.AuthConfig{Type: providers.AuthNone}
@@ -30,7 +30,8 @@ func selectableMagpieModels(ctx context.Context, template ProviderTemplate, base
 		if entry.Kind != "" && entry.Kind != "model" && entry.Kind != "chat" && entry.Kind != "decision" {
 			continue
 		}
-		if (entry.Kind == "decision") != judgment {
+		judgment := entry.Kind == "decision"
+		if judgmentOnly && !judgment || !judgmentOnly && judgment && !includeJudgments {
 			continue
 		}
 		defaults := ModelDefaults{ContextWindowTokens: entry.ContextWindowTokens, ImageInput: entry.ImageInput, ReasoningMode: modelcatalog.ReasoningModeNone}
@@ -54,7 +55,7 @@ func selectableMagpieModels(ctx context.Context, template ProviderTemplate, base
 		} else if len(defaults.ReasoningLevels) > 0 {
 			detail += " · reasoning"
 		}
-		out = append(out, SelectableModel{Name: entry.Name, Detail: detail, MetadataComplete: judgment || entry.ContextWindowTokens > 0 && entry.MaxOutputTokens > 0 && entry.Reasoning != nil, ImageInputKnown: defaults.ImageInput != nil, Defaults: defaults})
+		out = append(out, SelectableModel{Name: entry.Name, Judgment: judgment, Detail: detail, MetadataComplete: judgment || entry.ContextWindowTokens > 0 && entry.MaxOutputTokens > 0 && entry.Reasoning != nil, ImageInputKnown: defaults.ImageInput != nil, Defaults: defaults})
 	}
 	return uniqueSelectableModels(out), nil
 }

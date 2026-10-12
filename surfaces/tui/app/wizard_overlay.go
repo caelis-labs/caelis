@@ -10,6 +10,7 @@ import (
 	"github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/httpclient"
+	"github.com/caelis-labs/caelis/control/modelconfig"
 )
 
 type wizardField struct {
@@ -317,6 +318,9 @@ func (m *Model) wizardAction() string {
 	case m.wizard.def.Command == "plugin":
 		return m.pluginWizardAction()
 	case m.wizardStepKey() == "model" && len(s.fields) == 0:
+		if m.wizard.state["_unified"] == "true" && (m.wizard.state["provider"] == "magpie" || modelconfig.IsJudgmentProvider(m.wizard.state["provider"])) {
+			return "Continue"
+		}
 		count := len(m.wizard.multiSelections["model"])
 		if count > 1 {
 			return fmt.Sprintf("Connect %d models", count)
@@ -327,7 +331,7 @@ func (m *Model) wizardAction() string {
 		if c, ok := m.currentSlashArgCandidate(); ok && c.ModelMetadataComplete && c.ModelImageInputKnown {
 			return "Connect"
 		}
-	case m.wizardStepKey() == "acp_model", m.connectCapabilitiesForm():
+	case m.wizardStepKey() == "acp_model", m.wizardStepKey() == "model_type", m.connectCapabilitiesForm():
 		return "Connect"
 	}
 	return "Continue"

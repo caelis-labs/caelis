@@ -25,7 +25,7 @@ func TestConnectEnterStartsInteractiveWizardAndIgnoresTypedArgs(t *testing.T) {
 		},
 		Wizards: DefaultWizards(),
 		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
-			if command == "connect" {
+			if command == "connect-presets" {
 				return []SlashArgCandidate{{Value: "api-key", Display: "Use an API key"}}, nil
 			}
 			return nil, nil
@@ -43,7 +43,7 @@ func TestConnectEnterStartsInteractiveWizardAndIgnoresTypedArgs(t *testing.T) {
 	if !m.isWizardActive() {
 		t.Fatal("expected connect wizard to start")
 	}
-	if strings.TrimSpace(m.slashArgCommand) != "connect" {
+	if strings.TrimSpace(m.slashArgCommand) != "connect-presets" {
 		t.Fatalf("slashArgCommand = %q, want connect", m.slashArgCommand)
 	}
 	if got := m.textarea.Value(); got != "" {
@@ -64,7 +64,7 @@ func TestConnectEnterSubmitsWhenCommandUnavailable(t *testing.T) {
 		},
 		Wizards: DefaultWizards(),
 		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
-			if command == "connect" {
+			if command == "connect-presets" {
 				return []SlashArgCandidate{{Value: "custom-chat", Display: "custom-chat"}}, nil
 			}
 			return nil, nil
@@ -109,7 +109,7 @@ func TestConnectWizardACPFlowPicksLauncherAndModel(t *testing.T) {
 		},
 		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch {
-			case command == "connect":
+			case command == "connect-presets":
 				return []SlashArgCandidate{{Value: "acp", Display: "Local ACP Agent"}}, nil
 			case command == "connect-acp-agent":
 				return []SlashArgCandidate{{Value: "grok", Display: "Grok Build"}}, nil
@@ -271,7 +271,7 @@ func TestConnectWizardRunsCodexAuthenticationInBackgroundAndShowsBrowserGuidance
 		Wizards:       DefaultWizards(),
 		SlashArgComplete: func(ctx context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch command {
-			case "connect":
+			case "connect-presets":
 				return []SlashArgCandidate{{Value: "account", Display: "Sign in with an account"}}, nil
 			case "connect-provider-account":
 				return []SlashArgCandidate{{Value: "codex", Display: "codex", NoAuth: true}}, nil
@@ -595,7 +595,7 @@ func TestConnectWizardInstalledLauncherDoesNotAskForCommand(t *testing.T) {
 		Wizards: DefaultWizards(),
 		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch command {
-			case "connect":
+			case "connect-presets":
 				return []SlashArgCandidate{{Value: "acp"}}, nil
 			case "connect-acp-agent":
 				return []SlashArgCandidate{{Value: "grok"}}, nil
@@ -628,7 +628,7 @@ func TestConnectWizardOllamaLocalEndpointSkipsAPIKey(t *testing.T) {
 		Wizards: DefaultWizards(),
 		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch command {
-			case "connect":
+			case "connect-presets":
 				return []SlashArgCandidate{{Value: "api-key", Display: "Use an API key"}}, nil
 			case "connect-provider-api-key":
 				return []SlashArgCandidate{{Value: "ollama", Display: "ollama"}}, nil
@@ -679,7 +679,7 @@ func TestConnectWizardOllamaCustomEndpointSkipsAPIKey(t *testing.T) {
 		Wizards: DefaultWizards(),
 		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch command {
-			case "connect":
+			case "connect-presets":
 				return []SlashArgCandidate{{Value: "api-key", Display: "Use an API key"}}, nil
 			case "connect-provider-api-key":
 				return []SlashArgCandidate{{Value: "ollama", Display: "ollama"}}, nil
@@ -720,7 +720,7 @@ func TestConnectWizardKeepsBaseURLStepForCompatibleProviders(t *testing.T) {
 		Wizards: DefaultWizards(),
 		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch command {
-			case "connect":
+			case "connect-presets":
 				return []SlashArgCandidate{{Value: "api-key", Display: "Use an API key"}}, nil
 			case "connect-provider-api-key":
 				return []SlashArgCandidate{{Value: "custom-chat", Display: "custom-chat"}}, nil
@@ -755,7 +755,7 @@ func TestConnectWizardKeepsBaseURLStepForOpenAIProtocolProviders(t *testing.T) {
 				Wizards: DefaultWizards(),
 				SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 					switch command {
-					case "connect":
+					case "connect-presets":
 						return []SlashArgCandidate{{Value: "api-key", Display: "Use an API key"}}, nil
 					case "connect-provider-api-key":
 						return []SlashArgCandidate{{Value: provider, Display: provider}}, nil
@@ -789,7 +789,7 @@ func TestConnectWizardSkipsAPIKeyForReusableBaseURLAuth(t *testing.T) {
 		Wizards: DefaultWizards(),
 		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch command {
-			case "connect":
+			case "connect-presets":
 				return []SlashArgCandidate{{Value: "api-key", Display: "Use an API key"}}, nil
 			case "connect-provider-api-key":
 				return []SlashArgCandidate{{Value: "custom-chat", Display: "custom-chat"}}, nil
@@ -829,7 +829,7 @@ func TestConnectWizardSkipsAPIKeyForReusableDefaultProviderAuth(t *testing.T) {
 		Wizards: DefaultWizards(),
 		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch command {
-			case "connect":
+			case "connect-presets":
 				return []SlashArgCandidate{{Value: "api-key", Display: "Use an API key"}}, nil
 			case "connect-provider-api-key":
 				return []SlashArgCandidate{{Value: "deepseek", Display: "deepseek", Detail: "configured auth", NoAuth: true}}, nil
@@ -863,7 +863,7 @@ func TestConnectWizardTypedXiaomiAdvancesToEndpointStep(t *testing.T) {
 		Wizards: DefaultWizards(),
 		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch command {
-			case "connect":
+			case "connect-presets":
 				return []SlashArgCandidate{{Value: "api-key", Display: "Use an API key"}}, nil
 			case "connect-provider-api-key":
 				return []SlashArgCandidate{{Value: "xiaomi", Display: "xiaomi"}}, nil
@@ -906,7 +906,7 @@ func TestConnectWizardPrefixSelectsXiaomiCandidateAndKeepsModelCandidates(t *tes
 		Wizards: DefaultWizards(),
 		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch command {
-			case "connect":
+			case "connect-presets":
 				return []SlashArgCandidate{{Value: "api-key", Display: "Use an API key"}}, nil
 			case "connect-provider-api-key":
 				return []SlashArgCandidate{{Value: "xiaomi", Display: "xiaomi"}}, nil
@@ -981,7 +981,7 @@ func TestConnectWizardDoesNotAcceptUnknownProviderFreeform(t *testing.T) {
 	m := NewModel(Config{
 		Wizards: DefaultWizards(),
 		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
-			if command == "connect" {
+			if command == "connect-presets" {
 				return []SlashArgCandidate{{Value: "api-key", Display: "Use an API key"}}, nil
 			}
 			if command == "connect-provider-api-key" {
@@ -1027,7 +1027,7 @@ func TestConnectWizardAddsEndpointStepForXiaomiTokenPlan(t *testing.T) {
 		Wizards: DefaultWizards(),
 		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch command {
-			case "connect":
+			case "connect-presets":
 				return []SlashArgCandidate{{Value: "api-key", Display: "Use an API key"}}, nil
 			case "connect-provider-api-key":
 				return []SlashArgCandidate{{Value: "xiaomi", Display: "xiaomi"}}, nil
@@ -1108,7 +1108,7 @@ func TestConnectWizardSkipsAPIKeyForReusableEndpointAuth(t *testing.T) {
 		Wizards: DefaultWizards(),
 		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch command {
-			case "connect":
+			case "connect-presets":
 				return []SlashArgCandidate{{Value: "api-key", Display: "Use an API key"}}, nil
 			case "connect-provider-api-key":
 				return []SlashArgCandidate{{Value: "xiaomi", Display: "xiaomi"}}, nil
@@ -1150,7 +1150,7 @@ func TestConnectWizardSkipsAdvancedStepsForKnownModelCandidate(t *testing.T) {
 		Wizards: DefaultWizards(),
 		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch command {
-			case "connect":
+			case "connect-presets":
 				return []SlashArgCandidate{{Value: "api-key", Display: "Use an API key"}}, nil
 			case "connect-provider-api-key":
 				return []SlashArgCandidate{{Value: "deepseek", Display: "deepseek"}}, nil
@@ -1209,7 +1209,7 @@ func TestConnectWizardAsksImageCapabilityWhenOtherModelMetadataIsKnown(t *testin
 		Wizards: DefaultWizards(),
 		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch {
-			case command == "connect":
+			case command == "connect-presets":
 				return []SlashArgCandidate{{Value: "api-key", Display: "Use an API key"}}, nil
 			case command == "connect-provider-api-key":
 				return []SlashArgCandidate{{Value: "deepseek", Display: "deepseek"}}, nil
@@ -1281,7 +1281,7 @@ func TestConnectWizardSelectsMultipleMetadataBackedModels(t *testing.T) {
 		Wizards: DefaultWizards(),
 		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch command {
-			case "connect":
+			case "connect-presets":
 				return []SlashArgCandidate{{Value: "api-key", Display: "Use an API key"}}, nil
 			case "connect-provider-api-key":
 				return []SlashArgCandidate{{Value: "deepseek", Display: "deepseek"}}, nil
@@ -1395,7 +1395,7 @@ func TestConnectWizardKeepsAdvancedStepsForCustomCompatibleModel(t *testing.T) {
 		Wizards: DefaultWizards(),
 		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch command {
-			case "connect":
+			case "connect-presets":
 				return []SlashArgCandidate{{Value: "api-key", Display: "Use an API key"}}, nil
 			case "connect-provider-api-key":
 				return []SlashArgCandidate{{Value: "custom-chat", Display: "custom-chat"}}, nil
@@ -1495,7 +1495,7 @@ func TestConnectWizardTypedKnownModelAlsoSkipsAdvancedSteps(t *testing.T) {
 		Wizards: DefaultWizards(),
 		SlashArgComplete: func(_ context.Context, command string, _ string, _ int) ([]SlashArgCandidate, error) {
 			switch command {
-			case "connect":
+			case "connect-presets":
 				return []SlashArgCandidate{{Value: "api-key", Display: "Use an API key"}}, nil
 			case "connect-provider-api-key":
 				return []SlashArgCandidate{{Value: "deepseek", Display: "deepseek"}}, nil

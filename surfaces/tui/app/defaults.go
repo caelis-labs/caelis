@@ -99,21 +99,24 @@ func connectWizard() WizardDef {
 		Steps: []WizardStepDef{{
 			Key:               "source",
 			RequireCandidate:  true,
-			CompletionCommand: func(map[string]string) string { return "connect" },
+			CompletionCommand: func(map[string]string) string { return "connect-presets" },
 		}},
-		Branch: func(_ string, value string, _ *SlashArgCandidate, state map[string]string) *WizardDef {
+		Branch: func(_ string, value string, candidate *SlashArgCandidate, state map[string]string) *WizardDef {
 			source := strings.ToLower(strings.TrimSpace(value))
 			state["source"] = source
 			var next WizardDef
 			switch source {
+			// The shared wizard also accepts an older Host's source menu.
 			case "account", "api-key":
 				next = connectModelWizard(source)
 			case "judgment":
-				next = connectJudgmentWizard()
+				next = connectModelWizard(source)
 			case "acp":
 				next = connectACPWizard()
 			default:
-				return nil
+				confirmConnectModelStep("provider", value, candidate, state)
+				state["_unified"] = "true"
+				next = connectModelWizard("")
 			}
 			return &next
 		},
@@ -129,6 +132,7 @@ func connectModelWizard(authSource string) WizardDef {
 				Key:               "provider",
 				RequireCandidate:  true,
 				CompletionCommand: func(map[string]string) string { return providerCommand },
+				ShouldSkip:        func(state map[string]string) bool { return state["provider"] != "" },
 			},
 			{
 				Key: "protocol", RequireCandidate: true,
@@ -155,7 +159,20 @@ func connectModelWizard(authSource string) WizardDef {
 				MultiSelectCandidate: func(candidate SlashArgCandidate) bool {
 					return candidate.ModelMetadataComplete && candidate.ModelImageInputKnown
 				},
-				CompletionCommand: func(state map[string]string) string { return "connect-model:" + buildConnectWizardPayload(state) },
+				CompletionCommand: func(state map[string]string) string {
+					command := "connect-model:"
+					if state["_unified"] == "true" {
+						command = "connect-models:"
+					}
+					return command + buildConnectWizardPayload(state)
+				},
+			},
+			{
+				Key: "model_type", RequireCandidate: true,
+				CompletionCommand: func(state map[string]string) string { return "connect-model-type:" + buildConnectWizardPayload(state) },
+				ShouldSkip: func(state map[string]string) bool {
+					return state["_unified"] != "true" || state["provider"] != "magpie" && !modelconfig.IsJudgmentProvider(state["provider"])
+				},
 			},
 			{
 				Key:              "image_input",
@@ -163,24 +180,32 @@ func connectModelWizard(authSource string) WizardDef {
 				CompletionCommand: func(state map[string]string) string {
 					return "connect-image-input:" + buildConnectWizardPayload(state)
 				},
-				ShouldSkip: func(state map[string]string) bool { return state["_known_image_input"] == "true" },
+				ShouldSkip: func(state map[string]string) bool {
+					return state["_known_image_input"] == "true" || modelconfig.IsJudgmentProvider(state["provider"])
+				},
 			},
 			{
 				Key: "context_window_tokens", Validate: ValidateInt,
 				CompletionCommand: func(state map[string]string) string { return "connect-context:" + buildConnectWizardPayload(state) },
-				ShouldSkip:        func(state map[string]string) bool { return state["_known_model"] == "true" },
+				ShouldSkip: func(state map[string]string) bool {
+					return state["_known_model"] == "true" || modelconfig.IsJudgmentProvider(state["provider"])
+				},
 			},
 			{
 				Key: "max_output_tokens", Validate: ValidateInt,
 				CompletionCommand: func(state map[string]string) string { return "connect-maxout:" + buildConnectWizardPayload(state) },
-				ShouldSkip:        func(state map[string]string) bool { return state["_known_model"] == "true" },
+				ShouldSkip: func(state map[string]string) bool {
+					return state["_known_model"] == "true" || modelconfig.IsJudgmentProvider(state["provider"])
+				},
 			},
 			{
 				Key: "reasoning_levels",
 				CompletionCommand: func(state map[string]string) string {
 					return "connect-reasoning-levels:" + buildConnectWizardPayload(state)
 				},
-				ShouldSkip: func(state map[string]string) bool { return state["_known_model"] == "true" },
+				ShouldSkip: func(state map[string]string) bool {
+					return state["_known_model"] == "true" || modelconfig.IsJudgmentProvider(state["provider"])
+				},
 			},
 		},
 		OnStepConfirm: confirmConnectModelStep,
@@ -287,6 +312,10 @@ func disconnectACPWizard() WizardDef {
 
 func confirmConnectModelStep(stepKey string, value string, candidate *SlashArgCandidate, state map[string]string) {
 	switch stepKey {
+	case "model_type":
+		if value == "judgment" {
+			state["provider"] = modelconfig.JudgmentProvider(state["provider"])
+		}
 	case "provider":
 		state["provider"] = strings.ToLower(strings.TrimSpace(value))
 		delete(state, "_reuseauth")

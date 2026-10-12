@@ -26,7 +26,7 @@ func acpInstallationWizardFixture(t *testing.T) (*Model, *[]agents.ConnectState,
 		},
 		SlashArgComplete: func(_ context.Context, command, query string, _ int) ([]SlashArgCandidate, error) {
 			switch {
-			case command == "connect":
+			case command == "connect-presets":
 				return []SlashArgCandidate{{Value: "acp", Display: "Local ACP Agent"}}, nil
 			case command == "connect-acp-agent":
 				return []SlashArgCandidate{{Value: "antigravity", Display: "Google Antigravity"}}, nil

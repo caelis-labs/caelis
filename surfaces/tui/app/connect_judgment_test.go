@@ -19,7 +19,7 @@ func TestJudgmentWizardRendersMaskedCredentialsAndSubmitsWithoutChatControls(t *
 		SlashArgComplete: func(_ context.Context, command, query string, _ int) ([]SlashArgCandidate, error) {
 			var candidates []SlashArgCandidate
 			switch {
-			case command == "connect":
+			case command == "connect-presets":
 				candidates = []SlashArgCandidate{{Value: "judgment", Display: "Connect a judgment model"}}
 			case command == "connect-provider-judgment":
 				candidates = []SlashArgCandidate{{Value: "custom-judgment", Display: "Custom System One"}}
@@ -68,7 +68,7 @@ func TestCustomJudgmentModelFormCollectsOnlyModelID(t *testing.T) {
 	m.cfg.SlashArgComplete = func(_ context.Context, command, query string, _ int) ([]SlashArgCandidate, error) {
 		var candidates []SlashArgCandidate
 		switch command {
-		case "connect":
+		case "connect-presets":
 			candidates = []SlashArgCandidate{{Value: "judgment", Display: "Connect a judgment model"}}
 		case "connect-provider-judgment":
 			candidates = []SlashArgCandidate{{Value: "custom-judgment", Display: "Custom System One"}}

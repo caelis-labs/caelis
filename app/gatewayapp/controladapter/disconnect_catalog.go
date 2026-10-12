@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/control/modelprofile"
 	"github.com/caelis-labs/caelis/internal/controlprompt"
 )
@@ -19,7 +20,7 @@ func (d *assembler) completeDisconnectProviderModels(ctx context.Context, query 
 	providers := make([]ModelChoice, 0, len(choices))
 	for _, choice := range choices {
 		if choice.Backend != string(modelprofile.BackendACP) {
-			choice.Detail = firstNonEmpty(choice.BaseURL, choice.EndpointID, choice.Provider)
+			choice.Detail = modelconfig.ChoiceDetail(modelChoiceConfig(choice))
 			if choice.Current {
 				choice.Detail = "current · " + choice.Detail
 			}

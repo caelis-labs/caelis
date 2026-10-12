@@ -58,6 +58,9 @@ type ModelSelection struct {
 // provider profile and assemble one or more complete configured models.
 // Surface/protocol request types must be mapped into it.
 type ConnectRequest struct {
+	// IncludeJudgments includes typed evaluators in the gateway discovery menu.
+	// Existing HTTP clients retain their chat-only menu unless explicitly requested.
+	IncludeJudgments               bool
 	Provider                       string
 	EndpointID                     string
 	Models                         []ModelSelection
@@ -104,6 +107,8 @@ type ModelDefaults struct {
 // reports whether the selected source declares image-input support or
 // non-support for this exact model.
 type SelectableModel struct {
+	// Judgment identifies a model whose declared protocol evaluates typed questions.
+	Judgment         bool
 	Name             string
 	Detail           string
 	MetadataComplete bool
@@ -251,13 +256,14 @@ func AssembleConnect(ctx context.Context, req ConnectRequest, opts ConnectOption
 			}
 		}
 		var err error
-		discovered, err = selectableMagpieModels(ctx, template, req.BaseURL, req.HTTPClient, discoveryToken)
+		discovered, err = selectableMagpieModels(ctx, template, req.BaseURL, req.HTTPClient, discoveryToken, template.API != APISystemOne)
 		if err != nil {
 			return nil, err
 		}
 	}
 	out := make([]Config, 0, len(req.Models))
 	for _, selection := range req.Models {
+		modelAPI, modelEndpointID := api, req.EndpointID
 		defaults, err := ResolveModelDefaultsForEndpoint(template.Label, req.BaseURL, selection.Name)
 		if err != nil {
 			return nil, err
@@ -267,6 +273,10 @@ func AssembleConnect(ctx context.Context, req ConnectRequest, opts ConnectOption
 			for _, entry := range discovered {
 				if entry.Name == selection.Name {
 					defaults, found = entry.Defaults, true
+					if entry.Judgment {
+						modelAPI = APISystemOne
+						modelEndpointID = NormalizeEndpointID(template.Provider, "judgment", req.BaseURL, modelAPI)
+					}
 					break
 				}
 			}
@@ -315,8 +325,8 @@ func AssembleConnect(ctx context.Context, req ConnectRequest, opts ConnectOption
 
 		out = append(out, NormalizeConfig(Config{
 			Provider:                template.Provider,
-			EndpointID:              strings.TrimSpace(req.EndpointID),
-			API:                     api,
+			EndpointID:              strings.TrimSpace(modelEndpointID),
+			API:                     modelAPI,
 			Model:                   selection.Name,
 			BaseURL:                 req.BaseURL,
 			HTTPClient:              req.HTTPClient,
@@ -353,7 +363,7 @@ func SelectableModels(ctx context.Context, req ConnectRequest) ([]SelectableMode
 		template, _ = LookupProvider("magpie-judgment")
 	}
 	if template.Provider == "magpie" {
-		return selectableMagpieModels(ctx, template, firstNonEmpty(baseURL, template.DefaultBaseURL), req.HTTPClient, req.APIKey)
+		return selectableMagpieModels(ctx, template, firstNonEmpty(baseURL, template.DefaultBaseURL), req.HTTPClient, req.APIKey, req.IncludeJudgments)
 	}
 	if template.API == model.APIOllama {
 		return selectableOllamaModels(ctx, firstNonEmpty(baseURL, template.DefaultBaseURL), req.HTTPClient)
