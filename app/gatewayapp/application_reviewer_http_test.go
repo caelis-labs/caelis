@@ -109,7 +109,7 @@ func setupReviewerHTTP(t *testing.T, ctx context.Context, root string, provider 
 		}
 		connected, err := host.host.ConnectModel(ctx, appserver.ConnectModelRequest{
 			WriteBase: appserver.WriteBase{OperationID: "connect-" + model, ExpectedRevision: &status.Configuration.Revision},
-			Config:    appserver.ConnectConfig{Provider: "openai-compatible", Model: model, BaseURL: "https://provider.invalid/v1", APIKey: "SYNTHETIC_ONLY"},
+			Config:    appserver.ConnectConfig{Provider: "custom-chat", Model: model, BaseURL: "https://provider.invalid/v1", APIKey: "SYNTHETIC_ONLY"},
 		})
 		if err != nil || connected.Outcome != appserver.OutcomeCommitted {
 			t.Fatalf("connect %s: %+v %v", model, connected, err)
@@ -118,7 +118,7 @@ func setupReviewerHTTP(t *testing.T, ctx context.Context, root string, provider 
 	client, _ := registerApplicationHTTP(t, ctx, host, "reviewed", filepath.Join(root, "application.credential"))
 	profile := applicationHTTPProfile()
 	profile.Permissions.ApprovalMode = "auto-review"
-	profile.Reviewer = &application.Reviewer{Kind: "guardian", Model: "openai-compatible/reviewer-model"}
+	profile.Reviewer = &application.Reviewer{Kind: "guardian", Model: "custom/reviewer-model"}
 	profile.Tools[0].ApprovalPolicy = "required"
 	profile.Tools[0].InputSchema = map[string]any{"type": "object", "properties": map[string]any{
 		"key":   map[string]any{"type": "string"},

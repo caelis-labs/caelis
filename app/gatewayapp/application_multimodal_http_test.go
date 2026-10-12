@@ -95,7 +95,7 @@ func tinyApplicationPNG(t *testing.T) []byte {
 
 func multimodalHTTPProfile(model string) application.Profile {
 	profile := applicationHTTPProfile()
-	profile.Model = "openai-compatible/" + model
+	profile.Model = "custom/" + model
 	profile.Tools[0].ResultFormat = application.ResultFormatContentV1
 	profile.Tools[0].OutputSchema = map[string]any{
 		"type": "object", "properties": map[string]any{"score": map[string]any{"type": "integer"}, "identifier": map[string]any{"type": "integer"}},
@@ -193,7 +193,7 @@ func TestApplicationMultimodalHTTP(t *testing.T) {
 			}
 			connected, err := host.host.ConnectModel(ctx, appserver.ConnectModelRequest{
 				WriteBase: appserver.WriteBase{OperationID: "connect-model", ExpectedRevision: &status.Configuration.Revision},
-				Config: appserver.ConnectConfig{Provider: "openai-compatible", Model: "multimodal-" + tc.name,
+				Config: appserver.ConnectConfig{Provider: "custom-chat", Model: "multimodal-" + tc.name,
 					BaseURL: "https://provider.invalid/v1", APIKey: "SYNTHETIC_ONLY", ImageInput: tc.imageInput},
 			})
 			if err != nil || connected.Outcome != appserver.OutcomeCommitted {

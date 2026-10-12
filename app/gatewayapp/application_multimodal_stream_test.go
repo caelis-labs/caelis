@@ -124,7 +124,7 @@ func TestApplicationLargeImageKeepsNextTurnTransientFeed(t *testing.T) {
 	yes := true
 	connected, err := host.host.ConnectModel(ctx, appserver.ConnectModelRequest{
 		WriteBase: appserver.WriteBase{OperationID: "connect-stream-model", ExpectedRevision: &status.Configuration.Revision},
-		Config: appserver.ConnectConfig{Provider: "openai-compatible", Model: "large-image-stream",
+		Config: appserver.ConnectConfig{Provider: "custom-chat", Model: "large-image-stream",
 			BaseURL: "https://provider.invalid/v1", APIKey: "SYNTHETIC_ONLY", ImageInput: &yes},
 	})
 	if err != nil || connected.Outcome != appserver.OutcomeCommitted {

@@ -25,7 +25,7 @@ func TestApplicationModelCapabilitiesReadCanonicalCatalog(t *testing.T) {
 	no, yes := false, true
 	connected, err := stack.ConfigurationCommands().ConnectModel(ctx, owner, appserver.ConnectModelRequest{
 		WriteBase: appserver.WriteBase{OperationID: "connect-screen", ExpectedRevision: &revision},
-		Config:    appserver.ConnectConfig{Provider: "openai-compatible", Model: "screen-custom", BaseURL: "https://provider.invalid/v1", APIKey: "SYNTHETIC_ONLY", ImageInput: &no},
+		Config:    appserver.ConnectConfig{Provider: "custom-chat", Model: "screen-custom", BaseURL: "https://provider.invalid/v1", APIKey: "SYNTHETIC_ONLY", ImageInput: &no},
 	})
 	if err != nil || connected.Outcome != appserver.OutcomeCommitted {
 		t.Fatal(connected, err)
@@ -35,7 +35,7 @@ func TestApplicationModelCapabilitiesReadCanonicalCatalog(t *testing.T) {
 		t.Fatal(err)
 	}
 	principal := appserver.Principal{ID: owner.ID, ApplicationID: connection.ApplicationID, ConnectionID: connection.ConnectionID}
-	profile := application.Profile{Version: "screen/1", Model: "openai-compatible/screen-custom", Execution: "tools-only", ToolsVersion: "empty/1"}
+	profile := application.Profile{Version: "screen/1", Model: "custom/screen-custom", Execution: "tools-only", ToolsVersion: "empty/1"}
 	created, err := stack.Applications().Create(ctx, principal, appserver.CreateApplicationSessionRequest{WriteBase: appserver.WriteBase{OperationID: "create-screen"}, Profile: profile})
 	if err != nil || created.Outcome != appserver.OutcomeCommitted {
 		t.Fatal(created, err)

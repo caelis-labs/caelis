@@ -55,9 +55,11 @@ func TestReloadedSol61ConfigHydratesOnlyMissingContextWindow(t *testing.T) {
 
 func TestReloadedOpenRouterConfigPreservesSavedWindow(t *testing.T) {
 	for _, tc := range []struct{ saved, want int }{
-		{want: 200000}, {saved: 1000000, want: 1000000}, {saved: 500000, want: 500000},
+		{want: 128000}, {saved: 1000000, want: 1000000}, {saved: 500000, want: 500000},
 	} {
 		cfg := modelconfig.NormalizeConfig(ModelConfig{Provider: "openrouter", Model: "anthropic/claude-sonnet-4", ContextWindowTokens: tc.saved})
+		images := true
+		cfg.ImageInput = &images
 		store := newAppConfigStore(t.TempDir())
 		if err := store.Save(AppConfig{Models: persistedModelConfig{Configs: []ModelConfig{cfg}}}); err != nil {
 			t.Fatal(err)

@@ -35,6 +35,7 @@ type openAIResponsesLLM struct {
 	maxOutputTok          int
 	contextWindowTokens   int
 	imageInput            bool
+	reasoningMode         string
 }
 
 func newOpenAIResponses(cfg Config, token string) *openAIResponsesLLM {
@@ -57,6 +58,7 @@ func newOpenAIResponses(cfg Config, token string) *openAIResponsesLLM {
 		maxOutputTok:          cfg.MaxOutputTok,
 		contextWindowTokens:   cfg.ContextWindowTokens,
 		imageInput:            cfg.ImageInput,
+		reasoningMode:         cfg.ReasoningMode,
 	}
 }
 
@@ -196,7 +198,9 @@ func (l *openAIResponsesLLM) buildRequest(req *model.Request) (openAIResponsesRe
 	if req.DisableTools {
 		payload.ToolChoice = "none"
 	}
-	if effort := strings.TrimSpace(req.Reasoning.Effort); effort != "" {
+	// A no-selector profile's canonical none leaves the endpoint's reasoning
+	// default intact. Effort-based models can still explicitly request none.
+	if effort := strings.TrimSpace(req.Reasoning.Effort); effort != "" && (effort != "none" || l.reasoningMode != "none") {
 		payload.Reasoning = &openAICodexReasoning{Effort: effort}
 		if l.api == APIOpenAI && effort != "none" {
 			payload.Reasoning.Summary = "auto"

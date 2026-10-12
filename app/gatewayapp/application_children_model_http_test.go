@@ -316,7 +316,7 @@ func TestApplicationProfileChildInheritsAutomaticReviewer(t *testing.T) {
 	defer host.close(t)
 	child, _ := applicationProfileChild(t, ctx, client, sid)
 	binding, err := client.ApplicationSession(ctx, child)
-	if err != nil || binding.Profile.Reviewer == nil || binding.Profile.Reviewer.Model != "openai-compatible/reviewer-model" {
+	if err != nil || binding.Profile.Reviewer == nil || binding.Profile.Reviewer.Model != "custom/reviewer-model" {
 		t.Fatalf("reviewer inheritance: %+v %v", binding, err)
 	}
 	call := backgroundCall(t, ctx, client, child)
@@ -453,7 +453,7 @@ func TestApplicationProfileNamedNativeModelKeepsProfileAuthority(t *testing.T) {
 		t.Fatalf("native model override expanded profile: %+v %v", configuration, err)
 	}
 	parent, err := client.ApplicationConfiguration(ctx, sid)
-	if err != nil || parent.Profile.Model != "openai-compatible/gpt-4.1" {
+	if err != nil || parent.Profile.Model != "custom/gpt-4.1" {
 		t.Fatalf("child model rewrote parent: %+v %v", parent, err)
 	}
 	state, err = client.InspectSession(ctx, appserver.StateRequest{SessionID: sid})

@@ -29,7 +29,7 @@ func TestApplicationModelCapabilitiesHTTP(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		result, err := host.host.ConnectModel(ctx, appserver.ConnectModelRequest{WriteBase: appserver.WriteBase{OperationID: "connect-" + m.name, ExpectedRevision: &status.Configuration.Revision}, Config: appserver.ConnectConfig{Provider: "openai-compatible", Model: m.name, BaseURL: "https://provider.invalid/v1", APIKey: "SYNTHETIC_ONLY", ImageInput: m.image}})
+		result, err := host.host.ConnectModel(ctx, appserver.ConnectModelRequest{WriteBase: appserver.WriteBase{OperationID: "connect-" + m.name, ExpectedRevision: &status.Configuration.Revision}, Config: appserver.ConnectConfig{Provider: "custom-chat", Model: m.name, BaseURL: "https://provider.invalid/v1", APIKey: "SYNTHETIC_ONLY", ImageInput: m.image}})
 		if err != nil || result.Outcome != appserver.OutcomeCommitted {
 			t.Fatal(result, err)
 		}
@@ -37,7 +37,7 @@ func TestApplicationModelCapabilitiesHTTP(t *testing.T) {
 	a, _ := registerApplicationHTTP(t, ctx, host, "cap-a", filepath.Join(root, "a.credential"))
 	b, _ := registerApplicationHTTP(t, ctx, host, "cap-b", filepath.Join(root, "b.credential"))
 	profile := applicationHTTPProfile()
-	profile.Model = "openai-compatible/screen-text"
+	profile.Model = "custom/screen-text"
 	created, err := a.CreateApplicationSession(ctx, appserver.CreateApplicationSessionRequest{WriteBase: appserver.WriteBase{OperationID: "create-capabilities"}, Profile: profile})
 	if err != nil {
 		t.Fatal(err)
@@ -53,7 +53,7 @@ func TestApplicationModelCapabilitiesHTTP(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		selected := "openai-compatible/" + name
+		selected := "custom/" + name
 		updated, err := a.UpdateApplicationConfiguration(ctx, created.SessionID, application.UpdateConfigurationRequest{OperationID: "update-" + name + "-" + strconv.FormatUint(configuration.Revision, 10), ExpectedConfigurationRevision: configuration.Revision, Patch: application.ConfigurationPatch{Model: &selected}})
 		if err != nil {
 			t.Fatal(err)

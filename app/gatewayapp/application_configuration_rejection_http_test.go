@@ -26,7 +26,7 @@ func TestApplicationConfigurationHTTPRejectionPreservesIssuedRequest(t *testing.
 		t.Fatal(err)
 	}
 	provider := newRevisionProvider()
-	host := startApplicationHTTPHost(t, filepath.Join(root, "store"), workspace, provider)
+	host := startApplicationHTTPHostWithSavedModels(t, filepath.Join(root, "store"), workspace, provider)
 	defer func() {
 		select {
 		case <-provider.release:
@@ -35,8 +35,6 @@ func TestApplicationConfigurationHTTPRejectionPreservesIssuedRequest(t *testing.
 		}
 		host.close(t)
 	}()
-	connectRevisionHTTPModel(t, ctx, host, "gpt-5.4-mini")
-	connectRevisionHTTPModel(t, ctx, host, "gpt-4.1")
 	credentialPath := filepath.Join(root, "application.credential")
 	client, _ := registerApplicationHTTP(t, ctx, host, "rejection", credentialPath)
 	profile := applicationHTTPProfile()

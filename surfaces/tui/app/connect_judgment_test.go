@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/control/agentbinding"
+	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/control/modelprofile"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -21,7 +22,7 @@ func TestJudgmentWizardRendersMaskedCredentialsAndSubmitsWithoutChatControls(t *
 			case command == "connect":
 				candidates = []SlashArgCandidate{{Value: "judgment", Display: "Connect a judgment model"}}
 			case command == "connect-provider-judgment":
-				candidates = []SlashArgCandidate{{Value: "typesafe", Display: "TypeSafe · Jev"}}
+				candidates = []SlashArgCandidate{{Value: "custom-judgment", Display: "Custom System One"}}
 			case strings.HasPrefix(command, "connect-baseurl:"):
 				candidates = []SlashArgCandidate{{Value: "https://api.typesafe.ai/v1"}}
 			case strings.HasPrefix(command, "connect-model:"):
@@ -34,6 +35,7 @@ func TestJudgmentWizardRendersMaskedCredentialsAndSubmitsWithoutChatControls(t *
 	runConnectTestCmd(m, m.openSlashArgPicker("connect"))
 	connectPress(m, "enter")
 	connectPress(m, "enter")
+	connectPress(m, "tab")
 	connectPaste(m, "fixture-private-key")
 	frame := ansi.Strip(m.renderWizardOverlay())
 	if strings.Contains(frame, "fixture-private-key") || !strings.Contains(frame, "API key") {
@@ -58,6 +60,44 @@ func TestJudgmentWizardRendersMaskedCredentialsAndSubmitsWithoutChatControls(t *
 			t.Fatal(err)
 		}
 	}
+}
+
+func TestCustomJudgmentModelFormCollectsOnlyModelID(t *testing.T) {
+	m, submissions := wizardOverlayFixture(t)
+	m.clearWizard()
+	m.cfg.SlashArgComplete = func(_ context.Context, command, query string, _ int) ([]SlashArgCandidate, error) {
+		var candidates []SlashArgCandidate
+		switch command {
+		case "connect":
+			candidates = []SlashArgCandidate{{Value: "judgment", Display: "Connect a judgment model"}}
+		case "connect-provider-judgment":
+			candidates = []SlashArgCandidate{{Value: "custom-judgment", Display: "Custom System One"}}
+		case "connect-baseurl:custom-judgment":
+			candidates = []SlashArgCandidate{{Value: "https://api.typesafe.ai/v1"}}
+		}
+		return filterSlashArgCandidates(query, candidates), nil
+	}
+	runConnectTestCmd(m, m.openSlashArgPicker("connect"))
+	connectPress(m, "enter")
+	connectPress(m, "enter")
+	connectPress(m, "tab")
+	connectPaste(m, "fixture-key")
+	connectPress(m, "enter")
+	connectPress(m, "ctrl+n")
+	frame := ansi.Strip(m.renderWizardOverlay())
+	if !strings.Contains(frame, "Model ID") || strings.Contains(frame, "Images") || strings.Contains(frame, "Max output") || len(m.wizardOverlay.fields) != 1 {
+		t.Fatalf("judgment form collected chat controls:\n%s", frame)
+	}
+	connectPaste(m, "jev-latest")
+	connectPress(m, "enter")
+	if len(*submissions) != 1 || m.wizardOverlay != nil {
+		t.Fatalf("custom judgment not submitted: %#v", *submissions)
+	}
+	fields := strings.Fields((*submissions)[0].Text)
+	if len(fields) != 9 || !modelconfig.IsJudgmentProvider(fields[1]) || fields[2] != "jev-latest" || fields[6] != "-" || fields[7] != "-" {
+		t.Fatalf("judgment payload = %#v", fields)
+	}
+
 }
 
 func TestTeamOffersJudgmentOnlyForEvaluationScenes(t *testing.T) {

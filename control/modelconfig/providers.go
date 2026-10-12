@@ -96,7 +96,7 @@ func ProviderTemplates() []ProviderTemplate {
 	return out
 }
 
-// LookupProvider resolves a preset, protocol choice or retained input alias.
+// LookupProvider resolves a maintained preset or protocol choice for onboarding.
 func LookupProvider(value string) (ProviderTemplate, bool) {
 	value = strings.ToLower(strings.TrimSpace(value))
 	for _, template := range providerTemplates {
@@ -127,13 +127,6 @@ func LookupProvider(value string) (ProviderTemplate, bool) {
 		template, _ := LookupProvider("custom")
 		template.Label, template.API, template.DefaultEndpointID = value, api, strings.TrimPrefix(value, "custom-")
 		return template, true
-	}
-	// Retained input aliases share the ordinary connection assembler. They are
-	// absent from ProviderTemplates and have no maintained model directory.
-	// Remove with the pre-pinned configuration reader once its upgrade floor moves.
-	if legacy, ok := legacyProviders[value]; ok {
-		legacy.DefaultContextWindowTokens, legacy.DefaultMaxOutputTokens = 128000, 8192
-		return cloneProviderTemplate(legacy), true
 	}
 	return ProviderTemplate{}, false
 }

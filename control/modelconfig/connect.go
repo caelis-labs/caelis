@@ -124,11 +124,6 @@ func ResolveModelDefaultsForEndpoint(provider string, baseURL string, modelName 
 	}
 	catalogProvider := catalogProviderFor(template.Provider)
 	caps, known := modelcatalog.LookupModelCapabilities(catalogProvider, modelName)
-	// Explicit retained input IDs use the frozen upgrade reader, never a second
-	// selectable directory. New native recommendations come only from catalog.json.
-	if !known {
-		caps, known = legacyModelCapabilities(template.Provider, baseURL, modelName)
-	}
 	var imageInput *bool
 	if known {
 		imageInput = boolPointer(caps.SupportsImages)
@@ -187,6 +182,9 @@ func AssembleConnect(ctx context.Context, req ConnectRequest, opts ConnectOption
 	template, ok := LookupProvider(req.Provider)
 	if !ok {
 		return nil, fmt.Errorf("provider %q is not supported", strings.TrimSpace(req.Provider))
+	}
+	if template.Provider == "ollama" && NormalizeBaseURL(req.BaseURL) == "https://ollama.com" {
+		return nil, fmt.Errorf("modelconfig: Ollama Cloud no longer accepts new connections; use Magpie")
 	}
 	if template.Provider == "magpie" && req.EndpointID == "judgment" {
 		template, _ = LookupProvider("magpie-judgment")
@@ -351,11 +349,14 @@ func SelectableModels(ctx context.Context, req ConnectRequest) ([]SelectableMode
 	if !ok {
 		return nil, nil
 	}
+	if template.Provider == "magpie" && req.EndpointID == "judgment" {
+		template, _ = LookupProvider("magpie-judgment")
+	}
 	if template.Provider == "magpie" {
 		return selectableMagpieModels(ctx, template, firstNonEmpty(baseURL, template.DefaultBaseURL), req.HTTPClient, req.APIKey)
 	}
 	if template.API == model.APIOllama {
-		return selectableOllamaModels(ctx, firstNonEmpty(baseURL, template.DefaultBaseURL), nil)
+		return selectableOllamaModels(ctx, firstNonEmpty(baseURL, template.DefaultBaseURL), req.HTTPClient)
 	}
 	if template.API == APISystemOne {
 		return nil, nil

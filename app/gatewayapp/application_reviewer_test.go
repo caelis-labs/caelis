@@ -80,13 +80,13 @@ func TestApplicationReviewerStateUsesCanonicalModelAndSafeErrors(t *testing.T) {
 	}
 	connected, err := stack.ConfigurationCommands().ConnectModel(ctx, owner, appserver.ConnectModelRequest{
 		WriteBase: appserver.WriteBase{OperationID: "connect-review", ExpectedRevision: &revision},
-		Config:    appserver.ConnectConfig{Provider: "openai-compatible", Model: "reviewer-model", BaseURL: "https://provider.invalid/v1", APIKey: "SYNTHETIC_ONLY"},
+		Config:    appserver.ConnectConfig{Provider: "custom-chat", Model: "reviewer-model", BaseURL: "https://provider.invalid/v1", APIKey: "SYNTHETIC_ONLY"},
 	})
 	if err != nil || connected.Outcome != appserver.OutcomeCommitted {
 		t.Fatal(connected, err)
 	}
 	profile := application.Profile{Version: "v1", Model: "main", ToolsVersion: "v1", Execution: "tools-only",
-		Permissions: application.Permissions{ApprovalMode: "auto-review"}, Reviewer: &application.Reviewer{Kind: "guardian", Model: "openai-compatible/reviewer-model"}}
+		Permissions: application.Permissions{ApprovalMode: "auto-review"}, Reviewer: &application.Reviewer{Kind: "guardian", Model: "custom/reviewer-model"}}
 	state, err := stack.composition.applicationReviewerState(ctx, profile)
 	if err != nil || state.Status != "ready" || state.ApprovalMode != "auto-review" {
 		t.Fatal(state, err)

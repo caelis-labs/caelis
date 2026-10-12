@@ -95,7 +95,7 @@ type Choice struct {
 	ContextWindowTokens int
 }
 
-// SpeedModesForConfig returns the maintained non-default request-speed levels
+// SpeedModesForConfig returns the saved or native non-default request-speed levels
 // when the configured model uses an official OpenAI endpoint whose wire
 // protocol supports service tier requests.
 func SpeedModesForConfig(cfg Config) []modelcatalog.SpeedMode {
@@ -166,7 +166,7 @@ func NormalizeConfig(cfg Config) Config {
 		cfg.ID = id
 	}
 	if cfg.API == "" {
-		cfg.API = DefaultAPIForProvider(cfg.Provider)
+		cfg.API = defaultAPIForEndpoint(cfg.Provider, cfg.BaseURL)
 	}
 	if cfg.AuthType == "" {
 		cfg.AuthType = DefaultAuthTypeForEndpoint(cfg.Provider, cfg.BaseURL)
@@ -203,7 +203,7 @@ func NormalizeProviderEndpoint(endpoint ProviderEndpointConfig) ProviderEndpoint
 		endpoint.ID = BuildProviderEndpointID(endpoint.Provider, endpoint.EndpointID, endpoint.BaseURL)
 	}
 	if endpoint.API == "" {
-		endpoint.API = DefaultAPIForProvider(endpoint.Provider)
+		endpoint.API = defaultAPIForEndpoint(endpoint.Provider, endpoint.BaseURL)
 	}
 	if endpoint.AuthType == "" {
 		endpoint.AuthType = DefaultAuthTypeForEndpoint(endpoint.Provider, endpoint.BaseURL)
@@ -352,7 +352,16 @@ func DefaultAPIForProvider(provider string) providers.APIType {
 	if template, ok := LookupProvider(provider); ok {
 		return template.API
 	}
-	return legacyProviders[strings.ToLower(strings.TrimSpace(provider))].API
+	return savedProviderDefaults[strings.ToLower(strings.TrimSpace(provider))].API
+}
+
+func defaultAPIForEndpoint(provider, baseURL string) providers.APIType {
+	if saved, ok := savedProviderDefaults[provider]; ok {
+		if endpoint, found := EndpointForBaseURL(saved, baseURL); found && endpoint.API != "" {
+			return endpoint.API
+		}
+	}
+	return DefaultAPIForProvider(provider)
 }
 
 // SanitizePersistedConfig removes profile-owned and derivable runtime fields.
@@ -406,7 +415,7 @@ func SanitizePersistedProviderEndpoint(endpoint ProviderEndpointConfig) Provider
 func DefaultAuthTypeForProvider(provider string) providers.AuthType {
 	template, ok := LookupProvider(provider)
 	if !ok {
-		if legacy := legacyProviders[strings.ToLower(strings.TrimSpace(provider))]; legacy.AuthType != "" {
+		if legacy := savedProviderDefaults[strings.ToLower(strings.TrimSpace(provider))]; legacy.AuthType != "" {
 			return legacy.AuthType
 		}
 		return providers.AuthAPIKey
@@ -421,10 +430,7 @@ func DefaultAuthTypeForProvider(provider string) providers.AuthType {
 // preserving the provider default for custom or legacy endpoints.
 func DefaultAuthTypeForEndpoint(provider string, baseURL string) providers.AuthType {
 	template, ok := LookupProvider(provider)
-	if !ok {
-		return DefaultAuthTypeForProvider(provider)
-	}
-	if endpoint, found := EndpointForBaseURL(template, baseURL); found {
+	if endpoint, found := EndpointForBaseURL(template, baseURL); ok && found {
 		if endpoint.NoAuthRequired {
 			return providers.AuthNone
 		}
@@ -432,7 +438,7 @@ func DefaultAuthTypeForEndpoint(provider string, baseURL string) providers.AuthT
 			return endpoint.AuthType
 		}
 	}
-	if legacy, ok := legacyProviders[provider]; ok {
+	if legacy, ok := savedProviderDefaults[strings.ToLower(strings.TrimSpace(provider))]; ok {
 		if endpoint, found := EndpointForBaseURL(legacy, baseURL); found && endpoint.AuthType != "" {
 			return endpoint.AuthType
 		}
@@ -489,6 +495,15 @@ func BuildModelID(profileID string, alias string) string {
 func NormalizeEndpointID(provider string, endpointID string, baseURL string, api providers.APIType) string {
 	provider = strings.ToLower(strings.TrimSpace(provider))
 	endpointID = sanitizeConfigIDPart(endpointID)
+	// "judgment" is also the HTTP onboarding protocol selector. Its identity
+	// must agree with magpie-judgment and include a non-default gateway address.
+	if provider == "magpie" && (endpointID == "judgment" || endpointID == "" && api == APISystemOne) {
+		normalizedBaseURL := normalizedConfigBaseURL(baseURL)
+		if normalizedBaseURL == "" || normalizedBaseURL == "http://127.0.0.1:3425/v1" {
+			return "judgment"
+		}
+		return "judgment-" + shortConfigHash(normalizedBaseURL)
+	}
 	if endpointID != "" {
 		return endpointID
 	}
@@ -505,12 +520,6 @@ func NormalizeEndpointID(provider string, endpointID string, baseURL string, api
 		}
 		return protocol + "-" + shortConfigHash(normalizedBaseURL)
 	}
-	if provider == "magpie" && api == APISystemOne {
-		if normalizedBaseURL == "" || normalizedBaseURL == "http://127.0.0.1:3425/v1" {
-			return "judgment"
-		}
-		return "judgment-" + shortConfigHash(normalizedBaseURL)
-	}
 	if provider == "volcengine" && api == providers.APIVolcengineCoding {
 		return "coding-plan"
 	}
@@ -519,7 +528,7 @@ func NormalizeEndpointID(provider string, endpointID string, baseURL string, api
 			return sanitizeConfigIDPart(endpoint.ID)
 		}
 	}
-	if legacy, ok := legacyProviders[provider]; ok {
+	if legacy, ok := savedProviderDefaults[provider]; ok {
 		if endpoint, found := EndpointForBaseURL(legacy, baseURL); found {
 			return sanitizeConfigIDPart(endpoint.ID)
 		}

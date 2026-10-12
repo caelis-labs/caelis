@@ -23,10 +23,10 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// TestWindowsOpenRouterReconnectPreservesCustomReasoningLevels exercises the
+// TestWindowsCustomReconnectPreservesReasoningLevels exercises the
 // real Windows Host, config store, HTTP AppServer, and client path reported in
-// issue #2. The API key is intentionally not validated by /connect.
-func TestWindowsOpenRouterReconnectPreservesCustomReasoningLevels(t *testing.T) {
+// custom reasoning configuration. The API key is intentionally not validated by /connect.
+func TestWindowsCustomReconnectPreservesReasoningLevels(t *testing.T) {
 	testCases := []struct {
 		name              string
 		cancellationPoint string
@@ -98,7 +98,7 @@ func TestWindowsOpenRouterReconnectPreservesCustomReasoningLevels(t *testing.T) 
 			}
 			imageInput := true
 			connectConfig := appserver.ConnectConfig{
-				Provider: "openrouter", Model: "stealth/ox-alpha", APIKey: "intentionally-invalid-key",
+				Provider: "custom-chat", BaseURL: "https://openrouter.ai/api/v1", Model: "stealth/ox-alpha", APIKey: "intentionally-invalid-key",
 				ContextWindowTokens: 1048576, MaxOutputTokens: 131072,
 				ReasoningLevels: append([]string(nil), testCase.reasoningLevels...), ImageInput: &imageInput,
 			}
@@ -106,7 +106,9 @@ func TestWindowsOpenRouterReconnectPreservesCustomReasoningLevels(t *testing.T) 
 				WriteBase: appserver.WriteBase{OperationID: "windows-openrouter-canceled", ExpectedRevision: &initial.ConfigurationRevision},
 				Config:    connectConfig,
 			}
-			credentialRef := credentialstore.BuildReference("openrouter", modelconfig.BuildProviderEndpointID("openrouter", "default", ""))
+			endpointID := modelconfig.NormalizeEndpointID("custom", "", connectConfig.BaseURL, "openai_compatible")
+			providerEndpointID := modelconfig.BuildProviderEndpointID("custom", endpointID, connectConfig.BaseURL)
+			credentialRef := credentialstore.BuildReference("custom", providerEndpointID)
 			switch testCase.cancellationPoint {
 			case "before-request":
 				canceledCtx, cancel := context.WithCancel(context.Background())
@@ -156,7 +158,7 @@ func TestWindowsOpenRouterReconnectPreservesCustomReasoningLevels(t *testing.T) 
 				if endpoint, ok := endpoints[normalized.ProviderEndpointID]; ok {
 					normalized = modelconfig.MergeConfigProviderEndpoint(normalized, endpoint)
 				}
-				if normalized.Provider == "openrouter" && normalized.Model == "stealth/ox-alpha" {
+				if normalized.Provider == "custom" && normalized.Model == "stealth/ox-alpha" {
 					configured = normalized
 					break
 				}
@@ -165,12 +167,12 @@ func TestWindowsOpenRouterReconnectPreservesCustomReasoningLevels(t *testing.T) 
 			if testCase.wantDefaultEffort == "" {
 				defaultMismatch = configured.DefaultReasoningEffort == testCase.rejectedEffort
 			}
-			if configured.ID != "openrouter@default/openrouter/stealth/ox-alpha" ||
-				configured.Alias != "openrouter/stealth/ox-alpha" ||
+			if configured.ID != modelconfig.BuildModelID(providerEndpointID, "custom/stealth/ox-alpha") ||
+				configured.Alias != "custom/stealth/ox-alpha" ||
 				configured.ContextWindowTokens != 1048576 || configured.MaxOutputTok != 131072 ||
 				configured.ImageInput == nil || !*configured.ImageInput || configured.CredentialRef != credentialRef ||
 				!slices.Equal(configured.ReasoningLevels, testCase.reasoningLevels) || defaultMismatch {
-				t.Fatalf("persisted custom OpenRouter model = %#v", configured)
+				t.Fatalf("persisted custom model = %#v", configured)
 			}
 			if source, credentialErr := credentials.LookupSource(context.Background(), credentialRef); credentialErr != nil || source.APIKey != connectConfig.APIKey {
 				t.Fatalf("committed OpenRouter credential = %#v, %v", source, credentialErr)

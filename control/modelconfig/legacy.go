@@ -1,113 +1,92 @@
 package modelconfig
 
 import (
-	"bytes"
-	"compress/gzip"
-	_ "embed"
-	"encoding/json"
-	"io"
 	"strings"
-	"sync"
 
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/control/modelcatalog"
 )
 
-// These frozen records are Control's pre-pinned configuration reader. They
-// cannot populate connection menus. Retained input IDs use these same records
-// through the ordinary assembler, without recreating a selectable directory.
-// Remove them when the minimum supported upgrade source persists explicit API,
-// authentication and model capabilities (the first release shipping this reader).
-//
-//go:embed legacy_capabilities.json.gz
-var legacyCapabilitiesJSON []byte
+// Control reads these protocol/address defaults only for saved configurations.
+// They are not onboarding templates or a model directory. Remove this adapter
+// when the minimum supported configuration persists explicit endpoint protocols,
+// authentication and capabilities. Exact historical model limits are not restored.
+var savedProviderDefaults = map[string]ProviderTemplate{
+	"typesafe":                    {API: APISystemOne, AuthType: model.AuthBearerToken, DefaultBaseURL: "https://api.typesafe.ai/v1"},
+	"openai":                      {API: model.APIOpenAI, AuthType: model.AuthAPIKey, DefaultBaseURL: "https://api.openai.com/v1"},
+	"openai-compatible":           {API: model.APIOpenAICompatible, AuthType: model.AuthAPIKey, DefaultBaseURL: "https://api.openai.com/v1"},
+	"openai-responses-compatible": {API: model.APIOpenAIResponses, AuthType: model.AuthAPIKey, DefaultBaseURL: "https://api.openai.com/v1"},
+	"openrouter":                  {API: model.APIOpenRouter, AuthType: model.AuthAPIKey, DefaultBaseURL: "https://openrouter.ai/api/v1"},
+	"gemini":                      {API: model.APIGemini, AuthType: model.AuthAPIKey, DefaultBaseURL: "https://generativelanguage.googleapis.com/v1beta"},
+	"anthropic":                   {API: model.APIAnthropic, AuthType: model.AuthAPIKey, DefaultBaseURL: "https://api.anthropic.com"},
+	"anthropic-compatible":        {API: model.APIAnthropicCompatible, AuthType: model.AuthAPIKey, DefaultBaseURL: "https://api.anthropic.com"},
+	"minimax":                     {API: model.APIMiniMax, AuthType: model.AuthBearerToken, DefaultBaseURL: "https://api.minimaxi.com/anthropic"},
+	"volcengine": {API: model.APIVolcengine, AuthType: model.AuthAPIKey, DefaultEndpointID: "standard", DefaultBaseURL: "https://ark.cn-beijing.volces.com/api/v3", Endpoints: []EndpointTemplate{
+		{ID: "standard", BaseURL: "https://ark.cn-beijing.volces.com/api/v3", API: model.APIVolcengine},
+		{ID: "coding-plan", BaseURL: "https://ark.cn-beijing.volces.com/api/coding/v3", API: model.APIVolcengineCoding},
+	}},
+	"ollama": {Endpoints: []EndpointTemplate{{ID: "cloud", BaseURL: "https://ollama.com", API: model.APIOllama, AuthType: model.AuthAPIKey}}},
+}
 
-//go:embed legacy_providers.json
-var legacyProvidersJSON []byte
-
-var legacyProviders = func() map[string]ProviderTemplate {
-	var entries map[string]ProviderTemplate
-	if err := json.Unmarshal(legacyProvidersJSON, &entries); err != nil {
-		panic(err)
-	}
-	return entries
-}()
-
-var legacyCapabilities = sync.OnceValue(func() map[string]modelcatalog.ModelCapabilities {
-	r, err := gzip.NewReader(bytes.NewReader(legacyCapabilitiesJSON))
-	if err != nil {
-		panic(err)
-	}
-	defer r.Close()
-	data, err := io.ReadAll(r)
-	if err != nil {
-		panic(err)
-	}
-	var result map[string]modelcatalog.ModelCapabilities
-	if err := json.Unmarshal(data, &result); err != nil {
-		panic(err)
-	}
-
-	return result
-})
-
-// RestoreSavedCapabilities fills only omitted pre-pinned model fields. Callers
-// must hydrate the saved provider endpoint first. IDs and credential references
-// are retained. Maintained native and gateway recommendations do not use this data.
+// RestoreSavedCapabilities fills omitted saved fields with native metadata or
+// lightweight protocol defaults. It preserves explicit capabilities, IDs and
+// credentials; retired providers cannot be used to assemble new connections.
 func RestoreSavedCapabilities(cfg Config) Config {
-	if _, ok := legacyProviders[cfg.Provider]; !ok {
+	api := FirstNonEmptyAPI(cfg.API, DefaultAPIForProvider(cfg.Provider))
+	if api == "" {
 		return cfg
 	}
-	if cfg.ImageInput != nil && cfg.ReasoningMode != "" && cfg.ContextWindowTokens > 0 && ((cfg.Provider != "openai" && cfg.Provider != "openai-codex") || cfg.SpeedModes != nil) {
-		return cfg
-	}
-	caps, ok := legacyModelCapabilities(cfg.Provider, cfg.BaseURL, cfg.Model)
-	if !ok {
-		return cfg
+	caps, known := modelcatalog.LookupModelCapabilities(catalogProviderFor(cfg.Provider), cfg.Model)
+	if cfg.Provider == "openai" {
+		caps, known = modelcatalog.LookupModelCapabilities("openai-codex", cfg.Model)
 	}
 	if cfg.ContextWindowTokens <= 0 {
-		cfg.ContextWindowTokens = caps.ContextWindowTokens
+		cfg.ContextWindowTokens = 128000
+		if template, ok := LookupProvider(cfg.Provider); ok && template.DefaultContextWindowTokens > 0 {
+			cfg.ContextWindowTokens = template.DefaultContextWindowTokens
+		}
+		if known {
+			cfg.ContextWindowTokens = caps.ContextWindowTokens
+		}
 	}
 	// Older writers omitted 4096 because it was the configured default.
 	if cfg.MaxOutputTok <= 0 {
 		cfg.MaxOutputTok = 4096
 	}
 	if cfg.ImageInput == nil {
-		cfg.ImageInput = boolPointer(caps.SupportsImages)
+		if known {
+			cfg.ImageInput = boolPointer(caps.SupportsImages)
+		} else {
+			switch api {
+			case model.APIOpenAI, model.APIOpenAICodex:
+				if strings.HasPrefix(strings.ToLower(cfg.Model), "gpt-") {
+					cfg.ImageInput = boolPointer(true)
+				}
+			case model.APIGemini, model.APIAnthropic, model.APIXAIResponses:
+				cfg.ImageInput = boolPointer(true)
+			}
+		}
 	}
 	if cfg.ReasoningMode == "" {
-		cfg.ReasoningMode = caps.ReasoningMode
-		if cfg.ReasoningLevels == nil {
+		cfg.ReasoningMode = modelcatalog.ReasoningModeNone
+		if len(cfg.ReasoningLevels) > 0 || cfg.ReasoningEffort != "" && cfg.ReasoningEffort != "none" {
+			cfg.ReasoningMode = modelcatalog.ReasoningModeEffort
+		} else if known {
+			cfg.ReasoningMode = caps.ReasoningMode
 			cfg.ReasoningLevels = append([]string(nil), caps.ReasoningEfforts...)
 		}
 	}
 	if cfg.DefaultReasoningEffort == "" && cfg.ReasoningMode != modelcatalog.ReasoningModeNone {
-		cfg.DefaultReasoningEffort = firstNonEmpty(cfg.ReasoningEffort, caps.DefaultReasoningEffort)
-	}
-	if cfg.SpeedModes == nil {
-		cfg.SpeedModes = append([]modelcatalog.SpeedMode(nil), caps.SpeedModes...)
-	}
-	return cfg
-}
-
-func legacyModelCapabilities(provider, baseURL, name string) (modelcatalog.ModelCapabilities, bool) {
-	if _, ok := legacyProviders[provider]; !ok {
-		return modelcatalog.ModelCapabilities{}, false
-	}
-	if provider == "ollama" && NormalizeBaseURL(baseURL) != "https://ollama.com" {
-		return modelcatalog.ModelCapabilities{}, false
-	}
-	if provider == "ollama" && NormalizeBaseURL(baseURL) == "https://ollama.com" {
-		provider = "ollama-cloud"
-	}
-	key := strings.ToLower(provider + ":" + name)
-	var caps modelcatalog.ModelCapabilities
-	best := 0
-	for pattern, entry := range legacyCapabilities() {
-		if strings.HasPrefix(key, pattern) && len(pattern) > best {
-			caps, best = entry, len(pattern)
+		cfg.DefaultReasoningEffort = cfg.ReasoningEffort
+		if cfg.DefaultReasoningEffort == "" && known {
+			cfg.DefaultReasoningEffort = caps.DefaultReasoningEffort
 		}
 	}
-	caps.ReasoningEfforts = append([]string(nil), caps.ReasoningEfforts...)
-	caps.SpeedModes = append([]modelcatalog.SpeedMode(nil), caps.SpeedModes...)
-	return caps, best > 0
+	if cfg.SpeedModes == nil && (api == model.APIOpenAI || api == model.APIOpenAICodex) {
+		cfg.SpeedModes = append([]modelcatalog.SpeedMode(nil), caps.SpeedModes...)
+		if !known && strings.HasPrefix(cfg.Model, "gpt-5.") && !strings.HasSuffix(cfg.Model, "-pro") {
+			cfg.SpeedModes = []modelcatalog.SpeedMode{{Level: "fast", Description: "Faster responses, increased usage"}}
+		}
+	}
+	return cfg
 }

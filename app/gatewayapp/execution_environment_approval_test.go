@@ -40,7 +40,7 @@ func TestApplicationExecutionEnvironmentAfterHostApproval(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = host.host.ConnectModel(ctx, appserver.ConnectModelRequest{WriteBase: appserver.WriteBase{OperationID: "connect", ExpectedRevision: &status.Configuration.Revision}, Config: appserver.ConnectConfig{Provider: "openai-compatible", Model: "gpt-4.1", BaseURL: "https://provider.invalid/v1", APIKey: "SYNTHETIC_ONLY"}})
+	_, err = host.host.ConnectModel(ctx, appserver.ConnectModelRequest{WriteBase: appserver.WriteBase{OperationID: "connect", ExpectedRevision: &status.Configuration.Revision}, Config: appserver.ConnectConfig{Provider: "custom-chat", Model: "gpt-4.1", BaseURL: "https://provider.invalid/v1", APIKey: "SYNTHETIC_ONLY"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +54,7 @@ func TestApplicationExecutionEnvironmentAfterHostApproval(t *testing.T) {
 		delete(environment, "PATH")
 		command = "[IO.File]::WriteAllText('approved-env', ($env:HOME+'|'+(Get-Location).Path+'|'+$env:CONFIG_VALUE))"
 	}
-	profile := application.Profile{Version: "v1", Model: "openai-compatible/gpt-4.1", ToolsVersion: "v1", Execution: "workspace-write", Workspace: application.Workspace{CWD: cwd}, ExecutionConfig: &sandbox.ExecutionConfig{Environment: sandbox.EnvironmentConfig{Inherit: &inherit, Set: environment}}}
+	profile := application.Profile{Version: "v1", Model: "custom/gpt-4.1", ToolsVersion: "v1", Execution: "workspace-write", Workspace: application.Workspace{CWD: cwd}, ExecutionConfig: &sandbox.ExecutionConfig{Environment: sandbox.EnvironmentConfig{Inherit: &inherit, Set: environment}}}
 	created, err := client.CreateApplicationSession(ctx, appserver.CreateApplicationSessionRequest{WriteBase: appserver.WriteBase{OperationID: "create"}, Profile: profile})
 	if err != nil {
 		t.Fatal(err)

@@ -42,7 +42,7 @@ func TestConnectModelPickerTracksHostConfiguration(t *testing.T) {
 	initial, err := clients.Configuration.ConnectModel(ctx, appserver.ConnectModelRequest{
 		WriteBase: appserver.WriteBase{OperationID: "connect-initial", ExpectedRevision: &status.Configuration.Revision},
 		Config: appserver.ConnectConfig{
-			Provider: "openai", Model: "gpt-6-sol", APIKey: "test-provider-key",
+			Provider: "deepseek", Model: "deepseek-flash", APIKey: "test-provider-key",
 		},
 	})
 	if err != nil || initial.Outcome != appserver.OutcomeCommitted {
@@ -50,29 +50,29 @@ func TestConnectModelPickerTracksHostConfiguration(t *testing.T) {
 	}
 	sessionID := createAppServerTestSession(t, clients, "create-connect-picker", "connect-picker", workspace)
 	remote := bindAppServerHTTPTestClient(t, appServer, "local-user")
-	state := connectwizard.ConnectWizardState{Provider: "openai"}
+	state := connectwizard.ConnectWizardState{Provider: "deepseek"}
 	command := "connect-model:" + state.EncodeCompletionState()
-	assertSlashArgCandidate(t, clients.Completion, "", command, "gpt-6-sol", false)
-	assertSlashArgCandidate(t, remote, sessionID, command, "gpt-6-astra", true)
+	assertSlashArgCandidate(t, clients.Completion, "", command, "deepseek-flash", false)
+	assertSlashArgCandidate(t, remote, sessionID, command, "deepseek-v4-pro", true)
 
 	connected, err := clients.Configuration.ConnectModel(ctx, appserver.ConnectModelRequest{
 		WriteBase: appserver.WriteBase{OperationID: "connect-astra", ExpectedRevision: &initial.Revision},
-		Config:    appserver.ConnectConfig{Provider: "openai", Model: "gpt-6-astra"},
+		Config:    appserver.ConnectConfig{Provider: "deepseek", Model: "deepseek-v4-pro"},
 	})
 	if err != nil || connected.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("ConnectModel(astra) = %#v, %v", connected, err)
 	}
-	assertSlashArgCandidate(t, clients.Completion, "", command, "gpt-6-astra", false)
-	assertSlashArgCandidate(t, remote, sessionID, command, "gpt-6-astra", false)
-	assertSlashArgCandidate(t, remote, sessionID, "disconnect-provider", "openai/gpt-6-astra", true)
+	assertSlashArgCandidate(t, clients.Completion, "", command, "deepseek-v4-pro", false)
+	assertSlashArgCandidate(t, remote, sessionID, command, "deepseek-v4-pro", false)
+	assertSlashArgCandidate(t, remote, sessionID, "disconnect-provider", "deepseek/deepseek-v4-pro", true)
 
 	deleted, err := clients.Configuration.DeleteModel(ctx, appserver.DeleteModelRequest{
 		WriteBase: appserver.WriteBase{OperationID: "disconnect-astra", ExpectedRevision: &connected.Revision},
-		Model:     "openai/gpt-6-astra",
+		Model:     "deepseek/deepseek-v4-pro",
 	})
 	if err != nil || deleted.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("DeleteModel(astra) = %#v, %v", deleted, err)
 	}
-	assertSlashArgCandidate(t, remote, sessionID, command, "gpt-6-astra", true)
-	assertSlashArgCandidate(t, remote, sessionID, command, "gpt-6-sol", false)
+	assertSlashArgCandidate(t, remote, sessionID, command, "deepseek-v4-pro", true)
+	assertSlashArgCandidate(t, remote, sessionID, command, "deepseek-flash", false)
 }

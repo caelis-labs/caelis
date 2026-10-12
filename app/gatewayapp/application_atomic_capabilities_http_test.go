@@ -91,7 +91,7 @@ func TestApplicationMCPAlwaysRespectsAuthenticatedConfigurationOwnerHTTP(t *test
 		t.Fatal(err)
 	}
 	if _, err := host.host.ConnectModel(ctx, appserver.ConnectModelRequest{WriteBase: appserver.WriteBase{OperationID: "owner-model", ExpectedRevision: &status.Configuration.Revision}, Config: appserver.ConnectConfig{
-		Provider: "openai-compatible", Model: "gpt-4.1", BaseURL: "https://provider.invalid/v1", APIKey: "SYNTHETIC_ONLY",
+		Provider: "custom-chat", Model: "gpt-4.1", BaseURL: "https://provider.invalid/v1", APIKey: "SYNTHETIC_ONLY",
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -440,7 +440,7 @@ func TestApplicationAtomicSkillFailureIsolationHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := host.host.ConnectModel(ctx, appserver.ConnectModelRequest{WriteBase: appserver.WriteBase{OperationID: "skill-isolation-model", ExpectedRevision: &hostStatus.Configuration.Revision}, Config: appserver.ConnectConfig{
-		Provider: "openai-compatible", Model: "gpt-4.1", BaseURL: "https://provider.invalid/v1", APIKey: "SYNTHETIC_ONLY",
+		Provider: "custom-chat", Model: "gpt-4.1", BaseURL: "https://provider.invalid/v1", APIKey: "SYNTHETIC_ONLY",
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -533,7 +533,7 @@ func TestApplicationAtomicSkillFailureIsolationHTTP(t *testing.T) {
 	}
 	promptAtomicCapabilityClient(t, ctx, client, created.SessionID, "skill-isolation-basic-after-fail", "BASIC")
 	promptAtomicCapabilityClient(t, ctx, client, created.SessionID, "skill-isolation-healthy-after-fail", "HEALTHY_SKILL")
-	worker, err := client.CreateWorker(ctx, appserver.CreateWorkerRequest{WriteBase: appserver.WriteBase{OperationID: "skill-isolation-worker"}, CWD: root, Model: "openai-compatible/gpt-4.1"})
+	worker, err := client.CreateWorker(ctx, appserver.CreateWorkerRequest{WriteBase: appserver.WriteBase{OperationID: "skill-isolation-worker"}, CWD: root, Model: "custom/gpt-4.1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -611,7 +611,7 @@ func startAtomicLifecycleSession(t *testing.T, ctx context.Context, root string,
 		t.Fatal(err)
 	}
 	if _, err := host.host.ConnectModel(ctx, appserver.ConnectModelRequest{WriteBase: appserver.WriteBase{OperationID: "lifecycle-model", ExpectedRevision: &status.Configuration.Revision}, Config: appserver.ConnectConfig{
-		Provider: "openai-compatible", Model: "gpt-4.1", BaseURL: "https://provider.invalid/v1", APIKey: "SYNTHETIC_ONLY",
+		Provider: "custom-chat", Model: "gpt-4.1", BaseURL: "https://provider.invalid/v1", APIKey: "SYNTHETIC_ONLY",
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -653,10 +653,10 @@ func TestApplicationAtomicMCPRevisionLifecycleHTTP(t *testing.T) {
 	}
 	if _, err := host.host.ConnectModel(ctx, appserver.ConnectModelRequest{WriteBase: appserver.WriteBase{
 		OperationID: "lifecycle-second-model", ExpectedRevision: &hostStatus.Configuration.Revision,
-	}, Config: appserver.ConnectConfig{Provider: "openai-compatible", Model: "gpt-4.2", BaseURL: "https://provider.invalid/v1", APIKey: "SYNTHETIC_ONLY"}}); err != nil {
+	}, Config: appserver.ConnectConfig{Provider: "custom-chat", Model: "gpt-4.2", BaseURL: "https://provider.invalid/v1", APIKey: "SYNTHETIC_ONLY"}}); err != nil {
 		t.Fatal(err)
 	}
-	modelName := "openai-compatible/gpt-4.2"
+	modelName := "custom/gpt-4.2"
 	configuration, err = client.UpdateApplicationConfiguration(ctx, session, application.UpdateConfigurationRequest{
 		OperationID: "lifecycle-model-only", ExpectedConfigurationRevision: configuration.Revision,
 		Patch: application.ConfigurationPatch{Model: &modelName},
@@ -922,7 +922,7 @@ func TestApplicationAtomicCapabilitiesHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := host.host.ConnectModel(ctx, appserver.ConnectModelRequest{WriteBase: appserver.WriteBase{OperationID: "atomic-model", ExpectedRevision: &status.Configuration.Revision}, Config: appserver.ConnectConfig{
-		Provider: "openai-compatible", Model: "gpt-4.1", BaseURL: "https://provider.invalid/v1", APIKey: "SYNTHETIC_ONLY",
+		Provider: "custom-chat", Model: "gpt-4.1", BaseURL: "https://provider.invalid/v1", APIKey: "SYNTHETIC_ONLY",
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -1009,7 +1009,7 @@ func TestApplicationAtomicCapabilitiesHTTP(t *testing.T) {
 	if got := atomicAudit(audit); strings.Count(got, "documents:call") != 2 {
 		t.Fatalf("reenabled service call count: %s; requests: %s", got, provider.snapshot())
 	}
-	worker, err := client.CreateWorker(ctx, appserver.CreateWorkerRequest{WriteBase: appserver.WriteBase{OperationID: "atomic-worker"}, CWD: workspace, Model: "openai-compatible/gpt-4.1"})
+	worker, err := client.CreateWorker(ctx, appserver.CreateWorkerRequest{WriteBase: appserver.WriteBase{OperationID: "atomic-worker"}, CWD: workspace, Model: "custom/gpt-4.1"})
 	if err != nil || worker.SessionID == "" {
 		t.Fatalf("create ordinary Worker = %+v, %v", worker, err)
 	}
@@ -1077,7 +1077,7 @@ func TestApplicationFirstToolSearchUsesConsistentActivationModelCatalog(t *testi
 	}
 	connected, err := host.host.ConnectModel(ctx, appserver.ConnectModelRequest{WriteBase: appserver.WriteBase{
 		OperationID: "late-toolsearch-model", ExpectedRevision: &status.Configuration.Revision,
-	}, Config: appserver.ConnectConfig{Provider: "openai-compatible", Model: "gpt-4.2", BaseURL: "https://provider.invalid/v1", APIKey: "SYNTHETIC_ONLY"}})
+	}, Config: appserver.ConnectConfig{Provider: "custom-chat", Model: "gpt-4.2", BaseURL: "https://provider.invalid/v1", APIKey: "SYNTHETIC_ONLY"}})
 	if err != nil || connected.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("connect late model = %+v, %v", connected, err)
 	}
@@ -1151,7 +1151,7 @@ func TestApplicationAtomicMCPFailureIsolationHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := host.host.ConnectModel(ctx, appserver.ConnectModelRequest{WriteBase: appserver.WriteBase{OperationID: "failure-model", ExpectedRevision: &status.Configuration.Revision}, Config: appserver.ConnectConfig{
-		Provider: "openai-compatible", Model: "gpt-4.1", BaseURL: "https://provider.invalid/v1", APIKey: "SYNTHETIC_ONLY",
+		Provider: "custom-chat", Model: "gpt-4.1", BaseURL: "https://provider.invalid/v1", APIKey: "SYNTHETIC_ONLY",
 	}}); err != nil {
 		t.Fatal(err)
 	}

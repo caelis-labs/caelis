@@ -61,3 +61,63 @@ func TestHostMagpieDiscoveryAndConnectShareRetainedCredential(t *testing.T) {
 		t.Fatal("no connected gateway model")
 	}
 }
+
+func TestHostMagpieJudgmentGatewaysKeepSeparateAddressesAndCredentials(t *testing.T) {
+	newGateway := func() *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/v1/models" || r.Header.Get("X-Magpie-Deciders") != "1" || r.Header.Get("Authorization") != "Bearer fixture-key" {
+				http.Error(w, "wrong discovery scope", http.StatusUnauthorized)
+				return
+			}
+			fmt.Fprint(w, `{"data":[{"id":"typesafe/jev-a","kind":"decision"},{"id":"typesafe/jev-b","kind":"decision"}]}`)
+		}))
+	}
+	a, b := newGateway(), newGateway()
+	defer a.Close()
+	defer b.Close()
+	stack := newLocalStateTestHost(t, &runtimeMemoryHostStub{})
+	principal := appserver.Principal{ID: stack.UserID()}
+	revision, err := stack.ControlStatus().ConfigurationRevision(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var first ModelConfig
+	for i, gateway := range []*httptest.Server{a, b} {
+		result, err := stack.ConfigurationCommands().ConnectModel(t.Context(), principal, appserver.ConnectModelRequest{
+			WriteBase: appserver.WriteBase{OperationID: fmt.Sprintf("judgment-gateway-%d", i), ExpectedRevision: &revision},
+			Config:    appserver.ConnectConfig{Provider: "magpie", EndpointID: "judgment", BaseURL: gateway.URL + "/v1", Model: "typesafe/jev-a", APIKey: "fixture-key"},
+		})
+		if err != nil || result.Outcome != appserver.OutcomeCommitted {
+			t.Fatalf("connect gateway %d: %+v %v", i, result, err)
+		}
+		revision = result.Revision
+		id := retainedProviderEndpointID("magpie-judgment", "", gateway.URL+"/v1")
+		cfg, err := stack.composition.lookup.ResolveConfig(modelconfig.BuildModelID(id, "magpie/typesafe/jev-a"))
+		if err != nil || cfg.API != modelconfig.APISystemOne || cfg.BaseURL != gateway.URL+"/v1" {
+			t.Fatalf("resolved gateway %d: %#v %v", i, cfg, err)
+		}
+		if i == 0 {
+			first = cfg
+		} else if cfg.ProviderEndpointID == first.ProviderEndpointID || cfg.CredentialRef == first.CredentialRef {
+			t.Fatal("different gateways shared endpoint or credential identity")
+		}
+	}
+	current, err := stack.composition.lookup.ResolveConfig(first.ID)
+	if err != nil || current.BaseURL != first.BaseURL || current.CredentialRef != first.CredentialRef {
+		t.Fatalf("second gateway rewrote first connection: %#v %v", current, err)
+	}
+	service := ModelService{composition: &stack.composition}
+	for _, provider := range []string{"magpie", "magpie-judgment"} {
+		models, err := service.ConnectionModels(t.Context(), modelconfig.ConnectRequest{Provider: provider, EndpointID: "judgment", BaseURL: a.URL + "/v1"})
+		if err != nil || len(models) != 2 {
+			t.Fatalf("retained judgment discovery via %s: %#v %v", provider, models, err)
+		}
+	}
+	result, err := stack.ConfigurationCommands().ConnectModel(t.Context(), principal, appserver.ConnectModelRequest{
+		WriteBase: appserver.WriteBase{OperationID: "judgment-alias-reuse", ExpectedRevision: &revision},
+		Config:    appserver.ConnectConfig{Provider: "magpie-judgment", BaseURL: a.URL + "/v1", Model: "typesafe/jev-b"},
+	})
+	if err != nil || result.Outcome != appserver.OutcomeCommitted {
+		t.Fatalf("alias did not reuse the same gateway credential: %+v %v", result, err)
+	}
+}

@@ -60,7 +60,7 @@ func TestApplicationMainHTTPSteeringContinuesCurrentTurn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = h.host.ConnectModel(ctx, appserver.ConnectModelRequest{WriteBase: appserver.WriteBase{OperationID: "model", ExpectedRevision: &status.Configuration.Revision}, Config: appserver.ConnectConfig{Provider: "openai-compatible", Model: "gpt-4.1", BaseURL: "https://provider.invalid/v1", APIKey: "SYNTHETIC"}}); err != nil {
+	if _, err = h.host.ConnectModel(ctx, appserver.ConnectModelRequest{WriteBase: appserver.WriteBase{OperationID: "model", ExpectedRevision: &status.Configuration.Revision}, Config: appserver.ConnectConfig{Provider: "custom-chat", Model: "gpt-4.1", BaseURL: "https://provider.invalid/v1", APIKey: "SYNTHETIC"}}); err != nil {
 		t.Fatal(err)
 	}
 	bot, _ := registerApplicationHTTP(t, ctx, h, "main-steering", filepath.Join(root, "bot.token"))
@@ -135,13 +135,13 @@ func TestSharedWorkerHTTPAttachSteerDetachAndReconnect(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = h.host.ConnectModel(ctx, appserver.ConnectModelRequest{WriteBase: appserver.WriteBase{OperationID: "model", ExpectedRevision: &status.Configuration.Revision}, Config: appserver.ConnectConfig{Provider: "openai-compatible", Model: "gpt-4.1", BaseURL: "https://provider.invalid/v1", APIKey: "SYNTHETIC_ONLY"}})
+	_, err = h.host.ConnectModel(ctx, appserver.ConnectModelRequest{WriteBase: appserver.WriteBase{OperationID: "model", ExpectedRevision: &status.Configuration.Revision}, Config: appserver.ConnectConfig{Provider: "custom-chat", Model: "gpt-4.1", BaseURL: "https://provider.invalid/v1", APIKey: "SYNTHETIC_ONLY"}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	bot, _ := registerApplicationHTTP(t, ctx, h, "bot", filepath.Join(root, "bot.token"))
 	other, _ := registerApplicationHTTP(t, ctx, h, "other", filepath.Join(root, "other.token"))
-	req := appserver.CreateWorkerRequest{WriteBase: appserver.WriteBase{OperationID: "create-worker"}, CWD: workspace, Title: "Shared work", Model: "openai-compatible/gpt-4.1"}
+	req := appserver.CreateWorkerRequest{WriteBase: appserver.WriteBase{OperationID: "create-worker"}, CWD: workspace, Title: "Shared work", Model: "custom/gpt-4.1"}
 	created, err := bot.CreateWorker(ctx, req)
 	if err != nil || created.SessionID == "" || created.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("create: %+v %v", created, err)
@@ -341,7 +341,7 @@ func TestSharedWorkerHTTPApprovalCompetition(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = h.host.ConnectModel(ctx, appserver.ConnectModelRequest{WriteBase: appserver.WriteBase{OperationID: "model", ExpectedRevision: &status.Configuration.Revision}, Config: appserver.ConnectConfig{Provider: "openai-compatible", Model: "gpt-4.1", BaseURL: "https://provider.invalid/v1", APIKey: "SYNTHETIC"}}); err != nil {
+	if _, err = h.host.ConnectModel(ctx, appserver.ConnectModelRequest{WriteBase: appserver.WriteBase{OperationID: "model", ExpectedRevision: &status.Configuration.Revision}, Config: appserver.ConnectConfig{Provider: "custom-chat", Model: "gpt-4.1", BaseURL: "https://provider.invalid/v1", APIKey: "SYNTHETIC"}}); err != nil {
 		t.Fatal(err)
 	}
 	bot, _ := registerApplicationHTTP(t, ctx, h, "bot", filepath.Join(root, "bot.token"))

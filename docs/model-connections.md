@@ -81,7 +81,8 @@ chat choices in `/model`.
 Discovery imports declared context/output limits, image modality and reasoning
 levels. Missing metadata remains unknown and the wizard collects advanced
 settings. A reasoning model with no declared effort levels exposes no invented
-selector. Output defaults use a conservative budget bounded by the declared
+selector and leaves the gateway's reasoning default unchanged. Output defaults
+use a conservative budget bounded by the declared
 maximum. Chat and judgment endpoints have separate protocol identities.
 
 ### Custom and retained configuration
@@ -92,14 +93,16 @@ so the same model ID on two endpoints or protocols remains two distinct profiles
 The endpoint stores its explicit protocol and authentication; model records
 store accepted capabilities. Credentials remain in the existing credential store.
 
-Control retains frozen pre-pinned provider defaults and capability data only
-for old configuration loading and input aliases. They never populate connection
-menus or recommendations, and have no refresh/generation workflow. Loading fills
-omitted fields without changing IDs, credential references or bindings; the next
-ordinary configuration save persists them. Remove this reader and its aliases
-when the minimum supported upgrade source is a release that persists these
-explicit endpoint and capability fields. Existing SDK wire adapters remain usable
-by retained configurations and independent SDK consumers.
+Retired providers remain usable and removable through `/disconnect` and the Host
+delete command, but cannot create new connections. Control reads their saved
+protocol, address, credentials and model settings using a small configuration
+adapter. Omitted fields use protocol defaults or current native metadata; exact
+historical model limits and recommendations are not maintained. Gemini's native
+protocol retains image input without depending on a vendor namespace lookup.
+Loading preserves IDs, credential references and bindings; the next ordinary
+save persists the resolved fields. Remove this adapter when the minimum supported
+upgrade source persists explicit endpoint and capability fields. SDK wire
+adapters remain usable by saved configurations and independent SDK consumers.
 
 ## Interactive provider authentication
 

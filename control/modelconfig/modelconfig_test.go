@@ -386,34 +386,17 @@ func TestResolveCodexOAuthModelDefaultsUseSubscriptionCatalog(t *testing.T) {
 	}
 }
 
-func TestCodexOAuthLegacyModelsRetainSubscriptionDefaults(t *testing.T) {
+func TestSavedCodexModelPreservesExplicitSettings(t *testing.T) {
 	t.Parallel()
-
-	for _, tt := range []struct {
-		name    string
-		context int
-		effort  string
-		levels  []string
-	}{
-		{"gpt-5.6-sol", 258400, "low", []string{"low", "medium", "high", "xhigh", "max", "ultra"}},
-		{"gpt-5.6-terra", 258400, "medium", []string{"low", "medium", "high", "xhigh", "max", "ultra"}},
-		{"gpt-5.6-luna", 258400, "medium", []string{"low", "medium", "high", "xhigh", "max"}},
-		{"gpt-5.5", 272000, "medium", []string{"low", "medium", "high", "xhigh"}},
-		{"gpt-5.4", 272000, "medium", []string{"low", "medium", "high", "xhigh"}},
-		{"gpt-5.4-mini", 272000, "medium", []string{"low", "medium", "high", "xhigh"}},
-		{"gpt-5.3-codex-spark", 128000, "high", []string{"low", "medium", "high", "xhigh"}},
-		{"gpt-5.2", 272000, "medium", []string{"low", "medium", "high", "xhigh"}},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			cfg := RestoreSavedCapabilities(Config{Provider: "openai-codex", Model: tt.name, MaxOutputTok: 32768})
-			if cfg.ContextWindowTokens != tt.context || cfg.MaxOutputTok != 32768 || cfg.DefaultReasoningEffort != tt.effort || cfg.ReasoningMode != modelcatalog.ReasoningModeEffort || !slices.Equal(cfg.ReasoningLevels, tt.levels) || cfg.ImageInput == nil || !*cfg.ImageInput {
-				t.Fatalf("legacy config = %#v", cfg)
-			}
-
-			if slices.Contains(modelcatalog.ListRecommendedModels("openai-codex"), tt.name) {
-				t.Fatalf("legacy Codex model %q must not be recommended", tt.name)
-			}
-		})
+	cfg := RestoreSavedCapabilities(Config{
+		Provider: "openai-codex", Model: "gpt-5.6-sol", ContextWindowTokens: 258400,
+		MaxOutputTok: 32768, ReasoningEffort: "low", ReasoningLevels: []string{"low", "high"},
+	})
+	if cfg.ContextWindowTokens != 258400 || cfg.MaxOutputTok != 32768 || cfg.DefaultReasoningEffort != "low" || cfg.ReasoningMode != modelcatalog.ReasoningModeEffort || !slices.Equal(cfg.ReasoningLevels, []string{"low", "high"}) || cfg.ImageInput == nil || !*cfg.ImageInput {
+		t.Fatalf("saved config = %#v", cfg)
+	}
+	if slices.Contains(modelcatalog.ListRecommendedModels("openai-codex"), cfg.Model) {
+		t.Fatal("saved model appeared in the native directory")
 	}
 }
 
@@ -699,7 +682,6 @@ func TestSpeedModesForConfig(t *testing.T) {
 		{name: "astra has model-specific hint", cfg: Config{Provider: "openai-codex", API: model.APIOpenAICodex, Model: "gpt-6-astra"}, want: true, wantHint: "2x faster, more usage"},
 		{name: "normalizes official openai gpt identity", cfg: Config{Provider: " OpenAI ", Model: "GPT-6-SOL", BaseURL: "https://api.openai.com/v1/"}, want: true, wantHint: "1.5x faster, more usage"},
 		{name: "rejects unknown gpt model", cfg: Config{Provider: "openai", API: model.APIOpenAI, Model: "gpt-unknown"}},
-		{name: "rejects unsupported catalog variant", cfg: Config{Provider: "openai", API: model.APIOpenAI, Model: "gpt-5.5-pro"}},
 		{name: "rejects custom openai endpoint", cfg: Config{Provider: "openai", API: model.APIOpenAI, Model: "gpt-6-sol", BaseURL: "https://proxy.example/v1"}},
 		{name: "rejects custom openai-codex endpoint", cfg: Config{Provider: "openai-codex", API: model.APIOpenAICodex, Model: "gpt-6-sol", BaseURL: "https://proxy.example/codex"}},
 		{name: "rejects non-gpt openai model", cfg: Config{Provider: "openai", API: model.APIOpenAI, Model: "o3"}},
