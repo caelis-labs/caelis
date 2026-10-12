@@ -78,7 +78,7 @@ var providerTemplates = []ProviderTemplate{
 		{ID: "api-cn", BaseURL: XiaomiAPIBaseURL, Display: "api cn", Detail: "MiMo API", API: model.APIMimo},
 		{ID: "token-plan-cn", BaseURL: XiaomiTokenPlanCNBaseURL, Display: "token plan cn", Detail: "MiMo Token Plan", API: model.APIMimo},
 	}},
-	{Label: "magpie", Provider: "magpie", API: model.APIOpenAIResponses, AuthType: model.AuthAPIKey, Description: "Local gateway · chat and judgment models", DefaultEndpointID: "local", DefaultBaseURL: "http://127.0.0.1:3425/v1", DefaultContextWindowTokens: 128000, Endpoints: []EndpointTemplate{
+	{Label: "magpie", Provider: "magpie", API: model.APIOpenAIResponses, AuthType: model.AuthAPIKey, Description: "Local gateway", DefaultEndpointID: "local", DefaultBaseURL: "http://127.0.0.1:3425/v1", DefaultContextWindowTokens: 128000, Endpoints: []EndpointTemplate{
 		{ID: "local", BaseURL: "http://127.0.0.1:3425/v1", Display: "local", Detail: "Running Magpie gateway", API: model.APIOpenAIResponses, AuthType: model.AuthNone, NoAuthRequired: true},
 	}},
 	{Label: "ollama", Provider: "ollama", API: model.APIOllama, AuthType: model.AuthNone, Description: "Local Ollama models", DefaultEndpointID: "local", DefaultBaseURL: "http://localhost:11434", DefaultContextWindowTokens: 128000, Endpoints: []EndpointTemplate{

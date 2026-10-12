@@ -190,7 +190,7 @@ func Normalize(doc AppConfig) AppConfig {
 	doc.Models.ProviderEndpoints = dedupeProviderEndpointsForSave(doc.Models.ProviderEndpoints)
 	doc.ExternalAgents = controlagents.NormalizeConfiguration(doc.ExternalAgents)
 	doc.ModelProfiles = modelprofile.NormalizeConfiguration(doc.ModelProfiles)
-	refreshProviderSpeeds(&doc)
+	refreshProviderProfiles(&doc)
 	doc.AgentBindings = agentbinding.NormalizeConfiguration(doc.AgentBindings)
 	doc.Sandbox = NormalizeSandboxConfig(doc.Sandbox)
 	doc.Runtime = NormalizeRuntimeConfig(doc.Runtime)

@@ -27,6 +27,10 @@ type connectWizardPayload = connectwizard.ConnectWizardState
 
 func completeConnectArgs(ctx context.Context, driver *assembler, command string, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
 	switch {
+	case command == "connect-presets":
+		candidates := completeConnectProviders(ctx, driver, "", "", 0)
+		candidates = append(candidates, controlprompt.SlashArgCandidate{Value: "acp", Display: "Local ACP Agent", Detail: "Codex CLI, Gemini CLI"})
+		return filterSlashArgCandidates(candidates, query, limit), nil
 	case command == "connect":
 		return completeConnectSources(query, limit), nil
 	case command == "connect-provider-account":
@@ -61,7 +65,11 @@ func completeConnectArgs(ctx context.Context, driver *assembler, command string,
 	case strings.HasPrefix(command, "connect-apikey:"):
 		return nil, nil
 	case strings.HasPrefix(command, "connect-model:"):
-		return completeConnectModels(ctx, driver, connectwizard.ParseConnectWizardStatePayload(strings.TrimPrefix(command, "connect-model:")), query, limit)
+		return completeConnectModels(ctx, driver, connectwizard.ParseConnectWizardStatePayload(strings.TrimPrefix(command, "connect-model:")), query, limit, false)
+	case strings.HasPrefix(command, "connect-models:"):
+		return completeConnectModels(ctx, driver, connectwizard.ParseConnectWizardStatePayload(strings.TrimPrefix(command, "connect-models:")), query, limit, true)
+	case strings.HasPrefix(command, "connect-model-type:"):
+		return completeConnectModelType(ctx, driver, connectwizard.ParseConnectWizardStatePayload(strings.TrimPrefix(command, "connect-model-type:")), query, limit)
 	case strings.HasPrefix(command, "connect-image-input:"):
 		return completeConnectImageInput(query, limit), nil
 	case strings.HasPrefix(command, "connect-context:"):
@@ -76,6 +84,8 @@ func completeConnectArgs(ctx context.Context, driver *assembler, command string,
 }
 
 func completeConnectSources(query string, limit int) []controlprompt.SlashArgCandidate {
+	// Control retains the original menu for existing settings clients and older
+	// TUI fallback. Remove it when the minimum client uses connect-presets.
 	candidates := []controlprompt.SlashArgCandidate{
 		{Value: "account", Display: "Sign in with an account", Detail: "ChatGPT, Grok · account sign-in (OAuth)"},
 		{Value: "api-key", Display: "Use an API key", Detail: "DeepSeek, MiMo, Magpie, Ollama · API or local gateway"},
@@ -208,7 +218,7 @@ func completeConnectProviders(ctx context.Context, driver *assembler, authSource
 			Detail:  detail,
 			NoAuth:  template.NoAuthRequired || template.AuthFlow != "" || reusableAuth,
 		})
-		if len(out) >= limit {
+		if limit > 0 && len(out) >= limit {
 			break
 		}
 	}
@@ -249,12 +259,12 @@ func connectEndpointCandidates(template modelconfig.ProviderTemplate) []controlp
 	return out
 }
 
-func completeConnectModels(ctx context.Context, driver *assembler, payload connectWizardPayload, query string, limit int) ([]controlprompt.SlashArgCandidate, error) {
+func completeConnectModels(ctx context.Context, driver *assembler, payload connectWizardPayload, query string, limit int, includeJudgments bool) ([]controlprompt.SlashArgCandidate, error) {
 	template, ok := modelconfig.LookupProvider(payload.Provider)
 	if !ok {
 		return nil, nil
 	}
-	models, err := connectModelCatalog(ctx, driver, payload)
+	models, err := connectModelCatalog(ctx, driver, payload, includeJudgments)
 	if err != nil {
 		return nil, err
 	}
@@ -266,14 +276,19 @@ func completeConnectModels(ctx context.Context, driver *assembler, payload conne
 		if err != nil {
 			return nil, err
 		}
-		endpointID := modelconfig.NormalizeEndpointID(template.Provider, "", firstNonEmpty(payload.BaseURL, template.DefaultBaseURL), template.API)
 		for _, choice := range configured {
 			if choice.Backend == string(modelprofile.BackendACP) ||
-				!strings.EqualFold(strings.TrimSpace(choice.Provider), template.Provider) ||
-				modelconfig.NormalizeEndpointID(choice.Provider, choice.EndpointID, choice.BaseURL, "") != endpointID {
+				!strings.EqualFold(strings.TrimSpace(choice.Provider), template.Provider) {
 				continue
 			}
-			connected[strings.ToLower(strings.TrimSpace(choice.Model))] = true
+			api := template.API
+			if includeJudgments && choice.Judgment {
+				api = modelconfig.APISystemOne
+			}
+			endpointID := modelconfig.NormalizeEndpointID(template.Provider, "", firstNonEmpty(payload.BaseURL, template.DefaultBaseURL), api)
+			if modelconfig.NormalizeEndpointID(choice.Provider, choice.EndpointID, choice.BaseURL, "") == endpointID {
+				connected[strings.ToLower(strings.TrimSpace(choice.Model))] = true
+			}
 		}
 	}
 	choices := buildConnectModelChoices(template.Provider, models)
@@ -411,7 +426,7 @@ func buildConnectModelChoices(provider string, fallbackModels []modelconfig.Sele
 func connectDisplayModelRef(provider, modelName string) string {
 	provider = strings.TrimSpace(provider)
 	modelName = strings.TrimSpace(modelName)
-	if provider == "" {
+	if provider == "" || provider == "magpie" {
 		return modelName
 	}
 	if modelName == "" {
@@ -435,15 +450,15 @@ func compactNonEmpty(values []string) []string {
 	return out
 }
 
-func connectModelCatalog(ctx context.Context, driver *assembler, payload connectWizardPayload) ([]modelconfig.SelectableModel, error) {
-	req := modelconfig.ConnectRequest{Provider: payload.Provider, BaseURL: payload.BaseURL, APIKey: payload.TokenRef}
+func connectModelCatalog(ctx context.Context, driver *assembler, payload connectWizardPayload, includeJudgments bool) ([]modelconfig.SelectableModel, error) {
+	req := modelconfig.ConnectRequest{Provider: payload.Provider, BaseURL: payload.BaseURL, APIKey: payload.TokenRef, IncludeJudgments: includeJudgments}
 	if driver != nil && driver.deps != nil && driver.deps.Model.ConnectionModelsFn != nil {
 		return driver.deps.Model.ConnectionModelsFn(ctx, req)
 	}
 	return modelconfig.SelectableModels(ctx, req)
 }
 func connectModelDefaults(ctx context.Context, driver *assembler, payload connectWizardPayload) (modelconfig.ModelDefaults, error) {
-	models, err := connectModelCatalog(ctx, driver, payload)
+	models, err := connectModelCatalog(ctx, driver, payload, false)
 	if err != nil {
 		return modelconfig.ModelDefaults{}, err
 	}

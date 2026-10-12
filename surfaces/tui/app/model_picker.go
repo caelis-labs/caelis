@@ -147,8 +147,8 @@ func (m *Model) renderModelPicker(geometry completionOverlayGeometry, candidates
 			marker += "● "
 		}
 		identity := firstNonEmpty(candidate.Display, candidate.Value)
-		if hint := slashArgPickerHint("model", candidates, i); hint != "" {
-			identity += " (" + hint + ")"
+		if note := firstNonEmpty(candidate.Detail, slashArgPickerHint("model", candidates, i)); note != "" {
+			identity += "  " + m.theme.HelpHintTextStyle().Bold(false).Render(note)
 		}
 		rows = append(rows, completionTableRow{
 			identity: marker + identity,
@@ -168,7 +168,10 @@ func (m *Model) renderModelPicker(geometry completionOverlayGeometry, candidates
 		detail = "No matching models. Edit the search or Esc to cancel."
 	} else if geometry.selected < len(candidates) {
 		candidate := candidates[geometry.selected]
-		detail = candidate.Value
+		detail = firstNonEmpty(candidate.Display, candidate.Value)
+		if candidate.Detail != "" {
+			detail += "  ·  " + candidate.Detail
+		}
 		if selection := candidate.ModelSelection; selection != nil {
 			if selection.Current {
 				detail += "  ·  current"

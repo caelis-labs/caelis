@@ -432,6 +432,7 @@ func modelChoiceConfig(choice ModelChoice) modelconfig.Config {
 		ID: firstNonEmpty(choice.ID, choice.Alias), Alias: choice.Alias,
 		Provider: choice.Provider, Model: choice.Model,
 		ProviderEndpointID: choice.ProviderEndpointID,
+		EndpointID:         choice.EndpointID, BaseURL: choice.BaseURL,
 	}
 }
 
@@ -451,7 +452,7 @@ func modelChoiceCandidates(choices []ModelChoice, query string, limit int) ([]co
 	for _, choice := range choices {
 		cfg := modelChoiceConfig(choice)
 		value := modelconfig.PublicSelector(cfg)
-		display := strings.TrimSpace(firstNonEmpty(choice.Alias, choice.ID))
+		display := strings.TrimSpace(firstNonEmpty(choice.DisplayName, modelconfig.DisplayName(cfg), choice.Alias, choice.ID))
 		if display == "" {
 			continue
 		}

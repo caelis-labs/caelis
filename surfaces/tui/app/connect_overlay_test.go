@@ -21,7 +21,7 @@ func wizardOverlayFixture(t *testing.T) (*Model, *[]Submission) {
 		SlashArgComplete: func(_ context.Context, command, query string, _ int) ([]SlashArgCandidate, error) {
 			var candidates []SlashArgCandidate
 			switch {
-			case command == "connect":
+			case command == "connect-presets":
 				candidates = []SlashArgCandidate{{Value: "api-key", Display: "API key"}, {Value: "acp", Display: "Local ACP Agent"}}
 			case command == "connect-provider-api-key":
 				candidates = []SlashArgCandidate{{Value: "custom-responses", Display: "Responses API"}, {Value: "deepseek", Display: "DeepSeek"}, {Value: "xiaomi", Display: "Xiaomi"}}

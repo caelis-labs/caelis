@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	"github.com/caelis-labs/caelis/control/modelconfig"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
 	"github.com/caelis-labs/caelis/control/workspacetrust"
 )
@@ -283,6 +284,11 @@ func (d *assembler) status(ctx context.Context, includeDiagnostics bool) (contro
 	}
 	if err := ctx.Err(); err != nil {
 		return controlstatus.StatusSnapshot{}, err
+	}
+	if !activeACP && d.deps != nil && d.deps.Model.ConfigFn != nil {
+		if cfg, found := d.deps.Model.ConfigFn(rawModelText); found {
+			status.ModelStatus.Display = formatReasoningModelDisplay(modelconfig.DisplayName(cfg), status.ModelStatus.ReasoningEffort)
+		}
 	}
 	return status, nil
 }

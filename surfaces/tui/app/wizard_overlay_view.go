@@ -232,6 +232,8 @@ func (m *Model) wizardTitle() string {
 		return "Install runtime"
 	case "model", "acp_model":
 		return "Models"
+	case "model_type":
+		return "Model type"
 	}
 	return "Connection"
 }
@@ -338,6 +340,9 @@ func (m *Model) wizardBodyLines(width, offset, budget int) ([]string, []int) {
 			}
 			if m.wizard.def.Command == "disconnect" {
 				detail = ""
+				if m.wizardStepKey() == "provider_model" && slashArgIdentityDuplicated(label, candidates) {
+					detail = candidate.Detail
+				}
 			}
 			if m.wizardStepKey() == "source" {
 				detail = ""

@@ -6,10 +6,10 @@ import (
 	"github.com/caelis-labs/caelis/control/modelprofile/builder"
 )
 
-// refreshProviderSpeeds derives provider capabilities from the current endpoint
-// and catalog. ACP capabilities remain peer-discovered snapshots and are checked
+// refreshProviderProfiles derives provider labels and speed capabilities from
+// the current endpoint and catalog. ACP capabilities remain peer-discovered snapshots and are checked
 // again by session configuration before execution.
-func refreshProviderSpeeds(doc *AppConfig) {
+func refreshProviderProfiles(doc *AppConfig) {
 	for index, profile := range doc.ModelProfiles.Profiles {
 		if profile.Kind() != modelprofile.BackendProvider {
 			continue
@@ -27,6 +27,7 @@ func refreshProviderSpeeds(doc *AppConfig) {
 			fresh, err := builder.FromProvider(configured)
 			if err == nil {
 				doc.ModelProfiles.Profiles[index].Speed = fresh.Speed
+				doc.ModelProfiles.Profiles[index].DisplayName = fresh.DisplayName
 			}
 			break
 		}

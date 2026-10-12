@@ -521,7 +521,7 @@ func subagentProviderSource(profile modelprofile.ModelProfile) string {
 		return ""
 	}
 	source, _, _ := strings.Cut(strings.TrimSpace(profile.Backend.Provider.ModelConfigID), "/")
-	return source
+	return strings.TrimSuffix(strings.TrimSuffix(source, "@default"), "@local")
 }
 
 func subagentBindingDisplay(binding agentbinding.Binding, profiles []modelprofile.ModelProfile) string {

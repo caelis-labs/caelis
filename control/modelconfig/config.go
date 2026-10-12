@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -77,6 +78,7 @@ type Choice struct {
 	Judgment           bool
 	ID                 string
 	Alias              string
+	DisplayName        string
 	ProfileID          string
 	Backend            string
 	Provider           string
@@ -452,7 +454,8 @@ func EndpointUsesNoAuth(provider string, baseURL string) bool {
 	return DefaultAuthTypeForEndpoint(provider, baseURL) == providers.AuthNone
 }
 
-// BuildAlias returns the visible provider/model alias.
+// BuildAlias returns the provider/model alias retained for configuration and
+// command compatibility. DisplayName projects the model label separately.
 func BuildAlias(provider string, modelName string) string {
 	provider = strings.ToLower(strings.TrimSpace(provider))
 	modelName = strings.TrimSpace(modelName)
@@ -463,6 +466,21 @@ func BuildAlias(provider string, modelName string) string {
 		return provider
 	}
 	return strings.ToLower(provider + "/" + modelName)
+}
+
+// DisplayName returns a model label independently of its endpoint-qualified
+// alias and durable identity. Gateway model IDs already name their upstream.
+func DisplayName(cfg Config) string {
+	if strings.EqualFold(strings.TrimSpace(cfg.Provider), "magpie") {
+		return strings.TrimSpace(cfg.Model)
+	}
+	alias := firstNonEmpty(cfg.Alias, BuildAlias(cfg.Provider, cfg.Model), cfg.ID)
+	if strings.EqualFold(alias, BuildAlias(cfg.Provider, cfg.Model)) {
+		if template, ok := LookupProvider(cfg.Provider); ok {
+			return BuildAlias(template.Label, cfg.Model)
+		}
+	}
+	return alias
 }
 
 // BuildProviderEndpointID returns a stable provider-endpoint identity.
@@ -541,23 +559,19 @@ func NormalizeEndpointID(provider string, endpointID string, baseURL string, api
 
 // ChoiceDetail returns a concise endpoint description for a configured model.
 func ChoiceDetail(cfg Config) string {
-	parts := []string{}
-	if endpointID := strings.TrimSpace(cfg.ProviderEndpointID); endpointID != "" {
-		parts = append(parts, "endpoint:"+endpointID)
+	label := "direct"
+	if cfg.Provider == "magpie" || cfg.Provider == "ollama" || cfg.Provider == "custom" {
+		label = cfg.Provider
 	}
-	if endpoint := strings.TrimSpace(cfg.EndpointID); endpoint != "" && endpoint != "default" {
-		parts = append(parts, endpoint)
+	if endpoint := strings.TrimSpace(cfg.EndpointID); endpoint != "" && endpoint != "default" && endpoint != "local" && endpoint != "judgment" {
+		if strings.HasPrefix(endpoint, "custom-") || strings.HasPrefix(endpoint, "judgment-") {
+			if address, err := url.Parse(cfg.BaseURL); err == nil && address.Host != "" {
+				endpoint = address.Host
+			}
+		}
+		label += " · " + endpoint
 	}
-	if baseURL := strings.TrimSpace(cfg.BaseURL); baseURL != "" {
-		parts = append(parts, baseURL)
-	}
-	if credentialRef := strings.TrimSpace(cfg.CredentialRef); credentialRef != "" {
-		parts = append(parts, "managed auth")
-	}
-	if len(parts) == 0 {
-		return "configured model"
-	}
-	return strings.Join(parts, " · ")
+	return label
 }
 
 // ChoiceFromConfig projects a configured model into selection metadata.
@@ -567,6 +581,7 @@ func ChoiceFromConfig(cfg Config) Choice {
 		Judgment:            IsJudgment(cfg),
 		ID:                  cfg.ID,
 		Alias:               cfg.Alias,
+		DisplayName:         DisplayName(cfg),
 		Backend:             "provider",
 		Provider:            cfg.Provider,
 		Model:               cfg.Model,
