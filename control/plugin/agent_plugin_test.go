@@ -19,9 +19,9 @@ func TestAgentPluginLocalUpgradeKeepsManifestIdentityAndData(t *testing.T) {
 	host := &memoryHost{dir: t.TempDir()}
 	service := NewService(host)
 	var firstData string
+	root := filepath.Join(t.TempDir(), "desktop-world")
 	for version := 1; version <= 2; version++ {
-		root := filepath.Join(t.TempDir(), fmt.Sprintf("desktop-world-v%d", version))
-		writeAgentPluginFile(t, root, "plugin.json", `{"$schema":"https://agent-plugins.org/schemas/1.0.0/plugin.schema.json","name":"desktop-world"}`)
+		writeAgentPluginFile(t, root, "plugin.json", fmt.Sprintf(`{"$schema":"https://agent-plugins.org/schemas/1.0.0/plugin.schema.json","name":"desktop-world","version":"%d.0.0"}`, version))
 		writeAgentPluginFile(t, root, "mcp.json", `{"$schema":"https://agent-plugins.org/schemas/1.0.0/mcp.schema.json","mcpServers":{"desktop-world":{"type":"stdio","command":"./bin/server","cwd":"${PLUGIN_DATA}"}}}`)
 		writeAgentPluginFile(t, root, "bin/server", "launcher")
 		installed, err := service.Install(context.Background(), root)

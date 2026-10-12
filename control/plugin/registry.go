@@ -5,16 +5,26 @@ import (
 	"strings"
 )
 
-func upsertLocalPluginConfig(state *State, next Config) {
+func upsertLocalPluginConfig(state *State, next Config) error {
 	if state == nil {
-		return
+		return nil
 	}
 	if idx := pluginConfigIndexByID(state.Plugins, next.ID); idx >= 0 {
-		next.ExecutableEnv = cloneStringMap(state.Plugins[idx].ExecutableEnv)
+		previous := state.Plugins[idx]
+		// A manifest's self-declared name or publisher cannot prove ownership
+		// of another directory. Local standard updates retain their source.
+		if previous.Kind == ManifestKindAgentPlugin || next.Kind == ManifestKindAgentPlugin {
+			if previous.Managed || previous.Kind != next.Kind || !samePluginRoot(previous.Root, next.Root) {
+				return fmt.Errorf("plugin service: plugin id %q already belongs to another source at %s; remove it before registering a different directory or format", next.ID, previous.Root)
+			}
+			next.Enabled = previous.Enabled
+		}
+		next.ExecutableEnv = cloneStringMap(previous.ExecutableEnv)
 		state.Plugins[idx] = next
-		return
+		return nil
 	}
 	state.Plugins = append(state.Plugins, next)
+	return nil
 }
 
 func upsertMarketplacePluginConfig(state *State, next Config) error {

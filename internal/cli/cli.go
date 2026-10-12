@@ -136,6 +136,8 @@ func runWithProductClientOpener(
 		switch strings.ToLower(strings.TrimSpace(args[0])) {
 		case "update":
 			return runUpdateSubcommand(ctx, args[1:], defaultStore, stdout, stderr)
+		case "plugin":
+			return runPluginSubcommand(ctx, args[1:], cwd, stdout, stderr, openClients)
 		}
 	}
 	acpSubcommand := len(args) > 0 && strings.EqualFold(strings.TrimSpace(args[0]), "acp")

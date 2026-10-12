@@ -1,0 +1,36 @@
+---
+name: desktop-world
+description: Use one DTW exec tool to inspect and operate desktop apps through CUA native scripts.
+---
+
+# Desktop World
+
+Use the installed DTW `exec` tool (Antigravity names it `desktop-world_dtw/exec`) with `{"session":"task","script":"..."}`. This runs upstream CUA `run_script` in native QuickJS, with `cua` plus a JSON `state` object persisted after successful calls. No Node, filesystem, network or process API is available inside a script. Read [api.d.ts](api.d.ts) for exact signatures and [RECIPES.md](RECIPES.md) for copyable dialog, large-page, image, menu and global-shortcut flows. These two short files are authoring references, not runtime dependencies.
+
+For an Agent desktop task, read only this Skill and its two linked references through the host's file viewer. Use `exec` to inspect app content and verify UI effects; do not switch to a host file tool to read a document or new vault. A test harness may independently check disk effects outside the Agent turn.
+
+**Choose a route:** Bind an app/window, inspect a small AX query, and act by an exact semantic control when it exists. Keep window discovery scoped to the authorized PID: a global `listWindows()` can expose unrelated titles. A PID may first bind a Chrome translation or extension popup; for a known main-window title use `cua.getApp({pid,title:"Exact title"})` or filter `cua.listWindows({pid})` and pin its `window_id`. For a native chooser, first rebind by parent PID without `windowId` and check its real controls. **If a picker remains visible but window enumeration or binding fails, use `operation:"desktop",include_image:true` to see the primary display.** Confirm the intended picker visually, then use one desktop-scope coordinate action with that screenshot's `capture_id`; recapture and verify. `window_not_found` does not prove a visible panel closed. For a large web page or canvas, get a screenshot without walking the AX tree and use a point from that **same** image and Session; query text only when needed. An action receipt is delivery evidence; verify the changed UI.
+
+For a crowded **window** screenshot, mark a rectangle in that returned PNG's pixels and use the [region candidates recipe](RECIPES.md#region-candidates-from-a-window-screenshot). It returns AX-backed controls within the rectangle with image-pixel centers and element tokens; prefer an exact token to a point. The rectangle only narrows discovery: controls may be occluded or missing from a truncated AX tree. A full desktop screenshot or an unbound system picker has no matching window AX geometry, so this recipe cannot certify a clickable point there.
+
+`app.title` is the macOS window title, not a page heading or document state. Verify the changed UI before deciding whether any further input is needed. An element token may survive across scripts, but has no promised lifetime: navigation, redraw, window changes, or another Agent can make it stale. Re-query the exact control after such a change; if CUA refuses a stale token, observe again before deciding on any action. A `capture_id` is **one-use** for one pixel action. After an action, observe its effect; a second action needs a fresh screenshot/capture ID. Do not put an automatic fallback click after a possibly successful action.
+
+If a script reports `window_not_found` after a successful `click` in its `calls before the error took effect`, the clicked modal may have closed. Rebind by PID or recapture the desktop to find the resulting window; do not replay that click.
+
+For a screenshot you intend to inspect immediately, add `include_image:true` to the initial `exec`; when it finishes within `wait_ms`, the same reply contains the first image and compact summary. If it is still running, use the original ID with `operation:"result",part:"image"`. Omit this flag for ordinary reads so large images stay off the default path.
+
+Minimal read:
+
+```js
+const app=await cua.getApp({pid:123,windowId:456});
+const s=await app.getState({query:"Save",max_elements:80,include_screenshot:false});
+return {window_id:app.windowId,tree:s.tree_markdown,truncated:s.truncated};
+```
+
+Common methods: `app.query({name:"Save"})`, `app.waitFor({name:"Save"},{timeout_ms:3000})`, `app.click({name:"Save"})`, `app.typeText("text",selector)` (**text first**), `app.setValue(selector,"text")` (**selector first**), `app.pressKey("cmd+s")`, `app.hotkey(["cmd","shift","g"])`, `app.scroll([x,y],"down",3)`, `app.drag([x1,y1],[x2,y2],{delivery_mode:"foreground"})`, `app.zoom([x1,y1,x2,y2])`. Selectors use `name`, but query results expose `label`; broad queries cap at 50. `getState({since:"latest",include_screenshot:false})` keeps the read small. A screenshot-only read uses `include_accessibility_tree:false` with `include_screenshot:true`; omit `display_only:true` when its pixels will ground input.
+
+The chooser and `cmd` shortcut examples in RECIPES.md describe macOS. On Windows, inspect the actual target window and use its observed controls and Windows keys such as `ctrl+s`; do not copy macOS shortcuts or assume UIAccess for elevated/AppContainer windows. The same capture ID and readback rules apply.
+
+The same `exec` also passes two upstream atomics that `run_script` cannot call: `operation:"menu"` with exact `pid`, `window_id`, `path` calls CUA `invoke_menu`; `operation:"desktop"` captures the full primary display and retains its image. Use these only for the requested visible target or desktop scope, then read back. Desktop pixel input in a later script is `cua.call("click",{target:{kind:"desktop",display_id:"primary"},x,y,capture_id})`; take `capture_id` and coordinates from the **same fresh PNG pixel grid**, whose dimensions are in `capture.screenshot_width/height`. CUA maps to screen points; do not apply a second scale factor. For an exact ordinary window, `operation:"focus"` reports `focus.activated`, `focus.verified`, and `focus.focused_window_id`; the request alone does not prove focus. Window-targeted actions default to background. Before a foreground drag/click on one of several overlapping windows, focus its exact `(pid,window_id)`, require `focus.verified:true`, then act and read back before another Session takes focus. A two-window fixture needed this explicit step for both drags to land. Global hotkeys are available inside scripts with `cua.call("hotkey",{target:{kind:"desktop",display_id:"primary"},keys:["cmd","shift","g"]})`; they act on shared focus, so verify the focused UI before typing. For a single key use `cua.call("press_key",{target:{kind:"desktop",display_id:"primary"},key:"return"})`, not a one-key `hotkey`.
+
+Short calls usually return terminal results in 4 seconds. If `status:"running"`, use **the same** `session` and original `execution_id` with `operation:"result"`; `status` and `cancel` use that ID too. `result` gives a bounded summary. `part:"structured"` or `part:"text"` pages full data with `offset`; `part:"image"` shows a retained image. On stale tokens, permission refusal, timeout or `unknown`, observe and reconcile the original action; never blindly replay it. CUA/DTW Sessions separate JSON state and receipts, while the desktop, focus and native element cache are shared. Use a separate MCP process per independent Agent host and reobserve after another controller may have acted.

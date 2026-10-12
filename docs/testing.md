@@ -199,6 +199,30 @@ narrowest relevant `go test -race` package. File locking, atomic replacement,
 and WAL recovery require native Windows evidence when Windows behavior changes;
 cross-compilation is not equivalent.
 
+Local headless Plugin acceptance runs through the CLI, principal-bound Host
+commands, an isolated Store and fresh Session activations:
+
+```sh
+go test ./internal/cli -run '^TestCLIPlugin' -count=1
+go test -race ./internal/cli ./control/plugin -run 'TestCLIPlugin|TestLocalAgentPlugin|TestAgentPluginLocalUpgrade' -count=1
+```
+
+The default single-exec test uses pinned DTW manifest/Skill files with a
+deterministic MCP launcher and separate private worker process. It proves Caelis
+registration, one `exec`, startup, repeat/removal isolation and active/fresh
+Session snapshots, without invoking a real desktop. See the
+[fixture provenance](../internal/cli/testdata/dtw-agent-plugin/README.md).
+On a supported OS, use an independently verified native single-exec package:
+
+```sh
+CAELIS_DTW_SINGLE_EXEC_ROOT=/absolute/path/to/plugin go test ./internal/cli -run '^TestCLIPluginDesktopWorldNativeCandidate$' -count=1 -v
+```
+
+This native gate requires a ready DTW MCP connection and one `exec`; it does
+not perform desktop input. Signing, released artifacts, OS permissions and real
+GUI effects need separate native evidence. The older Full-package protocol
+probe under `control/plugin` remains specific to that package's two-tool catalog.
+
 Codex ACP has two opt-in live tests:
 
 ```bash

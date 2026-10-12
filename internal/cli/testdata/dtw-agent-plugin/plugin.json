@@ -1,0 +1,9 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "desktop-world",
+  "version": "0.1.0-rc.7",
+  "description": "DTW single-exec desktop plugin backed by CUA Driver",
+  "author": {"name": "Caelis Labs", "url": "https://github.com/caelis-labs"},
+  "license": "MIT",
+  "keywords": ["desktop", "computer-use", "mcp"]
+}
