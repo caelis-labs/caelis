@@ -53,6 +53,90 @@ func TestChildHistoryPagesStayPrivateUntilCommit(t *testing.T) {
 	}
 }
 
+func TestChildPaneUsesTaskNarrativeInsteadOfParentSidecarSummary(t *testing.T) {
+	m := NewModel(Config{
+		NoColor: true, NoAnimation: true,
+		TaskStreams: bindTaskStreamTestClient(t, &subagentRosterTestTaskStreamService{}),
+	})
+	m.currentSessionID = "parent-session"
+	m.width, m.height = 120, 32
+	const taskID = "task-faye"
+	const reply = "Hi! I’m ready to help."
+	view := m.ensureSubagentOutputView("task:" + taskID)
+	m.taskStreamCallIDsByID[taskID] = view.callID
+	m.taskStreamWanted[taskID] = true
+	m.taskStreamTokens[taskID] = 7
+	parentSummary := eventstream.Envelope{
+		Kind: eventstream.KindSessionUpdate, SessionID: "parent-session",
+		Scope: eventstream.ScopeSubagent, ScopeID: taskID, TurnID: taskID + ":1",
+		EventID: "parent-sidecar-final", ProjectionID: "parent-sidecar-final:0", Final: true,
+		Delivery: &eventstream.Delivery{Mode: eventstream.DeliveryCanonical},
+		Update: eventstream.ContentChunk{SessionUpdate: eventstream.UpdateAgentMessage,
+			Content: eventstream.TextContent{Type: "text", Text: reply}},
+	}
+	m = applyACPEnvelopeForTest(t, m, parentSummary)
+	if got := subagentOutputNarrativeTextForTest(view, SEAssistant); got != "" {
+		t.Fatalf("parent summary entered Task pane: %q", got)
+	}
+	child := func(turnID, messageID, text string) eventstream.Envelope {
+		return eventstream.Envelope{
+			Kind: eventstream.KindSessionUpdate, SessionID: "parent-session",
+			Scope: eventstream.ScopeSubagent, ScopeID: taskID, TurnID: turnID,
+			Delivery: &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
+			Update: eventstream.ContentChunk{SessionUpdate: eventstream.UpdateAgentMessage, MessageID: messageID,
+				Content: eventstream.TextContent{Type: "text", Text: text}},
+		}
+	}
+	for _, part := range []string{"Hi! I’m ", "ready to help."} {
+		m = applyACPEnvelopeForTest(t, m, child("child-turn", "child-message", part))
+	}
+	m.observeSubagentOutputEvents([]TranscriptEvent{{
+		Kind: TranscriptEventAgentCommunication, Scope: ACPProjectionSubagent, ScopeID: taskID,
+		TurnID: "child-turn", MessageID: "mail-dparent", Text: "Hi parent, I’m ready to help.",
+		AgentSourceKind: "participant", AgentSourceID: "dparent", AgentSourceName: "@dparent",
+	}})
+	m = applyACPEnvelopeForTest(t, m, parentSummary)
+	view.prepareVisibleRender()
+	rows := renderedRowsPlain(m.subagentOutputRows(view, 120, 40))
+	if strings.Count(rows, reply) != 1 || !strings.Contains(rows, "Hi parent, I’m ready to help.") {
+		t.Fatalf("live child pane projection:\n%s", rows)
+	}
+
+	apply := func(kind taskstream.DeliveryKind, events []eventstream.Envelope) {
+		m.handleTaskStreamBatch(taskStreamBatchMsg{
+			sessionID: "parent-session", taskID: taskID, token: 7, phase: kind, events: events,
+		})
+	}
+	apply(taskstream.DeliveryReplaceBegin, nil)
+	apply(taskstream.DeliveryReplacePage, []eventstream.Envelope{child("child-turn", "child-message", reply)})
+	apply(taskstream.DeliveryReplaceEnd, nil)
+	m = applyACPEnvelopeForTest(t, m, parentSummary)
+	view.prepareVisibleRender()
+	rows = renderedRowsPlain(m.subagentOutputRows(view, 120, 40))
+	if strings.Count(rows, reply) != 1 {
+		t.Fatalf("reconnected child pane duplicated summary:\n%s", rows)
+	}
+	// A later, separately identified child Turn may legitimately say the same words.
+	m = applyACPEnvelopeForTest(t, m, child("child-turn-2", "child-message-2", reply))
+	view.prepareVisibleRender()
+	rows = renderedRowsPlain(m.subagentOutputRows(view, 120, 40))
+	if strings.Count(rows, reply) != 2 {
+		t.Fatalf("distinct child message was swallowed:\n%s", rows)
+	}
+
+	// An older Surface without Task streams still needs the parent summary.
+	legacy := NewModel(Config{NoColor: true, NoAnimation: true})
+	legacy.currentSessionID = "parent-session"
+	legacy.width, legacy.height = 120, 32
+	legacy = applyACPEnvelopeForTest(t, legacy, parentSummary)
+	legacyView := legacy.ensureSubagentOutputView("task:" + taskID)
+	legacyView.prepareVisibleRender()
+	legacyRows := renderedRowsPlain(legacy.subagentOutputRows(legacyView, 120, 40))
+	if strings.Count(legacyRows, reply) != 1 {
+		t.Fatalf("parent summary missing without Task streams:\n%s", legacyRows)
+	}
+}
+
 func TestChildHistorySendMessageResultPresentation(t *testing.T) {
 	for _, tc := range []struct {
 		name, tool, status, output, want, hidden string

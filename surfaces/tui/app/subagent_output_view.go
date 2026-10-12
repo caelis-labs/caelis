@@ -5,6 +5,8 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 )
 
 const subagentOutputRenderInterval = 50 * time.Millisecond
@@ -86,6 +88,15 @@ func (m *Model) observeSubagentOutputEvents(events []TranscriptEvent) bool {
 	}
 	changed := false
 	for _, event := range events {
+		if m.cfg.TaskStreams != nil && event.Scope == ACPProjectionSubagent &&
+			event.DeliveryMode == eventstream.DeliveryCanonical && event.AnchorToolCallID == "" &&
+			event.Kind == TranscriptEventNarrative &&
+			(event.NarrativeKind == TranscriptNarrativeUser || event.NarrativeKind == TranscriptNarrativeAssistant) {
+			// The parent Session retains sidecar dialogue as a canonical summary.
+			// The Task stream owns the child pane's complete narrative, including
+			// history and reconnect. Projecting both creates a second Turn.
+			continue
+		}
 		if event.Scope == ACPProjectionMain && event.Kind == TranscriptEventTool &&
 			event.ToolName == surfaceToolSpawn {
 			m.observeSubagentOutputOwner(event)

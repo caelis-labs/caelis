@@ -383,6 +383,9 @@ func (m *Model) handleWizardEnter() (bool, tea.Cmd) {
 	// where an empty query otherwise selects the highlighted next candidate.
 	value := strings.TrimSpace(m.slashArgQuery)
 	selectedValues := wizardMultiSelectValues(w, step)
+	if w.def.Command == "connect" && step.Key == "model" && step.MultiSelect && len(selectedValues) == 0 {
+		return true, nil
+	}
 	if step.MultiSelect && len(selectedValues) > 0 && (value == "" || m.wizardOverlay != nil) {
 		formatted := strings.Join(selectedValues, ",")
 		complete := SlashArgCandidate{

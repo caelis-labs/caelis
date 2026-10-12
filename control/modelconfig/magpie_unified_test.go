@@ -106,3 +106,32 @@ func TestMagpieUnifiedCatalogKeepsLegacyMenuAndDispatchIdentity(t *testing.T) {
 		})
 	}
 }
+
+func TestMagpieSelectionExcludesKnownNonConversationalModels(t *testing.T) {
+	client := &http.Client{Transport: modelconfigRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		body := `{"data":[{"id":"xiaomi/mimo-v2.5-asr","type":"model"},{"id":"vendor/custom-unknown"},{"id":"vendor/chat","kind":"chat"},{"id":"vendor/embed","kind":"embedding"}]}`
+		if req.Header.Get("X-Magpie-Deciders") == "1" {
+			body = `{"data":[{"id":"xiaomi/mimo-v2.5-asr","type":"model"},{"id":"vendor/custom-unknown"},{"id":"vendor/chat","kind":"chat"},{"id":"vendor/embed","kind":"embedding"},{"id":"typesafe/jev-latest","kind":"decision"}]}`
+		}
+		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(body))}, nil
+	})}
+	for _, includeJudgments := range []bool{false, true} {
+		models, err := SelectableModels(t.Context(), ConnectRequest{Provider: "magpie", BaseURL: "http://127.0.0.1:3425/v1", HTTPClient: client, IncludeJudgments: includeJudgments})
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := map[string]bool{"vendor/chat": false, "vendor/custom-unknown": false}
+		if includeJudgments {
+			want["typesafe/jev-latest"] = true
+		}
+		if len(models) != len(want) {
+			t.Fatalf("models = %#v, want %v", models, want)
+		}
+		for _, item := range models {
+			judgment, ok := want[item.Name]
+			if !ok || item.Judgment != judgment {
+				t.Fatalf("model = %#v, want %v", item, want)
+			}
+		}
+	}
+}

@@ -46,6 +46,7 @@ func TestJudgmentWizardRendersMaskedCredentialsAndSubmitsWithoutChatControls(t *
 	if !strings.Contains(modelFrame, "jev-1.13.0") {
 		t.Fatalf("model picker omitted Jev:\n%s", modelFrame)
 	}
+	connectPress(m, "space")
 	connectPress(m, "enter")
 	if len(submitted) != 1 || !strings.Contains(submitted[0].Text, "jev-1.13.0") || m.wizardOverlay != nil {
 		t.Fatalf("judgment wizard did not submit: %v", submitted)

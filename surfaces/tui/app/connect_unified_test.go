@@ -49,6 +49,7 @@ func TestUnifiedMagpieWizardConfirmsTypeAfterModel(t *testing.T) {
 			if m.wizardStepKey() != "model" {
 				t.Fatalf("unexpected credential step: %s", m.wizardStepKey())
 			}
+			connectPress(m, "space")
 			connectPress(m, "enter")
 			if m.wizardStepKey() != "model_type" || len(submitted) != 0 {
 				t.Fatal("type was not confirmed after model selection")

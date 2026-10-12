@@ -130,6 +130,44 @@ func TestWizardOverlayConnectionFormBackSearchAndMultiSelect(t *testing.T) {
 
 }
 
+func TestConnectModelEnterRequiresExplicitCheckbox(t *testing.T) {
+	for _, provider := range []string{"custom-responses", "deepseek"} {
+		t.Run(provider, func(t *testing.T) {
+			m, submissions := wizardOverlayFixture(t)
+			connectPress(m, "enter")
+			if provider == "deepseek" {
+				connectPress(m, "down")
+			}
+			connectPress(m, "enter")
+			if provider == "custom-responses" {
+				connectPress(m, "tab")
+			}
+			connectPaste(m, "fixture-key")
+			connectPress(m, "enter")
+			if m.wizardStepKey() != "model" {
+				t.Fatalf("step = %s, want model", m.wizardStepKey())
+			}
+			connectPress(m, "enter")
+			if m.wizardStepKey() != "model" || len(*submissions) != 0 || len(m.wizard.multiSelections["model"]) != 0 {
+				t.Fatalf("zero-check Enter advanced: step=%s submissions=%d", m.wizardStepKey(), len(*submissions))
+			}
+			if frame := ansi.Strip(m.renderWizardOverlay()); !strings.Contains(frame, "Select a model") || !strings.Contains(frame, "[ ]") {
+				t.Fatalf("zero-check guidance missing:\n%s", frame)
+			}
+			connectPress(m, "down")
+			connectPress(m, "enter") // Focus still is not selection.
+			if m.wizardStepKey() != "model" || len(*submissions) != 0 {
+				t.Fatal("highlighted model acted as a checkbox")
+			}
+			connectPress(m, "space")
+			connectPress(m, "enter")
+			if m.wizardStepKey() == "model" && len(*submissions) == 0 {
+				t.Fatal("explicit selection did not continue")
+			}
+		})
+	}
+}
+
 func TestWizardOverlayChangingEndpointDropsKeyAndModelDraft(t *testing.T) {
 	m, _ := wizardOverlayFixture(t)
 	connectPress(m, "enter")
@@ -221,6 +259,7 @@ func TestWizardOverlayCustomEndpointAndSavedCredential(t *testing.T) {
 		connectPress(m, "tab")
 		connectPaste(m, "demo-key")
 		connectPress(m, "enter")
+		connectPress(m, "space")
 		connectPress(m, "enter")
 		if len(*submissions) != 1 || !strings.Contains((*submissions)[0].Text, "xiaomi alpha https://custom.example/v1") {
 			t.Fatalf("custom endpoint submission: %#v", *submissions)
@@ -236,6 +275,7 @@ func TestWizardOverlayCustomEndpointAndSavedCredential(t *testing.T) {
 		if m.wizardStepKey() != "model" || m.wizard.state["_reuseauth"] != "true" {
 			t.Fatal("saved endpoint required another key")
 		}
+		connectPress(m, "space")
 		connectPress(m, "enter")
 		if len(*submissions) != 1 || strings.Fields((*submissions)[0].Text)[5] != "-" {
 			t.Fatalf("saved endpoint submission: %#v", *submissions)
@@ -250,6 +290,7 @@ func TestWizardOverlayCustomEndpointAndSavedCredential(t *testing.T) {
 		connectPress(m, "tab")
 		connectPaste(m, "replacement-key")
 		connectPress(m, "enter")
+		connectPress(m, "space")
 		connectPress(m, "enter")
 		if len(*submissions) != 1 || strings.Fields((*submissions)[0].Text)[5] != "replacement-key" {
 			t.Fatalf("explicit credential was ignored: %#v", *submissions)
@@ -331,6 +372,7 @@ func TestWizardOverlayRejectedSubmissionRetainsFilteredDraft(t *testing.T) {
 	connectPaste(m, "demo-key")
 	connectPress(m, "enter")
 	connectPaste(m, "beta")
+	connectPress(m, "space")
 	connectPress(m, "enter")
 	if m.wizardOverlay == nil || m.wizardOverlay.blocked || m.slashArgQuery != "beta" || len(m.slashArgCandidates) != 1 || m.slashArgCandidates[0].Value != "beta" {
 		t.Fatal("rejection lost filtered model draft")

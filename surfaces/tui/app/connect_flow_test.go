@@ -1081,7 +1081,8 @@ func TestConnectWizardAddsEndpointStepForXiaomiTokenPlan(t *testing.T) {
 		t.Fatalf("connect model state after token-plan api key = %#v, want token-plan endpoint and pasted key", state)
 	}
 
-	handled, cmd = m.handleWizardEnter() // model -> submit
+	selectConnectModelCandidate(t, m)
+	handled, cmd = m.handleWizardEnter() // checked model -> submit
 	if !handled {
 		t.Fatal("model step was not handled")
 	}
@@ -1179,7 +1180,8 @@ func TestConnectWizardSkipsAdvancedStepsForKnownModelCandidate(t *testing.T) {
 	if state.Provider != "deepseek" || state.TokenRef != "sk-test" {
 		t.Fatalf("connect model state after api key = %#v, want deepseek token state", state)
 	}
-	handled, cmd = m.handleWizardEnter() // model -> submit
+	selectConnectModelCandidate(t, m)
+	handled, cmd = m.handleWizardEnter() // checked model -> submit
 	if !handled {
 		t.Fatal("model step was not handled")
 	}
@@ -1242,10 +1244,16 @@ func TestConnectWizardAsksImageCapabilityWhenOtherModelMetadataIsKnown(t *testin
 		runConnectTestCmd(m, cmd)
 	}
 
+	// This catalog entry has incomplete capability metadata, so it cannot be
+	// checked in the multi-select list. Enter alone must not select it.
 	handled, cmd := m.handleWizardEnter()
-	if !handled {
-		t.Fatalf("model selection = handled:%v, want image capability step", handled)
+	if !handled || cmd != nil || m.wizard.currentStep().Key != "model" {
+		t.Fatal("incomplete model advanced without an explicit selection")
 	}
+	// The model-details path supplies the explicit choice to the downstream
+	// capability wizard, whose metadata routing is the subject of this test.
+	candidate := m.slashArgCandidates[0]
+	cmd = m.advanceWizardStep(candidate.Value, &candidate)
 	runConnectTestCmd(m, cmd)
 	if step := m.wizard.currentStep(); step == nil || step.Key != "image_input" {
 		t.Fatalf("current step = %#v, want image_input", step)
@@ -1429,10 +1437,13 @@ func TestConnectWizardKeepsAdvancedStepsForCustomCompatibleModel(t *testing.T) {
 	}
 
 	m.slashArgQuery = "acme-reasoning-model"
-	handled, cmd = m.handleWizardEnter() // custom model -> image input
-	if !handled {
-		t.Fatal("custom model step was not handled")
+	handled, cmd = m.handleWizardEnter()
+	if !handled || cmd != nil || m.wizard.currentStep().Key != "model" {
+		t.Fatal("freeform model advanced without an explicit selection")
 	}
+	// The custom model-details entry provides this choice explicitly. Continue
+	// testing the legacy advanced-capability steps from that handoff.
+	cmd = m.advanceWizardStep("acme-reasoning-model", nil)
 	runConnectTestCmd(m, cmd)
 	if step := m.wizard.currentStep(); step == nil || step.Key != "image_input" {
 		t.Fatalf("current wizard step = %#v, want image_input", step)
@@ -1521,10 +1532,15 @@ func TestConnectWizardTypedKnownModelAlsoSkipsAdvancedSteps(t *testing.T) {
 	}
 	runConnectTestCmd(m, cmd)
 	m.slashArgQuery = "deepseek/deepseek-flash"
-	handled, cmd = m.handleWizardEnter() // typed display match -> submit
+	handled, cmd = m.handleWizardEnter() // typed display is not a check
 	if !handled {
 		t.Fatal("typed model step was not handled")
 	}
+	if cmd != nil || m.wizard.currentStep().Key != "model" {
+		t.Fatal("typed model advanced without an explicit check")
+	}
+	selectConnectModelCandidate(t, m)
+	_, cmd = m.handleWizardEnter() // checked model -> submit
 	if cmd == nil {
 		t.Fatal("expected submit command after known model typed value")
 	}
@@ -1569,6 +1585,19 @@ func requireConnectModelCommandState(t *testing.T, command string) connectwizard
 		t.Fatalf("slashArgCommand = %q, want connect-model command", command)
 	}
 	return state
+}
+
+func selectConnectModelCandidate(t *testing.T, m *Model) {
+	t.Helper()
+	candidate, ok := m.currentSlashArgCandidate()
+	if !ok {
+		t.Fatal("no current model candidate to check")
+	}
+	handled, cmd := m.toggleWizardMultiSelectCandidate(candidate)
+	if !handled {
+		t.Fatalf("model candidate %q cannot be checked", candidate.Value)
+	}
+	runConnectTestCmd(m, cmd)
 }
 
 func connectModelCommandState(command string) (connectwizard.ConnectWizardState, bool) {
