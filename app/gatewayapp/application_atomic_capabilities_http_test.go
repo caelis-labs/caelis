@@ -836,6 +836,10 @@ func TestApplicationAtomicMCPPinnedCallAcrossRevisionHTTP(t *testing.T) {
 	}
 	waitApplicationHTTPIdle(t, ctx, client, session)
 	waitAtomicAudit(t, audit, callStop)
+	// The next activation samples the revised selection and initializes it
+	// asynchronously. Wait for its catalog before requesting the new effect.
+	promptAtomicCapabilityClient(t, ctx, client, session, "pinned-new-warm", "BASIC")
+	waitAtomicApplicationMCPRunning(t, ctx, client, session, "utilities")
 	promptAtomicCapabilityClient(t, ctx, client, session, "pinned-new-after-old", "UTIL")
 	waitAtomicAuditCount(t, audit, "utilities:call:", 1)
 	if got := atomicAudit(audit); strings.Count(got, "blocking:call:") != 1 || strings.Count(got, "utilities:call:") != 1 {

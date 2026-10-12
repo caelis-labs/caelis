@@ -6,9 +6,10 @@ import (
 	"context"
 	"strconv"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
+
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox/internal/processtest"
 )
 
 func TestAsyncSessionCleansBackgroundProcessAfterShellExit(t *testing.T) {
@@ -34,7 +35,9 @@ func TestAsyncSessionCleansBackgroundProcessAfterShellExit(t *testing.T) {
 	}
 	stdout, _ := session.ReadAllOutput()
 	pid := parseBackgroundPID(t, stdout)
-	waitForProcessGone(t, pid)
+	if err := processtest.WaitForExit(pid, 2*time.Second); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func parseBackgroundPID(t *testing.T, stdout string) int {
@@ -51,18 +54,4 @@ func parseBackgroundPID(t *testing.T, stdout string) int {
 	}
 	t.Fatalf("stdout = %q, want bg pid", stdout)
 	return 0
-}
-
-func waitForProcessGone(t *testing.T, pid int) {
-	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		if err := syscall.Kill(pid, 0); err != nil {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("process %d is still alive", pid)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
 }

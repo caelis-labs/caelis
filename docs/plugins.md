@@ -24,22 +24,82 @@ it later. Start a new Session/task for configuration changes to take effect;
 an active Session retains its MCP and Skill snapshot. No plugin files or
 credentials are copied into the project workspace.
 
-For Desktop World, use the verified **Full** package for your OS and CPU.
-Its `mcp.json` starts the bundled Node launcher; Caelis neither selects Node
-nor starts a second Desktop World bridge. The **Lite** package requires the
-trusted Host to set `ExecutableEnv["DTW_NODE_PATH"]` to an absolute Node 24.x
-executable for that plugin. The TUI does not yet expose this advanced Host
-setting, so use Full through `/plugin install`. Desktop World input still
-requires its normal app grant and OS permissions. ToolSearch can discover
-`desktop_exec` and `desktop_status`; reviewing a script remains the caller's
-responsibility.
+Trusted external installers can use the local headless entry:
+
+```sh
+caelis plugin install /absolute/path/to/extracted-plugin --json
+caelis plugin status desktop-world --json
+caelis plugin remove desktop-world --json
+```
+
+Flags may precede or follow the directory/ID. `--store-dir <directory>` (or
+`CAELIS_STORE_DIR`) selects an isolated Store. By default these commands discover
+or start the same managed local Host as the TUI. `--embedded` requests an
+exclusive in-process Host and fails if another Host owns the Store. These are
+local commands: unset `CAELIS_CONTROL_URL`; no remote install, marketplace,
+download, shell script or desktop permission flow is exposed by this entry.
+No model configuration or Session creation is required. Exiting the command
+leaves the managed Host running.
+
+`install` requires an absolute existing directory and registers it in place;
+the installer owns the package files and must keep them available. A first
+installation enables the plugin; standard local packages retain the user's
+enabled/disabled choice on repeat installs and upgrades. For standard packages
+the manifest name is the stable installed ID.
+Repeat installs and upgrades preserve unrelated plugins, marketplaces, Host
+settings, explicit executable paths and private `PLUGIN_DATA`. Standard local
+updates stay bound to the registered canonical directory, resolved at install
+time. Another directory, manifest format or managed registration with the same
+ID is an error, even if its manifest claims the same publisher. To switch source
+directories, explicitly remove the registration before installing the new root.
+Older standard registrations that saved a directory alias instead of a canonical
+root require explicit removal and reinstallation. Their saved manifest cannot
+prove the original package boundary, including when it resolves to a nested file.
+Missing or contradictory saved source evidence also requires reinstallation.
+This new registration starts enabled; private data survives by ID, while any
+plugin-specific Host executable settings must be configured again. Verify
+package provenance before invoking installation.
+
+`remove` unregisters the ID for later activations; repeating it when absent
+succeeds. It leaves externally owned files and private data available. `status`
+reads the Host registration snapshot and returns `installed:false`
+for an absent ID without activating a Session or starting MCP. An enabled
+registration and its Host-scoped MCP fields do not prove the tool catalog or
+worker readiness of an activated Session. Start a fresh Session
+for changed Skill/MCP configuration; active Runtime snapshots remain fixed
+until release. Changes to files in place can still change bytes read by an active
+process; finish active work before replacing an installer's package files.
+
+JSON stdout contains one object with `schema_version:"1"`, `action`, `id`,
+`installed`, and, when registered, `plugin`. The `plugin` snapshot includes
+`id`, `root`, `version`, `enabled`, Skills and Host-scoped MCP fields. For example:
+
+```json
+{"schema_version":"1","action":"status","id":"desktop-world","installed":false}
+```
+
+Success exits zero. Invalid arguments, malformed manifests, ownership conflicts,
+and unavailable Stores/Hosts exit nonzero and include `error` in JSON output.
+Mutation failures also include the Host `receipt` when available. Check its
+`outcome`: `committed` means the mutation took effect even if subsequent
+observation or cleanup failed; do not blindly replay an uncertain mutation.
+Without `--json`, the command prints a brief text result and errors on stderr.
+
+For Desktop World, verify the package for your OS/CPU and register its extracted
+Agent Plugin root. Caelis starts exactly the launcher declared in `mcp.json`;
+the package owns its private worker. A single-exec DTW package exposes one MCP
+`exec`, qualified as `desktop_world__exec` inside Caelis. Earlier Full/Lite
+packages keep their declared launcher and tool catalog; Lite requires an
+explicit trusted Host `ExecutableEnv["DTW_NODE_PATH"]` Node executable setting.
+Desktop input still requires DTW's normal app grant and OS permissions;
+reviewing a script remains the caller's responsibility.
 
 You can copy this instruction to an Agent:
 
 > Verify the plugin publisher, version, and checksum. Extract the matching
-> official Full archive outside my workspace. In Caelis, install the extracted
-> root with `/plugin install <absolute path>`, then start a new Session. Check
-> `/plugin manage` and the ready MCP tools before using the Skill. Do not
+> official package outside my workspace. Install the extracted root with
+> `caelis plugin install <absolute path> --json`, then start a new Session. Check
+> `caelis plugin status desktop-world --json` and the ready MCP tools before using the Skill. Do not
 > rewrite the package's `mcp.json`, copy credentials, or replay a failed input.
 
 ## Paths, ownership, and results

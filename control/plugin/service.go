@@ -200,8 +200,9 @@ func (s Service) installLocalPluginSource(ctx context.Context, source string) (I
 	return info, true, err
 }
 
-// AddPath registers or updates a local plugin directory and enables it for
-// later Session Runtime activations.
+// AddPath registers a local plugin directory enabled for later Session Runtime
+// activations. Standard local updates require the same canonical source and
+// preserve the existing enabled/disabled choice and Host executable settings.
 func (s Service) AddPath(ctx context.Context, path string) (Info, error) {
 	if _, err := s.requireHost(); err != nil {
 		return Info{}, err
@@ -245,6 +246,11 @@ func (s Service) addPath(ctx context.Context, path string, opts pluginAddPathOpt
 		id = p.Name
 	}
 	p = pluginWithConfiguredID(p, id)
+	if p.Kind == ManifestKindAgentPlugin {
+		// Pin the resolved source so retargeting an installer's symlink cannot
+		// silently replace a different directory under the same installed ID.
+		absPath = p.Root
+	}
 
 	next := Config{
 		ID:          id,
@@ -265,8 +271,7 @@ func (s Service) addPath(ctx context.Context, path string, opts pluginAddPathOpt
 			case pluginInstallUpsertByRoot:
 				return upsertMarketplacePluginConfig(state, next)
 			default:
-				upsertLocalPluginConfig(state, next)
-				return nil
+				return upsertLocalPluginConfig(state, next)
 			}
 		},
 		AfterCommit: func(state State) error {

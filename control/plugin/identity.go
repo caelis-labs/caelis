@@ -36,6 +36,23 @@ func samePluginRoot(a string, b string) bool {
 	return aRoot == bRoot
 }
 
+func sameLocalPluginSource(previous Config, next Config) bool {
+	root, ok := canonicalPluginRoot(previous.Root)
+	if !ok || !samePluginRoot(root, next.Root) {
+		return false
+	}
+	abs, err := filepath.Abs(strings.TrimSpace(previous.Root))
+	if err != nil {
+		return false
+	}
+	// Older registrations may have saved an input alias rather than its pinned
+	// root. Even a saved resolved manifest cannot prove the original boundary:
+	// a legal nested manifest can also belong to a larger or smaller package.
+	// Require explicit removal/reinstallation when that evidence is missing.
+	manifest := strings.TrimSpace(previous.Manifest)
+	return filepath.Clean(abs) == root && filepath.IsAbs(manifest) && PathWithinRoot(root, manifest)
+}
+
 func canonicalPluginRoot(root string) (string, bool) {
 	root = strings.TrimSpace(root)
 	if root == "" {

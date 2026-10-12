@@ -564,6 +564,19 @@ func (h *turnHandle) allocateEventCursorLocked() string {
 	return fmt.Sprintf("%s-acp-%06d", prefix, h.acpCursorSeq)
 }
 
+func (h *turnHandle) finishRuntime(runtimeParent context.Context) {
+	// A Host can cancel the producer's parent before Gateway cancellation marks
+	// this handle. Record that cancellation after draining, without calling an
+	// already closed Runner. Inspect the parent, since normal completion also
+	// cancels the private run context as part of cleanup.
+	if runtimeParent.Err() != nil {
+		h.mu.Lock()
+		h.cancelled = true
+		h.mu.Unlock()
+	}
+	h.finish()
+}
+
 func (h *turnHandle) finish() {
 	h.mu.Lock()
 	if h.finished || h.finishing {

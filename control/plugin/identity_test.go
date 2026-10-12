@@ -80,7 +80,9 @@ func TestUpsertLocalPluginConfigMatchesByIDOnly(t *testing.T) {
 	}}
 	next := Config{ID: "drawio", Root: pluginRoot, Name: "new"}
 
-	upsertLocalPluginConfig(&doc, next)
+	if err := upsertLocalPluginConfig(&doc, next); err != nil {
+		t.Fatal(err)
+	}
 
 	if len(doc.Plugins) != 2 {
 		t.Fatalf("plugins = %#v, want two entries", doc.Plugins)

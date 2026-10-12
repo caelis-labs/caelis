@@ -3,6 +3,7 @@ package controlserver
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
 )
@@ -89,6 +90,17 @@ func TestLoadOrCreateBearerTokenFailsClosedForInsecureOrCorruptFiles(t *testing.
 		"world readable": func(t *testing.T, path string) {
 			if err := os.WriteFile(path, []byte(valid+"\n"), 0o644); err != nil {
 				t.Fatal(err)
+			}
+			// The security fixture must be insecure even under a private umask.
+			if err := os.Chmod(path, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			// Windows token security is checked through its ACL, not POSIX bits.
+			if runtime.GOOS != "windows" {
+				info, err := os.Stat(path)
+				if err != nil || info.Mode().Perm() != 0o644 {
+					t.Fatalf("world-readable fixture mode = %v, %v", info, err)
+				}
 			}
 		},
 		"corrupt": func(t *testing.T, path string) {

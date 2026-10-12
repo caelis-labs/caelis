@@ -124,7 +124,7 @@ func (g *Gateway) BeginTurn(ctx context.Context, req BeginTurnRequest) (BeginTur
 	g.mu.Unlock()
 
 	handle.publishStarted()
-	go g.runTurn(runCtx, cancelFn, activeSession, req, resolved, handle)
+	go g.runTurn(runCtx, runtimeParent, cancelFn, activeSession, req, resolved, handle)
 
 	return BeginTurnResult{
 		Session: activeSession,
@@ -166,13 +166,14 @@ func (g *Gateway) allocateID(prefix string) string {
 
 func (g *Gateway) runTurn(
 	ctx context.Context,
+	runtimeParent context.Context,
 	cancel func() bool,
 	session session.Session,
 	req BeginTurnRequest,
 	resolved ResolvedTurn,
 	handle *turnHandle,
 ) {
-	defer handle.finish()
+	defer handle.finishRuntime(runtimeParent)
 	defer g.releaseActive(session.SessionID, handle)
 	defer cancel()
 
@@ -248,12 +249,13 @@ func normalizeRunRequestPolicyProfile(req *agent.RunRequest) {
 
 func (g *Gateway) runParticipantTurn(
 	ctx context.Context,
+	runtimeParent context.Context,
 	cancel func() bool,
 	session session.Session,
 	req PromptParticipantRequest,
 	handle *turnHandle,
 ) {
-	defer handle.finish()
+	defer handle.finishRuntime(runtimeParent)
 	defer g.releaseActive(session.SessionID, handle)
 	defer cancel()
 
