@@ -191,6 +191,8 @@ func TestAnthropicBuildRequestHandlesThinkingOffByModel(t *testing.T) {
 		{model: "claude-sonnet-5", want: "disabled"},
 		{model: "claude-sonnet-5-5", want: "between_tools"},
 		{model: "claude-sonnet-5-5-20260928", want: "between_tools"},
+		{model: "claude-haiku-5-5", want: "disabled"},
+		{model: "claude-haiku-5-5-20261007", want: "disabled"},
 	} {
 		for _, effort := range []string{"none", "off", "disabled"} {
 			t.Run(tc.model+"/"+effort, func(t *testing.T) {
@@ -219,7 +221,7 @@ func TestAnthropicBuildRequestHandlesThinkingOffByModel(t *testing.T) {
 }
 
 func TestAnthropic55BuildRequestUsesAdaptiveEffortWithoutManualBudget(t *testing.T) {
-	for _, name := range []string{"claude-opus-5-5", "claude-sonnet-5-5"} {
+	for _, name := range []string{"claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-haiku-5-5-20261007"} {
 		llm := newAnthropic(Config{Provider: "anthropic", Model: name}, "anthropic-token").(*anthropicSDKLLM)
 		for _, reasoning := range []model.ReasoningConfig{
 			{},

@@ -452,6 +452,9 @@ func DefaultReasoningEffortForModel(provider, modelName string) string {
 	}
 	normalizeModelCapabilitiesReasoning(&caps)
 	mode := NormalizeReasoningMode(caps.ReasoningMode)
+	if mode == ReasoningModeNone {
+		return ""
+	}
 	if mode != ReasoningModeEffort && mode != ReasoningModeToggle {
 		return PreferredReasoningEffort(inferReasoningEfforts(provider, modelName))
 	}

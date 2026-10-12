@@ -90,6 +90,11 @@ type ollamaChatResponse struct {
 
 // newOllama returns a native Ollama /api/chat client.
 func newOllama(cfg Config, token string) model.LLM {
+	if strings.EqualFold(strings.TrimSpace(cfg.ReasoningMode), "none") &&
+		(len(cfg.ReasoningLevels) > 0 || len(cfg.SupportedReasoningEfforts) > 0) {
+		// Explicit levels retain the compatible boolean control contract.
+		cfg.ReasoningMode = "toggle"
+	}
 	baseURL := strings.TrimRight(strings.TrimSpace(cfg.BaseURL), "/")
 	if strings.HasSuffix(strings.ToLower(baseURL), "/v1") {
 		baseURL = baseURL[:len(baseURL)-len("/v1")]
@@ -489,6 +494,11 @@ func ollamaThinkValue(cfg model.ReasoningConfig, reasoningMode string) *ollamaTh
 		return nil
 	}
 	if effort == "none" {
+		// No advertised selector: canonical none preserves the provider
+		// default rather than claiming a supported disable control.
+		if strings.EqualFold(strings.TrimSpace(reasoningMode), "none") {
+			return nil
+		}
 		enabled := false
 		return &ollamaThinkParam{enabled: &enabled}
 	}

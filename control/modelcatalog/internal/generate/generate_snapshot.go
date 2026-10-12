@@ -29,6 +29,7 @@ type capEntry struct {
 	DefaultReasoningEffort string   `json:"default_reasoning_effort,omitempty"`
 	Images                 bool     `json:"images,omitempty"`
 	JSONOutput             bool     `json:"json_output,omitempty"`
+	HiddenFromDirectory    bool     `json:"hidden_from_directory,omitempty"`
 }
 
 type capSnapshot map[string]capEntry
@@ -58,19 +59,12 @@ var providerAlias = map[string]string{
 
 func main() {
 	input := flag.String("input", "", "path to a full models.dev api.json snapshot; if empty, fetch -url")
+	openRouterInput := flag.String("openrouter-input", "", "refresh only OpenRouter in the existing -output snapshot from the official /api/v1/models JSON")
 	output := flag.String("output", "control/modelcatalog/models_dev_snapshot.compact.json.gz", "path for the compact gzip snapshot")
 	sourceURL := flag.String("url", defaultModelsDevURL, "models.dev API URL used when -input is empty")
 	flag.Parse()
 
-	raw, err := readSource(*input, *sourceURL)
-	if err != nil {
-		fatal(err)
-	}
-	snap, err := parseModelsDevJSON(raw)
-	if err != nil {
-		fatal(err)
-	}
-	encoded, err := json.Marshal(snap)
+	encoded, err := generateSnapshot(*input, *sourceURL, *openRouterInput, *output)
 	if err != nil {
 		fatal(err)
 	}
@@ -91,7 +85,42 @@ func main() {
 	if err := os.WriteFile(*output, compressed.Bytes(), 0o644); err != nil {
 		fatal(err)
 	}
-	fmt.Printf("wrote %s: %d models, %d bytes json, %d bytes gzip\n", *output, len(snap), len(encoded), compressed.Len())
+	fmt.Printf("wrote %s: %d bytes json, %d bytes gzip\n", *output, len(encoded), compressed.Len())
+}
+
+func generateSnapshot(input, sourceURL, openRouterInput, output string) ([]byte, error) {
+	if strings.TrimSpace(openRouterInput) != "" {
+		if strings.TrimSpace(input) != "" {
+			return nil, fmt.Errorf("-input and -openrouter-input are mutually exclusive")
+		}
+		existing, err := os.ReadFile(output)
+		if err != nil {
+			return nil, err
+		}
+		zr, err := gzip.NewReader(bytes.NewReader(existing))
+		if err != nil {
+			return nil, err
+		}
+		defer zr.Close()
+		compact, err := io.ReadAll(zr)
+		if err != nil {
+			return nil, err
+		}
+		raw, err := os.ReadFile(openRouterInput)
+		if err != nil {
+			return nil, err
+		}
+		return refreshOpenRouterSnapshot(compact, raw)
+	}
+	raw, err := readSource(input, sourceURL)
+	if err != nil {
+		return nil, err
+	}
+	snap, err := parseModelsDevJSON(raw)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(snap)
 }
 
 func readSource(input string, sourceURL string) ([]byte, error) {

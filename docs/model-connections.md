@@ -29,9 +29,14 @@ revalidates eligibility and the configuration revision on writes.
 The API preset has a 1,050,000-token context, a 128,000-token output ceiling,
 and efforts `low`, `medium` (default), `high`, `xhigh`, and `max`.
 The `codex` subscription preset uses its separate maintained Codex catalog:
-475,000 usable context tokens (95% of its 500,000-token window), a 32,768-token
-configured output default, `low` default effort, and an additional `ultra` effort. Subscription model
-selection does not establish account entitlement. See the
+475,000 usable context tokens, a 32,768-token configured output default, `low`
+default effort, and an additional `ultra` effort. The window uses the
+user-provided announcement screenshot's 500,000 tokens and the existing 95%
+utilization convention. Public
+[Codex fallback metadata](https://github.com/openai/codex/blob/a9b0815167c27ab13719dd12d13b63e02b70d221/codex-rs/models-manager/models.json)
+still reports 272,000 tokens; authenticated account metadata was unavailable
+to confirm the announced change. Subscription model selection does not
+establish account entitlement. See the
 [OpenAI model specification](https://developers.openai.com/api/docs/models/gpt-6.1-sol).
 
 Subscription presets are maintained locally, independently of the API catalog
@@ -49,6 +54,21 @@ recommendation does not mean its provider has stopped serving it. Claude Haiku
 128,000-token output ceiling and `medium` default effort. See
 [Haiku 5.5 specifications](https://platform.claude.com/docs/en/models/haiku-5-5/overview).
 
+The OpenRouter directory includes text-output models supporting tools in the
+[official model list](https://openrouter.ai/api/v1/models), excluding batch
+routes. Other routes retain historical capability lookup. Absence from this
+public list does not establish that a service has stopped. Directory defaults
+use the smaller positive model and primary-provider context limit as a conservative
+default, and the primary-provider published output limit; these are not limits
+shared by every route. Historical entries absent from the selectable directory
+retain their capability metadata. Effort choices follow the endpoint's explicit
+reasoning metadata; omitted controls preserve the service default. Local
+capability overrides and positive saved window values retain precedence.
+`reasoning_mode: "none"` with
+no declared levels means no provider selector: the internal `none` choice
+omits a wire disable command. Explicit configured levels or an effort/toggle
+mode retain manual control.
+
 `anthropic` includes `claude-sonnet-5-5`, with a 1,000,000-token context,
 128,000-token output ceiling and `high` default effort. Caelis requests
 summarized adaptive thinking so progress between tool calls remains visible.
@@ -59,14 +79,17 @@ Anthropic's prefix mismatch control. Canonical Session history retains them.
 The adapter uses automatic tool selection (or `none` when tools are disabled)
 and leaves sampling parameters unset.
 
-Sonnet 5.5 thinking blocks are bound to their preceding instructions, tools and
-history. Caelis requests `drop_block` with the public
+Sonnet 5.5 and Haiku 5.5 thinking blocks are bound to their preceding
+instructions, tools and history. Caelis requests `drop_block` with the public
 `thinking-binding-controls-2026-08-01` beta header for adaptive thinking, so
 tool discovery or refreshed instructions let Anthropic drop invalid thinking
 instead of rejecting the next request. Valid blocks remain available; dropped
 reasoning may need to be generated again. Changing a model or account also does
 not guarantee retention of its thinking. See
 [Anthropic's preserved thinking contract](https://platform.claude.com/docs/en/build-with-claude/preserved-thinking).
+Haiku 5.5 also requests summarized adaptive thinking. When thinking is disabled,
+its request omits prior thinking blocks while canonical history retains them.
+See the [Haiku migration guide](https://platform.claude.com/docs/en/models/haiku-5-5/migration-guide).
 
 ## Interactive provider authentication
 

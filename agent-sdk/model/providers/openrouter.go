@@ -1,12 +1,26 @@
 package providers
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/caelis-labs/caelis/agent-sdk/model"
+)
 
 func newOpenRouter(cfg Config, token string) *openAICompatLLM {
 	llm := newOpenAICompat(cfg, token)
 	llm.api = APIOpenRouter
 	llm.options.StrictFunctionTools = true
 	llm.openRouter = cloneOpenRouterConfig(cfg.OpenRouter)
+	if strings.EqualFold(strings.TrimSpace(cfg.ReasoningMode), "none") &&
+		len(cfg.ReasoningLevels) == 0 && len(cfg.SupportedReasoningEfforts) == 0 {
+		llm.options.ApplyReasoning = func(payload *openAICompatRequest, reasoning model.ReasoningConfig) {
+			// No selector is declared: none preserves the endpoint default
+			// instead of sending an unadvertised disable command.
+			if !strings.EqualFold(strings.TrimSpace(reasoning.Effort), "none") {
+				applyOpenAIReasoning(payload, reasoning)
+			}
+		}
+	}
 	return llm
 }
 

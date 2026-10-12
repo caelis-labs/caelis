@@ -17,8 +17,12 @@ const codexOAuthEffectiveContextWindowTokens = 258400
 // https://github.com/openai/codex/blob/24462234b2ae/codex-rs/models-manager/models.json
 // https://github.com/openai/codex/blob/24462234b2ae/codex-rs/protocol/src/openai_models.rs
 //
-// GPT-6.1 Sol uses 95% of its 500000-token subscription window, matching the
-// protocol's default utilization. Other models keep their separate defaults.
+// GPT-6.1 Sol's 500000-token subscription window comes from the user-provided
+// announcement screenshot (2026-10-12), converted using the existing 95%
+// utilization convention. Public Codex metadata still reports 272000; no
+// authenticated account metadata was obtained to verify the announced change:
+// https://github.com/openai/codex/blob/a9b0815167c27ab13719dd12d13b63e02b70d221/codex-rs/models-manager/models.json
+// Other models keep their separate defaults.
 // Selectability does not imply account entitlement.
 //
 // Control retains unselectable entries for saved profiles whose capabilities,

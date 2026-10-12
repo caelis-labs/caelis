@@ -20,12 +20,12 @@ type ollamaCloudModel struct {
 // selectable Cloud catalog.
 var ollamaCloudModels = []ollamaCloudModel{
 	{
-		// https://ollama.com/library/mistral-large-4
-		Name:                   "mistral-large-4",
-		ContextWindowTokens:    1000000,
-		SupportsImages:         true,
-		ReasoningMode:          ReasoningModeToggle,
-		DefaultReasoningEffort: "high",
+		// /api/show reports mistral4.context_length but no thinking descriptor.
+		// Leave controls unset until the Cloud endpoint publishes their values.
+		Name:                "mistral-large-4",
+		ContextWindowTokens: 1048576,
+		SupportsImages:      true,
+		ReasoningMode:       ReasoningModeNone,
 	},
 	{
 		Name:                   "glm-5.3",
@@ -128,7 +128,9 @@ func ollamaCloudCatalogEntries() []catalogEntry {
 				ReasoningMode:          model.ReasoningMode,
 				ReasoningEfforts:       append([]string(nil), model.ReasoningEfforts...),
 				DefaultReasoningEffort: model.DefaultReasoningEffort,
-				SupportsJSONOutput:     true,
+				// https://docs.ollama.com/capabilities/structured-outputs
+				// Cloud does not support format=json or a schema.
+				SupportsJSONOutput: false,
 			},
 		})
 	}

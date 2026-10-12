@@ -113,3 +113,29 @@ func TestRetiredRecommendationsRemainExplicitlyConnectable(t *testing.T) {
 		})
 	}
 }
+
+func TestOpenRouterDirectoryKeepsExplicitHistoricalIDs(t *testing.T) {
+	choices, err := MaintainedSelectableModels(context.Background(), "openrouter", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	current := map[string]bool{}
+	for _, choice := range choices {
+		current[choice.Name] = true
+	}
+	for _, name := range []string{"anthropic/claude-haiku-5.5", "openai/gpt-6.1-sol", "mistralai/mistral-large-4-0", "xiaomi/mimo-v2.6-pro-ultraspeed"} {
+		if !current[name] {
+			t.Fatalf("official chat/tool route %q missing", name)
+		}
+	}
+	const historical = "anthropic/claude-3-haiku"
+	if current[historical] {
+		t.Fatal("excluded historical route still listed")
+	}
+	configs, err := AssembleConnect(context.Background(), ConnectRequest{
+		Provider: "openrouter", APIKey: "synthetic-token", Models: []ModelSelection{{Name: historical, ContextWindowTokens: 500000}},
+	}, ConnectOptions{})
+	if err != nil || len(configs) != 1 || configs[0].Model != historical || configs[0].ContextWindowTokens != 500000 || !ModelSupportsImages(configs[0]) {
+		t.Fatalf("explicit historical connection lost identity/capabilities/override: %#v, %v", configs, err)
+	}
+}

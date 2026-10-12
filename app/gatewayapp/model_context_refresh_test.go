@@ -52,3 +52,27 @@ func TestReloadedSol61ConfigHydratesOnlyMissingContextWindow(t *testing.T) {
 		})
 	}
 }
+
+func TestReloadedOpenRouterConfigPreservesSavedWindow(t *testing.T) {
+	for _, tc := range []struct{ saved, want int }{
+		{want: 200000}, {saved: 1000000, want: 1000000}, {saved: 500000, want: 500000},
+	} {
+		cfg := modelconfig.NormalizeConfig(ModelConfig{Provider: "openrouter", Model: "anthropic/claude-sonnet-4", ContextWindowTokens: tc.saved})
+		store := newAppConfigStore(t.TempDir())
+		if err := store.Save(AppConfig{Models: persistedModelConfig{Configs: []ModelConfig{cfg}}}); err != nil {
+			t.Fatal(err)
+		}
+		lookup, err := newModelLookup(store, 128000)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resolved, err := lookup.ResolveConfig(cfg.ID)
+		if err != nil || resolved.ContextWindowTokens != tc.want || resolved.Model != cfg.Model || !modelconfig.ModelSupportsImages(resolved) {
+			t.Fatalf("saved %d: %#v, %v, want %d", tc.saved, resolved, err, tc.want)
+		}
+		doc, err := store.Load()
+		if err != nil || doc.Models.Configs[0].ContextWindowTokens != tc.saved {
+			t.Fatalf("catalog refresh rewrote saved window: %#v, %v", doc.Models.Configs, err)
+		}
+	}
+}

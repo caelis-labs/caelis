@@ -38,13 +38,20 @@ func TestMistralLarge4CloudCapabilitiesStayEndpointScoped(t *testing.T) {
 		t.Fatal("Mistral Large 4 missing from direct Cloud choices")
 	}
 	caps, ok := LookupModelCapabilities(OllamaCloudProvider, "mistral-large-4")
-	if !ok || caps.ContextWindowTokens != 1000000 || caps.MaxOutputTokens != 0 || caps.DefaultMaxOutputTokens != 32768 ||
-		!caps.SupportsImages || !caps.SupportsToolCalls || caps.ReasoningMode != ReasoningModeToggle {
+	if !ok || caps.ContextWindowTokens != 1048576 || caps.MaxOutputTokens != 0 || caps.DefaultMaxOutputTokens != 32768 ||
+		!caps.SupportsImages || !caps.SupportsToolCalls || !caps.SupportsReasoning || caps.SupportsJSONOutput ||
+		caps.ReasoningMode != ReasoningModeNone || len(ReasoningLevelsForModel(OllamaCloudProvider, "mistral-large-4")) != 0 ||
+		DefaultReasoningEffortForModel(OllamaCloudProvider, "mistral-large-4") != "" {
 		t.Fatalf("Cloud capabilities = %#v, %t", caps, ok)
 	}
 	for _, provider := range []string{"ollama", "openai-compatible", "openai-responses-compatible", "openrouter"} {
 		if caps, ok := LookupModelCapabilities(provider, "mistral-large-4"); ok {
 			t.Fatalf("%s inherited direct Cloud metadata: %#v", provider, caps)
+		}
+	}
+	for _, name := range ListOllamaCloudModels() {
+		if caps, _ := LookupModelCapabilities(OllamaCloudProvider, name); caps.SupportsJSONOutput {
+			t.Fatalf("Cloud %s claims structured outputs", name)
 		}
 	}
 }

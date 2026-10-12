@@ -69,6 +69,7 @@ type capEntry struct {
 	SpeedModes             []SpeedMode `json:"speed_modes,omitempty"`
 	Images                 bool        `json:"images"`
 	JSONOutput             bool        `json:"json_output"`
+	HiddenFromDirectory    bool        `json:"hidden_from_directory,omitempty"`
 }
 
 // capSnapshot is the in-memory representation: map["provider:model"] → capEntry.
