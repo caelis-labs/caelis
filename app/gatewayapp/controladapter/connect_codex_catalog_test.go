@@ -45,8 +45,12 @@ func TestCodexConnectCompletionUsesMaintainedCatalogWithoutAuthentication(t *tes
 		if err != nil {
 			t.Fatalf("CompleteSlashArg(connect-context:codex %s) error = %v", modelName, err)
 		}
-		if len(contexts) != 1 || contexts[0].Value != "258400" {
-			t.Fatalf("Codex %s context candidates = %#v, want 258400", modelName, contexts)
+		wantContext := "258400"
+		if modelName == "gpt-6.1-sol" {
+			wantContext = "475000"
+		}
+		if len(contexts) != 1 || contexts[0].Value != wantContext {
+			t.Fatalf("Codex %s context candidates = %#v, want %s", modelName, contexts, wantContext)
 		}
 	}
 }

@@ -14,103 +14,113 @@ import (
 
 // Tool discovery and refreshed instructions can change a signed block's prefix.
 // This server models the documented rejection for accounts enforcing binding.
-func TestSonnet55ContinuesAfterThinkingPrefixChanges(t *testing.T) {
-	for _, effort := range []string{"high", "off", "none", "disabled"} {
-		for _, change := range []string{"tools", "instructions"} {
-			t.Run(effort+"/"+change, func(t *testing.T) {
-				calls := 0
-				var originalPrefix any
-				server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					calls++
-					var payload map[string]any
-					if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-						t.Error(err)
-						w.WriteHeader(http.StatusBadRequest)
-						return
-					}
-					w.Header().Set("Content-Type", "application/json")
-					if calls == 1 {
+func TestPrefixBoundThinkingContinuesAfterPrefixChanges(t *testing.T) {
+	for _, modelCase := range []struct{ name, offType string }{
+		{name: "claude-sonnet-5-5", offType: "between_tools"},
+		{name: "claude-haiku-5-5", offType: "disabled"},
+	} {
+		for _, effort := range []string{"high", "off", "none", "disabled"} {
+			for _, change := range []string{"tools", "instructions"} {
+				t.Run(modelCase.name+"/"+effort+"/"+change, func(t *testing.T) {
+					calls := 0
+					var originalPrefix any
+					server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						calls++
+						var payload map[string]any
+						if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+							t.Error(err)
+							w.WriteHeader(http.StatusBadRequest)
+							return
+						}
+						w.Header().Set("Content-Type", "application/json")
+						if calls == 1 {
+							thinking := nestedMapForTest(t, payload, "thinking")
+							if thinking["type"] != "adaptive" || thinking["display"] != "summarized" || !strings.Contains(r.Header.Get("anthropic-beta"), "thinking-binding-controls-2026-08-01") {
+								t.Errorf("signed thinking request lacks summarized adaptive binding controls: %#v", thinking)
+							}
+							field := "tools"
+							if change == "instructions" {
+								field = "system"
+							}
+							originalPrefix = payload[field]
+							_, _ = fmt.Fprintf(w, `{"id":"msg_1","type":"message","role":"assistant","model":%q,"stop_reason":"tool_use","content":[{"type":"thinking","thinking":"Find a tool.","signature":"signed-original-prefix"},{"type":"tool_use","id":"search_1","name":"ToolSearch","input":{}}],"usage":{"input_tokens":1,"output_tokens":1}}`, modelCase.name)
+							return
+						}
+						thinking := nestedMapForTest(t, payload, "thinking")
 						field := "tools"
 						if change == "instructions" {
 							field = "system"
 						}
-						originalPrefix = payload[field]
-						_, _ = fmt.Fprint(w, `{"id":"msg_1","type":"message","role":"assistant","model":"claude-sonnet-5-5","stop_reason":"tool_use","content":[{"type":"thinking","thinking":"Find a tool.","signature":"signed-original-prefix"},{"type":"tool_use","id":"search_1","name":"ToolSearch","input":{}}],"usage":{"input_tokens":1,"output_tokens":1}}`)
-						return
-					}
-					thinking := nestedMapForTest(t, payload, "thinking")
-					field := "tools"
+						if reflect.DeepEqual(payload[field], originalPrefix) {
+							t.Error("follow-up did not change the signed prefix")
+						}
+						messages := payload["messages"].([]any)
+						content := messages[1].(map[string]any)["content"].([]any)
+						var signed bool
+						for _, item := range content {
+							block := item.(map[string]any)
+							if block["type"] == "thinking" || block["type"] == "redacted_thinking" {
+								signed = true
+							}
+						}
+						if effort != "high" {
+							if signed || thinking["type"] != modelCase.offType || thinking["block_binding"] != nil {
+								w.WriteHeader(http.StatusBadRequest)
+								_, _ = fmt.Fprint(w, `{"type":"error","error":{"type":"invalid_request_error","message":"Invalid thinking prefix or between_tools block_binding"}}`)
+								return
+							}
+						} else {
+							binding, _ := thinking["block_binding"].(map[string]any)
+							if !signed || binding["prefix_mismatch_behavior"] != "drop_block" || !strings.Contains(r.Header.Get("anthropic-beta"), "thinking-binding-controls-2026-08-01") {
+								w.WriteHeader(http.StatusBadRequest)
+								_, _ = fmt.Fprint(w, `{"type":"error","error":{"type":"invalid_request_error","message":"Thinking block is bound to a different conversation"}}`)
+								return
+							}
+							if !strings.Contains(r.Header.Get("anthropic-beta"), "existing-beta") {
+								t.Error("existing beta header was lost")
+							}
+						}
+						_, _ = fmt.Fprint(w, `{"id":"msg_2","type":"message","role":"assistant","model":"claude-sonnet-5-5","stop_reason":"end_turn","content":[{"type":"text","text":"done"}],"usage":{"input_tokens":1,"output_tokens":1}}`)
+					}))
+					defer server.Close()
+					name := modelCase.name
 					if change == "instructions" {
-						field = "system"
+						name += "-20260928"
 					}
-					if reflect.DeepEqual(payload[field], originalPrefix) {
-						t.Error("follow-up did not change the signed prefix")
+					llm := newAnthropic(Config{Provider: "anthropic", Model: name, BaseURL: server.URL, HTTPClient: server.Client(), Headers: map[string]string{"Anthropic-Beta": "existing-beta"}}, "synthetic-token")
+					request := &model.Request{
+						Instructions: []model.Part{model.NewTextPart("original instructions")},
+						Messages:     []model.Message{model.NewTextMessage(model.RoleUser, "find a tool")},
+						Tools:        []model.ToolSpec{model.NewFunctionToolSpec("ToolSearch", "find tools", map[string]any{"type": "object"})},
+						Reasoning:    model.ReasoningConfig{Effort: "high"},
 					}
-					messages := payload["messages"].([]any)
-					content := messages[1].(map[string]any)["content"].([]any)
-					var signed bool
-					for _, item := range content {
-						block := item.(map[string]any)
-						if block["type"] == "thinking" || block["type"] == "redacted_thinking" {
-							signed = true
+					var first model.Message
+					for event, err := range llm.Generate(context.Background(), request) {
+						if err != nil {
+							t.Fatal(err)
+						}
+						if event.Response != nil {
+							first = event.Response.Message
 						}
 					}
-					if effort != "high" {
-						if signed || thinking["type"] != "between_tools" || thinking["block_binding"] != nil {
-							w.WriteHeader(http.StatusBadRequest)
-							_, _ = fmt.Fprint(w, `{"type":"error","error":{"type":"invalid_request_error","message":"Invalid thinking prefix or between_tools block_binding"}}`)
-							return
-						}
+					request.Messages = append(request.Messages, first, model.NewMessage(model.RoleTool, model.NewToolResultJSONPart("search_1", "ToolSearch", map[string]any{"tools": []string{"lookup"}}, false)))
+					if change == "tools" {
+						request.Tools = append(request.Tools, model.NewFunctionToolSpec("lookup", "look up a value", map[string]any{"type": "object"}))
 					} else {
-						binding, _ := thinking["block_binding"].(map[string]any)
-						if !signed || binding["prefix_mismatch_behavior"] != "drop_block" || !strings.Contains(r.Header.Get("anthropic-beta"), "thinking-binding-controls-2026-08-01") {
-							w.WriteHeader(http.StatusBadRequest)
-							_, _ = fmt.Fprint(w, `{"type":"error","error":{"type":"invalid_request_error","message":"Thinking block is bound to a different conversation"}}`)
-							return
+						request.Instructions = []model.Part{model.NewTextPart("refreshed instructions")}
+					}
+					request.Reasoning.Effort = effort
+					before := model.CloneMessages(request.Messages)
+					for _, err := range llm.Generate(context.Background(), request) {
+						if err != nil {
+							t.Fatalf("follow-up after %s changed: %v", change, err)
 						}
-						if !strings.Contains(r.Header.Get("anthropic-beta"), "existing-beta") {
-							t.Error("existing beta header was lost")
-						}
 					}
-					_, _ = fmt.Fprint(w, `{"id":"msg_2","type":"message","role":"assistant","model":"claude-sonnet-5-5","stop_reason":"end_turn","content":[{"type":"text","text":"done"}],"usage":{"input_tokens":1,"output_tokens":1}}`)
-				}))
-				defer server.Close()
-				name := "claude-sonnet-5-5"
-				if change == "instructions" {
-					name += "-20260928"
-				}
-				llm := newAnthropic(Config{Provider: "anthropic", Model: name, BaseURL: server.URL, HTTPClient: server.Client(), Headers: map[string]string{"Anthropic-Beta": "existing-beta"}}, "synthetic-token")
-				request := &model.Request{
-					Instructions: []model.Part{model.NewTextPart("original instructions")},
-					Messages:     []model.Message{model.NewTextMessage(model.RoleUser, "find a tool")},
-					Tools:        []model.ToolSpec{model.NewFunctionToolSpec("ToolSearch", "find tools", map[string]any{"type": "object"})},
-					Reasoning:    model.ReasoningConfig{Effort: effort},
-				}
-				var first model.Message
-				for event, err := range llm.Generate(context.Background(), request) {
-					if err != nil {
-						t.Fatal(err)
+					if calls != 2 || !reflect.DeepEqual(request.Messages, before) {
+						t.Fatalf("calls = %d; request history mutated = %v", calls, !reflect.DeepEqual(request.Messages, before))
 					}
-					if event.Response != nil {
-						first = event.Response.Message
-					}
-				}
-				request.Messages = append(request.Messages, first, model.NewMessage(model.RoleTool, model.NewToolResultJSONPart("search_1", "ToolSearch", map[string]any{"tools": []string{"lookup"}}, false)))
-				if change == "tools" {
-					request.Tools = append(request.Tools, model.NewFunctionToolSpec("lookup", "look up a value", map[string]any{"type": "object"}))
-				} else {
-					request.Instructions = []model.Part{model.NewTextPart("refreshed instructions")}
-				}
-				before := model.CloneMessages(request.Messages)
-				for _, err := range llm.Generate(context.Background(), request) {
-					if err != nil {
-						t.Fatalf("follow-up after %s changed: %v", change, err)
-					}
-				}
-				if calls != 2 || !reflect.DeepEqual(request.Messages, before) {
-					t.Fatalf("calls = %d; request history mutated = %v", calls, !reflect.DeepEqual(request.Messages, before))
-				}
-			})
+				})
+			}
 		}
 	}
 }

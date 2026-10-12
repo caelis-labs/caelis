@@ -80,7 +80,7 @@ func newAnthropicWithDefaults(cfg Config, token string, defaults anthropicProvid
 		}
 		opts = append(opts, option.WithHeader(key, value))
 	}
-	if isAnthropicSonnet55Model(cfg.Model) {
+	if isAnthropicPrefixBoundThinkingModel(cfg.Model) {
 		betas := []string{anthropicThinkingBindingBeta}
 		for key, value := range cfg.Headers {
 			if strings.EqualFold(strings.TrimSpace(key), "anthropic-beta") && strings.TrimSpace(value) != "" {
@@ -350,8 +350,8 @@ func anthropicReplayMeta(provider string, token string) *model.ReplayMeta {
 
 func (l *anthropicSDKLLM) buildRequest(req *model.Request) (anthropic.MessageNewParams, error) {
 	messages := req.Messages
-	if isAnthropicSonnet55Model(l.name) && anthropicThinkingOff(req.Reasoning.Effort) {
-		// between_tools cannot use the provider's drop_block control. Callers
+	if isAnthropicPrefixBoundThinkingModel(l.name) && anthropicThinkingOff(req.Reasoning.Effort) {
+		// between_tools and disabled cannot use drop_block. Callers
 		// may refresh instructions or discover tools, so omit all signed
 		// thinking on this wire path rather than replaying an invalid prefix.
 		// Canonical history remains intact, including for other models.
@@ -501,6 +501,7 @@ func isAnthropicAdaptiveThinkingModel(modelName string) bool {
 		"claude-mythos-preview",
 		"claude-opus-5",
 		"claude-sonnet-5",
+		"claude-haiku-5-5",
 		"claude-opus-4-8",
 		"claude-opus-4-7",
 		"claude-opus-4-6",
@@ -528,6 +529,11 @@ func isAnthropicSonnet55Model(modelName string) bool {
 	return modelName == "claude-sonnet-5-5" || strings.HasPrefix(modelName, "claude-sonnet-5-5-")
 }
 
+func isAnthropicPrefixBoundThinkingModel(modelName string) bool {
+	modelName = strings.ToLower(strings.TrimSpace(modelName))
+	return isAnthropicSonnet55Model(modelName) || modelName == "claude-haiku-5-5" || strings.HasPrefix(modelName, "claude-haiku-5-5-")
+}
+
 func anthropicThinkingOff(effort string) bool {
 	switch strings.ToLower(strings.TrimSpace(effort)) {
 	case "none", "off", "disabled":
@@ -544,13 +550,14 @@ func applyAnthropicAdaptiveThinking(params *anthropic.MessageNewParams, modelNam
 	adaptive := &anthropic.ThinkingConfigAdaptiveParam{}
 	modelName = strings.ToLower(strings.TrimSpace(modelName))
 	sonnet55 := isAnthropicSonnet55Model(modelName)
-	if sonnet55 {
+	prefixBound := isAnthropicPrefixBoundThinkingModel(modelName)
+	if prefixBound {
 		// Tool discovery and refreshed instructions can change signed prefixes.
 		// Let Anthropic retain valid thinking and drop only invalid blocks.
 		// https://platform.claude.com/docs/en/build-with-claude/preserved-thinking
 		adaptive.SetExtraFields(map[string]any{"block_binding": map[string]any{"prefix_mismatch_behavior": "drop_block"}})
 	}
-	if sonnet55 || modelName == "claude-opus-5-5" || strings.HasPrefix(modelName, "claude-opus-5-5-") {
+	if prefixBound || modelName == "claude-opus-5-5" || strings.HasPrefix(modelName, "claude-opus-5-5-") {
 		// These models omit thinking text by default, including progress updates.
 		adaptive.Display = anthropic.ThinkingConfigAdaptiveDisplaySummarized
 		params.Thinking.OfAdaptive = adaptive
@@ -568,7 +575,7 @@ func applyAnthropicAdaptiveThinking(params *anthropic.MessageNewParams, modelNam
 			return
 		}
 		disabled := anthropic.NewThinkingConfigDisabledParam()
-		params.Thinking.OfDisabled = &disabled
+		params.Thinking = anthropic.ThinkingConfigParamUnion{OfDisabled: &disabled}
 		return
 	}
 	if effort == "" && reasoning.BudgetTokens <= 0 {

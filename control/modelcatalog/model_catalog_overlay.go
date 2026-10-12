@@ -185,14 +185,15 @@ func ListRecommendedModels(provider string) []string {
 // ListCatalogModels is kept for callers that historically used "catalog" to
 // mean curated recommendations. New code should prefer ListRecommendedModels
 // when it needs recommendations, or ListModelDirectoryModels when it needs a
-// models.dev directory listing.
+// provider model directory listing.
 func ListCatalogModels(provider string) []string {
 	return ListRecommendedModels(provider)
 }
 
-// ListModelDirectoryModels returns models.dev directory entries for a provider.
+// ListModelDirectoryModels returns selectable directory entries for a provider.
 // Directory provider aliases are explicit so known routed providers can opt
-// into an upstream namespace without broad substring matching.
+// into an upstream namespace without broad substring matching. Embedded
+// directory exclusions constrain remote listings; explicit local overrides win.
 func ListModelDirectoryModels(provider string) []string {
 	provider = strings.ToLower(strings.TrimSpace(provider))
 	if provider == "" {
@@ -205,9 +206,15 @@ func ListModelDirectoryModels(provider string) []string {
 	embedded := embeddedCatalog
 	dynamicMu.RUnlock()
 
-	collector.addSnapshot(local, provider, modelDirectoryProviderMatches)
-	collector.addSnapshot(remote, provider, modelDirectoryProviderMatches)
-	collector.addSnapshot(embedded, provider, modelDirectoryProviderMatches)
+	collector.addDirectorySnapshot(local, provider)
+	for key, entry := range embedded {
+		p, model, ok := splitCatalogKey(key)
+		if ok && modelDirectoryProviderMatches(provider, p) && entry.HiddenFromDirectory {
+			collector.hide(model)
+		}
+	}
+	collector.addDirectorySnapshot(remote, provider)
+	collector.addDirectorySnapshot(embedded, provider)
 	return collector.sorted()
 }
 
@@ -241,6 +248,29 @@ func (c modelListCollector) addSnapshot(snap capSnapshot, provider string, match
 	}
 }
 
+func (c modelListCollector) hide(model string) {
+	key := strings.ToLower(strings.TrimSpace(model))
+	if key != "" && key != "*" {
+		if _, exists := c.seen[key]; !exists {
+			c.seen[key] = ""
+		}
+	}
+}
+
+func (c modelListCollector) addDirectorySnapshot(snap capSnapshot, provider string) {
+	for key, entry := range snap {
+		p, model, ok := splitCatalogKey(key)
+		if !ok || !modelDirectoryProviderMatches(provider, p) {
+			continue
+		}
+		if entry.HiddenFromDirectory {
+			c.hide(model)
+		} else {
+			c.add(model)
+		}
+	}
+}
+
 func (c modelListCollector) addOverlaySnapshot(snap overlaySnapshot, provider string, match func(string, string) bool) {
 	for key := range snap {
 		p, model, ok := splitCatalogKey(key)
@@ -257,7 +287,9 @@ func (c modelListCollector) addOverlaySnapshot(snap overlaySnapshot, provider st
 func (c modelListCollector) sorted() []string {
 	out := make([]string, 0, len(c.seen))
 	for _, model := range c.seen {
-		out = append(out, model)
+		if model != "" {
+			out = append(out, model)
+		}
 	}
 	sort.Slice(out, func(i, j int) bool {
 		return strings.ToLower(out[i]) < strings.ToLower(out[j])

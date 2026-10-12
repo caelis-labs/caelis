@@ -59,6 +59,8 @@ func TestAnthropicBuildRequestUsesAdaptiveThinkingForSupportedModels(t *testing.
 		model    string
 	}{
 		{name: "Opus 5.5", provider: "anthropic", model: "claude-opus-5-5"},
+		{name: "Haiku 5.5", provider: "anthropic", model: "claude-haiku-5-5"},
+		{name: "Haiku 5.5 snapshot", provider: "anthropic", model: "claude-haiku-5-5-20261007"},
 		{name: "current Claude 5", provider: "anthropic", model: "claude-sonnet-5"},
 		{name: "legacy Claude 4", provider: "anthropic", model: "claude-opus-4-8"},
 		{name: "compatible endpoint", provider: "anthropic-compatible", model: "claude-fable-5-1"},
@@ -189,6 +191,8 @@ func TestAnthropicBuildRequestHandlesThinkingOffByModel(t *testing.T) {
 		{model: "claude-sonnet-5", want: "disabled"},
 		{model: "claude-sonnet-5-5", want: "between_tools"},
 		{model: "claude-sonnet-5-5-20260928", want: "between_tools"},
+		{model: "claude-haiku-5-5", want: "disabled"},
+		{model: "claude-haiku-5-5-20261007", want: "disabled"},
 	} {
 		for _, effort := range []string{"none", "off", "disabled"} {
 			t.Run(tc.model+"/"+effort, func(t *testing.T) {
@@ -217,7 +221,7 @@ func TestAnthropicBuildRequestHandlesThinkingOffByModel(t *testing.T) {
 }
 
 func TestAnthropic55BuildRequestUsesAdaptiveEffortWithoutManualBudget(t *testing.T) {
-	for _, name := range []string{"claude-opus-5-5", "claude-sonnet-5-5"} {
+	for _, name := range []string{"claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-haiku-5-5-20261007"} {
 		llm := newAnthropic(Config{Provider: "anthropic", Model: name}, "anthropic-token").(*anthropicSDKLLM)
 		for _, reasoning := range []model.ReasoningConfig{
 			{},
@@ -257,6 +261,38 @@ func TestAnthropic55BuildRequestUsesAdaptiveEffortWithoutManualBudget(t *testing
 				}
 			})
 		}
+	}
+}
+
+func TestHaiku55BuildRequestUsesAdaptiveEffortAndKeepsOffAvailable(t *testing.T) {
+	llm := newAnthropic(Config{Provider: "anthropic", Model: "claude-haiku-5-5"}, "test-token").(*anthropicSDKLLM)
+	for _, effort := range []string{"low", "medium", "high", "xhigh", "max", "none"} {
+		t.Run(effort, func(t *testing.T) {
+			params, err := llm.buildRequest(&model.Request{
+				Messages:  []model.Message{model.NewTextMessage(model.RoleUser, "reason carefully")},
+				Reasoning: model.ReasoningConfig{Effort: effort, BudgetTokens: 4096},
+				Tools:     []model.ToolSpec{model.NewFunctionToolSpec("lookup", "look up a value", map[string]any{"type": "object", "properties": map[string]any{}})},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			payload := marshalAnthropicParamsForTest(t, params)
+			thinking := nestedMapForTest(t, payload, "thinking")
+			want := "adaptive"
+			if effort == "none" {
+				want = "disabled"
+			} else if got := nestedMapForTest(t, payload, "output_config")["effort"]; got != effort {
+				t.Fatalf("effort = %#v, want %q", got, effort)
+			}
+			if thinking["type"] != want || thinking["budget_tokens"] != nil {
+				t.Fatalf("thinking = %#v, want %s without manual budget", thinking, want)
+			}
+			for _, field := range []string{"tool_choice", "temperature", "top_p", "top_k"} {
+				if _, ok := payload[field]; ok {
+					t.Fatalf("%s = %#v, want provider default", field, payload[field])
+				}
+			}
+		})
 	}
 }
 

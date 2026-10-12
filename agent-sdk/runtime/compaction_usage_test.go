@@ -276,6 +276,33 @@ func TestComputeUsageSnapshotForModelDoesNotReuseDifferentModelRequestPrefix(t *
 	}
 }
 
+func TestSol61UsableWindowCompactionThresholds(t *testing.T) {
+	t.Parallel()
+	usage := snapshotUsageWithResolvedWindow(nil, 475000, CompactionConfig{})
+	if usage.ContextWindowTokens != 475000 || usage.EffectiveInputBudget != 458109 {
+		t.Fatalf("usable-window budget = %#v", usage)
+	}
+	for _, tc := range []struct {
+		tokens    int
+		reason    string
+		emergency bool
+	}{
+		{tokens: 435203},
+		{tokens: 435204, reason: "context_watermark"},
+		{tokens: 448946, reason: "context_watermark"},
+		{tokens: 448947, reason: "context_limit"},
+		{tokens: 453527, reason: "context_limit"},
+		{tokens: 453528, reason: "context_limit", emergency: true},
+	} {
+		usage.TotalTokens = tc.tokens
+		decision := evaluateWatermark(usage, CompactionConfig{})
+		if decision.Reason != tc.reason || decision.ShouldCompact != (tc.reason != "") ||
+			evaluateEmergencyWatermark(usage, CompactionConfig{}) != tc.emergency {
+			t.Fatalf("tokens=%d: compaction=%#v, want reason=%q emergency=%t", tc.tokens, decision, tc.reason, tc.emergency)
+		}
+	}
+}
+
 func TestDynamicCompactionDefaultsByContextWindow(t *testing.T) {
 	t.Parallel()
 
@@ -298,6 +325,16 @@ func TestDynamicCompactionDefaultsByContextWindow(t *testing.T) {
 			wantSoft:      0.99,
 			wantForce:     0.995,
 			wantEmergency: 0.998,
+		},
+		{
+			name:          "sol 6.1 usable window",
+			window:        475000,
+			wantReserve:   14843,
+			wantSafety:    2048,
+			wantEffective: 458109,
+			wantSoft:      0.95,
+			wantForce:     0.98,
+			wantEmergency: 0.99,
 		},
 		{
 			name:          "200k",
