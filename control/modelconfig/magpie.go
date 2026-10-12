@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 	"github.com/caelis-labs/caelis/control/modelcatalog"
@@ -27,10 +28,14 @@ func selectableMagpieModels(ctx context.Context, template ProviderTemplate, base
 	}
 	out := make([]SelectableModel, 0, len(remote))
 	for _, entry := range remote {
-		if entry.Kind != "" && entry.Kind != "model" && entry.Kind != "chat" && entry.Kind != "decision" {
+		kind := strings.ToLower(strings.TrimSpace(entry.Kind))
+		if kind == "" || kind == "model" {
+			kind = knownMagpieModelKind(entry.Name)
+		}
+		if kind != "" && kind != "model" && kind != "chat" && kind != "decision" {
 			continue
 		}
-		judgment := entry.Kind == "decision"
+		judgment := kind == "decision"
 		if judgmentOnly && !judgment || !judgmentOnly && judgment && !includeJudgments {
 			continue
 		}
@@ -58,6 +63,18 @@ func selectableMagpieModels(ctx context.Context, template ProviderTemplate, base
 		out = append(out, SelectableModel{Name: entry.Name, Judgment: judgment, Detail: detail, MetadataComplete: judgment || entry.ContextWindowTokens > 0 && entry.MaxOutputTokens > 0 && entry.Reasoning != nil, ImageInputKnown: defaults.ImageInput != nil, Defaults: defaults})
 	}
 	return uniqueSelectableModels(out), nil
+}
+
+// The gateway currently omits kind for this speech recognition model while
+// advertising generic chat routes. Xiaomi documents it as audio transcription;
+// keep this exact capability fact until discovery exposes a usable kind.
+func knownMagpieModelKind(name string) string {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "xiaomi/mimo-v2.5-asr":
+		return "audio_transcription"
+	default:
+		return ""
+	}
 }
 
 // JudgmentProvider selects the existing judgment protocol of a gateway or

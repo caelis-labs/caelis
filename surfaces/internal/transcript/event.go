@@ -6,6 +6,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/display"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 )
 
 type Scope string
@@ -75,12 +76,15 @@ type Event struct {
 	// inputs only: Surfaces must not persist them as a second transcript.
 	SourceEventID      string
 	SourceProjectionID string
-	RunID              string
-	TurnID             string
-	Actor              string
-	ParticipantID      string
-	OccurredAt         time.Time
-	Meta               map[string]any
+	// DeliveryMode distinguishes parent Session summaries from the Task-owned
+	// child stream without inferring ownership from narrative text or IDs.
+	DeliveryMode  eventstream.DeliveryMode
+	RunID         string
+	TurnID        string
+	Actor         string
+	ParticipantID string
+	OccurredAt    time.Time
+	Meta          map[string]any
 	// Observation marks a typed transient parent-tool Envelope. It is
 	// presentation provenance only: compatibility metadata cannot grant it.
 	Observation bool

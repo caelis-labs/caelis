@@ -318,10 +318,13 @@ func (m *Model) wizardAction() string {
 	case m.wizard.def.Command == "plugin":
 		return m.pluginWizardAction()
 	case m.wizardStepKey() == "model" && len(s.fields) == 0:
+		count := len(m.wizard.multiSelections["model"])
+		if count == 0 {
+			return "Select a model"
+		}
 		if m.wizard.state["_unified"] == "true" && (m.wizard.state["provider"] == "magpie" || modelconfig.IsJudgmentProvider(m.wizard.state["provider"])) {
 			return "Continue"
 		}
-		count := len(m.wizard.multiSelections["model"])
 		if count > 1 {
 			return fmt.Sprintf("Connect %d models", count)
 		}
