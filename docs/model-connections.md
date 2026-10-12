@@ -29,10 +29,25 @@ revalidates eligibility and the configuration revision on writes.
 The API preset has a 1,050,000-token context, a 128,000-token output ceiling,
 and efforts `low`, `medium` (default), `high`, `xhigh`, and `max`.
 The `codex` subscription preset uses its separate maintained Codex catalog:
-258,400 usable context tokens, a 32,768-token configured output default,
-`low` default effort, and an additional `ultra` effort. Subscription model
+475,000 usable context tokens (95% of its 500,000-token window), a 32,768-token
+configured output default, `low` default effort, and an additional `ultra` effort. Subscription model
 selection does not establish account entitlement. See the
 [OpenAI model specification](https://developers.openai.com/api/docs/models/gpt-6.1-sol).
+
+Subscription presets are maintained locally, independently of the API catalog
+and the built-in Codex CLI adapter's account metadata. A positive saved
+`context_window_tokens` value takes precedence over a refreshed preset; omitted
+values use the current preset. An explicit Runtime context-window override
+takes precedence over both. Caelis subtracts its output reserve and safety
+margin before applying Runtime compaction watermarks, so the preset window is
+not the automatic compaction threshold.
+
+Recommendations favor current model lines. Superseded recommendations retain
+capability lookup for explicit model IDs and saved configurations; hiding a
+recommendation does not mean its provider has stopped serving it. Claude Haiku
+5.5 is the current Haiku recommendation, with a 1,000,000-token context,
+128,000-token output ceiling and `medium` default effort. See
+[Haiku 5.5 specifications](https://platform.claude.com/docs/en/models/haiku-5-5/overview).
 
 `anthropic` includes `claude-sonnet-5-5`, with a 1,000,000-token context,
 128,000-token output ceiling and `high` default effort. Caelis requests

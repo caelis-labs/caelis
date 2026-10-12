@@ -17,8 +17,9 @@ const codexOAuthEffectiveContextWindowTokens = 258400
 // https://github.com/openai/codex/blob/24462234b2ae/codex-rs/models-manager/models.json
 // https://github.com/openai/codex/blob/24462234b2ae/codex-rs/protocol/src/openai_models.rs
 //
-// Current models use the catalog's 272000-token window at the protocol's default
-// 95% utilization. Selectability does not imply account entitlement.
+// GPT-6.1 Sol uses 95% of its 500000-token subscription window, matching the
+// protocol's default utilization. Other models keep their separate defaults.
+// Selectability does not imply account entitlement.
 //
 // Control retains unselectable entries for saved profiles whose capabilities,
 // including image input, are derived rather than persisted. Remove these entries
@@ -34,9 +35,10 @@ type codexOAuthModelSpec struct {
 }
 
 var codexOAuthModelSpecs = []codexOAuthModelSpec{
-	// GPT-6.1 Sol subscription metadata (checked 2026-10-02):
+	// GPT-6.1 Sol reasoning and image metadata; its subscription window is
+	// maintained separately from this bundled upstream fallback:
 	// https://github.com/openai/codex/blob/d25c114d494ddb693290b76bf5e5f64ecbdb38fc/codex-rs/models-manager/models.json
-	{name: "gpt-6.1-sol", contextWindowTokens: codexOAuthEffectiveContextWindowTokens, defaultReasoningEffort: "low", reasoningLevels: []string{"low", "medium", "high", "xhigh", "max", "ultra"}, imageInput: true, fallbackSelectable: true},
+	{name: "gpt-6.1-sol", contextWindowTokens: 500000 * 95 / 100, defaultReasoningEffort: "low", reasoningLevels: []string{"low", "medium", "high", "xhigh", "max", "ultra"}, imageInput: true, fallbackSelectable: true},
 	{name: "gpt-6-astra", contextWindowTokens: codexOAuthEffectiveContextWindowTokens, defaultReasoningEffort: "low", reasoningLevels: []string{"low", "medium", "high", "xhigh", "max", "ultra"}, imageInput: true, fallbackSelectable: true},
 	{name: "gpt-6-sol", contextWindowTokens: codexOAuthEffectiveContextWindowTokens, defaultReasoningEffort: "medium", reasoningLevels: []string{"low", "medium", "high", "xhigh", "max", "ultra"}, imageInput: true, fallbackSelectable: true},
 	{name: "gpt-6-luna", contextWindowTokens: codexOAuthEffectiveContextWindowTokens, defaultReasoningEffort: "medium", reasoningLevels: []string{"low", "medium", "high", "xhigh", "max"}, imageInput: true, fallbackSelectable: true},

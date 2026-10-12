@@ -9,7 +9,9 @@ type catalogEntry struct {
 }
 
 // builtinCatalog is the static registry of known model capabilities.
-// Add new SOTA models here as they become available.
+// Recommend current models while retaining superseded capabilities for saved
+// configurations. Hiding a recommendation does not rewrite a model ID or
+// establish that its provider has stopped serving it.
 var builtinCatalog = []catalogEntry{
 	// ── xAI ───────────────────────────────────────────────────────────────
 	{
@@ -580,8 +582,9 @@ var builtinCatalog = []catalogEntry{
 		},
 	},
 	{
-		provider: "anthropic",
-		pattern:  "claude-sonnet-5",
+		provider:                  "anthropic",
+		pattern:                   "claude-sonnet-5",
+		hiddenFromRecommendations: true,
 		caps: ModelCapabilities{
 			ContextWindowTokens:    1000000,
 			MaxOutputTokens:        128000,
@@ -663,9 +666,27 @@ var builtinCatalog = []catalogEntry{
 			SupportsImages:         true,
 		},
 	},
+	// https://platform.claude.com/docs/en/models/haiku-5-5/overview
 	{
 		provider: "anthropic",
-		pattern:  "claude-haiku-4-5",
+		pattern:  "claude-haiku-5-5",
+		caps: ModelCapabilities{
+			ContextWindowTokens:    1000000,
+			MaxOutputTokens:        128000,
+			DefaultMaxOutputTokens: 32768,
+			SupportsToolCalls:      true,
+			SupportsReasoning:      true,
+			ReasoningMode:          ReasoningModeEffort,
+			ReasoningEfforts:       []string{"low", "medium", "high", "xhigh", "max"},
+			DefaultReasoningEffort: "medium",
+			SupportsJSONOutput:     true,
+			SupportsImages:         true,
+		},
+	},
+	{
+		provider:                  "anthropic",
+		pattern:                   "claude-haiku-4-5",
+		hiddenFromRecommendations: true,
 		caps: ModelCapabilities{
 			ContextWindowTokens:    200000,
 			MaxOutputTokens:        64000,
@@ -887,9 +908,13 @@ var builtinCatalog = []catalogEntry{
 			SupportsImages:         true,
 		},
 	},
+	// Google routes this ID to Gemini 3.8 Flash; keep existing configurations
+	// resolvable without offering a second recommendation for the same route.
+	// https://ai.google.dev/gemini-api/docs/deprecations
 	{
-		provider: "gemini",
-		pattern:  "gemini-3.7-flash",
+		provider:                  "gemini",
+		pattern:                   "gemini-3.7-flash",
+		hiddenFromRecommendations: true,
 		caps: ModelCapabilities{
 			ContextWindowTokens:    1048576,
 			MaxOutputTokens:        65536,

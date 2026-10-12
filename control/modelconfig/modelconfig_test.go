@@ -566,7 +566,11 @@ func TestResolveCodexOAuthModelDefaultsUseSubscriptionCatalog(t *testing.T) {
 			if name == "gpt-6.1-sol" {
 				defaultEffort = "low"
 			}
-			if managed.ContextWindowTokens != 258400 || managed.MaxOutputTokens != 32768 ||
+			contextWindow := 258400
+			if name == "gpt-6.1-sol" {
+				contextWindow = 475000
+			}
+			if managed.ContextWindowTokens != contextWindow || managed.MaxOutputTokens != 32768 ||
 				managed.ReasoningMode != modelcatalog.ReasoningModeEffort || managed.DefaultReasoningEffort != defaultEffort ||
 				!slices.Equal(managed.ReasoningLevels, levels) {
 				t.Fatalf("Codex subscription defaults = %#v", managed)

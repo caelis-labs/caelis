@@ -20,6 +20,14 @@ type ollamaCloudModel struct {
 // selectable Cloud catalog.
 var ollamaCloudModels = []ollamaCloudModel{
 	{
+		// https://ollama.com/library/mistral-large-4
+		Name:                   "mistral-large-4",
+		ContextWindowTokens:    1000000,
+		SupportsImages:         true,
+		ReasoningMode:          ReasoningModeToggle,
+		DefaultReasoningEffort: "high",
+	},
+	{
 		Name:                   "glm-5.3",
 		ContextWindowTokens:    1000000,
 		ReasoningMode:          ReasoningModeEffort,

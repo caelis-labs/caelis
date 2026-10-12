@@ -84,7 +84,7 @@ func TestOpenAILegacyModelsRetainRuntimeCapabilitiesWithoutRecommendations(t *te
 
 func TestAnthropicCatalogRecommendsCurrentModels(t *testing.T) {
 	disableDynamicCatalogForTest(t)
-	want := []string{"claude-fable-5-1", "claude-haiku-4-5", "claude-mythos-5-1", "claude-opus-5-5", "claude-sonnet-5", "claude-sonnet-5-5"}
+	want := []string{"claude-fable-5-1", "claude-haiku-5-5", "claude-mythos-5-1", "claude-opus-5-5", "claude-sonnet-5-5"}
 	if got := ListRecommendedModels("anthropic"); !sameStrings(got, want) {
 		t.Fatalf("Anthropic recommendations = %v, want %v", got, want)
 	}
@@ -95,6 +95,8 @@ func TestAnthropicCatalogRecommendsCurrentModels(t *testing.T) {
 	}{
 		{name: "claude-opus-5-5", effort: "medium"},
 		{name: "claude-sonnet-5-5", effort: "high"},
+		{name: "claude-haiku-5-5", effort: "medium"},
+		{name: "claude-haiku-5-5-20261007", effort: "medium"},
 		{name: "claude-opus-5", effort: "high"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
