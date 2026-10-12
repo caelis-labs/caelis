@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox/internal/processtest"
 )
 
 func TestRuntimeStartAndReopenSession(t *testing.T) {
@@ -308,7 +309,9 @@ func TestRuntimeStartCleansBackgroundProcessAfterShellExit(t *testing.T) {
 		t.Fatalf("Result() error = %v", err)
 	}
 	pid := parseBackgroundPID(t, result.Stdout)
-	waitForProcessGone(t, pid)
+	if err := processtest.WaitForExit(pid, 2*time.Second); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func waitForStdoutMarkerAtLeast(t *testing.T, session sandbox.Session, want int) ([]byte, int64) {
@@ -364,20 +367,6 @@ func parseBackgroundPID(t *testing.T, stdout string) int {
 	}
 	t.Fatalf("stdout = %q, want bg pid", stdout)
 	return 0
-}
-
-func waitForProcessGone(t *testing.T, pid int) {
-	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		if err := syscall.Kill(pid, 0); err != nil {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("process %d is still alive", pid)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
 }
 
 func tailString(value string, limit int) string {

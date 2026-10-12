@@ -81,7 +81,13 @@ func TestPluginSystemE2E(t *testing.T) {
 	}
 	defer stack.Close()
 
-	list, err := stack.plugins().List(context.Background())
+	session, err := startGatewayAppTestSession(context.Background(), stack, "")
+	if err != nil {
+		t.Fatalf("StartSession() error = %v", err)
+	}
+	activated, release := activateHeldSessionRuntime(t, stack, session.SessionID)
+	defer release()
+	list, err := activated.instance.pluginReads().List(context.Background())
 	if err != nil {
 		t.Fatalf("Plugins().List() error = %v", err)
 	}
@@ -96,17 +102,13 @@ func TestPluginSystemE2E(t *testing.T) {
 		case <-ready.Done():
 			t.Fatalf("e2e plugin did not become ready: %+v", list)
 		case <-tick.C:
-			list, err = stack.plugins().List(ready)
+			list, err = activated.instance.pluginReads().List(ready)
 			if err != nil {
 				t.Fatal(err)
 			}
 		}
 	}
 
-	session, err := startGatewayAppTestSession(context.Background(), stack, "")
-	if err != nil {
-		t.Fatalf("StartSession() error = %v", err)
-	}
 	result, err := runHeadlessOnceForGatewayAppTest(context.Background(), stack, session, "plugin-e2e", "Run the Caelis plugin system E2E. Use the available MCP tool.", headless.Options{
 		ResolveApproval: func(_ context.Context, request headless.ApprovalRequest) (approval.Decision, error) {
 			if request.Payload == nil || request.Payload.ToolName != pluginE2EToolName {

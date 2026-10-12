@@ -52,6 +52,10 @@ updates stay bound to the registered canonical directory, resolved at install
 time. Another directory, manifest format or managed registration with the same
 ID is an error, even if its manifest claims the same publisher. To switch source
 directories, explicitly remove the registration before installing the new root.
+Older standard registrations that saved a directory alias instead of a canonical
+root require explicit removal and reinstallation. Their saved manifest cannot
+prove the original package boundary, including when it resolves to a nested file.
+Missing or contradictory saved source evidence also requires reinstallation.
 This new registration starts enabled; private data survives by ID, while any
 plugin-specific Host executable settings must be configured again. Verify
 package provenance before invoking installation.

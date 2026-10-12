@@ -14,7 +14,7 @@ func upsertLocalPluginConfig(state *State, next Config) error {
 		// A manifest's self-declared name or publisher cannot prove ownership
 		// of another directory. Local standard updates retain their source.
 		if previous.Kind == ManifestKindAgentPlugin || next.Kind == ManifestKindAgentPlugin {
-			if previous.Managed || previous.Kind != next.Kind || !samePluginRoot(previous.Root, next.Root) {
+			if previous.Managed || previous.Kind != next.Kind || !sameLocalPluginSource(previous, next) {
 				return fmt.Errorf("plugin service: plugin id %q already belongs to another source at %s; remove it before registering a different directory or format", next.ID, previous.Root)
 			}
 			next.Enabled = previous.Enabled

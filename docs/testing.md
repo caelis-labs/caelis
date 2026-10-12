@@ -23,6 +23,24 @@ tree by default. CI uses standard cache paths for runner cache integration.
 Set `CACHE_ROOT=/path/to/cache` to select another persistent location, or set it
 to an empty value locally to use standard caches.
 
+Security fixtures set and verify their required file mode explicitly; a private
+umask must not turn a deliberately insecure token into a secure file. Unix
+sandbox cleanup tests assert that background processes have terminated. On
+Linux, `/proc` distinguishes a terminated zombie awaiting parent reaping from
+a live process: `kill(pid, 0)` alone cannot prove execution is still active in
+containers whose PID 1 does not reap promptly. Inspection errors fail the test;
+no global umask, process reaper or security-policy change is required.
+
+MCP integration fixtures wait for the catalog of the Runtime that will execute
+the tested Turn, including a newly selected generation after configuration
+updates. Host-shutdown observation fixtures quiesce producers, receive their
+terminal output, then close resources to exercise reconnection. Resource Close
+does not wait for a slow observer to consume every published delivery.
+Kernel lifecycle tests also cancel the producer's parent before explicit Gateway
+cancellation, both during startup and after a Runner is returned. Terminals must
+report cancellation; normal completion and independent observation failures
+retain their own classifications.
+
 ## PR checks
 
 The `quality` workflow runs only on PRs targeting `main`, checks GitHub's PR

@@ -184,7 +184,7 @@ func (g *Gateway) PromptParticipant(ctx context.Context, req PromptParticipantRe
 	g.mu.Unlock()
 
 	handle.publishStarted()
-	go g.runParticipantTurn(runCtx, cancelFn, session, req, handle)
+	go g.runParticipantTurn(runCtx, runtimeParent, cancelFn, session, req, handle)
 
 	return BeginTurnResult{
 		Session: session,

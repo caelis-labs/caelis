@@ -76,7 +76,7 @@ func TestProductSessionObservationAutomaticallyRecoversAfterHostReplacement(t *t
 	}))
 	defer provider.Close()
 	store, workspace := t.TempDir(), t.TempDir()
-	clients, closeHost, err := localclient.New(ctx, store, workspace, provider.URL, provider.Client())
+	clients, quiesceHost, closeHost, err := localclient.NewWithLifecycle(ctx, store, workspace, provider.URL, provider.Client())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,22 +132,32 @@ func TestProductSessionObservationAutomaticallyRecoversAfterHostReplacement(t *t
 	m.textarea.SetValue("draft across Host replacement")
 	frames := []string{m.View().Content}
 	sessions.set(nil)
-	if err := closeHost(); err != nil {
+	// Quiesce publishes the interrupted Turn. Observe it before Close destroys
+	// the feed; resource closure does not wait for clients to drain output.
+	if err := quiesceHost(ctx); err != nil {
 		t.Fatal(err)
 	}
-	closeHost = nil
 	sawInterruption := false
+	var terminal eventstream.Envelope
 	for {
 		msg := recoveryTestRead(t, messages, m)
 		if env, ok := msg.(eventstream.Envelope); ok && eventstream.IsTurnTerminalLifecycle(env) {
+			terminal = env
 			sawInterruption = liveTurnLifecycleInterrupted(env)
-		}
-		if _, ok := msg.(sessionObservationRecoveringMsg); ok {
 			break
 		}
 	}
 	if !sawInterruption || m.turnRunning() {
-		t.Fatal("Host shutdown did not publish interrupted Turn before disconnect")
+		t.Fatalf("Host shutdown did not publish interrupted Turn before disconnect: terminal=%+v lifecycle=%+v running=%t", terminal, terminal.Lifecycle, m.turnRunning())
+	}
+	if err := closeHost(); err != nil {
+		t.Fatal(err)
+	}
+	closeHost = nil
+	for {
+		if _, ok := recoveryTestRead(t, messages, m).(sessionObservationRecoveringMsg); ok {
+			break
+		}
 	}
 	frames = append(frames, m.View().Content)
 	select {
