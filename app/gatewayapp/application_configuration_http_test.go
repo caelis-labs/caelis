@@ -14,10 +14,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
 	"github.com/caelis-labs/caelis/control/application"
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/httpclient"
+	"github.com/caelis-labs/caelis/control/modelconfig"
+	"github.com/caelis-labs/caelis/control/modelprofile"
+	"github.com/caelis-labs/caelis/control/modelprofile/builder"
 )
 
 // revisionProvider exercises the official OpenAI Responses adapter through a
@@ -135,11 +139,39 @@ func connectRevisionHTTPModel(t *testing.T, ctx context.Context, host *applicati
 	}
 	result, err := host.host.ConnectModel(ctx, appserver.ConnectModelRequest{
 		WriteBase: appserver.WriteBase{OperationID: "connect-" + model, ExpectedRevision: &status.Configuration.Revision},
-		Config:    appserver.ConnectConfig{Provider: "openai", Model: model, APIKey: "SYNTHETIC_ONLY_CREDENTIAL"},
+		Config:    appserver.ConnectConfig{Provider: "custom-responses", BaseURL: "https://provider.invalid/v1", Model: model, APIKey: "SYNTHETIC_ONLY_CREDENTIAL", ReasoningLevels: []string{"low", "medium", "high"}, ReasoningEffort: "medium"},
 	})
 	if err != nil || result.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("ConnectModel(%s) = %+v %v", model, result, err)
 	}
+}
+
+// Saved official endpoints keep service-tier and effort coverage independently
+// of onboarding presets. The new-connection tests use Custom Responses instead.
+func startApplicationHTTPHostWithSavedModels(t *testing.T, storeDir, workspace string, provider http.RoundTripper) *applicationHTTPHost {
+	t.Helper()
+	if _, err := os.Stat(filepath.Join(storeDir, "config.json")); os.IsNotExist(err) {
+		doc := configstore.AppConfig{SchemaVersion: configstore.SchemaVersionV2}
+		for _, name := range []string{"gpt-5.4-mini", "gpt-5.4", "gpt-4.1"} {
+			cfg := modelconfig.Config{Provider: "openai", Model: name, BaseURL: "https://api.openai.com/v1", AuthType: "none", ContextWindowTokens: 272000}
+			if name != "gpt-4.1" {
+				cfg.ReasoningLevels, cfg.ReasoningEffort = []string{"low", "medium", "high"}, "medium"
+			}
+			profile, err := builder.FromProvider(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			doc.Models.Configs = append(doc.Models.Configs, cfg)
+			doc.ModelProfiles, err = modelprofile.Upsert(doc.ModelProfiles, profile)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := configstore.New(storeDir).Save(doc); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return startApplicationHTTPHost(t, storeDir, workspace, provider)
 }
 
 func promptRevisionHTTP(t *testing.T, ctx context.Context, client *httpclient.Client, session, operation string) {
@@ -204,7 +236,7 @@ func TestApplicationConfigurationHostHTTPHotRequestsAndRestart(t *testing.T) {
 	}
 	store := filepath.Join(root, "store")
 	provider := newRevisionProvider()
-	host := startApplicationHTTPHost(t, store, workspace, provider)
+	host := startApplicationHTTPHostWithSavedModels(t, store, workspace, provider)
 	defer func() {
 		select {
 		case <-provider.release:
@@ -215,8 +247,6 @@ func TestApplicationConfigurationHostHTTPHotRequestsAndRestart(t *testing.T) {
 			host.close(t)
 		}
 	}()
-	connectRevisionHTTPModel(t, ctx, host, "gpt-5.4-mini")
-	connectRevisionHTTPModel(t, ctx, host, "gpt-5.4")
 	client, _ := registerApplicationHTTP(t, ctx, host, "configuration", filepath.Join(root, "application.credential"))
 	profile := applicationHTTPProfile()
 	profile.Model = "openai/gpt-5.4-mini"

@@ -195,8 +195,8 @@ func preRefreshSolModelConfig(t *testing.T, doc AppConfig) modelconfig.Config {
 	if cfg.Model != "gpt-5.6-sol" {
 		t.Fatalf("loaded model = %q, want gpt-5.6-sol", cfg.Model)
 	}
-	if cfg.ImageInput != nil {
-		t.Fatalf("loaded image_input override = %v, want catalogue-derived nil", *cfg.ImageInput)
+	if cfg.ImageInput == nil || !*cfg.ImageInput {
+		t.Fatalf("loaded image_input override = %v, want pinned image support", *cfg.ImageInput)
 	}
 	for _, endpoint := range doc.Models.ProviderEndpoints {
 		if endpoint.ID == cfg.ProviderEndpointID {

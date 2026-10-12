@@ -56,7 +56,7 @@ func TestApplicationProfileNamedModelUsesFrozenImageCapability(t *testing.T) {
 			}
 			client, _ := registerApplicationHTTP(t, ctx, host, "image-child", filepath.Join(root, "owner.token"))
 			profile := applicationHTTPProfile()
-			profile.Model = "openai-compatible/profile-parent"
+			profile.Model = "custom/profile-parent"
 			created, err := client.CreateApplicationSession(ctx, appserver.CreateApplicationSessionRequest{WriteBase: appserver.WriteBase{OperationID: "parent"}, Profile: profile})
 			if err != nil {
 				t.Fatal(err)

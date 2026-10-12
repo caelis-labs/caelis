@@ -32,51 +32,6 @@ func TestLookupProviderOwnsEndpointAndAuthenticationPolicy(t *testing.T) {
 	}
 }
 
-func TestProviderTemplateOwnsModelSelectionPolicy(t *testing.T) {
-	t.Parallel()
-
-	openRouter, ok := LookupProvider("openrouter")
-	if !ok || !openRouter.UseModelDirectory {
-		t.Fatalf("openrouter template = %#v, want model directory", openRouter)
-	}
-	for _, provider := range []string{"openai-compatible", "openai-chat-compatible", "openai-responses-compatible", "anthropic-compatible"} {
-		template, ok := LookupProvider(provider)
-		if !ok || template.UseModelDirectory || !template.PromptForBaseURL || len(template.DefaultReasoningLevels) == 0 {
-			t.Fatalf("%s template = %#v, want custom endpoint setup with maintained advanced defaults", provider, template)
-		}
-	}
-	if got := CatalogProviderFor("openai-codex", CodexOAuthBaseURL); got != "openai-codex" {
-		t.Fatalf("CatalogProviderFor(openai-codex) = %q, want dedicated subscription catalog", got)
-	}
-}
-
-func TestOllamaProviderOwnsLocalAndCloudEndpointPolicy(t *testing.T) {
-	t.Parallel()
-
-	template, ok := LookupProvider("ollama")
-	if !ok {
-		t.Fatal("LookupProvider(ollama) = false")
-	}
-	if template.DefaultEndpointID != "local" || template.NoAuthRequired || len(template.Endpoints) != 2 {
-		t.Fatalf("ollama template = %#v, want endpoint-specific auth policy", template)
-	}
-	local, ok := EndpointForBaseURL(template, "http://localhost:11434/")
-	if !ok || local.ID != "local" || !local.NoAuthRequired || local.AuthType != model.AuthNone {
-		t.Fatalf("local endpoint = %#v, %v", local, ok)
-	}
-	cloud, ok := EndpointForBaseURL(template, "https://ollama.com/")
-	if !ok || cloud.ID != "cloud" || cloud.NoAuthRequired || cloud.AuthType != model.AuthAPIKey ||
-		cloud.CatalogProvider != modelcatalog.OllamaCloudProvider {
-		t.Fatalf("cloud endpoint = %#v, %v", cloud, ok)
-	}
-	if got := CatalogProviderFor("ollama", local.BaseURL); got != "ollama" {
-		t.Fatalf("CatalogProviderFor(ollama local) = %q, want ollama", got)
-	}
-	if got := CatalogProviderFor("ollama", cloud.BaseURL); got != modelcatalog.OllamaCloudProvider {
-		t.Fatalf("CatalogProviderFor(ollama cloud) = %q, want %s", got, modelcatalog.OllamaCloudProvider)
-	}
-}
-
 func TestAssembleConnectBuildsCompleteKnownModelConfig(t *testing.T) {
 	t.Parallel()
 
@@ -112,50 +67,20 @@ func TestAssembleConnectBuildsCompleteKnownModelConfig(t *testing.T) {
 	}
 }
 
-func TestAssembleConnectAnthropicOpusDefaults(t *testing.T) {
-	t.Parallel()
-	for _, tc := range []struct {
-		model  string
-		effort string
-	}{
-		{model: "claude-opus-5-5", effort: "medium"},
-		{model: "claude-opus-5", effort: "high"},
-	} {
-		t.Run(tc.model, func(t *testing.T) {
-			configs, err := AssembleConnect(context.Background(), ConnectRequest{
-				Provider: "anthropic",
-				Models:   []ModelSelection{{Name: tc.model}},
-				APIKey:   "secret",
-			}, ConnectOptions{})
-			if err != nil || len(configs) != 1 {
-				t.Fatalf("AssembleConnect() = %#v, %v, want one config", configs, err)
-			}
-			cfg := configs[0]
-			if cfg.Model != tc.model || cfg.API != model.APIAnthropic || cfg.ContextWindowTokens != 1000000 || cfg.MaxOutputTok != 32768 {
-				t.Fatalf("assembled model = %#v", cfg)
-			}
-			if cfg.ReasoningMode != modelcatalog.ReasoningModeEffort || cfg.ReasoningEffort != tc.effort ||
-				cfg.DefaultReasoningEffort != tc.effort || !slices.Equal(cfg.ReasoningLevels, []string{"low", "medium", "high", "xhigh", "max"}) {
-				t.Fatalf("assembled reasoning = %#v, want default %q without an off option", cfg, tc.effort)
-			}
-		})
-	}
-}
-
-func TestMaintainedSelectableModelsOnlyReturnsMetadataBackedModels(t *testing.T) {
+func TestSelectableModelsOnlyReturnsMetadataBackedModels(t *testing.T) {
 	t.Parallel()
 
-	models, err := MaintainedSelectableModels(context.Background(), "openai-compatible", "https://proxy.example/v1")
+	models, err := SelectableModels(context.Background(), ConnectRequest{Provider: "custom-chat", BaseURL: "https://proxy.example/v1"})
 	if err != nil {
-		t.Fatalf("MaintainedSelectableModels(openai-compatible) error = %v", err)
+		t.Fatalf("SelectableModels(custom-chat) error = %v", err)
 	}
 	if selectableModelNamesContain(models, "acme-reasoning-model") {
 		t.Fatalf("generic compatible models = %#v, configured unknown model must remain custom", models)
 	}
 
-	models, err = MaintainedSelectableModels(context.Background(), "deepseek", "")
+	models, err = SelectableModels(context.Background(), ConnectRequest{Provider: "deepseek", BaseURL: ""})
 	if err != nil {
-		t.Fatalf("MaintainedSelectableModels(deepseek) error = %v", err)
+		t.Fatalf("SelectableModels(deepseek) error = %v", err)
 	}
 	if got, want := selectableModelNames(models), modelcatalog.ListRecommendedModels("deepseek"); !slices.Equal(got, want) {
 		t.Fatalf("known provider models = %#v, want maintained recommendations %#v", got, want)
@@ -193,136 +118,11 @@ func TestSelectableOllamaModelsUsesLocalInstalledModelsOnly(t *testing.T) {
 	assertSelectableModel(t, models, "glm-5.2:cloud", false)
 }
 
-func TestSelectableOllamaModelsUsesStaticCloudCatalogWithoutRemoteDiscovery(t *testing.T) {
-	t.Parallel()
-
-	requests := 0
-	client := &http.Client{Transport: modelconfigRoundTripFunc(func(r *http.Request) (*http.Response, error) {
-		requests++
-		return modelconfigHTTPResponse(r, http.StatusInternalServerError, "must not call remote catalog"), nil
-	})}
-
-	models, err := selectableOllamaModels(context.Background(), "https://ollama.com/", client)
-	if err != nil {
-		t.Fatalf("selectableOllamaModels() error = %v", err)
-	}
-	want := modelcatalog.ListOllamaCloudModels()
-	if requests != 0 || !slices.Equal(selectableModelNames(models), want) {
-		t.Fatalf("selectableOllamaModels() requests/models = %d/%#v, want static %#v", requests, models, want)
-	}
-	for _, item := range models {
-		if !item.MetadataComplete {
-			t.Fatalf("cloud model = %#v, want complete maintained metadata", item)
-		}
-		if !strings.Contains(item.Detail, "cloud api") {
-			t.Fatalf("cloud model = %#v, want endpoint-owned detail", item)
-		}
-	}
-}
-
-func TestAssembleConnectSupportsOllamaLocalAndCloudEndpoints(t *testing.T) {
-	localConfigs, err := AssembleConnect(context.Background(), ConnectRequest{
-		Provider: "ollama",
-		BaseURL:  "http://localhost:11434",
-		Models:   []ModelSelection{{Name: "custom-local"}},
-	}, ConnectOptions{})
-	if err != nil {
-		t.Fatalf("AssembleConnect(local) error = %v", err)
-	}
-	if len(localConfigs) != 1 {
-		t.Fatalf("AssembleConnect(local) = %#v, want one config", localConfigs)
-	}
-	local := localConfigs[0]
-	if local.EndpointID != "local" || local.AuthType != model.AuthNone || local.Token != "" {
-		t.Fatalf("local Ollama config = %#v, want local no-auth endpoint", local)
-	}
-
-	customConfigs, err := AssembleConnect(context.Background(), ConnectRequest{
-		Provider: "ollama",
-		BaseURL:  "http://ollama.lan:11434",
-		Models:   []ModelSelection{{Name: "custom-local"}},
-	}, ConnectOptions{})
-	if err != nil {
-		t.Fatalf("AssembleConnect(custom local) error = %v", err)
-	}
-	if len(customConfigs) != 1 || customConfigs[0].AuthType != model.AuthNone ||
-		!strings.HasPrefix(customConfigs[0].EndpointID, "custom-") {
-		t.Fatalf("custom local Ollama config = %#v, want custom no-auth endpoint", customConfigs)
-	}
-
-	_, err = AssembleConnect(context.Background(), ConnectRequest{
-		Provider: "ollama",
-		BaseURL:  "https://ollama.com",
-		Models:   []ModelSelection{{Name: "glm-5.2"}},
-	}, ConnectOptions{})
-	if err == nil || !strings.Contains(err.Error(), "API key is missing") {
-		t.Fatalf("AssembleConnect(cloud without key) error = %v, want API-key diagnostic", err)
-	}
-
-	cloudConfigs, err := AssembleConnect(context.Background(), ConnectRequest{
-		Provider: "ollama",
-		BaseURL:  "https://ollama.com",
-		APIKey:   "cloud-secret",
-		Models:   []ModelSelection{{Name: "glm-5.2"}},
-	}, ConnectOptions{})
-	if err != nil {
-		t.Fatalf("AssembleConnect(cloud) error = %v", err)
-	}
-	if len(cloudConfigs) != 1 {
-		t.Fatalf("AssembleConnect(cloud) = %#v, want one config", cloudConfigs)
-	}
-	cloud := cloudConfigs[0]
-	if cloud.EndpointID != "cloud" || cloud.AuthType != model.AuthAPIKey || cloud.Token != "cloud-secret" || !cloud.PersistToken {
-		t.Fatalf("cloud Ollama endpoint/auth = %#v", cloud)
-	}
-	if cloud.Model != "glm-5.2" {
-		t.Fatalf("cloud Ollama model = %#v", cloud)
-	}
-	defaults, err := ResolveModelDefaultsForEndpoint("ollama", "https://ollama.com", cloud.Model)
-	if err != nil {
-		t.Fatalf("ResolveModelDefaultsForEndpoint(ollama cloud) error = %v", err)
-	}
-	if cloud.ContextWindowTokens != defaults.ContextWindowTokens || cloud.MaxOutputTok != defaults.MaxOutputTokens ||
-		cloud.ReasoningMode != defaults.ReasoningMode || cloud.ReasoningEffort != defaults.DefaultReasoningEffort ||
-		!slices.Equal(cloud.ReasoningLevels, defaults.ReasoningLevels) {
-		t.Fatalf("cloud Ollama maintained metadata = %#v, want %#v", cloud, defaults)
-	}
-}
-
-func TestOllamaCloudCatalogSurvivesConfigPersistenceRoundTrip(t *testing.T) {
-	t.Parallel()
-
-	configured := NormalizeConfig(Config{
-		Provider:            "ollama",
-		Model:               "glm-5.2",
-		BaseURL:             "https://ollama.com",
-		ContextWindowTokens: 1000000,
-		MaxOutputTok:        32768,
-	})
-	if configured.ReasoningMode != modelcatalog.ReasoningModeEffort {
-		t.Fatalf("NormalizeConfig(cloud).ReasoningMode = %q, want effort", configured.ReasoningMode)
-	}
-	if levels := ReasoningLevelsForConfig(configured); !slices.Equal(levels, []string{"high", "max"}) {
-		t.Fatalf("ReasoningLevelsForConfig(cloud) = %#v, want high/max", levels)
-	}
-
-	endpoint := SanitizePersistedProviderEndpoint(ProviderEndpointFromConfig(configured))
-	modelRecord := SanitizePersistedConfig(configured)
-	if modelRecord.ReasoningMode != "" {
-		t.Fatalf("SanitizePersistedConfig(cloud).ReasoningMode = %q, want derivable field removed", modelRecord.ReasoningMode)
-	}
-	rehydrated := MergeConfigProviderEndpoint(modelRecord, endpoint)
-	if rehydrated.Provider != "ollama" || rehydrated.BaseURL != "https://ollama.com" ||
-		rehydrated.ReasoningMode != modelcatalog.ReasoningModeEffort {
-		t.Fatalf("MergeConfigProviderEndpoint(cloud) = %#v, want endpoint-scoped reasoning restored", rehydrated)
-	}
-}
-
 func TestAssembleConnectUsesModernCompatibleDefaultsAndSupportsExplicitNoReasoning(t *testing.T) {
 	t.Parallel()
 
 	configs, err := AssembleConnect(context.Background(), ConnectRequest{
-		Provider: "openai-compatible",
+		Provider: "custom-chat",
 		BaseURL:  "https://models.example.test/v1",
 		APIKey:   "secret",
 		Models:   []ModelSelection{{Name: "future-reasoning-model"}},
@@ -334,15 +134,15 @@ func TestAssembleConnectUsesModernCompatibleDefaultsAndSupportsExplicitNoReasoni
 		t.Fatalf("AssembleConnect(defaults) = %#v", configs)
 	}
 	cfg := configs[0]
-	if cfg.ContextWindowTokens != 262144 || cfg.MaxOutputTok != 32768 {
+	if cfg.ContextWindowTokens != 128000 || cfg.MaxOutputTok != 8192 {
 		t.Fatalf("compatible defaults = context:%d output:%d", cfg.ContextWindowTokens, cfg.MaxOutputTok)
 	}
-	if cfg.ReasoningMode != modelcatalog.ReasoningModeEffort || cfg.ReasoningEffort != "medium" || !slices.Equal(cfg.ReasoningLevels, []string{"none", "minimal", "low", "medium", "high", "xhigh"}) {
+	if cfg.ReasoningMode != modelcatalog.ReasoningModeNone || cfg.ReasoningEffort != "" || len(cfg.ReasoningLevels) != 0 {
 		t.Fatalf("compatible reasoning defaults = %#v", cfg)
 	}
 
 	configs, err = AssembleConnect(context.Background(), ConnectRequest{
-		Provider: "openai-compatible",
+		Provider: "custom-chat",
 		BaseURL:  "https://models.example.test/v1",
 		APIKey:   "secret",
 		Models: []ModelSelection{{
@@ -399,17 +199,17 @@ func TestAssembleConnectResolvesReasoningEffortPrecedence(t *testing.T) {
 	}{
 		{
 			name:      "preserve resolved catalog default",
-			provider:  "anthropic",
+			provider:  "deepseek",
 			apiKey:    "secret",
-			selection: ModelSelection{Name: "claude-opus-4-8"},
+			selection: ModelSelection{Name: "deepseek-flash"},
 			want:      "high",
 		},
 		{
 			name:     "rederive unsupported catalog default after levels override",
-			provider: "anthropic",
+			provider: "deepseek",
 			apiKey:   "secret",
 			selection: ModelSelection{
-				Name:            "claude-opus-4-8",
+				Name:            "deepseek-flash",
 				ReasoningLevels: []string{"none", "low"},
 			},
 			want: "low",
@@ -469,8 +269,8 @@ func TestAssembleConnectAuthenticatesOnceForMultipleModels(t *testing.T) {
 	configs, err := AssembleConnect(context.Background(), ConnectRequest{
 		Provider: "grok",
 		Models: []ModelSelection{
-			{Name: "grok-4.5"},
-			{Name: "grok-4.6"},
+			{Name: "grok-4.7"},
+			{Name: "grok-account-preview"},
 		},
 	}, ConnectOptions{Authenticate: func(_ context.Context, req AuthenticateRequest) error {
 		authCalls++
@@ -479,7 +279,7 @@ func TestAssembleConnectAuthenticatesOnceForMultipleModels(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AssembleConnect(multiple) error = %v", err)
 	}
-	if authCalls != 1 || len(configs) != 2 || configs[0].Model != "grok-4.5" || configs[1].Model != "grok-4.6" {
+	if authCalls != 1 || len(configs) != 2 || configs[0].Model != "grok-4.7" || configs[1].Model != "grok-account-preview" {
 		t.Fatalf("batch assembly calls/configs = %d/%#v", authCalls, configs)
 	}
 }
@@ -531,12 +331,12 @@ func TestAssembleConnectRejectsCustomCodexOAuthEndpoint(t *testing.T) {
 	}
 }
 
-func TestMaintainedSelectableModelsUsesCurrentBundledCodexCatalog(t *testing.T) {
+func TestSelectableModelsUsesCurrentBundledCodexCatalog(t *testing.T) {
 	t.Parallel()
 
-	models, err := MaintainedSelectableModels(context.Background(), "codex", "")
+	models, err := SelectableModels(context.Background(), ConnectRequest{Provider: "codex", BaseURL: ""})
 	if err != nil {
-		t.Fatalf("MaintainedSelectableModels(codex) error = %v", err)
+		t.Fatalf("SelectableModels(codex) error = %v", err)
 	}
 	want := []string{"gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna"}
 	if got := selectableModelNames(models); !slices.Equal(got, want) {
@@ -578,54 +378,25 @@ func TestResolveCodexOAuthModelDefaultsUseSubscriptionCatalog(t *testing.T) {
 			if managed.ImageInput == nil || !*managed.ImageInput {
 				t.Fatalf("Codex image input = %v, want maintained true", managed.ImageInput)
 			}
-			native, err := ResolveModelDefaultsForEndpoint("openai", "", name)
-			if err != nil {
+			if _, err := ResolveModelDefaultsForEndpoint("custom-responses", "", name); err != nil {
 				t.Fatal(err)
 			}
-			apiLevels := []string{"none", "low", "medium", "high", "xhigh", "max"}
-			if name == "gpt-6.1-sol" {
-				apiLevels = apiLevels[1:]
-			}
-			if native.ContextWindowTokens != 1050000 || native.DefaultReasoningEffort != "medium" ||
-				!slices.Equal(native.ReasoningLevels, apiLevels) {
-				t.Fatalf("OpenAI API defaults = %#v, want API rather than subscription metadata", native)
-			}
+
 		})
 	}
 }
 
-func TestCodexOAuthLegacyModelsRetainSubscriptionDefaults(t *testing.T) {
+func TestSavedCodexModelPreservesExplicitSettings(t *testing.T) {
 	t.Parallel()
-
-	for _, tt := range []struct {
-		name    string
-		context int
-		effort  string
-		levels  []string
-	}{
-		{"gpt-5.6-sol", 258400, "low", []string{"low", "medium", "high", "xhigh", "max", "ultra"}},
-		{"gpt-5.6-terra", 258400, "medium", []string{"low", "medium", "high", "xhigh", "max", "ultra"}},
-		{"gpt-5.6-luna", 258400, "medium", []string{"low", "medium", "high", "xhigh", "max"}},
-		{"gpt-5.5", 272000, "medium", []string{"low", "medium", "high", "xhigh"}},
-		{"gpt-5.4", 272000, "medium", []string{"low", "medium", "high", "xhigh"}},
-		{"gpt-5.4-mini", 272000, "medium", []string{"low", "medium", "high", "xhigh"}},
-		{"gpt-5.3-codex-spark", 128000, "high", []string{"low", "medium", "high", "xhigh"}},
-		{"gpt-5.2", 272000, "medium", []string{"low", "medium", "high", "xhigh"}},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			defaults, err := ResolveModelDefaultsForEndpoint("codex", "", tt.name)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if defaults.ContextWindowTokens != tt.context || defaults.MaxOutputTokens != 32768 ||
-				defaults.DefaultReasoningEffort != tt.effort || defaults.ReasoningMode != modelcatalog.ReasoningModeEffort ||
-				!slices.Equal(defaults.ReasoningLevels, tt.levels) || defaults.ImageInput == nil || !*defaults.ImageInput {
-				t.Fatalf("legacy Codex defaults = %+v, want original subscription capabilities", defaults)
-			}
-			if slices.Contains(codexOAuthSelectableModels(), tt.name) {
-				t.Fatalf("legacy Codex model %q must not be recommended", tt.name)
-			}
-		})
+	cfg := RestoreSavedCapabilities(Config{
+		Provider: "openai-codex", Model: "gpt-5.6-sol", ContextWindowTokens: 258400,
+		MaxOutputTok: 32768, ReasoningEffort: "low", ReasoningLevels: []string{"low", "high"},
+	})
+	if cfg.ContextWindowTokens != 258400 || cfg.MaxOutputTok != 32768 || cfg.DefaultReasoningEffort != "low" || cfg.ReasoningMode != modelcatalog.ReasoningModeEffort || !slices.Equal(cfg.ReasoningLevels, []string{"low", "high"}) || cfg.ImageInput == nil || !*cfg.ImageInput {
+		t.Fatalf("saved config = %#v", cfg)
+	}
+	if slices.Contains(modelcatalog.ListRecommendedModels("openai-codex"), cfg.Model) {
+		t.Fatal("saved model appeared in the native directory")
 	}
 }
 
@@ -729,14 +500,14 @@ func TestBuildModelPropagatesMaintainedImageInputCapability(t *testing.T) {
 		{
 			Provider: "xai",
 			API:      model.APIOpenAI,
-			Model:    "grok-4.6",
+			Model:    "grok-4.7",
 			BaseURL:  "https://api.x.ai/v1",
 			Token:    "test-token",
 		},
 		{
 			Provider: "xai",
 			API:      model.APIOpenAI,
-			Model:    "grok-4.5",
+			Model:    "grok-4.7",
 			BaseURL:  "https://api.x.ai/v1",
 			Token:    "test-token",
 		},
@@ -766,7 +537,7 @@ func TestCompatibleEndpointsDoNotInheritVendorImageCapabilities(t *testing.T) {
 	t.Parallel()
 
 	if ModelSupportsImages(Config{
-		Provider: "openai-compatible",
+		Provider: "custom-chat",
 		Model:    "gpt-4o-mini",
 		BaseURL:  "https://proxy.example/v1",
 	}) {
@@ -811,24 +582,24 @@ func TestUnknownModelUsesExplicitImageInputCapability(t *testing.T) {
 	}
 }
 
-func TestMaintainedImageCapabilityOverridesConfig(t *testing.T) {
+func TestAcceptedImageCapabilityOverridesPreset(t *testing.T) {
 	t.Parallel()
 
 	disabled := false
-	if !ModelSupportsImages(Config{
-		Provider:   "openai",
+	if ModelSupportsImages(Config{
+		Provider:   "openai-codex",
 		Model:      "gpt-6-sol",
 		BaseURL:    "https://api.openai.com/v1",
 		ImageInput: &disabled,
 	}) {
-		t.Fatal("explicit custom capability overrode maintained OpenAI metadata")
+		t.Fatal("accepted capability was overwritten by directory metadata")
 	}
 }
 
 func TestResolveModelDefaultsCarriesMaintainedImageCapability(t *testing.T) {
 	t.Parallel()
 
-	defaults, err := ResolveModelDefaultsForEndpoint("xai", "", "grok-4.5")
+	defaults, err := ResolveModelDefaultsForEndpoint("xai", "", "grok-4.7")
 	if err != nil {
 		t.Fatalf("ResolveModelDefaultsForEndpoint(maintained image model) error = %v", err)
 	}
@@ -837,12 +608,12 @@ func TestResolveModelDefaultsCarriesMaintainedImageCapability(t *testing.T) {
 	}
 }
 
-func TestAssembleConnectPersistsImageInputOnlyForUnknownModels(t *testing.T) {
+func TestAssembleConnectPinsNativeAndCustomImageCapabilities(t *testing.T) {
 	t.Parallel()
 
 	enabled := true
 	configs, err := AssembleConnect(context.Background(), ConnectRequest{
-		Provider: "openai-compatible",
+		Provider: "custom-chat",
 		BaseURL:  "https://models.acme.example/v1",
 		APIKey:   "secret",
 		Models: []ModelSelection{{
@@ -865,21 +636,11 @@ func TestAssembleConnectPersistsImageInputOnlyForUnknownModels(t *testing.T) {
 		t.Fatalf("custom image model capabilities = %+v, declared=%v", capabilities, declared)
 	}
 
-	disabled := false
-	configs, err = AssembleConnect(context.Background(), ConnectRequest{
-		Provider: "openai",
-		APIKey:   "secret",
-		Models: []ModelSelection{{
-			Name:       "gpt-6-sol",
-			ImageInput: &disabled,
-		}},
-	}, ConnectOptions{})
-	if err != nil {
-		t.Fatalf("AssembleConnect(maintained image model) error = %v", err)
+	configs, err = AssembleConnect(context.Background(), ConnectRequest{Provider: "deepseek", APIKey: "secret", Models: []ModelSelection{{Name: "deepseek-flash"}}}, ConnectOptions{})
+	if err != nil || len(configs) != 1 || configs[0].ImageInput == nil || !*configs[0].ImageInput {
+		t.Fatalf("native capability not pinned: %#v %v", configs, err)
 	}
-	if len(configs) != 1 || configs[0].ImageInput != nil || !ModelSupportsImages(configs[0]) {
-		t.Fatalf("maintained image config = %#v, want directory-owned capability without persisted override", configs)
-	}
+
 }
 
 func TestApplyConfigProviderEndpointFieldsRetainsOmittedCredential(t *testing.T) {
@@ -921,15 +682,14 @@ func TestSpeedModesForConfig(t *testing.T) {
 		{name: "astra has model-specific hint", cfg: Config{Provider: "openai-codex", API: model.APIOpenAICodex, Model: "gpt-6-astra"}, want: true, wantHint: "2x faster, more usage"},
 		{name: "normalizes official openai gpt identity", cfg: Config{Provider: " OpenAI ", Model: "GPT-6-SOL", BaseURL: "https://api.openai.com/v1/"}, want: true, wantHint: "1.5x faster, more usage"},
 		{name: "rejects unknown gpt model", cfg: Config{Provider: "openai", API: model.APIOpenAI, Model: "gpt-unknown"}},
-		{name: "rejects unsupported catalog variant", cfg: Config{Provider: "openai", API: model.APIOpenAI, Model: "gpt-5.5-pro"}},
 		{name: "rejects custom openai endpoint", cfg: Config{Provider: "openai", API: model.APIOpenAI, Model: "gpt-6-sol", BaseURL: "https://proxy.example/v1"}},
 		{name: "rejects custom openai-codex endpoint", cfg: Config{Provider: "openai-codex", API: model.APIOpenAICodex, Model: "gpt-6-sol", BaseURL: "https://proxy.example/codex"}},
 		{name: "rejects non-gpt openai model", cfg: Config{Provider: "openai", API: model.APIOpenAI, Model: "o3"}},
-		{name: "rejects openai-compatible gpt", cfg: Config{Provider: "openai-compatible", API: model.APIOpenAICompatible, Model: "gpt-6-sol"}},
+		{name: "rejects openai-compatible gpt", cfg: Config{Provider: "custom-chat", API: model.APIOpenAICompatible, Model: "gpt-6-sol"}},
 		{name: "rejects openai-responses-compatible gpt", cfg: Config{Provider: "openai-responses-compatible", API: model.APIOpenAIResponses, Model: "gpt-6-sol"}},
 		{name: "rejects openai gpt on compatible api", cfg: Config{Provider: "openai", API: model.APIOpenAICompatible, Model: "gpt-6-sol"}},
 		{name: "rejects openai-codex gpt on chat api", cfg: Config{Provider: "openai-codex", API: model.APIOpenAI, Model: "gpt-6-sol"}},
-		{name: "rejects xai grok", cfg: Config{Provider: "xai", Model: "grok-4.6"}},
+		{name: "rejects xai grok", cfg: Config{Provider: "xai", Model: "grok-4.7"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -224,7 +224,7 @@ func registerApplicationHTTP(t *testing.T, ctx context.Context, host *applicatio
 func applicationHTTPProfile() application.Profile {
 	return application.Profile{
 		Version: "lookup/1", Instructions: "APPLICATION_INSTRUCTION_SENTINEL: use only ApplicationLookup.",
-		Model: "openai-compatible/gpt-4.1", ToolsVersion: "lookup-tools/1", Execution: "tools-only",
+		Model: "custom/gpt-4.1", ToolsVersion: "lookup-tools/1", Execution: "tools-only",
 		Tools: []application.ToolDefinition{{
 			Name: "ApplicationLookup", Description: "Return one application-owned lookup value.",
 			InputSchema: map[string]any{"type": "object", "properties": map[string]any{"key": map[string]any{"type": "string"}}},
@@ -333,7 +333,7 @@ func TestApplicationHostHTTPA01A02A03A09A10(t *testing.T) {
 	}
 	connected, err := host.host.ConnectModel(ctx, appserver.ConnectModelRequest{
 		WriteBase: appserver.WriteBase{OperationID: "connect-model", ExpectedRevision: &status.Configuration.Revision},
-		Config:    appserver.ConnectConfig{Provider: "openai-compatible", Model: "gpt-4.1", BaseURL: "https://provider.invalid/v1", APIKey: "MODEL_CREDENTIAL_LEAK_SENTINEL"},
+		Config:    appserver.ConnectConfig{Provider: "custom-chat", Model: "gpt-4.1", BaseURL: "https://provider.invalid/v1", APIKey: "MODEL_CREDENTIAL_LEAK_SENTINEL"},
 	})
 	if err != nil || connected.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("ConnectModel = %#v, %v", connected, err)
@@ -655,7 +655,7 @@ func TestApplicationHTTPCallbackCompletesOriginalTurnBeforeSibling(t *testing.T)
 	}
 	connected, err := host.host.ConnectModel(ctx, appserver.ConnectModelRequest{
 		WriteBase: appserver.WriteBase{OperationID: "connect-terminal-model", ExpectedRevision: &status.Configuration.Revision},
-		Config:    appserver.ConnectConfig{Provider: "openai-compatible", Model: "gpt-4.1", BaseURL: "https://provider.invalid/v1", APIKey: "SYNTHETIC_KEY"},
+		Config:    appserver.ConnectConfig{Provider: "custom-chat", Model: "gpt-4.1", BaseURL: "https://provider.invalid/v1", APIKey: "SYNTHETIC_KEY"},
 	})
 	if err != nil || connected.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("ConnectModel = %+v, %v", connected, err)

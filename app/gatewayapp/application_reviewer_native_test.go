@@ -73,10 +73,10 @@ func TestApplicationReviewerNativeApprovalContinuation(t *testing.T) {
 				provider := &reviewerHTTPProvider{toolName: name, args: string(raw), decision: decision}
 				host, client, _ := setupReviewerHTTP(t, ctx, root, provider)
 				defer func() { host.close(t) }()
-				profile := application.Profile{Version: "native-review/1", Model: "openai-compatible/gpt-4.1", ToolsVersion: "native/1",
+				profile := application.Profile{Version: "native-review/1", Model: "custom/gpt-4.1", ToolsVersion: "native/1",
 					Execution: "workspace-write", Workspace: application.Workspace{CWD: workspace}, NativeTools: []string{name, "Task"},
 					Permissions: application.Permissions{Mode: "workspace-write", ApprovalMode: "auto-review"},
-					Reviewer:    &application.Reviewer{Kind: "guardian", Model: "openai-compatible/reviewer-model"}}
+					Reviewer:    &application.Reviewer{Kind: "guardian", Model: "custom/reviewer-model"}}
 				created, err := client.CreateApplicationSession(ctx, appserver.CreateApplicationSessionRequest{WriteBase: appserver.WriteBase{OperationID: "native-review"}, Profile: profile})
 				if err != nil || created.SessionID == "" {
 					t.Fatal(created, err)

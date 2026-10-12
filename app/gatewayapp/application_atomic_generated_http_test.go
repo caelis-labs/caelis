@@ -37,7 +37,7 @@ func TestApplicationAtomicGeneratedWireHTTP(t *testing.T) {
 	}
 	if _, err := host.host.ConnectModel(ctx, appserver.ConnectModelRequest{
 		WriteBase: appserver.WriteBase{OperationID: "generated-wire-model", ExpectedRevision: &hostStatus.Configuration.Revision},
-		Config:    appserver.ConnectConfig{Provider: "openai-compatible", Model: "gpt-4.1", BaseURL: "https://provider.invalid/v1", APIKey: "SYNTHETIC_ONLY"},
+		Config:    appserver.ConnectConfig{Provider: "custom-chat", Model: "gpt-4.1", BaseURL: "https://provider.invalid/v1", APIKey: "SYNTHETIC_ONLY"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestApplicationAtomicGeneratedWireHTTP(t *testing.T) {
 	services := []generated.ApplicationMCPServer{{Name: "documents", Transport: "stdio", Command: &command, WorkDir: &workDir}}
 	dirs, roots := []string{selectedDir}, []string{selectedRoot}
 	profile := generated.ApplicationProfile{
-		Version: "generated-wire/1", Instructions: "Use the selected abilities.", Model: "openai-compatible/gpt-4.1",
+		Version: "generated-wire/1", Instructions: "Use the selected abilities.", Model: "custom/gpt-4.1",
 		ToolsVersion: "generated-wire-tools/1", Execution: "tools-only", Inherit: generated.ApplicationInheritance{},
 		NativeTools: []string{}, McpServers: services, SkillDirs: dirs, SkillRoots: roots,
 	}

@@ -57,7 +57,7 @@ func connectApplicationChildModelWithImage(t *testing.T, ctx context.Context, ho
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := host.host.ConnectModel(ctx, appserver.ConnectModelRequest{WriteBase: appserver.WriteBase{OperationID: "connect-child-" + model, ExpectedRevision: &status.Configuration.Revision}, Config: appserver.ConnectConfig{Provider: "openai-compatible", Model: model, BaseURL: "https://provider.invalid/v1", APIKey: "SYNTHETIC_ONLY", ImageInput: image}})
+	result, err := host.host.ConnectModel(ctx, appserver.ConnectModelRequest{WriteBase: appserver.WriteBase{OperationID: "connect-child-" + model, ExpectedRevision: &status.Configuration.Revision}, Config: appserver.ConnectConfig{Provider: "custom-chat", Model: model, BaseURL: "https://provider.invalid/v1", APIKey: "SYNTHETIC_ONLY", ImageInput: image}})
 	if err != nil || result.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("connect child model: %+v %v", result, err)
 	}

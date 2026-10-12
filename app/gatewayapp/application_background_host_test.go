@@ -64,7 +64,7 @@ func backgroundHostModel(t *testing.T, ctx context.Context, host *applicationHTT
 	}
 	result, err := host.host.ConnectModel(ctx, appserver.ConnectModelRequest{
 		WriteBase: appserver.WriteBase{OperationID: "connect-background-model", ExpectedRevision: &status.Configuration.Revision},
-		Config:    appserver.ConnectConfig{Provider: "openai-compatible", Model: "gpt-4.1", BaseURL: "https://provider.invalid/v1", APIKey: "BACKGROUND_MODEL_SECRET_SENTINEL"},
+		Config:    appserver.ConnectConfig{Provider: "custom-chat", Model: "gpt-4.1", BaseURL: "https://provider.invalid/v1", APIKey: "BACKGROUND_MODEL_SECRET_SENTINEL"},
 	})
 	if err != nil || result.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("ConnectModel = %+v %v", result, err)

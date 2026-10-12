@@ -104,15 +104,15 @@ func TestRenderConnectModelPickerShowsMaintainedCatalogModels(t *testing.T) {
 	}
 }
 
-func TestRenderConnectModelPickerShowsCurrentAnthropicCatalog(t *testing.T) {
-	models, err := modelconfig.MaintainedSelectableModels(context.Background(), "anthropic", "")
+func TestRenderConnectModelPickerShowsCurrentDeepSeekCatalog(t *testing.T) {
+	models, err := modelconfig.SelectableModels(context.Background(), modelconfig.ConnectRequest{Provider: "deepseek", BaseURL: ""})
 	if err != nil {
 		t.Fatal(err)
 	}
 	model := NewModel(Config{Commands: DefaultCommands()})
 	model.width = 120
 	model.slashArgActive = true
-	model.slashArgCommand = "connect-model:" + (connectwizard.ConnectWizardState{Provider: "anthropic"}).EncodeCompletionState()
+	model.slashArgCommand = "connect-model:" + (connectwizard.ConnectWizardState{Provider: "deepseek"}).EncodeCompletionState()
 	for _, item := range models {
 		model.slashArgCandidates = append(model.slashArgCandidates, SlashArgCandidate{
 			Value: item.Name, Display: item.Name, Detail: item.Detail,
@@ -121,9 +121,9 @@ func TestRenderConnectModelPickerShowsCurrentAnthropicCatalog(t *testing.T) {
 	}
 
 	rendered := ansi.Strip(model.renderInputOverlay())
-	t.Logf("Anthropic model menu:\n%s", rendered)
+	t.Logf("DeepSeek model menu:\n%s", rendered)
 	fields := strings.Fields(rendered)
-	for _, want := range []string{"claude-fable-5-1", "claude-mythos-5-1", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"} {
+	for _, want := range []string{"deepseek-flash", "deepseek-v4-pro"} {
 		if !slices.Contains(fields, want) {
 			t.Fatalf("renderInputOverlay() = %q, want current model %q", rendered, want)
 		}

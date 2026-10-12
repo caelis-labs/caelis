@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"strings"
 	"sync"
@@ -395,6 +396,35 @@ func TestOpenAIResponsesRejectsReasoningBudgetsAndHostedTools(t *testing.T) {
 	})
 	if !errorcode.Is(err, errorcode.Unsupported) || err == nil || !strings.Contains(err.Error(), "only function tools are supported") {
 		t.Fatalf("hosted tool error = %v, want function-only scope", err)
+	}
+}
+
+func TestOpenAIResponsesNoSelectorPreservesGatewayReasoningDefault(t *testing.T) {
+	for _, mode := range []string{"none", "effort"} {
+		t.Run(mode, func(t *testing.T) {
+			called := false
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				called = true
+				var body map[string]any
+				if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+					t.Error(err)
+					return
+				}
+				reasoning, present := body["reasoning"]
+				if mode == "none" && present {
+					t.Errorf("no-selector profile changed gateway default: %#v", reasoning)
+				}
+				if mode == "effort" && (!present || reasoning.(map[string]any)["effort"] != "none") {
+					t.Errorf("explicit off selection lost: %#v", reasoning)
+				}
+				writeOpenAIResponsesJSON(t, w, openAIResponsesCompletedJSON("route/model", "ok"))
+			}))
+			defer server.Close()
+			llm := newOpenAIResponses(Config{API: APIOpenAIResponses, Model: "route/model", ReasoningMode: mode, BaseURL: server.URL, HTTPClient: server.Client()}, "fixture")
+			if _, _, _, err := collectOpenAICodexTestResponse(llm, &model.Request{Messages: []model.Message{model.NewTextMessage(model.RoleUser, "fixture")}, Reasoning: model.ReasoningConfig{Effort: "none"}}); err != nil || !called {
+				t.Fatalf("generation: called=%v err=%v", called, err)
+			}
+		})
 	}
 }
 

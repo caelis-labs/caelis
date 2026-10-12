@@ -301,6 +301,25 @@ func AtomicWriteFile(path string, data []byte, perm os.FileMode, ops AtomicWrite
 }
 
 func normalizePersistedModelsForSave(models PersistedModelConfig) PersistedModelConfig {
+	models.Configs = append([]modelconfig.Config(nil), models.Configs...)
+	for i, raw := range models.Configs {
+		configured := raw
+		for _, endpoint := range models.ProviderEndpoints {
+			if endpoint.ID == raw.ProviderEndpointID {
+				configured = modelconfig.MergeConfigProviderEndpoint(raw, endpoint)
+				configured.ReasoningMode = raw.ReasoningMode
+				if raw.MaxOutputTok == 0 {
+					configured.MaxOutputTok = 0
+				}
+				break
+			}
+		}
+		configured = modelconfig.RestoreSavedCapabilities(configured)
+		raw.ContextWindowTokens, raw.MaxOutputTok = configured.ContextWindowTokens, configured.MaxOutputTok
+		raw.ImageInput, raw.ReasoningMode = configured.ImageInput, configured.ReasoningMode
+		raw.ReasoningLevels, raw.DefaultReasoningEffort, raw.SpeedModes = configured.ReasoningLevels, configured.DefaultReasoningEffort, configured.SpeedModes
+		models.Configs[i] = raw
+	}
 	for _, cfg := range models.Configs {
 		if modelconfig.ConfigCarriesProviderEndpointFields(cfg) {
 			models.ProviderEndpoints = append(models.ProviderEndpoints, modelconfig.ProviderEndpointFromConfig(cfg))

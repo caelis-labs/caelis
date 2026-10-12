@@ -34,7 +34,7 @@ func TestApplicationConfigurationHostHTTPModelConnectedDuringTurn(t *testing.T) 
 	connectRevisionHTTPModel(t, ctx, host, "gpt-5.4-mini")
 	client, _ := registerApplicationHTTP(t, ctx, host, "late-model", filepath.Join(root, "application.credential"))
 	profile := applicationHTTPProfile()
-	profile.Model = "openai/gpt-5.4-mini"
+	profile.Model = "custom/gpt-5.4-mini"
 	profile.ReasoningEffort = "low"
 	created, err := client.CreateApplicationSession(ctx, appserver.CreateApplicationSessionRequest{
 		WriteBase: appserver.WriteBase{OperationID: "create-late-model"}, Profile: profile,
@@ -57,7 +57,7 @@ func TestApplicationConfigurationHostHTTPModelConnectedDuringTurn(t *testing.T) 
 	// This model is absent from the activation snapshot. Public configuration
 	// admission and the next request must resolve the same current Host catalog.
 	connectRevisionHTTPModel(t, ctx, host, "gpt-5.4")
-	newModel := "openai/gpt-5.4"
+	newModel := "custom/gpt-5.4"
 	updated, err := client.UpdateApplicationConfiguration(ctx, session, application.UpdateConfigurationRequest{
 		OperationID: "select-late-model", ExpectedConfigurationRevision: 1,
 		Patch: application.ConfigurationPatch{Model: &newModel},

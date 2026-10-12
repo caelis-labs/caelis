@@ -94,19 +94,12 @@ func TestSessionModelCommandPersistsExplicitFastMode(t *testing.T) {
 	ctx := context.Background()
 	stack, active := newLocalStateTestStack(t)
 	principal := appserver.Principal{ID: stack.composition.authorities.userID}
-	hostRevision, err := stack.ControlStatus().ConfigurationRevision(ctx)
-	if err != nil {
+	// This native API connection predates the retired onboarding entry.
+	if _, err := stack.connectTestModel(ModelConfig{
+		Provider: "openai", Model: "gpt-6-sol", BaseURL: "https://api.openai.com/v1", Token: "fast-fixture-secret",
+		ReasoningEffort: "xhigh", ReasoningLevels: []string{"low", "high", "xhigh"},
+	}); err != nil {
 		t.Fatal(err)
-	}
-	connected, err := stack.ConfigurationCommands().ConnectModel(ctx, principal, appserver.ConnectModelRequest{
-		WriteBase: appserver.WriteBase{OperationID: "session-fast-connect", ExpectedRevision: &hostRevision},
-		Config: appserver.ConnectConfig{
-			Provider: "openai", Model: "gpt-6-sol", BaseURL: "https://api.openai.com/v1", APIKey: "session-fast-secret",
-			ReasoningEffort: "xhigh", ReasoningLevels: []string{"low", "high", "xhigh"},
-		},
-	})
-	if err != nil || connected.Outcome != appserver.OutcomeCommitted {
-		t.Fatalf("ConnectModel() = %#v, %v", connected, err)
 	}
 
 	active = mustCurrentSession(t, stack, active.SessionID)

@@ -45,7 +45,7 @@ func TestProductACPStreamingChunksShareOneMessageID(t *testing.T) {
 		SkillDirs:    []string{t.TempDir()},
 		Sandbox:      gatewayapp.SandboxConfig{RequestedType: "host"},
 		Model: gatewayapp.ModelConfig{
-			Provider:            "openai-compatible",
+			Provider:            "custom-chat",
 			API:                 providers.APIOpenAICompatible,
 			Model:               "messageid-test",
 			BaseURL:             provider.URL,

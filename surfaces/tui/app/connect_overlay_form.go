@@ -91,13 +91,16 @@ func (m *Model) openConnectCustomModel() {
 	if s == nil || m.wizardStepKey() != "model" || m.slashArgLoadPending {
 		return
 	}
-	m.openConnectCustomForm([]wizardField{
-		{key: "model", label: "Model ID", value: m.slashArgQuery},
-		{key: "image_input", label: "Images", value: "false", choice: true},
-		{key: "context_window_tokens", label: "Context", placeholder: "tokens"},
-		{key: "max_output_tokens", label: "Max output", placeholder: "tokens"},
-		{key: "reasoning_levels", label: "Reasoning", placeholder: "low,medium,high · blank if unsupported"},
-	})
+	fields := []wizardField{{key: "model", label: "Model ID", value: m.slashArgQuery}}
+	if !modelconfig.IsJudgmentProvider(m.wizard.state["provider"]) {
+		fields = append(fields, []wizardField{
+			{key: "image_input", label: "Images", value: "false", choice: true},
+			{key: "context_window_tokens", label: "Context", placeholder: "tokens"},
+			{key: "max_output_tokens", label: "Max output", placeholder: "tokens"},
+			{key: "reasoning_levels", label: "Reasoning", placeholder: "low,medium,high · blank if unsupported"},
+		}...)
+	}
+	m.openConnectCustomForm(fields)
 }
 
 func (m *Model) openConnectCustomEndpoint() {

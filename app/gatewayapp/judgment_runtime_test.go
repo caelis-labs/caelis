@@ -100,7 +100,7 @@ func TestJudgmentConnectionBindsOnlySupportedScenesAndNeverBecomesDefault(t *tes
 		t.Fatal(err)
 	}
 	defer stack.Close()
-	configs, err := modelconfig.AssembleConnect(t.Context(), modelconfig.ConnectRequest{Provider: "typesafe", Models: []modelconfig.ModelSelection{{Name: typesafe.DefaultModel}}, APIKey: "fixture-secret"}, modelconfig.ConnectOptions{})
+	configs, err := modelconfig.AssembleConnect(t.Context(), modelconfig.ConnectRequest{Provider: "custom-judgment", BaseURL: "https://api.typesafe.ai/v1", Models: []modelconfig.ModelSelection{{Name: typesafe.DefaultModel}}, APIKey: "fixture-secret"}, modelconfig.ConnectOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1441,7 +1441,7 @@ func TestRunDoctorJSONDoesNotLeakToken(t *testing.T) {
 	testenv.SetHome(t, t.TempDir())
 	storeDir := cliTestStoreDir(t)
 	seedCLIModel(t, storeDir, gatewayapp.ModelConfig{
-		Provider: "minimax", Model: "MiniMax-M1", Token: "super-secret-token",
+		Provider: "deepseek", Model: "deepseek-v4-pro", Token: "super-secret-token",
 	})
 	var out bytes.Buffer
 	var errBuf bytes.Buffer
@@ -1461,8 +1461,8 @@ func TestRunDoctorJSONDoesNotLeakToken(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
 		t.Fatalf("doctor json decode error = %v", err)
 	}
-	if got := report["active_provider"]; got != "minimax" {
-		t.Fatalf("active_provider = %#v, want minimax", got)
+	if got := report["active_provider"]; got != "deepseek" {
+		t.Fatalf("active_provider = %#v, want deepseek", got)
 	}
 }
 

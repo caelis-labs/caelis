@@ -71,12 +71,12 @@ func nativeHostSession(t *testing.T, ctx context.Context, host *applicationHTTPH
 	if err != nil {
 		t.Fatal(err)
 	}
-	connected, err := host.host.ConnectModel(ctx, appserver.ConnectModelRequest{WriteBase: appserver.WriteBase{OperationID: "connect-native", ExpectedRevision: &status.Configuration.Revision}, Config: appserver.ConnectConfig{Provider: "openai-compatible", Model: "gpt-4.1", BaseURL: "https://provider.invalid/v1", APIKey: "SYNTHETIC_ONLY"}})
+	connected, err := host.host.ConnectModel(ctx, appserver.ConnectModelRequest{WriteBase: appserver.WriteBase{OperationID: "connect-native", ExpectedRevision: &status.Configuration.Revision}, Config: appserver.ConnectConfig{Provider: "custom-chat", Model: "gpt-4.1", BaseURL: "https://provider.invalid/v1", APIKey: "SYNTHETIC_ONLY"}})
 	if err != nil || connected.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("connect = %+v, %v", connected, err)
 	}
 	client, _ := registerApplicationHTTP(t, ctx, host, "native", filepath.Join(filepath.Dir(cwd), "native.credential"))
-	profile := application.Profile{Version: "native/1", Instructions: "Use the selected native tools.", Model: "openai-compatible/gpt-4.1", ToolsVersion: "native/1", Execution: "workspace-write", Workspace: application.Workspace{CWD: cwd}}
+	profile := application.Profile{Version: "native/1", Instructions: "Use the selected native tools.", Model: "custom/gpt-4.1", ToolsVersion: "native/1", Execution: "workspace-write", Workspace: application.Workspace{CWD: cwd}}
 	created, err := client.CreateApplicationSession(ctx, appserver.CreateApplicationSessionRequest{WriteBase: appserver.WriteBase{OperationID: "create-native"}, Profile: profile})
 	if err != nil || created.SessionID == "" {
 		t.Fatalf("create = %+v, %v", created, err)
@@ -158,7 +158,7 @@ func TestApplicationNativeHTTPB01B02B10(t *testing.T) {
 	if err := os.Mkdir(worker, 0700); err != nil {
 		t.Fatal(err)
 	}
-	workerProfile := application.Profile{Version: "worker/1", Instructions: "Separate worker", Model: "openai-compatible/gpt-4.1", ToolsVersion: "worker/1", Execution: "workspace-write", Workspace: application.Workspace{CWD: worker}, NativeTools: []string{"Write", "RunCommand", "Task"}}
+	workerProfile := application.Profile{Version: "worker/1", Instructions: "Separate worker", Model: "custom/gpt-4.1", ToolsVersion: "worker/1", Execution: "workspace-write", Workspace: application.Workspace{CWD: worker}, NativeTools: []string{"Write", "RunCommand", "Task"}}
 	workerResult, err := client.CreateApplicationSession(ctx, appserver.CreateApplicationSessionRequest{WriteBase: appserver.WriteBase{OperationID: "create-worker"}, Profile: workerProfile})
 	if err != nil || workerResult.SessionID == "" {
 		t.Fatalf("worker create = %+v, %v", workerResult, err)

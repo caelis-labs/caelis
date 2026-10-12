@@ -2,7 +2,11 @@ package controladapter
 
 import (
 	"context"
+	"io"
+	"net/http"
 	"slices"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/caelis-labs/caelis/control/modelconfig"
@@ -53,6 +57,33 @@ func TestCodexConnectCompletionUsesMaintainedCatalogWithoutAuthentication(t *tes
 			t.Fatalf("Codex %s context candidates = %#v, want %s", modelName, contexts, wantContext)
 		}
 	}
+}
+
+func TestOllamaCompletionOffersPositiveAdvancedDefaults(t *testing.T) {
+	t.Parallel()
+	driver := newHostAssembler(&runtimeDeps{Model: ModelRuntimeDeps{ConnectionModelsFn: func(ctx context.Context, req modelconfig.ConnectRequest) ([]modelconfig.SelectableModel, error) {
+		req.HTTPClient = &http.Client{Transport: connectCatalogRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"models":[{"name":"installed"}]}`)), Header: make(http.Header)}, nil
+		})}
+		return modelconfig.SelectableModels(ctx, req)
+	}}}, "", "")
+	state := connectwizard.ConnectWizardState{Provider: "ollama", Model: "installed", BaseURL: "http://ollama.invalid"}
+	for _, command := range []string{"connect-context:", "connect-maxout:"} {
+		candidates, err := driver.CompleteSlashArg(t.Context(), command+state.EncodeCompletionState(), "", 10)
+		if err != nil || len(candidates) != 1 {
+			t.Fatalf("%s completion: %#v %v", command, candidates, err)
+		}
+		value, err := strconv.Atoi(candidates[0].Value)
+		if err != nil || value <= 0 {
+			t.Fatalf("%s default = %q", command, candidates[0].Value)
+		}
+	}
+}
+
+type connectCatalogRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f connectCatalogRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
 }
 
 func slashCandidateValues(candidates []controlprompt.SlashArgCandidate) []string {

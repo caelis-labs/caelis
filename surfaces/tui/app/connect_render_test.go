@@ -10,6 +10,7 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/internal/controlprompt/connectwizard"
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 )
@@ -27,11 +28,11 @@ func TestRenderSlashArgListUsesWizardHintInsteadOfInternalConnectPayload(t *test
 	}
 	model.slashArgActive = true
 	model.slashArgCommand = "connect-context:" + connectwizard.ConnectWizardState{
-		Provider:       "minimax",
-		BaseURL:        "https://api.minimaxi.com/anthropic",
+		Provider:       "xiaomi",
+		BaseURL:        modelconfig.XiaomiAPIBaseURL,
 		TimeoutSeconds: connectwizard.DefaultConnectTimeoutSeconds,
 		TokenRef:       "sk-secret",
-		Model:          "MiniMax-M2.7-highspeed",
+		Model:          "mimo-v2.6-flash",
 	}.EncodeCompletionState()
 	model.slashArgCandidates = []SlashArgCandidate{{
 		Value:   "204800",
@@ -108,7 +109,7 @@ func TestRenderSlashArgListAlignsProviderHints(t *testing.T) {
 	model.slashArgCandidates = []SlashArgCandidate{
 		{Value: "codex", Display: "codex", Detail: "ChatGPT subscription models through Codex"},
 		{Value: "grok", Display: "grok", Detail: "Grok models through an eligible xAI subscription"},
-		{Value: "openai-chat-compatible", Display: "openai-chat-compatible", Detail: "OpenAI Chat Completions compatible proxy or self-hosted endpoint"},
+		{Value: "custom-chat", Display: "custom-chat", Detail: "OpenAI Chat Completions compatible proxy or self-hosted endpoint"},
 	}
 	model.slashArgIndex = 0
 
@@ -116,7 +117,7 @@ func TestRenderSlashArgListAlignsProviderHints(t *testing.T) {
 	lines := strings.Split(strings.TrimRight(rendered, "\n"), "\n")
 	codex := lineContaining(lines, "codex")
 	grok := lineContaining(lines, "Grok models")
-	compat := lineContaining(lines, "openai-chat-compatible")
+	compat := lineContaining(lines, "custom-chat")
 	if codex == "" || grok == "" || compat == "" {
 		t.Fatalf("renderInputOverlay() = %q, want provider rows", rendered)
 	}
@@ -128,37 +129,20 @@ func TestRenderSlashArgListAlignsProviderHints(t *testing.T) {
 	}
 }
 
-func TestRenderSlashArgListDistinguishesOpenAIProtocolProviders(t *testing.T) {
-	model := NewModel(Config{
-		Commands: DefaultCommands(),
-		Wizards:  DefaultWizards(),
-	})
-	model.width = 140
+func TestRenderSlashArgListShowsCustomProtocolChoices(t *testing.T) {
+	model := NewModel(Config{Commands: DefaultCommands(), Wizards: DefaultWizards()})
+	model.width = 120
 	model.slashArgActive = true
-	model.slashArgCommand = "connect-provider-api-key"
-	model.slashArgCandidates = []SlashArgCandidate{
-		{Value: "openai", Display: "openai", Detail: "OpenAI-hosted models through the Responses API"},
-		{Value: "openai-responses-compatible", Display: "openai-responses-compatible", Detail: "OpenAI Responses API compatible proxy or self-hosted endpoint"},
-		{Value: "openai-chat-compatible", Display: "openai-chat-compatible", Detail: "OpenAI Chat Completions compatible proxy or self-hosted endpoint"},
+	model.slashArgCommand = "connect-custom-protocol"
+	for _, value := range modelconfig.CustomProtocols() {
+		model.slashArgCandidates = append(model.slashArgCandidates, SlashArgCandidate{Value: value, Display: strings.TrimPrefix(value, "custom-"), Detail: "Endpoint API protocol"})
 	}
-	model.slashArgIndex = 0
-
 	rendered := ansi.Strip(model.renderInputOverlay())
-	t.Logf("provider menu:\n%s", rendered)
-	official := lineContaining(strings.Split(rendered, "\n"), "OpenAI-hosted models")
-	responses := lineContaining(strings.Split(rendered, "\n"), "openai-responses-compatible")
-	chat := lineContaining(strings.Split(rendered, "\n"), "openai-chat-compatible")
-	if official == "" || responses == "" || chat == "" {
-		t.Fatalf("renderInputOverlay() = %q, want distinct OpenAI protocol rows", rendered)
-	}
-	if !strings.Contains(official, "Responses") {
-		t.Fatalf("openai row = %q, want Responses", official)
-	}
-	if !strings.Contains(responses, "Responses") || strings.Contains(responses, "Chat Completions") {
-		t.Fatalf("responses compatible row = %q, want Responses without Chat Completions", responses)
-	}
-	if !strings.Contains(chat, "Chat Completions") {
-		t.Fatalf("chat compatible row = %q, want Chat Completions", chat)
+	t.Logf("custom protocol menu:\n%s", rendered)
+	for _, want := range []string{"responses", "chat", "messages", "judgment"} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("missing %s:\n%s", want, rendered)
+		}
 	}
 }
 
@@ -171,8 +155,8 @@ func TestRenderSlashArgListNarrowWidthKeepsANSIIntact(t *testing.T) {
 	model.slashArgActive = true
 	model.slashArgCommand = "connect"
 	model.slashArgCandidates = []SlashArgCandidate{
-		{Value: "anthropic-compatible", Display: "anthropic-compatible", Detail: "OpenAI-compatible endpoint with custom base URL"},
-		{Value: "openai-chat-compatible", Display: "openai-chat-compatible", Detail: "OpenAI Chat Completions compatible endpoint with custom base URL"},
+		{Value: "custom-messages", Display: "custom-messages", Detail: "OpenAI-compatible endpoint with custom base URL"},
+		{Value: "custom-chat", Display: "custom-chat", Detail: "OpenAI Chat Completions compatible endpoint with custom base URL"},
 	}
 	model.slashArgIndex = 0
 
@@ -191,7 +175,7 @@ func TestRenderSlashArgListNarrowWidthKeepsANSIIntact(t *testing.T) {
 }
 
 func TestRenderSlashArgListUsesWideDisplayForBaseURL(t *testing.T) {
-	const baseURL = "https://proxy.example.test/v1/organizations/acme/projects/caelis/openai-compatible"
+	const baseURL = "https://proxy.example.test/v1/organizations/acme/projects/caelis/custom-chat"
 
 	model := NewModel(Config{
 		Commands: DefaultCommands(),
@@ -199,7 +183,7 @@ func TestRenderSlashArgListUsesWideDisplayForBaseURL(t *testing.T) {
 	})
 	model.width = 140
 	model.slashArgActive = true
-	model.slashArgCommand = "connect-baseurl:openai-compatible"
+	model.slashArgCommand = "connect-baseurl:custom-chat"
 	model.slashArgCandidates = []SlashArgCandidate{
 		{Value: baseURL, Display: baseURL, Detail: "default base URL"},
 	}

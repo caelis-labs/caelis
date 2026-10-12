@@ -1727,7 +1727,7 @@ func TestWizardSuppressesRootSlashCompletion(t *testing.T) {
 }
 
 func TestModelCompletionUsesWideDisplayForLongAliases(t *testing.T) {
-	const alias = "openai-compatible/team-platform-evaluation-gpt-5.5-coding-preview-with-extended-context-and-tool-router"
+	const alias = "custom-chat/team-platform-evaluation-gpt-5.5-coding-preview-with-extended-context-and-tool-router"
 
 	model := NewModel(Config{Commands: DefaultCommands()})
 	model.width = 140
@@ -1883,7 +1883,7 @@ func TestFileCompletionListHidesPrefixAndTypeDetail(t *testing.T) {
 	model.mentionCandidates = []CompletionCandidate{
 		{Value: "docs/", Display: "docs/", Detail: "directory"},
 		{Value: "docs/message.sql", Display: "docs/message.sql", Detail: "file"},
-		{Value: "docs/providers/openai-compatible/base-url-reference.md", Display: "docs/providers/openai-compatible/base-url-reference.md", Detail: "file"},
+		{Value: "docs/providers/custom-chat/base-url-reference.md", Display: "docs/providers/custom-chat/base-url-reference.md", Detail: "file"},
 	}
 
 	rendered := ansi.Strip(model.renderInputOverlay())
@@ -1893,7 +1893,7 @@ func TestFileCompletionListHidesPrefixAndTypeDetail(t *testing.T) {
 			t.Fatalf("renderInputOverlay() = %q, should not contain %q", rendered, unwanted)
 		}
 	}
-	for _, want := range []string{"docs/", "docs/message.sql", "docs/providers/openai-compatible/base-url-reference.md"} {
+	for _, want := range []string{"docs/", "docs/message.sql", "docs/providers/custom-chat/base-url-reference.md"} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("renderInputOverlay() = %q, want %q", rendered, want)
 		}

@@ -28,7 +28,15 @@ func (d *assembler) hasReusableConnectAuth(ctx context.Context, provider string,
 		return false
 	}
 	for _, choice := range choices {
-		if !strings.EqualFold(strings.TrimSpace(choice.Provider), strings.TrimSpace(provider)) {
+		canonical := provider
+		api := modelconfig.DefaultAPIForProvider(provider)
+		if template, ok := modelconfig.LookupProvider(provider); ok {
+			canonical, api = template.Provider, template.API
+		}
+		if !strings.EqualFold(strings.TrimSpace(choice.Provider), strings.TrimSpace(canonical)) {
+			continue
+		}
+		if modelconfig.NormalizeEndpointID(choice.Provider, choice.EndpointID, choice.BaseURL, api) != modelconfig.NormalizeEndpointID(canonical, "", baseURL, api) {
 			continue
 		}
 		if modelconfig.NormalizeBaseURL(choice.BaseURL) == normalizedBaseURL {

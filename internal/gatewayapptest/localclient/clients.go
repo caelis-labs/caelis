@@ -26,7 +26,7 @@ func New(ctx context.Context, storeDir, workspace, providerURL string, httpClien
 		return appserver.AppServerClients{}, nil, err
 	}
 	if _, err := gatewayapptest.ConnectModel(ctx, host, gatewayapp.ModelConfig{
-		Provider: "openai-compatible", Model: "observation", BaseURL: providerURL,
+		Provider: "custom-chat", Model: "observation", BaseURL: providerURL,
 		Token: "test-token", ContextWindowTokens: 128000, MaxOutputTok: 1024,
 	}); err != nil {
 		_ = host.Close()

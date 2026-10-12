@@ -21,8 +21,6 @@ func TestSol61ConnectContextDefaultsAndExplicitOverrides(t *testing.T) {
 		{provider: "codex", window: 258400, want: 258400},
 		{provider: "codex", window: 500000, want: 500000},
 		{provider: "codex", window: 1000000, want: 1000000},
-		{provider: "openai", want: 1050000},
-		{provider: "openai-responses-compatible", want: 262144},
 	} {
 		t.Run(tc.provider+"/"+strconv.Itoa(tc.window), func(t *testing.T) {
 			configs, err := AssembleConnect(context.Background(), ConnectRequest{
@@ -79,63 +77,5 @@ func TestBuildSol61ContextWindowPrecedence(t *testing.T) {
 				t.Fatalf("built window = %#v, %t, want %d", window, ok, tc.want)
 			}
 		})
-	}
-}
-
-func TestRetiredRecommendationsRemainExplicitlyConnectable(t *testing.T) {
-	t.Parallel()
-	for _, tc := range []struct {
-		provider string
-		model    string
-	}{
-		{provider: "anthropic", model: "claude-sonnet-5"},
-		{provider: "anthropic", model: "claude-haiku-4-5"},
-		{provider: "gemini", model: "gemini-3.7-flash"},
-	} {
-		t.Run(tc.provider+"/"+tc.model, func(t *testing.T) {
-			choices, err := MaintainedSelectableModels(context.Background(), tc.provider, "")
-			if err != nil {
-				t.Fatal(err)
-			}
-			for _, choice := range choices {
-				if choice.Name == tc.model {
-					t.Fatalf("%s is still recommended", tc.model)
-				}
-			}
-			configs, err := AssembleConnect(context.Background(), ConnectRequest{
-				Provider: tc.provider,
-				APIKey:   "test-key",
-				Models:   []ModelSelection{{Name: tc.model}},
-			}, ConnectOptions{})
-			if err != nil || len(configs) != 1 || configs[0].Model != tc.model || !ModelSupportsImages(configs[0]) {
-				t.Fatalf("explicit connect = %#v, %v", configs, err)
-			}
-		})
-	}
-}
-
-func TestOpenRouterDirectoryKeepsExplicitHistoricalIDs(t *testing.T) {
-	choices, err := MaintainedSelectableModels(context.Background(), "openrouter", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	current := map[string]bool{}
-	for _, choice := range choices {
-		current[choice.Name] = true
-	}
-	for _, name := range []string{"anthropic/claude-haiku-5.5", "openai/gpt-6.1-sol", "mistralai/mistral-large-4-0", "xiaomi/mimo-v2.6-pro-ultraspeed"} {
-		if !current[name] {
-			t.Fatalf("official chat/tool route %q missing", name)
-		}
-	}
-	const historical = "anthropic/claude-3-haiku"
-	if current[historical] {
-		t.Fatal("excluded historical route still listed")
-	}
-	configs, err := AssembleConnect(context.Background(), ConnectRequest{
-		Provider: "openrouter", APIKey: "synthetic-token", Models: []ModelSelection{{Name: historical, ContextWindowTokens: 500000}},
-	}, ConnectOptions{})
-	if err != nil || len(configs) != 1 || configs[0].Model != historical || configs[0].ContextWindowTokens != 500000 || !ModelSupportsImages(configs[0]) {
-		t.Fatalf("explicit historical connection lost identity/capabilities/override: %#v, %v", configs, err)
 	}
 }

@@ -22,6 +22,9 @@ func BuildJudgment(config Config) (judgment.Evaluator, error) {
 	if config.API != APISystemOne {
 		return nil, fmt.Errorf("modelconfig: model does not support typed judgments")
 	}
+	if config.Provider == "magpie" && config.AuthType == model.AuthNone && config.Token == "" {
+		config.Token = "magpie"
+	}
 	return typesafe.New(typesafe.Config{
 		BaseURL: config.BaseURL, APIKey: config.Token, Model: config.Model,
 		HTTPClient: config.HTTPClient, Timeout: min(config.Timeout, 10*time.Second),

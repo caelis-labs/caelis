@@ -106,20 +106,19 @@ func TestHostModelCommandPersistsSupportedFastModeDefault(t *testing.T) {
 	ctx := context.Background()
 	stack := newLocalStateTestHost(t, &runtimeMemoryHostStub{})
 	principal := appserver.Principal{ID: stack.composition.authorities.userID}
-	revision, err := stack.ControlStatus().ConfigurationRevision(ctx)
+	// This native API connection predates the retired onboarding entry.
+	if _, err := stack.connectTestModel(ModelConfig{
+		Provider: "openai", Model: "gpt-6-sol", BaseURL: "https://api.openai.com/v1", Token: "fast-fixture-secret",
+		ReasoningEffort: "xhigh", ReasoningLevels: []string{"low", "high", "xhigh"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	currentRevision, err := stack.ControlStatus().ConfigurationRevision(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	connected, err := stack.ConfigurationCommands().ConnectModel(ctx, principal, appserver.ConnectModelRequest{
-		WriteBase: appserver.WriteBase{OperationID: "host-fast-connect", ExpectedRevision: &revision},
-		Config: appserver.ConnectConfig{
-			Provider: "openai", Model: "gpt-6-sol", BaseURL: "https://api.openai.com/v1", APIKey: "fast-test-secret",
-			ReasoningEffort: "xhigh", ReasoningLevels: []string{"low", "high", "xhigh"},
-		},
-	})
-	if err != nil || connected.Outcome != appserver.OutcomeCommitted {
-		t.Fatalf("ConnectModel() = %#v, %v", connected, err)
-	}
+	connected := appserver.CommandResult{Revision: currentRevision}
+
 	selected, err := stack.ConfigurationCommands().UseModel(ctx, principal, appserver.UseModelRequest{
 		WriteBase: appserver.WriteBase{OperationID: "host-fast-select", ExpectedRevision: &connected.Revision},
 		Model:     "openai/gpt-6-sol", ReasoningEffort: "xhigh", FastMode: true,
@@ -193,7 +192,7 @@ func TestHostModelConnectUsesCanonicalDocumentAndDoesNotPersistSecretInLedger(t 
 	request := appserver.ConnectModelRequest{
 		WriteBase: appserver.WriteBase{OperationID: "host-model-secret", ExpectedRevision: &saved.ConfigurationRevision},
 		Config: appserver.ConnectConfig{
-			Provider: "openai", Model: "gpt-command", BaseURL: "https://models.example/v1", APIKey: secret,
+			Provider: "custom-responses", Model: "gpt-command", BaseURL: "https://models.example/v1", APIKey: secret,
 		},
 	}
 	result, err := stack.ConfigurationCommands().ConnectModel(ctx, principal, request)
@@ -240,7 +239,7 @@ func TestHostModelCredentialsUseStableEndpointReferenceAcrossPrincipals(t *testi
 		result, connectErr := stack.ConfigurationCommands().ConnectModel(ctx, appserver.Principal{ID: principalID}, appserver.ConnectModelRequest{
 			WriteBase: appserver.WriteBase{OperationID: "shared-operation-id", ExpectedRevision: &expected},
 			Config: appserver.ConnectConfig{
-				Provider: "openai", Model: "shared-model", BaseURL: "https://models.example/v1", APIKey: secret,
+				Provider: "custom-responses", Model: "shared-model", BaseURL: "https://models.example/v1", APIKey: secret,
 			},
 		})
 		if connectErr != nil || result.Outcome != appserver.OutcomeCommitted {
@@ -256,7 +255,7 @@ func TestHostModelCredentialsUseStableEndpointReferenceAcrossPrincipals(t *testi
 	}
 	credentialRef := func(doc AppConfig) string {
 		for _, endpoint := range doc.Models.ProviderEndpoints {
-			if endpoint.Provider == "openai" && endpoint.BaseURL == "https://models.example/v1" {
+			if endpoint.Provider == "custom" && endpoint.BaseURL == "https://models.example/v1" {
 				return endpoint.CredentialRef
 			}
 		}
@@ -299,7 +298,7 @@ func TestHostModelConnectReusableAuthUsesCanonicalSnapshot(t *testing.T) {
 		connected, err := stack.ConfigurationCommands().ConnectModel(ctx, principal, appserver.ConnectModelRequest{
 			WriteBase: appserver.WriteBase{OperationID: "canonical-auth-connect", ExpectedRevision: &revision},
 			Config: appserver.ConnectConfig{
-				Provider: "openai", Model: "canonical-auth", BaseURL: "https://models.example/v1", APIKey: "canonical-secret",
+				Provider: "custom-responses", Model: "canonical-auth", BaseURL: "https://models.example/v1", APIKey: "canonical-secret",
 			},
 		})
 		if err != nil || connected.Outcome != appserver.OutcomeCommitted {
@@ -311,7 +310,7 @@ func TestHostModelConnectReusableAuthUsesCanonicalSnapshot(t *testing.T) {
 			t.Fatal(err)
 		}
 		for index := range doc.Models.ProviderEndpoints {
-			if doc.Models.ProviderEndpoints[index].Provider == "openai" {
+			if doc.Models.ProviderEndpoints[index].Provider == "custom" {
 				doc.Models.ProviderEndpoints[index].CredentialRef = ""
 			}
 		}
@@ -322,7 +321,7 @@ func TestHostModelConnectReusableAuthUsesCanonicalSnapshot(t *testing.T) {
 		result, commandErr := stack.ConfigurationCommands().ConnectModel(ctx, principal, appserver.ConnectModelRequest{
 			WriteBase: appserver.WriteBase{OperationID: "canonical-auth-reject", ExpectedRevision: &saved.ConfigurationRevision},
 			Config: appserver.ConnectConfig{
-				Provider: "openai", Model: "must-require-key", BaseURL: "https://models.example/v1",
+				Provider: "custom-responses", Model: "must-require-key", BaseURL: "https://models.example/v1",
 			},
 		})
 		if commandErr == nil || result.Outcome != appserver.OutcomeRejected || !strings.Contains(commandErr.Error(), "API key") {
@@ -346,7 +345,7 @@ func TestHostModelConnectReusableAuthUsesCanonicalSnapshot(t *testing.T) {
 		connected, err := stack.ConfigurationCommands().ConnectModel(ctx, principal, appserver.ConnectModelRequest{
 			WriteBase: appserver.WriteBase{OperationID: "legacy-ref-seed", ExpectedRevision: &revision},
 			Config: appserver.ConnectConfig{
-				Provider: "openai", Model: "legacy-seed", BaseURL: baseURL, APIKey: "stable-secret",
+				Provider: "custom-responses", Model: "legacy-seed", BaseURL: baseURL, APIKey: "stable-secret",
 			},
 		})
 		if err != nil || connected.Outcome != appserver.OutcomeCommitted {
@@ -362,7 +361,7 @@ func TestHostModelConnectReusableAuthUsesCanonicalSnapshot(t *testing.T) {
 			t.Fatal(err)
 		}
 		for index := range doc.Models.ProviderEndpoints {
-			if doc.Models.ProviderEndpoints[index].Provider == "openai" &&
+			if doc.Models.ProviderEndpoints[index].Provider == "custom" &&
 				modelconfig.NormalizeBaseURL(doc.Models.ProviderEndpoints[index].BaseURL) == modelconfig.NormalizeBaseURL(baseURL) {
 				doc.Models.ProviderEndpoints[index].CredentialRef = legacyRef
 			}
@@ -371,14 +370,14 @@ func TestHostModelConnectReusableAuthUsesCanonicalSnapshot(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		stableRef := retainedAPIKeyReference("openai", "", baseURL)
+		stableRef := retainedAPIKeyReference("custom", "", baseURL)
 		if err := stack.composition.authorities.apiKeyCredentials.Delete(ctx, stableRef); err != nil {
 			t.Fatal(err)
 		}
 		result, commandErr := stack.ConfigurationCommands().ConnectModel(ctx, principal, appserver.ConnectModelRequest{
 			WriteBase: appserver.WriteBase{OperationID: "legacy-ref-reuse", ExpectedRevision: &saved.ConfigurationRevision},
 			Config: appserver.ConnectConfig{
-				Provider: "openai", Model: "legacy-reused", BaseURL: baseURL,
+				Provider: "custom-responses", Model: "legacy-reused", BaseURL: baseURL,
 			},
 		})
 		if commandErr != nil || result.Outcome != appserver.OutcomeCommitted {
@@ -389,7 +388,7 @@ func TestHostModelConnectReusableAuthUsesCanonicalSnapshot(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, endpoint := range persisted.Models.ProviderEndpoints {
-			if endpoint.Provider == "openai" && modelconfig.NormalizeBaseURL(endpoint.BaseURL) == modelconfig.NormalizeBaseURL(baseURL) {
+			if endpoint.Provider == "custom" && modelconfig.NormalizeBaseURL(endpoint.BaseURL) == modelconfig.NormalizeBaseURL(baseURL) {
 				if endpoint.CredentialRef != legacyRef {
 					t.Fatalf("reused endpoint credential = %q, want canonical legacy ref %q", endpoint.CredentialRef, legacyRef)
 				}
@@ -412,7 +411,7 @@ func TestHostModelConnectReusableAuthUsesCanonicalSnapshot(t *testing.T) {
 		connected, err := stack.ConfigurationCommands().ConnectModel(ctx, principal, appserver.ConnectModelRequest{
 			WriteBase: appserver.WriteBase{OperationID: "canonical-auth-seed", ExpectedRevision: &revision},
 			Config: appserver.ConnectConfig{
-				Provider: "openai", Model: "seed", BaseURL: "https://models.example/v1", APIKey: "canonical-secret",
+				Provider: "custom-responses", Model: "seed", BaseURL: "https://models.example/v1", APIKey: "canonical-secret",
 			},
 		})
 		if err != nil || connected.Outcome != appserver.OutcomeCommitted {
@@ -422,7 +421,7 @@ func TestHostModelConnectReusableAuthUsesCanonicalSnapshot(t *testing.T) {
 		result, commandErr := stack.ConfigurationCommands().ConnectModel(ctx, principal, appserver.ConnectModelRequest{
 			WriteBase: appserver.WriteBase{OperationID: "canonical-auth-reuse", ExpectedRevision: &connected.Revision},
 			Config: appserver.ConnectConfig{
-				Provider: "openai", Model: "reused", BaseURL: "https://models.example/v1",
+				Provider: "custom-responses", Model: "reused", BaseURL: "https://models.example/v1",
 			},
 		})
 		if commandErr != nil || result.Outcome != appserver.OutcomeCommitted || result.Revision != connected.Revision+1 {
@@ -433,7 +432,7 @@ func TestHostModelConnectReusableAuthUsesCanonicalSnapshot(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, endpoint := range persisted.Models.ProviderEndpoints {
-			if endpoint.Provider == "openai" && endpoint.CredentialRef != "" {
+			if endpoint.Provider == "custom" && endpoint.CredentialRef != "" {
 				return
 			}
 		}
@@ -455,7 +454,7 @@ func TestHostModelReusableCredentialsAreScopedToExactEndpointIdentity(t *testing
 		result, connectErr := stack.ConfigurationCommands().ConnectModel(ctx, principal, appserver.ConnectModelRequest{
 			WriteBase: appserver.WriteBase{OperationID: operationID, ExpectedRevision: &expected},
 			Config: appserver.ConnectConfig{
-				Provider: "openai", EndpointID: endpointID, Model: model, BaseURL: baseURL, APIKey: apiKey,
+				Provider: "custom-responses", EndpointID: endpointID, Model: model, BaseURL: baseURL, APIKey: apiKey,
 			},
 		})
 		if connectErr != nil || result.Outcome != appserver.OutcomeCommitted {
@@ -469,8 +468,8 @@ func TestHostModelReusableCredentialsAreScopedToExactEndpointIdentity(t *testing
 	if reused.Revision != second.Revision+1 {
 		t.Fatalf("reused endpoint revision = %d, want %d", reused.Revision, second.Revision+1)
 	}
-	refA := retainedAPIKeyReference("openai", "tenant-a", baseURL)
-	refB := retainedAPIKeyReference("openai", "tenant-b", baseURL)
+	refA := retainedAPIKeyReference("custom", "tenant-a", baseURL)
+	refB := retainedAPIKeyReference("custom", "tenant-b", baseURL)
 	if refA == refB {
 		t.Fatalf("endpoint credential refs collided: %q", refA)
 	}
@@ -486,7 +485,7 @@ func TestHostModelReusableCredentialsAreScopedToExactEndpointIdentity(t *testing
 	foundTenantB := false
 	for _, configured := range persisted.Models.Configs {
 		if configured.Model == "tenant-b-next" {
-			foundTenantB = configured.ProviderEndpointID == retainedProviderEndpointID("openai", "tenant-b", baseURL)
+			foundTenantB = configured.ProviderEndpointID == retainedProviderEndpointID("custom", "tenant-b", baseURL)
 		}
 	}
 	if !foundTenantB {
@@ -506,7 +505,7 @@ func TestHostModelDeleteRetiresCredentialAfterLastProfileWithoutInterruptingPinn
 	connected, err := stack.ConfigurationCommands().ConnectModel(ctx, principal, appserver.ConnectModelRequest{
 		WriteBase: appserver.WriteBase{OperationID: "retired-auth-connect", ExpectedRevision: &revision},
 		Config: appserver.ConnectConfig{
-			Provider: "openai", Model: "pinned-model,sibling-model", BaseURL: baseURL, APIKey: "retired-secret",
+			Provider: "custom-responses", Model: "pinned-model,sibling-model", BaseURL: baseURL, APIKey: "retired-secret",
 		},
 	})
 	if err != nil || connected.Outcome != appserver.OutcomeCommitted {
@@ -523,11 +522,11 @@ func TestHostModelDeleteRetiresCredentialAfterLastProfileWithoutInterruptingPinn
 	if err := pinned.pinAPIKeyCredentials(ctx, providerProfileAPIKeyCredentialRefs(pinnedDoc)); err != nil {
 		t.Fatal(err)
 	}
-	ref := retainedAPIKeyReference("openai", "", baseURL)
+	ref := retainedAPIKeyReference("custom", "", baseURL)
 
 	firstDelete, err := stack.ConfigurationCommands().DeleteModel(ctx, principal, appserver.DeleteModelRequest{
 		WriteBase: appserver.WriteBase{OperationID: "retired-auth-delete-first", ExpectedRevision: &connected.Revision},
-		Model:     "openai/pinned-model",
+		Model:     "custom/pinned-model",
 	})
 	if err != nil || firstDelete.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("DeleteModel(first profile) = %#v, %v", firstDelete, err)
@@ -535,13 +534,13 @@ func TestHostModelDeleteRetiresCredentialAfterLastProfileWithoutInterruptingPinn
 	if source, lookupErr := stack.composition.authorities.apiKeyCredentials.LookupSource(ctx, ref); lookupErr != nil || source.APIKey != "retired-secret" {
 		t.Fatalf("shared endpoint credential after first delete = %#v, %v", source, lookupErr)
 	}
-	if !stack.Models().HasReusableAuth(ctx, "openai", baseURL) {
+	if !stack.Models().HasReusableAuth(ctx, "custom", baseURL) {
 		t.Fatal("shared endpoint credential is not reusable while one ModelProfile remains")
 	}
 
 	lastDelete, err := stack.ConfigurationCommands().DeleteModel(ctx, principal, appserver.DeleteModelRequest{
 		WriteBase: appserver.WriteBase{OperationID: "retired-auth-delete-last", ExpectedRevision: &firstDelete.Revision},
-		Model:     "openai/sibling-model",
+		Model:     "custom/sibling-model",
 	})
 	if err != nil || lastDelete.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("DeleteModel(last profile) = %#v, %v", lastDelete, err)
@@ -549,10 +548,10 @@ func TestHostModelDeleteRetiresCredentialAfterLastProfileWithoutInterruptingPinn
 	if _, lookupErr := stack.composition.authorities.apiKeyCredentials.LookupSource(ctx, ref); !errors.Is(lookupErr, os.ErrNotExist) {
 		t.Fatalf("retired endpoint credential lookup error = %v, want os.ErrNotExist", lookupErr)
 	}
-	if stack.Models().HasReusableAuth(ctx, "openai", baseURL) {
+	if stack.Models().HasReusableAuth(ctx, "custom", baseURL) {
 		t.Fatal("deleted endpoint credential remains reusable")
 	}
-	for _, alias := range []string{"openai/pinned-model", "openai/sibling-model"} {
+	for _, alias := range []string{"custom/pinned-model", "custom/sibling-model"} {
 		if _, resolveErr := pinned.ResolveModel(ctx, alias, 0); resolveErr != nil {
 			t.Fatalf("pinned Runtime generation lost %q credential: %v", alias, resolveErr)
 		}
@@ -561,7 +560,7 @@ func TestHostModelDeleteRetiresCredentialAfterLastProfileWithoutInterruptingPinn
 	reconnected, err := stack.ConfigurationCommands().ConnectModel(ctx, principal, appserver.ConnectModelRequest{
 		WriteBase: appserver.WriteBase{OperationID: "retired-auth-reconnect", ExpectedRevision: &lastDelete.Revision},
 		Config: appserver.ConnectConfig{
-			Provider: "openai", Model: "must-require-key", BaseURL: baseURL,
+			Provider: "custom-responses", Model: "must-require-key", BaseURL: baseURL,
 		},
 	})
 	if err == nil || reconnected.Outcome != appserver.OutcomeRejected || !strings.Contains(err.Error(), "API key") {
@@ -581,7 +580,7 @@ func TestHostModelDeleteRestoresCredentialWhenConfigurationSaveFails(t *testing.
 	connected, err := stack.ConfigurationCommands().ConnectModel(ctx, principal, appserver.ConnectModelRequest{
 		WriteBase: appserver.WriteBase{OperationID: "retirement-rollback-connect", ExpectedRevision: &revision},
 		Config: appserver.ConnectConfig{
-			Provider: "openai", Model: "rollback-model", BaseURL: baseURL, APIKey: "accepted-secret",
+			Provider: "custom-responses", Model: "rollback-model", BaseURL: baseURL, APIKey: "accepted-secret",
 		},
 	})
 	if err != nil || connected.Outcome != appserver.OutcomeCommitted {
@@ -591,16 +590,16 @@ func TestHostModelDeleteRestoresCredentialWhenConfigurationSaveFails(t *testing.
 	stack.composition.authorities.store.saveHook = func(AppConfig) error { return failure }
 	deleted, deleteErr := stack.ConfigurationCommands().DeleteModel(ctx, principal, appserver.DeleteModelRequest{
 		WriteBase: appserver.WriteBase{OperationID: "retirement-rollback-delete", ExpectedRevision: &connected.Revision},
-		Model:     "openai/rollback-model",
+		Model:     "custom/rollback-model",
 	})
 	if !errors.Is(deleteErr, failure) || deleted.Outcome != appserver.OutcomeRejected {
 		t.Fatalf("DeleteModel() = %#v, %v", deleted, deleteErr)
 	}
-	ref := retainedAPIKeyReference("openai", "", baseURL)
+	ref := retainedAPIKeyReference("custom", "", baseURL)
 	if source, lookupErr := stack.composition.authorities.apiKeyCredentials.LookupSource(ctx, ref); lookupErr != nil || source.APIKey != "accepted-secret" {
 		t.Fatalf("credential after delete rollback = %#v, %v", source, lookupErr)
 	}
-	if !stack.composition.lookup.HasAlias("openai/rollback-model") {
+	if !stack.composition.lookup.HasAlias("custom/rollback-model") {
 		t.Fatal("failed delete removed model from live catalog")
 	}
 }
@@ -617,7 +616,7 @@ func TestHostModelDeleteRetiresCredentialAfterLastReachableProfile(t *testing.T)
 	connected, err := stack.ConfigurationCommands().ConnectModel(ctx, principal, appserver.ConnectModelRequest{
 		WriteBase: appserver.WriteBase{OperationID: "orphan-model-connect", ExpectedRevision: &revision},
 		Config: appserver.ConnectConfig{
-			Provider: "openai", Model: "reachable-model,orphan-model", BaseURL: baseURL, APIKey: "orphan-model-secret",
+			Provider: "custom-responses", Model: "reachable-model,orphan-model", BaseURL: baseURL, APIKey: "orphan-model-secret",
 		},
 	})
 	if err != nil || connected.Outcome != appserver.OutcomeCommitted {
@@ -633,7 +632,7 @@ func TestHostModelDeleteRetiresCredentialAfterLastReachableProfile(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	orphan, err := orphanConfig.ResolveConfig("openai/orphan-model")
+	orphan, err := orphanConfig.ResolveConfig("custom/orphan-model")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -645,22 +644,22 @@ func TestHostModelDeleteRetiresCredentialAfterLastReachableProfile(t *testing.T)
 
 	deleted, err := stack.ConfigurationCommands().DeleteModel(ctx, principal, appserver.DeleteModelRequest{
 		WriteBase: appserver.WriteBase{OperationID: "orphan-model-delete-last-profile", ExpectedRevision: &saved.ConfigurationRevision},
-		Model:     "openai/reachable-model",
+		Model:     "custom/reachable-model",
 	})
 	if err != nil || deleted.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("DeleteModel(last reachable profile) = %#v, %v", deleted, err)
 	}
-	ref := retainedAPIKeyReference("openai", "", baseURL)
+	ref := retainedAPIKeyReference("custom", "", baseURL)
 	if _, lookupErr := stack.composition.authorities.apiKeyCredentials.LookupSource(ctx, ref); !errors.Is(lookupErr, os.ErrNotExist) {
 		t.Fatalf("orphan endpoint credential lookup error = %v, want os.ErrNotExist", lookupErr)
 	}
-	if stack.Models().HasReusableAuth(ctx, "openai", baseURL) {
+	if stack.Models().HasReusableAuth(ctx, "custom", baseURL) {
 		t.Fatal("orphan model kept endpoint credential reusable")
 	}
 	reconnected, err := stack.ConfigurationCommands().ConnectModel(ctx, principal, appserver.ConnectModelRequest{
 		WriteBase: appserver.WriteBase{OperationID: "orphan-model-reconnect", ExpectedRevision: &deleted.Revision},
 		Config: appserver.ConnectConfig{
-			Provider: "openai", Model: "must-require-key", BaseURL: baseURL,
+			Provider: "custom-responses", Model: "must-require-key", BaseURL: baseURL,
 		},
 	})
 	if err == nil || reconnected.Outcome != appserver.OutcomeRejected || !strings.Contains(err.Error(), "API key") {
@@ -678,7 +677,7 @@ func TestHostModelCommandPreCanceledContextHasNoEffect(t *testing.T) {
 	cancel()
 	result, err := stack.ConfigurationCommands().ConnectModel(ctx, appserver.Principal{ID: stack.composition.authorities.userID}, appserver.ConnectModelRequest{
 		WriteBase: appserver.WriteBase{OperationID: "host-model-cancelled", ExpectedRevision: &before},
-		Config:    appserver.ConnectConfig{Provider: "openai", Model: "cancelled", APIKey: "must-not-write"},
+		Config:    appserver.ConnectConfig{Provider: "custom-responses", Model: "cancelled", APIKey: "must-not-write"},
 	})
 	if err == nil || result.Outcome == appserver.OutcomeCommitted {
 		t.Fatalf("ConnectModel(cancelled) = %#v, %v", result, err)
@@ -827,7 +826,7 @@ func TestHostModelCommandPersistsUnknownWhenCredentialRollbackIsIncomplete(t *te
 	request := appserver.ConnectModelRequest{
 		WriteBase: appserver.WriteBase{OperationID: "host-model-rollback-incomplete", ExpectedRevision: &expected},
 		Config: appserver.ConnectConfig{
-			Provider: "openai", Model: "rollback-incomplete", BaseURL: "https://rollback.example/v1", APIKey: "uncommitted-secret",
+			Provider: "custom-responses", Model: "rollback-incomplete", BaseURL: "https://rollback.example/v1", APIKey: "uncommitted-secret",
 		},
 	}
 	result, commandErr := stack.ConfigurationCommands().ConnectModel(ctx, appserver.Principal{ID: stack.composition.authorities.userID}, request)
@@ -889,14 +888,14 @@ func TestHostModelCommandDoesNotGuessRevisionWhenCommittedWriteCannotBeReadBack(
 	request := appserver.ConnectModelRequest{
 		WriteBase: appserver.WriteBase{OperationID: "host-model-committed-readback", ExpectedRevision: &expected},
 		Config: appserver.ConnectConfig{
-			Provider: "openai", Model: "readback-model", BaseURL: "https://models.example/v1", APIKey: secret,
+			Provider: "custom-responses", Model: "readback-model", BaseURL: "https://models.example/v1", APIKey: secret,
 		},
 	}
 	result, err := stack.ConfigurationCommands().ConnectModel(context.Background(), appserver.Principal{ID: stack.composition.authorities.userID}, request)
 	if !errors.Is(err, fault) || result.Outcome != appserver.OutcomeUnknown || result.Revision != 0 {
 		t.Fatalf("ConnectModel(committed readback failure) = %#v, %v", result, err)
 	}
-	if stack.composition.lookup.HasAlias("openai/readback-model") {
+	if stack.composition.lookup.HasAlias("custom/readback-model") {
 		t.Fatal("live lookup installed an unobserved candidate while canonical readback was unavailable")
 	}
 	restore()
@@ -907,7 +906,12 @@ func TestHostModelCommandDoesNotGuessRevisionWhenCommittedWriteCannotBeReadBack(
 	if persisted.ConfigurationRevision != expected+1 || len(persisted.Models.ProviderEndpoints) == 0 {
 		t.Fatalf("persisted model configuration = %#v", persisted)
 	}
-	credentialRef := persisted.Models.ProviderEndpoints[len(persisted.Models.ProviderEndpoints)-1].CredentialRef
+	credentialRef := ""
+	for _, endpoint := range persisted.Models.ProviderEndpoints {
+		if endpoint.Provider == "custom" && endpoint.BaseURL == request.Config.BaseURL {
+			credentialRef = endpoint.CredentialRef
+		}
+	}
 	source, credentialErr := stack.composition.authorities.apiKeyCredentials.LookupSource(context.Background(), credentialRef)
 	if credentialErr != nil || source.APIKey != secret {
 		t.Fatalf("committed credential %q = %#v, %v", credentialRef, source, credentialErr)

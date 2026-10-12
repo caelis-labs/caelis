@@ -36,7 +36,7 @@ func TestBrokenUnusedProviderCredentialDoesNotBlockObservationOrStartup(t *testi
 			ExpectedRevision: &before.ConfigurationRevision,
 		},
 		Config: appserver.ConnectConfig{
-			Provider: "openai",
+			Provider: "custom-responses",
 			Model:    "broken-unused-credential-model",
 			BaseURL:  "https://broken-unused-credential.example/v1",
 			APIKey:   "broken-unused-secret",
@@ -45,7 +45,7 @@ func TestBrokenUnusedProviderCredentialDoesNotBlockObservationOrStartup(t *testi
 	if err != nil || connected.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("ConnectModel() = %#v, %v", connected, err)
 	}
-	configured, err := stack.composition.lookup.ResolveConfig("openai/broken-unused-credential-model")
+	configured, err := stack.composition.lookup.ResolveConfig("custom/broken-unused-credential-model")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,13 +110,13 @@ func TestRuntimeCredentialSnapshotPinsLateModelAndProcessLocalChildCopy(t *testi
 	connected, err := stack.ConfigurationCommands().ConnectModel(ctx, principal, appserver.ConnectModelRequest{
 		WriteBase: appserver.WriteBase{OperationID: "late-runtime-pin-connect", ExpectedRevision: &before.ConfigurationRevision},
 		Config: appserver.ConnectConfig{
-			Provider: "openai", Model: "late-runtime-model", BaseURL: baseURL, APIKey: "late-runtime-secret",
+			Provider: "custom-responses", Model: "late-runtime-model", BaseURL: baseURL, APIKey: "late-runtime-secret",
 		},
 	})
 	if err != nil || connected.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("ConnectModel() = %#v, %v", connected, err)
 	}
-	configured, err := stack.composition.lookup.ResolveConfig("openai/late-runtime-model")
+	configured, err := stack.composition.lookup.ResolveConfig("custom/late-runtime-model")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +144,7 @@ func TestRuntimeCredentialSnapshotPinsLateModelAndProcessLocalChildCopy(t *testi
 	if err != nil || deleted.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("DeleteModel() = %#v, %v", deleted, err)
 	}
-	ref := retainedAPIKeyReference("openai", "", baseURL)
+	ref := retainedAPIKeyReference("custom", "", baseURL)
 	if _, lookupErr := stack.composition.authorities.apiKeyCredentials.LookupSource(ctx, ref); !errors.Is(lookupErr, os.ErrNotExist) {
 		t.Fatalf("retired credential lookup error = %v, want os.ErrNotExist", lookupErr)
 	}
@@ -179,13 +179,13 @@ func TestRuntimeCredentialSnapshotRetriesWhenHostRetiresAfterConfigRead(t *testi
 	connected, err := stack.ConfigurationCommands().ConnectModel(ctx, principal, appserver.ConnectModelRequest{
 		WriteBase: appserver.WriteBase{OperationID: "activation-retirement-connect", ExpectedRevision: &before.ConfigurationRevision},
 		Config: appserver.ConnectConfig{
-			Provider: "openai", Model: "activation-retirement-model", BaseURL: baseURL, APIKey: "activation-retirement-secret",
+			Provider: "custom-responses", Model: "activation-retirement-model", BaseURL: baseURL, APIKey: "activation-retirement-secret",
 		},
 	})
 	if err != nil || connected.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("ConnectModel() = %#v, %v", connected, err)
 	}
-	configured, err := stack.composition.lookup.ResolveConfig("openai/activation-retirement-model")
+	configured, err := stack.composition.lookup.ResolveConfig("custom/activation-retirement-model")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -295,13 +295,13 @@ func TestHostCredentialRetirementRecoveryRestoresPreCASDeletion(t *testing.T) {
 	connected, err := stack.ConfigurationCommands().ConnectModel(ctx, principal, appserver.ConnectModelRequest{
 		WriteBase: appserver.WriteBase{OperationID: "retirement-crash-recovery-connect", ExpectedRevision: &before.ConfigurationRevision},
 		Config: appserver.ConnectConfig{
-			Provider: "openai", Model: "retirement-crash-recovery-model", BaseURL: baseURL, APIKey: "retirement-crash-recovery-secret",
+			Provider: "custom-responses", Model: "retirement-crash-recovery-model", BaseURL: baseURL, APIKey: "retirement-crash-recovery-secret",
 		},
 	})
 	if err != nil || connected.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("ConnectModel() = %#v, %v", connected, err)
 	}
-	ref := retainedAPIKeyReference("openai", "", baseURL)
+	ref := retainedAPIKeyReference("custom", "", baseURL)
 	storeRoot := filepath.Dir(stack.composition.authorities.store.path)
 	helper := exec.Command(os.Args[0], "-test.run=^TestHostCredentialRetirementRecoveryRestoresPreCASDeletion$")
 	helper.Env = append(os.Environ(),
@@ -373,17 +373,17 @@ func TestHostCredentialRetirementRecoveryPreservesPostCASDeletion(t *testing.T) 
 	connected, err := stack.ConfigurationCommands().ConnectModel(ctx, principal, appserver.ConnectModelRequest{
 		WriteBase: appserver.WriteBase{OperationID: "retirement-post-cas-recovery-connect", ExpectedRevision: &before.ConfigurationRevision},
 		Config: appserver.ConnectConfig{
-			Provider: "openai", Model: "retirement-post-cas-recovery-model", BaseURL: baseURL, APIKey: "retirement-post-cas-recovery-secret",
+			Provider: "custom-responses", Model: "retirement-post-cas-recovery-model", BaseURL: baseURL, APIKey: "retirement-post-cas-recovery-secret",
 		},
 	})
 	if err != nil || connected.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("ConnectModel() = %#v, %v", connected, err)
 	}
-	configured, err := stack.composition.lookup.ResolveConfig("openai/retirement-post-cas-recovery-model")
+	configured, err := stack.composition.lookup.ResolveConfig("custom/retirement-post-cas-recovery-model")
 	if err != nil {
 		t.Fatal(err)
 	}
-	ref := retainedAPIKeyReference("openai", "", baseURL)
+	ref := retainedAPIKeyReference("custom", "", baseURL)
 	storeRoot := filepath.Dir(stack.composition.authorities.store.path)
 	helper := exec.Command(os.Args[0], "-test.run=^TestHostCredentialRetirementRecoveryPreservesPostCASDeletion$")
 	helper.Env = append(os.Environ(),
@@ -431,7 +431,7 @@ func TestRuntimeCredentialSnapshotIgnoresOrphanModelWithRetiredCredential(t *tes
 	valid, err := stack.ConfigurationCommands().ConnectModel(ctx, principal, appserver.ConnectModelRequest{
 		WriteBase: appserver.WriteBase{OperationID: "orphan-runtime-valid-connect", ExpectedRevision: &before.ConfigurationRevision},
 		Config: appserver.ConnectConfig{
-			Provider: "openai", Model: "reachable-runtime-model", BaseURL: validURL, APIKey: "reachable-runtime-secret",
+			Provider: "custom-responses", Model: "reachable-runtime-model", BaseURL: validURL, APIKey: "reachable-runtime-secret",
 		},
 	})
 	if err != nil || valid.Outcome != appserver.OutcomeCommitted {
@@ -441,13 +441,13 @@ func TestRuntimeCredentialSnapshotIgnoresOrphanModelWithRetiredCredential(t *tes
 	orphaned, err := stack.ConfigurationCommands().ConnectModel(ctx, principal, appserver.ConnectModelRequest{
 		WriteBase: appserver.WriteBase{OperationID: "orphan-runtime-connect", ExpectedRevision: &valid.Revision},
 		Config: appserver.ConnectConfig{
-			Provider: "openai", Model: "retired-reachable-model,stable-orphan-model", BaseURL: orphanURL, APIKey: "orphan-runtime-secret",
+			Provider: "custom-responses", Model: "retired-reachable-model,stable-orphan-model", BaseURL: orphanURL, APIKey: "orphan-runtime-secret",
 		},
 	})
 	if err != nil || orphaned.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("ConnectModel(orphan endpoint) = %#v, %v", orphaned, err)
 	}
-	orphanConfig, err := stack.composition.lookup.ResolveConfig("openai/stable-orphan-model")
+	orphanConfig, err := stack.composition.lookup.ResolveConfig("custom/stable-orphan-model")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -462,12 +462,12 @@ func TestRuntimeCredentialSnapshotIgnoresOrphanModelWithRetiredCredential(t *tes
 	}
 	deleted, err := stack.ConfigurationCommands().DeleteModel(ctx, principal, appserver.DeleteModelRequest{
 		WriteBase: appserver.WriteBase{OperationID: "orphan-runtime-delete-final-profile", ExpectedRevision: &saved.ConfigurationRevision},
-		Model:     "openai/retired-reachable-model",
+		Model:     "custom/retired-reachable-model",
 	})
 	if err != nil || deleted.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("DeleteModel(final reachable orphan endpoint profile) = %#v, %v", deleted, err)
 	}
-	orphanRef := retainedAPIKeyReference("openai", "", orphanURL)
+	orphanRef := retainedAPIKeyReference("custom", "", orphanURL)
 	if _, err := stack.composition.authorities.apiKeyCredentials.LookupSource(ctx, orphanRef); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("orphan endpoint credential error = %v, want os.ErrNotExist", err)
 	}
@@ -483,7 +483,7 @@ func TestRuntimeCredentialSnapshotIgnoresOrphanModelWithRetiredCredential(t *tes
 	if snapshotDoc.ConfigurationRevision != deleted.Revision {
 		t.Fatalf("Runtime snapshot revision = %d, want %d", snapshotDoc.ConfigurationRevision, deleted.Revision)
 	}
-	if _, err := lookup.ResolveModel(ctx, "openai/reachable-runtime-model", 0); err != nil {
+	if _, err := lookup.ResolveModel(ctx, "custom/reachable-runtime-model", 0); err != nil {
 		t.Fatalf("ResolveModel(valid reachable model): %v", err)
 	}
 	if _, err := lookup.ResolveModel(ctx, orphanConfig.ID, 0); err == nil {
@@ -511,13 +511,13 @@ func TestRuntimeCredentialSnapshotRollsBackUncommittedLatePin(t *testing.T) {
 	connected, err := stack.ConfigurationCommands().ConnectModel(ctx, principal, appserver.ConnectModelRequest{
 		WriteBase: appserver.WriteBase{OperationID: "rolled-back-runtime-pin-connect", ExpectedRevision: &before.ConfigurationRevision},
 		Config: appserver.ConnectConfig{
-			Provider: "openai", Model: "rolled-back-runtime-model", BaseURL: baseURL, APIKey: "rolled-back-runtime-secret",
+			Provider: "custom-responses", Model: "rolled-back-runtime-model", BaseURL: baseURL, APIKey: "rolled-back-runtime-secret",
 		},
 	})
 	if err != nil || connected.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("ConnectModel() = %#v, %v", connected, err)
 	}
-	configured, err := stack.composition.lookup.ResolveConfig("openai/rolled-back-runtime-model")
+	configured, err := stack.composition.lookup.ResolveConfig("custom/rolled-back-runtime-model")
 	if err != nil {
 		t.Fatal(err)
 	}
