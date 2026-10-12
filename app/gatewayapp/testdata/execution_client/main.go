@@ -61,7 +61,7 @@ func run(ctx context.Context, args []string) error {
 		}
 		profile := application.Profile{
 			Version: "external-client/1", Instructions: "Execute the controlled native command.",
-			Model: "openai-compatible/gpt-4.1", ToolsVersion: "external-client/1", Execution: "workspace-write",
+			Model: "custom/gpt-4.1", ToolsVersion: "external-client/1", Execution: "workspace-write",
 			Workspace: application.Workspace{CWD: args[3]},
 			ExecutionConfig: &sandbox.ExecutionConfig{Environment: sandbox.EnvironmentConfig{
 				Inherit: &inherit, Set: environment,

@@ -36,7 +36,7 @@ func TestSharedWorkerNativeHTTPCommandAndRecovery(t *testing.T) {
 	host := startApplicationHTTPHostWithSandbox(t, filepath.Join(root, "store"), workspace, provider, "")
 	defer func() { host.close(t) }()
 	client, _ := nativeHostSession(t, ctx, host, workspace)
-	create := appserver.CreateWorkerRequest{WriteBase: appserver.WriteBase{OperationID: "native-worker-create"}, CWD: workspace, Model: "openai-compatible/gpt-4.1"}
+	create := appserver.CreateWorkerRequest{WriteBase: appserver.WriteBase{OperationID: "native-worker-create"}, CWD: workspace, Model: "custom/gpt-4.1"}
 	created, err := client.CreateWorker(ctx, create)
 	if err != nil || created.SessionID == "" || created.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("native Worker creation = %+v, %v", created, err)
