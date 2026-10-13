@@ -78,6 +78,17 @@ type AppConfig struct {
 // Validate checks the current persisted truth without reconstructing legacy
 // Agent or binding projections.
 func Validate(doc AppConfig) error {
+	return validate(doc, true)
+}
+
+// validateForLoad keeps optional, already-persisted MCP entries from making the
+// Host unavailable. Identity, trust, Memory, and security configuration stay
+// strict; new writes still use Validate.
+func validateForLoad(doc AppConfig) error {
+	return validate(doc, false)
+}
+
+func validate(doc AppConfig, validateMCP bool) error {
 	if err := doc.UI.Validate(); err != nil {
 		return fmt.Errorf("gatewayapp: invalid UI preferences: %w", err)
 	}
@@ -107,8 +118,10 @@ func Validate(doc AppConfig) error {
 	if err := agentbinding.ValidateConfiguration(doc.AgentBindings, doc.ModelProfiles); err != nil {
 		return fmt.Errorf("gatewayapp: invalid Agent bindings: %w", err)
 	}
-	if err := mcpconfig.Validate(doc.MCPServers); err != nil {
-		return fmt.Errorf("gatewayapp: invalid MCP servers: %w", err)
+	if validateMCP {
+		if err := mcpconfig.Validate(doc.MCPServers); err != nil {
+			return fmt.Errorf("gatewayapp: invalid MCP servers: %w", err)
+		}
 	}
 	if err := memorybinding.Validate(doc.Memory); err != nil {
 		return &invalidMemoryConfigurationError{err: err}

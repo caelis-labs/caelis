@@ -17,7 +17,7 @@ func resolveConfiguredMCPServers(native mcpconfig.Servers, trust workspacetrust.
 	}
 	workspaceDir = strings.TrimSpace(workspaceDir)
 	projectAgentsFile, projectMCPFile := mcpconfig.ProjectFiles(workspaceDir)
-	return mcpconfig.Resolve(mcpconfig.Request{
+	return mcpconfig.ResolveAvailable(mcpconfig.Request{
 		Native:               native,
 		UserAgentsFile:       userAgentsFile,
 		ProjectAgentsFile:    projectAgentsFile,

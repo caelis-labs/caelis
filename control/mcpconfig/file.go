@@ -75,6 +75,48 @@ func loadOverlayFile(path string) (Servers, error) {
 	return servers, nil
 }
 
+// loadAvailableOverlayFile retains valid siblings in an optional overlay.
+// Invalid JSON invalidates only this file; an invalid entry cannot authorize
+// a server or prevent lower-priority sources from loading.
+func loadAvailableOverlayFile(path string) Servers {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var doc struct {
+		MCPServers map[string]json.RawMessage `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return nil
+	}
+	// Any two raw names that normalize to the same identity are ambiguous. Drop
+	// the whole group before parsing content so map iteration order cannot pick
+	// which command runs. A healthy lower-priority layer may still provide it.
+	counts := make(map[string]int, len(doc.MCPServers))
+	for name := range doc.MCPServers {
+		if normalized := normalizeServerName(name); normalized != "" {
+			counts[normalized]++
+		}
+	}
+	out := make(Servers)
+	for name, raw := range doc.MCPServers {
+		normalized := normalizeServerName(name)
+		if normalized == "" || counts[normalized] != 1 || strings.ContainsAny(name, "/\\") || len(raw) == 0 || raw[0] != '{' {
+			continue
+		}
+		var cfg overlayServerConfig
+		if err := json.Unmarshal(raw, &cfg); err != nil {
+			continue
+		}
+		out[normalized] = cfg.serverConfig()
+	}
+	return out
+}
+
 func parseOverlayDocument(data []byte) (Servers, error) {
 	trimmed := strings.TrimSpace(string(data))
 	if trimmed == "" {

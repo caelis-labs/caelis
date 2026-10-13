@@ -28,16 +28,10 @@ func discoverPluginBundleMeta(bundles []skill.PluginBundle) ([]Meta, map[string]
 	for _, bundle := range bundles {
 		resolvedDir, err := ResolvePath(bundle.Root)
 		if err != nil {
-			if bundle.Enabled {
-				return nil, nil, err
-			}
 			continue
 		}
 		info, err := os.Stat(resolvedDir)
 		if err != nil {
-			if bundle.Enabled && !os.IsNotExist(err) {
-				return nil, nil, err
-			}
 			continue
 		}
 		if !info.IsDir() {
@@ -45,9 +39,6 @@ func discoverPluginBundleMeta(bundles []skill.PluginBundle) ([]Meta, map[string]
 		}
 		entries, err := os.ReadDir(resolvedDir)
 		if err != nil {
-			if bundle.Enabled {
-				return nil, nil, err
-			}
 			continue
 		}
 		for _, entry := range entries {
@@ -66,9 +57,6 @@ func discoverPluginBundleMeta(bundles []skill.PluginBundle) ([]Meta, map[string]
 			skillPath := filepath.Join(resolvedDir, entry.Name(), "SKILL.md")
 			info, err := os.Stat(skillPath)
 			if err != nil {
-				if bundle.Enabled && !os.IsNotExist(err) {
-					return nil, nil, err
-				}
 				continue
 			}
 			if bundle.SkipInvalid {
@@ -91,9 +79,6 @@ func discoverPluginBundleMeta(bundles []skill.PluginBundle) ([]Meta, map[string]
 			skillPath = filepath.Clean(skillPath)
 			meta, hash, err := parseMetaHashCached(skillPath, info)
 			if err != nil {
-				if bundle.Enabled && !bundle.SkipInvalid {
-					return nil, nil, err
-				}
 				continue
 			}
 			localName := strings.TrimSpace(meta.Name)

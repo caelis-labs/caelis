@@ -725,7 +725,7 @@ func TestBuildInitialGatewayRuntimeRejectsInitializedRuntimeBeforePlanLoad(t *te
 	}
 }
 
-func TestLoadGatewayBuildPlanInvalidPluginDoesNotMutateStack(t *testing.T) {
+func TestLoadGatewayBuildPlanSkipsInvalidPluginWithoutMutatingStack(t *testing.T) {
 	stack, _ := newLocalStateTestStack(t)
 	beforeGateway := stack.composition.gateway
 	beforeExec := stack.composition.exec
@@ -748,12 +748,17 @@ func TestLoadGatewayBuildPlanInvalidPluginDoesNotMutateStack(t *testing.T) {
 	}
 
 	sandboxCfg := stack.composition.sandbox
-	_, err := stack.composition.loadGatewayBuildPlan(sandboxCfg, stack.composition.activeRuntime)
-	if err == nil {
-		t.Fatal("loadGatewayBuildPlan() error = nil, want plugin parse failure")
+	plan, err := stack.composition.loadGatewayBuildPlan(sandboxCfg, stack.composition.activeRuntime)
+	if err != nil || len(plan.Plugins.SkillBundles) != 0 || len(plan.Plugins.MCPServerSpecs) != 0 {
+		t.Fatalf("loadGatewayBuildPlan() = %+v, %v, want broken plugin isolated", plan.Plugins, err)
 	}
-	if !strings.Contains(err.Error(), "parse enabled plugin") {
-		t.Fatalf("loadGatewayBuildPlan() error = %v, want plugin parse failure", err)
+	if plan.ReleasePluginCache != nil {
+		defer func() { _ = plan.ReleasePluginCache() }()
+	}
+	if err := stack.composition.validateAgentAssemblyCandidate(AppConfig{
+		Plugins: []PluginConfig{{ID: "malformed-plugin", Root: pluginRoot, Enabled: true}},
+	}); err == nil || !strings.Contains(err.Error(), "parse enabled plugin") {
+		t.Fatalf("explicit candidate validation = %v, want actionable plugin parse failure", err)
 	}
 	if stack.composition.gateway != beforeGateway {
 		t.Fatalf("gateway changed on plan failure: before=%p after=%p", beforeGateway, stack.composition.gateway)

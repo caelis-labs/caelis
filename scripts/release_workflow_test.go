@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -57,8 +58,8 @@ func TestReleasePleaseFeedsProtectedMainPublication(t *testing.T) {
 	if len(manifest) != 1 || !regexp.MustCompile(`^\d+\.\d+\.\d+$`).MatchString(manifest["."]) {
 		t.Fatal("release manifest must contain one root release version")
 	}
-	if !strings.Contains(readWorkflow(t, "../.goreleaser.yml"), "release:\n  mode: keep-existing") {
-		t.Fatal("GoReleaser must preserve the release-please changelog")
+	if !strings.Contains(readWorkflow(t, "../.github/workflows/release.yml"), "bash scripts/publish_release_assets.sh") {
+		t.Fatal("release assets must attach to the existing release-please release")
 	}
 }
 
@@ -90,6 +91,14 @@ func TestReleasePublishesProtectedMainTagsWithoutRepeatingPRQuality(t *testing.T
 		"name: Verify tag belongs to main",
 		`git merge-base --is-ancestor "${GITHUB_SHA}" origin/main`,
 		"goreleaser/goreleaser-action@v7",
+		"args: release --clean --skip=publish",
+		"name: unpublished-archives",
+		"  notarize-darwin:\n    needs: build",
+		"bash scripts/sign_notarize_cli.sh",
+		"name: verified-release-archives",
+		"  release:\n    needs: notarize-darwin",
+		"bash scripts/verify_release_archives.sh",
+		"bash scripts/publish_release_assets.sh",
 		"Publish platform packages",
 		"Publish main package",
 		"publish-r2:",
@@ -113,7 +122,6 @@ func TestReleasePublishesProtectedMainTagsWithoutRepeatingPRQuality(t *testing.T
 		"make ",
 		"sdk-proxy-smoke",
 		"workflow_dispatch:",
-		"actions/download-artifact",
 		"gh release download",
 		"GITHUB_STEP_SUMMARY",
 	} {
@@ -148,9 +156,186 @@ func TestReleasePublishesProtectedMainTagsWithoutRepeatingPRQuality(t *testing.T
 		}
 	}
 	guard := strings.Index(release, "name: Verify tag belongs to main")
-	publish := strings.Index(release, "name: GoReleaser")
-	if guard < 0 || publish < 0 || guard >= publish {
-		t.Error("release must validate tag ancestry before publishing artifacts")
+	build := strings.Index(release, "name: Build archives without publishing")
+	notarize := strings.Index(release, "name: Sign and notarize both macOS CLIs")
+	publish := strings.Index(release, "name: Publish verified GitHub assets")
+	if guard < 0 || build < 0 || notarize < 0 || publish < 0 ||
+		guard >= build || build >= notarize || notarize >= publish {
+		t.Error("release must validate ancestry, build, then notarize before publishing assets")
+	}
+	for _, want := range []string{
+		"APPLE_DEVELOPER_ID_P12_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_P12_BASE64 }}",
+		"APPLE_DEVELOPER_ID_P12_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}",
+		"APPLE_NOTARY_APPLE_ID: ${{ secrets.APPLE_NOTARY_APPLE_ID }}",
+		"APPLE_NOTARY_PASSWORD: ${{ secrets.APPLE_NOTARY_PASSWORD }}",
+		"APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}",
+	} {
+		if !strings.Contains(release, want) {
+			t.Errorf("macOS notarization workflow missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{"args: release --clean\n", "--clobber", "workflow_dispatch:"} {
+		if strings.Contains(release, forbidden) {
+			t.Errorf("tag workflow could bypass notarized archive gate: %q", forbidden)
+		}
+	}
+}
+
+func TestReleaseArchiveVerificationRejectsMissingOrTamperedAsset(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	version := "1.2.3"
+	for _, target := range []string{
+		"darwin_amd64", "darwin_arm64", "linux_amd64", "linux_arm64", "windows_amd64", "windows_arm64",
+	} {
+		name := "caelis_" + version + "_" + target + ".tar.gz"
+		if err := os.WriteFile(dir+"/"+name, []byte(target), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	verify := func(extra ...string) error {
+		t.Helper()
+		args := append([]string{"./verify_release_archives.sh", version, dir}, extra...)
+		cmd := exec.Command(testBash(t), args...)
+		cmd.Dir = "../scripts"
+		return cmd.Run()
+	}
+	if err := verify("--names-only"); err != nil {
+		t.Fatalf("six archive names: %v", err)
+	}
+	checksum := exec.Command(testBash(t), "-c", "shasum -a 256 caelis_*.tar.gz > checksums.txt")
+	checksum.Dir = dir
+	if output, err := checksum.CombinedOutput(); err != nil {
+		t.Fatalf("prepare checksums: %v: %s", err, output)
+	}
+	if err := verify(); err != nil {
+		t.Fatalf("valid final archives: %v", err)
+	}
+	if err := os.WriteFile(dir+"/caelis_"+version+"_darwin_arm64.tar.gz", []byte("changed after signing"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := verify(); err == nil {
+		t.Fatal("tampered macOS archive passed final checksum gate")
+	}
+}
+
+func TestReleaseAssetRetryVerifiesBytesBeforeSkippingOrUploading(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	dist := filepath.Join(root, "dist")
+	state := filepath.Join(root, "state")
+	bin := filepath.Join(root, "bin")
+	for _, dir := range []string{dist, state, bin, filepath.Join(state, "assets")} {
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, target := range []string{"darwin_amd64", "darwin_arm64", "linux_amd64", "linux_arm64", "windows_amd64", "windows_arm64"} {
+		name := "caelis_1.2.3_" + target + ".tar.gz"
+		if err := os.WriteFile(filepath.Join(dist, name), []byte(target), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	checksum := exec.Command(testBash(t), "-c", "shasum -a 256 caelis_*.tar.gz > checksums.txt")
+	checksum.Dir = dist
+	if output, err := checksum.CombinedOutput(); err != nil {
+		t.Fatalf("prepare checksums: %v: %s", err, output)
+	}
+	fakeGH := `#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$1" == api ]]; then
+  for file in "$FAKE_GH_STATE"/assets/*; do
+    [[ -f "$file" ]] || continue
+    printf '%s\tsha256:%s\tuploaded\n' "${file##*/}" "$(shasum -a 256 "$file" | awk '{print $1}')"
+  done
+elif [[ "$1" == release && "$2" == upload ]]; then
+  file=$4
+  name=${file##*/}
+  [[ ! -e "$FAKE_GH_STATE/assets/$name" ]] || exit 1
+  count=$(wc -l < "$FAKE_GH_STATE/uploads" | tr -d '[:space:]')
+  [[ "${FAKE_GH_FAIL_AT:-}" != "$((count + 1))" ]] || exit 1
+  cp "$file" "$FAKE_GH_STATE/assets/$name"
+  printf '%s\n' "$name" >> "$FAKE_GH_STATE/uploads"
+else
+  exit 2
+fi
+`
+	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte(fakeGH), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(state, "uploads"), nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	run := func(failAt string) (string, error) {
+		t.Helper()
+		cmd := exec.Command(testBash(t), "./publish_release_assets.sh", "v1.2.3", dist)
+		cmd.Dir = "../scripts"
+		cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"), "FAKE_GH_STATE="+state, "FAKE_GH_FAIL_AT="+failAt, "GITHUB_REPOSITORY=caelis-labs/caelis")
+		out, err := cmd.CombinedOutput()
+		return string(out), err
+	}
+	if _, err := run("4"); err == nil {
+		t.Fatal("expected interruption after three uploaded assets")
+	}
+	if output, err := run(""); err != nil {
+		t.Fatalf("retry must fill missing assets: %v: %s", err, output)
+	}
+	if output, err := run(""); err != nil {
+		t.Fatalf("identical retry must skip assets: %v: %s", err, output)
+	}
+	uploads, err := os.ReadFile(filepath.Join(state, "uploads"))
+	if err != nil || len(strings.Split(strings.TrimSpace(string(uploads)), "\n")) != 7 {
+		t.Fatalf("wanted seven distinct uploads, got %q: %v", uploads, err)
+	}
+	changed := filepath.Join(dist, "caelis_1.2.3_darwin_arm64.tar.gz")
+	if err := os.WriteFile(changed, []byte("new timestamped signature"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	checksum = exec.Command(testBash(t), "-c", "shasum -a 256 caelis_*.tar.gz > checksums.txt")
+	checksum.Dir = dist
+	if output, err := checksum.CombinedOutput(); err != nil {
+		t.Fatalf("recompute checksums: %v: %s", err, output)
+	}
+	if output, err := run(""); err == nil || !strings.Contains(output, "differs from the verified local bytes") {
+		t.Fatalf("different signed asset must fail without overwrite: %v: %s", err, output)
+	}
+	uploadsAfter, err := os.ReadFile(filepath.Join(state, "uploads"))
+	if err != nil || string(uploadsAfter) != string(uploads) {
+		t.Fatalf("mismatched retry uploaded files: %q: %v", uploadsAfter, err)
+	}
+}
+
+func TestMacOSCLIArchivesFollowAcceptedNotarization(t *testing.T) {
+	t.Parallel()
+	script := readWorkflow(t, "./sign_notarize_cli.sh")
+	for _, want := range []string{
+		"for arch in amd64 arm64; do",
+		"--options runtime --timestamp",
+		"TeamIdentifier=$APPLE_TEAM_ID",
+		"^CodeDirectory .*flags=.*runtime",
+		"^Timestamp=",
+		"ditto -c -k --keepParent",
+		"notarytool submit",
+		"--wait --timeout 60m",
+		"notarytool log",
+		"log.get('sha256')",
+		"tar -czf",
+		"verify_release_archives.sh",
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("macOS release gate missing %q", want)
+		}
+	}
+	if strings.Contains(script, "stapler staple") {
+		t.Error("bare CLI and ZIP do not support stapling")
+	}
+	sign := strings.Index(script, "--options runtime --timestamp")
+	submit := strings.Index(script, "notarytool submit")
+	accepted := strings.Index(script, "log.get('sha256')")
+	repackage := strings.Index(script, "tar -czf")
+	if sign < 0 || submit < 0 || accepted < 0 || repackage < 0 ||
+		sign >= submit || submit >= accepted || accepted >= repackage {
+		t.Error("macOS archives must contain signed bytes only after Apple accepts the matching submission")
 	}
 }
 

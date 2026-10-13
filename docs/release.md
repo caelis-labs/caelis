@@ -6,6 +6,22 @@ platform npm packages, the main
 `@caelis/caelis` package, and mirrors the latest archives to the public R2 bucket
 used by the raw installers.
 
+The tag workflow builds all six archives without publishing them. A macOS
+runner imports the organization Developer ID Application certificate into an
+ephemeral keychain, signs both Darwin CLI binaries with hardened runtime and
+timestamp, and submits a ZIP containing those exact binaries to Apple. Only an
+Accepted notarization result and matching Apple log allow final Darwin archives
+and six-archive checksums to be assembled. GitHub assets, npm packages, and R2
+all use these final archives. Signing or notarization failure blocks formal
+Darwin publication; Linux and Windows retain the GoReleaser build path.
+
+Apple cannot staple a ticket to a ZIP or standalone Mach-O CLI. The ZIP is a
+notarization submission container, not a separately distributed product. Apple
+publishes the accepted ticket online for Gatekeeper to find by code hash. The
+distributed format remains the `tar.gz` CLI archive, with the same signed
+binary in the Darwin npm package. Offline stapled-ticket verification is not
+available for this CLI format. See [Apple's notarization workflow](https://developer.apple.com/documentation/security/customizing-the-notarization-workflow).
+
 Raw installations check `https://releases.caelis.dev/latest.txt`. The official
 `https://caelis.dev/install.sh` and `https://caelis.dev/install.ps1` scripts own
 archive download, SHA256 verification, extraction, and executable replacement.
@@ -97,10 +113,10 @@ ordinary PR gate. Before publishing platform-sensitive changes, obtain the
 relevant native evidence through `platform-checks.yml`. Merging does not trigger
 a second full quality run.
 
-The tag workflow verifies that the tagged commit belongs to `main`, then builds
-and publishes artifacts. It relies on the protected branch rather than querying
-historical CI runs or repeating ordinary tests. Maintainers must tag a reviewed
-commit on `main` without bypassing its required checks. Release workflows are
+The tag workflow verifies that the tagged commit belongs to `main`, then builds,
+signs, notarizes, and publishes artifacts. It relies on the protected branch
+rather than querying historical CI runs or repeating ordinary tests.
+Maintainers must tag a reviewed commit on `main` without bypassing its required checks. Release workflows are
 serialized and do not cancel a publication already in progress.
 
 ## Release bot setup
@@ -143,7 +159,12 @@ version override, use a `Release-As: X.Y.Z` footer in a merged commit, following
 3. Confirm every `@caelis/*` trusted publisher targets this repository,
    `release.yml`, and the `default` environment.
 4. Confirm `RELEASE_PLEASE_TOKEN`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, and
-   `R2_ENDPOINT` are available and the public release domain is active.
+   `R2_ENDPOINT` are available and the public release domain is active. Confirm
+   the `default` environment can use the organization
+   `APPLE_DEVELOPER_ID_P12_BASE64`, `APPLE_DEVELOPER_ID_P12_PASSWORD`,
+   `APPLE_NOTARY_APPLE_ID`, and `APPLE_NOTARY_PASSWORD` secrets plus the
+   `APPLE_TEAM_ID` variable, without same-named repository or environment
+   overrides. Keep certificate and password material out of this repository.
 5. Confirm the imported `github.com/caelis-labs/memory` version is released and
    declares a forward-migration floor for the persisted appliance database.
    A prerelease development baseline is a release blocker. For a schema change,
@@ -164,14 +185,29 @@ or dry-run checks only when the release changes those boundaries. See
 
 Merge the reviewed Release PR after `quality` passes when ready to publish. The
 bot creates the root `vX.Y.Z` tag at that merge commit and a GitHub Release containing the
-changelog. That tag triggers `release.yml`: GoReleaser attaches the CLI archives
-and checksums while preserving the bot's release notes. The GitHub Release may
-be visible before all distribution steps have finished; complete the acceptance
-checks below before announcing availability.
+changelog. That tag triggers `release.yml`: GoReleaser builds unpublished archives;
+the macOS job signs and notarizes Darwin; the publication job uploads final
+archives and checksums while preserving the bot's release notes. The GitHub
+Release may be visible before all distribution steps have finished; complete
+the acceptance checks below before announcing availability.
 
 The workflow then publishes the platform and main npm packages, verifies the
 GitHub assets, mirrors them under `releases/vX.Y.Z/` in R2, and updates `latest.txt`
 last. GitHub Releases remains the complete versioned archive.
+
+Publication can resume after a partial failure. The GitHub step compares each
+existing asset's SHA256 digest with the verified archive before skipping it; a
+different digest stops the job without replacing the asset. Each npm package is
+packed once per attempt, and an existing version is skipped only when its
+registry SHA512 integrity matches the staged package. A different package at
+the same version stops publication. R2 reads the verified GitHub assets back
+and checks their bytes before updating `latest.txt`.
+
+Rerun a failed publication job within the same workflow run so it downloads the
+successful notarization job's `verified-release-archives` artifact. A full
+workflow rerun may produce different timestamped signatures; if any published
+asset differs, publication stops for investigation. Do not overwrite published
+assets or re-sign the Darwin binaries to resume a partially published version.
 
 ### Manual fallback
 
@@ -192,10 +228,16 @@ the released tag so the bot resumes from that version; never move a published ta
 Before declaring the release complete:
 
 1. Verify GitHub Releases contains six platform archives and `checksums.txt`.
+   Extract both Darwin CLIs and check their Developer ID team, hardened runtime,
+   timestamp, and signature. Compare their hashes with the corresponding npm
+   runtime binaries. The notarization job must have an Accepted Apple result and
+   matching submission ZIP digest in its log.
 2. Verify the same version exists for all six platform npm packages and
    `@caelis/caelis`.
-3. Verify `https://releases.caelis.dev/latest.txt`, download one archive and the
-   checksum file from its versioned R2 prefix, and validate the checksum.
+3. Verify `https://releases.caelis.dev/latest.txt`, download the archives and
+   checksum file from its versioned R2 prefix, and validate the checksums against
+   the GitHub assets. The workflow reads every R2 object back before updating
+   `latest.txt`.
 4. Verify the root module version is available through the public Go proxy.
 
 The imported `github.com/caelis-labs/memory` module is compiled into every

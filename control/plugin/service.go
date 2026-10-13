@@ -388,7 +388,7 @@ func (s Service) enrichPluginInfoFromManifest(info *Info, pCfg Config) {
 	if info == nil {
 		return
 	}
-	p, err := ParseConfigured(pCfg)
+	p, err := ParseConfiguredAvailable(pCfg)
 	if err != nil {
 		info.Status = "error"
 		info.Warning = err.Error()
@@ -431,13 +431,7 @@ func pluginSkillDisplayNames(p InstalledPlugin) []string {
 	}
 	metas, err := skillfs.DiscoverPluginBundleMeta(bundles)
 	if err != nil {
-		out := make([]string, 0, len(p.Skills))
-		for _, sc := range p.Skills {
-			if root := strings.TrimSpace(sc.Root); root != "" {
-				out = append(out, filepath.Base(root))
-			}
-		}
-		return out
+		return nil
 	}
 	out := make([]string, 0, len(metas))
 	for _, meta := range metas {

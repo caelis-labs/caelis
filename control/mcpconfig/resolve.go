@@ -32,18 +32,30 @@ type overlayEntry struct {
 // returns enabled ServerSpec values. Missing overlay files are skipped. The
 // result does not include plugin-contributed servers.
 func Resolve(req Request) ([]sdkmcp.ServerSpec, error) {
+	return resolve(req, false)
+}
+
+// ResolveAvailable assembles persisted optional MCP configuration for Runtime
+// startup. Broken files and individual servers are omitted before a layer can
+// shadow a healthy lower-priority server; it never samples untrusted project
+// overlays. Explicit configuration uses strict Resolve.
+func ResolveAvailable(req Request) ([]sdkmcp.ServerSpec, error) {
+	return resolve(req, true)
+}
+
+func resolve(req Request, skipBroken bool) ([]sdkmcp.ServerSpec, error) {
 	merged := map[string]overlayEntry{}
-	if err := overlayFile(merged, req.UserAgentsFile, NamespaceUser, ""); err != nil {
+	if err := overlayFile(merged, req.UserAgentsFile, NamespaceUser, "", skipBroken); err != nil {
 		return nil, err
 	}
-	if err := overlayNative(merged, req.Native, req.ProjectRoot); err != nil {
+	if err := overlayNative(merged, req.Native, req.ProjectRoot, skipBroken); err != nil {
 		return nil, err
 	}
 	if req.AllowProjectOverlays {
-		if err := overlayFile(merged, req.ProjectAgentsFile, NamespaceProject, req.ProjectRoot); err != nil {
+		if err := overlayFile(merged, req.ProjectAgentsFile, NamespaceProject, req.ProjectRoot, skipBroken); err != nil {
 			return nil, err
 		}
-		if err := overlayFile(merged, req.ProjectMCPFile, NamespaceProject, req.ProjectRoot); err != nil {
+		if err := overlayFile(merged, req.ProjectMCPFile, NamespaceProject, req.ProjectRoot, skipBroken); err != nil {
 			return nil, err
 		}
 	}
@@ -55,11 +67,23 @@ func Resolve(req Request) ([]sdkmcp.ServerSpec, error) {
 			continue
 		}
 		if err := validateEnabledServer(name, entry.cfg); err != nil {
+			if skipBroken {
+				continue
+			}
 			return nil, err
 		}
 		spec, err := specFromEntry(name, entry)
 		if err != nil {
+			if skipBroken {
+				continue
+			}
 			return nil, err
+		}
+		if err := sdkmcp.ValidateServerIdentity(spec); err != nil {
+			if skipBroken {
+				continue
+			}
+			return nil, fmt.Errorf("mcpconfig: MCP server %q: %w", name, err)
 		}
 		out = append(out, spec)
 	}
@@ -69,20 +93,33 @@ func Resolve(req Request) ([]sdkmcp.ServerSpec, error) {
 	return out, nil
 }
 
-func overlayNative(dst map[string]overlayEntry, native Servers, projectRoot string) error {
+func overlayNative(dst map[string]overlayEntry, native Servers, projectRoot string, skipBroken bool) error {
+	if err := ValidateIdentities(native); err != nil {
+		return err
+	}
 	native = Normalize(native)
 	for _, name := range slices.Sorted(maps.Keys(native)) {
-		dst[name] = overlayEntry{
+		entry := overlayEntry{
 			cfg:      native[name],
 			source:   NamespaceUser,
 			baseRoot: strings.TrimSpace(projectRoot),
 		}
+		if skipBroken && !availableEntryUsable(name, entry) {
+			continue
+		}
+		dst[name] = entry
 	}
 	return nil
 }
 
-func overlayFile(dst map[string]overlayEntry, path, source, projectRoot string) error {
-	servers, err := loadOverlayFile(path)
+func overlayFile(dst map[string]overlayEntry, path, source, projectRoot string, skipBroken bool) error {
+	var servers Servers
+	var err error
+	if skipBroken {
+		servers = loadAvailableOverlayFile(path)
+	} else {
+		servers, err = loadOverlayFile(path)
+	}
 	if err != nil {
 		return err
 	}
@@ -91,14 +128,34 @@ func overlayFile(dst map[string]overlayEntry, path, source, projectRoot string) 
 		fileDir = filepath.Dir(path)
 	}
 	for _, name := range slices.Sorted(maps.Keys(servers)) {
-		dst[name] = overlayEntry{
+		entry := overlayEntry{
 			cfg:      servers[name],
 			source:   source,
 			fileDir:  fileDir,
 			baseRoot: strings.TrimSpace(projectRoot),
 		}
+		if skipBroken && !availableEntryUsable(name, entry) {
+			continue
+		}
+		dst[name] = entry
 	}
 	return nil
+}
+
+func availableEntryUsable(name string, entry overlayEntry) bool {
+	// A valid explicit disable still overrides a lower layer without needing a
+	// command. Its identity must remain valid even though it starts no server.
+	if strings.ContainsAny(name, "/\\") || sdkmcp.ValidateServerIdentity(sdkmcp.ServerSpec{PluginID: NamespaceUser, Name: name}) != nil {
+		return false
+	}
+	if !entry.cfg.IsEnabled() {
+		return true
+	}
+	if validateEnabledServer(name, entry.cfg) != nil {
+		return false
+	}
+	spec, err := specFromEntry(name, entry)
+	return err == nil && sdkmcp.ValidateServerIdentity(spec) == nil
 }
 
 func specFromEntry(name string, entry overlayEntry) (sdkmcp.ServerSpec, error) {

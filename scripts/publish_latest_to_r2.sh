@@ -50,6 +50,7 @@ done
   cd "${work_dir}"
   sha256sum -c checksums.txt
 )
+bash "$(dirname "$0")/verify_release_archives.sh" "${version}" "${work_dir}"
 
 r2() {
   aws "$@" --endpoint-url "${R2_ENDPOINT}"
@@ -78,6 +79,14 @@ for asset in "${archives[@]}" checksums.txt; do
     echo "R2 size mismatch for ${asset}: local=${local_size}, remote=${remote_size}" >&2
     exit 1
   fi
+done
+
+# Read the uploaded objects back. S3 ETags and size alone are not SHA256 proofs.
+mkdir -p "${work_dir}/r2-readback"
+for asset in "${archives[@]}" checksums.txt; do
+  r2 s3 cp "s3://${R2_BUCKET}/${versioned_prefix}/${asset}" \
+    "${work_dir}/r2-readback/${asset}" --no-progress
+  cmp "${work_dir}/${asset}" "${work_dir}/r2-readback/${asset}"
 done
 
 printf '%s\n' "${tag}" > "${work_dir}/latest.txt"

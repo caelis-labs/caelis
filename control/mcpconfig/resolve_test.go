@@ -137,6 +137,122 @@ func TestResolveSkipsProjectOverlaysUnlessAllowed(t *testing.T) {
 	}
 }
 
+func TestResolveAvailableIsolatesMalformedOverlayAndServer(t *testing.T) {
+	root := t.TempDir()
+	userFile := filepath.Join(root, "user.json")
+	projectFile := filepath.Join(root, ".mcp.json")
+	mustWrite(t, userFile, `{"mcpServers":{"user-good":{"command":"user"}}}`)
+	mustWrite(t, projectFile, `{"mcpServers":`)
+	req := Request{
+		Native: Servers{
+			"native-good": {Command: "native"}, "native-bad": {},
+			strings.Repeat("x", 129): {Command: "too-long"},
+		},
+		UserAgentsFile: userFile, ProjectMCPFile: projectFile,
+		ProjectRoot: root, AllowProjectOverlays: true,
+	}
+	if _, err := Resolve(req); err == nil {
+		t.Fatal("strict Resolve accepted malformed overlay")
+	}
+	got, err := ResolveAvailable(req)
+	if err != nil || len(got) != 2 || got[0].Name != "native-good" || got[1].Name != "user-good" {
+		t.Fatalf("available servers = %+v, %v", got, err)
+	}
+	mustWrite(t, projectFile, `{"mcpServers":{"project-good":{"command":"project"},"project-bad":{"args":"wrong"}}}`)
+	got, err = ResolveAvailable(req)
+	if err != nil || len(got) != 3 || got[1].Name != "project-good" {
+		t.Fatalf("available after file repair = %+v, %v", got, err)
+	}
+	mustWrite(t, projectFile, `{"mcpServers":{"project-good":{"command":"project"},"project-bad":{"command":"repaired"}}}`)
+	got, err = ResolveAvailable(req)
+	if err != nil || len(got) != 4 {
+		t.Fatalf("available after server repair = %+v, %v", got, err)
+	}
+}
+
+func TestResolveAvailableFallsBackBeforeHigherLayerCanShadow(t *testing.T) {
+	root := t.TempDir()
+	userFile := filepath.Join(root, "user", "mcp.json")
+	projectAgents := filepath.Join(root, "workspace", ".agents", "mcp.json")
+	projectMCP := filepath.Join(root, "workspace", ".mcp.json")
+	workspace := filepath.Join(root, "workspace")
+	mustWrite(t, userFile, `{"mcpServers":{"docs":{"command":"user"}}}`)
+	mustWrite(t, projectAgents, `{"mcpServers":{"docs":{"command":"project-agents"}}}`)
+	mustWrite(t, projectMCP, `{"mcpServers":{"docs":{}}}`)
+	req := Request{
+		Native: Servers{"docs": {Command: "native"}}, UserAgentsFile: userFile,
+		ProjectAgentsFile: projectAgents, ProjectMCPFile: projectMCP,
+		ProjectRoot: workspace, AllowProjectOverlays: true,
+	}
+	want := func(command, source string) {
+		t.Helper()
+		got, err := ResolveAvailable(req)
+		if err != nil || len(got) != 1 || got[0].Command != command || got[0].PluginID != source {
+			t.Fatalf("available docs = %+v, %v; want %s from %s", got, err, command, source)
+		}
+		combined, err := CombineSpecs(got, []sdkmcp.ServerSpec{{PluginID: "healthy-plugin", Name: "docs", Command: "plugin"}})
+		if err != nil || len(combined) != 2 || combined[1].PluginID != "healthy-plugin" {
+			t.Fatalf("plugin and catalog docs = %+v, %v", combined, err)
+		}
+	}
+	want("project-agents", NamespaceProject) // Broken .mcp.json cannot shadow .agents/mcp.json.
+	mustWrite(t, projectAgents, `{"mcpServers":{"docs":{}}}`)
+	want("native", NamespaceUser) // Both broken workspace layers leave native intact.
+	req.Native = Servers{"docs": {}}
+	want("user", NamespaceUser) // Broken native item leaves healthy user overlay intact.
+	mustWrite(t, projectMCP, `{"mcpServers":{"docs":{"enabled":false}}}`)
+	req.Native = Servers{"docs": {Command: "native"}}
+	got, err := ResolveAvailable(req)
+	if err != nil || len(got) != 0 {
+		t.Fatalf("explicit workspace disable must suppress lower docs: %+v, %v", got, err)
+	}
+	mustWrite(t, projectMCP, `{"mcpServers":{"docs":{"command":"repaired"}}}`)
+	want("repaired", NamespaceProject)
+}
+
+func TestResolveAvailableDropsWholeNormalizedOverlayCollision(t *testing.T) {
+	if _, err := parseOverlayDocument([]byte(`{"mcpServers":{"docs":{"command":"a"}," docs":{"command":"b"}}}`)); err == nil || !strings.Contains(err.Error(), "duplicate MCP server") {
+		t.Fatalf("strict normalized collision error = %v", err)
+	}
+	for _, fixture := range []struct{ name, content string }{
+		{"leading-space-first", `{"mcpServers":{" docs":{"command":"unexpected"},"docs":{"command":"expected"},"other":{"command":"other"},"   ":{"command":"empty"}}}`},
+		{"leading-space-last", `{"mcpServers":{"docs":{"command":"expected"},"other":{"command":"other"}," docs":{"args":"malformed"},"   ":{"command":"empty"}}}`},
+	} {
+		t.Run(fixture.name, func(t *testing.T) {
+			file := filepath.Join(t.TempDir(), ".mcp.json")
+			mustWrite(t, file, fixture.content)
+			if _, err := loadOverlayFile(file); err == nil {
+				t.Fatal("strict overlay accepted malformed names or content")
+			}
+			available := loadAvailableOverlayFile(file)
+			if len(available) != 1 || available["other"].Command != "other" {
+				t.Fatalf("available overlay selected a colliding or empty name: %+v", available)
+			}
+			got, err := ResolveAvailable(Request{
+				Native:         Servers{"docs": {Command: "safe-lower"}},
+				ProjectMCPFile: file, ProjectRoot: filepath.Dir(file), AllowProjectOverlays: true,
+			})
+			if err != nil || len(got) != 2 || got[0].Name != "docs" || got[0].Command != "safe-lower" || got[1].Name != "other" {
+				t.Fatalf("colliding project names changed lower source: %+v, %v", got, err)
+			}
+			user, err := ResolveAvailable(Request{UserAgentsFile: file})
+			if err != nil || len(user) != 1 || user[0].Name != "other" {
+				t.Fatalf("colliding user names selected a winner: %+v, %v", user, err)
+			}
+			combined, err := CombineSpecs(user, []sdkmcp.ServerSpec{{PluginID: "healthy-plugin", Name: "docs", Command: "plugin"}})
+			if err != nil || len(combined) != 2 || combined[1].PluginID != "healthy-plugin" {
+				t.Fatalf("user collision affected independent plugin: %+v, %v", combined, err)
+			}
+		})
+	}
+	_, err := ResolveAvailable(Request{Native: Servers{
+		" docs": {Command: "a"}, "docs": {Command: "b"},
+	}})
+	if err == nil || !strings.Contains(err.Error(), "duplicate MCP server") {
+		t.Fatalf("native identity collision must remain fatal: %v", err)
+	}
+}
+
 func TestCombineSpecsRejectsDuplicatesAndReservedPluginIDs(t *testing.T) {
 	_, err := CombineSpecs(
 		[]sdkmcp.ServerSpec{{PluginID: NamespaceUser, Name: "docs", Command: "a"}},

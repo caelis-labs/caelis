@@ -10,8 +10,10 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 
+	"github.com/caelis-labs/caelis/control/mcpconfig"
 	"github.com/caelis-labs/caelis/control/memorybinding"
 	"github.com/caelis-labs/caelis/control/modelconfig/credentialstore"
 )
@@ -180,7 +182,7 @@ func decodeCurrentAppConfig(data []byte) (AppConfig, error) {
 		return AppConfig{}, err
 	}
 	doc = Normalize(doc)
-	if err := Validate(doc); err != nil {
+	if err := validateForLoad(doc); err != nil {
 		return AppConfig{}, err
 	}
 	return doc, nil
@@ -379,7 +381,7 @@ func (s *Store) saveUnlocked(path string, doc AppConfig, migratingLegacy bool) e
 		return err
 	}
 	doc = Normalize(doc)
-	if err := Validate(doc); err != nil {
+	if err := validateForSave(path, doc, migratingLegacy); err != nil {
 		return err
 	}
 	dir := filepath.Dir(path)
@@ -415,6 +417,23 @@ func (s *Store) saveUnlocked(path string, doc AppConfig, migratingLegacy bool) e
 		}
 	}
 	return err
+}
+
+// Unrelated Host writes may preserve an already-persisted malformed optional
+// MCP entry. A new or changed MCP catalog must still pass strict validation.
+func validateForSave(path string, doc AppConfig, migratingLegacy bool) error {
+	if err := mcpconfig.Validate(doc.MCPServers); err == nil || migratingLegacy {
+		return Validate(doc)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return Validate(doc)
+	}
+	previous, err := decodeCurrentAppConfig(data)
+	if err != nil || !reflect.DeepEqual(previous.MCPServers, doc.MCPServers) {
+		return Validate(doc)
+	}
+	return validateForLoad(doc)
 }
 
 type legacyBackupWriteError struct {

@@ -138,21 +138,21 @@ func scanRegularSkillDirs(dirs []string, visit func(Meta, string) (Meta, bool, e
 	for _, dir := range dirs {
 		resolvedDir, err := ResolvePath(dir)
 		if err != nil {
-			return nil, err
+			continue
 		}
 		info, err := os.Stat(resolvedDir)
 		if err != nil {
 			if os.IsNotExist(err) {
 				continue
 			}
-			return nil, err
+			continue
 		}
 		if !info.IsDir() {
 			continue
 		}
 		entries, err := os.ReadDir(resolvedDir)
 		if err != nil {
-			return nil, err
+			continue
 		}
 		for _, entry := range entries {
 			if entry == nil || !entry.IsDir() {
@@ -164,7 +164,7 @@ func scanRegularSkillDirs(dirs []string, visit func(Meta, string) (Meta, bool, e
 				if os.IsNotExist(err) {
 					continue
 				}
-				return nil, err
+				continue
 			}
 			skillPath = filepath.Clean(skillPath)
 			if _, ok := seenPaths[skillPath]; ok {
@@ -173,7 +173,7 @@ func scanRegularSkillDirs(dirs []string, visit func(Meta, string) (Meta, bool, e
 			seenPaths[skillPath] = struct{}{}
 			meta, hash, err := parseMetaHashCached(skillPath, info)
 			if err != nil {
-				return nil, err
+				continue
 			}
 			meta, include, err := visit(meta, hash)
 			if err != nil {
@@ -325,7 +325,7 @@ func parseFrontMatter(content string) (map[string]string, string, error) {
 		if strings.HasSuffix(rest, "\n---") {
 			idx = len(rest) - len("\n---")
 		} else {
-			return map[string]string{}, content, nil
+			return nil, "", fmt.Errorf("unterminated YAML frontmatter")
 		}
 	}
 	front := rest[:idx]

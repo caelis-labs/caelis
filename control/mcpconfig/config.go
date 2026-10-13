@@ -141,6 +141,9 @@ func validateEnabledServer(name string, cfg ServerConfig) error {
 	if strings.ContainsAny(name, "/\\") {
 		return fmt.Errorf("mcpconfig: MCP server %q must not contain a path separator", name)
 	}
+	if err := sdkmcp.ValidateServerIdentity(sdkmcp.ServerSpec{PluginID: NamespaceUser, Name: name}); err != nil {
+		return fmt.Errorf("mcpconfig: MCP server %q: %w", name, err)
+	}
 	transport := sdkmcp.NormalizeTransport(firstNonEmpty(cfg.Transport, cfg.Type), cfg.Command, cfg.URL)
 	switch transport {
 	case sdkmcp.TransportStdio:

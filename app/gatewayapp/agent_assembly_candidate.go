@@ -7,6 +7,7 @@ import (
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/control/modelprofile"
+	"github.com/caelis-labs/caelis/control/plugin"
 )
 
 // validateAgentAssemblyCandidate rejects candidate configuration that could
@@ -30,7 +31,7 @@ func (s *runtimeComposition) validateAgentAssemblyCandidate(doc AppConfig) error
 		}
 	}
 
-	contributions, err := resolveGatewayPluginContributions(doc.Plugins, s.authorities.storeDir, s.workspace.CWD)
+	contributions, err := plugin.ResolveContributions(doc.Plugins, plugin.RuntimePaths{StoreDir: s.authorities.storeDir, WorkspaceDir: s.workspace.CWD})
 	if err != nil {
 		return err
 	}
