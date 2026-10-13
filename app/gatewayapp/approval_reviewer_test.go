@@ -248,6 +248,40 @@ func TestApprovalReviewerRetriesInvalidJSONAssessment(t *testing.T) {
 	}
 }
 
+func TestApprovalReviewerAcceptsAllowExplanationWithoutRetry(t *testing.T) {
+	for _, structured := range []bool{true, false} {
+		t.Run(map[bool]string{true: "schema", false: "text"}[structured], func(t *testing.T) {
+			ctx := t.Context()
+			service, active := newApprovalReviewerTestSession(t, ctx)
+			llm := &approvalReviewerFakeModel{disableStructuredOutput: !structured, responses: []string{
+				`{"option_id":"allow_once","rationale":"The requested inspection is authorized.","extra":{"approved":true}}`,
+			}}
+			reviewer := newGuardianApprovalApprover(service)
+			t.Cleanup(func() { _ = reviewer.Close() })
+			req := approvalReviewerTestRequest(active, llm, "inspect", map[string]any{"path": "original.txt"})
+			result, err := reviewer.Decide(ctx, req)
+			if err != nil || !result.Approved || result.OptionID != "allow_once" || result.Rationale != "" || result.DisplayText != "approved" {
+				t.Fatalf("decision = %#v, %v; want original allow with explanation discarded", result, err)
+			}
+			if len(llm.Requests()) != 1 {
+				t.Fatalf("model calls = %d, want one", len(llm.Requests()))
+			}
+			snapshot, err := reviewer.conversations.snapshot(active.SessionID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if snapshot.Version != 1 || len(snapshot.Events) != 2 {
+				t.Fatalf("validated conversation = %#v, want one original pair", snapshot)
+			}
+			for _, event := range snapshot.Events {
+				if event.Meta["guardian_turn"] != "0:"+req.ReviewID {
+					t.Fatalf("normalization changed review identity: %#v", event)
+				}
+			}
+		})
+	}
+}
+
 func TestApprovalReviewerStopsAfterInvalidJSONAssessmentRetries(t *testing.T) {
 	ctx := context.Background()
 	service, activeSession := newApprovalReviewerTestSession(t, ctx)
