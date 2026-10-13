@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.71.1](https://github.com/caelis-labs/caelis/compare/v0.71.0...v0.71.1) (2026-10-13)
+
+
+### Bug Fixes
+
+* **guardian:** tolerate explanatory assessment fields ([#134](https://github.com/caelis-labs/caelis/issues/134)) ([13083a3](https://github.com/caelis-labs/caelis/commit/13083a3a712c8c5574ec49f8ca833d6317d66fa6)), closes [#133](https://github.com/caelis-labs/caelis/issues/133)
+* isolate extensions and make signed releases retry-safe ([#136](https://github.com/caelis-labs/caelis/issues/136)) ([08ae885](https://github.com/caelis-labs/caelis/commit/08ae8851aa094ed9ec66aced6e7f59de65d3bab3))
+
 ## [0.71.0](https://github.com/caelis-labs/caelis/compare/v0.70.0...v0.71.0) (2026-10-12)
 
 
