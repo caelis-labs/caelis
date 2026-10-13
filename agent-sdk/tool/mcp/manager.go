@@ -94,16 +94,8 @@ type clientStarter func(context.Context, ServerSpec) (*Client, error)
 func newManager(ctx context.Context, specs []ServerSpec, start clientStarter, onFailure func(ServerFailure)) (*Manager, error) {
 	seen := make(map[string]bool, len(specs))
 	for _, spec := range specs {
-		if err := validateMCPIdentity("plugin id", spec.PluginID, maxMCPPluginIDRunes); err != nil {
+		if err := ValidateServerIdentity(spec); err != nil {
 			return nil, err
-		}
-		if err := validateMCPIdentity("server name", spec.Name, maxMCPServerNameRunes); err != nil {
-			return nil, err
-		}
-		for _, id := range spec.ReplaySourceIDs {
-			if err := validateMCPIdentity("replay source id", id, maxMCPPluginIDRunes); err != nil {
-				return nil, err
-			}
 		}
 		key := spec.PluginID + "/" + spec.Name
 		if seen[key] {

@@ -5,6 +5,7 @@ import (
 	"runtime"
 
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 )
 
 // Contributions is the normalized set of Runtime inputs produced by the
@@ -32,10 +33,20 @@ type RuntimePaths struct {
 	TargetOS string
 }
 
-// ResolveContributions parses configured plugins and projects the contributions
-// consumed by Runtime assembly. Broken disabled plugins are ignored; a broken
-// enabled plugin makes the configuration invalid.
+// ResolveContributions strictly validates configured plugins for explicit
+// configuration changes. Broken enabled plugins return an actionable error.
 func ResolveContributions(configs []Config, paths ...RuntimePaths) (Contributions, error) {
+	return resolveContributions(configs, false, paths...)
+}
+
+// ResolveAvailableContributions assembles persisted optional plugin content.
+// A broken package or MCP server cannot prevent unrelated Runtime inputs from
+// loading. Explicit installation and configuration still use ResolveContributions.
+func ResolveAvailableContributions(configs []Config, paths ...RuntimePaths) (Contributions, error) {
+	return resolveContributions(configs, true, paths...)
+}
+
+func resolveContributions(configs []Config, skipBroken bool, paths ...RuntimePaths) (Contributions, error) {
 	var out Contributions
 	var runtimePaths RuntimePaths
 	if len(paths) > 0 {
@@ -45,9 +56,13 @@ func ResolveContributions(configs []Config, paths ...RuntimePaths) (Contribution
 		runtimePaths.TargetOS = runtime.GOOS
 	}
 	for _, configured := range configs {
-		installed, err := ParseConfigured(configured)
+		parse := ParseConfigured
+		if skipBroken {
+			parse = ParseConfiguredAvailable
+		}
+		installed, err := parse(configured)
 		if err != nil {
-			if configured.Enabled {
+			if configured.Enabled && !skipBroken {
 				return out, fmt.Errorf("parse enabled plugin %q failed: %w", configured.ID, err)
 			}
 			continue
@@ -69,18 +84,33 @@ func ResolveContributions(configs []Config, paths ...RuntimePaths) (Contribution
 				}
 				spec, err = instantiateAgentPluginMCP(spec, installed.Root, dataDir)
 				if err != nil {
+					if skipBroken {
+						continue
+					}
 					return out, fmt.Errorf("plugin %q MCP server %q: %w", installed.ID, spec.Name, err)
 				}
 				spec, err = applyHostExecutableEnv(spec, configured.ExecutableEnv, runtimePaths.TargetOS)
 				if err != nil {
+					if skipBroken {
+						continue
+					}
 					return out, fmt.Errorf("plugin %q MCP server %q: %w", installed.ID, spec.Name, err)
 				}
 			} else {
 				var err error
 				spec, err = instantiateClaudeProjectDir(spec, runtimePaths.WorkspaceDir)
 				if err != nil {
+					if skipBroken {
+						continue
+					}
 					return out, fmt.Errorf("plugin %q MCP server %q: %w", installed.ID, spec.Name, err)
 				}
+			}
+			if err := mcp.ValidateServerIdentity(spec); err != nil {
+				if skipBroken {
+					continue
+				}
+				return out, fmt.Errorf("plugin %q MCP server %q: %w", installed.ID, spec.Name, err)
 			}
 			out.MCPServerSpecs = append(out.MCPServerSpecs, spec)
 		}

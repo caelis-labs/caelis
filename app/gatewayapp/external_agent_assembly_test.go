@@ -72,6 +72,25 @@ func TestPluginAgentCollisionFailsClosed(t *testing.T) {
 	}
 }
 
+func TestRuntimeSkipsMalformedPluginAgentButKeepsHealthySibling(t *testing.T) {
+	stack := &Stack{}
+	registrations := []plugin.AgentRegistration{
+		{PluginID: "mixed", Agent: plugin.AgentContribution{Name: "broken"}},
+		{PluginID: "mixed", Agent: plugin.AgentContribution{Name: "healthy", Command: "healthy-acp"}},
+	}
+	got, err := stack.composition.withPluginACPAgents(assembly.ResolvedAssembly{}, registrations)
+	if err != nil || len(got.Agents) != 1 || got.Agents[0].Name != "healthy" {
+		t.Fatalf("Plugin Agents = %+v, %v", got.Agents, err)
+	}
+	if _, err := pluginAgentContributionToAssembly("mixed", registrations[0].Agent); err == nil || !strings.Contains(err.Error(), "command is required") {
+		t.Fatalf("explicit plugin Agent validation = %v", err)
+	}
+	registrations[0].Agent = plugin.AgentContribution{Name: "guardian", Command: "conflicting-acp"}
+	if _, err := stack.composition.withPluginACPAgents(assembly.ResolvedAssembly{}, registrations); err == nil || !strings.Contains(err.Error(), "conflicts") {
+		t.Fatalf("reserved Agent identity conflict = %v", err)
+	}
+}
+
 func TestCustomDirectRoleCollisionFailsClosedAndRollsBack(t *testing.T) {
 	stack := newStackForToolTestWithoutProfiles(t, assembly.ResolvedAssembly{Agents: []assembly.AgentConfig{{
 		Name: "research", Command: "existing-research",

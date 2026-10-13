@@ -370,7 +370,11 @@ writes use revision-aware atomic replacement; readers observe a complete documen
 Native MCP configuration is assembled from AppConfig plus supported user
 overlays. Project `.agents/mcp.json` or `.mcp.json` files are sampled only after
 the exact canonical workspace is trusted. Overlay changes never hot-reload an
-active Runtime. MCP servers initialize independently in the background with a
+active Runtime. During automatic assembly, a malformed overlay file or server
+entry is omitted; an invalid persisted native server is omitted individually.
+Explicit configuration writes still validate the changed MCP catalog. AppConfig
+identity collisions, workspace trust errors, and Store decoding errors remain
+fatal. MCP servers initialize independently in the background with a
 30-second budget per server for connection and tool listing. Runtime startup
 and other servers do not wait for that work. Only complete, validated ready
 lists enter ToolSearch. An initialization failure emits one transient Session
@@ -380,6 +384,11 @@ and idle periods; Turn and reconnect views omit duplicate presentation.
 Overlapping tool namespaces wait for higher-priority initialization to settle
 before publication, preserving configured collision precedence.
 Runtime release cancels and drains pending initialization and closes its clients.
+
+Automatic Skill discovery omits malformed individual `SKILL.md` files from
+future Session prompts and catalogs without a startup notice. An explicit Skill
+read or load still returns its parse error. A missing YAML closing marker is
+invalid frontmatter, not plain Skill content.
 
 Plugin configuration is also canonical AppConfig state. Managed plugin content
 is immutable and pinned while an active Runtime uses it; configuration mutation

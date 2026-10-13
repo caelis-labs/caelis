@@ -24,6 +24,16 @@ func ParseConfigured(pCfg Config) (InstalledPlugin, error) {
 	return pluginWithConfiguredID(p, pCfg.ID), nil
 }
 
+// ParseConfiguredAvailable applies the persisted identity to optional Runtime
+// contributions while isolating malformed individual native MCP entries.
+func ParseConfiguredAvailable(pCfg Config) (InstalledPlugin, error) {
+	p, err := ParsePluginAvailable(pCfg.Root)
+	if err != nil {
+		return InstalledPlugin{}, err
+	}
+	return pluginWithConfiguredID(p, pCfg.ID), nil
+}
+
 func samePluginRoot(a string, b string) bool {
 	aRoot, ok := canonicalPluginRoot(a)
 	if !ok {

@@ -137,6 +137,39 @@ func TestResolveSkipsProjectOverlaysUnlessAllowed(t *testing.T) {
 	}
 }
 
+func TestResolveAvailableIsolatesMalformedOverlayAndServer(t *testing.T) {
+	root := t.TempDir()
+	userFile := filepath.Join(root, "user.json")
+	projectFile := filepath.Join(root, ".mcp.json")
+	mustWrite(t, userFile, `{"mcpServers":{"user-good":{"command":"user"}}}`)
+	mustWrite(t, projectFile, `{"mcpServers":`)
+	req := Request{
+		Native: Servers{
+			"native-good": {Command: "native"}, "native-bad": {},
+			strings.Repeat("x", 129): {Command: "too-long"},
+		},
+		UserAgentsFile: userFile, ProjectMCPFile: projectFile,
+		ProjectRoot: root, AllowProjectOverlays: true,
+	}
+	if _, err := Resolve(req); err == nil {
+		t.Fatal("strict Resolve accepted malformed overlay")
+	}
+	got, err := ResolveAvailable(req)
+	if err != nil || len(got) != 2 || got[0].Name != "native-good" || got[1].Name != "user-good" {
+		t.Fatalf("available servers = %+v, %v", got, err)
+	}
+	mustWrite(t, projectFile, `{"mcpServers":{"project-good":{"command":"project"},"project-bad":{"args":"wrong"}}}`)
+	got, err = ResolveAvailable(req)
+	if err != nil || len(got) != 3 || got[1].Name != "project-good" {
+		t.Fatalf("available after file repair = %+v, %v", got, err)
+	}
+	mustWrite(t, projectFile, `{"mcpServers":{"project-good":{"command":"project"},"project-bad":{"command":"repaired"}}}`)
+	got, err = ResolveAvailable(req)
+	if err != nil || len(got) != 4 {
+		t.Fatalf("available after server repair = %+v, %v", got, err)
+	}
+}
+
 func TestCombineSpecsRejectsDuplicatesAndReservedPluginIDs(t *testing.T) {
 	_, err := CombineSpecs(
 		[]sdkmcp.ServerSpec{{PluginID: NamespaceUser, Name: "docs", Command: "a"}},

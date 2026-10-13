@@ -78,8 +78,12 @@ JSON stdout contains one object with `schema_version:"1"`, `action`, `id`,
 {"schema_version":"1","action":"status","id":"desktop-world","installed":false}
 ```
 
-Success exits zero. Invalid arguments, malformed manifests, ownership conflicts,
-and unavailable Stores/Hosts exit nonzero and include `error` in JSON output.
+Success exits zero. Explicit installation and configuration reject malformed
+manifests with an actionable error. A previously registered plugin whose
+manifest later becomes malformed is omitted from future Runtime assembly;
+`status` reports its error state and warning while the Host remains available.
+Invalid arguments, ownership conflicts, and unavailable Stores/Hosts exit
+nonzero and include `error` in JSON output.
 Mutation failures also include the Host `receipt` when available. Check its
 `outcome`: `committed` means the mutation took effect even if subsequent
 observation or cleanup failed; do not blindly replay an uncertain mutation.
@@ -113,6 +117,11 @@ variables plus package values and explicitly configured Host executable paths;
 it does not inherit arbitrary Bot tokens or process environment variables.
 Standard Skill metadata is parsed as YAML; the fixed `skills/` location may
 link to files elsewhere inside the same plugin package, but never outside it.
+Automatic discovery omits a malformed Skill without listing it or emitting a
+startup notice; valid Skills in the same package remain available. Explicit
+Skill reads still report the parse error. A malformed plugin MCP entry is
+omitted without disabling valid sibling servers or Skills; a failed connection
+is reported through its MCP status and does not delay Host readiness.
 On Windows, environment names are matched without case: an explicit Host
 executable path replaces any package value with the same name in another case.
 On Unix, differently cased names remain distinct.

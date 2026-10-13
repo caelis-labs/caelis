@@ -71,6 +71,55 @@ func TestLoaderRejectsMismatchedNamespacedRef(t *testing.T) {
 	}
 }
 
+func TestDiscoverySkipsMalformedSkillsAndRecoversAfterRepair(t *testing.T) {
+	root := t.TempDir()
+	writeSkillForDiscoveryTest(t, filepath.Join(root, "good"), "good", "usable")
+	bad := filepath.Join(root, "bad")
+	if err := os.MkdirAll(bad, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(bad, "SKILL.md")
+	for _, broken := range []string{
+		"---\nname: [invalid\ndescription: broken\n---\n# Bad\n",
+		"---\nname: bad\ndescription: missing closing marker\n# Bad\n",
+	} {
+		if err := os.WriteFile(path, []byte(broken), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		metas, err := DiscoverMetaRequest(skill.DiscoverRequest{Dirs: []string{root}})
+		if err != nil || len(metas) != 1 || metas[0].Name != "good" {
+			t.Fatalf("discovery = %+v, %v", metas, err)
+		}
+		if _, err := DiscoverRootMeta(bad); err == nil {
+			t.Fatal("explicit metadata read accepted malformed Skill")
+		}
+		if _, err := (Loader{}).Load(context.Background(), skill.Ref{Path: path}); err == nil {
+			t.Fatal("explicit load accepted malformed Skill")
+		}
+	}
+	writeSkillForDiscoveryTest(t, bad, "bad", "repaired")
+	metas, err := DiscoverMetaRequest(skill.DiscoverRequest{Dirs: []string{root}})
+	if err != nil || len(metas) != 2 {
+		t.Fatalf("discovery after repair = %+v, %v", metas, err)
+	}
+}
+
+func TestPluginDiscoverySkipsMalformedSibling(t *testing.T) {
+	root := t.TempDir()
+	writeSkillForDiscoveryTest(t, filepath.Join(root, "good"), "good", "usable")
+	bad := filepath.Join(root, "bad")
+	if err := os.MkdirAll(bad, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bad, "SKILL.md"), []byte("---\nname: [invalid\n---\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	metas, err := DiscoverPluginBundleMeta([]skill.PluginBundle{{Plugin: "demo", Namespace: "demo", Root: root, Enabled: true}})
+	if err != nil || len(metas) != 1 || metas[0].Name != "demo:good" {
+		t.Fatalf("plugin discovery = %+v, %v", metas, err)
+	}
+}
+
 func TestDiscoverMetaIncludesPluginSkillsNamespacedAndSuppressesLegacyCopy(t *testing.T) {
 	root := t.TempDir()
 	regularRoot := filepath.Join(root, "regular")

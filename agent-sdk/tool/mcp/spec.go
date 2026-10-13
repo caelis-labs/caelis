@@ -24,6 +24,23 @@ type ServerSpec struct {
 	CleanEnvironment bool
 }
 
+// ValidateServerIdentity checks one server before Manager admission. It does
+// not resolve collisions between separate configured servers.
+func ValidateServerIdentity(spec ServerSpec) error {
+	if err := validateMCPIdentity("plugin id", spec.PluginID, maxMCPPluginIDRunes); err != nil {
+		return err
+	}
+	if err := validateMCPIdentity("server name", spec.Name, maxMCPServerNameRunes); err != nil {
+		return err
+	}
+	for _, id := range spec.ReplaySourceIDs {
+		if err := validateMCPIdentity("replay source id", id, maxMCPPluginIDRunes); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 const (
 	TransportStdio          = "stdio"
 	TransportStreamableHTTP = "streamable_http"

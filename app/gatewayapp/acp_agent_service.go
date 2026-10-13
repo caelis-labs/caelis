@@ -281,6 +281,9 @@ func (s *runtimeComposition) withPluginACPAgents(resolved assembly.ResolvedAssem
 		}
 	}
 	for _, contributed := range pluginAgents {
+		if strings.TrimSpace(contributed.Agent.Name) == "" || strings.TrimSpace(contributed.Agent.Command) == "" {
+			continue
+		}
 		agent, err := pluginAgentContributionToAssembly(contributed.PluginID, contributed.Agent)
 		if err != nil {
 			return out, err

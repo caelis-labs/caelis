@@ -23,6 +23,7 @@ func TestStoreRejectsDuplicateCurrentRecordsBeforeNormalization(t *testing.T) {
 		name    string
 		mutate  func(AppConfig) AppConfig
 		wantErr string
+		loadOK  bool
 	}{
 		{
 			name: "provider model",
@@ -100,6 +101,7 @@ func TestStoreRejectsDuplicateCurrentRecordsBeforeNormalization(t *testing.T) {
 				return doc
 			},
 			wantErr: "invalid MCP servers",
+			loadOK:  true,
 		},
 		{
 			name: "MCP server identity",
@@ -160,7 +162,12 @@ func TestStoreRejectsDuplicateCurrentRecordsBeforeNormalization(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(root, "config.json"), data, 0o600); err != nil {
 				t.Fatalf("WriteFile() error = %v", err)
 			}
-			if _, err := New(root).Load(); err == nil || !strings.Contains(err.Error(), test.wantErr) {
+			_, err = New(root).Load()
+			if test.loadOK {
+				if err != nil {
+					t.Fatalf("Load() error = %v, want optional MCP isolation", err)
+				}
+			} else if err == nil || !strings.Contains(err.Error(), test.wantErr) {
 				t.Fatalf("Load() error = %v, want containing %q", err, test.wantErr)
 			}
 		})
@@ -253,6 +260,46 @@ func TestValidateRejectsUnsupportedFastModeDefault(t *testing.T) {
 	doc.Models.Configs[0].SpeedModes = nil
 	if err := Validate(doc); err == nil || !strings.Contains(err.Error(), "does not support fast mode") {
 		t.Fatalf("Validate(unsupported fast default) error = %v", err)
+	}
+}
+
+func TestLoadIsolatesMalformedPersistedMCPServerButKeepsIdentityChecks(t *testing.T) {
+	root := t.TempDir()
+	doc := currentValidationFixture()
+	doc.MCPServers = mcpconfig.Servers{
+		"good": {Command: "good-server"},
+		"bad":  {},
+	}
+	if err := Validate(doc); err == nil || !strings.Contains(err.Error(), "invalid MCP servers") {
+		t.Fatalf("explicit validation = %v", err)
+	}
+	path := filepath.Join(root, "config.json")
+	write := func() {
+		t.Helper()
+		raw, err := json.Marshal(doc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, raw, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write()
+	loaded, err := New(root).Load()
+	if err != nil || len(loaded.MCPServers) != 2 {
+		t.Fatalf("Load() = %+v, %v", loaded.MCPServers, err)
+	}
+	if err := New(root).Save(loaded); err != nil {
+		t.Fatalf("unrelated write did not preserve existing MCP entry: %v", err)
+	}
+	loaded.MCPServers["another-bad"] = mcpconfig.ServerConfig{}
+	if err := New(root).Save(loaded); err == nil || !strings.Contains(err.Error(), "invalid MCP servers") {
+		t.Fatalf("changed invalid MCP catalog was accepted: %v", err)
+	}
+	doc.MCPServers[" good "] = mcpconfig.ServerConfig{Command: "collision"}
+	write()
+	if _, err := New(root).Load(); err == nil || !strings.Contains(err.Error(), "duplicate MCP server") {
+		t.Fatalf("Load() identity conflict = %v", err)
 	}
 }
 

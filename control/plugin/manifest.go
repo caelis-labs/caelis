@@ -169,6 +169,16 @@ func pathContainsSymlink(root, target string) bool {
 
 // ParsePlugin discovers and normalizes supported manifests under root.
 func ParsePlugin(root string) (InstalledPlugin, error) {
+	return parsePlugin(root, false)
+}
+
+// ParsePluginAvailable parses optional runtime content while retaining valid
+// siblings of malformed native Caelis MCP entries.
+func ParsePluginAvailable(root string) (InstalledPlugin, error) {
+	return parsePlugin(root, true)
+}
+
+func parsePlugin(root string, skipBrokenMCP bool) (InstalledPlugin, error) {
 	root = filepath.Clean(root)
 	pluginID := strings.ToLower(filepath.Base(root))
 	// Agent Plugins 1.0 has one authoritative root manifest and fixed component
@@ -177,6 +187,8 @@ func ParsePlugin(root string) (InstalledPlugin, error) {
 	standardPath := filepath.Join(root, "plugin.json")
 	if _, err := os.Stat(standardPath); err == nil {
 		return parseAgentPlugin(root)
+	} else if !os.IsNotExist(err) {
+		return InstalledPlugin{}, fmt.Errorf("plugin manifest: inspect %s: %w", standardPath, err)
 	}
 
 	p := InstalledPlugin{
@@ -190,13 +202,15 @@ func ParsePlugin(root string) (InstalledPlugin, error) {
 	caelisPath := filepath.Join(root, ".caelis-plugin", "plugin.json")
 	if _, err := os.Stat(caelisPath); err == nil {
 		hasAnyManifest = true
-		cp, err := parseCaelisPluginRaw(root, caelisPath)
+		cp, err := parseCaelisPluginRaw(root, caelisPath, skipBrokenMCP)
 		if err != nil {
 			return InstalledPlugin{}, fmt.Errorf("plugin manifest: parse caelis manifest: %w", err)
 		}
 		p.Kind = ManifestKindCaelis
 		p.Manifest = caelisPath
 		mergeInstalledPlugin(&p, cp)
+	} else if !os.IsNotExist(err) {
+		return InstalledPlugin{}, fmt.Errorf("plugin manifest: inspect %s: %w", caelisPath, err)
 	}
 
 	// 2. Claude Code manifest
@@ -212,6 +226,8 @@ func ParsePlugin(root string) (InstalledPlugin, error) {
 			p.Manifest = claudePath
 		}
 		mergeInstalledPlugin(&p, clp)
+	} else if !os.IsNotExist(err) {
+		return InstalledPlugin{}, fmt.Errorf("plugin manifest: inspect %s: %w", claudePath, err)
 	}
 
 	if !hasAnyManifest {
@@ -256,13 +272,26 @@ func mergeInstalledPlugin(dest *InstalledPlugin, src InstalledPlugin) {
 	dest.Warnings = append(dest.Warnings, src.Warnings...)
 }
 
-func parseCaelisPluginRaw(root, manifestPath string) (InstalledPlugin, error) {
+func parseCaelisPluginRaw(root, manifestPath string, skipBrokenMCP bool) (InstalledPlugin, error) {
 	data, err := os.ReadFile(manifestPath)
 	if err != nil {
 		return InstalledPlugin{}, err
 	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return InstalledPlugin{}, fmt.Errorf("decode Caelis plugin manifest: %w", err)
+	}
+	if fields == nil {
+		return InstalledPlugin{}, fmt.Errorf("caelis plugin manifest must be a JSON object")
+	}
+	serverFields := fields["mcpServers"]
+	delete(fields, "mcpServers")
+	otherFields, err := json.Marshal(fields)
+	if err != nil {
+		return InstalledPlugin{}, err
+	}
 	var manifest CaelisPluginJSON
-	if err := json.Unmarshal(data, &manifest); err != nil {
+	if err := json.Unmarshal(otherFields, &manifest); err != nil {
 		return InstalledPlugin{}, err
 	}
 
@@ -289,11 +318,21 @@ func parseCaelisPluginRaw(root, manifestPath string) (InstalledPlugin, error) {
 	}
 	p.Hooks = append(p.Hooks, hooks...)
 
-	mcpSpecs, err := mcpServerSpecsFromMap(root, pluginID, manifest.MCPServers)
+	var servers map[string]json.RawMessage
+	if len(serverFields) > 0 {
+		if err := json.Unmarshal(serverFields, &servers); err != nil {
+			if !skipBrokenMCP {
+				return InstalledPlugin{}, fmt.Errorf("caelis mcpServers: %w", err)
+			}
+			p.Warnings = append(p.Warnings, fmt.Sprintf("Caelis MCP servers skipped: %v", err))
+		}
+	}
+	mcpSpecs, warnings, err := mcpServerSpecsFromMap(root, pluginID, servers, skipBrokenMCP)
 	if err != nil {
 		return InstalledPlugin{}, err
 	}
 	p.MCPServers = append(p.MCPServers, mcpSpecs...)
+	p.Warnings = append(p.Warnings, warnings...)
 
 	agents, err := agentContributionsFromManifest(root, manifest.Agents)
 	if err != nil {
@@ -468,19 +507,32 @@ func parseHooksFileAt(root, pluginID string, hooksPath string, required bool) ([
 	return out, nil
 }
 
-func mcpServerSpecsFromMap(root, pluginID string, servers map[string]CaelisMCPServerSpec) ([]MCPServerSpec, error) {
+func mcpServerSpecsFromMap(root, pluginID string, servers map[string]json.RawMessage, skipBroken bool) ([]MCPServerSpec, []string, error) {
 	if len(servers) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 	out := make([]MCPServerSpec, 0, len(servers))
+	var warnings []string
 	for _, name := range sortedKeys(servers) {
-		spec, err := buildMCPServerSpec(root, pluginID, name, servers[name])
+		var cfg CaelisMCPServerSpec
+		err := json.Unmarshal(servers[name], &cfg)
+		if err == nil && string(servers[name]) == "null" {
+			err = fmt.Errorf("server configuration must be an object")
+		}
+		var spec MCPServerSpec
+		if err == nil {
+			spec, err = buildMCPServerSpec(root, pluginID, name, cfg)
+		}
 		if err != nil {
-			return nil, err
+			if skipBroken {
+				warnings = append(warnings, fmt.Sprintf("Caelis MCP server %q skipped: %v", name, err))
+				continue
+			}
+			return nil, nil, fmt.Errorf("caelis MCP server %q: %w", name, err)
 		}
 		out = append(out, spec)
 	}
-	return out, nil
+	return out, warnings, nil
 }
 
 func agentContributionsFromManifest(root string, agents []CaelisAgentContribution) ([]AgentContribution, error) {

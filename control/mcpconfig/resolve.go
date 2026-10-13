@@ -32,18 +32,29 @@ type overlayEntry struct {
 // returns enabled ServerSpec values. Missing overlay files are skipped. The
 // result does not include plugin-contributed servers.
 func Resolve(req Request) ([]sdkmcp.ServerSpec, error) {
+	return resolve(req, false)
+}
+
+// ResolveAvailable assembles persisted optional MCP configuration for Runtime
+// startup. Broken files and individual servers are omitted; it never samples
+// untrusted project overlays. Explicit configuration uses strict Resolve.
+func ResolveAvailable(req Request) ([]sdkmcp.ServerSpec, error) {
+	return resolve(req, true)
+}
+
+func resolve(req Request, skipBroken bool) ([]sdkmcp.ServerSpec, error) {
 	merged := map[string]overlayEntry{}
-	if err := overlayFile(merged, req.UserAgentsFile, NamespaceUser, ""); err != nil {
+	if err := overlayFile(merged, req.UserAgentsFile, NamespaceUser, "", skipBroken); err != nil {
 		return nil, err
 	}
 	if err := overlayNative(merged, req.Native, req.ProjectRoot); err != nil {
 		return nil, err
 	}
 	if req.AllowProjectOverlays {
-		if err := overlayFile(merged, req.ProjectAgentsFile, NamespaceProject, req.ProjectRoot); err != nil {
+		if err := overlayFile(merged, req.ProjectAgentsFile, NamespaceProject, req.ProjectRoot, skipBroken); err != nil {
 			return nil, err
 		}
-		if err := overlayFile(merged, req.ProjectMCPFile, NamespaceProject, req.ProjectRoot); err != nil {
+		if err := overlayFile(merged, req.ProjectMCPFile, NamespaceProject, req.ProjectRoot, skipBroken); err != nil {
 			return nil, err
 		}
 	}
@@ -55,11 +66,23 @@ func Resolve(req Request) ([]sdkmcp.ServerSpec, error) {
 			continue
 		}
 		if err := validateEnabledServer(name, entry.cfg); err != nil {
+			if skipBroken {
+				continue
+			}
 			return nil, err
 		}
 		spec, err := specFromEntry(name, entry)
 		if err != nil {
+			if skipBroken {
+				continue
+			}
 			return nil, err
+		}
+		if err := sdkmcp.ValidateServerIdentity(spec); err != nil {
+			if skipBroken {
+				continue
+			}
+			return nil, fmt.Errorf("mcpconfig: MCP server %q: %w", name, err)
 		}
 		out = append(out, spec)
 	}
@@ -81,8 +104,14 @@ func overlayNative(dst map[string]overlayEntry, native Servers, projectRoot stri
 	return nil
 }
 
-func overlayFile(dst map[string]overlayEntry, path, source, projectRoot string) error {
-	servers, err := loadOverlayFile(path)
+func overlayFile(dst map[string]overlayEntry, path, source, projectRoot string, skipBroken bool) error {
+	var servers Servers
+	var err error
+	if skipBroken {
+		servers = loadAvailableOverlayFile(path)
+	} else {
+		servers, err = loadOverlayFile(path)
+	}
 	if err != nil {
 		return err
 	}
