@@ -93,18 +93,28 @@ func loadAvailableOverlayFile(path string) Servers {
 	if err := json.Unmarshal(data, &doc); err != nil {
 		return nil
 	}
+	// Any two raw names that normalize to the same identity are ambiguous. Drop
+	// the whole group before parsing content so map iteration order cannot pick
+	// which command runs. A healthy lower-priority layer may still provide it.
+	counts := make(map[string]int, len(doc.MCPServers))
+	for name := range doc.MCPServers {
+		if normalized := normalizeServerName(name); normalized != "" {
+			counts[normalized]++
+		}
+	}
 	out := make(Servers)
 	for name, raw := range doc.MCPServers {
-		if normalizeServerName(name) == "" || strings.ContainsAny(name, "/\\") || len(raw) == 0 || raw[0] != '{' {
+		normalized := normalizeServerName(name)
+		if normalized == "" || counts[normalized] != 1 || strings.ContainsAny(name, "/\\") || len(raw) == 0 || raw[0] != '{' {
 			continue
 		}
 		var cfg overlayServerConfig
 		if err := json.Unmarshal(raw, &cfg); err != nil {
 			continue
 		}
-		out[name] = cfg.serverConfig()
+		out[normalized] = cfg.serverConfig()
 	}
-	return Normalize(out)
+	return out
 }
 
 func parseOverlayDocument(data []byte) (Servers, error) {

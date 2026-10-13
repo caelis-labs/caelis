@@ -195,6 +195,20 @@ The workflow then publishes the platform and main npm packages, verifies the
 GitHub assets, mirrors them under `releases/vX.Y.Z/` in R2, and updates `latest.txt`
 last. GitHub Releases remains the complete versioned archive.
 
+Publication can resume after a partial failure. The GitHub step compares each
+existing asset's SHA256 digest with the verified archive before skipping it; a
+different digest stops the job without replacing the asset. Each npm package is
+packed once per attempt, and an existing version is skipped only when its
+registry SHA512 integrity matches the staged package. A different package at
+the same version stops publication. R2 reads the verified GitHub assets back
+and checks their bytes before updating `latest.txt`.
+
+Rerun a failed publication job within the same workflow run so it downloads the
+successful notarization job's `verified-release-archives` artifact. A full
+workflow rerun may produce different timestamped signatures; if any published
+asset differs, publication stops for investigation. Do not overwrite published
+assets or re-sign the Darwin binaries to resume a partially published version.
+
 ### Manual fallback
 
 If the bot is unavailable, first merge a reviewed PR updating the root manifest

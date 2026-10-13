@@ -372,6 +372,9 @@ overlays. Project `.agents/mcp.json` or `.mcp.json` files are sampled only after
 the exact canonical workspace is trusted. Overlay changes never hot-reload an
 active Runtime. During automatic assembly, a malformed overlay file or server
 entry is omitted; an invalid persisted native server is omitted individually.
+An invalid higher-priority entry cannot shadow a healthy lower-priority entry;
+ambiguous names within one overlay file are all omitted. A valid explicit
+disable still overrides lower-priority entries.
 Explicit configuration writes still validate the changed MCP catalog. AppConfig
 identity collisions, workspace trust errors, and Store decoding errors remain
 fatal. MCP servers initialize independently in the background with a

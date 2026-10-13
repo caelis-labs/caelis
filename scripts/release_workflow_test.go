@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -57,7 +58,7 @@ func TestReleasePleaseFeedsProtectedMainPublication(t *testing.T) {
 	if len(manifest) != 1 || !regexp.MustCompile(`^\d+\.\d+\.\d+$`).MatchString(manifest["."]) {
 		t.Fatal("release manifest must contain one root release version")
 	}
-	if !strings.Contains(readWorkflow(t, "../.github/workflows/release.yml"), "gh release upload") {
+	if !strings.Contains(readWorkflow(t, "../.github/workflows/release.yml"), "bash scripts/publish_release_assets.sh") {
 		t.Fatal("release assets must attach to the existing release-please release")
 	}
 }
@@ -97,7 +98,7 @@ func TestReleasePublishesProtectedMainTagsWithoutRepeatingPRQuality(t *testing.T
 		"name: verified-release-archives",
 		"  release:\n    needs: notarize-darwin",
 		"bash scripts/verify_release_archives.sh",
-		"gh release upload",
+		"bash scripts/publish_release_assets.sh",
 		"Publish platform packages",
 		"Publish main package",
 		"publish-r2:",
@@ -215,6 +216,92 @@ func TestReleaseArchiveVerificationRejectsMissingOrTamperedAsset(t *testing.T) {
 	}
 	if err := verify(); err == nil {
 		t.Fatal("tampered macOS archive passed final checksum gate")
+	}
+}
+
+func TestReleaseAssetRetryVerifiesBytesBeforeSkippingOrUploading(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	dist := filepath.Join(root, "dist")
+	state := filepath.Join(root, "state")
+	bin := filepath.Join(root, "bin")
+	for _, dir := range []string{dist, state, bin, filepath.Join(state, "assets")} {
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, target := range []string{"darwin_amd64", "darwin_arm64", "linux_amd64", "linux_arm64", "windows_amd64", "windows_arm64"} {
+		name := "caelis_1.2.3_" + target + ".tar.gz"
+		if err := os.WriteFile(filepath.Join(dist, name), []byte(target), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	checksum := exec.Command(testBash(t), "-c", "shasum -a 256 caelis_*.tar.gz > checksums.txt")
+	checksum.Dir = dist
+	if output, err := checksum.CombinedOutput(); err != nil {
+		t.Fatalf("prepare checksums: %v: %s", err, output)
+	}
+	fakeGH := `#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$1" == api ]]; then
+  for file in "$FAKE_GH_STATE"/assets/*; do
+    [[ -f "$file" ]] || continue
+    printf '%s\tsha256:%s\tuploaded\n' "${file##*/}" "$(shasum -a 256 "$file" | awk '{print $1}')"
+  done
+elif [[ "$1" == release && "$2" == upload ]]; then
+  file=$4
+  name=${file##*/}
+  [[ ! -e "$FAKE_GH_STATE/assets/$name" ]] || exit 1
+  count=$(wc -l < "$FAKE_GH_STATE/uploads" | tr -d '[:space:]')
+  [[ "${FAKE_GH_FAIL_AT:-}" != "$((count + 1))" ]] || exit 1
+  cp "$file" "$FAKE_GH_STATE/assets/$name"
+  printf '%s\n' "$name" >> "$FAKE_GH_STATE/uploads"
+else
+  exit 2
+fi
+`
+	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte(fakeGH), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(state, "uploads"), nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	run := func(failAt string) (string, error) {
+		t.Helper()
+		cmd := exec.Command(testBash(t), "./publish_release_assets.sh", "v1.2.3", dist)
+		cmd.Dir = "../scripts"
+		cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"), "FAKE_GH_STATE="+state, "FAKE_GH_FAIL_AT="+failAt, "GITHUB_REPOSITORY=caelis-labs/caelis")
+		out, err := cmd.CombinedOutput()
+		return string(out), err
+	}
+	if _, err := run("4"); err == nil {
+		t.Fatal("expected interruption after three uploaded assets")
+	}
+	if output, err := run(""); err != nil {
+		t.Fatalf("retry must fill missing assets: %v: %s", err, output)
+	}
+	if output, err := run(""); err != nil {
+		t.Fatalf("identical retry must skip assets: %v: %s", err, output)
+	}
+	uploads, err := os.ReadFile(filepath.Join(state, "uploads"))
+	if err != nil || len(strings.Split(strings.TrimSpace(string(uploads)), "\n")) != 7 {
+		t.Fatalf("wanted seven distinct uploads, got %q: %v", uploads, err)
+	}
+	changed := filepath.Join(dist, "caelis_1.2.3_darwin_arm64.tar.gz")
+	if err := os.WriteFile(changed, []byte("new timestamped signature"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	checksum = exec.Command(testBash(t), "-c", "shasum -a 256 caelis_*.tar.gz > checksums.txt")
+	checksum.Dir = dist
+	if output, err := checksum.CombinedOutput(); err != nil {
+		t.Fatalf("recompute checksums: %v: %s", err, output)
+	}
+	if output, err := run(""); err == nil || !strings.Contains(output, "differs from the verified local bytes") {
+		t.Fatalf("different signed asset must fail without overwrite: %v: %s", err, output)
+	}
+	uploadsAfter, err := os.ReadFile(filepath.Join(state, "uploads"))
+	if err != nil || string(uploadsAfter) != string(uploads) {
+		t.Fatalf("mismatched retry uploaded files: %q: %v", uploadsAfter, err)
 	}
 }
 

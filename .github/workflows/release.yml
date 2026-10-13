@@ -121,7 +121,7 @@ jobs:
       - name: Publish verified GitHub assets
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "${GITHUB_REF_NAME}" dist/caelis_*.tar.gz dist/checksums.txt
+        run: bash scripts/publish_release_assets.sh "${GITHUB_REF_NAME}" dist
       - name: Publish platform packages
         run: >
           node ./npm/scripts/publish-release.mjs
