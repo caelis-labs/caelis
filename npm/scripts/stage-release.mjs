@@ -4,8 +4,16 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { createHash } from 'node:crypto';
+import { createReadStream } from 'node:fs';
 
 const execFileAsync = promisify(execFile);
+
+async function sha256(file) {
+  const hash = createHash('sha256');
+  for await (const chunk of createReadStream(file)) hash.update(chunk);
+  return hash.digest('hex');
+}
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const packageRoot = path.resolve(__dirname, '..');
@@ -80,6 +88,9 @@ async function stageTarget(version, distDir, target) {
       const destPath = path.join(runtimeDir, name);
       await fs.copyFile(extracted, destPath);
       await fs.chmod(destPath, 0o755);
+      if (await sha256(extracted) !== await sha256(destPath)) {
+        throw new Error(`${name} in ${target.dir} differs from ${archiveName}`);
+      }
     }
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true });

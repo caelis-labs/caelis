@@ -13,13 +13,11 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release:
+  build:
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    environment: default
     permissions:
-      contents: write
-      id-token: write
+      contents: read
     steps:
       - uses: actions/checkout@v7
         with:
@@ -35,6 +33,78 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+      - name: Build archives without publishing
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          version: "~> v2"
+          args: release --clean --skip=publish
+      - name: Preserve unpublished archives
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: unpublished-archives
+          path: dist/caelis_*.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  notarize-darwin:
+    needs: build
+    runs-on: macos-15
+    timeout-minutes: 90
+    environment: default
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: unpublished-archives
+          path: dist
+      - name: Sign and notarize both macOS CLIs before packaging
+        env:
+          APPLE_DEVELOPER_ID_P12_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_P12_BASE64 }}
+          APPLE_DEVELOPER_ID_P12_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
+          APPLE_NOTARY_APPLE_ID: ${{ secrets.APPLE_NOTARY_APPLE_ID }}
+          APPLE_NOTARY_PASSWORD: ${{ secrets.APPLE_NOTARY_PASSWORD }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+        run: bash scripts/sign_notarize_cli.sh "${GITHUB_REF_NAME#v}" dist
+      - name: Preserve Apple result and log
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: macos-notarization-receipt
+          path: dist/notarization/*.json
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Preserve final release archives and checksums
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: verified-release-archives
+          path: |
+            dist/caelis_*.tar.gz
+            dist/checksums.txt
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    needs: notarize-darwin
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: default
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: verified-release-archives
+          path: dist
+      - name: Verify final assets before any publication
+        run: bash scripts/verify_release_archives.sh "${GITHUB_REF_NAME#v}" dist
       - uses: actions/setup-node@v7
         with:
           node-version: "22.14.0"
@@ -44,17 +114,14 @@ jobs:
         run: |
           npm i -g npm@^11.10.0
           npm -v
-      - name: GoReleaser
-        uses: goreleaser/goreleaser-action@v7
-        with:
-          version: "~> v2"
-          args: release --clean
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Set package version from git tag
         run: node ./npm/scripts/set-version.mjs "${GITHUB_REF_NAME#v}"
-      - name: Stage platform packages
+      - name: Stage platform packages from final archives
         run: node ./npm/scripts/stage-release.mjs "${GITHUB_REF_NAME#v}" ./dist
+      - name: Publish verified GitHub assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${GITHUB_REF_NAME}" dist/caelis_*.tar.gz dist/checksums.txt
       - name: Publish platform packages
         run: >
           node ./npm/scripts/publish-release.mjs

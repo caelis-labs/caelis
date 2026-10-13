@@ -544,7 +544,7 @@ func TestNewLocalStackLoadsPluginSkills(t *testing.T) {
 	}
 }
 
-func TestNewLocalStackMalformedPluginFails(t *testing.T) {
+func TestNewLocalStackIsolatesMalformedPlugin(t *testing.T) {
 	tmp := t.TempDir()
 	storeDir := filepath.Join(tmp, "caelis_store")
 	workspaceDir := filepath.Join(tmp, "workspace")
@@ -567,6 +567,21 @@ func TestNewLocalStackMalformedPluginFails(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(metaDir, "plugin.json"), []byte("invalid-json{"), 0600); err != nil {
 		t.Fatalf("write manifest: %v", err)
 	}
+	healthyRoot := filepath.Join(tmp, "healthy-plugin")
+	healthyMeta := filepath.Join(healthyRoot, ".caelis-plugin")
+	if err := os.MkdirAll(healthyMeta, 0700); err != nil {
+		t.Fatalf("mkdir healthy metadata: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(healthyMeta, "plugin.json"), []byte(`{"name":"healthy-plugin"}`), 0600); err != nil {
+		t.Fatalf("write healthy manifest: %v", err)
+	}
+	healthySkill := filepath.Join(healthyRoot, "skills", "healthy-skill")
+	if err := os.MkdirAll(healthySkill, 0700); err != nil {
+		t.Fatalf("mkdir healthy skill: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(healthySkill, "SKILL.md"), []byte("---\nname: healthy-skill\ndescription: Healthy plugin skill.\n---\n# Healthy\n"), 0600); err != nil {
+		t.Fatalf("write healthy skill: %v", err)
+	}
 
 	// Prepare config store and write AppConfig with the plugin enabled
 	configStore := newAppConfigStore(storeDir)
@@ -577,6 +592,7 @@ func TestNewLocalStackMalformedPluginFails(t *testing.T) {
 				Root:    pluginRoot,
 				Enabled: true,
 			},
+			{ID: "healthy-plugin", Root: healthyRoot, Enabled: true},
 		},
 	})
 	if err != nil {
@@ -592,13 +608,26 @@ func TestNewLocalStackMalformedPluginFails(t *testing.T) {
 		Sandbox:      SandboxConfig{RequestedType: "host"},
 	}
 
-	// NewLocalStack should return a failure because the enabled plugin is malformed
-	_, err = NewLocalStack(cfg)
-	if err == nil {
-		t.Fatal("expected NewLocalStack to fail for malformed enabled plugin, but it succeeded")
+	stack, err := newGatewayAppTestStack(t, cfg)
+	if err != nil {
+		t.Fatalf("Host startup with malformed plugin: %v", err)
 	}
-	if !strings.Contains(err.Error(), "gatewayapp: parse enabled plugin") {
-		t.Errorf("unexpected error message: %v", err)
+	defer stack.Close()
+	plugins, err := stack.ControlPluginReads().List(context.Background())
+	if err != nil || len(plugins) != 2 {
+		t.Fatalf("Plugin list = %+v, %v", plugins, err)
+	}
+	for _, info := range plugins {
+		if info.ID == "malformed-plugin" && (info.Status == "active" || info.Warning == "") {
+			t.Fatalf("malformed Plugin was not isolated: %+v", info)
+		}
+		if info.ID == "healthy-plugin" && (info.Status != "active" || len(info.Skills) != 1 || info.Skills[0] != "healthy-plugin:healthy-skill") {
+			t.Fatalf("healthy Plugin unavailable: %+v", info)
+		}
+	}
+	systemPrompt, _ := stack.composition.activeRuntime.BaseMetadata["system_prompt"].(string)
+	if !strings.Contains(systemPrompt, "healthy-plugin:healthy-skill") || strings.Contains(systemPrompt, "malformed-plugin:") {
+		t.Fatalf("Runtime prompt contains wrong Plugin Skills:\n%s", systemPrompt)
 	}
 }
 

@@ -57,8 +57,8 @@ func TestReleasePleaseFeedsProtectedMainPublication(t *testing.T) {
 	if len(manifest) != 1 || !regexp.MustCompile(`^\d+\.\d+\.\d+$`).MatchString(manifest["."]) {
 		t.Fatal("release manifest must contain one root release version")
 	}
-	if !strings.Contains(readWorkflow(t, "../.goreleaser.yml"), "release:\n  mode: keep-existing") {
-		t.Fatal("GoReleaser must preserve the release-please changelog")
+	if !strings.Contains(readWorkflow(t, "../.github/workflows/release.yml"), "gh release upload") {
+		t.Fatal("release assets must attach to the existing release-please release")
 	}
 }
 
@@ -90,6 +90,14 @@ func TestReleasePublishesProtectedMainTagsWithoutRepeatingPRQuality(t *testing.T
 		"name: Verify tag belongs to main",
 		`git merge-base --is-ancestor "${GITHUB_SHA}" origin/main`,
 		"goreleaser/goreleaser-action@v7",
+		"args: release --clean --skip=publish",
+		"name: unpublished-archives",
+		"  notarize-darwin:\n    needs: build",
+		"bash scripts/sign_notarize_cli.sh",
+		"name: verified-release-archives",
+		"  release:\n    needs: notarize-darwin",
+		"bash scripts/verify_release_archives.sh",
+		"gh release upload",
 		"Publish platform packages",
 		"Publish main package",
 		"publish-r2:",
@@ -113,7 +121,6 @@ func TestReleasePublishesProtectedMainTagsWithoutRepeatingPRQuality(t *testing.T
 		"make ",
 		"sdk-proxy-smoke",
 		"workflow_dispatch:",
-		"actions/download-artifact",
 		"gh release download",
 		"GITHUB_STEP_SUMMARY",
 	} {
@@ -148,9 +155,100 @@ func TestReleasePublishesProtectedMainTagsWithoutRepeatingPRQuality(t *testing.T
 		}
 	}
 	guard := strings.Index(release, "name: Verify tag belongs to main")
-	publish := strings.Index(release, "name: GoReleaser")
-	if guard < 0 || publish < 0 || guard >= publish {
-		t.Error("release must validate tag ancestry before publishing artifacts")
+	build := strings.Index(release, "name: Build archives without publishing")
+	notarize := strings.Index(release, "name: Sign and notarize both macOS CLIs")
+	publish := strings.Index(release, "name: Publish verified GitHub assets")
+	if guard < 0 || build < 0 || notarize < 0 || publish < 0 ||
+		guard >= build || build >= notarize || notarize >= publish {
+		t.Error("release must validate ancestry, build, then notarize before publishing assets")
+	}
+	for _, want := range []string{
+		"APPLE_DEVELOPER_ID_P12_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_P12_BASE64 }}",
+		"APPLE_DEVELOPER_ID_P12_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}",
+		"APPLE_NOTARY_APPLE_ID: ${{ secrets.APPLE_NOTARY_APPLE_ID }}",
+		"APPLE_NOTARY_PASSWORD: ${{ secrets.APPLE_NOTARY_PASSWORD }}",
+		"APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}",
+	} {
+		if !strings.Contains(release, want) {
+			t.Errorf("macOS notarization workflow missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{"args: release --clean\n", "--clobber", "workflow_dispatch:"} {
+		if strings.Contains(release, forbidden) {
+			t.Errorf("tag workflow could bypass notarized archive gate: %q", forbidden)
+		}
+	}
+}
+
+func TestReleaseArchiveVerificationRejectsMissingOrTamperedAsset(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	version := "1.2.3"
+	for _, target := range []string{
+		"darwin_amd64", "darwin_arm64", "linux_amd64", "linux_arm64", "windows_amd64", "windows_arm64",
+	} {
+		name := "caelis_" + version + "_" + target + ".tar.gz"
+		if err := os.WriteFile(dir+"/"+name, []byte(target), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	verify := func(extra ...string) error {
+		t.Helper()
+		args := append([]string{"./verify_release_archives.sh", version, dir}, extra...)
+		cmd := exec.Command(testBash(t), args...)
+		cmd.Dir = "../scripts"
+		return cmd.Run()
+	}
+	if err := verify("--names-only"); err != nil {
+		t.Fatalf("six archive names: %v", err)
+	}
+	checksum := exec.Command(testBash(t), "-c", "shasum -a 256 caelis_*.tar.gz > checksums.txt")
+	checksum.Dir = dir
+	if output, err := checksum.CombinedOutput(); err != nil {
+		t.Fatalf("prepare checksums: %v: %s", err, output)
+	}
+	if err := verify(); err != nil {
+		t.Fatalf("valid final archives: %v", err)
+	}
+	if err := os.WriteFile(dir+"/caelis_"+version+"_darwin_arm64.tar.gz", []byte("changed after signing"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := verify(); err == nil {
+		t.Fatal("tampered macOS archive passed final checksum gate")
+	}
+}
+
+func TestMacOSCLIArchivesFollowAcceptedNotarization(t *testing.T) {
+	t.Parallel()
+	script := readWorkflow(t, "./sign_notarize_cli.sh")
+	for _, want := range []string{
+		"for arch in amd64 arm64; do",
+		"--options runtime --timestamp",
+		"TeamIdentifier=$APPLE_TEAM_ID",
+		"^CodeDirectory .*flags=.*runtime",
+		"^Timestamp=",
+		"ditto -c -k --keepParent",
+		"notarytool submit",
+		"--wait --timeout 60m",
+		"notarytool log",
+		"log.get('sha256')",
+		"tar -czf",
+		"verify_release_archives.sh",
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("macOS release gate missing %q", want)
+		}
+	}
+	if strings.Contains(script, "stapler staple") {
+		t.Error("bare CLI and ZIP do not support stapling")
+	}
+	sign := strings.Index(script, "--options runtime --timestamp")
+	submit := strings.Index(script, "notarytool submit")
+	accepted := strings.Index(script, "log.get('sha256')")
+	repackage := strings.Index(script, "tar -czf")
+	if sign < 0 || submit < 0 || accepted < 0 || repackage < 0 ||
+		sign >= submit || submit >= accepted || accepted >= repackage {
+		t.Error("macOS archives must contain signed bytes only after Apple accepts the matching submission")
 	}
 }
 
