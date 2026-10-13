@@ -1,12 +1,73 @@
 package gatewayapp
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/internal/kernel"
+	"github.com/google/jsonschema-go/jsonschema"
 )
+
+func TestGuardianOutputSpecAllowsCanonicalExplanation(t *testing.T) {
+	t.Parallel()
+	options := []kernel.ApprovalOption{{ID: "allow_once", Kind: "allow_once"}, {ID: "reject_once", Kind: "reject_once"}}
+	output, err := guardianOutputSpec(&kernel.ApprovalPayload{Options: options})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(output.JSONSchema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var schema jsonschema.Schema
+	if err := json.Unmarshal(raw, &schema); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := schema.Resolve(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, input := range []string{`{"option_id":"allow_once"}`, `{"option_id":"allow_once","rationale":"This action is authorized."}`} {
+		var value any
+		if err := json.Unmarshal([]byte(input), &value); err != nil {
+			t.Fatal(err)
+		}
+		if err := resolved.Validate(value); err != nil {
+			t.Fatalf("generation schema rejects canonical explanation: %v", err)
+		}
+		parsed, err := parseGuardianAssessmentForMode(input, output.Mode, options)
+		if err != nil || parsed.OptionID != "allow_once" || parsed.Outcome != "allow" || parsed.Rationale != "" {
+			t.Fatalf("assessment = %#v, %v; want exact allow with explanation discarded", parsed, err)
+		}
+	}
+}
+
+func TestParseGuardianAssessmentIgnoresExplanatoryFields(t *testing.T) {
+	t.Parallel()
+	options := []kernel.ApprovalOption{{ID: "allow_once", Kind: "allow_once"}, {ID: "reject_once", Kind: "reject_once"}}
+	for _, mode := range []model.OutputMode{model.OutputModeText, model.OutputModeJSON, model.OutputModeSchema} {
+		for _, input := range []string{
+			`{"option_id":"allow_once","rationale":"This action is authorized."}`,
+			`{"option_id":"allow_once","rationale":""}`,
+			`{"option_id":"allow_once","rationale":null}`,
+			`{"option_id":"allow_once","rationale":{"explanation":"informational"},"extra":[true,{"option_id":"reject_once"}]}`,
+			`{"option_id":"allow_once","outcome":"deny","risk_level":"critical","user_authorization":"low"}`,
+		} {
+			t.Run(string(mode)+"/"+input, func(t *testing.T) {
+				parsed, err := parseGuardianAssessmentForMode(input, mode, options)
+				if err != nil || parsed.OptionID != "allow_once" || parsed.Outcome != "allow" || parsed.Rationale != "" {
+					t.Fatalf("assessment = %#v, %v; want exact allow with explanation discarded", parsed, err)
+				}
+			})
+		}
+		parsed, err := parseGuardianAssessmentForMode(`{"option_id":"reject_once","rationale":"  outside task scope  ","decision":"allow","extra":true}`, mode, options)
+		if err != nil || parsed.Outcome != "deny" || parsed.Rationale != "outside task scope" {
+			t.Fatalf("deny assessment = %#v, %v; want original deny with rationale", parsed, err)
+		}
+	}
+}
 
 func TestParseGuardianAssessmentForModeEnvelopePolicy(t *testing.T) {
 	t.Parallel()
@@ -74,8 +135,8 @@ func TestParseGuardianAssessmentForModeRejectsInvalidTextEnvelopes(t *testing.T)
 		{name: "unbalanced closing", input: "Decision: " + valid + " }", want: "unbalanced JSON object braces"},
 		{
 			name:  "unique outer object does not fall back to nested decision",
-			input: `Decision: {"wrapper":{"outcome":"allow","risk_level":"low","user_authorization":"high","rationale":"nested"}}`,
-			want:  "unsupported field",
+			input: `Decision: {"wrapper":{"option_id":"allow_once"}}`,
+			want:  "selected option id is required",
 		},
 	}
 	for _, test := range tests {
@@ -120,7 +181,7 @@ func TestParseGuardianAssessmentForModePreservesStrictDecisionValidation(t *test
 		t.Fatalf("parseGuardianAssessmentForMode(long rationale) error = %v", err)
 	}
 	if parsed.Outcome != "deny" || parsed.Rationale != strings.TrimSpace(longRationale) {
-		t.Fatalf("long-rationale assessment = %#v, want preserved allow decision", parsed)
+		t.Fatalf("long-rationale assessment = %#v, want preserved deny decision", parsed)
 	}
 
 	invalid := []struct {
@@ -129,23 +190,34 @@ func TestParseGuardianAssessmentForModePreservesStrictDecisionValidation(t *test
 	}{
 		{name: "missing option fields", input: `{"outcome":"allow"}`},
 		{name: "unknown option", input: `{"option_id":"unknown","risk_level":"low","user_authorization":"high","outcome":"allow","rationale":"unknown"}`},
-		{name: "allow option deny outcome", input: `{"option_id":"allow_once","risk_level":"high","user_authorization":"low","outcome":"deny","rationale":"contradiction"}`},
-		{name: "deny option allow outcome", input: `{"option_id":"reject_once","risk_level":"low","user_authorization":"high","outcome":"allow","rationale":"contradiction"}`},
-		{name: "critical allow", input: `{"option_id":"allow_once","risk_level":"critical","user_authorization":"high","outcome":"allow","rationale":"critical"}`},
-		{name: "unknown field", input: `{"option_id":"allow_once","risk_level":"low","user_authorization":"high","outcome":"allow","rationale":"ok","extra":true}`},
+		{name: "missing option with extra decision", input: `{"decision":"allow","approved":true,"rationale":"authorized"}`},
+		{name: "empty option", input: `{"option_id":"","decision":"allow"}`},
+		{name: "null option", input: `{"option_id":null}`},
+		{name: "numeric option", input: `{"option_id":1}`},
+		{name: "object option", input: `{"option_id":{"id":"allow_once"}}`},
+		{name: "array option", input: `{"option_id":["allow_once"]}`},
+		{name: "malformed decision", input: `{"option_id":}`},
+		{name: "malformed extra field", input: `{"option_id":"allow_once","extra":}`},
 		{name: "duplicate outcome deny then allow", input: `{"option_id":"allow_once","risk_level":"low","user_authorization":"high","outcome":"deny","outcome":"allow","rationale":"ambiguous"}`},
 		{name: "duplicate outcome allow then deny", input: `{"option_id":"reject_once","risk_level":"high","user_authorization":"low","outcome":"allow","outcome":"deny","rationale":"ambiguous"}`},
 		{name: "duplicate option id", input: `{"option_id":"reject_once","option_id":"allow_once","risk_level":"low","user_authorization":"high","outcome":"allow","rationale":"ambiguous"}`},
+		{name: "duplicate option reversed", input: `{"option_id":"allow_once","option_id":"reject_once"}`},
+		{name: "escaped duplicate option", input: `{"option_id":"reject_once","option\u005fid":"allow_once"}`},
+		{name: "duplicate rationale", input: `{"option_id":"allow_once","rationale":"no","rationale":"yes"}`},
 		{name: "duplicate risk", input: `{"option_id":"allow_once","risk_level":"high","risk_level":"low","user_authorization":"high","outcome":"allow","rationale":"ambiguous"}`},
 		{name: "duplicate authorization", input: `{"option_id":"allow_once","risk_level":"low","user_authorization":"low","user_authorization":"high","outcome":"allow","rationale":"ambiguous"}`},
-		{name: "uppercase outcome", input: `{"option_id":"allow_once","risk_level":"low","user_authorization":"high","Outcome":"allow","rationale":"wrong case"}`},
 		{name: "uppercase option id", input: `{"OPTION_ID":"allow_once","risk_level":"low","user_authorization":"high","outcome":"allow","rationale":"wrong case"}`},
+		{name: "option case alias after exact key", input: `{"option_id":"reject_once","OPTION_ID":"allow_once","rationale":"no"}`},
+		{name: "option case alias before exact key", input: `{"OPTION_ID":"reject_once","option_id":"allow_once"}`},
+		{name: "rationale case alias", input: `{"option_id":"reject_once","Rationale":"reason"}`},
 	}
 	for _, test := range invalid {
 		t.Run(test.name, func(t *testing.T) {
-			_, err := parseGuardianAssessmentForMode("Result: "+test.input, model.OutputModeText, options)
-			if err == nil {
-				t.Fatalf("parseGuardianAssessmentForMode(%s) error = nil, want strict rejection", test.name)
+			for _, mode := range []model.OutputMode{model.OutputModeText, model.OutputModeJSON, model.OutputModeSchema} {
+				_, err := parseGuardianAssessmentForMode(test.input, mode, options)
+				if err == nil {
+					t.Fatalf("parseGuardianAssessmentForMode(%s, %s) error = nil, want strict rejection", test.name, mode)
+				}
 			}
 		})
 	}
@@ -185,11 +257,21 @@ func TestParseGuardianAssessmentForModeRejectsUnsupportedMode(t *testing.T) {
 	}
 }
 
-func TestGuardianOptionOnlyDecisionRejectsSpuriousAllowRationale(t *testing.T) {
-	for _, text := range []string{`{"option_id":"allow_once","rationale":""}`, `{"option_id":"allow_once","rationale":null}`, `{"option_id":"reject_once"}`} {
+func TestGuardianDenyRequiresSpecificRationale(t *testing.T) {
+	for _, text := range []string{`{"option_id":"reject_once"}`, `{"option_id":"reject_once","rationale":"  "}`, `{"option_id":"reject_once","rationale":null}`, `{"option_id":"reject_once","rationale":true}`} {
 		_, err := parseGuardianAssessmentForMode(text, model.OutputModeSchema, []kernel.ApprovalOption{{ID: "allow_once", Kind: "allow_once"}, {ID: "reject_once", Kind: "reject_once"}})
 		if err == nil {
 			t.Fatalf("accepted invalid decision %s", text)
+		}
+	}
+}
+
+func TestGuardianNativeAssessmentRejectsNonObjectAndTrailingValues(t *testing.T) {
+	for _, mode := range []model.OutputMode{model.OutputModeJSON, model.OutputModeSchema} {
+		for _, input := range []string{`null`, `[]`, `"allow_once"`, `{"option_id":"allow_once"} true`, `{"option_id":"allow_once"} trailing`, `{"option_id":"allow_once"} {"option_id":"reject_once"}`} {
+			if _, err := parseGuardianAssessmentForMode(input, mode, []kernel.ApprovalOption{{ID: "allow_once", Kind: "allow_once"}}); err == nil {
+				t.Fatalf("accepted %s assessment %s", mode, input)
+			}
 		}
 	}
 }

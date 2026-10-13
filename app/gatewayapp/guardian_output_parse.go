@@ -131,79 +131,82 @@ func guardianTopLevelJSONObjectCandidates(text string) ([]string, error) {
 }
 
 func decodeGuardianAssessmentCandidate(candidate string, options []kernel.ApprovalOption) (guardianReviewModelOutput, error) {
-	if err := validateGuardianAssessmentObjectKeys(candidate); err != nil {
+	fields, err := decodeGuardianAssessmentObject(candidate)
+	if err != nil {
 		return guardianReviewModelOutput{}, err
 	}
 	var parsed guardianReviewModelOutput
+	if raw, present := fields["option_id"]; present {
+		if err := json.Unmarshal(raw, &parsed.OptionID); err != nil {
+			return guardianReviewModelOutput{}, fmt.Errorf("approval reviewer returned invalid option_id: %w", err)
+		}
+	}
+	_, decision, err := approval.ResolveStrictOption(options, parsed.OptionID)
+	if err != nil {
+		return guardianReviewModelOutput{}, err
+	}
+	// Only the original option determines authority. Allow explanations and
+	// extra fields are informational; never decode them into a decision or target.
+	if decision == approval.OptionDecisionDeny {
+		if raw, present := fields["rationale"]; present {
+			if err := json.Unmarshal(raw, &parsed.Rationale); err != nil {
+				return guardianReviewModelOutput{}, fmt.Errorf("approval reviewer returned invalid rationale: %w", err)
+			}
+		}
+	}
+	return normalizeGuardianAssessment(parsed, options)
+}
+
+// Decode exact field names once: struct decoding would also accept case aliases
+// and JSON's last-key-wins behavior would conceal conflicting duplicate keys.
+func decodeGuardianAssessmentObject(candidate string) (map[string]json.RawMessage, error) {
 	decoder := json.NewDecoder(strings.NewReader(candidate))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&parsed); err != nil {
-		return guardianReviewModelOutput{}, fmt.Errorf("approval reviewer returned invalid JSON: %w", err)
+	opening, err := decoder.Token()
+	if err != nil {
+		return nil, fmt.Errorf("approval reviewer returned invalid JSON: %w", err)
+	}
+	if delimiter, ok := opening.(json.Delim); !ok || delimiter != '{' {
+		return nil, fmt.Errorf("approval reviewer assessment must be one JSON object")
+	}
+	fields := make(map[string]json.RawMessage)
+	for decoder.More() {
+		token, err := decoder.Token()
+		if err != nil {
+			return nil, fmt.Errorf("approval reviewer returned invalid JSON: %w", err)
+		}
+		key, ok := token.(string)
+		if !ok {
+			return nil, fmt.Errorf("approval reviewer returned a non-string JSON field name")
+		}
+		for _, canonical := range []string{"option_id", "rationale"} {
+			if key != canonical && strings.EqualFold(key, canonical) {
+				return nil, fmt.Errorf("approval reviewer returned non-canonical field %q", key)
+			}
+		}
+		if _, duplicate := fields[key]; duplicate {
+			return nil, fmt.Errorf("approval reviewer returned duplicate field %q", key)
+		}
+		var value json.RawMessage
+		if err := decoder.Decode(&value); err != nil {
+			return nil, fmt.Errorf("approval reviewer returned invalid field %q: %w", key, err)
+		}
+		fields[key] = value
+	}
+	closing, err := decoder.Token()
+	if err != nil {
+		return nil, fmt.Errorf("approval reviewer returned invalid JSON: %w", err)
+	}
+	if delimiter, ok := closing.(json.Delim); !ok || delimiter != '}' {
+		return nil, fmt.Errorf("approval reviewer assessment must end with one JSON object")
 	}
 	var trailing any
 	if err := decoder.Decode(&trailing); err != io.EOF {
 		if err == nil {
-			return guardianReviewModelOutput{}, fmt.Errorf("approval reviewer returned more than one JSON value")
+			return nil, fmt.Errorf("approval reviewer returned more than one JSON value")
 		}
-		return guardianReviewModelOutput{}, fmt.Errorf("approval reviewer returned trailing content: %w", err)
+		return nil, fmt.Errorf("approval reviewer returned trailing content: %w", err)
 	}
-	parsed, err := normalizeGuardianAssessment(parsed, options)
-	if err != nil {
-		return guardianReviewModelOutput{}, err
-	}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(candidate), &fields); err != nil {
-		return guardianReviewModelOutput{}, err
-	}
-	if _, present := fields["rationale"]; present && parsed.Outcome == "allow" {
-		return guardianReviewModelOutput{}, fmt.Errorf("allow must omit rationale")
-	}
-	return parsed, nil
-}
-
-func validateGuardianAssessmentObjectKeys(candidate string) error {
-	allowed := map[string]struct{}{
-		"option_id": {},
-		"rationale": {},
-	}
-	decoder := json.NewDecoder(strings.NewReader(candidate))
-	opening, err := decoder.Token()
-	if err != nil {
-		return fmt.Errorf("approval reviewer returned invalid JSON: %w", err)
-	}
-	if delimiter, ok := opening.(json.Delim); !ok || delimiter != '{' {
-		return fmt.Errorf("approval reviewer assessment must be one JSON object")
-	}
-	seen := make(map[string]struct{}, len(allowed))
-	for decoder.More() {
-		token, err := decoder.Token()
-		if err != nil {
-			return fmt.Errorf("approval reviewer returned invalid JSON: %w", err)
-		}
-		key, ok := token.(string)
-		if !ok {
-			return fmt.Errorf("approval reviewer returned a non-string JSON field name")
-		}
-		if _, ok := allowed[key]; !ok {
-			return fmt.Errorf("approval reviewer returned unsupported field %q", key)
-		}
-		if _, duplicate := seen[key]; duplicate {
-			return fmt.Errorf("approval reviewer returned duplicate field %q", key)
-		}
-		seen[key] = struct{}{}
-		var value json.RawMessage
-		if err := decoder.Decode(&value); err != nil {
-			return fmt.Errorf("approval reviewer returned invalid field %q: %w", key, err)
-		}
-	}
-	closing, err := decoder.Token()
-	if err != nil {
-		return fmt.Errorf("approval reviewer returned invalid JSON: %w", err)
-	}
-	if delimiter, ok := closing.(json.Delim); !ok || delimiter != '}' {
-		return fmt.Errorf("approval reviewer assessment must end with one JSON object")
-	}
-	return nil
+	return fields, nil
 }
 
 func finalizeGuardianDecision(payload *kernel.ApprovalPayload, parsed guardianReviewModelOutput) (kernel.ApprovalReviewResult, error) {
@@ -232,8 +235,8 @@ func normalizeGuardianAssessment(parsed guardianReviewModelOutput, options []ker
 	}
 	parsed.Outcome = string(decision)
 	parsed.Rationale = strings.TrimSpace(parsed.Rationale)
-	if decision == approval.OptionDecisionAllow && parsed.Rationale != "" {
-		return guardianReviewModelOutput{}, fmt.Errorf("allow must not include rationale")
+	if decision == approval.OptionDecisionAllow {
+		parsed.Rationale = ""
 	}
 	if decision == approval.OptionDecisionDeny && parsed.Rationale == "" {
 		return guardianReviewModelOutput{}, fmt.Errorf("deny requires a specific rationale")

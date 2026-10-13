@@ -53,6 +53,9 @@ func guardianOutputSpec(payload *kernel.ApprovalPayload) (*model.OutputSpec, err
 		return nil, err
 	}
 	return &model.OutputSpec{Mode: model.OutputModeSchema, JSONSchema: map[string]any{
+		// Keep the generation schema closed for structured-output providers.
+		// The local parser tolerates extra informational fields and discards
+		// allow explanations without changing the selected option's authority.
 		"type": "object", "additionalProperties": false,
 		"properties": map[string]any{"option_id": map[string]any{"type": "string"}, "rationale": map[string]any{"type": "string"}},
 		"required":   []any{"option_id"},

@@ -20,6 +20,7 @@ func TestGuardianDetachedReviewPersistsUsageDuringParentTurn(t *testing.T) {
 		approved bool
 	}{
 		{"approved", `{"option_id":"allow_once"}`, true},
+		{"approved with explanation", `{"option_id":"allow_once","rationale":"Inspection is authorized.","review_id":"forged","target":{"session_id":"other"}}`, true},
 		{"denied", `{"option_id":"reject_once","rationale":"Outside the requested scope."}`, false},
 	} {
 		t.Run(decision.name, func(t *testing.T) {
@@ -73,7 +74,7 @@ func TestGuardianDetachedReviewPersistsUsageDuringParentTurn(t *testing.T) {
 			}
 			receipt := receipts[0]
 			measured := session.UsageSnapshotFromSessionEvent(receipt)
-			if measured == nil || measured.TotalTokens != 12 || receipt.SessionID != active.SessionID || receipt.Scope == nil || receipt.Scope.Executor.ID != "guardian" || receipt.Meta["usage_category"] != "auto_review" {
+			if measured == nil || measured.TotalTokens != 12 || receipt.SessionID != active.SessionID || receipt.Scope == nil || receipt.Scope.Executor.ID != "guardian" || receipt.Meta["usage_category"] != "auto_review" || receipt.Meta["review_id"] != req.ReviewID || receipt.Scope.TurnID != req.TurnID {
 				t.Fatalf("receipt lost its measurement or parent ownership: %#v", receipt)
 			}
 			if got := guardianReceiptParentModelContext(t, active, after); !reflect.DeepEqual(got, wantContext) {
