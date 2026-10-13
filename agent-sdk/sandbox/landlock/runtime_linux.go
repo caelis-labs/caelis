@@ -494,7 +494,7 @@ func applyLandlockFilesystemPolicy(p policy.Policy, policyCWD string) error {
 		return err
 	}
 	attr := unix.LandlockRulesetAttr{
-		Access_fs: landlockReadWriteMaskForABI(abi),
+		Handled_access_fs: landlockReadWriteMaskForABI(abi),
 	}
 	rulesetFD, err := landlockCreateRuleset(&attr, 0)
 	if err != nil {
