@@ -93,7 +93,12 @@ func TestReleasePublishesProtectedMainTagsWithoutRepeatingPRQuality(t *testing.T
 		"goreleaser/goreleaser-action@v7",
 		"args: release --clean --skip=publish",
 		"name: unpublished-archives",
-		"  notarize-darwin:\n    needs: build",
+		"  verify-recovery:\n    if: github.event_name == 'workflow_dispatch'",
+		"  notarize-darwin:\n    needs: [build, verify-recovery]",
+		"run-id: 38420720149",
+		"bash scripts/verify_release_recovery.sh",
+		"if: ${{ always() && !cancelled()",
+		"name: macos-signing-checkpoint",
 		"bash scripts/sign_notarize_cli.sh",
 		"name: verified-release-archives",
 		"  release:\n    needs: notarize-darwin",
@@ -121,7 +126,6 @@ func TestReleasePublishesProtectedMainTagsWithoutRepeatingPRQuality(t *testing.T
 		"-f status=success",
 		"make ",
 		"sdk-proxy-smoke",
-		"workflow_dispatch:",
 		"gh release download",
 		"GITHUB_STEP_SUMMARY",
 	} {
@@ -174,7 +178,7 @@ func TestReleasePublishesProtectedMainTagsWithoutRepeatingPRQuality(t *testing.T
 			t.Errorf("macOS notarization workflow missing %q", want)
 		}
 	}
-	for _, forbidden := range []string{"args: release --clean\n", "--clobber", "workflow_dispatch:"} {
+	for _, forbidden := range []string{"args: release --clean\n", "--clobber"} {
 		if strings.Contains(release, forbidden) {
 			t.Errorf("tag workflow could bypass notarized archive gate: %q", forbidden)
 		}
@@ -315,8 +319,10 @@ func TestMacOSCLIArchivesFollowAcceptedNotarization(t *testing.T) {
 		"^CodeDirectory .*flags=.*runtime",
 		"^Timestamp=",
 		"ditto -c -k --keepParent",
+		"submission.zip",
 		"notarytool submit",
-		"--wait --timeout 60m",
+		"notarytool wait",
+		"--timeout 60m --output-format json",
 		"notarytool log",
 		"log.get('sha256')",
 		"tar -czf",
@@ -330,11 +336,12 @@ func TestMacOSCLIArchivesFollowAcceptedNotarization(t *testing.T) {
 		t.Error("bare CLI and ZIP do not support stapling")
 	}
 	sign := strings.Index(script, "--options runtime --timestamp")
+	checkpoint := strings.Index(script, "cp \"$temp/notary.zip\" \"$dist/notarization/submission.zip\"")
 	submit := strings.Index(script, "notarytool submit")
 	accepted := strings.Index(script, "log.get('sha256')")
 	repackage := strings.Index(script, "tar -czf")
-	if sign < 0 || submit < 0 || accepted < 0 || repackage < 0 ||
-		sign >= submit || submit >= accepted || accepted >= repackage {
+	if sign < 0 || checkpoint < 0 || submit < 0 || accepted < 0 || repackage < 0 ||
+		sign >= checkpoint || checkpoint >= submit || submit >= accepted || accepted >= repackage {
 		t.Error("macOS archives must contain signed bytes only after Apple accepts the matching submission")
 	}
 }

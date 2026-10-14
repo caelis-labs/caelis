@@ -117,26 +117,56 @@ for arch in amd64 arm64; do
 done
 
 ditto -c -k --keepParent "$temp/notary" "$temp/notary.zip"
+mkdir -p "$dist/notarization"
+# Keep the exact signed submission bytes outside the temporary keychain area.
+# The workflow saves this ZIP even if Apple later times out or rejects it.
+cp "$temp/notary.zip" "$dist/notarization/submission.zip"
+/usr/bin/python3 - "$version" "$dist/notarization/submission.zip" \
+  "$dist/notarization/submission-manifest.json" <<'PY'
+import hashlib, json, os, sys
+digest = hashlib.sha256()
+with open(sys.argv[2], 'rb') as archive:
+    for chunk in iter(lambda: archive.read(1024 * 1024), b''):
+        digest.update(chunk)
+with open(sys.argv[3], 'w') as manifest:
+    json.dump({
+        'tag': 'v' + sys.argv[1],
+        'tag_sha': os.environ.get('RELEASE_TAG_SHA', ''),
+        'source_run': os.environ.get('RELEASE_SOURCE_RUN', ''),
+        'submission_zip_sha256': digest.hexdigest(),
+    }, manifest, sort_keys=True)
+    manifest.write('\n')
+PY
 xcrun notarytool store-credentials caelis-cli-release --keychain "$keychain" \
   --apple-id "$APPLE_NOTARY_APPLE_ID" --team-id "$APPLE_TEAM_ID" \
   --password "$APPLE_NOTARY_PASSWORD" >/dev/null
 unset APPLE_NOTARY_APPLE_ID APPLE_NOTARY_PASSWORD
-mkdir -p "$dist/notarization"
-xcrun notarytool submit "$temp/notary.zip" \
+xcrun notarytool submit "$dist/notarization/submission.zip" \
   --keychain-profile caelis-cli-release --keychain "$keychain" \
-  --wait --timeout 60m --output-format json > "$dist/notarization/result.json"
-submission=$(/usr/bin/python3 - "$dist/notarization/result.json" <<'PY'
+  --output-format json > "$dist/notarization/submission.json"
+submission=$(/usr/bin/python3 - "$dist/notarization/submission.json" <<'PY'
 import json, sys
 result = json.load(open(sys.argv[1]))
-if result.get('status') != 'Accepted':
+if not result.get('id'):
+    raise SystemExit('Apple did not return a notarization submission ID')
+print(result['id'])
+PY
+)
+xcrun notarytool wait "$submission" \
+  --keychain-profile caelis-cli-release --keychain "$keychain" \
+  --timeout 60m --output-format json > "$dist/notarization/result.json"
+receipt_id=$(/usr/bin/python3 - "$dist/notarization/result.json" "$submission" <<'PY'
+import json, sys
+result = json.load(open(sys.argv[1]))
+if result.get('id') != sys.argv[2] or result.get('status') != 'Accepted':
     raise SystemExit('Apple did not accept the macOS CLI submission: ' + str(result.get('status')))
 print(result['id'])
 PY
 )
-xcrun notarytool log "$submission" \
+xcrun notarytool log "$receipt_id" \
   --keychain-profile caelis-cli-release --keychain "$keychain" \
   "$dist/notarization/log.json"
-notary_digest=$(shasum -a 256 "$temp/notary.zip" | cut -d ' ' -f 1)
+notary_digest=$(shasum -a 256 "$dist/notarization/submission.zip" | cut -d ' ' -f 1)
 /usr/bin/python3 - "$dist/notarization/log.json" "$submission" "$notary_digest" <<'PY'
 import json, sys
 log = json.load(open(sys.argv[1]))

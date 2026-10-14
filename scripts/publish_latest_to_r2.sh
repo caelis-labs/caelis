@@ -2,13 +2,12 @@
 
 set -euo pipefail
 
-: "${GITHUB_REF_NAME:?GITHUB_REF_NAME is required}"
 : "${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}"
 : "${GH_TOKEN:?GH_TOKEN is required}"
 : "${R2_BUCKET:?R2_BUCKET is required}"
 : "${R2_ENDPOINT:?R2_ENDPOINT is required}"
 
-tag="${GITHUB_REF_NAME}"
+tag="${1:-${GITHUB_REF_NAME:-}}"
 if [[ ! "${tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[^/[:space:]]+)?$ ]]; then
   echo "refusing to publish invalid release tag: ${tag}" >&2
   exit 1
