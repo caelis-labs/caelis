@@ -2,11 +2,19 @@ name: release
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && 'v0.71.1' || github.ref_name }}
+  RELEASE_TAG_SHA: ${{ github.event_name == 'workflow_dispatch' && '5e232e817cdd62186a19dd1d3a43aa5476326a74' || github.sha }}
+  RELEASE_SOURCE_RUN: ${{ github.event_name == 'workflow_dispatch' && '38420720149' || github.run_id }}
 
 on:
   push:
     tags:
       - "v*"
+  # One reviewed recovery for the failed v0.71.1 tag run. New versions use push.
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 concurrency:
   group: release
@@ -14,6 +22,7 @@ concurrency:
 
 jobs:
   build:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -46,35 +55,77 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  verify-recovery:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify immutable tag, source run, build artifact and empty release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/verify_release_recovery.sh
+
   notarize-darwin:
-    needs: build
+    needs: [build, verify-recovery]
+    if: ${{ always() && !cancelled() && ((github.event_name == 'push' && needs.build.result == 'success') || (github.event_name == 'workflow_dispatch' && needs.verify-recovery.result == 'success')) }}
     runs-on: macos-15
     timeout-minutes: 90
     environment: default
     permissions:
       contents: read
+      actions: read
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: github.event_name == 'push'
         with:
           name: unpublished-archives
           path: dist
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: github.event_name == 'workflow_dispatch'
+        with:
+          name: unpublished-archives
+          path: dist
+          run-id: 38420720149
+          github-token: ${{ github.token }}
       - name: Sign and notarize both macOS CLIs before packaging
+        # A full rerun must not re-sign or re-submit an unknown Apple operation.
+        # Failed publication jobs can rerun without rerunning this successful job.
         env:
           APPLE_DEVELOPER_ID_P12_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_P12_BASE64 }}
           APPLE_DEVELOPER_ID_P12_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
           APPLE_NOTARY_APPLE_ID: ${{ secrets.APPLE_NOTARY_APPLE_ID }}
           APPLE_NOTARY_PASSWORD: ${{ secrets.APPLE_NOTARY_PASSWORD }}
           APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
-        run: bash scripts/sign_notarize_cli.sh "${GITHUB_REF_NAME#v}" dist
+        run: |
+          if [[ "${GITHUB_EVENT_NAME}" == workflow_dispatch && "${GITHUB_RUN_ATTEMPT}" != 1 ]]; then
+            echo 'Recovery signing cannot be rerun; inspect the saved ZIP and Apple submission ID.' >&2
+            exit 1
+          fi
+          bash scripts/sign_notarize_cli.sh "${RELEASE_TAG#v}" dist
       - name: Preserve Apple result and log
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: macos-notarization-receipt
           path: dist/notarization/*.json
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Preserve exact signed Apple submission bytes
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: macos-signing-checkpoint
+          path: dist/notarization/submission.zip
           if-no-files-found: ignore
           retention-days: 14
       - name: Preserve final release archives and checksums
@@ -98,13 +149,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
+          # npm package metadata and provenance come from the original tag.
+          ref: ${{ env.RELEASE_TAG }}
           persist-credentials: false
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: verified-release-archives
           path: dist
       - name: Verify final assets before any publication
-        run: bash scripts/verify_release_archives.sh "${GITHUB_REF_NAME#v}" dist
+        run: bash scripts/verify_release_archives.sh "${RELEASE_TAG#v}" dist
       - uses: actions/setup-node@v7
         with:
           node-version: "22.14.0"
@@ -115,13 +168,13 @@ jobs:
           npm i -g npm@^11.10.0
           npm -v
       - name: Set package version from git tag
-        run: node ./npm/scripts/set-version.mjs "${GITHUB_REF_NAME#v}"
+        run: node ./npm/scripts/set-version.mjs "${RELEASE_TAG#v}"
       - name: Stage platform packages from final archives
-        run: node ./npm/scripts/stage-release.mjs "${GITHUB_REF_NAME#v}" ./dist
+        run: node ./npm/scripts/stage-release.mjs "${RELEASE_TAG#v}" ./dist
       - name: Publish verified GitHub assets
         env:
           GH_TOKEN: ${{ github.token }}
-        run: bash scripts/publish_release_assets.sh "${GITHUB_REF_NAME}" dist
+        run: bash scripts/publish_release_assets.sh "${RELEASE_TAG}" dist
       - name: Publish platform packages
         run: >
           node ./npm/scripts/publish-release.mjs
@@ -151,4 +204,4 @@ jobs:
       - name: Publish latest raw-install assets to R2
         env:
           GH_TOKEN: ${{ github.token }}
-        run: ./scripts/publish_latest_to_r2.sh
+        run: ./scripts/publish_latest_to_r2.sh "${RELEASE_TAG}"

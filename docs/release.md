@@ -209,6 +209,24 @@ workflow rerun may produce different timestamped signatures; if any published
 asset differs, publication stops for investigation. Do not overwrite published
 assets or re-sign the Darwin binaries to resume a partially published version.
 
+A failed tag run keeps using the script from that immutable tag. A signing fix
+merged later to `main` cannot take effect through **Rerun failed jobs** on the
+old run. The one-off `workflow_dispatch` entry in `release.yml` restores only
+`v0.71.1` from source run `38420720149`. Run it on reviewed `main` with
+`gh workflow run release.yml --ref main` after confirming that run has no Apple
+submission and the release has no assets. Its guard verifies the original tag
+SHA, source run and artifact digest, empty release, and absence of an earlier
+recovery dispatch. It downloads the original unpublished archives, then uses
+the reviewed script for signing and the existing publication sequence. The
+submission ZIP, its tag/source/digest manifest, and Apple submission ID are
+saved as private workflow artifacts.
+If signing or notarization has an unknown result, inspect those artifacts and
+Apple history before any further action; a second dispatch or full recovery
+rerun cannot re-sign and re-submit. A failed publication job can be rerun in
+the same run using its `verified-release-archives` artifact. Keep the original
+tag and release assets immutable; the normal release-please tag flow remains
+the path for new versions. Remove this one-off dispatch after recovery.
+
 ### Manual fallback
 
 If the bot is unavailable, first merge a reviewed PR updating the root manifest
