@@ -10,7 +10,7 @@ on:
   push:
     tags:
       - "v*"
-  # One reviewed recovery for the failed v0.71.1 tag run. New versions use push.
+  # One reviewed publication resume for the accepted v0.71.1 signing run.
   workflow_dispatch:
 
 permissions:
@@ -67,14 +67,32 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Verify immutable tag, source run, build artifact and empty release
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: macos-notarization-receipt
+          path: recovery/receipt
+          run-id: 38505541188
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: macos-signing-checkpoint
+          path: recovery/checkpoint
+          run-id: 38505541188
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: verified-release-archives
+          path: dist
+          run-id: 38505541188
+          github-token: ${{ github.token }}
+      - name: Verify accepted Apple submission and exact release bytes
         env:
           GH_TOKEN: ${{ github.token }}
-        run: bash scripts/verify_release_recovery.sh
+        run: python3 scripts/verify_release_publication_recovery.py recovery dist
 
   notarize-darwin:
     needs: [build, verify-recovery]
-    if: ${{ always() && !cancelled() && ((github.event_name == 'push' && needs.build.result == 'success') || (github.event_name == 'workflow_dispatch' && needs.verify-recovery.result == 'success')) }}
+    if: ${{ always() && !cancelled() && github.event_name == 'push' && needs.build.result == 'success' }}
     runs-on: macos-15
     timeout-minutes: 90
     environment: default
@@ -139,12 +157,14 @@ jobs:
           retention-days: 7
 
   release:
-    needs: notarize-darwin
+    needs: [notarize-darwin, verify-recovery]
+    if: ${{ always() && !cancelled() && ((github.event_name == 'push' && needs.notarize-darwin.result == 'success') || (github.event_name == 'workflow_dispatch' && needs.verify-recovery.result == 'success')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: default
     permissions:
       contents: write
+      actions: read
       id-token: write
     steps:
       - uses: actions/checkout@v7
@@ -153,9 +173,17 @@ jobs:
           ref: ${{ env.RELEASE_TAG }}
           persist-credentials: false
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: github.event_name == 'push'
         with:
           name: verified-release-archives
           path: dist
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: github.event_name == 'workflow_dispatch'
+        with:
+          name: verified-release-archives
+          path: dist
+          run-id: 38505541188
+          github-token: ${{ github.token }}
       - name: Verify final assets before any publication
         run: bash scripts/verify_release_archives.sh "${RELEASE_TAG#v}" dist
       - uses: actions/setup-node@v7
@@ -189,6 +217,7 @@ jobs:
 
   publish-r2:
     needs: release
+    if: ${{ !cancelled() && needs.release.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
