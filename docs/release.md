@@ -209,6 +209,16 @@ workflow rerun may produce different timestamped signatures; if any published
 asset differs, publication stops for investigation. Do not overwrite published
 assets or re-sign the Darwin binaries to resume a partially published version.
 
+A failed tag run keeps using the script from that immutable tag. A signing fix
+merged later to `main` cannot take effect through **Rerun failed jobs** on the
+old run. For an interrupted release, use a reviewed recovery run with the fixed
+script while pinning the original tag commit and its unpublished build artifact.
+Check the tag SHA, artifact source run, existing release assets, and any Apple
+submission receipt before starting. If Apple has already accepted a submission,
+resume with the exact signed bytes rather than submitting a newly signed copy.
+Keep the original tag and release assets immutable; the normal release-please
+tag flow remains the path for new versions.
+
 ### Manual fallback
 
 If the bot is unavailable, first merge a reviewed PR updating the root manifest

@@ -19,20 +19,52 @@ bash "$(dirname "$0")/verify_release_archives.sh" "$version" "$dist" --names-onl
 umask 077
 temp=$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/caelis-cli-signing.XXXXXX")
 keychain="$temp/release.keychain-db"
+original_keychains=()
+original_keychain_list=
+search_list_touched=false
+keychain_created=false
 cleanup() {
-  security delete-keychain "$keychain" >/dev/null 2>&1 || true
-  rm -rf "$temp"
+  local status=$?
+  trap - EXIT
+  if [[ "$search_list_touched" == true ]]; then
+    if ! security list-keychains -d user -s "${original_keychains[@]}" >/dev/null 2>&1 ||
+       [[ "$(security list-keychains -d user)" != "$original_keychain_list" ]]; then
+      echo 'failed to restore the original keychain search list' >&2
+      status=1
+    fi
+  fi
+  if [[ "$keychain_created" == true ]] && ! security delete-keychain "$keychain" >/dev/null 2>&1; then
+    echo 'failed to delete the temporary signing keychain' >&2
+    status=1
+  fi
+  rm -rf "$temp" || status=1
+  exit "$status"
 }
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
+original_keychain_list=$(security list-keychains -d user)
+while IFS= read -r line; do
+  [[ -n "$line" ]] || continue
+  item=$(printf '%s\n' "$line" | sed -n 's/^[[:space:]]*"\(.*\)"$/\1/p')
+  [[ -n "$item" ]] || { echo 'unexpected keychain search list format' >&2; exit 1; }
+  original_keychains+=("$item")
+done <<< "$original_keychain_list"
+
 printf '%s' "$APPLE_DEVELOPER_ID_P12_BASE64" | base64 --decode > "$temp/identity.p12"
 unset APPLE_DEVELOPER_ID_P12_BASE64
 keychain_password=$(openssl rand -hex 32)
 security create-keychain -p "$keychain_password" "$keychain"
+keychain_created=true
+search_list_touched=true
+if ! security list-keychains -d user -s "$keychain" "${original_keychains[@]}"; then
+  echo 'failed to activate the temporary signing keychain search list' >&2
+  exit 1
+fi
 security set-keychain-settings -lut 9000 "$keychain"
 security unlock-keychain -p "$keychain_password" "$keychain"
+echo 'Importing Developer ID signing identity into the temporary keychain.'
 security import "$temp/identity.p12" -k "$keychain" \
   -P "$APPLE_DEVELOPER_ID_P12_PASSWORD" -T /usr/bin/codesign >/dev/null
 unset APPLE_DEVELOPER_ID_P12_PASSWORD
@@ -46,8 +78,16 @@ curl --fail --silent --show-error --location \
   https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer -o "$temp/AppleG2.cer"
 printf '%s  %s\n' f16cd3c54c7f83cea4bf1a3e6a0819c8aaa8e4a1528fd144715f350643d2df3a \
   "$temp/AppleG2.cer" | shasum -a 256 --check
-security import "$temp/AppleG2.cer" -k "$keychain" >/dev/null
-identities=$(security find-identity -v -p codesigning "$keychain")
+echo 'Importing Apple Developer ID G2 intermediate.'
+if ! security import "$temp/AppleG2.cer" -k "$keychain" >/dev/null; then
+  echo 'failed to import the Apple Developer ID G2 intermediate' >&2
+  exit 1
+fi
+echo 'Checking the Developer ID signing identity and certificate chain.'
+if ! identities=$(security find-identity -v -p codesigning "$keychain"); then
+  echo 'failed to query Developer ID signing identities in the temporary keychain' >&2
+  exit 1
+fi
 identity=$(printf '%s\n' "$identities" | sed -n 's/^[[:space:]]*[0-9][0-9]*) \([A-Fa-f0-9]\{40\}\) "Developer ID Application: .*"$/\1/p')
 [[ -n "$identity" && "$identity" != *$'\n'* ]] || { echo 'expected exactly one valid Developer ID Application identity' >&2; exit 1; }
 
@@ -62,8 +102,12 @@ for arch in amd64 arm64; do
   expected_arch=$arch
   [[ "$arch" != amd64 ]] || expected_arch=x86_64
   [[ "$(lipo -archs "$binary")" == "$expected_arch" ]] || { echo "wrong Mach-O architecture in $archive" >&2; exit 1; }
-  codesign --force --sign "$identity" --keychain "$keychain" \
-    --options runtime --timestamp "$binary"
+  echo "Signing Darwin $arch CLI with Developer ID, hardened runtime and timestamp."
+  if ! codesign --force --sign "$identity" --keychain "$keychain" \
+    --options runtime --timestamp "$binary"; then
+    echo "Developer ID codesign failed for Darwin $arch CLI" >&2
+    exit 1
+  fi
   codesign --verify --strict --verbose=2 "$binary"
   codesign -dvvv "$binary" 2> "$temp/$arch-signature.txt"
   grep -F "TeamIdentifier=$APPLE_TEAM_ID" "$temp/$arch-signature.txt" >/dev/null
