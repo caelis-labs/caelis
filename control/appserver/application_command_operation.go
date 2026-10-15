@@ -3,7 +3,10 @@ package appserver
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"slices"
+
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 
 	"github.com/caelis-labs/caelis/control/application"
 	"github.com/caelis-labs/caelis/control/internal/operationreceipt"
@@ -58,4 +61,45 @@ func (s *SQLiteOperationStore) completeAdmittedApplicationOperation(ctx context.
 		return application.ErrConflict
 	}
 	return err
+}
+
+// Native Session commands and Application commands share Store.BeginOperation's
+// atomic admission. The kind separates native command intents from historical
+// Application request shapes without changing those persisted request digests.
+func (s *CommandService) admitApplicationCommand(ctx context.Context, principal Principal, intent OperationIntent) (admittedApplicationOperation, *CommandResult, error) {
+	store := s.config.Applications
+	if store == nil {
+		return admittedApplicationOperation{}, nil, errors.New("application operation store is required")
+	}
+	scope, err := ApplicationScope(principal)
+	if err != nil {
+		return admittedApplicationOperation{}, nil, err
+	}
+	op, fresh, err := store.BeginOperation(ctx, scope, intent.OperationID, struct {
+		Kind   string          `json:"kind"`
+		Intent OperationIntent `json:"intent"`
+	}{Kind: "control_command", Intent: intent})
+	if err != nil {
+		return admittedApplicationOperation{}, nil, err
+	}
+	admitted := admittedApplicationOperation{principal, scope, op, store}
+	if fresh {
+		return admitted, nil, nil
+	}
+	result := CommandResult{OperationID: intent.OperationID, SessionID: intent.SessionID, Outcome: OutcomeUnknown, ErrorCode: errorcode.UnknownOutcome, Detail: "application intent exists without a proven receipt"}
+	if len(op.Result) > 0 {
+		result = CommandResult{}
+		if err := json.Unmarshal(op.Result, &result); err != nil {
+			return admittedApplicationOperation{}, nil, err
+		}
+	}
+	return admitted, &result, nil
+}
+
+func applicationCommandAdmissionFailure(operationID, sessionID string, err error) (CommandResult, error) {
+	if errors.Is(err, application.ErrConflict) || errors.Is(err, ErrOperationConflict) {
+		return commandFailure(operationID, sessionID, OutcomeConflicted, "conflict", ErrOperationConflict), ErrOperationConflict
+	}
+	coded := errorcode.Wrap(errorcode.UnknownOutcome, "controlclient: admit application command", err)
+	return commandFailure(operationID, sessionID, OutcomeUnknown, publicCommandDetail(coded, OutcomeUnknown), coded), coded
 }

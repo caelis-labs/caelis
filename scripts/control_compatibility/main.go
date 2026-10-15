@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/caelis-labs/caelis/control/application"
 	"github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/httpclient"
 )
 
@@ -131,7 +133,7 @@ func main() {
 			case <-time.After(25 * time.Millisecond):
 			}
 		}
-		waitTranscript(ctx, client, id)
+		must(waitTranscript(ctx, client, id, receipt.Prompt.Target))
 		write(saved, receipt)
 	} else {
 		raw, err := os.ReadFile(saved)
@@ -151,7 +153,7 @@ func main() {
 		check(equalJSON(call, receipt.Call), "callback receipt changed")
 		_, err = client.ClaimApplicationCall(ctx, receipt.Create.SessionID, receipt.Call.ID)
 		check(err != nil, "completed callback was claimable twice")
-		waitTranscript(ctx, client, receipt.Create.SessionID)
+		must(waitTranscript(ctx, client, receipt.Create.SessionID, receipt.Prompt.Target))
 	}
 	effect, err := os.ReadFile(filepath.Join(root, "callback-effect"))
 	must(err)
@@ -173,21 +175,80 @@ func main() {
 	write(filepath.Join(root, "evidence-"+phase+".json"), map[string]any{"phase": phase, "server": info, "session": receipt.Create.SessionID, "configuration_revision": receipt.Config.Revision, "operation_ids": []string{"create", "configure", "prompt"}, "callback_id": receipt.Call.ID, "callback_effect_verified": true, "resource_verified": true, "sse_replay_verified": true, "unrelated_session_denied": true})
 	fmt.Println("PASS", phase, receipt.Create.SessionID)
 }
-func waitTranscript(ctx context.Context, client *httpclient.Client, id string) {
+func waitTranscript(ctx context.Context, client *httpclient.Client, id string, target appserver.TurnTarget) error {
 	result, err := client.Reconnect(ctx, appserver.ReconnectRequest{SessionID: id})
-	must(err)
+	if err != nil {
+		return err
+	}
 	defer result.Subscription.Close()
+	return consumeTranscript(ctx, result.Subscription, id, target)
+}
+
+func consumeTranscript(ctx context.Context, subscription appserver.FeedSubscription, id string, target appserver.TurnTarget) error {
+	if target.TurnID == "" {
+		return errors.New("prompt receipt has no Turn identity")
+	}
+	var assembler appserver.FeedDeliveryAssembler
+	messages := map[string]string{}
+	terminal := false
 	for {
 		select {
-		case delivery, ok := <-result.Subscription.Deliveries():
-			check(ok, "feed closed before final transcript")
-			raw, err := json.Marshal(delivery)
-			must(err)
-			if strings.Contains(string(raw), "MATRIX_FINAL") {
-				return
+		case delivery, ok := <-subscription.Deliveries():
+			if err := subscription.Err(); err != nil {
+				return err
+			}
+			if !ok {
+				return errors.New("feed closed before committed transcript and target terminal")
+			}
+			events, replacement, err := assembler.Accept(delivery)
+			if err != nil {
+				return err
+			}
+			if replacement {
+				clear(messages)
+				terminal = false
+			}
+			for _, event := range events {
+				if event.SessionID != id || event.TurnID != target.TurnID || event.Scope != eventstream.ScopeMain {
+					continue
+				}
+				// Replay omits the live Handle/Run IDs; partial or foreign live
+				// identities cannot complete the command receipt's target.
+				if (event.HandleID != "" || event.RunID != "") && (event.HandleID != target.HandleID || event.RunID != target.RunID) {
+					continue
+				}
+				if eventstream.IsTurnTerminalLifecycle(event) {
+					if event.Lifecycle.State != eventstream.LifecycleStateCompleted {
+						return fmt.Errorf("target Turn ended in %s", event.Lifecycle.State)
+					}
+					terminal = true
+				}
+				chunk, ok := event.Update.(eventstream.ContentChunk)
+				if !ok || chunk.SessionUpdate != eventstream.UpdateAgentMessage || chunk.MessageID == "" || !event.Final || event.Delivery == nil || event.Delivery.Mode == eventstream.DeliveryTransient {
+					continue
+				}
+				content, ok := chunk.Content.(eventstream.TextContent)
+				if !ok {
+					continue
+				}
+				if chunk.Replacement {
+					messages[chunk.MessageID] = content.Text
+				} else {
+					messages[chunk.MessageID] += content.Text
+				}
+			}
+			if terminal && !assembler.Pending() {
+				if err := subscription.Err(); err != nil {
+					return err
+				}
+				for _, text := range messages {
+					if strings.Contains(text, "MATRIX_FINAL") {
+						return nil
+					}
+				}
 			}
 		case <-ctx.Done():
-			panic(ctx.Err())
+			return ctx.Err()
 		}
 	}
 }

@@ -1183,7 +1183,9 @@ func operationIDOf(request any) string {
 func TestApplicationCommandScopeAndValidation(t *testing.T) {
 	backend := &recordingCommandBackend{}
 	service := newTestCommandService(t, allowAuthorizer{}, NewMemoryOperationStore(), backend)
-	principal := Principal{ID: "owner", ApplicationID: "app-1", ConnectionID: "connection-1"}
+	store, _ := applicationTestStore(t)
+	service.config.Applications = store
+	principal := enrollTestApplication(t, store, "owner", "first", "a")
 	request := ApplicationPromptRequest{PromptRequest: PromptRequest{
 		WriteBase: WriteBase{OperationID: "prompt-1", SessionID: "session-1"}, Input: "hello",
 	}, SourceKind: "user"}
@@ -1196,8 +1198,8 @@ func TestApplicationCommandScopeAndValidation(t *testing.T) {
 		t.Fatalf("same-scope retry = %#v, %v; backend calls = %d", retry, err, backend.calls)
 	}
 	for index, other := range []Principal{
-		{ID: "owner", ApplicationID: "app-2", ConnectionID: principal.ConnectionID},
-		{ID: "owner", ApplicationID: principal.ApplicationID, ConnectionID: "connection-2"},
+		enrollTestApplication(t, store, "owner", "second", "b"),
+		enrollTestApplication(t, store, "owner", "third", "c"),
 	} {
 		result, err := service.PromptApplication(context.Background(), other, request)
 		if err != nil || result.Outcome != OutcomeCommitted || backend.calls != index+2 {

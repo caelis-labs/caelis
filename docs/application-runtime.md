@@ -176,7 +176,15 @@ shared Control command executor. The executor completes that same receipt; it
 does not open a second expiring operation for the effect. Its independent database
 connection preserves completion when the admission Store closes after dispatch.
 Unknown outcomes remain observable and never authorize redispatch. Configuration
-updates keep their atomic desired-revision and receipt transaction.
+updates keep their atomic desired-revision and receipt transaction. APP-scoped
+Session commands, including cancel and approval resolution, use the same permanent
+admission. Within one connection, reusing an operation ID for a different request
+conflicts across entry points. Different connections have independent IDs.
+
+The command executor checks retained pre-convergence Control receipts before fresh
+APP admission. It returns exact existing results and rejects conflicting requests;
+incomplete receipts never authorize redispatch. This read-only compatibility path
+remains until those Stores leave the supported upgrade window.
 
 The Control receipt reader retains support for incomplete Worker intents from
 released Hosts with a separate exact command receipt. This compatibility reader
@@ -634,8 +642,8 @@ callback may proceed under the current lease. Expiry is not a permanent generati
 fence or implicit Turn cancellation. Cancel canonical work when that behavior is
 required. Revocation is permanent, is allowed after expiry, and cannot be renewed.
 
-Create/prompt/archive permanent intent anchors outlive the shared command receipt
-retention. Known native results are recorded and remain readable under the original
+Application operation intents and their results are permanent. Known native
+results are recorded and remain readable under the original
 scope even if the connection expires or is revoked after admission. This completion
 does not restore mutation authority or relax late callback rejection.
 

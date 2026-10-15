@@ -21,7 +21,9 @@ import (
 type CommandServiceConfig struct {
 	Authorizer Authorizer
 	Operations OperationStore
-	Backend    CommandBackend
+	// Applications owns permanent admission for every application-scoped command.
+	Applications *application.Store
+	Backend      CommandBackend
 	// Diagnostics receives classification and correlation IDs only, never bodies or errors.
 	Diagnostics *slog.Logger
 }
@@ -117,6 +119,32 @@ func (s *CommandService) execute(ctx context.Context, principal Principal, actio
 	// that receipt through the same command executor instead of opening a second,
 	// expiring command record for the same effect.
 	admitted, hasAdmitted := admittedApplicationOperationFrom(ctx, principal, operationID)
+	if principal.ApplicationID != "" {
+		// Pre-convergence command receipts remain authoritative until their existing
+		// retention expires. Lookup never creates a second receipt or grants replay.
+		record, found, lookupErr := s.config.Operations.Lookup(ctx, intent)
+		if lookupErr != nil {
+			return applicationCommandAdmissionFailure(operationID, sessionID, lookupErr)
+		}
+		if found {
+			if record.Result != nil {
+				return *record.Result, nil
+			}
+			err := errorcode.New(errorcode.UnknownOutcome, "application command intent exists without a proven receipt")
+			return commandFailure(operationID, sessionID, OutcomeUnknown, err.Error(), err), nil
+		}
+		if !hasAdmitted {
+			var prior *CommandResult
+			admitted, prior, err = s.admitApplicationCommand(ctx, principal, intent)
+			if err != nil {
+				return applicationCommandAdmissionFailure(operationID, sessionID, err)
+			}
+			if prior != nil {
+				return *prior, nil
+			}
+			hasAdmitted = true
+		}
+	}
 	if !hasAdmitted {
 		recovery, recoveryBackend := s.config.Backend.(CommandRecoveryBackend)
 		recoverable := recoveryBackend && recovery.CanRecoverControlCommand(action)
