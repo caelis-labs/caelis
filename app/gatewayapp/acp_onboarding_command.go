@@ -26,7 +26,7 @@ type acpPreparationEffectResult struct {
 }
 
 func (*controlCommandBackend) CanRecoverControlCommand(action appserver.Action) bool {
-	return recoverableACPCommandAction(action)
+	return action == appserver.ActionSessionCreate || recoverableACPCommandAction(action)
 }
 
 func recoverableACPCommandAction(action appserver.Action) bool {
@@ -48,6 +48,9 @@ func (s *controlCommandBackend) RecoverControlCommand(
 	intent appserver.OperationIntent,
 	_ any,
 ) (appserver.CommandResult, bool, error) {
+	if intent.Action == appserver.ActionSessionCreate {
+		return s.recoverProfileCreation(ctx, principal, intent)
+	}
 	if intent.Action == appserver.ActionConversationInteraction {
 		return s.recoverControlInteraction(ctx, intent)
 	}

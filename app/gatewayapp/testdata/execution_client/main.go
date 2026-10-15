@@ -11,9 +11,9 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
-	"github.com/caelis-labs/caelis/control/application"
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/httpclient"
+	"github.com/caelis-labs/caelis/control/sessionprofile"
 )
 
 func main() {
@@ -40,7 +40,7 @@ func run(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	for _, required := range []string{appserver.CapabilityExecutionConfiguration, application.CapabilityNativeExecution, application.CapabilityWorkspaceBinding} {
+	for _, required := range []string{appserver.CapabilityExecutionConfiguration, sessionprofile.CapabilityNativeExecution, sessionprofile.CapabilityWorkspaceBinding} {
 		found := false
 		for _, capability := range info.Capabilities {
 			if capability == required {
@@ -59,21 +59,21 @@ func run(ctx context.Context, args []string) error {
 			environment["SystemRoot"] = os.Getenv("SystemRoot")
 			environment["TEMP"], environment["TMP"] = args[3], args[3]
 		}
-		profile := application.Profile{
+		profile := sessionprofile.Profile{
 			Version: "external-client/1", Instructions: "Execute the controlled native command.",
 			Model: "custom/gpt-4.1", ToolsVersion: "external-client/1", Execution: "workspace-write",
-			Workspace: application.Workspace{CWD: args[3]},
+			Workspace: sessionprofile.Workspace{CWD: args[3]},
 			ExecutionConfig: &sandbox.ExecutionConfig{Environment: sandbox.EnvironmentConfig{
 				Inherit: &inherit, Set: environment,
 			}},
 		}
-		result, err := client.CreateApplicationSession(ctx, appserver.CreateApplicationSessionRequest{WriteBase: appserver.WriteBase{OperationID: "external-create"}, Profile: profile})
+		result, err := client.CreateSession(ctx, appserver.CreateSessionRequest{WriteBase: appserver.WriteBase{OperationID: "external-create"}, Profile: &profile})
 		if err != nil {
 			return err
 		}
 		return json.NewEncoder(os.Stdout).Encode(result)
 	case "inspect":
-		binding, err := client.ApplicationSession(ctx, args[3])
+		binding, err := client.SessionProfile(ctx, args[3])
 		if err != nil {
 			return err
 		}
@@ -82,11 +82,11 @@ func run(ctx context.Context, args []string) error {
 			return err
 		}
 		return json.NewEncoder(os.Stdout).Encode(struct {
-			Binding application.Binding    `json:"binding"`
+			Binding sessionprofile.Binding `json:"binding"`
 			State   appserver.SessionState `json:"state"`
 		}{binding, state})
 	case "prompt", "prompt-restarted":
-		result, err := client.PromptApplication(ctx, appserver.ApplicationPromptRequest{PromptRequest: appserver.PromptRequest{WriteBase: appserver.WriteBase{SessionID: args[3], OperationID: "external-" + args[0]}, Input: "Execute the synthetic fixture."}, SourceKind: "user"})
+		result, err := client.Prompt(ctx, appserver.PromptRequest{WriteBase: appserver.WriteBase{SessionID: args[3], OperationID: "external-" + args[0]}, Input: "Execute the synthetic fixture.", SourceKind: "user"})
 		if err != nil {
 			return err
 		}

@@ -27,7 +27,7 @@ PRODUCT_SUBAGENT_SELECTOR ?= ^(TestRunnerActionSummaryKeepsFinalizingIntentAcros
 PRODUCT_CONTROL_CLIENT_SELECTOR ?= ^(TestStateServiceDoesNotStarveWhileSessionRevisionChanges|TestStateServiceReconnectSucceedsDuringContinuousPublish)$$
 PRODUCT_WIRE_SELECTOR ?= ^TestEveryProductionEnvelopeVariantConformsToOpenAPI$$
 PRODUCT_DIAGNOSTICS_SELECTOR ?= ^(TestRuntimeDiagnosticsLoggerWritesPrivateJSONLFile|TestBoundedDiagnosticWriterKeepsOneSizeBoundedBackup)$$
-PRODUCT_APPLICATION_SELECTOR ?= ^(TestApplicationHostHTTPA01A02A03A09A10|TestApplicationLeaseWithdrawalPreventsDelayedNativeEffects|TestApplicationResourceBridgeRoundTrip|TestApplicationArtifactFIFOReplacementDoesNotBlockDrain|TestDormantSessionRuntimeStateRecoversCanonicalOutcomeWithoutActivation)$$
+PRODUCT_PROFILE_SELECTOR ?= ^(TestApplicationHostHTTPA01A02A03A09A10|TestSessionRuntimeClosurePreventsDelayedNativeEffects|TestApplicationResourceBridgeRoundTrip|TestApplicationArtifactFIFOReplacementDoesNotBlockDrain|TestDormantSessionRuntimeStateRecoversCanonicalOutcomeWithoutActivation)$$
 # Local and sandboxed runs reuse a stable repository cache. CI keeps its
 # standard cache paths so runner-level cache integrations remain effective.
 ifeq ($(strip $(CI)),)
@@ -114,7 +114,7 @@ product-acceptance: cache-dirs
 	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) "$(BASH)" ./scripts/go_test_nonempty.sh ./control/appserver '$(PRODUCT_CONTROL_CLIENT_SELECTOR)' product-control-client
 	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) "$(BASH)" ./scripts/go_test_nonempty.sh ./control/appserver/wirev1 '$(PRODUCT_WIRE_SELECTOR)' product-wire
 	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) "$(BASH)" ./scripts/go_test_nonempty.sh ./app/gatewayapp '$(PRODUCT_DIAGNOSTICS_SELECTOR)' product-diagnostics
-	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) "$(BASH)" ./scripts/go_test_nonempty.sh ./app/gatewayapp '$(PRODUCT_APPLICATION_SELECTOR)' product-application
+	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) "$(BASH)" ./scripts/go_test_nonempty.sh ./app/gatewayapp '$(PRODUCT_PROFILE_SELECTOR)' product-profile
 	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) "$(BASH)" ./scripts/go_test_nonempty.sh ./surfaces/tui/app '$(PRODUCT_TUI_SELECTOR)' product-tui
 
 eval-smoke: cache-dirs

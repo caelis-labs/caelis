@@ -187,8 +187,8 @@ func TestModelAuthenticationProgressCoalescesWithoutAReader(t *testing.T) {
 
 func TestModelAuthenticationCapabilityIsAddedOnce(t *testing.T) {
 	info := appserver.ServerInfo{Capabilities: []string{appserver.CapabilityModelAuthStream}}
-	info = applicationServerInfo(info, appserver.AppServerServices{})
-	info = applicationServerInfo(info, appserver.AppServerServices{})
+	info = sessionServerInfo(info, appserver.AppServerServices{})
+	info = sessionServerInfo(info, appserver.AppServerServices{})
 	count := 0
 	for _, capability := range info.Capabilities {
 		if capability == appserver.CapabilityModelAuthStream {

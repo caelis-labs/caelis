@@ -54,10 +54,10 @@ func TestApplicationProfileNamedModelUsesFrozenImageCapability(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			client, _ := registerApplicationHTTP(t, ctx, host, "image-child", filepath.Join(root, "owner.token"))
+			client, _ := connectSessionOwnerHTTP(t, ctx, host, "owner", filepath.Join(root, "owner.token"))
 			profile := applicationHTTPProfile()
 			profile.Model = "custom/profile-parent"
-			created, err := client.CreateApplicationSession(ctx, appserver.CreateApplicationSessionRequest{WriteBase: appserver.WriteBase{OperationID: "parent"}, Profile: profile})
+			created, err := client.CreateSession(ctx, appserver.CreateSessionRequest{WriteBase: appserver.WriteBase{OperationID: "parent"}, Profile: profilePointer(profile)})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -89,10 +89,16 @@ func TestApplicationProfileNamedModelUsesFrozenImageCapability(t *testing.T) {
 			if err != nil || len(list.Tasks) != 1 || list.Tasks[0].Running || list.Tasks[0].State != task.StateFailed || list.Tasks[0].CurrentTurnID != "" {
 				t.Fatalf("unsupported image lost native terminal Task: %+v %v", list, err)
 			}
-			bindings, err := client.ListApplicationSessions(ctx)
-			if err != nil || len(bindings) != 1 || provider.requestCount() != 0 {
-				t.Fatalf("unsupported/unknown child advertised image: bindings=%+v requests=%d err=%v", bindings, provider.requestCount(), err)
+			state, err = client.InspectSession(ctx, appserver.StateRequest{SessionID: created.SessionID})
+			if err != nil || provider.requestCount() != 0 {
+				t.Fatalf("unsupported image admitted model request: %d, %v", provider.requestCount(), err)
 			}
+			for _, participant := range state.Participants {
+				if participant.SessionID != "" {
+					t.Fatalf("unsupported image created child: %+v", participant)
+				}
+			}
+
 		})
 	}
 }

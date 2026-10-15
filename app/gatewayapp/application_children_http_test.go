@@ -13,9 +13,9 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
-	"github.com/caelis-labs/caelis/control/application"
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/httpclient"
+	"github.com/caelis-labs/caelis/control/sessionprofile"
 )
 
 func applicationProfileChild(t *testing.T, ctx context.Context, client *httpclient.Client, root string) (string, string) {
@@ -76,12 +76,12 @@ func TestApplicationProfileChildHTTPIsolationAndRecovery(t *testing.T) {
 		}
 	}()
 	connectApplicationChildModel(t, ctx, host, "gpt-4.1")
-	client, connection := registerApplicationHTTP(t, ctx, host, "child-owner", filepath.Join(root, "owner.token"))
+	client, connection := connectSessionOwnerHTTP(t, ctx, host, "owner", filepath.Join(root, "owner.token"))
 	info, err := client.Initialize(ctx)
-	if err != nil || !slices.Contains(info.Capabilities, appserver.CapabilityApplicationProfileChildren) {
+	if err != nil || !slices.Contains(info.Capabilities, appserver.CapabilitySessionProfileChildren) {
 		t.Fatalf("profile child capability missing: %+v %v", info, err)
 	}
-	foreign, _ := registerApplicationHTTP(t, ctx, host, "child-foreign", filepath.Join(root, "foreign.token"))
+	foreign, _ := connectSessionOwnerHTTP(t, ctx, host, "foreign-owner", filepath.Join(root, "foreign.token"))
 	profile := applicationHTTPProfile()
 	selectedSkill := filepath.Join(root, "selected-skill")
 	writeAtomicSkill(t, selectedSkill, "profile-child-skill", "PROFILE_CHILD_SKILL_BODY")
@@ -94,8 +94,8 @@ func TestApplicationProfileChildHTTPIsolationAndRecovery(t *testing.T) {
 			t.Error(err)
 		}
 	}()
-	profile.MCPServers = []application.MCPServer{{Name: "documents", Transport: "stdio", Command: os.Args[0], Args: []string{"-test.run=^TestApplicationChildMCPStartupHelper$"}, WorkDir: root}}
-	created, err := client.CreateApplicationSession(ctx, appserver.CreateApplicationSessionRequest{WriteBase: appserver.WriteBase{OperationID: "parent"}, Profile: profile})
+	profile.MCPServers = []sessionprofile.MCPServer{{Name: "documents", Transport: "stdio", Command: os.Args[0], Args: []string{"-test.run=^TestApplicationChildMCPStartupHelper$"}, WorkDir: root}}
+	created, err := client.CreateSession(ctx, appserver.CreateSessionRequest{WriteBase: appserver.WriteBase{OperationID: "parent"}, Profile: profilePointer(profile)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,8 +107,8 @@ func TestApplicationProfileChildHTTPIsolationAndRecovery(t *testing.T) {
 	if child == created.SessionID {
 		t.Fatal("child reused parent canonical Session")
 	}
-	bound, err := client.ApplicationSession(ctx, child)
-	if err != nil || bound.Child == nil || bound.Child.ParentSessionID != created.SessionID || bound.Child.RootSessionID != created.SessionID || bound.Child.ParentTaskID != task || bound.ConnectionID != connection.ConnectionID || bound.Child.Source != (application.Source{Kind: "user", OperationID: "profile-child"}) {
+	bound, err := client.SessionProfile(ctx, child)
+	if err != nil || bound.Child == nil || bound.Child.ParentSessionID != created.SessionID || bound.Child.RootSessionID != created.SessionID || bound.Child.ParentTaskID != task || bound.PrincipalID != connection.PrincipalID || bound.Child.Source != (sessionprofile.Source{Kind: "user", OperationID: "profile-child"}) {
 		t.Fatalf("durable child relation: %+v %v", bound, err)
 	}
 	if bound.Profile.Instructions != profile.Instructions || bound.Profile.Execution != profile.Execution || len(bound.Profile.Tools) != 1 || len(bound.Profile.MCPServers) != 1 || len(bound.Profile.SkillRoots) != 1 {
@@ -116,7 +116,7 @@ func TestApplicationProfileChildHTTPIsolationAndRecovery(t *testing.T) {
 	}
 	childBytes := []byte("CHILD_RESOURCE_BYTES")
 	digest := sha256.Sum256(childBytes)
-	resource, err := client.UploadApplicationResource(ctx, appserver.ApplicationResourceRequest{WriteBase: appserver.WriteBase{OperationID: "child-resource", SessionID: child}, Name: "child-data", MediaType: "application/octet-stream", Data: childBytes, SHA256: hex.EncodeToString(digest[:])})
+	resource, err := resourceResult(client.CreateSessionResource(ctx, appserver.SessionResourceRequest{WriteBase: appserver.WriteBase{OperationID: "child-resource", SessionID: child}, Name: "child-data", MediaType: "application/octet-stream", Data: childBytes, SHA256: hex.EncodeToString(digest[:])}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,11 +124,11 @@ func TestApplicationProfileChildHTTPIsolationAndRecovery(t *testing.T) {
 		who *httpclient.Client
 		sid string
 	}{{client, created.SessionID}, {foreign, child}} {
-		if _, err := test.who.ReadApplicationResource(ctx, test.sid, resource.ID); err == nil {
+		if _, err := test.who.SessionResourceContent(ctx, test.sid, resource.ID); err == nil {
 			t.Fatal("child resource escaped its exact Session/scope")
 		}
 	}
-	read, err := client.ReadApplicationResource(ctx, child, resource.ID)
+	read, err := client.SessionResourceContent(ctx, child, resource.ID)
 	if err != nil || string(read.Data) != string(childBytes) {
 		t.Fatalf("child resource owner: %+v %v", read, err)
 	}
@@ -139,9 +139,9 @@ func TestApplicationProfileChildHTTPIsolationAndRecovery(t *testing.T) {
 	if _, err = client.StartParticipant(ctx, appserver.StartParticipantRequest{WriteBase: appserver.WriteBase{OperationID: "nested", SessionID: child}, Handle: "self", Input: "nested", Background: true}); err == nil {
 		t.Fatal("child acquired nested delegation")
 	}
-	var call application.Call
+	var call sessionprofile.Call
 	for {
-		calls, err := client.ApplicationCalls(ctx, child)
+		calls, err := client.SessionToolCalls(ctx, child)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -162,7 +162,7 @@ func TestApplicationProfileChildHTTPIsolationAndRecovery(t *testing.T) {
 	}
 	// A callback can arrive while the independently initialized MCP service
 	// is still connecting. Hold its startup to make this ordering deterministic.
-	health, err := client.ApplicationMCPStatus(ctx, child)
+	health, err := client.SessionMCPStatus(ctx, child)
 	if err != nil || health.SessionID != child || health.ConfigurationRevision == "" || len(health.Servers) != 1 || health.Servers[0].Name != "documents" || health.Servers[0].Status != "connecting" || len(health.Skills) != 1 || health.Skills[0].Name != "profile-child-skill" || health.Skills[0].Status != "ready" {
 		t.Fatalf("held child MCP/Skill assembly: %+v %v", health, err)
 	}
@@ -171,7 +171,7 @@ func TestApplicationProfileChildHTTPIsolationAndRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	for {
-		health, err = client.ApplicationMCPStatus(ctx, child)
+		health, err = client.SessionMCPStatus(ctx, child)
 		if err != nil || health.SessionID != child || health.ConfigurationRevision != healthRevision || len(health.Servers) != 1 || health.Servers[0].Name != "documents" {
 			t.Fatalf("child MCP health lost its exact owner: %+v %v", health, err)
 		}
@@ -191,17 +191,17 @@ func TestApplicationProfileChildHTTPIsolationAndRecovery(t *testing.T) {
 	if !slices.Equal(server.Tools, []string{"lookup"}) || len(server.ToolDetails) != 1 || server.ToolDetails[0].Name != "lookup" || !strings.Contains(server.ToolDetails[0].Description, "Look up a synthetic documents value") || len(health.Skills) != 1 || health.Skills[0].Name != "profile-child-skill" || health.Skills[0].Status != "ready" {
 		t.Fatalf("child MCP/Skill assembly: %+v", health)
 	}
-	if _, err = client.ApplicationCall(ctx, created.SessionID, call.ID); err == nil {
+	if _, err = client.SessionToolCall(ctx, created.SessionID, call.ID); err == nil {
 		t.Fatal("parent addressed child callback as its own")
 	}
-	if _, err = foreign.ApplicationCall(ctx, child, call.ID); err == nil {
+	if _, err = foreign.SessionToolCall(ctx, child, call.ID); err == nil {
 		t.Fatal("foreign connection addressed child callback")
 	}
-	claimed, err := client.ClaimApplicationCall(ctx, child, call.ID)
+	claimed, err := client.ClaimSessionToolCall(ctx, child, call.ID)
 	if err != nil || claimed.SessionID != child {
 		t.Fatalf("claim child callback: %+v %v", claimed, err)
 	}
-	if err = client.CompleteApplicationCall(ctx, child, call.ID, application.CallResult{Outcome: "succeeded", Content: json.RawMessage(`{"value":"child-complete"}`)}); err != nil {
+	if err = client.CompleteSessionToolCall(ctx, child, call.ID, sessionprofile.CallResult{Outcome: "succeeded", Content: json.RawMessage(`{"value":"child-complete"}`)}); err != nil {
 		t.Fatal(err)
 	}
 	waitApplicationHTTPIdle(t, ctx, client, child)
@@ -236,7 +236,7 @@ func TestApplicationProfileChildHTTPIsolationAndRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	client = host.app(strings.TrimSpace(string(token)))
-	recovered, err := client.ApplicationSession(ctx, child)
+	recovered, err := client.SessionProfile(ctx, child)
 	if err != nil || recovered.Child == nil || *recovered.Child != *bound.Child {
 		t.Fatalf("recovered relation: %+v %v", recovered, err)
 	}
@@ -248,12 +248,12 @@ func TestApplicationProfileChildHTTPIsolationAndRecovery(t *testing.T) {
 	if reconnect.State.SessionID != child || reconnect.State.Run.Active {
 		t.Fatalf("recovered child state: %+v", reconnect.State)
 	}
-	retainedResource, err := client.ReadApplicationResource(ctx, child, resource.ID)
+	retainedResource, err := client.SessionResourceContent(ctx, child, resource.ID)
 	if err != nil || retainedResource.Resource.ID != resource.ID || string(retainedResource.Data) != string(childBytes) {
 		t.Fatalf("resource recovery lost exact binding: %+v %v", retainedResource, err)
 	}
 
-	retained, err := client.ApplicationCall(ctx, child, call.ID)
+	retained, err := client.SessionToolCall(ctx, child, call.ID)
 	if err != nil || retained.State != "completed" || retained.Source != call.Source {
 		t.Fatalf("retained callback receipt: %+v %v", retained, err)
 	}

@@ -3,8 +3,8 @@ package gatewayapp
 import (
 	"testing"
 
-	"github.com/caelis-labs/caelis/control/application"
 	"github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/sessionprofile"
 	"github.com/caelis-labs/caelis/control/sessionvisibility"
 )
 
@@ -17,8 +17,9 @@ func TestGenericSessionCreationOnlyReservesApplicationAndRetiredProductAuthority
 		{name: "ordinary"},
 		{name: "spawned subagent", req: appserver.CreateSessionRequest{Metadata: map[string]any{sessionvisibility.MetadataSystemManagedAgent: "subagent"}}},
 		{name: "other system managed", req: appserver.CreateSessionRequest{Metadata: map[string]any{sessionvisibility.MetadataSystemManagedAgent: "guardian"}}},
-		{name: "application", req: appserver.CreateSessionRequest{Metadata: map[string]any{sessionvisibility.MetadataSystemManagedAgent: application.MetadataKind}}, reserved: true},
-		{name: "application record", req: appserver.CreateSessionRequest{Metadata: map[string]any{application.StateKey: "forged"}}, reserved: true},
+		{name: "application", req: appserver.CreateSessionRequest{Metadata: map[string]any{sessionvisibility.MetadataSystemManagedAgent: sessionprofile.MetadataKind}}, reserved: true},
+		{name: "application record", req: appserver.CreateSessionRequest{Metadata: map[string]any{sessionprofile.StateKey: "forged"}}, reserved: true},
+		{name: "profile id", req: appserver.CreateSessionRequest{PreferredSessionID: "profile-forged"}, reserved: true},
 		{name: "application id", req: appserver.CreateSessionRequest{PreferredSessionID: "application-forged"}, reserved: true},
 		{name: "retired chat", req: appserver.CreateSessionRequest{Metadata: map[string]any{sessionvisibility.MetadataSystemManagedAgent: "bot"}}, reserved: true},
 		{name: "retired work", req: appserver.CreateSessionRequest{PreferredSessionID: "bot-work-forged"}, reserved: true},

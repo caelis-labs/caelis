@@ -34,7 +34,6 @@ type SessionClient interface {
 type boundSessionClient struct {
 	service      Service
 	principal    Principal
-	applications *ApplicationService
 	capabilities []string
 }
 
@@ -84,9 +83,6 @@ func (c *boundSessionClient) CreateSession(ctx context.Context, request CreateSe
 }
 
 func (c *boundSessionClient) CloseSession(ctx context.Context, request CloseSessionRequest) (CommandResult, error) {
-	if c.applications != nil && (c.principal.ApplicationID != "" || c.principal.ConnectionID != "") {
-		return c.applications.CloseSession(ctx, c.boundPrincipal(), request)
-	}
 	return c.service.CloseSession(ctx, c.boundPrincipal(), request)
 }
 

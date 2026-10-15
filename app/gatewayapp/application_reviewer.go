@@ -6,15 +6,15 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/control/application"
+	"github.com/caelis-labs/caelis/control/sessionprofile"
 	"github.com/caelis-labs/caelis/internal/kernel"
 )
 
-func resolveApplicationReviewer(ctx context.Context, lookup *modelLookup, profile application.Profile, contextWindow int) (model.LLM, error) {
-	if profile.Reviewer == nil || application.EffectiveApprovalMode(profile) != string(kernel.ApprovalModeAutoReview) {
-		return nil, fmt.Errorf("%w: application reviewer is not configured", application.ErrUnsupported)
+func resolveApplicationReviewer(ctx context.Context, lookup *modelLookup, profile sessionprofile.Profile, contextWindow int) (model.LLM, error) {
+	if profile.Reviewer == nil || sessionprofile.EffectiveApprovalMode(profile) != string(kernel.ApprovalModeAutoReview) {
+		return nil, fmt.Errorf("%w: application reviewer is not configured", sessionprofile.ErrUnsupported)
 	}
-	configured, err := applicationModelConfig(lookup, application.Profile{Model: profile.Reviewer.Model})
+	configured, err := applicationModelConfig(lookup, sessionprofile.Profile{Model: profile.Reviewer.Model})
 	if err != nil {
 		return nil, err
 	}
@@ -29,16 +29,16 @@ func resolveApplicationReviewer(ctx context.Context, lookup *modelLookup, profil
 // independently of ordinary Session/Worker routing overrides.
 func (r *applicationTurnResolver) ResolveApprovalMode(_ context.Context, ref session.SessionRef) (kernel.ApprovalMode, error) {
 	if ref.SessionID != r.binding.SessionID {
-		return "", application.ErrUnauthorized
+		return "", sessionprofile.ErrUnauthorized
 	}
-	return kernel.ApprovalMode(application.EffectiveApprovalMode(r.binding.Profile)), nil
+	return kernel.ApprovalMode(sessionprofile.EffectiveApprovalMode(r.binding.Profile)), nil
 }
 
 // ResolveApprovalModel keeps the creation-bound reviewer independent of the hot
 // main-model catalog and the Host's ordinary Guardian/default model bindings.
 func (r *applicationTurnResolver) ResolveApprovalModel(ctx context.Context, ref session.SessionRef) (model.LLM, error) {
 	if ref.SessionID != r.binding.SessionID {
-		return nil, application.ErrUnauthorized
+		return nil, sessionprofile.ErrUnauthorized
 	}
 	lookup, err := r.modelLookup(ctx)
 	if err != nil {
@@ -47,9 +47,9 @@ func (r *applicationTurnResolver) ResolveApprovalModel(ctx context.Context, ref 
 	return resolveApplicationReviewer(ctx, lookup, r.binding.Profile, r.composition.activeRuntime.ContextWindow)
 }
 
-func (s *runtimeComposition) applicationReviewerState(ctx context.Context, profile application.Profile) (application.ReviewerState, error) {
-	out := application.ReviewerState{ApprovalMode: application.EffectiveApprovalMode(profile), Status: "manual"}
-	if err := application.ValidateProfile(profile); err != nil {
+func (s *runtimeComposition) applicationReviewerState(ctx context.Context, profile sessionprofile.Profile) (sessionprofile.ReviewerState, error) {
+	out := sessionprofile.ReviewerState{ApprovalMode: sessionprofile.EffectiveApprovalMode(profile), Status: "manual"}
+	if err := sessionprofile.ValidateProfile(profile); err != nil {
 		return out, err
 	}
 	if profile.Reviewer == nil {

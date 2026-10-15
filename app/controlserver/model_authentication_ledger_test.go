@@ -38,7 +38,7 @@ func newModelAuthLedgerServer(t *testing.T, backend *modelAuthBackend) *httptest
 	server, err := New(HandlerConfig{Services: services, Authenticator: AuthenticatorFunc(func(r *http.Request) (appserver.Principal, error) {
 		p := appserver.Principal{ID: r.Header.Get("Authorization")}
 		if p.ID == "application" {
-			p.ID, p.ApplicationID, p.ConnectionID = "owner", "bot", "connection"
+			return appserver.Principal{}, appserver.ErrUnauthorized
 		}
 		return p, nil
 	}), AllowedHosts: []string{"127.0.0.1"}})
@@ -177,13 +177,13 @@ func TestModelAuthenticationCommittedRetryAndChangedRequestUseNativeLedger(t *te
 	}
 }
 
-func TestModelAuthenticationRejectsApplicationAuthorityAndRedactsInvalidInput(t *testing.T) {
+func TestModelAuthenticationRejectsUnrecognizedCredentialsAndRedactsInvalidInput(t *testing.T) {
 	backend := &modelAuthBackend{}
 	host := newModelAuthLedgerServer(t, backend)
 	for _, principal := range []string{"", "application"} {
 		response := openModelAuthStream(t, t.Context(), host, principal, "grok")
 		_ = response.Body.Close()
-		want := http.StatusForbidden
+		want := http.StatusUnauthorized
 		if principal == "" {
 			want = http.StatusUnauthorized
 		}
@@ -195,7 +195,7 @@ func TestModelAuthenticationRejectsApplicationAuthorityAndRedactsInvalidInput(t 
 		principal, body string
 		want            int
 	}{
-		{"application", `{"challenge_id":"challenge","input":"SECRET"}`, http.StatusForbidden},
+		{"application", `{"challenge_id":"challenge","input":"SECRET"}`, http.StatusUnauthorized},
 		{"owner", `{"PRIVATE_CODE_SENTINEL":"secret"}`, http.StatusBadRequest},
 		{"owner", `{"challenge_id":"challenge","input":true}`, http.StatusBadRequest},
 		{"owner", `{"challenge_id":"challenge","input":"` + strings.Repeat("x", 16385) + `"}`, http.StatusBadRequest},

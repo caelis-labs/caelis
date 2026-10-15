@@ -94,7 +94,7 @@ func (r *participantHandleReader) ParticipantHandles(ctx context.Context, sessio
 		if composition.applicationChildren != nil {
 			return composition.applicationChildren.handles(ctx)
 		}
-		binding, err := composition.authorities.applications.BindingForSession(ctx, sessionID)
+		binding, err := composition.authorities.sessionProfiles.BindingForSession(ctx, sessionID)
 		if err != nil {
 			return nil, err
 		}

@@ -9,17 +9,17 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/control/application"
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/control/modelprofile/builder"
+	"github.com/caelis-labs/caelis/control/sessionprofile"
 	"github.com/caelis-labs/caelis/internal/kernel"
 )
 
 // applicationModelConfig uses the ordinary maintained capability matrix, but
 // never the Host's current model/effort/speed selection. Empty application effort
 // restores the selected provider model's default, not another Session's choice.
-func applicationModelConfig(lookup *modelLookup, profile application.Profile) (ModelConfig, error) {
+func applicationModelConfig(lookup *modelLookup, profile sessionprofile.Profile) (ModelConfig, error) {
 	configured, present, err := lookup.ResolveConfigIfPresent(profile.Model)
 	if err != nil {
 		if errors.Is(err, modelconfig.ErrAmbiguousSelector) {
@@ -39,23 +39,23 @@ func applicationModelConfig(lookup *modelLookup, profile application.Profile) (M
 		effort = capability.Effort.DefaultEffort
 	}
 	if !capability.SupportsEffort(effort) {
-		return ModelConfig{}, errorcode.Wrap(errorcode.Unsupported, fmt.Sprintf("application model %q does not support reasoning_effort %q", profile.Model, effort), application.ErrUnsupported)
+		return ModelConfig{}, errorcode.Wrap(errorcode.Unsupported, fmt.Sprintf("application model %q does not support reasoning_effort %q", profile.Model, effort), sessionprofile.ErrUnsupported)
 	}
 	configured.ReasoningEffort = effort
 	switch profile.ServiceTier {
 	case "":
 	case string(model.ServiceTierPriority):
 		if !modelconfig.SupportsSpeedMode(configured, "fast") {
-			return ModelConfig{}, errorcode.Wrap(errorcode.Unsupported, fmt.Sprintf("application model %q does not support service_tier %q", profile.Model, profile.ServiceTier), application.ErrUnsupported)
+			return ModelConfig{}, errorcode.Wrap(errorcode.Unsupported, fmt.Sprintf("application model %q does not support service_tier %q", profile.Model, profile.ServiceTier), sessionprofile.ErrUnsupported)
 		}
 	default:
-		return ModelConfig{}, errorcode.Wrap(errorcode.Unsupported, fmt.Sprintf("application service_tier %q is unsupported; use an empty value for the provider default or priority with a supported model", profile.ServiceTier), application.ErrUnsupported)
+		return ModelConfig{}, errorcode.Wrap(errorcode.Unsupported, fmt.Sprintf("application service_tier %q is unsupported; use an empty value for the provider default or priority with a supported model", profile.ServiceTier), sessionprofile.ErrUnsupported)
 	}
 	return configured, nil
 }
 
-func (s *runtimeComposition) validateApplicationProfile(ctx context.Context, profile application.Profile) error {
-	if err := application.ValidateProfile(profile); err != nil {
+func (s *runtimeComposition) validateApplicationProfile(ctx context.Context, profile sessionprofile.Profile) error {
+	if err := sessionprofile.ValidateProfile(profile); err != nil {
 		return err
 	}
 	if _, err := applicationSkillCatalog(profile); err != nil {
@@ -76,7 +76,7 @@ func (s *runtimeComposition) validateApplicationProfile(ctx context.Context, pro
 	return err
 }
 
-func (r *applicationTurnResolver) resolveProfileModel(ctx context.Context, profile application.Profile) (kernel.ModelResolution, error) {
+func (r *applicationTurnResolver) resolveProfileModel(ctx context.Context, profile sessionprofile.Profile) (kernel.ModelResolution, error) {
 	lookup, err := r.modelLookup(ctx)
 	if err != nil {
 		return kernel.ModelResolution{}, err
@@ -95,7 +95,7 @@ func (r *applicationTurnResolver) ResolveCompaction(ctx context.Context, ref ses
 	if ref.SessionID != r.binding.SessionID {
 		return kernel.ResolvedTurn{}, appserver.ErrUnauthorized
 	}
-	store := r.composition.authorities.applications
+	store := r.composition.authorities.sessionProfiles
 	if err := store.CheckActive(ctx, r.binding.Scope); err != nil {
 		return kernel.ResolvedTurn{}, err
 	}
@@ -114,7 +114,7 @@ func (r *applicationTurnResolver) ResolveCompaction(ctx context.Context, ref ses
 // applicationModelImageInput observes canonical model declarations even when a
 // committed change's process-catalog refresh failed. The metadata-only lookup
 // has no credential or HTTP resolvers and does not create an execution snapshot.
-func (s *runtimeComposition) applicationModelImageInput(ctx context.Context, profile application.Profile) (*bool, error) {
+func (s *runtimeComposition) applicationModelImageInput(ctx context.Context, profile sessionprofile.Profile) (*bool, error) {
 	if s == nil || s.authorities.store == nil {
 		return nil, errors.New("gatewayapp: app config store unavailable")
 	}
@@ -135,7 +135,7 @@ func (s *runtimeComposition) applicationModelImageInput(ctx context.Context, pro
 
 // applicationPolicyMode is the creation-bound policy selection shared by
 // execution and idle status. It does not resolve a provider or create a sandbox.
-func applicationPolicyMode(profile application.Profile) string {
+func applicationPolicyMode(profile sessionprofile.Profile) string {
 	if profile.Execution != "workspace-write" {
 		return "application-tools-only"
 	}

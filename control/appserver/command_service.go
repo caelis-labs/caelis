@@ -2,7 +2,9 @@ package appserver
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -15,15 +17,13 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/control/application"
+	"github.com/caelis-labs/caelis/control/sessionprofile"
 )
 
 type CommandServiceConfig struct {
 	Authorizer Authorizer
 	Operations OperationStore
-	// Applications owns permanent admission for every application-scoped command.
-	Applications *application.Store
-	Backend      CommandBackend
+	Backend    CommandBackend
 	// Diagnostics receives classification and correlation IDs only, never bodies or errors.
 	Diagnostics *slog.Logger
 }
@@ -115,99 +115,72 @@ func (s *CommandService) execute(ctx context.Context, principal Principal, actio
 		coded := errorcode.Wrap(errorcode.InvalidArgument, err.Error(), err)
 		return commandFailure(operationID, sessionID, OutcomeRejected, publicCommandDetail(coded, OutcomeRejected), coded), coded
 	}
-	// Application admission has already committed the permanent intent. Reuse
-	// that receipt through the same command executor instead of opening a second,
-	// expiring command record for the same effect.
-	admitted, hasAdmitted := admittedApplicationOperationFrom(ctx, principal, operationID)
-	if principal.ApplicationID != "" {
-		// Pre-convergence command receipts remain authoritative until their existing
-		// retention expires. Lookup never creates a second receipt or grants replay.
-		record, found, lookupErr := s.config.Operations.Lookup(ctx, intent)
-		if lookupErr != nil {
-			return applicationCommandAdmissionFailure(operationID, sessionID, lookupErr)
+	recovery, recoveryBackend := s.config.Backend.(CommandRecoveryBackend)
+	recoverable := recoveryBackend && recovery.CanRecoverControlCommand(action)
+	if recoverable {
+		executionLease, leaseErr := s.config.Operations.AcquireExecution(ctx, intent)
+		if leaseErr != nil {
+			unknownErr := errorcode.Wrap(errorcode.UnknownOutcome, "controlclient: acquire operation execution gate", leaseErr)
+			return commandFailure(operationID, sessionID, OutcomeUnknown, publicCommandDetail(unknownErr, OutcomeUnknown), unknownErr), unknownErr
 		}
-		if found {
-			if record.Result != nil {
-				return *record.Result, nil
-			}
-			err := errorcode.New(errorcode.UnknownOutcome, "application command intent exists without a proven receipt")
-			return commandFailure(operationID, sessionID, OutcomeUnknown, err.Error(), err), nil
-		}
-		if !hasAdmitted {
-			var prior *CommandResult
-			admitted, prior, err = s.admitApplicationCommand(ctx, principal, intent)
-			if err != nil {
-				return applicationCommandAdmissionFailure(operationID, sessionID, err)
-			}
-			if prior != nil {
-				return *prior, nil
-			}
-			hasAdmitted = true
-		}
+		defer executionLease.Release()
 	}
-	if !hasAdmitted {
-		recovery, recoveryBackend := s.config.Backend.(CommandRecoveryBackend)
-		recoverable := recoveryBackend && recovery.CanRecoverControlCommand(action)
+	record, created, err := s.config.Operations.Begin(ctx, intent)
+	if errors.Is(err, ErrOperationConflict) {
+		return commandFailure(operationID, sessionID, OutcomeConflicted, publicCommandDetail(err, OutcomeConflicted), err), err
+	}
+	if err != nil {
+		// Begin may have failed while reading a previously committed receipt.
+		// Failure to establish admission is not proof that this stable operation
+		// never ran; keep callers from treating storage loss as safe to retry.
+		coded := errorcode.Wrap(errorcode.UnknownOutcome, "controlclient: begin operation", err)
+		return commandFailure(operationID, sessionID, OutcomeUnknown, publicCommandDetail(coded, OutcomeUnknown), coded), coded
+	}
+	if !created {
+		if record.Result != nil {
+			return *record.Result, nil
+		}
 		if recoverable {
-			executionLease, leaseErr := s.config.Operations.AcquireExecution(ctx, intent)
-			if leaseErr != nil {
-				unknownErr := errorcode.Wrap(errorcode.UnknownOutcome, "controlclient: acquire operation execution gate", leaseErr)
+			recovered, proven, recoveryErr := recovery.RecoverControlCommand(
+				withOperationIntent(ctx, intent), principal, intent, request,
+			)
+			if recoveryErr != nil {
+				unknownErr := errorcode.Wrap(errorcode.UnknownOutcome, "controlclient: recover operation result", recoveryErr)
 				return commandFailure(operationID, sessionID, OutcomeUnknown, publicCommandDetail(unknownErr, OutcomeUnknown), unknownErr), unknownErr
 			}
-			defer executionLease.Release()
-		}
-		record, created, err := s.config.Operations.Begin(ctx, intent)
-		if errors.Is(err, ErrOperationConflict) {
-			return commandFailure(operationID, sessionID, OutcomeConflicted, publicCommandDetail(err, OutcomeConflicted), err), err
-		}
-		if err != nil {
-			// Begin may have failed while reading a previously committed receipt.
-			// Failure to establish admission is not proof that this stable operation
-			// never ran; keep callers from treating storage loss as safe to retry.
-			coded := errorcode.Wrap(errorcode.UnknownOutcome, "controlclient: begin operation", err)
-			return commandFailure(operationID, sessionID, OutcomeUnknown, publicCommandDetail(coded, OutcomeUnknown), coded), coded
-		}
-		if !created {
-			if record.Result != nil {
-				return *record.Result, nil
-			}
-			if recoverable {
-				recovered, proven, recoveryErr := recovery.RecoverControlCommand(
-					withOperationIntent(ctx, intent), principal, intent, request,
-				)
-				if recoveryErr != nil {
-					unknownErr := errorcode.Wrap(errorcode.UnknownOutcome, "controlclient: recover operation result", recoveryErr)
-					return commandFailure(operationID, sessionID, OutcomeUnknown, publicCommandDetail(unknownErr, OutcomeUnknown), unknownErr), unknownErr
+			if proven {
+				recovered.OperationID = operationID
+				if recovered.SessionID == "" {
+					recovered.SessionID = sessionID
 				}
-				if proven {
-					recovered.OperationID = operationID
-					if recovered.SessionID == "" {
-						recovered.SessionID = sessionID
-					}
-					if !recovered.Outcome.Valid() {
-						recovered.Outcome = OutcomeCommitted
-					}
-					completionCtx, cancelCompletion := operationCompletionContext(ctx)
-					defer cancelCompletion()
-					if _, completeErr := s.config.Operations.Complete(completionCtx, intent, recovered); completeErr != nil {
-						coded := internalCommandError("controlclient: complete recovered operation", completeErr)
-						return commandFailure(operationID, recovered.SessionID, OutcomeUnknown, publicCommandDetail(coded, OutcomeUnknown), coded), coded
-					}
-					return recovered, nil
+				if !recovered.Outcome.Valid() {
+					recovered.Outcome = OutcomeCommitted
 				}
+				completionCtx, cancelCompletion := operationCompletionContext(ctx)
+				defer cancelCompletion()
+				if _, completeErr := s.config.Operations.Complete(completionCtx, intent, recovered); completeErr != nil {
+					coded := internalCommandError("controlclient: complete recovered operation", completeErr)
+					return commandFailure(operationID, recovered.SessionID, OutcomeUnknown, publicCommandDetail(coded, OutcomeUnknown), coded), coded
+				}
+				return recovered, nil
 			}
-			// For recoverable actions the process-local execution gate proves that no
-			// creator is still running in this Host, but the durable domain evidence
-			// cannot prove the abandoned effect. For all other actions the creator may
-			// still be active.
-			// In either case, keep the intent incomplete and remain conservative.
-			unknownErr := errorcode.New(errorcode.UnknownOutcome, "operation intent exists without a provable result")
-			unknown := commandFailure(operationID, sessionID, OutcomeUnknown, unknownErr.Error(), unknownErr)
-			return unknown, nil
 		}
-
+		// For recoverable actions the process-local execution gate proves that no
+		// creator is still running in this Host, but the durable domain evidence
+		// cannot prove the abandoned effect. For all other actions the creator may
+		// still be active.
+		// In either case, keep the intent incomplete and remain conservative.
+		unknownErr := errorcode.New(errorcode.UnknownOutcome, "operation intent exists without a provable result")
+		unknown := commandFailure(operationID, sessionID, OutcomeUnknown, unknownErr.Error(), unknownErr)
+		return unknown, nil
 	}
 
+	if action == ActionSessionConfigure || action == ActionSessionResource || action == ActionBackgroundGrantCreate || action == ActionBackgroundGrantRevoke {
+		ctx, err = s.withTransactionReceipt(ctx, intent)
+		if err != nil {
+			return commandFailure(operationID, sessionID, OutcomeUnknown, err.Error(), err), err
+		}
+	}
 	result, dispatchErr := s.config.Backend.ExecuteControlCommand(withOperationIntent(ctx, intent), principal, action, request)
 	result.OperationID = operationID
 	if result.SessionID == "" {
@@ -220,7 +193,7 @@ func (s *CommandService) execute(ctx context.Context, principal Principal, actio
 	}
 	completionCtx, cancelCompletion := operationCompletionContext(ctx)
 	defer cancelCompletion()
-	completeErr := s.completeCommandReceipt(completionCtx, intent, result, admitted, hasAdmitted)
+	_, completeErr := s.config.Operations.Complete(completionCtx, intent, result)
 	if completeErr != nil {
 		coded := internalCommandError("controlclient: complete operation", completeErr)
 		// Backend already returned the effect identity. Keep the exact Turn
@@ -275,7 +248,7 @@ func internalCommandError(message string, err error) error {
 
 func publicCommandDetail(err error, outcome Outcome) string {
 	switch errorcode.CodeOf(err) {
-	case errorcode.InvalidArgument:
+	case errorcode.InvalidArgument, errorcode.Unsupported:
 		return strings.TrimSpace(err.Error())
 	case errorcode.Unauthenticated:
 		return "authentication required"
@@ -315,9 +288,52 @@ func commandFailure(operationID, sessionID string, outcome Outcome, detail strin
 
 func validateCommandRequest(action Action, request any) error {
 	switch typed := request.(type) {
-	case CreateWorkerRequest:
-		return nil // Validated by the application admission service.
+	case CreateSessionBackgroundGrantRequest:
+		if err := validateSessionDomainWrite(typed.WriteBase); err != nil {
+			return err
+		}
+		if strings.TrimSpace(typed.Source) == "" || strings.TrimSpace(typed.AuthorizationOperationID) == "" {
+			return errors.New("background grant requires source and authorization operation")
+		}
+		return nil
+	case RevokeSessionBackgroundGrantRequest:
+		if err := validateSessionDomainWrite(typed.WriteBase); err != nil {
+			return err
+		}
+		if strings.TrimSpace(typed.GrantID) == "" {
+			return errors.New("background grant ID is required")
+		}
+		return nil
+	case SessionResourceRequest:
+		if err := validateSessionDomainWrite(typed.WriteBase); err != nil {
+			return err
+		}
+		if len(typed.Data) > sessionprofile.MaxResourceBytes {
+			return errors.New("resource exceeds byte limit")
+		}
+		digest := sha256.Sum256(typed.Data)
+		if typed.SHA256 != hex.EncodeToString(digest[:]) {
+			return errors.New("resource SHA256 mismatch")
+		}
+		return nil
+	case UpdateSessionConfigurationRequest:
+		if err := requireSession(typed.SessionID); err != nil {
+			return err
+		}
+		if typed.ExpectedConfigurationRevision == 0 || typed.ExpectedRevision != nil || typed.ExpectedControllerEpoch != "" {
+			return errors.New("configuration updates require expected_configuration_revision and no conversation or controller revision")
+		}
+		return nil
 	case CreateSessionRequest:
+		if typed.Profile != nil {
+			if typed.Model != "" || typed.ReasoningEffort != "" || typed.FastMode || typed.PreferredSessionID != "" || typed.WorkspaceKey != "" || typed.CWD != "" || typed.ExecutionConfig != nil || len(typed.Metadata) != 0 || typed.SessionID != "" || typed.ExpectedRevision != nil || typed.ExpectedControllerEpoch != "" {
+				return errors.New("controlclient: explicit profile creation cannot also supply a workspace, execution configuration, metadata, Session or revision")
+			}
+			return sessionprofile.ValidateProfile(*typed.Profile)
+		}
+		if typed.Model == "" && (typed.ReasoningEffort != "" || typed.FastMode) {
+			return errors.New("initial model options require a model")
+		}
 		if strings.HasPrefix(typed.PreferredSessionID, "worker-") {
 			return errors.New("controlclient: worker Session IDs are allocated by the Host")
 		}
@@ -337,6 +353,11 @@ func validateCommandRequest(action Action, request any) error {
 			return errors.New("controlclient: interaction text exceeds 1 MiB")
 		}
 	case PromptRequest:
+		if typed.SourceKind != "" || typed.GrantID != "" {
+			if err := validateInputSource(typed.SourceKind, typed.GrantID); err != nil {
+				return err
+			}
+		}
 		if err := requireSession(typed.SessionID); err != nil {
 			return err
 		}
@@ -405,16 +426,6 @@ func validateCommandRequest(action Action, request any) error {
 		}
 	case HandoffRequest:
 		return validateHandoffRequest(typed)
-	case CreateApplicationSessionRequest:
-		if action != ActionApplicationCreate {
-			return errors.New("controlclient: invalid application creation action")
-		}
-		return application.ValidateProfile(typed.Profile)
-	case ApplicationPromptRequest:
-		if action != ActionApplicationPrompt {
-			return errors.New("controlclient: invalid application prompt action")
-		}
-		return validateApplicationPrompt(typed)
 	case SessionModeRequest:
 		return validateSessionModeRequest(typed)
 	case SessionModelRequest:
@@ -626,4 +637,16 @@ func turnTargetKey(target TurnTarget) string {
 
 func createSessionTarget(req CreateSessionRequest) string {
 	return strings.TrimSpace(req.PreferredSessionID) + ":" + strings.TrimSpace(req.WorkspaceKey)
+}
+
+// Domain configuration, grants and bytes do not mutate conversation history.
+// Never silently accept a history/controller precondition that is not checked.
+func validateSessionDomainWrite(base WriteBase) error {
+	if err := requireSession(base.SessionID); err != nil {
+		return err
+	}
+	if base.ExpectedRevision != nil || base.ExpectedControllerEpoch != "" {
+		return errors.New("this operation does not accept conversation or controller revisions")
+	}
+	return nil
 }

@@ -136,7 +136,7 @@ ChatGPT 订阅登录使用社区兼容的 Codex OAuth 流程，而非 OpenAI 文
 - [外部 ACP Agent](docs/external-acp-agents.md)：连接、能力和消息契约。
 - [Agent SDK](agent-sdk/README.md)：嵌入或扩展可复用的 Go Runtime。
 - [架构](docs/architecture.md)：代码归属与依赖边界。
-- [Application Runtime](docs/application-runtime.md)：应用注册、Session 执行配置、回调回执与资源。
+- [Application Runtime](docs/session-profiles.md)：应用注册、Session 执行配置、回调回执与资源。
 - [测试](docs/testing.md)：默认检查与按影响范围选择的验证。
 - [发布](docs/release.md)：官方产物的发布与验收流程。
 

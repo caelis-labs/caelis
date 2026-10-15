@@ -8,11 +8,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/control/sessionprofile"
 )
 
 var ErrOperationConflict = errorcode.New(errorcode.Conflict, "controlclient: operation id is bound to another request")
@@ -28,7 +30,10 @@ type OperationIntent struct {
 }
 
 type OperationRecord struct {
-	Version                      int             `json:"version,omitempty"`
+	Version int `json:"version,omitempty"`
+	// RetainForever preserves existing permanent intent/receipt guarantees.
+	// It is persistence policy, never caller-controlled dispatch authority.
+	RetainForever                bool            `json:"retain_forever,omitempty"`
 	Intent                       OperationIntent `json:"intent"`
 	Result                       *CommandResult  `json:"result,omitempty"`
 	TerminalRetentionNanoseconds int64           `json:"terminal_retention_nanoseconds,omitempty"`
@@ -254,11 +259,11 @@ func (s *MemoryOperationStore) Complete(ctx context.Context, intent OperationInt
 	copyResult := cloneCommandResult(result)
 	record.Result = &copyResult
 	record.Version = operationRecordSchemaVersion
-	if record.TerminalRetentionNanoseconds <= 0 {
+	if !record.RetainForever && record.TerminalRetentionNanoseconds <= 0 {
 		record.TerminalRetentionNanoseconds = int64(s.retention.TerminalRetention)
 	}
 	record.UpdatedAt = monotonicOperationTime(operationStoreNow(s.now), record.UpdatedAt, record.Intent.CreatedAt)
-	if terminalOperationOutcome(result.Outcome) {
+	if !record.RetainForever && terminalOperationOutcome(result.Outcome) {
 		record.RetainUntil = record.UpdatedAt.Add(time.Duration(record.TerminalRetentionNanoseconds))
 	} else {
 		record.RetainUntil = time.Time{}
@@ -300,6 +305,25 @@ func cloneOperationRecord(in OperationRecord) OperationRecord {
 
 func cloneCommandResult(in CommandResult) CommandResult {
 	out := in
+	if in.BackgroundGrant != nil {
+		grant := *in.BackgroundGrant
+		out.BackgroundGrant = &grant
+	}
+	if in.SessionResource != nil {
+		resource := *in.SessionResource
+		if resource.ExpiresAt != nil {
+			deadline := *resource.ExpiresAt
+			resource.ExpiresAt = &deadline
+		}
+		out.SessionResource = &resource
+	}
+	if in.Configuration != nil {
+		// Profiles contain nested slices and maps. Receipt callers must never share
+		// mutable storage with the ledger or with another observation.
+		data, _ := json.Marshal(in.Configuration)
+		out.Configuration = new(sessionprofile.Configuration)
+		_ = json.Unmarshal(data, out.Configuration)
+	}
 	if in.Resource != nil {
 		resource := *in.Resource
 		out.Resource = &resource
@@ -308,6 +332,18 @@ func cloneCommandResult(in CommandResult) CommandResult {
 }
 
 func sameCommandResult(left, right CommandResult) bool {
+	if !reflect.DeepEqual(left.BackgroundGrant, right.BackgroundGrant) {
+		return false
+	}
+	left.BackgroundGrant, right.BackgroundGrant = nil, nil
+	if !reflect.DeepEqual(left.SessionResource, right.SessionResource) {
+		return false
+	}
+	left.SessionResource, right.SessionResource = nil, nil
+	if !reflect.DeepEqual(left.Configuration, right.Configuration) {
+		return false
+	}
+	left.Configuration, right.Configuration = nil, nil
 	leftResource := left.Resource
 	rightResource := right.Resource
 	left.Resource = nil

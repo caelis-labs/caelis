@@ -60,7 +60,7 @@ func (a *workspaceConfigAssembler) assembleSnapshot(
 		return nil, fmt.Errorf("gatewayapp: retired product Session is read-only")
 	}
 	if sessionvisibility.IsApplicationSession(active) {
-		return a.assembleApplicationSnapshot(ctx, active, activity, sessions)
+		return a.assembleProfileSnapshot(ctx, active, activity, sessions)
 	}
 
 	deps := a.deps

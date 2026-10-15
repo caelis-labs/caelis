@@ -13,15 +13,15 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
-	"github.com/caelis-labs/caelis/control/application"
 	"github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/sessionprofile"
 	"github.com/caelis-labs/caelis/internal/kernel"
 )
 
 func TestApplicationReviewerDoesNotChangeNativePolicy(t *testing.T) {
 	root := t.TempDir()
 	for _, mode := range []string{"manual", "auto-review"} {
-		profile := application.Profile{Execution: "workspace-write", Permissions: application.Permissions{ApprovalMode: mode}}
+		profile := sessionprofile.Profile{Execution: "workspace-write", Permissions: sessionprofile.Permissions{ApprovalMode: mode}}
 		registry, name, err := applicationPolicyRegistry(profile)
 		if err != nil {
 			t.Fatal(err)
@@ -85,8 +85,8 @@ func TestApplicationReviewerStateUsesCanonicalModelAndSafeErrors(t *testing.T) {
 	if err != nil || connected.Outcome != appserver.OutcomeCommitted {
 		t.Fatal(connected, err)
 	}
-	profile := application.Profile{Version: "v1", Model: "main", ToolsVersion: "v1", Execution: "tools-only",
-		Permissions: application.Permissions{ApprovalMode: "auto-review"}, Reviewer: &application.Reviewer{Kind: "guardian", Model: "custom/reviewer-model"}}
+	profile := sessionprofile.Profile{Version: "v1", Model: "main", ToolsVersion: "v1", Execution: "tools-only",
+		Permissions: sessionprofile.Permissions{ApprovalMode: "auto-review"}, Reviewer: &sessionprofile.Reviewer{Kind: "guardian", Model: "custom/reviewer-model"}}
 	state, err := stack.composition.applicationReviewerState(ctx, profile)
 	if err != nil || state.Status != "ready" || state.ApprovalMode != "auto-review" {
 		t.Fatal(state, err)
@@ -132,17 +132,17 @@ func TestApplicationReviewerStateUsesCanonicalModelAndSafeErrors(t *testing.T) {
 }
 
 func TestApplicationReviewResolverIsCreationBound(t *testing.T) {
-	resolver := &applicationTurnResolver{binding: application.Binding{SessionID: "application", Profile: application.Profile{
-		Permissions: application.Permissions{ApprovalMode: "auto-review"}, Reviewer: &application.Reviewer{Kind: "guardian", Model: "reviewer"},
+	resolver := &applicationTurnResolver{binding: sessionprofile.Binding{SessionID: "application", Profile: sessionprofile.Profile{
+		Permissions: sessionprofile.Permissions{ApprovalMode: "auto-review"}, Reviewer: &sessionprofile.Reviewer{Kind: "guardian", Model: "reviewer"},
 	}}}
 	mode, err := resolver.ResolveApprovalMode(t.Context(), session.SessionRef{SessionID: "application"})
 	if err != nil || mode != kernel.ApprovalModeAutoReview {
 		t.Fatal(mode, err)
 	}
-	if _, err := resolver.ResolveApprovalMode(t.Context(), session.SessionRef{SessionID: "worker"}); !errors.Is(err, application.ErrUnauthorized) {
+	if _, err := resolver.ResolveApprovalMode(t.Context(), session.SessionRef{SessionID: "worker"}); !errors.Is(err, sessionprofile.ErrUnauthorized) {
 		t.Fatal("application policy escaped its Session", err)
 	}
-	if _, err := resolver.ResolveApprovalModel(t.Context(), session.SessionRef{SessionID: "worker"}); !errors.Is(err, application.ErrUnauthorized) {
+	if _, err := resolver.ResolveApprovalModel(t.Context(), session.SessionRef{SessionID: "worker"}); !errors.Is(err, sessionprofile.ErrUnauthorized) {
 		t.Fatal("application reviewer escaped its Session", err)
 	}
 }

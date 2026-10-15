@@ -1,40 +1,35 @@
 package appserver
 
 import (
-	"encoding/json"
+	"github.com/caelis-labs/caelis/control/sessionprofile"
 	"testing"
-
-	"github.com/caelis-labs/caelis/control/application"
 )
 
-func TestApplicationCreationRetryPrecedesCurrentCatalogValidation(t *testing.T) {
-	store, _ := applicationTestStore(t)
-	principal := enrollTestApplication(t, store, "owner", "catalog-migration", "a")
-	scope, _ := ApplicationScope(principal)
-	// Read was a valid application callback before native file tools existed.
-	// The unchanged creation operation remains recoverable after that expansion.
+func TestSessionCreationReceiptReadIgnoresCurrentCatalogValidation(t *testing.T) {
+	p := Principal{ID: "owner"}
 	profile := applicationTestProfile()
 	profile.Execution = "workspace-write"
-	profile.Tools = []application.ToolDefinition{{Name: "Read", InputSchema: map[string]any{"type": "object"}}}
-	req := CreateApplicationSessionRequest{WriteBase: WriteBase{OperationID: "legacy-create"}, Profile: profile}
-	if _, _, err := store.BeginOperation(t.Context(), scope, req.OperationID, req); err != nil {
-		t.Fatal(err)
-	}
-	want := CommandResult{OperationID: req.OperationID, SessionID: "existing", Outcome: OutcomeCommitted}
-	raw, err := json.Marshal(want)
+	profile.Tools = []sessionprofile.ToolDefinition{{Name: "Read", InputSchema: map[string]any{"type": "object"}}}
+	req := CreateSessionRequest{WriteBase: WriteBase{OperationID: "original-create"}, Profile: &profile}
+	intent, err := commandOperationIntent(p, ActionSessionCreate, req.WriteBase, createSessionTarget(req), req)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.CompleteOperation(t.Context(), scope, req.OperationID, raw); err != nil {
+	store := NewMemoryOperationStore()
+	if _, _, err := store.Begin(t.Context(), intent); err != nil {
 		t.Fatal(err)
 	}
-	if err := application.ValidateProfile(profile); err == nil {
-		t.Fatal("test requires an old callback conflicting with the current default native set")
+	want := CommandResult{OperationID: req.OperationID, SessionID: "existing", Outcome: OutcomeCommitted}
+	if _, err := store.Complete(t.Context(), intent, want); err != nil {
+		t.Fatal(err)
 	}
-	// No command backend is bound: recovering the receipt must never redispatch.
-	service := &ApplicationService{config: ApplicationServiceConfig{Store: store}}
-	got, err := service.Create(t.Context(), principal, req)
-	if err != nil || got.SessionID != want.SessionID || got.Outcome != want.Outcome {
-		t.Fatalf("unchanged creation retry = %+v, %v", got, err)
+	if err := sessionprofile.ValidateProfile(profile); err == nil {
+		t.Fatal("requires old callback conflicting with new native catalog")
+	}
+	backend := &applicationBoundaryBackend{}
+	commands := newTestCommandService(t, allowAuthorizer{}, store, backend)
+	got, err := commands.Operation(t.Context(), p, req.OperationID)
+	if err != nil || !sameCommandResult(got, want) || backend.effects != 0 {
+		t.Fatalf("receipt=%+v effects=%d err=%v", got, backend.effects, err)
 	}
 }

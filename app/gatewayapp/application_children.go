@@ -19,9 +19,9 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
-	"github.com/caelis-labs/caelis/control/application"
 	"github.com/caelis-labs/caelis/control/appserver"
 	controlplacement "github.com/caelis-labs/caelis/control/placement"
+	"github.com/caelis-labs/caelis/control/sessionprofile"
 	"github.com/caelis-labs/caelis/control/sessionvisibility"
 	bridge "github.com/caelis-labs/caelis/internal/acpagentbridge"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/endpoint"
@@ -33,14 +33,14 @@ import (
 // The local AppServer supplies its complete focused client assembly once. The
 // shared pointer is borrowed by Runtime snapshots; no leaf service retains Stack.
 type applicationChildClientFactory struct {
-	mu           sync.RWMutex
-	bind         func(appserver.Principal) (appserver.AppServerClients, error)
-	applications *appserver.ApplicationService
+	mu              sync.RWMutex
+	bind            func(appserver.Principal) (appserver.AppServerClients, error)
+	sessionProfiles *appserver.SessionProfileService
 }
 
 type applicationChildren struct {
 	composition   *runtimeComposition
-	binding       application.Binding
+	binding       sessionprofile.Binding
 	active        session.Session
 	modelSnapshot func(context.Context) (AppConfig, *modelLookup, error)
 }
@@ -60,19 +60,19 @@ func (c *applicationChildren) snapshot(ctx context.Context) (*placementSnapshot,
 }
 
 func (c *applicationChildren) principal() appserver.Principal {
-	return appserver.Principal{ID: c.binding.PrincipalID, ApplicationID: c.binding.ApplicationID, ConnectionID: c.binding.ConnectionID}
+	return appserver.Principal{ID: c.binding.PrincipalID}
 }
 
-func (c *applicationChildren) source(ctx context.Context) (application.Source, error) {
-	value, ok := ctx.Value(applicationSourceContextKey{}).(application.Source)
+func (c *applicationChildren) source(ctx context.Context) (sessionprofile.Source, error) {
+	value, ok := ctx.Value(applicationSourceContextKey{}).(sessionprofile.Source)
 	if !ok && c.binding.Child != nil {
 		value, ok = c.binding.Child.Source, true
 	}
-	if !ok || application.ValidateSource(value) != nil {
-		return application.Source{}, errors.New("application child: trusted parent source is required")
+	if !ok || sessionprofile.ValidateSource(value) != nil {
+		return sessionprofile.Source{}, errors.New("application child: trusted parent source is required")
 	}
 	if err := c.checkSource(ctx, value); err != nil {
-		return application.Source{}, err
+		return sessionprofile.Source{}, err
 	}
 	return value, nil
 }
@@ -83,8 +83,8 @@ func (c *applicationChildren) admitParticipant(ctx context.Context, operation st
 	if sessionvisibility.IsSpawnedSubagentSession(c.active) {
 		return ctx, errors.New("application child: nested delegation is unavailable")
 	}
-	if _, ok := ctx.Value(applicationSourceContextKey{}).(application.Source); !ok {
-		source := application.Source{Kind: "user", OperationID: operation}
+	if _, ok := ctx.Value(applicationSourceContextKey{}).(sessionprofile.Source); !ok {
+		source := sessionprofile.Source{Kind: "user", OperationID: operation}
 		if c.binding.Child != nil {
 			source = c.binding.Child.Source
 		}
@@ -94,8 +94,8 @@ func (c *applicationChildren) admitParticipant(ctx context.Context, operation st
 	return ctx, err
 }
 
-func (c *applicationChildren) checkSource(ctx context.Context, source application.Source) error {
-	store := c.composition.authorities.applications
+func (c *applicationChildren) checkSource(ctx context.Context, source sessionprofile.Source) error {
+	store := c.composition.authorities.sessionProfiles
 	if err := store.CheckActive(ctx, c.binding.Scope); err != nil {
 		return err
 	}
@@ -132,7 +132,7 @@ func (c *applicationChildren) checkSource(ctx context.Context, source applicatio
 // self uses the same explicit configured provider and normal frozen-placement
 // owner as every registered native model. It never samples the Host default.
 func (c *applicationChildren) selfPlacement(ctx context.Context) (placement.Placement, error) {
-	configuration, err := c.composition.authorities.applications.Configuration(ctx, c.binding.Scope, c.binding.SessionID)
+	configuration, err := c.composition.authorities.sessionProfiles.Configuration(ctx, c.binding.Scope, c.binding.SessionID)
 	if err != nil {
 		return placement.Placement{}, err
 	}
@@ -275,7 +275,7 @@ func (c *applicationChildren) tools(ctx context.Context) ([]tool.Tool, error) {
 
 func (c *applicationChildren) leaseTools(tools []tool.Tool) []tool.Tool {
 	for i, item := range tools {
-		tools[i] = applicationChildTool{Tool: applicationLeasedTool{Tool: item, store: c.composition.authorities.applications, scope: c.binding.Scope}, owner: c}
+		tools[i] = applicationChildTool{Tool: applicationLeasedTool{Tool: item, store: c.composition.authorities.sessionProfiles, scope: c.binding.Scope}, owner: c}
 	}
 	return tools
 }
@@ -295,7 +295,7 @@ func (t applicationChildTool) Call(ctx context.Context, call tool.Call) (tool.Re
 }
 
 func (c *applicationChildren) prepare(ctx context.Context, id string, cfg assembly.AgentConfig) (controlagents.SessionOptions, error) {
-	bound, err := c.composition.authorities.applications.GetBinding(ctx, c.binding.Scope, id)
+	bound, err := c.composition.authorities.sessionProfiles.GetBinding(ctx, c.binding.Scope, id)
 	if err != nil {
 		return controlagents.SessionOptions{}, err
 	}
@@ -305,7 +305,7 @@ func (c *applicationChildren) prepare(ctx context.Context, id string, cfg assemb
 	if cfg.PinnedModel == nil {
 		return controlagents.SessionOptions{}, errors.New("application child: resolved model preparation is required")
 	}
-	store := c.composition.authorities.applications
+	store := c.composition.authorities.sessionProfiles
 	current, err := store.Configuration(ctx, bound.Scope, id)
 	if err != nil {
 		return controlagents.SessionOptions{}, err
@@ -315,8 +315,26 @@ func (c *applicationChildren) prepare(ctx context.Context, id string, cfg assemb
 		tier = "priority"
 	}
 	if current.Profile.Model != model || current.Profile.ReasoningEffort != effort || current.Profile.ServiceTier != tier {
-		_, err = store.UpdateConfiguration(ctx, bound.Scope, id, application.UpdateConfigurationRequest{OperationID: "prepare-child-" + id, ExpectedConfigurationRevision: current.Revision,
-			Patch: application.ConfigurationPatch{Model: &model, ReasoningEffort: &effort, ServiceTier: &tier}}, c.composition.validateApplicationProfile)
+		factory := c.composition.authorities.applicationChildClients
+		if factory == nil {
+			return controlagents.SessionOptions{}, errors.New("Session configuration service unavailable")
+		}
+		factory.mu.RLock()
+		service := factory.sessionProfiles
+		factory.mu.RUnlock()
+		if service == nil {
+			return controlagents.SessionOptions{}, errors.New("Session configuration service unavailable")
+		}
+		result, updateErr := service.UpdateSessionConfiguration(ctx, c.principal(), appserver.UpdateSessionConfigurationRequest{
+			WriteBase: appserver.WriteBase{OperationID: "prepare-child-" + id, SessionID: id}, ExpectedConfigurationRevision: current.Revision,
+			Patch: sessionprofile.ConfigurationPatch{Model: &model, ReasoningEffort: &effort, ServiceTier: &tier}})
+		if updateErr != nil {
+			return controlagents.SessionOptions{}, updateErr
+		}
+		if result.Outcome != appserver.OutcomeCommitted || result.Configuration == nil {
+			return controlagents.SessionOptions{}, errors.New("child configuration has no committed receipt")
+		}
+
 	}
 	return controlagents.SessionOptions{}, err
 }
@@ -335,16 +353,16 @@ func (c *applicationChildren) ResolveACPProcess(ctx context.Context, req endpoin
 			return endpoint.Stream{}, errors.New("application child: typed AppServer assembly is unavailable")
 		}
 		factory.mu.RLock()
-		bind, applications := factory.bind, factory.applications
+		bind, sessionProfiles := factory.bind, factory.sessionProfiles
 		factory.mu.RUnlock()
-		if bind == nil || applications == nil {
+		if bind == nil || sessionProfiles == nil {
 			return endpoint.Stream{}, errors.New("application child: typed AppServer assembly is unavailable")
 		}
 		clients, err := bind(c.principal())
 		if err != nil {
 			return endpoint.Stream{}, err
 		}
-		child := &applicationChildSessions{SessionClient: clients.Sessions, owner: c, source: source, applications: applications}
+		child := &applicationChildSessions{SessionClient: clients.Sessions, owner: c, source: source, sessionProfiles: sessionProfiles}
 		clients.Sessions = child
 		clients.Presentation = applicationChildPresentation{PresentationClient: clients.Presentation, imageInput: req.ModelImageInput}
 		serverCtx, cancel := context.WithCancel(ctx)
@@ -384,9 +402,9 @@ func (c *applicationChildren) ResolveACPProcess(ctx context.Context, req endpoin
 
 type applicationChildSessions struct {
 	appserver.SessionClient
-	owner        *applicationChildren
-	source       application.Source
-	applications *appserver.ApplicationService
+	owner           *applicationChildren
+	source          sessionprofile.Source
+	sessionProfiles *appserver.SessionProfileService
 }
 
 // ACP negotiation projects the frozen child model's existing capability owner.
@@ -400,13 +418,13 @@ func (p applicationChildPresentation) PresentationCapabilities(context.Context) 
 	return appserver.PresentationCapabilities{Image: p.imageInput != nil && *p.imageInput}, nil
 }
 
-func (s *applicationChildSessions) binding(ctx context.Context, id string) (application.Binding, error) {
-	bound, err := s.owner.composition.authorities.applications.GetBinding(ctx, s.owner.binding.Scope, id)
+func (s *applicationChildSessions) binding(ctx context.Context, id string) (sessionprofile.Binding, error) {
+	bound, err := s.owner.composition.authorities.sessionProfiles.GetBinding(ctx, s.owner.binding.Scope, id)
 	if err != nil {
-		return application.Binding{}, err
+		return sessionprofile.Binding{}, err
 	}
 	if bound.Child == nil || bound.Child.ParentSessionID != s.owner.binding.SessionID {
-		return application.Binding{}, appserver.ErrUnauthorized
+		return sessionprofile.Binding{}, appserver.ErrUnauthorized
 	}
 	return bound, nil
 }
@@ -424,7 +442,7 @@ func (s *applicationChildSessions) CreateSession(ctx context.Context, req appser
 	if parent != "" && parent != c.binding.SessionID {
 		return appserver.CommandResult{}, appserver.ErrUnauthorized
 	}
-	configuration, err := c.composition.authorities.applications.Configuration(ctx, c.binding.Scope, c.binding.SessionID)
+	configuration, err := c.composition.authorities.sessionProfiles.Configuration(ctx, c.binding.Scope, c.binding.SessionID)
 	if err != nil {
 		return appserver.CommandResult{}, err
 	}
@@ -432,25 +450,25 @@ func (s *applicationChildSessions) CreateSession(ctx context.Context, req appser
 	if c.binding.Child != nil {
 		root = c.binding.Child.RootSessionID
 	}
-	id := application.SessionID(c.binding.Scope, "child:"+c.binding.SessionID+":"+req.OperationID)
-	relation := &application.ChildRelation{RootSessionID: root, ParentSessionID: c.binding.SessionID, ParentTaskID: task, Source: s.source}
+	id := sessionprofile.SessionID(c.binding.Scope, "child:"+c.binding.SessionID+":"+req.OperationID)
+	relation := &sessionprofile.ChildRelation{RootSessionID: root, ParentSessionID: c.binding.SessionID, ParentTaskID: task, Source: s.source}
 	profile := configuration.Profile
 	profile.Workspace.CWD = c.active.CWD
 	encoded, _ := json.Marshal(struct {
-		Profile   application.Profile
-		Relation  *application.ChildRelation
+		Profile   sessionprofile.Profile
+		Relation  *sessionprofile.ChildRelation
 		Operation string
 	}{profile, relation, req.OperationID})
 	hash := sha256.Sum256(encoded)
 	digest := hex.EncodeToString(hash[:])
-	bound := application.Binding{Scope: c.binding.Scope, SessionID: id, Profile: profile, CreationDigest: digest, Child: relation}
+	bound := sessionprofile.Binding{Scope: c.binding.Scope, SessionID: id, Profile: profile, CreationDigest: digest, Child: relation}
 	active, err := c.composition.sessions.StartSession(ctx, session.StartSessionRequest{PreferredSessionID: id, AppName: c.active.AppName, UserID: c.binding.PrincipalID,
 		Workspace: session.WorkspaceRef{Key: id, CWD: c.active.CWD}, Controller: initialKernelControllerBinding("acp_ingress"), ExecutionConfig: c.active.ExecutionConfig,
-		Metadata: map[string]any{sessionvisibility.MetadataSystemManagedAgent: sessionvisibility.SystemManagedAgentApplication, sessionvisibility.MetadataSystemManagedParent: c.binding.SessionID, sessionvisibility.MetadataSystemManagedTask: task, application.StateKey: c.binding.ApplicationID, "application_creation_digest": digest}})
+		Metadata: map[string]any{sessionvisibility.MetadataSystemManagedAgent: sessionvisibility.SystemManagedAgentApplication, sessionvisibility.MetadataSystemManagedParent: c.binding.SessionID, sessionvisibility.MetadataSystemManagedTask: task, "application_creation_digest": digest}})
 	if err != nil {
 		return sessionCommandResult(active), err
 	}
-	if err = c.composition.authorities.applications.PutBinding(ctx, bound); err != nil {
+	if err = c.composition.authorities.sessionProfiles.PutBinding(ctx, bound); err != nil {
 		return sessionCommandResult(active), err
 	}
 	return sessionCommandResult(active), nil
@@ -473,7 +491,8 @@ func (s *applicationChildSessions) Prompt(ctx context.Context, req appserver.Pro
 	if err != nil {
 		return appserver.CommandResult{}, err
 	}
-	return s.applications.Prompt(ctx, s.owner.principal(), appserver.ApplicationPromptRequest{PromptRequest: req, SourceKind: bound.Child.Source.Kind, GrantID: bound.Child.Source.GrantID})
+	req.SourceKind, req.GrantID = bound.Child.Source.Kind, bound.Child.Source.GrantID
+	return s.SessionClient.Prompt(ctx, req)
 }
 func (s *applicationChildSessions) RecordInteraction(ctx context.Context, req appserver.RecordInteractionRequest) (appserver.CommandResult, error) {
 	if _, err := s.binding(ctx, req.SessionID); err != nil {

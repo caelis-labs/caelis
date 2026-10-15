@@ -7,21 +7,13 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver"
 )
 
-// createWorkerSession grants one deterministic address, then uses the ordinary
-// Session creation/activation path. Worker configuration is entirely Host-owned.
-func (b *controlCommandBackend) createWorkerSession(ctx context.Context, p appserver.Principal, req appserver.CreateWorkerRequest) (appserver.CommandResult, error) {
-	scope, err := appserver.ApplicationScope(p)
-	if err != nil {
-		return appserver.CommandResult{}, classifyControlPreDispatchError(err)
-	}
-	w, err := b.composition.authorities.applications.PutWorker(ctx, scope, req.OperationID)
-	if err != nil {
-		return appserver.CommandResult{}, classifyControlPreDispatchError(err)
-	}
-	created, err := b.ExecuteControlCommand(ctx, p, appserver.ActionSessionCreate, appserver.CreateSessionRequest{
-		WriteBase: req.WriteBase, PreferredSessionID: w.SessionID, CWD: req.CWD, Title: req.Title,
-	})
-	if err != nil || req.Model == "" {
+// createSessionWithModel shares the ordinary Session creation/configuration
+// owners and one admitted command. It never grants or enrolls another client.
+func (b *controlCommandBackend) createSessionWithModel(ctx context.Context, p appserver.Principal, req appserver.CreateSessionRequest) (appserver.CommandResult, error) {
+	model, effort, fast := req.Model, req.ReasoningEffort, req.FastMode
+	req.Model, req.ReasoningEffort, req.FastMode = "", "", false
+	created, err := b.ExecuteControlCommand(ctx, p, appserver.ActionSessionCreate, req)
+	if err != nil || model == "" {
 		return created, err
 	}
 	active, err := b.composition.sessions.Session(ctx, session.SessionRef{SessionID: created.SessionID})
@@ -30,7 +22,7 @@ func (b *controlCommandBackend) createWorkerSession(ctx context.Context, p appse
 		result, err = b.ExecuteControlCommand(ctx, p, appserver.ActionSessionModel, appserver.SessionModelRequest{
 			WriteBase: appserver.WriteBase{OperationID: req.OperationID, SessionID: active.SessionID,
 				ExpectedRevision: &active.Revision, ExpectedControllerEpoch: active.Controller.EpochID},
-			Model: req.Model, ReasoningEffort: req.ReasoningEffort, FastMode: req.FastMode,
+			Model: model, ReasoningEffort: effort, FastMode: fast,
 		})
 	}
 	if err != nil {

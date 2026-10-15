@@ -2023,6 +2023,91 @@ func TestSessionRuntimeActivationWaitsForReleaseAndBuildsFreshRuntime(t *testing
 	}
 }
 
+func TestSessionCloseWaitsForRuntimeReleaseBeforeDispatch(t *testing.T) {
+	ctx := context.Background()
+	workspace := newWorkspaceRuntimeTestDir(t, "workspace", "Workspace rule.")
+	stack, err := NewLocalStack(Config{
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: "workspace",
+		WorkspaceCWD: workspace,
+		SkillDirs:    []string{},
+		Sandbox:      SandboxConfig{RequestedType: "host"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = stack.Close() })
+	client, err := appserver.BindSessionClient(stack.ControlClient(), appserver.Principal{ID: "local-user"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionID := createWorkspaceRuntimeTestSession(t, client, "create-close-release-race", "close-release-race", "workspace", workspace)
+	runtime := activateSessionRuntime(t, stack, sessionID)
+	active, err := stack.composition.sessions.Session(ctx, session.SessionRef{SessionID: sessionID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	allowStop := make(chan struct{})
+	blockingGateway, err := kernelimpl.New(kernelimpl.Config{
+		Sessions: stack.composition.sessions,
+		Runtime:  &blockingRuntime{session: active, release: allowStop},
+		Resolver: blockingResolver{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime.instance.mu.Lock()
+	runtime.instance.gateway = blockingGateway
+	runtime.instance.mu.Unlock()
+	if _, err := client.Prompt(ctx, appserver.PromptRequest{
+		WriteBase: appserver.WriteBase{OperationID: "prompt-close-release-race", SessionID: sessionID},
+		Input:     "hold release open",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	releaseDone := make(chan error, 1)
+	go func() {
+		releaseCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		releaseDone <- stack.sessionRuntimes.release(releaseCtx, sessionID)
+	}()
+	waitForSessionRuntimeReleasing(t, stack.sessionRuntimes, sessionID)
+
+	type closeResult struct {
+		result appserver.CommandResult
+		err    error
+	}
+	closeDone := make(chan closeResult, 1)
+	request := appserver.CloseSessionRequest{WriteBase: appserver.WriteBase{OperationID: "close-after-release", SessionID: sessionID}}
+	go func() {
+		closeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		result, closeErr := client.CloseSession(closeCtx, request)
+		closeDone <- closeResult{result, closeErr}
+	}()
+	select {
+	case result := <-closeDone:
+		t.Fatalf("close returned before Runtime release completed: %+v", result)
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(allowStop)
+	if err := <-releaseDone; err != nil {
+		t.Fatalf("Runtime release: %v", err)
+	}
+	closed := <-closeDone
+	if closed.err != nil || closed.result.Outcome != appserver.OutcomeCommitted {
+		t.Fatalf("close after Runtime release = %+v, %v", closed.result, closed.err)
+	}
+	if isClosed, err := appserver.IsSessionClosed(ctx, stack.composition.sessions, active.SessionRef); err != nil || !isClosed {
+		t.Fatalf("canonical closure = %v, %v", isClosed, err)
+	}
+	retried, err := client.CloseSession(ctx, request)
+	if err != nil || retried != closed.result {
+		t.Fatalf("original close receipt = %+v, %v; want %+v", retried, err, closed.result)
+	}
+}
+
 func TestSessionRuntimeConfigurationWaitsForReleaseAndBuildsDisposableSnapshot(t *testing.T) {
 	ctx := context.Background()
 	workspace := newWorkspaceRuntimeTestDir(t, "workspace", "Workspace rule.")

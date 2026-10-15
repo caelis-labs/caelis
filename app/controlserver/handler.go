@@ -2,6 +2,7 @@ package controlserver
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -43,22 +44,26 @@ func (f AuthenticatorFunc) Authenticate(request *http.Request) (appserver.Princi
 // an optional listener-lifecycle callback; Host quiesce remains owned by the
 // server runner.
 type HandlerConfig struct {
-	Services      appserver.AppServerServices
-	AdapterHost   controladapterhost.Service
-	Authenticator Authenticator
-	AllowedHosts  []string
-	Heartbeat     time.Duration
-	ServerInfo    appserver.ServerInfo
-	Ready         func() bool
-	Shutdown      func()
+	Services            appserver.AppServerServices
+	AdapterHost         controladapterhost.Service
+	Authenticator       Authenticator
+	AllowedHosts        []string
+	Heartbeat           time.Duration
+	ServerInfo          appserver.ServerInfo
+	Ready               func() bool
+	Shutdown            func()
+	PrepareIdleShutdown func(context.Context) error
 }
 
 type Server struct {
-	authMu        sync.Mutex
-	authExchanges map[modelAuthKey]*modelAuthExchange
-	config        HandlerConfig
-	mux           *http.ServeMux
-	policy        *requestPolicy
+	lifecycleMu     sync.Mutex
+	activeMutations int
+	draining        bool
+	authMu          sync.Mutex
+	authExchanges   map[modelAuthKey]*modelAuthExchange
+	config          HandlerConfig
+	mux             *http.ServeMux
+	policy          *requestPolicy
 }
 
 // New constructs the authenticated Control HTTP handler.
@@ -72,7 +77,10 @@ func New(config HandlerConfig) (*Server, error) {
 	if config.Heartbeat <= 0 {
 		config.Heartbeat = 15 * time.Second
 	}
-	config.ServerInfo = applicationServerInfo(config.ServerInfo, config.Services)
+	config.ServerInfo = sessionServerInfo(config.ServerInfo, config.Services)
+	if config.PrepareIdleShutdown != nil && config.Shutdown != nil {
+		config.ServerInfo.Capabilities = append(config.ServerInfo.Capabilities, appserver.CapabilityIdleHostShutdown)
+	}
 	if config.Ready == nil {
 		config.Ready = func() bool { return true }
 	}
@@ -96,6 +104,20 @@ func (s *Server) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		writeError(writer, http.StatusBadRequest, "credentials are not accepted in query parameters")
 		return
 	}
+	// Count only mutation dispatch, never long-lived observation. The same lock
+	// makes idle shutdown and HTTP admission mutually exclusive. Runtime producer
+	// admission remains with the Host lifecycle owner.
+	if request.Method != http.MethodGet && request.Method != http.MethodHead && request.URL.Path != apiPrefix+"/host/shutdown" {
+		s.lifecycleMu.Lock()
+		if s.draining {
+			s.lifecycleMu.Unlock()
+			writeError(writer, http.StatusServiceUnavailable, "Host is draining")
+			return
+		}
+		s.activeMutations++
+		s.lifecycleMu.Unlock()
+		defer func() { s.lifecycleMu.Lock(); s.activeMutations--; s.lifecycleMu.Unlock() }()
+	}
 	s.mux.ServeHTTP(writer, request)
 }
 
@@ -104,6 +126,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /healthz", s.health)
 	s.mux.HandleFunc("GET /readyz", s.readiness)
 	s.mux.HandleFunc("GET "+apiPrefix+"/initialize", s.initialize)
+	s.mux.HandleFunc("GET "+apiPrefix+"/operations/{operation_id}", s.operation)
 	s.mux.HandleFunc("POST "+apiPrefix+"/host/shutdown", s.shutdown)
 	s.mux.HandleFunc("GET "+apiPrefix+"/sessions", s.listSessions)
 	s.mux.HandleFunc("POST "+apiPrefix+"/sessions", s.createSession)
@@ -123,7 +146,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET "+apiPrefix+"/sessions/{session_id}/tasks/{task_id}/events", s.taskEvents)
 	s.mux.HandleFunc("GET "+apiPrefix+"/sessions/{session_id}/tasks/{task_id}/subscribe", s.subscribeTask)
 	s.focusedRoutes()
-	s.applicationRoutes()
+	s.sessionConfigurationRoutes()
+	s.sessionResourceRoutes()
+	s.sessionBackgroundRoutes()
+	s.sessionToolRoutes()
 	s.adapterRoutes()
 }
 
@@ -161,6 +187,35 @@ func (s *Server) shutdown(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "Host shutdown is unavailable")
 		return
 	}
+	var req appserver.HostShutdownRequest
+	if r.ContentLength != 0 && !decodeBody(w, r, &req) {
+		return
+	}
+	if req.ExpectedInstanceID != "" && req.ExpectedInstanceID != s.config.ServerInfo.InstanceID {
+		writeError(w, http.StatusConflict, "Host instance changed")
+		return
+	}
+	if req.IfIdle && req.ExpectedInstanceID == "" {
+		writeError(w, http.StatusBadRequest, "idle shutdown requires expected_instance_id")
+		return
+	}
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	if !s.draining && req.IfIdle {
+		if s.config.PrepareIdleShutdown == nil {
+			writeError(w, http.StatusServiceUnavailable, "idle shutdown is unavailable")
+			return
+		}
+		if s.activeMutations != 0 {
+			writeError(w, http.StatusConflict, "Host is busy; retry replacement after work completes")
+			return
+		}
+		if err := s.config.PrepareIdleShutdown(r.Context()); err != nil {
+			writeJSONResult(w, nil, err)
+			return
+		}
+	}
+	s.draining = true
 	writeJSON(w, http.StatusOK, appserver.HostStatus{
 		ServerID: s.config.ServerInfo.ServerID, InstanceID: s.config.ServerInfo.InstanceID,
 		Ready: false,
@@ -186,9 +241,6 @@ func normalizeServerInfo(info appserver.ServerInfo) appserver.ServerInfo {
 }
 
 func (s *Server) principal(request *http.Request) (appserver.Principal, error) {
-	if principal, handled, err := s.applicationPrincipal(request); handled {
-		return principal, err
-	}
 	principal, err := s.config.Authenticator.Authenticate(request)
 	if err != nil {
 		return appserver.Principal{}, errorcode.Wrap(errorcode.Unauthenticated, "controlserver: authentication failed", err)
@@ -244,13 +296,7 @@ func (s *Server) closeSession(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, &req) || !applyWriteHeaders(w, r, &req.WriteBase, r.PathValue("session_id")) {
 		return
 	}
-	var result appserver.CommandResult
-	var err error
-	if s.config.Services.Applications != nil && (principal.ApplicationID != "" || principal.ConnectionID != "") {
-		result, err = s.config.Services.Applications.CloseSession(r.Context(), principal, req)
-	} else {
-		result, err = s.config.Services.Sessions.CloseSession(r.Context(), principal, req)
-	}
+	result, err := s.config.Services.Sessions.CloseSession(r.Context(), principal, req)
 	writeCommandResult(w, result, err)
 }
 
@@ -423,13 +469,7 @@ func (s *Server) prompt(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, &req) || !applyWriteHeaders(w, r, &req.WriteBase, r.PathValue("session_id")) {
 		return
 	}
-	var result appserver.CommandResult
-	var err error
-	if principal.ApplicationID != "" {
-		result, err = s.config.Services.Applications.WorkerPrompt(r.Context(), principal, req)
-	} else {
-		result, err = s.config.Services.Sessions.Prompt(r.Context(), principal, req)
-	}
+	result, err := s.config.Services.Sessions.Prompt(r.Context(), principal, req)
 	writeCommandResult(w, result, err)
 }
 func (s *Server) steer(w http.ResponseWriter, r *http.Request) {
@@ -441,13 +481,7 @@ func (s *Server) steer(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, &req) || !applyWriteHeaders(w, r, &req.WriteBase, r.PathValue("session_id")) {
 		return
 	}
-	var result appserver.CommandResult
-	var err error
-	if principal.ApplicationID != "" {
-		result, err = s.config.Services.Applications.Steer(r.Context(), principal, req)
-	} else {
-		result, err = s.config.Services.Sessions.Steer(r.Context(), principal, req)
-	}
+	result, err := s.config.Services.Sessions.Steer(r.Context(), principal, req)
 	writeCommandResult(w, result, err)
 }
 func (s *Server) cancel(w http.ResponseWriter, r *http.Request) {
@@ -734,4 +768,17 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_, _ = w.Write(append(data, '\n'))
+}
+
+func (s *Server) operation(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.requirePrincipal(w, r)
+	if !ok {
+		return
+	}
+	if s.config.Services.Operations == nil {
+		writeError(w, http.StatusServiceUnavailable, "operation observation is unavailable")
+		return
+	}
+	result, err := s.config.Services.Operations.Operation(r.Context(), p, r.PathValue("operation_id"))
+	writeJSONResult(w, result, err)
 }

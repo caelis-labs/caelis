@@ -36,8 +36,8 @@ func TestSharedWorkerNativeHTTPCommandAndRecovery(t *testing.T) {
 	host := startApplicationHTTPHostWithSandbox(t, filepath.Join(root, "store"), workspace, provider, "")
 	defer func() { host.close(t) }()
 	client, _ := nativeHostSession(t, ctx, host, workspace)
-	create := appserver.CreateWorkerRequest{WriteBase: appserver.WriteBase{OperationID: "native-worker-create"}, CWD: workspace, Model: "custom/gpt-4.1"}
-	created, err := client.CreateWorker(ctx, create)
+	create := appserver.CreateSessionRequest{WriteBase: appserver.WriteBase{OperationID: "native-worker-create"}, CWD: workspace, Model: "custom/gpt-4.1"}
+	created, err := client.CreateSession(ctx, create)
 	if err != nil || created.SessionID == "" || created.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("native Worker creation = %+v, %v", created, err)
 	}
@@ -115,15 +115,15 @@ func TestSharedWorkerNativeHTTPCommandAndRecovery(t *testing.T) {
 	}
 	client = host.app(string(secret))
 	for _, operation := range []string{create.OperationID, prompt.OperationID} {
-		receipt, err := client.ApplicationOperation(ctx, operation)
-		if err != nil || receipt.Result == nil || receipt.Result.SessionID != sid {
+		receipt, err := client.Operation(ctx, operation)
+		if err != nil || receipt.SessionID != sid {
 			t.Fatalf("recovered %s = %+v, %v", operation, receipt, err)
 		}
 	}
 	if retry, err := client.Prompt(ctx, prompt); err != nil || !reflect.DeepEqual(retry, started) {
 		t.Fatalf("original prompt retry = %+v, %v; want %+v", retry, err, started)
 	}
-	if retry, err := client.CreateWorker(ctx, create); err != nil || !reflect.DeepEqual(retry, created) {
+	if retry, err := client.CreateSession(ctx, create); err != nil || !reflect.DeepEqual(retry, created) {
 		t.Fatalf("original Worker retry = %+v, %v; want %+v", retry, err, created)
 	}
 	provider.mu.Lock()

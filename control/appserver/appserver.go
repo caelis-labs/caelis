@@ -1,7 +1,6 @@
 package appserver
 
 import (
-	"context"
 	"errors"
 	"fmt"
 
@@ -13,6 +12,7 @@ import (
 // exposed by an AppServer. Presentation surfaces bind a principal once and
 // consume AppServerClients; they do not assemble individual Control services.
 type AppServerServices struct {
+	Operations     OperationService
 	SubagentInputs *SubagentInputService
 	UIPreferences  *UIPreferencesService
 	// Collaboration is the source-bound Agent mailbox surface.
@@ -22,14 +22,14 @@ type AppServerServices struct {
 	Status        StatusService
 	Configuration ConfigurationService
 	Agents        AgentService
-	// Applications supplies the same scoped admission and lifecycle owner to
+	// SessionProfiles supplies the common admission and lifecycle owner to
 	// embedded and HTTP adapters.
-	Applications *ApplicationService
-	Completion   CompletionService
-	Plugins      PluginService
-	Presentation PresentationService
-	Terminal     TerminalService
-	Tasks        taskstream.Service
+	SessionProfiles *SessionProfileService
+	Completion      CompletionService
+	Plugins         PluginService
+	Presentation    PresentationService
+	Terminal        TerminalService
+	Tasks           taskstream.Service
 }
 
 // Validate rejects partial AppServer assemblies. A transport adapter may use a
@@ -66,6 +66,7 @@ func (s AppServerServices) Validate() error {
 // presentation surface. Embedded and HTTP transports implement these same
 // interfaces.
 type AppServerClients struct {
+	Operations     OperationClient
 	SubagentInputs SubagentInputClient
 	UIPreferences  UIPreferencesClient
 	Sessions       SessionClient
@@ -85,24 +86,14 @@ func BindAppServerClients(services AppServerServices, principal Principal) (AppS
 	if err := services.Validate(); err != nil {
 		return AppServerClients{}, err
 	}
-	if principal.ApplicationID != "" || principal.ConnectionID != "" {
-		scope, err := ApplicationScope(principal)
-		if err != nil || services.Applications == nil {
-			return AppServerClients{}, ErrUnauthorized
-		}
-		if _, err := services.Applications.Store().Connection(context.Background(), scope); err != nil {
-			return AppServerClients{}, err
-		}
-	}
 	sessions, err := BindSessionClient(services.Sessions, principal)
 	if err != nil {
 		return AppServerClients{}, err
 	}
 	bound := sessions.(*boundSessionClient)
-	bound.applications = services.Applications
-	if services.Applications != nil {
-		bound.capabilities = append(bound.capabilities, services.Applications.Capabilities()...)
-		bound.capabilities = append(bound.capabilities, CapabilityApplicationTerminalObservation, CapabilityApplicationTerminalWait, CapabilityApplicationTerminalControl)
+	if services.SessionProfiles != nil {
+		bound.capabilities = append(bound.capabilities, services.SessionProfiles.Capabilities()...)
+		bound.capabilities = append(bound.capabilities, CapabilityTerminalObservation, CapabilityTerminalWait, CapabilityTerminalControl)
 	}
 	participants, err := BindParticipantClient(services.Participants, principal)
 	if err != nil {
@@ -138,7 +129,6 @@ func BindAppServerClients(services AppServerServices, principal Principal) (AppS
 	}
 	tasks, err := taskstream.BindClient(services.Tasks, taskstream.Principal{
 		ID: principal.ID, Roles: append([]string(nil), principal.Roles...),
-		ApplicationID: principal.ApplicationID, ConnectionID: principal.ConnectionID,
 	})
 	if err != nil {
 		return AppServerClients{}, err
@@ -150,6 +140,9 @@ func BindAppServerClients(services AppServerServices, principal Principal) (AppS
 		Sessions:       sessions, Participants: participants, Status: status,
 		Configuration: configuration, Agents: agents, Completion: completion, Plugins: plugins,
 		Presentation: presentation, Terminal: terminal, Tasks: tasks,
+	}
+	if services.Operations != nil {
+		clients.Operations = &boundOperationClient{service: services.Operations, principal: principal}
 	}
 	if err := clients.Validate(); err != nil {
 		return AppServerClients{}, err

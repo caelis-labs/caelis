@@ -63,14 +63,14 @@ func TestApplicationMainHTTPSteeringContinuesCurrentTurn(t *testing.T) {
 	if _, err = h.host.ConnectModel(ctx, appserver.ConnectModelRequest{WriteBase: appserver.WriteBase{OperationID: "model", ExpectedRevision: &status.Configuration.Revision}, Config: appserver.ConnectConfig{Provider: "custom-chat", Model: "gpt-4.1", BaseURL: "https://provider.invalid/v1", APIKey: "SYNTHETIC"}}); err != nil {
 		t.Fatal(err)
 	}
-	bot, _ := registerApplicationHTTP(t, ctx, h, "main-steering", filepath.Join(root, "bot.token"))
+	bot, _ := connectSessionOwnerHTTP(t, ctx, h, "owner", filepath.Join(root, "bot.token"))
 	sid := createApplicationHTTPSession(t, ctx, bot, "main")
 	feed, err := bot.Reconnect(ctx, appserver.ReconnectRequest{SessionID: sid})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer feed.Subscription.Close()
-	started, err := bot.PromptApplication(ctx, appserver.ApplicationPromptRequest{PromptRequest: appserver.PromptRequest{WriteBase: appserver.WriteBase{OperationID: "main-start", SessionID: sid}, Input: "MAIN_INPUT_SENTINEL"}, SourceKind: "user"})
+	started, err := bot.Prompt(ctx, appserver.PromptRequest{WriteBase: appserver.WriteBase{OperationID: "main-start", SessionID: sid}, Input: "MAIN_INPUT_SENTINEL", SourceKind: "user"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,15 +139,15 @@ func TestSharedWorkerHTTPAttachSteerDetachAndReconnect(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	bot, _ := registerApplicationHTTP(t, ctx, h, "bot", filepath.Join(root, "bot.token"))
-	other, _ := registerApplicationHTTP(t, ctx, h, "other", filepath.Join(root, "other.token"))
-	req := appserver.CreateWorkerRequest{WriteBase: appserver.WriteBase{OperationID: "create-worker"}, CWD: workspace, Title: "Shared work", Model: "custom/gpt-4.1"}
-	created, err := bot.CreateWorker(ctx, req)
+	bot, _ := connectSessionOwnerHTTP(t, ctx, h, "owner", filepath.Join(root, "bot.token"))
+	other, _ := connectSessionOwnerHTTP(t, ctx, h, "foreign-owner", filepath.Join(root, "other.token"))
+	req := appserver.CreateSessionRequest{WriteBase: appserver.WriteBase{OperationID: "create-worker"}, CWD: workspace, Title: "Shared work", Model: "custom/gpt-4.1"}
+	created, err := bot.CreateSession(ctx, req)
 	if err != nil || created.SessionID == "" || created.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("create: %+v %v", created, err)
 	}
 	sid := created.SessionID
-	duplicate, err := bot.CreateWorker(ctx, req)
+	duplicate, err := bot.CreateSession(ctx, req)
 	if err != nil || duplicate.SessionID != sid {
 		t.Fatalf("duplicate create: %+v %v", duplicate, err)
 	}
@@ -344,8 +344,8 @@ func TestSharedWorkerHTTPApprovalCompetition(t *testing.T) {
 	if _, err = h.host.ConnectModel(ctx, appserver.ConnectModelRequest{WriteBase: appserver.WriteBase{OperationID: "model", ExpectedRevision: &status.Configuration.Revision}, Config: appserver.ConnectConfig{Provider: "custom-chat", Model: "gpt-4.1", BaseURL: "https://provider.invalid/v1", APIKey: "SYNTHETIC"}}); err != nil {
 		t.Fatal(err)
 	}
-	bot, _ := registerApplicationHTTP(t, ctx, h, "bot", filepath.Join(root, "bot.token"))
-	created, err := bot.CreateWorker(ctx, appserver.CreateWorkerRequest{WriteBase: appserver.WriteBase{OperationID: "create"}, CWD: root})
+	bot, _ := connectSessionOwnerHTTP(t, ctx, h, "owner", filepath.Join(root, "bot.token"))
+	created, err := bot.CreateSession(ctx, appserver.CreateSessionRequest{WriteBase: appserver.WriteBase{OperationID: "create"}, CWD: root})
 	if err != nil {
 		t.Fatal(err)
 	}

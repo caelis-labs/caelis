@@ -7,7 +7,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/control/application"
+	"github.com/caelis-labs/caelis/control/sessionprofile"
 	"github.com/caelis-labs/caelis/control/sessionvisibility"
 )
 
@@ -17,14 +17,14 @@ type Authorizer interface {
 	Authorize(context.Context, Principal, Action, string) error
 }
 
-// SessionAuthorizer enforces canonical owner equality and application bindings.
-// An application credential cannot acquire another Session through metadata, a
-// client-selected ID, or the ordinary Host principal's administrative role.
+// SessionAuthorizer enforces canonical owner equality and explicit-profile
+// integrity for every Surface. Request metadata and client-selected IDs never
+// create ownership.
 type SessionAuthorizer struct {
 	Sessions interface {
 		Session(context.Context, session.SessionRef) (session.Session, error)
 	}
-	Applications *application.Store
+	SessionProfiles *sessionprofile.Store
 }
 
 func (a SessionAuthorizer) Authorize(ctx context.Context, p Principal, action Action, sessionID string) error {
@@ -32,19 +32,8 @@ func (a SessionAuthorizer) Authorize(ctx context.Context, p Principal, action Ac
 	if p.ID == "" {
 		return ErrUnauthorized
 	}
-	scoped := p.ApplicationID != "" || p.ConnectionID != ""
-	if action == ActionApplicationCreate || action == ActionWorkerCreate {
-		scope, err := ApplicationScope(p)
-		if err != nil || a.Applications == nil {
-			return ErrUnauthorized
-		}
-		return a.Applications.CheckActive(ctx, scope)
-	}
 	switch action {
 	case ActionSessionCreate, ActionSessionList:
-		if scoped {
-			return ErrUnauthorized
-		}
 		return nil
 	}
 	if a.Sessions == nil || strings.TrimSpace(sessionID) == "" {
@@ -66,61 +55,32 @@ func (a SessionAuthorizer) Authorize(ctx context.Context, p Principal, action Ac
 	if sessionvisibility.IsRetiredSession(active) {
 		return errorcode.New(errorcode.Unsupported, "controlclient: legacy Bot Mode has been removed; stored data is not migrated or deleted")
 	}
-	var binding application.Binding
+	var binding sessionprofile.Binding
 	bound := false
-	if a.Applications != nil {
-		binding, err = a.Applications.BindingForSession(ctx, active.SessionID)
+	if a.SessionProfiles != nil {
+		binding, err = a.SessionProfiles.BindingForSession(ctx, active.SessionID)
 		if err == nil {
 			bound = true
-		} else if !errors.Is(err, application.ErrNotFound) {
+		} else if !errors.Is(err, sessionprofile.ErrNotFound) {
 			return err
 		}
 	}
-	if scoped {
-		scope, scopeErr := ApplicationScope(p)
-		if scopeErr == nil && !bound && a.Applications != nil {
-			if _, err := a.Applications.Worker(ctx, scope, active.SessionID); err != nil {
-				return ErrUnauthorized
-			}
-			switch action {
-			case ActionSessionInspect, ActionParticipantList:
-				return nil
-			case ActionPrompt, ActionConversationInteraction, ActionSteer, ActionCancel, ActionApprovalResolve,
-				ActionSessionCompact, ActionSessionModel, ActionParticipantStart,
-				ActionParticipantPrompt, ActionParticipantCancel, ActionSubagentInput,
-				ActionSessionClose, ActionSessionApprovalMode, ActionSessionControllerMode,
-				ActionSessionPresentationMode, ActionSessionPresentationConfig, ActionControllerHandoff:
-				if err := a.Applications.CheckActive(ctx, scope); err != nil {
-					return err
-				}
-			default:
-				return ErrUnauthorized
-			}
-			// Continue through the canonical Session closure check.
-		} else {
-			if scopeErr != nil || !bound || binding.Scope != scope || active.UserID != scope.PrincipalID {
-				return ErrUnauthorized
-			}
-			switch action {
-			case ActionSessionInspect, ActionParticipantList:
-				return nil
-			case ActionApplicationPrompt, ActionConversationInteraction, ActionSteer, ActionCancel, ActionApprovalResolve, ActionSessionClose, ActionSessionCompact,
-				ActionParticipantStart, ActionParticipantPrompt, ActionParticipantCancel, ActionSubagentInput:
-				if err = a.Applications.CheckActive(ctx, scope); err != nil {
-					return err
-				}
-			default:
-				return ErrUnauthorized
-			}
-			if binding.Archived && action != ActionSessionClose {
-				return ErrSessionClosed
-			}
+	if bound {
+		// An explicit Session profile changes assembly, not the authority of
+		// the authenticated owner. TUI and Bot use the same Control principal.
+		// Host-default activation controls do not govern an explicit request
+		// profile. Reject a write to an ignored configuration source instead of
+		// reporting success while the resolver continues using another value.
+		switch action {
+		case ActionSessionModel:
+			return errorcode.New(errorcode.Unsupported, "explicit Session models use configuration revision and patch")
+		case ActionSessionApprovalMode, ActionSessionControllerMode, ActionControllerHandoff:
+			return errorcode.New(errorcode.Unsupported, "explicit Session execution and reviewer policy are creation-bound")
 		}
-	} else if bound {
-		if !p.HasRole(RoleSystemSessionRuntime) || action != ActionSessionInspect {
-			return ErrUnauthorized
+		if binding.Archived && action != ActionSessionInspect && action != ActionSessionClose {
+			return ErrSessionClosed
 		}
-	} else if action == ActionApplicationPrompt || active.Metadata[sessionvisibility.MetadataSystemManagedAgent] == application.MetadataKind {
+	} else if active.Metadata[sessionvisibility.MetadataSystemManagedAgent] == sessionprofile.MetadataKind {
 		return ErrUnauthorized
 	}
 	if action != ActionSessionInspect && action != ActionSessionClose {
@@ -151,7 +111,7 @@ type ConfigurationAuthorizer = ProductCommandAuthorizer
 
 func (a ProductCommandAuthorizer) Authorize(ctx context.Context, p Principal, action Action, sessionID string) error {
 	if isHostProductAction(action) {
-		if p.ApplicationID != "" || p.ConnectionID != "" || strings.TrimSpace(p.ID) == "" || strings.TrimSpace(sessionID) != "" {
+		if strings.TrimSpace(p.ID) == "" || strings.TrimSpace(sessionID) != "" {
 			return ErrUnauthorized
 		}
 		return nil

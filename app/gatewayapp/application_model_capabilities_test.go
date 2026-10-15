@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/caelis-labs/caelis/control/application"
 	"github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/sessionprofile"
 )
 
 func TestApplicationModelCapabilitiesHTTP(t *testing.T) {
@@ -17,7 +17,7 @@ func TestApplicationModelCapabilitiesHTTP(t *testing.T) {
 	host := startApplicationHTTPHost(t, filepath.Join(root, "store"), root, provider)
 	defer host.close(t)
 	info, err := host.host.Initialize(ctx)
-	if err != nil || !slices.Contains(info.Capabilities, application.CapabilityModelCapabilities) {
+	if err != nil || !slices.Contains(info.Capabilities, sessionprofile.CapabilityModelCapabilities) {
 		t.Fatal("missing negotiation", info, err)
 	}
 	yes, no := true, false
@@ -34,31 +34,31 @@ func TestApplicationModelCapabilitiesHTTP(t *testing.T) {
 			t.Fatal(result, err)
 		}
 	}
-	a, _ := registerApplicationHTTP(t, ctx, host, "cap-a", filepath.Join(root, "a.credential"))
-	b, _ := registerApplicationHTTP(t, ctx, host, "cap-b", filepath.Join(root, "b.credential"))
+	a, _ := connectSessionOwnerHTTP(t, ctx, host, "owner", filepath.Join(root, "a.credential"))
+	b, _ := connectSessionOwnerHTTP(t, ctx, host, "foreign-owner", filepath.Join(root, "b.credential"))
 	profile := applicationHTTPProfile()
 	profile.Model = "custom/screen-text"
-	created, err := a.CreateApplicationSession(ctx, appserver.CreateApplicationSessionRequest{WriteBase: appserver.WriteBase{OperationID: "create-capabilities"}, Profile: profile})
+	created, err := a.CreateSession(ctx, appserver.CreateSessionRequest{WriteBase: appserver.WriteBase{OperationID: "create-capabilities"}, Profile: profilePointer(profile)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = b.ApplicationModelCapabilities(ctx, created.SessionID); err == nil {
+	if _, err = b.SessionModelCapabilities(ctx, created.SessionID); err == nil {
 		t.Fatal("cross-application capabilities exposed")
 	}
-	if _, err = host.host.ApplicationModelCapabilities(ctx, created.SessionID); err == nil {
-		t.Fatal("Host principal substituted application scope")
+	if _, err = host.host.SessionModelCapabilities(ctx, created.SessionID); err != nil {
+		t.Fatal("Host principal could not read its Session model capabilities", err)
 	}
 	for _, name := range []string{"screen-text", "screen-vision", "screen-unknown", "screen-vision"} {
-		configuration, err := a.ApplicationConfiguration(ctx, created.SessionID)
+		configuration, err := a.SessionConfiguration(ctx, created.SessionID)
 		if err != nil {
 			t.Fatal(err)
 		}
 		selected := "custom/" + name
-		updated, err := a.UpdateApplicationConfiguration(ctx, created.SessionID, application.UpdateConfigurationRequest{OperationID: "update-" + name + "-" + strconv.FormatUint(configuration.Revision, 10), ExpectedConfigurationRevision: configuration.Revision, Patch: application.ConfigurationPatch{Model: &selected}})
+		updated, err := configurationResult(a.UpdateSessionConfiguration(ctx, configurationCommand(created.SessionID, sessionprofile.UpdateConfigurationRequest{OperationID: "update-" + name + "-" + strconv.FormatUint(configuration.Revision, 10), ExpectedConfigurationRevision: configuration.Revision, Patch: sessionprofile.ConfigurationPatch{Model: &selected}})))
 		if err != nil {
 			t.Fatal(err)
 		}
-		got, err := a.ApplicationModelCapabilities(ctx, created.SessionID)
+		got, err := a.SessionModelCapabilities(ctx, created.SessionID)
 		if err != nil || got.Model != selected || got.SessionID != created.SessionID || got.ConfigurationRevision != updated.Revision {
 			t.Fatal(got, err)
 		}

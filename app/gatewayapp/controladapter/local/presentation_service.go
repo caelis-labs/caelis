@@ -90,7 +90,7 @@ func (s *PresentationService) PresentationSnapshot(ctx context.Context, principa
 }
 
 func (s *PresentationService) PresentationCapabilities(ctx context.Context, principal appserver.Principal) (appserver.PresentationCapabilities, error) {
-	if err := authorizeUnscopedHostCapability(principal); err != nil {
+	if err := authorizeHostCapability(principal); err != nil {
 		return appserver.PresentationCapabilities{}, err
 	}
 	caps, err := s.source.PromptCapabilities(ctx)

@@ -7,7 +7,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
-	"github.com/caelis-labs/caelis/control/application"
+	"github.com/caelis-labs/caelis/control/sessionprofile"
 	"github.com/caelis-labs/caelis/control/sessionvisibility"
 	"github.com/caelis-labs/caelis/internal/sandboxrouter"
 )
@@ -19,7 +19,7 @@ func (a *workspaceConfigAssembler) assembleObservationSnapshot(ctx context.Conte
 	if !sessionvisibility.IsApplicationSession(active) {
 		return a.assembleSnapshot(ctx, active, sessionRuntimeActivity{}, sessions)
 	}
-	binding, err := a.deps.authorities.applications.BindingForSession(ctx, active.SessionID)
+	binding, err := a.deps.authorities.sessionProfiles.BindingForSession(ctx, active.SessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -48,13 +48,13 @@ func (a *workspaceConfigAssembler) assembleObservationSnapshot(ctx context.Conte
 		authorities: a.deps.authorities, sessions: sessions, workspace: workspace, lookup: lookup,
 		activation: &sessionRuntimeActivation{modelCatalog: a.deps.modelCatalog, sessionRef: active.SessionRef},
 		activeRuntime: stackRuntimeConfig{ContextWindow: a.deps.processConfig.snapshot().runtime.ContextWindow,
-			ApprovalMode: application.EffectiveApprovalMode(binding.Profile), PolicyProfile: mode},
+			ApprovalMode: sessionprofile.EffectiveApprovalMode(binding.Profile), PolicyProfile: mode},
 		sandbox: SandboxConfig{RequestedType: backend},
 	}}, nil
 }
 
-func (s *runtimeComposition) applicationRuntimeState(ctx context.Context, binding application.Binding) (SessionRuntimeState, error) {
-	configuration, err := s.authorities.applications.Configuration(ctx, binding.Scope, binding.SessionID)
+func (s *runtimeComposition) applicationRuntimeState(ctx context.Context, binding sessionprofile.Binding) (SessionRuntimeState, error) {
+	configuration, err := s.authorities.sessionProfiles.Configuration(ctx, binding.Scope, binding.SessionID)
 	if err != nil {
 		return SessionRuntimeState{}, err
 	}
@@ -73,24 +73,24 @@ func (s *runtimeComposition) applicationRuntimeState(ctx context.Context, bindin
 	mode := applicationPolicyMode(binding.Profile)
 	return SessionRuntimeState{ModelID: configured.ID, ModelAlias: configured.Alias,
 		ReasoningEffort: configured.ReasoningEffort, FastMode: configuration.Profile.ServiceTier == "priority",
-		SessionMode: application.EffectiveApprovalMode(binding.Profile), PolicyProfile: mode}, nil
+		SessionMode: sessionprofile.EffectiveApprovalMode(binding.Profile), PolicyProfile: mode}, nil
 }
 
 // applicationCompletionSkills shares the Skill catalog scanner, including its
 // exact explicit selections and damaged-item behavior, without starting MCP.
 func (s *runtimeComposition) applicationCompletionSkills() (skill.Catalog, bool) {
-	if s == nil || s.activation == nil || s.authorities.applications == nil {
+	if s == nil || s.activation == nil || s.authorities.sessionProfiles == nil {
 		return skill.Catalog{}, false
 	}
 	ctx := context.Background()
-	binding, err := s.authorities.applications.BindingForSession(ctx, s.activation.sessionRef.SessionID)
-	if errors.Is(err, application.ErrNotFound) {
+	binding, err := s.authorities.sessionProfiles.BindingForSession(ctx, s.activation.sessionRef.SessionID)
+	if errors.Is(err, sessionprofile.ErrNotFound) {
 		return skill.Catalog{}, false
 	}
 	if err != nil {
 		return skill.Catalog{}, true
 	}
-	configuration, err := s.authorities.applications.Configuration(ctx, binding.Scope, binding.SessionID)
+	configuration, err := s.authorities.sessionProfiles.Configuration(ctx, binding.Scope, binding.SessionID)
 	if err != nil {
 		return skill.Catalog{}, true
 	}

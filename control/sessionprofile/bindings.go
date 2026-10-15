@@ -1,0 +1,362 @@
+package sessionprofile
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/url"
+	"path/filepath"
+	"regexp"
+	"strings"
+
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
+	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/google/jsonschema-go/jsonschema"
+)
+
+var toolName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_.-]{0,127}$`)
+var mcpServerName = regexp.MustCompile(`^[a-z][a-z0-9_]{0,31}$`)
+
+// ValidateProfile requires a complete profile. Execution authority is separate
+// from hot configuration; Host instructions, models and catalogs are not inherited.
+// Process environment inheritance follows the separate SDK execution contract.
+func ValidateProfile(p Profile) error {
+	if !validID(p.Version) || !validID(p.Model) || !validID(p.ToolsVersion) {
+		return fmt.Errorf("%w: explicit profile version, model and tools_version required", ErrInvalid)
+	}
+	if p.Execution != "tools-only" && p.Execution != "workspace-write" {
+		return fmt.Errorf("%w: execution must be tools-only or workspace-write", ErrInvalid)
+	}
+	if p.ExecutionConfig != nil && p.Execution != "workspace-write" {
+		return fmt.Errorf("%w: execution_config requires native workspace-write execution", ErrInvalid)
+	}
+	if err := sandbox.ValidateExecutionConfig(p.ExecutionConfig); err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalid, err)
+	}
+	if p.Inherit != (Inheritance{}) {
+		return fmt.Errorf("%w: configuration inheritance is unavailable", ErrUnsupported)
+	}
+	if p.Workspace.CWD != "" && (!filepath.IsAbs(p.Workspace.CWD) || strings.TrimSpace(p.Workspace.CWD) != p.Workspace.CWD) {
+		return fmt.Errorf("%w: workspace cwd must be an absolute path", ErrInvalid)
+	}
+	if len(p.Workspace.Access) > 32 {
+		return fmt.Errorf("%w: too many workspace access directories", ErrInvalid)
+	}
+	for _, access := range p.Workspace.Access {
+		if !filepath.IsAbs(access.Path) || strings.TrimSpace(access.Path) != access.Path || (access.Mode != "read-only" && access.Mode != "read-write") {
+			return fmt.Errorf("%w: workspace access requires an absolute path and read-only or read-write mode", ErrInvalid)
+		}
+	}
+	switch p.Permissions.Mode {
+	case "", "workspace-write":
+	case "danger-full-access":
+		if p.Execution != "workspace-write" {
+			return fmt.Errorf("%w: full access requires native workspace-write execution", ErrUnsupported)
+		}
+	default:
+		return fmt.Errorf("%w: unsupported application permission mode", ErrUnsupported)
+	}
+	if err := validateReviewer(p); err != nil {
+		return err
+	}
+	if len(p.Instructions) > 1<<20 || len(p.Tools) > 128 || len(p.MCPServers) > 16 || len(p.SkillDirs)+len(p.SkillRoots) > 64 {
+		return fmt.Errorf("%w: profile size limit", ErrInvalid)
+	}
+	seenServers := map[string]bool{}
+	for _, server := range p.MCPServers {
+		if !mcpServerName.MatchString(server.Name) || seenServers[server.Name] {
+			return fmt.Errorf("%w: duplicate or invalid MCP server name %q", ErrInvalid, server.Name)
+		}
+		seenServers[server.Name] = true
+		if len(server.Command) > 4096 || len(server.WorkDir) > 4096 || len(server.URL) > 8192 {
+			return fmt.Errorf("%w: MCP launch or URL field is too long", ErrInvalid)
+		}
+		if len(server.Args) > 64 {
+			return fmt.Errorf("%w: too many MCP arguments", ErrInvalid)
+		}
+		for _, arg := range server.Args {
+			if len(arg) > 4096 {
+				return fmt.Errorf("%w: MCP argument is too long", ErrInvalid)
+			}
+		}
+		switch server.Transport {
+		case "stdio":
+			if strings.TrimSpace(server.Command) == "" || !filepath.IsAbs(server.WorkDir) || server.URL != "" {
+				return fmt.Errorf("%w: stdio MCP requires command and absolute work_dir without url", ErrInvalid)
+			}
+		case "streamable_http", "sse":
+			endpoint, err := url.Parse(server.URL)
+			if err != nil || endpoint.Host == "" || endpoint.User != nil || (endpoint.Scheme != "http" && endpoint.Scheme != "https") || server.Command != "" || server.WorkDir != "" || len(server.Args) != 0 {
+				return fmt.Errorf("%w: remote MCP requires an HTTP url without command fields", ErrInvalid)
+			}
+		default:
+			return fmt.Errorf("%w: unsupported MCP transport", ErrUnsupported)
+		}
+	}
+	for _, path := range append(append([]string(nil), p.SkillDirs...), p.SkillRoots...) {
+		if !filepath.IsAbs(path) || strings.TrimSpace(path) != path || path == "" {
+			return fmt.Errorf("%w: Skill directories and roots must be absolute paths", ErrInvalid)
+		}
+	}
+	if p.Execution == "tools-only" && len(p.NativeTools) != 0 {
+		return fmt.Errorf("%w: native tools require workspace-write execution", ErrInvalid)
+	}
+	knownNative := map[string]bool{"Read": true, "ViewImage": true, "Write": true, "Patch": true, "Glob": true, "Grep": true, "RunCommand": true, "Task": true}
+	seenNative := make(map[string]bool, len(p.NativeTools))
+	for _, name := range p.NativeTools {
+		if !knownNative[name] || seenNative[name] {
+			return fmt.Errorf("%w: unknown or duplicate native tool %q", ErrInvalid, name)
+		}
+		seenNative[name] = true
+	}
+	availableNative := seenNative
+	if p.NativeTools == nil {
+		availableNative = knownNative
+	}
+	seen := map[string]bool{}
+	for _, def := range p.Tools {
+		if !toolName.MatchString(def.Name) || seen[def.Name] {
+			return fmt.Errorf("%w: duplicate or invalid tool name", ErrInvalid)
+		}
+		seen[def.Name] = true
+		if (len(p.SkillDirs)+len(p.SkillRoots) > 0 && def.Name == "Skill") || (len(p.MCPServers) > 0 && def.Name == tool.ToolSearchToolName) {
+			return fmt.Errorf("%w: callback collides with an assembled capability tool", ErrInvalid)
+		}
+		for _, server := range p.MCPServers {
+			if strings.HasPrefix(strings.ToLower(def.Name), server.Name+"__") {
+				return fmt.Errorf("%w: callback name %q reserves MCP server %q namespace", ErrInvalid, def.Name, server.Name)
+			}
+		}
+		if def.ApprovalPolicy != "" && def.ApprovalPolicy != "direct" && def.ApprovalPolicy != "required" {
+			return fmt.Errorf("%w: unsupported callback approval_policy for %s", ErrInvalid, def.Name)
+		}
+		// SDK tool dispatch is exact-case. Only actually selected native
+		// names and the always-present resource bridge are reserved.
+		if p.Execution == "workspace-write" && (availableNative[def.Name] || def.Name == "ReadResource" || def.Name == "PublishArtifact") {
+			return fmt.Errorf("%w: callback collides with a native execution tool", ErrInvalid)
+		}
+		if len(def.Description) > 65536 {
+			return ErrInvalid
+		}
+		if _, err := resolveSchema(def.InputSchema); err != nil {
+			return fmt.Errorf("%w: tool %s: %w", ErrInvalid, def.Name, err)
+		}
+		if def.ResultFormat != "" && def.ResultFormat != ResultFormatContentV1 {
+			return fmt.Errorf("%w: tool result_format", ErrUnsupported)
+		}
+		if def.OutputSchema != nil {
+			if def.ResultFormat != ResultFormatContentV1 {
+				return fmt.Errorf("%w: output_schema requires content-v1", ErrInvalid)
+			}
+			if _, err := resolveSchema(def.OutputSchema); err != nil {
+				return fmt.Errorf("%w: invalid tool output_schema", ErrInvalid)
+			}
+		}
+	}
+	return nil
+}
+func resolveSchema(value map[string]any) (*jsonschema.Resolved, error) {
+	if value == nil || value["type"] != "object" {
+		return nil, fmt.Errorf("schema must explicitly have object type")
+	}
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	if len(raw) > 256<<10 {
+		return nil, fmt.Errorf("schema exceeds size limit")
+	}
+	var schema jsonschema.Schema
+	if err = json.Unmarshal(raw, &schema); err != nil {
+		return nil, err
+	}
+	// Resolve's nil loader rejects remote references without making network requests.
+	return schema.Resolve(nil)
+}
+
+// ValidateSource verifies Control-bound prompt provenance, not background grant
+// liveness. Only AdmitBackgroundSource can attach an authorized background source.
+func ValidateSource(source Source) error {
+	if !validID(source.OperationID) {
+		return fmt.Errorf("%w: source operation required", ErrInvalid)
+	}
+	switch source.Kind {
+	case "user", "application_summary", "external_material":
+		if source.GrantID != "" || source.AuthorizedSource != "" {
+			return ErrInvalid
+		}
+	case "authorized_background":
+		if !validID(source.GrantID) || !validID(source.AuthorizedSource) {
+			return ErrInvalid
+		}
+	default:
+		return fmt.Errorf("%w: unsupported input source", ErrUnsupported)
+	}
+	return nil
+}
+
+// PutBinding persists a Host-created Session binding. Every field, including the
+// creation digest and complete profile, participates in immutable idempotency.
+func (s *Store) PutBinding(ctx context.Context, b Binding) error {
+	if !validID(b.SessionID) || !validID(b.CreationDigest) || b.Archived {
+		return ErrInvalid
+	}
+	if b.Child != nil && (!validID(b.Child.RootSessionID) || !validID(b.Child.ParentSessionID) || b.Child.ParentSessionID == b.SessionID || ValidateSource(b.Child.Source) != nil) {
+		return ErrInvalid
+	}
+	body, err := encode(b)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err = s.checkScope(ctx, b.Scope); err != nil {
+		return err
+	}
+	var previous []byte
+	err = s.db.QueryRowContext(ctx, `SELECT body FROM session_profiles WHERE session=?`, b.SessionID).Scan(&previous)
+	if err == nil {
+		// Compare the decoded immutable value, not historical encoder key
+		// order or the current tool catalog's rules for new bindings.
+		var old Binding
+		if err = json.Unmarshal(previous, &old); err != nil {
+			return err
+		}
+		canonical, err := encode(old)
+		if err != nil {
+			return err
+		}
+		if !bytes.Equal(canonical, body) {
+			return ErrConflict
+		}
+		return nil
+	}
+	if !errors.Is(notFound(err), ErrNotFound) {
+		return err
+	}
+	if err := ValidateProfile(b.Profile); err != nil {
+		return err
+	}
+	config := Configuration{SessionID: b.SessionID, Revision: 1, Profile: b.Profile}
+	configBody, err := encode(config)
+	if err != nil {
+		return err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err = tx.ExecContext(ctx, `INSERT INTO session_profiles(session,principal,body) VALUES(?,?,?)`, b.SessionID, b.PrincipalID, body); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `INSERT INTO session_configurations(session,revision,body) VALUES(?,?,?)`, b.SessionID, config.Revision, configBody); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+func (s *Store) binding(ctx context.Context, scope Scope, id string) (Binding, error) {
+	if err := s.checkScope(ctx, scope); err != nil {
+		return Binding{}, err
+	}
+	var raw []byte
+	err := s.db.QueryRowContext(ctx, `SELECT body FROM session_profiles WHERE session=? AND principal=? `, id, scope.PrincipalID).Scan(&raw)
+	if err != nil {
+		return Binding{}, notFound(err)
+	}
+	var b Binding
+	err = json.Unmarshal(raw, &b)
+	return b, err
+}
+
+// GetBinding returns the immutable creation profile and ownership in the caller's
+// exact connection scope. Configuration is the authoritative desired profile.
+func (s *Store) GetBinding(ctx context.Context, scope Scope, id string) (Binding, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.binding(ctx, scope, id)
+}
+
+// BindingForSession is a trusted Host lookup for authorizers and Runtime assembly.
+// A public adapter must use GetBinding after authenticating its scope.
+func (s *Store) BindingForSession(ctx context.Context, id string) (Binding, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return Binding{}, ErrClosed
+	}
+	var raw []byte
+	if err := s.db.QueryRowContext(ctx, `SELECT body FROM session_profiles WHERE session=?`, id).Scan(&raw); err != nil {
+		return Binding{}, notFound(err)
+	}
+	var b Binding
+	err := json.Unmarshal(raw, &b)
+	return b, err
+}
+
+// ListBindings returns creation profiles, not latest desired configurations, for
+// bindings owned by this exact connection.
+func (s *Store) ListBindings(ctx context.Context, scope Scope) ([]Binding, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.checkScope(ctx, scope); err != nil {
+		return nil, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT body FROM session_profiles WHERE principal=?  ORDER BY session`, scope.PrincipalID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	out := []Binding{}
+	for rows.Next() {
+		var raw []byte
+		var b Binding
+		if err = rows.Scan(&raw); err != nil {
+			return nil, err
+		}
+		if err = json.Unmarshal(raw, &b); err != nil {
+			return nil, err
+		}
+		out = append(out, b)
+	}
+	return out, rows.Err()
+}
+
+// ArchiveBinding seals a binding after the Host proves the canonical close.
+// This trusted completion does not require a live lease or grant new admission;
+// the caller must retain the original operation's committed close receipt.
+// Read-only history and resources remain available under the original scope.
+func (s *Store) ArchiveBinding(ctx context.Context, scope Scope, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	b, err := s.binding(ctx, scope, id)
+	if err != nil {
+		return err
+	}
+	if b.Archived {
+		return nil
+	}
+	b.Archived = true
+	body, err := encode(b)
+	if err != nil {
+		return err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err = tx.ExecContext(ctx, `UPDATE session_profiles SET body=? WHERE session=? AND principal=?`, body, id, scope.PrincipalID); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE client_tool_calls SET state=CASE state WHEN 'pending' THEN 'cancelled' ELSE 'unknown' END WHERE principal=? AND session=? AND state IN ('pending','claimed')`, scope.PrincipalID, id); err != nil {
+		return err
+	}
+	if err = tx.Commit(); err != nil {
+		return err
+	}
+	s.signal()
+	return nil
+}

@@ -2,25 +2,27 @@ package appserver
 
 import (
 	"context"
+	"database/sql"
 	"errors"
+	"github.com/caelis-labs/caelis/control/internal/operationreceipt"
 	"slices"
 	"testing"
 
-	"github.com/caelis-labs/caelis/control/application"
+	"github.com/caelis-labs/caelis/control/sessionprofile"
 )
 
 func TestApplicationModelCapabilitiesAreScopedAndFollowDesiredProfile(t *testing.T) {
 	store, _ := applicationTestStore(t)
-	a := enrollTestApplication(t, store, "owner", "cap-a", "a")
-	b := enrollTestApplication(t, store, "owner", "cap-b", "b")
-	scope, _ := ApplicationScope(a)
+	a := Principal{ID: "owner"}
+	b := Principal{ID: "other"}
+	scope, _ := SessionScope(a)
 	profile := applicationTestProfile()
 	profile.Model = "vision"
-	if err := store.PutBinding(t.Context(), application.Binding{Scope: scope, SessionID: "owned", Profile: profile, CreationDigest: "digest"}); err != nil {
+	if err := store.PutBinding(t.Context(), sessionprofile.Binding{Scope: scope, SessionID: "owned", Profile: profile, CreationDigest: "digest"}); err != nil {
 		t.Fatal(err)
 	}
 	calls := 0
-	service := &ApplicationService{config: ApplicationServiceConfig{Store: store, ValidateProfile: func(context.Context, application.Profile) error { return nil }, ModelImageInput: func(_ context.Context, p application.Profile) (*bool, error) {
+	service := &SessionProfileService{config: SessionProfileServiceConfig{Store: store, ValidateProfile: func(context.Context, sessionprofile.Profile) error { return nil }, ModelImageInput: func(_ context.Context, p sessionprofile.Profile) (*bool, error) {
 		calls++
 		if p.Model == "unknown" {
 			return nil, nil
@@ -28,11 +30,11 @@ func TestApplicationModelCapabilitiesAreScopedAndFollowDesiredProfile(t *testing
 		v := p.Model == "vision"
 		return &v, nil
 	}}}
-	if !slices.Contains(service.Capabilities(), application.CapabilityModelCapabilities) {
+	if !slices.Contains(service.Capabilities(), sessionprofile.CapabilityModelCapabilities) {
 		t.Fatal("bound capability not advertised")
 	}
-	for _, foreign := range []Principal{b, {ID: "owner"}, {}} {
-		if _, err := service.ApplicationModelCapabilities(t.Context(), foreign, "owned"); err == nil {
+	for _, foreign := range []Principal{b, {}} {
+		if _, err := service.SessionModelCapabilities(t.Context(), foreign, "owned"); err == nil {
 			t.Fatal("cross-scope capability read allowed")
 		}
 	}
@@ -42,13 +44,13 @@ func TestApplicationModelCapabilitiesAreScopedAndFollowDesiredProfile(t *testing
 	revision := uint64(1)
 	for i, name := range []string{"vision", "text", "unknown", "vision"} {
 		if i > 0 {
-			next, err := service.UpdateApplicationConfiguration(t.Context(), a, "owned", application.UpdateConfigurationRequest{OperationID: "model-" + name, ExpectedConfigurationRevision: revision, Patch: application.ConfigurationPatch{Model: &name}})
+			next, err := store.UpdateConfiguration(operationreceipt.WithTransaction(t.Context(), func(context.Context, *sql.Tx, []byte) error { return nil }), scope, "owned", sessionprofile.UpdateConfigurationRequest{OperationID: "model-" + name, ExpectedConfigurationRevision: revision, Patch: sessionprofile.ConfigurationPatch{Model: &name}}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
 			revision = next.Revision
 		}
-		got, err := service.ApplicationModelCapabilities(t.Context(), a, "owned")
+		got, err := service.SessionModelCapabilities(t.Context(), a, "owned")
 		if err != nil || got.SessionID != "owned" || got.Model != name || got.ConfigurationRevision != revision {
 			t.Fatal(got, err)
 		}
@@ -61,10 +63,10 @@ func TestApplicationModelCapabilitiesAreScopedAndFollowDesiredProfile(t *testing
 		}
 	}
 	service.config.ModelImageInput = nil
-	if slices.Contains(service.Capabilities(), application.CapabilityModelCapabilities) {
+	if slices.Contains(service.Capabilities(), sessionprofile.CapabilityModelCapabilities) {
 		t.Fatal("unbound capability advertised")
 	}
-	if _, err := service.ApplicationModelCapabilities(t.Context(), a, "owned"); !errors.Is(err, application.ErrUnsupported) {
+	if _, err := service.SessionModelCapabilities(t.Context(), a, "owned"); !errors.Is(err, sessionprofile.ErrUnsupported) {
 		t.Fatal(err)
 	}
 }

@@ -9,38 +9,47 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/caelis-labs/caelis/control/application"
 	"github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/sessionprofile"
 )
 
 func TestApplicationConfigurationAdditionsPreserveScopeCASAndReceipt(t *testing.T) {
-	store, err := application.Open(filepath.Join(t.TempDir(), "control.sqlite"))
+	path := filepath.Join(t.TempDir(), "control.sqlite")
+	store, err := sessionprofile.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	token := "app-client-" + strings.Repeat("a", 64)
-	connection, err := store.Register(t.Context(), "owner", application.Registration{OperationID: "register", Name: "fixture", Credential: token})
+	token := "test-token"
+	scope := sessionprofile.PrincipalScope("trusted-owner")
+	operations, err := appserver.NewSQLiteOperationStoreWithConfig(path, appserver.OperationRetentionConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	scope := application.Scope{PrincipalID: connection.PrincipalID, ApplicationID: connection.ApplicationID, ConnectionID: connection.ConnectionID}
-	profile := application.Profile{Version: "role/1", Execution: "tools-only", Instructions: "original", Model: "main", ToolsVersion: "tools/1"}
-	if err := store.PutBinding(t.Context(), application.Binding{Scope: scope, SessionID: "owned", CreationDigest: "digest", Profile: profile}); err != nil {
+	defer operations.Close()
+	if err := operations.Initialize(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	service, err := appserver.NewApplicationService(appserver.ApplicationServiceConfig{Store: store, Commands: &appserver.CommandService{}, Sessions: &fakeService{}, ValidateProfile: func(context.Context, application.Profile) error { return nil }})
+	commands, err := appserver.NewCommandService(appserver.CommandServiceConfig{Authorizer: configurationTestAuthorizer{}, Operations: operations, Backend: configurationTestBackend{store}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile := sessionprofile.Profile{Version: "role/1", Execution: "tools-only", Instructions: "original", Model: "main", ToolsVersion: "tools/1"}
+	if err := store.PutBinding(t.Context(), sessionprofile.Binding{Scope: scope, SessionID: "owned", CreationDigest: "digest", Profile: profile}); err != nil {
+		t.Fatal(err)
+	}
+	service, err := appserver.NewSessionProfileService(appserver.SessionProfileServiceConfig{Store: store, Commands: commands, Sessions: &fakeService{}, ValidateProfile: func(context.Context, sessionprofile.Profile) error { return nil }})
 	if err != nil {
 		t.Fatal(err)
 	}
 	services := testAppServerServices(&fakeService{}, staticStatusService{})
-	services.Applications = service
+	services.SessionProfiles = service
 	server, err := New(HandlerConfig{Services: services, Authenticator: testAuthenticator(), AllowedHosts: []string{"example.test"}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	post := func(key, body, credential string) *httptest.ResponseRecorder {
-		r := httptest.NewRequest(http.MethodPost, apiPrefix+"/application/sessions/owned/configuration", strings.NewReader(body))
+		r := httptest.NewRequest(http.MethodPost, apiPrefix+"/sessions/owned/configuration", strings.NewReader(body))
 		r.Host = "example.test"
 		r.Header.Set("Authorization", "Bearer "+credential)
 		r.Header.Set("Content-Type", "application/json")
@@ -54,17 +63,18 @@ func TestApplicationConfigurationAdditionsPreserveScopeCASAndReceipt(t *testing.
 	if first.Code != http.StatusOK {
 		t.Fatalf("update %d: %s", first.Code, first.Body.String())
 	}
-	// The original strict application reader still accepts the Host's unchanged
-	// response shape; unknown request fields never become persisted profile data.
 	var raw struct {
-		Revision string              `json:"revision"`
-		Profile  application.Profile `json:"profile"`
+		Configuration struct {
+			Revision string                 `json:"revision"`
+			Profile  sessionprofile.Profile `json:"profile"`
+		} `json:"configuration"`
 	}
 	if err := json.Unmarshal(first.Body.Bytes(), &raw); err != nil {
 		t.Fatal(err)
 	}
-	if raw.Revision != "2" || raw.Profile.Instructions != "updated" || raw.Profile.NativeTools == nil || len(raw.Profile.NativeTools) != 0 || raw.Profile.Model != "main" {
-		t.Fatalf("configuration changed incorrectly: %+v", raw)
+	config := raw.Configuration
+	if config.Revision != "2" || config.Profile.Instructions != "updated" || config.Profile.NativeTools == nil || len(config.Profile.NativeTools) != 0 || config.Profile.Model != "main" {
+		t.Fatalf("configuration=%+v", config)
 	}
 	replay := post("update", body, token)
 	if replay.Code != 200 || replay.Body.String() != first.Body.String() {
@@ -82,4 +92,22 @@ func TestApplicationConfigurationAdditionsPreserveScopeCASAndReceipt(t *testing.
 	if err != nil || current.Revision != 2 || current.Profile.Instructions != "updated" {
 		t.Fatalf("unexpected effect: %+v %v", current, err)
 	}
+}
+
+type configurationTestAuthorizer struct{}
+
+func (configurationTestAuthorizer) Authorize(_ context.Context, p appserver.Principal, _ appserver.Action, id string) error {
+	if p.ID != "trusted-owner" || id != "owned" {
+		return appserver.ErrUnauthorized
+	}
+	return nil
+}
+
+type configurationTestBackend struct{ store *sessionprofile.Store }
+
+func (b configurationTestBackend) ExecuteControlCommand(ctx context.Context, p appserver.Principal, _ appserver.Action, request any) (appserver.CommandResult, error) {
+	req := request.(appserver.UpdateSessionConfigurationRequest)
+	scope, _ := appserver.SessionScope(p)
+	config, err := b.store.UpdateConfiguration(ctx, scope, req.SessionID, sessionprofile.UpdateConfigurationRequest{OperationID: req.OperationID, ExpectedConfigurationRevision: req.ExpectedConfigurationRevision, Patch: req.Patch}, nil)
+	return appserver.CommandResult{Outcome: appserver.OutcomeCommitted, Configuration: &config}, err
 }

@@ -101,7 +101,7 @@ jobs:
       - name: Native application execution tests
         env:
           CAELIS_TEST_APPLICATION_NATIVE: '1'
-        run: bash scripts/go_test_nonempty.sh ./app/gatewayapp '^Test(Application(Native|DirectoryBindings|LeaseWithdrawal|ResourceBridge|PublishArtifact|ReadResource|ArtifactChanged|ReviewerNative|ExecutionEnvironmentAfterHostApproval)|ExternalExecutionClientHTTP|SharedWorkerNativeHTTP)' linux-application-native -count=1
+        run: bash scripts/go_test_nonempty.sh ./app/gatewayapp '^Test(Application(Native|DirectoryBindings|ResourceBridge|PublishArtifact|ReadResource|ArtifactChanged|ReviewerNative|ExecutionEnvironmentAfterHostApproval)|SessionRuntimeClosurePreventsDelayedNativeEffects|ExternalExecutionClientHTTP|SharedWorkerNativeHTTP)' linux-application-native -count=1
 
       - name: Build
         run: make build

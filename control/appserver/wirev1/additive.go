@@ -8,9 +8,9 @@ import (
 
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	"github.com/caelis-labs/caelis/control/agents"
-	"github.com/caelis-labs/caelis/control/application"
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/taskstream"
+	"github.com/caelis-labs/caelis/control/sessionprofile"
 	"github.com/caelis-labs/caelis/control/status"
 	"github.com/caelis-labs/caelis/control/uipreferences"
 )
@@ -22,7 +22,7 @@ import (
 func knownWireFields(raw []byte, target any) ([]byte, error) {
 	// Extend this list only with matching schema and production-path tests.
 	switch target.(type) {
-	case *struct{}, *application.CallResult, *TaskDirectorySnapshot,
+	case *struct{}, *sessionprofile.CallResult, *TaskDirectorySnapshot,
 		*appserver.HostStatus,
 		*appserver.SessionState,
 		*appserver.PresentationCapabilities,
@@ -92,19 +92,20 @@ func knownWireFields(raw []byte, target any) ([]byte, error) {
 		*appserver.UseModelRequest,
 		*appserver.WorkspaceTrustRequest,
 		*appserver.CreateSessionRequest, *appserver.CloseSessionRequest,
-		*appserver.CompactSessionRequest, *appserver.CreateWorkerRequest,
+		*appserver.CompactSessionRequest,
 		*appserver.PromptRequest, *appserver.SteerRequest, *appserver.CancelRequest,
-		*appserver.ResolveApprovalRequest, *appserver.CreateApplicationSessionRequest,
-		*appserver.ApplicationPromptRequest, *appserver.ApplicationResourceRequest,
-		*application.Registration, *application.BackgroundGrantRequest,
-		*application.UpdateConfigurationRequest,
+		*appserver.ResolveApprovalRequest,
+		*appserver.SessionResourceRequest,
+		*appserver.CreateSessionBackgroundGrantRequest, *appserver.RevokeSessionBackgroundGrantRequest,
+		*sessionprofile.BackgroundGrantRequest,
+		*sessionprofile.UpdateConfigurationRequest, *appserver.UpdateSessionConfigurationRequest,
 		*appserver.ServerInfo, *appserver.CommandResult,
-		*application.Connection, *application.Configuration, *application.Binding,
-		*[]application.Worker, *application.Worker, *[]application.Binding, *application.Call, *[]application.Call,
-		*application.Resource, *appserver.ApplicationResourceContent,
-		*application.ModelCapabilities, *application.ReviewerState, *application.MCPStatus,
-		*application.BackgroundGrant, *[]application.BackgroundGrant,
-		*appserver.ApplicationOperation,
+		*sessionprofile.Configuration, *sessionprofile.Binding,
+		**[]sessionprofile.Binding, *sessionprofile.Call, *[]sessionprofile.Call,
+		*sessionprofile.Resource, *appserver.SessionResourceContent,
+		*sessionprofile.ModelCapabilities, *sessionprofile.ReviewerState, *sessionprofile.MCPStatus,
+		*sessionprofile.BackgroundGrant, *[]sessionprofile.BackgroundGrant,
+
 		*uipreferences.Preferences:
 		return filterWireFields(raw, reflect.TypeOf(target), 0)
 	default:
@@ -209,14 +210,14 @@ func wireObjectFields(typ reflect.Type) map[string]reflect.Type {
 }
 
 func reservedWireField(typ reflect.Type, name string) bool {
-	if typ == reflect.TypeFor[application.ConfigurationPatch]() {
-		for field := range wireObjectFields(reflect.TypeFor[application.Profile]()) {
+	if typ == reflect.TypeFor[sessionprofile.ConfigurationPatch]() {
+		for field := range wireObjectFields(reflect.TypeFor[sessionprofile.Profile]()) {
 			if strings.EqualFold(field, name) {
 				return true
 			}
 		}
 	}
-	if typ == reflect.TypeFor[application.MCPServer]() {
+	if typ == reflect.TypeFor[sessionprofile.MCPServer]() {
 		for _, field := range []string{"env", "environment", "headers", "bearer_token"} {
 			if strings.EqualFold(field, name) {
 				return true

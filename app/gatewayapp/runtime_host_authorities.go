@@ -11,7 +11,6 @@ import (
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/memoryhost"
 	controladapterhost "github.com/caelis-labs/caelis/control/adapterhost"
-	"github.com/caelis-labs/caelis/control/application"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/collaboration"
 	"github.com/caelis-labs/caelis/control/memorybinding"
@@ -19,6 +18,7 @@ import (
 	"github.com/caelis-labs/caelis/control/modelconfig/credentialstore"
 	"github.com/caelis-labs/caelis/control/modelconfig/grokauth"
 	"github.com/caelis-labs/caelis/control/modelconfig/providerusage"
+	"github.com/caelis-labs/caelis/control/sessionprofile"
 	"github.com/caelis-labs/caelis/control/streamspool"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/endpoint"
 	v1alpha1 "github.com/caelis-labs/memory/api/memory/v1alpha1"
@@ -43,7 +43,7 @@ type taskOutputLifecycle interface {
 // the Host root and detached Session Runtime instances. Copying this value
 // copies references only; Runtime compositions never own these lifecycles.
 type runtimeHostAuthorities struct {
-	applications            *application.Store
+	sessionProfiles         *sessionprofile.Store
 	applicationChildClients *applicationChildClientFactory
 	collaboration           *collaboration.Service
 	collaborationDone       <-chan struct{}

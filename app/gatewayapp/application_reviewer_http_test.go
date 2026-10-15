@@ -14,10 +14,10 @@ import (
 	"time"
 
 	sessionapi "github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/control/application"
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/httpclient"
+	"github.com/caelis-labs/caelis/control/sessionprofile"
 )
 
 // reviewerHTTPProvider is a deterministic real-provider-adapter transport. Main
@@ -115,21 +115,21 @@ func setupReviewerHTTP(t *testing.T, ctx context.Context, root string, provider 
 			t.Fatalf("connect %s: %+v %v", model, connected, err)
 		}
 	}
-	client, _ := registerApplicationHTTP(t, ctx, host, "reviewed", filepath.Join(root, "application.credential"))
+	client, _ := connectSessionOwnerHTTP(t, ctx, host, "owner", filepath.Join(root, "application.credential"))
 	profile := applicationHTTPProfile()
 	profile.Permissions.ApprovalMode = "auto-review"
-	profile.Reviewer = &application.Reviewer{Kind: "guardian", Model: "custom/reviewer-model"}
+	profile.Reviewer = &sessionprofile.Reviewer{Kind: "guardian", Model: "custom/reviewer-model"}
 	profile.Tools[0].ApprovalPolicy = "required"
 	profile.Tools[0].InputSchema = map[string]any{"type": "object", "properties": map[string]any{
 		"key":   map[string]any{"type": "string"},
 		"id":    map[string]any{"type": "integer"},
 		"range": map[string]any{"type": "object", "properties": map[string]any{"min": map[string]any{"type": "integer"}}, "additionalProperties": false},
 	}, "required": []any{"key"}, "additionalProperties": false}
-	created, err := client.CreateApplicationSession(ctx, appserver.CreateApplicationSessionRequest{WriteBase: appserver.WriteBase{OperationID: "create-reviewed"}, Profile: profile})
+	created, err := client.CreateSession(ctx, appserver.CreateSessionRequest{WriteBase: appserver.WriteBase{OperationID: "create-reviewed"}, Profile: profilePointer(profile)})
 	if err != nil || created.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("create: %+v %v", created, err)
 	}
-	state, err := client.ApplicationReviewerState(ctx, created.SessionID)
+	state, err := client.SessionReviewerState(ctx, created.SessionID)
 	if err != nil || state.Status != "ready" || state.ApprovalMode != "auto-review" || state.Reviewer == nil || state.Reviewer.Model != profile.Reviewer.Model {
 		t.Fatalf("reviewer readiness: %+v %v", state, err)
 	}
@@ -138,8 +138,8 @@ func setupReviewerHTTP(t *testing.T, ctx context.Context, root string, provider 
 
 func promptReviewerHTTP(t *testing.T, ctx context.Context, client *httpclient.Client, session, operation string) appserver.CommandResult {
 	t.Helper()
-	result, err := client.PromptApplication(ctx, appserver.ApplicationPromptRequest{
-		PromptRequest: appserver.PromptRequest{WriteBase: appserver.WriteBase{SessionID: session, OperationID: operation}, Input: "Please look up key one."}, SourceKind: "user",
+	result, err := client.Prompt(ctx, appserver.PromptRequest{
+		WriteBase: appserver.WriteBase{SessionID: session, OperationID: operation}, Input: "Please look up key one.", SourceKind: "user",
 	})
 	if err != nil || (result.Outcome != appserver.OutcomeAccepted && result.Outcome != appserver.OutcomeCommitted) {
 		t.Fatalf("prompt %s: %+v %v", operation, result, err)
@@ -289,7 +289,7 @@ func reviewerHTTPExactNumericReview(t *testing.T, events []eventstream.Envelope,
 
 func reviewerHTTPNoCallbacks(t *testing.T, ctx context.Context, client *httpclient.Client, session string) {
 	t.Helper()
-	calls, err := client.ApplicationCalls(ctx, session)
+	calls, err := client.SessionToolCalls(ctx, session)
 	if err != nil || len(calls) != 0 {
 		t.Fatalf("review created claimable callback before authorization: %+v %v", calls, err)
 	}
@@ -358,7 +358,7 @@ synced:
 	reviewerHTTPExactNumericReview(t, live, "in_progress")
 	reviewerHTTPReviewItem(t, live, prompted.Target.TurnID, "in_progress", step)
 	close(provider.release)
-	calls, err := client.WaitApplicationCalls(ctx, session)
+	calls, err := client.WaitSessionToolCalls(ctx, session)
 	if err != nil || len(calls) != 1 || calls[0].State != "pending" {
 		t.Fatalf("approved callback intent: %+v %v; requests=%+v", calls, err, provider.snapshot())
 	}
@@ -369,18 +369,18 @@ synced:
 	if call.CallID != "reviewed-provider-tool-id" || call.ItemID != step || call.TurnID != prompted.Target.TurnID || call.ConfigurationRevision != 1 || call.ToolsVersion != applicationHTTPProfile().ToolsVersion || string(call.Arguments) != args {
 		t.Fatalf("approved callback not pinned to submitted catalog/args: %+v", call)
 	}
-	claimed, err := client.ClaimApplicationCall(ctx, session, call.ID)
+	claimed, err := client.ClaimSessionToolCall(ctx, session, call.ID)
 	if err != nil || claimed.State != "claimed" || claimed.ID != call.ID || claimed.CallID != call.CallID || claimed.TurnID != call.TurnID || string(claimed.Arguments) != args {
 		t.Fatalf("claimed callback changed arguments/identity: %+v %v", claimed, err)
 	}
-	if _, err := client.ClaimApplicationCall(ctx, session, call.ID); err == nil {
+	if _, err := client.ClaimSessionToolCall(ctx, session, call.ID); err == nil {
 		t.Fatal("duplicate effect claim authorized")
 	}
-	result := application.CallResult{Outcome: "succeeded", Content: json.RawMessage(`{"value":"approved"}`)}
-	if err := client.CompleteApplicationCall(ctx, session, call.ID, result); err != nil {
+	result := sessionprofile.CallResult{Outcome: "succeeded", Content: json.RawMessage(`{"value":"approved"}`)}
+	if err := client.CompleteSessionToolCall(ctx, session, call.ID, result); err != nil {
 		t.Fatal(err)
 	}
-	if err := client.CompleteApplicationCall(ctx, session, call.ID, result); err != nil {
+	if err := client.CompleteSessionToolCall(ctx, session, call.ID, result); err != nil {
 		t.Fatalf("same result retry: %v", err)
 	}
 	waitApplicationHTTPIdle(t, ctx, client, session)
@@ -433,17 +433,17 @@ synced:
 	if len(mirrorIDs) != 0 {
 		t.Fatalf("review event IDs changed across Host restart: %+v", mirrorIDs)
 	}
-	replayed, err := client.ApplicationCall(ctx, session, call.ID)
+	replayed, err := client.SessionToolCall(ctx, session, call.ID)
 	if err != nil || replayed.State != "completed" || replayed.ID != call.ID || replayed.CallID != call.CallID || replayed.TurnID != call.TurnID || replayed.ItemID != step || string(replayed.Arguments) != args {
 		t.Fatalf("original callback receipt after restart changed arguments/identity: %+v %v", replayed, err)
 	}
 	if replayed.Result == nil || replayed.Result.Outcome != result.Outcome || string(replayed.Result.Content) != string(result.Content) {
 		t.Fatalf("restart changed terminal callback result: %+v", replayed)
 	}
-	if _, err := client.ClaimApplicationCall(ctx, session, call.ID); err == nil {
+	if _, err := client.ClaimSessionToolCall(ctx, session, call.ID); err == nil {
 		t.Fatal("restart authorized replay of a completed action")
 	}
-	restoredCalls, err := client.ApplicationCalls(ctx, session)
+	restoredCalls, err := client.SessionToolCalls(ctx, session)
 	if err != nil || len(restoredCalls) != 1 || restoredCalls[0].ID != call.ID || restoredCalls[0].State != "completed" {
 		t.Fatalf("restart created a new callback intent: %+v %v", restoredCalls, err)
 	}
@@ -454,7 +454,7 @@ synced:
 	// replacement. Session/Turn/item, not the provider ID or bare item,
 	// identifies each invocation.
 	second := promptReviewerHTTP(t, ctx, client, session, "prompt-reviewed-reused-id")
-	secondCalls, err := client.WaitApplicationCalls(ctx, session)
+	secondCalls, err := client.WaitSessionToolCalls(ctx, session)
 	if err != nil || len(secondCalls) != 1 || secondCalls[0].State != "pending" {
 		t.Fatalf("second reviewed callback: %+v %v", secondCalls, err)
 	}
@@ -463,10 +463,10 @@ synced:
 	if secondCall.ItemID != secondStep || secondCall.CallID != call.CallID || secondCall.TurnID == call.TurnID || secondCall.ID == call.ID {
 		t.Fatalf("provider ID reuse collapsed invocation identity: first=%+v second=%+v steps=%q/%q", call, secondCall, step, secondStep)
 	}
-	if _, err := client.ClaimApplicationCall(ctx, session, secondCall.ID); err != nil {
+	if _, err := client.ClaimSessionToolCall(ctx, session, secondCall.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := client.CompleteApplicationCall(ctx, session, secondCall.ID, result); err != nil {
+	if err := client.CompleteSessionToolCall(ctx, session, secondCall.ID, result); err != nil {
 		t.Fatal(err)
 	}
 	waitApplicationHTTPIdle(t, ctx, client, session)
@@ -704,23 +704,23 @@ func TestApplicationReviewerHTTPManualDirectDoesNotInheritGuardian(t *testing.T)
 	host, client, _ := setupReviewerHTTP(t, ctx, root, provider)
 	defer host.close(t)
 	profile := applicationHTTPProfile() // omitted callback policy keeps direct dispatch.
-	created, err := client.CreateApplicationSession(ctx, appserver.CreateApplicationSessionRequest{WriteBase: appserver.WriteBase{OperationID: "create-manual-direct"}, Profile: profile})
+	created, err := client.CreateSession(ctx, appserver.CreateSessionRequest{WriteBase: appserver.WriteBase{OperationID: "create-manual-direct"}, Profile: profilePointer(profile)})
 	if err != nil || created.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("create manual: %+v %v", created, err)
 	}
-	state, err := client.ApplicationReviewerState(ctx, created.SessionID)
+	state, err := client.SessionReviewerState(ctx, created.SessionID)
 	if err != nil || state.Status != "manual" || state.Reviewer != nil {
 		t.Fatalf("manual reviewer state: %+v %v", state, err)
 	}
 	promptReviewerHTTP(t, ctx, client, created.SessionID, "prompt-manual-direct")
-	calls, err := client.WaitApplicationCalls(ctx, created.SessionID)
+	calls, err := client.WaitSessionToolCalls(ctx, created.SessionID)
 	if err != nil || len(calls) != 1 || calls[0].State != "pending" {
 		t.Fatalf("manual direct callback: %+v %v", calls, err)
 	}
-	if _, err := client.ClaimApplicationCall(ctx, created.SessionID, calls[0].ID); err != nil {
+	if _, err := client.ClaimSessionToolCall(ctx, created.SessionID, calls[0].ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := client.CompleteApplicationCall(ctx, created.SessionID, calls[0].ID, application.CallResult{Outcome: "succeeded", Content: json.RawMessage(`{"value":"direct"}`)}); err != nil {
+	if err := client.CompleteSessionToolCall(ctx, created.SessionID, calls[0].ID, sessionprofile.CallResult{Outcome: "succeeded", Content: json.RawMessage(`{"value":"direct"}`)}); err != nil {
 		t.Fatal(err)
 	}
 	waitApplicationHTTPIdle(t, ctx, client, created.SessionID)
@@ -749,32 +749,32 @@ func TestApplicationReviewerHTTPHotPolicyPinnedWhileReviewPending(t *testing.T) 
 		t.Fatal("reviewer never reached provider")
 	}
 	reviewerHTTPNoCallbacks(t, ctx, client, session)
-	previous, err := client.ApplicationConfiguration(ctx, session)
+	previous, err := client.SessionConfiguration(ctx, session)
 	if err != nil || previous.Revision != 1 {
 		t.Fatalf("initial configuration: %+v %v", previous, err)
 	}
-	changed := append([]application.ToolDefinition(nil), previous.Profile.Tools...)
+	changed := append([]sessionprofile.ToolDefinition(nil), previous.Profile.Tools...)
 	changed[0].ApprovalPolicy = "direct"
 	changed[0].InputSchema = map[string]any{"type": "object", "properties": map[string]any{"key": map[string]any{"type": "integer"}}, "required": []any{"key"}}
 	version := "lookup-tools/2"
-	updated, err := client.UpdateApplicationConfiguration(ctx, session, application.UpdateConfigurationRequest{
+	updated, err := configurationResult(client.UpdateSessionConfiguration(ctx, configurationCommand(session, sessionprofile.UpdateConfigurationRequest{
 		OperationID: "hot-direct", ExpectedConfigurationRevision: 1,
-		Patch: application.ConfigurationPatch{ToolsVersion: &version, Tools: &changed},
-	})
+		Patch: sessionprofile.ConfigurationPatch{ToolsVersion: &version, Tools: &changed},
+	})))
 	if err != nil || updated.Revision != 2 {
 		t.Fatalf("update while review pending: %+v %v", updated, err)
 	}
 	reviewerHTTPNoCallbacks(t, ctx, client, session)
 	close(provider.release)
-	calls, err := client.WaitApplicationCalls(ctx, session)
+	calls, err := client.WaitSessionToolCalls(ctx, session)
 	if err != nil || len(calls) != 1 || calls[0].ConfigurationRevision != 1 || calls[0].ToolsVersion != previous.Profile.ToolsVersion || string(calls[0].Arguments) != `{"key":"one"}` || calls[0].TurnID != prompted.Target.TurnID {
 		t.Fatalf("reviewed call lost pinned policy/schema/args: %+v %v", calls, err)
 	}
 	call := calls[0]
-	if _, err := client.ClaimApplicationCall(ctx, session, call.ID); err != nil {
+	if _, err := client.ClaimSessionToolCall(ctx, session, call.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := client.CompleteApplicationCall(ctx, session, call.ID, application.CallResult{Outcome: "succeeded", Content: json.RawMessage(`{"value":"old revision"}`)}); err != nil {
+	if err := client.CompleteSessionToolCall(ctx, session, call.ID, sessionprofile.CallResult{Outcome: "succeeded", Content: json.RawMessage(`{"value":"old revision"}`)}); err != nil {
 		t.Fatal(err)
 	}
 	waitApplicationHTTPIdle(t, ctx, client, session)

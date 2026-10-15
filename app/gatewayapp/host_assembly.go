@@ -4,10 +4,10 @@ import (
 	"context"
 	"path/filepath"
 
-	"github.com/caelis-labs/caelis/control/application"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	acptaskstream "github.com/caelis-labs/caelis/control/appserver/taskstream"
 	"github.com/caelis-labs/caelis/control/collaboration"
+	"github.com/caelis-labs/caelis/control/sessionprofile"
 	controltaskstream "github.com/caelis-labs/caelis/control/taskstream"
 )
 
@@ -82,18 +82,17 @@ func assembleHostControlServices(stack *Stack, cfg Config, storeDir string, curs
 	if err != nil {
 		return hostControlAssembly{}, err
 	}
-	stack.composition.authorities.applications, err = application.Open(controlStoreDatabasePath(storeDir))
+	stack.composition.authorities.sessionProfiles, err = sessionprofile.Open(controlStoreDatabasePath(storeDir))
 	if err != nil {
 		return hostControlAssembly{}, err
 	}
 
-	sessionAuthorizer := appserver.SessionAuthorizer{Sessions: stack.composition.sessions, Applications: stack.composition.authorities.applications}
+	sessionAuthorizer := appserver.SessionAuthorizer{Sessions: stack.composition.sessions, SessionProfiles: stack.composition.authorities.sessionProfiles}
 	controlCommands, err := appserver.NewCommandService(appserver.CommandServiceConfig{
-		Authorizer:   appserver.ProductCommandAuthorizer{Sessions: sessionAuthorizer},
-		Operations:   controlOperations,
-		Applications: stack.composition.authorities.applications,
-		Backend:      stack.commandBackend,
-		Diagnostics:  stack.composition.authorities.diagnostics,
+		Authorizer:  appserver.ProductCommandAuthorizer{Sessions: sessionAuthorizer},
+		Operations:  controlOperations,
+		Backend:     stack.commandBackend,
+		Diagnostics: stack.composition.authorities.diagnostics,
 	})
 	if err != nil {
 		return hostControlAssembly{}, err
@@ -112,8 +111,8 @@ func assembleHostControlServices(stack *Stack, cfg Config, storeDir string, curs
 	stack.configurationCommands = controlCommands
 	stack.agentCommands = controlCommands
 	stack.pluginCommands = controlCommands
-	stack.applications, err = appserver.NewApplicationService(appserver.ApplicationServiceConfig{
-		Store: stack.composition.authorities.applications, Commands: controlCommands, Sessions: controlClient,
+	stack.sessionProfiles, err = appserver.NewSessionProfileService(appserver.SessionProfileServiceConfig{
+		Store: stack.composition.authorities.sessionProfiles, Commands: controlCommands, Sessions: controlClient,
 		ValidateProfile:        stack.composition.validateApplicationProfile,
 		ModelImageInput:        stack.composition.applicationModelImageInput,
 		MCPStatus:              stack.applicationMCPStatus,

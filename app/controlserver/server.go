@@ -59,10 +59,14 @@ func Handler(deps Dependencies, config Config) (http.Handler, error) {
 	if config.Authenticator == nil {
 		return nil, errors.New("controlserver: authenticator is required for an HTTP handler")
 	}
+	var prepareIdle func(context.Context) error
+	if lifecycle, ok := deps.Lifecycle.(interface{ PrepareIdleShutdown(context.Context) error }); ok {
+		prepareIdle = lifecycle.PrepareIdleShutdown
+	}
 	server, err := New(HandlerConfig{
 		Services: deps.Services, AdapterHost: deps.AdapterHost, Authenticator: config.Authenticator,
 		AllowedHosts: append([]string(nil), config.AllowedHosts...), Heartbeat: config.Heartbeat,
-		ServerInfo: config.ServerInfo, Ready: config.Ready, Shutdown: config.Shutdown,
+		ServerInfo: config.ServerInfo, Ready: config.Ready, Shutdown: config.Shutdown, PrepareIdleShutdown: prepareIdle,
 	})
 	if err != nil {
 		return nil, err
@@ -115,12 +119,15 @@ func listenAndServe(
 		_ = listener.Close()
 		return err
 	}
+	if _, ok := deps.Lifecycle.(interface{ PrepareIdleShutdown(context.Context) error }); ok {
+		resolved.ServerInfo.Capabilities = append(resolved.ServerInfo.Capabilities, appserver.CapabilityIdleHostShutdown)
+	}
 	readiness.Store(true)
 	defer readiness.Store(false)
 	if resolved.OnListening != nil {
 		if err := resolved.OnListening(ListenerInfo{
 			Endpoint: endpoint, Address: listener.Addr().String(),
-			ServerInfo: applicationServerInfo(resolved.ServerInfo, deps.Services),
+			ServerInfo: sessionServerInfo(resolved.ServerInfo, deps.Services),
 		}); err != nil {
 			readiness.Store(false)
 			_ = listener.Close()

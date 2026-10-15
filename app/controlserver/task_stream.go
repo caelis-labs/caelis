@@ -201,8 +201,7 @@ func (s *Server) subscribeTask(w http.ResponseWriter, r *http.Request) {
 
 func taskPrincipal(principal appserver.Principal) taskstream.Principal {
 	return taskstream.Principal{
-		ID:            principal.ID,
-		ApplicationID: principal.ApplicationID, ConnectionID: principal.ConnectionID,
+		ID:    principal.ID,
 		Roles: append([]string(nil), principal.Roles...),
 	}
 }

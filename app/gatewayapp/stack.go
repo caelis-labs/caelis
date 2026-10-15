@@ -152,7 +152,7 @@ type Stack struct {
 	configurationCommands     appserver.ConfigurationCommandService
 	agentCommands             appserver.AgentCommandService
 	pluginCommands            appserver.PluginCommandService
-	applications              *appserver.ApplicationService
+	sessionProfiles           *appserver.SessionProfileService
 	taskStreams               acptaskstream.Service
 	operations                appserver.DurableOperationStore
 	lifecycleCancel           context.CancelFunc
@@ -855,11 +855,11 @@ func (s *Stack) closeWithQuiesceTimeout(timeout time.Duration) error {
 	s.composition.mu.Unlock()
 
 	var errs []error
-	if store := s.composition.authorities.applications; store != nil {
+	if store := s.composition.authorities.sessionProfiles; store != nil {
 		if err := store.Close(); err != nil {
 			errs = append(errs, err)
 		}
-		s.composition.authorities.applications = nil
+		s.composition.authorities.sessionProfiles = nil
 	}
 	if mailboxes := s.composition.authorities.collaboration; mailboxes != nil {
 		if err := mailboxes.Close(); err != nil {
@@ -999,4 +999,13 @@ func (s *runtimeComposition) MCPServersStatus(pluginID string) []mcp.MCPServerIn
 		return nil
 	}
 	return mgr.GetServerInfos(pluginID)
+}
+
+// ControlOperations exposes receipts from the shared command owner.
+func (s *Stack) ControlOperations() appserver.OperationService {
+	if s == nil {
+		return nil
+	}
+	service, _ := s.configurationCommands.(appserver.OperationService)
+	return service
 }

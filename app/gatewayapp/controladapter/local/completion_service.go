@@ -93,13 +93,7 @@ func (s *CompletionService) slashArgAdapter(
 	if err := authorizeHostCapability(principal); err != nil {
 		return nil, nil, err
 	}
-	if principal.ApplicationID != "" || principal.ConnectionID != "" {
-		fields := strings.Fields(req.Command)
-		if strings.TrimSpace(req.SessionID) == "" || len(fields) == 0 || (!strings.EqualFold(fields[0], "model") && !strings.EqualFold(fields[0], "mode") && !strings.EqualFold(fields[0], "agent")) {
-			return nil, nil, appserver.ErrUnauthorized
-		}
-		return s.runtimeAdapter(ctx, principal, req)
-	}
+
 	deps := s.controlRuntimeDeps(principal)
 	workspace, err := s.workspaceAddress(req.WorkspaceKey, req.CWD)
 	if err != nil {
@@ -140,9 +134,7 @@ func (s *CompletionService) skillRuntimeAdapter(
 	if err := authorizeHostCapability(principal); err != nil {
 		return nil, nil, err
 	}
-	if principal.ApplicationID != "" || principal.ConnectionID != "" {
-		return nil, nil, appserver.ErrUnauthorized
-	}
+
 	workspace, err := s.workspaceAddress(req.WorkspaceKey, req.CWD)
 	if err != nil {
 		return nil, nil, err
@@ -175,9 +167,7 @@ func (s *CompletionService) runtimeAdapterForCapability(ctx context.Context, pri
 	}
 	deps := s.controlRuntimeDeps(principal)
 	if strings.TrimSpace(req.SessionID) == "" {
-		if principal.ApplicationID != "" || principal.ConnectionID != "" {
-			return nil, nil, appserver.ErrUnauthorized
-		}
+
 		workspace, err := s.workspaceAddress(req.WorkspaceKey, req.CWD)
 		if err != nil {
 			return nil, nil, err
@@ -193,12 +183,7 @@ func (s *CompletionService) runtimeAdapterForCapability(ctx context.Context, pri
 	if err != nil {
 		return nil, nil, err
 	}
-	if (principal.ApplicationID != "" || principal.ConnectionID != "") && sessionvisibility.IsApplicationSession(lease.Session()) && strings.TrimSpace(req.Command) != "" {
-		if fields := strings.Fields(req.Command); !strings.EqualFold(fields[0], "model") {
-			_ = lease.Close(context.Background())
-			return nil, nil, appserver.ErrUnauthorized
-		}
-	}
+
 	if files && sessionvisibility.IsApplicationSession(lease.Session()) {
 		state, err := lease.Status().SessionRuntimeState(ctx, lease.Session().SessionRef)
 		if err != nil || state.PolicyProfile == "application-tools-only" {

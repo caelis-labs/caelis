@@ -8,8 +8,8 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/control/application"
 	"github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/sessionprofile"
 )
 
 func TestApplicationCompactUsesProfileModelAndSharedCheckpointReplay(t *testing.T) {
@@ -20,12 +20,9 @@ func TestApplicationCompactUsesProfileModelAndSharedCheckpointReplay(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	connection, err := stack.Applications().Register(ctx, appserver.Principal{ID: "owner"}, application.Registration{OperationID: "enroll", Name: "compact", Credential: "app-client-" + strings.Repeat("a", 64)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	principal := appserver.Principal{ID: connection.PrincipalID, ApplicationID: connection.ApplicationID, ConnectionID: connection.ConnectionID}
-	created, err := stack.Applications().Create(ctx, principal, appserver.CreateApplicationSessionRequest{WriteBase: appserver.WriteBase{OperationID: "create"}, Profile: application.Profile{
+	connection := struct{ Scope sessionprofile.Scope }{sessionprofile.PrincipalScope("owner")}
+	principal := appserver.Principal{ID: connection.Scope.PrincipalID}
+	created, err := stack.ControlClient().CreateSession(ctx, principal, appserver.CreateSessionRequest{WriteBase: appserver.WriteBase{OperationID: "create"}, Profile: &sessionprofile.Profile{
 		Version: "test/1", Instructions: "Only explicit application instructions", Model: "ollama/compact-test", Execution: "tools-only", ToolsVersion: "tools/1"}})
 	if err != nil {
 		t.Fatal(err)

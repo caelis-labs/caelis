@@ -57,7 +57,7 @@ func managedHostInfo(identity servicelifecycle.Identity, instanceID string) apps
 		ProtocolVersion: acpsdk.ProtocolVersionNumber, EnvelopeVersion: appserver.EnvelopeVersion,
 		APIVersion: appserver.HTTPAPIVersion, ServerID: appserver.ServerIdentity,
 		DistributionVersion: identity.DistributionVersion, BuildID: identity.BuildID, BuildKind: identity.BuildKind,
-		InstanceID: instanceID, Capabilities: appserver.RequiredManagedHostCapabilities(), Transports: []string{"http"},
+		InstanceID: instanceID, Capabilities: append(appserver.RequiredManagedHostCapabilities(), appserver.CapabilityIdleHostShutdown), Transports: []string{"http"},
 	}
 }
 
@@ -103,6 +103,12 @@ func (h *upgradeTestHost) serveHTTP(writer http.ResponseWriter, request *http.Re
 	case upgradeTestAPIPrefix + "/host/shutdown":
 		if !h.authorized(request) {
 			http.Error(writer, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		var shutdown appserver.HostShutdownRequest
+		if err := json.NewDecoder(request.Body).Decode(&shutdown); err != nil || !shutdown.IfIdle || shutdown.ExpectedInstanceID != info.InstanceID {
+			h.t.Errorf("replacement lost conditional instance fence: %+v %v", shutdown, err)
+			http.Error(writer, "invalid idle shutdown", http.StatusBadRequest)
 			return
 		}
 		h.mu.Lock()
@@ -185,7 +191,7 @@ func noEmbeddedFallback(calls *atomic.Int32) func() (embeddedControlEndpoint, er
 	}
 }
 
-// A first launch of a newer managed build must interrupt the older ready Host
+// A first launch of a newer managed build must replace the older idle Host
 // and start the new one before attaching, never leaving two Hosts per Store.
 func TestManagedLocalHostUpgradeShutsDownOldHostThenStartsNew(t *testing.T) {
 	testenv.SetHome(t, t.TempDir())

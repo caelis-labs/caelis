@@ -878,12 +878,15 @@ func TestManagedLifecycleProbeIgnoresSurfaceCapabilityCompatibility(t *testing.T
 	if _, _, err := attachManagedHostClient(t.Context(), options); err == nil || !strings.Contains(err.Error(), "needs an update") {
 		t.Fatalf("Surface attach error = %v, want update requirement", err)
 	}
+	if err := requestManagedServiceShutdown(t.Context(), options, servicelifecycle.Status{InstanceID: info.InstanceID}, true); err == nil || !strings.Contains(err.Error(), "service restart") {
+		t.Fatalf("unsupported idle replacement did not require explicit restart: %v", err)
+	}
 	if err := requestManagedServiceShutdown(t.Context(), options, servicelifecycle.Status{
 		Identity: servicelifecycle.Identity{
 			DistributionVersion: info.DistributionVersion, BuildID: info.BuildID, BuildKind: info.BuildKind,
 		},
 		InstanceID: info.InstanceID, PID: 1234, Endpoint: server.URL,
-	}); err != nil {
+	}, false); err != nil {
 		t.Fatalf("lifecycle shutdown rejected future capabilities: %v", err)
 	}
 }

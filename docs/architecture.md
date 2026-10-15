@@ -33,12 +33,11 @@ uses them.
 - [ACP Projection Contract](acp-projection-architecture.md) owns Envelope,
   live/replay, Task, and Surface projection rules.
 - [Participants](participants.md) owns user-facing collaboration setup and workspace controls.
-- [Application Runtime](application-runtime.md) owns application enrollment,
-  Session profiles, revisioned configuration, background grants, callback
+- [Session profiles](session-profiles.md) owns explicit Session profiles, revisioned configuration, background grants, callback
   receipts, resources, and the legacy Bot Mode removal.
 - [Execution Configuration](execution-configuration.md) owns native process
   environment and shell assembly, creation-bound scope, and restart defaults.
-- [Shared Workers](shared-workers.md) owns scoped native Worker creation,
+- [Shared Workers](shared-workers.md) owns ordinary native Session creation,
   concurrent TUI attach, steering receipts and Bot subscription integration.
 - [Model Connections](model-connections.md) owns Host settings clients and
   interactive provider authentication over HTTP.
@@ -62,7 +61,7 @@ and acceptance history belong in Git and CI, not in this map.
 | `control/streamspool`, `control/streamspool/file` | Product-neutral Control cache records and the bounded local append-only spool implementation |
 | `control/modelcatalog`, `modelconfig`, `modelprofile`, `placement`, `agentbinding` | Provider and model discovery, credentials/configuration, selectable profiles, placement, and fixed Agent bindings |
 | `control/agents` | External ACP Agent identity, preparation, connection, and configuration |
-| `control/application` | Application enrollment scopes and credentials, creation-bound Session execution profiles with revisioned desired configuration and explicit MCP/Skill selection, background activation grants, durable callback receipts, operation anchors, and owned Session resources; applications do not admit Workspace Memory, which stays with `control/memorybinding` |
+| `control/sessionprofile` | Explicit Session execution profiles, revisioned desired configuration, MCP/Skill selection, background activation grants, native callback receipts and immutable resources; common command admission/receipts remain with `control/appserver` |
 | `control/memorybinding` | Opaque host-selected Memory binding references, Runtime actor and audience delegation, and immutable logical snapshots |
 | `control/collaboration` | Session-scoped participant discovery, public-result observation, shared messages and reader positions, mailboxes, collaborator prompt slices, and expiring external grants |
 | `control/mcpconfig`, `control/plugin`, `control/status` | MCP assembly inputs, plugin lifecycle, and product status read models |
@@ -89,9 +88,11 @@ proving that no Host owns the Store and managed startup failed.
 
 Presentation exit and executable installation do not stop the managed Host.
 Each managed application launch serializes Host selection for its Store. A newer
-release stages its executable separately, stops the old Host, and starts the new
-one; shutdown cancels active Session work rather than waiting for natural
-completion. The replacement must report the expected build identity and readiness
+release stages its executable separately and asks the observed Host to close
+admission atomically while idle, then starts the new one. Active mutation dispatch,
+Runtime producers and running Tasks reject implicit replacement; idle Bot/TUI
+subscriptions do not. A busy Host remains usable and replacement can be retried
+after its work completes. Explicit stop/restart still cancel active work. The replacement must report the expected build identity and readiness
 before the application attaches. An older client never replaces a newer running
 release. Explicit lifecycle commands remain available through
 `caelis service start|stop|restart|status`. Shared files are durable truth, never a
@@ -171,7 +172,7 @@ their semantics. The mandatory workspace label cannot be removed by that
 extension. Later binding changes affect new Sessions, never a Session that has
 already admitted Memory authority. A new canonical Session that admits Memory
 pins its complete non-secret delegation and LabelSet at creation.
-[Application Sessions](application-runtime.md) do not select or admit Workspace
+[Explicit-profile Sessions](session-profiles.md) do not select or admit Workspace
 Memory authority.
 A Session created before Memory was enabled is pinned before its first Memory call
 under the Runtime fence. Public or mixed-audience Runtime composition is invalid.

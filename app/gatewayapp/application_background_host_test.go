@@ -15,10 +15,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/caelis-labs/caelis/control/application"
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/httpclient"
+	"github.com/caelis-labs/caelis/control/sessionprofile"
 )
 
 // backgroundBarrier is a real provider HTTP transport behind the production
@@ -73,9 +73,9 @@ func backgroundHostModel(t *testing.T, ctx context.Context, host *applicationHTT
 
 func backgroundPrompt(t *testing.T, ctx context.Context, client *httpclient.Client, sessionID, op, input, kind, grantID string) appserver.CommandResult {
 	t.Helper()
-	result, err := client.PromptApplication(ctx, appserver.ApplicationPromptRequest{
-		PromptRequest: appserver.PromptRequest{WriteBase: appserver.WriteBase{SessionID: sessionID, OperationID: op}, Input: input},
-		SourceKind:    kind, GrantID: grantID,
+	result, err := client.Prompt(ctx, appserver.PromptRequest{
+		WriteBase: appserver.WriteBase{SessionID: sessionID, OperationID: op}, Input: input,
+		SourceKind: kind, GrantID: grantID,
 	})
 	if err != nil || (result.Outcome != appserver.OutcomeCommitted && result.Outcome != appserver.OutcomeAccepted) {
 		t.Fatalf("PromptApplication(%s/%s) = %+v %v", sessionID, op, result, err)
@@ -83,32 +83,32 @@ func backgroundPrompt(t *testing.T, ctx context.Context, client *httpclient.Clie
 	return result
 }
 
-func backgroundGrant(t *testing.T, ctx context.Context, client *httpclient.Client, sessionID, op, source string) application.BackgroundGrant {
+func backgroundGrant(t *testing.T, ctx context.Context, client *httpclient.Client, sessionID, op, source string) sessionprofile.BackgroundGrant {
 	t.Helper()
-	grant, err := client.CreateApplicationBackgroundGrant(ctx, sessionID, application.BackgroundGrantRequest{
+	grant, err := grantResult(client.CreateSessionBackgroundGrant(ctx, backgroundGrantCommand(sessionID, sessionprofile.BackgroundGrantRequest{
 		OperationID: op, Source: source, AuthorizationOperationID: "user-consent-" + op,
-	})
+	})))
 	if err != nil || grant.ID == "" || grant.SessionID != sessionID || grant.Revoked {
 		t.Fatalf("CreateApplicationBackgroundGrant = %+v %v", grant, err)
 	}
 	return grant
 }
 
-func backgroundCall(t *testing.T, ctx context.Context, client *httpclient.Client, sessionID string) application.Call {
+func backgroundCall(t *testing.T, ctx context.Context, client *httpclient.Client, sessionID string) sessionprofile.Call {
 	t.Helper()
-	calls, err := client.WaitApplicationCalls(ctx, sessionID)
+	calls, err := client.WaitSessionToolCalls(ctx, sessionID)
 	if err != nil || len(calls) != 1 {
 		t.Fatalf("WaitApplicationCalls(%s) = %+v %v", sessionID, calls, err)
 	}
 	return calls[0]
 }
 
-func completeBackgroundCall(t *testing.T, ctx context.Context, client *httpclient.Client, call application.Call) {
+func completeBackgroundCall(t *testing.T, ctx context.Context, client *httpclient.Client, call sessionprofile.Call) {
 	t.Helper()
-	if _, err := client.ClaimApplicationCall(ctx, call.SessionID, call.ID); err != nil {
+	if _, err := client.ClaimSessionToolCall(ctx, call.SessionID, call.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := client.CompleteApplicationCall(ctx, call.SessionID, call.ID, application.CallResult{Outcome: "succeeded", Content: json.RawMessage(`{"value":"BACKGROUND_RESULT_SENTINEL"}`)}); err != nil {
+	if err := client.CompleteSessionToolCall(ctx, call.SessionID, call.ID, sessionprofile.CallResult{Outcome: "succeeded", Content: json.RawMessage(`{"value":"BACKGROUND_RESULT_SENTINEL"}`)}); err != nil {
 		t.Fatal(err)
 	}
 	waitApplicationHTTPIdle(t, ctx, client, call.SessionID)
@@ -125,7 +125,7 @@ func backgroundModelMessages(t *testing.T, raw []byte) []json.RawMessage {
 	return request.Messages
 }
 
-func checkBackgroundHistory(t *testing.T, ctx context.Context, client *httpclient.Client, sessionID string, grant application.BackgroundGrant, input string) {
+func checkBackgroundHistory(t *testing.T, ctx context.Context, client *httpclient.Client, sessionID string, grant sessionprofile.BackgroundGrant, input string) {
 	t.Helper()
 	for _, event := range applicationHTTPHistory(t, ctx, client, sessionID) {
 		chunk, ok := event.Update.(eventstream.ContentChunk)
@@ -163,8 +163,8 @@ func TestApplicationBackgroundHostB08B09B11(t *testing.T) {
 	}()
 	backgroundHostModel(t, ctx, host)
 	secretPath := filepath.Join(root, "app.credential")
-	client, connection := registerApplicationHTTP(t, ctx, host, "background", secretPath)
-	other, _ := registerApplicationHTTP(t, ctx, host, "other-background", filepath.Join(root, "other.credential"))
+	client, connection := connectSessionOwnerHTTP(t, ctx, host, "owner", secretPath)
+	other, _ := connectSessionOwnerHTTP(t, ctx, host, "foreign-owner", filepath.Join(root, "other.credential"))
 	assistant := createApplicationHTTPSession(t, ctx, client, "assistant")
 	workerA := createApplicationHTTPSession(t, ctx, client, "worker-a")
 	workerB := createApplicationHTTPSession(t, ctx, client, "worker-b")
@@ -175,28 +175,28 @@ func TestApplicationBackgroundHostB08B09B11(t *testing.T) {
 	// cannot authorize prompts into this Session.
 	grantA := backgroundGrant(t, ctx, client, workerA, "grant-worker-a", "schedule/worker-a")
 	grantB := backgroundGrant(t, ctx, client, workerB, "grant-worker-b", "schedule/worker-b")
-	if grantA.Scope != connection.Scope || grantA.AuthorizationOperationID != "user-consent-grant-worker-a" {
+	if grantA.Scope != connection || grantA.AuthorizationOperationID != "user-consent-grant-worker-a" {
 		t.Fatalf("grant ownership/attestation = %+v", grantA)
 	}
-	list, err := client.ListApplicationBackgroundGrants(ctx, workerA)
+	list, err := client.SessionBackgroundGrants(ctx, workerA)
 	if err != nil || len(list) != 1 || list[0] != grantA {
 		t.Fatalf("grant list = %+v %v", list, err)
 	}
-	if _, err := other.ApplicationBackgroundGrant(ctx, workerA, grantA.ID); err == nil {
+	if _, err := other.SessionBackgroundGrant(ctx, workerA, grantA.ID); err == nil {
 		t.Fatal("second connection read grant")
 	}
-	if _, err := other.CreateApplicationBackgroundGrant(ctx, workerA, application.BackgroundGrantRequest{OperationID: "forged-grant", Source: "forged", AuthorizationOperationID: "forged-consent"}); err == nil {
+	if _, err := grantResult(other.CreateSessionBackgroundGrant(ctx, backgroundGrantCommand(workerA, sessionprofile.BackgroundGrantRequest{OperationID: "forged-grant", Source: "forged", AuthorizationOperationID: "forged-consent"}))); err == nil {
 		t.Fatal("second connection granted first connection's Session")
 	}
-	if _, err := client.CreateApplicationBackgroundGrant(ctx, otherSession, application.BackgroundGrantRequest{OperationID: "forged-grant-2", Source: "forged", AuthorizationOperationID: "forged-consent"}); err == nil {
+	if _, err := grantResult(client.CreateSessionBackgroundGrant(ctx, backgroundGrantCommand(otherSession, sessionprofile.BackgroundGrantRequest{OperationID: "forged-grant-2", Source: "forged", AuthorizationOperationID: "forged-consent"}))); err == nil {
 		t.Fatal("application created grant for another connection")
 	}
-	for _, bad := range []appserver.ApplicationPromptRequest{
-		{PromptRequest: appserver.PromptRequest{WriteBase: appserver.WriteBase{SessionID: workerA, OperationID: "no-grant"}, Input: "not authorized"}, SourceKind: "authorized_background"},
-		{PromptRequest: appserver.PromptRequest{WriteBase: appserver.WriteBase{SessionID: workerB, OperationID: "wrong-grant"}, Input: "not authorized"}, SourceKind: "authorized_background", GrantID: grantA.ID},
-		{PromptRequest: appserver.PromptRequest{WriteBase: appserver.WriteBase{SessionID: workerA, OperationID: "summary-with-grant"}, Input: "not authorized"}, SourceKind: "application_summary", GrantID: grantA.ID},
+	for _, bad := range []appserver.PromptRequest{
+		{WriteBase: appserver.WriteBase{SessionID: workerA, OperationID: "no-grant"}, Input: "not authorized", SourceKind: "authorized_background"},
+		{WriteBase: appserver.WriteBase{SessionID: workerB, OperationID: "wrong-grant"}, Input: "not authorized", SourceKind: "authorized_background", GrantID: grantA.ID},
+		{WriteBase: appserver.WriteBase{SessionID: workerA, OperationID: "summary-with-grant"}, Input: "not authorized", SourceKind: "application_summary", GrantID: grantA.ID},
 	} {
-		if _, err := client.PromptApplication(ctx, bad); err == nil {
+		if _, err := client.Prompt(ctx, bad); err == nil {
 			t.Fatalf("accepted unauthorized prompt %+v", bad)
 		}
 	}
@@ -207,7 +207,7 @@ func TestApplicationBackgroundHostB08B09B11(t *testing.T) {
 	backgroundInput := "B09_BACKGROUND_WORK_SENTINEL"
 	receipt := backgroundPrompt(t, ctx, client, workerA, "background-first", backgroundInput, "authorized_background", grantA.ID)
 	call := backgroundCall(t, ctx, client, workerA)
-	if call.Source != (application.Source{Kind: "authorized_background", OperationID: "background-first", GrantID: grantA.ID, AuthorizedSource: grantA.Source}) {
+	if call.Source != (sessionprofile.Source{Kind: "authorized_background", OperationID: "background-first", GrantID: grantA.ID, AuthorizedSource: grantA.Source}) {
 		t.Fatalf("callback source = %+v", call.Source)
 	}
 	observer, err := client.Reconnect(ctx, appserver.ReconnectRequest{SessionID: workerA})
@@ -217,7 +217,7 @@ func TestApplicationBackgroundHostB08B09B11(t *testing.T) {
 	if err := observer.Subscription.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if active, err := client.ApplicationCall(ctx, workerA, call.ID); err != nil || active.State != "pending" {
+	if active, err := client.SessionToolCall(ctx, workerA, call.ID); err != nil || active.State != "pending" {
 		t.Fatalf("UI detach stopped background callback: %+v %v", active, err)
 	}
 	completeBackgroundCall(t, ctx, client, call)
@@ -238,7 +238,7 @@ func TestApplicationBackgroundHostB08B09B11(t *testing.T) {
 		t.Fatal(err)
 	}
 	client = host.app(string(secret))
-	persistedGrant, err := client.ApplicationBackgroundGrant(ctx, workerA, grantA.ID)
+	persistedGrant, err := client.SessionBackgroundGrant(ctx, workerA, grantA.ID)
 	if err != nil || persistedGrant != grantA {
 		t.Fatalf("grant reopen = %+v %v", persistedGrant, err)
 	}
@@ -261,7 +261,7 @@ func TestApplicationBackgroundHostB08B09B11(t *testing.T) {
 	}
 	// Reusing an accepted operation after revocation returns the original native
 	// receipt without a second provider call; a new operation fails closed.
-	revoked, err := client.RevokeApplicationBackgroundGrant(ctx, workerA, grantA.ID)
+	revoked, err := grantResult(client.RevokeSessionBackgroundGrant(ctx, revokeGrantCommand(workerA, grantA.ID)))
 	if err != nil || !revoked.Revoked {
 		t.Fatalf("revoke = %+v %v", revoked, err)
 	}
@@ -270,7 +270,7 @@ func TestApplicationBackgroundHostB08B09B11(t *testing.T) {
 	if !reflect.DeepEqual(replay, receipt) || model.requestCount() != count {
 		t.Fatalf("idempotent receipt reran after revoke: first=%+v retry=%+v count=%d/%d", receipt, replay, model.requestCount(), count)
 	}
-	if _, err := client.PromptApplication(ctx, appserver.ApplicationPromptRequest{PromptRequest: appserver.PromptRequest{WriteBase: appserver.WriteBase{SessionID: workerA, OperationID: "after-revoke"}, Input: "must not start"}, SourceKind: "authorized_background", GrantID: grantA.ID}); err == nil {
+	if _, err := client.Prompt(ctx, appserver.PromptRequest{WriteBase: appserver.WriteBase{SessionID: workerA, OperationID: "after-revoke"}, Input: "must not start", SourceKind: "authorized_background", GrantID: grantA.ID}); err == nil {
 		t.Fatal("revoked grant admitted new prompt")
 	}
 
@@ -293,7 +293,7 @@ func TestApplicationBackgroundHostB08B09B11(t *testing.T) {
 	workerBCall := backgroundCall(t, ctx, client, workerB)
 	// Revoking a grant stops new admissions, not this already accepted worker
 	// callback (or the unrelated assistant and worker A).
-	grantB, err = client.RevokeApplicationBackgroundGrant(ctx, workerB, grantB.ID)
+	grantB, err = grantResult(client.RevokeSessionBackgroundGrant(ctx, revokeGrantCommand(workerB, grantB.ID)))
 	if err != nil || !grantB.Revoked {
 		t.Fatalf("revoke in-flight worker B = %+v %v", grantB, err)
 	}
@@ -310,7 +310,7 @@ func TestApplicationBackgroundHostB08B09B11(t *testing.T) {
 	completeBackgroundCall(t, ctx, client, workerBCall)
 	completeBackgroundCall(t, ctx, client, assistantCall)
 	waitApplicationHTTPIdle(t, ctx, client, workerA)
-	if persisted, err := client.ApplicationBackgroundGrant(ctx, workerB, grantB.ID); err != nil || persisted != grantB {
+	if persisted, err := client.SessionBackgroundGrant(ctx, workerB, grantB.ID); err != nil || persisted != grantB {
 		t.Fatalf("worker B revoked grant lost on worker A cancel: %+v %v", persisted, err)
 	}
 	backgroundPrompt(t, ctx, client, workerA, "worker-a-resume", "B11_WORKER_A_RESUMED_SENTINEL", "authorized_background", grantA2.ID)
@@ -329,19 +329,19 @@ func TestApplicationBackgroundHostB08B09B11(t *testing.T) {
 	client = host.app(string(secret))
 	for _, item := range []struct {
 		session string
-		grant   application.BackgroundGrant
+		grant   sessionprofile.BackgroundGrant
 		input   string
 	}{
 		{workerA, grantA2, "B11_WORKER_A_RESUMED_SENTINEL"},
 		{workerB, grantB, "B11_WORKER_B_SENTINEL"},
 	} {
 		checkBackgroundHistory(t, ctx, client, item.session, item.grant, item.input)
-		persisted, err := client.ApplicationBackgroundGrant(ctx, item.session, item.grant.ID)
+		persisted, err := client.SessionBackgroundGrant(ctx, item.session, item.grant.ID)
 		if err != nil || persisted != item.grant {
 			t.Fatalf("worker grant lost across Host restart: %+v %v", persisted, err)
 		}
 	}
-	if got, err := client.ApplicationBackgroundGrant(ctx, workerA, grantA.ID); err != nil || !got.Revoked {
+	if got, err := client.SessionBackgroundGrant(ctx, workerA, grantA.ID); err != nil || !got.Revoked {
 		t.Fatalf("revoked authority recovered as live: %+v %v", got, err)
 	}
 	if model.requestCount() != beforeRestart {

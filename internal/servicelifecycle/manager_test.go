@@ -67,7 +67,7 @@ func TestManagerRetainsOnlyCurrentAndPreviousStagedBuilds(t *testing.T) {
 			running = &Status{Identity: candidate.Identity, InstanceID: candidate.BuildID, PID: 1}
 			return testLaunchedProcess(1), nil
 		},
-		Shutdown: func(context.Context, Status) error {
+		Shutdown: func(context.Context, Status, bool) error {
 			running = nil
 			return nil
 		},
@@ -144,7 +144,7 @@ func TestFailedReplacementPreservesSelectedCandidate(t *testing.T) {
 			running = &Status{Identity: candidate.Identity, InstanceID: candidate.BuildID, PID: 1}
 			return testLaunchedProcess(1), nil
 		},
-		Shutdown: func(context.Context, Status) error {
+		Shutdown: func(context.Context, Status, bool) error {
 			running = nil
 			return nil
 		},
@@ -197,7 +197,7 @@ func TestFailedStartupAbortsExactLaunchedProcess(t *testing.T) {
 				Release: func() error { released = true; return nil },
 			}, nil
 		},
-		Shutdown: func(context.Context, Status) error { return nil },
+		Shutdown: func(context.Context, Status, bool) error { return nil },
 	}
 	if _, err := manager.Start(context.Background(), Candidate{Identity: devIdentity("build-a"), Executable: executable}); err == nil {
 		t.Fatal("Start() succeeded without readiness")
@@ -402,7 +402,7 @@ func TestManagerSerializesConcurrentStartAndLaunchesOnce(t *testing.T) {
 			running = &Status{Identity: candidate.Identity, InstanceID: "instance", PID: 1}
 			return testLaunchedProcess(1), nil
 		},
-		Shutdown: func(context.Context, Status) error { return nil },
+		Shutdown: func(context.Context, Status, bool) error { return nil },
 	}
 	candidate := Candidate{Identity: devIdentity("build-a"), Executable: executable}
 	var wait sync.WaitGroup
@@ -442,7 +442,7 @@ func TestManagerStartShutsDownReadyInstanceBeforeLaunchingReplacement(t *testing
 			}
 			return ProbeResult{State: ProbeReady, Status: running}
 		},
-		Shutdown: func(_ context.Context, status Status) error {
+		Shutdown: func(_ context.Context, status Status, _ bool) error {
 			events = append(events, "shutdown:"+status.InstanceID)
 			if status != running {
 				t.Errorf("Shutdown() status = %#v, want the running instance %#v", status, running)
@@ -483,7 +483,7 @@ func TestManagerStartKeepsNewerRunningReleaseWithoutReplacement(t *testing.T) {
 	manager := Manager{
 		StoreDir: t.TempDir(), InstallDir: t.TempDir(), PollInterval: time.Millisecond,
 		Probe: func(context.Context) ProbeResult { return ProbeResult{State: ProbeReady, Status: running} },
-		Shutdown: func(context.Context, Status) error {
+		Shutdown: func(context.Context, Status, bool) error {
 			replaced = true
 			return nil
 		},
@@ -517,5 +517,51 @@ func testLaunchedProcess(pid int) LaunchedProcess {
 		PID:     pid,
 		Abort:   func() error { return nil },
 		Release: func() error { return nil },
+	}
+}
+
+func TestReplacementRejectsBusyHostWithoutForcedFallback(t *testing.T) {
+	source := filepath.Join(t.TempDir(), "caelis")
+	if err := os.WriteFile(source, []byte("new-binary"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	running := &Status{Identity: releaseIdentity("v1.0.0", "old"), InstanceID: "old-host", PID: 1}
+	busy := errors.New("host busy")
+	var modes []bool
+	launches := 0
+	manager := Manager{
+		StoreDir: t.TempDir(), InstallDir: t.TempDir(), PollInterval: time.Millisecond,
+		Probe: func(context.Context) ProbeResult {
+			if running == nil {
+				return ProbeResult{State: ProbeMissing}
+			}
+			return ProbeResult{State: ProbeReady, Status: *running}
+		},
+		Launch: func(c Candidate) (LaunchedProcess, error) {
+			launches++
+			running = &Status{Identity: c.Identity, InstanceID: "new-host", PID: 2}
+			return testLaunchedProcess(2), nil
+		},
+		Shutdown: func(_ context.Context, s Status, ifIdle bool) error {
+			modes = append(modes, ifIdle)
+			if ifIdle {
+				return busy
+			}
+			running = nil
+			return nil
+		},
+	}
+	candidate := Candidate{Identity: releaseIdentity("v1.1.0", "new"), Executable: source}
+	if _, err := manager.Start(t.Context(), candidate); !errors.Is(err, busy) {
+		t.Fatalf("busy start: %v", err)
+	}
+	if launches != 0 || running.InstanceID != "old-host" || len(modes) != 1 || !modes[0] {
+		t.Fatalf("busy replacement changed Host: %v %d %+v", modes, launches, running)
+	}
+	if _, err := manager.Restart(t.Context(), candidate); err != nil {
+		t.Fatal(err)
+	}
+	if launches != 1 || len(modes) != 2 || modes[1] {
+		t.Fatalf("explicit restart mode: %v %d", modes, launches)
 	}
 }

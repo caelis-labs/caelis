@@ -3,18 +3,16 @@
 package gatewayapp
 
 import (
-	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
-	"strings"
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
-	"github.com/caelis-labs/caelis/control/application"
+	"github.com/caelis-labs/caelis/control/sessionprofile"
 	"github.com/caelis-labs/caelis/internal/sandboxrouter"
 )
 
@@ -31,7 +29,7 @@ func TestApplicationNativeWorkspaceAccess(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	profile := application.Workspace{CWD: notebook, Access: []application.WorkspaceAccess{{Path: extra, Mode: "read-write"}, {Path: readOnly, Mode: "read-only"}}}
+	profile := sessionprofile.Workspace{CWD: notebook, Access: []sessionprofile.WorkspaceAccess{{Path: extra, Mode: "read-write"}, {Path: readOnly, Mode: "read-only"}}}
 	ref, err := applicationSessionWorkspace(profile, filepath.Join(root, "store"), "session-one")
 	resolvedNotebook, resolveErr := filepath.EvalSymlinks(notebook)
 	if resolveErr != nil {
@@ -52,10 +50,10 @@ func TestApplicationNativeWorkspaceAccess(t *testing.T) {
 	if err != nil || !slices.Equal(writable, []string{resolvedNotebook, resolvedExtra}) || !slices.Equal(access, []string{resolvedExtra, resolvedReadOnly}) {
 		t.Fatalf("directory grants = writable:%v access:%v error:%v", writable, access, err)
 	}
-	if _, _, err := applicationWorkspaceAccess([]application.WorkspaceAccess{{Path: readOnly, Mode: "read-only"}, {Path: readOnly, Mode: "read-write"}}, ref.CWD); err == nil {
+	if _, _, err := applicationWorkspaceAccess([]sessionprofile.WorkspaceAccess{{Path: readOnly, Mode: "read-only"}, {Path: readOnly, Mode: "read-write"}}, ref.CWD); err == nil {
 		t.Fatal("conflicting access modes accepted")
 	}
-	if _, _, err := applicationWorkspaceAccess([]application.WorkspaceAccess{{Path: "../other", Mode: "read-write"}}, ref.CWD); err == nil {
+	if _, _, err := applicationWorkspaceAccess([]sessionprofile.WorkspaceAccess{{Path: "../other", Mode: "read-write"}}, ref.CWD); err == nil {
 		t.Fatal("relative application grant accepted")
 	}
 }
@@ -76,17 +74,13 @@ func TestApplicationNativeWorkspacePolicy(t *testing.T) {
 	for _, name := range []string{"TMP", "TEMP", "TMPDIR"} {
 		t.Setenv(name, filepath.Join(cwd, "tmp"))
 	}
-	store, err := application.Open(filepath.Join(root, "application.sqlite"))
+	store, err := sessionprofile.Open(filepath.Join(root, "application.sqlite"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	connection, err := store.Register(t.Context(), "owner", application.Registration{OperationID: "register", Name: "policy", Credential: "app-client-" + strings.Repeat("ab", 32)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	profile := application.Profile{Execution: "workspace-write", Workspace: application.Workspace{CWD: cwd, Access: []application.WorkspaceAccess{{Path: extra, Mode: "read-write"}, {Path: readOnly, Mode: "read-only"}}}}
-	executor, err := newApplicationExecutionRuntime(cwd, root, filepath.Join(root, "authority"), store, connection.Scope, profile, nil)
+	profile := sessionprofile.Profile{Execution: "workspace-write", Workspace: sessionprofile.Workspace{CWD: cwd, Access: []sessionprofile.WorkspaceAccess{{Path: extra, Mode: "read-write"}, {Path: readOnly, Mode: "read-only"}}}}
+	executor, err := newApplicationExecutionRuntime(cwd, root, filepath.Join(root, "authority"), profile, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,22 +142,19 @@ func TestApplicationNativeToolEffects(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := application.Open(filepath.Join(root, "application.sqlite"))
+	store, err := sessionprofile.Open(filepath.Join(root, "application.sqlite"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	connection, err := store.Register(t.Context(), "owner", application.Registration{OperationID: "register", Name: "native", Credential: "app-client-" + strings.Repeat("ab", 32)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	profile := application.Profile{Version: "v1", Model: "configured-model", ToolsVersion: "v1", Execution: "workspace-write", Workspace: application.Workspace{CWD: cwd}}
-	runtime, err := newApplicationExecutionRuntime(cwd, root, filepath.Join(root, "authority"), store, connection.Scope, profile, profile.ExecutionConfig)
+	connection := struct{ Scope sessionprofile.Scope }{sessionprofile.PrincipalScope("owner")}
+	profile := sessionprofile.Profile{Version: "v1", Model: "configured-model", ToolsVersion: "v1", Execution: "workspace-write", Workspace: sessionprofile.Workspace{CWD: cwd}}
+	runtime, err := newApplicationExecutionRuntime(cwd, root, filepath.Join(root, "authority"), profile, profile.ExecutionConfig)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer runtime.Close()
-	binding := application.Binding{Scope: connection.Scope, SessionID: "session-native", Profile: profile, CreationDigest: "digest"}
+	binding := sessionprofile.Binding{Scope: connection.Scope, SessionID: "session-native", Profile: profile, CreationDigest: "digest"}
 	if err := store.PutBinding(t.Context(), binding); err != nil {
 		t.Fatal(err)
 	}
@@ -199,17 +190,17 @@ func TestApplicationNativeToolEffects(t *testing.T) {
 	if err != nil || string(got) != "notebook identity" {
 		t.Fatalf("native command effect = %q, %v", got, err)
 	}
-	if err := store.Revoke(context.Background(), connection.Scope); err != nil {
+	if err := runtime.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if err := runtime.FileSystem().WriteFile(filepath.Join(cwd, "after-revoke.txt"), []byte("effect"), 0600); err == nil {
-		t.Fatal("revoked lease allowed delayed filesystem effect")
+	if err := runtime.FileSystem().WriteFile(filepath.Join(cwd, "after-close.txt"), []byte("effect"), 0600); err == nil {
+		t.Fatal("closed runtime allowed delayed filesystem effect")
 	}
-	if _, err := os.Stat(filepath.Join(cwd, "after-revoke.txt")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(cwd, "after-close.txt")); !os.IsNotExist(err) {
 		t.Fatalf("revoked effect created file: %v", err)
 	}
 	_, err = runtime.Run(t.Context(), sandbox.CommandRequest{Command: "echo revoked", Dir: cwd})
 	if err == nil {
-		t.Fatal("revoked lease allowed command")
+		t.Fatal("closed runtime allowed command")
 	}
 }

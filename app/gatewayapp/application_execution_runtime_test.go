@@ -12,7 +12,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
-	"github.com/caelis-labs/caelis/control/application"
+	"github.com/caelis-labs/caelis/control/sessionprofile"
 )
 
 type applicationRunnerProbe struct {
@@ -66,22 +66,13 @@ func TestApplicationDirectoryBindingsRejectRedirection(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			store, err := application.Open(filepath.Join(root, "application.sqlite"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer store.Close()
-			connection, err := store.Register(t.Context(), "owner", application.Registration{OperationID: "register", Name: "bindings", Credential: "app-client-" + strings.Repeat("ab", 32)})
-			if err != nil {
-				t.Fatal(err)
-			}
-			profile := application.Profile{Execution: "workspace-write", Workspace: application.Workspace{CWD: cwd}}
+			profile := sessionprofile.Profile{Execution: "workspace-write", Workspace: sessionprofile.Workspace{CWD: cwd}}
 			probe := &applicationRunnerProbe{files: &applicationFileSystemProbe{}}
-			rt := &applicationExecutionRuntime{Runtime: probe, cwd: cwd, lease: store, scope: connection.Scope}
+			rt := &applicationExecutionRuntime{Runtime: probe, cwd: cwd}
 			bound := cwd
 			if target != "cwd" {
 				bound = extra
-				profile.Workspace.Access = []application.WorkspaceAccess{{Path: extra, Mode: target}}
+				profile.Workspace.Access = []sessionprofile.WorkspaceAccess{{Path: extra, Mode: target}}
 				rt.access = []string{extra}
 			}
 			opened, err := rt.Start(t.Context(), sandbox.CommandRequest{})
@@ -92,7 +83,7 @@ func TestApplicationDirectoryBindingsRejectRedirection(t *testing.T) {
 				t.Fatal(err)
 			}
 			applicationDirectoryLink(t, bound, outside)
-			if _, err := newApplicationExecutionRuntime(cwd, root, filepath.Join(root, "authority"), store, connection.Scope, profile, nil); err == nil || !strings.Contains(err.Error(), "binding changed") {
+			if _, err := newApplicationExecutionRuntime(cwd, root, filepath.Join(root, "authority"), profile, nil); err == nil || !strings.Contains(err.Error(), "binding changed") {
 				t.Fatalf("activation accepted redirected %s: %v", target, err)
 			}
 			if _, err := rt.Run(t.Context(), sandbox.CommandRequest{Constraints: sandbox.Constraints{Route: sandbox.RouteHost}}); err == nil {
@@ -148,25 +139,14 @@ func (t *applicationToolProbe) Call(context.Context, tool.Call) (tool.Result, er
 	return tool.Result{Content: []model.Part{model.NewTextPart("effect")}}, nil
 }
 
-func TestApplicationLeaseWithdrawalPreventsDelayedNativeEffects(t *testing.T) {
+func TestSessionRuntimeClosurePreventsDelayedNativeEffects(t *testing.T) {
 	ctx := t.Context()
-	store, err := application.Open(filepath.Join(t.TempDir(), "control.sqlite"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-	connection, err := store.Register(ctx, "owner", application.Registration{
-		OperationID: "register", Name: "client", Credential: "app-client-" + strings.Repeat("ab", 32),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	cwd, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	probe := &applicationRunnerProbe{}
-	runtime := &applicationExecutionRuntime{Runtime: probe, cwd: cwd, lease: store, scope: connection.Scope}
+	runtime := &applicationExecutionRuntime{Runtime: probe, cwd: cwd}
 	request := sandbox.CommandRequest{Dir: cwd}
 	started, err := runtime.Start(ctx, request)
 	if err != nil || probe.launches != 1 {
@@ -182,26 +162,28 @@ func TestApplicationLeaseWithdrawalPreventsDelayedNativeEffects(t *testing.T) {
 	}
 	resource := &applicationToolProbe{}
 	leased := applicationBoundResourceTool{Tool: resource, runtime: runtime}
-	if err := store.Revoke(ctx, connection.Scope); err != nil {
+	if err := runtime.Close(); err != nil {
 		t.Fatal(err)
 	}
-	// These calls model a provider delayed beyond the lease and an approval
-	// resolved only after revocation. No new native launch or resource effect.
+	// These calls model a provider delayed beyond Runtime closure and an approval
+	// resolved only after closure. No new native launch or resource effect.
 	if _, err := runtime.Run(ctx, request); err == nil {
-		t.Fatal("revoked lease admitted delayed Run")
+		t.Fatal("closed runtime admitted delayed Run")
 	}
 	if _, err := runtime.Start(ctx, request); err == nil {
-		t.Fatal("revoked lease admitted pending approval Start")
+		t.Fatal("closed runtime admitted pending approval Start")
 	}
 	for _, session := range []sandbox.Session{started, opened, openedByRef} {
 		if err := session.WriteInput(ctx, []byte("new command")); err == nil {
-			t.Fatal("revoked lease admitted interactive input")
+			t.Fatal("closed runtime admitted interactive input")
 		}
 	}
 	if _, err := leased.Call(ctx, tool.Call{Name: "ReadResource"}); err == nil {
-		t.Fatal("revoked lease admitted resource materialization")
+		t.Fatal("closed runtime admitted resource materialization")
 	}
 	if probe.launches != 1 || probe.writes != 0 || resource.calls != 0 {
-		t.Fatalf("new effects after revoke: launches=%d writes=%d resource=%d", probe.launches, probe.writes, resource.calls)
+		t.Fatalf("new effects after close: launches=%d writes=%d resource=%d", probe.launches, probe.writes, resource.calls)
 	}
 }
+
+func (r *applicationRunnerProbe) Close() error { return nil }

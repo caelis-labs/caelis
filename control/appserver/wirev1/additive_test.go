@@ -8,9 +8,9 @@ import (
 
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	"github.com/caelis-labs/caelis/control/agents"
-	"github.com/caelis-labs/caelis/control/application"
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/taskstream"
+	"github.com/caelis-labs/caelis/control/sessionprofile"
 	"github.com/caelis-labs/caelis/control/status"
 )
 
@@ -38,17 +38,17 @@ func TestAdditiveRequestFieldsPreserveKnownValues(t *testing.T) {
 
 func TestAdditiveApplicationFieldsPreservePatchAndOpaqueSchema(t *testing.T) {
 	raw := []byte(`{"operation_id":"original","expected_configuration_revision":"7","future":true,"patch":{"native_tools":[],"future":null,"mcp_servers":[{"name":"test","transport":"stdio","command":"/bin/echo","future":true}]}}`)
-	var request application.UpdateConfigurationRequest
+	var request sessionprofile.UpdateConfigurationRequest
 	if err := DecodeRequest(raw, &request); err != nil {
 		t.Fatal(err)
 	}
 	if request.ExpectedConfigurationRevision != 7 || request.Patch.NativeTools == nil || len(*request.Patch.NativeTools) != 0 || request.Patch.MCPServers == nil || (*request.Patch.MCPServers)[0].Command != "/bin/echo" {
 		t.Fatalf("patch changed: %+v", request)
 	}
-	if err := DecodeRequest([]byte(`{"patch":{"native_tools":null,"future":true}}`), &application.UpdateConfigurationRequest{}); err == nil {
+	if err := DecodeRequest([]byte(`{"patch":{"native_tools":null,"future":true}}`), &sessionprofile.UpdateConfigurationRequest{}); err == nil {
 		t.Fatal("known null accepted")
 	}
-	var patch application.UpdateConfigurationRequest
+	var patch sessionprofile.UpdateConfigurationRequest
 	raw = []byte(`{"patch":{"tools":[{"name":"tool","input_schema":{"properties":{"future":{"type":"string"}}}}]}}`)
 	if err := DecodeRequest(raw, &patch); err != nil {
 		t.Fatal(err)
@@ -80,7 +80,7 @@ func TestAdditiveFieldsDoNotHideForbiddenKnownSettings(t *testing.T) {
 		`{"patch":{"execution":"full-access","future":true}}`,
 		`{"patch":{"mcp_servers":[{"name":"test","transport":"stdio","command":"/bin/echo","headers":{"Authorization":"secret"},"future":true}]}}`,
 	} {
-		if err := DecodeRequest([]byte(raw), &application.UpdateConfigurationRequest{}); err == nil {
+		if err := DecodeRequest([]byte(raw), &sessionprofile.UpdateConfigurationRequest{}); err == nil {
 			t.Fatalf("forbidden setting accepted: %s", raw)
 		}
 	}
@@ -89,7 +89,7 @@ func TestAdditiveFieldsDoNotHideForbiddenKnownSettings(t *testing.T) {
 func TestAdditiveSchemaKeepsKnownValidation(t *testing.T) {
 	for _, tc := range []struct{ name, raw string }{
 		{"CreateSessionRequest", `{"operation_id":"op","future":true,"execution_config":{"environment":{"inherit":false,"future":true},"shell":{"path":"/bin/sh","future":true},"future":true}}`},
-		{"UpdateApplicationConfigurationRequest", `{"operation_id":"op","expected_configuration_revision":"7","patch":{"native_tools":[],"future":null},"future":true}`},
+		{"UpdateSessionConfigurationRequest", `{"operation_id":"op","expected_configuration_revision":"7","patch":{"native_tools":[],"future":null},"future":true}`},
 		{"ServerInfo", `{"protocol_version":1,"envelope_version":"caelis.control.envelope/v1","api_version":"v1","future":true}`},
 		{"CommandResult", `{"operation_id":"op","outcome":"unknown","future":true,"target":{"handle_id":"h","run_id":"r","turn_id":"t","future":true}}`},
 		{"UIPreferences", `{"theme":"auto","future":true}`},
@@ -101,10 +101,10 @@ func TestAdditiveSchemaKeepsKnownValidation(t *testing.T) {
 		})
 	}
 	for _, tc := range []struct{ name, raw string }{
-		{"ApplicationConfigurationPatch", `{"permissions":{},"future":true}`},
-		{"ApplicationConfigurationPatch", `{"workspace":{},"future":true}`},
-		{"ApplicationConfigurationPatch", `{"native_tools":null,"future":true}`},
-		{"ApplicationMCPServer", `{"name":"m","transport":"stdio","command":"/bin/echo","headers":{},"future":true}`},
+		{"SessionConfigurationPatch", `{"permissions":{},"future":true}`},
+		{"SessionConfigurationPatch", `{"workspace":{},"future":true}`},
+		{"SessionConfigurationPatch", `{"native_tools":null,"future":true}`},
+		{"SessionMCPServer", `{"name":"m","transport":"stdio","command":"/bin/echo","headers":{},"future":true}`},
 		{"CommandResult", `{"operation_id":"op","outcome":"invented","future":true}`},
 		{"EnvironmentConfig", `{"set":{"KEY":null},"future":true}`},
 	} {
@@ -167,11 +167,10 @@ func TestAdditiveControlCommandFamilies(t *testing.T) {
 		appserver.SteerRequest{WriteBase: base, Target: target, Input: "original"},
 		appserver.CancelRequest{WriteBase: base, Target: target, Reason: "original"},
 		appserver.ResolveApprovalRequest{WriteBase: base, Target: target, ApprovalRequestID: "approval", Outcome: "cancelled"},
-		appserver.CreateWorkerRequest{WriteBase: base, CWD: "/tmp"},
-		appserver.ApplicationPromptRequest{PromptRequest: appserver.PromptRequest{WriteBase: base, Input: "original"}, SourceKind: "user"},
-		appserver.ApplicationResourceRequest{WriteBase: base, Name: "original", Data: []byte("original")},
-		application.Registration{OperationID: "original", Name: "test", Credential: "test"},
-		application.BackgroundGrantRequest{OperationID: "original", Source: "test", AuthorizationOperationID: "authorization"},
+		appserver.CreateSessionRequest{WriteBase: base, CWD: "/tmp"},
+		appserver.PromptRequest{WriteBase: base, Input: "original", SourceKind: "user"},
+		appserver.SessionResourceRequest{WriteBase: base, Name: "original", Data: []byte("original")},
+		sessionprofile.BackgroundGrantRequest{OperationID: "original", Source: "test", AuthorizationOperationID: "authorization"},
 	} {
 		t.Run(reflect.TypeOf(value).Name(), func(t *testing.T) {
 			raw, err := Marshal(value)
@@ -203,7 +202,7 @@ func TestAdditiveApplicationCreationPreservesProfileAuthority(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var original appserver.CreateApplicationSessionRequest
+	var original appserver.CreateSessionRequest
 	if err := DecodeRequest(raw, &original); err != nil {
 		t.Fatal(err)
 	}
@@ -226,14 +225,14 @@ func TestAdditiveApplicationCreationPreservesProfileAuthority(t *testing.T) {
 	body["profile"], _ = json.Marshal(profile)
 	body["future_optional"] = json.RawMessage(`true`)
 	raw, _ = json.Marshal(body)
-	var got appserver.CreateApplicationSessionRequest
+	var got appserver.CreateSessionRequest
 	if err := DecodeRequest(raw, &got); err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(got, original) {
 		t.Fatalf("creation authority changed: %#v", got)
 	}
-	if err := openAPIValidator(t, "CreateApplicationSessionRequest").Validate(decodeJSONWithNumbers(t, raw)); err != nil {
+	if err := openAPIValidator(t, "CreateSessionRequest").Validate(decodeJSONWithNumbers(t, raw)); err != nil {
 		t.Fatal(err)
 	}
 	for _, invalid := range []string{
@@ -242,7 +241,7 @@ func TestAdditiveApplicationCreationPreservesProfileAuthority(t *testing.T) {
 		`{"profile":{"permissions":{"approval_mode":false},"future_optional":true}}`,
 		`{"profile":{"mcp_servers":[{"env":{"SECRET":"value"},"future_optional":true}]}}`,
 	} {
-		if err := DecodeRequest([]byte(invalid), &appserver.CreateApplicationSessionRequest{}); err == nil {
+		if err := DecodeRequest([]byte(invalid), &appserver.CreateSessionRequest{}); err == nil {
 			t.Fatalf("accepted invalid authority: %s", invalid)
 		}
 	}
@@ -250,20 +249,18 @@ func TestAdditiveApplicationCreationPreservesProfileAuthority(t *testing.T) {
 
 func TestAdditiveControlResponseFamilies(t *testing.T) {
 	for _, value := range []any{
-		application.Connection{Name: "original"},
-		application.Configuration{SessionID: "session", Revision: 9007199254740993, Profile: application.Profile{NativeTools: []string{}}},
-		application.Binding{SessionID: "session", CreationDigest: "original", Profile: application.Profile{NativeTools: []string{}}},
-		[]application.Worker{{SessionID: "original"}},
-		[]application.Binding{{SessionID: "session", CreationDigest: "original"}},
-		application.Call{ID: "original", Arguments: json.RawMessage(`{"future_optional":"business input"}`)},
-		[]application.Call{{ID: "original", Arguments: json.RawMessage(`{"future_optional":"business input"}`)}},
-		application.Resource{ID: "original", SessionID: "session", SHA256: "original"},
-		appserver.ApplicationResourceContent{Resource: application.Resource{ID: "original"}, Data: []byte("original")},
-		application.ModelCapabilities{SessionID: "session", ConfigurationRevision: 9007199254740993},
-		application.ReviewerState{SessionID: "session"},
-		application.MCPStatus{SessionID: "session"},
-		application.BackgroundGrant{ID: "original"},
-		[]application.BackgroundGrant{{ID: "original"}},
+		sessionprofile.Configuration{SessionID: "session", Revision: 9007199254740993, Profile: sessionprofile.Profile{NativeTools: []string{}}},
+		sessionprofile.Binding{SessionID: "session", CreationDigest: "original", Profile: sessionprofile.Profile{NativeTools: []string{}}},
+		[]sessionprofile.Binding{{SessionID: "session", CreationDigest: "original"}},
+		sessionprofile.Call{ID: "original", Arguments: json.RawMessage(`{"future_optional":"business input"}`)},
+		[]sessionprofile.Call{{ID: "original", Arguments: json.RawMessage(`{"future_optional":"business input"}`)}},
+		sessionprofile.Resource{ID: "original", SessionID: "session", SHA256: "original"},
+		appserver.SessionResourceContent{Resource: sessionprofile.Resource{ID: "original"}, Data: []byte("original")},
+		sessionprofile.ModelCapabilities{SessionID: "session", ConfigurationRevision: 9007199254740993},
+		sessionprofile.ReviewerState{SessionID: "session"},
+		sessionprofile.MCPStatus{SessionID: "session"},
+		sessionprofile.BackgroundGrant{ID: "original"},
+		[]sessionprofile.BackgroundGrant{{ID: "original"}},
 		appserver.HostStatus{},
 		appserver.SessionState{},
 		appserver.PresentationCapabilities{},
@@ -294,7 +291,7 @@ func TestAdditiveControlResponseFamilies(t *testing.T) {
 		[]appserver.SlashArgCandidate{{}},
 		[]appserver.PluginSnapshot{{}},
 		[]appserver.MarketplaceSnapshot{{}},
-		appserver.ApplicationOperation{OperationID: "original", Outcome: appserver.OutcomeUnknown, Result: &appserver.CommandResult{OperationID: "original", Outcome: appserver.OutcomeUnknown}},
+		appserver.CommandResult{OperationID: "original", Outcome: appserver.OutcomeUnknown},
 	} {
 		t.Run(reflect.TypeOf(value).String(), func(t *testing.T) {
 			raw, err := Marshal(value)
@@ -356,7 +353,7 @@ func TestAdditiveEmptyAndCallbackBodies(t *testing.T) {
 			t.Fatalf("accepted nonobject: %s", raw)
 		}
 	}
-	var result application.CallResult
+	var result sessionprofile.CallResult
 	if err := DecodeRequest([]byte(`{"outcome":"succeeded","content":{"business_future":true},"future_optional":true}`), &result); err != nil {
 		t.Fatal(err)
 	}
@@ -367,11 +364,11 @@ func TestAdditiveEmptyAndCallbackBodies(t *testing.T) {
 		`{"outcome":true,"content":null,"future_optional":true}`,
 		`{"outcome":"succeeded","content":null,"turn_complete":"true","future_optional":true}`,
 	} {
-		if err := DecodeRequest([]byte(raw), &application.CallResult{}); err == nil {
+		if err := DecodeRequest([]byte(raw), &sessionprofile.CallResult{}); err == nil {
 			t.Fatalf("accepted invalid callback field: %s", raw)
 		}
 	}
-	for _, name := range []string{"EmptyResult", "ApplicationEmptyRequest"} {
+	for _, name := range []string{"EmptyResult", "EmptyToolCallRequest"} {
 		if err := openAPIValidator(t, name).Validate(decodeJSONWithNumbers(t, []byte(`{"future_optional":true}`))); err != nil {
 			t.Fatal(err)
 		}

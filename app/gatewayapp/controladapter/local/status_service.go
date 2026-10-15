@@ -55,9 +55,7 @@ func (s *StatusService) SessionStatus(
 		return controlstatus.StatusSnapshot{}, err
 	}
 	if strings.TrimSpace(request.SessionID) == "" {
-		if principal.ApplicationID != "" || principal.ConnectionID != "" {
-			return controlstatus.StatusSnapshot{}, appserver.ErrUnauthorized
-		}
+
 		workspace, err := s.resolveWorkspace(session.WorkspaceRef{
 			Key: strings.TrimSpace(request.WorkspaceKey),
 			CWD: strings.TrimSpace(request.CWD),
@@ -98,12 +96,7 @@ func (s *StatusService) SessionStatus(
 		return controlstatus.StatusSnapshot{}, errors.New("app/gatewayapp/controladapter/local: status Runtime projection is unavailable")
 	}
 	resolvedDeps := *deps
-	if principal.ApplicationID != "" || principal.ConnectionID != "" {
-		// Session diagnostics and usage are shared; Host configuration files,
-		// other Sessions and provider account limits are outside this grant.
-		resolvedDeps.Status.DoctorFn = nil
-		resolvedDeps.Model.ProviderUsageFn = nil
-	}
+
 	if !request.IncludeWorkspaceTrustRequirement {
 		resolvedDeps.Status.ProjectMCPConfigurationPresentFn = nil
 	}

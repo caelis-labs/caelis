@@ -106,8 +106,8 @@ func validateSpec(spec openAPISpec) error {
 	if spec.OpenAPI != "3.1.0" {
 		return fmt.Errorf("openapi version = %q, want 3.1.0", spec.OpenAPI)
 	}
-	if len(operationIDs(spec)) != 120 {
-		return fmt.Errorf("operation count = %d, want 120", len(operationIDs(spec)))
+	if len(operationIDs(spec)) != 109 {
+		return fmt.Errorf("operation count = %d, want 109", len(operationIDs(spec)))
 	}
 	required := []string{
 		"CreateSessionRequest", "CloseSessionRequest", "CompactSessionRequest", "RecordInteractionRequest", "PromptRequest", "SteerRequest", "CancelRequest",
@@ -120,13 +120,13 @@ func validateSpec(spec openAPISpec) error {
 		"BindAgentBindingRequest", "ResetAgentBindingRequest", "CreateAgentRoleRequest", "DeleteAgentRoleRequest", "AgentBindingSetRequest",
 		"CompletionRequest", "PluginRequest", "AddMarketplaceRequest", "UpdateMarketplaceRequest", "RemoveMarketplaceRequest",
 		"AddPluginPathRequest", "InstallPluginRequest", "EnablePluginRequest", "DisablePluginRequest", "RemovePluginRequest",
-		"ApplicationRegistration", "ApplicationConnection", "ApplicationProfile", "ApplicationToolDefinition", "ApplicationInheritance",
-		"ApplicationMCPServer", "ApplicationMCPStatus", "ApplicationMCPServerStatus", "ApplicationBinding", "ApplicationBindingList", "ApplicationChildRelation", "CreateApplicationSessionRequest", "ApplicationPromptRequest",
-		"ApplicationModelCapabilities", "ApplicationConfiguration", "ApplicationConfigurationPatch", "UpdateApplicationConfigurationRequest",
-		"ApplicationWorkspace", "ApplicationWorkspaceAccess", "ApplicationPermissions",
-		"ApplicationBackgroundGrant", "ApplicationBackgroundGrantList", "ApplicationBackgroundGrantRequest",
-		"ApplicationOperation", "ApplicationCall", "ApplicationCallList", "ApplicationCallResult",
-		"ApplicationResource", "ApplicationResourceRequest", "ApplicationResourceContent", "ApplicationEmptyRequest",
+		"SessionProfile", "SessionToolDefinition", "SessionInheritance",
+		"SessionMCPServer", "SessionMCPStatus", "SessionMCPServerStatus", "SessionBinding", "SessionChildRelation",
+		"SessionModelCapabilities", "SessionConfiguration", "SessionConfigurationPatch",
+		"SessionWorkspace", "SessionWorkspaceAccess", "SessionPermissions",
+		"SessionBackgroundGrant", "SessionBackgroundGrantList",
+		"SessionToolCall", "SessionToolCallList", "SessionToolCallResult",
+		"SessionResource", "SessionResourceContent", "EmptyToolCallRequest",
 		"AgentStatusSnapshot", "PluginSnapshot", "MarketplaceSnapshot",
 		"PresentationSnapshot", "PresentationCapabilities", "TerminalRequest", "TerminalOutput", "TerminalExitStatus",
 	}

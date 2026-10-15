@@ -15,13 +15,13 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
-	"github.com/caelis-labs/caelis/control/application"
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/httpclient"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/control/modelprofile"
 	"github.com/caelis-labs/caelis/control/modelprofile/builder"
+	"github.com/caelis-labs/caelis/control/sessionprofile"
 )
 
 // revisionProvider exercises the official OpenAI Responses adapter through a
@@ -176,17 +176,17 @@ func startApplicationHTTPHostWithSavedModels(t *testing.T, storeDir, workspace s
 
 func promptRevisionHTTP(t *testing.T, ctx context.Context, client *httpclient.Client, session, operation string) {
 	t.Helper()
-	result, err := client.PromptApplication(ctx, appserver.ApplicationPromptRequest{
-		PromptRequest: appserver.PromptRequest{WriteBase: appserver.WriteBase{SessionID: session, OperationID: operation}, Input: "CONFIGURATION_USER_SENTINEL"}, SourceKind: "user",
+	result, err := client.Prompt(ctx, appserver.PromptRequest{
+		WriteBase: appserver.WriteBase{SessionID: session, OperationID: operation}, Input: "CONFIGURATION_USER_SENTINEL", SourceKind: "user",
 	})
 	if err != nil || (result.Outcome != appserver.OutcomeAccepted && result.Outcome != appserver.OutcomeCommitted) {
 		t.Fatalf("PromptApplication(%s) = %+v %v", operation, result, err)
 	}
 }
 
-func claimAndCompleteRevisionCall(t *testing.T, ctx context.Context, client *httpclient.Client, session string, revision uint64, version, args string) application.Call {
+func claimAndCompleteRevisionCall(t *testing.T, ctx context.Context, client *httpclient.Client, session string, revision uint64, version, args string) sessionprofile.Call {
 	t.Helper()
-	calls, err := client.WaitApplicationCalls(ctx, session)
+	calls, err := client.WaitSessionToolCalls(ctx, session)
 	if err != nil || len(calls) != 1 {
 		t.Fatalf("WaitApplicationCalls: %+v %v", calls, err)
 	}
@@ -194,13 +194,13 @@ func claimAndCompleteRevisionCall(t *testing.T, ctx context.Context, client *htt
 	if call.ConfigurationRevision != revision || call.ToolsVersion != version || string(call.Arguments) != args || call.State != "pending" {
 		t.Fatalf("wrong pinned callback %+v, want revision %d version %s args %s", call, revision, version, args)
 	}
-	if _, err = client.ClaimApplicationCall(ctx, session, call.ID); err != nil {
+	if _, err = client.ClaimSessionToolCall(ctx, session, call.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = client.ClaimApplicationCall(ctx, session, call.ID); err == nil {
+	if _, err = client.ClaimSessionToolCall(ctx, session, call.ID); err == nil {
 		t.Fatal("repeated claim granted an external effect")
 	}
-	if err = client.CompleteApplicationCall(ctx, session, call.ID, application.CallResult{Outcome: "succeeded", Content: json.RawMessage(`{"value":"CONFIGURATION_TOOL_SENTINEL"}`)}); err != nil {
+	if err = client.CompleteSessionToolCall(ctx, session, call.ID, sessionprofile.CallResult{Outcome: "succeeded", Content: json.RawMessage(`{"value":"CONFIGURATION_TOOL_SENTINEL"}`)}); err != nil {
 		t.Fatal(err)
 	}
 	return call
@@ -247,18 +247,18 @@ func TestApplicationConfigurationHostHTTPHotRequestsAndRestart(t *testing.T) {
 			host.close(t)
 		}
 	}()
-	client, _ := registerApplicationHTTP(t, ctx, host, "configuration", filepath.Join(root, "application.credential"))
+	client, _ := connectSessionOwnerHTTP(t, ctx, host, "owner", filepath.Join(root, "application.credential"))
 	profile := applicationHTTPProfile()
 	profile.Model = "openai/gpt-5.4-mini"
 	profile.Instructions = "OLD_CONFIGURATION_INSTRUCTIONS"
 	profile.ReasoningEffort = "low"
 	profile.Tools[0].InputSchema = map[string]any{"type": "object", "properties": map[string]any{"key": map[string]any{"type": "string"}}, "required": []any{"key"}}
-	created, err := client.CreateApplicationSession(ctx, appserver.CreateApplicationSessionRequest{WriteBase: appserver.WriteBase{OperationID: "create-config"}, Profile: profile})
+	created, err := client.CreateSession(ctx, appserver.CreateSessionRequest{WriteBase: appserver.WriteBase{OperationID: "create-config"}, Profile: profilePointer(profile)})
 	if err != nil || created.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("create = %+v %v", created, err)
 	}
 	session := created.SessionID
-	baseline, err := client.ApplicationConfiguration(ctx, session)
+	baseline, err := client.SessionConfiguration(ctx, session)
 	if err != nil || baseline.Revision != 1 || !reflect.DeepEqual(baseline.Profile, profile) {
 		t.Fatalf("baseline %+v %v", baseline, err)
 	}
@@ -268,19 +268,19 @@ func TestApplicationConfigurationHostHTTPHotRequestsAndRestart(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("old provider request did not reach deterministic barrier")
 	}
-	issued, err := client.ApplicationConfiguration(ctx, session)
+	issued, err := client.SessionConfiguration(ctx, session)
 	if err != nil || issued.LastRequest == nil || issued.LastRequest.Revision != 1 || issued.LastRequest.RequestID == "" || issued.LastRequest.TurnID == "" || issued.LastRequest.Model != "gpt-5.4-mini" || issued.LastRequest.ReasoningEffort != "low" || issued.LastRequest.ServiceTier != "" || issued.LastRequest.ToolsVersion != profile.ToolsVersion {
 		t.Fatalf("old request was not admitted before the provider barrier: %+v %v", issued, err)
 	}
-	newDefs := []application.ToolDefinition{{Name: "ApplicationLookup", Description: "Look up integer key.", InputSchema: map[string]any{"type": "object", "properties": map[string]any{"key": map[string]any{"type": "integer"}}, "required": []any{"key"}}}}
+	newDefs := []sessionprofile.ToolDefinition{{Name: "ApplicationLookup", Description: "Look up integer key.", InputSchema: map[string]any{"type": "object", "properties": map[string]any{"key": map[string]any{"type": "integer"}}, "required": []any{"key"}}}}
 	newModel := "openai/gpt-5.4"
 	newInstructions := "NEW_CONFIGURATION_INSTRUCTIONS"
 	newEffort := "high"
 	newTier := "priority"
 	newVersion := "lookup-tools/2"
-	update := application.UpdateConfigurationRequest{OperationID: "hot-update", ExpectedConfigurationRevision: 1,
-		Patch: application.ConfigurationPatch{Model: &newModel, Instructions: &newInstructions, ReasoningEffort: &newEffort, ServiceTier: &newTier, ToolsVersion: &newVersion, Tools: &newDefs}}
-	updated, err := client.UpdateApplicationConfiguration(ctx, session, update)
+	update := sessionprofile.UpdateConfigurationRequest{OperationID: "hot-update", ExpectedConfigurationRevision: 1,
+		Patch: sessionprofile.ConfigurationPatch{Model: &newModel, Instructions: &newInstructions, ReasoningEffort: &newEffort, ServiceTier: &newTier, ToolsVersion: &newVersion, Tools: &newDefs}}
+	updated, err := configurationResult(client.UpdateSessionConfiguration(ctx, configurationCommand(session, update)))
 	if err != nil || updated.Revision != 2 || updated.LastRequest == nil || updated.LastRequest.Revision != 1 {
 		t.Fatalf("hot update did not overlap old request: %+v %v", updated, err)
 	}
@@ -296,13 +296,13 @@ func TestApplicationConfigurationHostHTTPHotRequestsAndRestart(t *testing.T) {
 	if inputs, _ := requests[1]["input"].([]any); len(inputs) == 0 || !strings.Contains(fmt.Sprint(inputs), "CONFIGURATION_TOOL_SENTINEL") {
 		t.Fatalf("new request lacks old callback result as model context: %#v", requests[1]["input"])
 	}
-	observed, err := client.ApplicationConfiguration(ctx, session)
+	observed, err := client.SessionConfiguration(ctx, session)
 	if err != nil || observed.LastRequest == nil || observed.LastRequest.Revision != 2 || observed.LastRequest.TurnID != oldCall.TurnID || observed.LastRequest.RequestID == issued.LastRequest.RequestID || observed.LastRequest.Model != "gpt-5.4" || observed.LastRequest.ReasoningEffort != "high" || observed.LastRequest.ServiceTier != "priority" || observed.LastRequest.ToolsVersion != newVersion {
 		t.Fatalf("same-Turn next model request did not pin new revision: %+v %v", observed, err)
 	}
 	// An unchanged patch is a durable operation, but cannot rewrite the model
 	// prefix, change the revision, or dispatch a user Turn.
-	stable, err := client.UpdateApplicationConfiguration(ctx, session, application.UpdateConfigurationRequest{OperationID: "noop", ExpectedConfigurationRevision: 2})
+	stable, err := configurationResult(client.UpdateSessionConfiguration(ctx, configurationCommand(session, sessionprofile.UpdateConfigurationRequest{OperationID: "noop", ExpectedConfigurationRevision: 2})))
 	if err != nil || stable.Revision != 2 || !reflect.DeepEqual(stable.Profile, updated.Profile) {
 		t.Fatalf("no-op %+v %v", stable, err)
 	}
@@ -323,13 +323,13 @@ func TestApplicationConfigurationHostHTTPHotRequestsAndRestart(t *testing.T) {
 	assertRevisionPrefix(t, requests[3], "gpt-5.4", "high", "priority", newInstructions, "integer")
 	history := applicationHTTPHistory(t, ctx, client, session)
 	assertRevisionUserHistory(t, history, 2)
-	for _, bad := range []application.UpdateConfigurationRequest{
+	for _, bad := range []sessionprofile.UpdateConfigurationRequest{
 		{OperationID: "stale", ExpectedConfigurationRevision: 1},
-		{OperationID: "invalid-model", ExpectedConfigurationRevision: 2, Patch: application.ConfigurationPatch{Model: stringPointer("")}},
-		{OperationID: "invalid-tier", ExpectedConfigurationRevision: 2, Patch: application.ConfigurationPatch{ServiceTier: stringPointer("unsupported-tier")}},
-		{OperationID: "catalog-reuse", ExpectedConfigurationRevision: 2, Patch: application.ConfigurationPatch{ToolsVersion: stringPointer(profile.ToolsVersion)}},
+		{OperationID: "invalid-model", ExpectedConfigurationRevision: 2, Patch: sessionprofile.ConfigurationPatch{Model: stringPointer("")}},
+		{OperationID: "invalid-tier", ExpectedConfigurationRevision: 2, Patch: sessionprofile.ConfigurationPatch{ServiceTier: stringPointer("unsupported-tier")}},
+		{OperationID: "catalog-reuse", ExpectedConfigurationRevision: 2, Patch: sessionprofile.ConfigurationPatch{ToolsVersion: stringPointer(profile.ToolsVersion)}},
 	} {
-		if _, err := client.UpdateApplicationConfiguration(ctx, session, bad); err == nil {
+		if _, err := configurationResult(client.UpdateSessionConfiguration(ctx, configurationCommand(session, bad))); err == nil {
 			t.Fatalf("accepted invalid update %+v", bad)
 		}
 	}
@@ -344,16 +344,16 @@ func TestApplicationConfigurationHostHTTPHotRequestsAndRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	clear := ""
-	loss := application.UpdateConfigurationRequest{OperationID: "lost-response", ExpectedConfigurationRevision: 2, Patch: application.ConfigurationPatch{ReasoningEffort: &clear, ServiceTier: &clear}}
-	if _, err = clientWithLoss.UpdateApplicationConfiguration(ctx, session, loss); err == nil {
+	loss := sessionprofile.UpdateConfigurationRequest{OperationID: "lost-response", ExpectedConfigurationRevision: 2, Patch: sessionprofile.ConfigurationPatch{ReasoningEffort: &clear, ServiceTier: &clear}}
+	if _, err = configurationResult(clientWithLoss.UpdateSessionConfiguration(ctx, configurationCommand(session, loss))); err == nil {
 		t.Fatal("lost HTTP response was not simulated")
 	}
-	receipt, err := client.ApplicationConfigurationOperation(ctx, loss.OperationID)
+	receipt, err := configurationResult(client.Operation(ctx, loss.OperationID))
 	if err != nil || receipt.Revision != 3 || receipt.Profile.ReasoningEffort != "" || receipt.Profile.ServiceTier != "" {
 		t.Fatalf("uncertain operation receipt %+v %v", receipt, err)
 	}
-	if _, err = client.ApplicationOperation(ctx, loss.OperationID); err == nil {
-		t.Fatal("generic command receipt route decoded configuration result")
+	if common, err := client.Operation(ctx, loss.OperationID); err != nil || common.Configuration == nil || common.Configuration.Revision != receipt.Revision {
+		t.Fatalf("common receipt lost configuration: %+v %v", common, err)
 	}
 	beforeRestart := provider.snapshot()
 	if len(beforeRestart) != 4 {
@@ -362,11 +362,11 @@ func TestApplicationConfigurationHostHTTPHotRequestsAndRestart(t *testing.T) {
 	host.close(t)
 	host = startApplicationHTTPHost(t, store, workspace, provider)
 	client = host.app(string(secret))
-	recovered, err := client.ApplicationConfiguration(ctx, session)
+	recovered, err := client.SessionConfiguration(ctx, session)
 	if err != nil || !reflect.DeepEqual(receipt, recovered) {
 		t.Fatalf("reopened desired configuration %+v, want %+v, err=%v", recovered, receipt, err)
 	}
-	replayReceipt, err := client.ApplicationConfigurationOperation(ctx, loss.OperationID)
+	replayReceipt, err := configurationResult(client.Operation(ctx, loss.OperationID))
 	if err != nil || !reflect.DeepEqual(replayReceipt, receipt) {
 		t.Fatalf("reopened operation receipt %+v, want %+v, err=%v", replayReceipt, receipt, err)
 	}
@@ -383,7 +383,7 @@ func TestApplicationConfigurationHostHTTPHotRequestsAndRestart(t *testing.T) {
 		t.Fatalf("restarted Turn produced %d model requests, want six", len(requests))
 	}
 	assertRevisionPrefix(t, requests[4], "gpt-5.4", "medium", "", newInstructions, "integer")
-	last, err := client.ApplicationConfiguration(ctx, session)
+	last, err := client.SessionConfiguration(ctx, session)
 	if err != nil || last.LastRequest == nil || last.LastRequest.Revision != 3 || last.LastRequest.Model != "gpt-5.4" || last.LastRequest.ReasoningEffort != "medium" || last.LastRequest.ServiceTier != "" || last.LastRequest.ToolsVersion != newVersion {
 		t.Fatalf("defaulted request selectors after restart %+v %v", last, err)
 	}
@@ -393,13 +393,13 @@ func TestApplicationConfigurationHostHTTPHotRequestsAndRestart(t *testing.T) {
 	assertRevisionUserHistory(t, applicationHTTPHistory(t, ctx, client, session), 3)
 	// Public JSON distinguishes an explicit empty catalog/allowlist from an
 	// omitted list. Clearing callbacks names a fresh catalog version.
-	emptyCallbacks := []application.ToolDefinition{}
+	emptyCallbacks := []sessionprofile.ToolDefinition{}
 	emptyNative := []string{}
 	clearedVersion := "lookup-tools/3"
-	cleared, err := client.UpdateApplicationConfiguration(ctx, session, application.UpdateConfigurationRequest{
+	cleared, err := configurationResult(client.UpdateSessionConfiguration(ctx, configurationCommand(session, sessionprofile.UpdateConfigurationRequest{
 		OperationID: "clear-catalog", ExpectedConfigurationRevision: 3,
-		Patch: application.ConfigurationPatch{ToolsVersion: &clearedVersion, Tools: &emptyCallbacks, NativeTools: &emptyNative},
-	})
+		Patch: sessionprofile.ConfigurationPatch{ToolsVersion: &clearedVersion, Tools: &emptyCallbacks, NativeTools: &emptyNative},
+	})))
 	if err != nil || cleared.Revision != 4 || cleared.Profile.NativeTools == nil || len(cleared.Profile.Tools) != 0 || len(cleared.Profile.NativeTools) != 0 {
 		t.Fatalf("public clear did not retain [] semantics: %+v %v", cleared, err)
 	}
