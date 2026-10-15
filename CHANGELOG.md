@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.71.2](https://github.com/caelis-labs/caelis/compare/v0.71.1...v0.71.2) (2026-10-15)
+
+
+### Bug Fixes
+
+* **control:** converge shared schema and application receipts ([#142](https://github.com/caelis-labs/caelis/issues/142)) ([105fd49](https://github.com/caelis-labs/caelis/commit/105fd491f9ac0904c1a118add70775d96cbd6f39))
+* restore Developer ID signing and recover v0.71.1 release ([#139](https://github.com/caelis-labs/caelis/issues/139)) ([40baada](https://github.com/caelis-labs/caelis/commit/40baada2990c9315d15bacab45990c4876a73b32))
+* resume v0.71.1 publication from accepted signing artifacts ([#141](https://github.com/caelis-labs/caelis/issues/141)) ([bd5f84c](https://github.com/caelis-labs/caelis/commit/bd5f84c6e826e69ec293b90356817e001d7b7dde))
+
 ## [0.71.1](https://github.com/caelis-labs/caelis/compare/v0.71.0...v0.71.1) (2026-10-13)
 
 
