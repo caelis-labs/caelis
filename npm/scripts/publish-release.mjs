@@ -39,7 +39,7 @@ async function publishedIntegrity(name, version) {
   try {
     const { stdout } = await execFileAsync(
       'npm',
-      ['view', `${name}@${version}`, 'dist.integrity', '--json', '--registry=https://registry.npmjs.org'],
+      ['view', `${name}@${version}`, 'dist.integrity', '--json', '--prefer-online', '--registry=https://registry.npmjs.org'],
       { cwd: packageRoot },
     );
     const integrity = JSON.parse(stdout);
@@ -98,11 +98,15 @@ async function publishPackage(packageDir) {
       args.push('--tag', 'bootstrap');
     }
     await runCommand('npm', args, { cwd: packageDir });
-    for (let attempt = 0; attempt < 5; attempt++) {
+    // npm can accept a publication minutes before its metadata becomes visible.
+    const verificationAttempts = 25;
+    for (let attempt = 0; attempt < verificationAttempts; attempt++) {
       const published = await publishedIntegrity(manifest.name, manifest.version);
       if (published === integrity) return;
       if (published) throw new Error(`npm ${manifest.name}@${manifest.version} published with different integrity`);
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      if (attempt < verificationAttempts - 1) {
+        await new Promise((resolve) => setTimeout(resolve, 5000));
+      }
     }
     throw new Error(`npm ${manifest.name}@${manifest.version} has no verifiable registry integrity after publish`);
   } finally {
