@@ -71,9 +71,44 @@ func TestTranscriptRequiresCommittedReplacementAndTargetTerminal(t *testing.T) {
 			close(sub.deliveries)
 			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 			defer cancel()
-			err := consumeTranscript(ctx, sub, "session", target)
+			err := consumeTranscript(ctx, sub, "session", target, new(eventstream.Envelope))
 			if (err == nil) != tc.wantOK {
 				t.Fatalf("result = %v; want success %v", err, tc.wantOK)
+			}
+		})
+	}
+}
+
+func TestTranscriptRestartRequiresSavedTerminalAndCommittedHistory(t *testing.T) {
+	target := appserver.TurnTarget{HandleID: "handle", RunID: "run", TurnID: "turn"}
+	terminal := eventstream.TurnCompleted(target.HandleID, target.RunID, target.TurnID, time.Now())
+	terminal.SessionID = "session"
+	message := eventstream.Envelope{SessionID: "session", TurnID: target.TurnID, Scope: eventstream.ScopeMain, Final: true, Update: eventstream.ContentChunk{SessionUpdate: eventstream.UpdateAgentMessage, MessageID: "message", Content: eventstream.TextContent{Type: "text", Text: "MATRIX_FINAL"}}}
+	for _, boundary := range []string{"complete", "missing-end", "missing-sync", "missing-terminal", "wrong-terminal", "stream-error"} {
+		t.Run(boundary, func(t *testing.T) {
+			saved := terminal
+			if boundary == "missing-terminal" {
+				saved = eventstream.Envelope{}
+			}
+			if boundary == "wrong-terminal" {
+				saved.TurnID = "foreign"
+			}
+			sub := &transcriptSubscription{deliveries: make(chan appserver.FeedDelivery, 4)}
+			sub.deliveries <- appserver.FeedDelivery{Kind: appserver.FeedDeliveryReplaceBegin, Source: appserver.FeedSourceReplacement, SnapshotID: "snapshot"}
+			sub.deliveries <- appserver.FeedDelivery{Kind: appserver.FeedDeliveryReplacePage, Source: appserver.FeedSourceReplacement, SnapshotID: "snapshot", Events: []eventstream.Envelope{message}}
+			if boundary != "missing-end" {
+				sub.deliveries <- appserver.FeedDelivery{Kind: appserver.FeedDeliveryReplaceEnd, Source: appserver.FeedSourceReplacement, SnapshotID: "snapshot", Page: 1}
+			}
+			if boundary != "missing-sync" {
+				sub.deliveries <- appserver.FeedDelivery{Kind: appserver.FeedDeliverySync, Source: appserver.FeedSourceExact}
+			}
+			if boundary == "stream-error" {
+				sub.err = errors.New("stream failed")
+			}
+			close(sub.deliveries)
+			err := consumeTranscript(t.Context(), sub, "session", target, &saved)
+			if (err == nil) != (boundary == "complete") {
+				t.Fatalf("result: %v", err)
 			}
 		})
 	}

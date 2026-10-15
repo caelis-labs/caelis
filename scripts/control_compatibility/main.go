@@ -61,6 +61,7 @@ func main() {
 	saved := filepath.Join(root, "saved.json")
 	var receipt struct {
 		Create, Prompt appserver.CommandResult
+		Terminal       eventstream.Envelope
 		Config         application.Configuration
 		Resource       application.Resource
 		Call           application.Call
@@ -133,7 +134,7 @@ func main() {
 			case <-time.After(25 * time.Millisecond):
 			}
 		}
-		must(waitTranscript(ctx, client, id, receipt.Prompt.Target))
+		must(waitTranscript(ctx, client, id, receipt.Prompt.Target, &receipt.Terminal))
 		write(saved, receipt)
 	} else {
 		raw, err := os.ReadFile(saved)
@@ -153,7 +154,7 @@ func main() {
 		check(equalJSON(call, receipt.Call), "callback receipt changed")
 		_, err = client.ClaimApplicationCall(ctx, receipt.Create.SessionID, receipt.Call.ID)
 		check(err != nil, "completed callback was claimable twice")
-		must(waitTranscript(ctx, client, receipt.Create.SessionID, receipt.Prompt.Target))
+		must(waitTranscript(ctx, client, receipt.Create.SessionID, receipt.Prompt.Target, &receipt.Terminal))
 	}
 	effect, err := os.ReadFile(filepath.Join(root, "callback-effect"))
 	must(err)
@@ -175,22 +176,33 @@ func main() {
 	write(filepath.Join(root, "evidence-"+phase+".json"), map[string]any{"phase": phase, "server": info, "session": receipt.Create.SessionID, "configuration_revision": receipt.Config.Revision, "operation_ids": []string{"create", "configure", "prompt"}, "callback_id": receipt.Call.ID, "callback_effect_verified": true, "resource_verified": true, "sse_replay_verified": true, "unrelated_session_denied": true})
 	fmt.Println("PASS", phase, receipt.Create.SessionID)
 }
-func waitTranscript(ctx context.Context, client *httpclient.Client, id string, target appserver.TurnTarget) error {
+func waitTranscript(ctx context.Context, client *httpclient.Client, id string, target appserver.TurnTarget, terminal *eventstream.Envelope) error {
 	result, err := client.Reconnect(ctx, appserver.ReconnectRequest{SessionID: id})
 	if err != nil {
 		return err
 	}
 	defer result.Subscription.Close()
-	return consumeTranscript(ctx, result.Subscription, id, target)
+	return consumeTranscript(ctx, result.Subscription, id, target, terminal)
 }
 
-func consumeTranscript(ctx context.Context, subscription appserver.FeedSubscription, id string, target appserver.TurnTarget) error {
-	if target.TurnID == "" {
+func consumeTranscript(ctx context.Context, subscription appserver.FeedSubscription, id string, target appserver.TurnTarget, terminal *eventstream.Envelope) error {
+	if target.TurnID == "" || terminal == nil {
 		return errors.New("prompt receipt has no Turn identity")
 	}
 	var assembler appserver.FeedDeliveryAssembler
 	messages := map[string]string{}
-	terminal := false
+	// Historical canonical replacement does not repeat transient Turn terminals.
+	// Observe phases reuse the exact completed terminal captured by the create
+	// phase; they still require a complete replacement and the replay sync cut.
+	matches := func(event eventstream.Envelope) bool {
+		return event.SessionID == id && event.TurnID == target.TurnID && event.Scope == eventstream.ScopeMain &&
+			((event.HandleID == "" && event.RunID == "") || (event.HandleID == target.HandleID && event.RunID == target.RunID))
+	}
+	confirmed := eventstream.IsTurnTerminalLifecycle(*terminal) && matches(*terminal) && terminal.Lifecycle.State == eventstream.LifecycleStateCompleted
+	replaying := confirmed
+	if terminal.Kind != "" && !confirmed {
+		return errors.New("saved terminal does not prove the target Turn completed")
+	}
 	for {
 		select {
 		case delivery, ok := <-subscription.Deliveries():
@@ -206,22 +218,17 @@ func consumeTranscript(ctx context.Context, subscription appserver.FeedSubscript
 			}
 			if replacement {
 				clear(messages)
-				terminal = false
 			}
 			for _, event := range events {
-				if event.SessionID != id || event.TurnID != target.TurnID || event.Scope != eventstream.ScopeMain {
-					continue
-				}
-				// Replay omits the live Handle/Run IDs; partial or foreign live
-				// identities cannot complete the command receipt's target.
-				if (event.HandleID != "" || event.RunID != "") && (event.HandleID != target.HandleID || event.RunID != target.RunID) {
+				if !matches(event) {
 					continue
 				}
 				if eventstream.IsTurnTerminalLifecycle(event) {
 					if event.Lifecycle.State != eventstream.LifecycleStateCompleted {
 						return fmt.Errorf("target Turn ended in %s", event.Lifecycle.State)
 					}
-					terminal = true
+					*terminal = eventstream.CloneEnvelope(event)
+					confirmed = true
 				}
 				// The live feed may suppress an identical canonical final message.
 				// Apply its committed display deltas/replacements, then require the
@@ -240,7 +247,7 @@ func consumeTranscript(ctx context.Context, subscription appserver.FeedSubscript
 					messages[chunk.MessageID] += content.Text
 				}
 			}
-			if terminal && !assembler.Pending() {
+			if confirmed && !assembler.Pending() && (!replaying || delivery.Kind == appserver.FeedDeliverySync) {
 				if err := subscription.Err(); err != nil {
 					return err
 				}
