@@ -9,11 +9,11 @@ import (
 	"strconv"
 
 	controlagents "github.com/caelis-labs/caelis/control/agents"
-	"github.com/caelis-labs/caelis/control/application"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/internal/eventmeta"
 	"github.com/caelis-labs/caelis/control/internal/jsonvalue"
+	"github.com/caelis-labs/caelis/control/sessionprofile"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
 	"github.com/caelis-labs/caelis/control/workspacetrust"
 )
@@ -122,8 +122,16 @@ func DecodeRequest(raw json.RawMessage, target any) error {
 
 func marshalWireValueUnchecked(value any) ([]byte, error) {
 	switch typed := value.(type) {
-	case appserver.CreateWorkerRequest:
-		return marshalWriteRequest(typed, typed.ExpectedRevision)
+	case appserver.UpdateSessionConfigurationRequest:
+		fields, err := marshalObject(typed)
+		if err != nil {
+			return nil, err
+		}
+		fields["expected_configuration_revision"] = decimalRaw(typed.ExpectedConfigurationRevision)
+		if typed.ExpectedRevision != nil {
+			fields["expected_revision"] = decimalRaw(*typed.ExpectedRevision)
+		}
+		return json.Marshal(fields)
 	case appserver.CreateSessionRequest:
 		return marshalWriteRequest(typed, typed.ExpectedRevision)
 	case appserver.CloseSessionRequest:
@@ -132,26 +140,45 @@ func marshalWireValueUnchecked(value any) ([]byte, error) {
 		return marshalWriteRequest(typed, typed.ExpectedRevision)
 	case appserver.PromptRequest:
 		return marshalWriteRequest(typed, typed.ExpectedRevision)
-	case appserver.CreateApplicationSessionRequest:
+	case appserver.CreateSessionBackgroundGrantRequest:
 		return marshalWriteRequest(typed, typed.ExpectedRevision)
-	case appserver.ApplicationPromptRequest:
+	case appserver.RevokeSessionBackgroundGrantRequest:
 		return marshalWriteRequest(typed, typed.ExpectedRevision)
-	case appserver.ApplicationResourceRequest:
+	case appserver.SessionResourceRequest:
 		return marshalWriteRequest(typed, typed.ExpectedRevision)
-	case application.Call:
+	case sessionprofile.Binding:
+		fields, err := marshalObject(typed)
+		if err != nil {
+			return nil, err
+		}
+		if typed.CreationRevision != nil {
+			fields["creation_revision"] = decimalRaw(*typed.CreationRevision)
+		}
+		return json.Marshal(fields)
+	case []sessionprofile.Binding:
+		values := make([]json.RawMessage, 0, len(typed))
+		for _, binding := range typed {
+			raw, err := marshalWireValueUnchecked(binding)
+			if err != nil {
+				return nil, err
+			}
+			values = append(values, raw)
+		}
+		return json.Marshal(values)
+	case sessionprofile.Call:
 		return marshalApplicationCall(typed)
-	case []application.Call:
+	case []sessionprofile.Call:
 		return marshalApplicationCallList(typed)
-	case application.ModelCapabilities:
+	case sessionprofile.ModelCapabilities:
 		fields, err := marshalObject(typed)
 		if err != nil {
 			return nil, err
 		}
 		fields["configuration_revision"] = decimalRaw(typed.ConfigurationRevision)
 		return json.Marshal(fields)
-	case application.Configuration:
+	case sessionprofile.Configuration:
 		return marshalApplicationConfiguration(typed)
-	case application.UpdateConfigurationRequest:
+	case sessionprofile.UpdateConfigurationRequest:
 		return marshalUpdateConfigurationRequest(typed)
 	case appserver.SteerRequest:
 		return marshalWriteRequest(typed, typed.ExpectedRevision)
@@ -258,7 +285,7 @@ func marshalWireValueUnchecked(value any) ([]byte, error) {
 	}
 }
 
-func marshalApplicationCall(call application.Call) ([]byte, error) {
+func marshalApplicationCall(call sessionprofile.Call) ([]byte, error) {
 	fields, err := marshalObject(call)
 	if err != nil {
 		return nil, err
@@ -267,7 +294,7 @@ func marshalApplicationCall(call application.Call) ([]byte, error) {
 	return json.Marshal(fields)
 }
 
-func marshalApplicationCallList(calls []application.Call) ([]byte, error) {
+func marshalApplicationCallList(calls []sessionprofile.Call) ([]byte, error) {
 	values := make([]json.RawMessage, 0, len(calls))
 	for _, call := range calls {
 		raw, err := marshalApplicationCall(call)
@@ -279,7 +306,7 @@ func marshalApplicationCallList(calls []application.Call) ([]byte, error) {
 	return json.Marshal(values)
 }
 
-func marshalApplicationConfiguration(configuration application.Configuration) ([]byte, error) {
+func marshalApplicationConfiguration(configuration sessionprofile.Configuration) ([]byte, error) {
 	fields, err := marshalObject(configuration)
 	if err != nil {
 		return nil, err
@@ -299,7 +326,7 @@ func marshalApplicationConfiguration(configuration application.Configuration) ([
 	return json.Marshal(fields)
 }
 
-func marshalUpdateConfigurationRequest(request application.UpdateConfigurationRequest) ([]byte, error) {
+func marshalUpdateConfigurationRequest(request sessionprofile.UpdateConfigurationRequest) ([]byte, error) {
 	fields, err := marshalObject(request)
 	if err != nil {
 		return nil, err
@@ -371,6 +398,12 @@ func marshalCommandResult(result appserver.CommandResult) ([]byte, error) {
 	fields, err := marshalObject(result)
 	if err != nil {
 		return nil, err
+	}
+	if result.Configuration != nil {
+		fields["configuration"], err = marshalApplicationConfiguration(*result.Configuration)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if result.Revision != 0 {
 		fields["revision"] = decimalRaw(result.Revision)

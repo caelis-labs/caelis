@@ -6,7 +6,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin"
-	"github.com/caelis-labs/caelis/control/application"
+	"github.com/caelis-labs/caelis/control/sessionprofile"
 )
 
 // applicationNativeToolNames is the ordinary SDK filesystem/command catalog,
@@ -16,7 +16,7 @@ var applicationNativeToolNames = []string{
 	"Read", "ViewImage", "Write", "Patch", "Glob", "Grep", "RunCommand", "Task",
 }
 
-func newApplicationNativeTools(exec *applicationExecutionRuntime, store *application.Store, binding application.Binding, workspace string, nativeTools []string) ([]tool.Tool, error) {
+func newApplicationNativeTools(exec *applicationExecutionRuntime, store *sessionprofile.Store, binding sessionprofile.Binding, workspace string, nativeTools []string) ([]tool.Tool, error) {
 	if exec == nil || store == nil {
 		return nil, fmt.Errorf("gatewayapp: application native execution is unavailable")
 	}

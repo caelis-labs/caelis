@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/control/application"
+	"github.com/caelis-labs/caelis/control/sessionprofile"
 	"github.com/caelis-labs/caelis/internal/kernel"
 )
 
@@ -39,12 +39,12 @@ func (s *runtimeComposition) SessionRuntimeState(ctx context.Context, ref sessio
 	if s == nil || s.sessions == nil {
 		return SessionRuntimeState{}, fmt.Errorf("gatewayapp: sessions service unavailable")
 	}
-	if s.authorities.applications != nil {
-		binding, err := s.authorities.applications.BindingForSession(ctx, ref.SessionID)
+	if s.authorities.sessionProfiles != nil {
+		binding, err := s.authorities.sessionProfiles.BindingForSession(ctx, ref.SessionID)
 		if err == nil {
 			return s.applicationRuntimeState(ctx, binding)
 		}
-		if !errors.Is(err, application.ErrNotFound) {
+		if !errors.Is(err, sessionprofile.ErrNotFound) {
 			return SessionRuntimeState{}, err
 		}
 	}

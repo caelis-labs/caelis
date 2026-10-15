@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/caelis-labs/caelis/control/internal/operationreceipt"
 	_ "modernc.org/sqlite"
 )
 
@@ -132,39 +133,7 @@ func rejectUnsafeSQLiteOperationFile(path string) error {
 }
 
 func ensureSQLiteOperationSchema(db *sql.DB) error {
-	_, err := db.Exec(`
-CREATE TABLE IF NOT EXISTS control_operation_policy (
-	id INTEGER PRIMARY KEY CHECK (id = 1),
-	version INTEGER NOT NULL,
-	terminal_retention_ns INTEGER NOT NULL
-);
-CREATE TABLE IF NOT EXISTS control_operations (
-	principal_id TEXT NOT NULL,
-	operation_id TEXT NOT NULL,
-	action TEXT NOT NULL,
-	session_id TEXT NOT NULL,
-	outcome TEXT NOT NULL,
-	created_at_ns INTEGER NOT NULL,
-	updated_at_ns INTEGER NOT NULL,
-	retain_until_ns INTEGER NOT NULL,
-	record_json BLOB NOT NULL,
-	PRIMARY KEY (principal_id, operation_id)
-);
-CREATE INDEX IF NOT EXISTS control_operations_updated_idx
-	ON control_operations(updated_at_ns DESC);
-CREATE INDEX IF NOT EXISTS control_operations_action_updated_idx
-	ON control_operations(action, updated_at_ns DESC);
-CREATE INDEX IF NOT EXISTS control_operations_session_updated_idx
-	ON control_operations(session_id, updated_at_ns DESC)
-	WHERE session_id <> '';
-CREATE INDEX IF NOT EXISTS control_operations_retention_idx
-	ON control_operations(retain_until_ns)
-	WHERE retain_until_ns > 0;
-`)
-	if err != nil {
-		return fmt.Errorf("controlclient: initialize operation store schema: %w", err)
-	}
-	return nil
+	return operationreceipt.EnsureSchema(context.Background(), db)
 }
 
 func (s *SQLiteOperationStore) Initialize(ctx context.Context) error {
@@ -325,11 +294,29 @@ func (s *SQLiteOperationStore) Complete(ctx context.Context, intent OperationInt
 	if _, err := s.ensureRetentionPolicy(ctx); err != nil {
 		return OperationRecord{}, err
 	}
+	return s.completeIn(ctx, s.db, intent, result)
+}
+
+// CompleteTransaction joins a domain mutation's transaction in the same Host
+// database. No independent receipt is written and rollback restores both sides.
+func (s *SQLiteOperationStore) CompleteTransaction(ctx context.Context, tx *sql.Tx, intent OperationIntent, result CommandResult) (OperationRecord, error) {
+	if result.OperationID != intent.OperationID || !result.Outcome.Valid() {
+		return OperationRecord{}, ErrOperationConflict
+	}
+	return s.completeIn(ctx, tx, intent, result)
+}
+
+type operationSQLDatabase interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}
+
+func (s *SQLiteOperationStore) completeIn(ctx context.Context, db operationSQLDatabase, intent OperationIntent, result CommandResult) (OperationRecord, error) {
 	ctx = contextOrBackground(ctx)
 	principalID := strings.TrimSpace(intent.PrincipalID)
 	operationID := strings.TrimSpace(intent.OperationID)
 	for range operationSQLMaxRetry {
-		record, raw, err := s.loadOperationRecord(ctx, principalID, operationID)
+		record, raw, err := loadOperationRecordFrom(ctx, db, principalID, operationID)
 		if errors.Is(err, sql.ErrNoRows) || (err == nil && !sameOperationIntent(record.Intent, intent)) {
 			return OperationRecord{}, ErrOperationConflict
 		}
@@ -345,16 +332,16 @@ func (s *SQLiteOperationStore) Complete(ctx context.Context, intent OperationInt
 		copyResult := cloneCommandResult(result)
 		record.Result = &copyResult
 		record.Version = operationRecordSchemaVersion
-		if record.TerminalRetentionNanoseconds <= 0 {
+		if !record.RetainForever && record.TerminalRetentionNanoseconds <= 0 {
 			record.TerminalRetentionNanoseconds = int64(s.effectiveRetention)
 		}
 		record.UpdatedAt = monotonicOperationTime(operationStoreNow(s.now), record.UpdatedAt, record.Intent.CreatedAt)
-		if terminalOperationOutcome(result.Outcome) {
+		if !record.RetainForever && terminalOperationOutcome(result.Outcome) {
 			record.RetainUntil = record.UpdatedAt.Add(time.Duration(record.TerminalRetentionNanoseconds))
 		} else {
 			record.RetainUntil = time.Time{}
 		}
-		updated, err := s.updateOperationRecordCAS(ctx, raw, record)
+		updated, err := updateOperationRecordCASIn(ctx, db, raw, record)
 		if err != nil {
 			return OperationRecord{}, err
 		}
@@ -366,8 +353,12 @@ func (s *SQLiteOperationStore) Complete(ctx context.Context, intent OperationInt
 }
 
 func (s *SQLiteOperationStore) loadOperationRecord(ctx context.Context, principalID, operationID string) (OperationRecord, []byte, error) {
+	return loadOperationRecordFrom(ctx, s.db, principalID, operationID)
+}
+
+func loadOperationRecordFrom(ctx context.Context, db operationSQLDatabase, principalID, operationID string) (OperationRecord, []byte, error) {
 	var raw []byte
-	err := s.db.QueryRowContext(ctx, `
+	err := db.QueryRowContext(ctx, `
 SELECT record_json FROM control_operations
 WHERE principal_id = ? AND operation_id = ?`, principalID, operationID).Scan(&raw)
 	if err != nil {
@@ -405,11 +396,15 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 }
 
 func (s *SQLiteOperationStore) updateOperationRecordCAS(ctx context.Context, previous []byte, record OperationRecord) (bool, error) {
+	return updateOperationRecordCASIn(ctx, s.db, previous, record)
+}
+
+func updateOperationRecordCASIn(ctx context.Context, db operationSQLDatabase, previous []byte, record OperationRecord) (bool, error) {
 	raw, outcome, retainUntil, err := encodeSQLiteOperationRecord(record)
 	if err != nil {
 		return false, err
 	}
-	result, err := s.db.ExecContext(ctx, `
+	result, err := db.ExecContext(ctx, `
 UPDATE control_operations
 SET action = ?, session_id = ?, outcome = ?, created_at_ns = ?, updated_at_ns = ?, retain_until_ns = ?, record_json = ?
 WHERE principal_id = ? AND operation_id = ? AND record_json = ?`,

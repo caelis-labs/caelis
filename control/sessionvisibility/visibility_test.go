@@ -40,12 +40,12 @@ func TestSystemManagedSessionClassification(t *testing.T) {
 func TestApplicationAndRetiredSessionClassification(t *testing.T) {
 	t.Parallel()
 	for _, test := range []struct {
-		marker      string
-		application bool
-		retired     bool
+		marker         string
+		sessionprofile bool
+		retired        bool
 	}{
-		{marker: "application", application: true},
-		{marker: " Application ", application: true},
+		{marker: "application", sessionprofile: true},
+		{marker: " Application ", sessionprofile: true},
 		{marker: "bot", retired: true},
 		{marker: " Bot ", retired: true},
 		{marker: "bot-work", retired: true},
@@ -54,8 +54,8 @@ func TestApplicationAndRetiredSessionClassification(t *testing.T) {
 		{marker: ""},
 	} {
 		active := session.Session{Metadata: map[string]any{MetadataSystemManagedAgent: test.marker}}
-		if got := IsApplicationSession(active); got != test.application {
-			t.Errorf("IsApplicationSession(%q) = %v, want %v", test.marker, got, test.application)
+		if got := IsApplicationSession(active); got != test.sessionprofile {
+			t.Errorf("IsApplicationSession(%q) = %v, want %v", test.marker, got, test.sessionprofile)
 		}
 		if got := IsRetiredSession(active); got != test.retired {
 			t.Errorf("IsRetiredSession(%q) = %v, want %v", test.marker, got, test.retired)

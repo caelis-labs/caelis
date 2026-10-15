@@ -1,7 +1,7 @@
 import os, json, secrets, subprocess, time, urllib.request, threading, http.server, socket, signal, pathlib, hashlib
 import argparse, tempfile
-parser = argparse.ArgumentParser(description='Build frozen/current Control clients and Hosts, then verify both directions in isolated Stores.')
-parser.add_argument('--baseline', default='v0.71.1', help='Locally available supported release Git ref')
+parser = argparse.ArgumentParser(description='Verify current Control restart, optionally interoperability with a compatible peer ref.')
+parser.add_argument('--peer-ref', help='Optional local ref implementing the unified Session protocol and compatible Store schema')
 parser.add_argument('--output', help='New evidence directory; created privately if omitted')
 args = parser.parse_args()
 repo = pathlib.Path(__file__).resolve().parents[2]
@@ -9,19 +9,28 @@ root = pathlib.Path(args.output).resolve() if args.output else pathlib.Path(temp
 if args.output:
     root.mkdir(mode=0o700, parents=True, exist_ok=False)
 print('Evidence:', root, flush=True)
-release = root / 'release'
-release.mkdir(mode=0o700)
-sha = subprocess.check_output(['git', 'rev-parse', '--verify', args.baseline + '^{commit}'], cwd=repo, text=True).strip()
-archive = root / 'release.tar'
-with archive.open('wb') as output:
-    subprocess.run(['git', 'archive', sha], cwd=repo, stdout=output, check=True)
-subprocess.run(['tar', '-xf', str(archive), '-C', str(release)], check=True)
-archive.unlink()
+sources = [('current', repo)]
+peer_sha = None
+if args.peer_ref:
+    peer = root / 'peer'
+    peer.mkdir(mode=0o700)
+    peer_sha = subprocess.check_output(['git', 'rev-parse', '--verify', args.peer_ref + '^{commit}'], cwd=repo, text=True).strip()
+    archive = root / 'peer.tar'
+    with archive.open('wb') as output:
+        subprocess.run(['git', 'archive', peer_sha], cwd=repo, stdout=output, check=True)
+    subprocess.run(['tar', '-xf', str(archive), '-C', str(peer)], check=True)
+    archive.unlink()
+    schema = json.loads((peer / 'api/control/v1/openapi.json').read_text())
+    if '/sessions/{session_id}/profile' not in schema['paths']:
+        raise RuntimeError('Peer predates the unified Session protocol; legacy binary compatibility is outside this matrix')
+    sources.append(('peer', peer))
 build_env = dict(os.environ, GOWORK='off')
-for name, source in [('release', release), ('current', repo)]:
+for name, source in sources:
     for kind, target in [('host', './cmd/caelis'), ('client', str(repo / 'scripts/control_compatibility/main.go'))]:
         subprocess.run(['go', 'build', '-o', str(root / (name + '-' + kind)), target], cwd=source, env=build_env, check=True)
-(root / 'sources.json').write_text(json.dumps({'baseline': sha, 'current': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=repo, text=True).strip(), 'current_diff': subprocess.check_output(['git', 'diff', '--binary', 'HEAD'], cwd=repo, text=True)}, indent=2))
+files = subprocess.check_output(['git','ls-files','--cached','--others','--exclude-standard','-z'],cwd=repo).split(b'\0')
+file_hashes = {os.fsdecode(name): hashlib.sha256((repo / os.fsdecode(name)).read_bytes()).hexdigest() for name in files if name and (repo / os.fsdecode(name)).is_file()}
+(root / 'sources.json').write_text(json.dumps({'peer': peer_sha, 'current': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=repo, text=True).strip(), 'current_files': file_hashes}, indent=2))
 
 class Provider(http.server.BaseHTTPRequestHandler):
 
@@ -58,9 +67,8 @@ def run_pair(name, client, host, replacements):
     case_env = dict(env, HOME=str(case / 'home'), XDG_CONFIG_HOME=str(case / 'home' / '.config'))
     (case / 'store').mkdir(mode=0o700)
     (case / 'workspace').mkdir(mode=0o700)
-    for n in ['host', 'app']:
-        (case / (n + '.token')).write_text(secrets.token_urlsafe(32) + '\n' if n == 'host' else 'app-client-' + secrets.token_hex(32))
-        os.chmod(case / (n + '.token'), 0o600)
+    (case / 'host.token').write_text(secrets.token_urlsafe(32) + '\n')
+    os.chmod(case / 'host.token', 0o600)
     for index, (binary, phase) in enumerate([(host, 'create')] + [(x, 'observe') for x in replacements]):
         with socket.socket() as s:
             s.bind(('127.0.0.1', 0))
@@ -98,9 +106,11 @@ def run_pair(name, client, host, replacements):
                 process.wait()
             log.close()
 try:
-    run_pair('old-client-new-host', 'release-client', 'current-host', ['current-host'])
-    run_pair('new-client-old-host', 'current-client', 'release-host', ['current-host', 'release-host'])
-    manifest = {n: hashlib.sha256((root / n).read_bytes()).hexdigest() for n in ['release-host', 'release-client', 'current-host', 'current-client']}
+    run_pair('current-restart', 'current-client', 'current-host', ['current-host'])
+    if args.peer_ref:
+        run_pair('peer-client-current-host', 'peer-client', 'current-host', ['current-host'])
+        run_pair('current-client-peer-host', 'current-client', 'peer-host', ['current-host', 'peer-host'])
+    manifest = {name + '-' + kind: hashlib.sha256((root / (name + '-' + kind)).read_bytes()).hexdigest() for name, _ in sources for kind in ['host','client']}
     (root / 'binary-hashes.json').write_text(json.dumps(manifest, indent=2))
     print('MATRIX PASS', flush=True)
 finally:

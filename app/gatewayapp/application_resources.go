@@ -15,20 +15,20 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
-	"github.com/caelis-labs/caelis/control/application"
+	"github.com/caelis-labs/caelis/control/sessionprofile"
 )
 
 // applicationResourceStore is the narrow Host-private boundary between native
 // execution files and the immutable, session-owned resource store.
 type applicationResourceStore interface {
-	CreateResource(context.Context, application.Scope, string, string, string, string, []byte) (application.Resource, error)
-	ReadResource(context.Context, application.Scope, string, string) (application.Resource, []byte, error)
+	CreateResource(context.Context, sessionprofile.Scope, string, string, string, string, []byte) (sessionprofile.Resource, error)
+	ReadResource(context.Context, sessionprofile.Scope, string, string) (sessionprofile.Resource, []byte, error)
 }
 
 // newApplicationResourceTools admits bytes only from the bound Store or from an
 // already isolated execution workspace. The caller adds these tools only to a
 // workspace-write application profile, whose workspace has a native sandbox.
-func newApplicationResourceTools(store applicationResourceStore, binding application.Binding, workspace string) []tool.Tool {
+func newApplicationResourceTools(store applicationResourceStore, binding sessionprofile.Binding, workspace string) []tool.Tool {
 	resource := tool.NamedTool{Def: tool.Definition{
 		Name: "ReadResource", Description: "Copy one immutable uploaded resource into the isolated execution workspace. Returns its relative path and metadata; use the path with workspace tools to inspect bytes.",
 		EffectClass: tool.EffectIdempotent,
@@ -44,7 +44,7 @@ func newApplicationResourceTools(store applicationResourceStore, binding applica
 			return tool.Result{}, err
 		}
 		if input.ResourceID == "" || store == nil {
-			return tool.Result{}, application.ErrInvalid
+			return tool.Result{}, sessionprofile.ErrInvalid
 		}
 		meta, data, err := store.ReadResource(ctx, binding.Scope, binding.SessionID, input.ResourceID)
 		if err != nil {
@@ -63,8 +63,8 @@ func newApplicationResourceTools(store applicationResourceStore, binding applica
 			return tool.Result{}, err
 		}
 		return resourceToolResult(struct {
-			Resource application.Resource `json:"resource"`
-			Path     string               `json:"path"`
+			Resource sessionprofile.Resource `json:"resource"`
+			Path     string                  `json:"path"`
 		}{meta, path})
 	}}
 	artifact := tool.NamedTool{Def: tool.Definition{
@@ -84,7 +84,7 @@ func newApplicationResourceTools(store applicationResourceStore, binding applica
 			return tool.Result{}, err
 		}
 		if !localArtifactPath(input.Path) || strings.TrimSpace(input.Name) == "" || strings.TrimSpace(input.MediaType) == "" || store == nil {
-			return tool.Result{}, application.ErrInvalid
+			return tool.Result{}, sessionprofile.ErrInvalid
 		}
 		root, err := os.OpenRoot(workspace)
 		if err != nil {
@@ -107,16 +107,16 @@ func newApplicationResourceTools(store applicationResourceStore, binding applica
 			return tool.Result{}, err
 		}
 		return resourceToolResult(struct {
-			Resource application.Resource `json:"resource"`
+			Resource sessionprofile.Resource `json:"resource"`
 		}{meta})
 	}}
 	return []tool.Tool{resource, artifact}
 }
 
-func validateResourceCall(call tool.Call, binding application.Binding) error {
+func validateResourceCall(call tool.Call, binding sessionprofile.Binding) error {
 	id := call.Execution
 	if id.SessionID == "" || id.TurnID == "" || id.ItemID == "" || id.SessionID != binding.SessionID || binding.Archived {
-		return fmt.Errorf("%w: resource invocation lacks bound native execution identity", application.ErrUnauthorized)
+		return fmt.Errorf("%w: resource invocation lacks bound native execution identity", sessionprofile.ErrUnauthorized)
 	}
 	return nil
 }
@@ -131,10 +131,10 @@ func decodeResourceInput(raw json.RawMessage, out any) error {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(out); err != nil {
-		return fmt.Errorf("%w: invalid resource tool input: %w", application.ErrInvalid, err)
+		return fmt.Errorf("%w: invalid resource tool input: %w", sessionprofile.ErrInvalid, err)
 	}
 	if err := dec.Decode(new(any)); err != io.EOF {
-		return fmt.Errorf("%w: resource tool requires one JSON object", application.ErrInvalid)
+		return fmt.Errorf("%w: resource tool requires one JSON object", sessionprofile.ErrInvalid)
 	}
 	return nil
 }
@@ -147,10 +147,10 @@ func resourceToolResult(value any) (tool.Result, error) {
 	return tool.Result{Content: []model.Part{model.NewTextPart(string(data))}}, nil
 }
 
-func validateResourceSnapshot(meta application.Resource, data []byte, sessionID, resourceID string) error {
+func validateResourceSnapshot(meta sessionprofile.Resource, data []byte, sessionID, resourceID string) error {
 	sum := sha256.Sum256(data)
-	if meta.ID == "" || meta.ID != resourceID || meta.SessionID != sessionID || len(data) > application.MaxResourceBytes || meta.Size != int64(len(data)) || meta.SHA256 != hex.EncodeToString(sum[:]) {
-		return fmt.Errorf("%w: resource snapshot metadata does not match bytes and owner", application.ErrInvalid)
+	if meta.ID == "" || meta.ID != resourceID || meta.SessionID != sessionID || len(data) > sessionprofile.MaxResourceBytes || meta.Size != int64(len(data)) || meta.SHA256 != hex.EncodeToString(sum[:]) {
+		return fmt.Errorf("%w: resource snapshot metadata does not match bytes and owner", sessionprofile.ErrInvalid)
 	}
 	return nil
 }
@@ -165,14 +165,14 @@ func localArtifactPath(path string) bool {
 // to inject replacements at either boundary without timing races.
 func readStableWorkspaceFile(root *os.Root, path string, beforeOpen, afterRead func()) ([]byte, error) {
 	if !localArtifactPath(path) {
-		return nil, application.ErrInvalid
+		return nil, sessionprofile.ErrInvalid
 	}
 	before, err := root.Lstat(path)
 	if err != nil {
 		return nil, err
 	}
 	if !before.Mode().IsRegular() {
-		return nil, fmt.Errorf("%w: artifact is not a regular file", application.ErrInvalid)
+		return nil, fmt.Errorf("%w: artifact is not a regular file", sessionprofile.ErrInvalid)
 	}
 	if beforeOpen != nil {
 		beforeOpen()
@@ -188,16 +188,16 @@ func readStableWorkspaceFile(root *os.Root, path string, beforeOpen, afterRead f
 	if err != nil {
 		return nil, err
 	}
-	if !opened.Mode().IsRegular() || !os.SameFile(before, opened) || opened.Size() > application.MaxResourceBytes {
-		return nil, fmt.Errorf("%w: artifact changed or exceeds resource limit", application.ErrInvalid)
+	if !opened.Mode().IsRegular() || !os.SameFile(before, opened) || opened.Size() > sessionprofile.MaxResourceBytes {
+		return nil, fmt.Errorf("%w: artifact changed or exceeds resource limit", sessionprofile.ErrInvalid)
 	}
 	read := func() ([]byte, error) {
-		data, err := io.ReadAll(io.LimitReader(file, int64(application.MaxResourceBytes)+1))
+		data, err := io.ReadAll(io.LimitReader(file, int64(sessionprofile.MaxResourceBytes)+1))
 		if err != nil {
 			return nil, err
 		}
-		if len(data) > application.MaxResourceBytes {
-			return nil, fmt.Errorf("%w: artifact exceeds resource limit", application.ErrInvalid)
+		if len(data) > sessionprofile.MaxResourceBytes {
+			return nil, fmt.Errorf("%w: artifact exceeds resource limit", sessionprofile.ErrInvalid)
 		}
 		return data, nil
 	}
@@ -224,7 +224,7 @@ func readStableWorkspaceFile(root *os.Root, path string, beforeOpen, afterRead f
 		return nil, err
 	}
 	if !bytes.Equal(data, verified) || !os.SameFile(before, current) || !end.Mode().IsRegular() || end.Size() != int64(len(data)) || opened.Size() != end.Size() || !opened.ModTime().Equal(end.ModTime()) {
-		return nil, fmt.Errorf("%w: artifact changed during snapshot", application.ErrConflict)
+		return nil, fmt.Errorf("%w: artifact changed during snapshot", sessionprofile.ErrConflict)
 	}
 	return data, nil
 }
@@ -239,7 +239,7 @@ func materializeResource(root *os.Root, resourceID string, data []byte) (string,
 		return "", err
 	}
 	if !info.IsDir() {
-		return "", fmt.Errorf("%w: resource directory is not a directory", application.ErrInvalid)
+		return "", fmt.Errorf("%w: resource directory is not a directory", sessionprofile.ErrInvalid)
 	}
 	folder, err := root.OpenRoot(dir)
 	if err != nil {
@@ -248,7 +248,7 @@ func materializeResource(root *os.Root, resourceID string, data []byte) (string,
 	defer folder.Close()
 	pinned, err := folder.Stat(".")
 	if err != nil || !os.SameFile(info, pinned) {
-		return "", fmt.Errorf("resource directory changed before delivery: %w", errors.Join(application.ErrConflict, err))
+		return "", fmt.Errorf("resource directory changed before delivery: %w", errors.Join(sessionprofile.ErrConflict, err))
 	}
 	sum := sha256.Sum256([]byte(resourceID))
 	name := hex.EncodeToString(sum[:])
@@ -258,11 +258,11 @@ func materializeResource(root *os.Root, resourceID string, data []byte) (string,
 		// Never follow an existing symlink or silently accept modified bytes.
 		existing, readErr := readStableWorkspaceFile(folder, name, nil, nil)
 		if readErr != nil || !bytes.Equal(existing, data) {
-			return "", fmt.Errorf("%w: existing resource file differs", application.ErrConflict)
+			return "", fmt.Errorf("%w: existing resource file differs", sessionprofile.ErrConflict)
 		}
 		current, err := root.Lstat(dir)
 		if err != nil || !os.SameFile(info, current) {
-			return "", fmt.Errorf("resource directory changed during delivery: %w", errors.Join(application.ErrConflict, err))
+			return "", fmt.Errorf("resource directory changed during delivery: %w", errors.Join(sessionprofile.ErrConflict, err))
 		}
 		return path, nil
 	}
@@ -280,7 +280,7 @@ func materializeResource(root *os.Root, resourceID string, data []byte) (string,
 	}
 	current, err := root.Lstat(dir)
 	if err != nil || !os.SameFile(info, current) {
-		return "", fmt.Errorf("resource directory changed during delivery: %w", errors.Join(application.ErrConflict, err))
+		return "", fmt.Errorf("resource directory changed during delivery: %w", errors.Join(sessionprofile.ErrConflict, err))
 	}
 	return path, nil
 }

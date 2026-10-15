@@ -15,9 +15,9 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/control/agentbinding"
-	"github.com/caelis-labs/caelis/control/application"
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/httpclient"
+	"github.com/caelis-labs/caelis/control/sessionprofile"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -73,7 +73,7 @@ func TestAtomicFailedMCPHelper(t *testing.T) {
 	}
 }
 
-func TestApplicationMCPAlwaysRespectsAuthenticatedConfigurationOwnerHTTP(t *testing.T) {
+func TestSessionMCPAlwaysGrantIsSharedAcrossSurfacesHTTP(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
 	defer cancel()
 	root := t.TempDir()
@@ -95,14 +95,14 @@ func TestApplicationMCPAlwaysRespectsAuthenticatedConfigurationOwnerHTTP(t *test
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	a, _ := registerApplicationHTTP(t, ctx, host, "owner-a", filepath.Join(root, "a.credential"))
-	b, _ := registerApplicationHTTP(t, ctx, host, "owner-b", filepath.Join(root, "b.credential"))
+	a, _ := connectSessionOwnerHTTP(t, ctx, host, "owner", filepath.Join(root, "a.credential"))
+	b, _ := connectSessionOwnerHTTP(t, ctx, host, "owner", filepath.Join(root, "b.credential"))
 	profile := applicationHTTPProfile()
 	profile.Workspace.CWD = workspace
-	profile.MCPServers = []application.MCPServer{{Name: "documents", Transport: "stdio", Command: os.Args[0], Args: []string{"-test.run=^TestAtomicDocumentsMCPHelper$"}, WorkDir: root}}
+	profile.MCPServers = []sessionprofile.MCPServer{{Name: "documents", Transport: "stdio", Command: os.Args[0], Args: []string{"-test.run=^TestAtomicDocumentsMCPHelper$"}, WorkDir: root}}
 	create := func(client *httpclient.Client, operation string) string {
 		t.Helper()
-		result, err := client.CreateApplicationSession(ctx, appserver.CreateApplicationSessionRequest{WriteBase: appserver.WriteBase{OperationID: operation}, Profile: profile})
+		result, err := client.CreateSession(ctx, appserver.CreateSessionRequest{WriteBase: appserver.WriteBase{OperationID: operation}, Profile: profilePointer(profile)})
 		if err != nil || result.SessionID == "" {
 			t.Fatalf("create %s: %+v, %v", operation, result, err)
 		}
@@ -132,46 +132,16 @@ func TestApplicationMCPAlwaysRespectsAuthenticatedConfigurationOwnerHTTP(t *test
 	if got := strings.Count(atomicAudit(audit), "documents:call:"); got != 1 {
 		t.Fatalf("A remote calls = %d, want 1", got)
 	}
-	result, err := b.PromptApplication(ctx, appserver.ApplicationPromptRequest{PromptRequest: appserver.PromptRequest{WriteBase: appserver.WriteBase{SessionID: bFirst, OperationID: "b-cancel"}, Input: "DOC"}, SourceKind: "user"})
-	if err != nil || (result.Outcome != appserver.OutcomeAccepted && result.Outcome != appserver.OutcomeCommitted) {
-		t.Fatalf("B prompt = %+v, %v", result, err)
+	if got := promptAtomicCapabilityClientWithMCPApproval(t, ctx, b, bFirst, "b-same-owner", "DOC", ""); got != 0 {
+		t.Fatalf("same Host owner acquired a second MCP approval authority: %d", got)
 	}
-	var pending *appserver.ActiveApproval
-	for pending == nil {
-		state, err := b.InspectSession(ctx, appserver.StateRequest{SessionID: bFirst})
-		if err != nil {
-			t.Fatal(err)
-		}
-		pending = state.Approval.Active
-		if pending == nil {
-			select {
-			case <-ctx.Done():
-				t.Fatal("independent Application skipped MCP approval")
-			case <-time.After(15 * time.Millisecond):
-			}
-		}
-	}
-	if pending.Permission == nil || len(pending.Permission.Options) != 4 || pending.Permission.Options[2].ID != "allow_always" {
-		t.Fatalf("B MCP approval lost four options: %+v", pending)
-	}
-	request := appserver.ResolveApprovalRequest{WriteBase: appserver.WriteBase{OperationID: "foreign-b-approval", SessionID: bFirst}, Target: pending.Target,
-		ApprovalRequestID: string(pending.RequestID), Outcome: "selected", OptionID: "allow_always", Approved: true}
-	if _, err := a.ResolveApproval(ctx, request); err == nil {
-		t.Fatal("A was able to resolve B's pending approval")
-	}
-	request.OperationID = "b-cancel-approval"
-	request.OptionID, request.Approved = "cancel", false
-	if _, err := b.ResolveApproval(ctx, request); err != nil {
-		t.Fatal(err)
-	}
-	waitApplicationHTTPIdle(t, ctx, b, bFirst)
-	if got := strings.Count(atomicAudit(audit), "documents:call:"); got != 1 {
-		t.Fatalf("B cancel executed remote call: %d", got)
+	if got := strings.Count(atomicAudit(audit), "documents:call:"); got != 2 {
+		t.Fatalf("same owner remote calls=%d", got)
 	}
 	if got := promptAtomicCapabilityClientWithMCPApproval(t, ctx, a, aSecond, "a-same-owner", "DOC", ""); got != 0 {
 		t.Fatalf("same Application owner was re-prompted: %d", got)
 	}
-	if got := strings.Count(atomicAudit(audit), "documents:call:"); got != 2 {
+	if got := strings.Count(atomicAudit(audit), "documents:call:"); got != 3 {
 		t.Fatalf("same owner failed to reuse grant: calls=%d", got)
 	}
 }
@@ -405,8 +375,8 @@ func writeAtomicSkill(t *testing.T, root, name, body string) {
 	}
 }
 
-func atomicSkillStatusesByPath(status application.MCPStatus) map[string]application.SkillStatus {
-	byPath := make(map[string]application.SkillStatus, len(status.Skills))
+func atomicSkillStatusesByPath(status sessionprofile.MCPStatus) map[string]sessionprofile.SkillStatus {
+	byPath := make(map[string]sessionprofile.SkillStatus, len(status.Skills))
 	for _, item := range status.Skills {
 		byPath[item.Path] = item
 	}
@@ -444,15 +414,15 @@ func TestApplicationAtomicSkillFailureIsolationHTTP(t *testing.T) {
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	client, _ := registerApplicationHTTP(t, ctx, host, "skill-isolation", filepath.Join(root, "app.credential"))
+	client, _ := connectSessionOwnerHTTP(t, ctx, host, "owner", filepath.Join(root, "app.credential"))
 	profile := applicationHTTPProfile()
 	profile.SkillDirs = []string{dir, vanishedDir}
 	profile.SkillRoots = []string{missing}
-	profile.MCPServers = []application.MCPServer{
+	profile.MCPServers = []sessionprofile.MCPServer{
 		{Name: "documents", Transport: "stdio", Command: os.Args[0], Args: []string{"-test.run=^TestAtomicDocumentsMCPHelper$"}, WorkDir: root},
 		{Name: "utilities", Transport: "stdio", Command: os.Args[0], Args: []string{"-test.run=^TestAtomicUtilitiesMCPHelper$"}, WorkDir: root},
 	}
-	created, err := client.CreateApplicationSession(ctx, appserver.CreateApplicationSessionRequest{WriteBase: appserver.WriteBase{OperationID: "skill-isolation-create"}, Profile: profile})
+	created, err := client.CreateSession(ctx, appserver.CreateSessionRequest{WriteBase: appserver.WriteBase{OperationID: "skill-isolation-create"}, Profile: profilePointer(profile)})
 	if err != nil || created.SessionID == "" {
 		t.Fatalf("create = %+v, %v", created, err)
 	}
@@ -461,7 +431,7 @@ func TestApplicationAtomicSkillFailureIsolationHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer feed.Subscription.Close()
-	before, err := client.ApplicationMCPStatus(ctx, created.SessionID)
+	before, err := client.SessionMCPStatus(ctx, created.SessionID)
 	if err != nil || len(before.Skills) != 3 || before.Skills[0].Status != "inactive" || before.Skills[1].Status != "inactive" || before.Skills[2].Status != "inactive" {
 		t.Fatalf("status read activated Skills: %+v, %v", before, err)
 	}
@@ -480,7 +450,7 @@ func TestApplicationAtomicSkillFailureIsolationHTTP(t *testing.T) {
 	if !strings.Contains(first, "healthy-skill") || !strings.Contains(first, "body-skill") || strings.Contains(first, "corrupt-skill") || strings.Contains(first, "missing-skill") || strings.Contains(first, "vanished-skill") || strings.Contains(first, "HEALTHY_BODY_953") {
 		t.Fatalf("model-facing Skill catalog was incomplete or included failed/body content: %s", first)
 	}
-	status, err := client.ApplicationMCPStatus(ctx, created.SessionID)
+	status, err := client.SessionMCPStatus(ctx, created.SessionID)
 	if err != nil || status.ConfigurationRevision != "1" {
 		t.Fatalf("skill status = %+v, %v", status, err)
 	}
@@ -489,20 +459,20 @@ func TestApplicationAtomicSkillFailureIsolationHTTP(t *testing.T) {
 		t.Fatalf("per-Skill failure was hidden or healthy Skills lost: %+v", status.Skills)
 	}
 	invalidInstructions := "Cannot commit while selected Skill metadata is broken."
-	if _, err := client.UpdateApplicationConfiguration(ctx, created.SessionID, application.UpdateConfigurationRequest{
+	if _, err := configurationResult(client.UpdateSessionConfiguration(ctx, configurationCommand(created.SessionID, sessionprofile.UpdateConfigurationRequest{
 		OperationID: "skill-isolation-reject-invalid", ExpectedConfigurationRevision: 1,
-		Patch: application.ConfigurationPatch{Instructions: &invalidInstructions},
-	}); err == nil {
+		Patch: sessionprofile.ConfigurationPatch{Instructions: &invalidInstructions},
+	}))); err == nil {
 		t.Fatal("deterministically invalid Skill metadata was committed")
 	}
-	unchanged, err := client.ApplicationConfiguration(ctx, created.SessionID)
+	unchanged, err := client.SessionConfiguration(ctx, created.SessionID)
 	if err != nil || unchanged.Revision != 1 {
 		t.Fatalf("invalid update changed revision: %+v, %v", unchanged, err)
 	}
 	deadline := time.NewTicker(20 * time.Millisecond)
 	defer deadline.Stop()
 	for {
-		status, err = client.ApplicationMCPStatus(ctx, created.SessionID)
+		status, err = client.SessionMCPStatus(ctx, created.SessionID)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -533,7 +503,7 @@ func TestApplicationAtomicSkillFailureIsolationHTTP(t *testing.T) {
 	}
 	promptAtomicCapabilityClient(t, ctx, client, created.SessionID, "skill-isolation-basic-after-fail", "BASIC")
 	promptAtomicCapabilityClient(t, ctx, client, created.SessionID, "skill-isolation-healthy-after-fail", "HEALTHY_SKILL")
-	worker, err := client.CreateWorker(ctx, appserver.CreateWorkerRequest{WriteBase: appserver.WriteBase{OperationID: "skill-isolation-worker"}, CWD: root, Model: "custom/gpt-4.1"})
+	worker, err := client.CreateSession(ctx, appserver.CreateSessionRequest{WriteBase: appserver.WriteBase{OperationID: "skill-isolation-worker"}, CWD: root, Model: "custom/gpt-4.1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -548,24 +518,24 @@ func TestApplicationAtomicSkillFailureIsolationHTTP(t *testing.T) {
 	writeAtomicSkill(t, missing, "missing-skill", "MISSING_BODY_RESTORED_809")
 	writeAtomicSkill(t, body, "body-skill", "BODY_RESTORED_418")
 	writeAtomicSkill(t, vanishedChild, "vanished-skill", "VANISHED_BODY_RESTORED_612")
-	configuration, err := client.ApplicationConfiguration(ctx, created.SessionID)
+	configuration, err := client.SessionConfiguration(ctx, created.SessionID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	instructions := "Refresh authorized Skill metadata after restoring files."
-	updated, err := client.UpdateApplicationConfiguration(ctx, created.SessionID, application.UpdateConfigurationRequest{
+	updated, err := configurationResult(client.UpdateSessionConfiguration(ctx, configurationCommand(created.SessionID, sessionprofile.UpdateConfigurationRequest{
 		OperationID: "skill-isolation-refresh", ExpectedConfigurationRevision: configuration.Revision,
-		Patch: application.ConfigurationPatch{Instructions: &instructions},
-	})
+		Patch: sessionprofile.ConfigurationPatch{Instructions: &instructions},
+	})))
 	if err != nil || updated.Revision != 2 {
 		t.Fatalf("explicit recovery revision = %+v, %v", updated, err)
 	}
-	pending, err := client.ApplicationMCPStatus(ctx, created.SessionID)
+	pending, err := client.SessionMCPStatus(ctx, created.SessionID)
 	if err != nil || pending.ConfigurationRevision != "2" || len(pending.Skills) != 3 || pending.Skills[0].Status != "inactive" {
 		t.Fatalf("new revision status reused old catalog: %+v, %v", pending, err)
 	}
 	promptAtomicCapabilityClient(t, ctx, client, created.SessionID, "skill-isolation-refreshed", "BASIC")
-	recovered, err := client.ApplicationMCPStatus(ctx, created.SessionID)
+	recovered, err := client.SessionMCPStatus(ctx, created.SessionID)
 	if err != nil || recovered.ConfigurationRevision != "2" {
 		t.Fatalf("recovered status = %+v, %v", recovered, err)
 	}
@@ -579,8 +549,8 @@ func TestApplicationAtomicSkillFailureIsolationHTTP(t *testing.T) {
 	writeAtomicSkill(t, only, "only-skill", "ONLY_BODY_274")
 	onlyProfile := applicationHTTPProfile()
 	onlyProfile.SkillRoots = []string{only}
-	onlySession, err := client.CreateApplicationSession(ctx, appserver.CreateApplicationSessionRequest{
-		WriteBase: appserver.WriteBase{OperationID: "skill-isolation-only-create"}, Profile: onlyProfile,
+	onlySession, err := client.CreateSession(ctx, appserver.CreateSessionRequest{
+		WriteBase: appserver.WriteBase{OperationID: "skill-isolation-only-create"}, Profile: profilePointer(onlyProfile),
 	})
 	if err != nil || onlySession.SessionID == "" {
 		t.Fatalf("Skills-only create = %+v, %v", onlySession, err)
@@ -594,7 +564,7 @@ func TestApplicationAtomicSkillFailureIsolationHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 	promptAtomicCapabilityClient(t, ctx, client, onlySession.SessionID, "skill-isolation-only-basic", "BASIC")
-	onlyStatus, err := client.ApplicationMCPStatus(ctx, onlySession.SessionID)
+	onlyStatus, err := client.SessionMCPStatus(ctx, onlySession.SessionID)
 	if err != nil || len(onlyStatus.Servers) != 0 || len(onlyStatus.Skills) != 1 || onlyStatus.Skills[0].Status != "failed" {
 		t.Fatalf("Skills-only failure blocked dialogue or was hidden: %+v, %v", onlyStatus, err)
 	}
@@ -603,7 +573,7 @@ func TestApplicationAtomicSkillFailureIsolationHTTP(t *testing.T) {
 	}
 }
 
-func startAtomicLifecycleSession(t *testing.T, ctx context.Context, root string, provider http.RoundTripper, servers []application.MCPServer) (*applicationHTTPHost, *httpclient.Client, string) {
+func startAtomicLifecycleSession(t *testing.T, ctx context.Context, root string, provider http.RoundTripper, servers []sessionprofile.MCPServer) (*applicationHTTPHost, *httpclient.Client, string) {
 	t.Helper()
 	host := startApplicationHTTPHost(t, filepath.Join(root, "store"), root, provider)
 	status, err := host.host.SessionStatus(ctx, appserver.StatusRequest{})
@@ -615,10 +585,10 @@ func startAtomicLifecycleSession(t *testing.T, ctx context.Context, root string,
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	client, _ := registerApplicationHTTP(t, ctx, host, "lifecycle", filepath.Join(root, "app.credential"))
+	client, _ := connectSessionOwnerHTTP(t, ctx, host, "owner", filepath.Join(root, "app.credential"))
 	profile := applicationHTTPProfile()
 	profile.MCPServers = servers
-	created, err := client.CreateApplicationSession(ctx, appserver.CreateApplicationSessionRequest{WriteBase: appserver.WriteBase{OperationID: "lifecycle-create"}, Profile: profile})
+	created, err := client.CreateSession(ctx, appserver.CreateSessionRequest{WriteBase: appserver.WriteBase{OperationID: "lifecycle-create"}, Profile: profilePointer(profile)})
 	if err != nil || created.SessionID == "" {
 		t.Fatalf("create = %+v, %v", created, err)
 	}
@@ -632,9 +602,9 @@ func TestApplicationAtomicMCPRevisionLifecycleHTTP(t *testing.T) {
 	audit := filepath.Join(root, "audit")
 	t.Setenv("CAELIS_ATOMIC_MCP_HELPER", "1")
 	t.Setenv("CAELIS_ATOMIC_MCP_AUDIT", audit)
-	server := application.MCPServer{Name: "documents", Transport: "stdio", Command: os.Args[0], Args: []string{"-test.run=^TestAtomicDocumentsMCPHelper$"}, WorkDir: root}
+	server := sessionprofile.MCPServer{Name: "documents", Transport: "stdio", Command: os.Args[0], Args: []string{"-test.run=^TestAtomicDocumentsMCPHelper$"}, WorkDir: root}
 	provider := &atomicCapabilityProvider{}
-	host, client, session := startAtomicLifecycleSession(t, ctx, root, provider, []application.MCPServer{server})
+	host, client, session := startAtomicLifecycleSession(t, ctx, root, provider, []sessionprofile.MCPServer{server})
 	defer host.close(t)
 	feed, err := client.Reconnect(ctx, appserver.ReconnectRequest{SessionID: session})
 	if err != nil {
@@ -643,7 +613,7 @@ func TestApplicationAtomicMCPRevisionLifecycleHTTP(t *testing.T) {
 	defer feed.Subscription.Close()
 	promptAtomicCapabilityClient(t, ctx, client, session, "lifecycle-warm", "BASIC")
 	waitAtomicAuditCount(t, audit, "documents:start:", 1)
-	configuration, err := client.ApplicationConfiguration(ctx, session)
+	configuration, err := client.SessionConfiguration(ctx, session)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -657,10 +627,10 @@ func TestApplicationAtomicMCPRevisionLifecycleHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 	modelName := "custom/gpt-4.2"
-	configuration, err = client.UpdateApplicationConfiguration(ctx, session, application.UpdateConfigurationRequest{
+	configuration, err = configurationResult(client.UpdateSessionConfiguration(ctx, configurationCommand(session, sessionprofile.UpdateConfigurationRequest{
 		OperationID: "lifecycle-model-only", ExpectedConfigurationRevision: configuration.Revision,
-		Patch: application.ConfigurationPatch{Model: &modelName},
-	})
+		Patch: sessionprofile.ConfigurationPatch{Model: &modelName},
+	})))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -670,14 +640,14 @@ func TestApplicationAtomicMCPRevisionLifecycleHTTP(t *testing.T) {
 	}
 	for i := 0; i < 3; i++ {
 		instructions := fmt.Sprintf("revision %d", i)
-		configuration, err = client.UpdateApplicationConfiguration(ctx, session, application.UpdateConfigurationRequest{
+		configuration, err = configurationResult(client.UpdateSessionConfiguration(ctx, configurationCommand(session, sessionprofile.UpdateConfigurationRequest{
 			OperationID: fmt.Sprintf("lifecycle-instructions-%d", i), ExpectedConfigurationRevision: configuration.Revision,
-			Patch: application.ConfigurationPatch{Instructions: &instructions},
-		})
+			Patch: sessionprofile.ConfigurationPatch{Instructions: &instructions},
+		})))
 		if err != nil {
 			t.Fatal(err)
 		}
-		status, err := client.ApplicationMCPStatus(ctx, session)
+		status, err := client.SessionMCPStatus(ctx, session)
 		if err != nil || len(status.Servers) != 1 || status.Servers[0].Status != "running" {
 			t.Fatalf("same MCP selection lost resident health after unrelated revision: %+v, %v", status, err)
 		}
@@ -689,15 +659,15 @@ func TestApplicationAtomicMCPRevisionLifecycleHTTP(t *testing.T) {
 			t.Fatalf("unrelated revision restarted MCP: %s", got)
 		}
 		atomicAssertLiveService(t, audit, "documents", 1)
-		empty := []application.MCPServer{}
-		configuration, err = client.UpdateApplicationConfiguration(ctx, session, application.UpdateConfigurationRequest{
+		empty := []sessionprofile.MCPServer{}
+		configuration, err = configurationResult(client.UpdateSessionConfiguration(ctx, configurationCommand(session, sessionprofile.UpdateConfigurationRequest{
 			OperationID: fmt.Sprintf("lifecycle-disable-%d", i), ExpectedConfigurationRevision: configuration.Revision,
-			Patch: application.ConfigurationPatch{MCPServers: &empty},
-		})
+			Patch: sessionprofile.ConfigurationPatch{MCPServers: &empty},
+		})))
 		if err != nil {
 			t.Fatal(err)
 		}
-		disabledStatus, err := client.ApplicationMCPStatus(ctx, session)
+		disabledStatus, err := client.SessionMCPStatus(ctx, session)
 		if err != nil || disabledStatus.ConfigurationRevision != fmt.Sprint(configuration.Revision) || len(disabledStatus.Servers) != 0 {
 			t.Fatalf("disabled revision retained public MCP tools: %+v, %v", disabledStatus, err)
 		}
@@ -707,15 +677,15 @@ func TestApplicationAtomicMCPRevisionLifecycleHTTP(t *testing.T) {
 		if strings.Contains(provider.lastTools(), "ToolSearch") {
 			t.Fatal("disabled tool appeared in a new request")
 		}
-		servers := []application.MCPServer{server}
-		configuration, err = client.UpdateApplicationConfiguration(ctx, session, application.UpdateConfigurationRequest{
+		servers := []sessionprofile.MCPServer{server}
+		configuration, err = configurationResult(client.UpdateSessionConfiguration(ctx, configurationCommand(session, sessionprofile.UpdateConfigurationRequest{
 			OperationID: fmt.Sprintf("lifecycle-enable-%d", i), ExpectedConfigurationRevision: configuration.Revision,
-			Patch: application.ConfigurationPatch{MCPServers: &servers},
-		})
+			Patch: sessionprofile.ConfigurationPatch{MCPServers: &servers},
+		})))
 		if err != nil {
 			t.Fatal(err)
 		}
-		pending, err := client.ApplicationMCPStatus(ctx, session)
+		pending, err := client.SessionMCPStatus(ctx, session)
 		if err != nil || pending.ConfigurationRevision != fmt.Sprint(configuration.Revision) || len(pending.Servers) != 1 {
 			t.Fatalf("reloaded generation reused stale descriptions: %+v, %v", pending, err)
 		}
@@ -727,7 +697,7 @@ func TestApplicationAtomicMCPRevisionLifecycleHTTP(t *testing.T) {
 		}
 		promptAtomicCapabilityClient(t, ctx, client, session, fmt.Sprintf("lifecycle-reenabled-warm-%d", i), "BASIC")
 		waitAtomicApplicationMCPRunning(t, ctx, client, session, "documents")
-		reloaded, err := client.ApplicationMCPStatus(ctx, session)
+		reloaded, err := client.SessionMCPStatus(ctx, session)
 		if err != nil || len(reloaded.Servers) != 1 || len(reloaded.Servers[0].ToolDetails) != 1 || reloaded.Servers[0].ToolDetails[0].Name != "lookup" {
 			t.Fatalf("reloaded ready generation lost tool details: %+v, %v", reloaded, err)
 		}
@@ -749,9 +719,9 @@ func TestApplicationAtomicMCPPinnedCallAcrossRevisionHTTP(t *testing.T) {
 	t.Setenv("CAELIS_ATOMIC_MCP_HELPER", "1")
 	t.Setenv("CAELIS_ATOMIC_MCP_AUDIT", audit)
 	t.Setenv("CAELIS_ATOMIC_MCP_RELEASE", releasePath)
-	blocking := application.MCPServer{Name: "blocking", Transport: "stdio", Command: os.Args[0], Args: []string{"-test.run=^TestAtomicBlockingMCPHelper$"}, WorkDir: root}
+	blocking := sessionprofile.MCPServer{Name: "blocking", Transport: "stdio", Command: os.Args[0], Args: []string{"-test.run=^TestAtomicBlockingMCPHelper$"}, WorkDir: root}
 	provider := &atomicCapabilityProvider{}
-	host, client, session := startAtomicLifecycleSession(t, ctx, root, provider, []application.MCPServer{blocking})
+	host, client, session := startAtomicLifecycleSession(t, ctx, root, provider, []sessionprofile.MCPServer{blocking})
 	defer host.close(t)
 	defer func() { _ = os.WriteFile(releasePath, []byte("release"), 0o600) }()
 	feed, err := client.Reconnect(ctx, appserver.ReconnectRequest{SessionID: session})
@@ -761,9 +731,9 @@ func TestApplicationAtomicMCPPinnedCallAcrossRevisionHTTP(t *testing.T) {
 	defer feed.Subscription.Close()
 	promptAtomicCapabilityClient(t, ctx, client, session, "pinned-warm", "BASIC")
 	waitAtomicApplicationMCPRunning(t, ctx, client, session, "blocking")
-	result, err := client.PromptApplication(ctx, appserver.ApplicationPromptRequest{PromptRequest: appserver.PromptRequest{
+	result, err := client.Prompt(ctx, appserver.PromptRequest{
 		WriteBase: appserver.WriteBase{SessionID: session, OperationID: "pinned-old"}, Input: "BLOCK",
-	}, SourceKind: "user"})
+		SourceKind: "user"})
 	if err != nil || (result.Outcome != appserver.OutcomeAccepted && result.Outcome != appserver.OutcomeCommitted) {
 		t.Fatalf("old prompt = %+v, %v", result, err)
 	}
@@ -807,15 +777,15 @@ func TestApplicationAtomicMCPPinnedCallAcrossRevisionHTTP(t *testing.T) {
 	}
 	callStart := "blocking:start:" + callPID + "\n"
 	callStop := "blocking:stop:" + callPID + "\n"
-	configuration, err := client.ApplicationConfiguration(ctx, session)
+	configuration, err := client.SessionConfiguration(ctx, session)
 	if err != nil {
 		t.Fatal(err)
 	}
-	utilities := []application.MCPServer{{Name: "utilities", Transport: "stdio", Command: os.Args[0], Args: []string{"-test.run=^TestAtomicUtilitiesMCPHelper$"}, WorkDir: root}}
-	updated, err := client.UpdateApplicationConfiguration(ctx, session, application.UpdateConfigurationRequest{
+	utilities := []sessionprofile.MCPServer{{Name: "utilities", Transport: "stdio", Command: os.Args[0], Args: []string{"-test.run=^TestAtomicUtilitiesMCPHelper$"}, WorkDir: root}}
+	updated, err := configurationResult(client.UpdateSessionConfiguration(ctx, configurationCommand(session, sessionprofile.UpdateConfigurationRequest{
 		OperationID: "pinned-change", ExpectedConfigurationRevision: configuration.Revision,
-		Patch: application.ConfigurationPatch{MCPServers: &utilities},
-	})
+		Patch: sessionprofile.ConfigurationPatch{MCPServers: &utilities},
+	})))
 	if err != nil || updated.Revision != configuration.Revision+1 {
 		t.Fatalf("update = %+v, %v", updated, err)
 	}
@@ -825,9 +795,9 @@ func TestApplicationAtomicMCPPinnedCallAcrossRevisionHTTP(t *testing.T) {
 	atomicAssertLiveService(t, audit, "blocking", 1)
 	// This Session rejects concurrent inputs while the old Turn is active.
 	// The conflict is a definite rejection, so no second effect is dispatched.
-	newResult, newErr := client.PromptApplication(ctx, appserver.ApplicationPromptRequest{PromptRequest: appserver.PromptRequest{
+	newResult, newErr := client.Prompt(ctx, appserver.PromptRequest{
 		WriteBase: appserver.WriteBase{SessionID: session, OperationID: "pinned-new"}, Input: "UTIL",
-	}, SourceKind: "user"})
+		SourceKind: "user"})
 	if newErr == nil || newResult.Outcome != appserver.OutcomeConflicted {
 		t.Fatalf("concurrent prompt = %+v, %v; want definite conflict", newResult, newErr)
 	}
@@ -859,15 +829,15 @@ func TestApplicationAtomicMCPFailedUpdateConcurrentCloseHTTP(t *testing.T) {
 	audit := filepath.Join(root, "audit")
 	t.Setenv("CAELIS_ATOMIC_MCP_HELPER", "1")
 	t.Setenv("CAELIS_ATOMIC_MCP_AUDIT", audit)
-	server := application.MCPServer{Name: "documents", Transport: "stdio", Command: os.Args[0], Args: []string{"-test.run=^TestAtomicDocumentsMCPHelper$"}, WorkDir: root}
-	host, client, session := startAtomicLifecycleSession(t, ctx, root, &atomicCapabilityProvider{}, []application.MCPServer{server})
+	server := sessionprofile.MCPServer{Name: "documents", Transport: "stdio", Command: os.Args[0], Args: []string{"-test.run=^TestAtomicDocumentsMCPHelper$"}, WorkDir: root}
+	host, client, session := startAtomicLifecycleSession(t, ctx, root, &atomicCapabilityProvider{}, []sessionprofile.MCPServer{server})
 	feed, err := client.Reconnect(ctx, appserver.ReconnectRequest{SessionID: session})
 	if err != nil {
 		t.Fatal(err)
 	}
 	promptAtomicCapabilityClient(t, ctx, client, session, "close-race-warm", "BASIC")
 	waitAtomicAuditCount(t, audit, "documents:start:", 1)
-	configuration, err := client.ApplicationConfiguration(ctx, session)
+	configuration, err := client.SessionConfiguration(ctx, session)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -876,10 +846,10 @@ func TestApplicationAtomicMCPFailedUpdateConcurrentCloseHTTP(t *testing.T) {
 	go func() {
 		close(started)
 		missing := []string{filepath.Join(root, "missing-skill-root")}
-		_, updateErr := client.UpdateApplicationConfiguration(ctx, session, application.UpdateConfigurationRequest{
+		_, updateErr := configurationResult(client.UpdateSessionConfiguration(ctx, configurationCommand(session, sessionprofile.UpdateConfigurationRequest{
 			OperationID: "close-race-invalid", ExpectedConfigurationRevision: configuration.Revision,
-			Patch: application.ConfigurationPatch{SkillRoots: &missing},
-		})
+			Patch: sessionprofile.ConfigurationPatch{SkillRoots: &missing},
+		})))
 		finished <- updateErr
 	}()
 	<-started
@@ -931,30 +901,30 @@ func TestApplicationAtomicCapabilitiesHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 	info, err := host.host.Initialize(ctx)
-	if err != nil || !slices.Contains(info.Capabilities, application.CapabilityAtomicCapabilities) {
+	if err != nil || !slices.Contains(info.Capabilities, sessionprofile.CapabilityAtomicCapabilities) {
 		t.Fatalf("atomic capability missing: %+v, %v", info, err)
 	}
-	client, _ := registerApplicationHTTP(t, ctx, host, "atomic", filepath.Join(root, "app.credential"))
+	client, _ := connectSessionOwnerHTTP(t, ctx, host, "owner", filepath.Join(root, "app.credential"))
 	profile := applicationHTTPProfile()
 	profile.SkillDirs = []string{skills}
-	profile.MCPServers = []application.MCPServer{
+	profile.MCPServers = []sessionprofile.MCPServer{
 		{Name: "documents", Transport: "stdio", Command: os.Args[0], Args: []string{"-test.run=^TestAtomicDocumentsMCPHelper$"}, WorkDir: root},
 		{Name: "utilities", Transport: "stdio", Command: os.Args[0], Args: []string{"-test.run=^TestAtomicUtilitiesMCPHelper$"}, WorkDir: root},
 	}
-	created, err := client.CreateApplicationSession(ctx, appserver.CreateApplicationSessionRequest{WriteBase: appserver.WriteBase{OperationID: "atomic-create"}, Profile: profile})
+	created, err := client.CreateSession(ctx, appserver.CreateSessionRequest{WriteBase: appserver.WriteBase{OperationID: "atomic-create"}, Profile: profilePointer(profile)})
 	if err != nil || created.SessionID == "" {
 		t.Fatalf("create = %+v, %v", created, err)
 	}
-	configuration, err := client.ApplicationConfiguration(ctx, created.SessionID)
+	configuration, err := client.SessionConfiguration(ctx, created.SessionID)
 	if err != nil || len(configuration.Profile.MCPServers) != 2 || len(configuration.Profile.SkillDirs) != 1 {
 		t.Fatalf("configuration = %+v, %v", configuration, err)
 	}
-	inactive, err := client.ApplicationMCPStatus(ctx, created.SessionID)
+	inactive, err := client.SessionMCPStatus(ctx, created.SessionID)
 	if err != nil || inactive.ConfigurationRevision != "1" || len(inactive.Servers) != 2 || inactive.Servers[0].Status != "inactive" || inactive.Servers[1].Status != "inactive" {
 		t.Fatalf("status read activated a service or lost a domain: %+v, %v", inactive, err)
 	}
-	other, _ := registerApplicationHTTP(t, ctx, host, "other-atomic", filepath.Join(root, "other.credential"))
-	if _, err := other.ApplicationMCPStatus(ctx, created.SessionID); err == nil {
+	other, _ := connectSessionOwnerHTTP(t, ctx, host, "foreign-owner", filepath.Join(root, "other.credential"))
+	if _, err := other.SessionMCPStatus(ctx, created.SessionID); err == nil {
 		t.Fatal("another application read MCP service health")
 	}
 	feed, err := client.Reconnect(ctx, appserver.ReconnectRequest{SessionID: created.SessionID})
@@ -981,20 +951,20 @@ func TestApplicationAtomicCapabilitiesHTTP(t *testing.T) {
 		t.Fatalf("independent MCP calls: %s; requests: %s", got, provider.snapshot())
 	}
 	missing := []string{filepath.Join(root, "missing")}
-	if _, err := client.UpdateApplicationConfiguration(ctx, created.SessionID, application.UpdateConfigurationRequest{OperationID: "atomic-bad", ExpectedConfigurationRevision: configuration.Revision, Patch: application.ConfigurationPatch{SkillDirs: &missing}}); err == nil {
+	if _, err := configurationResult(client.UpdateSessionConfiguration(ctx, configurationCommand(created.SessionID, sessionprofile.UpdateConfigurationRequest{OperationID: "atomic-bad", ExpectedConfigurationRevision: configuration.Revision, Patch: sessionprofile.ConfigurationPatch{SkillDirs: &missing}}))); err == nil {
 		t.Fatal("invalid reconfiguration was committed")
 	}
-	unchanged, err := client.ApplicationConfiguration(ctx, created.SessionID)
+	unchanged, err := client.SessionConfiguration(ctx, created.SessionID)
 	if err != nil || unchanged.Revision != configuration.Revision {
 		t.Fatalf("failed update changed configuration: %+v %v", unchanged, err)
 	}
-	emptyServices := []application.MCPServer{}
+	emptyServices := []sessionprofile.MCPServer{}
 	emptyDirs := []string{}
-	disabled, err := client.UpdateApplicationConfiguration(ctx, created.SessionID, application.UpdateConfigurationRequest{OperationID: "atomic-disable", ExpectedConfigurationRevision: configuration.Revision, Patch: application.ConfigurationPatch{MCPServers: &emptyServices, SkillDirs: &emptyDirs}})
+	disabled, err := configurationResult(client.UpdateSessionConfiguration(ctx, configurationCommand(created.SessionID, sessionprofile.UpdateConfigurationRequest{OperationID: "atomic-disable", ExpectedConfigurationRevision: configuration.Revision, Patch: sessionprofile.ConfigurationPatch{MCPServers: &emptyServices, SkillDirs: &emptyDirs}})))
 	if err != nil || disabled.Revision != configuration.Revision+1 {
 		t.Fatalf("disable = %+v, %v", disabled, err)
 	}
-	disabledStatus, err := client.ApplicationMCPStatus(ctx, created.SessionID)
+	disabledStatus, err := client.SessionMCPStatus(ctx, created.SessionID)
 	if err != nil || len(disabledStatus.Servers) != 0 || disabledStatus.ConfigurationRevision != "2" {
 		t.Fatalf("disabled desired service status = %+v, %v", disabledStatus, err)
 	}
@@ -1003,7 +973,7 @@ func TestApplicationAtomicCapabilitiesHTTP(t *testing.T) {
 	if strings.Contains(tools, "\"name\":\"Skill\"") || strings.Contains(tools, "\"name\":\"ToolSearch\"") || strings.Contains(tools, "documents__lookup") {
 		t.Fatalf("disabled capabilities remained in new model request: %s", tools)
 	}
-	reenabled, err := client.UpdateApplicationConfiguration(ctx, created.SessionID, application.UpdateConfigurationRequest{OperationID: "atomic-reenable", ExpectedConfigurationRevision: disabled.Revision, Patch: application.ConfigurationPatch{MCPServers: &profile.MCPServers, SkillDirs: &profile.SkillDirs}})
+	reenabled, err := configurationResult(client.UpdateSessionConfiguration(ctx, configurationCommand(created.SessionID, sessionprofile.UpdateConfigurationRequest{OperationID: "atomic-reenable", ExpectedConfigurationRevision: disabled.Revision, Patch: sessionprofile.ConfigurationPatch{MCPServers: &profile.MCPServers, SkillDirs: &profile.SkillDirs}})))
 	if err != nil || reenabled.Revision != disabled.Revision+1 {
 		t.Fatalf("reenable = %+v, %v", reenabled, err)
 	}
@@ -1013,7 +983,7 @@ func TestApplicationAtomicCapabilitiesHTTP(t *testing.T) {
 	if got := atomicAudit(audit); strings.Count(got, "documents:call") != 2 {
 		t.Fatalf("reenabled service call count: %s; requests: %s", got, provider.snapshot())
 	}
-	worker, err := client.CreateWorker(ctx, appserver.CreateWorkerRequest{WriteBase: appserver.WriteBase{OperationID: "atomic-worker"}, CWD: workspace, Model: "custom/gpt-4.1"})
+	worker, err := client.CreateSession(ctx, appserver.CreateSessionRequest{WriteBase: appserver.WriteBase{OperationID: "atomic-worker"}, CWD: workspace, Model: "custom/gpt-4.1"})
 	if err != nil || worker.SessionID == "" {
 		t.Fatalf("create ordinary Worker = %+v, %v", worker, err)
 	}
@@ -1045,7 +1015,7 @@ func TestApplicationAtomicCapabilitiesHTTP(t *testing.T) {
 	if got := strings.Count(atomicAudit(audit), "documents:call"); got != beforeRecoveryCalls {
 		t.Fatalf("reconnect replayed an MCP effect: before=%d after=%d", beforeRecoveryCalls, got)
 	}
-	recoveryStatus, err := recovered.ApplicationMCPStatus(ctx, created.SessionID)
+	recoveryStatus, err := recovered.SessionMCPStatus(ctx, created.SessionID)
 	if err != nil || recoveryStatus.ConfigurationRevision != "3" {
 		t.Fatalf("recovered desired configuration = %+v, %v", recoveryStatus, err)
 	}
@@ -1064,8 +1034,8 @@ func TestApplicationFirstToolSearchUsesConsistentActivationModelCatalog(t *testi
 	audit := filepath.Join(root, "audit")
 	t.Setenv("CAELIS_ATOMIC_MCP_HELPER", "1")
 	t.Setenv("CAELIS_ATOMIC_MCP_AUDIT", audit)
-	server := application.MCPServer{Name: "documents", Transport: "stdio", Command: os.Args[0], Args: []string{"-test.run=^TestAtomicDocumentsMCPHelper$"}, WorkDir: root}
-	host, client, sessionID := startAtomicLifecycleSession(t, ctx, root, &atomicCapabilityProvider{}, []application.MCPServer{server})
+	server := sessionprofile.MCPServer{Name: "documents", Transport: "stdio", Command: os.Args[0], Args: []string{"-test.run=^TestAtomicDocumentsMCPHelper$"}, WorkDir: root}
+	host, client, sessionID := startAtomicLifecycleSession(t, ctx, root, &atomicCapabilityProvider{}, []sessionprofile.MCPServer{server})
 	defer host.close(t)
 	feed, err := client.Reconnect(ctx, appserver.ReconnectRequest{SessionID: sessionID})
 	if err != nil {
@@ -1116,7 +1086,7 @@ func waitAtomicApplicationMCPRunning(t *testing.T, ctx context.Context, client *
 	ticker := time.NewTicker(20 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		status, err := client.ApplicationMCPStatus(ctx, session)
+		status, err := client.SessionMCPStatus(ctx, session)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1159,15 +1129,15 @@ func TestApplicationAtomicMCPFailureIsolationHTTP(t *testing.T) {
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	client, _ := registerApplicationHTTP(t, ctx, host, "failure", filepath.Join(root, "app.credential"))
+	client, _ := connectSessionOwnerHTTP(t, ctx, host, "owner", filepath.Join(root, "app.credential"))
 	profile := applicationHTTPProfile()
-	profile.MCPServers = []application.MCPServer{
+	profile.MCPServers = []sessionprofile.MCPServer{
 		{Name: "documents", Transport: "stdio", Command: os.Args[0], Args: []string{"-test.run=^TestAtomicDocumentsMCPHelper$"}, WorkDir: root},
 		{Name: "failed", Transport: "stdio", Command: os.Args[0], Args: []string{"-test.run=^TestAtomicFailedMCPHelper$"}, WorkDir: root},
 		{Name: "utilities", Transport: "stdio", Command: os.Args[0], Args: []string{"-test.run=^TestAtomicUtilitiesMCPHelper$"}, WorkDir: root},
 		{Name: "callfail", Transport: "stdio", Command: os.Args[0], Args: []string{"-test.run=^TestAtomicCallFailMCPHelper$"}, WorkDir: root},
 	}
-	created, err := client.CreateApplicationSession(ctx, appserver.CreateApplicationSessionRequest{WriteBase: appserver.WriteBase{OperationID: "failure-create"}, Profile: profile})
+	created, err := client.CreateSession(ctx, appserver.CreateSessionRequest{WriteBase: appserver.WriteBase{OperationID: "failure-create"}, Profile: profilePointer(profile)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1176,7 +1146,7 @@ func TestApplicationAtomicMCPFailureIsolationHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer feed.Subscription.Close()
-	result, err := client.PromptApplication(ctx, appserver.ApplicationPromptRequest{PromptRequest: appserver.PromptRequest{WriteBase: appserver.WriteBase{OperationID: "failure-prompt", SessionID: created.SessionID}, Input: "BASIC"}, SourceKind: "user"})
+	result, err := client.Prompt(ctx, appserver.PromptRequest{WriteBase: appserver.WriteBase{OperationID: "failure-prompt", SessionID: created.SessionID}, Input: "BASIC", SourceKind: "user"})
 	if err != nil || (result.Outcome != appserver.OutcomeAccepted && result.Outcome != appserver.OutcomeCommitted) {
 		t.Fatalf("basic prompt = %+v, %v", result, err)
 	}
@@ -1188,7 +1158,7 @@ func TestApplicationAtomicMCPFailureIsolationHTTP(t *testing.T) {
 	deadline := time.NewTicker(20 * time.Millisecond)
 	defer deadline.Stop()
 	for {
-		health, err := client.ApplicationMCPStatus(ctx, created.SessionID)
+		health, err := client.SessionMCPStatus(ctx, created.SessionID)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1232,8 +1202,8 @@ func promptAtomicCapabilityClient(t *testing.T, ctx context.Context, client *htt
 // fixture's real pending approval. An empty option asserts no approval is due.
 func promptAtomicCapabilityClientWithMCPApproval(t *testing.T, ctx context.Context, client *httpclient.Client, session, operation, input, option string) int {
 	t.Helper()
-	result, err := client.PromptApplication(ctx, appserver.ApplicationPromptRequest{
-		PromptRequest: appserver.PromptRequest{WriteBase: appserver.WriteBase{SessionID: session, OperationID: operation}, Input: input}, SourceKind: "user",
+	result, err := client.Prompt(ctx, appserver.PromptRequest{
+		WriteBase: appserver.WriteBase{SessionID: session, OperationID: operation}, Input: input, SourceKind: "user",
 	})
 	if err != nil || (result.Outcome != appserver.OutcomeAccepted && result.Outcome != appserver.OutcomeCommitted) {
 		t.Fatalf("prompt %s = %+v, %v", operation, result, err)

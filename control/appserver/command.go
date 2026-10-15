@@ -10,16 +10,12 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/control/sessionprofile"
 )
 
 // Principal is trusted adapter context. It is never decoded from a command
 // body or query parameter.
 type Principal struct {
-	// ApplicationID and ConnectionID are trusted adapter context, not decoded
-	// from JSON command bodies or query parameters.
-	ApplicationID string `json:"-"`
-	ConnectionID  string `json:"-"`
-
 	ID    string   `json:"id"`
 	Roles []string `json:"roles,omitempty"`
 }
@@ -74,6 +70,7 @@ const (
 	ActionSessionList               Action = "session.list"
 	ActionSessionInspect            Action = "session.inspect"
 	ActionSessionConfigure          Action = "session.configure"
+	ActionSessionResource           Action = "session.resource.create"
 	ActionSessionApprovalMode       Action = "configuration.session.approval-mode"
 	ActionSessionModel              Action = "configuration.session.model"
 	ActionSessionControllerMode     Action = "configuration.session.controller-mode"
@@ -167,12 +164,19 @@ const (
 
 type CreateSessionRequest struct {
 	WriteBase
+	// Profile explicitly assembles this Session. Omission retains the ordinary
+	// Host configuration; it is not a different client identity or permission.
+	Profile            *sessionprofile.Profile  `json:"profile,omitempty"`
 	PreferredSessionID string                   `json:"preferred_session_id,omitempty"`
 	WorkspaceKey       string                   `json:"workspace_key,omitempty"`
 	CWD                string                   `json:"cwd,omitempty"`
 	ExecutionConfig    *sandbox.ExecutionConfig `json:"execution_config,omitempty"`
 	Title              string                   `json:"title,omitempty"`
-	Metadata           map[string]any           `json:"metadata,omitempty"`
+	// Initial model selection uses the ordinary native Session configuration owner.
+	Model           string         `json:"model,omitempty"`
+	ReasoningEffort string         `json:"reasoning_effort,omitempty"`
+	FastMode        bool           `json:"fast_mode,omitempty"`
+	Metadata        map[string]any `json:"metadata,omitempty"`
 }
 
 type CloseSessionRequest struct{ WriteBase }
@@ -183,6 +187,10 @@ type CompactSessionRequest struct{ WriteBase }
 
 type PromptRequest struct {
 	WriteBase
+	// SourceKind defaults to user. Non-user input retains its provenance through
+	// execution; authorized_background additionally requires the original grant.
+	SourceKind   string              `json:"source_kind,omitempty"`
+	GrantID      string              `json:"grant_id,omitempty"`
 	Input        string              `json:"input,omitempty"`
 	DisplayInput string              `json:"display_input,omitempty"`
 	ContentParts []model.ContentPart `json:"content_parts,omitempty"`
@@ -280,17 +288,20 @@ type HandoffRequest struct {
 type CommandResult struct {
 	// InputStatus is accepted when steering is admitted to the exact Turn.
 	// Application at a safe point is reported by a canonical feed input receipt.
-	InputStatus   string           `json:"input_status,omitempty"`
-	OperationID   string           `json:"operation_id"`
-	Outcome       Outcome          `json:"outcome"`
-	SessionID     string           `json:"session_id,omitempty"`
-	Revision      uint64           `json:"revision,omitempty"`
-	Target        TurnTarget       `json:"target,omitempty"`
-	ParticipantID string           `json:"participant_id,omitempty"`
-	Resource      *CommandResource `json:"resource,omitempty"`
-	Detail        string           `json:"detail,omitempty"`
-	ErrorCode     errorcode.Code   `json:"error_code,omitempty"`
-	ErrorKind     ErrorKind        `json:"error_kind,omitempty"`
+	InputStatus     string                          `json:"input_status,omitempty"`
+	OperationID     string                          `json:"operation_id"`
+	Outcome         Outcome                         `json:"outcome"`
+	SessionID       string                          `json:"session_id,omitempty"`
+	Revision        uint64                          `json:"revision,omitempty"`
+	Target          TurnTarget                      `json:"target,omitempty"`
+	ParticipantID   string                          `json:"participant_id,omitempty"`
+	Resource        *CommandResource                `json:"resource,omitempty"`
+	Configuration   *sessionprofile.Configuration   `json:"configuration,omitempty"`
+	SessionResource *sessionprofile.Resource        `json:"session_resource,omitempty"`
+	BackgroundGrant *sessionprofile.BackgroundGrant `json:"background_grant,omitempty"`
+	Detail          string                          `json:"detail,omitempty"`
+	ErrorCode       errorcode.Code                  `json:"error_code,omitempty"`
+	ErrorKind       ErrorKind                       `json:"error_kind,omitempty"`
 }
 
 // CommandReceiptError preserves a typed mutation receipt when a caller cannot

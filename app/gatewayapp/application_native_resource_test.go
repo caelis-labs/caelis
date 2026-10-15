@@ -5,27 +5,23 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
-	"github.com/caelis-labs/caelis/control/application"
+	"github.com/caelis-labs/caelis/control/sessionprofile"
 )
 
 // TestApplicationNativeResourceStoreRoundTrip checks the same Store/bridge
 // combination used by the HTTP Host without requiring a native Seatbelt launch.
 func TestApplicationNativeResourceStoreRoundTrip(t *testing.T) {
 	workspace := t.TempDir()
-	store, err := application.Open(filepath.Join(t.TempDir(), "application.sqlite"))
+	store, err := sessionprofile.Open(filepath.Join(t.TempDir(), "application.sqlite"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	connection, err := store.Register(t.Context(), "owner", application.Registration{OperationID: "enroll", Name: "synthetic", Credential: "app-client-" + strings.Repeat("aa", 32)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	binding := application.Binding{Scope: connection.Scope, SessionID: "session-native", Profile: application.Profile{Version: "native/1", Model: "model", ToolsVersion: "native/1", Execution: "workspace-write"}, CreationDigest: "create"}
+	connection := struct{ Scope sessionprofile.Scope }{sessionprofile.PrincipalScope("owner")}
+	binding := sessionprofile.Binding{Scope: connection.Scope, SessionID: "session-native", Profile: sessionprofile.Profile{Version: "native/1", Model: "model", ToolsVersion: "native/1", Execution: "workspace-write"}, CreationDigest: "create"}
 	if err := store.PutBinding(t.Context(), binding); err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +55,7 @@ func TestApplicationNativeResourceStoreRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	var output struct {
-		Resource application.Resource `json:"resource"`
+		Resource sessionprofile.Resource `json:"resource"`
 	}
 	if err := json.Unmarshal([]byte(published.Content[0].Text.Text), &output); err != nil {
 		t.Fatal(err)

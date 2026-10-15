@@ -2,9 +2,6 @@ package gatewayapp
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -21,9 +18,9 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
-	"github.com/caelis-labs/caelis/control/application"
 	"github.com/caelis-labs/caelis/control/memorybinding"
 	controlplacement "github.com/caelis-labs/caelis/control/placement"
+	"github.com/caelis-labs/caelis/control/sessionprofile"
 	"github.com/caelis-labs/caelis/control/sessionvisibility"
 	"github.com/caelis-labs/caelis/internal/acpbridge"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
@@ -34,8 +31,8 @@ import (
 // assembleApplicationSnapshot binds execution authority once; each model request
 // resolves its desired profile separately. Choosing a directory never imports
 // workspace instructions, skills, Memory, MCP, plugins or the process prompt.
-func (a *workspaceConfigAssembler) assembleApplicationSnapshot(ctx context.Context, active session.Session, activity sessionRuntimeActivity, sessions session.Service) (*sessionRuntimeInstance, error) {
-	store := a.deps.authorities.applications
+func (a *workspaceConfigAssembler) assembleProfileSnapshot(ctx context.Context, active session.Session, activity sessionRuntimeActivity, sessions session.Service) (*sessionRuntimeInstance, error) {
+	store := a.deps.authorities.sessionProfiles
 	if store == nil || !sessionvisibility.IsApplicationSession(active) {
 		return nil, fmt.Errorf("gatewayapp: application binding store unavailable")
 	}
@@ -43,7 +40,7 @@ func (a *workspaceConfigAssembler) assembleApplicationSnapshot(ctx context.Conte
 	if err != nil {
 		return nil, err
 	}
-	if binding.Archived || binding.PrincipalID != active.UserID || binding.SessionID != active.SessionID || active.Metadata[application.StateKey] != binding.ApplicationID {
+	if binding.Archived || binding.PrincipalID != active.UserID || binding.SessionID != active.SessionID {
 		return nil, fmt.Errorf("gatewayapp: application Session binding does not match its canonical owner")
 	}
 	if err := validateApplicationExecutionPlatform(binding.Profile.Execution); err != nil {
@@ -75,7 +72,7 @@ func (a *workspaceConfigAssembler) assembleApplicationSnapshot(ctx context.Conte
 		authorities: a.deps.authorities, sessions: sessions, workspace: workspace, lookup: lookup,
 		placementCache:    placement,
 		activation:        &sessionRuntimeActivation{modelCatalog: a.deps.modelCatalog, sessionRef: active.SessionRef},
-		activeRuntime:     stackRuntimeConfig{ContextWindow: contextWindow, ApprovalMode: application.EffectiveApprovalMode(binding.Profile)},
+		activeRuntime:     stackRuntimeConfig{ContextWindow: contextWindow, ApprovalMode: sessionprofile.EffectiveApprovalMode(binding.Profile)},
 		executionConfig:   sandbox.CloneExecutionConfig(active.ExecutionConfig),
 		retainRuntimeWork: activity.retainWork, runtimeTaskChanged: activity.taskChanged, taskCommitted: activity.taskCommitted,
 	}}
@@ -87,7 +84,7 @@ func (a *workspaceConfigAssembler) assembleApplicationSnapshot(ctx context.Conte
 	var execRuntime *applicationExecutionRuntime
 	var sandboxDescriptor sandbox.DescriptorProvider = applicationNoNativeExecution{}
 	if binding.Profile.Execution == "workspace-write" {
-		execRuntime, err = newApplicationExecutionRuntime(active.CWD, a.deps.authorities.storeDir, a.deps.authorities.sandboxHostAuthorityDir, store, binding.Scope, binding.Profile, instance.executionConfig)
+		execRuntime, err = newApplicationExecutionRuntime(active.CWD, a.deps.authorities.storeDir, a.deps.authorities.sandboxHostAuthorityDir, binding.Profile, instance.executionConfig)
 		if err != nil {
 			return nil, err
 		}
@@ -115,7 +112,7 @@ func (a *workspaceConfigAssembler) assembleApplicationSnapshot(ctx context.Conte
 	if err != nil {
 		return nil, err
 	}
-	if err := application.ValidateProfile(configuration.Profile); err != nil {
+	if err := sessionprofile.ValidateProfile(configuration.Profile); err != nil {
 		return nil, err
 	}
 	if _, err := resolver.resolveProfileModel(ctx, configuration.Profile); err != nil {
@@ -133,7 +130,7 @@ func (a *workspaceConfigAssembler) assembleApplicationSnapshot(ctx context.Conte
 	if err != nil {
 		return nil, err
 	}
-	estimateTools, err := resolver.tools(ctx, configuration, application.Source{Kind: "user", OperationID: "estimate"}, estimateCapabilities)
+	estimateTools, err := resolver.tools(ctx, configuration, sessionprofile.Source{Kind: "user", OperationID: "estimate"}, estimateCapabilities)
 	releaseEstimate()
 	if err != nil {
 		return nil, err
@@ -160,7 +157,6 @@ func (a *workspaceConfigAssembler) assembleApplicationSnapshot(ctx context.Conte
 		Sessions: sessions, AgentFactory: chat.Factory{}, Compaction: compaction,
 		Diagnostics: a.deps.authorities.diagnostics, PolicyRegistry: policies, DefaultPolicyMode: mode,
 		MCPGrants:     a.deps.authorities.mcpGrants,
-		MCPGrantOwner: applicationMCPGrantOwner(binding.Scope),
 		SandboxPolicy: sandboxPolicy,
 		TaskStore:     a.deps.authorities.taskStore, TaskOutput: a.deps.authorities.taskOutput,
 		TaskActivityChanged: activity.taskChanged, TaskCommitted: activity.taskCommitted,
@@ -200,7 +196,7 @@ func (a *workspaceConfigAssembler) assembleApplicationSnapshot(ctx context.Conte
 	bundle.Gateway, err = kernel.New(kernel.Config{
 		Sessions: sessions, Runtime: fencedRuntime, TurnStartGate: a.deps.authorities.approvalRecovery,
 		Resolver: resolver, ExecutionValidator: validator,
-		DefaultApprovalMode: kernel.ApprovalMode(application.EffectiveApprovalMode(binding.Profile)),
+		DefaultApprovalMode: kernel.ApprovalMode(sessionprofile.EffectiveApprovalMode(binding.Profile)),
 		ApprovalApprover:    approver,
 		Control:             sessionControl,
 	})
@@ -214,15 +210,6 @@ func (a *workspaceConfigAssembler) assembleApplicationSnapshot(ctx context.Conte
 	return instance, nil
 }
 
-// applicationMCPGrantOwner binds reusable grants to the authenticated owner
-// of this independently revisioned Application configuration. Equal CWD and
-// server values from another connection do not transfer approval.
-func applicationMCPGrantOwner(scope application.Scope) string {
-	raw, _ := json.Marshal([]string{scope.PrincipalID, scope.ApplicationID, scope.ConnectionID})
-	hash := sha256.Sum256(raw)
-	return "application:" + hex.EncodeToString(hash[:])
-}
-
 // applicationNoNativeExecution advertises no filesystem/process capabilities.
 // Tools-only profiles have no native executor to probe, borrow, or accidentally
 // expose: a misassembled native tool fails preflight instead of running on Host.
@@ -231,8 +218,8 @@ func applicationMCPGrantOwner(scope application.Scope) string {
 // Callback tools enforce this natively in the application Store.
 type applicationLeasedTool struct {
 	tool.Tool
-	store *application.Store
-	scope application.Scope
+	store *sessionprofile.Store
+	scope sessionprofile.Scope
 }
 
 func (t applicationLeasedTool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
@@ -248,7 +235,7 @@ func (applicationNoNativeExecution) Describe() sandbox.Descriptor { return sandb
 
 type applicationTurnResolver struct {
 	composition *runtimeComposition
-	binding     application.Binding
+	binding     sessionprofile.Binding
 	execution   *applicationExecutionRuntime
 	// Each request pins the current Host provider catalog, not the catalog
 	// detached when this Session's native executor was activated.
@@ -260,23 +247,23 @@ type applicationTurnResolver struct {
 	capabilitiesClosed bool
 }
 
-func (r *applicationTurnResolver) tools(ctx context.Context, configuration application.Configuration, source application.Source, capabilities *applicationCapabilities) ([]tool.Tool, error) {
-	tools, err := r.composition.authorities.applications.ToolsForConfiguration(ctx, r.binding, configuration, source)
+func (r *applicationTurnResolver) tools(ctx context.Context, configuration sessionprofile.Configuration, source sessionprofile.Source, capabilities *applicationCapabilities) ([]tool.Tool, error) {
+	tools, err := r.composition.authorities.sessionProfiles.ToolsForConfiguration(ctx, r.binding, configuration, source)
 	if err != nil {
 		return nil, err
 	}
 	if r.binding.Profile.Execution == "workspace-write" {
-		native, err := newApplicationNativeTools(r.execution, r.composition.authorities.applications, r.binding, r.composition.workspace.CWD, configuration.Profile.NativeTools)
+		native, err := newApplicationNativeTools(r.execution, r.composition.authorities.sessionProfiles, r.binding, r.composition.workspace.CWD, configuration.Profile.NativeTools)
 		if err != nil {
 			return nil, err
 		}
 		tools = append(tools, native...)
 	}
 	if len(capabilities.catalog.Metas()) > 0 {
-		tools = append(tools, applicationLeasedTool{Tool: capabilities.skillTool, store: r.composition.authorities.applications, scope: r.binding.Scope})
+		tools = append(tools, applicationLeasedTool{Tool: capabilities.skillTool, store: r.composition.authorities.sessionProfiles, scope: r.binding.Scope})
 	}
 	if capabilities.source != nil {
-		tools = append(tools, applicationLeasedTool{Tool: capabilities.searchTool, store: r.composition.authorities.applications, scope: r.binding.Scope})
+		tools = append(tools, applicationLeasedTool{Tool: capabilities.searchTool, store: r.composition.authorities.sessionProfiles, scope: r.binding.Scope})
 	}
 	children, err := r.composition.applicationChildren.tools(ctx)
 	if err != nil {
@@ -298,8 +285,8 @@ func (r *applicationTurnResolver) ResolveTurn(ctx context.Context, intent kernel
 	if strings.TrimSpace(intent.ModelHint) != "" || strings.TrimSpace(intent.ModeName) != "" {
 		return kernel.ResolvedTurn{}, fmt.Errorf("gatewayapp: application model changes use configuration updates; permissions are creation-bound")
 	}
-	source, ok := ctx.Value(applicationSourceContextKey{}).(application.Source)
-	if !ok || application.ValidateSource(source) != nil {
+	source, ok := ctx.Value(applicationSourceContextKey{}).(sessionprofile.Source)
+	if !ok || sessionprofile.ValidateSource(source) != nil {
 		return kernel.ResolvedTurn{}, fmt.Errorf("gatewayapp: application Turn is missing trusted source admission")
 	}
 	snapshot, err := r.resolveModelRequest(ctx, source)
@@ -329,8 +316,8 @@ func (r *applicationTurnResolver) ResolveTurn(ctx context.Context, intent kernel
 	}}, nil
 }
 
-func (r *applicationTurnResolver) resolveModelRequest(ctx context.Context, source application.Source) (agent.ModelRequestSnapshot, error) {
-	store := r.composition.authorities.applications
+func (r *applicationTurnResolver) resolveModelRequest(ctx context.Context, source sessionprofile.Source) (agent.ModelRequestSnapshot, error) {
+	store := r.composition.authorities.sessionProfiles
 	configuration, err := store.Configuration(ctx, r.binding.Scope, r.binding.SessionID)
 	if err != nil {
 		return agent.ModelRequestSnapshot{}, err
@@ -367,12 +354,12 @@ func (r *applicationTurnResolver) resolveModelRequest(ctx context.Context, sourc
 		Request: agent.ModelRequestOptions{ServiceTier: model.ServiceTier(configuration.Profile.ServiceTier)},
 		Release: release,
 		Admit: func(ctx context.Context, request agent.ModelRequestAdmission) error {
-			err := store.AdmitRequest(ctx, r.binding.Scope, r.binding.SessionID, application.RequestConfiguration{
+			err := store.AdmitRequest(ctx, r.binding.Scope, r.binding.SessionID, sessionprofile.RequestConfiguration{
 				Revision: configuration.Revision, RequestID: request.RequestID, TurnID: request.TurnID,
 				Model: resolved.Model.Name(), ReasoningEffort: resolved.ReasoningEffort,
 				ServiceTier: configuration.Profile.ServiceTier, ToolsVersion: configuration.Profile.ToolsVersion,
 			})
-			if errors.Is(err, application.ErrConfigurationStale) {
+			if errors.Is(err, sessionprofile.ErrConfigurationStale) {
 				return agent.ErrModelRequestSnapshotStale
 			}
 			return err
@@ -380,7 +367,7 @@ func (r *applicationTurnResolver) resolveModelRequest(ctx context.Context, sourc
 	}, nil
 }
 
-func applicationPolicyRegistry(profile application.Profile) (policy.Registry, string, error) {
+func applicationPolicyRegistry(profile sessionprofile.Profile) (policy.Registry, string, error) {
 	mode := applicationPolicyMode(profile)
 	var native policy.Mode
 	if mode != "application-tools-only" {
@@ -392,7 +379,7 @@ func applicationPolicyRegistry(profile application.Profile) (policy.Registry, st
 	registry, err := policy.NewMemory(policy.NamedMode{ID: mode, Decide: func(ctx context.Context, input policy.ToolContext) (policy.Decision, error) {
 		// Only the stored, request-pinned callback catalog supplies callback
 		// policy; names and model arguments cannot opt into this path.
-		if decision, handled, err := application.CallbackPolicyDecision(input); handled || err != nil {
+		if decision, handled, err := sessionprofile.CallbackPolicyDecision(input); handled || err != nil {
 			return decision, err
 		}
 		if tool.IsMCPDefinition(input.Tool) || tool.IsToolSearchDefinition(input.Tool) || input.Tool.Name == "Skill" {

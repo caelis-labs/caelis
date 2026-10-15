@@ -18,10 +18,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/caelis-labs/caelis/control/application"
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/httpclient"
+	"github.com/caelis-labs/caelis/control/sessionprofile"
 )
 
 func TestApplicationNativeProviderUsesReturnedResourcePath(t *testing.T) {
@@ -62,7 +62,7 @@ func nativeHostSession(t *testing.T, ctx context.Context, host *applicationHTTPH
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, capability := range []string{application.CapabilityNativeExecution, application.CapabilityWorkspaceBinding} {
+	for _, capability := range []string{sessionprofile.CapabilityNativeExecution, sessionprofile.CapabilityWorkspaceBinding} {
 		if !slices.Contains(info.Capabilities, capability) {
 			t.Fatalf("native Host does not advertise %s", capability)
 		}
@@ -75,9 +75,9 @@ func nativeHostSession(t *testing.T, ctx context.Context, host *applicationHTTPH
 	if err != nil || connected.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("connect = %+v, %v", connected, err)
 	}
-	client, _ := registerApplicationHTTP(t, ctx, host, "native", filepath.Join(filepath.Dir(cwd), "native.credential"))
-	profile := application.Profile{Version: "native/1", Instructions: "Use the selected native tools.", Model: "custom/gpt-4.1", ToolsVersion: "native/1", Execution: "workspace-write", Workspace: application.Workspace{CWD: cwd}}
-	created, err := client.CreateApplicationSession(ctx, appserver.CreateApplicationSessionRequest{WriteBase: appserver.WriteBase{OperationID: "create-native"}, Profile: profile})
+	client, _ := connectSessionOwnerHTTP(t, ctx, host, "owner", filepath.Join(filepath.Dir(cwd), "native.credential"))
+	profile := sessionprofile.Profile{Version: "native/1", Instructions: "Use the selected native tools.", Model: "custom/gpt-4.1", ToolsVersion: "native/1", Execution: "workspace-write", Workspace: sessionprofile.Workspace{CWD: cwd}}
+	created, err := client.CreateSession(ctx, appserver.CreateSessionRequest{WriteBase: appserver.WriteBase{OperationID: "create-native"}, Profile: profilePointer(profile)})
 	if err != nil || created.SessionID == "" {
 		t.Fatalf("create = %+v, %v", created, err)
 	}
@@ -85,7 +85,7 @@ func nativeHostSession(t *testing.T, ctx context.Context, host *applicationHTTPH
 }
 func nativePrompt(t *testing.T, ctx context.Context, client *httpclient.Client, id, op string) {
 	t.Helper()
-	result, err := client.PromptApplication(ctx, appserver.ApplicationPromptRequest{PromptRequest: appserver.PromptRequest{WriteBase: appserver.WriteBase{SessionID: id, OperationID: op}, Input: "Carry out the selected synthetic operation."}, SourceKind: "user"})
+	result, err := client.Prompt(ctx, appserver.PromptRequest{WriteBase: appserver.WriteBase{SessionID: id, OperationID: op}, Input: "Carry out the selected synthetic operation.", SourceKind: "user"})
 	if err != nil || (result.Outcome != appserver.OutcomeCommitted && result.Outcome != appserver.OutcomeAccepted) {
 		t.Fatalf("prompt = %+v, %v", result, err)
 	}
@@ -158,8 +158,8 @@ func TestApplicationNativeHTTPB01B02B10(t *testing.T) {
 	if err := os.Mkdir(worker, 0700); err != nil {
 		t.Fatal(err)
 	}
-	workerProfile := application.Profile{Version: "worker/1", Instructions: "Separate worker", Model: "custom/gpt-4.1", ToolsVersion: "worker/1", Execution: "workspace-write", Workspace: application.Workspace{CWD: worker}, NativeTools: []string{"Write", "RunCommand", "Task"}}
-	workerResult, err := client.CreateApplicationSession(ctx, appserver.CreateApplicationSessionRequest{WriteBase: appserver.WriteBase{OperationID: "create-worker"}, Profile: workerProfile})
+	workerProfile := sessionprofile.Profile{Version: "worker/1", Instructions: "Separate worker", Model: "custom/gpt-4.1", ToolsVersion: "worker/1", Execution: "workspace-write", Workspace: sessionprofile.Workspace{CWD: worker}, NativeTools: []string{"Write", "RunCommand", "Task"}}
+	workerResult, err := client.CreateSession(ctx, appserver.CreateSessionRequest{WriteBase: appserver.WriteBase{OperationID: "create-worker"}, Profile: profilePointer(workerProfile)})
 	if err != nil || workerResult.SessionID == "" {
 		t.Fatalf("worker create = %+v, %v", workerResult, err)
 	}
@@ -173,7 +173,7 @@ func TestApplicationNativeHTTPB01B02B10(t *testing.T) {
 	}
 	resourceBytes := []byte("input-resource-bytes\n")
 	sum := sha256.Sum256(resourceBytes)
-	uploaded, err := client.UploadApplicationResource(ctx, appserver.ApplicationResourceRequest{WriteBase: appserver.WriteBase{SessionID: id, OperationID: "native-upload"}, Name: "input.txt", MediaType: "text/plain", Data: resourceBytes, SHA256: hex.EncodeToString(sum[:])})
+	uploaded, err := resourceResult(client.CreateSessionResource(ctx, appserver.SessionResourceRequest{WriteBase: appserver.WriteBase{SessionID: id, OperationID: "native-upload"}, Name: "input.txt", MediaType: "text/plain", Data: resourceBytes, SHA256: hex.EncodeToString(sum[:])}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,12 +203,12 @@ func TestApplicationNativeHTTPB01B02B10(t *testing.T) {
 	if artifactID == "" {
 		t.Fatal("published native resource ID absent from model-visible tool result")
 	}
-	artifact, err := client.ReadApplicationResource(ctx, id, artifactID)
+	artifact, err := client.SessionResourceContent(ctx, id, artifactID)
 	if err != nil || string(artifact.Data) != string(resourceBytes) || artifact.Resource.SHA256 != hex.EncodeToString(sum[:]) {
 		t.Fatalf("published HTTP artifact bytes/digest = %+v, %v", artifact, err)
 	}
-	other, _ := registerApplicationHTTP(t, ctx, host, "other", filepath.Join(root, "other.credential"))
-	if _, err := other.ReadApplicationResource(ctx, id, artifactID); err == nil {
+	other, _ := connectSessionOwnerHTTP(t, ctx, host, "foreign-owner", filepath.Join(root, "other.credential"))
+	if _, err := other.SessionResourceContent(ctx, id, artifactID); err == nil {
 		t.Fatal("other application read published artifact")
 	}
 }

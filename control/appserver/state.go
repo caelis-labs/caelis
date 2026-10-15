@@ -52,6 +52,16 @@ type ServerInfo struct {
 	Transports          []string `json:"transports,omitempty"`
 }
 
+// CapabilityIdleHostShutdown permits an instance-bound, idle-only replacement.
+const CapabilityIdleHostShutdown = "host-idle-shutdown-v1"
+
+// HostShutdownRequest optionally fences shutdown to the observed instance.
+// IfIdle rejects replacement while Session work or mutation dispatch is active.
+type HostShutdownRequest struct {
+	ExpectedInstanceID string `json:"expected_instance_id,omitempty"`
+	IfIdle             bool   `json:"if_idle,omitempty"`
+}
+
 // HostStatus is the safely scoped process-level health/readiness response. It
 // contains no principal, Session, workspace, configuration, or credential data.
 type HostStatus struct {

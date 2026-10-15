@@ -9,8 +9,8 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
-	"github.com/caelis-labs/caelis/control/application"
 	"github.com/caelis-labs/caelis/control/memorybinding"
+	"github.com/caelis-labs/caelis/control/sessionprofile"
 	acpassembly "github.com/caelis-labs/caelis/internal/acpagentbridge/assembly"
 	"github.com/caelis-labs/caelis/internal/controlplane"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
@@ -64,8 +64,8 @@ type runtimeComposition struct {
 	gateway            *kernelimpl.Gateway
 	mcpMgr             *mcp.Manager
 	capabilityClose    func()
-	capabilityStatus   func(uint64) application.MCPStatus
-	capabilityUpdated  func(application.Configuration)
+	capabilityStatus   func(uint64) sessionprofile.MCPStatus
+	capabilityUpdated  func(sessionprofile.Configuration)
 	pluginCacheRelease func() error
 	retainRuntimeWork  func(session.SessionRef) func()
 	runtimeTaskChanged func(session.SessionRef)

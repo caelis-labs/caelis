@@ -5,13 +5,12 @@ import (
 	"errors"
 	"net/http"
 	"path/filepath"
-	"strings"
 	"sync/atomic"
 	"testing"
 
-	"github.com/caelis-labs/caelis/control/application"
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/modelconfig"
+	"github.com/caelis-labs/caelis/control/sessionprofile"
 )
 
 func TestApplicationModelCapabilitiesReadCanonicalCatalog(t *testing.T) {
@@ -30,17 +29,13 @@ func TestApplicationModelCapabilitiesReadCanonicalCatalog(t *testing.T) {
 	if err != nil || connected.Outcome != appserver.OutcomeCommitted {
 		t.Fatal(connected, err)
 	}
-	connection, err := stack.Applications().Register(ctx, owner, application.Registration{OperationID: "enroll-screen", Name: "screen-test", Credential: "app-client-" + strings.Repeat("b", 64)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	principal := appserver.Principal{ID: owner.ID, ApplicationID: connection.ApplicationID, ConnectionID: connection.ConnectionID}
-	profile := application.Profile{Version: "screen/1", Model: "custom/screen-custom", Execution: "tools-only", ToolsVersion: "empty/1"}
-	created, err := stack.Applications().Create(ctx, principal, appserver.CreateApplicationSessionRequest{WriteBase: appserver.WriteBase{OperationID: "create-screen"}, Profile: profile})
+	principal := appserver.Principal{ID: owner.ID}
+	profile := sessionprofile.Profile{Version: "screen/1", Model: "custom/screen-custom", Execution: "tools-only", ToolsVersion: "empty/1"}
+	created, err := stack.ControlClient().CreateSession(ctx, principal, appserver.CreateSessionRequest{WriteBase: appserver.WriteBase{OperationID: "create-screen"}, Profile: profilePointer(profile)})
 	if err != nil || created.Outcome != appserver.OutcomeCommitted {
 		t.Fatal(created, err)
 	}
-	before, err := stack.Applications().ApplicationModelCapabilities(ctx, principal, created.SessionID)
+	before, err := stack.SessionProfiles().SessionModelCapabilities(ctx, principal, created.SessionID)
 	if err != nil || before.ImageInput == nil || *before.ImageInput {
 		t.Fatal(before, err)
 	}
@@ -75,7 +70,7 @@ func TestApplicationModelCapabilitiesReadCanonicalCatalog(t *testing.T) {
 		if _, err = external.CompareAndSave(ctx, doc.ConfigurationRevision, doc); err != nil {
 			t.Fatal(err)
 		}
-		got, err := stack.Applications().ApplicationModelCapabilities(ctx, principal, created.SessionID)
+		got, err := stack.SessionProfiles().SessionModelCapabilities(ctx, principal, created.SessionID)
 		if err != nil || got.Model != before.Model || got.ConfigurationRevision != before.ConfigurationRevision || got.SessionID != before.SessionID {
 			t.Fatal(got, err)
 		}
@@ -90,12 +85,12 @@ func TestApplicationModelCapabilitiesReadCanonicalCatalog(t *testing.T) {
 	// Failure must propagate rather than silently falling back to stale support.
 	path := stack.composition.authorities.store.path
 	stack.composition.authorities.store.path = t.TempDir() // A directory is not a configuration document.
-	got, err := stack.Applications().ApplicationModelCapabilities(ctx, principal, created.SessionID)
+	got, err := stack.SessionProfiles().SessionModelCapabilities(ctx, principal, created.SessionID)
 	stack.composition.authorities.store.path = path
 	if err == nil || got.ImageInput != nil {
 		t.Fatal("unreadable catalog used stale lookup", got, err)
 	}
-	got, err = stack.Applications().ApplicationModelCapabilities(ctx, principal, created.SessionID)
+	got, err = stack.SessionProfiles().SessionModelCapabilities(ctx, principal, created.SessionID)
 	if err != nil || got.ImageInput == nil || !*got.ImageInput {
 		t.Fatal("read did not recover", got, err)
 	}
@@ -108,3 +103,5 @@ func TestApplicationModelCapabilitiesReadCanonicalCatalog(t *testing.T) {
 		t.Fatal("read resolved credentials or provider", resolutions.Load())
 	}
 }
+
+func profilePointer(p sessionprofile.Profile) *sessionprofile.Profile { return &p }

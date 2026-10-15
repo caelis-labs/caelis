@@ -19,9 +19,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/caelis-labs/caelis/control/application"
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
+	"github.com/caelis-labs/caelis/control/sessionprofile"
 )
 
 // largeImageStreamModel finishes the image callback Turn, then holds the next
@@ -94,7 +94,7 @@ func largeApplicationPNG(t *testing.T) []byte {
 	if err := (&png.Encoder{CompressionLevel: png.NoCompression}).Encode(&data, img); err != nil {
 		t.Fatal(err)
 	}
-	if data.Len() <= 3<<20 || data.Len() > application.MaxResourceBytes {
+	if data.Len() <= 3<<20 || data.Len() > sessionprofile.MaxResourceBytes {
 		t.Fatalf("encoded PNG size = %d; need a valid resource image above 3 MiB and within the 8 MiB admission limit", data.Len())
 	}
 	return data.Bytes()
@@ -130,9 +130,9 @@ func TestApplicationLargeImageKeepsNextTurnTransientFeed(t *testing.T) {
 	if err != nil || connected.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("ConnectModel: %+v %v", connected, err)
 	}
-	client, _ := registerApplicationHTTP(t, ctx, host, "large-image-stream", filepath.Join(root, "app.credential"))
-	created, err := client.CreateApplicationSession(ctx, appserver.CreateApplicationSessionRequest{
-		WriteBase: appserver.WriteBase{OperationID: "create-large-image-session"}, Profile: multimodalHTTPProfile("large-image-stream"),
+	client, _ := connectSessionOwnerHTTP(t, ctx, host, "owner", filepath.Join(root, "app.credential"))
+	created, err := client.CreateSession(ctx, appserver.CreateSessionRequest{
+		WriteBase: appserver.WriteBase{OperationID: "create-large-image-session"}, Profile: profilePointer(multimodalHTTPProfile("large-image-stream")),
 	})
 	if err != nil || created.Outcome != appserver.OutcomeCommitted || created.SessionID == "" {
 		t.Fatalf("CreateApplicationSession: %+v %v", created, err)
@@ -140,16 +140,16 @@ func TestApplicationLargeImageKeepsNextTurnTransientFeed(t *testing.T) {
 	sessionID := created.SessionID
 	prompt := func(operation, input string) {
 		t.Helper()
-		out, err := client.PromptApplication(ctx, appserver.ApplicationPromptRequest{
-			PromptRequest: appserver.PromptRequest{WriteBase: appserver.WriteBase{SessionID: sessionID, OperationID: operation}, Input: input},
-			SourceKind:    "user",
+		out, err := client.Prompt(ctx, appserver.PromptRequest{
+			WriteBase: appserver.WriteBase{SessionID: sessionID, OperationID: operation}, Input: input,
+			SourceKind: "user",
 		})
 		if err != nil || (out.Outcome != appserver.OutcomeAccepted && out.Outcome != appserver.OutcomeCommitted) {
 			t.Fatalf("PromptApplication(%s): %+v %v", operation, out, err)
 		}
 	}
 	prompt("image-turn", "Look up the image.")
-	calls, err := client.WaitApplicationCalls(ctx, sessionID)
+	calls, err := client.WaitSessionToolCalls(ctx, sessionID)
 	if err != nil || len(calls) != 1 || calls[0].CallID != "provider-image-call" {
 		t.Fatalf("WaitApplicationCalls: %+v %v", calls, err)
 	}
@@ -173,31 +173,31 @@ func TestApplicationLargeImageKeepsNextTurnTransientFeed(t *testing.T) {
 		}
 	}
 synced:
-	if _, err := client.ClaimApplicationCall(ctx, sessionID, call.ID); err != nil {
+	if _, err := client.ClaimSessionToolCall(ctx, sessionID, call.ID); err != nil {
 		t.Fatal(err)
 	}
 	image := largeApplicationPNG(t)
 	digest := sha256.Sum256(image)
 	expires := time.Now().Add(5 * time.Minute)
-	resource, err := client.UploadApplicationResource(ctx, appserver.ApplicationResourceRequest{
+	resource, err := resourceResult(client.CreateSessionResource(ctx, appserver.SessionResourceRequest{
 		WriteBase: appserver.WriteBase{SessionID: sessionID, OperationID: "upload-large-image"},
 		Name:      "screen.png", MediaType: "image/png", Data: image,
 		SHA256: hex.EncodeToString(digest[:]), ExpiresAt: &expires,
-	})
+	}))
 	if err != nil {
 		t.Fatalf("UploadApplicationResource(%d bytes): %v", len(image), err)
 	}
 	first, last := "first text", "last text"
-	content, err := json.Marshal([]application.ContentBlock{
+	content, err := json.Marshal([]sessionprofile.ContentBlock{
 		{Type: "text", Text: &first},
-		{Type: "resource_link", MIMEType: resource.MediaType, URI: application.ResourceURIPrefix + resource.ID, Name: resource.Name, SHA256: resource.SHA256},
+		{Type: "resource_link", MIMEType: resource.MediaType, URI: sessionprofile.ResourceURIPrefix + resource.ID, Name: resource.Name, SHA256: resource.SHA256},
 		{Type: "text", Text: &last},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := client.CompleteApplicationCall(ctx, sessionID, call.ID, application.CallResult{
-		Outcome: "succeeded", ResultFormat: application.ResultFormatContentV1, Content: content,
+	if err := client.CompleteSessionToolCall(ctx, sessionID, call.ID, sessionprofile.CallResult{
+		Outcome: "succeeded", ResultFormat: sessionprofile.ResultFormatContentV1, Content: content,
 		StructuredContent: map[string]any{"score": 7, "identifier": json.Number("9007199254740991")},
 	}); err != nil {
 		t.Fatalf("CompleteApplicationCall: %v", err)

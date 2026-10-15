@@ -26,8 +26,8 @@ import (
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/sandboxpolicy"
 	"github.com/caelis-labs/caelis/control/agentbinding"
-	"github.com/caelis-labs/caelis/control/application"
 	"github.com/caelis-labs/caelis/control/plugin"
+	"github.com/caelis-labs/caelis/control/sessionprofile"
 	"github.com/caelis-labs/caelis/control/sessionvisibility"
 	acpassembly "github.com/caelis-labs/caelis/internal/acpagentbridge/assembly"
 	"github.com/caelis-labs/caelis/internal/acpbridge"
@@ -134,8 +134,8 @@ type gatewayRuntimeBundle struct {
 	ACPControlPlane             *acpassembly.ControlPlane
 	MCP                         *mcp.Manager
 	CloseCapabilities           func()
-	CapabilityStatus            func(uint64) application.MCPStatus
-	CapabilityUpdated           func(application.Configuration)
+	CapabilityStatus            func(uint64) sessionprofile.MCPStatus
+	CapabilityUpdated           func(sessionprofile.Configuration)
 	RuntimeConfig               stackRuntimeConfig
 	EstimatedPromptPrefixTokens int
 	ReleasePluginCache          func() error

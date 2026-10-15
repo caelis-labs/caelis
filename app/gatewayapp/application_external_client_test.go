@@ -15,8 +15,8 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
-	"github.com/caelis-labs/caelis/control/application"
 	"github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/sessionprofile"
 )
 
 // TestExternalExecutionClientHTTP uses an independently compiled client with
@@ -73,7 +73,7 @@ func TestExternalExecutionClientHTTP(t *testing.T) {
 	inspect := func() {
 		t.Helper()
 		var got struct {
-			Binding application.Binding    `json:"binding"`
+			Binding sessionprofile.Binding `json:"binding"`
 			State   appserver.SessionState `json:"state"`
 		}
 		if err := json.Unmarshal(run("inspect", created.SessionID), &got); err != nil {

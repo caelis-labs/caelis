@@ -96,9 +96,7 @@ func (s *TerminalService) authorizeMutation(ctx context.Context, principal appse
 	if s.authorizer != nil {
 		return s.authorizer.Authorize(ctx, principal, appserver.ActionCancel, sessionID)
 	}
-	if principal.ApplicationID != "" || principal.ConnectionID != "" {
-		return appserver.ErrUnauthorized
-	}
+
 	return nil
 }
 
@@ -108,7 +106,7 @@ func (s *TerminalService) resolve(ctx context.Context, principal appserver.Princ
 	if sessionID == "" || terminalID == "" {
 		return terminal.Ref{}, errorcode.New(errorcode.InvalidArgument, "appserver terminal requires Session and terminal IDs")
 	}
-	list, err := s.tasks.List(ctx, taskstream.Principal{ID: principal.ID, ApplicationID: principal.ApplicationID, ConnectionID: principal.ConnectionID, Roles: append([]string(nil), principal.Roles...)}, taskstream.ListRequest{SessionID: sessionID})
+	list, err := s.tasks.List(ctx, taskstream.Principal{ID: principal.ID, Roles: append([]string(nil), principal.Roles...)}, taskstream.ListRequest{SessionID: sessionID})
 	if err != nil {
 		return terminal.Ref{}, err
 	}

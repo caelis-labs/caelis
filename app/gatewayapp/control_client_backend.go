@@ -14,9 +14,9 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/control/agentbinding"
-	"github.com/caelis-labs/caelis/control/application"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	controlplacement "github.com/caelis-labs/caelis/control/placement"
+	"github.com/caelis-labs/caelis/control/sessionprofile"
 	"github.com/caelis-labs/caelis/control/sessionvisibility"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
 
@@ -41,22 +41,64 @@ func (s *controlCommandBackend) ExecuteControlCommand(ctx context.Context, princ
 				errorcode.New(errorcode.Unavailable, "gatewayapp: host is closing"),
 			)
 	}
+	// Profile callback lifecycle follows the canonical close, for every Surface.
+	defer func() {
+		if action != appserver.ActionSessionClose || result.Outcome != appserver.OutcomeCommitted || s.composition.authorities.sessionProfiles == nil {
+			return
+		}
+		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), controlFeedPublishTimeout)
+		defer cancel()
+		err := s.composition.authorities.sessionProfiles.ArchiveBinding(cleanup, sessionprofile.PrincipalScope(principal.ID), result.SessionID)
+		if err != nil && !errors.Is(err, sessionprofile.ErrNotFound) {
+			result.Detail = "session closed; callback receipt cleanup remains pending"
+			commandErr = errors.Join(commandErr, appserver.NewOutcomeError(appserver.OutcomeCommitted, err))
+		}
+	}()
 	if create, ok := request.(appserver.CreateSessionRequest); ok && reservedApplicationOrRetiredCreation(create) {
 		return appserver.CommandResult{}, appserver.NewOutcomeError(appserver.OutcomeRejected, appserver.ErrUnauthorized)
 	}
-	if action == appserver.ActionApplicationCreate {
-		return s.createApplicationSession(ctx, principal, request.(appserver.CreateApplicationSessionRequest))
+	switch req := request.(type) {
+	case appserver.CreateSessionBackgroundGrantRequest:
+		return s.createSessionBackgroundGrant(ctx, principal, req)
+	case appserver.RevokeSessionBackgroundGrantRequest:
+		return s.revokeSessionBackgroundGrant(ctx, principal, req)
 	}
-	if action == appserver.ActionWorkerCreate {
-		return s.createWorkerSession(ctx, principal, request.(appserver.CreateWorkerRequest))
+	if resource, ok := request.(appserver.SessionResourceRequest); ok {
+		return s.createSessionResource(ctx, principal, resource)
 	}
-	if action == appserver.ActionApplicationPrompt {
-		var err error
-		ctx, request, err = s.admitApplicationPrompt(ctx, principal, request.(appserver.ApplicationPromptRequest))
-		if err != nil {
-			return appserver.CommandResult{}, classifyControlPreDispatchError(err)
+	if configuration, ok := request.(appserver.UpdateSessionConfigurationRequest); ok {
+		return s.updateSessionConfiguration(ctx, principal, configuration)
+	}
+	if create, ok := request.(appserver.CreateSessionRequest); ok && create.Profile != nil {
+		return s.createProfileSession(ctx, principal, create)
+	}
+	if create, ok := request.(appserver.CreateSessionRequest); ok && create.Model != "" {
+		return s.createSessionWithModel(ctx, principal, create)
+	}
+	if prompt, ok := request.(appserver.PromptRequest); ok {
+		var binding sessionprofile.Binding
+		var err error = sessionprofile.ErrNotFound
+		if store := s.composition.authorities.sessionProfiles; store != nil {
+			binding, err = store.BindingForSession(ctx, prompt.SessionID)
 		}
-		action = appserver.ActionPrompt
+		if err == nil {
+			if principal.ID != binding.PrincipalID {
+				return appserver.CommandResult{}, appserver.ErrUnauthorized
+			}
+			kind := prompt.SourceKind
+			if kind == "" {
+				kind = "user"
+			}
+			prompt.SourceKind = kind
+			ctx, request, err = s.admitProfilePrompt(ctx, principal, prompt)
+			if err != nil {
+				return appserver.CommandResult{}, classifyControlPreDispatchError(err)
+			}
+		} else if !errors.Is(err, sessionprofile.ErrNotFound) {
+			return appserver.CommandResult{}, classifyControlPreDispatchError(err)
+		} else if (prompt.SourceKind != "" && prompt.SourceKind != "user") || prompt.GrantID != "" {
+			return appserver.CommandResult{}, errorcode.New(errorcode.Unsupported, "explicit input source requires a configured Session")
+		}
 	}
 	if isHostConfigurationCommandRequest(request) {
 		return s.executeConfigurationCommand(ctx, action, request)
@@ -183,7 +225,20 @@ func (s *controlCommandBackend) ExecuteControlCommand(ctx context.Context, princ
 		releaseRuntimeUse = releaseUse
 		composition = &runtime.instance.runtimeComposition
 	case action == appserver.ActionSessionClose:
-		runtime, releaseUse, err := runtimes.acquireLoadedRuntime(sessionID)
+		// An idle Runtime may already be draining. Wait before dispatch, then
+		// resolve the current owner again; the close command itself runs once.
+		var runtime *sessionRuntime
+		var releaseUse func()
+		var err error
+		for {
+			if err = runtimes.waitSessionRelease(ctx, sessionID); err != nil {
+				break
+			}
+			runtime, releaseUse, err = runtimes.acquireLoadedRuntime(sessionID)
+			if !isSessionRuntimeReleasingError(err) {
+				break
+			}
+		}
 		if err != nil {
 			return appserver.CommandResult{SessionID: sessionID}, classifyControlPreDispatchError(err)
 		}
@@ -236,8 +291,8 @@ func reservedApplicationOrRetiredCreation(req appserver.CreateSessionRequest) bo
 	active := session.Session{Metadata: req.Metadata}
 	id := strings.TrimSpace(req.PreferredSessionID)
 	return sessionvisibility.IsApplicationSession(active) || sessionvisibility.IsRetiredSession(active) ||
-		req.Metadata[application.StateKey] != nil || req.Metadata["application_creation_digest"] != nil ||
-		req.Metadata["control_bot_id"] != nil || strings.HasPrefix(id, "application-") ||
+		req.Metadata[sessionprofile.StateKey] != nil || req.Metadata["application_creation_digest"] != nil ||
+		req.Metadata["control_bot_id"] != nil || strings.HasPrefix(id, "application-") || strings.HasPrefix(id, "profile-") ||
 		strings.HasPrefix(id, "bot-chat-") || strings.HasPrefix(id, "bot-work-")
 }
 
@@ -394,7 +449,7 @@ func (s *runtimeComposition) executeControlCommand(ctx context.Context, principa
 			Input: req.Input, DisplayInput: req.DisplayInput, ContentParts: req.ContentParts,
 			Surface: "control-client", Metadata: map[string]any{"operation_id": req.OperationID}, Observer: observer,
 		}
-		if source, ok := ctx.Value(applicationSourceContextKey{}).(application.Source); ok && source.Kind != "user" {
+		if source, ok := ctx.Value(applicationSourceContextKey{}).(sessionprofile.Source); ok && source.Kind != "user" {
 			turn.InputKind = kernelimpl.SubmissionKindAgentCommunication
 			turn.InputActor = session.ActorRef{Kind: session.ActorKindSystem, ID: source.Kind, Name: "Application evidence"}
 			if source.Kind == "authorized_background" {
@@ -735,7 +790,7 @@ func (s *runtimeComposition) controlRuntimeContext(fallback context.Context, act
 	// cancellation parent is the Stack lifecycle. Preserve only the negotiated
 	// Agent-input transport from the request context: it is a trusted host
 	// capability required by ACP child turns, not arbitrary request state.
-	if source, ok := fallback.Value(applicationSourceContextKey{}).(application.Source); ok {
+	if source, ok := fallback.Value(applicationSourceContextKey{}).(sessionprofile.Source); ok {
 		runtimeCtx = context.WithValue(runtimeCtx, applicationSourceContextKey{}, source)
 	}
 	if sender := agent.AgentInputSenderFromContext(fallback); sender != nil {

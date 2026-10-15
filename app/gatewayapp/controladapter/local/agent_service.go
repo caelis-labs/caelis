@@ -104,7 +104,7 @@ func (s *AgentService) PrepareACPAuthentication(ctx context.Context, principal a
 }
 
 func (s *AgentService) ACPPreparation(ctx context.Context, principal appserver.Principal, req appserver.ACPPreparationRequest) (controlagents.ACPPreparation, error) {
-	if err := authorizeUnscopedHostCapability(principal); err != nil {
+	if err := authorizeHostCapability(principal); err != nil {
 		return controlagents.ACPPreparation{}, err
 	}
 	return s.preparation(ctx, principal.ID, req.Ref)
@@ -115,7 +115,7 @@ func (s *AgentService) ConnectACP(ctx context.Context, principal appserver.Princ
 }
 
 func (s *AgentService) DisconnectCandidates(ctx context.Context, principal appserver.Principal, req appserver.AgentRequest) (appserver.DisconnectCandidatesSnapshot, error) {
-	if err := authorizeUnscopedHostCapability(principal); err != nil {
+	if err := authorizeHostCapability(principal); err != nil {
 		return appserver.DisconnectCandidatesSnapshot{}, err
 	}
 	if strings.TrimSpace(req.SessionID) != "" {
@@ -129,7 +129,7 @@ func (s *AgentService) DisconnectACP(ctx context.Context, principal appserver.Pr
 }
 
 func (s *AgentService) AgentBindingStatus(ctx context.Context, principal appserver.Principal, req appserver.AgentRequest) (agentbinding.Status, error) {
-	if err := authorizeUnscopedHostCapability(principal); err != nil {
+	if err := authorizeHostCapability(principal); err != nil {
 		return agentbinding.Status{}, err
 	}
 	if strings.TrimSpace(req.SessionID) != "" {
@@ -170,7 +170,7 @@ func (s *AgentService) hostAdapter(principal appserver.Principal, surface string
 	if s == nil || s.hostDeps == nil {
 		return nil, errors.New("app/gatewayapp/controladapter/local: Agent service is unavailable")
 	}
-	if err := authorizeUnscopedHostCapability(principal); err != nil {
+	if err := authorizeHostCapability(principal); err != nil {
 		return nil, err
 	}
 	return controladapter.NewAgentAssemblerForHost(*s.hostDeps, strings.TrimSpace(surface), ""), nil

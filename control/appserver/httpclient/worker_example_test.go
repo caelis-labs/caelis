@@ -11,20 +11,20 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/httpclient"
 )
 
-func ExampleClient_CreateWorker() {
+func ExampleClient_CreateSession_observe() {
 	ctx := context.Background()
-	client, err := httpclient.New(httpclient.Config{BaseURL: "http://127.0.0.1:7777", BearerToken: "persisted-scoped-application-credential"})
+	client, err := httpclient.New(httpclient.Config{BaseURL: "http://127.0.0.1:7777", BearerToken: "host-auth-token"})
 	if err != nil {
 		log.Fatal(err)
 	}
 	info, err := client.Initialize(ctx)
-	if err != nil || !slices.Contains(info.Capabilities, appserver.CapabilitySharedWorkers) || !slices.Contains(info.Capabilities, appserver.CapabilityTurnSteering) {
+	if err != nil || !slices.Contains(info.Capabilities, appserver.CapabilityTurnSteering) || !slices.Contains(info.Capabilities, appserver.CapabilityTurnSteering) {
 		log.Fatal("Host lacks shared Worker support")
 	}
 	// Persist request bytes and ID before dispatch; reuse neither for another task.
-	created, err := client.CreateWorker(ctx, appserver.CreateWorkerRequest{WriteBase: appserver.WriteBase{OperationID: "worker-create-1"}, CWD: "/absolute/user/workspace", Title: "Shared work"})
+	created, err := client.CreateSession(ctx, appserver.CreateSessionRequest{WriteBase: appserver.WriteBase{OperationID: "worker-create-1"}, CWD: "/absolute/user/workspace", Title: "Shared work"})
 	if err != nil || created.Outcome != appserver.OutcomeCommitted {
-		receipt, queryErr := client.ApplicationOperation(ctx, "worker-create-1")
+		receipt, queryErr := client.Operation(ctx, "worker-create-1")
 		fmt.Println(receipt.Outcome, queryErr) // Reconcile; never invent another ID.
 		return
 	}
@@ -70,6 +70,6 @@ func ExampleClient_CreateWorker() {
 		// Keep observing after completion: the user can start another Turn in TUI.
 	}
 	// Reconnect with the saved cursor/history after a transport failure. Apply any
-	// replacement transaction atomically; never resend CreateWorker or Prompt.
+	// replacement transaction atomically; never resend CreateSession or Prompt.
 	fmt.Println(cursor, len(history), feed.Subscription.Err())
 }

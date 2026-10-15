@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
-	"github.com/caelis-labs/caelis/control/application"
+	"github.com/caelis-labs/caelis/control/sessionprofile"
 	"github.com/caelis-labs/caelis/internal/sandboxrouter"
 )
 
@@ -38,26 +38,17 @@ func TestApplicationNativeExecutionEnvironment(t *testing.T) {
 	t.Setenv("REMOVE_AT_CONFIG", "inherited")
 	t.Setenv("REMOVE_AT_COMMAND", "inherited")
 	t.Setenv("CAELIS_CONTROL_TOKEN", "synthetic-private")
-	store, err := application.Open(filepath.Join(root, "application.sqlite"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-	connection, err := store.Register(t.Context(), "owner", application.Registration{OperationID: "environment", Name: "environment", Credential: "app-client-" + strings.Repeat("ab", 32)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	profile := application.Profile{Version: "v1", Model: "configured-model", ToolsVersion: "v1", Execution: "workspace-write", Workspace: application.Workspace{CWD: cwd}, ExecutionConfig: &sandbox.ExecutionConfig{Environment: sandbox.EnvironmentConfig{
+	profile := sessionprofile.Profile{Version: "v1", Model: "configured-model", ToolsVersion: "v1", Execution: "workspace-write", Workspace: sessionprofile.Workspace{CWD: cwd}, ExecutionConfig: &sandbox.ExecutionConfig{Environment: sandbox.EnvironmentConfig{
 		Set: map[string]string{"SESSION_VALUE": "first", "OVERRIDE": "configured", "ZDOTDIR": home}, Unset: []string{"REMOVE_AT_CONFIG"},
 	}}}
-	first, err := newApplicationExecutionRuntime(cwd, root, filepath.Join(root, "authority"), store, connection.Scope, profile, profile.ExecutionConfig)
+	first, err := newApplicationExecutionRuntime(cwd, root, filepath.Join(root, "authority"), profile, profile.ExecutionConfig)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer first.Close()
 	profile.ExecutionConfig = sandbox.CloneExecutionConfig(profile.ExecutionConfig)
 	profile.ExecutionConfig.Environment.Set["SESSION_VALUE"] = "second"
-	second, err := newApplicationExecutionRuntime(cwd, root, filepath.Join(root, "authority"), store, connection.Scope, profile, profile.ExecutionConfig)
+	second, err := newApplicationExecutionRuntime(cwd, root, filepath.Join(root, "authority"), profile, profile.ExecutionConfig)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,20 +111,20 @@ func TestApplicationNativeExecutionEnvironment(t *testing.T) {
 	if os.Getenv("SESSION_VALUE") != "" || os.Getenv("REMOVE_AT_CONFIG") != "inherited" || os.Getenv("CAELIS_CONTROL_TOKEN") != "synthetic-private" {
 		t.Fatal("Session configuration mutated the Host")
 	}
-	opened, err := first.Start(t.Context(), sandbox.CommandRequest{Command: `read -r input; printf revoked > after-revoke`, TTY: true})
+	opened, err := first.Start(t.Context(), sandbox.CommandRequest{Command: `read -r input; printf revoked > after-close`, TTY: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Revoke(t.Context(), connection.Scope); err != nil {
+	if err := first.Close(); err != nil {
 		t.Fatal(err)
 	}
 	if err := opened.WriteInput(t.Context(), []byte("continue\n")); err == nil {
-		t.Fatal("revoked lease accepted TTY input")
+		t.Fatal("closed runtime accepted TTY input")
 	}
-	if _, err := first.Start(t.Context(), sandbox.CommandRequest{Command: "touch after-revoke", Constraints: sandbox.Constraints{Route: sandbox.RouteHost}}); err == nil {
-		t.Fatal("revoked lease accepted approved Host launch")
+	if _, err := first.Start(t.Context(), sandbox.CommandRequest{Command: "touch after-close", Constraints: sandbox.Constraints{Route: sandbox.RouteHost}}); err == nil {
+		t.Fatal("closed runtime accepted approved Host launch")
 	}
-	if _, err := os.Stat(filepath.Join(cwd, "after-revoke")); !os.IsNotExist(err) {
-		t.Fatalf("revocation allowed a new effect: %v", err)
+	if _, err := os.Stat(filepath.Join(cwd, "after-close")); !os.IsNotExist(err) {
+		t.Fatalf("closure allowed a new effect: %v", err)
 	}
 }

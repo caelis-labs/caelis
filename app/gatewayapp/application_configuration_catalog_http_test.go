@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/caelis-labs/caelis/control/application"
 	"github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/sessionprofile"
 )
 
 func TestApplicationConfigurationHostHTTPModelConnectedDuringTurn(t *testing.T) {
@@ -32,12 +32,12 @@ func TestApplicationConfigurationHostHTTPModelConnectedDuringTurn(t *testing.T) 
 		host.close(t)
 	}()
 	connectRevisionHTTPModel(t, ctx, host, "gpt-5.4-mini")
-	client, _ := registerApplicationHTTP(t, ctx, host, "late-model", filepath.Join(root, "application.credential"))
+	client, _ := connectSessionOwnerHTTP(t, ctx, host, "owner", filepath.Join(root, "application.credential"))
 	profile := applicationHTTPProfile()
 	profile.Model = "custom/gpt-5.4-mini"
 	profile.ReasoningEffort = "low"
-	created, err := client.CreateApplicationSession(ctx, appserver.CreateApplicationSessionRequest{
-		WriteBase: appserver.WriteBase{OperationID: "create-late-model"}, Profile: profile,
+	created, err := client.CreateSession(ctx, appserver.CreateSessionRequest{
+		WriteBase: appserver.WriteBase{OperationID: "create-late-model"}, Profile: profilePointer(profile),
 	})
 	if err != nil || created.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("create = %+v %v", created, err)
@@ -49,7 +49,7 @@ func TestApplicationConfigurationHostHTTPModelConnectedDuringTurn(t *testing.T) 
 	case <-ctx.Done():
 		t.Fatal("initial model request did not reach the provider barrier")
 	}
-	issued, err := client.ApplicationConfiguration(ctx, session)
+	issued, err := client.SessionConfiguration(ctx, session)
 	if err != nil || issued.LastRequest == nil || issued.LastRequest.Revision != 1 || issued.LastRequest.Model != "gpt-5.4-mini" {
 		t.Fatalf("initial request admission = %+v %v", issued, err)
 	}
@@ -58,10 +58,10 @@ func TestApplicationConfigurationHostHTTPModelConnectedDuringTurn(t *testing.T) 
 	// admission and the next request must resolve the same current Host catalog.
 	connectRevisionHTTPModel(t, ctx, host, "gpt-5.4")
 	newModel := "custom/gpt-5.4"
-	updated, err := client.UpdateApplicationConfiguration(ctx, session, application.UpdateConfigurationRequest{
+	updated, err := configurationResult(client.UpdateSessionConfiguration(ctx, configurationCommand(session, sessionprofile.UpdateConfigurationRequest{
 		OperationID: "select-late-model", ExpectedConfigurationRevision: 1,
-		Patch: application.ConfigurationPatch{Model: &newModel},
-	})
+		Patch: sessionprofile.ConfigurationPatch{Model: &newModel},
+	})))
 	if err != nil || updated.Revision != 2 || updated.Profile.Model != newModel || updated.LastRequest == nil || *updated.LastRequest != *issued.LastRequest {
 		t.Fatalf("hot update while first request is issued = %+v %v", updated, err)
 	}
@@ -81,7 +81,7 @@ func TestApplicationConfigurationHostHTTPModelConnectedDuringTurn(t *testing.T) 
 	if !strings.Contains(fmt.Sprint(requests[1]["input"]), "CONFIGURATION_TOOL_SENTINEL") {
 		t.Fatal("new model request lost the callback result from the issued request")
 	}
-	observed, err := client.ApplicationConfiguration(ctx, session)
+	observed, err := client.SessionConfiguration(ctx, session)
 	if err != nil || observed.LastRequest == nil || observed.LastRequest.Revision != 2 || observed.LastRequest.Model != "gpt-5.4" || observed.LastRequest.TurnID != oldCall.TurnID || observed.LastRequest.TurnID != issued.LastRequest.TurnID || observed.LastRequest.RequestID == issued.LastRequest.RequestID || observed.LastRequest.ReasoningEffort != "low" || observed.LastRequest.ToolsVersion != profile.ToolsVersion {
 		t.Fatalf("newly connected model did not execute under revision 2 in the same Turn: %+v %v", observed, err)
 	}

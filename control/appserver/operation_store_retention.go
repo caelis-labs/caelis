@@ -23,7 +23,7 @@ const (
 	// to the hard entry and deletion limits.
 	DefaultOperationSweepTimeLimit = 100 * time.Millisecond
 
-	operationRecordSchemaVersion    = 1
+	operationRecordSchemaVersion    = 2
 	operationRetentionPolicyVersion = 1
 	maxOperationStoreJSONSize       = 1 << 20
 )
@@ -191,7 +191,7 @@ func classifyOperationRecord(
 }
 
 func validateOperationRecord(record OperationRecord) error {
-	if record.Version != 0 && record.Version != operationRecordSchemaVersion {
+	if record.Version != 0 && record.Version != 1 && record.Version != operationRecordSchemaVersion {
 		return fmt.Errorf("controlclient: unsupported operation record version %d", record.Version)
 	}
 	if strings.TrimSpace(record.Intent.PrincipalID) == "" || strings.TrimSpace(record.Intent.OperationID) == "" ||
@@ -209,12 +209,18 @@ func validateOperationRecord(record OperationRecord) error {
 			return errors.New("controlclient: invalid operation result")
 		}
 	}
+	if record.RetainForever {
+		if record.Version != operationRecordSchemaVersion || record.TerminalRetentionNanoseconds != 0 || !record.RetainUntil.IsZero() {
+			return errors.New("controlclient: invalid permanent operation retention")
+		}
+		return nil
+	}
 	switch record.Version {
 	case 0:
 		if record.TerminalRetentionNanoseconds != 0 || !record.RetainUntil.IsZero() {
 			return errors.New("controlclient: legacy operation record contains retention metadata")
 		}
-	case operationRecordSchemaVersion:
+	case 1, operationRecordSchemaVersion:
 		if record.TerminalRetentionNanoseconds <= 0 {
 			return errors.New("controlclient: versioned operation record has no retention snapshot")
 		}
@@ -272,7 +278,7 @@ func terminalOperationOutcome(outcome Outcome) bool {
 }
 
 func operationRecordHasReclaimableTerminalOutcome(record OperationRecord) bool {
-	if record.Result == nil || !terminalOperationOutcome(record.Result.Outcome) {
+	if record.RetainForever || record.Result == nil || !terminalOperationOutcome(record.Result.Outcome) {
 		return false
 	}
 	// Before schema v1, unclassified backend failures were persisted as

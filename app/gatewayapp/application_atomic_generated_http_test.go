@@ -41,7 +41,7 @@ func TestApplicationAtomicGeneratedWireHTTP(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	_, _ = registerApplicationHTTP(t, ctx, host, "generated-wire", filepath.Join(root, "app.credential"))
+	_, _ = connectSessionOwnerHTTP(t, ctx, host, "owner", filepath.Join(root, "app.credential"))
 	credential, err := os.ReadFile(filepath.Join(root, "app.credential"))
 	if err != nil {
 		t.Fatal(err)
@@ -85,35 +85,35 @@ func TestApplicationAtomicGeneratedWireHTTP(t *testing.T) {
 	}
 
 	command, workDir := os.Args[0], root
-	services := []generated.ApplicationMCPServer{{Name: "documents", Transport: "stdio", Command: &command, WorkDir: &workDir}}
+	services := []generated.SessionMCPServer{{Name: "documents", Transport: "stdio", Command: &command, WorkDir: &workDir}}
 	dirs, roots := []string{selectedDir}, []string{selectedRoot}
-	profile := generated.ApplicationProfile{
+	profile := generated.SessionProfile{
 		Version: "generated-wire/1", Instructions: "Use the selected abilities.", Model: "custom/gpt-4.1",
-		ToolsVersion: "generated-wire-tools/1", Execution: "tools-only", Inherit: generated.ApplicationInheritance{},
+		ToolsVersion: "generated-wire-tools/1", Execution: "tools-only", Inherit: generated.SessionInheritance{},
 		NativeTools: []string{}, McpServers: services, SkillDirs: dirs, SkillRoots: roots,
 	}
 	createID := "generated-wire-create"
-	create := generated.CreateApplicationSessionRequest{OperationId: &createID, Profile: profile}
+	create := generated.CreateSessionRequest{OperationId: &createID, Profile: &profile}
 	createdJSON, err := json.Marshal(create)
 	if err != nil || !bytes.Contains(createdJSON, []byte(`"native_tools":[]`)) {
 		t.Fatalf("generated creation lost explicit empty native tool selection: %s %v", createdJSON, err)
 	}
 	var created generated.CommandResult
-	send(http.MethodPost, "/application/sessions", createID, create, &created)
+	send(http.MethodPost, "/sessions", createID, create, &created)
 	if string(created.Outcome) != "committed" || created.SessionId == nil || *created.SessionId == "" {
 		t.Fatalf("generated creation = %+v", created)
 	}
-	sessionPath := "/application/sessions/" + url.PathEscape(*created.SessionId)
-	checkProfile := func(got generated.ApplicationProfile) {
+	sessionPath := "/sessions/" + url.PathEscape(*created.SessionId)
+	checkProfile := func(got generated.SessionProfile) {
 		t.Helper()
 		if len(got.McpServers) != 1 || got.McpServers[0].Name != "documents" || !slices.Equal(got.SkillDirs, dirs) || !slices.Equal(got.SkillRoots, roots) || got.NativeTools == nil || len(got.NativeTools) != 0 {
 			t.Fatalf("generated profile lost selections: %+v", got)
 		}
 	}
-	var binding generated.ApplicationBinding
-	send(http.MethodGet, sessionPath, "", nil, &binding)
+	var binding generated.SessionBinding
+	send(http.MethodGet, sessionPath+"/profile", "", nil, &binding)
 	checkProfile(binding.Profile)
-	var configuration generated.ApplicationConfiguration
+	var configuration generated.SessionConfiguration
 	send(http.MethodGet, sessionPath+"/configuration", "", nil, &configuration)
 	if configuration.Revision != "1" {
 		t.Fatalf("configuration revision = %q", configuration.Revision)
@@ -121,7 +121,7 @@ func TestApplicationAtomicGeneratedWireHTTP(t *testing.T) {
 	checkProfile(configuration.Profile)
 	checkStatus := func(revision string, wantSelections bool) {
 		t.Helper()
-		var status generated.ApplicationMCPStatus
+		var status generated.SessionMCPStatus
 		send(http.MethodGet, sessionPath+"/mcp-status", "", nil, &status)
 		if string(status.ConfigurationRevision) != revision {
 			t.Fatalf("status revision = %q, want %s", status.ConfigurationRevision, revision)
@@ -143,11 +143,11 @@ func TestApplicationAtomicGeneratedWireHTTP(t *testing.T) {
 	checkStatus("1", true)
 
 	clearID := "generated-wire-clear"
-	clear := generated.UpdateApplicationConfigurationRequest{
+	clear := generated.UpdateSessionConfigurationRequest{
 		OperationId: clearID, ExpectedConfigurationRevision: "1",
-		Patch: generated.ApplicationConfigurationPatch{
-			McpServers: []generated.ApplicationMCPServer{}, SkillDirs: []string{}, SkillRoots: []string{},
-			NativeTools: []string{}, Tools: []generated.ApplicationToolDefinition{},
+		Patch: generated.SessionConfigurationPatch{
+			McpServers: []generated.SessionMCPServer{}, SkillDirs: []string{}, SkillRoots: []string{},
+			NativeTools: []string{}, Tools: []generated.SessionToolDefinition{},
 		},
 	}
 	clearJSON, err := json.Marshal(clear)
@@ -159,26 +159,34 @@ func TestApplicationAtomicGeneratedWireHTTP(t *testing.T) {
 			t.Fatalf("generated CAS omitted explicit %s clear: %s", field, clearJSON)
 		}
 	}
-	var cleared generated.ApplicationConfiguration
-	send(http.MethodPost, sessionPath+"/configuration", clearID, clear, &cleared)
+	var clearedResult generated.CommandResult
+	send(http.MethodPost, sessionPath+"/configuration", clearID, clear, &clearedResult)
+	if clearedResult.Configuration == nil || clearedResult.Outcome != "committed" {
+		t.Fatalf("configuration receipt: %+v", clearedResult)
+	}
+	cleared := clearedResult.Configuration
 	if cleared.Revision != "2" || len(cleared.Profile.McpServers)+len(cleared.Profile.SkillDirs)+len(cleared.Profile.SkillRoots) != 0 {
 		t.Fatalf("generated CAS did not clear abilities: %+v", cleared)
 	}
 	checkStatus("2", false)
 
 	restoreID := "generated-wire-restore"
-	restore := generated.UpdateApplicationConfigurationRequest{
+	restore := generated.UpdateSessionConfigurationRequest{
 		OperationId: restoreID, ExpectedConfigurationRevision: "2",
-		Patch: generated.ApplicationConfigurationPatch{McpServers: services, SkillDirs: dirs, SkillRoots: roots},
+		Patch: generated.SessionConfigurationPatch{McpServers: services, SkillDirs: dirs, SkillRoots: roots},
 	}
-	var restored generated.ApplicationConfiguration
-	send(http.MethodPost, sessionPath+"/configuration", restoreID, restore, &restored)
+	var restoredResult generated.CommandResult
+	send(http.MethodPost, sessionPath+"/configuration", restoreID, restore, &restoredResult)
+	if restoredResult.Configuration == nil || restoredResult.Outcome != "committed" {
+		t.Fatalf("configuration receipt: %+v", restoredResult)
+	}
+	restored := restoredResult.Configuration
 	if restored.Revision != "3" {
 		t.Fatalf("restored revision = %q", restored.Revision)
 	}
 	checkProfile(restored.Profile)
 	checkStatus("3", true)
 	// A configuration update never rewrites the immutable creation binding.
-	send(http.MethodGet, sessionPath, "", nil, &binding)
+	send(http.MethodGet, sessionPath+"/profile", "", nil, &binding)
 	checkProfile(binding.Profile)
 }

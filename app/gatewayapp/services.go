@@ -255,7 +255,7 @@ func (s *runtimeComposition) skillCatalogSnapshot() skill.Catalog {
 	if s == nil {
 		return skill.Catalog{}
 	}
-	if catalog, application := s.applicationCompletionSkills(); application {
+	if catalog, sessionprofile := s.applicationCompletionSkills(); sessionprofile {
 		return catalog
 	}
 	s.mu.RLock()

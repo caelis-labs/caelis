@@ -631,13 +631,13 @@ func newLocalServiceManager(options productClientOptions) (servicelifecycle.Mana
 		}
 		return launchDetachedLocalHost(request)
 	}
-	manager.Shutdown = func(ctx context.Context, running servicelifecycle.Status) error {
-		return requestManagedServiceShutdown(ctx, options, running)
+	manager.Shutdown = func(ctx context.Context, running servicelifecycle.Status, ifIdle bool) error {
+		return requestManagedServiceShutdown(ctx, options, running, ifIdle)
 	}
 	return manager, candidate, nil
 }
 
-func requestManagedServiceShutdown(ctx context.Context, options productClientOptions, running servicelifecycle.Status) error {
+func requestManagedServiceShutdown(ctx context.Context, options productClientOptions, running servicelifecycle.Status, ifIdle bool) error {
 	inspection := inspectManagedHost(ctx, options)
 	if inspection.Probe.State != servicelifecycle.ProbeReady {
 		if inspection.Probe.State == servicelifecycle.ProbeMissing {
@@ -649,7 +649,17 @@ func requestManagedServiceShutdown(ctx context.Context, options productClientOpt
 	if record.InstanceID != running.InstanceID {
 		return fmt.Errorf("cli: Caelis service changed from %q to %q before shutdown", running.InstanceID, record.InstanceID)
 	}
-	acknowledged, err := remote.ShutdownHost(ctx)
+	var acknowledged appserver.HostStatus
+	var err error
+	if ifIdle {
+		info, initializeErr := remote.Initialize(ctx)
+		if initializeErr != nil || !slices.Contains(info.Capabilities, appserver.CapabilityIdleHostShutdown) {
+			return errors.New("cli: CAELIS_HOST_RESTART_REQUIRED: running Host cannot replace itself without interrupting work; finish work and use caelis service restart once to upgrade")
+		}
+		acknowledged, err = remote.ShutdownIdleHost(ctx, record.InstanceID)
+	} else {
+		acknowledged, err = remote.ShutdownHost(ctx)
+	}
 	if err != nil {
 		return fmt.Errorf("cli: stop Caelis service: %w", err)
 	}

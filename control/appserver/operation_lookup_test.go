@@ -42,7 +42,7 @@ func TestOperationLookupNeverAdmitsOrRefreshesWork(t *testing.T) {
 				t.Fatalf("committed lookup = %+v, %v, %v", record, found, err)
 			}
 			changed := intent
-			changed.Action = ActionWorkerCreate
+			changed.Action = ActionSessionCreate
 			if _, _, err := store.Lookup(t.Context(), changed); !errors.Is(err, ErrOperationConflict) {
 				t.Fatalf("changed intent lookup = %v", err)
 			}

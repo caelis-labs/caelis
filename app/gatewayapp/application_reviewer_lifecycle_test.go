@@ -3,31 +3,24 @@ package gatewayapp
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/control/application"
 	"github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/sessionprofile"
 )
 
 func TestApplicationReviewerRuntimeReleaseDrainsCancelledReview(t *testing.T) {
 	ctx := t.Context()
 	stack := newLocalStateTestHost(t, &runtimeMemoryHostStub{})
 	owner := appserver.Principal{ID: stack.composition.authorities.userID}
-	connection, err := stack.Applications().Register(ctx, owner, application.Registration{
-		OperationID: "review-drain-enroll", Name: "review-drain", Credential: "app-client-" + strings.Repeat("d", 64),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	principal := appserver.Principal{ID: owner.ID, ApplicationID: connection.ApplicationID, ConnectionID: connection.ConnectionID}
+	principal := appserver.Principal{ID: owner.ID}
 	selected := stack.composition.lookup.DefaultID()
-	created, err := stack.Applications().Create(ctx, principal, appserver.CreateApplicationSessionRequest{
+	created, err := stack.ControlClient().CreateSession(ctx, principal, appserver.CreateSessionRequest{
 		WriteBase: appserver.WriteBase{OperationID: "review-drain-create"},
-		Profile: application.Profile{Version: "v1", Model: selected, ToolsVersion: "v1", Execution: "tools-only",
-			Permissions: application.Permissions{ApprovalMode: "auto-review"}, Reviewer: &application.Reviewer{Kind: "guardian", Model: selected}},
+		Profile: &sessionprofile.Profile{Version: "v1", Model: selected, ToolsVersion: "v1", Execution: "tools-only",
+			Permissions: sessionprofile.Permissions{ApprovalMode: "auto-review"}, Reviewer: &sessionprofile.Reviewer{Kind: "guardian", Model: selected}},
 	})
 	if err != nil || created.SessionID == "" {
 		t.Fatal(created, err)

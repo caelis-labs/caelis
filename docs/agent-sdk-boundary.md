@@ -232,11 +232,10 @@ bind the current canonical Session ID and creation time across Turns. Always
 grants bind the trusted configuration owner, workspace, plugin, server,
 projected and remote tool names, and fingerprint of the accepted server
 configuration, declared server version, and tool definition across Sessions and
-restarts. Ordinary Sessions share the Host configuration owner; Application
-Sessions use their authenticated connection scope, so independently owned
-configurations cannot share a grant merely by selecting the same directory and
-MCP server values. Sessions under one Application connection may share an Always
-grant when the workspace and exact MCP source also match. For stdio, the source
+restarts. Ordinary and explicitly profiled Sessions share the authenticated Host
+configuration owner. An Always grant is reusable only when its workspace and
+exact MCP source match; a profile or Surface does not create another permission
+namespace. For stdio, the source
 fingerprint includes a digest of the effective environment frozen when the
 process transport is created, without exposing environment values in metadata.
 A changed source or schema needs new approval. A cached MCP grant only satisfies

@@ -34,7 +34,8 @@ versions for manual installs. Global npm installations update through npm.
 
 `caelis update` and TUI `Ctrl+U` install artifacts without stopping or starting a
 Host. The next managed application launch owns Host version selection and
-activation, including interruption of active Sessions; see
+activation through idle-only replacement; explicit restart may interrupt active
+Sessions. See
 [Product Host and clients](architecture.md#product-host-and-clients). Installation
 success does not mean an already-running client or Host has changed version.
 
@@ -42,28 +43,32 @@ Release builds stamp the distribution version, commit, build time, BuildID, and
 `build_kind=release`. Local or unstamped builds remain development builds and use
 their isolated default Store.
 
-## Application Runtime upgrades
+## Unified Control and Store upgrades
 
-The application protocol replaces the removed Bot Mode; there is no legacy Bot
-CLI, scheduler, storage API or compatibility entry point. Applications own
-identity, Notebook, business tools and scheduling. Caelis provides generic
-execution, permissions, observation and recovery. See
-[Application Runtime](application-runtime.md) for the public contract.
+The unified Session protocol removes Application enrollment, connection leases,
+credentials and routes. Bot and TUI use the same Host principal and permissions.
+Old clients must upgrade; there is no permanent forwarding protocol. Applications
+retain identity, Notebook, business tools and scheduling through explicit profiles,
+MCP and Skills. See [Session profiles](session-profiles.md).
 
-The Application Store migration is separate from embedded Memory below. Its
-schema 1 → 2 upgrade preserves bindings, Session identities, operation
-requests/digests/receipts, callback receipts and resource bytes. Existing native
-Sessions retain their old RunCommand/Task catalog plus the resource bridge;
-new file tools are selected explicitly rather than silently granted. The
-[compatibility contract](application-runtime.md#persistence-compatibility) owns
-the supported upgrade source and immutable creation retry behavior.
+The isolated `control/internal/storemigration/applicationv3` importer upgrades
+schema 1/2 to 3 atomically. It preserves Session/call/resource identities, bytes,
+original requests and receipt provenance. Old operation namespaces map to inert,
+retained common receipts; pending calls are cancelled and uncertain effects stay
+unknown. The importer never redispatches old intent. It can be removed when the
+minimum supported Store is schema 3; archived evidence has separate retention.
 
-A schema-1 binary cannot open the upgraded Application Store. Before upgrading
-when rollback is required, stop the Host, prevent client restarts and keep a
-complete protected Store backup, including database WAL/SHM files, configuration
-and credentials. Verify the backup in isolation. Downgrading the executable
-alone cannot undo either database migration; reconcile post-upgrade writes
-before restoring a backup.
+Older writers reject schema 3. Rollback requires a protected complete pre-upgrade
+Store backup, not an executable downgrade. Stop the Host and prevent client
+restarts while taking the backup; include database WAL/SHM files, configuration
+and credentials, and verify restoration in isolation. Reconcile post-upgrade
+writes before restoring a backup.
+
+A pre-unification Host lacks atomic idle replacement. Complete work across its
+Surfaces and run `caelis service restart --store-dir <Store>` once. Future managed
+launches negotiate `host-idle-shutdown-v1`, preserve busy Hosts, and can replace
+an idle Host despite resident Bot/TUI subscriptions. Installation alone does not
+prove that the selected Host has changed.
 
 CWD, inheritance, execution and permissions remain bound at Session creation.
 Model, reasoning effort, supported service tier, instructions and tools can

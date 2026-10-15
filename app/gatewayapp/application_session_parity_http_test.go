@@ -11,10 +11,10 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter/local"
-	"github.com/caelis-labs/caelis/control/application"
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/httpclient"
 	"github.com/caelis-labs/caelis/control/appserver/taskstream"
+	"github.com/caelis-labs/caelis/control/sessionprofile"
 	"github.com/caelis-labs/caelis/control/uipreferences"
 )
 
@@ -25,9 +25,9 @@ func TestOwnedWorkerHTTPUsesNativeSessionControlsAndIsolation(t *testing.T) {
 	provider := &nativeModelScript{}
 	host := startApplicationHTTPHostWithSavedModels(t, filepath.Join(root, "store"), root, provider)
 	defer host.close(t)
-	client, _ := registerApplicationHTTP(t, ctx, host, "owner", filepath.Join(root, "owner.token"))
-	other, _ := registerApplicationHTTP(t, ctx, host, "foreign", filepath.Join(root, "foreign.token"))
-	created, err := client.CreateWorker(ctx, appserver.CreateWorkerRequest{WriteBase: appserver.WriteBase{OperationID: "worker"}, CWD: root, Model: "openai/gpt-5.4"})
+	client, _ := connectSessionOwnerHTTP(t, ctx, host, "owner", filepath.Join(root, "owner.token"))
+	other, _ := connectSessionOwnerHTTP(t, ctx, host, "foreign-owner", filepath.Join(root, "foreign.token"))
+	created, err := client.CreateSession(ctx, appserver.CreateSessionRequest{WriteBase: appserver.WriteBase{OperationID: "worker"}, CWD: root, Model: "openai/gpt-5.4"})
 	if err != nil || created.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("create: %+v, %v", created, err)
 	}
@@ -136,7 +136,7 @@ func TestOwnedWorkerHTTPUsesNativeSessionControlsAndIsolation(t *testing.T) {
 		t.Fatalf("owned native controller handoff: %+v, %v", handoff, err)
 	}
 	assertForeignSessionControlDenied(t, ctx, other, sid, state)
-	closedWorker, err := client.CreateWorker(ctx, appserver.CreateWorkerRequest{WriteBase: appserver.WriteBase{OperationID: "closed-worker"}, CWD: root})
+	closedWorker, err := client.CreateSession(ctx, appserver.CreateSessionRequest{WriteBase: appserver.WriteBase{OperationID: "closed-worker"}, CWD: root})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,40 +154,45 @@ func TestOwnedWorkerHTTPUsesNativeSessionControlsAndIsolation(t *testing.T) {
 	if _, err := client.UseSessionModel(ctx, appserver.SessionModelRequest{WriteBase: appserver.WriteBase{OperationID: "closed-model", SessionID: closing.SessionID, ExpectedRevision: &closed.Revision, ExpectedControllerEpoch: closing.Controller.EpochID}, Model: "openai/gpt-5.4"}); errorcode.CodeOf(err) != errorcode.FailedPrecondition {
 		t.Fatalf("closed native Worker mutated: %v", err)
 	}
-	if err := client.RevokeApplicationConnection(ctx); err != nil {
+	if err := closeProfileTestSession(ctx, client, sid); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := client.SessionStatus(ctx, appserver.StatusRequest{SessionID: sid}); err != nil {
-		t.Fatalf("revoked status observation: %v", err)
+		t.Fatalf("closed status observation: %v", err)
 	}
 	if _, err := client.PresentationSnapshot(ctx, appserver.PresentationRequest{SessionID: sid}); err != nil {
-		t.Fatalf("revoked presentation observation: %v", err)
+		t.Fatalf("closed presentation observation: %v", err)
 	}
-	if _, err := client.Handles(ctx, sid); err != nil {
-		t.Fatalf("revoked handles observation: %v", err)
+	// Runnable participant discovery follows ordinary native closure. Durable
+	// status, presentation and input receipts remain observable above/below.
+	if _, err := client.Handles(ctx, sid); errorcode.CodeOf(err) != errorcode.FailedPrecondition {
+		t.Fatalf("closed native handles should reject execution discovery: %v", err)
 	}
 	if _, err := client.SubagentInputStatuses(ctx, appserver.SubagentInputStatusRequest{SessionID: sid}); err != nil {
-		t.Fatalf("revoked input receipt observation: %v", err)
+		t.Fatalf("closed input receipt observation: %v", err)
 	}
-	base.OperationID = "revoked-compact"
+	base.OperationID = "closed-compact"
 	if _, err := client.CompactSession(ctx, appserver.CompactSessionRequest{WriteBase: base}); err == nil {
-		t.Fatal("revoked compact acquired mutation authority")
+		t.Fatal("closed compact acquired mutation authority")
 	}
-	base.OperationID = "revoked-model"
+	base.OperationID = "closed-model"
 	if _, err := client.UseSessionModel(ctx, appserver.SessionModelRequest{WriteBase: base, Model: "openai/gpt-5.4"}); err == nil {
-		t.Fatal("revoked model acquired mutation authority")
+		t.Fatal("closed model acquired mutation authority")
 	}
 	if err := client.KillTerminal(ctx, appserver.TerminalRequest{SessionID: sid, TerminalID: "missing"}); errorcode.CodeOf(err) != errorcode.FailedPrecondition {
-		t.Fatalf("revoked kill passed mutation owner: %v", err)
+		t.Fatalf("closed kill passed mutation owner: %v", err)
 	}
 	if err := client.ReleaseTerminal(ctx, appserver.TerminalRequest{SessionID: sid, TerminalID: "missing"}); errorcode.CodeOf(err) != errorcode.FailedPrecondition {
-		t.Fatalf("revoked release passed mutation owner: %v", err)
+		t.Fatalf("closed release passed mutation owner: %v", err)
 	}
 }
 
 func assertForeignSessionControlDenied(t *testing.T, ctx context.Context, client *httpclient.Client, sid string, state appserver.SessionState) {
 	t.Helper()
 	base := appserver.WriteBase{OperationID: "foreign", SessionID: sid, ExpectedRevision: &state.Revision, ExpectedControllerEpoch: state.Controller.EpochID}
+	if base.ExpectedControllerEpoch == "" {
+		base.ExpectedControllerEpoch = "foreign-syntactically-valid-epoch"
+	}
 	checks := []struct {
 		name   string
 		invoke func() error
@@ -272,14 +277,14 @@ func TestApplicationMainHTTPProfileProjectionAndRecoveryArePassive(t *testing.T)
 	provider := newRevisionProvider()
 	host := startApplicationHTTPHostWithSavedModels(t, filepath.Join(root, "store"), root, provider)
 	defer func() { host.close(t) }()
-	client, _ := registerApplicationHTTP(t, ctx, host, "main", filepath.Join(root, "main.token"))
-	other, _ := registerApplicationHTTP(t, ctx, host, "other", filepath.Join(root, "other.token"))
+	client, _ := connectSessionOwnerHTTP(t, ctx, host, "owner", filepath.Join(root, "main.token"))
+	other, _ := connectSessionOwnerHTTP(t, ctx, host, "foreign-owner", filepath.Join(root, "other.token"))
 	selectedSkill := filepath.Join(root, "selected")
 	writeAtomicSkill(t, selectedSkill, "selected-skill", "EXPLICIT_SKILL")
 	profile := applicationHTTPProfile()
 	profile.Model, profile.ReasoningEffort = "openai/gpt-5.4", "low"
 	profile.SkillRoots = []string{selectedSkill}
-	created, err := client.CreateApplicationSession(ctx, appserver.CreateApplicationSessionRequest{WriteBase: appserver.WriteBase{OperationID: "main"}, Profile: profile})
+	created, err := client.CreateSession(ctx, appserver.CreateSessionRequest{WriteBase: appserver.WriteBase{OperationID: "main"}, Profile: profilePointer(profile)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -287,7 +292,7 @@ func TestApplicationMainHTTPProfileProjectionAndRecoveryArePassive(t *testing.T)
 	checkProjection := func(effort string) {
 		t.Helper()
 		status, err := client.SessionStatus(ctx, appserver.StatusRequest{SessionID: sid, IncludeDiagnostics: true})
-		if err != nil || status.ModelStatus.ReasoningEffort != effort || status.SandboxStatus.Route != "none" || status.SandboxStatus.SecuritySummary != "tools-only" || status.Diagnostics.ConfigPath != "" || len(status.Runtime.ActiveSessions) != 0 {
+		if err != nil || status.ModelStatus.ReasoningEffort != effort || status.SandboxStatus.Route != "none" || status.SandboxStatus.SecuritySummary != "tools-only" || len(status.Runtime.ActiveSessions) != 0 {
 			t.Fatalf("explicit passive status: %+v, %v", status, err)
 		}
 		presentation, err := client.PresentationSnapshot(ctx, appserver.PresentationRequest{SessionID: sid})
@@ -319,7 +324,7 @@ func TestApplicationMainHTTPProfileProjectionAndRecoveryArePassive(t *testing.T)
 	}
 	checkProjection("low")
 	effort := "high"
-	if _, err := client.UpdateApplicationConfiguration(ctx, sid, application.UpdateConfigurationRequest{OperationID: "new-effort", ExpectedConfigurationRevision: 1, Patch: application.ConfigurationPatch{ReasoningEffort: &effort}}); err != nil {
+	if _, err := configurationResult(client.UpdateSessionConfiguration(ctx, configurationCommand(sid, sessionprofile.UpdateConfigurationRequest{OperationID: "new-effort", ExpectedConfigurationRevision: 1, Patch: sessionprofile.ConfigurationPatch{ReasoningEffort: &effort}}))); err != nil {
 		t.Fatal(err)
 	}
 	checkProjection("high")
@@ -329,7 +334,7 @@ func TestApplicationMainHTTPProfileProjectionAndRecoveryArePassive(t *testing.T)
 	}
 	assertForeignSessionControlDenied(t, ctx, other, sid, state)
 	info, err := client.Initialize(ctx)
-	if err != nil || !slices.Contains(info.Capabilities, appserver.CapabilityApplicationTerminalWait) || !slices.Contains(info.Capabilities, appserver.CapabilityApplicationTerminalControl) {
+	if err != nil || !slices.Contains(info.Capabilities, appserver.CapabilityTerminalWait) || !slices.Contains(info.Capabilities, appserver.CapabilityTerminalControl) {
 		t.Fatalf("negotiation: %+v, %v", info, err)
 	}
 	host.close(t)
@@ -349,42 +354,37 @@ func TestApplicationMainHTTPProfileProjectionAndRecoveryArePassive(t *testing.T)
 	if err != nil || closed.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("HTTP same-object close did not reach original Archive: %+v, %v", closed, err)
 	}
-	binding, err := client.ApplicationSession(ctx, sid)
+	binding, err := client.SessionProfile(ctx, sid)
 	if err != nil || !binding.Archived {
 		t.Fatalf("HTTP same-object close omitted Archive binding: %+v, %v", binding, err)
 	}
-	if receipt, err := client.ApplicationOperation(ctx, closed.OperationID); err != nil || receipt.Outcome != appserver.OutcomeCommitted {
+	if receipt, err := client.Operation(ctx, closed.OperationID); err != nil || receipt.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("HTTP original Archive receipt: %+v, %v", receipt, err)
 	}
 }
 
-func TestScopedEmbeddedClientsUseTheSameOwnedObjectsAsHTTP(t *testing.T) {
+func TestSameOwnerEmbeddedClientsUseTheSameObjectsAsHTTP(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 	root := t.TempDir()
 	host := startApplicationHTTPHostWithSavedModels(t, filepath.Join(root, "store"), root, &nativeModelScript{})
 	defer host.close(t)
-	client, connection := registerApplicationHTTP(t, ctx, host, "embedded", filepath.Join(root, "embedded.token"))
-	_, foreign := registerApplicationHTTP(t, ctx, host, "foreign", filepath.Join(root, "foreign.token"))
+	client, connection := connectSessionOwnerHTTP(t, ctx, host, "owner", filepath.Join(root, "embedded.token"))
+	_, foreign := connectSessionOwnerHTTP(t, ctx, host, "foreign-owner", filepath.Join(root, "foreign.token"))
 	server, err := local.NewAppServer(host.stack)
 	if err != nil {
 		t.Fatal(err)
 	}
-	principal := appserver.Principal{ID: connection.PrincipalID, ApplicationID: connection.ApplicationID, ConnectionID: connection.ConnectionID}
+	principal := appserver.Principal{ID: connection.PrincipalID}
 	bound, err := server.Bind(principal)
 	if err != nil {
 		t.Fatal(err)
 	}
-	wrong := principal
-	wrong.ConnectionID += "-foreign"
-	if _, err := server.Bind(wrong); err == nil {
-		t.Fatal("wrong ConnectionID bound embedded clients")
-	}
-	foreignBound, err := server.Bind(appserver.Principal{ID: foreign.PrincipalID, ApplicationID: foreign.ApplicationID, ConnectionID: foreign.ConnectionID})
+	foreignBound, err := server.Bind(appserver.Principal{ID: foreign.PrincipalID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	worker, err := client.CreateWorker(ctx, appserver.CreateWorkerRequest{WriteBase: appserver.WriteBase{OperationID: "embedded-worker"}, CWD: root})
+	worker, err := client.CreateSession(ctx, appserver.CreateSessionRequest{WriteBase: appserver.WriteBase{OperationID: "embedded-worker"}, CWD: root})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -459,13 +459,13 @@ func TestScopedEmbeddedClientsUseTheSameOwnedObjectsAsHTTP(t *testing.T) {
 			return err
 		},
 	} {
-		if err := check(); errorcode.CodeOf(err) != errorcode.PermissionDenied {
-			t.Fatalf("scoped embedded clients escaped into Host-global object: %v", err)
+		if err := check(); errorcode.CodeOf(err) == errorcode.PermissionDenied {
+			t.Fatalf("same Host owner lost ordinary service authority: %v", err)
 		}
 	}
 	profile := applicationHTTPProfile()
 	profile.Model = "openai/gpt-5.4"
-	main, err := client.CreateApplicationSession(ctx, appserver.CreateApplicationSessionRequest{WriteBase: appserver.WriteBase{OperationID: "embedded-main"}, Profile: profile})
+	main, err := client.CreateSession(ctx, appserver.CreateSessionRequest{WriteBase: appserver.WriteBase{OperationID: "embedded-main"}, Profile: profilePointer(profile)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -478,30 +478,30 @@ func TestScopedEmbeddedClientsUseTheSameOwnedObjectsAsHTTP(t *testing.T) {
 	if err != nil || archived.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("embedded main Archive: %+v, %v", archived, err)
 	}
-	binding, err := client.ApplicationSession(ctx, main.SessionID)
+	binding, err := client.SessionProfile(ctx, main.SessionID)
 	if err != nil || !binding.Archived {
 		t.Fatalf("embedded close omitted original binding Archive: %+v, %v", binding, err)
 	}
-	if receipt, err := client.ApplicationOperation(ctx, closeBase.OperationID); err != nil || receipt.Outcome != appserver.OutcomeCommitted {
+	if receipt, err := client.Operation(ctx, closeBase.OperationID); err != nil || receipt.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("original Archive receipt: %+v, %v", receipt, err)
 	}
-	if err := client.RevokeApplicationConnection(ctx); err != nil {
+	if err := closeProfileTestSession(ctx, client, sid); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := server.Bind(principal); err != nil {
-		t.Fatalf("revoked observation binding: %v", err)
+		t.Fatalf("closed observation binding: %v", err)
 	}
 	if _, err := bound.Tasks.List(ctx, taskstream.ListRequest{SessionID: sid}); err != nil {
-		t.Fatalf("revoked own Task read: %v", err)
+		t.Fatalf("closed own Task read: %v", err)
 	}
 	if _, err := bound.SubagentInputs.SubagentInputStatuses(ctx, appserver.SubagentInputStatusRequest{SessionID: sid}); err != nil {
-		t.Fatalf("revoked own input receipt read: %v", err)
+		t.Fatalf("closed own input receipt read: %v", err)
 	}
-	base.OperationID = "revoked-embedded-model"
+	base.OperationID = "closed-embedded-model"
 	if _, err := bound.Configuration.UseSessionModel(ctx, appserver.SessionModelRequest{WriteBase: base, Model: "openai/gpt-5.4"}); err == nil {
-		t.Fatal("revoked embedded Worker mutation admitted")
+		t.Fatal("closed embedded Worker mutation admitted")
 	}
 	if err := bound.Terminal.KillTerminal(ctx, appserver.TerminalRequest{SessionID: sid, TerminalID: "missing"}); err == nil {
-		t.Fatal("revoked embedded Terminal mutation admitted")
+		t.Fatal("closed embedded Terminal mutation admitted")
 	}
 }

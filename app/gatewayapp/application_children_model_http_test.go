@@ -3,7 +3,9 @@ package gatewayapp_test
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"path/filepath"
@@ -14,11 +16,11 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/agentbinding"
-	"github.com/caelis-labs/caelis/control/application"
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/httpclient"
 	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 	"github.com/caelis-labs/caelis/control/collaboration"
+	"github.com/caelis-labs/caelis/control/sessionprofile"
 )
 
 // Exercise production HTTP, provider, SDK tool wrappers, Task and scoped native
@@ -93,16 +95,16 @@ func TestApplicationProfileChildModelSpawnKeepsBackgroundSource(t *testing.T) {
 	host := startApplicationHTTPHost(t, filepath.Join(root, "store"), root, provider)
 	defer host.close(t)
 	connectApplicationChildModel(t, ctx, host, "gpt-4.1")
-	client, _ := registerApplicationHTTP(t, ctx, host, "background-child", filepath.Join(root, "owner.token"))
+	client, _ := connectSessionOwnerHTTP(t, ctx, host, "owner", filepath.Join(root, "owner.token"))
 	sid := createApplicationHTTPSession(t, ctx, client, "parent")
 	grant := backgroundGrant(t, ctx, client, sid, "child-grant", "approved-schedule")
 	backgroundPrompt(t, ctx, client, sid, "background-spawn", "SPAWN_PROFILE_CHILD", "authorized_background", grant.ID)
 	child, task := applicationAttachedChild(t, ctx, client, sid, "leaf")
-	binding, err := client.ApplicationSession(ctx, child)
+	binding, err := client.SessionProfile(ctx, child)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := application.Source{Kind: "authorized_background", OperationID: "background-spawn", GrantID: grant.ID, AuthorizedSource: grant.Source}
+	want := sessionprofile.Source{Kind: "authorized_background", OperationID: "background-spawn", GrantID: grant.ID, AuthorizedSource: grant.Source}
 	if binding.Child == nil || binding.Child.Source != want || binding.Child.ParentTaskID != task {
 		t.Fatalf("source lost: %+v", binding)
 	}
@@ -136,22 +138,22 @@ func TestApplicationProfileChildModelSpawnKeepsBackgroundSource(t *testing.T) {
 		case <-time.After(10 * time.Millisecond):
 		}
 	}
-	for _, req := range []appserver.ApplicationPromptRequest{
-		{PromptRequest: appserver.PromptRequest{WriteBase: appserver.WriteBase{OperationID: "relabel-child", SessionID: child}, Input: "forge user"}, SourceKind: "user"},
-		{PromptRequest: appserver.PromptRequest{WriteBase: appserver.WriteBase{OperationID: "wrong-grant", SessionID: child}, Input: "forge background"}, SourceKind: "authorized_background", GrantID: "unknown"},
+	for _, req := range []appserver.PromptRequest{
+		{WriteBase: appserver.WriteBase{OperationID: "relabel-child", SessionID: child}, Input: "forge user", SourceKind: "user"},
+		{WriteBase: appserver.WriteBase{OperationID: "wrong-grant", SessionID: child}, Input: "forge background", SourceKind: "authorized_background", GrantID: "unknown"},
 	} {
-		if _, err := client.PromptApplication(ctx, req); err == nil {
+		if _, err := client.Prompt(ctx, req); err == nil {
 			t.Fatal("child source was widened")
 		}
 	}
-	if _, err := client.RevokeApplicationBackgroundGrant(ctx, sid, grant.ID); err != nil {
+	if _, err := grantResult(client.RevokeSessionBackgroundGrant(ctx, revokeGrantCommand(sid, grant.ID))); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := client.PromptApplication(ctx, appserver.ApplicationPromptRequest{PromptRequest: appserver.PromptRequest{WriteBase: appserver.WriteBase{OperationID: "revoked-child-source", SessionID: child}, Input: "must not run"}, SourceKind: "authorized_background", GrantID: grant.ID}); err == nil {
+	if _, err := client.Prompt(ctx, appserver.PromptRequest{WriteBase: appserver.WriteBase{OperationID: "revoked-child-source", SessionID: child}, Input: "must not run", SourceKind: "authorized_background", GrantID: grant.ID}); err == nil {
 		t.Fatal("child retained revoked root background grant")
 	}
 }
-func TestApplicationProfileCollaborationRechecksLeaseAfterProviderWait(t *testing.T) {
+func TestSessionClosureCancelsProviderBeforeCollaborationEffect(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 	root := t.TempDir()
@@ -159,7 +161,7 @@ func TestApplicationProfileCollaborationRechecksLeaseAfterProviderWait(t *testin
 	host := startApplicationHTTPHost(t, filepath.Join(root, "store"), root, provider)
 	defer host.close(t)
 	connectApplicationChildModel(t, ctx, host, "gpt-4.1")
-	client, connection := registerApplicationHTTP(t, ctx, host, "revoke-child", filepath.Join(root, "owner.token"))
+	client, connection := connectSessionOwnerHTTP(t, ctx, host, "owner", filepath.Join(root, "owner.token"))
 	sid := createApplicationHTTPSession(t, ctx, client, "parent")
 	child, _ := applicationProfileChild(t, ctx, client, sid)
 	completeBackgroundCall(t, ctx, client, backgroundCall(t, ctx, client, child))
@@ -169,19 +171,18 @@ func TestApplicationProfileCollaborationRechecksLeaseAfterProviderWait(t *testin
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
-	principal := appserver.Principal{ID: connection.PrincipalID, ApplicationID: connection.ApplicationID, ConnectionID: connection.ConnectionID}
+	principal := appserver.Principal{ID: connection.PrincipalID}
 	lease, err := host.stack.ControlRuntimes().Acquire(ctx, principal, appserver.ActionSessionInspect, sid, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer lease.Close(context.WithoutCancel(ctx))
 
-	if err := client.RevokeApplicationConnection(ctx); err != nil {
+	if err := closeProfileTestSession(ctx, client, sid); err != nil {
 		t.Fatal(err)
 	}
 	close(provider.release)
-	// This trusted test reader observes the original native Run; the revoked
-	// connection remains unable to use its HTTP client.
+	// The original native Run stops under canonical Session closure.
 	for len(lease.KernelReads().TurnState().ActiveTurns()) > 0 {
 		select {
 		case <-ctx.Done():
@@ -191,20 +192,27 @@ func TestApplicationProfileCollaborationRechecksLeaseAfterProviderWait(t *testin
 	}
 
 	zero := uint64(0)
-	page, err := host.stack.CollaborationService().ReadMessages(ctx, collaboration.Identity{Session: sid, Member: "parent"}, &zero, 128)
+	if _, err := host.stack.CollaborationService().ReadMessages(ctx, collaboration.Identity{Session: sid, Member: "parent"}, &zero, 128); !errors.Is(err, collaboration.ErrSessionClosed) {
+		t.Fatalf("closed Session collaboration read = %v", err)
+	}
+	// Closure purges the shared log. Inspect storage independently after the
+	// delayed provider has stopped: no callback may recreate a closed mailbox.
+	db, err := sql.Open("sqlite", filepath.Join(root, "store", "control", "control.sqlite"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, message := range page.Messages {
-		if strings.Contains(message.Text, "MUST_NOT_BE_COMMITTED") {
-			t.Fatalf("revoked model queued mail: %+v", message)
+	defer db.Close()
+	for _, table := range []string{"collaboration_messages", "collaboration_mailbox"} {
+		var rows int
+		if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+table+" WHERE session=?", sid).Scan(&rows); err != nil || rows != 0 {
+			t.Fatalf("closed Session %s rows = %d, %v", table, rows, err)
 		}
 	}
 	provider.mu.Lock()
 	defer provider.mu.Unlock()
 	for _, raw := range provider.requests {
 		if bytes.Contains(raw, []byte("MUST_NOT_BE_COMMITTED")) && bytes.Contains(raw, []byte("CHILD_PROFILE_INPUT")) {
-			t.Fatal("revoked mail reached target model")
+			t.Fatal("closed Session mail reached target model")
 		}
 	}
 }
@@ -224,12 +232,12 @@ func TestApplicationProfileChildApprovalKeepsNativeOwnerAndOptions(t *testing.T)
 			host := startApplicationHTTPHost(t, filepath.Join(root, "store"), root, &applicationHTTPModel{})
 			defer host.close(t)
 			connectApplicationChildModel(t, ctx, host, "gpt-4.1")
-			client, _ := registerApplicationHTTP(t, ctx, host, "approval-child", filepath.Join(root, "owner.token"))
-			foreign, _ := registerApplicationHTTP(t, ctx, host, "approval-foreign", filepath.Join(root, "foreign.token"))
+			client, _ := connectSessionOwnerHTTP(t, ctx, host, "owner", filepath.Join(root, "owner.token"))
+			foreign, _ := connectSessionOwnerHTTP(t, ctx, host, "foreign-owner", filepath.Join(root, "foreign.token"))
 			profile := applicationHTTPProfile()
 			profile.Permissions.ApprovalMode = "manual"
 			profile.Tools[0].ApprovalPolicy = "required"
-			created, err := client.CreateApplicationSession(ctx, appserver.CreateApplicationSessionRequest{WriteBase: appserver.WriteBase{OperationID: "approval-parent"}, Profile: profile})
+			created, err := client.CreateSession(ctx, appserver.CreateSessionRequest{WriteBase: appserver.WriteBase{OperationID: "approval-parent"}, Profile: profilePointer(profile)})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -252,7 +260,7 @@ func TestApplicationProfileChildApprovalKeepsNativeOwnerAndOptions(t *testing.T)
 			if pending.Permission == nil || len(pending.Permission.Options) == 0 || pending.ScopeID != task || pending.Target.TurnID == "" {
 				t.Fatalf("child approval native owner lost: %+v", pending)
 			}
-			calls, err := client.ApplicationCalls(ctx, child)
+			calls, err := client.SessionToolCalls(ctx, child)
 			if err != nil || len(calls) != 0 {
 				t.Fatalf("callback preceded approval: %+v %v", calls, err)
 			}
@@ -292,14 +300,14 @@ func TestApplicationProfileChildApprovalKeepsNativeOwnerAndOptions(t *testing.T)
 			}
 			if test.kind == "reject_once" {
 				waitApplicationHTTPIdle(t, ctx, client, child)
-				calls, err := client.ApplicationCalls(ctx, child)
+				calls, err := client.SessionToolCalls(ctx, child)
 				if err != nil || len(calls) != 0 {
 					t.Fatalf("native rejection executed callback: %+v %v", calls, err)
 				}
 				return
 			}
 			call := backgroundCall(t, ctx, client, child)
-			if call.Source != (application.Source{Kind: "user", OperationID: "profile-child"}) {
+			if call.Source != (sessionprofile.Source{Kind: "user", OperationID: "profile-child"}) {
 				t.Fatalf("approval relabeled source: %+v", call)
 			}
 			completeBackgroundCall(t, ctx, client, call)
@@ -315,7 +323,7 @@ func TestApplicationProfileChildInheritsAutomaticReviewer(t *testing.T) {
 	host, client, sid := setupReviewerHTTP(t, ctx, root, provider)
 	defer host.close(t)
 	child, _ := applicationProfileChild(t, ctx, client, sid)
-	binding, err := client.ApplicationSession(ctx, child)
+	binding, err := client.SessionProfile(ctx, child)
 	if err != nil || binding.Profile.Reviewer == nil || binding.Profile.Reviewer.Model != "custom/reviewer-model" {
 		t.Fatalf("reviewer inheritance: %+v %v", binding, err)
 	}
@@ -339,7 +347,7 @@ func TestApplicationProfileForegroundParticipantHasIndependentSession(t *testing
 	host := startApplicationHTTPHost(t, filepath.Join(root, "store"), root, &applicationHTTPModel{})
 	defer host.close(t)
 	connectApplicationChildModel(t, ctx, host, "gpt-4.1")
-	client, _ := registerApplicationHTTP(t, ctx, host, "foreground-child", filepath.Join(root, "owner.token"))
+	client, _ := connectSessionOwnerHTTP(t, ctx, host, "owner", filepath.Join(root, "owner.token"))
 	sid := createApplicationHTTPSession(t, ctx, client, "parent")
 	state, err := client.InspectSession(ctx, appserver.StateRequest{SessionID: sid})
 	if err != nil {
@@ -350,14 +358,14 @@ func TestApplicationProfileForegroundParticipantHasIndependentSession(t *testing
 		t.Fatalf("direct native participant: %+v %v", result, err)
 	}
 	child, _ := applicationAttachedChild(t, ctx, client, sid, "direct")
-	binding, err := client.ApplicationSession(ctx, child)
+	binding, err := client.SessionProfile(ctx, child)
 	if err != nil || binding.Child == nil || binding.Child.ParentSessionID != sid || binding.Child.ParentTaskID != "" || child == sid {
 		t.Fatalf("direct relation: %+v %v", binding, err)
 	}
 	call := backgroundCall(t, ctx, client, child)
 	completeBackgroundCall(t, ctx, client, call)
 	grandchild, grandTask := applicationProfileChild(t, ctx, client, child)
-	grandBinding, err := client.ApplicationSession(ctx, grandchild)
+	grandBinding, err := client.SessionProfile(ctx, grandchild)
 	if err != nil || grandBinding.Child == nil || grandBinding.Child.RootSessionID != sid || grandBinding.Child.ParentSessionID != child || grandBinding.Child.ParentTaskID != grandTask {
 		t.Fatalf("recursive native relation: %+v %v", grandBinding, err)
 	}
@@ -387,12 +395,11 @@ func TestApplicationProfileForegroundParticipantHasIndependentSession(t *testing
 		case <-time.After(10 * time.Millisecond):
 		}
 	}
-	childState, err := client.InspectSession(ctx, appserver.StateRequest{SessionID: child})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if _, err := client.CloseSession(ctx, appserver.CloseSessionRequest{WriteBase: appserver.WriteBase{OperationID: "close-direct-child", SessionID: child, ExpectedRevision: &childState.Revision, ExpectedControllerEpoch: childState.Controller.EpochID}}); err != nil {
+	// A finished grandchild Task does not mean its parent Turn has finished
+	// consuming the result. Observe the child Turn's own completion before
+	// testing closure; history CAS races are covered separately.
+	childState := waitApplicationHTTPIdle(t, ctx, client, child)
+	if _, err := client.CloseSession(ctx, appserver.CloseSessionRequest{WriteBase: appserver.WriteBase{OperationID: "close-direct-child", SessionID: child, ExpectedControllerEpoch: childState.Controller.EpochID}}); err != nil {
 		t.Fatal(err)
 	}
 	closed, err := appserver.IsSessionClosed(ctx, host.stack.Sessions(), session.SessionRef{SessionID: sid})
@@ -432,7 +439,7 @@ func TestApplicationProfileNamedNativeModelKeepsProfileAuthority(t *testing.T) {
 	if err != nil || configured.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("native role: %+v %v", configured, err)
 	}
-	client, _ := registerApplicationHTTP(t, ctx, host, "named-child", filepath.Join(root, "owner.token"))
+	client, _ := connectSessionOwnerHTTP(t, ctx, host, "owner", filepath.Join(root, "owner.token"))
 	sid := createApplicationHTTPSession(t, ctx, client, "parent")
 	handles, err := client.Handles(ctx, sid)
 	if err != nil || !strings.Contains(strings.Join(handles, ","), "research") {
@@ -448,11 +455,11 @@ func TestApplicationProfileNamedNativeModelKeepsProfileAuthority(t *testing.T) {
 	}
 	child, _ := applicationAttachedChild(t, ctx, client, sid, "research")
 	completeBackgroundCall(t, ctx, client, backgroundCall(t, ctx, client, child))
-	configuration, err := client.ApplicationConfiguration(ctx, child)
+	configuration, err := client.SessionConfiguration(ctx, child)
 	if err != nil || !strings.HasSuffix(configuration.Profile.Model, "/gpt-4.2") || configuration.Profile.Instructions != applicationHTTPProfile().Instructions || len(configuration.Profile.Tools) != 1 {
 		t.Fatalf("native model override expanded profile: %+v %v", configuration, err)
 	}
-	parent, err := client.ApplicationConfiguration(ctx, sid)
+	parent, err := client.SessionConfiguration(ctx, sid)
 	if err != nil || parent.Profile.Model != "custom/gpt-4.1" {
 		t.Fatalf("child model rewrote parent: %+v %v", parent, err)
 	}

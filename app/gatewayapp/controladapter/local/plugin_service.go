@@ -83,7 +83,7 @@ func (s *PluginService) hostAdapter(principal appserver.Principal, req appserver
 	if s == nil || s.hostDeps == nil {
 		return nil, errors.New("app/gatewayapp/controladapter/local: plugin service is unavailable")
 	}
-	if err := authorizeUnscopedHostCapability(principal); err != nil {
+	if err := authorizeHostCapability(principal); err != nil {
 		return nil, err
 	}
 	return controladapter.NewPluginAssemblerForHost(*s.hostDeps), nil

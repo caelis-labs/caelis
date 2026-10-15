@@ -6,9 +6,9 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
-	"github.com/caelis-labs/caelis/control/application"
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/wirev1/generated"
+	"github.com/caelis-labs/caelis/control/sessionprofile"
 )
 
 func TestExecutionConfigurationSchemaAndProductionWire(t *testing.T) {
@@ -24,9 +24,9 @@ func TestExecutionConfigurationSchemaAndProductionWire(t *testing.T) {
 	if wireOrdinary.ExecutionConfig == nil || wireOrdinary.ExecutionConfig.Environment == nil || wireOrdinary.ExecutionConfig.Environment.Inherit == nil || *wireOrdinary.ExecutionConfig.Environment.Inherit || wireOrdinary.ExecutionConfig.Environment.Set["A"] != "custom" || wireOrdinary.ExecutionConfig.Shell == nil || wireOrdinary.ExecutionConfig.Shell.Login == nil || !*wireOrdinary.ExecutionConfig.Shell.Login {
 		t.Fatalf("generated ordinary DTO lost config: %+v", wireOrdinary.ExecutionConfig)
 	}
-	profile := application.Profile{Version: "native/1", Instructions: "native", Model: "configured", ToolsVersion: "native/1", Execution: "workspace-write", ExecutionConfig: config}
-	validateWireValue(t, "ApplicationProfile", profile)
-	var wireProfile generated.ApplicationProfile
+	profile := sessionprofile.Profile{Version: "native/1", Instructions: "native", Model: "configured", ToolsVersion: "native/1", Execution: "workspace-write", ExecutionConfig: config}
+	validateWireValue(t, "SessionProfile", profile)
+	var wireProfile generated.SessionProfile
 	decodeGeneratedExecution(t, profile, &wireProfile)
 	if wireProfile.ExecutionConfig == nil || wireProfile.ExecutionConfig.Environment == nil || !reflect.DeepEqual(wireProfile.ExecutionConfig.Environment.Unset, []string{"B"}) {
 		t.Fatalf("generated application DTO lost config: %+v", wireProfile.ExecutionConfig)

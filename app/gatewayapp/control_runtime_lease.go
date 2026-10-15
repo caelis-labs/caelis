@@ -7,8 +7,8 @@ import (
 	"sync"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/control/application"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/sessionprofile"
 )
 
 // ControlSessionReader is the read-only durable Session capability available
@@ -36,9 +36,9 @@ type ControlRuntimeLease struct {
 type ControlRuntimeService struct {
 	registry           *sessionRuntimeRegistry
 	sessions           session.Service
-	applications       *application.Store
+	sessionProfiles    *sessionprofile.Store
 	childClients       *applicationChildClientFactory
-	applicationService *appserver.ApplicationService
+	applicationService *appserver.SessionProfileService
 }
 
 // ControlRuntimes returns the focused Runtime lease authority for AppServer
@@ -47,7 +47,7 @@ func (s *Stack) ControlRuntimes() ControlRuntimeService {
 	if s == nil {
 		return ControlRuntimeService{}
 	}
-	return ControlRuntimeService{registry: s.sessionRuntimes, sessions: s.composition.sessions, applications: s.composition.authorities.applications, childClients: s.composition.authorities.applicationChildClients, applicationService: s.Applications()}
+	return ControlRuntimeService{registry: s.sessionRuntimes, sessions: s.composition.sessions, sessionProfiles: s.composition.authorities.sessionProfiles, childClients: s.composition.authorities.applicationChildClients, applicationService: s.SessionProfiles()}
 }
 
 // BindApplicationChildClients connects the local profile endpoint to the
@@ -58,7 +58,7 @@ func (s ControlRuntimeService) BindApplicationChildClients(bind func(appserver.P
 	}
 	s.childClients.mu.Lock()
 	defer s.childClients.mu.Unlock()
-	s.childClients.bind, s.childClients.applications = bind, s.applicationService
+	s.childClients.bind, s.childClients.sessionProfiles = bind, s.applicationService
 }
 
 // Acquire authorizes and resolves one Session Runtime snapshot.
@@ -73,7 +73,7 @@ func (s ControlRuntimeService) Acquire(
 		return nil, errors.New("gatewayapp: Control Runtime service is unavailable")
 	}
 	sessionID = strings.TrimSpace(sessionID)
-	authorizer := appserver.SessionAuthorizer{Sessions: s.sessions, Applications: s.applications}
+	authorizer := appserver.SessionAuthorizer{Sessions: s.sessions, SessionProfiles: s.sessionProfiles}
 	if err := authorizer.Authorize(ctx, principal, action, sessionID); err != nil {
 		return nil, err
 	}

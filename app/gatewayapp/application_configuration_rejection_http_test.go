@@ -12,9 +12,9 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
-	"github.com/caelis-labs/caelis/control/application"
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/httpclient"
+	"github.com/caelis-labs/caelis/control/sessionprofile"
 )
 
 func TestApplicationConfigurationHTTPRejectionPreservesIssuedRequest(t *testing.T) {
@@ -36,11 +36,11 @@ func TestApplicationConfigurationHTTPRejectionPreservesIssuedRequest(t *testing.
 		host.close(t)
 	}()
 	credentialPath := filepath.Join(root, "application.credential")
-	client, _ := registerApplicationHTTP(t, ctx, host, "rejection", credentialPath)
+	client, _ := connectSessionOwnerHTTP(t, ctx, host, "owner", credentialPath)
 	profile := applicationHTTPProfile()
 	profile.Model = "openai/gpt-5.4-mini"
 	profile.ReasoningEffort = "low"
-	created, err := client.CreateApplicationSession(ctx, appserver.CreateApplicationSessionRequest{WriteBase: appserver.WriteBase{OperationID: "create"}, Profile: profile})
+	created, err := client.CreateSession(ctx, appserver.CreateSessionRequest{WriteBase: appserver.WriteBase{OperationID: "create"}, Profile: profilePointer(profile)})
 	if err != nil || created.Outcome != appserver.OutcomeCommitted {
 		t.Fatalf("create = %+v %v", created, err)
 	}
@@ -50,26 +50,26 @@ func TestApplicationConfigurationHTTPRejectionPreservesIssuedRequest(t *testing.
 	case <-ctx.Done():
 		t.Fatal("provider did not reach admission barrier")
 	}
-	issued, err := client.ApplicationConfiguration(ctx, created.SessionID)
+	issued, err := client.SessionConfiguration(ctx, created.SessionID)
 	if err != nil || issued.Revision != 1 || issued.LastRequest == nil || issued.LastRequest.Revision != 1 {
 		t.Fatalf("issued configuration = %+v %v", issued, err)
 	}
 	cases := []struct {
 		name   string
-		patch  application.ConfigurationPatch
+		patch  sessionprofile.ConfigurationPatch
 		code   errorcode.Code
 		detail []string
 	}{
-		{"model", application.ConfigurationPatch{Model: stringPointer("openai/not-configured")}, errorcode.InvalidArgument, []string{"model", "openai/not-configured", "not configured"}},
-		{"effort", application.ConfigurationPatch{ReasoningEffort: stringPointer("unsupported-effort")}, errorcode.Unsupported, []string{profile.Model, "reasoning_effort", "unsupported-effort"}},
-		{"tier", application.ConfigurationPatch{Model: stringPointer("openai/gpt-4.1"), ReasoningEffort: stringPointer(""), ServiceTier: stringPointer("priority")}, errorcode.Unsupported, []string{"openai/gpt-4.1", "service_tier", "priority"}},
-		{"unknown-tier", application.ConfigurationPatch{ServiceTier: stringPointer("unsupported-tier")}, errorcode.Unsupported, []string{"service_tier", "unsupported-tier"}},
+		{"model", sessionprofile.ConfigurationPatch{Model: stringPointer("openai/not-configured")}, errorcode.InvalidArgument, []string{"model", "openai/not-configured", "not configured"}},
+		{"effort", sessionprofile.ConfigurationPatch{ReasoningEffort: stringPointer("unsupported-effort")}, errorcode.Unsupported, []string{profile.Model, "reasoning_effort", "unsupported-effort"}},
+		{"tier", sessionprofile.ConfigurationPatch{Model: stringPointer("openai/gpt-4.1"), ReasoningEffort: stringPointer(""), ServiceTier: stringPointer("priority")}, errorcode.Unsupported, []string{"openai/gpt-4.1", "service_tier", "priority"}},
+		{"unknown-tier", sessionprofile.ConfigurationPatch{ServiceTier: stringPointer("unsupported-tier")}, errorcode.Unsupported, []string{"service_tier", "unsupported-tier"}},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			request := application.UpdateConfigurationRequest{OperationID: "rejected-" + test.name, ExpectedConfigurationRevision: 1, Patch: test.patch}
+			request := sessionprofile.UpdateConfigurationRequest{OperationID: "rejected-" + test.name, ExpectedConfigurationRevision: 1, Patch: test.patch}
 			for range 2 {
-				_, err := client.UpdateApplicationConfiguration(ctx, created.SessionID, request)
+				_, err := configurationResult(client.UpdateSessionConfiguration(ctx, configurationCommand(created.SessionID, request)))
 				var remote *httpclient.RemoteError
 				if !errors.As(err, &remote) || remote.StatusCode != http.StatusBadRequest || errorcode.CodeOf(err) != test.code {
 					t.Fatalf("rejection = %v, want HTTP 400 %s", err, test.code)
@@ -80,10 +80,10 @@ func TestApplicationConfigurationHTTPRejectionPreservesIssuedRequest(t *testing.
 					}
 				}
 			}
-			if _, err := client.ApplicationConfigurationOperation(ctx, request.OperationID); errorcode.CodeOf(err) != errorcode.NotFound {
-				t.Fatalf("rejected update has a committed receipt: %v", err)
+			if receipt, err := client.Operation(ctx, request.OperationID); err != nil || receipt.Outcome != appserver.OutcomeRejected || receipt.Configuration != nil || receipt.ErrorCode != test.code {
+				t.Fatalf("rejected update receipt: %+v, %v", receipt, err)
 			}
-			current, err := client.ApplicationConfiguration(ctx, created.SessionID)
+			current, err := client.SessionConfiguration(ctx, created.SessionID)
 			if err != nil || !reflect.DeepEqual(current, issued) || len(provider.snapshot()) != 1 {
 				t.Fatalf("rejection changed desired or admitted state: %+v %v", current, err)
 			}
@@ -98,13 +98,13 @@ func TestApplicationConfigurationHTTPRejectionPreservesIssuedRequest(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = lossy.UpdateApplicationConfiguration(ctx, created.SessionID, application.UpdateConfigurationRequest{OperationID: "lost-rejection", ExpectedConfigurationRevision: 1, Patch: cases[2].patch})
+	_, err = configurationResult(lossy.UpdateSessionConfiguration(ctx, configurationCommand(created.SessionID, sessionprofile.UpdateConfigurationRequest{OperationID: "lost-rejection", ExpectedConfigurationRevision: 1, Patch: cases[2].patch})))
 	var remote *httpclient.RemoteError
 	if err == nil || errors.As(err, &remote) {
 		t.Fatalf("lost response incorrectly reported as a definite rejection: %v", err)
 	}
-	if _, err := client.ApplicationConfigurationOperation(ctx, "lost-rejection"); errorcode.CodeOf(err) != errorcode.NotFound {
-		t.Fatalf("lost rejected update has a committed receipt: %v", err)
+	if receipt, err := client.Operation(ctx, "lost-rejection"); err != nil || receipt.Outcome != appserver.OutcomeRejected || receipt.Configuration != nil {
+		t.Fatalf("lost rejection was not reconciled: %+v, %v", receipt, err)
 	}
 	close(provider.release)
 	claimAndCompleteRevisionCall(t, ctx, client, created.SessionID, 1, profile.ToolsVersion, `{"key":"old"}`)
@@ -113,7 +113,7 @@ func TestApplicationConfigurationHTTPRejectionPreservesIssuedRequest(t *testing.
 	if len(requests) != 2 || requests[0]["model"] != "gpt-5.4-mini" || requests[1]["model"] != "gpt-5.4-mini" {
 		t.Fatalf("rejected model change affected the running Turn: %v", requests)
 	}
-	final, err := client.ApplicationConfiguration(ctx, created.SessionID)
+	final, err := client.SessionConfiguration(ctx, created.SessionID)
 	if err != nil || final.Revision != 1 || !reflect.DeepEqual(final.Profile, issued.Profile) || final.LastRequest == nil || final.LastRequest.Revision != 1 {
 		t.Fatalf("rejected update changed final configuration: %+v %v", final, err)
 	}

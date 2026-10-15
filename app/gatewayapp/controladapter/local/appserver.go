@@ -105,7 +105,7 @@ func NewAppServer(host *gatewayapp.Stack) (*AppServer, error) {
 	if err != nil {
 		return nil, err
 	}
-	sessionAuthorizer := appserver.SessionAuthorizer{Sessions: dependencies.Sessions, Applications: host.Applications().Store()}
+	sessionAuthorizer := appserver.SessionAuthorizer{Sessions: dependencies.Sessions, SessionProfiles: host.SessionProfiles().Store()}
 	presentation.authorizer = sessionAuthorizer
 	terminal, err := NewTerminalService(tasks, terminalStreams, sessionAuthorizer)
 	if err != nil {
@@ -113,11 +113,12 @@ func NewAppServer(host *gatewayapp.Stack) (*AppServer, error) {
 	}
 	server := &AppServer{
 		Services: appserver.AppServerServices{
-			Applications:   host.Applications(),
-			Collaboration:  host.CollaborationService(),
-			SubagentInputs: &appserver.SubagentInputService{Authorizer: sessionAuthorizer, Mailbox: host.CollaborationService()},
-			UIPreferences:  &appserver.UIPreferencesService{Store: dependencies.UIPreferences},
-			Sessions:       control, Participants: participants, Status: status,
+			Operations:      host.ControlOperations(),
+			SessionProfiles: host.SessionProfiles(),
+			Collaboration:   host.CollaborationService(),
+			SubagentInputs:  &appserver.SubagentInputService{Authorizer: sessionAuthorizer, Mailbox: host.CollaborationService()},
+			UIPreferences:   &appserver.UIPreferencesService{Store: dependencies.UIPreferences},
+			Sessions:        control, Participants: participants, Status: status,
 			Configuration: configuration, Agents: agents, Completion: completion, Plugins: plugins,
 			Presentation: presentation, Terminal: terminal, Tasks: tasks,
 		},

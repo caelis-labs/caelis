@@ -15,7 +15,7 @@ import (
 	skilltool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/skill"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
-	"github.com/caelis-labs/caelis/control/application"
+	"github.com/caelis-labs/caelis/control/sessionprofile"
 )
 
 // applicationCapabilities belongs to one admitted configuration revision. The
@@ -23,7 +23,7 @@ import (
 // Runtime; only Control's explicit selection and lifetime differ.
 type applicationCapabilities struct {
 	catalog    skill.Catalog
-	skills     []application.SkillStatus
+	skills     []sessionprofile.SkillStatus
 	skillTool  tool.Tool
 	searchTool tool.Tool
 	source     tool.Source
@@ -33,7 +33,7 @@ type applicationCapabilities struct {
 // The resolver owns the current MCP configuration; each model snapshot also
 // holds a reference until its response and tool calls have completed.
 type applicationMCPResource struct {
-	servers []application.MCPServer
+	servers []sessionprofile.MCPServer
 	manager *mcp.Manager
 	refs    int
 	retired bool
@@ -42,8 +42,8 @@ type applicationMCPResource struct {
 
 type applicationMCPSource struct {
 	manager   *mcp.Manager
-	store     *application.Store
-	scope     application.Scope
+	store     *sessionprofile.Store
+	scope     sessionprofile.Scope
 	sessionID string
 	revision  uint64
 }
@@ -59,7 +59,7 @@ func (s applicationMCPSource) CheckSearchScope(ctx context.Context) error {
 		return err
 	}
 	if current.Revision != s.revision {
-		return fmt.Errorf("ToolSearch Application configuration changed: %w", application.ErrConfigurationStale)
+		return fmt.Errorf("ToolSearch Application configuration changed: %w", sessionprofile.ErrConfigurationStale)
 	}
 	return nil
 }
@@ -72,7 +72,7 @@ func (s applicationMCPSource) Tools() []tool.Tool {
 	return ready
 }
 
-func applicationSkillCatalog(profile application.Profile) (skill.Catalog, error) {
+func applicationSkillCatalog(profile sessionprofile.Profile) (skill.Catalog, error) {
 	catalog, _, err := assembleApplicationSkills(profile, true)
 	return catalog, err
 }
@@ -80,9 +80,9 @@ func applicationSkillCatalog(profile application.Profile) (skill.Catalog, error)
 // assembleApplicationSkills is the single scanner for admission and Runtime
 // assembly. Admission rejects invalid selections; after commit, one damaged
 // selected item is reported and omitted without suppressing healthy siblings.
-func assembleApplicationSkills(profile application.Profile, strict bool) (skill.Catalog, []application.SkillStatus, error) {
+func assembleApplicationSkills(profile sessionprofile.Profile, strict bool) (skill.Catalog, []sessionprofile.SkillStatus, error) {
 	var metas []skill.Meta
-	statuses := make([]application.SkillStatus, 0, len(profile.SkillDirs)+len(profile.SkillRoots))
+	statuses := make([]sessionprofile.SkillStatus, 0, len(profile.SkillDirs)+len(profile.SkillRoots))
 	seen := map[string]bool{}
 	addRoot := func(root string, direct bool) error {
 		meta, err := skillfs.DiscoverRootMeta(root)
@@ -95,7 +95,7 @@ func assembleApplicationSkills(profile application.Profile, strict bool) (skill.
 				}
 				return fmt.Errorf("application Skill root %q: %w", root, err)
 			}
-			statuses = append(statuses, application.SkillStatus{Path: root, Kind: "skill", Status: "failed", Warning: applicationSkillWarning(err)})
+			statuses = append(statuses, sessionprofile.SkillStatus{Path: root, Kind: "skill", Status: "failed", Warning: applicationSkillWarning(err)})
 			return nil
 		}
 		key := strings.ToLower(meta.Name)
@@ -103,12 +103,12 @@ func assembleApplicationSkills(profile application.Profile, strict bool) (skill.
 			if strict {
 				return fmt.Errorf("application Skill name %q is duplicated", meta.Name)
 			}
-			statuses = append(statuses, application.SkillStatus{Path: root, Kind: "skill", Name: meta.Name, Status: "failed", Warning: "Skill name conflicts with another selected Skill"})
+			statuses = append(statuses, sessionprofile.SkillStatus{Path: root, Kind: "skill", Name: meta.Name, Status: "failed", Warning: "Skill name conflicts with another selected Skill"})
 			return nil
 		}
 		seen[key] = true
 		metas = append(metas, meta)
-		statuses = append(statuses, application.SkillStatus{Path: root, Kind: "skill", Name: meta.Name, Status: "ready"})
+		statuses = append(statuses, sessionprofile.SkillStatus{Path: root, Kind: "skill", Name: meta.Name, Status: "ready"})
 		return nil
 	}
 	for _, dir := range profile.SkillDirs {
@@ -124,10 +124,10 @@ func assembleApplicationSkills(profile application.Profile, strict bool) (skill.
 			if strict {
 				return skill.Catalog{}, nil, fmt.Errorf("application Skill directory %q: %w", dir, err)
 			}
-			statuses = append(statuses, application.SkillStatus{Path: dir, Kind: "directory", Status: "failed", Warning: applicationSkillWarning(err)})
+			statuses = append(statuses, sessionprofile.SkillStatus{Path: dir, Kind: "directory", Status: "failed", Warning: applicationSkillWarning(err)})
 			continue
 		}
-		statuses = append(statuses, application.SkillStatus{Path: dir, Kind: "directory", Status: "ready"})
+		statuses = append(statuses, sessionprofile.SkillStatus{Path: dir, Kind: "directory", Status: "ready"})
 		for _, entry := range entries {
 			if entry.IsDir() {
 				if err := addRoot(filepath.Join(dir, entry.Name()), false); err != nil {
@@ -164,7 +164,7 @@ func applicationSkillMetadata(catalog skill.Catalog) string {
 	return strings.TrimSpace(b.String())
 }
 
-func applicationMCPSpecs(profile application.Profile) []mcp.ServerSpec {
+func applicationMCPSpecs(profile sessionprofile.Profile) []mcp.ServerSpec {
 	specs := make([]mcp.ServerSpec, 0, len(profile.MCPServers))
 	for _, server := range profile.MCPServers {
 		specs = append(specs, mcp.ServerSpec{
@@ -176,7 +176,7 @@ func applicationMCPSpecs(profile application.Profile) []mcp.ServerSpec {
 	return specs
 }
 
-func (r *applicationTurnResolver) acquireCapabilities(ctx context.Context, configuration application.Configuration) (*applicationCapabilities, func(), error) {
+func (r *applicationTurnResolver) acquireCapabilities(ctx context.Context, configuration sessionprofile.Configuration) (*applicationCapabilities, func(), error) {
 	r.capabilitiesMu.Lock()
 	defer r.capabilitiesMu.Unlock()
 	if r.capabilitiesClosed {
@@ -212,13 +212,13 @@ func (r *applicationTurnResolver) acquireCapabilities(ctx context.Context, confi
 			if err != nil {
 				return nil, nil, err
 			}
-			resource = &applicationMCPResource{servers: append([]application.MCPServer(nil), configuration.Profile.MCPServers...), manager: manager, retired: configuration.Revision < r.desiredRevision}
+			resource = &applicationMCPResource{servers: append([]sessionprofile.MCPServer(nil), configuration.Profile.MCPServers...), manager: manager, retired: configuration.Revision < r.desiredRevision}
 			if !resource.retired {
 				r.currentMCP = resource
 			}
 		}
 		assembled.resource = resource
-		assembled.source = applicationMCPSource{manager: resource.manager, store: r.composition.authorities.applications, scope: r.binding.Scope, sessionID: r.binding.SessionID, revision: configuration.Revision}
+		assembled.source = applicationMCPSource{manager: resource.manager, store: r.composition.authorities.sessionProfiles, scope: r.binding.Scope, sessionID: r.binding.SessionID, revision: configuration.Revision}
 		assembled.searchTool = toolsearch.NewSource(assembled.source, newBoundToolSearchRanker(r.composition))
 	}
 	if configuration.Revision >= r.desiredRevision && r.capabilities == nil {
@@ -249,7 +249,7 @@ func (r *applicationTurnResolver) retainCapabilitiesLocked(capability *applicati
 	}
 }
 
-func (r *applicationTurnResolver) setDesiredCapabilitiesLocked(configuration application.Configuration) *mcp.Manager {
+func (r *applicationTurnResolver) setDesiredCapabilitiesLocked(configuration sessionprofile.Configuration) *mcp.Manager {
 	r.desiredRevision = configuration.Revision
 	for revision := range r.capabilities {
 		if revision < configuration.Revision {
@@ -269,7 +269,7 @@ func (r *applicationTurnResolver) setDesiredCapabilitiesLocked(configuration app
 	return nil
 }
 
-func (r *applicationTurnResolver) configurationCommitted(configuration application.Configuration) {
+func (r *applicationTurnResolver) configurationCommitted(configuration sessionprofile.Configuration) {
 	r.capabilitiesMu.Lock()
 	if !r.capabilitiesClosed && configuration.Revision > r.desiredRevision {
 		if obsolete := r.setDesiredCapabilitiesLocked(configuration); obsolete != nil {
@@ -296,15 +296,15 @@ func (r *applicationTurnResolver) closeCapabilities() {
 	r.capabilitiesMu.Unlock()
 }
 
-func (r *applicationTurnResolver) capabilityStatus(revision uint64) application.MCPStatus {
+func (r *applicationTurnResolver) capabilityStatus(revision uint64) sessionprofile.MCPStatus {
 	r.capabilitiesMu.Lock()
 	defer r.capabilitiesMu.Unlock()
 	capability := r.capabilities[revision]
 	current := r.currentMCP
-	status := application.MCPStatus{}
+	status := sessionprofile.MCPStatus{}
 	if capability != nil {
 		current = capability.resource
-		status.Skills = append([]application.SkillStatus(nil), capability.skills...)
+		status.Skills = append([]sessionprofile.SkillStatus(nil), capability.skills...)
 	} else if revision != r.desiredRevision {
 		current = nil
 	}
@@ -312,9 +312,9 @@ func (r *applicationTurnResolver) capabilityStatus(revision uint64) application.
 		return status
 	}
 	infos := current.manager.GetServerInfos("application")
-	status.Servers = make([]application.MCPServerStatus, 0, len(infos))
+	status.Servers = make([]sessionprofile.MCPServerStatus, 0, len(infos))
 	for _, info := range infos {
-		status.Servers = append(status.Servers, application.MCPServerStatus{Name: info.Name, Status: info.Status, Tools: info.Tools, ToolDetails: info.ToolDetails, Warning: info.Warning})
+		status.Servers = append(status.Servers, sessionprofile.MCPServerStatus{Name: info.Name, Status: info.Status, Tools: info.Tools, ToolDetails: info.ToolDetails, Warning: info.Warning})
 	}
 	return status
 }

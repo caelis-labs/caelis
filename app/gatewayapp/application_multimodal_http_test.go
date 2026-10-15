@@ -20,9 +20,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/caelis-labs/caelis/control/application"
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
+	"github.com/caelis-labs/caelis/control/sessionprofile"
 )
 
 // multimodalHTTPModel observes real adapter requests. In Chat Completions an
@@ -93,10 +93,10 @@ func tinyApplicationPNG(t *testing.T) []byte {
 	return out.Bytes()
 }
 
-func multimodalHTTPProfile(model string) application.Profile {
+func multimodalHTTPProfile(model string) sessionprofile.Profile {
 	profile := applicationHTTPProfile()
 	profile.Model = "custom/" + model
-	profile.Tools[0].ResultFormat = application.ResultFormatContentV1
+	profile.Tools[0].ResultFormat = sessionprofile.ResultFormatContentV1
 	profile.Tools[0].OutputSchema = map[string]any{
 		"type": "object", "properties": map[string]any{"score": map[string]any{"type": "integer"}, "identifier": map[string]any{"type": "integer"}},
 		"required": []any{"score"}, "additionalProperties": false,
@@ -200,67 +200,67 @@ func TestApplicationMultimodalHTTP(t *testing.T) {
 				t.Fatalf("ConnectModel: %+v %v", connected, err)
 			}
 			credentialPath := filepath.Join(root, "app.credential")
-			client, _ := registerApplicationHTTP(t, ctx, host, "multimodal-"+tc.name, credentialPath)
+			client, _ := connectSessionOwnerHTTP(t, ctx, host, "owner", credentialPath)
 			profile := multimodalHTTPProfile("multimodal-" + tc.name)
-			created, err := client.CreateApplicationSession(ctx, appserver.CreateApplicationSessionRequest{
-				WriteBase: appserver.WriteBase{OperationID: "create-image-session"}, Profile: profile,
+			created, err := client.CreateSession(ctx, appserver.CreateSessionRequest{
+				WriteBase: appserver.WriteBase{OperationID: "create-image-session"}, Profile: profilePointer(profile),
 			})
 			if err != nil || created.Outcome != appserver.OutcomeCommitted || created.SessionID == "" {
 				t.Fatalf("CreateApplicationSession: %+v %v", created, err)
 			}
 			session := created.SessionID
-			capabilities, err := client.ApplicationModelCapabilities(ctx, session)
+			capabilities, err := client.SessionModelCapabilities(ctx, session)
 			if err != nil || capabilities.Model != profile.Model || !reflect.DeepEqual(capabilities.ImageInput, tc.imageInput) {
 				t.Fatalf("selected model image capability: %+v %v", capabilities, err)
 			}
-			admitted, err := client.PromptApplication(ctx, appserver.ApplicationPromptRequest{
-				PromptRequest: appserver.PromptRequest{WriteBase: appserver.WriteBase{SessionID: session, OperationID: "image-turn"}, Input: "Look up the image."},
-				SourceKind:    "user",
+			admitted, err := client.Prompt(ctx, appserver.PromptRequest{
+				WriteBase: appserver.WriteBase{SessionID: session, OperationID: "image-turn"}, Input: "Look up the image.",
+				SourceKind: "user",
 			})
 			if err != nil || (admitted.Outcome != appserver.OutcomeAccepted && admitted.Outcome != appserver.OutcomeCommitted) {
 				t.Fatalf("PromptApplication: %+v %v", admitted, err)
 			}
-			calls, err := client.WaitApplicationCalls(ctx, session)
+			calls, err := client.WaitSessionToolCalls(ctx, session)
 			if err != nil || len(calls) != 1 || calls[0].CallID != "provider-image-call" {
 				t.Fatalf("WaitApplicationCalls: %+v %v", calls, err)
 			}
 			call := calls[0]
-			if _, err := client.ClaimApplicationCall(ctx, session, call.ID); err != nil {
+			if _, err := client.ClaimSessionToolCall(ctx, session, call.ID); err != nil {
 				t.Fatal(err)
 			}
 			pngBytes := tinyApplicationPNG(t)
-			imageBlock := application.ContentBlock{Type: "image", MIMEType: "image/png", Data: base64.StdEncoding.EncodeToString(pngBytes)}
+			imageBlock := sessionprofile.ContentBlock{Type: "image", MIMEType: "image/png", Data: base64.StdEncoding.EncodeToString(pngBytes)}
 			if tc.resource {
 				// A decodable PNG larger than the inline limit must take the
 				// authenticated upload/reference path, never a local path or URL.
-				pngBytes = append(pngBytes, make([]byte, application.MaxInlineImageBytes+1-len(pngBytes))...)
+				pngBytes = append(pngBytes, make([]byte, sessionprofile.MaxInlineImageBytes+1-len(pngBytes))...)
 				digest := sha256.Sum256(pngBytes)
 				expires := time.Now().Add(5 * time.Minute)
-				resource, err := client.UploadApplicationResource(ctx, appserver.ApplicationResourceRequest{
+				resource, err := resourceResult(client.CreateSessionResource(ctx, appserver.SessionResourceRequest{
 					WriteBase: appserver.WriteBase{SessionID: session, OperationID: "upload-image"},
 					Name:      "screen.png", MediaType: "image/png", Data: pngBytes,
 					SHA256: hex.EncodeToString(digest[:]), ExpiresAt: &expires,
-				})
+				}))
 				if err != nil {
 					t.Fatal(err)
 				}
-				imageBlock = application.ContentBlock{Type: "resource_link", MIMEType: resource.MediaType,
-					URI: application.ResourceURIPrefix + resource.ID, Name: resource.Name, SHA256: resource.SHA256}
+				imageBlock = sessionprofile.ContentBlock{Type: "resource_link", MIMEType: resource.MediaType,
+					URI: sessionprofile.ResourceURIPrefix + resource.ID, Name: resource.Name, SHA256: resource.SHA256}
 			}
 			first, last := "first text", "last text"
-			content, err := json.Marshal([]application.ContentBlock{
+			content, err := json.Marshal([]sessionprofile.ContentBlock{
 				{Type: "text", Text: &first}, imageBlock, {Type: "text", Text: &last},
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
-			result := application.CallResult{Outcome: "succeeded", ResultFormat: application.ResultFormatContentV1,
+			result := sessionprofile.CallResult{Outcome: "succeeded", ResultFormat: sessionprofile.ResultFormatContentV1,
 				Content: content, StructuredContent: map[string]any{"score": 7, "identifier": json.Number("9007199254740991")}}
-			if err := client.CompleteApplicationCall(ctx, session, call.ID, result); err != nil {
+			if err := client.CompleteSessionToolCall(ctx, session, call.ID, result); err != nil {
 				t.Fatalf("CompleteApplicationCall: %v", err)
 			}
-			completed, err := client.ApplicationCall(ctx, session, call.ID)
-			if err != nil || completed.State != "completed" || completed.Result == nil || completed.Result.ResultFormat != application.ResultFormatContentV1 ||
+			completed, err := client.SessionToolCall(ctx, session, call.ID)
+			if err != nil || completed.State != "completed" || completed.Result == nil || completed.Result.ResultFormat != sessionprofile.ResultFormatContentV1 ||
 				!bytes.Equal(completed.Result.Content, content) || !reflect.DeepEqual(completed.Result.StructuredContent, map[string]any{"score": json.Number("7"), "identifier": json.Number("9007199254740991")}) {
 				t.Fatalf("completed content-v1 receipt: %+v %v", completed, err)
 			}
@@ -301,7 +301,7 @@ func TestApplicationMultimodalHTTP(t *testing.T) {
 				t.Fatal(err)
 			}
 			client = host.app(string(secret))
-			recovered, err := client.ApplicationCall(ctx, session, call.ID)
+			recovered, err := client.SessionToolCall(ctx, session, call.ID)
 			if err != nil || !reflect.DeepEqual(recovered.Result, completed.Result) || recovered.State != "completed" {
 				t.Fatalf("Host restart changed callback receipt: %+v %v", recovered, err)
 			}

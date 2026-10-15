@@ -91,7 +91,9 @@ type PhaseEvent struct {
 
 type ProbeFunc func(context.Context) ProbeResult
 type LaunchFunc func(Candidate) (LaunchedProcess, error)
-type ShutdownFunc func(context.Context, Status) error
+
+// ShutdownFunc must honor ifIdle without falling back to a forced stop.
+type ShutdownFunc func(ctx context.Context, running Status, ifIdle bool) error
 
 // Manager serializes lifecycle decisions for one Store.
 type Manager struct {
@@ -153,7 +155,7 @@ func (m Manager) Restart(ctx context.Context, candidate Candidate) (status Statu
 		if err != nil {
 			return Status{}, err
 		}
-		if err := m.shutdownAndWait(ctx, running); err != nil {
+		if err := m.shutdownAndWait(ctx, running, false); err != nil {
 			return Status{}, err
 		}
 		return m.launchWithRollback(ctx, selected, rollback)
@@ -173,7 +175,7 @@ func (m Manager) Stop(ctx context.Context) (status Status, err error) {
 			return Status{}, probeError(probe)
 		}
 		running := probe.Status
-		if err := m.shutdownAndWait(ctx, running); err != nil {
+		if err := m.shutdownAndWait(ctx, running, false); err != nil {
 			return Status{}, err
 		}
 		return Status{}, nil
@@ -214,7 +216,7 @@ func (m Manager) startLocked(ctx context.Context, candidate Candidate) (Status, 
 		if err != nil {
 			return Status{}, err
 		}
-		if err := m.shutdownAndWait(ctx, running); err != nil {
+		if err := m.shutdownAndWait(ctx, running, true); err != nil {
 			return Status{}, err
 		}
 		return m.launchWithRollback(ctx, staged, previous)
@@ -282,7 +284,7 @@ func (m Manager) launchAndWait(ctx context.Context, candidate Candidate) (status
 			}
 			released = true
 			if err := m.writeSelected(candidate); err != nil {
-				stopErr := m.shutdownAndWait(ctx, running)
+				stopErr := m.shutdownAndWait(ctx, running, false)
 				return Status{}, errors.Join(err, stopErr)
 			}
 			m.cleanupStaged(candidate, previous)
@@ -347,13 +349,13 @@ func previousCandidate(running Status, candidate Candidate, err error) Candidate
 	return candidate
 }
 
-func (m Manager) shutdownAndWait(ctx context.Context, running Status) (err error) {
+func (m Manager) shutdownAndWait(ctx context.Context, running Status, ifIdle bool) (err error) {
 	started := time.Now()
 	defer func() { m.observePhase("shutdown", started, err) }()
 	if m.Shutdown == nil {
 		return errors.New("servicelifecycle: shutdown function is required")
 	}
-	if err := m.Shutdown(ctx, running); err != nil {
+	if err := m.Shutdown(ctx, running, ifIdle); err != nil {
 		return err
 	}
 	deadline := m.ShutdownTimeout

@@ -17,10 +17,10 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
-	"github.com/caelis-labs/caelis/control/application"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/wirev1/generated"
+	"github.com/caelis-labs/caelis/control/sessionprofile"
 	"github.com/caelis-labs/caelis/control/taskstream"
 	"github.com/caelis-labs/caelis/control/workspacetrust"
 )
@@ -293,28 +293,28 @@ func TestUint64WireRoundTripAtJavaScriptBoundary(t *testing.T) {
 	}
 }
 
-func TestApplicationConfigurationWirePreservesRevisionAsDecimal(t *testing.T) {
+func TestSessionConfigurationWirePreservesRevisionAsDecimal(t *testing.T) {
 	decimal := strconv.FormatUint(math.MaxUint64, 10)
-	profile := application.Profile{
+	profile := sessionprofile.Profile{
 		Version: "example-role/1", Instructions: "Use the callback.", Model: "configured-model",
 		ToolsVersion: "example-tools/1", Execution: "tools-only",
 	}
-	want := application.Configuration{
+	want := sessionprofile.Configuration{
 		SessionID: "session-1", Revision: math.MaxUint64, Profile: profile,
-		LastRequest: &application.RequestConfiguration{Revision: math.MaxUint64, RequestID: "operation-1", TurnID: "turn-1"},
+		LastRequest: &sessionprofile.RequestConfiguration{Revision: math.MaxUint64, RequestID: "operation-1", TurnID: "turn-1"},
 	}
 	raw := mustMarshalWire(t, want)
 	if !bytes.Contains(raw, []byte(`"revision":"`+decimal+`"`)) {
 		t.Fatalf("wire JSON = %s, want decimal string revision", raw)
 	}
-	var generatedConfiguration generated.ApplicationConfiguration
+	var generatedConfiguration generated.SessionConfiguration
 	if err := json.Unmarshal(raw, &generatedConfiguration); err != nil {
 		t.Fatal(err)
 	}
 	if string(generatedConfiguration.Revision) != decimal {
 		t.Fatalf("generated revision = %q, want %q", generatedConfiguration.Revision, decimal)
 	}
-	var got application.Configuration
+	var got sessionprofile.Configuration
 	if err := Unmarshal(raw, &got); err != nil {
 		t.Fatal(err)
 	}
@@ -322,22 +322,22 @@ func TestApplicationConfigurationWirePreservesRevisionAsDecimal(t *testing.T) {
 		t.Fatalf("round trip = %#v, want %#v", got, want)
 	}
 
-	update := application.UpdateConfigurationRequest{
+	update := sessionprofile.UpdateConfigurationRequest{
 		OperationID: "update-1", ExpectedConfigurationRevision: math.MaxUint64,
-		Patch: application.ConfigurationPatch{Model: stringPointer("other-model")},
+		Patch: sessionprofile.ConfigurationPatch{Model: stringPointer("other-model")},
 	}
 	updateJSON := mustMarshalWire(t, update)
 	if !bytes.Contains(updateJSON, []byte(`"expected_configuration_revision":"`+decimal+`"`)) {
 		t.Fatalf("wire JSON = %s, want decimal string expected_configuration_revision", updateJSON)
 	}
-	var generatedUpdate generated.UpdateApplicationConfigurationRequest
+	var generatedUpdate generated.UpdateSessionConfigurationRequest
 	if err := json.Unmarshal(updateJSON, &generatedUpdate); err != nil {
 		t.Fatal(err)
 	}
 	if string(generatedUpdate.ExpectedConfigurationRevision) != decimal {
 		t.Fatalf("generated expected_configuration_revision = %q, want %q", generatedUpdate.ExpectedConfigurationRevision, decimal)
 	}
-	var decodedUpdate application.UpdateConfigurationRequest
+	var decodedUpdate sessionprofile.UpdateConfigurationRequest
 	if err := DecodeRequest(updateJSON, &decodedUpdate); err != nil {
 		t.Fatal(err)
 	}
@@ -348,12 +348,12 @@ func TestApplicationConfigurationWirePreservesRevisionAsDecimal(t *testing.T) {
 		t.Fatalf("decoded patch = %#v", decodedUpdate.Patch)
 	}
 
-	call := application.Call{
-		ID: "receipt-1", CallContext: application.CallContext{
-			Scope:     application.Scope{PrincipalID: "owner", ApplicationID: "app-1", ConnectionID: "connection-1"},
+	call := sessionprofile.Call{
+		ID: "receipt-1", CallContext: sessionprofile.CallContext{
+			Scope:     sessionprofile.Scope{PrincipalID: "owner"},
 			SessionID: "session-1", TurnID: "turn-1", ItemID: "item-1", CallID: "native-call-1",
 			ToolsVersion: profile.ToolsVersion, ConfigurationRevision: math.MaxUint64,
-			Source: application.Source{Kind: "user", OperationID: "prompt-1"},
+			Source: sessionprofile.Source{Kind: "user", OperationID: "prompt-1"},
 		},
 		Name: "ExampleLookup", Arguments: json.RawMessage(`{"key":"example"}`), State: "pending",
 	}
@@ -361,29 +361,29 @@ func TestApplicationConfigurationWirePreservesRevisionAsDecimal(t *testing.T) {
 	if !bytes.Contains(callJSON, []byte(`"configuration_revision":"`+decimal+`"`)) {
 		t.Fatalf("wire JSON = %s, want decimal string configuration_revision", callJSON)
 	}
-	var generatedCall generated.ApplicationCall
+	var generatedCall generated.SessionToolCall
 	if err := json.Unmarshal(callJSON, &generatedCall); err != nil {
 		t.Fatal(err)
 	}
 	if string(generatedCall.ConfigurationRevision) != decimal {
 		t.Fatalf("generated configuration_revision = %q, want %q", generatedCall.ConfigurationRevision, decimal)
 	}
-	var gotCall application.Call
+	var gotCall sessionprofile.Call
 	if err := Unmarshal(callJSON, &gotCall); err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(gotCall, call) {
 		t.Fatalf("call round trip = %#v, want %#v", gotCall, call)
 	}
-	listJSON := mustMarshalWire(t, []application.Call{call})
+	listJSON := mustMarshalWire(t, []sessionprofile.Call{call})
 	if !bytes.Contains(listJSON, []byte(`"configuration_revision":"`+decimal+`"`)) {
 		t.Fatalf("wire JSON = %s, want decimal string configuration_revision", listJSON)
 	}
-	var gotList []application.Call
+	var gotList []sessionprofile.Call
 	if err := Unmarshal(listJSON, &gotList); err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(gotList, []application.Call{call}) {
+	if !reflect.DeepEqual(gotList, []sessionprofile.Call{call}) {
 		t.Fatalf("list round trip = %#v", gotList)
 	}
 }
@@ -970,39 +970,39 @@ func TestTaskDescriptorContextGaugeMatchesGeneratedWire(t *testing.T) {
 	}
 }
 
-func TestApplicationModelCapabilitiesRoundTrip(t *testing.T) {
+func TestSessionModelCapabilitiesRoundTrip(t *testing.T) {
 	yes, no := true, false
 	for _, supported := range []*bool{nil, &no, &yes} {
-		want := application.ModelCapabilities{SessionID: "session-1", Model: "selected-model", ConfigurationRevision: math.MaxUint64, ImageInput: supported}
+		want := sessionprofile.ModelCapabilities{SessionID: "session-1", Model: "selected-model", ConfigurationRevision: math.MaxUint64, ImageInput: supported}
 		raw := mustMarshalWire(t, want)
-		validateWireValue(t, "ApplicationModelCapabilities", want)
-		var wire generated.ApplicationModelCapabilities
+		validateWireValue(t, "SessionModelCapabilities", want)
+		var wire generated.SessionModelCapabilities
 		if err := json.Unmarshal(raw, &wire); err != nil {
 			t.Fatal(err)
 		}
 		if string(wire.ConfigurationRevision) != strconv.FormatUint(math.MaxUint64, 10) || (wire.ImageInput == nil) != (supported == nil) || supported != nil && *wire.ImageInput != *supported {
 			t.Fatalf("wire capability lost: %s", raw)
 		}
-		var got application.ModelCapabilities
+		var got sessionprofile.ModelCapabilities
 		if err := Unmarshal(raw, &got); err != nil || !reflect.DeepEqual(got, want) {
 			t.Fatal(got, err)
 		}
 	}
 }
 
-func TestApplicationSkillStatusRoundTrip(t *testing.T) {
-	want := application.MCPStatus{
+func TestSessionSkillStatusRoundTrip(t *testing.T) {
+	want := sessionprofile.MCPStatus{
 		SessionID: "session-1", ConfigurationRevision: "2",
-		Servers: []application.MCPServerStatus{{Name: "documents", Status: "running", Tools: []string{"lookup"}, ToolDetails: []mcp.MCPToolDetail{{Name: "lookup", Description: tool.ExternalCapabilityDescriptionPrefix + " Look up a document"}}}},
-		Skills: []application.SkillStatus{
+		Servers: []sessionprofile.MCPServerStatus{{Name: "documents", Status: "running", Tools: []string{"lookup"}, ToolDetails: []mcp.MCPToolDetail{{Name: "lookup", Description: tool.ExternalCapabilityDescriptionPrefix + " Look up a document"}}}},
+		Skills: []sessionprofile.SkillStatus{
 			{Path: "/selected", Kind: "directory", Status: "ready"},
 			{Path: "/selected/healthy", Kind: "skill", Name: "healthy", Status: "ready"},
 			{Path: "/selected/broken", Kind: "skill", Status: "failed", Warning: "selected Skill metadata is invalid or unreadable"},
 		},
 	}
 	raw := mustMarshalWire(t, want)
-	validateWireValue(t, "ApplicationMCPStatus", want)
-	var wire generated.ApplicationMCPStatus
+	validateWireValue(t, "SessionMCPStatus", want)
+	var wire generated.SessionMCPStatus
 	if err := json.Unmarshal(raw, &wire); err != nil || len(wire.Skills) != 3 || wire.Skills[2].Status != "failed" || len(wire.Servers[0].ToolDetails) != 1 || wire.Servers[0].ToolDetails[0].Name != "lookup" {
 		t.Fatalf("generated status = %+v, %v", wire, err)
 	}
@@ -1014,7 +1014,7 @@ func TestApplicationSkillStatusRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(raw, &oldClient); err != nil || len(oldClient.Servers) != 1 || !reflect.DeepEqual(oldClient.Servers[0].Tools, []string{"lookup"}) {
 		t.Fatalf("old tools-only client = %+v, %v", oldClient, err)
 	}
-	var got application.MCPStatus
+	var got sessionprofile.MCPStatus
 	if err := Unmarshal(raw, &got); err != nil || !reflect.DeepEqual(got, want) {
 		t.Fatalf("roundtrip = %+v, %v", got, err)
 	}

@@ -4,15 +4,14 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	inmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
 	"github.com/caelis-labs/caelis/agent-sdk/task/terminal"
-	"github.com/caelis-labs/caelis/control/application"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/taskstream"
+	"github.com/caelis-labs/caelis/control/sessionprofile"
 )
 
 func TestTerminalServiceResolvesDisplayIDThroughTaskDirectory(t *testing.T) {
@@ -52,25 +51,21 @@ type scopedTerminalTaskDirectory struct {
 }
 
 func (d scopedTerminalTaskDirectory) List(ctx context.Context, p taskstream.Principal, req taskstream.ListRequest) (taskstream.ListResult, error) {
-	if p.ID != d.owner.ID || p.ApplicationID != d.owner.ApplicationID || p.ConnectionID != d.owner.ConnectionID {
+	if p.ID != d.owner.ID {
 		return taskstream.ListResult{}, appserver.ErrUnauthorized
 	}
 	return d.terminalTaskDirectory.List(ctx, p, req)
 }
 
-func TestTerminalMutationUsesNativeApplicationScopeAndLeaseOwner(t *testing.T) {
-	store, err := application.Open(filepath.Join(t.TempDir(), "control.sqlite"))
+func TestTerminalMutationUsesNativeSessionScopeAndLeaseOwner(t *testing.T) {
+	store, err := sessionprofile.Open(filepath.Join(t.TempDir(), "control.sqlite"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	connection, err := store.Register(t.Context(), "owner", application.Registration{OperationID: "app", Name: "app", Credential: "app-client-" + strings.Repeat("a", 64)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	principal := appserver.Principal{ID: "owner", ApplicationID: connection.ApplicationID, ConnectionID: connection.ConnectionID}
-	scope, _ := appserver.ApplicationScope(principal)
-	if err := store.PutBinding(t.Context(), application.Binding{Scope: scope, SessionID: "session-1", CreationDigest: "creation", Profile: application.Profile{Version: "role/1", Instructions: "test", Model: "test", Execution: "tools-only", ToolsVersion: "tools/1"}}); err != nil {
+	principal := appserver.Principal{ID: "owner"}
+	scope, _ := appserver.SessionScope(principal)
+	if err := store.PutBinding(t.Context(), sessionprofile.Binding{Scope: scope, SessionID: "session-1", CreationDigest: "creation", Profile: sessionprofile.Profile{Version: "role/1", Instructions: "test", Model: "test", Execution: "tools-only", ToolsVersion: "tools/1"}}); err != nil {
 		t.Fatal(err)
 	}
 	sessions := inmemory.NewStore(inmemory.Config{})
@@ -78,7 +73,7 @@ func TestTerminalMutationUsesNativeApplicationScopeAndLeaseOwner(t *testing.T) {
 		t.Fatal(err)
 	}
 	streams := &recordingTerminalStreams{}
-	service, err := NewTerminalService(scopedTerminalTaskDirectory{owner: principal}, streams, appserver.SessionAuthorizer{Sessions: sessions, Applications: store})
+	service, err := NewTerminalService(scopedTerminalTaskDirectory{owner: principal}, streams, appserver.SessionAuthorizer{Sessions: sessions, SessionProfiles: store})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,13 +86,13 @@ func TestTerminalMutationUsesNativeApplicationScopeAndLeaseOwner(t *testing.T) {
 			t.Fatalf("native target changed: %+v", streams.ref)
 		}
 		wrong := principal
-		wrong.ConnectionID = "foreign"
+		wrong.ID = "foreign"
 		streams.ref = terminal.Ref{}
 		if err := mutate(t.Context(), wrong, req); !errors.Is(err, appserver.ErrUnauthorized) || streams.ref.TaskID != "" {
 			t.Fatalf("foreign connection reached native terminal: %+v, %v", streams.ref, err)
 		}
 	}
-	if err := store.Revoke(t.Context(), scope); err != nil {
+	if err := store.ArchiveBinding(t.Context(), scope, "session-1"); err != nil {
 		t.Fatal(err)
 	}
 	for _, observe := range []func(context.Context, appserver.Principal, appserver.TerminalRequest) error{
@@ -116,7 +111,7 @@ func TestTerminalMutationUsesNativeApplicationScopeAndLeaseOwner(t *testing.T) {
 	}
 	for _, mutate := range []func(context.Context, appserver.Principal, appserver.TerminalRequest) error{service.KillTerminal, service.ReleaseTerminal} {
 		streams.ref = terminal.Ref{}
-		if err := mutate(t.Context(), principal, req); !errors.Is(err, application.ErrRevoked) || streams.ref.TaskID != "" {
+		if err := mutate(t.Context(), principal, req); !errors.Is(err, appserver.ErrSessionClosed) || streams.ref.TaskID != "" {
 			t.Fatalf("revoked mutation reached terminal: %+v, %v", streams.ref, err)
 		}
 	}
@@ -163,39 +158,3 @@ func (s *recordingTerminalStreams) Release(_ context.Context, ref terminal.Ref) 
 }
 
 var _ terminal.Controller = (*recordingTerminalStreams)(nil)
-
-type applicationTerminalDirectory struct {
-	terminalTaskDirectory
-	seen taskstream.Principal
-}
-
-func (d *applicationTerminalDirectory) List(ctx context.Context, p taskstream.Principal, r taskstream.ListRequest) (taskstream.ListResult, error) {
-	d.seen = p
-	if p.ApplicationID != "application" || p.ConnectionID != "connection" {
-		return taskstream.ListResult{}, context.Canceled
-	}
-	return d.terminalTaskDirectory.List(ctx, p, r)
-}
-func TestTerminalObservationPreservesApplicationPrincipal(t *testing.T) {
-	directory := &applicationTerminalDirectory{}
-	service, err := NewTerminalService(directory, &recordingTerminalStreams{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = service.TerminalOutput(t.Context(), appserver.Principal{ID: "owner", ApplicationID: "application", ConnectionID: "connection"}, appserver.TerminalRequest{SessionID: "session-1", TerminalID: "tool-call-1"})
-	if err != nil {
-		t.Fatal("application context lost", err)
-	}
-	p := appserver.Principal{ID: "owner", ApplicationID: "application", ConnectionID: "connection"}
-	req := appserver.TerminalRequest{SessionID: "session-1", TerminalID: "tool-call-1"}
-	if _, err = service.WaitTerminal(t.Context(), p, req); err != nil {
-		t.Fatal("application lost scoped terminal observation", err)
-	}
-	if err = service.KillTerminal(t.Context(), p, req); err == nil {
-		t.Fatal("application acquired kill authority")
-	}
-	if err = service.ReleaseTerminal(t.Context(), p, req); err == nil {
-		t.Fatal("application acquired release authority")
-	}
-
-}

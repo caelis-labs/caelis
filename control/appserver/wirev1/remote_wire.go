@@ -8,9 +8,9 @@ import (
 	"math"
 
 	controlagents "github.com/caelis-labs/caelis/control/agents"
-	"github.com/caelis-labs/caelis/control/application"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
+	"github.com/caelis-labs/caelis/control/sessionprofile"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
 	"github.com/caelis-labs/caelis/control/workspacetrust"
 )
@@ -37,7 +37,43 @@ func unmarshalWireValue(raw []byte, target any) error {
 			return err
 		}
 		return unmarshalKnown(normalized, typed)
+	case *sessionprofile.Binding:
+		normalized, err := normalizeObjectUint64Fields(raw, "creation_revision")
+		if err != nil {
+			return err
+		}
+		return unmarshalKnown(normalized, typed)
+	case *[]sessionprofile.Binding:
+		var values []json.RawMessage
+		if err := json.Unmarshal(raw, &values); err != nil {
+			return err
+		}
+		out := make([]sessionprofile.Binding, 0, len(values))
+		for _, value := range values {
+			var binding sessionprofile.Binding
+			if err := Unmarshal(value, &binding); err != nil {
+				return err
+			}
+			out = append(out, binding)
+		}
+		*typed = out
+		return nil
 	case *appserver.CommandResult:
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &fields); err != nil {
+			return err
+		}
+		if configuration, ok := fields["configuration"]; ok && string(configuration) != "null" {
+			normalized, err := normalizeApplicationConfigurationJSON(configuration)
+			if err != nil {
+				return err
+			}
+			fields["configuration"] = normalized
+		}
+		raw, err := json.Marshal(fields)
+		if err != nil {
+			return err
+		}
 		normalized, err := normalizeObjectUint64Fields(raw, "revision")
 		if err != nil {
 			return err
@@ -76,25 +112,25 @@ func unmarshalWireValue(raw []byte, target any) error {
 			return err
 		}
 		return unmarshalKnown(normalized, typed)
-	case *application.ModelCapabilities:
+	case *sessionprofile.ModelCapabilities:
 		normalized, err := normalizeObjectUint64Fields(raw, "configuration_revision")
 		if err != nil {
 			return err
 		}
 		return unmarshalKnown(normalized, typed)
-	case *application.Configuration:
+	case *sessionprofile.Configuration:
 		normalized, err := normalizeApplicationConfigurationJSON(raw)
 		if err != nil {
 			return err
 		}
 		return unmarshalKnown(normalized, typed)
-	case *application.Call:
+	case *sessionprofile.Call:
 		normalized, err := normalizeObjectUint64Fields(raw, "configuration_revision")
 		if err != nil {
 			return err
 		}
 		return unmarshalKnown(normalized, typed)
-	case *[]application.Call:
+	case *[]sessionprofile.Call:
 		normalized, err := normalizeApplicationCallListJSON(raw)
 		if err != nil {
 			return err

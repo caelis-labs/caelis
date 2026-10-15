@@ -193,7 +193,17 @@ func (c *Client) Readiness(ctx context.Context) (appserver.HostStatus, error) {
 // ShutdownHost requests graceful quiesce of the authenticated Control Host.
 // The response acknowledges the exact instance before listener shutdown starts.
 func (c *Client) ShutdownHost(ctx context.Context) (appserver.HostStatus, error) {
-	response, err := c.do(ctx, http.MethodPost, "/host/shutdown", nil, nil, nil)
+	return c.shutdownHost(ctx, nil)
+}
+
+// ShutdownIdleHost fences replacement to an observed instance and refuses to
+// cancel active Session work. Callers must first negotiate its capability.
+func (c *Client) ShutdownIdleHost(ctx context.Context, instanceID string) (appserver.HostStatus, error) {
+	return c.shutdownHost(ctx, appserver.HostShutdownRequest{ExpectedInstanceID: instanceID, IfIdle: true})
+}
+
+func (c *Client) shutdownHost(ctx context.Context, request any) (appserver.HostStatus, error) {
+	response, err := c.do(ctx, http.MethodPost, "/host/shutdown", nil, request, nil)
 	if err != nil {
 		return appserver.HostStatus{}, err
 	}

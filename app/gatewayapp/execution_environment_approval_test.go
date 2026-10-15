@@ -13,11 +13,11 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
-	"github.com/caelis-labs/caelis/control/application"
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/httpclient"
 	"github.com/caelis-labs/caelis/control/appserver/taskstream"
+	"github.com/caelis-labs/caelis/control/sessionprofile"
 )
 
 func TestApplicationExecutionEnvironmentAfterHostApproval(t *testing.T) {
@@ -44,7 +44,7 @@ func TestApplicationExecutionEnvironmentAfterHostApproval(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	client, _ := registerApplicationHTTP(t, ctx, host, "environment", filepath.Join(root, "application.credential"))
+	client, _ := connectSessionOwnerHTTP(t, ctx, host, "owner", filepath.Join(root, "application.credential"))
 	inherit := false
 	environment := map[string]string{"HOME": home, "PATH": "/usr/bin:/bin", "CONFIG_VALUE": "configured"}
 	command := `printf '%s|%s|%s' "$HOME" "$PWD" "$CONFIG_VALUE" > approved-env`
@@ -54,8 +54,8 @@ func TestApplicationExecutionEnvironmentAfterHostApproval(t *testing.T) {
 		delete(environment, "PATH")
 		command = "[IO.File]::WriteAllText('approved-env', ($env:HOME+'|'+(Get-Location).Path+'|'+$env:CONFIG_VALUE))"
 	}
-	profile := application.Profile{Version: "v1", Model: "custom/gpt-4.1", ToolsVersion: "v1", Execution: "workspace-write", Workspace: application.Workspace{CWD: cwd}, ExecutionConfig: &sandbox.ExecutionConfig{Environment: sandbox.EnvironmentConfig{Inherit: &inherit, Set: environment}}}
-	created, err := client.CreateApplicationSession(ctx, appserver.CreateApplicationSessionRequest{WriteBase: appserver.WriteBase{OperationID: "create"}, Profile: profile})
+	profile := sessionprofile.Profile{Version: "v1", Model: "custom/gpt-4.1", ToolsVersion: "v1", Execution: "workspace-write", Workspace: sessionprofile.Workspace{CWD: cwd}, ExecutionConfig: &sandbox.ExecutionConfig{Environment: sandbox.EnvironmentConfig{Inherit: &inherit, Set: environment}}}
+	created, err := client.CreateSession(ctx, appserver.CreateSessionRequest{WriteBase: appserver.WriteBase{OperationID: "create"}, Profile: profilePointer(profile)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +69,7 @@ func TestApplicationExecutionEnvironmentAfterHostApproval(t *testing.T) {
 		t.Fatal(err)
 	}
 	provider.set(nativeModelTool{"RunCommand", string(input)}, nativeModelTool{"Task", `{"action":"wait","handle":"command"}`})
-	_, err = client.PromptApplication(ctx, appserver.ApplicationPromptRequest{PromptRequest: appserver.PromptRequest{WriteBase: appserver.WriteBase{OperationID: "prompt", SessionID: created.SessionID}, Input: "Run the synthetic environment check after approval."}, SourceKind: "user"})
+	_, err = client.Prompt(ctx, appserver.PromptRequest{WriteBase: appserver.WriteBase{OperationID: "prompt", SessionID: created.SessionID}, Input: "Run the synthetic environment check after approval.", SourceKind: "user"})
 	if err != nil {
 		t.Fatal(err)
 	}

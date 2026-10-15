@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/caelis-labs/caelis/control/application"
+	"github.com/caelis-labs/caelis/control/sessionprofile"
 	"golang.org/x/sys/unix"
 )
 
@@ -66,7 +66,7 @@ func TestApplicationArtifactFIFOReplacementDoesNotBlockDrain(t *testing.T) {
 	defer stop()
 	select {
 	case err := <-finished:
-		if !errors.Is(err, application.ErrInvalid) {
+		if !errors.Is(err, sessionprofile.ErrInvalid) {
 			t.Fatalf("FIFO replacement not rejected: %v", err)
 		}
 	case <-deadline.Done():
@@ -76,7 +76,7 @@ func TestApplicationArtifactFIFOReplacementDoesNotBlockDrain(t *testing.T) {
 	store := &resourceBridgeStore{}
 	_, publish := testResourceBridge(t, workspace, store)
 	_, err = publish.Call(ctx, testResourceCall(t, "PublishArtifact", map[string]string{"path": "output.txt", "name": "report", "media_type": "text/plain"}))
-	if !errors.Is(err, application.ErrInvalid) || store.calls != 0 {
+	if !errors.Is(err, sessionprofile.ErrInvalid) || store.calls != 0 {
 		t.Fatalf("canceled FIFO artifact reached resource Store: %v, calls=%d", err, store.calls)
 	}
 }

@@ -9,25 +9,8 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
 	skillfs "github.com/caelis-labs/caelis/agent-sdk/skill/fs"
-	"github.com/caelis-labs/caelis/control/application"
+	"github.com/caelis-labs/caelis/control/sessionprofile"
 )
-
-func TestApplicationMCPGrantOwnerUsesAuthenticatedConnectionScope(t *testing.T) {
-	owner := application.Scope{PrincipalID: "principal", ApplicationID: "application-a", ConnectionID: "connection-a"}
-	if applicationMCPGrantOwner(owner) == "" {
-		t.Fatal("authenticated connection has no MCP grant owner")
-	}
-	other := owner
-	other.ConnectionID = "connection-b"
-	if applicationMCPGrantOwner(owner) == applicationMCPGrantOwner(other) {
-		t.Fatal("independent connection shared MCP grant owner")
-	}
-	other = owner
-	other.ApplicationID = "application-b"
-	if applicationMCPGrantOwner(owner) == applicationMCPGrantOwner(other) {
-		t.Fatal("independent Application shared MCP grant owner")
-	}
-}
 
 func TestApplicationSkillRootLoadsOnlySelectedMetadataThenBody(t *testing.T) {
 	root := t.TempDir()
@@ -44,7 +27,7 @@ func TestApplicationSkillRootLoadsOnlySelectedMetadataThenBody(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(ambient, "SKILL.md"), []byte("---\nname: ambient\ndescription: Ambient synthetic skill.\n---\nAMBIENT_BODY_MARKER\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	catalog, err := applicationSkillCatalog(application.Profile{SkillRoots: []string{selected}})
+	catalog, err := applicationSkillCatalog(sessionprofile.Profile{SkillRoots: []string{selected}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +55,7 @@ func TestApplicationSkillCatalogDoesNotSilentlyDropMissingSelectedRoot(t *testin
 		t.Fatal(err)
 	}
 	missing := filepath.Join(root, "selected-but-missing")
-	if _, err := applicationSkillCatalog(application.Profile{SkillRoots: []string{healthy, missing}}); err == nil || !strings.Contains(err.Error(), missing) {
+	if _, err := applicationSkillCatalog(sessionprofile.Profile{SkillRoots: []string{healthy, missing}}); err == nil || !strings.Contains(err.Error(), missing) {
 		t.Fatalf("missing selected Skill was silently omitted: %v", err)
 	}
 }

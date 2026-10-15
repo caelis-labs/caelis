@@ -10,7 +10,7 @@ schema is [OpenAPI](../api/control/v1/openapi.json), with supported
 ## Scope and assembly
 
 An ordinary `POST /sessions` request accepts `execution_config` alongside its
-existing `cwd`. An [Application Session](application-runtime.md) accepts the same
+existing `cwd`. An [Explicit-profile Session](session-profiles.md) accepts the same
 object at `profile.execution_config`, alongside `profile.workspace.cwd` and
 `execution: "workspace-write"`. Tools-only profiles reject non-null process
 configuration. The SDK owner is `sandbox.ExecutionConfig`, supplied through

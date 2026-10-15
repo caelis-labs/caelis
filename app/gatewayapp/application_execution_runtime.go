@@ -7,10 +7,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
-	"github.com/caelis-labs/caelis/control/application"
+	"github.com/caelis-labs/caelis/control/sessionprofile"
 	"github.com/caelis-labs/caelis/internal/sandboxrouter"
 	"github.com/caelis-labs/caelis/internal/workspaceidentity"
 )
@@ -31,24 +32,19 @@ func validateApplicationExecutionPlatform(execution string) error {
 	}
 }
 
-// applicationExecutionRuntime leases the ordinary native sandbox to one bound
-// application Session. Its directory may be application-owned and persistent;
-// Host execution remains subject to normal per-call approval policy.
+// applicationExecutionRuntime binds the ordinary native sandbox to the Session
+// activation and its immutable directories. Permissions use the native policy.
 type applicationExecutionRuntime struct {
 	sandbox.Runtime
 	cwd        string
 	access     []string
 	fullAccess bool
-	lease      *application.Store
-	scope      application.Scope
+	closed     atomic.Bool
 }
 
-func newApplicationExecutionRuntime(cwd, storeDir, authorityDir string, lease *application.Store, scope application.Scope, profile application.Profile, execution *sandbox.ExecutionConfig) (*applicationExecutionRuntime, error) {
+func newApplicationExecutionRuntime(cwd, storeDir, authorityDir string, profile sessionprofile.Profile, execution *sandbox.ExecutionConfig) (*applicationExecutionRuntime, error) {
 	if err := validateApplicationExecutionPlatform("workspace-write"); err != nil {
 		return nil, err
-	}
-	if lease == nil {
-		return nil, errors.New("gatewayapp: application execution lease is required")
 	}
 	if err := validateApplicationDirectory(cwd); err != nil {
 		return nil, err
@@ -82,7 +78,7 @@ func newApplicationExecutionRuntime(cwd, storeDir, authorityDir string, lease *a
 	if err != nil {
 		return nil, err
 	}
-	return &applicationExecutionRuntime{Runtime: rt, cwd: securedCWD, access: access, fullAccess: backend == sandbox.BackendHost, lease: lease, scope: scope}, nil
+	return &applicationExecutionRuntime{Runtime: rt, cwd: securedCWD, access: access, fullAccess: backend == sandbox.BackendHost}, nil
 }
 
 // validateApplicationDirectory rejects redirection of a creation-bound canonical
@@ -101,7 +97,7 @@ func validateApplicationDirectory(path string) error {
 // applicationWorkspaceAccess resolves and verifies additional directories at
 // creation and again at activation. The bound CWD is always writable; read-only
 // entries only identify working directories, not a hard read ceiling.
-func applicationWorkspaceAccess(entries []application.WorkspaceAccess, cwd string) ([]string, []string, error) {
+func applicationWorkspaceAccess(entries []sessionprofile.WorkspaceAccess, cwd string) ([]string, []string, error) {
 	writable := []string{cwd}
 	access := make([]string, 0, len(entries))
 	seen := map[string]string{cwd: "read-write"}
@@ -158,54 +154,54 @@ func (r *applicationExecutionRuntime) command(req sandbox.CommandRequest) (sandb
 }
 
 // FileSystemFor retains the selected SDK policy filesystem while checking the
-// application lease at every filesystem effect, including after approval resumes.
+// activation lifecycle and directory binding at each filesystem effect.
 func (r *applicationExecutionRuntime) FileSystemFor(constraints sandbox.Constraints) sandbox.FileSystem {
 	if provider, ok := r.Runtime.(sandbox.FileSystemProvider); ok {
-		return applicationLeasedFileSystem{FileSystem: provider.FileSystemFor(constraints), runtime: r}
+		return sessionBoundFileSystem{FileSystem: provider.FileSystemFor(constraints), runtime: r}
 	}
-	return applicationLeasedFileSystem{FileSystem: r.Runtime.FileSystem(), runtime: r}
+	return sessionBoundFileSystem{FileSystem: r.Runtime.FileSystem(), runtime: r}
 }
 
 func (r *applicationExecutionRuntime) FileSystem() sandbox.FileSystem {
-	return applicationLeasedFileSystem{FileSystem: r.Runtime.FileSystem(), runtime: r}
+	return sessionBoundFileSystem{FileSystem: r.Runtime.FileSystem(), runtime: r}
 }
 
-type applicationLeasedFileSystem struct {
+type sessionBoundFileSystem struct {
 	sandbox.FileSystem
 	runtime *applicationExecutionRuntime
 }
 
-func (f applicationLeasedFileSystem) Open(path string) (*os.File, error) {
+func (f sessionBoundFileSystem) Open(path string) (*os.File, error) {
 	if err := f.runtime.checkActive(context.Background()); err != nil {
 		return nil, err
 	}
 	return f.FileSystem.Open(path)
 }
-func (f applicationLeasedFileSystem) ReadDir(path string) ([]os.DirEntry, error) {
+func (f sessionBoundFileSystem) ReadDir(path string) ([]os.DirEntry, error) {
 	if err := f.runtime.checkActive(context.Background()); err != nil {
 		return nil, err
 	}
 	return f.FileSystem.ReadDir(path)
 }
-func (f applicationLeasedFileSystem) Stat(path string) (os.FileInfo, error) {
+func (f sessionBoundFileSystem) Stat(path string) (os.FileInfo, error) {
 	if err := f.runtime.checkActive(context.Background()); err != nil {
 		return nil, err
 	}
 	return f.FileSystem.Stat(path)
 }
-func (f applicationLeasedFileSystem) ReadFile(path string) ([]byte, error) {
+func (f sessionBoundFileSystem) ReadFile(path string) ([]byte, error) {
 	if err := f.runtime.checkActive(context.Background()); err != nil {
 		return nil, err
 	}
 	return f.FileSystem.ReadFile(path)
 }
-func (f applicationLeasedFileSystem) WriteFile(path string, data []byte, mode os.FileMode) error {
+func (f sessionBoundFileSystem) WriteFile(path string, data []byte, mode os.FileMode) error {
 	if err := f.runtime.checkActive(context.Background()); err != nil {
 		return err
 	}
 	return f.FileSystem.WriteFile(path, data, mode)
 }
-func (f applicationLeasedFileSystem) MkdirAll(path string, mode os.FileMode) error {
+func (f sessionBoundFileSystem) MkdirAll(path string, mode os.FileMode) error {
 	if err := f.runtime.checkActive(context.Background()); err != nil {
 		return err
 	}
@@ -217,13 +213,13 @@ func (f applicationLeasedFileSystem) MkdirAll(path string, mode os.FileMode) err
 	}
 	return fsys.MkdirAll(path, mode)
 }
-func (f applicationLeasedFileSystem) Glob(pattern string) ([]string, error) {
+func (f sessionBoundFileSystem) Glob(pattern string) ([]string, error) {
 	if err := f.runtime.checkActive(context.Background()); err != nil {
 		return nil, err
 	}
 	return f.FileSystem.Glob(pattern)
 }
-func (f applicationLeasedFileSystem) WalkDir(path string, visit fs.WalkDirFunc) error {
+func (f sessionBoundFileSystem) WalkDir(path string, visit fs.WalkDirFunc) error {
 	if err := f.runtime.checkActive(context.Background()); err != nil {
 		return err
 	}
@@ -236,10 +232,10 @@ func (f applicationLeasedFileSystem) WalkDir(path string, visit fs.WalkDirFunc) 
 }
 
 func (r *applicationExecutionRuntime) checkActive(ctx context.Context) error {
-	if r.lease == nil {
-		return errors.New("gatewayapp: application execution lease is unavailable")
+	if r.closed.Load() {
+		return errors.New("gatewayapp: Session execution runtime is closed")
 	}
-	if err := r.lease.CheckActive(ctx, r.scope); err != nil {
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if err := validateApplicationDirectory(r.cwd); err != nil {
@@ -311,4 +307,11 @@ func (s applicationExecutionSession) WriteInput(ctx context.Context, input []byt
 		return err
 	}
 	return s.Session.WriteInput(ctx, input)
+}
+
+func (r *applicationExecutionRuntime) Close() error {
+	if r.closed.Swap(true) {
+		return nil
+	}
+	return r.Runtime.Close()
 }

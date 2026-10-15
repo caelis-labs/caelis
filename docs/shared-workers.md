@@ -1,15 +1,13 @@
 # Shared native Worker Sessions
 
-A Worker is an ordinary native Session in the existing Control Host. An enrolled
-application can create one and receives a durable grant to that Session. The
-local user can attach concurrently through the existing TUI. Neither observer
-owns execution or displaces another observer; there is no control handoff.
+A Worker is an ordinary native Session in the existing Control Host. Bot and TUI
+use the same authenticated Host principal and Session permissions. The local user
+can attach concurrently through the TUI. Neither observer owns execution or
+displaces another observer; there is no control handoff or separate Worker grant.
 
-The Host must advertise `shared-native-workers-v1`, `turn-steering-receipts-v1`
-and `session-feed-v2` through `GET /api/control/v1/initialize`. Authentication and
-enrollment follow [Application Runtime](application-runtime.md). Use a scoped
-application credential for Bot operations and the user's Host credential for TUI
-attach. Do not give the Bot a Host credential to bypass missing permissions.
+Negotiate `turn-steering-receipts-v1` and `session-feed-v2` through
+`GET /api/control/v1/initialize`. See [Session profiles](session-profiles.md) for
+explicit client assembly, common operation receipts and authentication.
 
 ## Create, attach and work
 
@@ -18,8 +16,7 @@ All HTTP paths below are relative to `/api/control/v1`. Writes require matching
 
 | Operation | Endpoint and request |
 | --- | --- |
-| Create Worker | `POST /application/workers` with `{operation_id, cwd, title?}`; `cwd` is an absolute directory on the Host |
-| List owned Workers | `GET /application/workers`; returns scoped Session grants, not execution status |
+| Create Worker | `POST /sessions` with `{operation_id, cwd, title?}`; `cwd` is an absolute directory on the Host |
 | Start a Turn | `POST /sessions/{session_id}/prompt` with `{operation_id, input, content_parts?}` |
 | Append to a running Turn | `POST /sessions/{session_id}/steer` with `{operation_id, target, input, content_parts?}` |
 | Inspect state | `GET /sessions/{session_id}/state` |
@@ -28,7 +25,7 @@ All HTTP paths below are relative to `/api/control/v1`. Writes require matching
 | Observe Task output | `GET /sessions/{session_id}/tasks/{task_id}/events` or `/subscribe`; uses the existing independent Task stream |
 | Interrupt | `POST /sessions/{session_id}/cancel` with `{operation_id, target}` |
 | Decide approval | `POST /sessions/{session_id}/approvals/{request_id}/resolve` with `{operation_id, target, approval_request_id, outcome, option_id, approved}` |
-| Reconcile application create/prompt/steer | `GET /application/operations/{operation_id}` |
+| Reconcile create/prompt/steer | `GET /operations/{operation_id}` |
 
 Creation may optionally select `model`, `reasoning_effort` and `fast_mode` using
 the Host's configured model catalog. Without a selection the ordinary Host
@@ -37,12 +34,11 @@ the new Session. No credentials, callback tools, Bot instructions or memory are
 copied. A model configuration failure after creation retains the Session address
 with an unknown operation outcome; it must not trigger another creation.
 
-If the Host loses the application receipt after the complete create-and-configure
-command commits, operation queries and identical retries recover its retained
-command receipt and Session ID. Recovery requires the exact application scope,
-operation, action and request. A Worker grant or an existing Session alone is
-insufficient; missing or expired command evidence keeps the outcome unknown and
-never redispatches creation.
+If a response is lost, query the shared operation ID. Recovery uses the original
+retained command receipt or exact canonical completion evidence, without
+redispatch. An existing Session alone cannot prove the complete create-and-model
+selection command. Missing/expired evidence stays unknown and does not authorize
+another creation.
 
 Use the returned Session ID unchanged:
 
@@ -86,9 +82,9 @@ An accepted input that has no applied event before cancellation, failure or Host
 loss must not be reported as applied. An unknown receipt or disconnected stream
 does not authorize another operation ID. Reconcile the saved ID and restore the
 feed. A new user instruction for a later Turn is a new operation, not a retry.
-Application main Sessions support the same `/steer` endpoint for actual collected
+Explicit-profile Sessions support the same `/steer` endpoint for actual collected
 user input; summaries and background triggers must retain their ordinary
-application source/grant path and must not be relabeled as user steering.
+source/grant path and must not be relabeled as user steering.
 
 ## Observation, state and permissions
 
@@ -109,40 +105,33 @@ Turns without status polling.
 
 The Worker samples normal Host configuration at activation: native tools,
 trusted-workspace instructions, MCP, plugins, environment, Workspace Memory and
-the native permission/approval policy. Bot-private Application Session state,
+the native permission/approval policy. Bot-private profile state,
 callback catalogs and private Memory are not inherited. A workspace path grants
 no extra tool privileges; normal workspace trust and approvals still apply.
 
-An owned Worker grant exposes the native Session controls used by the local
-user. Require `shared-worker-session-control-v1` for Session compaction, model and
-approval/controller/presentation selection, controller handoff, closure,
-status/presentation, file/Skill/model completion, participant start/prompt/cancel,
-and exact child input/receipts. These calls use the ordinary `/sessions/{id}`
-focused APIs, native revision/controller checks and operation receipts.
-They do not mutate the Host's model default, credential store or agent bindings.
-Trusted embedded adapters may bind the same scoped principal with
-`BindAppServerClients`; the bound Task, child-input and focused clients retain the
-exact Application and Connection scope. Selected-Session Agent discovery reads
-its Runtime catalog. Host-global catalogs and UI preferences require a Host grant.
+The same authenticated owner can use native Session compaction, model and
+approval/controller/presentation selection, handoff, closure, status, completion,
+participants and exact child input through the ordinary `/sessions/{id}` APIs.
+Each action retains its native revision/controller fences and shared receipt.
+Host-global configuration changes use the corresponding explicit Host action;
+Session model selection does not implicitly change the Host default.
 
-The application can inspect, prompt, steer, interrupt and resolve approvals only
-for its own Worker grants. It cannot adopt an arbitrary Session ID or acquire
-another application's Worker, including another connection of the same owner.
-Lease expiry or revocation removes mutation authority without cancelling the
-user's native Session. Retained state, handles and input receipts remain readable;
-the user retains access. Application main Sessions retain their creation profile
-and use the [Application configuration](application-runtime.md) owner.
-They also support independent children through the same native participant/Task
-owners. Those children inherit the explicit Application profile and connection
-scope, rather than the ordinary Worker's ambient Host assembly. A child's durable
-relation preserves its root authorization source and native Task identity.
+Trusted embedded adapters bind the same principal through `BindAppServerClients`.
+Task, child-input and focused services preserve canonical native Session ownership.
+A different principal cannot acquire a Session by knowing its ID. Closing the
+Session seals mutations while retaining history and original receipts. UI detach
+leaves execution running.
 
-Require `application-terminal-wait-v1` to wait for producer exit through the
-scoped Task directory. Output and wait do not consume the model's Task output
-cursor or invent an exit for an unknown outcome. Cancelling a waiter closes only
-that observation. `application-terminal-control-v1` permits kill/release after
-the native Session mutation authorizer checks the grant, lease and lifecycle;
-the terminal display ID must still map to an exact Task in that Session.
+Explicit-profile Sessions use the [Session configuration](session-profiles.md)
+owner for dynamic assembly and reject ignored native model selectors. Their
+children use the native participant/Task owners and preserve the root source,
+profile and native Task identity. There are no Application/Connection grants.
+
+Require `session-terminal-wait-v1` for producer-exit observation and
+`session-terminal-control-v1` for native kill/release. Terminal IDs must resolve
+through the Session Task directory. Reads/waits do not consume the model's Task
+output cursor or invent an exit for unknown work. Cancelling a waiter ends only
+that observation.
 
 Both clients resolve the current approval FIFO head with its request ID and exact
 target. Only the first valid decision wins; stale or competing decisions cannot

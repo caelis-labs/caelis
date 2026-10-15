@@ -19,11 +19,11 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 	"github.com/caelis-labs/caelis/control/agentbinding"
-	"github.com/caelis-labs/caelis/control/application"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/wirev1/generated"
 	"github.com/caelis-labs/caelis/control/modelprofile"
+	"github.com/caelis-labs/caelis/control/sessionprofile"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
 	"github.com/caelis-labs/caelis/control/workspacetrust"
 	jsonschema "github.com/google/jsonschema-go/jsonschema"
@@ -41,7 +41,6 @@ func TestProductionRequestAndResponseJSONConformsToOpenAPI(t *testing.T) {
 		"CreateSessionRequest":   appserver.CreateSessionRequest{WriteBase: base, PreferredSessionID: "session-1", WorkspaceKey: "workspace-1", CWD: "/tmp/workspace", Title: "Session", Metadata: map[string]any{"source": "test"}},
 		"CloseSessionRequest":    appserver.CloseSessionRequest{WriteBase: base},
 		"PromptRequest":          appserver.PromptRequest{WriteBase: base, Input: "hello", DisplayInput: "hello", ContentParts: contentParts},
-		"CreateWorkerRequest":    appserver.CreateWorkerRequest{WriteBase: base, CWD: "/workspace"},
 		"SteerRequest":           appserver.SteerRequest{WriteBase: base, Target: target, ContentParts: contentParts},
 		"CancelRequest":          appserver.CancelRequest{WriteBase: base, Target: target, Reason: "stop"},
 		"ResolveApprovalRequest": appserver.ResolveApprovalRequest{WriteBase: base, Target: target, ApprovalRequestID: "approval-1", Outcome: "selected", OptionID: string(acpsdk.PermissionOptionKindAllowOnce), Approved: true},
@@ -482,73 +481,70 @@ func compactNoticeEnvelope() eventstream.Envelope {
 func stringPointer(value string) *string { return &value }
 
 func TestApplicationRequestAndResponseJSONConformsToOpenAPI(t *testing.T) {
-	profile := application.Profile{
+	profile := sessionprofile.Profile{
 		Version: "example-role/1", Instructions: "Use the callback.", Model: "configured-model",
 		ToolsVersion: "example-tools/1", Execution: "tools-only",
-		MCPServers: []application.MCPServer{{Name: "documents", Transport: "stdio", Command: "synthetic-mcp", WorkDir: "/tmp"}},
+		MCPServers: []sessionprofile.MCPServer{{Name: "documents", Transport: "stdio", Command: "synthetic-mcp", WorkDir: "/tmp"}},
 		SkillDirs:  []string{"/tmp/selected-skills"}, SkillRoots: []string{"/tmp/selected-skill"},
-		Tools: []application.ToolDefinition{{Name: "ExampleLookup", Description: "Look up a key.", InputSchema: map[string]any{
+		Tools: []sessionprofile.ToolDefinition{{Name: "ExampleLookup", Description: "Look up a key.", InputSchema: map[string]any{
 			"type": "object", "properties": map[string]any{"key": map[string]any{"type": "string"}},
 		}}},
 	}
-	scope := application.Scope{PrincipalID: "owner", ApplicationID: "app-1", ConnectionID: "connection-1"}
-	binding := application.Binding{Scope: scope, SessionID: "session-1", Profile: profile, CreationDigest: "sha256:profile"}
+	scope := sessionprofile.Scope{PrincipalID: "owner"}
+	binding := sessionprofile.Binding{Scope: scope, SessionID: "session-1", Profile: profile, CreationDigest: "sha256:profile"}
 	childBinding := binding
-	childBinding.Child = &application.ChildRelation{RootSessionID: "root", ParentSessionID: "parent", Source: application.Source{Kind: "authorized_background", OperationID: "original-input", GrantID: "grant", AuthorizedSource: "original-background"}}
-	validateWireValue(t, "ApplicationBinding", childBinding)
+	childBinding.Child = &sessionprofile.ChildRelation{RootSessionID: "root", ParentSessionID: "parent", Source: sessionprofile.Source{Kind: "authorized_background", OperationID: "original-input", GrantID: "grant", AuthorizedSource: "original-background"}}
+	validateWireValue(t, "SessionBinding", childBinding)
 	base := appserver.WriteBase{OperationID: "operation-1", SessionID: "session-1"}
-	resource := application.Resource{ID: "resource-1", SessionID: "session-1", Name: "report", MediaType: "text/plain", Size: 5, SHA256: "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"}
-	grant := application.BackgroundGrant{ID: "grant-1", Scope: scope, SessionID: "session-1", Source: "authorized-timer-42", AuthorizationOperationID: "user-opt-in-42"}
+	resource := sessionprofile.Resource{ID: "resource-1", SessionID: "session-1", Name: "report", MediaType: "text/plain", Size: 5, SHA256: "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"}
+	grant := sessionprofile.BackgroundGrant{ID: "grant-1", Scope: scope, SessionID: "session-1", Source: "authorized-timer-42", AuthorizationOperationID: "user-opt-in-42"}
 	model := "configured-model"
 	nativeTools := []string{"Read", "Bash"}
-	emptyTools := []application.ToolDefinition{}
-	services := []application.MCPServer{{Name: "documents", Transport: "stdio", Command: "synthetic-mcp", WorkDir: "/tmp"}}
+	emptyTools := []sessionprofile.ToolDefinition{}
+	services := []sessionprofile.MCPServer{{Name: "documents", Transport: "stdio", Command: "synthetic-mcp", WorkDir: "/tmp"}}
 	dirs := []string{"/tmp/selected-skills"}
 	roots := []string{"/tmp/selected-skill"}
 	for name, value := range map[string]any{
-		"RecordInteractionRequest":        appserver.RecordInteractionRequest{WriteBase: base, Text: "/status", RequireIdleRun: true},
-		"ApplicationRegistration":         application.Registration{OperationID: "register-1", Name: "Example", Credential: "app-client-" + strings.Repeat("a", 64)},
-		"ApplicationConnection":           application.Connection{Scope: scope, Name: "Example", ExpiresAt: time.Unix(100, 0).UTC()},
-		"CreateApplicationSessionRequest": appserver.CreateApplicationSessionRequest{WriteBase: appserver.WriteBase{OperationID: "create-1"}, Profile: profile},
-		"ApplicationPromptRequest":        appserver.ApplicationPromptRequest{PromptRequest: appserver.PromptRequest{WriteBase: base, Input: "Hello"}, SourceKind: "user"},
-		"ApplicationBinding":              binding,
-		"ApplicationChildRelation":        application.ChildRelation{RootSessionID: "root", ParentSessionID: "parent", ParentTaskID: "task", Source: application.Source{Kind: "user", OperationID: "original-input"}},
-		"ApplicationBindingList":          []application.Binding{binding},
-		"ApplicationOperation":            appserver.ApplicationOperation{OperationID: "operation-1", Outcome: appserver.OutcomeUnknown},
-		"ApplicationCall":                 application.Call{ID: "receipt-1", CallContext: application.CallContext{Scope: scope, SessionID: "session-1", TurnID: "turn-1", ItemID: "item-1", CallID: "native-call-1", ToolsVersion: profile.ToolsVersion, ConfigurationRevision: 7, Source: application.Source{Kind: "user", OperationID: "prompt-1"}}, Name: "ExampleLookup", Arguments: json.RawMessage(`{"key":"example"}`), State: "pending"},
-		"ApplicationCallResult":           application.CallResult{Outcome: "succeeded", Content: json.RawMessage(`{"found":true}`)},
-		"ApplicationConfiguration": application.Configuration{
+		"RecordInteractionRequest": appserver.RecordInteractionRequest{WriteBase: base, Text: "/status", RequireIdleRun: true},
+		"CreateSessionRequest":     appserver.CreateSessionRequest{WriteBase: appserver.WriteBase{OperationID: "create-1"}, Profile: &profile},
+		"PromptRequest":            appserver.PromptRequest{WriteBase: base, Input: "Hello", SourceKind: "user"},
+		"SessionBinding":           binding,
+		"SessionChildRelation":     sessionprofile.ChildRelation{RootSessionID: "root", ParentSessionID: "parent", ParentTaskID: "task", Source: sessionprofile.Source{Kind: "user", OperationID: "original-input"}},
+		"CommandResult":            appserver.CommandResult{OperationID: "operation-1", Outcome: appserver.OutcomeUnknown},
+		"SessionToolCall":          sessionprofile.Call{ID: "receipt-1", CallContext: sessionprofile.CallContext{Scope: scope, SessionID: "session-1", TurnID: "turn-1", ItemID: "item-1", CallID: "native-call-1", ToolsVersion: profile.ToolsVersion, ConfigurationRevision: 7, Source: sessionprofile.Source{Kind: "user", OperationID: "prompt-1"}}, Name: "ExampleLookup", Arguments: json.RawMessage(`{"key":"example"}`), State: "pending"},
+		"SessionToolCallResult":    sessionprofile.CallResult{Outcome: "succeeded", Content: json.RawMessage(`{"found":true}`)},
+		"SessionConfiguration": sessionprofile.Configuration{
 			SessionID: "session-1", Revision: 7, Profile: profile,
-			LastRequest: &application.RequestConfiguration{Revision: 7, RequestID: "operation-1", TurnID: "turn-1"},
+			LastRequest: &sessionprofile.RequestConfiguration{Revision: 7, RequestID: "operation-1", TurnID: "turn-1"},
 		},
-		"ApplicationMCPStatus": application.MCPStatus{
+		"SessionMCPStatus": sessionprofile.MCPStatus{
 			SessionID: "session-1", ConfigurationRevision: "7",
-			Servers: []application.MCPServerStatus{{Name: "documents", Status: "running", Tools: []string{"lookup"}, ToolDetails: []mcp.MCPToolDetail{{Name: "lookup", Description: tool.ExternalCapabilityDescriptionPrefix + " Look up a document"}}}},
-			Skills:  []application.SkillStatus{{Path: "/tmp/selected-skills", Kind: "directory", Status: "ready"}, {Path: "/tmp/selected-skill", Kind: "skill", Name: "selected-skill", Status: "failed", Warning: "synthetic metadata failure"}},
+			Servers: []sessionprofile.MCPServerStatus{{Name: "documents", Status: "running", Tools: []string{"lookup"}, ToolDetails: []mcp.MCPToolDetail{{Name: "lookup", Description: tool.ExternalCapabilityDescriptionPrefix + " Look up a document"}}}},
+			Skills:  []sessionprofile.SkillStatus{{Path: "/tmp/selected-skills", Kind: "directory", Status: "ready"}, {Path: "/tmp/selected-skill", Kind: "skill", Name: "selected-skill", Status: "failed", Warning: "synthetic metadata failure"}},
 		},
-		"UpdateApplicationConfigurationRequest": application.UpdateConfigurationRequest{
+		"UpdateSessionConfigurationRequest": sessionprofile.UpdateConfigurationRequest{
 			OperationID: "update-1", ExpectedConfigurationRevision: 7,
-			Patch: application.ConfigurationPatch{Model: &model, NativeTools: &nativeTools, Tools: &emptyTools, MCPServers: &services, SkillDirs: &dirs, SkillRoots: &roots},
+			Patch: sessionprofile.ConfigurationPatch{Model: &model, NativeTools: &nativeTools, Tools: &emptyTools, MCPServers: &services, SkillDirs: &dirs, SkillRoots: &roots},
 		},
-		"ApplicationBackgroundGrant":        grant,
-		"ApplicationBackgroundGrantList":    []application.BackgroundGrant{grant},
-		"ApplicationBackgroundGrantRequest": application.BackgroundGrantRequest{OperationID: "grant-op", Source: "authorized-timer-42", AuthorizationOperationID: "user-opt-in-42"},
-		"ApplicationResourceRequest":        appserver.ApplicationResourceRequest{WriteBase: base, Name: "report", MediaType: "text/plain", Data: []byte("hello"), SHA256: resource.SHA256},
-		"ApplicationResource":               resource,
-		"ApplicationResourceContent":        appserver.ApplicationResourceContent{Resource: resource, Data: []byte("hello")},
+		"SessionBackgroundGrant":              grant,
+		"SessionBackgroundGrantList":          []sessionprofile.BackgroundGrant{grant},
+		"CreateSessionBackgroundGrantRequest": sessionprofile.BackgroundGrantRequest{OperationID: "grant-op", Source: "authorized-timer-42", AuthorizationOperationID: "user-opt-in-42"},
+		"SessionResourceRequest":              appserver.SessionResourceRequest{WriteBase: base, Name: "report", MediaType: "text/plain", Data: []byte("hello"), SHA256: resource.SHA256},
+		"SessionResource":                     resource,
+		"SessionResourceContent":              appserver.SessionResourceContent{Resource: resource, Data: []byte("hello")},
 	} {
 		t.Run(name, func(t *testing.T) { validateWireValue(t, name, value) })
 	}
-	for _, tools := range [][]application.ToolDefinition{nil, {}} {
+	for _, tools := range [][]sessionprofile.ToolDefinition{nil, {}} {
 		profile.Tools = tools
-		validateWireValue(t, "CreateApplicationSessionRequest", appserver.CreateApplicationSessionRequest{WriteBase: appserver.WriteBase{OperationID: "no-callbacks"}, Profile: profile})
+		validateWireValue(t, "CreateSessionRequest", appserver.CreateSessionRequest{WriteBase: appserver.WriteBase{OperationID: "no-callbacks"}, Profile: &profile})
 		binding.Profile = profile
-		validateWireValue(t, "ApplicationBinding", binding)
+		validateWireValue(t, "SessionBinding", binding)
 	}
-	t.Run("ApplicationPromptRequest/authorized_background", func(t *testing.T) {
-		validateWireValue(t, "ApplicationPromptRequest", appserver.ApplicationPromptRequest{
-			PromptRequest: appserver.PromptRequest{WriteBase: base, Input: "Run the scheduled task."},
-			SourceKind:    "authorized_background", GrantID: "grant-1",
+	t.Run("PromptRequest/authorized_background", func(t *testing.T) {
+		validateWireValue(t, "PromptRequest", appserver.PromptRequest{
+			WriteBase: base, Input: "Run the scheduled task.",
+			SourceKind: "authorized_background", GrantID: "grant-1",
 		})
 	})
 }

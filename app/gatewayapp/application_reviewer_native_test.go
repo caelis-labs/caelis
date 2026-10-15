@@ -13,9 +13,9 @@ import (
 	"time"
 
 	sessionapi "github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/control/application"
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
+	"github.com/caelis-labs/caelis/control/sessionprofile"
 )
 
 // This check uses the actual native Application executor and controlled provider
@@ -73,16 +73,16 @@ func TestApplicationReviewerNativeApprovalContinuation(t *testing.T) {
 				provider := &reviewerHTTPProvider{toolName: name, args: string(raw), decision: decision}
 				host, client, _ := setupReviewerHTTP(t, ctx, root, provider)
 				defer func() { host.close(t) }()
-				profile := application.Profile{Version: "native-review/1", Model: "custom/gpt-4.1", ToolsVersion: "native/1",
-					Execution: "workspace-write", Workspace: application.Workspace{CWD: workspace}, NativeTools: []string{name, "Task"},
-					Permissions: application.Permissions{Mode: "workspace-write", ApprovalMode: "auto-review"},
-					Reviewer:    &application.Reviewer{Kind: "guardian", Model: "custom/reviewer-model"}}
-				created, err := client.CreateApplicationSession(ctx, appserver.CreateApplicationSessionRequest{WriteBase: appserver.WriteBase{OperationID: "native-review"}, Profile: profile})
+				profile := sessionprofile.Profile{Version: "native-review/1", Model: "custom/gpt-4.1", ToolsVersion: "native/1",
+					Execution: "workspace-write", Workspace: sessionprofile.Workspace{CWD: workspace}, NativeTools: []string{name, "Task"},
+					Permissions: sessionprofile.Permissions{Mode: "workspace-write", ApprovalMode: "auto-review"},
+					Reviewer:    &sessionprofile.Reviewer{Kind: "guardian", Model: "custom/reviewer-model"}}
+				created, err := client.CreateSession(ctx, appserver.CreateSessionRequest{WriteBase: appserver.WriteBase{OperationID: "native-review"}, Profile: profilePointer(profile)})
 				if err != nil || created.SessionID == "" {
 					t.Fatal(created, err)
 				}
-				result, err := client.PromptApplication(ctx, appserver.ApplicationPromptRequest{
-					PromptRequest: appserver.PromptRequest{WriteBase: appserver.WriteBase{SessionID: created.SessionID, OperationID: "native-effect"}, Input: "Write NATIVE_ONCE to the exact fixture path with the selected operation."}, SourceKind: "user"})
+				result, err := client.Prompt(ctx, appserver.PromptRequest{
+					WriteBase: appserver.WriteBase{SessionID: created.SessionID, OperationID: "native-effect"}, Input: "Write NATIVE_ONCE to the exact fixture path with the selected operation.", SourceKind: "user"})
 				if err != nil {
 					diagnostics, _ := os.ReadFile(filepath.Join(root, "store", "logs", "runtime.jsonl"))
 					t.Fatalf("prompt: %+v, %v; diagnostics=%s", result, err, diagnostics)
