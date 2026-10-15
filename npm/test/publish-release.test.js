@@ -30,11 +30,18 @@ if (args[0] === 'pack') {
   fs.writeFileSync(path.join(args[args.indexOf('--pack-destination') + 1], filename), bytes);
   process.stdout.write(JSON.stringify([{ name: manifest.name, version: manifest.version, filename, integrity: integrity(bytes) }]));
 } else if (args[0] === 'view') {
+  if (!args.includes('--prefer-online')) process.exit(2);
   if (process.env.FAKE_NPM_VIEW_ERROR === '1') {
     process.stderr.write('ENETUNREACH registry unavailable\\n');
     process.exit(1);
   }
   const key = args[1];
+  if (state.hiddenViews > 0 && key in state.published) {
+    state.hiddenViews--;
+    save();
+    process.stderr.write('npm ERR! code E404\\n');
+    process.exit(1);
+  }
   if (!(key in state.published)) {
     process.stderr.write('npm ERR! code E404\\n');
     process.exit(1);
@@ -51,6 +58,7 @@ if (args[0] === 'pack') {
     process.exit(1);
   }
   state.published[pkg.name + '@' + pkg.version] = integrity(bytes);
+  if (state.attempts === 1) state.hiddenViews = 5;
   save();
 } else {
   process.exit(2);
