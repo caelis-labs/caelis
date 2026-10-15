@@ -914,3 +914,27 @@ func (body *fixtureResponseBody) Close() error {
 	body.cancel()
 	return body.ReadCloser.Close()
 }
+
+func TestInitializeAcceptsBaselineAndAdditiveHostFields(t *testing.T) {
+	for _, addition := range []string{"", `,"future_capabilities":{"reader":"next"}`} {
+		t.Run(fmt.Sprint(len(addition)), func(t *testing.T) {
+			calls := 0
+			client, closeServer := newFixtureClient(t, func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				if r.URL.Path != wirev1.APIPrefix+"/initialize" {
+					t.Errorf("changed protocol path: %s", r.URL.Path)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = fmt.Fprintf(w, `{"protocol_version":%d,"envelope_version":%q,"api_version":%q,"capabilities":["future-optional-capability"]%s}`, acpsdk.ProtocolVersionNumber, appserver.EnvelopeVersion, appserver.HTTPAPIVersion, addition)
+			})
+			defer closeServer()
+			info, err := client.Initialize(t.Context())
+			if err != nil || info.APIVersion != appserver.HTTPAPIVersion {
+				t.Fatalf("handshake: %+v %v", info, err)
+			}
+			if calls != 1 {
+				t.Fatalf("handshake retried: %d", calls)
+			}
+		})
+	}
+}

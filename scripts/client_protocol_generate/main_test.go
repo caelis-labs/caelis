@@ -26,3 +26,30 @@ func TestNullableExecutionSchemasKeepConcreteGeneratedTypes(t *testing.T) {
 		t.Fatalf("generated Go lost optional nullable bool: %s", out.String())
 	}
 }
+
+func TestAdditiveObjectsKeepDeclaredGoFields(t *testing.T) {
+	value := &schema{Type: "object", Properties: map[string]*schema{"revision": {Type: "string"}}, AdditionalProperties: []byte("true"), IgnoreUnknownFields: true}
+	var typed strings.Builder
+	writeGoSchema(&typed, "Receipt", value, nil)
+	if !strings.Contains(typed.String(), "type Receipt struct") || !strings.Contains(typed.String(), "Revision *string") {
+		t.Fatalf("additive object lost typed fields: %s", typed.String())
+	}
+	if got := tsType(value, nil); !strings.Contains(got, "[key: string]: JSONValue") || !strings.Contains(got, "revision?: string") {
+		t.Fatalf("inline additive object lost extension or typed field: %s", got)
+	}
+	value.IgnoreUnknownFields = false
+	var opaque strings.Builder
+	writeGoSchema(&opaque, "VendorObject", value, nil)
+	if !strings.Contains(opaque.String(), "map[string]JSONValue") {
+		t.Fatalf("vendor fields would be lost: %s", opaque.String())
+	}
+}
+
+func TestAdditiveAllOfTypeScriptKeepsExtensions(t *testing.T) {
+	value := &schema{IgnoreUnknownFields: true, AllOf: []*schema{{Type: "object", Properties: map[string]*schema{"operation_id": {Type: "string"}}}}}
+	var out strings.Builder
+	writeTypeScriptSchema(&out, "Request", value, nil)
+	if !strings.Contains(out.String(), "operation_id?: string") || !strings.Contains(out.String(), "[key: string]: JSONValue") {
+		t.Fatalf("allOf extension missing: %s", out.String())
+	}
+}

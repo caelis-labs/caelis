@@ -24,8 +24,8 @@ func TestWorkerCreationRecoversCommittedCommandAfterApplicationReceiptLoss(t *te
 		t.Fatal(err)
 	}
 	backend.afterEffect = func() {
-		// The separate SQLite command connection can still persist its result,
-		// but the outer permanent application receipt write is unavailable.
+		// The command connection can still complete the permanent receipt,
+		// while the admission Store is unavailable after the effect.
 		if err := store.Close(); err != nil {
 			t.Fatal(err)
 		}
@@ -55,8 +55,8 @@ func TestWorkerCreationRecoversCommittedCommandAfterApplicationReceiptLoss(t *te
 	if err != nil || observed.Result == nil || *observed.Result != want || observed.Outcome != OutcomeCommitted {
 		t.Fatalf("recovered Worker receipt = %+v, %v; want %+v", observed, err, want)
 	}
-	// Recovery promotes the existing command receipt to the permanent anchor.
-	// The ordinary command ledger may subsequently expire or be swept.
+	// The permanent receipt survives loss of the ordinary ledger. Supported
+	// release Stores with two records exercise promotion in the test below.
 	commands.config.Operations = NewMemoryOperationStore()
 	if observed, err := svc.Operation(t.Context(), p, req.OperationID); err != nil || observed.Result == nil || *observed.Result != want {
 		t.Fatalf("permanent recovered receipt = %+v, %v", observed, err)

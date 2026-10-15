@@ -47,11 +47,15 @@ func (s *ApplicationService) CreateWorker(ctx context.Context, p Principal, req 
 	if req.Model == "" && (req.ReasoningEffort != "" || req.FastMode) {
 		return CommandResult{}, errorcode.New(errorcode.InvalidArgument, "worker model options require a model")
 	}
-	return s.execute(ctx, p, req.OperationID, workerCreateOperation{Kind: ActionWorkerCreate, Request: req}, func() (CommandResult, error) {
+	return s.execute(ctx, p, req.OperationID, workerCreateOperation{Kind: ActionWorkerCreate, Request: req}, func(ctx context.Context) (CommandResult, error) {
 		return s.config.Commands.execute(ctx, p, ActionWorkerCreate, req.WriteBase, "", req)
 	})
 }
 
+// observeWorkerCreation is receipt-only compatibility for release Hosts that
+// wrote an expiring command receipt after a permanent intent. Remove this reader
+// when those retained Stores are outside the supported upgrade window. It never
+// creates a second record or dispatches work.
 func (s *ApplicationService) observeWorkerCreation(ctx context.Context, p Principal, scope application.Scope, op application.Operation) (ApplicationOperation, error) {
 	out := ApplicationOperation{OperationID: op.ID, Outcome: OutcomeUnknown}
 	var saved workerCreateOperation
@@ -88,7 +92,7 @@ func (s *ApplicationService) observeWorkerCreation(ctx context.Context, p Princi
 
 // WorkerPrompt uses the ordinary Turn owner and a permanent application intent.
 func (s *ApplicationService) WorkerPrompt(ctx context.Context, p Principal, req PromptRequest) (CommandResult, error) {
-	return s.execute(ctx, p, req.OperationID, req, func() (CommandResult, error) {
+	return s.execute(ctx, p, req.OperationID, req, func(ctx context.Context) (CommandResult, error) {
 		return s.config.Commands.Prompt(ctx, p, req)
 	})
 }
@@ -96,7 +100,7 @@ func (s *ApplicationService) WorkerPrompt(ctx context.Context, p Principal, req 
 // Steer persists an application intent before submitting to the exact Turn.
 // The command receipt proves admission; the canonical input event proves application.
 func (s *ApplicationService) Steer(ctx context.Context, p Principal, req SteerRequest) (CommandResult, error) {
-	return s.execute(ctx, p, req.OperationID, req, func() (CommandResult, error) {
+	return s.execute(ctx, p, req.OperationID, req, func(ctx context.Context) (CommandResult, error) {
 		return s.config.Commands.Steer(ctx, p, req)
 	})
 }

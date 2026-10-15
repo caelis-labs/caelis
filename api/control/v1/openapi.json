@@ -2061,7 +2061,7 @@
     "schemas": {
       "ModelAuthenticationSnapshot": {
         "type": "object",
-        "additionalProperties": false,
+        "additionalProperties": true,
         "description": "Transient initiating-client authentication state. Tokens and submitted input are never included. Result is the existing ConnectModel command receipt. A dropped stream is not proof of failure and never authorizes a fresh mutation.",
         "properties": {
           "operation_id": {
@@ -2093,11 +2093,12 @@
           "operation_id",
           "sequence",
           "phase"
-        ]
+        ],
+        "x-caelis-ignore-unknown-fields": true
       },
       "ModelAuthenticationInput": {
         "type": "object",
-        "additionalProperties": false,
+        "additionalProperties": true,
         "description": "Write-only input to one live principal-bound challenge; never persisted in command history or echoed in errors. Input is limited to 16384 UTF-8 bytes. A stale or consumed challenge returns 409.",
         "properties": {
           "challenge_id": {
@@ -2112,7 +2113,8 @@
         "required": [
           "challenge_id",
           "input"
-        ]
+        ],
+        "x-caelis-ignore-unknown-fields": true
       },
       "CreateWorkerRequest": {
         "allOf": [
@@ -2135,8 +2137,9 @@
               "fast_mode": {"type": "boolean"}
             }
           }
-        ]
-      },
+        ],
+      "x-caelis-ignore-unknown-fields": true
+    },
       "ApplicationWorker": {
         "type": "object",
         "required": [
@@ -2158,11 +2161,12 @@
           "session_id": {
             "type": "string"
           }
-        }
+        },
+        "x-caelis-ignore-unknown-fields": true
       },
       "SubagentInputRequest": {
         "type": "object",
-        "additionalProperties": false,
+        "additionalProperties": true,
         "required": ["operation_id", "session_id", "participant_id", "task_id", "input"],
         "properties": {
           "operation_id": {"type": "string"},
@@ -2171,13 +2175,15 @@
           "task_id": {"type": "string"},
           "input": {"type": "string"},
           "content_parts": {"type": "array", "items": {"$ref": "#/components/schemas/PromptContentPart"}}
-        }
+        },
+        "x-caelis-ignore-unknown-fields": true
       },
       "SubagentInputStatusRequest": {
         "type": "object",
-        "additionalProperties": false,
+        "additionalProperties": true,
         "required": ["session_id", "ids"],
-        "properties": {"session_id": {"type": "string"}, "ids": {"type": "array", "maxItems": 64, "items": {"type": "string"}}}
+        "properties": {"session_id": {"type": "string"}, "ids": {"type": "array", "maxItems": 64, "items": {"type": "string"}}},
+        "x-caelis-ignore-unknown-fields": true
       },
       "SubagentInputStatus": {
         "type": "object",
@@ -2191,9 +2197,10 @@
       },
       "SubagentInputStatuses": {"type": "array", "items": {"$ref": "#/components/schemas/SubagentInputStatus"}},
       "UIPreferences": {
+        "x-caelis-ignore-unknown-fields": true,
         "type": "object",
         "description": "Persisted presentation preferences. PUT is a sparse merge: omitted or zero fields are unchanged. Theme is an opaque selected name; surfaces own palette names and the default auto. Host does not validate palettes.",
-        "additionalProperties": false,
+        "additionalProperties": true,
         "required": [],
         "properties": {
           "subagent_layout": {"type": "string", "enum": ["", "overlay", "left", "right", "up", "down"], "description": "Empty string is a sparse no-op; overlay/left/right/up/down replace the stored layout."},
@@ -2202,40 +2209,93 @@
           "theme": {"type": "string", "description": "Opaque selected theme name. Host stores the value as sent and does not validate palettes. Empty string is a sparse no-op."}
         }
       },
-      "EmptyResult": {"type":"object","additionalProperties":false},
+      "EmptyResult": {"type":"object","additionalProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
       "StringList": {"type":"array","items":{"type":"string"}},
-      "PresentationCapabilities": {"type":"object","required":["audio","embedded_context","image"],"properties":{"audio":{"type":"boolean"},"embedded_context":{"type":"boolean"},"image":{"type":"boolean"}},"additionalProperties":false},
-      "PresentationMode": {"type":"object","required":["id","name"],"properties":{"id":{"type":"string"},"name":{"type":"string"},"description":{"type":"string"}},"additionalProperties":false},
-      "PresentationModeState": {"type":"object","required":["available_modes","current_mode_id"],"properties":{"target":{"type":"string","enum":["approval","app","controller"]},"available_modes":{"type":"array","items":{"$ref":"#/components/schemas/PresentationMode"}},"current_mode_id":{"type":"string"}},"additionalProperties":false},
-      "PresentationSelectOption": {"type":"object","required":["value","name"],"properties":{"value":{"type":"string"},"name":{"type":"string"},"description":{"type":"string"}},"additionalProperties":false},
-      "PresentationConfigOption": {"type":"object","required":["type","id","name","current_value"],"properties":{"type":{"type":"string"},"id":{"type":"string"},"name":{"type":"string"},"description":{"type":"string"},"category":{"type":"string"},"current_value":{"$ref":"#/components/schemas/JSONValue"},"options":{"type":"array","items":{"$ref":"#/components/schemas/PresentationSelectOption"}}},"additionalProperties":false},
+      "PresentationCapabilities": {"type":"object","required":["audio","embedded_context","image"],"properties":{"audio":{"type":"boolean"},"embedded_context":{"type":"boolean"},"image":{"type":"boolean"}},"additionalProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "PresentationMode": {"type":"object","required":["id","name"],"properties":{"id":{"type":"string"},"name":{"type":"string"},"description":{"type":"string"}},"additionalProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "PresentationModeState": {"type":"object","required":["available_modes","current_mode_id"],"properties":{"target":{"type":"string","enum":["approval","app","controller"]},"available_modes":{"type":"array","items":{"$ref":"#/components/schemas/PresentationMode"}},"current_mode_id":{"type":"string"}},"additionalProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "PresentationSelectOption": {"type":"object","required":["value","name"],"properties":{"value":{"type":"string"},"name":{"type":"string"},"description":{"type":"string"}},"additionalProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "PresentationConfigOption": {"type":"object","required":["type","id","name","current_value"],"properties":{"type":{"type":"string"},"id":{"type":"string"},"name":{"type":"string"},"description":{"type":"string"},"category":{"type":"string"},"current_value":{"$ref":"#/components/schemas/JSONValue"},"options":{"type":"array","items":{"$ref":"#/components/schemas/PresentationSelectOption"}}},"additionalProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
       "PresentationConfigOptionList": {"type":"array","items":{"$ref":"#/components/schemas/PresentationConfigOption"}},
-      "PresentationModel": {"type":"object","required":["id","name"],"properties":{"id":{"type":"string"},"name":{"type":"string"},"description":{"type":"string"}},"additionalProperties":false},
-      "PresentationModelState": {"type":"object","required":["current_model_id","available_models"],"properties":{"current_model_id":{"type":"string"},"available_models":{"type":"array","items":{"$ref":"#/components/schemas/PresentationModel"}}},"additionalProperties":false},
-      "PresentationCommandInput": {"type":"object","properties":{"hint":{"type":"string"}},"additionalProperties":false},
-      "PresentationCommand": {"type":"object","required":["name"],"properties":{"name":{"type":"string"},"description":{"type":"string"},"input":{"$ref":"#/components/schemas/PresentationCommandInput"}},"additionalProperties":false},
-      "PresentationSnapshot": {"type":"object","properties":{"modes":{"$ref":"#/components/schemas/PresentationModeState"},"config_options":{"$ref":"#/components/schemas/PresentationConfigOptionList"},"models":{"$ref":"#/components/schemas/PresentationModelState"},"commands":{"type":"array","items":{"$ref":"#/components/schemas/PresentationCommand"}}},"additionalProperties":false},
-      "TerminalRequest": {"type":"object","required":["session_id","terminal_id"],"properties":{"session_id":{"type":"string"},"terminal_id":{"type":"string"}},"additionalProperties":false},
-      "TerminalExitStatus": {"type":"object","properties":{"exit_code":{"type":"integer"},"signal":{"type":"string"}},"additionalProperties":false},
-      "TerminalOutput": {"type":"object","required":["output","truncated"],"properties":{"output":{"type":"string"},"truncated":{"type":"boolean"},"exit_status":{"$ref":"#/components/schemas/TerminalExitStatus"}},"additionalProperties":false},
-      "StartParticipantRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["handle"],"properties":{"background":{"type":"boolean","description":"Start a durable child Task without claiming the main Turn; returns resource.kind participant_task and resource.ref Task ID."},"handle":{"type":"string"},"role":{"$ref":"#/components/schemas/ParticipantRole"},"label":{"type":"string"},"source":{"type":"string"},"input":{"type":"string"},"display_input":{"type":"string"},"display_address":{"type":"string"},"display_title":{"type":"string"},"content_parts":{"type":"array","items":{"$ref":"#/components/schemas/PromptContentPart"}},"transient":{"type":"boolean"},"detach_source":{"type":"string"}}}],"unevaluatedProperties":false},
-      "PromptParticipantRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["participant_id"],"properties":{"participant_id":{"type":"string"},"input":{"type":"string"},"display_input":{"type":"string"},"display_address":{"type":"string"},"display_title":{"type":"string"},"content_parts":{"type":"array","items":{"$ref":"#/components/schemas/PromptContentPart"}},"source":{"type":"string"}}}],"unevaluatedProperties":false},
-      "CancelParticipantRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["participant_id","target"],"properties":{"participant_id":{"type":"string"},"target":{"$ref":"#/components/schemas/TurnTarget"},"reason":{"type":"string"}}}],"unevaluatedProperties":false},
-      "SessionModeRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["mode"],"properties":{"mode":{"type":"string"}}}],"unevaluatedProperties":false},
-      "SessionModelRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["model"],"properties":{"model":{"type":"string"},"reasoning_effort":{"type":"string"},"fast_mode":{"type":"boolean"},"clear":{"type":"boolean"}}}],"unevaluatedProperties":false},
-      "SessionControllerModeRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["mode"],"properties":{"mode":{"type":"string"}}}],"unevaluatedProperties":false},
-      "SessionPresentationModeRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["mode"],"properties":{"mode":{"type":"string"}}}],"unevaluatedProperties":false},
-      "SessionPresentationConfigRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["config_id","value"],"properties":{"config_id":{"type":"string"},"value":{"type":"string"}}}],"unevaluatedProperties":false},
-      "ConnectConfig": {"type":"object","required":["provider","model"],"properties":{"provider":{"type":"string"},"endpoint_id":{"type":"string"},"model":{"type":"string"},"base_url":{"type":"string"},"timeout_seconds":{"type":"integer"},"stream_first_event_timeout_seconds":{"type":"integer"},"api_key":{"type":"string","writeOnly":true},"auth_type":{"type":"string"},"context_window_tokens":{"type":"integer"},"max_output_tokens":{"type":"integer"},"reasoning_effort":{"type":"string"},"reasoning_levels":{"type":"array","items":{"type":"string"}},"image_input":{"type":"boolean"}},"additionalProperties":false},
-      "ConnectModelRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["config"],"properties":{"config":{"$ref":"#/components/schemas/ConnectConfig"}}}],"unevaluatedProperties":false},
-      "UseModelRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["model"],"properties":{"model":{"type":"string"},"reasoning_effort":{"type":"string"},"fast_mode":{"type":"boolean"}}}],"unevaluatedProperties":false},
-      "DeleteModelRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["model"],"properties":{"model":{"type":"string"}}}],"unevaluatedProperties":false},
+      "PresentationModel": {"type":"object","required":["id","name"],"properties":{"id":{"type":"string"},"name":{"type":"string"},"description":{"type":"string"}},"additionalProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "PresentationModelState": {"type":"object","required":["current_model_id","available_models"],"properties":{"current_model_id":{"type":"string"},"available_models":{"type":"array","items":{"$ref":"#/components/schemas/PresentationModel"}}},"additionalProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "PresentationCommandInput": {"type":"object","properties":{"hint":{"type":"string"}},"additionalProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "PresentationCommand": {"type":"object","required":["name"],"properties":{"name":{"type":"string"},"description":{"type":"string"},"input":{"$ref":"#/components/schemas/PresentationCommandInput"}},"additionalProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "PresentationSnapshot": {"type":"object","properties":{"modes":{"$ref":"#/components/schemas/PresentationModeState"},"config_options":{"$ref":"#/components/schemas/PresentationConfigOptionList"},"models":{"$ref":"#/components/schemas/PresentationModelState"},"commands":{"type":"array","items":{"$ref":"#/components/schemas/PresentationCommand"}}},"additionalProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "TerminalRequest": {"type":"object","required":["session_id","terminal_id"],"properties":{"session_id":{"type":"string"},"terminal_id":{"type":"string"}},"additionalProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "TerminalExitStatus": {"type":"object","properties":{"exit_code":{"type":"integer"},"signal":{"type":"string"}},"additionalProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "TerminalOutput": {"type":"object","required":["output","truncated"],"properties":{"output":{"type":"string"},"truncated":{"type":"boolean"},"exit_status":{"$ref":"#/components/schemas/TerminalExitStatus"}},"additionalProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "StartParticipantRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["handle"],"properties":{"background":{"type":"boolean","description":"Start a durable child Task without claiming the main Turn; returns resource.kind participant_task and resource.ref Task ID."},"handle":{"type":"string"},"role":{"$ref":"#/components/schemas/ParticipantRole"},"label":{"type":"string"},"source":{"type":"string"},"input":{"type":"string"},"display_input":{"type":"string"},"display_address":{"type":"string"},"display_title":{"type":"string"},"content_parts":{"type":"array","items":{"$ref":"#/components/schemas/PromptContentPart"}},"transient":{"type":"boolean"},"detach_source":{"type":"string"}}}],"unevaluatedProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "PromptParticipantRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["participant_id"],"properties":{"participant_id":{"type":"string"},"input":{"type":"string"},"display_input":{"type":"string"},"display_address":{"type":"string"},"display_title":{"type":"string"},"content_parts":{"type":"array","items":{"$ref":"#/components/schemas/PromptContentPart"}},"source":{"type":"string"}}}],"unevaluatedProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "CancelParticipantRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["participant_id","target"],"properties":{"participant_id":{"type":"string"},"target":{"$ref":"#/components/schemas/TurnTarget"},"reason":{"type":"string"}}}],"unevaluatedProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "SessionModeRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["mode"],"properties":{"mode":{"type":"string"}}}],"unevaluatedProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "SessionModelRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["model"],"properties":{"model":{"type":"string"},"reasoning_effort":{"type":"string"},"fast_mode":{"type":"boolean"},"clear":{"type":"boolean"}}}],"unevaluatedProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "SessionControllerModeRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["mode"],"properties":{"mode":{"type":"string"}}}],"unevaluatedProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "SessionPresentationModeRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["mode"],"properties":{"mode":{"type":"string"}}}],"unevaluatedProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "SessionPresentationConfigRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["config_id","value"],"properties":{"config_id":{"type":"string"},"value":{"type":"string"}}}],"unevaluatedProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "ConnectConfig": {"type":"object","required":["provider","model"],"properties":{"provider":{"type":"string"},"endpoint_id":{"type":"string"},"model":{"type":"string"},"base_url":{"type":"string"},"timeout_seconds":{"type":"integer"},"stream_first_event_timeout_seconds":{"type":"integer"},"api_key":{"type":"string","writeOnly":true},"auth_type":{"type":"string"},"context_window_tokens":{"type":"integer"},"max_output_tokens":{"type":"integer"},"reasoning_effort":{"type":"string"},"reasoning_levels":{"type":"array","items":{"type":"string"}},"image_input":{"type":"boolean"}},"additionalProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "ConnectModelRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["config"],"properties":{"config":{"$ref":"#/components/schemas/ConnectConfig"}}}],"unevaluatedProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "UseModelRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["model"],"properties":{"model":{"type":"string"},"reasoning_effort":{"type":"string"},"fast_mode":{"type":"boolean"}}}],"unevaluatedProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "DeleteModelRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["model"],"properties":{"model":{"type":"string"}}}],"unevaluatedProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
       "SandboxRequest": {
         "allOf": [
           {"$ref": "#/components/schemas/WriteBase"},
           {"type": "object", "properties": {"backend": {"type": "string"}}}
         ],
-        "unevaluatedProperties": false
+        "unevaluatedProperties": true,
+        "x-caelis-ignore-unknown-fields": true
       },
       "WorkspaceTrustLevel": {"type":"string","enum":["unknown","trusted","untrusted"]},
       "WorkspaceTrustRequest": {
@@ -2243,125 +2303,232 @@
           {"$ref":"#/components/schemas/WriteBase"},
           {"type":"object","required":["workspace_key","cwd","trust_level"],"properties":{"workspace_key":{"type":"string","minLength":1},"cwd":{"type":"string","minLength":1},"trust_level":{"$ref":"#/components/schemas/WorkspaceTrustLevel"}}}
         ],
-        "unevaluatedProperties": false
+        "unevaluatedProperties": true,
+        "x-caelis-ignore-unknown-fields": true
       },
-      "AgentRequest": {"type":"object","properties":{"session_id":{"type":"string"},"surface":{"type":"string"},"limit":{"type":"integer"}},"additionalProperties":false},
-      "HandoffAgentRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["target"],"properties":{"target":{"type":"string"}}}],"unevaluatedProperties":false},
+      "AgentRequest": {"type":"object","properties":{"session_id":{"type":"string"},"surface":{"type":"string"},"limit":{"type":"integer"}},"additionalProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "HandoffAgentRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["target"],"properties":{"target":{"type":"string"}}}],"unevaluatedProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
       "ACPLauncherChoice": {"type":"string","enum":["hosted","npx","global","managed","installed","command"]},
       "ACPLaunchKind": {"type":"string","enum":["executable","package_exec","managed"]},
       "ACPAuthenticationType": {"type":"string","enum":["agent","terminal"]},
-      "ACPAuthentication": {"type":"object","properties":{"method_id":{"type":"string"},"type":{"$ref":"#/components/schemas/ACPAuthenticationType"}},"additionalProperties":false},
-      "ACPLauncher": {"type":"object","properties":{"kind":{"$ref":"#/components/schemas/ACPLaunchKind"},"command":{"type":"string"},"args":{"type":"array","items":{"type":"string"}},"env":{"type":"object","additionalProperties":{"type":"string"}},"work_dir":{"type":"string"}},"additionalProperties":false},
-      "ACPConnection": {"type":"object","properties":{"id":{"type":"string"},"name":{"type":"string"},"launcher":{"$ref":"#/components/schemas/ACPLauncher"},"authentication":{"$ref":"#/components/schemas/ACPAuthentication"}},"additionalProperties":false},
-      "ACPConfigChoice": {"type":"object","properties":{"value":{"type":"string"},"name":{"type":"string"},"description":{"type":"string"}},"additionalProperties":false},
+      "ACPAuthentication": {"type":"object","properties":{"method_id":{"type":"string"},"type":{"$ref":"#/components/schemas/ACPAuthenticationType"}},"additionalProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "ACPLauncher": {"type":"object","properties":{"kind":{"$ref":"#/components/schemas/ACPLaunchKind"},"command":{"type":"string"},"args":{"type":"array","items":{"type":"string"}},"env":{"type":"object","additionalProperties":{"type":"string"}},"work_dir":{"type":"string"}},"additionalProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "ACPConnection": {"type":"object","properties":{"id":{"type":"string"},"name":{"type":"string"},"launcher":{"$ref":"#/components/schemas/ACPLauncher"},"authentication":{"$ref":"#/components/schemas/ACPAuthentication"}},"additionalProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "ACPConfigChoice": {"type":"object","properties":{"value":{"type":"string"},"name":{"type":"string"},"description":{"type":"string"}},"additionalProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
       "ACPConfigOptionPurpose": {"type":"string","enum":["reasoning_effort"]},
-      "ACPConfigOption": {"type":"object","properties":{"id":{"type":"string"},"name":{"type":"string"},"type":{"type":"string"},"category":{"type":"string"},"description":{"type":"string"},"current_value":{"type":"string"},"purpose":{"$ref":"#/components/schemas/ACPConfigOptionPurpose"},"options":{"type":"array","items":{"$ref":"#/components/schemas/ACPConfigChoice"}}},"additionalProperties":false},
-      "ACPRemoteModel": {"type":"object","properties":{"id":{"type":"string"},"name":{"type":"string"},"description":{"type":"string"}},"additionalProperties":false},
+      "ACPConfigOption": {"type":"object","properties":{"id":{"type":"string"},"name":{"type":"string"},"type":{"type":"string"},"category":{"type":"string"},"description":{"type":"string"},"current_value":{"type":"string"},"purpose":{"$ref":"#/components/schemas/ACPConfigOptionPurpose"},"options":{"type":"array","items":{"$ref":"#/components/schemas/ACPConfigChoice"}}},"additionalProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "ACPRemoteModel": {"type":"object","properties":{"id":{"type":"string"},"name":{"type":"string"},"description":{"type":"string"}},"additionalProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
       "ACPModelControlKind": {"type":"string","enum":["config_option","set_model"]},
-      "ACPModelControl": {"type":"object","properties":{"kind":{"$ref":"#/components/schemas/ACPModelControlKind"},"config_id":{"type":"string"}},"additionalProperties":false},
-      "ACPDiscoverySnapshot": {"type":"object","properties":{"connection_id":{"type":"string"},"launch_fingerprint":{"type":"string"},"cwd":{"type":"string"},"protocol_version":{"type":"integer"},"selected_model_id":{"type":"string"},"current_model_id":{"type":"string"},"models":{"type":"array","items":{"$ref":"#/components/schemas/ACPRemoteModel"}},"config_options":{"type":"array","items":{"$ref":"#/components/schemas/ACPConfigOption"}},"model_control":{"$ref":"#/components/schemas/ACPModelControl"},"authentication":{"$ref":"#/components/schemas/ACPAuthentication"},"discovered_at":{"type":"string","format":"date-time"}},"additionalProperties":false},
-      "ACPAuthenticationChallengeMethod": {"type":"object","required":["id","type"],"properties":{"id":{"type":"string","minLength":1},"name":{"type":"string"},"description":{"type":"string"},"type":{"$ref":"#/components/schemas/ACPAuthenticationType"}},"additionalProperties":false},
-      "RuntimeInstallation": {"type":"object","required":["directory","archive_url"],"properties":{"directory":{"type":"string"},"archive_url":{"type":"string"},"sha256":{"type":"string"}},"additionalProperties":false},
-      "RuntimeSetup": {"type":"object","required":["command","directory"],"properties":{"command":{"type":"string"},"directory":{"type":"string"},"archive_url":{"type":"string"},"sha256":{"type":"string"},"manual_steps":{"type":"array","items":{"type":"string"}},"install_prompt":{"type":"string"}},"additionalProperties":false},
-      "ACPPrepareRequest": {"type":"object","properties":{"adapter_id":{"type":"string"},"launcher":{"$ref":"#/components/schemas/ACPLauncherChoice"},"command_line":{"type":"string"},"model_id":{"type":"string"},"cwd":{"type":"string"},"parent_ref":{"type":"string"},"install":{"$ref":"#/components/schemas/RuntimeInstallation"}},"additionalProperties":false},
-      "PrepareACPRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["request"],"properties":{"request":{"$ref":"#/components/schemas/ACPPrepareRequest"}}}],"unevaluatedProperties":false},
-      "PrepareACPAuthenticationRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["preparation_ref","preparation_digest","method_id"],"properties":{"preparation_ref":{"type":"string","minLength":1},"preparation_digest":{"type":"string","pattern":"^[0-9a-f]{64}$"},"method_id":{"type":"string","minLength":1}}}],"unevaluatedProperties":false},
-      "ConnectACPRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["preparation_ref","preparation_digest"],"properties":{"preparation_ref":{"type":"string","minLength":1},"preparation_digest":{"type":"string","pattern":"^[0-9a-f]{64}$"},"config_values":{"type":"object","additionalProperties":{"type":"string"}}}}],"unevaluatedProperties":false},
+      "ACPModelControl": {"type":"object","properties":{"kind":{"$ref":"#/components/schemas/ACPModelControlKind"},"config_id":{"type":"string"}},"additionalProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "ACPDiscoverySnapshot": {"type":"object","properties":{"connection_id":{"type":"string"},"launch_fingerprint":{"type":"string"},"cwd":{"type":"string"},"protocol_version":{"type":"integer"},"selected_model_id":{"type":"string"},"current_model_id":{"type":"string"},"models":{"type":"array","items":{"$ref":"#/components/schemas/ACPRemoteModel"}},"config_options":{"type":"array","items":{"$ref":"#/components/schemas/ACPConfigOption"}},"model_control":{"$ref":"#/components/schemas/ACPModelControl"},"authentication":{"$ref":"#/components/schemas/ACPAuthentication"},"discovered_at":{"type":"string","format":"date-time"}},"additionalProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "ACPAuthenticationChallengeMethod": {"type":"object","required":["id","type"],"properties":{"id":{"type":"string","minLength":1},"name":{"type":"string"},"description":{"type":"string"},"type":{"$ref":"#/components/schemas/ACPAuthenticationType"}},"additionalProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "RuntimeInstallation": {"type":"object","required":["directory","archive_url"],"properties":{"directory":{"type":"string"},"archive_url":{"type":"string"},"sha256":{"type":"string"}},"additionalProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "RuntimeSetup": {"type":"object","required":["command","directory"],"properties":{"command":{"type":"string"},"directory":{"type":"string"},"archive_url":{"type":"string"},"sha256":{"type":"string"},"manual_steps":{"type":"array","items":{"type":"string"}},"install_prompt":{"type":"string"}},"additionalProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "ACPPrepareRequest": {"type":"object","properties":{"adapter_id":{"type":"string"},"launcher":{"$ref":"#/components/schemas/ACPLauncherChoice"},"command_line":{"type":"string"},"model_id":{"type":"string"},"cwd":{"type":"string"},"parent_ref":{"type":"string"},"install":{"$ref":"#/components/schemas/RuntimeInstallation"}},"additionalProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "PrepareACPRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["request"],"properties":{"request":{"$ref":"#/components/schemas/ACPPrepareRequest"}}}],"unevaluatedProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "PrepareACPAuthenticationRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["preparation_ref","preparation_digest","method_id"],"properties":{"preparation_ref":{"type":"string","minLength":1},"preparation_digest":{"type":"string","pattern":"^[0-9a-f]{64}$"},"method_id":{"type":"string","minLength":1}}}],"unevaluatedProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "ConnectACPRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["preparation_ref","preparation_digest"],"properties":{"preparation_ref":{"type":"string","minLength":1},"preparation_digest":{"type":"string","pattern":"^[0-9a-f]{64}$"},"config_values":{"type":"object","additionalProperties":{"type":"string"}}}}],"unevaluatedProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
       "ACPPreparationRequest": {"type":"object","required":["ref"],"properties":{"ref":{"type":"string","minLength":1}},"additionalProperties":false},
-      "ACPPreparation": {"type":"object","required":["ref","state","request","observed_revision","created_at","expires_at","content_digest"],"properties":{"ref":{"type":"string","minLength":1},"state":{"type":"string","enum":["planned","needs_auth","ready"]},"parent_ref":{"type":"string"},"request":{"$ref":"#/components/schemas/ACPPrepareRequest"},"connection":{"$ref":"#/components/schemas/ACPConnection"},"observed_revision":{"$ref":"#/components/schemas/Uint64Decimal"},"discovery":{"$ref":"#/components/schemas/ACPDiscoverySnapshot"},"authentication_methods":{"type":"array","items":{"$ref":"#/components/schemas/ACPAuthenticationChallengeMethod"}},"selected_authentication":{"$ref":"#/components/schemas/ACPAuthentication"},"created_at":{"type":"string","format":"date-time"},"expires_at":{"type":"string","format":"date-time"},"content_digest":{"type":"string","pattern":"^[0-9a-f]{64}$"},"cleanup_warning":{"type":"string"}},"additionalProperties":false},
-      "DisconnectACPRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["agent_id"],"properties":{"agent_id":{"type":"string"}}}],"unevaluatedProperties":false},
-      "AgentBinding": {"type":"object","properties":{"handle":{"type":"string"},"profile_id":{"type":"string"},"effort":{"type":"string"},"speed":{"type":"string","enum":["","standard","fast"],"description":"Empty preserves a configured profile default or inherits the backend default; standard and fast are explicit choices."}},"required":[],"additionalProperties":false},
-      "ModelSpeedChoice": {"type":"object","properties":{"canonical":{"type":"string"},"wire_value":{"type":"string"}},"required":["canonical","wire_value"],"additionalProperties":false},
-      "ModelSpeedCapability": {"type":"object","properties":{"default_speed":{"type":"string"},"choices":{"type":"array","items":{"$ref":"#/components/schemas/ModelSpeedChoice"}},"acp_config_id":{"type":"string"}},"required":[],"additionalProperties":false},
-      "ModelEffortChoice": {"type":"object","properties":{"canonical":{"type":"string"},"wire_value":{"type":"string"}},"required":[],"additionalProperties":false},
-      "ModelEffortCapability": {"type":"object","properties":{"default_effort":{"type":"string"},"choices":{"type":"array","items":{"$ref":"#/components/schemas/ModelEffortChoice"}},"acp_config_id":{"type":"string"}},"required":[],"additionalProperties":false},
-      "ModelProfile": {"type":"object","properties":{"judgment":{"type":"boolean"},"id":{"type":"string"},"display_name":{"type":"string"},"backend":{"$ref":"#/components/schemas/JSONObject"},"effort":{"$ref":"#/components/schemas/ModelEffortCapability"},"speed":{"$ref":"#/components/schemas/ModelSpeedCapability"}},"required":["backend","effort"],"additionalProperties":false},
-      "AgentHandleStatus": {"type":"object","properties":{"Definition":{"$ref":"#/components/schemas/JSONObject"},"Binding":{"$ref":"#/components/schemas/AgentBinding"},"Profile":{"$ref":"#/components/schemas/ModelProfile"},"eligible_profile_ids":{"type":"array","items":{"type":"string"},"description":"Present only when include=eligible_profile_ids is requested. Current Targets allowed for this handle by Host binding rules; an empty array means no eligible target. Mutations still validate the current configuration."}},"required":["Definition","Binding","Profile"],"additionalProperties":false},
-      "AgentBindingSetStatus": {"type":"object","properties":{"Name":{"type":"string"},"Bindings":{"type":"array","items":{"$ref":"#/components/schemas/AgentBinding"}},"Active":{"type":"boolean"},"Available":{"type":"boolean"},"Problem":{"type":"string"}},"required":["Name","Bindings","Active","Available","Problem"],"additionalProperties":false},
-      "BindAgentBindingRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["binding"],"properties":{"binding":{"$ref":"#/components/schemas/AgentBinding"}}}],"unevaluatedProperties":false},
-      "ResetAgentBindingRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["handle"],"properties":{"handle":{"type":"string"}}}],"unevaluatedProperties":false},
-      "CreateAgentRoleRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["role"],"properties":{"role":{"$ref":"#/components/schemas/JSONObject"},"binding":{"$ref":"#/components/schemas/AgentBinding"}}}],"unevaluatedProperties":false},
-      "DeleteAgentRoleRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["handle"],"properties":{"handle":{"type":"string"}}}],"unevaluatedProperties":false},
-      "AgentBindingSetRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["set_name"],"properties":{"set_name":{"type":"string"}}}],"unevaluatedProperties":false},
-      "CompletionRequest": {"type":"object","properties":{"session_id":{"type":"string"},"workspace_key":{"type":"string"},"cwd":{"type":"string"},"surface":{"type":"string"},"query":{"type":"string"},"command":{"type":"string"},"name":{"type":"string"},"limit":{"type":"integer"}},"additionalProperties":false},
-      "PluginRequest": {"type":"object","properties":{"session_id":{"type":"string"},"surface":{"type":"string"},"source":{"type":"string"},"name":{"type":"string"},"id":{"type":"string"},"path":{"type":"string"}},"additionalProperties":false},
+      "ACPPreparation": {"type":"object","required":["ref","state","request","observed_revision","created_at","expires_at","content_digest"],"properties":{"ref":{"type":"string","minLength":1},"state":{"type":"string","enum":["planned","needs_auth","ready"]},"parent_ref":{"type":"string"},"request":{"$ref":"#/components/schemas/ACPPrepareRequest"},"connection":{"$ref":"#/components/schemas/ACPConnection"},"observed_revision":{"$ref":"#/components/schemas/Uint64Decimal"},"discovery":{"$ref":"#/components/schemas/ACPDiscoverySnapshot"},"authentication_methods":{"type":"array","items":{"$ref":"#/components/schemas/ACPAuthenticationChallengeMethod"}},"selected_authentication":{"$ref":"#/components/schemas/ACPAuthentication"},"created_at":{"type":"string","format":"date-time"},"expires_at":{"type":"string","format":"date-time"},"content_digest":{"type":"string","pattern":"^[0-9a-f]{64}$"},"cleanup_warning":{"type":"string"}},"additionalProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "DisconnectACPRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["agent_id"],"properties":{"agent_id":{"type":"string"}}}],"unevaluatedProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "AgentBinding": {"type":"object","properties":{"handle":{"type":"string"},"profile_id":{"type":"string"},"effort":{"type":"string"},"speed":{"type":"string","enum":["","standard","fast"],"description":"Empty preserves a configured profile default or inherits the backend default; standard and fast are explicit choices."}},"required":[],"additionalProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "ModelSpeedChoice": {"type":"object","properties":{"canonical":{"type":"string"},"wire_value":{"type":"string"}},"required":["canonical","wire_value"],"additionalProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "ModelSpeedCapability": {"type":"object","properties":{"default_speed":{"type":"string"},"choices":{"type":"array","items":{"$ref":"#/components/schemas/ModelSpeedChoice"}},"acp_config_id":{"type":"string"}},"required":[],"additionalProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "ModelEffortChoice": {"type":"object","properties":{"canonical":{"type":"string"},"wire_value":{"type":"string"}},"required":[],"additionalProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "ModelEffortCapability": {"type":"object","properties":{"default_effort":{"type":"string"},"choices":{"type":"array","items":{"$ref":"#/components/schemas/ModelEffortChoice"}},"acp_config_id":{"type":"string"}},"required":[],"additionalProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "ModelProfile": {"type":"object","properties":{"judgment":{"type":"boolean"},"id":{"type":"string"},"display_name":{"type":"string"},"backend":{"$ref":"#/components/schemas/JSONObject"},"effort":{"$ref":"#/components/schemas/ModelEffortCapability"},"speed":{"$ref":"#/components/schemas/ModelSpeedCapability"}},"required":["backend","effort"],"additionalProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "AgentHandleStatus": {"type":"object","properties":{"Definition":{"$ref":"#/components/schemas/JSONObject"},"Binding":{"$ref":"#/components/schemas/AgentBinding"},"Profile":{"$ref":"#/components/schemas/ModelProfile"},"eligible_profile_ids":{"type":"array","items":{"type":"string"},"description":"Present only when include=eligible_profile_ids is requested. Current Targets allowed for this handle by Host binding rules; an empty array means no eligible target. Mutations still validate the current configuration."}},"required":["Definition","Binding","Profile"],"additionalProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "AgentBindingSetStatus": {"type":"object","properties":{"Name":{"type":"string"},"Bindings":{"type":"array","items":{"$ref":"#/components/schemas/AgentBinding"}},"Active":{"type":"boolean"},"Available":{"type":"boolean"},"Problem":{"type":"string"}},"required":["Name","Bindings","Active","Available","Problem"],"additionalProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "BindAgentBindingRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["binding"],"properties":{"binding":{"$ref":"#/components/schemas/AgentBinding"}}}],"unevaluatedProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "ResetAgentBindingRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["handle"],"properties":{"handle":{"type":"string"}}}],"unevaluatedProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "CreateAgentRoleRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["role"],"properties":{"role":{"$ref":"#/components/schemas/JSONObject"},"binding":{"$ref":"#/components/schemas/AgentBinding"}}}],"unevaluatedProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "DeleteAgentRoleRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["handle"],"properties":{"handle":{"type":"string"}}}],"unevaluatedProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "AgentBindingSetRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["set_name"],"properties":{"set_name":{"type":"string"}}}],"unevaluatedProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "CompletionRequest": {"type":"object","properties":{"session_id":{"type":"string"},"workspace_key":{"type":"string"},"cwd":{"type":"string"},"surface":{"type":"string"},"query":{"type":"string"},"command":{"type":"string"},"name":{"type":"string"},"limit":{"type":"integer"}},"additionalProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "PluginRequest": {"type":"object","properties":{"session_id":{"type":"string"},"surface":{"type":"string"},"source":{"type":"string"},"name":{"type":"string"},"id":{"type":"string"},"path":{"type":"string"}},"additionalProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
     "AddMarketplaceRequest": {
       "allOf": [
         {"$ref":"#/components/schemas/WriteBase"},
         {"type":"object","required":["source"],"properties":{"source":{"type":"string"}}}
       ],
-      "unevaluatedProperties": false
-    },
+      "unevaluatedProperties": true,
+        "x-caelis-ignore-unknown-fields": true
+      },
     "UpdateMarketplaceRequest": {
       "allOf": [
         {"$ref":"#/components/schemas/WriteBase"},
         {"type":"object","required":["name"],"properties":{"name":{"type":"string"}}}
       ],
-      "unevaluatedProperties": false
-    },
+      "unevaluatedProperties": true,
+        "x-caelis-ignore-unknown-fields": true
+      },
     "RemoveMarketplaceRequest": {
       "allOf": [
         {"$ref":"#/components/schemas/WriteBase"},
         {"type":"object","required":["name"],"properties":{"name":{"type":"string"}}}
       ],
-      "unevaluatedProperties": false
-    },
+      "unevaluatedProperties": true,
+        "x-caelis-ignore-unknown-fields": true
+      },
     "AddPluginPathRequest": {
       "allOf": [
         {"$ref":"#/components/schemas/WriteBase"},
         {"type":"object","required":["path"],"properties":{"path":{"type":"string"}}}
       ],
-      "unevaluatedProperties": false
-    },
+      "unevaluatedProperties": true,
+        "x-caelis-ignore-unknown-fields": true
+      },
     "InstallPluginRequest": {
       "allOf": [
         {"$ref":"#/components/schemas/WriteBase"},
         {"type":"object","required":["source"],"properties":{"source":{"type":"string"}}}
       ],
-      "unevaluatedProperties": false
-    },
+      "unevaluatedProperties": true,
+        "x-caelis-ignore-unknown-fields": true
+      },
     "EnablePluginRequest": {
       "allOf": [
         {"$ref":"#/components/schemas/WriteBase"},
         {"type":"object","required":["id"],"properties":{"id":{"type":"string"}}}
       ],
-      "unevaluatedProperties": false
-    },
+      "unevaluatedProperties": true,
+        "x-caelis-ignore-unknown-fields": true
+      },
     "DisablePluginRequest": {
       "allOf": [
         {"$ref":"#/components/schemas/WriteBase"},
         {"type":"object","required":["id"],"properties":{"id":{"type":"string"}}}
       ],
-      "unevaluatedProperties": false
-    },
+      "unevaluatedProperties": true,
+        "x-caelis-ignore-unknown-fields": true
+      },
     "RemovePluginRequest": {
       "allOf": [
         {"$ref":"#/components/schemas/WriteBase"},
         {"type":"object","required":["id"],"properties":{"id":{"type":"string"}}}
       ],
-      "unevaluatedProperties": false
-    },
-      "AgentCandidate": {"type":"object","required":["name"],"properties":{"name":{"type":"string"},"description":{"type":"string"}},"additionalProperties":false},
+      "unevaluatedProperties": true,
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "AgentCandidate": {"type":"object","required":["name"],"properties":{"name":{"type":"string"},"description":{"type":"string"}},"additionalProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
       "AgentCandidateList": {"type":"array","items":{"$ref":"#/components/schemas/AgentCandidate"}},
-      "AgentParticipantSnapshot": {"type":"object","required":["id"],"properties":{"id":{"type":"string"},"label":{"type":"string"},"agent_name":{"type":"string"},"kind":{"type":"string"},"role":{"type":"string"},"source":{"type":"string"},"session_id":{"type":"string"}},"additionalProperties":false},
-      "AgentStatusSnapshot": {"type":"object","properties":{"session_id":{"type":"string"},"controller_kind":{"type":"string"},"controller_label":{"type":"string"},"controller_epoch":{"type":"string"},"controller_model":{"type":"string"},"controller_reasoning_effort":{"type":"string"},"controller_commands":{"type":"array","items":{"type":"string"}},"controller_models":{"$ref":"#/components/schemas/SlashArgCandidateList"},"controller_efforts":{"$ref":"#/components/schemas/SlashArgCandidateList"},"has_active_turn":{"type":"boolean"},"active_turn_kind":{"type":"string"},"available_agents":{"$ref":"#/components/schemas/AgentCandidateList"},"participants":{"type":"array","items":{"$ref":"#/components/schemas/AgentParticipantSnapshot"}},"delegated_participants":{"type":"array","items":{"$ref":"#/components/schemas/AgentParticipantSnapshot"}}},"additionalProperties":false},
-      "DisconnectCandidate": {"type":"object","properties":{"agent_id":{"type":"string"},"name":{"type":"string"},"connection_id":{"type":"string"},"sibling_count":{"type":"integer"},"last_on_connection":{"type":"boolean"}},"additionalProperties":false},
+      "AgentParticipantSnapshot": {"type":"object","required":["id"],"properties":{"id":{"type":"string"},"label":{"type":"string"},"agent_name":{"type":"string"},"kind":{"type":"string"},"role":{"type":"string"},"source":{"type":"string"},"session_id":{"type":"string"}},"additionalProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "AgentStatusSnapshot": {"type":"object","properties":{"session_id":{"type":"string"},"controller_kind":{"type":"string"},"controller_label":{"type":"string"},"controller_epoch":{"type":"string"},"controller_model":{"type":"string"},"controller_reasoning_effort":{"type":"string"},"controller_commands":{"type":"array","items":{"type":"string"}},"controller_models":{"$ref":"#/components/schemas/SlashArgCandidateList"},"controller_efforts":{"$ref":"#/components/schemas/SlashArgCandidateList"},"has_active_turn":{"type":"boolean"},"active_turn_kind":{"type":"string"},"available_agents":{"$ref":"#/components/schemas/AgentCandidateList"},"participants":{"type":"array","items":{"$ref":"#/components/schemas/AgentParticipantSnapshot"}},"delegated_participants":{"type":"array","items":{"$ref":"#/components/schemas/AgentParticipantSnapshot"}}},"additionalProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "DisconnectCandidate": {"type":"object","properties":{"agent_id":{"type":"string"},"name":{"type":"string"},"connection_id":{"type":"string"},"sibling_count":{"type":"integer"},"last_on_connection":{"type":"boolean"}},"additionalProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
       "DisconnectCandidateList": {"type":"array","items":{"$ref":"#/components/schemas/DisconnectCandidate"}},
-      "DisconnectCandidatesSnapshot": {"type":"object","required":["revision","candidates"],"properties":{"revision":{"$ref":"#/components/schemas/Uint64Decimal"},"candidates":{"$ref":"#/components/schemas/DisconnectCandidateList"}},"additionalProperties":false},
-      "AgentBindingStatus": {"type":"object","properties":{"Handles":{"type":"array","items":{"$ref":"#/components/schemas/AgentHandleStatus"}},"Targets":{"type":"array","items":{"$ref":"#/components/schemas/ModelProfile"}},"Sets":{"type":"array","items":{"$ref":"#/components/schemas/AgentBindingSetStatus"}}},"required":["Handles","Targets","Sets"],"additionalProperties":false},
-      "CompletionCandidate": {"type":"object","required":["value"],"properties":{"value":{"type":"string"},"display":{"type":"string"},"kind":{"type":"string"},"detail":{"type":"string"},"path":{"type":"string"}},"additionalProperties":false},
+      "DisconnectCandidatesSnapshot": {"type":"object","required":["revision","candidates"],"properties":{"revision":{"$ref":"#/components/schemas/Uint64Decimal"},"candidates":{"$ref":"#/components/schemas/DisconnectCandidateList"}},"additionalProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "AgentBindingStatus": {"type":"object","properties":{"Handles":{"type":"array","items":{"$ref":"#/components/schemas/AgentHandleStatus"}},"Targets":{"type":"array","items":{"$ref":"#/components/schemas/ModelProfile"}},"Sets":{"type":"array","items":{"$ref":"#/components/schemas/AgentBindingSetStatus"}}},"required":["Handles","Targets","Sets"],"additionalProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "CompletionCandidate": {"type":"object","required":["value"],"properties":{"value":{"type":"string"},"display":{"type":"string"},"kind":{"type":"string"},"detail":{"type":"string"},"path":{"type":"string"}},"additionalProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
       "CompletionCandidateList": {"type":"array","items":{"$ref":"#/components/schemas/CompletionCandidate"}},
-      "ResumeCandidate": {"type":"object","required":["session_id"],"properties":{"running":{"type":"boolean"},"session_id":{"type":"string"},"title":{"type":"string"},"prompt":{"type":"string"},"model":{"type":"string"},"workspace":{"type":"string"},"age":{"type":"string"},"updated_at":{"type":"string","format":"date-time"}},"additionalProperties":false},
+      "ResumeCandidate": {"type":"object","required":["session_id"],"properties":{"running":{"type":"boolean"},"session_id":{"type":"string"},"title":{"type":"string"},"prompt":{"type":"string"},"model":{"type":"string"},"workspace":{"type":"string"},"age":{"type":"string"},"updated_at":{"type":"string","format":"date-time"}},"additionalProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
       "ResumeCandidateList": {"type":"array","items":{"$ref":"#/components/schemas/ResumeCandidate"}},
-      "ModelSelection": {"type":"object","required":["efforts","effort"],"properties":{"efforts":{"type":"array","items":{"type":"string"}},"effort":{"type":"string"},"fast_supported":{"type":"boolean"},"fast":{"type":"boolean"},"current":{"type":"boolean"},"context_window_tokens":{"type":"integer"}},"additionalProperties":false},
-      "SlashArgCandidate": {"type":"object","required":["value"],"properties":{"value":{"type":"string"},"display":{"type":"string"},"detail":{"type":"string"},"no_auth":{"type":"boolean"},"model_metadata_complete":{"type":"boolean"},"model_image_input_known":{"type":"boolean"},"model_config_id":{"type":"string"},"model_selection":{"$ref":"#/components/schemas/ModelSelection"},"runtime_setup":{"$ref":"#/components/schemas/RuntimeSetup"}},"additionalProperties":false},
+      "ModelSelection": {"type":"object","required":["efforts","effort"],"properties":{"efforts":{"type":"array","items":{"type":"string"}},"effort":{"type":"string"},"fast_supported":{"type":"boolean"},"fast":{"type":"boolean"},"current":{"type":"boolean"},"context_window_tokens":{"type":"integer"}},"additionalProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "SlashArgCandidate": {"type":"object","required":["value"],"properties":{"value":{"type":"string"},"display":{"type":"string"},"detail":{"type":"string"},"no_auth":{"type":"boolean"},"model_metadata_complete":{"type":"boolean"},"model_image_input_known":{"type":"boolean"},"model_config_id":{"type":"string"},"model_selection":{"$ref":"#/components/schemas/ModelSelection"},"runtime_setup":{"$ref":"#/components/schemas/RuntimeSetup"}},"additionalProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
       "SlashArgCandidateList": {"type":"array","items":{"$ref":"#/components/schemas/SlashArgCandidate"}},
-      "SkillResolveResult": {"type":"object","properties":{"canonical":{"type":"string"},"matches":{"type":"array","items":{"type":"string"}}},"additionalProperties":false},
-      "MCPToolDetail": {"type":"object","additionalProperties":false,"required":["name","description"],"properties":{"name":{"type":"string","minLength":1},"description":{"type":"string","maxLength":1024,"description":"Bounded non-authorizing text from the accepted callable Runtime definition; no schema, credentials or result data."}}},
-      "MCPServerSnapshot": {"type":"object","required":["name","status"],"properties":{"name":{"type":"string"},"status":{"type":"string"},"tools":{"type":"array","items":{"type":"string"}},"tool_details":{"type":"array","items":{"$ref":"#/components/schemas/MCPToolDetail"},"description":"Optional name and description for the same ready tools in tools; omitted when no tools are ready."},"warning":{"type":"string"}},"additionalProperties":false},
-      "PluginSnapshot": {"type":"object","required":["id","name","version","description","root","enabled","skills","hooks","status"],"properties":{"id":{"type":"string"},"name":{"type":"string"},"version":{"type":"string"},"description":{"type":"string"},"root":{"type":"string"},"enabled":{"type":"boolean"},"skills":{"type":"array","items":{"type":"string"}},"hooks":{"type":"array","items":{"type":"string"}},"agents":{"type":"array","items":{"type":"string"}},"mcp_servers":{"type":"array","items":{"$ref":"#/components/schemas/MCPServerSnapshot"}},"status":{"type":"string"},"warning":{"type":"string"}},"additionalProperties":false},
+      "SkillResolveResult": {"type":"object","properties":{"canonical":{"type":"string"},"matches":{"type":"array","items":{"type":"string"}}},"additionalProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "MCPToolDetail": {"type":"object","additionalProperties":true,"required":["name","description"],"properties":{"name":{"type":"string","minLength":1},"description":{"type":"string","maxLength":1024,"description":"Bounded non-authorizing text from the accepted callable Runtime definition; no schema, credentials or result data."}},
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "MCPServerSnapshot": {"type":"object","required":["name","status"],"properties":{"name":{"type":"string"},"status":{"type":"string"},"tools":{"type":"array","items":{"type":"string"}},"tool_details":{"type":"array","items":{"$ref":"#/components/schemas/MCPToolDetail"},"description":"Optional name and description for the same ready tools in tools; omitted when no tools are ready."},"warning":{"type":"string"}},"additionalProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "PluginSnapshot": {"type":"object","required":["id","name","version","description","root","enabled","skills","hooks","status"],"properties":{"id":{"type":"string"},"name":{"type":"string"},"version":{"type":"string"},"description":{"type":"string"},"root":{"type":"string"},"enabled":{"type":"boolean"},"skills":{"type":"array","items":{"type":"string"}},"hooks":{"type":"array","items":{"type":"string"}},"agents":{"type":"array","items":{"type":"string"}},"mcp_servers":{"type":"array","items":{"$ref":"#/components/schemas/MCPServerSnapshot"}},"status":{"type":"string"},"warning":{"type":"string"}},"additionalProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
       "PluginSnapshotList": {"type":"array","items":{"$ref":"#/components/schemas/PluginSnapshot"}},
-      "MarketplaceSnapshot": {"type":"object","required":["name"],"properties":{"name":{"type":"string"},"description":{"type":"string"},"owner":{"type":"string"},"source":{"type":"string"},"root":{"type":"string"},"version":{"type":"string"},"plugin_root":{"type":"string"},"allow_cross_marketplace_dependencies":{"type":"array","items":{"type":"string"}},"plugin_count":{"type":"integer"}},"additionalProperties":false},
+      "MarketplaceSnapshot": {"type":"object","required":["name"],"properties":{"name":{"type":"string"},"description":{"type":"string"},"owner":{"type":"string"},"source":{"type":"string"},"root":{"type":"string"},"version":{"type":"string"},"plugin_root":{"type":"string"},"allow_cross_marketplace_dependencies":{"type":"array","items":{"type":"string"}},"plugin_count":{"type":"integer"}},"additionalProperties":true,
+        "x-caelis-ignore-unknown-fields": true
+      },
       "MarketplaceSnapshotList": {"type":"array","items":{"$ref":"#/components/schemas/MarketplaceSnapshot"}},
       "JSONValue": {
         "oneOf": [
@@ -2509,17 +2676,19 @@
       },
       "TurnTarget": {
         "type": "object",
-        "additionalProperties": false,
+        "additionalProperties": true,
         "required": ["handle_id", "run_id", "turn_id"],
         "properties": {
           "handle_id": {"type": "string", "minLength": 1},
           "run_id": {"type": "string", "minLength": 1},
           "turn_id": {"type": "string", "minLength": 1}
-        }
-      },
+        },
+      "x-caelis-ignore-unknown-fields": true
+    },
       "CommandTarget": {
+        "x-caelis-ignore-unknown-fields": true,
         "type": "object",
-        "additionalProperties": false,
+        "additionalProperties": true,
         "properties": {
           "handle_id": {"type": "string"},
           "run_id": {"type": "string"},
@@ -2527,6 +2696,7 @@
         }
       },
       "CreateSessionRequest": {
+        "x-caelis-ignore-unknown-fields": true,
         "allOf": [
           {"$ref": "#/components/schemas/WriteBase"},
           {"type": "object", "properties": {
@@ -2538,12 +2708,17 @@
             "metadata": {"$ref": "#/components/schemas/JSONObject"}
           }}
         ],
-        "unevaluatedProperties": false
+        "unevaluatedProperties": true
       },
-      "ExecutionConfig": {"type": "object", "additionalProperties": false, "properties": {"environment": {"oneOf": [{"$ref": "#/components/schemas/EnvironmentConfig"}, {"type": "null"}], "description": "Null or omitted retains host environment defaults."}, "shell": {"oneOf": [{"$ref": "#/components/schemas/ShellConfig"}, {"type": "null"}], "description": "Null or omitted selects platform-default non-login shell."}}},
-      "EnvironmentConfig": {"type": "object", "additionalProperties": false, "properties": {"inherit": {"oneOf": [{"type": "boolean"}, {"type": "null"}], "description": "Null or omitted inherits the host environment snapshot; false starts from an empty environment."}, "set": {"oneOf": [{"type": "object", "additionalProperties": {"type": "string"}}, {"type": "null"}], "description": "Applied after unset; null or omitted sets no variables."}, "unset": {"oneOf": [{"type": "array", "items": {"type": "string"}}, {"type": "null"}], "description": "Applied before set; null or omitted unsets no variables."}}},
-      "ShellConfig": {"type": "object", "additionalProperties": false, "properties": {"path": {"oneOf": [{"type": "string"}, {"type": "null"}], "description": "Absolute POSIX shell path; null or omitted uses /bin/bash. Windows supports only the platform-default shell."}, "login": {"oneOf": [{"type": "boolean"}, {"type": "null"}], "description": "Null or omitted defaults to false (-c); true selects -lc on Unix. Windows rejects true."}}},
-      "CloseSessionRequest": {"allOf": [{"$ref": "#/components/schemas/WriteBase"}], "unevaluatedProperties": false},
+      "ExecutionConfig": {
+        "x-caelis-ignore-unknown-fields": true,"type": "object", "additionalProperties": true, "properties": {"environment": {"oneOf": [{"$ref": "#/components/schemas/EnvironmentConfig"}, {"type": "null"}], "description": "Null or omitted retains host environment defaults."}, "shell": {"oneOf": [{"$ref": "#/components/schemas/ShellConfig"}, {"type": "null"}], "description": "Null or omitted selects platform-default non-login shell."}}},
+      "EnvironmentConfig": {
+        "x-caelis-ignore-unknown-fields": true,"type": "object", "additionalProperties": true, "properties": {"inherit": {"oneOf": [{"type": "boolean"}, {"type": "null"}], "description": "Null or omitted inherits the host environment snapshot; false starts from an empty environment."}, "set": {"oneOf": [{"type": "object", "additionalProperties": {"type": "string"}}, {"type": "null"}], "description": "Applied after unset; null or omitted sets no variables."}, "unset": {"oneOf": [{"type": "array", "items": {"type": "string"}}, {"type": "null"}], "description": "Applied before set; null or omitted unsets no variables."}}},
+      "ShellConfig": {
+        "x-caelis-ignore-unknown-fields": true,"type": "object", "additionalProperties": true, "properties": {"path": {"oneOf": [{"type": "string"}, {"type": "null"}], "description": "Absolute POSIX shell path; null or omitted uses /bin/bash. Windows supports only the platform-default shell."}, "login": {"oneOf": [{"type": "boolean"}, {"type": "null"}], "description": "Null or omitted defaults to false (-c); true selects -lc on Unix. Windows rejects true."}}},
+      "CloseSessionRequest": {"allOf": [{"$ref": "#/components/schemas/WriteBase"}], "unevaluatedProperties": true,
+      "x-caelis-ignore-unknown-fields": true
+    },
       "RecordInteractionRequest": {
         "allOf": [
           {
@@ -2567,65 +2742,75 @@
             }
           }
         ],
-        "unevaluatedProperties": false
+        "unevaluatedProperties": true,
+        "x-caelis-ignore-unknown-fields": true
       },
-      "CompactSessionRequest": {"allOf": [{"$ref": "#/components/schemas/WriteBase"}], "unevaluatedProperties": false},
+      "CompactSessionRequest": {"allOf": [{"$ref": "#/components/schemas/WriteBase"}], "unevaluatedProperties": true,
+      "x-caelis-ignore-unknown-fields": true
+    },
       "StatusSession": {
-        "type": "object", "additionalProperties": false,
+        "type": "object", "additionalProperties": true,
         "properties": {
           "id": {"type": "string"}, "workspace": {"type": "string"}, "store_dir": {"type": "string"},
           "mode_label": {"type": "string"}, "session_mode": {"type": "string"}, "policy_profile": {"type": "string"}, "surface": {"type": "string"}
-        }
+        },
+        "x-caelis-ignore-unknown-fields": true
       },
       "StatusModel": {
-        "type": "object", "additionalProperties": false,
+        "type": "object", "additionalProperties": true,
         "properties": {
           "display": {"type": "string"}, "alias": {"type": "string"}, "provider": {"type": "string"}, "name": {"type": "string"},
           "reasoning_effort": {"type": "string"}, "fast_mode": {"type": "boolean"}, "missing_api_key": {"type": "boolean"}
-        }
+        },
+        "x-caelis-ignore-unknown-fields": true
       },
       "SandboxSetupCheck": {
-        "type": "object", "additionalProperties": false,
+        "type": "object", "additionalProperties": true,
         "properties": {
           "name": {"type": "string"}, "scope": {"type": "string"}, "current": {"type": "boolean"},
           "required": {"type": "boolean"}, "reason": {"type": "string"}, "error": {"type": "string"},
           "version": {"type": "integer"}, "root": {"type": "string"}, "updated_at": {"type": "string", "format": "date-time"},
           "details": {"type": "object", "additionalProperties": {"type": "string"}},
           "counts": {"type": "object", "additionalProperties": {"type": "integer"}}
-        }
+        },
+        "x-caelis-ignore-unknown-fields": true
       },
       "SandboxSetupStatus": {
-        "type": "object", "additionalProperties": false,
+        "type": "object", "additionalProperties": true,
         "properties": {
           "required": {"type": "boolean"}, "error": {"type": "string"},
           "details": {"type": "object", "additionalProperties": {"type": "string"}},
           "counts": {"type": "object", "additionalProperties": {"type": "integer"}},
           "checks": {"type": "array", "items": {"$ref": "#/components/schemas/SandboxSetupCheck"}}
-        }
+        },
+        "x-caelis-ignore-unknown-fields": true
       },
       "StatusSandbox": {
-        "type": "object", "additionalProperties": false,
+        "type": "object", "additionalProperties": true,
         "required": ["setup"],
         "properties": {
           "type": {"type": "string"}, "requested_backend": {"type": "string"}, "resolved_backend": {"type": "string"},
           "route": {"type": "string"}, "fallback_reason": {"type": "string"}, "install_hint": {"type": "string"},
           "setup": {"$ref": "#/components/schemas/SandboxSetupStatus"}, "security_summary": {"type": "string"},
           "host_execution": {"type": "boolean"}, "full_access_mode": {"type": "boolean"}
-        }
+        },
+        "x-caelis-ignore-unknown-fields": true
       },
       "UsageSnapshot": {
-        "type": "object", "additionalProperties": false,
+        "type": "object", "additionalProperties": true,
         "properties": {
           "prompt_tokens": {"type": "integer"}, "cached_input_tokens": {"type": "integer"},
           "completion_tokens": {"type": "integer"}, "reasoning_tokens": {"type": "integer"}, "total_tokens": {"type": "integer"}
-        }
+        },
+        "x-caelis-ignore-unknown-fields": true
       },
       "ModelUsageSnapshot": {
-        "type": "object", "additionalProperties": false, "required": ["usage"],
-        "properties": {"provider": {"type": "string"}, "model": {"type": "string"}, "usage": {"$ref": "#/components/schemas/UsageSnapshot"}}
+        "type": "object", "additionalProperties": true, "required": ["usage"],
+        "properties": {"provider": {"type": "string"}, "model": {"type": "string"}, "usage": {"$ref": "#/components/schemas/UsageSnapshot"}},
+        "x-caelis-ignore-unknown-fields": true
       },
       "StatusUsage": {
-        "type": "object", "additionalProperties": false,
+        "type": "object", "additionalProperties": true,
         "required": ["context_usage_available", "context_usage_controller_epoch", "context_usage_replace", "session_usage_total"],
         "properties": {
           "prompt_tokens": {"type": "integer"}, "completion_tokens": {"type": "integer"}, "total_tokens": {"type": "integer"},
@@ -2633,46 +2818,53 @@
           "context_usage_controller_epoch": {"type": "string"}, "context_usage_replace": {"type": "boolean"},
           "session_usage_total": {"$ref": "#/components/schemas/UsageSnapshot"},
           "session_usage_by_model": {"type": "array", "items": {"$ref": "#/components/schemas/ModelUsageSnapshot"}}
-        }
+        },
+        "x-caelis-ignore-unknown-fields": true
       },
       "StatusRuntime": {
-        "type": "object", "additionalProperties": false,
-        "properties": {"active_jobs": {"type": "integer"}, "active_turn_kind": {"type": "string"}, "active_sessions": {"type": "array", "items": {"type": "string"}}, "running": {"type": "boolean"}}
+        "type": "object", "additionalProperties": true,
+        "properties": {"active_jobs": {"type": "integer"}, "active_turn_kind": {"type": "string"}, "active_sessions": {"type": "array", "items": {"type": "string"}}, "running": {"type": "boolean"}},
+        "x-caelis-ignore-unknown-fields": true
       },
       "StatusConfiguration": {
-        "type": "object", "additionalProperties": false, "required": ["revision", "workspace_trust"],
-        "properties": {"revision": {"$ref": "#/components/schemas/Uint64Decimal"}, "workspace_trust": {"$ref":"#/components/schemas/WorkspaceTrustLevel"}, "workspace_trust_required": {"type": "boolean", "description": "Present only for an explicitly requested interactive workspace trust preflight."}}
+        "type": "object", "additionalProperties": true, "required": ["revision", "workspace_trust"],
+        "properties": {"revision": {"$ref": "#/components/schemas/Uint64Decimal"}, "workspace_trust": {"$ref":"#/components/schemas/WorkspaceTrustLevel"}, "workspace_trust_required": {"type": "boolean", "description": "Present only for an explicitly requested interactive workspace trust preflight."}},
+        "x-caelis-ignore-unknown-fields": true
       },
       "StatusDiagnostics": {
-        "type": "object", "additionalProperties": false,
+        "type": "object", "additionalProperties": true,
         "properties": {
           "go_version": {"type": "string"}, "goos": {"type": "string"}, "goarch": {"type": "string"},
           "config_path": {"type": "string"}, "config_dir_mode": {"type": "string"}, "config_file_mode": {"type": "string"},
           "config_dir_secure": {"type": "boolean"}, "config_file_secure": {"type": "boolean"}, "config_permissions_secure": {"type": "boolean"},
           "token_source": {"type": "string"}, "persisted_plaintext_token": {"type": "boolean"},
           "warnings": {"type": "array", "items": {"type": "string"}}
-        }
+        },
+        "x-caelis-ignore-unknown-fields": true
       },
       "StatusRateLimitWindow": {
-        "type": "object", "additionalProperties": false,
+        "type": "object", "additionalProperties": true,
         "properties": {
           "kind": {"type": "string"}, "label": {"type": "string"}, "used_percent": {"type": "number"},
           "duration_minutes": {"type": "integer"}, "resets_at": {"type": "string", "format": "date-time"}
-        }
+        },
+        "x-caelis-ignore-unknown-fields": true
       },
       "StatusRateLimit": {
-        "type": "object", "additionalProperties": false,
-        "properties": {"id": {"type": "string"}, "name": {"type": "string"}, "windows": {"type": "array", "items": {"$ref": "#/components/schemas/StatusRateLimitWindow"}}}
+        "type": "object", "additionalProperties": true,
+        "properties": {"id": {"type": "string"}, "name": {"type": "string"}, "windows": {"type": "array", "items": {"$ref": "#/components/schemas/StatusRateLimitWindow"}}},
+        "x-caelis-ignore-unknown-fields": true
       },
       "StatusRateLimits": {
-        "type": "object", "additionalProperties": false,
+        "type": "object", "additionalProperties": true,
         "properties": {
           "provider": {"type": "string"}, "plan": {"type": "string"}, "captured_at": {"type": "string", "format": "date-time"},
           "limits": {"type": "array", "items": {"$ref": "#/components/schemas/StatusRateLimit"}}
-        }
+        },
+        "x-caelis-ignore-unknown-fields": true
       },
       "StatusSnapshot": {
-        "type": "object", "additionalProperties": false,
+        "type": "object", "additionalProperties": true,
         "required": ["configuration", "session", "model_status", "sandbox_status", "usage", "rate_limits", "runtime", "diagnostics"],
         "properties": {
           "configuration": {"$ref": "#/components/schemas/StatusConfiguration"},
@@ -2683,28 +2875,33 @@
           "rate_limits": {"$ref": "#/components/schemas/StatusRateLimits"},
           "runtime": {"$ref": "#/components/schemas/StatusRuntime"},
           "diagnostics": {"$ref": "#/components/schemas/StatusDiagnostics"}
-        }
+        },
+        "x-caelis-ignore-unknown-fields": true
       },
       "PromptTextContentPart": {
         "type": "object",
-        "additionalProperties": false,
+        "additionalProperties": true,
         "required": ["type", "text"],
         "properties": {
           "type": {"const": "text"},
           "text": {"type": "string", "minLength": 1}
-        }
-      },
+        },
+      "x-caelis-ignore-unknown-fields": true,
+      "not": {"anyOf": [{"required": ["mime_type"]}, {"required": ["data"]}, {"required": ["file_name"]}]}
+    },
       "PromptImageContentPart": {
         "type": "object",
-        "additionalProperties": false,
+        "additionalProperties": true,
         "required": ["type", "mime_type", "data"],
         "properties": {
           "type": {"const": "image"},
           "mime_type": {"type": "string", "pattern": "^image/\\S+$"},
           "data": {"type": "string", "minLength": 1, "contentEncoding": "base64"},
           "file_name": {"type": "string"}
-        }
-      },
+        },
+      "x-caelis-ignore-unknown-fields": true,
+      "not": {"anyOf": [{"required": ["text"]}]}
+    },
       "PromptContentPart": {
         "oneOf": [
           {"$ref": "#/components/schemas/PromptTextContentPart"},
@@ -2722,8 +2919,9 @@
           },
           "anyOf": [{"required": ["input"]}, {"required": ["content_parts"]}]
         }],
-        "unevaluatedProperties": false
-      },
+        "unevaluatedProperties": true,
+      "x-caelis-ignore-unknown-fields": true
+    },
       "SteerRequest": {
         "allOf": [{"$ref": "#/components/schemas/WriteBase"}, {
           "type": "object",
@@ -2736,12 +2934,14 @@
           },
           "anyOf": [{"required": ["input"]}, {"required": ["content_parts"]}]
         }],
-        "unevaluatedProperties": false
-      },
+        "unevaluatedProperties": true,
+      "x-caelis-ignore-unknown-fields": true
+    },
       "CancelRequest": {
         "allOf": [{"$ref": "#/components/schemas/WriteBase"}, {"type": "object", "required": ["target"], "properties": {"target": {"$ref": "#/components/schemas/TurnTarget"}, "reason": {"type": "string"}}}],
-        "unevaluatedProperties": false
-      },
+        "unevaluatedProperties": true,
+      "x-caelis-ignore-unknown-fields": true
+    },
       "ResolveApprovalRequest": {
         "allOf": [{"$ref": "#/components/schemas/WriteBase"}, {"type": "object", "required": ["target", "approval_request_id", "outcome", "approved"], "properties": {
           "target": {"$ref": "#/components/schemas/TurnTarget"},
@@ -2752,20 +2952,23 @@
           "reason": {"type": "string"},
           "review_text": {"type": "string"}
         }}],
-        "unevaluatedProperties": false
-      },
+        "unevaluatedProperties": true,
+      "x-caelis-ignore-unknown-fields": true
+    },
       "CommandResource": {
         "type": "object",
-        "additionalProperties": false,
+        "additionalProperties": true,
         "properties": {
           "kind": {"type": "string"},
           "ref": {"type": "string"},
           "digest": {"type": "string"}
-        }
+        },
+        "x-caelis-ignore-unknown-fields": true
       },
       "CommandResult": {
+        "x-caelis-ignore-unknown-fields": true,
         "type": "object",
-        "additionalProperties": false,
+        "additionalProperties": true,
         "required": ["operation_id", "outcome"],
         "properties": {
         "input_status": {"type": "string", "enum": ["accepted"], "description": "Steering admission, not safe-point application. Correlate the canonical input receipt by operation ID."},
@@ -2791,21 +2994,59 @@
         }
       },
       "DurableFeedPosition": {
-        "type": "object", "additionalProperties": false, "required": ["seq", "projection_index"],
-        "properties": {"seq": {"$ref": "#/components/schemas/Uint64Decimal"}, "projection_index": {"type": "integer", "format": "uint32", "minimum": 0, "maximum": 4294967295}}
+        "type": "object", "additionalProperties": true, "required": ["seq", "projection_index"],
+        "properties": {"seq": {"$ref": "#/components/schemas/Uint64Decimal"}, "projection_index": {"type": "integer", "format": "uint32", "minimum": 0, "maximum": 4294967295}},
+        "x-caelis-ignore-unknown-fields": true
       },
       "TransientFeedPosition": {
-        "type": "object", "additionalProperties": false, "required": ["anchor", "generation", "sequence"],
-        "properties": {"anchor": {"$ref": "#/components/schemas/DurableFeedPosition"}, "generation": {"type": "string", "minLength": 1}, "sequence": {"$ref": "#/components/schemas/PositiveUint64Decimal"}}
+        "type": "object", "additionalProperties": true, "required": ["anchor", "generation", "sequence"],
+        "properties": {"anchor": {"$ref": "#/components/schemas/DurableFeedPosition"}, "generation": {"type": "string", "minLength": 1}, "sequence": {"$ref": "#/components/schemas/PositiveUint64Decimal"}},
+        "x-caelis-ignore-unknown-fields": true
       },
       "FeedPosition": {
         "oneOf": [
-          {"type": "object", "additionalProperties": false, "required": ["durable"], "properties": {"durable": {"$ref": "#/components/schemas/DurableFeedPosition"}}},
-          {"type": "object", "additionalProperties": false, "required": ["transient"], "properties": {"transient": {"$ref": "#/components/schemas/TransientFeedPosition"}}}
+          {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "durable"
+            ],
+            "properties": {
+              "durable": {
+                "$ref": "#/components/schemas/DurableFeedPosition"
+              }
+            },
+            "x-caelis-ignore-unknown-fields": true,
+            "not": {
+              "required": [
+                "transient"
+              ]
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "transient"
+            ],
+            "properties": {
+              "transient": {
+                "$ref": "#/components/schemas/TransientFeedPosition"
+              }
+            },
+            "x-caelis-ignore-unknown-fields": true,
+            "not": {
+              "required": [
+                "durable"
+              ]
+            }
+          }
         ]
       },
       "Delivery": {"type": "object", "additionalProperties": false, "required": ["mode"], "properties": {"mode": {"$ref": "#/components/schemas/DeliveryMode"}}},
-      "ParentToolRelation": {"type": "object", "additionalProperties": false, "properties": {"tool_call_id": {"type": "string"}, "tool_name": {"type": "string"}}},
+      "ParentToolRelation": {"type": "object", "additionalProperties": true, "properties": {"tool_call_id": {"type": "string"}, "tool_name": {"type": "string"}},
+        "x-caelis-ignore-unknown-fields": true
+      },
       "TextContent": {"type": "object", "additionalProperties": false, "required": ["type", "text"], "properties": {"type": {"const": "text"}, "text": {"type": "string"}}},
       "ImageContent": {"type": "object", "additionalProperties": false, "required": ["type", "data", "mimeType"], "properties": {"type": {"const": "image"}, "data": {"type": "string"}, "mimeType": {"type": "string"}}},
       "AudioContent": {"type": "object", "additionalProperties": false, "required": ["type", "data", "mimeType"], "properties": {"type": {"const": "audio"}, "data": {"type": "string"}, "mimeType": {"type": "string"}}},
@@ -2854,9 +3095,15 @@
       "PermissionOption": {"type": "object", "additionalProperties": false, "required": ["optionId", "name", "kind"], "properties": {"_meta": {"$ref": "#/components/schemas/ACPMetadata"}, "optionId": {"type": "string"}, "name": {"type": "string"}, "kind": {"type": "string"}}},
       "RequestPermission": {"type": "object", "additionalProperties": false, "required": ["sessionId", "options"], "properties": {"sessionId": {"type": "string"}, "toolCall": {"$ref": "#/components/schemas/ACPToolCallUpdate", "description":"Present only when the native permission names an actual tool call; independent or opaque permission subjects never acquire a fabricated toolCallId."}, "title":{"type":"string","maxLength":512},"description":{"type":"string","maxLength":512}, "options": {"type": "array", "items": {"$ref": "#/components/schemas/PermissionOption"}}, "_meta": {"$ref": "#/components/schemas/ACPMetadata"}}},
       "ApprovalFieldState": {"type":"string","enum":["known","unavailable","truncated","opaque"]},
-      "ApprovalField": {"type":"object","additionalProperties":false,"required":["state"],"properties":{"state":{"$ref":"#/components/schemas/ApprovalFieldState"},"text":{"type":"string","maxLength":512},"sensitive":{"type":"boolean","description":"Presence only; marked values never appear in text."}}},
-      "ApprovalGrant": {"type":"object","additionalProperties":false,"required":["option_id","scope"],"properties":{"option_id":{"type":"string","description":"Display join to an original native option, never grant authority."},"scope":{"$ref":"#/components/schemas/ApprovalField"}}},
-      "ApprovalSubject": {"type":"object","additionalProperties":false,"required":["kind","tool","operation","targets","effect","scope"],"properties":{"title":{"$ref":"#/components/schemas/ApprovalField"},"description":{"$ref":"#/components/schemas/ApprovalField"},"kind":{"type":"string","enum":["command","file","network","app_access","opaque"]},"tool":{"$ref":"#/components/schemas/ApprovalField"},"operation":{"$ref":"#/components/schemas/ApprovalField"},"targets":{"type":"array","minItems":1,"maxItems":16,"items":{"$ref":"#/components/schemas/ApprovalField"}},"effect":{"$ref":"#/components/schemas/ApprovalField"},"scope":{"$ref":"#/components/schemas/ApprovalField"},"grants":{"type":"array","maxItems":32,"items":{"$ref":"#/components/schemas/ApprovalGrant"}},"targets_truncated":{"type":"boolean"},"grants_truncated":{"type":"boolean"},"sensitive_input":{"type":"boolean","description":"Explicitly marked input values were omitted from the display snapshot; private review/execution evidence is unchanged."},"opaque_input":{"type":"boolean","description":"Uninterpreted action evidence was retained privately; public raw input and derived review text are withheld."},"reported":{"type":"boolean","description":"Remote presentation claims, independently of the canonical action and native offered options; never automatic review or grant authority."}},"description":"approval-subjects-v1: owner-supplied bounded decision context, identical on live permission and recovered state. Unknown structures stay opaque. The original request, options and resolve target remain authoritative."},
+      "ApprovalField": {"type":"object","additionalProperties":true,"required":["state"],"properties":{"state":{"$ref":"#/components/schemas/ApprovalFieldState"},"text":{"type":"string","maxLength":512},"sensitive":{"type":"boolean","description":"Presence only; marked values never appear in text."}},
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "ApprovalGrant": {"type":"object","additionalProperties":true,"required":["option_id","scope"],"properties":{"option_id":{"type":"string","description":"Display join to an original native option, never grant authority."},"scope":{"$ref":"#/components/schemas/ApprovalField"}},
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "ApprovalSubject": {"type":"object","additionalProperties":true,"required":["kind","tool","operation","targets","effect","scope"],"properties":{"title":{"$ref":"#/components/schemas/ApprovalField"},"description":{"$ref":"#/components/schemas/ApprovalField"},"kind":{"type":"string","enum":["command","file","network","app_access","opaque"]},"tool":{"$ref":"#/components/schemas/ApprovalField"},"operation":{"$ref":"#/components/schemas/ApprovalField"},"targets":{"type":"array","minItems":1,"maxItems":16,"items":{"$ref":"#/components/schemas/ApprovalField"}},"effect":{"$ref":"#/components/schemas/ApprovalField"},"scope":{"$ref":"#/components/schemas/ApprovalField"},"grants":{"type":"array","maxItems":32,"items":{"$ref":"#/components/schemas/ApprovalGrant"}},"targets_truncated":{"type":"boolean"},"grants_truncated":{"type":"boolean"},"sensitive_input":{"type":"boolean","description":"Explicitly marked input values were omitted from the display snapshot; private review/execution evidence is unchanged."},"opaque_input":{"type":"boolean","description":"Uninterpreted action evidence was retained privately; public raw input and derived review text are withheld."},"reported":{"type":"boolean","description":"Remote presentation claims, independently of the canonical action and native offered options; never automatic review or grant authority."}},"description":"approval-subjects-v1: owner-supplied bounded decision context, identical on live permission and recovered state. Unknown structures stay opaque. The original request, options and resolve target remain authoritative.",
+        "x-caelis-ignore-unknown-fields": true
+      },
       "ApprovalReview": {"type": "object", "additionalProperties": false, "properties": {"tool_call_id": {"type": "string"}, "item_id": {"type": "string", "description": "Canonical Session item ID for the reviewed tool call when available; approval_request_id on the enclosing Envelope is the public approval token."}, "tool_name": {"type": "string"}, "raw_input": {"$ref": "#/components/schemas/JSONObject"}, "status": {"type": "string"}, "text": {"type": "string"}, "risk": {"type": "string"}, "authorization": {"type": "string"}}},
       "ParticipantEvent": {"type": "object", "additionalProperties": false, "required": ["state"], "properties": {"state": {"type": "string"}}},
       "LifecycleEvent": {"type": "object", "additionalProperties": false, "required": ["state"], "properties": {"state": {"type": "string"}, "reason": {"type": "string"}, "stopReason": {"type": "string"}}},
@@ -2896,10 +3143,12 @@
         ],
         "discriminator": {"propertyName": "kind"}
       },
-      "TaskParentTool": {"type": "object", "additionalProperties": false, "properties": {"tool_call_id": {"type": "string"}, "tool_name": {"type": "string"}}},
+      "TaskParentTool": {"type": "object", "additionalProperties": true, "properties": {"tool_call_id": {"type": "string"}, "tool_name": {"type": "string"}},
+        "x-caelis-ignore-unknown-fields": true
+      },
       "TaskDescriptor": {
         "type": "object",
-        "additionalProperties": false,
+        "additionalProperties": true,
         "required": ["session_id", "task_id", "handle", "kind", "state", "running"],
         "properties": {
           "model": {"type": "string"},
@@ -2920,56 +3169,77 @@
           "activity_id": {"type": "string"},
           "current_turn_id": {"type": "string"},
           "updated_at": {"type": "string", "format": "date-time"}
-        }
+        },
+        "x-caelis-ignore-unknown-fields": true
       },
-      "TaskList": {"type": "object", "additionalProperties": false, "properties": {"tasks": {"type": "array", "items": {"$ref": "#/components/schemas/TaskDescriptor"}}}},
+      "TaskList": {"type": "object", "additionalProperties": true, "properties": {"tasks": {"type": "array", "items": {"$ref": "#/components/schemas/TaskDescriptor"}}},
+        "x-caelis-ignore-unknown-fields": true
+      },
       "TaskDirectorySnapshot": {
         "type": "object",
-        "additionalProperties": false,
+        "additionalProperties": true,
         "required": ["revision"],
         "properties": {
           "revision": {"$ref": "#/components/schemas/Uint64Decimal"},
           "tasks": {"type": "array", "items": {"$ref": "#/components/schemas/TaskDescriptor"}}
-        }
+        },
+        "x-caelis-ignore-unknown-fields": true
       },
       "TaskEventBatch": {
         "type": "object",
-        "additionalProperties": false,
+        "additionalProperties": true,
         "properties": {
           "deliveries": {"type": "array", "items": {"$ref": "#/components/schemas/TaskStreamDelivery"}},
           "activity_id": {"type": "string"}
-        }
+        },
+        "x-caelis-ignore-unknown-fields": true
       },
       "TaskStreamDelivery": {
-        "type": "object", "additionalProperties": false, "required": ["kind", "source"],
+        "type": "object", "additionalProperties": true, "required": ["kind", "source"],
         "properties": {
           "history_before": {"type": "string", "description": "Earlier-history token, present only at Session sync or Task replace_end; absent at the beginning of history."},
           "kind": {"$ref": "#/components/schemas/StreamDeliveryKind"}, "source": {"$ref": "#/components/schemas/StreamSourceClass"},
           "snapshot_id": {"type": "string"}, "page": {"type": "integer", "minimum": 0},
           "events": {"type": "array", "items": {"$ref": "#/components/schemas/Envelope"}},
           "next_cursor": {"type": "string"}, "activity_id": {"type": "string"}
-        }
+        },
+        "x-caelis-ignore-unknown-fields": true
       },
       "SessionFeedDelivery": {
-        "type": "object", "additionalProperties": false, "required": ["kind", "source"],
+        "type": "object", "additionalProperties": true, "required": ["kind", "source"],
         "properties": {
           "history_before": {"type": "string", "description": "Earlier-history token, present only at Session sync or Task replace_end; absent at the beginning of history."},
           "kind": {"$ref": "#/components/schemas/StreamDeliveryKind"}, "source": {"$ref": "#/components/schemas/StreamSourceClass"},
           "snapshot_id": {"type": "string"}, "page": {"type": "integer", "minimum": 0},
           "events": {"type": "array", "items": {"$ref": "#/components/schemas/Envelope"}}, "next_cursor": {"type": "string"}
-        }
+        },
+        "x-caelis-ignore-unknown-fields": true
       },
       "SessionRef": {"type": "object", "additionalProperties": false, "properties": {"app_name": {"type": "string"}, "user_id": {"type": "string"}, "session_id": {"type": "string"}, "workspace_key": {"type": "string"}}},
       "PlacementKind": {"type": "string", "enum": ["agent", "model"]},
-      "Placement": {"type": "object", "additionalProperties": false, "properties": {"kind": {"$ref": "#/components/schemas/PlacementKind"}, "profile_id": {"type": "string"}, "agent": {"type": "string"}, "model": {"type": "string"}, "reasoning_effort": {"type": "string"}, "reasoning_effort_config_id": {"type": "string"}, "session_config_values": {"type": "object", "additionalProperties": {"type": "string"}}, "config_fingerprint": {"type": "string"}, "fingerprint": {"type": "string"}}},
-      "ControllerBinding": {"type": "object", "additionalProperties": false, "properties": {"kind": {"$ref": "#/components/schemas/ControllerKind"}, "controller_id": {"type": "string"}, "agent_name": {"type": "string"}, "label": {"type": "string"}, "placement": {"$ref": "#/components/schemas/Placement"}, "epoch_id": {"type": "string"}, "remote_session_id": {"type": "string"}, "context_sync_seq": {"$ref": "#/components/schemas/Uint64Decimal"}, "attached_at": {"type": "string", "format": "date-time"}, "source": {"type": "string"}}},
-      "ParticipantBinding": {"type": "object", "additionalProperties": false, "properties": {"id": {"type": "string"}, "kind": {"$ref": "#/components/schemas/ParticipantKind"}, "role": {"$ref": "#/components/schemas/ParticipantRole"}, "agent_name": {"type": "string"}, "label": {"type": "string"}, "session_id": {"type": "string"}, "source": {"type": "string"}, "parent_turn_id": {"type": "string"}, "delegation_id": {"type": "string"}, "attachment_generation": {"type": "string"}, "context_sync_seq": {"$ref": "#/components/schemas/Uint64Decimal"}, "attached_at": {"type": "string", "format": "date-time"}, "controller_ref": {"type": "string"}}},
-      "RunState": {"type": "object", "additionalProperties": false, "properties": {"status": {"type": "string"}, "waiting_approval": {"type": "boolean"}, "active": {"type": "boolean"}, "kind": {"type": "string"}, "handle_id": {"type": "string"}, "run_id": {"type": "string"}, "turn_id": {"type": "string"}, "started_at": {"type": "string", "format": "date-time"}}},
-      "ActiveApproval": {"type": "object", "additionalProperties": false, "required": ["request_id", "permission"], "properties": {"target": {"$ref": "#/components/schemas/TurnTarget"}, "request_id": {"type": "string"}, "scope": {"type": "string", "enum": ["main", "participant", "subagent"]}, "scope_id": {"type": "string"}, "participant_id": {"type": "string"}, "parent_tool": {"$ref": "#/components/schemas/ParentToolRelation"}, "permission": {"$ref": "#/components/schemas/JSONObject"}, "subject": {"$ref":"#/components/schemas/ApprovalSubject"}}},
-      "ApprovalState": {"type": "object", "additionalProperties": false, "properties": {"active": {"$ref": "#/components/schemas/ActiveApproval"}, "queued_count": {"type": "integer", "minimum": 0, "maximum": 9007199254740991}}},
-      "ClientCapabilities": {"type": "object", "additionalProperties": false, "required": ["client_managed_terminal", "caelis_terminal_stream", "goal_bootstrap_supported", "manage_loop_bootstrap_supported"], "properties": {"client_managed_terminal": {"type": "boolean", "const": false}, "caelis_terminal_stream": {"type": "boolean", "const": true}, "goal_bootstrap_supported": {"type": "boolean", "const": false}, "manage_loop_bootstrap_supported": {"type": "boolean", "const": false}}},
+      "Placement": {"type": "object", "additionalProperties": true, "properties": {"kind": {"$ref": "#/components/schemas/PlacementKind"}, "profile_id": {"type": "string"}, "agent": {"type": "string"}, "model": {"type": "string"}, "reasoning_effort": {"type": "string"}, "reasoning_effort_config_id": {"type": "string"}, "session_config_values": {"type": "object", "additionalProperties": {"type": "string"}}, "config_fingerprint": {"type": "string"}, "fingerprint": {"type": "string"}},
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "ControllerBinding": {"type": "object", "additionalProperties": true, "properties": {"kind": {"$ref": "#/components/schemas/ControllerKind"}, "controller_id": {"type": "string"}, "agent_name": {"type": "string"}, "label": {"type": "string"}, "placement": {"$ref": "#/components/schemas/Placement"}, "epoch_id": {"type": "string"}, "remote_session_id": {"type": "string"}, "context_sync_seq": {"$ref": "#/components/schemas/Uint64Decimal"}, "attached_at": {"type": "string", "format": "date-time"}, "source": {"type": "string"}},
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "ParticipantBinding": {"type": "object", "additionalProperties": true, "properties": {"id": {"type": "string"}, "kind": {"$ref": "#/components/schemas/ParticipantKind"}, "role": {"$ref": "#/components/schemas/ParticipantRole"}, "agent_name": {"type": "string"}, "label": {"type": "string"}, "session_id": {"type": "string"}, "source": {"type": "string"}, "parent_turn_id": {"type": "string"}, "delegation_id": {"type": "string"}, "attachment_generation": {"type": "string"}, "context_sync_seq": {"$ref": "#/components/schemas/Uint64Decimal"}, "attached_at": {"type": "string", "format": "date-time"}, "controller_ref": {"type": "string"}},
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "RunState": {"type": "object", "additionalProperties": true, "properties": {"status": {"type": "string"}, "waiting_approval": {"type": "boolean"}, "active": {"type": "boolean"}, "kind": {"type": "string"}, "handle_id": {"type": "string"}, "run_id": {"type": "string"}, "turn_id": {"type": "string"}, "started_at": {"type": "string", "format": "date-time"}},
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "ActiveApproval": {"type": "object", "additionalProperties": true, "required": ["request_id", "permission"], "properties": {"target": {"$ref": "#/components/schemas/TurnTarget"}, "request_id": {"type": "string"}, "scope": {"type": "string", "enum": ["main", "participant", "subagent"]}, "scope_id": {"type": "string"}, "participant_id": {"type": "string"}, "parent_tool": {"$ref": "#/components/schemas/ParentToolRelation"}, "permission": {"$ref": "#/components/schemas/JSONObject"}, "subject": {"$ref":"#/components/schemas/ApprovalSubject"}},
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "ApprovalState": {"type": "object", "additionalProperties": true, "properties": {"active": {"$ref": "#/components/schemas/ActiveApproval"}, "queued_count": {"type": "integer", "minimum": 0, "maximum": 9007199254740991}},
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "ClientCapabilities": {"type": "object", "additionalProperties": true, "required": ["client_managed_terminal", "caelis_terminal_stream", "goal_bootstrap_supported", "manage_loop_bootstrap_supported"], "properties": {"client_managed_terminal": {"type": "boolean", "const": false}, "caelis_terminal_stream": {"type": "boolean", "const": true}, "goal_bootstrap_supported": {"type": "boolean", "const": false}, "manage_loop_bootstrap_supported": {"type": "boolean", "const": false}},
+        "x-caelis-ignore-unknown-fields": true
+      },
       "SessionState": {
-        "type": "object", "additionalProperties": false,
+        "type": "object", "additionalProperties": true,
         "required": ["protocol_version", "envelope_version", "api_version", "session_id", "revision", "run", "controller", "approval", "capabilities"],
         "properties": {
           "protocol_version": {"type": "integer"}, "envelope_version": {"type": "string"}, "api_version": {"type": "string"},
@@ -2979,61 +3249,138 @@
           "run": {"$ref": "#/components/schemas/RunState"}, "controller": {"$ref": "#/components/schemas/ControllerBinding"},
           "participants": {"type": "array", "items": {"$ref": "#/components/schemas/ParticipantBinding"}},
           "approval": {"$ref": "#/components/schemas/ApprovalState"}, "capabilities": {"$ref": "#/components/schemas/ClientCapabilities"}
-        }
+        },
+        "x-caelis-ignore-unknown-fields": true
       },
-      "ServerInfo": {"type": "object", "additionalProperties": false, "required": ["protocol_version", "envelope_version", "api_version"], "properties": {"protocol_version": {"type": "integer"}, "envelope_version": {"type": "string"}, "api_version": {"type": "string"}, "distribution_version": {"type": "string"}, "build_id": {"type": "string"}, "build_kind": {"type": "string", "enum": ["dev", "release"]}, "server_id": {"type": "string"}, "instance_id": {"type": "string"}, "capabilities": {"type": "array", "items": {"type": "string"}, "description": "Additive capability names. display-replacements-v1 supplies same-ID complete narrative replacement, explicit narrative metadata replacement and empty tool-display patches; conversation-interactions-v1 supplies durable command-input receipts without model context or a model Turn. approval-subjects-v1 supplies common bounded approval context on live events and recovered state. application-session-control-v1 supplies profile-aware main Session controls; shared-worker-session-control-v1 supplies scoped Worker Session controls; application-terminal-wait-v1 supplies non-consuming terminal waits; application-terminal-control-v1 supplies authorized terminal kill/release. These capabilities preserve native principal, approval and operation authority."}, "transports": {"type": "array", "items": {"type": "string"}},
+      "ServerInfo": {
+        "x-caelis-ignore-unknown-fields": true,"type": "object", "additionalProperties": true, "required": ["protocol_version", "envelope_version", "api_version"], "properties": {"protocol_version": {"type": "integer"}, "envelope_version": {"type": "string"}, "api_version": {"type": "string"}, "distribution_version": {"type": "string"}, "build_id": {"type": "string"}, "build_kind": {"type": "string", "enum": ["dev", "release"]}, "server_id": {"type": "string"}, "instance_id": {"type": "string"}, "capabilities": {"type": "array", "items": {"type": "string"}, "description": "Additive capability names. display-replacements-v1 supplies same-ID complete narrative replacement, explicit narrative metadata replacement and empty tool-display patches; conversation-interactions-v1 supplies durable command-input receipts without model context or a model Turn. approval-subjects-v1 supplies common bounded approval context on live events and recovered state. application-session-control-v1 supplies profile-aware main Session controls; shared-worker-session-control-v1 supplies scoped Worker Session controls; application-terminal-wait-v1 supplies non-consuming terminal waits; application-terminal-control-v1 supplies authorized terminal kill/release. These capabilities preserve native principal, approval and operation authority."}, "transports": {"type": "array", "items": {"type": "string"}},
           "store_id": {
             "type": "string"
           }
         }},
-      "HostStatus": {"type": "object", "additionalProperties": false, "required": ["server_id", "instance_id", "ready"], "properties": {"server_id": {"type": "string"}, "instance_id": {"type": "string"}, "ready": {"type": "boolean"}}},
+      "HostStatus": {"type": "object", "additionalProperties": true, "required": ["server_id", "instance_id", "ready"], "properties": {"server_id": {"type": "string"}, "instance_id": {"type": "string"}, "ready": {"type": "boolean"}},
+        "x-caelis-ignore-unknown-fields": true
+      },
       "SessionSummary": {"type": "object", "additionalProperties": false, "properties": {"app_name": {"type": "string"}, "user_id": {"type": "string"}, "session_id": {"type": "string"}, "workspace_key": {"type": "string"}, "cwd": {"type": "string"}, "title": {"type": "string"}, "metadata": {"$ref": "#/components/schemas/JSONObject"}, "updated_at": {"type": "string", "format": "date-time"}}},
       "SessionList": {"type": "object", "additionalProperties": false, "properties": {"sessions": {"type": "array", "items": {"$ref": "#/components/schemas/SessionSummary"}}, "next_cursor": {"type": "string"}, "running_session_ids": {"type": "array", "items": {"type": "string"}}}},
-      "ApplicationScope": {"type":"object","additionalProperties":false,"required":["principal_id","application_id","connection_id"],"properties":{"principal_id":{"type":"string"},"application_id":{"type":"string"},"connection_id":{"type":"string"}}},
-      "ApplicationRegistration": {"type":"object","additionalProperties":false,"required":["operation_id","name","credential"],"properties":{"operation_id":{"type":"string"},"name":{"type":"string"},"credential":{"type":"string","pattern":"^app-client-[0-9a-fA-F]{64}$"}}},
-      "ApplicationConnection": {"type":"object","additionalProperties":false,"required":["principal_id","application_id","connection_id","name","expires_at","revoked"],"properties":{"principal_id":{"type":"string"},"application_id":{"type":"string"},"connection_id":{"type":"string"},"name":{"type":"string"},"expires_at":{"type":"string","format":"date-time"},"revoked":{"type":"boolean"}}},
-      "ApplicationInheritance": {"type":"object","additionalProperties":false,"required":["cwd_instructions","mcp","skills","workspace_memory"],"properties":{"cwd_instructions":{"type":"boolean","const":false},"mcp":{"type":"boolean","const":false},"skills":{"type":"boolean","const":false},"workspace_memory":{"type":"boolean","const":false}}},
-      "ApplicationMCPServer": {"type":"object","additionalProperties":false,"required":["name","transport"],"properties":{"name":{"type":"string","pattern":"^[a-z][a-z0-9_]{0,31}$"},"transport":{"type":"string","enum":["stdio","streamable_http","sse"]},"command":{"type":"string"},"args":{"type":"array","items":{"type":"string"}},"work_dir":{"type":"string"},"url":{"type":"string"}}},
+      "ApplicationScope": {"type":"object","additionalProperties":true,"required":["principal_id","application_id","connection_id"],"properties":{"principal_id":{"type":"string"},"application_id":{"type":"string"},"connection_id":{"type":"string"}},
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "ApplicationRegistration": {"type":"object","additionalProperties":true,"required":["operation_id","name","credential"],"properties":{"operation_id":{"type":"string"},"name":{"type":"string"},"credential":{"type":"string","pattern":"^app-client-[0-9a-fA-F]{64}$"}},
+      "x-caelis-ignore-unknown-fields": true
+    },
+      "ApplicationConnection": {"type":"object","additionalProperties":true,"required":["principal_id","application_id","connection_id","name","expires_at","revoked"],"properties":{"principal_id":{"type":"string"},"application_id":{"type":"string"},"connection_id":{"type":"string"},"name":{"type":"string"},"expires_at":{"type":"string","format":"date-time"},"revoked":{"type":"boolean"}},
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "ApplicationInheritance": {"type":"object","additionalProperties":true,"required":["cwd_instructions","mcp","skills","workspace_memory"],"properties":{"cwd_instructions":{"type":"boolean","const":false},"mcp":{"type":"boolean","const":false},"skills":{"type":"boolean","const":false},"workspace_memory":{"type":"boolean","const":false}},
+      "x-caelis-ignore-unknown-fields": true
+    },
+      "ApplicationMCPServer": {
+        "x-caelis-ignore-unknown-fields": true,
+        "not": {"anyOf": [{"required": ["env"]}, {"required": ["environment"]}, {"required": ["headers"]}, {"required": ["bearer_token"]}]},"type":"object","additionalProperties":true,"required":["name","transport"],"properties":{"name":{"type":"string","pattern":"^[a-z][a-z0-9_]{0,31}$"},"transport":{"type":"string","enum":["stdio","streamable_http","sse"]},"command":{"type":"string"},"args":{"type":"array","items":{"type":"string"}},"work_dir":{"type":"string"},"url":{"type":"string"}}},
       "ApplicationToolDefinition": {"oneOf":[{"$ref":"#/components/schemas/ApplicationLegacyToolDefinition"},{"$ref":"#/components/schemas/ApplicationContentToolDefinition"}],"description":"Absent result_format is the legacy arbitrary-JSON callback contract. content-v1 requires application-tool-result-content-v1 capability; old Hosts without that capability require legacy text results."},
-      "ApplicationLegacyToolDefinition": {"type":"object","additionalProperties":false,"required":["name","description","input_schema"],"properties":{"name":{"type":"string"},"description":{"type":"string"},"input_schema":{"$ref":"#/components/schemas/JSONObject"},"approval_policy":{"type":"string","enum":["direct","required"],"description":"Omitted or direct preserves legacy callback dispatch. required gates each callback intent through canonical approval before dispatch and requires application-guardian-review-v1; manual routing permits user approval, while auto-review uses the creation-bound Guardian reviewer."}}},
-      "ApplicationContentToolDefinition": {"type":"object","additionalProperties":false,"required":["name","description","input_schema","result_format"],"properties":{"name":{"type":"string"},"description":{"type":"string"},"input_schema":{"$ref":"#/components/schemas/JSONObject"},"result_format":{"type":"string","const":"content-v1"},"output_schema":{"$ref":"#/components/schemas/JSONObject","description":"Optional JSON Schema validating structuredContent for succeeded results only. Failed and unknown results may omit structuredContent."},"approval_policy":{"type":"string","enum":["direct","required"],"description":"Omitted or direct preserves legacy callback dispatch. required gates each callback intent through canonical approval before dispatch and requires application-guardian-review-v1; manual routing permits user approval, while auto-review uses the creation-bound Guardian reviewer."}}},
-      "ApplicationProfile": {"type":"object","additionalProperties":false,"required":["version","instructions","model","tools_version","execution","inherit"],"properties":{"version":{"type":"string","minLength":1,"maxLength":512},"instructions":{"type":"string"},"model":{"type":"string","minLength":1},"reasoning_effort":{"type":"string","description":"Empty or omitted selects the model default effort."},"service_tier":{"type":"string","description":"Empty or omitted selects the provider default tier; priority is the only explicit tier value and is accepted only when the selected model supports it."},"tools_version":{"type":"string","minLength":1},"tools":{"type":"array","items":{"$ref":"#/components/schemas/ApplicationToolDefinition"},"description":"Absent and an explicit empty list are equivalent (empty callback catalog); profile reads omit the field when the catalog is empty. Explicit null is invalid."},"native_tools":{"type":"array","items":{"type":"string"},"description":"Omitted selects the default native tool set; an explicit empty list selects no native tools and is preserved as [] on reads. Explicit null is invalid at creation — it would silently select the default set.","x-go-omitzero":true},"execution":{"type":"string","enum":["tools-only","workspace-write"],"description":"tools-only uses only application callbacks and rejects non-null execution_config. workspace-write adds confined native filesystem/command execution under the platform's ordinary workspace sandbox with the profile's workspace bindings; a platform without a native backend rejects it with unsupported before Session creation or activation."},"execution_config":{"oneOf":[{"$ref":"#/components/schemas/ExecutionConfig"},{"type":"null"}],"description":"Creation-bound native command environment and shell; null or omitted preserves defaults. Requires execution-configuration-v1. Does not alter workspace.cwd."},"inherit":{"$ref":"#/components/schemas/ApplicationInheritance"},"reviewer":{"$ref":"#/components/schemas/ApplicationReviewer","description":"Creation-bound, requires application-guardian-review-v1 and auto-review approval mode; never inherits the main model."},"workspace":{"$ref":"#/components/schemas/ApplicationWorkspace","description":"Creation-bound; not accepted in configuration updates."},"permissions":{"$ref":"#/components/schemas/ApplicationPermissions","description":"Creation-bound; not accepted in configuration updates."},"mcp_servers":{"type":"array","items":{"$ref":"#/components/schemas/ApplicationMCPServer"},"description":"Explicit authorized MCP services; omitted or [] selects none. Does not inherit Host, CWD or Worker services. Requires application-atomic-capabilities-v1."},"skill_dirs":{"type":"array","items":{"type":"string"},"description":"Absolute directories of direct Skill roots; omitted or [] selects none. Requires application-atomic-capabilities-v1."},"skill_roots":{"type":"array","items":{"type":"string"},"description":"Absolute individual Skill roots; omitted or [] selects none. Requires application-atomic-capabilities-v1."}}},
-      "ApplicationWorkspace": {"type":"object","additionalProperties":false,"properties":{"cwd":{"type":"string","description":"Resident working directory from authenticated application configuration; empty selects the allocated Session workspace."},"access":{"type":"array","items":{"$ref":"#/components/schemas/ApplicationWorkspaceAccess"},"description":"Additional explicitly named directories. Read-only entries grant no write access."}}},
-      "ApplicationWorkspaceAccess": {"type":"object","additionalProperties":false,"required":["path","mode"],"properties":{"path":{"type":"string","minLength":1},"mode":{"type":"string","enum":["read-only","read-write"]}}},
-      "ApplicationPermissions": {"type":"object","additionalProperties":false,"properties":{"mode":{"type":"string","enum":["workspace-write","danger-full-access"],"description":"Defaults to workspace-write when omitted. danger-full-access is an explicit unsandboxed Host opt-in and is only accepted when the native agent implements it."},"approval_mode":{"type":"string","enum":["manual","auto-review"],"description":"Defaults to manual when omitted. auto-review requires an explicit guardian reviewer; manual rejects reviewer. Routing does not change sandbox policy or grant callback authority."}}},
-      "ApplicationReviewer": {"type":"object","additionalProperties":false,"required":["kind","model"],"properties":{"kind":{"type":"string","const":"guardian"},"model":{"type":"string","minLength":1,"description":"Explicit Host-configured model reference; never inherited from the main profile model."}}},
-      "ApplicationReviewerState": {"type":"object","additionalProperties":false,"required":["session_id","approval_mode","status"],"properties":{"session_id":{"type":"string"},"approval_mode":{"type":"string","enum":["manual","auto-review"]},"reviewer":{"$ref":"#/components/schemas/ApplicationReviewer"},"status":{"type":"string","enum":["manual","ready","unavailable"],"description":"Local assembly readiness, not provider health or review success."},"reason":{"type":"string","description":"Non-secret explanation when unavailable."}}},
-      "ApplicationModelCapabilities": {"type":"object","additionalProperties":false,"required":["session_id","configuration_revision","model"],"properties":{"session_id":{"type":"string"},"configuration_revision":{"$ref":"#/components/schemas/PositiveUint64Decimal"},"model":{"type":"string","minLength":1},"image_input":{"type":"boolean","description":"Omitted is unknown. False and true are authoritative declarations for the selected model, using the same endpoint-scoped rules as execution."}}},
-      "ApplicationMCPServerStatus": {"type":"object","additionalProperties":false,"required":["name","status"],"properties":{"name":{"type":"string"},"status":{"type":"string","enum":["inactive","connecting","running","failed"]},"tools":{"type":"array","items":{"type":"string"}},"tool_details":{"type":"array","items":{"$ref":"#/components/schemas/MCPToolDetail"},"description":"Optional name and description for the same ready tools in tools; omitted when no tools are ready."},"warning":{"type":"string"}}},
-      "ApplicationSkillStatus": {"type":"object","additionalProperties":false,"required":["path","kind","status"],"properties":{"path":{"type":"string"},"kind":{"type":"string","enum":["directory","skill"]},"name":{"type":"string"},"status":{"type":"string","enum":["inactive","ready","failed"]},"warning":{"type":"string"}}},
-      "ApplicationMCPStatus": {"type":"object","additionalProperties":false,"required":["session_id","configuration_revision","servers","skills"],"properties":{"session_id":{"type":"string"},"configuration_revision":{"$ref":"#/components/schemas/Uint64Decimal"},"servers":{"type":"array","items":{"$ref":"#/components/schemas/ApplicationMCPServerStatus"}},"skills":{"type":"array","items":{"$ref":"#/components/schemas/ApplicationSkillStatus"}}}},
-      "ApplicationConfiguration": {"type":"object","additionalProperties":false,"required":["session_id","revision","profile"],"properties":{"session_id":{"type":"string"},"revision":{"$ref":"#/components/schemas/Uint64Decimal"},"profile":{"$ref":"#/components/schemas/ApplicationProfile"},"last_request":{"$ref":"#/components/schemas/ApplicationConfigurationRequest","description":"Latest request admitted under this revision, recorded separately from the catalog."}}},
-      "ApplicationConfigurationRequest": {"type":"object","additionalProperties":false,"required":["revision","request_id","turn_id"],"properties":{"revision":{"$ref":"#/components/schemas/Uint64Decimal"},"request_id":{"type":"string"},"turn_id":{"type":"string"},"model":{"type":"string","description":"Resolved selector recorded with the admitted request; omitted when unset, including on pre-upgrade records."},"reasoning_effort":{"type":"string","description":"Resolved selector recorded with the admitted request; omitted when unset."},"service_tier":{"type":"string","description":"Resolved selector recorded with the admitted request; omitted when unset."},"tools_version":{"type":"string","description":"Resolved selector recorded with the admitted request; omitted when unset."}}},
-      "ApplicationConfigurationPatch": {"type":"object","additionalProperties":false,"properties":{"instructions":{"type":"string","description":"Omitted preserves; explicit empty string clears role instructions."},"model":{"type":"string","minLength":1},"reasoning_effort":{"type":"string","description":"Omitted preserves; empty string restores the model default effort."},"service_tier":{"type":"string","description":"Omitted preserves; empty string restores the provider default tier."},"tools_version":{"type":"string","minLength":1},"tools":{"type":"array","items":{"$ref":"#/components/schemas/ApplicationToolDefinition"},"description":"Omitted preserves; an explicit empty list clears the callback catalog. Explicit null is invalid.","x-go-omitzero":true},"native_tools":{"type":"array","items":{"type":"string"},"description":"Omitted preserves the previous selection including the default set; an explicit empty list selects no native tools. Explicit null is invalid.","x-go-omitzero":true},"mcp_servers":{"type":"array","items":{"$ref":"#/components/schemas/ApplicationMCPServer"},"x-go-omitzero":true,"description":"Omitted preserves; [] clears the authorized MCP selection; explicit null is invalid. Requires application-atomic-capabilities-v1."},"skill_dirs":{"type":"array","items":{"type":"string"},"x-go-omitzero":true,"description":"Omitted preserves; [] clears the selected Skill directories; explicit null is invalid. Requires application-atomic-capabilities-v1."},"skill_roots":{"type":"array","items":{"type":"string"},"x-go-omitzero":true,"description":"Omitted preserves; [] clears the selected Skill roots; explicit null is invalid. Requires application-atomic-capabilities-v1."}},"description":"Absent fields preserve; explicit null is invalid; workspace and permissions are creation-bound and rejected as unknown patch fields."},
-      "UpdateApplicationConfigurationRequest": {"type":"object","additionalProperties":false,"required":["operation_id","expected_configuration_revision","patch"],"properties":{"operation_id":{"type":"string","minLength":1},"expected_configuration_revision":{"$ref":"#/components/schemas/PositiveUint64Decimal"},"patch":{"$ref":"#/components/schemas/ApplicationConfigurationPatch"}}},
-      "ApplicationBackgroundGrant": {"type":"object","additionalProperties":false,"required":["id","principal_id","application_id","connection_id","session_id","source","authorization_operation_id","revoked"],"properties":{"id":{"type":"string"},"principal_id":{"type":"string"},"application_id":{"type":"string"},"connection_id":{"type":"string"},"session_id":{"type":"string"},"source":{"type":"string","description":"Application-declared authorization source recorded with the grant."},"authorization_operation_id":{"type":"string"},"revoked":{"type":"boolean"}}},
+      "ApplicationLegacyToolDefinition": {"type":"object","additionalProperties":true,"required":["name","description","input_schema"],"properties":{"name":{"type":"string"},"description":{"type":"string"},"input_schema":{"$ref":"#/components/schemas/JSONObject"},"approval_policy":{"type":"string","enum":["direct","required"],"description":"Omitted or direct preserves legacy callback dispatch. required gates each callback intent through canonical approval before dispatch and requires application-guardian-review-v1; manual routing permits user approval, while auto-review uses the creation-bound Guardian reviewer."}},
+      "x-caelis-ignore-unknown-fields": true,
+      "not": {"anyOf": [{"required": ["result_format"]}, {"required": ["output_schema"]}]}
+    },
+      "ApplicationContentToolDefinition": {"type":"object","additionalProperties":true,"required":["name","description","input_schema","result_format"],"properties":{"name":{"type":"string"},"description":{"type":"string"},"input_schema":{"$ref":"#/components/schemas/JSONObject"},"result_format":{"type":"string","const":"content-v1"},"output_schema":{"$ref":"#/components/schemas/JSONObject","description":"Optional JSON Schema validating structuredContent for succeeded results only. Failed and unknown results may omit structuredContent."},"approval_policy":{"type":"string","enum":["direct","required"],"description":"Omitted or direct preserves legacy callback dispatch. required gates each callback intent through canonical approval before dispatch and requires application-guardian-review-v1; manual routing permits user approval, while auto-review uses the creation-bound Guardian reviewer."}},
+      "x-caelis-ignore-unknown-fields": true
+    },
+      "ApplicationProfile": {"type":"object","additionalProperties":true,"required":["version","instructions","model","tools_version","execution","inherit"],"properties":{"version":{"type":"string","minLength":1,"maxLength":512},"instructions":{"type":"string"},"model":{"type":"string","minLength":1},"reasoning_effort":{"type":"string","description":"Empty or omitted selects the model default effort."},"service_tier":{"type":"string","description":"Empty or omitted selects the provider default tier; priority is the only explicit tier value and is accepted only when the selected model supports it."},"tools_version":{"type":"string","minLength":1},"tools":{"type":"array","items":{"$ref":"#/components/schemas/ApplicationToolDefinition"},"description":"Absent and an explicit empty list are equivalent (empty callback catalog); profile reads omit the field when the catalog is empty. Explicit null is invalid."},"native_tools":{"type":"array","items":{"type":"string"},"description":"Omitted selects the default native tool set; an explicit empty list selects no native tools and is preserved as [] on reads. Explicit null is invalid at creation — it would silently select the default set.","x-go-omitzero":true},"execution":{"type":"string","enum":["tools-only","workspace-write"],"description":"tools-only uses only application callbacks and rejects non-null execution_config. workspace-write adds confined native filesystem/command execution under the platform's ordinary workspace sandbox with the profile's workspace bindings; a platform without a native backend rejects it with unsupported before Session creation or activation."},"execution_config":{"oneOf":[{"$ref":"#/components/schemas/ExecutionConfig"},{"type":"null"}],"description":"Creation-bound native command environment and shell; null or omitted preserves defaults. Requires execution-configuration-v1. Does not alter workspace.cwd."},"inherit":{"$ref":"#/components/schemas/ApplicationInheritance"},"reviewer":{"$ref":"#/components/schemas/ApplicationReviewer","description":"Creation-bound, requires application-guardian-review-v1 and auto-review approval mode; never inherits the main model."},"workspace":{"$ref":"#/components/schemas/ApplicationWorkspace","description":"Creation-bound; not accepted in configuration updates."},"permissions":{"$ref":"#/components/schemas/ApplicationPermissions","description":"Creation-bound; not accepted in configuration updates."},"mcp_servers":{"type":"array","items":{"$ref":"#/components/schemas/ApplicationMCPServer"},"description":"Explicit authorized MCP services; omitted or [] selects none. Does not inherit Host, CWD or Worker services. Requires application-atomic-capabilities-v1."},"skill_dirs":{"type":"array","items":{"type":"string"},"description":"Absolute directories of direct Skill roots; omitted or [] selects none. Requires application-atomic-capabilities-v1."},"skill_roots":{"type":"array","items":{"type":"string"},"description":"Absolute individual Skill roots; omitted or [] selects none. Requires application-atomic-capabilities-v1."}},
+      "x-caelis-ignore-unknown-fields": true
+    },
+      "ApplicationWorkspace": {"type":"object","additionalProperties":true,"properties":{"cwd":{"type":"string","description":"Resident working directory from authenticated application configuration; empty selects the allocated Session workspace."},"access":{"type":"array","items":{"$ref":"#/components/schemas/ApplicationWorkspaceAccess"},"description":"Additional explicitly named directories. Read-only entries grant no write access."}},
+      "x-caelis-ignore-unknown-fields": true
+    },
+      "ApplicationWorkspaceAccess": {"type":"object","additionalProperties":true,"required":["path","mode"],"properties":{"path":{"type":"string","minLength":1},"mode":{"type":"string","enum":["read-only","read-write"]}},
+      "x-caelis-ignore-unknown-fields": true
+    },
+      "ApplicationPermissions": {"type":"object","additionalProperties":true,"properties":{"mode":{"type":"string","enum":["workspace-write","danger-full-access"],"description":"Defaults to workspace-write when omitted. danger-full-access is an explicit unsandboxed Host opt-in and is only accepted when the native agent implements it."},"approval_mode":{"type":"string","enum":["manual","auto-review"],"description":"Defaults to manual when omitted. auto-review requires an explicit guardian reviewer; manual rejects reviewer. Routing does not change sandbox policy or grant callback authority."}},
+      "x-caelis-ignore-unknown-fields": true
+    },
+      "ApplicationReviewer": {"type":"object","additionalProperties":true,"required":["kind","model"],"properties":{"kind":{"type":"string","const":"guardian"},"model":{"type":"string","minLength":1,"description":"Explicit Host-configured model reference; never inherited from the main profile model."}},
+      "x-caelis-ignore-unknown-fields": true
+    },
+      "ApplicationReviewerState": {"type":"object","additionalProperties":true,"required":["session_id","approval_mode","status"],"properties":{"session_id":{"type":"string"},"approval_mode":{"type":"string","enum":["manual","auto-review"]},"reviewer":{"$ref":"#/components/schemas/ApplicationReviewer"},"status":{"type":"string","enum":["manual","ready","unavailable"],"description":"Local assembly readiness, not provider health or review success."},"reason":{"type":"string","description":"Non-secret explanation when unavailable."}},
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "ApplicationModelCapabilities": {"type":"object","additionalProperties":true,"required":["session_id","configuration_revision","model"],"properties":{"session_id":{"type":"string"},"configuration_revision":{"$ref":"#/components/schemas/PositiveUint64Decimal"},"model":{"type":"string","minLength":1},"image_input":{"type":"boolean","description":"Omitted is unknown. False and true are authoritative declarations for the selected model, using the same endpoint-scoped rules as execution."}},
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "ApplicationMCPServerStatus": {"type":"object","additionalProperties":true,"required":["name","status"],"properties":{"name":{"type":"string"},"status":{"type":"string","enum":["inactive","connecting","running","failed"]},"tools":{"type":"array","items":{"type":"string"}},"tool_details":{"type":"array","items":{"$ref":"#/components/schemas/MCPToolDetail"},"description":"Optional name and description for the same ready tools in tools; omitted when no tools are ready."},"warning":{"type":"string"}},
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "ApplicationSkillStatus": {"type":"object","additionalProperties":true,"required":["path","kind","status"],"properties":{"path":{"type":"string"},"kind":{"type":"string","enum":["directory","skill"]},"name":{"type":"string"},"status":{"type":"string","enum":["inactive","ready","failed"]},"warning":{"type":"string"}},
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "ApplicationMCPStatus": {"type":"object","additionalProperties":true,"required":["session_id","configuration_revision","servers","skills"],"properties":{"session_id":{"type":"string"},"configuration_revision":{"$ref":"#/components/schemas/Uint64Decimal"},"servers":{"type":"array","items":{"$ref":"#/components/schemas/ApplicationMCPServerStatus"}},"skills":{"type":"array","items":{"$ref":"#/components/schemas/ApplicationSkillStatus"}}},
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "ApplicationConfiguration": {"type":"object","additionalProperties":true,"required":["session_id","revision","profile"],"properties":{"session_id":{"type":"string"},"revision":{"$ref":"#/components/schemas/Uint64Decimal"},"profile":{"$ref":"#/components/schemas/ApplicationProfile"},"last_request":{"$ref":"#/components/schemas/ApplicationConfigurationRequest","description":"Latest request admitted under this revision, recorded separately from the catalog."}},
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "ApplicationConfigurationRequest": {"type":"object","additionalProperties":true,"required":["revision","request_id","turn_id"],"properties":{"revision":{"$ref":"#/components/schemas/Uint64Decimal"},"request_id":{"type":"string"},"turn_id":{"type":"string"},"model":{"type":"string","description":"Resolved selector recorded with the admitted request; omitted when unset, including on pre-upgrade records."},"reasoning_effort":{"type":"string","description":"Resolved selector recorded with the admitted request; omitted when unset."},"service_tier":{"type":"string","description":"Resolved selector recorded with the admitted request; omitted when unset."},"tools_version":{"type":"string","description":"Resolved selector recorded with the admitted request; omitted when unset."}},
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "ApplicationConfigurationPatch": {
+        "x-caelis-ignore-unknown-fields": true,
+        "not": {"anyOf": [{"required": ["execution"]}, {"required": ["execution_config"]}, {"required": ["inherit"]}, {"required": ["permissions"]}, {"required": ["reviewer"]}, {"required": ["version"]}, {"required": ["workspace"]}]},"type":"object","additionalProperties":true,"properties":{"instructions":{"type":"string","description":"Omitted preserves; explicit empty string clears role instructions."},"model":{"type":"string","minLength":1},"reasoning_effort":{"type":"string","description":"Omitted preserves; empty string restores the model default effort."},"service_tier":{"type":"string","description":"Omitted preserves; empty string restores the provider default tier."},"tools_version":{"type":"string","minLength":1},"tools":{"type":"array","items":{"$ref":"#/components/schemas/ApplicationToolDefinition"},"description":"Omitted preserves; an explicit empty list clears the callback catalog. Explicit null is invalid.","x-go-omitzero":true},"native_tools":{"type":"array","items":{"type":"string"},"description":"Omitted preserves the previous selection including the default set; an explicit empty list selects no native tools. Explicit null is invalid.","x-go-omitzero":true},"mcp_servers":{"type":"array","items":{"$ref":"#/components/schemas/ApplicationMCPServer"},"x-go-omitzero":true,"description":"Omitted preserves; [] clears the authorized MCP selection; explicit null is invalid. Requires application-atomic-capabilities-v1."},"skill_dirs":{"type":"array","items":{"type":"string"},"x-go-omitzero":true,"description":"Omitted preserves; [] clears the selected Skill directories; explicit null is invalid. Requires application-atomic-capabilities-v1."},"skill_roots":{"type":"array","items":{"type":"string"},"x-go-omitzero":true,"description":"Omitted preserves; [] clears the selected Skill roots; explicit null is invalid. Requires application-atomic-capabilities-v1."}},"description":"Absent known fields preserve; explicit null is invalid. Unknown optional properties are ignored. Existing creation-bound profile fields, including workspace and permissions, remain forbidden."},
+      "UpdateApplicationConfigurationRequest": {
+        "x-caelis-ignore-unknown-fields": true,"type":"object","additionalProperties":true,"required":["operation_id","expected_configuration_revision","patch"],"properties":{"operation_id":{"type":"string","minLength":1},"expected_configuration_revision":{"$ref":"#/components/schemas/PositiveUint64Decimal"},"patch":{"$ref":"#/components/schemas/ApplicationConfigurationPatch"}}},
+      "ApplicationBackgroundGrant": {"type":"object","additionalProperties":true,"required":["id","principal_id","application_id","connection_id","session_id","source","authorization_operation_id","revoked"],"properties":{"id":{"type":"string"},"principal_id":{"type":"string"},"application_id":{"type":"string"},"connection_id":{"type":"string"},"session_id":{"type":"string"},"source":{"type":"string","description":"Application-declared authorization source recorded with the grant."},"authorization_operation_id":{"type":"string"},"revoked":{"type":"boolean"}},
+        "x-caelis-ignore-unknown-fields": true
+      },
       "ApplicationBackgroundGrantList": {"type":"array","items":{"$ref":"#/components/schemas/ApplicationBackgroundGrant"}},
-      "ApplicationBackgroundGrantRequest": {"type":"object","additionalProperties":false,"required":["operation_id","source","authorization_operation_id"],"properties":{"operation_id":{"type":"string","minLength":1},"source":{"type":"string","minLength":1},"authorization_operation_id":{"type":"string","minLength":1}}},
-      "ApplicationBinding": {"type":"object","additionalProperties":false,"required":["principal_id","application_id","connection_id","session_id","profile","creation_digest","archived"],"properties":{"principal_id":{"type":"string"},"application_id":{"type":"string"},"connection_id":{"type":"string"},"session_id":{"type":"string"},"profile":{"$ref":"#/components/schemas/ApplicationProfile"},"creation_digest":{"type":"string"},"archived":{"type":"boolean"},"child":{"$ref":"#/components/schemas/ApplicationChildRelation"}}},
-      "ApplicationChildRelation": {"type":"object","additionalProperties":false,"required":["root_session_id","parent_session_id","source"],"description":"Host-admitted native child relationship. Clients cannot create or grant authority by supplying this read-only projection.","properties":{"root_session_id":{"type":"string"},"parent_session_id":{"type":"string"},"parent_task_id":{"type":"string"},"source":{"$ref":"#/components/schemas/ApplicationSource"}}},
+      "ApplicationBackgroundGrantRequest": {"type":"object","additionalProperties":true,"required":["operation_id","source","authorization_operation_id"],"properties":{"operation_id":{"type":"string","minLength":1},"source":{"type":"string","minLength":1},"authorization_operation_id":{"type":"string","minLength":1}},
+      "x-caelis-ignore-unknown-fields": true
+    },
+      "ApplicationBinding": {"type":"object","additionalProperties":true,"required":["principal_id","application_id","connection_id","session_id","profile","creation_digest","archived"],"properties":{"principal_id":{"type":"string"},"application_id":{"type":"string"},"connection_id":{"type":"string"},"session_id":{"type":"string"},"profile":{"$ref":"#/components/schemas/ApplicationProfile"},"creation_digest":{"type":"string"},"archived":{"type":"boolean"},"child":{"$ref":"#/components/schemas/ApplicationChildRelation"}},
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "ApplicationChildRelation": {"type":"object","additionalProperties":true,"required":["root_session_id","parent_session_id","source"],"description":"Host-admitted native child relationship. Clients cannot create or grant authority by supplying this read-only projection.","properties":{"root_session_id":{"type":"string"},"parent_session_id":{"type":"string"},"parent_task_id":{"type":"string"},"source":{"$ref":"#/components/schemas/ApplicationSource"}},
+        "x-caelis-ignore-unknown-fields": true
+      },
       "ApplicationBindingList": {"type":"array","items":{"$ref":"#/components/schemas/ApplicationBinding"}},
-      "ApplicationSource": {"type":"object","additionalProperties":false,"required":["kind","operation_id"],"properties":{"kind":{"type":"string","enum":["user","application_summary","external_material","authorized_background"]},"operation_id":{"type":"string"},"grant_id":{"type":"string","description":"Required when kind is authorized_background and forbidden otherwise; names the background grant that authorized this input."},"authorized_source":{"type":"string","description":"Required when kind is authorized_background; Control copies it from the durable grant so replay keeps the authorized source distinct from user input and summaries."}}},
+      "ApplicationSource": {"type":"object","additionalProperties":true,"required":["kind","operation_id"],"properties":{"kind":{"type":"string","enum":["user","application_summary","external_material","authorized_background"]},"operation_id":{"type":"string"},"grant_id":{"type":"string","description":"Required when kind is authorized_background and forbidden otherwise; names the background grant that authorized this input."},"authorized_source":{"type":"string","description":"Required when kind is authorized_background; Control copies it from the durable grant so replay keeps the authorized source distinct from user input and summaries."}},
+        "x-caelis-ignore-unknown-fields": true
+      },
       "ApplicationCallResult": {"oneOf":[{"$ref":"#/components/schemas/ApplicationContentCallResult"},{"$ref":"#/components/schemas/ApplicationLegacyCallResult"}],"description":"The original callback receipt remains arbitrary JSON when result_format is absent. content-v1 receipts use ordered typed blocks; the serialized callback JSON bound remains 1 MiB."},
-      "ApplicationLegacyCallResult": {"type":"object","additionalProperties":false,"required":["outcome","content"],"properties":{"outcome":{"type":"string","enum":["succeeded","failed","unknown"]},"content":{"$ref":"#/components/schemas/JSONValue","description":"Any JSON, unchanged from legacy callback receipts."},"turn_complete":{"type":"boolean","description":"On a succeeded callback, complete the originating Turn after this result is recorded, before another serial tool effect or model request."}}},
-      "ApplicationContentCallResult": {"type":"object","additionalProperties":false,"required":["outcome","content","result_format"],"properties":{"outcome":{"type":"string","enum":["succeeded","failed","unknown"]},"result_format":{"type":"string","const":"content-v1"},"content":{"type":"array","maxItems":64,"items":{"$ref":"#/components/schemas/ApplicationResultContentBlock"},"description":"Ordered typed blocks (at most 64). Model-visible text bytes across all text blocks plus the serialized outcome/receipt_id/structuredContent/resource-links JSON receipt total at most 32 KiB (independent of the 1 MiB callback bound); decoded image bytes in one callback total at most 16 MiB; images may have at most 16 million pixels each."},"structuredContent":{"$ref":"#/components/schemas/JSONObject","x-go-omitzero":true,"description":"Optional structured object; validated against the callback tool output_schema only for succeeded outcomes. Its serialized model-visible JSON receipt counts toward the aggregate 32 KiB text-and-receipt bound."},"turn_complete":{"type":"boolean","description":"On a succeeded callback, complete the originating Turn after this result is recorded, before another serial tool effect or model request."}}},
+      "ApplicationLegacyCallResult": {"type":"object","additionalProperties":true,"required":["outcome","content"],"properties":{"outcome":{"type":"string","enum":["succeeded","failed","unknown"]},"content":{"$ref":"#/components/schemas/JSONValue","description":"Any JSON, unchanged from legacy callback receipts."},"turn_complete":{"type":"boolean","description":"On a succeeded callback, complete the originating Turn after this result is recorded, before another serial tool effect or model request."}},
+        "x-caelis-ignore-unknown-fields": true,
+        "not": {"anyOf": [{"required": ["result_format"]}, {"required": ["structuredContent"]}]}
+      },
+      "ApplicationContentCallResult": {"type":"object","additionalProperties":true,"required":["outcome","content","result_format"],"properties":{"outcome":{"type":"string","enum":["succeeded","failed","unknown"]},"result_format":{"type":"string","const":"content-v1"},"content":{"type":"array","maxItems":64,"items":{"$ref":"#/components/schemas/ApplicationResultContentBlock"},"description":"Ordered typed blocks (at most 64). Model-visible text bytes across all text blocks plus the serialized outcome/receipt_id/structuredContent/resource-links JSON receipt total at most 32 KiB (independent of the 1 MiB callback bound); decoded image bytes in one callback total at most 16 MiB; images may have at most 16 million pixels each."},"structuredContent":{"$ref":"#/components/schemas/JSONObject","x-go-omitzero":true,"description":"Optional structured object; validated against the callback tool output_schema only for succeeded outcomes. Its serialized model-visible JSON receipt counts toward the aggregate 32 KiB text-and-receipt bound."},"turn_complete":{"type":"boolean","description":"On a succeeded callback, complete the originating Turn after this result is recorded, before another serial tool effect or model request."}},
+        "x-caelis-ignore-unknown-fields": true
+      },
       "ApplicationResultContentBlock": {"oneOf":[{"$ref":"#/components/schemas/ApplicationResultTextBlock"},{"$ref":"#/components/schemas/ApplicationResultImageBlock"},{"$ref":"#/components/schemas/ApplicationResultResourceLinkBlock"}]},
       "ApplicationResultTextBlock": {"type":"object","additionalProperties":false,"required":["type","text"],"properties":{"type":{"type":"string","const":"text"},"text":{"type":"string","maxLength":32768,"description":"Aggregate UTF-8 text block bytes plus the serialized model-visible JSON receipt total at most 32 KiB; a single text block cannot exceed that bound."}}},
       "ApplicationResultImageBlock": {"type":"object","additionalProperties":false,"required":["type","data","mimeType"],"properties":{"type":{"type":"string","const":"image"},"data":{"type":"string","contentEncoding":"base64","maxLength":349528,"description":"Decoded inline image at most 256 KiB; images at most 16 million pixels."},"mimeType":{"type":"string","enum":["image/png","image/jpeg"]}}},
       "ApplicationResultResourceLinkBlock": {"type":"object","additionalProperties":false,"required":["type","uri","name","mimeType","sha256"],"properties":{"type":{"type":"string","const":"resource_link"},"uri":{"type":"string","pattern":"^application-resource:app-resource-[0-9a-f]{64}$","description":"Only an unexpired resource with expires_at owned by this application binding and Session; file/http URLs are forbidden. An image resource may contain at most 8 MiB decoded bytes and 16 million pixels."},"name":{"type":"string"},"mimeType":{"type":"string","enum":["image/png","image/jpeg"]},"sha256":{"type":"string","pattern":"^[0-9a-f]{64}$"}}},
-      "ApplicationCall": {"type":"object","additionalProperties":false,"required":["id","principal_id","application_id","connection_id","session_id","turn_id","item_id","call_id","tools_version","configuration_revision","source","name","arguments","state"],"properties":{"id":{"type":"string"},"principal_id":{"type":"string"},"application_id":{"type":"string"},"connection_id":{"type":"string"},"session_id":{"type":"string"},"turn_id":{"type":"string"},"item_id":{"type":"string"},"call_id":{"type":"string"},"tools_version":{"type":"string"},"configuration_revision":{"$ref":"#/components/schemas/Uint64Decimal","description":"Configuration revision the dispatching model request used; in-flight receipts keep routing to their original catalog."},"source":{"$ref":"#/components/schemas/ApplicationSource"},"name":{"type":"string"},"arguments":{"$ref":"#/components/schemas/JSONValue"},"state":{"type":"string","enum":["pending","claimed","completed","cancelled","unknown"]},"result":{"$ref":"#/components/schemas/ApplicationCallResult"}}},
+      "ApplicationCall": {"type":"object","additionalProperties":true,"required":["id","principal_id","application_id","connection_id","session_id","turn_id","item_id","call_id","tools_version","configuration_revision","source","name","arguments","state"],"properties":{"id":{"type":"string"},"principal_id":{"type":"string"},"application_id":{"type":"string"},"connection_id":{"type":"string"},"session_id":{"type":"string"},"turn_id":{"type":"string"},"item_id":{"type":"string"},"call_id":{"type":"string"},"tools_version":{"type":"string"},"configuration_revision":{"$ref":"#/components/schemas/Uint64Decimal","description":"Configuration revision the dispatching model request used; in-flight receipts keep routing to their original catalog."},"source":{"$ref":"#/components/schemas/ApplicationSource"},"name":{"type":"string"},"arguments":{"$ref":"#/components/schemas/JSONValue"},"state":{"type":"string","enum":["pending","claimed","completed","cancelled","unknown"]},"result":{"$ref":"#/components/schemas/ApplicationCallResult"}},
+        "x-caelis-ignore-unknown-fields": true
+      },
       "ApplicationCallList": {"type":"array","items":{"$ref":"#/components/schemas/ApplicationCall"}},
-      "ApplicationOperation": {"type":"object","additionalProperties":false,"required":["operation_id","outcome"],"properties":{"operation_id":{"type":"string"},"outcome":{"$ref":"#/components/schemas/Outcome"},"result":{"$ref":"#/components/schemas/CommandResult"}}},
-      "ApplicationResource": {"type":"object","additionalProperties":false,"required":["id","session_id","name","media_type","size","sha256"],"properties":{"id":{"type":"string"},"session_id":{"type":"string"},"name":{"type":"string"},"media_type":{"type":"string"},"size":{"type":"integer","minimum":0,"maximum":8388608},"sha256":{"type":"string"},"expires_at":{"type":"string","format":"date-time","description":"Optional immutable upload expiry. After expiry, byte reads and new callback references are unavailable; owned descriptors remain readable."}}},
-      "ApplicationResourceContent": {"type":"object","additionalProperties":false,"required":["resource","data"],"properties":{"resource":{"$ref":"#/components/schemas/ApplicationResource"},"data":{"type":"string","contentEncoding":"base64","maxLength":11184812}}},
-      "ApplicationEmptyRequest": {"type":"object","additionalProperties":false,"required":[],"properties":{}},
-      "CreateApplicationSessionRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["profile"],"properties":{"profile":{"$ref":"#/components/schemas/ApplicationProfile"}}}],"unevaluatedProperties":false},
-      "ApplicationResourceRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["name","media_type","data","sha256"],"properties":{"name":{"type":"string"},"media_type":{"type":"string"},"data":{"type":"string","contentEncoding":"base64","maxLength":11184812},"sha256":{"type":"string"},"expires_at":{"type":"string","format":"date-time","description":"Optional immutable expiry; must be in the future at upload and is not extended by an idempotent retry."}}}],"unevaluatedProperties":false},
-      "ApplicationPromptRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","properties":{"input":{"type":"string","minLength":1},"display_input":{"type":"string"},"content_parts":{"type":"array","minItems":1,"items":{"$ref":"#/components/schemas/PromptContentPart"}},"source_kind":{"type":"string","enum":["user","application_summary","external_material","authorized_background"]},"grant_id":{"type":"string","description":"Required when source_kind is authorized_background and forbidden otherwise; names the background grant authorizing this activation."}},"anyOf":[{"required":["input"]},{"required":["content_parts"]}],"required":["source_kind"]}],"unevaluatedProperties":false}
+      "ApplicationOperation": {"type":"object","additionalProperties":true,"required":["operation_id","outcome"],"properties":{"operation_id":{"type":"string"},"outcome":{"$ref":"#/components/schemas/Outcome"},"result":{"$ref":"#/components/schemas/CommandResult"}},
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "ApplicationResource": {"type":"object","additionalProperties":true,"required":["id","session_id","name","media_type","size","sha256"],"properties":{"id":{"type":"string"},"session_id":{"type":"string"},"name":{"type":"string"},"media_type":{"type":"string"},"size":{"type":"integer","minimum":0,"maximum":8388608},"sha256":{"type":"string"},"expires_at":{"type":"string","format":"date-time","description":"Optional immutable upload expiry. After expiry, byte reads and new callback references are unavailable; owned descriptors remain readable."}},
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "ApplicationResourceContent": {"type":"object","additionalProperties":true,"required":["resource","data"],"properties":{"resource":{"$ref":"#/components/schemas/ApplicationResource"},"data":{"type":"string","contentEncoding":"base64","maxLength":11184812}},
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "ApplicationEmptyRequest": {"type":"object","additionalProperties":true,"required":[],"properties":{},
+        "x-caelis-ignore-unknown-fields": true
+      },
+      "CreateApplicationSessionRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["profile"],"properties":{"profile":{"$ref":"#/components/schemas/ApplicationProfile"}}}],"unevaluatedProperties":true,
+      "x-caelis-ignore-unknown-fields": true
+    },
+      "ApplicationResourceRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","required":["name","media_type","data","sha256"],"properties":{"name":{"type":"string"},"media_type":{"type":"string"},"data":{"type":"string","contentEncoding":"base64","maxLength":11184812},"sha256":{"type":"string"},"expires_at":{"type":"string","format":"date-time","description":"Optional immutable expiry; must be in the future at upload and is not extended by an idempotent retry."}}}],"unevaluatedProperties":true,
+      "x-caelis-ignore-unknown-fields": true
+    },
+      "ApplicationPromptRequest": {"allOf":[{"$ref":"#/components/schemas/WriteBase"},{"type":"object","properties":{"input":{"type":"string","minLength":1},"display_input":{"type":"string"},"content_parts":{"type":"array","minItems":1,"items":{"$ref":"#/components/schemas/PromptContentPart"}},"source_kind":{"type":"string","enum":["user","application_summary","external_material","authorized_background"]},"grant_id":{"type":"string","description":"Required when source_kind is authorized_background and forbidden otherwise; names the background grant authorizing this activation."}},"anyOf":[{"required":["input"]},{"required":["content_parts"]}],"required":["source_kind"]}],"unevaluatedProperties":true,
+      "x-caelis-ignore-unknown-fields": true
+    }
     }
   },
   "security": [{"bearerAuth": []}]

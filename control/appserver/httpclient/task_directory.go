@@ -122,13 +122,8 @@ func (s *remoteTaskDirectorySubscription) readLoop() {
 	}
 }
 
-type taskDirectorySnapshotWire struct {
-	Revision string                      `json:"revision"`
-	Tasks    []taskstream.TaskDescriptor `json:"tasks,omitempty"`
-}
-
 func decodeTaskDirectorySnapshot(raw []byte) (taskstream.DirectorySnapshot, error) {
-	var wire taskDirectorySnapshotWire
+	var wire wirev1.TaskDirectorySnapshot
 	if err := wirev1.Unmarshal(raw, &wire); err != nil {
 		return taskstream.DirectorySnapshot{}, err
 	}

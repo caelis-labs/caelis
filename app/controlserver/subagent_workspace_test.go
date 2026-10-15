@@ -162,7 +162,10 @@ func TestUIPreferencesHTTPSparseUpdateAndValidation(t *testing.T) {
 	if recorder := put(`{"horizontal_ratio":1}`); recorder.Code != http.StatusBadRequest {
 		t.Fatalf("ratio 1 status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
-	if recorder := put(`{"theme":"catppuccin","unknown":true}`); recorder.Code != http.StatusBadRequest {
-		t.Fatalf("unknown field status=%d body=%s", recorder.Code, recorder.Body.String())
+	if recorder := put(`{"theme":"catppuccin","unknown":true}`); recorder.Code != http.StatusOK {
+		t.Fatalf("additive field status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if backend.preferences.Theme != "catppuccin" || backend.preferences.SubagentLayout != uipreferences.Left {
+		t.Fatalf("extension changed preferences: %#v", backend.preferences)
 	}
 }

@@ -169,6 +169,20 @@ Reviews carry the same public `approval_request_id` token used for manual
 approvals. These fields correlate Session observation, not private review-journal
 identity or a new authorization grant.
 
+## Operation ownership
+
+Application admission commits one permanent scoped intent before calling the
+shared Control command executor. The executor completes that same receipt; it
+does not open a second expiring operation for the effect. Its independent database
+connection preserves completion when the admission Store closes after dispatch.
+Unknown outcomes remain observable and never authorize redispatch. Configuration
+updates keep their atomic desired-revision and receipt transaction.
+
+The Control receipt reader retains support for incomplete Worker intents from
+released Hosts with a separate exact command receipt. This compatibility reader
+only promotes a proven receipt and remains until those Stores leave the supported
+upgrade window. A Session or Worker grant alone cannot prove command completion.
+
 ## Persistence compatibility
 
 The application Store accepts schema 1 and transactionally upgrades it to schema
@@ -400,8 +414,9 @@ Send it with a matching `Idempotency-Key`. Patch semantics:
 | `mcp_servers` | preserve | replaces the independent service set; `[]` disables it |
 | `skill_dirs`, `skill_roots` | preserve | replace the explicit Skill paths; `[]` clears each selection |
 
-Explicit JSON `null` in a patch field is invalid, as are unknown fields —
-`workspace` and `permissions` are creation-bound and rejected here. Readback
+Explicit JSON `null` in a known patch field is invalid. Unknown optional HTTP
+patch fields are ignored; they do not grant new capabilities. Existing
+creation-bound fields such as `workspace` and `permissions` remain rejected. Readback
 distinguishes the two catalogs: profile reads omit `tools` when it is empty
 (absent and `[]` mean the same empty catalog), while a cleared `native_tools`
 selection is echoed as `[]` and omission means the default native set —

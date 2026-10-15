@@ -113,64 +113,71 @@ func (s *CommandService) execute(ctx context.Context, principal Principal, actio
 		coded := errorcode.Wrap(errorcode.InvalidArgument, err.Error(), err)
 		return commandFailure(operationID, sessionID, OutcomeRejected, publicCommandDetail(coded, OutcomeRejected), coded), coded
 	}
-	recovery, recoveryBackend := s.config.Backend.(CommandRecoveryBackend)
-	recoverable := recoveryBackend && recovery.CanRecoverControlCommand(action)
-	if recoverable {
-		executionLease, leaseErr := s.config.Operations.AcquireExecution(ctx, intent)
-		if leaseErr != nil {
-			unknownErr := errorcode.Wrap(errorcode.UnknownOutcome, "controlclient: acquire operation execution gate", leaseErr)
-			return commandFailure(operationID, sessionID, OutcomeUnknown, publicCommandDetail(unknownErr, OutcomeUnknown), unknownErr), unknownErr
-		}
-		defer executionLease.Release()
-	}
-	record, created, err := s.config.Operations.Begin(ctx, intent)
-	if errors.Is(err, ErrOperationConflict) {
-		return commandFailure(operationID, sessionID, OutcomeConflicted, publicCommandDetail(err, OutcomeConflicted), err), err
-	}
-	if err != nil {
-		// Begin may have failed while reading a previously committed receipt.
-		// Failure to establish admission is not proof that this stable operation
-		// never ran; keep callers from treating storage loss as safe to retry.
-		coded := errorcode.Wrap(errorcode.UnknownOutcome, "controlclient: begin operation", err)
-		return commandFailure(operationID, sessionID, OutcomeUnknown, publicCommandDetail(coded, OutcomeUnknown), coded), coded
-	}
-	if !created {
-		if record.Result != nil {
-			return *record.Result, nil
-		}
+	// Application admission has already committed the permanent intent. Reuse
+	// that receipt through the same command executor instead of opening a second,
+	// expiring command record for the same effect.
+	admitted, hasAdmitted := admittedApplicationOperationFrom(ctx, principal, operationID)
+	if !hasAdmitted {
+		recovery, recoveryBackend := s.config.Backend.(CommandRecoveryBackend)
+		recoverable := recoveryBackend && recovery.CanRecoverControlCommand(action)
 		if recoverable {
-			recovered, proven, recoveryErr := recovery.RecoverControlCommand(
-				withOperationIntent(ctx, intent), principal, intent, request,
-			)
-			if recoveryErr != nil {
-				unknownErr := errorcode.Wrap(errorcode.UnknownOutcome, "controlclient: recover operation result", recoveryErr)
+			executionLease, leaseErr := s.config.Operations.AcquireExecution(ctx, intent)
+			if leaseErr != nil {
+				unknownErr := errorcode.Wrap(errorcode.UnknownOutcome, "controlclient: acquire operation execution gate", leaseErr)
 				return commandFailure(operationID, sessionID, OutcomeUnknown, publicCommandDetail(unknownErr, OutcomeUnknown), unknownErr), unknownErr
 			}
-			if proven {
-				recovered.OperationID = operationID
-				if recovered.SessionID == "" {
-					recovered.SessionID = sessionID
-				}
-				if !recovered.Outcome.Valid() {
-					recovered.Outcome = OutcomeCommitted
-				}
-				completionCtx, cancelCompletion := operationCompletionContext(ctx)
-				defer cancelCompletion()
-				if _, completeErr := s.config.Operations.Complete(completionCtx, intent, recovered); completeErr != nil {
-					coded := internalCommandError("controlclient: complete recovered operation", completeErr)
-					return commandFailure(operationID, recovered.SessionID, OutcomeUnknown, publicCommandDetail(coded, OutcomeUnknown), coded), coded
-				}
-				return recovered, nil
-			}
+			defer executionLease.Release()
 		}
-		// For recoverable actions the process-local execution gate proves that no
-		// creator is still running in this Host, but the durable domain evidence
-		// cannot prove the abandoned effect. For all other actions the creator may
-		// still be active.
-		// In either case, keep the intent incomplete and remain conservative.
-		unknownErr := errorcode.New(errorcode.UnknownOutcome, "operation intent exists without a provable result")
-		unknown := commandFailure(operationID, sessionID, OutcomeUnknown, unknownErr.Error(), unknownErr)
-		return unknown, nil
+		record, created, err := s.config.Operations.Begin(ctx, intent)
+		if errors.Is(err, ErrOperationConflict) {
+			return commandFailure(operationID, sessionID, OutcomeConflicted, publicCommandDetail(err, OutcomeConflicted), err), err
+		}
+		if err != nil {
+			// Begin may have failed while reading a previously committed receipt.
+			// Failure to establish admission is not proof that this stable operation
+			// never ran; keep callers from treating storage loss as safe to retry.
+			coded := errorcode.Wrap(errorcode.UnknownOutcome, "controlclient: begin operation", err)
+			return commandFailure(operationID, sessionID, OutcomeUnknown, publicCommandDetail(coded, OutcomeUnknown), coded), coded
+		}
+		if !created {
+			if record.Result != nil {
+				return *record.Result, nil
+			}
+			if recoverable {
+				recovered, proven, recoveryErr := recovery.RecoverControlCommand(
+					withOperationIntent(ctx, intent), principal, intent, request,
+				)
+				if recoveryErr != nil {
+					unknownErr := errorcode.Wrap(errorcode.UnknownOutcome, "controlclient: recover operation result", recoveryErr)
+					return commandFailure(operationID, sessionID, OutcomeUnknown, publicCommandDetail(unknownErr, OutcomeUnknown), unknownErr), unknownErr
+				}
+				if proven {
+					recovered.OperationID = operationID
+					if recovered.SessionID == "" {
+						recovered.SessionID = sessionID
+					}
+					if !recovered.Outcome.Valid() {
+						recovered.Outcome = OutcomeCommitted
+					}
+					completionCtx, cancelCompletion := operationCompletionContext(ctx)
+					defer cancelCompletion()
+					if _, completeErr := s.config.Operations.Complete(completionCtx, intent, recovered); completeErr != nil {
+						coded := internalCommandError("controlclient: complete recovered operation", completeErr)
+						return commandFailure(operationID, recovered.SessionID, OutcomeUnknown, publicCommandDetail(coded, OutcomeUnknown), coded), coded
+					}
+					return recovered, nil
+				}
+			}
+			// For recoverable actions the process-local execution gate proves that no
+			// creator is still running in this Host, but the durable domain evidence
+			// cannot prove the abandoned effect. For all other actions the creator may
+			// still be active.
+			// In either case, keep the intent incomplete and remain conservative.
+			unknownErr := errorcode.New(errorcode.UnknownOutcome, "operation intent exists without a provable result")
+			unknown := commandFailure(operationID, sessionID, OutcomeUnknown, unknownErr.Error(), unknownErr)
+			return unknown, nil
+		}
+
 	}
 
 	result, dispatchErr := s.config.Backend.ExecuteControlCommand(withOperationIntent(ctx, intent), principal, action, request)
@@ -185,7 +192,8 @@ func (s *CommandService) execute(ctx context.Context, principal Principal, actio
 	}
 	completionCtx, cancelCompletion := operationCompletionContext(ctx)
 	defer cancelCompletion()
-	if _, completeErr := s.config.Operations.Complete(completionCtx, intent, result); completeErr != nil {
+	completeErr := s.completeCommandReceipt(completionCtx, intent, result, admitted, hasAdmitted)
+	if completeErr != nil {
 		coded := internalCommandError("controlclient: complete operation", completeErr)
 		// Backend already returned the effect identity. Keep the exact Turn
 		// target so observation and Cancel can continue after a receipt-write

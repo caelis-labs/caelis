@@ -36,63 +36,72 @@ func unmarshalWireValue(raw []byte, target any) error {
 		if err != nil {
 			return err
 		}
-		return unmarshalStrict(normalized, typed)
+		return unmarshalKnown(normalized, typed)
 	case *appserver.CommandResult:
 		normalized, err := normalizeObjectUint64Fields(raw, "revision")
 		if err != nil {
 			return err
 		}
-		return unmarshalStrict(normalized, typed)
+		var result appserver.CommandResult
+		if err := unmarshalKnown(normalized, &result); err != nil {
+			return err
+		}
+		// An extensible error object must not be mistaken for a command receipt.
+		if result.OperationID == "" || result.Outcome == "" {
+			return fmt.Errorf("control wire v1: command receipt requires operation_id and outcome")
+		}
+		*typed = result
+		return nil
 	case *appserver.DisconnectCandidatesSnapshot:
 		normalized, err := normalizeObjectUint64Fields(raw, "revision")
 		if err != nil {
 			return err
 		}
-		return unmarshalStrict(normalized, typed)
+		return unmarshalKnown(normalized, typed)
 	case *controlagents.ACPPreparation:
 		normalized, err := normalizeObjectUint64Fields(raw, "observed_revision")
 		if err != nil {
 			return err
 		}
-		return unmarshalStrict(normalized, typed)
+		return unmarshalKnown(normalized, typed)
 	case *appserver.SessionState:
 		normalized, err := normalizeSessionStateJSON(raw)
 		if err != nil {
 			return err
 		}
-		return unmarshalStrict(normalized, typed)
+		return unmarshalKnown(normalized, typed)
 	case *controlstatus.StatusSnapshot:
 		normalized, err := normalizeStatusSnapshotJSON(raw)
 		if err != nil {
 			return err
 		}
-		return unmarshalStrict(normalized, typed)
+		return unmarshalKnown(normalized, typed)
 	case *application.ModelCapabilities:
 		normalized, err := normalizeObjectUint64Fields(raw, "configuration_revision")
 		if err != nil {
 			return err
 		}
-		return unmarshalStrict(normalized, typed)
+		return unmarshalKnown(normalized, typed)
 	case *application.Configuration:
 		normalized, err := normalizeApplicationConfigurationJSON(raw)
 		if err != nil {
 			return err
 		}
-		return unmarshalStrict(normalized, typed)
+		return unmarshalKnown(normalized, typed)
 	case *application.Call:
 		normalized, err := normalizeObjectUint64Fields(raw, "configuration_revision")
 		if err != nil {
 			return err
 		}
-		return unmarshalStrict(normalized, typed)
+		return unmarshalKnown(normalized, typed)
 	case *[]application.Call:
 		normalized, err := normalizeApplicationCallListJSON(raw)
 		if err != nil {
 			return err
 		}
-		return unmarshalStrict(normalized, typed)
+		return unmarshalKnown(normalized, typed)
 	default:
-		return unmarshalStrict(raw, target)
+		return unmarshalKnown(raw, target)
 	}
 }
 
@@ -427,7 +436,12 @@ func normalizeRawUint64Field(fields map[string]json.RawMessage, name string) err
 	return nil
 }
 
-func unmarshalStrict(raw []byte, target any) error {
+func unmarshalKnown(raw []byte, target any) error {
+	filtered, err := knownWireFields(raw, target)
+	if err != nil {
+		return err
+	}
+	raw = filtered
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(target); err != nil {

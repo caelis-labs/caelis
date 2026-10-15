@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+
+	"github.com/caelis-labs/caelis/control/internal/operationreceipt"
 )
 
 // Operation is a permanent application request anchor. An empty result means
@@ -97,7 +99,13 @@ func (s *Store) CompleteOperation(ctx context.Context, scope Scope, id string, r
 		}
 		return nil
 	}
-	_, err = s.db.ExecContext(ctx, `UPDATE app_operations SET result=? WHERE connection=? AND operation=? AND result IS NULL`, body, scope.ConnectionID, id)
+	matched, err := operationreceipt.Complete(ctx, s.db, operationreceipt.Key{
+		Principal: scope.PrincipalID, Application: scope.ApplicationID, Connection: scope.ConnectionID,
+		Operation: id, Digest: op.Digest,
+	}, body)
+	if err == nil && !matched {
+		return ErrConflict
+	}
 	return err
 }
 

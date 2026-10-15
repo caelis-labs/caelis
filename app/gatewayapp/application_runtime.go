@@ -171,16 +171,7 @@ func (a *workspaceConfigAssembler) assembleApplicationSnapshot(ctx context.Conte
 	if err != nil {
 		return nil, err
 	}
-	coordinator, err := controlplane.NewCoordinator(controlplane.CoordinatorConfig{Sessions: sessions, Controllers: localConfig.Controllers, Context: contextRouter, FenceOwnerID: a.deps.authorities.fenceOwnerID, LifecycleContext: a.deps.authorities.lifecycleCtx, Diagnostics: a.deps.authorities.diagnostics})
-	if err != nil {
-		return nil, err
-	}
-	localConfig.ControllerRecovery = coordinator
-	rt, err := runtime.New(localConfig)
-	if err != nil {
-		return nil, err
-	}
-	bundle := &gatewayRuntimeBundle{Engine: rt, ACPControlPlane: childPlane, RuntimeConfig: instance.activeRuntime, EstimatedPromptPrefixTokens: compaction.EstimatedPromptPrefixTokens}
+	bundle := &gatewayRuntimeBundle{ACPControlPlane: childPlane, RuntimeConfig: instance.activeRuntime, EstimatedPromptPrefixTokens: compaction.EstimatedPromptPrefixTokens}
 	bundle.CloseCapabilities = resolver.closeCapabilities
 	bundle.CapabilityStatus = resolver.capabilityStatus
 	bundle.CapabilityUpdated = resolver.configurationCommitted
@@ -193,18 +184,10 @@ func (a *workspaceConfigAssembler) assembleApplicationSnapshot(ctx context.Conte
 			bundle.Close()
 		}
 	}()
-	fences, ok := sessions.(session.SessionFenceService)
-	if !ok {
-		return nil, fmt.Errorf("gatewayapp: application Session service requires execution fences")
-	}
-	fenced, err := controlplane.NewFencedRuntime(controlplane.FencedRuntimeConfig{
-		Runtime: rt, Fences: fences, OwnerID: strings.TrimSpace(a.deps.authorities.fenceOwnerID),
-		LifecycleContext: a.deps.authorities.lifecycleCtx, Diagnostics: a.deps.authorities.diagnostics,
-	})
+	fencedRuntime, sessionControl, err := instance.buildSessionExecution(bundle, localConfig, contextRouter)
 	if err != nil {
 		return nil, err
 	}
-	bundle.Placement = fenced
 	validator, err := controlplane.NewExecutionValidator(controlplane.ExecutionValidatorConfig{Sandbox: sandboxDescriptor})
 	if err != nil {
 		return nil, err
@@ -214,12 +197,8 @@ func (a *workspaceConfigAssembler) assembleApplicationSnapshot(ctx context.Conte
 		bundle.Guardian = newApplicationGuardianApprover(sessions, a.deps.authorities.diagnostics)
 		approver = bundle.Guardian
 	}
-	sessionControl, err := controlplane.NewSessionControl(controlplane.SessionControlConfig{Controllers: coordinator, Participants: fenced})
-	if err != nil {
-		return nil, err
-	}
 	bundle.Gateway, err = kernel.New(kernel.Config{
-		Sessions: sessions, Runtime: fenced, TurnStartGate: a.deps.authorities.approvalRecovery,
+		Sessions: sessions, Runtime: fencedRuntime, TurnStartGate: a.deps.authorities.approvalRecovery,
 		Resolver: resolver, ExecutionValidator: validator,
 		DefaultApprovalMode: kernel.ApprovalMode(application.EffectiveApprovalMode(binding.Profile)),
 		ApprovalApprover:    approver,
@@ -402,14 +381,13 @@ func (r *applicationTurnResolver) resolveModelRequest(ctx context.Context, sourc
 }
 
 func applicationPolicyRegistry(profile application.Profile) (policy.Registry, string, error) {
-	mode := "application-tools-only"
+	mode := applicationPolicyMode(profile)
 	var native policy.Mode
-	if profile.Execution == "workspace-write" {
+	if mode != "application-tools-only" {
 		native = presets.WorkspaceWriteMode()
-		if profile.Permissions.Mode == presets.ModeDangerFullAccess {
+		if mode == presets.ModeDangerFullAccess {
 			native = presets.DangerFullAccessMode()
 		}
-		mode = native.Name()
 	}
 	registry, err := policy.NewMemory(policy.NamedMode{ID: mode, Decide: func(ctx context.Context, input policy.ToolContext) (policy.Decision, error) {
 		// Only the stored, request-pinned callback catalog supplies callback
