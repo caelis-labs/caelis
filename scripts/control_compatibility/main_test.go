@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -37,6 +38,13 @@ func TestTranscriptRequiresCommittedReplacementAndTargetTerminal(t *testing.T) {
 	transient := message("MATRIX_FINAL")
 	transient.Final = false
 	transient.Delivery = &eventstream.Delivery{Mode: eventstream.DeliveryTransient}
+	exact := func(events ...eventstream.Envelope) appserver.FeedDelivery {
+		for i := range events {
+			events[i].Cursor = fmt.Sprintf("cursor-%d", i+1)
+			events[i].Position = &eventstream.FeedPosition{Transient: &eventstream.TransientFeedPosition{Generation: "live", Sequence: uint64(i + 1)}}
+		}
+		return appserver.FeedDelivery{Kind: appserver.FeedDeliveryAppendPage, Source: appserver.FeedSourceExact, Events: events, NextCursor: events[len(events)-1].Cursor}
+	}
 	for _, tc := range []struct {
 		name       string
 		deliveries []appserver.FeedDelivery
@@ -47,7 +55,8 @@ func TestTranscriptRequiresCommittedReplacementAndTargetTerminal(t *testing.T) {
 		{"incomplete replacement", []appserver.FeedDelivery{begin, page(message("MATRIX_FINAL"), terminal)}, nil, false},
 		{"text without terminal", []appserver.FeedDelivery{begin, page(message("MATRIX_FINAL")), end}, nil, false},
 		{"wrong terminal", []appserver.FeedDelivery{begin, page(message("MATRIX_FINAL"), otherTerminal), end}, nil, false},
-		{"transient text", []appserver.FeedDelivery{begin, page(transient, terminal), end}, nil, false},
+		{"transient text before terminal", []appserver.FeedDelivery{exact(transient)}, nil, false},
+		{"live final deduplicated", []appserver.FeedDelivery{exact(transient, terminal)}, nil, true},
 		{"stream failure", []appserver.FeedDelivery{begin, page(message("MATRIX_FINAL"), terminal), end}, errors.New("stream failed"), false},
 		{"same ID replaced", []appserver.FeedDelivery{begin, page(message("MATRIX_FINAL"), message("revised"), terminal), end}, nil, false},
 		{"empty message replacement", []appserver.FeedDelivery{begin, page(message("MATRIX_FINAL"), message(""), terminal), end}, nil, false},

@@ -223,8 +223,11 @@ func consumeTranscript(ctx context.Context, subscription appserver.FeedSubscript
 					}
 					terminal = true
 				}
+				// The live feed may suppress an identical canonical final message.
+				// Apply its committed display deltas/replacements, then require the
+				// target terminal below before accepting their text.
 				chunk, ok := event.Update.(eventstream.ContentChunk)
-				if !ok || chunk.SessionUpdate != eventstream.UpdateAgentMessage || chunk.MessageID == "" || !event.Final || event.Delivery == nil || event.Delivery.Mode == eventstream.DeliveryTransient {
+				if !ok || chunk.SessionUpdate != eventstream.UpdateAgentMessage || chunk.MessageID == "" {
 					continue
 				}
 				content, ok := chunk.Content.(eventstream.TextContent)
@@ -246,6 +249,7 @@ func consumeTranscript(ctx context.Context, subscription appserver.FeedSubscript
 						return nil
 					}
 				}
+				return errors.New("completed target Turn has no expected assistant text")
 			}
 		case <-ctx.Done():
 			return ctx.Err()
