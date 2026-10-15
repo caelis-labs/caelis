@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/control/appserver/taskstream"
 )
 
 const (
@@ -72,4 +73,11 @@ func DecodeTaskStreamError(wire TaskStreamError) error {
 		message = "Task stream subscription failed"
 	}
 	return errorcode.New(code, message)
+}
+
+// TaskDirectorySnapshot retains decimal revision encoding for the shared Task
+// directory response. The protocol codec owns its additive object boundary.
+type TaskDirectorySnapshot struct {
+	Revision string                      `json:"revision"`
+	Tasks    []taskstream.TaskDescriptor `json:"tasks,omitempty"`
 }

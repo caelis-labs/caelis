@@ -89,10 +89,11 @@ func assembleHostControlServices(stack *Stack, cfg Config, storeDir string, curs
 
 	sessionAuthorizer := appserver.SessionAuthorizer{Sessions: stack.composition.sessions, Applications: stack.composition.authorities.applications}
 	controlCommands, err := appserver.NewCommandService(appserver.CommandServiceConfig{
-		Authorizer:  appserver.ProductCommandAuthorizer{Sessions: sessionAuthorizer},
-		Operations:  controlOperations,
-		Backend:     stack.commandBackend,
-		Diagnostics: stack.composition.authorities.diagnostics,
+		Authorizer:   appserver.ProductCommandAuthorizer{Sessions: sessionAuthorizer},
+		Operations:   controlOperations,
+		Applications: stack.composition.authorities.applications,
+		Backend:      stack.commandBackend,
+		Diagnostics:  stack.composition.authorities.diagnostics,
 	})
 	if err != nil {
 		return hostControlAssembly{}, err

@@ -62,6 +62,7 @@ type schema struct {
 	AllOf                []*schema          `json:"allOf"`
 	AdditionalProperties json.RawMessage    `json:"additionalProperties"`
 	GoOmitZero           bool               `json:"x-go-omitzero"`
+	IgnoreUnknownFields  bool               `json:"x-caelis-ignore-unknown-fields"`
 }
 
 type objectShape struct {
@@ -328,7 +329,7 @@ func writeGoSchema(out *strings.Builder, name string, value *schema, schemas map
 		return
 	}
 	shape := shapeOf(value, schemas, map[string]bool{})
-	if len(shape.properties) > 0 && hasAdditionalProperties(value) {
+	if len(shape.properties) > 0 && hasAdditionalProperties(value) && !value.IgnoreUnknownFields {
 		// Go has no native open struct. A map is the only generated DTO shape
 		// that preserves both declared and vendor-defined properties without
 		// hand-written marshal hooks.
@@ -390,7 +391,7 @@ func schemaHasExplicitAdditionalProperties(value *schema, schemas map[string]*sc
 		nextSeen[name] = true
 		return schemaHasExplicitAdditionalProperties(schemas[name], schemas, nextSeen)
 	}
-	if hasAdditionalProperties(value) {
+	if hasAdditionalProperties(value) && !value.IgnoreUnknownFields {
 		return true
 	}
 	for _, part := range value.AllOf {
@@ -538,7 +539,7 @@ func writeTypeScriptSchema(out *strings.Builder, name string, value *schema, sch
 		}
 		out.WriteString("  " + tsProperty(property) + optional + ": " + tsType(shape.properties[property], schemas) + ";\n")
 	}
-	if hasAdditionalProperties(value) {
+	if hasAdditionalProperties(value) || value.IgnoreUnknownFields {
 		out.WriteString("  [key: string]: JSONValue;\n")
 	}
 	out.WriteString("}\n\n")
@@ -595,6 +596,9 @@ func tsType(value *schema, schemas map[string]*schema) string {
 			}
 			fields = append(fields, tsProperty(property)+optional+": "+tsType(shape.properties[property], schemas))
 		}
+		if value.IgnoreUnknownFields {
+			fields = append(fields, "[key: string]: JSONValue")
+		}
 		return "{ " + strings.Join(fields, "; ") + " }"
 	default:
 		if len(value.AllOf) > 0 || len(value.Properties) > 0 {
@@ -606,6 +610,9 @@ func tsType(value *schema, schemas map[string]*schema) string {
 					optional = "?"
 				}
 				fields = append(fields, tsProperty(property)+optional+": "+tsType(shape.properties[property], schemas))
+			}
+			if value.IgnoreUnknownFields {
+				fields = append(fields, "[key: string]: JSONValue")
 			}
 			return "{ " + strings.Join(fields, "; ") + " }"
 		}

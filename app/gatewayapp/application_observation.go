@@ -31,13 +31,12 @@ func (a *workspaceConfigAssembler) assembleObservationSnapshot(ctx context.Conte
 	if err != nil {
 		return nil, err
 	}
-	mode := "application-tools-only"
+	mode := applicationPolicyMode(binding.Profile)
 	backend := "none"
 	if binding.Profile.Execution == "workspace-write" {
-		mode = "workspace-write"
 		selected := sandbox.Backend("")
 		if binding.Profile.Permissions.Mode == "danger-full-access" {
-			mode, selected = "danger-full-access", sandbox.BackendHost
+			selected = sandbox.BackendHost
 		}
 		route, err := sandboxrouter.Current(selected)
 		if err != nil {
@@ -71,13 +70,7 @@ func (s *runtimeComposition) applicationRuntimeState(ctx context.Context, bindin
 	if err != nil {
 		return SessionRuntimeState{}, err
 	}
-	mode := "application-tools-only"
-	if binding.Profile.Execution == "workspace-write" {
-		mode = "workspace-write"
-		if binding.Profile.Permissions.Mode == "danger-full-access" {
-			mode = "danger-full-access"
-		}
-	}
+	mode := applicationPolicyMode(binding.Profile)
 	return SessionRuntimeState{ModelID: configured.ID, ModelAlias: configured.Alias,
 		ReasoningEffort: configured.ReasoningEffort, FastMode: configuration.Profile.ServiceTier == "priority",
 		SessionMode: application.EffectiveApprovalMode(binding.Profile), PolicyProfile: mode}, nil

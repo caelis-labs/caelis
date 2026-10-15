@@ -114,7 +114,8 @@ func MarshalEnvelope(envelope eventstream.Envelope) ([]byte, error) {
 	return marshalEnvelope(envelope)
 }
 
-// DecodeRequest decodes one strict v1 write request.
+// DecodeRequest decodes one v1 write request, ignoring additive object fields.
+// Known fields retain their original validation and default semantics.
 func DecodeRequest(raw json.RawMessage, target any) error {
 	return decodeWireRequest(raw, target)
 }
@@ -756,6 +757,11 @@ func decimalString(value any) (string, error) {
 }
 
 func decodeWireRequest(raw json.RawMessage, target any) error {
+	filtered, err := knownWireFields(raw, target)
+	if err != nil {
+		return err
+	}
+	raw = filtered
 	if err := ValidateJSONNumbers(raw); err != nil {
 		return err
 	}

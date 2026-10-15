@@ -123,7 +123,7 @@ func (s *ApplicationService) Create(ctx context.Context, p Principal, req Create
 	if req.SessionID != "" || req.ExpectedRevision != nil || req.ExpectedControllerEpoch != "" {
 		return CommandResult{}, errorcode.New(errorcode.InvalidArgument, "application: creation cannot select a Session or revision")
 	}
-	return s.execute(ctx, p, req.OperationID, req, func() (CommandResult, error) {
+	return s.execute(ctx, p, req.OperationID, req, func(ctx context.Context) (CommandResult, error) {
 		// An unchanged creation retry must recover its original receipt even
 		// when the current native catalog has grown since that creation.
 		if err := application.ValidateProfile(req.Profile); err != nil {
@@ -159,7 +159,9 @@ func (s *ApplicationService) Prompt(ctx context.Context, p Principal, req Applic
 	if err := validateApplicationPrompt(req); err != nil {
 		return CommandResult{}, err
 	}
-	return s.execute(ctx, p, req.OperationID, req, func() (CommandResult, error) { return s.config.Commands.PromptApplication(ctx, p, req) })
+	return s.execute(ctx, p, req.OperationID, req, func(ctx context.Context) (CommandResult, error) {
+		return s.config.Commands.PromptApplication(ctx, p, req)
+	})
 }
 
 func (s *ApplicationService) Operation(ctx context.Context, p Principal, id string) (ApplicationOperation, error) {
@@ -174,7 +176,7 @@ func (s *ApplicationService) Operation(ctx context.Context, p Principal, id stri
 	return s.observeOperation(ctx, p, scope, op)
 }
 
-func (s *ApplicationService) execute(ctx context.Context, p Principal, id string, req any, dispatch func() (CommandResult, error)) (CommandResult, error) {
+func (s *ApplicationService) execute(ctx context.Context, p Principal, id string, req any, dispatch func(context.Context) (CommandResult, error)) (CommandResult, error) {
 	scope, err := ApplicationScope(p)
 	if err != nil {
 		return CommandResult{}, err
@@ -201,7 +203,7 @@ func (s *ApplicationService) execute(ctx context.Context, p Principal, id string
 		err = json.Unmarshal(op.Result, &result)
 		return result, err
 	}
-	result, dispatchErr := dispatch()
+	result, dispatchErr := dispatch(withAdmittedApplicationOperation(ctx, p, scope, op, s.config.Store))
 	result.OperationID = id
 	if dispatchErr != nil {
 		result = resultForBackendError(result, dispatchErr)

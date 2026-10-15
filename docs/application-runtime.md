@@ -169,6 +169,28 @@ Reviews carry the same public `approval_request_id` token used for manual
 approvals. These fields correlate Session observation, not private review-journal
 identity or a new authorization grant.
 
+## Operation ownership
+
+Application admission commits one permanent scoped intent before calling the
+shared Control command executor. The executor completes that same receipt; it
+does not open a second expiring operation for the effect. Its independent database
+connection preserves completion when the admission Store closes after dispatch.
+Unknown outcomes remain observable and never authorize redispatch. Configuration
+updates keep their atomic desired-revision and receipt transaction. APP-scoped
+Session commands, including cancel and approval resolution, use the same permanent
+admission. Within one connection, reusing an operation ID for a different request
+conflicts across entry points. Different connections have independent IDs.
+
+The command executor checks retained pre-convergence Control receipts before fresh
+APP admission. It returns exact existing results and rejects conflicting requests;
+incomplete receipts never authorize redispatch. This read-only compatibility path
+remains until those Stores leave the supported upgrade window.
+
+The Control receipt reader retains support for incomplete Worker intents from
+released Hosts with a separate exact command receipt. This compatibility reader
+only promotes a proven receipt and remains until those Stores leave the supported
+upgrade window. A Session or Worker grant alone cannot prove command completion.
+
 ## Persistence compatibility
 
 The application Store accepts schema 1 and transactionally upgrades it to schema
@@ -400,8 +422,9 @@ Send it with a matching `Idempotency-Key`. Patch semantics:
 | `mcp_servers` | preserve | replaces the independent service set; `[]` disables it |
 | `skill_dirs`, `skill_roots` | preserve | replace the explicit Skill paths; `[]` clears each selection |
 
-Explicit JSON `null` in a patch field is invalid, as are unknown fields —
-`workspace` and `permissions` are creation-bound and rejected here. Readback
+Explicit JSON `null` in a known patch field is invalid. Unknown optional HTTP
+patch fields are ignored; they do not grant new capabilities. Existing
+creation-bound fields such as `workspace` and `permissions` remain rejected. Readback
 distinguishes the two catalogs: profile reads omit `tools` when it is empty
 (absent and `[]` mean the same empty catalog), while a cleared `native_tools`
 selection is echoed as `[]` and omission means the default native set —
@@ -619,8 +642,8 @@ callback may proceed under the current lease. Expiry is not a permanent generati
 fence or implicit Turn cancellation. Cancel canonical work when that behavior is
 required. Revocation is permanent, is allowed after expiry, and cannot be renewed.
 
-Create/prompt/archive permanent intent anchors outlive the shared command receipt
-retention. Known native results are recorded and remain readable under the original
+Application operation intents and their results are permanent. Known native
+results are recorded and remain readable under the original
 scope even if the connection expires or is revoked after admission. This completion
 does not restore mutation authority or relax late callback rejection.
 

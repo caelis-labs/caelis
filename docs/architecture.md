@@ -29,6 +29,7 @@ uses them.
 - This file owns the layer, repository, Host, and current-state map.
 - [Agent SDK Boundary](agent-sdk-boundary.md) owns reusable Runtime, durability,
   concurrency, tool, and instruction-authority contracts.
+- [Control Client Compatibility](control-client-schema.md) owns shared wire field evolution and peer capability boundaries.
 - [ACP Projection Contract](acp-projection-architecture.md) owns Envelope,
   live/replay, Task, and Surface projection rules.
 - [Participants](participants.md) owns user-facing collaboration setup and workspace controls.

@@ -47,7 +47,7 @@ func (s *ApplicationService) Archive(ctx context.Context, p Principal, req Close
 	}
 	// Persist the exact native receipt before touching the binding. A failed
 	// archive write must not replace a proven close with an immutable unknown.
-	out, err := s.execute(ctx, p, req.OperationID, applicationArchiveRequest{"archive", req}, func() (CommandResult, error) {
+	out, err := s.execute(ctx, p, req.OperationID, applicationArchiveRequest{"archive", req}, func(ctx context.Context) (CommandResult, error) {
 		return s.config.Sessions.CloseSession(ctx, p, req)
 	})
 	if err != nil {

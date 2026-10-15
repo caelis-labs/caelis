@@ -415,47 +415,8 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 		bundle.Close()
 		return nil, err
 	}
-	controlCoordinator, err := controlplane.NewCoordinator(controlplane.CoordinatorConfig{
-		Sessions:         s.sessions,
-		Controllers:      localCfg.Controllers,
-		Context:          contextRouter,
-		FenceOwnerID:     strings.TrimSpace(s.authorities.fenceOwnerID),
-		LifecycleContext: s.authorities.lifecycleCtx,
-		Diagnostics:      s.authorities.diagnostics,
-	})
-	if err != nil {
-		bundle.Close()
-		return nil, err
-	}
-	localCfg.ControllerRecovery = controlCoordinator
-	rt, err := runtime.New(localCfg)
-	if err != nil {
-		bundle.Close()
-		return nil, err
-	}
-	bundle.Engine = rt
-	fenceService, ok := s.sessions.(session.SessionFenceService)
-	if !ok {
-		bundle.Close()
-		return nil, fmt.Errorf("gatewayapp: production session service does not support execution fences")
-	}
-	fencedRuntime, err := controlplane.NewFencedRuntime(controlplane.FencedRuntimeConfig{
-		Runtime:          rt,
-		Fences:           fenceService,
-		OwnerID:          strings.TrimSpace(s.authorities.fenceOwnerID),
-		LifecycleContext: s.authorities.lifecycleCtx,
-		Diagnostics:      s.authorities.diagnostics,
-	})
-	if err != nil {
-		bundle.Close()
-		return nil, err
-	}
 	bundle.ACPControlPlane = acpControlPlane
-	bundle.Placement = fencedRuntime
-	sessionControl, err := controlplane.NewSessionControl(controlplane.SessionControlConfig{
-		Controllers:  controlCoordinator,
-		Participants: fencedRuntime,
-	})
+	fencedRuntime, sessionControl, err := s.buildSessionExecution(bundle, localCfg, contextRouter)
 	if err != nil {
 		bundle.Close()
 		return nil, err

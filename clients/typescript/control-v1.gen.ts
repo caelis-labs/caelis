@@ -6,6 +6,7 @@ export type OperationId = typeof operationIds[number];
 export interface ACPAuthentication {
   method_id?: string;
   type?: ACPAuthenticationType;
+  [key: string]: JSONValue;
 }
 
 export interface ACPAuthenticationChallengeMethod {
@@ -13,6 +14,7 @@ export interface ACPAuthenticationChallengeMethod {
   id: string;
   name?: string;
   type: ACPAuthenticationType;
+  [key: string]: JSONValue;
 }
 
 export type ACPAuthenticationType = "agent" | "terminal";
@@ -31,6 +33,7 @@ export interface ACPConfigChoice {
   description?: string;
   name?: string;
   value?: string;
+  [key: string]: JSONValue;
 }
 
 export interface ACPConfigOption {
@@ -42,6 +45,7 @@ export interface ACPConfigOption {
   options?: Array<ACPConfigChoice>;
   purpose?: ACPConfigOptionPurpose;
   type?: string;
+  [key: string]: JSONValue;
 }
 
 export type ACPConfigOptionPurpose = "reasoning_effort";
@@ -56,6 +60,7 @@ export interface ACPConnection {
   id?: string;
   launcher?: ACPLauncher;
   name?: string;
+  [key: string]: JSONValue;
 }
 
 export interface ACPContentChunk {
@@ -84,6 +89,7 @@ export interface ACPDiscoverySnapshot {
   models?: Array<ACPRemoteModel>;
   protocol_version?: number;
   selected_model_id?: string;
+  [key: string]: JSONValue;
 }
 
 export type ACPLaunchKind = "executable" | "package_exec" | "managed";
@@ -94,6 +100,7 @@ export interface ACPLauncher {
   env?: Record<string, JSONValue>;
   kind?: ACPLaunchKind;
   work_dir?: string;
+  [key: string]: JSONValue;
 }
 
 export type ACPLauncherChoice = "hosted" | "npx" | "global" | "managed" | "installed" | "command";
@@ -109,6 +116,7 @@ export interface ACPMetadata {
 export interface ACPModelControl {
   config_id?: string;
   kind?: ACPModelControlKind;
+  [key: string]: JSONValue;
 }
 
 export type ACPModelControlKind = "config_option" | "set_model";
@@ -132,6 +140,7 @@ export interface ACPPreparation {
   request: ACPPrepareRequest;
   selected_authentication?: ACPAuthentication;
   state: "planned" | "needs_auth" | "ready";
+  [key: string]: JSONValue;
 }
 
 export interface ACPPreparationRequest {
@@ -146,6 +155,7 @@ export interface ACPPrepareRequest {
   launcher?: ACPLauncherChoice;
   model_id?: string;
   parent_ref?: string;
+  [key: string]: JSONValue;
 }
 
 export interface ACPRawUpdate {
@@ -157,6 +167,7 @@ export interface ACPRemoteModel {
   description?: string;
   id?: string;
   name?: string;
+  [key: string]: JSONValue;
 }
 
 export interface ACPSessionInfoUpdate {
@@ -213,6 +224,7 @@ export interface ActiveApproval {
   scope_id?: string;
   subject?: ApprovalSubject;
   target?: TurnTarget;
+  [key: string]: JSONValue;
 }
 
 export interface ActorIdentity {
@@ -228,6 +240,7 @@ export interface AddMarketplaceRequest {
   operation_id?: string;
   session_id?: string;
   source: string;
+  [key: string]: JSONValue;
 }
 
 export interface AddPluginPathRequest {
@@ -236,6 +249,7 @@ export interface AddPluginPathRequest {
   operation_id?: string;
   path: string;
   session_id?: string;
+  [key: string]: JSONValue;
 }
 
 export interface AgentBinding {
@@ -243,6 +257,7 @@ export interface AgentBinding {
   handle?: string;
   profile_id?: string;
   speed?: "" | "standard" | "fast";
+  [key: string]: JSONValue;
 }
 
 export interface AgentBindingSetRequest {
@@ -251,6 +266,7 @@ export interface AgentBindingSetRequest {
   operation_id?: string;
   session_id?: string;
   set_name: string;
+  [key: string]: JSONValue;
 }
 
 export interface AgentBindingSetStatus {
@@ -259,17 +275,20 @@ export interface AgentBindingSetStatus {
   Bindings: Array<AgentBinding>;
   Name: string;
   Problem: string;
+  [key: string]: JSONValue;
 }
 
 export interface AgentBindingStatus {
   Handles: Array<AgentHandleStatus>;
   Sets: Array<AgentBindingSetStatus>;
   Targets: Array<ModelProfile>;
+  [key: string]: JSONValue;
 }
 
 export interface AgentCandidate {
   description?: string;
   name: string;
+  [key: string]: JSONValue;
 }
 
 export type AgentCandidateList = Array<AgentCandidate>;
@@ -309,6 +328,7 @@ export interface AgentHandleStatus {
   Definition: JSONObject;
   Profile: ModelProfile;
   eligible_profile_ids?: Array<string>;
+  [key: string]: JSONValue;
 }
 
 export interface AgentParticipantSnapshot {
@@ -319,12 +339,14 @@ export interface AgentParticipantSnapshot {
   role?: string;
   session_id?: string;
   source?: string;
+  [key: string]: JSONValue;
 }
 
 export interface AgentRequest {
   limit?: number;
   session_id?: string;
   surface?: string;
+  [key: string]: JSONValue;
 }
 
 export interface AgentStatusSnapshot {
@@ -342,6 +364,7 @@ export interface AgentStatusSnapshot {
   has_active_turn?: boolean;
   participants?: Array<AgentParticipantSnapshot>;
   session_id?: string;
+  [key: string]: JSONValue;
 }
 
 export interface ApplicationBackgroundGrant {
@@ -353,6 +376,7 @@ export interface ApplicationBackgroundGrant {
   revoked: boolean;
   session_id: string;
   source: string;
+  [key: string]: JSONValue;
 }
 
 export type ApplicationBackgroundGrantList = Array<ApplicationBackgroundGrant>;
@@ -361,6 +385,7 @@ export interface ApplicationBackgroundGrantRequest {
   authorization_operation_id: string;
   operation_id: string;
   source: string;
+  [key: string]: JSONValue;
 }
 
 export interface ApplicationBinding {
@@ -372,6 +397,7 @@ export interface ApplicationBinding {
   principal_id: string;
   profile: ApplicationProfile;
   session_id: string;
+  [key: string]: JSONValue;
 }
 
 export type ApplicationBindingList = Array<ApplicationBinding>;
@@ -392,6 +418,7 @@ export interface ApplicationCall {
   state: "pending" | "claimed" | "completed" | "cancelled" | "unknown";
   tools_version: string;
   turn_id: string;
+  [key: string]: JSONValue;
 }
 
 export type ApplicationCallList = Array<ApplicationCall>;
@@ -403,6 +430,7 @@ export interface ApplicationChildRelation {
   parent_task_id?: string;
   root_session_id: string;
   source: ApplicationSource;
+  [key: string]: JSONValue;
 }
 
 export interface ApplicationConfiguration {
@@ -410,6 +438,7 @@ export interface ApplicationConfiguration {
   profile: ApplicationProfile;
   revision: Uint64Decimal;
   session_id: string;
+  [key: string]: JSONValue;
 }
 
 export interface ApplicationConfigurationPatch {
@@ -423,6 +452,7 @@ export interface ApplicationConfigurationPatch {
   skill_roots?: Array<string>;
   tools?: Array<ApplicationToolDefinition>;
   tools_version?: string;
+  [key: string]: JSONValue;
 }
 
 export interface ApplicationConfigurationRequest {
@@ -433,6 +463,7 @@ export interface ApplicationConfigurationRequest {
   service_tier?: string;
   tools_version?: string;
   turn_id: string;
+  [key: string]: JSONValue;
 }
 
 export interface ApplicationConnection {
@@ -442,6 +473,7 @@ export interface ApplicationConnection {
   name: string;
   principal_id: string;
   revoked: boolean;
+  [key: string]: JSONValue;
 }
 
 export interface ApplicationContentCallResult {
@@ -450,6 +482,7 @@ export interface ApplicationContentCallResult {
   result_format: "content-v1";
   structuredContent?: JSONObject;
   turn_complete?: boolean;
+  [key: string]: JSONValue;
 }
 
 export interface ApplicationContentToolDefinition {
@@ -459,21 +492,24 @@ export interface ApplicationContentToolDefinition {
   name: string;
   output_schema?: JSONObject;
   result_format: "content-v1";
+  [key: string]: JSONValue;
 }
 
-export type ApplicationEmptyRequest = {  };
+export type ApplicationEmptyRequest = Record<string, JSONValue>;
 
 export interface ApplicationInheritance {
   cwd_instructions: false;
   mcp: false;
   skills: false;
   workspace_memory: false;
+  [key: string]: JSONValue;
 }
 
 export interface ApplicationLegacyCallResult {
   content: JSONValue;
   outcome: "succeeded" | "failed" | "unknown";
   turn_complete?: boolean;
+  [key: string]: JSONValue;
 }
 
 export interface ApplicationLegacyToolDefinition {
@@ -481,6 +517,7 @@ export interface ApplicationLegacyToolDefinition {
   description: string;
   input_schema: JSONObject;
   name: string;
+  [key: string]: JSONValue;
 }
 
 export interface ApplicationMCPServer {
@@ -490,6 +527,7 @@ export interface ApplicationMCPServer {
   transport: "stdio" | "streamable_http" | "sse";
   url?: string;
   work_dir?: string;
+  [key: string]: JSONValue;
 }
 
 export interface ApplicationMCPServerStatus {
@@ -498,6 +536,7 @@ export interface ApplicationMCPServerStatus {
   tool_details?: Array<MCPToolDetail>;
   tools?: Array<string>;
   warning?: string;
+  [key: string]: JSONValue;
 }
 
 export interface ApplicationMCPStatus {
@@ -505,6 +544,7 @@ export interface ApplicationMCPStatus {
   servers: Array<ApplicationMCPServerStatus>;
   session_id: string;
   skills: Array<ApplicationSkillStatus>;
+  [key: string]: JSONValue;
 }
 
 export interface ApplicationModelCapabilities {
@@ -512,17 +552,20 @@ export interface ApplicationModelCapabilities {
   image_input?: boolean;
   model: string;
   session_id: string;
+  [key: string]: JSONValue;
 }
 
 export interface ApplicationOperation {
   operation_id: string;
   outcome: Outcome;
   result?: CommandResult;
+  [key: string]: JSONValue;
 }
 
 export interface ApplicationPermissions {
   approval_mode?: "manual" | "auto-review";
   mode?: "workspace-write" | "danger-full-access";
+  [key: string]: JSONValue;
 }
 
 export interface ApplicationProfile {
@@ -543,6 +586,7 @@ export interface ApplicationProfile {
   tools_version: string;
   version: string;
   workspace?: ApplicationWorkspace;
+  [key: string]: JSONValue;
 }
 
 export interface ApplicationPromptRequest {
@@ -555,12 +599,14 @@ export interface ApplicationPromptRequest {
   operation_id?: string;
   session_id?: string;
   source_kind: "user" | "application_summary" | "external_material" | "authorized_background";
+  [key: string]: JSONValue;
 }
 
 export interface ApplicationRegistration {
   credential: string;
   name: string;
   operation_id: string;
+  [key: string]: JSONValue;
 }
 
 export interface ApplicationResource {
@@ -571,11 +617,13 @@ export interface ApplicationResource {
   session_id: string;
   sha256: string;
   size: number;
+  [key: string]: JSONValue;
 }
 
 export interface ApplicationResourceContent {
   data: string;
   resource: ApplicationResource;
+  [key: string]: JSONValue;
 }
 
 export interface ApplicationResourceRequest {
@@ -588,6 +636,7 @@ export interface ApplicationResourceRequest {
   operation_id?: string;
   session_id?: string;
   sha256: string;
+  [key: string]: JSONValue;
 }
 
 export type ApplicationResultContentBlock = ApplicationResultTextBlock | ApplicationResultImageBlock | ApplicationResultResourceLinkBlock;
@@ -614,6 +663,7 @@ export interface ApplicationResultTextBlock {
 export interface ApplicationReviewer {
   kind: "guardian";
   model: string;
+  [key: string]: JSONValue;
 }
 
 export interface ApplicationReviewerState {
@@ -622,12 +672,14 @@ export interface ApplicationReviewerState {
   reviewer?: ApplicationReviewer;
   session_id: string;
   status: "manual" | "ready" | "unavailable";
+  [key: string]: JSONValue;
 }
 
 export interface ApplicationScope {
   application_id: string;
   connection_id: string;
   principal_id: string;
+  [key: string]: JSONValue;
 }
 
 export interface ApplicationSkillStatus {
@@ -636,6 +688,7 @@ export interface ApplicationSkillStatus {
   path: string;
   status: "inactive" | "ready" | "failed";
   warning?: string;
+  [key: string]: JSONValue;
 }
 
 export interface ApplicationSource {
@@ -643,6 +696,7 @@ export interface ApplicationSource {
   grant_id?: string;
   kind: "user" | "application_summary" | "external_material" | "authorized_background";
   operation_id: string;
+  [key: string]: JSONValue;
 }
 
 export type ApplicationToolDefinition = ApplicationLegacyToolDefinition | ApplicationContentToolDefinition;
@@ -652,22 +706,26 @@ export interface ApplicationWorker {
   connection_id: string;
   principal_id: string;
   session_id: string;
+  [key: string]: JSONValue;
 }
 
 export interface ApplicationWorkspace {
   access?: Array<ApplicationWorkspaceAccess>;
   cwd?: string;
+  [key: string]: JSONValue;
 }
 
 export interface ApplicationWorkspaceAccess {
   mode: "read-only" | "read-write";
   path: string;
+  [key: string]: JSONValue;
 }
 
 export interface ApprovalField {
   sensitive?: boolean;
   state: ApprovalFieldState;
   text?: string;
+  [key: string]: JSONValue;
 }
 
 export type ApprovalFieldState = "known" | "unavailable" | "truncated" | "opaque";
@@ -675,6 +733,7 @@ export type ApprovalFieldState = "known" | "unavailable" | "truncated" | "opaque
 export interface ApprovalGrant {
   option_id: string;
   scope: ApprovalField;
+  [key: string]: JSONValue;
 }
 
 export interface ApprovalReview {
@@ -718,6 +777,7 @@ export interface ApprovalReviewEnvelope {
 export interface ApprovalState {
   active?: ActiveApproval;
   queued_count?: number;
+  [key: string]: JSONValue;
 }
 
 export interface ApprovalSubject {
@@ -735,6 +795,7 @@ export interface ApprovalSubject {
   targets_truncated?: boolean;
   title?: ApprovalField;
   tool: ApprovalField;
+  [key: string]: JSONValue;
 }
 
 export interface AudioContent {
@@ -755,6 +816,7 @@ export interface BindAgentBindingRequest {
   expected_revision?: Uint64Decimal;
   operation_id?: string;
   session_id?: string;
+  [key: string]: JSONValue;
 }
 
 export interface CaelisMetadata {
@@ -778,6 +840,7 @@ export interface CancelParticipantRequest {
   reason?: string;
   session_id?: string;
   target: TurnTarget;
+  [key: string]: JSONValue;
 }
 
 export interface CancelRequest {
@@ -787,6 +850,7 @@ export interface CancelRequest {
   reason?: string;
   session_id?: string;
   target: TurnTarget;
+  [key: string]: JSONValue;
 }
 
 export interface ClientCapabilities {
@@ -794,6 +858,7 @@ export interface ClientCapabilities {
   client_managed_terminal: false;
   goal_bootstrap_supported: false;
   manage_loop_bootstrap_supported: false;
+  [key: string]: JSONValue;
 }
 
 export interface CloseSessionRequest {
@@ -801,12 +866,14 @@ export interface CloseSessionRequest {
   expected_revision?: Uint64Decimal;
   operation_id?: string;
   session_id?: string;
+  [key: string]: JSONValue;
 }
 
 export interface CommandResource {
   digest?: string;
   kind?: string;
   ref?: string;
+  [key: string]: JSONValue;
 }
 
 export interface CommandResult {
@@ -820,12 +887,14 @@ export interface CommandResult {
   revision?: Uint64Decimal;
   session_id?: string;
   target?: CommandTarget;
+  [key: string]: JSONValue;
 }
 
 export interface CommandTarget {
   handle_id?: string;
   run_id?: string;
   turn_id?: string;
+  [key: string]: JSONValue;
 }
 
 export interface CompactMetadata {
@@ -843,6 +912,7 @@ export interface CompactSessionRequest {
   expected_revision?: Uint64Decimal;
   operation_id?: string;
   session_id?: string;
+  [key: string]: JSONValue;
 }
 
 export interface CompletionCandidate {
@@ -851,6 +921,7 @@ export interface CompletionCandidate {
   kind?: string;
   path?: string;
   value: string;
+  [key: string]: JSONValue;
 }
 
 export type CompletionCandidateList = Array<CompletionCandidate>;
@@ -864,6 +935,7 @@ export interface CompletionRequest {
   session_id?: string;
   surface?: string;
   workspace_key?: string;
+  [key: string]: JSONValue;
 }
 
 export interface ConnectACPRequest {
@@ -874,6 +946,7 @@ export interface ConnectACPRequest {
   preparation_digest: string;
   preparation_ref: string;
   session_id?: string;
+  [key: string]: JSONValue;
 }
 
 export interface ConnectConfig {
@@ -890,6 +963,7 @@ export interface ConnectConfig {
   reasoning_levels?: Array<string>;
   stream_first_event_timeout_seconds?: number;
   timeout_seconds?: number;
+  [key: string]: JSONValue;
 }
 
 export interface ConnectModelRequest {
@@ -898,6 +972,7 @@ export interface ConnectModelRequest {
   expected_revision?: Uint64Decimal;
   operation_id?: string;
   session_id?: string;
+  [key: string]: JSONValue;
 }
 
 export type ContentBlock = TextContent | ImageContent | AudioContent | ResourceContent;
@@ -913,6 +988,7 @@ export interface ControllerBinding {
   placement?: Placement;
   remote_session_id?: string;
   source?: string;
+  [key: string]: JSONValue;
 }
 
 export type ControllerKind = "kernel" | "acp";
@@ -924,6 +1000,7 @@ export interface CreateAgentRoleRequest {
   operation_id?: string;
   role: JSONObject;
   session_id?: string;
+  [key: string]: JSONValue;
 }
 
 export interface CreateApplicationSessionRequest {
@@ -932,6 +1009,7 @@ export interface CreateApplicationSessionRequest {
   operation_id?: string;
   profile: ApplicationProfile;
   session_id?: string;
+  [key: string]: JSONValue;
 }
 
 export interface CreateSessionRequest {
@@ -945,6 +1023,7 @@ export interface CreateSessionRequest {
   session_id?: string;
   title?: string;
   workspace_key?: string;
+  [key: string]: JSONValue;
 }
 
 export interface CreateWorkerRequest {
@@ -957,6 +1036,7 @@ export interface CreateWorkerRequest {
   reasoning_effort?: string;
   session_id?: string;
   title?: string;
+  [key: string]: JSONValue;
 }
 
 export interface DeleteAgentRoleRequest {
@@ -965,6 +1045,7 @@ export interface DeleteAgentRoleRequest {
   handle: string;
   operation_id?: string;
   session_id?: string;
+  [key: string]: JSONValue;
 }
 
 export interface DeleteModelRequest {
@@ -973,6 +1054,7 @@ export interface DeleteModelRequest {
   model: string;
   operation_id?: string;
   session_id?: string;
+  [key: string]: JSONValue;
 }
 
 export interface Delivery {
@@ -987,6 +1069,7 @@ export interface DisablePluginRequest {
   id: string;
   operation_id?: string;
   session_id?: string;
+  [key: string]: JSONValue;
 }
 
 export interface DisconnectACPRequest {
@@ -995,6 +1078,7 @@ export interface DisconnectACPRequest {
   expected_revision?: Uint64Decimal;
   operation_id?: string;
   session_id?: string;
+  [key: string]: JSONValue;
 }
 
 export interface DisconnectCandidate {
@@ -1003,6 +1087,7 @@ export interface DisconnectCandidate {
   last_on_connection?: boolean;
   name?: string;
   sibling_count?: number;
+  [key: string]: JSONValue;
 }
 
 export type DisconnectCandidateList = Array<DisconnectCandidate>;
@@ -1010,14 +1095,16 @@ export type DisconnectCandidateList = Array<DisconnectCandidate>;
 export interface DisconnectCandidatesSnapshot {
   candidates: DisconnectCandidateList;
   revision: Uint64Decimal;
+  [key: string]: JSONValue;
 }
 
 export interface DurableFeedPosition {
   projection_index: number;
   seq: Uint64Decimal;
+  [key: string]: JSONValue;
 }
 
-export type EmptyResult = {  };
+export type EmptyResult = Record<string, JSONValue>;
 
 export interface EnablePluginRequest {
   expected_controller_epoch?: string;
@@ -1025,6 +1112,7 @@ export interface EnablePluginRequest {
   id: string;
   operation_id?: string;
   session_id?: string;
+  [key: string]: JSONValue;
 }
 
 export type Envelope = SessionUpdateEnvelope | RequestPermissionEnvelope | NoticeEnvelope | ParticipantEnvelope | LifecycleEnvelope | AgentCommunicationEnvelope | ApprovalReviewEnvelope | ErrorEnvelope;
@@ -1059,6 +1147,7 @@ export interface EnvironmentConfig {
   inherit?: boolean | null;
   set?: Record<string, JSONValue> | null;
   unset?: Array<string> | null;
+  [key: string]: JSONValue;
 }
 
 export type ErrorCode = "unknown" | "invalid_argument" | "not_found" | "already_exists" | "conflict" | "permission_denied" | "unauthenticated" | "failed_precondition" | "resource_exhausted" | "rate_limited" | "overloaded" | "timeout" | "cancelled" | "interrupted" | "unavailable" | "unsupported" | "unknown_outcome" | "internal";
@@ -1099,9 +1188,10 @@ export interface ErrorResponse {
 export interface ExecutionConfig {
   environment?: EnvironmentConfig | null;
   shell?: ShellConfig | null;
+  [key: string]: JSONValue;
 }
 
-export type FeedPosition = { durable: DurableFeedPosition } | { transient: TransientFeedPosition };
+export type FeedPosition = { durable: DurableFeedPosition; [key: string]: JSONValue } | { transient: TransientFeedPosition; [key: string]: JSONValue };
 
 export interface HandoffAgentRequest {
   expected_controller_epoch?: string;
@@ -1109,6 +1199,7 @@ export interface HandoffAgentRequest {
   operation_id?: string;
   session_id?: string;
   target: string;
+  [key: string]: JSONValue;
 }
 
 export interface HandoffBindingMetadata {
@@ -1120,6 +1211,7 @@ export interface HostStatus {
   instance_id: string;
   ready: boolean;
   server_id: string;
+  [key: string]: JSONValue;
 }
 
 export interface ImageContent {
@@ -1134,6 +1226,7 @@ export interface InstallPluginRequest {
   operation_id?: string;
   session_id?: string;
   source: string;
+  [key: string]: JSONValue;
 }
 
 export type JSONObject = Record<string, JSONValue>;
@@ -1177,11 +1270,13 @@ export interface MCPServerSnapshot {
   tool_details?: Array<MCPToolDetail>;
   tools?: Array<string>;
   warning?: string;
+  [key: string]: JSONValue;
 }
 
 export interface MCPToolDetail {
   description: string;
   name: string;
+  [key: string]: JSONValue;
 }
 
 export interface MarketplaceSnapshot {
@@ -1194,6 +1289,7 @@ export interface MarketplaceSnapshot {
   root?: string;
   source?: string;
   version?: string;
+  [key: string]: JSONValue;
 }
 
 export type MarketplaceSnapshotList = Array<MarketplaceSnapshot>;
@@ -1201,6 +1297,7 @@ export type MarketplaceSnapshotList = Array<MarketplaceSnapshot>;
 export interface ModelAuthenticationInput {
   challenge_id: string;
   input: string;
+  [key: string]: JSONValue;
 }
 
 export interface ModelAuthenticationSnapshot {
@@ -1212,17 +1309,20 @@ export interface ModelAuthenticationSnapshot {
   sequence: Uint64Decimal;
   user_code?: string;
   verification_url?: string;
+  [key: string]: JSONValue;
 }
 
 export interface ModelEffortCapability {
   acp_config_id?: string;
   choices?: Array<ModelEffortChoice>;
   default_effort?: string;
+  [key: string]: JSONValue;
 }
 
 export interface ModelEffortChoice {
   canonical?: string;
   wire_value?: string;
+  [key: string]: JSONValue;
 }
 
 export interface ModelProfile {
@@ -1232,6 +1332,7 @@ export interface ModelProfile {
   id?: string;
   judgment?: boolean;
   speed?: ModelSpeedCapability;
+  [key: string]: JSONValue;
 }
 
 export interface ModelSelection {
@@ -1241,23 +1342,27 @@ export interface ModelSelection {
   efforts: Array<string>;
   fast?: boolean;
   fast_supported?: boolean;
+  [key: string]: JSONValue;
 }
 
 export interface ModelSpeedCapability {
   acp_config_id?: string;
   choices?: Array<ModelSpeedChoice>;
   default_speed?: string;
+  [key: string]: JSONValue;
 }
 
 export interface ModelSpeedChoice {
   canonical: string;
   wire_value: string;
+  [key: string]: JSONValue;
 }
 
 export interface ModelUsageSnapshot {
   model?: string;
   provider?: string;
   usage: UsageSnapshot;
+  [key: string]: JSONValue;
 }
 
 export interface NoticeEnvelope {
@@ -1293,6 +1398,7 @@ export type Outcome = "accepted" | "committed" | "conflicted" | "rejected" | "un
 export interface ParentToolRelation {
   tool_call_id?: string;
   tool_name?: string;
+  [key: string]: JSONValue;
 }
 
 export interface ParticipantBinding {
@@ -1309,6 +1415,7 @@ export interface ParticipantBinding {
   role?: ParticipantRole;
   session_id?: string;
   source?: string;
+  [key: string]: JSONValue;
 }
 
 export interface ParticipantEnvelope {
@@ -1361,6 +1468,7 @@ export interface Placement {
   reasoning_effort?: string;
   reasoning_effort_config_id?: string;
   session_config_values?: Record<string, JSONValue>;
+  [key: string]: JSONValue;
 }
 
 export type PlacementKind = "agent" | "model";
@@ -1378,6 +1486,7 @@ export interface PluginRequest {
   session_id?: string;
   source?: string;
   surface?: string;
+  [key: string]: JSONValue;
 }
 
 export interface PluginSnapshot {
@@ -1393,6 +1502,7 @@ export interface PluginSnapshot {
   status: string;
   version: string;
   warning?: string;
+  [key: string]: JSONValue;
 }
 
 export type PluginSnapshotList = Array<PluginSnapshot>;
@@ -1407,6 +1517,7 @@ export interface PrepareACPAuthenticationRequest {
   preparation_digest: string;
   preparation_ref: string;
   session_id?: string;
+  [key: string]: JSONValue;
 }
 
 export interface PrepareACPRequest {
@@ -1415,22 +1526,26 @@ export interface PrepareACPRequest {
   operation_id?: string;
   request: ACPPrepareRequest;
   session_id?: string;
+  [key: string]: JSONValue;
 }
 
 export interface PresentationCapabilities {
   audio: boolean;
   embedded_context: boolean;
   image: boolean;
+  [key: string]: JSONValue;
 }
 
 export interface PresentationCommand {
   description?: string;
   input?: PresentationCommandInput;
   name: string;
+  [key: string]: JSONValue;
 }
 
 export interface PresentationCommandInput {
   hint?: string;
+  [key: string]: JSONValue;
 }
 
 export interface PresentationConfigOption {
@@ -1441,6 +1556,7 @@ export interface PresentationConfigOption {
   name: string;
   options?: Array<PresentationSelectOption>;
   type: string;
+  [key: string]: JSONValue;
 }
 
 export type PresentationConfigOptionList = Array<PresentationConfigOption>;
@@ -1449,29 +1565,34 @@ export interface PresentationMode {
   description?: string;
   id: string;
   name: string;
+  [key: string]: JSONValue;
 }
 
 export interface PresentationModeState {
   available_modes: Array<PresentationMode>;
   current_mode_id: string;
   target?: "approval" | "app" | "controller";
+  [key: string]: JSONValue;
 }
 
 export interface PresentationModel {
   description?: string;
   id: string;
   name: string;
+  [key: string]: JSONValue;
 }
 
 export interface PresentationModelState {
   available_models: Array<PresentationModel>;
   current_model_id: string;
+  [key: string]: JSONValue;
 }
 
 export interface PresentationSelectOption {
   description?: string;
   name: string;
   value: string;
+  [key: string]: JSONValue;
 }
 
 export interface PresentationSnapshot {
@@ -1479,6 +1600,7 @@ export interface PresentationSnapshot {
   config_options?: PresentationConfigOptionList;
   models?: PresentationModelState;
   modes?: PresentationModeState;
+  [key: string]: JSONValue;
 }
 
 export type PromptContentPart = PromptTextContentPart | PromptImageContentPart;
@@ -1488,6 +1610,7 @@ export interface PromptImageContentPart {
   file_name?: string;
   mime_type: string;
   type: "image";
+  [key: string]: JSONValue;
 }
 
 export interface PromptParticipantRequest {
@@ -1502,6 +1625,7 @@ export interface PromptParticipantRequest {
   participant_id: string;
   session_id?: string;
   source?: string;
+  [key: string]: JSONValue;
 }
 
 export interface PromptRequest {
@@ -1512,11 +1636,13 @@ export interface PromptRequest {
   input?: string;
   operation_id?: string;
   session_id?: string;
+  [key: string]: JSONValue;
 }
 
 export interface PromptTextContentPart {
   text: string;
   type: "text";
+  [key: string]: JSONValue;
 }
 
 export interface RecordInteractionRequest {
@@ -1526,6 +1652,7 @@ export interface RecordInteractionRequest {
   require_idle_run?: boolean;
   session_id?: string;
   text: string;
+  [key: string]: JSONValue;
 }
 
 export interface RemoveMarketplaceRequest {
@@ -1534,6 +1661,7 @@ export interface RemoveMarketplaceRequest {
   name: string;
   operation_id?: string;
   session_id?: string;
+  [key: string]: JSONValue;
 }
 
 export interface RemovePluginRequest {
@@ -1542,6 +1670,7 @@ export interface RemovePluginRequest {
   id: string;
   operation_id?: string;
   session_id?: string;
+  [key: string]: JSONValue;
 }
 
 export interface RequestPermission {
@@ -1586,6 +1715,7 @@ export interface ResetAgentBindingRequest {
   handle: string;
   operation_id?: string;
   session_id?: string;
+  [key: string]: JSONValue;
 }
 
 export interface ResolveApprovalRequest {
@@ -1600,6 +1730,7 @@ export interface ResolveApprovalRequest {
   review_text?: string;
   session_id?: string;
   target: TurnTarget;
+  [key: string]: JSONValue;
 }
 
 export interface ResourceContent {
@@ -1618,6 +1749,7 @@ export interface ResumeCandidate {
   title?: string;
   updated_at?: string;
   workspace?: string;
+  [key: string]: JSONValue;
 }
 
 export type ResumeCandidateList = Array<ResumeCandidate>;
@@ -1631,12 +1763,14 @@ export interface RunState {
   status?: string;
   turn_id?: string;
   waiting_approval?: boolean;
+  [key: string]: JSONValue;
 }
 
 export interface RuntimeInstallation {
   archive_url: string;
   directory: string;
   sha256?: string;
+  [key: string]: JSONValue;
 }
 
 export interface RuntimeSetup {
@@ -1646,6 +1780,7 @@ export interface RuntimeSetup {
   install_prompt?: string;
   manual_steps?: Array<string>;
   sha256?: string;
+  [key: string]: JSONValue;
 }
 
 export interface RuntimeStreamMetadata {
@@ -1684,6 +1819,7 @@ export interface SandboxRequest {
   expected_revision?: Uint64Decimal;
   operation_id?: string;
   session_id?: string;
+  [key: string]: JSONValue;
 }
 
 export interface SandboxSetupCheck {
@@ -1698,6 +1834,7 @@ export interface SandboxSetupCheck {
   scope?: string;
   updated_at?: string;
   version?: number;
+  [key: string]: JSONValue;
 }
 
 export interface SandboxSetupStatus {
@@ -1706,6 +1843,7 @@ export interface SandboxSetupStatus {
   details?: Record<string, JSONValue>;
   error?: string;
   required?: boolean;
+  [key: string]: JSONValue;
 }
 
 export interface ServerInfo {
@@ -1720,6 +1858,7 @@ export interface ServerInfo {
   server_id?: string;
   store_id?: string;
   transports?: Array<string>;
+  [key: string]: JSONValue;
 }
 
 export interface SessionControllerModeRequest {
@@ -1728,6 +1867,7 @@ export interface SessionControllerModeRequest {
   mode: string;
   operation_id?: string;
   session_id?: string;
+  [key: string]: JSONValue;
 }
 
 export interface SessionFeedDelivery {
@@ -1738,6 +1878,7 @@ export interface SessionFeedDelivery {
   page?: number;
   snapshot_id?: string;
   source: StreamSourceClass;
+  [key: string]: JSONValue;
 }
 
 export interface SessionList {
@@ -1752,6 +1893,7 @@ export interface SessionModeRequest {
   mode: string;
   operation_id?: string;
   session_id?: string;
+  [key: string]: JSONValue;
 }
 
 export interface SessionModelRequest {
@@ -1763,6 +1905,7 @@ export interface SessionModelRequest {
   operation_id?: string;
   reasoning_effort?: string;
   session_id?: string;
+  [key: string]: JSONValue;
 }
 
 export interface SessionPresentationConfigRequest {
@@ -1772,6 +1915,7 @@ export interface SessionPresentationConfigRequest {
   operation_id?: string;
   session_id?: string;
   value: string;
+  [key: string]: JSONValue;
 }
 
 export interface SessionPresentationModeRequest {
@@ -1780,6 +1924,7 @@ export interface SessionPresentationModeRequest {
   mode: string;
   operation_id?: string;
   session_id?: string;
+  [key: string]: JSONValue;
 }
 
 export interface SessionRef {
@@ -1807,6 +1952,7 @@ export interface SessionState {
   session_id: string;
   title?: string;
   workspace_key?: string;
+  [key: string]: JSONValue;
 }
 
 export interface SessionSummary {
@@ -1850,11 +1996,13 @@ export interface SessionUpdateEnvelope {
 export interface ShellConfig {
   login?: boolean | null;
   path?: string | null;
+  [key: string]: JSONValue;
 }
 
 export interface SkillResolveResult {
   canonical?: string;
   matches?: Array<string>;
+  [key: string]: JSONValue;
 }
 
 export interface SlashArgCandidate {
@@ -1867,6 +2015,7 @@ export interface SlashArgCandidate {
   no_auth?: boolean;
   runtime_setup?: RuntimeSetup;
   value: string;
+  [key: string]: JSONValue;
 }
 
 export type SlashArgCandidateList = Array<SlashArgCandidate>;
@@ -1888,12 +2037,14 @@ export interface StartParticipantRequest {
   session_id?: string;
   source?: string;
   transient?: boolean;
+  [key: string]: JSONValue;
 }
 
 export interface StatusConfiguration {
   revision: Uint64Decimal;
   workspace_trust: WorkspaceTrustLevel;
   workspace_trust_required?: boolean;
+  [key: string]: JSONValue;
 }
 
 export interface StatusDiagnostics {
@@ -1909,6 +2060,7 @@ export interface StatusDiagnostics {
   persisted_plaintext_token?: boolean;
   token_source?: string;
   warnings?: Array<string>;
+  [key: string]: JSONValue;
 }
 
 export interface StatusModel {
@@ -1919,12 +2071,14 @@ export interface StatusModel {
   name?: string;
   provider?: string;
   reasoning_effort?: string;
+  [key: string]: JSONValue;
 }
 
 export interface StatusRateLimit {
   id?: string;
   name?: string;
   windows?: Array<StatusRateLimitWindow>;
+  [key: string]: JSONValue;
 }
 
 export interface StatusRateLimitWindow {
@@ -1933,6 +2087,7 @@ export interface StatusRateLimitWindow {
   label?: string;
   resets_at?: string;
   used_percent?: number;
+  [key: string]: JSONValue;
 }
 
 export interface StatusRateLimits {
@@ -1940,6 +2095,7 @@ export interface StatusRateLimits {
   limits?: Array<StatusRateLimit>;
   plan?: string;
   provider?: string;
+  [key: string]: JSONValue;
 }
 
 export interface StatusRuntime {
@@ -1947,6 +2103,7 @@ export interface StatusRuntime {
   active_sessions?: Array<string>;
   active_turn_kind?: string;
   running?: boolean;
+  [key: string]: JSONValue;
 }
 
 export interface StatusSandbox {
@@ -1960,6 +2117,7 @@ export interface StatusSandbox {
   security_summary?: string;
   setup: SandboxSetupStatus;
   type?: string;
+  [key: string]: JSONValue;
 }
 
 export interface StatusSession {
@@ -1970,6 +2128,7 @@ export interface StatusSession {
   store_dir?: string;
   surface?: string;
   workspace?: string;
+  [key: string]: JSONValue;
 }
 
 export interface StatusSnapshot {
@@ -1981,6 +2140,7 @@ export interface StatusSnapshot {
   sandbox_status: StatusSandbox;
   session: StatusSession;
   usage: StatusUsage;
+  [key: string]: JSONValue;
 }
 
 export interface StatusUsage {
@@ -1993,6 +2153,7 @@ export interface StatusUsage {
   session_usage_by_model?: Array<ModelUsageSnapshot>;
   session_usage_total: UsageSnapshot;
   total_tokens?: number;
+  [key: string]: JSONValue;
 }
 
 export interface SteerRequest {
@@ -2004,6 +2165,7 @@ export interface SteerRequest {
   operation_id?: string;
   session_id?: string;
   target: TurnTarget;
+  [key: string]: JSONValue;
 }
 
 export type StreamDeliveryKind = "replace_begin" | "replace_page" | "replace_end" | "append_page" | "status" | "sync";
@@ -2019,6 +2181,7 @@ export interface SubagentInputRequest {
   participant_id: string;
   session_id: string;
   task_id: string;
+  [key: string]: JSONValue;
 }
 
 export interface SubagentInputStatus {
@@ -2030,6 +2193,7 @@ export interface SubagentInputStatus {
 export interface SubagentInputStatusRequest {
   ids: Array<string>;
   session_id: string;
+  [key: string]: JSONValue;
 }
 
 export type SubagentInputStatuses = Array<SubagentInputStatus>;
@@ -2053,27 +2217,32 @@ export interface TaskDescriptor {
   task_id: string;
   title?: string;
   updated_at?: string;
+  [key: string]: JSONValue;
 }
 
 export interface TaskDirectorySnapshot {
   revision: Uint64Decimal;
   tasks?: Array<TaskDescriptor>;
+  [key: string]: JSONValue;
 }
 
 export interface TaskEventBatch {
   activity_id?: string;
   deliveries?: Array<TaskStreamDelivery>;
+  [key: string]: JSONValue;
 }
 
 export type TaskKind = "command" | "subagent";
 
 export interface TaskList {
   tasks?: Array<TaskDescriptor>;
+  [key: string]: JSONValue;
 }
 
 export interface TaskParentTool {
   tool_call_id?: string;
   tool_name?: string;
+  [key: string]: JSONValue;
 }
 
 export type TaskState = "prepared" | "running" | "waiting_input" | "completed" | "failed" | "cancelled" | "interrupted" | "terminated" | "waiting_approval" | "unknown_outcome";
@@ -2087,22 +2256,26 @@ export interface TaskStreamDelivery {
   page?: number;
   snapshot_id?: string;
   source: StreamSourceClass;
+  [key: string]: JSONValue;
 }
 
 export interface TerminalExitStatus {
   exit_code?: number;
   signal?: string;
+  [key: string]: JSONValue;
 }
 
 export interface TerminalOutput {
   exit_status?: TerminalExitStatus;
   output: string;
   truncated: boolean;
+  [key: string]: JSONValue;
 }
 
 export interface TerminalRequest {
   session_id: string;
   terminal_id: string;
+  [key: string]: JSONValue;
 }
 
 export interface TextContent {
@@ -2145,12 +2318,14 @@ export interface TransientFeedPosition {
   anchor: DurableFeedPosition;
   generation: string;
   sequence: PositiveUint64Decimal;
+  [key: string]: JSONValue;
 }
 
 export interface TurnTarget {
   handle_id: string;
   run_id: string;
   turn_id: string;
+  [key: string]: JSONValue;
 }
 
 export interface UIPreferences {
@@ -2158,6 +2333,7 @@ export interface UIPreferences {
   subagent_layout?: "" | "overlay" | "left" | "right" | "up" | "down";
   theme?: string;
   vertical_ratio?: number;
+  [key: string]: JSONValue;
 }
 
 export type Uint64Decimal = string;
@@ -2166,6 +2342,7 @@ export interface UpdateApplicationConfigurationRequest {
   expected_configuration_revision: PositiveUint64Decimal;
   operation_id: string;
   patch: ApplicationConfigurationPatch;
+  [key: string]: JSONValue;
 }
 
 export interface UpdateMarketplaceRequest {
@@ -2174,6 +2351,7 @@ export interface UpdateMarketplaceRequest {
   name: string;
   operation_id?: string;
   session_id?: string;
+  [key: string]: JSONValue;
 }
 
 export interface UsageCost {
@@ -2205,6 +2383,7 @@ export interface UsageSnapshot {
   prompt_tokens?: number;
   reasoning_tokens?: number;
   total_tokens?: number;
+  [key: string]: JSONValue;
 }
 
 export interface UseModelRequest {
@@ -2215,6 +2394,7 @@ export interface UseModelRequest {
   operation_id?: string;
   reasoning_effort?: string;
   session_id?: string;
+  [key: string]: JSONValue;
 }
 
 export type WorkspaceTrustLevel = "unknown" | "trusted" | "untrusted";
@@ -2227,6 +2407,7 @@ export interface WorkspaceTrustRequest {
   session_id?: string;
   trust_level: WorkspaceTrustLevel;
   workspace_key: string;
+  [key: string]: JSONValue;
 }
 
 export interface WriteBase {

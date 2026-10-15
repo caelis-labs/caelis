@@ -132,3 +132,15 @@ func (s *runtimeComposition) applicationModelImageInput(ctx context.Context, pro
 	}
 	return modelconfig.ModelImageInput(configured), nil
 }
+
+// applicationPolicyMode is the creation-bound policy selection shared by
+// execution and idle status. It does not resolve a provider or create a sandbox.
+func applicationPolicyMode(profile application.Profile) string {
+	if profile.Execution != "workspace-write" {
+		return "application-tools-only"
+	}
+	if profile.Permissions.Mode == "danger-full-access" {
+		return "danger-full-access"
+	}
+	return "workspace-write"
+}
