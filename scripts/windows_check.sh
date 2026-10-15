@@ -26,7 +26,7 @@ CAELIS_WINDOWS_SANDBOX_E2E=1 bash ./scripts/go_test_nonempty.sh \
   ./agent-sdk/sandbox/windows '^TestRestrictedToken(ExecutionConfig|PythonEnvironment)E2E$' windows-execution-config -count=1
 
 CAELIS_TEST_APPLICATION_NATIVE=1 bash ./scripts/go_test_nonempty.sh ./app/gatewayapp \
-  '^Test(Application(Native|DirectoryBindings|LeaseWithdrawal|ResourceBridge|PublishArtifact|ReadResource|ArtifactChanged|ReviewerNative|ExecutionEnvironmentAfterHostApproval)|ExternalExecutionClientHTTP|SharedWorker(NativeHTTP|HTTP))' windows-application-native -count=1
+  '^Test(Application(Native|DirectoryBindings|ResourceBridge|PublishArtifact|ReadResource|ArtifactChanged|ReviewerNative|ExecutionEnvironmentAfterHostApproval)|SessionRuntimeClosurePreventsDelayedNativeEffects|ExternalExecutionClientHTTP|SharedWorker(NativeHTTP|HTTP))' windows-application-native -count=1
 
 # Large packages run only native process, storage, path, and clipboard contracts.
 # Selectors must match tests, so renames cannot silently remove this coverage.
