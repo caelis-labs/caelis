@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.72.0](https://github.com/caelis-labs/caelis/compare/v0.71.2...v0.72.0) (2026-10-15)
+
+
+### ⚠ BREAKING CHANGES
+
+* Remove Application registration, credentials, leases, routes and wire capabilities. Migrate Control Store schema 1/2 to 3 and reject legacy writers. Old Application clients must upgrade; a pre-unification Host needs one explicit restart after active work completes.
+
+### Unified Control protocol
+
+TUI and Bot now share one public OpenAPI schema, Host identity, Session/Turn owner and operation receipt contract. Explicit Session profiles retain application instructions, native tools, MCP/Skills, private working directories, workers, hot configuration, approvals, background grants and immutable resources. Unknown effects recover through their original receipts and are never replayed with replacement IDs.
+
+**Breaking client change:** the independent Application protocol, registration, credentials, leases and capabilities are removed. Use a migrated Bot build from caelis-labs/caelis-bot#178; old Application clients must upgrade. The released v0.71.2 line is the last Application writer; this release is the first unified-only writer. CLI embedding remains Bot #165.
+
+**Store upgrade:** Control Store schema 1/2 migrates atomically to schema 3. Original Session/call/resource identities, immutable request bytes and uncertain outcomes are retained; legacy receipts are inert. Back up the complete stopped Store before the first launch. Older binaries cannot write schema 3, and executable downgrade does not undo migration. The isolated importer can be removed when the minimum supported Store reaches v3; archived evidence has independent retention.
+
+**Host replacement:** managed startup can replace an idle Host while Bot/TUI remain subscribed, but it preserves active work. Existing pre-unification Hosts need one explicit `caelis service restart --store-dir <Store>` after their work finishes. Installation alone does not switch a running Host. Compatible clients continue to share one Store writer.
+
+Validation includes full Core/Bot suites, native process integration and restart, isolated macOS onboarding/recovery with a synthetic provider, and separate real DeepSeek `deepseek-flash` acceptance for files, resources, approvals, workers, background grants and request-level hot configuration. Live Fast behavior and Windows GUI acceptance are outside this verification.
+
+### Features
+
+* unify application surfaces on public Control sessions ([#146](https://github.com/caelis-labs/caelis/issues/146)) ([1497727](https://github.com/caelis-labs/caelis/commit/14977276308485baa3ec12453b69372fc42831d6))
+
+
+### Bug Fixes
+
+* wait for npm publication metadata propagation ([#144](https://github.com/caelis-labs/caelis/issues/144)) ([a9e69ba](https://github.com/caelis-labs/caelis/commit/a9e69ba0e0f4c3e05df94b812ec6eca1783baaec))
+
 ## [0.71.2](https://github.com/caelis-labs/caelis/compare/v0.71.1...v0.71.2) (2026-10-15)
 
 
