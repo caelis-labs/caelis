@@ -6,7 +6,7 @@ import (
 	"github.com/caelis-labs/caelis/control/sessionprofile"
 )
 
-// ApplicationModelCapabilities reads only the exact application-owned Session's
+// SessionModelCapabilities reads only the selected Session's
 // desired model. No worker, global default or union capability is substituted.
 func (s *SessionProfileService) SessionModelCapabilities(ctx context.Context, p Principal, sessionID string) (sessionprofile.ModelCapabilities, error) {
 	configuration, err := s.SessionConfiguration(ctx, p, sessionID)

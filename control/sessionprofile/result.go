@@ -29,7 +29,7 @@ func (s *Store) projectResult(ctx context.Context, c CallContext, name, format s
 	}
 	out.Metadata = map[string]any{"application_call": metadata}
 	if format == "" {
-		// The baseline application-runtime-v1 format is opaque JSON text.
+		// The baseline callback format is opaque JSON text.
 		// Keep it until that public capability is retired; never infer images
 		// from image-shaped JSON returned by an unnegotiated legacy tool.
 		raw, err := json.Marshal(result)
