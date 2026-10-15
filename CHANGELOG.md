@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.72.0](https://github.com/caelis-labs/caelis/compare/v0.71.2...v0.72.0) (2026-10-15)
+
+
+### ⚠ BREAKING CHANGES
+
+* Remove Application registration, credentials, leases, routes and wire capabilities. Migrate Control Store schema 1/2 to 3 and reject legacy writers. Old Application clients must upgrade; a pre-unification Host needs one explicit restart after active work completes.
+
+### Features
+
+* unify application surfaces on public Control sessions ([#146](https://github.com/caelis-labs/caelis/issues/146)) ([1497727](https://github.com/caelis-labs/caelis/commit/14977276308485baa3ec12453b69372fc42831d6))
+
+
+### Bug Fixes
+
+* wait for npm publication metadata propagation ([#144](https://github.com/caelis-labs/caelis/issues/144)) ([a9e69ba](https://github.com/caelis-labs/caelis/commit/a9e69ba0e0f4c3e05df94b812ec6eca1783baaec))
+
 ## [0.71.2](https://github.com/caelis-labs/caelis/compare/v0.71.1...v0.71.2) (2026-10-15)
 
 
