@@ -204,17 +204,11 @@ type runtime struct {
 	closeOnce         sync.Once
 	closeErr          error
 
-	setupMu   sync.RWMutex
-	refreshMu sync.RWMutex
-	mu        sync.RWMutex
-	sessions  map[string]*windowsSession
-
+	runtimeRefresh
+	setupMu                 sync.RWMutex
+	mu                      sync.RWMutex
+	sessions                map[string]*windowsSession
 	lastWorkspaceSetupError string
-	refreshRunning          bool
-	lastRefreshError        string
-	lastRefreshAt           time.Time
-	lastCacheCleanupAt      time.Time
-	lastCacheBytes          int64
 }
 
 func (r *runtime) Describe() sandbox.Descriptor {
