@@ -90,7 +90,13 @@ def case(binary,busy):
     while b'UPGRADE_RECONNECTED_COMPLETE' not in tui.output:
      assert time.monotonic()<deadline,'old TUI did not render replacement result'
      time.sleep(.1)
+    # The terminal text event can precede the persisted run terminal state.
+    # Read the authoritative state until completion instead of treating a
+    # rendered token as proof that the run has already settled.
     state=api('/sessions/'+sid+'/state')['run']
+    while state.get('status')=='running':
+     assert time.monotonic()<deadline,'replacement run did not complete'
+     time.sleep(.1);state=api('/sessions/'+sid+'/state')['run']
     assert state.get('status')=='completed' and state.get('run_id')!=before.get('run_id'),state
     assert len(after_requests)==1,'old TUI replayed the new request'
     print(name,'persistent old TUI reconnect/render PASS',flush=True)
