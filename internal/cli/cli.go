@@ -118,6 +118,8 @@ func runWithProductClientOpener(
 		switch strings.ToLower(strings.TrimSpace(args[0])) {
 		case "version":
 			return runVersionSubcommand(args[1:], stdout)
+		case "internal-upgrade-host":
+			return runDeferredHostUpgrade(ctx, args[1:])
 		case "bot":
 			return errors.New("cli: bot mode has been removed; run caelis for the ordinary TUI")
 		}

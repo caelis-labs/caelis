@@ -1,11 +1,14 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -75,6 +78,8 @@ type upgradeTestHost struct {
 	serving   bool
 	publishes int
 	shutdowns int
+	busy      bool
+	taskOnly  bool
 }
 
 func newUpgradeTestHost(t *testing.T, storeDir string, token string) *upgradeTestHost {
@@ -86,7 +91,7 @@ func newUpgradeTestHost(t *testing.T, storeDir string, token string) *upgradeTes
 
 func (h *upgradeTestHost) serveHTTP(writer http.ResponseWriter, request *http.Request) {
 	h.mu.Lock()
-	info, serving := h.current, h.serving
+	info, serving, busy, taskOnly := h.current, h.serving, h.busy, h.taskOnly
 	h.mu.Unlock()
 	switch request.URL.Path {
 	case "/readyz":
@@ -100,15 +105,46 @@ func (h *upgradeTestHost) serveHTTP(writer http.ResponseWriter, request *http.Re
 			return
 		}
 		_ = json.NewEncoder(writer).Encode(info)
+	case upgradeTestAPIPrefix + "/status":
+		if !h.authorized(request) {
+			http.Error(writer, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		_ = json.NewEncoder(writer).Encode(map[string]any{"configuration": map[string]any{"revision": "0"}, "runtime": map[string]any{"running": busy && !taskOnly && slices.Contains(info.Capabilities, appserver.CapabilityIdleHostShutdown), "active_jobs": 1}})
+	case upgradeTestAPIPrefix + "/sessions":
+		if taskOnly {
+			_ = json.NewEncoder(writer).Encode(map[string]any{"sessions": []map[string]string{{"session_id": "detached"}}})
+			return
+		}
+		list := appserver.SessionList{}
+		if busy {
+			list.RunningSessionIDs = []string{"active-task-session"}
+		}
+		_ = json.NewEncoder(writer).Encode(list)
+	case upgradeTestAPIPrefix + "/sessions/detached/tasks":
+		_ = json.NewEncoder(writer).Encode(map[string]any{"tasks": []map[string]any{{"session_id": "detached", "task_id": "background-command", "handle": "command", "kind": "command", "state": "running", "running": busy}}})
 	case upgradeTestAPIPrefix + "/host/shutdown":
 		if !h.authorized(request) {
 			http.Error(writer, "unauthorized", http.StatusUnauthorized)
 			return
 		}
 		var shutdown appserver.HostShutdownRequest
-		if err := json.NewDecoder(request.Body).Decode(&shutdown); err != nil || !shutdown.IfIdle || shutdown.ExpectedInstanceID != info.InstanceID {
-			h.t.Errorf("replacement lost conditional instance fence: %+v %v", shutdown, err)
+		modern := slices.Contains(info.Capabilities, appserver.CapabilityIdleHostShutdown)
+		var decodeErr error
+		if request.Body != nil {
+			decodeErr = json.NewDecoder(request.Body).Decode(&shutdown)
+		}
+		legacyFallback := info.DistributionVersion == "v0.72.0" || info.DistributionVersion == "v0.72.1"
+		if decodeErr != nil || modern && (!shutdown.IfIdle && !legacyFallback || shutdown.IfIdle && shutdown.ExpectedInstanceID != info.InstanceID) || !modern && shutdown.IfIdle {
+			h.t.Errorf("replacement lost conditional instance fence: %+v %v", shutdown, decodeErr)
 			http.Error(writer, "invalid idle shutdown", http.StatusBadRequest)
+			return
+		}
+		if busy && (!taskOnly || modern && shutdown.IfIdle) {
+			if !modern {
+				h.t.Error("legacy shutdown dispatched despite active work")
+			}
+			http.Error(writer, "Host is busy", http.StatusConflict)
 			return
 		}
 		h.mu.Lock()
@@ -437,5 +473,94 @@ func TestManagedLocalHostUpgradeFailureSurfacesErrorWithoutFallback(t *testing.T
 	}
 	if record.BuildID != "old-build" || record.InstanceID != restoredInstance {
 		t.Fatalf("restored Host discovery = %#v, want the previous release restored", record)
+	}
+}
+
+func TestManagedBusyHostAttachesThenUpgradesAfterWork(t *testing.T) {
+	for _, tc := range []struct{ legacy, taskOnly bool }{{false, false}, {true, false}} {
+		legacy := tc.legacy
+		t.Run(fmt.Sprintf("legacy=%v,detached=%v", legacy, tc.taskOnly), func(t *testing.T) {
+			testenv.SetHome(t, t.TempDir())
+			store := t.TempDir()
+			stampReleaseIdentity(t, "v0.73.0", "new-build")
+			host := newUpgradeTestHost(t, store, mustBearerToken(t, store))
+			old := managedHostInfo(releaseHostIdentity("v0.71.1", "old-build"), uuid.NewString())
+			if legacy {
+				old.Capabilities = appserver.RequiredManagedHostCapabilities()
+			}
+			if err := host.become(old); err != nil {
+				t.Fatal(err)
+			}
+			host.mu.Lock()
+			host.busy = true
+			host.taskOnly = tc.taskOnly
+			host.mu.Unlock()
+			var launches atomic.Int32
+			options := productClientOptions{Mode: productClientModeManaged, AppName: "caelis", UserID: "local-user", StoreDir: store, HTTPClient: host.server.Client(), ServiceInstallDir: t.TempDir(), StartupTimeout: time.Second, PollInterval: time.Millisecond,
+				LaunchLocalService: func(localHostStartRequest) (servicelifecycle.LaunchedProcess, error) {
+					launches.Add(1)
+					if err := host.become(managedHostInfo(releaseHostIdentity("v0.73.0", "new-build"), uuid.NewString())); err != nil {
+						return servicelifecycle.LaunchedProcess{}, err
+					}
+					return testLaunchedService(2), nil
+				},
+			}
+			product, err := openProductClients(t.Context(), gatewayapp.Config{AppName: "caelis", UserID: "local-user", StoreDir: store, WorkspaceKey: "workspace", WorkspaceCWD: t.TempDir()}, options)
+			if err != nil {
+				t.Fatalf("busy upgrade blocked startup: %v; cause: %v", err, errors.Unwrap(err))
+			}
+			defer product.Close()
+			if host.shutdownCount() != 0 || launches.Load() != 0 {
+				t.Fatal("busy Host interrupted")
+			}
+			manager, candidate, err := newLocalServiceManager(options)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+			defer cancel()
+			done := make(chan error, 1)
+			go func() { done <- awaitHostUpgrade(ctx, manager, candidate, old.InstanceID, 5*time.Millisecond) }()
+			host.mu.Lock()
+			host.busy = false
+			host.mu.Unlock()
+			if err = <-done; err != nil {
+				t.Fatal(err)
+			}
+			if host.shutdownCount() != 1 || launches.Load() != 1 || host.currentInstance() == old.InstanceID {
+				t.Fatal("idle Host did not converge exactly once")
+			}
+		})
+	}
+}
+
+func TestLegacyIdleHostWithBackgroundTaskUpgradesOnFirstLaunch(t *testing.T) {
+	for _, distribution := range []string{"v0.71.1", "v0.72.0", "v0.72.1"} {
+		t.Run(distribution, func(t *testing.T) {
+			testenv.SetHome(t, t.TempDir())
+			store := t.TempDir()
+			stampReleaseIdentity(t, "v0.73.0", "new-build")
+			host := newUpgradeTestHost(t, store, mustBearerToken(t, store))
+			old := managedHostInfo(releaseHostIdentity(distribution, "old-build"), uuid.NewString())
+			if distribution == "v0.71.1" {
+				old.Capabilities = appserver.RequiredManagedHostCapabilities()
+			}
+			host.busy, host.taskOnly = true, true
+			if err := host.become(old); err != nil {
+				t.Fatal(err)
+			}
+			options := productClientOptions{Mode: productClientModeManaged, HTTPClient: host.server.Client(), ServiceInstallDir: t.TempDir(), StartupTimeout: time.Second, PollInterval: time.Millisecond, LaunchLocalService: func(localHostStartRequest) (servicelifecycle.LaunchedProcess, error) {
+				err := host.become(managedHostInfo(releaseHostIdentity("v0.73.0", "new-build"), uuid.NewString()))
+				return testLaunchedService(2), err
+			}}
+			product, err := openProductClients(t.Context(), gatewayapp.Config{AppName: "caelis", UserID: "local-user", StoreDir: store, WorkspaceKey: "workspace", WorkspaceCWD: t.TempDir()}, options)
+			if err != nil {
+				t.Fatalf("%v; cause: %v", err, errors.Unwrap(err))
+			}
+			defer product.Close()
+			if host.shutdownCount() != 1 || host.currentInstance() == old.InstanceID {
+				t.Fatal("legacy idle Host retained")
+			}
+		})
 	}
 }

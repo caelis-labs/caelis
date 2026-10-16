@@ -320,3 +320,19 @@ Drive the production entry point with deterministic dependencies, compare whole
 objects or event sequences, and keep layer-specific setup beside the owner under
 test. Persistence or replay changes must additionally prove that rebuilt model
 context matches Runtime-produced context.
+
+## Released Host upgrade smoke
+
+`python3 scripts/host_upgrade_smoke.py --legacy /path/to/caelis-v0.71.1
+--current /path/to/caelis-v0.72.1 --candidate /path/to/newer-release-build --tui`
+uses private Stores and a synthetic loopback model. It tests idle replacement,
+new CLI work against a busy old Host, automatic replacement after the original
+work finishes, original Store/receipt continuity, and older CLI non-downgrade.
+On Unix, `--tui` keeps each real old TUI process attached across replacement,
+then checks a new prompt completes in the original Session and the old TUI
+renders the replacement Host result without duplicate model requests.
+The candidate must carry a strictly newer release identity for lifecycle
+selection; a locally stamped acceptance build is not a published artifact.
+Evidence records all binary hashes and reported versions. No daily Store or
+provider credential is used. Fixture tests additionally cover detached commands,
+concurrent replacement and explicit-stop/instance fences.

@@ -30,6 +30,9 @@ const (
 
 var ErrBuildKindConflict = errors.New("servicelifecycle: development and release services require isolated Stores")
 
+// ErrHostBusy preserves a ready Host while real work delays replacement.
+var ErrHostBusy = errors.New("servicelifecycle: Host has active work")
+
 // Identity is the process-selection identity reported by one full caelis
 // binary. Protocol compatibility is intentionally not part of this type.
 type Identity struct {
@@ -50,6 +53,8 @@ type Status struct {
 	InstanceID string `json:"instance_id"`
 	PID        int    `json:"pid"`
 	Endpoint   string `json:"endpoint"`
+	// PendingUpgrade is staged, but is not the running or selected authority.
+	PendingUpgrade *Candidate `json:"-"`
 }
 
 // ProbeState distinguishes absence from a service that exists but cannot be
@@ -92,7 +97,8 @@ type PhaseEvent struct {
 type ProbeFunc func(context.Context) ProbeResult
 type LaunchFunc func(Candidate) (LaunchedProcess, error)
 
-// ShutdownFunc must honor ifIdle without falling back to a forced stop.
+// ShutdownFunc returns ErrHostBusy when work prevents implicit replacement.
+// The protocol adapter owns any explicitly bounded legacy transition.
 type ShutdownFunc func(ctx context.Context, running Status, ifIdle bool) error
 
 // Manager serializes lifecycle decisions for one Store.
@@ -118,6 +124,48 @@ func (m Manager) Start(ctx context.Context, candidate Candidate) (status Status,
 	defer func() { m.observePhase("start_total", started, err) }()
 	return m.withLock(ctx, func() (Status, error) {
 		return m.startLocked(ctx, candidate)
+	})
+}
+
+// UpgradeInstance retries a deferred upgrade only while the original Host is
+// still running. An explicit stop or another replacement retires the request.
+func (m Manager) UpgradeInstance(ctx context.Context, candidate Candidate, instanceID string) (Status, error) {
+	return m.withLock(ctx, func() (Status, error) {
+		probe := m.probe(ctx)
+		if probe.State == ProbeUnreachable {
+			return Status{}, probeError(probe)
+		}
+		if probe.State != ProbeReady || probe.Status.InstanceID != instanceID {
+			return Status{}, os.ErrNotExist
+		}
+		if err := validateCandidate(candidate); err != nil {
+			return Status{}, err
+		}
+		running := probe.Status
+		decision, err := selectCandidate(running.Identity, candidate.Identity)
+		if err != nil {
+			return Status{}, err
+		}
+		if decision == keepRunning {
+			return running, nil
+		}
+		// The initiating Start already staged this executable. Busy retries must not
+		// hash/copy it again, nor read the durable selection on each wakeup. Reverify
+		// the bytes before launch once Session admission is closed.
+		if err := m.shutdownAndWait(ctx, running, true); err != nil {
+			if errors.Is(err, ErrHostBusy) {
+				running.PendingUpgrade = &candidate
+				return running, nil
+			}
+			return Status{}, err
+		}
+		selected, selectedErr := m.loadSelected()
+		previous := previousCandidate(running, selected, selectedErr)
+		staged, err := m.stage(candidate)
+		if err != nil {
+			return m.restorePrevious(ctx, previous, err)
+		}
+		return m.launchWithRollback(ctx, staged, previous)
 	})
 }
 
@@ -217,6 +265,10 @@ func (m Manager) startLocked(ctx context.Context, candidate Candidate) (Status, 
 			return Status{}, err
 		}
 		if err := m.shutdownAndWait(ctx, running, true); err != nil {
+			if errors.Is(err, ErrHostBusy) {
+				running.PendingUpgrade = &staged
+				return running, nil
+			}
 			return Status{}, err
 		}
 		return m.launchWithRollback(ctx, staged, previous)
@@ -335,6 +387,13 @@ func (m Manager) launchWithRollback(ctx context.Context, candidate Candidate, pr
 	running, err := m.launchAndWait(ctx, candidate)
 	if err == nil || previous.Executable == "" {
 		return running, err
+	}
+	return m.restorePrevious(ctx, previous, err)
+}
+
+func (m Manager) restorePrevious(ctx context.Context, previous Candidate, err error) (Status, error) {
+	if previous.Executable == "" {
+		return Status{}, err
 	}
 	if _, restoreErr := m.launchAndWait(ctx, previous); restoreErr != nil {
 		return Status{}, errors.Join(err, fmt.Errorf("servicelifecycle: restore previous service: %w", restoreErr))

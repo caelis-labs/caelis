@@ -565,3 +565,65 @@ func TestReplacementRejectsBusyHostWithoutForcedFallback(t *testing.T) {
 		t.Fatalf("explicit restart mode: %v %d", modes, launches)
 	}
 }
+
+func TestDeferredUpgradeRetiresAfterStopOrInstanceChange(t *testing.T) {
+	for _, state := range []ProbeResult{{State: ProbeMissing}, {State: ProbeReady, Status: Status{Identity: releaseIdentity("v1.3.0", "replacement"), InstanceID: "replacement", PID: 1, Endpoint: "http://127.0.0.1:12345"}}} {
+		manager := Manager{StoreDir: t.TempDir(), Probe: func(context.Context) ProbeResult { return state }, Launch: func(Candidate) (LaunchedProcess, error) {
+			t.Fatal("retired upgrade launched a Host")
+			return LaunchedProcess{}, nil
+		}, Shutdown: func(context.Context, Status, bool) error { t.Fatal("retired upgrade stopped another Host"); return nil }}
+		_, err := manager.UpgradeInstance(t.Context(), Candidate{}, "original")
+		if !errors.Is(err, os.ErrNotExist) {
+			t.Fatal("retired request not fenced", err)
+		}
+	}
+}
+
+func TestDeferredBusyRetryDoesNotStageOrReprobe(t *testing.T) {
+	probes, stages := 0, 0
+	running := Status{Identity: releaseIdentity("v1.0.0", "old"), InstanceID: "original", PID: 1}
+	manager := Manager{StoreDir: t.TempDir(), Probe: func(context.Context) ProbeResult { probes++; return ProbeResult{State: ProbeReady, Status: running} }, Shutdown: func(context.Context, Status, bool) error { return ErrHostBusy }, ObservePhase: func(event PhaseEvent) {
+		if event.Name == "stage" {
+			stages++
+		}
+	}}
+	candidate := Candidate{Identity: releaseIdentity("v1.1.0", "new"), Executable: filepath.Join(t.TempDir(), "unread-during-busy-retry")}
+	for range 20 {
+		got, err := manager.UpgradeInstance(t.Context(), candidate, running.InstanceID)
+		if err != nil || got.PendingUpgrade == nil {
+			t.Fatalf("busy retry: %+v %v", got, err)
+		}
+	}
+	if probes != 20 || stages != 0 {
+		t.Fatalf("busy retries probes=%d stages=%d", probes, stages)
+	}
+}
+
+func TestDeferredUpgradeRestoresSelectionAfterStageFailure(t *testing.T) {
+	source := filepath.Join(t.TempDir(), "caelis")
+	if err := os.WriteFile(source, []byte("old"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	var running *Status
+	manager := Manager{StoreDir: t.TempDir(), InstallDir: t.TempDir(), PollInterval: time.Millisecond,
+		Probe: func(context.Context) ProbeResult {
+			if running == nil {
+				return ProbeResult{State: ProbeMissing}
+			}
+			return ProbeResult{State: ProbeReady, Status: *running}
+		},
+		Launch: func(c Candidate) (LaunchedProcess, error) {
+			running = &Status{Identity: c.Identity, InstanceID: "restored", PID: 1}
+			return testLaunchedProcess(1), nil
+		},
+		Shutdown: func(context.Context, Status, bool) error { running = nil; return nil },
+	}
+	old := Candidate{Identity: releaseIdentity("v1.0.0", "old"), Executable: source}
+	if _, err := manager.Start(t.Context(), old); err != nil {
+		t.Fatal(err)
+	}
+	_, err := manager.UpgradeInstance(t.Context(), Candidate{Identity: releaseIdentity("v1.1.0", "new"), Executable: source + "-missing"}, running.InstanceID)
+	if err == nil || running == nil || running.Identity != old.Identity {
+		t.Fatalf("failed revalidation lost previous Host: %+v %v", running, err)
+	}
+}

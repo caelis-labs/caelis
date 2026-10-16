@@ -90,9 +90,12 @@ Presentation exit and executable installation do not stop the managed Host.
 Each managed application launch serializes Host selection for its Store. A newer
 release stages its executable separately and asks the observed Host to close
 admission atomically while idle, then starts the new one. Active mutation dispatch,
-Runtime producers and running Tasks reject implicit replacement; idle Bot/TUI
-subscriptions do not. A busy Host remains usable and replacement can be retried
-after its work completes. Explicit stop/restart still cancel active work. The replacement must report the expected build identity and readiness
+running Session turns reject implicit replacement. Idle Sessions, detached Tasks,
+child execution references and Bot/TUI subscriptions do not. A busy Host remains usable: the new CLI attaches and a short-lived lifecycle
+waiter retries replacement after actual work completes. The waiter owns no
+Store writer and retires if the observed instance stops or changes. The isolated
+pre-v0.72.2 transition permits the older public shutdown after a work-state read;
+see [compatibility](control-client-schema.md#managed-host-replacement). Explicit stop/restart still cancel active work. The replacement must report the expected build identity and readiness
 before the application attaches. An older client never replaces a newer running
 release. Explicit lifecycle commands remain available through
 `caelis service start|stop|restart|status`. Shared files are durable truth, never a

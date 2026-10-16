@@ -54,6 +54,9 @@ func runLocalHostCommandWithOptions(
 	switch action {
 	case "start":
 		status, err = manager.Start(ctx, candidate)
+		if err == nil {
+			scheduleDeferredHostUpgrade(options, status)
+		}
 	case "restart":
 		status, err = manager.Restart(ctx, candidate)
 	case "stop":

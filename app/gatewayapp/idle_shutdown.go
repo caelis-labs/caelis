@@ -7,8 +7,8 @@ import (
 )
 
 // PrepareIdleShutdown atomically closes Session Runtime admission only when no
-// producer or command owns work. HTTP mutation dispatch is fenced by the caller.
-// Subscriptions do not own work and therefore cannot pin an obsolete Host.
+// Session turn or command dispatch owns work. HTTP mutation dispatch is fenced by the caller.
+// Subscriptions, detached Tasks and child execution references do not pin a Host.
 // On rejection the Host remains fully usable; on success Quiesce must follow.
 func (s *Stack) PrepareIdleShutdown(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
@@ -27,16 +27,10 @@ func (s *Stack) PrepareIdleShutdown(ctx context.Context) error {
 		return idleShutdownBusy()
 	}
 	for _, runtime := range r.sessions {
-		if runtime.inUse != 0 || runtime.workRefs != 0 || runtime.releasing {
+		if runtime.inUse != 0 || runtime.releasing {
 			return idleShutdownBusy()
 		}
-		// Detached durable Tasks also retain the activation after a producer
-		// reference is released. Preserve that existing idle-release rule here.
-		running, err := r.hasRunningTasks(ctx, runtime.sessionID)
-		if err != nil {
-			return errorcode.Wrap(errorcode.Unavailable, "cannot establish Host idle state", err)
-		}
-		if running {
+		if runtime.instance != nil && runtime.instance.currentGateway().SessionRunning(runtime.sessionID) {
 			return idleShutdownBusy()
 		}
 	}
