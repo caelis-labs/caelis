@@ -191,6 +191,10 @@ func TestReleasePublishesProtectedMainTagsWithoutRepeatingPRQuality(t *testing.T
 
 func TestNpmPlatformsCompleteBeforeMainPublication(t *testing.T) {
 	t.Parallel()
+	quality := readWorkflow(t, "../.github/workflows/quality.yml")
+	if !strings.Contains(quality, "name: Test npm distribution\n        if: steps.scope.outputs.full == 'true'\n        run: npm --prefix npm test") {
+		t.Fatal("PR checks must exercise the npm publisher before release")
+	}
 	release := readWorkflow(t, "../.github/workflows/release.yml")
 	_, job, ok := strings.Cut(release, "\n  release:\n")
 	if !ok {
