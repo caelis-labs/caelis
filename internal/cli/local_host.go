@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
@@ -58,7 +59,8 @@ func openManagedProductClients(ctx context.Context, cfg gatewayapp.Config, optio
 		return nil, err
 	}
 	missingBeforeStart := inspectManagedHost(ctx, options).Probe.State == servicelifecycle.ProbeMissing
-	if _, err := manager.Start(ctx, candidate); err != nil {
+	status, startErr := manager.Start(ctx, candidate)
+	if err := startErr; err != nil {
 		managedErr := managedProductFailure(options.StoreDir, "start", err)
 		if !missingBeforeStart || ctx.Err() != nil {
 			return nil, managedErr
@@ -78,6 +80,7 @@ func openManagedProductClients(ctx context.Context, cfg gatewayapp.Config, optio
 	if err != nil {
 		return nil, managedProductFailure(options.StoreDir, "connect", err)
 	}
+	scheduleDeferredHostUpgrade(options, status)
 	return product, nil
 }
 
@@ -653,10 +656,17 @@ func requestManagedServiceShutdown(ctx context.Context, options productClientOpt
 	var err error
 	if ifIdle {
 		info, initializeErr := remote.Initialize(ctx)
-		if initializeErr != nil || !slices.Contains(info.Capabilities, appserver.CapabilityIdleHostShutdown) {
-			return errors.New("cli: CAELIS_HOST_RESTART_REQUIRED: running Host cannot replace itself without interrupting work; finish work and use caelis service restart once to upgrade")
+		if initializeErr != nil {
+			return fmt.Errorf("cli: inspect Host before idle replacement: %w", initializeErr)
+		}
+		if !slices.Contains(info.Capabilities, appserver.CapabilityIdleHostShutdown) {
+			return shutdownLegacyIdleHost(ctx, remote, record, info)
 		}
 		acknowledged, err = remote.ShutdownIdleHost(ctx, record.InstanceID)
+		var response *httpclient.RemoteError
+		if errors.As(err, &response) && response.StatusCode == http.StatusConflict {
+			return servicelifecycle.ErrHostBusy
+		}
 	} else {
 		acknowledged, err = remote.ShutdownHost(ctx)
 	}

@@ -565,3 +565,16 @@ func TestReplacementRejectsBusyHostWithoutForcedFallback(t *testing.T) {
 		t.Fatalf("explicit restart mode: %v %d", modes, launches)
 	}
 }
+
+func TestDeferredUpgradeRetiresAfterStopOrInstanceChange(t *testing.T) {
+	for _, state := range []ProbeResult{{State: ProbeMissing}, {State: ProbeReady, Status: Status{Identity: releaseIdentity("v1.3.0", "replacement"), InstanceID: "replacement", PID: 1, Endpoint: "http://127.0.0.1:12345"}}} {
+		manager := Manager{StoreDir: t.TempDir(), Probe: func(context.Context) ProbeResult { return state }, Launch: func(Candidate) (LaunchedProcess, error) {
+			t.Fatal("retired upgrade launched a Host")
+			return LaunchedProcess{}, nil
+		}, Shutdown: func(context.Context, Status, bool) error { t.Fatal("retired upgrade stopped another Host"); return nil }}
+		_, err := manager.UpgradeInstance(t.Context(), Candidate{}, "original")
+		if !errors.Is(err, os.ErrNotExist) {
+			t.Fatal("retired request not fenced", err)
+		}
+	}
+}

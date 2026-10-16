@@ -30,6 +30,9 @@ const (
 
 var ErrBuildKindConflict = errors.New("servicelifecycle: development and release services require isolated Stores")
 
+// ErrHostBusy preserves a ready Host while real work delays replacement.
+var ErrHostBusy = errors.New("servicelifecycle: Host has active work")
+
 // Identity is the process-selection identity reported by one full caelis
 // binary. Protocol compatibility is intentionally not part of this type.
 type Identity struct {
@@ -50,6 +53,8 @@ type Status struct {
 	InstanceID string `json:"instance_id"`
 	PID        int    `json:"pid"`
 	Endpoint   string `json:"endpoint"`
+	// PendingUpgrade is staged, but is not the running or selected authority.
+	PendingUpgrade *Candidate `json:"-"`
 }
 
 // ProbeState distinguishes absence from a service that exists but cannot be
@@ -92,7 +97,8 @@ type PhaseEvent struct {
 type ProbeFunc func(context.Context) ProbeResult
 type LaunchFunc func(Candidate) (LaunchedProcess, error)
 
-// ShutdownFunc must honor ifIdle without falling back to a forced stop.
+// ShutdownFunc returns ErrHostBusy when work prevents implicit replacement.
+// The protocol adapter owns any explicitly bounded legacy transition.
 type ShutdownFunc func(ctx context.Context, running Status, ifIdle bool) error
 
 // Manager serializes lifecycle decisions for one Store.
@@ -117,6 +123,21 @@ func (m Manager) Start(ctx context.Context, candidate Candidate) (status Status,
 	started := time.Now()
 	defer func() { m.observePhase("start_total", started, err) }()
 	return m.withLock(ctx, func() (Status, error) {
+		return m.startLocked(ctx, candidate)
+	})
+}
+
+// UpgradeInstance retries a deferred upgrade only while the original Host is
+// still running. An explicit stop or another replacement retires the request.
+func (m Manager) UpgradeInstance(ctx context.Context, candidate Candidate, instanceID string) (Status, error) {
+	return m.withLock(ctx, func() (Status, error) {
+		probe := m.probe(ctx)
+		if probe.State == ProbeUnreachable {
+			return Status{}, probeError(probe)
+		}
+		if probe.State != ProbeReady || probe.Status.InstanceID != instanceID {
+			return Status{}, os.ErrNotExist
+		}
 		return m.startLocked(ctx, candidate)
 	})
 }
@@ -217,6 +238,10 @@ func (m Manager) startLocked(ctx context.Context, candidate Candidate) (Status, 
 			return Status{}, err
 		}
 		if err := m.shutdownAndWait(ctx, running, true); err != nil {
+			if errors.Is(err, ErrHostBusy) {
+				running.PendingUpgrade = &staged
+				return running, nil
+			}
 			return Status{}, err
 		}
 		return m.launchWithRollback(ctx, staged, previous)

@@ -66,9 +66,18 @@ lifecycle manager owns executable selection, exclusive Store ownership, readines
 and rollback; subscriptions never select or start a Host during reconnection.
 Explicit `service stop` and `service restart` retain their interrupting semantics.
 
-For the one-time pre-unification upgrade, a Host without this capability cannot
-prove conditional shutdown. `service start` reports `CAELIS_HOST_RESTART_REQUIRED`;
-finish shared work and explicitly run `caelis service restart --store-dir <Store>`.
-This is a lifecycle-only rejection, not an old protocol adapter. Once the minimum
-supported installed Host has the capability, that diagnostic branch can be removed.
-No timeout silently forces a busy or unknown Host to stop.
+A newer CLI attaches to a compatible busy Host instead of failing startup. The
+lifecycle manager stages the candidate and a short-lived CLI waiter retries the
+same atomic upgrade after actual work completes. It owns no protocol listener or
+Store writer. A Store lifecycle lock serializes replacement; a per-build waiter
+lock suppresses duplicates. The waiter is bound to the original Host instance:
+explicit stop or another replacement retires it. Subscriptions and heartbeats
+are not active work. Transient mutation dispatch can defer an atomic attempt.
+
+The one-time pre-v0.72.0 release transition is isolated in
+`internal/cli/legacy_host_upgrade.go`. It reads the old Host's Runtime work state;
+when no active Turn/job exists, its existing public shutdown is allowed even
+without the atomic interface. A task admitted in the legacy read/shutdown gap
+can be interrupted. Busy legacy Hosts remain usable and are upgraded after work
+finishes. This exception never applies to newer releases or unknown builds;
+remove the whole boundary once the minimum installed Host is v0.72.0.
