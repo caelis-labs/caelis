@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.72.3](https://github.com/caelis-labs/caelis/compare/v0.72.2...v0.72.3) (2026-10-16)
+
+
+### Bug Fixes
+
+* **sandbox/windows:** drain refresh before runtime shutdown ([#152](https://github.com/caelis-labs/caelis/issues/152)) ([0bcb193](https://github.com/caelis-labs/caelis/commit/0bcb193ce4480307c2e403427c61f06a0b0e1073))
+
 ## [0.72.2](https://github.com/caelis-labs/caelis/compare/v0.72.1...v0.72.2) (2026-10-16)
 
 
