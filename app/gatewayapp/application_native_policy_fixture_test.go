@@ -4,9 +4,7 @@ package gatewayapp
 
 import (
 	"os"
-	"runtime"
 	"testing"
-	"time"
 
 	"github.com/caelis-labs/caelis/internal/workspaceidentity"
 )
@@ -23,19 +21,8 @@ func applicationNativePolicyRoot(t *testing.T) string {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		// Windows manifest refresh can briefly retain a handle after Close,
-		// so retry removal as testing.TempDir does for Windows file handles.
-		deadline := time.Now().Add(5 * time.Second)
-		for {
-			err := os.RemoveAll(root)
-			if err == nil {
-				return
-			}
-			if runtime.GOOS != "windows" || time.Now().After(deadline) {
-				t.Error(err)
-				return
-			}
-			time.Sleep(10 * time.Millisecond)
+		if err := os.RemoveAll(root); err != nil {
+			t.Error(err)
 		}
 	})
 	canonical, err := workspaceidentity.CanonicalDirectory(root)

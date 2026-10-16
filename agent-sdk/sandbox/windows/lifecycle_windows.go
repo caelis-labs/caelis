@@ -147,7 +147,8 @@ func (r *runtime) Refresh(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if !r.beginRefresh() {
+	ctx, started := r.beginRefresh(ctx)
+	if !started {
 		return nil
 	}
 	releaseUse, err := r.beginRuntimeUse()
@@ -155,7 +156,6 @@ func (r *runtime) Refresh(ctx context.Context) error {
 		r.finishRefresh(err)
 		return fmt.Errorf("impl/sandbox/windows: refresh sandbox: %w", err)
 	}
-	defer releaseUse()
 	err = r.refreshForRequest(ctx, sandbox.CommandRequest{
 		Dir: r.cfg.CWD,
 		Constraints: sandbox.Constraints{
@@ -165,6 +165,7 @@ func (r *runtime) Refresh(ctx context.Context) error {
 			Network:    sandbox.NetworkEnabled,
 		},
 	})
+	releaseUse()
 	r.finishRefresh(err)
 	return err
 }
@@ -175,7 +176,8 @@ func (r *runtime) startBackgroundRefresh(ctx context.Context, req sandbox.Comman
 	if r == nil || r.cfg.ResourceLimits != nil {
 		return
 	}
-	if !r.beginRefresh() {
+	ctx, started := r.beginRefresh(ctx)
+	if !started {
 		return
 	}
 	releaseUse, err := r.beginRuntimeUse()
@@ -184,39 +186,12 @@ func (r *runtime) startBackgroundRefresh(ctx context.Context, req sandbox.Comman
 		return
 	}
 	go func() {
-		defer releaseUse()
 		refreshCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 		defer cancel()
-		r.finishRefresh(r.refreshForRequest(refreshCtx, req))
+		err := r.refreshForRequest(refreshCtx, req)
+		releaseUse()
+		r.finishRefresh(err)
 	}()
-}
-
-func (r *runtime) beginRefresh() bool {
-	r.refreshMu.Lock()
-	defer r.refreshMu.Unlock()
-	if r.refreshRunning {
-		return false
-	}
-	r.refreshRunning = true
-	return true
-}
-
-func (r *runtime) finishRefresh(err error) {
-	r.refreshMu.Lock()
-	defer r.refreshMu.Unlock()
-	r.refreshRunning = false
-	r.lastRefreshAt = time.Now().UTC()
-	if err == nil || errors.Is(err, context.Canceled) {
-		r.lastRefreshError = ""
-		return
-	}
-	r.lastRefreshError = strings.TrimSpace(err.Error())
-}
-
-func (r *runtime) refreshSnapshot() (running bool, lastErr string, lastAt time.Time, lastCacheCleanup time.Time, lastCacheBytes int64) {
-	r.refreshMu.RLock()
-	defer r.refreshMu.RUnlock()
-	return r.refreshRunning, strings.TrimSpace(r.lastRefreshError), r.lastRefreshAt, r.lastCacheCleanupAt, r.lastCacheBytes
 }
 
 func (r *runtime) refreshForRequest(ctx context.Context, req sandbox.CommandRequest) error {
@@ -328,6 +303,9 @@ func (r *runtime) Close() error {
 		return nil
 	}
 	r.closeOnce.Do(func() {
+		// Join refresh before releasing Runtime ownership. A completed command
+		// must not leave refresh writes racing its owner's StateDir cleanup.
+		r.stopRefresh()
 		r.mu.RLock()
 		sessions := make([]*windowsSession, 0, len(r.sessions))
 		for _, session := range r.sessions {

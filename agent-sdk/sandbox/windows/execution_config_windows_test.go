@@ -236,23 +236,10 @@ func restrictedEnvironmentCheckCommand(want map[string]string, absent []string, 
 	return strings.Join(checks, "; ")
 }
 
-// Background manifest refresh may outlive a command and Close. Wait before
-// t.TempDir removes the fixture's state directory, as in the workspace E2E.
 func closeRestrictedExecutionConfigRuntime(t *testing.T, rt sandbox.Runtime) {
 	t.Helper()
-	defer rt.Close()
-	windowsRT := rt.(*runtime)
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		running, _, _, _, _ := windowsRT.refreshSnapshot()
-		if !running {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Error("background refresh remained active before fixture cleanup")
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
+	if err := rt.Close(); err != nil {
+		t.Errorf("Close() error = %v", err)
 	}
 }
 
