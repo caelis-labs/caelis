@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.72.2](https://github.com/caelis-labs/caelis/compare/v0.72.1...v0.72.2) (2026-10-16)
+
+
+### Bug Fixes
+
+* keep CLI usable while shared Hosts upgrade ([#149](https://github.com/caelis-labs/caelis/issues/149)) ([5740fdc](https://github.com/caelis-labs/caelis/commit/5740fdcda75d966ac4873921375a24d4dfa7b486))
+
 ## [0.72.1](https://github.com/caelis-labs/caelis/compare/v0.72.0...v0.72.1) (2026-10-16)
 
 
