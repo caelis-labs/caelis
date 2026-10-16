@@ -160,7 +160,7 @@ jobs:
     needs: [notarize-darwin, verify-recovery]
     if: ${{ always() && !cancelled() && ((github.event_name == 'push' && needs.notarize-darwin.result == 'success') || (github.event_name == 'workflow_dispatch' && needs.verify-recovery.result == 'success')) }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 65
     environment: default
     permissions:
       contents: write
@@ -205,7 +205,7 @@ jobs:
         run: bash scripts/publish_release_assets.sh "${RELEASE_TAG}" dist
       - name: Publish platform packages
         run: >
-          node ./npm/scripts/publish-release.mjs
+          node ./npm/scripts/publish-release.mjs --concurrency 6
           ./npm/packages/caelis-darwin-arm64
           ./npm/packages/caelis-darwin-x64
           ./npm/packages/caelis-linux-arm64

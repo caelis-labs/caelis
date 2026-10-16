@@ -196,17 +196,43 @@ archives and checksums while preserving the bot's release notes. The GitHub
 Release may be visible before all distribution steps have finished; complete
 the acceptance checks below before announcing availability.
 
-The workflow then publishes the platform and main npm packages, verifies the
-GitHub assets, mirrors them under `releases/vX.Y.Z/` in R2, and updates `latest.txt`
-last. GitHub Releases remains the complete versioned archive.
+After verified GitHub assets are uploaded, the workflow publishes the six
+platform npm packages concurrently in the same OIDC-enabled job. All six must
+settle and pass registry integrity verification before the separate main-package
+step runs. A failed platform does not cancel its siblings, but blocks the main
+package and R2. R2 mirrors the archives under `releases/vX.Y.Z/` and updates
+`latest.txt` last. GitHub Releases remains the complete versioned archive.
 
 Publication can resume after a partial failure. The GitHub step compares each
 existing asset's SHA256 digest with the verified archive before skipping it; a
 different digest stops the job without replacing the asset. Each npm package is
 packed once per attempt, and an existing version is skipped only when its
 registry SHA512 integrity matches the staged package. A different package at
-the same version stops publication. R2 reads the verified GitHub assets back
-and checks their bytes before updating `latest.txt`.
+the same version stops publication. Upload acceptance is not registry readiness:
+each package gets up to 20 minutes of readback with exponential backoff (5 to
+30 seconds, with jitter). Preflight reads retry transient failures for up to two
+minutes; only an explicit 404 permits an upload. Incomplete metadata, timeouts,
+network errors, HTTP 429 and 5xx are retried; authentication/read-policy errors
+and conflicting SHA512 values are not treated as absence. Each read is bounded
+by 20 seconds and the remaining deadline, with npm's nested fetch retries off.
+
+A failed or timed-out upload can still have reached npm. Except for explicit
+authentication/usage failures, the publisher reconciles the original package
+against its packed SHA512 without issuing another upload. Expired readback
+leaves publication unconfirmed and blocks downstream steps; inspect the npm
+registry (and staged publishing settings if relevant) before recovery. The
+65-minute job budget accommodates concurrent platform verification followed by
+main-package verification. R2 reads the verified GitHub assets back and checks
+their bytes before updating `latest.txt`.
+
+This separates immutable upload from eventually visible metadata, following
+[npm's immutable version and integrity contract](https://docs.npmjs.com/cli/v11/commands/npm-publish/)
+and [idempotent read retry guidance](https://docs.npmjs.com/cli/v11/using-npm/config/#fetch-retries).
+Community workflows such as
+[Jodit's registry-readiness gate](https://github.com/xdan/jodit/blob/main/.github/workflows/release.yml)
+also wait after `npm publish`. Caelis requires matching integrity before
+continuing, including when that wait expires. OIDC/provenance and the original
+signed archive gates remain unchanged.
 
 Rerun a failed publication job within the same workflow run so it downloads the
 successful notarization job's `verified-release-archives` artifact. A full
@@ -214,7 +240,7 @@ workflow rerun may produce different timestamped signatures; if any published
 asset differs, publication stops for investigation. Do not overwrite published
 assets or re-sign the Darwin binaries to resume a partially published version.
 
-A failed tag run keeps using the script from that immutable tag. A signing fix
+A failed tag run keeps using the script from that immutable tag. A publishing or signing fix
 merged later to `main` cannot take effect through **Rerun failed jobs** on the
 old run. The one-off `workflow_dispatch` permits one `v0.71.1` publication
 resume from the Accepted Apple receipt, exact submission ZIP, and final

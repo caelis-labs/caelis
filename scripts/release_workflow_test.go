@@ -189,6 +189,43 @@ func TestReleasePublishesProtectedMainTagsWithoutRepeatingPRQuality(t *testing.T
 	}
 }
 
+func TestNpmPlatformsCompleteBeforeMainPublication(t *testing.T) {
+	t.Parallel()
+	release := readWorkflow(t, "../.github/workflows/release.yml")
+	_, job, ok := strings.Cut(release, "\n  release:\n")
+	if !ok {
+		t.Fatal("release job missing")
+	}
+	job, _, _ = strings.Cut(job, "\n  publish-r2:")
+	_, platforms, ok := strings.Cut(job, "      - name: Publish platform packages\n")
+	if !ok {
+		t.Fatal("platform publish step missing")
+	}
+	platforms, main, ok := strings.Cut(platforms, "      - name: Publish main package\n")
+	if !ok {
+		t.Fatal("main must be a later step gated by platform success")
+	}
+	if !strings.Contains(platforms, "publish-release.mjs --concurrency 6") {
+		t.Fatal("six platform publications must run concurrently")
+	}
+	for _, platform := range []string{"darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "windows-arm64", "windows-x64"} {
+		if strings.Count(platforms, "./npm/packages/caelis-"+platform) != 1 {
+			t.Errorf("platform %s must occur exactly once", platform)
+		}
+	}
+	if !strings.Contains(main, "run: node ./npm/scripts/publish-release.mjs ./npm") {
+		t.Fatal("main publication must use the same integrity verifier")
+	}
+	for _, forbidden := range []string{"continue-on-error", "if:", "|| true", "&"} {
+		if strings.Contains(platforms+main, forbidden) {
+			t.Errorf("publication must not bypass the platform success gate: %s", forbidden)
+		}
+	}
+	if !strings.Contains(job, "timeout-minutes: 65") {
+		t.Fatal("job must budget both platform and main verification deadlines")
+	}
+}
+
 func TestReleaseArchiveVerificationRejectsMissingOrTamperedAsset(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
