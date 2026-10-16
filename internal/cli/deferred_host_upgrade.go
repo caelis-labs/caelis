@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -85,6 +86,13 @@ func runDeferredHostUpgrade(ctx context.Context, args []string) error {
 }
 
 func awaitHostUpgrade(ctx context.Context, manager servicelifecycle.Manager, candidate servicelifecycle.Candidate, instance string, interval time.Duration) error {
+	observe := manager.ObservePhase
+	manager.ObservePhase = func(event servicelifecycle.PhaseEvent) {
+		if observe != nil && !errors.Is(event.Err, servicelifecycle.ErrHostBusy) {
+			observe(event)
+		}
+	}
+	delay := interval
 	for {
 		status, err := manager.UpgradeInstance(ctx, candidate, instance)
 		if errors.Is(err, os.ErrNotExist) || err == nil && status.PendingUpgrade == nil {
@@ -93,7 +101,10 @@ func awaitHostUpgrade(ctx context.Context, manager servicelifecycle.Manager, can
 		if err != nil {
 			return err
 		}
-		timer := time.NewTimer(interval)
+		// Bounded exponential backoff avoids a uniform full-directory scan on
+		// legacy Hosts. Jitter prevents multiple offered builds waking together.
+		timer := time.NewTimer(delay - time.Duration(rand.Int64N(max(1, int64(delay/5)))))
+		delay = min(5*interval, 2*delay)
 		select {
 		case <-ctx.Done():
 			timer.Stop()

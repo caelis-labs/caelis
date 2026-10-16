@@ -68,7 +68,8 @@ Explicit `service stop` and `service restart` retain their interrupting semantic
 
 A newer CLI attaches to a compatible busy Host instead of failing startup. The
 lifecycle manager stages the candidate and a short-lived CLI waiter retries the
-same atomic upgrade every second until running Session turns finish. It owns no protocol listener or
+same atomic upgrade with 1, 2, 4, then at most 5-second delays (with jitter)
+until running Session turns finish. Busy retries do not hash or copy the CLI. It owns no protocol listener or
 Store writer. A Store lifecycle lock serializes replacement; a per-build waiter
 lock suppresses duplicates. The waiter is bound to the original Host instance:
 explicit stop or another replacement retires it. Subscriptions and heartbeats
