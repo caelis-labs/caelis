@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.72.1](https://github.com/caelis-labs/caelis/compare/v0.72.0...v0.72.1) (2026-10-16)
+
+
+### Bug Fixes
+
+* tolerate npm propagation delays and publish platforms concurrently ([#147](https://github.com/caelis-labs/caelis/issues/147)) ([2aa6e5d](https://github.com/caelis-labs/caelis/commit/2aa6e5db17e616e1d54b029fbf778920494af78c))
+
 ## [0.72.0](https://github.com/caelis-labs/caelis/compare/v0.71.2...v0.72.0) (2026-10-15)
 
 
