@@ -734,6 +734,12 @@ func TestControlHTTPClientControlsHostOwnedTurnAcrossRequests(t *testing.T) {
 	if err != nil || len(listed.RunningSessionIDs) != 1 || listed.RunningSessionIDs[0] != active.SessionID {
 		t.Fatalf("directory omitted the live Host Turn: %#v, %v", listed, err)
 	}
+	upgradeStack := &Stack{sessionRuntimes: &sessionRuntimeRegistry{sessions: map[string]*sessionRuntime{
+		active.SessionID: {sessionID: active.SessionID, instance: &sessionRuntimeInstance{runtimeComposition: runtimeComposition{gateway: kernel}}},
+	}}}
+	if err := upgradeStack.PrepareIdleShutdown(ctx); errorcode.CodeOf(err) != errorcode.Conflict {
+		t.Fatalf("upgrade must preserve the running Session: %v", err)
+	}
 	// The registry-backed path must sample the activated Session's Gateway,
 	// including when the default Host has no execution Gateway at all.
 	registryActivity, err := newControlRuntimeStateReader(&runtimeComposition{})

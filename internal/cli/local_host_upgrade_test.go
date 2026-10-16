@@ -110,7 +110,7 @@ func (h *upgradeTestHost) serveHTTP(writer http.ResponseWriter, request *http.Re
 			http.Error(writer, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		_ = json.NewEncoder(writer).Encode(map[string]any{"configuration": map[string]any{"revision": "0"}, "runtime": map[string]any{"running": busy && slices.Contains(info.Capabilities, appserver.CapabilityIdleHostShutdown)}})
+		_ = json.NewEncoder(writer).Encode(map[string]any{"configuration": map[string]any{"revision": "0"}, "runtime": map[string]any{"running": busy && !taskOnly && slices.Contains(info.Capabilities, appserver.CapabilityIdleHostShutdown), "active_jobs": 1}})
 	case upgradeTestAPIPrefix + "/sessions":
 		if taskOnly {
 			_ = json.NewEncoder(writer).Encode(map[string]any{"sessions": []map[string]string{{"session_id": "detached"}}})
@@ -134,12 +134,13 @@ func (h *upgradeTestHost) serveHTTP(writer http.ResponseWriter, request *http.Re
 		if request.Body != nil {
 			decodeErr = json.NewDecoder(request.Body).Decode(&shutdown)
 		}
-		if decodeErr != nil || modern && (!shutdown.IfIdle || shutdown.ExpectedInstanceID != info.InstanceID) || !modern && shutdown.IfIdle {
+		legacyFallback := info.DistributionVersion == "v0.72.0" || info.DistributionVersion == "v0.72.1"
+		if decodeErr != nil || modern && (!shutdown.IfIdle && !legacyFallback || shutdown.IfIdle && shutdown.ExpectedInstanceID != info.InstanceID) || !modern && shutdown.IfIdle {
 			h.t.Errorf("replacement lost conditional instance fence: %+v %v", shutdown, decodeErr)
 			http.Error(writer, "invalid idle shutdown", http.StatusBadRequest)
 			return
 		}
-		if busy {
+		if busy && (!taskOnly || modern && shutdown.IfIdle) {
 			if !modern {
 				h.t.Error("legacy shutdown dispatched despite active work")
 			}
@@ -476,7 +477,7 @@ func TestManagedLocalHostUpgradeFailureSurfacesErrorWithoutFallback(t *testing.T
 }
 
 func TestManagedBusyHostAttachesThenUpgradesAfterWork(t *testing.T) {
-	for _, tc := range []struct{ legacy, taskOnly bool }{{false, false}, {true, false}, {true, true}} {
+	for _, tc := range []struct{ legacy, taskOnly bool }{{false, false}, {true, false}} {
 		legacy := tc.legacy
 		t.Run(fmt.Sprintf("legacy=%v,detached=%v", legacy, tc.taskOnly), func(t *testing.T) {
 			testenv.SetHome(t, t.TempDir())
@@ -533,26 +534,33 @@ func TestManagedBusyHostAttachesThenUpgradesAfterWork(t *testing.T) {
 	}
 }
 
-func TestLegacyIdleHostUpgradesOnFirstLaunch(t *testing.T) {
-	testenv.SetHome(t, t.TempDir())
-	store := t.TempDir()
-	stampReleaseIdentity(t, "v0.73.0", "new-build")
-	host := newUpgradeTestHost(t, store, mustBearerToken(t, store))
-	old := managedHostInfo(releaseHostIdentity("v0.71.1", "old-build"), uuid.NewString())
-	old.Capabilities = appserver.RequiredManagedHostCapabilities()
-	if err := host.become(old); err != nil {
-		t.Fatal(err)
-	}
-	options := productClientOptions{Mode: productClientModeManaged, HTTPClient: host.server.Client(), ServiceInstallDir: t.TempDir(), StartupTimeout: time.Second, PollInterval: time.Millisecond, LaunchLocalService: func(localHostStartRequest) (servicelifecycle.LaunchedProcess, error) {
-		err := host.become(managedHostInfo(releaseHostIdentity("v0.73.0", "new-build"), uuid.NewString()))
-		return testLaunchedService(2), err
-	}}
-	product, err := openProductClients(t.Context(), gatewayapp.Config{AppName: "caelis", UserID: "local-user", StoreDir: store, WorkspaceKey: "workspace", WorkspaceCWD: t.TempDir()}, options)
-	if err != nil {
-		t.Fatalf("%v; cause: %v", err, errors.Unwrap(err))
-	}
-	defer product.Close()
-	if host.shutdownCount() != 1 || host.currentInstance() == old.InstanceID {
-		t.Fatal("legacy idle Host retained")
+func TestLegacyIdleHostWithBackgroundTaskUpgradesOnFirstLaunch(t *testing.T) {
+	for _, distribution := range []string{"v0.71.1", "v0.72.0", "v0.72.1"} {
+		t.Run(distribution, func(t *testing.T) {
+			testenv.SetHome(t, t.TempDir())
+			store := t.TempDir()
+			stampReleaseIdentity(t, "v0.73.0", "new-build")
+			host := newUpgradeTestHost(t, store, mustBearerToken(t, store))
+			old := managedHostInfo(releaseHostIdentity(distribution, "old-build"), uuid.NewString())
+			if distribution == "v0.71.1" {
+				old.Capabilities = appserver.RequiredManagedHostCapabilities()
+			}
+			host.busy, host.taskOnly = true, true
+			if err := host.become(old); err != nil {
+				t.Fatal(err)
+			}
+			options := productClientOptions{Mode: productClientModeManaged, HTTPClient: host.server.Client(), ServiceInstallDir: t.TempDir(), StartupTimeout: time.Second, PollInterval: time.Millisecond, LaunchLocalService: func(localHostStartRequest) (servicelifecycle.LaunchedProcess, error) {
+				err := host.become(managedHostInfo(releaseHostIdentity("v0.73.0", "new-build"), uuid.NewString()))
+				return testLaunchedService(2), err
+			}}
+			product, err := openProductClients(t.Context(), gatewayapp.Config{AppName: "caelis", UserID: "local-user", StoreDir: store, WorkspaceKey: "workspace", WorkspaceCWD: t.TempDir()}, options)
+			if err != nil {
+				t.Fatalf("%v; cause: %v", err, errors.Unwrap(err))
+			}
+			defer product.Close()
+			if host.shutdownCount() != 1 || host.currentInstance() == old.InstanceID {
+				t.Fatal("legacy idle Host retained")
+			}
+		})
 	}
 }

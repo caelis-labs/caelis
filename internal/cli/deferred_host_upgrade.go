@@ -81,7 +81,7 @@ func runDeferredHostUpgrade(ctx context.Context, args []string) error {
 		return err
 	}
 	defer lock.Close()
-	return awaitHostUpgrade(ctx, manager, candidate, instance, 5*time.Second)
+	return awaitHostUpgrade(ctx, manager, candidate, instance, time.Second)
 }
 
 func awaitHostUpgrade(ctx context.Context, manager servicelifecycle.Manager, candidate servicelifecycle.Candidate, instance string, interval time.Duration) error {

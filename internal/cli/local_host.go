@@ -665,6 +665,9 @@ func requestManagedServiceShutdown(ctx context.Context, options productClientOpt
 		acknowledged, err = remote.ShutdownIdleHost(ctx, record.InstanceID)
 		var response *httpclient.RemoteError
 		if errors.As(err, &response) && response.StatusCode == http.StatusConflict {
+			if info.DistributionVersion == "v0.72.0" || info.DistributionVersion == "v0.72.1" {
+				return shutdownLegacyIdleHost(ctx, remote, record, info)
+			}
 			return servicelifecycle.ErrHostBusy
 		}
 	} else {

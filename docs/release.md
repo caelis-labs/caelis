@@ -64,10 +64,11 @@ restarts while taking the backup; include database WAL/SHM files, configuration
 and credentials, and verify restoration in isolation. Reconcile post-upgrade
 writes before restoring a backup.
 
-A pre-unification Host lacks atomic idle replacement. Complete work across its
-Surfaces and run `caelis service restart --store-dir <Store>` once. Future managed
-launches negotiate `host-idle-shutdown-v1`, preserve busy Hosts, and can replace
-an idle Host despite resident Bot/TUI subscriptions. Installation alone does not
+Managed launch upgrades early Hosts automatically through the bounded
+pre-v0.72.2 transition. Running Session turns temporarily preserve the old Host;
+idle Sessions, detached Tasks and resident Bot/TUI subscriptions do not. New
+Hosts retain atomic admission fencing; the early-version transition uses a live
+activity read followed by shutdown. See [replacement](control-client-schema.md#managed-host-replacement). Installation alone does not
 prove that the selected Host has changed.
 
 CWD, inheritance, execution and permissions remain bound at Session creation.
