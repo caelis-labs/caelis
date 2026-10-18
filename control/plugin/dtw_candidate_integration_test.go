@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,11 +15,11 @@ import (
 )
 
 // Run with CAELIS_DTW_CANDIDATE_ROOT pointed at an independently verified
-// Desktop World Full archive. The normal test suite stays self-contained.
+// Desktop World standard Plugin archive. The normal test suite stays self-contained.
 func TestDesktopWorldStandardCandidateInstallAndProtocol(t *testing.T) {
 	root := os.Getenv("CAELIS_DTW_CANDIDATE_ROOT")
 	if root == "" {
-		t.Skip("set CAELIS_DTW_CANDIDATE_ROOT to a verified Full archive root")
+		t.Skip("set CAELIS_DTW_CANDIDATE_ROOT to a verified standard Plugin root")
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 40*time.Second)
 	defer cancel()
@@ -46,8 +47,8 @@ func TestDesktopWorldStandardCandidateInstallAndProtocol(t *testing.T) {
 	for _, candidate := range mgr.Tools() {
 		all[candidate.Definition().Name] = candidate
 	}
-	execTool, statusTool := all["desktop_world__desktop_exec"], all["desktop_world__desktop_status"]
-	if execTool == nil || statusTool == nil {
+	execTool := all["desktop_world__exec"]
+	if execTool == nil || len(all) != 1 {
 		t.Fatalf("candidate tools = %v; status = %+v", all, mgr.GetServerInfos(installed.ID))
 	}
 	search := toolsearch.NewWithRanker(mgr.Tools(), dtwCandidateRanker{})
@@ -64,36 +65,61 @@ func TestDesktopWorldStandardCandidateInstallAndProtocol(t *testing.T) {
 			Name string `json:"name"`
 		} `json:"tools"`
 	}
-	if err := json.Unmarshal(found.Content[0].JSON.Value, &discovery); err != nil || discovery.Count != 2 || len(discovery.Tools) != 2 {
+	if err := json.Unmarshal(found.Content[0].JSON.Value, &discovery); err != nil || discovery.Count != 1 || len(discovery.Tools) != 1 {
 		t.Fatalf("ToolSearch discovery = %+v, %v", discovery, err)
 	}
-	status, err := statusTool.Call(ctx, tool.Call{ID: "status-first", Name: statusTool.Definition().Name, Input: []byte(`{}`)})
-	if err != nil || status.IsError {
-		t.Fatalf("desktop_status = %+v, %v", status, err)
+
+	invoke := func(candidate tool.Tool, input string) string {
+		t.Helper()
+		result, callErr := candidate.Call(ctx, tool.Call{ID: "candidate", Name: candidate.Definition().Name, Input: []byte(input)})
+		if callErr != nil || result.IsError || len(result.Content) == 0 || result.Content[0].Text == nil {
+			t.Fatalf("exec = %+v, %v", result, callErr)
+		}
+		text := result.Content[0].Text.Text
+		fields := strings.Fields(text)
+		if len(fields) < 2 || !strings.HasPrefix(fields[0], "id=") {
+			t.Fatalf("missing receipt: %s", text)
+		}
+		id := strings.TrimPrefix(fields[0], "id=")
+		for strings.Contains(text, "status=running") {
+			select {
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			case <-time.After(25 * time.Millisecond):
+			}
+			result, callErr = candidate.Call(ctx, tool.Call{ID: "poll", Name: candidate.Definition().Name, Input: []byte(fmt.Sprintf(`{"operation":"result","id":%q}`, id))})
+			if callErr != nil || result.IsError || len(result.Content) == 0 || result.Content[0].Text == nil {
+				t.Fatalf("result = %+v, %v", result, callErr)
+			}
+			text = result.Content[0].Text.Text
+		}
+		return text
 	}
 	for i := 1; i <= 2; i++ {
-		input := fmt.Sprintf(`{"execution_id":"core112-%d","code":"state.core112 = (state.core112 || 0) + 1; print(state.core112);"}`, i)
-		result, err := execTool.Call(ctx, tool.Call{ID: fmt.Sprintf("call-%d", i), Name: execTool.Definition().Name, Input: []byte(input)})
-		body, _ := json.Marshal(result)
-		if err != nil || result.IsError || result.ID != fmt.Sprintf("call-%d", i) {
-			t.Fatalf("desktop_exec %d = %s, %v", i, body, err)
-		}
-		if len(result.Content) != 2 || result.Content[0].Text == nil || result.Content[1].JSON == nil {
-			t.Fatalf("desktop_exec %d lost text or structuredContent: %s", i, body)
-		}
-		var structured struct {
-			ExecutionID string `json:"execution_id"`
-			State       string `json:"state"`
-			Outputs     []int  `json:"outputs"`
-		}
-		if err := json.Unmarshal(result.Content[1].JSON.Value, &structured); err != nil || structured.ExecutionID != fmt.Sprintf("core112-%d", i) || structured.State != "completed" || len(structured.Outputs) != 1 || structured.Outputs[0] != i {
-			t.Fatalf("desktop_exec %d did not preserve state: %s, %v", i, body, err)
-		}
-		status, err = statusTool.Call(ctx, tool.Call{ID: fmt.Sprintf("status-%d", i), Name: statusTool.Definition().Name, Input: []byte(`{}`)})
-		if err != nil || status.IsError {
-			t.Fatalf("desktop_status %d = %+v, %v", i, status, err)
+		text := invoke(execTool, `{"script":"state.n=(state.n||0)+1; return state.n;"}`)
+		if !strings.Contains(text, "status=completed") || !strings.Contains(text, fmt.Sprintf("return value: %d", i)) {
+			t.Fatalf("state %d: %s", i, text)
 		}
 	}
+	independent, err := mcp.NewManager(ctx, contributions.MCPServerSpecs, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer independent.Close()
+	select {
+	case <-independent.Initialized():
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	isolated := independent.Tools()
+	if len(isolated) != 1 {
+		t.Fatalf("independent tools = %v", isolated)
+	}
+	text := invoke(isolated[0], `{"script":"state.n=(state.n||0)+1; return state.n;"}`)
+	if !strings.Contains(text, "return value: 1") {
+		t.Fatalf("state crossed runtime boundary: %s", text)
+	}
+
 }
 
 // The selector is deterministic test plumbing. Production continues to use
@@ -103,7 +129,7 @@ type dtwCandidateRanker struct{}
 func (dtwCandidateRanker) Rank(_ context.Context, _ string, definitions []tool.Definition, _ int, _ toolsearch.SearchModel) ([]string, error) {
 	var names []string
 	for _, definition := range definitions {
-		if definition.Name == "desktop_world__desktop_exec" || definition.Name == "desktop_world__desktop_status" {
+		if definition.Name == "desktop_world__exec" {
 			names = append(names, definition.Name)
 		}
 	}
