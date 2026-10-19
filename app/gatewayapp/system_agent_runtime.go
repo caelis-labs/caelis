@@ -28,7 +28,6 @@ type systemManagedAgentPurpose string
 
 const (
 	systemManagedAgentPurposeApprovalReview systemManagedAgentPurpose = "approval_review"
-	systemManagedAgentPurposeMemorySteward  systemManagedAgentPurpose = "memory_steward"
 )
 
 type systemManagedAgentCapabilityProfile string
@@ -484,7 +483,6 @@ func systemManagedAgentRegistrySnapshot() systemManagedAgentRegistry {
 	systemManagedAgentRegistryOnce.Do(func() {
 		systemManagedAgentRegistryValue = buildSystemManagedAgentRegistry([]systemManagedAgentSpec{
 			guardianSystemManagedAgentSpec(),
-			stewardSystemManagedAgentSpec(),
 		})
 	})
 	return systemManagedAgentRegistryValue

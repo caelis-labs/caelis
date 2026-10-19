@@ -91,8 +91,7 @@ atomic replacement, WAL recovery, Host persistence and replacement, client
 reconnection, updater handoff, and clipboard behavior. Small platform owners run
 their full tests; larger packages use selectors in `scripts/windows_check.sh`
 that fail if no tests match. Implicit vet remains enabled. Tests use at most two
-packages concurrently with a five-minute package timeout. A build of all packages
-and embedded Memory Open use `CGO_ENABLED=0`, matching the release configuration.
+packages concurrently with a five-minute package timeout. A build of all packages uses `CGO_ENABLED=0`, matching the release configuration.
 
 The gate also enables `CAELIS_TEST_APPLICATION_NATIVE=1` for application and
 shared Worker HTTP acceptance: native file/PowerShell effects, resource transfer,
@@ -138,7 +137,6 @@ The following Jev evaluations are opt-in and send only repository synthetic fixt
 
 ```bash
 CAELIS_JEV_EVAL=1 go test ./agent-sdk/tool/builtin/toolsearch -run '^TestToolSearchJevEvaluation$' -count=1 -v
-CAELIS_JEV_EVAL=1 go test ./app/gatewayapp -run '^TestMemoryJevEvaluation$' -count=1 -v
 ```
 
 These tests report outcomes, token counts and elapsed time. A passing test means
@@ -200,8 +198,7 @@ adds cost without improving unrelated changes:
 | SDK dependencies or supported imports | `make sdk-boundary-check` |
 | Runtime, Control, projection, or physical TUI contracts | `make product-acceptance` |
 | Broad TUI, command, or ACP integration | `make regression` |
-| In-process Host or built-in Memory composition | `make startup-performance` |
-| Native Windows Host Memory Open | `go test ./app/gatewayapp/internal/memoryhost -run TestEmbeddedHostBindsSDKClient` |
+| In-process Host composition | `make startup-performance` |
 | Managed Host lifecycle or process ownership | `go test -race ./internal/servicelifecycle ./internal/cli` |
 | Maintained documentation links | `make docs-links` |
 | npm launcher or package handoff | `npm --prefix npm test` |

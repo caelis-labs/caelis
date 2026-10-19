@@ -14,7 +14,6 @@ import (
 	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/web"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/control/memorytool"
 )
 
 const (
@@ -96,9 +95,9 @@ func projectedBuiltinToolProfile(name string) (projectedToolProfile, bool) {
 		return projectedToolProfile{kind: projectedToolKindExecute, title: projectedTitleSpawn, result: projectedResultSpawn, terminalKnown: true, terminalPanel: true}, true
 	case sendmessage.ToolName:
 		return projectedToolProfile{kind: projectedToolKindExecute, title: projectedTitleMessage}, true
-	case memorytool.RememberToolName:
+	case "Remember": // Retained historical presentation only; never an execution alias.
 		return projectedToolProfile{kind: projectedToolKindEdit, title: projectedTitleMemoryUpdate, suppressSuccessfulEmpty: true}, true
-	case memorytool.RecallToolName:
+	case "Recall": // Retained historical presentation only; never an execution alias.
 		return projectedToolProfile{kind: projectedToolKindSearch, title: projectedTitleSearchQuery, result: projectedResultMemoryRecall}, true
 	default:
 		return projectedToolProfile{}, false

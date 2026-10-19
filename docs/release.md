@@ -81,30 +81,6 @@ and limit live acceptance to the exercised models, adapter, and request paths;
 a successful priority request does not establish latency, billing, or GUI and
 distribution acceptance.
 
-## Embedded Memory upgrades and recovery
-
-The embedded Memory database uses schema 2. Opening a supported v0.5.2
-schema-1 database migrates it during Host construction. The migration is
-transactional, but there is no automatic pre-upgrade backup or supported
-in-place downgrade. Binaries embedding Memory v0.5.2 cannot open schema 2.
-
-Before the first Host launch with a newer Memory schema:
-
-1. Stop the Host with `caelis service stop` and prevent clients from restarting
-   it while the backup is taken.
-2. Preserve a complete, access-protected copy of the Store, including Memory
-   data, any SQLite WAL/SHM files, configuration, and credentials. Verify that
-   the backup can be restored in isolation before relying on it for rollback.
-3. Start the new Host and verify Memory access and, when configured, Steward
-   processing. Retain the pre-upgrade backup until the upgrade is accepted.
-
-Restoring an older binary alone does not restore its database format. Recovery
-requires a compatible pre-upgrade Store backup; reconcile later writes and
-forgetting/deletion operations before resuming use so deleted evidence is not
-revived. Never delete Memory data or overwrite immutable Steward profiles to
-resolve an upgrade error. See the Memory owner's
-[migration contract](https://github.com/caelis-labs/memory/blob/v0.6.1/docs/memory-v0.6-migration.md).
-
 ## Gate model
 
 The `main` branch ruleset requires the aggregate `quality` check from GitHub
@@ -171,15 +147,11 @@ version override, use a `Release-As: X.Y.Z` footer in a merged commit, following
    `APPLE_NOTARY_APPLE_ID`, and `APPLE_NOTARY_PASSWORD` secrets plus the
    `APPLE_TEAM_ID` variable, without same-named repository or environment
    overrides. Keep certificate and password material out of this repository.
-5. Confirm the imported `github.com/caelis-labs/memory` version is released and
-   declares a forward-migration floor for the persisted appliance database.
-   A prerelease development baseline is a release blocker. For a schema change,
-   include the backup and recovery requirements above in the release notes.
-6. Submit the intended changes through PRs and wait for their selected checks.
+5. Submit the intended changes through PRs and wait for their selected checks.
    Review the resulting Release PR's version and changelog, and wait for its
    metadata validation. Merging this PR is the decision to publish; there is no
    separate CI approval step. Do not rerun unchanged local gates just for a tag.
-7. Ensure the release notes are concise and user-visible. When retiring a durable writer,
+6. Ensure the release notes are concise and user-visible. When retiring a durable writer,
    record the last writer and first no-write version; retain its compatibility
    reader until the supported upgrade floor reaches that version.
 
@@ -286,10 +258,3 @@ Before declaring the release complete:
    the GitHub assets. The workflow reads every R2 object back before updating
    `latest.txt`.
 4. Verify the root module version is available through the public Go proxy.
-
-The imported `github.com/caelis-labs/memory` module is compiled into every
-Caelis binary and follows this same platform matrix and installation unit.
-Executable replacement does not roll back Memory's durable schema. Caelis does
-not download, stage, supervise, or version-match a separate
-Memory runtime artifact. A future standalone Memory distribution remains an
-independent ecosystem product and cannot become a prerequisite for this path.

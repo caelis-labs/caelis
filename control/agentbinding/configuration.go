@@ -59,7 +59,7 @@ func ValidateCustomHandle(raw Handle) error {
 			maxCustomHandleLength,
 		)
 	}
-	if _, fixed := lookupDefinition(handle); fixed {
+	if _, fixed := lookupDefinition(handle); fixed || IsRetired(handle) {
 		return fmt.Errorf("control/agentbinding: handle %q is reserved", handle)
 	}
 	if _, reserved := reservedCustomHandles[handle]; reserved {
@@ -162,7 +162,7 @@ func validateRole(role Role) error {
 // saved sets. Fixed roles cannot be deleted.
 func DeleteRole(current Configuration, raw Handle) (Configuration, error) {
 	handle := NormalizeHandle(raw)
-	if _, fixed := lookupDefinition(handle); fixed {
+	if _, fixed := lookupDefinition(handle); fixed || IsRetired(handle) {
 		return Configuration{}, fmt.Errorf("control/agentbinding: fixed role %q cannot be deleted", handle)
 	}
 	if _, ok := LookupRole(current, handle); !ok {
@@ -326,6 +326,9 @@ func ValidateBindingSets(sets []BindingSet) error {
 		seenHandles := make(map[Handle]struct{}, len(raw.Bindings))
 		for _, rawBinding := range raw.Bindings {
 			binding := Normalize(rawBinding)
+			if IsRetired(binding.Handle) {
+				continue
+			}
 			if binding.Handle == "" || binding.ProfileID == "" || binding.Effort == "" {
 				return fmt.Errorf("control/agentbinding: binding set %q contains an incomplete binding", set.Name)
 			}

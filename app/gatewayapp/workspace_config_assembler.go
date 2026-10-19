@@ -10,7 +10,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
-	"github.com/caelis-labs/caelis/control/memorybinding"
 	controlplacement "github.com/caelis-labs/caelis/control/placement"
 	"github.com/caelis-labs/caelis/control/sessionvisibility"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
@@ -94,21 +93,6 @@ func (a *workspaceConfigAssembler) assembleSnapshot(
 	if err := controlplacement.ValidateSnapshot(placement.placement); err != nil {
 		return nil, err
 	}
-	memoryBinding, err := selectRuntimeMemoryBinding(ctx, sessions, doc.Memory, process, active.SessionRef, workspace)
-	if err != nil {
-		return nil, err
-	}
-	if memoryBinding != nil {
-		if authorities.memoryHost == nil {
-			return nil, errors.New("gatewayapp: resolved Memory binding has no embedded runtime")
-		}
-		if err := authorities.memoryHost.ValidateBinding(*memoryBinding); err != nil {
-			return nil, fmt.Errorf("gatewayapp: validate embedded Memory binding: %w", err)
-		}
-		if err := memorybinding.ValidateSessionAdmission(ctx, sessions, active.SessionRef, *memoryBinding); err != nil {
-			return nil, fmt.Errorf("gatewayapp: validate canonical Session Memory binding: %w", err)
-		}
-	}
 
 	instance := &sessionRuntimeInstance{
 		runtimeComposition: runtimeComposition{
@@ -120,7 +104,6 @@ func (a *workspaceConfigAssembler) assembleSnapshot(
 				modelCatalog:          deps.modelCatalog,
 				appConfig:             ptrToRuntimeConfigSnapshot(doc),
 				sessionRef:            active.SessionRef,
-				memoryBinding:         memoryBinding,
 				childControlURL:       process.childControlURL,
 				childControlTokenFile: process.childControlTokenFile,
 			},
@@ -233,74 +216,9 @@ func cloneSessionModelLookup(source *modelLookup, doc AppConfig) (*modelLookup, 
 
 func ptrToRuntimeConfigSnapshot(doc AppConfig) *AppConfig {
 	snapshot := configstore.Normalize(doc)
-	// The selected Runtime binding is the only Memory authority retained by an
-	// activation. Keeping the full configuration here would leave alternate
-	// host-selected binding references reachable from Runtime composition.
-	snapshot.Memory = memorybinding.Configuration{}
+	// Legacy Memory configuration is persistence-only data, not Runtime input.
+	snapshot.Memory = nil
 	return &snapshot
-}
-
-func resolveRuntimeMemoryBinding(
-	configuration memorybinding.Configuration,
-	process sessionRuntimeProcessSnapshot,
-) (*memorybinding.RuntimeMemoryBindingSnapshot, error) {
-	snapshot, enabled, err := memorybinding.Resolve(
-		configuration,
-		process.memorySelection,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("gatewayapp: resolve Runtime Memory binding: %w", err)
-	}
-	if !enabled {
-		return nil, nil
-	}
-	return &snapshot, nil
-}
-
-func selectRuntimeMemoryBinding(
-	ctx context.Context,
-	sessions session.StateReader,
-	configuration memorybinding.Configuration,
-	process sessionRuntimeProcessSnapshot,
-	ref session.SessionRef,
-	workspace session.WorkspaceRef,
-) (*memorybinding.RuntimeMemoryBindingSnapshot, error) {
-	var binding *memorybinding.RuntimeMemoryBindingSnapshot
-	var err error
-	if process.memorySelector == nil {
-		binding, err = resolveRuntimeMemoryBinding(configuration, process)
-	} else {
-		var selected memorybinding.BindingRef
-		selected, err = process.memorySelector(ctx, MemoryBindingSelectionContext{
-			SessionRef:         ref,
-			Workspace:          workspace,
-			FallbackBindingRef: process.memorySelection.BindingRef,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("gatewayapp: select Runtime Memory binding: %w", err)
-		}
-		if selected != "" {
-			process.memorySelection.BindingRef = selected
-		}
-		binding, err = resolveRuntimeMemoryBinding(configuration, process)
-	}
-	if err != nil || binding == nil {
-		return binding, err
-	}
-	labels, found, err := memorybinding.PinnedRuntimeLabels(ctx, sessions, ref, *binding)
-	if err != nil {
-		return nil, fmt.Errorf("gatewayapp: resolve canonical Session Memory labels: %w", err)
-	}
-	var labeled memorybinding.RuntimeMemoryBindingSnapshot
-	if found {
-		labeled, err = memorybinding.BindRuntimeLabels(*binding, labels)
-	} else {
-		labeled, err = bindRuntimeMemoryLabels(ctx, *binding, process.memoryLabelSelector, ref, workspace)
-	}
-	if err != nil {
-		return nil, err
-	}
-	return &labeled, nil
 }
 
 func cloneSessionModelConfig(config ModelConfig) ModelConfig {

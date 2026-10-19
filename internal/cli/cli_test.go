@@ -885,7 +885,7 @@ func TestEnvBoolParsesTUIAnimationSetting(t *testing.T) {
 	}
 }
 
-func TestMemoryEnvironmentDoesNotConfigureBuiltInMemory(t *testing.T) {
+func TestRetiredMemoryEnvironmentDoesNotConfigureHost(t *testing.T) {
 	t.Setenv("CAELIS_MEMORY_BINDING_REF", " primary ")
 	t.Setenv("CAELIS_MEMORY_DISABLED", "true")
 	t.Setenv("CAELIS_MEMORY_SIDECAR_MANIFEST", " /opt/caelis/memoryd.manifest.json ")
@@ -906,7 +906,7 @@ func TestMemoryEnvironmentDoesNotConfigureBuiltInMemory(t *testing.T) {
 	if !errors.Is(err, stop) {
 		t.Fatalf("runWithProductClientOpener() error = %v", err)
 	}
-	if captured.MemoryBindingRef != "" {
+	if captured.MemoryBindingRef != "" { //nolint:staticcheck // Verifies that legacy environment inputs cannot populate the deprecated embedding field.
 		t.Fatalf("Memory environment config = %#v", captured)
 	}
 }

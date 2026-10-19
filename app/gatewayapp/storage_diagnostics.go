@@ -10,15 +10,11 @@ import (
 	"strings"
 )
 
-// These names describe the embedded Memory schema-2 appliance layout. The
-// Memory package intentionally keeps its storage owner internals private; the
-// Caelis diagnostic contract records the layout without opening those files.
 const (
 	embeddedMemoryDatabaseFilename             = "memory.db"
 	embeddedMemoryOwnerLockFilename            = "memoryd.lock"
 	embeddedMemoryManagementCredentialFilename = "management.token"
 	embeddedMemoryStewardCredentialFilename    = "steward-worker.token"
-	embeddedMemoryCurrentSchemaVersion         = 2
 )
 
 // StoreDiagnostics is a read-only snapshot of the local durable Store
@@ -44,11 +40,12 @@ type StoreDiagnostics struct {
 	Warnings             []string                 `json:"warnings,omitempty"`
 }
 
-// MemoryStorageDiagnostics describes the embedded Memory files without
+// MemoryStorageDiagnostics describes retained files from retired Core Memory without
 // asserting that a database is usable. OwnerLockState is a best-effort
 // non-blocking probe on platforms that support it; it is never inferred from
 // the lock file's existence alone.
 type MemoryStorageDiagnostics struct {
+	Retired                   bool   `json:"retired"`
 	DataDir                   string `json:"data_dir,omitempty"`
 	DataDirState              string `json:"data_dir_state,omitempty"`
 	DatabasePath              string `json:"database_path,omitempty"`
@@ -106,9 +103,10 @@ func InspectStoreDiagnostics(storeDir string) (StoreDiagnostics, error) {
 		ControlDatabasePath: controlStoreDatabasePath(storeDir),
 		SessionsPath:        filepath.Join(storeDir, "sessions"),
 		Memory: MemoryStorageDiagnostics{
-			DataDir:                  filepath.Join(storeDir, "memory", "appliance"),
-			DatabasePath:             filepath.Join(storeDir, "memory", "appliance", embeddedMemoryDatabaseFilename),
-			ExpectedSchemaVersion:    embeddedMemoryCurrentSchemaVersion,
+			DataDir:      filepath.Join(storeDir, "memory", "appliance"),
+			DatabasePath: filepath.Join(storeDir, "memory", "appliance", embeddedMemoryDatabaseFilename),
+
+			Retired:                  true,
 			OwnerLockPath:            filepath.Join(storeDir, "memory", "appliance", embeddedMemoryOwnerLockFilename),
 			WALPath:                  filepath.Join(storeDir, "memory", "appliance", embeddedMemoryDatabaseFilename+"-wal"),
 			SHMPath:                  filepath.Join(storeDir, "memory", "appliance", embeddedMemoryDatabaseFilename+"-shm"),
@@ -190,24 +188,7 @@ func addRecoveryAdvice(result *StoreDiagnostics) {
 	if result == nil {
 		return
 	}
-	var advice []string
-	if result.Memory.OwnerLockState == diagnosticLockHeld {
-		advice = append(advice, "stop the owning Caelis Host before inspecting or restoring embedded Memory")
-	} else if result.Memory.OwnerLockState == diagnosticLockUnknown || result.Memory.OwnerLockFileState == diagnosticStatePresent {
-		advice = append(advice, "do not remove memoryd.lock; verify the owning process before recovery")
-	}
-	if result.Memory.DatabaseState == diagnosticStateMissing || result.Memory.DatabaseState == diagnosticStateInvalid || result.Memory.DatabaseState == diagnosticStateUnreadable {
-		advice = append(advice, "restore embedded Memory from a verified backup or perform an explicit rebuild; startup will not overwrite it")
-	}
-	if result.Memory.DatabaseFormat == diagnosticStateInvalid {
-		advice = append(advice, "the embedded Memory database header is not SQLite; preserve the files and inspect the private service log")
-	}
-	if result.Memory.SchemaState == diagnosticStateUnknown && result.Memory.DatabaseState == diagnosticStatePresent {
-		advice = append(advice, "schema version is unknown without an owner-held Memory inspection; do not run an ad hoc migration")
-	}
-	if result.Memory.RollbackState == diagnosticStatePresent {
-		advice = append(advice, "a Memory rollback image is present; keep it until the restored generation is explicitly verified and committed")
-	}
+	advice := []string{"Core Memory is retired; retained data is not used or migrated by the Host; preserve it for independent recovery"}
 	if result.ControlDatabaseState != diagnosticStatePresent {
 		advice = append(advice, "inspect the Control store before recovery; its absence or unreadable state is not repaired by diagnostics")
 	}

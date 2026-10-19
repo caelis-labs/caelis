@@ -110,8 +110,6 @@ func (m *Model) renderSubagentTitle(width int) string {
 		switch state.bindingHandle {
 		case agentbinding.HandleGuardianScreen:
 			title = "/team › Guardian · Choose classifier"
-		case agentbinding.HandleMemoryVerifier:
-			title = "/team › Memory Steward · Choose verifier"
 		case agentbinding.HandleGuardian:
 			title = "/team › Guardian · Choose model"
 		}

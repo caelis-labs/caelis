@@ -106,7 +106,7 @@ func (b *controlCommandBackend) createProfileSession(ctx context.Context, princi
 
 // applicationSessionWorkspace pins the authenticated application's working
 // directory in the canonical Session. Profile workspace selection does not load
-// CWD instructions or any ambient skill, MCP or Memory configuration.
+// CWD instructions or any ambient skill or MCP configuration.
 func applicationSessionWorkspace(profile sessionprofile.Workspace, storeDir, sessionID string) (session.WorkspaceRef, error) {
 	cwd := profile.CWD
 	if cwd == "" {

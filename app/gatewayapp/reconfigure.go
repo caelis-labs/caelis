@@ -357,12 +357,6 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 		bundle.Close()
 		return nil, err
 	}
-	memoryTools, err := s.buildMemoryTools()
-	if err != nil {
-		bundle.Close()
-		return nil, err
-	}
-	tools = append(tools, memoryTools...)
 	if len(mcpSpecs) > 0 {
 		ranker := newBoundToolSearchRanker(s)
 		tools = append(tools, toolsearch.NewSource(mcpMgr, ranker))

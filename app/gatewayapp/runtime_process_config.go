@@ -5,7 +5,6 @@ import (
 	"sync"
 
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
-	"github.com/caelis-labs/caelis/control/memorybinding"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 )
 
@@ -19,9 +18,6 @@ type runtimeProcessConfigSource struct {
 	sandboxOverride       SandboxConfig
 	childControlURL       string
 	childControlTokenFile string
-	memorySelection       memorybinding.RuntimeSelection
-	memorySelector        MemoryBindingSelector
-	memoryLabelSelector   MemoryLabelSelector
 }
 
 func newRuntimeProcessConfigSource(snapshot sessionRuntimeProcessSnapshot) *runtimeProcessConfigSource {
@@ -30,11 +26,6 @@ func newRuntimeProcessConfigSource(snapshot sessionRuntimeProcessSnapshot) *runt
 		sandboxOverride:       cloneSandboxConfig(snapshot.sandboxOverride),
 		childControlURL:       strings.TrimSpace(snapshot.childControlURL),
 		childControlTokenFile: strings.TrimSpace(snapshot.childControlTokenFile),
-		memorySelection: memorybinding.RuntimeSelection{
-			BindingRef: memorybinding.BindingRef(strings.TrimSpace(string(snapshot.memorySelection.BindingRef))),
-		},
-		memorySelector:      snapshot.memorySelector,
-		memoryLabelSelector: snapshot.memoryLabelSelector,
 	}
 }
 
@@ -49,9 +40,6 @@ func (s *runtimeProcessConfigSource) snapshot() sessionRuntimeProcessSnapshot {
 		sandboxOverride:       cloneSandboxConfig(s.sandboxOverride),
 		childControlURL:       s.childControlURL,
 		childControlTokenFile: s.childControlTokenFile,
-		memorySelection:       s.memorySelection,
-		memorySelector:        s.memorySelector,
-		memoryLabelSelector:   s.memoryLabelSelector,
 	}
 }
 

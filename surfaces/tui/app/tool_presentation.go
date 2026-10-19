@@ -10,7 +10,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/web"
-	"github.com/caelis-labs/caelis/control/memorytool"
 	"github.com/caelis-labs/caelis/surfaces/internal/transcript"
 )
 
@@ -28,8 +27,8 @@ const (
 	surfaceToolWebFetch    = web.FetchToolName
 	surfaceToolSpawn       = spawn.ToolName
 	surfaceToolSendMessage = sendmessage.ToolName
-	surfaceToolRemember    = memorytool.RememberToolName
-	surfaceToolRecall      = memorytool.RecallToolName
+	surfaceToolRemember    = "Remember" // Historical rendering only.
+	surfaceToolRecall      = "Recall"   // Historical rendering only.
 )
 
 type surfaceToolResultStyle uint8

@@ -95,8 +95,7 @@ explicit-profile Session is rejected; use its configuration patch.
 Creation requires `version`, `model`, `tools_version` and `execution`. It may
 supply instructions, callback definitions, selected MCP servers and Skill roots,
 workspace access, permissions, reviewer and process configuration. Explicit
-profiles do not inherit workspace instructions, ambient business tools or
-Workspace Memory. A Bot can provide its private memory through an explicit MCP,
+profiles do not inherit workspace instructions, ambient business tools. A Bot can provide its private memory through an explicit MCP,
 Skill or callback integration. Control still owns history, tools, approvals,
 sandbox policy and recovery.
 
