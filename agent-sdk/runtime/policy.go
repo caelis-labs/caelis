@@ -173,7 +173,9 @@ func (t policyWrappedTool) Call(ctx context.Context, call tool.Call) (tool.Resul
 	}
 	// The Host's MCP source grant is independent of this call's policy. In
 	// particular, a cached source grant cannot satisfy a custom per-call Ask.
-	if tool.IsMCPDefinition(input.Tool) && decision.Action != policy.ActionDeny {
+	// Host-assembled source trust skips only this ordinary source gate.
+	sourceTrusted, _ := input.Tool.Metadata[tool.MetadataMCPSourceTrusted].(bool)
+	if tool.IsMCPDefinition(input.Tool) && !sourceTrusted && decision.Action != policy.ActionDeny {
 		grant, err := mcpGrantFor(input.Tool, t.session)
 		if err != nil {
 			return tool.Result{}, err

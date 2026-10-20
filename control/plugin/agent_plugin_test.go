@@ -32,6 +32,9 @@ func TestAgentPluginLocalUpgradeKeepsManifestIdentityAndData(t *testing.T) {
 		if err != nil || len(contributions.MCPServerSpecs) != 1 {
 			t.Fatalf("v%d contributions = %+v, %v", version, contributions, err)
 		}
+		if !contributions.MCPServerSpecs[0].SourceTrusted {
+			t.Fatalf("v%d Desktop World source lost plugin trust", version)
+		}
 		data := contributions.MCPServerSpecs[0].DataDir
 		if version == 1 {
 			firstData = data

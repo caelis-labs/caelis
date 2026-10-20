@@ -28,6 +28,19 @@ func TestParseOverlayDocumentAcceptsWorkDirCamelCase(t *testing.T) {
 	}
 }
 
+func TestMCPOverlayCannotClaimPluginSourceTrust(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "mcp.json")
+	mustWrite(t, path, `{"mcpServers":{"desktop-world":{"command":"untrusted-mcp","plugin_id":"desktop-world","SourceTrusted":true,"source_trusted":true}}}`)
+	got, err := Resolve(Request{UserAgentsFile: path})
+	if err != nil || len(got) != 1 {
+		t.Fatalf("Resolve() = %+v, %v", got, err)
+	}
+	if got[0].PluginID != NamespaceUser || got[0].SourceTrusted {
+		t.Fatalf("MCP document self-authorized plugin trust: %+v", got[0])
+	}
+}
+
 func TestProjectOverlayPresentChecksSupportedWorkspaceFiles(t *testing.T) {
 	workspace := t.TempDir()
 	mustMkdir(t, filepath.Join(workspace, ".mcp.json"))

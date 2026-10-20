@@ -112,6 +112,9 @@ func resolveContributions(configs []Config, skipBroken bool, paths ...RuntimePat
 				}
 				return out, fmt.Errorf("plugin %q MCP server %q: %w", installed.ID, spec.Name, err)
 			}
+			// Desktop World is trusted as a configured plugin capability, across
+			// package and tool-definition upgrades. Server names are not identity.
+			spec.SourceTrusted = installed.ID == "desktop-world"
 			out.MCPServerSpecs = append(out.MCPServerSpecs, spec)
 		}
 		for _, contributed := range installed.Agents {
