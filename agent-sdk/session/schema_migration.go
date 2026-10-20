@@ -335,6 +335,9 @@ func migrateEventV1ToV2(raw json.RawMessage) (json.RawMessage, error) {
 	if err := json.Unmarshal(raw, &object); err != nil {
 		return nil, err
 	}
+	if err := rejectLegacyEventMedia(raw, object); err != nil {
+		return nil, err
+	}
 	object["schema"] = json.RawMessage(`2`)
 	return json.Marshal(object)
 }

@@ -83,7 +83,7 @@ func eventMediaID(data string) string {
 }
 
 func expandEventMedia(e Event, media map[string]string) (Event, error) {
-	if len(media) > 0 && e.Schema != EventSchemaVersion {
+	if media != nil && e.Schema != EventSchemaVersion {
 		return Event{}, fmt.Errorf("agent-sdk/session: event media requires schema %d", EventSchemaVersion)
 	}
 	for id, data := range media {
@@ -158,6 +158,10 @@ func visitPartMedia(parts []model.Part, visit func(model.MediaSource) (model.Med
 }
 
 func mapReceiptMedia(raw json.RawMessage, kind model.MediaSourceKind, visit func(model.MediaSource) (model.MediaSource, error)) (json.RawMessage, error) {
+	return mapRawMedia(raw, "content", kind, visit)
+}
+
+func mapRawMedia(raw json.RawMessage, contentPath string, kind model.MediaSourceKind, visit func(model.MediaSource) (model.MediaSource, error)) (json.RawMessage, error) {
 	// Inspect only tool content paths, never similarly named application JSON.
 	// gjson/sjson preserve the original receipt's field order, numeric tokens,
 	// unknown fields and escapes; changing them would break full-payload retries.
@@ -212,8 +216,24 @@ func mapReceiptMedia(raw json.RawMessage, kind model.MediaSourceKind, visit func
 		}
 		return nil
 	}
-	if err := walk(gjson.GetBytes(raw, "content"), "content"); err != nil {
+	if err := walk(gjson.GetBytes(raw, contentPath), contentPath); err != nil {
 		return nil, err
 	}
 	return out, nil
+}
+
+// Validate before stamping the new schema: a legacy record cannot acquire
+// permission to use schema-2-only encoding merely by passing through migration.
+func rejectLegacyEventMedia(raw json.RawMessage, object map[string]json.RawMessage) error {
+	if media, ok := object["media"]; ok && !bytes.Equal(bytes.TrimSpace(media), []byte("null")) {
+		return fmt.Errorf("legacy event cannot contain an event media table")
+	}
+	for _, path := range []string{"message.parts", "journal.tool_execution.result.content"} {
+		if _, err := mapRawMedia(raw, path, eventMediaSourceKind, func(source model.MediaSource) (model.MediaSource, error) {
+			return source, fmt.Errorf("legacy event cannot contain an event media reference")
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }

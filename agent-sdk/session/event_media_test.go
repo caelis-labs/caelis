@@ -3,6 +3,7 @@ package session
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -209,5 +210,80 @@ func TestEventMediaSharesNestedJournalOnlyPayloads(t *testing.T) {
 	}
 	if json.Unmarshal(broken, &restored) == nil {
 		t.Fatal("dangling nested journal reference accepted")
+	}
+}
+
+func TestLegacyEventMediaRejectedBeforeMigration(t *testing.T) {
+	event := sharedMediaEvent(t, 8192)
+	packed, err := MarshalEventJSON(&event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, schema := range []int{0, 1} {
+		for _, variant := range []string{"shared", "empty table", "message reference", "receipt reference"} {
+			t.Run(fmt.Sprintf("schema%d/%s", schema, variant), func(t *testing.T) {
+				var root map[string]json.RawMessage
+				if err := json.Unmarshal(packed, &root); err != nil {
+					t.Fatal(err)
+				}
+				root["schema"], _ = json.Marshal(schema)
+				switch variant {
+				case "empty table":
+					root["media"] = json.RawMessage(`{}`)
+					delete(root, "message")
+					delete(root, "journal")
+				case "message reference":
+					delete(root, "media")
+					delete(root, "journal")
+				case "receipt reference":
+					delete(root, "media")
+					delete(root, "message")
+				}
+				raw, err := json.Marshal(root)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := MigrateEventJSON(raw); err == nil {
+					t.Fatal("migration accepted schema-2 media in a legacy record")
+				}
+				var direct Event
+				if json.Unmarshal(raw, &direct) == nil {
+					t.Fatal("direct decoder accepted legacy media")
+				}
+			})
+		}
+	}
+}
+
+func BenchmarkEventMediaEncodeScenarios(b *testing.B) {
+	for _, scenario := range []string{"text", "single", "shared"} {
+		event := sharedMediaEvent(b, 1<<20)
+		switch scenario {
+		case "text":
+			message := model.NewTextMessage(model.RoleAssistant, "ordinary text event")
+			event = Event{Schema: EventSchemaVersion, Message: &message}
+		case "single":
+			event.Journal = nil
+		}
+		for _, packed := range []bool{false, true} {
+			codec := "expanded"
+			if packed {
+				codec = "storage"
+			}
+			b.Run(scenario+"/"+codec, func(b *testing.B) {
+				b.ReportAllocs()
+				for range b.N {
+					var err error
+					if packed {
+						_, err = MarshalEventJSON(&event)
+					} else {
+						_, err = json.Marshal(event)
+					}
+					if err != nil {
+						b.Fatal(err)
+					}
+				}
+			})
+		}
 	}
 }

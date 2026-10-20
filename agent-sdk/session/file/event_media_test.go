@@ -158,11 +158,7 @@ func TestSharedMediaLegacyLogAndMixedAppend(t *testing.T) {
 }
 
 func BenchmarkColdSharedMediaLoad(b *testing.B) {
-	for _, shared := range []bool{false, true} {
-		name := "expanded"
-		if shared {
-			name = "shared"
-		}
+	for _, name := range []string{"legacy_v1", "shared_v2"} {
 		b.Run(name, func(b *testing.B) {
 			store, active, events := newSharedMediaFixture(b, 14)
 			persisted, err := store.AppendEvents(b.Context(), session.AppendEventsRequest{SessionRef: active.SessionRef, Events: events})
@@ -173,9 +169,10 @@ func BenchmarkColdSharedMediaLoad(b *testing.B) {
 			if err != nil {
 				b.Fatal(err)
 			}
-			if !shared {
+			if name == "legacy_v1" {
 				var log bytes.Buffer
 				for _, event := range persisted {
+					event.Schema = 1
 					raw, err := json.Marshal(event)
 					if err != nil {
 						b.Fatal(err)
@@ -238,5 +235,82 @@ func TestSharedMediaCorruptionFailsClosed(t *testing.T) {
 	}
 	if _, err := reopened.EventCheckpoint(t.Context(), active.SessionRef); err == nil {
 		t.Fatal("checkpoint accepted dangling media")
+	}
+}
+
+func TestLegacySharedMediaRejectedByStore(t *testing.T) {
+	for _, target := range []string{"log", "wal"} {
+		for _, table := range []bool{true, false} {
+			t.Run(fmt.Sprintf("%s/table=%t", target, table), func(t *testing.T) {
+				store, active, events := newSharedMediaFixture(t, 1)
+				path, err := store.resolveWritePath(active)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if target == "wal" {
+					store.transactionFault = func(phase string) error {
+						if phase == "after_commit" {
+							return errors.New("committed test interruption")
+						}
+						return nil
+					}
+				}
+				_, err = store.AppendEvents(t.Context(), session.AppendEventsRequest{SessionRef: active.SessionRef, Events: events})
+				if target == "wal" {
+					if !session.IsCommitted(err) {
+						t.Fatalf("expected durable WAL: %v", err)
+					}
+				} else if err != nil {
+					t.Fatal(err)
+				}
+				filename := eventLogPath(path)
+				if target == "wal" {
+					filename = transactionPath(path)
+				}
+				raw, err := os.ReadFile(filename)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var root map[string]json.RawMessage
+				if err := json.Unmarshal(raw, &root); err != nil {
+					t.Fatal(err)
+				}
+				event := root
+				var walEvents []map[string]json.RawMessage
+				if target == "wal" {
+					if err := json.Unmarshal(root["events"], &walEvents); err != nil {
+						t.Fatal(err)
+					}
+					event = walEvents[0]
+				}
+				event["schema"] = json.RawMessage(`1`)
+				if !table {
+					delete(event, "media")
+				}
+				if target == "wal" {
+					root["events"], err = json.Marshal(walEvents)
+					if err != nil {
+						t.Fatal(err)
+					}
+				}
+				broken, err := json.Marshal(root)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filename, append(broken, '\n'), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				reopened := NewStore(Config{RootDir: store.rootDir})
+				if _, err := reopened.LoadSession(t.Context(), session.LoadSessionRequest{SessionRef: active.SessionRef, IncludeTransient: true}); err == nil {
+					t.Fatal("load upgraded invalid legacy media")
+				}
+				if _, err := reopened.EventsPage(t.Context(), session.EventPageRequest{SessionRef: active.SessionRef}); err == nil {
+					t.Fatal("page upgraded invalid legacy media")
+				}
+				if _, err := reopened.EventCheckpoint(t.Context(), active.SessionRef); err == nil {
+					t.Fatal("checkpoint upgraded invalid legacy media")
+				}
+			})
+		}
 	}
 }
