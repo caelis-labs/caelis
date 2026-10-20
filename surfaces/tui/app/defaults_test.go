@@ -24,6 +24,7 @@ func TestDefaultCommandsExposePlatformCoreCommands(t *testing.T) {
 		"new",
 		"resume",
 		"compact",
+		"experimental",
 		"quit",
 	}
 	if !reflect.DeepEqual(got, want) {

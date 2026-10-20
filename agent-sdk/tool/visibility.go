@@ -22,6 +22,8 @@ const (
 // ToolVisibility owns the current model-visible tool set for one run. It keeps
 // deferred-tool policy and tool_search replay interpretation in one place.
 type ToolVisibility struct {
+	retirement           bool
+	exposure             ExposureState
 	tools                []Tool
 	byName               map[string]Tool
 	pendingReplay        []string
@@ -61,6 +63,11 @@ func newToolVisibility(tools []Tool, llm model.LLM) ToolVisibility {
 	}
 	deferMCP := hasToolSearchTool(tools)
 	for _, item := range tools {
+		if item != nil && item.Definition().Name == RetireToolName && item.Definition().Metadata[MetadataToolKind] == retirementKind {
+			visibility.retirement = true
+		}
+	}
+	for _, item := range tools {
 		if item == nil {
 			continue
 		}
@@ -99,6 +106,9 @@ func newToolVisibility(tools []Tool, llm model.LLM) ToolVisibility {
 
 // ApplyToolResult restores visibility changes from one durable tool result.
 func (v *ToolVisibility) ApplyToolResult(name string, output map[string]any) {
+	if v.RetirementEnabled() {
+		return
+	}
 	if name != ToolSearchToolName {
 		return
 	}
@@ -181,6 +191,9 @@ func (v *ToolVisibility) LookupTool(name string) (Tool, bool) {
 		return nil, false
 	}
 	item, ok := v.byName[name]
+	if v.RetirementEnabled() && ((v.deferred[name] && !v.visible[name]) || (name == RetireToolName && v.deferredCount == 0)) {
+		return nil, false
+	}
 	return item, ok
 }
 
@@ -228,7 +241,15 @@ func (v *ToolVisibility) AdmitToolSearchResult(result ToolSearchResult) ToolSear
 		if EstimateToolSearchResultPromptTokens(admitted) <= MaxToolSearchResultPromptTokens {
 			// Commit visibility only after the complete payload that will be sent to
 			// the model and durable history has passed its own budget.
-			return v.commitToolSearchAdmission(admitted, planned)
+			accepted := v.commitToolSearchAdmission(admitted, planned)
+			if v.RetirementEnabled() {
+				for _, item := range result.Tools {
+					if item.Binding != nil && *item.Binding == BindingForDefinition(v.definitions[item.Name]) {
+						v.KeepTool(item.Name)
+					}
+				}
+			}
+			return accepted
 		}
 		if len(planned) == 0 {
 			return failedToolSearchAdmission(admitted)
@@ -294,7 +315,15 @@ func (v *ToolVisibility) planToolSearchAdmission(result ToolSearchResult, maxAcc
 			admitted.Truncated = true
 			continue
 		}
+		if v.RetirementEnabled() && (discovered.Binding == nil || discovered.Binding.Identity == "" || *discovered.Binding != BindingForDefinition(def)) {
+			admitted.OmittedCount++
+			admitted.Truncated = true
+			continue
+		}
 		if visible[name] {
+			if v.RetirementEnabled() {
+				admitted.Tools = append(admitted.Tools, NewToolSearchDiscoveredTool(def))
+			}
 			admitted.AlreadyVisibleCount++
 			continue
 		}
@@ -309,7 +338,11 @@ func (v *ToolVisibility) planToolSearchAdmission(result ToolSearchResult, maxAcc
 			admitted.Truncated = true
 			continue
 		}
-		admitted.Tools = append(admitted.Tools, NewToolSearchDiscoveredTool(def))
+		entry := NewToolSearchDiscoveredTool(def)
+		if !v.RetirementEnabled() {
+			entry.Binding = nil
+		}
+		admitted.Tools = append(admitted.Tools, entry)
 		planned = append(planned, name)
 		visible[name] = true
 		deferredCount++
@@ -361,7 +394,7 @@ func (v ToolVisibility) ModelSpecs() []model.ToolSpec {
 		}
 		def := item.Definition()
 		name := def.Name
-		if name == "" || !v.visible[name] || (v.available != nil && !v.available[name]) {
+		if (v.RetirementEnabled() && name == RetireToolName && v.deferredCount == 0) || name == "" || !v.visible[name] || (v.available != nil && !v.available[name]) {
 			continue
 		}
 		definitions = append(definitions, CloneDefinition(def))
@@ -391,6 +424,7 @@ type ToolSearchResult struct {
 // the registered definitions, not from model-visible discovery results.
 type ToolSearchDiscoveredTool struct {
 	Name     string                      `json:"name,omitempty"`
+	Binding  *Binding                    `json:"binding,omitempty"`
 	Function *ToolSearchFunctionContract `json:"function,omitempty"`
 }
 
@@ -416,9 +450,14 @@ func NewToolSearchResult(definitions []Definition) ToolSearchResult {
 // NewToolSearchDiscoveredTool converts one deferred definition into the
 // tool_search result contract.
 func NewToolSearchDiscoveredTool(def Definition) ToolSearchDiscoveredTool {
-	// The registered definition supplies the callable schema on the next model
-	// request. Persist only its name so history does not repeat that schema.
-	return ToolSearchDiscoveredTool{Name: strings.TrimSpace(def.Name)}
+	// The next request supplies the registered schema. Exact bindings are
+	// included for experimental lifecycle consumers; ordinary admission strips
+	// them to retain its name-only result contract.
+	entry := ToolSearchDiscoveredTool{Name: strings.TrimSpace(def.Name)}
+	if binding := BindingForDefinition(def); binding.Identity != "" {
+		entry.Binding = &binding
+	}
+	return entry
 }
 
 // ParseToolSearchOutput decodes one tool_search output map into the canonical

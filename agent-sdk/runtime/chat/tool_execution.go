@@ -157,6 +157,7 @@ func (a *Agent) executeToolCallAdmitted(
 		a.refreshDeferredTools(visibility)
 	}
 	result = admitToolSearchResult(selectedTool.Definition(), call, result, visibility)
+	result = admitRetirementResult(call, result, visibility)
 	canonical, truncationMeta := canonicalToolResult(result, a.toolResultArtifacts)
 	message := toolResultMessageFromCanonical(call, canonical)
 	eventMeta := truncationMeta

@@ -21,7 +21,7 @@ For Jev, choose **Connect a judgment model** in `/connect`, then `typesafe`,
 the API key, and `jev-1.13.0`. This flow omits conversation-only controls.
 The key uses the same managed credential store as other providers. Judgment
 profiles appear in `/team` and `/disconnect`; they cannot become the main
-Session model, a participant, Reviewer, or Memory Steward.
+Session model, a participant, or Reviewer.
 
 Open `/team` to configure the profiles available for collaboration:
 
@@ -56,8 +56,6 @@ start a conversation:
 | ToolSearch | A restricted selector inherits the Main Agent's resolved provider model when unbound and can consume model tokens when candidates are ready. Bind a separate provider model or Jev judgment to override it. An explicit provider binding retains its effort and Fast setting. Jev scores the scoped name/description catalog; search failures are reported without keyword fallback. |
 | Guardian | Uses a provider model, or the Main Agent model when unbound. An auxiliary classifier selector, labeled `Classifier`, appears on the same row when a judgment model is connected; it is off until selected. |
 | Reviewer | Uses a provider model or ACP agent for the fixed review scene. |
-| Memory Steward | An explicit generation model enables semantic organization. Unbound Memory keeps its durable journal and lexical recall without model calls. |
-| Memory Verifier | An optional judgment model checks Steward proposals for clear semantic conflicts. The `Verifier` selector sits beside Memory Steward on the same row. It requires an enabled Steward and cannot generate or apply Memory changes. |
 
 ToolSearch's private model requests use their own context capacity and do not
 trigger the main Session's compaction watermark. Their provider attempts and
@@ -78,14 +76,16 @@ guessed. The Agent supplies a reason when its review rejects the action.
 Screening uses only user messages and the current approval ticket with its exact
 action. It receives no historical tool observations and never waits for Tasks.
 Diagnostics distinguish input-budget, option-eligibility, provider, and
-inconclusive-judgment fallbacks without recording request content. Changing or disabling screening preserves the Agent model selection. See [Guardian's evidence contract](agent-sdk-boundary.md#guardian-evidence-and-context)
-and [Memory composition](architecture.md#session-runtime-lifecycle).
+inconclusive-judgment fallbacks without recording request content. Changing or disabling screening preserves the Agent model selection. See [Guardian's evidence contract](agent-sdk-boundary.md#guardian-evidence-and-context).
 
 `/team` takes no arguments and opens the configuration overlay. The TUI accepts
 `/subagent` as an alias; completion shows one `/team (subagent)` entry. Likewise,
 `/quit` accepts `/exit` and appears as `/quit (exit)`. Built-in commands take
 precedence over same-name Skills and custom roles. A conflicting role stays in
 configuration with a name-conflict warning; rename it to use its slash command.
+The role name `experimental` is reserved for new role creation. Existing roles,
+bindings and sets with that name remain valid; `/experimental` opens the feature
+editor and the role remains addressable through participant APIs.
 
 The product term **participant** describes the collaboration role; `subagent`
 still names native execution contracts, SDK packages, and existing wire or

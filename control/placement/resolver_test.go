@@ -44,7 +44,6 @@ func TestPurposeForHandleMapsDirectAndSystemInvocations(t *testing.T) {
 		{handle: agentbinding.HandleZenith, want: PurposeDirect},
 		{handle: agentbinding.HandleGuardian, want: PurposeGuardian},
 		{handle: agentbinding.HandleReviewer, want: PurposeReviewer},
-		{handle: agentbinding.HandleSteward, want: PurposeSteward},
 	} {
 		got, err := PurposeForFixedHandle(test.handle)
 		if err != nil || got != test.want {
@@ -139,30 +138,18 @@ func TestUnboundSystemAgentUsesAnEligibleDefaultProfile(t *testing.T) {
 	}
 }
 
-func TestStewardRequiresExplicitProviderBinding(t *testing.T) {
+func TestRetiredMemoryPlacementCannotResolve(t *testing.T) {
 	snapshot := testSnapshot()
-	if _, err := ResolveHandle(snapshot, HandleRequest{Handle: agentbinding.HandleSteward, Purpose: PurposeSteward}); err == nil || !strings.Contains(err.Error(), "not bound") {
-		t.Fatalf("Resolve(unbound Steward) error = %v, want explicit-binding rejection", err)
-	}
-
-	snapshot.Bindings.Bindings = append(snapshot.Bindings.Bindings, agentbinding.Binding{
-		Handle: agentbinding.HandleSteward, ProfileID: "provider:main", Effort: "low",
-	})
-	steward, err := ResolveHandle(snapshot, HandleRequest{Handle: agentbinding.HandleSteward, Purpose: PurposeSteward})
-	if err != nil {
-		t.Fatalf("Resolve(bound Steward) error = %v", err)
-	}
-	if steward.Kind != sdkplacement.KindModel || steward.ProfileID != "provider:main" || steward.ReasoningEffort != "low" {
-		t.Fatalf("Resolve(bound Steward) = %#v", steward)
-	}
-
-	snapshot.Bindings.Bindings[len(snapshot.Bindings.Bindings)-1] = agentbinding.Binding{
-		Handle: agentbinding.HandleSteward, ProfileID: "acp:claude:opus", Effort: "xhigh",
-	}
-	_, err = ResolveHandle(snapshot, HandleRequest{Handle: agentbinding.HandleSteward, Purpose: PurposeSteward})
-	var unsupported *agentbinding.UnsupportedBackendError
-	if !errors.As(err, &unsupported) {
-		t.Fatalf("Resolve(ACP Steward) error = %v, want UnsupportedBackendError", err)
+	for _, handle := range []agentbinding.Handle{"steward", "memory-verifier"} {
+		snapshot.Bindings.Bindings = append(snapshot.Bindings.Bindings, agentbinding.Binding{Handle: handle, ProfileID: "provider:main", Effort: "low"})
+		if _, err := PurposeForFixedHandle(handle); err == nil {
+			t.Fatalf("retired purpose %s resolved", handle)
+		}
+		for _, purpose := range []Purpose{PurposeSteward, PurposeSpawn, PurposeDirect, PurposeGuardian} {
+			if _, err := ResolveHandle(snapshot, HandleRequest{Handle: handle, Purpose: purpose}); err == nil {
+				t.Fatalf("retired handle %s resolved for %s", handle, purpose)
+			}
+		}
 	}
 }
 

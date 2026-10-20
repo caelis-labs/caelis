@@ -40,6 +40,7 @@ type Agent struct {
 	admitModelRequest   func(context.Context, agent.ModelRequestAdmission) error
 	releaseModelRequest func()
 	discoveredTools     []string
+	exposure            *tool.ExposureState
 }
 
 // New returns one concrete chat agent.
@@ -131,15 +132,6 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 		messages := messagesFromContext(ctx)
 		watchdog := newDefaultGenerationWatchdog()
 		visibility := tool.NewToolVisibilityForModel(a.tools, a.model)
-		a.refreshDeferredTools(&visibility)
-		for event := range ctx.Events().All() {
-			if event != nil {
-				visibility.ApplyDiscoveredToolNames(tool.DiscoveredToolNamesFromMetadata(event.Meta))
-			}
-			if event != nil && event.Tool != nil {
-				visibility.ApplyToolResult(event.Tool.Name, event.Tool.Output)
-			}
-		}
 		for {
 			assistantMessage, calls, final, messageID, requestPrefix, ok, err := a.collectCanonicalModelStep(ctx, messages, watchdog, &visibility, func(event *session.Event) bool {
 				return yield(event, nil)
@@ -211,6 +203,7 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 				yield(nil, err)
 				return
 			}
+			a.recordExposure(&visibility, toolEvents)
 			for _, toolEvent := range toolEvents {
 				if toolEvent != nil && toolEvent.Tool != nil {
 					visibility.ApplyToolResult(toolEvent.Tool.Name, toolEvent.Tool.Output)
@@ -252,10 +245,10 @@ func (a *Agent) collectCanonicalModelStep(
 		if err := ctx.Err(); err != nil {
 			return model.Message{}, nil, nil, "", prefixusage.Snapshot{}, true, err
 		}
-		if err := a.refreshModelRequest(ctx, visibility); err != nil {
+		if err := a.refreshModelRequest(ctx); err != nil {
 			return model.Message{}, nil, nil, "", prefixusage.Snapshot{}, true, err
 		}
-		a.refreshDeferredTools(visibility)
+		a.refreshToolVisibility(ctx, visibility)
 		stream := a.request.StreamEnabled(false)
 		messageID := uuid.NewString()
 		request := &model.Request{

@@ -36,12 +36,18 @@ func TestDoctorStartupFailureIncludesReadOnlyStorageDiagnostics(t *testing.T) {
 	text := formatDoctorResult(result)
 	for _, want := range []string{
 		"storage_diagnostics_read_only: true",
+		"memory_retired: true",
 		"memory_database_state: missing",
 		"memory_owner_lock_file_state: present",
 		"recovery_advice:",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("doctor output missing %q:\n%s", want, text)
+		}
+	}
+	for _, obsolete := range []string{"memory_expected_schema_version:", "memory_schema_state:"} {
+		if strings.Contains(text, obsolete) {
+			t.Fatalf("doctor output contains retired schema diagnostic %q:\n%s", obsolete, text)
 		}
 	}
 	raw, err := json.Marshal(result)

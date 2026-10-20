@@ -12,6 +12,7 @@ import (
 // exposed by an AppServer. Presentation surfaces bind a principal once and
 // consume AppServerClients; they do not assemble individual Control services.
 type AppServerServices struct {
+	Experimental   *ExperimentalService
 	Operations     OperationService
 	SubagentInputs *SubagentInputService
 	UIPreferences  *UIPreferencesService
@@ -66,6 +67,7 @@ func (s AppServerServices) Validate() error {
 // presentation surface. Embedded and HTTP transports implement these same
 // interfaces.
 type AppServerClients struct {
+	Experimental   ExperimentalClient
 	Operations     OperationClient
 	SubagentInputs SubagentInputClient
 	UIPreferences  UIPreferencesClient
@@ -140,6 +142,10 @@ func BindAppServerClients(services AppServerServices, principal Principal) (AppS
 		Sessions:       sessions, Participants: participants, Status: status,
 		Configuration: configuration, Agents: agents, Completion: completion, Plugins: plugins,
 		Presentation: presentation, Terminal: terminal, Tasks: tasks,
+	}
+	if services.Experimental != nil {
+		clients.Experimental = &boundExperimentalClient{service: services.Experimental, principal: principal}
+		bound.capabilities = append(bound.capabilities, CapabilityExperimental)
 	}
 	if services.Operations != nil {
 		clients.Operations = &boundOperationClient{service: services.Operations, principal: principal}

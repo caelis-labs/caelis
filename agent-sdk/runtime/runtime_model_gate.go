@@ -13,6 +13,8 @@ import (
 )
 
 type autoCompactDecision struct {
+	Validate         checkpointValidator
+	Release          func()
 	Reason           string
 	Kind             compactionRecoveryKind
 	Usage            compact.UsageSnapshot
@@ -49,9 +51,10 @@ func autoCompactRequired(err error) (autoCompactDecision, bool) {
 }
 
 type autoCompactGatedLLM struct {
-	inner      model.LLM
-	runtime    *Runtime
-	sessionRef session.SessionRef
+	inner            model.LLM
+	runtime          *Runtime
+	sessionRef       session.SessionRef
+	requestAuthority *modelRequestAuthority
 }
 
 type autoCompactGatedSearchLLM struct {
@@ -112,12 +115,27 @@ func (l *autoCompactGatedLLM) Generate(ctx context.Context, req *model.Request) 
 			yield(nil, errors.New("model: llm is nil"))
 			return
 		}
+		request := *l
+		request.requestAuthority = l.runtime.captureRequestAuthority(l.requestAuthority)
+		l := &request
+		if l.requestAuthority != nil {
+			defer l.requestAuthority.drop()
+		}
 		decision, err := l.runtime.autoCompactDecisionBeforeModelRequest(ctx, l.sessionRef, l.inner, req)
 		if err != nil {
 			yield(nil, err)
 			return
-		} else if strings.TrimSpace(decision.Reason) != "" {
-			yield(nil, &autoCompactRequiredError{decision: decision})
+		}
+		hard := strings.TrimSpace(decision.Reason) != ""
+		if adopted, asyncErr := l.asyncCompactBeforeRequest(ctx, req, hard); asyncErr != nil {
+			yield(nil, asyncErr)
+			return
+		} else if adopted {
+			yield(nil, &asyncCompactAdoptedError{})
+			return
+		}
+		if hard {
+			yield(nil, l.compactionRequired(decision, nil))
 			return
 		}
 		l.runtime.rememberCompactionRequest(l.sessionRef, l.inner, req, decision.SourceThroughSeq)
@@ -127,17 +145,17 @@ func (l *autoCompactGatedLLM) Generate(ctx context.Context, req *model.Request) 
 			if err != nil {
 				failed = true
 				if model.IsContextOverflow(err) {
-					yield(nil, &autoCompactRequiredError{decision: autoCompactDecision{
+					yield(nil, l.compactionRequired(autoCompactDecision{
 						Kind: compactionRecoveryKindOverflow, Reason: "model_request_context_overflow",
 						Model: l.inner, Request: model.CloneRequest(req), SourceThroughSeq: decision.SourceThroughSeq,
-					}, cause: err})
+					}, err))
 					return
 				}
 				if decision, compact, decisionErr := l.runtime.autoCompactDecisionAfterModelRequestFailure(ctx, l.sessionRef, l.inner, req, err); decisionErr != nil {
 					yield(nil, decisionErr)
 					return
 				} else if compact {
-					yield(nil, &autoCompactRequiredError{decision: decision})
+					yield(nil, l.compactionRequired(decision, nil))
 					return
 				}
 			}
@@ -159,6 +177,14 @@ func (l *autoCompactGatedLLM) Generate(ctx context.Context, req *model.Request) 
 	}
 }
 
+func (l *autoCompactGatedLLM) compactionRequired(decision autoCompactDecision, cause error) error {
+	if a := l.requestAuthority; a != nil {
+		decision.Validate = a.validate
+		decision.Release = a.retain()
+	}
+	return &autoCompactRequiredError{decision: decision, cause: cause}
+}
+
 func (l *autoCompactGatedSearchLLM) SearchWeb(ctx context.Context, req model.WebSearchRequest) (model.WebSearchResponse, error) {
 	if l == nil || l.autoCompactGatedLLM == nil || l.inner == nil {
 		return model.WebSearchResponse{}, errors.New("model: llm is nil")
@@ -170,7 +196,7 @@ func (l *autoCompactGatedSearchLLM) SearchWeb(ctx context.Context, req model.Web
 	return searcher.SearchWeb(ctx, req)
 }
 
-func (r *Runtime) wrapModelForAutoCompaction(ref session.SessionRef, llm model.LLM) model.LLM {
+func (r *Runtime) wrapModelForAutoCompaction(ref session.SessionRef, llm model.LLM, authority *modelRequestAuthority) model.LLM {
 	if r == nil || llm == nil || !r.compaction.Enabled {
 		return llm
 	}
@@ -182,9 +208,10 @@ func (r *Runtime) wrapModelForAutoCompaction(ref session.SessionRef, llm model.L
 		return llm
 	}
 	wrapped := &autoCompactGatedLLM{
-		inner:      llm,
-		runtime:    r,
-		sessionRef: session.NormalizeSessionRef(ref),
+		inner:            llm,
+		runtime:          r,
+		sessionRef:       session.NormalizeSessionRef(ref),
+		requestAuthority: authority,
 	}
 	if _, ok := llm.(model.WebSearcher); ok {
 		return &autoCompactGatedSearchLLM{autoCompactGatedLLM: wrapped}

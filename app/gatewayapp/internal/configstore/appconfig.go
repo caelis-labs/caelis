@@ -1,15 +1,15 @@
 package configstore
 
 import (
-	"errors"
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"strings"
 
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
+	"github.com/caelis-labs/caelis/control/experimental"
 	"github.com/caelis-labs/caelis/control/mcpconfig"
-	"github.com/caelis-labs/caelis/control/memorybinding"
 	"github.com/caelis-labs/caelis/control/modelcatalog"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/control/modelprofile"
@@ -22,57 +22,27 @@ import (
 // and one handle-binding table.
 const SchemaVersionV2 = 2
 
-type invalidMemoryConfigurationError struct {
-	err error
-}
-
-func (e *invalidMemoryConfigurationError) Error() string {
-	if e == nil || e.err == nil {
-		return "gatewayapp: invalid Memory binding"
-	}
-	return "gatewayapp: invalid Memory binding: " + e.err.Error()
-}
-
-func (e *invalidMemoryConfigurationError) Unwrap() error {
-	if e == nil {
-		return nil
-	}
-	return e.err
-}
-
-// isInvalidMemoryConfiguration reports whether AppConfig loading failed at the
-// Memory binding boundary. Callers use it only for a fixed, secret-free product
-// diagnostic and must not persist the wrapped detail.
-func isInvalidMemoryConfiguration(err error) bool {
-	var invalid *invalidMemoryConfigurationError
-	return errors.As(err, &invalid)
-}
-
-func wrapInvalidMemoryConfiguration(err error) error {
-	if err == nil || isInvalidMemoryConfiguration(err) {
-		return err
-	}
-	return &invalidMemoryConfigurationError{err: err}
-}
-
 // AppConfig is the current persisted application configuration. Retired roster,
 // delegation, and system-Agent fields exist only in the private legacy wire
 // document used by the one-way migration.
 type AppConfig struct {
-	UI                    uipreferences.Preferences    `json:"ui,omitzero"`
-	SchemaVersion         int                          `json:"schema_version"`
-	ConfigurationRevision uint64                       `json:"configuration_revision,omitempty"`
-	Models                PersistedModelConfig         `json:"models,omitempty"`
-	ExternalAgents        controlagents.Configuration  `json:"external_agents,omitempty"`
-	ModelProfiles         modelprofile.Configuration   `json:"model_profiles,omitempty"`
-	AgentBindings         agentbinding.Configuration   `json:"agent_bindings,omitempty"`
-	Sandbox               SandboxConfig                `json:"sandbox,omitempty"`
-	Runtime               RuntimeConfig                `json:"runtime,omitempty"`
-	Plugins               []PluginConfig               `json:"plugins,omitempty"`
-	PluginMarketplaces    []MarketplaceConfig          `json:"plugin_marketplaces,omitempty"`
-	MCPServers            mcpconfig.Servers            `json:"mcp_servers,omitempty"`
-	Memory                memorybinding.Configuration  `json:"memory,omitzero"`
-	WorkspaceTrust        workspacetrust.Configuration `json:"workspace_trust,omitempty"`
+	Experimental          experimental.Values         `json:"experimental,omitempty"`
+	UI                    uipreferences.Preferences   `json:"ui,omitzero"`
+	SchemaVersion         int                         `json:"schema_version"`
+	ConfigurationRevision uint64                      `json:"configuration_revision,omitempty"`
+	Models                PersistedModelConfig        `json:"models,omitempty"`
+	ExternalAgents        controlagents.Configuration `json:"external_agents,omitempty"`
+	ModelProfiles         modelprofile.Configuration  `json:"model_profiles,omitempty"`
+	AgentBindings         agentbinding.Configuration  `json:"agent_bindings,omitempty"`
+	Sandbox               SandboxConfig               `json:"sandbox,omitempty"`
+	Runtime               RuntimeConfig               `json:"runtime,omitempty"`
+	Plugins               []PluginConfig              `json:"plugins,omitempty"`
+	PluginMarketplaces    []MarketplaceConfig         `json:"plugin_marketplaces,omitempty"`
+	MCPServers            mcpconfig.Servers           `json:"mcp_servers,omitempty"`
+	// Memory preserves retired configuration without interpreting or activating it.
+	// Remove when the supported configuration floor excludes Memory writers.
+	Memory         json.RawMessage              `json:"memory,omitempty"`
+	WorkspaceTrust workspacetrust.Configuration `json:"workspace_trust,omitempty"`
 }
 
 // Validate checks the current persisted truth without reconstructing legacy
@@ -82,13 +52,16 @@ func Validate(doc AppConfig) error {
 }
 
 // validateForLoad keeps optional, already-persisted MCP entries from making the
-// Host unavailable. Identity, trust, Memory, and security configuration stay
+// Host unavailable. Identity, trust, and security configuration stay
 // strict; new writes still use Validate.
 func validateForLoad(doc AppConfig) error {
 	return validate(doc, false)
 }
 
 func validate(doc AppConfig, validateMCP bool) error {
+	if err := experimental.Validate(doc.Experimental); err != nil {
+		return err
+	}
 	if err := doc.UI.Validate(); err != nil {
 		return fmt.Errorf("gatewayapp: invalid UI preferences: %w", err)
 	}
@@ -122,9 +95,6 @@ func validate(doc AppConfig, validateMCP bool) error {
 		if err := mcpconfig.Validate(doc.MCPServers); err != nil {
 			return fmt.Errorf("gatewayapp: invalid MCP servers: %w", err)
 		}
-	}
-	if err := memorybinding.Validate(doc.Memory); err != nil {
-		return &invalidMemoryConfigurationError{err: err}
 	}
 	if err := workspacetrust.Validate(doc.WorkspaceTrust); err != nil {
 		return fmt.Errorf("gatewayapp: invalid workspace trust: %w", err)
@@ -210,7 +180,7 @@ func Normalize(doc AppConfig) AppConfig {
 	doc.Plugins = plugin.DedupeConfigs(doc.Plugins)
 	doc.PluginMarketplaces = plugin.DedupeMarketplaceConfigs(doc.PluginMarketplaces)
 	doc.MCPServers = mcpconfig.Normalize(doc.MCPServers)
-	doc.Memory = memorybinding.Normalize(doc.Memory)
+	doc.Memory = append(json.RawMessage(nil), doc.Memory...)
 	doc.WorkspaceTrust = workspacetrust.Normalize(doc.WorkspaceTrust)
 	return doc
 }
@@ -346,6 +316,9 @@ func validateCurrentRecordIdentities(doc AppConfig) error {
 	bindingHandles := make(map[string]struct{}, len(doc.AgentBindings.Bindings))
 	for _, raw := range doc.AgentBindings.Bindings {
 		handle := string(agentbinding.NormalizeHandle(raw.Handle))
+		if agentbinding.IsRetired(raw.Handle) {
+			continue
+		}
 		if handle != "" && recordIdentityExists(bindingHandles, handle) {
 			return fmt.Errorf("gatewayapp: duplicate Agent binding for handle %q", handle)
 		}
@@ -373,9 +346,6 @@ func validateCurrentRecordIdentities(doc AppConfig) error {
 	}
 	if err := mcpconfig.ValidateIdentities(doc.MCPServers); err != nil {
 		return fmt.Errorf("gatewayapp: invalid MCP servers: %w", err)
-	}
-	if err := memorybinding.ValidateIdentities(doc.Memory); err != nil {
-		return &invalidMemoryConfigurationError{err: err}
 	}
 	if err := workspacetrust.ValidateIdentities(doc.WorkspaceTrust); err != nil {
 		return fmt.Errorf("gatewayapp: invalid workspace trust: %w", err)

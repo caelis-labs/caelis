@@ -9,6 +9,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
 func (r *Runtime) prepareInvocationContext(
@@ -42,7 +43,7 @@ func (r *Runtime) prepareInvocationContext(
 		// Its ordinary watermark gate owns proactive compaction; a stale Turn
 		// bootstrap must not compact history before that snapshot is resolved.
 		return invocationContext{
-			PromptEvents: promptEventsWithToolVisibilityMetadata(compact.PromptEventsFromLatestCompact(events), events),
+			PromptEvents: promptEventsWithToolVisibilityMetadata(compact.PromptEventsFromLatestCompact(events), events, r.toolRetirement),
 			State:        state,
 		}, nil
 	}
@@ -50,6 +51,7 @@ func (r *Runtime) prepareInvocationContext(
 	if err != nil {
 		return invocationContext{}, err
 	}
+	ctx = r.staticCheckpointContext(ctx, req.AgentSpec.DeferredTools)
 	records := &compactionInvocations{}
 	compactCtx := records.context(r.withCompactActivity(ctx, loaded.Session, turnID, sink))
 	result, err := r.compactor.Prepare(compactCtx, compact.Request{
@@ -73,13 +75,13 @@ func (r *Runtime) prepareInvocationContext(
 		}
 		sourceEvents := append(session.CloneEvents(events), persisted)
 		return invocationContext{
-			PromptEvents: promptEventsWithToolVisibilityMetadata(compact.PromptEventsFromLatestCompact(sourceEvents), sourceEvents),
+			PromptEvents: promptEventsWithToolVisibilityMetadata(compact.PromptEventsFromLatestCompact(sourceEvents), sourceEvents, r.toolRetirement),
 			State:        state,
 			LiveCompact:  persisted,
 		}, nil
 	}
 	return invocationContext{
-		PromptEvents: promptEventsWithToolVisibilityMetadata(result.PromptEvents, events),
+		PromptEvents: promptEventsWithToolVisibilityMetadata(result.PromptEvents, events, r.toolRetirement),
 		State:        state,
 	}, nil
 }
@@ -91,6 +93,11 @@ type invocationContext struct {
 }
 
 type CompactRequest struct {
+	// DeferredTools supplies the catalog identity protected during this checkpoint.
+	DeferredTools tool.Source
+	// Validate holds the caller snapshot authority through the checkpoint append.
+	// It must not admit requests or hold guards during summary generation.
+	Validate   func(context.Context) (func(), error)
 	SessionRef session.SessionRef
 	// ExpectedRevision is checked after this compaction is admitted to the
 	// Runtime's Session write queue. Nil accepts the latest admitted revision.
@@ -113,6 +120,8 @@ func (r *Runtime) Compact(ctx context.Context, req CompactRequest) (CompactResul
 	if r == nil {
 		return CompactResult{}, errors.New("agent-sdk/runtime: runtime is unavailable")
 	}
+	snapshot := r.withMCPCheckpointAuthority(agent.ModelRequestSnapshot{Revision: "manual", DeferredTools: req.DeferredTools, Validate: req.Validate})
+	ctx = context.WithValue(ctx, checkpointValidationKey{}, snapshot.Validate)
 	ref := session.NormalizeSessionRef(req.SessionRef)
 	if err := r.recoverRuntimeState(ctx, ref); err != nil {
 		return CompactResult{}, err

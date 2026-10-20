@@ -89,6 +89,7 @@ func runTUI(
 		RenderFPS:           envInt("CAELIS_TUI_RENDER_FPS", 0),
 		NoAnimation:         options.NoAnimation,
 		SubagentInputs:      clients.SubagentInputs, UIPreferences: clients.UIPreferences,
+		Experimental: clients.Experimental, ExperimentalInitialize: clients.Sessions.Initialize,
 		TaskStreams: clients.Tasks,
 		OnStart: func() {
 			startTUISandboxRefresh(programCtx, typedDriver)

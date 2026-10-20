@@ -92,7 +92,7 @@ func knownWireFields(raw []byte, target any) ([]byte, error) {
 		*appserver.UseModelRequest,
 		*appserver.WorkspaceTrustRequest,
 		*appserver.CreateSessionRequest, *appserver.CloseSessionRequest,
-		*appserver.CompactSessionRequest,
+		*appserver.CompactSessionRequest, *appserver.RefreshMCPToolsRequest,
 		*appserver.PromptRequest, *appserver.SteerRequest, *appserver.CancelRequest,
 		*appserver.ResolveApprovalRequest,
 		*appserver.SessionResourceRequest,

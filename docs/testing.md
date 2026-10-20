@@ -91,8 +91,7 @@ atomic replacement, WAL recovery, Host persistence and replacement, client
 reconnection, updater handoff, and clipboard behavior. Small platform owners run
 their full tests; larger packages use selectors in `scripts/windows_check.sh`
 that fail if no tests match. Implicit vet remains enabled. Tests use at most two
-packages concurrently with a five-minute package timeout. A build of all packages
-and embedded Memory Open use `CGO_ENABLED=0`, matching the release configuration.
+packages concurrently with a five-minute package timeout. A build of all packages uses `CGO_ENABLED=0`, matching the release configuration.
 
 The gate also enables `CAELIS_TEST_APPLICATION_NATIVE=1` for application and
 shared Worker HTTP acceptance: native file/PowerShell effects, resource transfer,
@@ -133,12 +132,47 @@ compaction watermark while retaining admission and durable usage receipts.
 Application fixtures cover a consistent activation model catalog and explicit
 ToolSearch Fast/standard provider request encoding.
 
+Async compaction is a default-off experiment with SDK and Control opt-ins. Embedders enable it on
+an isolated Runtime with `Compaction.Enabled = true` and
+`Compaction.Async.Enabled = true`; setting `Async.Enabled = false` on the next
+Runtime disables it. `Async.StartRatio` defaults to 0.65 of the raw, explicitly
+known model context window. Unknown windows and thresholds at or above the
+synchronous watermark do not speculate. The current conservative limit is one
+candidate per Turn. Custom compactors used with this option must support
+`compact.ForceEngine` and concurrent generation. Hosts must retain their ordinary
+Runner completion/fence discipline; no product configuration migration is needed.
+Dynamic resolvers must supply `ModelRequestSnapshot.Validate`, a side-effect-free
+check of current revision, full catalog identity, and execution authority. Without
+it speculation is disabled. Its returned guard must hold those identities current
+through the short checkpoint commit and serialize with configuration/catalog
+updates; a point-in-time read is insufficient. Adoption never uses `Admit` to fabricate a dispatched
+request. The product Host defaults this experiment off and exposes an explicit
+[configuration API](experimental-features.md).
+
+```sh
+go test ./agent-sdk/runtime -run '^TestAsyncCompaction' -count=1 -v
+go test -race ./agent-sdk/runtime -run '^TestAsyncCompaction' -count=1
+go test ./agent-sdk/runtime -run '^TestAsyncCompactionFixtureMeasurement$' -count=1 -v
+CAELIS_ASYNC_LIVE=1 go test ./agent-sdk/runtime -run '^TestAsyncCompactionLiveProvider$' -count=1 -v
+```
+
+The live test requires `DEEPSEEK_API_KEY` and uses the existing DeepSeek adapter
+with `deepseek-flash`. It sends only synthetic repository fixtures, uses a
+temporary file Store and inert tools, and never opens production Sessions or
+changes user configuration. Candidate generation and the original/compacted
+semantic probes use the real provider; foreground tool steps and the 10k trigger
+window are synthetic. Its assertions establish adoption, not semantic equivalence;
+compare the reported probe answers separately. Provider token/cache receipts are
+reported without inventing unavailable monetary prices. Set
+`CAELIS_ASYNC_POC_REPORT` to an absolute output path to save the JSON measurement.
+The fixture comparison inserts 300 ms of generation delay and reports synthetic
+usage; its timings are scheduling evidence, not a provider benchmark.
+
 The following Jev evaluations are opt-in and send only repository synthetic fixtures. Set
 `JEV_API_KEY` in the test process environment and run the scenarios in order:
 
 ```bash
 CAELIS_JEV_EVAL=1 go test ./agent-sdk/tool/builtin/toolsearch -run '^TestToolSearchJevEvaluation$' -count=1 -v
-CAELIS_JEV_EVAL=1 go test ./app/gatewayapp -run '^TestMemoryJevEvaluation$' -count=1 -v
 ```
 
 These tests report outcomes, token counts and elapsed time. A passing test means
@@ -200,8 +234,7 @@ adds cost without improving unrelated changes:
 | SDK dependencies or supported imports | `make sdk-boundary-check` |
 | Runtime, Control, projection, or physical TUI contracts | `make product-acceptance` |
 | Broad TUI, command, or ACP integration | `make regression` |
-| In-process Host or built-in Memory composition | `make startup-performance` |
-| Native Windows Host Memory Open | `go test ./app/gatewayapp/internal/memoryhost -run TestEmbeddedHostBindsSDKClient` |
+| In-process Host composition | `make startup-performance` |
 | Managed Host lifecycle or process ownership | `go test -race ./internal/servicelifecycle ./internal/cli` |
 | Maintained documentation links | `make docs-links` |
 | npm launcher or package handoff | `npm --prefix npm test` |
@@ -336,3 +369,63 @@ selection; a locally stamped acceptance build is not a published artifact.
 Evidence records all binary hashes and reported versions. No daily Store or
 provider credential is used. Fixture tests additionally cover detached commands,
 concurrent replacement and explicit-stop/instance fences.
+
+## Experimental MCP tool lifecycle
+
+The SDK switches in [MCP tool lifecycle](mcp-tool-lifecycle.md) default off in
+product assembly and have explicit [Control opt-ins](experimental-features.md).
+These tests use temporary Stores and synthetic model responses;
+no user configuration, credentials, or production Session is needed.
+
+```bash
+GOWORK=off go test ./agent-sdk/tool/mcp -run '^TestCatalog' -count=1 -v
+GOWORK=off go test ./agent-sdk/runtime ./agent-sdk/tool -run 'Test(Retirement|MCPRevocation|MCPRetirement)' -count=1 -v
+GOWORK=off go test ./agent-sdk/model/providers -run '^TestRetirementProvider' -count=1 -v
+```
+
+Catalog tests bind ephemeral loopback HTTP ports, exercise both legacy and
+2026-07-28 subscriptions, and test notification coalescing, pagination races,
+failure retention, schema changes, collision ownership, revocation and reconnect.
+The Runtime test starts a real stdio MCP child process and verifies two exact
+local receipt-file effects, approval, marking, durable compaction, full model
+request reconstruction from a fresh file Store, and rediscovery. Fault tests
+cover pending calls/model batches, cancellation and checkpoint write outcomes.
+Snapshot tests cover the directory and grant guards through an actual checkpoint
+write, identity changes before/after that critical section, and rejection of
+generated checkpoints without canonical identity/coverage. Joint scheduler tests use that real stdio server with a blocked synthetic summary,
+late marks/use, accepted CAS tails, and failed or unknown checkpoint writes:
+
+```bash
+GOWORK=off go test ./agent-sdk/runtime -run '^TestExperimentalAsyncMCPJointCheckpoint$' -count=1 -v
+GOWORK=off go test ./app/gatewayapp ./surfaces/tui/app -run 'TestExperimental|TestProductExperimental' -count=1 -v
+GOWORK=off go test -race ./agent-sdk/runtime ./agent-sdk/tool/mcp ./control/sessionprofile -run 'TestExperimental|TestAsyncCompaction|TestCatalog|TestMCP|TestConfigurationCheckpoint' -count=1
+```
+
+Host tests cover all eight independent configuration combinations, desired versus
+active Runtime values, HTTP operation receipts and CAS. Runtime workflows run
+all eight combinations against a loopback MCP server for static and resolved
+requests, including schema replacement, discovery, execution, checkpoint,
+retirement-off reactivation and full file-Store model-context replay. Additional
+regressions cover delayed directory readiness, stable server failures, async
+Turn-start budgets, catalog changes during generation and repeated healthy
+recovery cycles. The Host retry test exercises failed listing followed by an
+authorized HTTP retry without another notification, dormant/disabled rejection,
+Session CAS and operation-receipt deduplication. Product TUI tests verify
+persistence across Host reconstruction, server capability negotiation, keyboard
+staging, original-request retry and full terminal frames at two widths.
+`TestExperimentalRenderedGoldenAndTerminal` owns the checkbox render goldens;
+`UPDATE_GOLDEN=1` refreshes them for intentional visible changes. The summary and
+foreground model responses are deterministic fixtures, not semantic-quality or
+cache-billing evidence.
+
+The longer deterministic experiment is opt-in and takes several minutes:
+
+```bash
+CAELIS_MCP_RETIREMENT_EXPERIMENT=1 GOWORK=off go test ./agent-sdk/runtime -run '^TestRetirementLongSessionPrefixExperiment$' -timeout 8m -count=1 -v
+```
+
+It runs 80 turns with a checkpoint every 16 turns, comparing ordinary discovery
+and explicit retirement. It reports schema counts, unique admitted tools and
+local prefix token estimates. Provider tests compare serialized tools bytes before
+marking and after retirement. Neither experiment measures real provider cache
+hits, token billing, model selection quality or semantic retention.

@@ -41,6 +41,28 @@ func (s *requestSnapshotSource) resolve(context.Context) (agent.ModelRequestSnap
 	s.mu.Unlock()
 	s.resolved.Add(1)
 	revision := snapshot.Revision
+	snapshot.Validate = func(ctx context.Context) (func(), error) {
+		s.mu.Lock()
+		if s.current.Revision != revision {
+			s.mu.Unlock()
+			return nil, agent.ErrModelRequestSnapshotStale
+		}
+		var release func()
+		if s.current.Validate != nil {
+			var err error
+			release, err = s.current.Validate(ctx)
+			if err != nil {
+				s.mu.Unlock()
+				return nil, err
+			}
+		}
+		return func() {
+			if release != nil {
+				release()
+			}
+			s.mu.Unlock()
+		}, nil
+	}
 	snapshot.Admit = func(_ context.Context, admission agent.ModelRequestAdmission) error {
 		s.mu.Lock()
 		defer s.mu.Unlock()

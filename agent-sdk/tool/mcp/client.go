@@ -33,9 +33,13 @@ type Client struct {
 	launchIdentity string
 	cancel         context.CancelFunc
 
-	closeOnce sync.Once
-	closed    chan struct{}
-	closeErr  error
+	catalog *clientCatalog
+
+	// identityMu protects publication of connection loss even without refresh.
+	identityMu sync.Mutex
+	closeOnce  sync.Once
+	closed     chan struct{}
+	closeErr   error
 }
 
 func resolveExecutable(command string, workDir string) string {
@@ -56,17 +60,43 @@ func StartClient(ctx context.Context, spec ServerSpec) (*Client, error) {
 }
 
 func startClientWithHTTPClient(ctx context.Context, spec ServerSpec, httpClient *http.Client) (*Client, error) {
+	return startClientWithCatalog(ctx, spec, httpClient, false)
+}
+
+func startClientWithCatalog(ctx context.Context, spec ServerSpec, httpClient *http.Client, refresh bool) (*Client, error) {
 	transport, transportName, launchIdentity, err := transportForSpecWithIdentity(spec, httpClient)
 	if err != nil {
 		return nil, err
+	}
+	var catalog *clientCatalog
+	options := &mcpsdk.ClientOptions{Capabilities: &mcpsdk.ClientCapabilities{}}
+	if refresh {
+		catalog = newClientCatalog()
+		options.ToolListChangedHandler = func(context.Context, *mcpsdk.ToolListChangedRequest) { catalog.invalidate() }
+		if httpTransport, ok := transport.(*mcpsdk.StreamableClientTransport); ok {
+			httpTransport.DisableStandaloneSSE = false
+		}
 	}
 	client := mcpsdk.NewClient(&mcpsdk.Implementation{
 		Name:    "caelis",
 		Title:   "Caelis",
 		Version: "1.0.0",
-	}, &mcpsdk.ClientOptions{
-		Capabilities: &mcpsdk.ClientCapabilities{},
-	})
+	}, options)
+	if refresh {
+		// The manager is the catalog owner. A late page must not repopulate the
+		// SDK's independent TTL cache after list_changed invalidated that cache.
+		client.AddSendingMiddleware(func(next mcpsdk.MethodHandler) mcpsdk.MethodHandler {
+			return func(ctx context.Context, method string, req mcpsdk.Request) (mcpsdk.Result, error) {
+				result, err := next(ctx, method, req)
+				if method == "tools/list" {
+					if listed, ok := result.(*mcpsdk.ListToolsResult); ok && listed != nil {
+						listed.TTLMs = 0
+					}
+				}
+				return result, err
+			}
+		})
+	}
 	lifetimeCtx, cancel := context.WithCancel(context.Background())
 	session, err := connectWithTimeout(ctx, client, lifetimeCtx, cancel, transport, DefaultStartupTimeout)
 	if err != nil {
@@ -75,6 +105,7 @@ func startClientWithHTTPClient(ctx context.Context, spec ServerSpec, httpClient 
 	}
 	connected := &Client{
 		spec:           spec,
+		catalog:        catalog,
 		session:        session,
 		transport:      transportName,
 		launchIdentity: launchIdentity,
@@ -391,21 +422,44 @@ func (c *Client) ListTools(ctx context.Context) ([]*mcpsdk.Tool, error) {
 	}
 	var out []*mcpsdk.Tool
 	var cursor string
-	for {
+	seenCursors := map[string]bool{}
+	seenNames := map[string]bool{}
+	for page := 0; ; page++ {
+		if page >= 4096 {
+			return nil, errors.New("MCP tool listing exceeded page limit")
+		}
 		var params *mcpsdk.ListToolsParams
 		if cursor != "" {
 			params = &mcpsdk.ListToolsParams{Cursor: cursor}
 		}
 		res, err := c.session.ListTools(ctx, params)
 		if err != nil {
-			c.markFailed(err)
+			if c.catalog == nil {
+				c.markFailed(err)
+			}
 			return nil, err
 		}
+		if res == nil {
+			return nil, errors.New("MCP tool listing returned no result")
+		}
+		for _, item := range res.Tools {
+			if item == nil {
+				continue
+			}
+			if seenNames[item.Name] {
+				return nil, fmt.Errorf("duplicate MCP tool in paginated listing: %q", item.Name)
+			}
+			seenNames[item.Name] = true
+		}
 		out = append(out, res.Tools...)
-		cursor = strings.TrimSpace(res.NextCursor)
+		cursor = res.NextCursor
 		if cursor == "" {
 			break
 		}
+		if seenCursors[cursor] {
+			return nil, errors.New("MCP tool listing repeated cursor")
+		}
+		seenCursors[cursor] = true
 	}
 	return out, nil
 }
@@ -433,12 +487,11 @@ func (c *Client) Close() error {
 		if c.session != nil {
 			closeErr = c.session.Close()
 		}
-		if closeErr != nil {
-			c.closeErr = closeErr
+		if closeErr == nil {
+			c.publishClosed(errors.New("closed"))
 		} else {
-			c.closeErr = errors.New("closed")
+			c.publishClosed(closeErr)
 		}
-		close(c.closed)
 	})
 	return closeErr
 }
@@ -460,13 +513,25 @@ func (c *Client) markFailed(err error) {
 		return
 	}
 	c.closeOnce.Do(func() {
-		c.closeErr = err
 		if c.cancel != nil {
 			c.cancel()
 		}
 		if c.session != nil {
 			_ = c.session.Close()
 		}
-		close(c.closed)
+		c.publishClosed(err)
 	})
+}
+
+// Publish only the local identity transition under the catalog guard; transport
+// cleanup must never hold it. A closed remote transport already rejects calls.
+func (c *Client) publishClosed(err error) {
+	if c.catalog != nil {
+		c.catalog.mu.Lock()
+		defer c.catalog.mu.Unlock()
+	}
+	c.identityMu.Lock()
+	defer c.identityMu.Unlock()
+	c.closeErr = err
+	close(c.closed)
 }

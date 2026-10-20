@@ -165,7 +165,7 @@ profile default in `SessionDefaults`, or inherits the backend default when none
 is configured;
 `standard` and `fast` are explicit selections. Binding sets retain that choice.
 Host and Session model commands retain their explicit Fast boolean: false selects
-standard on a capable profile. Guardian and Steward remain provider-only.
+standard on a capable profile. Guardian remains provider-only.
 
 The Codex adapter reads `model/list.serviceTiers` and `defaultServiceTier` and
 publishes `service_tier`. Every catalog-known model exposes the protocol baseline

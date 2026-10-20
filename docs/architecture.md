@@ -35,6 +35,7 @@ uses them.
 - [Participants](participants.md) owns user-facing collaboration setup and workspace controls.
 - [Session profiles](session-profiles.md) owns explicit Session profiles, revisioned configuration, background grants, callback
   receipts, resources, and the legacy Bot Mode removal.
+- [Experimental features](experimental-features.md) owns the opt-in catalog, Host defaults, activation readback and TUI/API configuration.
 - [Execution Configuration](execution-configuration.md) owns native process
   environment and shell assembly, creation-bound scope, and restart defaults.
 - [Shared Workers](shared-workers.md) owns ordinary native Session creation,
@@ -62,7 +63,6 @@ and acceptance history belong in Git and CI, not in this map.
 | `control/modelcatalog`, `modelconfig`, `modelprofile`, `placement`, `agentbinding` | Provider and model discovery, credentials/configuration, selectable profiles, placement, and fixed Agent bindings |
 | `control/agents` | External ACP Agent identity, preparation, connection, and configuration |
 | `control/sessionprofile` | Explicit Session execution profiles, revisioned desired configuration, MCP/Skill selection, background activation grants, native callback receipts and immutable resources; common command admission/receipts remain with `control/appserver` |
-| `control/memorybinding` | Opaque host-selected Memory binding references, Runtime actor and audience delegation, and immutable logical snapshots |
 | `control/collaboration` | Session-scoped participant discovery, public-result observation, shared messages and reader positions, mailboxes, collaborator prompt slices, and expiring external grants |
 | `control/mcpconfig`, `control/plugin`, `control/status` | MCP assembly inputs, plugin lifecycle, and product status read models |
 | `app/controlserver` | Authenticated HTTP/SSE Host listener, policy, readiness, and drain |
@@ -146,77 +146,10 @@ affect later activations. Explicit provider or ACP-Agent removal is the narrow
 revocation exception: Control removes the profile from live placement and repairs
 affected Session bindings so later work cannot resolve a deleted endpoint.
 
-Memory is a default-enabled built-in Host capability. Process composition
-synchronously opens the imported `github.com/caelis-labs/memory/appliance` Go
-package and applies its schema migrations. Successful Host construction means
-Memory is available; there is no independent install, process, endpoint,
-readiness, compatibility handshake, or degraded Host state. First Host startup
-atomically provisions one private Identity, Space, View, Grant, issuer
-credential, and default binding. These are internal topology and authority
-records, not setup fields. On every later startup, Host construction validates
-each configured credential and its complete Grant-backed Runtime authority,
-including the exact expected View, through Memory's side-effect-free validation
-API. Validation issues no bearer and persists no capability state.
-
-Memory then follows the same activation boundary. Control selects one opaque
-`BindingRef` internally, then detaches only that binding's Runtime actor,
-principal, issuer reference, View, Grant, single `private` or
-`shared` audience, and binding version. Caelis additionally derives one mandatory
-opaque Label from the canonical workspace CWD by SHA-256. The exact LabelSet is
-bound into each issued capability, so identical terms from different workspaces
-cannot cross Recall, receipt, or consistency-cursor boundaries. Raw workspace
-paths and labels never enter the model-visible tool schema or result.
-
-The activated Runtime does not retain the complete binding catalog or any
-downstream product identity. A future product layer may map a user, tenant,
-or another concept to a `BindingRef` or append opaque labels through the
-embedding-only selector; Memory still sees neither those product concepts nor
-their semantics. The mandatory workspace label cannot be removed by that
-extension. Later binding changes affect new Sessions, never a Session that has
-already admitted Memory authority. A new canonical Session that admits Memory
-pins its complete non-secret delegation and LabelSet at creation.
-[Explicit-profile Sessions](session-profiles.md) do not select or admit Workspace
-Memory authority.
-A Session created before Memory was enabled is pinned before its first Memory call
-under the Runtime fence. Public or mixed-audience Runtime composition is invalid.
-
-The current Session pin includes binding, actor, principal, issuer reference,
-audience, View, Grant, binding version, and the canonical LabelSet. Existing
-version-4 pins retain their exact LabelSet across Host upgrades; selection must
-first match every other authority field. Earlier unpublished Memory pin and
-AppConfig wire shapes are rejected without mutation instead of being guessed or
-rewritten. There is no Memory lifecycle switch or partially active Host state.
-
-Host-private composition binds the Memory SDK directly to the embedded
-`DataPlane`. Runtime capabilities are issued and renewed from an owner-only
-issuer credential store; the model sees exactly `Remember(text)` and
-`Recall(query)`. Their canonical ToolResults are ordinary Session history, so
-replay reads the stored bytes and does not repeat a Memory call. Consistency
-cursors and provenance references remain in model-hidden Session state and
-ToolResult metadata.
-
-Semantic organization is selected through the `Memory Steward` row in `/team`.
-Without an explicit provider-model binding, Memory keeps its baseline durable
-receipt journal and lexical recall path and Caelis never invokes a model for
-Memory. Binding that fixed system Agent enables the provider-neutral Steward
-Worker callback for jobs queued by Remember: Memory supplies bounded evidence
-and appliance-owned prompt policy, Caelis runs the selected existing provider
-model with no tools, and Memory validates and applies the returned proposal.
-The current Recall path does not invoke Steward or another model; it applies the
-caller's lexical query to baseline receipts and already-organized semantic
-records. Steward deliberately has no default-profile fallback, so an absent
-binding is a stable zero-token mode.
-
-An additional `Memory Verifier` binding optionally evaluates the generated
-proposal against those same appliance-supplied instructions and complete bounded
-evidence, without imposing a separate input budget or truncating the evidence.
-It does not parse or rewrite the proposal. A high-confidence semantic conflict
-fails enrichment; an inconclusive judgment retains Memory's ordinary validation
-path. Provider failures, including input-limit rejection, use Memory's existing
-bounded job retry policy. The immutable Remember receipt remains available even
-when enrichment fails.
-Binding only the verifier performs no model work. Recall still performs no
-inference, and Memory owns all authorization, revision and canonical Apply checks.
+Core Memory is retired. Host startup and Session activation do not open its
+database, provision credentials, select bindings, register `Remember`/`Recall`,
+or schedule Memory jobs. The [compatibility boundary](control-client-schema.md#retired-core-memory)
+preserves legacy inputs and historical Session records without executing them.
 
 Shutdown closes admission, cancels and drains producers, waits for routed
 mutations and Runtime cleanup, then closes stores and process resources.
@@ -325,8 +258,8 @@ sessions/                   canonical Session documents and event JSONL plus der
 providers/                  private provider credential material
 bots/<Bot ID>/files/         retained legacy Bot data; not imported or executed
 bots/<Bot ID>/work/<Work ID>/files/  retained legacy managed work data
-memory/credentials/         owner-only Memory issuer credentials behind opaque references
-memory/appliance/           embedded Memory package data and SQLite authority
+memory/credentials/         retained legacy Memory credentials; no active writer
+memory/appliance/           retained legacy Memory data; no active writer
 plugins/                    installed and marketplace content caches
 runtime/service/            live Host discovery, authentication, and ownership files
 logs/, updates/, skills/    diagnostics, update state, and prompt assets
@@ -412,23 +345,6 @@ tool calls and Turns reuse that connection until the Runtime is released or the
 connection fails. Failed clients are removed from the callable catalog without
 replaying a call or promoting a lower-priority colliding server. See
 [Plugin integration](plugins.md) for supported content and authentication limits.
-
-Memory AppConfig contains one default `BindingRef` and opaque actor, principal,
-issuer-credential, View, Grant, and
-audience values for each binding. Raw
-credentials, capabilities, receipts, records, indexes, lifecycle policy, and
-Steward state belong outside AppConfig.
-References do not grant access: Host-private composition resolves the issuer
-credential, while the Memory package remains the authority for
-Views, Grants, capabilities, receipts, retrieval, and lifecycle.
-
-Normal product startup exposes none of the binding, data path, or credential
-fields. The CLI does not accept Memory lifecycle or topology from the user
-environment.
-Future product concepts may select another opaque binding through the existing
-Host callback without making tenant, workspace, or similar concepts part
-of the Memory API. A future standalone Memory distribution is an independent
-ecosystem adapter and cannot become a dependency of the embedded Caelis path.
 
 ## Compatibility and current limits
 

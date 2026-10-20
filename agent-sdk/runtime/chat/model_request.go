@@ -9,9 +9,6 @@ import (
 )
 
 func (a *Agent) rememberRequestToolDiscovery(event *session.Event) {
-	if a.resolveModelRequest == nil {
-		return
-	}
 	names := tool.DiscoveredToolNamesFromMetadata(event.Meta)
 	if event.Tool.Name == tool.ToolSearchToolName {
 		names = append(names, tool.ParseToolSearchOutput(event.Tool.Output).DiscoveredToolNames()...)
@@ -23,7 +20,7 @@ func (a *Agent) rememberRequestToolDiscovery(event *session.Event) {
 	}
 }
 
-func (a *Agent) refreshModelRequest(ctx agent.Context, visibility *tool.ToolVisibility) error {
+func (a *Agent) refreshModelRequest(ctx agent.Context) error {
 	if a.resolveModelRequest == nil {
 		return nil
 	}
@@ -51,18 +48,7 @@ func (a *Agent) refreshModelRequest(ctx agent.Context, visibility *tool.ToolVisi
 	next.resolveModelRequest = a.resolveModelRequest
 	next.toolResultArtifacts = a.toolResultArtifacts
 	next.discoveredTools = a.discoveredTools
+	next.exposure = a.exposure
 	*a = *next
-	*visibility = tool.NewToolVisibilityForModel(a.tools, a.model)
-	a.refreshDeferredTools(visibility)
-	for event := range ctx.Events().All() {
-		if event == nil {
-			continue
-		}
-		visibility.ApplyDiscoveredToolNames(tool.DiscoveredToolNamesFromMetadata(event.Meta))
-		if event.Tool != nil {
-			visibility.ApplyToolResult(event.Tool.Name, event.Tool.Output)
-		}
-	}
-	visibility.ApplyDiscoveredToolNames(a.discoveredTools)
 	return nil
 }

@@ -70,14 +70,6 @@ var definitions = []Definition{
 		Description:  "Reviews current workspace changes through the fixed review scene.",
 		Configurable: true,
 	},
-	{
-		Handle:       HandleSteward,
-		Class:        HandleClassSystem,
-		Name:         "Memory Steward",
-		Description:  "Organizes Memory semantically when explicitly bound; unbound Memory remains static and token-free.",
-		Configurable: true,
-	},
-	{Handle: HandleMemoryVerifier, Class: HandleClassSystem, Name: "Memory Verifier", Description: "Checks generated Memory proposals against supplied policy and evidence; requires a bound Memory Steward.", Configurable: true},
 }
 
 // Catalog is one closed view of the fixed handle definitions plus the custom

@@ -19,7 +19,7 @@ func TestAutoCompactModelWrapperPreservesWebSearcher(t *testing.T) {
 	t.Parallel()
 
 	runtime := forceGateRuntimeForWrapTest()
-	wrapped := runtime.wrapModelForAutoCompaction(session.SessionRef{SessionID: "sess-web-search"}, searchCapableGateModel{})
+	wrapped := runtime.wrapModelForAutoCompaction(session.SessionRef{SessionID: "sess-web-search"}, searchCapableGateModel{}, nil)
 	if _, ok := wrapped.(model.WebSearcher); !ok {
 		t.Fatalf("wrapped model = %T, want WebSearcher capability", wrapped)
 	}
@@ -44,7 +44,7 @@ func TestAutoCompactModelWrapperDoesNotExposeWebSearcherForUnsupportedModel(t *t
 	t.Parallel()
 
 	runtime := forceGateRuntimeForWrapTest()
-	wrapped := runtime.wrapModelForAutoCompaction(session.SessionRef{SessionID: "sess-no-web-search"}, staticModel{text: "ok"})
+	wrapped := runtime.wrapModelForAutoCompaction(session.SessionRef{SessionID: "sess-no-web-search"}, staticModel{text: "ok"}, nil)
 	if _, ok := wrapped.(model.WebSearcher); ok {
 		t.Fatalf("wrapped model = %T unexpectedly exposes WebSearcher", wrapped)
 	}
@@ -58,7 +58,7 @@ func TestAutoCompactModelWrapperSkipsNonForceCompactor(t *testing.T) {
 		compaction: CompactionConfig{Enabled: true},
 		compactor:  nonForceGateCompactor{},
 	}
-	wrapped := runtime.wrapModelForAutoCompaction(session.SessionRef{SessionID: "sess-non-force-gate"}, base)
+	wrapped := runtime.wrapModelForAutoCompaction(session.SessionRef{SessionID: "sess-non-force-gate"}, base, nil)
 	if wrapped != base {
 		t.Fatalf("wrapped model = %T, want original model when compactor cannot force", wrapped)
 	}

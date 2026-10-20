@@ -1,0 +1,151 @@
+# Experimental Runtime features
+
+Control exposes three independent opt-ins through `experimental-features-v1`.
+Core defaults all three to false. `control/experimental` owns their identifiers,
+definitions and defaults; Surfaces render that catalog and the SDK receives
+explicit Runtime/Manager options.
+
+| ID | Effect |
+| --- | --- |
+| `async_compact` | Generate one background context checkpoint candidate within the active Turn. |
+| `mcp_catalog_refresh` | Process MCP tool-list notifications and refresh the full server directory. |
+| `deferred_tool_retirement` | Expose `tool_retire` after discovery; retire marked bindings at a durable canonical compact. |
+
+Refresh does not require compaction. Retirement works with a static or refreshing
+catalog and with synchronous or asynchronous compaction. A generated summary is
+never a retirement signal. See [MCP lifecycle](mcp-tool-lifecycle.md) and the
+[SDK durability boundary](agent-sdk-boundary.md).
+
+## Scope and activation
+
+Values are Host defaults, persisted in the existing Store's `config.json` under
+`experimental`, using the Host configuration revision and operation ledger.
+Omitted values default to false; sparse writes change only the supplied keys.
+Unknown keys, including unknown keys set to false, are rejected.
+
+Both workspace and explicit-profile Sessions sample these defaults at their next
+Runtime activation. An existing activation keeps its current values until it is
+released. Saving does not cancel running work or replace a live Runtime. No App
+restart is required: a new Session's first work uses the saved defaults, and an
+idle released Session samples them when activated again. A connected observer
+can retain an existing activation, so a new Session is the immediate opt-in path.
+These flags do not change external ACP agents or enable Guardian experiments.
+
+Discovery returns `desired`, `scope: "host"`, and
+`applies_at: "next_runtime_activation"`. With `session_id`, it also returns
+`effective` only when that authorized Session has a live Runtime. An absent
+`effective` means no active Runtime; reads never activate one. It does not mean
+that the desired values have already taken effect.
+
+## Control API
+
+First call `POST /api/control/v1/initialize` and check for
+`experimental-features-v1`. Executable version strings do not select behavior.
+An older Host without this capability must be reported as unsupported.
+
+```http
+GET /api/control/v1/configuration/experimental?session_id=SESSION_ID
+Authorization: Bearer HOST_TOKEN
+```
+
+The response includes feature definitions, complete desired values and the
+current Host configuration `revision` as a decimal string. Read this revision
+immediately before a write:
+
+```http
+POST /api/control/v1/configuration/experimental
+Authorization: Bearer HOST_TOKEN
+Content-Type: application/json
+Idempotency-Key: enable-experiments-001
+
+{
+  "operation_id": "enable-experiments-001",
+  "expected_revision": "42",
+  "values": {
+    "async_compact": true,
+    "mcp_catalog_refresh": true,
+    "deferred_tool_retirement": true
+  }
+}
+```
+
+`42` is illustrative; use the actual discovery revision. The response is the
+ordinary `CommandResult`. A conflict or rejection is not a saved configuration.
+Read back desired values after a committed result. For an unknown result, retain
+the original operation ID and exact payload and use the existing operation
+readback; do not mint another operation to replay the same intent.
+
+Go clients use `AppServerClients.Experimental.ExperimentalFeatures(ctx, sessionID)`
+and `SetExperimentalFeatures(ctx, appserver.ExperimentalRequest{...})` after the
+same capability negotiation. The optional client is present in both embedded and
+HTTP bindings. OpenAPI and generated Go/TypeScript clients describe the routes.
+
+A future Bot can explicitly initialize these Host defaults through this API
+before starting new Session work, while preserving already-configured user
+choices according to its product policy. The values are shared by every client
+of that Host, not private Bot preferences or per-Session overrides. Core has no
+implicit Bot detection and no default-on environment-variable path.
+
+## Retry an MCP catalog read
+
+After the same capability negotiation, an authorized Session owner can call
+`AppServerClients.Experimental.RefreshMCPTools` or POST
+`/api/control/v1/sessions/{session_id}/mcp/refresh`:
+
+```json
+{
+  "operation_id": "retry-documents-1",
+  "session_id": "current-session",
+  "plugin_id": "application",
+  "server_name": "documents"
+}
+```
+
+Send the matching `Idempotency-Key`. Optional `expected_revision` and
+`expected_controller_epoch` use the ordinary Session preconditions. Plugin IDs
+are the configured directory namespaces; explicit-profile servers use
+`application`. This retries `tools/list` on the existing activation-owned
+Manager. It requires `mcp_catalog_refresh` to be effective there and never
+activates a dormant Runtime, reconnects a failed startup, or changes grants.
+Session authorization and the shared operation ledger apply. A repeated original
+request returns its receipt without another remote listing; unknown results keep
+the original ID and payload for readback. Failed listing leaves dispatch blocked
+and the directory warning visible until a later successful refresh.
+
+## Terminal interaction
+
+`/experimental` opens the compact checkbox editor.
+The initial checkboxes show the server's saved values. Arrow keys move, Space
+stages a draft, and Enter saves the changed values with the loaded revision.
+The current Runtime values are shown separately. A successful save closes the
+editor only after readback confirms the requested values.
+
+Esc discards an unsaved draft and closes. During a dispatched save, Esc closes
+without canceling the write; the editor says so. Reopen to read current truth.
+Errors retain the draft. An unresolved save retains its original request and
+freezes further edits; Enter checks that same operation and payload. A known
+CAS rejection or a committed write superseded by another client refreshes the
+baseline while preserving selections for a deliberate new save. A completed
+operation never freezes that draft; only an unresolved operation does. Unsupported Hosts and failed reads never display fabricated checkboxes.
+
+## Checkpoint authority
+
+Runtime composes the request configuration validator, MCP catalog guard and
+MCP grant-revocation guard in that order, releasing in reverse order. The Session
+write queue is acquired first. Owner guards cover the short checkpoint append
+and any original-payload reconciliation; they never cover summary generation,
+approval or remote execution. Explicit-profile configuration validation uses its
+existing Store mutex and does not call `AdmitRequest` or alter `LastRequest`.
+Catalog and grant guard acquisition fails closed on contention. A static catalog
+also protects connection-loss publication without enabling dynamic refresh.
+
+The sole checkpoint writer attaches the adopted exposure state to the canonical
+compact event. A CAS retry that accepts a newer canonical tail recalculates that
+state from the latest source. An unknown write is reconciled with the original
+ID and complete payload before any further action. Tool admission still checks
+current bindings and permissions independently of compaction.
+
+Summary model fidelity and prompt tuning are outside these switches' structural
+validation. Token counts and fixture latency do not establish provider cache hits
+or monetary savings. The [testing guide](testing.md) names deterministic,
+real-local-protocol and rendered-terminal evidence separately.

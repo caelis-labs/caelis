@@ -13,7 +13,7 @@ import (
 
 func TestApplicationReviewerRuntimeReleaseDrainsCancelledReview(t *testing.T) {
 	ctx := t.Context()
-	stack := newLocalStateTestHost(t, &runtimeMemoryHostStub{})
+	stack := newLocalStateTestHost(t)
 	owner := appserver.Principal{ID: stack.composition.authorities.userID}
 	principal := appserver.Principal{ID: owner.ID}
 	selected := stack.composition.lookup.DefaultID()

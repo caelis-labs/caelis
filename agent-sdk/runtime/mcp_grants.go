@@ -21,9 +21,10 @@ import (
 // private to the Host Store; deleting it while the Host is stopped revokes all
 // grants. Revoke removes one grant while the Host is running.
 type MCPGrantStore struct {
-	mu     sync.Mutex
-	path   string
-	grants map[string]bool
+	mu          sync.Mutex
+	path        string
+	grants      map[string]bool
+	revocations map[string]uint64
 }
 
 // NewMCPGrantStore opens a private, versioned grant file. Corrupt state fails
@@ -168,7 +169,14 @@ func (s *MCPGrantStore) Revoke(g MCPGrant, scope, sessionID string) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.change(key, false)
+	if err := s.change(key, false); err != nil {
+		return err
+	}
+	if s.revocations == nil {
+		s.revocations = map[string]uint64{}
+	}
+	s.revocations[key]++
+	return nil
 }
 
 func (s *MCPGrantStore) change(key string, present bool) error {
@@ -219,4 +227,24 @@ func (s *MCPGrantStore) change(key string, present bool) error {
 	}
 	s.grants = next
 	return nil
+}
+
+// RevocationRevision is an activation-local invalidation token for background
+// candidates. A changed value requires revalidation even when model tool schemas
+// are identical. Pending calls use per-scope epochs, not this aggregate token.
+func (s *MCPGrantStore) RevocationRevision() uint64 {
+	if s == nil {
+		return 0
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.revocationRevisionLocked()
+}
+
+func (s *MCPGrantStore) revocationRevisionLocked() uint64 {
+	var revision uint64
+	for _, epoch := range s.revocations {
+		revision += epoch
+	}
+	return revision
 }

@@ -21,7 +21,9 @@ const (
 	HandleGuardian       Handle = "guardian"
 	HandleGuardianScreen Handle = "guardian-screen"
 	HandleReviewer       Handle = "reviewer"
-	HandleSteward        Handle = "steward"
+	// Deprecated: retained for rejected legacy requests only.
+	HandleSteward Handle = "steward"
+	// Deprecated: retained for rejected legacy requests only.
 	HandleMemoryVerifier Handle = "memory-verifier"
 )
 
@@ -144,6 +146,9 @@ func NormalizeBindingSet(in BindingSet) BindingSet {
 	seen := make(map[Handle]struct{}, len(in.Bindings))
 	for _, raw := range in.Bindings {
 		binding := Normalize(raw)
+		if IsRetired(binding.Handle) {
+			continue
+		}
 		if binding.Handle == "" || binding.ProfileID == "" || binding.Effort == "" {
 			continue
 		}
@@ -164,6 +169,9 @@ func NormalizeConfiguration(in Configuration) Configuration {
 	seen := make(map[Handle]struct{}, len(in.Bindings))
 	for _, raw := range in.Bindings {
 		binding := Normalize(raw)
+		if IsRetired(binding.Handle) {
+			continue
+		}
 		if binding.Handle == "" || binding.ProfileID == "" {
 			continue
 		}
@@ -205,6 +213,9 @@ func ValidateConfiguration(in Configuration, profiles modelprofile.Configuration
 	seen := make(map[Handle]struct{}, len(in.Bindings))
 	for _, raw := range in.Bindings {
 		binding := Normalize(raw)
+		if IsRetired(binding.Handle) {
+			continue
+		}
 		if !isPersistedHandleIn(in, binding.Handle) {
 			if binding.Handle == HandleSelf {
 				return fmt.Errorf("control/agentbinding: self is Session-derived and cannot be persisted")
@@ -245,6 +256,9 @@ func ValidateConfiguration(in Configuration, profiles modelprofile.Configuration
 // partially normalized mutation.
 func Bind(current Configuration, raw Binding, profiles modelprofile.Configuration) (Configuration, error) {
 	binding := Normalize(raw)
+	if IsRetired(binding.Handle) {
+		return Configuration{}, ErrRetiredHandle
+	}
 	if !isPersistedHandleIn(current, binding.Handle) {
 		if binding.Handle == HandleSelf {
 			return Configuration{}, fmt.Errorf("control/agentbinding: self is Session-derived and cannot be bound")
@@ -270,6 +284,9 @@ func Bind(current Configuration, raw Binding, profiles modelprofile.Configuratio
 // Reset removes one explicit binding.
 func Reset(current Configuration, handle Handle) (Configuration, error) {
 	handle = NormalizeHandle(handle)
+	if IsRetired(handle) {
+		return Configuration{}, ErrRetiredHandle
+	}
 	if !isPersistedHandleIn(current, handle) {
 		return Configuration{}, fmt.Errorf("control/agentbinding: handle %q cannot be reset", handle)
 	}

@@ -13,7 +13,7 @@ import (
 
 func TestWorkerCreationSelectsProviderFromACPHostDefault(t *testing.T) {
 	ctx := t.Context()
-	stack := newLocalStateTestHost(t, nil)
+	stack := newLocalStateTestHost(t)
 	provider := stack.composition.lookup.DefaultID()
 	persistDisconnectTestAgent(t, stack, "codex")
 	doc, err := stack.composition.authorities.store.LoadContext(ctx)
@@ -59,7 +59,7 @@ func TestWorkerCreationSelectsProviderFromACPHostDefault(t *testing.T) {
 
 func TestCommonSessionCreationSelectsWorkerModelWithoutApplicationGrant(t *testing.T) {
 	ctx := t.Context()
-	stack := newLocalStateTestHost(t, nil)
+	stack := newLocalStateTestHost(t)
 	provider := stack.composition.lookup.DefaultID()
 	persistDisconnectTestAgent(t, stack, "codex")
 	doc, err := stack.composition.authorities.store.LoadContext(ctx)

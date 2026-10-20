@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/control/agentbinding"
+	"github.com/caelis-labs/caelis/control/modelprofile"
 )
 
 func TestDefaultNamesExposePlatformCoreCommandsOnly(t *testing.T) {
@@ -25,6 +26,7 @@ func TestDefaultNamesExposePlatformCoreCommandsOnly(t *testing.T) {
 		"new",
 		"resume",
 		"compact",
+		"experimental",
 		"quit",
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -43,31 +45,38 @@ func TestDefaultNamesExposePlatformCoreCommandsOnly(t *testing.T) {
 }
 
 func TestProductCommandNamesAreReservedFromCustomRoles(t *testing.T) {
-	// Every registered product command and alias is reserved from custom
+	// Every registered product command and alias is reserved from new custom
 	// delegation handles, so a role cannot hijack command or alias resolution.
 	// `team` is the deliberate exception: it stays a legal custom handle because
 	// the TUI resolves the built-in /team overlay before considering agent runs,
 	// so a colliding role cannot shadow it there.
+	create := func(name string) error {
+		_, err := agentbinding.CreateRole(agentbinding.Configuration{}, agentbinding.Role{Handle: agentbinding.Handle(name), Description: "custom role"}, agentbinding.Binding{}, modelprofile.Configuration{})
+		return err
+	}
+	if err := create("research"); err != nil {
+		t.Fatal("valid custom role creation failed:", err)
+	}
 	for _, goos := range []string{"linux", "windows"} {
 		for _, spec := range DefaultSpecsForPlatform(goos) {
 			if spec.Name != "team" {
-				if err := agentbinding.ValidateCustomHandle(agentbinding.Handle(spec.Name)); err == nil {
-					t.Errorf("ValidateCustomHandle(%q) succeeded for %s product command", spec.Name, goos)
+				if err := create(spec.Name); err == nil {
+					t.Errorf("CreateRole(%q) succeeded for %s product command", spec.Name, goos)
 				}
 			}
 			for _, alias := range spec.Aliases {
-				if err := agentbinding.ValidateCustomHandle(agentbinding.Handle(alias)); err == nil {
-					t.Errorf("ValidateCustomHandle(%q) succeeded for %s product command alias", alias, goos)
+				if err := create(alias); err == nil {
+					t.Errorf("CreateRole(%q) succeeded for %s product command alias", alias, goos)
 				}
 			}
 		}
 	}
-	if err := agentbinding.ValidateCustomHandle("team"); err != nil {
-		t.Errorf("ValidateCustomHandle(team) = %v, want legal custom handle", err)
+	if err := create("team"); err != nil {
+		t.Errorf("CreateRole(team) = %v, want legal custom handle", err)
 	}
 	for _, name := range []string{"lead", "sandbox"} {
-		if err := agentbinding.ValidateCustomHandle(agentbinding.Handle(name)); err == nil {
-			t.Errorf("ValidateCustomHandle(%q) succeeded for reserved remote command", name)
+		if err := create(name); err == nil {
+			t.Errorf("CreateRole(%q) succeeded for reserved remote command", name)
 		}
 	}
 }

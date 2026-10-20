@@ -61,7 +61,7 @@ func defaultSpecs() []CommandSpec {
 	for _, spec := range append(defaultSharedSpecs(), defaultTUISpecs()...) {
 		byName[spec.Name] = spec
 	}
-	order := []string{"help", "review", "breeze", "orbit", "zenith", "connect", "disconnect", "team", "plugin", "model", "status", "doctor", "new", "resume", "compact", "quit"}
+	order := []string{"help", "review", "breeze", "orbit", "zenith", "connect", "disconnect", "team", "plugin", "model", "status", "doctor", "new", "resume", "compact", "experimental", "quit"}
 	specs := make([]CommandSpec, 0, len(order))
 	for _, name := range order {
 		if spec, ok := byName[name]; ok {
@@ -94,6 +94,7 @@ func defaultTUISpecs() []CommandSpec {
 		{Name: "disconnect", Usage: "/disconnect", Description: "Disconnect provider models or local ACP Agents", DynamicCompleter: true},
 		{Name: "team", Aliases: []string{"subagent"}, Usage: "/team", Description: "Configure participant profiles and system Agents"},
 		{Name: "plugin", Usage: "/plugin <action>", Description: "Manage Caelis plugins", Details: []string{"actions: install <plugin@marketplace|path>, marketplace add|list|update|rm, manage, rm <id>"}, ArgCandidates: pluginRootCandidates(), DynamicCompleter: true},
+		{Name: "experimental", Usage: "/experimental", Description: "Configure experimental Runtime features", AvailableWhileRunning: true},
 		{Name: "quit", Aliases: []string{"exit"}, Usage: "/quit", Description: "Exit the TUI", AvailableWhileRunning: true},
 	}
 	return specs

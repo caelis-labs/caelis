@@ -318,7 +318,7 @@ func isHostConfigurationCommandRequest(request any) bool {
 	case appserver.ConnectModelRequest,
 		appserver.UseModelRequest,
 		appserver.DeleteModelRequest,
-		appserver.WorkspaceTrustRequest,
+		appserver.WorkspaceTrustRequest, appserver.ExperimentalRequest,
 		appserver.SandboxRequest:
 		return true
 	default:
@@ -407,9 +407,6 @@ func (s *runtimeComposition) executeControlCommand(ctx context.Context, principa
 		if errors.Is(err, session.ErrInvalidSession) {
 			return appserver.CommandResult{Outcome: appserver.OutcomeRejected}, classifyControlPreDispatchError(err)
 		}
-		if err == nil {
-			created, err = s.admitCreatedMemorySession(ctx, created)
-		}
 		return sessionCommandResult(created), classifyControlBackendError(err)
 	case appserver.CloseSessionRequest:
 		active, err := s.checkControlCommandCASAllowClosed(ctx, req.WriteBase)
@@ -483,6 +480,8 @@ func (s *runtimeComposition) executeControlCommand(ctx context.Context, principa
 			out.InputStatus = "accepted"
 		}
 		return out, classifyControlSteerError(err)
+	case appserver.RefreshMCPToolsRequest:
+		return s.executeMCPRefresh(ctx, req)
 	case appserver.CompactSessionRequest:
 		active, err := s.checkControlCommandCAS(ctx, req.WriteBase)
 		if err != nil {
@@ -694,6 +693,8 @@ func controlCommandSessionID(request any) string {
 		return strings.TrimSpace(typed.SessionID)
 	case appserver.CloseSessionRequest:
 		return strings.TrimSpace(typed.SessionID)
+	case appserver.RefreshMCPToolsRequest:
+		return strings.TrimSpace(typed.SessionID)
 	case appserver.CompactSessionRequest:
 		return strings.TrimSpace(typed.SessionID)
 	case appserver.PromptRequest:
@@ -761,7 +762,7 @@ func controlActionActivatesSessionRuntime(action appserver.Action) bool {
 
 func controlActionTargetsActiveRuntime(action appserver.Action) bool {
 	switch action {
-	case appserver.ActionSteer,
+	case appserver.ActionSessionMCPRefresh, appserver.ActionSteer,
 		appserver.ActionCancel,
 		appserver.ActionApprovalResolve,
 		appserver.ActionParticipantCancel:

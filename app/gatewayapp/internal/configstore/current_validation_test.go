@@ -3,16 +3,13 @@ package configstore
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	"github.com/caelis-labs/caelis/control/mcpconfig"
-	"github.com/caelis-labs/caelis/control/memorybinding"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/control/modelprofile"
 	"github.com/caelis-labs/caelis/control/workspacetrust"
@@ -115,26 +112,6 @@ func TestStoreRejectsDuplicateCurrentRecordsBeforeNormalization(t *testing.T) {
 			wantErr: "duplicate MCP server",
 		},
 		{
-			name: "Memory binding reference",
-			mutate: func(doc AppConfig) AppConfig {
-				doc.Memory = currentMemoryBindingFixture()
-				duplicate := doc.Memory.Bindings[0]
-				duplicate.RuntimeActorRef = "actor-b"
-				doc.Memory.Bindings = append(doc.Memory.Bindings, duplicate)
-				return doc
-			},
-			wantErr: "duplicate binding reference",
-		},
-		{
-			name: "Memory default binding",
-			mutate: func(doc AppConfig) AppConfig {
-				doc.Memory = currentMemoryBindingFixture()
-				doc.Memory.DefaultBindingRef = "missing"
-				return doc
-			},
-			wantErr: "default binding reference",
-		},
-		{
 			name: "workspace trust level",
 			mutate: func(doc AppConfig) AppConfig {
 				doc.WorkspaceTrust = workspacetrust.Configuration{
@@ -174,30 +151,6 @@ func TestStoreRejectsDuplicateCurrentRecordsBeforeNormalization(t *testing.T) {
 	}
 }
 
-func TestStoreRoundTripsMemoryBindingWithoutSecretMaterial(t *testing.T) {
-	store := New(t.TempDir())
-	doc := currentValidationFixture()
-	doc.Memory = currentMemoryBindingFixture()
-	if err := store.Save(doc); err != nil {
-		t.Fatal(err)
-	}
-	loaded, err := store.Load()
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := memorybinding.Normalize(doc.Memory)
-	if got := loaded.Memory; !reflect.DeepEqual(got, want) {
-		t.Fatalf("loaded Memory binding = %#v, want %#v", got, want)
-	}
-	raw, err := os.ReadFile(store.Path())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if bytes.Contains(raw, []byte("issuer-secret")) || !bytes.Contains(raw, []byte(`"issuer_credential_ref"`)) {
-		t.Fatalf("persisted Memory binding contains secret or omits credential reference: %s", raw)
-	}
-}
-
 func TestZeroMemoryBindingIsOmittedFromCurrentDocument(t *testing.T) {
 	store := New(t.TempDir())
 	if err := store.Save(currentValidationFixture()); err != nil {
@@ -209,41 +162,6 @@ func TestZeroMemoryBindingIsOmittedFromCurrentDocument(t *testing.T) {
 	}
 	if bytes.Contains(raw, []byte(`"memory"`)) {
 		t.Fatalf("zero Memory binding was persisted: %s", raw)
-	}
-}
-
-func TestStoreRejectsUnreleasedMemoryWireWithoutRewritingIt(t *testing.T) {
-	for _, memoryWire := range []map[string]any{
-		{"enabled": false, "bots": []any{}},
-		{"enabled": true, "bots": []any{map[string]any{"bot_id": "historical"}}},
-		{"bindings": []any{}, "bots": []any{}},
-	} {
-		t.Run(fmt.Sprint(memoryWire["enabled"]), func(t *testing.T) {
-			root := t.TempDir()
-			wire := map[string]any{
-				"schema_version":         SchemaVersionV2,
-				"configuration_revision": 7,
-				"memory":                 memoryWire,
-			}
-			raw, err := json.Marshal(wire)
-			if err != nil {
-				t.Fatal(err)
-			}
-			path := filepath.Join(root, "config.json")
-			if err := os.WriteFile(path, raw, 0o600); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := New(root).Load(); err == nil || !strings.Contains(err.Error(), "invalid Memory binding") {
-				t.Fatalf("Load() error = %v, want unsupported Memory wire rejection", err)
-			}
-			persisted, err := os.ReadFile(path)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !bytes.Equal(persisted, raw) {
-				t.Fatalf("unsupported Memory wire was rewritten:\n got: %s\nwant: %s", persisted, raw)
-			}
-		})
 	}
 }
 
@@ -357,16 +275,5 @@ func currentValidationFixture() AppConfig {
 				}},
 			}},
 		},
-	}
-}
-
-func currentMemoryBindingFixture() memorybinding.Configuration {
-	return memorybinding.Configuration{
-		DefaultBindingRef: "primary",
-		Bindings: []memorybinding.AccessBinding{{
-			BindingRef: "primary", RuntimeActorRef: "actor-a", PrincipalRef: "principal:a",
-			IssuerCredentialRef: "memory-issuer:a", ViewRef: "view-a", GrantRef: "grant-a",
-			Audience: memorybinding.OutputAudiencePrivate, BindingVersion: 1,
-		}},
 	}
 }

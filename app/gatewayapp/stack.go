@@ -20,7 +20,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 	hostacpendpoint "github.com/caelis-labs/caelis/app/gatewayapp/internal/acpendpoint"
 	adapterhostimpl "github.com/caelis-labs/caelis/app/gatewayapp/internal/adapterhost"
-	"github.com/caelis-labs/caelis/app/gatewayapp/internal/memoryhost"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/sandboxpolicy"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	acptaskstream "github.com/caelis-labs/caelis/control/appserver/taskstream"
@@ -38,20 +37,6 @@ import (
 	"github.com/caelis-labs/caelis/internal/hostownership"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
 )
-
-// MemoryBindingSelectionContext is the host-neutral input for selecting one
-// opaque Memory binding at Session creation and Runtime activation. It carries
-// no downstream product identity or Memory authority.
-type MemoryBindingSelectionContext struct {
-	SessionRef         session.SessionRef
-	Workspace          session.WorkspaceRef
-	FallbackBindingRef memorybinding.BindingRef
-}
-
-// MemoryBindingSelector lets an embedding map future product concepts to an
-// opaque binding without adding those concepts to Caelis. Returning an empty
-// reference preserves the process fallback and AppConfig default.
-type MemoryBindingSelector func(context.Context, MemoryBindingSelectionContext) (memorybinding.BindingRef, error)
 
 type Config struct {
 	AppName  string
@@ -96,18 +81,11 @@ type Config struct {
 	// Host and the token itself is not placed in argv or environment.
 	ChildControlURL       string
 	ChildControlTokenFile string
-	// MemoryBindingRef is an embedding-only extension seam for selecting another
-	// opaque Control-owned Memory binding. Product users receive the automatically
-	// provisioned private binding and never configure endpoints or grants.
+	// Deprecated: Core Memory inputs are accepted but ignored. Selectors are
+	// never called. Remove at the next breaking embedding API boundary.
 	MemoryBindingRef      memorybinding.BindingRef
 	MemoryBindingSelector MemoryBindingSelector
-	// MemoryLabelSelector is an embedding-only extension seam for adding opaque
-	// product partitions to Caelis' mandatory, hashed workspace label. Labels
-	// are fixed at Session admission and never enter model-visible tool data.
-	MemoryLabelSelector MemoryLabelSelector
-	// memoryHost is a package-private deterministic test seam. Production opens
-	// the embedded Memory package synchronously with the Host.
-	memoryHost runtimeMemoryHost
+	MemoryLabelSelector   MemoryLabelSelector
 }
 
 type ModelConfig = modelconfig.Config
@@ -158,8 +136,6 @@ type Stack struct {
 	lifecycleCancel           context.CancelFunc
 	sessionRuntimes           *sessionRuntimeRegistry
 	modelRecovery             *sessionModelRecovery
-	memoryRuntime             *memoryhost.Host
-	memorySteward             *memoryStewardBridge
 }
 
 // Sessions returns the Host's process-level Session authority.
@@ -387,31 +363,6 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	if err != nil {
 		return nil, err
 	}
-	preparedMemory, err := prepareEmbeddedMemory(context.Background(), cfg, configStore, storeDir, doc)
-	if err != nil {
-		return nil, err
-	}
-	doc = preparedMemory.document
-	startupMemoryRuntime := preparedMemory.host
-	defer func() {
-		if startupMemoryRuntime != nil {
-			_ = startupMemoryRuntime.Close()
-		}
-	}()
-	memorySelection := memorybinding.RuntimeSelection{BindingRef: cfg.MemoryBindingRef}
-	initialMemorySelection := memorySelection
-	if cfg.MemoryBindingSelector != nil {
-		if memorySelection.BindingRef != "" {
-			if _, _, fallbackErr := memorybinding.Resolve(doc.Memory, memorySelection); fallbackErr != nil {
-				return nil, fmt.Errorf("gatewayapp: validate fallback Memory selection: %w", fallbackErr)
-			}
-		}
-		initialMemorySelection = memorybinding.RuntimeSelection{}
-	}
-	_, memorySelected, err := memorybinding.Resolve(doc.Memory, initialMemorySelection)
-	if err != nil {
-		return nil, fmt.Errorf("gatewayapp: validate process Memory selection: %w", err)
-	}
 	apiKeyCredentials, err := credentialstore.New(storeDir)
 	if err != nil {
 		return nil, err
@@ -566,9 +517,6 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 		sandboxOverride:       cfg.Sandbox,
 		childControlURL:       cfg.ChildControlURL,
 		childControlTokenFile: cfg.ChildControlTokenFile,
-		memorySelection:       memorySelection,
-		memorySelector:        cfg.MemoryBindingSelector,
-		memoryLabelSelector:   cfg.MemoryLabelSelector,
 	})
 	sessionModelPins := newSessionModelPinRegistry(apiKeyCredentials.Get, lookup.Snapshot().Configs...)
 	stack := &Stack{
@@ -605,19 +553,6 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 			},
 			sandbox: sandboxCfg,
 		},
-	}
-	if memorySelected {
-		if cfg.memoryHost != nil {
-			stack.composition.authorities.memoryHost = cfg.memoryHost
-		} else {
-			stack.memoryRuntime = startupMemoryRuntime
-			startupMemoryRuntime = nil
-			stack.composition.authorities.memoryHost = stack.memoryRuntime
-		}
-		if err := validateConfiguredMemoryAuthorities(context.Background(), stack.composition.authorities.memoryHost, doc.Memory); err != nil {
-			_ = stack.Close()
-			return nil, err
-		}
 	}
 	stack.adapterHost, err = newHostedAdapterManager()
 	if err != nil {
@@ -656,12 +591,6 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	if err := activateHostRuntime(stack, controlAssembly); err != nil {
 		_ = stack.Close()
 		return nil, err
-	}
-	if preparedMemory.defaultTopology {
-		if err := startMemoryStewardBridge(stack); err != nil {
-			_ = stack.Close()
-			return nil, fmt.Errorf("gatewayapp: start Memory Steward bridge: %w", err)
-		}
 	}
 	return stack, nil
 }
@@ -770,15 +699,8 @@ func (s *Stack) Quiesce(ctx context.Context) error {
 		}
 	}
 	s.composition.closing.Store(true)
-	var memoryStewardErr error
-	if s.memorySteward != nil {
-		memoryStewardErr = s.memorySteward.wait(ctx)
-	}
 	if s.sessionRuntimes != nil {
 		var errs []error
-		if memoryStewardErr != nil {
-			errs = append(errs, fmt.Errorf("memory Steward: %w", memoryStewardErr))
-		}
 		drain, err := s.sessionRuntimes.beginQuiesce(ctx)
 		if err != nil {
 			errs = append(errs, err)
@@ -806,9 +728,6 @@ func (s *Stack) Quiesce(ctx context.Context) error {
 		return errors.Join(errs...)
 	}
 	var errs []error
-	if memoryStewardErr != nil {
-		errs = append(errs, fmt.Errorf("memory Steward: %w", memoryStewardErr))
-	}
 	if gateway := s.composition.currentGateway(); gateway != nil {
 		if err := gateway.Quiesce(ctx); err != nil {
 			errs = append(errs, err)
@@ -838,9 +757,6 @@ func (s *Stack) closeWithQuiesceTimeout(timeout time.Duration) error {
 	quiesceCtx, cancelQuiesce := context.WithTimeout(context.Background(), timeout)
 	quiesceErr := s.Quiesce(quiesceCtx)
 	cancelQuiesce()
-	if s.memorySteward != nil && !s.memorySteward.drained() {
-		return fmt.Errorf("gatewayapp stack: close deferred until Memory Steward drains: %w", quiesceErr)
-	}
 	if s.composition.authorities.approvalRecovery != nil {
 		s.composition.authorities.approvalRecovery.Close()
 	}
@@ -874,17 +790,6 @@ func (s *Stack) closeWithQuiesceTimeout(timeout time.Duration) error {
 	}
 	if sessionCloseErr != nil {
 		errs = append(errs, sessionCloseErr)
-	}
-	if s.memorySteward != nil {
-		s.memorySteward.closeClients()
-		s.memorySteward = nil
-	}
-	if s.memoryRuntime != nil {
-		if err := s.memoryRuntime.Close(); err != nil {
-			errs = append(errs, err)
-		}
-		s.memoryRuntime = nil
-		s.composition.authorities.memoryHost = nil
 	}
 	if controlOperations != nil {
 		if err := controlOperations.Close(); err != nil {
@@ -946,6 +851,7 @@ func (s *runtimeComposition) closeWorkspaceResources() error {
 	capabilityClose := s.capabilityClose
 	s.capabilityClose = nil
 	s.capabilityStatus = nil
+	s.capabilityRefresh = nil
 	s.capabilityUpdated = nil
 	pluginCacheRelease := s.pluginCacheRelease
 	s.mu.Unlock()

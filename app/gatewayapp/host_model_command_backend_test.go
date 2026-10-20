@@ -104,7 +104,7 @@ func TestHostModelCommandPersistsSupportedFastModeDefault(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	stack := newLocalStateTestHost(t, &runtimeMemoryHostStub{})
+	stack := newLocalStateTestHost(t)
 	principal := appserver.Principal{ID: stack.composition.authorities.userID}
 	// This native API connection predates the retired onboarding entry.
 	if _, err := stack.connectTestModel(ModelConfig{
@@ -175,7 +175,7 @@ func TestHostModelCommandPersistsSupportedFastModeDefault(t *testing.T) {
 
 func TestHostModelConnectUsesCanonicalDocumentAndDoesNotPersistSecretInLedger(t *testing.T) {
 	ctx := context.Background()
-	stack := newLocalStateTestHost(t, &runtimeMemoryHostStub{})
+	stack := newLocalStateTestHost(t)
 	principal := appserver.Principal{ID: stack.composition.authorities.userID}
 	external := newAppConfigStore(filepath.Dir(stack.composition.authorities.store.path))
 	doc, err := external.LoadContext(ctx)
@@ -229,7 +229,7 @@ func TestHostModelConnectUsesCanonicalDocumentAndDoesNotPersistSecretInLedger(t 
 
 func TestHostModelCredentialsUseStableEndpointReferenceAcrossPrincipals(t *testing.T) {
 	ctx := context.Background()
-	stack := newLocalStateTestHost(t, &runtimeMemoryHostStub{})
+	stack := newLocalStateTestHost(t)
 	revision, err := stack.ControlStatus().ConfigurationRevision(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -289,7 +289,7 @@ func TestHostModelCredentialsUseStableEndpointReferenceAcrossPrincipals(t *testi
 func TestHostModelConnectReusableAuthUsesCanonicalSnapshot(t *testing.T) {
 	t.Run("canonical endpoint without credential rejects retained stable fallback", func(t *testing.T) {
 		ctx := context.Background()
-		stack := newLocalStateTestHost(t, &runtimeMemoryHostStub{})
+		stack := newLocalStateTestHost(t)
 		principal := appserver.Principal{ID: stack.composition.authorities.userID}
 		revision, err := stack.ControlStatus().ConfigurationRevision(ctx)
 		if err != nil {
@@ -335,7 +335,7 @@ func TestHostModelConnectReusableAuthUsesCanonicalSnapshot(t *testing.T) {
 
 	t.Run("canonical legacy credential reference takes precedence over retained stable reference", func(t *testing.T) {
 		ctx := context.Background()
-		stack := newLocalStateTestHost(t, &runtimeMemoryHostStub{})
+		stack := newLocalStateTestHost(t)
 		principal := appserver.Principal{ID: stack.composition.authorities.userID}
 		revision, err := stack.ControlStatus().ConfigurationRevision(ctx)
 		if err != nil {
@@ -400,7 +400,7 @@ func TestHostModelConnectReusableAuthUsesCanonicalSnapshot(t *testing.T) {
 
 	t.Run("canonical credential permits stale empty live lookup", func(t *testing.T) {
 		ctx := context.Background()
-		stack := newLocalStateTestHost(t, &runtimeMemoryHostStub{})
+		stack := newLocalStateTestHost(t)
 		principal := appserver.Principal{ID: stack.composition.authorities.userID}
 		before := stack.composition.lookup.Snapshot()
 		contextWindow := stack.composition.lookup.contextWindow
@@ -442,7 +442,7 @@ func TestHostModelConnectReusableAuthUsesCanonicalSnapshot(t *testing.T) {
 
 func TestHostModelReusableCredentialsAreScopedToExactEndpointIdentity(t *testing.T) {
 	ctx := context.Background()
-	stack := newLocalStateTestHost(t, &runtimeMemoryHostStub{})
+	stack := newLocalStateTestHost(t)
 	principal := appserver.Principal{ID: stack.composition.authorities.userID}
 	revision, err := stack.ControlStatus().ConfigurationRevision(ctx)
 	if err != nil {
@@ -495,7 +495,7 @@ func TestHostModelReusableCredentialsAreScopedToExactEndpointIdentity(t *testing
 
 func TestHostModelDeleteRetiresCredentialAfterLastProfileWithoutInterruptingPinnedRuntime(t *testing.T) {
 	ctx := context.Background()
-	stack := newLocalStateTestHost(t, &runtimeMemoryHostStub{})
+	stack := newLocalStateTestHost(t)
 	principal := appserver.Principal{ID: stack.composition.authorities.userID}
 	revision, err := stack.ControlStatus().ConfigurationRevision(ctx)
 	if err != nil {
@@ -570,7 +570,7 @@ func TestHostModelDeleteRetiresCredentialAfterLastProfileWithoutInterruptingPinn
 
 func TestHostModelDeleteRestoresCredentialWhenConfigurationSaveFails(t *testing.T) {
 	ctx := context.Background()
-	stack := newLocalStateTestHost(t, &runtimeMemoryHostStub{})
+	stack := newLocalStateTestHost(t)
 	principal := appserver.Principal{ID: stack.composition.authorities.userID}
 	revision, err := stack.ControlStatus().ConfigurationRevision(ctx)
 	if err != nil {
@@ -606,7 +606,7 @@ func TestHostModelDeleteRestoresCredentialWhenConfigurationSaveFails(t *testing.
 
 func TestHostModelDeleteRetiresCredentialAfterLastReachableProfile(t *testing.T) {
 	ctx := context.Background()
-	stack := newLocalStateTestHost(t, &runtimeMemoryHostStub{})
+	stack := newLocalStateTestHost(t)
 	principal := appserver.Principal{ID: stack.composition.authorities.userID}
 	revision, err := stack.ControlStatus().ConfigurationRevision(ctx)
 	if err != nil {
@@ -668,7 +668,7 @@ func TestHostModelDeleteRetiresCredentialAfterLastReachableProfile(t *testing.T)
 }
 
 func TestHostModelCommandPreCanceledContextHasNoEffect(t *testing.T) {
-	stack := newLocalStateTestHost(t, &runtimeMemoryHostStub{})
+	stack := newLocalStateTestHost(t)
 	before, err := stack.ControlStatus().ConfigurationRevision(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -736,7 +736,7 @@ func TestHostModelConnectCommitsWhileTurnIsActiveWithoutReplacingRuntime(t *test
 
 func TestHostModelConnectRejectsConcurrentOAuthWithoutSecondEffect(t *testing.T) {
 	ctx := context.Background()
-	stack := newLocalStateTestHost(t, &runtimeMemoryHostStub{})
+	stack := newLocalStateTestHost(t)
 	expected, err := stack.ControlStatus().ConfigurationRevision(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -765,7 +765,7 @@ func TestHostModelConnectRejectsConcurrentOAuthWithoutSecondEffect(t *testing.T)
 }
 
 func TestHostModelCommandRollsForwardAfterCommittedWriteWarning(t *testing.T) {
-	stack := newLocalStateTestHost(t, &runtimeMemoryHostStub{})
+	stack := newLocalStateTestHost(t)
 	fault := errors.New("directory fsync after model CAS failed")
 	writeCount := installCommittedConfigSaveFault(t, stack, "fsync", fault)
 	expected, err := stack.ControlStatus().ConfigurationRevision(context.Background())
@@ -797,7 +797,7 @@ func TestHostModelCommandPersistsUnknownWhenCredentialRollbackIsIncomplete(t *te
 		t.Skip("directory mode fault injection is Unix-only")
 	}
 	ctx := context.Background()
-	stack := newLocalStateTestHost(t, &runtimeMemoryHostStub{})
+	stack := newLocalStateTestHost(t)
 	expected, err := stack.ControlStatus().ConfigurationRevision(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -846,7 +846,7 @@ func TestHostModelCommandPersistsUnknownWhenCredentialRollbackIsIncomplete(t *te
 }
 
 func TestHostModelCommandDoesNotGuessRevisionWhenCommittedWriteCannotBeReadBack(t *testing.T) {
-	stack := newLocalStateTestHost(t, &runtimeMemoryHostStub{})
+	stack := newLocalStateTestHost(t)
 	fault := errors.New("directory fsync after model CAS failed")
 	writeCount := installCommittedConfigSaveFault(t, stack, "fsync", fault)
 	committedFault := stack.composition.authorities.store.saveHook
@@ -924,7 +924,7 @@ func TestHostModelCommandDoesNotGuessRevisionWhenCommittedWriteCannotBeReadBack(
 
 func TestHostModelCommandReconcilesNewerCanonicalRevisionBeforeLiveInstall(t *testing.T) {
 	ctx := context.Background()
-	stack := newLocalStateTestHost(t, &runtimeMemoryHostStub{})
+	stack := newLocalStateTestHost(t)
 	principal := appserver.Principal{ID: stack.composition.authorities.userID}
 	revision, err := stack.ControlStatus().ConfigurationRevision(ctx)
 	if err != nil {
@@ -989,7 +989,7 @@ func TestHostModelCommandReconcilesNewerCanonicalRevisionBeforeLiveInstall(t *te
 }
 
 func TestHostModelCommandCommitsForFutureActivationWithoutAssemblyRefresh(t *testing.T) {
-	stack := newLocalStateTestHost(t, &runtimeMemoryHostStub{})
+	stack := newLocalStateTestHost(t)
 	expected, err := stack.ControlStatus().ConfigurationRevision(context.Background())
 	if err != nil {
 		t.Fatal(err)

@@ -166,6 +166,10 @@ func (m *Model) View() tea.View {
 		picker := m.renderSessionPicker()
 		view = tuikit.OverlayCenter(view, picker, m.width, m.height)
 	}
+	if m.experimental != nil && m.width > 0 && m.height > 0 {
+		normalizeBaseForOverlay()
+		view = tuikit.OverlayCenter(view, m.renderExperimental(), m.width, m.height)
+	}
 	var finalTrim int
 	view, finalTrim = m.normalizeFullscreenFrameWithTopTrim(view)
 	topTrim += finalTrim

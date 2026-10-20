@@ -1,6 +1,7 @@
 package gatewayapp
 
 import (
+	"context"
 	"sync"
 	"sync/atomic"
 
@@ -9,7 +10,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
-	"github.com/caelis-labs/caelis/control/memorybinding"
 	"github.com/caelis-labs/caelis/control/sessionprofile"
 	acpassembly "github.com/caelis-labs/caelis/internal/acpagentbridge/assembly"
 	"github.com/caelis-labs/caelis/internal/controlplane"
@@ -65,6 +65,7 @@ type runtimeComposition struct {
 	mcpMgr             *mcp.Manager
 	capabilityClose    func()
 	capabilityStatus   func(uint64) sessionprofile.MCPStatus
+	capabilityRefresh  func(context.Context, string, string) error
 	capabilityUpdated  func(sessionprofile.Configuration)
 	pluginCacheRelease func() error
 	retainRuntimeWork  func(session.SessionRef) func()
@@ -89,7 +90,6 @@ type sessionRuntimeActivation struct {
 	modelCatalog          *modelLookup
 	appConfig             *AppConfig
 	sessionRef            session.SessionRef
-	memoryBinding         *memorybinding.RuntimeMemoryBindingSnapshot
 	childControlURL       string
 	childControlTokenFile string
 }

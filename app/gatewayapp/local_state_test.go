@@ -19,7 +19,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
-	"github.com/caelis-labs/caelis/control/memorybinding"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	"github.com/caelis-labs/caelis/internal/kernel"
@@ -1117,8 +1116,8 @@ func TestNewLocalStackAllowsEmptyInitialModelConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadAppConfig() error = %v", err)
 	}
-	if len(document.Models.Configs) != 0 || !memorybinding.IsConfigured(document.Memory) {
-		t.Fatalf("initial config = %#v, want only built-in Memory provisioning", document)
+	if len(document.Models.Configs) != 0 || len(document.Memory) != 0 {
+		t.Fatalf("initial config = %#v, want empty initial configuration", document)
 	}
 }
 
@@ -1530,7 +1529,7 @@ func TestDefaultStoreDirUsesHomeDirectory(t *testing.T) {
 
 func newLocalStateTestStack(t *testing.T) (*Stack, session.Session) {
 	t.Helper()
-	stack := newLocalStateTestHost(t, nil)
+	stack := newLocalStateTestHost(t)
 	activeSession, err := startGatewayAppTestSession(context.Background(), stack, "state-test-session")
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
@@ -1538,9 +1537,7 @@ func newLocalStateTestStack(t *testing.T) (*Stack, session.Session) {
 	return stack, activeSession
 }
 
-// Session scenarios retain real Memory. Configuration-only tests can supply
-// the Memory stub without paying for unrelated appliance provisioning.
-func newLocalStateTestHost(t *testing.T, memoryHost runtimeMemoryHost) *Stack {
+func newLocalStateTestHost(t *testing.T) *Stack {
 	t.Helper()
 	root := t.TempDir()
 	workdir := t.TempDir()
@@ -1551,7 +1548,6 @@ func newLocalStateTestHost(t *testing.T, memoryHost runtimeMemoryHost) *Stack {
 		WorkspaceKey: workdir,
 		WorkspaceCWD: workdir,
 		ApprovalMode: "auto-review",
-		memoryHost:   memoryHost,
 		Assembly:     assembly.ResolvedAssembly{},
 		Model: ModelConfig{
 			Provider: "ollama",

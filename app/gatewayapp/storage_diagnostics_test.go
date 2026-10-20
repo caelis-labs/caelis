@@ -6,8 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/caelis-labs/memory/appliance"
 )
 
 func TestInspectStoreDiagnosticsIsReadOnlyAndDistinguishesUnknownHealth(t *testing.T) {
@@ -55,7 +53,7 @@ func TestInspectStoreDiagnosticsIsReadOnlyAndDistinguishesUnknownHealth(t *testi
 	if diagnostics.Memory.DatabaseState != diagnosticStatePresent || diagnostics.Memory.DatabaseFormat != "sqlite3" {
 		t.Fatalf("Memory database state = %#v", diagnostics.Memory)
 	}
-	if diagnostics.Memory.SchemaState != diagnosticStateUnknown || diagnostics.Memory.ExpectedSchemaVersion != 2 {
+	if diagnostics.Memory.SchemaState != diagnosticStateUnknown || diagnostics.Memory.ExpectedSchemaVersion != 0 || !diagnostics.Memory.Retired {
 		t.Fatalf("Memory schema state = %#v", diagnostics.Memory)
 	}
 	if diagnostics.Memory.OwnerLockFileState != diagnosticStatePresent || diagnostics.Memory.OwnerLockState != diagnosticLockFree {
@@ -68,8 +66,8 @@ func TestInspectStoreDiagnosticsIsReadOnlyAndDistinguishesUnknownHealth(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(encoded), `"expected_schema_version":2`) {
-		t.Fatalf("diagnostics omitted the expected Memory schema: %s", encoded)
+	if strings.Contains(string(encoded), `"expected_schema_version"`) || !strings.Contains(string(encoded), `"retired":true`) {
+		t.Fatalf("diagnostics should report retired Memory without a required schema: %s", encoded)
 	}
 	if strings.Contains(string(encoded), secret) {
 		t.Fatalf("diagnostics leaked credential content: %s", encoded)
@@ -87,39 +85,11 @@ func TestInspectStoreDiagnosticsIsReadOnlyAndDistinguishesUnknownHealth(t *testi
 		}
 	}
 	for _, want := range []string{
-		"do not remove memoryd.lock; verify the owning process before recovery",
-		"schema version is unknown without an owner-held Memory inspection; do not run an ad hoc migration",
+		"Core Memory is retired; retained data is not used or migrated by the Host; preserve it for independent recovery",
 	} {
 		if !containsString(diagnostics.RecoveryAdvice, want) {
 			t.Fatalf("recovery advice = %#v, missing %q", diagnostics.RecoveryAdvice, want)
 		}
-	}
-}
-
-func TestInspectStoreDiagnosticsMatchesEmbeddedMemorySchema(t *testing.T) {
-	root := t.TempDir()
-	runtime, err := appliance.Open(t.Context(), appliance.Options{DataDir: filepath.Join(root, "memory", "appliance")})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if err := runtime.Close(); err != nil {
-			t.Error(err)
-		}
-	})
-	inspection, err := runtime.Management().Inspect(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	diagnostics, err := InspectStoreDiagnostics(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if diagnostics.Memory.ExpectedSchemaVersion != inspection.SchemaVersion {
-		t.Fatalf("diagnostic schema = %d, embedded Memory schema = %d", diagnostics.Memory.ExpectedSchemaVersion, inspection.SchemaVersion)
-	}
-	if diagnostics.Memory.SchemaState != diagnosticStateUnknown {
-		t.Fatalf("read-only diagnostics inferred Memory health: %#v", diagnostics.Memory)
 	}
 }
 
@@ -139,7 +109,7 @@ func TestInspectStoreDiagnosticsDoesNotTreatCorruptMemoryAsHealthy(t *testing.T)
 	if diagnostics.Memory.DatabaseState != diagnosticStatePresent || diagnostics.Memory.DatabaseFormat != diagnosticStateInvalid || diagnostics.Memory.SchemaState != diagnosticStateInvalid {
 		t.Fatalf("corrupt Memory diagnostics = %#v", diagnostics.Memory)
 	}
-	if !containsString(diagnostics.RecoveryAdvice, "the embedded Memory database header is not SQLite; preserve the files and inspect the private service log") {
+	if !containsString(diagnostics.RecoveryAdvice, "Core Memory is retired; retained data is not used or migrated by the Host; preserve it for independent recovery") {
 		t.Fatalf("corrupt Memory recovery advice = %#v", diagnostics.RecoveryAdvice)
 	}
 }

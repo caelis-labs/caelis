@@ -9,7 +9,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/internal/eventmeta"
-	"github.com/caelis-labs/caelis/control/memorytool"
 )
 
 func TestEventProjectorNormalizesRuntimeToolStatus(t *testing.T) {
@@ -51,7 +50,7 @@ func TestEventProjectorRememberTitleFollowsLifecycle(t *testing.T) {
 
 	callMessage := model.MessageFromAssistantParts("", "", []model.ToolCall{{
 		ID:   "remember-1",
-		Name: memorytool.RememberToolName,
+		Name: "Remember",
 		Args: `{"text":"private fact"}`,
 	}})
 	callUpdates, err := ProjectEvent(&session.Event{
@@ -81,11 +80,11 @@ func TestEventProjectorRememberTitleFollowsLifecycle(t *testing.T) {
 		{name: "in progress canonical payload overrides stale title", status: eventstream.ToolStatusInProgress, stale: "Updated memory", wantTitle: "Updating memory"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			response := model.NewMessage(model.RoleTool, model.NewToolResultJSONPart("remember-1", memorytool.RememberToolName, map[string]any{"accepted": true}, false))
+			response := model.NewMessage(model.RoleTool, model.NewToolResultJSONPart("remember-1", "Remember", map[string]any{"accepted": true}, false))
 			event := &session.Event{Type: session.EventTypeToolResult, Message: &response, Meta: test.meta}
 			if test.stale != "" {
 				event.Tool = &session.EventTool{
-					ID: "remember-1", Name: memorytool.RememberToolName,
+					ID: "remember-1", Name: "Remember",
 					Status: test.status, Title: test.stale,
 				}
 			}

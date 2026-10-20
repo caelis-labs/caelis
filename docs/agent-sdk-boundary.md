@@ -179,6 +179,50 @@ Compaction receipts append under their original mutation authority independently
 of the source revision. A checkpoint may advance past concurrent journal writes
 only after verifying unchanged model-visible history and Session state; its
 commit still uses revision CAS and the original fence.
+The experimental `runtime.CompactionConfig.Async` is disabled by default. When
+enabled, a fenced native Turn can generate one candidate without holding the
+Session write queue. It binds the exact source prefix and coverage sequence,
+request instructions and tool schemas, model identity, dynamic snapshot revision,
+Session state and controller metadata, and the original fence. Adoption permits
+only an unchanged prefix plus a complete, ordered raw tail. Configuration,
+authorization state, or tool catalog changes discard the candidate. Current
+Runtime continuity is assembled again at adoption. Unpaired tool calls/results,
+new checkpoints, and candidates without a smaller projected context are rejected.
+Generation uses frozen canonical source frames, not the possibly older assembled
+foreground request. This conservative path does not promise hot-prefix cache reuse.
+
+Candidate readiness is not a commit. Both compaction paths use the same guarded
+checkpoint writer, with revision CAS and original-ID readback after an uncertain
+write. Only the confirmed canonical compact event is the safe success marker for
+embedding-owned actions such as retiring discovered tool definitions. Consumers
+key their work by that event's ID/Seq and coverage and refresh the next request
+snapshot. Runtime exposure is metadata in that same canonical append, with no
+second retirement mutation. Generation callbacks and lifecycle
+interceptors are not tool-retirement hooks. A catalog change before adoption
+invalidates a candidate; a change after commit belongs to the newly resolved
+request. Runtime does not own an additional MCP compaction callback.
+Dynamic request resolvers supply a side-effect-free `ModelRequestSnapshot.Validate`
+guard that serializes configuration, catalog and authority changes with this
+short commit. Missing validation disables speculation; it does not fabricate a
+provider admission or modify the Host's last-request record.
+Runtime-owned catalog and grant guards still apply to synchronous recovery when
+that optional embedding validator is absent. A dynamic recovery without a
+captured request authority is rejected before generation or checkpoint append
+when either async compaction or deferred retirement is enabled.
+
+An async candidate stays inside its originating Turn. Stop, turn completion and
+synchronous recovery cancel and drain it before Runner completion; existing Host
+work references and fence release therefore already cover its lifetime. Dynamic
+model snapshot leases are retained until drain. A provider that ignores
+cancellation delays completion rather than accessing released resources. The
+opt-in Turn bounds each synchronous recovery with a configurable timeout and
+the existing generation retry limits. Successful independent cycles have no
+Turn-wide quota; the existing durable-progress check stops empty recovery. A ready checkpoint restarts
+request assembly from durable truth, so the ordinary budget gate checks the full
+summary plus tail and current tool definitions before dispatch. Background usage
+receipts never become the foreground context gauge. Uncommitted candidates are
+memory-only and are not resumed or inherited by a fork.
+
 Historical responses without a matching receipt remain readable until the supported
 upgrade floor requires receipts; equal token values alone never prove duplicate calls.
 
@@ -223,6 +267,11 @@ each accepted definition together with its callable, so later catalog changes
 cannot redirect an already-bound name. Replay discoveries whose server is still
 initializing become visible only when that definition is ready, under the same
 budgets.
+
+The default-off [MCP tool lifecycle experiment](mcp-tool-lifecycle.md) adds
+identity/version-bound discovery, notification-driven directory refresh, and
+checkpoint-atomic retirement of Session exposure. It does not change the
+server/plugin lifecycle or remove canonical tool results.
 
 Every MCP invocation reaches Runtime policy admission, including tools loaded
 through ToolSearch, plugins, and injected MCP sources. A ready connection,

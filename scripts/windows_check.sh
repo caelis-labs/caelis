@@ -49,7 +49,5 @@ bash ./scripts/go_test_nonempty.sh ./surfaces/tui/app \
 bash ./scripts/go_test_nonempty.sh ./surfaces/tui/app \
   '^Test(SessionObservationRecovery|SessionObservationRetry|ProductSessionObservationAutomaticallyRecoversAfterHostReplacement)' windows-host-reconnect -count=1
 
-# Match the release configuration for all production packages and Memory Open.
+# Match the release configuration for all production packages.
 CGO_ENABLED=0 go build ./...
-CGO_ENABLED=0 GO_TEST_TIMEOUT=10m bash ./scripts/go_test_nonempty.sh \
-  ./app/gatewayapp/internal/memoryhost '^TestEmbeddedHostBindsSDKClient$' windows-memory-open -count=1
