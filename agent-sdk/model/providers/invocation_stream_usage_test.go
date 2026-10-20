@@ -101,6 +101,15 @@ func TestProviderInvocationsPreserveCumulativeUsageOnReadFailureAndCancel(t *tes
 				if calls != 1 || len(receipts) != 1 || gotErr == nil {
 					t.Fatalf("calls=%d receipts=%#v err=%v", calls, receipts, gotErr)
 				}
+				if provider == "gemini" {
+					wantErr := failure
+					if mode == "cancel" {
+						wantErr = context.Canceled
+					}
+					if !errors.Is(gotErr, wantErr) {
+						t.Fatalf("SDK lost the stream read error: got %v want %v", gotErr, wantErr)
+					}
+				}
 				want := values[len(values)-1]
 				outcome := "failed"
 				if mode == "cancel" {
