@@ -224,6 +224,7 @@ type Inheritance struct {
 	CWDInstructions bool `json:"cwd_instructions"`
 	MCP             bool `json:"mcp"`
 	Skills          bool `json:"skills"`
+	// Deprecated: Core Memory is retired. Retained for wire compatibility; must be false.
 	WorkspaceMemory bool `json:"workspace_memory"`
 }
 

@@ -15,7 +15,7 @@ import (
 
 func TestApplicationModelCapabilitiesReadCanonicalCatalog(t *testing.T) {
 	ctx := t.Context()
-	stack := newLocalStateTestHost(t, &runtimeMemoryHostStub{})
+	stack := newLocalStateTestHost(t)
 	owner := appserver.Principal{ID: stack.composition.authorities.userID}
 	revision, err := stack.ControlStatus().ConfigurationRevision(ctx)
 	if err != nil {

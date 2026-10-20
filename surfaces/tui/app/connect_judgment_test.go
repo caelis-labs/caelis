@@ -105,7 +105,7 @@ func TestTeamOffersJudgmentOnlyForEvaluationScenes(t *testing.T) {
 	m, _ := newSubagentOverlayTestModel(t)
 	profile := modelprofile.ModelProfile{ID: "provider:jev", DisplayName: "Jev", Judgment: true, Backend: modelprofile.Backend{Provider: &modelprofile.ProviderBackend{ModelConfigID: "jev"}}, Effort: modelprofile.EffortCapability{DefaultEffort: "none", Choices: []modelprofile.EffortChoice{{Canonical: "none"}}}}
 	m.subagentOverlay.status.Targets = append(m.subagentOverlay.status.Targets, profile)
-	for _, handle := range []agentbinding.Handle{agentbinding.HandleToolSearch, agentbinding.HandleGuardian, agentbinding.HandleGuardianScreen, agentbinding.HandleMemoryVerifier, agentbinding.HandleSteward, agentbinding.HandleReviewer, agentbinding.HandleOrbit} {
+	for _, handle := range []agentbinding.Handle{agentbinding.HandleToolSearch, agentbinding.HandleGuardian, agentbinding.HandleGuardianScreen, agentbinding.HandleReviewer, agentbinding.HandleOrbit} {
 		m.subagentOverlay.bindingHandle = handle
 		found := false
 		for _, row := range m.subagentBindingRows() {
@@ -113,7 +113,7 @@ func TestTeamOffersJudgmentOnlyForEvaluationScenes(t *testing.T) {
 				found = true
 			}
 		}
-		want := handle == agentbinding.HandleToolSearch || handle == agentbinding.HandleGuardianScreen || handle == agentbinding.HandleMemoryVerifier
+		want := handle == agentbinding.HandleToolSearch || handle == agentbinding.HandleGuardianScreen
 		if found != want {
 			t.Fatalf("Jev choice for %s = %v", handle, found)
 		}

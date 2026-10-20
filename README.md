@@ -100,9 +100,8 @@ requirements and delivery guarantees.
 - **Workspace extensions:** MCP servers, skills, and plugins; project MCP
   configuration requires workspace trust. [Install standard Agent Plugins and
   Claude plugins](docs/plugins.md) through the same Plugin manager.
-- **Durable sessions and memory:** resume conversations and use built-in
-  `Remember` and `Recall`. Memory needs no separate installation and invokes no
-  model unless you explicitly bind the Memory Steward in `/team`.
+- **Durable sessions:** resume conversations from canonical history, including
+  stored tool results.
 - **Interactive or scriptable:** a TUI, text, versioned JSON, streaming JSONL,
   and an ACP server backed by the same Session and Control services.
 

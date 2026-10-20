@@ -124,43 +124,6 @@ func TestTeamCellFocusSingleClickEditsControlsAndAppliesModel(t *testing.T) {
 	}
 }
 
-func TestTeamCellFocusMemoryVerifierSharesStewardAndOffersJev(t *testing.T) {
-	m, service := teamCellTestModel(t)
-	selectSubagentTestRow(t, m, "handle:steward")
-	frame := ansi.Strip(m.renderSubagentOverlay())
-	if strings.Contains(frame, "Memory Verifier") || !strings.Contains(frame, "Verifier Disabled") {
-		t.Fatalf("Verifier is not paired:\n%s", frame)
-	}
-	clickTeamText(t, m, "Memory Steward", "Verifier")
-	if m.subagentOverlay.bindingHandle != agentbinding.HandleMemoryVerifier {
-		t.Fatal("Verifier opened Steward model picker")
-	}
-	frame = ansi.Strip(m.renderSubagentOverlay())
-	if !strings.Contains(frame, "Jev") || strings.Contains(frame, "openai-codex") || strings.Contains(frame, "Claude") {
-		t.Fatalf("incompatible verifier catalog:\n%s", frame)
-	}
-	cmd := clickTeamText(t, m, "Jev", "Jev")
-	if cmd == nil {
-		t.Fatal("Jev single click did not bind")
-	}
-	m.Update(cmd())
-	if service.bindRequest.Handle != agentbinding.HandleMemoryVerifier || service.bindRequest.ProfileID != "provider:jev" || service.bindRequest.Effort != "none" {
-		t.Fatalf("verifier binding: %+v", service.bindRequest)
-	}
-	if m.currentSubagentRow().handle != agentbinding.HandleSteward || m.subagentOverlay.field != subagentFieldAuxiliary {
-		t.Fatal("save lost Steward auxiliary focus")
-	}
-	m.handleSubagentOverlayKey(subagentSpecialKey(tea.KeyEnter))
-	cmd = clickTeamText(t, m, "Disabled", "Disabled")
-	if cmd == nil {
-		t.Fatal("missing disable command")
-	}
-	cmd()
-	if service.reset != agentbinding.HandleMemoryVerifier {
-		t.Fatal("disabling verifier changed Steward binding")
-	}
-}
-
 func TestTeamCellFocusMainQuickControlsUseTypedBinding(t *testing.T) {
 	m, service := teamCellTestModel(t)
 	selectSubagentTestRow(t, m, "handle:orbit")
@@ -293,6 +256,26 @@ func TestTeamCellFocusRenderedFrames(t *testing.T) {
 					}
 				}
 			})
+		}
+	}
+}
+
+func TestTeamRetiredMemoryHandlesAreAbsent(t *testing.T) {
+	m, _ := teamCellTestModel(t)
+	// Even an older Host projection must not recreate retired controls.
+	for _, handle := range []agentbinding.Handle{"steward", "memory-verifier"} {
+		m.subagentOverlay.status.Handles = append(m.subagentOverlay.status.Handles, agentbinding.HandleStatus{Definition: agentbinding.Definition{Handle: handle, Name: string(handle), Class: agentbinding.HandleClassSystem, Configurable: true}})
+	}
+	for _, row := range m.subagentMainRows() {
+		if agentbinding.IsRetired(row.handle) {
+			t.Fatalf("retired row: %#v", row)
+		}
+	}
+	for _, width := range []int{24, 35, 60, 100, 120} {
+		m.width = width
+		frame := strings.ToLower(ansi.Strip(m.renderSubagentOverlay()))
+		if strings.Contains(frame, "steward") || strings.Contains(frame, "verifier") || strings.Contains(frame, "zero-token") {
+			t.Fatalf("retired entry at width %d:\n%s", width, frame)
 		}
 	}
 }

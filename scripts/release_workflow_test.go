@@ -505,8 +505,6 @@ func TestWindowsQualityUsesFocusedNativeGate(t *testing.T) {
 		"CAELIS_WINDOWS_SANDBOX_E2E=1 bash ./scripts/go_test_nonempty.sh",
 		"./agent-sdk/sandbox/windows '^TestRestrictedToken(ExecutionConfig|PythonEnvironment)E2E$' windows-execution-config -count=1",
 		"CGO_ENABLED=0 go build ./...",
-		"CGO_ENABLED=0 GO_TEST_TIMEOUT=10m bash ./scripts/go_test_nonempty.sh",
-		"./app/gatewayapp/internal/memoryhost '^TestEmbeddedHostBindsSDKClient$' windows-memory-open -count=1",
 	} {
 		if !strings.Contains(gate, want) {
 			t.Errorf("Windows release configuration check missing %q", want)

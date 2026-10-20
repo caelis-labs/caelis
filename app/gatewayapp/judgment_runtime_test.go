@@ -32,7 +32,7 @@ func (s guardianModelState) SnapshotState(context.Context, session.SessionRef) (
 }
 
 func TestGuardianPrimaryAndScreeningBindingsComposeAndResetIndependently(t *testing.T) {
-	stack := newLocalStateTestHost(t, &runtimeMemoryHostStub{})
+	stack := newLocalStateTestHost(t)
 	var profiles []modelprofile.ModelProfile
 	for _, name := range []string{"host-default", "session-main", "guardian-specialist"} {
 		profile, err := stack.connectTestModel(ModelConfig{Provider: "ollama", API: providers.APIOllama, Model: name})
@@ -118,7 +118,7 @@ func TestJudgmentConnectionBindsOnlySupportedScenesAndNeverBecomesDefault(t *tes
 	if _, err := modelprofile.SelectDefault(modelprofile.Configuration{Profiles: profiles}, profile.ID, ""); err == nil {
 		t.Fatal("profile accepted judgment default")
 	}
-	for _, handle := range []agentbinding.Handle{agentbinding.HandleToolSearch, agentbinding.HandleGuardianScreen, agentbinding.HandleMemoryVerifier} {
+	for _, handle := range []agentbinding.Handle{agentbinding.HandleToolSearch, agentbinding.HandleGuardianScreen} {
 		if _, err := stack.testAgentBindings().BindAgentBinding(t.Context(), agentbinding.Binding{Handle: handle, ProfileID: profile.ID, Effort: "none"}); err != nil {
 			t.Fatalf("bind %s: %v", handle, err)
 		}
@@ -127,7 +127,7 @@ func TestJudgmentConnectionBindsOnlySupportedScenesAndNeverBecomesDefault(t *tes
 			t.Fatalf("resolve %s = %v, %v", handle, evaluator, err)
 		}
 	}
-	for _, handle := range []agentbinding.Handle{agentbinding.HandleBreeze, agentbinding.HandleGuardian, agentbinding.HandleReviewer, agentbinding.HandleSteward} {
+	for _, handle := range []agentbinding.Handle{agentbinding.HandleBreeze, agentbinding.HandleGuardian, agentbinding.HandleReviewer} {
 		if _, err := stack.testAgentBindings().BindAgentBinding(t.Context(), agentbinding.Binding{Handle: handle, ProfileID: profile.ID, Effort: "none"}); err == nil {
 			t.Fatalf("judgment accepted by generation scene %s", handle)
 		}
@@ -176,7 +176,7 @@ func TestJudgmentConnectionBindsOnlySupportedScenesAndNeverBecomesDefault(t *tes
 }
 
 func TestBoundToolSearchRankerRevokesDeletedProvider(t *testing.T) {
-	stack := newLocalStateTestHost(t, &runtimeMemoryHostStub{})
+	stack := newLocalStateTestHost(t)
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
@@ -209,7 +209,7 @@ func TestBoundToolSearchRankerRevokesDeletedProvider(t *testing.T) {
 }
 
 func TestToolSearchProviderBindingUsesSharedModelResolution(t *testing.T) {
-	stack := newLocalStateTestHost(t, &runtimeMemoryHostStub{})
+	stack := newLocalStateTestHost(t)
 	profile, err := stack.connectTestModel(ModelConfig{Provider: "ollama", API: providers.APIOllama, Model: "tool-specialist"})
 	if err != nil {
 		t.Fatal(err)
@@ -235,7 +235,7 @@ func TestToolSearchProviderBindingEncodesExplicitSpeed(t *testing.T) {
 	// request if the synthetic transport is accidentally disconnected.
 	t.Setenv("HTTPS_PROXY", "http://127.0.0.1:1")
 	t.Setenv("NO_PROXY", "")
-	stack := newLocalStateTestHost(t, &runtimeMemoryHostStub{})
+	stack := newLocalStateTestHost(t)
 	profile, err := stack.connectTestModel(ModelConfig{
 		Provider: "openai", API: providers.APIOpenAI, Model: "gpt-6-sol", BaseURL: "https://api.openai.com/v1", Token: "fixture",
 		ReasoningEffort: "high", ReasoningLevels: []string{"low", "high"},

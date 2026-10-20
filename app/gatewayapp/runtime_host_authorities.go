@@ -9,11 +9,9 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/task/output"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
-	"github.com/caelis-labs/caelis/app/gatewayapp/internal/memoryhost"
 	controladapterhost "github.com/caelis-labs/caelis/control/adapterhost"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/collaboration"
-	"github.com/caelis-labs/caelis/control/memorybinding"
 	"github.com/caelis-labs/caelis/control/modelconfig/codexauth"
 	"github.com/caelis-labs/caelis/control/modelconfig/credentialstore"
 	"github.com/caelis-labs/caelis/control/modelconfig/grokauth"
@@ -21,14 +19,7 @@ import (
 	"github.com/caelis-labs/caelis/control/sessionprofile"
 	"github.com/caelis-labs/caelis/control/streamspool"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/endpoint"
-	v1alpha1 "github.com/caelis-labs/memory/api/memory/v1alpha1"
 )
-
-type runtimeMemoryHost interface {
-	ValidateBinding(memorybinding.RuntimeMemoryBindingSnapshot) error
-	ValidateAuthority(context.Context, memorybinding.RuntimeMemoryBindingSnapshot) error
-	Bind(memorybinding.RuntimeMemoryBindingSnapshot, v1alpha1.SourceContext, v1alpha1.RecallBudget) (memoryhost.BoundClient, error)
-}
 
 // taskOutputLifecycle is the Control-owned close side of the producer-only SDK
 // binding. Keeping it separate prevents Agent Runtime from acquiring replay,
@@ -72,7 +63,6 @@ type runtimeHostAuthorities struct {
 	adapterHost             controladapterhost.Service
 	acpEndpointResolver     endpoint.Resolver
 	sessionModelPins        *sessionModelPinRegistry
-	memoryHost              runtimeMemoryHost
 	lifecycleCtx            context.Context
 	// hostedChildInput is the Host-owned parent/sibling route borrowed by
 	// spawned child Session Runtimes. The function carries routing capability,

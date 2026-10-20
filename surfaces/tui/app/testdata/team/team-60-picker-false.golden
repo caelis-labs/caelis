@@ -12,7 +12,6 @@ System Agents
  · ToolSearch   Main Agent model
  › Guardian     openai-codex/gpt-…  Classifier Disable…
  · Reviewer     Main Agent default
- · Memory S...  Static (zero-toke…  Verifier Disabled ▾
 Custom roles
  · + new        Choose a name, pu…
 Snapshots

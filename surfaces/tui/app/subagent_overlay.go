@@ -256,7 +256,7 @@ func (m *Model) subagentMainRows() []subagentOverlayRow {
 	}}
 	for _, item := range state.status.Handles {
 		// Auxiliary bindings stay on their owning role's row.
-		if item.Definition.Handle == agentbinding.HandleGuardianScreen || item.Definition.Handle == agentbinding.HandleMemoryVerifier {
+		if item.Definition.Handle == agentbinding.HandleGuardianScreen || agentbinding.IsRetired(item.Definition.Handle) {
 			continue
 		}
 		detail := subagentBindingDetail(item)
@@ -309,21 +309,17 @@ func (m *Model) subagentBindingRows() []subagentOverlayRow {
 	switch handle {
 	case agentbinding.HandleGuardianScreen:
 		resetDetail = "Use Guardian Agent review directly"
-	case agentbinding.HandleMemoryVerifier:
-		resetDetail = "Disable extra Memory proposal checks"
 	case agentbinding.HandleToolSearch:
 		resetDetail = "Use the Main Agent model for MCP discovery"
 	case agentbinding.HandleGuardian:
 		resetDetail = "Use the Main Agent model"
 	case agentbinding.HandleReviewer:
 		resetDetail = "Use the Main Agent default"
-	case agentbinding.HandleSteward:
-		resetDetail = "Use static zero-token Memory"
 	}
 	var rows []subagentOverlayRow
 	if !state.creatingRole {
 		label := "Default"
-		if handle == agentbinding.HandleGuardianScreen || handle == agentbinding.HandleMemoryVerifier {
+		if handle == agentbinding.HandleGuardianScreen {
 			label = "Disabled"
 		}
 		rows = append(rows, subagentOverlayRow{
@@ -458,14 +454,12 @@ func subagentBindingDetail(item agentbinding.HandleStatus) string {
 	}
 	if item.Definition.Class == agentbinding.HandleClassSystem {
 		switch item.Definition.Handle {
-		case agentbinding.HandleMemoryVerifier, agentbinding.HandleGuardianScreen:
+		case agentbinding.HandleGuardianScreen:
 			return "Disabled"
 		case agentbinding.HandleToolSearch:
 			return "Main Agent model"
 		case agentbinding.HandleGuardian:
 			return "Main Agent default"
-		case agentbinding.HandleSteward:
-			return "Static (zero-token)"
 		default:
 			return "Main Agent default"
 		}

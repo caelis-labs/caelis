@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -14,7 +13,6 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/control/mcpconfig"
-	"github.com/caelis-labs/caelis/control/memorybinding"
 	"github.com/caelis-labs/caelis/control/modelconfig/credentialstore"
 )
 
@@ -171,9 +169,6 @@ func (s *Store) loadLegacyLocked(path string) (document AppConfig, committed boo
 }
 
 func decodeCurrentAppConfig(data []byte) (AppConfig, error) {
-	if err := validateCurrentMemoryWire(data); err != nil {
-		return AppConfig{}, wrapInvalidMemoryConfiguration(err)
-	}
 	var doc AppConfig
 	if err := json.Unmarshal(data, &doc); err != nil {
 		return AppConfig{}, fmt.Errorf("gatewayapp: decode app config: %w", err)
@@ -186,28 +181,6 @@ func decodeCurrentAppConfig(data []byte) (AppConfig, error) {
 		return AppConfig{}, err
 	}
 	return doc, nil
-}
-
-func validateCurrentMemoryWire(data []byte) error {
-	var top struct {
-		Memory json.RawMessage `json:"memory"`
-	}
-	if err := json.Unmarshal(data, &top); err != nil {
-		return fmt.Errorf("gatewayapp: decode app config: %w", err)
-	}
-	if len(top.Memory) == 0 || string(top.Memory) == "null" {
-		return nil
-	}
-	decoder := json.NewDecoder(bytes.NewReader(top.Memory))
-	decoder.DisallowUnknownFields()
-	var current memorybinding.Configuration
-	if err := decoder.Decode(&current); err != nil {
-		return fmt.Errorf("decode current Memory configuration: %w", err)
-	}
-	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		return fmt.Errorf("decode current Memory configuration: trailing data")
-	}
-	return nil
 }
 
 type legacyCredentialPrevious struct {

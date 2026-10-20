@@ -407,9 +407,6 @@ func (s *runtimeComposition) executeControlCommand(ctx context.Context, principa
 		if errors.Is(err, session.ErrInvalidSession) {
 			return appserver.CommandResult{Outcome: appserver.OutcomeRejected}, classifyControlPreDispatchError(err)
 		}
-		if err == nil {
-			created, err = s.admitCreatedMemorySession(ctx, created)
-		}
 		return sessionCommandResult(created), classifyControlBackendError(err)
 	case appserver.CloseSessionRequest:
 		active, err := s.checkControlCommandCASAllowClosed(ctx, req.WriteBase)

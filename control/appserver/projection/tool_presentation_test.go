@@ -8,7 +8,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
-	"github.com/caelis-labs/caelis/control/memorytool"
 )
 
 func TestBuiltinToolPresentationRequiresExactDefinitionName(t *testing.T) {
@@ -37,7 +36,7 @@ func TestBuiltinToolPresentationRequiresExactDefinitionName(t *testing.T) {
 func TestMemoryToolPresentationUsesProductSemantics(t *testing.T) {
 	t.Parallel()
 
-	if got := projectedToolKind(memorytool.RememberToolName); got != projectedToolKindEdit {
+	if got := projectedToolKind("Remember"); got != projectedToolKindEdit {
 		t.Fatalf("projectedToolKind(Remember) = %q, want edit", got)
 	}
 	for status, want := range map[string]string{
@@ -45,14 +44,14 @@ func TestMemoryToolPresentationUsesProductSemantics(t *testing.T) {
 		eventstream.ToolStatusCompleted: "Updated memory",
 		eventstream.ToolStatusFailed:    "Update memory failed",
 	} {
-		if got := projectedToolTitle(memorytool.RememberToolName, map[string]any{"text": "private fact"}, status); got != want {
+		if got := projectedToolTitle("Remember", map[string]any{"text": "private fact"}, status); got != want {
 			t.Fatalf("projectedToolTitle(Remember, %q) = %q, want %q", status, got, want)
 		}
 	}
-	if got := projectedToolKind(memorytool.RecallToolName); got != projectedToolKindSearch {
+	if got := projectedToolKind("Recall"); got != projectedToolKindSearch {
 		t.Fatalf("projectedToolKind(Recall) = %q, want search", got)
 	}
-	if got := projectedToolTitle(memorytool.RecallToolName, map[string]any{"query": "项目技术栈"}, eventstream.ToolStatusPending); got != "Search 项目技术栈" {
+	if got := projectedToolTitle("Recall", map[string]any{"query": "项目技术栈"}, eventstream.ToolStatusPending); got != "Search 项目技术栈" {
 		t.Fatalf("projectedToolTitle(Recall) = %q", got)
 	}
 	if got := projectedToolKind("remember"); got != projectedToolKindOther {
@@ -61,7 +60,7 @@ func TestMemoryToolPresentationUsesProductSemantics(t *testing.T) {
 
 	content := projectedToolResultContent(
 		"remember-1",
-		memorytool.RememberToolName,
+		"Remember",
 		map[string]any{"text": "private fact"},
 		map[string]any{"accepted": true},
 		nil,
@@ -73,7 +72,7 @@ func TestMemoryToolPresentationUsesProductSemantics(t *testing.T) {
 
 	content = projectedToolResultContent(
 		"recall-1",
-		memorytool.RecallToolName,
+		"Recall",
 		map[string]any{"query": "missing exact terms"},
 		map[string]any{"fragments": []any{}, "message": "No matching memories found."},
 		nil,

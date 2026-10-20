@@ -20,7 +20,7 @@ func TestHostUnifiedMagpieProfilesSelectAndDeleteByOriginalIdentity(t *testing.T
 		fmt.Fprint(w, `{"data":[{"id":"typesafe/jev-latest","kind":"decision"},{"id":"codex/gpt-6-luna","context_window":272000,"max_output_tokens":32768,"reasoning":false,"modalities":{"input":["text"]}}]}`)
 	}))
 	defer provider.Close()
-	stack := newLocalStateTestHost(t, &runtimeMemoryHostStub{})
+	stack := newLocalStateTestHost(t)
 	principal := appserver.Principal{ID: stack.UserID()}
 	revision, err := stack.ControlStatus().ConfigurationRevision(t.Context())
 	if err != nil {

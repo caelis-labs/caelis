@@ -18,7 +18,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
-	"github.com/caelis-labs/caelis/control/memorybinding"
 	controlplacement "github.com/caelis-labs/caelis/control/placement"
 	"github.com/caelis-labs/caelis/control/sessionprofile"
 	"github.com/caelis-labs/caelis/control/sessionvisibility"
@@ -30,7 +29,7 @@ import (
 
 // assembleApplicationSnapshot binds execution authority once; each model request
 // resolves its desired profile separately. Choosing a directory never imports
-// workspace instructions, skills, Memory, MCP, plugins or the process prompt.
+// workspace instructions, skills, MCP, plugins or the process prompt.
 func (a *workspaceConfigAssembler) assembleProfileSnapshot(ctx context.Context, active session.Session, activity sessionRuntimeActivity, sessions session.Service) (*sessionRuntimeInstance, error) {
 	store := a.deps.authorities.sessionProfiles
 	if store == nil || !sessionvisibility.IsApplicationSession(active) {
@@ -45,13 +44,6 @@ func (a *workspaceConfigAssembler) assembleProfileSnapshot(ctx context.Context, 
 	}
 	if err := validateApplicationExecutionPlatform(binding.Profile.Execution); err != nil {
 		return nil, err
-	}
-	state, err := sessions.SnapshotState(ctx, active.SessionRef)
-	if err != nil {
-		return nil, err
-	}
-	if _, bound := state[memorybinding.SessionStateKey]; bound {
-		return nil, fmt.Errorf("gatewayapp: application Session cannot inherit Workspace Memory")
 	}
 	workspace, err := canonicalSessionWorkspace(active)
 	if err != nil {

@@ -42,8 +42,6 @@ func (s *subagentOverlayState) subagentCompanion(handle agentbinding.Handle) *su
 		}) {
 			return nil
 		}
-	case agentbinding.HandleSteward:
-		c.handle, c.label = agentbinding.HandleMemoryVerifier, "Verifier"
 	default:
 		return nil
 	}

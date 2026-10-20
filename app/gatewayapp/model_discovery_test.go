@@ -20,7 +20,7 @@ func TestHostMagpieDiscoveryAndConnectShareRetainedCredential(t *testing.T) {
 		fmt.Fprint(w, `{"data":[{"id":"vendor/a","context_window":200000,"max_output_tokens":32000,"reasoning":false,"modalities":{"input":["text"]}},{"id":"vendor/b","context_window":200000,"max_output_tokens":32000,"reasoning":false,"modalities":{"input":["text"]}}]}`)
 	}))
 	defer provider.Close()
-	stack := newLocalStateTestHost(t, &runtimeMemoryHostStub{})
+	stack := newLocalStateTestHost(t)
 	principal := appserver.Principal{ID: stack.UserID()}
 	revision, err := stack.ControlStatus().ConfigurationRevision(t.Context())
 	if err != nil {
@@ -75,7 +75,7 @@ func TestHostMagpieJudgmentGatewaysKeepSeparateAddressesAndCredentials(t *testin
 	a, b := newGateway(), newGateway()
 	defer a.Close()
 	defer b.Close()
-	stack := newLocalStateTestHost(t, &runtimeMemoryHostStub{})
+	stack := newLocalStateTestHost(t)
 	principal := appserver.Principal{ID: stack.UserID()}
 	revision, err := stack.ControlStatus().ConfigurationRevision(t.Context())
 	if err != nil {

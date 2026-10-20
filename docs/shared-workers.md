@@ -104,9 +104,10 @@ exact Turn; the Session subscription stays open to observe later user or Bot
 Turns without status polling.
 
 The Worker samples normal Host configuration at activation: native tools,
-trusted-workspace instructions, MCP, plugins, environment, Workspace Memory and
-the native permission/approval policy. Bot-private profile state,
-callback catalogs and private Memory are not inherited. A workspace path grants
+trusted-workspace instructions, MCP, plugins, environment and the native
+permission/approval policy. Bot-private profile state and callback catalogs are
+not inherited. Any application-provided private memory capability remains owned
+by that application; Core does not provide built-in Memory inheritance. A workspace path grants
 no extra tool privileges; normal workspace trust and approvals still apply.
 
 The same authenticated owner can use native Session compaction, model and
