@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.73.1](https://github.com/caelis-labs/caelis/compare/v0.73.0...v0.73.1) (2026-10-20)
+
+
+### Bug Fixes
+
+* **plugin:** trust Desktop World MCP sources across upgrades ([#163](https://github.com/caelis-labs/caelis/issues/163)) ([7514902](https://github.com/caelis-labs/caelis/commit/751490232720874a680699f5ad81090cb5e96f7a))
+* **sdk:** avoid per-byte reflection in JSON validation and cloning ([#159](https://github.com/caelis-labs/caelis/issues/159)) ([a7e16c0](https://github.com/caelis-labs/caelis/commit/a7e16c09b7ca558c80641e3f0e6b1e621e64ce8c))
+* **sdk:** share durable media within session events ([#162](https://github.com/caelis-labs/caelis/issues/162)) ([1e6cd9a](https://github.com/caelis-labs/caelis/commit/1e6cd9ad78070b7b5ba42c81a1416045d7a9bb0c))
+
 ## [0.73.0](https://github.com/caelis-labs/caelis/compare/v0.72.2...v0.73.0) (2026-10-20)
 
 ### Core Memory retirement
