@@ -94,9 +94,17 @@ saved sets. They are absent from catalogs, placement and `/team`, remain reserve
 against reuse as custom roles, and cannot retain a model dependency.
 
 Existing bind/reset request shapes still decode. Requests for either retired
-handle are rejected with a retirement error before configuration persistence or
-scheduling; they never report a saved or executed operation. Deprecated embedding
-selectors and binding references are accepted but ignored, including callbacks.
+handle return HTTP 400 with a terminal `rejected` command receipt and a retirement
+error before configuration persistence or scheduling. The configuration revision
+does not advance; the receipt never reports a saved or executed operation.
+Ordinary role mutations continue to save the full Host document, retaining opaque
+`memory` JSON and omitting retired bindings. Binding-set commands carry a set name,
+not a client-owned role table; applying an old set ignores retired entries before
+validating the remaining bindings. These ignored entries cannot make another
+role update or an otherwise valid saved set fail.
+
+Deprecated embedding selectors and binding references are accepted but ignored,
+including callbacks.
 `gatewayapp` owns those source-compatible input types until the next breaking
 embedding API boundary. Remove the configuration and wire shims only when the
 minimum supported upgrade source and client versions exclude Memory writers and
