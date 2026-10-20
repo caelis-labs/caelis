@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.73.0](https://github.com/caelis-labs/caelis/compare/v0.72.2...v0.73.0) (2026-10-20)
+
+
+### Features
+
+* add experimental async compaction and MCP lifecycle controls ([#157](https://github.com/caelis-labs/caelis/issues/157)) ([4e6aab0](https://github.com/caelis-labs/caelis/commit/4e6aab070624fb281c74c233b9b3a10b1a602daf))
+
+
+### Bug Fixes
+
+* **sandbox/windows:** drain refresh before runtime shutdown ([#152](https://github.com/caelis-labs/caelis/issues/152)) ([0bcb193](https://github.com/caelis-labs/caelis/commit/0bcb193ce4480307c2e403427c61f06a0b0e1073))
+
 ## [0.72.2](https://github.com/caelis-labs/caelis/compare/v0.72.1...v0.72.2) (2026-10-16)
 
 
