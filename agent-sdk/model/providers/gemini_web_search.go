@@ -29,7 +29,8 @@ func (l *geminiLLM) SearchWeb(ctx context.Context, req model.WebSearchRequest) (
 		ToolConfig: &genai.ToolConfig{
 			IncludeServerSideToolInvocations: &includeServerSideTools,
 		},
-		MaxOutputTokens: 512,
+		MaxOutputTokens:       512,
+		AutomaticContinuation: genai.Ptr(false),
 	}
 	out, err := client.Models.GenerateContent(runCtx, l.name, []*genai.Content{{
 		Role:  "user",

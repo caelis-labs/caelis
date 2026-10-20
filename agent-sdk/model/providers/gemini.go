@@ -75,6 +75,9 @@ func (l *geminiLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 		googleSearchEnabled := !req.DisableTools && geminiGoogleSearchEnabled(l.name, req.Tools)
 		cfg := &genai.GenerateContentConfig{
 			Tools: toGeminiTools(req.Tools, googleSearchEnabled),
+			// Runtime owns generation admission, recovery and per-attempt usage.
+			// Do not hide additional billed generations inside an SDK call.
+			AutomaticContinuation: genai.Ptr(false),
 		}
 		if googleSearchEnabled {
 			includeServerSideTools := true
@@ -106,14 +109,7 @@ func (l *geminiLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 		}
 		defer cancel()
 
-		clientModel := l
-		var streamRead geminiStreamReadError
-		if req.Stream {
-			cloned := *l
-			cloned.httpClient = streamRead.client(l.httpClient)
-			clientModel = &cloned
-		}
-		client, err := clientModel.newClient(runCtx)
+		client, err := l.newClient(runCtx)
 		if err != nil {
 			yield(nil, err)
 			return
@@ -202,7 +198,7 @@ func (l *geminiLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 			}
 		}
 
-		if err := errors.Join(runCtx.Err(), streamRead.err()); err != nil {
+		if err := runCtx.Err(); err != nil {
 			yield(nil, err)
 			return
 		}

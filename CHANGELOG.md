@@ -2,15 +2,29 @@
 
 ## [0.73.0](https://github.com/caelis-labs/caelis/compare/v0.72.2...v0.73.0) (2026-10-20)
 
+### Core Memory retirement
 
-### Features
+Core no longer opens the embedded Memory appliance, registers `Remember`/`Recall`, or runs Steward and Memory Verifier jobs ([#156](https://github.com/caelis-labs/caelis/pull/156)). **v0.72.2 is the last Core Memory writer; v0.73.0 is the first no-write release.** Existing Memory databases, WAL files, credentials and canonical Session history are retained without migration or deletion. Historical tool results remain readable.
 
-* add experimental async compaction and MCP lifecycle controls ([#157](https://github.com/caelis-labs/caelis/issues/157)) ([4e6aab0](https://github.com/caelis-labs/caelis/commit/4e6aab070624fb281c74c233b9b3a10b1a602daf))
+Legacy `memory` configuration is preserved opaquely during unrelated saves. Retired role bindings are ignored when loading configuration and saved sets; direct bind/reset requests return HTTP 400 with a terminal rejected receipt. Compatibility readers remain until the supported upgrade floor excludes those writers and requests. Notebook, summaries, ordinary Session persistence and Bot-owned Memory retain their existing owners.
 
+### Experimental Runtime controls
 
-### Bug Fixes
+Three independent options are available through `/experimental` and the capability-negotiated Control API: background compaction, MCP catalog refresh and deferred tool retirement ([#157](https://github.com/caelis-labs/caelis/pull/157)). **All three default to off.** Saved values are Host-wide defaults applied at the next Runtime activation; an existing activation retains its effective values.
 
-* **sandbox/windows:** drain refresh before runtime shutdown ([#152](https://github.com/caelis-labs/caelis/issues/152)) ([0bcb193](https://github.com/caelis-labs/caelis/commit/0bcb193ce4480307c2e403427c61f06a0b0e1073))
+Tool retirement occurs only after a confirmed durable canonical compact. A ready summary is not a retirement signal. Configuration, catalog, permission and execution-fence checks guard checkpoint adoption; unknown writes retain their original identity and payload.
+
+These features have deterministic Runtime, protocol, persistent replay and rendered-terminal regression coverage. Summary-model semantic fidelity, provider cache hits, monetary savings and production performance have not been established.
+
+### Fixes and dependencies
+
+- Drain native Windows sandbox refresh work before releasing Runtime ownership ([#152](https://github.com/caelis-labs/caelis/pull/152)).
+- Update Anthropic Go SDK to 1.82.0, Gemini Go SDK to 1.75.0 and the VT test emulator to 0.1.0. Keep Gemini SDK automatic continuation disabled so additional billed generations cannot bypass the existing invocation boundary; preserve original stream errors and usage receipts ([#155](https://github.com/caelis-labs/caelis/pull/155)).
+
+### Regression coverage
+
+- Wait for authoritative Turn completion after TUI rendering ([#151](https://github.com/caelis-labs/caelis/pull/151)).
+- Validate the current Desktop World single-exec Plugin contract with isolated fixtures ([#154](https://github.com/caelis-labs/caelis/pull/154)). This does not establish real desktop input or native GUI acceptance.
 
 ## [0.72.2](https://github.com/caelis-labs/caelis/compare/v0.72.1...v0.72.2) (2026-10-16)
 
