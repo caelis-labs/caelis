@@ -18,6 +18,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/control/experimental"
 	controlplacement "github.com/caelis-labs/caelis/control/placement"
 	"github.com/caelis-labs/caelis/control/sessionprofile"
 	"github.com/caelis-labs/caelis/control/sessionvisibility"
@@ -64,7 +65,7 @@ func (a *workspaceConfigAssembler) assembleProfileSnapshot(ctx context.Context, 
 		authorities: a.deps.authorities, sessions: sessions, workspace: workspace, lookup: lookup,
 		placementCache:    placement,
 		activation:        &sessionRuntimeActivation{modelCatalog: a.deps.modelCatalog, sessionRef: active.SessionRef},
-		activeRuntime:     stackRuntimeConfig{ContextWindow: contextWindow, ApprovalMode: sessionprofile.EffectiveApprovalMode(binding.Profile)},
+		activeRuntime:     stackRuntimeConfig{Experimental: experimental.Complete(modelDocument.Experimental), ContextWindow: contextWindow, ApprovalMode: sessionprofile.EffectiveApprovalMode(binding.Profile)},
 		executionConfig:   sandbox.CloneExecutionConfig(active.ExecutionConfig),
 		retainRuntimeWork: activity.retainWork, runtimeTaskChanged: activity.taskChanged, taskCommitted: activity.taskCommitted,
 	}}
@@ -116,6 +117,7 @@ func (a *workspaceConfigAssembler) assembleProfileSnapshot(ctx context.Context, 
 	}
 	instance.activeRuntime.PolicyProfile = mode
 	compaction := defaultCompactionConfig(contextWindow)
+	compaction.Async.Enabled = instance.activeRuntime.Experimental[experimental.AsyncCompact]
 	// The complete tool set is independent of Turn source. An unavailable
 	// callback provenance is rejected during resolution, never silently widened.
 	estimateCapabilities, releaseEstimate, err := resolver.acquireCapabilities(ctx, configuration)
@@ -146,7 +148,8 @@ func (a *workspaceConfigAssembler) assembleProfileSnapshot(ctx context.Context, 
 	}
 	instance.activeRuntime.Assembly.Agents = agents
 	localConfig := runtime.Config{
-		Sessions: sessions, AgentFactory: chat.Factory{}, Compaction: compaction,
+		ExperimentalToolRetirement: instance.activeRuntime.Experimental[experimental.ToolRetirement],
+		Sessions:                   sessions, AgentFactory: chat.Factory{}, Compaction: compaction,
 		Diagnostics: a.deps.authorities.diagnostics, PolicyRegistry: policies, DefaultPolicyMode: mode,
 		MCPGrants:     a.deps.authorities.mcpGrants,
 		SandboxPolicy: sandboxPolicy,
@@ -162,6 +165,7 @@ func (a *workspaceConfigAssembler) assembleProfileSnapshot(ctx context.Context, 
 	bundle := &gatewayRuntimeBundle{ACPControlPlane: childPlane, RuntimeConfig: instance.activeRuntime, EstimatedPromptPrefixTokens: compaction.EstimatedPromptPrefixTokens}
 	bundle.CloseCapabilities = resolver.closeCapabilities
 	bundle.CapabilityStatus = resolver.capabilityStatus
+	bundle.CapabilityRefresh = resolver.refreshMCPTools
 	bundle.CapabilityUpdated = resolver.configurationCommitted
 	if execRuntime != nil {
 		bundle.Exec = execRuntime
@@ -345,6 +349,13 @@ func (r *applicationTurnResolver) resolveModelRequest(ctx context.Context, sourc
 		Instructions: instructions, Reasoning: model.ReasoningConfig{Effort: resolved.ReasoningEffort},
 		Request: agent.ModelRequestOptions{ServiceTier: model.ServiceTier(configuration.Profile.ServiceTier)},
 		Release: release,
+		Validate: func(ctx context.Context) (func(), error) {
+			unlock, err := store.ValidateConfiguration(ctx, r.binding.Scope, r.binding.SessionID, configuration.Revision)
+			if err != nil {
+				return nil, errors.Join(agent.ErrModelRequestSnapshotStale, err)
+			}
+			return unlock, nil
+		},
 		Admit: func(ctx context.Context, request agent.ModelRequestAdmission) error {
 			err := store.AdmitRequest(ctx, r.binding.Scope, r.binding.SessionID, sessionprofile.RequestConfiguration{
 				Revision: configuration.Revision, RequestID: request.RequestID, TurnID: request.TurnID,

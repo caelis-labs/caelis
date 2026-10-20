@@ -13,6 +13,8 @@ import (
 
 type MCPTool struct {
 	client     *Client
+	manager    *Manager
+	bindingID  uint64
 	pluginID   string
 	serverName string
 	origName   string
@@ -50,6 +52,11 @@ func (t *MCPTool) addReplayAliases(in []string) {
 }
 
 func (t *MCPTool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
+	if t.manager != nil {
+		if err := t.manager.admitCatalogTool(ctx, t); err != nil {
+			return tool.Result{}, err
+		}
+	}
 	var args map[string]any
 	if len(call.Input) > 0 {
 		if err := json.Unmarshal(call.Input, &args); err != nil {

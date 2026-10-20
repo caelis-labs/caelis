@@ -145,6 +145,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET "+apiPrefix+"/sessions/{session_id}/tasks/watch", s.watchTaskDirectory)
 	s.mux.HandleFunc("GET "+apiPrefix+"/sessions/{session_id}/tasks/{task_id}/events", s.taskEvents)
 	s.mux.HandleFunc("GET "+apiPrefix+"/sessions/{session_id}/tasks/{task_id}/subscribe", s.subscribeTask)
+	s.experimentalRoutes()
 	s.focusedRoutes()
 	s.sessionConfigurationRoutes()
 	s.sessionResourceRoutes()

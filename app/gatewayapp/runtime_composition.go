@@ -1,6 +1,7 @@
 package gatewayapp
 
 import (
+	"context"
 	"sync"
 	"sync/atomic"
 
@@ -64,6 +65,7 @@ type runtimeComposition struct {
 	mcpMgr             *mcp.Manager
 	capabilityClose    func()
 	capabilityStatus   func(uint64) sessionprofile.MCPStatus
+	capabilityRefresh  func(context.Context, string, string) error
 	capabilityUpdated  func(sessionprofile.Configuration)
 	pluginCacheRelease func() error
 	retainRuntimeWork  func(session.SessionRef) func()

@@ -25,12 +25,14 @@ import (
 
 // Config defines one baseline local runtime instance.
 type Config struct {
-	Sessions       session.Service
-	AgentFactory   agent.AgentFactory
-	RunIDGenerator func() string
-	Clock          func() time.Time
-	Compaction     CompactionConfig
-	Compactor      compact.Engine
+	// ExperimentalToolRetirement enables versioned discovery and delayed exposure removal. Default false.
+	ExperimentalToolRetirement bool
+	Sessions                   session.Service
+	AgentFactory               agent.AgentFactory
+	RunIDGenerator             func() string
+	Clock                      func() time.Time
+	Compaction                 CompactionConfig
+	Compactor                  compact.Engine
 	// Diagnostics receives fixed Runtime classifications only. Callers must not
 	// attach user content, Session identities, or workspace paths.
 	Diagnostics         *slog.Logger
@@ -71,6 +73,7 @@ type Config struct {
 
 // Runtime is the baseline local runtime implementation.
 type Runtime struct {
+	toolRetirement           bool
 	childApprovalRequester   agent.ApprovalRequester
 	sessions                 session.Service
 	agentFactory             agent.AgentFactory
@@ -123,6 +126,7 @@ func New(cfg Config) (*Runtime, error) {
 		return nil, errors.New("agent-sdk/runtime: agent factory is required")
 	}
 	r := &Runtime{
+		toolRetirement:           cfg.ExperimentalToolRetirement,
 		sessions:                 cfg.Sessions,
 		agentFactory:             cfg.AgentFactory,
 		runIDGenerator:           cfg.RunIDGenerator,

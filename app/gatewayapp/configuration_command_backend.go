@@ -14,6 +14,8 @@ func (s *controlCommandBackend) executeConfigurationCommand(ctx context.Context,
 	switch typed := request.(type) {
 	case appserver.ConnectModelRequest, appserver.UseModelRequest, appserver.DeleteModelRequest:
 		return s.executeHostModelConfigurationCommand(ctx, action, request)
+	case appserver.ExperimentalRequest:
+		return s.executeExperimentalCommand(ctx, typed)
 	case appserver.WorkspaceTrustRequest:
 		return s.executeWorkspaceTrustCommand(ctx, action, typed)
 	}

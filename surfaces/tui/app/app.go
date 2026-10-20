@@ -441,6 +441,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case uiPreferencesSavedMsg:
 		return m, m.finishUIPreferencesSave(typed)
 
+	case experimentalResultMsg:
+		return m, m.finishExperimental(typed)
+
 	case themePreviewMsg:
 		m.applyThemePreview(typed)
 		return m, nil

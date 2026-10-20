@@ -851,6 +851,7 @@ func (s *runtimeComposition) closeWorkspaceResources() error {
 	capabilityClose := s.capabilityClose
 	s.capabilityClose = nil
 	s.capabilityStatus = nil
+	s.capabilityRefresh = nil
 	s.capabilityUpdated = nil
 	pluginCacheRelease := s.pluginCacheRelease
 	s.mu.Unlock()

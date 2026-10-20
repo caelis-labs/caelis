@@ -33,8 +33,18 @@ type ModelRequestSnapshot struct {
 	// A successful admission pins this snapshot through response tool execution;
 	// the hook must not retain its update lock for the provider stream lifetime.
 	Admit func(context.Context, ModelRequestAdmission) error
+	// Validate checks and holds this snapshot's revision, full tool catalog
+	// identity and execution authority current until the returned release is
+	// called. It must serialize with the embedding's updates, without admitting
+	// a provider request or recording LastRequest. Runtime holds this guard only
+	// across a short durable candidate commit, never generation. Success requires
+	// a non-nil release. It is required for experimental async compaction with a
+	// dynamic resolver; absence disables speculation. ErrModelRequestSnapshotStale
+	// refreshes the unsent request. Actual provider attempts still call Admit.
+	Validate func(context.Context) (release func(), err error)
 	// Release relinquishes resources held by this snapshot after its provider
-	// response and all resulting tool calls finish. The resolver owns this hook.
+	// response and all resulting tool calls and speculative producers finish.
+	// The resolver owns this hook.
 	Release func()
 }
 

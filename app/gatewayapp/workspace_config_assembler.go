@@ -10,6 +10,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
+	"github.com/caelis-labs/caelis/control/experimental"
 	controlplacement "github.com/caelis-labs/caelis/control/placement"
 	"github.com/caelis-labs/caelis/control/sessionvisibility"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
@@ -74,6 +75,7 @@ func (a *workspaceConfigAssembler) assembleSnapshot(
 	}
 	process := deps.processConfig.snapshot()
 	runtimeConfig := process.runtime
+	runtimeConfig.Experimental = experimental.Complete(doc.Experimental)
 	sandboxConfig := mergeSandboxConfig(doc.Sandbox, process.sandboxOverride)
 	securityPosture := resolveProcessSecurityPosture(runtimeConfig)
 	if securityPosture.RequiredSandboxBackend != "" {

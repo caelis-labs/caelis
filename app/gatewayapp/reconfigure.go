@@ -26,6 +26,7 @@ import (
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/sandboxpolicy"
 	"github.com/caelis-labs/caelis/control/agentbinding"
+	"github.com/caelis-labs/caelis/control/experimental"
 	"github.com/caelis-labs/caelis/control/plugin"
 	"github.com/caelis-labs/caelis/control/sessionprofile"
 	"github.com/caelis-labs/caelis/control/sessionvisibility"
@@ -135,6 +136,7 @@ type gatewayRuntimeBundle struct {
 	MCP                         *mcp.Manager
 	CloseCapabilities           func()
 	CapabilityStatus            func(uint64) sessionprofile.MCPStatus
+	CapabilityRefresh           func(context.Context, string, string) error
 	CapabilityUpdated           func(sessionprofile.Configuration)
 	RuntimeConfig               stackRuntimeConfig
 	EstimatedPromptPrefixTokens int
@@ -323,7 +325,7 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 		bundle.Close()
 		return nil, fmt.Errorf("gatewayapp: failed to initialize MCP servers: %w", err)
 	}
-	mcpMgr, err := mcp.NewManager(context.WithoutCancel(ctx), mcpSpecs, s.mcpFailureNotifier())
+	mcpMgr, err := mcp.NewManagerWithOptions(context.WithoutCancel(ctx), mcpSpecs, s.mcpFailureNotifier(), mcp.ManagerOptions{RefreshTools: runtimeCfg.Experimental[experimental.MCPRefresh]})
 	if err != nil {
 		bundle.Close()
 		return nil, fmt.Errorf("gatewayapp: failed to initialize MCP servers: %w", err)
@@ -371,6 +373,7 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 
 	estimatedPrefixTokens := estimateModelPromptPrefixTokens(effectiveBaseMetadata, tools)
 	compactionCfg := defaultCompactionConfig(runtimeCfg.ContextWindow)
+	compactionCfg.Async.Enabled = runtimeCfg.Experimental[experimental.AsyncCompact]
 	compactionCfg.EstimatedPromptPrefixTokens = estimatedPrefixTokens
 	contextRouter, err := controlplane.NewContextRouter(s.sessions)
 	if err != nil {
@@ -378,22 +381,23 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 		return nil, err
 	}
 	localCfg := runtime.Config{
-		Sessions:                 s.sessions,
-		AgentFactory:             chat.Factory{},
-		DefaultPolicyMode:        effectivePolicyProfile,
-		SandboxPolicy:            sandboxPolicySnapshot,
-		PolicyRegistry:           policyRegistry,
-		DefaultApprovalMode:      string(kernelimpl.NormalizeApprovalMode(runtimeCfg.ApprovalMode)),
-		MCPGrants:                s.authorities.mcpGrants,
-		Compaction:               compactionCfg,
-		Diagnostics:              s.authorities.diagnostics,
-		ControllerContextRouter:  contextRouter,
-		ControllerEventForwarder: acpbridge.NewControllerForwarder(s.sessions),
-		TaskStore:                s.authorities.taskStore,
-		TaskOutput:               s.authorities.taskOutput,
-		TaskActivityChanged:      s.runtimeTaskChanged,
-		TaskCommitted:            s.taskCommitted,
-		ChildApprovalRequester:   backgroundChildApprovalRequester{composition: s},
+		ExperimentalToolRetirement: runtimeCfg.Experimental[experimental.ToolRetirement],
+		Sessions:                   s.sessions,
+		AgentFactory:               chat.Factory{},
+		DefaultPolicyMode:          effectivePolicyProfile,
+		SandboxPolicy:              sandboxPolicySnapshot,
+		PolicyRegistry:             policyRegistry,
+		DefaultApprovalMode:        string(kernelimpl.NormalizeApprovalMode(runtimeCfg.ApprovalMode)),
+		MCPGrants:                  s.authorities.mcpGrants,
+		Compaction:                 compactionCfg,
+		Diagnostics:                s.authorities.diagnostics,
+		ControllerContextRouter:    contextRouter,
+		ControllerEventForwarder:   acpbridge.NewControllerForwarder(s.sessions),
+		TaskStore:                  s.authorities.taskStore,
+		TaskOutput:                 s.authorities.taskOutput,
+		TaskActivityChanged:        s.runtimeTaskChanged,
+		TaskCommitted:              s.taskCommitted,
+		ChildApprovalRequester:     backgroundChildApprovalRequester{composition: s},
 	}
 	var acpControlPlane *acpassembly.ControlPlane
 	localCfg, acpControlPlane, err = injectACPControlPlane(
@@ -575,9 +579,11 @@ func (s *runtimeComposition) swapGatewayRuntime(bundle *gatewayRuntimeBundle) {
 	s.mcpMgr = bundle.MCP
 	s.capabilityClose = bundle.CloseCapabilities
 	s.capabilityStatus = bundle.CapabilityStatus
+	s.capabilityRefresh = bundle.CapabilityRefresh
 	s.capabilityUpdated = bundle.CapabilityUpdated
 	bundle.CloseCapabilities = nil
 	bundle.CapabilityStatus = nil
+	bundle.CapabilityRefresh = nil
 	bundle.CapabilityUpdated = nil
 	s.pluginCacheRelease = bundle.ReleasePluginCache
 	bundle.ReleasePluginCache = nil

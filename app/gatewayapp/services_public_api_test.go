@@ -21,6 +21,7 @@ func TestStackPublicMethodsStayAtDeclaredHostBoundary(t *testing.T) {
 		"ControlPluginReads":    true, "ControlParticipants": true,
 		"ControlRuntimes": true, "ControlStatus": true,
 		"ControlTerminalStreams": true,
+		"ExperimentalFeatures":   true,
 		"Models":                 true,
 		"PluginCommands":         true, "PresentationDependencies": true, "PresentationSource": true,
 		"Quiesce": true, "PrepareIdleShutdown": true,

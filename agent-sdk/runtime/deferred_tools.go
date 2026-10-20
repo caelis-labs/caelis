@@ -1,6 +1,11 @@
 package runtime
 
-import "github.com/caelis-labs/caelis/agent-sdk/tool"
+import (
+	"context"
+
+	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/tool"
+)
 
 // Deferred MCP tools pass through the same wrappers as static tools before a
 // chat run can pin them. Sources cannot inject builtins through this path.
@@ -17,4 +22,24 @@ func (s *deferredToolSource) Tools() []tool.Tool {
 		}
 	}
 	return s.wrap(ready)
+}
+
+// CatalogRevision preserves an optional source invalidation seam through the
+// Runtime's policy wrappers. Empty means the source supplies no revision token.
+func (s *deferredToolSource) CatalogRevision() string {
+	if source, ok := s.source.(interface{ CatalogRevision() string }); ok {
+		return source.CatalogRevision()
+	}
+	return ""
+}
+
+// ValidateCatalog forwards the optional commit guard without creating a second
+// catalog owner. Sources without that guard cannot validate a dynamic candidate.
+func (s *deferredToolSource) ValidateCatalog(ctx context.Context, revision string) (func(), error) {
+	if source, ok := s.source.(interface {
+		ValidateCatalog(context.Context, string) (func(), error)
+	}); ok {
+		return source.ValidateCatalog(ctx, revision)
+	}
+	return nil, agent.ErrModelRequestSnapshotStale
 }

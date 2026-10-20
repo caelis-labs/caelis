@@ -556,3 +556,36 @@ func TestRuntimeMCPToolSearchApprovalBeforeLocalServerCall(t *testing.T) {
 		t.Fatalf("custom denial executed remote MCP call: count=%q, %v", raw, err)
 	}
 }
+
+func TestMCPRevocationRejectsLateApprovalAndDoesNotRestoreGrant(t *testing.T) {
+	for _, option := range []string{"allow_once", "allow_session", "allow_always"} {
+		t.Run(option, func(t *testing.T) {
+			grants, err := NewMCPGrantStore(filepath.Join(t.TempDir(), "grants.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			active := session.Session{SessionRef: session.SessionRef{SessionID: "revocation"}, CWD: t.TempDir(), CreatedAt: time.Now()}
+			def := fixtureMCPDefinition("pending-source")
+			var approvals, calls atomic.Int32
+			wrapped := fixtureMCPWrapped(t, grants, active, def, []string{option}, &approvals, &calls)
+			grant, err := mcpGrantFor(def, active)
+			if err != nil {
+				t.Fatal(err)
+			}
+			original := wrapped.approval.requester
+			wrapped.approval.requester = approvalRequesterFunc(func(ctx context.Context, request agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+				if err := grants.Revoke(grant, "session", active.SessionID); err != nil {
+					t.Fatal(err)
+				}
+				return original.RequestApproval(ctx, request)
+			})
+			_, err = wrapped.Call(t.Context(), tool.Call{ID: "pending", Name: def.Name, Input: []byte(`{"value":"fixture"}`)})
+			if err == nil || calls.Load() != 0 {
+				t.Fatalf("late approval dispatched: %v calls=%d", err, calls.Load())
+			}
+			if allowed, err := grants.Allows(grant, active.SessionID); err != nil || allowed {
+				t.Fatalf("late approval restored grant: %v %v", allowed, err)
+			}
+		})
+	}
+}

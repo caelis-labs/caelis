@@ -35,6 +35,7 @@ uses them.
 - [Participants](participants.md) owns user-facing collaboration setup and workspace controls.
 - [Session profiles](session-profiles.md) owns explicit Session profiles, revisioned configuration, background grants, callback
   receipts, resources, and the legacy Bot Mode removal.
+- [Experimental features](experimental-features.md) owns the opt-in catalog, Host defaults, activation readback and TUI/API configuration.
 - [Execution Configuration](execution-configuration.md) owns native process
   environment and shell assembly, creation-bound scope, and restart defaults.
 - [Shared Workers](shared-workers.md) owns ordinary native Session creation,

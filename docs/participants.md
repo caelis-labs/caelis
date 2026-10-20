@@ -83,6 +83,9 @@ inconclusive-judgment fallbacks without recording request content. Changing or d
 `/quit` accepts `/exit` and appears as `/quit (exit)`. Built-in commands take
 precedence over same-name Skills and custom roles. A conflicting role stays in
 configuration with a name-conflict warning; rename it to use its slash command.
+The role name `experimental` is reserved for new role creation. Existing roles,
+bindings and sets with that name remain valid; `/experimental` opens the feature
+editor and the role remains addressable through participant APIs.
 
 The product term **participant** describes the collaboration role; `subagent`
 still names native execution contracts, SDK packages, and existing wire or

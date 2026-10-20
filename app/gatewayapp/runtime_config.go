@@ -9,6 +9,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	"github.com/caelis-labs/caelis/control/agentbinding"
+	"github.com/caelis-labs/caelis/control/experimental"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
 	"github.com/caelis-labs/caelis/internal/productpaths"
@@ -17,6 +18,7 @@ import (
 const dangerouslySkipPermissionsModeLabel = "yolo"
 
 type stackRuntimeConfig struct {
+	Experimental                experimental.Values
 	ApprovalMode                string
 	PolicyProfile               string
 	DangerouslySkipPermissions  bool

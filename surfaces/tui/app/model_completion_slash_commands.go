@@ -257,6 +257,10 @@ func (m *Model) applySlashCommandCompletion() tea.Cmd {
 	if selected == "" {
 		return nil
 	}
+	if selected == "/experimental" {
+		m.clearSlashCompletion()
+		return m.openExperimental()
+	}
 	if selected == "/theme" {
 		m.clearSlashCompletion()
 		return m.submitThemeCommand(selected)

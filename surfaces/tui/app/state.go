@@ -122,6 +122,8 @@ const (
 )
 
 type Config struct {
+	Experimental           appserver.ExperimentalClient
+	ExperimentalInitialize func(context.Context) (appserver.ServerInfo, error)
 	SubagentInputs         appserver.SubagentInputClient
 	UIPreferences          appserver.UIPreferencesClient
 	Context                context.Context

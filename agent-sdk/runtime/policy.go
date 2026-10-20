@@ -43,6 +43,7 @@ type policyWrappedTool struct {
 	sandboxPolicy sandbox.PolicySnapshot
 	tool          tool.Tool
 	approval      approvalContext
+	mcpEpoch      mcpRevocationEpoch
 	mcpGrants     *MCPGrantStore
 	mcpGrantOwner string
 }
@@ -142,6 +143,15 @@ func (t policyWrappedTool) Call(ctx context.Context, call tool.Call) (tool.Resul
 	defer call.ModelStep.MarkAdmissionComplete()
 	if t.policy == nil {
 		return tool.Result{}, &policy.ProfileError{Profile: t.mode, Detail: "policy mode is unavailable"}
+	}
+	if tool.IsMCPDefinition(t.tool.Definition()) {
+		grant, err := mcpGrantFor(t.tool.Definition(), t.session)
+		if err != nil {
+			return tool.Result{}, err
+		}
+		grant.Owner = t.mcpGrantOwner
+		t.mcpEpoch = t.mcpGrants.revocationEpoch(grant, t.sessionRef.SessionID)
+		t.tool = mcpRevocationTool{Tool: t.tool, store: t.mcpGrants, epoch: t.mcpEpoch}
 	}
 	input := policy.ToolContext{
 		Session:       t.session,
@@ -276,11 +286,11 @@ func (t policyWrappedTool) resolveMCPApproval(ctx context.Context, call, approve
 	switch option.ID {
 	case "allow_once":
 	case "allow_session":
-		if err := t.mcpGrants.Grant(grant, "session", t.sessionRef.SessionID); err != nil {
+		if err := t.mcpGrants.grantAtEpoch(grant, "session", t.sessionRef.SessionID, t.mcpEpoch); err != nil {
 			return tool.Result{}, err
 		}
 	case "allow_always":
-		if err := t.mcpGrants.Grant(grant, "always", ""); err != nil {
+		if err := t.mcpGrants.grantAtEpoch(grant, "always", "", t.mcpEpoch); err != nil {
 			return tool.Result{}, err
 		}
 	default:

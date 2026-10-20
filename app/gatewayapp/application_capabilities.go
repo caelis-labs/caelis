@@ -15,6 +15,7 @@ import (
 	skilltool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/skill"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
+	"github.com/caelis-labs/caelis/control/experimental"
 	"github.com/caelis-labs/caelis/control/sessionprofile"
 )
 
@@ -62,6 +63,11 @@ func (s applicationMCPSource) CheckSearchScope(ctx context.Context) error {
 		return fmt.Errorf("ToolSearch Application configuration changed: %w", sessionprofile.ErrConfigurationStale)
 	}
 	return nil
+}
+
+func (s applicationMCPSource) CatalogRevision() string { return s.manager.CatalogRevision() }
+func (s applicationMCPSource) ValidateCatalog(ctx context.Context, revision string) (func(), error) {
+	return s.manager.ValidateCatalog(ctx, revision)
 }
 
 func (s applicationMCPSource) Tools() []tool.Tool {
@@ -208,7 +214,7 @@ func (r *applicationTurnResolver) acquireCapabilities(ctx context.Context, confi
 	if len(configuration.Profile.MCPServers) != 0 {
 		resource := r.currentMCP
 		if resource == nil || !reflect.DeepEqual(resource.servers, configuration.Profile.MCPServers) {
-			manager, err := mcp.NewManager(context.WithoutCancel(ctx), applicationMCPSpecs(configuration.Profile), nil)
+			manager, err := mcp.NewManagerWithOptions(context.WithoutCancel(ctx), applicationMCPSpecs(configuration.Profile), nil, mcp.ManagerOptions{RefreshTools: r.composition.activeRuntime.Experimental[experimental.MCPRefresh]})
 			if err != nil {
 				return nil, nil, err
 			}
@@ -317,4 +323,26 @@ func (r *applicationTurnResolver) capabilityStatus(revision uint64) sessionprofi
 		status.Servers = append(status.Servers, sessionprofile.MCPServerStatus{Name: info.Name, Status: info.Status, Tools: info.Tools, ToolDetails: info.ToolDetails, Warning: info.Warning})
 	}
 	return status
+}
+
+// Borrow only the manager already owned by this activation. A remote retry must
+// not start a dormant catalog or resurrect one retired by configuration removal.
+func (r *applicationTurnResolver) refreshMCPTools(ctx context.Context, pluginID, serverName string) error {
+	if err := r.composition.authorities.sessionProfiles.CheckActive(ctx, r.binding.Scope); err != nil {
+		return err
+	}
+	configuration, err := r.composition.authorities.sessionProfiles.Configuration(ctx, r.binding.Scope, r.binding.SessionID)
+	if err != nil {
+		return err
+	}
+	r.capabilitiesMu.Lock()
+	current := r.currentMCP
+	if r.capabilitiesClosed || current == nil || current.retired || configuration.Revision != r.desiredRevision || !reflect.DeepEqual(configuration.Profile.MCPServers, current.servers) {
+		r.capabilitiesMu.Unlock()
+		return fmt.Errorf("active MCP directory is unavailable")
+	}
+	release := r.retainCapabilitiesLocked(&applicationCapabilities{resource: current})
+	r.capabilitiesMu.Unlock()
+	defer release()
+	return current.manager.RefreshTools(ctx, pluginID, serverName)
 }

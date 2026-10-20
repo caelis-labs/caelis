@@ -342,6 +342,8 @@ func validateCommandRequest(action Action, request any) error {
 		return requireSession(typed.SessionID)
 	case CompactSessionRequest:
 		return requireSession(typed.SessionID)
+	case RefreshMCPToolsRequest:
+		return validateRefreshMCPToolsRequest(typed)
 	case RecordInteractionRequest:
 		if err := requireSession(typed.SessionID); err != nil {
 			return err
@@ -442,6 +444,8 @@ func validateCommandRequest(action Action, request any) error {
 		return validateUseModelRequest(typed)
 	case DeleteModelRequest:
 		return validateDeleteModelRequest(typed)
+	case ExperimentalRequest:
+		return validateExperimentalRequest(typed)
 	case WorkspaceTrustRequest:
 		return validateWorkspaceTrustRequest(typed)
 	case SandboxRequest:

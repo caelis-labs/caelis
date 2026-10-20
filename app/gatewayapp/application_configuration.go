@@ -108,7 +108,20 @@ func (r *applicationTurnResolver) ResolveCompaction(ctx context.Context, ref ses
 		return kernel.ResolvedTurn{}, err
 	}
 	return kernel.ResolvedTurn{RunRequest: agent.RunRequest{AgentSpec: agent.AgentSpec{Model: resolved.Model,
-		Request: agent.ModelRequestOptions{ServiceTier: model.ServiceTier(configuration.Profile.ServiceTier)}}}}, nil
+		Request: agent.ModelRequestOptions{ServiceTier: model.ServiceTier(configuration.Profile.ServiceTier)},
+		ResolveModelRequest: func(ctx context.Context) (agent.ModelRequestSnapshot, error) {
+			capabilities, release, err := r.acquireCapabilities(ctx, configuration)
+			if err != nil {
+				return agent.ModelRequestSnapshot{}, err
+			}
+			return agent.ModelRequestSnapshot{Model: resolved.Model, DeferredTools: capabilities.source, Release: release,
+				Request: agent.ModelRequestOptions{ServiceTier: model.ServiceTier(configuration.Profile.ServiceTier)},
+				Validate: func(ctx context.Context) (func(), error) {
+					return store.ValidateConfiguration(ctx, r.binding.Scope, r.binding.SessionID, configuration.Revision)
+				},
+			}, nil
+		},
+	}}}, nil
 }
 
 // applicationModelImageInput observes canonical model declarations even when a
