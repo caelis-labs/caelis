@@ -40,11 +40,13 @@ func (s *Store) appendEventLogTransaction(documentPath string, events []*session
 		return nil, err
 	}
 	var buf bytes.Buffer
-	encoder := json.NewEncoder(&buf)
 	for _, event := range events {
-		if err := encoder.Encode(session.CloneEvent(event)); err != nil {
+		raw, err := session.MarshalEventJSON(event)
+		if err != nil {
 			return nil, err
 		}
+		buf.Write(raw)
+		buf.WriteByte('\n')
 	}
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0o600)
 	if err != nil {

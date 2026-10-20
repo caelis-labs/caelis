@@ -140,7 +140,8 @@ type Event struct {
 	Meta        map[string]any         `json:"_meta,omitempty"`
 }
 
-// UnmarshalJSON preserves numeric tokens in the open durable metadata map.
+// UnmarshalJSON expands event-local media and preserves numeric tokens in the
+// open durable metadata map.
 // Typed event fields and other open payloads retain their established decoder
 // behavior, except EventTool.Input's own token-preserving decoder. Metadata
 // consumers can distinguish an exact json.Number from a
@@ -152,7 +153,8 @@ func (e *Event) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	var fields struct {
-		Meta json.RawMessage `json:"_meta"`
+		Meta  json.RawMessage   `json:"_meta"`
+		Media map[string]string `json:"media"`
 	}
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return err
@@ -164,7 +166,11 @@ func (e *Event) UnmarshalJSON(data []byte) error {
 			return err
 		}
 	}
-	*e = Event(decoded)
+	expanded, err := expandEventMedia(Event(decoded), fields.Media)
+	if err != nil {
+		return err
+	}
+	*e = expanded
 	return nil
 }
 
