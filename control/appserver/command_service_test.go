@@ -68,6 +68,13 @@ func TestEveryWriteCommandAuthorizationIdempotencyCASAndUnknownOutcome(t *testin
 			}
 			return s.CloseSession(context.Background(), p, CloseSessionRequest{WriteBase: WriteBase{OperationID: op, SessionID: "session-1", ExpectedRevision: &expected}})
 		}},
+		{"MCP refresh", ActionSessionMCPRefresh, func(s *CommandService, p Principal, op string, changed bool) (CommandResult, error) {
+			name := "local"
+			if changed {
+				name = "other"
+			}
+			return s.RefreshMCPTools(context.Background(), p, RefreshMCPToolsRequest{WriteBase: WriteBase{OperationID: op, SessionID: "session-1", ExpectedRevision: &revision, ExpectedControllerEpoch: epoch}, PluginID: "fixture", ServerName: name})
+		}},
 		{"session compact", ActionSessionCompact, func(s *CommandService, p Principal, op string, changed bool) (CommandResult, error) {
 			expected := revision
 			if changed {
@@ -1094,6 +1101,8 @@ func operationIDOf(request any) string {
 	case CreateSessionRequest:
 		return req.OperationID
 	case CloseSessionRequest:
+		return req.OperationID
+	case RefreshMCPToolsRequest:
 		return req.OperationID
 	case CompactSessionRequest:
 		return req.OperationID

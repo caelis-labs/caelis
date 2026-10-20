@@ -112,6 +112,11 @@ func CreateRole(
 	profiles modelprofile.Configuration,
 ) (Configuration, error) {
 	role := NormalizeRole(rawRole)
+	// Stored identities remain readable and bindable. This command reservation
+	// applies only to creation; no existing role is renamed.
+	if role.Handle == "experimental" {
+		return Configuration{}, fmt.Errorf("control/agentbinding: handle %q is reserved for a command", role.Handle)
+	}
 	if err := validateRole(role); err != nil {
 		return Configuration{}, err
 	}

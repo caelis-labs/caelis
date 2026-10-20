@@ -177,6 +177,7 @@ func modelCompactMarkdown(
 		return "", errors.New("empty compaction input")
 	}
 	request := &model.Request{
+		DisableTools: true,
 		Instructions: []model.Part{model.NewTextPart(compactionInstructions(`
 You are producing an internal CONTEXT COMPACTION SUMMARY for the same ongoing coding task. Return only a concise Markdown continuation handoff, without JSON or code fences, so execution resumes from the current state.
 Across the prior summary and all source=user frames, preserve Session-wide User intent and valid authorization, including compatible older goals and constraints; newer User messages supersede only conflicts or revisions. Merge new work updates and retain progress, decisions, material findings and evidence, validation, undelivered results, unresolved work, and next actions. Compress completed, superseded, repetitive, irrelevant, or progression-only detail, and keep uncertainty explicit. Runtime appends the current plan and active subagent handles separately.

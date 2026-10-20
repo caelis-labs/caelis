@@ -8,6 +8,7 @@ import (
 
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
+	"github.com/caelis-labs/caelis/control/experimental"
 	"github.com/caelis-labs/caelis/control/mcpconfig"
 	"github.com/caelis-labs/caelis/control/modelcatalog"
 	"github.com/caelis-labs/caelis/control/modelconfig"
@@ -25,6 +26,7 @@ const SchemaVersionV2 = 2
 // delegation, and system-Agent fields exist only in the private legacy wire
 // document used by the one-way migration.
 type AppConfig struct {
+	Experimental          experimental.Values         `json:"experimental,omitempty"`
 	UI                    uipreferences.Preferences   `json:"ui,omitzero"`
 	SchemaVersion         int                         `json:"schema_version"`
 	ConfigurationRevision uint64                      `json:"configuration_revision,omitempty"`
@@ -57,6 +59,9 @@ func validateForLoad(doc AppConfig) error {
 }
 
 func validate(doc AppConfig, validateMCP bool) error {
+	if err := experimental.Validate(doc.Experimental); err != nil {
+		return err
+	}
 	if err := doc.UI.Validate(); err != nil {
 		return fmt.Errorf("gatewayapp: invalid UI preferences: %w", err)
 	}

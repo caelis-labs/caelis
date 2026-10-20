@@ -85,7 +85,12 @@ func (r *Runtime) runWithOverflowRecovery(
 	pendingInputs []*session.Event,
 	batch *[]*session.Event,
 	sink *runner,
-) error {
+) (runErr error) {
+	if r.compaction.Enabled && r.compaction.Async.Enabled {
+		scope := &asyncCompactScope{ctx: ctx}
+		ctx = context.WithValue(ctx, asyncCompactScopeKey{}, scope)
+		defer func() { runErr = errors.Join(runErr, scope.drain()) }()
+	}
 	currentTurnInputs := session.CloneEvents(pendingInputs)
 	var toolFactOrdinal uint64
 	// Share the durable tool-step counter across overflow retries so a reused
@@ -100,9 +105,25 @@ func (r *Runtime) runWithOverflowRecovery(
 			*batch = append(*batch, attemptBatch...)
 			return nil
 		}
+		var adopted *asyncCompactAdoptedError
+		if errors.As(err, &adopted) {
+			*batch = append(*batch, attemptBatch...)
+			if sink != nil {
+				sink.publishEvent(normalizeEvent(activeSession, turnID, buildCompactNoticeEvent(activeSession, turnID, r.now())))
+			}
+			continue
+		}
 		if recovery, ok := compactionRecoveryFromError(err); ok {
 			*batch = append(*batch, attemptBatch...)
-			progress, compacted, compactErr := r.recoverByCompacting(ctx, ref, turnID, req, recovery, currentTurnInputs, sink)
+			if err := asyncScope(ctx).beforeRecovery(); err != nil {
+				if recovery.decision.Release != nil {
+					recovery.decision.Release()
+				}
+				return err
+			}
+			recoveryCtx, cancelRecovery := r.asyncFallbackContext(ctx)
+			progress, compacted, compactErr := r.recoverByCompacting(recoveryCtx, ref, turnID, req, recovery, currentTurnInputs, sink)
+			cancelRecovery()
 			if compactErr != nil {
 				return compactErr
 			}

@@ -17,6 +17,7 @@ import (
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/wirev1"
+	"github.com/caelis-labs/caelis/control/experimental"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/control/modelprofile"
 	"github.com/caelis-labs/caelis/control/modelprofile/builder"
@@ -166,6 +167,7 @@ func TestRetiredMemoryHTTPPreservesSharedConfigurationUpdates(t *testing.T) {
 	send("/agents/bind", fmt.Sprintf(`"binding":{"handle":"orbit","profile_id":%q,"effort":"none","speed":""}`, profile.ID), false)
 	send("/agents/apply-binding-set", `"set_name":"legacy-team"`, false)
 	send("/agents/save-binding-set", `"set_name":"saved-team"`, false)
+	send("/configuration/experimental", `"values":{"async_compact":true,"mcp_catalog_refresh":true,"deferred_tool_retirement":true}`, false)
 	_, status := read()
 	if len(status.Sets) != 2 {
 		t.Fatalf("saved Team missing: %+v", status.Sets)
@@ -173,6 +175,11 @@ func TestRetiredMemoryHTTPPreservesSharedConfigurationUpdates(t *testing.T) {
 	loadedDoc, err := configstore.New(storeDir).Load()
 	if err != nil {
 		t.Fatal(err)
+	}
+	for _, feature := range experimental.Definitions() {
+		if !loadedDoc.Experimental[feature.ID] {
+			t.Fatalf("experimental save lost %s: %+v", feature.ID, loadedDoc.Experimental)
+		}
 	}
 	var originalMemory, retainedMemory any
 	if err := json.Unmarshal(doc.Memory, &originalMemory); err != nil {

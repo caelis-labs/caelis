@@ -45,7 +45,7 @@ func TestSlashCompletionAliasQueryResolvesToCanonical(t *testing.T) {
 		display string
 	}{
 		{query: "/sub", want: "/team", display: "/team (subagent)"},
-		{query: "/ex", want: "/quit", display: "/quit (exit)"},
+		{query: "/exi", want: "/quit", display: "/quit (exit)"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.query, func(t *testing.T) {

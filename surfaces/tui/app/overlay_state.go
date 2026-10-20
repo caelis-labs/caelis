@@ -16,6 +16,7 @@ import (
 // below the viewport as temporary UI and communicate results via Submission
 // or callback messages.
 type OverlayState struct {
+	experimental *experimentalState
 	btwOverlay   *btwOverlayState
 	btwDismissed bool
 
@@ -97,7 +98,7 @@ type OverlayState struct {
 
 // HasActiveOverlay returns true if any overlay is currently visible.
 func (o *OverlayState) HasActiveOverlay() bool {
-	return o.wizardOverlay != nil || o.btwOverlay != nil ||
+	return o.experimental != nil || o.wizardOverlay != nil || o.btwOverlay != nil ||
 		o.subagentOverlay != nil ||
 		o.subagentOutputOverlay != nil ||
 		o.activePrompt != nil ||

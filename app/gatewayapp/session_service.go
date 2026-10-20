@@ -31,7 +31,18 @@ func (s *runtimeComposition) compactSession(ctx context.Context, ref session.Ses
 	if err != nil {
 		return session.Session{}, err
 	}
-	request.Model, request.ServiceTier = resolved.RunRequest.AgentSpec.Model, resolved.RunRequest.AgentSpec.Request.ServiceTier
+	spec := resolved.RunRequest.AgentSpec
+	request.Model, request.ServiceTier, request.DeferredTools = spec.Model, spec.Request.ServiceTier, spec.DeferredTools
+	if spec.ResolveModelRequest != nil {
+		snapshot, err := spec.ResolveModelRequest(ctx)
+		if err != nil {
+			return session.Session{}, err
+		}
+		if snapshot.Release != nil {
+			defer snapshot.Release()
+		}
+		request.Model, request.ServiceTier, request.DeferredTools, request.Validate = snapshot.Model, snapshot.Request.ServiceTier, snapshot.DeferredTools, snapshot.Validate
+	}
 	var compacted sdkruntime.CompactResult
 	err = s.withPlaced(ctx, ref, func(runCtx context.Context, engine *sdkruntime.Runtime) error {
 		var compactErr error

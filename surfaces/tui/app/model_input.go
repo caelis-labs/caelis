@@ -584,6 +584,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if _, ok := msg.(tea.KeyReleaseMsg); ok {
 		return m, nil
 	}
+	if m.experimental != nil {
+		return m, m.handleExperimentalKey(msg)
+	}
 	if m.activeCompletionKind() != completionNone {
 		m.clearCompletionMouseState()
 	}
@@ -1264,6 +1267,9 @@ func (m *Model) submitInteractiveLine(execLine string, displayLine string, attac
 	}
 	if execLine == "" && len(attachments) == 0 {
 		return m, nil
+	}
+	if slashCommandName(execLine) == "experimental" {
+		return m, m.openExperimental()
 	}
 	if slashCommandName(execLine) == "theme" {
 		return m, m.submitThemeCommand(execLine)
