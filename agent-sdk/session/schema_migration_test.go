@@ -117,8 +117,12 @@ func TestMigrateEventJSONPreservesUnknownFieldCorpusAtEveryJournalLevel(t *testi
 		"tool_execution": migrationObject(t, journal, "tool_execution"),
 		"pause_token":    migrationObject(t, journal, "pause_token"),
 	} {
-		if object["schema"] != float64(1) {
-			t.Fatalf("%s schema = %#v, want 1", name, object["schema"])
+		wantSchema := float64(1)
+		if name == "event" {
+			wantSchema = float64(session.EventSchemaVersion)
+		}
+		if object["schema"] != wantSchema {
+			t.Fatalf("%s schema = %#v, want %v", name, object["schema"], wantSchema)
 		}
 	}
 }

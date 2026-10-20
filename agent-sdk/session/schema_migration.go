@@ -10,7 +10,7 @@ import (
 
 const (
 	// EventSchemaVersion is the current durable canonical event schema.
-	EventSchemaVersion = 1
+	EventSchemaVersion = 2
 	// RunSchemaVersion is the current durable Run/Turn/Step record schema.
 	RunSchemaVersion = ExecutionJournalSchemaVersion
 )
@@ -116,7 +116,8 @@ func (r *MigrationRegistry) Migrate(kind SchemaKind, source, target int, raw jso
 
 func newDefaultMigrationRegistry() *MigrationRegistry {
 	registry := NewMigrationRegistry()
-	_ = registry.Register(SchemaKindEvent, 0, EventSchemaVersion, migrateEventV0ToV1)
+	_ = registry.Register(SchemaKindEvent, 0, 1, migrateEventV0ToV1)
+	_ = registry.Register(SchemaKindEvent, 1, 2, migrateEventV1ToV2)
 	_ = registry.Register(SchemaKindJournal, 0, ExecutionJournalSchemaVersion, migrateJournalV0ToV1)
 	_ = registry.Register(SchemaKindRun, 0, RunSchemaVersion, migrateSchemaFieldV0ToV1)
 	_ = registry.Register(SchemaKindToolExecution, 0, ToolExecutionSchemaVersion, migrateSchemaFieldV0ToV1)
@@ -274,7 +275,7 @@ func migrateEventV0ToV1(raw json.RawMessage) (json.RawMessage, error) {
 	if err := json.Unmarshal(raw, &object); err != nil {
 		return nil, err
 	}
-	schema, _ := json.Marshal(EventSchemaVersion)
+	schema, _ := json.Marshal(1)
 	object["schema"] = schema
 	if legacyPluginContextObject(object) {
 		kind, _ := json.Marshal(EventTypeContext)
@@ -324,4 +325,16 @@ func legacyPluginContextObject(object map[string]json.RawMessage) bool {
 	}
 	source, _ := meta["source"].(string)
 	return source == "plugin_hook"
+}
+
+// Schema 1 remains readable until the supported upgrade floor reaches the first
+// schema-2 writer. Migration changes no semantics; only schema 2 can encode
+// event-local media references.
+func migrateEventV1ToV2(raw json.RawMessage) (json.RawMessage, error) {
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &object); err != nil {
+		return nil, err
+	}
+	object["schema"] = json.RawMessage(`2`)
+	return json.Marshal(object)
 }

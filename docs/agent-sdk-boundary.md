@@ -241,6 +241,17 @@ monotonic replay, schema migration before typed decode, and fail-closed handling
 of unknown versions. Persistence or replay changes require whole-object round
 trips proving rebuilt model context equals Runtime-produced context.
 
+Event schema 2 supports event-local sharing of repeated large inline media.
+The file Store uses `session.MarshalEventJSON` for JSONL and WAL records; ordinary
+JSON encoding retains expanded values. Decoding verifies content digests and
+references and restores complete model messages and execution receipts before
+validation or recovery. Media never depends on another event or a temporary
+artifact, so retaining or discarding an event also retains or discards its media.
+Schema-1 logs remain readable without rewriting them. Older binaries reject
+schema-2 events; downgrade requires a Store backup from before those writes.
+Remove the schema-1 reader only when the supported upgrade floor requires
+schema-2 writers.
+
 Runtime-authored tool-result Events explicitly declare whether their wrapper may
 produce Task lifecycle facts. Historical absence is accepted only for the bounded
 legacy case where parent call and stored Task identity agree; an explicit false
