@@ -144,6 +144,12 @@ func validateReflect(value reflect.Value, path string, stack map[visit]bool) err
 		if value.IsNil() {
 			return nil
 		}
+		// Bytes (including json.RawMessage and named byte slices) cannot
+		// contain cycles or non-finite values. The final json.Marshal still
+		// checks raw JSON and custom marshalers without a path allocation per byte.
+		if value.Type().Elem().Kind() == reflect.Uint8 {
+			return nil
+		}
 		key := visit{typeOf: value.Type(), kind: value.Kind(), ptr: value.Pointer()}
 		if key.ptr != 0 {
 			if stack[key] {
@@ -159,6 +165,9 @@ func validateReflect(value reflect.Value, path string, stack map[visit]bool) err
 		}
 		return nil
 	case reflect.Array:
+		if value.Type().Elem().Kind() == reflect.Uint8 {
+			return nil
+		}
 		for i := 0; i < value.Len(); i++ {
 			if err := validateReflect(value.Index(i), fmt.Sprintf("%s[%d]", path, i), stack); err != nil {
 				return err
@@ -244,12 +253,20 @@ func cloneReflect(value reflect.Value, memo map[visit]reflect.Value) reflect.Val
 		if key.ptr != 0 {
 			memo[key] = out
 		}
+		if value.Type().Elem().Kind() == reflect.Uint8 {
+			reflect.Copy(out, value)
+			return out
+		}
 		for i := 0; i < value.Len(); i++ {
 			out.Index(i).Set(cloneReflect(value.Index(i), memo))
 		}
 		return out
 	case reflect.Array:
 		out := reflect.New(value.Type()).Elem()
+		if value.Type().Elem().Kind() == reflect.Uint8 {
+			out.Set(value)
+			return out
+		}
 		for i := 0; i < value.Len(); i++ {
 			out.Index(i).Set(cloneReflect(value.Index(i), memo))
 		}
