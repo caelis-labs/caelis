@@ -22,6 +22,11 @@ type ServerSpec struct {
 	// CleanEnvironment keeps plugin subprocesses from inheriting host-private
 	// credentials while preserving only platform process essentials.
 	CleanEnvironment bool
+	// SourceTrusted is set only by trusted Host assembly, never remote MCP
+	// metadata or configuration documents. It skips ordinary source approval
+	// for all tools on this connection, but preserves per-call policy decisions.
+	// Trust is independent of the versioned source fingerprint.
+	SourceTrusted bool `json:"-"`
 }
 
 // ValidateServerIdentity checks one server before Manager admission. It does

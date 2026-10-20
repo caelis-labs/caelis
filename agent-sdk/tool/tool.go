@@ -87,6 +87,9 @@ const (
 	MetadataMCPServer            = "caelis.mcp.server"
 	MetadataMCPTool              = "caelis.mcp.tool"
 	MetadataMCPSourceFingerprint = "caelis.mcp.source_fingerprint"
+	// MetadataMCPSourceTrusted is a Host-assembly assertion that skips ordinary
+	// MCP source approval, never an explicit per-call policy Ask or Deny.
+	MetadataMCPSourceTrusted     = "caelis.mcp.source_trusted"
 	MetadataExternalCapability   = "caelis.external.capability"
 	MetadataDescriptionAuthority = "caelis.description.authority"
 	MetadataDiscoveredToolNames  = "caelis.tool.discovered_names"

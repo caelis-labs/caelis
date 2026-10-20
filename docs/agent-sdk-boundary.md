@@ -300,13 +300,18 @@ fingerprint includes a digest of the effective environment frozen when the
 process transport is created, without exposing environment values in metadata.
 A changed source or schema needs new approval. A cached MCP grant only satisfies
 the source gate; a custom policy's per-call approval still applies to that call.
+Trusted Host assembly may instead mark a source `SourceTrusted`; Manager projects
+that assertion in tool metadata, independently of remote metadata and the source
+fingerprint. It skips only ordinary source approval for all of that source's
+tools, including after version or schema changes. Explicit per-call Ask and Deny
+still apply. Ordinary MCP configuration cannot set this Host-only assertion.
 The Host keeps grants in
 `control/mcp-grants.json`; stopping the Host and deleting that file revokes all
 grants. The Host-owned `MCPGrantStore.Revoke` API removes an individual grant
-while running. Only a selected matching option authorizes the remote call;
-approval failure, cancellation, and invalid responses fail closed. Explicit
-full-access policy still requires this MCP approval; its existing built-in
-tool behavior is unchanged.
+while running. For sources requiring approval, only a selected matching option
+authorizes the remote call; approval failure, cancellation, and invalid responses
+fail closed. Explicit full-access policy does not itself satisfy the MCP source
+gate; its existing built-in tool behavior is unchanged.
 
 ToolSearch defaults to a private model selector. Every ready tool's name and
 description in the current scope is considered, with no initial tool schemas or

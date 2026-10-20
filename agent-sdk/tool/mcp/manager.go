@@ -256,7 +256,7 @@ func (mgr *Manager) rebuildToolsLocked() {
 				winner.addReplayAliases(legacyNames)
 				continue
 			}
-			def, warning, err := normalizeListedToolDefinition(tool.Definition{
+			def := tool.Definition{
 				Name:        name,
 				Description: info.Description,
 				Metadata: map[string]any{
@@ -267,7 +267,11 @@ func (mgr *Manager) rebuildToolsLocked() {
 					tool.MetadataMCPSourceFingerprint: hex.EncodeToString(sourceHash[:]),
 					tool.MetadataReplayAliases:        legacyNames,
 				},
-			}, info.InputSchema)
+			}
+			if spec.SourceTrusted {
+				def.Metadata[tool.MetadataMCPSourceTrusted] = true
+			}
+			def, warning, err := normalizeListedToolDefinition(def, info.InputSchema)
 			if warning != "" {
 				mgr.addWarning(key, fmt.Sprintf("tool %s: %s", toolLabel, warning))
 			}

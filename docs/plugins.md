@@ -95,8 +95,15 @@ the package owns its private worker. A single-exec DTW package exposes one MCP
 `exec`, qualified as `desktop_world__exec` inside Caelis. Earlier Full/Lite
 packages keep their declared launcher and tool catalog; Lite requires an
 explicit trusted Host `ExecutableEnv["DTW_NODE_PATH"]` Node executable setting.
-Desktop input still requires DTW's normal app grant and OS permissions;
-reviewing a script remains the caller's responsibility.
+Core trusts all MCP tools assembled from the configured `desktop-world` plugin,
+so ordinary MCP source approval is skipped across package, server-version and
+tool-schema updates. `desktop_world` is not a plugin-ID alias, and an ordinary
+MCP server named `desktop-world` does not inherit this trust. Explicit per-call
+policy Ask/Deny and OS permissions still apply. This trusts the plugin's computer
+operation capability; it does not provide per-app isolation. Reviewing a script
+remains the caller's responsibility. Disabling/removing the plugin excludes it
+from later Runtime assembly; deleting a source grant does not disable this
+plugin-level trust.
 
 You can copy this instruction to an Agent:
 
