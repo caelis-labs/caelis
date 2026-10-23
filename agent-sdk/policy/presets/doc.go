@@ -21,8 +21,10 @@
 //     enforces this boundary for every policy profile before remote execution.
 //   - Hard deny is reserved for machine-level catastrophic operations
 //     (system/home root recursive deletes and device wipes).
-//   - Built-in filesystem writes outside allowed roots ask for approval with
-//     exact path grants under sandbox constraints.
+//   - Built-in filesystem writes share the sandbox filesystem's default scratch
+//     roots, including system temporary directories. Physical paths outside
+//     app-approved and scratch roots ask for exact-path sandbox write grants.
+//     Sensitive configuration paths remain denied without an explicit grant.
 //   - Destructive VCS operations, remote script execution (including PowerShell
 //     download-to-Invoke-Expression flows), and out-of-root recursive deletes
 //     require approval on the requested execution route.

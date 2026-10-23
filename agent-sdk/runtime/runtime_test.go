@@ -2842,10 +2842,10 @@ func TestRuntimeDangerFullAccessExecutesWithoutApprovalRequester(t *testing.T) {
 	}
 }
 
-func TestRuntimePolicyWriteOutsideAllowedRootsExecutesAfterApproval(t *testing.T) {
+func TestRuntimePolicyWriteToSystemTempDoesNotRequestApproval(t *testing.T) {
 	t.Parallel()
 
-	sessions, activeSession := newTestSessionService(t, "sess-policy-write-approve")
+	sessions, activeSession := newTestSessionService(t, "sess-policy-write-temp")
 	runtime, err := New(Config{
 		Sessions: sessions,
 		AgentFactory: chat.Factory{
@@ -2861,22 +2861,15 @@ func TestRuntimePolicyWriteOutsideAllowedRootsExecutesAfterApproval(t *testing.T
 	if err != nil {
 		t.Fatalf("filesystem.NewWrite() error = %v", err)
 	}
-	outsideDir := t.TempDir()
-	outsidePath := filepath.Join(outsideDir, "approved-outside.txt")
-	testModel := &writePathRuntimeModel{path: outsidePath, content: "approved-outside\n"}
+	tempPath := filepath.Join(t.TempDir(), "scratch.txt")
+	testModel := &writePathRuntimeModel{path: tempPath, content: "temporary\n"}
 	requester := approvalRequesterFunc(func(_ context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
-		if req.Approval == nil || req.Approval.ToolCall.Name != filesystem.WriteToolName {
-			t.Fatalf("approval request = %+v, want WRITE tool call", req.Approval)
-		}
-		return agent.ApprovalResponse{
-			Outcome:  "selected",
-			OptionID: "allow_once",
-			Approved: true,
-		}, nil
+		t.Errorf("system temporary file unexpectedly requested approval: %+v", req.Approval)
+		return agent.ApprovalResponse{}, nil
 	})
 	result, err := runtime.Run(context.Background(), agent.RunRequest{
 		SessionRef:        activeSession.SessionRef,
-		Input:             "write outside workspace after approval",
+		Input:             "write a system temporary file",
 		ApprovalRequester: requester,
 		AgentSpec: agent.AgentSpec{
 			Name:  "chat",
@@ -2890,12 +2883,12 @@ func TestRuntimePolicyWriteOutsideAllowedRootsExecutesAfterApproval(t *testing.T
 	if _, err := drainRunnerEvents(t, result.Handle); err != nil {
 		t.Fatalf("runner error = %v", err)
 	}
-	data, err := os.ReadFile(outsidePath)
+	data, err := os.ReadFile(tempPath)
 	if err != nil {
-		t.Fatalf("os.ReadFile(%q) error = %v", outsidePath, err)
+		t.Fatalf("os.ReadFile(%q) error = %v", tempPath, err)
 	}
-	if got := strings.TrimSpace(string(data)); got != "approved-outside" {
-		t.Fatalf("written content = %q, want approved-outside", got)
+	if got := strings.TrimSpace(string(data)); got != "temporary" {
+		t.Fatalf("written content = %q, want temporary", got)
 	}
 }
 
