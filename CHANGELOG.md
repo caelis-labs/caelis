@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.73.2](https://github.com/caelis-labs/caelis/compare/v0.73.1...v0.73.2) (2026-10-23)
+
+
+### Bug Fixes
+
+* **sdk:** normalize image inputs and improve scratch/task handling ([#164](https://github.com/caelis-labs/caelis/issues/164)) ([ddca5f8](https://github.com/caelis-labs/caelis/commit/ddca5f87bff4a09b1636763511bcc2be6fc820f7))
+
 ## [0.73.1](https://github.com/caelis-labs/caelis/compare/v0.73.0...v0.73.1) (2026-10-20)
 
 
