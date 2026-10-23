@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.73.2](https://github.com/caelis-labs/caelis/compare/v0.73.1...v0.73.2) (2026-10-23)
+
+
+### Bug Fixes
+
+* Prepare images consistently across providers, preserve long-screenshot detail with overlapping crops and coordinate mappings, and reuse bounded image derivatives across turns. Keep original Session media intact and stop retrying permanent HTTP or Responses stream image errors ([#164](https://github.com/caelis-labs/caelis/pull/164)).
+* Allow file edits in the sandbox's system temporary and scratch directories without redundant approval, retaining physical-path and sensitive-path protections ([#164](https://github.com/caelis-labs/caelis/pull/164)).
+* Guide background servers and watchers toward immediate status reads and bounded readiness checks instead of waiting for process completion ([#164](https://github.com/caelis-labs/caelis/pull/164)).
+
+### Security
+
+* Require Go 1.26.10, which fixes the standard-library certificate verification issue [GO-2026-6809](https://pkg.go.dev/vuln/GO-2026-6809).
+
 ## [0.73.1](https://github.com/caelis-labs/caelis/compare/v0.73.0...v0.73.1) (2026-10-20)
 
 
