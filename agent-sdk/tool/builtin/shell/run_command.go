@@ -102,7 +102,7 @@ func (t *RunCommandTool) Definition() tool.Definition {
 				"yield_time_ms": map[string]any{
 					"type":        "integer",
 					"minimum":     0,
-					"description": "Wait for approval and execution before yielding an async Task; not the command timeout. 10000 ms default. Use shorter for long/interactive work, longer for medium jobs. waiting_approval means not started; Task wait uses the same handle.",
+					"description": "Wait before yielding a Task, not a command timeout; default 10000 ms. Use 1000 ms for servers/watchers. waiting_approval means not started: keep the handle, use Task read, and do independent work or yield control pending approval.",
 				},
 				"tty": map[string]any{
 					"type":        "boolean",

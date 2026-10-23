@@ -55,14 +55,14 @@ func New() Tool {
 func (Tool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        ToolName,
-		Description: "Inspect or control asynchronous work using a Task handle.",
+		Description: "Inspect or control asynchronous work using a Task handle. Use read for long-lived servers and watchers, verify readiness with a time-limited probe, then continue once ready. Reserve wait for finite jobs whose completion you need.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"action": map[string]any{
 					"type":        "string",
 					"enum":        []string{"wait", "read", "write", "cancel"},
-					"description": "read inspects now; wait observes for up to one minute; write sends input when the Job supports input; cancel requests cancellation when supported. Participant threads use ReadThread and WaitThread.",
+					"description": "read inspects state/output immediately; wait waits up to one minute for completion, not new output/readiness; write sends supported input; cancel requests cancellation. Participant threads use ReadThread/WaitThread.",
 				},
 				"handle": map[string]any{
 					"type":        "string",
