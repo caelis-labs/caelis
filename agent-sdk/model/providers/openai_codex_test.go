@@ -18,6 +18,8 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 )
 
+const codexTestPixelPNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+
 func TestOpenAICodexToolLoopPreservesEncryptedReasoning(t *testing.T) {
 	t.Parallel()
 
@@ -108,7 +110,7 @@ func TestOpenAICodexToolLoopPreservesEncryptedReasoning(t *testing.T) {
 	user := model.NewMessage(
 		model.RoleUser,
 		model.NewTextPart("check weather"),
-		model.NewMediaPart(model.MediaModalityImage, model.MediaSource{Kind: model.MediaSourceInline, Data: "aW1n"}, "image/png", "pixel.png"),
+		model.NewMediaPart(model.MediaModalityImage, model.MediaSource{Kind: model.MediaSourceInline, Data: codexTestPixelPNG}, "image/png", "pixel.png"),
 	)
 	toolSpec := model.NewFunctionToolSpec("lookup", "lookup weather", map[string]any{
 		"type":       "object",
@@ -716,7 +718,7 @@ func assertOpenAICodexFirstRequest(t *testing.T, body map[string]any) {
 		t.Fatalf("user content = %#v", content)
 	}
 	image, _ := content[1].(map[string]any)
-	if image["type"] != "input_image" || image["image_url"] != "data:image/png;base64,aW1n" {
+	if image["type"] != "input_image" || image["image_url"] != "data:image/png;base64,"+codexTestPixelPNG {
 		t.Fatalf("image input = %#v", image)
 	}
 }

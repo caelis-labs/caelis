@@ -118,7 +118,7 @@ func (l *geminiLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 		if !req.Stream {
 			out, err := client.Models.GenerateContent(runCtx, l.name, contents, cfg)
 			if err != nil {
-				yield(nil, err)
+				yield(nil, classifyGeminiImageError(err))
 				return
 			}
 			model.RecordInvocationUsage(runCtx, geminiUsageFromResponse(out))
@@ -156,7 +156,7 @@ func (l *geminiLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 		var abnormalReason genai.FinishReason
 		for out, err := range client.Models.GenerateContentStream(runCtx, l.name, contents, cfg) {
 			if err != nil {
-				yield(nil, err)
+				yield(nil, classifyGeminiImageError(err))
 				return
 			}
 			if out == nil {
@@ -225,6 +225,14 @@ func (l *geminiLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 			},
 		}, nil)
 	}
+}
+
+func classifyGeminiImageError(err error) error {
+	var apiErr genai.APIError
+	if errors.As(err, &apiErr) {
+		return classifyImageInputError(err, apiErr.Message, apiErr.Code)
+	}
+	return err
 }
 
 func geminiTerminalError(out *genai.GenerateContentResponse) error {

@@ -85,6 +85,11 @@ type InvocationTracker interface{ TracksInvocations() }
 
 // Generate observes each actual attempt, including unwrapped providers. Nested
 // gates must implement InvocationTracker and delegate through Generate.
+// Inline images in messages and tool results are validated on a private request
+// snapshot, with MIME detected from content. Images exceeding a 2048-pixel edge
+// or 4.5 MB of base64 are resized or re-encoded; processing is bounded to 32 MiB
+// of source bytes and 64 Mi pixels. Unprocessable images become text notices.
+// Canonical messages and remote media references remain unchanged.
 func Generate(ctx context.Context, llm LLM, req *Request) iter.Seq2[*StreamEvent, error] {
 	if available, ok := ctx.Value(toolAvailabilityKey{}).(func() bool); ok && req != nil && !available() {
 		req = CloneRequest(req)
@@ -96,7 +101,7 @@ func Generate(ctx context.Context, llm LLM, req *Request) iter.Seq2[*StreamEvent
 	admit, _ := ctx.Value(invocationAdmissionKey{}).(func(context.Context, *Request) error)
 	observer, _ := ctx.Value(invocationObserverKey{}).(func(Invocation))
 	if admit == nil && observer == nil {
-		return llm.Generate(ctx, CloneRequest(req))
+		return generatePrepared(ctx, llm, CloneRequest(req))
 	}
 	return func(yield func(*StreamEvent, error) bool) {
 		if err := ctx.Err(); err != nil {
@@ -110,7 +115,7 @@ func Generate(ctx context.Context, llm LLM, req *Request) iter.Seq2[*StreamEvent
 			}
 		}
 		if observer == nil {
-			for event, err := range llm.Generate(ctx, CloneRequest(req)) {
+			for event, err := range generatePrepared(ctx, llm, CloneRequest(req)) {
 				if !yield(event, err) {
 					return
 				}
@@ -135,7 +140,7 @@ func Generate(ctx context.Context, llm LLM, req *Request) iter.Seq2[*StreamEvent
 				observer(receipt)
 			}
 		}()
-		for event, err := range llm.Generate(attemptCtx, CloneRequest(req)) {
+		for event, err := range generatePrepared(attemptCtx, llm, CloneRequest(req)) {
 			if event != nil && event.Response != nil {
 				cloned := *event
 				response := *event.Response
