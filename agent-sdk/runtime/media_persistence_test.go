@@ -3,7 +3,10 @@ package runtime
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"image"
+	"image/png"
 	"iter"
 	"os"
 	"path/filepath"
@@ -27,7 +30,12 @@ func TestSharedMediaRebuildsRuntimeProducedContextWithoutToolReplay(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	data := strings.Repeat("YWJj", 256<<10)
+	var pngData bytes.Buffer
+	encoder := png.Encoder{CompressionLevel: png.NoCompression}
+	if err := encoder.Encode(&pngData, image.NewNRGBA(image.Rect(0, 0, 32, 12249))); err != nil {
+		t.Fatal(err)
+	}
+	data := base64.StdEncoding.EncodeToString(pngData.Bytes())
 	content := []model.Part{model.NewTextPart("screenshot"), model.NewMediaPart(model.MediaModalityImage, model.MediaSource{Kind: model.MediaSourceInline, Data: data}, "image/png", "screen")}
 	calls := 0
 	screen := tool.NamedTool{Def: tool.Definition{Name: "ECHO", EffectClass: tool.EffectReadOnly}, Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
@@ -56,6 +64,28 @@ func TestSharedMediaRebuildsRuntimeProducedContextWithoutToolReplay(t *testing.T
 	run(store, first, "take a screenshot")
 	if len(first.requests) != 2 || calls != 1 {
 		t.Fatalf("requests=%d tool calls=%d", len(first.requests), calls)
+	}
+	images := 0
+	for _, message := range first.requests[1] {
+		for _, result := range message.ToolResults() {
+			for _, part := range result.Content {
+				if part.Media == nil {
+					continue
+				}
+				images++
+				decoded, err := base64.StdEncoding.DecodeString(part.Media.Source.Data)
+				if err != nil {
+					t.Fatal(err)
+				}
+				cfg, _, err := image.DecodeConfig(bytes.NewReader(decoded))
+				if err != nil || cfg.Width != 32 || cfg.Height != 2048 {
+					t.Fatalf("Runtime did not prepare historical tool image: %v (%dx%d)", err, cfg.Width, cfg.Height)
+				}
+			}
+		}
+	}
+	if images != 7 {
+		t.Fatalf("model image count=%d, want seven readable crops", images)
 	}
 	var logPath string
 	if err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {

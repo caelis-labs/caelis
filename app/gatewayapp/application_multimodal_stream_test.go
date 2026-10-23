@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"image"
+	"image/jpeg"
 	"image/png"
 	"io"
 	"net/http"
@@ -251,7 +252,32 @@ synced:
 	if len(requests) != 2 {
 		t.Fatalf("model requests before next Turn = %d, want callback and image response", len(requests))
 	}
-	multimodalHTTPImageRequest(t, requests[1], image, call.CallID)
+	multimodalHTTPImageRequestWithCheck(t, requests[1], call.CallID, func(url string) {
+		t.Helper()
+		const prefix = "data:image/jpeg;base64,"
+		if !strings.HasPrefix(url, prefix) || len(strings.TrimPrefix(url, prefix)) > 4_500_000 {
+			t.Fatal("provider image was not re-encoded within its byte budget")
+		}
+		data, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(url, prefix))
+		if err != nil {
+			t.Fatal(err)
+		}
+		decoded, err := jpeg.Decode(bytes.NewReader(data))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if decoded.Bounds().Dx() != 1024 || decoded.Bounds().Dy() != 1024 {
+			t.Fatalf("prepared provider image dimensions=%v", decoded.Bounds())
+		}
+	})
+	if !bytes.Contains(requests[1], []byte("source rectangle [0,0,1024,1024)")) {
+		t.Fatal("provider lost the prepared image coordinate mapping")
+	}
+	history := applicationHTTPHistory(t, ctx, client, sessionID)
+	canonical, err := json.Marshal(history)
+	if err != nil || !bytes.Contains(canonical, wantBase64) {
+		t.Fatalf("canonical history lost the original PNG: %v", err)
+	}
 	// Keep reading the previously attached observer across the Turn boundary:
 	// neither image replay nor a durable final may stand in for the second Turn's
 	// exact transient provider deltas.

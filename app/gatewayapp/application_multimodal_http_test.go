@@ -106,6 +106,17 @@ func multimodalHTTPProfile(model string) sessionprofile.Profile {
 
 func multimodalHTTPImageRequest(t *testing.T, raw, pngBytes []byte, callID string) {
 	t.Helper()
+	wantURL := "data:image/png;base64," + base64.StdEncoding.EncodeToString(pngBytes)
+	multimodalHTTPImageRequestWithCheck(t, raw, callID, func(url string) {
+		t.Helper()
+		if url != wantURL {
+			t.Fatal("provider changed a small valid PNG")
+		}
+	})
+}
+
+func multimodalHTTPImageRequestWithCheck(t *testing.T, raw []byte, callID string, checkImage func(string)) {
+	t.Helper()
 	var request struct {
 		Messages []struct {
 			Role       string          `json:"role"`
@@ -116,7 +127,6 @@ func multimodalHTTPImageRequest(t *testing.T, raw, pngBytes []byte, callID strin
 	if err := json.Unmarshal(raw, &request); err != nil {
 		t.Fatal(err)
 	}
-	wantURL := "data:image/png;base64," + base64.StdEncoding.EncodeToString(pngBytes)
 	for i, message := range request.Messages {
 		if message.Role != "tool" || message.ToolCallID != callID {
 			continue
@@ -141,7 +151,8 @@ func multimodalHTTPImageRequest(t *testing.T, raw, pngBytes []byte, callID strin
 		first, imageAt, last, receiptAt := -1, -1, -1, -1
 		for j, part := range parts {
 			switch {
-			case part.Type == "image_url" && part.ImageURL.URL == wantURL:
+			case part.Type == "image_url":
+				checkImage(part.ImageURL.URL)
 				imageAt = j
 			case part.Type == "text" && part.Text == "first text":
 				first = j

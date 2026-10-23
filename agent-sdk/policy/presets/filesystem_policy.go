@@ -8,6 +8,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
+	"github.com/caelis-labs/caelis/agent-sdk/sandbox/backend/fsboundary"
 )
 
 func decideFilesystemWrite(input policy.ToolContext, def sandbox.Constraints) (policy.Decision, error) {
@@ -18,7 +19,7 @@ func decideFilesystemWrite(input policy.ToolContext, def sandbox.Constraints) (p
 	if err := ensurePathsOutsideDefaultHiddenRoots(paths, approvedOverrideRoots(input.Options), "write"); err != nil {
 		return deny(err.Error()), nil
 	}
-	if err := ensurePathsWithinRoots(paths, writableRoots(input.Options), "write"); err == nil {
+	if err := ensureFilesystemWritePaths(paths, writableRoots(input.Options)); err == nil {
 		return allow(def), nil
 	}
 	return askPathWriteApproval(input, def, paths)
@@ -64,13 +65,15 @@ func ensureReadPathsOutsideDefaultHiddenRoots(input policy.ToolContext) error {
 	return ensurePathsOutsideDefaultHiddenRoots(paths, approvedOverrideRoots(input.Options), "read")
 }
 
-func ensurePathsWithinRoots(paths []string, roots []string, action string) error {
+func ensureFilesystemWritePaths(paths []string, roots []string) error {
 	for _, one := range paths {
 		if strings.TrimSpace(one) == "" {
 			continue
 		}
-		if !withinAnyRoot(one, roots) {
-			return fmt.Errorf("%s target %q is outside allowed roots", action, one)
+		// Use the same physical-path and scratch-root authority as policyfs.
+		// A lexical /tmp prefix must not grant a symlink target elsewhere.
+		if !fsboundary.IsWithinRoots(one, roots, nil) && !fsboundary.IsWithinScratchRoots(one, nil) {
+			return fmt.Errorf("write target %q is outside allowed roots", one)
 		}
 	}
 	return nil
@@ -101,14 +104,14 @@ func approvedOverrideRoots(opts policy.ModeOptions) []string {
 
 func ensurePathsOutsideDefaultHiddenRoots(paths []string, approvedRoots []string, action string) error {
 	for _, one := range paths {
-		target := normalizeTarget(one)
+		target := fsboundary.ResolvePathWithSymlinks(normalizeTarget(one))
 		if target == "" {
 			continue
 		}
-		if withinAnyRoot(target, approvedRoots) {
+		if fsboundary.IsWithinRoots(target, approvedRoots, nil) {
 			continue
 		}
-		if withinAnyRoot(target, defaultHiddenUserRoots()) {
+		if fsboundary.IsWithinRoots(target, defaultHiddenUserRoots(), nil) {
 			return fmt.Errorf("%s target %q is under a sensitive user configuration path and is blocked", action, one)
 		}
 	}

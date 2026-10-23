@@ -1,8 +1,12 @@
 package gatewayapp
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"image"
+	"image/png"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
@@ -309,7 +313,11 @@ func runHostedSubagentUserInput(t *testing.T, assemble func(*Stack) (appserver.A
 recovered:
 	recoveryElapsed := time.Since(startedAt)
 	initialComplete = true
-	const imageData = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a5l8AAAAASUVORK5CYII="
+	var imageBytes bytes.Buffer
+	if err := png.Encode(&imageBytes, image.NewNRGBA(image.Rect(0, 0, 1, 1))); err != nil {
+		t.Fatal(err)
+	}
+	imageData := base64.StdEncoding.EncodeToString(imageBytes.Bytes())
 	for index, text := range []string{"user guidance one", "user followup two"} {
 		req := appserver.SubagentInputRequest{OperationID: text, SessionID: parent.SessionID, ParticipantID: child.ID, TaskID: child.DelegationID, Input: text}
 		if index == 0 {
@@ -466,6 +474,24 @@ recovered:
 	}
 	if !strings.Contains(payload, imageData) {
 		t.Fatal("next Turn model context lost the user's image")
+	}
+	childEvents, err := host.composition.sessions.Events(ctx, session.EventsRequest{SessionRef: session.SessionRef{SessionID: child.SessionID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonicalImage := false
+	for _, event := range childEvents {
+		if event.Message == nil || event.Message.Role != model.RoleUser {
+			continue
+		}
+		for _, part := range event.Message.Parts {
+			if part.Media != nil && part.Media.Source.Data == imageData && part.Media.MimeType == "image/png" {
+				canonicalImage = true
+			}
+		}
+	}
+	if !canonicalImage {
+		t.Fatal("child Session history lost the original PNG")
 	}
 	for _, text := range []string{"user guidance one", "user followup two"} {
 		if !strings.Contains(payload, text) {

@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"iter"
 	"slices"
@@ -159,7 +160,7 @@ func (l *anthropicSDKLLM) generateNonStreaming(ctx context.Context, params anthr
 	}
 	resp, err := cli.Messages.New(runCtx, params, opts...)
 	if err != nil {
-		yield(nil, err)
+		yield(nil, classifyAnthropicImageError(err))
 		return
 	}
 	if resp != nil {
@@ -239,7 +240,7 @@ func (l *anthropicSDKLLM) generateStreaming(ctx context.Context, params anthropi
 		}
 	}
 	if err := stream.Err(); err != nil {
-		yield(nil, err)
+		yield(nil, classifyAnthropicImageError(err))
 		return
 	}
 	if !messageStopped {
@@ -265,6 +266,14 @@ func (l *anthropicSDKLLM) generateStreaming(ctx context.Context, params anthropi
 			Usage:           usage,
 		},
 	}, nil)
+}
+
+func classifyAnthropicImageError(err error) error {
+	var apiErr *anthropic.Error
+	if errors.As(err, &apiErr) {
+		return classifyImageInputError(err, apiErr.RawJSON(), apiErr.StatusCode)
+	}
+	return err
 }
 
 func normalizeAccumulatedToolUseInput(acc *anthropic.Message, stop anthropic.ContentBlockStopEvent) {

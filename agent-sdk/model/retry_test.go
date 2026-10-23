@@ -437,8 +437,8 @@ func TestWithRetryRetriesProviderDeadlineExceededButStopsWhenCallerContextDone(t
 	if gotErr == nil || !errors.Is(gotErr, context.Canceled) {
 		t.Fatalf("Generate() error = %v, want caller cancellation returned", gotErr)
 	}
-	if expiredInner.calls != 1 {
-		t.Fatalf("expired calls = %d, want 1", expiredInner.calls)
+	if expiredInner.calls != 0 {
+		t.Fatalf("expired calls = %d, want no dispatch after caller cancellation", expiredInner.calls)
 	}
 	if gotReset {
 		t.Fatal("received attempt reset for already-expired caller context")

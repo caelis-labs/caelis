@@ -35,7 +35,7 @@ func TestApplicationReviewerDoesNotChangeNativePolicy(t *testing.T) {
 			want       policy.Action
 		}{
 			{"Write", `{"path":"inside.txt","content":"safe"}`, policy.ActionAllow},
-			{"Write", `{"path":` + string(mustJSON(t, filepath.Join(filepath.Dir(root), "outside.txt"))) + `,"content":"exact action"}`, policy.ActionAskApproval},
+			{"Write", `{"path":` + string(mustJSON(t, filepath.Join(filepath.VolumeName(root)+string(filepath.Separator), "caelis-outside-workspace", "outside.txt"))) + `,"content":"exact action"}`, policy.ActionAskApproval},
 			{"RunCommand", `{"command":"echo safe","sandbox_permissions":"require_escalated","justification":"test Host action"}`, policy.ActionAskApproval},
 		} {
 			got, err := selected.DecideTool(t.Context(), policy.ToolContext{

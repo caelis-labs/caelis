@@ -289,9 +289,11 @@ func TestDefaultModeAllowsAssembledAgentCoordinationTools(t *testing.T) {
 }
 
 func TestDefaultModeAllowsUserConfigReadsButRequiresWriteGrant(t *testing.T) {
-	home := t.TempDir()
+	// The virtual home must be outside scratch roots; a real t.TempDir is
+	// intentionally writable under the shared sandbox scratch policy.
+	home := filepath.Join(filepath.Dir(testOutsidePath()), "caelis-user-home")
 	setHomeForPresetsTest(t, home)
-	tempRoot := filepath.Join(filepath.Dir(home), "caelis-temp-root")
+	tempRoot := filepath.Join(testWorkspaceRoot(), "caelis-temp-root")
 	configPath := filepath.Join(home, ".config", "ghostty", "config")
 
 	readInput := readCtx(configPath)

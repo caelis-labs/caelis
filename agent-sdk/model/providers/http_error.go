@@ -55,7 +55,43 @@ func statusError(resp *http.Response) error {
 	if looksLikeContextOverflow(body, resp.StatusCode) {
 		return &model.ContextOverflowError{Cause: base}
 	}
-	return base
+	return classifyImageInputError(base, body, resp.StatusCode)
+}
+
+// An invalid image cannot become valid by replaying the same request. Keep
+// the original provider diagnostic and code while excluding this specific
+// failure from the otherwise broad compatible-gateway retry policy.
+type imageInputError struct{ cause error }
+
+func (e *imageInputError) Error() string           { return e.cause.Error() }
+func (e *imageInputError) Unwrap() error           { return e.cause }
+func (*imageInputError) Retryable() bool           { return false }
+func (*imageInputError) ErrorCode() errorcode.Code { return errorcode.InvalidArgument }
+
+func classifyImageInputError(err error, body string, status int) error {
+	if status != http.StatusBadRequest && status != http.StatusRequestEntityTooLarge && status != http.StatusUnprocessableEntity {
+		return err
+	}
+	if looksLikeImageInputError(body) {
+		return &imageInputError{cause: err}
+	}
+	return err
+}
+
+// HTTP bodies and Responses SSE envelopes use the same permanent image codes
+// and messages, including gateways that supply only an underscore-delimited code.
+func looksLikeImageInputError(detail string) bool {
+	lower := strings.ReplaceAll(strings.ToLower(detail), "_", " ")
+	for _, phrase := range []string{
+		"unsupported image", "invalid image", "image parse error", "image too small",
+		"could not decode image", "unable to decode image", "image could not be decoded",
+		"image exceeds", "image too large", "image file too large", "image dimensions exceed", "image size exceeds",
+	} {
+		if strings.Contains(lower, phrase) {
+			return true
+		}
+	}
+	return false
 }
 
 func looksLikeContextOverflow(body string, statusCode int) bool {
