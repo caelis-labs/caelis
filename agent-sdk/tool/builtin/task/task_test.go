@@ -29,7 +29,7 @@ func TestTaskSchemaUsesServiceOwnedObservationBudgets(t *testing.T) {
 		t.Fatalf("yield_time_ms property unexpectedly exposed: %#v", props["yield_time_ms"])
 	}
 	action, _ := props["action"].(map[string]any)
-	if want := "read inspects state/output immediately; wait waits up to one minute for completion, not new output/readiness; write sends supported input; cancel requests cancellation. Participant threads use ReadThread/WaitThread."; action["description"] != want {
+	if want := "read inspects state/output immediately; wait waits up to one minute for completion, not new output/readiness; write sends supported input; cancel requests cancellation when supported. Participant threads use ReadThread/WaitThread."; action["description"] != want {
 		t.Fatalf("action guidance = %q, want %q", action["description"], want)
 	}
 	enum, _ := action["enum"].([]string)

@@ -189,6 +189,9 @@ func classifyResponsesStreamError(
 	if class, ok := providerTerminalCodes[code]; ok {
 		return class
 	}
+	if looksLikeImageInputError(errorType + " " + code + " " + details.message) {
+		return responsesErrorClassification{errorCode: errorcode.InvalidArgument}
+	}
 	switch {
 	case strings.HasPrefix(code, "invalid_"):
 		return responsesErrorClassification{errorCode: errorcode.InvalidArgument}

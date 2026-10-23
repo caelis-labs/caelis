@@ -2861,7 +2861,14 @@ func TestRuntimePolicyWriteToSystemTempDoesNotRequestApproval(t *testing.T) {
 	if err != nil {
 		t.Fatalf("filesystem.NewWrite() error = %v", err)
 	}
-	tempPath := filepath.Join(t.TempDir(), "scratch.txt")
+	// testing.TempDir follows GOTMPDIR, which may be a repository build cache
+	// rather than a sandbox scratch root. Exercise the OS temp policy directly.
+	tempRoot, err := os.MkdirTemp("", "caelis-runtime-scratch-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(tempRoot) })
+	tempPath := filepath.Join(tempRoot, "scratch.txt")
 	testModel := &writePathRuntimeModel{path: tempPath, content: "temporary\n"}
 	requester := approvalRequesterFunc(func(_ context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
 		t.Errorf("system temporary file unexpectedly requested approval: %+v", req.Approval)

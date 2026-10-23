@@ -62,7 +62,7 @@ func (Tool) Definition() tool.Definition {
 				"action": map[string]any{
 					"type":        "string",
 					"enum":        []string{"wait", "read", "write", "cancel"},
-					"description": "read inspects state/output immediately; wait waits up to one minute for completion, not new output/readiness; write sends supported input; cancel requests cancellation. Participant threads use ReadThread/WaitThread.",
+					"description": "read inspects state/output immediately; wait waits up to one minute for completion, not new output/readiness; write sends supported input; cancel requests cancellation when supported. Participant threads use ReadThread/WaitThread.",
 				},
 				"handle": map[string]any{
 					"type":        "string",

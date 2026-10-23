@@ -97,6 +97,12 @@ func collaborationLifecycleSeedRetained(t *testing.T, ctx context.Context, dbPat
 		t.Fatalf("open %s: %v", dbPath, err)
 	}
 	defer func() { _ = db.Close() }()
+	// The live Host also writes this database. Pin one fixture connection so
+	// its inserts wait for that writer instead of failing on transient locks.
+	db.SetMaxOpenConns(1)
+	if _, err := db.ExecContext(ctx, "PRAGMA busy_timeout=5000"); err != nil {
+		t.Fatal(err)
+	}
 	body := fmt.Sprintf(`{"id":"%s-message","from":"parent","to":"orbit","message":"handoff"}`, sessionID)
 	statements := []struct {
 		query string

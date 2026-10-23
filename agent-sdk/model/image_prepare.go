@@ -24,11 +24,18 @@ const (
 	imageMaxEncodedBytes = 4_500_000
 	imageMaxSourceBytes  = 32 * 1024 * 1024
 	imageMaxSourcePixels = 64 * 1024 * 1024
+	imageMaxTiles        = 8
 )
 
 type preparedImage struct {
-	media *MediaPart
-	note  string
+	images []preparedImagePart
+	note   string
+}
+
+// Empty data means validated pass-through. Cached derivatives never retain
+// original media bytes, names, or references into canonical requests.
+type preparedImagePart struct {
+	data, mimeType, note string
 }
 
 // generatePrepared is the final shared boundary for actual provider attempts.
@@ -62,9 +69,10 @@ func prepareRequestImages(ctx context.Context, req *Request) error {
 	if req == nil {
 		return nil
 	}
-	// One request can repeat the same image across message/tool evidence.
-	// Memoize only for this attempt, never retain private media globally.
-	cache := make(map[MediaSource]preparedImage)
+	return sharedImagePreparationCache.prepareRequest(ctx, req)
+}
+
+func (cache *imagePreparationCache) prepareRequest(ctx context.Context, req *Request) error {
 	var prepare func([]Part) ([]Part, error)
 	prepare = func(parts []Part) ([]Part, error) {
 		if len(parts) == 0 {
@@ -87,17 +95,22 @@ func prepareRequestImages(ctx context.Context, req *Request) error {
 				out = append(out, part)
 				continue
 			}
-			prepared, ok := cache[media.Source]
-			if !ok {
-				prepared = prepareInlineImage(media)
-				cache[media.Source] = prepared
+			prepared, err := cache.prepare(ctx, media.Source.Data, func() preparedImage { return prepareInlineImage(media) })
+			if err != nil {
+				return nil, err
 			}
 			if prepared.note != "" {
 				out = append(out, NewTextPart(fmt.Sprintf("[Image %q: %s]", media.Name, prepared.note)))
 			}
-			if prepared.media != nil {
-				copyMedia := *prepared.media
-				copyMedia.Name = media.Name
+			for _, derived := range prepared.images {
+				if derived.note != "" {
+					out = append(out, NewTextPart(fmt.Sprintf("[Image %q: %s]", media.Name, derived.note)))
+				}
+				copyMedia := *media
+				copyMedia.MimeType = derived.mimeType
+				if derived.data != "" {
+					copyMedia.Source.Data = derived.data
+				}
 				part.Media = &copyMedia
 				out = append(out, part)
 			}
@@ -146,28 +159,69 @@ func prepareInlineImage(media *MediaPart) preparedImage {
 	if err != nil {
 		return omit("image could not be decoded")
 	}
-	copyMedia := *media
-	copyMedia.MimeType = mime
 	if max(cfg.Width, cfg.Height) <= imageMaxDimension && len(media.Source.Data) <= imageMaxEncodedBytes {
-		return preparedImage{media: &copyMedia}
+		return preparedImage{images: []preparedImagePart{{mimeType: mime}}}
 	}
 	// Re-encoding removes EXIF, so use the displayed orientation and dimensions
 	// rather than rotating or mirroring camera photos as a side effect.
 	cfg.Width, cfg.Height = src.Bounds().Dx(), src.Bounds().Dy()
-	long := max(cfg.Width, cfg.Height)
-	w, h := cfg.Width, cfg.Height
-	if long > imageMaxDimension {
-		w = max(1, int(int64(cfg.Width)*imageMaxDimension/int64(long)))
-		h = max(1, int(int64(cfg.Height)*imageMaxDimension/int64(long)))
+	regions := imagePreparationRegions(src.Bounds())
+	result := preparedImage{}
+	for i, region := range regions {
+		derived, err := encodePreparedImage(src, region)
+		if err != nil {
+			return omit("image could not be encoded")
+		}
+		mapping := region.Sub(src.Bounds().Min)
+		derived.note = fmt.Sprintf("crop %d/%d of %dx%d in display orientation; source rectangle [%d,%d,%d,%d), prepared %s; map coordinates back by scaling to this rectangle and adding its top-left offset", i+1, len(regions), cfg.Width, cfg.Height, mapping.Min.X, mapping.Min.Y, mapping.Max.X, mapping.Max.Y, derived.note)
+		result.images = append(result.images, derived)
+	}
+	return result
+}
+
+// Panoramic images are cropped along their long axis before scaling so text
+// does not collapse into a narrow overview. At most eight overlapping crops
+// cover the complete displayed image; extreme aspect ratios still need scaling.
+func imagePreparationRegions(bounds image.Rectangle) []image.Rectangle {
+	w, h := bounds.Dx(), bounds.Dy()
+	long, short := max(w, h), min(w, h)
+	if long <= imageMaxDimension || long < short*3 {
+		return []image.Rectangle{bounds}
+	}
+	edge := max(short, imageMaxDimension)
+	overlap := edge / 16
+	// Ensure coverage including overlap without exceeding the tile budget.
+	edge = max(edge, (long+(imageMaxTiles-1)*overlap+imageMaxTiles-1)/imageMaxTiles)
+	count := (long - overlap + edge - overlap - 1) / (edge - overlap)
+	var regions []image.Rectangle
+	for i := 0; i < count; i++ {
+		start := i * (long - edge) / (count - 1)
+		end := start + edge
+		region := bounds
+		if h >= w {
+			region.Min.Y, region.Max.Y = bounds.Min.Y+start, bounds.Min.Y+end
+		} else {
+			region.Min.X, region.Max.X = bounds.Min.X+start, bounds.Min.X+end
+		}
+		regions = append(regions, region)
+	}
+	return regions
+}
+
+func encodePreparedImage(src image.Image, region image.Rectangle) (preparedImagePart, error) {
+	w, h := region.Dx(), region.Dy()
+	if long := max(w, h); long > imageMaxDimension {
+		w = max(1, int(int64(w)*imageMaxDimension/int64(long)))
+		h = max(1, int(int64(h)*imageMaxDimension/int64(long)))
 	}
 	for {
 		scaled := image.NewRGBA(image.Rect(0, 0, w, h))
-		draw.ApproxBiLinear.Scale(scaled, scaled.Bounds(), src, src.Bounds(), draw.Src, nil)
+		draw.ApproxBiLinear.Scale(scaled, scaled.Bounds(), src, region, draw.Src, nil)
 		var encoded bytes.Buffer
 		if err := png.Encode(&encoded, scaled); err != nil {
-			return omit("image could not be encoded")
+			return preparedImagePart{}, err
 		}
-		mime = "image/png"
+		mime := "image/png"
 		if base64.StdEncoding.EncodedLen(encoded.Len()) > imageMaxEncodedBytes {
 			// Flatten alpha onto white before JPEG encoding, rather than
 			// turning transparent screenshots black.
@@ -176,14 +230,12 @@ func prepareInlineImage(media *MediaPart) preparedImage {
 			draw.Draw(opaque, opaque.Bounds(), scaled, image.Point{}, draw.Over)
 			encoded.Reset()
 			if err := jpeg.Encode(&encoded, opaque, &jpeg.Options{Quality: 85}); err != nil {
-				return omit("image could not be encoded")
+				return preparedImagePart{}, err
 			}
 			mime = "image/jpeg"
 		}
 		if base64.StdEncoding.EncodedLen(encoded.Len()) <= imageMaxEncodedBytes {
-			copyMedia.Source.Data = base64.StdEncoding.EncodeToString(encoded.Bytes())
-			copyMedia.MimeType = mime
-			return preparedImage{media: &copyMedia, note: fmt.Sprintf("prepared from %dx%d to %dx%d for model input; coordinates refer to the prepared image", cfg.Width, cfg.Height, w, h)}
+			return preparedImagePart{data: base64.StdEncoding.EncodeToString(encoded.Bytes()), mimeType: mime, note: fmt.Sprintf("%dx%d", w, h)}, nil
 		}
 		w, h = max(1, w*3/4), max(1, h*3/4)
 	}

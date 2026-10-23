@@ -78,14 +78,14 @@ func TestSharedMediaRebuildsRuntimeProducedContextWithoutToolReplay(t *testing.T
 					t.Fatal(err)
 				}
 				cfg, _, err := image.DecodeConfig(bytes.NewReader(decoded))
-				if err != nil || cfg.Width != 5 || cfg.Height != 2048 {
+				if err != nil || cfg.Width != 32 || cfg.Height != 2048 {
 					t.Fatalf("Runtime did not prepare historical tool image: %v (%dx%d)", err, cfg.Width, cfg.Height)
 				}
 			}
 		}
 	}
-	if images != 1 {
-		t.Fatalf("model image count=%d, want 1", images)
+	if images != 7 {
+		t.Fatalf("model image count=%d, want seven readable crops", images)
 	}
 	var logPath string
 	if err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {

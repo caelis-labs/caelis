@@ -72,17 +72,26 @@ func classifyImageInputError(err error, body string, status int) error {
 	if status != http.StatusBadRequest && status != http.StatusRequestEntityTooLarge && status != http.StatusUnprocessableEntity {
 		return err
 	}
-	lower := strings.ToLower(body)
-	for _, phrase := range []string{
-		"unsupported image", "invalid image", "invalid_image", "image_too_large",
-		"could not decode image", "unable to decode image", "image could not be decoded",
-		"image exceeds", "image too large", "image dimensions exceed", "image size exceeds",
-	} {
-		if strings.Contains(lower, phrase) {
-			return &imageInputError{cause: err}
-		}
+	if looksLikeImageInputError(body) {
+		return &imageInputError{cause: err}
 	}
 	return err
+}
+
+// HTTP bodies and Responses SSE envelopes use the same permanent image codes
+// and messages, including gateways that supply only an underscore-delimited code.
+func looksLikeImageInputError(detail string) bool {
+	lower := strings.ReplaceAll(strings.ToLower(detail), "_", " ")
+	for _, phrase := range []string{
+		"unsupported image", "invalid image", "image parse error", "image too small",
+		"could not decode image", "unable to decode image", "image could not be decoded",
+		"image exceeds", "image too large", "image file too large", "image dimensions exceed", "image size exceeds",
+	} {
+		if strings.Contains(lower, phrase) {
+			return true
+		}
+	}
+	return false
 }
 
 func looksLikeContextOverflow(body string, statusCode int) bool {

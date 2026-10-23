@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 )
 
@@ -40,8 +41,8 @@ func TestFactoryPreparesUserAndHistoricalToolImagesForEveryWireFamily(t *testing
 					return
 				}
 				images := wireInlineImages(body)
-				if len(images) != 2 {
-					t.Errorf("wire image count=%d, want user and tool images", len(images))
+				if len(images) != 14 {
+					t.Errorf("wire image count=%d, want seven crops for both user and tool images", len(images))
 				}
 				for _, data := range images {
 					raw, err := base64.StdEncoding.DecodeString(data)
@@ -50,7 +51,7 @@ func TestFactoryPreparesUserAndHistoricalToolImagesForEveryWireFamily(t *testing
 						continue
 					}
 					img, _, err := image.Decode(bytes.NewReader(raw))
-					if err != nil || img.Bounds().Dx() != 1 || img.Bounds().Dy() != 2048 {
+					if err != nil || img.Bounds().Dx() != 9 || img.Bounds().Dy() != 2048 {
 						t.Errorf("wire image was not prepared: %v", err)
 					}
 				}
@@ -162,6 +163,41 @@ func TestFactoryDoesNotRetryPermanentImageHTTPFailures(t *testing.T) {
 					last = err
 				}
 				if last == nil || model.IsRetryableLLMError(last) || requests != 1 {
+					t.Fatalf("requests=%d error=%v", requests, last)
+				}
+			})
+		}
+	}
+}
+
+func TestFactoryDoesNotRetryPermanentImageResponsesEvents(t *testing.T) {
+	for _, api := range []APIType{APIOpenAIResponses, APIOpenAICodex, APIXAIResponses} {
+		for _, event := range []string{
+			`{"type":"response.failed","response":{"status":"failed","error":{"code":"image_too_large"}}}`,
+			`{"type":"error","code":"unsupported_image"}`,
+			`{"type":"response.failed","response":{"error":{"message":"could not decode image"}}}`,
+		} {
+			t.Run(string(api)+"/"+event, func(t *testing.T) {
+				requests := 0
+				server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					requests++
+					w.Header().Set("Content-Type", "text/event-stream")
+					_, _ = fmt.Fprintf(w, "data: %s\n\n", event)
+				}))
+				defer server.Close()
+				factory := NewFactory()
+				if err := factory.Register(Config{Alias: "test", API: api, Model: "test-model", BaseURL: server.URL, HTTPClient: server.Client(), Auth: AuthConfig{Type: AuthOAuthToken, Token: "synthetic"}, Retry: model.RetryConfig{MaxRetries: 2, BaseDelay: time.Nanosecond, MaxDelay: time.Nanosecond}}); err != nil {
+					t.Fatal(err)
+				}
+				llm, err := factory.NewByAlias("test")
+				if err != nil {
+					t.Fatal(err)
+				}
+				var last error
+				for _, err := range llm.Generate(t.Context(), &model.Request{Messages: []model.Message{model.NewTextMessage(model.RoleUser, "test")}, Stream: true}) {
+					last = err
+				}
+				if !errorcode.Is(last, errorcode.InvalidArgument) || model.IsRetryableLLMError(last) || requests != 1 {
 					t.Fatalf("requests=%d error=%v", requests, last)
 				}
 			})
