@@ -11,8 +11,9 @@ import (
 var catalogJSON []byte
 
 type catalogEntry struct {
-	Provider string `json:"provider"`
-	Model    string `json:"model"`
+	Provider    string `json:"provider"`
+	Model       string `json:"model"`
+	Recommended *bool  `json:"recommended,omitempty"`
 	ModelCapabilities
 }
 
@@ -57,7 +58,7 @@ func LookupModelCapabilities(provider, name string) (ModelCapabilities, bool) {
 func ListRecommendedModels(provider string) []string {
 	var models []string
 	for _, e := range catalog {
-		if e.Provider == strings.ToLower(strings.TrimSpace(provider)) {
+		if e.Provider == strings.ToLower(strings.TrimSpace(provider)) && (e.Recommended == nil || *e.Recommended) {
 			models = append(models, e.Model)
 		}
 	}

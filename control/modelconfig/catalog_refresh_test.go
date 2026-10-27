@@ -9,34 +9,47 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 )
 
-func TestSol61ConnectContextDefaultsAndExplicitOverrides(t *testing.T) {
+func TestCodex61ConnectContextDefaultsAndExplicitOverrides(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
 		provider string
+		model    string
 		window   int
 		want     int
 	}{
-		{provider: "codex", want: 475000},
-		{provider: "openai-codex", want: 475000},
-		{provider: "codex", window: 258400, want: 258400},
-		{provider: "codex", window: 500000, want: 500000},
-		{provider: "codex", window: 1000000, want: 1000000},
+		{model: "gpt-6.1-sol", provider: "codex", want: 258400},
+		{model: "gpt-6.1-sol", provider: "openai-codex", want: 258400},
+		{model: "gpt-6.1-sol", provider: "codex", window: 258400, want: 258400},
+		{model: "gpt-6.1-sol", provider: "codex", window: 500000, want: 500000},
+		{model: "gpt-6.1-sol", provider: "codex", window: 1000000, want: 1000000},
+		{model: "gpt-6.1-terra", provider: "codex", want: 475000},
+		{model: "gpt-6.1-terra", provider: "openai-codex", want: 475000},
+		{model: "gpt-6.1-terra", provider: "codex", window: 258400, want: 258400},
 	} {
-		t.Run(tc.provider+"/"+strconv.Itoa(tc.window), func(t *testing.T) {
+		t.Run(tc.model+"/"+tc.provider+"/"+strconv.Itoa(tc.window), func(t *testing.T) {
 			configs, err := AssembleConnect(context.Background(), ConnectRequest{
-				Provider: tc.provider,
-				APIKey:   "test-key",
-				Models:   []ModelSelection{{Name: "gpt-6.1-sol", ContextWindowTokens: tc.window}},
+				Provider:   tc.provider,
+				APIKey:     "test-key",
+				HTTPClient: &http.Client{},
+				Models:     []ModelSelection{{Name: tc.model, ContextWindowTokens: tc.window}},
 			}, ConnectOptions{Authenticate: func(context.Context, AuthenticateRequest) error { return nil }})
 			if err != nil || len(configs) != 1 {
 				t.Fatalf("AssembleConnect() = %#v, %v", configs, err)
 			}
 			cfg := configs[0]
-			if cfg.ContextWindowTokens != tc.want || cfg.Model != "gpt-6.1-sol" {
+			if cfg.ContextWindowTokens != tc.want || cfg.Model != tc.model {
 				t.Fatalf("connected config = %#v, want original model ID and window %d", cfg, tc.want)
 			}
+			resolved, err := BuildModel(cfg, 128000, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			window, ok := resolved.Model.(interface{ ContextWindowTokens() int })
+			if !ok || window.ContextWindowTokens() != tc.want {
+				t.Fatalf("built model = %#v, want context window %d", window, tc.want)
+			}
 			if tc.provider == "codex" || tc.provider == "openai-codex" {
-				if cfg.Alias != "openai-codex/gpt-6.1-sol" || cfg.API != model.APIOpenAICodex {
+				if cfg.Alias != "openai-codex/"+tc.model || cfg.API != model.APIOpenAICodex {
 					t.Fatalf("subscription route = %#v", cfg)
 				}
 			}
@@ -57,8 +70,8 @@ func TestBuildSol61ContextWindowPrecedence(t *testing.T) {
 		want       int
 	}{
 		{name: "host fallback", want: 128000},
-		{name: "refreshed preset", configured: 475000, want: 475000},
-		{name: "saved old preset", configured: 258400, want: 258400},
+		{name: "refreshed preset", configured: 258400, want: 258400},
+		{name: "saved old preset", configured: 475000, want: 475000},
 		{name: "explicit model window", configured: 500000, want: 500000},
 		{name: "runtime override", configured: 475000, override: 1000000, want: 1000000},
 	} {

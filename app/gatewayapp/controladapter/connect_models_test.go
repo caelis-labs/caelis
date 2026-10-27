@@ -76,6 +76,8 @@ func TestConnectModelCompletionRefreshesAfterConnectAndDisconnect(t *testing.T) 
 	}
 	assertFirst("gpt-6.1-sol")
 	configured = append(configured, ModelChoice{Provider: "openai-codex", Model: "gpt-6.1-sol"})
+	assertFirst("gpt-6.1-terra")
+	configured = append(configured, ModelChoice{Provider: "openai-codex", Model: "gpt-6.1-terra"})
 	assertFirst("gpt-6-sol")
 	configured = configured[1:]
 	assertFirst("gpt-6-astra")

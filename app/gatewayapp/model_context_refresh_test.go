@@ -12,8 +12,8 @@ func TestReloadedSol61ConfigHydratesOnlyMissingContextWindow(t *testing.T) {
 		saved  int
 		window int
 	}{
-		{name: "missing", window: 475000},
-		{name: "previous usable default", saved: 258400, window: 258400},
+		{name: "missing", window: 258400},
+		{name: "previous usable default", saved: 475000, window: 475000},
 		{name: "previous raw default", saved: 272000, window: 272000},
 		{name: "explicit raw window", saved: 500000, window: 500000},
 		{name: "explicit long window", saved: 1000000, window: 1000000},
