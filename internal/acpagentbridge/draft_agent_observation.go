@@ -259,6 +259,15 @@ func (s *draftSession) emitEnvelope(env eventstream.Envelope, replay, task bool,
 					s.narrativeResets[key] = replacementID
 				}
 			}
+			reset, err := draftMetadataReset(env, *update)
+			if err != nil {
+				return err
+			}
+			if reset != nil {
+				if err := s.agent.callbacks.SessionUpdate(s.ctx, v2.UpdateSessionNotification{SessionId: v2.SessionId(s.id), Update: *reset}); err != nil {
+					return err
+				}
+			}
 			if err := s.agent.callbacks.SessionUpdate(s.ctx, v2.UpdateSessionNotification{SessionId: v2.SessionId(s.id), Update: *update}); err != nil {
 				return err
 			}

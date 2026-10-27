@@ -17,7 +17,7 @@ Application integrations keep their existing stable types independently of the
 ACP wire profile.
 
 Repo-owned subprocess children use the explicitly selected
-`schema-v2.0.0-alpha.8` profile. The hosted Codex adapter keeps stable v1 by
+`schema-v2.0.0-alpha.9` profile. The hosted Codex adapter keeps stable v1 by
 default. Direct native main/child delegation stays
 inside Control and Runtime and does not acquire an ACP transport. User-provided
 process overrides remain stable unless their link explicitly selects a draft.
@@ -25,7 +25,7 @@ The Host-owned adapter descriptor, one-use channel grant and helper invocation
 carry the same exact schema. An unsupported schema fails before granting or
 serving the channel; the selected draft never falls back to v1.
 
-`caelis acp --acp-draft=schema-v2.0.0-alpha.8` serves product Sessions through the
+`caelis acp --acp-draft=schema-v2.0.0-alpha.9` serves product Sessions through the
 existing principal-bound Control clients. Initialization requires protocol
 version 2, the v2 `info` shape and an exact
 `_meta["caelis/acp_schema"]` tag. Responses advertise the implemented Session

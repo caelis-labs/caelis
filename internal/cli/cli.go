@@ -207,7 +207,7 @@ func runWithProductClientOpener(
 		controlTLSCert   = fs.String("control-tls-cert", envOr("CAELIS_CONTROL_TLS_CERT", ""), "TLS certificate file for the Control server")
 		controlTLSKey    = fs.String("control-tls-key", envOr("CAELIS_CONTROL_TLS_KEY", ""), "TLS private key file for the Control server")
 		acpAdapter       = fs.String("adapter", "", "Serve a built-in ACP adapter (codex)")
-		acpDraft         = fs.String("acp-draft", "", "Experimental asynchronous ACP; requires acp and exact schema-v2.0.0-alpha.8")
+		acpDraft         = fs.String("acp-draft", "", "Experimental asynchronous ACP; requires acp and exact "+surfaceacp.DraftSchemaTag)
 		adapterGrantFile = fs.String("adapter-grant-file", "", "Internal one-use built-in adapter channel grant")
 	)
 	if err := fs.Parse(args); err != nil {
@@ -218,7 +218,7 @@ func runWithProductClientOpener(
 	}
 	if strings.TrimSpace(*acpDraft) != "" {
 		if !acpSubcommand || strings.TrimSpace(*prompt) != "" || fs.NArg() != 0 || strings.TrimSpace(*acpDraft) != surfaceacp.DraftSchemaTag {
-			return errors.New("cli: --acp-draft requires the acp subcommand, exact schema-v2.0.0-alpha.8, and accepts no prompt")
+			return fmt.Errorf("cli: --acp-draft requires the acp subcommand, exact %s, and accepts no prompt", surfaceacp.DraftSchemaTag)
 		}
 	}
 	if attachSubcommand {

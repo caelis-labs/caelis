@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"maps"
 	"strings"
 
 	"github.com/caelis-labs/acp-go-sdk/experimental/v2"
@@ -40,8 +41,8 @@ func (d *draftClient) handleUpdate(raw json.RawMessage) {
 		d.fail(err)
 		return
 	}
-	// Preserve raw patch presence. The alpha.8 typed structs intentionally do
-	// not retain all absent/null/empty distinctions on re-encoding.
+	// Read raw field presence so normalized updates retain explicit clears and
+	// the original extension payload independently of typed SDK recovery.
 	var envelope SessionNotification
 	if err := json.Unmarshal(raw, &envelope); err != nil {
 		d.fail(err)
@@ -137,6 +138,13 @@ func (d *draftClient) decodeUpdates(sessionID, kind string, fields map[string]js
 		if err != nil {
 			d.mu.Unlock()
 			return nil, err
+		}
+		if raw, present := fields["_meta"]; present {
+			update.Meta, err = d.patchToolMetaLocked(session, update.ToolCallID, raw)
+			if err != nil {
+				d.mu.Unlock()
+				return nil, err
+			}
 		}
 		update.PreviouslyObserved = previous
 		updates := []Update{update}
@@ -256,11 +264,17 @@ func (d *draftClient) decodeMessage(sessionID, kind string, fields map[string]js
 	previouslyObserved := message.hasContent
 	_, metaPresent := fields["_meta"]
 	if meta, present := fields["_meta"]; present {
-		message.meta = nil
-		if !bytes.Equal(bytes.TrimSpace(meta), []byte("null")) {
-			if err := json.Unmarshal(meta, &message.meta); err != nil {
-				return nil, err
-			}
+		var err error
+		if replacement {
+			message.meta, err = draftPatchMeta(message.meta, meta)
+		} else {
+			// Chunk metadata describes this content contribution, not an entity
+			// upsert. Keep its existing replacement semantics.
+			message.meta = nil
+			err = json.Unmarshal(meta, &message.meta)
+		}
+		if err != nil {
+			return nil, err
 		}
 	}
 	if baseKind == "user_message" && newMessage {
@@ -446,4 +460,28 @@ func draftTerminalExitMeta(meta map[string]any, id string, exit map[string]any) 
 		code = &converted
 	}
 	return acpmeta.WithTerminalExit(meta, id, code, status.Signal)
+}
+
+// Entity upsert metadata patches by top-level key. Copy before applying so later
+// patches cannot mutate an already emitted normalized snapshot.
+func draftPatchMeta(previous map[string]any, raw json.RawMessage) (map[string]any, error) {
+	var patch map[string]any
+	if err := json.Unmarshal(raw, &patch); err != nil {
+		return nil, err
+	}
+	if patch == nil {
+		return nil, nil
+	}
+	next := maps.Clone(previous)
+	if next == nil {
+		next = make(map[string]any)
+	}
+	for key, value := range patch {
+		if value == nil {
+			delete(next, key)
+		} else {
+			next[key] = value
+		}
+	}
+	return next, nil
 }

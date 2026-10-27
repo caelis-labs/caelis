@@ -160,3 +160,35 @@ func TestDraftIndependentPermissionPublishesOnlyBoundedDisplayFacts(t *testing.T
 		t.Fatalf("subject=%#v err=%v", subject, err)
 	}
 }
+
+func TestDraftProjectionResetsReplacedMetadataBeforeSnapshot(t *testing.T) {
+	t.Parallel()
+	for _, update := range []eventstream.Update{
+		eventstream.ContentChunk{SessionUpdate: eventstream.UpdateAgentMessage, MessageID: "message", Content: eventstream.TextContent{Type: "text", Text: ""}, Meta: map[string]any{"keep": true}, ReplacedFields: []string{"_meta"}},
+		eventstream.ToolCallUpdate{SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "tool", Meta: map[string]any{"keep": true}, ReplacedFields: []string{"_meta"}},
+	} {
+		env := eventstream.Envelope{SessionID: "session", Update: update}
+		projected, err := draftEnvelopeUpdate(env)
+		if err != nil {
+			t.Fatal(err)
+		}
+		reset, err := draftMetadataReset(env, *projected)
+		if err != nil || reset == nil {
+			t.Fatalf("metadata reset = %v, %v", reset, err)
+		}
+		if err := reset.Validate(); err != nil {
+			t.Fatal(err)
+		}
+		raw, err := json.Marshal(reset)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &fields); err != nil {
+			t.Fatal(err)
+		}
+		if len(fields) != 3 || string(fields["_meta"]) != "null" {
+			t.Fatalf("metadata reset affects other fields: %s", raw)
+		}
+	}
+}

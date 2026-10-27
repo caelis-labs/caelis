@@ -58,8 +58,13 @@ func (d *draftClient) accountTerminalLocked(session *draftSession, id string, te
 	return nil
 }
 
-// observeToolLocked retains only the emitted tool identity in the existing
-// Session cache owner. Display bodies and execution/approval state live elsewhere.
+type draftTool struct {
+	meta       map[string]any
+	cacheBytes int
+}
+
+// observeToolLocked retains emitted tool identity and draft metadata in the
+// bounded Session cache. Execution and approval state live elsewhere.
 func (d *draftClient) observeToolLocked(session *draftSession, id string) (bool, error) {
 	if _, known := session.tools[id]; known {
 		return true, nil
@@ -71,8 +76,26 @@ func (d *draftClient) observeToolLocked(session *draftSession, id string) (bool,
 		return false, err
 	}
 	if session.tools == nil {
-		session.tools = make(map[string]struct{})
+		session.tools = make(map[string]*draftTool)
 	}
-	session.tools[id] = struct{}{}
+	session.tools[id] = &draftTool{cacheBytes: len(id) + 128}
 	return false, nil
+}
+
+func (d *draftClient) patchToolMetaLocked(session *draftSession, id string, raw json.RawMessage) (map[string]any, error) {
+	tool := session.tools[id]
+	meta, err := draftPatchMeta(tool.meta, raw)
+	if err != nil {
+		return nil, err
+	}
+	encoded, err := json.Marshal(meta)
+	if err != nil {
+		return nil, err
+	}
+	size := len(id) + len(encoded) + 128
+	if err := d.reserveCacheLocked(session, size, tool.cacheBytes); err != nil {
+		return nil, err
+	}
+	tool.meta, tool.cacheBytes = meta, size
+	return meta, nil
 }
