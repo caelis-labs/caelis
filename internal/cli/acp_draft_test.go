@@ -200,6 +200,7 @@ func TestRunRejectsIncompatibleDraftInvocationBeforeOpeningHost(t *testing.T) {
 	for _, args := range [][]string{
 		{"--acp-draft=" + surfaceacp.DraftSchemaTag},
 		{"acp", "--acp-draft=schema-v2.0.0-alpha.7"},
+		{"acp", "--acp-draft=schema-v2.0.0-alpha.8"},
 		{"acp", "--acp-draft=" + surfaceacp.DraftSchemaTag, "--adapter-grant-file=grant"},
 		{"acp", "--acp-draft=" + surfaceacp.DraftSchemaTag, "-p=work"},
 		{"acp", "--acp-draft=" + surfaceacp.DraftSchemaTag, "work"},
@@ -214,5 +215,15 @@ func TestRunRejectsIncompatibleDraftInvocationBeforeOpeningHost(t *testing.T) {
 				t.Fatal("invalid draft invocation succeeded")
 			}
 		})
+	}
+}
+
+func TestACPDraftHelpAdvertisesAcceptedSchema(t *testing.T) {
+	var output bytes.Buffer
+	if err := Run(t.Context(), []string{"acp", "--help"}, strings.NewReader(""), io.Discard, &output); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "exact "+surfaceacp.DraftSchemaTag) {
+		t.Fatalf("help omitted current schema %s: %s", surfaceacp.DraftSchemaTag, output.String())
 	}
 }

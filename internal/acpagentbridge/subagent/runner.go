@@ -1038,7 +1038,7 @@ func (r *Runner) handleUpdate(run *childRun, env client.UpdateEnvelope) {
 	run.updatedAt = r.clock()
 	switch update := env.Update.(type) {
 	case client.ContentChunk:
-		if text := chunkText(update); text != "" || update.Replacement || update.MetaPresent {
+		if text := chunkText(update); text != "" || update.Replacement || update.MetaPresent || len(update.Meta) != 0 {
 			switch strings.TrimSpace(update.SessionUpdate) {
 			case client.UpdateUserMessage:
 				if !run.suppressInputEcho {
@@ -1055,7 +1055,7 @@ func (r *Runner) handleUpdate(run *childRun, env client.UpdateEnvelope) {
 					env.Update = update
 					run.actionSummary.observeAssistant(messageID, run.agentText)
 					run.outputPreview = run.actionSummary.previewOrEmpty()
-					if textOverride != "" || update.Replacement || update.MetaPresent {
+					if textOverride != "" || update.Replacement || update.MetaPresent || len(update.Meta) != 0 {
 						event = run.acpUpdateEvent(env, run.updatedAt, textOverride)
 					}
 				}

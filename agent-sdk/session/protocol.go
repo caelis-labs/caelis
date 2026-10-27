@@ -1,6 +1,7 @@
 package session
 
 import (
+	"bytes"
 	"encoding/json"
 	"slices"
 	"strings"
@@ -234,11 +235,34 @@ func (p EventProtocol) MarshalJSON() ([]byte, error) {
 func (p *EventProtocol) UnmarshalJSON(data []byte) error {
 	type protocolJSON EventProtocol
 	var decoded protocolJSON
-	if err := json.Unmarshal(data, &decoded); err != nil {
+	wire := struct {
+		*protocolJSON
+		Update json.RawMessage `json:"update"`
+	}{protocolJSON: &decoded}
+	if err := json.Unmarshal(data, &wire); err != nil {
 		return err
 	}
-	normalized := CloneEventProtocol(EventProtocol(decoded))
-	*p = normalized
+	if len(wire.Update) > 0 && !bytes.Equal(bytes.TrimSpace(wire.Update), []byte("null")) {
+		var update ProtocolUpdate
+		fields := struct {
+			*ProtocolUpdate
+			Meta json.RawMessage `json:"_meta"`
+		}{ProtocolUpdate: &update}
+		if err := json.Unmarshal(wire.Update, &fields); err != nil {
+			return err
+		}
+		// Never route opaque metadata through float64, even temporarily:
+		// a valid numeric token may exceed float64's finite range.
+		if len(fields.Meta) > 0 {
+			decoder := json.NewDecoder(bytes.NewReader(fields.Meta))
+			decoder.UseNumber()
+			if err := decoder.Decode(&update.Meta); err != nil {
+				return err
+			}
+		}
+		decoded.Update = &update
+	}
+	*p = CloneEventProtocol(EventProtocol(decoded))
 	return nil
 }
 

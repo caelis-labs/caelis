@@ -47,7 +47,7 @@ type ContentChunk struct {
 	// Replacement is an internal materialized message snapshot, including an
 	// explicit empty snapshot. It is never a fabricated ACP v1 delta.
 	Replacement bool `json:"-"`
-	// MetaPresent preserves an explicit metadata patch, including null, without
+	// MetaPresent preserves an explicit entity metadata patch, including null, without
 	// changing content or treating an empty metadata delta as a new answer.
 	MetaPresent bool `json:"-"`
 	// PreviouslyObserved means this Session's materialization owner has already

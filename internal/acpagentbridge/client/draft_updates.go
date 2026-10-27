@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"maps"
 	"strings"
 
 	"github.com/caelis-labs/acp-go-sdk/experimental/v2"
@@ -14,7 +15,7 @@ import (
 type draftMessage struct {
 	content    []json.RawMessage
 	hasContent bool
-	meta       map[string]any
+	entityMeta map[string]any
 	cacheBytes int
 }
 
@@ -40,8 +41,8 @@ func (d *draftClient) handleUpdate(raw json.RawMessage) {
 		d.fail(err)
 		return
 	}
-	// Preserve raw patch presence. The alpha.8 typed structs intentionally do
-	// not retain all absent/null/empty distinctions on re-encoding.
+	// Read raw field presence so normalized updates retain explicit clears and
+	// the original extension payload independently of typed SDK recovery.
 	var envelope SessionNotification
 	if err := json.Unmarshal(raw, &envelope); err != nil {
 		d.fail(err)
@@ -117,7 +118,11 @@ func (d *draftClient) decodeUpdates(sessionID, kind string, fields map[string]js
 		return []Update{PlanUpdate{SessionUpdate: UpdatePlan, Entries: entries}}, nil
 	case "tool_call_update":
 		var update ToolCallUpdate
-		if err := json.Unmarshal(raw, &update); err != nil {
+		wire := struct {
+			*ToolCallUpdate
+			Meta json.RawMessage `json:"_meta"`
+		}{ToolCallUpdate: &update}
+		if err := json.Unmarshal(raw, &wire); err != nil {
 			return nil, err
 		}
 		if content, present := fields["content"]; present {
@@ -137,6 +142,13 @@ func (d *draftClient) decodeUpdates(sessionID, kind string, fields map[string]js
 		if err != nil {
 			d.mu.Unlock()
 			return nil, err
+		}
+		if raw, present := fields["_meta"]; present {
+			update.Meta, err = d.patchToolMetaLocked(session, update.ToolCallID, raw)
+			if err != nil {
+				d.mu.Unlock()
+				return nil, err
+			}
 		}
 		update.PreviouslyObserved = previous
 		updates := []Update{update}
@@ -255,12 +267,25 @@ func (d *draftClient) decodeMessage(sessionID, kind string, fields map[string]js
 	}
 	previouslyObserved := message.hasContent
 	_, metaPresent := fields["_meta"]
-	if meta, present := fields["_meta"]; present {
-		message.meta = nil
-		if !bytes.Equal(bytes.TrimSpace(meta), []byte("null")) {
-			if err := json.Unmarshal(meta, &message.meta); err != nil {
-				return nil, err
-			}
+	entityMetaPresent := replacement && metaPresent
+	meta := message.entityMeta
+	if !replacement {
+		// Chunk annotations belong only to this contribution. They neither
+		// replace nor inherit the entity's accumulated upsert metadata.
+		meta = nil
+	}
+	if raw, present := fields["_meta"]; present {
+		var err error
+		if replacement {
+			message.entityMeta, err = draftPatchMeta(message.entityMeta, raw)
+			meta = message.entityMeta
+		} else {
+			decoder := json.NewDecoder(bytes.NewReader(raw))
+			decoder.UseNumber()
+			err = decoder.Decode(&meta)
+		}
+		if err != nil {
+			return nil, err
 		}
 	}
 	if baseKind == "user_message" && newMessage {
@@ -287,7 +312,7 @@ func (d *draftClient) decodeMessage(sessionID, kind string, fields map[string]js
 		if err := d.accountMessageLocked(session, key, message); err != nil {
 			return nil, err
 		}
-		return []Update{ContentChunk{SessionUpdate: chunkKind, MessageID: messageID, Content: json.RawMessage(`{"type":"text","text":""}`), Meta: message.meta, MetaPresent: true, PreviouslyObserved: previouslyObserved}}, nil
+		return []Update{ContentChunk{SessionUpdate: chunkKind, MessageID: messageID, Content: json.RawMessage(`{"type":"text","text":""}`), Meta: meta, MetaPresent: true, PreviouslyObserved: previouslyObserved}}, nil
 	} else if replacement {
 		if !bytes.Equal(bytes.TrimSpace(content), []byte("null")) {
 			if err := json.Unmarshal(content, &blocks); err != nil {
@@ -317,7 +342,7 @@ func (d *draftClient) decodeMessage(sessionID, kind string, fields map[string]js
 	}
 	updates := make([]Update, 0, len(blocks))
 	for index, block := range blocks {
-		updates = append(updates, ContentChunk{SessionUpdate: chunkKind, MessageID: messageID, Content: block, Meta: message.meta, Replacement: replacement && index == 0, MetaPresent: metaPresent && index == 0, PreviouslyObserved: previouslyObserved})
+		updates = append(updates, ContentChunk{SessionUpdate: chunkKind, MessageID: messageID, Content: block, Meta: meta, Replacement: replacement && index == 0, MetaPresent: entityMetaPresent && index == 0, PreviouslyObserved: previouslyObserved})
 	}
 	return updates, nil
 }
@@ -446,4 +471,30 @@ func draftTerminalExitMeta(meta map[string]any, id string, exit map[string]any) 
 		code = &converted
 	}
 	return acpmeta.WithTerminalExit(meta, id, code, status.Signal)
+}
+
+// Entity upsert metadata patches by top-level key. Copy before applying so later
+// patches cannot mutate an already emitted normalized snapshot.
+func draftPatchMeta(previous map[string]any, raw json.RawMessage) (map[string]any, error) {
+	var patch map[string]any
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	if err := decoder.Decode(&patch); err != nil {
+		return nil, err
+	}
+	if patch == nil {
+		return nil, nil
+	}
+	next := maps.Clone(previous)
+	if next == nil {
+		next = make(map[string]any)
+	}
+	for key, value := range patch {
+		if value == nil {
+			delete(next, key)
+		} else {
+			next[key] = value
+		}
+	}
+	return next, nil
 }

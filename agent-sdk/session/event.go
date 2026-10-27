@@ -149,13 +149,11 @@ type Event struct {
 func (e *Event) UnmarshalJSON(data []byte) error {
 	type eventAlias Event
 	var decoded eventAlias
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		return err
-	}
-	var fields struct {
+	fields := struct {
+		*eventAlias
 		Meta  json.RawMessage   `json:"_meta"`
 		Media map[string]string `json:"media"`
-	}
+	}{eventAlias: &decoded}
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return err
 	}

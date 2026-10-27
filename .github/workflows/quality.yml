@@ -23,7 +23,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          fetch-depth: 2
+          # Older PR events can retain a base older than the merge parent.
+          # Classification verifies that ancestor before selecting checks.
+          fetch-depth: 0
           persist-credentials: false
       - name: Test CI change classification
         run: node --test scripts/ci_scope.test.mjs

@@ -86,16 +86,45 @@ func TestDraftInitializeUsesPinnedV2SchemaAndAdvertisesNoWork(t *testing.T) {
 	}
 }
 
+// The latest major offered by a client is negotiated independently from the
+// exact draft schema, which remains a separate compatibility constraint.
+func TestDraftInitializeNegotiatesNewerMajorToPinnedV2(t *testing.T) {
+	t.Parallel()
+	for _, explicitSchema := range []bool{false, true} {
+		ctx, connection := newDraftTestConnection(t)
+		request := draftTestInitialize()
+		request.ProtocolVersion = 3
+		if explicitSchema {
+			request.Meta = map[string]json.RawMessage{DraftSchemaMetaKey: json.RawMessage(`"` + DraftSchemaTag + `"`)}
+		}
+		response, err := acpsdk.SendRequest[v2.InitializeResponse](connection, ctx, v2.AgentMethodInitialize, request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if response.ProtocolVersion != 2 || response.Info.Name != "caelis-test" || string(response.Meta[DraftSchemaMetaKey]) != `"`+DraftSchemaTag+`"` {
+			t.Fatalf("negotiated response = %#v", response)
+		}
+		if response.Capabilities.Session != nil || response.Capabilities.Auth != nil || len(response.AuthMethods) != 0 {
+			t.Fatalf("unimplemented work advertised: %#v", response)
+		}
+		_, err = acpsdk.SendRequest[json.RawMessage](connection, ctx, v2.AgentMethodSessionNew, map[string]any{})
+		assertDraftRPCError(t, err, -32601)
+		_, err = acpsdk.SendRequest[v2.InitializeResponse](connection, ctx, v2.AgentMethodInitialize, request)
+		assertDraftRPCError(t, err, -32600)
+	}
+}
+
 func TestDraftInitializeRejectsInvalidOrIncompatibleHandshake(t *testing.T) {
 	t.Parallel()
 	for name, request := range map[string]json.RawMessage{
 		"v1":            json.RawMessage(`{"protocolVersion":1,"clientInfo":{"name":"fixture","version":"test"}}`),
-		"future":        json.RawMessage(`{"protocolVersion":3,"info":{"name":"fixture","version":"test"}}`),
+		"zero":          json.RawMessage(`{"protocolVersion":0,"info":{"name":"fixture","version":"test"}}`),
 		"no version":    json.RawMessage(`{"info":{"name":"fixture","version":"test"}}`),
 		"null version":  json.RawMessage(`{"protocolVersion":null,"info":{"name":"fixture","version":"test"}}`),
 		"no info":       json.RawMessage(`{"protocolVersion":2,"clientInfo":{"name":"fixture","version":"test"}}`),
 		"null info":     json.RawMessage(`{"protocolVersion":2,"info":null}`),
 		"bad info":      json.RawMessage(`{"protocolVersion":2,"info":{"name":"fixture"}}`),
+		"future schema": json.RawMessage(`{"protocolVersion":3,"info":{"name":"fixture","version":"test"},"_meta":{"caelis/acp_schema":"schema-v2.0.0-alpha.8"}}`),
 		"other schema":  json.RawMessage(`{"protocolVersion":2,"info":{"name":"fixture","version":"test"},"_meta":{"caelis/acp_schema":"schema-v2.0.0-alpha.7"}}`),
 		"null schema":   json.RawMessage(`{"protocolVersion":2,"info":{"name":"fixture","version":"test"},"_meta":{"caelis/acp_schema":null}}`),
 		"object schema": json.RawMessage(`{"protocolVersion":2,"info":{"name":"fixture","version":"test"},"_meta":{"caelis/acp_schema":{}}}`),

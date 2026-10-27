@@ -170,8 +170,8 @@ func draftValidatedUpdate(object map[string]json.RawMessage) (*v2.SessionUpdate,
 	if err := update.Validate(); err != nil {
 		return nil, fmt.Errorf("ACP draft projected update: %w", err)
 	}
-	// alpha.8's typed marshaler loses most explicit null/empty patch fields.
-	// Preserve the validated standard payload through its raw union branch.
+	// Preserve the validated payload, including field presence and extensions,
+	// through the raw union branch without another typed normalization.
 	wire := json.RawMessage(encoded)
 	return &v2.SessionUpdate{Other: &wire}, nil
 }
@@ -401,4 +401,52 @@ func (a *DraftAgent) draftRefreshPresentation(ctx context.Context, sessionID str
 		return a.callbacks.SessionUpdate(ctx, v2.UpdateSessionNotification{SessionId: v2.SessionId(sessionID), Update: update})
 	}
 	return nil
+}
+
+// Native ReplacedFields metadata is a complete snapshot. A draft upsert object
+// patches by key, so clear the entity metadata before sending that snapshot.
+func draftMetadataReset(env eventstream.Envelope, update v2.SessionUpdate) (*v2.SessionUpdate, error) {
+	raw, err := json.Marshal(env.Update)
+	if err != nil {
+		return nil, err
+	}
+	var source struct {
+		ReplacedFields []string `json:"replacedFields"`
+	}
+	if err := json.Unmarshal(raw, &source); err != nil {
+		return nil, err
+	}
+	if !slices.Contains(source.ReplacedFields, "_meta") {
+		return nil, nil
+	}
+	raw, err = json.Marshal(update)
+	if err != nil {
+		return nil, err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return nil, err
+	}
+	var kind string
+	_ = json.Unmarshal(fields["sessionUpdate"], &kind)
+	switch kind {
+	case "user_message", "agent_message", "agent_thought", "tool_call_update":
+	default:
+		// Chunk metadata belongs to the content contribution, not the entity.
+		return nil, nil
+	}
+	var meta map[string]json.RawMessage
+	if err := json.Unmarshal(fields["_meta"], &meta); err != nil {
+		return nil, err
+	}
+	if meta == nil {
+		return nil, nil
+	}
+	reset := map[string]json.RawMessage{"sessionUpdate": fields["sessionUpdate"], "_meta": draftRaw(nil)}
+	for _, key := range []string{"messageId", "toolCallId"} {
+		if id, present := fields[key]; present {
+			reset[key] = id
+		}
+	}
+	return draftValidatedUpdate(reset)
 }
