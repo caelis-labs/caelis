@@ -436,7 +436,10 @@ func draftMetadataReset(env eventstream.Envelope, update v2.SessionUpdate) (*v2.
 		return nil, nil
 	}
 	var meta map[string]json.RawMessage
-	if json.Unmarshal(fields["_meta"], &meta) != nil || meta == nil {
+	if err := json.Unmarshal(fields["_meta"], &meta); err != nil {
+		return nil, err
+	}
+	if meta == nil {
 		return nil, nil
 	}
 	reset := map[string]json.RawMessage{"sessionUpdate": fields["sessionUpdate"], "_meta": draftRaw(nil)}
