@@ -338,7 +338,7 @@ func TestSelectableModelsUsesCurrentBundledCodexCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SelectableModels(codex) error = %v", err)
 	}
-	want := []string{"gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna"}
+	want := []string{"gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna"}
 	if got := selectableModelNames(models); !slices.Equal(got, want) {
 		t.Fatalf("codex selectable models = %#v, want maintained fallback %#v", got, want)
 	}
@@ -352,22 +352,22 @@ func TestSelectableModelsUsesCurrentBundledCodexCatalog(t *testing.T) {
 func TestResolveCodexOAuthModelDefaultsUseSubscriptionCatalog(t *testing.T) {
 	t.Parallel()
 
-	for _, name := range []string{"gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna"} {
+	for _, name := range []string{"gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-sol", "gpt-6-luna"} {
 		t.Run(name, func(t *testing.T) {
 			managed, err := ResolveModelDefaultsForEndpoint("codex", "", name)
 			if err != nil {
 				t.Fatal(err)
 			}
 			levels := []string{"low", "medium", "high", "xhigh", "max"}
-			if name == "gpt-6-sol" || name == "gpt-6.1-sol" {
+			if name == "gpt-6-sol" || name == "gpt-6.1-sol" || name == "gpt-6.1-terra" {
 				levels = append(levels, "ultra")
 			}
 			defaultEffort := "medium"
-			if name == "gpt-6.1-sol" {
+			if name == "gpt-6.1-sol" || name == "gpt-6.1-terra" {
 				defaultEffort = "low"
 			}
 			contextWindow := 258400
-			if name == "gpt-6.1-sol" {
+			if name == "gpt-6.1-terra" {
 				contextWindow = 475000
 			}
 			if managed.ContextWindowTokens != contextWindow || managed.MaxOutputTokens != 32768 ||
@@ -673,8 +673,9 @@ func TestSpeedModesForConfig(t *testing.T) {
 		want     bool
 		wantHint string
 	}{
-		{name: "openai Sol 6.1 uses responses", cfg: Config{Provider: "openai", API: model.APIOpenAI, Model: "gpt-6.1-sol"}, want: true, wantHint: "Faster responses, increased usage"},
-		{name: "codex Sol 6.1 uses responses", cfg: Config{Provider: "openai-codex", API: model.APIOpenAICodex, Model: "gpt-6.1-sol"}, want: true, wantHint: "Faster responses, increased usage"},
+		{name: "openai Sol 6.1 uses responses", cfg: Config{Provider: "openai", API: model.APIOpenAI, Model: "gpt-6.1-sol"}, want: true, wantHint: "2x faster, more usage"},
+		{name: "codex Sol 6.1 uses responses", cfg: Config{Provider: "openai-codex", API: model.APIOpenAICodex, Model: "gpt-6.1-sol"}, want: true, wantHint: "2x faster, more usage"},
+		{name: "codex Terra supports fast", cfg: Config{Provider: "openai-codex", API: model.APIOpenAICodex, Model: "gpt-6.1-terra"}, want: true, wantHint: "1.5x faster, more usage"},
 		{name: "openai gpt uses responses", cfg: Config{Provider: "openai", API: model.APIOpenAI, Model: "gpt-6-sol"}, want: true, wantHint: "1.5x faster, more usage"},
 		{name: "openai-codex gpt uses responses", cfg: Config{Provider: "openai-codex", API: model.APIOpenAICodex, Model: "gpt-6-sol"}, want: true, wantHint: "1.5x faster, more usage"},
 		{name: "openai luna uses responses", cfg: Config{Provider: "openai", API: model.APIOpenAI, Model: "gpt-6-luna"}, want: true, wantHint: "1.5x faster, more usage"},

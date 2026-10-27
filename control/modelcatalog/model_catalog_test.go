@@ -86,14 +86,14 @@ func TestCoreCatalogIsOneValidatedSource(t *testing.T) {
 			t.Fatalf("unsupported default effort: %s", key)
 		}
 	}
-	if len(ListRecommendedModels("openai-codex")) != 4 {
+	if len(ListRecommendedModels("openai-codex")) != 5 {
 		t.Fatal("subscription recommendations missing")
 	}
 	for _, provider := range []string{"openai", "openrouter", "anthropic", "magpie", "custom"} {
 		if len(ListRecommendedModels(provider)) != 0 {
 			t.Fatalf("unexpected maintained directory for %s", provider)
 		}
-		if _, ok := LookupModelCapabilities(provider, "gpt-6.1-sol"); ok {
+		if _, ok := LookupModelCapabilities(provider, "gpt-6.1-terra"); ok {
 			t.Fatalf("inherited native metadata: %s", provider)
 		}
 	}
@@ -107,4 +107,28 @@ func TestCatalogLookupReturnsDetachedCapabilities(t *testing.T) {
 		t.Fatal("caller changed catalog")
 	}
 }
+
+func TestDeepSeekCatalogMatchesCurrentCapabilities(t *testing.T) {
+	for _, name := range []string{"deepseek-flash", "deepseek-v4-pro"} {
+		caps, ok := LookupModelCapabilities("deepseek", name)
+		if !ok || !caps.SupportsJSONOutput || caps.ContextWindowTokens != 1000000 || caps.MaxOutputTokens != 393216 {
+			t.Fatalf("DeepSeek limits/JSON support for %s = %#v, known=%t", name, caps, ok)
+		}
+		if got := ReasoningLevelsForModel("deepseek", name); !slices.Equal(got, []string{"none", "low", "high", "max"}) || caps.DefaultReasoningEffort != "high" {
+			t.Fatalf("DeepSeek reasoning for %s = %v, default=%q", name, got, caps.DefaultReasoningEffort)
+		}
+	}
+}
+
+func TestRetiredMiMoModelsKeepCapabilitiesWithoutRecommendations(t *testing.T) {
+	if got := ListRecommendedModels("xiaomi"); !slices.Equal(got, []string{"mimo-v2.6-flash", "mimo-v2.6-pro"}) {
+		t.Fatalf("MiMo recommendations = %v", got)
+	}
+	for _, name := range []string{"mimo-v2.5", "mimo-v2.5-pro"} {
+		if caps, ok := LookupModelCapabilities("xiaomi", name); !ok || !caps.SupportsImages || caps.ContextWindowTokens != 1050000 {
+			t.Fatalf("retired MiMo capabilities for %s = %#v, known=%t", name, caps, ok)
+		}
+	}
+}
+
 func sameStrings(a, b []string) bool { return slices.Equal(a, b) }

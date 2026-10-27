@@ -55,6 +55,8 @@ metadata from an upstream vendor name.
 Edit this JSON directly to add or update a native model; no generator, remote
 models.dev feed or overlay is involved. Keep `default_max_output` distinct from
 the provider's `max_output` ceiling, and declare only supported reasoning levels.
+Set `recommended: false` for retired models whose capabilities must remain
+available to saved connections; omitted values keep the entry recommended.
 Run `go test ./control/modelcatalog ./control/modelconfig` after an edit. The
 catalog test rejects duplicate entries, unsupported namespaces, missing limits
 and default efforts outside the declared set.
@@ -64,6 +66,28 @@ reasoning controls. Directory edits affect new connections; reconnect a saved
 model to accept refreshed defaults. Explicit model settings and Runtime context
 window overrides retain their precedence. The context window is not a compaction
 threshold: Runtime subtracts its output reserve and safety margin first.
+
+Codex entries use the subscription catalog rather than public API limits. Its
+`context_window` is reduced by the upstream effective-context percentage (95%
+when omitted): Terra's 500,000 becomes 475,000, while Sol's 272,000 becomes
+258,400. The 32,768 output budget is a Caelis default; an omitted `max_output`
+means no verified subscription output ceiling. Speed hints describe upstream
+service tiers, not API prices. Recommendation order does not change the saved
+global default model.
+
+Use these first-party sources when maintaining the native directory:
+
+| Provider | Capability sources |
+| --- | --- |
+| Codex | [Bundled models](https://github.com/openai/codex/blob/main/codex-rs/models-manager/models.json), [effective-context definition](https://github.com/openai/codex/blob/main/codex-rs/protocol/src/openai_models.rs), [model availability](https://developers.openai.com/codex/models) |
+| xAI | [Grok models](https://docs.x.ai/developers/models), [release notes](https://docs.x.ai/developers/release-notes) |
+| DeepSeek | [Model details](https://api-docs.deepseek.com/quick_start/pricing/), [reasoning controls](https://api-docs.deepseek.com/guides/thinking_mode/), [output ceiling](https://api-docs.deepseek.com/api/create-chat-completion/) |
+| Xiaomi | [Models and availability](https://mimo.mi.com/docs/en-US/quick-start/summary/model), [API parameters](https://mimo.mi.com/docs/en-US/api/chat/openai-api) |
+
+MiMo V2.6 Pro and Flash are the general API recommendations. Ultraspeed requires
+custom service access and is not a general recommendation. The V2.5 entries
+retain capability lookup for saved connections; upstream deprecated those models
+on October 21, 2026, so use V2.6 for new connections.
 
 ### Magpie
 
