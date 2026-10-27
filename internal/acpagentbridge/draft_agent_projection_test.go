@@ -192,3 +192,20 @@ func TestDraftProjectionResetsReplacedMetadataBeforeSnapshot(t *testing.T) {
 		}
 	}
 }
+
+func TestDraftProjectionDoesNotResetChunkMetadata(t *testing.T) {
+	t.Parallel()
+	env := eventstream.Envelope{SessionID: "session", Update: eventstream.ContentChunk{
+		SessionUpdate: eventstream.UpdateAgentMessage, MessageID: "message",
+		Content: eventstream.TextContent{Type: "text", Text: "append"},
+		Meta:    map[string]any{"keep": true}, ReplacedFields: []string{"_meta"},
+	}}
+	projected, err := draftEnvelopeUpdate(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reset, err := draftMetadataReset(env, *projected)
+	if err != nil || reset != nil {
+		t.Fatalf("content chunk reset = %v, %v", reset, err)
+	}
+}

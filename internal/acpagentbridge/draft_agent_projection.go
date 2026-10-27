@@ -427,6 +427,14 @@ func draftMetadataReset(env eventstream.Envelope, update v2.SessionUpdate) (*v2.
 	if err := json.Unmarshal(raw, &fields); err != nil {
 		return nil, err
 	}
+	var kind string
+	_ = json.Unmarshal(fields["sessionUpdate"], &kind)
+	switch kind {
+	case "user_message", "agent_message", "agent_thought", "tool_call_update":
+	default:
+		// Chunk metadata belongs to the content contribution, not the entity.
+		return nil, nil
+	}
 	var meta map[string]json.RawMessage
 	if json.Unmarshal(fields["_meta"], &meta) != nil || meta == nil {
 		return nil, nil
