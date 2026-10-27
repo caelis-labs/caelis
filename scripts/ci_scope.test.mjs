@@ -96,6 +96,10 @@ test('merge diff excludes changes already on main, including in a shallow checko
   f.git('clone', '--depth=2', `file://${f.cwd}`, shallow);
   assert.deepEqual(inspectChanges(currentBase, shallow), {full: false, docs: true, release: false});
   assert.equal(inspectChanges(f.base, f.cwd).full, true, 'older base must include all intervening changes');
+  assert.throws(() => inspectChanges(f.base, shallow), /Not a valid commit name/);
+  f.git('-C', shallow, 'fetch', '--unshallow');
+  assert.deepEqual(inspectChanges(f.base, shallow), {full: true, docs: true, release: false},
+    'full checkout history must retain an older event base after main advances');
 });
 
 test('invalid or unavailable base fails without emitting successful outputs', t => {

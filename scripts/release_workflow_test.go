@@ -395,7 +395,7 @@ func TestScopedQualityFailsClosed(t *testing.T) {
 	t.Parallel()
 	quality := readWorkflow(t, "../.github/workflows/quality.yml")
 	for _, want := range []string{
-		"fetch-depth: 2", "PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}",
+		"fetch-depth: 0", "PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}",
 		"node --test scripts/ci_scope.test.mjs", "node scripts/ci_scope.mjs",
 		"if: steps.scope.outputs.docs == 'true'", "go run ./scripts/markdown_links",
 		"needs: [changes, govulncheck, go-quality]", "if: always()",
