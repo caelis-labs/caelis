@@ -213,7 +213,7 @@ func inferredAssistantUpdates(event *session.Event) []eventstream.Update {
 	if reasoning := reasoningForAssistantEvent(event); reasoning != "" {
 		out = append(out, contentChunkForEvent(event, eventstream.UpdateAgentThought, reasoning))
 	}
-	if text := textForAssistantEvent(event); text != "" || narrativeReplacement(event, eventstream.UpdateAgentMessage) || narrativeMetaPatch(event, eventstream.UpdateAgentMessage) {
+	if text := textForAssistantEvent(event); text != "" || narrativeReplacement(event, eventstream.UpdateAgentMessage) || narrativeMetadata(event, eventstream.UpdateAgentMessage) {
 		out = append(out, contentChunkForEvent(event, eventstream.UpdateAgentMessage, text))
 	}
 	return out
@@ -227,7 +227,7 @@ func explicitAssistantMessageUpdates(event *session.Event) []eventstream.Update 
 	if reasoning := reasoningForAssistantEvent(event); reasoning != "" {
 		out = append(out, contentChunkForEvent(event, eventstream.UpdateAgentThought, reasoning))
 	}
-	if text := textForAssistantEvent(event); text != "" || narrativeReplacement(event, eventstream.UpdateAgentMessage) || narrativeMetaPatch(event, eventstream.UpdateAgentMessage) {
+	if text := textForAssistantEvent(event); text != "" || narrativeReplacement(event, eventstream.UpdateAgentMessage) || narrativeMetadata(event, eventstream.UpdateAgentMessage) {
 		out = append(out, contentChunkForEvent(event, eventstream.UpdateAgentMessage, text))
 	}
 	return out
@@ -304,7 +304,7 @@ func inferredToolCallUpdates(event *session.Event) []eventstream.Update {
 }
 
 func contentUpdateForEvent(event *session.Event, kind string, text string) []eventstream.Update {
-	if text == "" && !narrativeReplacement(event, kind) && !narrativeMetaPatch(event, kind) {
+	if text == "" && !narrativeReplacement(event, kind) && !narrativeMetadata(event, kind) {
 		return nil
 	}
 	return []eventstream.Update{contentChunkForEvent(event, kind, text)}
@@ -315,9 +315,10 @@ func narrativeReplacement(event *session.Event, kind string) bool {
 	return update != nil && update.Replacement && normalizeUpdateType(update.SessionUpdate) == kind
 }
 
-func narrativeMetaPatch(event *session.Event, kind string) bool {
+func narrativeMetadata(event *session.Event, kind string) bool {
 	update := session.ProtocolUpdateOf(event)
-	return update != nil && normalizeUpdateType(update.SessionUpdate) == kind && containsProtocolField(update.ReplacedFields, "_meta")
+	return update != nil && normalizeUpdateType(update.SessionUpdate) == kind &&
+		(len(update.Meta) != 0 || containsProtocolField(update.ReplacedFields, "_meta"))
 }
 
 func contentChunk(kind string, text string) eventstream.ContentChunk {
