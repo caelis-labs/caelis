@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.73.3](https://github.com/caelis-labs/caelis/compare/v0.73.2...v0.73.3) (2026-10-27)
+
+
+### Bug Fixes
+
+* isolate child message outcomes and reconnect TUI output ([#169](https://github.com/caelis-labs/caelis/issues/169)) ([27c992e](https://github.com/caelis-labs/caelis/commit/27c992e643635b0fe88168ab058af4b1b3e3afa9))
+* **models:** add GPT-6.1 Terra and refresh native catalog ([#167](https://github.com/caelis-labs/caelis/issues/167)) ([25f9eff](https://github.com/caelis-labs/caelis/commit/25f9efffae5a98532dffe9c36607d88073a57b31))
+
 ## [0.73.2](https://github.com/caelis-labs/caelis/compare/v0.73.1...v0.73.2) (2026-10-23)
 
 
