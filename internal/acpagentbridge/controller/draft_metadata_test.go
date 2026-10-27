@@ -68,10 +68,10 @@ func TestDraftMetadataSurvivesClientCanonicalAndLiveProjection(t *testing.T) {
 				chunk, empty bool
 				meta, want   string
 			}{
-				{meta: `{"stable":9007199254740993}`, want: `{"stable":9007199254740993}`},
+				{meta: `{"stable":9007199254740993,"overflow":1e400}`, want: `{"stable":9007199254740993,"overflow":1e400}`},
 				{chunk: true, meta: `{"transient":9007199254740995}`, want: `{"transient":9007199254740995}`},
 				{chunk: true, empty: true, meta: `{"annotation":9007199254740997}`, want: `{"annotation":9007199254740997}`},
-				{meta: `{"added":{"decimal":1.2500}}`, want: `{"stable":9007199254740993,"added":{"decimal":1.2500}}`},
+				{meta: `{"added":{"decimal":1.2500}}`, want: `{"stable":9007199254740993,"overflow":1e400,"added":{"decimal":1.2500}}`},
 			}
 			for _, frame := range frames {
 				if kind == "tool_call_update" && frame.chunk {

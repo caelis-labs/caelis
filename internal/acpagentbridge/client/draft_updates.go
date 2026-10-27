@@ -118,7 +118,11 @@ func (d *draftClient) decodeUpdates(sessionID, kind string, fields map[string]js
 		return []Update{PlanUpdate{SessionUpdate: UpdatePlan, Entries: entries}}, nil
 	case "tool_call_update":
 		var update ToolCallUpdate
-		if err := json.Unmarshal(raw, &update); err != nil {
+		wire := struct {
+			*ToolCallUpdate
+			Meta json.RawMessage `json:"_meta"`
+		}{ToolCallUpdate: &update}
+		if err := json.Unmarshal(raw, &wire); err != nil {
 			return nil, err
 		}
 		if content, present := fields["content"]; present {

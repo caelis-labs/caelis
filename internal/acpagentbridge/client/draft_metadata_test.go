@@ -149,7 +149,7 @@ func TestDraftMetadataPreservesNumericTokens(t *testing.T) {
 			if _, err := client.Initialize(ctx); err != nil {
 				t.Fatal(err)
 			}
-			value := map[string]any{"sessionUpdate": kind, "_meta": json.RawMessage(`{"large":9007199254740993,"nested":{"decimal":1.2500}}`)}
+			value := map[string]any{"sessionUpdate": kind, "_meta": json.RawMessage(`{"overflow":1e400,"large":9007199254740993,"nested":{"decimal":1.2500}}`)}
 			if kind == "tool_call_update" {
 				value["toolCallId"] = "tool"
 			} else {
@@ -169,7 +169,7 @@ func TestDraftMetadataPreservesNumericTokens(t *testing.T) {
 			case ToolCallUpdate:
 				meta = update.Meta
 			}
-			if meta["large"] != json.Number("9007199254740993") || meta["nested"].(map[string]any)["decimal"] != json.Number("1.2500") {
+			if meta["overflow"] != json.Number("1e400") || meta["large"] != json.Number("9007199254740993") || meta["nested"].(map[string]any)["decimal"] != json.Number("1.2500") {
 				t.Fatalf("numeric metadata lost tokens: %#v", meta)
 			}
 		})

@@ -73,7 +73,7 @@ func TestEnvelopeMetadataNumbersSurvivePlainJSONRoundTrip(t *testing.T) {
 	t.Parallel()
 	for _, kind := range []string{UpdateAgentMessage, UpdateAgentThought, UpdateUserMessage, UpdateToolCall, UpdateToolCallInfo} {
 		t.Run(kind, func(t *testing.T) {
-			raw := json.RawMessage(`{"sessionUpdate":"` + kind + `","messageId":"message","toolCallId":"tool","_meta":{"large":9007199254740993,"nested":{"decimal":1.2500}}}`)
+			raw := json.RawMessage(`{"sessionUpdate":"` + kind + `","messageId":"message","toolCallId":"tool","_meta":{"overflow":1e400,"large":9007199254740993,"nested":{"decimal":1.2500}}}`)
 			update, err := DecodeUpdateJSON(raw)
 			if err != nil {
 				t.Fatal(err)
@@ -87,7 +87,7 @@ func TestEnvelopeMetadataNumbersSurvivePlainJSONRoundTrip(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, meta := range []map[string]any{UpdateMeta(update), UpdateMeta(restored.Update), restored.Meta} {
-				if meta["large"] != json.Number("9007199254740993") || meta["nested"].(map[string]any)["decimal"] != json.Number("1.2500") {
+				if meta["overflow"] != json.Number("1e400") || meta["large"] != json.Number("9007199254740993") || meta["nested"].(map[string]any)["decimal"] != json.Number("1.2500") {
 					t.Fatalf("metadata tokens changed: %#v", meta)
 				}
 			}
