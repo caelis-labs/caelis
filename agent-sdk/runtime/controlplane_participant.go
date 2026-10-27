@@ -68,6 +68,13 @@ func (r *Runtime) AttachParticipant(ctx context.Context, req agent.AttachPartici
 	if err != nil {
 		return session.Session{}, err
 	}
+	if err := r.participantInputMutationErrorLocked(ref, binding.ID); err != nil {
+		if _, _, existingErr := resolveExactParticipantInputSource(activeSession, binding); existingErr == nil {
+			return session.Session{}, err
+		}
+		cleanupErr := r.controllers.Detach(context.WithoutCancel(ctx), controller.DetachRequest{SessionRef: ref, Session: activeSession, ParticipantID: binding.ID, DelegationID: binding.DelegationID, AttachmentGeneration: binding.AttachmentGeneration})
+		return session.Session{}, errors.Join(err, cleanupErr)
+	}
 	lifecycleEvent := participantLifecycleEvent(activeSession, binding, "attached", r.now())
 	mutationGuard := session.ControlMutationGuard(session.ControlMutationPurposeParticipant)
 	updatedSession, persistedEvent, err := lifecycle.PutParticipantWithEvent(ctx, session.PutParticipantWithEventRequest{
@@ -125,6 +132,9 @@ func (r *Runtime) DetachParticipant(ctx context.Context, req agent.DetachPartici
 	lifecycle, ok := r.sessions.(session.ParticipantLifecycleService)
 	if !ok {
 		return session.Session{}, fmt.Errorf("agent-sdk/runtime: participant lifecycle store does not support atomic event persistence")
+	}
+	if err := r.participantInputMutationErrorLocked(ref, strings.TrimSpace(req.ParticipantID)); err != nil {
+		return session.Session{}, err
 	}
 	binding, _ := participantBinding(activeSession, req.ParticipantID)
 	if req.ExpectedDelegationID != "" && binding.DelegationID != req.ExpectedDelegationID ||

@@ -52,9 +52,9 @@ func (r *Runtime) SubmitChildInput(
 
 // SubmitParticipantInput admits one child-originated input against the exact
 // durable participant binding that created its source-bound sender. Participant
-// attach, detach, compensation, and input admission share participantMu, so the
-// current binding is reloaded and remains authoritative until either dispatch
-// is rejected or the selected endpoint owns the input.
+// attach, detach, compensation, and input reservations share participantMu.
+// Validated bindings stay pinned through admission, but remote receipt waits
+// release the topology lock so unrelated participants can proceed.
 //
 // Parent Turn admission remains outside the topology Runtime and is supplied as
 // a narrow callback; sibling resolution and dispatch stay inside this Runtime.
@@ -95,7 +95,7 @@ func (r *Runtime) SubmitParticipantInput(
 		if submitParent == nil {
 			return errorcode.New(errorcode.FailedPrecondition, "Main Agent messaging is unavailable")
 		}
-		return submitParent(ctx, active, source, input)
+		return r.awaitParticipantInputLocked(ref, []session.ParticipantBinding{*sourceBinding}, func() error { return submitParent(ctx, active, source, input) })
 	}
 	if r.tasks == nil {
 		return errorcode.New(errorcode.FailedPrecondition, "Target Agent messaging is unavailable")
@@ -133,6 +133,40 @@ func (r *Runtime) submitChildInputLocked(
 	}
 	if err := validateTaskActivityTarget(task, target); err != nil {
 		return agent.ChildInputResult{}, errorcode.Wrap(errorcode.Conflict, "Target Agent binding changed", err)
+	}
+	pins := []session.ParticipantBinding{binding}
+	if sourceBinding != nil {
+		pins = append(pins, *sourceBinding)
+	}
+	for _, message := range messages {
+		// Batch validation already canonicalized controller inputs to the parent.
+		if message.Source == session.ParentCommunicationActor() {
+			continue
+		}
+		_, sender, err := resolveTrustedChildInputSource(active, message.Source)
+		if err != nil {
+			return agent.ChildInputResult{}, err
+		}
+		if sender != nil {
+			pins = append(pins, *sender)
+		}
+	}
+	var result agent.ChildInputResult
+	err = r.awaitParticipantInputLocked(ref, pins, func() error {
+		release, err := task.inputAdmissions.acquire(ctx, ref)
+		if err != nil {
+			return err
+		}
+		defer release()
+		result, err = r.submitChildTaskInput(ctx, ref, active, task, target, command, source, messages)
+		return err
+	})
+	return result, err
+}
+
+func (r *Runtime) submitChildTaskInput(ctx context.Context, ref session.SessionRef, active session.Session, task *subagentTask, target agent.ChildEndpointRef, command agent.ChildInputCommand, source session.ActorRef, messages []agent.AgentCommunicationInput) (agent.ChildInputResult, error) {
+	if err := ctx.Err(); err != nil {
+		return agent.ChildInputResult{}, err
 	}
 	// An unresolved producer is not an idle endpoint. Consult the durable
 	// Task projection before binding a fresh connection, including after a

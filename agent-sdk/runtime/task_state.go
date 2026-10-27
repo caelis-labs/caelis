@@ -184,6 +184,9 @@ type commandTask struct {
 }
 
 type subagentTask struct {
+	// inputAdmissions serializes this endpoint with cancellable waits, never topology.
+	inputAdmissions sessionWriteQueue
+
 	ref          taskapi.Ref
 	sessionRef   session.SessionRef
 	anchor       delegation.Anchor

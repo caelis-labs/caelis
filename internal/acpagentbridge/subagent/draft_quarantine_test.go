@@ -235,3 +235,76 @@ func TestDraftChildSteeringTimeoutPreservesOutputAndExplicitNextMessage(t *testi
 		})
 	}
 }
+
+func TestDraftChildTerminalReleasesSteeringWithoutEchoOrInputDeadline(t *testing.T) {
+	ctx := t.Context()
+	peer := &draftpeer.Peer{SessionID: "child-remote"}
+	ready, steering := make(chan string, 1), make(chan struct{})
+	peer.OnPrompt = func(ctx context.Context, req v2.PromptRequest, activity, message string) (v2.PromptResponse, error) {
+		if peer.Prompts.Load() == 1 {
+			if err := peer.State(ctx, req.SessionId, activity, "running", ""); err != nil {
+				return v2.PromptResponse{}, err
+			}
+			if err := peer.Echo(ctx, req.SessionId, message, "initial input"); err != nil {
+				return v2.PromptResponse{}, err
+			}
+			ready <- activity
+		} else {
+			close(steering)
+		}
+		return v2.PromptResponse{MessageId: v2.MessageId(message), Meta: acpdraft.ActivityMeta(activity)}, nil
+	}
+	registry, err := NewRegistry([]AgentConfig{{Name: "helper", HostedAdapterID: "fixture", ACPDraftSchema: acpdraft.SchemaTag}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner, err := NewRunner(RunnerConfig{Registry: registry, EndpointResolver: peer})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = runner.Quiesce(context.Background()) }()
+	events := make(chan childInputTestEvent, 64)
+	spawn := childInputSpawnContext(t, "original-task", events)
+	anchor, _, err := runner.Spawn(ctx, spawn, delegation.Request{Agent: "helper", Prompt: "initial input"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	activity := <-ready
+	run, err := runner.lookup(anchor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run.client.ListSessions(ctx, acp.ListSessionsRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	sent := make(chan error, 1)
+	go func() {
+		_, err := submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{Target: run.slot.target, Source: session.ActorRef{Kind: session.ActorKindController, ID: "sender"}, Input: "missing echo"})
+		sent <- err
+	}()
+	<-steering
+	if err := peer.Update(ctx, v2.SessionId(anchor.SessionID), map[string]any{"sessionUpdate": "agent_message", "messageId": "final", "content": []any{map[string]any{"type": "text", "text": "original completed"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := peer.State(ctx, v2.SessionId(anchor.SessionID), activity, "idle", "end_turn"); err != nil {
+		t.Fatal(err)
+	}
+	// Only this assertion has a deadline; the production input wait does not.
+	assertion, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	terminal := waitChildActivityTerminalFor(t, assertion, events, spawn.ActivityID)
+	if terminal.Result == nil || terminal.Result.State != delegation.StateCompleted || terminal.Result.Result != "original completed" {
+		t.Fatalf("terminal = %+v", terminal.Result)
+	}
+	select {
+	case err := <-sent:
+		if !errorcode.Is(err, errorcode.UnknownOutcome) {
+			t.Fatalf("message outcome = %v", err)
+		}
+	case <-assertion.Done():
+		t.Fatal("steering still waits after Activity completion")
+	}
+	if peer.Cancels.Load() != 0 || peer.Prompts.Load() != 2 {
+		t.Fatalf("cancel/replay = %d/%d", peer.Cancels.Load(), peer.Prompts.Load())
+	}
+}

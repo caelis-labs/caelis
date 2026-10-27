@@ -333,7 +333,7 @@ func (r *Runner) submitActiveChildInputLocked(
 	rpcCtx, cancelRPC := context.WithCancel(ctx)
 	if !slot.beginInput(cancelRPC) {
 		cancelRPC()
-		return agent.ChildInputResult{}, errorcode.New(errorcode.Conflict, "Target Agent state changed before the message was sent.")
+		return agent.ChildInputResult{}, errorcode.Wrap(errorcode.FailedPrecondition, "Target Agent is finishing its current turn.", agent.ErrChildInputNotReady)
 	}
 	run.mu.Lock()
 	previousInputActor := run.inputActor

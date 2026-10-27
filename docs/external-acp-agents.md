@@ -347,8 +347,12 @@ another message. Pull and automatic delivery share the same atomic removal.
 Automatic delivery is serial per recipient and independent across recipients,
 with admission waits bound to Host service cancellation rather than a short
 polling deadline. No mailbox read lock is held while waiting for a remote input
-boundary. Each attempt atomically claims the pending messages that fit the
-encoded batch budget and submits them as one
+boundary. Runtime validates exact attachment generations and pins only the
+involved bindings before releasing its topology lock. Removal or replacement of
+those bindings reports a conflict while admission is pending; other participants
+can attach or receive input. Child input preparation remains serial per endpoint
+with cancellable queue waits.
+Each attempt atomically claims the pending messages that fit the encoded batch budget and submits them as one
 input admission, preserving their order and individual source identities. The
 same rule applies to the parent: a running local controller accepts the batch
 at its next safe model boundary, and a running ACP controller receives one
@@ -360,7 +364,10 @@ being acknowledged into a completed Run.
 The 32-message pull limit does not split automatic delivery; messages beyond the
 encoded budget remain queued. An unconfirmed additional message affects only
 that delivery: it neither settles the existing Activity nor closes its output
-connection. The sender can wait or explicitly send another message, which may
+connection. A definite terminal result for the original Activity closes its
+steering admission and cancels any outstanding additional-message receipt/echo
+wait before publishing completion. Only that unconfirmed message is uncertain;
+no remote Activity cancellation is sent. The sender can wait or explicitly send another message, which may
 duplicate a delivery whose outcome remains unknown. No uncertain send is
 replayed automatically. Actual connection loss remains an execution observation
 failure; a receipt alone cannot prove remote execution has stopped.

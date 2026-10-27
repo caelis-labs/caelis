@@ -98,9 +98,10 @@ type Runtime struct {
 	sessionWrites            sessionWriteQueue
 	executionMu              sync.Mutex
 	// participantMu linearizes durable participant topology mutations with
-	// source/target input admission until the selected endpoint owns the input.
+	// source/target input reservations; remote receipt waits never hold it.
 	participantMu           sync.Mutex
 	participantPromptClaims map[participantPromptKey]struct{}
+	participantInputPins    map[participantPromptKey]int
 	mu                      sync.RWMutex
 	runStates               map[string]agent.RunState
 	activeRunners           map[string]activeRun

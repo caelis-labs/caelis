@@ -10,8 +10,9 @@ import (
 )
 
 // SubmitAgentInputBatch validates every source and the common recipient under
-// the participant mutation lock, then transfers the entire ordered input in one
-// admission. No member is dispatched if any attachment changed.
+// the participant mutation lock and reserves their bindings before waiting for
+// one ordered admission without that lock. No member is dispatched if any
+// attachment changed before reservation.
 func (r *Runtime) SubmitAgentInputBatch(
 	ctx context.Context,
 	ref session.SessionRef,
@@ -48,6 +49,7 @@ func (r *Runtime) SubmitAgentInputBatch(
 		}
 	}
 	messages := make([]agent.AgentCommunicationInput, len(entries))
+	var sources []session.ParticipantBinding
 	for i, entry := range entries {
 		var source session.ActorRef
 		var binding *session.ParticipantBinding
@@ -64,6 +66,9 @@ func (r *Runtime) SubmitAgentInputBatch(
 		if binding != nil && binding.ID == recipient.ID {
 			return errorcode.New(errorcode.Conflict, "An Agent cannot send a message to itself")
 		}
+		if binding != nil {
+			sources = append(sources, *binding)
+		}
 		messages[i] = agent.CloneAgentCommunicationInputs([]agent.AgentCommunicationInput{entry.Message})[0]
 		messages[i].Source = source
 		if strings.TrimSpace(messages[i].Input) == "" && len(messages[i].ContentParts) == 0 {
@@ -74,7 +79,7 @@ func (r *Runtime) SubmitAgentInputBatch(
 		if submitParent == nil {
 			return errorcode.New(errorcode.FailedPrecondition, "Main Agent messaging is unavailable")
 		}
-		return submitParent(ctx, active, messages)
+		return r.awaitParticipantInputLocked(ref, sources, func() error { return submitParent(ctx, active, messages) })
 	}
 	_, err = r.submitChildInputLocked(ctx, ref, active, agent.ChildInputCommand{Target: target}, session.ActorRef{}, nil, messages)
 	return err

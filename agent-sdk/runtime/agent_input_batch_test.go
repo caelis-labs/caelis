@@ -2,12 +2,14 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"testing/synctest"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 )
 
 func TestAgentInputBatchValidatesEverySenderBeforeSingleChildDispatch(t *testing.T) {
@@ -64,7 +66,7 @@ func (r *blockingBatchRunner) SubmitChildInputBatch(ctx context.Context, req age
 	return result, err
 }
 
-func TestBatchAdmissionSerializesWithDetachUntilProducerOwnsInput(t *testing.T) {
+func TestBatchAdmissionPinsTargetWithoutHoldingTopologyLock(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		r, child, base := newIdleChildActivityTask(t)
 		r.controllers = stubACPController{}
@@ -85,21 +87,20 @@ func TestBatchAdmissionSerializesWithDetachUntilProducerOwnsInput(t *testing.T) 
 			_, err := r.DetachParticipant(t.Context(), agent.DetachParticipantRequest{SessionRef: child.sessionRef, ParticipantID: binding.ID, RequireSettled: true, ExpectedDelegationID: binding.DelegationID, ExpectedAttachmentGeneration: binding.AttachmentGeneration})
 			detached <- err
 		}()
-		if r.participantMu.TryLock() {
-			r.participantMu.Unlock()
-			t.Fatal("batch dispatch released participant mutation lock")
+		synctest.Wait()
+		if !r.participantMu.TryLock() {
+			t.Fatal("receipt wait holds topology lock")
 		}
-		select {
-		case err := <-detached:
-			t.Fatalf("detach escaped admission fence: %v", err)
-		default:
+		r.participantMu.Unlock()
+		if err := <-detached; !errorcode.Is(err, errorcode.Conflict) {
+			t.Fatalf("pending admission detach = %v", err)
 		}
 		close(runner.release)
 		if err := <-sent; err != nil {
 			t.Fatal(err)
 		}
-		if err := <-detached; err == nil {
-			t.Fatal("detached unsettled batch producer")
+		if _, err := r.DetachParticipant(t.Context(), agent.DetachParticipantRequest{SessionRef: child.sessionRef, ParticipantID: binding.ID, RequireSettled: true}); err == nil {
+			t.Fatal("detached unsettled producer after receipt")
 		}
 		finishChildActivity(t, base.request.Completion, "batch complete")
 	})
@@ -120,4 +121,78 @@ func TestBatchAdmissionRejectsSingularOnlyRunnerWithoutDispatch(t *testing.T) {
 	if len(base.request.Messages) != 0 || base.request.Input != "" {
 		t.Fatalf("dispatched through singular interface: %#v", base.request)
 	}
+}
+
+func TestParentReceiptWaitAllowsStartThreadAndOtherRecipient(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r, child, runner := newIdleChildActivityTask(t)
+		r.controllers = stubACPController{}
+		active, err := r.sessions.Session(t.Context(), child.sessionRef)
+		if err != nil {
+			t.Fatal(err)
+		}
+		source := active.Participants[0]
+		entered, release := make(chan struct{}), make(chan struct{})
+		sent := make(chan error, 1)
+		go func() {
+			sent <- r.SubmitAgentInputBatch(t.Context(), child.sessionRef, agent.AgentInputParent, []agent.AgentInputBatchEntry{{Participant: &source, Message: agent.AgentCommunicationInput{Input: "child report"}}}, func(context.Context, session.Session, []agent.AgentCommunicationInput) error {
+				close(entered)
+				<-release
+				return nil
+			})
+		}()
+		<-entered
+		// The parent ACP receipt waits for its currently executing StartThread tool.
+		// Starting the next participant must complete without cancelling that receipt.
+		started, err := r.tasks.StartSubagent(t.Context(), active, child.sessionRef, runner, taskapi.SubagentStartRequest{Agent: "helper", Prompt: "second child"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = r.SubmitAgentInputBatch(t.Context(), child.sessionRef, started.Ref.TaskID, []agent.AgentInputBatchEntry{{Participant: &source, Message: agent.AgentCommunicationInput{Input: "sibling input"}}}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := r.DetachParticipant(t.Context(), agent.DetachParticipantRequest{SessionRef: child.sessionRef, ParticipantID: source.ID}); !errorcode.Is(err, errorcode.Conflict) {
+			t.Fatalf("source detach = %v", err)
+		}
+		close(release)
+		if err := <-sent; err != nil {
+			t.Fatal(err)
+		}
+		finishChildActivity(t, runner.request.Completion, "second complete")
+		if _, err := r.DetachParticipant(t.Context(), agent.DetachParticipantRequest{SessionRef: child.sessionRef, ParticipantID: source.ID, RequireSettled: true}); err != nil {
+			t.Fatalf("source pin not released: %v", err)
+		}
+	})
+}
+
+func TestQueuedChildAdmissionCancellationReleasesOnlyItsPins(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r, child, base := newIdleChildActivityTask(t)
+		runner := &blockingBatchRunner{runtimeChildInputRunner: base, entered: make(chan struct{}), release: make(chan struct{})}
+		child.runner = runner
+		entries := []agent.AgentInputBatchEntry{{Message: agent.AgentCommunicationInput{Source: session.ActorRef{Kind: session.ActorKindController, ID: "controller-1"}, Input: "input"}}}
+		first := make(chan error, 1)
+		go func() { first <- r.SubmitAgentInputBatch(t.Context(), child.sessionRef, child.handle, entries, nil) }()
+		<-runner.entered
+		ctx, cancel := context.WithCancel(t.Context())
+		second := make(chan error, 1)
+		go func() { second <- r.SubmitAgentInputBatch(ctx, child.sessionRef, child.handle, entries, nil) }()
+		synctest.Wait()
+		cancel()
+		if err := <-second; !errors.Is(err, context.Canceled) {
+			t.Fatalf("queued cancellation = %v", err)
+		}
+		r.participantMu.Lock()
+		pins := r.participantInputPins[participantPromptKey{sessionID: child.sessionRef.SessionID, participantID: child.anchor.AgentID}]
+		r.participantMu.Unlock()
+		if pins != 1 {
+			t.Fatalf("remaining pins = %d, want first admission only", pins)
+		}
+		close(runner.release)
+		if err := <-first; err != nil {
+			t.Fatal(err)
+		}
+		finishChildActivity(t, base.request.Completion, "complete")
+	})
 }
