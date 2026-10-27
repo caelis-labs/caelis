@@ -160,9 +160,7 @@ func (s *Service) runUserInputs(ctx context.Context, report func(error)) {
 				workers.Add(1)
 				go func() {
 					defer workers.Done()
-					attempt, cancel := context.WithTimeout(ctx, deliveryTimeout)
-					defer cancel()
-					if err := s.deliverUserInput(attempt, backend, input); err != nil && report != nil {
+					if err := s.deliverUserInput(ctx, backend, input); err != nil && report != nil {
 						report(err)
 					}
 					select {

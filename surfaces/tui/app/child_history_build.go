@@ -58,6 +58,7 @@ func (m *Model) handleChildHistoryPage(msg taskStreamBatchMsg) (bool, tea.Cmd) {
 		view.seenProjections, view.liveNarratives = build.seenProjections, build.liveNarratives
 		view.renderCache = subagentOutputRenderCache{}
 		view.historyResolved = true
+		view.streamRecovering = false
 		view.liveActivityID = taskStreamActivityKey(msg.activityID)
 		m.taskStreamCursors[msg.taskID] = msg.cursor
 		m.noteTaskStreamFollowing(msg.taskID, time.Now())

@@ -26,7 +26,7 @@ import (
 // space for the SendMessage and WaitThread response envelopes.
 const MaxResponseBytes = 4 << 20
 const mailboxBatchBytes = MaxResponseBytes - (64 << 10)
-const deliveryTimeout = 10 * time.Second
+const lifecycleQueryTimeout = 10 * time.Second
 
 // ErrSessionClosed proves the owning Session permanently stopped accepting mail.
 // Backends must not use it for unavailable stores or transient discovery errors.
@@ -286,7 +286,7 @@ func (s *Service) take(ctx context.Context, i Identity, limit int, seenInstance 
 
 // Run attempts delivery at safe points identified by the backend. Every
 // attempted message is removed before dispatch, including failed dispatches.
-// At most one bounded attempt runs per recipient; unrelated recipients proceed
+// At most one asynchronous attempt runs per recipient; unrelated recipients proceed
 // independently. Run joins these attempts before returning.
 func (s *Service) Run(ctx context.Context, report func(error)) {
 	tick := time.NewTicker(250 * time.Millisecond)
@@ -333,9 +333,7 @@ func (s *Service) Run(ctx context.Context, report func(error)) {
 				workers.Add(1)
 				go func() {
 					defer workers.Done()
-					attempt, cancel := context.WithTimeout(ctx, deliveryTimeout)
-					defer cancel()
-					err := s.deliverRecipient(attempt, target)
+					err := s.deliverRecipient(ctx, target)
 					select {
 					case finished <- completion{target, err}:
 					case <-ctx.Done():
@@ -370,41 +368,49 @@ func (s *Service) pendingRecipients(ctx context.Context) ([]Identity, error) {
 	return targets, nil
 }
 
-func (s *Service) deliverRecipient(ctx context.Context, i Identity) error {
+// claimRecipient holds the read lock only while consuming the local mailbox.
+// Never hold it across remote admission: the recipient may need to finish a
+// ReceiveMessages/SendMessage tool before reaching the input boundary.
+func (s *Service) claimRecipient(ctx context.Context, i Identity) ([]Message, string, error) {
 	lock := s.readerLock(i)
 	lock.Lock()
 	defer lock.Unlock()
 	threads, err := s.backend.List(ctx, i.Session)
 	if errors.Is(err, ErrSessionClosed) {
-		return s.purgeClosedSession(ctx, i.Session)
+		return nil, "", s.purgeClosedSession(ctx, i.Session)
 	}
 	if err != nil {
-		return err
+		return nil, "", err
 	}
 	for _, t := range threads {
 		if t.Handle != i.Member || !t.CanDeliver {
 			continue
 		}
-		// Automatic admission drains the pending encoded-byte-bounded batch;
-		// the pull API's message-count limit must not create extra Turns.
-		messages, err := s.take(ctx, i, -1)
+		instance, err := readerInstance(threads, i.Member)
 		if err != nil {
-			return err
+			return nil, "", err
 		}
-		if len(messages) > 0 {
-			// The entire bounded batch is consumed before its one dispatch.
-			// An ambiguous outcome never reinserts any member of the batch.
-			if err := s.backend.Deliver(ctx, i.Session, messages); err != nil {
-				return fmt.Errorf("deliver %d messages (removed; remote outcome may be unknown): %w", len(messages), err)
-			}
-			instance, _ := readerInstance(threads, i.Member)
-			if err := s.markDelivered(context.WithoutCancel(ctx), i, instance, messages); err != nil {
-				return err
-			}
-			s.notifyDelivery(i)
-		}
-		break
+		// Suppress shared-log duplicates atomically with dispatch ownership.
+		// Explicit cursor replay remains available during an uncertain delivery.
+		messages, err := s.take(ctx, i, -1, instance)
+		return messages, instance, err
 	}
+	return nil, "", nil
+}
+
+func (s *Service) deliverRecipient(ctx context.Context, i Identity) error {
+	messages, instance, err := s.claimRecipient(ctx, i)
+	if err != nil || len(messages) == 0 {
+		return err
+	}
+	// Admission may wait for a model/tool boundary. Its lifetime belongs to
+	// the service, not a short polling deadline. Never retry an ambiguous send.
+	if err := s.backend.Deliver(ctx, i.Session, messages); err != nil {
+		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), lifecycleQueryTimeout)
+		defer cancel()
+		return errors.Join(fmt.Errorf("deliver %d messages (removed; remote outcome may be unknown): %w", len(messages), err), s.unmarkDelivery(cleanup, i, instance, messages))
+	}
+	s.notifyDelivery(i)
 	return nil
 }
 

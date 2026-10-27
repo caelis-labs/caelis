@@ -79,3 +79,51 @@ func TestTaskStreamIncompleteChildSnapshotStillTimesOut(t *testing.T) {
 		}
 	})
 }
+
+func TestChildOutputReconnectsAfterRecoveryBudgetWithoutChangingExecution(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		sub := newTUIProtocolTaskSubscription()
+		service := &subagentRosterTestTaskStreamService{subscription: sub}
+		messages := make(chan tea.Msg, 16)
+		sender := &ProgramSender{Send: func(msg tea.Msg) { messages <- msg }}
+		defer sender.Close()
+		m := NewModel(Config{NoColor: true, NoAnimation: true, TaskStreams: bindTaskStreamTestClient(t, service), ProgramSender: sender})
+		m.currentSessionID = "session"
+		v := m.ensureSubagentOutputView("call")
+		v.block.Status = "running"
+		v.taskHandle = "helper"
+		doc := v.document
+		m.subagentOutputOverlay = &subagentOutputOverlayState{callID: "call"}
+		m.taskStreamCallIDsByID["task"] = "call"
+		m.taskStreamIDsByCallID["call"] = "task"
+		m.taskStreamHandlesByID["task"] = "helper"
+		m.taskStreamWanted["task"] = true
+		m.taskStreamTokens["task"] = 7
+		m.taskStreamCursors["task"] = "committed"
+		m.taskStreamRecovery = map[string]time.Time{"call": time.Now().Add(-time.Second)}
+		_, cmd := m.handleTaskStreamClosed(taskStreamClosedMsg{sessionID: "session", taskID: "task", token: 7, err: errorcode.New(errorcode.Unavailable, "connection lost")})
+		if cmd == nil || !v.streamRecovering || v.block.Status != "running" || v.document != doc {
+			t.Fatal("observation failure escaped its panel")
+		}
+		started := time.Now()
+		retry := cmd().(taskStreamSubscribeRetryMsg)
+		if time.Since(started) != taskStreamRecoveryCooldown {
+			t.Fatal("reconnect did not back off")
+		}
+		m.handleTaskStreamSubscribeRetry(retry)
+		opened := receiveTUITaskStreamMessage[taskStreamOpenedMsg](t, messages)
+		m.handleTaskStreamOpened(opened)
+		if m.taskStreamCursors["task"] != "committed" {
+			t.Fatal("resume lost committed cursor")
+		}
+		m.handleTaskStreamBatch(taskStreamBatchMsg{sessionID: "session", taskID: "task", token: opened.token, phase: taskstream.DeliveryAppendPage, cursor: "next"})
+		if v.streamRecovering || v.block.Status != "running" || v.document != doc {
+			t.Fatal("recovery failed to retain execution and transcript")
+		}
+		m.closeTaskStreamSubscriptions()
+		m.handleTaskStreamSubscribeRetry(retry)
+		if m.taskStreamWanted["task"] {
+			t.Fatal("stale cooldown restarted hidden subscription")
+		}
+	})
+}

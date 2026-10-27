@@ -73,8 +73,8 @@ func TestTaskStreamRetryExhaustionKeepsMountedDocument(t *testing.T) {
 	m.taskStreamWanted["task"] = true
 	m.taskStreamRecovery = map[string]time.Time{callID: time.Now().Add(-time.Second)}
 	_, _ = m.handleTaskStreamClosed(taskStreamClosedMsg{sessionID: "session", taskID: "task", token: 7, err: errorcode.New(errorcode.Unavailable, "cache unavailable")})
-	if v.document != doc || m.taskStreamWanted["task"] {
-		t.Fatal("exhausted retry replaced display or remained wanted")
+	if v.document != doc || !m.taskStreamWanted["task"] || !v.streamRecovering {
+		t.Fatal("exhausted fast retry lost display or recovery demand")
 	}
 }
 

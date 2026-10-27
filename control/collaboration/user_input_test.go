@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
@@ -336,4 +337,52 @@ func TestUserInputParticipantFacingCopy(t *testing.T) {
 		statuses[0].State != "unknown" || statuses[0].Detail != "Participant execution is unresolved; input was not sent" {
 		t.Fatalf("unresolved delivery receipt = %#v, %v", statuses, err)
 	}
+}
+
+type slowUserInputBackend struct {
+	userInputTestBackend
+	started chan struct{}
+	release chan struct{}
+}
+
+func (b *slowUserInputBackend) DeliverUserInput(ctx context.Context, _ UserInput) error {
+	close(b.started)
+	select {
+	case <-b.release:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func TestUserInputAsyncAdmissionCanOutlivePollingTimeout(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		backend := &slowUserInputBackend{userInputTestBackend: userInputTestBackend{threads: []Thread{userInputTestTarget()}}, started: make(chan struct{}), release: make(chan struct{})}
+		service, err := Open(filepath.Join(t.TempDir(), "control.sqlite"), backend)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer service.Close()
+		status, err := service.EnqueueUserInput(t.Context(), "slow", "user", "parent", "participant", "task", "guide", nil)
+		if err != nil || status.State != "queued" {
+			t.Fatalf("enqueue = %+v, %v", status, err)
+		}
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan struct{})
+		go func() { defer close(done); service.runUserInputs(ctx, func(err error) { t.Error(err) }) }()
+		defer func() { cancel(); <-done }()
+		<-backend.started
+		time.Sleep(time.Minute)
+		synctest.Wait()
+		statuses, err := service.UserInputStatuses(t.Context(), "user", "parent", []string{"slow"})
+		if err != nil || len(statuses) != 1 || statuses[0].State != "sending" {
+			t.Fatalf("slow admission = %+v, %v", statuses, err)
+		}
+		close(backend.release)
+		synctest.Wait()
+		statuses, err = service.UserInputStatuses(t.Context(), "user", "parent", []string{"slow"})
+		if err != nil || len(statuses) != 1 || statuses[0].State != "sent" {
+			t.Fatalf("late receipt = %+v, %v", statuses, err)
+		}
+	})
 }

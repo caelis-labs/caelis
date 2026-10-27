@@ -25,7 +25,6 @@ const (
 )
 
 var errTaskStreamNotDiscoverable = errors.New("task stream is not discoverable yet")
-var errTaskStreamUnexpectedClose = errors.New("following task stream ended unexpectedly")
 
 type taskStreamDemand uint8
 
@@ -79,15 +78,18 @@ type taskStreamResolvedMsg struct {
 }
 
 type taskStreamResolveRetryMsg struct {
-	sessionID string
-	callID    string
-	handle    string
-	token     uint64
+	resetRecovery bool
+	sessionID     string
+	callID        string
+	handle        string
+	token         uint64
 }
 
 type taskStreamSubscribeRetryMsg struct {
-	sessionID string
-	taskID    string
+	resetRecovery bool
+	token         uint64
+	sessionID     string
+	taskID        string
 }
 
 func (m *Model) observeTaskStreamSession(env eventstream.Envelope) {
@@ -334,6 +336,13 @@ func (m *Model) handleTaskStreamResolved(msg taskStreamResolvedMsg) (tea.Model, 
 			m.taskStreamResolveRetries[msg.callID]++
 			return m, taskStreamResolveRetryCmd(msg, m.taskStreamResolveRetries[msg.callID])
 		}
+		if taskStreamRetryable(msg.err) && demand == taskStreamDemandVisibleSubagent {
+			m.setTaskStreamRecovering(msg.callID, true)
+			return m, tea.Tick(taskStreamRecoveryCooldown, func(time.Time) tea.Msg {
+				return taskStreamResolveRetryMsg{sessionID: msg.sessionID, callID: msg.callID, handle: msg.handle, token: msg.token, resetRecovery: true}
+			})
+		}
+		m.setTaskStreamRecovering(msg.callID, false)
 		m.taskStreamResolveTokens[msg.callID] = 0
 		m.taskStreamRecoveryDeadline(msg.callID, time.Now())
 		m.taskStreamRecovery[msg.callID] = time.Now()
@@ -563,6 +572,7 @@ func (m *Model) handleTaskStreamBatch(msg taskStreamBatchMsg) (tea.Model, tea.Cm
 	if handled, cmd := m.handleChildHistoryPage(msg); handled {
 		return m, cmd
 	}
+	m.setTaskStreamRecovering(m.taskStreamCallIDsByID[msg.taskID], false)
 	m.noteTaskStreamFollowing(msg.taskID, time.Now())
 	if cursor := strings.TrimSpace(msg.cursor); cursor != "" {
 		m.taskStreamCursors[msg.taskID] = cursor
@@ -643,16 +653,14 @@ func (m *Model) handleTaskStreamClosed(msg taskStreamClosedMsg) (tea.Model, tea.
 		m.wantResolvedTaskStream(msg.taskID, false)
 		return m, nil
 	}
-	if msg.err == nil && demand == taskStreamDemandVisibleSubagent && m.taskStreamWanted[msg.taskID] {
+	if demand == taskStreamDemandVisibleSubagent && m.taskStreamWanted[msg.taskID] && (msg.err == nil || taskStreamRetryable(msg.err)) {
+		m.setTaskStreamRecovering(callID, true)
 		m.taskStreamRetries[msg.taskID]++
-		if m.taskStreamRetries[msg.taskID] > taskStreamCleanExitRetries || !m.taskStreamRetryWithinBudget(callID, time.Now()) {
-			m.taskStreamTokens[msg.taskID] = 0
-			m.taskStreamWanted[msg.taskID] = false
-			m.taskStreamRecoveryDeadline(callID, time.Now())
-			m.taskStreamRecovery[callID] = time.Now()
-			handle := m.taskStreamHandlesByID[msg.taskID]
-			return m, m.showHint(taskStreamUnavailableHint(handle, errTaskStreamUnexpectedClose), hintOptions{
-				priority: HintPriorityHigh, clearOnMessage: true, clearAfter: systemHintDuration,
+		if !m.taskStreamRetryWithinBudget(callID, time.Now()) || msg.err == nil && m.taskStreamRetries[msg.taskID] > taskStreamCleanExitRetries {
+			// Keep a pending token so roster refreshes cannot bypass the cooldown.
+			// Observation retries never send input or change execution state.
+			return m, tea.Tick(taskStreamRecoveryCooldown, func(time.Time) tea.Msg {
+				return taskStreamSubscribeRetryMsg{sessionID: msg.sessionID, taskID: msg.taskID, token: msg.token, resetRecovery: true}
 			})
 		}
 		m.taskStreamTokens[msg.taskID] = 0
@@ -667,6 +675,7 @@ func (m *Model) handleTaskStreamClosed(msg taskStreamClosedMsg) (tea.Model, tea.
 		return m, taskStreamSubscribeRetryCmd(msg.sessionID, msg.taskID, m.taskStreamRetries[msg.taskID])
 	}
 	if msg.err != nil && !errors.Is(msg.err, context.Canceled) {
+		m.setTaskStreamRecovering(callID, false)
 		m.taskStreamTokens[msg.taskID] = 0
 		m.taskStreamWanted[msg.taskID] = false
 		m.taskStreamRecoveryDeadline(callID, time.Now())
@@ -684,14 +693,23 @@ func (m *Model) handleTaskStreamResolveRetry(msg taskStreamResolveRetryMsg) (tea
 		!m.taskStreamDemandForOwner(msg.callID, msg.handle).wanted() {
 		return m, nil
 	}
+	if msg.resetRecovery {
+		delete(m.taskStreamRecovery, msg.callID)
+		delete(m.taskStreamResolveRetries, msg.callID)
+	}
 	m.startTaskStreamResolver(msg.sessionID, msg.callID, msg.handle, msg.token)
 	return m, nil
 }
 
 func (m *Model) handleTaskStreamSubscribeRetry(msg taskStreamSubscribeRetryMsg) (tea.Model, tea.Cmd) {
 	if m == nil || msg.sessionID != m.currentSessionID || !m.taskStreamWanted[msg.taskID] ||
-		m.taskStreamTokens[msg.taskID] != 0 || !m.taskStreamDemandForTaskID(msg.taskID).wanted() {
+		m.taskStreamTokens[msg.taskID] != msg.token || !m.taskStreamDemandForTaskID(msg.taskID).wanted() {
 		return m, nil
+	}
+	if msg.resetRecovery {
+		delete(m.taskStreamRecovery, m.taskStreamCallIDsByID[msg.taskID])
+		delete(m.taskStreamRetries, msg.taskID)
+		m.taskStreamTokens[msg.taskID] = 0
 	}
 	m.wantResolvedTaskStream(msg.taskID, true)
 	return m, nil

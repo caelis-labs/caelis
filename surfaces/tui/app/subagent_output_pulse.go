@@ -11,8 +11,10 @@ func subagentOutputStatusFromState(status string) subagentOutputStatus {
 	switch strings.ToLower(strings.TrimSpace(status)) {
 	case "completed", "succeeded", "success":
 		return subagentOutputSucceeded
-	case "failed", "cancelled", "canceled", "interrupted", "terminated", eventstream.LifecycleStateUnknown:
+	case "failed", "cancelled", "canceled", "interrupted", "terminated":
 		return subagentOutputFailed
+	case eventstream.LifecycleStateUnknown:
+		return subagentOutputUnknown
 	default:
 		return subagentOutputRunning
 	}

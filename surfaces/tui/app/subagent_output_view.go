@@ -26,6 +26,7 @@ type subagentOutputNarrativeKey struct {
 }
 
 type subagentOutputView struct {
+	streamRecovering bool
 	retentionUpdates int
 	retentionBlocks  int
 	lastViewed       time.Time

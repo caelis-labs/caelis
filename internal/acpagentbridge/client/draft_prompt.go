@@ -285,7 +285,6 @@ func (d *draftClient) steer(ctx context.Context, sessionID string, prompt []json
 	}
 	if acpdraft.ActivityID(response.Meta) != activity {
 		err := errors.New("acp draft: injected prompt receipt has a different Activity identity")
-		d.fail(err)
 		return SessionSteeringResponse{}, &draftInsertionOutcomeError{err: err}
 	}
 	if err := d.waitUserEcho(ctx, sessionID, string(response.MessageId), floor); err != nil {

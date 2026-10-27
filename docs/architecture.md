@@ -122,7 +122,12 @@ incompatible durable state but never mutates it.
 `control/appserver.AppServerClients` is the aggregate capability boundary used by
 product clients. Focused Control packages remain the semantic owners behind it.
 Task observation is independently delivered and never joins the Session feed, so
-a slow Task observer cannot delay or reclassify the parent Turn.
+a slow Task observer cannot delay or reclassify the parent Turn. Visible child
+Task subscriptions retry transient observation failures,
+first with bounded fast retries and then a cooldown between recovery windows.
+They retain the mounted transcript and committed cursor, stop when hidden or
+access is permanently rejected, and never resubmit execution. Unknown execution
+outcomes and reconnecting output are displayed separately from execution failure.
 
 Host-private adapters depend on focused services. They must not retain a concrete
 `gatewayapp.Stack`, a Runtime lease, the root Runtime composition, or bound Stack

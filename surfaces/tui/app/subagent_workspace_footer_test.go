@@ -176,3 +176,25 @@ func TestSubagentWorkspaceFooterHideRequiresCompleteClick(t *testing.T) {
 		})
 	}
 }
+
+func TestSubagentPaneRendersObservationAndUnknownSeparately(t *testing.T) {
+	m, _ := newPaneTestModel(t)
+	state := m.subagentOutputOverlay
+	view := m.subagentOutputViews[state.callID]
+	delete(m.subagentRosterTasks, state.callID)
+	for _, tc := range []struct {
+		state     string
+		reconnect bool
+		want      string
+	}{
+		{"running", true, "Reconnecting output…"},
+		{"unknown_outcome", false, "? Outcome unconfirmed"},
+		{"failed", false, "! Failed"},
+	} {
+		view.block.Status = tc.state
+		view.streamRecovering = tc.reconnect
+		if got := ansi.Strip(m.renderPaneHint(view, state, 100)); got != tc.want {
+			t.Fatalf("%s/reconnect=%v: %q, want %q", tc.state, tc.reconnect, got, tc.want)
+		}
+	}
+}

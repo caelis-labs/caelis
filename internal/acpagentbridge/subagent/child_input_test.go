@@ -773,7 +773,7 @@ func TestIdlePromptOwnershipMakesImmediateNextInputSteering(t *testing.T) {
 	}
 }
 
-func TestUnknownSteeringOutcomeDropsBufferedRemoteTurnOutput(t *testing.T) {
+func TestUnknownSteeringOutcomePreservesOriginalActivity(t *testing.T) {
 	t.Parallel()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -797,19 +797,15 @@ func TestUnknownSteeringOutcomeDropsBufferedRemoteTurnOutput(t *testing.T) {
 		t.Fatalf("SubmitChildInput() error = %v, want unknown outcome", err)
 	}
 	terminal := waitChildActivityTerminal(t, ctx, events)
-	if terminal.Result == nil || terminal.Result.State != delegation.StateUnknownOutcome {
+	if terminal.Result == nil || terminal.Result.State != delegation.StateCompleted {
 		t.Fatalf("unknown terminal = %#v", terminal)
 	}
-	select {
-	case event := <-events:
-		if event.Frame != nil && event.Frame.Event != nil && event.Frame.Event.Text == "ambiguous output" {
-			t.Fatalf("ambiguous remote-Turn output was released: %#v", event)
-		}
-	case <-time.After(50 * time.Millisecond):
+	if terminal.Result.Result != "ambiguous output" {
+		t.Fatalf("original Activity output lost: %+v", terminal.Result)
 	}
 }
 
-func TestMalformedSteeringResultIsUnknownAndDropsBufferedOutput(t *testing.T) {
+func TestMalformedSteeringResultDoesNotSettleOriginalActivity(t *testing.T) {
 	t.Parallel()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -836,15 +832,11 @@ func TestMalformedSteeringResultIsUnknownAndDropsBufferedOutput(t *testing.T) {
 		t.Fatalf("SubmitChildInput() error = %v, want unknown outcome", err)
 	}
 	terminal := waitChildActivityTerminal(t, ctx, events)
-	if terminal.Result == nil || terminal.Result.State != delegation.StateUnknownOutcome {
+	if terminal.Result == nil || terminal.Result.State != delegation.StateCompleted {
 		t.Fatalf("malformed steering terminal = %#v", terminal)
 	}
-	select {
-	case event := <-events:
-		if event.Frame != nil && event.Frame.Event != nil && event.Frame.Event.Text == "malformed steering output" {
-			t.Fatalf("malformed steering output was released: %#v", event)
-		}
-	case <-time.After(50 * time.Millisecond):
+	if terminal.Result.Result != "malformed steering output" {
+		t.Fatalf("original Activity output lost: %+v", terminal.Result)
 	}
 }
 

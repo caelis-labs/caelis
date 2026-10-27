@@ -19,6 +19,7 @@ const (
 	subagentOutputRunning subagentOutputStatus = iota
 	subagentOutputSucceeded
 	subagentOutputFailed
+	subagentOutputUnknown
 )
 
 type subagentOutputOverlayGeometry struct {

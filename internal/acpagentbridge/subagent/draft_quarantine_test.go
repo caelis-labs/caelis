@@ -141,112 +141,97 @@ func TestDraftChildAcceptedReceiptFailureQuarantinesOriginalTaskAndApproval(t *t
 	}
 }
 
-func TestDraftChildSteeringReceiptWithoutEchoKeepsOriginalStreamAndQuarantinesLaterOutput(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-	peer := &draftpeer.Peer{SessionID: "child-remote"}
-	ready := make(chan struct{})
-	peer.OnPrompt = func(ctx context.Context, req v2.PromptRequest, activity, message string) (v2.PromptResponse, error) {
-		if peer.Prompts.Load() == 1 {
-			if err := peer.State(ctx, req.SessionId, activity, "running", ""); err != nil {
-				return v2.PromptResponse{}, err
+func TestDraftChildSteeringTimeoutPreservesOutputAndExplicitNextMessage(t *testing.T) {
+	for _, failure := range []string{"missing-echo", "late-receipt"} {
+		t.Run(failure, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			peer := &draftpeer.Peer{SessionID: "child-remote"}
+			ready := make(chan string, 1)
+			release := make(chan struct{})
+			lateReturned := make(chan struct{})
+			peer.OnPrompt = func(ctx context.Context, req v2.PromptRequest, activity, message string) (v2.PromptResponse, error) {
+				switch peer.Prompts.Load() {
+				case 1:
+					if err := peer.State(ctx, req.SessionId, activity, "running", ""); err != nil {
+						return v2.PromptResponse{}, err
+					}
+					if err := peer.Echo(ctx, req.SessionId, message, "initial input"); err != nil {
+						return v2.PromptResponse{}, err
+					}
+					ready <- activity
+				case 2:
+					if failure == "late-receipt" {
+						<-release
+						defer close(lateReturned)
+						if err := peer.Echo(ctx, req.SessionId, message, "ambiguous input"); err != nil {
+							return v2.PromptResponse{}, err
+						}
+					}
+				default:
+					if err := peer.Echo(ctx, req.SessionId, message, "explicit next message"); err != nil {
+						return v2.PromptResponse{}, err
+					}
+				}
+				return v2.PromptResponse{MessageId: v2.MessageId(message), Meta: acpdraft.ActivityMeta(activity)}, nil
 			}
-			if err := peer.Echo(ctx, req.SessionId, message, "initial input"); err != nil {
-				return v2.PromptResponse{}, err
-			}
-			close(ready)
-		} else {
-			if err := peer.Update(ctx, req.SessionId, map[string]any{"sessionUpdate": "agent_message", "messageId": "unproven-output", "content": []any{map[string]any{"type": "text", "text": "ambiguous remote output"}}}); err != nil {
-				return v2.PromptResponse{}, err
-			}
-		}
-		return v2.PromptResponse{MessageId: v2.MessageId(message), Meta: acpdraft.ActivityMeta(activity)}, nil
-	}
-	registry, err := NewRegistry([]AgentConfig{{Name: "helper", HostedAdapterID: "fixture", ACPDraftSchema: acpdraft.SchemaTag}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	runner, err := NewRunner(RunnerConfig{Registry: registry, EndpointResolver: peer})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = runner.Quiesce(context.Background()) })
-	events := make(chan childInputTestEvent, 64)
-	spawn := childInputSpawnContext(t, "original-task", events)
-	anchor, _, err := runner.Spawn(ctx, spawn, delegation.Request{Agent: "helper", Prompt: "initial input"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case <-ready:
-	case <-ctx.Done():
-		t.Fatal(ctx.Err())
-	}
-	run, err := runner.lookup(anchor)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := run.client.ListSessions(ctx, acp.ListSessionsRequest{}); err != nil {
-		t.Fatal(err)
-	}
-	steerCtx, cancelSteer := context.WithTimeout(ctx, 200*time.Millisecond)
-	defer cancelSteer()
-	_, err = submitChildInputTest(runner, events, steerCtx, agent.ChildInputRequest{Target: run.slot.target, Source: session.ActorRef{Kind: session.ActorKindController, ID: "original-controller"}, Input: "ambiguous input"})
-	if !errorcode.Is(err, errorcode.UnknownOutcome) {
-		t.Fatalf("steer receipt missing echo = %v, want unknown", err)
-	}
-	observedOriginalOutput := false
-	for {
-		select {
-		case event := <-events:
-			data, err := json.Marshal(event)
+			registry, err := NewRegistry([]AgentConfig{{Name: "helper", HostedAdapterID: "fixture", ACPDraftSchema: acpdraft.SchemaTag}})
 			if err != nil {
 				t.Fatal(err)
 			}
-			// Output still belongs to the already admitted original Activity.
-			// Continuous same-Activity output may precede insertion confirmation;
-			// uncertainty must not rewrite it as the steering sender's output.
-			if strings.Contains(string(data), "ambiguous remote output") {
-				observedOriginalOutput = true
-				if event.ActivityID != spawn.ActivityID || event.Frame == nil || event.Frame.Event == nil || event.Frame.Event.Actor.ID != anchor.AgentID {
-					t.Fatalf("original output changed owner: %+v", event)
-				}
+			runner, err := NewRunner(RunnerConfig{Registry: registry, EndpointResolver: peer})
+			if err != nil {
+				t.Fatal(err)
 			}
-			if strings.Contains(string(data), "ambiguous input") {
-				t.Fatalf("unproven input acquired canonical acceptance: %s", data)
+			t.Cleanup(func() { _ = runner.Quiesce(context.Background()) })
+			events := make(chan childInputTestEvent, 64)
+			spawn := childInputSpawnContext(t, "original-task", events)
+			anchor, _, err := runner.Spawn(ctx, spawn, delegation.Request{Agent: "helper", Prompt: "initial input"})
+			if err != nil {
+				t.Fatal(err)
 			}
-			if event.Result == nil {
-				continue
+			activity := <-ready
+			run, err := runner.lookup(anchor)
+			if err != nil {
+				t.Fatal(err)
 			}
-			if event.Result.State != delegation.StateUnknownOutcome || event.Result.TaskID != anchor.TaskID || event.Result.Result != "" {
-				t.Fatalf("original child falsely settled: %+v", event.Result)
+			if _, err := run.client.ListSessions(ctx, acp.ListSessionsRequest{}); err != nil {
+				t.Fatal(err)
 			}
-			if !observedOriginalOutput {
-				t.Fatal("existing original Activity stream was dropped")
+			steerCtx, cancelSteer := context.WithTimeout(ctx, 50*time.Millisecond)
+			_, err = submitChildInputTest(runner, events, steerCtx, agent.ChildInputRequest{Target: run.slot.target, Source: session.ActorRef{Kind: session.ActorKindController, ID: "sender"}, Input: "ambiguous input"})
+			cancelSteer()
+			if !errorcode.Is(err, errorcode.UnknownOutcome) {
+				t.Fatalf("input outcome = %v", err)
 			}
-			if peer.Prompts.Load() != 2 || peer.Opens.Load() != 1 {
-				t.Fatalf("unproven steering retried: prompts=%d opens=%d", peer.Prompts.Load(), peer.Opens.Load())
+			run.mu.RLock()
+			running, state := run.running, run.state
+			run.mu.RUnlock()
+			if !running || state != delegation.StateRunning || run.slot.activityCheckpoint().outputQuarantined {
+				t.Fatalf("message timeout escaped to Activity: running=%v state=%s", running, state)
 			}
-			retained, err := runner.lookup(anchor)
-			if err != nil || retained != run {
-				t.Fatalf("unknown steering lost original task owner: %v", err)
+			if failure == "late-receipt" {
+				close(release)
+				<-lateReturned
 			}
-			// A notification already decoded by the SDK may reach the callback
-			// after transport isolation. The real owner must reject that late output.
-			runner.handleUpdate(run, client.UpdateEnvelope{SessionID: anchor.SessionID, Update: client.ContentChunk{SessionUpdate: client.UpdateAgentMessage, MessageID: "late-message", Content: json.RawMessage(`{"type":"text","text":"late quarantined output"}`)}})
-			for len(events) != 0 {
-				late := <-events
-				data, err := json.Marshal(late)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if strings.Contains(string(data), "late quarantined output") {
-					t.Fatalf("late output crossed quarantine: %s", data)
-				}
+			// The next send is an explicit decision, never an automatic replay.
+			next, err := submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{Target: run.slot.target, Source: session.ActorRef{Kind: session.ActorKindController, ID: "sender"}, Input: "explicit next message"})
+			if err != nil || next.StartedActivity || next.ActivityID != spawn.ActivityID {
+				t.Fatalf("next message = %+v, %v", next, err)
 			}
-			return
-		case <-ctx.Done():
-			t.Fatal(ctx.Err())
-		}
+			if err := peer.Update(ctx, v2.SessionId(anchor.SessionID), map[string]any{"sessionUpdate": "agent_message", "messageId": "later-output", "content": []any{map[string]any{"type": "text", "text": "continued original Activity"}}}); err != nil {
+				t.Fatal(err)
+			}
+			if err := peer.State(ctx, v2.SessionId(anchor.SessionID), activity, "idle", "end_turn"); err != nil {
+				t.Fatal(err)
+			}
+			terminal := waitChildActivityTerminalFor(t, ctx, events, spawn.ActivityID)
+			if terminal.Result == nil || terminal.Result.State != delegation.StateCompleted || terminal.Result.Result != "continued original Activity" {
+				t.Fatalf("original completion = %+v", terminal.Result)
+			}
+			if peer.Prompts.Load() != 3 || peer.Opens.Load() != 1 || peer.Cancels.Load() != 0 {
+				t.Fatalf("unexpected retry/reconnect/cancel: %d/%d/%d", peer.Prompts.Load(), peer.Opens.Load(), peer.Cancels.Load())
+			}
+		})
 	}
 }

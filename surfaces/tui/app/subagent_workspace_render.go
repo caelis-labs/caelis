@@ -29,9 +29,14 @@ func (m *Model) renderPaneHint(view *subagentOutputView, state *subagentOutputOv
 				remaining -= displayColumns(notice) + 3
 			}
 			label = m.renderActivityHint(view.activity.visible(true), time.Now(), maxInt(1, remaining), 0)
+		case subagentOutputUnknown:
+			label = m.theme.WarnStyle().Render("? Outcome unconfirmed")
 		case subagentOutputFailed:
 			label = m.theme.WarnStyle().Render("! Failed")
 		}
+	}
+	if view != nil && view.streamRecovering {
+		label = m.theme.HelpHintTextStyle().Render("Reconnecting output…")
 	}
 	if notice != "" {
 		if label != "" {

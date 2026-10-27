@@ -299,13 +299,14 @@ These are observation positions, separate from ReadThread cursors and delivery.
 Reading never drains a mailbox or starts execution. A message read from the
 group log can still arrive later through its pending directed delivery.
 
-Successful sends, mailbox takes and successful automatic input admissions mark
+Successful sends, mailbox takes and automatic dispatch claims mark
 individual IDs known to that reader. Default group reads skip those IDs while
 scanning intervening unseen records in order; they never jump over unread gaps.
 Admission and server-side response completion do not prove model consumption.
-An ambiguous or failed dispatch leaves its body readable in the group log, even
-though its directed queue entry was consumed. Explicit replay can include known
-bodies. None of these paths promises exactly-once delivery.
+An ambiguous or failed dispatch removes its suppression marker without
+rewinding an already advanced reader. Its body remains available through explicit
+replay even though its directed queue entry was consumed. None of these paths
+promises exactly-once delivery.
 
 Reader identity includes the immutable Task/participant/attachment generation,
 or the parent's controller epoch. Credential renewal and reconnect within that
@@ -344,8 +345,10 @@ mailbox. A failed dispatch or lost tool response can lose the message; there is
 no acknowledgement, retry, or redelivery protocol. Repeating SendMessage creates
 another message. Pull and automatic delivery share the same atomic removal.
 Automatic delivery is serial per recipient and independent across recipients,
-with a ten-second deadline per attempt. Each attempt atomically claims the
-pending messages that fit the encoded batch budget and submits them as one
+with admission waits bound to Host service cancellation rather than a short
+polling deadline. No mailbox read lock is held while waiting for a remote input
+boundary. Each attempt atomically claims the pending messages that fit the
+encoded batch budget and submits them as one
 input admission, preserving their order and individual source identities. The
 same rule applies to the parent: a running local controller accepts the batch
 at its next safe model boundary, and a running ACP controller receives one
@@ -355,8 +358,12 @@ batches are committed atomically before entering model context. A final empty
 drain closes input admission so late mail can select the next Turn without
 being acknowledged into a completed Run.
 The 32-message pull limit does not split automatic delivery; messages beyond the
-encoded budget remain queued. A deadline does not establish whether the peer
-executed the input and does not trigger a retry.
+encoded budget remain queued. An unconfirmed additional message affects only
+that delivery: it neither settles the existing Activity nor closes its output
+connection. The sender can wait or explicitly send another message, which may
+duplicate a delivery whose outcome remains unknown. No uncertain send is
+replayed automatically. Actual connection loss remains an execution observation
+failure; a receipt alone cannot prove remote execution has stopped.
 Agents without steering can take mail through MCP during their current turn;
 otherwise the Host waits for a known terminal activity before submitting the
 queued batch as one prompt on the existing Session. An unresolved execution
