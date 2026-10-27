@@ -853,6 +853,9 @@ func (tm *taskRuntime) detachSubagentParticipant(ctx context.Context, task *suba
 		// and may safely advance to terminal compensated.
 		return nil
 	}
+	if err := tm.runtime.participantInputMutationErrorLocked(task.sessionRef, binding.ID); err != nil {
+		return err
+	}
 	event := participantLifecycleEvent(active, binding, "detached", tm.runtime.now())
 	_, _, err = lifecycle.RemoveParticipantWithEvent(ctx, session.RemoveParticipantWithEventRequest{
 		SessionRef: task.sessionRef, ExpectedRevision: &active.Revision, MutationGuard: session.RuntimeMutationGuard(ctx),

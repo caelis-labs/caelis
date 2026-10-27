@@ -89,7 +89,7 @@ func (s *Service) cleanupClosedSessions(ctx context.Context, report func(error))
 			return
 		}
 		for _, id := range ids {
-			attempt, cancel := context.WithTimeout(ctx, deliveryTimeout)
+			attempt, cancel := context.WithTimeout(ctx, lifecycleQueryTimeout)
 			reportError(s.CleanupClosedSession(attempt, id))
 			cancel()
 		}

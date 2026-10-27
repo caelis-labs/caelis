@@ -64,14 +64,21 @@ func markMessagesSeen(ctx context.Context, tx *sql.Tx, sessionID, instance strin
 	return nil
 }
 
-func (s *Service) markDelivered(ctx context.Context, i Identity, instance string, messages []Message) error {
+// unmarkDelivery makes unconfirmed mail readable without requeueing it or
+// rewinding a reader that already advanced. Explicit replay always retains it.
+func (s *Service) unmarkDelivery(ctx context.Context, i Identity, instance string, messages []Message) error {
+	lock := s.readerLock(i)
+	lock.Lock()
+	defer lock.Unlock()
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err = markMessagesSeen(ctx, tx, i.Session, instance, messages); err != nil {
-		return err
+	for _, message := range messages {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM collaboration_seen WHERE session=? AND instance=? AND id=?`, i.Session, instance, message.ID); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }

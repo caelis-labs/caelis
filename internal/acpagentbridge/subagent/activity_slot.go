@@ -30,6 +30,7 @@ type childSlot struct {
 	activityInitial    bool
 	terminalActivity   string
 	inputActive        bool
+	inputClosed        bool
 	inputProjectionSeq uint64
 	outputQuarantined  bool
 	setupActive        bool
@@ -128,6 +129,7 @@ type childActivityCheckpoint struct {
 	terminalActivity  string
 	outputQuarantined bool
 	setupActive       bool
+	inputClosed       bool
 }
 
 func newChildSlot(target agent.ChildEndpointRef, run *childRun) *childSlot {
@@ -158,6 +160,7 @@ func (s *childSlot) beginSetup(run *childRun) {
 	s.run = run
 	s.activityID = activityID
 	s.activityInitial = true
+	s.inputClosed = false
 	s.setupActive = true
 	s.outputQuarantined = false
 	s.mu.Unlock()
@@ -238,6 +241,7 @@ func (s *childSlot) beginActivityKind(activityID string, run *childRun, initial 
 	s.activityID = strings.TrimSpace(activityID)
 	s.activityInitial = initial
 	s.terminalActivity = ""
+	s.inputClosed = false
 	s.inputActive = false
 	s.outputQuarantined = false
 	s.setupActive = false
@@ -254,7 +258,7 @@ func (s *childSlot) activityCheckpoint() childActivityCheckpoint {
 	return childActivityCheckpoint{
 		activityID: s.activityID, activityInitial: s.activityInitial,
 		terminalActivity: s.terminalActivity, outputQuarantined: s.outputQuarantined,
-		setupActive: s.setupActive,
+		setupActive: s.setupActive, inputClosed: s.inputClosed,
 	}
 }
 
@@ -269,6 +273,7 @@ func (s *childSlot) restoreActivity(checkpoint childActivityCheckpoint, run *chi
 	s.activityID = checkpoint.activityID
 	s.activityInitial = checkpoint.activityInitial
 	s.terminalActivity = checkpoint.terminalActivity
+	s.inputClosed = checkpoint.inputClosed
 	s.inputActive = false
 	s.outputQuarantined = checkpoint.outputQuarantined
 	s.setupActive = checkpoint.setupActive
@@ -346,7 +351,7 @@ func (s *childSlot) beginInput(cancel context.CancelFunc) bool {
 	defer s.ingressMu.Unlock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.inputActive || s.activityID == "" || s.outputQuarantined {
+	if s.inputClosed || s.inputActive || s.activityID == "" || s.outputQuarantined {
 		return false
 	}
 	s.inputActive = true
@@ -468,4 +473,20 @@ func childInputProvenFailure(message string, err error) error {
 		return err
 	}
 	return errorcode.Wrap(errorcode.FailedPrecondition, message, err)
+}
+
+// closeActivityInput fences further steering and releases an existing receipt
+// wait before terminal settlement takes opMu. It does not cancel the Activity.
+func (s *childSlot) closeActivityInput(run *childRun) {
+	s.mu.Lock()
+	if s.run != run {
+		s.mu.Unlock()
+		return
+	}
+	s.inputClosed = true
+	cancel := s.activeInputCancel
+	s.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
 }

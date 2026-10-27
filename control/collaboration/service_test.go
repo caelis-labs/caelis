@@ -183,7 +183,7 @@ func (b *isolatedDeliveryBackend) Deliver(ctx context.Context, id string, messag
 	}
 	return nil
 }
-func TestDeliveryIsolatesRecipientsAndExpiresWithoutRetry(t *testing.T) {
+func TestDeliveryIsolatesRecipientsAndWaitsUntilServiceStops(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		b := &isolatedDeliveryBackend{started: make(chan string, 8), expired: make(chan error, 8)}
 		s, err := Open(filepath.Join(t.TempDir(), "control.sqlite"), b)
@@ -213,13 +213,18 @@ func TestDeliveryIsolatesRecipientsAndExpiresWithoutRetry(t *testing.T) {
 		if len(b.started) != 0 {
 			t.Fatal("same recipient started overlapping delivery")
 		}
-		time.Sleep(deliveryTimeout)
+		time.Sleep(time.Minute)
 		synctest.Wait()
-		if err := <-b.expired; !errors.Is(err, context.DeadlineExceeded) {
-			t.Fatal(err)
+		select {
+		case err := <-b.expired:
+			t.Fatalf("slow admission expired: %v", err)
+		default:
 		}
 		cancel()
 		<-done
+		if err := <-b.expired; !errors.Is(err, context.Canceled) {
+			t.Fatal(err)
+		}
 		for len(b.started) > 0 {
 			if got := <-b.started; got == "blocked:first" {
 				t.Fatal("retried removed message")

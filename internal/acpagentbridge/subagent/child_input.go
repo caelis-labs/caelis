@@ -333,27 +333,30 @@ func (r *Runner) submitActiveChildInputLocked(
 	rpcCtx, cancelRPC := context.WithCancel(ctx)
 	if !slot.beginInput(cancelRPC) {
 		cancelRPC()
-		return agent.ChildInputResult{}, errorcode.New(errorcode.Conflict, "Target Agent state changed before the message was sent.")
+		return agent.ChildInputResult{}, errorcode.Wrap(errorcode.FailedPrecondition, "Target Agent is finishing its current turn.", agent.ErrChildInputNotReady)
 	}
 	run.mu.Lock()
 	previousInputActor := run.inputActor
 	run.inputActor = session.CloneActorRef(req.Source)
 	run.suppressInputEcho = true
 	run.mu.Unlock()
+	// An additional input owns only its receipt. Uncertainty cannot settle the
+	// already admitted Activity or quarantine its continuous output.
+	defer func() {
+		run.mu.Lock()
+		run.inputActor = previousInputActor
+		run.mu.Unlock()
+	}()
 	acceptedInput := r.acceptedChildInputOutputs(slot, run, req, activityID)
 	response, err := r.callChildSteering(rpcCtx, run, prompt)
 	cancelRPC()
 	if err != nil {
 		if childInputEffectUnknown(err) {
 			unknown := joinChildInputUnknown("Message delivery outcome cannot be confirmed.", err)
-			slot.settleInput(run, false, nil)
-			r.finishDriveLocked(context.WithoutCancel(ctx), run, "", unknown)
+			slot.settleInput(run, true, nil)
 			return agent.ChildInputResult{}, unknown
 		}
 		slot.settleInput(run, true, nil)
-		run.mu.Lock()
-		run.inputActor = previousInputActor
-		run.mu.Unlock()
 		return agent.ChildInputResult{}, childInputProvenFailure("Target Agent rejected the message.", err)
 	}
 	switch response.Outcome {
@@ -362,25 +365,17 @@ func (r *Runner) submitActiveChildInputLocked(
 		return agent.ChildInputResult{ActivityID: activityID}, nil
 	case client.SessionSteeringPromptRequired:
 		slot.settleInput(run, true, nil)
-		run.mu.Lock()
-		run.inputActor = previousInputActor
-		run.mu.Unlock()
 		return agent.ChildInputResult{}, errorcode.Wrap(errorcode.FailedPrecondition, "Target Agent is finishing its current turn.", agent.ErrChildInputNotReady)
 	case client.SessionSteeringFailed:
 		slot.settleInput(run, true, nil)
-		run.mu.Lock()
-		run.inputActor = previousInputActor
-		run.mu.Unlock()
 		return agent.ChildInputResult{}, errorcode.New(errorcode.FailedPrecondition, "Target Agent did not accept the message.")
 	case client.SessionSteeringStartedNewTurn:
 		unknown := errorcode.New(errorcode.UnknownOutcome, "Message delivery outcome cannot be confirmed.")
-		slot.settleInput(run, false, nil)
-		r.finishDriveLocked(context.WithoutCancel(ctx), run, "", unknown)
+		slot.settleInput(run, true, nil)
 		return agent.ChildInputResult{}, unknown
 	default:
 		unknown := errorcode.New(errorcode.UnknownOutcome, "Message delivery outcome cannot be confirmed.")
-		slot.settleInput(run, false, nil)
-		r.finishDriveLocked(context.WithoutCancel(ctx), run, "", unknown)
+		slot.settleInput(run, true, nil)
 		return agent.ChildInputResult{}, unknown
 	}
 }

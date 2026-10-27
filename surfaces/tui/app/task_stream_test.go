@@ -813,7 +813,7 @@ func TestTUISubagentOutputSurfacesPermanentSubscriptionFailure(t *testing.T) {
 	}
 }
 
-func TestTUISubagentOutputStopsMaskingRepeatedCleanFollowExit(t *testing.T) {
+func TestTUISubagentOutputBacksOffRepeatedCleanFollowExit(t *testing.T) {
 	t.Parallel()
 
 	model := NewModel(Config{NoColor: true, NoAnimation: true})
@@ -829,15 +829,15 @@ func TestTUISubagentOutputStopsMaskingRepeatedCleanFollowExit(t *testing.T) {
 	model.taskStreamIDsByCallID["spawn-1"] = "task-1"
 	model.taskStreamCallIDsByID["task-1"] = "spawn-1"
 
-	next, _ := model.handleTaskStreamClosed(taskStreamClosedMsg{
+	next, cmd := model.handleTaskStreamClosed(taskStreamClosedMsg{
 		sessionID: "session-1", taskID: "task-1", token: 7,
 	})
 	model = next.(*Model)
-	if !strings.Contains(model.hint, "following task stream ended unexpectedly") {
-		t.Fatalf("clean Follow exit hint = %q, want invariant failure surfaced", model.hint)
+	if cmd == nil || !view.streamRecovering || !model.taskStreamWanted["task-1"] || model.taskStreamTokens["task-1"] != 7 {
+		t.Fatal("clean Follow exit did not retain a pending reconnect")
 	}
-	if model.taskStreamTokens["task-1"] != 0 {
-		t.Fatalf("Task stream token = %d, want retries stopped", model.taskStreamTokens["task-1"])
+	if view.block.Status != "running" {
+		t.Fatal("observation changed execution state")
 	}
 }
 

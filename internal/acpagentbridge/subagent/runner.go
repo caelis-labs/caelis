@@ -691,6 +691,7 @@ func (r *Runner) finishDrive(ctx context.Context, run *childRun, stopReason stri
 	}
 	slot := run.childSlot()
 	if slot != nil {
+		slot.closeActivityInput(run)
 		slot.opMu.Lock()
 	}
 	done := r.finishDriveLocked(ctx, run, stopReason, err)

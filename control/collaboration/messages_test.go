@@ -155,7 +155,7 @@ func (b *pendingAdmissionBackend) Deliver(ctx context.Context, _ string, _ []Mes
 	}
 }
 
-func TestSharedReadWaitsForConcurrentAutomaticAdmission(t *testing.T) {
+func TestSharedReadAndReceiveProceedDuringAutomaticAdmission(t *testing.T) {
 	b := &pendingAdmissionBackend{testBackend: testBackend{deliver: true}, entered: make(chan struct{}), release: make(chan struct{})}
 	s, err := Open(filepath.Join(t.TempDir(), "control.sqlite"), b)
 	if err != nil {
@@ -169,10 +169,13 @@ func TestSharedReadWaitsForConcurrentAutomaticAdmission(t *testing.T) {
 	delivered := make(chan error, 1)
 	go func() { delivered <- s.deliverRecipient(t.Context(), i) }()
 	<-b.entered
-	if s.readerLock(i).TryLock() {
-		s.readerLock(i).Unlock()
+	if !s.readerLock(i).TryLock() {
 		close(b.release)
-		t.Fatal("in-flight delivery did not exclude a same-member group read")
+		t.Fatal("remote admission holds the recipient read lock")
+	}
+	s.readerLock(i).Unlock()
+	if mail, err := s.Receive(t.Context(), i); err != nil || len(mail) != 0 {
+		t.Fatalf("receive during admission: %v, %v", mail, err)
 	}
 	read := make(chan MessagePage, 1)
 	go func() {
@@ -182,12 +185,12 @@ func TestSharedReadWaitsForConcurrentAutomaticAdmission(t *testing.T) {
 		}
 		read <- page
 	}()
+	if page := <-read; len(page.Messages) != 0 {
+		t.Fatalf("in-flight body duplicated by concurrent read: %#v", page)
+	}
 	close(b.release)
 	if err := <-delivered; err != nil {
 		t.Fatal(err)
-	}
-	if page := <-read; len(page.Messages) != 0 {
-		t.Fatalf("admitted body duplicated by concurrent read: %#v", page)
 	}
 }
 

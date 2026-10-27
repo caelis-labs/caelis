@@ -3,6 +3,14 @@ package tuiapp
 import "time"
 
 const taskStreamRecoveryBudget = 35 * time.Second
+const taskStreamRecoveryCooldown = 30 * time.Second
+
+func (m *Model) setTaskStreamRecovering(callID string, recovering bool) {
+	if view := m.subagentOutputViews[callID]; view != nil && view.streamRecovering != recovering {
+		view.streamRecovering = recovering
+		view.touch(true)
+	}
+}
 
 // Resolution, subscription and replacement failures share one recovery
 // episode. A snapshot alone is not proof of a stable live follower.
