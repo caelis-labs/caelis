@@ -26,7 +26,7 @@ func (d *draftClient) reserveCacheLocked(session *draftSession, size, previous i
 }
 
 func (d *draftClient) accountMessageLocked(session *draftSession, key string, message *draftMessage) error {
-	meta, err := json.Marshal(message.meta)
+	meta, err := json.Marshal(message.entityMeta)
 	if err != nil {
 		return err
 	}

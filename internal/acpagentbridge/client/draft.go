@@ -190,7 +190,7 @@ func draftMCPServers(servers []acpsdk.McpServer) ([]v2.McpServer, error) {
 	out := make([]v2.McpServer, 0, len(servers))
 	for _, server := range servers {
 		if server.Sse != nil {
-			return nil, errors.New("acp draft: SSE MCP transport has no alpha.8 standard equivalent")
+			return nil, errors.New("acp draft: SSE MCP transport has no standard equivalent in the selected ACP draft")
 		}
 		raw, err := json.Marshal(server)
 		if err != nil {

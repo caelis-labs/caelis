@@ -1,6 +1,7 @@
 package session
 
 import (
+	"bytes"
 	"encoding/json"
 	"slices"
 	"strings"
@@ -236,6 +237,23 @@ func (p *EventProtocol) UnmarshalJSON(data []byte) error {
 	var decoded protocolJSON
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		return err
+	}
+	// Protocol update metadata is opaque JSON; keep its numeric tokens when
+	// durable events are reloaded, just as Event.UnmarshalJSON does for _meta.
+	var fields struct {
+		Update *struct {
+			Meta json.RawMessage `json:"_meta"`
+		} `json:"update"`
+	}
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	if decoded.Update != nil && fields.Update != nil && len(fields.Update.Meta) > 0 {
+		decoder := json.NewDecoder(bytes.NewReader(fields.Update.Meta))
+		decoder.UseNumber()
+		if err := decoder.Decode(&decoded.Update.Meta); err != nil {
+			return err
+		}
 	}
 	normalized := CloneEventProtocol(EventProtocol(decoded))
 	*p = normalized

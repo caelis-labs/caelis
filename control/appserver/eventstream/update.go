@@ -1,6 +1,7 @@
 package eventstream
 
 import (
+	"bytes"
 	"encoding/json"
 	"strings"
 
@@ -54,7 +55,8 @@ type Update interface {
 // standard members owned by acp-go-sdk and unknown vendor members as RawUpdate.
 func DecodeUpdateJSON(raw json.RawMessage) (Update, error) {
 	var probe struct {
-		SessionUpdate string `json:"sessionUpdate"`
+		SessionUpdate string          `json:"sessionUpdate"`
+		Meta          json.RawMessage `json:"_meta"`
 	}
 	if err := json.Unmarshal(raw, &probe); err != nil {
 		return nil, err
@@ -80,14 +82,25 @@ func DecodeUpdateJSON(raw json.RawMessage) (Update, error) {
 	if err := json.Unmarshal(raw, target); err != nil {
 		return nil, err
 	}
+	var meta map[string]any
+	if len(probe.Meta) > 0 {
+		decoder := json.NewDecoder(bytes.NewReader(probe.Meta))
+		decoder.UseNumber()
+		if err := decoder.Decode(&meta); err != nil {
+			return nil, err
+		}
+	}
 	switch typed := target.(type) {
 	case *ContentChunk:
+		typed.Meta = meta
 		typed.Content = restoreDecodedTextContent(typed.Content)
 		return *typed, nil
 	case *ToolCall:
+		typed.Meta = meta
 		restoreDecodedToolContent(typed.Content)
 		return *typed, nil
 	case *ToolCallUpdate:
+		typed.Meta = meta
 		restoreDecodedToolContent(typed.Content)
 		return *typed, nil
 	case *PlanUpdate:

@@ -15,7 +15,7 @@ import (
 type draftMessage struct {
 	content    []json.RawMessage
 	hasContent bool
-	meta       map[string]any
+	entityMeta map[string]any
 	cacheBytes int
 }
 
@@ -263,15 +263,22 @@ func (d *draftClient) decodeMessage(sessionID, kind string, fields map[string]js
 	}
 	previouslyObserved := message.hasContent
 	_, metaPresent := fields["_meta"]
-	if meta, present := fields["_meta"]; present {
+	entityMetaPresent := replacement && metaPresent
+	meta := message.entityMeta
+	if !replacement {
+		// Chunk annotations belong only to this contribution. They neither
+		// replace nor inherit the entity's accumulated upsert metadata.
+		meta = nil
+	}
+	if raw, present := fields["_meta"]; present {
 		var err error
 		if replacement {
-			message.meta, err = draftPatchMeta(message.meta, meta)
+			message.entityMeta, err = draftPatchMeta(message.entityMeta, raw)
+			meta = message.entityMeta
 		} else {
-			// Chunk metadata describes this content contribution, not an entity
-			// upsert. Keep its existing replacement semantics.
-			message.meta = nil
-			err = json.Unmarshal(meta, &message.meta)
+			decoder := json.NewDecoder(bytes.NewReader(raw))
+			decoder.UseNumber()
+			err = decoder.Decode(&meta)
 		}
 		if err != nil {
 			return nil, err
@@ -301,7 +308,7 @@ func (d *draftClient) decodeMessage(sessionID, kind string, fields map[string]js
 		if err := d.accountMessageLocked(session, key, message); err != nil {
 			return nil, err
 		}
-		return []Update{ContentChunk{SessionUpdate: chunkKind, MessageID: messageID, Content: json.RawMessage(`{"type":"text","text":""}`), Meta: message.meta, MetaPresent: true, PreviouslyObserved: previouslyObserved}}, nil
+		return []Update{ContentChunk{SessionUpdate: chunkKind, MessageID: messageID, Content: json.RawMessage(`{"type":"text","text":""}`), Meta: meta, MetaPresent: true, PreviouslyObserved: previouslyObserved}}, nil
 	} else if replacement {
 		if !bytes.Equal(bytes.TrimSpace(content), []byte("null")) {
 			if err := json.Unmarshal(content, &blocks); err != nil {
@@ -331,7 +338,7 @@ func (d *draftClient) decodeMessage(sessionID, kind string, fields map[string]js
 	}
 	updates := make([]Update, 0, len(blocks))
 	for index, block := range blocks {
-		updates = append(updates, ContentChunk{SessionUpdate: chunkKind, MessageID: messageID, Content: block, Meta: message.meta, Replacement: replacement && index == 0, MetaPresent: metaPresent && index == 0, PreviouslyObserved: previouslyObserved})
+		updates = append(updates, ContentChunk{SessionUpdate: chunkKind, MessageID: messageID, Content: block, Meta: meta, Replacement: replacement && index == 0, MetaPresent: entityMetaPresent && index == 0, PreviouslyObserved: previouslyObserved})
 	}
 	return updates, nil
 }
@@ -466,7 +473,9 @@ func draftTerminalExitMeta(meta map[string]any, id string, exit map[string]any) 
 // patches cannot mutate an already emitted normalized snapshot.
 func draftPatchMeta(previous map[string]any, raw json.RawMessage) (map[string]any, error) {
 	var patch map[string]any
-	if err := json.Unmarshal(raw, &patch); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	if err := decoder.Decode(&patch); err != nil {
 		return nil, err
 	}
 	if patch == nil {

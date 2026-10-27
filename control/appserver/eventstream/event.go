@@ -1,6 +1,7 @@
 package eventstream
 
 import (
+	"bytes"
 	"encoding/json"
 	"maps"
 	"strings"
@@ -251,10 +252,18 @@ func (e *Envelope) UnmarshalJSON(raw []byte) error {
 	decoded := envelopeAlias{}
 	wire := struct {
 		Update json.RawMessage `json:"update"`
+		Meta   json.RawMessage `json:"_meta"`
 		*envelopeAlias
 	}{envelopeAlias: &decoded}
 	if err := json.Unmarshal(raw, &wire); err != nil {
 		return err
+	}
+	if len(wire.Meta) > 0 {
+		decoder := json.NewDecoder(bytes.NewReader(wire.Meta))
+		decoder.UseNumber()
+		if err := decoder.Decode(&decoded.Meta); err != nil {
+			return err
+		}
 	}
 	if len(wire.Update) > 0 && string(wire.Update) != "null" {
 		update, err := DecodeUpdateJSON(wire.Update)

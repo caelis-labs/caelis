@@ -26,14 +26,28 @@ carry the same exact schema. An unsupported schema fails before granting or
 serving the channel; the selected draft never falls back to v1.
 
 `caelis acp --acp-draft=schema-v2.0.0-alpha.9` serves product Sessions through the
-existing principal-bound Control clients. Initialization requires protocol
-version 2, the v2 `info` shape and an exact
+existing principal-bound Control clients. Initialization negotiates v2 from a
+client offering protocol version 2 or a newer major, using the v2 `info` shape.
+The controlled product channel requires an exact alpha.9
 `_meta["caelis/acp_schema"]` tag. Responses advertise the implemented Session
 capabilities and the conditional-prompt profile described below. Initialization
 is pinned once per connection. Unknown methods and unimplemented optional
 features fail explicitly. Only actual image/MCP/configuration support is
 advertised; native ACP Sessions do not accept lifecycle MCP server declarations
 or additional directories that their existing owner cannot apply.
+
+The separate Core initialization/capability probe (`ServeDraftStdio`) also
+negotiates newer offered majors down to v2. Its schema tag is optional in the
+request; when explicitly provided it must match alpha.9. The response always
+identifies the pinned schema. This probe advertises no Session or auth work;
+omitting its tag does not relax the controlled product channel's requirements.
+
+Entity upsert `_meta` objects patch by top-level key: omitted keys remain,
+null-valued keys are removed, and nested values replace rather than merge.
+An empty object is a no-op; top-level null clears entity metadata. Message-chunk
+metadata annotates only that contribution and does not patch the entity's
+metadata. Numeric tokens in these opaque annotations are preserved through
+aggregation, canonical events, and live/replay projection.
 
 The Codex draft channel requires native app-server 0.160.0 or newer with
 `clientUserMessageId` correlation. The adapter assigns a private submission token
@@ -61,8 +75,8 @@ keeps the existing ordered replay barrier. Transport loss before settlement
 remains `unknown_outcome`; there is no automatic resubmission.
 
 Native permission requests keep the same original options and resolution owner.
-Where alpha.8 cannot express completeness, sensitivity or per-option scope, the
-bounded public approval subject travels in `_meta["caelis/approval_subject"]`.
+Where the selected draft cannot express completeness, sensitivity or per-option
+scope, the bounded public approval subject travels in `_meta["caelis/approval_subject"]`.
 The receiver stores it as a reported display hint, joins only the original
 option identities and marks remote claims in presentation. Guardian continues
 using the canonical standard subject and private native evidence; the hint does
@@ -84,7 +98,7 @@ an earlier Activity updates its display without taking the new Activity's result
 The explicit Codex draft channel preserves native skill and mention references
 by their supplied name and path without reading those paths. Native negative
 command exit sentinels produce an exit status without an unsigned exit code.
-If a route fails before native completion is confirmed, alpha.8 cannot express
+If a route fails before native completion is confirmed, the selected draft cannot express
 an Agent-side Session closure. The affected ACP connection closes observably,
 pending native requests are cancelled and the owner attempts interruption of
 the actual native Turn. Sessions on that connection become unknown outcomes;
@@ -214,7 +228,7 @@ cannot turn the initial prompt into mid-turn injection. Both conditions in one
 guard are invalid. An unmet condition returns the profile's structured
 `promptRequired` no-effect error. Callers do not silently retry it as a different
 operation. Ordinary unguarded external v2 prompts keep standard insertion
-behavior. ACP alpha.8 has no equivalent running-only or idle-only admission/CAS
+behavior. The selected draft has no equivalent running-only or idle-only admission/CAS
 field, so this minimal negotiated metadata remains. Pure
 commands may use their durable interaction identity as an opaque Activity ID;
 that ID never authorizes steering into a native Turn.
