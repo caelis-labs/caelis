@@ -239,7 +239,7 @@ func (a *SessionClientAdapter) interruptSession(ctx context.Context, sessionID s
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		a.cancelTurnAdmissions(wait, sessionID)
+		cancelled := a.cancelTurnAdmissions(wait, sessionID)
 		a.activeMu.Lock()
 		active = a.active
 		reconnect = a.reconnect
@@ -258,7 +258,10 @@ func (a *SessionClientAdapter) interruptSession(ctx context.Context, sessionID s
 			}
 			return cancelTurnWithTimeout(ctx, reconnect.cancel)
 		}
-		if currentWait != wait && admissionErr != nil {
+		// A completed cancellation is the successful interrupt outcome. Keep
+		// independent failures and receipt-wrapped unknown outcomes visible.
+		cancelledAdmission := cancelled && admissionErr == context.Canceled //nolint:errorlint // Wrapped receipt errors must remain visible.
+		if currentWait != wait && admissionErr != nil && !cancelledAdmission {
 			return admissionErr
 		}
 		// The exact target was not admitted within the bounded grace period.
@@ -428,14 +431,14 @@ func (a *SessionClientAdapter) finishTurnAdmission(id uint64, err error) {
 	}
 }
 
-func (a *SessionClientAdapter) cancelTurnAdmissions(wait chan struct{}, sessionID string) {
+func (a *SessionClientAdapter) cancelTurnAdmissions(wait chan struct{}, sessionID string) bool {
 	if a == nil {
-		return
+		return false
 	}
 	a.activeMu.Lock()
 	if wait != nil && a.admissionWait != wait {
 		a.activeMu.Unlock()
-		return
+		return false
 	}
 	cancels := make([]context.CancelFunc, 0, len(a.admissions))
 	for _, admission := range a.admissions {
@@ -450,6 +453,7 @@ func (a *SessionClientAdapter) cancelTurnAdmissions(wait chan struct{}, sessionI
 	for _, cancel := range cancels {
 		cancel()
 	}
+	return len(cancels) > 0
 }
 
 func (a *SessionClientAdapter) admissionInterrupted(id uint64) bool {

@@ -3635,7 +3635,7 @@ func TestRuntimeRunCommandClosesStdinAndTaskWriteRejectsInput(t *testing.T) {
 	runCommandResult := callRuntimeRunCommandTool(t, runCommandTool, map[string]any{
 		"command":       shellStdinEOFThenSleepForTest(10 * time.Second),
 		"workdir":       ".",
-		"yield_time_ms": shellRunningYieldMillisForTest(0),
+		"yield_time_ms": 1000,
 	})
 	handle, _ := testToolResultRuntimeMeta(t, runCommandResult, "task")["handle"].(string)
 	if strings.TrimSpace(handle) == "" {
@@ -3647,24 +3647,29 @@ func TestRuntimeRunCommandClosesStdinAndTaskWriteRejectsInput(t *testing.T) {
 		sessionRef: activeSession.SessionRef,
 		tasks:      runtime.tasks,
 	}
-	var readyPayload map[string]any
+	// EOF may arrive in RunCommand's initial observation. Output is delivered
+	// as deltas, so retain that observation and accumulate later reads.
+	readyPayload := testToolResultPayload(t, runCommandResult)
+	var readyOutput strings.Builder
 	readyDeadline := time.Now().Add(5 * time.Second)
 	for {
-		readyResult := callRuntimeTaskTool(t, taskTool, map[string]any{
-			"action": "read",
-			"handle": handle,
-		})
-		readyPayload = testToolResultPayload(t, readyResult)
-		if latest, _ := readyPayload["latest_output"].(string); strings.Contains(latest, "stdin-eof") {
+		latest, _ := readyPayload["latest_output"].(string)
+		readyOutput.WriteString(latest)
+		if strings.Contains(readyOutput.String(), "stdin-eof") {
 			break
 		}
 		if readyPayload["state"] != string(taskapi.StateRunning) {
 			t.Fatalf("task readiness result = %#v, want command running until stdin EOF is observed", readyPayload)
 		}
 		if time.Now().After(readyDeadline) {
-			t.Fatalf("task readiness output = %#v, want stdin EOF observation", readyPayload)
+			t.Fatalf("task readiness output = %q, want stdin EOF observation", readyOutput.String())
 		}
 		time.Sleep(5 * time.Millisecond)
+		readyResult := callRuntimeTaskTool(t, taskTool, map[string]any{
+			"action": "read",
+			"handle": handle,
+		})
+		readyPayload = testToolResultPayload(t, readyResult)
 	}
 
 	raw, err := json.Marshal(map[string]any{
