@@ -55,7 +55,7 @@ func (b *collaborationBackend) Start(ctx context.Context, identity collaboration
 	if registry == nil {
 		return nil, errors.New("collaboration runtime unavailable")
 	}
-	rt, active, release, err := registry.acquireControlRuntime(ctx, identity.Session, true)
+	rt, active, release, err := registry.acquireControlRuntime(ctx, identity.Session, runtimeUseActivation)
 	if err != nil {
 		return nil, err
 	}

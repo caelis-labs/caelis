@@ -5,6 +5,18 @@ import (
 	"strings"
 )
 
+// CacheReadAccounting describes whether PromptTokens already includes cache
+// reads. The API adapter owns this distinction, independently of provider names.
+// An empty value retains compatibility with usage recorded before this field.
+type CacheReadAccounting string
+
+const (
+	// CacheReadIncluded means cached input is a breakdown of PromptTokens.
+	CacheReadIncluded CacheReadAccounting = "included"
+	// CacheReadSeparate means cached input must be added to PromptTokens.
+	CacheReadSeparate CacheReadAccounting = "separate"
+)
+
 // ProviderSeparatesCachedInput reports providers whose prompt/input token count
 // excludes cache-read tokens. Display accounting folds cached input into Input
 // for these providers while keeping Cached as the visible cache-read breakdown.
@@ -21,6 +33,14 @@ func ProviderSeparatesCachedInput(provider string) bool {
 // payload follows Anthropic-style cache accounting where cache reads are
 // separate from prompt/input tokens.
 func ProviderSeparatesCachedInputForUsage(provider string, payload map[string]any) bool {
+	switch CacheReadAccounting(stringValue(payload["cache_read_accounting"])) {
+	case CacheReadIncluded:
+		return false
+	case CacheReadSeparate:
+		return true
+	}
+	// Legacy events and custom SDK models may lack API accounting metadata.
+	// Keep their historical interpretation until these records are migrated.
 	if len(payload) > 0 {
 		provider = firstNonEmptyString(strings.TrimSpace(stringValue(payload["provider"])), provider)
 	}

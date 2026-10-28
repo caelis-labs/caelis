@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -195,57 +196,74 @@ func TestBuildAgentCommunicationPromptCarriesTrustedSource(t *testing.T) {
 func TestRejectedChildSteeringReleasesOriginalActivityUpdates(t *testing.T) {
 	t.Parallel()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	runner := childInputTestRunner(t, "failed-echo")
-	events := make(chan childInputTestEvent, 8)
-	spawn := childInputSpawnContext(t, "task-rejected-input", events)
-	anchor, _, err := runner.Spawn(ctx, spawn, delegation.Request{
-		Agent: "helper", Prompt: "initial",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	consumeSpawnInitialInput(t, ctx, events, spawn.ActivityID, "initial")
-	run, err := runner.lookup(anchor)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{
-		Target: run.slot.target,
-		Source: session.ActorRef{Kind: session.ActorKindController, ID: "controller-1"},
-		Input:  "cannot inject",
-	})
-	if !errorcode.Is(err, errorcode.FailedPrecondition) {
-		t.Fatalf("rejected SubmitChildInput() error = %v, want failed precondition", err)
-	}
-	communicationCount := 0
-	var frame childInputTestEvent
-	var terminal childInputTestEvent
-	for terminal.Result == nil {
-		select {
-		case event := <-events:
-			if event.Frame != nil {
-				frame = event
-				if session.ProtocolAgentCommunicationOf(event.Frame.Event) != nil {
-					communicationCount++
+	for _, order := range []string{"receipt_first", "terminal_first"} {
+		t.Run(order, func(t *testing.T) {
+
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			release := filepath.Join(t.TempDir(), "release")
+			key := "CAELIS_ACP_CHILD_INPUT_TERMINAL_RELEASE"
+			want := errorcode.FailedPrecondition
+			if order == "terminal_first" {
+				key = "CAELIS_ACP_CHILD_INPUT_RECEIPT_RELEASE"
+				want = errorcode.UnknownOutcome
+			}
+			runner := newChildInputTestRunner(t, "failed-echo", map[string]string{key: release}, controlagents.Authentication{})
+			events := make(chan childInputTestEvent, 8)
+			spawn := childInputSpawnContext(t, "task-rejected-input", events)
+			anchor, _, err := runner.Spawn(ctx, spawn, delegation.Request{
+				Agent: "helper", Prompt: "initial",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			consumeSpawnInitialInput(t, ctx, events, spawn.ActivityID, "initial")
+			run, err := runner.lookup(anchor)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{
+				Target: run.slot.target,
+				Source: session.ActorRef{Kind: session.ActorKindController, ID: "controller-1"},
+				Input:  "cannot inject",
+			})
+			// A terminal Activity may legitimately cancel an unobserved receipt. Make
+			// both orders explicit instead of racing two RPC replies in the fixture.
+			if releaseErr := os.WriteFile(release, []byte("release"), 0o600); releaseErr != nil {
+				t.Fatal(releaseErr)
+			}
+			if !errorcode.Is(err, want) {
+				t.Fatalf("rejected SubmitChildInput() error = %v, want %s", err, want)
+			}
+			communicationCount := 0
+			var frame childInputTestEvent
+			var terminal childInputTestEvent
+			for terminal.Result == nil {
+				select {
+				case event := <-events:
+					if event.Frame != nil {
+						frame = event
+						if session.ProtocolAgentCommunicationOf(event.Frame.Event) != nil {
+							communicationCount++
+						}
+					}
+					if event.Result != nil {
+						terminal = event
+					}
+				case <-ctx.Done():
+					t.Fatal(ctx.Err())
 				}
 			}
-			if event.Result != nil {
-				terminal = event
+			if frame.Frame == nil || frame.Frame.Event.Text != "not injected output" || terminal.Cursor <= frame.Cursor || terminal.Result.State != delegation.StateCompleted {
+				t.Fatalf("released rejection events = frame %#v terminal %#v", frame, terminal)
 			}
-		case <-ctx.Done():
-			t.Fatal(ctx.Err())
-		}
-	}
-	if frame.Frame == nil || frame.Frame.Event.Text != "not injected output" || terminal.Cursor <= frame.Cursor {
-		t.Fatalf("released rejection events = frame %#v terminal %#v", frame, terminal)
-	}
-	if communicationCount != 0 {
-		t.Fatalf("rejected input projected %d Agent communication events, want none", communicationCount)
-	}
-	if err := runner.Quiesce(ctx); err != nil {
-		t.Fatal(err)
+			if communicationCount != 0 {
+				t.Fatalf("rejected input projected %d Agent communication events, want none", communicationCount)
+			}
+			if err := runner.Quiesce(ctx); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }
 
@@ -1249,6 +1267,11 @@ func TestChildInputHelperProcess(t *testing.T) {
 				case <-time.After(4 * time.Second):
 					return nil, &jsonrpc.RPCError{Code: -32000, Message: "steering timeout"}
 				}
+				if release := os.Getenv("CAELIS_ACP_CHILD_INPUT_TERMINAL_RELEASE"); release != "" {
+					if err := waitForChildInputRelease(release); err != nil {
+						return nil, &jsonrpc.RPCError{Code: -32000, Message: err.Error()}
+					}
+				}
 			} else if count > 1 {
 				if mode == "idle-echo" {
 					if err := childInputNotifyUpdate(conn, client.UpdateUserMessage, "second prompt"); err != nil {
@@ -1320,6 +1343,11 @@ func TestChildInputHelperProcess(t *testing.T) {
 				return nil, &jsonrpc.RPCError{Code: -32000, Message: err.Error()}
 			}
 			steerOnce.Do(func() { close(steered) })
+			if release := os.Getenv("CAELIS_ACP_CHILD_INPUT_RECEIPT_RELEASE"); release != "" {
+				if err := waitForChildInputRelease(release); err != nil {
+					return nil, &jsonrpc.RPCError{Code: -32000, Message: err.Error()}
+				}
+			}
 			if mode == "malformed-steering" {
 				return map[string]any{"outcome": 42}, nil
 			}

@@ -209,7 +209,7 @@ func (s *runtimeComposition) newIdleCompactionCoordinator(engine *runtime.Runtim
 
 func (r *sessionRuntimeRegistry) idleCompactionQuiet(ctx context.Context, runtime *sessionRuntime, ref session.SessionRef) (bool, error) {
 	r.mu.RLock()
-	quiet := !r.closed && !runtime.releasing && r.sessions[ref.SessionID] == runtime && runtime.inUse == 0 && runtime.workRefs == 1
+	quiet := !r.closed && !runtime.releasing && r.sessions[ref.SessionID] == runtime && runtime.inUse == runtime.observing && runtime.workRefs == 1
 	r.mu.RUnlock()
 	if !quiet {
 		return false, nil

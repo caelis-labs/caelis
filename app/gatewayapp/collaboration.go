@@ -50,7 +50,7 @@ func (b *collaborationBackend) List(ctx context.Context, id string) ([]collabora
 	registry := b.router.runtimes
 	b.router.mu.RUnlock()
 	if registry != nil {
-		rt, release, e := registry.acquireLoadedRuntime(id)
+		rt, release, e := registry.acquireLoadedRuntime(id, runtimeUseObservation)
 		if e == nil && rt == nil {
 			out[0].State = "idle"
 			out[0].CanDeliver = true
@@ -103,7 +103,7 @@ func (b *collaborationBackend) Deliver(ctx context.Context, id string, messages 
 	if registry == nil {
 		return errors.New("collaboration runtime unavailable")
 	}
-	rt, active, release, err := registry.acquireControlRuntime(ctx, id, true)
+	rt, active, release, err := registry.acquireControlRuntime(ctx, id, runtimeUseActivation)
 	if err != nil {
 		return err
 	}
@@ -159,7 +159,7 @@ func (b *collaborationBackend) DeliverUserInput(ctx context.Context, input colla
 	if registry == nil {
 		return errorcode.New(errorcode.Unavailable, "Child runtime unavailable")
 	}
-	rt, active, release, err := registry.acquireControlRuntime(ctx, input.SessionID, true)
+	rt, active, release, err := registry.acquireControlRuntime(ctx, input.SessionID, runtimeUseActivation)
 	if err != nil {
 		return err
 	}
@@ -283,7 +283,7 @@ func (b *collaborationBackend) Remove(ctx context.Context, id, handle string) er
 		if registry == nil {
 			return errors.New("participant runtime unavailable")
 		}
-		rt, _, release, err := registry.acquireControlRuntime(ctx, id, true)
+		rt, _, release, err := registry.acquireControlRuntime(ctx, id, runtimeUseActivation)
 		if err != nil {
 			return err
 		}

@@ -761,6 +761,7 @@ type Request struct {
 
 // Usage reports model token usage on a best-effort basis.
 type Usage struct {
+	CacheReadAccounting CacheReadAccounting `json:"cache_read_accounting,omitempty"`
 	// Cache writes are an input breakdown already included in PromptTokens.
 	CacheWriteTokens           int  `json:"cache_write_tokens,omitempty"`
 	CacheWrite5mTokens         int  `json:"cache_write_5m_tokens,omitempty"`

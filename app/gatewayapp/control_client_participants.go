@@ -74,7 +74,7 @@ func (r *participantHandleReader) ParticipantHandles(ctx context.Context, sessio
 		}
 		defer unlock()
 		ctx = activationCtx
-		runtime, releaseUse, err := registry.acquireLoadedRuntime(sessionID)
+		runtime, releaseUse, err := registry.acquireLoadedRuntime(sessionID, runtimeUseObservation)
 		if err != nil {
 			return nil, err
 		}

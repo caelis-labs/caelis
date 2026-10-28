@@ -948,6 +948,7 @@ func anthropicUsageToKernel(usage anthropic.Usage) model.Usage {
 	outputTokens := usage.OutputTokens
 	reasoningTokens := usage.OutputTokensDetails.ThinkingTokens
 	return usageWithPresence(model.Usage{
+		CacheReadAccounting:        model.CacheReadSeparate,
 		PromptTokens:               int(promptTokens),
 		CachedInputTokens:          int(cachedTokens),
 		CacheWriteTokens:           int(usage.CacheCreationInputTokens),

@@ -1831,7 +1831,7 @@ func TestSessionRuntimeConfigurationWaitsForReleaseAndBuildsDisposableSnapshot(t
 	go func() {
 		acquireCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		acquired, _, closeRuntime, acquireErr := stack.sessionRuntimes.acquireControlRuntime(acquireCtx, sessionID, false)
+		acquired, _, closeRuntime, acquireErr := stack.sessionRuntimes.acquireControlRuntime(acquireCtx, sessionID, runtimeUseCommand)
 		acquireDone <- acquireResult{runtime: acquired, close: closeRuntime, err: acquireErr}
 	}()
 	select {
@@ -2937,7 +2937,7 @@ func TestAcquireControlRuntimeRetriesAcrossIdleRelease(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	acquired, _, release, err := stack.sessionRuntimes.acquireControlRuntime(ctx, active.SessionID, true)
+	acquired, _, release, err := stack.sessionRuntimes.acquireControlRuntime(ctx, active.SessionID, runtimeUseActivation)
 	if err != nil {
 		t.Fatalf("acquireControlRuntime() during idle release = %v", err)
 	}

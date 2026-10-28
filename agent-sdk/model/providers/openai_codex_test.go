@@ -134,7 +134,7 @@ func TestOpenAICodexToolLoopPreservesEncryptedReasoning(t *testing.T) {
 	if first.FinishReason != model.FinishReasonToolCalls {
 		t.Fatalf("FinishReason = %q, want tool_calls", first.FinishReason)
 	}
-	if first.Usage != (model.Usage{PromptTokens: 20, CachedInputTokens: 5, CompletionTokens: 8, ReasoningTokens: 3, TotalTokens: 28}) {
+	if first.Usage != (model.Usage{CacheReadAccounting: model.CacheReadIncluded, PromptTokens: 20, CachedInputTokens: 5, CompletionTokens: 8, ReasoningTokens: 3, TotalTokens: 28}) {
 		t.Fatalf("Usage = %+v", first.Usage)
 	}
 	reasoning := first.Message.ReasoningParts()
