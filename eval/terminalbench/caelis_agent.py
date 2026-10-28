@@ -151,6 +151,10 @@ class CaelisAgent(BaseInstalledAgent):
         metadata["total_tokens"] = usage["n_total_tokens"]
         metadata["context_window_tokens"] = usage["context_window_tokens"]
         metadata["cost_micros"] = usage["cost_micros"]
+        for field in ("cache_write_tokens", "cache_write_5m_tokens", "cache_write_1h_tokens"):
+            metadata[field] = usage[f"n_{field}"]
+        for field in ("cached_input_tokens", "cache_write_tokens", "cache_write_5m_tokens", "cache_write_1h_tokens"):
+            metadata[f"{field}_reported"] = usage[f"{field}_reported"]
         metadata["usage_updates"] = usage["usage_updates"]
         metadata["usage_coverage"] = usage["usage_coverage"]
         context.metadata = metadata

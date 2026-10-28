@@ -109,3 +109,13 @@ func TestStatusDisplayOmitsHabitualYOLOWarningCopy(t *testing.T) {
 		t.Fatalf("Warnings = %#v, must not claim approval review remains active", view.Warnings)
 	}
 }
+
+func TestCacheMeasurementPresenceAndWriteBreakdown(t *testing.T) {
+	view := tokenUsageView([]tokenUsageStatusRow{{scope: "reported", usage: controlstatus.UsageSnapshot{CachedInputTokensReported: true, CacheWriteTokensReported: true}}, {scope: "missing", usage: controlstatus.UsageSnapshot{PromptTokens: 100, TotalTokens: 100}}})
+	if !view.ShowCacheWrite || view.Rows[0].Cached != "0" || view.Rows[0].CacheWrite != "0" || view.Rows[1].Cached != "-" || view.Rows[1].CacheWrite != "-" {
+		t.Fatalf("presence lost: %+v", view)
+	}
+	if usageSnapshotZero(controlstatus.UsageSnapshot{CacheWriteTokensReported: true}) {
+		t.Fatal("explicit zero cache write discarded")
+	}
+}

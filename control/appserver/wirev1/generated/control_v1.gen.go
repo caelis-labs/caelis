@@ -910,6 +910,7 @@ type ExperimentalSnapshot struct {
 type ExperimentalValues struct {
 	AsyncCompact           *bool `json:"async_compact,omitempty"`
 	DeferredToolRetirement *bool `json:"deferred_tool_retirement,omitempty"`
+	IdleCompact            *bool `json:"idle_compact,omitempty"`
 	McpCatalogRefresh      *bool `json:"mcp_catalog_refresh,omitempty"`
 }
 
@@ -1621,6 +1622,7 @@ type SessionConfigurationPatch struct {
 }
 
 type SessionConfigurationRequest struct {
+	JobId           *string       `json:"job_id,omitempty"`
 	Model           *string       `json:"model,omitempty"`
 	ReasoningEffort *string       `json:"reasoning_effort,omitempty"`
 	RequestId       string        `json:"request_id"`
@@ -2369,11 +2371,18 @@ const (
 )
 
 type UsageSnapshot struct {
-	CachedInputTokens *int `json:"cached_input_tokens,omitempty"`
-	CompletionTokens  *int `json:"completion_tokens,omitempty"`
-	PromptTokens      *int `json:"prompt_tokens,omitempty"`
-	ReasoningTokens   *int `json:"reasoning_tokens,omitempty"`
-	TotalTokens       *int `json:"total_tokens,omitempty"`
+	CacheWrite1hTokens         *int  `json:"cache_write_1h_tokens,omitempty"`
+	CacheWrite1hTokensReported *bool `json:"cache_write_1h_tokens_reported,omitempty"`
+	CacheWrite5mTokens         *int  `json:"cache_write_5m_tokens,omitempty"`
+	CacheWrite5mTokensReported *bool `json:"cache_write_5m_tokens_reported,omitempty"`
+	CacheWriteTokens           *int  `json:"cache_write_tokens,omitempty"`
+	CacheWriteTokensReported   *bool `json:"cache_write_tokens_reported,omitempty"`
+	CachedInputTokens          *int  `json:"cached_input_tokens,omitempty"`
+	CachedInputTokensReported  *bool `json:"cached_input_tokens_reported,omitempty"`
+	CompletionTokens           *int  `json:"completion_tokens,omitempty"`
+	PromptTokens               *int  `json:"prompt_tokens,omitempty"`
+	ReasoningTokens            *int  `json:"reasoning_tokens,omitempty"`
+	TotalTokens                *int  `json:"total_tokens,omitempty"`
 }
 
 type UseModelRequest struct {

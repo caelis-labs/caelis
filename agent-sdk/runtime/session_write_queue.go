@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 
@@ -24,7 +25,14 @@ type sessionWriteTicket struct {
 	admitted bool
 }
 
+var errSessionWriteBusy = errors.New("runtime: Session writer is busy")
+
 func (q *sessionWriteQueue) acquire(ctx context.Context, ref session.SessionRef) (func(), error) {
+	return q.acquireIf(ctx, ref, true)
+}
+
+// acquireIf lets speculative idle work decline without joining the foreground queue.
+func (q *sessionWriteQueue) acquireIf(ctx context.Context, ref session.SessionRef, wait bool) (func(), error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -42,6 +50,10 @@ func (q *sessionWriteQueue) acquire(ctx context.Context, ref session.SessionRef)
 		q.tails = map[string]*sessionWriteTicket{}
 	}
 	predecessor := q.tails[key]
+	if !wait && predecessor != nil {
+		q.mu.Unlock()
+		return nil, errSessionWriteBusy
+	}
 	ticket.previous = predecessor
 	if predecessor != nil {
 		predecessor.next = ticket

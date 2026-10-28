@@ -376,6 +376,13 @@ func (r *sessionRuntimeRegistry) activateSessionTracked(
 	}
 	runtime := &sessionRuntime{sessionID: sessionID, workspace: workspace}
 	activity := sessionRuntimeActivity{
+		retainIdleWork: func(ref session.SessionRef) (func(), bool) {
+			release := r.retainRuntimeWorkKind(runtime, ref, true)
+			return release, release != nil
+		},
+		idleQuiet: func(ctx context.Context, ref session.SessionRef) (bool, error) {
+			return r.idleCompactionQuiet(ctx, runtime, ref)
+		},
 		retainWork: func(ref session.SessionRef) func() {
 			return r.retainRuntimeWork(runtime, ref)
 		},
@@ -583,6 +590,9 @@ func (r *sessionRuntimeRegistry) acquireControlRuntime(
 // r.mu and owns the returned idempotent release function.
 func (r *sessionRuntimeRegistry) retainRuntimeLocked(runtime *sessionRuntime) func() {
 	r.cancelIdleReleaseLocked(runtime)
+	if runtime.instance != nil {
+		runtime.instance.idleCompaction.cancel()
+	}
 	if runtime.inUse == 0 {
 		runtime.usesIdle = make(chan struct{})
 	}
@@ -652,15 +662,26 @@ func (r *sessionRuntimeRegistry) retainRuntimeWork(
 	runtime *sessionRuntime,
 	ref session.SessionRef,
 ) func() {
-	if r == nil || runtime == nil {
+	release := r.retainRuntimeWorkKind(runtime, ref, false)
+	if release == nil {
 		return func() {}
+	}
+	return release
+}
+
+func (r *sessionRuntimeRegistry) retainRuntimeWorkKind(runtime *sessionRuntime, ref session.SessionRef, idle bool) func() {
+	if r == nil || runtime == nil {
+		return nil
 	}
 	sessionID := strings.TrimSpace(ref.SessionID)
 	r.mu.Lock()
 	if sessionID == "" || sessionID != runtime.sessionID ||
 		r.sessions[sessionID] != runtime || runtime.releasing || r.closed {
 		r.mu.Unlock()
-		return func() {}
+		return nil
+	}
+	if !idle && runtime.instance != nil {
+		runtime.instance.idleCompaction.cancel()
 	}
 	if runtime.workRefs == 0 {
 		runtime.workIdle = make(chan struct{})
@@ -1021,6 +1042,9 @@ func (r *sessionRuntimeRegistry) closeAdmission(ctx context.Context) ([]*session
 	r.mu.Lock()
 	r.closed = true
 	for _, runtime := range r.sessions {
+		if runtime.instance != nil {
+			runtime.instance.idleCompaction.stop()
+		}
 		r.cancelIdleReleaseLocked(runtime)
 	}
 	buildsIdle := r.buildsIdle

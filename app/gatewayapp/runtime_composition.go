@@ -69,6 +69,9 @@ type runtimeComposition struct {
 	capabilityUpdated  func(sessionprofile.Configuration)
 	pluginCacheRelease func() error
 	retainRuntimeWork  func(session.SessionRef) func()
+	retainIdleWork     func(session.SessionRef) (func(), bool)
+	idleQuiet          func(context.Context, session.SessionRef) (bool, error)
+	idleCompaction     *idleCompactionCoordinator
 	runtimeTaskChanged func(session.SessionRef)
 	taskCommitted      func(*task.Entry)
 }

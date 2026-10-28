@@ -6,6 +6,7 @@ import (
 	"iter"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -13,11 +14,14 @@ import (
 // Invocation is one actual provider attempt. It contains no prompt or response
 // text. A receipt at attempt termination does not prove crash-time completeness.
 type Invocation struct {
-	ID       string
-	Provider string
-	Model    string
-	Usage    Usage
-	Outcome  string
+	ID string
+	// StartedAt is captured once immediately before this actual provider attempt.
+	StartedAt  time.Time
+	FinishedAt time.Time
+	Provider   string
+	Model      string
+	Usage      Usage
+	Outcome    string
 }
 
 type invocationObserverKey struct{}
@@ -78,6 +82,27 @@ func WithInvocationAdmission(ctx context.Context, admit func(context.Context, *R
 	return context.WithValue(ctx, invocationAdmissionKey{}, admit)
 }
 
+type invocationStartKey struct{}
+
+// WithInvocationStart installs a fallible pre-dispatch hook after admission and
+// request preparation. The fixed identity is reserved before provider execution.
+// Rejection sends no provider request and emits no terminal invocation receipt.
+func WithInvocationStart(ctx context.Context, start func(context.Context, Invocation, *Request) error) context.Context {
+	if start == nil {
+		return ctx
+	}
+	if parent, ok := ctx.Value(invocationStartKey{}).(func(context.Context, Invocation, *Request) error); ok {
+		next := start
+		start = func(ctx context.Context, in Invocation, req *Request) error {
+			if err := parent(ctx, in, req); err != nil {
+				return err
+			}
+			return next(ctx, in, req)
+		}
+	}
+	return context.WithValue(ctx, invocationStartKey{}, start)
+}
+
 // InvocationTracker is implemented by request gates and retry wrappers that
 // delegate accounting to their actual provider attempts rather than counting
 // their own admission or orchestration as an attempt.
@@ -102,7 +127,8 @@ func Generate(ctx context.Context, llm LLM, req *Request) iter.Seq2[*StreamEvent
 	}
 	admit, _ := ctx.Value(invocationAdmissionKey{}).(func(context.Context, *Request) error)
 	observer, _ := ctx.Value(invocationObserverKey{}).(func(Invocation))
-	if admit == nil && observer == nil {
+	start, _ := ctx.Value(invocationStartKey{}).(func(context.Context, Invocation, *Request) error)
+	if admit == nil && observer == nil && start == nil {
 		return generatePrepared(ctx, llm, CloneRequest(req))
 	}
 	return func(yield func(*StreamEvent, error) bool) {
@@ -116,22 +142,31 @@ func Generate(ctx context.Context, llm LLM, req *Request) iter.Seq2[*StreamEvent
 				return
 			}
 		}
-		if observer == nil {
-			for event, err := range generatePrepared(ctx, llm, CloneRequest(req)) {
-				if !yield(event, err) {
-					return
-				}
-			}
+		prepared := CloneRequest(req)
+		if err := prepareRequestImages(ctx, prepared); err != nil {
+			yield(nil, err)
 			return
 		}
-		receipt := Invocation{ID: uuid.NewString(), Model: strings.TrimSpace(llm.Name()), Outcome: "failed"}
-		usage := &invocationUsage{}
-		attemptCtx := context.WithValue(ctx, invocationUsageKey{}, usage)
+		if err := ctx.Err(); err != nil {
+			yield(nil, err)
+			return
+		}
+		receipt := Invocation{ID: uuid.NewString(), Model: strings.TrimSpace(llm.Name()), StartedAt: time.Now()}
 		if provider, ok := llm.(interface{ ProviderName() string }); ok {
 			receipt.Provider = strings.TrimSpace(provider.ProviderName())
 		}
+		if start != nil {
+			if err := start(ctx, receipt, CloneRequest(prepared)); err != nil {
+				yield(nil, err)
+				return
+			}
+		}
+		receipt.Outcome = "failed"
+		usage := &invocationUsage{}
+		attemptCtx := context.WithValue(ctx, invocationUsageKey{}, usage)
 		var cause error
 		defer func() {
+			receipt.FinishedAt = time.Now()
 			usage.mu.Lock()
 			receipt.Usage = usage.latest
 			usage.mu.Unlock()
@@ -142,7 +177,7 @@ func Generate(ctx context.Context, llm LLM, req *Request) iter.Seq2[*StreamEvent
 				observer(receipt)
 			}
 		}()
-		for event, err := range generatePrepared(attemptCtx, llm, CloneRequest(req)) {
+		for event, err := range llm.Generate(attemptCtx, prepared) {
 			if event != nil && event.Response != nil {
 				cloned := *event
 				response := *event.Response
@@ -174,5 +209,5 @@ func Generate(ctx context.Context, llm LLM, req *Request) iter.Seq2[*StreamEvent
 // IsReported distinguishes an omitted measurement from an explicit zero. The
 // nonzero fallback preserves providers written before Reported was introduced.
 func (u Usage) IsReported() bool {
-	return u.Reported || u.PromptTokens != 0 || u.CachedInputTokens != 0 || u.CompletionTokens != 0 || u.ReasoningTokens != 0 || u.TotalTokens != 0 || u.CostMicros != 0
+	return u.Reported || u.CacheWriteTokens != 0 || u.CacheWrite5mTokens != 0 || u.CacheWrite1hTokens != 0 || u.CachedInputTokensReported || u.CacheWriteTokensReported || u.CacheWrite5mTokensReported || u.CacheWrite1hTokensReported || u.PromptTokens != 0 || u.CachedInputTokens != 0 || u.CompletionTokens != 0 || u.ReasoningTokens != 0 || u.TotalTokens != 0 || u.CostMicros != 0
 }

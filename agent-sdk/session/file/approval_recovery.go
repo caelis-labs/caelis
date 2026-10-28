@@ -148,7 +148,7 @@ func (s *Store) SettlePendingApproval(
 		if !session.PendingApprovalMatches(current, req) {
 			return nil
 		}
-		if err := validateFileMutationGuard(activeDocumentFence(doc), req.MutationGuard); err != nil {
+		if err := authorizeDocumentMutation(&doc, req.MutationGuard); err != nil {
 			return err
 		}
 		if err := session.CheckExpectedRevision(doc.Session, req.ExpectedRevision); err != nil {

@@ -25,6 +25,7 @@ func (r *sessionRuntimeInstance) Quiesce(ctx context.Context) error {
 		ctx = context.Background()
 	}
 	r.closing.Store(true)
+	r.idleCompaction.stop()
 	var gatewayErr error
 	if gateway := r.currentGateway(); gateway != nil {
 		gatewayErr = gateway.Quiesce(ctx)
@@ -33,5 +34,5 @@ func (r *sessionRuntimeInstance) Quiesce(ctx context.Context) error {
 	if r.acpControlPlane != nil {
 		childErr = r.acpControlPlane.Quiesce(ctx)
 	}
-	return errors.Join(gatewayErr, childErr)
+	return errors.Join(gatewayErr, childErr, r.idleCompaction.drain(ctx))
 }

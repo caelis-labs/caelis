@@ -80,7 +80,7 @@ func TestCollectCompactionResponseTerminalReasons(t *testing.T) {
 func TestCollectCompactionResponseUnreportedLogs(t *testing.T) {
 	var logs bytes.Buffer
 	previous := slog.Default()
-	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
 	defer slog.SetDefault(previous)
 	response := compactionTerminalResponse(model.FinishReasonUnknown)
 	response.FinishReasonReported = false

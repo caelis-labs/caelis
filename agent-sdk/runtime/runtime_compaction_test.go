@@ -1079,10 +1079,11 @@ func TestRuntimeCompactionPreservesDeferredMCPToolVisibility(t *testing.T) {
 			Description: "Create calendar events",
 			InputSchema: map[string]any{"type": "object"},
 			Metadata: map[string]any{
-				tool.MetadataToolKind:  tool.MetadataToolKindMCP,
-				tool.MetadataPluginID:  "calendar",
-				tool.MetadataMCPServer: "demo",
-				tool.MetadataMCPTool:   "create_event",
+				tool.MetadataToolKind:             tool.MetadataToolKindMCP,
+				tool.MetadataPluginID:             "calendar",
+				tool.MetadataMCPServer:            "demo",
+				tool.MetadataMCPTool:              "create_event",
+				tool.MetadataMCPSourceFingerprint: "fixture-v1",
 			},
 		},
 	}
@@ -1094,6 +1095,7 @@ func TestRuntimeCompactionPreservesDeferredMCPToolVisibility(t *testing.T) {
 	appendTestEvent(t, sessions, activeSession.SessionRef, &session.Event{
 		Type:       session.EventTypeToolResult,
 		Visibility: session.VisibilityCanonical,
+		Meta:       map[string]any{tool.MetadataToolExposure: tool.ExposureState{Version: 1, Active: []tool.Binding{tool.BindingForDefinition(mcpTool.Definition())}}},
 		Tool: &session.EventTool{
 			ID:     "call-search",
 			Name:   tool.ToolSearchToolName,
@@ -1168,7 +1170,7 @@ func TestRuntimeCompactionPreservesDeferredMCPToolVisibility(t *testing.T) {
 	if _, err := drainRunnerEvents(t, run.Handle); err != nil {
 		t.Fatalf("runner error = %v", err)
 	}
-	if got, want := toolNamesFromRequestForTest(probe.last), []string{tool.ToolSearchToolName, mcpToolName}; !slices.Equal(got, want) {
+	if got, want := toolNamesFromRequestForTest(probe.last), []string{tool.ToolSearchToolName, mcpToolName, tool.RetireToolName}; !slices.Equal(got, want) {
 		t.Fatalf("post-compact request tools = %v, want %v", got, want)
 	}
 }

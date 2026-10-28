@@ -128,7 +128,7 @@ func TestRuntimeLateMCPUsesPolicyAndExecutionJournal(t *testing.T) {
 			if invoked != want {
 				t.Fatalf("calls=%d want %d", invoked, want)
 			}
-			if len(llm.requests) != 3 || len(llm.requests[0].Tools) != 1 || len(llm.requests[1].Tools) != 2 {
+			if len(llm.requests) != 3 || len(llm.requests[0].Tools) != 1 || len(llm.requests[1].Tools) != 3 {
 				t.Fatalf("tool declarations=%#v", llm.requests)
 			}
 			journaled := false

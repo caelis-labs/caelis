@@ -13,13 +13,14 @@ import (
 type modelRequestAuthorityKey struct{}
 
 // Retain a request snapshot while background generation or synchronous recovery
-// uses its model and validator. References belong to this Turn; the original
-// snapshot remains the sole owner of the provider release.
+// uses its model and validator. Idle handoff retains this only until it obtains
+// an independent snapshot from the resolver; it does not reuse Turn admission.
 type modelRequestAuthority struct {
-	epoch    string
-	admit    func(context.Context, agent.ModelRequestAdmission) error
-	validate func(context.Context) (func(), error)
-	catalog  tool.Source
+	epoch       string
+	admit       func(context.Context, agent.ModelRequestAdmission) error
+	validate    func(context.Context) (func(), error)
+	catalog     tool.Source
+	resolveIdle agent.ModelRequestResolver
 	// Runtime guards protect synchronous commits even without a parent guard.
 	// They cannot establish the embedding authority required for speculation.
 	canSpeculate bool
@@ -39,7 +40,7 @@ func (r *Runtime) captureRequestAuthority(parent *modelRequestAuthority) *modelR
 		Revision: parent.epoch, Validate: parent.validate, DeferredTools: parent.catalog,
 	})
 	return &modelRequestAuthority{epoch: snapshot.Revision, validate: snapshot.Validate,
-		admit: parent.admit, canSpeculate: parent.validate != nil, refs: 1, release: parent.retain()}
+		admit: parent.admit, catalog: parent.catalog, resolveIdle: parent.resolveIdle, canSpeculate: parent.validate != nil, refs: 1, release: parent.retain()}
 }
 
 func (a *modelRequestAuthority) retain() func() {

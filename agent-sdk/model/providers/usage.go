@@ -51,7 +51,7 @@ func (u openAICompatUsage) toKernelUsage() model.Usage {
 
 func (u openAICompatUsage) toKernelUsageOr(fallback model.Usage) model.Usage {
 	out := u.toKernelUsage()
-	if !out.Reported && out.PromptTokens == 0 && out.CachedInputTokens == 0 && out.CompletionTokens == 0 && out.ReasoningTokens == 0 && out.TotalTokens == 0 {
+	if !out.IsReported() {
 		return fallback
 	}
 	return out
@@ -105,7 +105,7 @@ func reportedTokenFields(data []byte) bool {
 	if json.Unmarshal(data, &fields) != nil {
 		return false
 	}
-	for _, key := range []string{"prompt_tokens", "completion_tokens", "total_tokens", "input_tokens", "output_tokens", "cached_tokens", "prompt_cache_hit_tokens", "reasoning_tokens"} {
+	for _, key := range []string{"prompt_tokens", "completion_tokens", "total_tokens", "input_tokens", "output_tokens", "cached_tokens", "prompt_cache_hit_tokens", "reasoning_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"} {
 		if value, ok := fields[key]; ok && string(value) != "null" {
 			return true
 		}

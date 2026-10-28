@@ -255,7 +255,9 @@ func (s *Store) validateCatalogVersion(ctx context.Context, session string, cand
 // mutex used for configuration CAS, and records its revision and canonical IDs.
 // A stale snapshot is never silently admitted under a newer profile.
 func (s *Store) AdmitRequest(ctx context.Context, scope Scope, session string, request RequestConfiguration) error {
-	if request.Revision == 0 || !validID(request.RequestID) || !validID(request.TurnID) || !validID(request.Model) || !validID(request.ToolsVersion) {
+	validTurn := validID(request.TurnID) && request.JobID == ""
+	validJob := validID(request.JobID) && request.TurnID == ""
+	if request.Revision == 0 || !validID(request.RequestID) || (!validTurn && !validJob) || !validID(request.Model) || !validID(request.ToolsVersion) {
 		return ErrInvalid
 	}
 	s.mu.Lock()

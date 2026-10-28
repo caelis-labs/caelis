@@ -858,6 +858,7 @@ export interface ExperimentalSnapshot {
 export interface ExperimentalValues {
   async_compact?: boolean;
   deferred_tool_retirement?: boolean;
+  idle_compact?: boolean;
   mcp_catalog_refresh?: boolean;
 }
 
@@ -1500,7 +1501,14 @@ export interface SDKMetadata {
 }
 
 export interface SDKUsageMetadata {
+  cache_write_1h_tokens?: Uint64Decimal;
+  cache_write_1h_tokens_reported?: boolean;
+  cache_write_5m_tokens?: Uint64Decimal;
+  cache_write_5m_tokens_reported?: boolean;
+  cache_write_tokens?: Uint64Decimal;
+  cache_write_tokens_reported?: boolean;
   cached_input_tokens?: Uint64Decimal;
+  cached_input_tokens_reported?: boolean;
   completion_tokens?: Uint64Decimal;
   context_window_tokens?: Uint64Decimal;
   cost_micros?: Uint64Decimal;
@@ -1612,6 +1620,7 @@ export interface SessionConfigurationPatch {
 }
 
 export interface SessionConfigurationRequest {
+  job_id?: string;
   model?: string;
   reasoning_effort?: string;
   request_id: string;
@@ -2358,7 +2367,14 @@ export interface UsageCost {
 }
 
 export interface UsageMetadata {
+  cache_write_1h_tokens?: Uint64Decimal;
+  cache_write_1h_tokens_reported?: boolean;
+  cache_write_5m_tokens?: Uint64Decimal;
+  cache_write_5m_tokens_reported?: boolean;
+  cache_write_tokens?: Uint64Decimal;
+  cache_write_tokens_reported?: boolean;
   cached_input_tokens?: Uint64Decimal;
+  cached_input_tokens_reported?: boolean;
   completion_tokens?: Uint64Decimal;
   context_window_tokens?: Uint64Decimal;
   prompt_tokens?: Uint64Decimal;
@@ -2370,7 +2386,14 @@ export interface UsageMetadata {
 export type UsageSemantics = "context_gauge" | "provider_usage";
 
 export interface UsageSnapshot {
+  cache_write_1h_tokens?: number;
+  cache_write_1h_tokens_reported?: boolean;
+  cache_write_5m_tokens?: number;
+  cache_write_5m_tokens_reported?: boolean;
+  cache_write_tokens?: number;
+  cache_write_tokens_reported?: boolean;
   cached_input_tokens?: number;
+  cached_input_tokens_reported?: boolean;
   completion_tokens?: number;
   prompt_tokens?: number;
   reasoning_tokens?: number;

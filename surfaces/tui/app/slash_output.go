@@ -262,12 +262,18 @@ func slashHelpGroupTitle(item controlprompt.CommandHelpItem) string {
 }
 
 func renderSlashTokenUsage(usage promptview.TokenUsageView) []slashOutputLine {
-	table := [][]string{{"Scope", "Total", "Input", "Cached", "Output"}}
+	table := [][]string{{"Scope", "Total", "Input", "Cache read", "Output"}}
+	if usage.ShowCacheWrite {
+		table[0] = append(table[0], "Cache write")
+	}
 	if usage.ShowReasoning {
 		table[0] = append(table[0], "Reasoning")
 	}
 	for _, row := range usage.Rows {
 		values := []string{row.Scope, row.Total, row.Input, row.Cached, row.Output}
+		if usage.ShowCacheWrite {
+			values = append(values, row.CacheWrite)
+		}
 		if usage.ShowReasoning {
 			values = append(values, row.Reasoning)
 		}

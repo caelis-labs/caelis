@@ -698,6 +698,7 @@ func compactIntegerKeys() []string {
 func usageMetadataIntegerKeys(includeCost bool) []string {
 	keys := []string{
 		"prompt_tokens", "cached_input_tokens", "completion_tokens",
+		"cache_write_tokens", "cache_write_5m_tokens", "cache_write_1h_tokens",
 		"reasoning_tokens", "total_tokens", "context_window_tokens",
 	}
 	if includeCost {

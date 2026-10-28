@@ -32,7 +32,7 @@ func (r *Runtime) wrapModelRequestResolver(ctx context.Context, active session.S
 		bound.ResolveModelRequest = nil
 		prepareCtx := ctx
 		if r.compaction.Enabled {
-			authority := &modelRequestAuthority{epoch: snapshot.Revision, refs: 1, release: snapshot.Release, validate: snapshot.Validate, catalog: snapshot.DeferredTools}
+			authority := &modelRequestAuthority{epoch: snapshot.Revision, refs: 1, release: snapshot.Release, validate: snapshot.Validate, catalog: snapshot.DeferredTools, resolveIdle: source}
 			if admit := snapshot.Admit; admit != nil {
 				authority.admit = func(ctx context.Context, admission agent.ModelRequestAdmission) error {
 					admission.TurnID = turnID

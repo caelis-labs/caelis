@@ -14,7 +14,9 @@ import (
 // CompactionConfig controls codex-style checkpoint compaction.
 type CompactionConfig struct {
 	// Async opts into turn-scoped speculative compaction. The zero value is off.
-	Async                       AsyncCompactionConfig
+	Async AsyncCompactionConfig
+	// Idle opts into Host-coordinated compaction after successful Turn completion.
+	Idle                        IdleCompactionConfig
 	Enabled                     bool
 	WatermarkRatio              float64
 	ForceWatermarkRatio         float64

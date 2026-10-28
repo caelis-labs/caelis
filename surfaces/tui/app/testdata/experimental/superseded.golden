@@ -6,6 +6,7 @@
 │  Current Runtime: all off.                                                                       │
 │                                                                                                  │
 │  › [ ] Async compact              Prepare a context checkpoint in the background.                │
+│    [ ] Idle compact               Compact completed context while idle.                          │
 │                                                                                                  │
 │  Save/read error: saved values changed before readback; your selections are retained             │
 │                                                                                                  │

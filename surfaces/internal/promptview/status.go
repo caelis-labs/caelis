@@ -117,8 +117,9 @@ func (v RateLimitUsageView) Empty() bool { return len(v.Rows) == 0 }
 
 // TokenUsageView is the canonical display model for session token usage.
 type TokenUsageView struct {
-	Rows          []TokenUsageViewRow `json:"rows,omitempty"`
-	ShowReasoning bool                `json:"show_reasoning,omitempty"`
+	Rows           []TokenUsageViewRow `json:"rows,omitempty"`
+	ShowCacheWrite bool                `json:"show_cache_write,omitempty"`
+	ShowReasoning  bool                `json:"show_reasoning,omitempty"`
 }
 
 // Empty reports whether the usage view has no visible rows.
@@ -128,12 +129,13 @@ func (v TokenUsageView) Empty() bool {
 
 // TokenUsageViewRow carries preformatted token usage cells.
 type TokenUsageViewRow struct {
-	Scope     string `json:"scope,omitempty"`
-	Total     string `json:"total,omitempty"`
-	Input     string `json:"input,omitempty"`
-	Cached    string `json:"cached,omitempty"`
-	Output    string `json:"output,omitempty"`
-	Reasoning string `json:"reasoning,omitempty"`
+	Scope      string `json:"scope,omitempty"`
+	Total      string `json:"total,omitempty"`
+	Input      string `json:"input,omitempty"`
+	CacheWrite string `json:"cache_write,omitempty"`
+	Cached     string `json:"cached,omitempty"`
+	Output     string `json:"output,omitempty"`
+	Reasoning  string `json:"reasoning,omitempty"`
 }
 
 // StatusDisplayFromSnapshot derives the canonical display model for /status.
@@ -411,22 +413,24 @@ func tokenUsageView(rows []tokenUsageStatusRow) TokenUsageView {
 		return TokenUsageView{}
 	}
 	showReasoning := false
+	showCacheWrite := false
 	for _, row := range rows {
+		showCacheWrite = showCacheWrite || row.usage.CacheWriteTokensReported || row.usage.CacheWriteTokens > 0
 		if normalizedUsageSnapshot(row.usage).ReasoningTokens > 0 {
 			showReasoning = true
-			break
 		}
 	}
-	view := TokenUsageView{Rows: make([]TokenUsageViewRow, 0, len(rows)), ShowReasoning: showReasoning}
+	view := TokenUsageView{Rows: make([]TokenUsageViewRow, 0, len(rows)), ShowReasoning: showReasoning, ShowCacheWrite: showCacheWrite}
 	for _, row := range rows {
 		usage := normalizedUsageSnapshot(row.usage)
 		view.Rows = append(view.Rows, TokenUsageViewRow{
-			Scope:     row.scope,
-			Total:     formatTokenUsageNumber(usage.TotalTokens),
-			Input:     formatTokenUsageNumber(usage.PromptTokens),
-			Cached:    formatTokenUsageNumber(usage.CachedInputTokens),
-			Output:    formatTokenUsageNumber(usage.CompletionTokens),
-			Reasoning: formatTokenUsageNumber(usage.ReasoningTokens),
+			Scope:      row.scope,
+			Total:      formatTokenUsageNumber(usage.TotalTokens),
+			Input:      formatTokenUsageNumber(usage.PromptTokens),
+			Cached:     formatCacheMeasurement(usage.CachedInputTokens, usage.CachedInputTokensReported),
+			CacheWrite: formatCacheWrite(usage),
+			Output:     formatTokenUsageNumber(usage.CompletionTokens),
+			Reasoning:  formatTokenUsageNumber(usage.ReasoningTokens),
 		})
 	}
 	return view
@@ -441,7 +445,10 @@ func FormatTokenUsageDisplay(usage TokenUsageView) string {
 }
 
 func tokenUsagePlainRows(usage TokenUsageView) [][]string {
-	header := []string{"Scope", "Total", "Input", "Cached", "Output"}
+	header := []string{"Scope", "Total", "Input", "Cache read", "Output"}
+	if usage.ShowCacheWrite {
+		header = append(header, "Cache write")
+	}
 	if usage.ShowReasoning {
 		header = append(header, "Reasoning")
 	}
@@ -449,6 +456,9 @@ func tokenUsagePlainRows(usage TokenUsageView) [][]string {
 	rows = append(rows, header)
 	for _, row := range usage.Rows {
 		values := []string{row.Scope, row.Total, row.Input, row.Cached, row.Output}
+		if usage.ShowCacheWrite {
+			values = append(values, row.CacheWrite)
+		}
 		if usage.ShowReasoning {
 			values = append(values, row.Reasoning)
 		}
@@ -498,6 +508,7 @@ func normalizedUsageSnapshot(usage controlstatus.UsageSnapshot) controlstatus.Us
 func usageSnapshotZero(usage controlstatus.UsageSnapshot) bool {
 	return usage.PromptTokens == 0 &&
 		usage.CachedInputTokens == 0 &&
+		usage.CacheWriteTokens == 0 && usage.CacheWrite5mTokens == 0 && usage.CacheWrite1hTokens == 0 && !usage.CachedInputTokensReported && !usage.CacheWriteTokensReported && !usage.CacheWrite5mTokensReported && !usage.CacheWrite1hTokensReported &&
 		usage.CompletionTokens == 0 &&
 		usage.ReasoningTokens == 0 &&
 		usage.TotalTokens == 0
@@ -570,4 +581,15 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+// A missing measurement is not an observed zero.
+func formatCacheWrite(usage controlstatus.UsageSnapshot) string {
+	return formatCacheMeasurement(usage.CacheWriteTokens, usage.CacheWriteTokensReported)
+}
+func formatCacheMeasurement(tokens int, reported bool) string {
+	if tokens == 0 && !reported {
+		return "-"
+	}
+	return strconv.Itoa(tokens)
 }

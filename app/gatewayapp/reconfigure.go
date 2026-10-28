@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/judgment"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
@@ -131,6 +132,7 @@ type gatewayRuntimeBundle struct {
 	Gateway                     *kernelimpl.Gateway
 	Exec                        sandbox.Runtime
 	Engine                      *runtime.Runtime
+	IdleCompaction              *idleCompactionCoordinator
 	Placement                   controlplane.PlacementExecutor
 	ACPControlPlane             *acpassembly.ControlPlane
 	MCP                         *mcp.Manager
@@ -151,7 +153,16 @@ func (b *gatewayRuntimeBundle) Close() {
 		closeIfSupported(b.Gateway)
 	}
 	b.Gateway = nil
+	if b.IdleCompaction != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		err := b.IdleCompaction.drain(ctx)
+		cancel()
+		if err != nil {
+			return
+		}
+	}
 	if b.Engine != nil {
+		b.Engine.DiscardIdleCompactionSources()
 		closeIfSupported(b.Engine)
 	}
 	b.Engine = nil
@@ -374,6 +385,7 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 	estimatedPrefixTokens := estimateModelPromptPrefixTokens(effectiveBaseMetadata, tools)
 	compactionCfg := defaultCompactionConfig(runtimeCfg.ContextWindow)
 	compactionCfg.Async.Enabled = runtimeCfg.Experimental[experimental.AsyncCompact]
+	compactionCfg.Idle.Enabled = runtimeCfg.Experimental[experimental.IdleCompact]
 	compactionCfg.EstimatedPromptPrefixTokens = estimatedPrefixTokens
 	contextRouter, err := controlplane.NewContextRouter(s.sessions)
 	if err != nil {
@@ -571,6 +583,7 @@ func (s *runtimeComposition) swapGatewayRuntime(bundle *gatewayRuntimeBundle) {
 	s.gateway = bundle.Gateway
 	s.exec = bundle.Exec
 	s.engine = bundle.Engine
+	s.idleCompaction = bundle.IdleCompaction
 	s.guardian = bundle.Guardian
 	bundle.Guardian = nil
 	s.placement = bundle.Placement

@@ -217,7 +217,28 @@ func usagePayload(usage model.Usage) map[string]any {
 	if usage.PromptTokens != 0 {
 		out["prompt_tokens"] = usage.PromptTokens
 	}
-	if usage.CachedInputTokens != 0 {
+	if usage.CacheWriteTokens != 0 || usage.CacheWriteTokensReported {
+		out["cache_write_tokens"] = usage.CacheWriteTokens
+	}
+	if usage.CacheWrite5mTokens != 0 || usage.CacheWrite5mTokensReported {
+		out["cache_write_5m_tokens"] = usage.CacheWrite5mTokens
+	}
+	if usage.CacheWrite1hTokens != 0 || usage.CacheWrite1hTokensReported {
+		out["cache_write_1h_tokens"] = usage.CacheWrite1hTokens
+	}
+	if usage.CachedInputTokensReported {
+		out["cached_input_tokens_reported"] = true
+	}
+	if usage.CacheWriteTokensReported {
+		out["cache_write_tokens_reported"] = true
+	}
+	if usage.CacheWrite5mTokensReported {
+		out["cache_write_5m_tokens_reported"] = true
+	}
+	if usage.CacheWrite1hTokensReported {
+		out["cache_write_1h_tokens_reported"] = true
+	}
+	if usage.CachedInputTokens != 0 || usage.CachedInputTokensReported {
 		out["cached_input_tokens"] = usage.CachedInputTokens
 	}
 	if usage.CompletionTokens != 0 {

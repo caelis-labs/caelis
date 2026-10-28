@@ -210,3 +210,23 @@ func TestConfigurationSelectedNativeNamesAndExactCallbackIdentity(t *testing.T) 
 		t.Fatalf("explicitly empty native selection still reserved Read: %v", err)
 	}
 }
+
+func TestIdleRequestAdmissionUsesJobWithoutCompletedTurn(t *testing.T) {
+	store, _ := testStore(t)
+	owner := testOwner(t, store, 1)
+	binding := testBinding(t, store, owner, "idle-session")
+	req := admittedRequest(1, binding.Profile, "idle-request", "")
+	req.JobID = "idle-job"
+	if err := store.AdmitRequest(t.Context(), owner.Scope, binding.SessionID, req); err != nil {
+		t.Fatal(err)
+	}
+	current, err := store.Configuration(t.Context(), owner.Scope, binding.SessionID)
+	if err != nil || current.LastRequest == nil || current.LastRequest.JobID != "idle-job" || current.LastRequest.TurnID != "" {
+		t.Fatalf("attribution=%+v %v", current.LastRequest, err)
+	}
+	req.TurnID = "completed-turn"
+	assertError(t, store.AdmitRequest(t.Context(), owner.Scope, binding.SessionID, req), ErrInvalid)
+	req.TurnID = ""
+	req.JobID = ""
+	assertError(t, store.AdmitRequest(t.Context(), owner.Scope, binding.SessionID, req), ErrInvalid)
+}

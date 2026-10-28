@@ -16,6 +16,25 @@ func (r *Runtime) adoptAsyncCompaction(ctx context.Context, l *autoCompactGatedL
 	if ctx.Err() != nil || job.guard != session.RuntimeMutationGuard(ctx) {
 		return false, ctx.Err()
 	}
+	validator, ok := r.sessions.(session.MutationGuardValidator)
+	if !ok {
+		return false, nil
+	}
+	if err := validator.ValidateMutationGuard(ctx, l.sessionRef, job.guard); err != nil {
+		return false, err
+	}
+
+	adopted, err := r.adoptCompactionCandidate(ctx, l, job, lifecycleScopeFromContext(ctx).turnID, nil)
+	if err != nil || !adopted {
+		return adopted, err
+	}
+	if err := validator.ValidateMutationGuard(ctx, l.sessionRef, job.guard); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (r *Runtime) adoptCompactionCandidate(ctx context.Context, l *autoCompactGatedLLM, job *asyncCompactJob, turnID string, appendCheckpoint checkpointAppender) (bool, error) {
 	data, ok := compact.CompactEventDataFromEvent(job.result.CompactEvent)
 	delta := compactableEvents(mainInvocationEvents(job.source.Events))
 	_, baseData, _ := compact.LatestCompactEvent(job.source.Events)
@@ -26,14 +45,8 @@ func (r *Runtime) adoptAsyncCompaction(ctx context.Context, l *autoCompactGatedL
 		strings.TrimSpace(stripRuntimeContinuity(job.result.CompactText)) == "" {
 		return false, nil
 	}
-	validator, ok := r.sessions.(session.MutationGuardValidator)
-	if !ok {
-		return false, nil
-	}
-	if err := validator.ValidateMutationGuard(ctx, l.sessionRef, job.guard); err != nil {
-		return false, err
-	}
-	release, err := r.acquireSessionWrite(ctx, l.sessionRef)
+	// A grant-bound idle writer never queues behind existing foreground work.
+	release, err := r.sessionWrites.acquireIf(ctx, l.sessionRef, appendCheckpoint == nil)
 	if err != nil {
 		return false, err
 	}
@@ -63,8 +76,8 @@ func (r *Runtime) adoptAsyncCompaction(ctx context.Context, l *autoCompactGatedL
 	if estimatePromptEventsTokens(projected) >= estimatePromptEventsTokens(compact.PromptEventsFromLatestCompact(current)) {
 		return false, nil
 	}
-	_, err = r.persistCompactionArtifactsValidated(ctx, &loaded.Session, loaded, lifecycleScopeFromContext(ctx).turnID,
-		compact.Result{Compacted: true, CompactEvent: event}, job.validSource)
+	_, err = r.persistCompactionArtifactsUsing(ctx, &loaded.Session, loaded, turnID,
+		compact.Result{Compacted: true, CompactEvent: event}, job.validSource, appendCheckpoint)
 	if err != nil {
 		var stale *checkpointCatalogStaleError
 		if errors.As(err, &stale) {
@@ -76,9 +89,7 @@ func (r *Runtime) adoptAsyncCompaction(ctx context.Context, l *autoCompactGatedL
 		// fails this Turn; it must not mint a second checkpoint as a fallback.
 		return false, err
 	}
-	if err := validator.ValidateMutationGuard(ctx, l.sessionRef, job.guard); err != nil {
-		return false, err
-	}
+
 	return true, nil
 }
 

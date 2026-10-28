@@ -179,6 +179,11 @@ func (s *Store) writeTransaction(ctx context.Context, path string, record persis
 	if err := tmp.Close(); err != nil {
 		return err
 	}
+	if validate, ok := ctx.Value(idleCommitValidationKey{}).(func() error); ok {
+		if err := validate(); err != nil {
+			return err
+		}
+	}
 	if err := replaceFile(ctx, s.diagnostics, fileOperationReplaceTransaction, tmpName, path); err != nil {
 		return err
 	}

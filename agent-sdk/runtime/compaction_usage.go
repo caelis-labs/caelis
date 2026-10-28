@@ -203,25 +203,25 @@ func providerPromptBaselineTokens(meta map[string]any) (int, bool, bool) {
 		return 0, false, false
 	}
 	if usage := nestedMap(meta, "caelis", "sdk", "usage"); len(usage) > 0 {
-		if value, ok := intFromAny(usage["prompt_tokens"]); ok && value > 0 {
+		if value, ok := intFromAny(usage["prompt_tokens"]); ok && value >= 0 {
 			return providerPromptBaselineWithCachedInput(meta, usage, value), true, true
 		}
 		total, totalOK := intFromAny(usage["total_tokens"])
 		completion, completionOK := intFromAny(usage["completion_tokens"])
 		if totalOK && completionOK && total > 0 {
-			return providerPromptBaselineWithCachedInput(meta, usage, max(total-completion, 0)), true, true
+			return max(total-completion, 0), true, true
 		}
 		if totalOK && total > 0 {
 			return total, false, true
 		}
 	}
-	if value, ok := intFromAny(meta["prompt_tokens"]); ok && value > 0 {
+	if value, ok := intFromAny(meta["prompt_tokens"]); ok && value >= 0 {
 		return providerPromptBaselineWithCachedInput(meta, meta, value), true, true
 	}
 	total, totalOK := intFromAny(meta["total_tokens"])
 	completion, completionOK := intFromAny(meta["completion_tokens"])
 	if totalOK && completionOK && total > 0 {
-		return providerPromptBaselineWithCachedInput(meta, meta, max(total-completion, 0)), true, true
+		return max(total-completion, 0), true, true
 	}
 	if totalOK && total > 0 {
 		return total, false, true
@@ -230,7 +230,7 @@ func providerPromptBaselineTokens(meta map[string]any) (int, bool, bool) {
 }
 
 func providerPromptBaselineWithCachedInput(meta map[string]any, usage map[string]any, baseline int) int {
-	if baseline <= 0 || !providerUsageSeparatesCachedInputMeta(meta, usage) {
+	if baseline < 0 || !providerUsageSeparatesCachedInputMeta(meta, usage) {
 		return baseline
 	}
 	cached := firstPositiveIntFromAny(

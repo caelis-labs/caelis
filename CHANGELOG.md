@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+* Add independent, default-off idle checkpoint compaction with cancellable one-shot coordination, bounded Store commit authority and durable attempt accounting.
+* Add native Anthropic ephemeral five-minute prompt caching and cache read/write usage with missing-versus-zero presence.
+
+### Bug Fixes
+
+* Reject incomplete compaction summaries, preserve actual dispatched prefixes for speculative compaction, and count fully cached input once.
+* Make MCP refresh admission cancellable and preserve dynamic catalogs and duplicate-tool replay aliases.
+* Route Anthropic retries through Core admission and accounting instead of hidden SDK retries.
+
+### Behavior Changes
+
+* MCP catalog refresh and deferred tool retirement are always active. Legacy Control keys are accepted but ignored, including `deferred_tool_retirement: false`; the experimental editor exposes only async and idle compaction. Custom deferred sources must supply catalog validation for checkpoint adoption.
+
+
 ## [0.73.3](https://github.com/caelis-labs/caelis/compare/v0.73.2...v0.73.3) (2026-10-27)
 
 

@@ -475,7 +475,31 @@ func usageUpdateMeta(meta map[string]any, usage session.UsageSnapshot) map[strin
 	caelis["version"] = 1
 	usageMeta := map[string]any{}
 	setPositiveInt(usageMeta, "prompt_tokens", usage.PromptTokens)
-	setPositiveInt(usageMeta, "cached_input_tokens", usage.CachedInputTokens)
+	if usage.CachedInputTokens != 0 || usage.CachedInputTokensReported {
+		usageMeta["cached_input_tokens"] = usage.CachedInputTokens
+	}
+	if usage.CacheWriteTokens != 0 || usage.CacheWriteTokensReported {
+		usageMeta["cache_write_tokens"] = usage.CacheWriteTokens
+	}
+	if usage.CacheWrite5mTokens != 0 || usage.CacheWrite5mTokensReported {
+		usageMeta["cache_write_5m_tokens"] = usage.CacheWrite5mTokens
+	}
+	if usage.CacheWrite1hTokens != 0 || usage.CacheWrite1hTokensReported {
+		usageMeta["cache_write_1h_tokens"] = usage.CacheWrite1hTokens
+	}
+	if usage.CachedInputTokensReported {
+		usageMeta["cached_input_tokens_reported"] = true
+	}
+	if usage.CacheWriteTokensReported {
+		usageMeta["cache_write_tokens_reported"] = true
+	}
+	if usage.CacheWrite5mTokensReported {
+		usageMeta["cache_write_5m_tokens_reported"] = true
+	}
+	if usage.CacheWrite1hTokensReported {
+		usageMeta["cache_write_1h_tokens_reported"] = true
+	}
+
 	setPositiveInt(usageMeta, "completion_tokens", usage.CompletionTokens)
 	setPositiveInt(usageMeta, "reasoning_tokens", usage.ReasoningTokens)
 	setPositiveInt(usageMeta, "total_tokens", usage.TotalTokens)
@@ -495,7 +519,15 @@ func usageSnapshotFromMeta(meta map[string]any) *session.UsageSnapshot {
 		return nil
 	}
 	usage := session.UsageSnapshot{
-		PromptTokens:        intFromAny(usageMeta["prompt_tokens"]),
+		PromptTokens:               intFromAny(usageMeta["prompt_tokens"]),
+		CacheWriteTokens:           intFromAny(usageMeta["cache_write_tokens"]),
+		CacheWrite5mTokens:         intFromAny(usageMeta["cache_write_5m_tokens"]),
+		CacheWrite1hTokens:         intFromAny(usageMeta["cache_write_1h_tokens"]),
+		CachedInputTokensReported:  usageMeta["cached_input_tokens_reported"] == true,
+		CacheWriteTokensReported:   usageMeta["cache_write_tokens_reported"] == true,
+		CacheWrite5mTokensReported: usageMeta["cache_write_5m_tokens_reported"] == true,
+		CacheWrite1hTokensReported: usageMeta["cache_write_1h_tokens_reported"] == true,
+
 		CachedInputTokens:   intFromAny(usageMeta["cached_input_tokens"]),
 		CompletionTokens:    intFromAny(usageMeta["completion_tokens"]),
 		ReasoningTokens:     intFromAny(usageMeta["reasoning_tokens"]),
@@ -509,7 +541,7 @@ func usageSnapshotFromMeta(meta map[string]any) *session.UsageSnapshot {
 }
 
 func usageSnapshotEmpty(usage session.UsageSnapshot) bool {
-	return usage.PromptTokens == 0 &&
+	return usage.CacheWriteTokens == 0 && usage.CacheWrite5mTokens == 0 && usage.CacheWrite1hTokens == 0 && !usage.CachedInputTokensReported && !usage.CacheWriteTokensReported && !usage.CacheWrite5mTokensReported && !usage.CacheWrite1hTokensReported && usage.PromptTokens == 0 &&
 		usage.CachedInputTokens == 0 &&
 		usage.CompletionTokens == 0 &&
 		usage.ReasoningTokens == 0 &&
@@ -529,6 +561,12 @@ func intFromAny(value any) int {
 		return typed
 	case int64:
 		return int(typed)
+	case uint64:
+		// Control wire decodes decimal counters to uint64, never float64.
+		if typed <= uint64(maxInt()) {
+			return int(typed)
+		}
+		return 0
 	case float64:
 		return int(typed)
 	case json.Number:

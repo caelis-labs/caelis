@@ -67,6 +67,10 @@ model invocation. A trace with a normal terminal record is marked `complete`;
 a timeout prefix is retained and marked `partial_lower_bound` instead of being
 presented as complete billing usage. Every JSONL Envelope is also decoded by the
 repository's typed `wirev1` reader before the report can be complete.
+Cache reads and writes (including reported 5m/1h write subsets) are separate
+observed subtotals. Missing counters remain null, while reported zero remains
+zero. These breakdowns are not added to input or total tokens again; trace
+completeness does not imply every provider reported every cache counter.
 
 By default, `start.sh` also prepares two verifier-only cache services in Docker:
 an Apt-Cacher NG proxy for Debian indexes/packages and a local mirror of the

@@ -29,7 +29,7 @@ func TestValuesRejectUnknownAndNullWithoutLosingFalse(t *testing.T) {
 
 func TestCatalogOmitsLegacyFeatures(t *testing.T) {
 	definitions := Definitions()
-	if len(definitions) != 1 || definitions[0].ID != AsyncCompact {
+	if len(definitions) != 2 || definitions[0].ID != AsyncCompact || definitions[1].ID != IdleCompact {
 		t.Fatalf("catalog = %+v", definitions)
 	}
 	for _, enabled := range []bool{false, true} {
@@ -37,7 +37,7 @@ func TestCatalogOmitsLegacyFeatures(t *testing.T) {
 		if err := Validate(legacy); err != nil {
 			t.Fatal(err)
 		}
-		if got := Complete(legacy); !maps.Equal(got, Values{AsyncCompact: definitions[0].Default}) {
+		if got := Complete(legacy); !maps.Equal(got, Values{AsyncCompact: false, IdleCompact: false}) {
 			t.Fatalf("complete = %v", got)
 		}
 	}

@@ -163,7 +163,7 @@ func (r *Runtime) runAttempt(
 	}
 
 	var source *requestsource.Tracker
-	if r.compaction.Async.Enabled {
+	if r.compaction.Async.Enabled || r.compaction.Idle.Enabled {
 		ctx, source = requestsource.WithTracker(ctx, invocation.SourceEvents)
 	}
 	batch := make([]*session.Event, 0, 3)

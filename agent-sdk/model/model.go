@@ -761,6 +761,15 @@ type Request struct {
 
 // Usage reports model token usage on a best-effort basis.
 type Usage struct {
+	// Cache writes are an input breakdown already included in PromptTokens.
+	CacheWriteTokens           int  `json:"cache_write_tokens,omitempty"`
+	CacheWrite5mTokens         int  `json:"cache_write_5m_tokens,omitempty"`
+	CacheWrite1hTokens         int  `json:"cache_write_1h_tokens,omitempty"`
+	CachedInputTokensReported  bool `json:"cached_input_tokens_reported,omitempty"`
+	CacheWriteTokensReported   bool `json:"cache_write_tokens_reported,omitempty"`
+	CacheWrite5mTokensReported bool `json:"cache_write_5m_tokens_reported,omitempty"`
+	CacheWrite1hTokensReported bool `json:"cache_write_1h_tokens_reported,omitempty"`
+
 	// Reported marks explicitly supplied zero usage. Nonzero counters also
 	// imply availability; callers should use IsReported.
 	Reported          bool `json:"reported,omitempty"`

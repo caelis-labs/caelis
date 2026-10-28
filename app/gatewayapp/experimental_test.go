@@ -32,7 +32,7 @@ func TestExperimentalHTTPIndependentCombinationsAndActivation(t *testing.T) {
 	}
 	var previous string
 	var previousValues experimental.Values
-	for bits := 0; bits < 8; bits++ {
+	for bits := range 16 {
 		snapshot, err := client.ExperimentalFeatures(t.Context(), previous)
 		if err != nil {
 			t.Fatal(err)
@@ -44,8 +44,8 @@ func TestExperimentalHTTPIndependentCombinationsAndActivation(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		values := experimental.Values{experimental.AsyncCompact: bits&1 != 0}
-		requested := experimental.Values{experimental.AsyncCompact: bits&1 != 0, experimental.MCPRefresh: bits&2 != 0, experimental.ToolRetirement: bits&4 != 0}
+		values := experimental.Values{experimental.AsyncCompact: bits&1 != 0, experimental.IdleCompact: bits&8 != 0}
+		requested := experimental.Values{experimental.AsyncCompact: bits&1 != 0, experimental.IdleCompact: bits&8 != 0, experimental.MCPRefresh: bits&2 != 0, experimental.ToolRetirement: bits&4 != 0}
 		req := appserver.ExperimentalRequest{WriteBase: appserver.WriteBase{OperationID: fmt.Sprintf("experiments-%d", bits), ExpectedRevision: &revision}, Values: requested}
 		result, err := client.SetExperimentalFeatures(t.Context(), req)
 		if err != nil || result.Outcome != appserver.OutcomeCommitted {
@@ -164,7 +164,7 @@ func TestExperimentalLegacyStoredValuesAreIgnoredAndRemovedOnSave(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !maps.Equal(snapshot.Desired, experimental.Values{experimental.AsyncCompact: true}) {
+	if !maps.Equal(snapshot.Desired, experimental.Values{experimental.AsyncCompact: true, experimental.IdleCompact: false}) {
 		t.Fatalf("desired = %v", snapshot.Desired)
 	}
 	revision, err := strconv.ParseUint(snapshot.Revision, 10, 64)
@@ -184,7 +184,7 @@ func TestExperimentalLegacyStoredValuesAreIgnoredAndRemovedOnSave(t *testing.T) 
 	if err := json.Unmarshal(raw, &saved); err != nil {
 		t.Fatal(err)
 	}
-	if !maps.Equal(saved.Experimental, experimental.Values{experimental.AsyncCompact: true}) {
+	if !maps.Equal(saved.Experimental, experimental.Values{experimental.AsyncCompact: true, experimental.IdleCompact: false}) {
 		t.Fatalf("persisted = %v", saved.Experimental)
 	}
 	snapshot, err = client.ExperimentalFeatures(t.Context(), "")

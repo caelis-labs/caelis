@@ -67,7 +67,7 @@ func (a *workspaceConfigAssembler) assembleProfileSnapshot(ctx context.Context, 
 		activation:        &sessionRuntimeActivation{modelCatalog: a.deps.modelCatalog, sessionRef: active.SessionRef},
 		activeRuntime:     stackRuntimeConfig{Experimental: experimental.Complete(modelDocument.Experimental), ContextWindow: contextWindow, ApprovalMode: sessionprofile.EffectiveApprovalMode(binding.Profile)},
 		executionConfig:   sandbox.CloneExecutionConfig(active.ExecutionConfig),
-		retainRuntimeWork: activity.retainWork, runtimeTaskChanged: activity.taskChanged, taskCommitted: activity.taskCommitted,
+		retainRuntimeWork: activity.retainWork, retainIdleWork: activity.retainIdleWork, idleQuiet: activity.idleQuiet, runtimeTaskChanged: activity.taskChanged, taskCommitted: activity.taskCommitted,
 	}}
 	children := &applicationChildren{composition: &instance.runtimeComposition, binding: binding, active: active,
 		modelSnapshot: func(ctx context.Context) (AppConfig, *modelLookup, error) {
@@ -118,6 +118,7 @@ func (a *workspaceConfigAssembler) assembleProfileSnapshot(ctx context.Context, 
 	instance.activeRuntime.PolicyProfile = mode
 	compaction := defaultCompactionConfig(contextWindow)
 	compaction.Async.Enabled = instance.activeRuntime.Experimental[experimental.AsyncCompact]
+	compaction.Idle.Enabled = instance.activeRuntime.Experimental[experimental.IdleCompact]
 	// The complete tool set is independent of Turn source. An unavailable
 	// callback provenance is rejected during resolution, never silently widened.
 	estimateCapabilities, releaseEstimate, err := resolver.acquireCapabilities(ctx, configuration)
@@ -357,7 +358,7 @@ func (r *applicationTurnResolver) resolveModelRequest(ctx context.Context, sourc
 		},
 		Admit: func(ctx context.Context, request agent.ModelRequestAdmission) error {
 			err := store.AdmitRequest(ctx, r.binding.Scope, r.binding.SessionID, sessionprofile.RequestConfiguration{
-				Revision: configuration.Revision, RequestID: request.RequestID, TurnID: request.TurnID,
+				Revision: configuration.Revision, RequestID: request.RequestID, TurnID: request.TurnID, JobID: request.JobID,
 				Model: resolved.Model.Name(), ReasoningEffort: resolved.ReasoningEffort,
 				ServiceTier: configuration.Profile.ServiceTier, ToolsVersion: configuration.Profile.ToolsVersion,
 			})

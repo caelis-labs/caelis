@@ -115,3 +115,35 @@ func TestInvocationAdmissionRunsAtIteratorDispatch(t *testing.T) {
 		})
 	}
 }
+
+func TestInvocationStartReservesIdentityBeforeEachActualAttempt(t *testing.T) {
+	llm := &retryTestLLM{events: [][]*StreamEvent{{StreamEventFromResponse(&Response{TurnComplete: true, Usage: Usage{CacheWriteTokensReported: true}})}}}
+	var started []Invocation
+	var finished []Invocation
+	ctx := WithInvocationObserver(t.Context(), func(in Invocation) { finished = append(finished, in) })
+	ctx = WithInvocationStart(ctx, func(_ context.Context, in Invocation, _ *Request) error {
+		if in.ID == "" || in.StartedAt.IsZero() || in.Outcome != "" || !in.FinishedAt.IsZero() {
+			t.Fatalf("invalid reserved identity: %+v", in)
+		}
+		started = append(started, in)
+		return nil
+	})
+	for _, err := range Generate(ctx, llm, &Request{}) {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(started) != 1 || len(finished) != 1 || started[0].ID != finished[0].ID || !started[0].StartedAt.Equal(finished[0].StartedAt) || finished[0].FinishedAt.Before(started[0].StartedAt) || !finished[0].Usage.CacheWriteTokensReported {
+		t.Fatalf("start=%+v finish=%+v", started, finished)
+	}
+	denied := errors.New("accounting unavailable")
+	before := len(finished)
+	ctx = WithInvocationStart(ctx, func(context.Context, Invocation, *Request) error { return denied })
+	seen := false
+	for _, err := range Generate(ctx, llm, &Request{}) {
+		seen = errors.Is(err, denied)
+	}
+	if !seen || len(finished) != before {
+		t.Fatalf("rejected reservation emitted an actual receipt: %+v", finished)
+	}
+}

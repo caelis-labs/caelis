@@ -30,6 +30,14 @@ type DoctorRequest struct {
 
 // UsageSnapshot is one provider/model token-usage aggregate.
 type UsageSnapshot struct {
+	CacheWriteTokens           int  `json:"cache_write_tokens,omitempty"`
+	CacheWrite5mTokens         int  `json:"cache_write_5m_tokens,omitempty"`
+	CacheWrite1hTokens         int  `json:"cache_write_1h_tokens,omitempty"`
+	CachedInputTokensReported  bool `json:"cached_input_tokens_reported,omitempty"`
+	CacheWriteTokensReported   bool `json:"cache_write_tokens_reported,omitempty"`
+	CacheWrite5mTokensReported bool `json:"cache_write_5m_tokens_reported,omitempty"`
+	CacheWrite1hTokensReported bool `json:"cache_write_1h_tokens_reported,omitempty"`
+
 	PromptTokens      int `json:"prompt_tokens,omitempty"`
 	CachedInputTokens int `json:"cached_input_tokens,omitempty"`
 	CompletionTokens  int `json:"completion_tokens,omitempty"`

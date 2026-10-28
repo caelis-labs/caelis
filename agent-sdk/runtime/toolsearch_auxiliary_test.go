@@ -70,7 +70,7 @@ func auxiliarySearchRun(t *testing.T, llm *auxiliarySearchProbeModel, compactor 
 	sessions, active := newJournalTestSession(t, "auxiliary-search")
 	candidate := tool.NamedTool{Def: tool.Definition{
 		Name: "docs__read", Description: "Read documents", InputSchema: map[string]any{"type": "object"},
-		Metadata: map[string]any{tool.MetadataToolKind: tool.MetadataToolKindMCP},
+		Metadata: map[string]any{tool.MetadataToolKind: tool.MetadataToolKindMCP, tool.MetadataMCPServer: "docs", tool.MetadataMCPTool: "read", tool.MetadataMCPSourceFingerprint: "fixture-v1"},
 	}}
 	source := &runtimeDeferredSource{ready: []tool.Tool{candidate}}
 	registry := staticPolicyRegistry{mode: policy.NamedMode{ID: "test", Decide: func(context.Context, policy.ToolContext) (policy.Decision, error) {

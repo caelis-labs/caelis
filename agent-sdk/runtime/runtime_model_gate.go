@@ -121,6 +121,13 @@ func (l *autoCompactGatedLLM) Generate(ctx context.Context, req *model.Request) 
 		if l.requestAuthority != nil {
 			defer l.requestAuthority.drop()
 		}
+		if adopted, err := l.adoptReadyIdleCandidate(ctx, req); err != nil {
+			yield(nil, err)
+			return
+		} else if adopted {
+			yield(nil, &asyncCompactAdoptedError{})
+			return
+		}
 		decision, err := l.runtime.autoCompactDecisionBeforeModelRequest(ctx, l.sessionRef, l.inner, req)
 		if err != nil {
 			yield(nil, err)
@@ -138,7 +145,20 @@ func (l *autoCompactGatedLLM) Generate(ctx context.Context, req *model.Request) 
 			yield(nil, l.compactionRequired(decision, nil))
 			return
 		}
-		l.runtime.rememberCompactionRequest(l.sessionRef, l.inner, req, decision.SourceThroughSeq)
+		// A new assembly invalidates old completed eligibility even if admission fails.
+		l.runtime.clearCompactionRequest(l.sessionRef)
+		dispatched := req
+		ctx = model.WithInvocationStart(ctx, func(attempt context.Context, in model.Invocation, prepared *model.Request) error {
+			dispatched = model.CloneRequest(prepared)
+			through := decision.SourceThroughSeq
+			if prepared.Source != nil {
+				through = prepared.Source.SourceThroughSeq
+			}
+			l.runtime.rememberCompactionRequest(l.sessionRef, l.inner, prepared, through)
+			l.runtime.bindIdleCompactionAttempt(l.sessionRef, in, l.requestAuthority, lifecycleScopeFromContext(attempt).turnID)
+			_, err := l.asyncCompactionBoundary(attempt, prepared, false, true)
+			return err
+		})
 		var final *model.Response
 		failed := false
 		for event, err := range model.Generate(ctx, l.inner, req) {
@@ -172,7 +192,7 @@ func (l *autoCompactGatedLLM) Generate(ctx context.Context, req *model.Request) 
 			}
 		}
 		if !failed && final != nil {
-			l.runtime.completeCompactionRequest(l.sessionRef, l.inner, req, final, decision.SourceThroughSeq)
+			l.runtime.completeCompactionRequest(l.sessionRef, l.inner, dispatched, final, decision.SourceThroughSeq)
 		}
 	}
 }

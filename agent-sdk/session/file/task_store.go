@@ -61,8 +61,13 @@ func (s *TaskStore) put(ctx context.Context, entry *taskapi.Entry, expected *uin
 	err := s.store.withRootWriteLockContext(ctx, func() error {
 		doc, err := s.store.readDocumentForRef(entry.Session)
 		if err == nil {
-			if err := validateFileMutationGuard(activeDocumentFence(doc), guard); err != nil {
+			if err := authorizeDocumentMutation(&doc, guard); err != nil {
 				return err
+			}
+			if doc.Idle.Window != nil {
+				if err := s.store.writeFenceDocument(ctx, doc); err != nil && !documentWriteCommitted(err) {
+					return err
+				}
 			}
 		} else {
 			if !errors.Is(err, session.ErrSessionNotFound) || !taskMutationMayUseDetachedControlStore(guard) {

@@ -12,6 +12,14 @@ import (
 )
 
 type compactionRequestSnapshot struct {
+	dispatch  *model.Request
+	startedAt time.Time
+	turnID    string
+	completed bool
+	final     model.Message
+	authority *modelRequestAuthority
+	release   func()
+
 	model      model.LLM
 	request    *model.Request
 	throughSeq uint64
@@ -25,11 +33,20 @@ func (r *Runtime) rememberCompactionRequest(ref session.SessionRef, llm model.LL
 		return
 	}
 	r.compactionRequestMu.Lock()
-	defer r.compactionRequestMu.Unlock()
-	r.compactionRequests[compactionSessionKey(ref)] = compactionRequestSnapshot{
-		model: llm, request: model.CloneRequest(req), throughSeq: throughSeq, updatedAt: r.compactionSnapshotTime(),
+	key := compactionSessionKey(ref)
+	oldRelease := r.compactionRequests[key].release
+	r.compactionRequests[key] = compactionRequestSnapshot{
+		dispatch: model.CloneRequest(req),
+		model:    llm, request: model.CloneRequest(req), throughSeq: throughSeq, updatedAt: r.compactionSnapshotTime(),
 	}
-	r.trimCompactionRequestsLocked()
+	releases := r.trimCompactionRequestsLocked()
+	r.compactionRequestMu.Unlock()
+	if oldRelease != nil {
+		oldRelease()
+	}
+	for _, release := range releases {
+		release()
+	}
 }
 
 func (r *Runtime) completeCompactionRequest(ref session.SessionRef, llm model.LLM, req *model.Request, final *model.Response, throughSeq uint64) {
@@ -39,11 +56,17 @@ func (r *Runtime) completeCompactionRequest(ref session.SessionRef, llm model.LL
 	completed := model.CloneRequest(req)
 	completed.Messages = append(completed.Messages, model.CloneMessage(final.Message))
 	r.compactionRequestMu.Lock()
-	defer r.compactionRequestMu.Unlock()
-	r.compactionRequests[compactionSessionKey(ref)] = compactionRequestSnapshot{
-		model: llm, request: completed, throughSeq: throughSeq, updatedAt: r.compactionSnapshotTime(),
+	key := compactionSessionKey(ref)
+	snapshot := r.compactionRequests[key]
+	snapshot.model, snapshot.request, snapshot.throughSeq, snapshot.updatedAt = llm, completed, throughSeq, r.compactionSnapshotTime()
+	snapshot.final = model.CloneMessage(final.Message)
+	snapshot.completed = final.Status != model.ResponseStatusFailed && final.Status != model.ResponseStatusCancelled && (final.FinishReason == model.FinishReasonStop || (!final.FinishReasonReported && final.FinishReason == model.FinishReasonUnknown))
+	r.compactionRequests[key] = snapshot
+	releases := r.trimCompactionRequestsLocked()
+	r.compactionRequestMu.Unlock()
+	for _, release := range releases {
+		release()
 	}
-	r.trimCompactionRequestsLocked()
 }
 
 func (r *Runtime) inContextRequest(ref session.SessionRef, llm model.LLM, events []*session.Event, serviceTier model.ServiceTier) *model.Request {
@@ -87,7 +110,8 @@ func (r *Runtime) compactionSnapshotTime() time.Time {
 	return time.Now()
 }
 
-func (r *Runtime) trimCompactionRequestsLocked() {
+func (r *Runtime) trimCompactionRequestsLocked() []func() {
+	var releases []func()
 	for len(r.compactionRequests) > maxCompactionRequestSnapshots {
 		oldestKey := ""
 		var oldest time.Time
@@ -97,8 +121,12 @@ func (r *Runtime) trimCompactionRequestsLocked() {
 				oldest = snapshot.updatedAt
 			}
 		}
+		if old := r.compactionRequests[oldestKey]; old.release != nil {
+			releases = append(releases, old.release)
+		}
 		delete(r.compactionRequests, oldestKey)
 	}
+	return releases
 }
 
 func (r *Runtime) clearCompactionRequest(ref session.SessionRef) {
@@ -106,8 +134,12 @@ func (r *Runtime) clearCompactionRequest(ref session.SessionRef) {
 		return
 	}
 	r.compactionRequestMu.Lock()
+	release := r.compactionRequests[compactionSessionKey(ref)].release
 	delete(r.compactionRequests, compactionSessionKey(ref))
 	r.compactionRequestMu.Unlock()
+	if release != nil {
+		release()
+	}
 }
 
 func compactionSessionKey(ref session.SessionRef) string {
@@ -217,4 +249,40 @@ func activeSubagentContinuity(entries []*taskapi.Entry) []string {
 		handles = append(handles, handle)
 	}
 	return handles
+}
+
+// DiscardIdleCompactionSource releases only idle eligibility for this source;
+// the normal manual-compaction snapshot remains available.
+func (r *Runtime) DiscardIdleCompactionSource(ref session.SessionRef) {
+	r.compactionRequestMu.Lock()
+	key := compactionSessionKey(ref)
+	snapshot := r.compactionRequests[key]
+	release := snapshot.release
+	snapshot.release = nil
+	snapshot.authority = nil
+	if snapshot.request != nil {
+		r.compactionRequests[key] = snapshot
+	}
+	r.compactionRequestMu.Unlock()
+	if release != nil {
+		release()
+	}
+}
+
+// DiscardIdleCompactionSources releases retained sources after Host drain.
+func (r *Runtime) DiscardIdleCompactionSources() {
+	r.compactionRequestMu.Lock()
+	var releases []func()
+	for key, snapshot := range r.compactionRequests {
+		if snapshot.release != nil {
+			releases = append(releases, snapshot.release)
+		}
+		snapshot.release = nil
+		snapshot.authority = nil
+		r.compactionRequests[key] = snapshot
+	}
+	r.compactionRequestMu.Unlock()
+	for _, release := range releases {
+		release()
+	}
 }

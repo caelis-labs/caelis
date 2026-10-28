@@ -9,10 +9,11 @@ import (
 // Stable identifiers accepted by the Control API.
 const (
 	AsyncCompact = "async_compact"
-	// Deprecated: MCPRefresh is accepted and ignored for legacy Control clients.
+	IdleCompact  = "idle_compact"
+	// MCPRefresh is accepted and ignored for legacy Control clients.
 	// Remove when the minimum supported clients no longer send it.
 	MCPRefresh = "mcp_catalog_refresh"
-	// Deprecated: ToolRetirement is accepted and ignored for legacy Control clients.
+	// ToolRetirement is accepted and ignored for legacy Control clients.
 	// Remove when the minimum supported clients no longer send it.
 	ToolRetirement = "deferred_tool_retirement"
 )
@@ -32,6 +33,7 @@ type Definition struct {
 func Definitions() []Definition {
 	return []Definition{
 		{ID: AsyncCompact, Name: "Async compact", Description: "Prepare a context checkpoint in the background."},
+		{ID: IdleCompact, Name: "Idle compact", Description: "Compact completed context while idle."},
 	}
 }
 

@@ -104,7 +104,7 @@ func legacyToolName(pluginID, serverName, toolName string) string {
 // listing failures affect only that server and invoke onFailure once, if set.
 // ctx owns initialization; Close cancels and drains all initialization work.
 func NewManager(ctx context.Context, specs []ServerSpec, onFailure func(ServerFailure)) (*Manager, error) {
-	return newManager(ctx, specs, StartClient, onFailure)
+	return NewManagerWithOptions(ctx, specs, onFailure, ManagerOptions{})
 }
 
 type clientStarter func(context.Context, ServerSpec) (*Client, error)
@@ -233,6 +233,10 @@ func (mgr *Manager) rebuildToolsLocked() {
 				}
 				owner := key + "/" + info.Name
 				if pinned := mgr.owners[name]; pinned != "" && pinned != owner {
+					// Preserve legacy replay names without transferring the pinned live binding.
+					if winner := toolsByProjectedName[name]; winner != nil {
+						winner.addReplayAliases(legacyToolNames(spec, info.Name))
+					}
 					continue
 				}
 			}

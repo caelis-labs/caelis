@@ -101,9 +101,11 @@ func (p *Profile) UnmarshalJSON(data []byte) error {
 
 // RequestConfiguration identifies the latest request admitted under a revision.
 type RequestConfiguration struct {
-	Revision        uint64 `json:"revision"`
-	RequestID       string `json:"request_id"`
-	TurnID          string `json:"turn_id"`
+	Revision  uint64 `json:"revision"`
+	RequestID string `json:"request_id"`
+	TurnID    string `json:"turn_id"`
+	// JobID is present for idle compaction requests, whose TurnID is empty.
+	JobID           string `json:"job_id,omitempty"`
 	Model           string `json:"model,omitempty"`
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 	ServiceTier     string `json:"service_tier,omitempty"`

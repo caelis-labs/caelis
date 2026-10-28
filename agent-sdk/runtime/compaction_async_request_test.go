@@ -48,11 +48,12 @@ func TestAsyncCompactionFailedInContextNeverGeneratesColdCheckpoint(t *testing.T
 			run := h.run(t)
 			next := h.startCandidate(t)
 			response := asyncTextResponse("", 2000)
-			if failure == "length" {
+			switch failure {
+			case "length":
 				response = asyncTextResponse(asyncFixtureSummary, 2000)
 				response.response.FinishReason = model.FinishReasonLength
 				response.response.FinishReasonReported = true
-			} else if failure == "tools" {
+			case "tools":
 				response = asyncToolResponse("forbidden")
 			}
 			h.llm.summaries <- response

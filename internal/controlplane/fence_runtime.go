@@ -30,6 +30,16 @@ type FencedRuntimeConfig struct {
 	OwnerID          string
 	LifecycleContext context.Context
 	Diagnostics      *slog.Logger
+	// PrepareIdle runs after successful producer completion while the original
+	// fence is held. The returned transition is reused by the sole release loop.
+	PrepareIdle func(context.Context, session.SessionRef, session.SessionFence) (*IdleCompactionHandoff, error)
+}
+
+// IdleCompactionHandoff binds one prepared source to fence release. Complete is
+// called exactly once after release is observed; a zero window means no handoff.
+type IdleCompactionHandoff struct {
+	Release  session.ReleaseForIdleCompactionRequest
+	Complete func(session.IdleCompactionWindow, error)
 }
 
 // FencedRuntime acquires a store-level execution fence before a main or
@@ -44,6 +54,7 @@ type FencedRuntime struct {
 	diagnostics  *fencePhaseDiagnostics
 	executionsMu sync.Mutex
 	executions   map[fencedExecutionKey]*activeFencedExecution
+	prepareIdle  func(context.Context, session.SessionRef, session.SessionFence) (*IdleCompactionHandoff, error)
 }
 
 func NewFencedRuntime(config FencedRuntimeConfig) (*FencedRuntime, error) {
@@ -71,6 +82,7 @@ func NewFencedRuntime(config FencedRuntimeConfig) (*FencedRuntime, error) {
 		lifecycleCtx:  lifecycleCtx,
 		diagnostics:   newFencePhaseDiagnostics(config.Diagnostics),
 		executions:    make(map[fencedExecutionKey]*activeFencedExecution),
+		prepareIdle:   config.PrepareIdle,
 	}, nil
 }
 
@@ -131,6 +143,21 @@ func (r *FencedRuntime) runWithFence(ctx context.Context, ref session.SessionRef
 			r.completeFencedExecution(execution)
 		})
 		base := baseFencedRunner(wrapped)
+		if r.prepareIdle != nil {
+			base.beforeFinish = func(outcome error) {
+				if outcome != nil {
+					return
+				}
+				prepareCtx, done := context.WithTimeout(context.WithoutCancel(runCtx), 5*time.Second)
+				defer done()
+				handoff, err := r.prepareIdle(prepareCtx, ref, fence)
+				if err != nil {
+					r.diagnostics.observe(prepareCtx, "prepare_idle", r.diagnostics.started(), err)
+					return
+				}
+				guard.idleHandoff = handoff
+			}
+		}
 		execution.setRunner(base)
 		go func() { _ = base.finishAfterProducer() }()
 		return wrapped
@@ -233,6 +260,7 @@ type sessionFenceGuard struct {
 	releaseCompleted bool
 	onReleased       func()
 	releaseNotified  bool
+	idleHandoff      *IdleCompactionHandoff
 }
 
 var errSessionFenceOwnershipLost = fmt.Errorf("controlplane: session fence ownership was lost: %w", session.ErrFenceConflict)
@@ -333,7 +361,7 @@ func (g *sessionFenceGuard) releaseLoop() {
 		fence := g.fence
 		g.mu.Unlock()
 		started := g.diagnostics.started()
-		err := releaseSessionFence(g.fences, fence)
+		err := g.releaseFence(fence)
 
 		g.releaseMu.Lock()
 		if first {
@@ -418,15 +446,16 @@ func releaseSessionFence(fences session.SessionFenceService, fence session.Sessi
 }
 
 type fencedRunner struct {
-	inner       agent.Runner
-	guard       *sessionFenceGuard
-	cancel      context.CancelFunc
-	diagnostics *fencePhaseDiagnostics
-	onFinish    func()
-	quiesceOnce sync.Once
-	quiesceDone chan struct{}
-	quiesceErr  error
-	finishOnce  sync.Once
+	inner        agent.Runner
+	guard        *sessionFenceGuard
+	cancel       context.CancelFunc
+	diagnostics  *fencePhaseDiagnostics
+	onFinish     func()
+	beforeFinish func(error)
+	quiesceOnce  sync.Once
+	quiesceDone  chan struct{}
+	quiesceErr   error
+	finishOnce   sync.Once
 }
 
 func newFencedRunner(inner agent.Runner, guard *sessionFenceGuard, cancel context.CancelFunc, diagnostics *fencePhaseDiagnostics, onFinish func()) agent.Runner {
@@ -469,7 +498,7 @@ func (r *fencedRunner) WaitCompletion(ctx context.Context) error {
 	// A return while the wait context is still live is the producer's terminal
 	// outcome, so quiescence is proven even when that outcome is an error.
 	if ctx == nil || ctx.Err() == nil {
-		return errors.Join(waitErr, r.finish(), r.guard.err())
+		return errors.Join(r.finishAfterProducer(), r.guard.err())
 	}
 	finishErr := r.finishAfterProducer()
 	return errors.Join(waitErr, finishErr, r.guard.err())
@@ -522,6 +551,9 @@ func (r *fencedRunner) waitForProducer(ctx context.Context) (bool, error) {
 
 func (r *fencedRunner) finish() error {
 	r.finishOnce.Do(func() {
+		if r.beforeFinish != nil {
+			r.beforeFinish(r.quiesceErr)
+		}
 		if r.cancel != nil {
 			r.cancel()
 		}

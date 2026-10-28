@@ -214,7 +214,7 @@ func (s *Store) AppendEventWithOutcome(
 	if !ok {
 		return session.AppendEventResult{}, session.ErrSessionNotFound
 	}
-	if err := validateMutationGuard(record.fence, req.MutationGuard); err != nil {
+	if err := record.authorizeMutation(req.MutationGuard); err != nil {
 		return session.AppendEventResult{}, err
 	}
 
@@ -245,7 +245,7 @@ func (s *Store) AppendEventWithOutcomeConditional(
 	if !ok {
 		return session.AppendEventResult{}, session.ErrSessionNotFound
 	}
-	if err := validateMutationGuard(record.fence, req.MutationGuard); err != nil {
+	if err := record.authorizeMutation(req.MutationGuard); err != nil {
 		return session.AppendEventResult{}, err
 	}
 	for _, precondition := range req.RelatedRevisions {
@@ -290,7 +290,7 @@ func (s *Store) SettlePendingApproval(
 	if !session.PendingApprovalMatches(current, req) {
 		return result, nil
 	}
-	if err := validateMutationGuard(record.fence, req.MutationGuard); err != nil {
+	if err := record.authorizeMutation(req.MutationGuard); err != nil {
 		return result, err
 	}
 	if err := session.CheckExpectedRevision(record.session, req.ExpectedRevision); err != nil {
@@ -400,7 +400,7 @@ func (s *Store) AppendEvents(
 	if !ok {
 		return nil, session.ErrSessionNotFound
 	}
-	if err := validateMutationGuard(record.fence, req.MutationGuard); err != nil {
+	if err := record.authorizeMutation(req.MutationGuard); err != nil {
 		return nil, err
 	}
 	tx, err := s.prepareAppendTransactionForRecord(record, req.Events, nil, nil, req.ExpectedRevision, "", "")
@@ -426,7 +426,7 @@ func (s *Store) AppendEventsAndUpdateState(
 	if !ok {
 		return nil, session.ErrSessionNotFound
 	}
-	if err := validateMutationGuard(record.fence, req.MutationGuard); err != nil {
+	if err := record.authorizeMutation(req.MutationGuard); err != nil {
 		return nil, err
 	}
 	tx, err := s.prepareAppendTransactionForRecord(record, req.Events, nil, req.UpdateState, req.ExpectedRevision, req.TransactionID, req.MutationDigest)
@@ -508,7 +508,7 @@ func (s *Store) bindControllerRequest(req session.BindControllerRequest) (sessio
 	if !ok {
 		return session.Session{}, session.ErrSessionNotFound
 	}
-	if err := validateMutationGuard(record.fence, req.MutationGuard); err != nil {
+	if err := record.authorizeMutation(req.MutationGuard); err != nil {
 		return session.Session{}, err
 	}
 	record.session.Controller = session.CloneControllerBinding(req.Binding)
@@ -527,7 +527,7 @@ func (s *Store) BindControllerWithEvent(
 	if !ok {
 		return session.Session{}, nil, session.ErrSessionNotFound
 	}
-	if err := validateMutationGuard(record.fence, req.MutationGuard); err != nil {
+	if err := record.authorizeMutation(req.MutationGuard); err != nil {
 		return session.Session{}, nil, err
 	}
 	tx, err := s.prepareAppendTransactionForRecord(
@@ -565,7 +565,7 @@ func (s *Store) putParticipantRequest(req session.PutParticipantRequest) (sessio
 	if !ok {
 		return session.Session{}, session.ErrSessionNotFound
 	}
-	if err := validateMutationGuard(record.fence, req.MutationGuard); err != nil {
+	if err := record.authorizeMutation(req.MutationGuard); err != nil {
 		return session.Session{}, err
 	}
 	if err := session.CheckExpectedRevision(record.session, req.ExpectedRevision); err != nil {
@@ -598,7 +598,7 @@ func (s *Store) PutParticipantWithEvent(
 	if !ok {
 		return session.Session{}, nil, session.ErrSessionNotFound
 	}
-	if err := validateMutationGuard(record.fence, req.MutationGuard); err != nil {
+	if err := record.authorizeMutation(req.MutationGuard); err != nil {
 		return session.Session{}, nil, err
 	}
 	tx, err := s.prepareAppendTransactionForRecord(
@@ -644,7 +644,7 @@ func (s *Store) removeParticipantRequest(req session.RemoveParticipantRequest) (
 	if !ok {
 		return session.Session{}, session.ErrSessionNotFound
 	}
-	if err := validateMutationGuard(record.fence, req.MutationGuard); err != nil {
+	if err := record.authorizeMutation(req.MutationGuard); err != nil {
 		return session.Session{}, err
 	}
 	if err := session.CheckExpectedRevision(record.session, req.ExpectedRevision); err != nil {
@@ -673,7 +673,7 @@ func (s *Store) RemoveParticipantWithEvent(
 	if !ok {
 		return session.Session{}, nil, session.ErrSessionNotFound
 	}
-	if err := validateMutationGuard(record.fence, req.MutationGuard); err != nil {
+	if err := record.authorizeMutation(req.MutationGuard); err != nil {
 		return session.Session{}, nil, err
 	}
 	tx, err := s.prepareAppendTransactionForRecord(
@@ -728,7 +728,7 @@ func (s *Store) ReplaceState(
 	if !ok {
 		return session.Session{}, session.ErrSessionNotFound
 	}
-	if err := validateMutationGuard(record.fence, req.MutationGuard); err != nil {
+	if err := record.authorizeMutation(req.MutationGuard); err != nil {
 		return session.Session{}, err
 	}
 	if err := session.CheckExpectedRevision(record.session, req.ExpectedRevision); err != nil {
@@ -751,7 +751,7 @@ func (s *Store) UpdateState(
 	if !ok {
 		return session.Session{}, session.ErrSessionNotFound
 	}
-	if err := validateMutationGuard(record.fence, req.MutationGuard); err != nil {
+	if err := record.authorizeMutation(req.MutationGuard); err != nil {
 		return session.Session{}, err
 	}
 	if err := session.CheckExpectedRevision(record.session, req.ExpectedRevision); err != nil {
@@ -856,6 +856,7 @@ func (s *Store) PendingApprovals(ctx context.Context) ([]session.PendingApproval
 }
 
 type record struct {
+	idle                      session.IdleCompactionState
 	session                   session.Session
 	events                    []*session.Event
 	state                     map[string]any

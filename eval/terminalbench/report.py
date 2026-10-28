@@ -68,6 +68,9 @@ def usage_totals(trials: dict[str, tuple[dict[str, Any], Path]]) -> dict[str, An
     fields = (
         "n_input_tokens",
         "n_cache_tokens",
+        "n_cache_write_tokens",
+        "n_cache_write_5m_tokens",
+        "n_cache_write_1h_tokens",
         "n_output_tokens",
         "n_reasoning_tokens",
         "n_total_tokens",
@@ -375,6 +378,7 @@ def markdown(report: dict[str, Any]) -> str:
         f"- Completed/scored/errors: {report['completed']}/{report['scored']}/{report['errors']}",
         f"- Structured output errors: {report['structured_errors']}",
         f"- Tokens input/cache/output/reasoning/total: {report['n_input_tokens']}/{report['n_cache_tokens']}/{report['n_output_tokens']}/{report['n_reasoning_tokens']}/{report['n_total_tokens']}",
+        f"- Reported cache writes total/5m/1h: {report['n_cache_write_tokens']}/{report['n_cache_write_5m_tokens']}/{report['n_cache_write_1h_tokens']} (None means unreported)",
         f"- Usage coverage complete/partial/unavailable: {report['usage_coverage']['complete']}/{report['usage_coverage']['partial_lower_bound']}/{report['usage_coverage']['unavailable']}",
         f"- Phase seconds environment/agent setup/agent execution/verifier: {report['phase_seconds']['environment_setup']:.1f}/{report['phase_seconds']['agent_setup']:.1f}/{report['phase_seconds']['agent_execution']:.1f}/{report['phase_seconds']['verifier']:.1f}",
         f"- Complete: `{str(report['complete']).lower()}`",

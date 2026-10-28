@@ -93,6 +93,12 @@ func (*asyncCompactAdoptedError) Error() string {
 // before dispatch. Returning adopted asks the existing Run loop to rebuild from
 // durable truth; it does not mutate the chat Agent's private message slice.
 func (l *autoCompactGatedLLM) asyncCompactBeforeRequest(ctx context.Context, req *model.Request, hard bool) (bool, error) {
+	return l.asyncCompactionBoundary(ctx, req, hard, false)
+}
+
+// Launch only after actual-attempt admission and request preparation. An
+// assembled request rejected by admission cannot authorize speculative spend.
+func (l *autoCompactGatedLLM) asyncCompactionBoundary(ctx context.Context, req *model.Request, hard, dispatch bool) (bool, error) {
 	r := l.runtime
 	s := asyncScope(ctx)
 	if !r.compaction.Async.Enabled || s == nil {
@@ -111,7 +117,7 @@ func (l *autoCompactGatedLLM) asyncCompactBeforeRequest(ctx context.Context, req
 	if err != nil {
 		return false, err
 	}
-	if job := s.job; job != nil {
+	if job := s.job; job != nil && !dispatch {
 		if job.epoch != epoch || job.requestHash != requestHash || !sameCompactionModel(job.llm, l.inner) {
 			job.discarded = true
 			job.cancel()
@@ -144,7 +150,7 @@ func (l *autoCompactGatedLLM) asyncCompactBeforeRequest(ctx context.Context, req
 		}
 		return false, nil
 	}
-	if s.started || req.Source == nil || !compactionPrefixSafe(req.Messages) {
+	if !dispatch || s.started || req.Source == nil || !compactionPrefixSafe(req.Messages) {
 		return false, nil
 	}
 	messagesHash, err := requestsource.Fingerprint(req.Messages)

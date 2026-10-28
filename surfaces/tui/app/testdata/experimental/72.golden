@@ -7,6 +7,8 @@
 │                                                                │
 │  › [x] Async compact                                           │
 │        Prepare a context checkpoint in the background.         │
+│    [ ] Idle compact                                            │
+│        Compact completed context while idle.                   │
 │                                                                │
 │  ↑↓ move · Space toggle · Enter save · Esc discard and close   │
 │                                                                │

@@ -81,6 +81,8 @@ type Runtime struct {
 	diagnostics              *slog.Logger
 	compactionRequestMu      sync.RWMutex
 	compactionRequests       map[string]compactionRequestSnapshot
+	idleCandidateMu          sync.Mutex
+	idleCandidates           map[string]*idleCompactionCandidate
 	policies                 policy.Registry
 	defaultPolicyMode        string
 	sandboxPolicy            sandbox.PolicySnapshot
@@ -131,6 +133,7 @@ func New(cfg Config) (*Runtime, error) {
 		compaction:               normalizeCompactionConfig(cfg.Compaction),
 		diagnostics:              cfg.Diagnostics,
 		compactionRequests:       map[string]compactionRequestSnapshot{},
+		idleCandidates:           map[string]*idleCompactionCandidate{},
 		policies:                 cfg.PolicyRegistry,
 		defaultPolicyMode:        strings.TrimSpace(cfg.DefaultPolicyMode),
 		sandboxPolicy:            sandbox.ClonePolicySnapshot(cfg.SandboxPolicy),
