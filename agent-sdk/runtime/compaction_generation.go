@@ -246,7 +246,7 @@ func collectCompactionResponse(ctx context.Context, llm model.LLM, req *model.Re
 			slog.String("model", final.Model),
 		)
 	}
-	if final.Status == model.ResponseStatusFailed || final.Status == model.ResponseStatusCancelled {
+	if final.Status != "" && final.Status != model.ResponseStatusCompleted {
 		return nil, errCompactionIncomplete
 	}
 	switch final.FinishReason {

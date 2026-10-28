@@ -62,6 +62,8 @@ func TestCollectCompactionResponseTerminalReasons(t *testing.T) {
 		{"legacy_length", model.FinishReasonLength, false, "", errCompactionTruncated},
 		{"failed", model.FinishReasonStop, true, model.ResponseStatusFailed, errCompactionIncomplete},
 		{"cancelled", model.FinishReasonStop, true, model.ResponseStatusCancelled, errCompactionIncomplete},
+		{"in_progress", model.FinishReasonStop, true, model.ResponseStatusInProgress, errCompactionIncomplete},
+		{"future_status", model.FinishReasonStop, true, model.ResponseStatus("future_status"), errCompactionIncomplete},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			response := compactionTerminalResponse(tt.reason)
