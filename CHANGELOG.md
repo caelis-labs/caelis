@@ -5,13 +5,21 @@
 
 ### Features
 
-* preserve compaction prefixes and add idle checkpoints ([#170](https://github.com/caelis-labs/caelis/issues/170)) ([26865e5](https://github.com/caelis-labs/caelis/commit/26865e53e8c771a296a5b0c581fd86548994b6f6))
-
+* Preserve the actual in-context request prefix and complete tool batches during compaction. Reject truncated, filtered and unknown terminal responses without retrying or adopting an incomplete summary ([#170](https://github.com/caelis-labs/caelis/pull/170)).
+* Offer independent `async_compact` and `idle_compact` opt-ins, both off by default. Idle compaction commits a checkpoint after a completed Turn remains idle for 60 seconds; the Host coordinates foreground preemption, shutdown and recovery. Saved settings apply at the next Runtime activation ([#170](https://github.com/caelis-labs/caelis/pull/170)).
+* Always refresh MCP catalogs and retire unused tools after a durable canonical compact. The former `mcp_catalog_refresh` and `deferred_tool_retirement` settings are accepted and ignored for compatibility; they no longer appear in discovery or the editor ([#170](https://github.com/caelis-labs/caelis/pull/170)).
+* Add cache breakpoints for the native Anthropic API and expose cache read/write presence and 5-minute/1-hour write breakdowns. Compatible routes do not acquire native breakpoints based on model names. Missing measurements remain distinct from zero, and TTL breakdowns do not increase totals ([#170](https://github.com/caelis-labs/caelis/pull/170)).
 
 ### Bug Fixes
 
-* make admission interruption deterministic and stabilize native probes ([#174](https://github.com/caelis-labs/caelis/issues/174)) ([97ed549](https://github.com/caelis-labs/caelis/commit/97ed5496af597b3cc8012dc40ca5bde6b85a1a7b))
-* preserve idle reads and API cache accounting ([#173](https://github.com/caelis-labs/caelis/issues/173)) ([297a74c](https://github.com/caelis-labs/caelis/commit/297a74cf07352f9a1f6cf534758bdda8dc883e1b))
+* Keep Session status and diagnostics reads from canceling idle compaction while retaining Runtime lifetime during the read. Foreground work, configuration and shutdown retain their existing preemption authority ([#173](https://github.com/caelis-labs/caelis/pull/173)).
+* Preserve the API's cache accounting basis through provider normalization. Context usage includes cache reads exactly once for native and compatible Anthropic routes and inclusive Responses usage, while retaining accurate cumulative totals and legacy-record compatibility ([#173](https://github.com/caelis-labs/caelis/pull/173)).
+
+* Do not report a successful admission interrupt as an error when cancellation cleanup finishes before the interrupt returns. Preserve independent failures and unknown-outcome receipts ([#174](https://github.com/caelis-labs/caelis/pull/174)).
+
+### Security
+
+* Upgrade `golang.org/x/net` to `v0.62.0`, fixing reachable HTML parsing/rendering vulnerabilities [GO-2026-6860](https://pkg.go.dev/vuln/GO-2026-6860) and [GO-2026-6866](https://pkg.go.dev/vuln/GO-2026-6866) in WebFetch ([#170](https://github.com/caelis-labs/caelis/pull/170)).
 
 ## [0.73.3](https://github.com/caelis-labs/caelis/compare/v0.73.2...v0.73.3) (2026-10-27)
 
