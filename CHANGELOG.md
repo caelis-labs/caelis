@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.74.0](https://github.com/caelis-labs/caelis/compare/v0.73.3...v0.74.0) (2026-10-28)
+
+
+### Features
+
+* preserve compaction prefixes and add idle checkpoints ([#170](https://github.com/caelis-labs/caelis/issues/170)) ([26865e5](https://github.com/caelis-labs/caelis/commit/26865e53e8c771a296a5b0c581fd86548994b6f6))
+
+
+### Bug Fixes
+
+* make admission interruption deterministic and stabilize native probes ([#174](https://github.com/caelis-labs/caelis/issues/174)) ([97ed549](https://github.com/caelis-labs/caelis/commit/97ed5496af597b3cc8012dc40ca5bde6b85a1a7b))
+* preserve idle reads and API cache accounting ([#173](https://github.com/caelis-labs/caelis/issues/173)) ([297a74c](https://github.com/caelis-labs/caelis/commit/297a74cf07352f9a1f6cf534758bdda8dc883e1b))
+
 ## [0.73.3](https://github.com/caelis-labs/caelis/compare/v0.73.2...v0.73.3) (2026-10-27)
 
 
