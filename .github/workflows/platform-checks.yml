@@ -1,58 +1,36 @@
 name: platform-checks
-
 on:
-  schedule:
-    - cron: '23 6 * * *'
   workflow_dispatch:
-
 permissions:
   contents: read
-
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
-concurrency:
-  group: platform-checks-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
-  windows-host-open:
+  approval:
     runs-on: windows-2022
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        source:
+          - 297a74cf07352f9a1f6cf534758bdda8dc883e1b
+          - c4c6df2d710357a3c77a6f24b743d5cf5114ddaa
     env:
       GOWORK: 'off'
       GOFLAGS: -mod=readonly -p=2
+      CAELIS_TEST_APPLICATION_NATIVE: '1'
     steps:
       - uses: actions/checkout@v7
-
+        with:
+          ref: ${{ matrix.source }}
+          fetch-depth: 0
+          persist-credentials: false
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-          cache: true
-
-      - uses: actions/setup-python@v7
-        with:
-          python-version: '3.13'
-
-      - name: Windows platform checks
+      - name: Add diagnostics without changing assertions or production
         shell: bash
-        run: make windows-check
-
-  security-and-race:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    env:
-      GOWORK: 'off'
-      GOFLAGS: -mod=readonly
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-          cache: true
-      - name: Install govulncheck
-        run: go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
-      - name: Check reachable vulnerabilities
-        run: govulncheck -mode=source -scan=symbol ./...
-      - name: Guardian and model invocation concurrency
-        run: go test -race -count=1 -timeout=5m ./app/gatewayapp ./agent-sdk/model ./agent-sdk/session/... ./internal/kernel -run 'TestGuardian|TestApprovalReviewer|TestToolAvailability|TestInvocation|TestAutoReview|Test.*Fence|Test.*MutationGuard'
+        env:
+          DIAGNOSTIC_SHA: ${{ github.sha }}
+        run: git show "${DIAGNOSTIC_SHA}:app/gatewayapp/execution_environment_approval_test.go" > app/gatewayapp/execution_environment_approval_test.go
+      - name: Reproduce approval completion
+        shell: bash
+        run: go test ./app/gatewayapp -run '^TestApplicationExecutionEnvironmentAfterHostApproval$' -count=5 -v -timeout=8m

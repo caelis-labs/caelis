@@ -64,6 +64,29 @@ func TestApplicationExecutionEnvironmentAfterHostApproval(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer feed.Subscription.Close()
+	defer func() {
+		if !t.Failed() {
+			return
+		}
+		diagnosticCtx, stop := context.WithTimeout(context.Background(), 3*time.Second)
+		defer stop()
+		state, stateErr := client.InspectSession(diagnosticCtx, appserver.StateRequest{SessionID: created.SessionID})
+		t.Logf("approval timeout state: %+v, error: %v", state, stateErr)
+		clients, clientsErr := httpclient.AppServerClients(client)
+		if clientsErr == nil {
+			tasks, tasksErr := clients.Tasks.List(diagnosticCtx, taskstream.ListRequest{SessionID: created.SessionID})
+			t.Logf("approval timeout tasks: %+v, error: %v", tasks, tasksErr)
+		}
+		output, outputErr := os.ReadFile(filepath.Join(cwd, "approved-env"))
+		t.Logf("approval timeout effect: %q, error: %v", output, outputErr)
+		provider.mu.Lock()
+		for i, request := range provider.seen {
+			t.Logf("approval timeout model request %d: %s", i, request)
+		}
+		provider.mu.Unlock()
+		stacks := make([]byte, 1<<20)
+		t.Logf("approval timeout stacks:\n%s", stacks[:runtime.Stack(stacks, true)])
+	}()
 	input, err := json.Marshal(map[string]any{"command": command, "sandbox_permissions": "require_escalated", "justification": "Verify the synthetic Host-route environment after explicit approval."})
 	if err != nil {
 		t.Fatal(err)
