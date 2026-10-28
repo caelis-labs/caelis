@@ -52,7 +52,7 @@ func TestApplicationExecutionEnvironmentAfterHostApproval(t *testing.T) {
 		environment["SystemRoot"] = os.Getenv("SystemRoot")
 		environment["TEMP"], environment["TMP"] = cwd, cwd
 		delete(environment, "PATH")
-		command = "[IO.File]::WriteAllText('approved-env', ($env:HOME+'|'+(Get-Location).Path+'|'+$env:CONFIG_VALUE))"
+		command = "[IO.File]::WriteAllText('approved-env', ($env:HOME+'|'+[Environment]::CurrentDirectory+'|'+$env:CONFIG_VALUE))"
 	}
 	profile := sessionprofile.Profile{Version: "v1", Model: "custom/gpt-4.1", ToolsVersion: "v1", Execution: "workspace-write", Workspace: sessionprofile.Workspace{CWD: cwd}, ExecutionConfig: &sandbox.ExecutionConfig{Environment: sandbox.EnvironmentConfig{Inherit: &inherit, Set: environment}}}
 	created, err := client.CreateSession(ctx, appserver.CreateSessionRequest{WriteBase: appserver.WriteBase{OperationID: "create"}, Profile: profilePointer(profile)})
