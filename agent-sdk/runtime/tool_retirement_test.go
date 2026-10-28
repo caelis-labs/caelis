@@ -82,12 +82,11 @@ func retirementPolicy() policy.Registry {
 }
 
 func TestRetirementRealStdioRuntimeCompactReloadAndRediscover(t *testing.T) {
-	for _, mode := range []struct{ dynamic, refresh bool }{{false, false}, {true, false}, {false, true}, {true, true}} {
-		dynamic := mode.dynamic
-		t.Run(fmt.Sprintf("refresh_%t/resolver_%t", mode.refresh, dynamic), func(t *testing.T) {
+	for _, dynamic := range []bool{false, true} {
+		t.Run(fmt.Sprintf("resolver_%t", dynamic), func(t *testing.T) {
 			root, work := t.TempDir(), t.TempDir()
 			receipts := filepath.Join(work, "receipts.txt")
-			manager, err := mcp.NewManagerWithOptions(t.Context(), []mcp.ServerSpec{{PluginID: "poc", Name: "local", Command: os.Args[0], Args: []string{"-test.run=^TestRetirementMCPServerProcess$"}, WorkDir: work, Env: map[string]string{"CAELIS_RETIREMENT_SERVER": "1", "CAELIS_RETIREMENT_RECEIPTS": receipts}}}, nil, mcp.ManagerOptions{RefreshTools: mode.refresh})
+			manager, err := mcp.NewManager(t.Context(), []mcp.ServerSpec{{PluginID: "poc", Name: "local", Command: os.Args[0], Args: []string{"-test.run=^TestRetirementMCPServerProcess$"}, WorkDir: work, Env: map[string]string{"CAELIS_RETIREMENT_SERVER": "1", "CAELIS_RETIREMENT_RECEIPTS": receipts}}}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -103,7 +102,7 @@ func TestRetirementRealStdioRuntimeCompactReloadAndRediscover(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			cfg := Config{Sessions: store, AgentFactory: chat.Factory{}, ExperimentalToolRetirement: true, PolicyRegistry: retirementPolicy(), DefaultPolicyMode: "retirement-test"}
+			cfg := Config{Sessions: store, AgentFactory: chat.Factory{}, PolicyRegistry: retirementPolicy(), DefaultPolicyMode: "retirement-test"}
 			runtime, err := New(cfg)
 			if err != nil {
 				t.Fatal(err)
@@ -190,7 +189,7 @@ func TestRetirementRealStdioRuntimeCompactReloadAndRediscover(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				events := promptEventsWithToolVisibilityMetadata(compact.PromptEventsFromLatestCompact(loaded.Events), loaded.Events, true)
+				events := promptEventsWithToolVisibilityMetadata(compact.PromptEventsFromLatestCompact(loaded.Events), loaded.Events)
 				for _, err := range a.Run(agent.NewContext(agent.ContextSpec{Context: t.Context(), Session: loaded.Session, Events: events, State: loaded.State})) {
 					if err != nil {
 						t.Fatal(err)
@@ -293,7 +292,7 @@ func TestRetirementCheckpointFailureCancellationAndPendingCalls(t *testing.T) {
 			if scenario == "write_failure" || scenario == "unknown_committed" {
 				service = retirementFaultStore{Service: store, after: scenario == "unknown_committed"}
 			}
-			rt, err := New(Config{Sessions: service, AgentFactory: chat.Factory{}, ExperimentalToolRetirement: true})
+			rt, err := New(Config{Sessions: service, AgentFactory: chat.Factory{}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -334,7 +333,7 @@ func TestRetirementManualCompactWaitsForPendingModelBatch(t *testing.T) {
 	event := userTextEvent("preserve pending model batch")
 	event.Meta = map[string]any{tool.MetadataToolExposure: state}
 	appendTestEvent(t, store, active.SessionRef, event)
-	rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}, ExperimentalToolRetirement: true, PolicyRegistry: retirementPolicy(), DefaultPolicyMode: "retirement-test"})
+	rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}, PolicyRegistry: retirementPolicy(), DefaultPolicyMode: "retirement-test"})
 	if err != nil {
 		t.Fatal(err)
 	}

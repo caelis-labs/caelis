@@ -174,15 +174,16 @@ func (l *anthropicSDKLLM) generateNonStreaming(ctx context.Context, params anthr
 	yield(&model.StreamEvent{
 		Type: model.StreamEventTurnDone,
 		Response: &model.Response{
-			Message:         msg,
-			TurnComplete:    true,
-			StepComplete:    true,
-			Status:          model.ResponseStatusCompleted,
-			FinishReason:    finishReason,
-			RawFinishReason: rawFinishReason,
-			Model:           resp.Model,
-			Provider:        l.provider,
-			Usage:           usage,
+			Message:              msg,
+			TurnComplete:         true,
+			StepComplete:         true,
+			Status:               model.ResponseStatusCompleted,
+			FinishReason:         finishReason,
+			FinishReasonReported: true,
+			RawFinishReason:      rawFinishReason,
+			Model:                resp.Model,
+			Provider:             l.provider,
+			Usage:                usage,
 		},
 	}, nil)
 }
@@ -255,15 +256,16 @@ func (l *anthropicSDKLLM) generateStreaming(ctx context.Context, params anthropi
 	yield(&model.StreamEvent{
 		Type: model.StreamEventTurnDone,
 		Response: &model.Response{
-			Message:         msg,
-			TurnComplete:    true,
-			StepComplete:    true,
-			Status:          model.ResponseStatusCompleted,
-			FinishReason:    finishReason,
-			RawFinishReason: rawFinishReason,
-			Model:           acc.Model,
-			Provider:        l.provider,
-			Usage:           usage,
+			Message:              msg,
+			TurnComplete:         true,
+			StepComplete:         true,
+			Status:               model.ResponseStatusCompleted,
+			FinishReason:         finishReason,
+			FinishReasonReported: true,
+			RawFinishReason:      rawFinishReason,
+			Model:                acc.Model,
+			Provider:             l.provider,
+			Usage:                usage,
 		},
 	}, nil)
 }
@@ -956,7 +958,9 @@ func anthropicUsageToKernel(usage anthropic.Usage) model.Usage {
 
 func normalizeAnthropicFinishReason(reason anthropic.StopReason) model.FinishReason {
 	switch reason {
-	case anthropic.StopReasonEndTurn, anthropic.StopReasonStopSequence, anthropic.StopReasonPauseTurn, anthropic.StopReasonRefusal:
+	case anthropic.StopReasonRefusal:
+		return model.FinishReasonRefusal
+	case anthropic.StopReasonEndTurn, anthropic.StopReasonStopSequence, anthropic.StopReasonPauseTurn:
 		return model.FinishReasonStop
 	case anthropic.StopReasonMaxTokens:
 		return model.FinishReasonLength

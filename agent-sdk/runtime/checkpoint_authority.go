@@ -77,9 +77,6 @@ type checkpointValidator = func(context.Context) (func(), error)
 // owners. Neither refresh nor retirement depends on the compaction scheduler.
 // All guards are short, nonblocking, and released in reverse acquisition order.
 func (r *Runtime) withMCPCheckpointAuthority(snapshot agent.ModelRequestSnapshot) agent.ModelRequestSnapshot {
-	if !r.toolRetirement && !r.compaction.Async.Enabled {
-		return snapshot
-	}
 	catalog, supported := snapshot.DeferredTools.(tool.CatalogSource)
 	revision := ""
 	if supported {
@@ -101,7 +98,11 @@ func (r *Runtime) withMCPCheckpointAuthority(snapshot agent.ModelRequestSnapshot
 			}
 		}
 		if snapshot.DeferredTools != nil {
-			if !supported || revision == "" {
+			if !supported {
+				release()
+				return nil, &CapabilityError{Capability: "tool.CatalogSource"}
+			}
+			if revision == "" {
 				release()
 				return nil, agent.ErrModelRequestSnapshotStale
 			}

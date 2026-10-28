@@ -609,6 +609,7 @@ func TestOpenAIResponsesSSEAndJSONAccumulateTextReasoningToolsUsage(t *testing.T
 		if len(calls) != 1 || calls[0].ID != "call_1" || calls[0].Name != "lookup" {
 			t.Fatalf("tool calls = %#v", calls)
 		}
+		assertFinishReasonReported(t, response)
 		if response.FinishReason != model.FinishReasonToolCalls {
 			t.Fatalf("FinishReason = %q, want tool_calls", response.FinishReason)
 		}
@@ -647,6 +648,7 @@ func TestOpenAIResponsesSSEAndJSONAccumulateTextReasoningToolsUsage(t *testing.T
 		if reasoningDelta != "" {
 			t.Fatalf("JSON path emitted reasoning delta %q", reasoningDelta)
 		}
+		assertFinishReasonReported(t, response)
 		if response.Message.TextContent() != "done" || response.FinishReason != model.FinishReasonStop {
 			t.Fatalf("json response = %+v", response)
 		}

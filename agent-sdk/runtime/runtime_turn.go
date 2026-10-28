@@ -9,6 +9,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/requestsource"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
@@ -161,11 +162,16 @@ func (r *Runtime) runAttempt(
 		return nil, false, false, err
 	}
 
+	var source *requestsource.Tracker
+	if r.compaction.Async.Enabled {
+		ctx, source = requestsource.WithTracker(ctx, invocation.SourceEvents)
+	}
 	batch := make([]*session.Event, 0, 3)
 	persistedInputs, appendErr := r.appendInputEvents(ctx, ref, pendingInputs)
 	if appendErr != nil {
 		return nil, false, false, appendErr
 	}
+	source.Append(persistedInputs...)
 	inputPersisted := len(persistedInputs) > 0
 	for _, persisted := range persistedInputs {
 		batch = append(batch, persisted)
@@ -212,6 +218,7 @@ func (r *Runtime) runAttempt(
 			if err != nil {
 				return nil, err
 			}
+			source.Append(persisted...)
 			messages := make([]model.Message, 0, len(persisted))
 			for _, event := range persisted {
 				batch = append(batch, event)
@@ -243,6 +250,7 @@ func (r *Runtime) runAttempt(
 				_ = r.tasks.syncCanonicalToolResult(ctx, ref, normalized)
 			}
 		}
+		source.Append(normalized)
 		batch = append(batch, session.CloneEvent(normalized))
 		if sink != nil {
 			sink.publishEvent(normalized)

@@ -2,6 +2,7 @@ package experimental
 
 import (
 	"encoding/json"
+	"maps"
 	"testing"
 )
 
@@ -23,5 +24,34 @@ func TestValuesRejectUnknownAndNullWithoutLosingFalse(t *testing.T) {
 	}
 	if enabled, present := values[AsyncCompact]; enabled || !present {
 		t.Fatal("explicit false disappeared")
+	}
+}
+
+func TestCatalogOmitsLegacyFeatures(t *testing.T) {
+	definitions := Definitions()
+	if len(definitions) != 1 || definitions[0].ID != AsyncCompact {
+		t.Fatalf("catalog = %+v", definitions)
+	}
+	for _, enabled := range []bool{false, true} {
+		legacy := Values{MCPRefresh: enabled, ToolRetirement: enabled}
+		if err := Validate(legacy); err != nil {
+			t.Fatal(err)
+		}
+		if got := Complete(legacy); !maps.Equal(got, Values{AsyncCompact: definitions[0].Default}) {
+			t.Fatalf("complete = %v", got)
+		}
+	}
+}
+
+func TestCompleteAppliesDefaultsAndExplicitChoices(t *testing.T) {
+	for _, definition := range Definitions() {
+		if got := Complete(nil)[definition.ID]; got != definition.Default {
+			t.Fatalf("default %s = %v", definition.ID, got)
+		}
+		for _, enabled := range []bool{false, true} {
+			if got := Complete(Values{definition.ID: enabled})[definition.ID]; got != enabled {
+				t.Fatalf("choice %s = %v", definition.ID, got)
+			}
+		}
 	}
 }

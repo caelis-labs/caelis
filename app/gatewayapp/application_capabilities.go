@@ -15,7 +15,6 @@ import (
 	skilltool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/skill"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
-	"github.com/caelis-labs/caelis/control/experimental"
 	"github.com/caelis-labs/caelis/control/sessionprofile"
 )
 
@@ -214,7 +213,7 @@ func (r *applicationTurnResolver) acquireCapabilities(ctx context.Context, confi
 	if len(configuration.Profile.MCPServers) != 0 {
 		resource := r.currentMCP
 		if resource == nil || !reflect.DeepEqual(resource.servers, configuration.Profile.MCPServers) {
-			manager, err := mcp.NewManagerWithOptions(context.WithoutCancel(ctx), applicationMCPSpecs(configuration.Profile), nil, mcp.ManagerOptions{RefreshTools: r.composition.activeRuntime.Experimental[experimental.MCPRefresh]})
+			manager, err := mcp.NewManagerWithOptions(context.WithoutCancel(ctx), applicationMCPSpecs(configuration.Profile), nil, mcp.ManagerOptions{})
 			if err != nil {
 				return nil, nil, err
 			}
@@ -320,9 +319,16 @@ func (r *applicationTurnResolver) capabilityStatus(revision uint64) sessionprofi
 	infos := current.manager.GetServerInfos("application")
 	status.Servers = make([]sessionprofile.MCPServerStatus, 0, len(infos))
 	for _, info := range infos {
-		status.Servers = append(status.Servers, sessionprofile.MCPServerStatus{Name: info.Name, Status: info.Status, Tools: info.Tools, ToolDetails: info.ToolDetails, Warning: info.Warning})
+		status.Servers = append(status.Servers, applicationMCPServerStatus(info))
 	}
 	return status
+}
+
+func applicationMCPServerStatus(info mcp.MCPServerInfo) sessionprofile.MCPServerStatus {
+	return sessionprofile.MCPServerStatus{
+		Name: info.Name, Status: info.Status, Tools: info.Tools, ToolDetails: info.ToolDetails, Warning: info.Warning,
+		Refreshing: info.Refreshing, Stale: info.Stale, RefreshFailed: info.RefreshFailed,
+	}
 }
 
 // Borrow only the manager already owned by this activation. A remote retry must

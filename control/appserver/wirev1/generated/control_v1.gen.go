@@ -989,11 +989,14 @@ type LifecycleEvent struct {
 }
 
 type MCPServerSnapshot struct {
-	Name        string          `json:"name"`
-	Status      string          `json:"status"`
-	ToolDetails []MCPToolDetail `json:"tool_details,omitempty"`
-	Tools       []string        `json:"tools,omitempty"`
-	Warning     *string         `json:"warning,omitempty"`
+	Name          string          `json:"name"`
+	RefreshFailed *bool           `json:"refresh_failed,omitempty"`
+	Refreshing    *bool           `json:"refreshing,omitempty"`
+	Stale         *bool           `json:"stale,omitempty"`
+	Status        string          `json:"status"`
+	ToolDetails   []MCPToolDetail `json:"tool_details,omitempty"`
+	Tools         []string        `json:"tools,omitempty"`
+	Warning       *string         `json:"warning,omitempty"`
 }
 
 type MCPToolDetail struct {
@@ -1698,11 +1701,14 @@ type SessionMCPServer struct {
 }
 
 type SessionMCPServerStatus struct {
-	Name        string          `json:"name"`
-	Status      string          `json:"status"`
-	ToolDetails []MCPToolDetail `json:"tool_details,omitempty"`
-	Tools       []string        `json:"tools,omitempty"`
-	Warning     *string         `json:"warning,omitempty"`
+	Name          string          `json:"name"`
+	RefreshFailed *bool           `json:"refresh_failed,omitempty"`
+	Refreshing    *bool           `json:"refreshing,omitempty"`
+	Stale         *bool           `json:"stale,omitempty"`
+	Status        string          `json:"status"`
+	ToolDetails   []MCPToolDetail `json:"tool_details,omitempty"`
+	Tools         []string        `json:"tools,omitempty"`
+	Warning       *string         `json:"warning,omitempty"`
 }
 
 type SessionMCPStatus struct {

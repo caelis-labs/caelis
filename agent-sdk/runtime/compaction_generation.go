@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -35,6 +36,10 @@ const inContextCompactionPrompt = `Internal compaction for this ongoing task. Re
 var (
 	errCompactionToolRequest    = errors.New("agent-sdk/runtime: compaction response requested a tool")
 	errCompactionUnusableOutput = errors.New("agent-sdk/runtime: compaction returned no usable checkpoint")
+	errCompactionTruncated      = errors.New("agent-sdk/runtime: compaction response was truncated")
+	errCompactionFiltered       = errors.New("agent-sdk/runtime: compaction response was filtered")
+	errCompactionRefused        = errors.New("agent-sdk/runtime: compaction response was refused")
+	errCompactionIncomplete     = errors.New("agent-sdk/runtime: compaction response did not complete successfully")
 )
 
 func modelCompactMarkdownInContext(ctx context.Context, llm model.LLM, frozen *model.Request) (string, error) {
@@ -47,11 +52,11 @@ func modelCompactMarkdownInContext(ctx context.Context, llm model.LLM, frozen *m
 	if err != nil {
 		return "", err
 	}
-	text := normalizeCompactMarkdown(strings.TrimSpace(final.Message.TextContent()))
+	text := strings.TrimSpace(final.Message.TextContent())
 	if compactMarkdownLooksEmpty(text) {
 		return "", errCompactionUnusableOutput
 	}
-	return text, nil
+	return normalizeCompactMarkdown(text), nil
 }
 
 func (c *codexStyleCompactor) generateCompactMarkdown(
@@ -134,7 +139,7 @@ func (c *codexStyleCompactor) generateCompactMarkdownOnce(
 		if err == nil {
 			return text, nil
 		}
-		if isCompactionOverflowError(err) {
+		if isCompactionTerminalError(err) || isCompactionOverflowError(err) {
 			return "", err
 		}
 		lastErr = err
@@ -192,15 +197,18 @@ Across the prior summary and all source=user frames, preserve Session-wide User 
 	if err != nil {
 		return "", err
 	}
-	text := normalizeCompactMarkdown(strings.TrimSpace(final.Message.TextContent()))
+	text := strings.TrimSpace(final.Message.TextContent())
 	if compactMarkdownLooksEmpty(text) {
 		salvaged, salvageErr := salvageCompactMarkdown(ctx, llm, input, text, serviceTier)
-		if salvageErr == nil && !compactMarkdownLooksEmpty(salvaged) {
+		if salvageErr == nil {
 			return salvaged, nil
+		}
+		if isCompactionTerminalError(salvageErr) {
+			return "", salvageErr
 		}
 		return "", fmt.Errorf("agent-sdk/runtime: insufficient compact checkpoint payload: %s", compactText(text, 320))
 	}
-	return text, nil
+	return normalizeCompactMarkdown(text), nil
 }
 
 func collectCompactionResponse(ctx context.Context, llm model.LLM, req *model.Request) (*model.Response, error) {
@@ -228,7 +236,39 @@ func collectCompactionResponse(ctx context.Context, llm model.LLM, req *model.Re
 	if final == nil {
 		return nil, errors.New("agent-sdk/runtime: model returned no compaction response")
 	}
+	if !final.FinishReasonReported {
+		// Most adapters that omit termination metadata are ordinary fakes or
+		// compatibility servers; keep this diagnostic out of normal runs.
+		slog.DebugContext(ctx, "compaction response has unreported finish reason",
+			slog.String("component", "context_compaction"),
+			slog.Bool("finish_reason_reported", false),
+			slog.String("provider", final.Provider),
+			slog.String("model", final.Model),
+		)
+	}
+	if final.Status == model.ResponseStatusFailed || final.Status == model.ResponseStatusCancelled {
+		return nil, errCompactionIncomplete
+	}
+	switch final.FinishReason {
+	case model.FinishReasonLength:
+		return nil, errCompactionTruncated
+	case model.FinishReasonContentFilter:
+		return nil, errCompactionFiltered
+	case model.FinishReasonRefusal:
+		return nil, errCompactionRefused
+	case model.FinishReasonUnknown:
+		if final.FinishReasonReported {
+			return nil, errCompactionIncomplete
+		}
+	}
 	return final, nil
+}
+
+// These are completed but unusable responses, not transient provider failures.
+// Preserve their identity through salvage and in-context fallback decisions.
+func isCompactionTerminalError(err error) bool {
+	return errors.Is(err, errCompactionTruncated) || errors.Is(err, errCompactionFiltered) ||
+		errors.Is(err, errCompactionRefused) || errors.Is(err, errCompactionIncomplete)
 }
 
 func compactionResponseUsesTools(event *model.StreamEvent) bool {
@@ -263,6 +303,7 @@ func salvageCompactMarkdown(ctx context.Context, llm model.LLM, input string, pr
 		))
 	}
 	request := &model.Request{
+		DisableTools: true,
 		Instructions: []model.Part{model.NewTextPart(compactionInstructions(`
 You are repairing an internal CONTEXT COMPACTION SUMMARY for the same ongoing coding task. Return only a concise Markdown continuation handoff, without JSON or code fences. Recover only state supported by the source frames. Across the prior summary and all source=user frames, preserve Session-wide User intent and valid authorization, including compatible older goals and constraints; newer User messages supersede only conflicts or revisions. Merge work updates and retain progress, decisions, material findings and evidence, validation, undelivered results, unresolved work, and next actions. Compress completed, superseded, repetitive, irrelevant, or progression-only detail, and keep uncertainty explicit. Runtime appends the current plan and active subagent handles separately.
 `))},
@@ -276,5 +317,9 @@ You are repairing an internal CONTEXT COMPACTION SUMMARY for the same ongoing co
 	if err != nil {
 		return "", err
 	}
-	return normalizeCompactMarkdown(strings.TrimSpace(final.Message.TextContent())), nil
+	text := strings.TrimSpace(final.Message.TextContent())
+	if compactMarkdownLooksEmpty(text) {
+		return "", errCompactionUnusableOutput
+	}
+	return normalizeCompactMarkdown(text), nil
 }

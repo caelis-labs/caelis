@@ -148,8 +148,7 @@ func (a *workspaceConfigAssembler) assembleProfileSnapshot(ctx context.Context, 
 	}
 	instance.activeRuntime.Assembly.Agents = agents
 	localConfig := runtime.Config{
-		ExperimentalToolRetirement: instance.activeRuntime.Experimental[experimental.ToolRetirement],
-		Sessions:                   sessions, AgentFactory: chat.Factory{}, Compaction: compaction,
+		Sessions: sessions, AgentFactory: chat.Factory{}, Compaction: compaction,
 		Diagnostics: a.deps.authorities.diagnostics, PolicyRegistry: policies, DefaultPolicyMode: mode,
 		MCPGrants:     a.deps.authorities.mcpGrants,
 		SandboxPolicy: sandboxPolicy,

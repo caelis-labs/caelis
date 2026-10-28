@@ -1,19 +1,15 @@
-# Experimental MCP tool lifecycle
+# MCP tool lifecycle
 
-The SDK has two independent, default-off opt-ins:
+MCP catalog refresh and deferred tool retirement are always enabled. `mcp.NewManager`
+processes tool-list notifications and refreshes the server capability directory.
+Runtime uses version-bound ToolSearch exposure and the temporary `tool_retire`
+management tool with the ordinary `tool_search` tool and MCP definitions carrying
+complete source fingerprints. Only asynchronous compaction remains an opt-in;
+see [Experimental features](experimental-features.md).
 
-- `mcp.NewManagerWithOptions(..., mcp.ManagerOptions{RefreshTools: true})`
-  refreshes the server capability directory. Ordinary `NewManager` retains
-  startup-only discovery.
-- `runtime.Config{ExperimentalToolRetirement: true}` enables version-bound
-  ToolSearch exposure and the temporary `tool_retire` management tool. It
-  requires the ordinary `tool_search` tool and MCP definitions with complete
-  source fingerprints. Host configuration exposes both switches through
-  [Experimental features](experimental-features.md).
-
-The switches are independent. Refresh can run without any compact; retirement
-can use a static catalog. Neither disconnects a server, uninstalls a plugin, or
-deletes history.
+Refresh can run without any compact. Retirement applies at a durable canonical
+compact, with synchronous or asynchronous compaction. Neither disconnects a
+server, uninstalls a plugin, or deletes history.
 The reproducible local protocol and long-session experiments are described in
 [Testing](testing.md#experimental-mcp-tool-lifecycle).
 
@@ -27,22 +23,24 @@ refreshes the visible catalog in both static and profile-resolved Sessions,
 independently of retirement. Sources pass through
 the existing Runtime wrappers; there is no separate execution path.
 
-A projected name remains the exact routing name. Experimental discovery also
+A projected name remains the exact routing name. Discovery also
 returns a `binding` with `name`, an opaque `identity` hash of plugin/server/remote
 name, and `version`, the existing MCP source fingerprint. The version includes
 configuration, effective stdio launch environment digest, declared server version,
-protocol and full remote tool definition. Secrets are not returned. A same-name
-replacement or schema change requires rediscovery and fresh source approval.
+protocol and full remote tool definition. Secrets are not returned. After a successful refresh, an already exposed tool
+with the same projected name uses its current definition on the next model
+request, without another ToolSearch. A changed source still requires fresh source
+approval. The pinned response and tool batch keep their original schema; obsolete
+handles fail final dispatch validation. Newly added, unexposed names still require
+ToolSearch.
 Connection identity is additionally pinned by the callable; a reconnected
 Manager cannot revive a handle from a closed connection. A tool that disappears
 and later returns also receives a new callable binding, even with identical
 identity/schema bytes; old pending calls remain invalid.
 
-Canonical experimental ToolSearch results retain these bindings without repeating
-schemas. Name-only legacy discoveries do not authorize experimental exposure:
-old messages/results remain readable, and tools can be rediscovered. Turning the
-experiment off restores ordinary name-based discovery behavior, so it is not a
-migration or rollback guarantee for production Sessions.
+Canonical ToolSearch results retain these bindings without repeating schemas.
+Name-only legacy discoveries do not authorize version-bound exposure: old
+messages/results remain readable, and tools can be rediscovered.
 
 ## Directory refresh and revocation
 
@@ -59,7 +57,7 @@ that same activation-owned Manager. A stable failed or disconnected directory
 can be captured for an unrelated checkpoint; a changed revision or incomplete
 initialization still rejects adoption, and unavailable tools stay blocked.
 
-The experimental client supports legacy standalone SSE and the SDK's
+The MCP client supports legacy standalone SSE and the SDK's
 2026-07-28 subscription path. It suppresses the SDK's separate tool-page TTL cache:
 otherwise a late page could repopulate that cache after notification invalidation.
 The Manager remains the single directory owner. Cursor bytes stay opaque. The
@@ -77,7 +75,7 @@ receives evidence of it.
 MCP grants separately capture per-scope revocation epochs before review and check
 them at dispatch. Revocation while waiting for source or per-call approval rejects
 the old call; a late approval cannot recreate its persistent grant. These checks
-also apply with the experiment disabled. Epochs are process-local: the existing
+apply independently of compaction. Epochs are process-local: the existing
 shared Host grant store owns persistence, and no pending callback survives a
 Runtime restart.
 
@@ -92,9 +90,7 @@ also cancels its mark conservatively. The server directory stays searchable.
 
 Runtime stores a versioned exposure projection in canonical result metadata.
 Temporarily unready catalogs do not erase exact durable bindings or pending
-marks; only ready, version-matching bindings become callable. After retirement
-is disabled, later ordinary discovery extends the last checkpoint in canonical
-event order.
+marks; only ready, current bindings become callable.
 At compaction persistence it derives the current projection from canonical events,
 removes eligible marked bindings, and puts the resulting set in the same
 checkpoint append. Only a confirmed append is adopted. Exposure reconstruction
@@ -113,7 +109,10 @@ compact while this Runtime has an active model/tool batch preserves the marks;
 an idle compact or Runtime's normal safe compaction boundary may apply them.
 This mechanism requires one live Runtime owner per Session, under the existing Session
 fence. When all dynamic tools are retired, the management tool disappears too.
-ToolSearch remains available and can expose the tools and manager again.
+ToolSearch remains available and can expose the tools and manager again. A
+retired tool remains absent on later model requests, even if catalog refresh
+keeps its name available. It requires a new ToolSearch discovery to become
+exposed again.
 
 The default policy is explicit per-tool marking. A service-level action could
 expand to the exact currently exposed bindings when marked, but must not capture
@@ -172,7 +171,8 @@ The checkpoint integration contracts are:
   invalidates the candidate. An ordinary exposure change invalidates its request
   prefix. Failed compact/adoption keeps both marks and the old exposed set.
 
-Host assembly supplies these options from activation-pinned Control defaults.
+Host assembly supplies the asynchronous compaction option from activation-pinned
+Control defaults; refresh and retirement do not depend on that option.
 Runtime composes the directory and grant guards with the existing request
 validator for both synchronous and asynchronous checkpoints. Explicit-profile
 requests additionally hold their desired configuration revision through commit.

@@ -130,6 +130,7 @@ func TestOpenAICodexToolLoopPreservesEncryptedReasoning(t *testing.T) {
 	if reasoningDelta != "checking" || toolDelta != "{\"query\":\"weather\"}" {
 		t.Fatalf("deltas = reasoning %q tool %q", reasoningDelta, toolDelta)
 	}
+	assertFinishReasonReported(t, first)
 	if first.FinishReason != model.FinishReasonToolCalls {
 		t.Fatalf("FinishReason = %q, want tool_calls", first.FinishReason)
 	}
@@ -154,6 +155,7 @@ func TestOpenAICodexToolLoopPreservesEncryptedReasoning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second Generate() error = %v", err)
 	}
+	assertFinishReasonReported(t, second)
 	if second.Message.TextContent() != "sunny" || second.FinishReason != model.FinishReasonStop {
 		t.Fatalf("second response = %+v", second)
 	}

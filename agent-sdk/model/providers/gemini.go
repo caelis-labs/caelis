@@ -134,15 +134,16 @@ func (l *geminiLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 			yield(&model.StreamEvent{
 				Type: model.StreamEventTurnDone,
 				Response: &model.Response{
-					Message:         msg,
-					TurnComplete:    true,
-					StepComplete:    true,
-					Status:          model.ResponseStatusCompleted,
-					FinishReason:    model.FinishReasonStop,
-					RawFinishReason: string(genai.FinishReasonStop),
-					Model:           l.name,
-					Provider:        l.provider,
-					Usage:           usage,
+					Message:              msg,
+					TurnComplete:         true,
+					StepComplete:         true,
+					Status:               model.ResponseStatusCompleted,
+					FinishReason:         model.FinishReasonStop,
+					RawFinishReason:      string(genai.FinishReasonStop),
+					FinishReasonReported: true,
+					Model:                l.name,
+					Provider:             l.provider,
+					Usage:                usage,
 				},
 			}, nil)
 			return
@@ -213,15 +214,16 @@ func (l *geminiLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 		yield(&model.StreamEvent{
 			Type: model.StreamEventTurnDone,
 			Response: &model.Response{
-				Message:         acc.message(),
-				TurnComplete:    true,
-				StepComplete:    true,
-				Status:          model.ResponseStatusCompleted,
-				FinishReason:    geminiFinishReasonToKernel(finishReason),
-				RawFinishReason: string(finishReason),
-				Model:           l.name,
-				Provider:        l.provider,
-				Usage:           usage,
+				Message:              acc.message(),
+				TurnComplete:         true,
+				StepComplete:         true,
+				Status:               model.ResponseStatusCompleted,
+				FinishReason:         geminiFinishReasonToKernel(finishReason),
+				RawFinishReason:      string(finishReason),
+				FinishReasonReported: true,
+				Model:                l.name,
+				Provider:             l.provider,
+				Usage:                usage,
 			},
 		}, nil)
 	}

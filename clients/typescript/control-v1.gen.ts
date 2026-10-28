@@ -941,6 +941,9 @@ export interface LifecycleEvent {
 
 export interface MCPServerSnapshot {
   name: string;
+  refresh_failed?: boolean;
+  refreshing?: boolean;
+  stale?: boolean;
   status: string;
   tool_details?: Array<MCPToolDetail>;
   tools?: Array<string>;
@@ -1699,6 +1702,9 @@ export interface SessionMCPServer {
 
 export interface SessionMCPServerStatus {
   name: string;
+  refresh_failed?: boolean;
+  refreshing?: boolean;
+  stale?: boolean;
   status: "inactive" | "connecting" | "running" | "failed";
   tool_details?: Array<MCPToolDetail>;
   tools?: Array<string>;

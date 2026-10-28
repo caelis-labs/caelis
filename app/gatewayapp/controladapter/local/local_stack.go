@@ -222,11 +222,14 @@ func toRuntimePluginSnapshot(info gatewayapp.PluginInfo) controlprompt.PluginSna
 	mcpSnapshots := make([]controlprompt.MCPServerSnapshot, 0, len(info.MCPServers))
 	for _, mcpInfo := range info.MCPServers {
 		mcpSnapshots = append(mcpSnapshots, controlprompt.MCPServerSnapshot{
-			Name:        mcpInfo.Name,
-			Status:      mcpInfo.Status,
-			Tools:       append([]string(nil), mcpInfo.Tools...),
-			ToolDetails: append([]mcp.MCPToolDetail(nil), mcpInfo.ToolDetails...),
-			Warning:     mcpInfo.Warning,
+			Name:          mcpInfo.Name,
+			Status:        mcpInfo.Status,
+			Tools:         append([]string(nil), mcpInfo.Tools...),
+			ToolDetails:   append([]mcp.MCPToolDetail(nil), mcpInfo.ToolDetails...),
+			Warning:       mcpInfo.Warning,
+			Refreshing:    mcpInfo.Refreshing,
+			Stale:         mcpInfo.Stale,
+			RefreshFailed: mcpInfo.RefreshFailed,
 		})
 	}
 	return controlprompt.PluginSnapshot{

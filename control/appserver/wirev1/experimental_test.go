@@ -5,6 +5,7 @@ import (
 	"math"
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/caelis-labs/caelis/control/appserver"
@@ -61,7 +62,11 @@ func TestExperimentalCatalogMatchesWireProperties(t *testing.T) {
 	var spec struct {
 		Components struct {
 			Schemas map[string]struct {
-				Properties map[string]struct{ Type string }
+				Properties map[string]struct {
+					Type        string
+					Deprecated  bool
+					Description string
+				}
 			}
 		}
 	}
@@ -70,8 +75,14 @@ func TestExperimentalCatalogMatchesWireProperties(t *testing.T) {
 	}
 	properties := spec.Components.Schemas["ExperimentalValues"].Properties
 	definitions := experimental.Definitions()
-	if len(properties) != len(definitions) {
+	if len(properties) != len(definitions)+2 {
 		t.Fatal("wire and catalog feature sets differ")
+	}
+	for _, id := range []string{experimental.MCPRefresh, experimental.ToolRetirement} {
+		property := properties[id]
+		if property.Type != "boolean" || !property.Deprecated || !strings.Contains(property.Description, "ignored") {
+			t.Fatalf("legacy property %q = %+v", id, property)
+		}
 	}
 	for _, feature := range definitions {
 		if properties[feature.ID].Type != "boolean" {
@@ -106,5 +117,36 @@ func TestExperimentalMCPRefreshWire(t *testing.T) {
 	var generatedRequest generated.RefreshMCPToolsRequest
 	if err = json.Unmarshal(raw, &generatedRequest); err != nil || generatedRequest.PluginId != "application" {
 		t.Fatalf("generated refresh request=%+v %v", generatedRequest, err)
+	}
+}
+
+func TestMCPCatalogRefreshFactsAreOptionalBooleans(t *testing.T) {
+	raw, err := os.ReadFile("../../../api/control/v1/openapi.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var spec struct {
+		Components struct {
+			Schemas map[string]struct {
+				Required   []string
+				Properties map[string]struct{ Type string }
+			}
+		}
+	}
+	if err := json.Unmarshal(raw, &spec); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"MCPServerSnapshot", "SessionMCPServerStatus"} {
+		schema := spec.Components.Schemas[name]
+		for _, field := range []string{"refreshing", "stale", "refresh_failed"} {
+			if schema.Properties[field].Type != "boolean" {
+				t.Fatalf("%s.%s must be boolean", name, field)
+			}
+			for _, required := range schema.Required {
+				if required == field {
+					t.Fatalf("%s.%s must be optional", name, field)
+				}
+			}
+		}
 	}
 }

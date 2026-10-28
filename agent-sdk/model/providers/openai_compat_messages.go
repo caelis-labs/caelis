@@ -421,7 +421,9 @@ func normalizeOpenAICompatFinishReason(raw string) model.FinishReason {
 		return model.FinishReasonToolCalls
 	case "content_filter":
 		return model.FinishReasonContentFilter
+	case "refusal":
+		return model.FinishReasonRefusal
 	default:
-		return model.FinishReason(strings.ToLower(strings.TrimSpace(raw)))
+		return model.FinishReasonUnknown
 	}
 }

@@ -53,16 +53,16 @@ func TestExperimentalAsyncPreservesTurnStartBudget(t *testing.T) {
 }
 
 func TestExperimentalFailedMCPDoesNotBlockUnrelatedCompact(t *testing.T) {
-	for bits := 0; bits < 4; bits++ {
+	for bits := 0; bits < 2; bits++ {
 		t.Run(fmt.Sprint(bits), func(t *testing.T) {
-			manager, err := mcp.NewManagerWithOptions(t.Context(), []mcp.ServerSpec{{PluginID: "fixture", Name: "missing", Command: filepath.Join(t.TempDir(), "nonexistent")}}, nil, mcp.ManagerOptions{RefreshTools: true})
+			manager, err := mcp.NewManager(t.Context(), []mcp.ServerSpec{{PluginID: "fixture", Name: "missing", Command: filepath.Join(t.TempDir(), "nonexistent")}}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
 			defer manager.Close()
 			<-manager.Initialized()
 			store, active := newTestSessionService(t, "failed-mcp")
-			rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}, ExperimentalToolRetirement: bits&2 != 0, Compaction: CompactionConfig{Enabled: true, Async: AsyncCompactionConfig{Enabled: bits&1 != 0}}})
+			rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}, Compaction: CompactionConfig{Enabled: true, Async: AsyncCompactionConfig{Enabled: bits&1 != 0}}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -79,7 +79,7 @@ func TestExperimentalFailedMCPDoesNotBlockUnrelatedCompact(t *testing.T) {
 }
 
 func TestExperimentalMCPWorkflowIndependentCombinations(t *testing.T) {
-	for bits := 0; bits < 8; bits++ {
+	for bits := 0; bits < 2; bits++ {
 		for _, dynamic := range []bool{false, true} {
 			t.Run(fmt.Sprintf("flags_%d/dynamic_%t", bits, dynamic), func(t *testing.T) {
 				t.Parallel() // Each workflow owns its HTTP server, Runtime and file Store.
@@ -94,7 +94,7 @@ func TestExperimentalMCPWorkflowIndependentCombinations(t *testing.T) {
 				install("schema-v1")
 				endpoint := httptest.NewServer(mcpsdk.NewStreamableHTTPHandler(func(*http.Request) *mcpsdk.Server { return server }, nil))
 				defer endpoint.Close()
-				manager, err := mcp.NewManagerWithOptions(t.Context(), []mcp.ServerSpec{{PluginID: "fixture", Name: "local", Transport: mcp.TransportStreamableHTTP, URL: endpoint.URL}}, nil, mcp.ManagerOptions{RefreshTools: bits&2 != 0})
+				manager, err := mcp.NewManager(t.Context(), []mcp.ServerSpec{{PluginID: "fixture", Name: "local", Transport: mcp.TransportStreamableHTTP, URL: endpoint.URL}}, nil)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -106,14 +106,14 @@ func TestExperimentalMCPWorkflowIndependentCombinations(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}, ExperimentalToolRetirement: bits&4 != 0, Compaction: CompactionConfig{Enabled: true, Async: AsyncCompactionConfig{Enabled: bits&1 != 0}}, PolicyRegistry: retirementPolicy(), DefaultPolicyMode: "retirement-test"})
+				rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}, Compaction: CompactionConfig{Enabled: true, Async: AsyncCompactionConfig{Enabled: bits&1 != 0}}, PolicyRegistry: retirementPolicy(), DefaultPolicyMode: "retirement-test"})
 				if err != nil {
 					t.Fatal(err)
 				}
 				search := toolsearch.NewSource(manager, toolsearch.NewLexicalRanker())
 				update := tool.NamedTool{Def: tool.Definition{Name: "UpdateCatalog", InputSchema: map[string]any{"type": "object"}, EffectClass: tool.EffectReadOnly}, Invoke: func(ctx context.Context, c tool.Call) (tool.Result, error) {
 					install("schema-v2")
-					if bits&2 != 0 {
+					{
 						deadline := time.Now().Add(5 * time.Second)
 						for {
 							current := manager.Tools()
@@ -135,10 +135,7 @@ func TestExperimentalMCPWorkflowIndependentCombinations(t *testing.T) {
 					case 1:
 						return []model.ToolCall{{ID: "update", Name: "UpdateCatalog", Args: `{}`}}
 					case 3:
-						want := "schema-v1"
-						if bits&2 != 0 {
-							want = "schema-v2"
-						}
+						want := "schema-v2"
 						found := false
 						for _, def := range req.Tools {
 							if def.Function != nil && def.Function.Name == "local__read" {
@@ -150,9 +147,7 @@ func TestExperimentalMCPWorkflowIndependentCombinations(t *testing.T) {
 						}
 						return []model.ToolCall{{ID: "effect", Name: "local__read", Args: `{}`}}
 					case 4:
-						if bits&4 != 0 {
-							return []model.ToolCall{{ID: "mark", Name: tool.RetireToolName, Args: retirementMarkArgs(tool.BindingForDefinition(manager.Tools()[0].Definition()))}}
-						}
+						return []model.ToolCall{{ID: "mark", Name: tool.RetireToolName, Args: retirementMarkArgs(tool.BindingForDefinition(manager.Tools()[0].Definition()))}}
 					}
 					return nil
 				}}
@@ -179,15 +174,11 @@ func TestExperimentalMCPWorkflowIndependentCombinations(t *testing.T) {
 					t.Fatal(err)
 				}
 				data, _ := compact.CompactEventDataFromEvent(result.Event)
-				want := 1
-				if bits&4 != 0 {
-					want = 0
-				}
+				want := 0
 				if len(data.DiscoveredTools) != want {
 					t.Fatalf("compact exposure=%v", data.DiscoveredTools)
 				}
-				// A later activation has retirement disabled. Its new discovery is
-				// canonical even when the previous checkpoint retired every tool.
+				// A later activation can rediscover tools retired by a prior checkpoint.
 				ordinary, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}})
 				if err != nil {
 					t.Fatal(err)
@@ -226,11 +217,11 @@ func TestExperimentalMCPWorkflowIndependentCombinations(t *testing.T) {
 				}
 				capture := func(loaded session.LoadedSession) *model.Request {
 					probe := &retirementScriptModel{steps: func(int, *model.Request) []model.ToolCall { return nil }}
-					chatAgent, err := (chat.Factory{}).NewAgent(t.Context(), agent.AgentSpec{Model: probe, Tools: []tool.Tool{search}, DeferredTools: manager})
+					chatAgent, err := (chat.Factory{}).NewAgent(t.Context(), agent.AgentSpec{Model: probe, Tools: []tool.Tool{search, tool.NewRetirementTool()}, DeferredTools: manager})
 					if err != nil {
 						t.Fatal(err)
 					}
-					events := promptEventsWithToolVisibilityMetadata(compact.PromptEventsFromLatestCompact(loaded.Events), loaded.Events, false)
+					events := promptEventsWithToolVisibilityMetadata(compact.PromptEventsFromLatestCompact(loaded.Events), loaded.Events)
 					for _, err := range chatAgent.Run(agent.NewContext(agent.ContextSpec{Context: t.Context(), Session: loaded.Session, Events: events, State: loaded.State})) {
 						if err != nil {
 							t.Fatal(err)
@@ -239,7 +230,7 @@ func TestExperimentalMCPWorkflowIndependentCombinations(t *testing.T) {
 					return probe.requests[0]
 				}
 				before, after := capture(live), capture(replay)
-				if !reflect.DeepEqual(before, after) || len(after.Tools) != 2 {
+				if !reflect.DeepEqual(before, after) || len(after.Tools) != 3 {
 					t.Fatal("ordinary model context/exposure did not round trip")
 				}
 			})
@@ -384,7 +375,7 @@ func TestExperimentalUnreadyCatalogPreservesExposureAcrossActivation(t *testing.
 			binding := tool.BindingForDefinition(remote.Definition())
 			run := func(llm model.LLM, local ...tool.Tool) {
 				t.Helper()
-				rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}, ExperimentalToolRetirement: true, PolicyRegistry: retirementPolicy(), DefaultPolicyMode: "retirement-test"})
+				rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}, PolicyRegistry: retirementPolicy(), DefaultPolicyMode: "retirement-test"})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -458,7 +449,7 @@ func TestExperimentalCatalogRequiresReleaseGuard(t *testing.T) {
 	store, active := newTestSessionService(t, "missing-catalog-guard")
 	appendTestEvent(t, store, active.SessionRef, userTextEvent("history"))
 	appendTestEvent(t, store, active.SessionRef, experimentalAssistantEvent("answer"))
-	rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}, ExperimentalToolRetirement: true})
+	rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}})
 	if err != nil {
 		t.Fatal(err)
 	}

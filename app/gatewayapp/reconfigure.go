@@ -325,7 +325,7 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 		bundle.Close()
 		return nil, fmt.Errorf("gatewayapp: failed to initialize MCP servers: %w", err)
 	}
-	mcpMgr, err := mcp.NewManagerWithOptions(context.WithoutCancel(ctx), mcpSpecs, s.mcpFailureNotifier(), mcp.ManagerOptions{RefreshTools: runtimeCfg.Experimental[experimental.MCPRefresh]})
+	mcpMgr, err := mcp.NewManagerWithOptions(context.WithoutCancel(ctx), mcpSpecs, s.mcpFailureNotifier(), mcp.ManagerOptions{})
 	if err != nil {
 		bundle.Close()
 		return nil, fmt.Errorf("gatewayapp: failed to initialize MCP servers: %w", err)
@@ -381,23 +381,22 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 		return nil, err
 	}
 	localCfg := runtime.Config{
-		ExperimentalToolRetirement: runtimeCfg.Experimental[experimental.ToolRetirement],
-		Sessions:                   s.sessions,
-		AgentFactory:               chat.Factory{},
-		DefaultPolicyMode:          effectivePolicyProfile,
-		SandboxPolicy:              sandboxPolicySnapshot,
-		PolicyRegistry:             policyRegistry,
-		DefaultApprovalMode:        string(kernelimpl.NormalizeApprovalMode(runtimeCfg.ApprovalMode)),
-		MCPGrants:                  s.authorities.mcpGrants,
-		Compaction:                 compactionCfg,
-		Diagnostics:                s.authorities.diagnostics,
-		ControllerContextRouter:    contextRouter,
-		ControllerEventForwarder:   acpbridge.NewControllerForwarder(s.sessions),
-		TaskStore:                  s.authorities.taskStore,
-		TaskOutput:                 s.authorities.taskOutput,
-		TaskActivityChanged:        s.runtimeTaskChanged,
-		TaskCommitted:              s.taskCommitted,
-		ChildApprovalRequester:     backgroundChildApprovalRequester{composition: s},
+		Sessions:                 s.sessions,
+		AgentFactory:             chat.Factory{},
+		DefaultPolicyMode:        effectivePolicyProfile,
+		SandboxPolicy:            sandboxPolicySnapshot,
+		PolicyRegistry:           policyRegistry,
+		DefaultApprovalMode:      string(kernelimpl.NormalizeApprovalMode(runtimeCfg.ApprovalMode)),
+		MCPGrants:                s.authorities.mcpGrants,
+		Compaction:               compactionCfg,
+		Diagnostics:              s.authorities.diagnostics,
+		ControllerContextRouter:  contextRouter,
+		ControllerEventForwarder: acpbridge.NewControllerForwarder(s.sessions),
+		TaskStore:                s.authorities.taskStore,
+		TaskOutput:               s.authorities.taskOutput,
+		TaskActivityChanged:      s.runtimeTaskChanged,
+		TaskCommitted:            s.taskCommitted,
+		ChildApprovalRequester:   backgroundChildApprovalRequester{composition: s},
 	}
 	var acpControlPlane *acpassembly.ControlPlane
 	localCfg, acpControlPlane, err = injectACPControlPlane(

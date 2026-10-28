@@ -743,6 +743,9 @@ const (
 
 // Request is the provider-agnostic model request contract.
 type Request struct {
+	// Source binds the assembled messages to observed Session history. It is
+	// local bookkeeping and must not be sent to providers.
+	Source *RequestSource `json:"-"`
 	// DisableTools closes tool selection for this step while retaining definitions
 	// needed to interpret prior tool calls. Providers use their native no-tool
 	// choice; protocols without one omit declarations from the wire request.
@@ -780,6 +783,7 @@ const (
 	FinishReasonLength        FinishReason = "length"
 	FinishReasonToolCalls     FinishReason = "tool_calls"
 	FinishReasonContentFilter FinishReason = "content_filter"
+	FinishReasonRefusal       FinishReason = "refusal"
 )
 
 // PartDelta is one incremental provider-neutral part update.
@@ -806,6 +810,9 @@ type Response struct {
 	Model               string         `json:"model,omitempty"`
 	Provider            string         `json:"provider,omitempty"`
 	ContextWindowTokens int            `json:"context_window_tokens,omitempty"`
+	// FinishReasonReported distinguishes an adapter-normalized terminal reason
+	// (including Unknown) from providers that do not report termination metadata.
+	FinishReasonReported bool `json:"finish_reason_reported,omitempty"`
 }
 
 // StreamEvent is the unified event contract consumed by upper layers.

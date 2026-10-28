@@ -82,6 +82,22 @@ func sendPluginManagerPrompt(ctx context.Context, service controlprompt.PluginSe
 			strings.TrimSpace(p.Name),
 			strings.TrimSpace(p.Version),
 		}, " "))
+		for _, server := range p.MCPServers {
+			health := []string{server.Status}
+			if server.Refreshing {
+				health = append(health, "refreshing")
+			}
+			if server.Stale {
+				health = append(health, "stale")
+			}
+			if server.RefreshFailed {
+				health = append(health, "refresh failed")
+			}
+			detail += "; " + server.Name + ": " + strings.Join(health, ", ")
+			if server.Warning != "" {
+				detail += " (" + server.Warning + ")"
+			}
+		}
 		choices = append(choices, PromptChoice{
 			Label:  id,
 			Value:  id,

@@ -208,15 +208,16 @@ func (l *ollamaLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 			yield(&model.StreamEvent{
 				Type: model.StreamEventTurnDone,
 				Response: &model.Response{
-					Message:         msg,
-					TurnComplete:    true,
-					StepComplete:    true,
-					Status:          model.ResponseStatusCompleted,
-					FinishReason:    finishReason,
-					RawFinishReason: out.DoneReason,
-					Model:           out.Model,
-					Provider:        l.provider,
-					Usage:           ollamaUsage(out),
+					Message:              msg,
+					TurnComplete:         true,
+					StepComplete:         true,
+					Status:               model.ResponseStatusCompleted,
+					FinishReason:         finishReason,
+					RawFinishReason:      out.DoneReason,
+					FinishReasonReported: true,
+					Model:                out.Model,
+					Provider:             l.provider,
+					Usage:                ollamaUsage(out),
 				},
 			}, nil)
 			return
@@ -295,15 +296,16 @@ func (l *ollamaLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 		yield(&model.StreamEvent{
 			Type: model.StreamEventTurnDone,
 			Response: &model.Response{
-				Message:         model.MessageFromAssistantParts(acc.text.String(), acc.reasoning.String(), dedupToolCalls(acc.toolCalls)),
-				TurnComplete:    true,
-				StepComplete:    true,
-				Status:          model.ResponseStatusCompleted,
-				FinishReason:    finishReason,
-				RawFinishReason: doneReason,
-				Model:           modelID,
-				Provider:        l.provider,
-				Usage:           usage,
+				Message:              model.MessageFromAssistantParts(acc.text.String(), acc.reasoning.String(), dedupToolCalls(acc.toolCalls)),
+				TurnComplete:         true,
+				StepComplete:         true,
+				Status:               model.ResponseStatusCompleted,
+				FinishReason:         finishReason,
+				RawFinishReason:      doneReason,
+				FinishReasonReported: true,
+				Model:                modelID,
+				Provider:             l.provider,
+				Usage:                usage,
 			},
 		}, nil)
 	}

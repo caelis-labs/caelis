@@ -265,6 +265,7 @@ func (a *Agent) collectCanonicalModelStep(
 			request.Instructions = instructionsFromContext(ctx, a.systemPrompt)
 		}
 
+		bindRequestSource(ctx, request)
 		modelCtx := model.WithProviderRequestMetadata(ctx, model.ProviderRequestMetadata{
 			SessionAffinity: ctx.Session().SessionID,
 		})

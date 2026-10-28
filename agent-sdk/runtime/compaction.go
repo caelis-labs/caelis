@@ -85,6 +85,9 @@ func (c *codexStyleCompactor) Prepare(ctx context.Context, req compact.Request) 
 }
 
 func (c *codexStyleCompactor) Force(ctx context.Context, req compact.Request, trigger string) (compact.Result, error) {
+	if err := req.ValidateCoverage(); err != nil {
+		return compact.Result{}, err
+	}
 	promptEvents := compact.PromptEventsFromLatestCompact(req.Events)
 	result := compact.Result{
 		PromptEvents: promptEvents,
@@ -128,6 +131,9 @@ func (c *codexStyleCompactor) decide(_ context.Context, usage compact.UsageSnaps
 }
 
 func (c *codexStyleCompactor) compact(ctx context.Context, req compact.Request, trigger string) (compact.Result, error) {
+	if err := req.ValidateCoverage(); err != nil {
+		return compact.Result{}, err
+	}
 	baseEvent, baseData, _ := compact.LatestCompactEvent(req.Events)
 	baseText := stripRuntimeContinuity(compactTextFromEvent(baseEvent))
 	delta := compactableEvents(req.Events)
@@ -157,6 +163,10 @@ func (c *codexStyleCompactor) compact(ctx context.Context, req compact.Request, 
 			generator = "model_context"
 		} else if ctx.Err() != nil {
 			return compact.Result{}, ctx.Err()
+		} else if req.RequireInContext || (req.Coverage != nil && req.Coverage.RequireInContext) {
+			return compact.Result{}, err
+		} else if isCompactionTerminalError(err) {
+			return compact.Result{}, err
 		} else {
 			c.logFallback(ctx, "in_context", "independent", classifyCompactionFailure(err))
 		}

@@ -50,6 +50,11 @@ type Request struct {
 	// InContextRequest is an exact, already assembled model request whose prefix
 	// may still be hot at the provider. The compactor clones it before use.
 	InContextRequest *model.Request
+	// Coverage binds the frozen request to the source prefix and summarized delta.
+	Coverage *Coverage
+	// RequireInContext rejects missing source bindings and forbids independent
+	// generation if the frozen in-context request fails.
+	RequireInContext bool
 	// RuntimeAppendix is deterministic continuity owned by Runtime rather than
 	// inferred by the summarizing model.
 	RuntimeAppendix string

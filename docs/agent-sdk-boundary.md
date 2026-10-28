@@ -188,8 +188,16 @@ only an unchanged prefix plus a complete, ordered raw tail. Configuration,
 authorization state, or tool catalog changes discard the candidate. Current
 Runtime continuity is assembled again at adoption. Unpaired tool calls/results,
 new checkpoints, and candidates without a smaller projected context are rejected.
-Generation uses frozen canonical source frames, not the possibly older assembled
-foreground request. This conservative path does not promise hot-prefix cache reuse.
+Chat binds source coverage when assembling a request, only when its complete
+messages equal the observed canonical projection. Speculation reuses that frozen
+request with a final compaction instruction, preserving its instructions, tools,
+reasoning, and service tier. An unbound request, changed source hash, or incomplete
+tool batch disables speculation. Later canonical appends remain in the raw tail;
+the dispatch source boundary may exceed the summarized boundary when a prior
+checkpoint follows retained older events. Strict in-context generation validates
+both boundaries and fingerprints and never falls back to an independent request.
+Custom async compactors must enforce `compact.Request` coverage and in-context
+requirements. Synchronous compaction retains its optional fallback.
 
 Candidate readiness is not a commit. Both compaction paths use the same guarded
 checkpoint writer, with revision CAS and original-ID readback after an uncertain

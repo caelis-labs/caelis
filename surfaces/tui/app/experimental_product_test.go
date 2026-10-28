@@ -33,7 +33,8 @@ func TestProductExperimentalAPIAndTUISurviveHostRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(first.Features) != 3 || first.Effective != nil {
+	// Only async_compact remains configurable; refresh and tool retirement are built in.
+	if len(first.Features) != 1 || first.Features[0].ID != experimental.AsyncCompact || first.Effective != nil {
 		t.Fatalf("discovery=%+v", first)
 	}
 	for _, v := range first.Desired {

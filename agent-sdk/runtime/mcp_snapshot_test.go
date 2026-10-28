@@ -94,7 +94,7 @@ func TestMCPRetirementComposedGuardsCoverCanonicalCheckpoint(t *testing.T) {
 			})
 			httpServer := httptest.NewServer(mcpsdk.NewStreamableHTTPHandler(func(*http.Request) *mcpsdk.Server { return server }, nil))
 			defer httpServer.Close()
-			manager, err := mcp.NewManagerWithOptions(t.Context(), []mcp.ServerSpec{{PluginID: "p", Name: "local", Transport: mcp.TransportStreamableHTTP, URL: httpServer.URL}}, nil, mcp.ManagerOptions{RefreshTools: true})
+			manager, err := mcp.NewManager(t.Context(), []mcp.ServerSpec{{PluginID: "p", Name: "local", Transport: mcp.TransportStreamableHTTP, URL: httpServer.URL}}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -129,7 +129,7 @@ func TestMCPRetirementComposedGuardsCoverCanonicalCheckpoint(t *testing.T) {
 					close(gate.finish)
 				}
 			}()
-			rt, err := New(Config{Sessions: gate, AgentFactory: chat.Factory{}, ExperimentalToolRetirement: true, MCPGrants: grants})
+			rt, err := New(Config{Sessions: gate, AgentFactory: chat.Factory{}, MCPGrants: grants})
 			if err != nil {
 				t.Fatal(err)
 			}

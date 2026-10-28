@@ -61,7 +61,10 @@ func (m *Manager) ValidateCatalog(ctx context.Context, revision string) (release
 			return release, tool.ErrCatalogSnapshotStale
 		}
 		locked = append(locked, c.mu.Unlock)
-		if c.dirty && server.refreshErr == nil && server.client.closedError() == nil {
+		if server.refreshing {
+			return release, tool.ErrCatalogSnapshotStale
+		}
+		if c.dirty && !settledRefreshFailed(server, c.generation) && server.client.closedError() == nil {
 			return release, tool.ErrCatalogSnapshotStale
 		}
 	}

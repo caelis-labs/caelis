@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/requestsource"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
@@ -19,8 +20,9 @@ func (r *Runtime) adoptAsyncCompaction(ctx context.Context, l *autoCompactGatedL
 	delta := compactableEvents(mainInvocationEvents(job.source.Events))
 	_, baseData, _ := compact.LatestCompactEvent(job.source.Events)
 	if !job.result.Compacted || !ok || data.ContractVersion != compact.CompactContractVersion ||
-		data.Revision != baseData.Revision+1 || data.SourceEventCount != len(delta) ||
-		data.SummarizedThroughSeq != job.throughSeq || data.SummarizedThroughID != lastEventID(delta) ||
+		data.Revision != baseData.Revision+1 || data.SourceEventCount != len(delta) || data.SourceEventCount != job.coverage.SourceEventCount ||
+		data.SummarizedThroughSeq != job.coverage.SummarizedThroughSeq || data.SummarizedThroughID != lastEventID(delta) ||
+		data.SummarizedThroughID != job.coverage.SummarizedThroughID ||
 		strings.TrimSpace(stripRuntimeContinuity(job.result.CompactText)) == "" {
 		return false, nil
 	}
@@ -95,8 +97,8 @@ func (j *asyncCompactJob) validSource(current session.LoadedSession) bool {
 	if !reflect.DeepEqual(sourceSession, currentSession) {
 		return false
 	}
-	prefix, err := asyncFingerprint(events[:len(sourceEvents)])
-	if err != nil || prefix != j.prefix {
+	prefix, err := requestsource.Fingerprint(events[:len(sourceEvents)])
+	if err != nil || prefix != j.coverage.SourcePrefixHash {
 		return false
 	}
 	var last uint64
@@ -108,7 +110,7 @@ func (j *asyncCompactJob) validSource(current session.LoadedSession) bool {
 	}
 	tail := events[len(sourceEvents):]
 	for _, event := range tail {
-		if compact.IsCompactEvent(event) || event.Seq <= j.throughSeq {
+		if compact.IsCompactEvent(event) || event.Seq <= j.coverage.SourceThroughSeq {
 			return false
 		}
 	}

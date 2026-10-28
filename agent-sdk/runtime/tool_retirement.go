@@ -37,9 +37,6 @@ func exposureFromEvents(events []*session.Event) (tool.ExposureState, bool) {
 // the previous set. Async adopters must pass their revalidated current source,
 // not the background generation snapshot, through this persistence boundary.
 func (r *Runtime) checkpointExposure(event *session.Event, source []*session.Event, safe bool) {
-	if !r.toolRetirement {
-		return
-	}
 	state, ok := exposureFromEvents(source)
 	if !ok {
 		state = tool.ExposureState{Version: 1}
