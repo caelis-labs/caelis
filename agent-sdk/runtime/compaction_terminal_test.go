@@ -57,6 +57,7 @@ func TestCollectCompactionResponseTerminalReasons(t *testing.T) {
 		{"refusal", model.FinishReasonRefusal, true, "", errCompactionRefused},
 		{"tool_calls", model.FinishReasonToolCalls, true, "", errCompactionToolRequest},
 		{"reported_unknown", model.FinishReasonUnknown, true, "", errCompactionIncomplete},
+		{"future_reason", model.FinishReason("future_reason"), true, "", errCompactionIncomplete},
 		{"unreported", model.FinishReasonUnknown, false, "", nil},
 		{"legacy_length", model.FinishReasonLength, false, "", errCompactionTruncated},
 		{"failed", model.FinishReasonStop, true, model.ResponseStatusFailed, errCompactionIncomplete},

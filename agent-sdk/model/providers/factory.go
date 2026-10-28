@@ -126,8 +126,10 @@ func (f *Factory) NewByAlias(alias string) (model.LLM, error) {
 		llm = newOpenRouter(cfg, token)
 	case APIOpenAI, APIOpenAIResponses:
 		llm = newOpenAIResponses(cfg, token)
-	case APIAnthropic, APIAnthropicCompatible:
+	case APIAnthropic:
 		llm = newAnthropic(cfg, token)
+	case APIAnthropicCompatible:
+		llm = newAnthropicWithDefaults(cfg, token, anthropicProviderDefaults{baseURL: defaultAnthropicBaseURL})
 	case APIGemini:
 		llm = newGemini(cfg, token)
 	case APIOllama:

@@ -3,7 +3,9 @@ package model
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"image"
 	_ "image/gif"
@@ -69,7 +71,24 @@ func prepareRequestImages(ctx context.Context, req *Request) error {
 	if req == nil {
 		return nil
 	}
-	return sharedImagePreparationCache.prepareRequest(ctx, req)
+	// Only carry forward a proof that already matches the canonical messages.
+	// This owned transformation changes wire bytes, not the covered event range.
+	bound := req.Source != nil && req.Source.MessagesHash != "" && req.Source.MessagesHash == requestMessagesHash(req.Messages)
+	if err := sharedImagePreparationCache.prepareRequest(ctx, req); err != nil {
+		return err
+	}
+	if bound {
+		req.Source.MessagesHash = requestMessagesHash(req.Messages)
+	}
+	return nil
+}
+
+func requestMessagesHash(messages []Message) string {
+	encoded, err := json.Marshal(messages)
+	if err != nil {
+		return ""
+	}
+	return fmt.Sprintf("%x", sha256.Sum256(encoded))
 }
 
 func (cache *imagePreparationCache) prepareRequest(ctx context.Context, req *Request) error {

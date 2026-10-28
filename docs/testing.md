@@ -372,8 +372,8 @@ concurrent replacement and explicit-stop/instance fences.
 
 ## Experimental MCP tool lifecycle
 
-The SDK switches in [MCP tool lifecycle](mcp-tool-lifecycle.md) default off in
-product assembly and have explicit [Control opt-ins](experimental-features.md).
+MCP refresh and tool retirement are always enabled. Asynchronous and idle
+compaction default off and have independent [Control opt-ins](experimental-features.md).
 These tests use temporary Stores and synthetic model responses;
 no user configuration, credentials, or production Session is needed.
 
@@ -401,11 +401,12 @@ GOWORK=off go test ./app/gatewayapp ./surfaces/tui/app -run 'TestExperimental|Te
 GOWORK=off go test -race ./agent-sdk/runtime ./agent-sdk/tool/mcp ./control/sessionprofile -run 'TestExperimental|TestAsyncCompaction|TestCatalog|TestMCP|TestConfigurationCheckpoint' -count=1
 ```
 
-Host tests cover all eight independent configuration combinations, desired versus
-active Runtime values, HTTP operation receipts and CAS. Runtime workflows run
-all eight combinations against a loopback MCP server for static and resolved
-requests, including schema replacement, discovery, execution, checkpoint,
-retirement-off reactivation and full file-Store model-context replay. Additional
+Host tests cover the four async/idle combinations together with ignored legacy
+refresh/retirement inputs, desired versus active Runtime values, HTTP operation
+receipts and CAS. Runtime workflows exercise legacy input combinations against
+a loopback MCP server for static and resolved requests, including schema
+replacement, discovery, execution, checkpoint, always-on retirement and full
+file-Store model-context replay. Additional
 regressions cover delayed directory readiness, stable server failures, async
 Turn-start budgets, catalog changes during generation and repeated healthy
 recovery cycles. The Host retry test exercises failed listing followed by an

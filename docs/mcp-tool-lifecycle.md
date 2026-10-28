@@ -4,11 +4,11 @@ MCP catalog refresh and deferred tool retirement are always enabled. `mcp.NewMan
 processes tool-list notifications and refreshes the server capability directory.
 Runtime uses version-bound ToolSearch exposure and the temporary `tool_retire`
 management tool with the ordinary `tool_search` tool and MCP definitions carrying
-complete source fingerprints. Only asynchronous compaction remains an opt-in;
+complete source fingerprints. Asynchronous and idle compaction remain independent opt-ins;
 see [Experimental features](experimental-features.md).
 
 Refresh can run without any compact. Retirement applies at a durable canonical
-compact, with synchronous or asynchronous compaction. Neither disconnects a
+compact, with synchronous, asynchronous or idle compaction. Neither disconnects a
 server, uninstalls a plugin, or deletes history.
 The reproducible local protocol and long-session experiments are described in
 [Testing](testing.md#experimental-mcp-tool-lifecycle).
@@ -128,8 +128,10 @@ tools changes the tools list; removal at a successful compact changes it again
 alongside the new context baseline. The existing local prefix estimator hashes
 instructions, tools and output shape, not provider KV state. Codex OAuth uses
 Session affinity for its prompt-cache key; ordinary OpenAI Responses does not set
-that key. The Anthropic adapter reads cache usage but does not currently install
-cache-control breakpoints. Stable affinity alone does not prove reuse.
+that key. Native Anthropic requests install up to four 5-minute cache-control
+breakpoints after encoding; Anthropic-compatible routes do not inherit that
+policy. Cache usage preserves reported zero values and missing fields. Stable
+affinity or installed breakpoints alone do not prove reuse.
 
 OpenAI requires compatible rendered prefixes and request settings for reuse;
 Anthropic describes the hierarchy as tools, system, then messages. Therefore
@@ -171,10 +173,10 @@ The checkpoint integration contracts are:
   invalidates the candidate. An ordinary exposure change invalidates its request
   prefix. Failed compact/adoption keeps both marks and the old exposed set.
 
-Host assembly supplies the asynchronous compaction option from activation-pinned
-Control defaults; refresh and retirement do not depend on that option.
+Host assembly supplies asynchronous and idle compaction options from activation-pinned
+Control defaults; refresh and retirement do not depend on either option.
 Runtime composes the directory and grant guards with the existing request
-validator for both synchronous and asynchronous checkpoints. Explicit-profile
+validator for synchronous, asynchronous and idle checkpoints. Explicit-profile
 requests additionally hold their desired configuration revision through commit.
 The same writer consumes current canonical exposure and reconciles uncertain
 writes; no compaction callback or separate retirement transaction is installed.

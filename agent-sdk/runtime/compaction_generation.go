@@ -250,6 +250,7 @@ func collectCompactionResponse(ctx context.Context, llm model.LLM, req *model.Re
 		return nil, errCompactionIncomplete
 	}
 	switch final.FinishReason {
+	case model.FinishReasonStop:
 	case model.FinishReasonLength:
 		return nil, errCompactionTruncated
 	case model.FinishReasonContentFilter:
@@ -260,6 +261,8 @@ func collectCompactionResponse(ctx context.Context, llm model.LLM, req *model.Re
 		if final.FinishReasonReported {
 			return nil, errCompactionIncomplete
 		}
+	default:
+		return nil, errCompactionIncomplete
 	}
 	return final, nil
 }
@@ -267,7 +270,8 @@ func collectCompactionResponse(ctx context.Context, llm model.LLM, req *model.Re
 // These are completed but unusable responses, not transient provider failures.
 // Preserve their identity through salvage and in-context fallback decisions.
 func isCompactionTerminalError(err error) bool {
-	return errors.Is(err, errCompactionTruncated) || errors.Is(err, errCompactionFiltered) ||
+	var terminal *model.TerminalResponseError
+	return errors.As(err, &terminal) || errors.Is(err, errCompactionTruncated) || errors.Is(err, errCompactionFiltered) ||
 		errors.Is(err, errCompactionRefused) || errors.Is(err, errCompactionIncomplete)
 }
 

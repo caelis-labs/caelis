@@ -114,6 +114,34 @@ func TestAnthropicCacheUsageSparseDeltaPresence(t *testing.T) {
 	}
 }
 
+func TestAnthropicFactoryCachePolicy(t *testing.T) {
+	for _, api := range []APIType{APIAnthropic, APIAnthropicCompatible} {
+		t.Run(string(api), func(t *testing.T) {
+			var body []byte
+			transport := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				body, _ = io.ReadAll(req.Body)
+				return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"type":"message","role":"assistant","content":[{"type":"text","text":"done"}],"stop_reason":"end_turn"}`)), Request: req}, nil
+			})
+			factory := NewFactory()
+			if err := factory.Register(Config{Alias: "cache-route", API: api, Provider: string(api), Model: "claude-sonnet-4-6", Auth: AuthConfig{Type: AuthAPIKey, Token: "fixture"}, HTTPClient: &http.Client{Transport: transport}}); err != nil {
+				t.Fatal(err)
+			}
+			llm, err := factory.NewByAlias("cache-route")
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, err := range model.Generate(t.Context(), llm, &model.Request{Messages: []model.Message{model.NewTextMessage(model.RoleUser, "source")}}) {
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if got := bytes.Contains(body, []byte(`"cache_control"`)); got != (api == APIAnthropic) {
+				t.Fatalf("API %s cache markers=%v", api, got)
+			}
+		})
+	}
+}
+
 // Compare the content and request settings that determine prefix reuse, not a
 // textual startsWith of the HTTP envelope. This proves lookup eligibility, not
 // a server cache hit or a monetary saving.

@@ -29,13 +29,17 @@ func (m *idleProbeModel) Name() string {
 }
 func (*idleProbeModel) ContextWindowTokens() int { return 40000 }
 
-func completedIdleSource(t *testing.T) (*asyncHarness, *model.Request) {
+func completedIdleSource(t *testing.T, extra ...*session.Event) (*asyncHarness, *model.Request) {
 	t.Helper()
 	h := newAsyncHarness(t, "")
+	h.llm.imageInput = len(extra) > 0
 	h.rt.compaction.Async.Enabled = false
 	h.rt.compaction.Idle.Enabled = true
 	m := &idleProbeModel{asyncProbeModel: h.llm}
 	h.source.set(agent.ModelRequestSnapshot{Revision: "epoch-1", Model: m})
+	for _, event := range extra {
+		appendTestEventWithGuard(t, h, event)
+	}
 	history := model.NewTextMessage(model.RoleAssistant, strings.Repeat("synthetic durable context fact; ", 2500))
 	if _, err := h.store.AppendEvent(h.ctx, session.AppendEventRequest{SessionRef: h.active.SessionRef, MutationGuard: session.RuntimeMutationGuard(h.ctx), Event: &session.Event{Type: session.EventTypeAssistant, Message: &history, Scope: &session.EventScope{TurnID: "old-turn"}}}); err != nil {
 		t.Fatal(err)

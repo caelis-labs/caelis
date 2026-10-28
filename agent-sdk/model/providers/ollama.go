@@ -321,9 +321,9 @@ func ollamaTerminalFinishReason(done bool, reason string) (model.FinishReason, e
 	case "", "stop":
 		return model.FinishReasonStop, nil
 	case "length":
-		return model.FinishReasonLength, fmt.Errorf("model: ollama response reached output length limit")
+		return model.FinishReasonLength, &model.TerminalResponseError{Reason: model.FinishReasonLength, Detail: "model: ollama response reached output length limit"}
 	default:
-		return model.FinishReasonUnknown, fmt.Errorf("model: ollama response ended with unknown done_reason %q", reason)
+		return model.FinishReasonUnknown, &model.TerminalResponseError{Reason: model.FinishReasonUnknown, Detail: fmt.Sprintf("model: ollama response ended with unknown done_reason %q", reason)}
 	}
 }
 

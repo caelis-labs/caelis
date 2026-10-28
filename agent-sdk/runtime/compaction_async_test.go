@@ -34,6 +34,7 @@ type asyncProbeModel struct {
 	responses  chan snapshotResponse
 	summaries  chan snapshotResponse
 	ignoreStop bool
+	imageInput bool
 }
 
 func newAsyncProbeModel() *asyncProbeModel {
@@ -43,10 +44,14 @@ func newAsyncProbeModel() *asyncProbeModel {
 	}
 }
 
-func (*asyncProbeModel) Name() string                     { return "async-fixture" }
-func (*asyncProbeModel) ProviderName() string             { return "fixture" }
-func (*asyncProbeModel) ContextWindowTokens() int         { return 10000 }
-func (*asyncProbeModel) Capabilities() model.Capabilities { return runtimeTestModelCapabilities() }
+func (*asyncProbeModel) Name() string             { return "async-fixture" }
+func (*asyncProbeModel) ProviderName() string     { return "fixture" }
+func (*asyncProbeModel) ContextWindowTokens() int { return 10000 }
+func (m *asyncProbeModel) Capabilities() model.Capabilities {
+	caps := runtimeTestModelCapabilities()
+	caps.ImageInput = m.imageInput
+	return caps
+}
 func (m *asyncProbeModel) Generate(ctx context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
 	return func(yield func(*model.StreamEvent, error) bool) {
 		responses := m.responses

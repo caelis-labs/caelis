@@ -166,7 +166,7 @@ func (l *geminiLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 			usage = mergeGeminiUsage(usage, geminiUsageFromResponse(out))
 			model.RecordInvocationUsage(runCtx, usage)
 			if len(out.Candidates) > 0 && out.Candidates[0] != nil {
-				if reason := out.Candidates[0].FinishReason; reason != "" && reason != genai.FinishReasonUnspecified {
+				if reason := out.Candidates[0].FinishReason; reason != "" {
 					finishReason = reason
 					if reason != genai.FinishReasonStop {
 						abnormalReason = reason
@@ -208,7 +208,7 @@ func (l *geminiLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 			return
 		}
 		if abnormalReason != "" || finishReason != genai.FinishReasonStop {
-			yield(nil, fmt.Errorf("model: gemini candidate ended with non-success finishReason %q", abnormalReason))
+			yield(nil, geminiFinishReasonError(abnormalReason))
 			return
 		}
 		yield(&model.StreamEvent{
@@ -243,9 +243,13 @@ func geminiTerminalError(out *genai.GenerateContentResponse) error {
 	}
 	reason := out.Candidates[0].FinishReason
 	if reason != genai.FinishReasonStop {
-		return fmt.Errorf("model: gemini candidate ended with non-success finishReason %q", reason)
+		return geminiFinishReasonError(reason)
 	}
 	return nil
+}
+
+func geminiFinishReasonError(reason genai.FinishReason) error {
+	return &model.TerminalResponseError{Reason: geminiFinishReasonToKernel(reason), Detail: fmt.Sprintf("model: gemini candidate ended with non-success finishReason %q", reason)}
 }
 
 func geminiFinishReasonToKernel(reason genai.FinishReason) model.FinishReason {
