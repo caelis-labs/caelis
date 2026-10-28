@@ -191,7 +191,7 @@ func (s *controlCommandBackend) reconcileDisconnectedACPAgentSession(
 	var runtime *sessionRuntime
 	var releaseRuntime func()
 	if runtimes != nil {
-		runtime, releaseRuntime, err = runtimes.acquireLoadedRuntime(active.SessionID)
+		runtime, releaseRuntime, err = runtimes.acquireLoadedRuntime(active.SessionID, runtimeUseCommand)
 		if err != nil {
 			return err
 		}

@@ -52,7 +52,7 @@ func NewModelInvocationReceipt(in model.Invocation, kind string) *Event {
 // ModelUsageMetadata preserves normalized provider usage without inventing a
 // monetary estimate. A zero CostMicros does not establish price availability.
 func ModelUsageMetadata(provider string, usage model.Usage) map[string]any {
-	if strings.EqualFold(provider, "deepseek") && usage.CachedInputTokens > 0 && usage.TotalTokens >= usage.PromptTokens+usage.CachedInputTokens+usage.CompletionTokens {
+	if usage.CacheReadAccounting == "" && strings.EqualFold(provider, "deepseek") && usage.CachedInputTokens > 0 && usage.TotalTokens >= usage.PromptTokens+usage.CachedInputTokens+usage.CompletionTokens {
 		provider = "deepseek-anthropic"
 	}
 	out := map[string]any{
@@ -62,6 +62,9 @@ func ModelUsageMetadata(provider string, usage model.Usage) map[string]any {
 		"completion_tokens":   usage.CompletionTokens,
 		"reasoning_tokens":    usage.ReasoningTokens,
 		"total_tokens":        usage.TotalTokens,
+	}
+	if usage.CacheReadAccounting != "" {
+		out["cache_read_accounting"] = string(usage.CacheReadAccounting)
 	}
 	if usage.CacheWriteTokens != 0 || usage.CacheWriteTokensReported {
 		out["cache_write_tokens"] = usage.CacheWriteTokens

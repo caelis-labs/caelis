@@ -60,10 +60,11 @@ func TestProviderConformanceMatrixStreamingSemantics(t *testing.T) {
 			wantText:     "answer",
 			wantReason:   "think ",
 			wantUsage: model.Usage{
-				PromptTokens:     11,
-				CompletionTokens: 7,
-				ReasoningTokens:  3,
-				TotalTokens:      18,
+				CacheReadAccounting: model.CacheReadIncluded,
+				PromptTokens:        11,
+				CompletionTokens:    7,
+				ReasoningTokens:     3,
+				TotalTokens:         18,
 			},
 		},
 		{
@@ -113,10 +114,11 @@ func TestProviderConformanceMatrixStreamingSemantics(t *testing.T) {
 			wantText:     "answer",
 			wantReason:   "think ",
 			wantUsage: model.Usage{
-				PromptTokens:     11,
-				CompletionTokens: 7,
-				ReasoningTokens:  3,
-				TotalTokens:      18,
+				CacheReadAccounting: model.CacheReadIncluded,
+				PromptTokens:        11,
+				CompletionTokens:    7,
+				ReasoningTokens:     3,
+				TotalTokens:         18,
 			},
 		},
 		{
@@ -216,10 +218,11 @@ func TestProviderConformanceMatrixStreamingSemantics(t *testing.T) {
 			wantText:     "answer",
 			wantReason:   "think ",
 			wantUsage: model.Usage{
-				PromptTokens:     11,
-				CompletionTokens: 7,
-				ReasoningTokens:  3,
-				TotalTokens:      18,
+				CacheReadAccounting: model.CacheReadSeparate,
+				PromptTokens:        11,
+				CompletionTokens:    7,
+				ReasoningTokens:     3,
+				TotalTokens:         18,
 			},
 		},
 	}

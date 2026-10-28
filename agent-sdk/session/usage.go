@@ -8,13 +8,15 @@ import (
 )
 
 type UsageSnapshot struct {
-	CacheWriteTokens           int  `json:"cache_write_tokens,omitempty"`
-	CacheWrite5mTokens         int  `json:"cache_write_5m_tokens,omitempty"`
-	CacheWrite1hTokens         int  `json:"cache_write_1h_tokens,omitempty"`
-	CachedInputTokensReported  bool `json:"cached_input_tokens_reported,omitempty"`
-	CacheWriteTokensReported   bool `json:"cache_write_tokens_reported,omitempty"`
-	CacheWrite5mTokensReported bool `json:"cache_write_5m_tokens_reported,omitempty"`
-	CacheWrite1hTokensReported bool `json:"cache_write_1h_tokens_reported,omitempty"`
+	// CacheReadAccounting preserves the API input basis through usage projection.
+	CacheReadAccounting        model.CacheReadAccounting `json:"cache_read_accounting,omitempty"`
+	CacheWriteTokens           int                       `json:"cache_write_tokens,omitempty"`
+	CacheWrite5mTokens         int                       `json:"cache_write_5m_tokens,omitempty"`
+	CacheWrite1hTokens         int                       `json:"cache_write_1h_tokens,omitempty"`
+	CachedInputTokensReported  bool                      `json:"cached_input_tokens_reported,omitempty"`
+	CacheWriteTokensReported   bool                      `json:"cache_write_tokens_reported,omitempty"`
+	CacheWrite5mTokensReported bool                      `json:"cache_write_5m_tokens_reported,omitempty"`
+	CacheWrite1hTokensReported bool                      `json:"cache_write_1h_tokens_reported,omitempty"`
 
 	PromptTokens        int `json:"prompt_tokens,omitempty"`
 	CachedInputTokens   int `json:"cached_input_tokens,omitempty"`
@@ -225,6 +227,7 @@ func usageSnapshotFromPayload(payload map[string]any, provider string) *UsageSna
 		totalTokens = minimumTotal
 	}
 	usage := &UsageSnapshot{
+		CacheReadAccounting:        model.CacheReadAccounting(stringValue(payload["cache_read_accounting"])),
 		PromptTokens:               promptTokens,
 		CacheWriteTokens:           firstPresentUsageInt(payload["cache_write_tokens"], payload["cache_creation_input_tokens"]),
 		CacheWrite5mTokens:         firstPresentUsageInt(payload["cache_write_5m_tokens"], nestedAny(payload, "cache_creation", "ephemeral_5m_input_tokens")),
@@ -253,6 +256,7 @@ func NormalizeUsageForDisplay(usage UsageSnapshot, provider string) UsageSnapsho
 	if providerSeparatesCachedInputForSnapshot(provider, usage) && usage.CachedInputTokens > 0 {
 		usage.PromptTokens += usage.CachedInputTokens
 	}
+	usage.CacheReadAccounting = model.CacheReadIncluded
 	minimum := usage.PromptTokens + usage.CompletionTokens
 	if usage.CompletionTokens == 0 {
 		minimum += usage.ReasoningTokens
@@ -268,6 +272,12 @@ func normalizedProviderKey(provider string) string {
 }
 
 func providerSeparatesCachedInputForSnapshot(provider string, usage UsageSnapshot) bool {
+	switch usage.CacheReadAccounting {
+	case model.CacheReadIncluded:
+		return false
+	case model.CacheReadSeparate:
+		return true
+	}
 	if model.ProviderSeparatesCachedInput(provider) {
 		return true
 	}

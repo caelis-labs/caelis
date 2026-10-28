@@ -26,7 +26,7 @@ type sessionRuntime struct {
 
 	// Lifecycle fields are guarded by sessionRuntimeRegistry.mu. Once releasing
 	// is set, command routing must not return this Runtime again. inUse covers
-	// synchronous Control mutation dispatches that already obtained the Runtime;
+	// synchronous Control reads and mutations that already obtained the Runtime;
 	// release waits for usesIdle before quiescing detached resources. workRefs
 	// are the shared_ptr-style references held by accepted Runtime producers
 	// until their canonical terminal boundary.
@@ -36,6 +36,7 @@ type sessionRuntime struct {
 	releaseDone   chan struct{}
 	releaseErr    error
 	inUse         int
+	observing     int // synchronous read leases are a subset of inUse
 	workRefs      int
 	useAdmissions uint64
 	usesIdle      chan struct{}
@@ -431,12 +432,22 @@ func (r *sessionRuntimeRegistry) acquireRuntimeUse(runtime *sessionRuntime) (fun
 		r.mu.Unlock()
 		return nil, sessionRuntimeReleasingError(runtime.sessionID)
 	}
-	releaseUse := r.retainRuntimeLocked(runtime)
+	releaseUse := r.retainRuntimeLocked(runtime, runtimeUseCommand)
 	r.mu.Unlock()
 	return releaseUse, nil
 }
 
-func (r *sessionRuntimeRegistry) acquireLoadedRuntime(sessionID string) (*sessionRuntime, func(), error) {
+// runtimeUseKind separates lifetime retention from foreground execution authority.
+// Observations pin teardown but neither cancel nor postpone an idle opportunity.
+type runtimeUseKind uint8
+
+const (
+	runtimeUseCommand runtimeUseKind = iota
+	runtimeUseObservation
+	runtimeUseActivation
+)
+
+func (r *sessionRuntimeRegistry) acquireLoadedRuntime(sessionID string, kind runtimeUseKind) (*sessionRuntime, func(), error) {
 	if r == nil {
 		return nil, nil, errors.New("gatewayapp: Session Runtime registry is unavailable")
 	}
@@ -455,7 +466,7 @@ func (r *sessionRuntimeRegistry) acquireLoadedRuntime(sessionID string) (*sessio
 		r.mu.Unlock()
 		return nil, nil, sessionRuntimeReleasingError(sessionID)
 	}
-	releaseUse := r.retainRuntimeLocked(runtime)
+	releaseUse := r.retainRuntimeLocked(runtime, kind)
 	r.mu.Unlock()
 	return runtime, releaseUse, nil
 }
@@ -474,7 +485,7 @@ func (r *sessionRuntimeRegistry) acquireActivatedControlRuntime(
 		if err := r.waitSessionRelease(ctx, sessionID); err != nil {
 			return nil, session.Session{}, nil, false, err
 		}
-		loaded, releaseUse, err := r.acquireLoadedRuntime(sessionID)
+		loaded, releaseUse, err := r.acquireLoadedRuntime(sessionID, runtimeUseCommand)
 		if err != nil {
 			if isSessionRuntimeReleasingError(err) {
 				continue
@@ -513,7 +524,7 @@ func (r *sessionRuntimeRegistry) acquireActivatedControlRuntime(
 func (r *sessionRuntimeRegistry) acquireControlRuntime(
 	ctx context.Context,
 	sessionID string,
-	activate bool,
+	kind runtimeUseKind,
 ) (*sessionRuntime, session.Session, func(context.Context) error, error) {
 	if r == nil || r.sessionService == nil {
 		return nil, session.Session{}, nil, errors.New("gatewayapp: Session Runtime registry is unavailable")
@@ -526,7 +537,7 @@ func (r *sessionRuntimeRegistry) acquireControlRuntime(
 		return nil, session.Session{}, nil, errors.New("gatewayapp: Session ID is required")
 	}
 	sessions := r.sessionService
-	if activate {
+	if kind == runtimeUseActivation {
 		runtime, active, release, _, err := r.acquireActivatedControlRuntime(ctx, sessionID)
 		return runtime, active, release, err
 	}
@@ -536,7 +547,7 @@ func (r *sessionRuntimeRegistry) acquireControlRuntime(
 		return nil, session.Session{}, nil, err
 	}
 	defer unlock()
-	loaded, releaseUse, err := r.acquireLoadedRuntime(sessionID)
+	loaded, releaseUse, err := r.acquireLoadedRuntime(sessionID, kind)
 	if isSessionRuntimeReleasingError(err) {
 		// The activation lock prevents a replacement Runtime from being bound
 		// while the releasing tombstone drains. Wait for that known lifecycle
@@ -586,17 +597,20 @@ func (r *sessionRuntimeRegistry) acquireControlRuntime(
 	}, nil
 }
 
-// retainRuntimeLocked records one routed synchronous command. The caller holds
+// retainRuntimeLocked records one routed synchronous use. The caller holds
 // r.mu and owns the returned idempotent release function.
-func (r *sessionRuntimeRegistry) retainRuntimeLocked(runtime *sessionRuntime) func() {
+func (r *sessionRuntimeRegistry) retainRuntimeLocked(runtime *sessionRuntime, kind runtimeUseKind) func() {
 	r.cancelIdleReleaseLocked(runtime)
-	if runtime.instance != nil {
+	if kind != runtimeUseObservation && runtime.instance != nil {
 		runtime.instance.idleCompaction.cancel()
 	}
 	if runtime.inUse == 0 {
 		runtime.usesIdle = make(chan struct{})
 	}
 	runtime.inUse++
+	if kind == runtimeUseObservation {
+		runtime.observing++
+	}
 	runtime.useAdmissions++
 
 	var once sync.Once
@@ -604,6 +618,9 @@ func (r *sessionRuntimeRegistry) retainRuntimeLocked(runtime *sessionRuntime) fu
 		once.Do(func() {
 			r.mu.Lock()
 			runtime.inUse--
+			if kind == runtimeUseObservation {
+				runtime.observing--
+			}
 			if runtime.inUse == 0 {
 				close(runtime.usesIdle)
 				runtime.usesIdle = nil

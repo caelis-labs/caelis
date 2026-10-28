@@ -41,11 +41,12 @@ func (u openAICompatUsage) toKernelUsage() model.Usage {
 		total = u.PromptTokens + u.CompletionTokens
 	}
 	return usageWithPresence(model.Usage{
-		PromptTokens:      u.PromptTokens,
-		CachedInputTokens: u.cachedInputTokens(),
-		CompletionTokens:  u.CompletionTokens,
-		ReasoningTokens:   u.reasoningTokens(),
-		TotalTokens:       total,
+		CacheReadAccounting: model.CacheReadIncluded,
+		PromptTokens:        u.PromptTokens,
+		CachedInputTokens:   u.cachedInputTokens(),
+		CompletionTokens:    u.CompletionTokens,
+		ReasoningTokens:     u.reasoningTokens(),
+		TotalTokens:         total,
 	}, u.reported)
 }
 

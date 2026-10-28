@@ -61,7 +61,9 @@ func (s ControlRuntimeService) BindApplicationChildClients(bind func(appserver.P
 	s.childClients.bind, s.childClients.sessionProfiles = bind, s.applicationService
 }
 
-// Acquire authorizes and resolves one Session Runtime snapshot.
+// Acquire authorizes and resolves one Session Runtime snapshot. Non-activating
+// SessionInspect reads retain its lifetime without interrupting idle work.
+// Activations and mutating actions preempt the idle opportunity.
 func (s ControlRuntimeService) Acquire(
 	ctx context.Context,
 	principal appserver.Principal,
@@ -77,7 +79,13 @@ func (s ControlRuntimeService) Acquire(
 	if err := authorizer.Authorize(ctx, principal, action, sessionID); err != nil {
 		return nil, err
 	}
-	runtime, active, release, err := s.registry.acquireControlRuntime(ctx, sessionID, activate)
+	kind := runtimeUseCommand
+	if activate {
+		kind = runtimeUseActivation
+	} else if action == appserver.ActionSessionInspect {
+		kind = runtimeUseObservation
+	}
+	runtime, active, release, err := s.registry.acquireControlRuntime(ctx, sessionID, kind)
 	if err != nil {
 		return nil, err
 	}

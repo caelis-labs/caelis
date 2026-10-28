@@ -19,7 +19,7 @@ func (s *subagentHistoryService) LoadHistory(ctx context.Context, req sdksubagen
 	if s.registry == nil {
 		return session.LoadedSession{}, fmt.Errorf("gatewayapp: child Runtime registry is unavailable")
 	}
-	runtime, _, release, err := s.registry.acquireControlRuntime(ctx, req.Reconnect.Spawn.SessionRef.SessionID, true)
+	runtime, _, release, err := s.registry.acquireControlRuntime(ctx, req.Reconnect.Spawn.SessionRef.SessionID, runtimeUseActivation)
 	if err != nil {
 		return session.LoadedSession{}, err
 	}

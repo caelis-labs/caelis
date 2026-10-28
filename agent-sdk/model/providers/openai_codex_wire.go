@@ -419,11 +419,12 @@ func (u openAICodexUsage) toKernelUsage() model.Usage {
 		total = u.InputTokens + u.OutputTokens
 	}
 	return usageWithPresence(model.Usage{
-		PromptTokens:      u.InputTokens,
-		CachedInputTokens: u.InputTokenDetails.CachedTokens,
-		CompletionTokens:  u.OutputTokens,
-		ReasoningTokens:   u.OutputTokenDetails.ReasoningTokens,
-		TotalTokens:       total,
+		CacheReadAccounting: model.CacheReadIncluded,
+		PromptTokens:        u.InputTokens,
+		CachedInputTokens:   u.InputTokenDetails.CachedTokens,
+		CompletionTokens:    u.OutputTokens,
+		ReasoningTokens:     u.OutputTokenDetails.ReasoningTokens,
+		TotalTokens:         total,
 	}, u.reported)
 }
 

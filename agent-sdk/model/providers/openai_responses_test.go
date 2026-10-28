@@ -616,7 +616,7 @@ func TestOpenAIResponsesSSEAndJSONAccumulateTextReasoningToolsUsage(t *testing.T
 		if response.Model != "gpt-test-build" {
 			t.Fatalf("Model = %q, want raw provider model", response.Model)
 		}
-		if response.Usage != (model.Usage{PromptTokens: 20, CachedInputTokens: 5, CompletionTokens: 8, ReasoningTokens: 3, TotalTokens: 28}) {
+		if response.Usage != (model.Usage{CacheReadAccounting: model.CacheReadIncluded, PromptTokens: 20, CachedInputTokens: 5, CompletionTokens: 8, ReasoningTokens: 3, TotalTokens: 28}) {
 			t.Fatalf("Usage = %+v", response.Usage)
 		}
 	})

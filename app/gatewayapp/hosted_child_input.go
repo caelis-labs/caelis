@@ -72,7 +72,7 @@ func (r *hostedChildInputRouter) route(
 		(input.Input == "" && len(input.ContentParts) == 0) {
 		return errorcode.New(errorcode.InvalidArgument, "gatewayapp: hosted child input requires parent, child, delegation, target, and content")
 	}
-	parentRuntime, active, release, err := runtimes.acquireControlRuntime(ctx, parentRef.SessionID, true)
+	parentRuntime, active, release, err := runtimes.acquireControlRuntime(ctx, parentRef.SessionID, runtimeUseActivation)
 	if err != nil {
 		return err
 	}

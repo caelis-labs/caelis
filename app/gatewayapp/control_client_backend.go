@@ -190,7 +190,7 @@ func (s *controlCommandBackend) ExecuteControlCommand(ctx context.Context, princ
 	}()
 	switch {
 	case action == appserver.ActionConversationInteraction, controlActionConfiguresSession(action):
-		runtime, _, closeRuntime, err := runtimes.acquireControlRuntime(ctx, sessionID, false)
+		runtime, _, closeRuntime, err := runtimes.acquireControlRuntime(ctx, sessionID, runtimeUseCommand)
 		if err != nil {
 			return appserver.CommandResult{SessionID: sessionID}, classifyControlPreDispatchError(err)
 		}
@@ -210,7 +210,7 @@ func (s *controlCommandBackend) ExecuteControlCommand(ctx context.Context, princ
 			newlyActivatedRuntime = runtime
 		}
 	case controlActionTargetsActiveRuntime(action):
-		runtime, releaseUse, err := runtimes.acquireLoadedRuntime(sessionID)
+		runtime, releaseUse, err := runtimes.acquireLoadedRuntime(sessionID, runtimeUseCommand)
 		if err != nil {
 			return appserver.CommandResult{SessionID: sessionID}, classifyControlPreDispatchError(err)
 		}
@@ -234,7 +234,7 @@ func (s *controlCommandBackend) ExecuteControlCommand(ctx context.Context, princ
 			if err = runtimes.waitSessionRelease(ctx, sessionID); err != nil {
 				break
 			}
-			runtime, releaseUse, err = runtimes.acquireLoadedRuntime(sessionID)
+			runtime, releaseUse, err = runtimes.acquireLoadedRuntime(sessionID, runtimeUseCommand)
 			if !isSessionRuntimeReleasingError(err) {
 				break
 			}
