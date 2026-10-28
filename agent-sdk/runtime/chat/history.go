@@ -17,7 +17,7 @@ func messagesFromContext(ctx agent.Context) []model.Message {
 	for event := range ctx.Events().All() {
 		events = append(events, event)
 	}
-	return normalizeToolCallHistory(messagesFromEvents(ctx.Session(), events))
+	return messagesFromEvents(ctx.Session(), events)
 }
 
 func messagesFromEvents(activeSession session.Session, events []*session.Event) []model.Message {
@@ -44,7 +44,7 @@ func messagesFromEvents(activeSession session.Session, events []*session.Event) 
 		out = append(out, message)
 		i++
 	}
-	return out
+	return normalizeToolCallHistory(out)
 }
 
 func eventWithParticipantContextMeta(event *session.Event, activeSession session.Session) *session.Event {

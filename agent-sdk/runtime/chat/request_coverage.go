@@ -16,8 +16,8 @@ func bindRequestSource(ctx agent.Context, req *model.Request) {
 		return
 	}
 	events := tracker.Events()
-	// Compare the unmodified projection, including origins and tool messages.
-	// History repair must not manufacture evidence for speculative coverage.
+	// Use the same normalized projection as request history, including origins.
+	// The fingerprint below still binds the complete observed source events.
 	projected := messagesFromEvents(ctx.Session(), compact.PromptEventsFromLatestCompact(events))
 	if !reflect.DeepEqual(req.Messages, projected) {
 		return
