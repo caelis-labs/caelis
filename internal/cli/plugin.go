@@ -169,10 +169,35 @@ func runPluginSubcommand(ctx context.Context, args []string, cwd string, stdout,
 	if jsonOutput {
 		return json.NewEncoder(stdout).Encode(result)
 	}
-	if result.Plugin != nil {
-		_, err = fmt.Fprintf(stdout, "%s %s: %s (version %s, enabled %t)\n", result.Action, result.ID, result.Plugin.Root, result.Plugin.Version, result.Plugin.Enabled)
-	} else {
-		_, err = fmt.Fprintf(stdout, "%s %s: absent\n", result.Action, result.ID)
+	return writePluginCommandText(stdout, result)
+}
+
+func writePluginCommandText(stdout io.Writer, result pluginCommandOutput) error {
+	if result.Plugin == nil {
+		_, err := fmt.Fprintf(stdout, "%s %s: absent\n", result.Action, result.ID)
+		return err
 	}
-	return err
+	if _, err := fmt.Fprintf(stdout, "%s %s: %s (version %s, enabled %t)\n", result.Action, result.ID, result.Plugin.Root, result.Plugin.Version, result.Plugin.Enabled); err != nil {
+		return err
+	}
+	for _, server := range result.Plugin.MCPServers {
+		health := []string{server.Status}
+		if server.Refreshing {
+			health = append(health, "refreshing")
+		}
+		if server.Stale {
+			health = append(health, "stale")
+		}
+		if server.RefreshFailed {
+			health = append(health, "refresh failed")
+		}
+		line := "  MCP " + server.Name + ": " + strings.Join(health, ", ")
+		if server.Warning != "" {
+			line += " (" + server.Warning + ")"
+		}
+		if _, err := fmt.Fprintln(stdout, line); err != nil {
+			return err
+		}
+	}
+	return nil
 }

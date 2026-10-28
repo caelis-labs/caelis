@@ -508,6 +508,7 @@ type openAICodexAccumulator struct {
 	slots          map[int]*openAICodexOutputSlot
 	itemIndexes    map[string]int
 	hasToolCall    bool
+	hasRefusal     bool
 	replayProvider string
 	plainReasoning bool
 }
@@ -562,6 +563,11 @@ func (a *openAICodexAccumulator) applyItem(item openAICodexOutputItem, index int
 			}
 		}
 	case "message":
+		for _, content := range item.Content {
+			if content.Type == "refusal" {
+				a.hasRefusal = true
+			}
+		}
 		if text := openAICodexOutputTextContent(item.Content); text != "" {
 			entry.text.Reset()
 			entry.text.WriteString(text)
@@ -635,6 +641,9 @@ func openAICodexOutputTextCitations(parts []openAICodexOutputContent) []model.Ci
 }
 
 func (a *openAICodexAccumulator) appendText(event openAICodexStreamWire) {
+	if event.Type == "response.refusal.delta" {
+		a.hasRefusal = true
+	}
 	a.slot(event.OutputIndex, event.ItemID, "message").text.WriteString(event.Delta)
 }
 
@@ -715,7 +724,7 @@ func (a *openAICodexAccumulator) message() (model.Message, error) {
 	return model.NewMessage(model.RoleAssistant, parts...), nil
 }
 
-func openAICodexFinishReason(response *openAICodexResponseWire, hasToolCall bool) (model.FinishReason, string) {
+func openAICodexFinishReason(response *openAICodexResponseWire, hasToolCall, hasRefusal bool) (model.FinishReason, string) {
 	reason := ""
 	if response != nil && response.IncompleteDetails != nil {
 		reason = strings.TrimSpace(response.IncompleteDetails.Reason)
@@ -726,6 +735,12 @@ func openAICodexFinishReason(response *openAICodexResponseWire, hasToolCall bool
 	case "content_filter":
 		return model.FinishReasonContentFilter, reason
 	case "":
+		if response != nil && response.Status == "incomplete" {
+			return model.FinishReasonUnknown, "incomplete"
+		}
+		if hasRefusal {
+			return model.FinishReasonRefusal, ""
+		}
 		if hasToolCall {
 			return model.FinishReasonToolCalls, ""
 		}

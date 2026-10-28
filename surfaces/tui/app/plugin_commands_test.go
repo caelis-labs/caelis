@@ -583,3 +583,35 @@ func TestSlashPluginUnknownSubcommand(t *testing.T) {
 		t.Errorf("expected usage in notice for unknown subcommand, got: %q", combined)
 	}
 }
+
+func TestPluginManageRendersMCPRefreshStatus(t *testing.T) {
+	for _, tc := range []struct {
+		name                      string
+		refreshing, stale, failed bool
+		want                      string
+	}{
+		{"refreshing", true, true, false, "refreshing, stale"},
+		{"failed", false, true, true, "stale, refresh failed"},
+		{"ready", false, false, false, "running"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			plugin := controlprompt.PluginSnapshot{ID: "docs", Enabled: true, Status: "active", MCPServers: []controlprompt.MCPServerSnapshot{{Name: "documents", Status: "running", Refreshing: tc.refreshing, Stale: tc.stale, RefreshFailed: tc.failed, Warning: "catalog warning"}}}
+			var prompt PromptRequestMsg
+			sendPluginManagerPrompt(t.Context(), &pluginStubService{}, func(msg tea.Msg) {
+				if p, ok := msg.(PromptRequestMsg); ok {
+					prompt = p
+				}
+			}, []controlprompt.PluginSnapshot{plugin})
+			defer close(prompt.Response)
+			model := NewModel(Config{Commands: DefaultCommands()})
+			model.width, model.height = 180, 40
+			model.activePrompt = newPromptState(prompt)
+			rendered := ansi.Strip(model.renderPromptModal())
+			for _, want := range []string{"documents", "running", tc.want, "catalog warning"} {
+				if !strings.Contains(rendered, want) {
+					t.Fatalf("missing %q in rendered plugin details: %s", want, rendered)
+				}
+			}
+		})
+	}
+}

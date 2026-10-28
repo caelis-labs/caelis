@@ -62,6 +62,14 @@ func (q *guardianQueries) invocation(in model.Invocation) {
 	q.usage.Reported = q.usage.Reported || in.Usage.IsReported()
 	q.usage.PromptTokens += in.Usage.PromptTokens
 	q.usage.CachedInputTokens += in.Usage.CachedInputTokens
+	q.usage.CacheWriteTokens += in.Usage.CacheWriteTokens
+	q.usage.CacheWrite5mTokens += in.Usage.CacheWrite5mTokens
+	q.usage.CacheWrite1hTokens += in.Usage.CacheWrite1hTokens
+	q.usage.CachedInputTokensReported = q.usage.CachedInputTokensReported || in.Usage.CachedInputTokensReported
+	q.usage.CacheWriteTokensReported = q.usage.CacheWriteTokensReported || in.Usage.CacheWriteTokensReported
+	q.usage.CacheWrite5mTokensReported = q.usage.CacheWrite5mTokensReported || in.Usage.CacheWrite5mTokensReported
+	q.usage.CacheWrite1hTokensReported = q.usage.CacheWrite1hTokensReported || in.Usage.CacheWrite1hTokensReported
+
 	q.usage.CompletionTokens += in.Usage.CompletionTokens
 	if !q.modelStarted.IsZero() {
 		q.modelMS += guardianElapsed(q.modelStarted)

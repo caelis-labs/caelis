@@ -27,6 +27,7 @@ type anthropicProviderDefaults struct {
 	baseURL      string
 	maxOutputTok int
 	deepSeek     bool
+	promptCache  bool
 }
 
 type anthropicSDKLLM struct {
@@ -42,11 +43,13 @@ type anthropicSDKLLM struct {
 	contextWindowTokens int
 	imageInput          bool
 	deepSeek            bool
+	promptCache         bool
 }
 
 func newAnthropic(cfg Config, token string) model.LLM {
 	return newAnthropicWithDefaults(cfg, token, anthropicProviderDefaults{
-		baseURL: defaultAnthropicBaseURL,
+		baseURL:     defaultAnthropicBaseURL,
+		promptCache: true,
 	})
 }
 
@@ -70,7 +73,9 @@ func newAnthropicWithDefaults(cfg Config, token string, defaults anthropicProvid
 	if strings.TrimSpace(cfg.Auth.HeaderKey) != "" {
 		opts = append(opts, option.WithoutEnvironmentDefaults())
 	}
-	opts = append(opts, option.WithBaseURL(baseURL))
+	// Core owns retries so every HTTP attempt crosses admission, timing and
+	// accounting. SDK-internal retries would bypass idle attempt limits.
+	opts = append(opts, option.WithMaxRetries(0), option.WithBaseURL(baseURL))
 	opts = append(opts, option.WithHTTPClient(coalesceHTTPClient(cfg.HTTPClient)))
 	opts = append(opts, anthropicAuthOptions(cfg, token)...)
 	for key, value := range cfg.Headers {
@@ -104,6 +109,7 @@ func newAnthropicWithDefaults(cfg Config, token string, defaults anthropicProvid
 		contextWindowTokens: cfg.ContextWindowTokens,
 		imageInput:          cfg.ImageInput,
 		deepSeek:            defaults.deepSeek,
+		promptCache:         defaults.promptCache,
 	}
 }
 
@@ -174,15 +180,16 @@ func (l *anthropicSDKLLM) generateNonStreaming(ctx context.Context, params anthr
 	yield(&model.StreamEvent{
 		Type: model.StreamEventTurnDone,
 		Response: &model.Response{
-			Message:         msg,
-			TurnComplete:    true,
-			StepComplete:    true,
-			Status:          model.ResponseStatusCompleted,
-			FinishReason:    finishReason,
-			RawFinishReason: rawFinishReason,
-			Model:           resp.Model,
-			Provider:        l.provider,
-			Usage:           usage,
+			Message:              msg,
+			TurnComplete:         true,
+			StepComplete:         true,
+			Status:               model.ResponseStatusCompleted,
+			FinishReason:         finishReason,
+			FinishReasonReported: resp.JSON.StopReason.Valid(),
+			RawFinishReason:      rawFinishReason,
+			Model:                resp.Model,
+			Provider:             l.provider,
+			Usage:                usage,
 		},
 	}, nil)
 }
@@ -197,7 +204,9 @@ func (l *anthropicSDKLLM) generateStreaming(ctx context.Context, params anthropi
 	defer stream.Close()
 
 	acc := anthropic.Message{}
+	streamUsage := anthropic.Usage{}
 	messageStopped := false
+	finishReasonReported := false
 	for stream.Next() {
 		event := stream.Current()
 		if stop, ok := event.AsAny().(anthropic.ContentBlockStopEvent); ok {
@@ -211,23 +220,12 @@ func (l *anthropicSDKLLM) generateStreaming(ctx context.Context, params anthropi
 		case anthropic.MessageStopEvent:
 			messageStopped = true
 		case anthropic.MessageDeltaEvent:
-			if ev.Usage.JSON.InputTokens.Valid() {
-				acc.Usage.InputTokens = ev.Usage.InputTokens
-			}
-			if ev.Usage.JSON.CacheCreationInputTokens.Valid() {
-				acc.Usage.CacheCreationInputTokens = ev.Usage.CacheCreationInputTokens
-			}
-			if ev.Usage.JSON.CacheReadInputTokens.Valid() {
-				acc.Usage.CacheReadInputTokens = ev.Usage.CacheReadInputTokens
-			}
-			if ev.Usage.JSON.OutputTokens.Valid() {
-				acc.Usage.OutputTokens = ev.Usage.OutputTokens
-			}
-			if ev.Usage.JSON.OutputTokensDetails.Valid() {
-				acc.Usage.OutputTokensDetails = ev.Usage.OutputTokensDetails
-			}
+			finishReasonReported = finishReasonReported || ev.Delta.JSON.StopReason.Valid()
+			acc.Usage = mergeAnthropicUsage(streamUsage, ev.Usage.RawJSON())
+			streamUsage = acc.Usage
 			model.RecordInvocationUsage(ctx, anthropicUsageToKernel(acc.Usage))
 		case anthropic.MessageStartEvent:
+			streamUsage = ev.Message.Usage
 			model.RecordInvocationUsage(ctx, anthropicUsageToKernel(acc.Usage))
 		case anthropic.ContentBlockStartEvent:
 			if !l.emitStreamingStartBlock(ev, yield) {
@@ -255,15 +253,16 @@ func (l *anthropicSDKLLM) generateStreaming(ctx context.Context, params anthropi
 	yield(&model.StreamEvent{
 		Type: model.StreamEventTurnDone,
 		Response: &model.Response{
-			Message:         msg,
-			TurnComplete:    true,
-			StepComplete:    true,
-			Status:          model.ResponseStatusCompleted,
-			FinishReason:    finishReason,
-			RawFinishReason: rawFinishReason,
-			Model:           acc.Model,
-			Provider:        l.provider,
-			Usage:           usage,
+			Message:              msg,
+			TurnComplete:         true,
+			StepComplete:         true,
+			Status:               model.ResponseStatusCompleted,
+			FinishReason:         finishReason,
+			FinishReasonReported: finishReasonReported,
+			RawFinishReason:      rawFinishReason,
+			Model:                acc.Model,
+			Provider:             l.provider,
+			Usage:                usage,
 		},
 	}, nil)
 }
@@ -396,6 +395,9 @@ func (l *anthropicSDKLLM) buildRequest(req *model.Request) (anthropic.MessageNew
 	} else if thinking := anthropicThinkingConfig(l.provider, req.Reasoning); thinking != nil {
 		params.Thinking = *thinking
 		applyAnthropicMaxTokensForThinking(&params)
+	}
+	if l.promptCache {
+		applyAnthropicCacheBreakpoints(&params)
 	}
 	return params, nil
 }
@@ -946,17 +948,26 @@ func anthropicUsageToKernel(usage anthropic.Usage) model.Usage {
 	outputTokens := usage.OutputTokens
 	reasoningTokens := usage.OutputTokensDetails.ThinkingTokens
 	return usageWithPresence(model.Usage{
-		PromptTokens:      int(promptTokens),
-		CachedInputTokens: int(cachedTokens),
-		CompletionTokens:  int(outputTokens),
-		ReasoningTokens:   int(reasoningTokens),
-		TotalTokens:       int(promptTokens + cachedTokens + outputTokens),
+		PromptTokens:               int(promptTokens),
+		CachedInputTokens:          int(cachedTokens),
+		CacheWriteTokens:           int(usage.CacheCreationInputTokens),
+		CacheWrite5mTokens:         int(usage.CacheCreation.Ephemeral5mInputTokens),
+		CacheWrite1hTokens:         int(usage.CacheCreation.Ephemeral1hInputTokens),
+		CachedInputTokensReported:  usage.JSON.CacheReadInputTokens.Valid(),
+		CacheWriteTokensReported:   usage.JSON.CacheCreationInputTokens.Valid(),
+		CacheWrite5mTokensReported: usage.CacheCreation.JSON.Ephemeral5mInputTokens.Valid(),
+		CacheWrite1hTokensReported: usage.CacheCreation.JSON.Ephemeral1hInputTokens.Valid(),
+		CompletionTokens:           int(outputTokens),
+		ReasoningTokens:            int(reasoningTokens),
+		TotalTokens:                int(promptTokens + cachedTokens + outputTokens),
 	}, reportedTokenFields([]byte(usage.RawJSON())))
 }
 
 func normalizeAnthropicFinishReason(reason anthropic.StopReason) model.FinishReason {
 	switch reason {
-	case anthropic.StopReasonEndTurn, anthropic.StopReasonStopSequence, anthropic.StopReasonPauseTurn, anthropic.StopReasonRefusal:
+	case anthropic.StopReasonRefusal:
+		return model.FinishReasonRefusal
+	case anthropic.StopReasonEndTurn, anthropic.StopReasonStopSequence:
 		return model.FinishReasonStop
 	case anthropic.StopReasonMaxTokens:
 		return model.FinishReasonLength

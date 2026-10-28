@@ -34,6 +34,7 @@ type asyncProbeModel struct {
 	responses  chan snapshotResponse
 	summaries  chan snapshotResponse
 	ignoreStop bool
+	imageInput bool
 }
 
 func newAsyncProbeModel() *asyncProbeModel {
@@ -43,10 +44,14 @@ func newAsyncProbeModel() *asyncProbeModel {
 	}
 }
 
-func (*asyncProbeModel) Name() string                     { return "async-fixture" }
-func (*asyncProbeModel) ProviderName() string             { return "fixture" }
-func (*asyncProbeModel) ContextWindowTokens() int         { return 10000 }
-func (*asyncProbeModel) Capabilities() model.Capabilities { return runtimeTestModelCapabilities() }
+func (*asyncProbeModel) Name() string             { return "async-fixture" }
+func (*asyncProbeModel) ProviderName() string     { return "fixture" }
+func (*asyncProbeModel) ContextWindowTokens() int { return 10000 }
+func (m *asyncProbeModel) Capabilities() model.Capabilities {
+	caps := runtimeTestModelCapabilities()
+	caps.ImageInput = m.imageInput
+	return caps
+}
 func (m *asyncProbeModel) Generate(ctx context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
 	return func(yield func(*model.StreamEvent, error) bool) {
 		responses := m.responses
@@ -205,8 +210,10 @@ func (h *asyncHarness) startCandidate(t *testing.T) asyncProbeRequest {
 	h.llm.responses <- asyncToolResponse("first")
 	next := receiveSnapshotValue(t, h.llm.foreground)
 	background := receiveSnapshotValue(t, h.llm.background)
-	if !background.DisableTools {
-		t.Fatal("background must disable tool selection")
+	want := model.CloneRequest(next.request)
+	want.Messages = append(want.Messages, model.NewTextMessage(model.RoleUser, inContextCompactionPrompt))
+	if !reflect.DeepEqual(background, want) {
+		t.Fatal("background must preserve the complete foreground request and append only the compaction instruction")
 	}
 	if next.scope == nil || next.scope.job == nil {
 		t.Fatal("candidate not launched")
@@ -230,6 +237,27 @@ func (h *asyncHarness) load(t *testing.T) session.LoadedSession {
 		t.Fatal(err)
 	}
 	return loaded
+}
+
+func TestAsyncCompactionFrozenRequestMatchesForeground(t *testing.T) {
+	h := newAsyncHarness(t, "")
+	h.source.set(agent.ModelRequestSnapshot{
+		Revision: "epoch-1", Model: h.llm, Tools: []tool.Tool{h.tool},
+		Instructions: []model.Part{model.NewTextPart("preserve these exact instructions")},
+		Reasoning:    model.ReasoningConfig{Effort: "high"},
+		Request:      agent.ModelRequestOptions{ServiceTier: model.ServiceTierPriority},
+	})
+	run := h.run(t)
+	next := h.startCandidate(t)
+	h.completeCandidate(t, next.scope)
+	data, ok := compact.CompactEventDataFromEvent(next.scope.job.result.CompactEvent)
+	if !ok || data.Generator != "model_context" {
+		t.Fatalf("generator = %q, want model_context", data.Generator)
+	}
+	h.llm.responses <- asyncTextResponse("done", 500)
+	if err := run.Handle.WaitCompletion(t.Context()); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestAsyncCompactionForegroundTailSteeringAndFileReplay(t *testing.T) {
@@ -265,7 +293,7 @@ func TestAsyncCompactionForegroundTailSteeringAndFileReplay(t *testing.T) {
 	}
 	loaded := h.load(t)
 	checkpoint, data, ok := compact.LatestCompactEvent(loaded.Events)
-	if !ok || data.SummarizedThroughSeq != next.scope.job.throughSeq || checkpoint.ID != next.scope.job.id {
+	if !ok || data.SummarizedThroughSeq != next.scope.job.coverage.SummarizedThroughSeq || checkpoint.ID != next.scope.job.id {
 		t.Fatal("coverage/identity mismatch")
 	}
 	var compactionReceipts, chatReceipts int
@@ -304,6 +332,9 @@ func TestAsyncCompactionForegroundTailSteeringAndFileReplay(t *testing.T) {
 	}
 	got := receiveSnapshotValue(t, h.llm.foreground).request
 	want := model.CloneRequest(after)
+	// This Runtime has speculation disabled; the prior request's local source
+	// binding does not describe the replay request with its two new messages.
+	want.Source = nil
 	want.Messages = append(want.Messages, model.NewTextMessage(model.RoleAssistant, "fixture complete"), model.NewTextMessage(model.RoleUser, "replay probe"))
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("whole request replay mismatch\ngot: %#v\nwant: %#v", got, want)
@@ -629,26 +660,45 @@ func TestAsyncCompactionTailParallelPairsAndUnknownResults(t *testing.T) {
 	}
 }
 
-func TestAsyncCompactionSourceFramesIncludeAppendMissingFromForegroundRequest(t *testing.T) {
+func TestAsyncCompactionAppendAfterAssemblyRemainsInTail(t *testing.T) {
 	h := newAsyncHarness(t, "")
-	run := h.run(t)
-	first := receiveSnapshotValue(t, h.llm.foreground)
 	const marker = "canonical input raced request assembly: never publish COBALT"
-	if _, err := h.store.AppendEvent(h.ctx, session.AppendEventRequest{
-		SessionRef: h.active.SessionRef, MutationGuard: session.RuntimeMutationGuard(h.ctx), Event: userTextEvent(marker),
-	}); err != nil {
-		t.Fatal(err)
+	calls := 0
+	var appended *session.Event
+	h.rt.agentFactory = asyncAssemblyFactory{hook: func(req *model.Request) {
+		calls++
+		if calls != 2 {
+			return
+		}
+		var err error
+		appended, err = h.store.AppendEvent(h.ctx, session.AppendEventRequest{
+			SessionRef: h.active.SessionRef, MutationGuard: session.RuntimeMutationGuard(h.ctx), Event: userTextEvent(marker),
+		})
+		if err != nil {
+			t.Error(err)
+		}
+	}}
+	run := h.run(t)
+	next := h.startCandidate(t)
+	if appended == nil || next.request.Source == nil || appended.Seq <= next.request.Source.SourceThroughSeq {
+		t.Fatal("fixture append must follow the bound request source")
 	}
-	h.llm.responses <- asyncToolResponse("first")
-	next := receiveSnapshotValue(t, h.llm.foreground)
-	background := receiveSnapshotValue(t, h.llm.background)
-	if strings.Contains(asyncMessagesText(first.request.Messages), marker) || strings.Contains(asyncMessagesText(next.request.Messages), marker) {
-		t.Fatal("fixture did not race the assembled request")
-	}
-	if !strings.Contains(asyncMessagesText(background.Messages), marker) || !strings.Contains(asyncMessagesText(background.Messages), "CAELIS_SOURCE_FRAME_V1") {
-		t.Fatal("summary coverage includes an event absent from generation input")
+	if strings.Contains(asyncMessagesText(next.request.Messages), marker) {
+		t.Fatal("external append entered the assembled request")
 	}
 	h.completeCandidate(t, next.scope)
+	data, _ := compact.CompactEventDataFromEvent(next.scope.job.result.CompactEvent)
+	if data.SummarizedThroughSeq >= appended.Seq {
+		t.Fatal("external append entered summary coverage")
+	}
+	h.llm.responses <- asyncToolResponse("second")
+	receiveSnapshotValue(t, h.secondTool)
+	close(h.releaseSecond)
+	after := receiveSnapshotValue(t, h.llm.foreground)
+	text := asyncMessagesText(after.request.Messages)
+	if !strings.Contains(text, marker) || !strings.Contains(text, "CONTEXT CHECKPOINT") {
+		t.Fatalf("adopted context lost tail: %s", text)
+	}
 	h.llm.responses <- asyncTextResponse("done", 500)
 	if err := run.Handle.WaitCompletion(t.Context()); err != nil {
 		t.Fatal(err)
@@ -660,13 +710,14 @@ func TestAsyncCompactionToolRequestHasNoEffectAndKeepsOriginalContext(t *testing
 	run := h.run(t)
 	next := h.startCandidate(t)
 	h.llm.summaries <- asyncToolResponse("forbidden-background-effect")
-	for attempt := 1; attempt < h.rt.compaction.MaxRetryAttempts; attempt++ {
-		receiveSnapshotValue(t, h.llm.background)
-		h.llm.summaries <- asyncToolResponse("forbidden-background-effect")
-	}
 	receiveSnapshotValue(t, next.scope.job.done)
 	if !errors.Is(next.scope.job.err, errCompactionToolRequest) {
 		t.Fatalf("generation=%v", next.scope.job.err)
+	}
+	select {
+	case <-h.llm.background:
+		t.Fatal("strict in-context generation fell back")
+	default:
 	}
 	if h.effects.Load() != 1 {
 		t.Fatal("background tool executed")

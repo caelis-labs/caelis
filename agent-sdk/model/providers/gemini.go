@@ -134,15 +134,16 @@ func (l *geminiLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 			yield(&model.StreamEvent{
 				Type: model.StreamEventTurnDone,
 				Response: &model.Response{
-					Message:         msg,
-					TurnComplete:    true,
-					StepComplete:    true,
-					Status:          model.ResponseStatusCompleted,
-					FinishReason:    model.FinishReasonStop,
-					RawFinishReason: string(genai.FinishReasonStop),
-					Model:           l.name,
-					Provider:        l.provider,
-					Usage:           usage,
+					Message:              msg,
+					TurnComplete:         true,
+					StepComplete:         true,
+					Status:               model.ResponseStatusCompleted,
+					FinishReason:         model.FinishReasonStop,
+					RawFinishReason:      string(genai.FinishReasonStop),
+					FinishReasonReported: true,
+					Model:                l.name,
+					Provider:             l.provider,
+					Usage:                usage,
 				},
 			}, nil)
 			return
@@ -165,7 +166,7 @@ func (l *geminiLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 			usage = mergeGeminiUsage(usage, geminiUsageFromResponse(out))
 			model.RecordInvocationUsage(runCtx, usage)
 			if len(out.Candidates) > 0 && out.Candidates[0] != nil {
-				if reason := out.Candidates[0].FinishReason; reason != "" && reason != genai.FinishReasonUnspecified {
+				if reason := out.Candidates[0].FinishReason; reason != "" {
 					finishReason = reason
 					if reason != genai.FinishReasonStop {
 						abnormalReason = reason
@@ -207,21 +208,22 @@ func (l *geminiLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 			return
 		}
 		if abnormalReason != "" || finishReason != genai.FinishReasonStop {
-			yield(nil, fmt.Errorf("model: gemini candidate ended with non-success finishReason %q", abnormalReason))
+			yield(nil, geminiFinishReasonError(abnormalReason))
 			return
 		}
 		yield(&model.StreamEvent{
 			Type: model.StreamEventTurnDone,
 			Response: &model.Response{
-				Message:         acc.message(),
-				TurnComplete:    true,
-				StepComplete:    true,
-				Status:          model.ResponseStatusCompleted,
-				FinishReason:    geminiFinishReasonToKernel(finishReason),
-				RawFinishReason: string(finishReason),
-				Model:           l.name,
-				Provider:        l.provider,
-				Usage:           usage,
+				Message:              acc.message(),
+				TurnComplete:         true,
+				StepComplete:         true,
+				Status:               model.ResponseStatusCompleted,
+				FinishReason:         geminiFinishReasonToKernel(finishReason),
+				RawFinishReason:      string(finishReason),
+				FinishReasonReported: true,
+				Model:                l.name,
+				Provider:             l.provider,
+				Usage:                usage,
 			},
 		}, nil)
 	}
@@ -241,9 +243,13 @@ func geminiTerminalError(out *genai.GenerateContentResponse) error {
 	}
 	reason := out.Candidates[0].FinishReason
 	if reason != genai.FinishReasonStop {
-		return fmt.Errorf("model: gemini candidate ended with non-success finishReason %q", reason)
+		return geminiFinishReasonError(reason)
 	}
 	return nil
+}
+
+func geminiFinishReasonError(reason genai.FinishReason) error {
+	return &model.TerminalResponseError{Reason: geminiFinishReasonToKernel(reason), Detail: fmt.Sprintf("model: gemini candidate ended with non-success finishReason %q", reason)}
 }
 
 func geminiFinishReasonToKernel(reason genai.FinishReason) model.FinishReason {

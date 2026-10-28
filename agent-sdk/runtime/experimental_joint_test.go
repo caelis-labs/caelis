@@ -22,11 +22,11 @@ import (
 // Real stdio transport and effects, with a deliberately blocked synthetic summary.
 // The scheduler, discovery, canonical checkpoint writer and replay are production.
 func TestExperimentalAsyncMCPJointCheckpoint(t *testing.T) {
-	for _, scenario := range []string{"retire", "retire_static_catalog", "late_mark", "reuse_tail", "cas_reuse", "unknown_commit", "failed_commit"} {
+	for _, scenario := range []string{"retire", "late_mark", "reuse_tail", "cas_reuse", "unknown_commit", "failed_commit"} {
 		t.Run(scenario, func(t *testing.T) {
 			h := newAsyncHarness(t, "", session.WorkspaceRef{Key: "joint", CWD: t.TempDir()})
 			receipts := filepath.Join(t.TempDir(), "receipts")
-			manager, err := mcp.NewManagerWithOptions(t.Context(), []mcp.ServerSpec{{PluginID: "joint", Name: "local", Command: os.Args[0], WorkDir: t.TempDir(), Args: []string{"-test.run=^TestRetirementMCPServerProcess$"}, Env: map[string]string{"CAELIS_RETIREMENT_SERVER": "1", "CAELIS_RETIREMENT_RECEIPTS": receipts}}}, func(f mcp.ServerFailure) { t.Logf("MCP failure: %v", f.Err) }, mcp.ManagerOptions{RefreshTools: scenario != "retire_static_catalog"})
+			manager, err := mcp.NewManager(t.Context(), []mcp.ServerSpec{{PluginID: "joint", Name: "local", Command: os.Args[0], WorkDir: t.TempDir(), Args: []string{"-test.run=^TestRetirementMCPServerProcess$"}, Env: map[string]string{"CAELIS_RETIREMENT_SERVER": "1", "CAELIS_RETIREMENT_RECEIPTS": receipts}}}, func(f mcp.ServerFailure) { t.Logf("MCP failure: %v", f.Err) })
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -38,7 +38,6 @@ func TestExperimentalAsyncMCPJointCheckpoint(t *testing.T) {
 			}
 			binding := tool.BindingForDefinition(ready[0].Definition())
 			search := toolsearch.NewSource(manager, toolsearch.NewLexicalRanker())
-			h.rt.toolRetirement = true
 			h.rt.compaction.Async.Enabled = false
 			h.rt.policies = retirementPolicy()
 			h.rt.defaultPolicyMode = "retirement-test"
@@ -195,7 +194,7 @@ func TestExperimentalAsyncMCPJointCheckpoint(t *testing.T) {
 			}
 			// Full request equality is covered by the existing async and stdio replay
 			// tests; this projection also verifies the joint exposure checkpoint.
-			if !reflect.DeepEqual(promptEventsWithToolVisibilityMetadata(compact.PromptEventsFromLatestCompact(loaded.Events), loaded.Events, true), promptEventsWithToolVisibilityMetadata(compact.PromptEventsFromLatestCompact(replay.Events), replay.Events, true)) {
+			if !reflect.DeepEqual(promptEventsWithToolVisibilityMetadata(compact.PromptEventsFromLatestCompact(loaded.Events), loaded.Events), promptEventsWithToolVisibilityMetadata(compact.PromptEventsFromLatestCompact(replay.Events), replay.Events)) {
 				t.Fatal("joint replay projection differs")
 			}
 			t.Logf("scenario=%s checkpoints=%d effects=%d active=%d", scenario, count, wantEffects, wantActive)

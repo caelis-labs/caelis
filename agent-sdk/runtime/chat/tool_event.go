@@ -199,8 +199,7 @@ func responseUsageAccountingProvider(resp *model.Response) string {
 	}
 	usage := resp.Usage
 	if usage.CachedInputTokens > 0 &&
-		usage.TotalTokens >= usage.PromptTokens+usage.CachedInputTokens+usage.CompletionTokens &&
-		usage.PromptTokens+usage.CompletionTokens > 0 {
+		usage.TotalTokens >= usage.PromptTokens+usage.CachedInputTokens+usage.CompletionTokens {
 		return "deepseek-anthropic"
 	}
 	return provider

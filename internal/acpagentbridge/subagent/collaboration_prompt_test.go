@@ -159,6 +159,11 @@ func TestACPChildSteeringOmitsCollaborationSlice(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	// This tests prompt contents, so keep the Activity alive until its steering
+	// receipt is observed. A terminal racing that receipt legitimately cancels it.
+	if err := os.WriteFile(trace+".receipt", []byte("observed"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	waitChildActivityTerminal(t, ctx, events)
 	payloads := readCollaborationPromptTrace(t, trace)
 	promptRaw, steeringRaw := "", ""
@@ -298,6 +303,16 @@ func TestCollaborationPromptHelperProcess(t *testing.T) {
 			if mode == "hold" {
 				select {
 				case <-steered:
+					deadline := time.Now().Add(4 * time.Second)
+					for {
+						if _, err := os.Stat(trace + ".receipt"); err == nil {
+							break
+						}
+						if time.Now().After(deadline) {
+							return nil, &jsonrpc.RPCError{Code: -32000, Message: "receipt observation timeout"}
+						}
+						time.Sleep(time.Millisecond)
+					}
 				case <-time.After(4 * time.Second):
 					return nil, &jsonrpc.RPCError{Code: -32000, Message: "steering timeout"}
 				}

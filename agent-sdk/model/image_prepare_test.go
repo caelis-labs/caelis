@@ -174,6 +174,43 @@ func TestGeneratePreservesSmallImagesAndCorrectsMIME(t *testing.T) {
 	}
 }
 
+func TestGenerateImagePreparationCarriesOnlyMatchingSource(t *testing.T) {
+	for _, binding := range []string{"matching", "mismatched", "absent"} {
+		t.Run(binding, func(t *testing.T) {
+			part := imageTestPart(t, 8, 8)
+			part.Media.MimeType = "image/jpeg"
+			req := &Request{Messages: []Message{NewMessage(RoleUser, part)}}
+			if binding != "absent" {
+				req.Source = &RequestSource{SourceThroughSeq: 42, SourcePrefixHash: "canonical-events", MessagesHash: requestMessagesHash(req.Messages)}
+				if binding == "mismatched" {
+					req.Source.MessagesHash = "stale-proof"
+				}
+			}
+			original := CloneRequest(req)
+			probe := &retryTestLLM{}
+			for _, err := range Generate(t.Context(), probe, req) {
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			prepared := probe.seenReqs[0]
+			if !reflect.DeepEqual(req, original) {
+				t.Fatal("changed canonical request")
+			}
+			if reflect.DeepEqual(prepared.Messages, req.Messages) {
+				t.Fatal("fixture did not normalize the image")
+			}
+			if binding == "matching" {
+				if prepared.Source.MessagesHash != requestMessagesHash(prepared.Messages) || prepared.Source.SourcePrefixHash != req.Source.SourcePrefixHash || prepared.Source.SourceThroughSeq != 42 {
+					t.Fatal("normalization lost canonical source proof")
+				}
+			} else if !reflect.DeepEqual(prepared.Source, req.Source) {
+				t.Fatal("normalization fabricated a source proof")
+			}
+		})
+	}
+}
+
 func TestImagePreparationPreservesSupportedFormatsWithinBudget(t *testing.T) {
 	t.Parallel()
 	img := image.NewNRGBA(image.Rect(0, 0, 1, 1))

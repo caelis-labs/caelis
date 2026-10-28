@@ -6,6 +6,30 @@ import (
 	"testing"
 )
 
+func TestResponseFinishReasonPresenceJSON(t *testing.T) {
+	for _, reported := range []bool{false, true} {
+		response := Response{FinishReason: FinishReasonUnknown, FinishReasonReported: reported}
+		data, err := json.Marshal(response)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(data), `"finish_reason_reported":true`) != reported ||
+			strings.Contains(string(data), `"finish_reason_reported":false`) {
+			t.Fatalf("presence encoding = %s, reported=%v", data, reported)
+		}
+		var restored Response
+		if err := json.Unmarshal(data, &restored); err != nil {
+			t.Fatal(err)
+		}
+		if restored.FinishReason != FinishReasonUnknown || restored.FinishReasonReported != reported {
+			t.Fatalf("unknown finish reason lost presence: %+v", restored)
+		}
+		if event := StreamEventFromResponse(&restored); event.FinishReasonReported != reported {
+			t.Fatal("stream event lost finish reason presence")
+		}
+	}
+}
+
 func TestMessageFromToolCallsNormalizesInvalidToolInputForJSONPersistence(t *testing.T) {
 	rawArgs := `* SEARCH "gm_license"`
 	msg := MessageFromToolCalls(RoleAssistant, []ToolCall{{

@@ -8,6 +8,10 @@ func CloneRequest(in *Request) *Request {
 		return nil
 	}
 	out := *in
+	if in.Source != nil {
+		source := *in.Source
+		out.Source = &source
+	}
 	out.Instructions = CloneParts(in.Instructions)
 	out.Messages = CloneMessages(in.Messages)
 	out.Tools = CloneToolSpecs(in.Tools)

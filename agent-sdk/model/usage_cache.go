@@ -40,7 +40,7 @@ func ProviderSeparatesCachedInputForUsage(provider string, payload map[string]an
 	cached := usageIntValue(payload["cached_input_tokens"])
 	completion := usageIntValue(payload["completion_tokens"])
 	total := usageIntValue(payload["total_tokens"])
-	return cached > 0 && total >= prompt+cached+completion && prompt+completion > 0
+	return cached > 0 && total >= prompt+cached+completion
 }
 
 func normalizedProviderKey(provider string) string {

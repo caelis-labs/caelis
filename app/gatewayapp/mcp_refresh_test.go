@@ -125,25 +125,26 @@ func TestExperimentalHTTPMCPRefreshRetriesOwnedActiveManager(t *testing.T) {
 			if result, err := client.RefreshMCPTools(t.Context(), request); err == nil || result.Outcome != appserver.OutcomeConflicted || lists.Load() != count {
 				t.Fatal("stale session precondition reached MCP")
 			}
-			// A new activation with the switch off must reject the same remote action.
+			// Live refresh is built in: a fresh activation still serves the retry
+			// even though the retired experimental key is absent.
 			doc, err = stack.composition.authorities.store.LoadContext(t.Context())
 			if err != nil {
 				t.Fatal(err)
 			}
-			doc.Experimental[experimental.MCPRefresh] = false
+			delete(doc.Experimental, experimental.MCPRefresh)
 			if err = stack.composition.authorities.store.Save(doc); err != nil {
 				t.Fatal(err)
 			}
-			create.OperationID = "create-disabled"
-			disabled, err := client.CreateSession(t.Context(), create)
+			create.OperationID = "create-always-on"
+			promoted, err := client.CreateSession(t.Context(), create)
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, releaseDisabled := activateHeldSessionRuntime(t, stack, disabled.SessionID)
-			defer releaseDisabled()
-			request.WriteBase = appserver.WriteBase{OperationID: "disabled", SessionID: disabled.SessionID}
-			if result, err := client.RefreshMCPTools(t.Context(), request); err == nil || result.Outcome != appserver.OutcomeRejected {
-				t.Fatal("disabled refresh accepted")
+			_, releasePromoted := activateHeldSessionRuntime(t, stack, promoted.SessionID)
+			defer releasePromoted()
+			request.WriteBase = appserver.WriteBase{OperationID: "always-on", SessionID: promoted.SessionID}
+			if result, err := client.RefreshMCPTools(t.Context(), request); err != nil || (result.Outcome != appserver.OutcomeCommitted && result.Outcome != appserver.OutcomeAccepted) {
+				t.Fatalf("built-in refresh rejected: %+v %v", result, err)
 			}
 		})
 	}

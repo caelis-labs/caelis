@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/judgment"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
@@ -131,6 +132,7 @@ type gatewayRuntimeBundle struct {
 	Gateway                     *kernelimpl.Gateway
 	Exec                        sandbox.Runtime
 	Engine                      *runtime.Runtime
+	IdleCompaction              *idleCompactionCoordinator
 	Placement                   controlplane.PlacementExecutor
 	ACPControlPlane             *acpassembly.ControlPlane
 	MCP                         *mcp.Manager
@@ -151,7 +153,16 @@ func (b *gatewayRuntimeBundle) Close() {
 		closeIfSupported(b.Gateway)
 	}
 	b.Gateway = nil
+	if b.IdleCompaction != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		err := b.IdleCompaction.drain(ctx)
+		cancel()
+		if err != nil {
+			return
+		}
+	}
 	if b.Engine != nil {
+		b.Engine.DiscardIdleCompactionSources()
 		closeIfSupported(b.Engine)
 	}
 	b.Engine = nil
@@ -325,7 +336,7 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 		bundle.Close()
 		return nil, fmt.Errorf("gatewayapp: failed to initialize MCP servers: %w", err)
 	}
-	mcpMgr, err := mcp.NewManagerWithOptions(context.WithoutCancel(ctx), mcpSpecs, s.mcpFailureNotifier(), mcp.ManagerOptions{RefreshTools: runtimeCfg.Experimental[experimental.MCPRefresh]})
+	mcpMgr, err := mcp.NewManagerWithOptions(context.WithoutCancel(ctx), mcpSpecs, s.mcpFailureNotifier(), mcp.ManagerOptions{})
 	if err != nil {
 		bundle.Close()
 		return nil, fmt.Errorf("gatewayapp: failed to initialize MCP servers: %w", err)
@@ -374,6 +385,7 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 	estimatedPrefixTokens := estimateModelPromptPrefixTokens(effectiveBaseMetadata, tools)
 	compactionCfg := defaultCompactionConfig(runtimeCfg.ContextWindow)
 	compactionCfg.Async.Enabled = runtimeCfg.Experimental[experimental.AsyncCompact]
+	compactionCfg.Idle.Enabled = runtimeCfg.Experimental[experimental.IdleCompact]
 	compactionCfg.EstimatedPromptPrefixTokens = estimatedPrefixTokens
 	contextRouter, err := controlplane.NewContextRouter(s.sessions)
 	if err != nil {
@@ -381,23 +393,22 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 		return nil, err
 	}
 	localCfg := runtime.Config{
-		ExperimentalToolRetirement: runtimeCfg.Experimental[experimental.ToolRetirement],
-		Sessions:                   s.sessions,
-		AgentFactory:               chat.Factory{},
-		DefaultPolicyMode:          effectivePolicyProfile,
-		SandboxPolicy:              sandboxPolicySnapshot,
-		PolicyRegistry:             policyRegistry,
-		DefaultApprovalMode:        string(kernelimpl.NormalizeApprovalMode(runtimeCfg.ApprovalMode)),
-		MCPGrants:                  s.authorities.mcpGrants,
-		Compaction:                 compactionCfg,
-		Diagnostics:                s.authorities.diagnostics,
-		ControllerContextRouter:    contextRouter,
-		ControllerEventForwarder:   acpbridge.NewControllerForwarder(s.sessions),
-		TaskStore:                  s.authorities.taskStore,
-		TaskOutput:                 s.authorities.taskOutput,
-		TaskActivityChanged:        s.runtimeTaskChanged,
-		TaskCommitted:              s.taskCommitted,
-		ChildApprovalRequester:     backgroundChildApprovalRequester{composition: s},
+		Sessions:                 s.sessions,
+		AgentFactory:             chat.Factory{},
+		DefaultPolicyMode:        effectivePolicyProfile,
+		SandboxPolicy:            sandboxPolicySnapshot,
+		PolicyRegistry:           policyRegistry,
+		DefaultApprovalMode:      string(kernelimpl.NormalizeApprovalMode(runtimeCfg.ApprovalMode)),
+		MCPGrants:                s.authorities.mcpGrants,
+		Compaction:               compactionCfg,
+		Diagnostics:              s.authorities.diagnostics,
+		ControllerContextRouter:  contextRouter,
+		ControllerEventForwarder: acpbridge.NewControllerForwarder(s.sessions),
+		TaskStore:                s.authorities.taskStore,
+		TaskOutput:               s.authorities.taskOutput,
+		TaskActivityChanged:      s.runtimeTaskChanged,
+		TaskCommitted:            s.taskCommitted,
+		ChildApprovalRequester:   backgroundChildApprovalRequester{composition: s},
 	}
 	var acpControlPlane *acpassembly.ControlPlane
 	localCfg, acpControlPlane, err = injectACPControlPlane(
@@ -572,6 +583,7 @@ func (s *runtimeComposition) swapGatewayRuntime(bundle *gatewayRuntimeBundle) {
 	s.gateway = bundle.Gateway
 	s.exec = bundle.Exec
 	s.engine = bundle.Engine
+	s.idleCompaction = bundle.IdleCompaction
 	s.guardian = bundle.Guardian
 	bundle.Guardian = nil
 	s.placement = bundle.Placement

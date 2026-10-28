@@ -83,6 +83,9 @@ func readResponsesStream(ctx context.Context, body io.ReadCloser, req *model.Req
 			if event.Response == nil {
 				return errorcode.New(errorcode.Internal, cfg.name+": terminal response is empty")
 			}
+			if event.Type == "response.incomplete" {
+				event.Response.Status = "incomplete"
+			}
 			response, err := cfg.response(event.Response, accumulator)
 			if err != nil {
 				return err
@@ -117,21 +120,22 @@ func (cfg responsesStreamConfig) response(wire *openAICodexResponseWire, accumul
 	if err != nil {
 		return nil, err
 	}
-	finishReason, rawFinishReason := openAICodexFinishReason(wire, accumulator.hasToolCall)
+	finishReason, rawFinishReason := openAICodexFinishReason(wire, accumulator.hasToolCall, accumulator.hasRefusal)
 	usage := model.Usage{}
 	if wire.Usage != nil {
 		usage = wire.Usage.toKernelUsage()
 	}
 	return &model.Response{
-		Message:             message,
-		StepComplete:        true,
-		TurnComplete:        true,
-		Status:              model.ResponseStatusCompleted,
-		FinishReason:        finishReason,
-		RawFinishReason:     rawFinishReason,
-		Usage:               usage,
-		Model:               firstNonEmptyString(wire.Model, cfg.model),
-		Provider:            cfg.provider,
-		ContextWindowTokens: cfg.contextWindowTokens,
+		Message:              message,
+		StepComplete:         true,
+		TurnComplete:         true,
+		Status:               model.ResponseStatusCompleted,
+		FinishReason:         finishReason,
+		RawFinishReason:      rawFinishReason,
+		FinishReasonReported: true,
+		Usage:                usage,
+		Model:                firstNonEmptyString(wire.Model, cfg.model),
+		Provider:             cfg.provider,
+		ContextWindowTokens:  cfg.contextWindowTokens,
 	}, nil
 }

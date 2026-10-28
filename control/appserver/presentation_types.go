@@ -114,12 +114,16 @@ type ConnectConfig struct {
 	ImageInput                     *bool    `json:"image_input,omitempty"`
 }
 
+// MCPServerSnapshot keeps connection state separate from catalog refresh health.
 type MCPServerSnapshot struct {
-	Name        string              `json:"name"`
-	Status      string              `json:"status"`
-	Tools       []string            `json:"tools,omitempty"`
-	ToolDetails []mcp.MCPToolDetail `json:"tool_details,omitempty"`
-	Warning     string              `json:"warning,omitempty"`
+	Refreshing    bool                `json:"refreshing"`
+	Stale         bool                `json:"stale"`
+	RefreshFailed bool                `json:"refresh_failed"`
+	Name          string              `json:"name"`
+	Status        string              `json:"status"`
+	Tools         []string            `json:"tools,omitempty"`
+	ToolDetails   []mcp.MCPToolDetail `json:"tool_details,omitempty"`
+	Warning       string              `json:"warning,omitempty"`
 }
 
 type PluginSnapshot struct {

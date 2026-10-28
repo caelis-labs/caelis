@@ -48,6 +48,7 @@ type runtimeHostAuthorities struct {
 	diagnostics             *slog.Logger
 	configMigration         configstore.MigrationReport
 	fenceOwnerID            string
+	idleGeneration          chan struct{}
 	taskStore               task.Store
 	taskOutput              output.Binder
 	taskOutputLifecycle     taskOutputLifecycle

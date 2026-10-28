@@ -19,9 +19,19 @@ func (r *Runtime) persistCompactionArtifacts(ctx context.Context, active *sessio
 	})
 }
 
-// Both synchronous and asynchronous compaction commit through this sole owner.
+// Synchronous, asynchronous and idle compaction commit through this sole owner.
 // The caller supplies the source validation policy and holds the write queue.
 func (r *Runtime) persistCompactionArtifactsValidated(ctx context.Context, active *session.Session, source session.LoadedSession, turnID string, result compact.Result, valid func(session.LoadedSession) bool) (*session.Event, error) {
+	return r.persistCompactionArtifactsUsing(ctx, active, source, turnID, result, valid, nil)
+}
+
+type checkpointAppender func(context.Context, session.AppendEventRequest) (*session.Event, error)
+
+func (r *Runtime) persistCompactionArtifactsUsing(ctx context.Context, active *session.Session, source session.LoadedSession, turnID string, result compact.Result, valid func(session.LoadedSession) bool, appendCheckpoint checkpointAppender) (*session.Event, error) {
+	if appendCheckpoint == nil {
+		appendCheckpoint = r.sessions.AppendEvent
+	}
+
 	if result.CompactEvent == nil {
 		return nil, errors.New("agent-sdk/runtime: compact event is required")
 	}
@@ -48,7 +58,7 @@ func (r *Runtime) persistCompactionArtifactsValidated(ctx context.Context, activ
 	for range 8 {
 		r.checkpointExposure(event, source.Events, turnID != "" || r.activeRunForSession(active.SessionRef).handle == nil)
 		var persisted *session.Event
-		persisted, err = r.sessions.AppendEvent(ctx, session.AppendEventRequest{
+		persisted, err = appendCheckpoint(ctx, session.AppendEventRequest{
 			SessionRef: active.SessionRef, ExpectedRevision: &active.Revision,
 			MutationGuard: session.RuntimeMutationGuard(ctx), Event: event,
 		})

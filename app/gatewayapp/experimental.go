@@ -74,7 +74,10 @@ func (s *controlCommandBackend) executeExperimentalCommand(ctx context.Context, 
 	}
 	next := experimental.Complete(doc.Experimental)
 	maps.Copy(next, req.Values)
-	if maps.Equal(next, experimental.Complete(doc.Experimental)) {
+	next = experimental.Complete(next)
+	_, legacyRefresh := doc.Experimental[experimental.MCPRefresh]
+	_, legacyRetirement := doc.Experimental[experimental.ToolRetirement]
+	if maps.Equal(next, experimental.Complete(doc.Experimental)) && !legacyRefresh && !legacyRetirement {
 		return configurationCommandResult(expected), nil
 	}
 	doc.Experimental = next

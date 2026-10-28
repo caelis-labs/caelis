@@ -155,7 +155,7 @@ func (l *retryingLLM) Generate(ctx context.Context, req *Request) iter.Seq2[*Str
 			yield(nil, errors.New("model: llm is nil"))
 			return
 		}
-		hasProviderTool := usesProviderExecutedTools(l.inner, req)
+		hasProviderTool := UsesProviderExecutedTools(l.inner, req)
 		stopped := false
 		canRetryLastErr := true
 
@@ -218,7 +218,9 @@ func (l *retryingLLM) runAttempt(ctx context.Context, req *Request, yield func(*
 	return committed, semanticDeltaEmitted, false, nil
 }
 
-func usesProviderExecutedTools(llm LLM, req *Request) bool {
+// UsesProviderExecutedTools reports whether this exact request can execute tools
+// at the provider. It does not infer configuration from general capabilities.
+func UsesProviderExecutedTools(llm LLM, req *Request) bool {
 	if usage, ok := llm.(ProviderExecutedToolUsage); ok {
 		return usage.UsesProviderExecutedTools(CloneRequest(req))
 	}

@@ -10,11 +10,15 @@ from typing import Any
 _USAGE_FIELDS = {
     "n_input_tokens": "prompt_tokens",
     "n_cache_tokens": "cached_input_tokens",
+    "n_cache_write_tokens": "cache_write_tokens",
+    "n_cache_write_5m_tokens": "cache_write_5m_tokens",
+    "n_cache_write_1h_tokens": "cache_write_1h_tokens",
     "n_output_tokens": "completion_tokens",
     "n_reasoning_tokens": "reasoning_tokens",
     "n_total_tokens": "total_tokens",
     "cost_micros": "cost_micros",
 }
+_CACHE_FIELDS = {key: value for key, value in _USAGE_FIELDS.items() if key.startswith("n_cache")}
 _MAX_USAGE_FIELDS = {"context_window_tokens": "context_window_tokens"}
 
 
@@ -76,7 +80,9 @@ def _usage_snapshot(update: dict[str, Any]) -> dict[str, Any]:
                 snapshot = dict(usage)
                 sdk = caelis.get("sdk")
                 if isinstance(sdk, dict) and isinstance(sdk.get("usage"), dict):
-                    snapshot.setdefault("cost_micros", sdk["usage"].get("cost_micros"))
+                    for field in (*_USAGE_FIELDS.values(), *(f"{field}_reported" for field in _CACHE_FIELDS.values())):
+                        if field in sdk["usage"]:
+                            snapshot.setdefault(field, sdk["usage"][field])
                 return snapshot
             sdk = caelis.get("sdk")
             if isinstance(sdk, dict) and isinstance(sdk.get("usage"), dict):
@@ -90,6 +96,12 @@ def _accumulate(
 ) -> None:
     for target, source in _USAGE_FIELDS.items():
         value = _nonnegative_int(usage.get(source))
+        if target in _CACHE_FIELDS:
+            reported = usage.get(f"{source}_reported")
+            if reported is True and value is None:
+                value = 0
+            if reported is False and value == 0:
+                value = None
         if value is None:
             continue
         totals[target] += value
@@ -117,6 +129,7 @@ def _usage_result(
             field: totals[field] if field in populated else None
             for field in (*_USAGE_FIELDS, *_MAX_USAGE_FIELDS)
         },
+        **{f"{source}_reported": target in populated for target, source in _CACHE_FIELDS.items()},
         "usage_updates": usage_updates,
         "usage_coverage": coverage,
     }

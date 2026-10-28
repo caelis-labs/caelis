@@ -178,7 +178,8 @@ receipts do not establish completeness for attempts interrupted by process crash
 Compaction receipts append under their original mutation authority independently
 of the source revision. A checkpoint may advance past concurrent journal writes
 only after verifying unchanged model-visible history and Session state; its
-commit still uses revision CAS and the original fence.
+commit still uses revision CAS and the original fence, except for the separate
+Store-owned idle checkpoint grant described below.
 The experimental `runtime.CompactionConfig.Async` is disabled by default. When
 enabled, a fenced native Turn can generate one candidate without holding the
 Session write queue. It binds the exact source prefix and coverage sequence,
@@ -188,10 +189,20 @@ only an unchanged prefix plus a complete, ordered raw tail. Configuration,
 authorization state, or tool catalog changes discard the candidate. Current
 Runtime continuity is assembled again at adoption. Unpaired tool calls/results,
 new checkpoints, and candidates without a smaller projected context are rejected.
-Generation uses frozen canonical source frames, not the possibly older assembled
-foreground request. This conservative path does not promise hot-prefix cache reuse.
+Chat binds source coverage when assembling a request, only when its complete
+messages equal the observed canonical projection. The actual invocation-start
+hook runs after provider admission and image preparation; rejected admission does
+not start speculation. Speculation reuses that frozen
+request with a final compaction instruction, preserving its instructions, tools,
+reasoning, and service tier. An unbound request, changed source hash, or incomplete
+tool batch disables speculation. Later canonical appends remain in the raw tail;
+the dispatch source boundary may exceed the summarized boundary when a prior
+checkpoint follows retained older events. Strict in-context generation validates
+both boundaries and fingerprints and never falls back to an independent request.
+Custom async compactors must enforce `compact.Request` coverage and in-context
+requirements. Synchronous compaction retains its optional fallback.
 
-Candidate readiness is not a commit. Both compaction paths use the same guarded
+Candidate readiness is not a commit. Synchronous, async and idle paths use the same guarded
 checkpoint writer, with revision CAS and original-ID readback after an uncertain
 write. Only the confirmed canonical compact event is the safe success marker for
 embedding-owned actions such as retiring discovered tool definitions. Consumers
@@ -208,7 +219,7 @@ provider admission or modify the Host's last-request record.
 Runtime-owned catalog and grant guards still apply to synchronous recovery when
 that optional embedding validator is absent. A dynamic recovery without a
 captured request authority is rejected before generation or checkpoint append
-when either async compaction or deferred retirement is enabled.
+because deferred retirement is always active.
 
 An async candidate stays inside its originating Turn. Stop, turn completion and
 synchronous recovery cancel and drain it before Runner completion; existing Host
@@ -222,6 +233,36 @@ request assembly from durable truth, so the ordinary budget gate checks the full
 summary plus tail and current tool definitions before dispatch. Background usage
 receipts never become the foreground context gauge. Uncommitted candidates are
 memory-only and are not resumed or inherited by a fork.
+
+Idle compaction has an independent default-off configuration. The Host consumes
+an eligible completed request at fence release and owns its one-shot timer and
+work reference; the SDK owns source validation, generation and shared adoption.
+Idle work acquires an independent resolver lease and admits requests by JobID,
+without carrying a completed Turn's admission closure or attributing usage to it.
+The dispatch prefix remains immutable. Exactly one canonical final answer may
+extend the summarized source; unrelated appends cannot be silently incorporated.
+Request-only `model.Request.Source` is excluded from provider JSON.
+
+Session owns checkpoint coverage encoding and validates the frozen handoff proof;
+Runtime retains prompt projection and raw-tail selection. The narrow
+`IdleCompactionStore` atomically issues a 180-second window with fence release,
+then a two-second grant for one fixed checkpoint. Store validation checks the
+source stamp, epoch, coverage, fixed payload and revision at the actual commit
+point. This capability cannot authorize arbitrary transcript/state writes or
+survive foreground acquisition. Unknown writes are read back by original identity.
+
+The Anthropic adapter disables SDK-internal retries; Core owns each attempt so
+admission, timing, receipts and idle attempt limits cannot be bypassed.
+
+`CompactionReceiptStore` reserves bounded per-Session accounting before dispatch,
+seals a terminal payload and appends only a Store-constructed journal receipt.
+Receipt settlement survives foreground revocation and never grants checkpoint
+authority. A rejected start-hook reservation is cancelled without inventing an
+attempt. An exclusive prior-Host capability can recover sealed receipts or mark
+unsealed prior attempts unknown; ordinary Store callers cannot declare a Host
+dead. Shutdown retains dependencies if producer drain or settlement is incomplete.
+See [experimental features](experimental-features.md) for eligibility and cache
+assumptions; these timing constants are not provider-hit or cost evidence.
 
 Historical responses without a matching receipt remain readable until the supported
 upgrade floor requires receipts; equal token values alone never prove duplicate calls.

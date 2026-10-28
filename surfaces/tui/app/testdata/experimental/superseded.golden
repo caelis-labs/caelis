@@ -5,9 +5,8 @@
 │  Loaded from saved settings · Space edits; Enter saves.                                          │
 │  Current Runtime: all off.                                                                       │
 │                                                                                                  │
-│  › [x] Async compact              Prepare a context checkpoint in the background.                │
-│    [x] MCP catalog refresh        Refresh tools when an MCP server changes its catalog.          │
-│    [ ] Deferred tool retirement   Retire marked tools after a durable context checkpoint.        │
+│  › [ ] Async compact              Prepare a context checkpoint in the background.                │
+│    [ ] Idle compact               Compact completed context while idle.                          │
 │                                                                                                  │
 │  Save/read error: saved values changed before readback; your selections are retained             │
 │                                                                                                  │

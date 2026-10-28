@@ -743,6 +743,9 @@ const (
 
 // Request is the provider-agnostic model request contract.
 type Request struct {
+	// Source binds the assembled messages to observed Session history. It is
+	// local bookkeeping and must not be sent to providers.
+	Source *RequestSource `json:"-"`
 	// DisableTools closes tool selection for this step while retaining definitions
 	// needed to interpret prior tool calls. Providers use their native no-tool
 	// choice; protocols without one omit declarations from the wire request.
@@ -758,6 +761,15 @@ type Request struct {
 
 // Usage reports model token usage on a best-effort basis.
 type Usage struct {
+	// Cache writes are an input breakdown already included in PromptTokens.
+	CacheWriteTokens           int  `json:"cache_write_tokens,omitempty"`
+	CacheWrite5mTokens         int  `json:"cache_write_5m_tokens,omitempty"`
+	CacheWrite1hTokens         int  `json:"cache_write_1h_tokens,omitempty"`
+	CachedInputTokensReported  bool `json:"cached_input_tokens_reported,omitempty"`
+	CacheWriteTokensReported   bool `json:"cache_write_tokens_reported,omitempty"`
+	CacheWrite5mTokensReported bool `json:"cache_write_5m_tokens_reported,omitempty"`
+	CacheWrite1hTokensReported bool `json:"cache_write_1h_tokens_reported,omitempty"`
+
 	// Reported marks explicitly supplied zero usage. Nonzero counters also
 	// imply availability; callers should use IsReported.
 	Reported          bool `json:"reported,omitempty"`
@@ -780,6 +792,7 @@ const (
 	FinishReasonLength        FinishReason = "length"
 	FinishReasonToolCalls     FinishReason = "tool_calls"
 	FinishReasonContentFilter FinishReason = "content_filter"
+	FinishReasonRefusal       FinishReason = "refusal"
 )
 
 // PartDelta is one incremental provider-neutral part update.
@@ -806,6 +819,9 @@ type Response struct {
 	Model               string         `json:"model,omitempty"`
 	Provider            string         `json:"provider,omitempty"`
 	ContextWindowTokens int            `json:"context_window_tokens,omitempty"`
+	// FinishReasonReported distinguishes an adapter-normalized terminal reason
+	// (including Unknown) from providers that do not report termination metadata.
+	FinishReasonReported bool `json:"finish_reason_reported,omitempty"`
 }
 
 // StreamEvent is the unified event contract consumed by upper layers.

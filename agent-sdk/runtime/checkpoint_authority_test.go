@@ -70,27 +70,25 @@ func (m *checkpointRecoveryModel) Generate(_ context.Context, req *model.Request
 // Seed retirement through real ToolSearch/tool_retire calls, then reactivate.
 func TestExperimentalDynamicRecoveryOwnsCheckpointGuards(t *testing.T) {
 	for _, async := range []bool{false, true} {
-		for _, retirement := range []bool{false, true} {
-			for _, parent := range []bool{false, true} {
-				for _, overflow := range []bool{false, true} {
-					for _, failure := range []string{"none", "catalog", "grant"} {
-						t.Run(fmt.Sprintf("async_%t/retirement_%t/parent_%t/overflow_%t/%s", async, retirement, parent, overflow, failure), func(t *testing.T) {
-							testDynamicRecoveryGuards(t, async, retirement, parent, overflow, failure)
-						})
-					}
+		for _, parent := range []bool{false, true} {
+			for _, overflow := range []bool{false, true} {
+				for _, failure := range []string{"none", "catalog", "grant"} {
+					t.Run(fmt.Sprintf("async_%t/parent_%t/overflow_%t/%s", async, parent, overflow, failure), func(t *testing.T) {
+						testDynamicRecoveryGuards(t, async, parent, overflow, failure)
+					})
 				}
 			}
 		}
 	}
 }
 
-func testDynamicRecoveryGuards(t *testing.T, async, retirement, parent, overflow bool, failure string) {
+func testDynamicRecoveryGuards(t *testing.T, async, parent, overflow bool, failure string) {
 	t.Helper()
 	store, active := newTestSessionService(t, "dynamic-checkpoint-guards")
 	source := &checkpointTestCatalog{ready: []tool.Tool{tool.NamedTool{Def: fixtureMCPDefinition("checkpoint-source")}}}
 	binding := tool.BindingForDefinition(source.ready[0].Definition())
 	search := toolsearch.NewSource(source, toolsearch.NewLexicalRanker())
-	seed, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}, ExperimentalToolRetirement: true, PolicyRegistry: retirementPolicy(), DefaultPolicyMode: "retirement-test"})
+	seed, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}, PolicyRegistry: retirementPolicy(), DefaultPolicyMode: "retirement-test"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +143,7 @@ func testDynamicRecoveryGuards(t *testing.T, async, retirement, parent, overflow
 	if overflow {
 		cfg.WatermarkRatio, cfg.ForceWatermarkRatio = .9, .95
 	}
-	rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}, MCPGrants: grants, ExperimentalToolRetirement: retirement, Compaction: cfg})
+	rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}, MCPGrants: grants, Compaction: cfg})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,14 +174,10 @@ func testDynamicRecoveryGuards(t *testing.T, async, retirement, parent, overflow
 	if held != released || parentHeld != parentReleased || resolved != snapshotReleased {
 		t.Fatalf("unbalanced releases: catalog=%d/%d parent=%d/%d snapshot=%d/%d", held, released, parentHeld, parentReleased, resolved, snapshotReleased)
 	}
-	guarded := async || retirement
-	if guarded && source.checks.Load() == 0 {
+	if source.checks.Load() == 0 {
 		t.Fatal("Runtime catalog guard was not consulted")
 	}
-	if !guarded && source.checks.Load() != 0 {
-		t.Fatal("default-off recovery acquired experimental guards")
-	}
-	rejected := guarded && failure != "none"
+	rejected := failure != "none"
 	if rejected && !errors.Is(runErr, agent.ErrModelRequestSnapshotStale) {
 		t.Fatalf("stale authority did not stop Turn: %v", runErr)
 	}
@@ -202,7 +196,7 @@ func testDynamicRecoveryGuards(t *testing.T, async, retirement, parent, overflow
 	if rejected && !reflect.DeepEqual(after, before) {
 		t.Fatalf("failed checkpoint changed exposure: before=%+v after=%+v", before, after)
 	}
-	if committed && retirement && (len(after.Active) != 0 || len(after.Pending) != 0) {
+	if committed && (len(after.Active) != 0 || len(after.Pending) != 0) {
 		t.Fatalf("durable checkpoint did not retire marked binding: %+v", after)
 	}
 }
@@ -278,10 +272,10 @@ func TestAsyncCompactionDynamicRemovedParentValidatePreventsAdoption(t *testing.
 type overflowOnlyCompactor struct{ compact.Engine }
 
 func TestExperimentalDynamicRecoveryRejectsMissingRequestAuthority(t *testing.T) {
-	for _, flags := range []struct{ async, retirement bool }{{true, false}, {false, true}, {true, true}} {
-		t.Run(fmt.Sprintf("async_%t/retirement_%t", flags.async, flags.retirement), func(t *testing.T) {
+	for _, async := range []bool{false, true} {
+		t.Run(fmt.Sprintf("async_%t", async), func(t *testing.T) {
 			h := newAsyncHarness(t, "")
-			h.rt.compaction.Async.Enabled, h.rt.toolRetirement = flags.async, flags.retirement
+			h.rt.compaction.Async.Enabled = async
 			compactor := &snapshotOverflowCompactor{err: errors.New("unguarded overflow reached generator")}
 			h.rt.compactor = &overflowOnlyCompactor{Engine: compactor}
 			run := h.run(t)

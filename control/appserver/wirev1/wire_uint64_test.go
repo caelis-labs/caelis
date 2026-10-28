@@ -1019,3 +1019,34 @@ func TestSessionSkillStatusRoundTrip(t *testing.T) {
 		t.Fatalf("roundtrip = %+v, %v", got, err)
 	}
 }
+
+func TestCacheUsagePresenceRoundTripsThroughControlWire(t *testing.T) {
+	for _, usage := range []session.UsageSnapshot{
+		{PromptTokens: 1, TotalTokens: 1},
+		{CachedInputTokensReported: true, CacheWriteTokensReported: true, CacheWrite5mTokensReported: true},
+		{CacheWriteTokens: 9007199254740993, CacheWrite5mTokens: 9007199254740992, CacheWrite1hTokens: 1, CacheWriteTokensReported: true, CacheWrite5mTokensReported: true, CacheWrite1hTokensReported: true},
+	} {
+		envelope := baseEnvelope(eventstream.KindSessionUpdate)
+		envelope.UsageSemantics = eventstream.UsageSemanticsProviderUsage
+		envelope.Update = eventstream.UsageUpdateFromSnapshot(usage, nil)
+		raw := mustMarshalEnvelope(t, envelope)
+		if err := openAPIValidator(t, "Envelope").Validate(decodeJSONWithNumbers(t, raw)); err != nil {
+			t.Fatalf("cache Envelope: %v; %s", err, raw)
+		}
+		decoded, err := UnmarshalEnvelope(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := eventstream.UsageSnapshotFromEnvelope(decoded)
+		// The standard ACP gauge uses Used as unknown Size, independently of cache accounting.
+		if got != nil {
+			got.ContextWindowTokens = usage.ContextWindowTokens
+		}
+		if got == nil || !reflect.DeepEqual(*got, usage) {
+			t.Fatalf("wire changed cache usage: got=%+v want=%+v JSON=%s", got, usage, raw)
+		}
+		if usage.CachedInputTokensReported && !bytes.Contains(raw, []byte(`"cached_input_tokens":"0"`)) {
+			t.Fatalf("reported zero omitted from wire: %s", raw)
+		}
+	}
+}

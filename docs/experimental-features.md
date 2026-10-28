@@ -1,19 +1,19 @@
 # Experimental Runtime features
 
-Control exposes three independent opt-ins through `experimental-features-v1`.
-Core defaults all three to false. `control/experimental` owns their identifiers,
+Control exposes the independent `async_compact` and `idle_compact` opt-ins through
+`experimental-features-v1`. Core defaults both to false. `control/experimental` owns their identifiers,
 definitions and defaults; Surfaces render that catalog and the SDK receives
 explicit Runtime/Manager options.
 
 | ID | Effect |
 | --- | --- |
 | `async_compact` | Generate one background context checkpoint candidate within the active Turn. |
-| `mcp_catalog_refresh` | Process MCP tool-list notifications and refresh the full server directory. |
-| `deferred_tool_retirement` | Expose `tool_retire` after discovery; retire marked bindings at a durable canonical compact. |
+| `idle_compact` | Generate and commit a checkpoint after a completed Turn has remained idle for 60 seconds. |
 
-Refresh does not require compaction. Retirement works with a static or refreshing
-catalog and with synchronous or asynchronous compaction. A generated summary is
-never a retirement signal. See [MCP lifecycle](mcp-tool-lifecycle.md) and the
+MCP catalog refresh and deferred tool retirement are always enabled. They are not
+experimental settings. Refresh does not require compaction; retirement uses a
+durable canonical compact with synchronous, asynchronous or idle compaction. A generated
+summary is never a retirement signal. See [MCP lifecycle](mcp-tool-lifecycle.md) and the
 [SDK durability boundary](agent-sdk-boundary.md).
 
 ## Scope and activation
@@ -21,7 +21,9 @@ never a retirement signal. See [MCP lifecycle](mcp-tool-lifecycle.md) and the
 Values are Host defaults, persisted in the existing Store's `config.json` under
 `experimental`, using the Host configuration revision and operation ledger.
 Omitted values default to false; sparse writes change only the supplied keys.
-Unknown keys, including unknown keys set to false, are rejected.
+Unknown keys, including unknown keys set to false, are rejected. The retired
+`mcp_catalog_refresh` and `deferred_tool_retirement` input keys are accepted and
+ignored for compatibility; reads and the editor expose only the two compaction settings.
 
 Both workspace and explicit-profile Sessions sample these defaults at their next
 Runtime activation. An existing activation keeps its current values until it is
@@ -29,7 +31,7 @@ released. Saving does not cancel running work or replace a live Runtime. No App
 restart is required: a new Session's first work uses the saved defaults, and an
 idle released Session samples them when activated again. A connected observer
 can retain an existing activation, so a new Session is the immediate opt-in path.
-These flags do not change external ACP agents or enable Guardian experiments.
+These settings do not change external ACP agents or enable Guardian experiments.
 
 Discovery returns `desired`, `scope: "host"`, and
 `applies_at: "next_runtime_activation"`. With `session_id`, it also returns
@@ -62,9 +64,7 @@ Idempotency-Key: enable-experiments-001
   "operation_id": "enable-experiments-001",
   "expected_revision": "42",
   "values": {
-    "async_compact": true,
-    "mcp_catalog_refresh": true,
-    "deferred_tool_retirement": true
+    "async_compact": true
   }
 }
 ```
@@ -105,8 +105,8 @@ Send the matching `Idempotency-Key`. Optional `expected_revision` and
 `expected_controller_epoch` use the ordinary Session preconditions. Plugin IDs
 are the configured directory namespaces; explicit-profile servers use
 `application`. This retries `tools/list` on the existing activation-owned
-Manager. It requires `mcp_catalog_refresh` to be effective there and never
-activates a dormant Runtime, reconnects a failed startup, or changes grants.
+Manager. It never activates a dormant Runtime, reconnects a failed startup, or
+changes grants.
 Session authorization and the shared operation ledger apply. A repeated original
 request returns its receipt without another remote listing; unknown results keep
 the original ID and payload for readback. Failed listing leaves dispatch blocked
@@ -136,8 +136,8 @@ write queue is acquired first. Owner guards cover the short checkpoint append
 and any original-payload reconciliation; they never cover summary generation,
 approval or remote execution. Explicit-profile configuration validation uses its
 existing Store mutex and does not call `AdmitRequest` or alter `LastRequest`.
-Catalog and grant guard acquisition fails closed on contention. A static catalog
-also protects connection-loss publication without enabling dynamic refresh.
+Catalog and grant guard acquisition fails closed on contention. Catalog guards
+also protect connection-loss publication.
 
 The sole checkpoint writer attaches the adopted exposure state to the canonical
 compact event. A CAS retry that accepts a newer canonical tail recalculates that
@@ -149,3 +149,63 @@ Summary model fidelity and prompt tuning are outside these switches' structural
 validation. Token counts and fixture latency do not establish provider cache hits
 or monetary savings. The [testing guide](testing.md) names deterministic,
 real-local-protocol and rendered-terminal evidence separately.
+
+## Idle compaction
+
+A successful native Turn may retain its last actual request and canonical final
+answer. After the original fence is atomically released, the Host schedules one
+60-second timer. Observer connections alone do not prevent this work; foreground
+uses, running Tasks and pending approvals do. Foreground work cancels the job
+without waiting for generation or acquiring an idle write lock. Each Host admits
+one idle generation at a time and drops overlapping opportunities.
+
+Eligibility requires at least two completed Turns and 16k estimated delta tokens,
+a known context window at least half full but below the ordinary compaction
+watermark, complete tool-call/result batches, and unchanged source/configuration.
+Requests on Codex-named channels, including Magpie Codex routes, are treated as
+`NeverExpires` and skipped. Other channels use a five-minute freshness assumption
+with a 30-second margin, measured from dispatch; clock discontinuities also skip
+work. This is not a cache-hit guarantee or a provider allowlist.
+
+The Store's 180-second opportunity window is separate from the two-second grant
+for one fixed checkpoint. Foreground acquisition or another mutation permanently
+revokes that opportunity. Generation allows at most two actual attempts and has
+a 30-second deadline. The same adoption checks as async compaction require a
+strictly smaller projected context, without an additional percentage/token saving
+threshold. A completed candidate displaced by foreground activity can be retained
+in bounded memory for up to 120 seconds and revalidated under the new foreground
+fence; its old grant is never reused.
+
+A dedicated work reference retains the provider/configuration lease until the
+producer drains and original-ID usage accounting settles. Shutdown cancels, drains,
+settles accounting, then releases dependencies. If drain or accounting cannot finish,
+shutdown reports an error and retains dependencies. Durable bounded reservations
+allow an exclusively owned Host restart to journal sealed usage, or an explicit
+unknown outcome when no terminal data survived; recovery never replays generation.
+
+## Native Anthropic cache and usage
+
+Native Anthropic requests receive at most four `ephemeral/5m` breakpoints after
+wire conversion. Priority is the last user message, the user before the last
+assistant, the penultimate user, then system and tools, with duplicate points
+removed. This preserves an explicit lookup boundary for frozen async requests,
+completed-request idle prefixes and batches of queued user messages. Compatible
+endpoints do not inherit these markers. Canonical messages and tool schemas are
+unchanged; compaction appends its instruction to the exact dispatched prefix.
+
+Replacing history with a checkpoint creates a new prefix. The optimization makes
+the generation request eligible to reuse the old input; it does not promise that
+requests after adoption can read all the old history from cache. The final answer
+appended for idle generation was output, so it is new input rather than a proven
+cache read. TTL, provider scope, minimum length and server availability still
+control real hits. Failed or cancelled attempts can incur usage even without an
+adopted checkpoint, and each actual attempt remains in accounting.
+
+Usage retains cache reads, cache writes, reported 5m/1h write breakdowns, and
+presence separately. For Anthropic, normalized prompt tokens contain uncached
+input plus writes; display Input additionally includes reads, exactly once.
+Write and TTL columns are breakdowns, not additional Total tokens. The TUI shows
+`0` for an observed zero and `-` for missing cache measurements. Sparse stream
+updates preserve prior counters while explicit zero can replace them. No cache
+price is synthesized into provider `CostMicros`; fixtures establish request and
+accounting behavior, not measured monetary savings.

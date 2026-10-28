@@ -29,7 +29,7 @@ func TestRetirementLongSessionPrefixExperiment(t *testing.T) {
 				source.ready = append(source.ready, tool.NamedTool{Def: tool.Definition{Name: name, Description: "Synthetic capability for prefix measurement only.", InputSchema: map[string]any{"type": "object", "properties": map[string]any{"query": map[string]any{"type": "string", "description": "The synthetic document query."}}}, Metadata: map[string]any{tool.MetadataToolKind: tool.MetadataToolKindMCP, tool.MetadataMCPServer: "catalog", tool.MetadataMCPTool: name, tool.MetadataMCPSourceFingerprint: fmt.Sprintf("source-%d", index)}}})
 			}
 			store, active := newTestSessionService(t, fmt.Sprintf("long-retirement-%v", enabled))
-			rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}, ExperimentalToolRetirement: enabled, PolicyRegistry: retirementPolicy(), DefaultPolicyMode: "retirement-test"})
+			rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}, PolicyRegistry: retirementPolicy(), DefaultPolicyMode: "retirement-test"})
 			if err != nil {
 				t.Fatal(err)
 			}

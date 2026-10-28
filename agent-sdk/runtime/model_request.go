@@ -32,7 +32,7 @@ func (r *Runtime) wrapModelRequestResolver(ctx context.Context, active session.S
 		bound.ResolveModelRequest = nil
 		prepareCtx := ctx
 		if r.compaction.Enabled {
-			authority := &modelRequestAuthority{epoch: snapshot.Revision, refs: 1, release: snapshot.Release, validate: snapshot.Validate, catalog: snapshot.DeferredTools}
+			authority := &modelRequestAuthority{epoch: snapshot.Revision, refs: 1, release: snapshot.Release, validate: snapshot.Validate, catalog: snapshot.DeferredTools, resolveIdle: source}
 			if admit := snapshot.Admit; admit != nil {
 				authority.admit = func(ctx context.Context, admission agent.ModelRequestAdmission) error {
 					admission.TurnID = turnID
@@ -63,17 +63,15 @@ func (r *Runtime) prepareAgentSpec(ctx context.Context, active session.Session, 
 	if err := validateAgentSpecCapabilities(spec.Model, spec.Tools, spec.Request.OutputSpec(), spec.Request.StreamEnabled(false), spec.RequiredModelCapabilities); err != nil {
 		return err
 	}
-	if r.toolRetirement {
-		for _, item := range spec.Tools {
-			if item != nil && item.Definition().Name == tool.RetireToolName {
-				return fmt.Errorf("reserved experimental tool name %q", tool.RetireToolName)
-			}
+	for _, item := range spec.Tools {
+		if item != nil && item.Definition().Name == tool.RetireToolName {
+			return fmt.Errorf("reserved runtime tool name %q", tool.RetireToolName)
 		}
-		spec.Tools = append(spec.Tools, tool.NewRetirementTool())
 	}
+	spec.Tools = append(spec.Tools, tool.NewRetirementTool())
 	modeName, _ := r.policyForName(ctx, r.policyMode(*spec))
 	authority, _ := ctx.Value(modelRequestAuthorityKey{}).(*modelRequestAuthority)
-	if authority == nil && r.compaction.Enabled && (r.toolRetirement || r.compaction.Async.Enabled) {
+	if authority == nil && r.compaction.Enabled {
 		authority = &modelRequestAuthority{epoch: "static", catalog: spec.DeferredTools, validate: func(context.Context) (func(), error) { return func() {}, nil }, refs: 1}
 	}
 	spec.Model = r.wrapModelForLifecycle(r.wrapModelForAutoCompaction(ref, spec.Model, authority))

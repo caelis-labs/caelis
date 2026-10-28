@@ -22,6 +22,13 @@ type MCPServerInfo struct {
 	Tools       []string
 	ToolDetails []MCPToolDetail
 	Warning     string
+	// Refreshing, Stale and RefreshFailed are independent directory facts.
+	// Status continues to describe the connection lifecycle only.
+	Refreshing bool
+	Stale      bool
+	// RefreshFailed reports a settled failure for the current catalog
+	// generation, not an outdated attempt.
+	RefreshFailed bool
 }
 
 // MCPToolDetail describes one accepted tool in the current ready Runtime catalog.
@@ -45,10 +52,14 @@ type managedServer struct {
 	client       *Client
 	listed       []*mcpsdk.Tool
 	err          error
-	refreshMu    sync.Mutex
+	refreshGate  chan struct{} // capacity 1; sole refresh ownership
 	revoked      bool
 	catalogReady bool
 	refreshErr   error
+	// refreshing and refreshErrGeneration are guarded by Manager.mu; the
+	// generation records which directory revision the attempt covered.
+	refreshing           bool
+	refreshErrGeneration uint64
 }
 
 // Manager owns background MCP initialization and immutable ready-tool snapshots.
@@ -93,7 +104,7 @@ func legacyToolName(pluginID, serverName, toolName string) string {
 // listing failures affect only that server and invoke onFailure once, if set.
 // ctx owns initialization; Close cancels and drains all initialization work.
 func NewManager(ctx context.Context, specs []ServerSpec, onFailure func(ServerFailure)) (*Manager, error) {
-	return newManager(ctx, specs, StartClient, onFailure)
+	return NewManagerWithOptions(ctx, specs, onFailure, ManagerOptions{})
 }
 
 type clientStarter func(context.Context, ServerSpec) (*Client, error)
@@ -117,7 +128,7 @@ func newManager(ctx context.Context, specs []ServerSpec, start clientStarter, on
 		spec.ReplaySourceIDs = append([]string(nil), spec.ReplaySourceIDs...)
 		spec.Env = maps.Clone(spec.Env)
 		spec.Headers = maps.Clone(spec.Headers)
-		mgr.servers = append(mgr.servers, &managedServer{spec: spec})
+		mgr.servers = append(mgr.servers, &managedServer{spec: spec, refreshGate: make(chan struct{}, 1)})
 	}
 	var workers sync.WaitGroup
 	for _, server := range mgr.servers {
@@ -153,7 +164,7 @@ func (m *Manager) initialize(parent context.Context, server *managedServer, star
 	m.rebuildToolsLocked()
 	m.mu.Unlock()
 	if err == nil && client.catalog != nil {
-		refreshErr := m.refreshCatalog(ctx, server)
+		refreshErr := m.refreshCatalog(ctx, server, false)
 		m.mu.Lock()
 		if m.closed || parent.Err() != nil {
 			m.mu.Unlock()
@@ -222,6 +233,10 @@ func (mgr *Manager) rebuildToolsLocked() {
 				}
 				owner := key + "/" + info.Name
 				if pinned := mgr.owners[name]; pinned != "" && pinned != owner {
+					// Preserve legacy replay names without transferring the pinned live binding.
+					if winner := toolsByProjectedName[name]; winner != nil {
+						winner.addReplayAliases(legacyToolNames(spec, info.Name))
+					}
 					continue
 				}
 			}
@@ -489,6 +504,18 @@ func (m *Manager) GetServerInfos(pluginID string) []MCPServerInfo {
 
 		var tools []string
 		var details []MCPToolDetail
+		stale := false
+		var generation uint64
+		if client != nil {
+			if c := client.catalog; c != nil {
+				c.mu.Lock()
+				stale, generation = c.dirty, c.generation
+				c.mu.Unlock()
+			} else {
+				// No catalog yet: the directory is not verified.
+				stale = true
+			}
+		}
 		if status == "running" {
 			for _, t := range m.tools {
 				if mcpTool, ok := t.(*MCPTool); ok && mcpTool.client == client {
@@ -501,11 +528,14 @@ func (m *Manager) GetServerInfos(pluginID string) []MCPServerInfo {
 		sort.Slice(details, func(i, j int) bool { return details[i].Name < details[j].Name })
 
 		infos = append(infos, MCPServerInfo{
-			Name:        serverName,
-			Status:      status,
-			Tools:       tools,
-			ToolDetails: details,
-			Warning:     strings.Join(warnings, "; "),
+			Name:          serverName,
+			Status:        status,
+			Tools:         tools,
+			ToolDetails:   details,
+			Warning:       strings.Join(warnings, "; "),
+			Refreshing:    server.refreshing,
+			Stale:         stale,
+			RefreshFailed: settledRefreshFailed(server, generation),
 		})
 	}
 	sort.SliceStable(infos, func(i, j int) bool {

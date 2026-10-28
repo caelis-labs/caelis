@@ -13,13 +13,14 @@ import (
 type modelRequestAuthorityKey struct{}
 
 // Retain a request snapshot while background generation or synchronous recovery
-// uses its model and validator. References belong to this Turn; the original
-// snapshot remains the sole owner of the provider release.
+// uses its model and validator. Idle handoff retains this only until it obtains
+// an independent snapshot from the resolver; it does not reuse Turn admission.
 type modelRequestAuthority struct {
-	epoch    string
-	admit    func(context.Context, agent.ModelRequestAdmission) error
-	validate func(context.Context) (func(), error)
-	catalog  tool.Source
+	epoch       string
+	admit       func(context.Context, agent.ModelRequestAdmission) error
+	validate    func(context.Context) (func(), error)
+	catalog     tool.Source
+	resolveIdle agent.ModelRequestResolver
 	// Runtime guards protect synchronous commits even without a parent guard.
 	// They cannot establish the embedding authority required for speculation.
 	canSpeculate bool
@@ -39,7 +40,7 @@ func (r *Runtime) captureRequestAuthority(parent *modelRequestAuthority) *modelR
 		Revision: parent.epoch, Validate: parent.validate, DeferredTools: parent.catalog,
 	})
 	return &modelRequestAuthority{epoch: snapshot.Revision, validate: snapshot.Validate,
-		admit: parent.admit, canSpeculate: parent.validate != nil, refs: 1, release: parent.retain()}
+		admit: parent.admit, catalog: parent.catalog, resolveIdle: parent.resolveIdle, canSpeculate: parent.validate != nil, refs: 1, release: parent.retain()}
 }
 
 func (a *modelRequestAuthority) retain() func() {
@@ -77,9 +78,6 @@ type checkpointValidator = func(context.Context) (func(), error)
 // owners. Neither refresh nor retirement depends on the compaction scheduler.
 // All guards are short, nonblocking, and released in reverse acquisition order.
 func (r *Runtime) withMCPCheckpointAuthority(snapshot agent.ModelRequestSnapshot) agent.ModelRequestSnapshot {
-	if !r.toolRetirement && !r.compaction.Async.Enabled {
-		return snapshot
-	}
 	catalog, supported := snapshot.DeferredTools.(tool.CatalogSource)
 	revision := ""
 	if supported {
@@ -101,7 +99,11 @@ func (r *Runtime) withMCPCheckpointAuthority(snapshot agent.ModelRequestSnapshot
 			}
 		}
 		if snapshot.DeferredTools != nil {
-			if !supported || revision == "" {
+			if !supported {
+				release()
+				return nil, &CapabilityError{Capability: "tool.CatalogSource"}
+			}
+			if revision == "" {
 				release()
 				return nil, agent.ErrModelRequestSnapshotStale
 			}

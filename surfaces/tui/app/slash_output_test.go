@@ -74,10 +74,10 @@ func TestSlashStatusOutputRendersStructuredSnapshot(t *testing.T) {
 		"  Context:   16k / 1.0m \u00b7 1%",
 		"",
 		"Usage",
-		"  Scope                       Total  Input  Cached  Output  Reasoning",
-		"  ──────────────────────────  ─────  ─────  ──────  ──────  ─────────",
-		"  total                       140    100    25      40      5",
-		"  deepseek/deepseek-v4-flash  140    100    -       40      -",
+		"  Scope                       Total  Input  Cache read  Output  Reasoning",
+		"  ──────────────────────────  ─────  ─────  ──────────  ──────  ─────────",
+		"  total                       140    100    25          40      5",
+		"  deepseek/deepseek-v4-flash  140    100    -           40      -",
 	}, "\n")
 	if plain != want {
 		t.Fatalf("status output mismatch:\n--- got ---\n%s\n--- want ---\n%s", plain, want)
@@ -382,4 +382,23 @@ func slashOutputPlainForTest(lines []slashOutputLine) string {
 		parts = append(parts, line.Text)
 	}
 	return strings.Join(parts, "\n")
+}
+
+func TestSlashStatusCacheWritePresenceRendered(t *testing.T) {
+	result := controlprompt.SlashCommandResult{Kind: controlprompt.SlashCommandResultStatus, Status: controlstatus.StatusSnapshot{Usage: controlstatus.StatusUsage{
+		SessionUsageTotal:   controlstatus.UsageSnapshot{PromptTokens: 500, CachedInputTokens: 200, CacheWriteTokens: 300, CompletionTokens: 100, TotalTokens: 600, CachedInputTokensReported: true, CacheWriteTokensReported: true},
+		SessionUsageByModel: []controlstatus.ModelUsageSnapshot{{Provider: "anthropic", Model: "zero", Usage: controlstatus.UsageSnapshot{CachedInputTokensReported: true, CacheWriteTokensReported: true}}, {Provider: "other", Model: "missing", Usage: controlstatus.UsageSnapshot{PromptTokens: 1, TotalTokens: 1}}},
+	}}}
+	plain := slashOutputPlainForTest(renderSlashCommandResultLines(result))
+	var rows []string
+	for _, line := range strings.Split(plain, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) > 0 && (fields[0] == "Scope" || fields[0] == "total" || fields[0] == "anthropic/zero" || fields[0] == "other/missing") {
+			rows = append(rows, strings.Join(fields, " "))
+		}
+	}
+	want := []string{"Scope Total Input Cache read Output Cache write", "total 600 500 200 100 300", "anthropic/zero - - 0 - 0", "other/missing 1 1 - - -"}
+	if !slices.Equal(rows, want) {
+		t.Fatalf("rendered cache accounting:\n%s", plain)
+	}
 }

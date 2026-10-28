@@ -40,7 +40,7 @@ func (f *experimentalFixture) RefreshMCPTools(context.Context, appserver.Refresh
 }
 func experimentalModel(t *testing.T) (*Model, *experimentalFixture) {
 	t.Helper()
-	f := &experimentalFixture{snapshot: experimental.Snapshot{Revision: "7", Scope: "host", AppliesAt: "next_runtime_activation", Features: experimental.Definitions(), Desired: experimental.Complete(experimental.Values{experimental.MCPRefresh: true}), Effective: experimental.Complete(nil)}}
+	f := &experimentalFixture{snapshot: experimental.Snapshot{Revision: "7", Scope: "host", AppliesAt: "next_runtime_activation", Features: experimental.Definitions(), Desired: experimental.Complete(experimental.Values{experimental.AsyncCompact: true}), Effective: experimental.Complete(nil)}}
 	m := NewModel(Config{Commands: DefaultCommands(), Experimental: f, ExperimentalInitialize: func(context.Context) (appserver.ServerInfo, error) {
 		return appserver.ServerInfo{Capabilities: []string{appserver.CapabilityExperimental}}, nil
 	}, NoColor: true, NoAnimation: true})
@@ -50,7 +50,7 @@ func experimentalModel(t *testing.T) (*Model, *experimentalFixture) {
 }
 func TestExperimentalKeyboardSaveErrorAndOriginalReceipt(t *testing.T) {
 	m, f := experimentalModel(t)
-	if !m.experimental.draft[experimental.MCPRefresh] || m.experimental.draft[experimental.AsyncCompact] {
+	if !m.experimental.draft[experimental.AsyncCompact] {
 		t.Fatal("checkbox did not load real configuration")
 	}
 	_, cmd := m.Update(keyPress("space"))
@@ -58,10 +58,9 @@ func TestExperimentalKeyboardSaveErrorAndOriginalReceipt(t *testing.T) {
 	if len(f.writes) != 0 {
 		t.Fatal("Space saved without Enter")
 	}
-	m.Update(keyPress("down"))
-	m.Update(keyPress("space"))
-	m.Update(keyPress("down"))
-	m.Update(keyPress("space"))
+	if m.experimental.draft[experimental.AsyncCompact] {
+		t.Fatal("Space did not toggle the only configurable feature")
+	}
 	f.fail = true
 	_, cmd = m.Update(keyPress("enter"))
 	runTeaCmds(t, m, cmd)
@@ -76,7 +75,7 @@ func TestExperimentalKeyboardSaveErrorAndOriginalReceipt(t *testing.T) {
 	if m.experimental != nil || len(f.writes) != 2 || !reflect.DeepEqual(original, f.writes[1]) {
 		t.Fatal("retry changed original mutation identity/payload")
 	}
-	if !f.snapshot.Desired[experimental.AsyncCompact] || f.snapshot.Desired[experimental.MCPRefresh] || !f.snapshot.Desired[experimental.ToolRetirement] {
+	if f.snapshot.Desired[experimental.AsyncCompact] {
 		t.Fatal("wrong persisted values")
 	}
 }
@@ -89,7 +88,7 @@ func TestExperimentalCommandEscapeAndCapability(t *testing.T) {
 	}
 	_, cmd := m.submitInteractiveLine("/experimental", "/experimental", nil)
 	runTeaCmds(t, m, cmd)
-	if m.experimental == nil || m.experimental.draft[experimental.AsyncCompact] {
+	if m.experimental == nil || !m.experimental.draft[experimental.AsyncCompact] {
 		t.Fatal("command failed to reopen saved values after discard")
 	}
 	m.Update(keyPress("esc"))
@@ -136,7 +135,7 @@ func TestExperimentalRenderedGoldenAndTerminal(t *testing.T) {
 			m.Update(keyPress("space"))
 			after := m.View().Content
 			assertPhysicalFullscreenFrame(t, width, 30, after, renderFullscreenFramesForTest(t, width, 30, before, after))
-			if !strings.Contains(frame, "[x] MCP catalog refresh") {
+			if !strings.Contains(frame, "[x] Async compact") {
 				t.Fatal("checkbox absent")
 			}
 		})
@@ -148,7 +147,7 @@ type overwrittenExperimentalFixture struct{ *experimentalFixture }
 func (f overwrittenExperimentalFixture) SetExperimentalFeatures(ctx context.Context, req appserver.ExperimentalRequest) (appserver.CommandResult, error) {
 	result, err := f.experimentalFixture.SetExperimentalFeatures(ctx, req)
 	f.snapshot.Revision = "9"
-	f.snapshot.Desired[experimental.AsyncCompact] = false
+	f.snapshot.Desired[experimental.AsyncCompact] = true
 	return result, err
 }
 
@@ -161,7 +160,7 @@ func TestExperimentalCommittedSaveSupersededBeforeReadback(t *testing.T) {
 	if m.experimental == nil || m.experimental.err == "" || m.experimental.request != nil {
 		t.Fatal("known committed save must keep draft but release completed request")
 	}
-	if m.experimental.snapshot.Revision != "9" || !m.experimental.draft[experimental.AsyncCompact] {
+	if m.experimental.snapshot.Revision != "9" || m.experimental.draft[experimental.AsyncCompact] {
 		t.Fatal("superseded save lost draft or latest baseline")
 	}
 	frame := evalharness.NormalizeFrame(m.renderExperimental()) + "\n"
@@ -178,14 +177,8 @@ func TestExperimentalCommittedSaveSupersededBeforeReadback(t *testing.T) {
 	if string(want) != frame {
 		t.Fatalf("superseded save golden differs:\n%s", frame)
 	}
-	before := m.View().Content
-	m.Update(keyPress("down"))
-	m.Update(keyPress("space"))
-	after := m.View().Content
-	assertPhysicalFullscreenFrame(t, 112, 28, after, renderFullscreenFramesForTest(t, 112, 28, before, after))
-	if m.experimental.draft[experimental.MCPRefresh] {
-		t.Fatal("known completed write left editor frozen")
-	}
+	// The retained draft already differs from the reopened baseline, so Enter
+	// must issue a new operation against the superseded revision.
 	m.cfg.Experimental = f
 	_, cmd = m.Update(keyPress("enter"))
 	runTeaCmds(t, m, cmd)

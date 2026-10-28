@@ -29,11 +29,19 @@ type modelUsageSnapshot struct {
 
 func usageSnapshotFromSession(usage session.UsageSnapshot) controlstatus.UsageSnapshot {
 	return controlstatus.UsageSnapshot{
-		PromptTokens:      usage.PromptTokens,
-		CachedInputTokens: usage.CachedInputTokens,
-		CompletionTokens:  usage.CompletionTokens,
-		ReasoningTokens:   usage.ReasoningTokens,
-		TotalTokens:       usage.TotalTokens,
+		PromptTokens:               usage.PromptTokens,
+		CachedInputTokens:          usage.CachedInputTokens,
+		CacheWriteTokens:           usage.CacheWriteTokens,
+		CacheWrite5mTokens:         usage.CacheWrite5mTokens,
+		CacheWrite1hTokens:         usage.CacheWrite1hTokens,
+		CachedInputTokensReported:  usage.CachedInputTokensReported,
+		CacheWriteTokensReported:   usage.CacheWriteTokensReported,
+		CacheWrite5mTokensReported: usage.CacheWrite5mTokensReported,
+		CacheWrite1hTokensReported: usage.CacheWrite1hTokensReported,
+
+		CompletionTokens: usage.CompletionTokens,
+		ReasoningTokens:  usage.ReasoningTokens,
+		TotalTokens:      usage.TotalTokens,
 	}
 }
 
@@ -422,6 +430,14 @@ func addUsageSnapshot(total *session.UsageSnapshot, usage session.UsageSnapshot)
 	}
 	total.PromptTokens += usage.PromptTokens
 	total.CachedInputTokens += usage.CachedInputTokens
+	total.CacheWriteTokens += usage.CacheWriteTokens
+	total.CacheWrite5mTokens += usage.CacheWrite5mTokens
+	total.CacheWrite1hTokens += usage.CacheWrite1hTokens
+	total.CachedInputTokensReported = total.CachedInputTokensReported || usage.CachedInputTokensReported
+	total.CacheWriteTokensReported = total.CacheWriteTokensReported || usage.CacheWriteTokensReported
+	total.CacheWrite5mTokensReported = total.CacheWrite5mTokensReported || usage.CacheWrite5mTokensReported
+	total.CacheWrite1hTokensReported = total.CacheWrite1hTokensReported || usage.CacheWrite1hTokensReported
+
 	total.CompletionTokens += usage.CompletionTokens
 	total.ReasoningTokens += usage.ReasoningTokens
 	total.TotalTokens += usage.TotalTokens

@@ -6,14 +6,19 @@ import (
 	"fmt"
 )
 
-// Stable identifiers accepted by the Control API and persisted configuration.
+// Stable identifiers accepted by the Control API.
 const (
-	AsyncCompact   = "async_compact"
-	MCPRefresh     = "mcp_catalog_refresh"
+	AsyncCompact = "async_compact"
+	IdleCompact  = "idle_compact"
+	// MCPRefresh is accepted and ignored for legacy Control clients.
+	// Remove when the minimum supported clients no longer send it.
+	MCPRefresh = "mcp_catalog_refresh"
+	// ToolRetirement is accepted and ignored for legacy Control clients.
+	// Remove when the minimum supported clients no longer send it.
 	ToolRetirement = "deferred_tool_retirement"
 )
 
-// Values is a sparse, persisted set of explicit choices. Absent features are off.
+// Values is a sparse set of explicit choices. Absent features use catalog defaults.
 type Values map[string]bool
 
 // Definition describes a supported independently configurable feature.
@@ -28,15 +33,14 @@ type Definition struct {
 func Definitions() []Definition {
 	return []Definition{
 		{ID: AsyncCompact, Name: "Async compact", Description: "Prepare a context checkpoint in the background."},
-		{ID: MCPRefresh, Name: "MCP catalog refresh", Description: "Refresh tools when an MCP server changes its catalog."},
-		{ID: ToolRetirement, Name: "Deferred tool retirement", Description: "Retire marked tools after a durable context checkpoint."},
+		{ID: IdleCompact, Name: "Idle compact", Description: "Compact completed context while idle."},
 	}
 }
 
 // Validate rejects unknown names, including unknown false values.
 func Validate(values Values) error {
 	for id := range values {
-		known := false
+		known := id == MCPRefresh || id == ToolRetirement
 		for _, feature := range Definitions() {
 			known = known || feature.ID == id
 		}
@@ -51,7 +55,11 @@ func Validate(values Values) error {
 func Complete(values Values) Values {
 	out := Values{}
 	for _, definition := range Definitions() {
-		out[definition.ID] = values[definition.ID]
+		enabled, present := values[definition.ID]
+		if !present {
+			enabled = definition.Default
+		}
+		out[definition.ID] = enabled
 	}
 	return out
 }

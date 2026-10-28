@@ -12,12 +12,16 @@ type MCPStatus struct {
 	Skills                []SkillStatus     `json:"skills"`
 }
 
+// MCPServerStatus keeps connection state separate from catalog refresh health.
 type MCPServerStatus struct {
-	Name        string              `json:"name"`
-	Status      string              `json:"status"` // inactive, connecting, running, failed
-	Tools       []string            `json:"tools,omitempty"`
-	ToolDetails []mcp.MCPToolDetail `json:"tool_details,omitempty"`
-	Warning     string              `json:"warning,omitempty"`
+	Refreshing    bool                `json:"refreshing"`
+	Stale         bool                `json:"stale"`
+	RefreshFailed bool                `json:"refresh_failed"`
+	Name          string              `json:"name"`
+	Status        string              `json:"status"` // inactive, connecting, running, failed
+	Tools         []string            `json:"tools,omitempty"`
+	ToolDetails   []mcp.MCPToolDetail `json:"tool_details,omitempty"`
+	Warning       string              `json:"warning,omitempty"`
 }
 
 // SkillStatus describes one selected directory or one candidate Skill root.

@@ -78,6 +78,7 @@ func (s *Store) acquireSessionFence(req session.AcquireSessionFenceRequest, repl
 	if err != nil {
 		return session.SessionFence{}, err
 	}
+	record.idle.Invalidate()
 	record.fenceEpoch++
 	fence, err := session.NewSessionFenceClaim(session.SessionFence{
 		SessionRef: session.NormalizeSessionRef(record.session.SessionRef), FenceID: fenceID, OwnerID: owner,
@@ -100,6 +101,7 @@ func (s *Store) ReleaseSessionFence(_ context.Context, req session.ReleaseSessio
 	if !session.SessionFenceReleaseAuthorized(record.fence, req) {
 		return fenceConflict(record.fence.SessionRef, "fence identity, owner, or claim mismatch")
 	}
+	record.idle.Invalidate()
 	record.fence = session.SessionFence{}
 	return nil
 }

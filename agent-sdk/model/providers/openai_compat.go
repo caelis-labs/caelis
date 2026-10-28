@@ -221,14 +221,16 @@ func (l *openAICompatLLM) Generate(ctx context.Context, req *model.Request) iter
 			yield(&model.StreamEvent{
 				Type: model.StreamEventTurnDone,
 				Response: &model.Response{
-					Message:      msg,
-					TurnComplete: true,
-					StepComplete: true,
-					Status:       model.ResponseStatusCompleted,
-					FinishReason: normalizeOpenAICompatFinishReason(out.Choices[0].FinishReason),
-					Model:        out.Model,
-					Provider:     l.provider,
-					Usage:        out.Usage.toKernelUsage(),
+					Message:              msg,
+					TurnComplete:         true,
+					StepComplete:         true,
+					Status:               model.ResponseStatusCompleted,
+					FinishReason:         normalizeOpenAICompatFinishReason(out.Choices[0].FinishReason),
+					RawFinishReason:      out.Choices[0].FinishReason,
+					FinishReasonReported: strings.TrimSpace(out.Choices[0].FinishReason) != "",
+					Model:                out.Model,
+					Provider:             l.provider,
+					Usage:                out.Usage.toKernelUsage(),
 				},
 			}, nil)
 			return
@@ -240,6 +242,7 @@ func (l *openAICompatLLM) Generate(ctx context.Context, req *model.Request) iter
 		}
 		var usage model.Usage
 		finishReason := model.FinishReasonUnknown
+		rawFinishReason := ""
 		done := false
 		stopped := false
 		if err := readSSEWithFirstEventTimeoutOnDone(resp.Body, l.firstEventTimeout, func(data []byte) error {
@@ -254,8 +257,9 @@ func (l *openAICompatLLM) Generate(ctx context.Context, req *model.Request) iter
 			if len(chunk.Choices) == 0 {
 				return nil
 			}
-			if one := normalizeOpenAICompatFinishReason(chunk.Choices[0].FinishReason); one != model.FinishReasonUnknown {
-				finishReason = one
+			if raw := chunk.Choices[0].FinishReason; strings.TrimSpace(raw) != "" {
+				rawFinishReason = raw
+				finishReason = normalizeOpenAICompatFinishReason(raw)
 			}
 			delta := chunk.Choices[0].Delta
 			if len(delta.Annotations) > 0 {
@@ -319,7 +323,7 @@ func (l *openAICompatLLM) Generate(ctx context.Context, req *model.Request) iter
 		if stopped {
 			return
 		}
-		if !done && finishReason == model.FinishReasonUnknown {
+		if !done && rawFinishReason == "" {
 			yield(nil, fmt.Errorf("model: openai-compatible stream ended before a terminal response"))
 			return
 		}
@@ -331,14 +335,16 @@ func (l *openAICompatLLM) Generate(ctx context.Context, req *model.Request) iter
 		yield(&model.StreamEvent{
 			Type: model.StreamEventTurnDone,
 			Response: &model.Response{
-				Message:      finalMsg,
-				TurnComplete: true,
-				StepComplete: true,
-				Status:       model.ResponseStatusCompleted,
-				FinishReason: finishReason,
-				Model:        l.name,
-				Provider:     l.provider,
-				Usage:        usage,
+				Message:              finalMsg,
+				TurnComplete:         true,
+				StepComplete:         true,
+				Status:               model.ResponseStatusCompleted,
+				FinishReason:         finishReason,
+				RawFinishReason:      rawFinishReason,
+				FinishReasonReported: strings.TrimSpace(rawFinishReason) != "",
+				Model:                l.name,
+				Provider:             l.provider,
+				Usage:                usage,
 			},
 		}, nil)
 	}

@@ -3,7 +3,6 @@ package runtime
 import (
 	"context"
 
-	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
@@ -41,5 +40,5 @@ func (s *deferredToolSource) ValidateCatalog(ctx context.Context, revision strin
 	}); ok {
 		return source.ValidateCatalog(ctx, revision)
 	}
-	return nil, agent.ErrModelRequestSnapshotStale
+	return nil, &CapabilityError{Capability: "tool.CatalogSource"}
 }

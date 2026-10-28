@@ -25,14 +25,12 @@ import (
 
 // Config defines one baseline local runtime instance.
 type Config struct {
-	// ExperimentalToolRetirement enables versioned discovery and delayed exposure removal. Default false.
-	ExperimentalToolRetirement bool
-	Sessions                   session.Service
-	AgentFactory               agent.AgentFactory
-	RunIDGenerator             func() string
-	Clock                      func() time.Time
-	Compaction                 CompactionConfig
-	Compactor                  compact.Engine
+	Sessions       session.Service
+	AgentFactory   agent.AgentFactory
+	RunIDGenerator func() string
+	Clock          func() time.Time
+	Compaction     CompactionConfig
+	Compactor      compact.Engine
 	// Diagnostics receives fixed Runtime classifications only. Callers must not
 	// attach user content, Session identities, or workspace paths.
 	Diagnostics         *slog.Logger
@@ -73,7 +71,6 @@ type Config struct {
 
 // Runtime is the baseline local runtime implementation.
 type Runtime struct {
-	toolRetirement           bool
 	childApprovalRequester   agent.ApprovalRequester
 	sessions                 session.Service
 	agentFactory             agent.AgentFactory
@@ -84,6 +81,8 @@ type Runtime struct {
 	diagnostics              *slog.Logger
 	compactionRequestMu      sync.RWMutex
 	compactionRequests       map[string]compactionRequestSnapshot
+	idleCandidateMu          sync.Mutex
+	idleCandidates           map[string]*idleCompactionCandidate
 	policies                 policy.Registry
 	defaultPolicyMode        string
 	sandboxPolicy            sandbox.PolicySnapshot
@@ -127,7 +126,6 @@ func New(cfg Config) (*Runtime, error) {
 		return nil, errors.New("agent-sdk/runtime: agent factory is required")
 	}
 	r := &Runtime{
-		toolRetirement:           cfg.ExperimentalToolRetirement,
 		sessions:                 cfg.Sessions,
 		agentFactory:             cfg.AgentFactory,
 		runIDGenerator:           cfg.RunIDGenerator,
@@ -135,6 +133,7 @@ func New(cfg Config) (*Runtime, error) {
 		compaction:               normalizeCompactionConfig(cfg.Compaction),
 		diagnostics:              cfg.Diagnostics,
 		compactionRequests:       map[string]compactionRequestSnapshot{},
+		idleCandidates:           map[string]*idleCompactionCandidate{},
 		policies:                 cfg.PolicyRegistry,
 		defaultPolicyMode:        strings.TrimSpace(cfg.DefaultPolicyMode),
 		sandboxPolicy:            sandbox.ClonePolicySnapshot(cfg.SandboxPolicy),

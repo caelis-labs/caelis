@@ -13,11 +13,14 @@ func messagesFromContext(ctx agent.Context) []model.Message {
 	if ctx == nil {
 		return nil
 	}
-	activeSession := ctx.Session()
 	events := make([]*session.Event, 0, ctx.Events().Len())
 	for event := range ctx.Events().All() {
 		events = append(events, event)
 	}
+	return normalizeToolCallHistory(messagesFromEvents(ctx.Session(), events))
+}
+
+func messagesFromEvents(activeSession session.Session, events []*session.Event) []model.Message {
 	out := make([]model.Message, 0, len(events))
 	for i := 0; i < len(events); {
 		event := events[i]
@@ -41,7 +44,7 @@ func messagesFromContext(ctx agent.Context) []model.Message {
 		out = append(out, message)
 		i++
 	}
-	return normalizeToolCallHistory(out)
+	return out
 }
 
 func eventWithParticipantContextMeta(event *session.Event, activeSession session.Session) *session.Event {

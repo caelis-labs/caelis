@@ -1,8 +1,10 @@
 package gatewayapp
 
 import (
+	"encoding/json"
 	"fmt"
 	"maps"
+	"os"
 	"strconv"
 	"testing"
 
@@ -30,7 +32,7 @@ func TestExperimentalHTTPIndependentCombinationsAndActivation(t *testing.T) {
 	}
 	var previous string
 	var previousValues experimental.Values
-	for bits := 0; bits < 8; bits++ {
+	for bits := range 16 {
 		snapshot, err := client.ExperimentalFeatures(t.Context(), previous)
 		if err != nil {
 			t.Fatal(err)
@@ -42,8 +44,9 @@ func TestExperimentalHTTPIndependentCombinationsAndActivation(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		values := experimental.Values{experimental.AsyncCompact: bits&1 != 0, experimental.MCPRefresh: bits&2 != 0, experimental.ToolRetirement: bits&4 != 0}
-		req := appserver.ExperimentalRequest{WriteBase: appserver.WriteBase{OperationID: fmt.Sprintf("experiments-%d", bits), ExpectedRevision: &revision}, Values: values}
+		values := experimental.Values{experimental.AsyncCompact: bits&1 != 0, experimental.IdleCompact: bits&8 != 0}
+		requested := experimental.Values{experimental.AsyncCompact: bits&1 != 0, experimental.IdleCompact: bits&8 != 0, experimental.MCPRefresh: bits&2 != 0, experimental.ToolRetirement: bits&4 != 0}
+		req := appserver.ExperimentalRequest{WriteBase: appserver.WriteBase{OperationID: fmt.Sprintf("experiments-%d", bits), ExpectedRevision: &revision}, Values: requested}
 		result, err := client.SetExperimentalFeatures(t.Context(), req)
 		if err != nil || result.Outcome != appserver.OutcomeCommitted {
 			t.Fatalf("save=%+v %v", result, err)
@@ -58,6 +61,26 @@ func TestExperimentalHTTPIndependentCombinationsAndActivation(t *testing.T) {
 		}
 		if previous != "" && !maps.Equal(read.Effective, previousValues) {
 			t.Fatal("save rewrote active Runtime")
+		}
+		doc, err := stack.composition.authorities.store.LoadContext(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, err := os.ReadFile(stack.composition.authorities.store.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var persisted struct{ Experimental experimental.Values }
+		if err := json.Unmarshal(raw, &persisted); err != nil {
+			t.Fatal(err)
+		}
+		for _, id := range []string{experimental.MCPRefresh, experimental.ToolRetirement} {
+			if _, ok := doc.Experimental[id]; ok {
+				t.Fatalf("loaded legacy value %s", id)
+			}
+			if _, ok := persisted.Experimental[id]; ok {
+				t.Fatalf("persisted legacy value %s", id)
+			}
 		}
 		created, err := client.CreateSession(t.Context(), appserver.CreateSessionRequest{WriteBase: appserver.WriteBase{OperationID: fmt.Sprintf("create-experimental-%d", bits)}})
 		if err != nil {
@@ -124,4 +147,57 @@ func newExperimentalHTTPStack(t *testing.T) (*Stack, *httpclient.Client) {
 	}
 
 	return stack, client
+}
+
+func TestExperimentalLegacyStoredValuesAreIgnoredAndRemovedOnSave(t *testing.T) {
+	stack, client := newExperimentalHTTPStack(t)
+	store := stack.composition.authorities.store
+	doc, err := store.LoadContext(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc.Experimental = experimental.Values{experimental.AsyncCompact: true, experimental.MCPRefresh: true, experimental.ToolRetirement: false}
+	if err := store.Save(doc); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := client.ExperimentalFeatures(t.Context(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !maps.Equal(snapshot.Desired, experimental.Values{experimental.AsyncCompact: true, experimental.IdleCompact: false}) {
+		t.Fatalf("desired = %v", snapshot.Desired)
+	}
+	revision, err := strconv.ParseUint(snapshot.Revision, 10, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := appserver.ExperimentalRequest{WriteBase: appserver.WriteBase{OperationID: "remove-legacy", ExpectedRevision: &revision}, Values: experimental.Values{experimental.MCPRefresh: false, experimental.ToolRetirement: true}}
+	result, err := client.SetExperimentalFeatures(t.Context(), request)
+	if err != nil || result.Outcome != appserver.OutcomeCommitted {
+		t.Fatalf("save = %+v %v", result, err)
+	}
+	raw, err := os.ReadFile(store.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var saved struct{ Experimental experimental.Values }
+	if err := json.Unmarshal(raw, &saved); err != nil {
+		t.Fatal(err)
+	}
+	if !maps.Equal(saved.Experimental, experimental.Values{experimental.AsyncCompact: true, experimental.IdleCompact: false}) {
+		t.Fatalf("persisted = %v", saved.Experimental)
+	}
+	snapshot, err = client.ExperimentalFeatures(t.Context(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	revision, err = strconv.ParseUint(snapshot.Revision, 10, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.OperationID = "legacy-noop"
+	result, err = client.SetExperimentalFeatures(t.Context(), request)
+	if err != nil || result.Outcome != appserver.OutcomeCommitted || result.Revision != revision {
+		t.Fatalf("legacy no-op = %+v %v", result, err)
+	}
 }

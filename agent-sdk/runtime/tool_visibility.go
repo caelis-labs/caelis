@@ -6,7 +6,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
-func promptEventsWithToolVisibilityMetadata(promptEvents []*session.Event, sourceEvents []*session.Event, retirement bool) []*session.Event {
+func promptEventsWithToolVisibilityMetadata(promptEvents []*session.Event, sourceEvents []*session.Event) []*session.Event {
 	if len(promptEvents) == 0 {
 		return promptEvents
 	}
@@ -26,9 +26,9 @@ func promptEventsWithToolVisibilityMetadata(promptEvents []*session.Event, sourc
 		if event.Meta == nil {
 			event.Meta = map[string]any{}
 		}
-		if retirement && hasExposure {
+		if hasExposure {
 			event.Meta[tool.MetadataToolExposure] = state
-		} else if !retirement {
+		} else {
 			event.Meta[tool.MetadataDiscoveredToolNames] = tool.DiscoveredToolNamesMetadataValue(names)
 		}
 		break

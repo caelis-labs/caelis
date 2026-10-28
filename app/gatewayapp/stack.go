@@ -394,6 +394,16 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 		sessionStore = sessionfile.NewStore(sessionStoreConfig)
 	}
 	sessions := sessionStore
+	idleGeneration := make(chan struct{}, 1)
+	recoveryCtx, recoveryCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	recoveryErr := recoverIdleCompactionAccounting(recoveryCtx, sessions, priorHostFenceCapability, fenceOwnerID)
+	recoveryCancel()
+	if recoveryErr != nil {
+		idleGeneration = nil
+		if runtimeDiagnostics != nil {
+			runtimeDiagnostics.Warn("idle compaction paused after accounting recovery failed", "error", recoveryErr)
+		}
+	}
 	taskStore := sessionfile.NewTaskStore(sessionStore)
 	var priorHostFences appserver.PriorHostFenceReplacer
 	if cfg.HostOwnership != nil {
@@ -531,6 +541,7 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 				diagnostics:             runtimeDiagnostics,
 				configMigration:         configStore.MigrationReport(),
 				fenceOwnerID:            fenceOwnerID,
+				idleGeneration:          idleGeneration,
 				taskStore:               taskStore,
 				streamSpool:             controlSpool,
 				controlFeeds:            controlFeeds,
@@ -757,6 +768,9 @@ func (s *Stack) closeWithQuiesceTimeout(timeout time.Duration) error {
 	quiesceCtx, cancelQuiesce := context.WithTimeout(context.Background(), timeout)
 	quiesceErr := s.Quiesce(quiesceCtx)
 	cancelQuiesce()
+	if quiesceErr != nil {
+		return fmt.Errorf("gatewayapp: resources retained after incomplete drain: %w", quiesceErr)
+	}
 	if s.composition.authorities.approvalRecovery != nil {
 		s.composition.authorities.approvalRecovery.Close()
 	}
@@ -840,7 +854,17 @@ func (s *runtimeComposition) closeWorkspaceResources() error {
 	}
 	s.workspaceCloseMu.Lock()
 	defer s.workspaceCloseMu.Unlock()
-
+	if s.idleCompaction != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		err := s.idleCompaction.drain(ctx)
+		cancel()
+		if err != nil {
+			return fmt.Errorf("idle compaction dependencies retained: %w", err)
+		}
+	}
+	if s.engine != nil {
+		s.engine.DiscardIdleCompactionSources()
+	}
 	s.mu.Lock()
 	exec := s.exec
 	s.exec = nil

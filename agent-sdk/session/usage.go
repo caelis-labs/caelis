@@ -8,6 +8,14 @@ import (
 )
 
 type UsageSnapshot struct {
+	CacheWriteTokens           int  `json:"cache_write_tokens,omitempty"`
+	CacheWrite5mTokens         int  `json:"cache_write_5m_tokens,omitempty"`
+	CacheWrite1hTokens         int  `json:"cache_write_1h_tokens,omitempty"`
+	CachedInputTokensReported  bool `json:"cached_input_tokens_reported,omitempty"`
+	CacheWriteTokensReported   bool `json:"cache_write_tokens_reported,omitempty"`
+	CacheWrite5mTokensReported bool `json:"cache_write_5m_tokens_reported,omitempty"`
+	CacheWrite1hTokensReported bool `json:"cache_write_1h_tokens_reported,omitempty"`
+
 	PromptTokens        int `json:"prompt_tokens,omitempty"`
 	CachedInputTokens   int `json:"cached_input_tokens,omitempty"`
 	CompletionTokens    int `json:"completion_tokens,omitempty"`
@@ -169,7 +177,11 @@ func usageSnapshotFromPayload(payload map[string]any, provider string) *UsageSna
 		intValue(nestedAny(payload, "usage_metadata", "cache_creation_input_tokens")),
 		intValue(nestedAny(payload, "usageMetadata", "cacheCreationInputTokens")),
 	)
-	promptTokens += cacheCreationTokens
+	if value, present := payload["prompt_tokens"]; present && value != nil {
+		promptTokens = intValue(value)
+	} else {
+		promptTokens += cacheCreationTokens
+	}
 	completionTokens := firstNonZeroInt(
 		intValue(payload["completion_tokens"]),
 		intValue(payload["output_tokens"]),
@@ -182,6 +194,9 @@ func usageSnapshotFromPayload(payload map[string]any, provider string) *UsageSna
 		intValue(nestedAny(payload, "usage_metadata", "response_token_count")),
 		intValue(nestedAny(payload, "usageMetadata", "responseTokenCount")),
 	)
+	if value, present := payload["completion_tokens"]; present && value != nil {
+		completionTokens = intValue(value)
+	}
 	totalTokens := firstNonZeroInt(
 		intValue(payload["total_tokens"]),
 		intValue(payload["total_token_count"]),
@@ -210,14 +225,22 @@ func usageSnapshotFromPayload(payload map[string]any, provider string) *UsageSna
 		totalTokens = minimumTotal
 	}
 	usage := &UsageSnapshot{
-		PromptTokens:        promptTokens,
+		PromptTokens:               promptTokens,
+		CacheWriteTokens:           firstPresentUsageInt(payload["cache_write_tokens"], payload["cache_creation_input_tokens"]),
+		CacheWrite5mTokens:         firstPresentUsageInt(payload["cache_write_5m_tokens"], nestedAny(payload, "cache_creation", "ephemeral_5m_input_tokens")),
+		CacheWrite1hTokens:         firstPresentUsageInt(payload["cache_write_1h_tokens"], nestedAny(payload, "cache_creation", "ephemeral_1h_input_tokens")),
+		CachedInputTokensReported:  payload["cached_input_tokens_reported"] == true || (payload["cached_input_tokens"] == nil && payload["cache_read_input_tokens"] != nil),
+		CacheWriteTokensReported:   cacheMeasurementReported(payload, "cache_write_tokens", "cache_write_tokens_reported", payload["cache_creation_input_tokens"]),
+		CacheWrite5mTokensReported: cacheMeasurementReported(payload, "cache_write_5m_tokens", "cache_write_5m_tokens_reported", nestedAny(payload, "cache_creation", "ephemeral_5m_input_tokens")),
+		CacheWrite1hTokensReported: cacheMeasurementReported(payload, "cache_write_1h_tokens", "cache_write_1h_tokens_reported", nestedAny(payload, "cache_creation", "ephemeral_1h_input_tokens")),
+
 		CachedInputTokens:   cachedTokens,
 		CompletionTokens:    completionTokens,
 		ReasoningTokens:     reasoningTokens,
 		TotalTokens:         totalTokens,
 		ContextWindowTokens: contextWindowTokens,
 	}
-	if usage.PromptTokens == 0 && usage.CachedInputTokens == 0 && usage.CompletionTokens == 0 && usage.ReasoningTokens == 0 && usage.TotalTokens == 0 && usage.ContextWindowTokens == 0 {
+	if usage.CacheWriteTokens == 0 && usage.CacheWrite5mTokens == 0 && usage.CacheWrite1hTokens == 0 && !usage.CachedInputTokensReported && !usage.CacheWriteTokensReported && !usage.CacheWrite5mTokensReported && !usage.CacheWrite1hTokensReported && usage.PromptTokens == 0 && usage.CachedInputTokens == 0 && usage.CompletionTokens == 0 && usage.ReasoningTokens == 0 && usage.TotalTokens == 0 && usage.ContextWindowTokens == 0 {
 		return nil
 	}
 	return usage
@@ -251,8 +274,7 @@ func providerSeparatesCachedInputForSnapshot(provider string, usage UsageSnapsho
 	if normalizedProviderKey(provider) != "deepseek" || usage.CachedInputTokens <= 0 {
 		return false
 	}
-	return usage.TotalTokens >= usage.PromptTokens+usage.CachedInputTokens+usage.CompletionTokens &&
-		usage.PromptTokens+usage.CompletionTokens > 0
+	return usage.TotalTokens >= usage.PromptTokens+usage.CachedInputTokens+usage.CompletionTokens
 }
 
 func semanticUsageMetadata(event *Event) map[string]any {
@@ -263,6 +285,12 @@ func semanticUsageMetadata(event *Event) map[string]any {
 }
 
 func cachedInputTokensFromPayload(payload map[string]any) int {
+	if value := payload["cached_input_tokens"]; value != nil {
+		return intValue(value)
+	}
+	if value := payload["cache_read_input_tokens"]; value != nil {
+		return intValue(value)
+	}
 	return firstNonZeroInt(
 		intValue(payload["cached_input_tokens"]),
 		intValue(payload["cached_prompt_tokens"]),
@@ -279,6 +307,9 @@ func cachedInputTokensFromPayload(payload map[string]any) int {
 }
 
 func explicitCacheReadInputTokens(payload map[string]any) int {
+	if payload["cached_input_tokens"] != nil {
+		return 0
+	}
 	return firstNonZeroInt(
 		intValue(payload["cache_read_input_tokens"]),
 		intValue(nestedAny(payload, "usage_metadata", "cache_read_input_tokens")),
@@ -431,4 +462,21 @@ func intValue(v any) int {
 func stringValue(v any) string {
 	text, _ := v.(string)
 	return text
+}
+
+// Canonical counters, including explicit zero, take precedence over raw aliases.
+func firstPresentUsageInt(values ...any) int {
+	for _, value := range values {
+		if value != nil {
+			return intValue(value)
+		}
+	}
+	return 0
+}
+
+func cacheMeasurementReported(payload map[string]any, key, flag string, raw any) bool {
+	if reported, ok := payload[flag].(bool); ok {
+		return reported
+	}
+	return payload[key] != nil || raw != nil
 }

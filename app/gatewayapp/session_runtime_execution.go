@@ -28,14 +28,21 @@ func (s *runtimeComposition) buildSessionExecution(bundle *gatewayRuntimeBundle,
 		return nil, nil, err
 	}
 	bundle.Engine = engine
+	if config.Compaction.Idle.Enabled {
+		bundle.IdleCompaction = s.newIdleCompactionCoordinator(engine)
+	}
 	fences, ok := s.sessions.(session.SessionFenceService)
 	if !ok {
 		return nil, nil, fmt.Errorf("gatewayapp: production session service does not support execution fences")
 	}
-	fenced, err := controlplane.NewFencedRuntime(controlplane.FencedRuntimeConfig{
+	fenceConfig := controlplane.FencedRuntimeConfig{
 		Runtime: engine, Fences: fences, OwnerID: strings.TrimSpace(s.authorities.fenceOwnerID),
 		LifecycleContext: s.authorities.lifecycleCtx, Diagnostics: s.authorities.diagnostics,
-	})
+	}
+	if bundle.IdleCompaction != nil {
+		fenceConfig.PrepareIdle = bundle.IdleCompaction.prepare
+	}
+	fenced, err := controlplane.NewFencedRuntime(fenceConfig)
 	if err != nil {
 		return nil, nil, err
 	}

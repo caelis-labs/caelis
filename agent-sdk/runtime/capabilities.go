@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"fmt"
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -34,4 +35,14 @@ func validateAgentSpecCapabilities(specModel model.LLM, tools []tool.Tool, reque
 		name = specModel.Name()
 	}
 	return model.ValidateCapabilities(name, actual, required)
+}
+
+// CapabilityError identifies a required Runtime capability missing from an embedding.
+// It is distinct from a stale snapshot: resolving the same source again cannot supply the capability.
+type CapabilityError struct {
+	Capability string
+}
+
+func (e *CapabilityError) Error() string {
+	return fmt.Sprintf("agent-sdk/runtime: deferred tool source requires %s capability", e.Capability)
 }

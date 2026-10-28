@@ -2,16 +2,13 @@ package runtime
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
-	"fmt"
 	"sync"
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/requestsource"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
@@ -49,8 +46,8 @@ type asyncCompactScope struct {
 type asyncCompactJob struct {
 	id          string
 	source      session.LoadedSession
-	throughSeq  uint64
-	prefix      string
+	coverage    compact.Coverage
+	frozen      *model.Request
 	requestHash string
 	epoch       string
 	llm         model.LLM
@@ -96,6 +93,12 @@ func (*asyncCompactAdoptedError) Error() string {
 // before dispatch. Returning adopted asks the existing Run loop to rebuild from
 // durable truth; it does not mutate the chat Agent's private message slice.
 func (l *autoCompactGatedLLM) asyncCompactBeforeRequest(ctx context.Context, req *model.Request, hard bool) (bool, error) {
+	return l.asyncCompactionBoundary(ctx, req, hard, false)
+}
+
+// Launch only after actual-attempt admission and request preparation. An
+// assembled request rejected by admission cannot authorize speculative spend.
+func (l *autoCompactGatedLLM) asyncCompactionBoundary(ctx context.Context, req *model.Request, hard, dispatch bool) (bool, error) {
 	r := l.runtime
 	s := asyncScope(ctx)
 	if !r.compaction.Async.Enabled || s == nil {
@@ -114,7 +117,7 @@ func (l *autoCompactGatedLLM) asyncCompactBeforeRequest(ctx context.Context, req
 	if err != nil {
 		return false, err
 	}
-	if job := s.job; job != nil {
+	if job := s.job; job != nil && !dispatch {
 		if job.epoch != epoch || job.requestHash != requestHash || !sameCompactionModel(job.llm, l.inner) {
 			job.discarded = true
 			job.cancel()
@@ -147,7 +150,11 @@ func (l *autoCompactGatedLLM) asyncCompactBeforeRequest(ctx context.Context, req
 		}
 		return false, nil
 	}
-	if s.started {
+	if !dispatch || s.started || req.Source == nil || !compactionPrefixSafe(req.Messages) {
+		return false, nil
+	}
+	messagesHash, err := requestsource.Fingerprint(req.Messages)
+	if err != nil || messagesHash != req.Source.MessagesHash {
 		return false, nil
 	}
 	if l.requestAuthority != nil && !l.requestAuthority.canSpeculate {
@@ -177,6 +184,15 @@ func (l *autoCompactGatedLLM) asyncCompactBeforeRequest(ctx context.Context, req
 		return false, err
 	}
 	events := mainInvocationEvents(loaded.Events)
+	cut := 0
+	for cut < len(events) && events[cut].Seq <= req.Source.SourceThroughSeq {
+		cut++
+	}
+	events = events[:cut]
+	prefix, err := requestsource.Fingerprint(events)
+	if err != nil || prefix != req.Source.SourcePrefixHash || session.LastEventSeq(events) != req.Source.SourceThroughSeq {
+		return false, nil
+	}
 	delta := compactableEvents(events)
 	if len(delta) == 0 || !autoCompactGateHasModelProgress(delta) || !asyncToolPairsComplete(compact.PromptEventsFromLatestCompact(events)) {
 		return false, nil
@@ -192,10 +208,18 @@ func (l *autoCompactGatedLLM) asyncCompactBeforeRequest(ctx context.Context, req
 	if !(ratio > 0 && ratio < 1) || evaluateWatermark(probe, r.compaction).ShouldCompact || float64(usage.TotalTokens) < threshold {
 		return false, nil
 	}
-	prefix, err := asyncFingerprint(events)
+	frozen := model.CloneRequest(req)
+	frozenHash, err := requestsource.Fingerprint(frozen)
 	if err != nil {
-		return false, err
+		return false, nil
 	}
+	coverage := compact.Coverage{
+		SourceThroughSeq:     req.Source.SourceThroughSeq,
+		SummarizedThroughSeq: session.LastEventSeq(delta), SummarizedThroughID: lastEventID(delta),
+		SourceEventCount: len(delta), SourcePrefixHash: prefix, FrozenRequestHash: frozenHash,
+		RequireInContext: true,
+	}
+	loaded.Events = session.CloneEvents(events)
 	timeout := r.compaction.Async.GenerationTimeout
 	if timeout <= 0 {
 		timeout = 30 * time.Second
@@ -203,13 +227,12 @@ func (l *autoCompactGatedLLM) asyncCompactBeforeRequest(ctx context.Context, req
 	// Root at the Turn, not the request's ephemeral accounting/admission context.
 	jobCtx, cancel := context.WithTimeout(s.ctx, timeout)
 	job := &asyncCompactJob{
-		id: r.nextID("async-compact", nil), source: loaded, throughSeq: session.LastEventSeq(delta),
-		prefix: prefix, requestHash: requestHash, epoch: epoch, llm: l.inner, guard: guard,
+		id: r.nextID("async-compact", nil), source: loaded, coverage: coverage, frozen: frozen,
+		requestHash: requestHash, epoch: epoch, llm: l.inner, guard: guard,
 		cancel: cancel, done: make(chan struct{}),
 	}
 	s.started, s.job = true, job
 	s.releases = append(s.releases, l.requestAuthority.retain())
-	serviceTier := req.ServiceTier
 	go func() {
 		defer close(job.done)
 		defer cancel()
@@ -224,11 +247,9 @@ func (l *autoCompactGatedLLM) asyncCompactBeforeRequest(ctx context.Context, req
 			})
 		}
 		job.result, job.err = r.compactor.(compact.ForceEngine).Force(generationCtx, compact.Request{
-			Session: loaded.Session, SessionRef: l.sessionRef, Events: session.CloneEvents(events),
-			// The already-assembled foreground request may precede an external
-			// canonical append. Generate from exact source frames, never assign
-			// that request a newer Store coverage it may not actually contain.
-			Model: l.inner, ServiceTier: serviceTier,
+			Session: loaded.Session, SessionRef: l.sessionRef, Events: session.CloneEvents(job.source.Events),
+			Model: l.inner, ServiceTier: job.frozen.ServiceTier,
+			InContextRequest: job.frozen, Coverage: &job.coverage, RequireInContext: true,
 		}, "async_candidate")
 		active := loaded.Session
 		job.receiptErr = r.persistCompactionInvocations(jobCtx, &active, lifecycleScopeFromContext(s.ctx).turnID, records)
@@ -269,16 +290,7 @@ func asyncRequestFingerprint(req *model.Request) (string, error) {
 	prefix.Messages = nil
 	// Unlike the usage estimate's media-stripped hash this binds exact bytes,
 	// schema, reasoning, service tier, and output shape.
-	return asyncFingerprint(prefix)
-}
-
-func asyncFingerprint(value any) (string, error) {
-	data, err := json.Marshal(value)
-	if err != nil {
-		return "", fmt.Errorf("runtime: fingerprint async compact source: %w", err)
-	}
-	sum := sha256.Sum256(data)
-	return hex.EncodeToString(sum[:]), nil
+	return requestsource.Fingerprint(prefix)
 }
 
 // No pair may straddle the coverage cut. A standalone/unknown result or an

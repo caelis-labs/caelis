@@ -55,6 +55,9 @@ type ModelRequestSnapshot struct {
 type ModelRequestAdmission struct {
 	RequestID string
 	TurnID    string
+	// JobID attributes an idle attempt independently of its completed source Turn.
+	// TurnID and JobID are mutually exclusive.
+	JobID string
 }
 
 // ErrModelRequestSnapshotStale asks the chat loop to resolve another complete

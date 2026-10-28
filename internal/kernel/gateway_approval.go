@@ -393,8 +393,16 @@ func anyStringValue(value any) string {
 
 func usageSnapshotMeta(usage UsageSnapshot) map[string]any {
 	return map[string]any{
-		"prompt_tokens":         usage.PromptTokens,
-		"cached_input_tokens":   usage.CachedInputTokens,
+		"prompt_tokens":                  usage.PromptTokens,
+		"cached_input_tokens":            usage.CachedInputTokens,
+		"cache_write_tokens":             usage.CacheWriteTokens,
+		"cache_write_5m_tokens":          usage.CacheWrite5mTokens,
+		"cache_write_1h_tokens":          usage.CacheWrite1hTokens,
+		"cached_input_tokens_reported":   usage.CachedInputTokensReported,
+		"cache_write_tokens_reported":    usage.CacheWriteTokensReported,
+		"cache_write_5m_tokens_reported": usage.CacheWrite5mTokensReported,
+		"cache_write_1h_tokens_reported": usage.CacheWrite1hTokensReported,
+
 		"completion_tokens":     usage.CompletionTokens,
 		"reasoning_tokens":      usage.ReasoningTokens,
 		"total_tokens":          usage.TotalTokens,
@@ -403,7 +411,7 @@ func usageSnapshotMeta(usage UsageSnapshot) map[string]any {
 }
 
 func usageSnapshotEmpty(usage UsageSnapshot) bool {
-	return usage.PromptTokens == 0 &&
+	return usage.CacheWriteTokens == 0 && usage.CacheWrite5mTokens == 0 && usage.CacheWrite1hTokens == 0 && !usage.CachedInputTokensReported && !usage.CacheWriteTokensReported && !usage.CacheWrite5mTokensReported && !usage.CacheWrite1hTokensReported && usage.PromptTokens == 0 &&
 		usage.CachedInputTokens == 0 &&
 		usage.CompletionTokens == 0 &&
 		usage.ReasoningTokens == 0 &&
@@ -416,6 +424,14 @@ func addUsageSnapshot(total *UsageSnapshot, usage UsageSnapshot) {
 	}
 	total.PromptTokens += usage.PromptTokens
 	total.CachedInputTokens += usage.CachedInputTokens
+	total.CacheWriteTokens += usage.CacheWriteTokens
+	total.CacheWrite5mTokens += usage.CacheWrite5mTokens
+	total.CacheWrite1hTokens += usage.CacheWrite1hTokens
+	total.CachedInputTokensReported = total.CachedInputTokensReported || usage.CachedInputTokensReported
+	total.CacheWriteTokensReported = total.CacheWriteTokensReported || usage.CacheWriteTokensReported
+	total.CacheWrite5mTokensReported = total.CacheWrite5mTokensReported || usage.CacheWrite5mTokensReported
+	total.CacheWrite1hTokensReported = total.CacheWrite1hTokensReported || usage.CacheWrite1hTokensReported
+
 	total.CompletionTokens += usage.CompletionTokens
 	total.ReasoningTokens += usage.ReasoningTokens
 	total.TotalTokens += usage.TotalTokens

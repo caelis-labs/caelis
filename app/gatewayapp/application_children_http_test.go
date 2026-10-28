@@ -175,10 +175,10 @@ func TestApplicationProfileChildHTTPIsolationAndRecovery(t *testing.T) {
 		if err != nil || health.SessionID != child || health.ConfigurationRevision != healthRevision || len(health.Servers) != 1 || health.Servers[0].Name != "documents" {
 			t.Fatalf("child MCP health lost its exact owner: %+v %v", health, err)
 		}
-		if health.Servers[0].Status == "running" {
+		if health.Servers[0].Status == "running" && !health.Servers[0].Refreshing && !health.Servers[0].Stale {
 			break
 		}
-		if health.Servers[0].Status != "connecting" {
+		if health.Servers[0].Status != "connecting" && health.Servers[0].Status != "running" {
 			t.Fatalf("child MCP initialization failed: %+v", health)
 		}
 		select {

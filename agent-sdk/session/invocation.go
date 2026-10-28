@@ -27,6 +27,12 @@ func StableInvocationIdentity(provider, modelName string) (string, string) {
 // caller supplies the trusted Session/Scope before appending it under its fence.
 func NewModelInvocationReceipt(in model.Invocation, kind string) *Event {
 	sdk := map[string]any{"invocation_kind": kind, "outcome": in.Outcome, "usage_status": "unknown"}
+	if !in.StartedAt.IsZero() {
+		sdk["started_at"] = in.StartedAt
+	}
+	if !in.FinishedAt.IsZero() {
+		sdk["finished_at"] = in.FinishedAt
+	}
 	if in.Usage.IsReported() {
 		sdk["usage_status"] = "reported"
 		sdk["usage"] = ModelUsageMetadata(in.Provider, in.Usage)
@@ -46,7 +52,7 @@ func NewModelInvocationReceipt(in model.Invocation, kind string) *Event {
 // ModelUsageMetadata preserves normalized provider usage without inventing a
 // monetary estimate. A zero CostMicros does not establish price availability.
 func ModelUsageMetadata(provider string, usage model.Usage) map[string]any {
-	if strings.EqualFold(provider, "deepseek") && usage.CachedInputTokens > 0 && usage.TotalTokens >= usage.PromptTokens+usage.CachedInputTokens+usage.CompletionTokens && usage.PromptTokens+usage.CompletionTokens > 0 {
+	if strings.EqualFold(provider, "deepseek") && usage.CachedInputTokens > 0 && usage.TotalTokens >= usage.PromptTokens+usage.CachedInputTokens+usage.CompletionTokens {
 		provider = "deepseek-anthropic"
 	}
 	out := map[string]any{
@@ -56,6 +62,27 @@ func ModelUsageMetadata(provider string, usage model.Usage) map[string]any {
 		"completion_tokens":   usage.CompletionTokens,
 		"reasoning_tokens":    usage.ReasoningTokens,
 		"total_tokens":        usage.TotalTokens,
+	}
+	if usage.CacheWriteTokens != 0 || usage.CacheWriteTokensReported {
+		out["cache_write_tokens"] = usage.CacheWriteTokens
+	}
+	if usage.CacheWrite5mTokens != 0 || usage.CacheWrite5mTokensReported {
+		out["cache_write_5m_tokens"] = usage.CacheWrite5mTokens
+	}
+	if usage.CacheWrite1hTokens != 0 || usage.CacheWrite1hTokensReported {
+		out["cache_write_1h_tokens"] = usage.CacheWrite1hTokens
+	}
+	// This legacy counter is always emitted. Explicit false prevents its default
+	// zero from being mistaken for a provider-reported cache measurement.
+	out["cached_input_tokens_reported"] = usage.CachedInputTokensReported || usage.CachedInputTokens > 0
+	if usage.CacheWriteTokensReported {
+		out["cache_write_tokens_reported"] = true
+	}
+	if usage.CacheWrite5mTokensReported {
+		out["cache_write_5m_tokens_reported"] = true
+	}
+	if usage.CacheWrite1hTokensReported {
+		out["cache_write_1h_tokens_reported"] = true
 	}
 	if usage.CostMicros != 0 {
 		out["cost_micros"] = usage.CostMicros

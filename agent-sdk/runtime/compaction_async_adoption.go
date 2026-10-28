@@ -8,21 +8,13 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/requestsource"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
 func (r *Runtime) adoptAsyncCompaction(ctx context.Context, l *autoCompactGatedLLM, job *asyncCompactJob) (bool, error) {
 	if ctx.Err() != nil || job.guard != session.RuntimeMutationGuard(ctx) {
 		return false, ctx.Err()
-	}
-	data, ok := compact.CompactEventDataFromEvent(job.result.CompactEvent)
-	delta := compactableEvents(mainInvocationEvents(job.source.Events))
-	_, baseData, _ := compact.LatestCompactEvent(job.source.Events)
-	if !job.result.Compacted || !ok || data.ContractVersion != compact.CompactContractVersion ||
-		data.Revision != baseData.Revision+1 || data.SourceEventCount != len(delta) ||
-		data.SummarizedThroughSeq != job.throughSeq || data.SummarizedThroughID != lastEventID(delta) ||
-		strings.TrimSpace(stripRuntimeContinuity(job.result.CompactText)) == "" {
-		return false, nil
 	}
 	validator, ok := r.sessions.(session.MutationGuardValidator)
 	if !ok {
@@ -31,7 +23,30 @@ func (r *Runtime) adoptAsyncCompaction(ctx context.Context, l *autoCompactGatedL
 	if err := validator.ValidateMutationGuard(ctx, l.sessionRef, job.guard); err != nil {
 		return false, err
 	}
-	release, err := r.acquireSessionWrite(ctx, l.sessionRef)
+
+	adopted, err := r.adoptCompactionCandidate(ctx, l, job, lifecycleScopeFromContext(ctx).turnID, nil)
+	if err != nil || !adopted {
+		return adopted, err
+	}
+	if err := validator.ValidateMutationGuard(ctx, l.sessionRef, job.guard); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (r *Runtime) adoptCompactionCandidate(ctx context.Context, l *autoCompactGatedLLM, job *asyncCompactJob, turnID string, appendCheckpoint checkpointAppender) (bool, error) {
+	data, ok := compact.CompactEventDataFromEvent(job.result.CompactEvent)
+	delta := compactableEvents(mainInvocationEvents(job.source.Events))
+	_, baseData, _ := compact.LatestCompactEvent(job.source.Events)
+	if !job.result.Compacted || !ok || data.ContractVersion != compact.CompactContractVersion ||
+		data.Revision != baseData.Revision+1 || data.SourceEventCount != len(delta) || data.SourceEventCount != job.coverage.SourceEventCount ||
+		data.SummarizedThroughSeq != job.coverage.SummarizedThroughSeq || data.SummarizedThroughID != lastEventID(delta) ||
+		data.SummarizedThroughID != job.coverage.SummarizedThroughID ||
+		strings.TrimSpace(stripRuntimeContinuity(job.result.CompactText)) == "" {
+		return false, nil
+	}
+	// A grant-bound idle writer never queues behind existing foreground work.
+	release, err := r.sessionWrites.acquireIf(ctx, l.sessionRef, appendCheckpoint == nil)
 	if err != nil {
 		return false, err
 	}
@@ -61,8 +76,8 @@ func (r *Runtime) adoptAsyncCompaction(ctx context.Context, l *autoCompactGatedL
 	if estimatePromptEventsTokens(projected) >= estimatePromptEventsTokens(compact.PromptEventsFromLatestCompact(current)) {
 		return false, nil
 	}
-	_, err = r.persistCompactionArtifactsValidated(ctx, &loaded.Session, loaded, lifecycleScopeFromContext(ctx).turnID,
-		compact.Result{Compacted: true, CompactEvent: event}, job.validSource)
+	_, err = r.persistCompactionArtifactsUsing(ctx, &loaded.Session, loaded, turnID,
+		compact.Result{Compacted: true, CompactEvent: event}, job.validSource, appendCheckpoint)
 	if err != nil {
 		var stale *checkpointCatalogStaleError
 		if errors.As(err, &stale) {
@@ -74,9 +89,7 @@ func (r *Runtime) adoptAsyncCompaction(ctx context.Context, l *autoCompactGatedL
 		// fails this Turn; it must not mint a second checkpoint as a fallback.
 		return false, err
 	}
-	if err := validator.ValidateMutationGuard(ctx, l.sessionRef, job.guard); err != nil {
-		return false, err
-	}
+
 	return true, nil
 }
 
@@ -95,8 +108,8 @@ func (j *asyncCompactJob) validSource(current session.LoadedSession) bool {
 	if !reflect.DeepEqual(sourceSession, currentSession) {
 		return false
 	}
-	prefix, err := asyncFingerprint(events[:len(sourceEvents)])
-	if err != nil || prefix != j.prefix {
+	prefix, err := requestsource.Fingerprint(events[:len(sourceEvents)])
+	if err != nil || prefix != j.coverage.SourcePrefixHash {
 		return false
 	}
 	var last uint64
@@ -108,7 +121,7 @@ func (j *asyncCompactJob) validSource(current session.LoadedSession) bool {
 	}
 	tail := events[len(sourceEvents):]
 	for _, event := range tail {
-		if compact.IsCompactEvent(event) || event.Seq <= j.throughSeq {
+		if compact.IsCompactEvent(event) || event.Seq <= j.coverage.SourceThroughSeq {
 			return false
 		}
 	}

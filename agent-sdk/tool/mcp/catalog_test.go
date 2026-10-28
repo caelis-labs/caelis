@@ -198,17 +198,13 @@ func TestCatalogPaginationFailureCancellationAndNotificationCoalescing(t *testin
 	}
 }
 
-func TestCatalogRefreshDefaultOffAndReconnectDoesNotReviveOldHandles(t *testing.T) {
+func TestCatalogRefreshAlwaysEnabledAndReconnectDoesNotReviveOldHandles(t *testing.T) {
 	server := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "local", Version: "1"}, nil)
 	catalogTool(server, "a", "a", nil)
-	disabled := catalogManager(t, server, false)
-	if disabled.servers[0].client.catalog != nil {
-		t.Fatal("refresh enabled by default")
-	}
-	if err := disabled.RefreshTools(t.Context(), "p", "local"); err == nil {
-		t.Fatal("disabled refresh accepted")
-	}
 	enabled := catalogManager(t, server, true)
+	if enabled.servers[0].client.catalog == nil {
+		t.Fatal("live catalog refresh must be built in")
+	}
 	old := enabled.Tools()[0]
 	if err := enabled.Close(); err != nil {
 		t.Fatal(err)

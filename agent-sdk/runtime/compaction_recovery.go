@@ -82,7 +82,7 @@ func (r *Runtime) recoverByCompacting(
 		ctx = context.WithValue(ctx, checkpointValidationKey{}, recovery.decision.Validate)
 	} else if req.AgentSpec.ResolveModelRequest == nil {
 		ctx = r.staticCheckpointContext(ctx, req.AgentSpec.DeferredTools)
-	} else if r.toolRetirement || r.compaction.Async.Enabled {
+	} else {
 		// An overflow outside the gated model has no captured dynamic catalog.
 		// Do not infer authority from the unresolved bootstrap AgentSpec.
 		return compactionProgress{}, false, fmt.Errorf("agent-sdk/runtime: dynamic compaction recovery requires request authority")

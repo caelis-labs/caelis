@@ -304,7 +304,7 @@ func (s *Store) AppendEventWithOutcome(
 		if err != nil {
 			return err
 		}
-		if err := validateFileMutationGuard(activeDocumentFence(doc), req.MutationGuard); err != nil {
+		if err := authorizeDocumentMutation(&doc, req.MutationGuard); err != nil {
 			return err
 		}
 
@@ -357,7 +357,7 @@ func (s *Store) AppendEventWithOutcomeConditional(
 		if err != nil {
 			return err
 		}
-		if err := validateFileMutationGuard(activeDocumentFence(doc), req.MutationGuard); err != nil {
+		if err := authorizeDocumentMutation(&doc, req.MutationGuard); err != nil {
 			return err
 		}
 		for _, precondition := range req.RelatedRevisions {
@@ -507,7 +507,7 @@ func (s *Store) AppendEvents(
 		if err != nil {
 			return err
 		}
-		if err := validateFileMutationGuard(activeDocumentFence(doc), req.MutationGuard); err != nil {
+		if err := authorizeDocumentMutation(&doc, req.MutationGuard); err != nil {
 			return err
 		}
 		nextDoc, tx, err := s.prepareAppendTransactionForDocument(ctx, doc, req.Events, nil, nil, nil, req.ExpectedRevision, "", "", prewarm)
@@ -551,7 +551,7 @@ func (s *Store) AppendEventsAndUpdateState(
 		if err != nil {
 			return err
 		}
-		if err := validateFileMutationGuard(activeDocumentFence(doc), req.MutationGuard); err != nil {
+		if err := authorizeDocumentMutation(&doc, req.MutationGuard); err != nil {
 			return err
 		}
 		nextDoc, tx, err := s.prepareAppendTransactionForDocument(ctx, doc, req.Events, nil, nil, req.UpdateState, req.ExpectedRevision, req.TransactionID, req.MutationDigest, prewarm)
@@ -682,7 +682,7 @@ func (s *Store) bindControllerRequest(ctx context.Context, req session.BindContr
 		if err != nil {
 			return err
 		}
-		if err := validateFileMutationGuard(activeDocumentFence(doc), req.MutationGuard); err != nil {
+		if err := authorizeDocumentMutation(&doc, req.MutationGuard); err != nil {
 			return err
 		}
 		doc.Session.Controller = session.CloneControllerBinding(req.Binding)
@@ -719,7 +719,7 @@ func (s *Store) BindControllerWithEvent(
 		if err != nil {
 			return err
 		}
-		if err := validateFileMutationGuard(activeDocumentFence(doc), req.MutationGuard); err != nil {
+		if err := authorizeDocumentMutation(&doc, req.MutationGuard); err != nil {
 			return err
 		}
 		nextDoc, tx, err := s.prepareAppendTransactionForDocument(
@@ -772,7 +772,7 @@ func (s *Store) putParticipantRequest(ctx context.Context, req session.PutPartic
 		if err != nil {
 			return err
 		}
-		if err := validateFileMutationGuard(activeDocumentFence(doc), req.MutationGuard); err != nil {
+		if err := authorizeDocumentMutation(&doc, req.MutationGuard); err != nil {
 			return err
 		}
 		if err := session.CheckExpectedRevision(doc.Session, req.ExpectedRevision); err != nil {
@@ -830,7 +830,7 @@ func (s *Store) PutParticipantWithEvent(
 		if err != nil {
 			return err
 		}
-		if err := validateFileMutationGuard(activeDocumentFence(doc), req.MutationGuard); err != nil {
+		if err := authorizeDocumentMutation(&doc, req.MutationGuard); err != nil {
 			return err
 		}
 		nextDoc, tx, err := s.prepareAppendTransactionForDocument(
@@ -894,7 +894,7 @@ func (s *Store) removeParticipantRequest(ctx context.Context, req session.Remove
 		if err != nil {
 			return err
 		}
-		if err := validateFileMutationGuard(activeDocumentFence(doc), req.MutationGuard); err != nil {
+		if err := authorizeDocumentMutation(&doc, req.MutationGuard); err != nil {
 			return err
 		}
 		if err := session.CheckExpectedRevision(doc.Session, req.ExpectedRevision); err != nil {
@@ -948,7 +948,7 @@ func (s *Store) RemoveParticipantWithEvent(
 		if err != nil {
 			return err
 		}
-		if err := validateFileMutationGuard(activeDocumentFence(doc), req.MutationGuard); err != nil {
+		if err := authorizeDocumentMutation(&doc, req.MutationGuard); err != nil {
 			return err
 		}
 		nextDoc, tx, err := s.prepareAppendTransactionForDocument(
@@ -1030,7 +1030,7 @@ func (s *Store) ReplaceState(
 		if err != nil {
 			return err
 		}
-		if err := validateFileMutationGuard(activeDocumentFence(doc), req.MutationGuard); err != nil {
+		if err := authorizeDocumentMutation(&doc, req.MutationGuard); err != nil {
 			return err
 		}
 		if err := session.CheckExpectedRevision(doc.Session, req.ExpectedRevision); err != nil {
@@ -1066,7 +1066,7 @@ func (s *Store) UpdateState(
 		if err != nil {
 			return err
 		}
-		if err := validateFileMutationGuard(activeDocumentFence(doc), req.MutationGuard); err != nil {
+		if err := authorizeDocumentMutation(&doc, req.MutationGuard); err != nil {
 			return err
 		}
 		if err := session.CheckExpectedRevision(doc.Session, req.ExpectedRevision); err != nil {

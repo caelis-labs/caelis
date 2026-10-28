@@ -202,16 +202,39 @@ func (p *atomicCapabilityProvider) RoundTrip(req *http.Request) (*http.Response,
 	}
 	name, args := "", ""
 	if len(payload.Tools) == 1 && payload.Tools[0].Function.Name == "InspectToolSchema" {
-		selected := ""
-		switch {
-		case strings.Contains(latestUser, "CALLFAIL"):
-			selected = "callfail__lookup"
-		case strings.Contains(latestUser, "BLOCK"):
-			selected = "blocking__lookup"
-		case strings.Contains(latestUser, "DOC"):
-			selected = "documents__lookup"
-		case strings.Contains(latestUser, "UTIL"):
-			selected = "utilities__lookup"
+		// The private selector sees its structured query, not the main user's
+		// uppercase script sentinel. Decode need independently of candidates.
+		var content string
+		switch value := payload.Messages[len(payload.Messages)-1].Content.(type) {
+		case string:
+			content = value
+		case []any:
+			for _, part := range value {
+				if block, ok := part.(map[string]any); ok {
+					if text, ok := block["text"].(string); ok {
+						content += text
+					}
+				}
+			}
+		}
+		var query struct {
+			Need       string `json:"need"`
+			Candidates []struct {
+				Name string `json:"name"`
+			} `json:"candidates"`
+		}
+		if err := json.Unmarshal([]byte(content), &query); err != nil {
+			return nil, err
+		}
+		selected := map[string]string{"callfail lookup": "callfail__lookup", "blocking lookup": "blocking__lookup", "documents lookup": "documents__lookup", "utilities lookup": "utilities__lookup"}[query.Need]
+		if selected != "" {
+			present := false
+			for _, candidate := range query.Candidates {
+				present = present || candidate.Name == selected
+			}
+			if !present {
+				return nil, fmt.Errorf("selector target %q is absent from catalog", selected)
+			}
 		}
 		selection, _ := json.Marshal(map[string]any{"tools": []string{selected}})
 		if selected == "" {

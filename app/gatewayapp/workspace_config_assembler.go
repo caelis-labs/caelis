@@ -25,9 +25,11 @@ type workspaceConfigAssembler struct {
 }
 
 type sessionRuntimeActivity struct {
-	retainWork    func(session.SessionRef) func()
-	taskChanged   func(session.SessionRef)
-	taskCommitted func(*task.Entry)
+	retainWork     func(session.SessionRef) func()
+	retainIdleWork func(session.SessionRef) (func(), bool)
+	idleQuiet      func(context.Context, session.SessionRef) (bool, error)
+	taskChanged    func(session.SessionRef)
+	taskCommitted  func(*task.Entry)
 }
 
 func newWorkspaceConfigAssembler(deps sessionRuntimeAssemblyDeps) (*workspaceConfigAssembler, error) {
@@ -109,11 +111,12 @@ func (a *workspaceConfigAssembler) assembleSnapshot(
 				childControlURL:       process.childControlURL,
 				childControlTokenFile: process.childControlTokenFile,
 			},
-			placementCache:     placement,
-			activeRuntime:      runtimeConfig,
-			sandbox:            sandboxConfig,
-			executionConfig:    sandbox.CloneExecutionConfig(active.ExecutionConfig),
-			retainRuntimeWork:  activity.retainWork,
+			placementCache:    placement,
+			activeRuntime:     runtimeConfig,
+			sandbox:           sandboxConfig,
+			executionConfig:   sandbox.CloneExecutionConfig(active.ExecutionConfig),
+			retainRuntimeWork: activity.retainWork,
+			retainIdleWork:    activity.retainIdleWork, idleQuiet: activity.idleQuiet,
 			runtimeTaskChanged: activity.taskChanged,
 			taskCommitted:      activity.taskCommitted,
 		},

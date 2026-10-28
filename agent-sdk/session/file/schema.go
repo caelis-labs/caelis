@@ -91,15 +91,16 @@ type TaskStore struct {
 }
 
 type persistedDocument struct {
-	Kind                      string                    `json:"kind"`
-	Version                   int                       `json:"version"`
-	Session                   session.Session           `json:"session"`
-	State                     map[string]any            `json:"state"`
-	PendingApprovals          map[string]*session.Event `json:"pending_approvals"`
-	AppliedTransactions       map[string]bool           `json:"applied_transactions,omitempty"`
-	AppliedTransactionDigests map[string]string         `json:"applied_transaction_digests,omitempty"`
-	Fence                     *persistedSessionFence    `json:"lease,omitempty"`
-	FenceEpoch                uint64                    `json:"lease_epoch,omitempty"`
+	Idle                      session.IdleCompactionState `json:"idle_compaction,omitempty"`
+	Kind                      string                      `json:"kind"`
+	Version                   int                         `json:"version"`
+	Session                   session.Session             `json:"session"`
+	State                     map[string]any              `json:"state"`
+	PendingApprovals          map[string]*session.Event   `json:"pending_approvals"`
+	AppliedTransactions       map[string]bool             `json:"applied_transactions,omitempty"`
+	AppliedTransactionDigests map[string]string           `json:"applied_transaction_digests,omitempty"`
+	Fence                     *persistedSessionFence      `json:"lease,omitempty"`
+	FenceEpoch                uint64                      `json:"lease_epoch,omitempty"`
 }
 
 // persistedSessionFence retains the current version-2 document encoding while

@@ -167,7 +167,7 @@ func TestRetiredMemoryHTTPPreservesSharedConfigurationUpdates(t *testing.T) {
 	send("/agents/bind", fmt.Sprintf(`"binding":{"handle":"orbit","profile_id":%q,"effort":"none","speed":""}`, profile.ID), false)
 	send("/agents/apply-binding-set", `"set_name":"legacy-team"`, false)
 	send("/agents/save-binding-set", `"set_name":"saved-team"`, false)
-	send("/configuration/experimental", `"values":{"async_compact":true,"mcp_catalog_refresh":true,"deferred_tool_retirement":true}`, false)
+	send("/configuration/experimental", `"values":{"async_compact":true,"idle_compact":true,"mcp_catalog_refresh":true,"deferred_tool_retirement":true}`, false)
 	_, status := read()
 	if len(status.Sets) != 2 {
 		t.Fatalf("saved Team missing: %+v", status.Sets)

@@ -43,7 +43,8 @@ func (r *Runtime) prepareInvocationContext(
 		// Its ordinary watermark gate owns proactive compaction; a stale Turn
 		// bootstrap must not compact history before that snapshot is resolved.
 		return invocationContext{
-			PromptEvents: promptEventsWithToolVisibilityMetadata(compact.PromptEventsFromLatestCompact(events), events, r.toolRetirement),
+			PromptEvents: promptEventsWithToolVisibilityMetadata(compact.PromptEventsFromLatestCompact(events), events),
+			SourceEvents: events,
 			State:        state,
 		}, nil
 	}
@@ -75,18 +76,21 @@ func (r *Runtime) prepareInvocationContext(
 		}
 		sourceEvents := append(session.CloneEvents(events), persisted)
 		return invocationContext{
-			PromptEvents: promptEventsWithToolVisibilityMetadata(compact.PromptEventsFromLatestCompact(sourceEvents), sourceEvents, r.toolRetirement),
+			PromptEvents: promptEventsWithToolVisibilityMetadata(compact.PromptEventsFromLatestCompact(sourceEvents), sourceEvents),
+			SourceEvents: sourceEvents,
 			State:        state,
 			LiveCompact:  persisted,
 		}, nil
 	}
 	return invocationContext{
-		PromptEvents: promptEventsWithToolVisibilityMetadata(result.PromptEvents, events, r.toolRetirement),
+		PromptEvents: promptEventsWithToolVisibilityMetadata(result.PromptEvents, events),
+		SourceEvents: events,
 		State:        state,
 	}, nil
 }
 
 type invocationContext struct {
+	SourceEvents []*session.Event
 	PromptEvents []*session.Event
 	State        map[string]any
 	LiveCompact  *session.Event
