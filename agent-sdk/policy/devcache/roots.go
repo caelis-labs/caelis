@@ -33,6 +33,9 @@ func WritableRoots() []string {
 	appendEnvPath("GOMODCACHE")
 	for _, gopath := range goPathRoots(home) {
 		appendRoot(filepath.Join(gopath, "pkg", "mod"))
+		// The module checksum database and toolchain verification write here, not
+		// into GOMODCACHE; without it `go` fails with a read-only filesystem error.
+		appendRoot(filepath.Join(gopath, "pkg", "sumdb"))
 	}
 
 	appendEnvPath("npm_config_cache")
