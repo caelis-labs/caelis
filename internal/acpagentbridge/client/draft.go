@@ -107,7 +107,7 @@ func (d *draftClient) initialize(ctx context.Context) (InitializeResponse, error
 	}
 	capabilities := v2.ClientCapabilities{}
 	if d.client.cfg.TerminalAuth {
-		capabilities.Auth = &v2.AuthCapabilities{Terminal: &v2.TerminalAuthCapabilities{}}
+		capabilities.Auth = &v2.ClientAuthCapabilities{Terminal: &v2.TerminalAuthCapabilities{}}
 	}
 	response, err := sendRequest[v2.InitializeResponse](d.client, ctx, v2.AgentMethodInitialize, v2.InitializeRequest{ProtocolVersion: 2, Info: info, Capabilities: capabilities, Meta: acpdraft.InitializeMeta()})
 	if err != nil {

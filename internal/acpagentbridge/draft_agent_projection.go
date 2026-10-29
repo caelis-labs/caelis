@@ -358,11 +358,11 @@ func draftConfigOptions(options []acp.SessionConfigOption) ([]v2.SessionConfigOp
 func draftCommands(commands []acp.AvailableCommand) []v2.AvailableCommand {
 	result := make([]v2.AvailableCommand, 0, len(commands))
 	for _, command := range commands {
-		mapped := v2.AvailableCommand{Name: command.Name, Description: command.Description, Meta: command.Meta}
+		mapped := v2.AvailableCommandCommand{Type: "command", Name: command.Name, Description: command.Description, Meta: command.Meta}
 		if command.Input != nil && command.Input.Unstructured != nil {
 			mapped.Input = &v2.AvailableCommandInput{Text: &v2.AvailableCommandInputText{Type: "text", Hint: command.Input.Unstructured.Hint, Meta: command.Input.Unstructured.Meta}}
 		}
-		result = append(result, mapped)
+		result = append(result, v2.AvailableCommand{Command: &mapped})
 	}
 	return result
 }

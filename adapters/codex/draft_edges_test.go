@@ -108,7 +108,7 @@ func TestDraftResumeNativeSkillMentionReferencesOverSDK(t *testing.T) {
 }
 
 func TestDraftTerminalSignedExitStatus(t *testing.T) {
-	for _, code := range []int64{-1, math.MinInt32, 0, 1, math.MaxInt32, math.MaxUint32} {
+	for _, code := range []int64{math.MinInt64, -1, math.MinInt32, 0, 1, math.MaxInt32, math.MaxUint32, math.MaxInt64} {
 		t.Run(fmt.Sprint(code), func(t *testing.T) {
 			raw, _ := json.Marshal(map[string]any{"terminal_id": "terminal", "exit_code": code, "signal": "SIGTERM"})
 			updates, err := draftTerminalUpdates(map[string]json.RawMessage{terminalExitMetaKey: raw})
@@ -116,7 +116,7 @@ func TestDraftTerminalSignedExitStatus(t *testing.T) {
 				t.Fatalf("native terminal exit = %+v, %v", updates, err)
 			}
 			exit := updates[0].TerminalUpdate.ExitStatus
-			if exit.Signal == nil || *exit.Signal != "SIGTERM" || code < 0 && exit.ExitCode != nil || code >= 0 && (exit.ExitCode == nil || int64(*exit.ExitCode) != code) {
+			if exit.Signal == nil || *exit.Signal != "SIGTERM" || code < 0 && exit.ExitCode != nil || code >= 0 && (exit.ExitCode == nil || *exit.ExitCode != code) {
 				t.Fatalf("native exit %d mapped to %+v", code, exit)
 			}
 			if err := updates[0].Validate(); err != nil {
@@ -124,9 +124,9 @@ func TestDraftTerminalSignedExitStatus(t *testing.T) {
 			}
 		})
 	}
-	raw := json.RawMessage(`{"terminal_id":"terminal","exit_code":4294967296}`)
+	raw := json.RawMessage(`{"terminal_id":"terminal","exit_code":9223372036854775808}`)
 	if _, err := draftTerminalUpdates(map[string]json.RawMessage{terminalExitMetaKey: raw}); err == nil {
-		t.Fatal("out-of-range terminal exit was silently truncated")
+		t.Fatal("out-of-range terminal exit was accepted")
 	}
 }
 
