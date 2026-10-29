@@ -815,3 +815,19 @@ func TestDraftNativeCancelSettlesUninsertedSteeringWithoutInventingReceipt(t *te
 		t.Fatal("cancel left the uninserted prompt blocked")
 	}
 }
+
+func TestDraftNativeRepeatInitializeBeforeSessionWork(t *testing.T) {
+	client, _, _ := connectDraftNative(t, newDraftNativeFixture(t))
+	request := v2.InitializeRequest{ProtocolVersion: 2, Info: v2.Implementation{Name: "peer", Version: "test"}, Meta: acpdraft.InitializeMeta()}
+	if _, err := client.Initialize(t.Context(), request); err != nil {
+		t.Fatalf("repeat initialize: %v", err)
+	}
+	if _, err := client.NewSession(t.Context(), v2.NewSessionRequest{Cwd: v2.AbsolutePath(t.TempDir())}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := client.Initialize(t.Context(), request)
+	var rpc *acp.RequestError
+	if !errors.As(err, &rpc) || rpc.Code != -32600 {
+		t.Fatalf("initialize after work: %v", err)
+	}
+}

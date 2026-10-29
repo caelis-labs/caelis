@@ -30,9 +30,19 @@ func (d *draftAgent) Prompt(ctx context.Context, request v2.PromptRequest) (v2.P
 	if err != nil {
 		return v2.PromptResponse{}, err
 	}
-	blocks, err := draftConvert[[]acp.ContentBlock](request.Prompt)
-	if err != nil {
-		return v2.PromptResponse{}, err
+	// Native reference input uses only the URI. Project that supported shape
+	// directly so v2's uint64 informational size never narrows through v1 int64.
+	blocks := make([]acp.ContentBlock, 0, len(request.Prompt))
+	for _, block := range request.Prompt {
+		if link := block.ResourceLink; link != nil {
+			blocks = append(blocks, acp.ResourceLinkBlock(link.Name, link.Uri))
+			continue
+		}
+		converted, err := draftConvert[acp.ContentBlock](block)
+		if err != nil {
+			return v2.PromptResponse{}, err
+		}
+		blocks = append(blocks, converted)
 	}
 	input, err := promptInput(blocks)
 	if err != nil {

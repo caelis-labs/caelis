@@ -2310,6 +2310,7 @@ export interface ToolDiffChange {
 }
 
 export interface ToolDiffPatch {
+  _meta?: JSONObject;
   format: string;
   text: string;
 }

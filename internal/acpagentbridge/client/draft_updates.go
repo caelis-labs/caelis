@@ -8,6 +8,7 @@ import (
 	"maps"
 	"strings"
 
+	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/acp-go-sdk/experimental/v2"
 	"github.com/caelis-labs/caelis/internal/acpagentbridge/internal/acpmeta"
 )
@@ -32,15 +33,6 @@ type draftTerminal struct {
 }
 
 func (d *draftClient) handleUpdate(raw json.RawMessage) {
-	var notification v2.UpdateSessionNotification
-	if err := json.Unmarshal(raw, &notification); err != nil {
-		d.fail(err)
-		return
-	}
-	if err := notification.Validate(); err != nil {
-		d.fail(err)
-		return
-	}
 	// Read raw field presence so normalized updates retain explicit clears and
 	// the original extension payload independently of typed SDK recovery.
 	var envelope SessionNotification
@@ -53,8 +45,50 @@ func (d *draftClient) handleUpdate(raw json.RawMessage) {
 		d.fail(err)
 		return
 	}
+	// In SDK v1.5.2 the SessionUpdate union probes required replacement lists
+	// before their leaf receiver can recover entries. This private ingress uses
+	// the SDK leaf receiver first for those variants; remove this ordering shim
+	// when the upstream union delegates recovery before its strict probes.
+	if err := recoverDraftReplacementLists(fields); err != nil {
+		d.fail(err)
+		return
+	}
+	candidate := envelope.Update
 	var kind string
 	_ = json.Unmarshal(fields["sessionUpdate"], &kind)
+	if kind == "available_commands_update" || kind == "config_option_update" || kind == "plan_update" {
+		var err error
+		candidate, err = json.Marshal(fields)
+		if err != nil {
+			d.fail(err)
+			return
+		}
+	}
+	var update v2.SessionUpdate
+	if err := json.Unmarshal(candidate, &update); err != nil {
+		d.fail(err)
+		return
+	}
+	if err := update.Validate(); err != nil {
+		d.fail(err)
+		return
+	}
+	// Consume the SDK's recovered standard fields while retaining unknown wire
+	// extensions. Raw presence alone must not turn a discarded malformed patch
+	// into a clear or an error in the materialization cache.
+	changed, err := recoverDraftUpdateFields(update, fields)
+	if err != nil {
+		d.fail(err)
+		return
+	}
+	normalized := candidate
+	if changed {
+		normalized, err = json.Marshal(fields)
+		if err != nil {
+			d.fail(err)
+			return
+		}
+	}
 	d.mu.Lock()
 	_, allocationErr := d.ensureSessionLocked(envelope.SessionID)
 	d.mu.Unlock()
@@ -71,7 +105,7 @@ func (d *draftClient) handleUpdate(raw json.RawMessage) {
 		}
 		return
 	}
-	updates, err := d.decodeUpdates(envelope.SessionID, kind, fields, envelope.Update)
+	updates, err := d.decodeUpdates(envelope.SessionID, kind, fields, normalized)
 	if err != nil {
 		d.fail(err)
 		return
@@ -97,6 +131,22 @@ func (d *draftClient) decodeUpdates(sessionID, kind string, fields map[string]js
 		return d.decodeMessage(sessionID, kind, fields)
 	case "terminal_update", "terminal_output_chunk":
 		return d.decodeTerminal(sessionID, kind, fields, raw)
+	case "available_commands_update":
+		var update v2.SessionAvailableCommandsUpdate
+		if err := json.Unmarshal(raw, &update); err != nil {
+			return nil, err
+		}
+		commands := make([]acpsdk.AvailableCommand, 0, len(update.AvailableCommands))
+		for _, item := range update.AvailableCommands {
+			if command := item.Command; command != nil {
+				mapped := acpsdk.AvailableCommand{Name: command.Name, Description: command.Description, Meta: command.Meta}
+				if command.Input != nil && command.Input.Text != nil {
+					mapped.Input = &acpsdk.AvailableCommandInput{Unstructured: &acpsdk.UnstructuredCommandInput{Hint: command.Input.Text.Hint, Meta: command.Input.Text.Meta}}
+				}
+				commands = append(commands, mapped)
+			}
+		}
+		return []Update{AvailableCommandsUpdate{SessionUpdate: kind, AvailableCommands: commands, Meta: update.Meta}}, nil
 	case "config_option_update":
 		var config v2.SessionConfigOptionUpdate
 		if err := json.Unmarshal(raw, &config); err != nil {
@@ -236,7 +286,10 @@ func decodeDraftToolContent(raw json.RawMessage) ([]ToolCallContent, error) {
 		}
 		item := ToolCallContent{Type: "diff", Changes: &changes, Meta: meta}
 		if patch := content.Diff.Patch; patch != nil {
-			item.Patch = &ToolDiffPatch{Format: string(patch.Format), Text: patch.Text}
+			item.Patch, err = draftConvert[*ToolDiffPatch](patch)
+			if err != nil {
+				return nil, err
+			}
 		}
 		out = append(out, item)
 	}
@@ -418,7 +471,9 @@ func (d *draftClient) decodeTerminal(sessionID, kind string, fields map[string]j
 			terminal.exit = nil
 			terminal.exitPresent = true
 			if !bytes.Equal(bytes.TrimSpace(exit), []byte("null")) {
-				if err := json.Unmarshal(exit, &terminal.exit); err != nil {
+				decoder := json.NewDecoder(bytes.NewReader(exit))
+				decoder.UseNumber()
+				if err := decoder.Decode(&terminal.exit); err != nil {
 					return nil, err
 				}
 			}

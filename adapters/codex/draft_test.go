@@ -714,3 +714,17 @@ func validateNativeDraftPeer(response v2.InitializeResponse) error {
 	}
 	return nil
 }
+
+func TestDraftRepeatInitializeBeforeNativeSessionWork(t *testing.T) {
+	fake, client, _, ctx, cwd := newDraftFixture(t)
+	request := v2.InitializeRequest{ProtocolVersion: 2, Info: v2.Implementation{Name: "peer", Version: "test"}, Meta: acpdraft.InitializeMeta()}
+	if _, err := client.Initialize(ctx, request); err != nil {
+		t.Fatalf("repeat initialize: %v", err)
+	}
+	openDraftSession(t, fake, client, ctx, cwd, "thread-repeat")
+	_, err := client.Initialize(ctx, request)
+	var rpc *acp.RequestError
+	if !errors.As(err, &rpc) || rpc.Code != -32600 {
+		t.Fatalf("initialize after work: %v", err)
+	}
+}

@@ -19,7 +19,7 @@ func TestDraftDiffProjectionConvertsLegacyFilesAndPreservesStructuredFacts(t *te
 	old, unchanged := "old line\n", "same\n"
 	emptyChanges := []eventstream.ToolDiffChange{}
 	changes := []eventstream.ToolDiffChange{{Operation: "delete", Path: "/tmp/removed"}}
-	patch := &eventstream.ToolDiffPatch{Format: "git_patch", Text: "diff --git a/file b/file\r\nexact patch bytes\r\n"}
+	patch := &eventstream.ToolDiffPatch{Meta: map[string]any{"large": json.Number("9007199254740993"), "huge": json.Number("1e400")}, Format: "git_patch", Text: "diff --git a/file b/file\r\nexact patch bytes\r\n"}
 	for _, tc := range []struct {
 		name      string
 		content   eventstream.ToolCallContent
@@ -74,7 +74,7 @@ func TestDraftDiffProjectionConvertsLegacyFilesAndPreservesStructuredFacts(t *te
 				t.Fatalf("patch=%#v", gotPatch)
 			}
 			if tc.content.Patch != nil {
-				if *gotPatch != *patch || !strings.Contains(string(item["_meta"]), "source") {
+				if !reflect.DeepEqual(gotPatch, patch) || !strings.Contains(string(item["_meta"]), "source") {
 					t.Fatalf("structured patch/metadata changed: %s", item)
 				}
 			} else if gotPatch != nil {

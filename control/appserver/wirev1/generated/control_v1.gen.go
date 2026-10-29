@@ -2310,8 +2310,9 @@ type ToolDiffChange struct {
 }
 
 type ToolDiffPatch struct {
-	Format string `json:"format"`
-	Text   string `json:"text"`
+	Meta   JSONObject `json:"_meta,omitempty"`
+	Format string     `json:"format"`
+	Text   string     `json:"text"`
 }
 
 type TransientFeedPosition struct {

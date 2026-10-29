@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 
 	acp "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/acp-go-sdk/experimental/v2"
@@ -197,12 +196,9 @@ func draftTerminalUpdates(meta map[string]json.RawMessage) ([]v2.SessionUpdate, 
 		// Native command execution uses signed exit codes, including -1 when
 		// no process exit code is available. ACP represents that fact with an
 		// exitStatus whose optional exitCode is absent; never wrap the sentinel.
-		var code *uint32
+		var code *int64
 		if exit.ExitCode != nil && *exit.ExitCode >= 0 {
-			if *exit.ExitCode > math.MaxUint32 {
-				return nil, errors.New("codex adapter: terminal exit exceeds the ACP exit-code range")
-			}
-			code = acp.Ptr(uint32(*exit.ExitCode))
+			code = acp.Ptr(*exit.ExitCode)
 		}
 		updates = append(updates, v2.SessionUpdate{TerminalUpdate: &v2.SessionTerminalUpdate{SessionUpdate: "terminal_update", TerminalId: v2.TerminalId(exit.TerminalID), ExitStatus: &v2.TerminalExitStatus{ExitCode: code, Signal: exit.Signal}}})
 	}

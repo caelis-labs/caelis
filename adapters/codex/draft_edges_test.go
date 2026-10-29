@@ -108,7 +108,7 @@ func TestDraftResumeNativeSkillMentionReferencesOverSDK(t *testing.T) {
 }
 
 func TestDraftTerminalSignedExitStatus(t *testing.T) {
-	for _, code := range []int64{-1, math.MinInt32, 0, 1, math.MaxInt32, math.MaxUint32} {
+	for _, code := range []int64{math.MinInt64, -1, math.MinInt32, 0, 1, math.MaxInt32, math.MaxUint32, math.MaxInt64} {
 		t.Run(fmt.Sprint(code), func(t *testing.T) {
 			raw, _ := json.Marshal(map[string]any{"terminal_id": "terminal", "exit_code": code, "signal": "SIGTERM"})
 			updates, err := draftTerminalUpdates(map[string]json.RawMessage{terminalExitMetaKey: raw})
@@ -116,7 +116,7 @@ func TestDraftTerminalSignedExitStatus(t *testing.T) {
 				t.Fatalf("native terminal exit = %+v, %v", updates, err)
 			}
 			exit := updates[0].TerminalUpdate.ExitStatus
-			if exit.Signal == nil || *exit.Signal != "SIGTERM" || code < 0 && exit.ExitCode != nil || code >= 0 && (exit.ExitCode == nil || int64(*exit.ExitCode) != code) {
+			if exit.Signal == nil || *exit.Signal != "SIGTERM" || code < 0 && exit.ExitCode != nil || code >= 0 && (exit.ExitCode == nil || *exit.ExitCode != code) {
 				t.Fatalf("native exit %d mapped to %+v", code, exit)
 			}
 			if err := updates[0].Validate(); err != nil {
@@ -124,9 +124,9 @@ func TestDraftTerminalSignedExitStatus(t *testing.T) {
 			}
 		})
 	}
-	raw := json.RawMessage(`{"terminal_id":"terminal","exit_code":4294967296}`)
+	raw := json.RawMessage(`{"terminal_id":"terminal","exit_code":9223372036854775808}`)
 	if _, err := draftTerminalUpdates(map[string]json.RawMessage{terminalExitMetaKey: raw}); err == nil {
-		t.Fatal("out-of-range terminal exit was silently truncated")
+		t.Fatal("out-of-range terminal exit was accepted")
 	}
 }
 
@@ -166,4 +166,47 @@ func TestDraftNegativeNativeExitAfterReceipt(t *testing.T) {
 		state, _, activity := draftState(update)
 		return state == "idle" && activity == "turn-2"
 	})
+}
+
+func TestDraftPromptResourceLinkUint64SizeReachesNativeInput(t *testing.T) {
+	fake, client, _, ctx, cwd := newDraftFixture(t)
+	session := openDraftSession(t, fake, client, ctx, cwd, "thread-large-resource")
+	var block v2.ContentBlock
+	if err := json.Unmarshal([]byte(`{"type":"resource_link","name":"large artifact","uri":"mcp://artifacts/large","size":18446744073709551615}`), &block); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := client.Prompt(ctx, v2.PromptRequest{SessionId: session, Prompt: []v2.ContentBlock{block}})
+		done <- err
+	}()
+	var request draftRPCMessage
+	select {
+	case request = <-fake.messages:
+		if request.Method != "turn/start" {
+			t.Fatalf("native request: %s", request.Method)
+		}
+	case err := <-done:
+		t.Fatalf("valid uint64 resource failed before native input: %v", err)
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	var params struct {
+		Input []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"input"`
+	}
+	if err := json.Unmarshal(request.Params["input"], &params.Input); err != nil {
+		t.Fatal(err)
+	}
+	if len(params.Input) != 1 || params.Input[0].Type != "text" || params.Input[0].Text != "Referenced resource: mcp://artifacts/large" {
+		t.Fatalf("native reference: %+v", params)
+	}
+	fake.reply(request, map[string]any{"turn": map[string]any{"id": "turn-large-resource"}})
+	echoDraftUser(fake, "thread-large-resource", "turn-large-resource", "user-large-resource", params.Input[0].Text)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	finishDraftTurn(fake, "thread-large-resource", "turn-large-resource", "completed")
 }

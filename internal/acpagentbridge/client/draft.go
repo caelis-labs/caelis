@@ -1,6 +1,7 @@
 package client
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -107,7 +108,7 @@ func (d *draftClient) initialize(ctx context.Context) (InitializeResponse, error
 	}
 	capabilities := v2.ClientCapabilities{}
 	if d.client.cfg.TerminalAuth {
-		capabilities.Auth = &v2.AuthCapabilities{Terminal: &v2.TerminalAuthCapabilities{}}
+		capabilities.Auth = &v2.ClientAuthCapabilities{Terminal: &v2.TerminalAuthCapabilities{}}
 	}
 	response, err := sendRequest[v2.InitializeResponse](d.client, ctx, v2.AgentMethodInitialize, v2.InitializeRequest{ProtocolVersion: 2, Info: info, Capabilities: capabilities, Meta: acpdraft.InitializeMeta()})
 	if err != nil {
@@ -179,7 +180,9 @@ func draftConvert[T any](value any) (T, error) {
 	if err != nil {
 		return out, err
 	}
-	err = json.Unmarshal(raw, &out)
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	err = decoder.Decode(&out)
 	return out, err
 }
 
@@ -337,7 +340,7 @@ func (d *draftClient) setConfig(ctx context.Context, sessionID, configID string,
 }
 
 func draftConfigOptions(options []v2.SessionConfigOption) []SessionConfigOption {
-	var out []SessionConfigOption
+	out := make([]SessionConfigOption, 0, len(options))
 	for _, option := range options {
 		raw, err := json.Marshal(option)
 		if err != nil {
@@ -377,6 +380,12 @@ func (d *draftClient) authenticate(ctx context.Context, methodID string) error {
 }
 
 func (d *draftClient) handleRequest(ctx context.Context, method string, raw json.RawMessage) (any, *acpsdk.RequestError) {
+	if inbound, ok := acpsdk.InboundInfoFromContext(ctx); ok {
+		var id v2.RequestId
+		if json.Unmarshal(inbound.RequestID, &id) != nil {
+			return nil, acpsdk.NewInvalidRequest(map[string]any{"error": "ACP v2 requires a string or integer request ID"})
+		}
+	}
 	if method != v2.ClientMethodSessionRequestPermission {
 		return nil, acpsdk.NewMethodNotFound(method)
 	}

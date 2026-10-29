@@ -135,7 +135,7 @@ func TestDraftProjectionConfigAndCommandsUseV2Identities(t *testing.T) {
 		t.Fatalf("options=%#v err=%v", options, err)
 	}
 	commands := draftCommands([]acp.AvailableCommand{{Name: "model", Description: "Select model", Input: &acp.AvailableCommandInput{Unstructured: &acp.UnstructuredCommandInput{Hint: "model effort"}}}})
-	if len(commands) != 1 || commands[0].Input == nil || commands[0].Input.Text == nil || commands[0].Input.Text.Type != "text" || commands[0].Input.Text.Hint != "model effort" {
+	if len(commands) != 1 || commands[0].Command == nil || commands[0].Command.Type != "command" || commands[0].Command.Input == nil || commands[0].Command.Input.Text == nil || commands[0].Command.Input.Text.Type != "text" || commands[0].Command.Input.Text.Hint != "model effort" {
 		t.Fatalf("commands=%#v", commands)
 	}
 }

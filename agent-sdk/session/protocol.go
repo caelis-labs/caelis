@@ -246,7 +246,8 @@ func (p *EventProtocol) UnmarshalJSON(data []byte) error {
 		var update ProtocolUpdate
 		fields := struct {
 			*ProtocolUpdate
-			Meta json.RawMessage `json:"_meta"`
+			Meta    json.RawMessage `json:"_meta"`
+			Content json.RawMessage `json:"content"`
 		}{ProtocolUpdate: &update}
 		if err := json.Unmarshal(wire.Update, &fields); err != nil {
 			return err
@@ -257,6 +258,15 @@ func (p *EventProtocol) UnmarshalJSON(data []byte) error {
 			decoder := json.NewDecoder(bytes.NewReader(fields.Meta))
 			decoder.UseNumber()
 			if err := decoder.Decode(&update.Meta); err != nil {
+				return err
+			}
+		}
+		// Structured content can now carry patch annotations with exact JSON
+		// numbers. Decode the generic content before canonical typed restoration.
+		if len(fields.Content) > 0 {
+			decoder := json.NewDecoder(bytes.NewReader(fields.Content))
+			decoder.UseNumber()
+			if err := decoder.Decode(&update.Content); err != nil {
 				return err
 			}
 		}
