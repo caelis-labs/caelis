@@ -1,5 +1,10 @@
 package session
 
+import (
+	"bytes"
+	"encoding/json"
+)
+
 // ProtocolDiffChange describes an affected file independently of the rendered
 // patch. Paths and patch text are preserved exactly; this is display evidence
 // and does not authorize a filesystem operation.
@@ -14,8 +19,9 @@ type ProtocolDiffChange struct {
 
 // ProtocolDiffPatch is a rendered patch, never the complete new file contents.
 type ProtocolDiffPatch struct {
-	Format string `json:"format"`
-	Text   string `json:"text"`
+	Meta   map[string]any `json:"_meta,omitempty"`
+	Format string         `json:"format"`
+	Text   string         `json:"text"`
 }
 
 // CloneProtocolDiffChanges preserves an explicitly empty changes array.
@@ -39,6 +45,7 @@ func CloneProtocolDiffPatch(in *ProtocolDiffPatch) *ProtocolDiffPatch {
 		return nil
 	}
 	out := *in
+	out.Meta = CloneState(in.Meta)
 	return &out
 }
 
@@ -48,4 +55,18 @@ func cloneDiffString(in *string) *string {
 	}
 	out := *in
 	return &out
+}
+
+// UnmarshalJSON preserves opaque patch annotations through durable and wire
+// round trips, including integers beyond float64 precision and large exponents.
+func (p *ProtocolDiffPatch) UnmarshalJSON(raw []byte) error {
+	type plain ProtocolDiffPatch
+	var decoded plain
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	if err := decoder.Decode(&decoded); err != nil {
+		return err
+	}
+	*p = ProtocolDiffPatch(decoded)
+	return nil
 }

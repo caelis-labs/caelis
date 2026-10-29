@@ -137,9 +137,7 @@ func (a *DraftAgent) Initialize(ctx context.Context, req v2.InitializeRequest) (
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.initialized {
-		return v2.InitializeResponse{}, acp.NewInvalidRequest(map[string]any{"error": "ACP connection is already initialized"})
-	}
+	// The SDK connection owns concurrent/repeated initialization admission.
 	caps, err := a.inner.presentationClient.PresentationCapabilities(ctx)
 	if err != nil {
 		return v2.InitializeResponse{}, err

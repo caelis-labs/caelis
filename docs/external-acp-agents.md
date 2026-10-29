@@ -17,7 +17,7 @@ Application integrations keep their existing stable types independently of the
 ACP wire profile.
 
 Repo-owned subprocess children use the explicitly selected
-`schema-v2.0.0-alpha.9` profile. The hosted Codex adapter keeps stable v1 by
+`schema-v2.0.0-alpha.10` profile. The hosted Codex adapter keeps stable v1 by
 default. Direct native main/child delegation stays
 inside Control and Runtime and does not acquire an ACP transport. User-provided
 process overrides remain stable unless their link explicitly selects a draft.
@@ -25,20 +25,23 @@ The Host-owned adapter descriptor, one-use channel grant and helper invocation
 carry the same exact schema. An unsupported schema fails before granting or
 serving the channel; the selected draft never falls back to v1.
 
-`caelis acp --acp-draft=schema-v2.0.0-alpha.9` serves product Sessions through the
+`caelis acp --acp-draft=schema-v2.0.0-alpha.10` serves product Sessions through the
 existing principal-bound Control clients. Initialization negotiates v2 from a
 client offering protocol version 2 or a newer major, using the v2 `info` shape.
-The controlled product channel requires an exact alpha.9
+The controlled product channel requires an exact alpha.10
 `_meta["caelis/acp_schema"]` tag. Responses advertise the implemented Session
 capabilities and the conditional-prompt profile described below. Initialization
-is pinned once per connection. Unknown methods and unimplemented optional
+may repeat before any other request; concurrent attempts and
+repeats after another request are rejected by the SDK connection. Unsupported
+versions return `-32022` with the requested and supported versions. Unknown
+methods and unimplemented optional
 features fail explicitly. Only actual image/MCP/configuration support is
 advertised; native ACP Sessions do not accept lifecycle MCP server declarations
 or additional directories that their existing owner cannot apply.
 
 The separate Core initialization/capability probe (`ServeDraftStdio`) also
 negotiates newer offered majors down to v2. Its schema tag is optional in the
-request; when explicitly provided it must match alpha.9. The response always
+request; when explicitly provided it must match alpha.10. The response always
 identifies the pinned schema. This probe advertises no Session or auth work;
 omitting its tag does not relax the controlled product channel's requirements.
 
@@ -97,7 +100,7 @@ an earlier Activity updates its display without taking the new Activity's result
 
 The explicit Codex draft channel preserves native skill and mention references
 by their supplied name and path without reading those paths. Native negative
-command exit sentinels produce an exit status without an unsigned exit code.
+command exit sentinels produce an exit status without an exit code.
 If a route fails before native completion is confirmed, the selected draft cannot express
 an Agent-side Session closure. The affected ACP connection closes observably,
 pending native requests are cancelled and the owner attempts interruption of

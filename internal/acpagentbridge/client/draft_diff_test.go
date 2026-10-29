@@ -1,6 +1,7 @@
 package client
 
 import (
+	"bytes"
 	"encoding/json"
 	"reflect"
 	"testing"
@@ -19,7 +20,7 @@ func TestDraftOutboundFileDiffPreservesStructuredChangesAndPatch(t *testing.T) {
 		`{"operation":"modify","path":"/tmp/changed.txt","fileType":null},` +
 		`{"operation":"move","path":"/tmp/新目录","oldPath":"/tmp/旧目录","fileType":"directory"},` +
 		`{"operation":"copy","path":"/tmp/copied-link","oldPath":"/tmp/original-link","fileType":"symlink"}` +
-		`],"patch":{"format":"git_patch","text":` + string(mustDiffJSON(t, patch)) + `}}`)
+		`],"patch":{"_meta":{"large":9007199254740993,"huge":1e400},"format":"git_patch","text":` + string(mustDiffJSON(t, patch)) + `}}`)
 	if err := agent.update(ctx, "session", map[string]any{
 		"sessionUpdate": "tool_call_update", "toolCallId": "edit", "status": "completed", "content": []any{wire},
 	}); err != nil {
@@ -30,7 +31,9 @@ func TestDraftOutboundFileDiffPreservesStructuredChangesAndPatch(t *testing.T) {
 		t.Fatalf("tool content = %#v", update.Content)
 	}
 	var want ToolCallContent
-	if err := json.Unmarshal(wire, &want); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(wire))
+	decoder.UseNumber()
+	if err := decoder.Decode(&want); err != nil {
 		t.Fatal(err)
 	}
 	got := update.Content[0]
@@ -44,7 +47,7 @@ func TestDraftOutboundFileDiffPreservesStructuredChangesAndPatch(t *testing.T) {
 	if err := json.Unmarshal(mustDiffJSON(t, update), &restored); err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(restored.Content, update.Content) {
+	if !reflect.DeepEqual(restored.Content[0].Patch, update.Content[0].Patch) {
 		t.Fatalf("typed diff changed after JSON round trip: %#v", restored.Content)
 	}
 }

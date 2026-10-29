@@ -129,10 +129,7 @@ func (d *draftAgent) Initialize(ctx context.Context, request v2.InitializeReques
 		return v2.InitializeResponse{}, acp.NewInvalidParams(map[string]any{"error": err.Error()})
 	}
 	d.mu.Lock()
-	if d.initialized {
-		d.mu.Unlock()
-		return v2.InitializeResponse{}, acp.NewInvalidRequest(map[string]any{"error": "initialize has already been received"})
-	}
+	// The SDK connection owns concurrent/repeated initialization admission.
 	// Hold admission while the original account owner performs initialization.
 	response, err := d.core.Initialize(ctx, acp.InitializeRequest{ProtocolVersion: 1, ClientCapabilities: acp.ClientCapabilities{Session: &acp.ClientSessionCapabilities{Notices: &acp.NoticeCapabilities{}}}})
 	if err != nil {

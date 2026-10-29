@@ -15,7 +15,7 @@ func TestStructuredDiffSurvivesCanonicalAndPublicWire(t *testing.T) {
 	t.Parallel()
 	oldPath, fileType, mimeType := " old.txt ", "file", "text/plain"
 	changes := []session.ProtocolDiffChange{{Operation: "move", Path: " new.txt ", OldPath: &oldPath, FileType: &fileType, MimeType: &mimeType, Meta: map[string]any{"source": "native"}}}
-	content := session.ProtocolToolCallContent{Type: "diff", Changes: &changes, Patch: &session.ProtocolDiffPatch{Format: "git_patch", Text: "diff --git a/old.txt b/new.txt\r\n-old\r\n+new\r\n"}, Meta: map[string]any{"label": "files"}}
+	content := session.ProtocolToolCallContent{Type: "diff", Changes: &changes, Patch: &session.ProtocolDiffPatch{Meta: map[string]any{"large": json.Number("42"), "huge": "1e400"}, Format: "git_patch", Text: "diff --git a/old.txt b/new.txt\r\n-old\r\n+new\r\n"}, Meta: map[string]any{"label": "files"}}
 	for _, protocol := range []bool{false, true} {
 		name := "native"
 		if protocol {

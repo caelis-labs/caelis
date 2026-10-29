@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net"
-	"sync"
 	"testing"
 	"time"
 
@@ -74,7 +73,9 @@ func TestDraftInitializeUsesPinnedV2SchemaAndAdvertisesNoWork(t *testing.T) {
 		t.Fatalf("schema constraint = %s", response.Meta[DraftSchemaMetaKey])
 	}
 	_, err = acpsdk.SendRequest[v2.InitializeResponse](connection, ctx, v2.AgentMethodInitialize, draftTestInitialize())
-	assertDraftRPCError(t, err, -32600)
+	if err != nil {
+		t.Fatalf("repeat initialize before work: %v", err)
+	}
 
 	for _, method := range []string{
 		"session/new", "session/prompt", "session/cancel", "session/resume", "session/list", "session/close", "session/delete",
@@ -132,7 +133,11 @@ func TestDraftInitializeRejectsInvalidOrIncompatibleHandshake(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			ctx, connection := newDraftTestConnection(t)
 			_, err := acpsdk.SendRequest[json.RawMessage](connection, ctx, v2.AgentMethodInitialize, request)
-			assertDraftRPCError(t, err, -32602)
+			code := -32602
+			if name == "v1" || name == "zero" {
+				code = -32022
+			}
+			assertDraftRPCError(t, err, code)
 			_, err = acpsdk.SendRequest[json.RawMessage](connection, ctx, v2.AgentMethodSessionNew, map[string]any{})
 			assertDraftRPCError(t, err, -32600)
 		})
@@ -158,29 +163,45 @@ func TestDraftHandshakeRequiresRequestAndConnectionLocalInitialization(t *testin
 	}
 }
 
+// Block the handler so the second request overlaps the first handshake rather
+// than becoming a legal sequential repeat after scheduling.
 func TestDraftConcurrentInitializePinsExactlyOneRequest(t *testing.T) {
 	t.Parallel()
-	ctx, connection := newDraftTestConnection(t)
-	results := make(chan error, 2)
-	var callers sync.WaitGroup
-	for range 2 {
-		callers.Go(func() {
-			_, err := acpsdk.SendRequest[v2.InitializeResponse](connection, ctx, v2.AgentMethodInitialize, draftTestInitialize())
-			results <- err
-		})
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	entered, release := make(chan struct{}), make(chan struct{})
+	handler := draftInitializeHandler(acpsdk.Implementation{Name: "fixture", Version: "test"})
+	router := &v2.ProtocolRouter{V2: func(ctx context.Context, method string, params json.RawMessage) (any, *acpsdk.RequestError) {
+		close(entered)
+		<-release
+		return handler(ctx, method, params)
+	}}
+	left, right := net.Pipe()
+	server, err := acpsdk.NewConnectionWithOptions(router.Handle, right, right, acpsdk.ConnectionOptions{})
+	if err != nil {
+		t.Fatal(err)
 	}
-	callers.Wait()
-	close(results)
-	accepted := 0
-	for err := range results {
-		if err == nil {
-			accepted++
-		} else {
-			assertDraftRPCError(t, err, -32600)
-		}
+	defer server.Close()
+	client, err := acpsdk.NewConnectionWithOptions(nil, left, left, acpsdk.ConnectionOptions{})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if accepted != 1 {
-		t.Fatalf("accepted initialize requests = %d, want one", accepted)
+	defer client.Close()
+	first := make(chan error, 1)
+	go func() {
+		_, err := acpsdk.SendRequest[v2.InitializeResponse](client, ctx, v2.AgentMethodInitialize, draftTestInitialize())
+		first <- err
+	}()
+	select {
+	case <-entered:
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	_, err = acpsdk.SendRequest[v2.InitializeResponse](client, ctx, v2.AgentMethodInitialize, draftTestInitialize())
+	close(release)
+	assertDraftRPCError(t, err, -32600)
+	if err := <-first; err != nil {
+		t.Fatal(err)
 	}
 }
 
