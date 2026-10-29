@@ -167,3 +167,46 @@ func TestDraftNegativeNativeExitAfterReceipt(t *testing.T) {
 		return state == "idle" && activity == "turn-2"
 	})
 }
+
+func TestDraftPromptResourceLinkUint64SizeReachesNativeInput(t *testing.T) {
+	fake, client, _, ctx, cwd := newDraftFixture(t)
+	session := openDraftSession(t, fake, client, ctx, cwd, "thread-large-resource")
+	var block v2.ContentBlock
+	if err := json.Unmarshal([]byte(`{"type":"resource_link","name":"large artifact","uri":"mcp://artifacts/large","size":18446744073709551615}`), &block); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := client.Prompt(ctx, v2.PromptRequest{SessionId: session, Prompt: []v2.ContentBlock{block}})
+		done <- err
+	}()
+	var request draftRPCMessage
+	select {
+	case request = <-fake.messages:
+		if request.Method != "turn/start" {
+			t.Fatalf("native request: %s", request.Method)
+		}
+	case err := <-done:
+		t.Fatalf("valid uint64 resource failed before native input: %v", err)
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	var params struct {
+		Input []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"input"`
+	}
+	if err := json.Unmarshal(request.Params["input"], &params.Input); err != nil {
+		t.Fatal(err)
+	}
+	if len(params.Input) != 1 || params.Input[0].Type != "text" || params.Input[0].Text != "Referenced resource: mcp://artifacts/large" {
+		t.Fatalf("native reference: %+v", params)
+	}
+	fake.reply(request, map[string]any{"turn": map[string]any{"id": "turn-large-resource"}})
+	echoDraftUser(fake, "thread-large-resource", "turn-large-resource", "user-large-resource", params.Input[0].Text)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	finishDraftTurn(fake, "thread-large-resource", "turn-large-resource", "completed")
+}
