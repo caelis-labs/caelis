@@ -117,7 +117,8 @@ type RunState struct {
 	StartedAt       time.Time `json:"started_at,omitempty"`
 }
 
-// ActiveApproval is the one resolvable Control FIFO head.
+// ActiveApproval is the one caller-resolvable Control FIFO head. Automatic
+// reviews contribute to RunState.WaitingApproval, not this decision surface.
 type ActiveApproval struct {
 	RequestID eventstream.ApprovalRequestID `json:"request_id"`
 	// Target identifies the approval's owner, which may be a background child

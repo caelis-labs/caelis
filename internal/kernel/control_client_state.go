@@ -93,7 +93,10 @@ func applyControlApprovalState(out *appserver.RuntimeState, coordinator *approva
 	active, queued := coordinator.snapshot()
 	out.Approval.QueuedCount = queued
 	out.Run.WaitingApproval = out.Run.WaitingApproval || active != nil
-	if active != nil {
+	// ActiveApproval is a caller-resolvable head, not a review progress feed.
+	// Use the same queue fact as submit: automatic approvals remain waiting
+	// work but only Guardian may resolve them, even before its first event.
+	if active != nil && active.publishOnActivate {
 		payload := approval.DisplayPayloadFromRuntimeRequest(*active.request)
 		origin := canonicalOriginFromApproval(active.request, ref, fallbackTurnID)
 		item := &appserver.ActiveApproval{

@@ -47,6 +47,15 @@ and replayed display replacement, exact approvals, operation receipts and unknow
 effects must retain their semantics. Wire compatibility does not authorize an
 older executable to write a newer Store format.
 
+`approval.active` is the caller-resolvable FIFO head. Automatic review requests
+remain in the same native queue and contribute to `run.waiting_approval`, but
+must not appear in `approval.active`: the queue rejects client decisions for
+them. Review events report progress and outcomes; their arrival order does not
+grant caller authority. State reads and reconnect bootstrap use the same queue
+projection, including when no foreground Turn owns a background child's request.
+Native manual requests retain their original target and options. No new field or
+capability is needed to enforce this existing contract.
+
 ## Reproducible release matrix
 
 The [release interoperability runner](../scripts/control_compatibility/README.md)
