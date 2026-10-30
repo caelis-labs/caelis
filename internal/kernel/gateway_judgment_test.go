@@ -126,3 +126,64 @@ func TestApprovalScreeningPreservesModelSelectionAndExecutionGate(t *testing.T) 
 		})
 	}
 }
+
+type frozenScreenResolver struct {
+	configuredScreenResolver
+	selected    *string
+	snapshotErr error
+}
+
+func (r frozenScreenResolver) SnapshotApprovalConfiguration(ctx context.Context, _ session.SessionRef) (context.Context, error) {
+	return ctx, r.snapshotErr
+}
+func (r frozenScreenResolver) ResolveApprovalModel(context.Context, session.SessionRef) (model.LLM, error) {
+	*r.calls++
+	if r.fail {
+		return nil, fmt.Errorf("synthetic unavailable model")
+	}
+	return fakeLLM{name: *r.selected}, nil
+}
+
+func TestApprovalConfigurationSnapshotFreezesDeferredGuardian(t *testing.T) {
+	for _, scenario := range []string{"screen escalates", "screen completes despite unavailable Agent", "snapshot failure"} {
+		t.Run(scenario, func(t *testing.T) {
+			active := session.Session{SessionRef: session.SessionRef{AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws"}}
+			runtime := &approvalRuntime{session: active}
+			selected, calls, decisions := "before", 0, 0
+			resolver := frozenScreenResolver{configuredScreenResolver: configuredScreenResolver{approvalJudgmentResolverStub: approvalJudgmentResolverStub{staticResolver: staticResolver{resolved: ResolvedTurn{RunRequest: agent.RunRequest{AgentSpec: agent.AgentSpec{Model: fakeLLM{name: "main"}}}}}, evaluator: unusedJudgment{}}, calls: &calls}, selected: &selected}
+			if scenario == "snapshot failure" {
+				resolver.snapshotErr = fmt.Errorf("synthetic configuration read error")
+			}
+			resolver.fail = scenario == "screen completes despite unavailable Agent"
+			reviewer := judgmentReviewFunc(func(ctx context.Context, req ApprovalReviewRequest) (ApprovalReviewResult, error) {
+				decisions++
+				selected = "after"
+				if !resolver.fail {
+					for range 2 {
+						llm, err := req.ResolveModel(ctx)
+						if err != nil || llm.Name() != "before" {
+							t.Fatalf("deferred Guardian changed: %v, %v", llm, err)
+						}
+					}
+				}
+				return ApprovalReviewResult{Approved: true}, nil
+			})
+			gateway, err := New(Config{Sessions: staticSessionService{session: active}, Runtime: runtime, Resolver: resolver, ApprovalReviewer: reviewer})
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := gateway.BeginTurn(t.Context(), BeginTurnRequest{SessionRef: active.SessionRef, Input: "inspect"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = collectHandleEvents(t, result.Handle)
+			want := 1
+			if resolver.snapshotErr != nil {
+				want = 0
+			}
+			if calls != want || decisions != want || runtime.executionCount() != want {
+				t.Fatalf("resolution/decision/effect = %d/%d/%d; want %d", calls, decisions, runtime.executionCount(), want)
+			}
+		})
+	}
+}

@@ -70,10 +70,7 @@ func (s *runtimeComposition) validateApplicationProfile(ctx context.Context, pro
 	if _, err = s.lookup.ResolveModelConfig(ctx, configured, s.activeRuntime.ContextWindow); err != nil {
 		return err
 	}
-	if profile.Reviewer != nil {
-		_, err = resolveApplicationReviewer(ctx, s.lookup, profile, s.activeRuntime.ContextWindow)
-	}
-	return err
+	return nil
 }
 
 func (r *applicationTurnResolver) resolveProfileModel(ctx context.Context, profile sessionprofile.Profile) (kernel.ModelResolution, error) {

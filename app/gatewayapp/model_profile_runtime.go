@@ -86,15 +86,42 @@ func resolveRuntimeProfile(
 	return resolveRuntimeProviderProfile(profiles, lookup, profileID, effort)
 }
 
-func (s *runtimeComposition) resolveProviderProfileConfig(profileID, effort string) (ModelConfig, error) {
-	if s == nil || s.authorities.store == nil {
-		return ModelConfig{}, fmt.Errorf("gatewayapp: model profile store is unavailable")
-	}
-	snapshot, err := s.placementSnapshot(context.Background())
+// Materialize credentials while the placement's lookup still owns selection.
+// Only the process-local child pin receives the key; ACP and durable profiles do not.
+func materializeProviderProfileConfig(ctx context.Context, snapshot *placementSnapshot, profileID, effort string) (ModelConfig, error) {
+	configured, err := resolveRuntimeProviderProfile(snapshot.placement.Profiles, snapshot.lookup, profileID, effort)
 	if err != nil {
 		return ModelConfig{}, err
 	}
-	return resolveRuntimeProviderProfile(snapshot.placement.Profiles, s.lookup, strings.TrimSpace(profileID), effort)
+	return snapshot.lookup.materializeAPIKeyCredential(ctx, configured)
+}
+
+// A native self participant inherits the activated Session main model, including
+// capabilities. Runtime Team revisions must not validate it against a different
+// provider generation. Explicit deletion still revokes the model through the
+// existing catalog and child pin admission fences.
+func (s *runtimeComposition) selfPlacementSnapshot(ctx context.Context, profileID string) (*placementSnapshot, error) {
+	if s.activation == nil {
+		return s.placementSnapshot(ctx)
+	}
+	configured, err := s.lookup.ResolveConfig(strings.TrimPrefix(modelprofile.NormalizeID(profileID), "provider:"))
+	if err != nil {
+		return nil, err
+	}
+	if s.activation.modelCatalog == nil || !s.activation.modelCatalog.HasAlias(configured.ID) {
+		return nil, fmt.Errorf("gatewayapp: self model %q is no longer configured", configured.ID)
+	}
+	profile, err := modelprofilebuilder.FromProvider(configured)
+	if err != nil {
+		return nil, err
+	}
+	doc := AppConfig{Models: persistedModelConfig{Configs: []ModelConfig{configured}}, ModelProfiles: modelprofile.Configuration{Profiles: []modelprofile.ModelProfile{profile}}}
+	snapshot := newPlacementSnapshot(doc)
+	snapshot.lookup, err = cloneSessionModelLookup(s.lookup, doc)
+	if err != nil {
+		return nil, err
+	}
+	return snapshot, nil
 }
 
 func (s *runtimeComposition) resolveSessionModelProfile(
@@ -111,27 +138,6 @@ func (s *runtimeComposition) resolveSessionModelProfile(
 	}
 	profile, ok := modelprofile.Lookup(snapshot.placement.Profiles, selector)
 	configured := ModelConfig{}
-	if !ok {
-		// Completion is Host-live, while an activated Session Runtime keeps a
-		// pinned snapshot. Consult canonical Control state for newly connected
-		// profiles; the provider/ACP pin path validates and installs the exact
-		// execution generation before the Session mutation commits.
-		if s.authorities.store != nil {
-			doc, loadErr := s.authorities.store.LoadContext(contextOrBackground(ctx))
-			if loadErr != nil {
-				return resolvedSessionModelProfile{}, false, loadErr
-			}
-			canonical := newPlacementSnapshot(doc)
-			if validateErr := controlplacement.ValidateSnapshot(canonical.placement); validateErr != nil {
-				return resolvedSessionModelProfile{}, false, validateErr
-			}
-			if candidate, found := modelprofile.Lookup(canonical.placement.Profiles, selector); found {
-				profile = candidate
-				ok = true
-				snapshot = canonical
-			}
-		}
-	}
 	if !ok {
 		catalog := s.lookup
 		if s.activation != nil && s.activation.modelCatalog != nil {

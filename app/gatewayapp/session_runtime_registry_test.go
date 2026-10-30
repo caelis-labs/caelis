@@ -563,7 +563,7 @@ func TestSpawnedSessionCannotUseDeletedParentRuntimeProfile(t *testing.T) {
 	}
 	parentRuntime, releaseParent := activateHeldSessionRuntime(t, stack, parent.SessionID)
 	defer releaseParent()
-	agentConfig, err := parentRuntime.instance.materializeDelegatedModel("", profile.ID, "high", parentRuntime.instance.activeRuntime)
+	agentConfig, err := parentRuntime.instance.materializeDelegatedModel(t.Context(), "", profile.ID, "high", parentRuntime.instance.activeRuntime)
 	if err != nil {
 		t.Fatalf("materializeDelegatedModel() before deletion: %v", err)
 	}
@@ -625,7 +625,7 @@ func TestSpawnedSessionCannotUseDeletedParentRuntimeProfile(t *testing.T) {
 		t.Fatalf("reactivated child Session Runtime resurrected deleted model %q", modelID)
 	}
 
-	if _, err := parentRuntime.instance.materializeDelegatedModel("", profile.ID, "high", parentRuntime.instance.activeRuntime); err == nil || !strings.Contains(err.Error(), "not configured") {
+	if _, err := parentRuntime.instance.materializeDelegatedModel(t.Context(), "", profile.ID, "high", parentRuntime.instance.activeRuntime); err == nil || !strings.Contains(err.Error(), "not configured") {
 		t.Fatalf("materializeDelegatedModel(deleted profile) error = %v", err)
 	}
 	reconnected, err := stack.connectTestModel(frozenConfig)
@@ -779,7 +779,7 @@ func TestProviderDeletionConvergesConcurrentSameIDReconnect(t *testing.T) {
 	}
 	runtime, releaseRuntime := activateHeldSessionRuntime(t, stack, active.SessionID)
 	defer releaseRuntime()
-	oldAgentConfig, err := runtime.instance.materializeDelegatedModel("", profile.ID, "high", runtime.instance.activeRuntime)
+	oldAgentConfig, err := runtime.instance.materializeDelegatedModel(t.Context(), "", profile.ID, "high", runtime.instance.activeRuntime)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -889,7 +889,6 @@ func TestSessionRuntimeModelPinIsInvisibleAndRollsBackWhenRevisionCASConflicts(t
 	runtime := activateSessionRuntime(t, stack, active.SessionID)
 	beforeLookup := runtime.instance.lookup.Snapshot()
 	beforeContextWindow := runtime.instance.lookup.contextWindow
-	beforePlacement := runtime.instance.placementCache
 
 	profile, err := stack.connectTestModel(ModelConfig{
 		Provider:                "ollama",
@@ -939,15 +938,14 @@ func TestSessionRuntimeModelPinIsInvisibleAndRollsBackWhenRevisionCASConflicts(t
 		t.Fatalf("uncommitted Runtime model lookup was observable, present=%v", visible)
 	case <-time.After(50 * time.Millisecond):
 	}
-	placementReadDone := make(chan *placementSnapshot, 1)
-	go func() {
-		snapshot, _ := runtime.instance.placementSnapshot(ctx)
-		placementReadDone <- snapshot
-	}()
-	select {
-	case <-placementReadDone:
-		t.Fatal("uncommitted Runtime placement profile was observable")
-	case <-time.After(50 * time.Millisecond):
+	// The model is already globally registered. A pending Session main-model
+	// CAS must neither hide that Team catalog nor publish a second Team view.
+	teamBefore, err := runtime.instance.placementSnapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := teamBefore.lookup.Config(lateID); !ok {
+		t.Fatal("registered Team model hidden by pending Session CAS")
 	}
 
 	if _, err := stack.composition.sessions.UpdateState(ctx, session.UpdateStateRequest{
@@ -972,8 +970,8 @@ func TestSessionRuntimeModelPinIsInvisibleAndRollsBackWhenRevisionCASConflicts(t
 	if visible := <-readDone; visible {
 		t.Fatal("conflicted model remained in the Runtime lookup")
 	}
-	if after := <-placementReadDone; after != beforePlacement {
-		t.Fatalf("Runtime placement after conflict = %p, want original %p", after, beforePlacement)
+	if after, err := runtime.instance.placementSnapshot(ctx); err != nil || after != teamBefore {
+		t.Fatalf("Session rollback changed canonical Team placement: %p, %v", after, err)
 	}
 	if after := runtime.instance.lookup.Snapshot(); !reflect.DeepEqual(after, beforeLookup) {
 		t.Fatalf("Runtime lookup after conflict = %#v, want %#v", after, beforeLookup)
@@ -2544,7 +2542,7 @@ func (s *transientListTaskStore) failureCount() int {
 	return s.failures
 }
 
-func TestParticipantHandlesUseFixedSessionRuntimeSnapshot(t *testing.T) {
+func TestParticipantHandlesFollowRuntimeTeamRevision(t *testing.T) {
 	ctx := context.Background()
 	workspace := newWorkspaceRuntimeTestDir(t, "workspace", "Workspace rule.")
 	stack, err := NewLocalStack(Config{
@@ -2589,8 +2587,8 @@ func TestParticipantHandlesUseFixedSessionRuntimeSnapshot(t *testing.T) {
 	if _, err := stack.testAgentBindings().ResetAgentBinding(ctx, agentbinding.HandleOrbit); err != nil {
 		t.Fatal(err)
 	}
-	if handles, err := participants.Handles(ctx, firstID); err != nil || !slices.Contains(handles, "orbit") {
-		t.Fatalf("active participant handles = %#v, %v; want frozen orbit", handles, err)
+	if handles, err := participants.Handles(ctx, firstID); err != nil || slices.Contains(handles, "orbit") {
+		t.Fatalf("active participant handles = %#v, %v; want reset orbit removed", handles, err)
 	}
 
 	secondID := createWorkspaceRuntimeTestSession(t, sessions, "create-second-handles", "second-handles", "workspace", workspace)

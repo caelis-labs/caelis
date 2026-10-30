@@ -48,7 +48,7 @@ func TestDirectParticipantPinsProviderModelBeforeACPStartup(t *testing.T) {
 			parentRuntime, release := activateHeldSessionRuntime(t, stack, parent.SessionID)
 			defer release()
 			instance := parentRuntime.instance
-			cfg, err := instance.materializeDelegatedModel(string(test.handle), profile.ID, "high", instance.activeRuntime)
+			cfg, err := instance.materializeDelegatedModel(t.Context(), string(test.handle), profile.ID, "high", instance.activeRuntime)
 			if err != nil {
 				t.Fatal(err)
 			}

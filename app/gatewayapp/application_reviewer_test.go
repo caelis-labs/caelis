@@ -85,7 +85,7 @@ func TestApplicationReviewerStateUsesCanonicalModelAndSafeErrors(t *testing.T) {
 	if err != nil || connected.Outcome != appserver.OutcomeCommitted {
 		t.Fatal(connected, err)
 	}
-	profile := sessionprofile.Profile{Version: "v1", Model: "main", ToolsVersion: "v1", Execution: "tools-only",
+	profile := sessionprofile.Profile{Version: "v1", Model: "custom/reviewer-model", ToolsVersion: "v1", Execution: "tools-only",
 		Permissions: sessionprofile.Permissions{ApprovalMode: "auto-review"}, Reviewer: &sessionprofile.Reviewer{Kind: "guardian", Model: "custom/reviewer-model"}}
 	state, err := stack.composition.applicationReviewerState(ctx, profile)
 	if err != nil || state.Status != "ready" || state.ApprovalMode != "auto-review" {
@@ -94,6 +94,7 @@ func TestApplicationReviewerStateUsesCanonicalModelAndSafeErrors(t *testing.T) {
 	stack.composition.lookup.resolveTransportHTTPClient = func(context.Context, ModelConfig) (*http.Client, error) {
 		return nil, errors.New("SECRET_TRANSPORT_DETAIL")
 	}
+	stack.composition.invalidateOwnPlacementSnapshot()
 	state, err = stack.composition.applicationReviewerState(ctx, profile)
 	if err != nil || state.Status != "unavailable" || state.Reason == "" || strings.Contains(state.Reason, "SECRET") {
 		t.Fatal("unsafe/incorrect reviewer state", state, err)
@@ -116,7 +117,7 @@ func TestApplicationReviewerStateUsesCanonicalModelAndSafeErrors(t *testing.T) {
 		t.Fatal(deleted, err)
 	}
 	stack.composition.lookup = stale
-	if _, err := resolveApplicationReviewer(ctx, stale, profile, 0); err != nil {
+	if _, err := applicationModelConfig(stale, profile); err != nil {
 		t.Fatalf("fixture lost its stale reviewer: %v", err)
 	}
 	state, err = stack.composition.applicationReviewerState(ctx, profile)

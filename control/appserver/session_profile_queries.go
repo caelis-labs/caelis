@@ -29,7 +29,7 @@ func (s *SessionProfileService) Capabilities() []string {
 		out = append(out, sessionprofile.CapabilityModelCapabilities)
 	}
 	if s.config.ReviewerState != nil {
-		out = append(out, sessionprofile.CapabilityGuardianReview)
+		out = append(out, sessionprofile.CapabilityGuardianReview, sessionprofile.CapabilityRuntimeAgentTeam)
 	}
 	if s.config.ValidateProfile != nil {
 		out = append(out, sessionprofile.CapabilityHotConfiguration)

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	sessionapi "github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/control/agentbinding"
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/httpclient"
@@ -44,7 +45,7 @@ func (p *reviewerHTTPProvider) RoundTrip(req *http.Request) (*http.Response, err
 	p.mu.Lock()
 	p.requests = append(p.requests, body)
 	p.mu.Unlock()
-	if body["model"] == "reviewer-model" {
+	if body["model"] == "reviewer-model" || body["model"] == "reviewer-next" {
 		if p.entered != nil {
 			p.once.Do(func() { close(p.entered) })
 		}
@@ -115,10 +116,32 @@ func setupReviewerHTTP(t *testing.T, ctx context.Context, root string, provider 
 			t.Fatalf("connect %s: %+v %v", model, connected, err)
 		}
 	}
+	catalog, err := host.host.AgentBindingStatus(ctx, appserver.AgentRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var guardian agentbinding.Binding
+	var guardianModel string
+	for _, target := range catalog.Targets {
+		if strings.Contains(target.ID, "reviewer-model") {
+			guardian = agentbinding.Binding{Handle: agentbinding.HandleGuardian, ProfileID: target.ID, Effort: target.Effort.DefaultEffort}
+			guardianModel = target.Backend.Provider.ModelConfigID
+		}
+	}
+	status, err := host.host.SessionStatus(ctx, appserver.StatusRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bound, err := host.host.BindAgentBinding(ctx, appserver.BindAgentBindingRequest{
+		WriteBase: appserver.WriteBase{OperationID: "bind-guardian", ExpectedRevision: &status.Configuration.Revision}, Binding: guardian,
+	})
+	if err != nil || bound.Outcome != appserver.OutcomeCommitted {
+		t.Fatalf("bind Guardian: %+v %v", bound, err)
+	}
 	client, _ := connectSessionOwnerHTTP(t, ctx, host, "owner", filepath.Join(root, "application.credential"))
 	profile := applicationHTTPProfile()
 	profile.Permissions.ApprovalMode = "auto-review"
-	profile.Reviewer = &sessionprofile.Reviewer{Kind: "guardian", Model: "custom/reviewer-model"}
+	profile.Reviewer = &sessionprofile.Reviewer{Kind: "guardian", Model: "retired-mimo"}
 	profile.Tools[0].ApprovalPolicy = "required"
 	profile.Tools[0].InputSchema = map[string]any{"type": "object", "properties": map[string]any{
 		"key":   map[string]any{"type": "string"},
@@ -130,7 +153,7 @@ func setupReviewerHTTP(t *testing.T, ctx context.Context, root string, provider 
 		t.Fatalf("create: %+v %v", created, err)
 	}
 	state, err := client.SessionReviewerState(ctx, created.SessionID)
-	if err != nil || state.Status != "ready" || state.ApprovalMode != "auto-review" || state.Reviewer == nil || state.Reviewer.Model != profile.Reviewer.Model {
+	if err != nil || state.Status != "ready" || state.ApprovalMode != "auto-review" || state.Reviewer == nil || state.Reviewer.Model != guardianModel {
 		t.Fatalf("reviewer readiness: %+v %v", state, err)
 	}
 	return host, client, created.SessionID

@@ -169,8 +169,17 @@ func (g *Gateway) resolveActiveAutoApproval(
 			approver = denyingApprovalApprover{}
 		}
 	}
+	var configurationErr error
+	_, freezeConfiguration := g.resolver.(approval.ConfigurationSnapshotter)
+	if snapshotter, ok := g.resolver.(approval.ConfigurationSnapshotter); ok {
+		var captured context.Context
+		captured, configurationErr = snapshotter.SnapshotApprovalConfiguration(approvalCtx, req.SessionRef)
+		if configurationErr == nil {
+			approvalCtx = captured
+		}
+	}
 	var evaluator judgment.Evaluator
-	if resolver, ok := g.resolver.(approval.JudgmentResolver); ok {
+	if resolver, ok := g.resolver.(approval.JudgmentResolver); ok && configurationErr == nil {
 		// Screening is optional. Failure to construct its provider leaves the
 		// existing Agent review path responsible for the decision.
 		if resolved, err := resolver.ResolveApprovalJudgment(approvalCtx, req.SessionRef); err == nil {
@@ -189,6 +198,21 @@ func (g *Gateway) resolveActiveAutoApproval(
 			return configured, nil
 		}
 		return reviewModel, nil
+	}
+	if freezeConfiguration {
+		// Freeze selection before a classifier can block or a Team edit can
+		// arrive. Constructing an LLM does not call its provider. Preserve the
+		// optional screen's ability to decide without using an unavailable LLM.
+		configured, resolutionErr := model.LLM(nil), configurationErr
+		if resolutionErr == nil {
+			configured, resolutionErr = resolveModel(approvalCtx)
+		}
+		resolveModel = func(ctx context.Context) (model.LLM, error) {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			return configured, resolutionErr
+		}
 	}
 	reviewReq := ApprovalReviewRequest{
 		SessionRef:     req.SessionRef,

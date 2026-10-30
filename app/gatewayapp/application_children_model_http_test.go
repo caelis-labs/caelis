@@ -315,7 +315,7 @@ func TestApplicationProfileChildApprovalKeepsNativeOwnerAndOptions(t *testing.T)
 	}
 }
 
-func TestApplicationProfileChildInheritsAutomaticReviewer(t *testing.T) {
+func TestApplicationProfileChildUsesTeamDespiteLegacyReviewer(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 	root := t.TempDir()
@@ -324,7 +324,7 @@ func TestApplicationProfileChildInheritsAutomaticReviewer(t *testing.T) {
 	defer host.close(t)
 	child, _ := applicationProfileChild(t, ctx, client, sid)
 	binding, err := client.SessionProfile(ctx, child)
-	if err != nil || binding.Profile.Reviewer == nil || binding.Profile.Reviewer.Model != "custom/reviewer-model" {
+	if err != nil || binding.Profile.Reviewer == nil || binding.Profile.Reviewer.Model != "retired-mimo" {
 		t.Fatalf("reviewer inheritance: %+v %v", binding, err)
 	}
 	call := backgroundCall(t, ctx, client, child)
@@ -336,7 +336,7 @@ func TestApplicationProfileChildInheritsAutomaticReviewer(t *testing.T) {
 		}
 	}
 	if !reviewed {
-		t.Fatal("child bypassed inherited native Guardian reviewer")
+		t.Fatal("child bypassed Runtime Team Guardian")
 	}
 }
 

@@ -34,11 +34,11 @@ func (s *runtimeComposition) boundJudgment(ctx context.Context, handle agentbind
 	if !agentbinding.SupportsProfile(handle, profile) {
 		return nil, fmt.Errorf("gatewayapp: profile cannot evaluate this capability")
 	}
-	cfg, ok := s.lookup.Config(profile.Backend.Provider.ModelConfigID)
+	cfg, ok := snapshot.lookup.Config(profile.Backend.Provider.ModelConfigID)
 	if !ok {
 		return nil, fmt.Errorf("gatewayapp: judgment model configuration is unavailable")
 	}
-	cfg, err = resolveProviderCredentials(ctx, cfg, s.lookup.resolveHTTPClient, s.lookup.resolveTransportHTTPClient, s.lookup.resolveAPIKey)
+	cfg, err = resolveProviderCredentials(ctx, cfg, snapshot.lookup.resolveHTTPClient, snapshot.lookup.resolveTransportHTTPClient, snapshot.lookup.resolveAPIKey)
 	if err != nil {
 		return nil, err
 	}

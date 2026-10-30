@@ -46,7 +46,7 @@ func TestDelegationAgentHandleKeepsACPPlacementIdentity(t *testing.T) {
 	if target.Selector != "zenith" || target.Placement.Agent != "grok" {
 		t.Fatalf("resolved target = %#v, want AgentHandle zenith backed by ACP Agent grok", target)
 	}
-	materialized, err := stack.composition.resolveDelegationPlacement(sdkdelegation.TargetRequest{Target: target}, stack.composition.activeRuntime)
+	materialized, err := stack.composition.resolveDelegationPlacement(t.Context(), sdkdelegation.TargetRequest{Target: target}, stack.composition.activeRuntime)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +161,7 @@ func TestDelegatedModelAgentIdentityNamesParticipant(t *testing.T) {
 	instance, release := activateHeldSessionRuntime(t, stack, parent.SessionID)
 	defer release()
 
-	agent, err := instance.instance.materializeDelegatedModel("research", profile.ID, "high", instance.instance.activeRuntime)
+	agent, err := instance.instance.materializeDelegatedModel(t.Context(), "research", profile.ID, "high", instance.instance.activeRuntime)
 	if err != nil {
 		t.Fatalf("materializeDelegatedModel() error = %v", err)
 	}
@@ -195,7 +195,7 @@ func TestDelegationPlacementRejectsConfigurationDrift(t *testing.T) {
 	if err := stack.composition.authorities.store.Save(doc); err != nil {
 		t.Fatalf("Save(changed) error = %v", err)
 	}
-	_, err = stack.composition.resolveDelegationPlacement(sdkdelegation.TargetRequest{Target: targets["self"]}, stack.composition.activeRuntime)
+	_, err = stack.composition.resolveDelegationPlacement(t.Context(), sdkdelegation.TargetRequest{Target: targets["self"]}, stack.composition.activeRuntime)
 	if err == nil || !strings.Contains(err.Error(), "changed after placement was frozen") {
 		t.Fatalf("resolveDelegationPlacement() error = %v, want configuration drift rejection", err)
 	}
@@ -203,7 +203,7 @@ func TestDelegationPlacementRejectsConfigurationDrift(t *testing.T) {
 
 func assertDelegationPlacementSessionOptions(t *testing.T, stack *Stack, target sdkdelegation.Target, modelID string, effort string) {
 	t.Helper()
-	agent, err := stack.composition.resolveDelegationPlacement(sdkdelegation.TargetRequest{Target: target}, stack.composition.activeRuntime)
+	agent, err := stack.composition.resolveDelegationPlacement(t.Context(), sdkdelegation.TargetRequest{Target: target}, stack.composition.activeRuntime)
 	if err != nil {
 		t.Fatalf("resolveDelegationPlacement() error = %v", err)
 	}
