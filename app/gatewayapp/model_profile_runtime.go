@@ -86,15 +86,42 @@ func resolveRuntimeProfile(
 	return resolveRuntimeProviderProfile(profiles, lookup, profileID, effort)
 }
 
-func (s *runtimeComposition) resolveProviderProfileConfig(ctx context.Context, profileID, effort string) (ModelConfig, error) {
-	if s == nil || s.authorities.store == nil {
-		return ModelConfig{}, fmt.Errorf("gatewayapp: model profile store is unavailable")
-	}
-	snapshot, err := s.placementSnapshot(ctx)
+// Materialize credentials while the placement's lookup still owns selection.
+// Only the process-local child pin receives the key; ACP and durable profiles do not.
+func materializeProviderProfileConfig(ctx context.Context, snapshot *placementSnapshot, profileID, effort string) (ModelConfig, error) {
+	configured, err := resolveRuntimeProviderProfile(snapshot.placement.Profiles, snapshot.lookup, profileID, effort)
 	if err != nil {
 		return ModelConfig{}, err
 	}
-	return resolveRuntimeProviderProfile(snapshot.placement.Profiles, snapshot.lookup, strings.TrimSpace(profileID), effort)
+	return snapshot.lookup.materializeAPIKeyCredential(ctx, configured)
+}
+
+// A native self participant inherits the activated Session main model, including
+// capabilities. Runtime Team revisions must not validate it against a different
+// provider generation. Explicit deletion still revokes the model through the
+// existing catalog and child pin admission fences.
+func (s *runtimeComposition) selfPlacementSnapshot(ctx context.Context, profileID string) (*placementSnapshot, error) {
+	if s.activation == nil {
+		return s.placementSnapshot(ctx)
+	}
+	configured, err := s.lookup.ResolveConfig(strings.TrimPrefix(modelprofile.NormalizeID(profileID), "provider:"))
+	if err != nil {
+		return nil, err
+	}
+	if s.activation.modelCatalog == nil || !s.activation.modelCatalog.HasAlias(configured.ID) {
+		return nil, fmt.Errorf("gatewayapp: self model %q is no longer configured", configured.ID)
+	}
+	profile, err := modelprofilebuilder.FromProvider(configured)
+	if err != nil {
+		return nil, err
+	}
+	doc := AppConfig{Models: persistedModelConfig{Configs: []ModelConfig{configured}}, ModelProfiles: modelprofile.Configuration{Profiles: []modelprofile.ModelProfile{profile}}}
+	snapshot := newPlacementSnapshot(doc)
+	snapshot.lookup, err = cloneSessionModelLookup(s.lookup, doc)
+	if err != nil {
+		return nil, err
+	}
+	return snapshot, nil
 }
 
 func (s *runtimeComposition) resolveSessionModelProfile(

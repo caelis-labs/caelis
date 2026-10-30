@@ -20,26 +20,7 @@ func (s *runtimeComposition) materializeReviewerAgent(
 	var cfg assembly.AgentConfig
 	switch placement.Kind {
 	case sdkplacement.KindModel:
-		if s.lookup == nil {
-			return assembly.AgentConfig{}, fmt.Errorf("gatewayapp: resolve Reviewer model: model lookup unavailable")
-		}
-		configured, err := s.resolveProviderProfileConfig(ctx, placement.ProfileID, placement.ReasoningEffort)
-		if err != nil {
-			return assembly.AgentConfig{}, fmt.Errorf("gatewayapp: resolve Reviewer model profile %q: %w", placement.ProfileID, err)
-		}
-		process := s.runtimeProcessSnapshot()
-		materialized, err := configuredModelSpawnedSelfACPAgent(defaultSpawnedSelfACPAgentConfig{
-			StoreDir:     s.authorities.storeDir,
-			WorkspaceKey: s.workspace.Key,
-			WorkspaceCWD: s.workspace.CWD,
-			SessionOptions: caelisModelSessionOptions(
-				configured,
-				placement.ReasoningEffort, placement.ServiceTier,
-			),
-			PinnedModel:  ptrToModelConfig(configured),
-			ApprovalMode: spawnedApprovalMode(runtimeCfg),
-			ControlURL:   process.childControlURL, ControlTokenFile: process.childControlTokenFile,
-		})
+		materialized, err := s.materializeDelegatedModel(ctx, "", placement.ProfileID, placement.ReasoningEffort, runtimeCfg, placement.ServiceTier)
 		if err != nil {
 			return assembly.AgentConfig{}, err
 		}

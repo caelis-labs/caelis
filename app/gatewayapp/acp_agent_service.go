@@ -203,7 +203,11 @@ func (s *runtimeComposition) withReviewerAgent(resolved assembly.ResolvedAssembl
 	if s.authorities.store == nil {
 		return assembly.ResolvedAssembly{}, fmt.Errorf("gatewayapp: resolve Reviewer placement: app config store unavailable")
 	}
-	placement, resolveErr := s.resolveHandlePlacement(context.Background(), controlplacement.HandleRequest{
+	ctx, err := s.captureTeamSnapshot(context.Background())
+	if err != nil {
+		return assembly.ResolvedAssembly{}, err
+	}
+	placement, resolveErr := s.resolveHandlePlacement(ctx, controlplacement.HandleRequest{
 		Handle: agentbinding.HandleReviewer, Purpose: controlplacement.PurposeReviewer,
 	})
 	if resolveErr != nil {
@@ -213,7 +217,7 @@ func (s *runtimeComposition) withReviewerAgent(resolved assembly.ResolvedAssembl
 		}
 		return assembly.ResolvedAssembly{}, fmt.Errorf("gatewayapp: resolve Reviewer placement: %w", resolveErr)
 	}
-	reviewer, err := s.materializeReviewerAgent(context.Background(), placement, runtimeCfg)
+	reviewer, err := s.materializeReviewerAgent(ctx, placement, runtimeCfg)
 	if err != nil {
 		return assembly.ResolvedAssembly{}, fmt.Errorf("gatewayapp: materialize fixed Reviewer scene: %w", err)
 	}

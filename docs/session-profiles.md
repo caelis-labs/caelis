@@ -94,6 +94,13 @@ configuration. Main conversation/Worker model selection remains Session-local;
 `self` uses that main selection. An unbound Guardian or tool-search uses the
 existing Session main-model fallback; resetting a delegation role removes it.
 
+Native `self` resolves its profile, capabilities and provider from the same
+Session main-model snapshot. Host capability edits do not invalidate an active
+Session's independent effort. Named Team participants resolve current Runtime
+configuration and materialize credentials into their existing process-local
+child pin before preparation; they never refresh the parent's main-model lookup.
+Explicit provider deletion and child pin admission checks remain in force.
+
 New auto-review profiles omit `reviewer`. Existing valid `reviewer` values,
 including Bot-generated MiMo overrides and explicitly supplied historical
 Application overrides, no longer select execution models. They remain byte-for-
@@ -107,6 +114,10 @@ fallback), not the historical profile field. `ready` checks local assembly only.
 Clients must negotiate `runtime-agent-team-v1` and must not compare the reported
 model to a legacy creation reviewer. Older clients that enforce that equality
 need a client upgrade; Core does not preserve a second fixed-reviewer mode.
+New Bot clients refuse an older Host without `runtime-agent-team-v1`, including a
+busy Host that cannot yet be replaced. Upgrade client and Runtime together;
+preserve busy work and reconcile original Sessions and receipts after idle
+replacement.
 No history/receipt schema is removed, so legacy creation evidence has no scheduled
 removal while those identities remain recoverable.
 
