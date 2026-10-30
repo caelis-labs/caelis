@@ -89,7 +89,7 @@ func (s *runtimeComposition) delegationSpawnConfiguration(session controlplaceme
 	return agents, targets, nil
 }
 
-func (s *runtimeComposition) resolveDelegationPlacement(req sdkdelegation.TargetRequest, runtimeCfg stackRuntimeConfig) (assembly.AgentConfig, error) {
+func (s *runtimeComposition) resolveDelegationPlacement(ctx context.Context, req sdkdelegation.TargetRequest, runtimeCfg stackRuntimeConfig) (assembly.AgentConfig, error) {
 	if s == nil || s.authorities.store == nil || s.lookup == nil {
 		return assembly.AgentConfig{}, fmt.Errorf("gatewayapp: delegation placement is unavailable")
 	}
@@ -100,7 +100,11 @@ func (s *runtimeComposition) resolveDelegationPlacement(req sdkdelegation.Target
 	if err := sdkplacement.ValidateSealed(target.Placement); err != nil {
 		return assembly.AgentConfig{}, fmt.Errorf("gatewayapp: invalid delegation placement: %w", err)
 	}
-	snapshot, err := s.placementSnapshot(context.Background())
+	ctx, err := s.captureTeamSnapshot(ctx)
+	if err != nil {
+		return assembly.AgentConfig{}, err
+	}
+	snapshot, err := s.placementSnapshot(ctx)
 	if err != nil {
 		return assembly.AgentConfig{}, err
 	}
@@ -109,14 +113,14 @@ func (s *runtimeComposition) resolveDelegationPlacement(req sdkdelegation.Target
 	}
 
 	if target.Selector == string(agentbinding.HandleReviewer) {
-		return s.materializeReviewerAgent(context.Background(), target.Placement, runtimeCfg)
+		return s.materializeReviewerAgent(ctx, target.Placement, runtimeCfg)
 	}
 	switch target.Placement.Kind {
 	case sdkplacement.KindModel:
 		// The selector is the public AgentHandle. The materialized child keeps
 		// the backend model identity; otherwise a handle such as "zenith" is
 		// accidentally treated as the ACP Agent selected by the Placement.
-		return s.materializeDelegatedModel("", target.Placement.ProfileID, target.Placement.ReasoningEffort, runtimeCfg, target.Placement.ServiceTier)
+		return s.materializeDelegatedModel(ctx, "", target.Placement.ProfileID, target.Placement.ReasoningEffort, runtimeCfg, target.Placement.ServiceTier)
 	case sdkplacement.KindAgent:
 		agent, connection, err := controlagents.ResolveAgent(snapshot.placement.Agents, target.Placement.Agent)
 		if err != nil {
@@ -137,8 +141,8 @@ func (s *runtimeComposition) resolveDelegationPlacement(req sdkdelegation.Target
 	}
 }
 
-func (s *runtimeComposition) materializeDelegatedModel(name, profileID, effort string, runtimeCfg stackRuntimeConfig, serviceTier ...string) (assembly.AgentConfig, error) {
-	configured, err := s.resolveProviderProfileConfig(profileID, effort)
+func (s *runtimeComposition) materializeDelegatedModel(ctx context.Context, name, profileID, effort string, runtimeCfg stackRuntimeConfig, serviceTier ...string) (assembly.AgentConfig, error) {
+	configured, err := s.resolveProviderProfileConfig(ctx, profileID, effort)
 	if err != nil {
 		return assembly.AgentConfig{}, fmt.Errorf("gatewayapp: resolve delegated profile %q: %w", profileID, err)
 	}

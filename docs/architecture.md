@@ -140,14 +140,19 @@ durable Session ID. Creating, inspecting, listing, or reconnecting a Session doe
 not by itself assemble execution state.
 
 The first work-bearing activation samples one complete AppConfig and workspace
-snapshot and builds an independent Runtime composition. That snapshot stays fixed
-while the activation lives. Accepted work and durable running Tasks keep it
+snapshot and builds an independent Runtime composition. Session main-model and
+workspace assembly stay activation-bound except for their explicit update paths.
+Agent Team placement uses the canonical AppConfig configuration revision on each
+new call, including calls from already activated Sessions. Accepted work and durable running Tasks keep it
 resident; observation may retain it after activation, but never grants execution
 authority. Once work is idle and the last observation closes, Control releases
 the Runtime. The next activation samples current configuration.
 
-Ordinary model, skill, MCP, plugin, sandbox, and placement changes therefore
-affect later activations. Explicit provider or ACP-Agent removal is the narrow
+Ordinary default-model, skill, MCP, plugin and sandbox changes affect later
+activations. Team bind/reset changes affect the next role invocation; an ongoing
+model request or review retains its resolved model, effort and speed. The optional
+approval classifier and its deferred Guardian share one captured Team revision.
+This capture does not dispatch or retry the original tool action. Explicit provider or ACP-Agent removal is the narrow
 revocation exception: Control removes the profile from live placement and repairs
 affected Session bindings so later work cannot resolve a deleted endpoint.
 

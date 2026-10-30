@@ -24,7 +24,7 @@ func TestApplicationReviewerValidationAndLegacyDigest(t *testing.T) {
 	}{
 		{name: "legacy"},
 		{name: "explicit manual", mode: "manual"},
-		{name: "no reviewer", mode: "auto-review", want: ErrInvalid},
+		{name: "runtime Team", mode: "auto-review"},
 		{name: "explicit guardian", mode: "auto-review", reviewer: &Reviewer{Kind: "guardian", Model: "review-model"}},
 		{name: "no model", mode: "auto-review", reviewer: &Reviewer{Kind: "guardian"}, want: ErrInvalid},
 		{name: "unknown reviewer", mode: "auto-review", reviewer: &Reviewer{Kind: "bot", Model: "model"}, want: ErrUnsupported},
@@ -47,7 +47,7 @@ func TestApplicationReviewerValidationAndLegacyDigest(t *testing.T) {
 	}
 }
 
-func TestApplicationReviewerPersistsWithoutHotModelInheritance(t *testing.T) {
+func TestLegacyReviewerCreationEvidencePersistsAcrossHotModelChanges(t *testing.T) {
 	store, path := testStore(t)
 	owner := testOwner(t, store, 1)
 	binding := Binding{Scope: owner.Scope, SessionID: "review-session", CreationDigest: "create-digest", Profile: Profile{

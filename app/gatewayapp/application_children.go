@@ -39,24 +39,38 @@ type applicationChildClientFactory struct {
 }
 
 type applicationChildren struct {
-	composition   *runtimeComposition
-	binding       sessionprofile.Binding
-	active        session.Session
-	modelSnapshot func(context.Context) (AppConfig, *modelLookup, error)
+	composition       *runtimeComposition
+	binding           sessionprofile.Binding
+	active            session.Session
+	mainModelSnapshot func(context.Context) (AppConfig, *modelLookup, error)
 }
 
-// Profile placement resolves from the same fresh Host catalog as the next
-// model request. Activating a Session must not pin future explicit model updates.
+// Team roles use the canonical Runtime revision, including provider parameters.
+// Session main-model pins belong only to the explicit self participant.
 func (c *applicationChildren) snapshot(ctx context.Context) (*placementSnapshot, *modelLookup, error) {
-	if c.modelSnapshot != nil {
-		doc, lookup, err := c.modelSnapshot(ctx)
+	snapshot, err := c.composition.placementSnapshot(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	return snapshot, snapshot.lookup, nil
+}
+
+func (c *applicationChildren) selfSnapshot(ctx context.Context) (*placementSnapshot, *modelLookup, error) {
+	if c.mainModelSnapshot != nil {
+		doc, lookup, err := c.mainModelSnapshot(ctx)
 		if err != nil {
 			return nil, nil, err
 		}
 		return newPlacementSnapshot(doc), lookup, nil
 	}
-	snapshot, err := c.composition.placementSnapshot(ctx)
-	return snapshot, c.composition.lookup, err
+	return c.snapshot(ctx)
+}
+
+func (c *applicationChildren) targetSnapshot(ctx context.Context, selector string) (*placementSnapshot, *modelLookup, error) {
+	if selector == string(agentbinding.HandleSelf) {
+		return c.selfSnapshot(ctx)
+	}
+	return c.snapshot(ctx)
 }
 
 func (c *applicationChildren) principal() appserver.Principal {
@@ -136,7 +150,7 @@ func (c *applicationChildren) selfPlacement(ctx context.Context) (placement.Plac
 	if err != nil {
 		return placement.Placement{}, err
 	}
-	snapshot, lookup, err := c.snapshot(ctx)
+	snapshot, lookup, err := c.selfSnapshot(ctx)
 	if err != nil {
 		return placement.Placement{}, err
 	}
@@ -196,6 +210,10 @@ func (c *applicationChildren) placement(ctx context.Context, handle agentbinding
 }
 
 func (c *applicationChildren) agents(ctx context.Context) ([]assembly.AgentConfig, error) {
+	ctx, err := c.composition.captureTeamSnapshot(ctx)
+	if err != nil {
+		return nil, err
+	}
 	handles, err := c.handles(ctx)
 	if err != nil {
 		return nil, err
@@ -206,7 +224,7 @@ func (c *applicationChildren) agents(ctx context.Context) ([]assembly.AgentConfi
 		if err != nil {
 			return nil, err
 		}
-		_, lookup, err := c.snapshot(ctx)
+		_, lookup, err := c.targetSnapshot(ctx, handle)
 		if err != nil {
 			return nil, err
 		}
@@ -227,7 +245,7 @@ func (c *applicationChildren) resolve(ctx context.Context, parent subagent.Spawn
 	if _, err := c.source(ctx); err != nil {
 		return assembly.AgentConfig{}, err
 	}
-	snapshot, lookup, err := c.snapshot(ctx)
+	snapshot, lookup, err := c.targetSnapshot(ctx, request.Target.Selector)
 	if err != nil {
 		return assembly.AgentConfig{}, err
 	}
@@ -289,6 +307,10 @@ type applicationChildTool struct {
 
 func (t applicationChildTool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
 	if _, err := t.owner.source(ctx); err != nil {
+		return tool.Result{}, err
+	}
+	ctx, err := t.owner.composition.captureTeamSnapshot(ctx)
+	if err != nil {
 		return tool.Result{}, err
 	}
 	return t.Tool.Call(ctx, call)

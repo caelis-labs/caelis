@@ -86,15 +86,15 @@ func resolveRuntimeProfile(
 	return resolveRuntimeProviderProfile(profiles, lookup, profileID, effort)
 }
 
-func (s *runtimeComposition) resolveProviderProfileConfig(profileID, effort string) (ModelConfig, error) {
+func (s *runtimeComposition) resolveProviderProfileConfig(ctx context.Context, profileID, effort string) (ModelConfig, error) {
 	if s == nil || s.authorities.store == nil {
 		return ModelConfig{}, fmt.Errorf("gatewayapp: model profile store is unavailable")
 	}
-	snapshot, err := s.placementSnapshot(context.Background())
+	snapshot, err := s.placementSnapshot(ctx)
 	if err != nil {
 		return ModelConfig{}, err
 	}
-	return resolveRuntimeProviderProfile(snapshot.placement.Profiles, s.lookup, strings.TrimSpace(profileID), effort)
+	return resolveRuntimeProviderProfile(snapshot.placement.Profiles, snapshot.lookup, strings.TrimSpace(profileID), effort)
 }
 
 func (s *runtimeComposition) resolveSessionModelProfile(
@@ -111,27 +111,6 @@ func (s *runtimeComposition) resolveSessionModelProfile(
 	}
 	profile, ok := modelprofile.Lookup(snapshot.placement.Profiles, selector)
 	configured := ModelConfig{}
-	if !ok {
-		// Completion is Host-live, while an activated Session Runtime keeps a
-		// pinned snapshot. Consult canonical Control state for newly connected
-		// profiles; the provider/ACP pin path validates and installs the exact
-		// execution generation before the Session mutation commits.
-		if s.authorities.store != nil {
-			doc, loadErr := s.authorities.store.LoadContext(contextOrBackground(ctx))
-			if loadErr != nil {
-				return resolvedSessionModelProfile{}, false, loadErr
-			}
-			canonical := newPlacementSnapshot(doc)
-			if validateErr := controlplacement.ValidateSnapshot(canonical.placement); validateErr != nil {
-				return resolvedSessionModelProfile{}, false, validateErr
-			}
-			if candidate, found := modelprofile.Lookup(canonical.placement.Profiles, selector); found {
-				profile = candidate
-				ok = true
-				snapshot = canonical
-			}
-		}
-	}
 	if !ok {
 		catalog := s.lookup
 		if s.activation != nil && s.activation.modelCatalog != nil {

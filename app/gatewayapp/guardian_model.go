@@ -10,6 +10,10 @@ import (
 // An unbound Guardian leaves selection to the AssemblyResolver's current
 // Session model, which can differ from the Host's default model.
 func (s *runtimeComposition) resolveGuardianAgentModel(ctx context.Context, contextWindow int) (model.LLM, bool, error) {
+	ctx, err := s.captureTeamSnapshot(ctx)
+	if err != nil {
+		return nil, false, err
+	}
 	snapshot, err := s.placementSnapshot(ctx)
 	if err != nil {
 		return nil, false, err

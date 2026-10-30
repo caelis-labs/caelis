@@ -16,12 +16,14 @@ import (
 // Without a binding the SDK selector receives the complete main-turn model
 // object and settings; neither tools nor conversation history accompany it.
 type boundToolSearchRanker struct {
+	capture      func(context.Context) (context.Context, error)
 	resolve      func(context.Context) (judgment.Evaluator, error)
 	resolveAgent func(context.Context) (model.LLM, error)
 }
 
 func newBoundToolSearchRanker(s *runtimeComposition) boundToolSearchRanker {
 	return boundToolSearchRanker{
+		capture: s.captureTeamSnapshot,
 		resolve: func(ctx context.Context) (judgment.Evaluator, error) {
 			return s.boundJudgment(ctx, agentbinding.HandleToolSearch)
 		},
@@ -30,6 +32,14 @@ func newBoundToolSearchRanker(s *runtimeComposition) boundToolSearchRanker {
 }
 
 func (r boundToolSearchRanker) Rank(ctx context.Context, query string, candidates []tool.Definition, limit int, selected toolsearch.SearchModel) ([]string, error) {
+	if r.capture != nil {
+		var err error
+		ctx, err = r.capture(ctx)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	if r.resolve != nil {
 		evaluator, err := r.resolve(ctx)
 		if err != nil {
@@ -74,12 +84,12 @@ func (s *runtimeComposition) boundToolSearchAgentModel(ctx context.Context) (mod
 	if !agentbinding.SupportsProfile(agentbinding.HandleToolSearch, profile) {
 		return nil, fmt.Errorf("gatewayapp: ToolSearch binding requires a provider model")
 	}
-	cfg, ok := s.lookup.Config(profile.Backend.Provider.ModelConfigID)
+	cfg, ok := snapshot.lookup.Config(profile.Backend.Provider.ModelConfigID)
 	if !ok {
 		return nil, fmt.Errorf("gatewayapp: ToolSearch model configuration is unavailable")
 	}
 	cfg.ReasoningEffort = binding.Effort
-	resolved, err := s.lookup.ResolveModelConfig(ctx, cfg, s.activeRuntime.ContextWindow)
+	resolved, err := snapshot.lookup.ResolveModelConfig(ctx, cfg, s.activeRuntime.ContextWindow)
 	if err != nil {
 		return nil, err
 	}

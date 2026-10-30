@@ -157,7 +157,11 @@ func (s *runtimeComposition) withDirectProfileAgents(resolved assembly.ResolvedA
 			seen[name] = struct{}{}
 		}
 	}
-	snapshot, err := s.placementSnapshot(context.Background())
+	ctx, err := s.captureTeamSnapshot(context.Background())
+	if err != nil {
+		return assembly.ResolvedAssembly{}, err
+	}
+	snapshot, err := s.placementSnapshot(ctx)
 	if err != nil {
 		return assembly.ResolvedAssembly{}, err
 	}
@@ -165,7 +169,7 @@ func (s *runtimeComposition) withDirectProfileAgents(resolved assembly.ResolvedA
 		if _, ok := agentbinding.Lookup(snapshot.placement.Bindings, handle); !ok {
 			continue
 		}
-		placement, err := s.resolveHandlePlacement(context.Background(), controlplacement.HandleRequest{
+		placement, err := s.resolveHandlePlacement(ctx, controlplacement.HandleRequest{
 			Handle: handle, Purpose: controlplacement.PurposeDirect,
 		})
 		if err != nil {
@@ -178,7 +182,7 @@ func (s *runtimeComposition) withDirectProfileAgents(resolved assembly.ResolvedA
 		if _, exists := seen[name]; exists {
 			return assembly.ResolvedAssembly{}, fmt.Errorf("gatewayapp: direct Agent handle %q conflicts with an existing Agent", handle)
 		}
-		materialized, err := s.materializeDelegatedModel(string(handle), placement.ProfileID, placement.ReasoningEffort, runtimeCfg, placement.ServiceTier)
+		materialized, err := s.materializeDelegatedModel(ctx, string(handle), placement.ProfileID, placement.ReasoningEffort, runtimeCfg, placement.ServiceTier)
 		if err != nil {
 			return assembly.ResolvedAssembly{}, err
 		}

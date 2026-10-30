@@ -11,8 +11,6 @@ import (
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
 	"github.com/caelis-labs/caelis/control/modelconfig"
-	"github.com/caelis-labs/caelis/control/modelprofile"
-	modelprofilebuilder "github.com/caelis-labs/caelis/control/modelprofile/builder"
 	controlplacement "github.com/caelis-labs/caelis/control/placement"
 	assembly "github.com/caelis-labs/caelis/internal/controlassembly"
 	kernelimpl "github.com/caelis-labs/caelis/internal/kernel"
@@ -20,6 +18,8 @@ import (
 
 type placementSnapshot struct {
 	placement controlplacement.Snapshot
+	revision  uint64
+	lookup    *modelLookup
 }
 
 func newPlacementSnapshot(doc AppConfig) *placementSnapshot {
@@ -38,7 +38,7 @@ func newPlacementSnapshot(doc AppConfig) *placementSnapshot {
 		}
 		models = append(models, configured)
 	}
-	return &placementSnapshot{placement: controlplacement.Snapshot{
+	return &placementSnapshot{revision: doc.ConfigurationRevision, placement: controlplacement.Snapshot{
 		Profiles: doc.ModelProfiles,
 		Bindings: doc.AgentBindings,
 		Models:   models,
@@ -56,17 +56,12 @@ func (s *runtimeComposition) invalidateOwnPlacementSnapshot() {
 	s.placementCacheMu.Unlock()
 }
 
-// beginPinnedModelSelection stages one provider model, its product profile,
-// and every model changed through the same shared provider endpoint as a
-// single detached Runtime update. Both views remain unreadable until the
-// matching durable Session revision CAS commits; rollback restores both.
+// beginPinnedModelSelection stages only the Session main model and credentials.
+// Team placement remains canonical and must never inherit a Session's pin or
+// be rolled back by a conflicting Session revision CAS.
 func (s *runtimeComposition) beginPinnedModelSelection(ctx context.Context, configured ModelConfig) (func(bool), error) {
 	if s == nil || s.lookup == nil {
 		return nil, fmt.Errorf("gatewayapp: Session Runtime model lookup is unavailable")
-	}
-	profile, err := modelprofilebuilder.FromProvider(configured)
-	if err != nil {
-		return nil, fmt.Errorf("gatewayapp: build pinned Session model profile: %w", err)
 	}
 	if s.activation == nil || s.activation.modelCatalog == nil {
 		return nil, fmt.Errorf("gatewayapp: Host model catalog is unavailable")
@@ -75,55 +70,23 @@ func (s *runtimeComposition) beginPinnedModelSelection(ctx context.Context, conf
 	if err != nil {
 		return nil, fmt.Errorf("gatewayapp: pin Session Runtime model credential: %w", err)
 	}
-	affectedModels, finishLookup, err := s.lookup.beginPinnedUpsert(configured)
+	_, finishLookup, err := s.lookup.beginPinnedUpsert(configured)
 	if err != nil {
 		finishCredential(false)
 		return nil, err
 	}
 
-	s.placementCacheMu.Lock()
-	before := s.placementCache
-	if before == nil {
-		s.placementCacheMu.Unlock()
-		finishLookup(false)
-		finishCredential(false)
-		return nil, fmt.Errorf("gatewayapp: Session Runtime placement snapshot is unavailable")
-	}
-	next := &placementSnapshot{placement: before.placement}
-	next.placement.Profiles, err = modelprofile.Upsert(next.placement.Profiles, profile)
-	if err == nil {
-		for _, affected := range affectedModels {
-			next.placement.Models = upsertPlacementModel(next.placement.Models, affected)
-		}
-		err = controlplacement.ValidateSnapshot(next.placement)
-	}
-	if err != nil {
-		s.placementCacheMu.Unlock()
-		finishLookup(false)
-		finishCredential(false)
-		return nil, fmt.Errorf("gatewayapp: pin Session Runtime placement: %w", err)
-	}
-	s.placementCache = next
-
 	var once sync.Once
 	return func(committed bool) {
 		once.Do(func() {
-			if !committed {
-				s.placementCache = before
-			}
 			finishLookup(committed)
 			finishCredential(committed)
-			s.placementCacheMu.Unlock()
 		})
 	}, nil
 }
 
-// beginPinnedACPSelection stages one canonical external Agent and the current
-// placement snapshot in an already assembled Session Runtime. This is needed
-// when /connect added the selected Agent after that Runtime was activated.
-// Rollback restores the staged execution registry and restores the placement
-// view only if no newer canonical publisher replaced it while the durable
-// controller handoff was in flight.
+// beginPinnedACPSelection stages an independently selected main controller in
+// the Session execution registry. Team configuration has no Session-local writer.
 func (s *runtimeComposition) beginPinnedACPSelection(ctx context.Context, frozen sdkplacement.Placement) (func(bool), error) {
 	if s == nil || s.authorities.store == nil {
 		return nil, fmt.Errorf("gatewayapp: Session Runtime ACP selection is unavailable")
@@ -164,32 +127,20 @@ func (s *runtimeComposition) beginPinnedACPSelection(ctx context.Context, frozen
 		ReasoningEffortConfigID: strings.TrimSpace(frozen.ReasoningEffortConfigID),
 	}
 
-	s.placementCacheMu.Lock()
-	beforePlacement := s.placementCache
-	s.placementCache = canonical
-	s.placementCacheGeneration++
-	stagedPlacementGeneration := s.placementCacheGeneration
 	s.mu.Lock()
 	beforeAssembly := assembly.CloneResolvedAssembly(s.activeRuntime.Assembly)
 	nextAssembly := assembly.CloneResolvedAssembly(beforeAssembly)
 	nextAssembly.Agents = upsertRuntimeACPAgent(nextAssembly.Agents, materialized)
 	if s.acpControlPlane == nil {
 		s.mu.Unlock()
-		s.placementCache = beforePlacement
-		s.placementCacheGeneration++
-		s.placementCacheMu.Unlock()
 		return nil, fmt.Errorf("gatewayapp: ACP control plane is unavailable")
 	}
 	if err := s.acpControlPlane.UpdateAgents(nextAssembly.Agents); err != nil {
 		s.mu.Unlock()
-		s.placementCache = beforePlacement
-		s.placementCacheGeneration++
-		s.placementCacheMu.Unlock()
 		return nil, err
 	}
 	s.activeRuntime.Assembly = nextAssembly
 	s.mu.Unlock()
-	s.placementCacheMu.Unlock()
 
 	var once sync.Once
 	unlockOnError = false
@@ -202,12 +153,6 @@ func (s *runtimeComposition) beginPinnedACPSelection(ctx context.Context, frozen
 				}
 				s.activeRuntime.Assembly = beforeAssembly
 				s.mu.Unlock()
-				s.placementCacheMu.Lock()
-				if s.placementCacheGeneration == stagedPlacementGeneration && s.placementCache == canonical {
-					s.placementCache = beforePlacement
-					s.placementCacheGeneration++
-				}
-				s.placementCacheMu.Unlock()
 			}
 			s.acpSelectionMu.Unlock()
 		})
@@ -233,38 +178,11 @@ func upsertRuntimeACPAgent(current []assembly.AgentConfig, configured assembly.A
 	return next
 }
 
-func upsertPlacementModel(current []modelconfig.Config, configured modelconfig.Config) []modelconfig.Config {
-	configured = placementModelConfig(configured)
-	next := make([]modelconfig.Config, 0, len(current)+1)
-	replaced := false
-	for _, raw := range current {
-		model := modelconfig.NormalizeConfig(raw)
-		if model.ID == configured.ID {
-			if !replaced {
-				next = append(next, configured)
-				replaced = true
-			}
-			continue
-		}
-		next = append(next, model)
-	}
-	if !replaced {
-		next = append(next, configured)
-	}
-	return next
-}
-
-func placementModelConfig(configured modelconfig.Config) modelconfig.Config {
-	configured = modelconfig.NormalizeConfig(configured)
-	// Placement needs stable execution semantics for validation and sealing,
-	// not the Runtime-only credential material retained by model lookup.
-	configured.HTTPClient = nil
-	configured.Token = ""
-	configured.CredentialPath = ""
-	return configured
-}
-
 func (s *runtimeComposition) placementSnapshot(ctx context.Context) (*placementSnapshot, error) {
+	if captured, ok := contextOrBackground(ctx).Value(teamSnapshotKey{}).(capturedTeamSnapshot); ok && captured.owner == s {
+		return captured.snapshot, nil
+	}
+
 	if s == nil || s.authorities.store == nil {
 		return nil, fmt.Errorf("gatewayapp: placement is unavailable")
 	}
@@ -273,18 +191,30 @@ func (s *runtimeComposition) placementSnapshot(ctx context.Context) (*placementS
 		return nil, err
 	}
 	for {
+		doc, err := s.authorities.store.LoadContext(ctx)
+		if err != nil {
+			return nil, err
+		}
 		s.placementCacheMu.RLock()
 		cached := s.placementCache
 		generation := s.placementCacheGeneration
 		s.placementCacheMu.RUnlock()
-		if cached != nil {
+		if cached != nil && cached.revision == doc.ConfigurationRevision && cached.lookup != nil {
 			return cached, nil
 		}
-		doc, err := s.authorities.store.Load()
+		loaded := newPlacementSnapshot(doc)
+		catalog := s.lookup
+		if s.activation != nil && s.activation.modelCatalog != nil {
+			catalog = s.activation.modelCatalog
+		}
+		if catalog == nil {
+			loaded.lookup, err = newModelLookupFromDocument(doc, s.activeRuntime.ContextWindow)
+		} else {
+			loaded.lookup, err = cloneSessionModelLookup(catalog, doc)
+		}
 		if err != nil {
 			return nil, err
 		}
-		loaded := newPlacementSnapshot(doc)
 		if err := controlplacement.ValidateSnapshot(loaded.placement); err != nil {
 			return nil, err
 		}
@@ -293,10 +223,8 @@ func (s *runtimeComposition) placementSnapshot(ctx context.Context) (*placementS
 			s.placementCacheMu.Unlock()
 			continue
 		}
-		if s.placementCache == nil {
-			s.placementCache = loaded
-		}
-		cached = s.placementCache
+		s.placementCache = loaded
+		cached = loaded
 		s.placementCacheMu.Unlock()
 		return cached, nil
 	}
@@ -341,18 +269,22 @@ func (s *runtimeComposition) resolveSystemAgentModel(
 	if err != nil {
 		return kernelimpl.ModelResolution{}, false, err
 	}
-	placement, err := s.resolveHandlePlacement(ctx, controlplacement.HandleRequest{Handle: handle, Purpose: purpose})
+	snapshot, err := s.placementSnapshot(ctx)
 	if err != nil {
 		return kernelimpl.ModelResolution{}, false, err
 	}
-	hydrated, err := s.lookup.ResolveConfig(placement.Model)
+	placement, err := controlplacement.ResolveHandle(snapshot.placement, controlplacement.HandleRequest{Handle: handle, Purpose: purpose})
+	if err != nil {
+		return kernelimpl.ModelResolution{}, false, err
+	}
+	hydrated, err := snapshot.lookup.ResolveConfig(placement.Model)
 	if err != nil {
 		return kernelimpl.ModelResolution{}, false, err
 	}
 	if placement.ReasoningEffort != "" {
 		hydrated.ReasoningEffort = placement.ReasoningEffort
 	}
-	resolved, err := s.lookup.ResolveModelConfig(ctx, hydrated, contextWindow)
+	resolved, err := snapshot.lookup.ResolveModelConfig(ctx, hydrated, contextWindow)
 	if err != nil {
 		return kernelimpl.ModelResolution{}, false, err
 	}
@@ -360,4 +292,20 @@ func (s *runtimeComposition) resolveSystemAgentModel(
 		resolved.FastMode = placement.ServiceTier == "priority"
 	}
 	return resolved, true, nil
+}
+
+// A call-local immutable projection, never another configuration authority.
+// The canonical document and its existing revision remain the only publisher.
+type teamSnapshotKey struct{}
+type capturedTeamSnapshot struct {
+	owner    *runtimeComposition
+	snapshot *placementSnapshot
+}
+
+func (s *runtimeComposition) captureTeamSnapshot(ctx context.Context) (context.Context, error) {
+	snapshot, err := s.placementSnapshot(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return context.WithValue(contextOrBackground(ctx), teamSnapshotKey{}, capturedTeamSnapshot{owner: s, snapshot: snapshot}), nil
 }

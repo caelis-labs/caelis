@@ -126,6 +126,14 @@ type JudgmentResolver interface {
 	ResolveApprovalJudgment(context.Context, session.SessionRef) (judgment.Evaluator, error)
 }
 
+// ConfigurationSnapshotter freezes mutable selection inputs for one review.
+// The gateway resolves its Agent model once before screening; model construction
+// errors remain deferred until screening actually needs that Agent. No model
+// request is issued by this hook, and the returned context retains cancellation.
+type ConfigurationSnapshotter interface {
+	SnapshotApprovalConfiguration(context.Context, session.SessionRef) (context.Context, error)
+}
+
 type ModelResolver interface {
 	ResolveApprovalModel(context.Context, session.SessionRef) (model.LLM, error)
 }

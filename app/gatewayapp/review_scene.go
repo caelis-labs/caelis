@@ -23,7 +23,7 @@ func (s *runtimeComposition) materializeReviewerAgent(
 		if s.lookup == nil {
 			return assembly.AgentConfig{}, fmt.Errorf("gatewayapp: resolve Reviewer model: model lookup unavailable")
 		}
-		configured, err := s.resolveProviderProfileConfig(placement.ProfileID, placement.ReasoningEffort)
+		configured, err := s.resolveProviderProfileConfig(ctx, placement.ProfileID, placement.ReasoningEffort)
 		if err != nil {
 			return assembly.AgentConfig{}, fmt.Errorf("gatewayapp: resolve Reviewer model profile %q: %w", placement.ProfileID, err)
 		}

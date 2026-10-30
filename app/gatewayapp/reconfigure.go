@@ -431,13 +431,14 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 		return nil, err
 	}
 	resolver, err := kernelimpl.NewAssemblyResolver(kernelimpl.AssemblyResolverConfig{
-		Sessions:          s.sessions,
-		Assembly:          runtimeCfg.Assembly,
-		DefaultModelAlias: runtimeDefaultModelAlias(runtimeCfg, s.lookup),
-		ContextWindow:     runtimeCfg.ContextWindow,
-		ModelLookup:       s.lookup,
-		Tools:             tools,
-		BaseMetadata:      cloneMap(effectiveBaseMetadata),
+		Sessions:                      s.sessions,
+		Assembly:                      runtimeCfg.Assembly,
+		DefaultModelAlias:             runtimeDefaultModelAlias(runtimeCfg, s.lookup),
+		ContextWindow:                 runtimeCfg.ContextWindow,
+		ModelLookup:                   s.lookup,
+		Tools:                         tools,
+		BaseMetadata:                  cloneMap(effectiveBaseMetadata),
+		ApprovalConfigurationSnapshot: s.captureTeamSnapshot,
 		ApprovalJudgmentResolver: func(ctx context.Context, _ session.SessionRef) (judgment.Evaluator, error) {
 			return s.boundJudgment(ctx, agentbinding.HandleGuardianScreen)
 		},

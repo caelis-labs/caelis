@@ -50,7 +50,8 @@ func (a *workspaceConfigAssembler) assembleProfileSnapshot(ctx context.Context, 
 	if err != nil {
 		return nil, err
 	}
-	// Model selection is explicit for both the application and its reviewer.
+	// Only the Session main model is independently selected. Team roles resolve
+	// against the current Runtime configuration at each call.
 	// No workspace configuration may alter the application prefix.
 	modelDocument, lookup, err := a.loadRuntimeModelSnapshot(ctx, active)
 	if err != nil {
@@ -70,7 +71,7 @@ func (a *workspaceConfigAssembler) assembleProfileSnapshot(ctx context.Context, 
 		retainRuntimeWork: activity.retainWork, retainIdleWork: activity.retainIdleWork, idleQuiet: activity.idleQuiet, runtimeTaskChanged: activity.taskChanged, taskCommitted: activity.taskCommitted,
 	}}
 	children := &applicationChildren{composition: &instance.runtimeComposition, binding: binding, active: active,
-		modelSnapshot: func(ctx context.Context) (AppConfig, *modelLookup, error) {
+		mainModelSnapshot: func(ctx context.Context) (AppConfig, *modelLookup, error) {
 			return a.loadRuntimeModelSnapshot(ctx, active)
 		}}
 	instance.applicationChildren = children
@@ -185,7 +186,7 @@ func (a *workspaceConfigAssembler) assembleProfileSnapshot(ctx context.Context, 
 		return nil, err
 	}
 	var approver kernel.ApprovalApprover
-	if binding.Profile.Reviewer != nil {
+	if sessionprofile.EffectiveApprovalMode(binding.Profile) == string(kernel.ApprovalModeAutoReview) {
 		bundle.Guardian = newApplicationGuardianApprover(sessions, a.deps.authorities.diagnostics)
 		approver = bundle.Guardian
 	}

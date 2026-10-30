@@ -238,7 +238,7 @@ func TestReviewerACPBindingMaterializesHiddenReviewScene(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	background, err := activated.resolveDelegationPlacement(delegation.TargetRequest{Target: delegation.Target{Selector: "reviewer", Placement: placement}}, activated.activeRuntime)
+	background, err := activated.resolveDelegationPlacement(t.Context(), delegation.TargetRequest{Target: delegation.Target{Selector: "reviewer", Placement: placement}}, activated.activeRuntime)
 	if err != nil {
 		t.Fatal(err)
 	}

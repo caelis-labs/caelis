@@ -31,7 +31,8 @@ Explicit profiles require `session-profiles-v1`. Optional functions advertise
 `session-workspace-binding-v1`, `session-background-activation-v1`,
 `session-resource-transfer-v1`, `session-model-capabilities-v1`,
 `session-tool-result-content-v1`, `session-media-resources-v1`,
-`session-guardian-review-v1`, and `session-atomic-capabilities-v1`.
+`session-guardian-review-v1`, `runtime-agent-team-v1`, and
+`session-atomic-capabilities-v1`.
 `session-profile-control-v1` and `session-profile-children-v1` identify the
 implemented profile-aware observation, native control and child paths.
 Require the capability consumed by a feature before using it.
@@ -84,9 +85,41 @@ is retained conservatively. Imported historical permanent receipts remain
 permanent, including after later proof resolves an unknown. Never turn admission
 (`accepted` or `committed`) into a claim that the Turn or external effect finished.
 
+## Runtime Agent Team and legacy reviewers
+
+`runtime-agent-team-v1` makes Runtime AppConfig the single model authority for
+breeze, orbit, zenith, tool-search, guardian and guardian-screen, including their
+effort and speed. TUI Team and Control agent binding commands edit that same
+configuration. Main conversation/Worker model selection remains Session-local;
+`self` uses that main selection. An unbound Guardian or tool-search uses the
+existing Session main-model fallback; resetting a delegation role removes it.
+
+New auto-review profiles omit `reviewer`. Existing valid `reviewer` values,
+including Bot-generated MiMo overrides and explicitly supplied historical
+Application overrides, no longer select execution models. They remain byte-for-
+byte creation evidence for request digests and receipt recovery. This is a read-
+time semantic migration: no database edits, new Session, Task recreation, Dream,
+or background maintenance Turn is required. Manual approval mode and all sandbox,
+permission, source and ownership boundaries remain unchanged.
+
+`reviewer-state` reports the current Runtime Guardian (or current Session main
+fallback), not the historical profile field. `ready` checks local assembly only.
+Clients must negotiate `runtime-agent-team-v1` and must not compare the reported
+model to a legacy creation reviewer. Older clients that enforce that equality
+need a client upgrade; Core does not preserve a second fixed-reviewer mode.
+No history/receipt schema is removed, so legacy creation evidence has no scheduled
+removal while those identities remain recoverable.
+
+Team changes use the existing configuration revision and cache invalidation.
+An already selected model request keeps its model/effort/speed; a review also
+freezes the optional classifier and deferred Guardian before screening. Completed
+approvals are never revisited and the underlying action is not replayed. Empty
+Guardian assessment recovery is a separate concern, unchanged by this contract.
+
 ## Configuration and native execution
 
-An ordinary Session samples ordinary Host configuration at Runtime activation.
+An ordinary Session samples ordinary Host configuration at Runtime activation;
+Agent Team roles are resolved from the current Runtime configuration on each call.
 An explicit profile pins its creation identity and execution boundaries, and
 samples its desired configuration at each model request. These are two assembly
 choices in one Session owner. Updating an ignored native model field on an
@@ -94,7 +127,7 @@ explicit-profile Session is rejected; use its configuration patch.
 
 Creation requires `version`, `model`, `tools_version` and `execution`. It may
 supply instructions, callback definitions, selected MCP servers and Skill roots,
-workspace access, permissions, reviewer and process configuration. Explicit
+workspace access, permissions and process configuration. Explicit
 profiles do not inherit workspace instructions, ambient business tools. A Bot can provide its private memory through an explicit MCP,
 Skill or callback integration. Control still owns history, tools, approvals,
 sandbox policy and recovery.
@@ -104,7 +137,7 @@ file/command tools. `workspace-write` uses the ordinary native sandbox and
 approval owner. `permissions.mode: danger-full-access` selects the ordinary Host
 execution route; it does not auto-approve callbacks, MCP, OS privacy access or
 external effects. Workspace CWD/access, execution, process environment, permissions
-and reviewer are creation-bound. Canonical directories are checked at activation
+are creation-bound. Canonical directories are checked at activation
 and before effects; redirection cannot expand a bound directory.
 
 Omitted native tool selection uses the default native catalog. Explicit `[]`
@@ -118,7 +151,8 @@ shell/environment behavior.
 Instructions, model, effort, tier, callback catalog/version, native tools, MCP
 servers and Skill selections can change. Omitted fields preserve values, explicit
 empty values clear supported selections, and null is rejected. Workspace,
-execution, permissions and reviewer cannot be changed through a patch.
+execution and permissions cannot be changed through a patch. The legacy reviewer
+field is retained as immutable creation evidence and cannot be patched.
 
 Configuration revision is separate from native history revision. The immutable
 creation profile/revision remains evidence; `configuration.profile` is the sole
