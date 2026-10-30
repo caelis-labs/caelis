@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.75.0](https://github.com/caelis-labs/caelis/compare/v0.74.0...v0.75.0) (2026-10-30)
+
+
+### ⚠ BREAKING CHANGES
+
+* Valid legacy Application reviewer overrides remain creation evidence but no longer select execution models. Older Bot clients that compare effective reviewer-state to that historical field may reject this Core. New Bot requires runtime-agent-team-v1 and rejects older Core, including busy Hosts awaiting idle replacement. Upgrade compatible Bot and Runtime together.
+
+### Features
+
+* make Runtime Agent Team authoritative for all sessions ([#181](https://github.com/caelis-labs/caelis/issues/181)) ([b8132a5](https://github.com/caelis-labs/caelis/commit/b8132a5299f5133bb85d5a9c6bd155d0d1b5b5a8))
+
+
+### Bug Fixes
+
+* **acp:** complete SDK v1.5.2 and draft alpha.10 migration ([#180](https://github.com/caelis-labs/caelis/issues/180)) ([7b88f78](https://github.com/caelis-labs/caelis/commit/7b88f78427bba37506d3bf58711409e0eda9a886))
+* **control:** expose only caller-resolvable approval heads ([#179](https://github.com/caelis-labs/caelis/issues/179)) ([0d87488](https://github.com/caelis-labs/caelis/commit/0d8748800bdd37064f140cf30b181fba1b3438c2))
+* normalize chat history before binding request coverage ([#176](https://github.com/caelis-labs/caelis/issues/176)) ([9108d26](https://github.com/caelis-labs/caelis/commit/9108d267f64cfc5a9030e3fb21630e28d67b109a))
+* **sandbox:** grant GOPATH/pkg/sumdb to sandboxed Go commands ([#178](https://github.com/caelis-labs/caelis/issues/178)) ([3821e32](https://github.com/caelis-labs/caelis/commit/3821e323b4a957895922b09503c877e87350f53e))
+
 ## [0.74.0](https://github.com/caelis-labs/caelis/compare/v0.73.3...v0.74.0) (2026-10-28)
 
 
