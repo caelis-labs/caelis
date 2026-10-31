@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.76.0](https://github.com/caelis-labs/caelis/compare/v0.75.0...v0.76.0) (2026-10-31)
+
+
+### Features
+
+* route MCP through fixed discovery and call entry points ([#186](https://github.com/caelis-labs/caelis/issues/186)) ([98e93f3](https://github.com/caelis-labs/caelis/commit/98e93f34561428ca7bcb1abfe6a463b473952b8b))
+
+
+### Bug Fixes
+
+* keep ToolSearch declaration stable across catalog changes ([#184](https://github.com/caelis-labs/caelis/issues/184)) ([b28448a](https://github.com/caelis-labs/caelis/commit/b28448a036844ae662b223f4f2d20aa743e5474e))
+* preserve plugin source identity and complete multipart recovery ([#185](https://github.com/caelis-labs/caelis/issues/185)) ([029e933](https://github.com/caelis-labs/caelis/commit/029e93336f3926191ce860544ee85597e7f0fc56))
+* retain desktop app approval on fixed MCP routing ([#187](https://github.com/caelis-labs/caelis/issues/187)) ([d15874f](https://github.com/caelis-labs/caelis/commit/d15874f759aae5736b5afecf1060186a23d700bf))
+
 ## [0.75.0](https://github.com/caelis-labs/caelis/compare/v0.74.0...v0.75.0) (2026-10-30)
 
 
