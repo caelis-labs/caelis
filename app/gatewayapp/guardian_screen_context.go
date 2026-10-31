@@ -3,7 +3,9 @@ package gatewayapp
 import (
 	"errors"
 	"fmt"
+	"strings"
 
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/internal/kernel"
@@ -61,7 +63,13 @@ func guardianMCPSource(req kernel.ApprovalReviewRequest) map[string]any {
 		"remote_tool":        def.Metadata[tool.MetadataMCPTool],
 		"source_fingerprint": def.Metadata[tool.MetadataMCPSourceFingerprint],
 	}
-	if guardianNativeMCPScopeOptions(req) {
+	if resource := guardianMCPResourceScope(req); resource != nil {
+		source["resource_scope"] = resource
+		source["scope_options"] = map[string]any{
+			"allow_session": "this exact resource in this real Session, across Turns; no other resource or Session",
+			"cancel":        "no remote call and no resource grant",
+		}
+	} else if guardianNativeMCPScopeOptions(req) {
 		source["scope_options"] = map[string]any{
 			"allow_once":    "this call only",
 			"allow_session": "this real Session only, across Turns",
@@ -70,6 +78,31 @@ func guardianMCPSource(req kernel.ApprovalReviewRequest) map[string]any {
 		}
 	}
 	return source
+}
+
+// Resource scope is a Host-assembled rule over the exact original argument.
+// Remote metadata, approval prose and arbitrary option IDs cannot establish it.
+func guardianMCPResourceScope(req kernel.ApprovalReviewRequest) map[string]any {
+	def := req.RuntimeRequest.Tool
+	resourceGate, _ := req.RuntimeRequest.Metadata[approval.MetadataMCPResourceGate].(bool)
+	if !resourceGate || req.Approval == nil || !tool.IsMCPDefinition(def) || len(req.Approval.Options) != 2 {
+		return nil
+	}
+	parameter, _ := def.Metadata[tool.MetadataMCPResourceParameter].(string)
+	if parameter == "" {
+		return nil
+	}
+	want := [2]struct{ id, kind string }{{"allow_session", "allow_once"}, {"cancel", "reject_once"}}
+	for index, option := range req.Approval.Options {
+		if option.ID != want[index].id || option.Kind != want[index].kind {
+			return nil
+		}
+	}
+	value, ok := rawJSONMap(req.RuntimeRequest.Call.Input)[parameter].(string)
+	if !ok || strings.TrimSpace(value) == "" {
+		return nil
+	}
+	return map[string]any{"parameter": parameter, "value": value}
 }
 
 type guardianScreenError struct {

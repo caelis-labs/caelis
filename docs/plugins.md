@@ -44,8 +44,10 @@ leaves the managed Host running.
 `install` requires an absolute existing directory and registers it in place;
 the installer owns the package files and must keep them available. A first
 installation enables the plugin; standard local packages retain the user's
-enabled/disabled choice on repeat installs and upgrades. For standard packages
-the manifest name is the stable installed ID.
+enabled/disabled choice on repeat installs and upgrades. For both Agent Plugins
+and Claude packages, the manifest name is the stable installed ID; version,
+platform, spaces, or non-English characters in the extraction directory do not
+change it.
 Repeat installs and upgrades preserve unrelated plugins, marketplaces, Host
 settings, explicit executable paths and private `PLUGIN_DATA`. Standard local
 updates stay bound to the registered canonical directory, resolved at install
@@ -59,6 +61,12 @@ Missing or contradictory saved source evidence also requires reinstallation.
 This new registration starts enabled; private data survives by ID, while any
 plugin-specific Host executable settings must be configured again. Verify
 package provenance before invoking installation.
+
+Older local Claude packages may be registered under their extraction directory
+name. Remove that old ID before installing the same package under its manifest
+name; Caelis rejects duplicate registrations of one source. Keep the package
+directory available and configure any plugin-specific Host executable settings
+again after reinstalling.
 
 `remove` unregisters the ID for later activations; repeating it when absent
 succeeds. It leaves externally owned files and private data available. `status`
@@ -90,20 +98,36 @@ observation or cleanup failed; do not blindly replay an uncertain mutation.
 Without `--json`, the command prints a brief text result and errors on stderr.
 
 For Desktop World, verify the package for your OS/CPU and register its extracted
-Agent Plugin root. Caelis starts exactly the launcher declared in `mcp.json`;
-the package owns its private worker. A single-exec DTW package exposes one MCP
-`exec`, qualified as `desktop_world__exec` inside Caelis. Earlier Full/Lite
-packages keep their declared launcher and tool catalog; Lite requires an
-explicit trusted Host `ExecutableEnv["DTW_NODE_PATH"]` Node executable setting.
-Core trusts all MCP tools assembled from the configured `desktop-world` plugin,
-so ordinary MCP source approval is skipped across package, server-version and
-tool-schema updates. `desktop_world` is not a plugin-ID alias, and an ordinary
-MCP server named `desktop-world` does not inherit this trust. Explicit per-call
-policy Ask/Deny and OS permissions still apply. This trusts the plugin's computer
-operation capability; it does not provide per-app isolation. Reviewing a script
-remains the caller's responsibility. Disabling/removing the plugin excludes it
-from later Runtime assembly; deleting a source grant does not disable this
-plugin-level trust.
+Agent Plugin root. The rewrite package declares `bin/dtw mcp` in `.mcp.json`
+and bundles its Skill. No separate Host adapter, CUA SDK, or Node installation
+is required. The Skill appears as `desktop-world:desktop-world`; its four MCP
+tools are qualified as `desktop_world__apps`, `desktop_world__api`,
+`desktop_world__exec`, and `desktop_world__result` inside Caelis.
+
+An operation supplies only `exec({app, source})`: a stable platform app ID and a
+script for that app. Caelis asks to allow that app for the current Session on
+its first use. Later scripts for the same app reuse that approval; another app
+or another Session requires approval again. Missing, empty, or non-string app
+arguments are rejected before dispatch. Concurrent first calls for the same
+app share the pending approval. Cancelling or denying it does not execute the
+pending scripts. Grants remain bound to the accepted plugin/tool source, so a
+changed source or schema also requires approval again. There is no permanent
+or whole-plugin desktop grant.
+
+For the configured `desktop-world` 0.2 app contract, `apps`, `api`, and `result` skip the
+ordinary MCP source prompt: they discover capabilities or read this connection's
+existing execution results. Other tools retain ordinary MCP source approval.
+`desktop_world` is not a plugin-ID alias, and an ordinary MCP server named
+`desktop-world` does not inherit these rules. Explicit per-call policy Ask/Deny
+and OS permissions still apply. Caelis owns approval; DTW receives the same
+standard MCP arguments and remains usable with other Agents. Disabling/removing
+the plugin excludes it from later Session assembly.
+
+Released pre-0.2 packages retain ordinary MCP source approval through the fixed
+entry points; they receive no blanket trust or new app-parameter requirement.
+Control owns this compatibility rule until the supported DTW package floor is
+0.2. Missing or unrecognized versions retain the resource gate and cannot
+silently acquire broad execution trust.
 
 You can copy this instruction to an Agent:
 
@@ -111,7 +135,7 @@ You can copy this instruction to an Agent:
 > official package outside my workspace. Install the extracted root with
 > `caelis plugin install <absolute path> --json`, then start a new Session. Check
 > `caelis plugin status desktop-world --json` and the ready MCP tools before using the Skill. Do not
-> rewrite the package's `mcp.json`, copy credentials, or replay a failed input.
+> rewrite the package's MCP configuration, copy credentials, or replay an uncertain input.
 
 ## Paths, ownership, and results
 

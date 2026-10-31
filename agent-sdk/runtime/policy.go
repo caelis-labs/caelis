@@ -144,12 +144,14 @@ func (t policyWrappedTool) Call(ctx context.Context, call tool.Call) (tool.Resul
 	if t.policy == nil {
 		return tool.Result{}, &policy.ProfileError{Profile: t.mode, Detail: "policy mode is unavailable"}
 	}
+	var mcpGrant MCPGrant
 	if tool.IsMCPDefinition(t.tool.Definition()) {
-		grant, err := mcpGrantFor(t.tool.Definition(), t.session)
+		grant, err := mcpGrantForCall(t.tool.Definition(), t.session, call)
 		if err != nil {
 			return tool.Result{}, err
 		}
 		grant.Owner = t.mcpGrantOwner
+		mcpGrant = grant
 		t.mcpEpoch = t.mcpGrants.revocationEpoch(grant, t.sessionRef.SessionID)
 		t.tool = mcpRevocationTool{Tool: t.tool, store: t.mcpGrants, epoch: t.mcpEpoch}
 	}
@@ -170,6 +172,9 @@ func (t policyWrappedTool) Call(ctx context.Context, call tool.Call) (tool.Resul
 	decision, err = policy.NormalizeDecision(t.mode, decision)
 	if err != nil {
 		return tool.Result{}, err
+	}
+	if mcpGrant.resourceScoped() && decision.Action != policy.ActionDeny {
+		return t.callWithMCPResourceApproval(ctx, call, input, decision, mcpGrant)
 	}
 	// The Host's MCP source grant is independent of this call's policy. In
 	// particular, a cached source grant cannot satisfy a custom per-call Ask.
@@ -236,21 +241,7 @@ func (t policyWrappedTool) requestApprovalWithContinuation(
 	if afterApproved == nil {
 		afterApproved = t.tool.Call
 	}
-	request := agent.ApprovalRequest{
-		Origin:     &agent.ApprovalOrigin{WorkingDirectory: t.session.CWD, Role: agent.ApprovalRoleMain, Endpoint: agent.ApprovalEndpointBuiltin, SessionID: t.sessionRef.SessionID, ToolCallID: call.ID},
-		SessionRef: t.sessionRef,
-		Session:    session.CloneSession(t.session),
-		RunID:      strings.TrimSpace(t.approval.runID),
-		TurnID:     strings.TrimSpace(t.approval.turnID),
-		Tool:       t.tool.Definition(),
-		Call:       tool.CloneCall(call),
-		ModelStep:  cloneModelStepRef(call.ModelStep),
-		Approval:   cloneApproval(decision.Approval),
-		Metadata:   mapsClone(decision.Metadata),
-	}
-	if len(request.Approval.Options) == 0 {
-		request.Approval.Options = []session.ProtocolApprovalOption{{ID: "allow_once", Name: "Allow once", Kind: "allow_once"}, {ID: "reject_once", Name: "Reject", Kind: "reject_once"}}
-	}
+	request := t.approvalRequest(call, decision)
 	approvedCall := tool.CloneCall(call)
 	approvedCall.Metadata = mergeCallMetadata(approvedCall.Metadata, decision)
 	started, _ := ctx.Value(taskInvocationStartKey{}).(taskInvocationStart)
@@ -274,7 +265,31 @@ func (t policyWrappedTool) requestApprovalWithContinuation(
 	return policyDecisionResultWithOutcome(call, t.tool.Definition(), decision, resp), nil
 }
 
+func (t policyWrappedTool) approvalRequest(call tool.Call, decision policy.Decision) agent.ApprovalRequest {
+	request := agent.ApprovalRequest{
+		Origin:     &agent.ApprovalOrigin{WorkingDirectory: t.session.CWD, Role: agent.ApprovalRoleMain, Endpoint: agent.ApprovalEndpointBuiltin, SessionID: t.sessionRef.SessionID, ToolCallID: call.ID},
+		SessionRef: t.sessionRef,
+		Session:    session.CloneSession(t.session),
+		RunID:      strings.TrimSpace(t.approval.runID),
+		TurnID:     strings.TrimSpace(t.approval.turnID),
+		Tool:       t.tool.Definition(),
+		Call:       tool.CloneCall(call),
+		ModelStep:  cloneModelStepRef(call.ModelStep),
+		Approval:   cloneApproval(decision.Approval),
+		Metadata:   mapsClone(decision.Metadata),
+	}
+	// A custom policy cannot claim the Runtime's resource grant semantics.
+	delete(request.Metadata, approval.MetadataMCPResourceGate)
+	if len(request.Approval.Options) == 0 {
+		request.Approval.Options = []session.ProtocolApprovalOption{{ID: "allow_once", Name: "Allow once", Kind: "allow_once"}, {ID: "reject_once", Name: "Reject", Kind: "reject_once"}}
+	}
+	return request
+}
+
 func (t policyWrappedTool) resolveMCPApproval(ctx context.Context, call, approvedCall tool.Call, decision policy.Decision, resp agent.ApprovalResponse, grant MCPGrant, afterApproved approvedToolCall) (tool.Result, error) {
+	if err := ctx.Err(); err != nil {
+		return tool.Result{}, err
+	}
 	if resp.Outcome != "selected" {
 		return policyDecisionResultWithOutcome(call, t.tool.Definition(), decision, resp), nil
 	}

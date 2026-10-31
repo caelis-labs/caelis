@@ -63,8 +63,31 @@ func TestCLIPluginWorkerProcess(t *testing.T) {
 	}
 	pid := scanner.Text()
 	server := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "dtw-fixture", Version: "1.0.0"}, nil)
-	mcpsdk.AddTool[struct{}, any](server, &mcpsdk.Tool{Name: "exec", Description: "Deterministic fixture only; reports the private worker PID."}, func(context.Context, *mcpsdk.CallToolRequest, struct{}) (*mcpsdk.CallToolResult, any, error) {
+	reply := func() (*mcpsdk.CallToolResult, any, error) {
 		return &mcpsdk.CallToolResult{Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: pid}}}, nil, nil
+	}
+	mcpsdk.AddTool[struct{}, any](server, &mcpsdk.Tool{Name: "apps", Description: "Fixture app inventory."}, func(context.Context, *mcpsdk.CallToolRequest, struct{}) (*mcpsdk.CallToolResult, any, error) {
+		return reply()
+	})
+	type apiInput struct {
+		Methods []string `json:"methods,omitempty"`
+	}
+	mcpsdk.AddTool[apiInput, any](server, &mcpsdk.Tool{Name: "api", Description: "Fixture method discovery."}, func(context.Context, *mcpsdk.CallToolRequest, apiInput) (*mcpsdk.CallToolResult, any, error) {
+		return reply()
+	})
+	type execInput struct {
+		App    string `json:"app"`
+		Source string `json:"source"`
+	}
+	mcpsdk.AddTool[execInput, any](server, &mcpsdk.Tool{Name: "exec", Description: "Fixture app script; reports the private worker PID without desktop access."}, func(context.Context, *mcpsdk.CallToolRequest, execInput) (*mcpsdk.CallToolResult, any, error) {
+		return reply()
+	})
+	type resultInput struct {
+		App         string `json:"app"`
+		ExecutionID string `json:"execution_id,omitempty"`
+	}
+	mcpsdk.AddTool[resultInput, any](server, &mcpsdk.Tool{Name: "result", Description: "Fixture receipt readback."}, func(context.Context, *mcpsdk.CallToolRequest, resultInput) (*mcpsdk.CallToolResult, any, error) {
+		return reply()
 	})
 	err = server.Run(context.Background(), &mcpsdk.StdioTransport{})
 	_ = input.Close()
@@ -89,9 +112,10 @@ func copyCLIPluginFile(t *testing.T, source, target string, mode os.FileMode) {
 	}
 }
 
-func TestCLIPluginFreshSessionSingleExecAndWorker(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "桌面 plugin with spaces")
-	for _, path := range []string{"plugin.json", "mcp.json", "skills/desktop-world/SKILL.md"} {
+func TestCLIPluginFreshSessionAppToolsAndWorker(t *testing.T) {
+	workspace := t.TempDir()
+	root := filepath.Join(workspace, "桌面 plugin with spaces")
+	for _, path := range []string{".claude-plugin/plugin.json", ".mcp.json", "skills/desktop-world/SKILL.md", "skills/desktop-world/PATTERNS.md"} {
 		copyCLIPluginFile(t, filepath.Join("testdata", "dtw-agent-plugin", path), filepath.Join(root, path), 0o600)
 	}
 	name := "dtw"
@@ -101,10 +125,11 @@ func TestCLIPluginFreshSessionSingleExecAndWorker(t *testing.T) {
 	for _, dir := range []string{"bin", "libexec"} {
 		copyCLIPluginFile(t, os.Args[0], filepath.Join(root, dir, name), 0o700)
 	}
-	// Only the launch arguments/environment differ from the pinned DTW
-	// manifest. The fixture never invokes CUA or a real desktop.
-	writeCLIPluginFile(t, root, "mcp.json", fmt.Sprintf(`{"$schema":"https://agent-plugins.org/schemas/1.0.0/mcp.schema.json","mcpServers":{"desktop-world":{"type":"stdio","command":"./bin/%s","args":["-test.run=^TestCLIPluginWorkerProcess$"],"env":{"CAELIS_TEST_PLUGIN_WORKER":"mcp","CAELIS_TEST_PLUGIN_MARKER":"${PLUGIN_DATA}/worker.pid"}}}}`, name))
-	marker := exerciseCLIPluginSessionLifecycle(t, root)
+	// Only the launch arguments/environment differ from the packaged DTW
+	// manifest. The fixture never performs desktop operations.
+	marker := filepath.Join(workspace, "worker.pid")
+	writeCLIPluginFile(t, root, ".mcp.json", fmt.Sprintf(`{"mcpServers":{"desktop-world":{"command":"${CLAUDE_PLUGIN_ROOT}/bin/%s","args":["-test.run=^TestCLIPluginWorkerProcess$"],"env":{"CAELIS_TEST_PLUGIN_WORKER":"mcp","CAELIS_TEST_PLUGIN_MARKER":%q}}}}`, name, marker))
+	exerciseCLIPluginSessionLifecycle(t, root)
 	data, err := os.ReadFile(marker)
 	pid, parseErr := strconv.Atoi(string(data))
 	if err != nil || parseErr != nil || pid <= 0 || pid == os.Getpid() {
@@ -116,14 +141,14 @@ func TestCLIPluginFreshSessionSingleExecAndWorker(t *testing.T) {
 // ready DTW MCP connection proves startup; desktop input/permissions remain
 // separate physical acceptance. Ordinary Cloud tests use the fixture above.
 func TestCLIPluginDesktopWorldNativeCandidate(t *testing.T) {
-	root := os.Getenv("CAELIS_DTW_SINGLE_EXEC_ROOT")
+	root := os.Getenv("CAELIS_DTW_CANDIDATE_ROOT")
 	if root == "" {
-		t.Skip("set CAELIS_DTW_SINGLE_EXEC_ROOT to a verified native single-exec DTW Plugin")
+		t.Skip("set CAELIS_DTW_CANDIDATE_ROOT to a verified native DTW Plugin")
 	}
 	exerciseCLIPluginSessionLifecycle(t, root)
 }
 
-func exerciseCLIPluginSessionLifecycle(t *testing.T, pluginRoot string) string {
+func exerciseCLIPluginSessionLifecycle(t *testing.T, pluginRoot string) {
 	t.Helper()
 	resetCLIPluginEnv(t)
 	workspace := t.TempDir()
@@ -261,13 +286,13 @@ func exerciseCLIPluginSessionLifecycle(t *testing.T, pluginRoot string) string {
 			t.Fatal(err)
 		}
 		servers := installed.MCPServers
-		if len(servers) == 1 && servers[0].Status == "running" && slices.Equal(servers[0].Tools, []string{"exec"}) {
+		if len(servers) == 1 && servers[0].Status == "running" && hasDTWAppTools(servers[0].Tools) {
 			break
 		}
 		select {
 		case <-ticker.C:
 		case <-ctx.Done():
-			t.Fatalf("single exec did not become ready: %+v", servers)
+			t.Fatalf("DTW app tools did not become ready: %+v", servers)
 		}
 	}
 	for range 2 {
@@ -275,7 +300,7 @@ func exerciseCLIPluginSessionLifecycle(t *testing.T, pluginRoot string) string {
 	}
 	checkSkill(after.id, true)
 	pinned, err := lease.PluginReads().Inspect(ctx, "desktop-world")
-	if err != nil || len(pinned.MCPServers) != 1 || pinned.MCPServers[0].Status != "running" || !slices.Equal(pinned.MCPServers[0].Tools, []string{"exec"}) {
+	if err != nil || len(pinned.MCPServers) != 1 || pinned.MCPServers[0].Status != "running" || !hasDTWAppTools(pinned.MCPServers[0].Tools) {
 		t.Fatalf("remove changed active Session MCP snapshot: %+v, %v", pinned, err)
 	}
 	finish(after.done)
@@ -289,14 +314,12 @@ func exerciseCLIPluginSessionLifecycle(t *testing.T, pluginRoot string) string {
 	if !call("status", "unrelated").Installed || call("status", "desktop-world").Installed {
 		t.Fatal("remove changed unrelated registration or retained DTW")
 	}
-	markers, err := filepath.Glob(filepath.Join(store, "plugins", "data", "*", "worker.pid"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(markers) == 1 {
-		return markers[0]
-	}
-	return ""
+}
+
+func hasDTWAppTools(names []string) bool {
+	ordered := slices.Clone(names)
+	slices.Sort(ordered)
+	return slices.Equal(ordered, []string{"api", "apps", "exec", "result"})
 }
 
 func checkCLIPluginSessionAbsent(t *testing.T, ctx context.Context, host *gatewayapp.Stack, id string) {
