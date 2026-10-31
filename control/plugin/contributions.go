@@ -3,6 +3,9 @@ package plugin
 import (
 	"fmt"
 	"runtime"
+	"strings"
+
+	"golang.org/x/mod/semver"
 
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
@@ -115,7 +118,7 @@ func resolveContributions(configs []Config, skipBroken bool, paths ...RuntimePat
 			// Rules come from the configured plugin identity, never its server
 			// name, remote metadata or script. Only exec creates new desktop work;
 			// result reads an existing receipt in this MCP connection.
-			if installed.ID == "desktop-world" {
+			if installed.ID == "desktop-world" && !legacyDesktopWorldVersion(installed.Version) {
 				spec.ToolResourceParameters = map[string]string{"exec": "app"}
 				spec.SourceTrustedTools = []string{"apps", "api", "result"}
 			}
@@ -129,4 +132,13 @@ func resolveContributions(configs []Config, skipBroken bool, paths ...RuntimePat
 		}
 	}
 	return out, nil
+}
+
+// Control keeps released pre-0.2 DTW packages on ordinary MCP source approval;
+// their script entry point cannot satisfy exec.app. Remove this compatibility
+// rule when the supported DTW package floor is 0.2. Unknown versions retain the
+// resource gate rather than silently obtaining broad execution trust.
+func legacyDesktopWorldVersion(version string) bool {
+	version = "v" + strings.TrimPrefix(strings.TrimSpace(version), "v")
+	return semver.IsValid(version) && semver.Compare(version, "v0.2.0-0") < 0
 }

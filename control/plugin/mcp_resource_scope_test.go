@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"fmt"
 	"maps"
 	"slices"
 	"testing"
@@ -37,6 +38,32 @@ func TestMCPResourceScopeUsesConfiguredDesktopWorldPluginIdentity(t *testing.T) 
 						t.Fatal("independent server rules share mutable state")
 					}
 				}
+			}
+		})
+	}
+}
+
+func TestReleasedLegacyDTWUsesOrdinaryMCPApprovalWithoutNewAppContract(t *testing.T) {
+	for _, version := range []string{"0.1.1", "0.2.0-rc.1", "0.2.0", "1.0.0", ""} {
+		t.Run(version, func(t *testing.T) {
+			root := t.TempDir()
+			writeAgentPluginFile(t, root, "plugin.json", fmt.Sprintf(`{"$schema":"https://agent-plugins.org/schemas/1.0.0/plugin.schema.json","name":"desktop-world","version":%q}`, version))
+			writeAgentPluginFile(t, root, "mcp.json", `{"$schema":"https://agent-plugins.org/schemas/1.0.0/mcp.schema.json","mcpServers":{"dtw":{"type":"stdio","command":"./server"}}}`)
+			writeAgentPluginFile(t, root, "server", "launcher")
+			out, err := ResolveContributions([]Config{{ID: "desktop-world", Root: root, Enabled: true}}, RuntimePaths{StoreDir: t.TempDir()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			spec := out.MCPServerSpecs[0]
+			if spec.SourceTrusted {
+				t.Fatal("legacy or current DTW gained blanket trust")
+			}
+			if version == "0.1.1" {
+				if len(spec.ToolResourceParameters) != 0 || len(spec.SourceTrustedTools) != 0 {
+					t.Fatal("old script contract was forced to accept app")
+				}
+			} else if spec.ToolResourceParameters["exec"] != "app" {
+				t.Fatal("new or unknown DTW bypassed app gate")
 			}
 		})
 	}

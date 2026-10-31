@@ -114,7 +114,7 @@ pending scripts. Grants remain bound to the accepted plugin/tool source, so a
 changed source or schema also requires approval again. There is no permanent
 or whole-plugin desktop grant.
 
-For the configured `desktop-world` plugin, `apps`, `api`, and `result` skip the
+For the configured `desktop-world` 0.2 app contract, `apps`, `api`, and `result` skip the
 ordinary MCP source prompt: they discover capabilities or read this connection's
 existing execution results. Other tools retain ordinary MCP source approval.
 `desktop_world` is not a plugin-ID alias, and an ordinary MCP server named
@@ -122,6 +122,12 @@ existing execution results. Other tools retain ordinary MCP source approval.
 and OS permissions still apply. Caelis owns approval; DTW receives the same
 standard MCP arguments and remains usable with other Agents. Disabling/removing
 the plugin excludes it from later Session assembly.
+
+Released pre-0.2 packages retain ordinary MCP source approval through the fixed
+entry points; they receive no blanket trust or new app-parameter requirement.
+Control owns this compatibility rule until the supported DTW package floor is
+0.2. Missing or unrecognized versions retain the resource gate and cannot
+silently acquire broad execution trust.
 
 You can copy this instruction to an Agent:
 
