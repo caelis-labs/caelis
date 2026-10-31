@@ -10,10 +10,10 @@ explicit Runtime/Manager options.
 | `async_compact` | Generate one background context checkpoint candidate within the active Turn. |
 | `idle_compact` | Generate and commit a checkpoint after a completed Turn has remained idle for 60 seconds. |
 
-MCP catalog refresh and deferred tool retirement are always enabled. They are not
-experimental settings. Refresh does not require compaction; retirement uses a
-durable canonical compact with synchronous, asynchronous or idle compaction. A generated
-summary is never a retirement signal. See [MCP lifecycle](mcp-tool-lifecycle.md) and the
+MCP catalog refresh is always enabled and independent of compaction. MCP-enabled
+Sessions use fixed `tool_search` and `mcp_call` declarations, with discovery
+bindings projected from canonical search receipts. Compaction does not retire
+MCP tools. See [MCP tools](mcp-tool-lifecycle.md) and the
 [SDK durability boundary](agent-sdk-boundary.md).
 
 ## Scope and activation

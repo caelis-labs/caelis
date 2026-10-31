@@ -61,7 +61,7 @@ func TestOpenAICodexSerializesExternalCapabilityBoundaryWithoutChangingSchema(t 
 			"required": []any{"query"},
 		},
 		Metadata: map[string]any{
-			tool.MetadataToolKind:             tool.MetadataToolKindMCP,
+			tool.MetadataToolKind:             "external_fixture",
 			tool.MetadataExternalCapability:   true,
 			tool.MetadataDescriptionAuthority: tool.MetadataAuthorityNonAuthorizing,
 		},

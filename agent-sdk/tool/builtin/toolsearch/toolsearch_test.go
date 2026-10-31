@@ -66,8 +66,8 @@ func TestToolSearchFindsDeferredMCPTools(t *testing.T) {
 		t.Fatalf("returned tool = %+v, want calendar function", got)
 	}
 	items := output["tools"].([]any)
-	if fields := items[0].(map[string]any); len(fields) != 1 {
-		t.Fatalf("discovery repeated callable schema or provenance: %#v", fields)
+	if fields := items[0].(map[string]any); fields["description"] == nil || fields["input_schema"] == nil || fields["binding"] == nil {
+		t.Fatalf("discovery missing full contract: %#v", fields)
 	}
 }
 
@@ -99,7 +99,7 @@ func TestParseRequestRejectsOversizedQueryAndLimit(t *testing.T) {
 	}
 }
 
-func TestToolSearchHeavySchemasDoNotBloatDiscoveryResult(t *testing.T) {
+func TestToolSearchReturnsOnlyCompleteEntriesWithinResultBudget(t *testing.T) {
 	t.Parallel()
 
 	tools := make([]tool.Tool, 0, maxLimit)
@@ -126,8 +126,8 @@ func TestToolSearchHeavySchemasDoNotBloatDiscoveryResult(t *testing.T) {
 		t.Fatal(err)
 	}
 	payload := tool.ParseToolSearchOutput(output)
-	if payload.Truncated || payload.OmittedCount != 0 || payload.Count != maxLimit {
-		t.Fatalf("payload = %#v, want all matching names without schema duplication", payload)
+	if !payload.Truncated || payload.OmittedCount == 0 || payload.Count == 0 || payload.Count+payload.OmittedCount != maxLimit {
+		t.Fatalf("payload = %#v, want complete entries and explicit omissions", payload)
 	}
 	if tokens := tool.EstimateToolSearchResultPromptTokens(payload); tokens > tool.MaxToolSearchResultPromptTokens {
 		t.Fatalf("result projected tokens = %d, want <= %d", tokens, tool.MaxToolSearchResultPromptTokens)
@@ -176,10 +176,11 @@ func mcpCandidate(name, description, pluginID, server, mcpTool string, schema ma
 		Description: description,
 		InputSchema: schema,
 		Metadata: map[string]any{
-			tool.MetadataToolKind:  tool.MetadataToolKindMCP,
-			tool.MetadataPluginID:  pluginID,
-			tool.MetadataMCPServer: server,
-			tool.MetadataMCPTool:   mcpTool,
+			tool.MetadataToolKind:             tool.MetadataToolKindMCP,
+			tool.MetadataPluginID:             pluginID,
+			tool.MetadataMCPServer:            server,
+			tool.MetadataMCPTool:              mcpTool,
+			tool.MetadataMCPSourceFingerprint: "fixture-v1",
 		},
 	}}
 }

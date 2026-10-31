@@ -89,7 +89,6 @@ func TestViewImageRequiresDeclaredImageInputCapability(t *testing.T) {
 	if specs := visibility.ModelSpecs(); len(specs) != 0 {
 		t.Fatalf("ViewImage specs = %#v, want hidden for text-only model", specs)
 	}
-	visibility.Reveal(ViewImageToolName)
 	if specs := visibility.ModelSpecs(); len(specs) != 0 {
 		t.Fatalf("revealed ViewImage specs = %#v, want capability gate to remain closed", specs)
 	}

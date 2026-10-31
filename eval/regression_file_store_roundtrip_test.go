@@ -138,7 +138,7 @@ func TestRegressionFileStoreRoundTripMinimalToolLoop(t *testing.T) {
 	}
 }
 
-func TestRegressionFileStoreRoundTripDeferredMCPToolVisibility(t *testing.T) {
+func TestRegressionFileStoreRoundTripFixedMCPEntry(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
@@ -147,13 +147,14 @@ func TestRegressionFileStoreRoundTripDeferredMCPToolVisibility(t *testing.T) {
 	sess, err := store.StartSession(ctx, session.StartSessionRequest{
 		AppName:            "caelis",
 		UserID:             "test-user",
-		PreferredSessionID: "sess-file-deferred-mcp-tool",
+		PreferredSessionID: "sess-file-fixed-mcp-tool",
 	})
 
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
 	}
 
+	effects := 0
 	const mcpToolName = "mcp__calendar__demo__create_event"
 	mcpTool := tool.NamedTool{
 		Def: tool.Definition{
@@ -161,13 +162,15 @@ func TestRegressionFileStoreRoundTripDeferredMCPToolVisibility(t *testing.T) {
 			Description: "Create calendar events",
 			InputSchema: map[string]any{"type": "object"},
 			Metadata: map[string]any{
-				tool.MetadataToolKind:  tool.MetadataToolKindMCP,
-				tool.MetadataPluginID:  "calendar",
-				tool.MetadataMCPServer: "demo",
-				tool.MetadataMCPTool:   "create_event",
+				tool.MetadataToolKind:             tool.MetadataToolKindMCP,
+				tool.MetadataPluginID:             "calendar",
+				tool.MetadataMCPServer:            "demo",
+				tool.MetadataMCPTool:              "create_event",
+				tool.MetadataMCPSourceFingerprint: "calendar-v1",
 			},
 		},
 		Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
+			effects++
 			return tool.Result{
 				ID:   call.ID,
 				Name: call.Name,
@@ -183,7 +186,7 @@ func TestRegressionFileStoreRoundTripDeferredMCPToolVisibility(t *testing.T) {
 	}
 	tools := []tool.Tool{searchTool, mcpTool}
 
-	liveScripted := evalharness.NewScriptedModel("live-file-deferred-mcp",
+	liveScripted := evalharness.NewScriptedModel("live-file-fixed-mcp",
 		evalharness.ToolCallStep("", model.ToolCall{
 			ID:   "call-search",
 			Name: tool.ToolSearchToolName,
@@ -191,13 +194,13 @@ func TestRegressionFileStoreRoundTripDeferredMCPToolVisibility(t *testing.T) {
 		}),
 		evalharness.ToolCallStep("", model.ToolCall{
 			ID:   "call-mcp",
-			Name: mcpToolName,
-			Args: `{}`,
+			Name: tool.MCPCallToolName,
+			Args: `{"tool_name":"mcp__calendar__demo__create_event","arguments":{}}`,
 		}),
 		evalharness.TextStep("created"),
 	)
 	liveRun, err := evalharness.RunChatScenario(ctx, evalharness.ChatScenario{
-		Name:      "live-file-deferred-mcp",
+		Name:      "live-file-fixed-mcp",
 		SessionID: sess.SessionID,
 		Prompt:    "create a calendar event",
 		Model:     liveScripted,
@@ -209,11 +212,14 @@ func TestRegressionFileStoreRoundTripDeferredMCPToolVisibility(t *testing.T) {
 	if got, want := len(liveRun.Requests), 3; got != want {
 		t.Fatalf("live request count = %d, want %d", got, want)
 	}
-	if got, want := requestToolNames(liveRun.Requests[0]), []string{tool.ToolSearchToolName}; !slices.Equal(got, want) {
+	if got, want := requestToolNames(liveRun.Requests[0]), []string{tool.ToolSearchToolName, tool.MCPCallToolName}; !slices.Equal(got, want) {
 		t.Fatalf("initial request tools = %v, want %v", got, want)
 	}
+	if effects != 1 {
+		t.Fatalf("live effects = %d", effects)
+	}
 	livePostSearchTools := requestToolNames(liveRun.Requests[1])
-	if want := []string{tool.ToolSearchToolName, mcpToolName}; !slices.Equal(livePostSearchTools, want) {
+	if want := []string{tool.ToolSearchToolName, tool.MCPCallToolName}; !slices.Equal(livePostSearchTools, want) {
 		t.Fatalf("post-search request tools = %v, want %v", livePostSearchTools, want)
 	}
 
@@ -236,11 +242,12 @@ func TestRegressionFileStoreRoundTripDeferredMCPToolVisibility(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Events() error = %v", err)
 	}
-	reloadedScripted := evalharness.NewScriptedModel("reloaded-file-deferred-mcp",
+	reloadedScripted := evalharness.NewScriptedModel("reloaded-file-fixed-mcp",
+		evalharness.ToolCallStep("", model.ToolCall{ID: "call-resumed", Name: tool.MCPCallToolName, Args: `{"tool_name":"mcp__calendar__demo__create_event","arguments":{}}`}),
 		evalharness.TextStep("ok"),
 	)
 	reloadedRun, err := evalharness.RunChatScenario(ctx, evalharness.ChatScenario{
-		Name:      "reloaded-file-deferred-mcp",
+		Name:      "reloaded-file-fixed-mcp",
 		SessionID: sess.SessionID,
 		Prompt:    "continue",
 		Model:     reloadedScripted,
@@ -250,8 +257,11 @@ func TestRegressionFileStoreRoundTripDeferredMCPToolVisibility(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunChatScenario(reloaded) error = %v", err)
 	}
-	if got, want := len(reloadedRun.Requests), 1; got != want {
+	if got, want := len(reloadedRun.Requests), 2; got != want {
 		t.Fatalf("reloaded request count = %d, want %d", got, want)
+	}
+	if effects != 2 {
+		t.Fatalf("resumed discovered target effects = %d, want 2", effects)
 	}
 	if got := requestToolNames(reloadedRun.Requests[0]); !slices.Equal(got, livePostSearchTools) {
 		t.Fatalf("reloaded request tools = %v, want runtime post-search tools %v", got, livePostSearchTools)

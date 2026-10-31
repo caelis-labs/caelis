@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -41,7 +42,8 @@ func (t journaledTool) Call(ctx context.Context, call tool.Call) (tool.Result, e
 	stepID := call.Execution.ItemID
 	var mu sync.Mutex
 	record := session.NormalizeToolExecution(session.ToolExecution{
-		Schema:      session.ToolExecutionSchemaVersion,
+		Schema:    session.ToolExecutionSchemaVersion,
+		ModelCall: call.ModelCall, Binding: call.TargetBinding,
 		Key:         session.ExecutionKey{SessionID: t.sessionRef.SessionID, RunID: t.runID, TurnID: t.turnID, StepID: stepID, ToolCallID: strings.TrimSpace(call.ID)},
 		Revision:    1,
 		ToolName:    def.Name,
@@ -291,7 +293,7 @@ func (r *Runtime) recoverIncompleteToolExecutions(ctx context.Context, ref sessi
 func reconcileToolExecution(ctx context.Context, record session.ToolExecution, tools []tool.Tool) (tool.RecoveryResult, string) {
 	recoveryName := record.ToolName
 	for _, candidate := range tools {
-		if candidate == nil || candidate.Definition().Name != recoveryName {
+		if candidate == nil || candidate.Definition().Name != recoveryName || (record.Binding != nil && tool.BindingForDefinition(candidate.Definition()) != *record.Binding) {
 			continue
 		}
 		recoverer, ok := candidate.(tool.Recoverer)
@@ -358,11 +360,15 @@ func (r *Runtime) appendRecoveredToolResult(
 	step session.ExecutionRecord,
 	payload map[string]any,
 ) error {
+	protocolName := record.ToolName
+	if record.ModelCall != nil {
+		protocolName = record.ModelCall.Name
+	}
 	message := model.Message{
 		Role: model.RoleTool,
 		Parts: []model.Part{model.NewToolResultJSONPart(
 			record.Key.ToolCallID,
-			record.ToolName,
+			protocolName,
 			payload,
 			record.Status != session.ToolExecutionSucceeded,
 		)},
@@ -375,7 +381,7 @@ func (r *Runtime) appendRecoveredToolResult(
 		Actor:          session.ActorRef{Kind: session.ActorKindTool, ID: record.Key.ToolCallID, Name: record.ToolName},
 		Message:        &message,
 		Tool: &session.EventTool{
-			ID: record.Key.ToolCallID, Name: record.ToolName, Status: recoveredToolStatus(record.Status),
+			ModelCall: record.ModelCall, ID: record.Key.ToolCallID, Name: record.ToolName, Status: recoveredToolStatus(record.Status),
 			Input: rawObject(record.Input), Output: session.CloneState(payload),
 		},
 		Journal: &session.ExecutionJournalEntry{
@@ -389,7 +395,9 @@ func (r *Runtime) appendRecoveredToolResult(
 
 func rawObject(raw json.RawMessage) map[string]any {
 	out := map[string]any{}
-	_ = json.Unmarshal(raw, &out)
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	_ = decoder.Decode(&out)
 	return out
 }
 

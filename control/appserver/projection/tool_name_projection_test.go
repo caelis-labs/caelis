@@ -1,6 +1,8 @@
 package projection
 
 import (
+	"bytes"
+	"encoding/json"
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
@@ -314,5 +316,24 @@ func TestProtocolStandardToolNameWinsMetadata(t *testing.T) {
 			}
 			assertStandardToolName(t, updates[0], name)
 		}
+	}
+}
+
+func TestRoutedMCPProjectsRealTargetAndArguments(t *testing.T) {
+	original := model.ToolCall{ID: "outer-42", Name: "mcp_call", Args: `{"tool_name":"maps__route","arguments":{"origin":"北京南站","destination":"故宫"}}`}
+	event := &session.Event{SessionID: "fixed-mcp", Type: session.EventTypeToolCall, Tool: &session.EventTool{ID: original.ID, Name: "maps__route", Input: map[string]any{"origin": "北京南站", "destination": "故宫"}, ModelCall: &original, Status: "pending"}}
+	message := model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{original}, "")
+	event.Message = &message
+	updates, err := ProjectEvent(event)
+	if err != nil || len(updates) != 1 {
+		t.Fatalf("updates=%v err=%v", updates, err)
+	}
+	assertStandardToolName(t, updates[0], "maps__route")
+	raw, err := json.Marshal(updates[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(raw, []byte(`"origin":"北京南站"`)) || bytes.Contains(raw, []byte(`"tool_name":"maps__route"`)) || bytes.Contains(raw, []byte("mcp_call")) {
+		t.Fatalf("projected envelope=%s", raw)
 	}
 }

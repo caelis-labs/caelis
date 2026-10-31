@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -52,6 +53,9 @@ func (t *MCPTool) addReplayAliases(in []string) {
 }
 
 func (t *MCPTool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
+	if err := tool.ValidateMCPArguments(t.def, call.Input); err != nil {
+		return tool.Result{}, err
+	}
 	if t.manager != nil {
 		if err := t.manager.admitCatalogTool(ctx, t); err != nil {
 			return tool.Result{}, err
@@ -59,7 +63,9 @@ func (t *MCPTool) Call(ctx context.Context, call tool.Call) (tool.Result, error)
 	}
 	var args map[string]any
 	if len(call.Input) > 0 {
-		if err := json.Unmarshal(call.Input, &args); err != nil {
+		decoder := json.NewDecoder(bytes.NewReader(call.Input))
+		decoder.UseNumber()
+		if err := decoder.Decode(&args); err != nil {
 			return tool.Result{}, fmt.Errorf("invalid MCP tool arguments: %w", err)
 		}
 	}

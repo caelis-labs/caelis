@@ -121,7 +121,7 @@ func ValidateProfile(p Profile) error {
 			return fmt.Errorf("%w: duplicate or invalid tool name", ErrInvalid)
 		}
 		seen[def.Name] = true
-		if (len(p.SkillDirs)+len(p.SkillRoots) > 0 && def.Name == "Skill") || (len(p.MCPServers) > 0 && def.Name == tool.ToolSearchToolName) {
+		if (len(p.SkillDirs)+len(p.SkillRoots) > 0 && def.Name == "Skill") || (len(p.MCPServers) > 0 && (def.Name == tool.ToolSearchToolName || def.Name == tool.MCPCallToolName)) {
 			return fmt.Errorf("%w: callback collides with an assembled capability tool", ErrInvalid)
 		}
 		for _, server := range p.MCPServers {

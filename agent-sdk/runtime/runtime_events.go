@@ -254,6 +254,9 @@ func defaultActorForEvent(event *session.Event) session.ActorRef {
 	case session.EventTypeUser:
 		return session.ActorRef{Kind: session.ActorKindUser, Name: "user"}
 	case session.EventTypeToolResult:
+		if event.Tool != nil && event.Tool.Name != "" {
+			return session.ActorRef{Kind: session.ActorKindTool, Name: event.Tool.Name}
+		}
 		name := ""
 		if event.Message != nil {
 			if parts := event.Message.ToolResults(); len(parts) > 0 {

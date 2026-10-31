@@ -40,6 +40,8 @@ const LifecycleStatusContextCompacting = "context_compacting"
 // ACP wire shapes are derived from this payload by surface projectors; they are
 // not the storage contract.
 type EventTool struct {
+	// ModelCall retains the original protocol call when execution targets another tool.
+	ModelCall    *model.ToolCall     `json:"model_call,omitempty"`
 	ID           string              `json:"id,omitempty"`
 	TurnComplete bool                `json:"turn_complete,omitempty"`
 	Name         string              `json:"name,omitempty"`

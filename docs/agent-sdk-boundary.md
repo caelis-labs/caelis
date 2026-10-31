@@ -186,7 +186,9 @@ Session write queue. It binds the exact source prefix and coverage sequence,
 request instructions and tool schemas, model identity, dynamic snapshot revision,
 Session state and controller metadata, and the original fence. Adoption permits
 only an unchanged prefix plus a complete, ordered raw tail. Configuration,
-authorization state, or tool catalog changes discard the candidate. Current
+or authority changes covered by the embedding snapshot discard the candidate.
+MCP catalog refresh is checked at tool dispatch and does not itself mutate a
+checkpoint candidate. Current
 Runtime continuity is assembled again at adoption. Unpaired tool calls/results,
 new checkpoints, and candidates without a smaller projected context are rejected.
 Chat binds source coverage when assembling a request, only when its complete
@@ -202,24 +204,16 @@ both boundaries and fingerprints and never falls back to an independent request.
 Custom async compactors must enforce `compact.Request` coverage and in-context
 requirements. Synchronous compaction retains its optional fallback.
 
-Candidate readiness is not a commit. Synchronous, async and idle paths use the same guarded
-checkpoint writer, with revision CAS and original-ID readback after an uncertain
-write. Only the confirmed canonical compact event is the safe success marker for
-embedding-owned actions such as retiring discovered tool definitions. Consumers
-key their work by that event's ID/Seq and coverage and refresh the next request
-snapshot. Runtime exposure is metadata in that same canonical append, with no
-second retirement mutation. Generation callbacks and lifecycle
-interceptors are not tool-retirement hooks. A catalog change before adoption
-invalidates a candidate; a change after commit belongs to the newly resolved
-request. Runtime does not own an additional MCP compaction callback.
-Dynamic request resolvers supply a side-effect-free `ModelRequestSnapshot.Validate`
-guard that serializes configuration, catalog and authority changes with this
-short commit. Missing validation disables speculation; it does not fabricate a
-provider admission or modify the Host's last-request record.
-Runtime-owned catalog and grant guards still apply to synchronous recovery when
-that optional embedding validator is absent. A dynamic recovery without a
-captured request authority is rejected before generation or checkpoint append
-because deferred retirement is always active.
+Candidate readiness is not a commit. Synchronous, async and idle paths use the
+same guarded checkpoint writer, with revision CAS and original-ID readback after
+an uncertain write. Only the confirmed canonical compact event changes model
+context. Compaction does not retire MCP tools or synchronize an exposure registry.
+Dynamic request resolvers supply a side-effect-free
+`ModelRequestSnapshot.Validate` guard that serializes embedding configuration and
+authority changes with this short commit. Missing validation disables speculation;
+it does not fabricate provider admission or modify the Host's last-request record.
+MCP availability and grant revocation are checked by their existing execution
+owners independently of compaction.
 
 An async candidate stays inside its originating Turn. Stop, turn completion and
 synchronous recovery cancel and drain it before Runner completion; existing Host
@@ -309,21 +303,21 @@ Canonical ToolSpecs describe Runtime-accepted input. Provider downgrade never
 weakens local schema, approval, or policy validation. Malformed external schemas
 are quarantined instead of replaced by permissive empty schemas.
 
-ToolSearch results persist discovered names and admission counts, not copies of
-schemas or source metadata. The next model request exposes the registered
-canonical definitions; replay restores visibility by those names. Admission still
-budgets the full callable schemas. An activation-owned deferred tool source may
-publish ready MCP tools after a run begins. Runtime wraps them with the same
-policy, execution journal, and lifecycle behavior as static tools. The run pins
-each accepted definition together with its callable, so later catalog changes
-cannot redirect an already-bound name. Replay discoveries whose server is still
-initializing become visible only when that definition is ready, under the same
-budgets.
+MCP-enabled Sessions expose fixed `tool_search` and `mcp_call` definitions.
+Search results return complete normalized input schemas and identity/version
+bindings. Successful new-format canonical receipts alone grant discovery
+eligibility. Runtime projects them from canonical events across compaction and
+resume; old exposure, name-only search results and checkpoint discovered-name
+fields remain readable history and require a fresh search.
 
-The default-off [MCP tool lifecycle experiment](mcp-tool-lifecycle.md) adds
-identity/version-bound discovery, notification-driven directory refresh, and
-checkpoint-atomic retirement of Session exposure. It does not change the
-server/plugin lifecycle or remove canonical tool results.
+Runtime resolves the envelope to a pinned real Tool, validates its binding and
+arguments, and enters the same policy, Journal, invocation and lifecycle wrappers
+as other tools. Display and approval data name the real target and arguments;
+typed original-call data keep model history paired under the outer call ID and
+`mcp_call` name. MCP schemas never join model `tools`, and no per-run exposure
+limit or retirement tool remains. [MCP tools](mcp-tool-lifecycle.md) describes
+refresh and final dispatch. The stable-tools contract does not promise that the
+entire model request prefix is unchanged.
 
 Every MCP invocation reaches Runtime policy admission, including tools loaded
 through ToolSearch, plugins, and injected MCP sources. A ready connection,
@@ -361,7 +355,9 @@ and respects the declared model context window; larger catalogs are covered in
 bounded batches, then batch selections are compared. A complete catalog above
 4 MiB or a single candidate that cannot fit one request fails explicitly. Its
 only callable tool reads one named candidate's current schema, from that
-request's catalog. It can read at most four schemas in five model steps per
+request's catalog. One out-of-batch name can receive a paired error for
+correction, with no schema read; repeated violations fail. Invalid attempts
+consume the existing read budget. It can inspect at most four names in five model steps per
 batch.
 The selector inherits the main request's resolved model, reasoning and service
 tier unless Control binds a separate provider model. It never inherits main tools.

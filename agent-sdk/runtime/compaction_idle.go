@@ -199,7 +199,7 @@ func (r *Runtime) PrepareIdleCompaction(ctx context.Context, ref session.Session
 	}
 	// Acquire a new resolver-owned lease before relinquishing the completed Turn's
 	// bridge reference. In particular, do not carry its Turn-bound Admit closure.
-	fresh := agent.ModelRequestSnapshot{Revision: "static", Model: snapshot.model, DeferredTools: snapshot.authority.catalog, Validate: func(context.Context) (func(), error) { return func() {}, nil }}
+	fresh := agent.ModelRequestSnapshot{Revision: "static", Model: snapshot.model, DeferredTools: snapshot.authority.deferredTools, Validate: func(context.Context) (func(), error) { return func() {}, nil }}
 	if resolve := snapshot.authority.resolveIdle; resolve != nil {
 		fresh, err = resolve(ctx)
 		if err != nil {
@@ -207,7 +207,6 @@ func (r *Runtime) PrepareIdleCompaction(ctx context.Context, ref session.Session
 		}
 	}
 	validParent := fresh.Validate != nil
-	fresh = r.withMCPCheckpointAuthority(fresh)
 	if !validParent || fresh.Revision != snapshot.authority.epoch || !sameCompactionModel(fresh.Model, snapshot.model) {
 		if fresh.Release != nil {
 			fresh.Release()
@@ -215,7 +214,7 @@ func (r *Runtime) PrepareIdleCompaction(ctx context.Context, ref session.Session
 		return nil, nil
 	}
 	release()
-	authority := &modelRequestAuthority{epoch: fresh.Revision, admit: fresh.Admit, validate: fresh.Validate, catalog: fresh.DeferredTools, canSpeculate: true, refs: 1, release: fresh.Release}
+	authority := &modelRequestAuthority{epoch: fresh.Revision, admit: fresh.Admit, validate: fresh.Validate, deferredTools: fresh.DeferredTools, canSpeculate: true, refs: 1, release: fresh.Release}
 	release = authority.drop
 	snapshot.model = fresh.Model
 	snapshot.authority = authority

@@ -81,7 +81,6 @@ func (r *Runtime) recoverByCompacting(
 	if recovery.decision.Validate != nil {
 		ctx = context.WithValue(ctx, checkpointValidationKey{}, recovery.decision.Validate)
 	} else if req.AgentSpec.ResolveModelRequest == nil {
-		ctx = r.staticCheckpointContext(ctx, req.AgentSpec.DeferredTools)
 	} else {
 		// An overflow outside the gated model has no captured dynamic catalog.
 		// Do not infer authority from the unresolved bootstrap AgentSpec.

@@ -64,11 +64,6 @@ func (s applicationMCPSource) CheckSearchScope(ctx context.Context) error {
 	return nil
 }
 
-func (s applicationMCPSource) CatalogRevision() string { return s.manager.CatalogRevision() }
-func (s applicationMCPSource) ValidateCatalog(ctx context.Context, revision string) (func(), error) {
-	return s.manager.ValidateCatalog(ctx, revision)
-}
-
 func (s applicationMCPSource) Tools() []tool.Tool {
 	ready := s.manager.Tools()
 	for i, item := range ready {
@@ -351,4 +346,12 @@ func (r *applicationTurnResolver) refreshMCPTools(ctx context.Context, pluginID,
 	r.capabilitiesMu.Unlock()
 	defer release()
 	return current.manager.RefreshTools(ctx, pluginID, serverName)
+}
+
+func (s applicationMCPSource) SearchTools() []tool.Tool {
+	ready := s.manager.SearchTools()
+	for i, item := range ready {
+		ready[i] = applicationLeasedTool{Tool: item, store: s.store, scope: s.scope}
+	}
+	return ready
 }

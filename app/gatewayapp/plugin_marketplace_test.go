@@ -8,7 +8,7 @@ import (
 )
 
 func TestMarketplaceAddListInstallUpdateRoundTrip(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := canonicalMarketplaceTestDir(t)
 	storeDir := filepath.Join(tmp, "store")
 	workspaceDir := filepath.Join(tmp, "ws")
 	marketplaceDir := filepath.Join(tmp, "marketplace")
@@ -68,7 +68,7 @@ func TestMarketplaceAddListInstallUpdateRoundTrip(t *testing.T) {
 }
 
 func TestAddMarketplaceAllowsMissingOwner(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := canonicalMarketplaceTestDir(t)
 	marketplaceDir := filepath.Join(tmp, "marketplace")
 	marketplaceManifestDir := filepath.Join(marketplaceDir, ".claude-plugin")
 	if err := os.MkdirAll(marketplaceManifestDir, 0o700); err != nil {
@@ -92,7 +92,7 @@ func TestAddMarketplaceAllowsMissingOwner(t *testing.T) {
 }
 
 func TestInstallFromRegisteredMarketplaceRefetchesMissingRoot(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := canonicalMarketplaceTestDir(t)
 	storeDir := filepath.Join(tmp, "store")
 	workspaceDir := filepath.Join(tmp, "ws")
 	marketplaceDir := filepath.Join(tmp, "marketplace")

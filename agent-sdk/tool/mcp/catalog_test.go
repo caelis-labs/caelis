@@ -245,7 +245,7 @@ func TestCatalogPaginationRacePublishesNoMixedSnapshot(t *testing.T) {
 		}
 	})
 	mgr := catalogManager(t, server, true)
-	revision := mgr.CatalogRevision()
+	previous := mgr.Tools()[0]
 	block.Store(true)
 	done := make(chan error, 1)
 	go func() { done <- mgr.RefreshTools(t.Context(), "p", "local") }()
@@ -257,8 +257,8 @@ func TestCatalogPaginationRacePublishesNoMixedSnapshot(t *testing.T) {
 	catalogTool(server, "c", "c", nil)
 	c := mgr.servers[0].client.catalog
 	awaitCatalog(t, func() bool { c.mu.Lock(); defer c.mu.Unlock(); return c.generation >= 2 })
-	if revision == mgr.CatalogRevision() {
-		t.Fatal("candidate revision survived notification")
+	if err := mgr.admitCatalogTool(t.Context(), previous.(*MCPTool)); err == nil {
+		t.Fatal("old tool remained callable during notification")
 	}
 	block.Store(false)
 	releaseOnce.Do(func() { close(release) })

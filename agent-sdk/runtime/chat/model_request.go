@@ -1,24 +1,8 @@
 package chat
 
 import (
-	"slices"
-
 	agent "github.com/caelis-labs/caelis/agent-sdk"
-	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
-
-func (a *Agent) rememberRequestToolDiscovery(event *session.Event) {
-	names := tool.DiscoveredToolNamesFromMetadata(event.Meta)
-	if event.Tool.Name == tool.ToolSearchToolName {
-		names = append(names, tool.ParseToolSearchOutput(event.Tool.Output).DiscoveredToolNames()...)
-	}
-	for _, name := range names {
-		if len(a.discoveredTools) < tool.MaxDeferredToolsPerRun && !slices.Contains(a.discoveredTools, name) {
-			a.discoveredTools = append(a.discoveredTools, name)
-		}
-	}
-}
 
 func (a *Agent) refreshModelRequest(ctx agent.Context) error {
 	if a.resolveModelRequest == nil {
@@ -47,8 +31,7 @@ func (a *Agent) refreshModelRequest(ctx agent.Context) error {
 	next.releaseModelRequest = snapshot.Release
 	next.resolveModelRequest = a.resolveModelRequest
 	next.toolResultArtifacts = a.toolResultArtifacts
-	next.discoveredTools = a.discoveredTools
-	next.exposure = a.exposure
+	next.discoveries = a.discoveries
 	*a = *next
 	return nil
 }

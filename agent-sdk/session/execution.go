@@ -8,6 +8,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/tool"
+
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/jsonvalue"
 )
@@ -133,6 +136,10 @@ func ExecutionIdentity(key ExecutionKey) string {
 }
 
 type ToolExecution struct {
+	// ModelCall and Binding preserve the original protocol envelope and exact
+	// target for recovery; they do not grant permission to execute or retry.
+	ModelCall     *model.ToolCall     `json:"model_call,omitempty"`
+	Binding       *tool.Binding       `json:"binding,omitempty"`
 	Schema        int                 `json:"schema"`
 	Key           ExecutionKey        `json:"key"`
 	Identity      string              `json:"identity"`
@@ -213,6 +220,14 @@ func (e *ToolExecutionTransitionError) ErrorCode() errorcode.Code {
 
 func NormalizeToolExecution(in ToolExecution) ToolExecution {
 	out := in
+	if in.ModelCall != nil {
+		value := *in.ModelCall
+		out.ModelCall = &value
+	}
+	if in.Binding != nil {
+		value := *in.Binding
+		out.Binding = &value
+	}
 	out.Key = NormalizeExecutionKey(in.Key)
 	out.Identity = strings.TrimSpace(in.Identity)
 	if out.Identity == "" {

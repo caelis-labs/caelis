@@ -443,3 +443,48 @@ func TestAgentSearchCoverageBudgetFailsBeforeDispatch(t *testing.T) {
 		t.Fatalf("dispatched %d requests", len(llm.requests))
 	}
 }
+
+func TestAgentSearchRepairsForeignBatchNameWithoutReadingIt(t *testing.T) {
+	for _, empty := range []bool{false, true} {
+		t.Run(fmt.Sprint(empty), func(t *testing.T) {
+			reads := 0
+			llm := &selectionModel{respond: func(i int, req *model.Request) (*model.Response, error) {
+				message := model.NewTextMessage(model.RoleAssistant, `{"tools":[]}`)
+				switch i {
+				case 0:
+					message = model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{ID: "wrong-batch", Name: inspectSchemaToolName, Args: `{"name":"other__read"}`}}, "")
+				case 1:
+					results := req.Messages[len(req.Messages)-1].ToolResults()
+					if len(results) != 1 || !results[0].IsError || reads != 0 {
+						t.Fatal("foreign schema was read or error was not paired")
+					}
+					if !empty {
+						message = model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{ID: "corrected", Name: inspectSchemaToolName, Args: `{"name":"current__read"}`}}, "")
+					}
+				case 2:
+					message = model.NewTextMessage(model.RoleAssistant, `{"tools":["current__read"]}`)
+				default:
+					t.Fatal("unbounded batch-name repair")
+				}
+				return &model.Response{Message: message, TurnComplete: true, Status: model.ResponseStatusCompleted}, nil
+			}}
+			names, err := NewAgentRanker().Rank(t.Context(), "read", []tool.Definition{{Name: "current__read"}}, 1, SearchModel{Model: llm, ReadSchema: func(_ context.Context, name string) (tool.Definition, error) {
+				reads++
+				if name != "current__read" {
+					t.Fatal("foreign schema leaked")
+				}
+				return tool.Definition{Name: name, InputSchema: map[string]any{"type": "object"}}, nil
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := 1
+			if empty {
+				want = 0
+			}
+			if len(names) != want || reads != want {
+				t.Fatalf("names=%v reads=%d", names, reads)
+			}
+		})
+	}
+}

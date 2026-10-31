@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -175,17 +174,12 @@ func TestCatalogRefreshFailureDoesNotSettleNewGeneration(t *testing.T) {
 	if err := mgr.RefreshTools(t.Context(), "p", "local"); err == nil {
 		t.Fatal("listing failure was lost")
 	}
-	if release, err := mgr.ValidateCatalog(t.Context(), mgr.CatalogRevision()); err != nil {
-		t.Fatal("settled failure blocked checkpoint:", err)
-	} else {
-		release()
+	if got := mgr.SearchTools(); len(got) != 0 {
+		t.Fatal("failed refresh remained discoverable")
 	}
 	mgr.servers[0].client.catalog.invalidate()
-	if release, err := mgr.ValidateCatalog(t.Context(), mgr.CatalogRevision()); !errors.Is(err, tool.ErrCatalogSnapshotStale) {
-		if release != nil {
-			release()
-		}
-		t.Fatalf("previous failure settled a new generation: %v", err)
+	if got := mgr.SearchTools(); len(got) != 0 {
+		t.Fatal("old failure made a new dirty generation discoverable")
 	}
 	fail.Store(false)
 	if err := mgr.RefreshTools(t.Context(), "p", "local"); err != nil {

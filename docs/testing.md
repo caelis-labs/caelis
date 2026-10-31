@@ -370,63 +370,34 @@ Evidence records all binary hashes and reported versions. No daily Store or
 provider credential is used. Fixture tests additionally cover detached commands,
 concurrent replacement and explicit-stop/instance fences.
 
-## Experimental MCP tool lifecycle
+## MCP fixed entry points and lifecycle
 
-MCP refresh and tool retirement are always enabled. Asynchronous and idle
-compaction default off and have independent [Control opt-ins](experimental-features.md).
-These tests use temporary Stores and synthetic model responses;
-no user configuration, credentials, or production Session is needed.
-
-```bash
-GOWORK=off go test ./agent-sdk/tool/mcp -run '^TestCatalog' -count=1 -v
-GOWORK=off go test ./agent-sdk/runtime ./agent-sdk/tool -run 'Test(Retirement|MCPRevocation|MCPRetirement)' -count=1 -v
-GOWORK=off go test ./agent-sdk/model/providers -run '^TestRetirementProvider' -count=1 -v
-```
-
-Catalog tests bind ephemeral loopback HTTP ports, exercise both legacy and
-2026-07-28 subscriptions, and test notification coalescing, pagination races,
-failure retention, schema changes, collision ownership, revocation and reconnect.
-The Runtime test starts a real stdio MCP child process and verifies two exact
-local receipt-file effects, approval, marking, durable compaction, full model
-request reconstruction from a fresh file Store, and rediscovery. Fault tests
-cover pending calls/model batches, cancellation and checkpoint write outcomes.
-Snapshot tests cover the directory and grant guards through an actual checkpoint
-write, identity changes before/after that critical section, and rejection of
-generated checkpoints without canonical identity/coverage. Joint scheduler tests use that real stdio server with a blocked synthetic summary,
-late marks/use, accepted CAS tails, and failed or unknown checkpoint writes:
+Fixtures require no user configuration or credentials. They cover complete
+normalized schemas, whole-entry search budgets, fixed provider tools bytes over
+500 catalog definitions, rejection of legacy discovery and guessed names,
+validation and version changes, same-batch isolation, real target display, source
+approval, revocation and unknown-effect recovery.
 
 ```bash
-GOWORK=off go test ./agent-sdk/runtime -run '^TestExperimentalAsyncMCPJointCheckpoint$' -count=1 -v
-GOWORK=off go test ./app/gatewayapp ./surfaces/tui/app -run 'TestExperimental|TestProductExperimental' -count=1 -v
+GOWORK=off go test ./agent-sdk/tool/... ./agent-sdk/runtime/chat ./agent-sdk/model/providers ./agent-sdk/session/... -count=1
+GOWORK=off go test ./agent-sdk/runtime -run 'TestFixedMCP|TestRuntimeLateMCP|TestRuntimeMCPToolSearch|TestMCP' -count=1 -timeout=8m
+GOWORK=off go test ./control/appserver/projection ./surfaces/tui/app -run 'TestRoutedMCP' -count=1
 GOWORK=off go test -race ./agent-sdk/runtime ./agent-sdk/tool/mcp ./control/sessionprofile -run 'TestExperimental|TestAsyncCompaction|TestCatalog|TestMCP|TestConfigurationCheckpoint' -count=1
 ```
 
-Host tests cover the four async/idle combinations together with ignored legacy
-refresh/retirement inputs, desired versus active Runtime values, HTTP operation
-receipts and CAS. Runtime workflows exercise legacy input combinations against
-a loopback MCP server for static and resolved requests, including schema
-replacement, discovery, execution, checkpoint, always-on retirement and full
-file-Store model-context replay. Additional
-regressions cover delayed directory readiness, stable server failures, async
-Turn-start budgets, catalog changes during generation and repeated healthy
-recovery cycles. The Host retry test exercises failed listing followed by an
-authorized HTTP retry without another notification, dormant/disabled rejection,
-Session CAS and operation-receipt deduplication. Product TUI tests verify
-persistence across Host reconstruction, server capability negotiation, keyboard
-staging, original-request retry and full terminal frames at two widths.
-`TestExperimentalRenderedGoldenAndTerminal` owns the checkbox render goldens;
-`UPDATE_GOLDEN=1` refreshes them for intentional visible changes. The summary and
-foreground model responses are deterministic fixtures, not semantic-quality or
-cache-billing evidence.
+The 500-tool stdio fixture discovers and calls 200 distinct tools, then reopens
+its file Store and calls a previously discovered binding. It checks actual model
+tools bytes, real policy identity, per-operation Journal identity and exact
+receipt effects. Catalog fixtures use loopback HTTP and cover notifications,
+pagination, failed refresh, schema replacement, disconnects and pinned handles.
+Generic asynchronous and idle compaction retain their own coverage/CAS,
+cancellation, embedding-validator and uncertain-write regressions. MCP catalog
+failure cannot block unrelated compaction.
 
-The longer deterministic experiment is opt-in and takes several minutes:
-
-```bash
-CAELIS_MCP_RETIREMENT_EXPERIMENT=1 GOWORK=off go test ./agent-sdk/runtime -run '^TestRetirementLongSessionPrefixExperiment$' -timeout 8m -count=1 -v
-```
-
-It runs 80 turns with a checkpoint every 16 turns, comparing ordinary discovery
-and explicit retirement. It reports schema counts, unique admitted tools and
-local prefix token estimates. Provider tests compare serialized tools bytes before
-marking and after retirement. Neither experiment measures real provider cache
-hits, token billing, model selection quality or semantic retention.
+TUI tests render the real tool name and arguments through the standard Control
+projector. Product experimental settings tests retain independent async/idle
+choices and ignored legacy refresh/retirement configuration keys. These fixtures
+do not prove live model selection, external service availability, provider cache
+hits or billing. Real-model MCP acceptance is separately opt-in, uses an explicitly
+supplied private profile and read-only tasks, and must retain original model
+behavior and distinguish external service failures.

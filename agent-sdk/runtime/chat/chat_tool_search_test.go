@@ -48,10 +48,10 @@ func TestChatAgentLoadsDeferredMCPToolsAfterToolSearch(t *testing.T) {
 	if got, want := len(testModel.requests), 3; got != want {
 		t.Fatalf("len(requests) = %d, want %d", got, want)
 	}
-	if got, want := requestToolNames(testModel.requests[0]), []string{tool.ToolSearchToolName}; !reflect.DeepEqual(got, want) {
+	if got, want := requestToolNames(testModel.requests[0]), []string{tool.ToolSearchToolName, tool.MCPCallToolName}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("first request tools = %v, want %v", got, want)
 	}
-	if got, want := requestToolNames(testModel.requests[1]), []string{tool.ToolSearchToolName, mcpToolName}; !reflect.DeepEqual(got, want) {
+	if got, want := requestToolNames(testModel.requests[1]), []string{tool.ToolSearchToolName, tool.MCPCallToolName}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("second request tools = %v, want %v", got, want)
 	}
 	for _, spec := range testModel.requests[1].Tools {
@@ -62,8 +62,8 @@ func TestChatAgentLoadsDeferredMCPToolsAfterToolSearch(t *testing.T) {
 	for _, event := range events {
 		if event.Tool != nil && event.Tool.Name == tool.ToolSearchToolName && event.Type == session.EventTypeToolResult {
 			items := event.Tool.Output["tools"].([]any)
-			if len(items[0].(map[string]any)) != 1 {
-				t.Fatalf("durable discovery repeated schema: %#v", items)
+			if items[0].(map[string]any)["input_schema"] == nil {
+				t.Fatalf("durable discovery missing schema: %#v", items)
 			}
 		}
 	}
@@ -125,7 +125,7 @@ func TestChatAgentRestoresDeferredMCPVisibilityFromToolSearchHistory(t *testing.
 			t.Fatalf("Run() error = %v", runErr)
 		}
 	}
-	if got, want := requestToolNames(testModel.last), []string{tool.ToolSearchToolName, mcpToolName}; !reflect.DeepEqual(got, want) {
+	if got, want := requestToolNames(testModel.last), []string{tool.ToolSearchToolName, tool.MCPCallToolName}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("request tools = %v, want %v", got, want)
 	}
 }
@@ -265,10 +265,11 @@ func mcpToolForTest(name string) tool.Tool {
 			Description: "Create calendar events",
 			InputSchema: map[string]any{"type": "object"},
 			Metadata: map[string]any{
-				tool.MetadataToolKind:  tool.MetadataToolKindMCP,
-				tool.MetadataPluginID:  "calendar",
-				tool.MetadataMCPServer: "demo",
-				tool.MetadataMCPTool:   "create_event",
+				tool.MetadataToolKind:             tool.MetadataToolKindMCP,
+				tool.MetadataPluginID:             "calendar",
+				tool.MetadataMCPServer:            "demo",
+				tool.MetadataMCPTool:              "create_event",
+				tool.MetadataMCPSourceFingerprint: "fixture-v1",
 			},
 		},
 		Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
@@ -288,10 +289,11 @@ func toolSearchResultJSON(t *testing.T, name string) json.RawMessage {
 		Description: "Create calendar events",
 		InputSchema: map[string]any{"type": "object"},
 		Metadata: map[string]any{
-			tool.MetadataToolKind:  tool.MetadataToolKindMCP,
-			tool.MetadataPluginID:  "calendar",
-			tool.MetadataMCPServer: "demo",
-			tool.MetadataMCPTool:   "create_event",
+			tool.MetadataToolKind:             tool.MetadataToolKindMCP,
+			tool.MetadataPluginID:             "calendar",
+			tool.MetadataMCPServer:            "demo",
+			tool.MetadataMCPTool:              "create_event",
+			tool.MetadataMCPSourceFingerprint: "fixture-v1",
 		},
 	}}))
 	if err != nil {
@@ -343,8 +345,8 @@ func (m *toolSearchLoopModel) Generate(_ context.Context, req *model.Request) it
 				Response: &model.Response{
 					Message: model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{
 						ID:   "call-mcp",
-						Name: m.mcpToolName,
-						Args: `{}`,
+						Name: tool.MCPCallToolName,
+						Args: `{"tool_name":"` + m.mcpToolName + `","arguments":{}}`,
 					}}, ""),
 					TurnComplete: true,
 					StepComplete: true,
@@ -406,10 +408,10 @@ func TestChatDiscoversAndCallsMCPReadyDuringFirstModelRequest(t *testing.T) {
 	if !called {
 		t.Fatal("late MCP tool was not called")
 	}
-	if got := requestToolNames(llm.requests[0]); !reflect.DeepEqual(got, []string{tool.ToolSearchToolName}) {
+	if got := requestToolNames(llm.requests[0]); !reflect.DeepEqual(got, []string{tool.ToolSearchToolName, tool.MCPCallToolName}) {
 		t.Fatalf("first request=%v", got)
 	}
-	if got := requestToolNames(llm.requests[1]); !reflect.DeepEqual(got, []string{tool.ToolSearchToolName, name}) {
+	if got := requestToolNames(llm.requests[1]); !reflect.DeepEqual(got, []string{tool.ToolSearchToolName, tool.MCPCallToolName}) {
 		t.Fatalf("post discovery request=%v", got)
 	}
 }

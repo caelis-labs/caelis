@@ -14,16 +14,19 @@ const CheckpointMetadataKey = "compact"
 // CheckpointData is the persisted checkpoint coverage contract. Session owns
 // its encoding; Runtime owns summary generation and projection policy.
 type CheckpointData struct {
-	Revision             int      `json:"revision,omitempty"`
-	ContractVersion      int      `json:"contract_version,omitempty"`
-	SummarizedThroughID  string   `json:"summarized_through_id,omitempty"`
-	SummarizedThroughSeq uint64   `json:"summarized_through_seq,omitempty"`
-	Generator            string   `json:"generator,omitempty"`
-	Trigger              string   `json:"trigger,omitempty"`
-	SourceEventCount     int      `json:"source_event_count,omitempty"`
-	TotalTokens          int      `json:"total_tokens,omitempty"`
-	ContextWindowTokens  int      `json:"context_window_tokens,omitempty"`
-	DiscoveredTools      []string `json:"discovered_tools,omitempty"`
+	Revision             int    `json:"revision,omitempty"`
+	ContractVersion      int    `json:"contract_version,omitempty"`
+	SummarizedThroughID  string `json:"summarized_through_id,omitempty"`
+	SummarizedThroughSeq uint64 `json:"summarized_through_seq,omitempty"`
+	Generator            string `json:"generator,omitempty"`
+	Trigger              string `json:"trigger,omitempty"`
+	SourceEventCount     int    `json:"source_event_count,omitempty"`
+	TotalTokens          int    `json:"total_tokens,omitempty"`
+	ContextWindowTokens  int    `json:"context_window_tokens,omitempty"`
+	// DiscoveredTools retains old checkpoint data for read-only history.
+	// Runtime never writes or uses it for invocation eligibility. Remove when
+	// the supported Session floor excludes checkpoints containing this field.
+	DiscoveredTools []string `json:"discovered_tools,omitempty"`
 }
 
 // CheckpointDataFromEvent decodes current and supported legacy metadata forms.

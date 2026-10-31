@@ -3,7 +3,6 @@ package chat
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"strings"
 	"time"
 
@@ -72,7 +71,9 @@ func (a *Agent) executeToolCallWithProgressAdmitted(
 					continue
 				}
 				canonical, truncationMeta := canonicalToolResult(progress, nil)
-				_ = yieldProgress(session.MarkUIOnly(toolProgressEvent(call, canonical, truncationMeta, progressTaskResultMeta)))
+				event := toolProgressEvent(call, canonical, truncationMeta, progressTaskResultMeta)
+				a.presentMCPEvent(event)
+				_ = yieldProgress(session.MarkUIOnly(event))
 			default:
 				return done.message, done.event, done.err
 			}
@@ -85,7 +86,9 @@ func (a *Agent) executeToolCallWithProgressAdmitted(
 				continue
 			}
 			canonical, truncationMeta := canonicalToolResult(progress, nil)
-			if !yieldProgress(session.MarkUIOnly(toolProgressEvent(call, canonical, truncationMeta, progressTaskResultMeta))) {
+			event := toolProgressEvent(call, canonical, truncationMeta, progressTaskResultMeta)
+			a.presentMCPEvent(event)
+			if !yieldProgress(session.MarkUIOnly(event)) {
 				return model.Message{}, nil, context.Canceled
 			}
 		case done := <-doneCh:
@@ -116,9 +119,9 @@ func (a *Agent) executeToolCallAdmitted(
 	visibility *tool.ToolVisibility,
 ) (model.Message, *session.Event, error) {
 	defer step.MarkAdmissionComplete()
-	selectedTool, ok := a.lookupRunTool(call.Name, visibility)
-	if !ok {
-		rawOutput := tool.ErrorPayload(tool.NewError(tool.ErrorCodeNotFound, fmt.Sprintf("tool %q not found", call.Name)))
+	selectedTool, actualCall, binding, bindingErr := a.boundTool(call, visibility)
+	if bindingErr != nil {
+		rawOutput := tool.ErrorPayload(bindingErr)
 		result := tool.Result{
 			ID:      call.ID,
 			Name:    call.Name,
@@ -127,7 +130,9 @@ func (a *Agent) executeToolCallAdmitted(
 		}
 		canonical, truncationMeta := canonicalToolResult(result, a.toolResultArtifacts)
 		message := toolResultMessageFromCanonical(call, canonical)
-		return message, toolResultEvent(call, canonical, &message, truncationMeta), nil
+		event := toolResultEvent(call, canonical, &message, truncationMeta)
+		a.presentMCPEvent(event)
+		return message, event, nil
 	}
 
 	if tool.IsToolSearchDefinition(selectedTool.Definition()) {
@@ -140,10 +145,16 @@ func (a *Agent) executeToolCallAdmitted(
 		}
 		ctx = toolsearch.WithInvocationAccounting(ctx, observer, admission)
 	}
+	var original *model.ToolCall
+	if binding != nil {
+		value := call
+		original = &value
+	}
 	result, err := selectedTool.Call(ctx, tool.Call{
+		ModelCall: original, TargetBinding: binding,
 		ID:                 strings.TrimSpace(call.ID),
-		Name:               strings.TrimSpace(call.Name),
-		Input:              json.RawMessage(strings.TrimSpace(call.Args)),
+		Name:               strings.TrimSpace(actualCall.Name),
+		Input:              json.RawMessage(strings.TrimSpace(actualCall.Args)),
 		ModelStep:          step,
 		RuntimeModel:       a.model,
 		RuntimeReasoning:   a.reasoning,
@@ -153,11 +164,7 @@ func (a *Agent) executeToolCallAdmitted(
 	if err != nil {
 		result = modelVisibleToolErrorResult(call, result, err)
 	}
-	if tool.IsToolSearchDefinition(selectedTool.Definition()) {
-		a.refreshDeferredTools(visibility)
-	}
-	result = admitToolSearchResult(selectedTool.Definition(), call, result, visibility)
-	result = admitRetirementResult(call, result, visibility)
+	result = a.admitToolSearchResult(selectedTool.Definition(), call, result)
 	canonical, truncationMeta := canonicalToolResult(result, a.toolResultArtifacts)
 	message := toolResultMessageFromCanonical(call, canonical)
 	eventMeta := truncationMeta
@@ -165,6 +172,7 @@ func (a *Agent) executeToolCallAdmitted(
 		eventMeta = mergeEventMeta(eventMeta, runtimeTaskResultSourceMeta(true))
 	}
 	event := toolResultEvent(call, canonical, &message, eventMeta)
+	a.presentMCPEvent(event)
 	return message, event, nil
 }
 
