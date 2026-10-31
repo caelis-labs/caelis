@@ -1,0 +1,9 @@
+{
+  "name": "desktop-world",
+  "description": "App-scoped desktop operations through standard MCP tools and an Agent Skill.",
+  "license": "MIT",
+  "author": {
+    "name": "Caelis Labs"
+  },
+  "version": "0.2.0"
+}

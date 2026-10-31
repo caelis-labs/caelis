@@ -3,6 +3,7 @@ package headless
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -11,9 +12,54 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/control/acppermission"
 	appserver "github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 )
+
+func TestRunSessionOncePreservesDetachedApprovalSubjectAndContext(t *testing.T) {
+	canonical := &session.ProtocolApproval{
+		Context: &session.PermissionContext{Title: "Allow app access for this Session"},
+		Subject: &session.ApprovalSubject{
+			Kind: "app_access", Tool: session.KnownApprovalField("desktop_world_exec"),
+			Operation: session.KnownApprovalField("operate app"),
+			Targets:   []session.ApprovalField{session.KnownApprovalField("com.google.Chrome")},
+			Effect:    session.KnownApprovalField("observe and press"), Scope: session.KnownApprovalField("this Session"),
+			Grants: []session.ApprovalGrant{{OptionID: "allow_session", Scope: session.KnownApprovalField("this app in this Session")}},
+		},
+		ToolCall: session.ProtocolToolCall{ID: "app-open", Name: "desktop_world_exec", Title: "Desktop app access", Kind: "other"},
+		Options:  []session.ProtocolApprovalOption{{ID: "allow_session", Name: "Allow this app for this Session", Kind: "allow_once"}},
+	}
+	wire, err := acppermission.EncodePermissionRequest(session.SessionRef{SessionID: "subject-session"}, canonical, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wire.Title = "Allow app access for this Session"
+	description := "Only the published scope"
+	wire.Description = &description
+	wantSubject := session.CloneApprovalSubject(canonical.Subject)
+	wantContext := &session.PermissionContext{Title: wire.Title, Description: new(description)}
+	handle := newFakeACPHandle([]eventstream.Envelope{{Kind: eventstream.KindRequestPermission, ApprovalRequestID: "subject-approval", ApprovalSubject: canonical.Subject, Permission: &wire}})
+	called := false
+	_, err = RunSessionOnce(t.Context(), fakeStarter{turn: handle}, appserver.SessionTurnStartRequest{SessionID: "subject-session", Input: "inspect"}, Options{
+		ResolveApproval: func(_ context.Context, req ApprovalRequest) (approval.Decision, error) {
+			called = true
+			if req.RequestID != "subject-approval" || req.Payload == nil || !reflect.DeepEqual(req.Payload.Subject, wantSubject) || !reflect.DeepEqual(req.Payload.Context, wantContext) {
+				t.Fatalf("canonical approval projection changed: %+v", req)
+			}
+			req.Payload.Subject.Targets[0].Text = "mutated callback"
+			req.Payload.Context.Title = "mutated callback"
+			*req.Payload.Context.Description = "mutated callback"
+			return approval.Decision{OptionID: "allow_session"}, nil
+		},
+	})
+	if err != nil || !called || len(handle.submissions) != 1 || handle.submissions[0].RequestID != "subject-approval" {
+		t.Fatalf("approval flow: called=%t decisions=%+v err=%v", called, handle.submissions, err)
+	}
+	if !reflect.DeepEqual(canonical.Subject, wantSubject) || wire.Title != wantContext.Title || *wire.Description != *wantContext.Description {
+		t.Fatalf("callback mutation changed canonical permission: %+v / %+v", canonical.Subject, wire)
+	}
+}
 
 func TestRunSessionOnceDrainsAssistantOutput(t *testing.T) {
 	t.Parallel()
@@ -340,8 +386,8 @@ func TestRunSessionOnceApprovalCallbackReceivesPromptFields(t *testing.T) {
 func TestApprovalPayloadFromPermissionNil(t *testing.T) {
 	t.Parallel()
 
-	if payload := approvalPayloadFromPermission(nil); payload != nil {
-		t.Fatalf("approvalPayloadFromPermission(nil) = %#v, want nil", payload)
+	if payload := approvalPayloadFromPermission(nil, nil); payload != nil {
+		t.Fatalf("approvalPayloadFromPermission(nil, nil) = %#v, want nil", payload)
 	}
 }
 

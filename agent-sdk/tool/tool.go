@@ -89,7 +89,11 @@ const (
 	MetadataMCPSourceFingerprint = "caelis.mcp.source_fingerprint"
 	// MetadataMCPSourceTrusted is a Host-assembly assertion that skips ordinary
 	// MCP source approval, never an explicit per-call policy Ask or Deny.
-	MetadataMCPSourceTrusted     = "caelis.mcp.source_trusted"
+	MetadataMCPSourceTrusted = "caelis.mcp.source_trusted"
+	// MetadataMCPResourceParameter is the Host-selected top-level string
+	// argument whose exact value requires a Session-only resource grant.
+	// It is independent of source trust and never comes from remote metadata.
+	MetadataMCPResourceParameter = "caelis.mcp.resource_parameter"
 	MetadataExternalCapability   = "caelis.external.capability"
 	MetadataDescriptionAuthority = "caelis.description.authority"
 	MetadataReplayAliases        = "caelis.tool.replay_aliases"

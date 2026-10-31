@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"iter"
+	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -180,9 +181,10 @@ func TestMCPFixedEntryLive(t *testing.T) {
 	}
 	wire.mu.Lock()
 	hashes := append([]string(nil), wire.hashes...)
+	wireModels := maps.Clone(wire.models)
 	wire.mu.Unlock()
 	writeLiveJSON(t, filepath.Join(root, "wire-tools.json"), hashes)
-	receipt := map[string]any{"configured_provider": cfg.Provider, "configured_model": cfg.Model, "model_id": cfg.ID, "searches": searches, "calls": calls, "tool_failures": failures, "approvals": approvals, "used_sources": used, "main_wire_requests": len(hashes), "session_id": active.SessionID}
+	receipt := map[string]any{"source_head": os.Getenv("CAELIS_MCP_LIVE_SOURCE_HEAD"), "provider_endpoint_id": cfg.ProviderEndpointID, "configured_api": cfg.API, "actual_wire_models": wireModels, "configured_provider": cfg.Provider, "configured_model": cfg.Model, "model_id": cfg.ID, "searches": searches, "calls": calls, "tool_failures": failures, "approvals": approvals, "used_sources": used, "main_wire_requests": len(hashes), "session_id": active.SessionID}
 	writeLiveJSON(t, filepath.Join(root, "receipt.json"), receipt)
 	t.Logf("live receipt: model=%s searches=%d calls=%d failures=%d approvals=%d sources=%v wire_requests=%d", cfg.Model, searches, calls, failures, approvals, used, len(hashes))
 	if len(hashes) < 2 {
@@ -224,6 +226,7 @@ type liveMCPWire struct {
 	base   http.RoundTripper
 	mu     sync.Mutex
 	hashes []string
+	models map[string]int
 }
 
 func (w *liveMCPWire) RoundTrip(r *http.Request) (*http.Response, error) {
@@ -241,6 +244,12 @@ func (w *liveMCPWire) RoundTrip(r *http.Request) (*http.Response, error) {
 				sum := sha256.Sum256(raw)
 				w.mu.Lock()
 				w.hashes = append(w.hashes, hex.EncodeToString(sum[:]))
+				var requestedModel string
+				_ = json.Unmarshal(fields["model"], &requestedModel)
+				if w.models == nil {
+					w.models = map[string]int{}
+				}
+				w.models[requestedModel]++
 				w.mu.Unlock()
 			}
 		}

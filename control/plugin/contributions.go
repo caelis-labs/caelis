@@ -112,9 +112,13 @@ func resolveContributions(configs []Config, skipBroken bool, paths ...RuntimePat
 				}
 				return out, fmt.Errorf("plugin %q MCP server %q: %w", installed.ID, spec.Name, err)
 			}
-			// Desktop World is trusted as a configured plugin capability, across
-			// package and tool-definition upgrades. Server names are not identity.
-			spec.SourceTrusted = installed.ID == "desktop-world"
+			// Rules come from the configured plugin identity, never its server
+			// name, remote metadata or script. Only exec creates new desktop work;
+			// result reads an existing receipt in this MCP connection.
+			if installed.ID == "desktop-world" {
+				spec.ToolResourceParameters = map[string]string{"exec": "app"}
+				spec.SourceTrustedTools = []string{"apps", "api", "result"}
+			}
 			out.MCPServerSpecs = append(out.MCPServerSpecs, spec)
 		}
 		for _, contributed := range installed.Agents {

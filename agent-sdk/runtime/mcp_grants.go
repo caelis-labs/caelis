@@ -21,10 +21,11 @@ import (
 // private to the Host Store; deleting it while the Host is stopped revokes all
 // grants. Revoke removes one grant while the Host is running.
 type MCPGrantStore struct {
-	mu          sync.Mutex
-	path        string
-	grants      map[string]bool
-	revocations map[string]uint64
+	mu                sync.Mutex
+	path              string
+	grants            map[string]bool
+	revocations       map[string]uint64
+	resourceApprovals map[string]*mcpResourceApproval
 }
 
 // NewMCPGrantStore opens a private, versioned grant file. Corrupt state fails
@@ -71,6 +72,10 @@ type MCPGrant struct {
 	// SessionEpoch prevents a newly created Session from inheriting a grant
 	// if an embedding ever reuses the same Session ID.
 	SessionEpoch string
+	// ResourceParameter and ResourceValue identify one exact Host-selected
+	// resource. Both must be present, and only Session grants are supported.
+	ResourceParameter string
+	ResourceValue     string
 }
 
 func mcpGrantFor(def tool.Definition, active session.Session) (MCPGrant, error) {
@@ -94,6 +99,9 @@ func mcpGrantFor(def tool.Definition, active session.Session) (MCPGrant, error) 
 }
 
 func (g MCPGrant) key(scope, sessionID string) (string, error) {
+	if g.resourceScoped() && (scope != "session" || strings.TrimSpace(g.ResourceParameter) == "" || strings.TrimSpace(g.ResourceValue) == "") {
+		return "", errors.New("MCP resource grants require a parameter, value, and Session scope")
+	}
 	if scope != "session" && scope != "always" {
 		return "", errors.New("invalid MCP grant scope")
 	}
@@ -111,7 +119,11 @@ func (g MCPGrant) key(scope, sessionID string) (string, error) {
 	if owner == "" {
 		owner = "host"
 	}
-	raw, err := json.Marshal([]string{scope, sessionID, epoch, owner, g.Workspace, g.PluginID, g.Server, g.Tool, g.Projected, g.Source})
+	identity := []string{scope, sessionID, epoch, owner, g.Workspace, g.PluginID, g.Server, g.Tool, g.Projected, g.Source}
+	if g.resourceScoped() {
+		identity = append(identity, "resource-v1", g.ResourceParameter, g.ResourceValue)
+	}
+	raw, err := json.Marshal(identity)
 	if err != nil {
 		return "", err
 	}
@@ -119,11 +131,26 @@ func (g MCPGrant) key(scope, sessionID string) (string, error) {
 	return scope + ":" + hex.EncodeToString(hash[:]), nil
 }
 
+func (g MCPGrant) resourceScoped() bool {
+	return g.ResourceParameter != "" || g.ResourceValue != ""
+}
+
 // Allows reports whether this Session or the durable workspace-wide scope
-// covers the exact tool source. Storage errors must prevent execution.
+// covers the exact tool source. Resource grants use only the exact Session
+// resource key; ordinary tool-wide grants never cover resources.
+// Storage errors must prevent execution.
 func (s *MCPGrantStore) Allows(g MCPGrant, sessionID string) (bool, error) {
 	if s == nil {
 		return false, nil
+	}
+	if g.resourceScoped() {
+		key, err := g.key("session", sessionID)
+		if err != nil {
+			return false, err
+		}
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return s.grants[key], nil
 	}
 	global, err := g.key("always", "")
 	if err != nil {

@@ -15,6 +15,12 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
+// MetadataMCPResourceGate marks a Runtime-owned resource grant request in
+// ApprovalRequest.Metadata. It is set only for that gate, never inherited from
+// per-call policy or tool metadata. Reviewers must also verify the Host-selected
+// resource parameter, exact argument and native Session options.
+const MetadataMCPResourceGate = "caelis.mcp.resource_gate"
+
 // Mode describes how one approval request should be resolved.
 type Mode string
 
