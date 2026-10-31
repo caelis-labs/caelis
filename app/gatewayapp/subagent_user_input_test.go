@@ -96,15 +96,24 @@ func runHostedSubagentUserInput(t *testing.T, assemble func(*Stack) (appserver.A
 	provider := newHostedChildInputTestProvider(t, false)
 	finishProvider := make(chan struct{})
 	streamingProvider := make(chan context.Context, 1)
-	if restored {
-		provider.afterChunk = func(ctx context.Context, call int) {
-			if call == 2 {
-				streamingProvider <- ctx
-				select {
-				case <-finishProvider:
-				case <-ctx.Done():
-				}
+	confirmedInputs := []chan struct{}{make(chan struct{}), make(chan struct{})}
+	provider.afterChunk = func(ctx context.Context, call int) {
+		if call < 2 || call > 3 {
+			return
+		}
+		if restored && call == 2 {
+			streamingProvider <- ctx
+			select {
+			case <-finishProvider:
+			case <-ctx.Done():
+				return
 			}
+		}
+		// Confirmed-delivery assertions require the input receipt before the
+		// provider ends the Activity and legitimately cancels unobserved input.
+		select {
+		case <-confirmedInputs[call-2]:
+		case <-ctx.Done():
 		}
 	}
 	host := newHostedChildInputTestStack(t, provider)
@@ -252,16 +261,16 @@ func runHostedSubagentUserInput(t *testing.T, assemble func(*Stack) (appserver.A
 			observed[update.Content.Text]++
 		}
 	}
+	initial, err := active.instance.engine.WaitSubagentTask(ctx, parent.SessionRef, child.DelegationID, 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// This fixture starts follow-up Turns. A visible first delta does not prove
+	// the original Activity is terminal; wait on its existing authoritative Task.
+	if initial.Running || initial.State != task.StateCompleted {
+		t.Fatalf("initial child Task did not complete before follow-up: %+v", initial)
+	}
 	if restored {
-		initial, err := active.instance.engine.WaitSubagentTask(ctx, parent.SessionRef, child.DelegationID, 5*time.Second)
-		if err != nil {
-			t.Fatal(err)
-		}
-		// A successful bounded wait can still return a running Task. Recovery
-		// must start from a completed Turn, not cancel unfinished setup work.
-		if initial.Running || initial.State != task.StateCompleted {
-			t.Fatalf("initial child Task did not complete before recovery: %+v", initial)
-		}
 		if err := host.sessionRuntimes.releaseSession(ctx, parent.SessionID); err != nil {
 			t.Fatal(err)
 		}
@@ -379,6 +388,9 @@ recovered:
 				if len(statuses) != 1 || statuses[0].State == "failed" || statuses[0].State == "unknown" {
 					t.Fatalf("input receipt=%#v", statuses)
 				}
+				if statuses[0].State != "sent" {
+					continue
+				}
 				events, readErr := host.composition.sessions.Events(ctx, session.EventsRequest{SessionRef: session.SessionRef{SessionID: child.SessionID}})
 				if readErr != nil {
 					ticker.Stop()
@@ -395,6 +407,7 @@ recovered:
 			}
 		}
 		ticker.Stop()
+		close(confirmedInputs[index])
 		waitHostedChildParentIdle(t, host, child.SessionID)
 	}
 	if restored {
