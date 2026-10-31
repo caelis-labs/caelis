@@ -110,7 +110,7 @@ func TestMCPFixedEntryLive(t *testing.T) {
 		}
 	}
 	writeLiveJSON(t, filepath.Join(root, "catalog.json"), catalog)
-	allowed := map[string]bool{"resolve-library-id": true, "query-docs": true, "get-library-docs": true, "manage.search_file": true, "manage.folder_list": true, "maps_text_search": true, "maps_search_detail": true, "maps_geo": true, "maps_direction_driving": true, "maps_direction_walking": true, "maps_direction_transit_integrated": true}
+	allowed := map[string]bool{"resolve-library-id": true, "query-docs": true, "get-library-docs": true, "manage.search_file": true, "manage.folder_list": true, "maps_text_search": true, "maps_search_detail": true, "maps_geo": true, "maps_regeocode": true, "maps_around_search": true, "maps_distance": true, "maps_direction_driving": true, "maps_direction_walking": true, "maps_direction_transit_integrated": true}
 	registry := liveMCPPolicy{allowed: allowed}
 	grants, err := runtime.NewMCPGrantStore(filepath.Join(root, "mcp-grants.json"))
 	if err != nil {
