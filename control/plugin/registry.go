@@ -9,11 +9,16 @@ func upsertLocalPluginConfig(state *State, next Config) error {
 	if state == nil {
 		return nil
 	}
+	if usesManifestIdentity(next.Kind) {
+		if idx := pluginConfigIndexByRoot(state.Plugins, next.Root); idx >= 0 && !strings.EqualFold(state.Plugins[idx].ID, next.ID) {
+			return fmt.Errorf("plugin service: source is already registered as %q; remove that registration before installing it as %q", state.Plugins[idx].ID, next.ID)
+		}
+	}
 	if idx := pluginConfigIndexByID(state.Plugins, next.ID); idx >= 0 {
 		previous := state.Plugins[idx]
 		// A manifest's self-declared name or publisher cannot prove ownership
 		// of another directory. Local standard updates retain their source.
-		if previous.Kind == ManifestKindAgentPlugin || next.Kind == ManifestKindAgentPlugin {
+		if usesManifestIdentity(previous.Kind) || usesManifestIdentity(next.Kind) {
 			if previous.Managed || previous.Kind != next.Kind || !sameLocalPluginSource(previous, next) {
 				return fmt.Errorf("plugin service: plugin id %q already belongs to another source at %s; remove it before registering a different directory or format", next.ID, previous.Root)
 			}

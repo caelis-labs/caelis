@@ -51,13 +51,20 @@ func TestToolResultArtifactStoreWritesRawContent(t *testing.T) {
 	}
 	assertFileContent(t, textPath, []byte(text))
 
-	if mixedPath, ok := store.write(tool.Result{Content: []model.Part{
+	mixed := []model.Part{
 		model.NewTextPart("alpha"),
 		model.NewMediaPart(model.MediaModalityImage, model.MediaSource{Kind: model.MediaSourceURL, URI: "https://example.com/a.png"}, "image/png", "a"),
 		model.NewJSONPart(json.RawMessage(`{"beta":true}`)),
-	}}); ok || mixedPath != "" {
-		t.Fatalf("write(mixed) = %q/%v, want unsupported", mixedPath, ok)
 	}
+	mixedPath, ok := store.write(tool.Result{Content: mixed})
+	if !ok || filepath.Ext(mixedPath) != ".json" {
+		t.Fatalf("write(mixed) = %q/%v, want JSON artifact", mixedPath, ok)
+	}
+	raw, err := json.Marshal(mixed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertFileContent(t, mixedPath, raw)
 }
 
 func TestToolResultArtifactStoreCleansOldestFiles(t *testing.T) {

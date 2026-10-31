@@ -214,6 +214,44 @@ func TestTruncateMapUsesSerializedJSONBudget(t *testing.T) {
 	}
 }
 
+func TestTruncatePartsReservesLaterTrustedArtifactFields(t *testing.T) {
+	t.Parallel()
+	protected := map[string]any{"_caelis": map[string]any{"runtime": map[string]any{
+		"artifact": map[string]any{"path": "C:\\owned\\complete.json", "model_visible_content_truncated": true},
+	}}}
+	parts := []model.Part{
+		model.NewTextPart(strings.Repeat("large documentation ", 1000)),
+		model.NewJSONPart(json.RawMessage(`{"schema":"original"}`)),
+	}
+	out, info := truncatePartsWithProtectedJSONFields(parts, TruncationPolicy{MaxTokens: 200}, protected)
+	if !info.Truncated {
+		t.Fatal("expected truncation")
+	}
+	found := false
+	for _, part := range out {
+		if part.JSON == nil {
+			continue
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(part.JSON.Value, &payload); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(payload["_caelis"], protected["_caelis"]) {
+			t.Fatal("trusted artifact metadata changed")
+		}
+		found = true
+	}
+	if !found {
+		t.Fatal("earlier text consumed the later protected artifact reference")
+	}
+	if estimateTokensForParts(out) > 200 {
+		t.Fatal("protected reference exceeded the complete result budget")
+	}
+	if again, second := truncatePartsWithProtectedJSONFields(out, TruncationPolicy{MaxTokens: 200}, protected); second.Truncated || !reflect.DeepEqual(again, out) {
+		t.Fatal("protected multipart output is not canonical")
+	}
+}
+
 func TestTruncateMapRolloutSizedEscapedOutputFitsDefaultBudget(t *testing.T) {
 	t.Parallel()
 

@@ -6,6 +6,10 @@ import (
 	"strings"
 )
 
+func usesManifestIdentity(kind ManifestKind) bool {
+	return kind == ManifestKindAgentPlugin || kind == ManifestKindClaude
+}
+
 func pluginConfigID(absPath string, override string) string {
 	id := strings.TrimSpace(override)
 	if id == "" {

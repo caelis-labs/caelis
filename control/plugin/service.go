@@ -238,19 +238,29 @@ func (s Service) addPath(ctx context.Context, path string, opts pluginAddPathOpt
 	if err != nil {
 		return Info{}, fmt.Errorf("plugin service: parse plugin failed: %w", err)
 	}
+	if usesManifestIdentity(p.Kind) {
+		// Pin both the root and its parsed contributions. Retargeting an installer's
+		// symlink cannot silently replace a different directory under the same ID.
+		canonical, err := filepath.EvalSymlinks(absPath)
+		if err != nil {
+			return Info{}, fmt.Errorf("plugin service: resolve plugin source: %w", err)
+		}
+		if p.Root != canonical {
+			p, err = ParsePlugin(canonical)
+			if err != nil {
+				return Info{}, fmt.Errorf("plugin service: parse resolved plugin source: %w", err)
+			}
+		}
+		absPath = canonical
+	}
 	id := pluginConfigID(absPath, opts.ConfigID)
-	// A standard package's extracted directory commonly includes a version and
-	// platform. Its manifest name is the stable installed identity, so package
-	// updates retain the same private PLUGIN_DATA and replace the same server.
-	if p.Kind == ManifestKindAgentPlugin && strings.TrimSpace(opts.ConfigID) == "" {
-		id = p.Name
+	// Standard packages often unpack into versioned, platform-specific directories.
+	// The manifest name supplies their stable identity; an explicit marketplace
+	// registration still owns its configured ID.
+	if usesManifestIdentity(p.Kind) && strings.TrimSpace(opts.ConfigID) == "" {
+		id = pluginConfigID(absPath, p.Name)
 	}
 	p = pluginWithConfiguredID(p, id)
-	if p.Kind == ManifestKindAgentPlugin {
-		// Pin the resolved source so retargeting an installer's symlink cannot
-		// silently replace a different directory under the same installed ID.
-		absPath = p.Root
-	}
 
 	next := Config{
 		ID:          id,
