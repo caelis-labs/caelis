@@ -345,7 +345,22 @@ Trusted Host assembly may instead mark a source `SourceTrusted`; Manager project
 that assertion in tool metadata, independently of remote metadata and the source
 fingerprint. It skips only ordinary source approval for all of that source's
 tools, including after version or schema changes. Explicit per-call Ask and Deny
-still apply. Ordinary MCP configuration cannot set this Host-only assertion.
+still apply. `SourceTrustedTools` limits that assertion to exact remote tool
+names. Ordinary MCP configuration and remote tool metadata cannot set these
+Host-only assertions.
+
+Host assembly may set `ServerSpec.ToolResourceParameters` to require Session
+approval for one top-level string argument of an exact remote tool. Manager
+projects the parameter through `MetadataMCPResourceParameter`; Runtime validates
+the argument and extends the existing grant identity with its exact parameter
+name and value. It never parses the script or infers scope from display text.
+Resource grants offer only Allow this session and Cancel. Broad tool/Always
+grants cannot cover a resource call. The same Host grant store coordinates
+concurrent first calls for that exact resource and Session; approval failure,
+denial, cancellation, or revocation prevents dispatch. A cached resource grant
+still leaves explicit per-call policy Ask/Deny in force. Product-specific tool
+and parameter mappings belong in Control, not in the SDK or the tool server.
+
 The Host keeps grants in
 `control/mcp-grants.json`; stopping the Host and deleting that file revokes all
 grants. The Host-owned `MCPGrantStore.Revoke` API removes an individual grant

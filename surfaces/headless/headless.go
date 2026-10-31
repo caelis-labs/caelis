@@ -165,7 +165,7 @@ func runSessionOnce(
 					cancelTurn("headless context cancelled")
 					continue
 				}
-				payload := approvalPayloadFromPermission(env.Permission)
+				payload := approvalPayloadFromPermission(env.Permission, env.ApprovalSubject)
 				approvalReq := ApprovalRequest{RequestID: env.ApprovalRequestID, Payload: payload}
 				decision, resolveErr := resolveApproval(ctx, opts, approvalReq)
 				if resolveErr != nil {
@@ -216,7 +216,7 @@ func runSessionOnce(
 	)
 }
 
-func approvalPayloadFromPermission(req *eventstream.RequestPermissionRequest) *approval.Payload {
+func approvalPayloadFromPermission(req *eventstream.RequestPermissionRequest, subject *session.ApprovalSubject) *approval.Payload {
 	if req == nil {
 		return nil
 	}
@@ -230,6 +230,7 @@ func approvalPayloadFromPermission(req *eventstream.RequestPermissionRequest) *a
 		reason = approvalPromptField(normalized.ToolCall.RawInput, "reason")
 	}
 	payload := &approval.Payload{
+		Subject:            session.CloneApprovalSubject(subject),
 		ToolCallID:         normalized.ToolCall.ID,
 		ToolName:           normalized.ToolCall.Name,
 		ToolKind:           normalized.ToolCall.Kind,
@@ -242,6 +243,11 @@ func approvalPayloadFromPermission(req *eventstream.RequestPermissionRequest) *a
 		Justification:      approvalPromptField(normalized.ToolCall.RawInput, "justification"),
 		SandboxPermissions: approvalPromptField(normalized.ToolCall.RawInput, "sandbox_permissions"),
 		Status:             approval.StatusPending,
+	}
+	// Only the public ACP prompt crosses this Surface boundary. Private native
+	// request IDs and raw permission evidence remain in Control.
+	if req.Title != "" || req.Description != nil {
+		payload.Context = session.ClonePermissionContext(&session.PermissionContext{Title: req.Title, Description: req.Description})
 	}
 	if len(normalized.Options) > 0 {
 		payload.Options = make([]approval.Option, 0, len(normalized.Options))

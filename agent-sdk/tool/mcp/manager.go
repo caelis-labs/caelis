@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -128,6 +129,8 @@ func newManager(ctx context.Context, specs []ServerSpec, start clientStarter, on
 		spec.ReplaySourceIDs = append([]string(nil), spec.ReplaySourceIDs...)
 		spec.Env = maps.Clone(spec.Env)
 		spec.Headers = maps.Clone(spec.Headers)
+		spec.SourceTrustedTools = slices.Clone(spec.SourceTrustedTools)
+		spec.ToolResourceParameters = maps.Clone(spec.ToolResourceParameters)
 		mgr.servers = append(mgr.servers, &managedServer{spec: spec, refreshGate: make(chan struct{}, 1)})
 	}
 	var workers sync.WaitGroup
@@ -283,8 +286,11 @@ func (mgr *Manager) rebuildToolsLocked() {
 					tool.MetadataReplayAliases:        legacyNames,
 				},
 			}
-			if spec.SourceTrusted {
+			if spec.SourceTrusted || slices.Contains(spec.SourceTrustedTools, info.Name) {
 				def.Metadata[tool.MetadataMCPSourceTrusted] = true
+			}
+			if parameter, ok := spec.ToolResourceParameters[info.Name]; ok {
+				def.Metadata[tool.MetadataMCPResourceParameter] = parameter
 			}
 			def, warning, err := normalizeListedToolDefinition(def, info.InputSchema)
 			if warning != "" {

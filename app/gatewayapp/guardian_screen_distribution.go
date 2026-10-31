@@ -76,7 +76,7 @@ func guardianScreenSelection(req kernel.ApprovalReviewRequest, response judgment
 	if !guardianDistributionDominates(groups, winner, 20, .9) || !guardianScreenEvidenceSupports(winner, response.Answers) {
 		return fail()
 	}
-	nativeMCP := guardianNativeMCPScopeOptions(req)
+	nativeMCP := guardianNativeMCPScopeOptions(req) || guardianMCPResourceScope(req) != nil
 	onceIndex, expandedIndex := -1, -1
 	for index, option := range req.Approval.Options {
 		if kinds[index] != winner {
@@ -104,10 +104,14 @@ func guardianScreenSelection(req kernel.ApprovalReviewRequest, response judgment
 	return req.Approval.Options[onceIndex], nil
 }
 
-// Only the Runtime's exact four MCP options have a Session scope. Arbitrary
-// external option IDs retain their standard ACP kind semantics.
+// Only the Runtime's ordinary source gate has these four MCP scope options.
+// Resource rules use a separate two-option gate; custom policy options retain
+// their standard ACP kind semantics.
 func guardianNativeMCPScopeOptions(req kernel.ApprovalReviewRequest) bool {
 	if req.Approval == nil || !tool.IsMCPDefinition(req.RuntimeRequest.Tool) || len(req.Approval.Options) != 4 {
+		return false
+	}
+	if parameter, _ := req.RuntimeRequest.Tool.Metadata[tool.MetadataMCPResourceParameter].(string); parameter != "" {
 		return false
 	}
 	want := [4]struct{ id, kind string }{{"allow_once", "allow_once"}, {"allow_session", "allow_once"}, {"allow_always", "allow_always"}, {"cancel", "reject_once"}}
