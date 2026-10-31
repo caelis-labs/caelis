@@ -3,6 +3,7 @@ package chat
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -209,8 +210,14 @@ func (s *toolResultArtifactStore) cleanupLocked(requiredBytes int64) error {
 }
 
 func rawToolResultArtifact(parts []model.Part) ([]byte, string, bool) {
-	if len(parts) != 1 {
+	if len(parts) == 0 {
 		return nil, "", false
+	}
+	if len(parts) > 1 {
+		// Preserve ordered typed content, including media sources. Flattening a
+		// multipart result would lose structured data or evidence on recovery.
+		raw, err := json.Marshal(parts)
+		return raw, ".json", err == nil
 	}
 	part := parts[0]
 	switch {

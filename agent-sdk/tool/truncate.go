@@ -99,19 +99,44 @@ func truncatePartsWithProtectedJSONFields(parts []model.Part, policy TruncationP
 		return prepared, info
 	}
 
+	// The omission notice is model-visible content too. Reserve its serialized
+	// cost when later content parts may be omitted; media remains untouched.
+	omissionNotice := model.NewTextPart("[additional tool result content omitted]")
 	remaining := budgetTokens
+	contentParts := 0
+	for _, part := range prepared {
+		if part.Text != nil || part.JSON != nil {
+			contentParts++
+		}
+	}
+	if contentParts > 1 {
+		remaining = max(remaining-estimateTokensForParts([]model.Part{omissionNotice}), 0)
+	}
+	// A trusted reference may live after a large text part (as in ordinary
+	// multipart MCP results). Earlier content must leave room for that JSON.
+	protectedReserve := 0
+	if protectedPart >= 0 {
+		cost := estimateTokensForJSONValue(protected) + 1
+		if cost <= remaining {
+			protectedReserve = cost
+		}
+	}
 	out := make([]model.Part, 0, len(parts)+1)
 	omitted := 0
 	for index, part := range prepared {
+		available := remaining
+		if index < protectedPart {
+			available = max(remaining-protectedReserve, 0)
+		}
 		switch {
 		case part.JSON != nil:
-			if remaining <= 0 {
+			if available <= 0 {
 				omitted++
 				continue
 			}
 			raw := part.JSON.Value
-			cost := estimateTextTokens(string(raw))
-			if cost <= remaining {
+			cost := estimateTokensForParts([]model.Part{part})
+			if cost <= available {
 				remaining -= cost
 				out = append(out, part)
 				continue
@@ -120,31 +145,39 @@ func truncatePartsWithProtectedJSONFields(parts []model.Part, policy TruncationP
 			if index == protectedPart {
 				protectedFields = protected
 			}
-			truncatedRaw, subInfo := truncateJSONWithProtectedFields(raw, TruncationPolicy{MaxTokens: remaining}, protectedFields)
+			truncatedRaw, subInfo := truncateJSONWithProtectedFields(raw, TruncationPolicy{MaxTokens: available}, protectedFields)
 			part.JSON.Value = truncatedRaw
 			out = append(out, part)
-			remaining = 0
+			remaining -= available
 			omitted += subInfo.OmittedItems
 		case part.Text != nil:
-			if remaining <= 0 {
+			if available <= 0 {
 				omitted++
 				continue
 			}
-			cost := estimateTextTokens(part.Text.Text)
-			if cost <= remaining {
+			cost := estimateTokensForParts([]model.Part{part})
+			if cost <= available {
 				remaining -= cost
 				out = append(out, part)
 				continue
 			}
-			part.Text.Text, _ = TruncateText(part.Text.Text, TruncationPolicy{MaxTokens: remaining})
-			out = append(out, part)
-			remaining = 0
+			// Text becomes {"result": text} in the canonical event. Budget that
+			// same JSON envelope, including quotes, escapes and joined-text space.
+			payload, subInfo := TruncateMap(map[string]any{"result": part.Text.Text}, TruncationPolicy{MaxTokens: available})
+			if text, ok := payload["result"].(string); ok {
+				part.Text.Text = text
+				out = append(out, part)
+			} else {
+				omitted++
+			}
+			omitted += subInfo.OmittedItems
+			remaining -= available
 		default:
 			out = append(out, part)
 		}
 	}
-	if omitted > 0 {
-		out = append(out, model.NewTextPart(fmt.Sprintf("[omitted %d tool result content items]", omitted)))
+	if omitted > 0 && estimateTokensForParts(out)+estimateTokensForParts([]model.Part{omissionNotice}) <= budgetTokens {
+		out = append(out, omissionNotice)
 	}
 	info.Truncated = true
 	info.OmittedItems = omitted
@@ -198,25 +231,13 @@ func truncateJSONWithProtectedFields(raw json.RawMessage, policy TruncationPolic
 		out, mapInfo := truncateMapWithProtectedJSONFields(payload, policy, protected)
 		return mustMarshalMap(out), mapInfo
 	}
-	totalTokens := estimateTokensForJSONValue(parsed)
-	info.EstimatedTokens = totalTokens
-	info.EstimatedBytes = totalTokens * approxBytesPerToken
-	if totalTokens <= budgetTokens {
-		return append(json.RawMessage(nil), raw...), info
+	// Arrays and scalars are wrapped under result in the durable output. Use
+	// the map truncator for that envelope, then retain the model part's shape.
+	out, mapInfo := TruncateMap(map[string]any{"result": parsed}, policy)
+	if value, ok := out["result"]; ok {
+		return mustMarshalAny(value), mapInfo
 	}
-	remaining := budgetTokens
-	state := &truncationState{}
-	truncated := truncateValue(parsed, &remaining, state)
-	data := mustMarshalAny(truncated)
-	if estimateTextTokens(string(data)) > budgetTokens {
-		text, _ := TruncateText(string(data), policy)
-		data = mustMarshalAny(text)
-	}
-	info.Truncated = true
-	info.OmittedItems = state.omitted
-	info.RemovedTokens = max(totalTokens-budgetTokens, 0)
-	info.RemovedBytes = info.RemovedTokens * approxBytesPerToken
-	return data, info
+	return mustMarshalMap(out), mapInfo
 }
 
 // TruncateMap applies recursive truncation to one JSON-like object.
@@ -477,9 +498,21 @@ func estimateTokensForParts(parts []model.Part) int {
 	for _, part := range parts {
 		switch {
 		case part.Text != nil:
-			sum += estimateTextTokens(part.Text.Text)
+			sum += estimateTokensForJSONValue(map[string]any{"result": part.Text.Text})
 		case part.JSON != nil:
-			sum += estimateTextTokens(string(part.JSON.Value))
+			// Canonical JSON serialization can expand HTML and control escapes;
+			// non-object JSON also gains the durable result envelope. Keep the
+			// raw cost too so pretty-printed model content remains bounded.
+			cost := estimateTextTokens(string(part.JSON.Value))
+			var decoded any
+			if json.Unmarshal(part.JSON.Value, &decoded) == nil {
+				payload, ok := decoded.(map[string]any)
+				if !ok {
+					payload = map[string]any{"result": decoded}
+				}
+				cost = max(cost, estimateTokensForJSONValue(payload))
+			}
+			sum += cost
 		case part.ToolResult != nil:
 			sum += estimateTokensForParts(part.ToolResult.Content)
 		}

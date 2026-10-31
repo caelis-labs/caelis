@@ -565,6 +565,11 @@ func TestPromptAuthenticationRetryKeepsChildInputAdmissionFence(t *testing.T) {
 			case <-ctx.Done():
 				t.Fatal(ctx.Err())
 			}
+			// This case proves the authenticated receipt, so hold natural completion
+			// until it is observed. Terminal-first uncertainty is covered separately.
+			if err := os.WriteFile(steeringMarker+"-terminal-release", []byte("release"), 0o600); err != nil {
+				t.Fatal(err)
+			}
 			waitChildActivityTerminalFor(t, ctx, events, activityID)
 			waitForChildInputFile(t, ctx, steeringMarker)
 			time.Sleep(50 * time.Millisecond)
@@ -941,9 +946,10 @@ func childInputTestRunner(t *testing.T, mode string) *Runner {
 func childInputAuthTestRunner(t *testing.T, mode string, ready string, release string, steering string) *Runner {
 	t.Helper()
 	return newChildInputTestRunner(t, mode, map[string]string{
-		"CAELIS_ACP_CHILD_INPUT_AUTH_READY":   ready,
-		"CAELIS_ACP_CHILD_INPUT_AUTH_RELEASE": release,
-		"CAELIS_ACP_CHILD_INPUT_STEER_MARKER": steering,
+		"CAELIS_ACP_CHILD_INPUT_AUTH_READY":       ready,
+		"CAELIS_ACP_CHILD_INPUT_AUTH_RELEASE":     release,
+		"CAELIS_ACP_CHILD_INPUT_STEER_MARKER":     steering,
+		"CAELIS_ACP_CHILD_INPUT_TERMINAL_RELEASE": steering + "-terminal-release",
 	}, controlagents.Authentication{MethodID: "agent-login", Type: controlagents.AuthenticationAgent})
 }
 
@@ -1257,6 +1263,9 @@ func TestChildInputHelperProcess(t *testing.T) {
 					case <-steered:
 					case <-time.After(4 * time.Second):
 						return nil, &jsonrpc.RPCError{Code: -32000, Message: "post-auth steering timeout"}
+					}
+					if err := waitForChildInputRelease(os.Getenv("CAELIS_ACP_CHILD_INPUT_TERMINAL_RELEASE")); err != nil {
+						return nil, &jsonrpc.RPCError{Code: -32000, Message: err.Error()}
 					}
 				}
 				return client.PromptResponse{StopReason: string(acpsdk.StopReasonEndTurn)}, nil
