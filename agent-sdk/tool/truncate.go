@@ -112,18 +112,31 @@ func truncatePartsWithProtectedJSONFields(parts []model.Part, policy TruncationP
 	if contentParts > 1 {
 		remaining = max(remaining-estimateTokensForParts([]model.Part{omissionNotice}), 0)
 	}
+	// A trusted reference may live after a large text part (as in ordinary
+	// multipart MCP results). Earlier content must leave room for that JSON.
+	protectedReserve := 0
+	if protectedPart >= 0 {
+		cost := estimateTokensForJSONValue(protected) + 1
+		if cost <= remaining {
+			protectedReserve = cost
+		}
+	}
 	out := make([]model.Part, 0, len(parts)+1)
 	omitted := 0
 	for index, part := range prepared {
+		available := remaining
+		if index < protectedPart {
+			available = max(remaining-protectedReserve, 0)
+		}
 		switch {
 		case part.JSON != nil:
-			if remaining <= 0 {
+			if available <= 0 {
 				omitted++
 				continue
 			}
 			raw := part.JSON.Value
 			cost := estimateTokensForParts([]model.Part{part})
-			if cost <= remaining {
+			if cost <= available {
 				remaining -= cost
 				out = append(out, part)
 				continue
@@ -132,25 +145,25 @@ func truncatePartsWithProtectedJSONFields(parts []model.Part, policy TruncationP
 			if index == protectedPart {
 				protectedFields = protected
 			}
-			truncatedRaw, subInfo := truncateJSONWithProtectedFields(raw, TruncationPolicy{MaxTokens: remaining}, protectedFields)
+			truncatedRaw, subInfo := truncateJSONWithProtectedFields(raw, TruncationPolicy{MaxTokens: available}, protectedFields)
 			part.JSON.Value = truncatedRaw
 			out = append(out, part)
-			remaining = 0
+			remaining -= available
 			omitted += subInfo.OmittedItems
 		case part.Text != nil:
-			if remaining <= 0 {
+			if available <= 0 {
 				omitted++
 				continue
 			}
 			cost := estimateTokensForParts([]model.Part{part})
-			if cost <= remaining {
+			if cost <= available {
 				remaining -= cost
 				out = append(out, part)
 				continue
 			}
 			// Text becomes {"result": text} in the canonical event. Budget that
 			// same JSON envelope, including quotes, escapes and joined-text space.
-			payload, subInfo := TruncateMap(map[string]any{"result": part.Text.Text}, TruncationPolicy{MaxTokens: remaining})
+			payload, subInfo := TruncateMap(map[string]any{"result": part.Text.Text}, TruncationPolicy{MaxTokens: available})
 			if text, ok := payload["result"].(string); ok {
 				part.Text.Text = text
 				out = append(out, part)
@@ -158,7 +171,7 @@ func truncatePartsWithProtectedJSONFields(parts []model.Part, policy TruncationP
 				omitted++
 			}
 			omitted += subInfo.OmittedItems
-			remaining = 0
+			remaining -= available
 		default:
 			out = append(out, part)
 		}

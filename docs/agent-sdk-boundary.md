@@ -301,6 +301,15 @@ upgrade floor postdates the first release that wrote the marker.
 
 ## Tools and instruction authority
 
+All tool sources use the same serialized result budget before model delivery and
+durable event validation. When truncation needs a recovery artifact, the bounded
+private artifact store retains the complete original result: single text/JSON
+keeps its existing format, and multipart content uses an ordered typed JSON array
+including media sources. The model receives bounded content with a runtime-owned
+artifact reference, whose budget is reserved even behind earlier text parts.
+Media remains unchanged. Artifact quota or write failure does not bypass the
+result budget or add a reference to an unavailable file.
+
 `tool.Definition.Name` is the sole executable identity. Names are exact and
 case-sensitive; assembly rejects empty, padded, or duplicate names. Durable
 history and deferred admission preserve that identity.

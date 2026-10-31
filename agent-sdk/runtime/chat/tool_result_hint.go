@@ -14,19 +14,32 @@ const (
 	toolResultRuntimeArtifactTruncated = "model_visible_content_truncated"
 )
 
-// toolResultWithArtifactHint handles the single text-or-JSON payload accepted
-// by the artifact store. Runtime artifact metadata does not reuse or extend a
-// tool-owned system_hint field.
+// toolResultWithArtifactHint prefers a structured payload for the trusted
+// reference, otherwise a text suffix. It preserves part order and media.
+// Runtime metadata does not reuse or extend a tool-owned system_hint field.
 func toolResultWithArtifactHint(result tool.Result, path string, collision bool) (tool.Result, map[string]any, bool) {
 	path = strings.TrimSpace(path)
-	if path == "" || len(result.Content) != 1 {
+	if path == "" || len(result.Content) == 0 {
 		return tool.Result{}, nil, false
 	}
 	out, _ := tool.CloneResult(result, nil)
 	// CloneResult copies the part slice; hint injection also needs isolated part
 	// payload pointers so the pre-truncation result remains the artifact source.
 	out.Content = model.CloneParts(result.Content)
-	part := &out.Content[0]
+	index := -1
+	for i, part := range out.Content {
+		if part.JSON != nil {
+			index = i
+			break
+		}
+		if index < 0 && part.Text != nil {
+			index = i
+		}
+	}
+	if index < 0 {
+		return tool.Result{}, nil, false
+	}
+	part := &out.Content[index]
 	switch {
 	case part.Text != nil:
 		if part.Text.Text != "" {
