@@ -121,6 +121,66 @@ func TestMCPFixedRoutingRefreshDuringApprovalAndRevocation(t *testing.T) {
 	}
 }
 
+func TestMCPFixedDuplicateCallIDsRejectedBeforeApprovalAndJournal(t *testing.T) {
+	service, active := newJournalTestSession(t, "fixed-duplicate")
+	var effects atomic.Int32
+	invoke := func(context.Context, tool.Call) (tool.Result, error) {
+		effects.Add(1)
+		return tool.Result{}, nil
+	}
+	remote := tool.NamedTool{Def: tool.Definition{Name: "docs__read", InputSchema: map[string]any{"type": "object"}, Metadata: map[string]any{
+		tool.MetadataToolKind: tool.MetadataToolKindMCP, tool.MetadataMCPServer: "docs", tool.MetadataMCPTool: "read", tool.MetadataMCPSourceFingerprint: "v1",
+	}}, Invoke: invoke}
+	source := &runtimeDeferredSource{}
+	source.publish(remote)
+	llm := &mcpScriptModel{steps: func(i int, _ *model.Request) []model.ToolCall {
+		switch i {
+		case 0:
+			return []model.ToolCall{{ID: "search", Name: tool.ToolSearchToolName, Args: `{"query":"docs__read"}`}}
+		case 1:
+			return []model.ToolCall{
+				{ID: "duplicate", Name: tool.MCPCallToolName, Args: `{"tool_name":"docs__read","arguments":{}}`},
+				{ID: "duplicate", Name: "Read", Args: `{}`},
+			}
+		default:
+			return nil
+		}
+	}}
+	approvals := 0
+	requester := approvalRequesterFunc(func(context.Context, agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+		approvals++
+		return agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_once", Approved: true}, nil
+	})
+	rt, err := New(Config{Sessions: service, AgentFactory: chat.Factory{}, PolicyRegistry: mcpFixturePolicy(), DefaultPolicyMode: "mcp-test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := rt.Run(t.Context(), agent.RunRequest{SessionRef: active.SessionRef, Input: "read", ApprovalRequester: requester, AgentSpec: agent.AgentSpec{
+		Model: llm, Tools: []tool.Tool{toolsearch.NewSource(source, exactMCPRanker{}), tool.NamedTool{Def: tool.Definition{Name: "Read"}, Invoke: invoke}}, DeferredTools: source,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := result.Handle.WaitCompletion(t.Context()); err != nil {
+		t.Fatalf("duplicate batch completion: %v; effects=%d approvals=%d", err, effects.Load(), approvals)
+	}
+	if effects.Load() != 0 || approvals != 0 {
+		t.Fatalf("duplicate batch reached effects=%d approvals=%d", effects.Load(), approvals)
+	}
+	events, err := service.Events(t.Context(), session.EventsRequest{SessionRef: active.SessionRef})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range events {
+		if event.Journal != nil && event.Journal.ToolExecution != nil && event.Journal.ToolExecution.Key.ToolCallID == "duplicate" {
+			t.Fatal("duplicate batch entered the execution journal")
+		}
+		if session.IsCanonicalHistoryEvent(event) && event.Tool != nil && event.Tool.ID == "duplicate" {
+			t.Fatal("duplicate batch entered canonical model history")
+		}
+	}
+}
+
 func TestMCPFixedLegacySessionRequiresRediscovery(t *testing.T) {
 	root := t.TempDir()
 	store := sessionfile.NewStore(sessionfile.Config{RootDir: root})

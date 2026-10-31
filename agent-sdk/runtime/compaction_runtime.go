@@ -9,7 +9,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
 func (r *Runtime) prepareInvocationContext(
@@ -96,8 +95,6 @@ type invocationContext struct {
 }
 
 type CompactRequest struct {
-	// DeferredTools supplies the catalog identity protected during this checkpoint.
-	DeferredTools tool.Source
 	// Validate holds the caller snapshot authority through the checkpoint append.
 	// It must not admit requests or hold guards during summary generation.
 	Validate   func(context.Context) (func(), error)

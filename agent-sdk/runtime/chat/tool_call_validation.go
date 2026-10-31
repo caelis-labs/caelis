@@ -37,10 +37,16 @@ func validateAssistantToolCalls(message model.Message) (model.Message, []model.T
 		return cloned, nil, nil
 	}
 	canonical := make([]model.ToolCall, 0, len(calls))
+	seenIDs := make(map[string]bool, len(calls))
 	for _, call := range calls {
-		if strings.TrimSpace(call.ID) == "" {
+		id := strings.TrimSpace(call.ID)
+		if id == "" {
 			return model.Message{}, nil, invalidToolCallError{Tool: call.Name, Reason: "missing tool call id"}
 		}
+		if seenIDs[id] {
+			return model.Message{}, nil, invalidToolCallError{Tool: call.Name, Reason: "duplicate tool call id"}
+		}
+		seenIDs[id] = true
 		if strings.TrimSpace(call.Name) == "" {
 			return model.Message{}, nil, invalidToolCallError{Tool: call.Name, Reason: "missing tool name"}
 		}

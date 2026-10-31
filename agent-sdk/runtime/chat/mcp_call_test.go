@@ -124,3 +124,53 @@ func TestSameBatchSearchCannotAuthorizeUndiscoveredSibling(t *testing.T) {
 		t.Fatal("same-batch search authorized its sibling")
 	}
 }
+
+func TestMCPRoutingRejectsDuplicateCallIDsBeforeDispatch(t *testing.T) {
+	for _, secondName := range []string{tool.MCPCallToolName, "Read"} {
+		t.Run(secondName, func(t *testing.T) {
+			effects := map[string]int{}
+			invoke := func(_ context.Context, call tool.Call) (tool.Result, error) {
+				effects[call.Name]++
+				return tool.Result{}, nil
+			}
+			first := tool.NamedTool{Def: mcpToolForTest("docs__first").Definition(), Invoke: invoke}
+			second := tool.NamedTool{Def: mcpToolForTest("docs__second").Definition(), Invoke: invoke}
+			source := &readyMCPSource{tools: []tool.Tool{first}}
+			secondArgs := `{"tool_name":"docs__second","arguments":{}}`
+			if secondName == "Read" {
+				secondArgs = `{}`
+			}
+			llm := &mcpRoutingModel{next: func(i int) []model.ToolCall {
+				switch i {
+				case 0:
+					return []model.ToolCall{{ID: "search", Name: tool.ToolSearchToolName, Args: `{"query":"docs"}`}}
+				case 1:
+					source.tools = []tool.Tool{second}
+					return []model.ToolCall{{ID: "search-second", Name: tool.ToolSearchToolName, Args: `{"query":"docs"}`}}
+				case 2:
+					source.tools = []tool.Tool{first, second}
+					return []model.ToolCall{
+						{ID: "duplicate", Name: tool.MCPCallToolName, Args: `{"tool_name":"docs__first","arguments":{}}`},
+						{ID: "duplicate", Name: secondName, Args: secondArgs},
+					}
+				default:
+					return nil
+				}
+			}}
+			local := tool.NamedTool{Def: tool.Definition{Name: "Read"}, Invoke: invoke}
+			a, err := NewWithTools("chat", llm, []tool.Tool{toolsearch.NewSource(source, fixtureSearchRanker{}), local}, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			a.deferredTools = source
+			for _, err := range a.Run(agent.NewContext(agent.ContextSpec{Context: t.Context()})) {
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if len(effects) != 0 {
+				t.Fatalf("duplicate model call IDs dispatched effects: %v", effects)
+			}
+		})
+	}
+}

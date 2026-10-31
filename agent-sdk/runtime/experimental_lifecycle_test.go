@@ -59,7 +59,7 @@ func TestExperimentalFailedMCPDoesNotBlockUnrelatedCompact(t *testing.T) {
 			for attempt := 0; attempt < 2; attempt++ {
 				appendTestEvent(t, store, active.SessionRef, userTextEvent("independent history"))
 				appendTestEvent(t, store, active.SessionRef, experimentalAssistantEvent("independent answer"))
-				result, err := rt.Compact(t.Context(), CompactRequest{SessionRef: active.SessionRef, Model: &compactionRequestCaptureModel{}, DeferredTools: manager})
+				result, err := rt.Compact(t.Context(), CompactRequest{SessionRef: active.SessionRef, Model: &compactionRequestCaptureModel{}})
 				if err != nil || !result.Compacted {
 					t.Fatalf("attempt %d: compact=%v err=%v", attempt, result.Compacted, err)
 				}
