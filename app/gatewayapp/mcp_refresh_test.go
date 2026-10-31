@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -30,10 +31,21 @@ func TestExperimentalHTTPMCPRefreshRetriesOwnedActiveManager(t *testing.T) {
 				})
 			}
 			install("first")
+			var promotedStartup atomic.Bool
+			initializing, initializeRelease := make(chan struct{}), make(chan struct{})
+			var initializeOnce sync.Once
 			var fail atomic.Bool
 			var lists atomic.Int32
 			server.AddReceivingMiddleware(func(next mcpsdk.MethodHandler) mcpsdk.MethodHandler {
 				return func(ctx context.Context, method string, req mcpsdk.Request) (mcpsdk.Result, error) {
+					if method == "initialize" && promotedStartup.Load() {
+						initializeOnce.Do(func() { close(initializing) })
+						select {
+						case <-initializeRelease:
+						case <-ctx.Done():
+							return nil, ctx.Err()
+						}
+					}
 					if method == "tools/list" {
 						lists.Add(1)
 						if fail.Load() {
@@ -140,10 +152,31 @@ func TestExperimentalHTTPMCPRefreshRetriesOwnedActiveManager(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, releasePromoted := activateHeldSessionRuntime(t, stack, promoted.SessionID)
+			promotedStartup.Store(true)
+			promotedActive, releasePromoted := activateHeldSessionRuntime(t, stack, promoted.SessionID)
 			defer releasePromoted()
+			if profile {
+				_ = promotedActive.instance.capabilityStatus(1)
+			}
+			select {
+			case <-initializing:
+			case <-time.After(5 * time.Second):
+				t.Fatal("promoted Manager did not start")
+			}
 			request.WriteBase = appserver.WriteBase{OperationID: "always-on", SessionID: promoted.SessionID}
-			if result, err := client.RefreshMCPTools(t.Context(), request); err != nil || (result.Outcome != appserver.OutcomeCommitted && result.Outcome != appserver.OutcomeAccepted) {
+			close(initializeRelease)
+			// Activation starts MCP asynchronously. Refresh tests must wait on the
+			// new activation's existing catalog status, not the previous Manager.
+			awaitExperimentalRefresh(t, func() bool {
+				if profile {
+					status := promotedActive.instance.capabilityStatus(1)
+					return len(status.Servers) == 1 && status.Servers[0].Status == "running" && status.Servers[0].Warning == ""
+				}
+				infos := promotedActive.instance.mcpMgr.GetServerInfos(pluginID)
+				return len(infos) == 1 && infos[0].Status == "running" && infos[0].Warning == ""
+			})
+			result, err = client.RefreshMCPTools(t.Context(), request)
+			if err != nil || (result.Outcome != appserver.OutcomeCommitted && result.Outcome != appserver.OutcomeAccepted) {
 				t.Fatalf("built-in refresh rejected: %+v %v", result, err)
 			}
 		})
