@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"strings"
 	"testing"
-	"unicode/utf8"
 
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
@@ -43,8 +42,8 @@ func TestToolSearchFindsDeferredMCPTools(t *testing.T) {
 	if def.Name != tool.ToolSearchToolName {
 		t.Fatalf("Definition.Name = %q, want %q", def.Name, tool.ToolSearchToolName)
 	}
-	if !strings.Contains(def.Description, "calendar/demo") || !strings.Contains(def.Description, "drive/demo") {
-		t.Fatalf("Definition.Description = %q, want source list", def.Description)
+	if strings.Contains(def.Description, "calendar/demo") || strings.Contains(def.Description, "drive/demo") {
+		t.Fatalf("Definition.Description contains dynamic sources: %q", def.Description)
 	}
 
 	result, err := searchTool.Call(context.Background(), tool.Call{
@@ -139,8 +138,8 @@ func TestToolSearchBoundsProjectedSourceMetadataAndDescription(t *testing.T) {
 	t.Parallel()
 
 	oversized := strings.Repeat("界", maxSourceMetadataRunes+100)
-	tools := make([]tool.Tool, 0, maxDescriptionSources+10)
-	for index := 0; index < maxDescriptionSources+10; index++ {
+	tools := make([]tool.Tool, 0, 16)
+	for index := 0; index < 16; index++ {
 		tools = append(tools, mcpCandidate(
 			fmt.Sprintf("mcp__plugin__server__tool_%02d", index),
 			"metadata probe",
@@ -151,13 +150,6 @@ func TestToolSearchBoundsProjectedSourceMetadataAndDescription(t *testing.T) {
 		))
 	}
 	searchTool := lexicalSearchForTest(tools)
-	description := searchTool.Definition().Description
-	if got := utf8.RuneCountInString(description); got > maxToolSearchDescriptionRunes {
-		t.Fatalf("ToolSearch description runes = %d, want <= %d", got, maxToolSearchDescriptionRunes)
-	}
-	if !strings.Contains(description, "additional sources omitted") {
-		t.Fatalf("ToolSearch description omitted marker missing: %q", description)
-	}
 	result, err := searchTool.Call(context.Background(), tool.Call{
 		Name:  tool.ToolSearchToolName,
 		Input: []byte(`{"query":"metadata","limit":16}`),

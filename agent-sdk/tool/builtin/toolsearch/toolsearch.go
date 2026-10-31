@@ -15,12 +15,10 @@ import (
 )
 
 const (
-	defaultLimit                  = 8
-	maxLimit                      = 16
-	maxQueryRunes                 = 256
-	maxDescriptionSources         = 6
-	maxToolSearchDescriptionRunes = 4096
-	maxSourceMetadataRunes        = 256
+	defaultLimit           = 8
+	maxLimit               = 16
+	maxQueryRunes          = 256
+	maxSourceMetadataRunes = 256
 )
 
 type Tool struct {
@@ -61,7 +59,7 @@ func newTool(entries []entry) *Tool {
 	return &Tool{
 		def: tool.Definition{
 			Name:        tool.ToolSearchToolName,
-			Description: description(entries),
+			Description: "Find MCP tools by name or capability. Search results describe the available tools; catalog changes do not change this declaration.",
 			InputSchema: map[string]any{
 				"type":                 "object",
 				"additionalProperties": false,
@@ -129,45 +127,11 @@ func buildEntries(tools []tool.Tool) []entry {
 	return entries
 }
 
-func description(entries []entry) string {
-	sourceSet := map[string]bool{}
-	for _, item := range entries {
-		if source := sourceName(item.def); source != "" {
-			sourceSet[source] = true
-		}
-	}
-	sources := make([]string, 0, len(sourceSet))
-	for source := range sourceSet {
-		sources = append(sources, source)
-	}
-	sort.Strings(sources)
-	omitted := 0
-	if len(sources) > maxDescriptionSources {
-		omitted = len(sources) - maxDescriptionSources
-		sources = sources[:maxDescriptionSources]
-	}
-	for index := range sources {
-		sources[index] = "- " + sources[index]
-	}
-	if omitted > 0 {
-		sources = append(sources, fmt.Sprintf("- %d additional sources omitted", omitted))
-	}
-	sourceDescriptions := "None currently ready."
-	if len(sources) > 0 {
-		sourceDescriptions = strings.Join(sources, "\n")
-	}
-	return truncateRunes("Find deferred MCP tools by name or capability; matching tools become callable on the next model request. Sources:\n"+sourceDescriptions, maxToolSearchDescriptionRunes)
-}
-
 func (t *Tool) Definition() tool.Definition {
 	if t == nil {
 		return tool.Definition{}
 	}
-	def := tool.CloneDefinition(t.def)
-	if t.source != nil {
-		def.Description = description(t.currentEntries())
-	}
-	return def
+	return tool.CloneDefinition(t.def)
 }
 
 func (t *Tool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
