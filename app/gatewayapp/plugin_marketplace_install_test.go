@@ -68,7 +68,7 @@ func buildMarketplaceInstallFixture(t *testing.T, tmp string, fixture marketplac
 }
 
 func TestPluginServiceInstallFromClaudeMarketplaceDirectory(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := canonicalMarketplaceTestDir(t)
 	storeDir := filepath.Join(tmp, "store")
 	workspaceDir := filepath.Join(tmp, "ws")
 	if err := os.MkdirAll(storeDir, 0o700); err != nil {
@@ -100,7 +100,7 @@ func TestPluginServiceInstallFromClaudeMarketplaceDirectory(t *testing.T) {
 }
 
 func TestPluginServiceInstallFromMarketplaceUsesEntryNameWhenSourceDirDiffers(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := canonicalMarketplaceTestDir(t)
 	storeDir := filepath.Join(tmp, "store")
 	workspaceDir := filepath.Join(tmp, "ws")
 	if err := os.MkdirAll(storeDir, 0o700); err != nil {
@@ -146,7 +146,7 @@ func TestPluginServiceInstallFromMarketplaceUsesEntryNameWhenSourceDirDiffers(t 
 }
 
 func TestPluginServiceMarketplaceInstallRenamesExistingSameRoot(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := canonicalMarketplaceTestDir(t)
 	storeDir := filepath.Join(tmp, "store")
 	workspaceDir := filepath.Join(tmp, "ws")
 	if err := os.MkdirAll(storeDir, 0o700); err != nil {
@@ -197,7 +197,7 @@ func TestPluginServiceMarketplaceInstallRenamesExistingSameRoot(t *testing.T) {
 }
 
 func TestPluginServiceMarketplaceInstallUpdatesSameIDAtNewRoot(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := canonicalMarketplaceTestDir(t)
 	storeDir := filepath.Join(tmp, "store")
 	workspaceDir := filepath.Join(tmp, "ws")
 	if err := os.MkdirAll(storeDir, 0o700); err != nil {
@@ -246,7 +246,7 @@ func TestPluginServiceMarketplaceInstallUpdatesSameIDAtNewRoot(t *testing.T) {
 }
 
 func TestPluginServiceMarketplaceInstallRejectsIDCollisionOnRootRename(t *testing.T) {
-	tmp := t.TempDir()
+	tmp := canonicalMarketplaceTestDir(t)
 	storeDir := filepath.Join(tmp, "store")
 	workspaceDir := filepath.Join(tmp, "ws")
 	if err := os.MkdirAll(storeDir, 0o700); err != nil {
@@ -289,4 +289,13 @@ func TestPluginServiceMarketplaceInstallRejectsIDCollisionOnRootRename(t *testin
 		doc.Plugins[1].ID != "claude-code" || doc.Plugins[1].Root != pluginDir {
 		t.Fatalf("plugins mutated after collision: %#v", doc.Plugins)
 	}
+}
+
+func canonicalMarketplaceTestDir(t *testing.T) string {
+	t.Helper()
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return root
 }

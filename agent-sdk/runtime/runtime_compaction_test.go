@@ -22,7 +22,6 @@ import (
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
 )
 
 func TestRuntimeCompactionInjectsCheckpointAndTrimsOldHistory(t *testing.T) {
@@ -1065,113 +1064,6 @@ func TestCompactionActiveSubagentHandlesStayWithinSession(t *testing.T) {
 		if strings.Contains(checkpoint, forbidden) {
 			t.Fatalf("compact checkpoint leaked omitted Task detail %q: %q", forbidden, checkpoint)
 		}
-	}
-}
-
-func TestRuntimeCompactionPreservesDeferredMCPToolVisibility(t *testing.T) {
-	t.Parallel()
-
-	sessions, activeSession := newTestSessionService(t, "sess-compact-tool-search")
-	const mcpToolName = "mcp__calendar__demo__create_event"
-	mcpTool := tool.NamedTool{
-		Def: tool.Definition{
-			Name:        mcpToolName,
-			Description: "Create calendar events",
-			InputSchema: map[string]any{"type": "object"},
-			Metadata: map[string]any{
-				tool.MetadataToolKind:             tool.MetadataToolKindMCP,
-				tool.MetadataPluginID:             "calendar",
-				tool.MetadataMCPServer:            "demo",
-				tool.MetadataMCPTool:              "create_event",
-				tool.MetadataMCPSourceFingerprint: "fixture-v1",
-			},
-		},
-	}
-	searchTool := toolsearch.New([]tool.Tool{mcpTool})
-	if searchTool == nil {
-		t.Fatal("toolsearch.New(MCP tool) = nil")
-	}
-	appendTestEvent(t, sessions, activeSession.SessionRef, userTextEvent("Find the calendar event tool."))
-	appendTestEvent(t, sessions, activeSession.SessionRef, &session.Event{
-		Type:       session.EventTypeToolResult,
-		Visibility: session.VisibilityCanonical,
-		Meta:       map[string]any{tool.MetadataToolExposure: tool.ExposureState{Version: 1, Active: []tool.Binding{tool.BindingForDefinition(mcpTool.Definition())}}},
-		Tool: &session.EventTool{
-			ID:     "call-search",
-			Name:   tool.ToolSearchToolName,
-			Status: "completed",
-			Output: toolSearchOutputMapForTest(t, mcpTool.Definition()),
-		},
-	})
-	appendTestEvent(t, sessions, activeSession.SessionRef, assistantEvent("Calendar tool is available."))
-
-	runtime, err := New(Config{
-		Sessions: sessions,
-		AgentFactory: chat.Factory{
-			SystemPrompt: "Be terse.",
-		},
-		Compaction: CompactionConfig{
-			SegmentTokenBudget: 80,
-		},
-	})
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-	compactModel := &contextProbeModel{
-		t: t,
-		compactBody: `CONTEXT CHECKPOINT
-
-## Current Objective
-- use the discovered calendar tool
-
-## Next Actions
-1. continue with the calendar MCP tool`,
-	}
-	result, err := runtime.Compact(context.Background(), CompactRequest{
-		SessionRef: activeSession.SessionRef,
-		Model:      compactModel,
-		Trigger:    "manual",
-	})
-	if err != nil {
-		t.Fatalf("Compact() error = %v", err)
-	}
-	if !result.Compacted {
-		t.Fatal("Compact() did not compact")
-	}
-	loaded, err := sessions.LoadSession(context.Background(), session.LoadSessionRequest{SessionRef: activeSession.SessionRef})
-	if err != nil {
-		t.Fatalf("LoadSession() error = %v", err)
-	}
-	compactEvent, ok := latestCompactEventForTest(loaded.Events)
-	if !ok {
-		t.Fatal("expected compact event")
-	}
-	data, ok := compact.CompactEventDataFromEvent(compactEvent)
-	if !ok {
-		t.Fatalf("compact event missing metadata: %+v", compactEvent.Meta)
-	}
-	if !slices.Equal(data.DiscoveredTools, []string{mcpToolName}) {
-		t.Fatalf("compact discovered tools = %v, want %v", data.DiscoveredTools, []string{mcpToolName})
-	}
-
-	probe := &toolListProbeModel{}
-	run, err := runtime.Run(context.Background(), agent.RunRequest{
-		SessionRef: activeSession.SessionRef,
-		Input:      "continue",
-		AgentSpec: agent.AgentSpec{
-			Name:  "chat",
-			Model: probe,
-			Tools: []tool.Tool{searchTool, mcpTool},
-		},
-	})
-	if err != nil {
-		t.Fatalf("Run() error = %v", err)
-	}
-	if _, err := drainRunnerEvents(t, run.Handle); err != nil {
-		t.Fatalf("runner error = %v", err)
-	}
-	if got, want := toolNamesFromRequestForTest(probe.last), []string{tool.ToolSearchToolName, mcpToolName, tool.RetireToolName}; !slices.Equal(got, want) {
-		t.Fatalf("post-compact request tools = %v, want %v", got, want)
 	}
 }
 

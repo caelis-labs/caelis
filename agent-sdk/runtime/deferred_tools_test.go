@@ -58,7 +58,7 @@ func (m *deferredRuntimeModel) Generate(_ context.Context, req *model.Request) i
 			msg = model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{ID: "search", Name: tool.ToolSearchToolName, Args: `{"query":"docs"}`}}, "")
 			finish = model.FinishReasonToolCalls
 		case 2:
-			msg = model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{ID: "late", Name: "docs__read", Args: `{}`}}, "")
+			msg = model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{ID: "late", Name: tool.MCPCallToolName, Args: `{"tool_name":"docs__read","arguments":{}}`}}, "")
 			finish = model.FinishReasonToolCalls
 		}
 		yield(&model.StreamEvent{Type: model.StreamEventTurnDone, Response: &model.Response{Message: msg, TurnComplete: true, StepComplete: true, Status: model.ResponseStatusCompleted, FinishReason: finish}}, nil)
@@ -128,7 +128,7 @@ func TestRuntimeLateMCPUsesPolicyAndExecutionJournal(t *testing.T) {
 			if invoked != want {
 				t.Fatalf("calls=%d want %d", invoked, want)
 			}
-			if len(llm.requests) != 3 || len(llm.requests[0].Tools) != 1 || len(llm.requests[1].Tools) != 3 {
+			if len(llm.requests) != 3 || len(llm.requests[0].Tools) != 2 || len(llm.requests[1].Tools) != 2 {
 				t.Fatalf("tool declarations=%#v", llm.requests)
 			}
 			journaled := false

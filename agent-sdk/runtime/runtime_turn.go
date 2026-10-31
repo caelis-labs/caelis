@@ -9,6 +9,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/mcpdiscovery"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/requestsource"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -162,6 +163,7 @@ func (r *Runtime) runAttempt(
 		return nil, false, false, err
 	}
 
+	ctx = mcpdiscovery.WithEvents(ctx, invocation.SourceEvents)
 	var source *requestsource.Tracker
 	if r.compaction.Async.Enabled || r.compaction.Idle.Enabled {
 		ctx, source = requestsource.WithTracker(ctx, invocation.SourceEvents)

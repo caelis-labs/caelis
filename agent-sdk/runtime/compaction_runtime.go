@@ -43,7 +43,7 @@ func (r *Runtime) prepareInvocationContext(
 		// Its ordinary watermark gate owns proactive compaction; a stale Turn
 		// bootstrap must not compact history before that snapshot is resolved.
 		return invocationContext{
-			PromptEvents: promptEventsWithToolVisibilityMetadata(compact.PromptEventsFromLatestCompact(events), events),
+			PromptEvents: compact.PromptEventsFromLatestCompact(events),
 			SourceEvents: events,
 			State:        state,
 		}, nil
@@ -52,7 +52,6 @@ func (r *Runtime) prepareInvocationContext(
 	if err != nil {
 		return invocationContext{}, err
 	}
-	ctx = r.staticCheckpointContext(ctx, req.AgentSpec.DeferredTools)
 	records := &compactionInvocations{}
 	compactCtx := records.context(r.withCompactActivity(ctx, loaded.Session, turnID, sink))
 	result, err := r.compactor.Prepare(compactCtx, compact.Request{
@@ -76,14 +75,14 @@ func (r *Runtime) prepareInvocationContext(
 		}
 		sourceEvents := append(session.CloneEvents(events), persisted)
 		return invocationContext{
-			PromptEvents: promptEventsWithToolVisibilityMetadata(compact.PromptEventsFromLatestCompact(sourceEvents), sourceEvents),
+			PromptEvents: compact.PromptEventsFromLatestCompact(sourceEvents),
 			SourceEvents: sourceEvents,
 			State:        state,
 			LiveCompact:  persisted,
 		}, nil
 	}
 	return invocationContext{
-		PromptEvents: promptEventsWithToolVisibilityMetadata(result.PromptEvents, events),
+		PromptEvents: result.PromptEvents,
 		SourceEvents: events,
 		State:        state,
 	}, nil
@@ -124,8 +123,7 @@ func (r *Runtime) Compact(ctx context.Context, req CompactRequest) (CompactResul
 	if r == nil {
 		return CompactResult{}, errors.New("agent-sdk/runtime: runtime is unavailable")
 	}
-	snapshot := r.withMCPCheckpointAuthority(agent.ModelRequestSnapshot{Revision: "manual", DeferredTools: req.DeferredTools, Validate: req.Validate})
-	ctx = context.WithValue(ctx, checkpointValidationKey{}, snapshot.Validate)
+	ctx = context.WithValue(ctx, checkpointValidationKey{}, req.Validate)
 	ref := session.NormalizeSessionRef(req.SessionRef)
 	if err := r.recoverRuntimeState(ctx, ref); err != nil {
 		return CompactResult{}, err

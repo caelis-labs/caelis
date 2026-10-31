@@ -7,8 +7,10 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	sdkmodel "github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
+	"github.com/caelis-labs/caelis/control/appserver/projection"
 	"github.com/caelis-labs/caelis/internal/evalharness"
 )
 
@@ -455,5 +457,31 @@ func assertFrameContainsInOrder(t *testing.T, name string, frame string, want []
 			t.Fatalf("%s missing fragment %q after byte %d\nframe:\n%s", name, fragment, cursor, frame)
 		}
 		cursor += idx + len(fragment)
+	}
+}
+
+func TestRoutedMCPRendersRealTargetAndArguments(t *testing.T) {
+	m := NewModel(Config{AppName: "CAELIS", Version: "dev", Workspace: "/tmp/workspace", ModelAlias: "fixture", NoColor: true, NoAnimation: true, Commands: DefaultCommands(), Wizards: DefaultWizards()})
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 32})
+	m = updated.(*Model)
+	original := sdkmodel.ToolCall{ID: "outer-42", Name: "mcp_call", Args: `{"tool_name":"maps__route","arguments":{"origin":"北京南站","destination":"故宫"}}`}
+	message := sdkmodel.MessageFromToolCalls(sdkmodel.RoleAssistant, []sdkmodel.ToolCall{original}, "")
+	event := &session.Event{SessionID: "fixed-mcp", Type: session.EventTypeToolCall, Tool: &session.EventTool{ID: original.ID, Name: "maps__route", Input: map[string]any{"origin": "北京南站", "destination": "故宫"}, ModelCall: &original, Status: "pending"}, Message: &message}
+	updates, err := projection.ProjectEvent(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, update := range updates {
+		updated, _ = m.Update(eventstream.Envelope{Kind: eventstream.KindSessionUpdate, SessionID: "fixed-mcp", Update: update})
+		m = updated.(*Model)
+	}
+	frame := evalharness.NormalizeFrame(m.View().Content)
+	for _, want := range []string{"maps__route", "北京南站", "故宫"} {
+		if !strings.Contains(frame, want) {
+			t.Fatalf("frame missing %q:\n%s", want, frame)
+		}
+	}
+	if strings.Contains(frame, "mcp_call") {
+		t.Fatalf("frame exposed routing envelope:\n%s", frame)
 	}
 }

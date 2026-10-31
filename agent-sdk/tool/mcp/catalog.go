@@ -2,9 +2,6 @@ package mcp
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -235,57 +232,6 @@ func (m *Manager) RevokeServer(pluginID, serverName string) error {
 		return nil
 	}
 	return fmt.Errorf("MCP server %s/%s not found", pluginID, serverName)
-}
-
-// CatalogRevision is an opaque activation-local invalidation token for
-// background candidates. It changes on notifications, revocation, connection
-// loss, and published source/schema changes, including hidden tools. It is not
-// a provider cache key or a portable reconnect identity.
-func (m *Manager) CatalogRevision() string {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	for _, server := range m.servers {
-		if server.client != nil && server.client.catalog != nil {
-			server.client.catalog.mu.Lock()
-			defer server.client.catalog.mu.Unlock()
-		}
-	}
-	return m.catalogRevisionLocked()
-}
-
-// catalogRevisionLocked requires Manager.mu and every connected catalog mutex.
-func (m *Manager) catalogRevisionLocked() string {
-	type entry struct {
-		Source                 string
-		Generation             uint64
-		Dirty, Revoked, Closed bool
-		Failed, RefreshFailed  bool
-	}
-	entries := make([]entry, 0, len(m.servers))
-	for _, server := range m.servers {
-		item := entry{Source: server.spec.PluginID + "/" + server.spec.Name, Revoked: server.revoked, Closed: m.closed, Failed: server.err != nil, RefreshFailed: server.refreshErr != nil}
-		if server.client != nil {
-			item.Closed = item.Closed || server.client.closedError() != nil
-			if c := server.client.catalog; c != nil {
-				item.Generation = c.generation
-				item.Dirty = c.dirty
-				item.Revoked = c.revoked
-			}
-		} else {
-			item.Dirty = true
-		}
-		entries = append(entries, item)
-	}
-	versions := make([]tool.Binding, 0, len(m.tools))
-	for _, item := range m.tools {
-		versions = append(versions, tool.BindingForDefinition(item.Definition()))
-	}
-	raw, _ := json.Marshal(struct {
-		Entries  []entry
-		Versions []tool.Binding
-	}{entries, versions})
-	sum := sha256.Sum256(raw)
-	return hex.EncodeToString(sum[:])
 }
 
 // A definition that disappears and later returns gets a new callable binding,

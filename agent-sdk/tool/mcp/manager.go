@@ -543,3 +543,15 @@ func (m *Manager) GetServerInfos(pluginID string) []MCPServerInfo {
 	})
 	return infos
 }
+
+// SearchTools returns only currently dispatchable directory candidates. Status
+// and refresh diagnostics retain the last whole directory through Tools.
+func (m *Manager) SearchTools() []tool.Tool {
+	var ready []tool.Tool
+	for _, one := range m.Tools() {
+		if remote, ok := one.(*MCPTool); ok && m.admitCatalogTool(context.Background(), remote) == nil {
+			ready = append(ready, one)
+		}
+	}
+	return ready
+}

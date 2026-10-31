@@ -59,7 +59,7 @@ func newTool(entries []entry) *Tool {
 	return &Tool{
 		def: tool.Definition{
 			Name:        tool.ToolSearchToolName,
-			Description: "Find MCP tools by name or capability. Search results describe the available tools; catalog changes do not change this declaration.",
+			Description: "Find MCP tools by name or capability. Results include full input schemas and exact version bindings. Call a discovered name using mcp_call with its arguments.",
 			InputSchema: map[string]any{
 				"type":                 "object",
 				"additionalProperties": false,
@@ -67,7 +67,7 @@ func newTool(entries []entry) *Tool {
 				"properties": map[string]any{
 					"query": map[string]any{
 						"type":        "string",
-						"description": "Search query for deferred tools.",
+						"description": "Search query for MCP tools.",
 						"minLength":   1,
 						"maxLength":   maxQueryRunes,
 					},
@@ -104,7 +104,7 @@ func NewSource(source tool.Source, rankers ...Ranker) tool.Tool {
 
 func (t *Tool) currentEntries() []entry {
 	if t.source != nil {
-		return buildEntries(t.source.Tools())
+		return buildEntries(searchTools(t.source))
 	}
 	return t.entries
 }
@@ -192,7 +192,7 @@ func (t *Tool) readSchema(ctx context.Context, name string) (tool.Definition, er
 			continue
 		}
 		if t.source != nil {
-			current := buildEntries(t.source.Tools())
+			current := buildEntries(searchTools(t.source))
 			for _, item := range current {
 				if item.def.Name == name && sameSearchDefinition(item.def, candidate.def) {
 					return tool.CloneDefinition(candidate.def), nil
@@ -401,3 +401,10 @@ func nonEmpty(values []string) []string {
 }
 
 var _ tool.Tool = (*Tool)(nil)
+
+func searchTools(source tool.Source) []tool.Tool {
+	if ready, ok := source.(interface{ SearchTools() []tool.Tool }); ok {
+		return ready.SearchTools()
+	}
+	return source.Tools()
+}

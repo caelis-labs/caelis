@@ -248,13 +248,13 @@ func (p *atomicCapabilityProvider) RoundTrip(req *http.Request) (*http.Response,
 			Body: io.NopCloser(strings.NewReader("data: " + string(encoded) + "\n\ndata: [DONE]\n\n")), Request: req}, nil
 	}
 	switch {
-	case latestTool == "ToolSearch" && strings.Contains(latestUser, "CALLFAIL"):
+	case latestTool == "tool_search" && strings.Contains(latestUser, "CALLFAIL"):
 		name, args = "callfail__lookup", `{}`
-	case latestTool == "ToolSearch" && strings.Contains(latestUser, "BLOCK"):
+	case latestTool == "tool_search" && strings.Contains(latestUser, "BLOCK"):
 		name, args = "blocking__lookup", `{}`
-	case latestTool == "ToolSearch" && strings.Contains(latestUser, "DOC"):
+	case latestTool == "tool_search" && strings.Contains(latestUser, "DOC"):
 		name, args = "documents__lookup", `{}`
-	case latestTool == "ToolSearch" && strings.Contains(latestUser, "UTIL"):
+	case latestTool == "tool_search" && strings.Contains(latestUser, "UTIL"):
 		name, args = "utilities__lookup", `{}`
 	case latestTool != "":
 	case strings.Contains(latestUser, "HEALTHY_SKILL"):
@@ -264,13 +264,17 @@ func (p *atomicCapabilityProvider) RoundTrip(req *http.Request) (*http.Response,
 	case strings.Contains(latestUser, "SKILL"):
 		name, args = "Skill", `{"name":"atomic-skill"}`
 	case strings.Contains(latestUser, "CALLFAIL"):
-		name, args = "ToolSearch", `{"query":"callfail lookup"}`
+		name, args = "tool_search", `{"query":"callfail lookup"}`
 	case strings.Contains(latestUser, "BLOCK"):
-		name, args = "ToolSearch", `{"query":"blocking lookup"}`
+		name, args = "tool_search", `{"query":"blocking lookup"}`
 	case strings.Contains(latestUser, "DOC"):
-		name, args = "ToolSearch", `{"query":"documents lookup"}`
+		name, args = "tool_search", `{"query":"documents lookup"}`
 	case strings.Contains(latestUser, "UTIL"):
-		name, args = "ToolSearch", `{"query":"utilities lookup"}`
+		name, args = "tool_search", `{"query":"utilities lookup"}`
+	}
+	if strings.HasSuffix(name, "__lookup") {
+		args = fmt.Sprintf(`{"tool_name":%q,"arguments":%s}`, name, args)
+		name = "mcp_call"
 	}
 	message := map[string]any{"role": "assistant", "content": "ATOMIC_DIALOGUE_OK"}
 	finish := "stop"
@@ -697,7 +701,7 @@ func TestApplicationAtomicMCPRevisionLifecycleHTTP(t *testing.T) {
 		waitAtomicAuditCount(t, audit, "documents:stop:", i+1)
 		atomicAssertLiveService(t, audit, "documents", 0)
 		promptAtomicCapabilityClient(t, ctx, client, session, fmt.Sprintf("lifecycle-disabled-%d", i), "BASIC")
-		if strings.Contains(provider.lastTools(), "ToolSearch") {
+		if strings.Contains(provider.lastTools(), "tool_search") {
 			t.Fatal("disabled tool appeared in a new request")
 		}
 		servers := []sessionprofile.MCPServer{server}
@@ -959,7 +963,7 @@ func TestApplicationAtomicCapabilitiesHTTP(t *testing.T) {
 	// load the Skill body only after the model calls the Skill tool.
 	promptAtomicCapabilityClient(t, ctx, client, created.SessionID, "atomic-skill", "SKILL")
 	first := provider.requestAt(0)
-	if !strings.Contains(first, "atomic-skill") || !strings.Contains(first, "ApplicationLookup") || !strings.Contains(first, "ToolSearch") || !strings.Contains(first, "Skill") || strings.Contains(first, "ATOMIC_SKILL_BODY_731") {
+	if !strings.Contains(first, "atomic-skill") || !strings.Contains(first, "ApplicationLookup") || !strings.Contains(first, "tool_search") || !strings.Contains(first, "Skill") || strings.Contains(first, "ATOMIC_SKILL_BODY_731") {
 		t.Fatalf("first model request lacked assembled metadata/tools or inlined Skill body: %s", first)
 	}
 	requests := provider.snapshot()

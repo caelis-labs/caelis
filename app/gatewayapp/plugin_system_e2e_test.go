@@ -315,8 +315,8 @@ func (p *pluginSystemE2EProvider) handle(w http.ResponseWriter, r *http.Request)
 						"id":    "call_plugin_e2e",
 						"type":  "function",
 						"function": map[string]any{
-							"name":      pluginE2EToolName,
-							"arguments": `{"name":"fixture"}`,
+							"name":      tool.MCPCallToolName,
+							"arguments": fmt.Sprintf(`{"tool_name":%q,"arguments":{"name":"fixture"}}`, pluginE2EToolName),
 						},
 					}},
 				},
@@ -386,6 +386,10 @@ func (p *pluginSystemE2EProvider) observePayload(callIndex int, payload map[stri
 	raw, _ := json.Marshal(payload)
 	text := string(raw)
 	p.payloadSummaries = append(p.payloadSummaries, summarizePluginSystemE2EPayload(payload))
+	if callIndex > 1 && strings.Contains(text, pluginE2EToolName) {
+		p.sawTool = true
+	}
+
 	if strings.Contains(text, pluginE2ESkillMarker) {
 		p.sawSkill = true
 	}
@@ -403,7 +407,6 @@ func (p *pluginSystemE2EProvider) observePayload(callIndex int, payload map[stri
 				p.sawToolSearch = true
 			}
 			if fn["name"] == pluginE2EToolName {
-				p.sawTool = true
 				if callIndex == 1 {
 					p.sawToolBeforeSearch = true
 				}
@@ -452,7 +455,7 @@ func (p *pluginSystemE2EProvider) Assert(t *testing.T, events string) {
 		t.Fatalf("provider observed concrete MCP tool before tool_search result; %s; events=%s", p.summaryLocked(), events)
 	}
 	if !p.sawTool {
-		t.Fatalf("provider did not observe plugin MCP tool declaration after tool_search; %s; events=%s", p.summaryLocked(), events)
+		t.Fatalf("provider did not observe full plugin MCP discovery after tool_search; %s; events=%s", p.summaryLocked(), events)
 	}
 	if !p.sawToolResult {
 		t.Fatalf("provider did not observe MCP tool result in follow-up model request; %s; events=%s", p.summaryLocked(), events)

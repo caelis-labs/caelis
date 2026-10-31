@@ -12,6 +12,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/internal/agentcommunication"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/runtimeinput"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/mcpdiscovery"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/prefixusage"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/session/userdisplay"
@@ -39,8 +40,8 @@ type Agent struct {
 	instructions        []model.Part
 	admitModelRequest   func(context.Context, agent.ModelRequestAdmission) error
 	releaseModelRequest func()
-	discoveredTools     []string
-	exposure            *tool.ExposureState
+	discoveries         map[string]tool.Binding
+	boundCalls          map[string]boundMCPCall
 }
 
 // New returns one concrete chat agent.
@@ -67,7 +68,7 @@ func NewWithTools(name string, model model.LLM, tools []tool.Tool, systemPrompt 
 	if err != nil {
 		return nil, err
 	}
-	agent.tools = append([]tool.Tool(nil), tools...)
+	agent.tools = append([]tool.Tool(nil), tool.WithMCPCallTool(tools)...)
 	for index, configured := range agent.tools {
 		if configured == nil {
 			continue
@@ -130,6 +131,10 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 			}
 		}()
 		messages := messagesFromContext(ctx)
+		a.discoveries = mcpdiscovery.FromContext(ctx)
+		for event := range ctx.Events().All() {
+			mcpdiscovery.Apply(a.discoveries, event)
+		}
 		watchdog := newDefaultGenerationWatchdog()
 		visibility := tool.NewToolVisibilityForModel(a.tools, a.model)
 		for {
@@ -169,7 +174,9 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 				return
 			}
 			toolCallEvents := modelToolCallEvents(assistantMessage, final, messageID, a.model, requestPrefix)
+			a.bindMCPCalls(calls, &visibility)
 			for _, event := range toolCallEvents {
+				a.presentMCPEvent(event)
 				if !yield(event, nil) {
 					return
 				}
@@ -203,15 +210,12 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 				yield(nil, err)
 				return
 			}
-			a.recordExposure(&visibility, toolEvents)
 			for _, toolEvent := range toolEvents {
-				if toolEvent != nil && toolEvent.Tool != nil {
-					visibility.ApplyToolResult(toolEvent.Tool.Name, toolEvent.Tool.Output)
-					a.rememberRequestToolDiscovery(toolEvent)
-				}
 				if !yield(toolEvent, nil) {
 					return
 				}
+				// yield returns only after Runtime confirms the canonical append.
+				mcpdiscovery.Apply(a.discoveries, toolEvent)
 				if toolEvent != nil && toolEvent.Tool != nil && toolEvent.Tool.TurnComplete {
 					// The terminal callback receipt is durable before this Run exits.
 					// Do not consume queued input or issue another model request.
@@ -248,7 +252,7 @@ func (a *Agent) collectCanonicalModelStep(
 		if err := a.refreshModelRequest(ctx); err != nil {
 			return model.Message{}, nil, nil, "", prefixusage.Snapshot{}, true, err
 		}
-		a.refreshToolVisibility(ctx, visibility)
+		*visibility = tool.NewToolVisibilityForModel(a.tools, a.model)
 		stream := a.request.StreamEnabled(false)
 		messageID := uuid.NewString()
 		request := &model.Request{
@@ -592,10 +596,4 @@ func Metadata(systemPrompt string) map[string]any {
 		return nil
 	}
 	return map[string]any{"system_prompt": systemPrompt}
-}
-
-func (a *Agent) refreshDeferredTools(visibility *tool.ToolVisibility) {
-	if a.deferredTools != nil {
-		visibility.RefreshDeferredTools(a.deferredTools.Tools(), a.model)
-	}
 }

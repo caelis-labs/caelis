@@ -3,6 +3,7 @@ package providers
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
@@ -19,7 +20,7 @@ func TestToolSearchProviderDeclarationStable(t *testing.T) {
 	search := toolsearch.NewSource(source)
 	wire := func() map[string][]byte {
 		t.Helper()
-		req := &model.Request{Tools: tool.ModelSpecs([]tool.Tool{search})}
+		req := &model.Request{Tools: tool.ModelSpecs(append([]tool.Tool{search}, source.tools...))}
 		codex, err := openAICodexRequestFromModel(req, "synthetic")
 		if err != nil {
 			t.Fatal(err)
@@ -46,7 +47,9 @@ func TestToolSearchProviderDeclarationStable(t *testing.T) {
 	for _, name := range []string{"ready", "refreshed", ""} {
 		source.tools = nil
 		if name != "" {
-			source.tools = []tool.Tool{tool.NamedTool{Def: tool.Definition{Name: name, Metadata: map[string]any{tool.MetadataToolKind: tool.MetadataToolKindMCP, tool.MetadataMCPServer: name}}}}
+			for i := 0; i < 500; i++ {
+				source.tools = append(source.tools, tool.NamedTool{Def: tool.Definition{Name: fmt.Sprintf("%s__remote_%d", name, i), Description: name, InputSchema: map[string]any{"type": "object", "properties": map[string]any{name: map[string]any{"type": "string"}}}, Metadata: map[string]any{tool.MetadataToolKind: tool.MetadataToolKindMCP, tool.MetadataMCPServer: name}}})
+			}
 		}
 		for provider, after := range wire() {
 			if !bytes.Equal(before[provider], after) {

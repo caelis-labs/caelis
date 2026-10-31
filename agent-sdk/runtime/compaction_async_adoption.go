@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"context"
-	"errors"
 	"reflect"
 	"strings"
 	"time"
@@ -76,15 +75,9 @@ func (r *Runtime) adoptCompactionCandidate(ctx context.Context, l *autoCompactGa
 	if estimatePromptEventsTokens(projected) >= estimatePromptEventsTokens(compact.PromptEventsFromLatestCompact(current)) {
 		return false, nil
 	}
-	_, err = r.persistCompactionArtifactsUsing(ctx, &loaded.Session, loaded, turnID,
+	_, err = r.persistCompactionArtifactsUsing(ctx, &loaded.Session, turnID,
 		compact.Result{Compacted: true, CompactEvent: event}, job.validSource, appendCheckpoint)
 	if err != nil {
-		var stale *checkpointCatalogStaleError
-		if errors.As(err, &stale) {
-			// The guard rejected before append. The candidate is already discarded;
-			// current tool admission remains authoritative for foreground work.
-			return false, nil
-		}
 		// No adoption, including on an unresolved write outcome. The caller
 		// fails this Turn; it must not mint a second checkpoint as a fallback.
 		return false, err

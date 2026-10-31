@@ -147,7 +147,7 @@ func TestAgentSearchBatchCannotInspectCandidateFromAnotherBatch(t *testing.T) {
 			return tool.Definition{}, nil
 		},
 	})
-	if err == nil || !strings.Contains(err.Error(), "catalog batch") || reads != 0 || len(llm.requests) != 1 {
+	if err == nil || !strings.Contains(err.Error(), "catalog batch") || reads != 0 || len(llm.requests) != 2 {
 		t.Fatalf("cross-batch schema error=%v reads=%d requests=%d", err, reads, len(llm.requests))
 	}
 }

@@ -228,23 +228,3 @@ func (s *MCPGrantStore) change(key string, present bool) error {
 	s.grants = next
 	return nil
 }
-
-// RevocationRevision is an activation-local invalidation token for background
-// candidates. A changed value requires revalidation even when model tool schemas
-// are identical. Pending calls use per-scope epochs, not this aggregate token.
-func (s *MCPGrantStore) RevocationRevision() uint64 {
-	if s == nil {
-		return 0
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.revocationRevisionLocked()
-}
-
-func (s *MCPGrantStore) revocationRevisionLocked() uint64 {
-	var revision uint64
-	for _, epoch := range s.revocations {
-		revision += epoch
-	}
-	return revision
-}

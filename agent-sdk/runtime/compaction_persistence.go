@@ -13,21 +13,16 @@ import (
 )
 
 func (r *Runtime) persistCompactionArtifacts(ctx context.Context, active *session.Session, source session.LoadedSession, turnID string, result compact.Result) (*session.Event, error) {
-	return r.persistCompactionArtifactsValidated(ctx, active, source, turnID, result, func(current session.LoadedSession) bool {
+	return r.persistCompactionArtifactsUsing(ctx, active, turnID, result, func(current session.LoadedSession) bool {
 		return reflect.DeepEqual(mainInvocationEvents(source.Events), mainInvocationEvents(current.Events)) &&
 			reflect.DeepEqual(source.State, current.State)
-	})
-}
-
-// Synchronous, asynchronous and idle compaction commit through this sole owner.
-// The caller supplies the source validation policy and holds the write queue.
-func (r *Runtime) persistCompactionArtifactsValidated(ctx context.Context, active *session.Session, source session.LoadedSession, turnID string, result compact.Result, valid func(session.LoadedSession) bool) (*session.Event, error) {
-	return r.persistCompactionArtifactsUsing(ctx, active, source, turnID, result, valid, nil)
+	}, nil)
 }
 
 type checkpointAppender func(context.Context, session.AppendEventRequest) (*session.Event, error)
 
-func (r *Runtime) persistCompactionArtifactsUsing(ctx context.Context, active *session.Session, source session.LoadedSession, turnID string, result compact.Result, valid func(session.LoadedSession) bool, appendCheckpoint checkpointAppender) (*session.Event, error) {
+// Synchronous, asynchronous and idle compaction commit through this sole owner.
+func (r *Runtime) persistCompactionArtifactsUsing(ctx context.Context, active *session.Session, turnID string, result compact.Result, valid func(session.LoadedSession) bool, appendCheckpoint checkpointAppender) (*session.Event, error) {
 	if appendCheckpoint == nil {
 		appendCheckpoint = r.sessions.AppendEvent
 	}
@@ -56,7 +51,6 @@ func (r *Runtime) persistCompactionArtifactsUsing(ctx context.Context, active *s
 	}
 	var err error
 	for range 8 {
-		r.checkpointExposure(event, source.Events, turnID != "" || r.activeRunForSession(active.SessionRef).handle == nil)
 		var persisted *session.Event
 		persisted, err = appendCheckpoint(ctx, session.AppendEventRequest{
 			SessionRef: active.SessionRef, ExpectedRevision: &active.Revision,
@@ -86,7 +80,6 @@ func (r *Runtime) persistCompactionArtifactsUsing(ctx context.Context, active *s
 			return nil, err
 		}
 		*active = current.Session
-		source = current
 	}
 	return nil, err
 }

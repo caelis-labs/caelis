@@ -3,8 +3,6 @@ package tool
 import (
 	"context"
 	"encoding/json"
-	"fmt"
-	"strings"
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
@@ -167,175 +165,6 @@ func TestModelSpecsDoesNotInferStrictForConditionalSchema(t *testing.T) {
 	}
 }
 
-func TestToolVisibilityDefersMCPToolsBehindToolSearch(t *testing.T) {
-	t.Parallel()
-
-	inspect := NamedTool{Def: Definition{Name: "inspect", Description: "Inspect", InputSchema: map[string]any{"type": "object"}}}
-	search := NamedTool{Def: Definition{
-		Name:        ToolSearchToolName,
-		Description: "Search deferred tools",
-		InputSchema: map[string]any{"type": "object"},
-		Metadata:    map[string]any{MetadataToolKind: MetadataToolKindToolSearch},
-	}}
-	mcp := NamedTool{Def: Definition{
-		Name:        "mcp__plugin__server__read",
-		Description: "Read external data",
-		InputSchema: map[string]any{"type": "object"},
-		Metadata: map[string]any{
-			MetadataToolKind:  MetadataToolKindMCP,
-			MetadataPluginID:  "plugin",
-			MetadataMCPServer: "server",
-		},
-	}}
-	tools := []Tool{inspect, search, mcp}
-
-	specs := ModelSpecs(tools)
-	if got, want := toolSpecNames(specs), []string{"inspect", ToolSearchToolName}; !equalStrings(got, want) {
-		t.Fatalf("ModelSpecs names = %v, want %v", got, want)
-	}
-
-	visibility := NewToolVisibility(tools)
-	visibility.Reveal("mcp__plugin__server__read")
-	specs = visibility.ModelSpecs()
-	if got, want := toolSpecNames(specs), []string{"inspect", ToolSearchToolName, "mcp__plugin__server__read"}; !equalStrings(got, want) {
-		t.Fatalf("ToolVisibility.ModelSpecs names = %v, want %v", got, want)
-	}
-
-	allSpecs := modelSpecsFromDefinitions([]Definition{inspect.Definition(), search.Definition(), mcp.Definition()})
-	if got, want := toolSpecNames(allSpecs), []string{"inspect", ToolSearchToolName, "mcp__plugin__server__read"}; !equalStrings(got, want) {
-		t.Fatalf("unfiltered model specs names = %v, want %v", got, want)
-	}
-}
-
-func TestToolVisibilityMapsReplayOnlyAliasToCompactMCPName(t *testing.T) {
-	t.Parallel()
-
-	const (
-		compactName = "context7__query_docs"
-		legacyName  = "mcp__caelis_mcp_user__context7__query_docs"
-	)
-	search := NamedTool{Def: Definition{
-		Name:     ToolSearchToolName,
-		Metadata: map[string]any{MetadataToolKind: MetadataToolKindToolSearch},
-	}}
-	mcp := NamedTool{Def: Definition{
-		Name: compactName,
-		Metadata: map[string]any{
-			MetadataToolKind:      MetadataToolKindMCP,
-			MetadataReplayAliases: []string{legacyName},
-		},
-	}}
-	tools := []Tool{search, mcp}
-
-	fromMetadata := NewToolVisibility(tools)
-	fromMetadata.ApplyDiscoveredToolNames([]string{legacyName})
-	if got, want := toolSpecNames(fromMetadata.ModelSpecs()), []string{ToolSearchToolName, compactName}; !equalStrings(got, want) {
-		t.Fatalf("metadata replay names = %v, want %v", got, want)
-	}
-
-	fromResult := NewToolVisibility(tools)
-	fromResult.ApplyToolSearchOutput(map[string]any{
-		"tools": []any{map[string]any{"name": legacyName}},
-	})
-	if got, want := toolSpecNames(fromResult.ModelSpecs()), []string{ToolSearchToolName, compactName}; !equalStrings(got, want) {
-		t.Fatalf("ToolSearch replay names = %v, want %v", got, want)
-	}
-}
-
-func TestToolVisibilityAdmitsBoundedToolSearchResults(t *testing.T) {
-	t.Parallel()
-
-	search := NamedTool{Def: Definition{
-		Name:     ToolSearchToolName,
-		Metadata: map[string]any{MetadataToolKind: MetadataToolKindToolSearch},
-	}}
-	tools := []Tool{search}
-	definitions := make([]Definition, 0, MaxDeferredToolsPerRun+6)
-	for i := 0; i < MaxDeferredToolsPerRun+6; i++ {
-		def := Definition{
-			Name:        fmt.Sprintf("mcp__plugin__server__tool_%03d", i),
-			Description: "Deferred external tool",
-			InputSchema: map[string]any{"type": "object"},
-			Metadata:    map[string]any{MetadataToolKind: MetadataToolKindMCP},
-		}
-		definitions = append(definitions, def)
-		tools = append(tools, NamedTool{Def: def})
-	}
-	visibility := NewToolVisibility(tools)
-	admitted := visibility.AdmitToolSearchResult(NewToolSearchResult(definitions))
-	if got, want := len(admitted.Tools), MaxDeferredToolsPerRun; got != want {
-		t.Fatalf("admitted tools = %d, want %d", got, want)
-	}
-	if !admitted.Truncated || admitted.OmittedCount != 6 {
-		t.Fatalf("admitted result = %#v, want truncated with 6 omitted", admitted)
-	}
-	if got, want := len(visibility.ModelSpecs()), 1+MaxDeferredToolsPerRun; got != want {
-		t.Fatalf("visible specs = %d, want %d", got, want)
-	}
-
-	repeated := visibility.AdmitToolSearchResult(NewToolSearchResult(definitions))
-	if len(repeated.Tools) != 0 || repeated.AlreadyVisibleCount != MaxDeferredToolsPerRun {
-		t.Fatalf("repeated admission = %#v, want no duplicate schemas", repeated)
-	}
-}
-
-func TestToolVisibilityAdmitsBoundedCumulativePromptCost(t *testing.T) {
-	t.Parallel()
-
-	search := NamedTool{Def: Definition{
-		Name:     ToolSearchToolName,
-		Metadata: map[string]any{MetadataToolKind: MetadataToolKindToolSearch},
-	}}
-	tools := []Tool{search}
-	definitions := make([]Definition, 0, MaxDeferredToolsPerRun)
-	for i := 0; i < MaxDeferredToolsPerRun; i++ {
-		def := Definition{
-			Name:        fmt.Sprintf("mcp__plugin__server__heavy_%03d", i),
-			Description: strings.Repeat("heavy metadata ", 300),
-			InputSchema: map[string]any{"type": "object"},
-			Metadata:    map[string]any{MetadataToolKind: MetadataToolKindMCP},
-		}
-		definitions = append(definitions, def)
-		tools = append(tools, NamedTool{Def: def})
-	}
-	visibility := NewToolVisibility(tools)
-	admitted := visibility.AdmitToolSearchResult(NewToolSearchResult(definitions))
-	if !admitted.Truncated || len(admitted.Tools) >= MaxDeferredToolsPerRun {
-		t.Fatalf("admitted result = %#v, want cumulative prompt-cost truncation", admitted)
-	}
-	if visibility.deferredPromptTokens > MaxDeferredToolPromptTokensPerRun {
-		t.Fatalf("deferred prompt tokens = %d, want <= %d", visibility.deferredPromptTokens, MaxDeferredToolPromptTokensPerRun)
-	}
-}
-
-func TestToolVisibilityCommitFailureReturnsExactFailClosedResult(t *testing.T) {
-	t.Parallel()
-
-	search := NamedTool{Def: Definition{
-		Name:     ToolSearchToolName,
-		Metadata: map[string]any{MetadataToolKind: MetadataToolKindToolSearch},
-	}}
-	visibility := NewToolVisibility([]Tool{search})
-	planned := ToolSearchResult{
-		Tools: []ToolSearchDiscoveredTool{
-			{Name: "mcp__missing__one"},
-			{Name: "mcp__missing__two"},
-		},
-		Count:               2,
-		Truncated:           true,
-		OmittedCount:        3,
-		AlreadyVisibleCount: 4,
-	}
-
-	got := visibility.commitToolSearchAdmission(planned, []string{"mcp__missing__one", "mcp__missing__two"})
-	if len(got.Tools) != 0 || got.Count != 0 || !got.Truncated || got.OmittedCount != 5 || got.AlreadyVisibleCount != 4 {
-		t.Fatalf("commit failure result = %#v, want empty exact fail-closed result with 5 omitted and 4 already visible", got)
-	}
-	if gotSpecs := visibility.ModelSpecs(); len(gotSpecs) != 1 || gotSpecs[0].Function == nil || gotSpecs[0].Function.Name != ToolSearchToolName {
-		t.Fatalf("visibility changed after failed atomic commit: %#v", gotSpecs)
-	}
-}
-
 func TestToolSearchNameWithoutMetadataDoesNotEnableDeferral(t *testing.T) {
 	t.Parallel()
 
@@ -347,7 +176,7 @@ func TestToolSearchNameWithoutMetadataDoesNotEnableDeferral(t *testing.T) {
 		Metadata:    map[string]any{MetadataToolKind: MetadataToolKindMCP},
 	}}
 	specs := ModelSpecs([]Tool{searchStub, mcp})
-	if got, want := toolSpecNames(specs), []string{ToolSearchToolName, "mcp__plugin__server__read"}; !equalStrings(got, want) {
+	if got, want := toolSpecNames(specs), []string{ToolSearchToolName}; !equalStrings(got, want) {
 		t.Fatalf("ModelSpecs names = %v, want %v", got, want)
 	}
 }
@@ -369,23 +198,6 @@ func TestParseToolSearchOutput(t *testing.T) {
 	malformed := ParseToolSearchOutput(map[string]any{"tools": "not-an-array"})
 	if got := malformed.DiscoveredToolNames(); len(got) != 0 {
 		t.Fatalf("malformed DiscoveredToolNames = %v, want empty", got)
-	}
-}
-
-func TestDiscoveredToolNamesMetadataRoundTrip(t *testing.T) {
-	t.Parallel()
-
-	value := DiscoveredToolNamesMetadataValue([]string{"mcp__a", "mcp__A", "", "mcp__b"})
-	got := DiscoveredToolNamesFromMetadata(map[string]any{MetadataDiscoveredToolNames: value})
-	if want := []string{"mcp__a", "mcp__A", "mcp__b"}; !equalStrings(got, want) {
-		t.Fatalf("DiscoveredToolNamesFromMetadata = %v, want %v", got, want)
-	}
-
-	got = DiscoveredToolNamesFromMetadata(map[string]any{
-		MetadataDiscoveredToolNames: []any{"mcp__c", 42, " "},
-	})
-	if want := []string{"mcp__c"}; !equalStrings(got, want) {
-		t.Fatalf("DiscoveredToolNamesFromMetadata([]any) = %v, want %v", got, want)
 	}
 }
 

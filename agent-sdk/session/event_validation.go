@@ -93,6 +93,9 @@ func ValidateDurableCoreEvent(event *Event) error {
 		if event.Tool == nil {
 			return coreEventValidationError("tool call is missing durable Event.Tool")
 		}
+		if err := validateRoutedModelCall(event.Tool); err != nil {
+			return err
+		}
 		if event.Message != nil && len(event.Message.ToolCalls()) == 0 {
 			return coreEventValidationError("tool call Event.Message is missing model tool-call payload")
 		}
@@ -169,7 +172,14 @@ func validateDurableCoreToolMessageOutput(event *Event) error {
 	if matched == nil {
 		return coreEventValidationError("tool message result does not match durable Event.Tool id")
 	}
-	if event.Tool.Name != "" && strings.TrimSpace(matched.Name) != "" && strings.TrimSpace(matched.Name) != strings.TrimSpace(event.Tool.Name) {
+	expectedName := event.Tool.Name
+	if event.Tool.ModelCall != nil {
+		if err := validateRoutedModelCall(event.Tool); err != nil {
+			return err
+		}
+		expectedName = event.Tool.ModelCall.Name
+	}
+	if expectedName != "" && strings.TrimSpace(matched.Name) != "" && strings.TrimSpace(matched.Name) != strings.TrimSpace(expectedName) {
 		return coreEventValidationError("tool message result does not match durable Event.Tool name")
 	}
 	payload, err := toolMessageOutputPayload(*matched)
@@ -247,4 +257,30 @@ func validateDurableCoreMeta(meta map[string]any) error {
 
 func coreEventValidationError(detail string) error {
 	return &EventValidationError{Detail: strings.TrimSpace(detail)}
+}
+
+func mustInputObject(raw string) map[string]any {
+	var out map[string]any
+	decoder := json.NewDecoder(strings.NewReader(raw))
+	decoder.UseNumber()
+	_ = decoder.Decode(&out)
+	return out
+}
+
+// Routing changes presentation identity; the stored model envelope must still
+// describe exactly that real target and input under the same operation ID.
+func validateRoutedModelCall(payload *EventTool) error {
+	if payload == nil || payload.ModelCall == nil {
+		return nil
+	}
+	original := payload.ModelCall
+	actual, err := tool.ParseMCPCall(*original)
+	if original.Name != tool.MCPCallToolName || err != nil || actual.ID != payload.ID || actual.Name != payload.Name {
+		return coreEventValidationError("invalid routed model tool call")
+	}
+	input := mustInputObject(actual.Args)
+	if (len(input) != 0 || len(payload.Input) != 0) && !sameCanonicalJSON(input, payload.Input) {
+		return coreEventValidationError("routed model tool arguments do not match real input")
+	}
+	return nil
 }
