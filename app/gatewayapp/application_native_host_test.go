@@ -117,6 +117,7 @@ func TestApplicationNativeHTTPB01B02B10(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(cwd, "AGENTS.md"), []byte("UNINHERITED_CONTEXT_SENTINEL"), 0600); err != nil {
 		t.Fatal(err)
 	}
+	writeAtomicSkill(t, filepath.Join(cwd, ".agents", "skills", "unselected-notebook-skill"), "unselected-notebook-skill", "UNINHERITED_SKILL_BODY")
 	provider := &nativeModelScript{}
 	host := startApplicationHTTPHost(t, filepath.Join(root, "store"), cwd, provider)
 	defer host.close(t)
@@ -148,7 +149,7 @@ func TestApplicationNativeHTTPB01B02B10(t *testing.T) {
 		t.Fatal("next Turn did not receive the native Notebook Read result")
 	}
 	for _, request := range provider.seen {
-		if strings.Contains(string(request), "UNINHERITED_CONTEXT_SENTINEL") || strings.Contains(string(request), `"name":"Skill"`) {
+		if strings.Contains(string(request), "UNINHERITED_CONTEXT_SENTINEL") || strings.Contains(string(request), "unselected-notebook-skill") || (!builtinComputerUseSupported() && strings.Contains(string(request), `"name":"Skill"`)) {
 			provider.mu.Unlock()
 			t.Fatal("Notebook CWD implicitly injected AGENTS instructions or global Skill")
 		}
