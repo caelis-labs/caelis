@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.76.0](https://github.com/caelis-labs/caelis/compare/v0.75.0...v0.76.0) (2026-11-01)
+
+
+### Features
+
+* provide built-in computer use across native Sessions ([#189](https://github.com/caelis-labs/caelis/issues/189)) ([c5767ea](https://github.com/caelis-labs/caelis/commit/c5767ea9a246faf0479675e262bdbba6b39de976))
+* route MCP through fixed discovery and call entry points ([#186](https://github.com/caelis-labs/caelis/issues/186)) ([98e93f3](https://github.com/caelis-labs/caelis/commit/98e93f34561428ca7bcb1abfe6a463b473952b8b))
+
+
+### Bug Fixes
+
+* keep ToolSearch declaration stable across catalog changes ([#184](https://github.com/caelis-labs/caelis/issues/184)) ([b28448a](https://github.com/caelis-labs/caelis/commit/b28448a036844ae662b223f4f2d20aa743e5474e))
+* preserve plugin source identity and complete multipart recovery ([#185](https://github.com/caelis-labs/caelis/issues/185)) ([029e933](https://github.com/caelis-labs/caelis/commit/029e93336f3926191ce860544ee85597e7f0fc56))
+* retain desktop app approval on fixed MCP routing ([#187](https://github.com/caelis-labs/caelis/issues/187)) ([d15874f](https://github.com/caelis-labs/caelis/commit/d15874f759aae5736b5afecf1060186a23d700bf))
+
+### Upgrade notes
+
+* Computer use is built in on macOS arm64 and Windows x64 with the official DTW 0.2.3 MCP and Skill. App approval and OS permissions still apply. Existing user-installed desktop-world files and registration records are preserved; the fixed Core contribution is used without double loading.
+* MCP calls use tool_search and mcp_call. Retained Session history remains readable, but resumed Sessions must discover tools again. Old discoveries are not carried forward, and uncertain operations are never replayed.
+* Missing native.plugins inherits optional plugins; an explicit empty list disables optional plugins only. The fixed computer-use contribution and each Session's permission boundary remain separate.
+* Native plugin selection uses Store schema 4. Older writers reject it. Rollback requires a complete pre-upgrade Store backup and reconciliation of later writes; replacing only the executable is insufficient.
+
 ## [0.75.0](https://github.com/caelis-labs/caelis/compare/v0.74.0...v0.75.0) (2026-10-30)
 
 
