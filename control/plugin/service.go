@@ -257,8 +257,8 @@ func (s Service) addPath(ctx context.Context, path string, opts pluginAddPathOpt
 	// Standard packages often unpack into versioned, platform-specific directories.
 	// The manifest name supplies their stable identity; an explicit marketplace
 	// registration still owns its configured ID.
-	if usesManifestIdentity(p.Kind) && strings.TrimSpace(opts.ConfigID) == "" {
-		id = pluginConfigID(absPath, p.Name)
+	if strings.TrimSpace(opts.ConfigID) == "" {
+		id = localPluginID(p)
 	}
 	p = pluginWithConfiguredID(p, id)
 

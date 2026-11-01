@@ -11,5 +11,6 @@ const (
 	CapabilityResourceTransfer     = "session-resource-transfer-v1"
 	CapabilityToolResultContent    = "session-tool-result-content-v1"
 	CapabilityMediaResources       = "session-media-resources-v1"
+	CapabilityNativePlugins        = "session-native-plugins-v1"
 	CapabilityAtomicCapabilities   = "session-atomic-capabilities-v1"
 )

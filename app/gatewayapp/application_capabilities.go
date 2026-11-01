@@ -15,6 +15,7 @@ import (
 	skilltool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/skill"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
+	"github.com/caelis-labs/caelis/control/plugin"
 	"github.com/caelis-labs/caelis/control/sessionprofile"
 )
 
@@ -24,6 +25,7 @@ import (
 type applicationCapabilities struct {
 	catalog    skill.Catalog
 	skills     []sessionprofile.SkillStatus
+	plugins    []sessionprofile.PluginStatus
 	skillTool  tool.Tool
 	searchTool tool.Tool
 	source     tool.Source
@@ -34,10 +36,16 @@ type applicationCapabilities struct {
 // holds a reference until its response and tool calls have completed.
 type applicationMCPResource struct {
 	servers []sessionprofile.MCPServer
+	plugins []sessionprofile.Plugin
+	specs   []mcp.ServerSpec
 	manager *mcp.Manager
 	refs    int
 	retired bool
 	closed  bool
+}
+
+func (r *applicationMCPResource) matches(profile sessionprofile.Profile) bool {
+	return reflect.DeepEqual(r.servers, profile.MCPServers) && reflect.DeepEqual(r.plugins, profile.Plugins)
 }
 
 type applicationMCPSource struct {
@@ -80,7 +88,7 @@ func applicationSkillCatalog(profile sessionprofile.Profile) (skill.Catalog, err
 // assembleApplicationSkills is the single scanner for admission and Runtime
 // assembly. Admission rejects invalid selections; after commit, one damaged
 // selected item is reported and omitted without suppressing healthy siblings.
-func assembleApplicationSkills(profile sessionprofile.Profile, strict bool) (skill.Catalog, []sessionprofile.SkillStatus, error) {
+func assembleApplicationSkills(profile sessionprofile.Profile, strict bool, bundles ...skill.PluginBundle) (skill.Catalog, []sessionprofile.SkillStatus, error) {
 	var metas []skill.Meta
 	statuses := make([]sessionprofile.SkillStatus, 0, len(profile.SkillDirs)+len(profile.SkillRoots))
 	seen := map[string]bool{}
@@ -141,6 +149,24 @@ func assembleApplicationSkills(profile sessionprofile.Profile, strict bool) (ski
 			return skill.Catalog{}, nil, err
 		}
 	}
+	pluginMetas, err := applicationPluginSkills(bundles)
+	if err != nil {
+		return skill.Catalog{}, nil, err
+	}
+	for _, regular := range metas {
+		for _, bundle := range bundles {
+			if plugin.PathWithinRoot(bundle.PluginRoot, regular.Path) {
+				return skill.Catalog{}, nil, fmt.Errorf("native plugin Skill also selected by ordinary path")
+			}
+		}
+	}
+	for _, meta := range pluginMetas {
+		if seen[strings.ToLower(meta.Name)] || seen[strings.ToLower(meta.LocalName)] {
+			return skill.Catalog{}, nil, fmt.Errorf("selected Skill %q conflicts with a native plugin", meta.Name)
+		}
+		metas = append(metas, meta)
+		statuses = append(statuses, sessionprofile.SkillStatus{Path: meta.Path, Kind: "skill", Name: meta.Name, Status: "ready"})
+	}
 	return skill.NewCatalog(metas), statuses, nil
 }
 
@@ -197,22 +223,38 @@ func (r *applicationTurnResolver) acquireCapabilities(ctx context.Context, confi
 	if err := ctx.Err(); err != nil {
 		return nil, nil, err
 	}
-	catalog, skills, err := assembleApplicationSkills(configuration.Profile, false)
+	contributions, err := applicationPluginContributions(configuration.Profile, applicationPluginPaths(r.composition.authorities.storeDir, r.binding.SessionID, r.composition.workspace.CWD))
+	if err != nil {
+		return nil, nil, err
+	}
+	catalog, skills, err := assembleApplicationSkills(configuration.Profile, false, contributions.SkillBundles...)
 	if err != nil {
 		return nil, nil, err
 	}
 	assembled := &applicationCapabilities{catalog: catalog, skills: skills}
+	for _, source := range contributions.Sources {
+		assembled.plugins = append(assembled.plugins, sessionprofile.PluginStatus{ID: source.ID, Root: source.Root, Version: source.Version, Status: "assembled"})
+	}
+	specs := append(applicationMCPSpecs(configuration.Profile), contributions.MCPServerSpecs...)
 	if len(catalog.Metas()) != 0 {
 		assembled.skillTool = skilltool.New(skilltool.Config{Loader: skillfs.Loader{}, Catalog: catalog})
 	}
-	if len(configuration.Profile.MCPServers) != 0 {
+	if len(specs) != 0 {
 		resource := r.currentMCP
-		if resource == nil || !reflect.DeepEqual(resource.servers, configuration.Profile.MCPServers) {
-			manager, err := mcp.NewManagerWithOptions(context.WithoutCancel(ctx), applicationMCPSpecs(configuration.Profile), nil, mcp.ManagerOptions{})
+		if resource == nil || !reflect.DeepEqual(resource.specs, specs) {
+			if resource != nil && configuration.Revision >= r.desiredRevision {
+				r.currentMCP = nil
+				resource.retired = true
+				if resource.refs == 0 && !resource.closed {
+					resource.closed = true
+					_ = resource.manager.Close()
+				}
+			}
+			manager, err := mcp.NewManagerWithOptions(context.WithoutCancel(ctx), specs, nil, mcp.ManagerOptions{})
 			if err != nil {
 				return nil, nil, err
 			}
-			resource = &applicationMCPResource{servers: append([]sessionprofile.MCPServer(nil), configuration.Profile.MCPServers...), manager: manager, retired: configuration.Revision < r.desiredRevision}
+			resource = &applicationMCPResource{servers: append([]sessionprofile.MCPServer(nil), configuration.Profile.MCPServers...), plugins: configuration.Profile.Plugins, specs: specs, manager: manager, retired: configuration.Revision < r.desiredRevision}
 			if !resource.retired {
 				r.currentMCP = resource
 			}
@@ -257,7 +299,7 @@ func (r *applicationTurnResolver) setDesiredCapabilitiesLocked(configuration ses
 		}
 	}
 	current := r.currentMCP
-	if current == nil || reflect.DeepEqual(current.servers, configuration.Profile.MCPServers) {
+	if current == nil || current.matches(configuration.Profile) {
 		return nil
 	}
 	r.currentMCP = nil
@@ -305,16 +347,26 @@ func (r *applicationTurnResolver) capabilityStatus(revision uint64) sessionprofi
 	if capability != nil {
 		current = capability.resource
 		status.Skills = append([]sessionprofile.SkillStatus(nil), capability.skills...)
+		status.Plugins = append([]sessionprofile.PluginStatus(nil), capability.plugins...)
 	} else if revision != r.desiredRevision {
 		current = nil
 	}
 	if current == nil {
 		return status
 	}
-	infos := current.manager.GetServerInfos("application")
-	status.Servers = make([]sessionprofile.MCPServerStatus, 0, len(infos))
-	for _, info := range infos {
-		status.Servers = append(status.Servers, applicationMCPServerStatus(info))
+	seen := map[string]bool{}
+	for _, spec := range current.specs {
+		if seen[spec.PluginID] {
+			continue
+		}
+		seen[spec.PluginID] = true
+		for _, info := range current.manager.GetServerInfos(spec.PluginID) {
+			server := applicationMCPServerStatus(info)
+			if spec.PluginID != "application" {
+				server.PluginID = spec.PluginID
+			}
+			status.Servers = append(status.Servers, server)
+		}
 	}
 	return status
 }
@@ -338,7 +390,7 @@ func (r *applicationTurnResolver) refreshMCPTools(ctx context.Context, pluginID,
 	}
 	r.capabilitiesMu.Lock()
 	current := r.currentMCP
-	if r.capabilitiesClosed || current == nil || current.retired || configuration.Revision != r.desiredRevision || !reflect.DeepEqual(configuration.Profile.MCPServers, current.servers) {
+	if r.capabilitiesClosed || current == nil || current.retired || configuration.Revision != r.desiredRevision || !current.matches(configuration.Profile) {
 		r.capabilitiesMu.Unlock()
 		return fmt.Errorf("active MCP directory is unavailable")
 	}

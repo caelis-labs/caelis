@@ -328,12 +328,12 @@ func (mgr *Manager) rebuildToolsLocked() {
 // overlapping namespaces until their priority is known, so a run never pins a
 // temporary lower-priority callable. Independent namespaces publish immediately.
 func (mgr *Manager) awaitingHigherPriorityServer(index int) bool {
-	prefix := mcpToolNamePrefix(mgr.servers[index].spec.Name)
+	prefix := ServerToolNamePrefix(mgr.servers[index].spec.Name)
 	for _, earlier := range mgr.servers[:index] {
 		if (earlier.client != nil && (earlier.client.catalog == nil || earlier.catalogReady)) || earlier.err != nil {
 			continue
 		}
-		earlierPrefix := mcpToolNamePrefix(earlier.spec.Name)
+		earlierPrefix := ServerToolNamePrefix(earlier.spec.Name)
 		if strings.HasPrefix(prefix, earlierPrefix) || strings.HasPrefix(earlierPrefix, prefix) {
 			return true
 		}
@@ -341,7 +341,9 @@ func (mgr *Manager) awaitingHigherPriorityServer(index int) bool {
 	return false
 }
 
-func mcpToolNamePrefix(serverName string) string {
+// ServerToolNamePrefix is the canonical projected namespace for a server.
+// Host admission can reject ambiguous explicit selections before starting clients.
+func ServerToolNamePrefix(serverName string) string {
 	return strings.TrimSuffix(sanitizeToolName(serverName+"__tool"), "tool")
 }
 

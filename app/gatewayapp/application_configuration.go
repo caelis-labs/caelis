@@ -58,7 +58,11 @@ func (s *runtimeComposition) validateApplicationProfile(ctx context.Context, pro
 	if err := sessionprofile.ValidateProfile(profile); err != nil {
 		return err
 	}
-	if _, err := applicationSkillCatalog(profile); err != nil {
+	contributions, err := applicationPluginContributions(profile, applicationPluginPaths(s.authorities.storeDir, "validation", s.workspace.CWD))
+	if err != nil {
+		return errorcode.Wrap(errorcode.InvalidArgument, "application native plugin selection is invalid", err)
+	}
+	if _, _, err := assembleApplicationSkills(profile, true, contributions.SkillBundles...); err != nil {
 		return errorcode.Wrap(errorcode.InvalidArgument, "application Skill selection is invalid", err)
 	}
 	configured, err := applicationModelConfig(s.lookup, profile)

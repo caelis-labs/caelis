@@ -120,6 +120,7 @@ func assembleHostControlServices(stack *Stack, cfg Config, storeDir string, curs
 		ReviewerState:          stack.composition.applicationReviewerState,
 		NativeExecution:        validateApplicationExecutionPlatform("workspace-write") == nil,
 		NativeProfileChildren:  true,
+		NativePlugins:          true,
 	})
 	if err != nil {
 		return hostControlAssembly{}, err

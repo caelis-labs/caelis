@@ -9,11 +9,13 @@ type MCPStatus struct {
 	SessionID             string            `json:"session_id"`
 	ConfigurationRevision string            `json:"configuration_revision"`
 	Servers               []MCPServerStatus `json:"servers"`
+	Plugins               []PluginStatus    `json:"plugins,omitempty"`
 	Skills                []SkillStatus     `json:"skills"`
 }
 
 // MCPServerStatus keeps connection state separate from catalog refresh health.
 type MCPServerStatus struct {
+	PluginID      string              `json:"plugin_id,omitempty"`
 	Refreshing    bool                `json:"refreshing"`
 	Stale         bool                `json:"stale"`
 	RefreshFailed bool                `json:"refresh_failed"`
@@ -32,4 +34,13 @@ type SkillStatus struct {
 	Name    string `json:"name,omitempty"`
 	Status  string `json:"status"` // inactive, ready, failed
 	Warning string `json:"warning,omitempty"`
+}
+
+// PluginStatus identifies the selected native package observed in a Runtime
+// snapshot. Assembled is package assembly, not MCP connection or tool readiness.
+type PluginStatus struct {
+	ID      string `json:"id,omitempty"`
+	Root    string `json:"root"`
+	Version string `json:"version,omitempty"`
+	Status  string `json:"status"`
 }

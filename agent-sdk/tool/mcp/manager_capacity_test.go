@@ -82,6 +82,14 @@ func TestManagerMCPSourceFingerprintChangesWithConnectionAndSchema(t *testing.T)
 	if first != definition(trusted, map[string]any{"type": "object"}) {
 		t.Fatal("Host approval policy changed remote source fingerprint")
 	}
+	for _, packaged := range []ServerSpec{
+		{PluginID: base.PluginID, Name: base.Name, Transport: base.Transport, URL: base.URL, PackageRoot: "/verified/package"},
+		{PluginID: base.PluginID, Name: base.Name, Transport: base.Transport, URL: base.URL, PackageVersion: "0.2.1"},
+	} {
+		if first == definition(packaged, map[string]any{"type": "object"}) {
+			t.Fatal("native package provenance did not change source identity")
+		}
+	}
 	changed := base
 	changed.URL = "https://mcp.test/v2"
 	if first == definition(changed, map[string]any{"type": "object"}) {

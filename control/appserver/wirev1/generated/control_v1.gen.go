@@ -1613,6 +1613,7 @@ type SessionConfigurationPatch struct {
 	McpServers      []SessionMCPServer      `json:"mcp_servers,omitzero"`
 	Model           *string                 `json:"model,omitempty"`
 	NativeTools     []string                `json:"native_tools,omitzero"`
+	Plugins         []SessionPlugin         `json:"plugins,omitzero"`
 	ReasoningEffort *string                 `json:"reasoning_effort,omitempty"`
 	ServiceTier     *string                 `json:"service_tier,omitempty"`
 	SkillDirs       []string                `json:"skill_dirs,omitzero"`
@@ -1704,6 +1705,7 @@ type SessionMCPServer struct {
 
 type SessionMCPServerStatus struct {
 	Name          string          `json:"name"`
+	PluginId      *string         `json:"plugin_id,omitempty"`
 	RefreshFailed *bool           `json:"refresh_failed,omitempty"`
 	Refreshing    *bool           `json:"refreshing,omitempty"`
 	Stale         *bool           `json:"stale,omitempty"`
@@ -1715,6 +1717,7 @@ type SessionMCPServerStatus struct {
 
 type SessionMCPStatus struct {
 	ConfigurationRevision Uint64Decimal            `json:"configuration_revision"`
+	Plugins               []SessionPluginStatus    `json:"plugins,omitempty"`
 	Servers               []SessionMCPServerStatus `json:"servers"`
 	SessionId             string                   `json:"session_id"`
 	Skills                []SessionSkillStatus     `json:"skills"`
@@ -1751,6 +1754,27 @@ type SessionPermissions struct {
 	Mode         *string `json:"mode,omitempty"`
 }
 
+type SessionPlugin struct {
+	McpServers []SessionPluginMCPServer `json:"mcp_servers,omitempty"`
+	Root       string                   `json:"root"`
+}
+
+type SessionPluginMCPServer struct {
+	Args      []string `json:"args,omitempty"`
+	Command   string   `json:"command"`
+	Name      string   `json:"name"`
+	Transport string   `json:"transport"`
+	Url       *string  `json:"url,omitempty"`
+	WorkDir   string   `json:"work_dir"`
+}
+
+type SessionPluginStatus struct {
+	Id      *string `json:"id,omitempty"`
+	Root    string  `json:"root"`
+	Status  string  `json:"status"`
+	Version *string `json:"version,omitempty"`
+}
+
 type SessionPresentationConfigRequest struct {
 	ConfigId                string         `json:"config_id"`
 	ExpectedControllerEpoch *string        `json:"expected_controller_epoch,omitempty"`
@@ -1777,6 +1801,7 @@ type SessionProfile struct {
 	Model           string                  `json:"model"`
 	NativeTools     []string                `json:"native_tools,omitzero"`
 	Permissions     *SessionPermissions     `json:"permissions,omitempty"`
+	Plugins         []SessionPlugin         `json:"plugins,omitempty"`
 	ReasoningEffort *string                 `json:"reasoning_effort,omitempty"`
 	Reviewer        *SessionReviewer        `json:"reviewer,omitempty"`
 	ServiceTier     *string                 `json:"service_tier,omitempty"`

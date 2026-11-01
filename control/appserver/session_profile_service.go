@@ -33,6 +33,8 @@ type SessionProfileServiceConfig struct {
 	ReviewerState func(context.Context, sessionprofile.Profile) (sessionprofile.ReviewerState, error)
 	// NativeExecution reports the Host platform's ordinary native sandbox support.
 	NativeExecution bool
+	// NativePlugins reports Host assembly of explicit native package selections.
+	NativePlugins bool
 	// NativeProfileChildren reports a Host assembly with scoped profile child
 	// endpoints backed by the original native participant, Task and approval owners.
 	NativeProfileChildren bool

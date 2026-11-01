@@ -98,7 +98,7 @@ observation or cleanup failed; do not blindly replay an uncertain mutation.
 Without `--json`, the command prints a brief text result and errors on stderr.
 
 For Desktop World, verify the package for your OS/CPU and register its extracted
-Agent Plugin root. The rewrite package declares `bin/dtw mcp` in `.mcp.json`
+plugin root. The rewrite package declares `bin/dtw mcp` in `.mcp.json`
 and bundles its Skill. No separate Host adapter, CUA SDK, or Node installation
 is required. The Skill appears as `desktop-world:desktop-world`; its four MCP
 tools are qualified as `desktop_world__apps`, `desktop_world__api`,
@@ -136,6 +136,11 @@ You can copy this instruction to an Agent:
 > `caelis plugin install <absolute path> --json`, then start a new Session. Check
 > `caelis plugin status desktop-world --json` and the ready MCP tools before using the Skill. Do not
 > rewrite the package's MCP configuration, copy credentials, or replay an uncertain input.
+
+Application-managed Sessions can select a reviewed native package and its existing
+launch proxy through [Session profiles](session-profiles.md#native-plugin-selection).
+This selection pairs MCP and Skill without replacing the standalone Host
+registration.
 
 ## Paths, ownership, and results
 

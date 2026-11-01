@@ -181,6 +181,64 @@ There is no Bot-specific MCP permission owner. Status reads do not activate
 Runtime, start servers or scan new directories. Failed selected roots/servers
 remain visible rather than being silently replaced by ambient capabilities.
 
+## Native plugin selection
+
+Hosts advertising `session-native-plugins-v1` accept `plugins` in creation
+profiles and configuration patches. Each entry selects a canonical absolute
+`root` of an externally owned native package. Core uses its existing Plugin
+parser to derive package identity, version, MCP and namespaced Skills together.
+A Session rejects duplicate package identities, overlapping MCP namespaces and
+ordinary MCP/Skill selections that duplicate the selected package. It never
+chooses a version by tool name or by the highest version number.
+
+For example, an application can select its reviewed bundle without changing the
+user's standalone Core registration:
+
+```json
+{"plugins":[{"root":"/absolute/immutable/desktop-world-0.2.0"}]}
+```
+
+Optional `mcp_servers` entries inside a plugin selection replace the launch of
+named servers declared by that package with Host-owned stdio proxies. Each uses
+the package's original server name, a command and arguments, and `work_dir` equal
+to `root`. The authenticated Host caller owns verification of the package and
+proxy; model output and remote MCP metadata cannot select them. Credentials,
+plugin-ID overrides and trust flags are not profile fields. A Bot can retain its
+existing per-message generation and owner fence in this proxy. Core retains the
+package-derived policy and binds the actual proxy launch, package root/version,
+remote implementation and schema in the MCP source identity.
+
+Selection uses the existing configuration revision, CAS and admitted-request
+snapshot. Omission preserves a patch's selection; `[]` clears it and `null` is
+invalid. A changed selection applies to the next model request; already admitted
+work retains its original snapshot and receipts. Package roots must remain
+immutable while selected: use a new root for an upgrade. This profile extension
+selects MCP and Skills, without activating package hooks or contributed Agents.
+Native profile `PLUGIN_DATA` is private to its Session, separate from standalone
+Host registrations. A launch proxy owns its own private package environment.
+
+Bot-managed Sessions can select the Bot's bundled source while standalone
+Core/TUI Sessions retain their Host registration. Neither choice overwrites or
+uninstalls the other. Native children inherit the explicit package selection,
+not another Session's app grants. Desktop World app approval remains bound to
+its exact app, Session, owner, source and schema; no whole-plugin desktop grant
+is created. Package assembly status is distinct from MCP connection readiness.
+
+## MCP discovery and upgrades
+
+Model declarations use the fixed `tool_search` and `mcp_call` entries. Search
+returns complete tool schemas and source bindings in results; discovering or
+refreshing MCP does not add tools to the model declaration. Calls resolve a
+previously discovered real tool before policy, approval and execution. Surfaces
+present that tool's actual name and arguments.
+
+Historical Sessions retain readable tool calls and results. Discovery made by
+older dynamic-tool versions is not migrated into executable bindings. After an
+upgrade or resume, search again through `tool_search` before calling MCP through
+`mcp_call`; retired discovery/retirement tools are unavailable. A changed source
+or schema also requires fresh discovery. Discovery grants no permission and
+never authorizes replay of an unknown external effect.
+
 ## Sources, children and approvals
 
 Prompt sources are `user`, `application_summary`, `external_material` and

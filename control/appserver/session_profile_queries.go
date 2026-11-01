@@ -35,6 +35,9 @@ func (s *SessionProfileService) Capabilities() []string {
 		out = append(out, sessionprofile.CapabilityHotConfiguration)
 		if s.config.MCPStatus != nil {
 			out = append(out, sessionprofile.CapabilityAtomicCapabilities)
+			if s.config.NativePlugins {
+				out = append(out, sessionprofile.CapabilityNativePlugins)
+			}
 		}
 	}
 	if s.config.NativeExecution {
@@ -82,6 +85,17 @@ func (s *SessionProfileService) SessionMCPStatus(ctx context.Context, p Principa
 			server = sessionprofile.MCPServerStatus{Name: declared.Name, Status: "inactive"}
 		}
 		status.Servers = append(status.Servers, server)
+	}
+	for _, server := range observed.Servers {
+		if server.PluginID != "" {
+			status.Servers = append(status.Servers, server)
+		}
+	}
+	status.Plugins = append([]sessionprofile.PluginStatus(nil), observed.Plugins...)
+	if len(status.Plugins) == 0 {
+		for _, selected := range configuration.Profile.Plugins {
+			status.Plugins = append(status.Plugins, sessionprofile.PluginStatus{Root: selected.Root, Status: "inactive"})
+		}
 	}
 	status.Skills = make([]sessionprofile.SkillStatus, 0, len(configuration.Profile.SkillDirs)+len(configuration.Profile.SkillRoots))
 	status.Skills = append(status.Skills, observed.Skills...)

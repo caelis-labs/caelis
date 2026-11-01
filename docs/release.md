@@ -81,6 +81,8 @@ and limit live acceptance to the exercised models, adapter, and request paths;
 a successful priority request does not establish latency, billing, or GUI and
 distribution acceptance.
 
+For the fixed MCP entry upgrade, include the [discovery compatibility rule](session-profiles.md#mcp-discovery-and-upgrades) in release notes: historical Sessions remain readable, but must discover MCP tools again before use.
+
 ## Gate model
 
 The `main` branch ruleset requires the aggregate `quality` check from GitHub
