@@ -101,6 +101,25 @@ func RequestFromDraft(req v2.RequestPermissionRequest, nativeReqID json.RawMessa
 	return out, nil
 }
 
+// RequestFromBuiltinDraft retains a Control-owned native endpoint's already
+// redacted tool-call display. The caller must establish that endpoint from Host
+// configuration, never peer metadata. Independent subjects and missing or
+// mismatched display context keep the ordinary opaque treatment. Display facts
+// remain reported; they do not become canonical action or grant authority.
+func RequestFromBuiltinDraft(req v2.RequestPermissionRequest, nativeReqID json.RawMessage) (*session.ProtocolApproval, error) {
+	permission, err := RequestFromDraft(req, nativeReqID)
+	if err != nil || req.Subject == nil || req.Subject.ToolCall == nil {
+		return permission, err
+	}
+	hint := permission.Context.DisplaySubjectHint
+	if hint == nil || hint.Tool.State != session.ApprovalFieldKnown || hint.Tool.Text == "" || hint.Tool.Text != permission.ToolCall.Name {
+		return permission, nil
+	}
+	permission.Subject.OpaqueInput = hint.OpaqueInput
+	permission.Subject.SensitiveInput = permission.Subject.SensitiveInput || hint.SensitiveInput
+	return permission, nil
+}
+
 // ResponseToDraft preserves selection of an actually offered original option;
 // no interpretation of display facts can manufacture a grant.
 func ResponseToDraft(req v2.RequestPermissionRequest, response agent.ApprovalResponse) (v2.RequestPermissionResponse, error) {

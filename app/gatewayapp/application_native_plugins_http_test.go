@@ -331,6 +331,34 @@ func TestSessionNativePluginsHTTPBridgeChildrenAndIsolation(t *testing.T) {
 	if childApproval.ScopeID != task || childApproval.Permission == nil || childApproval.Permission.ToolCall.Name != "desktop_world__exec" || len(childApproval.Permission.Options) != 2 {
 		t.Fatalf("child approval escaped original owner: %+v", childApproval)
 	}
+	loadedChild, err := host.stack.Sessions().LoadSession(ctx, session.LoadSessionRequest{SessionRef: session.SessionRef{SessionID: child}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var originalInput map[string]any
+	for _, event := range loadedChild.Events {
+		if event.Type == session.EventTypeToolCall && event.Tool != nil && event.Tool.Name == childApproval.Permission.ToolCall.Name && event.Tool.ID == childApproval.Permission.ToolCall.ID {
+			originalInput = event.Tool.Input
+		}
+	}
+	if originalInput["app"] == nil || originalInput["source"] == nil {
+		t.Fatal("child canonical tool call lacks original exec identity/arguments")
+	}
+	wantInput, _ := json.Marshal(originalInput)
+	gotInput, _ := json.Marshal(childApproval.Permission.ToolCall.RawInput)
+	if string(wantInput) != string(gotInput) || childApproval.Subject == nil || !childApproval.Subject.Reported || childApproval.Subject.OpaqueInput || childApproval.Subject.Targets[0].Text != "desktop-world/desktop-world/exec" || childApproval.Permission.Options[0].ID != "allow_session" || childApproval.Permission.Options[0].Kind != "allow_once" || childApproval.Permission.Options[1].ID != "cancel" || childApproval.Permission.Options[1].Kind != "reject_once" {
+		t.Fatal("native child forwarding changed actual arguments, source display or original choices")
+	}
+	reconnected, err := client.Reconnect(ctx, appserver.ReconnectRequest{SessionID: parent})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reconnected.Subscription.Close()
+	wantApproval, _ := json.Marshal(childApproval)
+	gotApproval, _ := json.Marshal(reconnected.State.Approval.Active)
+	if string(wantApproval) != string(gotApproval) {
+		t.Fatal("child approval reconnect changed identity, arguments or source display")
+	}
 	if _, err := client.ResolveApproval(ctx, appserver.ResolveApprovalRequest{WriteBase: appserver.WriteBase{OperationID: "native-child-approve", SessionID: parent}, Target: childApproval.Target, ApprovalRequestID: string(childApproval.RequestID), Outcome: "selected", OptionID: "allow_session", Approved: true}); err != nil {
 		t.Fatal(err)
 	}

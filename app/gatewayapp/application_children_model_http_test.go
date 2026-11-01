@@ -260,6 +260,9 @@ func TestApplicationProfileChildApprovalKeepsNativeOwnerAndOptions(t *testing.T)
 			if pending.Permission == nil || len(pending.Permission.Options) == 0 || pending.ScopeID != task || pending.Target.TurnID == "" {
 				t.Fatalf("child approval native owner lost: %+v", pending)
 			}
+			if pending.Permission.ToolCall.RawInput["key"] != "one" {
+				t.Fatal("native child approval lost actual callback arguments")
+			}
 			calls, err := client.SessionToolCalls(ctx, child)
 			if err != nil || len(calls) != 0 {
 				t.Fatalf("callback preceded approval: %+v %v", calls, err)
