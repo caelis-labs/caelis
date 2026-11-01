@@ -14,6 +14,25 @@ identity/version bindings. A per-result budget omits whole entries, with omissio
 counts, rather than returning truncated callable schemas. There is no per-run
 64-tool limit or accumulated schema-token exposure budget.
 
+MCP startup is asynchronous. Search reads the currently ready directory once;
+it does not wait for connecting servers. An empty result serializes as `{}` and
+grants no discovery binding. It means no ready match at that instant, including
+while all servers are connecting, rather than proof that the plugin has no tools.
+A fresh search after readiness can discover the tools; an earlier empty receipt
+is never filled in later. Complete ready servers remain searchable independently
+of slower or failed servers.
+
+Control's Session MCP status reports this same Runtime's connection state and
+catalog. `running` alone describes a connection, not a ready catalog: check that
+`refreshing`, `stale` and `refresh_failed` have cleared, with no warning, and that
+the expected tool directory is present. Inspection and reconnection do not
+activate a cold Runtime. Refresh
+targets an already active Runtime; it is not a startup operation. Integration
+clients must activate through actual work, observe readiness for that activation,
+and issue a fresh search before relying on a newly ready tool. A provider fixture
+can wait between model responses within that original Turn. It must not inject a
+warmup Prompt, borrow historical discovery, or treat `connecting` as tool absence.
+
 Successful new-format canonical search receipts are the sole durable discovery
 source. Runtime projects their bindings across compaction and file-Store resume;
 it does not maintain another durable registry. Old ToolSearch results, exposure

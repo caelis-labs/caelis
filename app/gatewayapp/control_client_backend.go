@@ -41,6 +41,11 @@ func (s *controlCommandBackend) ExecuteControlCommand(ctx context.Context, princ
 				errorcode.New(errorcode.Unavailable, "gatewayapp: host is closing"),
 			)
 	}
+	if req, ok := request.(appserver.StartParticipantRequest); ok && req.Background {
+		if err := validateBackgroundParticipantLabel(req.Label); err != nil {
+			return appserver.CommandResult{SessionID: req.SessionID}, classifyControlPreDispatchError(err)
+		}
+	}
 	// Profile callback lifecycle follows the canonical close, for every Surface.
 	defer func() {
 		if action != appserver.ActionSessionClose || result.Outcome != appserver.OutcomeCommitted || s.composition.authorities.sessionProfiles == nil {

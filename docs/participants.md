@@ -130,6 +130,17 @@ for the full guarantees and limits.
 
 ## Participant workspace
 
+For Control `participants/start` requests with `background: true`, `handle`
+selects the Agent placement and `label` requests the child's Task handle. The
+label accepts an optional leading `@`, is case-insensitive, and after
+normalization must contain at most 32 characters: a leading letter followed by
+letters, digits or hyphens. `parent` is reserved. Omit the label to allocate a
+handle. Human display labels with spaces are only valid for foreground starts.
+Invalid background labels are rejected before Runtime activation or Task
+creation. Previously retained `unknown` receipts remain unchanged and never
+authorize replay; query the original operation and reconcile its canonical Task
+evidence.
+
 Enter `/orbit <task>` (or another configured role) to start a background
 participant and open its pane automatically. The main controller remains free
 to work. Use `/{handle} <message>`, `/orbit(handle) <message>`, or the pane's input

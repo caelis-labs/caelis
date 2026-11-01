@@ -6,12 +6,24 @@ import (
 	"strings"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/agent-sdk/task/agenthandle"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
 	"github.com/caelis-labs/caelis/control/appserver"
 )
+
+// Validate inside the command backend, before Runtime activation. The command
+// service must first return any retained receipt, including a legacy unknown;
+// new validation cannot reclassify or replay that original operation.
+func validateBackgroundParticipantLabel(label string) error {
+	if _, err := agenthandle.CanonicalRequested(label); err != nil {
+		return errorcode.Wrap(errorcode.InvalidArgument, "background participant label must be a Task handle", err)
+	}
+	return nil
+}
 
 func (s *runtimeComposition) startBackgroundParticipant(ctx context.Context, active session.Session, req appserver.StartParticipantRequest, target placement.Placement) (appserver.CommandResult, error) {
 	ctx = session.ContextWithControlMutation(ctx, session.ControlMutationPurposeParticipant)
