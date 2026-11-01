@@ -1081,6 +1081,10 @@ type ModelUsageSnapshot struct {
 	Usage    UsageSnapshot `json:"usage"`
 }
 
+type NativeSessionConfiguration struct {
+	Plugins []SessionPlugin `json:"plugins,omitzero"`
+}
+
 type NoticeEnvelope struct {
 	Meta             *ACPMetadata        `json:"_meta,omitempty"`
 	ActivityId       *string             `json:"activity_id,omitempty"`
@@ -1603,7 +1607,8 @@ type SessionChildRelation struct {
 
 type SessionConfiguration struct {
 	LastRequest *SessionConfigurationRequest `json:"last_request,omitempty"`
-	Profile     SessionProfile               `json:"profile"`
+	Native      *NativeSessionConfiguration  `json:"native,omitempty"`
+	Profile     *SessionProfile              `json:"profile,omitempty"`
 	Revision    Uint64Decimal                `json:"revision"`
 	SessionId   string                       `json:"session_id"`
 }

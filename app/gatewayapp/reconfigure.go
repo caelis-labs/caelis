@@ -119,12 +119,13 @@ func (s *runtimeComposition) buildInitialGatewayRuntime(ctx context.Context) err
 }
 
 type gatewayBuildPlan struct {
-	SandboxConfig      SandboxConfig
-	RuntimeConfig      stackRuntimeConfig
-	SkillDirs          []string
-	Plugins            plugin.Contributions
-	MCPServers         []mcp.ServerSpec
-	ReleasePluginCache func() error
+	SandboxConfig       SandboxConfig
+	RuntimeConfig       stackRuntimeConfig
+	SkillDirs           []string
+	Plugins             plugin.Contributions
+	NativeConfiguration *sessionprofile.Configuration
+	MCPServers          []mcp.ServerSpec
+	ReleasePluginCache  func() error
 }
 
 type gatewayRuntimeBundle struct {
@@ -210,7 +211,7 @@ func (s *runtimeComposition) loadGatewayBuildPlan(sandboxCfg SandboxConfig, runt
 		}
 	}()
 	skillDirs := stackSkillDiscoveryDirs(s.workspace.CWD, runtimeCfg.SkillDirs)
-	contribs, err := resolveGatewayPluginContributions(doc.Plugins, s.authorities.storeDir, s.workspace.CWD)
+	contribs, nativeConfiguration, err := s.nativePluginContributions(doc.Plugins)
 	if err != nil {
 		return gatewayBuildPlan{}, err
 	}
@@ -227,12 +228,13 @@ func (s *runtimeComposition) loadGatewayBuildPlan(sandboxCfg SandboxConfig, runt
 	runtimeCfg.PluginSkills = skill.ClonePluginBundles(contribs.SkillBundles)
 	releaseOnError = false
 	return gatewayBuildPlan{
-		SandboxConfig:      sandboxCfg,
-		RuntimeConfig:      runtimeCfg,
-		SkillDirs:          skillDirs,
-		Plugins:            contribs,
-		MCPServers:         mcpServers,
-		ReleasePluginCache: releasePluginCache,
+		SandboxConfig:       sandboxCfg,
+		RuntimeConfig:       runtimeCfg,
+		SkillDirs:           skillDirs,
+		Plugins:             contribs,
+		NativeConfiguration: nativeConfiguration,
+		MCPServers:          mcpServers,
+		ReleasePluginCache:  releasePluginCache,
 	}, nil
 }
 
@@ -342,6 +344,7 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 		return nil, fmt.Errorf("gatewayapp: failed to initialize MCP servers: %w", err)
 	}
 	bundle.MCP = mcpMgr
+	bundle.CapabilityStatus = nativePluginStatus(plan.NativeConfiguration, plan.Plugins, mcpMgr)
 	if err := ctx.Err(); err != nil {
 		bundle.Close()
 		return nil, err

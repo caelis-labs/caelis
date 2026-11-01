@@ -1,4 +1,4 @@
-// Package applicationv3 is the one-time importer of Application Store v1/v2.
+// Package applicationv3 upgrades historical Session adjunct Store formats.
 // It is only called before opening the current Store, under exclusive Host
 // ownership. Current dispatch and read paths must not import this package.
 package applicationv3
@@ -104,6 +104,14 @@ func Run(ctx context.Context, db *sql.DB, now time.Time) error {
 		return err
 	}
 	if version == sessionstate.Version {
+		return tx.Commit()
+	}
+	if version == 3 {
+		// Tables and retained bytes are unchanged. The format fence prevents
+		// older writers from misinterpreting native configuration adjuncts.
+		if _, err = tx.ExecContext(ctx, `UPDATE app_schema SET version=? WHERE singleton=1`, sessionstate.Version); err != nil {
+			return err
+		}
 		return tx.Commit()
 	}
 	if version != 1 && version != 2 {

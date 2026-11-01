@@ -102,9 +102,11 @@ func (p *nativePluginProvider) RoundTrip(req *http.Request) (*http.Response, err
 	} else {
 		phase := 0
 		app := "fixture.app.one"
+		idle := false
 		for _, m := range payload.Messages {
 			if m.Role == "user" {
 				phase = 0
+				idle = strings.Contains(fmt.Sprint(m.Content), "NATIVE_NO_CALL")
 				app = "fixture.app.one"
 				if strings.Contains(fmt.Sprint(m.Content), "SECOND_APP") {
 					app = "fixture.app.two"
@@ -115,6 +117,9 @@ func (p *nativePluginProvider) RoundTrip(req *http.Request) (*http.Response, err
 			}
 		}
 		name := "mcp_call"
+		if idle {
+			phase = 99
+		}
 		args := map[string]any{}
 		switch phase {
 		case 0:
@@ -165,6 +170,10 @@ func nativeProfilePackageHTTP(t *testing.T, version string) string {
 }
 
 func settleNativeProfileHTTP(t *testing.T, ctx context.Context, client *httpclient.Client, sid, operation, input string) int {
+	return settleNativeProfileHTTPBeforeApproval(t, ctx, client, sid, operation, input, nil)
+}
+
+func settleNativeProfileHTTPBeforeApproval(t *testing.T, ctx context.Context, client *httpclient.Client, sid, operation, input string, before func()) int {
 	t.Helper()
 	if input != "" {
 		if _, err := client.Prompt(ctx, appserver.PromptRequest{WriteBase: appserver.WriteBase{SessionID: sid, OperationID: operation}, Input: input, SourceKind: "user"}); err != nil {
@@ -178,6 +187,10 @@ func settleNativeProfileHTTP(t *testing.T, ctx context.Context, client *httpclie
 			t.Fatal(err)
 		}
 		if active := state.Approval.Active; active != nil {
+			if before != nil {
+				before()
+				before = nil
+			}
 			if active.Permission == nil || active.Permission.ToolCall.Name != "desktop_world__exec" || len(active.Permission.Options) != 2 {
 				t.Fatalf("native app approval lost its identity/scope: %+v", active)
 			}

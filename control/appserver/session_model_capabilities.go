@@ -16,6 +16,10 @@ func (s *SessionProfileService) SessionModelCapabilities(ctx context.Context, p 
 	if s.config.ModelImageInput == nil {
 		return sessionprofile.ModelCapabilities{}, sessionprofile.ErrUnsupported
 	}
+	if configuration.Native != nil {
+		// Ordinary native model selection remains with its existing owner.
+		return sessionprofile.ModelCapabilities{}, sessionprofile.ErrUnsupported
+	}
 	imageInput, err := s.config.ModelImageInput(ctx, configuration.Profile)
 	if err != nil {
 		return sessionprofile.ModelCapabilities{}, err

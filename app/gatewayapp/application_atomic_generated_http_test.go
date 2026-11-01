@@ -118,7 +118,10 @@ func TestApplicationAtomicGeneratedWireHTTP(t *testing.T) {
 	if configuration.Revision != "1" {
 		t.Fatalf("configuration revision = %q", configuration.Revision)
 	}
-	checkProfile(configuration.Profile)
+	if configuration.Profile == nil {
+		t.Fatal("explicit configuration lost profile")
+	}
+	checkProfile(*configuration.Profile)
 	checkStatus := func(revision string, wantSelections bool) {
 		t.Helper()
 		var status generated.SessionMCPStatus
@@ -184,7 +187,10 @@ func TestApplicationAtomicGeneratedWireHTTP(t *testing.T) {
 	if restored.Revision != "3" {
 		t.Fatalf("restored revision = %q", restored.Revision)
 	}
-	checkProfile(restored.Profile)
+	if restored.Profile == nil {
+		t.Fatal("explicit configuration lost profile")
+	}
+	checkProfile(*restored.Profile)
 	checkStatus("3", true)
 	// A configuration update never rewrites the immutable creation binding.
 	send(http.MethodGet, sessionPath+"/profile", "", nil, &binding)

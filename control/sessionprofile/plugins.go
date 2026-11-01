@@ -9,6 +9,9 @@ import (
 )
 
 func validatePlugins(plugins []Plugin) error {
+	if len(plugins) > 16 {
+		return fmt.Errorf("%w: too many native plugins", ErrInvalid)
+	}
 	seen := map[string]bool{}
 	for _, selected := range plugins {
 		if !filepath.IsAbs(selected.Root) || filepath.Clean(selected.Root) != selected.Root || strings.TrimSpace(selected.Root) != selected.Root || len(selected.Root) > 4096 || seen[selected.Root] || len(selected.MCPServers) > 16 {

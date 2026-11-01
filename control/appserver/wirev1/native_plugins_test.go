@@ -36,3 +36,21 @@ func TestNativePluginPublicJSONAndGeneratedClient(t *testing.T) {
 		t.Fatalf("generated native clear lost presence: %s", raw)
 	}
 }
+
+func TestOrdinaryNativeConfigurationGeneratedPresence(t *testing.T) {
+	empty := []sessionprofile.Plugin{}
+	for _, selected := range []*[]sessionprofile.Plugin{nil, &empty} {
+		value := sessionprofile.Configuration{SessionID: "ordinary", Revision: 1, Native: &sessionprofile.NativeConfiguration{Plugins: selected}}
+		validateWireValue(t, "SessionConfiguration", value)
+		raw, _ := Marshal(value)
+		var client generated.SessionConfiguration
+		if err := json.Unmarshal(raw, &client); err != nil || client.Native == nil || client.Profile != nil {
+			t.Fatal("generated native discriminator lost", err)
+		}
+		raw, _ = json.Marshal(client)
+		var read sessionprofile.Configuration
+		if err := Unmarshal(raw, &read); err != nil || read.Native == nil || (read.Native.Plugins == nil) != (selected == nil) {
+			t.Fatalf("generated native inheritance/clear lost: %s %v", raw, err)
+		}
+	}
+}

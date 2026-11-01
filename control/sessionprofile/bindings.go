@@ -270,6 +270,9 @@ func (s *Store) binding(ctx context.Context, scope Scope, id string) (Binding, e
 		return Binding{}, notFound(err)
 	}
 	var b Binding
+	if isNativeConfigurationBinding(raw) {
+		return Binding{}, ErrNotFound
+	}
 	err = json.Unmarshal(raw, &b)
 	return b, err
 }
@@ -295,6 +298,9 @@ func (s *Store) BindingForSession(ctx context.Context, id string) (Binding, erro
 		return Binding{}, notFound(err)
 	}
 	var b Binding
+	if isNativeConfigurationBinding(raw) {
+		return Binding{}, ErrNotFound
+	}
 	err := json.Unmarshal(raw, &b)
 	return b, err
 }
@@ -318,6 +324,9 @@ func (s *Store) ListBindings(ctx context.Context, scope Scope) ([]Binding, error
 		var b Binding
 		if err = rows.Scan(&raw); err != nil {
 			return nil, err
+		}
+		if isNativeConfigurationBinding(raw) {
+			continue
 		}
 		if err = json.Unmarshal(raw, &b); err != nil {
 			return nil, err

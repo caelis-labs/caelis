@@ -183,6 +183,31 @@ remain visible rather than being silently replaced by ambient capabilities.
 
 ## Native plugin selection
 
+Ordinary native Sessions also support plugin selection when the Host advertises
+`native-session-plugin-configuration-v1`. They are created without `profile` and
+retain native models, Team, tools, sandbox and approval authority. Their existing
+`/configuration` response contains `native` instead of `profile`:
+
+```json
+{"session_id":"worker-session","revision":"1","native":{}}
+```
+
+An absent `native.plugins` inherits Host plugins at activation. Submit the
+existing configuration CAS with `patch.plugins` to choose package roots. A
+present `native.plugins: []` disables package contributions with no Host fallback,
+including after reconnect. This differs from the always explicit plugin catalog
+of a Profile Session. Clients must retain this presence distinction, including
+when comparing a desired empty selection with an inherited selection.
+
+For ordinary Sessions only plugin selection is accepted through this endpoint;
+native model and policy changes keep their existing APIs. A changed selection
+requires quiescence: active Turns, Tasks, approvals or canonical execution fences
+return conflict. Control retires the idle activation under its existing admission
+gate before committing the shared configuration/operation transaction. Later
+activation samples normal native configuration and the selected packages.
+Status observes the selected Session without starting a dormant Runtime. An
+external ACP controller does not support this native assembly override.
+
 Hosts advertising `session-native-plugins-v1` accept `plugins` in creation
 profiles and configuration patches. Each entry selects a canonical absolute
 `root` of an externally owned native package. Core uses its existing Plugin
@@ -310,7 +335,7 @@ deletion and arbitrary outside-workspace publication are not supported.
 
 ## Persistence compatibility
 
-Store schema 3 has one profile/configuration, callback, resource, grant and common
+Store schema 4 has one profile/configuration, callback, resource, grant and common
 operation owner. The isolated importer
 [`control/internal/storemigration/applicationv3`](../control/internal/storemigration/applicationv3/doc.go)
 transactionally imports schema 1/2 data, validates identity/digests, then drops
@@ -318,6 +343,12 @@ retired `app_*` tables. It preserves original Session/child/resource/callback ID
 bytes, provenance and known/unknown outcomes without replay. Schema-1 desired
 configuration retains its original native tool selection. No current execution
 path reads the retired schema.
+
+The schema-3 upgrade raises only the format marker; existing profile and receipt
+bytes are unchanged. Schema 4 adds ordinary native plugin selectors to the same
+configuration owner. Older writers reject the Store so an empty override cannot
+silently become Host inheritance. Native selectors never classify their Session
+as an explicit Profile or enable application callback/grant capabilities.
 
 Historical connection-scoped operation IDs map deterministically into the common
 principal namespace. The importer owns this mapping; clients migrating journals

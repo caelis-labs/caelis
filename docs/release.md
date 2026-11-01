@@ -52,13 +52,16 @@ retain identity, Notebook, business tools and scheduling through explicit profil
 MCP and Skills. See [Session profiles](session-profiles.md).
 
 The isolated `control/internal/storemigration/applicationv3` importer upgrades
-schema 1/2 to 3 atomically. It preserves Session/call/resource identities, bytes,
+schema 1/2 to 4 atomically. The schema-3 transition raises the format marker without
+rewriting retained profile or receipt bytes. It preserves Session/call/resource identities, bytes,
 original requests and receipt provenance. Old operation namespaces map to inert,
 retained common receipts; pending calls are cancelled and uncertain effects stay
 unknown. The importer never redispatches old intent. It can be removed when the
-minimum supported Store is schema 3; archived evidence has separate retention.
+minimum supported Store is schema 4; archived evidence has separate retention.
 
-Older writers reject schema 3. Rollback requires a protected complete pre-upgrade
+Schema 4 adds ordinary native plugin selectors under the existing configuration
+owner. Older writers reject schema 4; they must not ignore an explicit empty
+selection and restore Host plugins. Rollback requires a protected complete pre-upgrade
 Store backup, not an executable downgrade. Stop the Host and prevent client
 restarts while taking the backup; include database WAL/SHM files, configuration
 and credentials, and verify restoration in isolation. Reconcile post-upgrade

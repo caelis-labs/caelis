@@ -120,6 +120,54 @@ type Configuration struct {
 	Revision    uint64                `json:"revision"`
 	Profile     Profile               `json:"profile"`
 	LastRequest *RequestConfiguration `json:"last_request,omitempty"`
+	// Native is present instead of Profile for an ordinary native Session.
+	// It owns only explicit plugin selection; native execution still samples
+	// the existing Host and Session authorities.
+	Native *NativeConfiguration `json:"native,omitempty"`
+}
+
+// NativeConfiguration holds the optional plugin override of an ordinary Session.
+// Absent Plugins inherits Host plugins; a present empty array suppresses them.
+// Models, Team, tools, sandbox and permissions are never copied into this record.
+type NativeConfiguration struct {
+	Plugins *[]Plugin `json:"plugins,omitempty"`
+}
+
+// MarshalJSON preserves the existing explicit-profile wire bytes while ordinary
+// Sessions expose their narrow native selector without a fictitious Profile.
+func (c Configuration) MarshalJSON() ([]byte, error) {
+	type alias Configuration
+	if c.Native == nil {
+		return json.Marshal(alias(c))
+	}
+	return json.Marshal(struct {
+		SessionID string               `json:"session_id"`
+		Revision  uint64               `json:"revision"`
+		Native    *NativeConfiguration `json:"native"`
+	}{c.SessionID, c.Revision, c.Native})
+}
+
+// UnmarshalJSON rejects ambiguous assembly kinds instead of silently applying
+// one authority's fields to another Session kind.
+func (c *Configuration) UnmarshalJSON(raw []byte) error {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil || fields == nil {
+		return ErrInvalid
+	}
+	if native, present := fields["native"]; present {
+		if _, profile := fields["profile"]; profile || string(native) == "null" {
+			return ErrInvalid
+		}
+	} else if _, profile := fields["profile"]; !profile {
+		return ErrInvalid
+	}
+	type alias Configuration
+	var value alias
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return err
+	}
+	*c = Configuration(value)
+	return nil
 }
 
 // ConfigurationPatch changes only present hot-config fields. Nil preserves the

@@ -1044,6 +1044,11 @@ export interface ModelUsageSnapshot {
   [key: string]: JSONValue;
 }
 
+export interface NativeSessionConfiguration {
+  plugins?: Array<SessionPlugin>;
+  [key: string]: JSONValue;
+}
+
 export interface NoticeEnvelope {
   _meta?: ACPMetadata;
   activity_id?: string;
@@ -1597,13 +1602,7 @@ export interface SessionChildRelation {
   [key: string]: JSONValue;
 }
 
-export interface SessionConfiguration {
-  last_request?: SessionConfigurationRequest;
-  profile: SessionProfile;
-  revision: Uint64Decimal;
-  session_id: string;
-  [key: string]: JSONValue;
-}
+export type SessionConfiguration = unknown | unknown;
 
 export interface SessionConfigurationPatch {
   instructions?: string;
