@@ -15,6 +15,13 @@
 * preserve plugin source identity and complete multipart recovery ([#185](https://github.com/caelis-labs/caelis/issues/185)) ([029e933](https://github.com/caelis-labs/caelis/commit/029e93336f3926191ce860544ee85597e7f0fc56))
 * retain desktop app approval on fixed MCP routing ([#187](https://github.com/caelis-labs/caelis/issues/187)) ([d15874f](https://github.com/caelis-labs/caelis/commit/d15874f759aae5736b5afecf1060186a23d700bf))
 
+### Upgrade notes
+
+* Computer use is built in on macOS arm64 and Windows x64 with the official DTW 0.2.3 MCP and Skill. App approval and OS permissions still apply. Existing user-installed desktop-world files and registration records are preserved; the fixed Core contribution is used without double loading.
+* MCP calls use tool_search and mcp_call. Retained Session history remains readable, but resumed Sessions must discover tools again. Old discoveries are not carried forward, and uncertain operations are never replayed.
+* Missing native.plugins inherits optional plugins; an explicit empty list disables optional plugins only. The fixed computer-use contribution and each Session's permission boundary remain separate.
+* Native plugin selection uses Store schema 4. Older writers reject it. Rollback requires a complete pre-upgrade Store backup and reconciliation of later writes; replacing only the executable is insufficient.
+
 ## [0.75.0](https://github.com/caelis-labs/caelis/compare/v0.74.0...v0.75.0) (2026-10-30)
 
 
