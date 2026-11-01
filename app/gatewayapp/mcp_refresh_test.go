@@ -95,7 +95,12 @@ func TestExperimentalHTTPMCPRefreshRetriesOwnedActiveManager(t *testing.T) {
 			if profile {
 				ready = func() bool {
 					status := active.instance.capabilityStatus(1)
-					return len(status.Servers) == 1 && status.Servers[0].Status == "running" && status.Servers[0].Warning == ""
+					for _, server := range status.Servers {
+						if server.PluginID != "desktop-world" && server.Status == "running" && server.Warning == "" {
+							return true
+						}
+					}
+					return false
 				}
 			} else {
 				<-active.instance.mcpMgr.Initialized()
@@ -170,7 +175,12 @@ func TestExperimentalHTTPMCPRefreshRetriesOwnedActiveManager(t *testing.T) {
 			awaitExperimentalRefresh(t, func() bool {
 				if profile {
 					status := promotedActive.instance.capabilityStatus(1)
-					return len(status.Servers) == 1 && status.Servers[0].Status == "running" && status.Servers[0].Warning == ""
+					for _, server := range status.Servers {
+						if server.PluginID != "desktop-world" && server.Status == "running" && server.Warning == "" {
+							return true
+						}
+					}
+					return false
 				}
 				infos := promotedActive.instance.mcpMgr.GetServerInfos(pluginID)
 				return len(infos) == 1 && infos[0].Status == "running" && infos[0].Warning == ""

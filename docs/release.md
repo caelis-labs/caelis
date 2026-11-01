@@ -263,3 +263,13 @@ Before declaring the release complete:
    the GitHub assets. The workflow reads every R2 object back before updating
    `latest.txt`.
 4. Verify the root module version is available through the public Go proxy.
+
+## Embedded computer-use package
+
+Core pins the official DTW release independently of its source repository. The
+GoReleaser preparation hook verifies the complete platform ZIP and embeds it
+only in supported Core targets. The final archive gate checks the actual signed
+Core executable for that complete pinned ZIP, including its original Skill and
+provenance; source CI alone is insufficient. User receipt/recovery and Store
+rollback rules above still apply. No runtime download or DTW source build is
+part of Core startup. See [plugin integration](plugins.md#built-in-computer-use).

@@ -65,27 +65,34 @@ func applicationPluginContributions(profile sessionprofile.Profile, paths plugin
 	// Explicit Session selection has no priority fallback between two sources
 	// with the same projected namespace. Reject ambiguity before starting either.
 	if len(profile.Plugins) != 0 {
-		specs, err := mergeRuntimeMCPSpecs(applicationMCPSpecs(profile), out.MCPServerSpecs)
-		if err != nil {
+		if err := validateApplicationMCPNamespaces(profile, out); err != nil {
 			return out, err
-		}
-		for i, spec := range specs {
-			prefix := mcp.ServerToolNamePrefix(spec.Name)
-			for _, prior := range specs[:i] {
-				other := mcp.ServerToolNamePrefix(prior.Name)
-				if strings.HasPrefix(prefix, other) || strings.HasPrefix(other, prefix) {
-					return out, fmt.Errorf("explicit MCP sources have overlapping namespaces: %q and %q", spec.Name, prior.Name)
-				}
-			}
 		}
 	}
 	return out, nil
 }
 
+func validateApplicationMCPNamespaces(profile sessionprofile.Profile, out plugin.Contributions) error {
+	specs, err := mergeRuntimeMCPSpecs(applicationMCPSpecs(profile), out.MCPServerSpecs)
+	if err != nil {
+		return err
+	}
+	for i, spec := range specs {
+		prefix := mcp.ServerToolNamePrefix(spec.Name)
+		for _, prior := range specs[:i] {
+			other := mcp.ServerToolNamePrefix(prior.Name)
+			if strings.HasPrefix(prefix, other) || strings.HasPrefix(other, prefix) {
+				return fmt.Errorf("explicit MCP sources have overlapping namespaces: %q and %q", spec.Name, prior.Name)
+			}
+		}
+	}
+	return nil
+}
+
 func applicationPluginPaths(storeDir, sessionID, workspace string) plugin.RuntimePaths {
 	// Native profile extensions never share PLUGIN_DATA with standalone Host
 	// registrations or another Session. Package files remain externally owned.
-	return plugin.RuntimePaths{StoreDir: filepath.Join(storeDir, "session-plugins", fmt.Sprintf("%x", sha256.Sum256([]byte(sessionID)))), WorkspaceDir: workspace}
+	return plugin.RuntimePaths{ProductStoreDir: storeDir, StoreDir: filepath.Join(storeDir, "session-plugins", fmt.Sprintf("%x", sha256.Sum256([]byte(sessionID)))), WorkspaceDir: workspace}
 }
 
 // Explicit package selection has no Skill overlay priority. Scan through the
@@ -108,4 +115,42 @@ func applicationPluginSkills(bundles []skill.PluginBundle) ([]skill.Meta, error)
 		}
 	}
 	return out, nil
+}
+
+// Runtime product capabilities do not belong to the optional Profile plugin list.
+func applicationRuntimePluginContributions(profile sessionprofile.Profile, paths plugin.RuntimePaths) (plugin.Contributions, error) {
+	selected := profile
+	selected.Plugins = optionalApplicationPlugins(profile.Plugins)
+	optional, err := applicationPluginContributions(selected, paths)
+	if err != nil {
+		return plugin.Contributions{}, err
+	}
+	combined, err := plugin.WithProductContributions(optional, paths)
+	if err != nil {
+		return combined, err
+	}
+	if len(selected.Plugins) != len(profile.Plugins) {
+		combined.Sources[0].Status += "; user desktop-world package omitted"
+	}
+	if err := validateApplicationMCPNamespaces(profile, combined); err != nil {
+		return plugin.Contributions{}, err
+	}
+	return combined, nil
+}
+
+func pluginSourceStatus(source plugin.Source) string {
+	if source.Status != "" {
+		return source.Status
+	}
+	return "assembled"
+}
+
+func optionalApplicationPlugins(configured []sessionprofile.Plugin) []sessionprofile.Plugin {
+	var selected []sessionprofile.Plugin
+	for _, entry := range configured {
+		if !plugin.IsProductPlugin(plugin.Config{Root: entry.Root}) {
+			selected = append(selected, entry)
+		}
+	}
+	return selected
 }

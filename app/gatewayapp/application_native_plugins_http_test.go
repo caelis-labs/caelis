@@ -212,6 +212,9 @@ func settleNativeProfileHTTPBeforeApproval(t *testing.T, ctx context.Context, cl
 }
 
 func TestSessionNativePluginsHTTPBridgeChildrenAndIsolation(t *testing.T) {
+	if !builtinComputerUseSupported() {
+		t.Skip("native fixed DTW package requires a supported platform; optional source parser regressions remain portable")
+	}
 	ctx, cancel := context.WithTimeout(t.Context(), 75*time.Second)
 	defer cancel()
 	root := t.TempDir()
@@ -279,7 +282,7 @@ func TestSessionNativePluginsHTTPBridgeChildrenAndIsolation(t *testing.T) {
 		t.Fatalf("first app approvals=%d", n)
 	}
 	observed, err := client.SessionMCPStatus(ctx, parent)
-	if err != nil || len(observed.Plugins) != 1 || observed.Plugins[0].Root != selected || observed.Plugins[0].Version != "0.2.0" || len(observed.Servers) != 1 || observed.Servers[0].PluginID != "desktop-world" || len(observed.Servers[0].Tools) != 4 || len(observed.Skills) != 1 || observed.Skills[0].Name != "desktop-world:desktop-world" {
+	if err != nil || len(observed.Plugins) != 1 || observed.Plugins[0].Root == selected || observed.Plugins[0].Version != builtinComputerUseVersion(t) || len(observed.Servers) != 1 || observed.Servers[0].PluginID != "desktop-world" || len(observed.Servers[0].Tools) != 4 || len(observed.Skills) != 1 || observed.Skills[0].Name != "desktop-world:desktop-world" {
 		t.Fatalf("unpaired/duplicate native capability: %+v %v", observed, err)
 	}
 	if n := settleNativeProfileHTTP(t, ctx, client, parent, "native-parent-reuse", "FIRST_APP"); n != 0 {
@@ -302,8 +305,8 @@ func TestSessionNativePluginsHTTPBridgeChildrenAndIsolation(t *testing.T) {
 	if _, err := configurationResult(client.UpdateSessionConfiguration(ctx, configurationCommand(parent, sessionprofile.UpdateConfigurationRequest{OperationID: "native-change-source", ExpectedConfigurationRevision: current.Revision, Patch: sessionprofile.ConfigurationPatch{Plugins: &selection}}))); err != nil {
 		t.Fatal(err)
 	}
-	if n := settleNativeProfileHTTP(t, ctx, client, parent, "native-new-source", "FIRST_APP"); n != 1 {
-		t.Fatalf("new source inherited old app grant: %d", n)
+	if n := settleNativeProfileHTTP(t, ctx, client, parent, "native-new-source", "FIRST_APP"); n != 0 {
+		t.Fatalf("ignored user source replaced the fixed builtin or app grant: %d", n)
 	}
 	selected = replacement
 	child, task := applicationProfileChild(t, ctx, client, parent)
@@ -392,7 +395,7 @@ func TestSessionNativePluginsHTTPBridgeChildrenAndIsolation(t *testing.T) {
 		executions := 0
 		for _, e := range loaded.Events {
 			if e.Type == session.EventTypeToolResult && e.Tool != nil && e.Tool.Name == "desktop_world__exec" {
-				if e.Tool.Status != "completed" || e.Tool.ModelCall == nil || e.Tool.ModelCall.Name != "mcp_call" || e.Tool.ModelCall.ID != e.Tool.ID {
+				if e.Tool.Status != "failed" || e.Tool.ModelCall == nil || e.Tool.ModelCall.Name != "mcp_call" || e.Tool.ModelCall.ID != e.Tool.ID {
 					t.Fatalf("canonical exec lost real/envelope pairing: %+v", e.Tool)
 				}
 				executions++
@@ -411,17 +414,13 @@ func TestSessionNativePluginsHTTPBridgeChildrenAndIsolation(t *testing.T) {
 			t.Fatalf("Session index=%d %s real exec results=%d want=%d event_count=%d", index, sid, executions, want, len(loaded.Events))
 		}
 	}
-	if !strings.Contains(provider.snapshot(), "PAIRED_VERSION_0.2.0") || !strings.Contains(provider.snapshot(), "PAIRED_VERSION_0.2.1") || !strings.Contains(provider.snapshot(), "SYNTHETIC_EXEC:") {
-		t.Fatal("model context did not receive paired Skill and original MCP results")
+	if strings.Contains(provider.snapshot(), "PAIRED_VERSION_0.2.0") || strings.Contains(provider.snapshot(), "PAIRED_VERSION_0.2.1") || !strings.Contains(provider.snapshot(), "desktop-world:desktop-world") {
+		t.Fatal("user Skill displaced the fixed product package")
 	}
-	remoteAudit, err := os.ReadFile(audit)
-	if err != nil {
-		t.Fatal(err)
+	if data, err := os.ReadFile(audit); err == nil && len(data) != 0 {
+		t.Fatal("user launch proxy executed despite the reserved builtin identity")
 	}
-	if got := len(strings.Fields(string(remoteAudit))); got != 12 {
-		t.Fatalf("independent remote exec count=%d want=12", got)
-	}
-	t.Log("native HTTP: sessions=3 real_exec=12 app_approvals=5; child approval uses original root FIFO; standalone plugin unchanged")
+	t.Log("fixed native HTTP: per-Session app approval, canonical child forwarding, real/envelope identity; shadowed user proxy never executed")
 	registered, err := client.ListPlugins(ctx, appserver.PluginRequest{})
 	if err != nil || len(registered) != 1 || registered[0].Root != installed || registered[0].Version != "0.1.3" {
 		t.Fatalf("profile overwrote standalone registration: %+v %v", registered, err)
@@ -436,7 +435,7 @@ func TestSessionNativePluginsHTTPBridgeChildrenAndIsolation(t *testing.T) {
 		t.Fatalf("native clear failed: %+v %v", cleared, err)
 	}
 	passive, err = client.SessionMCPStatus(ctx, parent)
-	if err != nil || len(passive.Plugins)+len(passive.Servers)+len(passive.Skills) != 0 {
+	if err != nil || len(passive.Servers) != 1 || passive.Servers[0].PluginID != "desktop-world" {
 		t.Fatalf("cleared native source remained: %+v %v", passive, err)
 	}
 }

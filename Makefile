@@ -54,23 +54,23 @@ fmt:
 fmt-check:
 	@out="$$($(GOFILES_CMD) | xargs -0 gofmt -l)"; test -z "$$out" || { printf '%s\n' "$$out"; exit 1; }
 
-build: cache-dirs
+build: cache-dirs prepare-builtin-plugins
 	go build ./...
 
-install: cache-dirs
+install: cache-dirs prepare-builtin-plugins
 	go install -ldflags "$(LDFLAGS)" ./cmd/caelis
 
-build-cli: cache-dirs
+build-cli: cache-dirs prepare-builtin-plugins
 	mkdir -p ./.tmp/bin
 	go build -ldflags "$(LDFLAGS)" -o ./.tmp/bin/caelis ./cmd/caelis
 
-vet: cache-dirs
+vet: cache-dirs prepare-builtin-plugins
 	go vet ./...
 
-lint: cache-dirs
+lint: cache-dirs prepare-builtin-plugins
 	golangci-lint run ./...
 
-arch-lint: cache-dirs
+arch-lint: cache-dirs prepare-builtin-plugins
 	go run ./scripts/arch_lint.go --include-tests
 
 sdk-boundary-check: cache-dirs
@@ -99,7 +99,7 @@ commit-check: fmt-check lint
 	git diff --check
 	git diff --cached --check
 
-windows-check: cache-dirs
+windows-check: cache-dirs prepare-builtin-plugins
 	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) "$(BASH)" ./scripts/windows_check.sh
 
 startup-performance: cache-dirs
@@ -140,8 +140,12 @@ command-execution-regression: cache-dirs
 	GO_TEST_TIMEOUT=$(GO_TEST_TIMEOUT) "$(BASH)" ./scripts/go_test_nonempty.sh ./app/gatewayapp/controladapter '$(COMMAND_EXECUTION_REGRESSION_SELECTOR)' command-execution-regression
 
 # golangci-lint already runs govet; do not repeat the same analyzers here.
-test: cache-dirs
+test: cache-dirs prepare-builtin-plugins
 	go test -vet=off -timeout $(GO_TEST_TIMEOUT) ./...
 
 release-dry-run: cache-dirs
 	goreleaser release --clean --snapshot
+
+.PHONY: prepare-builtin-plugins
+prepare-builtin-plugins:
+	python3 scripts/prepare_builtin_dtw.py

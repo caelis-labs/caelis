@@ -749,7 +749,7 @@ func TestLoadGatewayBuildPlanSkipsInvalidPluginWithoutMutatingStack(t *testing.T
 
 	sandboxCfg := stack.composition.sandbox
 	plan, err := stack.composition.loadGatewayBuildPlan(sandboxCfg, stack.composition.activeRuntime)
-	if err != nil || len(plan.Plugins.SkillBundles) != 0 || len(plan.Plugins.MCPServerSpecs) != 0 {
+	if err != nil || len(plan.Plugins.SkillBundles) > 1 || len(plan.Plugins.MCPServerSpecs) > 1 || len(plan.Plugins.Sources) != 1 || plan.Plugins.Sources[0].ID != "desktop-world" {
 		t.Fatalf("loadGatewayBuildPlan() = %+v, %v, want broken plugin isolated", plan.Plugins, err)
 	}
 	if plan.ReleasePluginCache != nil {

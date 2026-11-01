@@ -106,7 +106,7 @@ func (p *revisionProvider) snapshot() []map[string]any {
 
 func assertRevisionPrefix(t *testing.T, body map[string]any, model, effort, tier, instructions, schemaType string) {
 	t.Helper()
-	if body["model"] != model || body["instructions"] != instructions {
+	if body["model"] != model || (body["instructions"] != instructions && !strings.HasPrefix(fmt.Sprint(body["instructions"]), instructions+"\n## Skills\n")) {
 		t.Fatalf("wrong model/instructions: %#v", body)
 	}
 	reasoning, _ := body["reasoning"].(map[string]any)
@@ -119,7 +119,11 @@ func assertRevisionPrefix(t *testing.T, body map[string]any, model, effort, tier
 		}
 	}
 	tools, _ := body["tools"].([]any)
-	if len(tools) != 7 {
+	want := 7
+	if builtinComputerUseSupported() {
+		want += 3
+	}
+	if len(tools) != want {
 		t.Fatalf("tools = %#v", body["tools"])
 	}
 	tool, _ := tools[0].(map[string]any)

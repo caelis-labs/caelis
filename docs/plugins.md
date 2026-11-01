@@ -10,7 +10,38 @@ only one copy of each declared server. For a Claude package, an inline server
 entry overrides the root `.mcp.json` entry with the same name. An existing
 native Caelis manifest takes precedence on a duplicate server name.
 
-## Install and use
+## Built-in computer use
+
+Desktop World is a fixed Core capability on macOS arm64 and Windows x64. The
+complete official plugin is embedded in the platform's Core executable and
+follows the Core version; no separate installation, switch or uninstall is
+provided. Core materializes the verified package in its private Store cache and
+starts its standard stdio process for each Session Runtime. Single-binary
+distribution does not mean single-process execution. Unsupported platforms keep
+Core usable and report computer use as unavailable; OS permissions still apply.
+
+The existing parser supplies MCP and the Skill from the same package. Main
+Sessions, application profiles, native children and managed Workers receive the
+fixed contribution independently of optional plugin selection. Missing optional
+selection and explicit `native.plugins: []` retain their existing contracts;
+neither controls the fixed capability. Each Session keeps its own connection,
+state, app approvals and lifecycle. Built-in status grants no blanket approval.
+
+The `desktop-world` identity belongs to the product contribution. User-installed
+packages with that actual identity, including configured aliases, remain on disk
+and in the user registry but are not assembled; status identifies the fixed
+source. A different service cannot shadow its projected MCP namespace. Other
+optional plugins retain their normal configuration and lifecycle.
+
+Core's single release pin is
+[`control/plugin/builtin/desktop-world.json`](../control/plugin/builtin/desktop-world.json).
+CI and local builds run the same preparation script to fetch and verify the
+complete official target package, including BUILD provenance, binary, Skill,
+manifest and licenses. Generated ZIPs are not source-controlled. Core does not
+build DTW's runtime or download it during execution. Release verification checks
+the actual signed Core archive for the complete pinned plugin bytes.
+
+## Install optional plugins
 
 Verify the publisher and package checksum, extract the package outside your
 workspace, then enter this in Caelis's TUI:
@@ -28,8 +59,8 @@ Trusted external installers can use the local headless entry:
 
 ```sh
 caelis plugin install /absolute/path/to/extracted-plugin --json
-caelis plugin status desktop-world --json
-caelis plugin remove desktop-world --json
+caelis plugin status example-plugin --json
+caelis plugin remove example-plugin --json
 ```
 
 Flags may precede or follow the directory/ID. `--store-dir <directory>` (or
@@ -97,11 +128,8 @@ Mutation failures also include the Host `receipt` when available. Check its
 observation or cleanup failed; do not blindly replay an uncertain mutation.
 Without `--json`, the command prints a brief text result and errors on stderr.
 
-For Desktop World, verify the package for your OS/CPU and register its extracted
-plugin root. The rewrite package declares `bin/dtw mcp` in `.mcp.json`
-and bundles its Skill. No separate Host adapter, CUA SDK, or Node installation
-is required. The Skill appears as `desktop-world:desktop-world`; its four MCP
-tools are qualified as `desktop_world__apps`, `desktop_world__api`,
+Desktop World's built-in Skill appears as `desktop-world:desktop-world`; its
+four MCP tools are `desktop_world__apps`, `desktop_world__api`,
 `desktop_world__exec`, and `desktop_world__result` inside Caelis.
 
 An operation supplies only `exec({app, source})`: a stable platform app ID and a
@@ -120,27 +148,17 @@ existing execution results. Other tools retain ordinary MCP source approval.
 `desktop_world` is not a plugin-ID alias, and an ordinary MCP server named
 `desktop-world` does not inherit these rules. Explicit per-call policy Ask/Deny
 and OS permissions still apply. Caelis owns approval; DTW receives the same
-standard MCP arguments and remains usable with other Agents. Disabling/removing
-the plugin excludes it from later Session assembly.
+standard MCP arguments and remains usable with other Agents.
 
-Released pre-0.2 packages retain ordinary MCP source approval through the fixed
-entry points; they receive no blanket trust or new app-parameter requirement.
-Control owns this compatibility rule until the supported DTW package floor is
-0.2. Missing or unrecognized versions retain the resource gate and cannot
-silently acquire broad execution trust.
+Source/schema changes require fresh discovery and the original authorization
+checks. Old Session history remains readable, but old discovery is not migrated
+on resume. Existing operation IDs, receipts and unknown outcomes are retained;
+an upgrade or reconnect does not replay desktop work. Package roots are not
+overwritten in place.
 
-You can copy this instruction to an Agent:
-
-> Verify the plugin publisher, version, and checksum. Extract the matching
-> official package outside my workspace. Install the extracted root with
-> `caelis plugin install <absolute path> --json`, then start a new Session. Check
-> `caelis plugin status desktop-world --json` and the ready MCP tools before using the Skill. Do not
-> rewrite the package's MCP configuration, copy credentials, or replay an uncertain input.
-
-Application-managed Sessions can select a reviewed native package and its existing
-launch proxy through [Session profiles](session-profiles.md#native-plugin-selection).
-This selection pairs MCP and Skill without replacing the standalone Host
-registration.
+Application-managed Sessions can also select optional native packages through
+[Session profiles](session-profiles.md#native-plugin-selection); this does not
+select or replace the fixed Desktop World package.
 
 ## Paths, ownership, and results
 

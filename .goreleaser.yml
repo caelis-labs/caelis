@@ -2,6 +2,10 @@ version: 2
 
 project_name: caelis
 
+before:
+  hooks:
+    - python3 scripts/prepare_builtin_dtw.py --all
+
 builds:
   - id: caelis
     main: ./cmd/caelis

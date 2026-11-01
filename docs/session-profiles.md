@@ -192,10 +192,12 @@ retain native models, Team, tools, sandbox and approval authority. Their existin
 {"session_id":"worker-session","revision":"1","native":{}}
 ```
 
-An absent `native.plugins` inherits Host plugins at activation. Submit the
+An absent `native.plugins` inherits optional Host plugins at activation. Submit the
 existing configuration CAS with `patch.plugins` to choose package roots. A
-present `native.plugins: []` disables package contributions with no Host fallback,
-including after reconnect. This differs from the always explicit plugin catalog
+present `native.plugins: []` disables optional package contributions with no Host fallback,
+including after reconnect. Core's fixed Desktop World contribution is assembled
+separately and is unaffected by this optional list; it retains original Session
+app approvals. This differs from the always explicit plugin catalog
 of a Profile Session. Clients must retain this presence distinction, including
 when comparing a desired empty selection with an inherited selection.
 

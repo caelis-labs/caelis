@@ -163,6 +163,7 @@ func TestApplicationProfileChildHTTPIsolationAndRecovery(t *testing.T) {
 	// A callback can arrive while the independently initialized MCP service
 	// is still connecting. Hold its startup to make this ordering deterministic.
 	health, err := client.SessionMCPStatus(ctx, child)
+	health = optionalCapabilityStatus(health)
 	if err != nil || health.SessionID != child || health.ConfigurationRevision == "" || len(health.Servers) != 1 || health.Servers[0].Name != "documents" || health.Servers[0].Status != "connecting" || len(health.Skills) != 1 || health.Skills[0].Name != "profile-child-skill" || health.Skills[0].Status != "ready" {
 		t.Fatalf("held child MCP/Skill assembly: %+v %v", health, err)
 	}
@@ -172,6 +173,7 @@ func TestApplicationProfileChildHTTPIsolationAndRecovery(t *testing.T) {
 	}
 	for {
 		health, err = client.SessionMCPStatus(ctx, child)
+		health = optionalCapabilityStatus(health)
 		if err != nil || health.SessionID != child || health.ConfigurationRevision != healthRevision || len(health.Servers) != 1 || health.Servers[0].Name != "documents" {
 			t.Fatalf("child MCP health lost its exact owner: %+v %v", health, err)
 		}

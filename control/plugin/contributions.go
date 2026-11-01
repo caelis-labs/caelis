@@ -22,7 +22,7 @@ type Contributions struct {
 }
 
 // Source identifies the package snapshot that produced one set of contributions.
-type Source struct{ ID, Root, Version string }
+type Source struct{ ID, Root, Version, Status string }
 
 // AgentRegistration associates a contributed Agent with its owning plugin.
 type AgentRegistration struct {
@@ -33,8 +33,11 @@ type AgentRegistration struct {
 // RuntimePaths are host-owned paths used only when materializing plugin MCP
 // servers for one Session snapshot. Listing Skills does not create data dirs.
 type RuntimePaths struct {
-	StoreDir     string
-	WorkspaceDir string
+	// ProductStoreDir is the shared Core package cache owner; StoreDir retains
+	// this Session's plugin data scope. Empty uses StoreDir.
+	ProductStoreDir string
+	StoreDir        string
+	WorkspaceDir    string
 	// TargetOS defaults to the current OS; an explicit value permits portable
 	// verification of process environment semantics during assembly.
 	TargetOS string

@@ -19,7 +19,7 @@ func selectedPluginFixture(t *testing.T, name, version string) string {
 	}
 	for path, body := range map[string]string{
 		".claude-plugin/plugin.json":    `{"name":"` + name + `","version":"` + version + `"}`,
-		".mcp.json":                     `{"mcpServers":{"desktop-world":{"command":"synthetic-native"}}}`,
+		".mcp.json":                     `{"mcpServers":{"` + name + `":{"command":"synthetic-native"}}}`,
 		"skills/desktop-world/SKILL.md": "---\nname: desktop-world\ndescription: Synthetic desktop instructions.\n---\nVERSION_" + version,
 	} {
 		full := filepath.Join(root, path)
@@ -65,9 +65,11 @@ func TestApplicationNativePluginIdentityPolicyAndPairing(t *testing.T) {
 		t.Fatalf("legacy policy widened: %+v %v", old, err)
 	}
 	ordinary := selectedPluginFixture(t, "ordinary-plugin", "0.2.0")
-	plain, err := applicationPluginContributions(sessionprofile.Profile{Plugins: []sessionprofile.Plugin{{Root: ordinary}}}, paths)
-	if err != nil || len(plain.MCPServerSpecs[0].SourceTrustedTools) != 0 || len(plain.MCPServerSpecs[0].ToolResourceParameters) != 0 {
-		t.Fatalf("server spelling gained DTW authority: %+v %v", plain, err)
+	if err := os.WriteFile(filepath.Join(ordinary, ".mcp.json"), []byte(`{"mcpServers":{"desktop-world":{"command":"synthetic-native"}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := applicationPluginContributions(sessionprofile.Profile{Plugins: []sessionprofile.Plugin{{Root: ordinary}}}, paths); err == nil {
+		t.Fatal("foreign plugin claimed the fixed DTW namespace")
 	}
 }
 

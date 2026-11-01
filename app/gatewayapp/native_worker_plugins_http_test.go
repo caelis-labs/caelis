@@ -18,6 +18,9 @@ import (
 )
 
 func TestNativeWorkerPluginConfigurationHTTP(t *testing.T) {
+	if !builtinComputerUseSupported() {
+		t.Skip("native fixed capability protocol is exercised on supported targets")
+	}
 	ctx, cancel := context.WithTimeout(t.Context(), 75*time.Second)
 	defer cancel()
 	root := t.TempDir()
@@ -109,7 +112,7 @@ func TestNativeWorkerPluginConfigurationHTTP(t *testing.T) {
 		t.Fatalf("native worker app approvals=%d", n)
 	}
 	health, err := client.SessionMCPStatus(ctx, created.SessionID)
-	if err != nil || len(health.Plugins) != 1 || health.Plugins[0].Root != selected || health.Plugins[0].Version != "0.2.0" || len(health.Servers) != 1 || health.Servers[0].PluginID != "desktop-world" || len(health.Skills) != 1 || health.Skills[0].Name != "desktop-world:desktop-world" {
+	if err != nil || len(health.Plugins) != 1 || health.Plugins[0].Root == selected || health.Plugins[0].Version != builtinComputerUseVersion(t) || len(health.Servers) != 1 || health.Servers[0].PluginID != "desktop-world" || len(health.Skills) != 1 || health.Skills[0].Name != "desktop-world:desktop-world" {
 		t.Fatalf("native assembly: %+v %v", health, err)
 	}
 	// Replaying the exact command returns the saved receipt, not another update.
@@ -142,17 +145,17 @@ func TestNativeWorkerPluginConfigurationHTTP(t *testing.T) {
 	executions := 0
 	for _, event := range loaded.Events {
 		if event.Type == session.EventTypeToolResult && event.Tool != nil && event.Tool.Name == "desktop_world__exec" {
-			if event.Tool.Status != "completed" || event.Tool.ModelCall == nil || event.Tool.ModelCall.Name != "mcp_call" || event.Tool.ModelCall.ID != event.Tool.ID {
+			if event.Tool.Status != "failed" || event.Tool.ModelCall == nil || event.Tool.ModelCall.Name != "mcp_call" || event.Tool.ModelCall.ID != event.Tool.ID {
 				t.Fatal("native worker result lost envelope identity")
 			}
 			executions++
 		}
 	}
 	remote, err := os.ReadFile(audit)
-	if err != nil || executions != 2 || len(strings.Fields(string(remote))) != 2 {
+	if (err != nil && !os.IsNotExist(err)) || executions != 2 || len(strings.Fields(string(remote))) != 0 {
 		t.Fatalf("native exec counts local=%d remote=%d err=%v", executions, len(strings.Fields(string(remote))), err)
 	}
-	if !strings.Contains(provider.snapshot(), "PAIRED_VERSION_0.2.0") || !strings.Contains(provider.snapshot(), `"RunCommand"`) {
+	if strings.Contains(provider.snapshot(), "PAIRED_VERSION_0.2.0") || !strings.Contains(provider.snapshot(), `"RunCommand"`) {
 		t.Fatal("paired native Skill or native tools lost")
 	}
 	clear := request
@@ -165,7 +168,7 @@ func TestNativeWorkerPluginConfigurationHTTP(t *testing.T) {
 		t.Fatal("disabled plugin requested approval")
 	}
 	health, err = client.SessionMCPStatus(ctx, created.SessionID)
-	if err != nil || len(health.Plugins)+len(health.Servers)+len(health.Skills) != 0 {
+	if err != nil || len(health.Plugins) != 1 || health.Plugins[0].Version != builtinComputerUseVersion(t) {
 		t.Fatalf("[] fell back to Host package: %+v %v", health, err)
 	}
 	_ = feed.Subscription.Close()
@@ -196,10 +199,10 @@ func TestNativeWorkerPluginConfigurationHTTP(t *testing.T) {
 		t.Fatalf("independent native inheritance replaced: %+v %v", independentConfig, err)
 	}
 	health, err = client.SessionMCPStatus(ctx, standalone.SessionID)
-	if err != nil || len(health.Plugins) != 1 || health.Plugins[0].Root != installed || health.Plugins[0].Version != "0.1.3" {
+	if err != nil || len(health.Plugins) != 1 || health.Plugins[0].Root == installed || health.Plugins[0].Version != builtinComputerUseVersion(t) {
 		t.Fatalf("independent Core source overwritten: %+v %v", health, err)
 	}
-	t.Log("ordinary native Worker: no Profile; configuration/readback/CAS/receipt/status; canonical exec=2 remote exec=2 app approvals=1; [] survives Host reopen without fallback; standalone inherits independent 0.1.3")
+	t.Log("ordinary native Worker: owner/CAS/busy/receipt preserved; canonical exec failures=2 (app_unavailable fixture), native effects=0, shadowed user proxy=0, app approval=1; optional [] survives reopen and fixed builtin remains")
 }
 
 func TestNativeWorkerPluginImmediateConfigurationAfterModelCreate(t *testing.T) {

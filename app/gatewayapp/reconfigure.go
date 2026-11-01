@@ -631,7 +631,15 @@ func stackSkillDiscoveryDirs(workspaceDir string, configured []string) []string 
 // resolveGatewayPluginContributions gives persisted configuration failures an
 // application-boundary prefix at initial assembly and pre-commit validation.
 func resolveGatewayPluginContributions(configs []PluginConfig, storeDir, workspaceDir string) (plugin.Contributions, error) {
-	contributions, err := plugin.ResolveAvailableContributions(configs, plugin.RuntimePaths{StoreDir: storeDir, WorkspaceDir: workspaceDir})
+	selected := plugin.OptionalUserConfigs(configs)
+	paths := plugin.RuntimePaths{StoreDir: storeDir, WorkspaceDir: workspaceDir}
+	contributions, err := plugin.ResolveAvailableContributions(selected, paths)
+	if err == nil {
+		contributions, err = plugin.WithProductContributions(contributions, paths)
+		if err == nil && len(selected) != len(configs) {
+			contributions.Sources[0].Status += "; user desktop-world package omitted"
+		}
+	}
 	if err != nil {
 		return plugin.Contributions{}, fmt.Errorf("gatewayapp: %w", err)
 	}

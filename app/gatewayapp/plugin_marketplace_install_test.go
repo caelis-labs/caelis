@@ -2,6 +2,7 @@ package gatewayapp
 
 import (
 	"context"
+	"github.com/caelis-labs/caelis/agent-sdk/skill"
 	"os"
 	"path/filepath"
 	"slices"
@@ -138,9 +139,7 @@ func TestPluginServiceInstallFromMarketplaceUsesEntryNameWhenSourceDirDiffers(t 
 		t.Fatalf("persisted plugins = %#v, want one drawio plugin", doc.Plugins)
 	}
 	activated := activateFutureAssemblyRuntime(t, stack, "marketplace-plugin-install")
-	if len(activated.activeRuntime.PluginSkills) != 1 ||
-		activated.activeRuntime.PluginSkills[0].Plugin != "drawio" ||
-		activated.activeRuntime.PluginSkills[0].Namespace != "drawio" {
+	if !slices.ContainsFunc(activated.activeRuntime.PluginSkills, func(bundle skill.PluginBundle) bool { return bundle.Plugin == "drawio" && bundle.Namespace == "drawio" }) {
 		t.Fatalf("future Session plugin skills = %#v, want drawio identity", activated.activeRuntime.PluginSkills)
 	}
 }

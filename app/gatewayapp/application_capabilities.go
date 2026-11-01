@@ -45,7 +45,7 @@ type applicationMCPResource struct {
 }
 
 func (r *applicationMCPResource) matches(profile sessionprofile.Profile) bool {
-	return reflect.DeepEqual(r.servers, profile.MCPServers) && reflect.DeepEqual(r.plugins, profile.Plugins)
+	return reflect.DeepEqual(r.servers, profile.MCPServers) && reflect.DeepEqual(r.plugins, optionalApplicationPlugins(profile.Plugins))
 }
 
 type applicationMCPSource struct {
@@ -223,7 +223,7 @@ func (r *applicationTurnResolver) acquireCapabilities(ctx context.Context, confi
 	if err := ctx.Err(); err != nil {
 		return nil, nil, err
 	}
-	contributions, err := applicationPluginContributions(configuration.Profile, applicationPluginPaths(r.composition.authorities.storeDir, r.binding.SessionID, r.composition.workspace.CWD))
+	contributions, err := applicationRuntimePluginContributions(configuration.Profile, applicationPluginPaths(r.composition.authorities.storeDir, r.binding.SessionID, r.composition.workspace.CWD))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -233,7 +233,7 @@ func (r *applicationTurnResolver) acquireCapabilities(ctx context.Context, confi
 	}
 	assembled := &applicationCapabilities{catalog: catalog, skills: skills}
 	for _, source := range contributions.Sources {
-		assembled.plugins = append(assembled.plugins, sessionprofile.PluginStatus{ID: source.ID, Root: source.Root, Version: source.Version, Status: "assembled"})
+		assembled.plugins = append(assembled.plugins, sessionprofile.PluginStatus{ID: source.ID, Root: source.Root, Version: source.Version, Status: pluginSourceStatus(source)})
 	}
 	specs := append(applicationMCPSpecs(configuration.Profile), contributions.MCPServerSpecs...)
 	if len(catalog.Metas()) != 0 {
@@ -254,7 +254,7 @@ func (r *applicationTurnResolver) acquireCapabilities(ctx context.Context, confi
 			if err != nil {
 				return nil, nil, err
 			}
-			resource = &applicationMCPResource{servers: append([]sessionprofile.MCPServer(nil), configuration.Profile.MCPServers...), plugins: configuration.Profile.Plugins, specs: specs, manager: manager, retired: configuration.Revision < r.desiredRevision}
+			resource = &applicationMCPResource{servers: append([]sessionprofile.MCPServer(nil), configuration.Profile.MCPServers...), plugins: optionalApplicationPlugins(configuration.Profile.Plugins), specs: specs, manager: manager, retired: configuration.Revision < r.desiredRevision}
 			if !resource.retired {
 				r.currentMCP = resource
 			}

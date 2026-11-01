@@ -1,5 +1,21 @@
 # Testing
 
+## Built-in plugin preparation
+
+Supported native targets require the pinned official DTW package before direct
+Go builds or tests:
+
+```bash
+python3 scripts/prepare_builtin_dtw.py
+```
+
+The normal Make build, test and lint targets run this step. `--all` prepares both
+supported packages for cross builds, as GoReleaser does. The script reuses verified
+cache bytes, downloads only missing pinned assets, and writes ignored go:embed
+inputs. Native acceptance uses `TestBuiltinDesktopWorldLiveAgentTask` with an
+explicit private model profile and artifact directory; ordinary tests never use
+live accounts. Fixture approval tests do not establish desktop effects.
+
 ## Default gate
 
 Run before committing:

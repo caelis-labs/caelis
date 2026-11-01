@@ -103,6 +103,10 @@ func (s Service) List(ctx context.Context) ([]Info, error) {
 	var list []Info
 	for _, pCfg := range doc.Plugins {
 		info := s.pluginInfoFromConfig(pCfg)
+		if info.Status == "shadowed" {
+			list = append(list, info)
+			continue
+		}
 
 		// For disabled plugins skip deep parse – show stored metadata only.
 		if !pCfg.Enabled {
@@ -370,7 +374,9 @@ func (s Service) inspectState(doc State, id string) (Info, error) {
 
 	pCfg := doc.Plugins[foundIdx]
 	info := s.pluginInfoFromConfig(pCfg)
-	s.enrichPluginInfoFromManifest(&info, pCfg)
+	if info.Status != "shadowed" {
+		s.enrichPluginInfoFromManifest(&info, pCfg)
+	}
 
 	return info, nil
 }
@@ -384,6 +390,11 @@ func (s Service) pluginInfoFromConfig(pCfg Config) Info {
 		Root:        pCfg.Root,
 		Enabled:     pCfg.Enabled,
 		Status:      "inactive",
+	}
+	if IsProductPlugin(pCfg) {
+		info.Status = "shadowed"
+		info.Warning = "desktop-world is provided by Core's fixed builtin; this user package is not assembled"
+		return info
 	}
 	if pCfg.Enabled {
 		info.Status = "active"
