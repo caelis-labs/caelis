@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"io"
 	"net/http"
 	"os"
@@ -15,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/httpclient"
 	"github.com/caelis-labs/caelis/control/appserver/wirev1/generated"
@@ -206,6 +206,12 @@ func TestSessionNativePluginsHTTPBridgeChildrenAndIsolation(t *testing.T) {
 	provider := &nativePluginProvider{}
 	host := startApplicationHTTPHost(t, filepath.Join(root, "store"), root, provider)
 	defer host.close(t)
+	var observers []io.Closer
+	defer func() {
+		for _, observer := range observers {
+			_ = observer.Close()
+		}
+	}()
 	connectApplicationChildModel(t, ctx, host, "gpt-4.1")
 	client, _ := connectSessionOwnerHTTP(t, ctx, host, "owner", filepath.Join(root, "owner.token"))
 	info, err := client.Initialize(ctx)
@@ -241,6 +247,14 @@ func TestSessionNativePluginsHTTPBridgeChildrenAndIsolation(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		// Reusable grants and resident status require a connected Session.
+		// Without an observer, idle teardown can correctly clear the catalog
+		// between turns before this fixture inspects it.
+		feed, err := client.Reconnect(ctx, appserver.ReconnectRequest{SessionID: result.SessionID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		observers = append(observers, feed.Subscription)
 		return result.SessionID
 	}
 	parent := create("native-parent")
