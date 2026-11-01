@@ -53,9 +53,9 @@ func TestCLIPluginIsolatedInstallStatusRepeatRemove(t *testing.T) {
 	t.Chdir(t.TempDir())
 	store := cliTestStoreDir(t)
 	root := filepath.Join(t.TempDir(), "插件 with spaces")
-	manifest := `{"$schema":"https://agent-plugins.org/schemas/1.0.0/plugin.schema.json","name":"desktop-world","version":"1.0.0","author":{"name":"Caelis Labs"}}`
+	manifest := `{"$schema":"https://agent-plugins.org/schemas/1.0.0/plugin.schema.json","name":"cli-demo","version":"1.0.0","author":{"name":"Caelis Labs"}}`
 	writeCLIPluginFile(t, root, "plugin.json", manifest)
-	writeCLIPluginFile(t, root, "skills/desktop-world/SKILL.md", "---\nname: desktop-world\ndescription: desktop fixture\n---\n")
+	writeCLIPluginFile(t, root, "skills/cli-demo/SKILL.md", "---\nname: cli-demo\ndescription: desktop fixture\n---\n")
 	other := t.TempDir()
 	writeCLIPluginFile(t, other, "plugin.json", `{"$schema":"https://agent-plugins.org/schemas/1.0.0/plugin.schema.json","name":"unrelated","version":"1.0.0"}`)
 	wantRoot, err := filepath.EvalSymlinks(root)
@@ -78,7 +78,7 @@ func TestCLIPluginIsolatedInstallStatusRepeatRemove(t *testing.T) {
 	call("install", other)
 	for range 2 {
 		result := call("install", root)
-		if !result.Installed || result.Plugin == nil || result.ID != "desktop-world" || result.Plugin.Root != wantRoot || result.Plugin.Version != "1.0.0" || !result.Plugin.Enabled || len(result.Plugin.Skills) != 1 {
+		if !result.Installed || result.Plugin == nil || result.ID != "cli-demo" || result.Plugin.Root != wantRoot || result.Plugin.Version != "1.0.0" || !result.Plugin.Enabled || len(result.Plugin.Skills) != 1 {
 			t.Fatalf("install = %+v", result)
 		}
 	}
@@ -86,7 +86,7 @@ func TestCLIPluginIsolatedInstallStatusRepeatRemove(t *testing.T) {
 	if got := call("install", root); got.Plugin.Version != "2.0.0" {
 		t.Fatalf("upgrade = %+v", got)
 	}
-	if got := call("status", "DESKTOP-WORLD"); !got.Installed || got.Plugin.Version != "2.0.0" {
+	if got := call("status", "CLI-DEMO"); !got.Installed || got.Plugin.Version != "2.0.0" {
 		t.Fatalf("status = %+v", got)
 	}
 	collision := t.TempDir()
@@ -95,15 +95,15 @@ func TestCLIPluginIsolatedInstallStatusRepeatRemove(t *testing.T) {
 	if err == nil || got.Receipt == nil || !strings.Contains(got.Error, "another source") {
 		t.Fatalf("collision = %+v, %v", got, err)
 	}
-	if got := call("status", "desktop-world"); got.Plugin.Root != wantRoot {
+	if got := call("status", "cli-demo"); got.Plugin.Root != wantRoot {
 		t.Fatalf("collision replaced existing root: %+v", got)
 	}
 	for range 2 {
-		if got := call("remove", "desktop-world"); got.Installed || got.Plugin != nil {
+		if got := call("remove", "cli-demo"); got.Installed || got.Plugin != nil {
 			t.Fatalf("remove = %+v", got)
 		}
 	}
-	if got := call("status", "desktop-world"); got.Installed {
+	if got := call("status", "cli-demo"); got.Installed {
 		t.Fatalf("removed status = %+v", got)
 	}
 	if got := call("status", "unrelated"); !got.Installed || got.Plugin.Root != wantOther {

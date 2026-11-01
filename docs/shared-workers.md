@@ -110,6 +110,14 @@ not inherited. Any application-provided private memory capability remains owned
 by that application; Core does not provide built-in Memory inheritance. A workspace path grants
 no extra tool privileges; normal workspace trust and approvals still apply.
 
+With `native-session-plugin-configuration-v1`, a managed Worker may choose native
+packages through the existing `/configuration` CAS without becoming a Profile
+Session. `native.plugins` absent means Host inheritance; a present empty array
+suppresses package fallback and survives reconnect. Updates accept only
+`patch.plugins` and require idle native execution. MCP and namespaced Skills come
+from the same immutable package, with independent app consent for each Session.
+See [native plugin selection](session-profiles.md#native-plugin-selection).
+
 The same authenticated owner can use native Session compaction, model and
 approval/controller/presentation selection, handoff, closure, status, completion,
 participants and exact child input through the ordinary `/sessions/{id}` APIs.

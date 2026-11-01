@@ -47,7 +47,7 @@ type Store struct {
 }
 
 // Open performs the bounded old-format import before opening the current Store.
-// Remove the importer when the minimum supported on-disk format becomes v3.
+// Remove the importer when the minimum supported on-disk format becomes v4.
 func Open(path string) (*Store, error) {
 	if strings.TrimSpace(path) == "" {
 		return nil, fmt.Errorf("%w: database path required", ErrInvalid)

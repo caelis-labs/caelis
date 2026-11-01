@@ -28,6 +28,9 @@ CAELIS_WINDOWS_SANDBOX_E2E=1 bash ./scripts/go_test_nonempty.sh \
 CAELIS_TEST_APPLICATION_NATIVE=1 bash ./scripts/go_test_nonempty.sh ./app/gatewayapp \
   '^Test(Application(Native|DirectoryBindings|ResourceBridge|PublishArtifact|ReadResource|ArtifactChanged|ReviewerNative|ExecutionEnvironmentAfterHostApproval)|SessionRuntimeClosurePreventsDelayedNativeEffects|ExternalExecutionClientHTTP|SharedWorker(NativeHTTP|HTTP))' windows-application-native -count=1
 
+# Verify the target's embedded package and cache/parser contracts; no GUI evidence.
+go test -count=1 -timeout "${GO_TEST_TIMEOUT:-5m}" ./control/plugin -run '^TestProduct'
+
 # Large packages run only native process, storage, path, and clipboard contracts.
 # Selectors must match tests, so renames cannot silently remove this coverage.
 bash ./scripts/go_test_nonempty.sh ./agent-sdk/session/file \

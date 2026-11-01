@@ -61,8 +61,11 @@ func ValidateProfile(p Profile) error {
 	if err := validateReviewer(p); err != nil {
 		return err
 	}
-	if len(p.Instructions) > 1<<20 || len(p.Tools) > 128 || len(p.MCPServers) > 16 || len(p.SkillDirs)+len(p.SkillRoots) > 64 {
+	if len(p.Instructions) > 1<<20 || len(p.Tools) > 128 || len(p.MCPServers) > 16 || len(p.Plugins) > 16 || len(p.SkillDirs)+len(p.SkillRoots) > 64 {
 		return fmt.Errorf("%w: profile size limit", ErrInvalid)
+	}
+	if err := validatePlugins(p.Plugins); err != nil {
+		return err
 	}
 	seenServers := map[string]bool{}
 	for _, server := range p.MCPServers {
@@ -121,7 +124,7 @@ func ValidateProfile(p Profile) error {
 			return fmt.Errorf("%w: duplicate or invalid tool name", ErrInvalid)
 		}
 		seen[def.Name] = true
-		if (len(p.SkillDirs)+len(p.SkillRoots) > 0 && def.Name == "Skill") || (len(p.MCPServers) > 0 && (def.Name == tool.ToolSearchToolName || def.Name == tool.MCPCallToolName)) {
+		if (len(p.SkillDirs)+len(p.SkillRoots)+len(p.Plugins) > 0 && def.Name == "Skill") || (len(p.MCPServers)+len(p.Plugins) > 0 && (def.Name == tool.ToolSearchToolName || def.Name == tool.MCPCallToolName)) {
 			return fmt.Errorf("%w: callback collides with an assembled capability tool", ErrInvalid)
 		}
 		for _, server := range p.MCPServers {
@@ -267,6 +270,9 @@ func (s *Store) binding(ctx context.Context, scope Scope, id string) (Binding, e
 		return Binding{}, notFound(err)
 	}
 	var b Binding
+	if isNativeConfigurationBinding(raw) {
+		return Binding{}, ErrNotFound
+	}
 	err = json.Unmarshal(raw, &b)
 	return b, err
 }
@@ -292,6 +298,9 @@ func (s *Store) BindingForSession(ctx context.Context, id string) (Binding, erro
 		return Binding{}, notFound(err)
 	}
 	var b Binding
+	if isNativeConfigurationBinding(raw) {
+		return Binding{}, ErrNotFound
+	}
 	err := json.Unmarshal(raw, &b)
 	return b, err
 }
@@ -315,6 +324,9 @@ func (s *Store) ListBindings(ctx context.Context, scope Scope) ([]Binding, error
 		var b Binding
 		if err = rows.Scan(&raw); err != nil {
 			return nil, err
+		}
+		if isNativeConfigurationBinding(raw) {
+			continue
 		}
 		if err = json.Unmarshal(raw, &b); err != nil {
 			return nil, err

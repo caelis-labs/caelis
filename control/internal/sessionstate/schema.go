@@ -8,7 +8,10 @@ import (
 )
 
 // Version is the principal-owned Session adjunct Store format.
-const Version = 3
+// Version 4 adds ordinary native configuration adjuncts. Older writers must
+// reject the Store rather than interpret a native selector as an explicit
+// execution Profile or ignore an explicit empty plugin selection.
+const Version = 4
 
 // SchemaDatabase permits schema creation in the startup migration transaction.
 type SchemaDatabase interface {

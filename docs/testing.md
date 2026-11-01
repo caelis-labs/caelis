@@ -1,5 +1,21 @@
 # Testing
 
+## Built-in plugin preparation
+
+Supported native targets require the pinned official DTW package before direct
+Go builds or tests:
+
+```bash
+python3 scripts/prepare_builtin_dtw.py
+```
+
+The normal Make build, test and lint targets run this step. `--all` prepares both
+supported packages for cross builds, as GoReleaser does. The script reuses verified
+cache bytes, downloads only missing pinned assets, and writes ignored go:embed
+inputs. Native acceptance uses `TestBuiltinDesktopWorldLiveAgentTask` with an
+explicit private model profile and artifact directory; ordinary tests never use
+live accounts. Fixture approval tests do not establish desktop effects.
+
 ## Default gate
 
 Run before committing:
@@ -258,21 +274,13 @@ go test ./internal/cli -run '^TestCLIPlugin' -count=1
 go test -race ./internal/cli ./control/plugin -run 'TestCLIPlugin|TestLocalAgentPlugin|TestAgentPluginLocalUpgrade' -count=1
 ```
 
-The default single-exec test uses pinned DTW manifest/Skill files with a
-deterministic MCP launcher and separate private worker process. It proves Caelis
-registration, one `exec`, startup, repeat/removal isolation and active/fresh
-Session snapshots, without invoking a real desktop. See the
+The optional-plugin fixture adapts a pinned sample manifest/Skill to a non-product
+identity, then uses a deterministic MCP launcher and private worker. It checks
+registration, readiness, repeat/removal isolation and active/fresh Session
+snapshots without invoking a desktop or live model. See the
 [fixture provenance](../internal/cli/testdata/dtw-agent-plugin/README.md).
-On a supported OS, use an independently verified native single-exec package:
-
-```sh
-CAELIS_DTW_SINGLE_EXEC_ROOT=/absolute/path/to/plugin go test ./internal/cli -run '^TestCLIPluginDesktopWorldNativeCandidate$' -count=1 -v
-```
-
-This native gate requires a ready DTW MCP connection and one `exec`; it does
-not perform desktop input. Signing, released artifacts, OS permissions and real
-GUI effects need separate native evidence. The older Full-package protocol
-probe under `control/plugin` remains specific to that package's two-tool catalog.
+Built-in computer-use acceptance is separate from this optional install/remove
+contract; see [built-in plugin preparation](#built-in-plugin-preparation).
 
 Codex ACP has two opt-in live tests:
 

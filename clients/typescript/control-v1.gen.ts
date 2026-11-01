@@ -1044,6 +1044,11 @@ export interface ModelUsageSnapshot {
   [key: string]: JSONValue;
 }
 
+export interface NativeSessionConfiguration {
+  plugins?: Array<SessionPlugin>;
+  [key: string]: JSONValue;
+}
+
 export interface NoticeEnvelope {
   _meta?: ACPMetadata;
   activity_id?: string;
@@ -1597,19 +1602,14 @@ export interface SessionChildRelation {
   [key: string]: JSONValue;
 }
 
-export interface SessionConfiguration {
-  last_request?: SessionConfigurationRequest;
-  profile: SessionProfile;
-  revision: Uint64Decimal;
-  session_id: string;
-  [key: string]: JSONValue;
-}
+export type SessionConfiguration = unknown | unknown;
 
 export interface SessionConfigurationPatch {
   instructions?: string;
   mcp_servers?: Array<SessionMCPServer>;
   model?: string;
   native_tools?: Array<string>;
+  plugins?: Array<SessionPlugin>;
   reasoning_effort?: string;
   service_tier?: string;
   skill_dirs?: Array<string>;
@@ -1711,6 +1711,7 @@ export interface SessionMCPServer {
 
 export interface SessionMCPServerStatus {
   name: string;
+  plugin_id?: string;
   refresh_failed?: boolean;
   refreshing?: boolean;
   stale?: boolean;
@@ -1723,6 +1724,7 @@ export interface SessionMCPServerStatus {
 
 export interface SessionMCPStatus {
   configuration_revision: Uint64Decimal;
+  plugins?: Array<SessionPluginStatus>;
   servers: Array<SessionMCPServerStatus>;
   session_id: string;
   skills: Array<SessionSkillStatus>;
@@ -1764,6 +1766,30 @@ export interface SessionPermissions {
   [key: string]: JSONValue;
 }
 
+export interface SessionPlugin {
+  mcp_servers?: Array<SessionPluginMCPServer>;
+  root: string;
+  [key: string]: JSONValue;
+}
+
+export interface SessionPluginMCPServer {
+  args?: Array<string>;
+  command: string;
+  name: string;
+  transport: "stdio";
+  url?: "";
+  work_dir: string;
+  [key: string]: JSONValue;
+}
+
+export interface SessionPluginStatus {
+  id?: string;
+  root: string;
+  status: "inactive" | "assembled";
+  version?: string;
+  [key: string]: JSONValue;
+}
+
 export interface SessionPresentationConfigRequest {
   config_id: string;
   expected_controller_epoch?: string;
@@ -1792,6 +1818,7 @@ export interface SessionProfile {
   model: string;
   native_tools?: Array<string>;
   permissions?: SessionPermissions;
+  plugins?: Array<SessionPlugin>;
   reasoning_effort?: string;
   reviewer?: SessionReviewer;
   service_tier?: string;

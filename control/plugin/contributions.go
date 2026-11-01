@@ -14,11 +14,15 @@ import (
 // Contributions is the normalized set of Runtime inputs produced by the
 // current Plugin configuration.
 type Contributions struct {
+	Sources           []Source
 	SkillBundles      []skill.PluginBundle
 	SessionStartHooks []HookSpec
 	MCPServerSpecs    []MCPServerSpec
 	Agents            []AgentRegistration
 }
+
+// Source identifies the package snapshot that produced one set of contributions.
+type Source struct{ ID, Root, Version, Status string }
 
 // AgentRegistration associates a contributed Agent with its owning plugin.
 type AgentRegistration struct {
@@ -29,8 +33,11 @@ type AgentRegistration struct {
 // RuntimePaths are host-owned paths used only when materializing plugin MCP
 // servers for one Session snapshot. Listing Skills does not create data dirs.
 type RuntimePaths struct {
-	StoreDir     string
-	WorkspaceDir string
+	// ProductStoreDir is the shared Core package cache owner; StoreDir retains
+	// this Session's plugin data scope. Empty uses StoreDir.
+	ProductStoreDir string
+	StoreDir        string
+	WorkspaceDir    string
 	// TargetOS defaults to the current OS; an explicit value permits portable
 	// verification of process environment semantics during assembly.
 	TargetOS string
@@ -70,10 +77,14 @@ func resolveContributions(configs []Config, skipBroken bool, paths ...RuntimePat
 			}
 			continue
 		}
+		if strings.TrimSpace(configured.ID) == "" {
+			installed = pluginWithConfiguredID(installed, localPluginID(installed))
+		}
 		out.SkillBundles = append(out.SkillBundles, pluginSkillBundles(installed, configured.Enabled)...)
 		if !configured.Enabled {
 			continue
 		}
+		out.Sources = append(out.Sources, Source{ID: installed.ID, Root: installed.Root, Version: installed.Version})
 		for _, hook := range installed.Hooks {
 			if hook.Event == HookEventSessionStart {
 				out.SessionStartHooks = append(out.SessionStartHooks, hook)
@@ -115,6 +126,7 @@ func resolveContributions(configs []Config, skipBroken bool, paths ...RuntimePat
 				}
 				return out, fmt.Errorf("plugin %q MCP server %q: %w", installed.ID, spec.Name, err)
 			}
+			spec.PackageRoot, spec.PackageVersion = installed.Root, installed.Version
 			// Rules come from the configured plugin identity, never its server
 			// name, remote metadata or script. Only exec creates new desktop work;
 			// result reads an existing receipt in this MCP connection.

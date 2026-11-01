@@ -30,3 +30,6 @@ npm/packages/*/runtime/
 .caelis
 plans
 .claude
+
+# Prepared from the pinned official DTW release; never vendor release ZIPs.
+/control/plugin/builtin/generated/

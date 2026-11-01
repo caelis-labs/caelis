@@ -103,6 +103,10 @@ func (s Service) List(ctx context.Context) ([]Info, error) {
 	var list []Info
 	for _, pCfg := range doc.Plugins {
 		info := s.pluginInfoFromConfig(pCfg)
+		if info.Status == "shadowed" {
+			list = append(list, info)
+			continue
+		}
 
 		// For disabled plugins skip deep parse – show stored metadata only.
 		if !pCfg.Enabled {
@@ -257,8 +261,8 @@ func (s Service) addPath(ctx context.Context, path string, opts pluginAddPathOpt
 	// Standard packages often unpack into versioned, platform-specific directories.
 	// The manifest name supplies their stable identity; an explicit marketplace
 	// registration still owns its configured ID.
-	if usesManifestIdentity(p.Kind) && strings.TrimSpace(opts.ConfigID) == "" {
-		id = pluginConfigID(absPath, p.Name)
+	if strings.TrimSpace(opts.ConfigID) == "" {
+		id = localPluginID(p)
 	}
 	p = pluginWithConfiguredID(p, id)
 
@@ -370,7 +374,9 @@ func (s Service) inspectState(doc State, id string) (Info, error) {
 
 	pCfg := doc.Plugins[foundIdx]
 	info := s.pluginInfoFromConfig(pCfg)
-	s.enrichPluginInfoFromManifest(&info, pCfg)
+	if info.Status != "shadowed" {
+		s.enrichPluginInfoFromManifest(&info, pCfg)
+	}
 
 	return info, nil
 }
@@ -384,6 +390,11 @@ func (s Service) pluginInfoFromConfig(pCfg Config) Info {
 		Root:        pCfg.Root,
 		Enabled:     pCfg.Enabled,
 		Status:      "inactive",
+	}
+	if IsProductPlugin(pCfg) {
+		info.Status = "shadowed"
+		info.Warning = "desktop-world is provided by Core's fixed builtin; this user package is not assembled"
+		return info
 	}
 	if pCfg.Enabled {
 		info.Status = "active"

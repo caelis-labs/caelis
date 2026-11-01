@@ -341,6 +341,10 @@ future Session prompts and catalogs without a startup notice. An explicit Skill
 read or load still returns its parse error. A missing YAML closing marker is
 invalid frontmatter, not plain Skill content.
 
+Fixed product plugin contributions are assembled separately from optional user
+plugin configuration through the same Control/plugin parser and Runtime inputs.
+They add no configuration or execution authority; see [built-in computer use](plugins.md#built-in-computer-use).
+
 Plugin configuration is also canonical AppConfig state. Managed plugin content
 is immutable and pinned while an active Runtime uses it; configuration mutation
 and installation effects remain on the principal-bound Control command path.

@@ -45,6 +45,34 @@ func TestCommandDiagnosticsCorrelateWithoutPrivateContent(t *testing.T) {
 	}
 }
 
+func TestBackgroundParticipantRetainsUnknownAcrossBackendValidationChange(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "operations.sqlite")
+	operations := newTestSQLiteOperationStore(t, path, OperationRetentionConfig{})
+	backend := &recordingCommandBackend{err: NewOutcomeError(OutcomeUnknown, errors.New("original start failed"))}
+	service := newTestCommandService(t, allowAuthorizer{}, operations, backend)
+	principal := Principal{ID: "owner"}
+	request := StartParticipantRequest{WriteBase: WriteBase{OperationID: "original-child", SessionID: "parent"}, Background: true, Handle: "self", Label: "Read-only plugin child", Input: "Return one answer."}
+	original, err := service.StartParticipant(t.Context(), principal, request)
+	if err == nil || original.Outcome != OutcomeUnknown || backend.calls != 1 {
+		t.Fatalf("original unknown: %+v %v calls=%d", original, err, backend.calls)
+	}
+	if err := operations.Close(); err != nil {
+		t.Fatal(err)
+	}
+	operations = newTestSQLiteOperationStore(t, path, OperationRetentionConfig{})
+	backend = &recordingCommandBackend{err: NewOutcomeError(OutcomeRejected, errorcode.New(errorcode.InvalidArgument, "new background label validation"))}
+	service = newTestCommandService(t, allowAuthorizer{}, operations, backend)
+	retained, err := service.StartParticipant(t.Context(), principal, request)
+	if err != nil || !sameCommandResult(retained, original) || backend.calls != 0 {
+		t.Fatalf("retained unknown changed or entered backend: %+v %v calls=%d", retained, err, backend.calls)
+	}
+	request.OperationID = "independent-invalid-request"
+	rejected, err := service.StartParticipant(t.Context(), principal, request)
+	if err == nil || rejected.Outcome != OutcomeRejected || rejected.ErrorCode != errorcode.InvalidArgument || backend.calls != 1 {
+		t.Fatalf("new invalid request: %+v %v calls=%d", rejected, err, backend.calls)
+	}
+}
+
 func TestEveryWriteCommandAuthorizationIdempotencyCASAndUnknownOutcome(t *testing.T) {
 	revision := uint64(4)
 	epoch := "epoch-1"

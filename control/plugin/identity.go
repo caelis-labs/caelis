@@ -10,6 +10,15 @@ func usesManifestIdentity(kind ManifestKind) bool {
 	return kind == ManifestKindAgentPlugin || kind == ManifestKindClaude
 }
 
+// localPluginID is shared by direct registration and explicit Session selection.
+// Versioned extraction directory names never identify standard or Claude packages.
+func localPluginID(p InstalledPlugin) string {
+	if usesManifestIdentity(p.Kind) {
+		return pluginConfigID(p.Root, p.Name)
+	}
+	return pluginConfigID(p.Root, "")
+}
+
 func pluginConfigID(absPath string, override string) string {
 	id := strings.TrimSpace(override)
 	if id == "" {

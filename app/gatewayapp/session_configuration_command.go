@@ -2,6 +2,7 @@ package gatewayapp
 
 import (
 	"context"
+	"errors"
 
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/sessionprofile"
@@ -11,6 +12,11 @@ func (s *controlCommandBackend) updateSessionConfiguration(ctx context.Context, 
 	scope, err := appserver.SessionScope(p)
 	if err != nil {
 		return appserver.CommandResult{}, err
+	}
+	if _, err := s.composition.authorities.sessionProfiles.BindingForSession(ctx, req.SessionID); errors.Is(err, sessionprofile.ErrNotFound) {
+		return s.updateNativePluginConfiguration(ctx, scope, req)
+	} else if err != nil {
+		return appserver.CommandResult{}, classifyControlPreDispatchError(err)
 	}
 	configuration, err := s.composition.authorities.sessionProfiles.UpdateConfiguration(ctx, scope, req.SessionID,
 		sessionprofile.UpdateConfigurationRequest{OperationID: req.OperationID, ExpectedConfigurationRevision: req.ExpectedConfigurationRevision, Patch: req.Patch},

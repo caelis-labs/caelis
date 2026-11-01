@@ -103,6 +103,12 @@ func applyConfigurationPatch(p Profile, patch ConfigurationPatch) (Profile, erro
 		}
 		p.SkillRoots = *patch.SkillRoots
 	}
+	if patch.Plugins != nil {
+		if *patch.Plugins == nil {
+			return Profile{}, ErrInvalid
+		}
+		p.Plugins = *patch.Plugins
+	}
 	if err := ValidateProfile(p); err != nil {
 		return Profile{}, err
 	}

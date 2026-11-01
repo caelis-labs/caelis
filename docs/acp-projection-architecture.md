@@ -141,6 +141,16 @@ review text; private evidence and native option resolution remain intact. Draft
 schema selection stays at the negotiated endpoint boundary, outside this
 stable display contract.
 
+A built-in native child is identified by the Host's bound Agent configuration,
+never peer metadata. Its actual draft tool call has already passed the native
+owner's display redaction. For that endpoint only, matching bounded native
+display context preserves the tool-call arguments through the parent approval
+queue; missing or mismatched context keeps them opaque. Sensitive and explicitly
+opaque input remain withheld. Source and scope hints stay reported display facts,
+not canonical action or grant authority. The child's original permission options,
+RPC identity and Session-bound grant owner still determine resolution. External
+ACP endpoints retain the opaque-input rule even if they claim to be native.
+
 Every field states `known`, `unavailable`, `truncated` or `opaque`. Text is
 bounded at 512 Unicode code points, targets at 16 and grant facts at 32; omitted
 tails are explicit. No Surface infers operation, target or scope from model

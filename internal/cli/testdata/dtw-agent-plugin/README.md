@@ -12,7 +12,7 @@ desktop access. The deterministic test supplies its own MCP helper with
 `apps`, `api`, `exec` and `result`, plus a private worker, to verify plugin
 installation, Skill discovery, Session snapshots and process startup. It does
 not establish native permissions, signing, actual desktop effects or model
-usability. Set `CAELIS_DTW_CANDIDATE_ROOT` to an independently verified platform
-package to run the native startup gate instead. The separate Control package
-protocol test optionally uses `CAELIS_DTW_TEST_APP` to check app state and original
-receipt readback without sending desktop input.
+usability. The optional CLI lifecycle test rewrites this sample's identity and
+Skill namespace to `cli-demo`, keeping installation/removal coverage independent
+of Core's fixed built-in Desktop World contribution. The built-in real Agent
+acceptance uses the embedded official package instead.

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/sessionprofile"
 )
 
@@ -33,6 +34,13 @@ type SessionProfileServiceConfig struct {
 	ReviewerState func(context.Context, sessionprofile.Profile) (sessionprofile.ReviewerState, error)
 	// NativeExecution reports the Host platform's ordinary native sandbox support.
 	NativeExecution bool
+	// NativePlugins reports Host assembly of explicit native package selections.
+	NativePlugins bool
+	// NativeSessions binds ordinary Session configuration to canonical ownership.
+	// Nil leaves the ordinary native plugin override capability unavailable.
+	NativeSessions interface {
+		Session(context.Context, session.SessionRef) (session.Session, error)
+	}
 	// NativeProfileChildren reports a Host assembly with scoped profile child
 	// endpoints backed by the original native participant, Task and approval owners.
 	NativeProfileChildren bool

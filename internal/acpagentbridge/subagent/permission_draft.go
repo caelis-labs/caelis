@@ -50,7 +50,11 @@ func (r *Runner) boundDraftPermissionHandler(run *childRun, spawn subagent.Spawn
 			return acppermission.ResponseToDraft(req, agent.ApprovalResponse{})
 		}
 		inbound, _ := acpsdk.InboundInfoFromContext(ctx)
-		permission, err := acppermission.RequestFromDraft(req, inbound.RequestID)
+		normalize := acppermission.RequestFromDraft
+		if cfg.BuiltinRuntime {
+			normalize = acppermission.RequestFromBuiltinDraft
+		}
+		permission, err := normalize(req, inbound.RequestID)
 		if err != nil {
 			return v2.RequestPermissionResponse{}, err
 		}

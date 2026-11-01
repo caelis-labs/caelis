@@ -240,18 +240,22 @@ type AttachParticipantRequest struct {
 type StartParticipantRequest struct {
 	WriteBase
 	// Background starts a durable child Task without claiming the main Turn.
-	Background     bool                    `json:"background,omitempty"`
-	Handle         string                  `json:"handle"`
-	Role           session.ParticipantRole `json:"role,omitempty"`
-	Label          string                  `json:"label,omitempty"`
-	Source         string                  `json:"source,omitempty"`
-	Input          string                  `json:"input,omitempty"`
-	DisplayInput   string                  `json:"display_input,omitempty"`
-	DisplayAddress string                  `json:"display_address,omitempty"`
-	DisplayTitle   string                  `json:"display_title,omitempty"`
-	ContentParts   []model.ContentPart     `json:"content_parts,omitempty"`
-	Transient      bool                    `json:"transient,omitempty"`
-	DetachSource   string                  `json:"detach_source,omitempty"`
+	Background bool                    `json:"background,omitempty"`
+	Handle     string                  `json:"handle"`
+	Role       session.ParticipantRole `json:"role,omitempty"`
+	// Label is a display label for foreground starts. For a background Task it
+	// is the requested Task handle: optional @, case-insensitive, at most 32
+	// canonical characters, a leading letter then letters/digits/hyphens; parent
+	// is reserved. Empty selects an allocated handle.
+	Label          string              `json:"label,omitempty"`
+	Source         string              `json:"source,omitempty"`
+	Input          string              `json:"input,omitempty"`
+	DisplayInput   string              `json:"display_input,omitempty"`
+	DisplayAddress string              `json:"display_address,omitempty"`
+	DisplayTitle   string              `json:"display_title,omitempty"`
+	ContentParts   []model.ContentPart `json:"content_parts,omitempty"`
+	Transient      bool                `json:"transient,omitempty"`
+	DetachSource   string              `json:"detach_source,omitempty"`
 }
 
 type PromptParticipantRequest struct {

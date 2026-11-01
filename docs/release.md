@@ -52,13 +52,16 @@ retain identity, Notebook, business tools and scheduling through explicit profil
 MCP and Skills. See [Session profiles](session-profiles.md).
 
 The isolated `control/internal/storemigration/applicationv3` importer upgrades
-schema 1/2 to 3 atomically. It preserves Session/call/resource identities, bytes,
+schema 1/2 to 4 atomically. The schema-3 transition raises the format marker without
+rewriting retained profile or receipt bytes. It preserves Session/call/resource identities, bytes,
 original requests and receipt provenance. Old operation namespaces map to inert,
 retained common receipts; pending calls are cancelled and uncertain effects stay
 unknown. The importer never redispatches old intent. It can be removed when the
-minimum supported Store is schema 3; archived evidence has separate retention.
+minimum supported Store is schema 4; archived evidence has separate retention.
 
-Older writers reject schema 3. Rollback requires a protected complete pre-upgrade
+Schema 4 adds ordinary native plugin selectors under the existing configuration
+owner. Older writers reject schema 4; they must not ignore an explicit empty
+selection and restore Host plugins. Rollback requires a protected complete pre-upgrade
 Store backup, not an executable downgrade. Stop the Host and prevent client
 restarts while taking the backup; include database WAL/SHM files, configuration
 and credentials, and verify restoration in isolation. Reconcile post-upgrade
@@ -80,6 +83,8 @@ notes must distinguish actual model requests from deterministic recovery tests
 and limit live acceptance to the exercised models, adapter, and request paths;
 a successful priority request does not establish latency, billing, or GUI and
 distribution acceptance.
+
+For the fixed MCP entry upgrade, include the [discovery compatibility rule](session-profiles.md#mcp-discovery-and-upgrades) in release notes: historical Sessions remain readable, but must discover MCP tools again before use.
 
 ## Gate model
 
@@ -258,3 +263,13 @@ Before declaring the release complete:
    the GitHub assets. The workflow reads every R2 object back before updating
    `latest.txt`.
 4. Verify the root module version is available through the public Go proxy.
+
+## Embedded computer-use package
+
+Core pins the official DTW release independently of its source repository. The
+GoReleaser preparation hook verifies the complete platform ZIP and embeds it
+only in supported Core targets. The final archive gate checks the actual signed
+Core executable for that complete pinned ZIP, including its original Skill and
+provenance; source CI alone is insufficient. User receipt/recovery and Store
+rollback rules above still apply. No runtime download or DTW source build is
+part of Core startup. See [plugin integration](plugins.md#built-in-computer-use).

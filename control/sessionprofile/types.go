@@ -43,6 +43,7 @@ type Profile struct {
 	MCPServers      []MCPServer      `json:"mcp_servers,omitempty"`
 	SkillDirs       []string         `json:"skill_dirs,omitempty"`
 	SkillRoots      []string         `json:"skill_roots,omitempty"`
+	Plugins         []Plugin         `json:"plugins,omitempty"`
 	Execution       string           `json:"execution"` // tools-only or workspace-write
 	Inherit         Inheritance      `json:"inherit"`
 	Workspace       Workspace        `json:"workspace,omitempty"`
@@ -85,7 +86,7 @@ func (p Profile) MarshalJSON() ([]byte, error) {
 // the default native tool set rather than the explicit empty selection.
 func (p *Profile) UnmarshalJSON(data []byte) error {
 	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(data, &fields); err != nil || fields == nil || string(fields["native_tools"]) == "null" || string(fields["mcp_servers"]) == "null" || string(fields["skill_dirs"]) == "null" || string(fields["skill_roots"]) == "null" {
+	if err := json.Unmarshal(data, &fields); err != nil || fields == nil || string(fields["native_tools"]) == "null" || string(fields["mcp_servers"]) == "null" || string(fields["skill_dirs"]) == "null" || string(fields["skill_roots"]) == "null" || string(fields["plugins"]) == "null" {
 		return ErrInvalid
 	}
 	type alias Profile
@@ -119,6 +120,54 @@ type Configuration struct {
 	Revision    uint64                `json:"revision"`
 	Profile     Profile               `json:"profile"`
 	LastRequest *RequestConfiguration `json:"last_request,omitempty"`
+	// Native is present instead of Profile for an ordinary native Session.
+	// It owns only explicit plugin selection; native execution still samples
+	// the existing Host and Session authorities.
+	Native *NativeConfiguration `json:"native,omitempty"`
+}
+
+// NativeConfiguration holds the optional plugin override of an ordinary Session.
+// Absent Plugins inherits Host plugins; a present empty array suppresses them.
+// Models, Team, tools, sandbox and permissions are never copied into this record.
+type NativeConfiguration struct {
+	Plugins *[]Plugin `json:"plugins,omitempty"`
+}
+
+// MarshalJSON preserves the existing explicit-profile wire bytes while ordinary
+// Sessions expose their narrow native selector without a fictitious Profile.
+func (c Configuration) MarshalJSON() ([]byte, error) {
+	type alias Configuration
+	if c.Native == nil {
+		return json.Marshal(alias(c))
+	}
+	return json.Marshal(struct {
+		SessionID string               `json:"session_id"`
+		Revision  uint64               `json:"revision"`
+		Native    *NativeConfiguration `json:"native"`
+	}{c.SessionID, c.Revision, c.Native})
+}
+
+// UnmarshalJSON rejects ambiguous assembly kinds instead of silently applying
+// one authority's fields to another Session kind.
+func (c *Configuration) UnmarshalJSON(raw []byte) error {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil || fields == nil {
+		return ErrInvalid
+	}
+	if native, present := fields["native"]; present {
+		if _, profile := fields["profile"]; profile || string(native) == "null" {
+			return ErrInvalid
+		}
+	} else if _, profile := fields["profile"]; !profile {
+		return ErrInvalid
+	}
+	type alias Configuration
+	var value alias
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return err
+	}
+	*c = Configuration(value)
+	return nil
 }
 
 // ConfigurationPatch changes only present hot-config fields. Nil preserves the
@@ -134,6 +183,7 @@ type ConfigurationPatch struct {
 	MCPServers      *[]MCPServer      `json:"mcp_servers,omitempty"`
 	SkillDirs       *[]string         `json:"skill_dirs,omitempty"`
 	SkillRoots      *[]string         `json:"skill_roots,omitempty"`
+	Plugins         *[]Plugin         `json:"plugins,omitempty"`
 }
 
 // UnmarshalJSON rejects null fields rather than treating them as absence.
@@ -144,7 +194,7 @@ func (p *ConfigurationPatch) UnmarshalJSON(data []byte) error {
 	}
 	for key, value := range fields {
 		switch key {
-		case "instructions", "model", "reasoning_effort", "service_tier", "tools_version", "tools", "native_tools", "mcp_servers", "skill_dirs", "skill_roots":
+		case "instructions", "model", "reasoning_effort", "service_tier", "tools_version", "tools", "native_tools", "mcp_servers", "skill_dirs", "skill_roots", "plugins":
 		default:
 			return ErrInvalid
 		}
@@ -159,6 +209,15 @@ func (p *ConfigurationPatch) UnmarshalJSON(data []byte) error {
 	}
 	*p = ConfigurationPatch(result)
 	return nil
+}
+
+// Plugin selects one externally owned immutable native package for this Session.
+// Core derives identity, policy and Skills from its manifest. Optional MCPServers
+// select Host-owned stdio proxies for named package servers; they carry no trust
+// flags or credentials. Selection never installs or changes Host registrations.
+type Plugin struct {
+	Root       string      `json:"root"`
+	MCPServers []MCPServer `json:"mcp_servers,omitempty"`
 }
 
 // MCPServer is an already authorized application service. Credentials and

@@ -197,6 +197,29 @@ func TestMigrationRollbackOnCorruptionAndFutureVersion(t *testing.T) {
 	}
 }
 
+func TestNativeConfigurationFormatFencePreservesSchema3Bytes(t *testing.T) {
+	db, _ := legacy(t)
+	if err := applicationv3.Run(t.Context(), db, importedAt); err != nil {
+		t.Fatal(err)
+	}
+	var before []byte
+	if err := db.QueryRow(`SELECT body FROM session_profiles LIMIT 1`).Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+	exec(t, db, `UPDATE app_schema SET version=3`)
+	if err := applicationv3.Run(t.Context(), db, importedAt); err != nil {
+		t.Fatal(err)
+	}
+	var after []byte
+	var version int
+	if err := db.QueryRow(`SELECT body FROM session_profiles LIMIT 1`).Scan(&after); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT version FROM app_schema`).Scan(&version); err != nil || version != 4 || string(before) != string(after) {
+		t.Fatal("native format fence rewrote retained profile", version, err)
+	}
+}
+
 func TestMigrationPinsV1CatalogWithoutRewritingCreationProfile(t *testing.T) {
 	db, _ := legacy(t)
 	exec(t, db, `DROP TABLE app_configurations; DROP TABLE app_workers; UPDATE app_schema SET version=1`)
@@ -233,7 +256,7 @@ func TestMigrationCancellationAndFreshStore(t *testing.T) {
 		t.Fatal(e)
 	}
 	var version int
-	if e = fresh.QueryRow(`SELECT version FROM app_schema`).Scan(&version); e != nil || version != 3 {
+	if e = fresh.QueryRow(`SELECT version FROM app_schema`).Scan(&version); e != nil || version != 4 {
 		t.Fatalf("new Store version: %d %v", version, e)
 	}
 }

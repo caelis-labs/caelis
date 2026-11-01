@@ -2,8 +2,10 @@ package appserver
 
 import (
 	"context"
+	"errors"
 	"strconv"
 
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/sessionprofile"
 )
 
@@ -35,6 +37,12 @@ func (s *SessionProfileService) Capabilities() []string {
 		out = append(out, sessionprofile.CapabilityHotConfiguration)
 		if s.config.MCPStatus != nil {
 			out = append(out, sessionprofile.CapabilityAtomicCapabilities)
+			if s.config.NativePlugins {
+				out = append(out, sessionprofile.CapabilityNativePlugins)
+				if s.config.NativeSessions != nil {
+					out = append(out, sessionprofile.CapabilityNativePluginConfiguration)
+				}
+			}
 		}
 	}
 	if s.config.NativeExecution {
@@ -53,24 +61,48 @@ func (s *SessionProfileService) SessionConfiguration(ctx context.Context, p Prin
 	if err != nil {
 		return sessionprofile.Configuration{}, err
 	}
-	return s.config.Store.Configuration(ctx, scope, sessionID)
+	configuration, err := s.config.Store.Configuration(ctx, scope, sessionID)
+	if !errors.Is(err, sessionprofile.ErrNotFound) || s.config.NativeSessions == nil {
+		return configuration, err
+	}
+	authorizer := SessionAuthorizer{Sessions: s.config.NativeSessions, SessionProfiles: s.config.Store}
+	if err := authorizer.Authorize(ctx, p, ActionSessionInspect, sessionID); err != nil {
+		return sessionprofile.Configuration{}, err
+	}
+	active, err := s.config.NativeSessions.Session(ctx, session.SessionRef{SessionID: sessionID})
+	if err != nil {
+		return sessionprofile.Configuration{}, err
+	}
+	return s.config.Store.NativeConfiguration(ctx, scope, active)
 }
 
 // SessionMCPStatus reads the Session's desired MCP and Skill selections
 // with optional resident health. Reading it never starts services or scans files.
 func (s *SessionProfileService) SessionMCPStatus(ctx context.Context, p Principal, sessionID string) (sessionprofile.MCPStatus, error) {
-	scope, err := SessionScope(p)
-	if err != nil {
-		return sessionprofile.MCPStatus{}, err
-	}
 	if s.config.MCPStatus == nil {
 		return sessionprofile.MCPStatus{}, sessionprofile.ErrUnsupported
 	}
-	configuration, err := s.config.Store.Configuration(ctx, scope, sessionID)
+	configuration, err := s.SessionConfiguration(ctx, p, sessionID)
 	if err != nil {
 		return sessionprofile.MCPStatus{}, err
 	}
 	observed := s.config.MCPStatus(ctx, sessionID, configuration.Revision)
+	if configuration.Native != nil {
+		observed.SessionID = sessionID
+		observed.ConfigurationRevision = strconv.FormatUint(configuration.Revision, 10)
+		if observed.Servers == nil {
+			observed.Servers = []sessionprofile.MCPServerStatus{}
+		}
+		if observed.Skills == nil {
+			observed.Skills = []sessionprofile.SkillStatus{}
+		}
+		if len(observed.Plugins) == 0 && configuration.Native.Plugins != nil {
+			for _, selected := range *configuration.Native.Plugins {
+				observed.Plugins = append(observed.Plugins, sessionprofile.PluginStatus{Root: selected.Root, Status: "inactive"})
+			}
+		}
+		return observed, nil
+	}
 	byName := make(map[string]sessionprofile.MCPServerStatus, len(observed.Servers))
 	for _, server := range observed.Servers {
 		byName[server.Name] = server
@@ -82,6 +114,17 @@ func (s *SessionProfileService) SessionMCPStatus(ctx context.Context, p Principa
 			server = sessionprofile.MCPServerStatus{Name: declared.Name, Status: "inactive"}
 		}
 		status.Servers = append(status.Servers, server)
+	}
+	for _, server := range observed.Servers {
+		if server.PluginID != "" {
+			status.Servers = append(status.Servers, server)
+		}
+	}
+	status.Plugins = append([]sessionprofile.PluginStatus(nil), observed.Plugins...)
+	if len(status.Plugins) == 0 {
+		for _, selected := range configuration.Profile.Plugins {
+			status.Plugins = append(status.Plugins, sessionprofile.PluginStatus{Root: selected.Root, Status: "inactive"})
+		}
 	}
 	status.Skills = make([]sessionprofile.SkillStatus, 0, len(configuration.Profile.SkillDirs)+len(configuration.Profile.SkillRoots))
 	status.Skills = append(status.Skills, observed.Skills...)

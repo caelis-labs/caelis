@@ -1,9 +1,10 @@
 /*
-Package applicationv3 contains only the Store v1/v2 -> v3 startup import.
+Package applicationv3 contains the Store v1/v2 startup import and the bounded
+schema-3 to schema-4 format fence for native configuration adjuncts.
 
 The caller must hold the Store's exclusive Host ownership and stop all producers
-before Run. A successful transaction raises app_schema to 3, which intentionally
-prevents a released v1/v2 Host from reopening the upgraded Store. Binary rollback
+before Run. A successful transaction raises app_schema to 4, which intentionally
+prevents older Hosts from reopening the upgraded Store. Binary rollback
 therefore cannot imply Store downgrade; an upgrade coordinator must inspect the
 format before attempting to restart an older Host.
 
@@ -22,8 +23,12 @@ permission to retry. Where a historical command ledger supplies a result, it is
 merged only after checking the original wrapped request digest and exact receipt.
 Permanent receipts remain permanent in the common ledger.
 
-Removal boundary: after the minimum accepted on-disk Store format is v3, delete
-this entire package and the v1/v2 startup branch. Reject older formats with an
+The schema-3 transition changes no retained profile or receipt bytes; its marker
+prevents old writers from interpreting native configuration as an execution
+Profile or ignoring an explicit empty plugin override.
+
+Removal boundary: after the minimum accepted on-disk Store format is v4, delete
+this entire package and its startup branches. Reject older formats with an
 explicit upgrade/export requirement. Keep the small app_schema downgrade refusal
 marker while old binaries can still be pointed at the Store. Archive disposal is
 an independent explicit data-retention decision and never a runtime dependency.

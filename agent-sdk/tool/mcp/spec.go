@@ -8,6 +8,10 @@ import (
 // ServerSpec describes one MCP server connection.
 type ServerSpec struct {
 	PluginID string
+	// PackageRoot and PackageVersion bind a Host-selected native package even
+	// when its declared connection is served through a Host-owned proxy.
+	PackageRoot    string `json:",omitempty"`
+	PackageVersion string `json:",omitempty"`
 	// ReplaySourceIDs lists prior source identities for remapping historical
 	// fully qualified names. They never create additional executable names.
 	ReplaySourceIDs []string

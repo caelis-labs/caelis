@@ -31,7 +31,7 @@ func (s *runtimeComposition) validateAgentAssemblyCandidate(doc AppConfig) error
 		}
 	}
 
-	contributions, err := plugin.ResolveContributions(doc.Plugins, plugin.RuntimePaths{StoreDir: s.authorities.storeDir, WorkspaceDir: s.workspace.CWD})
+	contributions, err := plugin.ResolveContributions(plugin.OptionalUserConfigs(doc.Plugins), plugin.RuntimePaths{StoreDir: s.authorities.storeDir, WorkspaceDir: s.workspace.CWD})
 	if err != nil {
 		return err
 	}
