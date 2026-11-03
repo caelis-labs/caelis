@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -120,6 +121,70 @@ func TestComputerUseDisclosureSurvivesLateFinalUpdate(t *testing.T) {
 		update.apply("exec", "desktop_world__exec", "app", "canonical result", true, false, ToolUpdateMeta{})
 		if !update.expanded("exec") {
 			t.Fatal("late final update discarded the user's disclosure choice")
+		}
+	}
+}
+
+func TestComputerUseDisclosureSurvivesTurnCompletion(t *testing.T) {
+	type computerTurn interface {
+		UpdateToolWithMeta(string, string, string, string, bool, bool, ToolUpdateMeta)
+		SetStatus(string, string, string, time.Time)
+		Render(BlockRenderContext) []RenderedRow
+		toggleToolPanelClick(string) bool
+		toolPanelExpanded(string) bool
+		toggleExplorationExpanded(string) bool
+	}
+	for _, surface := range []struct {
+		name string
+		new  func() computerTurn
+	}{
+		{"main", func() computerTurn { return NewMainACPTurnBlock("main") }},
+		{"participant", func() computerTurn { return NewParticipantTurnBlock("participant", "worker") }},
+	} {
+		for _, grouped := range []bool{false, true} {
+			name := "single"
+			if grouped {
+				name = "grouped"
+			}
+			t.Run(surface.name+"/"+name, func(t *testing.T) {
+				block := surface.new()
+				ctx := NewModel(Config{NoColor: true, NoAnimation: true}).blockRenderContext(80)
+				if grouped {
+					block.UpdateToolWithMeta("apps", "desktop_world__apps", "query", "apps result", true, false, ToolUpdateMeta{})
+				}
+				block.UpdateToolWithMeta("exec", "desktop_world__exec", "fixture.app", strings.Repeat("detail ", 100)+"RESULT_TAIL", true, false, ToolUpdateMeta{FullArgs: `{"app":"fixture.app","source":"return 'SCRIPT_TAIL';"}`})
+				// An unsettled call has no final-update default yet. Turn completion
+				// must still collapse it when the user has made no choice.
+				block.UpdateToolWithMeta("untouched", "desktop_world__exec", "fixture.app", "partial result", false, false, ToolUpdateMeta{})
+				if !block.toolPanelExpanded("untouched") {
+					t.Fatal("unsettled call already has a collapse default")
+				}
+				if grouped {
+					if !strings.Contains(joinRenderedPlain(block.Render(ctx)), "Using Computer") || !block.toggleExplorationExpanded("apps") {
+						t.Fatal("completed calls did not form an expandable group")
+					}
+				}
+				for range 2 {
+					if !block.toggleToolPanelClick("exec") {
+						t.Fatal("individual call lost its disclosure")
+					}
+				}
+				before := joinRenderedPlain(block.Render(ctx))
+				if !block.toolPanelExpanded("exec") || !strings.Contains(before, "SCRIPT_TAIL") || !strings.Contains(before, "RESULT_TAIL") {
+					t.Fatalf("precondition: original arguments and result are not visible:\n%s", before)
+				}
+				block.SetStatus("completed", "", "", time.Unix(200, 0))
+				after := joinRenderedPlain(block.Render(ctx))
+				if !block.toolPanelExpanded("exec") || !strings.Contains(after, "SCRIPT_TAIL") || !strings.Contains(after, "RESULT_TAIL") || !strings.Contains(after, "desktop_world__exec") {
+					t.Fatalf("Turn completion lost the user's disclosure or original call:\n%s", after)
+				}
+				if block.toolPanelExpanded("untouched") {
+					t.Fatal("Turn completion did not apply the unchosen default")
+				}
+				if !block.toggleToolPanelClick("exec") || block.toolPanelExpanded("exec") || strings.Contains(joinRenderedPlain(block.Render(ctx)), "RESULT_TAIL") {
+					t.Fatal("expanded call cannot be collapsed after Turn completion")
+				}
+			})
 		}
 	}
 }

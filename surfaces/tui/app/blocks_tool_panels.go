@@ -361,6 +361,10 @@ func collapseToolPanelsForEvents(state map[string]bool, events []SubagentEvent) 
 		if !shouldDefaultCollapseCallID(events, callID) {
 			continue
 		}
+		// Turn completion applies a default, not a new disclosure choice.
+		if _, chosen := state[callID]; chosen {
+			continue
+		}
 		state[callID] = false
 	}
 	return state
