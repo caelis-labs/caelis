@@ -43,7 +43,7 @@ func (s *controlCommandBackend) updateNativePluginConfiguration(ctx context.Cont
 	configuration, err := store.UpdateNativeConfiguration(ctx, scope, active,
 		sessionprofile.UpdateConfigurationRequest{OperationID: req.OperationID, ExpectedConfigurationRevision: req.ExpectedConfigurationRevision, Patch: req.Patch},
 		func(_ context.Context, selected []sessionprofile.Plugin) error {
-			_, err := applicationPluginContributions(sessionprofile.Profile{Plugins: selected}, applicationPluginPaths(s.composition.authorities.storeDir, active.SessionID, active.CWD))
+			_, err := s.composition.resolveApplicationPlugins(sessionprofile.Profile{Plugins: selected}, applicationPluginPaths(s.composition.authorities.storeDir, active.SessionID, active.CWD))
 			if err != nil {
 				return err
 			}
@@ -132,7 +132,7 @@ func (s *runtimeComposition) nativePluginContributions(configs []PluginConfig) (
 		contributions, err := resolveGatewayPluginContributions(configs, s.authorities.storeDir, s.workspace.CWD)
 		return contributions, &configuration, err
 	}
-	contributions, err := applicationRuntimePluginContributions(sessionprofile.Profile{Plugins: *configuration.Native.Plugins}, applicationPluginPaths(s.authorities.storeDir, active.SessionID, s.workspace.CWD))
+	contributions, err := applicationRuntimePluginContributions(sessionprofile.Profile{Plugins: *configuration.Native.Plugins}, applicationPluginPaths(s.authorities.storeDir, active.SessionID, s.workspace.CWD), configs...)
 	return contributions, &configuration, err
 }
 

@@ -14,24 +14,30 @@ native Caelis manifest takes precedence on a duplicate server name.
 
 Desktop World is a fixed Core capability on macOS arm64 and Windows x64. The
 complete official plugin is embedded in the platform's Core executable and
-follows the Core version; no separate installation, switch or uninstall is
-provided. Core materializes the verified package in its private Store cache and
+follows the Core version; no separate installation is required. Core materializes the verified package in its private Store cache and
 starts its standard stdio process for each Session Runtime. Single-binary
 distribution does not mean single-process execution. Unsupported platforms keep
 Core usable and report computer use as unavailable; OS permissions still apply.
 
 The existing parser supplies MCP and the Skill from the same package. Main
 Sessions, application profiles, native children and managed Workers receive the
-fixed contribution independently of optional plugin selection. Missing optional
-selection and explicit `native.plugins: []` retain their existing contracts;
-neither controls the fixed capability. Each Session keeps its own connection,
+capability independently of optional plugin selection. Missing optional
+selection and explicit `native.plugins: []` retain their existing contracts for
+other plugins. Each Session keeps its own connection,
 state, app approvals and lifecycle. Built-in status grants no blanket approval.
 
-The `desktop-world` identity belongs to the product contribution. User-installed
-packages with that actual identity, including configured aliases, remain on disk
-and in the user registry but are not assembled; status identifies the fixed
-source. A different service cannot shadow its projected MCP namespace. Other
-optional plugins retain their normal configuration and lifecycle.
+One whole `desktop-world` package supplies both MCP and its namespaced Skill.
+Selection is: an explicit Session package, then an enabled global DTW package,
+then the embedded default. The global DTW default also applies to application
+profiles and ordinary managed Workers; it does not inherit other optional global
+plugins into explicit selections. Configured aliases of the actual manifest
+identity select the same canonical capability. Duplicate enabled DTW overrides
+are rejected. An invalid selected override reports an error without silently
+using another source. Removing a Session override restores the enabled global
+package or embedded default; disabling or removing the global override restores
+the embedded default. These changes do not delete or overwrite user packages.
+The embedded fallback itself has no switch or uninstall. Status identifies the
+selected source. A different service cannot shadow its projected MCP namespace.
 
 Core's single release pin is
 [`control/plugin/builtin/desktop-world.json`](../control/plugin/builtin/desktop-world.json).
@@ -118,9 +124,11 @@ JSON stdout contains one object with `schema_version:"1"`, `action`, `id`,
 ```
 
 Success exits zero. Explicit installation and configuration reject malformed
-manifests with an actionable error. A previously registered plugin whose
+manifests with an actionable error. A previously registered optional plugin whose
 manifest later becomes malformed is omitted from future Runtime assembly;
 `status` reports its error state and warning while the Host remains available.
+A selected DTW override instead remains an assembly error until corrected or
+removed; its paired MCP and Skill never fall back independently.
 Invalid arguments, ownership conflicts, and unavailable Stores/Hosts exit
 nonzero and include `error` in JSON output.
 Mutation failures also include the Host `receipt` when available. Check its
@@ -129,8 +137,10 @@ observation or cleanup failed; do not blindly replay an uncertain mutation.
 Without `--json`, the command prints a brief text result and errors on stderr.
 
 Desktop World's built-in Skill appears as `desktop-world:desktop-world`; its
-four MCP tools are `desktop_world__apps`, `desktop_world__api`,
-`desktop_world__exec`, and `desktop_world__result` inside Caelis.
+two MCP tools are `desktop_world__apps` and `desktop_world__exec` inside Caelis.
+`apps` discovers application identities; `exec` runs the selected app's async
+script. The paired Skill documents the script API and result format. Core does
+not emulate retired `api` or `result` endpoints.
 
 An operation supplies only `exec({app, source})`: a stable platform app ID and a
 script for that app. Caelis asks to allow that app for the current Session on
@@ -142,9 +152,10 @@ pending scripts. Grants remain bound to the accepted plugin/tool source, so a
 changed source or schema also requires approval again. There is no permanent
 or whole-plugin desktop grant.
 
-For the configured `desktop-world` 0.2 app contract, `apps`, `api`, and `result` skip the
-ordinary MCP source prompt: they discover capabilities or read this connection's
-existing execution results. Other tools retain ordinary MCP source approval.
+For the configured `desktop-world` 0.3 app contract, `apps` skips the ordinary
+MCP source prompt. Explicitly selected released 0.2 packages retain their own
+`apps`, `api`, and `result` source-read rules; pre-0.2 packages use ordinary MCP
+approval. Other tools retain ordinary MCP source approval.
 `desktop_world` is not a plugin-ID alias, and an ordinary MCP server named
 `desktop-world` does not inherit these rules. Explicit per-call policy Ask/Deny
 and OS permissions still apply. Caelis owns approval; DTW receives the same
@@ -157,8 +168,8 @@ an upgrade or reconnect does not replay desktop work. Package roots are not
 overwritten in place.
 
 Application-managed Sessions can also select optional native packages through
-[Session profiles](session-profiles.md#native-plugin-selection); this does not
-select or replace the fixed Desktop World package.
+[Session profiles](session-profiles.md#native-plugin-selection), including a DTW
+override under the same whole-package selection rule.
 
 ## Paths, ownership, and results
 

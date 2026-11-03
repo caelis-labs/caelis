@@ -297,20 +297,34 @@ func ProductContributions(paths RuntimePaths) (Contributions, error) {
 	return out, err
 }
 
-// IsProductPlugin reports the reserved stable identity, including user aliases
-// of a package whose actual manifest identity belongs to the fixed capability.
+// IsProductPlugin reports the fixed capability's stable identity, including
+// user aliases. It selects the product-default path, not a reserved package.
 func IsProductPlugin(config Config) bool {
 	if strings.EqualFold(strings.TrimSpace(config.ID), "desktop-world") {
+		return true
+	}
+	// Preserve registration identity if an aliased override later becomes
+	// unreadable; selection must report it rather than activate the fallback.
+	if usesManifestIdentity(config.Kind) && strings.EqualFold(strings.TrimSpace(config.Name), "desktop-world") {
 		return true
 	}
 	installed, err := ParsePluginAvailable(config.Root)
 	return err == nil && localPluginID(installed) == "desktop-world"
 }
 
-// WithProductContributions merges already-resolved optional inputs with Core's
-// fixed package through the same contribution path; no second registry exists.
-func WithProductContributions(optional Contributions, paths RuntimePaths) (Contributions, error) {
-	fixed, err := ProductContributions(paths)
+// WithProductContributions selects one paired MCP/Skill capability: explicit
+// Session package, enabled Host override, then the embedded fallback. Defaults
+// come from the same activation snapshot as other Host configuration.
+func WithProductContributions(optional Contributions, paths RuntimePaths, defaults ...Config) (Contributions, error) {
+	for _, source := range optional.Sources {
+		if source.ID == "desktop-world" {
+			return optional, validateProductPair(optional)
+		}
+	}
+	fixed, selected, err := productOverride(defaults, paths)
+	if !selected && err == nil {
+		fixed, err = ProductContributions(paths)
+	}
 	if err != nil {
 		return Contributions{}, err
 	}
@@ -320,8 +334,8 @@ func WithProductContributions(optional Contributions, paths RuntimePaths) (Contr
 	return optional, nil
 }
 
-// OptionalUserConfigs excludes the fixed product identity without changing the
-// user's registry, files, or enabled/disabled records.
+// OptionalUserConfigs routes DTW through the single product-default selection
+// path without changing the user's registry, files or enabled/disabled records.
 func OptionalUserConfigs(configs []Config) []Config {
 	var selected []Config
 	for _, configured := range configs {

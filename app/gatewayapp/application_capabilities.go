@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
@@ -45,7 +46,7 @@ type applicationMCPResource struct {
 }
 
 func (r *applicationMCPResource) matches(profile sessionprofile.Profile) bool {
-	return reflect.DeepEqual(r.servers, profile.MCPServers) && reflect.DeepEqual(r.plugins, optionalApplicationPlugins(profile.Plugins))
+	return reflect.DeepEqual(r.servers, profile.MCPServers) && reflect.DeepEqual(r.plugins, profile.Plugins)
 }
 
 type applicationMCPSource struct {
@@ -223,7 +224,7 @@ func (r *applicationTurnResolver) acquireCapabilities(ctx context.Context, confi
 	if err := ctx.Err(); err != nil {
 		return nil, nil, err
 	}
-	contributions, err := applicationRuntimePluginContributions(configuration.Profile, applicationPluginPaths(r.composition.authorities.storeDir, r.binding.SessionID, r.composition.workspace.CWD))
+	contributions, err := r.composition.resolveApplicationPlugins(configuration.Profile, applicationPluginPaths(r.composition.authorities.storeDir, r.binding.SessionID, r.composition.workspace.CWD))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -254,7 +255,7 @@ func (r *applicationTurnResolver) acquireCapabilities(ctx context.Context, confi
 			if err != nil {
 				return nil, nil, err
 			}
-			resource = &applicationMCPResource{servers: append([]sessionprofile.MCPServer(nil), configuration.Profile.MCPServers...), plugins: optionalApplicationPlugins(configuration.Profile.Plugins), specs: specs, manager: manager, retired: configuration.Revision < r.desiredRevision}
+			resource = &applicationMCPResource{servers: append([]sessionprofile.MCPServer(nil), configuration.Profile.MCPServers...), plugins: slices.Clone(configuration.Profile.Plugins), specs: specs, manager: manager, retired: configuration.Revision < r.desiredRevision}
 			if !resource.retired {
 				r.currentMCP = resource
 			}

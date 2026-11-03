@@ -195,9 +195,11 @@ retain native models, Team, tools, sandbox and approval authority. Their existin
 An absent `native.plugins` inherits optional Host plugins at activation. Submit the
 existing configuration CAS with `patch.plugins` to choose package roots. A
 present `native.plugins: []` disables optional package contributions with no Host fallback,
-including after reconnect. Core's fixed Desktop World contribution is assembled
-separately and is unaffected by this optional list; it retains original Session
-app approvals. This differs from the always explicit plugin catalog
+including after reconnect. Desktop World remains available through its
+[whole-package defaults](plugins.md#built-in-computer-use): an enabled global
+DTW override or Core's embedded fallback. This does not inherit other optional
+global plugins. Changed DTW sources require fresh discovery and app approval;
+grants do not move between sources or Sessions. This differs from the optional plugin catalog
 of a Profile Session. Clients must retain this presence distinction, including
 when comparing a desired empty selection with an inherited selection.
 
@@ -222,7 +224,7 @@ For example, an application can select its reviewed bundle without changing the
 user's standalone Core registration:
 
 ```json
-{"plugins":[{"root":"/absolute/immutable/desktop-world-0.2.0"}]}
+{"plugins":[{"root":"/absolute/immutable/desktop-world-0.3.3"}]}
 ```
 
 Optional `mcp_servers` entries inside a plugin selection replace the launch of
@@ -244,7 +246,7 @@ selects MCP and Skills, without activating package hooks or contributed Agents.
 Native profile `PLUGIN_DATA` is private to its Session, separate from standalone
 Host registrations. A launch proxy owns its own private package environment.
 
-Bot-managed Sessions can select the Bot's bundled source while standalone
+Application-managed Sessions can select an explicit package while ordinary
 Core/TUI Sessions retain their Host registration. Neither choice overwrites or
 uninstalls the other. Native children inherit the explicit package selection,
 not another Session's app grants. Desktop World app approval remains bound to

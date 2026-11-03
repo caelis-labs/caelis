@@ -35,7 +35,7 @@ func TestProductDesktopWorldPackageAndSessionPaths(t *testing.T) {
 	if a.Command != filepath.Join(a.PackageRoot, "bin", filepath.Base(a.Command)) || len(a.Args) != 1 || a.Args[0] != "mcp" {
 		t.Fatal("fixed package did not use its standard stdio executable")
 	}
-	if len(a.SourceTrustedTools) != 3 {
+	if len(a.SourceTrustedTools) != 1 || a.SourceTrustedTools[0] != "apps" {
 		t.Fatal("app execution acquired blanket builtin trust")
 	}
 }
@@ -97,7 +97,7 @@ func TestProductDesktopWorldRejectsRedirectedCache(t *testing.T) {
 	}
 }
 
-func TestProductIdentityCannotBeDuplicatedByUserAlias(t *testing.T) {
+func TestProductIdentityAliasRemainsVisibleWithoutRegistryMutation(t *testing.T) {
 	root := t.TempDir()
 	writeAgentPluginFile(t, root, "plugin.json", `{"$schema":"https://agent-plugins.org/schemas/1.0.0/plugin.schema.json","name":"desktop-world","version":"0.1.3"}`)
 	cfg := Config{ID: "user-alias", Root: root, Enabled: true}
@@ -106,8 +106,8 @@ func TestProductIdentityCannotBeDuplicatedByUserAlias(t *testing.T) {
 	}
 	host := &memoryHost{dir: t.TempDir(), state: State{Plugins: []Config{cfg}}}
 	info, err := NewService(host).Inspect(t.Context(), "user-alias")
-	if err != nil || info.Status != "shadowed" || info.Warning == "" {
-		t.Fatal("user source did not receive a deterministic diagnostic")
+	if err != nil || info.Status == "shadowed" || info.Version != "0.1.3" {
+		t.Fatal("user override was hidden by the embedded fallback")
 	}
 	if len(host.mutations) != 0 {
 		t.Fatal("source projection changed user installation")
