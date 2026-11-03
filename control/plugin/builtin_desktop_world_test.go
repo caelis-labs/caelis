@@ -5,8 +5,12 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
+	"time"
+
+	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 )
 
 func TestProductDesktopWorldPackageAndSessionPaths(t *testing.T) {
@@ -38,6 +42,52 @@ func TestProductDesktopWorldPackageAndSessionPaths(t *testing.T) {
 	if len(a.SourceTrustedTools) != 1 || a.SourceTrustedTools[0] != "apps" {
 		t.Fatal("app execution acquired blanket builtin trust")
 	}
+}
+
+// Start the actual embedded release through the production stdio factory. This
+// is a headless integration check, not desktop input or console visibility proof.
+func TestProductDesktopWorldMCPStartup(t *testing.T) {
+	if builtinDesktopWorldTarget == "" {
+		t.Skip("no official package for this build target")
+	}
+	store := t.TempDir()
+	contributions, err := ProductContributions(RuntimePaths{ProductStoreDir: store, StoreDir: filepath.Join(store, "session")})
+	if err != nil || len(contributions.MCPServerSpecs) != 1 || len(contributions.SkillBundles) != 1 {
+		t.Fatalf("paired builtin package = %+v, %v", contributions, err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 40*time.Second)
+	defer cancel()
+	client, err := mcp.StartClient(ctx, contributions.MCPServerSpecs[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := client.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	tools, err := client.ListTools(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, candidate := range tools {
+		names = append(names, candidate.Name)
+		if candidate.Name == "exec" {
+			raw, _ := json.Marshal(candidate.InputSchema)
+			var schema struct {
+				Required []string `json:"required"`
+			}
+			if err := json.Unmarshal(raw, &schema); err != nil || !slices.Equal(schema.Required, []string{"app", "source"}) {
+				t.Fatalf("builtin exec schema = %s, %v", raw, err)
+			}
+		}
+	}
+	slices.Sort(names)
+	if !slices.Equal(names, []string{"apps", "exec"}) {
+		t.Fatalf("builtin tools = %v", names)
+	}
+	t.Logf("embedded desktop-world %s: native stdio initialized, tools=%v; no desktop RPC", pinnedDesktopWorldTestVersion(t), names)
 }
 
 func TestProductDesktopWorldConcurrentMaterializationAndTamper(t *testing.T) {

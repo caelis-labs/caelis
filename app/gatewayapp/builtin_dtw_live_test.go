@@ -157,8 +157,8 @@ func TestBuiltinDesktopWorldLiveAgentTask(t *testing.T) {
 		}
 		if active := state.Approval.Active; active != nil {
 			selected, err := host.host.SessionMCPStatus(ctx, created.SessionID)
-			if err != nil || len(selected.Plugins) != 1 || selected.Plugins[0].ID != "desktop-world" || selected.Plugins[0].Version != "0.3.3" || len(selected.Servers) != 1 || len(selected.Servers[0].Tools) != 2 || len(selected.Skills) != 1 {
-				t.Fatal("live source does not contain one paired 0.3.3 MCP/Skill package")
+			if err != nil || len(selected.Plugins) != 1 || selected.Plugins[0].ID != "desktop-world" || selected.Plugins[0].Version != "0.3.4" || len(selected.Servers) != 1 || len(selected.Servers[0].Tools) != 2 || len(selected.Skills) != 1 {
+				t.Fatal("live source does not contain one paired 0.3.4 MCP/Skill package")
 			}
 			if root := os.Getenv("CAELIS_DTW_LIVE_PLUGIN"); root != "" && selected.Plugins[0].Root != root {
 				t.Fatal("explicit package silently fell back to another source")

@@ -366,7 +366,13 @@ func TestAcceptedChildInputDeduplicatesProviderEcho(t *testing.T) {
 			t.Parallel()
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			runner := childInputTestRunner(t, test.mode)
+			var env map[string]string
+			release := ""
+			if !test.idle {
+				release = filepath.Join(t.TempDir(), "terminal-release")
+				env = map[string]string{"CAELIS_ACP_CHILD_INPUT_TERMINAL_RELEASE": release}
+			}
+			runner := newChildInputTestRunner(t, test.mode, env, controlagents.Authentication{})
 			events := make(chan childInputTestEvent, 12)
 			spawn := childInputSpawnContext(t, "task-echo-"+test.name, events)
 			anchor, _, err := runner.Spawn(ctx, spawn, delegation.Request{
@@ -388,6 +394,13 @@ func TestAcceptedChildInputDeduplicatesProviderEcho(t *testing.T) {
 				Source: session.ActorRef{Kind: session.ActorKindController, ID: "controller-1"},
 				Input:  test.text,
 			})
+			// This checks accepted echo deduplication. Observe the steering receipt
+			// before terminal completion can legitimately cancel its pending wait.
+			if release != "" {
+				if releaseErr := os.WriteFile(release, []byte("release"), 0o600); releaseErr != nil {
+					t.Fatal(releaseErr)
+				}
+			}
 			if err != nil {
 				t.Fatal(err)
 			}
