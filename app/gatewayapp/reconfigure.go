@@ -635,10 +635,7 @@ func resolveGatewayPluginContributions(configs []PluginConfig, storeDir, workspa
 	paths := plugin.RuntimePaths{StoreDir: storeDir, WorkspaceDir: workspaceDir}
 	contributions, err := plugin.ResolveAvailableContributions(selected, paths)
 	if err == nil {
-		contributions, err = plugin.WithProductContributions(contributions, paths)
-		if err == nil && len(selected) != len(configs) {
-			contributions.Sources[0].Status += "; user desktop-world package omitted"
-		}
+		contributions, err = plugin.WithProductContributions(contributions, paths, configs...)
 	}
 	if err != nil {
 		return plugin.Contributions{}, fmt.Errorf("gatewayapp: %w", err)

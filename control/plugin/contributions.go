@@ -132,7 +132,7 @@ func resolveContributions(configs []Config, skipBroken bool, paths ...RuntimePat
 			// result reads an existing receipt in this MCP connection.
 			if installed.ID == "desktop-world" && !legacyDesktopWorldVersion(installed.Version) {
 				spec.ToolResourceParameters = map[string]string{"exec": "app"}
-				spec.SourceTrustedTools = []string{"apps", "api", "result"}
+				spec.SourceTrustedTools = desktopWorldReadTools(installed.Version)
 			}
 			out.MCPServerSpecs = append(out.MCPServerSpecs, spec)
 		}
@@ -144,6 +144,19 @@ func resolveContributions(configs []Config, skipBroken bool, paths ...RuntimePat
 		}
 	}
 	return out, nil
+}
+
+func desktopWorldReadTools(version string) []string {
+	version = "v" + strings.TrimPrefix(strings.TrimSpace(version), "v")
+	if !semver.IsValid(version) {
+		return nil
+	}
+	// Released 0.2 packages retain their own receipt/schema tools. Core does
+	// not emulate these retired endpoints for the 0.3 script contract.
+	if semver.Compare(version, "v0.3.0-0") < 0 {
+		return []string{"apps", "api", "result"}
+	}
+	return []string{"apps"}
 }
 
 // Control keeps released pre-0.2 DTW packages on ordinary MCP source approval;

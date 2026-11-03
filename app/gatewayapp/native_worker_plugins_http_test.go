@@ -61,7 +61,7 @@ func TestNativeWorkerPluginConfigurationHTTP(t *testing.T) {
 	if _, err := client.AddPluginPath(ctx, appserver.AddPluginPathRequest{WriteBase: appserver.WriteBase{OperationID: "standalone-source", ExpectedRevision: &status.Configuration.Revision}, Path: installed}); err != nil {
 		t.Fatal(err)
 	}
-	selected := nativeProfilePackageHTTP(t, "0.2.0")
+	selected := nativeProfilePackageHTTP(t, "0.3.3")
 	plugins := []sessionprofile.Plugin{{Root: selected, MCPServers: []sessionprofile.MCPServer{{Name: "desktop-world", Transport: "stdio", Command: os.Args[0], Args: []string{"-test.run=^TestNativeProfilePluginMCPHelper$", "--", "native-profile-plugin-helper", audit}, WorkDir: selected}}}}
 	request := appserver.UpdateSessionConfigurationRequest{WriteBase: appserver.WriteBase{OperationID: "worker-plugin-original", SessionID: created.SessionID}, ExpectedConfigurationRevision: 1, Patch: sessionprofile.ConfigurationPatch{Plugins: &plugins}}
 	if _, err := foreign.UpdateSessionConfiguration(ctx, request); errorcode.CodeOf(err) != errorcode.PermissionDenied {
@@ -112,7 +112,7 @@ func TestNativeWorkerPluginConfigurationHTTP(t *testing.T) {
 		t.Fatalf("native worker app approvals=%d", n)
 	}
 	health, err := client.SessionMCPStatus(ctx, created.SessionID)
-	if err != nil || len(health.Plugins) != 1 || health.Plugins[0].Root == selected || health.Plugins[0].Version != builtinComputerUseVersion(t) || len(health.Servers) != 1 || health.Servers[0].PluginID != "desktop-world" || len(health.Skills) != 1 || health.Skills[0].Name != "desktop-world:desktop-world" {
+	if err != nil || len(health.Plugins) != 1 || health.Plugins[0].Root != selected || health.Plugins[0].Version != "0.3.3" || len(health.Servers) != 1 || health.Servers[0].PluginID != "desktop-world" || len(health.Skills) != 1 || health.Skills[0].Name != "desktop-world:desktop-world" {
 		t.Fatalf("native assembly: %+v %v", health, err)
 	}
 	// Replaying the exact command returns the saved receipt, not another update.
@@ -145,17 +145,17 @@ func TestNativeWorkerPluginConfigurationHTTP(t *testing.T) {
 	executions := 0
 	for _, event := range loaded.Events {
 		if event.Type == session.EventTypeToolResult && event.Tool != nil && event.Tool.Name == "desktop_world__exec" {
-			if event.Tool.Status != "failed" || event.Tool.ModelCall == nil || event.Tool.ModelCall.Name != "mcp_call" || event.Tool.ModelCall.ID != event.Tool.ID {
+			if event.Tool.Status == "failed" || event.Tool.ModelCall == nil || event.Tool.ModelCall.Name != "mcp_call" || event.Tool.ModelCall.ID != event.Tool.ID {
 				t.Fatal("native worker result lost envelope identity")
 			}
 			executions++
 		}
 	}
 	remote, err := os.ReadFile(audit)
-	if (err != nil && !os.IsNotExist(err)) || executions != 2 || len(strings.Fields(string(remote))) != 0 {
+	if err != nil || executions != 2 || len(strings.Fields(string(remote))) != 2 {
 		t.Fatalf("native exec counts local=%d remote=%d err=%v", executions, len(strings.Fields(string(remote))), err)
 	}
-	if strings.Contains(provider.snapshot(), "PAIRED_VERSION_0.2.0") || !strings.Contains(provider.snapshot(), `"RunCommand"`) {
+	if !strings.Contains(provider.snapshot(), "PAIRED_VERSION_0.3.3") || !strings.Contains(provider.snapshot(), `"RunCommand"`) {
 		t.Fatal("paired native Skill or native tools lost")
 	}
 	clear := request
@@ -168,8 +168,8 @@ func TestNativeWorkerPluginConfigurationHTTP(t *testing.T) {
 		t.Fatal("disabled plugin requested approval")
 	}
 	health, err = client.SessionMCPStatus(ctx, created.SessionID)
-	if err != nil || len(health.Plugins) != 1 || health.Plugins[0].Version != builtinComputerUseVersion(t) {
-		t.Fatalf("[] fell back to Host package: %+v %v", health, err)
+	if err != nil || len(health.Plugins) != 1 || health.Plugins[0].Root != installed || health.Plugins[0].Version != "0.1.3" {
+		t.Fatalf("[] lost the enabled global DTW default: %+v %v", health, err)
 	}
 	_ = feed.Subscription.Close()
 	host.close(t)
@@ -199,10 +199,10 @@ func TestNativeWorkerPluginConfigurationHTTP(t *testing.T) {
 		t.Fatalf("independent native inheritance replaced: %+v %v", independentConfig, err)
 	}
 	health, err = client.SessionMCPStatus(ctx, standalone.SessionID)
-	if err != nil || len(health.Plugins) != 1 || health.Plugins[0].Root == installed || health.Plugins[0].Version != builtinComputerUseVersion(t) {
+	if err != nil || len(health.Plugins) != 1 || health.Plugins[0].Root != installed || health.Plugins[0].Version != "0.1.3" {
 		t.Fatalf("independent Core source overwritten: %+v %v", health, err)
 	}
-	t.Log("ordinary native Worker: owner/CAS/busy/receipt preserved; canonical exec failures=2 (app_unavailable fixture), native effects=0, shadowed user proxy=0, app approval=1; optional [] survives reopen and fixed builtin remains")
+	t.Log("ordinary native Worker: owner/CAS/busy/receipt preserved; synthetic MCP effects=2, OS effects=0, app approval=1; optional [] survives reopen and retains the enabled global DTW default")
 }
 
 func TestNativeWorkerPluginImmediateConfigurationAfterModelCreate(t *testing.T) {

@@ -143,7 +143,9 @@ func (b *MainACPTurnBlock) UpdateToolWithMeta(callID, name, args, output string,
 		b.advanceNarrativeBoundary()
 	}
 	if collapse {
-		b.setToolPanelExpanded(strings.TrimSpace(callID), false)
+		if _, chosen := b.ExpandedTools[strings.TrimSpace(callID)]; !chosen {
+			b.setToolPanelExpanded(strings.TrimSpace(callID), false)
+		}
 	}
 }
 
@@ -480,7 +482,9 @@ func (b *ParticipantTurnBlock) UpdateToolWithMeta(callID, name, args, output str
 		b.advanceNarrativeBoundary()
 	}
 	if collapse {
-		b.setToolPanelExpanded(strings.TrimSpace(callID), false)
+		if _, chosen := b.ExpandedTools[strings.TrimSpace(callID)]; !chosen {
+			b.setToolPanelExpanded(strings.TrimSpace(callID), false)
+		}
 	}
 }
 

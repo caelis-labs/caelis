@@ -117,20 +117,15 @@ func applicationPluginSkills(bundles []skill.PluginBundle) ([]skill.Meta, error)
 	return out, nil
 }
 
-// Runtime product capabilities do not belong to the optional Profile plugin list.
-func applicationRuntimePluginContributions(profile sessionprofile.Profile, paths plugin.RuntimePaths) (plugin.Contributions, error) {
-	selected := profile
-	selected.Plugins = optionalApplicationPlugins(profile.Plugins)
-	optional, err := applicationPluginContributions(selected, paths)
+// Runtime defaults remain available when the optional Profile selection is empty.
+func applicationRuntimePluginContributions(profile sessionprofile.Profile, paths plugin.RuntimePaths, defaults ...plugin.Config) (plugin.Contributions, error) {
+	optional, err := applicationPluginContributions(profile, paths)
 	if err != nil {
 		return plugin.Contributions{}, err
 	}
-	combined, err := plugin.WithProductContributions(optional, paths)
+	combined, err := plugin.WithProductContributions(optional, paths, defaults...)
 	if err != nil {
 		return combined, err
-	}
-	if len(selected.Plugins) != len(profile.Plugins) {
-		combined.Sources[0].Status += "; user desktop-world package omitted"
 	}
 	if err := validateApplicationMCPNamespaces(profile, combined); err != nil {
 		return plugin.Contributions{}, err
@@ -145,12 +140,10 @@ func pluginSourceStatus(source plugin.Source) string {
 	return "assembled"
 }
 
-func optionalApplicationPlugins(configured []sessionprofile.Plugin) []sessionprofile.Plugin {
-	var selected []sessionprofile.Plugin
-	for _, entry := range configured {
-		if !plugin.IsProductPlugin(plugin.Config{Root: entry.Root}) {
-			selected = append(selected, entry)
-		}
+func (s *runtimeComposition) resolveApplicationPlugins(profile sessionprofile.Profile, paths plugin.RuntimePaths) (plugin.Contributions, error) {
+	doc, err := s.loadGatewayAppConfig()
+	if err != nil {
+		return plugin.Contributions{}, err
 	}
-	return selected
+	return applicationRuntimePluginContributions(profile, paths, doc.Plugins...)
 }

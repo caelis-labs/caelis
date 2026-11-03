@@ -58,7 +58,7 @@ func (s *runtimeComposition) validateApplicationProfile(ctx context.Context, pro
 	if err := sessionprofile.ValidateProfile(profile); err != nil {
 		return err
 	}
-	contributions, err := applicationPluginContributions(profile, applicationPluginPaths(s.authorities.storeDir, "validation", s.workspace.CWD))
+	contributions, err := s.resolveApplicationPlugins(profile, applicationPluginPaths(s.authorities.storeDir, "validation", s.workspace.CWD))
 	if err != nil {
 		return errorcode.Wrap(errorcode.InvalidArgument, "application native plugin selection is invalid", err)
 	}

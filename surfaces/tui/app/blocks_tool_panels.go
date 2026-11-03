@@ -48,7 +48,9 @@ func toggleToolPanelClick(expandedState *map[string]bool, fullOutputState *map[s
 		}
 		return false
 	}
-	if toolPanelHasHiddenToolArgs(events, callID) || toolPanelHasHiddenSummary(events, callID) {
+	// The rendered disclosure can hide visual rows without any hard newlines.
+	// Its click must open the original output independently of viewport width.
+	if toolPanelHasHiddenToolArgs(events, callID) || toolPanelHasHiddenSummary(events, callID) || toolPanelCanExpandCollapsed(events, callID) {
 		if fullOutputState == nil {
 			return false
 		}
@@ -359,6 +361,10 @@ func collapseToolPanelsForEvents(state map[string]bool, events []SubagentEvent) 
 		if !shouldDefaultCollapseCallID(events, callID) {
 			continue
 		}
+		// Turn completion applies a default, not a new disclosure choice.
+		if _, chosen := state[callID]; chosen {
+			continue
+		}
 		state[callID] = false
 	}
 	return state
@@ -440,8 +446,8 @@ func toolPanelEventHasHiddenOutputSummary(ev SubagentEvent) bool {
 	return finalToolOutputSummaryHidesLines(ev.Output)
 }
 
-func finalToolOutputSummaryHidesLines(text string) bool {
-	return len(nonEmptyToolOutputLines(text)) > acpTerminalPanelMaxLines
+func finalToolOutputSummaryHidesLines(text string, wrapWidth ...int) bool {
+	return len(toolOutputSummaryLines(text, wrapWidth...)) > acpTerminalPanelMaxLines
 }
 
 func latestToolEventForCallID(events []SubagentEvent, callID string) (SubagentEvent, bool) {
@@ -502,5 +508,5 @@ func collectToolPanelCallIDs(events []SubagentEvent) []string {
 func shouldDefaultCollapseToolEvent(ev SubagentEvent) bool {
 	// Failed exploration remains part of the compact exploration presentation;
 	// its outcome must not split an otherwise contiguous Explored run.
-	return surfaceIsExplorationTool(ev.Name, ev.ToolKind, ev.ExplorationVerb)
+	return surfaceIsExplorationTool(ev.Name, ev.ToolKind, ev.ExplorationVerb) || isComputerUseToolEvent(ev)
 }
