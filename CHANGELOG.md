@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.77.1](https://github.com/caelis-labs/caelis/compare/v0.77.0...v0.77.1) (2026-11-03)
+
+
+### Bug Fixes
+
+* **mcp:** hide Windows stdio server consoles ([#193](https://github.com/caelis-labs/caelis/issues/193)) ([d7f14de](https://github.com/caelis-labs/caelis/commit/d7f14de9ba361ad8b6f4ed9b8b2e0f18831ecba0))
+* **plugins:** bundle Desktop World 0.3.4 ([#195](https://github.com/caelis-labs/caelis/issues/195)) ([d82ec59](https://github.com/caelis-labs/caelis/commit/d82ec59b5ec8f60db5952a28377c269faf0a9fd5))
+
 ## [0.77.0](https://github.com/caelis-labs/caelis/compare/v0.76.0...v0.77.0) (2026-11-03)
 
 
