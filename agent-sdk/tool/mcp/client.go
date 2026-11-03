@@ -181,6 +181,7 @@ func transportForSpecWithIdentity(spec ServerSpec, httpClient *http.Client) (mcp
 			}
 		}
 		cmd := exec.Command(resolveExecutable(command, workDir), spec.Args...)
+		configureStdioProcess(cmd)
 		cmd.Dir = workDir
 		if spec.CleanEnvironment {
 			cmd.Env = pluginBaseEnvironment()

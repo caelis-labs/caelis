@@ -31,6 +31,11 @@ CAELIS_TEST_APPLICATION_NATIVE=1 bash ./scripts/go_test_nonempty.sh ./app/gatewa
 # Verify the target's embedded package and cache/parser contracts; no GUI evidence.
 go test -count=1 -timeout "${GO_TEST_TIMEOUT:-5m}" ./control/plugin -run '^TestProduct'
 
+# Stdio peers must not allocate a console below a detached Host. Verify pipes,
+# diagnostics and process teardown through actual Windows child processes.
+bash ./scripts/go_test_nonempty.sh ./agent-sdk/tool/mcp \
+  '^TestMCPStdioWindows' windows-mcp-stdio -count=1
+
 # Large packages run only native process, storage, path, and clipboard contracts.
 # Selectors must match tests, so renames cannot silently remove this coverage.
 bash ./scripts/go_test_nonempty.sh ./agent-sdk/session/file \
