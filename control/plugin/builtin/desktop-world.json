@@ -1,37 +1,37 @@
 {
   "schema": 1,
   "repository": "caelis-labs/desktop-world",
-  "version": "0.3.3",
-  "tag": "v0.3.3",
+  "version": "0.3.4",
+  "tag": "v0.3.4",
   "platforms": [
     {
       "target": "aarch64-apple-darwin",
-      "archive": "desktop-world-0.3.3-aarch64-apple-darwin.zip",
-      "archive_sha256": "f58f5fc5b75bdc23e9df2aa46b725dc74d6725cbf6c1bbacb94a9a243a90dbe0",
-      "binary_sha256": "038eabd47d9b178eef6c05c57fb0b68a0a55bccf9e9fae097d0341647d5d1134",
+      "archive": "desktop-world-0.3.4-aarch64-apple-darwin.zip",
+      "archive_sha256": "5833c6b0c854d65580806b4c185d0b423869dcb7d70d40a50282a29c03f2fe5b",
+      "binary_sha256": "ac6cb2d9c3a4152b35c95b64992b8f8f58d5cb535adf8694a2d7910f6857e731",
       "source": {
-        "commit": "f07fb78e5013b16744a6694e39e5b2f2479a554f",
-        "tree": "c1b2513dff9411e46be23c0a030b8804f187289f",
-        "commit_unix_seconds": 1793691042,
-        "cargo_lock_sha256": "b67ddcb2ffaa10ba6c53cd04d91057c92290aa07f9fdeac9911f7a2f6506b5f9"
+        "commit": "9f5ba8efbdfb3c7572e936d4bfca341de946c510",
+        "tree": "a6414008f5bb66a62a61e217a8c6a4caf7132e35",
+        "commit_unix_seconds": 1793733181,
+        "cargo_lock_sha256": "1cae46a0dee62ae7621b1351d2822a746f9fdd1cb27239f8f305743c656410bf"
       },
-      "skill_sha256": "a38efb044dd5f2a281b9071b05a022a789d38d484215f04afee264148461d52d",
-      "build_sha256": "9e7b9821603024957506706e0dad1e6b83b20fa89a68ab2ef5a867da9e100859"
+      "skill_sha256": "ddc3df6a64b1fdb6ce3d24513fc541ce914e9b8cb7168f13eab3029be842b0de",
+      "build_sha256": "6f046ac3c063b49399bb3b947bd2cb2fd58b4f610521c198672a0828903b942d"
     },
     {
       "target": "x86_64-pc-windows-msvc",
-      "archive": "desktop-world-0.3.3-x86_64-pc-windows-msvc.zip",
-      "archive_sha256": "e705a7f1efde6f891584bcef0d025ebeb8dee858148d8c0c1e94e436a5c73b4c",
-      "binary_sha256": "32d5585f5bdfa130603cf3bcd32f0aae3b54ddb5a8c6e9070ac70883a7985f83",
+      "archive": "desktop-world-0.3.4-x86_64-pc-windows-msvc.zip",
+      "archive_sha256": "1dbaa0ef715e6f34f836e51194270835207988171db8c4d2ffc8265ddf209097",
+      "binary_sha256": "bebb0a2c1733bf50f3c9fd45ee8ca209bcac595b784e3ef71ab7471d7edbfa3f",
       "source": {
-        "commit": "f07fb78e5013b16744a6694e39e5b2f2479a554f",
-        "tree": "c1b2513dff9411e46be23c0a030b8804f187289f",
-        "commit_unix_seconds": 1793691042,
-        "cargo_lock_sha256": "b67ddcb2ffaa10ba6c53cd04d91057c92290aa07f9fdeac9911f7a2f6506b5f9"
+        "commit": "9f5ba8efbdfb3c7572e936d4bfca341de946c510",
+        "tree": "a6414008f5bb66a62a61e217a8c6a4caf7132e35",
+        "commit_unix_seconds": 1793733181,
+        "cargo_lock_sha256": "1cae46a0dee62ae7621b1351d2822a746f9fdd1cb27239f8f305743c656410bf"
       },
-      "skill_sha256": "a38efb044dd5f2a281b9071b05a022a789d38d484215f04afee264148461d52d",
-      "build_sha256": "f6bcc79940fd06a7da0dbefe29609e5c6b5cf6fcada97dfe267f30d038eedc1b"
+      "skill_sha256": "ddc3df6a64b1fdb6ce3d24513fc541ce914e9b8cb7168f13eab3029be842b0de",
+      "build_sha256": "32fd840e9d367df02969538d5d16c4f0379ae2551d01240bea6cd097045fc332"
     }
   ],
-  "release_sha256": "e70fce0c0d7a390ffb979afa9d1229d007b7babf698027db79193db6b49ea3ab"
+  "release_sha256": "d2f884bbfa6942b402b74774cda85f33ab00f1c456187ca88e4f2d0e236e341d"
 }
