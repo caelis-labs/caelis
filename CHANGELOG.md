@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.77.0](https://github.com/caelis-labs/caelis/compare/v0.76.0...v0.77.0) (2026-11-03)
+
+
+### ⚠ BREAKING CHANGES
+
+* The embedded Desktop World package is upgraded to v0.3.3 and exposes apps/exec only; api/result are removed from that package and Core provides no compatibility executor. Explicit Session packages take precedence over enabled global DTW, which now overrides the embedded fallback for Profile Sessions and ordinary Workers too. Invalid selected packages fail explicitly. Historical Sessions remain readable but must discover MCP tools again before use.
+
+### Features
+
+* Select one complete Desktop World MCP/Skill package from explicit Session selection, enabled global DTW, then the embedded fallback. ([#191](https://github.com/caelis-labs/caelis/issues/191)) ([1313241](https://github.com/caelis-labs/caelis/commit/13132414ab0c0d77dc6b6350fabd937be0c53108))
+* Fold long MCP output by visual rows and group consecutive DTW calls under Using Computer. Each call retains its real name, full arguments, result, approval controls and independent disclosure; Turn completion preserves user expansion choices.
+
 ## [0.76.0](https://github.com/caelis-labs/caelis/compare/v0.75.0...v0.76.0) (2026-11-01)
 
 
