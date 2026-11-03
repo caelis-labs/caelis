@@ -243,6 +243,13 @@ func toolDisplayArgumentsWithRecoveredInput(name string, kind string, raw map[st
 	}
 	wrapGenericQuery := !recoveredInput && !surfaceIsExplorationTool(name, kind, "")
 	args := toolDisplayArgsForKindWithQueryWrapper(name, kind, raw, wrapGenericQuery, fallback...)
+	// Projected MCP names retain their complete invocation input for explicit
+	// disclosure, even when the compact header shows only a query or app.
+	if strings.Contains(name, "__") && len(raw) > 0 {
+		if full, err := json.MarshalIndent(raw, "", "  "); err == nil {
+			return args, string(full)
+		}
+	}
 	if preview, full, ok := commandTextDisplayArguments(name, kind, args); ok {
 		return preview, full
 	}

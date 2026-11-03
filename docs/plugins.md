@@ -142,6 +142,12 @@ two MCP tools are `desktop_world__apps` and `desktop_world__exec` inside Caelis.
 script. The paired Skill documents the script API and result format. Core does
 not emulate retired `api` or `result` endpoints.
 
+The TUI limits MCP output previews by rendered rows, including long single-line
+JSON. Disclosure shows the original output and complete invocation parameters.
+Consecutive DTW calls share a compact `Using Computer` group, with each call
+initially collapsed inside it. Reasoning stays available when the group expands;
+ordinary messages, other tools and reviewed calls keep their separate rows.
+
 An operation supplies only `exec({app, source})`: a stable platform app ID and a
 script for that app. Caelis asks to allow that app for the current Session on
 its first use. Later scripts for the same app reuse that approval; another app

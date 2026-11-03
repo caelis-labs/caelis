@@ -278,6 +278,9 @@ func toolLifecycleHeaderEvent(start SubagentEvent, final SubagentEvent, hasFinal
 				header.Args = compactACPToolInline(args, width)
 			}
 		}
+		if fullArgs := strings.TrimSpace(final.FullArgs); fullArgs != "" {
+			header.FullArgs = fullArgs
+		}
 		header.Err = final.Err
 	}
 	header.Done = settled
@@ -327,15 +330,21 @@ func isACPCompactToolAck(text string) bool {
 }
 
 func renderACPStandardToolLifecycleRows(blockID string, ev SubagentEvent, callID string, text string, width int, ctx BlockRenderContext, err bool, final bool, fullOutput bool) []RenderedRow {
-	ev = compactACPToolHeaderEvent(ev, width)
+	outputWidth := maxInt(1, width-displayColumns("  └ "))
+	token := acpToolPanelClickTokenIf(callID, toolPanelCanExpandHiddenDetails(ev, text, final, err, outputWidth))
+	showFullArgs := fullOutput && strings.TrimSpace(ev.FullArgs) != ""
+	if showFullArgs {
+		ev.Args = ev.FullArgs
+	} else {
+		ev = compactACPToolHeaderEvent(ev, width)
+	}
 	header := standardToolLifecycleHeader(ev, err)
-	if !isTerminalPanelToolEvent(ev) || strings.TrimSpace(ev.FullArgs) != "" {
+	if !showFullArgs && (!isTerminalPanelToolEvent(ev) || strings.TrimSpace(ev.FullArgs) != "") {
 		header = compactSingleLineHeader(header, width)
 	}
-	token := acpToolPanelClickTokenIf(callID, toolPanelCanExpandHiddenDetails(ev, text, final, err))
 	rows := []RenderedRow{renderACPToolHeaderRow(blockID, header, width, ctx, token, err, final)}
 	if !final || !fullOutput {
-		text = summarizeACPToolPanelText(text, final)
+		text = summarizeACPToolPanelText(text, final, outputWidth)
 	}
 	if !renderableTextHasContent(text) {
 		if !final || err {
@@ -379,6 +388,9 @@ func acpStandardCollapsedClickToken(callID string, ev SubagentEvent, text string
 }
 
 func standardToolLifecycleHeader(ev SubagentEvent, err bool) string {
+	if isComputerUseToolEvent(ev) {
+		return standardVerbLifecycleHeader(ev.Name, ev.Args, err)
+	}
 	semanticName := ev.Name
 	presentation := transcript.ResolveToolPresentationWithHint(ev.Name, ev.ToolKind, ev.Title, ev.ExplorationVerb)
 	switch semanticName {

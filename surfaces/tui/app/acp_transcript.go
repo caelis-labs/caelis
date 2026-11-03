@@ -733,8 +733,8 @@ func renderACPTerminalPanelBody(text string, width int, ctx BlockRenderContext, 
 	return lines
 }
 
-func summarizeACPToolPanelText(text string, final bool) string {
-	lines := nonEmptyToolOutputLines(text)
+func summarizeACPToolPanelText(text string, final bool, wrapWidth ...int) string {
+	lines := toolOutputSummaryLines(text, wrapWidth...)
 	if len(lines) == 0 {
 		return ""
 	}
@@ -750,9 +750,25 @@ func summarizeACPToolPanelText(text string, final bool) string {
 	hidden := len(lines) - 4
 	out := make([]string, 0, acpTerminalPanelMaxLines)
 	out = append(out, lines[0], lines[1])
-	out = append(out, fmt.Sprintf("... +%d lines", hidden))
+	marker := fmt.Sprintf("... +%d lines", hidden)
+	if len(wrapWidth) > 0 {
+		marker = truncateTailDisplay(marker, maxInt(1, wrapWidth[0]))
+	}
+	out = append(out, marker)
 	out = append(out, lines[len(lines)-2], lines[len(lines)-1])
 	return strings.Join(out, "\n")
+}
+
+func toolOutputSummaryLines(text string, wrapWidth ...int) []string {
+	lines := nonEmptyToolOutputLines(text)
+	if len(wrapWidth) == 0 {
+		return lines
+	}
+	var wrapped []string
+	for _, line := range lines {
+		wrapped = append(wrapped, wrapToolOutputText(line, maxInt(1, wrapWidth[0]))...)
+	}
+	return wrapped
 }
 
 func nonEmptyToolOutputLines(text string) []string {
@@ -877,7 +893,7 @@ func acpToolPanelClickTokenIf(callID string, enabled bool) string {
 	return acpToolPanelClickToken(callID)
 }
 
-func toolPanelCanExpandHiddenDetails(ev SubagentEvent, outputText string, final bool, err bool) bool {
+func toolPanelCanExpandHiddenDetails(ev SubagentEvent, outputText string, final bool, err bool, wrapWidth ...int) bool {
 	if toolPanelEventHasHiddenToolArgs(ev) {
 		return true
 	}
@@ -887,7 +903,7 @@ func toolPanelCanExpandHiddenDetails(ev SubagentEvent, outputText string, final 
 	if final && shouldDefaultCollapseToolEvent(ev) && shouldRenderACPToolPanel(outputText, err) {
 		return true
 	}
-	return final && finalToolOutputSummaryHidesLines(outputText)
+	return final && finalToolOutputSummaryHidesLines(outputText, wrapWidth...)
 }
 
 func acpReasoningClickToken(key string) string {
