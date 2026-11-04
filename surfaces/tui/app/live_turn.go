@@ -19,6 +19,7 @@ func (m *Model) beginLiveTurn(mode SubmissionMode, divider bool, startedAt time.
 	if m == nil {
 		return
 	}
+	m.runningHintTracker.endTurn()
 	if startedAt.IsZero() {
 		startedAt = time.Now()
 	}

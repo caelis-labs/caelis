@@ -230,3 +230,6 @@ func (l *openAIResponsesLLM) buildRequest(req *model.Request) (openAIResponsesRe
 	payload.Text = &openAIResponsesTextConfig{Format: format}
 	return payload, nil
 }
+
+// RequestTimeout reports the configured per-request budget; zero selects the SDK default.
+func (l *openAIResponsesLLM) RequestTimeout() time.Duration { return l.requestTimeout }

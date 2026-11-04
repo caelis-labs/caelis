@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"iter"
 	"maps"
 	"reflect"
@@ -4144,7 +4145,7 @@ func (m *retryToolModel) Generate(_ context.Context, req *model.Request) iter.Se
 	call := m.calls.Add(1)
 
 	return func(yield func(*model.StreamEvent, error) bool) {
-		if call >= 3 {
+		if call >= 10 {
 			yield(&model.StreamEvent{
 				Type: model.StreamEventTurnDone,
 				Response: &model.Response{
@@ -4158,7 +4159,7 @@ func (m *retryToolModel) Generate(_ context.Context, req *model.Request) iter.Se
 			return
 		}
 
-		if call == 1 {
+		if call <= 8 {
 			if !yield(&model.StreamEvent{
 				Type: model.StreamEventPartDelta,
 				PartDelta: &model.PartDelta{
@@ -4168,11 +4169,11 @@ func (m *retryToolModel) Generate(_ context.Context, req *model.Request) iter.Se
 			}, nil) {
 				return
 			}
-			yield(nil, errors.New("providers: sse scanner: unexpected EOF"))
+			yield(nil, fmt.Errorf("providers: sse scanner: %w", io.ErrUnexpectedEOF))
 			return
 		}
 
-		// call == 2
+		// The ninth request is the first completed tool call.
 		yield(&model.StreamEvent{
 			Type: model.StreamEventTurnDone,
 			Response: &model.Response{
@@ -4214,9 +4215,8 @@ func TestChatAgentSpeculativeToolCallRetry(t *testing.T) {
 	}
 
 	retryingModel := model.WithRetry(testModel, model.RetryConfig{
-		MaxRetries: 2,
-		BaseDelay:  time.Nanosecond,
-		MaxDelay:   time.Nanosecond,
+		BaseDelay: time.Nanosecond,
+		MaxDelay:  time.Nanosecond,
 	})
 
 	chatAgent, err := (Factory{SystemPrompt: "Use tools."}).NewAgent(context.Background(), agent.AgentSpec{
@@ -4257,7 +4257,7 @@ func TestChatAgentSpeculativeToolCallRetry(t *testing.T) {
 	if got, want := toolCallsCount, 1; got != want {
 		t.Fatalf("toolCallsCount = %d, want %d", got, want)
 	}
-	if got, want := int(testModel.calls.Load()), 3; got != want {
+	if got, want := int(testModel.calls.Load()), 10; got != want {
 		t.Fatalf("model calls = %d, want %d", got, want)
 	}
 
@@ -4279,7 +4279,7 @@ func TestChatAgentSpeculativeToolCallRetry(t *testing.T) {
 		}
 	}
 
-	if got, want := resetEventCount, 1; got != want {
+	if got, want := resetEventCount, 8; got != want {
 		t.Fatalf("resetEventCount = %d, want %d", got, want)
 	}
 	attemptMeta := nestedMap(resetEvent.Meta, "caelis", "runtime", "attempt_reset")

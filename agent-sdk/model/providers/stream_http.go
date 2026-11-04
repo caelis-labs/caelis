@@ -11,11 +11,12 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 )
 
 var errStreamResponseHeaderTimeout = errors.New("providers: stream response header timeout")
 
-const defaultStreamResponseHeaderTimeout = 5 * time.Minute
+const defaultStreamResponseHeaderTimeout = model.DefaultRequestTimeout
 
 type streamResponseHeaderTimeoutError struct {
 	timeout time.Duration

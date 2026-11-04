@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 )
 
 var errStopSSE = errors.New("providers: stop sse")
@@ -20,8 +21,8 @@ var errStreamFirstEventTimeout = errors.New("providers: stream first event timeo
 var errStreamIdleTimeout = errors.New("providers: stream idle timeout")
 
 const (
-	defaultStreamFirstEventTimeout = 5 * time.Minute
-	defaultStreamIdleTimeout       = 5 * time.Minute
+	defaultStreamFirstEventTimeout = model.DefaultRequestTimeout
+	defaultStreamIdleTimeout       = model.DefaultRequestTimeout
 	streamTimeoutMaxRetries        = 1
 )
 

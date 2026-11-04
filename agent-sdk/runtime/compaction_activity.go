@@ -4,10 +4,18 @@ import (
 	"context"
 	"sync"
 
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
 type compactionStartObserverKey struct{}
+type compactionRetryObserverKey struct{}
+
+func notifyCompactionRetry(ctx context.Context, reset model.AttemptReset) {
+	if observer, ok := ctx.Value(compactionRetryObserverKey{}).(func(model.AttemptReset)); ok {
+		observer(reset)
+	}
+}
 
 func withCompactionStartObserver(ctx context.Context, observer func()) context.Context {
 	if observer == nil {
@@ -38,6 +46,9 @@ func (r *Runtime) withCompactActivity(
 	if sink == nil {
 		return ctx
 	}
+	ctx = context.WithValue(ctx, compactionRetryObserverKey{}, func(reset model.AttemptReset) {
+		sink.publishEvent(normalizeEvent(activeSession, turnID, session.NewModelAttemptReset(reset)))
+	})
 	var once sync.Once
 	return withCompactionStartObserver(ctx, func() {
 		once.Do(func() {

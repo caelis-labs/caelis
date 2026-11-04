@@ -4,6 +4,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 )
 
 type runningActivityPhase string
@@ -25,6 +27,11 @@ const (
 
 const runningCompactActivityKey = "context-compact"
 
+// runningFocusOrderKey marks foreground model progress in the existing recency
+// list. Older tools remain indexed for real progress/settlement, but cannot
+// reappear solely because a newer foreground tool completed.
+const runningFocusOrderKey = "model-focus"
+
 type runningActivityTarget string
 
 const (
@@ -42,11 +49,12 @@ type runningActivityState struct {
 }
 
 type runningActivityOwner struct {
-	Key     string
-	CallID  string
-	Handle  string
-	BlockID string
-	Target  runningActivityTarget
+	Key        string
+	CallID     string
+	Handle     string
+	TerminalID string
+	BlockID    string
+	Target     runningActivityTarget
 }
 
 // runningHintTracker owns the TUI-only live hint projection derived from ACP
@@ -55,18 +63,24 @@ type runningActivityOwner struct {
 // RunCommand owner it observes. Completed keys are retained for the Session so
 // late non-terminal projections cannot revive an already closed activity.
 type runningHintTracker struct {
-	focus           runningActivityState
-	focusForeground bool
-	foregroundKey   string
-	active          map[string]runningActivityState
-	order           []string
-	completed       map[string]struct{}
-	compact         runningActivityState
-	overlay         runningActivityState
-	ownersByHandle  map[string]runningActivityOwner
-	ownersByCallID  map[string][]runningActivityOwner
-	turnGeneration  uint64
-	turnStartedAt   time.Time
+	focus                       runningActivityState
+	focusForeground             bool
+	foregroundKey               string
+	active                      map[string]runningActivityState
+	order                       []string
+	completed                   map[string]struct{}
+	compact                     runningActivityState
+	overlay                     runningActivityState
+	ownersByHandle              map[string]runningActivityOwner
+	ownersByCallID              map[string][]runningActivityOwner
+	turnGeneration              uint64
+	turnStartedAt               time.Time
+	turnID                      string
+	retiredTurns                map[string]struct{}
+	activityAt                  time.Time
+	activityDurable             *eventstream.DurableFeedPosition
+	activityTransientGeneration string
+	activityTransientSequence   uint64
 }
 
 func newRunningHintTracker() runningHintTracker {
@@ -79,6 +93,9 @@ func newRunningHintTracker() runningHintTracker {
 }
 
 func (t *runningHintTracker) ensure() {
+	if t.retiredTurns == nil {
+		t.retiredTurns = map[string]struct{}{}
+	}
 	if t.active == nil {
 		t.active = map[string]runningActivityState{}
 	}
@@ -95,6 +112,11 @@ func (t *runningHintTracker) ensure() {
 
 func (t *runningHintTracker) beginTurn(startedAt time.Time) {
 	t.ensure()
+	if t.turnID != "" {
+		t.retiredTurns[t.turnID] = struct{}{}
+	}
+	t.turnID = ""
+	t.activityAt = time.Time{}
 	if startedAt.IsZero() {
 		startedAt = time.Now()
 	}
@@ -109,6 +131,10 @@ func (t *runningHintTracker) beginTurn(startedAt time.Time) {
 
 func (t *runningHintTracker) endTurn() {
 	t.ensure()
+	if t.turnID != "" {
+		t.retiredTurns[t.turnID] = struct{}{}
+	}
+	t.turnID = ""
 	clear(t.active)
 	t.order = t.order[:0]
 	t.compact = runningActivityState{}
@@ -141,6 +167,7 @@ func (t *runningHintTracker) setFocus(
 	if phase == "" {
 		return
 	}
+	t.compact = runningActivityState{}
 	key = strings.TrimSpace(key)
 	startedAt := now
 	if t.focus.Phase == phase && t.focus.Target == target && t.focus.Key == key && !t.focus.StartedAt.IsZero() {
@@ -154,6 +181,8 @@ func (t *runningHintTracker) setFocus(
 	}
 	t.focusForeground = true
 	t.foregroundKey = ""
+	t.removeOrderKey(runningFocusOrderKey)
+	t.order = append(t.order, runningFocusOrderKey)
 }
 
 func (t *runningHintTracker) start(
@@ -171,6 +200,7 @@ func (t *runningHintTracker) start(
 	if _, closed := t.completed[key]; closed {
 		return
 	}
+	t.compact = runningActivityState{}
 	entry := runningActivityState{
 		Phase:     phase,
 		Target:    target,
@@ -207,29 +237,54 @@ func (t *runningHintTracker) complete(key string, now time.Time) {
 	if t.foregroundKey == key {
 		t.foregroundKey = ""
 	}
-	if len(t.active) == 0 && !t.focusForeground {
+	if t.latestCurrentActivity().Phase == "" && !t.focusForeground {
 		t.setModelWait(now)
 	}
 }
 
-// completeTool closes the exact invocation key and any indexed presentation
-// owner for the same ACP tool call. Task-stream frames carry the runtime Turn
-// identity, while the parent RunCommand/Spawn activity was opened by the main
-// Turn; the typed tool-call relation is the stable join between those streams.
+// completeTool closes only the original Turn/call identity. Cross-Turn Task
+// observations must first resolve their typed parent relation and handle.
 func (t *runningHintTracker) completeTool(key string, callID string, now time.Time) {
 	t.complete(key, now)
 	callID = strings.TrimSpace(callID)
 	if callID == "" {
 		return
 	}
-	for _, owner := range t.ownersByCallID[callID] {
-		if owner.Key == key {
-			continue
-		}
-		if _, active := t.active[owner.Key]; active {
-			t.complete(owner.Key, now)
+	// A canonical result also settles the presentation of this exact review,
+	// even when its transient review-ended delivery was lost.
+	if strings.HasPrefix(key, "tool:") {
+		reviewKey := "approval:" + strings.TrimPrefix(key, "tool:")
+		if entry, active := t.active[reviewKey]; active && entry.Phase == runningPhaseReview {
+			t.complete(reviewKey, now)
 		}
 	}
+}
+
+func (t *runningHintTracker) observedToolOwner(callID, handle, terminalID string) (runningActivityOwner, bool) {
+	handle = normalizeRunningActivityHandle(handle)
+	// Prefer the Task handle. A command may expose only its standard ACP
+	// terminal identity before its first yielded result; that original identity
+	// is also usable, but never overrides conflicting known Task handles.
+	for _, byHandle := range []bool{true, false} {
+		var found runningActivityOwner
+		for _, owner := range t.ownersByCallID[callID] {
+			match := sameTaskHandle(owner.Handle, handle)
+			if !byHandle {
+				match = terminalID != "" && owner.TerminalID == terminalID && (handle == "" || owner.Handle == "")
+			}
+			if !match || (terminalID != "" && owner.TerminalID != "" && owner.TerminalID != terminalID) {
+				continue
+			}
+			if found.Key != "" && found.Key != owner.Key {
+				return runningActivityOwner{}, false
+			}
+			found = owner
+		}
+		if found.Key != "" {
+			return found, true
+		}
+	}
+	return runningActivityOwner{}, false
 }
 
 func (t *runningHintTracker) setCompact(now time.Time) {
@@ -243,17 +298,15 @@ func (t *runningHintTracker) setCompact(now time.Time) {
 		Key:       runningCompactActivityKey,
 		StartedAt: startedAt,
 	}
-	if !alreadyCompacting && len(t.active) == 0 {
+	if !alreadyCompacting && t.latestCurrentActivity().Phase == "" {
 		// Replace the pre-compaction model phase with the expected retry wait.
 		// Later foreground events still advance beneath the compact boundary.
 		t.setModelWait(now)
 	}
 }
 
-// completeCompact releases the strong compaction boundary only after its typed
-// success/failure signal. Foreground activity may advance underneath the
-// boundary and becomes visible after release; otherwise the Agent is waiting on
-// its retried model request.
+// completeCompact closes a still-current compact hint. Later foreground actions
+// already superseded it, so a delayed notice cannot change their phase clock.
 func (t *runningHintTracker) completeCompact(now time.Time) {
 	if t.compact.Phase != runningPhaseCompact {
 		return
@@ -262,7 +315,7 @@ func (t *runningHintTracker) completeCompact(now time.Time) {
 	if t.focusForeground && t.focus.Phase != "" && t.focus.Phase != runningPhaseModelWait {
 		return
 	}
-	if len(t.active) > 0 && !t.focusForeground {
+	if t.latestCurrentActivity().Phase != "" && !t.focusForeground {
 		return
 	}
 	t.setModelWait(now)
@@ -276,6 +329,8 @@ func (t *runningHintTracker) setModelWait(now time.Time) {
 	}
 	t.focusForeground = true
 	t.foregroundKey = ""
+	t.removeOrderKey(runningFocusOrderKey)
+	t.order = append(t.order, runningFocusOrderKey)
 }
 
 func (t *runningHintTracker) setOverlay(phase runningActivityPhase, key string, now time.Time) {
@@ -298,8 +353,16 @@ func (t *runningHintTracker) clearOverlay(key string) {
 }
 
 func (t *runningHintTracker) visible(turnRunning bool) runningActivityState {
+	if !turnRunning {
+		return runningActivityState{}
+	}
 	if t.overlay.Phase != "" {
 		return t.overlay
+	}
+	for index := len(t.order) - 1; index >= 0; index-- {
+		if entry, ok := t.active[t.order[index]]; ok && entry.Phase == runningPhaseReview {
+			return entry
+		}
 	}
 	if t.compact.Phase != "" {
 		return t.compact
@@ -312,10 +375,8 @@ func (t *runningHintTracker) visible(turnRunning bool) runningActivityState {
 			return entry
 		}
 	}
-	for index := len(t.order) - 1; index >= 0; index-- {
-		if entry, ok := t.active[t.order[index]]; ok {
-			return entry
-		}
+	if current := t.latestCurrentActivity(); current.Phase != "" {
+		return current
 	}
 	if t.focus.Phase != "" {
 		return t.focus
@@ -325,6 +386,19 @@ func (t *runningHintTracker) visible(turnRunning bool) runningActivityState {
 			Phase:     runningPhaseModelWait,
 			Key:       "model",
 			StartedAt: t.turnStartedAt,
+		}
+	}
+	return runningActivityState{}
+}
+
+func (t *runningHintTracker) latestCurrentActivity() runningActivityState {
+	for index := len(t.order) - 1; index >= 0; index-- {
+		key := t.order[index]
+		if key == runningFocusOrderKey {
+			break
+		}
+		if entry, ok := t.active[key]; ok {
+			return entry
 		}
 	}
 	return runningActivityState{}
@@ -375,6 +449,9 @@ func mergeRunningActivityOwner(previous runningActivityOwner, current runningAct
 	}
 	if current.Handle == "" {
 		current.Handle = previous.Handle
+	}
+	if current.TerminalID == "" {
+		current.TerminalID = previous.TerminalID
 	}
 	if current.BlockID == "" {
 		current.BlockID = previous.BlockID

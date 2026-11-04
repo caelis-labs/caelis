@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"testing"
 	"time"
 )
@@ -11,7 +12,7 @@ import (
 func TestGenerateAccountsEachRetryAttempt(t *testing.T) {
 	final := StreamEventFromResponse(&Response{Message: NewTextMessage(RoleAssistant, "done"), TurnComplete: true, Usage: Usage{TotalTokens: 12}})
 	partial := &StreamEvent{Type: StreamEventPartDelta, Response: &Response{Usage: Usage{PromptTokens: 7, CachedInputTokens: 3, TotalTokens: 7}}}
-	inner := &retryTestLLM{events: [][]*StreamEvent{{partial}, {final}}, errs: []error{errors.New("provider unavailable"), nil}}
+	inner := &retryTestLLM{events: [][]*StreamEvent{{partial}, {final}}, errs: []error{errorcode.New(errorcode.Unavailable, "provider unavailable"), nil}}
 	llm := WithRetry(inner, RetryConfig{MaxRetries: 1, BaseDelay: time.Nanosecond, MaxDelay: time.Nanosecond})
 	var receipts []Invocation
 	ctx := WithInvocationObserver(context.Background(), func(in Invocation) { receipts = append(receipts, in) })
@@ -67,7 +68,7 @@ func TestNestedInvocationObserversReceiveEachAttemptOnce(t *testing.T) {
 }
 
 func TestInvocationAdmissionStopsRetriesBeforeProviderAndReceipt(t *testing.T) {
-	inner := &retryTestLLM{errs: []error{errors.New("provider unavailable"), nil}}
+	inner := &retryTestLLM{errs: []error{errorcode.New(errorcode.Unavailable, "provider unavailable"), nil}}
 	llm := WithRetry(inner, RetryConfig{MaxRetries: 3, BaseDelay: time.Nanosecond, MaxDelay: time.Nanosecond})
 	var admitted, receipts int
 	exhausted := errors.New("budget exhausted")

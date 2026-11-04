@@ -22,7 +22,7 @@ func TestStatusErrorTreatsProviderContextWindow424AsOverflow(t *testing.T) {
 	}
 }
 
-func TestStatusErrorKeepsUnrelatedBadRequestRetryable(t *testing.T) {
+func TestStatusErrorRejectsInvalidRequest(t *testing.T) {
 	t.Parallel()
 
 	err := statusError(&http.Response{
@@ -32,8 +32,8 @@ func TestStatusErrorKeepsUnrelatedBadRequestRetryable(t *testing.T) {
 	if model.IsContextOverflow(err) {
 		t.Fatalf("statusError() = %v, did not want context overflow", err)
 	}
-	if !model.IsRetryableLLMError(err) {
-		t.Fatalf("unclassified gateway failure should remain retryable: %v", err)
+	if model.IsRetryableLLMError(err) {
+		t.Fatalf("invalid gateway request must not retry: %v", err)
 	}
 }
 

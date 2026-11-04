@@ -842,7 +842,6 @@ func TestRuntimeManualCompactFallsBackFromHotRequestToIndependentCompactor(t *te
 			ForceWatermarkRatio:        10,
 			DefaultContextWindowTokens: 8192,
 			SegmentTokenBudget:         80,
-			MaxRetryAttempts:           1,
 		},
 	})
 	if err != nil {
@@ -1519,22 +1518,18 @@ Next action: fit the pending user turn inside the compacted prompt
 	}
 }
 
-func TestGenerateCompactMarkdownOnceStopsWhenCallerContextDone(t *testing.T) {
+func TestModelCompactMarkdownStopsWhenCallerContextDone(t *testing.T) {
 	t.Parallel()
 
-	compactor := &codexStyleCompactor{cfg: normalizeCompactionConfig(CompactionConfig{
-		Enabled:                    true,
-		DefaultContextWindowTokens: 192,
-	})}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	testModel := &compactDeadlineModel{}
 
-	_, err := compactor.generateCompactMarkdownOnce(ctx, testModel, "base", []*session.Event{
+	_, err := modelCompactMarkdown(ctx, testModel, "base", []*session.Event{
 		userTextEvent("content that would otherwise be compacted"),
 	}, "")
 	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("generateCompactMarkdownOnce() error = %v, want caller cancellation", err)
+		t.Fatalf("modelCompactMarkdown() error = %v, want caller cancellation", err)
 	}
 	if testModel.calls != 0 {
 		t.Fatalf("model calls = %d, want zero after caller context ended", testModel.calls)

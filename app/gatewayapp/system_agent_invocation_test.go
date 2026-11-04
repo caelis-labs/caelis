@@ -16,7 +16,7 @@ import (
 )
 
 func TestProductionReasoningWrapperCountsHTTPAttempts(t *testing.T) {
-	for _, mode := range []string{"success", "retry", "cancel"} {
+	for _, mode := range []string{"success", "retry", "malformed", "cancel"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
@@ -26,6 +26,11 @@ func TestProductionReasoningWrapperCountsHTTPAttempts(t *testing.T) {
 
 				data := "data: {\"choices\":[],\"usage\":{\"total_tokens\":12}}\n\ndata: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n"
 				if mode == "retry" && call == 1 {
+					// A lost stream after reported usage is recoverable; malformed
+					// protocol data is not a transport failure.
+					data = "data: {\"choices\":[],\"usage\":{\"total_tokens\":12}}\n\n"
+				}
+				if mode == "malformed" {
 					data = "data: {\"choices\":[],\"usage\":{\"total_tokens\":12}}\n\ndata: {invalid}\n\n"
 				}
 				body := io.NopCloser(strings.NewReader(data))
@@ -45,10 +50,15 @@ func TestProductionReasoningWrapperCountsHTTPAttempts(t *testing.T) {
 			llm := withSystemAgentReasoningEffort(kernel.ModelResolution{Model: inner, ReasoningEffort: "high"})
 			var receipts []model.Invocation
 			ctx = model.WithInvocationObserver(ctx, func(in model.Invocation) { receipts = append(receipts, in) })
+			var failure error
 			for _, err := range model.Generate(ctx, llm, &model.Request{Stream: true}) {
-				if mode != "cancel" && err != nil {
+				failure = err
+				if mode != "cancel" && mode != "malformed" && err != nil {
 					t.Fatal(err)
 				}
+			}
+			if mode == "malformed" && failure == nil {
+				t.Fatal("malformed protocol response unexpectedly succeeded")
 			}
 			total := 0
 			for _, in := range receipts {

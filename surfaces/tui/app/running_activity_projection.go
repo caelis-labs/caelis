@@ -21,6 +21,21 @@ func (m *Model) applyACPRunningActivity(
 	if m == nil || !m.turnRunning() {
 		return nil
 	}
+	if !m.runningHintTracker.acceptActivityPosition(env) {
+		// Older results may settle their exact invocation without acquiring
+		// foreground. Starts, compact notices and narrative cannot move back.
+		for _, event := range events {
+			if event.Kind == TranscriptEventTool && event.Final {
+				if terminal, ok := foregroundRunningActivityEvent(env, event); ok {
+					m.applyTranscriptRunningActivity(terminal)
+				}
+			}
+		}
+		if env.Kind == eventstream.KindApprovalReview && env.ApprovalReview != nil && env.ApprovalReview.Status != "in_progress" {
+			m.applyACPRunningActivityState(env, nil)
+		}
+		return nil
+	}
 	m.applyACPRunningActivityState(env, events)
 	return m.resumeRunningAnimationIfNeeded()
 }
@@ -33,9 +48,16 @@ func (m *Model) applyACPRunningActivityState(
 	events []TranscriptEvent,
 ) {
 	if env.Kind == eventstream.KindApprovalReview && env.ApprovalReview != nil {
-		key := "approval:" + strings.TrimSpace(env.ApprovalReview.ToolCallID)
+		toolKey := m.runningHintTracker.toolKey(env.TurnID, env.ApprovalReview.ToolCallID, env.OccurredAt)
+		if toolKey == "" {
+			return
+		}
+		key := "approval:" + strings.TrimPrefix(toolKey, "tool:")
 		switch strings.ToLower(strings.TrimSpace(env.ApprovalReview.Status)) {
 		case "in_progress":
+			if _, terminal := m.runningHintTracker.completed[toolKey]; terminal {
+				return
+			}
 			m.setRunningToolActivity(runningPhaseReview, "", key, env.ApprovalReview.ToolCallID)
 			return
 		case "approved", "denied", "timed_out", "failed":
@@ -46,6 +68,18 @@ func (m *Model) applyACPRunningActivityState(
 	for _, event := range events {
 		foregroundEvent, ok := foregroundRunningActivityEvent(env, event)
 		if !ok {
+			continue
+		}
+		if foregroundEvent.Kind == TranscriptEventTool && foregroundEvent.Final && foregroundEvent.Observation && env.ParentTool != nil &&
+			env.ParentTool.ToolCallID == foregroundEvent.ToolCallID {
+			// Task streams have their own Turn. Only the typed parent plus its
+			// observed handle can settle that original invocation, never a
+			// same-named call in the current Turn. Ambiguity leaves it untouched.
+			handle := foregroundEvent.ToolTaskHandle
+			if owner, found := m.runningHintTracker.observedToolOwner(foregroundEvent.ToolCallID, handle, foregroundEvent.ToolTerminalID); found {
+				m.runningHintTracker.completeTool(owner.Key, owner.CallID, time.Now())
+				m.refreshRunningActivity()
+			}
 			continue
 		}
 		m.applyTranscriptRunningActivity(foregroundEvent)
@@ -111,7 +145,6 @@ func applyTranscriptActivity(tracker *runningHintTracker, event TranscriptEvent,
 	if event.Kind == TranscriptEventNotice && event.NoticeKind == transcript.NoticeKindModelRetry {
 		return
 	}
-	tracker.clearRetryFocus()
 	switch event.Kind {
 	case TranscriptEventNarrative:
 		switch event.NarrativeKind {
@@ -138,8 +171,21 @@ func applyTranscriptActivity(tracker *runningHintTracker, event TranscriptEvent,
 	case TranscriptEventPlan:
 		tracker.setFocus(runningPhaseThinking, "", "plan", time.Now())
 	case TranscriptEventTool:
+		if !event.Final {
+			tracker.completeCompact(time.Now())
+			tracker.clearRetryFocus()
+		}
 		applyToolActivity(tracker, event, targetFor)
 	case TranscriptEventLifecycle:
+		if eventstream.IsTerminalLifecycleState(event.State) {
+			// Only the main Turn owner retires its identity. A participant's
+			// terminal cannot end the still-running main Agent's projection.
+			if event.Scope == ACPProjectionMain {
+				tracker.completeCompact(time.Now())
+				tracker.clearRetryFocus()
+			}
+			return
+		}
 		if strings.EqualFold(strings.TrimSpace(event.State), session.LifecycleStatusContextCompacting) {
 			tracker.setCompact(time.Now())
 		}
@@ -249,9 +295,10 @@ func (m *Model) observeRunningActivityTargets(events []TranscriptEvent) {
 			continue
 		}
 		owner := runningActivityOwner{
-			Key:    m.runningHintTracker.toolKey(event.TurnID, event.ToolCallID, event.OccurredAt),
-			CallID: event.ToolCallID,
-			Target: target,
+			Key:        m.runningHintTracker.toolKey(event.TurnID, event.ToolCallID, event.OccurredAt),
+			CallID:     event.ToolCallID,
+			Target:     target,
+			TerminalID: event.ToolTerminalID,
 		}
 		m.runningHintTracker.observeOwner("", owner)
 		for _, handle := range runningActivityTaskHandles(event.ToolTaskHandle) {
@@ -279,11 +326,12 @@ func (m *Model) observeToolPresentationOwner(block *MainACPTurnBlock, event Tran
 		return
 	}
 	m.runningHintTracker.observeOwner(event.ToolTaskHandle, runningActivityOwner{
-		Key:     m.runningHintTracker.toolKey(event.TurnID, event.ToolCallID, event.OccurredAt),
-		CallID:  event.ToolCallID,
-		Handle:  event.ToolTaskHandle,
-		BlockID: block.BlockID(),
-		Target:  target,
+		Key:        m.runningHintTracker.toolKey(event.TurnID, event.ToolCallID, event.OccurredAt),
+		CallID:     event.ToolCallID,
+		Handle:     event.ToolTaskHandle,
+		BlockID:    block.BlockID(),
+		Target:     target,
+		TerminalID: event.ToolTerminalID,
 	})
 }
 

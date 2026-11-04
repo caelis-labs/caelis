@@ -66,6 +66,7 @@ type toolAvailabilityKey struct{}
 
 // WithInvocationAdmission installs an embedding-owned gate before each actual
 // provider attempt, including retries. Rejection creates no invocation receipt.
+// A gate error stops request recovery; it is not a provider transport failure.
 func WithInvocationAdmission(ctx context.Context, admit func(context.Context, *Request) error) context.Context {
 	if admit == nil {
 		return ctx
@@ -87,6 +88,8 @@ type invocationStartKey struct{}
 // WithInvocationStart installs a fallible pre-dispatch hook after admission and
 // request preparation. The fixed identity is reserved before provider execution.
 // Rejection sends no provider request and emits no terminal invocation receipt.
+// Errors stay with the hook's owner, which retains any uncertain reservation;
+// transport recovery must not repeat the hook under a fresh invocation identity.
 func WithInvocationStart(ctx context.Context, start func(context.Context, Invocation, *Request) error) context.Context {
 	if start == nil {
 		return ctx
@@ -107,6 +110,14 @@ func WithInvocationStart(ctx context.Context, start func(context.Context, Invoca
 // delegate accounting to their actual provider attempts rather than counting
 // their own admission or orchestration as an attempt.
 type InvocationTracker interface{ TracksInvocations() }
+
+// invocationGateError preserves the owner's cause while preventing transport
+// retries from replaying admission or an uncertain pre-dispatch reservation.
+type invocationGateError struct{ cause error }
+
+func (e *invocationGateError) Error() string { return e.cause.Error() }
+func (e *invocationGateError) Unwrap() error { return e.cause }
+func (*invocationGateError) Retryable() bool { return false }
 
 // Generate observes each actual attempt, including unwrapped providers. Nested
 // gates must implement InvocationTracker and delegate through Generate.
@@ -138,7 +149,7 @@ func Generate(ctx context.Context, llm LLM, req *Request) iter.Seq2[*StreamEvent
 		}
 		if admit != nil {
 			if err := admit(ctx, CloneRequest(req)); err != nil {
-				yield(nil, err)
+				yield(nil, &invocationGateError{cause: err})
 				return
 			}
 		}
@@ -157,7 +168,7 @@ func Generate(ctx context.Context, llm LLM, req *Request) iter.Seq2[*StreamEvent
 		}
 		if start != nil {
 			if err := start(ctx, receipt, CloneRequest(prepared)); err != nil {
-				yield(nil, err)
+				yield(nil, &invocationGateError{cause: err})
 				return
 			}
 		}
@@ -177,7 +188,7 @@ func Generate(ctx context.Context, llm LLM, req *Request) iter.Seq2[*StreamEvent
 				observer(receipt)
 			}
 		}()
-		for event, err := range llm.Generate(attemptCtx, prepared) {
+		for event, err := range generateAttempt(attemptCtx, llm, prepared) {
 			if event != nil && event.Response != nil {
 				cloned := *event
 				response := *event.Response

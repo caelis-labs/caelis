@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"hash/crc32"
 	"image"
 	"image/color"
@@ -111,7 +112,7 @@ func TestGeneratePreparesImagesAcrossHistoryAndRetries(t *testing.T) {
 		NewTextMessage(RoleUser, "continue"),
 	}}
 	original := CloneRequest(req)
-	probe := &retryTestLLM{errs: []error{errors.New("temporary outage"), nil}}
+	probe := &retryTestLLM{errs: []error{errorcode.New(errorcode.Unavailable, "temporary outage"), nil}}
 	wrapped := WithRetry(probe, RetryConfig{MaxRetries: 1, BaseDelay: time.Nanosecond, MaxDelay: time.Nanosecond})
 	for _, err := range wrapped.Generate(t.Context(), req) {
 		if err != nil {

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"iter"
 	"net/http"
 	"slices"
@@ -324,7 +325,7 @@ func (l *openAICompatLLM) Generate(ctx context.Context, req *model.Request) iter
 			return
 		}
 		if !done && rawFinishReason == "" {
-			yield(nil, fmt.Errorf("model: openai-compatible stream ended before a terminal response"))
+			yield(nil, fmt.Errorf("model: openai-compatible stream ended before a terminal response: %w", io.ErrUnexpectedEOF))
 			return
 		}
 		finalMsg, err := acc.message()
@@ -777,3 +778,6 @@ func applyOpenAIReasoning(payload *openAICompatRequest, cfg model.ReasoningConfi
 	// Keep this for compatibility with some OpenAI-compatible gateways.
 	payload.ReasoningEffort = effort
 }
+
+// RequestTimeout reports the configured per-request budget; zero selects the SDK default.
+func (l *openAICompatLLM) RequestTimeout() time.Duration { return l.requestTimeout }

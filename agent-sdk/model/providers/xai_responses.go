@@ -278,3 +278,6 @@ func (e *xAIResponsesTerminalError) ErrorCode() errorcode.Code {
 	}
 	return errorcode.CodeOf(e.cause)
 }
+
+// RequestTimeout reports the configured per-request budget; zero selects the SDK default.
+func (l *xAIResponsesLLM) RequestTimeout() time.Duration { return l.requestTimeout }

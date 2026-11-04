@@ -41,3 +41,17 @@ func coalesceHTTPClient(client *http.Client) *http.Client {
 		MaxIdleConnsPerHost: 10,
 	}}
 }
+
+// providerStatusTransport preserves Retry-After and status classification for
+// SDKs whose error values discard response headers. It owns no retry loop.
+type providerStatusTransport struct{ inner http.RoundTripper }
+
+func (t providerStatusTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	response, err := t.inner.RoundTrip(req)
+	if err == nil && response != nil && response.StatusCode >= http.StatusBadRequest {
+		err = statusError(response)
+		_ = response.Body.Close()
+		return nil, err
+	}
+	return response, err
+}

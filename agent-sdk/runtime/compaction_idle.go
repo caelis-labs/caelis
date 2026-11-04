@@ -264,8 +264,17 @@ func (j *IdleCompactionJob) Run(ctx context.Context, window session.IdleCompacti
 	}
 	release()
 	store := j.runtime.sessions.(session.CompactionReceiptStore)
-	generation, cancel := context.WithTimeout(ctx, 30*time.Second)
+	timeout := j.runtime.compaction.Async.GenerationTimeout
+	if timeout <= 0 {
+		timeout = model.DefaultRequestTimeout
+	}
+	generation, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+	if deadline := window.Deadline(); !deadline.IsZero() {
+		var cancelWindow context.CancelFunc
+		generation, cancelWindow = context.WithDeadline(generation, deadline)
+		defer cancelWindow()
+	}
 	generation = model.WithInvocationAdmission(generation, func(ctx context.Context, _ *model.Request) error {
 		if len(j.attempts) >= 2 {
 			return &idleCompactionAttemptLimit{}

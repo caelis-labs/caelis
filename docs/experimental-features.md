@@ -169,8 +169,9 @@ work. This is not a cache-hit guarantee or a provider allowlist.
 
 The Store's 180-second opportunity window is separate from the two-second grant
 for one fixed checkpoint. Foreground acquisition or another mutation permanently
-revokes that opportunity. Generation allows at most two actual attempts and has
-a 30-second deadline. The same adoption checks as async compaction require a
+revokes that opportunity. Generation allows at most two actual attempts, using
+the [SDK generation allowance](agent-sdk-boundary.md) shortened to the remaining
+opportunity window. The same adoption checks as async compaction require a
 strictly smaller projected context, without an additional percentage/token saving
 threshold. A completed candidate displaced by foreground activity can be retained
 in bounded memory for up to 120 seconds and revalidated under the new foreground

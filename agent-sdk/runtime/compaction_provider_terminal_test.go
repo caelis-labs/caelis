@@ -67,7 +67,7 @@ func TestCompactionProviderTerminalNeverRetriesOrFallsBack(t *testing.T) {
 						admissions++
 						return nil
 					})
-					c := newCodexStyleCompactor(CompactionConfig{Enabled: true, MaxRetryAttempts: 2, RetryBaseDelay: time.Nanosecond, RetryMaxDelay: time.Nanosecond}, nil).(compact.ForceEngine)
+					c := newCodexStyleCompactor(CompactionConfig{Enabled: true}, nil).(compact.ForceEngine)
 					result, err := c.Force(ctx, compact.Request{Model: llm, Events: []*session.Event{userTextEvent("retain original source")}, InContextRequest: &model.Request{Stream: stream, Messages: []model.Message{model.NewTextMessage(model.RoleUser, "source")}}}, "manual")
 					if !isCompactionTerminalError(err) || result.Compacted || calls != 1 || admissions != 1 || receipts != 1 {
 						t.Fatalf("terminal=%v compacted=%v HTTP=%d admissions=%d receipts=%d", err, result.Compacted, calls, admissions, receipts)

@@ -5,8 +5,8 @@ import (
 	"errors"
 	"log/slog"
 	"strings"
-	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
@@ -25,9 +25,6 @@ type CompactionConfig struct {
 	SafetyMarginTokens          int
 	SegmentTokenBudget          int
 	MaxSegmentDepth             int
-	MaxRetryAttempts            int
-	RetryBaseDelay              time.Duration
-	RetryMaxDelay               time.Duration
 	EstimatedPromptPrefixTokens int
 }
 
@@ -40,15 +37,6 @@ func normalizeCompactionConfig(cfg CompactionConfig) CompactionConfig {
 	}
 	if cfg.MaxSegmentDepth <= 0 {
 		cfg.MaxSegmentDepth = 8
-	}
-	if cfg.MaxRetryAttempts <= 0 {
-		cfg.MaxRetryAttempts = 3
-	}
-	if cfg.RetryBaseDelay <= 0 {
-		cfg.RetryBaseDelay = 500 * time.Millisecond
-	}
-	if cfg.RetryMaxDelay <= 0 {
-		cfg.RetryMaxDelay = 8 * time.Second
 	}
 	if cfg.EstimatedPromptPrefixTokens < 0 {
 		cfg.EstimatedPromptPrefixTokens = 0
@@ -168,6 +156,10 @@ func (c *codexStyleCompactor) compact(ctx context.Context, req compact.Request, 
 		} else if req.RequireInContext || (req.Coverage != nil && req.Coverage.RequireInContext) {
 			return compact.Result{}, err
 		} else if isCompactionTerminalError(err) {
+			return compact.Result{}, err
+		} else if model.IsRetryableLLMError(err) {
+			// Provider recovery belongs to the existing request retry owner. A
+			// returned failure must not restart its budget via another prompt.
 			return compact.Result{}, err
 		} else {
 			c.logFallback(ctx, "in_context", "independent", classifyCompactionFailure(err))

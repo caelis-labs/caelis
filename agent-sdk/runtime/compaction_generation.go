@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
@@ -69,7 +69,7 @@ func (c *codexStyleCompactor) generateCompactMarkdown(
 	if len(events) == 0 {
 		return normalizeCompactMarkdown(baseText), nil
 	}
-	text, err := c.generateCompactMarkdownOnce(ctx, llm, baseText, events, serviceTier)
+	text, err := modelCompactMarkdown(ctx, llm, baseText, events, serviceTier)
 	if err == nil {
 		return text, nil
 	}
@@ -106,7 +106,7 @@ func (c *codexStyleCompactor) generateCompactMarkdownSegmented(
 		if len(segment) == 0 {
 			continue
 		}
-		update, err := c.generateCompactMarkdownOnce(ctx, llm, current, segment, serviceTier)
+		update, err := modelCompactMarkdown(ctx, llm, current, segment, serviceTier)
 		if err != nil {
 			if isCompactionOverflowError(err) {
 				update, err = c.generateCompactMarkdownSegmented(ctx, llm, current, segment, serviceTier, depth+1)
@@ -118,56 +118,6 @@ func (c *codexStyleCompactor) generateCompactMarkdownSegmented(
 		current = update
 	}
 	return normalizeCompactMarkdown(current), nil
-}
-
-func (c *codexStyleCompactor) generateCompactMarkdownOnce(
-	ctx context.Context,
-	llm model.LLM,
-	baseText string,
-	events []*session.Event,
-	serviceTier model.ServiceTier,
-) (string, error) {
-	var lastErr error
-	for attempt := 0; attempt < c.cfg.MaxRetryAttempts; attempt++ {
-		if attempt > 0 {
-			delay := model.RetryDelayForAttempt(attempt-1, c.cfg.RetryBaseDelay, c.cfg.RetryMaxDelay)
-			if err := sleepCompactionRetryDelay(ctx, delay); err != nil {
-				return "", err
-			}
-		}
-		text, err := modelCompactMarkdown(ctx, llm, baseText, events, serviceTier)
-		if err == nil {
-			return text, nil
-		}
-		if isCompactionTerminalError(err) || isCompactionOverflowError(err) {
-			return "", err
-		}
-		lastErr = err
-		if ctx.Err() != nil {
-			return "", lastErr
-		}
-		if !model.IsRetryableLLMError(err) {
-			break
-		}
-	}
-	if lastErr == nil {
-		lastErr = errors.New("compact generation failed")
-	}
-	return "", lastErr
-}
-
-func sleepCompactionRetryDelay(ctx context.Context, delay time.Duration) error {
-	if delay <= 0 {
-		return nil
-	}
-	timer := time.NewTimer(delay)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		return nil
-	}
 }
 
 func modelCompactMarkdown(
@@ -217,6 +167,9 @@ func collectCompactionResponse(ctx context.Context, llm model.LLM, req *model.Re
 	}
 	var final *model.Response
 	for event, err := range model.Generate(ctx, llm, req) {
+		if event != nil && event.AttemptReset != nil {
+			notifyCompactionRetry(ctx, *event.AttemptReset)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -270,6 +223,14 @@ func collectCompactionResponse(ctx context.Context, llm model.LLM, req *model.Re
 // These are completed but unusable responses, not transient provider failures.
 // Preserve their identity through salvage and in-context fallback decisions.
 func isCompactionTerminalError(err error) bool {
+	var classified model.RetryableError
+	if errors.As(err, &classified) && !classified.Retryable() {
+		return true
+	}
+	switch errorcode.CodeOf(err) {
+	case errorcode.Unauthenticated, errorcode.PermissionDenied, errorcode.InvalidArgument, errorcode.FailedPrecondition, errorcode.ResourceExhausted, errorcode.NotFound, errorcode.UnknownOutcome, errorcode.Interrupted:
+		return true
+	}
 	var terminal *model.TerminalResponseError
 	return errors.As(err, &terminal) || errors.Is(err, errCompactionTruncated) || errors.Is(err, errCompactionFiltered) ||
 		errors.Is(err, errCompactionRefused) || errors.Is(err, errCompactionIncomplete)

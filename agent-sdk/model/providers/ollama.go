@@ -315,7 +315,7 @@ func (l *ollamaLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 // nonempty reason must be a known natural stop before content is committed.
 func ollamaTerminalFinishReason(done bool, reason string) (model.FinishReason, error) {
 	if !done {
-		return model.FinishReasonUnknown, fmt.Errorf("model: ollama response ended before done")
+		return model.FinishReasonUnknown, fmt.Errorf("model: ollama response ended before done: %w", io.ErrUnexpectedEOF)
 	}
 	switch strings.ToLower(strings.TrimSpace(reason)) {
 	case "", "stop":
@@ -596,3 +596,6 @@ func (r *ollamaChatResponse) UnmarshalJSON(data []byte) error {
 	r.usageReported = prompt || output
 	return nil
 }
+
+// RequestTimeout reports the configured per-request budget; zero selects the SDK default.
+func (l *ollamaLLM) RequestTimeout() time.Duration { return l.requestTimeout }

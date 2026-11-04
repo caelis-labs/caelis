@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"iter"
 	"net/http"
 	"net/url"
@@ -204,7 +205,7 @@ func (l *geminiLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 			return
 		}
 		if finishReason == "" {
-			yield(nil, fmt.Errorf("model: gemini stream ended before candidate finishReason"))
+			yield(nil, fmt.Errorf("model: gemini stream ended before candidate finishReason: %w", io.ErrUnexpectedEOF))
 			return
 		}
 		if abnormalReason != "" || finishReason != genai.FinishReasonStop {
@@ -232,7 +233,11 @@ func (l *geminiLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 func classifyGeminiImageError(err error) error {
 	var apiErr genai.APIError
 	if errors.As(err, &apiErr) {
-		return classifyImageInputError(err, apiErr.Message, apiErr.Code)
+		raw, _ := json.Marshal(struct {
+			Error genai.APIError `json:"error"`
+		}{apiErr})
+		classified := newProviderHTTPError(apiErr.Code, string(raw), nil, err)
+		return classifyImageInputError(classified, apiErr.Message, apiErr.Code)
 	}
 	return err
 }
@@ -356,11 +361,17 @@ func stringSliceFromAny(value any) []string {
 }
 
 func (l *geminiLLM) newClient(ctx context.Context) (*genai.Client, error) {
+	client := *coalesceHTTPClient(l.httpClient)
+	transport := client.Transport
+	if transport == nil {
+		transport = http.DefaultTransport
+	}
+	client.Transport = providerStatusTransport{inner: transport}
 	return genai.NewClient(ctx, &genai.ClientConfig{
 		Backend:     genai.BackendGeminiAPI,
 		APIKey:      l.token,
 		HTTPOptions: l.httpOptions,
-		HTTPClient:  l.httpClient,
+		HTTPClient:  &client,
 	})
 }
 
@@ -503,7 +514,8 @@ func geminiToolUsePartFromCall(call model.ToolCall) model.Part {
 
 func buildGeminiHTTPOptions(baseURL string, headers map[string]string) genai.HTTPOptions {
 	root, version := splitGeminiBaseURL(baseURL)
-	opts := genai.HTTPOptions{}
+	// Each actual HTTP attempt must cross Core admission and accounting.
+	opts := genai.HTTPOptions{RetryOptions: &genai.HTTPRetryOptions{Attempts: genai.Ptr[int32](1)}}
 	if root != "" {
 		opts.BaseURL = root
 	}
@@ -904,3 +916,6 @@ func decodeGeminiThoughtSignature(encoded string) []byte {
 	// Backward compatibility: historical records stored plain text.
 	return []byte(encoded)
 }
+
+// RequestTimeout reports the configured per-request budget; zero selects the SDK default.
+func (l *geminiLLM) RequestTimeout() time.Duration { return l.requestTimeout }

@@ -116,11 +116,14 @@ type Event struct {
 	// ToolStatusExplicit reports whether the source ACP update supplied status.
 	// Reducers use it to distinguish a stale lifecycle downgrade from a sparse
 	// content patch whose missing status must retain the settled lifecycle.
-	ToolStatusExplicit       bool
-	ToolReplacedFields       []string
-	ToolOutputReplacement    bool
-	ToolError                bool
-	ToolTerminal             bool
+	ToolStatusExplicit    bool
+	ToolReplacedFields    []string
+	ToolOutputReplacement bool
+	ToolError             bool
+	ToolTerminal          bool
+	// ToolTerminalID retains the existing terminal content identity for local
+	// presentation correlation, without establishing execution ownership.
+	ToolTerminalID           string `json:"-"`
 	ToolOutputSynthetic      bool
 	ToolClearSyntheticOutput bool
 	// ToolOutputCollection marks a present standard ACP content collection.

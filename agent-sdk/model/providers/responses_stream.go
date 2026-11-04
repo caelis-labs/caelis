@@ -108,7 +108,7 @@ func readResponsesStream(ctx context.Context, body io.ReadCloser, req *model.Req
 		return
 	}
 	if !terminalSeen {
-		yield(nil, fmt.Errorf("%s: stream ended before a terminal response", cfg.name))
+		yield(nil, fmt.Errorf("%s: stream ended before a terminal response: %w", cfg.name, io.ErrUnexpectedEOF))
 	}
 }
 

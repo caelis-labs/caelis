@@ -24,10 +24,10 @@ const (
 	maxCatalogCoverageBytes = 4 << 20
 	maxSchemaReads          = 4
 	maxAgentSteps           = maxSchemaReads + 1
-	// Provider streams already have a five-minute first-event timeout and a
+	// Provider streams already have a ten-minute first-event timeout and a
 	// retry policy. This slightly longer watchdog also covers SDK streams and
 	// silence after the first event without imposing a total selector budget.
-	selectorInactivityTimeout = 6 * time.Minute
+	selectorInactivityTimeout = model.DefaultRequestTimeout + time.Minute
 )
 
 type agentRanker struct{ inactivityTimeout time.Duration }
@@ -347,7 +347,14 @@ func (r agentRanker) generateStep(ctx context.Context, llm model.LLM, req *model
 			break
 		}
 		if event != nil && timer != nil && selectorStreamProgress(event) {
-			timer.Reset(r.inactivityTimeout)
+			budget := r.inactivityTimeout
+			// A declared retry wait is active recovery, not silent generation.
+			// Keep the watchdog finite after that wait; the parent still wins.
+			if reset := event.AttemptReset; reset != nil && reset.RetryDelayMillis > 0 {
+				remainingMillis := (time.Duration(1<<63-1) - budget).Milliseconds()
+				budget += time.Duration(min(reset.RetryDelayMillis, remainingMillis)) * time.Millisecond
+			}
+			timer.Reset(budget)
 		}
 		if event != nil && event.Response != nil && event.TurnComplete {
 			response = event.Response

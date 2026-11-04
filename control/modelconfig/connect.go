@@ -76,7 +76,7 @@ type ConnectRequest struct {
 // non-streaming provider calls and explicit provider-native tool requests.
 // Streaming generation uses caller cancellation and its separate first-event
 // timeout instead.
-const DefaultProviderRequestTimeoutSeconds = 300
+const DefaultProviderRequestTimeoutSeconds = 600
 
 // ConnectOptions supplies runtime facts needed while assembling a connection.
 type ConnectOptions struct {

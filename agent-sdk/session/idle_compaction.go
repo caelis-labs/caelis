@@ -22,7 +22,12 @@ var ErrIdleCompactionRevoked = errors.New("session: idle compaction opportunity 
 type IdleCompactionWindow struct {
 	ref          SessionRef
 	jobID, token string
+	expiresAt    time.Time
 }
+
+// Deadline returns the Store-issued opportunity expiry. It is an observation
+// for cancellation, never authority to extend or validate the opaque window.
+func (w IdleCompactionWindow) Deadline() time.Time { return w.expiresAt }
 
 // IdleCompactionGrant authorizes exactly one fixed checkpoint for two seconds.
 type IdleCompactionGrant struct {
@@ -153,7 +158,9 @@ func (s *IdleCompactionState) Release(req ReleaseForIdleCompactionRequest, activ
 		if w.Revoked || w.Epoch != s.Epoch {
 			return IdleCompactionWindow{}, idleDenied("transition already revoked")
 		}
-		return req.window, nil
+		window := req.window
+		window.expiresAt = w.ExpiresAt
+		return window, nil
 	}
 	if !SessionFenceReleaseAuthorized(active, req.Release) {
 		return IdleCompactionWindow{}, idleDenied("original fence claim required")
@@ -195,7 +202,9 @@ func (s *IdleCompactionState) Release(req ReleaseForIdleCompactionRequest, activ
 	}
 	s.Invalidate()
 	s.Window = &IdleCompactionWindowRecord{Source: source, Epoch: s.Epoch, ClaimDigest: sessionFenceClaimDigest(req.window.token), ExpiresAt: now.Add(180 * time.Second)}
-	return req.window, nil
+	window := req.window
+	window.expiresAt = s.Window.ExpiresAt
+	return window, nil
 }
 
 // ValidateWindow is used at actual attempt admission and grant issue.

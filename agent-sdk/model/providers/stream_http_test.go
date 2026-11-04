@@ -87,8 +87,8 @@ func TestDoStreamingRequestHonorsCallerCancellationBeforeHeaders(t *testing.T) {
 func TestNormalizeStreamResponseHeaderTimeoutDefault(t *testing.T) {
 	t.Parallel()
 
-	if got := normalizeStreamResponseHeaderTimeout(0); got != 5*time.Minute {
-		t.Fatalf("normalizeStreamResponseHeaderTimeout(0) = %s, want 5m", got)
+	if got := normalizeStreamResponseHeaderTimeout(0); got != model.DefaultRequestTimeout {
+		t.Fatalf("normalizeStreamResponseHeaderTimeout(0) = %s, want 10m", got)
 	}
 	if got := normalizeStreamResponseHeaderTimeout(-1); got != 0 {
 		t.Fatalf("normalizeStreamResponseHeaderTimeout(-1) = %s, want disabled zero", got)

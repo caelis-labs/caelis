@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"iter"
 	"reflect"
 	"strings"
@@ -348,7 +350,7 @@ func TestWithRetryRetriesAfterEmptyEventEmission(t *testing.T) {
 	}
 }
 
-func TestWithRetryRetriesProviderBadRequestUntilExhausted(t *testing.T) {
+func TestWithRetryRejectsProviderBadRequest(t *testing.T) {
 	t.Parallel()
 
 	err := errors.New("model: http status 400 body={\"error\":\"bad request\"}")
@@ -364,10 +366,10 @@ func TestWithRetryRetriesProviderBadRequestUntilExhausted(t *testing.T) {
 	if gotErr == nil {
 		t.Fatal("Generate() error = nil, want exhausted retry error")
 	}
-	if got := gotErr.Error(); !strings.Contains(got, "failed after 2 retries") || !strings.Contains(got, "http status 400") {
-		t.Fatalf("error = %q, want exhausted retry wrapping 400", got)
+	if got := gotErr.Error(); !strings.Contains(got, "http status 400") {
+		t.Fatalf("error = %q, want original invalid request", got)
 	}
-	if got, want := inner.calls, 3; got != want {
+	if got, want := inner.calls, 1; got != want {
 		t.Fatalf("calls = %d, want %d", got, want)
 	}
 }
@@ -375,7 +377,7 @@ func TestWithRetryRetriesProviderBadRequestUntilExhausted(t *testing.T) {
 func TestIsRetryableLLMErrorTreatsStreamFirstEventTimeoutAsTransient(t *testing.T) {
 	t.Parallel()
 
-	err := errors.New("providers: stream first event timeout after 5m0s")
+	err := errorcode.New(errorcode.Timeout, "fixture first event timeout")
 	if !IsRetryableLLMError(err) {
 		t.Fatalf("IsRetryableLLMError(%q) = false, want true", err)
 	}
@@ -445,12 +447,12 @@ func TestWithRetryRetriesProviderDeadlineExceededButStopsWhenCallerContextDone(t
 	}
 }
 
-func TestIsRetryableLLMErrorRetriesBadRequestButNotOverflow(t *testing.T) {
+func TestIsRetryableLLMErrorRejectsBadRequestAndOverflow(t *testing.T) {
 	t.Parallel()
 
 	badRequest := errors.New("model: http status 400 body={\"error\":{\"message\":\"Multimodal data is corrupted or cannot be processed.\"}}")
-	if !IsRetryableLLMError(badRequest) {
-		t.Fatalf("IsRetryableLLMError(%q) = false, want true", badRequest)
+	if IsRetryableLLMError(badRequest) {
+		t.Fatalf("IsRetryableLLMError(%q) = true, want false", badRequest)
 	}
 
 	overflow := &ContextOverflowError{Cause: errors.New("model: http status 400 body={\"error\":\"context length exceeded\"}")}
@@ -588,7 +590,7 @@ func TestWithRetrySpeculativeAttemptRetry(t *testing.T) {
 			{final},
 		},
 		errs: []error{
-			errors.New("providers: sse scanner: unexpected EOF"),
+			fmt.Errorf("providers: sse scanner: %w", io.ErrUnexpectedEOF),
 			nil,
 		},
 	}
@@ -654,7 +656,7 @@ func TestWithRetryNoRetryForProviderExecutedTools(t *testing.T) {
 				},
 			},
 			errs: []error{
-				errors.New("providers: sse scanner: unexpected EOF"),
+				fmt.Errorf("providers: sse scanner: %w", io.ErrUnexpectedEOF),
 				nil,
 			},
 		},
@@ -728,7 +730,7 @@ func TestWithRetryRetriesWhenProviderHookReportsNoProviderExecutedTools(t *testi
 						},
 					},
 					errs: []error{
-						errors.New("providers: sse scanner: unexpected EOF"),
+						fmt.Errorf("providers: sse scanner: %w", io.ErrUnexpectedEOF),
 						nil,
 					},
 				},
@@ -774,7 +776,7 @@ func TestWithRetryNoRetryAfterFinalResponse(t *testing.T) {
 			{final},
 		},
 		errs: []error{
-			errors.New("providers: sse scanner: unexpected EOF"),
+			fmt.Errorf("providers: sse scanner: %w", io.ErrUnexpectedEOF),
 			nil,
 		},
 	}
@@ -832,7 +834,7 @@ func TestWithRetryKeepsFailureRetryLimitAcrossMixedErrors(t *testing.T) {
 	t.Parallel()
 
 	timeoutErr := retryLimitedTestError{maxRetries: 1}
-	transientErr := errors.New("transient provider failure")
+	transientErr := errorcode.New(errorcode.Unavailable, "transient provider failure")
 	tests := []struct {
 		name        string
 		errs        []error

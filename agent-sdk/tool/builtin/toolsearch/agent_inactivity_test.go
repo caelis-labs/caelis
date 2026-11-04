@@ -95,3 +95,55 @@ func TestAgentSearchInactivityAllowsLongReasoningButNotEmptyHeartbeat(t *testing
 		})
 	}
 }
+
+type selectorRetryAfterError struct{}
+
+func (selectorRetryAfterError) Error() string             { return "fixture selector rate limit" }
+func (selectorRetryAfterError) Retryable() bool           { return true }
+func (selectorRetryAfterError) RetryAfter() time.Duration { return 12 * time.Minute }
+
+type retryAfterSelectionModel struct{ calls int }
+
+func (*retryAfterSelectionModel) Name() string { return "retry-after-selector" }
+func (m *retryAfterSelectionModel) Generate(ctx context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
+	return func(yield func(*model.StreamEvent, error) bool) {
+		m.calls++
+		if m.calls == 1 {
+			yield(nil, selectorRetryAfterError{})
+			return
+		}
+		for event, err := range (&activitySelectionModel{interval: 30 * time.Second, finalAt: 30 * time.Second}).Generate(ctx, req) {
+			if !yield(event, err) {
+				return
+			}
+		}
+	}
+}
+
+func TestAgentSearchWatchdogRespectsRetryAfterAndCallerCancellation(t *testing.T) {
+	for _, limit := range []time.Duration{0, 5 * time.Minute} {
+		synctest.Test(t, func(t *testing.T) {
+			ctx := t.Context()
+			if limit > 0 {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithTimeout(ctx, limit)
+				defer cancel()
+			}
+			inner := &retryAfterSelectionModel{}
+			started := time.Now()
+			got, err := NewAgentRanker().Rank(ctx, "record", []tool.Definition{{Name: "docs__lookup"}}, 1, SearchModel{Model: model.WithRetry(inner, model.RetryConfig{}), ReadSchema: func(context.Context, string) (tool.Definition, error) {
+				t.Fatal("unexpected schema read")
+				return tool.Definition{}, nil
+			}})
+			if limit > 0 {
+				if !errors.Is(err, context.DeadlineExceeded) || time.Since(started) != limit || inner.calls != 1 {
+					t.Fatalf("caller deadline lost: elapsed=%s calls=%d err=%v", time.Since(started), inner.calls, err)
+				}
+				return
+			}
+			if err != nil || inner.calls != 2 || time.Since(started) != 12*time.Minute+30*time.Second || len(got) != 1 || got[0] != "docs__lookup" {
+				t.Fatalf("retry wait truncated: elapsed=%s calls=%d selected=%v err=%v", time.Since(started), inner.calls, got, err)
+			}
+		})
+	}
+}

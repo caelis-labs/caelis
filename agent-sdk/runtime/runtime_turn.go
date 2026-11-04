@@ -123,9 +123,8 @@ func (r *Runtime) runWithOverflowRecovery(
 				}
 				return err
 			}
-			recoveryCtx, cancelRecovery := r.asyncFallbackContext(ctx)
+			recoveryCtx := r.compactionRequestContext(ctx)
 			progress, compacted, compactErr := r.recoverByCompacting(recoveryCtx, ref, turnID, req, recovery, currentTurnInputs, sink)
-			cancelRecovery()
 			if compactErr != nil {
 				return compactErr
 			}
