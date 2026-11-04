@@ -45,7 +45,17 @@ func generateAttempt(parent context.Context, llm LLM, req *Request) iter.Seq2[*S
 	return func(yield func(*StreamEvent, error) bool) {
 		ctx, cancel := context.WithTimeout(parent, requestAttemptTimeout(parent, llm))
 		defer cancel()
+		completed := false
 		for event, err := range llm.Generate(ctx, req) {
+			// Consumer processing runs inside yield. Once a complete response
+			// arrived, its latency cannot turn success into an attempt timeout.
+			if completed && parent.Err() == nil && ctx.Err() == context.DeadlineExceeded &&
+				(errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
+				return
+			}
+			if err == nil && event != nil && event.Response != nil && isFinalResponse(event) {
+				completed = true
+			}
 			if parent.Err() == nil && ctx.Err() == context.DeadlineExceeded &&
 				(errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
 				err = context.DeadlineExceeded
@@ -57,7 +67,9 @@ func generateAttempt(parent context.Context, llm LLM, req *Request) iter.Seq2[*S
 				return
 			}
 		}
-		if err := ctx.Err(); err != nil {
+		if err := parent.Err(); err != nil {
+			yield(nil, err)
+		} else if err := ctx.Err(); err != nil && !completed {
 			yield(nil, err)
 		}
 	}
