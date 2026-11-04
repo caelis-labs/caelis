@@ -115,3 +115,14 @@ func TestActivityRecoveryCurrentActionSupersedesCompact(t *testing.T) {
 		t.Fatalf("new response did not supersede stale compaction: %#v", got)
 	}
 }
+
+func TestActivityRecoveryParticipantTerminalCannotRetireMain(t *testing.T) {
+	m := NewModel(Config{NoColor: true, NoAnimation: true})
+	m.beginLiveTurn(SubmissionModeDefault, false, time.Unix(100, 0))
+	m = applyACPEnvelopeForTest(t, m, eventstream.Envelope{Kind: eventstream.KindLifecycle, SessionID: "s", TurnID: "main", Scope: eventstream.ScopeMain, Lifecycle: &eventstream.Lifecycle{State: eventstream.LifecycleStateRunning}})
+	m = applyACPEnvelopeForTest(t, m, eventstream.Envelope{Kind: eventstream.KindLifecycle, SessionID: "s", TurnID: "peer-turn", Scope: eventstream.ScopeParticipant, ScopeID: "peer", ParticipantID: "peer", Lifecycle: &eventstream.Lifecycle{State: eventstream.LifecycleStateFailed}})
+	m = applyACPEnvelopeForTest(t, m, eventstream.Envelope{Kind: eventstream.KindSessionUpdate, SessionID: "s", TurnID: "main", Scope: eventstream.ScopeMain, Update: eventstream.ContentChunk{SessionUpdate: eventstream.UpdateAgentMessage, Content: eventstream.TextContent{Type: "text", Text: "main still working"}}})
+	if !m.turnRunning() || m.runningHintTracker.turnID != "main" || m.runningActivity.Phase != runningPhaseResponding {
+		t.Fatalf("participant retired main activity: %#v", m.runningActivity)
+	}
+}

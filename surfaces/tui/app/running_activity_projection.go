@@ -162,7 +162,12 @@ func applyTranscriptActivity(tracker *runningHintTracker, event TranscriptEvent,
 		applyToolActivity(tracker, event, targetFor)
 	case TranscriptEventLifecycle:
 		if eventstream.IsTerminalLifecycleState(event.State) {
-			tracker.endTurn()
+			// Only the main Turn owner retires its identity. A participant's
+			// terminal cannot end the still-running main Agent's projection.
+			if event.Scope == ACPProjectionMain {
+				tracker.completeCompact(time.Now())
+				tracker.clearRetryFocus()
+			}
 			return
 		}
 		if strings.EqualFold(strings.TrimSpace(event.State), session.LifecycleStatusContextCompacting) {
