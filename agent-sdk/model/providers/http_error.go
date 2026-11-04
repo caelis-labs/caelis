@@ -31,13 +31,14 @@ func statusError(resp *http.Response) error {
 	if resp == nil {
 		return errorcode.New(errorcode.Internal, "model: empty http response")
 	}
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
 	body := strings.TrimSpace(string(raw))
+	diagnostic := strings.TrimSpace(string(raw[:min(len(raw), 4096)]))
 	message := ""
 	if body == "" {
 		message = fmt.Sprintf("model: http status %d", resp.StatusCode)
 	} else {
-		message = fmt.Sprintf("model: http status %d body=%s", resp.StatusCode, body)
+		message = fmt.Sprintf("model: http status %d body=%s", resp.StatusCode, diagnostic)
 	}
 	base := newProviderHTTPError(resp.StatusCode, body, resp.Header, errorcode.New(httpErrorCode(resp.StatusCode), message))
 	if looksLikeContextOverflow(body, resp.StatusCode) {
@@ -57,6 +58,8 @@ func httpErrorCode(status int) errorcode.Code {
 		code = errorcode.NotFound
 	case status == http.StatusRequestTimeout:
 		code = errorcode.Timeout
+	case status == http.StatusPaymentRequired:
+		code = errorcode.FailedPrecondition
 	case status == http.StatusTooManyRequests:
 		code = errorcode.RateLimited
 	case status == 529:
@@ -83,35 +86,44 @@ func (e *providerHTTPError) Retryable() bool {
 
 func newProviderHTTPError(status int, body string, header http.Header, cause error) error {
 	code := httpErrorCode(status)
-	// HTTP status alone cannot distinguish exhausted billing from rate limiting.
-	// Reuse Responses' structured terminal codes rather than message matching.
+	after := retryAfter(header, time.Now())
+	// Code is a string in compatible APIs and a number in Google's native
+	// errors. Decode it independently so numeric codes cannot discard details.
 	var payload struct {
-		Error struct {
-			Code string `json:"code"`
-			Type string `json:"type"`
-		} `json:"error"`
+		Error providerErrorPayload `json:"error"`
 	}
-	if status != http.StatusUnauthorized && status != http.StatusForbidden && json.Unmarshal([]byte(body), &payload) == nil {
-		if class, ok := responsesTerminalErrorCodes[strings.ToLower(payload.Error.Code)]; ok {
-			code = class.errorCode
-		} else if class, ok := responsesTerminalErrorTypes[strings.ToLower(payload.Error.Type)]; ok {
-			code = class.errorCode
-		} else if class, ok := responsesTransientErrorCodes[strings.ToLower(payload.Error.Code)]; ok {
-			code = class.errorCode
-		} else {
-			switch strings.ToLower(payload.Error.Type) {
-			case "overloaded_error":
-				code = errorcode.Overloaded
-			case "rate_limit_error":
-				code = errorcode.RateLimited
-			case "api_error":
-				code = errorcode.Unavailable
-			case "timeout_error":
-				code = errorcode.Timeout
+	if json.Unmarshal([]byte(body), &payload) == nil {
+		var specific string
+		_ = json.Unmarshal(payload.Error.Code, &specific)
+		specific = strings.ToLower(strings.TrimSpace(specific))
+		terminal, delay := googleErrorDetails(payload.Error.Details)
+		after = max(after, delay)
+		if status != http.StatusUnauthorized && status != http.StatusForbidden && status != http.StatusPaymentRequired {
+			if class, ok := responsesTerminalErrorCodes[specific]; ok {
+				code = class.errorCode
+			} else if terminal != "" {
+				code = terminal
+			} else if class, ok := responsesTransientErrorCodes[specific]; ok {
+				code = class.errorCode
+			} else if native, ok := googleStatusCode(payload.Error.Status); ok {
+				code = native
+			} else if class, ok := responsesTerminalErrorTypes[strings.ToLower(payload.Error.Type)]; ok {
+				code = class.errorCode
+			} else {
+				switch strings.ToLower(payload.Error.Type) {
+				case "overloaded_error":
+					code = errorcode.Overloaded
+				case "rate_limit_error":
+					code = errorcode.RateLimited
+				case "api_error":
+					code = errorcode.Unavailable
+				case "timeout_error":
+					code = errorcode.Timeout
+				}
 			}
 		}
 	}
-	return &providerHTTPError{cause: cause, code: code, after: retryAfter(header, time.Now())}
+	return &providerHTTPError{cause: cause, code: code, after: after}
 }
 
 func retryAfter(header http.Header, now time.Time) time.Duration {

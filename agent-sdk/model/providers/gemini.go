@@ -233,7 +233,10 @@ func (l *geminiLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 func classifyGeminiImageError(err error) error {
 	var apiErr genai.APIError
 	if errors.As(err, &apiErr) {
-		classified := newProviderHTTPError(apiErr.Code, apiErr.Message, nil, err)
+		raw, _ := json.Marshal(struct {
+			Error genai.APIError `json:"error"`
+		}{apiErr})
+		classified := newProviderHTTPError(apiErr.Code, string(raw), nil, err)
 		return classifyImageInputError(classified, apiErr.Message, apiErr.Code)
 	}
 	return err
