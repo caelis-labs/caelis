@@ -48,12 +48,16 @@ func (m *Model) applyACPRunningActivityState(
 	events []TranscriptEvent,
 ) {
 	if env.Kind == eventstream.KindApprovalReview && env.ApprovalReview != nil {
-		key := "approval:" + strings.TrimSpace(env.ApprovalReview.ToolCallID)
-		if env.TurnID != "" {
-			key = "approval:" + env.TurnID + ":" + strings.TrimSpace(env.ApprovalReview.ToolCallID)
+		toolKey := m.runningHintTracker.toolKey(env.TurnID, env.ApprovalReview.ToolCallID, env.OccurredAt)
+		if toolKey == "" {
+			return
 		}
+		key := "approval:" + strings.TrimPrefix(toolKey, "tool:")
 		switch strings.ToLower(strings.TrimSpace(env.ApprovalReview.Status)) {
 		case "in_progress":
+			if _, terminal := m.runningHintTracker.completed[toolKey]; terminal {
+				return
+			}
 			m.setRunningToolActivity(runningPhaseReview, "", key, env.ApprovalReview.ToolCallID)
 			return
 		case "approved", "denied", "timed_out", "failed":

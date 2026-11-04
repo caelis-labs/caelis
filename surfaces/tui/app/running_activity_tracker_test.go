@@ -29,6 +29,55 @@ func TestRunningHintTrackerPreservesPhaseStartAcrossMatchingUpdates(t *testing.T
 	}
 }
 
+func TestRunningHintTrackerDoesNotRestoreToolsSupersededByModelProgress(t *testing.T) {
+	tracker := newRunningHintTracker()
+	tracker.beginTurn(time.Unix(100, 0))
+	tracker.start("old", runningPhaseToolWait, runningTargetShell, time.Unix(101, 0), "old")
+	// No terminal arrived for old. The foreground has since progressed through
+	// another model step and a newer tool, whose completion cannot revive it.
+	tracker.setFocus(runningPhaseThinking, "", "new-model-step", time.Unix(102, 0))
+	tracker.start("new", runningPhaseToolWait, runningTargetShell, time.Unix(103, 0), "new")
+	tracker.complete("new", time.Unix(104, 0))
+	if got := tracker.visible(true); got.Phase != runningPhaseModelWait {
+		t.Fatalf("superseded tool revived: %#v", got)
+	}
+	// A fresh progress update can still prove that an independent activity is
+	// alive; this is presentation convergence, not fabricated tool completion.
+	tracker.start("old", runningPhaseToolWait, runningTargetShell, time.Unix(105, 0), "old")
+	tracker.start("other", runningPhaseToolWait, runningTargetShell, time.Unix(106, 0), "other")
+	tracker.complete("other", time.Unix(107, 0))
+	if got := tracker.visible(true); got.CallID != "old" {
+		t.Fatalf("fresh concurrent progress was discarded: %#v", got)
+	}
+}
+
+func TestRunningHintTrackerRetainsCurrentParallelTools(t *testing.T) {
+	tracker := newRunningHintTracker()
+	tracker.beginTurn(time.Unix(100, 0))
+	tracker.start("a", runningPhaseToolWait, runningTargetShell, time.Unix(101, 0), "a")
+	tracker.start("b", runningPhaseToolWait, runningTargetShell, time.Unix(102, 0), "b")
+	tracker.complete("b", time.Unix(103, 0))
+	if got := tracker.visible(true); got.CallID != "a" {
+		t.Fatalf("current parallel activity was hidden: %#v", got)
+	}
+	tracker.start("approval", runningPhaseReview, "", time.Unix(104, 0), "review")
+	tracker.setFocus(runningPhaseResponding, "", "response", time.Unix(105, 0))
+	if got := tracker.visible(true); got.Phase != runningPhaseReview {
+		t.Fatalf("model progress displaced a valid review: %#v", got)
+	}
+}
+
+func TestRunningHintTrackerToolResultOnlySettlesMatchingReviewIdentity(t *testing.T) {
+	tracker := newRunningHintTracker()
+	tracker.beginTurn(time.Unix(100, 0))
+	tracker.start("approval:older:shared", runningPhaseReview, "", time.Unix(101, 0), "shared")
+	tracker.start("approval:current:shared", runningPhaseReview, "", time.Unix(102, 0), "shared")
+	tracker.completeTool("tool:older:shared", "shared", time.Unix(103, 0))
+	if got := tracker.visible(true); got.Key != "approval:current:shared" {
+		t.Fatalf("other Turn's terminal cleared a valid review: %#v", got)
+	}
+}
+
 func TestRunningHintTrackerReplacesStaleCompactWithForegroundTool(t *testing.T) {
 	t.Parallel()
 

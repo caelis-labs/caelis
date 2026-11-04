@@ -27,6 +27,11 @@ const (
 
 const runningCompactActivityKey = "context-compact"
 
+// runningFocusOrderKey marks foreground model progress in the existing recency
+// list. Older tools remain indexed for real progress/settlement, but cannot
+// reappear solely because a newer foreground tool completed.
+const runningFocusOrderKey = "model-focus"
+
 type runningActivityTarget string
 
 const (
@@ -175,6 +180,8 @@ func (t *runningHintTracker) setFocus(
 	}
 	t.focusForeground = true
 	t.foregroundKey = ""
+	t.removeOrderKey(runningFocusOrderKey)
+	t.order = append(t.order, runningFocusOrderKey)
 }
 
 func (t *runningHintTracker) start(
@@ -229,7 +236,7 @@ func (t *runningHintTracker) complete(key string, now time.Time) {
 	if t.foregroundKey == key {
 		t.foregroundKey = ""
 	}
-	if len(t.active) == 0 && !t.focusForeground {
+	if t.latestCurrentActivity().Phase == "" && !t.focusForeground {
 		t.setModelWait(now)
 	}
 }
@@ -246,8 +253,9 @@ func (t *runningHintTracker) completeTool(key string, callID string, now time.Ti
 	}
 	// A canonical result also settles the presentation of this exact review,
 	// even when its transient review-ended delivery was lost.
-	for reviewKey, entry := range t.active {
-		if entry.Phase == runningPhaseReview && entry.CallID == callID {
+	if strings.HasPrefix(key, "tool:") {
+		reviewKey := "approval:" + strings.TrimPrefix(key, "tool:")
+		if entry, active := t.active[reviewKey]; active && entry.Phase == runningPhaseReview {
 			t.complete(reviewKey, now)
 		}
 	}
@@ -272,7 +280,7 @@ func (t *runningHintTracker) setCompact(now time.Time) {
 		Key:       runningCompactActivityKey,
 		StartedAt: startedAt,
 	}
-	if !alreadyCompacting && len(t.active) == 0 {
+	if !alreadyCompacting && t.latestCurrentActivity().Phase == "" {
 		// Replace the pre-compaction model phase with the expected retry wait.
 		// Later foreground events still advance beneath the compact boundary.
 		t.setModelWait(now)
@@ -289,7 +297,7 @@ func (t *runningHintTracker) completeCompact(now time.Time) {
 	if t.focusForeground && t.focus.Phase != "" && t.focus.Phase != runningPhaseModelWait {
 		return
 	}
-	if len(t.active) > 0 && !t.focusForeground {
+	if t.latestCurrentActivity().Phase != "" && !t.focusForeground {
 		return
 	}
 	t.setModelWait(now)
@@ -303,6 +311,8 @@ func (t *runningHintTracker) setModelWait(now time.Time) {
 	}
 	t.focusForeground = true
 	t.foregroundKey = ""
+	t.removeOrderKey(runningFocusOrderKey)
+	t.order = append(t.order, runningFocusOrderKey)
 }
 
 func (t *runningHintTracker) setOverlay(phase runningActivityPhase, key string, now time.Time) {
@@ -347,10 +357,8 @@ func (t *runningHintTracker) visible(turnRunning bool) runningActivityState {
 			return entry
 		}
 	}
-	for index := len(t.order) - 1; index >= 0; index-- {
-		if entry, ok := t.active[t.order[index]]; ok {
-			return entry
-		}
+	if current := t.latestCurrentActivity(); current.Phase != "" {
+		return current
 	}
 	if t.focus.Phase != "" {
 		return t.focus
@@ -360,6 +368,19 @@ func (t *runningHintTracker) visible(turnRunning bool) runningActivityState {
 			Phase:     runningPhaseModelWait,
 			Key:       "model",
 			StartedAt: t.turnStartedAt,
+		}
+	}
+	return runningActivityState{}
+}
+
+func (t *runningHintTracker) latestCurrentActivity() runningActivityState {
+	for index := len(t.order) - 1; index >= 0; index-- {
+		key := t.order[index]
+		if key == runningFocusOrderKey {
+			break
+		}
+		if entry, ok := t.active[key]; ok {
+			return entry
 		}
 	}
 	return runningActivityState{}

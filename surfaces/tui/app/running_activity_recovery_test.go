@@ -126,3 +126,16 @@ func TestActivityRecoveryParticipantTerminalCannotRetireMain(t *testing.T) {
 		t.Fatalf("participant retired main activity: %#v", m.runningActivity)
 	}
 }
+
+func TestActivityRecoveryCompletedToolCannotReviveReview(t *testing.T) {
+	for _, turnID := range []string{"", "main"} {
+		m := NewModel(Config{NoColor: true, NoAnimation: true})
+		m.beginLiveTurn(SubmissionModeDefault, false, time.Unix(100, 0))
+		m = applyACPEnvelopeForTest(t, m, eventstream.Envelope{Kind: eventstream.KindSessionUpdate, TurnID: turnID, Scope: eventstream.ScopeMain, Update: eventstream.ToolCall{SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "call", Kind: eventstream.ToolKindExecute, Status: eventstream.ToolStatusInProgress}})
+		m = applyACPEnvelopeForTest(t, m, eventstream.Envelope{Kind: eventstream.KindSessionUpdate, TurnID: turnID, Scope: eventstream.ScopeMain, Final: true, Update: eventstream.ToolCallUpdate{SessionUpdate: eventstream.UpdateToolCallInfo, ToolCallID: "call", Status: stringPtr(eventstream.ToolStatusCompleted)}})
+		m = applyACPEnvelopeForTest(t, m, eventstream.Envelope{Kind: eventstream.KindApprovalReview, TurnID: turnID, Scope: eventstream.ScopeMain, ApprovalReview: &eventstream.ApprovalReview{ToolCallID: "call", Status: "in_progress"}})
+		if m.runningActivity.Phase == runningPhaseReview {
+			t.Fatalf("terminal invocation revived review for Turn %q: %#v", turnID, m.runningActivity)
+		}
+	}
+}
