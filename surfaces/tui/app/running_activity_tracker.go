@@ -4,6 +4,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 )
 
 type runningActivityPhase string
@@ -55,18 +57,24 @@ type runningActivityOwner struct {
 // RunCommand owner it observes. Completed keys are retained for the Session so
 // late non-terminal projections cannot revive an already closed activity.
 type runningHintTracker struct {
-	focus           runningActivityState
-	focusForeground bool
-	foregroundKey   string
-	active          map[string]runningActivityState
-	order           []string
-	completed       map[string]struct{}
-	compact         runningActivityState
-	overlay         runningActivityState
-	ownersByHandle  map[string]runningActivityOwner
-	ownersByCallID  map[string][]runningActivityOwner
-	turnGeneration  uint64
-	turnStartedAt   time.Time
+	focus                       runningActivityState
+	focusForeground             bool
+	foregroundKey               string
+	active                      map[string]runningActivityState
+	order                       []string
+	completed                   map[string]struct{}
+	compact                     runningActivityState
+	overlay                     runningActivityState
+	ownersByHandle              map[string]runningActivityOwner
+	ownersByCallID              map[string][]runningActivityOwner
+	turnGeneration              uint64
+	turnStartedAt               time.Time
+	turnID                      string
+	retiredTurns                map[string]struct{}
+	activityAt                  time.Time
+	activityDurable             *eventstream.DurableFeedPosition
+	activityTransientGeneration string
+	activityTransientSequence   uint64
 }
 
 func newRunningHintTracker() runningHintTracker {
@@ -79,6 +87,9 @@ func newRunningHintTracker() runningHintTracker {
 }
 
 func (t *runningHintTracker) ensure() {
+	if t.retiredTurns == nil {
+		t.retiredTurns = map[string]struct{}{}
+	}
 	if t.active == nil {
 		t.active = map[string]runningActivityState{}
 	}
@@ -95,6 +106,11 @@ func (t *runningHintTracker) ensure() {
 
 func (t *runningHintTracker) beginTurn(startedAt time.Time) {
 	t.ensure()
+	if t.turnID != "" {
+		t.retiredTurns[t.turnID] = struct{}{}
+	}
+	t.turnID = ""
+	t.activityAt = time.Time{}
 	if startedAt.IsZero() {
 		startedAt = time.Now()
 	}
@@ -109,6 +125,10 @@ func (t *runningHintTracker) beginTurn(startedAt time.Time) {
 
 func (t *runningHintTracker) endTurn() {
 	t.ensure()
+	if t.turnID != "" {
+		t.retiredTurns[t.turnID] = struct{}{}
+	}
+	t.turnID = ""
 	clear(t.active)
 	t.order = t.order[:0]
 	t.compact = runningActivityState{}
@@ -141,6 +161,7 @@ func (t *runningHintTracker) setFocus(
 	if phase == "" {
 		return
 	}
+	t.compact = runningActivityState{}
 	key = strings.TrimSpace(key)
 	startedAt := now
 	if t.focus.Phase == phase && t.focus.Target == target && t.focus.Key == key && !t.focus.StartedAt.IsZero() {
@@ -171,6 +192,7 @@ func (t *runningHintTracker) start(
 	if _, closed := t.completed[key]; closed {
 		return
 	}
+	t.compact = runningActivityState{}
 	entry := runningActivityState{
 		Phase:     phase,
 		Target:    target,
@@ -222,6 +244,13 @@ func (t *runningHintTracker) completeTool(key string, callID string, now time.Ti
 	if callID == "" {
 		return
 	}
+	// A canonical result also settles the presentation of this exact review,
+	// even when its transient review-ended delivery was lost.
+	for reviewKey, entry := range t.active {
+		if entry.Phase == runningPhaseReview && entry.CallID == callID {
+			t.complete(reviewKey, now)
+		}
+	}
 	for _, owner := range t.ownersByCallID[callID] {
 		if owner.Key == key {
 			continue
@@ -250,10 +279,8 @@ func (t *runningHintTracker) setCompact(now time.Time) {
 	}
 }
 
-// completeCompact releases the strong compaction boundary only after its typed
-// success/failure signal. Foreground activity may advance underneath the
-// boundary and becomes visible after release; otherwise the Agent is waiting on
-// its retried model request.
+// completeCompact closes a still-current compact hint. Later foreground actions
+// already superseded it, so a delayed notice cannot change their phase clock.
 func (t *runningHintTracker) completeCompact(now time.Time) {
 	if t.compact.Phase != runningPhaseCompact {
 		return
@@ -298,8 +325,16 @@ func (t *runningHintTracker) clearOverlay(key string) {
 }
 
 func (t *runningHintTracker) visible(turnRunning bool) runningActivityState {
+	if !turnRunning {
+		return runningActivityState{}
+	}
 	if t.overlay.Phase != "" {
 		return t.overlay
+	}
+	for index := len(t.order) - 1; index >= 0; index-- {
+		if entry, ok := t.active[t.order[index]]; ok && entry.Phase == runningPhaseReview {
+			return entry
+		}
 	}
 	if t.compact.Phase != "" {
 		return t.compact

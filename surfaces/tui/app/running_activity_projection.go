@@ -21,6 +21,21 @@ func (m *Model) applyACPRunningActivity(
 	if m == nil || !m.turnRunning() {
 		return nil
 	}
+	if !m.runningHintTracker.acceptActivityPosition(env) {
+		// Older results may settle their exact invocation without acquiring
+		// foreground. Starts, compact notices and narrative cannot move back.
+		for _, event := range events {
+			if event.Kind == TranscriptEventTool && event.Final {
+				if terminal, ok := foregroundRunningActivityEvent(env, event); ok {
+					m.applyTranscriptRunningActivity(terminal)
+				}
+			}
+		}
+		if env.Kind == eventstream.KindApprovalReview && env.ApprovalReview != nil && env.ApprovalReview.Status != "in_progress" {
+			m.applyACPRunningActivityState(env, nil)
+		}
+		return nil
+	}
 	m.applyACPRunningActivityState(env, events)
 	return m.resumeRunningAnimationIfNeeded()
 }
@@ -34,6 +49,9 @@ func (m *Model) applyACPRunningActivityState(
 ) {
 	if env.Kind == eventstream.KindApprovalReview && env.ApprovalReview != nil {
 		key := "approval:" + strings.TrimSpace(env.ApprovalReview.ToolCallID)
+		if env.TurnID != "" {
+			key = "approval:" + env.TurnID + ":" + strings.TrimSpace(env.ApprovalReview.ToolCallID)
+		}
 		switch strings.ToLower(strings.TrimSpace(env.ApprovalReview.Status)) {
 		case "in_progress":
 			m.setRunningToolActivity(runningPhaseReview, "", key, env.ApprovalReview.ToolCallID)
@@ -111,7 +129,6 @@ func applyTranscriptActivity(tracker *runningHintTracker, event TranscriptEvent,
 	if event.Kind == TranscriptEventNotice && event.NoticeKind == transcript.NoticeKindModelRetry {
 		return
 	}
-	tracker.clearRetryFocus()
 	switch event.Kind {
 	case TranscriptEventNarrative:
 		switch event.NarrativeKind {
@@ -138,8 +155,16 @@ func applyTranscriptActivity(tracker *runningHintTracker, event TranscriptEvent,
 	case TranscriptEventPlan:
 		tracker.setFocus(runningPhaseThinking, "", "plan", time.Now())
 	case TranscriptEventTool:
+		if !event.Final {
+			tracker.completeCompact(time.Now())
+			tracker.clearRetryFocus()
+		}
 		applyToolActivity(tracker, event, targetFor)
 	case TranscriptEventLifecycle:
+		if eventstream.IsTerminalLifecycleState(event.State) {
+			tracker.endTurn()
+			return
+		}
 		if strings.EqualFold(strings.TrimSpace(event.State), session.LifecycleStatusContextCompacting) {
 			tracker.setCompact(time.Now())
 		}

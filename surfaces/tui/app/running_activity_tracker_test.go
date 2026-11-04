@@ -29,7 +29,7 @@ func TestRunningHintTrackerPreservesPhaseStartAcrossMatchingUpdates(t *testing.T
 	}
 }
 
-func TestRunningHintTrackerKeepsCompactBoundaryAcrossToolStartAndCompletion(t *testing.T) {
+func TestRunningHintTrackerReplacesStaleCompactWithForegroundTool(t *testing.T) {
 	t.Parallel()
 
 	tracker := newRunningHintTracker()
@@ -39,13 +39,13 @@ func TestRunningHintTrackerKeepsCompactBoundaryAcrossToolStartAndCompletion(t *t
 
 	toolKey := "tool:turn-2:command-1"
 	tracker.start(toolKey, runningPhaseToolWait, runningTargetShell, time.Unix(102, 0), "command-1")
-	if got := tracker.visible(true); got.Phase != runningPhaseCompact || !got.StartedAt.Equal(compactAt) {
-		t.Fatalf("activity after tool start = %#v, want stable compact boundary", got)
+	if got := tracker.visible(true); got.Phase != runningPhaseToolWait || got.CallID != "command-1" {
+		t.Fatalf("activity after tool start = %#v, want latest foreground tool", got)
 	}
 
 	tracker.complete(toolKey, time.Unix(103, 0))
-	if got := tracker.visible(true); got.Phase != runningPhaseCompact {
-		t.Fatalf("activity after tool completion = %#v, want compact until typed completion", got)
+	if got := tracker.visible(true); got.Phase != runningPhaseModelWait {
+		t.Fatalf("activity after tool completion = %#v, want waiting after tool completion", got)
 	}
 
 	tracker.completeCompact(time.Unix(104, 0))

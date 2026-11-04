@@ -44,6 +44,7 @@ func (m *Model) applySessionReconnectState(state appserver.SessionState) tea.Cmd
 	m.clearInputOverlays()
 	if state.Run.Active || state.Approval.Active != nil {
 		m.beginLiveTurn(SubmissionModeDefault, true, state.Run.StartedAt)
+		m.runningHintTracker.turnID = strings.TrimSpace(state.Run.TurnID)
 		m.liveTurn.observed = m.viewGeneration != 0
 		return m.resumeRunningAnimationIfNeeded()
 	}

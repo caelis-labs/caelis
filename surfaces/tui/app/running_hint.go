@@ -26,7 +26,9 @@ func (m *Model) runningFrame() string {
 func (m *Model) startRunningAnimation() {
 	m.spinnerTickScheduled = false
 	if m.turnRunning() {
-		m.runningHintTracker.beginTurn(m.liveTurn.StartedAt)
+		if m.runningHintTracker.turnStartedAt.IsZero() {
+			m.runningHintTracker.beginTurn(m.liveTurn.StartedAt)
+		}
 		m.refreshRunningActivity()
 		return
 	}

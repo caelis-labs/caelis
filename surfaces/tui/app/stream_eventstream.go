@@ -16,11 +16,12 @@ func (m *Model) handleACPEventEnvelope(env eventstream.Envelope) (tea.Model, tea
 		return m, nil
 	}
 	m.observeTaskStreamSession(env)
+	currentActivity := m.observeLiveActivityTurn(env)
 	if approvalSettled(env) {
 		m.dismissApproval(string(env.ApprovalRequestID))
 	}
 	if env.Kind == eventstream.KindLifecycle && env.Lifecycle != nil && env.Lifecycle.State == eventstream.LifecycleStateRunning && (env.Scope == "" || env.Scope == eventstream.ScopeMain) && env.ApprovalRequestID == "" {
-		if !m.turnRunning() {
+		if !m.turnRunning() && currentActivity {
 			m.beginLiveTurn(SubmissionModeDefault, true, env.OccurredAt)
 		}
 		m.liveTurn.observed = m.viewGeneration != 0
@@ -34,6 +35,9 @@ func (m *Model) handleACPEventEnvelope(env eventstream.Envelope) (tea.Model, tea
 		return m, nil
 	}
 	if isMainTurnTerminalLifecycle(env) {
+		if m.turnRunning() && !currentActivity {
+			return m, nil
+		}
 		if !m.turnRunning() && !terminalLifecycleHasTranscriptIdentity(env) {
 			return m, nil
 		}
@@ -42,7 +46,10 @@ func (m *Model) handleACPEventEnvelope(env eventstream.Envelope) (tea.Model, tea
 		if next, ok := model.(*Model); ok {
 			m = next
 		}
-		finishCmd, _ := m.finishLiveTurnFromEnvelope(env)
+		var finishCmd tea.Cmd
+		if currentActivity {
+			finishCmd, _ = m.finishLiveTurnFromEnvelope(env)
+		}
 		return m, tea.Batch(cmd, finishCmd)
 	}
 	presentation := m.projectACPEnvelopePresentation(env)
@@ -51,6 +58,9 @@ func (m *Model) handleACPEventEnvelope(env eventstream.Envelope) (tea.Model, tea
 		m = next
 	}
 	m.observeTaskPanelStreamOwner(env)
+	if !currentActivity {
+		return m, cmd
+	}
 	return m, tea.Batch(m.applyACPRunningActivity(env, presentation.Events), cmd)
 }
 
