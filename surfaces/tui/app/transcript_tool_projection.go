@@ -62,6 +62,7 @@ func projectTranscriptToolCall(input transcript.ToolProjectionInput) TranscriptE
 		ToolStatusExplicit:   input.StatusExplicit,
 		ToolReplacedFields:   append([]string(nil), input.ReplacedFields...),
 		ToolTerminal:         toolTerminal,
+		ToolTerminalID:       transcriptToolTerminalID(input.Meta, content),
 		ToolOutputCollection: toolOutputCollection,
 		ToolOutputExact:      toolOutputCollection && transcriptToolContentHasStructuredDiff(content),
 		ToolDiffSummary:      transcriptToolDiffSummary(content),
@@ -244,6 +245,7 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 		ToolReplacedFields:       append([]string(nil), input.ReplacedFields...),
 		ToolError:                toolErr,
 		ToolTerminal:             toolTerminal,
+		ToolTerminalID:           transcriptToolTerminalID(input.Meta, content),
 		ToolOutputSynthetic:      toolOutputSynthetic,
 		ToolClearSyntheticOutput: clearExit,
 		ToolOutputCollection:     toolOutputCollection,
@@ -359,4 +361,14 @@ func containsToolField(fields []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func transcriptToolTerminalID(meta map[string]any, content []acpprojector.ToolContent) string {
+	for _, item := range content {
+		if item.Type == "terminal" && item.TerminalID != "" {
+			return item.TerminalID
+		}
+	}
+	terminal, _ := transcript.ReadTerminalInfo(meta)
+	return terminal.TerminalID
 }

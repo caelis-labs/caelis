@@ -70,6 +70,18 @@ func (m *Model) applyACPRunningActivityState(
 		if !ok {
 			continue
 		}
+		if foregroundEvent.Kind == TranscriptEventTool && foregroundEvent.Final && foregroundEvent.Observation && env.ParentTool != nil &&
+			env.ParentTool.ToolCallID == foregroundEvent.ToolCallID {
+			// Task streams have their own Turn. Only the typed parent plus its
+			// observed handle can settle that original invocation, never a
+			// same-named call in the current Turn. Ambiguity leaves it untouched.
+			handle := foregroundEvent.ToolTaskHandle
+			if owner, found := m.runningHintTracker.observedToolOwner(foregroundEvent.ToolCallID, handle, foregroundEvent.ToolTerminalID); found {
+				m.runningHintTracker.completeTool(owner.Key, owner.CallID, time.Now())
+				m.refreshRunningActivity()
+			}
+			continue
+		}
 		m.applyTranscriptRunningActivity(foregroundEvent)
 	}
 }
@@ -283,9 +295,10 @@ func (m *Model) observeRunningActivityTargets(events []TranscriptEvent) {
 			continue
 		}
 		owner := runningActivityOwner{
-			Key:    m.runningHintTracker.toolKey(event.TurnID, event.ToolCallID, event.OccurredAt),
-			CallID: event.ToolCallID,
-			Target: target,
+			Key:        m.runningHintTracker.toolKey(event.TurnID, event.ToolCallID, event.OccurredAt),
+			CallID:     event.ToolCallID,
+			Target:     target,
+			TerminalID: event.ToolTerminalID,
 		}
 		m.runningHintTracker.observeOwner("", owner)
 		for _, handle := range runningActivityTaskHandles(event.ToolTaskHandle) {
@@ -313,11 +326,12 @@ func (m *Model) observeToolPresentationOwner(block *MainACPTurnBlock, event Tran
 		return
 	}
 	m.runningHintTracker.observeOwner(event.ToolTaskHandle, runningActivityOwner{
-		Key:     m.runningHintTracker.toolKey(event.TurnID, event.ToolCallID, event.OccurredAt),
-		CallID:  event.ToolCallID,
-		Handle:  event.ToolTaskHandle,
-		BlockID: block.BlockID(),
-		Target:  target,
+		Key:        m.runningHintTracker.toolKey(event.TurnID, event.ToolCallID, event.OccurredAt),
+		CallID:     event.ToolCallID,
+		Handle:     event.ToolTaskHandle,
+		BlockID:    block.BlockID(),
+		Target:     target,
+		TerminalID: event.ToolTerminalID,
 	})
 }
 

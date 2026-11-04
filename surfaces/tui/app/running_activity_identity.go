@@ -10,14 +10,19 @@ import (
 // Turn replaces missing terminal delivery; a retired Turn can still repair its
 // transcript, but can neither revive a hint nor finish the current Turn.
 func (m *Model) observeLiveActivityTurn(env eventstream.Envelope) bool {
-	if env.ParentTool != nil || env.ApprovalRequestID != "" || (env.Scope != "" && env.Scope != eventstream.ScopeMain) {
-		return true
-	}
 	t := &m.runningHintTracker
 	t.ensure()
 	id := strings.TrimSpace(env.TurnID)
 	if _, retired := t.retiredTurns[id]; id != "" && retired {
 		return false
+	}
+	// Approval settlement is consumed independently by its original request
+	// ID. Its review activity must still belong to the current foreground Turn.
+	if env.Kind == eventstream.KindApprovalReview || env.ApprovalRequestID != "" {
+		return m.turnRunning() && (id == "" || t.turnID == "" || id == t.turnID)
+	}
+	if env.ParentTool != nil || (env.Scope != "" && env.Scope != eventstream.ScopeMain) {
+		return true
 	}
 	running := env.Kind == eventstream.KindLifecycle && env.Lifecycle != nil && env.Lifecycle.State == eventstream.LifecycleStateRunning
 	if running && (!m.turnRunning() || (id != "" && t.turnID != "" && id != t.turnID)) {

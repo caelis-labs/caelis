@@ -49,11 +49,12 @@ type runningActivityState struct {
 }
 
 type runningActivityOwner struct {
-	Key     string
-	CallID  string
-	Handle  string
-	BlockID string
-	Target  runningActivityTarget
+	Key        string
+	CallID     string
+	Handle     string
+	TerminalID string
+	BlockID    string
+	Target     runningActivityTarget
 }
 
 // runningHintTracker owns the TUI-only live hint projection derived from ACP
@@ -241,10 +242,8 @@ func (t *runningHintTracker) complete(key string, now time.Time) {
 	}
 }
 
-// completeTool closes the exact invocation key and any indexed presentation
-// owner for the same ACP tool call. Task-stream frames carry the runtime Turn
-// identity, while the parent RunCommand/Spawn activity was opened by the main
-// Turn; the typed tool-call relation is the stable join between those streams.
+// completeTool closes only the original Turn/call identity. Cross-Turn Task
+// observations must first resolve their typed parent relation and handle.
 func (t *runningHintTracker) completeTool(key string, callID string, now time.Time) {
 	t.complete(key, now)
 	callID = strings.TrimSpace(callID)
@@ -259,14 +258,33 @@ func (t *runningHintTracker) completeTool(key string, callID string, now time.Ti
 			t.complete(reviewKey, now)
 		}
 	}
-	for _, owner := range t.ownersByCallID[callID] {
-		if owner.Key == key {
-			continue
+}
+
+func (t *runningHintTracker) observedToolOwner(callID, handle, terminalID string) (runningActivityOwner, bool) {
+	handle = normalizeRunningActivityHandle(handle)
+	// Prefer the Task handle. A command may expose only its standard ACP
+	// terminal identity before its first yielded result; that original identity
+	// is also usable, but never overrides conflicting known Task handles.
+	for _, byHandle := range []bool{true, false} {
+		var found runningActivityOwner
+		for _, owner := range t.ownersByCallID[callID] {
+			match := sameTaskHandle(owner.Handle, handle)
+			if !byHandle {
+				match = terminalID != "" && owner.TerminalID == terminalID && (handle == "" || owner.Handle == "")
+			}
+			if !match || (terminalID != "" && owner.TerminalID != "" && owner.TerminalID != terminalID) {
+				continue
+			}
+			if found.Key != "" && found.Key != owner.Key {
+				return runningActivityOwner{}, false
+			}
+			found = owner
 		}
-		if _, active := t.active[owner.Key]; active {
-			t.complete(owner.Key, now)
+		if found.Key != "" {
+			return found, true
 		}
 	}
+	return runningActivityOwner{}, false
 }
 
 func (t *runningHintTracker) setCompact(now time.Time) {
@@ -431,6 +449,9 @@ func mergeRunningActivityOwner(previous runningActivityOwner, current runningAct
 	}
 	if current.Handle == "" {
 		current.Handle = previous.Handle
+	}
+	if current.TerminalID == "" {
+		current.TerminalID = previous.TerminalID
 	}
 	if current.BlockID == "" {
 		current.BlockID = previous.BlockID
