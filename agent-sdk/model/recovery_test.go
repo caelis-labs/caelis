@@ -32,6 +32,38 @@ func TestRecoverySurvivesOfflineBeyondRequestBudget(t *testing.T) {
 	})
 }
 
+func TestRecoveryDoesNotReplayFailedInvocationGates(t *testing.T) {
+	for _, stage := range []string{"admission", "start"} {
+		t.Run(stage, func(t *testing.T) {
+			inner := &retryTestLLM{}
+			var gates, receipts int
+			var reserved []string
+			cause := context.DeadlineExceeded
+			ctx := WithInvocationObserver(t.Context(), func(Invocation) { receipts++ })
+			if stage == "admission" {
+				ctx = WithInvocationAdmission(ctx, func(context.Context, *Request) error { gates++; return cause })
+			} else {
+				ctx = WithInvocationStart(ctx, func(_ context.Context, in Invocation, _ *Request) error {
+					gates++
+					reserved = append(reserved, in.ID)
+					return cause
+				})
+			}
+			llm := WithRetry(inner, RetryConfig{MaxRetries: 1, BaseDelay: time.Nanosecond, MaxDelay: time.Nanosecond})
+			var failure error
+			for _, err := range Generate(ctx, llm, &Request{}) {
+				failure = err
+			}
+			if gates != 1 || inner.calls != 0 || receipts != 0 || !errors.Is(failure, cause) {
+				t.Fatalf("failed %s gate replayed: gates=%d provider=%d receipts=%d reserved=%v err=%v", stage, gates, inner.calls, receipts, reserved, failure)
+			}
+			if IsRetryableLLMError(failure) {
+				t.Fatalf("%s error escaped its owner as provider retry: %v", stage, failure)
+			}
+		})
+	}
+}
+
 type recoveryDeadlineLLM struct {
 	calls     int
 	deadlines []time.Duration

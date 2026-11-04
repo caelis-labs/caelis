@@ -13,6 +13,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
@@ -354,7 +355,7 @@ func TestRuntimeModelRequestSnapshotRefreshesBeforeProviderRetry(t *testing.T) {
 	newSnapshot := snapshotTestConfig("new", newModel)
 	newSnapshot.Release = func() { newReleases.Add(1) }
 	source.set(newSnapshot)
-	oldModel.responses <- snapshotResponse{err: errors.New("retryable provider failure")}
+	oldModel.responses <- snapshotResponse{err: errorcode.New(errorcode.Unavailable, "fixture provider unavailable")}
 	receiveSnapshotValue(t, newModel.requests)
 	newModel.responses <- snapshotResponse{response: textResponse("done", model.Usage{})}
 	if err := run.Handle.WaitCompletion(t.Context()); err != nil {

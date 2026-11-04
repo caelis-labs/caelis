@@ -298,7 +298,7 @@ func (m *delayedSelectionModel) Generate(ctx context.Context, req *model.Request
 	}
 }
 
-func TestAgentSearchRespectsOnlyCallerDeadline(t *testing.T) {
+func TestAgentSearchRespectsGenerationAndCallerDeadlines(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
 		delays      []time.Duration
@@ -309,6 +309,8 @@ func TestAgentSearchRespectsOnlyCallerDeadline(t *testing.T) {
 		{"slow valid final", []time.Duration{35 * time.Second}, 0, 35 * time.Second, nil},
 		{"two model steps", []time.Duration{35 * time.Second, 35 * time.Second}, 0, 70 * time.Second, nil},
 		{"slow valid final beyond old budget", []time.Duration{91 * time.Second}, 0, 91 * time.Second, nil},
+		{"slow first event within generation budget", []time.Duration{7 * time.Minute}, 0, 7 * time.Minute, nil},
+		{"single generation budget", []time.Duration{11 * time.Minute}, 0, model.DefaultRequestTimeout, context.DeadlineExceeded},
 		{"shorter caller deadline", []time.Duration{35 * time.Second}, 12 * time.Second, 12 * time.Second, context.DeadlineExceeded},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -326,11 +328,17 @@ func TestAgentSearchRespectsOnlyCallerDeadline(t *testing.T) {
 				if time.Since(started) != tc.wantElapsed || !errors.Is(err, tc.wantErr) {
 					t.Fatalf("elapsed=%s error=%v want elapsed=%s error=%v", time.Since(started), err, tc.wantElapsed, tc.wantErr)
 				}
-				if tc.callerLimit == 0 && len(llm.remaining) != 0 {
-					t.Fatalf("unexpected private selector deadline: %v", llm.remaining)
+				budget := model.DefaultRequestTimeout
+				if tc.callerLimit > 0 {
+					budget = min(budget, tc.callerLimit)
 				}
-				if tc.callerLimit > 0 && (len(llm.remaining) != 1 || llm.remaining[0] != tc.callerLimit) {
-					t.Fatalf("caller deadline not propagated: %v", llm.remaining)
+				if len(llm.remaining) != len(tc.delays) {
+					t.Fatalf("unexpected model attempts: %v", llm.remaining)
+				}
+				for _, remaining := range llm.remaining {
+					if remaining != budget {
+						t.Fatalf("generation/caller budget not propagated: %v want %s", llm.remaining, budget)
+					}
 				}
 			})
 		})
