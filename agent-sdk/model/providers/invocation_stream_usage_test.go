@@ -149,9 +149,7 @@ func TestOpenAIInvocationKeepsUsageBeforeDecoderFailure(t *testing.T) {
 				}
 			}
 			want := 1
-			if retry {
-				want = 2
-			}
+			// A malformed payload is not evidence of a recoverable network error.
 			if failure == nil || calls != want || len(receipts) != want {
 				t.Fatalf("calls=%d receipts=%#v err=%v", calls, receipts, failure)
 			}

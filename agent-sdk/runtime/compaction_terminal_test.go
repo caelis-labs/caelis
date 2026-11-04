@@ -10,7 +10,6 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
@@ -130,7 +129,7 @@ func TestCompactionTerminalErrorsDoNotRetryOrFallback(t *testing.T) {
 					llm.responses = append([]*model.Response{short}, llm.responses...)
 					wantAttempts = 2
 				}
-				compactor := newCodexStyleCompactor(CompactionConfig{MaxRetryAttempts: 3, RetryBaseDelay: time.Nanosecond, RetryMaxDelay: time.Nanosecond}, nil).(compact.ForceEngine)
+				compactor := newCodexStyleCompactor(CompactionConfig{}, nil).(compact.ForceEngine)
 				result, err := compactor.Force(t.Context(), req, "manual")
 				if !errors.Is(err, tt.want) || result.Compacted || result.CompactEvent != nil {
 					t.Errorf("compacted=%v has_checkpoint=%v error=%v, want %v", result.Compacted, result.CompactEvent != nil, err, tt.want)
@@ -191,7 +190,6 @@ func TestRuntimeCompactionTruncatedPreservesContextAndReceipts(t *testing.T) {
 			llm := &compactionTerminalModel{responses: []*model.Response{compactionTerminalResponse(model.FinishReasonLength)}}
 			rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}, Compaction: CompactionConfig{
 				Enabled: true, DefaultContextWindowTokens: 128, ReserveOutputTokens: 16, SafetyMarginTokens: 8,
-				MaxRetryAttempts: 3, RetryBaseDelay: time.Nanosecond, RetryMaxDelay: time.Nanosecond,
 			}})
 			if err != nil {
 				t.Fatal(err)

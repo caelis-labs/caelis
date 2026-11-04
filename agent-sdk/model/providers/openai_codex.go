@@ -181,3 +181,6 @@ func (e *openAICodexTerminalError) ErrorCode() errorcode.Code {
 	}
 	return errorcode.CodeOf(e.cause)
 }
+
+// RequestTimeout reports the configured per-request budget; zero selects the SDK default.
+func (l *openAICodexLLM) RequestTimeout() time.Duration { return l.requestTimeout }

@@ -4,23 +4,29 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"iter"
+	"math/rand/v2"
+	"net"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 )
 
 const (
-	defaultLLMRequestMaxRetries       = 5
+	defaultLLMRequestMaxRetries       = -1
 	defaultLLMRetryBaseDelay          = time.Second
-	defaultLLMRetryMaxDelay           = 3 * time.Minute
-	defaultRateLimitRequestMaxRetries = 7
+	defaultLLMRetryMaxDelay           = time.Minute
+	defaultRateLimitRequestMaxRetries = -1
 	defaultRateLimitRetryBaseDelay    = 5 * time.Second
-	defaultRateLimitRetryMaxDelay     = 3 * time.Minute
+	defaultRateLimitRetryMaxDelay     = time.Minute
 )
 
 // RetryConfig controls retry behavior for one provider-neutral LLM call.
+// Zero or negative retry counts recover until caller cancellation. Positive
+// counts retain an embedding owner's finite retry budget.
 type RetryConfig struct {
 	MaxRetries          int
 	BaseDelay           time.Duration
@@ -49,9 +55,9 @@ type BackpressureError interface {
 	Backpressure() bool
 }
 
-// RetryLimitError lets one failure class clamp the number of retries below the
-// provider-neutral request budget. It is intended for slow failures where each
-// attempt already consumed a substantial timeout window.
+// RetryLimitError lets one failure class clamp an explicitly finite retry count.
+// Continuous recovery ignores latency-based count limits and retains the caller
+// context as its lifecycle boundary.
 type RetryLimitError interface {
 	RetryMaxRetries() int
 }
@@ -131,8 +137,8 @@ func unwrapRetryingLLM(llm LLM) LLM {
 // ProviderExecutedToolUsage is an optional LLM capability for providers that
 // can enable provider-executed tools implicitly from request/model policy. When
 // implemented, retry handling uses this hook instead of inspecting req.Tools
-// alone so it does not retry after semantic output from non-idempotent
-// provider-side tools.
+// alone. A failed request with provider-side tools has an unknown execution
+// outcome even without semantic output and cannot be replayed automatically.
 type ProviderExecutedToolUsage interface {
 	UsesProviderExecutedTools(*Request) bool
 }
@@ -161,7 +167,7 @@ func (l *retryingLLM) Generate(ctx context.Context, req *Request) iter.Seq2[*Str
 
 		err := l.retryUntilOK(ctx, func(int) error {
 			canRetryLastErr = true
-			committed, semanticDeltaEmitted, attemptStopped, err := l.runAttempt(ctx, req, yield)
+			committed, attemptStopped, err := l.runAttempt(ctx, req, yield)
 			if attemptStopped {
 				stopped = true
 				return nil
@@ -169,7 +175,7 @@ func (l *retryingLLM) Generate(ctx context.Context, req *Request) iter.Seq2[*Str
 			if err == nil {
 				return nil
 			}
-			canRetryLastErr = !committed && (!hasProviderTool || !semanticDeltaEmitted)
+			canRetryLastErr = !committed && !hasProviderTool
 			return err
 		}, func(reset AttemptReset) (bool, error) {
 			resetEvent := &StreamEvent{
@@ -194,17 +200,13 @@ func (l *retryingLLM) Generate(ctx context.Context, req *Request) iter.Seq2[*Str
 
 func (*retryingLLM) TracksInvocations() {}
 
-func (l *retryingLLM) runAttempt(ctx context.Context, req *Request, yield func(*StreamEvent, error) bool) (bool, bool, bool, error) {
+func (l *retryingLLM) runAttempt(ctx context.Context, req *Request, yield func(*StreamEvent, error) bool) (bool, bool, error) {
 	committed := false
-	semanticDeltaEmitted := false
 	for event, err := range Generate(ctx, l.inner, req) {
 		if err != nil {
-			return committed, semanticDeltaEmitted, false, err
+			return committed, false, err
 		}
 		if event != nil {
-			if hasStreamContent(event) {
-				semanticDeltaEmitted = true
-			}
 			if isFinalResponse(event) {
 				committed = true
 			}
@@ -212,10 +214,10 @@ func (l *retryingLLM) runAttempt(ctx context.Context, req *Request, yield func(*
 			continue
 		}
 		if !yield(event, nil) {
-			return committed, semanticDeltaEmitted, true, nil
+			return committed, true, nil
 		}
 	}
-	return committed, semanticDeltaEmitted, false, nil
+	return committed, false, nil
 }
 
 // UsesProviderExecutedTools reports whether this exact request can execute tools
@@ -238,26 +240,6 @@ func isFinalResponse(event *StreamEvent) bool {
 	}
 	switch event.Type {
 	case StreamEventMessageDone, StreamEventStepDone, StreamEventTurnDone:
-		return true
-	}
-	return false
-}
-
-func hasStreamContent(event *StreamEvent) bool {
-	if event == nil {
-		return false
-	}
-	if event.PartDelta != nil {
-		if event.PartDelta.TextDelta != "" || event.PartDelta.InputDelta != "" || event.PartDelta.Kind == PartKindToolUse {
-			return true
-		}
-	}
-	if event.Message != nil {
-		if len(event.Message.Parts) > 0 {
-			return true
-		}
-	}
-	if event.Response != nil {
 		return true
 	}
 	return false
@@ -331,14 +313,23 @@ func (l *retryingLLM) retryUntilOK(
 			return err
 		}
 		policy := retryPolicyForError(l.cfg, err)
-		if effectiveMaxRetries < 0 || policy.maxRetries < effectiveMaxRetries {
+		if policy.maxRetries >= 0 && (effectiveMaxRetries < 0 || policy.maxRetries < effectiveMaxRetries) {
 			effectiveMaxRetries = policy.maxRetries
 		}
 		policy.maxRetries = effectiveMaxRetries
-		if attempt >= policy.maxRetries {
+		if policy.maxRetries >= 0 && attempt >= policy.maxRetries {
 			return retryExhaustedError(policy, attempt, err)
 		}
 		delay := RetryDelayForAttempt(attempt, policy.baseDelay, policy.maxDelay)
+		// Equal jitter avoids near-zero probes, including after the cap. A
+		// server's minimum wait wins even when it exceeds our backoff cap.
+		if delay > 1 {
+			delay = delay/2 + time.Duration(rand.Int64N(int64(delay-delay/2)))
+		}
+		var after RetryAfterError
+		if errors.As(err, &after) {
+			delay = max(delay, after.RetryAfter())
+		}
 		if resetter, ok := l.inner.(RetryConnectionResetter); ok {
 			resetter.ResetConnectionsForRetry(err)
 		}
@@ -347,7 +338,7 @@ func (l *retryingLLM) retryUntilOK(
 				Attempt:          attempt + 1,
 				Retrying:         true,
 				MaxRetries:       policy.maxRetries,
-				RetryDelayMillis: delay.Milliseconds(),
+				RetryDelayMillis: max(int64(1), delay.Milliseconds()),
 			})
 			if hookErr != nil {
 				return hookErr
@@ -432,6 +423,9 @@ func retryExhaustedMessage(maxRetries int, backpressure bool, includeRuntimePref
 func retryPolicyForError(cfg RetryConfig, err error) retryPolicy {
 	cfg = NormalizeRetryConfig(cfg)
 	limit := func(maxRetries int) int {
+		if maxRetries < 0 {
+			return maxRetries
+		}
 		var limiter RetryLimitError
 		if errors.As(err, &limiter) {
 			if retryLimit := limiter.RetryMaxRetries(); retryLimit >= 0 && retryLimit < maxRetries {
@@ -468,10 +462,10 @@ func RetryDelayForAttempt(retry int, baseDelay, maxDelay time.Duration) time.Dur
 	}
 	delay := baseDelay
 	for i := 0; i < retry; i++ {
-		delay *= 2
-		if delay >= maxDelay {
+		if delay >= maxDelay/2 {
 			return maxDelay
 		}
+		delay *= 2
 	}
 	if delay > maxDelay {
 		return maxDelay
@@ -493,13 +487,10 @@ func sleepRetryDelay(ctx context.Context, delay time.Duration) error {
 	}
 }
 
-// IsRetryableLLMError classifies model request failures that are safe to retry.
-// Provider request errors are retried broadly because some compatible gateways
-// occasionally return malformed 4xx responses for otherwise valid payloads. We
-// still exclude caller cancellation and context overflow so control flow and
-// compaction recovery stay immediate. Caller context deadlines are handled by
-// retryUntilOK before consulting this classifier; provider-layer deadlines are
-// retryable when the caller context is still active.
+// IsRetryableLLMError classifies transport and structured transient failures.
+// Unknown errors, rejected requests, authority and safety budgets are terminal.
+// The caller's context is checked before this classifier, so a child request
+// deadline can recover without extending a parent deadline or cancellation.
 func IsRetryableLLMError(err error) bool {
 	if err == nil {
 		return false
@@ -511,7 +502,22 @@ func IsRetryableLLMError(err error) bool {
 	if errors.As(err, &retryable) {
 		return retryable.Retryable()
 	}
-	return true
+	switch errorcode.CodeOf(err) {
+	case errorcode.Unavailable, errorcode.Timeout, errorcode.RateLimited, errorcode.Overloaded:
+		return true
+	case errorcode.Unknown:
+		var network net.Error
+		var dns *net.DNSError
+		if errors.As(err, &dns) && dns.IsNotFound {
+			return false
+		}
+		return errors.Is(err, context.DeadlineExceeded) || errors.As(err, &network) && network.Timeout() || dns != nil && dns.IsTemporary ||
+			errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) ||
+			errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.ECONNREFUSED) ||
+			errors.Is(err, syscall.EPIPE) || errors.Is(err, syscall.ENETUNREACH) || errors.Is(err, syscall.EHOSTUNREACH)
+	default:
+		return false
+	}
 }
 
 // IsBackpressureLLMError classifies provider-side rate limit or overload.

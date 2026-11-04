@@ -125,7 +125,7 @@ func TestRuntimeCompactionPersistsEveryAttemptEvenWhenCheckpointFails(t *testing
 					t.Fatal(err)
 				}
 			}
-			rt, err := New(Config{Sessions: sessions, AgentFactory: chat.Factory{}, Compaction: CompactionConfig{Enabled: true, MaxRetryAttempts: 1}})
+			rt, err := New(Config{Sessions: sessions, AgentFactory: chat.Factory{}, Compaction: CompactionConfig{Enabled: true}})
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"iter"
+	"net/http"
 	"slices"
 	"strings"
 	"time"
@@ -242,7 +244,7 @@ func (l *anthropicSDKLLM) generateStreaming(ctx context.Context, params anthropi
 		return
 	}
 	if !messageStopped {
-		yield(nil, fmt.Errorf("providers: anthropic stream ended before message_stop"))
+		yield(nil, fmt.Errorf("providers: anthropic stream ended before message_stop: %w", io.ErrUnexpectedEOF))
 		return
 	}
 	msg, finishReason, rawFinishReason, usage, err := anthropicMessageToKernel(l.provider, &acc)
@@ -270,7 +272,12 @@ func (l *anthropicSDKLLM) generateStreaming(ctx context.Context, params anthropi
 func classifyAnthropicImageError(err error) error {
 	var apiErr *anthropic.Error
 	if errors.As(err, &apiErr) {
-		return classifyImageInputError(err, apiErr.RawJSON(), apiErr.StatusCode)
+		var header http.Header
+		if apiErr.Response != nil {
+			header = apiErr.Response.Header
+		}
+		classified := newProviderHTTPError(apiErr.StatusCode, apiErr.RawJSON(), header, err)
+		return classifyImageInputError(classified, apiErr.RawJSON(), apiErr.StatusCode)
 	}
 	return err
 }
@@ -1008,3 +1015,6 @@ func jsonRawToAny(raw json.RawMessage) any {
 	}
 	return value
 }
+
+// RequestTimeout reports the configured per-request budget; zero selects the SDK default.
+func (l *anthropicSDKLLM) RequestTimeout() time.Duration { return l.requestTimeout }

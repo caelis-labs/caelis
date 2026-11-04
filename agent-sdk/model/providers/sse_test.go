@@ -299,8 +299,8 @@ func TestStreamIdleTimeoutErrorIsRetryable(t *testing.T) {
 func TestNormalizeStreamFirstEventTimeoutDefault(t *testing.T) {
 	t.Parallel()
 
-	if got := normalizeStreamFirstEventTimeout(0); got != 5*time.Minute {
-		t.Fatalf("normalizeStreamFirstEventTimeout(0) = %s, want 5m", got)
+	if got := normalizeStreamFirstEventTimeout(0); got != model.DefaultRequestTimeout {
+		t.Fatalf("normalizeStreamFirstEventTimeout(0) = %s, want 10m", got)
 	}
 	if got := normalizeStreamFirstEventTimeout(-1); got != 0 {
 		t.Fatalf("normalizeStreamFirstEventTimeout(-1) = %s, want disabled zero", got)
@@ -310,8 +310,8 @@ func TestNormalizeStreamFirstEventTimeoutDefault(t *testing.T) {
 func TestNormalizeStreamIdleTimeoutDefault(t *testing.T) {
 	t.Parallel()
 
-	if got := normalizeStreamIdleTimeout(0); got != 5*time.Minute {
-		t.Fatalf("normalizeStreamIdleTimeout(0) = %s, want 5m", got)
+	if got := normalizeStreamIdleTimeout(0); got != model.DefaultRequestTimeout {
+		t.Fatalf("normalizeStreamIdleTimeout(0) = %s, want 10m", got)
 	}
 	if got := normalizeStreamIdleTimeout(-1); got != 0 {
 		t.Fatalf("normalizeStreamIdleTimeout(-1) = %s, want disabled zero", got)

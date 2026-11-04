@@ -219,9 +219,11 @@ An async candidate stays inside its originating Turn. Stop, turn completion and
 synchronous recovery cancel and drain it before Runner completion; existing Host
 work references and fence release therefore already cover its lifetime. Dynamic
 model snapshot leases are retained until drain. A provider that ignores
-cancellation delays completion rather than accessing released resources. The
-opt-in Turn bounds each synchronous recovery with a configurable timeout and
-the existing generation retry limits. Successful independent cycles have no
+cancellation delays completion rather than accessing released resources. Foreground recovery bounds each actual model generation at 600 seconds by
+default through `Async.FallbackTimeout`; retry waiting does not consume the next
+generation budget. Speculative candidates retain a finite 600-second owner
+deadline through `Async.GenerationTimeout`, and idle candidates also retain the
+Store window and two-attempt limit. Successful independent cycles have no
 Turn-wide quota; the existing durable-progress check stops empty recovery. A ready checkpoint restarts
 request assembly from durable truth, so the ordinary budget gate checks the full
 summary plus tail and current tool definitions before dispatch. Background usage

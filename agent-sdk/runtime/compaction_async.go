@@ -22,12 +22,12 @@ type AsyncCompactionConfig struct {
 	// window, not the effective input budget. Zero selects 0.65. Invalid values
 	// or a threshold at/above the synchronous watermark disable speculation.
 	StartRatio float64
-	// GenerationTimeout bounds cooperative generation, defaulting to 30 seconds.
+	// GenerationTimeout bounds a speculative candidate, defaulting to 600 seconds.
 	// A provider that ignores cancellation still holds completion until drained.
 	GenerationTimeout time.Duration
-	// FallbackTimeout bounds each synchronous recovery. Zero selects 30
-	// seconds; successful independent cycles have no Turn-wide quota. The compactor keeps
-	// its retry and segment-depth limits. Cancellation still requires drain.
+	// FallbackTimeout bounds each actual foreground recovery generation. Zero
+	// selects 600 seconds. Retry waiting uses the parent context, with no
+	// Turn-wide quota. Cancellation still requires producer drain.
 	FallbackTimeout time.Duration
 }
 
@@ -222,7 +222,7 @@ func (l *autoCompactGatedLLM) asyncCompactionBoundary(ctx context.Context, req *
 	loaded.Events = session.CloneEvents(events)
 	timeout := r.compaction.Async.GenerationTimeout
 	if timeout <= 0 {
-		timeout = 30 * time.Second
+		timeout = model.DefaultRequestTimeout
 	}
 	// Root at the Turn, not the request's ephemeral accounting/admission context.
 	jobCtx, cancel := context.WithTimeout(s.ctx, timeout)
@@ -274,15 +274,8 @@ func (s *asyncCompactScope) beforeRecovery() error {
 	return nil
 }
 
-func (r *Runtime) asyncFallbackContext(ctx context.Context) (context.Context, context.CancelFunc) {
-	if asyncScope(ctx) == nil {
-		return ctx, func() {}
-	}
-	timeout := r.compaction.Async.FallbackTimeout
-	if timeout <= 0 {
-		timeout = 30 * time.Second
-	}
-	return context.WithTimeout(ctx, timeout)
+func (r *Runtime) compactionRequestContext(ctx context.Context) context.Context {
+	return model.WithRequestAttemptTimeout(ctx, r.compaction.Async.FallbackTimeout)
 }
 
 func asyncRequestFingerprint(req *model.Request) (string, error) {

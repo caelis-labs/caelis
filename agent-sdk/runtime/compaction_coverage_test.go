@@ -172,7 +172,7 @@ func TestCompactionRequireInContextNeverFallsBack(t *testing.T) {
 					req.RequireInContext = false
 					req.Coverage.RequireInContext = true
 				}
-				compactor := &codexStyleCompactor{cfg: normalizeCompactionConfig(CompactionConfig{MaxRetryAttempts: 3})}
+				compactor := &codexStyleCompactor{cfg: normalizeCompactionConfig(CompactionConfig{})}
 				result, err := compactor.Force(t.Context(), req, "test")
 				if err == nil || llm.calls != 1 || result.Compacted || result.CompactEvent != nil {
 					t.Fatalf("calls=%d result=%+v error=%v", llm.calls, result, err)

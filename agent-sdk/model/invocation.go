@@ -177,7 +177,7 @@ func Generate(ctx context.Context, llm LLM, req *Request) iter.Seq2[*StreamEvent
 				observer(receipt)
 			}
 		}()
-		for event, err := range llm.Generate(attemptCtx, prepared) {
+		for event, err := range generateAttempt(attemptCtx, llm, prepared) {
 			if event != nil && event.Response != nil {
 				cloned := *event
 				response := *event.Response

@@ -59,7 +59,7 @@ func generatePrepared(ctx context.Context, llm LLM, req *Request) iter.Seq2[*Str
 			yield(nil, err)
 			return
 		}
-		for event, err := range llm.Generate(ctx, req) {
+		for event, err := range generateAttempt(ctx, llm, req) {
 			if !yield(event, err) {
 				return
 			}
