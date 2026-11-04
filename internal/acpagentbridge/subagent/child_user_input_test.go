@@ -3,12 +3,15 @@ package subagent
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
+	controlagents "github.com/caelis-labs/caelis/control/agents"
 )
 
 func TestUserChildInputActiveAndIdleKeepHumanProvenance(t *testing.T) {
@@ -16,8 +19,18 @@ func TestUserChildInputActiveAndIdleKeepHumanProvenance(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 			defer cancel()
-			runner := childInputTestRunner(t, mode)
-			defer func() { _ = runner.Quiesce(ctx) }()
+			// Keep the active Prompt open until its steering receipt settles.
+			// A terminal can legitimately cancel an unobserved input receipt.
+			release := filepath.Join(t.TempDir(), "terminal-release")
+			runner := newChildInputTestRunner(t, mode, map[string]string{
+				"CAELIS_ACP_CHILD_INPUT_TERMINAL_RELEASE": release,
+			}, controlagents.Authentication{})
+			defer func() {
+				if err := os.WriteFile(release, []byte("release"), 0o600); err != nil {
+					t.Error(err)
+				}
+				_ = runner.Quiesce(ctx)
+			}()
 			events := make(chan childInputTestEvent, 32)
 			spawn := childInputSpawnContext(t, "task-user-"+mode, events)
 			anchor, _, err := runner.Spawn(ctx, spawn, delegation.Request{Agent: "helper", Prompt: "initial"})
