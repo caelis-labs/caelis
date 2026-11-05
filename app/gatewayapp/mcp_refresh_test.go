@@ -36,6 +36,14 @@ func TestExperimentalHTTPMCPRefreshRetriesOwnedActiveManager(t *testing.T) {
 			var initializeOnce sync.Once
 			var fail atomic.Bool
 			var lists atomic.Int32
+			initialListing, initialListRelease := make(chan struct{}), make(chan struct{})
+			backgroundListing, backgroundRelease := make(chan struct{}), make(chan struct{})
+			var holdBackground atomic.Bool
+			var releaseInitialOnce, releaseBackgroundOnce sync.Once
+			releaseInitial := func() { releaseInitialOnce.Do(func() { close(initialListRelease) }) }
+			releaseBackground := func() { releaseBackgroundOnce.Do(func() { close(backgroundRelease) }) }
+			defer releaseInitial()
+			defer releaseBackground()
 			server.AddReceivingMiddleware(func(next mcpsdk.MethodHandler) mcpsdk.MethodHandler {
 				return func(ctx context.Context, method string, req mcpsdk.Request) (mcpsdk.Result, error) {
 					if method == "initialize" && promotedStartup.Load() {
@@ -47,7 +55,23 @@ func TestExperimentalHTTPMCPRefreshRetriesOwnedActiveManager(t *testing.T) {
 						}
 					}
 					if method == "tools/list" {
-						lists.Add(1)
+						count := lists.Add(1)
+						if profile && count == 1 {
+							close(initialListing)
+							select {
+							case <-initialListRelease:
+							case <-ctx.Done():
+								return nil, ctx.Err()
+							}
+						}
+						if holdBackground.CompareAndSwap(true, false) {
+							close(backgroundListing)
+							select {
+							case <-backgroundRelease:
+							case <-ctx.Done():
+								return nil, ctx.Err()
+							}
+						}
 						if fail.Load() {
 							return nil, errors.New("temporary listing failure")
 						}
@@ -91,29 +115,56 @@ func TestExperimentalHTTPMCPRefreshRetriesOwnedActiveManager(t *testing.T) {
 			}
 			active, release := activateHeldSessionRuntime(t, stack, created.SessionID)
 			defer release()
-			var ready func() bool
-			if profile {
-				ready = func() bool {
-					status := active.instance.capabilityStatus(1)
-					for _, server := range status.Servers {
-						if server.PluginID != "desktop-world" && server.Status == "running" && server.Warning == "" {
-							return true
+			catalogStatus := func(active *sessionRuntime) sessionprofile.MCPServerStatus {
+				if profile {
+					for _, server := range active.instance.capabilityStatus(1).Servers {
+						if server.Name == "local" {
+							return server
 						}
 					}
-					return false
+				} else {
+					for _, server := range active.instance.mcpMgr.GetServerInfos(pluginID) {
+						if server.Name == "local" {
+							return applicationMCPServerStatus(server)
+						}
+					}
 				}
-			} else {
-				<-active.instance.mcpMgr.Initialized()
-				ready = func() bool {
-					infos := active.instance.mcpMgr.GetServerInfos(pluginID)
-					return len(infos) == 1 && infos[0].Status == "running" && infos[0].Warning == ""
-				}
+				return sessionprofile.MCPServerStatus{}
 			}
-			awaitExperimentalRefresh(t, ready)
+			ready := func(active *sessionRuntime) bool {
+				server := catalogStatus(active)
+				return server.Status == "running" && server.Warning == "" && !server.Stale && !server.Refreshing && !server.RefreshFailed && len(server.Tools) == 1 && server.Tools[0] == "read"
+			}
+			var manualRefreshes atomic.Int32
+			if profile {
+				active.instance.mu.Lock()
+				refresh := active.instance.capabilityRefresh
+				active.instance.capabilityRefresh = func(ctx context.Context, pluginID, name string) error {
+					manualRefreshes.Add(1)
+					return refresh(ctx, pluginID, name)
+				}
+				active.instance.mu.Unlock()
+				select {
+				case <-initialListing:
+				case <-time.After(5 * time.Second):
+					t.Fatal("initial catalog read did not start")
+				}
+				// A connected transport is visible before its first directory read.
+				// Holding that read makes the fixture's readiness contract deterministic.
+				if ready(active) {
+					releaseInitial()
+					t.Fatal("fixture treated a connected but unlisted catalog as ready")
+				}
+				releaseInitial()
+			}
+			awaitExperimentalRefresh(t, func() bool { return ready(active) })
 			fail.Store(true)
 			before := lists.Load()
 			install("second")
-			awaitExperimentalRefresh(t, func() bool { return lists.Load() > before && !ready() })
+			awaitExperimentalRefresh(t, func() bool {
+				server := catalogStatus(active)
+				return lists.Load() > before && server.Stale && server.RefreshFailed && !server.Refreshing
+			})
 			// No new notification is emitted when the remote server becomes healthy.
 			fail.Store(false)
 			current, err := stack.composition.sessions.Session(t.Context(), session.SessionRef{SessionID: created.SessionID})
@@ -125,7 +176,11 @@ func TestExperimentalHTTPMCPRefreshRetriesOwnedActiveManager(t *testing.T) {
 			if err != nil || result.Outcome != appserver.OutcomeCommitted {
 				t.Fatalf("retry=%+v %v", result, err)
 			}
-			awaitExperimentalRefresh(t, ready)
+			awaitExperimentalRefresh(t, func() bool { return ready(active) })
+			if profile && manualRefreshes.Load() != 1 {
+				t.Fatalf("manual refresh positive control: got %d calls", manualRefreshes.Load())
+			}
+			recoveredRequest := request
 			count := lists.Load()
 			replay, err := client.RefreshMCPTools(t.Context(), request)
 			if err != nil || replay.OperationID != result.OperationID || lists.Load() != count {
@@ -141,6 +196,37 @@ func TestExperimentalHTTPMCPRefreshRetriesOwnedActiveManager(t *testing.T) {
 			request.ExpectedRevision = &bad
 			if result, err := client.RefreshMCPTools(t.Context(), request); err == nil || result.Outcome != appserver.OutcomeConflicted || lists.Load() != count {
 				t.Fatal("stale session precondition reached MCP")
+			}
+			if profile {
+				// Background notifications are independent of rejected manual commands.
+				// Keep one real watcher request in flight and observe the command path too.
+				holdBackground.Store(true)
+				install("third")
+				select {
+				case <-backgroundListing:
+				case <-time.After(5 * time.Second):
+					t.Fatal("background catalog read did not start")
+				}
+				backgroundCount := lists.Load()
+				ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+				defer cancel()
+				if replay, err := client.RefreshMCPTools(ctx, recoveredRequest); err != nil || replay.OperationID != result.OperationID || replay.Outcome != appserver.OutcomeCommitted {
+					t.Fatalf("receipt during background refresh: %+v %v", replay, err)
+				}
+				foreign := recoveredRequest
+				foreign.OperationID = "foreign-during-background"
+				if denied, err := stack.ExperimentalFeatures().Commands.RefreshMCPTools(ctx, appserver.Principal{ID: "not-the-owner"}, foreign); err == nil || denied.Outcome != appserver.OutcomeRejected {
+					t.Fatalf("foreign refresh during background: %+v %v", denied, err)
+				}
+				request.OperationID = "stale-during-background"
+				if denied, err := client.RefreshMCPTools(ctx, request); err == nil || denied.Outcome != appserver.OutcomeConflicted {
+					t.Fatalf("stale refresh during background: %+v %v", denied, err)
+				}
+				if manualRefreshes.Load() != 1 || lists.Load() != backgroundCount {
+					t.Fatalf("replay or rejected refresh reached MCP: manual=%d remote=%d want remote=%d", manualRefreshes.Load(), lists.Load(), backgroundCount)
+				}
+				releaseBackground()
+				awaitExperimentalRefresh(t, func() bool { return ready(active) })
 			}
 			// Live refresh is built in: a fresh activation still serves the retry
 			// even though the retired experimental key is absent.
@@ -172,19 +258,7 @@ func TestExperimentalHTTPMCPRefreshRetriesOwnedActiveManager(t *testing.T) {
 			close(initializeRelease)
 			// Activation starts MCP asynchronously. Refresh tests must wait on the
 			// new activation's existing catalog status, not the previous Manager.
-			awaitExperimentalRefresh(t, func() bool {
-				if profile {
-					status := promotedActive.instance.capabilityStatus(1)
-					for _, server := range status.Servers {
-						if server.PluginID != "desktop-world" && server.Status == "running" && server.Warning == "" {
-							return true
-						}
-					}
-					return false
-				}
-				infos := promotedActive.instance.mcpMgr.GetServerInfos(pluginID)
-				return len(infos) == 1 && infos[0].Status == "running" && infos[0].Warning == ""
-			})
+			awaitExperimentalRefresh(t, func() bool { return ready(promotedActive) })
 			result, err = client.RefreshMCPTools(t.Context(), request)
 			if err != nil || (result.Outcome != appserver.OutcomeCommitted && result.Outcome != appserver.OutcomeAccepted) {
 				t.Fatalf("built-in refresh rejected: %+v %v", result, err)

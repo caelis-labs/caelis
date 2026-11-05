@@ -27,14 +27,19 @@ other plugins. Each Session keeps its own connection,
 state, app approvals and lifecycle. Built-in status grants no blanket approval.
 
 One whole `desktop-world` package supplies both MCP and its namespaced Skill.
-Selection is: an explicit Session package, then an enabled global DTW package,
-then the embedded default. The global DTW default also applies to application
-profiles and ordinary managed Workers; it does not inherit other optional global
+An explicit Session package wins, including its Host launch override. Otherwise,
+Core validates the enabled global DTW package's manifest identity and complete
+MCP/Skill pair, then selects the newer semantic version of that package and the
+supported embedded release. Equal versions, including build metadata differences,
+retain the global package; a non-semver or incomplete version also retains the
+global package without guessing an order. Versions come from the parsed package,
+not the saved registration or directory name. This default selection also applies
+to application profiles and ordinary managed Workers; it does not inherit other optional global
 plugins into explicit selections. Configured aliases of the actual manifest
 identity select the same canonical capability. Duplicate enabled DTW overrides
 are rejected. An invalid selected override reports an error without silently
-using another source. Removing a Session override restores the enabled global
-package or embedded default; disabling or removing the global override restores
+using another source. Removing a Session override restores version selection
+between the enabled global package and embedded release. Disabling or removing the global override restores
 the embedded default. These changes do not delete or overwrite user packages.
 The embedded fallback itself has no switch or uninstall. Status identifies the
 selected source. A different service cannot shadow its projected MCP namespace.

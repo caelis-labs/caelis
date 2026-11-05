@@ -312,8 +312,9 @@ func IsProductPlugin(config Config) bool {
 	return err == nil && localPluginID(installed) == "desktop-world"
 }
 
-// WithProductContributions selects one paired MCP/Skill capability: explicit
-// Session package, enabled Host override, then the embedded fallback. Defaults
+// WithProductContributions selects one paired MCP/Skill package. Explicit Session
+// packages win; otherwise comparable Host and embedded versions use the newer
+// package, with ties and opaque versions retaining the Host override. Defaults
 // come from the same activation snapshot as other Host configuration.
 func WithProductContributions(optional Contributions, paths RuntimePaths, defaults ...Config) (Contributions, error) {
 	for _, source := range optional.Sources {

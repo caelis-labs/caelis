@@ -32,14 +32,14 @@ func TestFixedProductCapabilitiesSurviveOptionalEmptySelection(t *testing.T) {
 }
 
 func TestDesktopWorldOverridePrecedenceAcrossProfilesAndWorkers(t *testing.T) {
-	makePackage := func(name string) string {
+	makePackage := func(name, version string) string {
 		t.Helper()
 		root, err := filepath.EvalSymlinks(t.TempDir())
 		if err != nil {
 			t.Fatal(err)
 		}
 		for path, body := range map[string]string{
-			"plugin.json":                  `{"$schema":"https://agent-plugins.org/schemas/1.0.0/plugin.schema.json","name":"` + name + `","version":"0.3.3"}`,
+			"plugin.json":                  `{"$schema":"https://agent-plugins.org/schemas/1.0.0/plugin.schema.json","name":"` + name + `","version":"` + version + `"}`,
 			"mcp.json":                     `{"$schema":"https://agent-plugins.org/schemas/1.0.0/mcp.schema.json","mcpServers":{"` + name + `":{"type":"stdio","command":"./server"}}}`,
 			"server":                       "fixture; never launched",
 			"skills/" + name + "/SKILL.md": "---\nname: " + name + "\ndescription: Selected package.\n---\n" + root,
@@ -54,9 +54,9 @@ func TestDesktopWorldOverridePrecedenceAcrossProfilesAndWorkers(t *testing.T) {
 		}
 		return root
 	}
-	root := makePackage("desktop-world")
-	globalRoot := makePackage("desktop-world")
-	otherRoot := makePackage("other-plugin")
+	root := makePackage("desktop-world", "0.1.1")
+	globalRoot := makePackage("desktop-world", "999.0.0")
+	otherRoot := makePackage("other-plugin", "9999.0.0")
 	defaults := []plugin.Config{{ID: "alias", Root: globalRoot, Enabled: true}, {ID: "other-plugin", Root: otherRoot, Enabled: true}}
 	paths := applicationPluginPaths(t.TempDir(), "profile", t.TempDir())
 	selected := sessionprofile.Profile{Plugins: []sessionprofile.Plugin{{Root: root, MCPServers: []sessionprofile.MCPServer{{Name: "desktop-world", Transport: "stdio", Command: "must-never-launch", WorkDir: root}}}}}
@@ -85,6 +85,26 @@ func TestDesktopWorldOverridePrecedenceAcrossProfilesAndWorkers(t *testing.T) {
 	}
 	if len(ordinary.Sources) != 2 || ordinary.Sources[0].Root != globalRoot {
 		t.Fatal("inherited optional plugins or canonical DTW selection lost")
+	}
+	olderRoot := makePackage("desktop-world", "0.1.1")
+	defaults[0].Root = olderRoot
+	builtin, err := plugin.ProductContributions(paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantRoot := olderRoot
+	if builtin.Sources[0].Status == "builtin" {
+		wantRoot = builtin.Sources[0].Root
+	}
+	for _, optional := range [][]sessionprofile.Plugin{nil, {}} {
+		got, err = applicationRuntimePluginContributions(sessionprofile.Profile{Plugins: optional}, paths, defaults...)
+		if err != nil || len(got.Sources) != 1 || got.Sources[0].Root != wantRoot || got.MCPServerSpecs[0].PackageRoot != wantRoot || got.SkillBundles[0].PluginRoot != wantRoot {
+			t.Fatalf("newest default in Bot/Worker profile = %+v, %v", got, err)
+		}
+	}
+	ordinary, err = resolveGatewayPluginContributions(defaults, paths.ProductStoreDir, t.TempDir())
+	if err != nil || len(ordinary.Sources) != 2 || ordinary.Sources[0].Root != wantRoot || ordinary.Sources[1].Root != otherRoot {
+		t.Fatalf("newest ordinary default or optional isolation = %+v, %v", ordinary, err)
 	}
 	defaults[0].Enabled = false
 	got, err = applicationRuntimePluginContributions(sessionprofile.Profile{}, paths, defaults...)
