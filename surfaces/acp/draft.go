@@ -42,7 +42,7 @@ func ServeDraftStdio(ctx context.Context, schema string, info acpsdk.Implementat
 	}
 	router := &v2.ProtocolRouter{V2: draftInitializeHandler(info)}
 	peer, err := acpsdk.NewConnectionWithOptions(router.Handle, connectionOutput, connectionInput,
-		acpsdk.ConnectionOptions{MaxFrameSize: serverMaxFrameSize})
+		acpsdk.ConnectionOptions{MaxFrameSize: serverMaxFrameSize, RejectBatch: true})
 	if err != nil {
 		closeInputOnFailure()
 		closeOutputOnFailure()

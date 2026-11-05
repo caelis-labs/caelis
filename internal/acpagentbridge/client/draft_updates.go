@@ -45,7 +45,7 @@ func (d *draftClient) handleUpdate(raw json.RawMessage) {
 		d.fail(err)
 		return
 	}
-	// In SDK v1.5.2 the SessionUpdate union probes required replacement lists
+	// The pinned SDK SessionUpdate union probes required replacement lists
 	// before their leaf receiver can recover entries. This private ingress uses
 	// the SDK leaf receiver first for those variants; remove this ordering shim
 	// when the upstream union delegates recovery before its strict probes.
@@ -127,6 +127,12 @@ func (d *draftClient) decodeUpdates(sessionID, kind string, fields map[string]js
 		d.mu.Unlock()
 	}
 	switch kind {
+	case UpdateUsage:
+		update, err := d.decodeUsage(sessionID, raw)
+		if err != nil {
+			return nil, err
+		}
+		return []Update{update}, nil
 	case "user_message", "agent_message", "agent_thought", UpdateUserMessage, UpdateAgentMessage, UpdateAgentThought:
 		return d.decodeMessage(sessionID, kind, fields)
 	case "terminal_update", "terminal_output_chunk":

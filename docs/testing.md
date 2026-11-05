@@ -282,6 +282,22 @@ snapshots without invoking a desktop or live model. See the
 Built-in computer-use acceptance is separate from this optional install/remove
 contract; see [built-in plugin preparation](#built-in-plugin-preparation).
 
+ACP release compatibility has a deterministic stdio gate:
+
+```bash
+GOWORK=off go test -tags=e2e ./eval -run '^TestACPSDKReleaseCompatibility$' -count=1 -v
+```
+
+It independently compiles SDK v1.5.2 and v1.6.0 peers, then tests each against
+the Core client and ACP Surface in both directions. It covers stable v1
+initialization, Session creation, ordered updates, reverse permission requests
+and completion. The peers use temporary module graphs with pinned checksums;
+they need a Go module cache or network access and make no model requests.
+The PR Go quality job runs this gate with race instrumentation in Core and both
+independent peers.
+Draft v2 is covered by the owning Go wire and product tests, including exact
+schema rejection; this gate does not claim TypeScript/Rust v2 interoperability.
+
 Codex ACP has two opt-in live tests:
 
 ```bash

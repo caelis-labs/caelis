@@ -118,17 +118,18 @@ func TestDraftInitializeNegotiatesNewerMajorToPinnedV2(t *testing.T) {
 func TestDraftInitializeRejectsInvalidOrIncompatibleHandshake(t *testing.T) {
 	t.Parallel()
 	for name, request := range map[string]json.RawMessage{
-		"v1":            json.RawMessage(`{"protocolVersion":1,"clientInfo":{"name":"fixture","version":"test"}}`),
-		"zero":          json.RawMessage(`{"protocolVersion":0,"info":{"name":"fixture","version":"test"}}`),
-		"no version":    json.RawMessage(`{"info":{"name":"fixture","version":"test"}}`),
-		"null version":  json.RawMessage(`{"protocolVersion":null,"info":{"name":"fixture","version":"test"}}`),
-		"no info":       json.RawMessage(`{"protocolVersion":2,"clientInfo":{"name":"fixture","version":"test"}}`),
-		"null info":     json.RawMessage(`{"protocolVersion":2,"info":null}`),
-		"bad info":      json.RawMessage(`{"protocolVersion":2,"info":{"name":"fixture"}}`),
-		"future schema": json.RawMessage(`{"protocolVersion":3,"info":{"name":"fixture","version":"test"},"_meta":{"caelis/acp_schema":"schema-v2.0.0-alpha.8"}}`),
-		"other schema":  json.RawMessage(`{"protocolVersion":2,"info":{"name":"fixture","version":"test"},"_meta":{"caelis/acp_schema":"schema-v2.0.0-alpha.7"}}`),
-		"null schema":   json.RawMessage(`{"protocolVersion":2,"info":{"name":"fixture","version":"test"},"_meta":{"caelis/acp_schema":null}}`),
-		"object schema": json.RawMessage(`{"protocolVersion":2,"info":{"name":"fixture","version":"test"},"_meta":{"caelis/acp_schema":{}}}`),
+		"v1":              json.RawMessage(`{"protocolVersion":1,"clientInfo":{"name":"fixture","version":"test"}}`),
+		"zero":            json.RawMessage(`{"protocolVersion":0,"info":{"name":"fixture","version":"test"}}`),
+		"no version":      json.RawMessage(`{"info":{"name":"fixture","version":"test"}}`),
+		"null version":    json.RawMessage(`{"protocolVersion":null,"info":{"name":"fixture","version":"test"}}`),
+		"no info":         json.RawMessage(`{"protocolVersion":2,"clientInfo":{"name":"fixture","version":"test"}}`),
+		"null info":       json.RawMessage(`{"protocolVersion":2,"info":null}`),
+		"bad info":        json.RawMessage(`{"protocolVersion":2,"info":{"name":"fixture"}}`),
+		"future schema":   json.RawMessage(`{"protocolVersion":3,"info":{"name":"fixture","version":"test"},"_meta":{"caelis/acp_schema":"schema-v2.0.0-alpha.8"}}`),
+		"previous schema": json.RawMessage(`{"protocolVersion":2,"info":{"name":"fixture","version":"test"},"_meta":{"caelis/acp_schema":"schema-v2.0.0-alpha.10"}}`),
+		"other schema":    json.RawMessage(`{"protocolVersion":2,"info":{"name":"fixture","version":"test"},"_meta":{"caelis/acp_schema":"schema-v2.0.0-alpha.7"}}`),
+		"null schema":     json.RawMessage(`{"protocolVersion":2,"info":{"name":"fixture","version":"test"},"_meta":{"caelis/acp_schema":null}}`),
+		"object schema":   json.RawMessage(`{"protocolVersion":2,"info":{"name":"fixture","version":"test"},"_meta":{"caelis/acp_schema":{}}}`),
 	} {
 		t.Run(name, func(t *testing.T) {
 			ctx, connection := newDraftTestConnection(t)

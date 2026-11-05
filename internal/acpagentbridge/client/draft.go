@@ -52,6 +52,8 @@ type draftSession struct {
 	activitySequence   uint64
 	activeSequence     uint64
 	activityCacheBytes int
+	cost               json.RawMessage
+	costCacheBytes     int
 	cacheBytes         int
 }
 

@@ -58,7 +58,11 @@ func (d *draftClient) preparePrompt(sessionID string, prompt []json.RawMessage, 
 	for key, value := range acpdraft.IdleOnlyMeta() {
 		rawMeta[key] = value
 	}
-	call, err := acpsdk.PrepareRequest[v2.PromptResponse](d.client.conn, v2.AgentMethodSessionPrompt, v2.PromptRequest{SessionId: v2.SessionId(sessionID), Prompt: blocks, Meta: rawMeta})
+	request := v2.PromptRequest{SessionId: v2.SessionId(sessionID), Prompt: blocks, Meta: rawMeta}
+	if err := request.Validate(); err != nil {
+		return nil, err
+	}
+	call, err := acpsdk.PrepareRequest[v2.PromptResponse](d.client.conn, v2.AgentMethodSessionPrompt, request)
 	if err != nil {
 		return nil, err
 	}
@@ -243,6 +247,10 @@ func (d *draftClient) steer(ctx context.Context, sessionID string, prompt []json
 	if err != nil {
 		return SessionSteeringResponse{}, err
 	}
+	request := v2.PromptRequest{SessionId: v2.SessionId(sessionID), Prompt: blocks}
+	if err := request.Validate(); err != nil {
+		return SessionSteeringResponse{}, err
+	}
 	d.mu.Lock()
 	session, err := d.ensureSessionLocked(sessionID)
 	if err != nil {
@@ -262,7 +270,8 @@ func (d *draftClient) steer(ctx context.Context, sessionID string, prompt []json
 		d.sessionLocked(sessionID).receiptWaiters--
 		d.mu.Unlock()
 	}()
-	call, err := acpsdk.PrepareRequest[v2.PromptResponse](d.client.conn, v2.AgentMethodSessionPrompt, v2.PromptRequest{SessionId: v2.SessionId(sessionID), Prompt: blocks, Meta: acpdraft.ActiveOnlyMeta(activity)})
+	request.Meta = acpdraft.ActiveOnlyMeta(activity)
+	call, err := acpsdk.PrepareRequest[v2.PromptResponse](d.client.conn, v2.AgentMethodSessionPrompt, request)
 	if err != nil {
 		return SessionSteeringResponse{}, err
 	}
