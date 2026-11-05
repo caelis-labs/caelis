@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.77.2](https://github.com/caelis-labs/caelis/compare/v0.77.1...v0.77.2) (2026-11-05)
+
+
+### Bug Fixes
+
+* **acp:** align SDK v1.6.0 and draft alpha.13 ([#200](https://github.com/caelis-labs/caelis/issues/200)) ([82f75f1](https://github.com/caelis-labs/caelis/commit/82f75f13f5aa38e94947d2d58d59f3fd9e008732))
+* keep Agent recovery alive and retire stale activity hints ([#196](https://github.com/caelis-labs/caelis/issues/196)) ([f0d81aa](https://github.com/caelis-labs/caelis/commit/f0d81aa6ceea51b767b3f7c5268379c93ee25d4f))
+* select newer DTW package and pin v0.3.5 ([#198](https://github.com/caelis-labs/caelis/issues/198)) ([f7c2d61](https://github.com/caelis-labs/caelis/commit/f7c2d61ff370b346b0ebb83340d19e6796daa313))
+* speed up long-session resume and preserve loading drafts ([#199](https://github.com/caelis-labs/caelis/issues/199)) ([3b3dc1e](https://github.com/caelis-labs/caelis/commit/3b3dc1e862b22dd5fbe6914155a10cc6c7c52b4d))
+
+
+### Performance Improvements
+
+* reuse incremental status usage projections ([#202](https://github.com/caelis-labs/caelis/issues/202)) ([83743d3](https://github.com/caelis-labs/caelis/commit/83743d3396faf4fd36fb8768ed16d0a2cd97384d))
+
 ## [0.77.1](https://github.com/caelis-labs/caelis/compare/v0.77.0...v0.77.1) (2026-11-03)
 
 Bundles the complete official Desktop World 0.3.4 MCP+Skill plugin on macOS arm64 and Windows x64. An explicit Session package or enabled global DTW package still overrides the builtin fallback.
