@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	inmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
@@ -50,10 +51,9 @@ func TestStatusSharesParentHistoryCutAndRefreshesUsage(t *testing.T) {
 	deps := &runtimeDeps{
 		Session: SessionRuntimeDeps{Store: store},
 		Model: ModelRuntimeDeps{
-			SessionUsageSnapshotFn: func(_ context.Context, _ session.SessionRef, _ string, events []*session.Event) (compact.UsageSnapshot, error) {
+			SessionUsageSnapshotFn: func(_ context.Context, _ session.SessionRef, _ string, projection *runtime.ContextUsageProjection) (compact.UsageSnapshot, error) {
 				readsAtProjection = store.reads
-				total := sessionTokenUsageBreakdownFromEvents(events, tokenUsageCategoryMain).Total.TotalTokens
-				return compact.UsageSnapshot{TotalTokens: total}, nil
+				return projection.Snapshot(128000, runtime.CompactionConfig{}, "fixture", "main"), nil
 			},
 		},
 	}
@@ -65,6 +65,11 @@ func TestStatusSharesParentHistoryCutAndRefreshesUsage(t *testing.T) {
 		if index == 1 {
 			appendUsage("second", 20)
 		}
+		events, err := store.Store.Events(t.Context(), session.EventsRequest{SessionRef: active.SessionRef})
+		if err != nil {
+			t.Fatal(err)
+		}
+		expectedContext := runtime.ComputeUsageSnapshotForModel(events, nil, 128000, runtime.CompactionConfig{}, "fixture", "main")
 		result, err := driver.Status(t.Context())
 		if err != nil {
 			t.Fatal(err)
@@ -72,7 +77,7 @@ func TestStatusSharesParentHistoryCutAndRefreshesUsage(t *testing.T) {
 		if store.reads != index+1 || readsAtProjection != store.reads {
 			t.Fatalf("status read history %d times; context read at %d", store.reads, readsAtProjection)
 		}
-		if result.Usage.TotalTokens != want || result.Usage.SessionUsageTotal.TotalTokens != want || len(result.Usage.SessionUsageByModel) != 1 {
+		if result.Usage.TotalTokens != expectedContext.TotalTokens || result.Usage.SessionUsageTotal.TotalTokens != want || len(result.Usage.SessionUsageByModel) != 1 {
 			t.Fatalf("usage=%+v, want context and total %d", result.Usage, want)
 		}
 	}

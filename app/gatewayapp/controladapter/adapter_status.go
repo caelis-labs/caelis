@@ -4,7 +4,6 @@ import (
 	"context"
 	"strings"
 
-	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	controlstatus "github.com/caelis-labs/caelis/control/status"
 	"github.com/caelis-labs/caelis/control/workspacetrust"
@@ -171,14 +170,16 @@ func (d *assembler) status(ctx context.Context, includeDiagnostics bool) (contro
 		status.Usage.ContextUsageControllerEpoch = strings.TrimSpace(activeSession.Controller.EpochID)
 	}
 	if d.deps != nil {
-		// Context and lifetime accounting use the same parent history cut.
-		// Keep this request-local: the next status must observe new receipts.
-		var usageEvents []*session.Event
+		// Context and accounting share an immutable cut, caught up incrementally.
+		var usageView sessionUsageView
 		var usageErr error
 		if ok && (includeDiagnostics || activeACP) && d.deps.Session.Store != nil {
-			usageEvents, usageErr = sessionUsageEvents(ctx, d.deps.Session.Store, activeSession.SessionRef)
+			usageView, usageErr = d.usage.read(ctx, d, activeSession.SessionRef, tokenUsageCategoryMain, includeDiagnostics && !activeACP && d.deps.Model.SessionUsageSnapshotFn != nil)
 			if ctx.Err() != nil {
 				return controlstatus.StatusSnapshot{}, ctx.Err()
+			}
+			if usageErr != nil && includeDiagnostics {
+				return controlstatus.StatusSnapshot{}, usageErr
 			}
 		}
 		// The configured context window is static model metadata, not a usage
@@ -194,7 +195,7 @@ func (d *assembler) status(ctx context.Context, includeDiagnostics bool) (contro
 		if activeACP && ok && usageErr == nil {
 			usage, found := latestACPControllerContextUsage(
 				activeSession,
-				usageEvents,
+				usageView.events,
 				firstNonEmpty(acpStatus.Agent, activeSession.Controller.AgentName, activeSession.Controller.ControllerID),
 				firstNonEmpty(acpStatus.Model, activeSession.Controller.Placement.Model),
 			)
@@ -231,7 +232,7 @@ func (d *assembler) status(ctx context.Context, includeDiagnostics bool) (contro
 			}
 		}
 		if includeDiagnostics && ok && usageErr == nil && !activeACP && d.deps.Model.SessionUsageSnapshotFn != nil {
-			if usage, err := d.deps.Model.SessionUsageSnapshotFn(ctx, activeSession.SessionRef, rawModelText, usageEvents); err == nil {
+			if usage, err := d.deps.Model.SessionUsageSnapshotFn(ctx, activeSession.SessionRef, rawModelText, usageView.context); err == nil {
 				status.Usage.TotalTokens = usage.TotalTokens
 				status.Usage.ContextUsageAvailable = true
 				if usage.ContextWindowTokens > 0 {
@@ -242,11 +243,11 @@ func (d *assembler) status(ctx context.Context, includeDiagnostics bool) (contro
 			}
 		}
 		if includeDiagnostics && ok && usageErr == nil {
-			if usage, err := d.sessionTokenUsageBreakdown(ctx, activeSession.SessionRef, usageEvents); err == nil {
+			if usage, err := d.sessionTokenUsageBreakdownFromView(ctx, usageView); err == nil {
 				status.Usage.SessionUsageTotal = usageSnapshotFromSession(usage.Total)
 				status.Usage.SessionUsageByModel = modelUsageSnapshotsFromBreakdown(usage)
-			} else if ctx.Err() != nil {
-				return controlstatus.StatusSnapshot{}, ctx.Err()
+			} else {
+				return controlstatus.StatusSnapshot{}, err
 			}
 		}
 		if includeDiagnostics && !activeACP && d.deps.Model.ProviderUsageFn != nil {

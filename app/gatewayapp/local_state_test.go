@@ -15,6 +15,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
+	sdkruntime "github.com/caelis-labs/caelis/agent-sdk/runtime"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
@@ -462,7 +463,9 @@ func TestReloadedSessionHydratesMissingGrokContextWindow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	usage, err := reloaded.Models().UsageSnapshot(ctx, resumedRef, state.ModelAlias, usageEvents)
+	projection := &sdkruntime.ContextUsageProjection{}
+	projection.Append(usageEvents)
+	usage, err := reloaded.Models().UsageSnapshot(ctx, resumedRef, state.ModelAlias, projection)
 	if err != nil {
 		t.Fatalf("SessionUsageSnapshot() error = %v", err)
 	}
@@ -1455,7 +1458,9 @@ func TestSessionUsageSnapshotKeepsPromptPrefixVisibleAfterCompact(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	usage, err := stack.Models().UsageSnapshot(ctx, activeSession.SessionRef, "ollama/llama3", usageEvents)
+	projection := &sdkruntime.ContextUsageProjection{}
+	projection.Append(usageEvents)
+	usage, err := stack.Models().UsageSnapshot(ctx, activeSession.SessionRef, "ollama/llama3", projection)
 	if err != nil {
 		t.Fatalf("SessionUsageSnapshot() error = %v", err)
 	}
@@ -1518,7 +1523,9 @@ func TestSessionUsageSnapshotUsesActiveMainModelBaseline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	usage, err := stack.Models().UsageSnapshot(ctx, activeSession.SessionRef, "openai-codex/gpt-main", usageEvents)
+	projection := &sdkruntime.ContextUsageProjection{}
+	projection.Append(usageEvents)
+	usage, err := stack.Models().UsageSnapshot(ctx, activeSession.SessionRef, "openai-codex/gpt-main", projection)
 	if err != nil {
 		t.Fatalf("SessionUsageSnapshot() error = %v", err)
 	}

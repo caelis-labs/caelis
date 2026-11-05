@@ -31,6 +31,16 @@ func snapshotUsageWithResolvedWindowDetails(
 	cfg CompactionConfig,
 	useProviderSnapshot func(providerTokenSnapshot) bool,
 ) (compact.UsageSnapshot, providerTokenSnapshot, bool) {
+	return snapshotUsageWithResolvedWindowDetailsUsing(promptEvents, window, cfg, useProviderSnapshot, estimatePromptEventTokens)
+}
+
+func snapshotUsageWithResolvedWindowDetailsUsing(
+	promptEvents []*session.Event,
+	window int,
+	cfg CompactionConfig,
+	useProviderSnapshot func(providerTokenSnapshot) bool,
+	estimate func(*session.Event) int,
+) (compact.UsageSnapshot, providerTokenSnapshot, bool) {
 	cfg = normalizeCompactionConfig(cfg)
 	if window <= 0 {
 		window = cfg.DefaultContextWindowTokens
@@ -47,13 +57,18 @@ func snapshotUsageWithResolvedWindowDetails(
 	providerSnapshot, hasProviderSnapshot := latestProviderTokenSnapshotUsing(promptEvents, useProviderSnapshot)
 	if hasProviderSnapshot {
 		total = providerSnapshot.BaselineTokens
-		delta = estimateTokensFromIndex(promptEvents, providerSnapshot.DeltaStartIndex)
+		for _, event := range promptEvents[providerSnapshot.DeltaStartIndex:] {
+			delta += estimate(event)
+		}
 		total += delta
 		asOfEventID = providerSnapshot.EventID
 		source = compact.UsageSourceProvider
 	} else {
 		prefix = cfg.EstimatedPromptPrefixTokens
-		total = estimatePromptEventsTokens(promptEvents) + prefix
+		total = prefix
+		for _, event := range promptEvents {
+			total += estimate(event)
+		}
 	}
 	return compact.UsageSnapshot{
 		TotalTokens:           total,
@@ -331,17 +346,6 @@ func nestedMap(values map[string]any, path ...string) map[string]any {
 	}
 	out, _ := current.(map[string]any)
 	return out
-}
-
-func estimateTokensFromIndex(events []*session.Event, index int) int {
-	if index <= 0 {
-		return estimatePromptEventsTokens(events)
-	}
-	total := 0
-	for _, event := range events[index:] {
-		total += estimatePromptEventTokens(event)
-	}
-	return total
 }
 
 func estimatePromptEventsTokens(events []*session.Event) int {
