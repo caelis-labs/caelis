@@ -7,6 +7,27 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 )
 
+// ProjectUsageEvent returns detached usage/provenance fields without message or
+// tool payloads. Compaction text is retained for the existing context estimator.
+// This derived view is not a transcript and must never be persisted as an Event.
+func ProjectUsageEvent(event *Event) *Event {
+	if event == nil {
+		return nil
+	}
+	out := *event
+	out.Type = EventTypeOf(event)
+	if IsJournal(event) {
+		out.Visibility = VisibilityJournal
+	}
+	out.Message, out.Tool, out.PlanPayload, out.Protocol, out.Journal = nil, nil, nil, nil, nil
+	out.Text = ""
+	_, checkpoint := event.Meta[CheckpointMetadataKey]
+	if out.Type == EventTypeCompact || checkpoint {
+		out.Text = EventText(event)
+	}
+	return CloneEvent(&out)
+}
+
 type UsageSnapshot struct {
 	// CacheReadAccounting preserves the API input basis through usage projection.
 	CacheReadAccounting        model.CacheReadAccounting `json:"cache_read_accounting,omitempty"`

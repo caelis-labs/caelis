@@ -18,6 +18,7 @@ const processOwnedFullAccessSessionMode = "yolo"
 type assembler struct {
 	mu                 sync.Mutex
 	deps               *runtimeDeps
+	usage              *UsageReadModel
 	session            session.Session
 	hasSession         bool
 	bindingKey         string
@@ -58,7 +59,12 @@ func newAssemblerForSession(ctx context.Context, deps *runtimeDeps, activeSessio
 
 func newHostAssembler(deps *runtimeDeps, bindingKey string, modelText string) *assembler {
 	key := firstNonEmpty(strings.TrimSpace(bindingKey), "cli-tui")
+	usage := NewUsageReadModel()
+	if deps != nil && deps.Status.UsageReadModel != nil {
+		usage = deps.Status.UsageReadModel
+	}
 	return &assembler{
+		usage:              usage,
 		deps:               deps,
 		bindingKey:         key,
 		defaultModelText:   strings.TrimSpace(modelText),

@@ -83,7 +83,7 @@ func defaultCompactionConfig(contextWindow int) sdkruntime.CompactionConfig {
 	}
 }
 
-func (s *runtimeComposition) SessionUsageSnapshot(ctx context.Context, ref session.SessionRef, modelAlias string, events []*session.Event) (compact.UsageSnapshot, error) {
+func (s *runtimeComposition) SessionUsageSnapshot(ctx context.Context, ref session.SessionRef, modelAlias string, projection *sdkruntime.ContextUsageProjection) (compact.UsageSnapshot, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -96,13 +96,8 @@ func (s *runtimeComposition) SessionUsageSnapshot(ctx context.Context, ref sessi
 	if err := ctx.Err(); err != nil {
 		return compact.UsageSnapshot{}, err
 	}
-	// Match the canonical Events read used by context reporting. Journal-only
-	// accounting receipts must not become provider context baselines.
-	canonical := make([]*session.Event, 0, len(events))
-	for _, event := range events {
-		if session.IsCanonicalHistoryEvent(event) {
-			canonical = append(canonical, event)
-		}
+	if projection == nil {
+		projection = &sdkruntime.ContextUsageProjection{}
 	}
 	alias := strings.TrimSpace(modelAlias)
 	if alias == "" && s.lookup != nil {
@@ -112,9 +107,7 @@ func (s *runtimeComposition) SessionUsageSnapshot(ctx context.Context, ref sessi
 	cfg := defaultCompactionConfig(contextWindow)
 	cfg.EstimatedPromptPrefixTokens = s.estimatedPromptPrefixTokens(ctx, ref)
 	modelCfg, _ := s.modelConfigForAlias(alias)
-	return sdkruntime.ComputeUsageSnapshotForModel(
-		canonical,
-		nil,
+	return projection.Snapshot(
 		contextWindow,
 		cfg,
 		modelCfg.Provider,

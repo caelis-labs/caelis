@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/caelis-labs/caelis/agent-sdk/runtime"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
@@ -174,10 +175,9 @@ func (s *controlCommandBackend) authenticateModelProvider(ctx context.Context, r
 	return modelconfig.AuthenticateProvider(ctx, req)
 }
 
-// UsageSnapshot projects current context from the complete parent history cut
-// supplied by the authorized status reader. It does not reread Session history.
-func (s ModelService) UsageSnapshot(ctx context.Context, ref session.SessionRef, modelAlias string, events []*session.Event) (compact.UsageSnapshot, error) {
-	return s.composition.SessionUsageSnapshot(ctx, ref, modelAlias, events)
+// UsageSnapshot resolves model settings over the caller's immutable context projection.
+func (s ModelService) UsageSnapshot(ctx context.Context, ref session.SessionRef, modelAlias string, projection *runtime.ContextUsageProjection) (compact.UsageSnapshot, error) {
+	return s.composition.SessionUsageSnapshot(ctx, ref, modelAlias, projection)
 }
 
 // ProviderUsage returns the latest cached account-level subscription windows

@@ -17,6 +17,7 @@ import (
 // It reuses the maintained status assembler while keeping Runtime handles out
 // of presentation surfaces.
 type StatusService struct {
+	usage                     *controladapter.UsageReadModel
 	hostDeps                  *controladapter.StatusAssemblyDeps
 	acquireRuntime            acquireControlRuntimeFunc
 	resolveWorkspace          resolveWorkspaceAddressFunc
@@ -38,6 +39,7 @@ func newStatusService(deps statusServiceDeps) (*StatusService, error) {
 		return nil, errors.New("app/gatewayapp/controladapter/local: status service dependencies are required")
 	}
 	return &StatusService{
+		usage:    controladapter.NewUsageReadModel(),
 		hostDeps: deps.hostDeps, acquireRuntime: deps.acquireRuntime, resolveWorkspace: deps.resolveWorkspace,
 		sandboxStatusForWorkspace: deps.sandboxStatusForWorkspace, doctorForWorkspace: deps.doctorForWorkspace,
 	}, nil
@@ -96,6 +98,7 @@ func (s *StatusService) SessionStatus(
 		return controlstatus.StatusSnapshot{}, errors.New("app/gatewayapp/controladapter/local: status Runtime projection is unavailable")
 	}
 	resolvedDeps := *deps
+	resolvedDeps.Status.UsageReadModel = s.usage
 
 	if !request.IncludeWorkspaceTrustRequirement {
 		resolvedDeps.Status.ProjectMCPConfigurationPresentFn = nil

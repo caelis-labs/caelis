@@ -121,6 +121,22 @@ incompatible durable state but never mutates it.
 
 `control/appserver.AppServerClients` is the aggregate capability boundary used by
 product clients. Focused Control packages remain the semantic owners behind it.
+
+Host status owns a bounded, disposable usage read model shared by its requests.
+It builds from durable Events once, then reads only after the recorded sequence
+through an immutable Session/event checkpoint. Canonical invocation receipts and
+the existing legacy-state accounting retain authority; the read model performs
+no writes. It retains usage metadata and Runtime token estimates rather than
+transcript payloads, and uses the existing receipt deduplication and context
+estimator. A changed accounting cut reprojects those compact facts, including
+late receipts that supersede older measurements. Child membership and each
+child's durable cut are observed anew; these are per-Session cuts, not a global
+transaction across independent Sessions. Restart or eviction rebuilds on the
+first query. Execution and model-context replay never read this status cache.
+Full status returns an accounting read error rather than presenting a partial
+total. Remote ACP children without a local Session still use the existing Task
+gauge fallback.
+
 Task observation is independently delivered and never joins the Session feed, so
 a slow Task observer cannot delay or reclassify the parent Turn. Visible child
 Task subscriptions retry transient observation failures,

@@ -2,6 +2,7 @@ package controladapter
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"sort"
@@ -51,49 +52,38 @@ const (
 	tokenUsageCategoryAutoReview = "auto_review"
 )
 
-func (d *assembler) sessionTokenUsageBreakdown(ctx context.Context, ref session.SessionRef, events []*session.Event) (sessionTokenUsageBreakdown, error) {
-	if d == nil || d.deps == nil || d.deps.Session.Store == nil {
+func (d *assembler) sessionTokenUsageBreakdownFromView(ctx context.Context, view sessionUsageView) (sessionTokenUsageBreakdown, error) {
+	if d == nil || d.deps == nil || d.deps.Session.Store == nil || view.active.SessionID == "" {
 		return sessionTokenUsageBreakdown{}, nil
 	}
-	if strings.TrimSpace(ref.SessionID) == "" {
-		return sessionTokenUsageBreakdown{}, nil
-	}
-	if active, err := d.deps.Session.Store.Session(ctx, ref); err == nil {
-		events = d.filterCurrentMainContextUsage(ctx, active, events)
-	}
-	breakdown := sessionTokenUsageBreakdownFromEvents(events, tokenUsageCategoryMain)
-	if state, err := d.deps.Session.Store.SnapshotState(ctx, ref); err == nil {
-		breakdown.addBreakdown(sessionTokenUsageBreakdownFromState(state))
-	}
+	breakdown := view.breakdown
 	aggregatedLocalChildTasks := map[string]struct{}{}
-	for _, child := range d.subagentChildren(ctx, ref) {
-		childEvents, err := sessionUsageEvents(ctx, d.deps.Session.Store, child.SessionRef)
+	for _, child := range subagentChildren(view.active) {
+		childView, err := d.usage.read(ctx, d, child.SessionRef, tokenUsageCategorySubagent, false)
 		if err != nil {
-			continue
+			// A remote ACP child may have no local mirror; its Task gauge is
+			// the existing fallback. Other failures cannot prove a full total.
+			if errors.Is(err, session.ErrSessionNotFound) {
+				continue
+			}
+			return sessionTokenUsageBreakdown{}, err
 		}
-		if active, err := d.deps.Session.Store.Session(ctx, child.SessionRef); err == nil {
-			childEvents = d.filterCurrentMainContextUsage(ctx, active, childEvents)
-		}
-		childBreakdown := sessionTokenUsageBreakdownFromEvents(childEvents, tokenUsageCategorySubagent)
-		if state, err := d.deps.Session.Store.SnapshotState(ctx, child.SessionRef); err == nil {
-			childBreakdown.addBreakdown(sessionTokenUsageBreakdownFromState(state))
-		}
-		breakdown.addBreakdown(childBreakdown)
+		breakdown.addBreakdown(childView.breakdown)
 		if taskID := strings.TrimSpace(child.DelegationID); taskID != "" {
 			aggregatedLocalChildTasks[taskID] = struct{}{}
 		}
 	}
 	if d.deps.Status.TaskEntriesFn != nil {
-		if entries, err := d.deps.Status.TaskEntriesFn(ctx, ref); err == nil {
+		if entries, err := d.deps.Status.TaskEntriesFn(ctx, view.active.SessionRef); err == nil {
 			breakdown.addACPTaskUsage(entries, aggregatedLocalChildTasks)
-		} else if ctx.Err() != nil {
-			return sessionTokenUsageBreakdown{}, ctx.Err()
+		} else {
+			return sessionTokenUsageBreakdown{}, err
 		}
 	}
 	return breakdown, nil
 }
 
-func (d *assembler) filterCurrentMainContextUsage(ctx context.Context, active session.Session, events []*session.Event) []*session.Event {
+func (d *assembler) currentContextUsageIdentity(ctx context.Context, active session.Session) (string, string) {
 	expectedProvider := firstNonEmpty(active.Controller.AgentName, active.Controller.ControllerID, active.Controller.Label)
 	expectedModel := strings.TrimSpace(active.Controller.Placement.Model)
 	if active.Controller.Kind == session.ControllerKindACP && d != nil && d.deps != nil && d.deps.Agent.ControllerStatusFn != nil {
@@ -102,6 +92,10 @@ func (d *assembler) filterCurrentMainContextUsage(ctx context.Context, active se
 			expectedModel = firstNonEmpty(status.Model, expectedModel)
 		}
 	}
+	return expectedProvider, expectedModel
+}
+
+func filterMainContextUsage(active session.Session, events []*session.Event, expectedProvider, expectedModel string) []*session.Event {
 	latestMain := latestControllerContextUsageIndex(events, active.Controller, expectedProvider, expectedModel)
 	out := make([]*session.Event, 0, len(events))
 	for index, event := range events {
@@ -567,14 +561,7 @@ type subagentChildRef struct {
 	DelegationID string
 }
 
-func (d *assembler) subagentChildren(ctx context.Context, ref session.SessionRef) []subagentChildRef {
-	if d == nil || d.deps == nil || d.deps.Session.Store == nil {
-		return nil
-	}
-	activeSession, err := d.deps.Session.Store.Session(ctx, ref)
-	if err != nil {
-		return nil
-	}
+func subagentChildren(activeSession session.Session) []subagentChildRef {
 	seen := map[string]struct{}{}
 	out := make([]subagentChildRef, 0, len(activeSession.Participants))
 	for _, participant := range activeSession.Participants {
@@ -590,8 +577,8 @@ func (d *assembler) subagentChildren(ctx context.Context, ref session.SessionRef
 		}
 		seen[sessionID] = struct{}{}
 		childRef := session.SessionRef{
-			AppName:   ref.AppName,
-			UserID:    ref.UserID,
+			AppName:   activeSession.AppName,
+			UserID:    activeSession.UserID,
 			SessionID: sessionID,
 		}
 		out = append(out, subagentChildRef{

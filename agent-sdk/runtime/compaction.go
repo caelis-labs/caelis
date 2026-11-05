@@ -257,6 +257,16 @@ func ComputeUsageSnapshotForModel(
 	provider string,
 	modelName string,
 ) compact.UsageSnapshot {
+	return computeUsageSnapshotForModel(events, pendingEvents, contextWindow, cfg, provider, modelName, estimatePromptEventTokens)
+}
+
+func computeUsageSnapshotForModel(
+	events, pendingEvents []*session.Event,
+	contextWindow int,
+	cfg CompactionConfig,
+	provider, modelName string,
+	estimate func(*session.Event) int,
+) compact.UsageSnapshot {
 	promptEvents := compact.PromptEventsFromLatestCompact(events)
 	promptEvents = promptEventsWithPending(promptEvents, pendingEvents)
 	// When a provider omits usage, prefer the prefix recorded from the actual
@@ -266,14 +276,16 @@ func ComputeUsageSnapshotForModel(
 	if tokens, ok := latestPromptPrefixTokensForIdentity(events, provider, modelName); ok {
 		cfg.EstimatedPromptPrefixTokens = tokens
 	}
-	return snapshotUsageWithResolvedWindowUsing(
+	usage, _, _ := snapshotUsageWithResolvedWindowDetailsUsing(
 		promptEvents,
 		contextWindow,
 		cfg,
 		func(snapshot providerTokenSnapshot) bool {
 			return providerSnapshotCompatibleWithIdentity(snapshot, provider, modelName)
 		},
+		estimate,
 	)
+	return usage
 }
 
 func latestPromptPrefixTokensForIdentity(events []*session.Event, provider string, modelName string) (int, bool) {

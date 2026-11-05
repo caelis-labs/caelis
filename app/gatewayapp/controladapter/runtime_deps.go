@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/runtime"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -152,6 +153,8 @@ type SessionRuntimeDeps struct {
 
 // StatusRuntimeDeps carries read-only runtime state lookups.
 type StatusRuntimeDeps struct {
+	// UsageReadModel is shared by the Host, including newly bound assemblers.
+	UsageReadModel                   *UsageReadModel
 	RuntimeStateFn                   func(context.Context, session.SessionRef) (SessionRuntimeState, error)
 	ConfigurationRevisionFn          func(context.Context) (uint64, error)
 	WorkspaceTrustFn                 func(context.Context, string) (workspacetrust.Level, error)
@@ -180,9 +183,8 @@ type ModelRuntimeDeps struct {
 	EffectiveEffortFn   func() string
 	EffectiveFastModeFn func() bool
 	ConfigFn            func(string) (ModelConfig, bool)
-	// SessionUsageSnapshotFn projects context from the caller's complete parent
-	// history cut, shared with lifetime accounting rather than reread from disk.
-	SessionUsageSnapshotFn func(context.Context, session.SessionRef, string, []*session.Event) (compact.UsageSnapshot, error)
+	// SessionUsageSnapshotFn resolves context from a derived immutable parent cut.
+	SessionUsageSnapshotFn func(context.Context, session.SessionRef, string, *runtime.ContextUsageProjection) (compact.UsageSnapshot, error)
 	ProviderUsageFn        func(context.Context, string) (providerusage.Snapshot, bool, error)
 	ListAliasesFn          func(context.Context, session.SessionRef) ([]string, error)
 	ListChoicesFn          func(context.Context, session.SessionRef) ([]ModelChoice, error)

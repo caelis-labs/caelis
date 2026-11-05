@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/placement"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/compact"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	inmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
@@ -37,7 +38,7 @@ func TestAdapterFullStatusQueriesProviderUsageAndFailsSoft(t *testing.T) {
 			ConfigFn: func(string) (ModelConfig, bool) {
 				return ModelConfig{ContextWindowTokens: 128_000}, true
 			},
-			SessionUsageSnapshotFn: func(context.Context, session.SessionRef, string, []*session.Event) (compact.UsageSnapshot, error) {
+			SessionUsageSnapshotFn: func(context.Context, session.SessionRef, string, *runtime.ContextUsageProjection) (compact.UsageSnapshot, error) {
 				usageCalls++
 				// A provider snapshot may omit static capacity; the model catalog
 				// remains authoritative for that field.
@@ -256,11 +257,11 @@ func TestSessionUsageIncludesACPSubagentTaskGauge(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	usageEvents, err := sessionUsageEvents(ctx, driver.deps.Session.Store, active.SessionRef)
+	view, err := driver.usage.read(ctx, driver, active.SessionRef, tokenUsageCategoryMain, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	breakdown, err := driver.sessionTokenUsageBreakdown(ctx, active.SessionRef, usageEvents)
+	breakdown, err := driver.sessionTokenUsageBreakdownFromView(ctx, view)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -337,11 +338,11 @@ func TestSessionUsageSkipsACPTaskGaugeWhenLocalChildSessionIsAggregated(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	usageEvents, err := sessionUsageEvents(ctx, driver.deps.Session.Store, parent.SessionRef)
+	view, err := driver.usage.read(ctx, driver, parent.SessionRef, tokenUsageCategoryMain, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	breakdown, err := driver.sessionTokenUsageBreakdown(ctx, parent.SessionRef, usageEvents)
+	breakdown, err := driver.sessionTokenUsageBreakdownFromView(ctx, view)
 	if err != nil {
 		t.Fatal(err)
 	}
