@@ -192,7 +192,7 @@ func (s *Store) readEventLogTailContext(
 	if _, err := file.Seek(offset, io.SeekStart); err != nil {
 		return nil, offset, lineNo, lastCheckpoint, err
 	}
-	reader := bufio.NewReader(file)
+	reader := bufio.NewReaderSize(file, eventLogReadBufferSize)
 	events := make([]*session.Event, 0)
 	for {
 		if err := ctx.Err(); err != nil {

@@ -174,8 +174,10 @@ func (s *controlCommandBackend) authenticateModelProvider(ctx context.Context, r
 	return modelconfig.AuthenticateProvider(ctx, req)
 }
 
-func (s ModelService) UsageSnapshot(ctx context.Context, ref session.SessionRef, modelAlias string) (compact.UsageSnapshot, error) {
-	return s.composition.SessionUsageSnapshot(ctx, ref, modelAlias)
+// UsageSnapshot projects current context from the complete parent history cut
+// supplied by the authorized status reader. It does not reread Session history.
+func (s ModelService) UsageSnapshot(ctx context.Context, ref session.SessionRef, modelAlias string, events []*session.Event) (compact.UsageSnapshot, error) {
+	return s.composition.SessionUsageSnapshot(ctx, ref, modelAlias, events)
 }
 
 // ProviderUsage returns the latest cached account-level subscription windows

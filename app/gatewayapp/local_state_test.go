@@ -458,7 +458,11 @@ func TestReloadedSessionHydratesMissingGrokContextWindow(t *testing.T) {
 	if state.ModelAlias != "xai/grok-4.5" {
 		t.Fatalf("resumed ModelAlias = %q, want xai/grok-4.5", state.ModelAlias)
 	}
-	usage, err := reloaded.Models().UsageSnapshot(ctx, resumedRef, state.ModelAlias)
+	usageEvents, err := reloaded.composition.sessions.Events(ctx, session.EventsRequest{SessionRef: resumedRef})
+	if err != nil {
+		t.Fatal(err)
+	}
+	usage, err := reloaded.Models().UsageSnapshot(ctx, resumedRef, state.ModelAlias, usageEvents)
 	if err != nil {
 		t.Fatalf("SessionUsageSnapshot() error = %v", err)
 	}
@@ -1447,7 +1451,11 @@ func TestSessionUsageSnapshotKeepsPromptPrefixVisibleAfterCompact(t *testing.T) 
 		},
 	})
 
-	usage, err := stack.Models().UsageSnapshot(ctx, activeSession.SessionRef, "ollama/llama3")
+	usageEvents, err := stack.composition.sessions.Events(ctx, session.EventsRequest{SessionRef: activeSession.SessionRef})
+	if err != nil {
+		t.Fatal(err)
+	}
+	usage, err := stack.Models().UsageSnapshot(ctx, activeSession.SessionRef, "ollama/llama3", usageEvents)
 	if err != nil {
 		t.Fatalf("SessionUsageSnapshot() error = %v", err)
 	}
@@ -1506,7 +1514,11 @@ func TestSessionUsageSnapshotUsesActiveMainModelBaseline(t *testing.T) {
 	appendUsage("main-usage", "openai-codex", "gpt-main", 80_000)
 	appendUsage("guardian-usage", "deepseek", "guardian", 25_941)
 
-	usage, err := stack.Models().UsageSnapshot(ctx, activeSession.SessionRef, "openai-codex/gpt-main")
+	usageEvents, err := stack.composition.sessions.Events(ctx, session.EventsRequest{SessionRef: activeSession.SessionRef})
+	if err != nil {
+		t.Fatal(err)
+	}
+	usage, err := stack.Models().UsageSnapshot(ctx, activeSession.SessionRef, "openai-codex/gpt-main", usageEvents)
 	if err != nil {
 		t.Fatalf("SessionUsageSnapshot() error = %v", err)
 	}

@@ -51,16 +51,12 @@ const (
 	tokenUsageCategoryAutoReview = "auto_review"
 )
 
-func (d *assembler) sessionTokenUsageBreakdown(ctx context.Context, ref session.SessionRef) (sessionTokenUsageBreakdown, error) {
+func (d *assembler) sessionTokenUsageBreakdown(ctx context.Context, ref session.SessionRef, events []*session.Event) (sessionTokenUsageBreakdown, error) {
 	if d == nil || d.deps == nil || d.deps.Session.Store == nil {
 		return sessionTokenUsageBreakdown{}, nil
 	}
 	if strings.TrimSpace(ref.SessionID) == "" {
 		return sessionTokenUsageBreakdown{}, nil
-	}
-	events, err := sessionUsageEvents(ctx, d.deps.Session.Store, ref)
-	if err != nil {
-		return sessionTokenUsageBreakdown{}, err
 	}
 	if active, err := d.deps.Session.Store.Session(ctx, ref); err == nil {
 		events = d.filterCurrentMainContextUsage(ctx, active, events)
@@ -313,28 +309,21 @@ func (u *sessionTokenUsageBreakdown) addACPTaskUsage(entries []*taskapi.Entry, a
 	}
 }
 
-func (d *assembler) latestACPControllerContextUsage(
-	ctx context.Context,
+func latestACPControllerContextUsage(
 	active session.Session,
+	events []*session.Event,
 	expectedProvider string,
 	expectedModel string,
-) (session.UsageSnapshot, bool, error) {
-	if d == nil || d.deps == nil || d.deps.Session.Store == nil {
-		return session.UsageSnapshot{}, false, nil
-	}
-	events, err := sessionUsageEvents(ctx, d.deps.Session.Store, active.SessionRef)
-	if err != nil {
-		return session.UsageSnapshot{}, false, err
-	}
+) (session.UsageSnapshot, bool) {
 	index := latestControllerContextUsageIndex(events, active.Controller, expectedProvider, expectedModel)
 	if index < 0 {
-		return session.UsageSnapshot{}, false, nil
+		return session.UsageSnapshot{}, false
 	}
 	usage := session.UsageSnapshotFromContextUsage(*events[index].ContextUsage)
 	if usage == nil {
-		return session.UsageSnapshot{}, false, nil
+		return session.UsageSnapshot{}, false
 	}
-	return *usage, true, nil
+	return *usage, true
 }
 
 func sessionTokenUsageBreakdownFromState(state map[string]any) sessionTokenUsageBreakdown {

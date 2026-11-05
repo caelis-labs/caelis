@@ -83,16 +83,26 @@ func defaultCompactionConfig(contextWindow int) sdkruntime.CompactionConfig {
 	}
 }
 
-func (s *runtimeComposition) SessionUsageSnapshot(ctx context.Context, ref session.SessionRef, modelAlias string) (compact.UsageSnapshot, error) {
+func (s *runtimeComposition) SessionUsageSnapshot(ctx context.Context, ref session.SessionRef, modelAlias string, events []*session.Event) (compact.UsageSnapshot, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if s == nil || s.sessions == nil {
 		return compact.UsageSnapshot{}, fmt.Errorf("gatewayapp: sessions service unavailable")
 	}
 	if strings.TrimSpace(ref.SessionID) == "" {
 		return compact.UsageSnapshot{}, nil
 	}
-	events, err := s.sessions.Events(ctx, session.EventsRequest{SessionRef: ref})
-	if err != nil {
+	if err := ctx.Err(); err != nil {
 		return compact.UsageSnapshot{}, err
+	}
+	// Match the canonical Events read used by context reporting. Journal-only
+	// accounting receipts must not become provider context baselines.
+	canonical := make([]*session.Event, 0, len(events))
+	for _, event := range events {
+		if session.IsCanonicalHistoryEvent(event) {
+			canonical = append(canonical, event)
+		}
 	}
 	alias := strings.TrimSpace(modelAlias)
 	if alias == "" && s.lookup != nil {
@@ -103,7 +113,7 @@ func (s *runtimeComposition) SessionUsageSnapshot(ctx context.Context, ref sessi
 	cfg.EstimatedPromptPrefixTokens = s.estimatedPromptPrefixTokens(ctx, ref)
 	modelCfg, _ := s.modelConfigForAlias(alias)
 	return sdkruntime.ComputeUsageSnapshotForModel(
-		events,
+		canonical,
 		nil,
 		contextWindow,
 		cfg,

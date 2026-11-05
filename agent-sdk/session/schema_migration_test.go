@@ -143,3 +143,23 @@ func assertMigrationSentinel(t *testing.T, object map[string]any, key, want stri
 		t.Fatalf("%s sentinel = %#v, want %q", key, sentinel["sentinel"], want)
 	}
 }
+
+func TestCurrentSchemaMigrationPreservesPayloadWithoutAliasing(t *testing.T) {
+	raw := json.RawMessage(` { "schema":2, "future":{"large":"preserved"}, "journal": { "schema":1, "execution":{"schema":1,"unknown":123}, "tool_execution":{"schema":1}, "pause_token":{"schema":1} } } `)
+	migrated, err := session.MigrateEventJSON(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(migrated) != string(raw) {
+		t.Fatal("current schemas rewrote an unchanged payload")
+	}
+	migrated[0] = 'x'
+	if raw[0] == 'x' {
+		t.Fatal("migration aliases its caller's source buffer")
+	}
+	for _, journal := range []string{`{"schema":2}`, `{"schema":1,"execution":{"schema":2}}`, `{"schema":1,"tool_execution":{"schema":2}}`, `{"schema":1,"pause_token":{"schema":2}}`} {
+		if _, err := session.MigrateEventJSON(json.RawMessage(`{"schema":2,"journal":` + journal + `}`)); err == nil {
+			t.Fatalf("future nested schema accepted: %s", journal)
+		}
+	}
+}

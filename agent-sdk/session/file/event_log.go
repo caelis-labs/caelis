@@ -15,6 +15,10 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
+// Long tool results commonly exceed bufio's 4 KiB default. Each Store read
+// holds only one bounded buffer, independent of total Session history size.
+const eventLogReadBufferSize = 64 << 10
+
 func (s *Store) eventsForDocumentContext(ctx context.Context, doc persistedDocument) ([]*session.Event, error) {
 	path, err := s.resolveWritePath(doc.Session)
 	if err != nil {
@@ -143,7 +147,7 @@ func (s *Store) readEventLogPage(ctx context.Context, documentPath string, req s
 	}
 
 	out := session.EventPage{NextSeq: req.AfterSeq}
-	reader := bufio.NewReader(file)
+	reader := bufio.NewReaderSize(file, eventLogReadBufferSize)
 	lineNo := checkpoint.LineNo
 	offset := checkpoint.Offset
 	lastConsumed := checkpoint
@@ -171,6 +175,12 @@ func (s *Store) readEventLogPage(ctx context.Context, documentPath string, req s
 					break
 				}
 				return session.EventPage{}, fmt.Errorf("agent-sdk/session/file: decode event log %s line %d header: %w", path, lineNo, err)
+			}
+			// A finite read owns only its durable cut. In particular, history
+			// provenance lookups must not decode the entire remaining Session
+			// for each individual approval record.
+			if req.ThroughSeq > 0 && header.Seq > req.ThroughSeq {
+				break
 			}
 			// The cursor proves earlier records were already consumed. Parse only
 			// their sequence header instead of repeatedly migrating, validating,
@@ -213,6 +223,9 @@ func (s *Store) readEventLogPage(ctx context.Context, documentPath string, req s
 				if session.EventMatchesPageVisibility(&event, req.Visibility) {
 					out.Events = append(out.Events, session.CanonicalizeEvent(&event))
 				}
+			}
+			if req.ThroughSeq > 0 && header.Seq == req.ThroughSeq {
+				break
 			}
 		}
 		if errors.Is(readErr, io.EOF) {
