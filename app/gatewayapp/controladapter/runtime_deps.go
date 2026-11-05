@@ -176,11 +176,13 @@ type AgentRuntimeDeps struct {
 // Metadata reads can return zero values when absent. Product mutations are
 // exposed only through the focused Configuration command service.
 type ModelRuntimeDeps struct {
-	EffectiveAliasFn       func() string
-	EffectiveEffortFn      func() string
-	EffectiveFastModeFn    func() bool
-	ConfigFn               func(string) (ModelConfig, bool)
-	SessionUsageSnapshotFn func(context.Context, session.SessionRef, string) (compact.UsageSnapshot, error)
+	EffectiveAliasFn    func() string
+	EffectiveEffortFn   func() string
+	EffectiveFastModeFn func() bool
+	ConfigFn            func(string) (ModelConfig, bool)
+	// SessionUsageSnapshotFn projects context from the caller's complete parent
+	// history cut, shared with lifetime accounting rather than reread from disk.
+	SessionUsageSnapshotFn func(context.Context, session.SessionRef, string, []*session.Event) (compact.UsageSnapshot, error)
 	ProviderUsageFn        func(context.Context, string) (providerusage.Snapshot, bool, error)
 	ListAliasesFn          func(context.Context, session.SessionRef) ([]string, error)
 	ListChoicesFn          func(context.Context, session.SessionRef) ([]ModelChoice, error)

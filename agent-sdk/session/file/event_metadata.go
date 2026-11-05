@@ -219,7 +219,7 @@ func (s *Store) readEventMetadata(ctx context.Context, documentPath string) (*ev
 		if _, err := file.Seek(index.Size, io.SeekStart); err != nil {
 			return nil, err
 		}
-		reader := bufio.NewReader(io.LimitReader(file, info.Size()-index.Size))
+		reader := bufio.NewReaderSize(io.LimitReader(file, info.Size()-index.Size), eventLogReadBufferSize)
 		line := index.Tail.LineNo
 		for {
 			if err := ctx.Err(); err != nil {

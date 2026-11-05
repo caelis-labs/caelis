@@ -680,7 +680,8 @@ func TestResumeSetupUsesNewChildOutputBinding(t *testing.T) {
 func TestActiveChildInputKeepsProducerBindingBeforeRuntimeObservation(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	runner := childInputTestRunner(t, "active")
+	terminalRelease := filepath.Join(t.TempDir(), "terminal-release")
+	runner := newChildInputTestRunner(t, "active", map[string]string{"CAELIS_ACP_CHILD_INPUT_TERMINAL_RELEASE": terminalRelease}, controlagents.Authentication{})
 	defer func() { _ = runner.Quiesce(context.Background()) }()
 	events := make(chan childInputTestEvent, 16)
 	spawn := childInputSpawnContext(t, "task-active-binding", events)
@@ -704,6 +705,11 @@ func TestActiveChildInputKeepsProducerBindingBeforeRuntimeObservation(t *testing
 	})
 	if err != nil || result.StartedActivity || result.ActivityID == candidate.activityID {
 		t.Fatalf("steering = %#v, %v", result, err)
+	}
+	// This case tests an active producer binding, so hold the original Prompt
+	// until its independent steering receipt settles, using the fixture's gate.
+	if err := os.WriteFile(terminalRelease, nil, 0o600); err != nil {
+		t.Fatal(err)
 	}
 	waitChildActivityTerminalFor(t, ctx, events, result.ActivityID)
 	select {

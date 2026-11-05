@@ -75,7 +75,12 @@ func (m *Model) commitSessionHistory() tea.Cmd {
 	m.sessionObservationRecovering = false
 	m.removeHintsByText(sessionObservationRecoveryHint)
 	m.sessionSwitchPending = (build.start.automatic || build.start.recovery) && build.pendingNavigation
-	claimDraft := build.start.automatic && m.currentSessionID == ""
+	// Input entered before the first attachment has no Session owner yet.
+	// Adopt it at the atomic commit, including explicit startup /resume, but
+	// never overwrite a draft already retained for the selected Session.
+	_, retainedDraft := m.sessionDrafts[build.start.state.SessionID]
+	claimDraft := m.currentSessionID == "" && build.start.state.SessionID != "" &&
+		!build.start.replacement && !build.start.recovery && !retainedDraft
 	if claimDraft {
 		m.saveSessionDraft()
 		m.sessionDrafts[build.start.state.SessionID] = m.sessionDrafts[""]

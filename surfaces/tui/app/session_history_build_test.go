@@ -269,3 +269,34 @@ func TestTwoTurnResumePaintsTailBeforeEarlierHistoryIsRequested(t *testing.T) {
 		})
 	}
 }
+
+func TestInitialResumeKeepsUnboundDraftEnteredWhileLoading(t *testing.T) {
+	m := NewModel(Config{NoColor: true, NoAnimation: true})
+	m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m.Update(sessionViewStartMsg{generation: 1, state: appserver.SessionState{SessionID: "restored"}})
+	for _, r := range "输入仍在 abc" {
+		m.Update(tea.KeyPressMsg(tea.Key{Code: r, Text: string(r)}))
+	}
+	m.insertAttachmentsAtCursor([]string{"draft.png"})
+	want := m.textarea.Value()
+	frames := []string{m.View().Content}
+	m.Update(TranscriptEventsMsg{Events: longHistoryTranscript(2), ReconnectReplay: true})
+	m.Update(sessionHistoryReadyMsg{})
+	if m.textarea.Value() != want || len(m.inputAttachments) != 1 {
+		t.Fatal("initial resume cleared input entered while loading")
+	}
+	frames = append(frames, m.View().Content)
+	updates := renderFullscreenFramesForTest(t, 80, 24, frames...)
+	assertPhysicalFullscreenFrame(t, 80, 24, frames[1], updates)
+}
+
+func TestInitialResumeDoesNotReplaceRetainedTargetDraft(t *testing.T) {
+	m := NewModel(Config{NoColor: true, NoAnimation: true})
+	m.sessionDrafts = map[string]sessionDraft{"restored": {text: "retained target", cursor: 15}}
+	m.textarea.SetValue("unbound draft")
+	m.Update(sessionViewStartMsg{generation: 1, state: appserver.SessionState{SessionID: "restored"}})
+	m.Update(sessionHistoryReadyMsg{})
+	if m.textarea.Value() != "retained target" || m.sessionDrafts[""].text != "unbound draft" {
+		t.Fatal("initial resume overwrote a draft belonging to another input owner")
+	}
+}

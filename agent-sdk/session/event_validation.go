@@ -48,11 +48,16 @@ func ValidateDurableCoreEvent(event *Event) error {
 	if event == nil || IsTransient(event) {
 		return nil
 	}
-	migrated, err := MigrateEvent(*event)
-	if err != nil {
-		return coreEventValidationError(err.Error())
+	// File readers have already migrated raw JSON before typed decoding. Do
+	// not serialize and decode that complete payload again merely to validate
+	// current schemas; legacy and unsupported versions still use migration.
+	if !eventSchemasCurrent(event) {
+		migrated, err := MigrateEvent(*event)
+		if err != nil {
+			return coreEventValidationError(err.Error())
+		}
+		event = &migrated
 	}
-	event = &migrated
 	if err := jsonvalue.Validate(event); err != nil {
 		return coreEventValidationError(fmt.Sprintf("event contains invalid JSON-compatible value: %v", err))
 	}
@@ -108,6 +113,20 @@ func ValidateDurableCoreEvent(event *Event) error {
 		}
 	}
 	return nil
+}
+
+func eventSchemasCurrent(event *Event) bool {
+	if event.Schema != EventSchemaVersion {
+		return false
+	}
+	journal := event.Journal
+	if journal == nil {
+		return true
+	}
+	return journal.Schema == ExecutionJournalSchemaVersion &&
+		(journal.Execution == nil || journal.Execution.Schema == RunSchemaVersion) &&
+		(journal.ToolExecution == nil || journal.ToolExecution.Schema == ToolExecutionSchemaVersion) &&
+		(journal.PauseToken == nil || journal.PauseToken.Schema == ExecutionJournalSchemaVersion)
 }
 
 func validateDurableCoreToolResult(event *Event) error {

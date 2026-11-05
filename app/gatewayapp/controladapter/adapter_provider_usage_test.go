@@ -21,8 +21,13 @@ func TestAdapterFullStatusQueriesProviderUsageAndFailsSoft(t *testing.T) {
 	providerCalls := 0
 	doctorCalls := 0
 	usageCalls := 0
+	store := inmemory.NewStore(inmemory.Config{})
+	active, err := store.StartSession(t.Context(), session.StartSessionRequest{AppName: "test", UserID: "user"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	deps := &runtimeDeps{
-		Session: SessionRuntimeDeps{Store: inmemory.NewStore(inmemory.Config{})},
+		Session: SessionRuntimeDeps{Store: store},
 		Status: StatusRuntimeDeps{DoctorFn: func(context.Context, DoctorRequest) (DoctorStatusProjection, error) {
 			doctorCalls++
 			return DoctorStatusProjection{}, nil
@@ -32,7 +37,7 @@ func TestAdapterFullStatusQueriesProviderUsageAndFailsSoft(t *testing.T) {
 			ConfigFn: func(string) (ModelConfig, bool) {
 				return ModelConfig{ContextWindowTokens: 128_000}, true
 			},
-			SessionUsageSnapshotFn: func(context.Context, session.SessionRef, string) (compact.UsageSnapshot, error) {
+			SessionUsageSnapshotFn: func(context.Context, session.SessionRef, string, []*session.Event) (compact.UsageSnapshot, error) {
 				usageCalls++
 				// A provider snapshot may omit static capacity; the model catalog
 				// remains authoritative for that field.
@@ -53,7 +58,7 @@ func TestAdapterFullStatusQueriesProviderUsageAndFailsSoft(t *testing.T) {
 		},
 	}
 	driver := newHostAssembler(deps, "surface", "")
-	driver.session = session.Session{SessionRef: session.SessionRef{SessionID: "session-1"}}
+	driver.session = active
 	driver.hasSession = true
 
 	lightweight, err := driver.LightweightStatus(context.Background())
@@ -251,7 +256,11 @@ func TestSessionUsageIncludesACPSubagentTaskGauge(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	breakdown, err := driver.sessionTokenUsageBreakdown(ctx, active.SessionRef)
+	usageEvents, err := sessionUsageEvents(ctx, driver.deps.Session.Store, active.SessionRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	breakdown, err := driver.sessionTokenUsageBreakdown(ctx, active.SessionRef, usageEvents)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -328,7 +337,11 @@ func TestSessionUsageSkipsACPTaskGaugeWhenLocalChildSessionIsAggregated(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	breakdown, err := driver.sessionTokenUsageBreakdown(ctx, parent.SessionRef)
+	usageEvents, err := sessionUsageEvents(ctx, driver.deps.Session.Store, parent.SessionRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	breakdown, err := driver.sessionTokenUsageBreakdown(ctx, parent.SessionRef, usageEvents)
 	if err != nil {
 		t.Fatal(err)
 	}

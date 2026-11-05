@@ -1,6 +1,7 @@
 package session
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"sync"
@@ -149,6 +150,8 @@ func MigrateEvent(in Event) (Event, error) {
 
 // MigrateEventJSON upgrades raw durable event JSON before typed decoding so
 // every migration step can preserve fields introduced by newer writers.
+// Current schemas return an independent copy without re-encoding the payload;
+// nested legacy and unsupported schemas still pass through version checks.
 func MigrateEventJSON(raw json.RawMessage) (json.RawMessage, error) {
 	var object map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &object); err != nil {
@@ -163,8 +166,10 @@ func MigrateEventJSON(raw json.RawMessage) (json.RawMessage, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := json.Unmarshal(migrated, &object); err != nil {
-		return nil, err
+	if source != EventSchemaVersion {
+		if err := json.Unmarshal(migrated, &object); err != nil {
+			return nil, err
+		}
 	}
 	journalRaw := object["journal"]
 	if len(journalRaw) == 0 || string(journalRaw) == "null" {
@@ -173,6 +178,9 @@ func MigrateEventJSON(raw json.RawMessage) (json.RawMessage, error) {
 	journal, err := migrateJournalJSON(registry, journalRaw)
 	if err != nil {
 		return nil, err
+	}
+	if bytes.Equal(journal, journalRaw) {
+		return migrated, nil
 	}
 	object["journal"] = journal
 	return json.Marshal(object)
@@ -191,8 +199,11 @@ func migrateJournalJSON(registry *MigrationRegistry, raw json.RawMessage) (json.
 	if err != nil {
 		return nil, err
 	}
-	if err := json.Unmarshal(migrated, &journal); err != nil {
-		return nil, err
+	changed := source != ExecutionJournalSchemaVersion
+	if changed {
+		if err := json.Unmarshal(migrated, &journal); err != nil {
+			return nil, err
+		}
 	}
 	nested := []struct {
 		key    string
@@ -216,11 +227,18 @@ func migrateJournalJSON(registry *MigrationRegistry, raw json.RawMessage) (json.
 		if err != nil {
 			return nil, err
 		}
+		if source == candidate.target {
+			continue
+		}
 		nestedRaw, err = registry.Migrate(candidate.kind, source, candidate.target, nestedRaw)
 		if err != nil {
 			return nil, err
 		}
 		journal[candidate.key] = nestedRaw
+		changed = true
+	}
+	if !changed {
+		return migrated, nil
 	}
 	return json.Marshal(journal)
 }
