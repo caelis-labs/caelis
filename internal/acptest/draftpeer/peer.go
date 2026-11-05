@@ -1,4 +1,4 @@
-// Package draftpeer supplies an actual alpha.8 SDK peer for owning-path tests.
+// Package draftpeer supplies an actual pinned SDK peer for owning-path tests.
 package draftpeer
 
 import (
@@ -51,7 +51,7 @@ func (p *Peer) Serve(input io.Reader, output io.Writer) (*v2.AgentSideConnection
 // ResolveACPProcess implements the production late-bound endpoint seam.
 func (p *Peer) ResolveACPProcess(_ context.Context, req endpoint.Request) (endpoint.Process, error) {
 	if req.ACPDraftSchema != acpdraft.SchemaTag {
-		return endpoint.Process{}, fmt.Errorf("fixture requires exact alpha.8, got %q", req.ACPDraftSchema)
+		return endpoint.Process{}, fmt.Errorf("fixture requires %s, got %q", acpdraft.SchemaTag, req.ACPDraftSchema)
 	}
 	return endpoint.Process{Open: func(context.Context) (endpoint.Stream, error) {
 		if p.Opens.Add(1) != 1 {

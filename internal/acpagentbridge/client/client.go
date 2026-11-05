@@ -184,6 +184,7 @@ func (c *Client) bind(peerInput io.Writer, peerOutput io.Reader) error {
 		// runs. The independent byte cap prevents the frame limit multiplying into
 		// unbounded queue memory. Unsupported extension methods use no queue slots.
 		acpsdk.ConnectionOptions{MaxFrameSize: maxFrameSize, MaxQueuedNotifications: 8192, MaxNotificationBytes: 32 << 20,
+			RejectBatch:        c.draft != nil,
 			AcceptNotification: func(method string) bool { return method == MethodSessionUpdate },
 		},
 	)

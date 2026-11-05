@@ -359,7 +359,7 @@ func TestDraftOutboundAcknowledgementStillWaitsForEchoAndCancellationSettlement(
 
 func TestDraftOutboundRejectsIncompatibleProfileWithoutStableFallback(t *testing.T) {
 	t.Parallel()
-	for _, incompatible := range []string{"version", "schema", "guard", "idleGuard", "session"} {
+	for _, incompatible := range []string{"version", "schema", "previousSchema", "guard", "idleGuard", "session"} {
 		t.Run(incompatible, func(t *testing.T) {
 			agent := &draftTestAgent{initialize: func(req v2.InitializeRequest) (v2.InitializeResponse, error) {
 				if err := acpdraft.ValidateInitialize(req); err != nil {
@@ -371,6 +371,8 @@ func TestDraftOutboundRejectsIncompatibleProfileWithoutStableFallback(t *testing
 					response.ProtocolVersion = 1
 				case "schema":
 					response.Meta[acpdraft.SchemaMetaKey] = json.RawMessage(`"schema-v2.0.0-alpha.7"`)
+				case "previousSchema":
+					response.Meta[acpdraft.SchemaMetaKey] = json.RawMessage(`"schema-v2.0.0-alpha.10"`)
 				case "guard":
 					delete(response.Meta, acpdraft.ConditionalPromptMetaKey)
 				case "idleGuard":

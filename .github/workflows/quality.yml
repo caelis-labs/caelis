@@ -98,6 +98,11 @@ jobs:
       - name: Test
         run: make test
 
+      - name: ACP SDK release compatibility
+        env:
+          GOFLAGS: -race
+        run: go test -tags=e2e -timeout=2m ./eval -run '^TestACPSDKReleaseCompatibility$' -count=1 -v
+
       - name: Install bubblewrap
         run: sudo apt-get update && sudo apt-get install -y bubblewrap
 

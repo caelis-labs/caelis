@@ -17,7 +17,7 @@ Application integrations keep their existing stable types independently of the
 ACP wire profile.
 
 Repo-owned subprocess children use the explicitly selected
-`schema-v2.0.0-alpha.10` profile. The hosted Codex adapter keeps stable v1 by
+`schema-v2.0.0-alpha.13` profile. The hosted Codex adapter keeps stable v1 by
 default. Direct native main/child delegation stays
 inside Control and Runtime and does not acquire an ACP transport. User-provided
 process overrides remain stable unless their link explicitly selects a draft.
@@ -25,10 +25,10 @@ The Host-owned adapter descriptor, one-use channel grant and helper invocation
 carry the same exact schema. An unsupported schema fails before granting or
 serving the channel; the selected draft never falls back to v1.
 
-`caelis acp --acp-draft=schema-v2.0.0-alpha.10` serves product Sessions through the
+`caelis acp --acp-draft=schema-v2.0.0-alpha.13` serves product Sessions through the
 existing principal-bound Control clients. Initialization negotiates v2 from a
 client offering protocol version 2 or a newer major, using the v2 `info` shape.
-The controlled product channel requires an exact alpha.10
+The controlled product channel requires an exact alpha.13
 `_meta["caelis/acp_schema"]` tag. Responses advertise the implemented Session
 capabilities and the conditional-prompt profile described below. Initialization
 may repeat before any other request; concurrent attempts and
@@ -41,9 +41,25 @@ or additional directories that their existing owner cannot apply.
 
 The separate Core initialization/capability probe (`ServeDraftStdio`) also
 negotiates newer offered majors down to v2. Its schema tag is optional in the
-request; when explicitly provided it must match alpha.10. The response always
+request; when explicitly provided it must match alpha.13. The response always
 identifies the pinned schema. This probe advertises no Session or auth work;
 omitting its tag does not relax the controlled product channel's requirements.
+
+Draft connections reject a JSON-RPC array as one invalid request before any
+element is dispatched. Stable v1 retains its batch response and notification
+ordering. Draft prompts, including steering, require at least one content block;
+an empty text block remains valid. Invalid select controls with no remaining
+values are omitted from recoverable display lists; an explicit empty control
+list still clears the previous list.
+
+Draft usage cost is a per-Session patch: omission retains the reported cost,
+null clears it, and a value replaces it. The ingress adapter materializes full
+snapshots for the shared live and durable context gauge; units such as credits
+remain opaque. Background work snapshots and per-entity cancellation capabilities
+do not grant Caelis Task or cancellation authority. Product and Codex endpoints
+advertise no per-entity cancellation support; unsupported cancellation requests
+fail explicitly. Foreground receipts still settle only through their matching
+Activity state, independently of any reported background work.
 
 Entity upsert `_meta` objects patch by top-level key: omitted keys remain,
 null-valued keys are removed, and nested values replace rather than merge.
