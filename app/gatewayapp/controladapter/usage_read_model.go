@@ -112,7 +112,8 @@ func (m *UsageReadModel) read(ctx context.Context, d *assembler, ref session.Ses
 			next.history = old.history
 		}
 		contextOwned := old == nil
-		if needContext {
+		// Once built, context follows the cut even for accounting-only reads.
+		if needContext || old != nil && old.context != nil {
 			if old != nil {
 				next.context = old.context
 			} else {

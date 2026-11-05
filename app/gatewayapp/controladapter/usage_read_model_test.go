@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -319,6 +320,82 @@ func TestUsageReadModelKeepsPublishedContextImmutableDuringCatchUp(t *testing.T)
 	}
 	if err := <-done; err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestUsageReadModelAccountingCatchUpPreservesContext(t *testing.T) {
+	store := &usageProbeStore{usageTestStore: file.NewStore(file.Config{RootDir: t.TempDir()})}
+	active, err := store.StartSession(t.Context(), session.StartSessionRequest{AppName: "fixture", UserID: "user"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var events []*session.Event
+	for n := range 250 {
+		events = append(events, usageTestEvent(fmt.Sprint(n), 10))
+	}
+	appendUsageTestEvents(t, store, active.SessionRef, events...)
+	cache := NewUsageReadModel()
+	d := usageTestDriver(t, store, active, cache)
+	view, err := cache.read(t.Context(), d, active.SessionRef, tokenUsageCategoryMain, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if store.pages.Load() != 2 || store.reads.Load() != 0 {
+		t.Fatalf("initial build pages=%d full=%d", store.pages.Load(), store.reads.Load())
+	}
+	for index, event := range []*session.Event{
+		usageTestEvent("canonical-tail", 20),
+		session.NewModelInvocationReceipt(model.Invocation{ID: "receipt-tail", Provider: "fixture", Model: "main", Usage: model.Usage{PromptTokens: 30, TotalTokens: 30}}, "main"),
+	} {
+		previous := view.context.Snapshot(128000, runtime.CompactionConfig{}, "fixture", "main")
+		previousProjection := view.context
+		seq, pages := cache.entries[active.SessionRef].seq, store.pages.Load()
+		appendUsageTestEvents(t, store, active.SessionRef, event)
+		var requests []session.EventPageRequest
+		store.hook = func(req session.EventPageRequest) error {
+			requests = append(requests, req)
+			return nil
+		}
+		accounting, err := cache.read(t.Context(), d, active.SessionRef, tokenUsageCategoryMain, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(requests) != 1 || requests[0].AfterSeq != seq || store.pages.Load() != pages+1 {
+			t.Fatalf("accounting did not read only the tail: requests=%+v pages=%d", requests, store.pages.Load())
+		}
+		if accounting.context == nil {
+			t.Error("accounting-only catch-up discarded an existing context projection")
+		}
+		view, err = cache.read(t.Context(), d, active.SessionRef, tokenUsageCategoryMain, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if store.pages.Load() != pages+1 || store.reads.Load() != 0 {
+			t.Fatalf("context query reread history after accounting catch-up: pages=%d want=%d full=%d", store.pages.Load(), pages+1, store.reads.Load())
+		}
+		all, err := sessionUsageEvents(t.Context(), store.usageTestStore, active.SessionRef)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var canonical []*session.Event
+		for _, event := range all {
+			if session.IsCanonicalHistoryEvent(event) {
+				canonical = append(canonical, event)
+			}
+		}
+		want := runtime.ComputeUsageSnapshotForModel(canonical, nil, 128000, runtime.CompactionConfig{}, "fixture", "main")
+		if got := view.context.Snapshot(128000, runtime.CompactionConfig{}, "fixture", "main"); got != want {
+			t.Fatalf("context=%+v want full reconstruction=%+v", got, want)
+		}
+		if want := sessionTokenUsageBreakdownFromEvents(all, tokenUsageCategoryMain); view.breakdown.Total != want.Total || accounting.breakdown.Total != want.Total || !maps.Equal(view.breakdown.ByModel, want.ByModel) || !maps.Equal(accounting.breakdown.ByModel, want.ByModel) {
+			t.Fatalf("accounting=%+v context query=%+v want=%+v", accounting.breakdown.Total, view.breakdown.Total, want.Total)
+		}
+		if want := []int{2520, 2550}[index]; accounting.breakdown.Total.TotalTokens != want {
+			t.Fatalf("accounting total=%d want=%d", accounting.breakdown.Total.TotalTokens, want)
+		}
+		if got := previousProjection.Snapshot(128000, runtime.CompactionConfig{}, "fixture", "main"); got != previous {
+			t.Fatalf("published context mutated: got=%+v want=%+v", got, previous)
+		}
 	}
 }
 
