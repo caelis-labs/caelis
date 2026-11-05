@@ -2,13 +2,16 @@ package plugin
 
 import (
 	"fmt"
+	"strings"
+
+	"golang.org/x/mod/semver"
 
 	"github.com/caelis-labs/caelis/agent-sdk/skill/fs"
 )
 
-// productOverride resolves only the fixed capability from the Host snapshot.
-// Explicit Session contributions have already won before this is called. A
-// broken selected override is an error, never permission to use another source.
+// productOverride validates the enabled Host package before comparing it with
+// the embedded release. Explicit Session contributions have already won. A
+// broken override is an error, never permission to use another source.
 func productOverride(configs []Config, paths RuntimePaths) (Contributions, bool, error) {
 	var selected *Config
 	for _, configured := range configs {
@@ -39,7 +42,33 @@ func productOverride(configs []Config, paths RuntimePaths) (Contributions, bool,
 	if err == nil {
 		out.Sources[0].Status = "override"
 	}
+	if err == nil && builtinDesktopWorldTarget != "" && productSemver(out.Sources[0].Version) != "" {
+		_, _, version, bundleErr := desktopWorldBundle()
+		if bundleErr != nil {
+			return Contributions{}, true, bundleErr
+		}
+		if newerProductVersion(version, out.Sources[0].Version) {
+			out, err = ProductContributions(paths)
+		}
+	}
 	return out, true, err
+}
+
+// Only complete semantic versions are ordered. Equal versions (including build
+// metadata) and opaque versions preserve the enabled Host override contract.
+func productSemver(version string) string {
+	version = "v" + strings.TrimPrefix(strings.TrimSpace(version), "v")
+	base, _, _ := strings.Cut(version, "-")
+	base, _, _ = strings.Cut(base, "+")
+	if strings.Count(base, ".") != 2 || !semver.IsValid(version) {
+		return ""
+	}
+	return version
+}
+
+func newerProductVersion(candidate, current string) bool {
+	a, b := productSemver(candidate), productSemver(current)
+	return a != "" && b != "" && semver.Compare(a, b) > 0
 }
 
 func validateProductPair(out Contributions) error {
