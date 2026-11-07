@@ -67,7 +67,19 @@ func (t runtimeCodeModeTool) execute(ctx context.Context, call tool.Call, source
 	discovered := mcpdiscovery.FromEvents(events)
 	host.discovered = discovered
 	candidates := append([]tool.Tool(nil), t.nativeTargets()...)
+	// Lookup prefers the static registration. Restoring its discovered binding
+	// must not append that same registration again; duplicates within the
+	// assembled static set still reach the ordinary rejection below.
+	staticNames := map[string]bool{}
+	for _, one := range candidates {
+		if one != nil {
+			staticNames[one.Definition().Name] = true
+		}
+	}
 	for name := range discovered {
+		if staticNames[name] {
+			continue
+		}
 		one, found, lookupErr := t.lookup(ctx, name)
 		if lookupErr == nil && found {
 			candidates = append(candidates, one)
