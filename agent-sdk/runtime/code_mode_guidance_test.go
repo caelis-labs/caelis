@@ -46,11 +46,10 @@ func TestCodeModeGuidanceExamplesOffline(t *testing.T) {
 		t.Fatal(err)
 	}
 	blocks := strings.Split(string(doc), "```js\n")
-	if len(blocks) != 4 {
-		t.Fatal("expected projection, optional fs calculation and image examples")
+	if len(blocks) != 3 {
+		t.Fatal("expected projection and image examples")
 	}
 	docProjection := strings.SplitN(blocks[1], "```", 2)[0]
-	docCalculation := strings.SplitN(blocks[2], "```", 2)[0]
 	type sample struct {
 		Reply    json.RawMessage `json:"reply"`
 		Expected json.RawMessage `json:"expected"`
@@ -77,10 +76,6 @@ const output={text:v=>selected.push(v)};`
 			guidanceExampleJSON(t, prelude, code, want)
 		}
 	}
-	guidanceExampleJSON(t, `const selected=[],calls=[];
-const tools={call:async(n,a)=>{calls.push({name:n,args:a});return {parts:[{kind:"text",text:"not JSON"},{kind:"json",json:{content:a.path==="a.txt"?"3":"5"}}]};}};
-const output={text:v=>selected.push(v)};`, docCalculation,
-		`{"selected":[{"total":8,"sources":["a.txt","b.txt"]}],"calls":[{"name":"Read","args":{"path":"a.txt"}},{"name":"Read","args":{"path":"b.txt"}}]}`)
 	t.Logf("pure JSON sample projections checked: %d; no Tool/model dispatch", len(samples))
 }
 

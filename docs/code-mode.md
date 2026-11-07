@@ -77,16 +77,7 @@ const d = r.parts.find(p => p.kind === "json").json;
 output.text({count: d.records.length, source: d.batch_id});
 ```
 
-Filesystem orchestration is optional. For numeric file contents, await reads
-sequentially when computing in JS:
-
-```js
-const a = await tools.call("Read", {path: "a.txt"});
-const b = await tools.call("Read", {path: "b.txt"});
-const x = a.parts.find(p => p.kind === "json").json;
-const y = b.parts.find(p => p.kind === "json").json;
-output.text({total: Number(x.content) + Number(y.content), sources: ["a.txt", "b.txt"]});
-```
+Filesystem tools remain directly callable natively; JS orchestration is optional.
 
 After describing an extension, select image handles in the same invocation:
 
