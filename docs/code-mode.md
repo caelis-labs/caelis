@@ -1,114 +1,100 @@
-# Code Mode foundation (experimental)
+# Code Mode
 
-This SDK PoC has no product registration or selected language engine. Its baseline
-is `83743d3396faf4fd36fb8768ed16d0a2cd97384d`. The deterministic executor used by
-tests is a protocol fixture, not a JavaScript implementation.
+Implementation contract for the fixed `js_exec` entry. Actual tools, policy,
+approval, Guardian, invocation identity, Journal and Task lifecycle remain owned
+by Runtime. This work selects Goja; no alternate-engine product framework is
+introduced. Implementation and acceptance checkpoints are recorded in Git.
 
-## Source findings and ownership
+## Model tools and discovery
 
-- Runtime already injects concrete native tools before journal, policy, invocation
-  identity and lifecycle wrappers. A script must call those tools, including the
-  wrapped MCPTool; it must never call MCP Manager directly.
-- Canonical successful `tool_search` results own MCP discovery. Raw search calls,
-  old name-only history and same-response searches grant no script authority.
-  MCP source fingerprints and Manager's final admission already fence replacement.
-- `journaledTool.Call` writes pre-execution states, but normally returns terminal
-  metadata for the canonical chat result to persist. Nested calls need the existing
-  `persistToolExecutionReceipt` owner because their aggregate is a different result.
-  The metadata carrier uses JSON numbers so full input/result tokens survive it.
-- Session journal recovery already marks interrupted effects unknown and never
-  replays Call. Code Mode adds no recovery executor, journal or Session authority.
+Core filesystem and shell tools keep their native function-call definitions.
+Filesystem tools are also callable from JavaScript through their real wrapped
+Tool identities. Shell, RunCommand, aliases and equivalent native process-launch
+capabilities are rejected in code before JS dispatch. A name containing `exec`
+is not sufficient to classify a tool: Desktop World exec is a domain operation,
+not the native shell entry.
 
-## Common contract
+Extensions use one fixed `js_exec` definition, accepting exactly one of `code`
+and `file`, plus the existing foreground wait convention. The model does not
+also receive `tool_search`, `mcp_call`, or changing MCP schemas in its tools array.
+A small selected name/description catalog is a bounded Session snapshot; other
+extensions are found by fuzzy search. Discovery never rewrites earlier prompt
+slices or changes the serialized tools definitions.
 
-`tool/codemode.Executor.Execute(ctx, Source, Limits, Host)` receives immutable
-source text, path and SHA-256, explicit transfer limits and a restricted Host.
-Host calls accept a name and JSON object and return bounded JSON
-parts and opaque media handles. Go retains tools, policy, credentials, Session,
-full results and receipts. Host handles live only for that invocation. Explicitly
-emitted handles become original media parts in the model result, never base64 text.
-Executor is the trusted Go adapter: it translates Host to bounded JSON RPC and
-must never expose the Host Go object to the untrusted language engine.
-Structured JSON, IsError and trusted TurnComplete retain their distinct semantics.
-Reply.outcome distinguishes succeeded, failed and unknown_outcome. Non-read-only
-MCP calls with a request failure or missing response conservatively report a typed
-unknown outcome; neither Runtime recovery nor the bridge retries that effect.
+The async function body has these interfaces:
 
-The declaration accepts exactly one of `code` and `file`. Runtime supplies the
-concrete binding's optional `file` read-path semantics to the existing policy
-owner via `ToolContext.ReadPathArgument`; a display name or untrusted metadata
-cannot supply this fact. Workspace-write uses the same sensitive-path, physical
-symlink and explicit read-grant rules as Read, without a synthetic Read invocation.
-This source check does not classify the script itself as a Read tool.
-Files are then opened through the supplied sandbox Runtime filesystem under existing workspace constraints,
-read once with a size limit, and hashed. Each execution reads again; adapters must
-execute these bytes, never resolve the path through a module cache. Only a real
-Node adapter may advertise `node_repl`; other JavaScript adapters use `js_repl`.
-The common layer provides no Node APIs, persistent heap or workflow scheduler.
+- `await tools.search(query)` returns bounded candidate names and descriptions.
+- `await tools.describe(name)` returns the current complete input schema and
+  records the discovery binding through the existing canonical owner.
+- `await tools.call(name, arguments)` invokes the already discovered Tool once.
+- `output.text(value)` and `await output.image(handle)` explicitly select output.
 
-At invocation start the bridge pins current native declarations and currently
-discovered MCP bindings. Before dispatch, including after approval, it rechecks
-the source/schema and model snapshot generation validator. The final check,
-source comparison and existing journal's durable started claim share one short
-guard. Approval waits and external tool I/O hold no configuration guard. Dynamic snapshots
-without Validate cannot dispatch script host calls; static bindings belong to
-their immutable Runtime/Turn assembly. MCP keeps its
-own final catalog and grant revocation checks. Native tools stay native, and
-concrete Runtime injection happens before wrapping.
+Unknown schemas must be returned to the model before a later script supplies
+arguments. JavaScript is orchestration, not a second model that understands a
+previously unknown schema. Native fs identities need no redundant MCP discovery.
+Returned JSON outside JavaScript's safe integer range may round in Number;
+original JSON and receipts retain their tokens. BigInt must be stringified.
 
-Every nested call has a fresh Runtime invocation identity and typed parent
-relation. Display mirrors carry actual tool names and arguments without adding
-inner tool messages to the model transcript. Each terminal receipt persists
-independently before its bounded projection reaches the executor.
-The Runtime-only parent relation marks Code Mode children with `kind=code_mode`;
-that provenance is not authority. Their original in-memory admission binding is
-required at the journal claim, including calls which yielded a native Command
-approval Task. The existing Task/Run owner carries only that binding across the
-context switch, not the short-lived Host.Call context. Other parent provenance
-does not imply Code Mode admission. Recovery never reconstructs the binding from
-stored parent, Task or approval facts and never starts an interrupted approval.
+## Authority and invalidation
 
-Limits apply before source reads, argument copies, projection/transport and
-output acceptance. Adapters receive those limits and must enforce them before
-worker RPC decoding and result encoding/allocation. Host retains full tool facts
-in existing journal receipts; these
-limits cannot prevent allocation inside an arbitrary tool or external MCP SDK.
-Concurrent requests require explicit ParallelSafe on every active target. A
-trusted TurnComplete serializes with the final execution claim and closes
-admission, including calls still waiting for approval. Already claimed effects
-retain their original cancellation and receipt contract. The completing call
-may still Emit its own media; rejecting a pending approval does not cancel Emit.
-Rejected requests count toward the host request budget. Receipt persistence or
-transport failure closes the bridge even if the executor swallows the error.
-The JSON output limit and cumulative opaque-media retention limit are separate.
+The parent process owns Host, Session, credentials and Tool wrappers. The child
+receives fixed source bytes/hash and bounded JSON messages; no Go object,
+credential, environment, module, filesystem, network or shell API is exposed.
+Goja has one VM goroutine; Host completions resolve promises on that owner.
 
-Cancellation closes admission and cancels inflight requests. Chat retains its
-existing bounded foreground drain, but this does not prove producer quiescence.
-Code Mode's full ordinary tool wrapper chain registers with the existing Run
-continuation owner: Runner completion and Session fence release wait for the
-adapter and every Host request to exit, including terminal receipt persistence.
-An unresponsive Go tool or adapter therefore retains that authority until it
-actually exits; increasing a wait threshold cannot release it safely. Unsettled
-effects retain original IDs and journal state for existing unknown-outcome
-recovery after a true shutdown. Adapters must stop their producer on cancellation;
-engine CPU/fuel accounting must pause during host/approval waits. There is no new
-Turn timeout, automatic retry or replay of script/tool effects.
+Calls pass through the existing real Tool policy, Guardian/approval, source and
+generation admission, effect claim, Journal and lifecycle wrappers. Discovery
+is not an execution grant. Refresh remains low-frequency Manager-owned work;
+searches do not push full catalog updates into prompts. Before an old binding
+can execute, a changed source/schema produces a distinct stale-binding error:
+the catalog was refreshed and tools.describe/search must rediscover it. Old
+arguments are not dispatched or automatically retried with a new schema.
+Offline and revoked access retain their own errors.
 
-## Backend integration and common evaluation
+The model receives only explicitly selected summaries and original media.
+Actual child names, exact arguments, results, failures, unknown outcomes and
+receipts remain in the existing audit/event chain. Filtering must not convert
+failed or unknown execution to success. TUI projects those original child
+identities under a collapsible js_exec parent; discovery is compact presentation,
+not another consumer-owned execution path.
 
-Implement Executor behind this contract, register one concrete declaration in an
-isolated SDK composition, and keep all tool RPCs on Host. Enforce process/memory/
-CPU limits and cancellable producer shutdown in the adapter. Reuse this foundation
-commit unchanged for each later comparison worktree.
+## Execution and Tasks
 
-Evaluate the same real tasks and inputs: discover then serially read and aggregate;
-native plus MCP calls; schema/source/generation replacement and revoked approval;
-denied approval; one completed effect followed by failure/cancellation; interrupted
-effect recovery without replay; structured JSON plus image handle emission; source
-file edit and rerun; bounded large input/result; concurrent safe and unsafe calls;
-CPU-only cancellation versus approval/tool waiting; canonical Session fence
-retention until real producer exit; approval released after trusted completion;
-and sensitive source denial versus explicit read grants. Record original operation IDs,
-terminal receipts, model tokens, host transfers, engine CPU/wall/memory, startup,
-cleanup and actual effect counts. Fixture success does not establish language
-compatibility, sandbox security, live-model quality or production readiness.
+Every execution starts a new Goja child process in the same Go executable.
+There is no cross-call REPL, persistent Goja stack or restart replay. File reads
+reuse the source-read policy path, then execute only those fixed bytes/hash.
+CPU time and model network budgets are separate. Host/approval waiting is not
+CPU time. Interrupt is followed by kill/reap if needed. No hard VM heap bound is
+claimed; missing a hard heap limiter is not a default rejection condition.
+64MiB is an experimental observation target, not a product admission threshold.
+Process separation and JS capability restrictions do not constitute a secure OS
+sandbox against an engine exploit.
+
+Foreground yield transfers observation to the existing Task owner with one
+original handle. Query, wait, incremental output, cancellation and completion
+reuse Task control and output cursors. Waiting less does not shorten execution.
+A real child tool that yields is observed by its original handle until terminal;
+it is never resubmitted. Cancellation reaches owned work and reaps the worker;
+completed/unknown effects retain their original receipts. Restart exposes the
+record and interrupted/unknown state, without recreating the script or stack.
+Task support does not grant shell access from JS.
+
+## Acceptance
+
+Owning checks cover native fs plus code-level shell denial (including aliases),
+DTW domain exec, search/describe/call, schema replacement before effect claim,
+Guardian parameters, async yield/handle/cancel/completion and unknown no-replay.
+Model-context round trips and rendered TUI parent/child evidence cover durable
+and visible behavior.
+
+Exact serialized model tools and stable leading prompt bytes are captured for
+first discovery, repeated orchestration and refresh/rediscovery. Token and model
+request comparisons use the same task, actual usage and retained source/output
+sizes; source-line counts or fixture-only usage are not savings evidence.
+Real acceptance uses streaming models with independent generation budgets of at
+least 600 seconds, no shorter enclosing client/header deadline and no added
+request retry. Authorized existing gpt-6-luna is preferred; an explicit quota
+failure permits deepseek-flash. Credentials are read only through the selected
+existing configuration path, never exported into shared evidence. Context7 read
+queries, a task-owned DTW observation/screenshot fixture and temporary fs work
+are kept separate from deterministic fixtures and broader platform claims.
