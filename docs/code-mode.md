@@ -39,6 +39,7 @@ concrete binding's optional `file` read-path semantics to the existing policy
 owner via `ToolContext.ReadPathArgument`; a display name or untrusted metadata
 cannot supply this fact. Workspace-write uses the same sensitive-path, physical
 symlink and explicit read-grant rules as Read, without a synthetic Read invocation.
+This source check does not classify the script itself as a Read tool.
 Files are then opened through the supplied sandbox Runtime filesystem under existing workspace constraints,
 read once with a size limit, and hashed. Each execution reads again; adapters must
 execute these bytes, never resolve the path through a module cache. Only a real
