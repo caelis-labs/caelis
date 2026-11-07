@@ -1,0 +1,7 @@
+Use js_exec inline code with tools.search/describe/call for Context7 and filesystem orchestration; native filesystem tools remain available.
+
+Continue in this same Session. The harness has updated a.txt to 18; b.txt remains 25. Re-read both files and replace answer.json.
+Shell/process execution is forbidden for this task, including RunCommand, aliases and equivalent process tools. Work only in this workspace. Read a.txt and b.txt using actual tools and sum their integers. Read returns JSON content with numbered lines; parse the values, not the line numbers.
+Use Context7 read-only documentation to answer this question: Goja Runtime.Interrupt: may it be called from a goroutine other than the VM owner?
+Resolve Goja's library ID, then query its docs with that exact question text in this Turn. Keep the actual returned source/library ID; if relevant evidence is unavailable, explicitly report unavailable instead of guessing.
+Write answer.json with exactly four fields: total (integer), api_status (found or unavailable), api_answer (one short sentence, at most 300 characters), api_source (one actual library ID or URL, or empty when unavailable). Finish with a concise total/API/source answer. Select only relevant documentation output. Do not create or execute workflow.js or any other saved script; JS may use inline code only. Do not edit a.txt or b.txt. No other files or external services may be written.

@@ -46,3 +46,7 @@ Artifacts retain prompts, exact SDK and HTTP requests, stable-prefix slices,
 original invocation receipts, first events, final responses/usage, generated
 files, Session/Task records and observed worker metrics. Model usage includes
 main and selector calls. A stable prefix alone does not prove token savings.
+
+The separate [frozen no-GUI comparison A](fair-a/README.md) uses
+`TestCodeModeFairLive`; it runs both Turns on each route without the old
+workflow.js or GUI obligations. It is not invoked by the historical entry above.

@@ -1,0 +1,113 @@
+{
+  "version": "fair-a-no-gui-v1",
+  "production_base": "6d15d1e6078b1b20d2a27f219331c3a00f0e29ad",
+  "harness_sha256": "c5b5925115e74f99304000e9c7523a349a28f1ba7bff0c0c7715674fe66d6511",
+  "model": {
+    "api": "openai_responses",
+    "configured_first_event_timeout_ns": 0,
+    "configured_timeout_ns": 0,
+    "context_window_tokens": 272000,
+    "default_reasoning_effort": "medium",
+    "endpoint_id": "magpie@local",
+    "endpoint_origin": "http://127.0.0.1:3425",
+    "generation_budget_seconds": 600,
+    "id": "magpie@local/magpie/codex/gpt-6-luna",
+    "max_output_tokens": 32768,
+    "model": "codex/gpt-6-luna",
+    "provider": "magpie",
+    "reasoning_effort": "medium",
+    "reasoning_mode": "effort",
+    "stream": true
+  },
+  "context7": {
+    "configuration": "reuse only existing context7 entry arguments/environment; no installer, credentials omitted",
+    "entry": "/Users/xueyongzhi/.npm/_npx/eea2bd7412d4593b/node_modules/@upstash/context7-mcp/dist/index.js",
+    "entry_sha256": "a58aa517ab6defd8780566373a9fde5d1d47845a1cf7b2fb72151ef595740a57",
+    "package": "@upstash/context7-mcp",
+    "package_json_sha256": "a5fd3d271310955005d5477558133b94ad37d7232c83721015c417025f519e2a",
+    "version": "4.5.0"
+  },
+  "system": "Complete the task using actual tools and only this isolated workspace. No shell/process execution or external writes. Do not invent documentation or replay unknown effects.",
+  "question": "Goja Runtime.Interrupt: may it be called from a goroutine other than the VM owner?",
+  "entry_guidance": {
+    "js": "Use js_exec inline code with tools.search/describe/call for Context7 and filesystem orchestration; native filesystem tools remain available.",
+    "native": "Use native filesystem tools and the existing ToolSearch/mcp_call entries for Context7."
+  },
+  "turns": [
+    {
+      "label": "first",
+      "common": "Inputs are a.txt=17 and b.txt=25.\nShell/process execution is forbidden for this task, including RunCommand, aliases and equivalent process tools. Work only in this workspace. Read a.txt and b.txt using actual tools and sum their integers. Read returns JSON content with numbered lines; parse the values, not the line numbers.\nUse Context7 read-only documentation to answer this question: Goja Runtime.Interrupt: may it be called from a goroutine other than the VM owner?\nResolve Goja's library ID, then query its docs with that exact question text in this Turn. Keep the actual returned source/library ID; if relevant evidence is unavailable, explicitly report unavailable instead of guessing.\nWrite answer.json with exactly four fields: total (integer), api_status (found or unavailable), api_answer (one short sentence, at most 300 characters), api_source (one actual library ID or URL, or empty when unavailable). Finish with a concise total/API/source answer. Select only relevant documentation output. Do not create or execute workflow.js or any other saved script; JS may use inline code only. Do not edit a.txt or b.txt. No other files or external services may be written.",
+      "inputs": {
+        "a.txt": "17\n",
+        "b.txt": "25\n"
+      },
+      "expected_total": 42
+    },
+    {
+      "label": "continuation",
+      "common": "Continue in this same Session. The harness has updated a.txt to 18; b.txt remains 25. Re-read both files and replace answer.json.\nShell/process execution is forbidden for this task, including RunCommand, aliases and equivalent process tools. Work only in this workspace. Read a.txt and b.txt using actual tools and sum their integers. Read returns JSON content with numbered lines; parse the values, not the line numbers.\nUse Context7 read-only documentation to answer this question: Goja Runtime.Interrupt: may it be called from a goroutine other than the VM owner?\nResolve Goja's library ID, then query its docs with that exact question text in this Turn. Keep the actual returned source/library ID; if relevant evidence is unavailable, explicitly report unavailable instead of guessing.\nWrite answer.json with exactly four fields: total (integer), api_status (found or unavailable), api_answer (one short sentence, at most 300 characters), api_source (one actual library ID or URL, or empty when unavailable). Finish with a concise total/API/source answer. Select only relevant documentation output. Do not create or execute workflow.js or any other saved script; JS may use inline code only. Do not edit a.txt or b.txt. No other files or external services may be written.",
+      "inputs": {
+        "a.txt": "18\n",
+        "b.txt": "25\n"
+      },
+      "expected_total": 43
+    }
+  ],
+  "exact_prompts": {
+    "js": [
+      "Use js_exec inline code with tools.search/describe/call for Context7 and filesystem orchestration; native filesystem tools remain available.\n\nInputs are a.txt=17 and b.txt=25.\nShell/process execution is forbidden for this task, including RunCommand, aliases and equivalent process tools. Work only in this workspace. Read a.txt and b.txt using actual tools and sum their integers. Read returns JSON content with numbered lines; parse the values, not the line numbers.\nUse Context7 read-only documentation to answer this question: Goja Runtime.Interrupt: may it be called from a goroutine other than the VM owner?\nResolve Goja's library ID, then query its docs with that exact question text in this Turn. Keep the actual returned source/library ID; if relevant evidence is unavailable, explicitly report unavailable instead of guessing.\nWrite answer.json with exactly four fields: total (integer), api_status (found or unavailable), api_answer (one short sentence, at most 300 characters), api_source (one actual library ID or URL, or empty when unavailable). Finish with a concise total/API/source answer. Select only relevant documentation output. Do not create or execute workflow.js or any other saved script; JS may use inline code only. Do not edit a.txt or b.txt. No other files or external services may be written.",
+      "Use js_exec inline code with tools.search/describe/call for Context7 and filesystem orchestration; native filesystem tools remain available.\n\nContinue in this same Session. The harness has updated a.txt to 18; b.txt remains 25. Re-read both files and replace answer.json.\nShell/process execution is forbidden for this task, including RunCommand, aliases and equivalent process tools. Work only in this workspace. Read a.txt and b.txt using actual tools and sum their integers. Read returns JSON content with numbered lines; parse the values, not the line numbers.\nUse Context7 read-only documentation to answer this question: Goja Runtime.Interrupt: may it be called from a goroutine other than the VM owner?\nResolve Goja's library ID, then query its docs with that exact question text in this Turn. Keep the actual returned source/library ID; if relevant evidence is unavailable, explicitly report unavailable instead of guessing.\nWrite answer.json with exactly four fields: total (integer), api_status (found or unavailable), api_answer (one short sentence, at most 300 characters), api_source (one actual library ID or URL, or empty when unavailable). Finish with a concise total/API/source answer. Select only relevant documentation output. Do not create or execute workflow.js or any other saved script; JS may use inline code only. Do not edit a.txt or b.txt. No other files or external services may be written."
+    ],
+    "native": [
+      "Use native filesystem tools and the existing ToolSearch/mcp_call entries for Context7.\n\nInputs are a.txt=17 and b.txt=25.\nShell/process execution is forbidden for this task, including RunCommand, aliases and equivalent process tools. Work only in this workspace. Read a.txt and b.txt using actual tools and sum their integers. Read returns JSON content with numbered lines; parse the values, not the line numbers.\nUse Context7 read-only documentation to answer this question: Goja Runtime.Interrupt: may it be called from a goroutine other than the VM owner?\nResolve Goja's library ID, then query its docs with that exact question text in this Turn. Keep the actual returned source/library ID; if relevant evidence is unavailable, explicitly report unavailable instead of guessing.\nWrite answer.json with exactly four fields: total (integer), api_status (found or unavailable), api_answer (one short sentence, at most 300 characters), api_source (one actual library ID or URL, or empty when unavailable). Finish with a concise total/API/source answer. Select only relevant documentation output. Do not create or execute workflow.js or any other saved script; JS may use inline code only. Do not edit a.txt or b.txt. No other files or external services may be written.",
+      "Use native filesystem tools and the existing ToolSearch/mcp_call entries for Context7.\n\nContinue in this same Session. The harness has updated a.txt to 18; b.txt remains 25. Re-read both files and replace answer.json.\nShell/process execution is forbidden for this task, including RunCommand, aliases and equivalent process tools. Work only in this workspace. Read a.txt and b.txt using actual tools and sum their integers. Read returns JSON content with numbered lines; parse the values, not the line numbers.\nUse Context7 read-only documentation to answer this question: Goja Runtime.Interrupt: may it be called from a goroutine other than the VM owner?\nResolve Goja's library ID, then query its docs with that exact question text in this Turn. Keep the actual returned source/library ID; if relevant evidence is unavailable, explicitly report unavailable instead of guessing.\nWrite answer.json with exactly four fields: total (integer), api_status (found or unavailable), api_answer (one short sentence, at most 300 characters), api_source (one actual library ID or URL, or empty when unavailable). Finish with a concise total/API/source answer. Select only relevant documentation output. Do not create or execute workflow.js or any other saved script; JS may use inline code only. Do not edit a.txt or b.txt. No other files or external services may be written."
+    ]
+  },
+  "schedule": [
+    {
+      "id": "pair1-native",
+      "pair": 1,
+      "route": "native"
+    },
+    {
+      "id": "pair1-js",
+      "pair": 1,
+      "route": "js"
+    },
+    {
+      "id": "pair2-js",
+      "pair": 2,
+      "route": "js"
+    },
+    {
+      "id": "pair2-native",
+      "pair": 2,
+      "route": "native"
+    }
+  ],
+  "controls": {
+    "answer_file": "retained between Turns; revalidated after each",
+    "automatic_retries": 0,
+    "cache_accounting": "Within each independent Session only; first/continuation and each pair separate. Provider reported prompt/cached/fresh/completion; no inference of KV caching from common HTTP body bytes.",
+    "gui": false,
+    "http_client_timeout_seconds": 0,
+    "max_generations_per_turn_including_selectors": 24,
+    "pairs": 2,
+    "per_generation_seconds": 600,
+    "response_header_timeout_seconds": 0,
+    "script_file_obligation": "none for either route; file capability B uses historical evidence only",
+    "sessions": 4,
+    "stop_policy": "Stop entire study on any model/runtime error, incomplete generation, unknown tool outcome, or instrumentation failure; no replacement sampling. Record assertion failures and continue fixed scheduled Turns without retry.",
+    "stream": true,
+    "turns_per_session": 2
+  },
+  "assertions": [
+    "both input files actually read per Turn; exact expected total",
+    "answer.json four-field schema; short API answer and real returned source",
+    "successful Context7 docs query with frozen question each Turn; relevant API support reviewed against original result",
+    "no shell/process dispatch; no GUI; no saved script generation or execution",
+    "same Session for its two Turns; four independent workspaces/Sessions",
+    "serialized main-request instructions/tools byte-equal within each Session",
+    "preserve original request/stream/Response/usage/invocation and Tool receipts, including failures and missing usage"
+  ]
+}
