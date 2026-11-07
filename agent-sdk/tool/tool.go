@@ -250,13 +250,18 @@ func AvailableForModel(target Tool, llm model.LLM) bool {
 	if target == nil {
 		return false
 	}
-	definition := target.Definition()
+	return target.Definition().AvailableForModel(llm)
+}
+
+// AvailableForModel checks this definition against the model's capabilities.
+// Callers that already read a Tool definition can reuse that same snapshot.
+func (d Definition) AvailableForModel(llm model.LLM) bool {
 	actual, _ := model.CapabilitiesOf(llm)
 	name := ""
 	if llm != nil {
 		name = llm.Name()
 	}
-	return model.ValidateCapabilities(name, actual, definition.RequiredModelCapabilities) == nil
+	return model.ValidateCapabilities(name, actual, d.RequiredModelCapabilities) == nil
 }
 
 // Observer receives transient tool updates emitted before the model-visible

@@ -65,9 +65,13 @@ func (r *Runtime) codeModeCatalog(ctx context.Context, ref session.SessionRef, c
 	if len(hints) > 6 {
 		hints = hints[:6]
 	}
-	text := `Native schema in tools: call directly. Known extension name: describe(name) once if schema is missing; otherwise call. Reuse valid schema across this Session's VMs/Turns; only JS variables reset. Unknown name: search(q) returns {tools:[{name,description}],count,truncated}; candidates grant no admission. describe takes a string:
-const s=await tools.search("unknown capability");output.text(await tools.describe(s.tools[0].name));
-Await calls sequentially. See schema before arguments; on stale, describe(name). Bindings/permissions stay live.`
+	text := `Valid Session schema or native schema in tools: tools.call(name,args) directly. Missing schema for known name (name is a string), schema-only invocation:
+output.text(await tools.describe(name));
+Call in a later invocation after choosing args (or directly if schema is valid):
+output.text(await tools.call(name,args));
+VMs clear JS variables, not Session discovery; reuse schemas across Turns. Await sequentially. Bindings/permissions stay live; on stale, describe(name).
+Only unknown names need search: {tools:[{name,description}],count,truncated}, no admission:
+const s=await tools.search("unknown");if(s.count)output.text(await tools.describe(s.tools[0].name));else output.text(s);`
 	if len(hints) > 0 {
 		raw, _ := json.Marshal(hints)
 		text += "\n\nSelected hints (fixed, not grants). " + tool.ExternalCapabilityDescriptionPrefix + "\n" + string(raw)

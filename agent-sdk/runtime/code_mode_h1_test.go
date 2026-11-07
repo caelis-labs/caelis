@@ -545,6 +545,9 @@ func TestJSExecH1HintWarningOncePreservesCapability(t *testing.T) {
 	if strings.Count(text, tool.ExternalCapabilityDescriptionPrefix) != 1 || !strings.Contains(text, "Read a synthetic lookup") || !strings.Contains(text, "{tools:[{name,description}],count,truncated}") {
 		t.Fatalf("H1 guidance/hint semantics lost: %s", text)
 	}
+	if !strings.Contains(text, "tools.call(name,args)") || strings.Index(text, "tools.call(name,args)") > strings.Index(text, "tools.search(") || !strings.Contains(text, "if(s.count)") {
+		t.Fatal("known-call signature/order or empty search guard absent")
+	}
 	state, _ := store.SnapshotState(t.Context(), active.SessionRef)
 	again, err := rt.codeModeCatalog(t.Context(), active.SessionRef, nil, nil)
 	if err != nil || again != state[codeModeCatalogKey] {
@@ -608,4 +611,36 @@ func TestJSExecH1SearchShapeError(t *testing.T) {
 		}
 	}
 	t.Fatal("missing shape rejection")
+}
+
+func TestJSExecH1UnknownSearchEmptyGuard(t *testing.T) {
+	store, active, _ := codeModeStore(t)
+	s := h1Directory(0)
+	m := &h1Model{s: s, main: func(i int, req *model.Request) []model.ToolCall {
+		if i != 0 {
+			return nil
+		}
+		var catalog string
+		for _, part := range req.Instructions {
+			if part.Text != nil && strings.Contains(part.Text.Text, "Only unknown names need search") {
+				catalog = part.Text.Text
+			}
+		}
+		if catalog == "" {
+			t.Fatal("missing assembled H1 instructions")
+		}
+		// Execute the actual final example, including the empty-candidate branch.
+		example := strings.Split(catalog, "\n")
+		return h1Script(example[len(example)-1])
+	}}
+	events, _ := runCodeMode(t, store, active, h1Spec(s, m), nil, nil)
+	for _, event := range events {
+		if event.Tool != nil && event.Tool.Status == "failed" {
+			t.Fatalf("empty search example failed: %+v", event.Tool)
+		}
+	}
+	stats := s.snapshot()
+	if stats.QueryRequests != 1 || stats.ExactRequests != 0 || stats.Effects != 0 || stats.SelectorCalls != 0 {
+		t.Fatalf("empty branch dispatched describe/selector/effect: %+v", stats)
+	}
 }

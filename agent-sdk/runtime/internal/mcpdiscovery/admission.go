@@ -12,12 +12,18 @@ func Admit(selected tool.ToolSearchResult, current map[string]tool.Tool, result 
 	admitted := tool.ToolSearchResult{Truncated: selected.Truncated, OmittedCount: selected.OmittedCount}
 	for _, entry := range selected.Tools {
 		one := current[entry.Name]
-		if one == nil || entry.Binding == nil || entry.Binding.Identity == "" || entry.Binding.Version == "" || *entry.Binding != tool.BindingForDefinition(one.Definition()) {
+		if one == nil || entry.Binding == nil || entry.Binding.Identity == "" || entry.Binding.Version == "" {
 			admitted.OmittedCount++
 			admitted.Truncated = true
 			continue
 		}
-		full := tool.NewToolSearchDiscoveredTool(one.Definition())
+		def := one.Definition()
+		if *entry.Binding != tool.BindingForDefinition(def) {
+			admitted.OmittedCount++
+			admitted.Truncated = true
+			continue
+		}
+		full := tool.NewToolSearchDiscoveredTool(def)
 		trial := admitted
 		trial.Tools = append(append([]tool.ToolSearchDiscoveredTool(nil), admitted.Tools...), full)
 		trial.Count = len(trial.Tools)

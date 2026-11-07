@@ -42,8 +42,12 @@ func (t codeModeDiscoveryTool) Call(ctx context.Context, call tool.Call) (tool.R
 	}
 	current := map[string]tool.Tool{}
 	for _, one := range t.targets() {
-		if one != nil && tool.IsMCPDefinition(one.Definition()) && tool.AvailableForModel(one, call.RuntimeModel) {
-			current[one.Definition().Name] = one
+		if one == nil {
+			continue
+		}
+		def := one.Definition()
+		if tool.IsMCPDefinition(def) && def.AvailableForModel(call.RuntimeModel) {
+			current[def.Name] = one
 		}
 	}
 	return mcpdiscovery.Admit(selected, current, result)

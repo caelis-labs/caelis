@@ -231,7 +231,11 @@ func (h *codeModeHost) admit(ctx context.Context, name string, target codeModeTa
 	if validationErr == nil {
 		validationErr = tool.NewError(tool.ErrorCodeStaleRevision, "Code Mode source/schema changed; reload with tools.describe(name) before calling")
 		for _, one := range h.owner.targets() {
-			if one != nil && one.Definition().Name == name && codeModeDefinitionDigest(one.Definition()) == target.digest {
+			if one == nil {
+				continue
+			}
+			def := one.Definition()
+			if def.Name == name && codeModeDefinitionDigest(def) == target.digest {
 				validationErr = nil
 				break
 			}
@@ -313,8 +317,11 @@ func (h *codeModeHost) call(requestCtx context.Context, name string, arguments j
 	h.mu.Unlock()
 	if discovery {
 		for _, one := range h.owner.targets() {
-			if one != nil && tool.IsToolSearchDefinition(one.Definition()) {
-				def := one.Definition()
+			if one == nil {
+				continue
+			}
+			def := one.Definition()
+			if tool.IsToolSearchDefinition(def) {
 				target = codeModeTarget{tool: one, definition: def, digest: codeModeDefinitionDigest(def)}
 				ok = true
 				break
@@ -329,7 +336,11 @@ func (h *codeModeHost) call(requestCtx context.Context, name string, arguments j
 				}
 			}
 			for _, one := range h.owner.targets() {
-				if one != nil && one.Definition().Name == name && oldBinding != tool.BindingForDefinition(one.Definition()) {
+				if one == nil {
+					continue
+				}
+				def := one.Definition()
+				if def.Name == name && oldBinding != tool.BindingForDefinition(def) {
 					return codemode.Reply{}, tool.NewError(tool.ErrorCodeStaleRevision, "tool directory refreshed; use tools.describe(name) to reload its schema/binding before calling")
 				}
 			}

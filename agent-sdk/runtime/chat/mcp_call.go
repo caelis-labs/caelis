@@ -23,8 +23,12 @@ func (a *Agent) mcpTools() map[string]tool.Tool {
 		candidates = append(candidates, a.deferredTools.Tools()...)
 	}
 	for _, one := range candidates {
-		if one != nil && tool.IsMCPDefinition(one.Definition()) && tool.AvailableForModel(one, a.model) {
-			out[one.Definition().Name] = one
+		if one == nil {
+			continue
+		}
+		def := one.Definition()
+		if tool.IsMCPDefinition(def) && def.AvailableForModel(a.model) {
+			out[def.Name] = one
 		}
 	}
 	return out
@@ -34,11 +38,16 @@ func (a *Agent) mcpTools() map[string]tool.Tool {
 // executes. A later discovery or refresh cannot redirect a pending invocation.
 func (a *Agent) bindMCPCalls(calls []model.ToolCall, visibility *tool.ToolVisibility) {
 	a.boundCalls = map[string]boundMCPCall{}
-	current := a.mcpTools()
+	var current map[string]tool.Tool
 	for _, call := range calls {
 		declaration, ok := a.lookupRunTool(call.Name, visibility)
 		if !ok || !tool.IsMCPCallDefinition(declaration.Definition()) {
 			continue
+		}
+		// Resolve the real declaration (including aliases) before deciding whether
+		// this response needs the MCP catalog. Binding still precedes execution.
+		if current == nil {
+			current = a.mcpTools()
 		}
 		bound := boundMCPCall{original: call}
 		actual, err := tool.ParseMCPCall(call)
@@ -48,14 +57,18 @@ func (a *Agent) bindMCPCalls(calls []model.ToolCall, visibility *tool.ToolVisibi
 			binding, known := a.discoveries[actual.Name]
 			bound.binding = binding
 			one := current[actual.Name]
+			var definition tool.Definition
+			if known && one != nil {
+				definition = one.Definition()
+			}
 			switch {
 			case !known:
 				bound.err = tool.NewError(tool.ErrorCodeNotFound, "MCP tool has not been discovered in this Session; use tool_search")
-			case one == nil || binding != tool.BindingForDefinition(one.Definition()):
+			case one == nil || binding != tool.BindingForDefinition(definition):
 				bound.err = tool.NewError(tool.ErrorCodeStaleRevision, "MCP binding changed or is unavailable; use tool_search after refresh")
 			default:
 				bound.target = one
-				bound.err = tool.ValidateMCPArguments(one.Definition(), []byte(actual.Args))
+				bound.err = tool.ValidateMCPArguments(definition, []byte(actual.Args))
 			}
 		}
 		a.boundCalls[call.ID] = bound

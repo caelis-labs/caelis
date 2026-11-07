@@ -13,9 +13,11 @@ type deferredToolSource struct {
 
 func (s *deferredToolSource) Tools() []tool.Tool {
 	var ready []tool.Tool
-	candidates := s.source.Tools()
+	var candidates []tool.Tool
 	if source, ok := s.source.(interface{ SearchTools() []tool.Tool }); ok {
 		candidates = source.SearchTools()
+	} else {
+		candidates = s.source.Tools()
 	}
 	for _, item := range candidates {
 		if item != nil && tool.IsMCPDefinition(item.Definition()) {
