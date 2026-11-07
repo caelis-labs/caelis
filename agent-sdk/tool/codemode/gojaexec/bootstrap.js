@@ -70,15 +70,15 @@
   const tools=freeze({
     call(name,args) {
       if(typeof name!=="string" || name.length>1024 || args===null || typeof args!=="object" || isArray(args))
-        throw new ErrorType("tools.call requires a name and JSON object");
+        throw new ErrorType("tools.call(name,args) requires a name string and JSON object");
       return then(rpc("call",name,encode(args,limits.argument_bytes)),decode);
     },
     search(query) {
-      if(typeof query!=="string" || query.length===0 || query.length>1024)throw new ErrorType("invalid search query");
+      if(typeof query!=="string" || query.length===0 || query.length>1024)throw new ErrorType("tools.search(query) requires a non-empty string; search only unknown extension names");
       return then(then(rpc("search",query,"{}"),decode),r=>r.parts[0].json);
     },
     describe(name) {
-      if(typeof name!=="string" || name.length===0 || name.length>1024)throw new ErrorType("invalid tool name");
+      if(typeof name!=="string" || name.length===0 || name.length>1024)throw new ErrorType("tools.describe(name) requires a name string, e.g. searchResult.tools[0].name; reuse valid Session schemas with tools.call");
       return then(then(rpc("describe",name,"{}"),decode),r=>r.parts[0].json);
     }
   });

@@ -25,11 +25,20 @@ slices or changes the serialized tools definitions.
 
 The async function body has these interfaces:
 
-- `await tools.search(query)` returns bounded candidate names and descriptions.
-- `await tools.describe(name)` returns the current complete input schema and
+- `await tools.search(query)` is for unknown extension names and returns
+  `{tools:[{name,description}],count,truncated}`. Candidates do not admit calls.
+- `await tools.describe(name)` accepts a name string (for example
+  `searchResult.tools[0].name`), returns the current complete input schema and
   records the discovery binding through the existing canonical owner.
 - `await tools.call(name, arguments)` invokes the already discovered Tool once.
 - `output.text(value)` and `await output.image(handle)` explicitly select output.
+
+Known native schemas in `tools` need no discovery. For a known extension name,
+use exact describe once only when the complete schema is absent from context.
+Otherwise call directly. Valid discovery in the same Session is reusable across
+VMs and Turns; a fresh VM clears local JS variables. Runtime still checks current
+identity, source/schema, generation and permissions on every call. Missing schema
+can be fetched by name without fuzzy search.
 
 Unknown schemas must be returned to the model before a later script supplies
 arguments. JavaScript is orchestration, not a second model that understands a
@@ -71,7 +80,7 @@ generation admission, effect claim, Journal and lifecycle wrappers. Discovery
 is not an execution grant. Refresh remains low-frequency Manager-owned work;
 searches do not push full catalog updates into prompts. Before an old binding
 can execute, a changed source/schema produces a distinct stale-binding error:
-the catalog was refreshed and tools.describe/search must rediscover it. Old
+the catalog was refreshed and tools.describe(name) must reload it. Old
 arguments are not dispatched or automatically retried with a new schema.
 Offline and revoked access retain their own errors.
 
@@ -123,7 +132,7 @@ child effects are never replayed to repair durability.
 ## Acceptance
 
 Owning checks cover native fs plus code-level shell denial (including aliases),
-DTW domain exec, search/describe/call, schema replacement before effect claim,
+DTW domain exec, candidate search/exact describe, Session reuse, schema replacement before effect claim,
 Guardian parameters, async yield/handle/cancel/completion and unknown no-replay.
 Model-context round trips and rendered TUI parent/child evidence cover durable
 and visible behavior.

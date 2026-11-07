@@ -156,7 +156,7 @@ func (h *codeModeHost) Discover(ctx context.Context, query string, describe bool
 				return codemode.Reply{CallID: reply.CallID, Outcome: codemode.OutcomeSucceeded, Parts: []codemode.Part{{Kind: "json", JSON: raw}}}, nil
 			}
 		}
-		return codemode.Reply{}, tool.NewError(tool.ErrorCodeStaleRevision, "tool directory refreshed; use tools.describe or tools.search to rediscover before calling")
+		return codemode.Reply{}, tool.NewError(tool.ErrorCodeStaleRevision, "tool directory refreshed; use tools.describe(name) to reload its schema/binding before calling")
 	}
 	type summary struct {
 		Name        string `json:"name"`

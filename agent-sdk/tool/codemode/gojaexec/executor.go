@@ -304,7 +304,7 @@ func (e *Executor) Execute(ctx context.Context, source codemode.Source, limits c
 					if callErr != nil {
 						response.Error = "Host request failed (" + string(errorcode.CodeOf(callErr)) + ")"
 						if errorcode.Is(callErr, tool.ErrorCodeStaleRevision) {
-							response.Error = "Tool directory refreshed; use tools.describe/search to rediscover before calling. Old arguments were not executed."
+							response.Error = "Tool directory refreshed; use tools.describe(name) to reload its schema/binding before calling. Old arguments were not executed."
 						}
 						if errorcode.Is(callErr, errorcode.UnknownOutcome) {
 							response.Error = "Tool outcome is unknown; do not replay the effect."

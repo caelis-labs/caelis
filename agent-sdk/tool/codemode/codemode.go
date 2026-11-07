@@ -116,7 +116,7 @@ type Tool struct {
 
 // Definition declares mutually exclusive inline and file source inputs.
 func (t *Tool) Definition() tool.Definition {
-	return tool.Definition{Name: t.Name, Metadata: map[string]any{tool.MetadataToolKind: ToolKind}, Description: "Fresh isolated JS async body from code or current file bytes. tools.search/describe/call; output.text/image or JSON return select output. FS keeps original permissions; shell/process forbidden. raw_json is explicit and non-enumerable; Numbers may round past 2^53-1. Failures remain errors. Long work yields an original Task handle: read/wait/cancel; never replay unknown effects.", InputSchema: map[string]any{
+	return tool.Definition{Name: t.Name, Metadata: map[string]any{tool.MetadataToolKind: ToolKind}, Description: "Fresh isolated JS async body from code/file; Session discovery persists. Select output with output.text(object), output.image(handle) or JSON return. FS keeps permissions; no shell/process. raw_json is explicit/non-enumerable; Numbers round past 2^53-1. Failures remain errors. Long work yields original Task: read/wait/cancel; never replay unknown effects.", InputSchema: map[string]any{
 		"type": "object", "additionalProperties": false,
 		"properties": map[string]any{"code": map[string]any{"type": "string", "minLength": 1}, "file": map[string]any{"type": "string", "minLength": 1}, "yield_time_ms": map[string]any{"type": "integer", "minimum": 0, "maximum": 60000, "default": 10000}},
 		"oneOf":      []any{map[string]any{"required": []string{"code"}}, map[string]any{"required": []string{"file"}}},

@@ -138,7 +138,7 @@ func (t runtimeCodeModeTool) execute(ctx context.Context, call tool.Call, source
 				result.Metadata["code_mode_outcome"] = codemode.OutcomeUnknown
 			}
 		}
-		raw, _ := json.Marshal(map[string]any{"errors": host.failures, "instruction": "Do not replay unknown effects. Rediscover stale bindings with tools.describe/search."})
+		raw, _ := json.Marshal(map[string]any{"errors": host.failures, "instruction": "Do not replay unknown effects. Reload stale schemas/bindings with tools.describe(name)."})
 		result.Content = append(result.Content, model.NewJSONPart(raw))
 	}
 	if completed.err != nil {
@@ -229,7 +229,7 @@ func (h *codeModeHost) admit(ctx context.Context, name string, target codeModeTa
 		}
 	}
 	if validationErr == nil {
-		validationErr = tool.NewError(tool.ErrorCodeStaleRevision, "Code Mode source/schema changed; discover and execute again")
+		validationErr = tool.NewError(tool.ErrorCodeStaleRevision, "Code Mode source/schema changed; reload with tools.describe(name) before calling")
 		for _, one := range h.owner.targets() {
 			if one != nil && one.Definition().Name == name && codeModeDefinitionDigest(one.Definition()) == target.digest {
 				validationErr = nil
@@ -330,7 +330,7 @@ func (h *codeModeHost) call(requestCtx context.Context, name string, arguments j
 			}
 			for _, one := range h.owner.targets() {
 				if one != nil && one.Definition().Name == name && oldBinding != tool.BindingForDefinition(one.Definition()) {
-					return codemode.Reply{}, tool.NewError(tool.ErrorCodeStaleRevision, "tool directory refreshed; use tools.describe or tools.search to rediscover before calling")
+					return codemode.Reply{}, tool.NewError(tool.ErrorCodeStaleRevision, "tool directory refreshed; use tools.describe(name) to reload its schema/binding before calling")
 				}
 			}
 			return codemode.Reply{}, tool.NewError(errorcode.Unavailable, "discovered tool is currently unavailable; check connection or access before rediscovery")
