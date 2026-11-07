@@ -123,6 +123,10 @@ type InvocationContext struct {
 // ParentCall relates a nested invocation to the admitted host call that owns it.
 // It is Runtime data, never script arguments or an authorization capability.
 type ParentCall struct {
+	// Kind identifies the Runtime-owned relation, not execution authority.
+	// Empty retains ordinary parent provenance; code_mode requires a live
+	// Runtime admission binding which cannot be reconstructed from this record.
+	Kind      string            `json:"kind,omitempty"`
 	ID        string            `json:"id"`
 	Name      string            `json:"name"`
 	Execution InvocationContext `json:"execution"`

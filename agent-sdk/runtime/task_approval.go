@@ -25,6 +25,7 @@ type taskApproval struct {
 	resolve    func(context.Context, agent.ApprovalRequest) (agent.ApprovalResponse, error)
 	started    time.Time
 	generation uint64
+	admission  *codeModeAdmissionBinding
 }
 
 type approvedToolCall func(context.Context, tool.Call) (tool.Result, error)
@@ -51,6 +52,11 @@ func submitTaskApproval(ctx context.Context, call tool.Call, approval taskApprov
 	if !ok {
 		return tool.Result{}, false, nil
 	}
+	binding, err := codeModeAdmissionFor(ctx, call)
+	if err != nil {
+		return tool.Result{}, true, err
+	}
+	approval.admission = binding
 	result, err := producer.submitApproval(ctx, call, approval, execute)
 	return result, true, err
 }
@@ -60,6 +66,10 @@ func submitTaskApproval(ctx context.Context, call tool.Call, approval taskApprov
 // second result for that call ID. Journaling still begins only after approval.
 func (t journaledTool) callTaskContinuation(ctx context.Context, call tool.Call) (tool.Result, error) {
 	result, callErr := t.Call(ctx, call)
+	if isCodeModeChild(call) {
+		// Call already persists nested terminals through the same receipt owner.
+		return result, callErr
+	}
 	return result, errors.Join(callErr, persistToolExecutionReceipt(ctx, t.sessions, t.sessionRef, call, result))
 }
 

@@ -281,7 +281,6 @@ func (h *codeModeHost) Call(requestCtx context.Context, name string, arguments j
 	stop := context.AfterFunc(requestCtx, cancel)
 	defer stop()
 	admission := func(ctx context.Context) (func(), error) { return h.admit(ctx, name, target) }
-	ctx = context.WithValue(ctx, codeModeAdmissionKey{}, admission)
 	// This eligibility check is advisory; the journal repeats it after approval
 	// and retains the guard through its durable started claim.
 	release, err := admission(ctx)
@@ -290,8 +289,9 @@ func (h *codeModeHost) Call(requestCtx context.Context, name string, arguments j
 	}
 	release()
 	call := tool.Call{ID: callID, Name: name, Input: append(json.RawMessage(nil), arguments...),
-		Parent:       &tool.ParentCall{ID: h.parent.ID, Name: h.parent.Name, Execution: h.parent.Execution},
+		Parent:       &tool.ParentCall{Kind: codemode.ToolKind, ID: h.parent.ID, Name: h.parent.Name, Execution: h.parent.Execution},
 		RuntimeModel: h.parent.RuntimeModel, RuntimeReasoning: h.parent.RuntimeReasoning, RuntimeServiceTier: h.parent.RuntimeServiceTier}
+	ctx = context.WithValue(ctx, codeModeAdmissionKey{}, &codeModeAdmissionBinding{callID: call.ID, name: call.Name, parent: *call.Parent, validate: admission})
 	if tool.IsMCPDefinition(target.definition) {
 		binding := tool.BindingForDefinition(target.definition)
 		call.TargetBinding = &binding

@@ -33,11 +33,15 @@ func (t journaledTool) RuntimeTaskResultSource(toolbinding.Token) bool {
 }
 
 func (t journaledTool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
-	admission, nested := ctx.Value(codeModeAdmissionKey{}).(func(context.Context) (func(), error))
+	admission, err := codeModeAdmissionFor(ctx, call)
+	if err != nil {
+		return tool.Result{}, err
+	}
+	nested := admission != nil
 	var release func()
 	if nested {
 		var err error
-		release, err = admission(ctx)
+		release, err = admission.validate(ctx)
 		if err != nil {
 			return tool.Result{}, err
 		}

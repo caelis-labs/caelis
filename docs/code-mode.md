@@ -60,6 +60,13 @@ Every nested call has a fresh Runtime invocation identity and typed parent
 relation. Display mirrors carry actual tool names and arguments without adding
 inner tool messages to the model transcript. Each terminal receipt persists
 independently before its bounded projection reaches the executor.
+The Runtime-only parent relation marks Code Mode children with `kind=code_mode`;
+that provenance is not authority. Their original in-memory admission binding is
+required at the journal claim, including calls which yielded a native Command
+approval Task. The existing Task/Run owner carries only that binding across the
+context switch, not the short-lived Host.Call context. Other parent provenance
+does not imply Code Mode admission. Recovery never reconstructs the binding from
+stored parent, Task or approval facts and never starts an interrupted approval.
 
 Limits apply before source reads, argument copies, projection/transport and
 output acceptance. Adapters receive those limits and must enforce them before
