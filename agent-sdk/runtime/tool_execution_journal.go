@@ -33,11 +33,19 @@ func (t journaledTool) RuntimeTaskResultSource(toolbinding.Token) bool {
 }
 
 func (t journaledTool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
-	admission, nested := ctx.Value(codeModeAdmissionKey{}).(func(context.Context) error)
+	admission, nested := ctx.Value(codeModeAdmissionKey{}).(func(context.Context) (func(), error))
+	var release func()
 	if nested {
-		if err := admission(ctx); err != nil {
+		var err error
+		release, err = admission(ctx)
+		if err != nil {
 			return tool.Result{}, err
 		}
+		defer func() {
+			if release != nil {
+				release()
+			}
+		}()
 	}
 	def := t.base.Definition()
 	now := t.now
@@ -88,6 +96,13 @@ func (t journaledTool) Call(ctx context.Context, call tool.Call) (tool.Result, e
 		}
 	}
 
+	// The existing durable started record is the execution claim. Configuration
+	// replacement and trusted completion cannot cross this admission boundary;
+	// approvals have already resolved, and external tool I/O starts after release.
+	if release != nil {
+		release()
+		release = nil
+	}
 	requestCancellation := func() error {
 		mu.Lock()
 		defer mu.Unlock()

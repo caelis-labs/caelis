@@ -317,6 +317,9 @@ func builtinPolicyClassForName(name string) builtinPolicyClass {
 }
 
 func policyClass(input policy.ToolContext) builtinPolicyClass {
+	if input.ReadPathArgument != "" {
+		return builtinPolicyReadPath
+	}
 	if class := builtinPolicyClassForName(toolName(input)); class != builtinPolicyUnknown {
 		return class
 	}

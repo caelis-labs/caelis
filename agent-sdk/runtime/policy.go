@@ -156,14 +156,15 @@ func (t policyWrappedTool) Call(ctx context.Context, call tool.Call) (tool.Resul
 		t.tool = mcpRevocationTool{Tool: t.tool, store: t.mcpGrants, epoch: t.mcpEpoch}
 	}
 	input := policy.ToolContext{
-		Session:       t.session,
-		State:         session.CloneState(t.state),
-		Tool:          t.tool.Definition(),
-		Call:          tool.CloneCall(call),
-		Sandbox:       t.describeSandbox(),
-		SandboxPolicy: sandbox.ClonePolicySnapshot(t.sandboxPolicy),
-		Mode:          t.mode,
-		Options:       policy.CloneModeOptions(t.options),
+		Session:          t.session,
+		State:            session.CloneState(t.state),
+		Tool:             t.tool.Definition(),
+		Call:             tool.CloneCall(call),
+		Sandbox:          t.describeSandbox(),
+		SandboxPolicy:    sandbox.ClonePolicySnapshot(t.sandboxPolicy),
+		Mode:             t.mode,
+		Options:          policy.CloneModeOptions(t.options),
+		ReadPathArgument: codeModeReadPathArgument(t.tool),
 	}
 	decision, err := t.policy.DecideTool(ctx, input)
 	if err != nil {

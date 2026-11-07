@@ -46,6 +46,10 @@ type ToolContext struct {
 	SandboxPolicy sandbox.PolicySnapshot `json:"sandbox_policy,omitempty"`
 	Mode          string                 `json:"mode,omitempty"`
 	Options       ModeOptions            `json:"options,omitempty"`
+	// ReadPathArgument is a source-read argument selected by Runtime from a
+	// trusted concrete implementation. Names and untrusted metadata cannot set
+	// it. Presets authorize this optional path using their existing Read rules.
+	ReadPathArgument string `json:"read_path_argument,omitempty"`
 }
 
 // Decision is the normalized policy result. Constraints are backend-neutral

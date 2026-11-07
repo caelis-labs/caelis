@@ -122,12 +122,13 @@ func TestCodeModeRevalidatesMCPAndGenerationAfterApproval(t *testing.T) {
 }
 
 func TestCodeModeCancellationAndRecoveryDoNotReplayEffects(t *testing.T) {
-	for _, responsive := range []bool{true, false} {
-		name := "unresponsive"
-		if responsive {
-			name = "responsive"
+	for _, outcome := range []string{"responsive-unknown", "unresponsive-unknown", "unresponsive-success"} {
+		responsive := outcome == "responsive-unknown"
+		wantStatus := session.ToolExecutionUnknownOutcome
+		if outcome == "unresponsive-success" {
+			wantStatus = session.ToolExecutionSucceeded
 		}
-		t.Run(name, func(t *testing.T) {
+		t.Run(outcome, func(t *testing.T) {
 			store, active, root := codeModeStore(t)
 			var effects atomic.Int32
 			started, release, executorDone := make(chan struct{}), make(chan struct{}), make(chan struct{})
@@ -143,6 +144,9 @@ func TestCodeModeCancellationAndRecoveryDoNotReplayEffects(t *testing.T) {
 					return tool.Result{IsError: true}, ctx.Err()
 				}
 				<-release
+				if wantStatus == session.ToolExecutionSucceeded {
+					return tool.Result{Content: []model.Part{model.NewTextPart("confirmed after cancellation")}}, nil
+				}
 				return tool.Result{IsError: true}, ctx.Err()
 			}}
 			var retained codemode.Host
@@ -161,6 +165,11 @@ func TestCodeModeCancellationAndRecoveryDoNotReplayEffects(t *testing.T) {
 			}
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
+			fence, err := store.AcquireSessionFence(t.Context(), session.AcquireSessionFenceRequest{SessionRef: active.SessionRef, OwnerID: "code-mode-cancellation-fixture"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx = session.ContextWithRuntimeFence(ctx, fence)
 			run, err := rt.Run(ctx, agent.RunRequest{SessionRef: active.SessionRef, Input: "effects then cancel", AgentSpec: agent.AgentSpec{Model: codeModeModel(false), Tools: []tool.Tool{declaration, write, pending}}})
 			if err != nil {
 				t.Fatal(err)
@@ -171,12 +180,23 @@ func TestCodeModeCancellationAndRecoveryDoNotReplayEffects(t *testing.T) {
 				t.Fatal("pending effect never started")
 			}
 			cancel()
+			if !responsive {
+				// Foreground cancellation is not quiescence. The existing Run
+				// owner must remain joined while this producer ignores cancellation.
+				wait, stop := context.WithTimeout(t.Context(), 250*time.Millisecond)
+				err := run.Handle.WaitCompletion(wait)
+				stop()
+				if !errors.Is(err, context.DeadlineExceeded) {
+					close(release)
+					t.Fatalf("Runner released a live producer: %v", err)
+				}
+			}
+			close(release)
 			wait, stop := context.WithTimeout(t.Context(), 2*time.Second)
 			defer stop()
 			if err := run.Handle.WaitCompletion(wait); !errors.Is(err, context.Canceled) {
 				t.Fatalf("cancel terminal=%v", err)
 			}
-			close(release)
 			select {
 			case <-executorDone:
 			case <-time.After(5 * time.Second):
@@ -191,10 +211,18 @@ func TestCodeModeCancellationAndRecoveryDoNotReplayEffects(t *testing.T) {
 				t.Fatal(err)
 			}
 			var original string
+			var pendingStatus session.ToolExecutionStatus
 			for _, event := range before {
 				if event.Journal != nil && event.Journal.ToolExecution != nil && event.Journal.ToolExecution.ToolName == "Pending" {
 					original = event.Journal.ToolExecution.Identity
+					pendingStatus = event.Journal.ToolExecution.Status
 				}
+			}
+			if original == "" || pendingStatus != wantStatus {
+				t.Fatalf("child terminal missing before fence release: identity=%s status=%s", original, pendingStatus)
+			}
+			if err := store.ReleaseSessionFence(t.Context(), session.SessionFenceReleaseRequest(fence)); err != nil {
+				t.Fatal(err)
 			}
 			// A fresh Runtime performs existing receipt recovery, without dispatching
 			// the executor or either effect again.
@@ -219,7 +247,7 @@ func TestCodeModeCancellationAndRecoveryDoNotReplayEffects(t *testing.T) {
 					t.Fatal("recovery fabricated inner model tool result")
 				}
 			}
-			if original == "" || effects.Load() != 2 || statuses["Write"] != session.ToolExecutionSucceeded || statuses["Pending"] != session.ToolExecutionUnknownOutcome {
+			if original == "" || effects.Load() != 2 || statuses["Write"] != session.ToolExecutionSucceeded || statuses["Pending"] != wantStatus {
 				t.Fatalf("effects=%d statuses=%v original=%s", effects.Load(), statuses, original)
 			}
 		})

@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"sync"
-	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/mcpdiscovery"
@@ -21,7 +20,7 @@ type codeModeAdmissionKey struct{}
 type codeModeValidationKey struct{}
 type nestedToolEventSinkKey struct{}
 
-const codeModeDrainGrace = 50 * time.Millisecond
+var errCodeModeComplete = errors.New("code mode host admission is closed by TurnComplete")
 
 type runtimeCodeModeTool struct {
 	declaration *codemode.Tool
@@ -94,23 +93,13 @@ func (t runtimeCodeModeTool) Call(ctx context.Context, call tool.Call) (tool.Res
 	case completed = <-done:
 	case <-ctx.Done():
 		host.stop()
-		timer := time.NewTimer(codeModeDrainGrace)
-		defer timer.Stop()
-		select {
-		case completed = <-done:
-		case <-timer.C:
-			return tool.Result{}, ctx.Err()
-		}
+		completed = <-done
 	}
 	// An executor cannot retain Host and dispatch after returning.
 	host.stop()
-	drain := time.NewTimer(codeModeDrainGrace)
-	defer drain.Stop()
-	select {
-	case <-host.drained:
-	case <-drain.C:
-		return tool.Result{}, fmt.Errorf("code mode executor returned with pending host calls; original receipts retained")
-	}
+	// Foreground cancellation may stop waiting, but Runner completion must retain
+	// the existing Run owner until the adapter and every Host producer have exited.
+	<-host.drained
 	host.mu.Lock()
 	defer host.mu.Unlock()
 	if host.turnComplete && host.fatal == nil {
@@ -156,6 +145,7 @@ type codeModeHost struct {
 	drained      chan struct{}
 	drainClosed  bool
 	active       int
+	pending      int
 	unsafeActive bool
 	calls        int
 	retained     int
@@ -175,31 +165,54 @@ func (h *codeModeHost) stop() {
 }
 
 func (h *codeModeHost) closeDrainLocked() {
-	if h.closed && h.active == 0 && !h.drainClosed {
+	if h.closed && h.pending == 0 && !h.drainClosed {
 		close(h.drained)
 		h.drainClosed = true
 	}
 }
 
-func (h *codeModeHost) current(ctx context.Context, name string, target codeModeTarget) error {
+// admit protects the final source comparison and existing journal's durable
+// execution claim. The caller releases before invoking external tool I/O.
+// Lock order is snapshot guard, then host.mu; no approval wait holds either.
+func (h *codeModeHost) admit(ctx context.Context, name string, target codeModeTarget) (func(), error) {
 	if err := ctx.Err(); err != nil {
-		return err
+		return nil, err
 	}
+	release := func() {}
+	var validationErr error
 	if h.owner.validate != nil {
-		release, err := h.owner.validate(ctx)
-		if err != nil {
-			return err
-		}
-		if release != nil {
-			release()
+		guard, err := h.owner.validate(ctx)
+		validationErr = err
+		if guard != nil {
+			release = guard
 		}
 	}
-	for _, one := range h.owner.targets() {
-		if one != nil && one.Definition().Name == name && codeModeDefinitionDigest(one.Definition()) == target.digest {
-			return nil
+	if validationErr == nil {
+		validationErr = tool.NewError(tool.ErrorCodeStaleRevision, "Code Mode source/schema changed; discover and execute again")
+		for _, one := range h.owner.targets() {
+			if one != nil && one.Definition().Name == name && codeModeDefinitionDigest(one.Definition()) == target.digest {
+				validationErr = nil
+				break
+			}
 		}
 	}
-	return tool.NewError(tool.ErrorCodeStaleRevision, "Code Mode source/schema changed; discover and execute again")
+	h.mu.Lock()
+	switch {
+	case h.turnComplete:
+		validationErr = errCodeModeComplete
+	case h.closed:
+		validationErr = fmt.Errorf("code mode host admission is closed")
+	case h.ctx.Err() != nil:
+		validationErr = h.ctx.Err()
+	case ctx.Err() != nil:
+		validationErr = ctx.Err()
+	}
+	if validationErr != nil {
+		h.mu.Unlock()
+		release()
+		return nil, validationErr
+	}
+	return func() { h.mu.Unlock(); release() }, nil
 }
 
 func (h *codeModeHost) Call(requestCtx context.Context, name string, arguments json.RawMessage) (codemode.Reply, error) {
@@ -219,7 +232,14 @@ func (h *codeModeHost) Call(requestCtx context.Context, name string, arguments j
 	// schema compilation or other potentially expensive host work.
 	h.calls++
 	ordinal := h.calls
+	h.pending++
 	h.mu.Unlock()
+	defer func() {
+		h.mu.Lock()
+		h.pending--
+		h.closeDrainLocked()
+		h.mu.Unlock()
+	}()
 	if len(arguments) > h.limits.ArgumentBytes {
 		return codemode.Reply{}, fmt.Errorf("code mode arguments exceed budget")
 	}
@@ -260,10 +280,15 @@ func (h *codeModeHost) Call(requestCtx context.Context, name string, arguments j
 	defer cancel()
 	stop := context.AfterFunc(requestCtx, cancel)
 	defer stop()
-	ctx = context.WithValue(ctx, codeModeAdmissionKey{}, func(ctx context.Context) error { return h.current(ctx, name, target) })
-	if err := h.current(ctx, name, target); err != nil {
+	admission := func(ctx context.Context) (func(), error) { return h.admit(ctx, name, target) }
+	ctx = context.WithValue(ctx, codeModeAdmissionKey{}, admission)
+	// This eligibility check is advisory; the journal repeats it after approval
+	// and retains the guard through its durable started claim.
+	release, err := admission(ctx)
+	if err != nil {
 		return codemode.Reply{}, err
 	}
+	release()
 	call := tool.Call{ID: callID, Name: name, Input: append(json.RawMessage(nil), arguments...),
 		Parent:       &tool.ParentCall{ID: h.parent.ID, Name: h.parent.Name, Execution: h.parent.Execution},
 		RuntimeModel: h.parent.RuntimeModel, RuntimeReasoning: h.parent.RuntimeReasoning, RuntimeServiceTier: h.parent.RuntimeServiceTier}
@@ -293,6 +318,11 @@ func (h *codeModeHost) Call(requestCtx context.Context, name string, arguments j
 		h.closed = true
 	}
 	if callErr != nil {
+		if errors.Is(callErr, errCodeModeComplete) {
+			// A pending approval lost admission before claiming an effect. This
+			// expected rejection must not cancel the completing call's media Emit.
+			return codemode.Reply{CallID: callID, IsError: true, Outcome: outcome}, callErr
+		}
 		// A persistence failure or transport error must not be swallowed by an executor.
 		h.fatal = errors.Join(h.fatal, callErr)
 		h.closed = true

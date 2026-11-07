@@ -34,8 +34,12 @@ Reply.outcome distinguishes succeeded, failed and unknown_outcome. Non-read-only
 MCP calls with a request failure or missing response conservatively report a typed
 unknown outcome; neither Runtime recovery nor the bridge retries that effect.
 
-The declaration accepts exactly one of `code` and `file`. Files are opened through
-the supplied sandbox Runtime filesystem under existing workspace constraints,
+The declaration accepts exactly one of `code` and `file`. Runtime supplies the
+concrete binding's optional `file` read-path semantics to the existing policy
+owner via `ToolContext.ReadPathArgument`; a display name or untrusted metadata
+cannot supply this fact. Workspace-write uses the same sensitive-path, physical
+symlink and explicit read-grant rules as Read, without a synthetic Read invocation.
+Files are then opened through the supplied sandbox Runtime filesystem under existing workspace constraints,
 read once with a size limit, and hashed. Each execution reads again; adapters must
 execute these bytes, never resolve the path through a module cache. Only a real
 Node adapter may advertise `node_repl`; other JavaScript adapters use `js_repl`.
@@ -43,7 +47,9 @@ The common layer provides no Node APIs, persistent heap or workflow scheduler.
 
 At invocation start the bridge pins current native declarations and currently
 discovered MCP bindings. Before dispatch, including after approval, it rechecks
-the source/schema and model snapshot generation validator. Dynamic snapshots
+the source/schema and model snapshot generation validator. The final check,
+source comparison and existing journal's durable started claim share one short
+guard. Approval waits and external tool I/O hold no configuration guard. Dynamic snapshots
 without Validate cannot dispatch script host calls; static bindings belong to
 their immutable Runtime/Turn assembly. MCP keeps its
 own final catalog and grant revocation checks. Native tools stay native, and
@@ -60,14 +66,23 @@ worker RPC decoding and result encoding/allocation. Host retains full tool facts
 in existing journal receipts; these
 limits cannot prevent allocation inside an arbitrary tool or external MCP SDK.
 Concurrent requests require explicit ParallelSafe on every active target. A
-trusted TurnComplete closes admission even when an executor ignores its reply.
+trusted TurnComplete serializes with the final execution claim and closes
+admission, including calls still waiting for approval. Already claimed effects
+retain their original cancellation and receipt contract. The completing call
+may still Emit its own media; rejecting a pending approval does not cancel Emit.
 Rejected requests count toward the host request budget. Receipt persistence or
 transport failure closes the bridge even if the executor swallows the error.
 The JSON output limit and cumulative opaque-media retention limit are separate.
 
-Cancellation closes admission, cancels inflight requests and drains for a bounded
-grace period. Unsettled effects retain original IDs and journal state for existing
-unknown-outcome recovery. Adapters must stop their producer on cancellation;
+Cancellation closes admission and cancels inflight requests. Chat retains its
+existing bounded foreground drain, but this does not prove producer quiescence.
+Code Mode's full ordinary tool wrapper chain registers with the existing Run
+continuation owner: Runner completion and Session fence release wait for the
+adapter and every Host request to exit, including terminal receipt persistence.
+An unresponsive Go tool or adapter therefore retains that authority until it
+actually exits; increasing a wait threshold cannot release it safely. Unsettled
+effects retain original IDs and journal state for existing unknown-outcome
+recovery after a true shutdown. Adapters must stop their producer on cancellation;
 engine CPU/fuel accounting must pause during host/approval waits. There is no new
 Turn timeout, automatic retry or replay of script/tool effects.
 
@@ -83,7 +98,9 @@ native plus MCP calls; schema/source/generation replacement and revoked approval
 denied approval; one completed effect followed by failure/cancellation; interrupted
 effect recovery without replay; structured JSON plus image handle emission; source
 file edit and rerun; bounded large input/result; concurrent safe and unsafe calls;
-CPU-only cancellation versus approval/tool waiting. Record original operation IDs,
+CPU-only cancellation versus approval/tool waiting; canonical Session fence
+retention until real producer exit; approval released after trusted completion;
+and sensitive source denial versus explicit read grants. Record original operation IDs,
 terminal receipts, model tokens, host transfers, engine CPU/wall/memory, startup,
 cleanup and actual effect counts. Fixture success does not establish language
 compatibility, sandbox security, live-model quality or production readiness.

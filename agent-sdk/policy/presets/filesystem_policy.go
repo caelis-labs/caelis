@@ -171,7 +171,11 @@ func candidatePaths(input policy.ToolContext) ([]string, error) {
 	}
 	switch policyClass(input) {
 	case builtinPolicyReadPath, builtinPolicyWritePath:
-		return resolvePathsAgainstWorkspace(stringValues(args["path"]), input.Options.WorkspaceRoot), nil
+		argument := "path"
+		if input.ReadPathArgument != "" {
+			argument = input.ReadPathArgument
+		}
+		return resolvePathsAgainstWorkspace(stringValues(args[argument]), input.Options.WorkspaceRoot), nil
 	case builtinPolicySearchPath:
 		if roots := resolvePathsAgainstWorkspace(stringValues(args["path"]), input.Options.WorkspaceRoot); len(roots) > 0 {
 			return roots, nil
