@@ -1,0 +1,121 @@
+{
+  "total_count": 14,
+  "owners": [
+    {
+      "owner": "api",
+      "count": 1,
+      "issues": [
+        {
+          "issue_id": "ISS-003",
+          "severity": "critical",
+          "updated_at": "2026-11-04T00:01:00Z",
+          "record_id": "R015",
+          "batch_id": "batch-b"
+        }
+      ]
+    },
+    {
+      "owner": "ops",
+      "count": 8,
+      "issues": [
+        {
+          "issue_id": "ISS-002",
+          "severity": "high",
+          "updated_at": "2026-11-02T00:01:00Z",
+          "record_id": "R014",
+          "batch_id": "batch-b"
+        },
+        {
+          "issue_id": "ISS-005",
+          "severity": "high",
+          "updated_at": "2026-11-02T00:04:00Z",
+          "record_id": "R017",
+          "batch_id": "batch-b"
+        },
+        {
+          "issue_id": "ISS-008",
+          "severity": "high",
+          "updated_at": "2026-11-03T00:01:00Z",
+          "record_id": "R026",
+          "batch_id": "batch-c"
+        },
+        {
+          "issue_id": "ISS-011",
+          "severity": "high",
+          "updated_at": "2026-11-03T00:04:00Z",
+          "record_id": "R029",
+          "batch_id": "batch-c"
+        },
+        {
+          "issue_id": "ISS-014",
+          "severity": "high",
+          "updated_at": "2026-11-02T00:07:00Z",
+          "record_id": "R020",
+          "batch_id": "batch-b"
+        },
+        {
+          "issue_id": "ISS-017",
+          "severity": "high",
+          "updated_at": "2026-11-02T00:10:00Z",
+          "record_id": "R023",
+          "batch_id": "batch-b"
+        },
+        {
+          "issue_id": "ISS-020",
+          "severity": "high",
+          "updated_at": "2026-11-03T00:07:00Z",
+          "record_id": "R032",
+          "batch_id": "batch-c"
+        },
+        {
+          "issue_id": "ISS-023",
+          "severity": "high",
+          "updated_at": "2026-11-03T00:10:00Z",
+          "record_id": "R035",
+          "batch_id": "batch-c"
+        }
+      ]
+    },
+    {
+      "owner": "ui",
+      "count": 5,
+      "issues": [
+        {
+          "issue_id": "ISS-001",
+          "severity": "critical",
+          "updated_at": "2026-11-02T00:00:00Z",
+          "record_id": "R013",
+          "batch_id": "batch-b"
+        },
+        {
+          "issue_id": "ISS-004",
+          "severity": "critical",
+          "updated_at": "2026-11-04T00:00:00Z",
+          "record_id": "R016",
+          "batch_id": "batch-b"
+        },
+        {
+          "issue_id": "ISS-007",
+          "severity": "critical",
+          "updated_at": "2026-11-05T00:00:00Z",
+          "record_id": "R036",
+          "batch_id": "batch-c"
+        },
+        {
+          "issue_id": "ISS-013",
+          "severity": "critical",
+          "updated_at": "2026-11-02T00:06:00Z",
+          "record_id": "R019",
+          "batch_id": "batch-b"
+        },
+        {
+          "issue_id": "ISS-019",
+          "severity": "critical",
+          "updated_at": "2026-11-03T00:06:00Z",
+          "record_id": "R031",
+          "batch_id": "batch-c"
+        }
+      ]
+    }
+  ]
+}

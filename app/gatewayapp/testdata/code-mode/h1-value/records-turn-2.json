@@ -1,0 +1,344 @@
+{
+  "classification": "synthetic inspection data for real local MCP execution",
+  "batches": {
+    "batch-a": [
+      {
+        "record_id": "R001",
+        "issue_id": "ISS-001",
+        "status": "open",
+        "severity": "critical",
+        "owner": "ui",
+        "updated_at": "2026-11-01T00:00:00Z",
+        "evidence": "Synthetic inspection 1, issue 1. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. "
+      },
+      {
+        "record_id": "R002",
+        "issue_id": "ISS-002",
+        "status": "open",
+        "severity": "high",
+        "owner": "ops",
+        "updated_at": "2026-11-01T00:01:00Z",
+        "evidence": "Synthetic inspection 2, issue 2. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. "
+      },
+      {
+        "record_id": "R003",
+        "issue_id": "ISS-003",
+        "status": "open",
+        "severity": "critical",
+        "owner": "api",
+        "updated_at": "2026-11-01T00:02:00Z",
+        "evidence": "Synthetic inspection 3, issue 3. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. "
+      },
+      {
+        "record_id": "R004",
+        "issue_id": "ISS-004",
+        "status": "open",
+        "severity": "high",
+        "owner": "ui",
+        "updated_at": "2026-11-04T00:00:00Z",
+        "evidence": "Synthetic inspection 4, issue 4. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. "
+      },
+      {
+        "record_id": "R005",
+        "issue_id": "ISS-005",
+        "status": "open",
+        "severity": "high",
+        "owner": "ops",
+        "updated_at": "2026-11-01T00:04:00Z",
+        "evidence": "Synthetic inspection 5, issue 5. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. "
+      },
+      {
+        "record_id": "R006",
+        "issue_id": "ISS-006",
+        "status": "closed",
+        "severity": "critical",
+        "owner": "api",
+        "updated_at": "2026-11-01T00:05:00Z",
+        "evidence": "Synthetic inspection 6, issue 6. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. "
+      },
+      {
+        "record_id": "R007",
+        "issue_id": "ISS-007",
+        "status": "open",
+        "severity": "critical",
+        "owner": "ui",
+        "updated_at": "2026-11-01T00:06:00Z",
+        "evidence": "Synthetic inspection 7, issue 7. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. "
+      },
+      {
+        "record_id": "R008",
+        "issue_id": "ISS-008",
+        "status": "open",
+        "severity": "high",
+        "owner": "ops",
+        "updated_at": "2026-11-01T00:07:00Z",
+        "evidence": "Synthetic inspection 8, issue 8. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. "
+      },
+      {
+        "record_id": "R009",
+        "issue_id": "ISS-009",
+        "status": "closed",
+        "severity": "medium",
+        "owner": "api",
+        "updated_at": "2026-11-01T00:08:00Z",
+        "evidence": "Synthetic inspection 9, issue 9. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. "
+      },
+      {
+        "record_id": "R010",
+        "issue_id": "ISS-010",
+        "status": "open",
+        "severity": "low",
+        "owner": "ui",
+        "updated_at": "2026-11-01T00:09:00Z",
+        "evidence": "Synthetic inspection 10, issue 10. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. "
+      },
+      {
+        "record_id": "R011",
+        "issue_id": "ISS-011",
+        "status": "open",
+        "severity": "high",
+        "owner": "ops",
+        "updated_at": "2026-11-01T00:10:00Z",
+        "evidence": "Synthetic inspection 11, issue 11. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. "
+      },
+      {
+        "record_id": "R012",
+        "issue_id": "ISS-012",
+        "status": "closed",
+        "severity": "critical",
+        "owner": "api",
+        "updated_at": "2026-11-01T00:11:00Z",
+        "evidence": "Synthetic inspection 12, issue 12. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. "
+      }
+    ],
+    "batch-b": [
+      {
+        "record_id": "R013",
+        "issue_id": "ISS-001",
+        "status": "open",
+        "severity": "critical",
+        "owner": "ui",
+        "updated_at": "2026-11-02T00:00:00Z",
+        "evidence": "Synthetic inspection 13, issue 1. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. "
+      },
+      {
+        "record_id": "R014",
+        "issue_id": "ISS-002",
+        "status": "open",
+        "severity": "high",
+        "owner": "ops",
+        "updated_at": "2026-11-02T00:01:00Z",
+        "evidence": "Synthetic inspection 14, issue 2. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. "
+      },
+      {
+        "record_id": "R015",
+        "issue_id": "ISS-003",
+        "status": "closed",
+        "severity": "critical",
+        "owner": "api",
+        "updated_at": "2026-11-06T00:00:00Z",
+        "evidence": "Synthetic inspection 15, issue 3. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. "
+      },
+      {
+        "record_id": "R016",
+        "issue_id": "ISS-004",
+        "status": "open",
+        "severity": "critical",
+        "owner": "ui",
+        "updated_at": "2026-11-04T00:00:00Z",
+        "evidence": "Synthetic inspection 16, issue 4. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. "
+      },
+      {
+        "record_id": "R017",
+        "issue_id": "ISS-005",
+        "status": "open",
+        "severity": "high",
+        "owner": "ops",
+        "updated_at": "2026-11-02T00:04:00Z",
+        "evidence": "Synthetic inspection 17, issue 5. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. "
+      },
+      {
+        "record_id": "R018",
+        "issue_id": "ISS-006",
+        "status": "closed",
+        "severity": "critical",
+        "owner": "api",
+        "updated_at": "2026-11-02T00:05:00Z",
+        "evidence": "Synthetic inspection 18, issue 6. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. "
+      },
+      {
+        "record_id": "R019",
+        "issue_id": "ISS-013",
+        "status": "open",
+        "severity": "critical",
+        "owner": "ui",
+        "updated_at": "2026-11-02T00:06:00Z",
+        "evidence": "Synthetic inspection 19, issue 13. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. "
+      },
+      {
+        "record_id": "R020",
+        "issue_id": "ISS-014",
+        "status": "open",
+        "severity": "high",
+        "owner": "ops",
+        "updated_at": "2026-11-02T00:07:00Z",
+        "evidence": "Synthetic inspection 20, issue 14. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. "
+      },
+      {
+        "record_id": "R021",
+        "issue_id": "ISS-015",
+        "status": "closed",
+        "severity": "medium",
+        "owner": "api",
+        "updated_at": "2026-11-02T00:08:00Z",
+        "evidence": "Synthetic inspection 21, issue 15. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. "
+      },
+      {
+        "record_id": "R022",
+        "issue_id": "ISS-016",
+        "status": "open",
+        "severity": "low",
+        "owner": "ui",
+        "updated_at": "2026-11-02T00:09:00Z",
+        "evidence": "Synthetic inspection 22, issue 16. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. "
+      },
+      {
+        "record_id": "R023",
+        "issue_id": "ISS-017",
+        "status": "open",
+        "severity": "high",
+        "owner": "ops",
+        "updated_at": "2026-11-02T00:10:00Z",
+        "evidence": "Synthetic inspection 23, issue 17. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. "
+      },
+      {
+        "record_id": "R024",
+        "issue_id": "ISS-018",
+        "status": "closed",
+        "severity": "critical",
+        "owner": "api",
+        "updated_at": "2026-11-02T00:11:00Z",
+        "evidence": "Synthetic inspection 24, issue 18. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. "
+      }
+    ],
+    "batch-c": [
+      {
+        "record_id": "R025",
+        "issue_id": "ISS-007",
+        "status": "open",
+        "severity": "critical",
+        "owner": "ui",
+        "updated_at": "2026-11-05T00:00:00Z",
+        "evidence": "Synthetic inspection 25, issue 7. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. "
+      },
+      {
+        "record_id": "R026",
+        "issue_id": "ISS-008",
+        "status": "open",
+        "severity": "high",
+        "owner": "ops",
+        "updated_at": "2026-11-03T00:01:00Z",
+        "evidence": "Synthetic inspection 26, issue 8. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. "
+      },
+      {
+        "record_id": "R027",
+        "issue_id": "ISS-009",
+        "status": "closed",
+        "severity": "medium",
+        "owner": "api",
+        "updated_at": "2026-11-03T00:02:00Z",
+        "evidence": "Synthetic inspection 27, issue 9. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. "
+      },
+      {
+        "record_id": "R028",
+        "issue_id": "ISS-010",
+        "status": "open",
+        "severity": "low",
+        "owner": "ui",
+        "updated_at": "2026-11-03T00:03:00Z",
+        "evidence": "Synthetic inspection 28, issue 10. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. "
+      },
+      {
+        "record_id": "R029",
+        "issue_id": "ISS-011",
+        "status": "open",
+        "severity": "high",
+        "owner": "ops",
+        "updated_at": "2026-11-03T00:04:00Z",
+        "evidence": "Synthetic inspection 29, issue 11. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. "
+      },
+      {
+        "record_id": "R030",
+        "issue_id": "ISS-012",
+        "status": "closed",
+        "severity": "critical",
+        "owner": "api",
+        "updated_at": "2026-11-03T00:05:00Z",
+        "evidence": "Synthetic inspection 30, issue 12. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. "
+      },
+      {
+        "record_id": "R031",
+        "issue_id": "ISS-019",
+        "status": "open",
+        "severity": "critical",
+        "owner": "ui",
+        "updated_at": "2026-11-03T00:06:00Z",
+        "evidence": "Synthetic inspection 31, issue 19. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. "
+      },
+      {
+        "record_id": "R032",
+        "issue_id": "ISS-020",
+        "status": "open",
+        "severity": "high",
+        "owner": "ops",
+        "updated_at": "2026-11-03T00:07:00Z",
+        "evidence": "Synthetic inspection 32, issue 20. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. "
+      },
+      {
+        "record_id": "R033",
+        "issue_id": "ISS-021",
+        "status": "closed",
+        "severity": "medium",
+        "owner": "api",
+        "updated_at": "2026-11-03T00:08:00Z",
+        "evidence": "Synthetic inspection 33, issue 21. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. "
+      },
+      {
+        "record_id": "R034",
+        "issue_id": "ISS-022",
+        "status": "open",
+        "severity": "low",
+        "owner": "ui",
+        "updated_at": "2026-11-03T00:09:00Z",
+        "evidence": "Synthetic inspection 34, issue 22. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. "
+      },
+      {
+        "record_id": "R035",
+        "issue_id": "ISS-023",
+        "status": "open",
+        "severity": "high",
+        "owner": "ops",
+        "updated_at": "2026-11-03T00:10:00Z",
+        "evidence": "Synthetic inspection 35, issue 23. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. "
+      },
+      {
+        "record_id": "R036",
+        "issue_id": "ISS-007",
+        "status": "open",
+        "severity": "critical",
+        "owner": "ui",
+        "updated_at": "2026-11-05T00:00:00Z",
+        "evidence": "Synthetic inspection 36, issue 7. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. This synthetic payload preserves investigation context, reproducible observations and surrounding notes; only declared summary fields belong in the actionable report. "
+      },
+      {
+        "record_id": "R037",
+        "issue_id": "ISS-NEW",
+        "status": "open",
+        "severity": "high",
+        "owner": "ops",
+        "updated_at": "2026-11-06T00:01:00Z",
+        "evidence": "Synthetic new inspection record in the continuation; not production data. Follow-up context that is intentionally excluded from selected report output. Follow-up context that is intentionally excluded from selected report output. Follow-up context that is intentionally excluded from selected report output. "
+      }
+    ]
+  }
+}
