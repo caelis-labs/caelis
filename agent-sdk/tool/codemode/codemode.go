@@ -1,6 +1,5 @@
-// Package codemode defines an experimental, engine-neutral script boundary.
-// It does not implement a language, expose Go objects to scripts, or register a
-// product tool. Runtime supplies the only authoritative Host implementation.
+// Package codemode defines the controlled script boundary. Runtime supplies
+// the only authoritative Host; the language worker receives bounded JSON only.
 package codemode
 
 import (
@@ -20,6 +19,9 @@ import (
 
 // ToolKind identifies declarations that require Runtime Code Mode binding.
 const ToolKind = "code_mode"
+
+// ToolName is the fixed model-facing script entry.
+const ToolName = "js_exec"
 
 // Outcome values project existing execution receipts without granting retry authority.
 const (
@@ -62,6 +64,13 @@ type Host interface {
 	Emit(context.Context, string) error
 }
 
+// DiscoveryHost adds the existing scoped discovery owner to the bridge.
+// Describe requests one exact schema; search returns names/descriptions only.
+type DiscoveryHost interface {
+	Host
+	Discover(context.Context, string, bool) (Reply, error)
+}
+
 // Executor is the trusted Go adapter for one engine invocation. The adapter must
 // translate Host into bounded JSON RPC; it must never expose Host or other Go
 // objects to the untrusted language engine. Implementations bound CPU/memory,
@@ -85,13 +94,13 @@ type Limits struct {
 	Calls         int `json:"calls"`
 }
 
-// DefaultLimits returns conservative per-invocation PoC limits.
+// DefaultLimits returns conservative per-invocation transfer limits.
 func DefaultLimits() Limits {
 	return Limits{SourceBytes: 256 << 10, ArgumentBytes: 64 << 10, ReplyBytes: 1 << 20, OutputBytes: 1 << 20, RetainedBytes: 16 << 20, Calls: 64}
 }
 
 // Tool is a concrete declaration, retained until Runtime injects its Host.
-// JavaScript adapters use js_repl; node_repl is reserved for actual Node.
+// Product assembly uses the fixed ToolName. Every execution has a new VM.
 type Tool struct {
 	Name     string
 	Executor Executor
@@ -101,9 +110,9 @@ type Tool struct {
 
 // Definition declares mutually exclusive inline and file source inputs.
 func (t *Tool) Definition() tool.Definition {
-	return tool.Definition{Name: t.Name, Metadata: map[string]any{tool.MetadataToolKind: ToolKind}, Description: "Execute code using the controlled Runtime host bridge. Supply exactly one of code or file. File bytes are read anew for every invocation.", InputSchema: map[string]any{
+	return tool.Definition{Name: t.Name, Metadata: map[string]any{tool.MetadataToolKind: ToolKind}, Description: "Fresh isolated JS async body; variables do not persist. await tools.search(query), tools.describe(name), tools.call(name,args). Describe unknown schemas first. call returns {outcome,is_error,parts:[{text,json,handle}],raw_json}; Numbers round beyond 2^53-1. output.text(value), await output.image(handle), or return JSON select output. Failures stay errors. FS uses original Tools; shell/process forbidden. Supply code/file (reread bytes). Long work yields Task handle: read/wait/cancel; never replay.", InputSchema: map[string]any{
 		"type": "object", "additionalProperties": false,
-		"properties": map[string]any{"code": map[string]any{"type": "string", "minLength": 1}, "file": map[string]any{"type": "string", "minLength": 1}},
+		"properties": map[string]any{"code": map[string]any{"type": "string", "minLength": 1}, "file": map[string]any{"type": "string", "minLength": 1}, "yield_time_ms": map[string]any{"type": "integer", "minimum": 0, "maximum": 60000, "default": 10000}},
 		"oneOf":      []any{map[string]any{"required": []string{"code"}}, map[string]any{"required": []string{"file"}}},
 	}}
 }
@@ -134,8 +143,9 @@ func (t *Tool) ReadSource(call tool.Call, limit int) (Source, error) {
 		return Source{}, fmt.Errorf("code mode source input exceeds budget")
 	}
 	var input struct {
-		Code json.RawMessage `json:"code"`
-		File json.RawMessage `json:"file"`
+		Code  json.RawMessage `json:"code"`
+		File  json.RawMessage `json:"file"`
+		Yield *int            `json:"yield_time_ms"`
 	}
 	dec := json.NewDecoder(strings.NewReader(string(call.Input)))
 	dec.DisallowUnknownFields()

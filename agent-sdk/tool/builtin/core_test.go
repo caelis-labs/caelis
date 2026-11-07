@@ -43,7 +43,7 @@ func TestBuildCoreToolsCreatesDefaultCodingGroup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildCoreTools() error = %v", err)
 	}
-	if got, want := len(tools), 12; got != want {
+	if got, want := len(tools), 13; got != want {
 		t.Fatalf("len(tools) = %d, want %d", got, want)
 	}
 	if got := tools[0].Definition().Name; got != filesystem.ReadToolName {
@@ -78,7 +78,7 @@ func TestBuildCoreToolsCreatesDefaultCodingGroup(t *testing.T) {
 	}
 }
 
-func TestCoreToolsExposeOnlyCanonicalPascalCaseNames(t *testing.T) {
+func TestCoreToolsExposeCanonicalNames(t *testing.T) {
 	t.Parallel()
 
 	rt, err := host.New(host.Config{CWD: t.TempDir()})
@@ -97,7 +97,7 @@ func TestCoreToolsExposeOnlyCanonicalPascalCaseNames(t *testing.T) {
 		filesystem.ReadToolName, filesystem.ViewImageToolName, filesystem.WriteToolName,
 		filesystem.PatchToolName, filesystem.GlobToolName, filesystem.SearchToolName,
 		shell.RunCommandToolName, task.ToolName, plan.ToolName, skilltool.ToolName,
-		web.SearchToolName, web.FetchToolName,
+		web.SearchToolName, web.FetchToolName, "js_exec",
 	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("core tool names = %#v, want %#v", got, want)

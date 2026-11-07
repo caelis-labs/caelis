@@ -2,6 +2,7 @@ package mcpdiscovery
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -35,6 +36,23 @@ func FromEvents(events []*session.Event) map[string]tool.Binding {
 // Apply accepts only new-format successful canonical discovery receipts.
 // Old name-only results and Exposure Active/Pending never grant call eligibility.
 func Apply(out map[string]tool.Binding, event *session.Event) {
+	if event != nil && session.IsJournal(event) && event.Journal != nil && event.Journal.ToolExecution != nil {
+		record := event.Journal.ToolExecution
+		if record.ToolName == tool.ToolSearchToolName && record.Status == session.ToolExecutionSucceeded && record.Parent != nil && record.Parent.Kind == "code_mode" {
+			var result tool.Result
+			if json.Unmarshal(record.Result, &result) == nil && !result.IsError && result.Metadata[MetadataKey] == true {
+				for _, part := range result.Content {
+					if part.JSON == nil {
+						continue
+					}
+					var raw map[string]any
+					if json.Unmarshal(part.JSON.Value, &raw) == nil {
+						applyEntries(out, tool.ParseToolSearchOutput(raw))
+					}
+				}
+			}
+		}
+	}
 	if event == nil || !session.IsCanonicalHistoryEvent(event) || event.Type != session.EventTypeToolResult || event.Tool == nil || event.Tool.Name != tool.ToolSearchToolName || event.Tool.Status != "completed" {
 		return
 	}
@@ -44,7 +62,11 @@ func Apply(out map[string]tool.Binding, event *session.Event) {
 	}
 	// The receipt's canonical output owns the binding. The metadata marker
 	// distinguishes this admitted format without storing another binding list.
-	for _, entry := range tool.ParseToolSearchOutput(event.Tool.Output).Tools {
+	applyEntries(out, tool.ParseToolSearchOutput(event.Tool.Output))
+}
+
+func applyEntries(out map[string]tool.Binding, selected tool.ToolSearchResult) {
+	for _, entry := range selected.Tools {
 		b := entry.Binding
 		if b != nil && entry.Name == b.Name && entry.InputSchema != nil && b.Name != "" && b.Identity != "" && b.Version != "" {
 			out[b.Name] = *b

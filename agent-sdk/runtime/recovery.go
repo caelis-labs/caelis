@@ -31,6 +31,19 @@ func (r *Runtime) recoverRuntimeState(ctx context.Context, ref session.SessionRe
 			continue
 		}
 		switch entry.Kind {
+		case task.KindCodeMode:
+			r.tasks.mu.RLock()
+			live := r.tasks.codeTasks[entry.TaskID]
+			r.tasks.mu.RUnlock()
+			if live == nil {
+				entry.Running = false
+				entry.State = task.StateInterrupted
+				entry.UpdatedAt = r.now()
+				entry.Result = map[string]any{"error": "script worker is no longer owned; execution was not replayed"}
+				if err := r.tasks.persistTaskEntry(ctx, entry); err != nil {
+					return err
+				}
+			}
 		case task.KindCommand:
 			if err := r.recoverCommandEntry(ctx, entry); err != nil {
 				return err

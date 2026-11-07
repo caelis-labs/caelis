@@ -610,7 +610,7 @@ func descriptorFromEntry(entry *task.Entry) TaskDescriptor {
 		Handle:      firstString(entry.Handle, mapString(entry.Metadata, "handle"), mapString(entry.Spec, "handle"), entry.TaskID),
 		AgentHandle: firstString(mapString(entry.Metadata, "agent"), mapString(entry.Spec, "agent")),
 		Kind:        entry.Kind, Title: strings.TrimSpace(entry.Title), State: entry.State, Running: entry.Running,
-		SupportsInput: entry.Kind == task.KindCommand && entry.SupportsInput, SupportsCancel: entry.Kind == task.KindCommand && entry.SupportsCancel,
+		SupportsInput: entry.Kind == task.KindCommand && entry.SupportsInput, SupportsCancel: (entry.Kind == task.KindCommand || entry.Kind == task.KindCodeMode) && entry.SupportsCancel,
 		ParentTool:    ParentTool{ToolCallID: parentCall, ToolName: parentTool},
 		ParticipantID: firstString(mapString(entry.Metadata, "agent_id"), mapString(entry.Spec, "agent_id")),
 		ActivityID:    firstString(mapString(entry.Metadata, "child_activity_id"), mapString(entry.Spec, "child_activity_id")),

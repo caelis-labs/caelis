@@ -13,6 +13,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/google/jsonschema-go/jsonschema"
 )
 
@@ -106,7 +107,7 @@ func ValidateProfile(p Profile) error {
 	if p.Execution == "tools-only" && len(p.NativeTools) != 0 {
 		return fmt.Errorf("%w: native tools require workspace-write execution", ErrInvalid)
 	}
-	knownNative := map[string]bool{"Read": true, "ViewImage": true, "Write": true, "Patch": true, "Glob": true, "Grep": true, "RunCommand": true, "Task": true}
+	knownNative := map[string]bool{"Read": true, "ViewImage": true, "Write": true, "Patch": true, "Glob": true, "Grep": true, "RunCommand": true, "Task": true, codemode.ToolName: true}
 	seenNative := make(map[string]bool, len(p.NativeTools))
 	for _, name := range p.NativeTools {
 		if !knownNative[name] || seenNative[name] {
@@ -124,6 +125,9 @@ func ValidateProfile(p Profile) error {
 			return fmt.Errorf("%w: duplicate or invalid tool name", ErrInvalid)
 		}
 		seen[def.Name] = true
+		if def.Name == codemode.ToolName || def.Name == "Task" {
+			return fmt.Errorf("%w: callback collides with fixed Code Mode/Task entry", ErrInvalid)
+		}
 		if (len(p.SkillDirs)+len(p.SkillRoots)+len(p.Plugins) > 0 && def.Name == "Skill") || (len(p.MCPServers)+len(p.Plugins) > 0 && (def.Name == tool.ToolSearchToolName || def.Name == tool.MCPCallToolName)) {
 			return fmt.Errorf("%w: callback collides with an assembled capability tool", ErrInvalid)
 		}

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/mcpdiscovery"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -23,11 +24,14 @@ type nestedToolEventSinkKey struct{}
 var errCodeModeComplete = errors.New("code mode host admission is closed by TurnComplete")
 
 type runtimeCodeModeTool struct {
-	declaration *codemode.Tool
-	sessions    session.Service
-	ref         session.SessionRef
-	targets     func() []tool.Tool
-	validate    func(context.Context) (func(), error)
+	declaration  *codemode.Tool
+	tasks        *taskRuntime
+	active       session.Session
+	sessions     session.Service
+	ref          session.SessionRef
+	targets      func() []tool.Tool
+	checkBinding func(context.Context, tool.Binding) error
+	validate     func(context.Context) (func(), error)
 }
 
 func (t runtimeCodeModeTool) Definition() tool.Definition { return t.declaration.Definition() }
@@ -44,7 +48,14 @@ func (t runtimeCodeModeTool) Call(ctx context.Context, call tool.Call) (tool.Res
 	if err != nil {
 		return tool.Result{}, err
 	}
-	events, err := t.sessions.Events(ctx, session.EventsRequest{SessionRef: t.ref})
+	if t.tasks != nil && t.declaration.Name == codemode.ToolName {
+		return t.tasks.startCodeMode(ctx, t, call, source, limits)
+	}
+	return t.execute(ctx, call, source, limits)
+}
+
+func (t runtimeCodeModeTool) execute(ctx context.Context, call tool.Call, source codemode.Source, limits codemode.Limits) (tool.Result, error) {
+	events, err := t.sessions.Events(ctx, session.EventsRequest{SessionRef: t.ref, IncludeTransient: true})
 	if err != nil {
 		return tool.Result{}, err
 	}
@@ -53,6 +64,7 @@ func (t runtimeCodeModeTool) Call(ctx context.Context, call tool.Call) (tool.Res
 	host := &codeModeHost{ctx: workCtx, cancel: cancel, owner: t, parent: call, limits: limits,
 		targets: map[string]codeModeTarget{}, handles: map[string]model.Part{}, drained: make(chan struct{})}
 	discovered := mcpdiscovery.FromEvents(events)
+	host.discovered = discovered
 	for _, one := range t.targets() {
 		if one == nil {
 			continue
@@ -119,7 +131,20 @@ func (t runtimeCodeModeTool) Call(ctx context.Context, call tool.Call) (tool.Res
 		result.Content = append(result.Content, model.NewJSONPart(completed.output))
 	}
 	result.Content = append(result.Content, host.emitted...)
-	return result, errors.Join(completed.err, host.fatal)
+	if len(host.failures) > 0 {
+		result.Metadata["code_mode_outcome"] = codemode.OutcomeFailed
+		for _, failure := range host.failures {
+			if failure["outcome"] == codemode.OutcomeUnknown {
+				result.Metadata["code_mode_outcome"] = codemode.OutcomeUnknown
+			}
+		}
+		raw, _ := json.Marshal(map[string]any{"errors": host.failures, "instruction": "Do not replay unknown effects. Rediscover stale bindings with tools.describe/search."})
+		result.Content = append(result.Content, model.NewJSONPart(raw))
+	}
+	if completed.err != nil {
+		return result, errors.Join(completed.err, host.fatal, host.firstCallError)
+	}
+	return result, host.fatal
 }
 
 type codeModeTarget struct {
@@ -134,26 +159,29 @@ func codeModeDefinitionDigest(def tool.Definition) [32]byte {
 }
 
 type codeModeHost struct {
-	ctx          context.Context
-	cancel       context.CancelFunc
-	owner        runtimeCodeModeTool
-	parent       tool.Call
-	limits       codemode.Limits
-	targets      map[string]codeModeTarget
-	mu           sync.Mutex
-	closed       bool
-	drained      chan struct{}
-	drainClosed  bool
-	active       int
-	pending      int
-	unsafeActive bool
-	calls        int
-	retained     int
-	isError      bool
-	turnComplete bool
-	fatal        error
-	handles      map[string]model.Part
-	emitted      []model.Part
+	ctx            context.Context
+	cancel         context.CancelFunc
+	owner          runtimeCodeModeTool
+	parent         tool.Call
+	limits         codemode.Limits
+	targets        map[string]codeModeTarget
+	discovered     map[string]tool.Binding
+	failures       []map[string]string
+	firstCallError error
+	mu             sync.Mutex
+	closed         bool
+	drained        chan struct{}
+	drainClosed    bool
+	active         int
+	pending        int
+	unsafeActive   bool
+	calls          int
+	retained       int
+	isError        bool
+	turnComplete   bool
+	fatal          error
+	handles        map[string]model.Part
+	emitted        []model.Part
 }
 
 func (h *codeModeHost) stop() {
@@ -178,8 +206,21 @@ func (h *codeModeHost) admit(ctx context.Context, name string, target codeModeTa
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	if scope := taskScopeFromContext(h.ctx); scope != nil {
+		scope.mu.Lock()
+		closed := scope.codeModeClosed
+		scope.mu.Unlock()
+		if closed {
+			return nil, errCodeModeComplete
+		}
+	}
 	release := func() {}
 	var validationErr error
+	if h.owner.checkBinding != nil && tool.IsMCPDefinition(target.definition) {
+		if err := h.owner.checkBinding(ctx, tool.BindingForDefinition(target.definition)); err != nil {
+			return nil, err
+		}
+	}
 	if h.owner.validate != nil {
 		guard, err := h.owner.validate(ctx)
 		validationErr = err
@@ -215,7 +256,27 @@ func (h *codeModeHost) admit(ctx context.Context, name string, target codeModeTa
 	return func() { h.mu.Unlock(); release() }, nil
 }
 
-func (h *codeModeHost) Call(requestCtx context.Context, name string, arguments json.RawMessage) (codemode.Reply, error) {
+func (h *codeModeHost) Call(ctx context.Context, name string, args json.RawMessage) (codemode.Reply, error) {
+	return h.call(ctx, name, args, false)
+}
+
+func (h *codeModeHost) call(requestCtx context.Context, name string, arguments json.RawMessage, discovery bool) (returned codemode.Reply, callError error) {
+	defer func() {
+		if callError != nil || returned.IsError || returned.Outcome == codemode.OutcomeUnknown {
+			h.mu.Lock()
+			h.isError = true
+			if callError != nil && h.firstCallError == nil {
+				h.firstCallError = callError
+			}
+			outcome := returned.Outcome
+			if outcome == "" {
+				outcome = codemode.OutcomeFailed
+			}
+			h.failures = append(h.failures, map[string]string{"tool": name, "outcome": outcome, "code": string(errorcode.CodeOf(callError))})
+			h.mu.Unlock()
+		}
+	}()
+
 	if err := requestCtx.Err(); err != nil {
 		return codemode.Reply{}, err
 	}
@@ -246,12 +307,38 @@ func (h *codeModeHost) Call(requestCtx context.Context, name string, arguments j
 	if raw := bytes.TrimSpace(arguments); len(raw) == 0 || raw[0] != '{' {
 		return codemode.Reply{}, tool.NewError(tool.ErrorCodeInvalidInput, "host arguments must be a JSON object")
 	}
+	h.mu.Lock()
 	target, ok := h.targets[name]
-	if !ok {
-		return codemode.Reply{}, tool.NewError(tool.ErrorCodeNotFound, "target is not admitted; MCP tools require prior canonical tool_search")
+	oldBinding, known := h.discovered[name]
+	h.mu.Unlock()
+	if discovery {
+		for _, one := range h.owner.targets() {
+			if one != nil && tool.IsToolSearchDefinition(one.Definition()) {
+				def := one.Definition()
+				target = codeModeTarget{tool: one, definition: def, digest: codeModeDefinitionDigest(def)}
+				ok = true
+				break
+			}
+		}
 	}
-	if err := tool.ValidateMCPArguments(target.definition, arguments); err != nil {
-		return codemode.Reply{}, err
+	if !ok {
+		if known {
+			if h.owner.checkBinding != nil {
+				if err := h.owner.checkBinding(requestCtx, oldBinding); err != nil {
+					return codemode.Reply{}, err
+				}
+			}
+			for _, one := range h.owner.targets() {
+				if one != nil && one.Definition().Name == name && oldBinding != tool.BindingForDefinition(one.Definition()) {
+					return codemode.Reply{}, tool.NewError(tool.ErrorCodeStaleRevision, "tool directory refreshed; use tools.describe or tools.search to rediscover before calling")
+				}
+			}
+			return codemode.Reply{}, tool.NewError(errorcode.Unavailable, "discovered tool is currently unavailable; check connection or access before rediscovery")
+		}
+		return codemode.Reply{}, tool.NewError(tool.ErrorCodeNotFound, "tool has not been described in this Session; use tools.describe(name) first")
+	}
+	if !codeModeCanCall(target.definition) {
+		return codemode.Reply{}, tool.NewError(tool.ErrorCodePermissionDenied, "native shell/process execution is prohibited from JavaScript")
 	}
 	h.mu.Lock()
 	if h.closed || h.ctx.Err() != nil {
@@ -277,6 +364,9 @@ func (h *codeModeHost) Call(requestCtx context.Context, name string, arguments j
 		h.mu.Unlock()
 	}()
 	ctx, cancel := context.WithCancel(h.ctx)
+	if discovery {
+		ctx = context.WithValue(ctx, codeModeDescribeKey{}, requestCtx.Value(codeModeDescribeKey{}))
+	}
 	defer cancel()
 	stop := context.AfterFunc(requestCtx, cancel)
 	defer stop()
@@ -288,6 +378,9 @@ func (h *codeModeHost) Call(requestCtx context.Context, name string, arguments j
 		return codemode.Reply{}, err
 	}
 	release()
+	if err := tool.ValidateMCPArguments(target.definition, arguments); err != nil {
+		return codemode.Reply{}, err
+	}
 	call := tool.Call{ID: callID, Name: name, Input: append(json.RawMessage(nil), arguments...),
 		Parent:       &tool.ParentCall{Kind: codemode.ToolKind, ID: h.parent.ID, Name: h.parent.Name, Execution: h.parent.Execution},
 		RuntimeModel: h.parent.RuntimeModel, RuntimeReasoning: h.parent.RuntimeReasoning, RuntimeServiceTier: h.parent.RuntimeServiceTier}
@@ -316,6 +409,9 @@ func (h *codeModeHost) Call(requestCtx context.Context, name string, arguments j
 	if result.TurnComplete && !result.IsError {
 		h.turnComplete = true
 		h.closed = true
+		if scope := taskScopeFromContext(h.ctx); scope != nil {
+			scope.completeCodeMode(h.ctx)
+		}
 	}
 	if callErr != nil {
 		if errors.Is(callErr, errCodeModeComplete) {

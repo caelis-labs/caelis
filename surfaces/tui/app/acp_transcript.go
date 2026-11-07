@@ -123,6 +123,9 @@ func renderACPTranscriptRows(blockID string, events []SubagentEvent, status stri
 			}
 		case SEToolCall:
 			toolRows, consumed := renderACPToolLifecycleRows(blockID, visible, i, width, ctx, opts)
+			if ev.ParentToolName == "js_exec" {
+				toolRows = indentCodeModeChildren(toolRows)
+			}
 			if len(toolRows) > 0 {
 				attached := lastGroup == acpTranscriptGroupNarrative && toolContinuesPreviousNarrative(visible, i)
 				rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupTool, attached)

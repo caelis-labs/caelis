@@ -5,6 +5,8 @@ import (
 )
 
 type ToolUpdateMeta struct {
+	ParentToolCallID   string
+	ParentToolName     string
 	ToolNameExplicit   bool
 	TaskHandle         string
 	TaskAction         string
@@ -93,6 +95,14 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 		var moved bool
 		out, moved = relocateApprovalReviewEventsAfterTool(out, callID)
 		changed = changed || moved
+		if update.Meta.ParentToolCallID != "" {
+			for i := range out {
+				if out[i].Kind == SEToolCall && out[i].CallID == callID {
+					out[i].ParentToolCallID = update.Meta.ParentToolCallID
+					out[i].ParentToolName = update.Meta.ParentToolName
+				}
+			}
+		}
 		updateToolEventIndex(toolIndex, out, callID)
 	}()
 	if settledIdx >= 0 && !update.Final {

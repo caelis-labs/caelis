@@ -9,9 +9,9 @@ import (
 	"image/png"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"reflect"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -24,7 +24,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/filesystem"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
@@ -140,8 +140,11 @@ func TestCodeModeRuntimeMCPAggregationAndMediaReceipts(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer sandbox.Close()
-	command, err := shell.NewRunCommand(shell.RunCommandConfig{Runtime: sandbox})
+	read, err := filesystem.NewRead(filesystem.DefaultReadConfig(), sandbox)
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "input.txt"), []byte("code-mode-native"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	var policyNames []string
@@ -185,39 +188,15 @@ func TestCodeModeRuntimeMCPAggregationAndMediaReceipts(t *testing.T) {
 				}
 			}
 		}
-		commandResult, err := host.Call(ctx, shell.RunCommandToolName, []byte(`{"command":"echo code-mode-native","yield_time_ms":1000}`))
-		if err != nil {
-			return nil, err
-		}
-		if commandResult.IsError {
-			raw, _ := json.Marshal(commandResult)
-			return nil, errors.New("native command failed: " + string(raw))
-		}
-		var commandOutput map[string]any
-		for _, part := range commandResult.Parts {
-			if len(part.JSON) > 0 {
-				_ = json.Unmarshal(part.JSON, &commandOutput)
-			}
-		}
-		handle, _ := commandOutput["handle"].(string)
-		if handle == "" {
-			return nil, errors.New("concrete command Runtime injection was lost")
-		}
-		args, _ := json.Marshal(map[string]any{"action": "wait", "handle": handle})
-		finished, err := host.Call(ctx, "Task", args)
-		if err != nil {
-			return nil, err
-		}
-		wire, _ := json.Marshal(finished)
-		initialWire, _ := json.Marshal(commandResult)
-		if finished.IsError || !strings.Contains(string(initialWire)+string(wire), "code-mode-native") {
-			return nil, errors.New("native command effect/output not observed: " + string(initialWire) + " / " + string(wire))
+		readReply, err := host.Call(ctx, "Read", []byte(`{"path":"input.txt"}`))
+		if err != nil || readReply.IsError {
+			return nil, errors.New("real filesystem read failed")
 		}
 		return json.Marshal(map[string]any{"sum": total})
 	})}
 	llm := codeModeModel(true)
-	live, _ := runCodeMode(t, store, active, agent.AgentSpec{Model: codeModeImageModel{llm}, Tools: []tool.Tool{toolsearch.NewSource(manager, exactMCPRanker{}), declaration, command}, DeferredTools: manager}, registry, nil)
-	if effects.Load() != 2 || !reflect.DeepEqual(policyNames, []string{"live__read", "live__read", "RunCommand", "Task"}) {
+	live, _ := runCodeMode(t, store, active, agent.AgentSpec{Model: codeModeImageModel{llm}, Tools: []tool.Tool{toolsearch.NewSource(manager, exactMCPRanker{}), declaration, read}, DeferredTools: manager}, registry, nil)
+	if effects.Load() != 2 || !reflect.DeepEqual(policyNames, []string{"live__read", "live__read", "Read"}) {
 		t.Fatalf("effects=%d policy=%v", effects.Load(), policyNames)
 	}
 	seenMirror := false
@@ -256,7 +235,7 @@ func TestCodeModeRuntimeMCPAggregationAndMediaReceipts(t *testing.T) {
 			t.Fatal("nested display polluted model tool protocol")
 		}
 	}
-	if terminals != 4 || !outer {
+	if terminals != 3 || !outer {
 		t.Fatalf("independent terminals=%d aggregate=%v", terminals, outer)
 	}
 	if len(session.RecoverIncompleteToolExecutions(loaded.Events)) != 0 {

@@ -24,6 +24,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/commanddiag"
 )
 
@@ -31,9 +32,13 @@ func (r *Runtime) wrapToolsForRuntime(activeSession session.Session, ref session
 	out := make([]tool.Tool, 0, len(spec.Tools)+2)
 	hasCommand := false
 	hasTask := false
+	hasCodeMode := false
 	for _, one := range spec.Tools {
 		if one == nil {
 			continue
+		}
+		if _, ok := one.(runtimeCodeModeTool); ok {
+			hasCodeMode = true
 		}
 		switch {
 		case isBuiltinRunCommandTool(one):
@@ -77,7 +82,7 @@ func (r *Runtime) wrapToolsForRuntime(activeSession session.Session, ref session
 			out = append(out, one)
 		}
 	}
-	if hasCommand && !hasTask {
+	if (hasCommand || hasCodeMode) && !hasTask {
 		out = append(out, runtimeTaskTool{
 			base:       tasktool.New(),
 			sessionRef: session.NormalizeSessionRef(ref),
@@ -683,6 +688,23 @@ func (t runtimeTaskTool) Call(ctx context.Context, call tool.Call) (tool.Result,
 	handles := splitTaskControlHandles(handle)
 	if len(handles) == 0 {
 		return tool.Result{}, fmt.Errorf("arg %q is required", "handle")
+	}
+	if call.Parent != nil && call.Parent.Kind == codemode.ToolKind {
+		for _, handle := range handles {
+			identity, err := t.resolveJobHandle(ctx, handle)
+			if err != nil {
+				return tool.Result{}, err
+			}
+			if strings.EqualFold(action, "write") && identity.kind == taskapi.KindCommand {
+				return tool.Result{}, tool.NewError(tool.ErrorCodePermissionDenied, "native command stdin is prohibited from JavaScript")
+			}
+			if identity.kind == taskapi.KindCodeMode && (strings.EqualFold(action, "wait") || strings.EqualFold(action, "cancel")) {
+				entry, ok := t.tasks.storedTaskEntryByID(ctx, t.sessionRef, identity.taskID)
+				if ok && taskStringValue(entry.Metadata["parent_call"]) == call.Parent.ID {
+					return tool.Result{}, tool.NewError(tool.ErrorCodeInvalidInput, "a script cannot wait on or cancel its own Task")
+				}
+			}
+		}
 	}
 	input, _ := rawStringArg(args, "input")
 	appendNewline := optionalBoolArg(args, "append_newline")

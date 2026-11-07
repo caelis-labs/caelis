@@ -13,7 +13,7 @@ import (
 // excluding product-global Skill, web, and Plan tools. Its order is stable in
 // model requests; resource transfer remains the existing scoped bridge.
 var applicationNativeToolNames = []string{
-	"Read", "ViewImage", "Write", "Patch", "Glob", "Grep", "RunCommand", "Task",
+	"Read", "ViewImage", "Write", "Patch", "Glob", "Grep", "RunCommand", "Task", "js_exec",
 }
 
 func newApplicationNativeTools(exec *applicationExecutionRuntime, store *sessionprofile.Store, binding sessionprofile.Binding, workspace string, nativeTools []string) ([]tool.Tool, error) {

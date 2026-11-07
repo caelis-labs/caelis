@@ -162,6 +162,9 @@ func (b *MainACPTurnBlock) toggleToolPanelClick(callID string) bool {
 	if b == nil {
 		return false
 	}
+	if b.toggleCodeModeGroup(callID) {
+		return true
+	}
 	return toggleToolPanelClick(&b.ExpandedTools, &b.ExpandedToolOutput, b.Events, callID)
 }
 

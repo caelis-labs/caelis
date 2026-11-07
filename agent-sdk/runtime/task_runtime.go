@@ -105,12 +105,21 @@ type taskBatchControlItem struct {
 func taskBatchControlToolResult(call tool.Call, def tool.Definition, items []taskBatchControlItem, action string, actualWaitMS int) tool.Result {
 	payload := taskBatchControlPayload(items, action, actualWaitMS)
 	raw, _ := json.Marshal(payload)
-	return tool.Result{
-		ID:      strings.TrimSpace(call.ID),
-		Name:    strings.TrimSpace(def.Name),
-		Content: []model.Part{model.NewJSONPart(raw)},
-		IsError: taskBatchHasError(items),
+	result := tool.Result{ID: strings.TrimSpace(call.ID), Name: strings.TrimSpace(def.Name), Content: []model.Part{model.NewJSONPart(raw)}, IsError: taskBatchHasError(items)}
+	if action != "cancel" {
+		for _, item := range items {
+			if item.Err != nil || item.Snapshot.Kind != taskapi.KindCodeMode {
+				continue
+			}
+			var selected tool.Result
+			if json.Unmarshal([]byte(taskStringValue(item.Snapshot.Result["tool_result_json"])), &selected) == nil {
+				result.Content = append(result.Content, selected.Content...)
+				result.IsError = result.IsError || selected.IsError
+				result.TurnComplete = result.TurnComplete || (selected.TurnComplete && !selected.IsError)
+			}
+		}
 	}
+	return result
 }
 
 func taskSnapshotToolResultWithPayload(call tool.Call, def tool.Definition, snapshot taskapi.Snapshot, payload map[string]any) tool.Result {
@@ -118,13 +127,27 @@ func taskSnapshotToolResultWithPayload(call tool.Call, def tool.Definition, snap
 		payload = map[string]any{}
 	}
 	meta := taskToolMeta(snapshot)
-	raw, _ := json.Marshal(payload)
-	return tool.Result{
-		ID:       strings.TrimSpace(call.ID),
-		Name:     strings.TrimSpace(def.Name),
-		Content:  []model.Part{model.NewJSONPart(raw)},
-		Metadata: meta,
+	var selected *tool.Result
+	if snapshot.Kind == taskapi.KindCodeMode {
+		if text := taskStringValue(payload["tool_result_json"]); text != "" {
+			var result tool.Result
+			if json.Unmarshal([]byte(text), &result) == nil {
+				selected = &result
+			}
+			delete(payload, "tool_result_json")
+		}
 	}
+	raw, _ := json.Marshal(payload)
+	result := tool.Result{ID: call.ID, Name: def.Name, Content: []model.Part{model.NewJSONPart(raw)}, Metadata: meta}
+	if selected != nil {
+		result.Content = append(result.Content, selected.Content...)
+		result.IsError = selected.IsError
+		result.TurnComplete = selected.TurnComplete && !selected.IsError
+	}
+	if snapshot.Kind == taskapi.KindCodeMode && (snapshot.State == taskapi.StateUnknownOutcome || snapshot.State == taskapi.StateFailed || snapshot.State == taskapi.StateInterrupted || snapshot.State == taskapi.StateCancelled) {
+		result.IsError = true
+	}
+	return result
 }
 
 func taskBatchControlPayload(items []taskBatchControlItem, action string, actualWaitMS int) map[string]any {
@@ -151,6 +174,9 @@ func taskBatchControlPayload(items []taskBatchControlItem, action string, actual
 				payload["actual_wait_time_ms"] = item.ActualWaitMS
 			}
 		}
+		if item.Snapshot.Kind == taskapi.KindCodeMode {
+			delete(payload, "tool_result_json")
+		}
 		tasks = append(tasks, payload)
 	}
 	out := map[string]any{
@@ -172,7 +198,7 @@ func taskBatchHasError(items []taskBatchControlItem) bool {
 func taskBatchErrorCount(items []taskBatchControlItem) int {
 	count := 0
 	for _, item := range items {
-		if item.Err != nil {
+		if item.Err != nil || (item.Snapshot.Kind == taskapi.KindCodeMode && (item.Snapshot.State == taskapi.StateUnknownOutcome || item.Snapshot.State == taskapi.StateFailed || item.Snapshot.State == taskapi.StateInterrupted || item.Snapshot.State == taskapi.StateCancelled)) {
 			count++
 		}
 	}
@@ -194,6 +220,11 @@ func taskToolMeta(snapshot taskapi.Snapshot) map[string]any {
 	taskMeta["running"] = snapshot.Running
 	taskMeta["task_id"] = strings.TrimSpace(snapshot.Ref.TaskID)
 	taskMeta["handle"] = taskPublicHandle(snapshot)
+	if snapshot.Kind == taskapi.KindCodeMode {
+		if cursor, ok := taskInt64Value(snapshot.Metadata["model_output_cursor"]); ok {
+			taskMeta["model_output_cursor"] = cursor
+		}
+	}
 	if sessionID := strings.TrimSpace(snapshot.Ref.SessionID); sessionID != "" {
 		taskMeta["session_id"] = sessionID
 	}
@@ -228,9 +259,21 @@ func taskToolMeta(snapshot taskapi.Snapshot) map[string]any {
 
 func taskToolPayload(snapshot taskapi.Snapshot) map[string]any {
 	var payload map[string]any
-	if snapshot.Kind == taskapi.KindSubagent {
+	switch snapshot.Kind {
+	case taskapi.KindCodeMode:
+		payload = session.CloneState(snapshot.Result)
+		if payload == nil {
+			payload = map[string]any{}
+		}
+		payload["handle"] = snapshot.Handle
+		if cursor, ok := taskInt64Value(snapshot.Metadata["model_output_cursor"]); ok {
+			payload["model_output_cursor"] = cursor
+		}
+		payload["state"] = string(snapshot.State)
+		payload["running"] = snapshot.Running
+	case taskapi.KindSubagent:
 		payload = subagentTaskToolPayload(snapshot)
-	} else {
+	default:
 		payload = commandTaskToolPayload(snapshot)
 	}
 	if payload == nil {

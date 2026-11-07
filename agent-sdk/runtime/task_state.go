@@ -40,6 +40,7 @@ type taskRuntime struct {
 
 	mu         sync.RWMutex
 	tasks      map[string]*commandTask
+	codeTasks  map[string]*codeModeTask
 	subagents  map[string]*subagentTask
 	order      map[string][]string
 	backends   map[sandbox.Backend]sandbox.Runtime

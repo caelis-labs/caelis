@@ -1,9 +1,9 @@
 # Code Mode
 
-Implementation contract for the fixed `js_exec` entry. Actual tools, policy,
+The fixed `js_exec` entry runs JavaScript orchestration in a fresh Goja worker.
+Actual tools, policy,
 approval, Guardian, invocation identity, Journal and Task lifecycle remain owned
-by Runtime. This work selects Goja; no alternate-engine product framework is
-introduced. Implementation and acceptance checkpoints are recorded in Git.
+by Runtime.
 
 ## Model tools and discovery
 
@@ -70,11 +70,18 @@ claimed; missing a hard heap limiter is not a default rejection condition.
 Process separation and JS capability restrictions do not constitute a secure OS
 sandbox against an engine exploit.
 
+Scripts yield within the original Run. The Run owner remains
+until the producer is quiescent; it does not extend generation or permission
+authority. Stop, cancellation and TurnComplete close further Host admission.
+Final safe points cancel script producers before joining them, including an
+approval waiter. Cross-Turn background execution is not promised.
+
 Foreground yield transfers observation to the existing Task owner with one
-original handle. Query, wait, incremental output, cancellation and completion
-reuse Task control and output cursors. Waiting less does not shorten execution.
-A real child tool that yields is observed by its original handle until terminal;
-it is never resubmitted. Cancellation reaches owned work and reaps the worker;
+original handle. Query, wait, cancellation and completion reuse Task control and output cursors.
+Selected output is published at script completion; child progress uses the
+original tool event stream. Waiting less does not shorten execution. A yielded
+child keeps its original handle; scripts can query it through Host without
+resubmitting the operation. Cancellation reaches owned work and reaps the worker;
 completed/unknown effects retain their original receipts. Restart exposes the
 record and interrupted/unknown state, without recreating the script or stack.
 Task support does not grant shell access from JS.

@@ -2,6 +2,7 @@ package gatewayapp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -18,6 +19,9 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode/gojaexec"
 	"github.com/caelis-labs/caelis/control/experimental"
 	controlplacement "github.com/caelis-labs/caelis/control/placement"
 	"github.com/caelis-labs/caelis/control/sessionprofile"
@@ -256,6 +260,26 @@ func (r *applicationTurnResolver) tools(ctx context.Context, configuration sessi
 		}
 		tools = append(tools, native...)
 	}
+	hasCodeMode := false
+	for _, one := range tools {
+		if one.Definition().Name == codemode.ToolName {
+			hasCodeMode = true
+			break
+		}
+	}
+	if !hasCodeMode {
+		tools = append(tools, &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}})
+	}
+	hasTask := false
+	for _, one := range tools {
+		if one.Definition().Name == tasktool.ToolName {
+			hasTask = true
+			break
+		}
+	}
+	if !hasTask {
+		tools = append(tools, tasktool.New())
+	}
 	if len(capabilities.catalog.Metas()) > 0 {
 		tools = append(tools, applicationLeasedTool{Tool: capabilities.skillTool, store: r.composition.authorities.sessionProfiles, scope: r.binding.Scope})
 	}
@@ -351,7 +375,7 @@ func (r *applicationTurnResolver) resolveModelRequest(ctx context.Context, sourc
 		Request: agent.ModelRequestOptions{ServiceTier: model.ServiceTier(configuration.Profile.ServiceTier)},
 		Release: release,
 		Validate: func(ctx context.Context) (func(), error) {
-			unlock, err := store.ValidateConfiguration(ctx, r.binding.Scope, r.binding.SessionID, configuration.Revision)
+			unlock, err := store.GuardConfiguration(ctx, r.binding.Scope, r.binding.SessionID, configuration.Revision)
 			if err != nil {
 				return nil, errors.Join(agent.ErrModelRequestSnapshotStale, err)
 			}
@@ -385,6 +409,29 @@ func applicationPolicyRegistry(profile sessionprofile.Profile) (policy.Registry,
 		// policy; names and model arguments cannot opt into this path.
 		if decision, handled, err := sessionprofile.CallbackPolicyDecision(input); handled || err != nil {
 			return decision, err
+		}
+		if input.Tool.Name == codemode.ToolName && input.Tool.Metadata[tool.MetadataToolKind] == codemode.ToolKind {
+			var source struct {
+				File string `json:"file"`
+			}
+			_ = json.Unmarshal(input.Call.Input, &source)
+			if source.File == "" {
+				return policy.Decision{Action: policy.ActionAllow}, nil
+			}
+			if native == nil {
+				return policy.Decision{Action: policy.ActionDeny, Reason: "file source requires the original filesystem read authority"}, nil
+			}
+			return native.DecideTool(ctx, input)
+		}
+		if input.Tool.Name == tasktool.ToolName && native == nil {
+			var control struct {
+				Action string `json:"action"`
+			}
+			_ = json.Unmarshal(input.Call.Input, &control)
+			if control.Action == "write" {
+				return policy.Decision{Action: policy.ActionDeny, Reason: "tools-only execution does not grant native command input"}, nil
+			}
+			return policy.Decision{Action: policy.ActionAllow}, nil
 		}
 		if tool.IsMCPDefinition(input.Tool) || tool.IsToolSearchDefinition(input.Tool) || input.Tool.Name == "Skill" {
 			return policy.Decision{Action: policy.ActionAllow}, nil

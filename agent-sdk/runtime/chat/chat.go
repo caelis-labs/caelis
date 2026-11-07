@@ -105,6 +105,9 @@ func (f Factory) NewAgent(_ context.Context, spec agent.AgentSpec) (agent.Agent,
 	if systemPrompt == "" {
 		systemPrompt = strings.TrimSpace(f.SystemPrompt)
 	}
+	if catalog, _ := spec.Metadata["code_mode_catalog"].(string); catalog != "" {
+		systemPrompt += "\n\n" + catalog
+	}
 	chatAgent, err := NewWithTools(spec.Name, spec.Model, spec.Tools, systemPrompt)
 	if err != nil {
 		return nil, err

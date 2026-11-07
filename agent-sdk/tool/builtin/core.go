@@ -10,6 +10,8 @@ import (
 	skilltool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/skill"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/web"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode/gojaexec"
 )
 
 // CoreToolsConfig configures default core coding tools.
@@ -63,6 +65,6 @@ func BuildCoreTools(cfg CoreToolsConfig) ([]tool.Tool, error) {
 	}
 	return []tool.Tool{
 		readTool, viewImageTool, writeTool, patchTool, globTool, searchTool, runCommandTool, taskTool, planTool,
-		skillTool, webSearchTool, webFetchTool,
+		skillTool, webSearchTool, webFetchTool, &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}, Sandbox: cfg.Runtime},
 	}, nil
 }

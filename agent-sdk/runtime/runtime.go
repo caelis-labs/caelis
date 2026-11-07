@@ -369,6 +369,7 @@ func (r *Runtime) executeKernelTurn(
 		return r.executeLifecycle(runCtx, r.lifecycleEvent(runCtx, agent.LifecycleTurn, "", ""), func(turnCtx context.Context) error {
 			runErr := r.runWithOverflowRecovery(turnCtx, activeSession, ref, runID, turnID, req, inputEvents, &batch, handle)
 			scope := taskScopeFromContext(turnCtx)
+			scope.stopCodeMode()
 			if runErr != nil {
 				scope.revoke(runErr, true)
 			}

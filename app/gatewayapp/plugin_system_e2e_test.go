@@ -403,7 +403,7 @@ func (p *pluginSystemE2EProvider) observePayload(callIndex int, payload map[stri
 		for _, item := range tools {
 			toolMap, _ := item.(map[string]any)
 			fn, _ := toolMap["function"].(map[string]any)
-			if fn["name"] == tool.ToolSearchToolName {
+			if fn["name"] == "js_exec" {
 				p.sawToolSearch = true
 			}
 			if fn["name"] == pluginE2EToolName {
@@ -416,6 +416,21 @@ func (p *pluginSystemE2EProvider) observePayload(callIndex int, payload map[stri
 }
 
 func writePluginSystemE2ESSE(w http.ResponseWriter, payload map[string]any) {
+	choices, _ := payload["choices"].([]map[string]any)
+	for _, choice := range choices {
+		delta, _ := choice["delta"].(map[string]any)
+		calls, _ := delta["tool_calls"].([]map[string]any)
+		for _, call := range calls {
+			fn, _ := call["function"].(map[string]any)
+			if fn != nil {
+				name, _ := fn["name"].(string)
+				args, _ := fn["arguments"].(string)
+				name, args = CodeModeFixtureCall(true, name, args)
+				fn["name"], fn["arguments"] = name, args
+			}
+		}
+	}
+
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		panic(fmt.Sprintf("marshal e2e SSE payload: %v", err))

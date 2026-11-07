@@ -15,6 +15,7 @@ type TaskKind string
 
 const (
 	TaskKindCommand  TaskKind = "command"
+	TaskKindCodeMode TaskKind = "code_mode"
 	TaskKindSubagent TaskKind = "subagent"
 )
 

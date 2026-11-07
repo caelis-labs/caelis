@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
@@ -56,7 +57,16 @@ func (m *Manager) admitCatalogTool(ctx context.Context, remote *MCPTool) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if !m.closed && (c == nil || (!c.revoked && !c.dirty)) {
+	if m.closed {
+		return tool.NewError(errorcode.Unavailable, "MCP source is closed")
+	}
+	if c != nil && c.revoked {
+		return tool.NewError(errorcode.PermissionDenied, "MCP source access was revoked")
+	}
+	if remote.client.closedError() != nil {
+		return tool.NewError(errorcode.Unavailable, "MCP source is offline")
+	}
+	if c == nil || !c.dirty {
 		for _, candidate := range m.tools {
 			current, ok := candidate.(*MCPTool)
 			if ok && current.bindingID == remote.bindingID && sameCatalogTool(current, remote) {
@@ -64,7 +74,7 @@ func (m *Manager) admitCatalogTool(ctx context.Context, remote *MCPTool) error {
 			}
 		}
 	}
-	return errors.New("MCP tool catalog changed or access was revoked; discover again after refresh")
+	return tool.NewError(tool.ErrorCodeStaleRevision, "MCP directory refreshed; use tools.describe/search to rediscover before calling")
 }
 
 func (m *Manager) watchCatalog(ctx context.Context, server *managedServer) {
@@ -238,4 +248,49 @@ func (m *Manager) RevokeServer(pluginID, serverName string) error {
 // even if its schema hash matches. Pending old approvals cannot revive it.
 func sameCatalogTool(a, b *MCPTool) bool {
 	return a.client == b.client && a.origName == b.origName && a.def.Name == b.def.Name && a.def.Metadata[tool.MetadataMCPSourceFingerprint] == b.def.Metadata[tool.MetadataMCPSourceFingerprint]
+}
+
+// CheckToolBinding uses the existing directory/source owner to distinguish a
+// changed schema from a disconnected or revoked source. It dispatches nothing.
+func (m *Manager) CheckToolBinding(ctx context.Context, binding tool.Binding) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.closed {
+		return tool.NewError(errorcode.Unavailable, "MCP source is closed")
+	}
+	for _, server := range m.servers {
+		for _, remote := range server.listed {
+			def := tool.Definition{Name: binding.Name, Metadata: map[string]any{tool.MetadataToolKind: tool.MetadataToolKindMCP, tool.MetadataPluginID: server.spec.PluginID, tool.MetadataMCPServer: server.spec.Name, tool.MetadataMCPTool: remote.Name, tool.MetadataMCPSourceFingerprint: "identity-only"}}
+			if tool.BindingForDefinition(def).Identity != binding.Identity {
+				continue
+			}
+			if server.revoked {
+				return tool.NewError(errorcode.PermissionDenied, "MCP source access was revoked")
+			}
+			if server.client == nil || server.client.closedError() != nil {
+				return tool.NewError(errorcode.Unavailable, "MCP source is offline")
+			}
+			if server.client.catalog != nil {
+				server.client.catalog.mu.Lock()
+				revoked, dirty := server.client.catalog.revoked, server.client.catalog.dirty
+				server.client.catalog.mu.Unlock()
+				if revoked {
+					return tool.NewError(errorcode.PermissionDenied, "MCP source access was revoked")
+				}
+				if dirty {
+					return tool.NewError(tool.ErrorCodeStaleRevision, "MCP directory was invalidated; refresh then tools.describe/search again")
+				}
+			}
+			for _, current := range m.tools {
+				if current != nil && tool.BindingForDefinition(current.Definition()) == binding {
+					return nil
+				}
+			}
+			return tool.NewError(tool.ErrorCodeStaleRevision, "MCP directory refreshed; use tools.describe/search to rediscover before calling")
+		}
+	}
+	return tool.NewError(tool.ErrorCodeStaleRevision, "MCP directory refreshed; binding is no longer present; use tools.describe/search")
 }

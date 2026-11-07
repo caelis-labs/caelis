@@ -8,11 +8,15 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode/gojaexec"
 	"github.com/caelis-labs/caelis/internal/bootstrap"
 	"github.com/caelis-labs/caelis/internal/cli"
 )
 
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == gojaexec.WorkerArgument {
+		os.Exit(gojaexec.WorkerMain())
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	code := runMain(

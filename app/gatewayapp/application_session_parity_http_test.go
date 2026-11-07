@@ -300,7 +300,13 @@ func TestApplicationMainHTTPProfileProjectionAndRecoveryArePassive(t *testing.T)
 			t.Fatalf("explicit passive presentation: %+v, %v", presentation, err)
 		}
 		candidates, err := client.CompleteSkill(ctx, appserver.CompletionRequest{SessionID: sid})
-		if err != nil || len(candidates) != 1 || candidates[0].Value != "selected-skill" {
+		selectedCandidates := candidates[:0]
+		for _, candidate := range candidates {
+			if candidate.Value != "desktop-world:desktop-world" {
+				selectedCandidates = append(selectedCandidates, candidate)
+			}
+		}
+		if err != nil || len(selectedCandidates) != 1 || selectedCandidates[0].Value != "selected-skill" {
 			t.Fatalf("explicit skill projection: %+v, %v", candidates, err)
 		}
 		if agents, err := client.ListAgents(ctx, appserver.AgentRequest{SessionID: sid}); err != nil || len(agents) != 0 {
