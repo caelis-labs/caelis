@@ -81,11 +81,7 @@ func (r *Runtime) prepareAgentSpec(ctx context.Context, active session.Session, 
 		}
 	}
 	if hasCodeMode {
-		var catalogTools []tool.Tool
-		if spec.DeferredTools != nil {
-			catalogTools = spec.DeferredTools.Tools()
-		}
-		catalog, err := r.codeModeCatalog(ctx, ref, catalogTools, spec.Metadata)
+		catalog, err := r.codeModeCatalog(ctx, ref, spec.DeferredTools, spec.Metadata)
 		if err != nil {
 			return err
 		}
@@ -117,12 +113,17 @@ func (r *Runtime) prepareAgentSpec(ctx context.Context, active session.Session, 
 	// Bind the concrete declaration only after native tools have received their
 	// Runtime injection, and look up targets through the ordinary wrapper chain.
 	var allTools []tool.Tool
-	targets := func() []tool.Tool {
-		out := append([]tool.Tool(nil), allTools...)
-		if spec.DeferredTools != nil {
-			out = append(out, spec.DeferredTools.Tools()...)
+	lookup := func(ctx context.Context, name string) (tool.Tool, bool, error) {
+		for _, one := range allTools {
+			if one != nil && one.Definition().Name == name {
+				return one, true, nil
+			}
 		}
-		return out
+		if source, ok := spec.DeferredTools.(tool.NamedSource); ok {
+			return source.Lookup(ctx, name)
+		}
+
+		return nil, false, nil
 	}
 	var checkBinding func(context.Context, tool.Binding) error
 	if source, ok := spec.DeferredTools.(interface {
@@ -133,11 +134,11 @@ func (r *Runtime) prepareAgentSpec(ctx context.Context, active session.Session, 
 	validate, _ := ctx.Value(codeModeValidationKey{}).(func(context.Context) (func(), error))
 	for i, one := range spec.Tools {
 		if one != nil && tool.IsToolSearchDefinition(one.Definition()) {
-			spec.Tools[i] = codeModeDiscoveryTool{base: one, targets: targets}
+			spec.Tools[i] = codeModeDiscoveryTool{base: one, lookup: lookup}
 			continue
 		}
 		if declaration, ok := one.(*codemode.Tool); ok {
-			spec.Tools[i] = runtimeCodeModeTool{tasks: r.tasks, active: session.CloneSession(active), declaration: declaration, sessions: r.sessions, ref: ref, targets: targets, validate: validate, checkBinding: checkBinding}
+			spec.Tools[i] = runtimeCodeModeTool{tasks: r.tasks, active: session.CloneSession(active), declaration: declaration, sessions: r.sessions, ref: ref, nativeTargets: func() []tool.Tool { return allTools }, lookup: lookup, validate: validate, checkBinding: checkBinding}
 		}
 	}
 	allTools = wrap(spec.Tools)

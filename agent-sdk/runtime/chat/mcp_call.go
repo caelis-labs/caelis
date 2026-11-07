@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
@@ -16,10 +17,22 @@ type boundMCPCall struct {
 	err      error
 }
 
-func (a *Agent) mcpTools() map[string]tool.Tool {
+func (a *Agent) mcpTools(ctx context.Context, names []string) map[string]tool.Tool {
 	out := map[string]tool.Tool{}
 	candidates := append([]tool.Tool(nil), a.tools...)
-	if a.deferredTools != nil {
+	if named, ok := a.deferredTools.(tool.NamedSource); ok {
+		seen := map[string]bool{}
+		for _, name := range names {
+			if seen[name] {
+				continue
+			}
+			seen[name] = true
+			one, found, err := named.Lookup(ctx, name)
+			if err == nil && found {
+				candidates = append(candidates, one)
+			}
+		}
+	} else if a.deferredTools != nil {
 		candidates = append(candidates, a.deferredTools.Tools()...)
 	}
 	for _, one := range candidates {
@@ -36,24 +49,37 @@ func (a *Agent) mcpTools() map[string]tool.Tool {
 
 // Bind once per complete model response, before approval or any sibling tool
 // executes. A later discovery or refresh cannot redirect a pending invocation.
-func (a *Agent) bindMCPCalls(calls []model.ToolCall, visibility *tool.ToolVisibility) {
+func (a *Agent) bindMCPCalls(ctx context.Context, calls []model.ToolCall, visibility *tool.ToolVisibility) {
 	a.boundCalls = map[string]boundMCPCall{}
-	var current map[string]tool.Tool
+	var names []string
 	for _, call := range calls {
 		declaration, ok := a.lookupRunTool(call.Name, visibility)
 		if !ok || !tool.IsMCPCallDefinition(declaration.Definition()) {
 			continue
 		}
-		// Resolve the real declaration (including aliases) before deciding whether
-		// this response needs the MCP catalog. Binding still precedes execution.
-		if current == nil {
-			current = a.mcpTools()
-		}
+
 		bound := boundMCPCall{original: call}
 		actual, err := tool.ParseMCPCall(call)
 		bound.call = actual
 		bound.err = err
 		if err == nil {
+			names = append(names, actual.Name)
+		}
+		a.boundCalls[call.ID] = bound
+	}
+	if len(a.boundCalls) == 0 {
+		return
+	}
+	// All response targets are pinned before any sibling executes. The optional
+	// source lookup changes catalog work, never declaration/binding authority.
+	current := a.mcpTools(ctx, names)
+	for _, call := range calls {
+		bound, ok := a.boundCalls[call.ID]
+		if !ok {
+			continue
+		}
+		actual := bound.call
+		if bound.err == nil {
 			binding, known := a.discoveries[actual.Name]
 			bound.binding = binding
 			one := current[actual.Name]

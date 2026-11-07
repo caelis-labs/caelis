@@ -16,6 +16,15 @@ import (
 // definitions must remain immutable. Reading a source must not wait for I/O.
 type Source interface{ Tools() []Tool }
 
+// NamedSource optionally locates one canonical current tool without enumerating
+// the directory, using Registry.Lookup's signature. Lookup must not wait for I/O.
+// A result is a candidate, not a grant; callers still validate bindings and
+// execution authority. Missing names must not resolve to another source's alias.
+// Sources without this capability retain their ordinary enumeration fallback.
+type NamedSource interface {
+	Lookup(context.Context, string) (Tool, bool, error)
+}
+
 // Definition is the stable tool declaration exposed to runtimes and model
 // providers.
 type Definition struct {

@@ -144,7 +144,21 @@ func (t *Tool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
 	if err != nil {
 		return tool.Result{}, err
 	}
-	snapshot := Tool{entries: t.currentEntries(), source: t.source, ranker: t.ranker}
+	snapshot := Tool{source: t.source, ranker: t.ranker}
+	if named, ok := t.source.(tool.NamedSource); ok && args.Name != "" {
+		if err := t.checkSource(ctx); err != nil {
+			return tool.Result{}, err
+		}
+		one, found, lookupErr := named.Lookup(ctx, args.Name)
+		if lookupErr != nil {
+			return tool.Result{}, lookupErr
+		}
+		if found && one != nil {
+			snapshot.entries = buildEntries([]tool.Tool{one})
+		}
+	} else {
+		snapshot.entries = t.currentEntries()
+	}
 	var matches []entry
 	if args.Name != "" {
 		def, readErr := snapshot.readSchema(ctx, args.Name)
@@ -203,7 +217,18 @@ func (t *Tool) readSchema(ctx context.Context, name string) (tool.Definition, er
 			continue
 		}
 		if t.source != nil {
-			current := buildEntries(searchTools(t.source))
+			var current []entry
+			if named, ok := t.source.(tool.NamedSource); ok {
+				one, found, lookupErr := named.Lookup(ctx, name)
+				if lookupErr != nil {
+					return tool.Definition{}, lookupErr
+				}
+				if found && one != nil {
+					current = buildEntries([]tool.Tool{one})
+				}
+			} else {
+				current = buildEntries(searchTools(t.source))
+			}
 			for _, item := range current {
 				if item.def.Name == name && sameSearchDefinition(item.def, candidate.def) {
 					return tool.CloneDefinition(candidate.def), nil

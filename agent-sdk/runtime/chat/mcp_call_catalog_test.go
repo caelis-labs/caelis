@@ -51,7 +51,7 @@ func TestBindMCPCallsBuildsCatalogOnlyForResolvedDeclaration(t *testing.T) {
 			if kind == "malformed" {
 				args = `{"tool_name":"docs__read","arguments":[]}`
 			}
-			a.bindMCPCalls([]model.ToolCall{{ID: "one", Name: name, Args: args}, {ID: "two", Name: name, Args: args}}, nil)
+			a.bindMCPCalls(t.Context(), []model.ToolCall{{ID: "one", Name: name, Args: args}, {ID: "two", Name: name, Args: args}}, nil)
 			if kind == "ordinary" || kind == "impostor" {
 				if source.enumerations != 0 || len(a.boundCalls) != 0 || definitions != 0 {
 					t.Fatalf("unrelated declaration enumerated catalog: %+v %d", source, definitions)

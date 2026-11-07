@@ -298,6 +298,10 @@ func TestCatalogCollisionOwnerDoesNotTransferAfterRemoval(t *testing.T) {
 	if len(mgr.Tools()) != 0 {
 		t.Fatal("removed owner silently promoted same-name tool")
 	}
+	if _, found, err := mgr.Lookup(t.Context(), "shared__read"); err != nil || found {
+		t.Fatalf("Lookup promoted removed owner's name: found=%v err=%v", found, err)
+	}
+
 }
 
 func TestCatalogModernHTTPDoesNotReuseIndependentPageCache(t *testing.T) {

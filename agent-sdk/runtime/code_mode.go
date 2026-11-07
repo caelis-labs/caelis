@@ -24,14 +24,15 @@ type nestedToolEventSinkKey struct{}
 var errCodeModeComplete = errors.New("code mode host admission is closed by TurnComplete")
 
 type runtimeCodeModeTool struct {
-	declaration  *codemode.Tool
-	tasks        *taskRuntime
-	active       session.Session
-	sessions     session.Service
-	ref          session.SessionRef
-	targets      func() []tool.Tool
-	checkBinding func(context.Context, tool.Binding) error
-	validate     func(context.Context) (func(), error)
+	declaration   *codemode.Tool
+	tasks         *taskRuntime
+	active        session.Session
+	sessions      session.Service
+	ref           session.SessionRef
+	nativeTargets func() []tool.Tool
+	lookup        func(context.Context, string) (tool.Tool, bool, error)
+	checkBinding  func(context.Context, tool.Binding) error
+	validate      func(context.Context) (func(), error)
 }
 
 func (t runtimeCodeModeTool) Definition() tool.Definition { return t.declaration.Definition() }
@@ -65,7 +66,14 @@ func (t runtimeCodeModeTool) execute(ctx context.Context, call tool.Call, source
 		targets: map[string]codeModeTarget{}, handles: map[string]model.Part{}, drained: make(chan struct{})}
 	discovered := mcpdiscovery.FromEvents(events)
 	host.discovered = discovered
-	for _, one := range t.targets() {
+	candidates := append([]tool.Tool(nil), t.nativeTargets()...)
+	for name := range discovered {
+		one, found, lookupErr := t.lookup(ctx, name)
+		if lookupErr == nil && found {
+			candidates = append(candidates, one)
+		}
+	}
+	for _, one := range candidates {
 		if one == nil {
 			continue
 		}
@@ -83,7 +91,7 @@ func (t runtimeCodeModeTool) execute(ctx context.Context, call tool.Call, source
 		if tool.IsMCPDefinition(def) && tool.BindingForDefinition(def).Identity == "" {
 			continue
 		}
-		if !tool.AvailableForModel(one, call.RuntimeModel) {
+		if !def.AvailableForModel(call.RuntimeModel) {
 			continue
 		}
 		if _, duplicate := host.targets[def.Name]; duplicate {
@@ -230,14 +238,13 @@ func (h *codeModeHost) admit(ctx context.Context, name string, target codeModeTa
 	}
 	if validationErr == nil {
 		validationErr = tool.NewError(tool.ErrorCodeStaleRevision, "Code Mode source/schema changed; reload with tools.describe(name) before calling")
-		for _, one := range h.owner.targets() {
-			if one == nil {
-				continue
-			}
+		one, found, lookupErr := h.owner.lookup(ctx, name)
+		if lookupErr != nil {
+			validationErr = lookupErr
+		} else if found && one != nil {
 			def := one.Definition()
 			if def.Name == name && codeModeDefinitionDigest(def) == target.digest {
 				validationErr = nil
-				break
 			}
 		}
 	}
@@ -316,15 +323,15 @@ func (h *codeModeHost) call(requestCtx context.Context, name string, arguments j
 	oldBinding, known := h.discovered[name]
 	h.mu.Unlock()
 	if discovery {
-		for _, one := range h.owner.targets() {
-			if one == nil {
-				continue
-			}
+		one, found, lookupErr := h.owner.lookup(requestCtx, tool.ToolSearchToolName)
+		if lookupErr != nil {
+			return codemode.Reply{}, lookupErr
+		}
+		if found && one != nil {
 			def := one.Definition()
 			if tool.IsToolSearchDefinition(def) {
 				target = codeModeTarget{tool: one, definition: def, digest: codeModeDefinitionDigest(def)}
 				ok = true
-				break
 			}
 		}
 	}
@@ -335,15 +342,17 @@ func (h *codeModeHost) call(requestCtx context.Context, name string, arguments j
 					return codemode.Reply{}, err
 				}
 			}
-			for _, one := range h.owner.targets() {
-				if one == nil {
-					continue
-				}
+			one, found, lookupErr := h.owner.lookup(requestCtx, name)
+			if lookupErr != nil {
+				return codemode.Reply{}, lookupErr
+			}
+			if found && one != nil {
 				def := one.Definition()
 				if def.Name == name && oldBinding != tool.BindingForDefinition(def) {
 					return codemode.Reply{}, tool.NewError(tool.ErrorCodeStaleRevision, "tool directory refreshed; use tools.describe(name) to reload its schema/binding before calling")
 				}
 			}
+
 			return codemode.Reply{}, tool.NewError(errorcode.Unavailable, "discovered tool is currently unavailable; check connection or access before rediscovery")
 		}
 		return codemode.Reply{}, tool.NewError(tool.ErrorCodeNotFound, "tool has not been described in this Session; use tools.describe(name) first")

@@ -15,6 +15,7 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
 )
 
 type h1ReviewBatchModel struct {
@@ -122,6 +123,7 @@ func (c *h1ReviewCalls) copy() map[string]int {
 
 func TestH1ReviewNativeJSDefinitionCosts(t *testing.T) {
 	var results []map[string]any
+	constantCounts := map[string]int{}
 	for _, n := range []int{2, 20, 200, 2000} {
 		for _, route := range []string{"native", "js"} {
 			t.Run(fmt.Sprintf("%s/%d", route, n), func(t *testing.T) {
@@ -139,12 +141,19 @@ func TestH1ReviewNativeJSDefinitionCosts(t *testing.T) {
 				for i, one := range s.items {
 					s.items[i] = h1ReviewTool{one, trace}
 				}
+				var source tool.Source = s
+				if os.Getenv("CAELIS_H1_REVIEW_LOOKUP") == "1" {
+					source = h1Indexed(s)
+				}
 				store, active, _ := codeModeStore(t)
 				m := &h1Model{s: s}
 				spec := func() agent.AgentSpec {
 					result := h1Spec(s, m)
+					search := h1Discovery{s: s, base: toolsearch.NewSource(source, h1Ranker{s})}
+					result.DeferredTools = source
+					result.Tools[0] = search
 					if route == "native" {
-						result.Tools = []tool.Tool{h1Search(s)}
+						result.Tools = []tool.Tool{search}
 					}
 					return result
 				}
@@ -203,6 +212,16 @@ func TestH1ReviewNativeJSDefinitionCosts(t *testing.T) {
 					}
 					if total != phase.phase.Stats.DefinitionReads {
 						t.Fatalf("stack total %d != Definition count %d", total, phase.phase.Stats.DefinitionReads)
+					}
+					if os.Getenv("CAELIS_H1_REVIEW_LOOKUP") == "1" {
+						key := route + "/" + phase.phase.Name
+						if previous, exists := constantCounts[key]; exists && previous != total {
+							t.Fatalf("indexed known path grew with N: %s N=%d count=%d baseline=%d", key, n, total, previous)
+						}
+						constantCounts[key] = total
+						if phase.phase.Stats.ToolsEnumerations != 0 || phase.phase.Stats.SearchEnumerations != 0 {
+							t.Fatalf("indexed path enumerated directory: %+v", phase.phase.Stats)
+						}
 					}
 					results = append(results, map[string]any{"n": n, "route": route, "phase": phase.phase, "definition_caller_stacks": phase.stacks})
 				}

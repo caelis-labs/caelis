@@ -17,8 +17,8 @@ type codeModeDescribeKey struct{}
 // Search alone does not admit schemas. Canonical SDK ToolSearch still uses the
 // same admission helper in Chat; there is no second durable binding store.
 type codeModeDiscoveryTool struct {
-	base    tool.Tool
-	targets func() []tool.Tool
+	base   tool.Tool
+	lookup func(context.Context, string) (tool.Tool, bool, error)
 }
 
 func (t codeModeDiscoveryTool) Definition() tool.Definition { return t.base.Definition() }
@@ -41,15 +41,19 @@ func (t codeModeDiscoveryTool) Call(ctx context.Context, call tool.Call) (tool.R
 		}
 	}
 	current := map[string]tool.Tool{}
-	for _, one := range t.targets() {
-		if one == nil {
-			continue
+	for _, entry := range selected.Tools {
+		one, found, lookupErr := t.lookup(ctx, entry.Name)
+		if lookupErr != nil {
+			return result, lookupErr
 		}
-		def := one.Definition()
-		if tool.IsMCPDefinition(def) && def.AvailableForModel(call.RuntimeModel) {
-			current[def.Name] = one
+		if found && one != nil {
+			def := one.Definition()
+			if tool.IsMCPDefinition(def) && def.AvailableForModel(call.RuntimeModel) {
+				current[def.Name] = one
+			}
 		}
 	}
+
 	return mcpdiscovery.Admit(selected, current, result)
 }
 
@@ -88,10 +92,11 @@ func (h *codeModeHost) Discover(ctx context.Context, query string, describe bool
 	if describe {
 		// Native tools are already registered by identity; their schema is known
 		// without creating an MCP discovery receipt or executing the tool.
-		for _, one := range h.owner.targets() {
-			if one == nil {
-				continue
-			}
+		one, found, lookupErr := h.owner.lookup(ctx, query)
+		if lookupErr != nil {
+			return codemode.Reply{}, lookupErr
+		}
+		if found && one != nil {
 			def := one.Definition()
 			if def.Name == query && !tool.IsMCPDefinition(def) && !tool.IsToolSearchDefinition(def) && !tool.IsMCPCallDefinition(def) && def.Metadata[tool.MetadataToolKind] != codemode.ToolKind {
 				if !codeModeCanCall(def) {
@@ -109,12 +114,12 @@ func (h *codeModeHost) Discover(ctx context.Context, query string, describe bool
 			}
 		}
 	}
-	var search tool.Tool
-	for _, one := range h.owner.targets() {
-		if one != nil && tool.IsToolSearchDefinition(one.Definition()) {
-			search = one
-			break
-		}
+	search, found, lookupErr := h.owner.lookup(ctx, tool.ToolSearchToolName)
+	if lookupErr != nil {
+		return codemode.Reply{}, lookupErr
+	}
+	if !found || search == nil || !tool.IsToolSearchDefinition(search.Definition()) {
+		search = nil
 	}
 	if search == nil {
 		return codemode.Reply{}, tool.NewError(tool.ErrorCodeNotFound, "no extension discovery source is configured")
@@ -143,10 +148,11 @@ func (h *codeModeHost) Discover(ctx context.Context, query string, describe bool
 			return codemode.Reply{}, tool.NewError(tool.ErrorCodeNotFound, "tool is unavailable; search or describe again after the directory is ready")
 		}
 		entry := result.Tools[0]
-		for _, one := range h.owner.targets() {
-			if one == nil {
-				continue
-			}
+		one, found, lookupErr := h.owner.lookup(ctx, query)
+		if lookupErr != nil {
+			return codemode.Reply{}, lookupErr
+		}
+		if found && one != nil {
 			def := one.Definition()
 			if def.Name == query && entry.Binding != nil && *entry.Binding == tool.BindingForDefinition(def) {
 				if !codeModeCanCall(def) {

@@ -68,6 +68,7 @@ type Manager struct {
 	mu             sync.Mutex
 	servers        []*managedServer
 	tools          []tool.Tool
+	toolsByName    map[string]*MCPTool
 	warnings       map[string][]string
 	cancel         context.CancelFunc
 	initialized    chan struct{}
@@ -322,6 +323,10 @@ func (mgr *Manager) rebuildToolsLocked() {
 		}
 	}
 	sort.SliceStable(mgr.tools, func(i, j int) bool { return mgr.tools[i].Definition().Name < mgr.tools[j].Definition().Name })
+	// This index is derived from the same immutable canonical directory and is
+	// published under the same owner lock. Readiness is checked at each lookup.
+	mgr.toolsByName = toolsByProjectedName
+
 }
 
 // A pending server can still own colliding projected tool names. Hold only
@@ -468,6 +473,7 @@ func (m *Manager) Close() error {
 		m.refreshWorkers.Wait()
 		m.mu.Lock()
 		m.tools = nil
+		m.toolsByName = nil
 		m.mu.Unlock()
 		for _, server := range m.servers {
 			if server.client != nil {

@@ -40,6 +40,17 @@ VMs and Turns; a fresh VM clears local JS variables. Runtime still checks curren
 identity, source/schema, generation and permissions on every call. Missing schema
 can be fetched by name without fuzzy search.
 
+Sources may implement `tool.NamedSource` using the existing `Registry.Lookup`
+signature. Runtime wraps only the located canonical candidate and restores a
+Host from its Session's discovered bindings. Lookup grants no eligibility:
+source/schema, generation, policy and both execution admission boundaries remain
+live. MCP Manager derives its name index from its current directory under the
+same owner lock; dirty, revoked, replaced or disconnected sources cannot return
+a dispatchable candidate or promote another source's same-name tool. No lock is
+held across approval or tool I/O. Sources without Lookup use the existing linear
+enumeration fallback. Unknown fuzzy search still covers its candidate directory
+under the normal selector budgets.
+
 Unknown schemas must be returned to the model before a later script supplies
 arguments. JavaScript is orchestration, not a second model that understands a
 previously unknown schema. Native fs identities need no redundant MCP discovery.

@@ -21,3 +21,15 @@ Before running, coordinate authorization and freeze a new harness, exact product
 head and manifest hash. Do not run the old fair A harness under a changed prompt
 or describe this proposal as an executed comparison. File capability B remains
 separate. H2 output selection/aggregation changes are excluded.
+
+For the current canonical lookup implementation, run
+`bash app/gatewayapp/testdata/code-mode/h1-plan/reproduce-lookup-offline.sh`.
+It checks indexed and enumeration-only Sources in a bounded N=2 smoke,
+checks real local MCP Manager behavior and authority boundaries, and preserves
+fresh evidence without contacting a provider model. The earlier H1 head is
+historical; a future sampling manifest must bind the new reviewed product head.
+
+Definition counts are internal local-cost diagnostics, not the primary product
+benefit criterion. The archived N=2/20/200/2000 matrix remains evidence of the
+bounded optimization; do not extend it as a performance study. Real-model
+business success, round trips and provider token usage remain the main targets.

@@ -164,7 +164,7 @@ func (a *Agent) executeToolCallAdmitted(
 	if err != nil {
 		result = modelVisibleToolErrorResult(call, result, err)
 	}
-	result = a.admitToolSearchResult(selectedTool.Definition(), call, result)
+	result = a.admitToolSearchResult(ctx, selectedTool.Definition(), call, result)
 	canonical, truncationMeta := canonicalToolResult(result, a.toolResultArtifacts)
 	message := toolResultMessageFromCanonical(call, canonical)
 	eventMeta := truncationMeta

@@ -29,6 +29,7 @@ import (
 // These counters observe existing source/selector interfaces. They do not
 // replace Runtime discovery, binding, authorization, or its journal.
 type h1Stats struct {
+	LookupRequests            int   `json:"source_lookup_requests"`
 	ToolsEnumerations         int   `json:"tools_enumerations"`
 	SearchEnumerations        int   `json:"search_enumerations"`
 	EnumeratedItems           int   `json:"enumerated_items"`
@@ -538,7 +539,7 @@ func TestJSExecH1HintWarningOncePreservesCapability(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := h1Directory(2)
-	text, err := rt.codeModeCatalog(t.Context(), active.SessionRef, s.Tools(), map[string]any{codemode.MetadataSelectedTools: []string{"a__target", "z__target"}})
+	text, err := rt.codeModeCatalog(t.Context(), active.SessionRef, s, map[string]any{codemode.MetadataSelectedTools: []string{"a__target", "z__target"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -566,7 +567,7 @@ func TestJSExecH1HintWarningOncePreservesCapability(t *testing.T) {
 		many.items[i] = item
 		names = append(names, item.def.Name)
 	}
-	capped, err := other.codeModeCatalog(t.Context(), another.SessionRef, many.Tools(), map[string]any{codemode.MetadataSelectedTools: names})
+	capped, err := other.codeModeCatalog(t.Context(), another.SessionRef, many, map[string]any{codemode.MetadataSelectedTools: names})
 	if err != nil {
 		t.Fatal(err)
 	}

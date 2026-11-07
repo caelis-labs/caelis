@@ -177,7 +177,7 @@ func TestJSExecRealGojaDiscoveryAndStableTools(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	frozen, err := restarted.codeModeCatalog(t.Context(), active.SessionRef, source.Tools(), nil)
+	frozen, err := restarted.codeModeCatalog(t.Context(), active.SessionRef, source, nil)
 	if err != nil || frozen != hint {
 		t.Fatal("catalog refresh/restart rewrote the selected early prefix")
 	}

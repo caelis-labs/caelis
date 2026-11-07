@@ -5,10 +5,10 @@
     "sha256": "f7723dfb9f7e7df2a11ee42bc7293f8204527617d3634b5b8d4708972a7c07eb",
     "preserved": true
   },
-  "implementation_base": "79cf3b4d994c9cea2103fa616ea977cd73a85902",
-  "scope": "H1 revised guidance plus local removal of repeated catalog work; no new cache, owner, admission, parallel-safety or H2 strategy",
+  "implementation_base": "74cfdaed85d7dc85c61124be9cbdf3a078d83bf9",
+  "scope": "Revised H1 guidance plus current-source canonical lookup and local duplicate removal; no second owner, authority cache, admission weakening or H2 strategy",
   "proposed_live_spec": {
-    "version": "h1-pre-freeze-proposal-v1",
+    "version": "h1-lookup-pre-freeze-proposal-v2",
     "production_base": "6d15d1e6078b1b20d2a27f219331c3a00f0e29ad",
     "model": {
       "api": "openai_responses",
@@ -149,7 +149,7 @@
   },
   "activation_requirements": [
     "Bot-coordinated authorization and readback before any new real sample; this plan does not trigger live execution.",
-    "Freeze a new H1 harness/manifest with exact product head and harness SHA. Do not alter old fair-a harness or manifest.",
+    "Freeze a new H1 harness/manifest with exact final Lookup product head and harness SHA. Head 79cf3b4d is historical and is not the sampling head. Do not alter old fair-a harness or manifest.",
     "Offline compare all common task fields and model parameters to reference; only route entry guidance differs. No H2 instructions, saved-script obligation or extra orchestration hint.",
     "Revalidate read-only Context7 entry version/hash before sampling; retain drift and source/result changes, never substitute fixtures for provider evidence.",
     "Same four independent Sessions/two Turns, counterbalanced order, streaming >=600 seconds per generation, no shorter enclosing deadline, no automatic retry/fallback. Permanent quota error stops study.",

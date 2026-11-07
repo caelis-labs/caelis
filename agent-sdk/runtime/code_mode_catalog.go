@@ -17,7 +17,7 @@ const codeModeCatalogKey = "code_mode_catalog"
 // This is a hint snapshot, not discovery or authorization. An empty initial
 // ready catalog stays empty; later tools remain discoverable without rewriting
 // a Session's earlier instructions. Raw schemas never enter this snapshot.
-func (r *Runtime) codeModeCatalog(ctx context.Context, ref session.SessionRef, candidates []tool.Tool, metadata map[string]any) (string, error) {
+func (r *Runtime) codeModeCatalog(ctx context.Context, ref session.SessionRef, source tool.Source, metadata map[string]any) (string, error) {
 	state, err := r.sessions.SnapshotState(ctx, ref)
 	if err != nil {
 		return "", err
@@ -43,6 +43,27 @@ func (r *Runtime) codeModeCatalog(ctx context.Context, ref session.SessionRef, c
 		}
 	}
 	var hints []hint
+	var candidates []tool.Tool
+	if len(selected) > 0 && source != nil {
+		if named, ok := source.(tool.NamedSource); ok {
+			names := make([]string, 0, len(selected))
+			for name := range selected {
+				names = append(names, name)
+			}
+			sort.Strings(names)
+			for _, name := range names {
+				one, found, lookupErr := named.Lookup(ctx, name)
+				if ctx.Err() != nil {
+					return "", ctx.Err()
+				}
+				if lookupErr == nil && found {
+					candidates = append(candidates, one)
+				}
+			}
+		} else {
+			candidates = source.Tools()
+		}
+	}
 	for _, one := range candidates {
 		if one == nil {
 			continue

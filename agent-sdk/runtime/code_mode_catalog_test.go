@@ -23,12 +23,12 @@ func TestJSExecCatalogSelectionIsEmbedderOwnedAndBounded(t *testing.T) {
 	def.Metadata[tool.MetadataMCPTool] = "query-docs"
 	def.Description = strings.Repeat("界", 70)
 	candidates := []tool.Tool{tool.NamedTool{Def: def}}
-	text, err := rt.codeModeCatalog(t.Context(), active.SessionRef, candidates, nil)
+	text, err := rt.codeModeCatalog(t.Context(), active.SessionRef, &jsExecSource{items: candidates}, nil)
 	if err != nil || strings.Contains(text, def.Name) {
 		t.Fatalf("SDK imposed product selection: %s %v", text, err)
 	}
 	selected := map[string]any{codemode.MetadataSelectedTools: []any{def.Name}}
-	again, err := rt.codeModeCatalog(t.Context(), active.SessionRef, candidates, selected)
+	again, err := rt.codeModeCatalog(t.Context(), active.SessionRef, &jsExecSource{items: candidates}, selected)
 	if err != nil || again != text {
 		t.Fatalf("late selection rewrote early prefix: %v", err)
 	}
@@ -36,7 +36,7 @@ func TestJSExecCatalogSelectionIsEmbedderOwnedAndBounded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	text, err = rt.codeModeCatalog(t.Context(), second.SessionRef, candidates, selected)
+	text, err = rt.codeModeCatalog(t.Context(), second.SessionRef, &jsExecSource{items: candidates}, selected)
 	if err != nil {
 		t.Fatal(err)
 	}

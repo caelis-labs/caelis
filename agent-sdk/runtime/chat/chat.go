@@ -177,7 +177,7 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 				return
 			}
 			toolCallEvents := modelToolCallEvents(assistantMessage, final, messageID, a.model, requestPrefix)
-			a.bindMCPCalls(calls, &visibility)
+			a.bindMCPCalls(ctx, calls, &visibility)
 			for _, event := range toolCallEvents {
 				a.presentMCPEvent(event)
 				if !yield(event, nil) {
