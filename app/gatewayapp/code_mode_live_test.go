@@ -30,6 +30,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode/gojaexec"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/control/modelconfig/credentialstore"
@@ -84,12 +85,22 @@ func TestCodeModeLive(t *testing.T) {
 	}
 	trace := &codeLiveTrace{LLM: resolved.Model, root: root}
 	writeLiveJSON(t, filepath.Join(root, "model.json"), map[string]any{"id": cfg.ID, "model": cfg.Model, "provider": cfg.Provider, "api": cfg.API, "endpoint_id": cfg.ProviderEndpointID, "reasoning_effort": cfg.ReasoningEffort, "reasoning_mode": cfg.ReasoningMode, "stream": true, "per_generation_budget_seconds": 600, "mode": mode})
-	workspace := filepath.Join(root, "workspace")
+	stateRoot := os.Getenv("CAELIS_CODE_MODE_LIVE_STATE_ROOT")
+	if stateRoot == "" {
+		stateRoot = root
+	}
+	if !filepath.IsAbs(stateRoot) {
+		t.Fatal("absolute task-owned state root required")
+	}
+	resume := os.Getenv("CAELIS_CODE_MODE_LIVE_RESUME") == "1"
+	workspace := filepath.Join(stateRoot, "workspace")
 	if err := os.MkdirAll(workspace, 0700); err != nil {
 		t.Fatal(err)
 	}
-	_ = os.WriteFile(filepath.Join(workspace, "a.txt"), []byte("17\n"), 0600)
-	_ = os.WriteFile(filepath.Join(workspace, "b.txt"), []byte("25\n"), 0600)
+	if !resume {
+		_ = os.WriteFile(filepath.Join(workspace, "a.txt"), []byte("17\n"), 0600)
+		_ = os.WriteFile(filepath.Join(workspace, "b.txt"), []byte("25\n"), 0600)
+	}
 	var doc struct {
 		Servers map[string]struct {
 			Command string            `json:"command"`
@@ -124,7 +135,7 @@ func TestCodeModeLive(t *testing.T) {
 	if !skipPackage {
 		t.Fatal("unexpected Context7 launch configuration")
 	}
-	noGUI := os.Getenv("CAELIS_CODE_MODE_LIVE_NO_GUI") == "1"
+	noGUI := os.Getenv("CAELIS_CODE_MODE_LIVE_ENABLE_GUI") != "1" || os.Getenv("CAELIS_CODE_MODE_LIVE_NO_GUI") == "1"
 	specs := []mcp.ServerSpec{{PluginID: "context7", Name: "context7", Transport: mcp.TransportStdio, Command: "node", Args: args, Env: server.Env, WorkDir: workspace, CleanEnvironment: true}}
 	if !noGUI {
 		dtwRoot := os.Getenv("CAELIS_CODE_MODE_LIVE_DTW_ROOT")
@@ -160,6 +171,18 @@ func TestCodeModeLive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	for _, one := range tools {
+		if script, ok := one.(*codemode.Tool); ok {
+			script.Executor = &gojaexec.Executor{Observe: func(metrics gojaexec.Metrics) {
+				raw, _ := json.Marshal(metrics)
+				f, e := os.OpenFile(filepath.Join(root, "worker-metrics.jsonl"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+				if e == nil {
+					_, _ = f.Write(append(raw, '\n'))
+					_ = f.Close()
+				}
+			}}
+		}
+	}
 	if mode == "baseline" {
 		kept := tools[:0]
 		for _, one := range tools {
@@ -170,12 +193,30 @@ func TestCodeModeLive(t *testing.T) {
 		tools = kept
 	}
 	tools = append(tools, toolsearch.NewSource(manager))
-	store := sessionfile.NewStore(sessionfile.Config{RootDir: filepath.Join(root, "sessions")})
-	active, err := store.StartSession(t.Context(), session.StartSessionRequest{AppName: "caelis", UserID: "code-mode-live", Workspace: session.WorkspaceRef{Key: root, CWD: workspace}})
-	if err != nil {
-		t.Fatal(err)
+	store := sessionfile.NewStore(sessionfile.Config{RootDir: filepath.Join(stateRoot, "sessions")})
+	var active session.Session
+	if resume {
+		raw, err := os.ReadFile(filepath.Join(stateRoot, "active-session.json"))
+		if err != nil {
+			t.Fatal("original task-owned Session identity missing")
+		}
+		var ref session.SessionRef
+		if json.Unmarshal(raw, &ref) != nil {
+			t.Fatal("invalid original Session identity")
+		}
+		loaded, err := store.LoadSession(t.Context(), session.LoadSessionRequest{SessionRef: ref, IncludeTransient: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		active = loaded.Session
+	} else {
+		active, err = store.StartSession(t.Context(), session.StartSessionRequest{AppName: "caelis", UserID: "code-mode-live", Workspace: session.WorkspaceRef{Key: stateRoot, CWD: workspace}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeLiveJSON(t, filepath.Join(stateRoot, "active-session.json"), active.SessionRef)
 	}
-	grants, err := runtime.NewMCPGrantStore(filepath.Join(root, "mcp-grants.json"))
+	grants, err := runtime.NewMCPGrantStore(filepath.Join(stateRoot, "mcp-grants.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,7 +282,14 @@ func TestCodeModeLive(t *testing.T) {
 			}
 		}
 		if approved {
-			return agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_once", Approved: true}, nil
+			option := "allow_once"
+			for _, candidate := range r.Approval.Options {
+				if candidate.ID == "allow_session" {
+					option = candidate.ID
+					break
+				}
+			}
+			return agent.ApprovalResponse{Outcome: "selected", OptionID: option, Approved: true}, nil
 		}
 		return agent.ApprovalResponse{Outcome: "selected", OptionID: "cancel"}, nil
 	})
@@ -268,6 +316,9 @@ func TestCodeModeLive(t *testing.T) {
 	})
 	stream := true
 	for i, prompt := range prompts {
+		if resume && i == 0 {
+			continue
+		}
 		if noGUI && i == 1 {
 			writeLiveJSON(t, filepath.Join(root, "desktop-pending.json"), map[string]any{"reason": "shared desktop paused by coordinator", "task": 2})
 			break
@@ -293,6 +344,52 @@ func TestCodeModeLive(t *testing.T) {
 		}
 		if json.Unmarshal(answer, &v) != nil || v.Total != 42+i {
 			t.Fatalf("wrong actual aggregate at task %d", i+1)
+		}
+		if mode == "js_exec" {
+			scriptBytes, e := os.ReadFile(filepath.Join(workspace, "workflow.js"))
+			if e != nil {
+				t.Fatal("generated executable source missing")
+			}
+			sum := sha256.Sum256(scriptBytes)
+			expected := hex.EncodeToString(sum[:])
+			history, e := store.LoadSession(t.Context(), session.LoadSessionRequest{SessionRef: active.SessionRef, IncludeTransient: true})
+			if e != nil {
+				t.Fatal(e)
+			}
+			fixedFile := false
+			for _, event := range history.Events {
+				if event.Journal == nil || event.Journal.ToolExecution == nil {
+					continue
+				}
+				record := event.Journal.ToolExecution
+				if record.ToolName != codemode.ToolName || record.Status != session.ToolExecutionSucceeded {
+					continue
+				}
+				var input struct {
+					File string `json:"file"`
+				}
+				_ = json.Unmarshal(record.Input, &input)
+				if filepath.Base(input.File) != "workflow.js" {
+					continue
+				}
+				var result tool.Result
+				if json.Unmarshal(record.Result, &result) != nil {
+					continue
+				}
+				source, _ := result.Metadata["code_mode_source"].(map[string]any)
+				if source["sha256"] == expected {
+					fixedFile = true
+				}
+			}
+			if !fixedFile {
+				t.Fatal("no original successful fixed-file execution receipt matches current workflow bytes")
+			}
+			if i == 1 {
+				before, e := os.ReadFile(filepath.Join(stateRoot, "task-1-workflow.js"))
+				if e != nil || string(before) == string(scriptBytes) {
+					t.Fatal("second task did not edit original file bytes")
+				}
+			}
 		}
 		for _, name := range []string{"workflow.js", "answer.json"} {
 			if b, err := os.ReadFile(filepath.Join(workspace, name)); err == nil {

@@ -73,9 +73,10 @@ type DiscoveryHost interface {
 
 // Executor is the trusted Go adapter for one engine invocation. The adapter must
 // translate Host into bounded JSON RPC; it must never expose Host or other Go
-// objects to the untrusted language engine. Implementations bound CPU/memory,
-// stop on cancellation, pause CPU accounting during Host waits, and enforce
-// Limits before RPC allocation/encoding. The engine receives only JSON data and
+// objects to the untrusted language engine. Implementations bound CPU and report
+// their memory enforcement limits, stop on cancellation, exclude idle Host
+// waits, and enforce Limits before RPC allocation/encoding. The engine receives
+// only JSON data and
 // opaque handles, never Session, tool registry, credentials or filesystem access.
 type Executor interface {
 	Execute(context.Context, Source, Limits, Host) (json.RawMessage, error)

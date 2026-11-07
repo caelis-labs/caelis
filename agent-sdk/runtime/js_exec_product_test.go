@@ -430,3 +430,39 @@ func TestJSExecLeavesNativeRunCommandUsable(t *testing.T) {
 		t.Fatalf("native shell regressed: %q %v", data, err)
 	}
 }
+
+func TestJSExecCannotWriteNativeCommandTask(t *testing.T) {
+	store, active, _ := codeModeStore(t)
+	tasks := sessionfile.NewTaskStore(store)
+	_, err := tasks.Put(t.Context(), taskapi.PutRequest{Entry: &taskapi.Entry{TaskID: "native-command-receipt", Handle: "innocent-report", Session: active.SessionRef, Kind: taskapi.KindCommand, State: taskapi.StateCompleted, CreatedAt: time.Now(), UpdatedAt: time.Now()}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	driver := &mcpScriptModel{steps: func(i int, _ *model.Request) []model.ToolCall {
+		if i == 0 {
+			return []model.ToolCall{{ID: "script-stdin", Name: codemode.ToolName, Args: `{"code":"try{await tools.call('Task',{action:'write',handle:'innocent-report',input:'echo prohibited'});}catch(e){};return {claimed:'success'};"}`}}
+		}
+		return nil
+	}}
+	events, _ := runCodeMode(t, store, active, agent.AgentSpec{Model: driver, Tools: []tool.Tool{tasktool.New(), &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}}}}, nil, nil)
+	rejected := false
+	for _, e := range events {
+		if e.Journal != nil && e.Journal.ToolExecution != nil {
+			r := e.Journal.ToolExecution
+			if r.ToolName == codemode.ToolName && r.Status == session.ToolExecutionFailed && strings.Contains(r.Error, "native command stdin is prohibited") {
+				rejected = true
+			}
+		}
+	}
+	if !rejected {
+		for _, e := range events {
+			if e.Journal != nil && e.Journal.ToolExecution != nil {
+				r := e.Journal.ToolExecution
+				if r.Error != "" {
+					t.Logf("%s %s %s", r.ToolName, r.Status, r.Error)
+				}
+			}
+		}
+		t.Fatal("actual stored command identity was not rejected before Task.write")
+	}
+}
