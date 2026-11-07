@@ -36,3 +36,14 @@ receipt. Comparison must split first/continuation, pairs, and main/selector usag
 missing usage or cached counts remain unknown. Byte equality is not evidence of
 provider KV caching. Actual Context7 query arguments, library/source and returned
 results must be retained when interpreting variable documentation responses.
+
+Offline accounting (never invokes a model or tool):
+
+```sh
+python3 app/gatewayapp/testdata/code-mode/fair-a/analyze.py "$CAELIS_CODE_MODE_FAIR_RUN"
+```
+
+The analyzer crosschecks final normalized usage against terminal raw SSE usage.
+It preserves an explicitly reported cached_tokens=0 even when Go JSON omits
+that zero, and leaves absent/incomplete usage unknown. Canonical tool-output
+bytes count each tool-result Message once, not every repeated history copy.
