@@ -33,12 +33,15 @@ The async function body has these interfaces:
 - `await tools.call(name, arguments)` invokes the already discovered Tool once.
 - `output.text(value)` and `await output.image(handle)` explicitly select output.
 
-Known native schemas in `tools` need no discovery. For a known extension name,
+Call native filesystem functions already in `tools` directly; do not search the
+extension directory for them. For a known extension name,
 use exact describe once only when the complete schema is absent from context.
 Otherwise call directly. Valid discovery in the same Session is reusable across
 VMs and Turns; a fresh VM clears local JS variables. Runtime still checks current
 identity, source/schema, generation and permissions on every call. Missing schema
 can be fetched by name without fuzzy search.
+Choose arguments by the actual schema. Strings that the task requires to be
+passed exactly must be transmitted unchanged, rather than paraphrased.
 
 Sources may implement `tool.NamedSource` using the existing `Registry.Lookup`
 signature. Runtime wraps only the located canonical candidate and restores a
@@ -61,12 +64,28 @@ and object spread omit that duplicate serialization. Selected `parts` keep their
 normal shape; explicitly output `reply.raw_json` when original tokens are needed.
 BigInt must be stringified.
 
-Await ordinary reads sequentially and select their content:
+Tool replies carry normalized `parts`: select `kind === "json"` and read
+`.json`, rather than expecting the MCP envelope's `structuredContent` property.
+Inspect the returned payload shape before choosing business fields. Perform
+deterministic filtering, grouping, counting and calculation in the VM, then emit
+only the required summary and sources. For a JSON payload with `batch_id` and
+`records`:
+
+```js
+const r = await tools.call(name, args);
+const d = r.parts.find(p => p.kind === "json").json;
+output.text({count: d.records.length, source: d.batch_id});
+```
+
+Filesystem orchestration is optional. For numeric file contents, await reads
+sequentially when computing in JS:
 
 ```js
 const a = await tools.call("Read", {path: "a.txt"});
 const b = await tools.call("Read", {path: "b.txt"});
-output.text([a.parts[0].json.content, b.parts[0].json.content]);
+const x = a.parts.find(p => p.kind === "json").json;
+const y = b.parts.find(p => p.kind === "json").json;
+output.text({total: Number(x.content) + Number(y.content), sources: ["a.txt", "b.txt"]});
 ```
 
 After describing an extension, select image handles in the same invocation:
