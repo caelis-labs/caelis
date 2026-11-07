@@ -163,6 +163,9 @@ func (r *Runtime) runAttempt(
 	}
 
 	ctx = mcpdiscovery.WithEvents(ctx, invocation.SourceEvents)
+	if sink != nil {
+		ctx = context.WithValue(ctx, nestedToolEventSinkKey{}, sink.publishEvent)
+	}
 	var source *requestsource.Tracker
 	if r.compaction.Async.Enabled || r.compaction.Idle.Enabled {
 		ctx, source = requestsource.WithTracker(ctx, invocation.SourceEvents)

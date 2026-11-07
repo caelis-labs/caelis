@@ -112,6 +112,9 @@ func EnvelopeBaseFromSessionEvent(ref session.SessionRef, event *session.Event, 
 	}
 	base.Actor = firstNonEmpty(strings.TrimSpace(event.Actor.Name), strings.TrimSpace(event.Actor.ID))
 	base.ParentTool = canonicalTaskParentToolRelation(event)
+	if event.Tool != nil && event.Tool.Parent != nil {
+		base.ParentTool = &eventstream.ParentToolRelation{ToolCallID: event.Tool.Parent.CallID, ToolName: event.Tool.Parent.Name}
+	}
 	if event.ChildOrigin != nil {
 		origin := session.CloneEventChildOrigin(*event.ChildOrigin)
 		base.ScopeID = firstNonEmpty(origin.ScopeID, origin.TaskID, origin.DelegationID, base.ScopeID)

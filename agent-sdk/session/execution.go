@@ -136,6 +136,7 @@ func ExecutionIdentity(key ExecutionKey) string {
 }
 
 type ToolExecution struct {
+	Parent *tool.ParentCall `json:"parent,omitempty"`
 	// ModelCall and Binding preserve the original protocol envelope and exact
 	// target for recovery; they do not grant permission to execute or retry.
 	ModelCall     *model.ToolCall     `json:"model_call,omitempty"`
@@ -220,6 +221,10 @@ func (e *ToolExecutionTransitionError) ErrorCode() errorcode.Code {
 
 func NormalizeToolExecution(in ToolExecution) ToolExecution {
 	out := in
+	if in.Parent != nil {
+		value := *in.Parent
+		out.Parent = &value
+	}
 	if in.ModelCall != nil {
 		value := *in.ModelCall
 		out.ModelCall = &value

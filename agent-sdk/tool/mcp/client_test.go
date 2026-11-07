@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	builtintoolsearch "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -281,7 +282,7 @@ func TestMCPManagerQuarantinesOnlyMalformedToolAndReportsWarning(t *testing.T) {
 	}
 }
 
-func TestMCPToolCallServerExitReturnsErrorResult(t *testing.T) {
+func TestMCPToolCallServerExitRetainsUnknownOutcome(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -315,8 +316,8 @@ func TestMCPToolCallServerExitReturnsErrorResult(t *testing.T) {
 		Name:  tools[0].Definition().Name,
 		Input: []byte(`{"val":"hello"}`),
 	})
-	if err != nil {
-		t.Fatalf("tool call returned transport error, want error result: %v", err)
+	if !errorcode.Is(err, errorcode.UnknownOutcome) {
+		t.Fatalf("tool call returned %v, want typed unknown outcome after server exit", err)
 	}
 	if !res.IsError || res.ID != "original-call" {
 		t.Fatalf("tool call IsError = false, want true")

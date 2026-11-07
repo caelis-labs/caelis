@@ -120,6 +120,14 @@ type InvocationContext struct {
 	ItemID    string `json:"item_id"`
 }
 
+// ParentCall relates a nested invocation to the admitted host call that owns it.
+// It is Runtime data, never script arguments or an authorization capability.
+type ParentCall struct {
+	ID        string            `json:"id"`
+	Name      string            `json:"name"`
+	Execution InvocationContext `json:"execution"`
+}
+
 // Call is one provider-neutral tool invocation.
 type Call struct {
 	ID       string          `json:"id,omitempty"`
@@ -130,6 +138,7 @@ type Call struct {
 	// tool. Runtime overwrites any caller-provided value before invoking the tool.
 	// Direct callers and model-supplied Input/Metadata do not grant identity.
 	Execution InvocationContext `json:"-"`
+	Parent    *ParentCall       `json:"-"`
 	// ModelCall retains the model protocol envelope when Runtime routes to a real tool.
 	ModelCall     *model.ToolCall `json:"-"`
 	TargetBinding *Binding        `json:"-"`
@@ -458,6 +467,10 @@ func CloneDefinition(in Definition) Definition {
 // CloneCall returns one copy of one tool call.
 func CloneCall(in Call) Call {
 	out := in
+	if in.Parent != nil {
+		value := *in.Parent
+		out.Parent = &value
+	}
 	out.Name = strings.TrimSpace(in.Name)
 	if in.ModelCall != nil {
 		value := *in.ModelCall

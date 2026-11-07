@@ -7,6 +7,7 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 )
 
 // wrapModelRequestResolver admits changing model-facing values through the same
@@ -30,6 +31,13 @@ func (r *Runtime) wrapModelRequestResolver(ctx context.Context, active session.S
 		bound.DeferredTools = snapshot.DeferredTools
 		bound.ResolveModelRequest = nil
 		prepareCtx := ctx
+		validateCodeMode := snapshot.Validate
+		if validateCodeMode == nil {
+			validateCodeMode = func(context.Context) (func(), error) {
+				return nil, tool.NewError(tool.ErrorCodeStaleRevision, "Code Mode host calls require a dynamic snapshot generation validator")
+			}
+		}
+		prepareCtx = context.WithValue(prepareCtx, codeModeValidationKey{}, validateCodeMode)
 		if r.compaction.Enabled {
 			authority := &modelRequestAuthority{epoch: snapshot.Revision, refs: 1, release: snapshot.Release, validate: snapshot.Validate, deferredTools: snapshot.DeferredTools, resolveIdle: source}
 			if admit := snapshot.Admit; admit != nil {
@@ -39,7 +47,7 @@ func (r *Runtime) wrapModelRequestResolver(ctx context.Context, active session.S
 				}
 			}
 			snapshot.Release = authority.drop
-			prepareCtx = context.WithValue(ctx, modelRequestAuthorityKey{}, authority)
+			prepareCtx = context.WithValue(prepareCtx, modelRequestAuthorityKey{}, authority)
 		}
 		if err := r.prepareAgentSpec(prepareCtx, active, ref, state, &bound, req, runID, turnID, sequence); err != nil {
 			if snapshot.Release != nil {
@@ -79,6 +87,21 @@ func (r *Runtime) prepareAgentSpec(ctx context.Context, active session.Session, 
 		bound := wrappingSpec
 		bound.Tools = tools
 		return r.wrapTurnTools(ctx, active, ref, state, bound, req.ApprovalRequester, runID, turnID, sequence)
+	}
+	// Bind the concrete declaration only after native tools have received their
+	// Runtime injection, and look up targets through the ordinary wrapper chain.
+	targets := func() []tool.Tool {
+		out := append([]tool.Tool(nil), spec.Tools...)
+		if spec.DeferredTools != nil {
+			out = append(out, spec.DeferredTools.Tools()...)
+		}
+		return out
+	}
+	validate, _ := ctx.Value(codeModeValidationKey{}).(func(context.Context) (func(), error))
+	for i, one := range spec.Tools {
+		if declaration, ok := one.(*codemode.Tool); ok {
+			spec.Tools[i] = runtimeCodeModeTool{declaration: declaration, sessions: r.sessions, ref: ref, targets: targets, validate: validate}
+		}
 	}
 	spec.Tools = wrap(spec.Tools)
 	if spec.DeferredTools != nil {

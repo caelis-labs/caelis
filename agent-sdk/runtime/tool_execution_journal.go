@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -32,6 +33,12 @@ func (t journaledTool) RuntimeTaskResultSource(toolbinding.Token) bool {
 }
 
 func (t journaledTool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
+	admission, nested := ctx.Value(codeModeAdmissionKey{}).(func(context.Context) error)
+	if nested {
+		if err := admission(ctx); err != nil {
+			return tool.Result{}, err
+		}
+	}
 	def := t.base.Definition()
 	now := t.now
 	if now == nil {
@@ -42,6 +49,7 @@ func (t journaledTool) Call(ctx context.Context, call tool.Call) (tool.Result, e
 	stepID := call.Execution.ItemID
 	var mu sync.Mutex
 	record := session.NormalizeToolExecution(session.ToolExecution{
+		Parent:    call.Parent,
 		Schema:    session.ToolExecutionSchemaVersion,
 		ModelCall: call.ModelCall, Binding: call.TargetBinding,
 		Key:         session.ExecutionKey{SessionID: t.sessionRef.SessionID, RunID: t.runID, TurnID: t.turnID, StepID: stepID, ToolCallID: strings.TrimSpace(call.ID)},
@@ -134,8 +142,15 @@ func (t journaledTool) Call(ctx context.Context, call tool.Call) (tool.Result, e
 		record.Result = resultRaw
 	}
 	switch {
+	case errorcode.Is(callErr, errorcode.UnknownOutcome):
+		record.Status = session.ToolExecutionUnknownOutcome
+		record.Error = errorText(callErr)
 	case ctx.Err() != nil && (callErr != nil || result.IsError):
 		record.Status = session.ToolExecutionCancelled
+		if nested && tool.EffectClassOf(def) != tool.EffectReadOnly {
+			// Cancellation is not proof that a dispatched effect did not happen.
+			record.Status = session.ToolExecutionUnknownOutcome
+		}
 		record.Error = firstNonEmpty(errorText(callErr), ctx.Err().Error())
 	case callErr != nil || result.IsError:
 		record.Status = session.ToolExecutionFailed
@@ -155,6 +170,8 @@ func (t journaledTool) Call(ctx context.Context, call tool.Call) (tool.Result, e
 		step.Status = session.ExecutionSucceeded
 	case session.ToolExecutionCancelled:
 		step.Status = session.ExecutionCancelled
+	case session.ToolExecutionUnknownOutcome:
+		step.Status = session.ExecutionUnknownOutcome
 	default:
 		step.Status = session.ExecutionFailed
 	}
@@ -170,10 +187,16 @@ func (t journaledTool) Call(ctx context.Context, call tool.Call) (tool.Result, e
 		return result, errors.Join(callErr, journalErr)
 	}
 	var journalValue map[string]any
-	if err := json.Unmarshal(journalRaw, &journalValue); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(journalRaw))
+	decoder.UseNumber() // The terminal carrier must not round opaque input/result numbers.
+	if err := decoder.Decode(&journalValue); err != nil {
 		return result, errors.Join(callErr, err)
 	}
 	result.Metadata[tool.MetadataExecutionJournal] = journalValue
+	if nested {
+		// Aggregation has no canonical child result to carry this receipt.
+		callErr = errors.Join(callErr, persistToolExecutionReceipt(ctx, t.sessions, t.sessionRef, call, result))
+	}
 	return result, callErr
 }
 
@@ -388,6 +411,13 @@ func (r *Runtime) appendRecoveredToolResult(
 			Schema: session.ExecutionJournalSchemaVersion, Kind: session.JournalKindToolExecution,
 			Execution: &step, ToolExecution: &record,
 		},
+	}
+	if record.Parent != nil {
+		// A nested invocation never had a model protocol call. Recovery must not
+		// manufacture an unpaired tool message in canonical model history.
+		event.Visibility = session.VisibilityMirror
+		event.Message = nil
+		event.Tool.Parent = &session.EventParentTool{CallID: record.Parent.ID, Name: record.Parent.Name}
 	}
 	_, err := r.sessions.AppendEvent(ctx, session.AppendEventRequest{SessionRef: ref, MutationGuard: session.RuntimeMutationGuard(ctx), Event: event})
 	return err

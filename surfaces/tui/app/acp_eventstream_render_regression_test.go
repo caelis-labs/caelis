@@ -485,3 +485,25 @@ func TestRoutedMCPRendersRealTargetAndArguments(t *testing.T) {
 		t.Fatalf("frame exposed routing envelope:\n%s", frame)
 	}
 }
+
+func TestCodeModeRendersActualNestedToolAndParent(t *testing.T) {
+	m := NewModel(Config{AppName: "CAELIS", Version: "dev", Workspace: "/tmp/workspace", ModelAlias: "fixture", NoColor: true, NoAnimation: true, Commands: DefaultCommands(), Wizards: DefaultWizards()})
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 32})
+	m = updated.(*Model)
+	for _, event := range []*session.Event{
+		{SessionID: "code-mode", Type: session.EventTypeToolCall, Tool: &session.EventTool{ID: "script", Name: "js_repl", Status: "started", Input: map[string]any{"code": "fixture"}}},
+		{SessionID: "code-mode", Type: session.EventTypeToolCall, Visibility: session.VisibilityMirror, Tool: &session.EventTool{ID: "nested", Name: "maps__route", Status: "started", Input: map[string]any{"origin": "北京南站", "destination": "故宫"}, Parent: &session.EventParentTool{CallID: "script", Name: "js_repl"}}},
+	} {
+		base := projection.EnvelopeBaseFromSessionEvent(session.SessionRef{SessionID: "code-mode"}, event, projection.SessionEventTransport{})
+		for _, envelope := range projection.ProjectSessionEventEnvelope(base, event) {
+			updated, _ = m.Update(envelope)
+			m = updated.(*Model)
+		}
+	}
+	frame := evalharness.NormalizeFrame(m.View().Content)
+	for _, want := range []string{"js_repl", "maps__route", "北京南站", "故宫"} {
+		if !strings.Contains(frame, want) {
+			t.Fatalf("frame missing %q:\n%s", want, frame)
+		}
+	}
+}
