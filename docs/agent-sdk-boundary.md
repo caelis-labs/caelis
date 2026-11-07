@@ -28,10 +28,12 @@ Hosts inject model, tool, Session, sandbox, task, policy, and endpoint
 implementations. Runtime validates the assembled capabilities and fails closed
 when a required feature is absent.
 
-The experimental [Code Mode foundation](code-mode.md) binds an engine-neutral
-executor to the existing Runtime tool chain. It is an SDK PoC with no selected
-engine or product registration; tools, Session authority and independent nested
-execution receipts remain with their existing Go owners.
+[Code Mode](code-mode.md) binds a fresh-process Goja executor to the existing
+Runtime tool chain. Product assembly registers `js_exec` and supplies selected
+name/description hints; SDK Runtime owns the generic bounded Session snapshot.
+Tools, Session authority and independent nested execution receipts retain their
+existing Go owners. Embedders using the default coding tools must install the
+early executable worker entry described in the SDK quickstart.
 
 `sandbox.ExecutionConfig` owns reusable native command environment and shell
 configuration. Hosts supply it through `sandbox.Config.Execution`, independently

@@ -7,7 +7,9 @@
 // Each Execute has a new heap. Scripts are async function bodies: await
 // tools.call(name, object), tools.search/describe, output.text/image, and JSON return.
 // Reply JSON numbers use JavaScript Number semantics; reply.raw_json retains the
-// exact original Host reply JSON, including integers beyond 2^53-1. BigInt must
+// exact original Host reply JSON, including integers beyond 2^53-1. It is a
+// non-enumerable property: output.text(reply), JSON.stringify and object spread
+// omit it; scripts can explicitly select reply.raw_json. BigInt must
 // be returned as a string. There are no default fs, network, shell, env or module
 // APIs. This is capability isolation, not an OS sandbox against engine exploits.
 //

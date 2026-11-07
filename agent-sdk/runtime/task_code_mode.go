@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
@@ -27,6 +28,7 @@ type codeModeTask struct {
 	cancel     context.CancelFunc
 	result     tool.Result
 	err        error
+	persistErr error
 	// Reuse Task's model-output frontier; Surface output has independent cursors.
 	frontier commandObservationFrontier
 	observer output.Observer
@@ -92,44 +94,12 @@ func (tm *taskRuntime) startCodeMode(ctx context.Context, owner runtimeCodeModeT
 	tm.codeTasks[taskID] = task
 	tm.mu.Unlock()
 	release()
-	if transfer, ok := ctx.Value(codeModeProducerLifetimeKey{}).(func(<-chan struct{})); ok {
-		transfer(task.done)
+	if transfer, ok := ctx.Value(codeModeProducerLifetimeKey{}).(func(<-chan struct{}, func() error)); ok {
+		transfer(task.done, func() error { task.mu.Lock(); defer task.mu.Unlock(); return task.persistErr })
 	}
 	go func() {
 		result, executeErr := owner.execute(workCtx, call, source, limits)
-		task.mu.Lock()
-		next := taskapi.CloneEntry(task.entry)
-		task.mu.Unlock()
-		next.Running = false
-		next.UpdatedAt = tm.runtime.now()
-		next.State = taskapi.StateCompleted
-		switch {
-		case result.Metadata["code_mode_outcome"] == codemode.OutcomeUnknown:
-			next.State = taskapi.StateUnknownOutcome
-		case workCtx.Err() != nil:
-			next.State = taskapi.StateCancelled
-		case executeErr != nil || result.IsError:
-			next.State = taskapi.StateFailed
-		}
-		raw, marshalErr := json.Marshal(result)
-		executeErr = errors.Join(executeErr, marshalErr)
-		next.Result = map[string]any{"tool_result_json": string(raw)}
-		if executeErr != nil {
-			next.Result["error"] = executeErr.Error()
-		}
-		cleanup, stop := context.WithTimeout(context.WithoutCancel(workCtx), approvalResolutionRecoveryTimeout)
-		persistErr := tm.persistTaskEntry(cleanup, next)
-		stop()
-		task.mu.Lock()
-		task.result = result
-		task.err = errors.Join(executeErr, persistErr)
-		task.entry = next
-		state := next.State
-		observer := task.observer
-		task.mu.Unlock()
-		_ = observer.ObserveTaskOutput(context.WithoutCancel(workCtx), output.Event{Text: string(raw), State: string(state), Closed: true, ProducerClosed: true})
-		cancel()
-		close(task.done)
+		tm.finishCodeModeTask(workCtx, task, result, executeErr)
 	}()
 	timer := time.NewTimer(yield)
 	defer timer.Stop()
@@ -163,6 +133,66 @@ func (tm *taskRuntime) startCodeMode(ctx context.Context, owner runtimeCodeModeT
 	}
 }
 
+// The existing Task mutation claim serializes terminal CAS with canonical
+// cursor checkpoints. Observations never hold this claim while waiting.
+func (tm *taskRuntime) finishCodeModeTask(ctx context.Context, task *codeModeTask, result tool.Result, executeErr error) {
+	raw, marshalErr := json.Marshal(result)
+	executeErr = errors.Join(executeErr, marshalErr)
+	cleanup, stop := context.WithTimeout(context.WithoutCancel(ctx), approvalResolutionRecoveryTimeout)
+	task.mu.Lock()
+	taskID := task.entry.TaskID
+	task.mu.Unlock()
+	release, persistErr := tm.waitForTaskOperationClaim(cleanup, task.sessionRef, taskID)
+	state := taskapi.StateUnknownOutcome
+	if persistErr == nil {
+		task.mu.Lock()
+		next := taskapi.CloneEntry(task.entry)
+		task.mu.Unlock()
+		next.Running = false
+		next.UpdatedAt = tm.runtime.now()
+		next.State = taskapi.StateCompleted
+		switch {
+		case result.Metadata["code_mode_outcome"] == codemode.OutcomeUnknown:
+			next.State = taskapi.StateUnknownOutcome
+		case ctx.Err() != nil:
+			next.State = taskapi.StateCancelled
+		case executeErr != nil || result.IsError:
+			next.State = taskapi.StateFailed
+		}
+		next.Result = map[string]any{"tool_result_json": string(raw)}
+		if executeErr != nil {
+			next.Result["error"] = executeErr.Error()
+		}
+		persistErr = tm.persistTaskEntry(cleanup, next)
+		if persistErr == nil {
+			task.mu.Lock()
+			task.entry = next
+			task.mu.Unlock()
+			state = next.State
+		}
+	}
+	stop()
+	if persistErr != nil {
+		// Keep the last committed entry authoritative. Report producer closure and
+		// failed durability without publishing an uncommitted completed snapshot.
+		result.IsError = true
+		result.Content = append(result.Content, model.NewTextPart("script terminal status could not be persisted; preserve original receipts and do not replay effects: "+persistErr.Error()))
+		raw, _ = json.Marshal(result)
+	}
+	task.mu.Lock()
+	task.result = result
+	task.err = errors.Join(executeErr, persistErr)
+	task.persistErr = persistErr
+	observer := task.observer
+	task.mu.Unlock()
+	if release != nil {
+		release()
+	}
+	_ = observer.ObserveTaskOutput(context.WithoutCancel(ctx), output.Event{Text: string(raw), State: string(state), Closed: true, ProducerClosed: true})
+	task.cancel()
+	close(task.done)
+}
+
 func codeModeSnapshot(entry *taskapi.Entry) taskapi.Snapshot {
 	return taskapi.Snapshot{Ref: taskapi.Ref{TaskID: entry.TaskID, SessionID: entry.Session.SessionID}, Handle: entry.Handle, Revision: entry.Revision, Kind: entry.Kind, Title: entry.Title, State: entry.State, Running: entry.Running, SupportsCancel: entry.Running, CreatedAt: entry.CreatedAt, UpdatedAt: entry.UpdatedAt, Result: session.CloneState(entry.Result), Metadata: session.CloneState(entry.Metadata)}
 }
@@ -176,6 +206,9 @@ func (t codeModeControlTarget) Read(ctx context.Context, req taskapi.ControlRequ
 	t.task.mu.Lock()
 	defer t.task.mu.Unlock()
 	snapshot := codeModeSnapshot(t.task.entry)
+	if t.task.persistErr != nil {
+		return snapshot, t.task.persistErr
+	}
 	raw := taskStringValue(snapshot.Result["tool_result_json"])
 	if req.Source == "agent_tool" && req.Principal == session.ActorKindTool {
 		if t.task.frontier.model >= int64(len(raw)) {
@@ -262,17 +295,28 @@ func (tm *taskRuntime) syncCanonicalCodeModeCursor(ctx context.Context, ref sess
 }
 
 func (tm *taskRuntime) syncCodeModeCursor(ctx context.Context, ref session.SessionRef, id string, cursor int64) error {
-	if cursor < 0 {
+	if cursor < 0 || tm.store == nil {
 		return nil
 	}
-	entry, ok := tm.storedTaskEntry(ctx, ref, id, taskapi.KindCodeMode)
-	if !ok {
+	release, err := tm.waitForTaskOperationClaim(ctx, ref, id)
+	if err != nil {
+		return err
+	}
+	defer release()
+	entry, err := tm.store.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	if !storedTaskEntryMatches(entry, ref, taskapi.KindCodeMode) {
+		return nil
+	}
+	previous, _ := taskInt64Value(entry.Metadata["model_output_cursor"])
+	if cursor <= previous {
 		return nil
 	}
 	if entry.Metadata == nil {
 		entry.Metadata = map[string]any{}
 	}
-	previous, _ := taskInt64Value(entry.Metadata["model_output_cursor"])
-	entry.Metadata["model_output_cursor"] = max(previous, cursor)
+	entry.Metadata["model_output_cursor"] = cursor
 	return tm.persistTaskEntry(ctx, entry)
 }

@@ -32,6 +32,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode/gojaexec"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
+	"github.com/caelis-labs/caelis/app/gatewayapp"
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/control/modelconfig/credentialstore"
 )
@@ -323,7 +324,7 @@ func TestCodeModeLive(t *testing.T) {
 			writeLiveJSON(t, filepath.Join(root, "desktop-pending.json"), map[string]any{"reason": "shared desktop paused by coordinator", "task": 2})
 			break
 		}
-		result, err := rt.Run(t.Context(), agent.RunRequest{SessionRef: active.SessionRef, Input: prompt, Request: agent.ModelRequestOptions{Stream: &stream}, ApprovalRequester: requester, SourceObserver: observer, AgentSpec: agent.AgentSpec{Model: trace, Metadata: map[string]any{"reasoning_effort": resolved.ReasoningEffort}, Tools: tools, DeferredTools: manager}})
+		result, err := rt.Run(t.Context(), agent.RunRequest{SessionRef: active.SessionRef, Input: prompt, Request: agent.ModelRequestOptions{Stream: &stream}, ApprovalRequester: requester, SourceObserver: observer, AgentSpec: agent.AgentSpec{Model: trace, Metadata: map[string]any{"reasoning_effort": resolved.ReasoningEffort, codemode.MetadataSelectedTools: gatewayapp.CodeModeFixtureSelectedTools(manager.Tools())}, Tools: tools, DeferredTools: manager}})
 		if err == nil {
 			err = result.Handle.WaitCompletion(t.Context())
 		}

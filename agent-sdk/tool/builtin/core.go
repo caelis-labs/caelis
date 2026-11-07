@@ -22,7 +22,9 @@ type CoreToolsConfig struct {
 	SkillCatalog skill.Catalog
 }
 
-// BuildCoreTools constructs the default coding tool group for the new SDK.
+// BuildCoreTools constructs the default coding tool group, including js_exec.
+// The embedding executable must route gojaexec.WorkerArgument to WorkerMain
+// before host/configuration initialization; see gojaexec package documentation.
 func BuildCoreTools(cfg CoreToolsConfig) ([]tool.Tool, error) {
 	readTool, err := filesystem.NewRead(cfg.Read, cfg.Runtime)
 	if err != nil {

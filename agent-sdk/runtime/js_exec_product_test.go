@@ -3,8 +3,11 @@ package runtime
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/png"
 	"os"
 	"path/filepath"
 	"slices"
@@ -68,15 +71,20 @@ func TestJSExecRealGojaDiscoveryAndStableTools(t *testing.T) {
 	def.Metadata[tool.MetadataMCPSourceTrusted] = true
 	def.Metadata[tool.MetadataMCPServer] = "desktop-world"
 	def.Metadata[tool.MetadataMCPTool] = "exec"
+	var bitmap bytes.Buffer
+	if err := png.Encode(&bitmap, image.NewRGBA(image.Rect(0, 0, 1, 1))); err != nil {
+		t.Fatal(err)
+	}
+	imagePart := model.NewMediaPart(model.MediaModalityImage, model.MediaSource{Kind: model.MediaSourceInline, Data: base64.StdEncoding.EncodeToString(bitmap.Bytes())}, "image/png", "selected.png")
 	var effects int
 	source.items = []tool.Tool{tool.NamedTool{Def: def, Invoke: func(_ context.Context, c tool.Call) (tool.Result, error) {
 		effects++
-		return tool.Result{Content: []model.Part{model.NewJSONPart(json.RawMessage(`{"value":42}`))}}, nil
+		return tool.Result{Content: []model.Part{model.NewJSONPart(json.RawMessage(`{"value":42}`)), imagePart}}, nil
 	}}}
 	scripts := []string{
 		`const r=await tools.search("fixture");output.text(r);`,
 		`output.text(await tools.describe("fixture__exec"));`,
-		`const r=await tools.call("fixture__exec",{script:"observe"});const f=await tools.call("Read",{path:"numbers.txt"});return {value:r.parts[0].json.value,fs:f.outcome};`,
+		`const r=await tools.call("fixture__exec",{script:"observe"});const a=await tools.call("Read",{path:"numbers.txt"});const b=await tools.call("Read",{path:"numbers.txt"});if(a.parts[0].json.content!=="1: 17,25"||b.parts[0].json.content!=="1: 17,25")throw Error("Read content shape");output.text([a.parts[0].json.content,b.parts[0].json.content]);for(const p of r.parts)if(p.handle)await output.image(p.handle);return {value:r.parts[0].json.value,fs:a.outcome};`,
 	}
 	driver := &mcpScriptModel{steps: func(i int, req *model.Request) []model.ToolCall {
 		if i >= len(scripts) {
@@ -85,7 +93,7 @@ func TestJSExecRealGojaDiscoveryAndStableTools(t *testing.T) {
 		raw, _ := json.Marshal(map[string]any{"code": scripts[i]})
 		return []model.ToolCall{{ID: "provider-reused-id", Name: codemode.ToolName, Args: string(raw)}}
 	}}
-	events, _ := runCodeMode(t, store, active, agent.AgentSpec{Model: driver, Tools: []tool.Tool{read, &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}, Sandbox: sandbox}, toolsearch.NewSource(source, toolsearch.NewLexicalRanker())}, DeferredTools: source}, nil, nil)
+	events, _ := runCodeMode(t, store, active, agent.AgentSpec{Model: codeModeImageModel{driver}, Tools: []tool.Tool{read, &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}, Sandbox: sandbox}, toolsearch.NewSource(source, toolsearch.NewLexicalRanker())}, DeferredTools: source, Metadata: map[string]any{codemode.MetadataSelectedTools: []string{"fixture__exec"}}}, nil, nil)
 	// Provider call IDs may repeat in different model steps. Runtime's original
 	// invocation item keeps script Tasks distinct without replaying any invocation.
 	tasks, taskErr := sessionfile.NewTaskStore(store).ListSession(t.Context(), active.SessionRef)
@@ -108,6 +116,23 @@ func TestJSExecRealGojaDiscoveryAndStableTools(t *testing.T) {
 		}
 		t.Fatalf("actual effects=%d", effects)
 	}
+	selectedImage := false
+	for _, req := range driver.requests {
+		for _, msg := range req.Messages {
+			for _, part := range msg.Parts {
+				if part.ToolResult != nil {
+					for _, content := range part.ToolResult.Content {
+						if content.Media != nil && content.Media.Source.Data == imagePart.Media.Source.Data {
+							selectedImage = true
+						}
+					}
+				}
+			}
+		}
+	}
+	if !selectedImage {
+		t.Fatal("same-invocation output.image did not reach model")
+	}
 	var declaration, instructions []byte
 	for _, req := range driver.requests {
 		b, _ := json.Marshal(req.Instructions)
@@ -128,6 +153,16 @@ func TestJSExecRealGojaDiscoveryAndStableTools(t *testing.T) {
 			}
 		}
 	}
+	if dir := os.Getenv("CAELIS_CODE_MODE_OFFLINE_ARTIFACTS"); dir != "" {
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			t.Fatal(err)
+		}
+		for name, data := range map[string][]byte{"sdk.instructions.json": instructions, "sdk.tools.json": declaration} {
+			if err := os.WriteFile(filepath.Join(dir, name), data, 0600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
 	state, _ := store.SnapshotState(t.Context(), active.SessionRef)
 	hint, _ := state[codeModeCatalogKey].(string)
 	if !strings.Contains(hint, "fixture__exec") || strings.Contains(hint, `"input_schema":`) {
@@ -142,7 +177,7 @@ func TestJSExecRealGojaDiscoveryAndStableTools(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	frozen, err := restarted.codeModeCatalog(t.Context(), active.SessionRef, source.Tools())
+	frozen, err := restarted.codeModeCatalog(t.Context(), active.SessionRef, source.Tools(), nil)
 	if err != nil || frozen != hint {
 		t.Fatal("catalog refresh/restart rewrote the selected early prefix")
 	}

@@ -40,7 +40,9 @@ func (tm *taskRuntime) control(ctx context.Context, ref session.SessionRef, req 
 	if err != nil {
 		return taskapi.Snapshot{}, err
 	}
-	if identity.kind == taskapi.KindCodeMode && access == taskControlObserve {
+	// Script cancellation joins its producer; only that producer and cursor
+	// checkpoints mutate the entry. Never hold the mutation claim during a join.
+	if identity.kind == taskapi.KindCodeMode && access != taskControlExclusive {
 		target, err := tm.codeModeTarget(ctx, ref, identity.taskID)
 		if err != nil {
 			return taskapi.Snapshot{}, err

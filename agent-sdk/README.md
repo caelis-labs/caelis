@@ -46,6 +46,29 @@ shows a minimal external consumer. Only paths listed in
 other non-`internal` packages are bundled implementations or experimental
 helpers.
 
+## Code Mode executable entry
+
+`builtin.BuildCoreTools` includes `js_exec`, which reexecutes the current Go
+binary. The embedder must dispatch the worker argument before configuration,
+Host startup, CLI parsing or signal setup, then exit with its status:
+
+```go
+if len(os.Args) == 2 && os.Args[1] == gojaexec.WorkerArgument {
+    os.Exit(gojaexec.WorkerMain())
+}
+```
+
+These Code Mode helpers remain bundled/experimental packages outside the
+`supported-packages.txt` compatibility surface. Import
+`agent-sdk/tool/codemode/gojaexec` for this entry. A library cannot install
+an executable entry on behalf of its host; executables without this hook do not
+support the default Goja executor. Core CLI supplies it. Registering only the
+public `codemode.Tool` also injects the existing Task tool; shell is unnecessary.
+The host can supply canonical selected names via
+`AgentSpec.Metadata[codemode.MetadataSelectedTools]` (`[]string`); the SDK does
+not choose product integrations. See [Code Mode](../docs/code-mode.md) for
+permissions, output selection and Run-scoped yield limits.
+
 ## Dependency boundary
 
 SDK packages must not depend on product `control/*`, `app/*`, `surfaces/*`, the
@@ -75,5 +98,6 @@ make arch-lint
 
 `sdk-boundary-check` compiles the current worktree from a separate consumer
 module. `sdk-proxy-smoke` verifies an exact published tag through a Go proxy.
-These are change-scoped checks; `make commit-check` runs the shared repository
-lint, full test, and build gates without repeating the SDK suite.
+These are change-scoped checks. `make commit-check` runs formatting, lint and
+diff checks; select owning tests and additional gates from
+[Testing](../docs/testing.md).

@@ -3,10 +3,17 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
+	"encoding/json"
 	"errors"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode/gojaexec"
 	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 )
 
 func TestRunMainUsesInternalHelperBeforeCLI(t *testing.T) {
@@ -52,4 +59,83 @@ func TestRunMainReportsCLIError(t *testing.T) {
 	if stderr.String() != "boom\n" {
 		t.Fatalf("stderr = %q, want boom newline", stderr.String())
 	}
+}
+
+// The installed-entry check uses an explicitly built CLI; ordinary unit tests
+// do not recursively build the product binary.
+func TestCodeModeCLIWorkerHandshake(t *testing.T) {
+	binaryPath := os.Getenv("CAELIS_TEST_CLI_BINARY")
+	if binaryPath == "" {
+		t.Skip("set CAELIS_TEST_CLI_BINARY to a native Core CLI build")
+	}
+	binaryPath, err := filepath.Abs(binaryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, binaryPath, gojaexec.WorkerArgument)
+	cmd.Env = []string{"GOMAXPROCS=1"}
+	var input, stderr bytes.Buffer
+	send := func(kind byte, payload string) {
+		var header [13]byte
+		binary.BigEndian.PutUint32(header[:4], uint32(len(payload)))
+		header[4] = kind
+		input.Write(header[:])
+		input.WriteString(payload)
+	}
+	send(1, `{"limits":{}}`)
+	send(2, `output.text("native-cli");return {total:42,fs:typeof require};`)
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stdin.Close()
+	if err = cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = stdin.Write(input.Bytes()); err != nil {
+		_ = cmd.Wait()
+		t.Fatal(err)
+	}
+	err = cmd.Wait()
+	raw := stdout.Bytes()
+	if err != nil {
+		t.Fatalf("early worker handshake: %v stderr=%q", err, stderr.String())
+	}
+	next := func() (byte, []byte) {
+		if len(raw) < 13 {
+			t.Fatalf("truncated protocol: %q", raw)
+		}
+		n := int(binary.BigEndian.Uint32(raw[:4]))
+		kind := raw[4]
+		if n > len(raw)-13 {
+			t.Fatalf("truncated payload")
+		}
+		payload := raw[13 : 13+n]
+		raw = raw[13+n:]
+		return kind, payload
+	}
+	kind, _ := next()
+	if kind != 3 {
+		t.Fatalf("worker ready=%d", kind)
+	}
+	kind, payload := next()
+	if kind != 7 {
+		t.Fatalf("worker result=%d %s", kind, payload)
+	}
+	var result struct {
+		Output []string `json:"output"`
+		Result struct {
+			Total int    `json:"total"`
+			FS    string `json:"fs"`
+		} `json:"result"`
+	}
+	if json.Unmarshal(payload, &result) != nil || result.Result.Total != 42 || result.Result.FS != "undefined" || len(result.Output) != 1 || result.Output[0] != "native-cli" || len(raw) != 0 {
+		t.Fatalf("worker protocol result=%s trailing=%d", payload, len(raw))
+	}
+	t.Logf("native CLI early-worker handshake complete; process Wait succeeded, result=%s", payload)
 }

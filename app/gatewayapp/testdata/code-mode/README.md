@@ -19,7 +19,12 @@ CAELIS_CODE_MODE_LIVE_NO_GUI=1 go test ./app/gatewayapp -run '^TestCodeModeLive$
 The first task reads synthetic 17/25 inputs, queries Context7, and generates and
 executes a saved workflow producing 42. The independent `baseline` mode completes
 the same data/documentation task with native calls. It has no JS file-execution
-requirement; report this extra JS work when comparing actual usage.
+requirement. This entry tests file capability and preserves historical evidence;
+its usage difference does not isolate engine cost or establish inline savings.
+A future inline comparison must omit script-file work on both routes, apply the
+same shell prohibition and chosen summary/image outputs, and account separately
+for first and resumed Turns. Freeze those matched prompts before another live
+run; keep file edit/reread acceptance separate.
 
 Only the selected model, its endpoint and one API-key credential reference are
 resolved. A temporary credential copy is private and deleted after validation.

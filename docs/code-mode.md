@@ -17,7 +17,9 @@ not the native shell entry.
 Extensions use one fixed `js_exec` definition, accepting exactly one of `code`
 and `file`, plus the existing foreground wait convention. The model does not
 also receive `tool_search`, `mcp_call`, or changing MCP schemas in its tools array.
-A small selected name/description catalog is a bounded Session snapshot; other
+Product assembly selects canonical extension names via
+`AgentSpec.Metadata[codemode.MetadataSelectedTools]`; the SDK has no integration
+allowlist. A small name/description catalog is a bounded Session snapshot; other
 extensions are found by fuzzy search. Discovery never rewrites earlier prompt
 slices or changes the serialized tools definitions.
 
@@ -33,7 +35,29 @@ Unknown schemas must be returned to the model before a later script supplies
 arguments. JavaScript is orchestration, not a second model that understands a
 previously unknown schema. Native fs identities need no redundant MCP discovery.
 Returned JSON outside JavaScript's safe integer range may round in Number;
-original JSON and receipts retain their tokens. BigInt must be stringified.
+original JSON and receipts retain their tokens. `reply.raw_json` is explicitly
+accessible and lossless, but non-enumerable: `output.text(reply)`, JSON.stringify
+and object spread omit that duplicate serialization. Selected `parts` keep their
+normal shape; explicitly output `reply.raw_json` when original tokens are needed.
+BigInt must be stringified.
+
+Await ordinary reads sequentially and select their content:
+
+```js
+const a = await tools.call("Read", {path: "a.txt"});
+const b = await tools.call("Read", {path: "b.txt"});
+output.text([a.parts[0].json.content, b.parts[0].json.content]);
+```
+
+After describing an extension, select image handles in the same invocation:
+
+```js
+const r = await tools.call(name, args);
+for (const p of r.parts) if (p.handle) await output.image(p.handle);
+```
+
+These examples do not grant parallel safety. Concurrent calls still require
+every target to be explicitly ParallelSafe.
 
 ## Authority and invalidation
 
@@ -61,6 +85,8 @@ not another consumer-owned execution path.
 ## Execution and Tasks
 
 Every execution starts a new Goja child process in the same Go executable.
+Embedders must install the early WorkerMain dispatch documented in the
+[SDK quickstart](../agent-sdk/README.md#code-mode-executable-entry).
 There is no cross-call REPL, persistent Goja stack or restart replay. File reads
 reuse the source-read policy path, then execute only those fixed bytes/hash.
 CPU time and model network budgets are separate. Host/approval waiting is not
@@ -86,6 +112,14 @@ completed/unknown effects retain their original receipts. Restart exposes the
 record and interrupted/unknown state, without recreating the script or stack.
 Task support does not grant shell access from JS.
 
+Cursor checkpoints write only when the delivered model frontier advances.
+Checkpoints and terminal commits share the existing Task mutation claim and
+CAS revision. A terminal persistence failure preserves the last committed
+snapshot and original child receipts; Run producer completion and Task
+observations surface that failure. Producer closure is reported as unknown
+outcome rather than publishing an uncommitted completed state. Scripts and
+child effects are never replayed to repair durability.
+
 ## Acceptance
 
 Owning checks cover native fs plus code-level shell denial (including aliases),
@@ -97,7 +131,11 @@ and visible behavior.
 Exact serialized model tools and stable leading prompt bytes are captured for
 first discovery, repeated orchestration and refresh/rediscovery. Token and model
 request comparisons use the same task, actual usage and retained source/output
-sizes; source-line counts or fixture-only usage are not savings evidence.
+sizes; source-line counts or fixture-only usage are not savings evidence. Both
+routes must have the same saved-script obligation, shell prohibition and chosen
+summary/image outputs. Evaluate file edit/reread capability separately from
+inline batching savings; first and resumed Turns are separate accounting groups.
+A historical mixed-task usage difference does not isolate engine cost.
 Real acceptance uses streaming models with independent generation budgets of at
 least 600 seconds, no shorter enclosing client/header deadline and no added
 request retry. Authorized existing gpt-6-luna is preferred; an explicit quota

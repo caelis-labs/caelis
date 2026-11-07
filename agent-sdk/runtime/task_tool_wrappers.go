@@ -37,7 +37,7 @@ func (r *Runtime) wrapToolsForRuntime(activeSession session.Session, ref session
 		if one == nil {
 			continue
 		}
-		if _, ok := one.(runtimeCodeModeTool); ok {
+		if declaration, ok := one.(*codemode.Tool); ok && declaration.Name == codemode.ToolName {
 			hasCodeMode = true
 		}
 		switch {

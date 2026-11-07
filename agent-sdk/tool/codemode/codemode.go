@@ -100,6 +100,11 @@ func DefaultLimits() Limits {
 	return Limits{SourceBytes: 256 << 10, ArgumentBytes: 64 << 10, ReplyBytes: 1 << 20, OutputBytes: 1 << 20, RetainedBytes: 16 << 20, Calls: 64}
 }
 
+// MetadataSelectedTools is an optional AgentSpec.Metadata []string of canonical
+// tool names selected by the embedder for the bounded Session hint snapshot.
+// It is presentation policy, never discovery or authorization.
+const MetadataSelectedTools = "code_mode_selected_tools"
+
 // Tool is a concrete declaration, retained until Runtime injects its Host.
 // Product assembly uses the fixed ToolName. Every execution has a new VM.
 type Tool struct {
@@ -111,7 +116,7 @@ type Tool struct {
 
 // Definition declares mutually exclusive inline and file source inputs.
 func (t *Tool) Definition() tool.Definition {
-	return tool.Definition{Name: t.Name, Metadata: map[string]any{tool.MetadataToolKind: ToolKind}, Description: "Fresh isolated JS async body; variables do not persist. await tools.search(query), tools.describe(name), tools.call(name,args). Describe unknown schemas first. call returns {outcome,is_error,parts:[{text,json,handle}],raw_json}; Numbers round beyond 2^53-1. output.text(value), await output.image(handle), or return JSON select output. Failures stay errors. FS uses original Tools; shell/process forbidden. Supply code/file (reread bytes). Long work yields Task handle: read/wait/cancel; never replay.", InputSchema: map[string]any{
+	return tool.Definition{Name: t.Name, Metadata: map[string]any{tool.MetadataToolKind: ToolKind}, Description: "Fresh isolated JS async body from code or current file bytes. tools.search/describe/call; output.text/image or JSON return select output. FS keeps original permissions; shell/process forbidden. raw_json is explicit and non-enumerable; Numbers may round past 2^53-1. Failures remain errors. Long work yields an original Task handle: read/wait/cancel; never replay unknown effects.", InputSchema: map[string]any{
 		"type": "object", "additionalProperties": false,
 		"properties": map[string]any{"code": map[string]any{"type": "string", "minLength": 1}, "file": map[string]any{"type": "string", "minLength": 1}, "yield_time_ms": map[string]any{"type": "integer", "minimum": 0, "maximum": 60000, "default": 10000}},
 		"oneOf":      []any{map[string]any{"required": []string{"code"}}, map[string]any{"required": []string{"file"}}},

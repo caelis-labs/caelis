@@ -59,12 +59,13 @@ func (t codeModeProducerTool) Call(ctx context.Context, call tool.Call) (tool.Re
 		return tool.Result{}, errCodeModeComplete
 	}
 	var done <-chan struct{}
-	ctx = context.WithValue(context.WithValue(work.ctx, codeModeProducerIdentityKey{}, id), codeModeProducerLifetimeKey{}, func(ch <-chan struct{}) { done = ch })
+	var producerError func() error
+	ctx = context.WithValue(context.WithValue(work.ctx, codeModeProducerIdentityKey{}, id), codeModeProducerLifetimeKey{}, func(ch <-chan struct{}, completionError func() error) { done = ch; producerError = completionError })
 	result, callErr := t.base.Call(ctx, call)
 	if done == nil {
 		t.scope.complete(id, work, nil)
 	} else {
-		go func() { <-done; t.scope.complete(id, work, nil) }()
+		go func() { <-done; t.scope.complete(id, work, producerError()) }()
 	}
 	return result, callErr
 }

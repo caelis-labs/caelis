@@ -85,7 +85,7 @@ func (r *Runtime) prepareAgentSpec(ctx context.Context, active session.Session, 
 		if spec.DeferredTools != nil {
 			catalogTools = spec.DeferredTools.Tools()
 		}
-		catalog, err := r.codeModeCatalog(ctx, ref, catalogTools)
+		catalog, err := r.codeModeCatalog(ctx, ref, catalogTools, spec.Metadata)
 		if err != nil {
 			return err
 		}

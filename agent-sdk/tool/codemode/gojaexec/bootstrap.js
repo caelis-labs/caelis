@@ -3,7 +3,7 @@
 (function(rpc, limits) {
   "use strict";
   const parse = JSON.parse, keys = Object.keys, isArray = Array.isArray;
-  const finite = Number.isFinite, freeze = Object.freeze;
+  const finite = Number.isFinite, freeze = Object.freeze, define = Object.defineProperty;
   const ErrorType = Error, SetType = Set;
   const apply = Function.prototype.call.bind(Function.prototype.call);
   const charCode = Function.prototype.call.bind(String.prototype.charCodeAt);
@@ -63,7 +63,7 @@
   }
   function decode(raw) {
     const envelope=parse(raw), reply=parse(envelope.raw);
-    reply.raw_json=envelope.raw;
+    define(reply,"raw_json",{value:envelope.raw,enumerable:false});
     if (envelope.error) {const e=new ErrorType(envelope.error);e.reply=reply;throw e;}
     return reply;
   }

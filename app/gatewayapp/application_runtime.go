@@ -318,6 +318,9 @@ func (r *applicationTurnResolver) ResolveTurn(ctx context.Context, intent kernel
 		defer snapshot.Release()
 	}
 	metadata := map[string]any{}
+	if snapshot.DeferredTools != nil {
+		metadata[codemode.MetadataSelectedTools] = selectedCodeModeTools(snapshot.DeferredTools.Tools())
+	}
 	if r.execution != nil {
 		writable, access, err := applicationWorkspaceAccess(r.binding.Profile.Workspace.Access, r.composition.workspace.CWD)
 		if err != nil {

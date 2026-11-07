@@ -487,12 +487,20 @@ func (tm *taskRuntime) updateTaskPersistence(entry *taskapi.Entry) {
 	tm.mu.RLock()
 	command := tm.tasks[entry.TaskID]
 	subagent := tm.subagents[entry.TaskID]
+	script := tm.codeTasks[entry.TaskID]
 	tm.mu.RUnlock()
 	if command != nil {
 		command.mu.Lock()
 		command.revision = entry.Revision
 		command.lease = taskapi.CloneLease(entry.Lease)
 		command.mu.Unlock()
+	}
+	if script != nil {
+		script.mu.Lock()
+		if entry.Revision >= script.entry.Revision {
+			script.entry = taskapi.CloneEntry(entry)
+		}
+		script.mu.Unlock()
 	}
 	if subagent != nil {
 		subagent.mu.Lock()
