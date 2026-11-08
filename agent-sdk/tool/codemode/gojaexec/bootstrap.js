@@ -4,6 +4,8 @@
   "use strict";
   const parse = JSON.parse, keys = Object.keys, isArray = Array.isArray;
   const finite = Number.isFinite, freeze = Object.freeze, define = Object.defineProperty;
+  const descriptor = Object.getOwnPropertyDescriptor;
+  const owns = Function.prototype.call.bind(Object.prototype.hasOwnProperty);
   const ErrorType = Error, SetType = Set, WeakMapType = WeakMap;
   const weakGet = Function.prototype.call.bind(WeakMap.prototype.get);
   const weakSet = Function.prototype.call.bind(WeakMap.prototype.set);
@@ -22,11 +24,17 @@
   }
   function directParts(value) {
     if(!value||typeof value!=="object"||!weakGet(replies,value))return null;
-    const names=keys(value), source=value.parts;
-    if(names.length!==1||names[0]!=="parts"||!isArray(source))return null;
-    const parts=[];
+    const names=keys(value);
+    if(names.length!==1||names[0]!=="parts")return null;
+    // Preflight reads data descriptors only. Accessors belong to the ordinary
+    // encoding pass, which must evaluate and select from the same value once.
+    const field=descriptor(value,"parts");
+    if(!field||!owns(field,"value")||!isArray(field.value))return null;
+    const source=field.value, parts=[];
     for(let i=0;i<source.length;i++) {
-      const p=source[i], origin=p&&typeof p==="object"?weakGet(origins,p):null;
+      const item=descriptor(source,""+i);
+      if(!item||!owns(item,"value"))return null;
+      const p=item.value, origin=p&&typeof p==="object"?weakGet(origins,p):null;
       if(!origin)return null;
       // Added business properties remain ordinary JSON instead of being lost
       // by native Part decoding. Payload values themselves may be processed.
