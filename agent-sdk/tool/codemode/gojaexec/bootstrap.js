@@ -4,7 +4,38 @@
   "use strict";
   const parse = JSON.parse, keys = Object.keys, isArray = Array.isArray;
   const finite = Number.isFinite, freeze = Object.freeze, define = Object.defineProperty;
-  const ErrorType = Error, SetType = Set;
+  const ErrorType = Error, SetType = Set, WeakMapType = WeakMap;
+  const weakGet = Function.prototype.call.bind(WeakMap.prototype.get);
+  const weakSet = Function.prototype.call.bind(WeakMap.prototype.set);
+  const origins=new WeakMapType(), replies=new WeakMapType();
+  // Object identity is private to this closure; no string/symbol property in
+  // business JSON grants a projection role. Media identities are immutable.
+  function ownReply(result) {
+    weakSet(replies,result,true);
+    for(let i=0;i<result.parts.length;i++) {
+      const p=result.parts[i];
+      weakSet(origins,p,{kind:p.kind,handle:p.handle});
+      define(p,"kind",{value:p.kind,writable:false,configurable:false});
+      if(p.kind==="media"||p.kind==="file_ref") freeze(p);
+    }
+    return result;
+  }
+  function directParts(value) {
+    if(!value||typeof value!=="object"||!weakGet(replies,value))return null;
+    const names=keys(value), source=value.parts;
+    if(names.length!==1||names[0]!=="parts"||!isArray(source))return null;
+    const parts=[];
+    for(let i=0;i<source.length;i++) {
+      const p=source[i], origin=p&&typeof p==="object"?weakGet(origins,p):null;
+      if(!origin)return null;
+      // Added business properties remain ordinary JSON instead of being lost
+      // by native Part decoding. Payload values themselves may be processed.
+      const fields=keys(p);
+      for(let j=0;j<fields.length;j++) if(fields[j]!=="kind"&&fields[j]!=="text"&&fields[j]!=="json"&&fields[j]!=="handle"&&fields[j]!=="mime_type")return null;
+      define(parts,i,{value:p,enumerable:true});
+    }
+    return parts;
+  }
   const apply = Function.prototype.call.bind(Function.prototype.call);
   const charCode = Function.prototype.call.bind(String.prototype.charCodeAt);
   const slice = Function.prototype.call.bind(String.prototype.slice);
@@ -15,9 +46,9 @@
   // Streaming JSON encoding bounds bytes before appending. It deliberately
   // accepts only JSON values (no toJSON, BigInt, functions or undefined), and
   // caps depth. It never exports an untrusted object graph to Go.
-  function encode(value, budget) {
+  function encode(value, budget, project) {
     let out = "", used = 0;
-    const seen = new SetType();
+    const seen = new SetType(), selected=new SetType(), media=[];
     function put(s, n) {
       if ((used += n) > budget) throw new ErrorType("JSON byte budget exceeded");
       out += s;
@@ -36,7 +67,7 @@
       }
       put('"',1);
     }
-    function visit(v, depth) {
+    function visit(v, depth, inspect) {
       if (depth > 128) throw new ErrorType("JSON depth exceeded");
       if (v === null) return put("null",4);
       switch (typeof v) {
@@ -48,18 +79,29 @@
       }
       if (has(seen,v)) throw new ErrorType("cyclic JSON");
       add(seen,v);
+      const origin=weakGet(origins,v);
+      if(inspect&&origin&&(origin.kind==="media"||origin.kind==="file_ref")&&!has(selected,origin.handle)) {
+        if(media.length>=limits.calls)throw new ErrorType("returned media budget exceeded");
+        add(selected,origin.handle);
+        define(media,media.length,{value:{kind:origin.kind,handle:origin.handle},enumerable:true});
+      }
       const array=isArray(v);put(array?"[":"{",1);
       if (array) {
-        for (let i=0;i<v.length;i++) {if(i)put(",",1);visit(v[i],depth+1);}
+        for (let i=0;i<v.length;i++) {if(i)put(",",1);visit(v[i],depth+1,inspect);}
       } else {
         // keys() can allocate proportional to the input object. Goja has no
         // heap limiter; encoding/IPC budgets do not claim to bound the VM heap.
         const names=keys(v);
-        for(let i=0;i<names.length;i++){if(i)put(",",1);quote(names[i]);put(":",1);visit(v[names[i]],depth+1);}
+        for(let i=0;i<names.length;i++){if(i)put(",",1);quote(names[i]);put(":",1);visit(v[names[i]],depth+1,inspect&&!(origin&&origin.kind==="json"&&names[i]==="json"));}
       }
       put(array?"]":"}",1);del(seen,v);
     }
-    visit(value,0);return out;
+    if(project) {
+      const parts=directParts(value);
+      if(parts!==null) {put('{"reply":true,"parts":',22);visit(parts,0,false);put('}',1);}
+      else {put('{"value":',9);visit(value,0,true);put(',"parts":',9);visit(media,0,false);put('}',1);}
+    } else visit(value,0,false);
+    return out;
   }
   function decode(raw) {
     const envelope=parse(raw), reply=parse(envelope.raw);
@@ -77,7 +119,7 @@
     }
     const result={parts:reply.parts||[]};
     define(result,"raw_json",{value:envelope.raw,enumerable:false});
-    return result;
+    return ownReply(result);
   }
   const tools=freeze({
     call(name,args) {
@@ -90,5 +132,5 @@
       return then(then(rpc("search",query,"{}"),decode),r=>define(r.parts[0].json,"raw_json",{value:r.raw_json,enumerable:false}));
     }
   });
-  return freeze({tools, encode:value=>encode(value===undefined?null:value,limits.output_bytes)});
+  return freeze({tools, encode:value=>encode(value===undefined?null:value,limits.output_bytes,true)});
 })

@@ -30,7 +30,12 @@ func TestJSExecReturnOnlySelectedMedia(t *testing.T) {
 		{"direct", `return await tools.call("PictureA",{});`, []string{"A"}, false},
 		{"unreturned", `await tools.call("PictureA",{});return {ok:true};`, nil, false},
 		{"other_call", `await tools.call("PictureA",{});return await tools.call("PictureB",{});`, []string{"B"}, false},
-		{"foreign", `return {parts:[{kind:"media",handle:"another-invocation"}]};`, nil, true},
+		{"foreign", `const r=await tools.call("PictureA",{});r.parts[2].handle="another-invocation";return r;`, nil, true},
+		{"plain_foreign_data", `return {parts:[{kind:"media",handle:"another-invocation"}]};`, nil, false},
+		{"copied_fields", `const r=await tools.call("PictureA",{});return {parts:[{...r.parts[2]}]};`, nil, false},
+		{"combined", `const a=await tools.call("PictureA",{});const b=await tools.call("PictureB",{});return {selected:b.parts[2],record:{kind:"media",handle:"ordinary-data"}};`, []string{"B"}, false},
+		{"selected_reply_parts", `const r=await tools.call("PictureA",{});r.parts=r.parts.filter(p=>p.kind!=="json");return r;`, []string{"A"}, false},
+		{"getter_once", `const r=await tools.call("PictureA",{});let n=0;return {get selected(){return n++===0?{kind:"media",handle:"ordinary-data"}:r.parts[2]}};`, nil, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store, active, _ := codeModeStore(t)

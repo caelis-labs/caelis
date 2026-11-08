@@ -43,13 +43,13 @@ func TestFreshWorkerAsyncAndRawJSON(t *testing.T) {
 	}}
 	code := `globalThis.saved=42;const results=await Promise.all([tools.call("Read",{}),tools.call("Read",{})]);return {raw:results[0].raw_json,rounded:results[0].parts[0].json.n,apis:[typeof process,typeof require,typeof fetch]};`
 	result, err := e.Execute(t.Context(), fixed(code), codemode.Limits{}, h)
-	if err != nil || !strings.Contains(string(result), "9223372036854775807") || !strings.Contains(string(result), "undefined") {
-		t.Fatalf("%s %v", result, err)
+	if err != nil || !strings.Contains(string(result.Value), "9223372036854775807") || !strings.Contains(string(result.Value), "undefined") {
+		t.Fatalf("%s %v", result.Value, err)
 	}
 	e.Observe = nil
 	result, err = e.Execute(t.Context(), fixed(`return typeof saved;`), codemode.Limits{}, h)
-	if err != nil || string(result) != `"undefined"` {
-		t.Fatalf("heap retained: %s %v", result, err)
+	if err != nil || string(result.Value) != `"undefined"` {
+		t.Fatalf("heap retained: %s %v", result.Value, err)
 	}
 }
 
@@ -117,14 +117,14 @@ func TestRawJSONIsExplicitAndDefaultOutputDoesNotDuplicate(t *testing.T) {
 		Content     string                     `json:"content"`
 		Removed     []string                   `json:"removed"`
 	}
-	if err = json.Unmarshal(result, &got); err != nil {
+	if err = json.Unmarshal(result.Value, &got); err != nil {
 		t.Fatal(err)
 	}
 	if got.Raw != string(raw) || got.Reply["raw_json"] != nil || got.Spread["raw_json"] != nil || strings.Contains(got.Stringified, "raw_json") || got.Content != "retained payload" || got.Reply["parts"] == nil || got.Reply["call_id"] != nil {
-		t.Fatalf("unexpected public reply: %s", result)
+		t.Fatalf("unexpected public reply: %s", result.Value)
 	}
 	if strings.Join(got.Removed, ",") != "undefined,undefined" || !strings.Contains(string(got.Reply["parts"]), "9223372036854776000") {
-		t.Fatalf("interface/Number semantics: %s", result)
+		t.Fatalf("interface/Number semantics: %s", result.Value)
 	}
 }
 

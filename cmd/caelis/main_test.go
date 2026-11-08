@@ -127,6 +127,12 @@ func TestCodeModeCLIWorkerHandshake(t *testing.T) {
 	if kind != 6 {
 		t.Fatalf("worker result=%d %s", kind, payload)
 	}
+	var output struct {
+		Value json.RawMessage `json:"value"`
+	}
+	if json.Unmarshal(payload, &output) != nil {
+		t.Fatal("invalid worker output envelope")
+	}
 	var result struct {
 		Text     string `json:"text"`
 		Total    int    `json:"total"`
@@ -134,7 +140,7 @@ func TestCodeModeCLIWorkerHandshake(t *testing.T) {
 		Output   string `json:"output"`
 		Describe string `json:"describe"`
 	}
-	if json.Unmarshal(payload, &result) != nil || result.Total != 42 || result.FS != "undefined" || result.Text != "native-cli" || result.Output != "undefined" || result.Describe != "undefined" || len(raw) != 0 {
+	if json.Unmarshal(output.Value, &result) != nil || result.Total != 42 || result.FS != "undefined" || result.Text != "native-cli" || result.Output != "undefined" || result.Describe != "undefined" || len(raw) != 0 {
 		t.Fatalf("worker protocol result=%s trailing=%d", payload, len(raw))
 	}
 	t.Logf("native CLI early-worker handshake complete; process Wait succeeded, result=%s", payload)

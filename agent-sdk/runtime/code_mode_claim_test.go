@@ -87,7 +87,7 @@ func TestCodeModeTurnCompletePendingApprovalStillEmitsMedia(t *testing.T) {
 		effects.Add(1)
 		return tool.Result{}, nil
 	}}
-	declaration := &codemode.Tool{Name: "js_repl", Executor: codeExecutorFunc(func(ctx context.Context, _ codemode.Source, host codemode.Host) (json.RawMessage, error) {
+	declaration := &codemode.Tool{Name: "js_repl", Executor: codeOutputExecutorFunc(func(ctx context.Context, _ codemode.Source, host codemode.Host) (codemode.Output, error) {
 		done := make(chan error, 1)
 		go func() { _, err := host.Call(ctx, "Write", []byte(`{}`)); done <- err }()
 		<-asked
@@ -95,9 +95,9 @@ func TestCodeModeTurnCompletePendingApprovalStillEmitsMedia(t *testing.T) {
 		close(release)
 		blocked := <-done
 		if err != nil || !reply.TurnComplete || len(reply.Parts) != 1 || !errors.Is(blocked, errCodeModeComplete) {
-			return nil, errors.New("completion did not fence the pending approval")
+			return codemode.Output{}, errors.New("completion did not fence the pending approval")
 		}
-		return json.Marshal(map[string]any{"parts": reply.Parts})
+		return codemode.Output{Reply: true, Parts: reply.Parts}, nil
 	})}
 	llm := codeModeModel(false)
 	live, _ := runCodeMode(t, store, active, agent.AgentSpec{Model: codeModeImageModel{llm}, Tools: []tool.Tool{declaration, complete, write}}, registry, requester)

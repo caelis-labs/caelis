@@ -76,89 +76,60 @@ func opaquePartBytes(part model.Part) int {
 	return 0
 }
 
-// returnedParts runs once under host.mu after all producers have drained. Only
-// media explicitly present in this invocation's final return value is selected;
-// JSON payloads remain opaque data, not a source of implicit media references.
-func (h *codeModeHost) returnedParts(raw json.RawMessage) ([]model.Part, error) {
-	var value any
-	if err := json.Unmarshal(raw, &value); err != nil {
-		return nil, err
+// validCodeModeOutput bounds trusted adapter metadata separately from business
+// JSON. The scalar check precedes marshaling so an adapter cannot request an
+// unbounded copy at this common boundary.
+func validCodeModeOutput(output codemode.Output, budget int) bool {
+	size := len(output.Value)
+	for _, part := range output.Parts {
+		size += len(part.Kind) + len(part.Text) + len(part.JSON) + len(part.Handle) + len(part.MimeType) + 16
+		if size > budget {
+			return false
+		}
 	}
-	var media []model.Part
-	seen := map[string]bool{}
-	var selectMedia func(any, int) error
-	selectMedia = func(value any, depth int) error {
-		if depth > 128 {
-			return fmt.Errorf("returned value exceeds nesting budget")
-		}
-		switch v := value.(type) {
-		case []any:
-			for _, entry := range v {
-				if err := selectMedia(entry, depth+1); err != nil {
-					return err
-				}
-			}
-		case map[string]any:
-			kind, _ := v["kind"].(string)
-			if kind == string(model.PartKindMedia) || kind == string(model.PartKindFileRef) {
-				handle, _ := v["handle"].(string)
-				part, ok := h.handles[handle]
-				if !ok || string(part.Kind) != kind {
-					return fmt.Errorf("returned media handle does not belong to this invocation")
-				}
-				if !seen[handle] {
-					if len(media) >= h.limits.Calls {
-						return fmt.Errorf("returned media budget exceeded")
-					}
-					seen[handle] = true
-					media = append(media, part)
-				}
-				return nil
-			}
-			for name, entry := range v {
-				if kind == "json" && name == "json" {
-					continue
-				}
-				if err := selectMedia(entry, depth+1); err != nil {
-					return err
-				}
-			}
-		}
-		return nil
+	if size > budget || output.Reply && len(output.Value) != 0 || !output.Reply && !json.Valid(output.Value) {
+		return false
 	}
-	if err := selectMedia(value, 0); err != nil {
-		return nil, err
+	raw, err := json.Marshal(output)
+	return err == nil && len(raw) <= budget
+}
+
+// returnedParts consumes only the adapter's separate origin metadata. Ordinary
+// JSON is never inspected for kind/parts/handle fields. Handle ownership remains
+// authoritative here, independently of the worker's object-identity tracking.
+func (h *codeModeHost) returnedParts(output codemode.Output) ([]model.Part, error) {
+	var parts []model.Part
+	if !output.Reply {
+		parts = append(parts, model.NewJSONPart(output.Value))
 	}
-	// Direct tool replies expose original model parts without a second JSON
-	// envelope. Arbitrary computations and combinations remain ordinary JSON.
-	if object, ok := value.(map[string]any); ok && len(object) == 1 && object["parts"] != nil {
-		var reply struct {
-			Parts []codemode.Part `json:"parts"`
-		}
-		if err := json.Unmarshal(raw, &reply); err != nil {
-			return nil, err
-		}
-		var parts []model.Part
-		selected := map[string]bool{}
-		for _, part := range reply.Parts {
-			switch part.Kind {
-			case "text":
-				parts = append(parts, model.NewTextPart(part.Text))
-			case "json":
-				if !json.Valid(part.JSON) {
-					return nil, fmt.Errorf("invalid returned JSON part")
-				}
-				parts = append(parts, model.NewJSONPart(part.JSON))
-			case string(model.PartKindMedia), string(model.PartKindFileRef):
-				if !selected[part.Handle] {
-					parts = append(parts, h.handles[part.Handle])
-					selected[part.Handle] = true
-				}
-			default:
-				return nil, fmt.Errorf("unsupported returned part kind %q", part.Kind)
+	selected := map[string]bool{}
+	for _, part := range output.Parts {
+		switch part.Kind {
+		case "text":
+			if !output.Reply {
+				return nil, fmt.Errorf("text selection requires an authenticated reply")
 			}
+			parts = append(parts, model.NewTextPart(part.Text))
+		case "json":
+			if !output.Reply || !json.Valid(part.JSON) {
+				return nil, fmt.Errorf("invalid authenticated JSON part")
+			}
+			parts = append(parts, model.NewJSONPart(part.JSON))
+		case string(model.PartKindMedia), string(model.PartKindFileRef):
+			original, ok := h.handles[part.Handle]
+			if !ok || string(original.Kind) != part.Kind {
+				return nil, fmt.Errorf("returned media handle does not belong to this invocation")
+			}
+			if !selected[part.Handle] {
+				if len(selected) >= h.limits.Calls {
+					return nil, fmt.Errorf("returned media budget exceeded")
+				}
+				selected[part.Handle] = true
+				parts = append(parts, original)
+			}
+		default:
+			return nil, fmt.Errorf("unsupported authenticated part kind %q", part.Kind)
 		}
-		return parts, nil
 	}
-	return append([]model.Part{model.NewJSONPart(raw)}, media...), nil
+	return parts, nil
 }

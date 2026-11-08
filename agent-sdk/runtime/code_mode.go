@@ -112,7 +112,7 @@ func (t runtimeCodeModeTool) execute(ctx context.Context, call tool.Call, source
 		host.targets[def.Name] = codeModeTarget{tool: one, definition: def, digest: codeModeDefinitionDigest(def)}
 	}
 	type execution struct {
-		output json.RawMessage
+		output codemode.Output
 		err    error
 	}
 	done := make(chan execution, 1)
@@ -138,11 +138,11 @@ func (t runtimeCodeModeTool) execute(ctx context.Context, call tool.Call, source
 		// A trusted host disposition cannot be suppressed by executor control
 		// flow or an invalid final value. No further effect or model call follows.
 		completed.err = nil
-		if len(completed.output) > limits.OutputBytes || !json.Valid(completed.output) {
-			completed.output = []byte(`null`)
+		if !validCodeModeOutput(completed.output, limits.OutputBytes) {
+			completed.output = codemode.Output{Value: []byte(`null`)}
 		}
 	}
-	if completed.err == nil && (len(completed.output) > limits.OutputBytes || !json.Valid(completed.output)) {
+	if completed.err == nil && !validCodeModeOutput(completed.output, limits.OutputBytes) {
 		completed.err = errors.Join(completed.err, fmt.Errorf("code mode output must be bounded JSON"))
 	}
 	result := tool.Result{ID: call.ID, Name: call.Name, IsError: host.isError && !host.turnComplete, TurnComplete: host.turnComplete,

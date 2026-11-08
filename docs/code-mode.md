@@ -37,8 +37,11 @@ The async function body has two interfaces:
 model context. `return await tools.search(query)` delivers the search result.
 Scripts may process or combine returned values; only media present in the final
 return value is selected, never other calls' unreturned or historical media.
-Returned handles are checked against the current invocation and retained media
-budgets. A failed or unknown child remains failed even if JavaScript catches its
+The bridge tracks real reply/part object identities privately. Selecting those
+references preserves media; copying or reconstructing their fields creates
+ordinary JSON. Business properties named kind, parts or handle have no control
+meaning. Returned references are checked against the current invocation and
+retained media budgets. A failed or unknown child remains failed even if JavaScript catches its
 exception. No `tools.describe` or `output` interface is installed.
 
 Known schemas may be reused across calls; a fresh VM clears only JS variables.

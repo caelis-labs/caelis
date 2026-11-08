@@ -70,6 +70,16 @@ type DiscoveryHost interface {
 	Search(context.Context, string) (Reply, error)
 }
 
+// Output separates ordinary script JSON from adapter-authenticated returned parts.
+// Reply is true only for a real bridge reply returned directly. Otherwise Value
+// is ordinary JSON and Parts may contain only selected opaque media references.
+// These fields are internal executor metadata, never markers in business JSON.
+type Output struct {
+	Value json.RawMessage `json:"value,omitempty"`
+	Parts []Part          `json:"parts,omitempty"`
+	Reply bool            `json:"reply,omitempty"`
+}
+
 // Executor is the trusted Go adapter for one engine invocation. The adapter must
 // translate Host into bounded JSON RPC; it must never expose Host or other Go
 // objects to the untrusted language engine. Implementations bound CPU and report
@@ -78,7 +88,7 @@ type DiscoveryHost interface {
 // only JSON data and
 // opaque handles, never Session, tool registry, credentials or filesystem access.
 type Executor interface {
-	Execute(context.Context, Source, Limits, Host) (json.RawMessage, error)
+	Execute(context.Context, Source, Limits, Host) (Output, error)
 }
 
 // Limits bound allocations/transfers at the common boundary. Tool-internal

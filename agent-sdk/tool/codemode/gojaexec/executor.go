@@ -77,28 +77,28 @@ func effective(l codemode.Limits) (codemode.Limits, error) {
 
 // Execute runs exactly Source.Code after checking its fixed hash. It never
 // reopens Source.Path, retries an RPC, or retains variables between invocations.
-func (e *Executor) Execute(ctx context.Context, source codemode.Source, limits codemode.Limits, host codemode.Host) (output json.RawMessage, resultErr error) {
+func (e *Executor) Execute(ctx context.Context, source codemode.Source, limits codemode.Limits, host codemode.Host) (output codemode.Output, resultErr error) {
 	if !cpuSupported() {
-		return nil, fmt.Errorf("goja worker CPU accounting is implemented only on Darwin/Linux/Windows")
+		return codemode.Output{}, fmt.Errorf("goja worker CPU accounting is implemented only on Darwin/Linux/Windows")
 	}
 	l, err := effective(limits)
 	if err != nil {
-		return nil, err
+		return codemode.Output{}, err
 	}
 	sum := sha256.Sum256([]byte(source.Code))
 	if len(source.Code) == 0 || len(source.Code) > l.SourceBytes || !utf8.ValidString(source.Code) || source.SHA256 != hex.EncodeToString(sum[:]) {
-		return nil, fmt.Errorf("invalid fixed source bytes/hash")
+		return codemode.Output{}, fmt.Errorf("invalid fixed source bytes/hash")
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return codemode.Output{}, err
 	}
 	executable, err := os.Executable()
 	if err != nil {
-		return nil, err
+		return codemode.Output{}, err
 	}
 	dir, err := os.MkdirTemp("", "caelis-goja-worker-")
 	if err != nil {
-		return nil, err
+		return codemode.Output{}, err
 	}
 	defer os.RemoveAll(dir)
 	cmd := exec.Command(executable, WorkerArgument)
@@ -106,18 +106,18 @@ func (e *Executor) Execute(ctx context.Context, source codemode.Source, limits c
 	cmd.Env = []string{"GOMAXPROCS=1", "GORACE=atexit_sleep_ms=0 halt_on_error=1"}
 	input, err := cmd.StdinPipe()
 	if err != nil {
-		return nil, err
+		return codemode.Output{}, err
 	}
 	defer input.Close()
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return nil, err
+		return codemode.Output{}, err
 	}
 	defer stdout.Close()
 	// Stderr is discarded, never inherited; VM exceptions cross bounded RPC.
 	started := time.Now()
 	if err := cmd.Start(); err != nil {
-		return nil, err
+		return codemode.Output{}, err
 	}
 	m := Metrics{PID: cmd.Process.Pid}
 	workCtx, cancel := context.WithCancel(ctx)
@@ -204,7 +204,7 @@ func (e *Executor) Execute(ctx context.Context, source codemode.Source, limits c
 		}
 	}()
 	if err != nil {
-		return nil, err
+		return codemode.Output{}, err
 	}
 	// Cancellation uses an out-of-band VM interrupt first, then kill/reap after
 	// 100 ms. A blocked Host cannot prevent the process stop (but retains Runtime
@@ -225,13 +225,13 @@ func (e *Executor) Execute(ctx context.Context, source codemode.Source, limits c
 			stopC = stopTimer.C
 		case <-stopC:
 			m.Killed = true
-			return nil, resultErr
+			return codemode.Output{}, resultErr
 		case next := <-frames:
 			if next.err != nil {
 				if resultErr != nil {
-					return nil, resultErr
+					return codemode.Output{}, resultErr
 				}
-				return nil, fmt.Errorf("worker transport: %w", next.err)
+				return codemode.Output{}, fmt.Errorf("worker transport: %w", next.err)
 			}
 			f := next.f
 			switch f.kind {
@@ -246,11 +246,11 @@ func (e *Executor) Execute(ctx context.Context, source codemode.Source, limits c
 			case frameCall:
 				requests++
 				if workCtx.Err() != nil || f.id == 0 || requests > l.Calls {
-					return nil, fmt.Errorf("worker request admission closed or budget exceeded")
+					return codemode.Output{}, fmt.Errorf("worker request admission closed or budget exceeded")
 				}
 				var req callRequest
 				if json.Unmarshal(f.data, &req) != nil || len(req.Name) > 1024 || len(req.Arguments) > l.ArgumentBytes || !json.Valid(req.Arguments) || len(req.Arguments) == 0 || req.Arguments[0] != '{' {
-					return nil, fmt.Errorf("invalid or oversized worker call")
+					return codemode.Output{}, fmt.Errorf("invalid or oversized worker call")
 				}
 				metricMu.Lock()
 				m.HostRequestBytes += int64(len(f.data))
@@ -311,24 +311,27 @@ func (e *Executor) Execute(ctx context.Context, source codemode.Source, limits c
 					stopAt = time.Now()
 				}
 				if len(f.data) > l.OutputBytes || !json.Valid(f.data) {
-					return nil, fmt.Errorf("invalid worker result")
+					return codemode.Output{}, fmt.Errorf("invalid worker result")
 				}
 				if resultErr != nil {
-					return nil, resultErr
+					return codemode.Output{}, resultErr
+				}
+				if err := json.Unmarshal(f.data, &output); err != nil {
+					return codemode.Output{}, fmt.Errorf("invalid worker output: %w", err)
 				}
 				normal = true
-				return f.data, nil
+				return output, nil
 			case frameError:
 				if stopAt.IsZero() {
 					stopAt = time.Now()
 				}
 				normal = true
 				if resultErr != nil {
-					return nil, resultErr
+					return codemode.Output{}, resultErr
 				}
-				return nil, errors.New("JavaScript execution failed: " + string(f.data))
+				return codemode.Output{}, errors.New("JavaScript execution failed: " + string(f.data))
 			default:
-				return nil, fmt.Errorf("unexpected worker frame")
+				return codemode.Output{}, fmt.Errorf("unexpected worker frame")
 			}
 		}
 	}

@@ -43,7 +43,14 @@ func (codeModeImageModel) Capabilities() model.Capabilities {
 	return c
 }
 
-func (f codeExecutorFunc) Execute(ctx context.Context, source codemode.Source, _ codemode.Limits, host codemode.Host) (json.RawMessage, error) {
+func (f codeExecutorFunc) Execute(ctx context.Context, source codemode.Source, _ codemode.Limits, host codemode.Host) (codemode.Output, error) {
+	raw, err := f(ctx, source, host)
+	return codemode.Output{Value: raw}, err
+}
+
+type codeOutputExecutorFunc func(context.Context, codemode.Source, codemode.Host) (codemode.Output, error)
+
+func (f codeOutputExecutorFunc) Execute(ctx context.Context, source codemode.Source, _ codemode.Limits, host codemode.Host) (codemode.Output, error) {
 	return f(ctx, source, host)
 }
 
@@ -157,9 +164,9 @@ func TestCodeModeRuntimeMCPAggregationAndMediaReceipts(t *testing.T) {
 		}
 		return policy.Decision{Action: policy.ActionAllow}, nil
 	}}}
-	declaration := &codemode.Tool{Name: "js_repl", Executor: codeExecutorFunc(func(ctx context.Context, source codemode.Source, host codemode.Host) (json.RawMessage, error) {
+	declaration := &codemode.Tool{Name: "js_repl", Executor: codeOutputExecutorFunc(func(ctx context.Context, source codemode.Source, host codemode.Host) (codemode.Output, error) {
 		if source.Code != "fixture" || source.SHA256 == "" {
-			return nil, errors.New("source was not frozen")
+			return codemode.Output{}, errors.New("source was not frozen")
 		}
 		total := 0
 		var selected codemode.Part
@@ -167,20 +174,20 @@ func TestCodeModeRuntimeMCPAggregationAndMediaReceipts(t *testing.T) {
 			raw, _ := json.Marshal(map[string]any{"value": value})
 			reply, err := host.Call(ctx, "live__read", raw)
 			if err != nil {
-				return nil, err
+				return codemode.Output{}, err
 			}
 			if reply.IsError || len(reply.Parts) != 2 || reply.Parts[0].Handle == "" || !bytes.Contains(reply.Parts[1].JSON, []byte("9223372036854775807")) {
-				return nil, errors.New("MCP JSON/media projection lost")
+				return codemode.Output{}, errors.New("MCP JSON/media projection lost")
 			}
 			wire, _ := json.Marshal(reply)
 			if bytes.Contains(wire, []byte("base64")) || bytes.Contains(wire, []byte("iVBOR")) {
-				return nil, errors.New("image leaked into script JSON")
+				return codemode.Output{}, errors.New("image leaked into script JSON")
 			}
 			var result struct {
 				Value int `json:"value"`
 			}
 			if err := json.Unmarshal(reply.Parts[1].JSON, &result); err != nil {
-				return nil, err
+				return codemode.Output{}, err
 			}
 			total += result.Value
 			if value == 3 {
@@ -189,9 +196,10 @@ func TestCodeModeRuntimeMCPAggregationAndMediaReceipts(t *testing.T) {
 		}
 		readReply, err := host.Call(ctx, "Read", []byte(`{"path":"input.txt"}`))
 		if err != nil || readReply.IsError {
-			return nil, errors.New("real filesystem read failed")
+			return codemode.Output{}, errors.New("real filesystem read failed")
 		}
-		return json.Marshal(map[string]any{"sum": total, "selected": selected})
+		raw, err := json.Marshal(map[string]any{"sum": total, "selected": selected})
+		return codemode.Output{Value: raw, Parts: []codemode.Part{selected}}, err
 	})}
 	llm := codeModeModel(true)
 	live, _ := runCodeMode(t, store, active, agent.AgentSpec{Model: codeModeImageModel{llm}, Tools: []tool.Tool{toolsearch.NewSource(manager, exactMCPRanker{}), declaration, read}, DeferredTools: manager}, registry, nil)
