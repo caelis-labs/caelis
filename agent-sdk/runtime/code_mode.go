@@ -247,7 +247,7 @@ func (h *codeModeHost) admit(ctx context.Context, name string, target codeModeTa
 		}
 	}
 	if validationErr == nil {
-		validationErr = tool.NewError(tool.ErrorCodeStaleRevision, "Code Mode source/schema changed; reload with tools.search(name) before calling")
+		validationErr = tool.NewError(tool.ErrorCodeStaleRevision, "Code Mode source/schema changed")
 		one, found, lookupErr := h.owner.lookup(ctx, name)
 		if lookupErr != nil {
 			validationErr = lookupErr
@@ -283,6 +283,7 @@ func (h *codeModeHost) Call(ctx context.Context, name string, args json.RawMessa
 
 func (h *codeModeHost) call(requestCtx context.Context, name string, arguments json.RawMessage, discovery bool) (returned codemode.Reply, callError error) {
 	defer func() {
+		callError = mcpdiscovery.WithEntryHint(callError, "tools.search(name)")
 		if callError != nil || returned.IsError || returned.Outcome == codemode.OutcomeUnknown {
 			h.mu.Lock()
 			h.isError = true
@@ -359,7 +360,7 @@ func (h *codeModeHost) call(requestCtx context.Context, name string, arguments j
 			if found && one != nil {
 				def := one.Definition()
 				if def.Name == name && oldBinding != tool.BindingForDefinition(def) {
-					return codemode.Reply{}, tool.NewError(tool.ErrorCodeStaleRevision, "tool directory refreshed; use tools.search(name) to reload its schema/binding before calling")
+					return codemode.Reply{}, tool.NewError(tool.ErrorCodeStaleRevision, "tool directory refreshed; binding is stale")
 				}
 			}
 

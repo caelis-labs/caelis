@@ -114,6 +114,14 @@ func DefaultLimits() Limits {
 // It is presentation policy, never discovery or authorization.
 const MetadataSelectedTools = "code_mode_selected_tools"
 
+// MetadataCatalog carries the Runtime-owned guidance and partial hint snapshot
+// through both static AgentSpec metadata and dynamic request instructions.
+const MetadataCatalog = "code_mode_catalog_v2"
+
+// Guidance is the fixed model-facing SDK contract. Runtime appends its partial
+// catalog hints separately so discovery never changes this instruction slice.
+const Guidance = `Code Mode SDK: await tools.search(query) returns {tools:[{name,description,input_schema}],count,truncated}, matching an exact name first, otherwise searching capabilities. It returns complete schemas; reuse known schemas. First MCP discovery establishes bindings reusable in this session. tools.call(name,args) returns a Promise resolving to {parts:[{kind,text?,json?,handle?,mime_type?}]}; calls can be sequentially awaited in the same script after search. Follow each schema and preserve required exact strings. Explicitly return the value or selected/combined parts to deliver text, JSON and attachments. Return original media-part references to select attachments; copying fields does not grant media identity. Host failures reject with an Error whose reply property contains the host reply; local errors may lack reply. Catching an error does not erase failed records. Never blindly replay unknown outcomes. After a stale binding error, refresh if needed and use tools.search(name) again. Native filesystem tools remain directly callable; shell execution stays outside js_exec.`
+
 // Tool is a concrete declaration, retained until Runtime injects its Host.
 // Product assembly uses the fixed ToolName. Every execution has a new VM.
 type Tool struct {
@@ -125,9 +133,9 @@ type Tool struct {
 
 // Definition declares mutually exclusive inline and file source inputs.
 func (t *Tool) Definition() tool.Definition {
-	return tool.Definition{Name: t.Name, Metadata: map[string]any{tool.MetadataToolKind: ToolKind}, Description: "Call tools and process data with JavaScript from code or file. Not Node.js: no modules, direct network or processes; shell stays native. Use tools.search(query) for full schemas (exact name or capability), tools.call(name,args) to invoke; reuse known schemas. Return the value to deliver text, JSON and images. Long calls may yield a Task handle.", InputSchema: map[string]any{
+	return tool.Definition{Name: t.Name, Metadata: map[string]any{tool.MetadataToolKind: ToolKind}, Description: "Execute an async JavaScript function body from code or file in fresh state. Use await for tools.search(query) and tools.call(name,args), then explicitly return the desired output. No Node.js, modules, direct filesystem, network or process access. Shell execution stays outside js_exec. Long executions may yield a Task handle.", InputSchema: map[string]any{
 		"type": "object", "additionalProperties": false,
-		"properties": map[string]any{"code": map[string]any{"type": "string", "minLength": 1}, "file": map[string]any{"type": "string", "minLength": 1}, "yield_time_ms": map[string]any{"type": "integer", "minimum": 0, "maximum": 60000, "default": 10000}},
+		"properties": map[string]any{"code": map[string]any{"type": "string", "minLength": 1, "description": "Async JavaScript function body; await tool calls and explicitly return the desired output."}, "file": map[string]any{"type": "string", "minLength": 1, "description": "JavaScript source file path; relative paths resolve from the working directory."}, "yield_time_ms": map[string]any{"type": "integer", "minimum": 0, "maximum": 60000, "default": 10000, "description": "Foreground wait only, in milliseconds. After yielding, use Task read/wait/cancel on the original handle; do not resubmit js_exec."}},
 		"oneOf":      []any{map[string]any{"required": []string{"code"}}, map[string]any{"required": []string{"file"}}},
 	}}
 }

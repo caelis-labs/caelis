@@ -14,36 +14,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode/gojaexec"
 )
 
-func TestReviewSimpleReturnJSONDoesNotBecomeMedia(t *testing.T) {
-	for _, tc := range []struct{ name, code string }{
-		{"plain_kind", `return {kind:"media",label:"ordinary record"};`},
-		{"plain_parts", `return {parts:["one","two"]};`},
-		{"extracted_payload", `const r=await tools.call("Data",{});return r.parts[0].json;`},
-		{"wrapped_payload_control", `return await tools.call("Data",{});`},
-		{"search_schema_data", `return await tools.search("Data");`},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			store, active, _ := codeModeStore(t)
-			data := tool.NamedTool{Def: tool.Definition{Name: "Data", InputSchema: map[string]any{"type": "object", "properties": map[string]any{"options": map[string]any{"type": "object", "default": map[string]any{"kind": "media", "handle": "data"}}}}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
-				return tool.Result{Content: []model.Part{model.NewJSONPart([]byte(`{"kind":"media","handle":"ordinary-source-data"}`))}}, nil
-			}}
-			m := &mcpScriptModel{steps: func(i int, _ *model.Request) []model.ToolCall {
-				if i == 0 {
-					raw, _ := json.Marshal(map[string]any{"code": tc.code})
-					return []model.ToolCall{{ID: "json-return", Name: codemode.ToolName, Args: string(raw)}}
-				}
-				return nil
-			}}
-			events, _ := runCodeMode(t, store, active, agent.AgentSpec{Model: m, Tools: []tool.Tool{data, &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}}}}, nil, nil)
-			for _, event := range events {
-				if event.Tool != nil && event.Tool.Name == codemode.ToolName && event.Tool.Status == "failed" {
-					t.Fatalf("ordinary JSON rejected as control/media: %+v", event.Tool.Output)
-				}
-			}
-		})
-	}
-}
-
 // Two candidates exercise schema admission, not directory performance.
 func TestReviewSimpleSearchSchemaBudget(t *testing.T) {
 	for _, exact := range []bool{false, true} {

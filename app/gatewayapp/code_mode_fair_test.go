@@ -74,8 +74,8 @@ type fairManifest struct {
 
 func newFairManifest(parameters, context7 map[string]any, harness string) fairManifest {
 	routes := map[string]string{
-		"native": "Use native filesystem tools and the existing ToolSearch/mcp_call entries for Context7.",
-		"js":     "Use js_exec inline code with tools.search/describe/call for Context7 and filesystem orchestration; native filesystem tools remain available.",
+		"native": "Use native filesystem tools and the existing tool_search/mcp_call entries for Context7.",
+		"js":     "Use js_exec inline code with tools.search and tools.call for Context7 and filesystem orchestration; native filesystem tools remain available.",
 	}
 	common := `Shell/process execution is forbidden for this task, including RunCommand, aliases and equivalent process tools. Work only in this workspace. Read a.txt and b.txt using actual tools and sum their integers. Read returns JSON content with numbered lines; parse the values, not the line numbers.
 Use Context7 read-only documentation to answer this question: ` + fairQuestion + `

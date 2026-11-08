@@ -145,3 +145,61 @@ func TestCodeModeCLIWorkerHandshake(t *testing.T) {
 	}
 	t.Logf("native CLI early-worker handshake complete; process Wait succeeded, result=%s", payload)
 }
+
+func TestCodeModeCLIWorkerCancellationReapsProcess(t *testing.T) {
+	binaryPath := os.Getenv("CAELIS_TEST_CLI_BINARY")
+	if binaryPath == "" {
+		t.Skip("set CAELIS_TEST_CLI_BINARY to a native Core CLI build")
+	}
+	binaryPath, err := filepath.Abs(binaryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, binaryPath, gojaexec.WorkerArgument)
+	cmd.Env = []string{"GOMAXPROCS=1"}
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stdin.Close()
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err = cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	var input bytes.Buffer
+	for i, payload := range []string{`{"limits":{}}`, `while(true){}`} {
+		var header [13]byte
+		binary.BigEndian.PutUint32(header[:4], uint32(len(payload)))
+		header[4] = byte(i + 1)
+		input.Write(header[:])
+		input.WriteString(payload)
+	}
+	if _, err = stdin.Write(input.Bytes()); err != nil {
+		cancel()
+		_ = cmd.Wait()
+		t.Fatal(err)
+	}
+	var ready [13]byte
+	if _, err = io.ReadFull(stdout, ready[:]); err != nil {
+		cancel()
+		_ = cmd.Wait()
+		t.Fatalf("ready: %v stderr=%s", err, stderr.String())
+	}
+	if ready[4] != 3 || binary.BigEndian.Uint32(ready[:4]) != 0 {
+		cancel()
+		_ = cmd.Wait()
+		t.Fatalf("unexpected ready frame: %v", ready)
+	}
+	cancel()
+	if err = cmd.Wait(); err == nil || cmd.ProcessState == nil {
+		t.Fatalf("cancel did not terminate and reap native CLI: %v", err)
+	}
+	t.Logf("native CLI cancellation reaped pid=%d", cmd.Process.Pid)
+}

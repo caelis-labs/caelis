@@ -392,3 +392,30 @@ func TestCatalogCloseCancelsRefreshAndDrainsWorker(t *testing.T) {
 		t.Fatal("closed manager retained tools")
 	}
 }
+
+func TestCatalogBindingErrorsAreEntryNeutral(t *testing.T) {
+	server := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "entry-neutral", Version: "1"}, nil)
+	catalogTool(server, "read", "v1", nil)
+	manager := catalogManager(t, server, true)
+	remote := manager.Tools()[0].(*MCPTool)
+	binding := tool.BindingForDefinition(remote.Definition())
+	for _, dirty := range []bool{false, true} {
+		remote.client.catalog.mu.Lock()
+		remote.client.catalog.dirty = dirty
+		remote.client.catalog.mu.Unlock()
+		stale := binding
+		stale.Version = "superseded"
+		for _, err := range []error{manager.CheckToolBinding(t.Context(), stale), func() error {
+			if !dirty {
+				return manager.CheckToolBinding(t.Context(), stale)
+			}
+			_, err := remote.Call(t.Context(), tool.Call{Input: []byte(`{}`)})
+			return err
+		}()} {
+			var typed *tool.ToolError
+			if !errors.As(err, &typed) || typed.Code != tool.ErrorCodeStaleRevision || typed.Hint != "" || strings.Contains(err.Error(), "search") {
+				t.Fatalf("manager chose an entry point: %v", err)
+			}
+		}
+	}
+}

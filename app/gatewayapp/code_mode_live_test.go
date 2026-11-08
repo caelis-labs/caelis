@@ -294,9 +294,9 @@ func TestCodeModeLive(t *testing.T) {
 		}
 		return agent.ApprovalResponse{Outcome: "selected", OptionID: "cancel"}, nil
 	})
-	route := "Use native filesystem tools and the existing ToolSearch/mcp_call extension entries."
+	route := "Use native filesystem tools and the existing tool_search/mcp_call extension entries."
 	if mode == "js_exec" {
-		route = "Use js_exec with tools.describe/search/call for extensions and JS orchestration. Native filesystem calls may write/edit workflow.js; execute the actual saved file with js_exec file. Select only the aggregate/documentation and screenshot outputs. Shell must remain native and is forbidden for this task."
+		route = "Use js_exec with tools.search and tools.call for extensions and JS orchestration. Native filesystem calls may write/edit workflow.js; execute the actual saved file with js_exec file. Select only the aggregate/documentation and screenshot outputs. Shell must remain native and is forbidden for this task."
 	}
 	prompts := []string{
 		route + " Read a.txt and b.txt using actual tools and aggregate their numbers. Query Context7 for Goja Promise/Runtime.Interrupt API documentation using actual resolve-library-id and query-docs; report its documentation source without inventing availability. Save an executable workflow.js (js_exec async body with tools.call) which reads both files, returns their total (42), and writes answer.json containing total and a brief sourced API summary. Execute it from file. In baseline mode, complete the same data/documentation task with native tools and also save answer.json; workflow.js execution is required only in js_exec mode.",

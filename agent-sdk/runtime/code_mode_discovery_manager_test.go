@@ -15,6 +15,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 )
@@ -83,6 +84,12 @@ func TestJSExecManagerLookupFinalAdmissionRejectsSourceChange(t *testing.T) {
 			}
 			if !failed {
 				t.Fatal("final admission error hidden")
+			}
+			if change == "schema" {
+				raw, _ := json.Marshal(driver.requests[len(driver.requests)-1].Messages)
+				if !strings.Contains(string(raw), "tools.search(name)") || !strings.Contains(string(raw), "binding is stale") {
+					t.Fatalf("next request lacks Code Mode stale guidance: %s", raw)
+				}
 			}
 			if directory := os.Getenv("CAELIS_LOOKUP_EVIDENCE"); directory != "" {
 				if err := os.MkdirAll(directory, 0700); err != nil {

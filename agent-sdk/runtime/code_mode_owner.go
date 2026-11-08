@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"sync"
 
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -27,6 +28,7 @@ func ownCodeModeProducers(ctx context.Context, concrete, wrapped []tool.Tool) []
 }
 
 type codeModeProducerIdentityKey struct{}
+type codeModeProducerErrorKey struct{}
 
 type codeModeProducerTool struct {
 	base  tool.Tool
@@ -60,12 +62,24 @@ func (t codeModeProducerTool) Call(ctx context.Context, call tool.Call) (tool.Re
 	}
 	var done <-chan struct{}
 	var producerError func() error
-	ctx = context.WithValue(context.WithValue(work.ctx, codeModeProducerIdentityKey{}, id), codeModeProducerLifetimeKey{}, func(ch <-chan struct{}, completionError func() error) { done = ch; producerError = completionError })
+	var errorMu sync.Mutex
+	var durabilityErr error
+	ctx = context.WithValue(work.ctx, codeModeProducerErrorKey{}, func(err error) {
+		errorMu.Lock()
+		durabilityErr = errors.Join(durabilityErr, err)
+		errorMu.Unlock()
+	})
+	completionError := func() error {
+		errorMu.Lock()
+		defer errorMu.Unlock()
+		return durabilityErr
+	}
+	ctx = context.WithValue(context.WithValue(ctx, codeModeProducerIdentityKey{}, id), codeModeProducerLifetimeKey{}, func(ch <-chan struct{}, completionError func() error) { done = ch; producerError = completionError })
 	result, callErr := t.base.Call(ctx, call)
 	if done == nil {
-		t.scope.complete(id, work, nil)
+		t.scope.complete(id, work, completionError())
 	} else {
-		go func() { <-done; t.scope.complete(id, work, producerError()) }()
+		go func() { <-done; t.scope.complete(id, work, errors.Join(producerError(), completionError())) }()
 	}
 	return result, callErr
 }

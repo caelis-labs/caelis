@@ -872,18 +872,21 @@ func anthropicToolInputSchema(schema map[string]any) anthropic.ToolInputSchemaPa
 	if len(schema) == 0 {
 		return anthropic.ToolInputSchemaParam{Type: "object"}
 	}
+	if kind, exists := schema["type"]; !exists || kind == "" {
+		normalized := make(map[string]any, len(schema)+1)
+		for key, value := range schema {
+			normalized[key] = value
+		}
+		normalized["type"] = "object"
+		schema = normalized
+	}
 	raw, err := json.Marshal(schema)
 	if err != nil {
 		return anthropic.ToolInputSchemaParam{Type: "object", ExtraFields: map[string]any{}}
 	}
-	var out anthropic.ToolInputSchemaParam
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return anthropic.ToolInputSchemaParam{Type: "object", ExtraFields: map[string]any{}}
-	}
-	if out.Type == "" {
-		out.Type = "object"
-	}
-	return out
+	// ExtraFields are merged by the SDK in map iteration order. Override with
+	// encoding/json's canonical map bytes to retain oneOf and stable declarations.
+	return param.Override[anthropic.ToolInputSchemaParam](json.RawMessage(raw))
 }
 
 func anthropicResponseToMessage(provider string, resp *anthropic.Message) (model.Message, model.FinishReason, string, model.Usage, error) {

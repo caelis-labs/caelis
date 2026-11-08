@@ -17,6 +17,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/session/userdisplay"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/google/uuid"
 )
 
@@ -105,7 +106,7 @@ func (f Factory) NewAgent(_ context.Context, spec agent.AgentSpec) (agent.Agent,
 	if systemPrompt == "" {
 		systemPrompt = strings.TrimSpace(f.SystemPrompt)
 	}
-	if catalog, _ := spec.Metadata["code_mode_catalog"].(string); catalog != "" {
+	if catalog, _ := spec.Metadata[codemode.MetadataCatalog].(string); catalog != "" {
 		systemPrompt += "\n\n" + catalog
 	}
 	chatAgent, err := NewWithTools(spec.Name, spec.Model, spec.Tools, systemPrompt)

@@ -21,13 +21,17 @@ func (c *compactionInvocations) context(ctx context.Context) context.Context {
 // overlapping approval and Task journals must not discard a completed attempt.
 // The checkpoint separately validates its source before advancing a stale CAS.
 func (r *Runtime) persistCompactionInvocations(ctx context.Context, active *session.Session, turnID string, records *compactionInvocations) error {
-	if len(records.attempts) == 0 {
+	return r.persistModelInvocations(ctx, active, turnID, records.attempts, "compaction")
+}
+
+func (r *Runtime) persistModelInvocations(ctx context.Context, active *session.Session, turnID string, attempts []model.Invocation, kind string) error {
+	if len(attempts) == 0 {
 		return nil
 	}
 	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
-	for _, attempt := range records.attempts {
-		event := normalizeEvent(*active, turnID, session.NewModelInvocationReceipt(attempt, "compaction"))
+	for _, attempt := range attempts {
+		event := normalizeEvent(*active, turnID, session.NewModelInvocationReceipt(attempt, kind))
 		_, err := r.sessions.AppendEvent(cleanup, session.AppendEventRequest{SessionRef: active.SessionRef, MutationGuard: session.RuntimeMutationGuard(ctx), Event: event})
 		if err != nil {
 			persisted, readErr := r.reconcileCompactionAppend(cleanup, active.SessionRef, event)

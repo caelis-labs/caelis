@@ -26,16 +26,23 @@ func TestJSExecReturnOnlySelectedMedia(t *testing.T) {
 		name, code string
 		want       []string
 		failed     bool
+		wantJSON   string
 	}{
-		{"direct", `return await tools.call("PictureA",{});`, []string{"A"}, false},
-		{"unreturned", `await tools.call("PictureA",{});return {ok:true};`, nil, false},
-		{"other_call", `await tools.call("PictureA",{});return await tools.call("PictureB",{});`, []string{"B"}, false},
-		{"foreign", `const r=await tools.call("PictureA",{});r.parts[2].handle="another-invocation";return r;`, nil, true},
-		{"plain_foreign_data", `return {parts:[{kind:"media",handle:"another-invocation"}]};`, nil, false},
-		{"copied_fields", `const r=await tools.call("PictureA",{});return {parts:[{...r.parts[2]}]};`, nil, false},
-		{"combined", `const a=await tools.call("PictureA",{});const b=await tools.call("PictureB",{});return {selected:b.parts[2],record:{kind:"media",handle:"ordinary-data"}};`, []string{"B"}, false},
-		{"selected_reply_parts", `const r=await tools.call("PictureA",{});r.parts=r.parts.filter(p=>p.kind!=="json");return r;`, []string{"A"}, false},
-		{"getter_once", `const r=await tools.call("PictureA",{});let n=0;return {get selected(){return n++===0?{kind:"media",handle:"ordinary-data"}:r.parts[2]}};`, nil, false},
+		{"direct", `return await tools.call("PictureA",{});`, []string{"A"}, false, ""},
+		{"unreturned", `await tools.call("PictureA",{});return {ok:true};`, nil, false, ""},
+		{"other_call", `await tools.call("PictureA",{});return await tools.call("PictureB",{});`, []string{"B"}, false, ""},
+		{"foreign", `const r=await tools.call("PictureA",{});r.parts[2].handle="another-invocation";return r;`, nil, true, ""},
+		{"plain_foreign_data", `return {parts:[{kind:"media",handle:"another-invocation"}]};`, nil, false, ""},
+		{"copied_fields", `const r=await tools.call("PictureA",{});return {parts:[{...r.parts[2]}]};`, nil, false, ""},
+		{"combined", `const a=await tools.call("PictureA",{});const b=await tools.call("PictureB",{});return {selected:b.parts[2],record:{kind:"media",handle:"ordinary-data"}};`, []string{"B"}, false, ""},
+		{"selected_reply_parts", `const r=await tools.call("PictureA",{});r.parts=r.parts.filter(p=>p.kind!=="json");return r;`, []string{"A"}, false, ""},
+		{"getter_once", `const r=await tools.call("PictureA",{});let n=0;return {get selected(){return n++===0?{kind:"media",handle:"ordinary-data"}:r.parts[2]}};`, nil, false, ""},
+		{"proxy_array_reads", `const r=await tools.call("PictureA",{});r.parts=new Proxy([r.parts[2]],{get(t,k){if(k==="0")return {kind:"json",json:{visible:"actual proxy read"}};return Reflect.get(t,k)}});return r;`, nil, false, "actual proxy read"},
+		{"text_business_field", `const r=await tools.call("PictureA",{});r.parts=[r.parts[0]];r.parts[0].json={note:"text business"};return r;`, nil, false, "text business"},
+		{"json_business_field", `const r=await tools.call("PictureA",{});r.parts=[r.parts[1]];r.parts[0].text="json business";return r;`, nil, false, "json business"},
+		{"json_missing_payload", `const r=await tools.call("PictureA",{});r.parts=[r.parts[1]];delete r.parts[0].json;return r;`, nil, false, `kind`},
+		{"text_nonstring_payload", `const r=await tools.call("PictureA",{});r.parts=[r.parts[0]];r.parts[0].text={note:"text object"};return r;`, nil, false, "text object"},
+		{"text_handle_field", `const r=await tools.call("PictureA",{});r.parts=[r.parts[0]];r.parts[0].handle="business handle";return r;`, nil, false, "business handle"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store, active, _ := codeModeStore(t)
@@ -93,6 +100,15 @@ func TestJSExecReturnOnlySelectedMedia(t *testing.T) {
 							}
 						}
 					}
+				}
+			}
+			if tc.wantJSON != "" {
+				if len(driver.requests) != 2 {
+					t.Fatalf("next model request missing: %d", len(driver.requests))
+				}
+				raw, _ := json.Marshal(driver.requests[1].Messages)
+				if !bytes.Contains(raw, []byte(tc.wantJSON)) {
+					t.Fatalf("business data lost in next request: %s", raw)
 				}
 			}
 			if strings.Join(modelMedia, ",") != strings.Join(tc.want, ",") {
@@ -154,5 +170,35 @@ func TestJSExecFixedFileBytesAndFreshVM(t *testing.T) {
 	}
 	if len(hashes) != 2 || hashes[0] == hashes[1] {
 		t.Fatalf("source bytes/hash not reread: %v", hashes)
+	}
+}
+
+func TestReviewSimpleReturnJSONDoesNotBecomeMedia(t *testing.T) {
+	for _, tc := range []struct{ name, code string }{
+		{"plain_kind", `return {kind:"media",label:"ordinary record"};`},
+		{"plain_parts", `return {parts:["one","two"]};`},
+		{"extracted_payload", `const r=await tools.call("Data",{});return r.parts[0].json;`},
+		{"wrapped_payload_control", `return await tools.call("Data",{});`},
+		{"search_schema_data", `return await tools.search("Data");`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store, active, _ := codeModeStore(t)
+			data := tool.NamedTool{Def: tool.Definition{Name: "Data", InputSchema: map[string]any{"type": "object", "properties": map[string]any{"options": map[string]any{"type": "object", "default": map[string]any{"kind": "media", "handle": "data"}}}}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
+				return tool.Result{Content: []model.Part{model.NewJSONPart([]byte(`{"kind":"media","handle":"ordinary-source-data"}`))}}, nil
+			}}
+			m := &mcpScriptModel{steps: func(i int, _ *model.Request) []model.ToolCall {
+				if i == 0 {
+					raw, _ := json.Marshal(map[string]any{"code": tc.code})
+					return []model.ToolCall{{ID: "json-return", Name: codemode.ToolName, Args: string(raw)}}
+				}
+				return nil
+			}}
+			events, _ := runCodeMode(t, store, active, agent.AgentSpec{Model: m, Tools: []tool.Tool{data, &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}}}}, nil, nil)
+			for _, event := range events {
+				if event.Tool != nil && event.Tool.Name == codemode.ToolName && event.Tool.Status == "failed" {
+					t.Fatalf("ordinary JSON rejected as control/media: %+v", event.Tool.Output)
+				}
+			}
+		})
 	}
 }

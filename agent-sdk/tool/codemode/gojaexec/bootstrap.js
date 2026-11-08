@@ -4,8 +4,6 @@
   "use strict";
   const parse = JSON.parse, keys = Object.keys, isArray = Array.isArray;
   const finite = Number.isFinite, freeze = Object.freeze, define = Object.defineProperty;
-  const descriptor = Object.getOwnPropertyDescriptor;
-  const owns = Function.prototype.call.bind(Object.prototype.hasOwnProperty);
   const ErrorType = Error, SetType = Set, WeakMapType = WeakMap;
   const weakGet = Function.prototype.call.bind(WeakMap.prototype.get);
   const weakSet = Function.prototype.call.bind(WeakMap.prototype.set);
@@ -22,28 +20,6 @@
     }
     return result;
   }
-  function directParts(value) {
-    if(!value||typeof value!=="object"||!weakGet(replies,value))return null;
-    const names=keys(value);
-    if(names.length!==1||names[0]!=="parts")return null;
-    // Preflight reads data descriptors only. Accessors belong to the ordinary
-    // encoding pass, which must evaluate and select from the same value once.
-    const field=descriptor(value,"parts");
-    if(!field||!owns(field,"value")||!isArray(field.value))return null;
-    const source=field.value, parts=[];
-    for(let i=0;i<source.length;i++) {
-      const item=descriptor(source,""+i);
-      if(!item||!owns(item,"value"))return null;
-      const p=item.value, origin=p&&typeof p==="object"?weakGet(origins,p):null;
-      if(!origin)return null;
-      // Added business properties remain ordinary JSON instead of being lost
-      // by native Part decoding. Payload values themselves may be processed.
-      const fields=keys(p);
-      for(let j=0;j<fields.length;j++) if(fields[j]!=="kind"&&fields[j]!=="text"&&fields[j]!=="json"&&fields[j]!=="handle"&&fields[j]!=="mime_type")return null;
-      define(parts,i,{value:p,enumerable:true});
-    }
-    return parts;
-  }
   const apply = Function.prototype.call.bind(Function.prototype.call);
   const charCode = Function.prototype.call.bind(String.prototype.charCodeAt);
   const slice = Function.prototype.call.bind(String.prototype.slice);
@@ -57,6 +33,7 @@
   function encode(value, budget, project) {
     let out = "", used = 0;
     const seen = new SetType(), selected=new SetType(), media=[];
+    let direct=!!(project&&value&&typeof value==="object"&&weakGet(replies,value));
     function put(s, n) {
       if ((used += n) > budget) throw new ErrorType("JSON byte budget exceeded");
       out += s;
@@ -75,7 +52,9 @@
       }
       put('"',1);
     }
-    function visit(v, depth, inspect) {
+    function visit(v, depth, inspect, role) {
+      if(role===2&&!isArray(v))direct=false;
+      if(role===3&&(!v||typeof v!=="object"||!weakGet(origins,v)))direct=false;
       if (depth > 128) throw new ErrorType("JSON depth exceeded");
       if (v === null) return put("null",4);
       switch (typeof v) {
@@ -95,20 +74,44 @@
       }
       const array=isArray(v);put(array?"[":"{",1);
       if (array) {
-        for (let i=0;i<v.length;i++) {if(i)put(",",1);visit(v[i],depth+1,inspect);}
+        const length=v.length;
+        for (let i=0;i<length;i++) {if(i)put(",",1);visit(v[i],depth+1,inspect,role===2?3:0);}
       } else {
         // keys() can allocate proportional to the input object. Goja has no
         // heap limiter; encoding/IPC budgets do not claim to bound the VM heap.
         const names=keys(v);
-        for(let i=0;i<names.length;i++){if(i)put(",",1);quote(names[i]);put(":",1);visit(v[names[i]],depth+1,inspect&&!(origin&&origin.kind==="json"&&names[i]==="json"));}
+        if(role===1&&(names.length!==1||names[0]!=="parts"))direct=false;
+        let kindSeen=false, payloadSeen=!!(origin&&origin.kind==="text");
+        for(let i=0;i<names.length;i++) {
+          const name=names[i];
+          // Canonical parts follow their original kind. Extra business fields
+          // keep the entire reply ordinary JSON rather than losing data in Go.
+          if(role===3&&origin&&name!=="kind"&&
+            !(origin.kind==="text"&&name==="text")&&
+            !(origin.kind==="json"&&name==="json")&&
+            !((origin.kind==="media"||origin.kind==="file_ref")&&(name==="handle"||name==="mime_type")))direct=false;
+          if(i)put(",",1);quote(name);put(":",1);
+          // All projection decisions consume these same budgeted reads. Proxy
+          // descriptors and accessors never supply a separate preflight value.
+          const child=v[name];
+          if(role===3&&origin) {
+            if(name==="kind")kindSeen=child===origin.kind;
+            if(origin.kind==="text"&&name==="text"&&typeof child!=="string")direct=false;
+            if(origin.kind==="json"&&name==="json")payloadSeen=true;
+            if((origin.kind==="media"||origin.kind==="file_ref")&&name==="handle")payloadSeen=child===origin.handle;
+          }
+          visit(child,depth+1,inspect&&!(origin&&origin.kind==="json"&&name==="json"),role===1&&name==="parts"?2:0);
+        }
+        if(role===3&&(!kindSeen||!payloadSeen))direct=false;
       }
       put(array?"]":"}",1);del(seen,v);
     }
+    visit(value,0,!!project,direct?1:0);
     if(project) {
-      const parts=directParts(value);
-      if(parts!==null) {put('{"reply":true,"parts":',22);visit(parts,0,false);put('}',1);}
-      else {put('{"value":',9);visit(value,0,true);put(',"parts":',9);visit(media,0,false);put('}',1);}
-    } else visit(value,0,false);
+      const body=out, bytes=used;out="";used=0;
+      if(direct) {put('{"reply":true,',14);put(slice(body,1),bytes-1);}
+      else {put('{"value":',9);put(body,bytes);put(',"parts":',9);visit(media,0,false,0);put('}',1);}
+    }
     return out;
   }
   function decode(raw) {

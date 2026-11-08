@@ -91,7 +91,7 @@ func (a *Agent) bindMCPCalls(ctx context.Context, calls []model.ToolCall, visibi
 			case !known:
 				bound.err = tool.NewError(tool.ErrorCodeNotFound, "MCP tool has not been discovered in this Session; use tool_search")
 			case one == nil || binding != tool.BindingForDefinition(definition):
-				bound.err = tool.NewError(tool.ErrorCodeStaleRevision, "MCP binding changed or is unavailable; use tool_search after refresh")
+				bound.err = tool.NewError(tool.ErrorCodeStaleRevision, "MCP binding changed or is unavailable")
 			default:
 				bound.target = one
 				bound.err = tool.ValidateMCPArguments(definition, []byte(actual.Args))

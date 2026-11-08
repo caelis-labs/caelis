@@ -39,6 +39,7 @@ func (r *Runtime) wrapModelRequestResolver(ctx context.Context, active session.S
 			}
 		}
 		prepareCtx = context.WithValue(prepareCtx, codeModeValidationKey{}, validateCodeMode)
+		prepareCtx = context.WithValue(prepareCtx, codeModeModelAdmissionKey{}, snapshot.Admit)
 		if r.compaction.Enabled {
 			authority := &modelRequestAuthority{epoch: snapshot.Revision, refs: 1, release: snapshot.Release, validate: snapshot.Validate, deferredTools: snapshot.DeferredTools, resolveIdle: source}
 			if admit := snapshot.Admit; admit != nil {
@@ -132,9 +133,10 @@ func (r *Runtime) prepareAgentSpec(ctx context.Context, active session.Session, 
 		checkBinding = source.CheckToolBinding
 	}
 	validate, _ := ctx.Value(codeModeValidationKey{}).(func(context.Context) (func(), error))
+	admit, _ := ctx.Value(codeModeModelAdmissionKey{}).(func(context.Context, agent.ModelRequestAdmission) error)
 	for i, one := range spec.Tools {
 		if one != nil && tool.IsToolSearchDefinition(one.Definition()) {
-			spec.Tools[i] = codeModeDiscoveryTool{base: one, lookup: lookup}
+			spec.Tools[i] = codeModeDiscoveryTool{base: one, lookup: lookup, runtime: r, active: active, turnID: turnID, admit: admit}
 			continue
 		}
 		if declaration, ok := one.(*codemode.Tool); ok {

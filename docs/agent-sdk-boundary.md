@@ -323,18 +323,22 @@ Canonical ToolSpecs describe Runtime-accepted input. Provider downgrade never
 weakens local schema, approval, or policy validation. Malformed external schemas
 are quarantined instead of replaced by permissive empty schemas.
 
-MCP-enabled Sessions expose fixed `tool_search` and `mcp_call` definitions.
-Search results return complete normalized input schemas and identity/version
+Code Mode Sessions expose a fixed `js_exec` definition; its async body uses
+`await tools.search(query)` and `await tools.call(name,args)`. SDK entry points
+without Code Mode expose fixed `tool_search` and `mcp_call` definitions.
+Both search routes return complete normalized input schemas and identity/version
 bindings. Successful new-format canonical receipts alone grant discovery
 eligibility. Runtime projects them from canonical events across compaction and
 resume; old exposure, name-only search results and checkpoint discovered-name
 fields remain readable history and require a fresh search.
 
-Runtime resolves the envelope to a pinned real Tool, validates its binding and
+Runtime resolves each route to a pinned real Tool, validates its binding and
 arguments, and enters the same policy, Journal, invocation and lifecycle wrappers
 as other tools. Display and approval data name the real target and arguments;
 typed original-call data keep model history paired under the outer call ID and
-`mcp_call` name. MCP schemas never join model `tools`, and no per-run exposure
+`mcp_call` name without Code Mode. A Code Mode script can sequentially await
+search and call; its nested receipts retain the same discovery and execution
+owners. MCP schemas never join model `tools`, and no per-run exposure
 limit or retirement tool remains. [MCP tools](mcp-tool-lifecycle.md) describes
 refresh and final dispatch. The stable-tools contract does not promise that the
 entire model request prefix is unchanged.
@@ -400,8 +404,10 @@ Its model requests stream privately and use only completed responses for schema
 reads and final selection. There is no ToolSearch total-duration deadline. The
 caller can cancel the work; a six-minute period without streamed model progress
 also cancels the current request. Reasoning and tool-argument deltas count as
-progress; empty protocol frames do not. Provider retry and attempt accounting
-remain in the shared model path.
+progress; empty protocol frames do not. Provider retry and attempt accounting remain in the shared model path. Both
+entry routes admit every selector provider attempt and retain durable private
+usage receipts, including attempts completed after foreground yield or before
+a later request is rejected.
 Provider adapters require their protocol's terminal signal before publishing a
 streamed final response; a transport EOF after partial output is an error.
 

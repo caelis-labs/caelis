@@ -24,8 +24,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 )
 
-// These independent review regressions assert the required behavior. They are
-// expected to fail on 1f93efabb930e4a7a7398473d0c09ba9db031e27.
+// Code Mode retains the original Run authority through producer quiescence.
 func TestReviewCodeModeTurnCompleteFencesPendingApproval(t *testing.T) {
 	store, active, _ := codeModeStore(t)
 	asked, release := make(chan struct{}), make(chan struct{})

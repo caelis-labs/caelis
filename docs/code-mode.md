@@ -19,9 +19,14 @@ and `file`, plus the existing foreground wait convention. The model does not
 also receive `tool_search`, `mcp_call`, or changing MCP schemas in its tools array.
 Product assembly selects canonical extension names via
 `AgentSpec.Metadata[codemode.MetadataSelectedTools]`; the SDK has no integration
-allowlist. A small name/description catalog is a bounded Session snapshot; other
-extensions are found by fuzzy search. Discovery never rewrites earlier prompt
+allowlist. A small name/description catalog is a partial, bounded Session hint snapshot;
+other extensions are found by fuzzy search. Discovery never rewrites earlier prompt
 slices or changes the serialized tools definitions.
+
+Supply an async function body, use `await`, and explicitly `return` the desired
+output. Each execution starts with fresh state. There are no Node.js, module,
+direct filesystem, network or process APIs. `file` paths resolve relative to the
+working directory; shell execution stays outside `js_exec`.
 
 The async function body has two interfaces:
 
@@ -30,7 +35,7 @@ The async function body has two interfaces:
   `{tools:[{name,description,input_schema}],count,truncated}`. Schemas are complete;
   candidates omitted by the bounded result budget are marked by `truncated`.
   Extension bindings are recorded by the original canonical discovery owner.
-- `await tools.call(name, args)` returns `{parts:[...]}`. Text parts have `text`,
+- `tools.call(name, args)` returns a Promise resolving to `{parts:[...]}`. Text parts have `text`,
   JSON parts have `json`, and media parts carry an opaque invocation-owned handle.
 
 `return await tools.call(name, args)` delivers the text, JSON and actual media to
@@ -44,7 +49,12 @@ meaning. Returned references are checked against the current invocation and
 retained media budgets. A failed or unknown child remains failed even if JavaScript catches its
 exception. No `tools.describe` or `output` interface is installed.
 
-Known schemas may be reused across calls; a fresh VM clears only JS variables.
+First MCP discovery establishes bindings reusable within that Session. Search
+and calls may be sequentially awaited in the same script. Known schemas may be
+reused across calls; a fresh VM clears only JS variables. Host failures reject
+with an Error whose `reply` property contains the host reply. Local validation or
+script errors may lack `reply`. Catching does not erase failed records, and an
+unknown outcome must never be replayed blindly.
 Arguments follow the schema, including required exact strings. Native filesystem
 functions remain directly callable and may also be orchestrated from JS. Search
 and call retain current source, generation, binding and permission checks. On a
@@ -105,6 +115,8 @@ authority. Stop, cancellation and TurnComplete close further Host admission.
 Final safe points cancel script producers before joining them, including an
 approval waiter. Cross-Turn background execution is not promised.
 
+`yield_time_ms` bounds only the foreground wait, not execution. After yielding,
+use Task read/wait/cancel on the original handle; do not resubmit `js_exec`.
 Foreground yield transfers observation to the existing Task owner with one
 original handle. Query, wait, cancellation and completion reuse Task control and output cursors.
 Selected output is published at script completion; child progress uses the
@@ -126,7 +138,7 @@ child effects are never replayed to repair durability.
 ## Acceptance
 
 Owning checks cover native fs plus code-level shell denial (including aliases),
-DTW domain exec, candidate search/exact describe, Session reuse, schema replacement before effect claim,
+DTW domain exec, capability/exact-name search, Session reuse, schema replacement before effect claim,
 Guardian parameters, async yield/handle/cancel/completion and unknown no-replay.
 Model-context round trips and rendered TUI parent/child evidence cover durable
 and visible behavior.

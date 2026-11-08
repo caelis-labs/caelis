@@ -3,30 +3,70 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"sync"
 
+	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/mcpdiscovery"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
+	"github.com/google/uuid"
 )
 
 type codeModeSearchKey struct{}
+type codeModeModelAdmissionKey struct{}
 
 // Nested search uses canonical admission before the existing Journal records
 // full schemas/bindings. Ordinary native ToolSearch keeps its Chat owner.
 type codeModeDiscoveryTool struct {
-	base   tool.Tool
-	lookup func(context.Context, string) (tool.Tool, bool, error)
+	base    tool.Tool
+	lookup  func(context.Context, string) (tool.Tool, bool, error)
+	runtime *Runtime
+	active  session.Session
+	turnID  string
+	admit   func(context.Context, agent.ModelRequestAdmission) error
 }
 
 func (t codeModeDiscoveryTool) Definition() tool.Definition { return t.base.Definition() }
-func (t codeModeDiscoveryTool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
+func (t codeModeDiscoveryTool) Call(ctx context.Context, call tool.Call) (returned tool.Result, callErr error) {
+	nested, _ := ctx.Value(codeModeSearchKey{}).(bool)
+	if nested {
+		// The producer owns this sink through completion, including after the
+		// foreground yields. Chat's per-step buffer cannot own late receipts.
+		var mu sync.Mutex
+		var attempts []model.Invocation
+		ctx = toolsearch.WithInvocationAccounting(ctx, func(in model.Invocation) {
+			mu.Lock()
+			attempts = append(attempts, in)
+			mu.Unlock()
+		}, func(ctx context.Context, _ *model.Request) error {
+			if t.admit == nil {
+				return nil
+			}
+			return t.admit(ctx, agent.ModelRequestAdmission{RequestID: uuid.NewString(), TurnID: t.turnID})
+		})
+		defer func() {
+			mu.Lock()
+			records := append([]model.Invocation(nil), attempts...)
+			mu.Unlock()
+			active := t.active
+			persistErr := t.runtime.persistModelInvocations(ctx, &active, t.turnID, records, "tool")
+			if record, ok := ctx.Value(codeModeProducerErrorKey{}).(func(error)); ok && persistErr != nil {
+				record(persistErr)
+			}
+			callErr = errors.Join(callErr, persistErr)
+		}()
+	}
 	result, err := t.base.Call(ctx, call)
 	if err != nil || result.IsError {
 		return result, err
 	}
-	if nested, _ := ctx.Value(codeModeSearchKey{}).(bool); !nested {
+	if !nested {
 		return result, nil
 	}
 	var selected tool.ToolSearchResult
@@ -73,6 +113,7 @@ func (h *codeModeHost) Search(ctx context.Context, query string) (reply codemode
 	closed := h.closed || h.ctx.Err() != nil
 	h.mu.Unlock()
 	defer func() {
+		discoveryErr = mcpdiscovery.WithEntryHint(discoveryErr, "tools.search(name)")
 		if discoveryErr != nil {
 			h.mu.Lock()
 			h.isError = true
@@ -149,11 +190,11 @@ func (h *codeModeHost) Search(ctx context.Context, query string) (reply codemode
 			return reply, lookupErr
 		}
 		if !exists || one == nil || entry.Binding == nil {
-			return reply, tool.NewError(tool.ErrorCodeStaleRevision, "tool directory changed; search again before calling")
+			return reply, tool.NewError(tool.ErrorCodeStaleRevision, "tool directory changed; binding is stale")
 		}
 		def := one.Definition()
 		if def.Name != entry.Name || *entry.Binding != tool.BindingForDefinition(def) || !codeModeCanCall(def) || !def.AvailableForModel(h.parent.RuntimeModel) {
-			return reply, tool.NewError(tool.ErrorCodeStaleRevision, "tool directory changed; search again before calling")
+			return reply, tool.NewError(tool.ErrorCodeStaleRevision, "tool directory changed; binding is stale")
 		}
 		h.mu.Lock()
 		h.targets[entry.Name] = codeModeTarget{tool: one, definition: def, digest: codeModeDefinitionDigest(def)}

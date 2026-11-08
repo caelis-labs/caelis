@@ -255,7 +255,9 @@ is created. Package assembly status is distinct from MCP connection readiness.
 
 ## MCP discovery and upgrades
 
-Model declarations use the fixed `tool_search` and `mcp_call` entries. Search
+Product model declarations use the fixed `js_exec` entry with
+`tools.search`/`tools.call`; SDK embedders without Code Mode use fixed
+`tool_search` and `mcp_call` entries. Search
 returns complete tool schemas and source bindings in results; discovering or
 refreshing MCP does not add tools to the model declaration. Calls resolve a
 previously discovered real tool before policy, approval and execution. Surfaces
@@ -263,8 +265,12 @@ present that tool's actual name and arguments.
 
 Historical Sessions retain readable tool calls and results. Discovery made by
 older dynamic-tool versions is not migrated into executable bindings. After an
-upgrade or resume, search again through `tool_search` before calling MCP through
-`mcp_call`; retired discovery/retirement tools are unavailable. A changed source
+upgrade from name-only discovery, search again using `tools.search` in Code Mode
+or `tool_search` without it; retired discovery/retirement tools are unavailable.
+Current canonical discovery bindings remain reusable in that Session across
+fresh scripts and resume. Sequentially awaiting search and call in one script
+works; sibling function calls in one model response retain their prior-binding
+requirement. A changed source
 or schema also requires fresh discovery. Discovery grants no permission and
 never authorizes replay of an unknown external effect.
 

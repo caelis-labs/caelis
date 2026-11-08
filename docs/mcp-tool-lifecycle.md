@@ -1,6 +1,8 @@
 # MCP tools and fixed model entry points
 
-Every MCP-enabled native Session presents the fixed `tool_search` and `mcp_call`
+Native product Sessions use [Code Mode](code-mode.md): the fixed `js_exec`
+declaration exposes `tools.search` and `tools.call` inside an async script.
+SDK embedders without Code Mode use the fixed `tool_search` and `mcp_call`
 function declarations. Directory changes, search results and reconnection never
 append MCP schemas to the model's `tools` array. Ordinary model capability filters
 still apply to non-MCP tools. This contract covers the serialized tools field;
@@ -8,15 +10,16 @@ messages, instructions, model configuration and other request prefixes can chang
 
 ## Discovery and invocation
 
-`tool_search` uses the existing Manager directory and selector. Results contain
+Both `tools.search(query)` in Code Mode and `tool_search` without Code Mode
+use the existing Manager directory and selector. Results contain
 exact names, descriptions, complete normalized `input_schema` objects, and
 identity/version bindings. A per-result budget omits whole entries, with omission
 counts, rather than returning truncated callable schemas. There is no per-run
 64-tool limit or accumulated schema-token exposure budget.
 
 MCP startup is asynchronous. Search reads the currently ready directory once;
-it does not wait for connecting servers. An empty result serializes as `{}` and
-grants no discovery binding. It means no ready match at that instant, including
+it does not wait for connecting servers. An empty legacy search result serializes as `{}`; Code Mode returns an empty
+`tools` list. Neither grants a discovery binding. It means no ready match at that instant, including
 while all servers are connecting, rather than proof that the plugin has no tools.
 A fresh search after readiness can discover the tools; an earlier empty receipt
 is never filled in later. Complete ready servers remain searchable independently
@@ -37,21 +40,25 @@ Successful new-format canonical search receipts are the sole durable discovery
 source. Runtime projects their bindings across compaction and file-Store resume;
 it does not maintain another durable registry. Old ToolSearch results, exposure
 metadata and checkpoint discovered-name fields remain readable history only.
-Legacy Sessions resume with fixed tools and must search again before an MCP call.
+Historical name-only discovery requires a fresh search before an MCP call.
+Current canonical bindings are reusable in the same Session across fresh VMs,
+compaction and resume while their source and schema remain valid.
 There is no legacy execution path or `tool_retire` tool.
 
 `mcp_call(tool_name, arguments)` requires an exact previously discovered name and
 object arguments. Runtime binds the assembled real Tool once per complete model
 response, compares its identity/version and validates its accepted input schema.
-A search in the same response cannot authorize an undiscovered sibling call.
-Changed or unavailable bindings fail closed and require a new search. No name
+Without Code Mode, a search in the same model response cannot authorize an
+undiscovered sibling call. In Code Mode, sequentially awaiting `tools.search`
+then `tools.call` in one script works: the canonical search receipt is committed
+before the call. Changed or unavailable bindings fail closed and require a new search. No name
 lookup fallback grants eligibility.
 
 The resolved Tool enters the existing lifecycle, invocation, policy/approval and
 execution-journal wrappers. It is never dispatched directly through Manager.
 Policy, approvals, display events and the one Journal record use the real name
-and arguments. The model-facing call/result retain the original `mcp_call` name
-and call ID; a typed original-call field preserves that pairing through Store
+and arguments. Without Code Mode, the model-facing call/result retain the original `mcp_call`
+name and call ID; a typed original-call field preserves that pairing through Store
 round trips and unknown-result recovery. Recovery never replays an unknown MCP
 effect or invents a recoverer. Final Manager admission still checks the pinned
 catalog handle immediately before dispatch.

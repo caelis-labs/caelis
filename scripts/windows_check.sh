@@ -57,5 +57,12 @@ bash ./scripts/go_test_nonempty.sh ./surfaces/tui/app \
 bash ./scripts/go_test_nonempty.sh ./surfaces/tui/app \
   '^Test(SessionObservationRecovery|SessionObservationRetry|ProductSessionObservationAutomaticallyRecoversAfterHostReplacement)' windows-host-reconnect -count=1
 
+# Code Mode is enabled in product assembly on Windows. Exercise native worker
+# handshake, cancellation and Wait/reaping through the installed CLI entry.
+mkdir -p .tmp/bin
+CGO_ENABLED=0 go build -o .tmp/bin/caelis-code-mode-smoke.exe ./cmd/caelis
+CAELIS_TEST_CLI_BINARY=.tmp/bin/caelis-code-mode-smoke.exe go test -count=1 -timeout "${GO_TEST_TIMEOUT:-5m}" \
+  ./cmd/caelis ./agent-sdk/tool/codemode/...
+
 # Match the release configuration for all production packages.
 CGO_ENABLED=0 go build ./...

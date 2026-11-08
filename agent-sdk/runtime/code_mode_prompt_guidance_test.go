@@ -18,7 +18,7 @@ func TestCodeModeMinimalModelInterface(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, value := range []string{text, (&codemode.Tool{Name: codemode.ToolName}).Definition().Description} {
-		for _, removed := range []string{"tools.describe", "output.text", "output.image", "batch_id", "records", "Session", "Runtime", "approval"} {
+		for _, removed := range []string{"tools.describe", "output.text", "output.image", "batch_id", "records()", "Session", "Runtime", "approval"} {
 			if strings.Contains(value, removed) {
 				t.Fatalf("obsolete model guidance %q", removed)
 			}

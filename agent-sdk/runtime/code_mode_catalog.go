@@ -12,7 +12,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 )
 
-const codeModeCatalogKey = "code_mode_catalog_v2"
+const codeModeCatalogKey = codemode.MetadataCatalog
 
 // This is a hint snapshot, not discovery or authorization. An empty initial
 // ready catalog stays empty; later tools remain discoverable without rewriting
@@ -51,6 +51,9 @@ func (r *Runtime) codeModeCatalog(ctx context.Context, ref session.SessionRef, s
 				names = append(names, name)
 			}
 			sort.Strings(names)
+			if len(names) > 6 {
+				names = names[:6]
+			}
 			for _, name := range names {
 				one, found, lookupErr := named.Lookup(ctx, name)
 				if ctx.Err() != nil {
@@ -64,7 +67,10 @@ func (r *Runtime) codeModeCatalog(ctx context.Context, ref session.SessionRef, s
 			candidates = source.Tools()
 		}
 	}
-	for _, one := range candidates {
+	for i, one := range candidates {
+		if i >= 256 || len(hints) >= 6 {
+			break
+		}
 		if one == nil {
 			continue
 		}
@@ -86,10 +92,10 @@ func (r *Runtime) codeModeCatalog(ctx context.Context, ref session.SessionRef, s
 	if len(hints) > 6 {
 		hints = hints[:6]
 	}
-	text := `tools.search(query) returns {tools:[{name,description,input_schema}],count,truncated}: exact name first, otherwise capability search. Returned schemas are complete; reuse known schemas. tools.call(name,args) returns {parts:[{kind,text?,json?,handle?,mime_type?}]}. Return the value (or selected/combined parts) to deliver its text, JSON and images. Parameters must follow the schema; pass required exact strings unchanged. After a stale-tool error, search again. Native filesystem tools remain directly callable; shell is native only.`
+	text := codemode.Guidance + "\n\n" + tool.ExternalCapabilityDescriptionPrefix
 	if len(hints) > 0 {
 		raw, _ := json.Marshal(hints)
-		text += "\n\nAvailable tool hints. " + tool.ExternalCapabilityDescriptionPrefix + "\n" + string(raw)
+		text += "\n\nPartial tool hint snapshot; use tools.search for other capabilities.\n" + string(raw)
 	}
 	_, err = r.sessions.UpdateState(ctx, session.UpdateStateRequest{SessionRef: ref, MutationGuard: session.RuntimeMutationGuard(ctx), Update: func(current map[string]any) (map[string]any, error) {
 		if prior, ok := current[codeModeCatalogKey].(string); ok {

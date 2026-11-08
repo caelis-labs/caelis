@@ -464,7 +464,7 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 				augmentedTools = append([]tool.Tool{spawn.NewWithTargets(agents, targets)}, augmentedTools...)
 			}
 			metadata := map[string]any{}
-			if mcpMgr != nil {
+			if _, frozen := req.State[codemode.MetadataCatalog].(string); !frozen && mcpMgr != nil {
 				metadata[codemode.MetadataSelectedTools] = selectedCodeModeTools(mcpMgr.Tools())
 			}
 			if systemPrompt := stringFromMap(effectiveBaseMetadata, "system_prompt"); systemPrompt != "" {
