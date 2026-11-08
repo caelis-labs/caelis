@@ -1,8 +1,12 @@
 package runtime
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"image"
+	"image/png"
 	"os"
 	"path/filepath"
 	"strings"
@@ -30,9 +34,13 @@ func TestJSExecReturnOnlySelectedMedia(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store, active, _ := codeModeStore(t)
+			var bitmap bytes.Buffer
+			if err := png.Encode(&bitmap, image.NewRGBA(image.Rect(0, 0, 1, 1))); err != nil {
+				t.Fatal(err)
+			}
 			picture := func(name string) tool.Tool {
 				return tool.NamedTool{Def: tool.Definition{Name: "Picture" + name, InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
-					return tool.Result{Content: []model.Part{model.NewTextPart("caption " + name), model.NewJSONPart([]byte(`{"value":42}`)), model.NewMediaPart(model.MediaModalityImage, model.MediaSource{Kind: model.MediaSourceInline, Data: "owned-" + name}, "image/png", name)}}, nil
+					return tool.Result{Content: []model.Part{model.NewTextPart("caption " + name), model.NewJSONPart([]byte(`{"value":42}`)), model.NewMediaPart(model.MediaModalityImage, model.MediaSource{Kind: model.MediaSourceInline, Data: base64.StdEncoding.EncodeToString(bitmap.Bytes())}, "image/png", name)}}, nil
 				}}
 			}
 			driver := &mcpScriptModel{steps: func(i int, _ *model.Request) []model.ToolCall {
@@ -67,6 +75,23 @@ func TestJSExecReturnOnlySelectedMedia(t *testing.T) {
 						}
 					}
 				}
+			}
+			var modelMedia []string
+			for _, req := range driver.requests {
+				for _, message := range req.Messages {
+					for _, part := range message.Parts {
+						if part.ToolResult != nil {
+							for _, content := range part.ToolResult.Content {
+								if content.Media != nil {
+									modelMedia = append(modelMedia, content.Media.Name)
+								}
+							}
+						}
+					}
+				}
+			}
+			if strings.Join(modelMedia, ",") != strings.Join(tc.want, ",") {
+				t.Fatalf("unselected/historical media reached model: %v, want %v", modelMedia, tc.want)
 			}
 			if strings.Join(got, ",") != strings.Join(tc.want, ",") || failed != tc.failed {
 				t.Fatalf("returned media=%v failed=%v", got, failed)
