@@ -78,7 +78,7 @@ func (m *Manager) admitCatalogToolLocked(ctx context.Context, remote *MCPTool) e
 			return nil
 		}
 	}
-	return tool.NewError(tool.ErrorCodeStaleRevision, "MCP directory refreshed; use tools.describe/search to rediscover before calling")
+	return tool.NewError(tool.ErrorCodeStaleRevision, "MCP directory refreshed; use tools.search to rediscover before calling")
 }
 
 func (m *Manager) watchCatalog(ctx context.Context, server *managedServer) {
@@ -290,13 +290,13 @@ func (m *Manager) CheckToolBinding(ctx context.Context, binding tool.Binding) er
 					return tool.NewError(errorcode.PermissionDenied, "MCP source access was revoked")
 				}
 				if dirty {
-					return tool.NewError(tool.ErrorCodeStaleRevision, "MCP directory was invalidated; refresh then tools.describe/search again")
+					return tool.NewError(tool.ErrorCodeStaleRevision, "MCP directory was invalidated; refresh then tools.search again")
 				}
 			}
-			return tool.NewError(tool.ErrorCodeStaleRevision, "MCP directory refreshed; use tools.describe/search to rediscover before calling")
+			return tool.NewError(tool.ErrorCodeStaleRevision, "MCP directory refreshed; use tools.search to rediscover before calling")
 		}
 	}
-	return tool.NewError(tool.ErrorCodeStaleRevision, "MCP directory refreshed; binding is no longer present; use tools.describe/search")
+	return tool.NewError(tool.ErrorCodeStaleRevision, "MCP directory refreshed; binding is no longer present; use tools.search")
 }
 
 // Lookup returns the current canonical candidate only while its source is

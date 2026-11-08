@@ -17,7 +17,7 @@ func TestJSExecStaticDiscoveredUnionStillRejectsDuplicateRegistrations(t *testin
 	driver := &h1Model{s: s, main: func(i int, _ *model.Request) []model.ToolCall {
 		switch i {
 		case 0:
-			return h1Script(`output.text(await tools.describe("a__target"));`)
+			return h1Script(`return await tools.search("a__target");`)
 		case 1:
 			return h1Script(`await tools.call("a__target",{value:1});`)
 		}
@@ -45,7 +45,7 @@ func TestJSExecStaticAndDeferredUnionKeepsBothBindings(t *testing.T) {
 	driver := &h1Model{s: s, main: func(i int, _ *model.Request) []model.ToolCall {
 		switch i {
 		case 0:
-			return h1Script(`output.text(await tools.describe("a__target"));output.text(await tools.describe("z__target"));`)
+			return h1Script(`return [await tools.search("a__target"),await tools.search("z__target")];`)
 		case 1:
 			return h1Script(`await tools.call("a__target",{value:1});await tools.call("z__target",{value:1});`)
 		}

@@ -85,7 +85,7 @@ func TestCodeModeCLIWorkerHandshake(t *testing.T) {
 		input.WriteString(payload)
 	}
 	send(1, `{"limits":{}}`)
-	send(2, `output.text("native-cli");return {total:42,fs:typeof require};`)
+	send(2, `return {text:"native-cli",total:42,fs:typeof require,output:typeof output,describe:typeof tools.describe};`)
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -124,17 +124,17 @@ func TestCodeModeCLIWorkerHandshake(t *testing.T) {
 		t.Fatalf("worker ready=%d", kind)
 	}
 	kind, payload := next()
-	if kind != 7 {
+	if kind != 6 {
 		t.Fatalf("worker result=%d %s", kind, payload)
 	}
 	var result struct {
-		Output []string `json:"output"`
-		Result struct {
-			Total int    `json:"total"`
-			FS    string `json:"fs"`
-		} `json:"result"`
+		Text     string `json:"text"`
+		Total    int    `json:"total"`
+		FS       string `json:"fs"`
+		Output   string `json:"output"`
+		Describe string `json:"describe"`
 	}
-	if json.Unmarshal(payload, &result) != nil || result.Result.Total != 42 || result.Result.FS != "undefined" || len(result.Output) != 1 || result.Output[0] != "native-cli" || len(raw) != 0 {
+	if json.Unmarshal(payload, &result) != nil || result.Total != 42 || result.FS != "undefined" || result.Text != "native-cli" || result.Output != "undefined" || result.Describe != "undefined" || len(raw) != 0 {
 		t.Fatalf("worker protocol result=%s trailing=%d", payload, len(raw))
 	}
 	t.Logf("native CLI early-worker handshake complete; process Wait succeeded, result=%s", payload)

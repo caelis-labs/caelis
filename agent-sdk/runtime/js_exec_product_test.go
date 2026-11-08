@@ -68,6 +68,7 @@ func TestJSExecRealGojaDiscoveryAndStableTools(t *testing.T) {
 	source := &jsExecSource{}
 	def := fixtureMCPDefinition("v1")
 	def.Name = "fixture__exec"
+	def.InputSchema = map[string]any{"type": "object", "properties": map[string]any{"script": map[string]any{"type": "string", "enum": []string{"observe"}}}, "required": []string{"script"}, "additionalProperties": false}
 	def.Metadata[tool.MetadataMCPSourceTrusted] = true
 	def.Metadata[tool.MetadataMCPServer] = "desktop-world"
 	def.Metadata[tool.MetadataMCPTool] = "exec"
@@ -82,9 +83,9 @@ func TestJSExecRealGojaDiscoveryAndStableTools(t *testing.T) {
 		return tool.Result{Content: []model.Part{model.NewJSONPart(json.RawMessage(`{"value":42}`)), imagePart}}, nil
 	}}}
 	scripts := []string{
-		`const r=await tools.search("fixture");output.text(r);`,
-		`output.text(await tools.describe("fixture__exec"));`,
-		`const r=await tools.call("fixture__exec",{script:"observe"});const a=await tools.call("Read",{path:"numbers.txt"});const b=await tools.call("Read",{path:"numbers.txt"});if(a.parts[0].json.content!=="1: 17,25"||b.parts[0].json.content!=="1: 17,25")throw Error("Read content shape");output.text([a.parts[0].json.content,b.parts[0].json.content]);for(const p of r.parts)if(p.handle)await output.image(p.handle);return {value:r.parts[0].json.value,fs:a.outcome};`,
+		`const s=await tools.search("fixture");if(s.count!==1||!s.tools[0].input_schema.properties.script)throw Error("incomplete search schema");return s;`,
+		`return await tools.call("fixture__exec",{script:"observe"});`,
+		`const a=await tools.call("Read",{path:"numbers.txt"});const b=await tools.call("Read",{path:"numbers.txt"});if(a.parts[0].json.content!=="1: 17,25"||b.parts[0].json.content!=="1: 17,25")throw Error("Read content shape");return [a,b];`,
 	}
 	driver := &mcpScriptModel{steps: func(i int, req *model.Request) []model.ToolCall {
 		if i >= len(scripts) {
@@ -131,7 +132,7 @@ func TestJSExecRealGojaDiscoveryAndStableTools(t *testing.T) {
 		}
 	}
 	if !selectedImage {
-		t.Fatal("same-invocation output.image did not reach model")
+		t.Fatal("directly returned media did not reach model")
 	}
 	var declaration, instructions []byte
 	for _, req := range driver.requests {
@@ -409,7 +410,7 @@ func TestJSExecStaleSchemaRejectsOldArgumentsBeforeEffect(t *testing.T) {
 	driver := &mcpScriptModel{steps: func(i int, r *model.Request) []model.ToolCall {
 		switch i {
 		case 0:
-			return []model.ToolCall{{ID: "describe", Name: codemode.ToolName, Args: `{"code":"return await tools.describe('fixture__changing');"}`}}
+			return []model.ToolCall{{ID: "describe", Name: codemode.ToolName, Args: `{"code":"return await tools.search('fixture__changing');"}`}}
 		case 1:
 			next := fixtureMCPDefinition("v2")
 			next.Name = old.Name
@@ -429,7 +430,7 @@ func TestJSExecStaleSchemaRejectsOldArgumentsBeforeEffect(t *testing.T) {
 	for _, e := range events {
 		if e.Tool != nil && e.Tool.ID == "stale" && e.Type == session.EventTypeToolResult {
 			raw, _ := json.Marshal(e.Tool.Output)
-			if e.Tool.Status != "failed" || !bytes.Contains(raw, []byte("refreshed")) || !bytes.Contains(raw, []byte("tools.describe(name)")) {
+			if e.Tool.Status != "failed" || !bytes.Contains(raw, []byte("refreshed")) || !bytes.Contains(raw, []byte("tools.search(name)")) {
 				t.Fatalf("stale call lacked actionable error: %s", raw)
 			}
 			checked = true

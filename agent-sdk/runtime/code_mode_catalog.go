@@ -12,7 +12,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 )
 
-const codeModeCatalogKey = "code_mode_catalog"
+const codeModeCatalogKey = "code_mode_catalog_v2"
 
 // This is a hint snapshot, not discovery or authorization. An empty initial
 // ready catalog stays empty; later tools remain discoverable without rewriting
@@ -86,18 +86,10 @@ func (r *Runtime) codeModeCatalog(ctx context.Context, ref session.SessionRef, s
 	if len(hints) > 6 {
 		hints = hints[:6]
 	}
-	text := `Native fs functions already in tools: call them directly; do not search extensions for them. No shell/process in JS.
-Valid Session schema: tools.call(name,args) directly. Missing schema for a known extension name (string), schema-only invocation:
-output.text(await tools.describe(name));
-Choose args by schema in a later invocation; pass required exact strings unchanged. Inspect parts[kind=json].json, compute/filter/group/count in VM, emit only needed summary/sources. Example for JSON {batch_id,records}:
-const r=await tools.call(name,args),d=r.parts.find(p=>p.kind==="json").json;
-output.text({count:d.records.length,source:d.batch_id});
-VMs clear variables, not Session discovery; reuse schemas across Turns. Await sequentially; bindings/permissions stay live; on stale, describe(name).
-Only unknown extension names need search: {tools:[{name,description}],count,truncated}, no admission:
-const s=await tools.search("unknown");if(s.count)output.text(await tools.describe(s.tools[0].name));else output.text(s);`
+	text := `tools.search(query) returns {tools:[{name,description,input_schema}],count,truncated}: exact name first, otherwise capability search. Returned schemas are complete; reuse known schemas. tools.call(name,args) returns {parts:[{kind,text?,json?,handle?,mime_type?}]}. Return the value (or selected/combined parts) to deliver its text, JSON and images. Parameters must follow the schema; pass required exact strings unchanged. After a stale-tool error, search again. Native filesystem tools remain directly callable; shell is native only.`
 	if len(hints) > 0 {
 		raw, _ := json.Marshal(hints)
-		text += "\n\nSelected hints (fixed, not grants). " + tool.ExternalCapabilityDescriptionPrefix + "\n" + string(raw)
+		text += "\n\nAvailable tool hints. " + tool.ExternalCapabilityDescriptionPrefix + "\n" + string(raw)
 	}
 	_, err = r.sessions.UpdateState(ctx, session.UpdateStateRequest{SessionRef: ref, MutationGuard: session.RuntimeMutationGuard(ctx), Update: func(current map[string]any) (map[string]any, error) {
 		if prior, ok := current[codeModeCatalogKey].(string); ok {

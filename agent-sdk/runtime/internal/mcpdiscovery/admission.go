@@ -7,7 +7,7 @@ import (
 )
 
 // Admit projects only exact current bindings, under the discovery result budget.
-// Both canonical model calls and nested describe use this single admission owner.
+// Both canonical model calls and nested search use this single admission owner.
 func Admit(selected tool.ToolSearchResult, current map[string]tool.Tool, result tool.Result) (tool.Result, error) {
 	admitted := tool.ToolSearchResult{Truncated: selected.Truncated, OmittedCount: selected.OmittedCount}
 	for _, entry := range selected.Tools {

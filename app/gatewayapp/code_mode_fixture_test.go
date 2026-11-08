@@ -24,7 +24,7 @@ func CodeModeFixtureCall(enabled bool, name, args string) (string, string) {
 		_ = json.Unmarshal([]byte(args), &input)
 		if input.Name != "" {
 			value, _ := json.Marshal(input.Name)
-			source = "return await tools.describe(" + string(value) + ");"
+			source = "return await tools.search(" + string(value) + ");"
 		} else {
 			value, _ := json.Marshal(input.Query)
 			source = "return await tools.search(" + string(value) + ");"
@@ -39,7 +39,7 @@ func CodeModeFixtureCall(enabled bool, name, args string) (string, string) {
 		if len(input.Args) == 0 {
 			input.Args = []byte(`{}`)
 		}
-		source = "await tools.describe(" + string(nameJSON) + ");const r=await tools.call(" + string(nameJSON) + "," + string(input.Args) + ");for(const p of r.parts){if(p.handle)await output.image(p.handle);else if(p.text)output.text(p.text);else if(p.json)output.text(p.json);}return {outcome:r.outcome,is_error:!!r.is_error};"
+		source = "await tools.search(" + string(nameJSON) + ");return await tools.call(" + string(nameJSON) + "," + string(input.Args) + ");"
 	default:
 		return name, args
 	}
@@ -57,6 +57,9 @@ func CodeModeFixturePhase(name, args string) string {
 		Code string `json:"code"`
 	}
 	_ = json.Unmarshal([]byte(args), &input)
+	if strings.Contains(input.Code, "tools.call(") {
+		return tool.MCPCallToolName
+	}
 	if strings.Contains(input.Code, "tools.search(") {
 		return tool.ToolSearchToolName
 	}

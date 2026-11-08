@@ -63,9 +63,10 @@
   }
   function decode(raw) {
     const envelope=parse(raw), reply=parse(envelope.raw);
-    define(reply,"raw_json",{value:envelope.raw,enumerable:false});
-    if (envelope.error) {const e=new ErrorType(envelope.error);e.reply=reply;throw e;}
-    return reply;
+    if (envelope.error || reply.is_error || reply.outcome==="unknown_outcome") {const e=new ErrorType(envelope.error || "Tool call failed; do not replay an unknown outcome");e.reply=reply;throw e;}
+    const result={parts:reply.parts||[]};
+    define(result,"raw_json",{value:envelope.raw,enumerable:false});
+    return result;
   }
   const tools=freeze({
     call(name,args) {
@@ -74,25 +75,9 @@
       return then(rpc("call",name,encode(args,limits.argument_bytes)),decode);
     },
     search(query) {
-      if(typeof query!=="string" || query.length===0 || query.length>1024)throw new ErrorType("tools.search(query) requires a non-empty string; search only unknown extension names");
-      return then(then(rpc("search",query,"{}"),decode),r=>r.parts[0].json);
-    },
-    describe(name) {
-      if(typeof name!=="string" || name.length===0 || name.length>1024)throw new ErrorType("tools.describe(name) requires a name string, e.g. searchResult.tools[0].name; reuse valid Session schemas with tools.call");
-      return then(then(rpc("describe",name,"{}"),decode),r=>r.parts[0].json);
+      if(typeof query!=="string" || query.length===0 || query.length>1024)throw new ErrorType("tools.search(query) requires a non-empty name or capability string");
+      return then(then(rpc("search",query,"{}"),decode),r=>define(r.parts[0].json,"raw_json",{value:r.raw_json,enumerable:false}));
     }
   });
-  const texts=[];let textBytes=0;
-  const output=freeze({
-    text(value) {
-      const encoded=encode(value,limits.output_bytes-textBytes);textBytes+=encoded.length;
-      if(texts.length>=limits.calls)throw new ErrorType("output count exceeded");
-      texts.push(parse(encoded));
-    },
-    image(handle) {
-      if(typeof handle!=="string" || handle.length>1024)throw new ErrorType("invalid media handle");
-      return then(rpc("emit",handle,""),decode);
-    }
-  });
-  return freeze({tools, output, encode: value => encode(texts.length ? {output:texts,result:value===undefined?null:value} : value===undefined?null:value,limits.output_bytes)});
+  return freeze({tools, encode:value=>encode(value===undefined?null:value,limits.output_bytes)});
 })

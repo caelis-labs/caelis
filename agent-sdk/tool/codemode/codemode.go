@@ -57,18 +57,17 @@ type Reply struct {
 }
 
 // Host is the executor's complete effect capability. Call arguments must be a
-// JSON object. Emit selects original opaque content for the final model result.
+// JSON object. Returned media is selected by Runtime from the final script value.
 // Cancellation of a supplied context may shorten, never extend, Runtime scope.
 type Host interface {
 	Call(context.Context, string, json.RawMessage) (Reply, error)
-	Emit(context.Context, string) error
 }
 
 // DiscoveryHost adds the existing scoped discovery owner to the bridge.
-// Describe requests one exact schema; search returns names/descriptions only.
+// Search returns full schemas and records discovery through the existing owner.
 type DiscoveryHost interface {
 	Host
-	Discover(context.Context, string, bool) (Reply, error)
+	Search(context.Context, string) (Reply, error)
 }
 
 // Executor is the trusted Go adapter for one engine invocation. The adapter must
@@ -116,7 +115,7 @@ type Tool struct {
 
 // Definition declares mutually exclusive inline and file source inputs.
 func (t *Tool) Definition() tool.Definition {
-	return tool.Definition{Name: t.Name, Metadata: map[string]any{tool.MetadataToolKind: ToolKind}, Description: "Fresh isolated JS async body from code/file; Session discovery persists. Select output with output.text(object), output.image(handle) or JSON return. FS keeps permissions; no shell/process. raw_json is explicit/non-enumerable; Numbers round past 2^53-1. Failures remain errors. Long work yields original Task: read/wait/cancel; never replay unknown effects.", InputSchema: map[string]any{
+	return tool.Definition{Name: t.Name, Metadata: map[string]any{tool.MetadataToolKind: ToolKind}, Description: "Call tools and process data with JavaScript from code or file. Not Node.js: no modules, direct network or processes; shell stays native. Use tools.search(query) for full schemas (exact name or capability), tools.call(name,args) to invoke; reuse known schemas. Return the value to deliver text, JSON and images. Long calls may yield a Task handle.", InputSchema: map[string]any{
 		"type": "object", "additionalProperties": false,
 		"properties": map[string]any{"code": map[string]any{"type": "string", "minLength": 1}, "file": map[string]any{"type": "string", "minLength": 1}, "yield_time_ms": map[string]any{"type": "integer", "minimum": 0, "maximum": 60000, "default": 10000}},
 		"oneOf":      []any{map[string]any{"required": []string{"code"}}, map[string]any{"required": []string{"file"}}},

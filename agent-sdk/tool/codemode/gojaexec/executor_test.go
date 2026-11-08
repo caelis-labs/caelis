@@ -27,7 +27,6 @@ type testHost struct {
 func (h testHost) Call(ctx context.Context, n string, a json.RawMessage) (codemode.Reply, error) {
 	return h.call(ctx, n, a)
 }
-func (testHost) Emit(context.Context, string) error { return nil }
 func fixed(code string) codemode.Source {
 	sum := sha256.Sum256([]byte(code))
 	return codemode.Source{Code: code, SHA256: hex.EncodeToString(sum[:])}
@@ -104,39 +103,27 @@ func TestRawJSONIsExplicitAndDefaultOutputDoesNotDuplicate(t *testing.T) {
 	h := testHost{call: func(context.Context, string, json.RawMessage) (codemode.Reply, error) { return reply, nil }}
 	// Mutating the global intrinsic cannot replace the trusted decoder's captured
 	// defineProperty. Explicit access remains exact; ordinary enumeration omits it.
-	code := `Object.defineProperty=()=>{throw Error("untrusted override")};const r=await tools.call("Read",{});output.text(r);output.text(r.raw_json);output.text({...r,raw_json:r.raw_json});return {keys:Object.keys(r),spread:{...r},stringified:JSON.stringify(r),content:r.parts[0].json.content};`
+	code := `Object.defineProperty=()=>{throw Error("untrusted override")};const r=await tools.call("Read",{});return {reply:r,raw:r.raw_json,keys:Object.keys(r),spread:{...r},stringified:JSON.stringify(r),content:r.parts[0].json.content,removed:[typeof output,typeof tools.describe]};`
 	result, err := (&Executor{}).Execute(t.Context(), fixed(code), codemode.Limits{}, h)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var got struct {
-		Output []json.RawMessage `json:"output"`
-		Result struct {
-			Keys        []string                   `json:"keys"`
-			Spread      map[string]json.RawMessage `json:"spread"`
-			Stringified string                     `json:"stringified"`
-			Content     string                     `json:"content"`
-		} `json:"result"`
+		Reply       map[string]json.RawMessage `json:"reply"`
+		Raw         string                     `json:"raw"`
+		Keys        []string                   `json:"keys"`
+		Spread      map[string]json.RawMessage `json:"spread"`
+		Stringified string                     `json:"stringified"`
+		Content     string                     `json:"content"`
+		Removed     []string                   `json:"removed"`
 	}
 	if err = json.Unmarshal(result, &got); err != nil {
 		t.Fatal(err)
 	}
-	var explicit string
-	if len(got.Output) != 3 || json.Unmarshal(got.Output[1], &explicit) != nil || explicit != string(raw) {
-		t.Fatalf("lossless explicit raw JSON lost: %s", result)
+	if got.Raw != string(raw) || got.Reply["raw_json"] != nil || got.Spread["raw_json"] != nil || strings.Contains(got.Stringified, "raw_json") || got.Content != "retained payload" || got.Reply["parts"] == nil || got.Reply["call_id"] != nil {
+		t.Fatalf("unexpected public reply: %s", result)
 	}
-	for _, key := range got.Result.Keys {
-		if key == "raw_json" {
-			t.Fatal("raw_json became enumerable")
-		}
+	if strings.Join(got.Removed, ",") != "undefined,undefined" || !strings.Contains(string(got.Reply["parts"]), "9223372036854776000") {
+		t.Fatalf("interface/Number semantics: %s", result)
 	}
-	var defaultOutput map[string]json.RawMessage
-	_ = json.Unmarshal(got.Output[0], &defaultOutput)
-	if defaultOutput["raw_json"] != nil || got.Result.Spread["raw_json"] != nil || strings.Contains(got.Result.Stringified, "raw_json") || got.Result.Content != "retained payload" || defaultOutput["parts"] == nil {
-		t.Fatalf("default output duplicated raw JSON or lost parts: %s", result)
-	}
-	if !strings.Contains(string(got.Output[0]), "9223372036854776000") {
-		t.Fatalf("unexpected JS Number semantics: %s", got.Output[0])
-	}
-	t.Logf("default_output_bytes=%d explicit_raw_bytes=%d enumerable_equivalent_bytes=%d; UTF-8 JSON bytes, not model tokens", len(got.Output[0]), len(explicit), len(got.Output[2]))
 }

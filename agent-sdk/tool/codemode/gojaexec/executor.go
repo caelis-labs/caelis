@@ -34,7 +34,6 @@ type Metrics struct {
 	CPU              time.Duration `json:"cpu_ns"`
 	PeakRSS          int64         `json:"peak_rss_bytes"`
 	HostCalls        int           `json:"host_calls"`
-	HostEmits        int           `json:"host_emits"`
 	HostRequestBytes int64         `json:"host_request_bytes"`
 	HostReplyBytes   int64         `json:"host_reply_bytes"`
 	Killed           bool          `json:"killed"`
@@ -244,45 +243,33 @@ func (e *Executor) Execute(ctx context.Context, source codemode.Source, limits c
 				stopTimer = time.NewTimer(100 * time.Millisecond)
 				defer stopTimer.Stop()
 				stopC = stopTimer.C
-			case frameCall, frameEmit:
+			case frameCall:
 				requests++
 				if workCtx.Err() != nil || f.id == 0 || requests > l.Calls {
 					return nil, fmt.Errorf("worker request admission closed or budget exceeded")
 				}
 				var req callRequest
-				if f.kind == frameCall {
-					if json.Unmarshal(f.data, &req) != nil || len(req.Name) > 1024 || len(req.Arguments) > l.ArgumentBytes || !json.Valid(req.Arguments) || len(req.Arguments) == 0 || req.Arguments[0] != '{' {
-						return nil, fmt.Errorf("invalid or oversized worker call")
-					}
-				} else if len(f.data) > 1024 {
-					return nil, fmt.Errorf("oversized media handle")
+				if json.Unmarshal(f.data, &req) != nil || len(req.Name) > 1024 || len(req.Arguments) > l.ArgumentBytes || !json.Valid(req.Arguments) || len(req.Arguments) == 0 || req.Arguments[0] != '{' {
+					return nil, fmt.Errorf("invalid or oversized worker call")
 				}
 				metricMu.Lock()
 				m.HostRequestBytes += int64(len(f.data))
-				if f.kind == frameCall {
-					m.HostCalls++
-				} else {
-					m.HostEmits++
-				}
+				m.HostCalls++
 				metricMu.Unlock()
 				hostWG.Go(func() {
 					var reply codemode.Reply
 					var callErr error
-					if f.kind == frameCall {
-						switch req.Method {
-						case "", "call":
-							reply, callErr = host.Call(workCtx, req.Name, req.Arguments)
-						case "search", "describe":
-							if discovery, ok := host.(codemode.DiscoveryHost); ok {
-								reply, callErr = discovery.Discover(workCtx, req.Name, req.Method == "describe")
-							} else {
-								callErr = fmt.Errorf("discovery is unavailable")
-							}
-						default:
-							callErr = fmt.Errorf("invalid bridge method")
+					switch req.Method {
+					case "", "call":
+						reply, callErr = host.Call(workCtx, req.Name, req.Arguments)
+					case "search":
+						if discovery, ok := host.(codemode.DiscoveryHost); ok {
+							reply, callErr = discovery.Search(workCtx, req.Name)
+						} else {
+							callErr = fmt.Errorf("discovery is unavailable")
 						}
-					} else {
-						callErr = host.Emit(workCtx, string(f.data))
+					default:
+						callErr = fmt.Errorf("invalid bridge method")
 					}
 					// Runtime already bounds Reply before returning it. Check exact
 					// bytes again before crossing the process boundary.
@@ -304,7 +291,7 @@ func (e *Executor) Execute(ctx context.Context, source codemode.Source, limits c
 					if callErr != nil {
 						response.Error = "Host request failed (" + string(errorcode.CodeOf(callErr)) + ")"
 						if errorcode.Is(callErr, tool.ErrorCodeStaleRevision) {
-							response.Error = "Tool directory refreshed; use tools.describe(name) to reload its schema/binding before calling. Old arguments were not executed."
+							response.Error = "Tool directory refreshed; use tools.search(name) to reload its schema/binding before calling. Old arguments were not executed."
 						}
 						if errorcode.Is(callErr, errorcode.UnknownOutcome) {
 							response.Error = "Tool outcome is unknown; do not replay the effect."

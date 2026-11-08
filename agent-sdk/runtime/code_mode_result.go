@@ -1,7 +1,6 @@
 package runtime
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 
@@ -77,24 +76,89 @@ func opaquePartBytes(part model.Part) int {
 	return 0
 }
 
-func (h *codeModeHost) Emit(ctx context.Context, handle string) error {
-	if err := ctx.Err(); err != nil {
-		return err
+// returnedParts runs once under host.mu after all producers have drained. Only
+// media explicitly present in this invocation's final return value is selected;
+// JSON payloads remain opaque data, not a source of implicit media references.
+func (h *codeModeHost) returnedParts(raw json.RawMessage) ([]model.Part, error) {
+	var value any
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return nil, err
 	}
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	// TurnComplete stops effects, but its own result can still emit its media.
-	if h.ctx.Err() != nil {
-		return h.ctx.Err()
+	var media []model.Part
+	seen := map[string]bool{}
+	var selectMedia func(any, int) error
+	selectMedia = func(value any, depth int) error {
+		if depth > 128 {
+			return fmt.Errorf("returned value exceeds nesting budget")
+		}
+		switch v := value.(type) {
+		case []any:
+			for _, entry := range v {
+				if err := selectMedia(entry, depth+1); err != nil {
+					return err
+				}
+			}
+		case map[string]any:
+			kind, _ := v["kind"].(string)
+			if kind == string(model.PartKindMedia) || kind == string(model.PartKindFileRef) {
+				handle, _ := v["handle"].(string)
+				part, ok := h.handles[handle]
+				if !ok || string(part.Kind) != kind {
+					return fmt.Errorf("returned media handle does not belong to this invocation")
+				}
+				if !seen[handle] {
+					if len(media) >= h.limits.Calls {
+						return fmt.Errorf("returned media budget exceeded")
+					}
+					seen[handle] = true
+					media = append(media, part)
+				}
+				return nil
+			}
+			for name, entry := range v {
+				if kind == "json" && name == "json" {
+					continue
+				}
+				if err := selectMedia(entry, depth+1); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
 	}
-	part, ok := h.handles[handle]
-	if !ok {
-		return fmt.Errorf("unknown Code Mode media handle")
+	if err := selectMedia(value, 0); err != nil {
+		return nil, err
 	}
-	if len(h.emitted) >= h.limits.Calls {
-		return fmt.Errorf("code mode emitted part budget exceeded")
+	// Direct tool replies expose original model parts without a second JSON
+	// envelope. Arbitrary computations and combinations remain ordinary JSON.
+	if object, ok := value.(map[string]any); ok && len(object) == 1 && object["parts"] != nil {
+		var reply struct {
+			Parts []codemode.Part `json:"parts"`
+		}
+		if err := json.Unmarshal(raw, &reply); err != nil {
+			return nil, err
+		}
+		var parts []model.Part
+		selected := map[string]bool{}
+		for _, part := range reply.Parts {
+			switch part.Kind {
+			case "text":
+				parts = append(parts, model.NewTextPart(part.Text))
+			case "json":
+				if !json.Valid(part.JSON) {
+					return nil, fmt.Errorf("invalid returned JSON part")
+				}
+				parts = append(parts, model.NewJSONPart(part.JSON))
+			case string(model.PartKindMedia), string(model.PartKindFileRef):
+				if !selected[part.Handle] {
+					parts = append(parts, h.handles[part.Handle])
+					selected[part.Handle] = true
+				}
+			default:
+				return nil, fmt.Errorf("unsupported returned part kind %q", part.Kind)
+			}
+		}
+		return parts, nil
 	}
-	h.emitted = append(h.emitted, part)
-	delete(h.handles, handle)
-	return nil
+	return append([]model.Part{model.NewJSONPart(raw)}, media...), nil
 }

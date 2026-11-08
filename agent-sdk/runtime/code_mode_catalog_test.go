@@ -45,7 +45,7 @@ func TestJSExecCatalogSelectionIsEmbedderOwnedAndBounded(t *testing.T) {
 		Description string `json:"description"`
 	}
 	start := strings.LastIndex(text, "\n[")
-	if start < 0 || json.Unmarshal([]byte(text[start+1:]), &hints) != nil || len(hints) != 1 || hints[0].Name != def.Name || len(hints[0].Description) > 128 || !utf8.ValidString(hints[0].Description) || strings.Contains(text, "input_schema") {
+	if start < 0 || json.Unmarshal([]byte(text[start+1:]), &hints) != nil || len(hints) != 1 || hints[0].Name != def.Name || len(hints[0].Description) > 128 || !utf8.ValidString(hints[0].Description) || strings.Contains(text[start+1:], "input_schema") {
 		t.Fatalf("generic bounded name/description snapshot=%s", text)
 	}
 }

@@ -148,9 +148,8 @@ func (t runtimeCodeModeTool) execute(ctx context.Context, call tool.Call, source
 	result := tool.Result{ID: call.ID, Name: call.Name, IsError: host.isError && !host.turnComplete, TurnComplete: host.turnComplete,
 		Metadata: map[string]any{"code_mode_source": map[string]any{"path": source.Path, "sha256": source.SHA256}}}
 	if completed.err == nil {
-		result.Content = append(result.Content, model.NewJSONPart(completed.output))
+		result.Content, completed.err = host.returnedParts(completed.output)
 	}
-	result.Content = append(result.Content, host.emitted...)
 	if len(host.failures) > 0 {
 		result.Metadata["code_mode_outcome"] = codemode.OutcomeFailed
 		for _, failure := range host.failures {
@@ -158,7 +157,7 @@ func (t runtimeCodeModeTool) execute(ctx context.Context, call tool.Call, source
 				result.Metadata["code_mode_outcome"] = codemode.OutcomeUnknown
 			}
 		}
-		raw, _ := json.Marshal(map[string]any{"errors": host.failures, "instruction": "Do not replay unknown effects. Reload stale schemas/bindings with tools.describe(name)."})
+		raw, _ := json.Marshal(map[string]any{"errors": host.failures, "instruction": "Do not replay unknown effects. Reload stale schemas/bindings with tools.search(name)."})
 		result.Content = append(result.Content, model.NewJSONPart(raw))
 	}
 	if completed.err != nil {
@@ -201,7 +200,6 @@ type codeModeHost struct {
 	turnComplete   bool
 	fatal          error
 	handles        map[string]model.Part
-	emitted        []model.Part
 }
 
 func (h *codeModeHost) stop() {
@@ -249,7 +247,7 @@ func (h *codeModeHost) admit(ctx context.Context, name string, target codeModeTa
 		}
 	}
 	if validationErr == nil {
-		validationErr = tool.NewError(tool.ErrorCodeStaleRevision, "Code Mode source/schema changed; reload with tools.describe(name) before calling")
+		validationErr = tool.NewError(tool.ErrorCodeStaleRevision, "Code Mode source/schema changed; reload with tools.search(name) before calling")
 		one, found, lookupErr := h.owner.lookup(ctx, name)
 		if lookupErr != nil {
 			validationErr = lookupErr
@@ -361,13 +359,13 @@ func (h *codeModeHost) call(requestCtx context.Context, name string, arguments j
 			if found && one != nil {
 				def := one.Definition()
 				if def.Name == name && oldBinding != tool.BindingForDefinition(def) {
-					return codemode.Reply{}, tool.NewError(tool.ErrorCodeStaleRevision, "tool directory refreshed; use tools.describe(name) to reload its schema/binding before calling")
+					return codemode.Reply{}, tool.NewError(tool.ErrorCodeStaleRevision, "tool directory refreshed; use tools.search(name) to reload its schema/binding before calling")
 				}
 			}
 
 			return codemode.Reply{}, tool.NewError(errorcode.Unavailable, "discovered tool is currently unavailable; check connection or access before rediscovery")
 		}
-		return codemode.Reply{}, tool.NewError(tool.ErrorCodeNotFound, "tool has not been described in this Session; use tools.describe(name) first")
+		return codemode.Reply{}, tool.NewError(tool.ErrorCodeNotFound, "tool has not been discovered; use tools.search(name) first")
 	}
 	if !codeModeCanCall(target.definition) {
 		return codemode.Reply{}, tool.NewError(tool.ErrorCodePermissionDenied, "native shell/process execution is prohibited from JavaScript")
@@ -397,7 +395,7 @@ func (h *codeModeHost) call(requestCtx context.Context, name string, arguments j
 	}()
 	ctx, cancel := context.WithCancel(h.ctx)
 	if discovery {
-		ctx = context.WithValue(ctx, codeModeDescribeKey{}, requestCtx.Value(codeModeDescribeKey{}))
+		ctx = context.WithValue(ctx, codeModeSearchKey{}, requestCtx.Value(codeModeSearchKey{}))
 	}
 	defer cancel()
 	stop := context.AfterFunc(requestCtx, cancel)

@@ -1,14 +1,12 @@
 package runtime
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"iter"
 	"os"
 	"path/filepath"
-	goruntime "runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -287,7 +285,7 @@ func TestJSExecH1SessionReuseAndPermissionRevocation(t *testing.T) {
 			m := &h1Model{s: s, main: func(i int, _ *model.Request) []model.ToolCall {
 				switch i {
 				case 0:
-					return h1Script(`globalThis.local=1;output.text(await tools.describe("a__target"));output.text(await tools.describe("z__target"));`)
+					return h1Script(`globalThis.local=1;return [await tools.search("a__target"),await tools.search("z__target")];`)
 				case 1:
 					return h1Script(`if(typeof local!=="undefined")throw Error("VM retained variable");await tools.call("a__target",{value:1});await tools.call("z__target",{value:1});`)
 				}
@@ -357,181 +355,6 @@ func TestJSExecH1SessionReuseAndPermissionRevocation(t *testing.T) {
 	}
 }
 
-type h1Phase struct {
-	Name             string  `json:"name"`
-	WallNS           int64   `json:"wall_ns"`
-	ParentAllocBytes uint64  `json:"parent_process_total_alloc_bytes"`
-	Stats            h1Stats `json:"stats"`
-	Covered          int     `json:"unique_candidates_seen"`
-}
-
-func h1Measure(s *h1Source, name string, f func()) h1Phase {
-	s.reset()
-	var before, after goruntime.MemStats
-	goruntime.ReadMemStats(&before)
-	start := time.Now()
-	f()
-	wall := time.Since(start)
-	goruntime.ReadMemStats(&after)
-	s.mu.Lock()
-	covered := len(s.seen)
-	s.mu.Unlock()
-	return h1Phase{name, wall.Nanoseconds(), after.TotalAlloc - before.TotalAlloc, s.snapshot(), covered}
-}
-func TestJSExecH1DirectoryScale(t *testing.T) {
-	var results []map[string]any
-	var stablePrefix []byte
-	routePrefixes := map[string][]byte{}
-	for _, n := range []int{2, 20, 200, 2000} {
-		t.Run(fmt.Sprint(n), func(t *testing.T) {
-			s := h1Directory(n)
-			var phases []h1Phase
-			for _, position := range []struct {
-				label string
-				index int
-			}{{"first", 0}, {"middle", n / 2}, {"last", n - 1}} {
-				name := s.items[position.index].Definition().Name
-				p := h1Measure(s, "exact_"+position.label, func() {
-					store, active, _ := codeModeStore(t)
-					driver := &h1Model{s: s, main: func(i int, _ *model.Request) []model.ToolCall {
-						if i == 0 {
-							return h1Script(fmt.Sprintf("output.text(await tools.describe(%q));", name))
-						}
-						return nil
-					}}
-					events, _ := runCodeMode(t, store, active, h1Spec(s, driver), nil, nil)
-					for _, event := range events {
-						if event.Tool != nil && event.Tool.Status == "failed" {
-							t.Fatalf("exact %s failed: %+v", name, event.Tool)
-						}
-					}
-				})
-				if p.Stats.SelectorCalls != 0 || p.Stats.ExactRequests != 1 {
-					t.Fatalf("exact entered selector: %+v", p)
-				}
-				phases = append(phases, p)
-			}
-			store, active, _ := codeModeStore(t)
-			m := &h1Model{s: s, main: func(i int, _ *model.Request) []model.ToolCall {
-				switch i {
-				case 0:
-					return h1Script(`output.text(await tools.describe("a__target"));output.text(await tools.describe("z__target"));`)
-				case 1:
-					return h1Script(`await tools.call("a__target",{value:1});await tools.call("z__target",{value:1});`)
-				}
-				return nil
-			}}
-			var rt *Runtime
-			p := h1Measure(s, "first_turn_exact_then_new_vm_calls", func() { _, rt = runCodeMode(t, store, active, h1Spec(s, m), nil, nil) })
-			if p.Stats.ExactRequests != 2 || p.Stats.QueryRequests != 0 || p.Stats.SelectorCalls != 0 || p.Stats.Effects != 2 {
-				t.Fatalf("first=%+v", p)
-			}
-			phases = append(phases, p)
-			p = h1Measure(s, "next_turn_direct_calls", func() {
-				m.mainCalls = 0
-				m.main = func(i int, _ *model.Request) []model.ToolCall {
-					if i == 0 {
-						return h1Script(`await tools.call("a__target",{value:2});await tools.call("z__target",{value:2});`)
-					}
-					return nil
-				}
-				h1Run(t, rt, active, h1Spec(s, m))
-			})
-			if p.Stats.ExactRequests != 0 || p.Stats.QueryRequests != 0 || p.Stats.SelectorCalls != 0 || p.Stats.Effects != 2 {
-				t.Fatalf("reuse=%+v", p)
-			}
-			phases = append(phases, p)
-			for _, prefix := range m.prefixes {
-				if stablePrefix == nil {
-					stablePrefix = prefix
-				}
-				if !bytes.Equal(stablePrefix, prefix) {
-					t.Fatalf("N=%d changed fixed main prefix", n)
-				}
-			}
-			for _, route := range []string{"native", "js"} {
-				p = h1Measure(s, "unknown_search_"+route, func() {
-					fresh, session, _ := codeModeStore(t)
-					driver := &h1Model{s: s, main: func(i int, _ *model.Request) []model.ToolCall {
-						if i != 0 {
-							return nil
-						}
-						if route == "js" {
-							return h1Script(`const s=await tools.search("find the synthetic last lookup");if(!Array.isArray(s.tools)||s.count!==s.tools.length||typeof s.truncated!=="boolean")throw Error("search result shape");if(!s.tools.some(t=>t.name==="z__target"))throw Error("target missing");output.text(s);`)
-						}
-						return []model.ToolCall{{ID: "query", Name: tool.ToolSearchToolName, Args: `{"query":"find the synthetic last lookup","limit":8}`}}
-					}}
-					spec := h1Spec(s, driver)
-					if route == "native" {
-						spec.Tools = []tool.Tool{h1Search(s)}
-					}
-					events, _ := runCodeMode(t, fresh, session, spec, nil, nil)
-					for _, e := range events {
-						if e.Tool != nil && e.Tool.Status == "failed" {
-							t.Fatalf("unknown search failed: %+v", e.Tool)
-						}
-					}
-					if len(driver.prefixes) == 0 {
-						t.Fatal("missing main request prefix")
-					}
-					for _, prefix := range driver.prefixes {
-						if routePrefixes[route] == nil {
-							routePrefixes[route] = prefix
-						}
-						if !bytes.Equal(routePrefixes[route], prefix) {
-							t.Fatalf("%s main prefix changed at N=%d", route, n)
-						}
-					}
-
-				})
-				if p.Covered != n || p.Stats.QueryRequests != 1 || p.Stats.Effects != 0 || p.Stats.MaxCatalogBytes > 96<<10 {
-					t.Fatalf("coverage/budget/effects=%+v N=%d", p, n)
-				}
-				phases = append(phases, p)
-			}
-
-			type candidate struct {
-				Name        string `json:"name"`
-				Description string `json:"description"`
-			}
-			var candidates []candidate
-			for _, one := range s.items {
-				def := one.(h1Tool).def
-				candidates = append(candidates, candidate{def.Name, def.Description})
-			}
-			coverage, _ := json.Marshal(struct {
-				Need       string      `json:"need"`
-				Candidates []candidate `json:"candidates"`
-			}{"find the synthetic last lookup", candidates})
-			if len(coverage) > 4<<20 {
-				t.Fatal("aggregate catalog coverage budget exceeded")
-			}
-			results = append(results, map[string]any{"n": n, "limit": 8, "selected_names": []string{"a__target", "z__target"}, "catalog_coverage_bytes": len(coverage), "catalog_coverage_budget_bytes": 4 << 20, "per_selector_catalog_budget_bytes": 96 << 10, "main_prefix_bytes": len(stablePrefix), "phases": phases})
-
-		})
-	}
-	if directory := os.Getenv("CAELIS_H1_EVIDENCE"); directory != "" {
-		if err := os.MkdirAll(directory, 0700); err != nil {
-			t.Fatal(err)
-		}
-		raw, _ := json.MarshalIndent(map[string]any{"classification": "offline deterministic selector/real Runtime and Goja; no model provider/network or token usage", "timing": "one native Mac sample per phase; inclusive counters overlap; process TotalAlloc delta includes parent goroutines, excludes child heap; not constant-time or hard memory claims", "schema_counting": "exact requests imply existing exact readSchema; selector callback reads counted directly; result name revalidation count recorded separately; definition_schema_materializations includes full-definition reads during catalog walks", "results": results}, "", "  ")
-		if err := os.WriteFile(filepath.Join(directory, "directory-scale.json"), raw, 0600); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(directory, "main-prefix.json"), stablePrefix, 0600); err != nil {
-			t.Fatal(err)
-		}
-		for route, prefix := range routePrefixes {
-			if err := os.WriteFile(filepath.Join(directory, "main-prefix-"+route+".json"), prefix, 0600); err != nil {
-				t.Fatal(err)
-			}
-		}
-	}
-	if len(results) != 4 {
-		t.Fatal("incomplete directory matrix")
-	}
-}
-
 func TestJSExecH1HintWarningOncePreservesCapability(t *testing.T) {
 	store, active, _ := codeModeStore(t)
 	rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}})
@@ -543,11 +366,11 @@ func TestJSExecH1HintWarningOncePreservesCapability(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Count(text, tool.ExternalCapabilityDescriptionPrefix) != 1 || !strings.Contains(text, "Read a synthetic lookup") || !strings.Contains(text, "{tools:[{name,description}],count,truncated}") {
+	if strings.Count(text, tool.ExternalCapabilityDescriptionPrefix) != 1 || !strings.Contains(text, "Read a synthetic lookup") || !strings.Contains(text, "{tools:[{name,description,input_schema}],count,truncated}") {
 		t.Fatalf("H1 guidance/hint semantics lost: %s", text)
 	}
-	if !strings.Contains(text, "tools.call(name,args)") || strings.Index(text, "tools.call(name,args)") > strings.Index(text, "tools.search(") || !strings.Contains(text, "if(s.count)") {
-		t.Fatal("known-call signature/order or empty search guard absent")
+	if !strings.Contains(text, "tools.call(name,args)") || !strings.Contains(text, "input_schema") || strings.Contains(text, "tools.describe") || strings.Contains(text, "output.") {
+		t.Fatal("minimal search/call guidance absent")
 	}
 	state, _ := store.SnapshotState(t.Context(), active.SessionRef)
 	again, err := rt.codeModeCatalog(t.Context(), active.SessionRef, nil, nil)
@@ -589,59 +412,23 @@ func TestJSExecH1HintWarningOncePreservesCapability(t *testing.T) {
 
 }
 
-func TestJSExecH1SearchShapeError(t *testing.T) {
+func TestJSExecSearchRequiresString(t *testing.T) {
 	store, active, _ := codeModeStore(t)
-	s := h1Directory(2)
+	s := h1Directory(0)
 	m := &h1Model{s: s, main: func(i int, _ *model.Request) []model.ToolCall {
 		if i == 0 {
-			return h1Script(`const s=await tools.search("unknown capability");await tools.describe(s);`)
+			return h1Script(`return await tools.search({name:"unknown"});`)
 		}
 		return nil
 	}}
 	events, _ := runCodeMode(t, store, active, h1Spec(s, m), nil, nil)
-	if got := s.snapshot(); got.QueryRequests != 1 || got.ExactRequests != 0 || got.Effects != 0 {
-		t.Fatalf("shape rejection dispatched describe/effect: %+v", got)
+	if s.snapshot().QueryRequests != 0 {
+		t.Fatal("invalid query reached discovery")
 	}
-	for _, event := range events {
-		if event.Tool != nil && event.Tool.Name == codemode.ToolName && event.Tool.Status == "failed" {
-			raw, _ := json.Marshal(event.Tool.Output)
-			if !bytes.Contains(raw, []byte("requires a name string")) || !bytes.Contains(raw, []byte("searchResult.tools[0].name")) {
-				t.Fatalf("shape error not actionable: %s", raw)
-			}
+	for _, e := range events {
+		if e.Tool != nil && e.Tool.Name == codemode.ToolName && e.Tool.Status == "failed" {
 			return
 		}
 	}
-	t.Fatal("missing shape rejection")
-}
-
-func TestJSExecH1UnknownSearchEmptyGuard(t *testing.T) {
-	store, active, _ := codeModeStore(t)
-	s := h1Directory(0)
-	m := &h1Model{s: s, main: func(i int, req *model.Request) []model.ToolCall {
-		if i != 0 {
-			return nil
-		}
-		var catalog string
-		for _, part := range req.Instructions {
-			if part.Text != nil && strings.Contains(part.Text.Text, "Only unknown names need search") {
-				catalog = part.Text.Text
-			}
-		}
-		if catalog == "" {
-			t.Fatal("missing assembled H1 instructions")
-		}
-		// Execute the actual final example, including the empty-candidate branch.
-		example := strings.Split(catalog, "\n")
-		return h1Script(example[len(example)-1])
-	}}
-	events, _ := runCodeMode(t, store, active, h1Spec(s, m), nil, nil)
-	for _, event := range events {
-		if event.Tool != nil && event.Tool.Status == "failed" {
-			t.Fatalf("empty search example failed: %+v", event.Tool)
-		}
-	}
-	stats := s.snapshot()
-	if stats.QueryRequests != 1 || stats.ExactRequests != 0 || stats.Effects != 0 || stats.SelectorCalls != 0 {
-		t.Fatalf("empty branch dispatched describe/selector/effect: %+v", stats)
-	}
+	t.Fatal("invalid query was hidden")
 }

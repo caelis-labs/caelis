@@ -97,7 +97,7 @@ func TestCodeModeTurnCompletePendingApprovalStillEmitsMedia(t *testing.T) {
 		if err != nil || !reply.TurnComplete || len(reply.Parts) != 1 || !errors.Is(blocked, errCodeModeComplete) {
 			return nil, errors.New("completion did not fence the pending approval")
 		}
-		return []byte(`{}`), host.Emit(ctx, reply.Parts[0].Handle)
+		return json.Marshal(map[string]any{"parts": reply.Parts})
 	})}
 	llm := codeModeModel(false)
 	live, _ := runCodeMode(t, store, active, agent.AgentSpec{Model: codeModeImageModel{llm}, Tools: []tool.Tool{declaration, complete, write}}, registry, requester)

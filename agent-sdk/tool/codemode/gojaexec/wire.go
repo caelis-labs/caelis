@@ -15,7 +15,6 @@ const (
 	frameSource
 	frameReady
 	frameCall
-	frameEmit
 	frameReply
 	frameResult
 	frameError

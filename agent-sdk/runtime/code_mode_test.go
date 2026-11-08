@@ -162,6 +162,7 @@ func TestCodeModeRuntimeMCPAggregationAndMediaReceipts(t *testing.T) {
 			return nil, errors.New("source was not frozen")
 		}
 		total := 0
+		var selected codemode.Part
 		for _, value := range []int{2, 3} {
 			raw, _ := json.Marshal(map[string]any{"value": value})
 			reply, err := host.Call(ctx, "live__read", raw)
@@ -183,16 +184,14 @@ func TestCodeModeRuntimeMCPAggregationAndMediaReceipts(t *testing.T) {
 			}
 			total += result.Value
 			if value == 3 {
-				if err := host.Emit(ctx, reply.Parts[0].Handle); err != nil {
-					return nil, err
-				}
+				selected = reply.Parts[0]
 			}
 		}
 		readReply, err := host.Call(ctx, "Read", []byte(`{"path":"input.txt"}`))
 		if err != nil || readReply.IsError {
 			return nil, errors.New("real filesystem read failed")
 		}
-		return json.Marshal(map[string]any{"sum": total})
+		return json.Marshal(map[string]any{"sum": total, "selected": selected})
 	})}
 	llm := codeModeModel(true)
 	live, _ := runCodeMode(t, store, active, agent.AgentSpec{Model: codeModeImageModel{llm}, Tools: []tool.Tool{toolsearch.NewSource(manager, exactMCPRanker{}), declaration, read}, DeferredTools: manager}, registry, nil)

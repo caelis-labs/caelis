@@ -23,71 +23,41 @@ allowlist. A small name/description catalog is a bounded Session snapshot; other
 extensions are found by fuzzy search. Discovery never rewrites earlier prompt
 slices or changes the serialized tools definitions.
 
-The async function body has these interfaces:
+The async function body has two interfaces:
 
-- `await tools.search(query)` is for unknown extension names and returns
-  `{tools:[{name,description}],count,truncated}`. Candidates do not admit calls.
-- `await tools.describe(name)` accepts a name string (for example
-  `searchResult.tools[0].name`), returns the current complete input schema and
-  records the discovery binding through the existing canonical owner.
-- `await tools.call(name, arguments)` invokes the already discovered Tool once.
-- `output.text(value)` and `await output.image(handle)` explicitly select output.
+- `await tools.search(query)` first matches an exact callable native or current
+  extension name, otherwise uses the existing fuzzy search. It returns
+  `{tools:[{name,description,input_schema}],count,truncated}`. Schemas are complete;
+  candidates omitted by the bounded result budget are marked by `truncated`.
+  Extension bindings are recorded by the original canonical discovery owner.
+- `await tools.call(name, args)` returns `{parts:[...]}`. Text parts have `text`,
+  JSON parts have `json`, and media parts carry an opaque invocation-owned handle.
 
-Call native filesystem functions already in `tools` directly; do not search the
-extension directory for them. For a known extension name,
-use exact describe once only when the complete schema is absent from context.
-Otherwise call directly. Valid discovery in the same Session is reusable across
-VMs and Turns; a fresh VM clears local JS variables. Runtime still checks current
-identity, source/schema, generation and permissions on every call. Missing schema
-can be fetched by name without fuzzy search.
-Choose arguments by the actual schema. Strings that the task requires to be
-passed exactly must be transmitted unchanged, rather than paraphrased.
+`return await tools.call(name, args)` delivers the text, JSON and actual media to
+model context. `return await tools.search(query)` delivers the search result.
+Scripts may process or combine returned values; only media present in the final
+return value is selected, never other calls' unreturned or historical media.
+Returned handles are checked against the current invocation and retained media
+budgets. A failed or unknown child remains failed even if JavaScript catches its
+exception. No `tools.describe` or `output` interface is installed.
 
-Sources may implement `tool.NamedSource` using the existing `Registry.Lookup`
-signature. Runtime wraps only the located canonical candidate and restores a
-Host from its Session's discovered bindings. Lookup grants no eligibility:
-source/schema, generation, policy and both execution admission boundaries remain
-live. MCP Manager derives its name index from its current directory under the
-same owner lock; dirty, revoked, replaced or disconnected sources cannot return
-a dispatchable candidate or promote another source's same-name tool. No lock is
-held across approval or tool I/O. Sources without Lookup use the existing linear
-enumeration fallback. Unknown fuzzy search still covers its candidate directory
-under the normal selector budgets.
+Known schemas may be reused across calls; a fresh VM clears only JS variables.
+Arguments follow the schema, including required exact strings. Native filesystem
+functions remain directly callable and may also be orchestrated from JS. Search
+and call retain current source, generation, binding and permission checks. On a
+stale result, search again; old arguments are not automatically executed.
 
-Unknown schemas must be returned to the model before a later script supplies
-arguments. JavaScript is orchestration, not a second model that understands a
-previously unknown schema. Native fs identities need no redundant MCP discovery.
-Returned JSON outside JavaScript's safe integer range may round in Number;
-original JSON and receipts retain their tokens. `reply.raw_json` is explicitly
-accessible and lossless, but non-enumerable: `output.text(reply)`, JSON.stringify
-and object spread omit that duplicate serialization. Selected `parts` keep their
-normal shape; explicitly output `reply.raw_json` when original tokens are needed.
-BigInt must be stringified.
+Sources may implement the existing `tool.NamedSource`/`Registry.Lookup` contract.
+Lookup grants no authority; both admission boundaries and the final Journal claim
+remain in the original wrapper chain. Sources without Lookup retain the linear
+fallback; fuzzy search retains its existing selector budgets. No lock crosses
+approval or Tool I/O. Snapshot hints remain fixed within this API version; a
+software API change creates its own presentation snapshot, not a new grant cache.
 
-Tool replies carry normalized `parts`: select `kind === "json"` and read
-`.json`, rather than expecting the MCP envelope's `structuredContent` property.
-Inspect the returned payload shape before choosing business fields. Perform
-deterministic filtering, grouping, counting and calculation in the VM, then emit
-only the required summary and sources. For a JSON payload with `batch_id` and
-`records`:
-
-```js
-const r = await tools.call(name, args);
-const d = r.parts.find(p => p.kind === "json").json;
-output.text({count: d.records.length, source: d.batch_id});
-```
-
-Filesystem tools remain directly callable natively; JS orchestration is optional.
-
-After describing an extension, select image handles in the same invocation:
-
-```js
-const r = await tools.call(name, args);
-for (const p of r.parts) if (p.handle) await output.image(p.handle);
-```
-
-These examples do not grant parallel safety. Concurrent calls still require
-every target to be explicitly ParallelSafe.
+JSON Numbers outside JavaScript's safe integer range may round. The original
+reply remains explicitly accessible through non-enumerable `reply.raw_json`,
+which retains original JSON tokens. BigInt must be returned as a string.
+Concurrent calls still require every target to be explicitly ParallelSafe.
 
 ## Authority and invalidation
 
@@ -101,7 +71,7 @@ generation admission, effect claim, Journal and lifecycle wrappers. Discovery
 is not an execution grant. Refresh remains low-frequency Manager-owned work;
 searches do not push full catalog updates into prompts. Before an old binding
 can execute, a changed source/schema produces a distinct stale-binding error:
-the catalog was refreshed and tools.describe(name) must reload it. Old
+the catalog was refreshed and tools.search(name) must reload it. Old
 arguments are not dispatched or automatically retried with a new schema.
 Offline and revoked access retain their own errors.
 

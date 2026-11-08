@@ -93,16 +93,13 @@ func WorkerMain() int {
 		kind, name, args := call.Argument(0).String(), call.Argument(1).String(), call.Argument(2).String()
 		var data []byte
 		var frameType byte
-		if kind == "call" || kind == "search" || kind == "describe" {
+		if kind == "call" || kind == "search" {
 			if len(name) > 1024 || len(args) > l.ArgumentBytes {
 				_ = reject("Host argument budget exceeded")
 				return vm.ToValue(promise)
 			}
 			data, err = json.Marshal(callRequest{Method: kind, Name: name, Arguments: json.RawMessage(args)})
 			frameType = frameCall
-		} else if kind == "emit" && len(name) <= 1024 {
-			data = []byte(name)
-			frameType = frameEmit
 		} else {
 			err = fmt.Errorf("invalid bridge operation")
 		}
@@ -135,10 +132,8 @@ func WorkerMain() int {
 	if err != nil {
 		return 2
 	}
-	for _, name := range []string{"tools", "output"} {
-		if err = vm.Set(name, bridge.ToObject(vm).Get(name)); err != nil {
-			return 2
-		}
+	if err = vm.Set("tools", bridge.ToObject(vm).Get("tools")); err != nil {
+		return 2
 	}
 	encode, ok := goja.AssertFunction(bridge.ToObject(vm).Get("encode"))
 	if !ok {
