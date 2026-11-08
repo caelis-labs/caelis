@@ -60,6 +60,9 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 	toolTitle := strings.TrimSpace(update.Meta.ToolTitle)
 	explorationVerb := strings.TrimSpace(update.Meta.ExplorationVerb)
 	fullArgs := strings.TrimSpace(update.Meta.FullArgs)
+	// Canonical replay loses Location/monotonic representation. Keep the same
+	// display instant for live and replay without changing the source event.
+	occurredAt := update.Meta.OccurredAt.UTC()
 	messageID := update.Meta.MessageID
 	taskHandle := strings.TrimSpace(update.Meta.TaskHandle)
 	taskAction := strings.ToLower(strings.TrimSpace(update.Meta.TaskAction))
@@ -107,17 +110,17 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 				}
 			}
 		}
-		if updated && !update.Meta.OccurredAt.IsZero() {
+		if updated && !occurredAt.IsZero() {
 			for i := range out {
 				ev := &out[i]
 				if ev.Kind != SEToolCall || ev.CallID != callID {
 					continue
 				}
-				if !update.Final && (ev.StartedAt.IsZero() || update.Meta.OccurredAt.Before(ev.StartedAt)) {
-					ev.StartedAt = update.Meta.OccurredAt
+				if !update.Final && (ev.StartedAt.IsZero() || occurredAt.Before(ev.StartedAt)) {
+					ev.StartedAt = occurredAt
 				}
-				if update.Final && (ev.EndedAt.IsZero() || update.Meta.OccurredAt.After(ev.EndedAt)) {
-					ev.EndedAt = update.Meta.OccurredAt
+				if update.Final && (ev.EndedAt.IsZero() || occurredAt.After(ev.EndedAt)) {
+					ev.EndedAt = occurredAt
 				}
 			}
 		}
