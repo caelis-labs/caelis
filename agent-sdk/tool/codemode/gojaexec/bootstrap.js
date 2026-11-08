@@ -63,7 +63,18 @@
   }
   function decode(raw) {
     const envelope=parse(raw), reply=parse(envelope.raw);
-    if (envelope.error || reply.is_error || reply.outcome==="unknown_outcome") {const e=new ErrorType(envelope.error || "Tool call failed; do not replay an unknown outcome");e.reply=reply;throw e;}
+    if (envelope.error || reply.is_error || reply.outcome==="unknown_outcome") {
+      let message=envelope.error || "Tool call failed";
+      if(reply.outcome==="unknown_outcome") message="Unknown outcome; do not replay";
+      else if(!envelope.error) {
+        const parts=reply.parts||[];
+        for(let i=0;i<parts.length;i++) {
+          const p=parts[i], detail=p.kind==="text"?p.text:p.kind==="json"&&p.json?p.json.error:null;
+          if(typeof detail==="string") {message="Tool call failed: "+slice(detail,0,1024);break;}
+        }
+      }
+      const e=new ErrorType(message);e.reply=reply;throw e;
+    }
     const result={parts:reply.parts||[]};
     define(result,"raw_json",{value:envelope.raw,enumerable:false});
     return result;

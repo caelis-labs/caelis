@@ -10,12 +10,14 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
@@ -155,6 +157,12 @@ func TestCodeModeSimpleLive(t *testing.T) {
 		{"context7", `Use js_exec for an actual Context7 documentation call. Find React useEffect cleanup documentation: when is cleanup run? Return the tool result, then give a brief supported answer and its actual source, or explicitly report unavailable. Use read-only Context7 only; no shell or file writes.`},
 		{"image", `Use js_exec and Desktop World only to observe and capture the already running task-owned CodeModeFixture (bundle dev.caelis.codemode.fixture). Only this read-only domain source is authorized: await app.look(); await app.capture(); . Do not operate any other application or send input. Return the actual image result to yourself and describe the colored geometric marker and the large code visibly drawn in the fixture. Do not infer the picture from tool names, window title or this request. No shell or file writes.`},
 	}
+	if selected := os.Getenv("CAELIS_CODE_MODE_SIMPLE_ONLY"); selected != "" {
+		if selected != "image" {
+			t.Fatal("unsupported acceptance selection")
+		}
+		prompts = prompts[1:]
+	}
 	writeLiveJSON(t, filepath.Join(root, "prompts.json"), prompts)
 	for _, task := range prompts {
 		dir := filepath.Join(root, task.ID)
@@ -232,6 +240,13 @@ func TestCodeModeSimpleLive(t *testing.T) {
 		if runErr != nil || loadErr != nil {
 			t.Fatal("functional run failed; original receipts retained, no retry: " + string(errorcode.CodeOf(runErr)))
 		}
+		checks := simpleFunctionalChecks(t, dir, task.ID)
+		writeLiveJSON(t, filepath.Join(dir, "functional-assertions.json"), checks)
+		for name, ok := range checks {
+			if !ok {
+				t.Fatalf("functional assertion failed: %s; original sample retained", name)
+			}
+		}
 	}
 }
 
@@ -246,4 +261,63 @@ func simpleOwnedProcesses(raw []byte, parent int, root string) []byte {
 		}
 	}
 	return []byte(strings.Join(out, "\n") + "\n")
+}
+
+// Outcome assertions are independent of a model's successful Run termination.
+func simpleFunctionalChecks(t *testing.T, dir, id string) map[string]bool {
+	t.Helper()
+	requests, err := filepath.Glob(filepath.Join(dir, "generation-*.request.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	imageReceived := false
+	for _, path := range requests {
+		raw, e := os.ReadFile(path)
+		if e != nil {
+			t.Fatal(e)
+		}
+		var req model.Request
+		if json.Unmarshal(raw, &req) != nil {
+			t.Fatal("invalid retained request")
+		}
+		for _, message := range req.Messages {
+			for _, part := range message.Parts {
+				if part.ToolResult != nil {
+					for _, content := range part.ToolResult.Content {
+						if content.Media != nil && content.Media.Modality == model.MediaModalityImage {
+							imageReceived = true
+						}
+					}
+				}
+			}
+		}
+	}
+	responses, err := filepath.Glob(filepath.Join(dir, "generation-*.response.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	slices.Sort(responses)
+	final := ""
+	for _, path := range responses {
+		raw, e := os.ReadFile(path)
+		if e != nil {
+			t.Fatal(e)
+		}
+		var response model.Response
+		if json.Unmarshal(raw, &response) != nil {
+			t.Fatal("invalid retained Response")
+		}
+		if response.FinishReason == model.FinishReasonStop {
+			for _, part := range response.Message.Parts {
+				if part.Text != nil {
+					final = part.Text.Text
+				}
+			}
+		}
+	}
+	lower := strings.ToLower(final)
+	if id == "image" {
+		return map[string]bool{"actual_image_in_following_model_request": imageReceived, "visible_code": strings.Contains(final, "ORBIT") && strings.Contains(final, "582"), "shape": strings.Contains(lower, "triangle") || strings.Contains(final, "三角"), "color": strings.Contains(lower, "teal") || strings.Contains(lower, "cyan") || strings.Contains(lower, "turquoise") || strings.Contains(final, "青") || strings.Contains(final, "蓝绿")}
+	}
+	return map[string]bool{"sourced_api_answer": strings.Contains(lower, "cleanup") && strings.Contains(lower, "react") && strings.Contains(final, "https://")}
 }

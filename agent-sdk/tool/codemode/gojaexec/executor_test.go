@@ -127,3 +127,24 @@ func TestRawJSONIsExplicitAndDefaultOutputDoesNotDuplicate(t *testing.T) {
 		t.Fatalf("interface/Number semantics: %s", result)
 	}
 }
+
+func TestFailedReplyPreservesOutcomeClassification(t *testing.T) {
+	for _, outcome := range []string{codemode.OutcomeFailed, codemode.OutcomeUnknown} {
+		t.Run(outcome, func(t *testing.T) {
+			h := testHost{call: func(context.Context, string, json.RawMessage) (codemode.Reply, error) {
+				return codemode.Reply{Outcome: outcome, IsError: true, Parts: []codemode.Part{{Kind: "json", JSON: json.RawMessage(`{"error":"rejected before dispatch"}`)}}}, nil
+			}}
+			_, err := (&Executor{}).Execute(t.Context(), fixed(`return await tools.call("Target",{});`), codemode.Limits{}, h)
+			if err == nil {
+				t.Fatal("failed reply became success")
+			}
+			unknown := strings.Contains(strings.ToLower(err.Error()), "unknown outcome")
+			if outcome == codemode.OutcomeFailed && !strings.Contains(err.Error(), "rejected before dispatch") {
+				t.Fatal("original factual error lost")
+			}
+			if unknown != (outcome == codemode.OutcomeUnknown) {
+				t.Fatalf("outcome=%s error=%v", outcome, err)
+			}
+		})
+	}
+}
