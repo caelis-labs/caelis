@@ -60,8 +60,9 @@ bash ./scripts/go_test_nonempty.sh ./surfaces/tui/app \
 # Code Mode is enabled in product assembly on Windows. Exercise native worker
 # handshake, cancellation and Wait/reaping through the installed CLI entry.
 mkdir -p .tmp/bin
-CGO_ENABLED=0 go build -o .tmp/bin/caelis-code-mode-smoke.exe ./cmd/caelis
-CAELIS_TEST_CLI_BINARY=.tmp/bin/caelis-code-mode-smoke.exe go test -count=1 -timeout "${GO_TEST_TIMEOUT:-5m}" \
+code_mode_cli_binary="$(cygpath -am .tmp/bin/caelis-code-mode-smoke.exe)"
+CGO_ENABLED=0 go build -o "$code_mode_cli_binary" ./cmd/caelis
+CAELIS_TEST_CLI_BINARY="$code_mode_cli_binary" go test -count=1 -timeout "${GO_TEST_TIMEOUT:-5m}" \
   ./cmd/caelis ./agent-sdk/tool/codemode/...
 
 # Match the release configuration for all production packages.
