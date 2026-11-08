@@ -92,8 +92,12 @@ The model receives only explicitly selected summaries and original media.
 Actual child names, exact arguments, results, failures, unknown outcomes and
 receipts remain in the existing audit/event chain. Filtering must not convert
 failed or unknown execution to success. TUI projects those original child
-identities under a collapsible js_exec parent; discovery is compact presentation,
-not another consumer-owned execution path.
+identities in a default-collapsed Code Mode group. While running, its summary
+shows the current child action. Opening the group shows actual tool names and
+brief arguments; each tool's script, arguments and output have their own detail
+disclosure. Approval decisions remain visible outside the collapsed group.
+Grouping reuses the existing Turn and call identities and does not change the
+execution path.
 
 ## Execution and Tasks
 

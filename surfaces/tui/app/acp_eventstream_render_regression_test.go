@@ -487,53 +487,31 @@ func TestRoutedMCPRendersRealTargetAndArguments(t *testing.T) {
 }
 
 func TestCodeModeRendersActualNestedToolAndParent(t *testing.T) {
-	m := NewModel(Config{AppName: "CAELIS", Version: "dev", Workspace: "/tmp/workspace", ModelAlias: "fixture", NoColor: true, NoAnimation: true, Commands: DefaultCommands(), Wizards: DefaultWizards()})
-	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 32})
-	m = updated.(*Model)
+	m := NewModel(Config{NoColor: true, NoAnimation: true})
+	m.Update(tea.WindowSizeMsg{Width: 120, Height: 32})
 	for _, event := range []*session.Event{
 		{SessionID: "code-mode", Type: session.EventTypeToolCall, Tool: &session.EventTool{ID: "script", Name: "js_exec", Status: "started", Input: map[string]any{"code": "fixture"}}},
 		{SessionID: "code-mode", Type: session.EventTypeToolCall, Visibility: session.VisibilityMirror, Tool: &session.EventTool{ID: "nested", Name: "maps__route", Status: "started", Input: map[string]any{"origin": "北京南站", "destination": "故宫"}, Parent: &session.EventParentTool{CallID: "script", Name: "js_exec"}}},
 	} {
 		base := projection.EnvelopeBaseFromSessionEvent(session.SessionRef{SessionID: "code-mode"}, event, projection.SessionEventTransport{})
-		for _, envelope := range projection.ProjectSessionEventEnvelope(base, event) {
-			updated, _ = m.Update(envelope)
-			m = updated.(*Model)
-		}
-	}
-	frame := evalharness.NormalizeFrame(m.View().Content)
-	for _, want := range []string{"js_exec", "maps__route", "北京南站", "故宫"} {
-		if !strings.Contains(frame, want) {
-			t.Fatalf("frame missing %q:\n%s", want, frame)
+		for _, env := range projection.ProjectSessionEventEnvelope(base, event) {
+			m = applyACPEnvelopeForTest(t, m, env)
 		}
 	}
 	block := requireMainACPTurnBlockForTest(t, m)
-	if !block.toggleToolPanelClick("script") {
-		t.Fatal("parent collapse action was not routed")
+	closed := joinRenderedPlain(block.Render(m.blockRenderContext(120)))
+	if !strings.Contains(closed, "Code Mode") || strings.Count(closed, "maps__route") != 1 {
+		t.Fatalf("running summary: %s", closed)
 	}
-	m.markViewportBlockDirty(block.BlockID())
-	m.syncViewportContent()
-	collapsed := evalharness.NormalizeFrame(m.View().Content)
-	if strings.Contains(collapsed, "maps__route") || !strings.Contains(collapsed, "js_exec") {
-		t.Fatalf("typed child did not fold under parent:\n%s", collapsed)
+	block.toggleExplorationExpanded("script")
+	open := joinRenderedPlain(block.Render(m.blockRenderContext(120)))
+	for _, want := range []string{"Code Mode", "maps__route", "北京南站", "故宫"} {
+		if !strings.Contains(open, want) {
+			t.Fatalf("missing %q: %s", want, open)
+		}
 	}
-	t.Logf("EXPANDED\n%s\nCOLLAPSED\n%s", frame, collapsed)
-
-}
-
-func TestJSExecCollapsesTypedChildrenWithoutLosingIdentity(t *testing.T) {
-	b := NewMainACPTurnBlock("code-mode")
-	b.UpdateTool("script", "js_exec", `{"code":"return 42"}`, "", false, false)
-	b.UpdateToolWithMeta("child", "maps__route", `{"origin":"北京南站"}`, "", false, false, ToolUpdateMeta{ParentToolCallID: "script", ParentToolName: "js_exec"})
-	if len(b.codeModeDisplayEvents()) != 2 {
-		t.Fatal("children should be visible initially")
+	if len(block.Events) != 2 || block.Events[1].ParentToolCallID != "script" {
+		t.Fatal("group modified original projection")
 	}
-	if !b.toggleToolPanelClick("script") || len(b.codeModeDisplayEvents()) != 1 {
-		t.Fatal("parent did not collapse its child")
-	}
-	if len(b.Events) != 2 || b.Events[1].Name != "maps__route" || b.Events[1].Args != `{"origin":"北京南站"}` {
-		t.Fatal("collapse modified real child identity/arguments")
-	}
-	if !b.toggleToolPanelClick("script") || len(b.codeModeDisplayEvents()) != 2 {
-		t.Fatal("parent did not restore its child")
-	}
+	t.Logf("COLLAPSED\n%s\nEXPANDED\n%s", closed, open)
 }

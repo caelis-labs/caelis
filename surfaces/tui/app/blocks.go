@@ -94,7 +94,6 @@ type MainACPTurnBlock struct {
 	EndedAt               time.Time
 	Events                []SubagentEvent
 	ExpandedTools         map[string]bool
-	CollapsedCodeMode     map[string]bool
 	ExpandedToolOutput    map[string]bool
 	ToolPanelScroll       map[string]toolPanelScrollState
 	ExpandedThought       map[string]bool
@@ -326,7 +325,7 @@ func (b *MainACPTurnBlock) Render(ctx BlockRenderContext) []RenderedRow {
 	if b == nil {
 		return nil
 	}
-	rows := renderACPTranscriptRows(b.id, b.codeModeDisplayEvents(), b.Status, maxInt(8, ctx.Width), ctx, b.transcriptRenderOptions())
+	rows := renderACPTranscriptRows(b.id, b.Events, b.Status, maxInt(8, ctx.Width), ctx, b.transcriptRenderOptions())
 	return b.compactHeightBudget.apply(b.id, rows, b.Events, b.Status, ctx)
 }
 
@@ -424,7 +423,6 @@ type ParticipantTurnBlock struct {
 	EndedAt               time.Time
 	Events                []SubagentEvent
 	ExpandedTools         map[string]bool
-	CollapsedCodeMode     map[string]bool
 	ExpandedToolOutput    map[string]bool
 	ToolPanelScroll       map[string]toolPanelScrollState
 	ExpandedThought       map[string]bool

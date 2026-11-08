@@ -388,9 +388,6 @@ func acpStandardCollapsedClickToken(callID string, ev SubagentEvent, text string
 }
 
 func standardToolLifecycleHeader(ev SubagentEvent, err bool) string {
-	if isComputerUseToolEvent(ev) {
-		return standardVerbLifecycleHeader(ev.Name, ev.Args, err)
-	}
 	semanticName := ev.Name
 	presentation := transcript.ResolveToolPresentationWithHint(ev.Name, ev.ToolKind, ev.Title, ev.ExplorationVerb)
 	switch semanticName {

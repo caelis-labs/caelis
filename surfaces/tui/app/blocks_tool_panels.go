@@ -162,9 +162,6 @@ func (b *MainACPTurnBlock) toggleToolPanelClick(callID string) bool {
 	if b == nil {
 		return false
 	}
-	if b.toggleCodeModeGroup(callID) {
-		return true
-	}
 	return toggleToolPanelClick(&b.ExpandedTools, &b.ExpandedToolOutput, b.Events, callID)
 }
 
@@ -511,5 +508,5 @@ func collectToolPanelCallIDs(events []SubagentEvent) []string {
 func shouldDefaultCollapseToolEvent(ev SubagentEvent) bool {
 	// Failed exploration remains part of the compact exploration presentation;
 	// its outcome must not split an otherwise contiguous Explored run.
-	return surfaceIsExplorationTool(ev.Name, ev.ToolKind, ev.ExplorationVerb) || isComputerUseToolEvent(ev)
+	return surfaceIsExplorationTool(ev.Name, ev.ToolKind, ev.ExplorationVerb) || ev.Name == "js_exec" || ev.ParentToolName == "js_exec"
 }

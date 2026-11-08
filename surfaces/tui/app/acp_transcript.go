@@ -69,6 +69,19 @@ func renderACPTranscriptRows(blockID string, events []SubagentEvent, status stri
 	lastGroup := acpTranscriptGroupNone
 	for i := 0; i < len(visible); i++ {
 		ev := visible[i]
+		if isCodeModeChild(visible, ev) {
+			continue
+		}
+		if isCodeModeParent(ev) {
+			if codeModeRootIndex(visible, ev.CallID) != i {
+				continue
+			}
+			group := renderCodeModeContainerRows(blockID, visible, i, status, width, ctx, opts)
+			rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupTool, false)
+			rows = appendACPTranscriptSemanticRows(rows, blockID, group, &pendingSemanticGap)
+			hasContent, lastGroup = true, acpTranscriptGroupTool
+			continue
+		}
 		if ev.Kind == SESemanticBoundary {
 			if hasContent {
 				pendingSemanticGap = true
@@ -123,9 +136,6 @@ func renderACPTranscriptRows(blockID string, events []SubagentEvent, status stri
 			}
 		case SEToolCall:
 			toolRows, consumed := renderACPToolLifecycleRows(blockID, visible, i, width, ctx, opts)
-			if ev.ParentToolName == "js_exec" {
-				toolRows = indentCodeModeChildren(toolRows)
-			}
 			if len(toolRows) > 0 {
 				attached := lastGroup == acpTranscriptGroupNarrative && toolContinuesPreviousNarrative(visible, i)
 				rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupTool, attached)
@@ -135,7 +145,7 @@ func renderACPTranscriptRows(blockID string, events []SubagentEvent, status stri
 			}
 			i = consumed
 		case SEApproval:
-			if approvalReviewHasTool(visible, ev) {
+			if approvalReviewHasTool(visible, ev) && !codeModeReview(visible, ev) {
 				continue
 			}
 			approvalRows := renderACPApprovalReviewRows(blockID, ev, width, ctx)

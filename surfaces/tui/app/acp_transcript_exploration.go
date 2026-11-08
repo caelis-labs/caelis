@@ -14,7 +14,6 @@ type explorationProjectionState struct {
 type explorationContainerState struct {
 	StableID string
 	CallIDs  []string
-	Computer bool
 }
 
 func (s *explorationProjectionState) preserveBeforeEventRemoval(events []SubagentEvent, status string) {
@@ -161,7 +160,7 @@ func retainExplorationContainer(events []SubagentEvent, previous explorationCont
 		if !ok {
 			continue
 		}
-		if position != next || !event.Done || !isGroupedToolEvent(event) || isComputerUseToolEvent(event) != previous.Computer {
+		if position != next || !event.Done || !isExplorationToolEvent(event) {
 			return explorationContainerState{}, false
 		}
 		if first < 0 {
@@ -181,11 +180,9 @@ func retainExplorationContainer(events []SubagentEvent, previous explorationCont
 		case SEReasoning:
 			continue
 		case SEAssistant:
-			if !previous.Computer {
-				continue
-			}
+			continue
 		case SEToolCall:
-			if _, ok := wanted[strings.TrimSpace(event.CallID)]; ok && isGroupedToolEvent(event) && isComputerUseToolEvent(event) == previous.Computer {
+			if _, ok := wanted[strings.TrimSpace(event.CallID)]; ok && isExplorationToolEvent(event) {
 				continue
 			}
 		}
@@ -194,14 +191,12 @@ func retainExplorationContainer(events []SubagentEvent, previous explorationCont
 	return explorationContainerState{
 		StableID: strings.TrimSpace(previous.CallIDs[0]),
 		CallIDs:  append([]string(nil), previous.CallIDs...),
-		Computer: previous.Computer,
 	}, true
 }
 
 func collectExplorationContainers(events []SubagentEvent, status string) []explorationContainerState {
 	var containers []explorationContainerState
 	var current []string
-	computer := false
 	flush := func() {
 		// One exploration tool has no density benefit: keep its narrative and
 		// tool row directly visible. Containers are reserved for runs with at
@@ -210,7 +205,6 @@ func collectExplorationContainers(events []SubagentEvent, status string) []explo
 			containers = append(containers, explorationContainerState{
 				StableID: current[0],
 				CallIDs:  append([]string(nil), current...),
-				Computer: computer,
 			})
 		}
 		current = nil
@@ -228,17 +222,7 @@ func collectExplorationContainers(events []SubagentEvent, status string) []explo
 			i = step.end + 1
 			continue
 		}
-		messageBoundary := false
-		for _, event := range events[step.start : step.end+1] {
-			messageBoundary = messageBoundary || event.Kind == SEAssistant
-		}
-		if len(current) > 0 && (computer != step.computer || (step.computer && messageBoundary)) {
-			flush()
-		}
-		computer = step.computer
-		// Computer calls already default to compact rows; their completed
-		// prefix can group while the next call remains independently visible.
-		settledForLayout := step.computer || terminal || hasLaterTranscriptStep(events, step.end+1)
+		settledForLayout := terminal || hasLaterTranscriptStep(events, step.end+1)
 		if !settledForLayout {
 			flush()
 			i = step.end + 1
@@ -254,7 +238,7 @@ func collectExplorationContainers(events []SubagentEvent, status string) []explo
 			if event.Kind != SEToolCall {
 				continue
 			}
-			if !event.Done || !isGroupedToolEvent(event) {
+			if !event.Done || !isExplorationToolEvent(event) {
 				flush()
 				break
 			}
@@ -267,10 +251,9 @@ func collectExplorationContainers(events []SubagentEvent, status string) []explo
 }
 
 type explorationRenderStep struct {
-	start    int
-	end      int
-	callIDs  []string
-	computer bool
+	start   int
+	end     int
+	callIDs []string
 }
 
 func collectExplorationRenderStep(events []SubagentEvent, idx int) (explorationRenderStep, bool) {
@@ -286,13 +269,12 @@ func collectExplorationRenderStep(events []SubagentEvent, idx int) (explorationR
 		return explorationRenderStep{}, false
 	}
 	step := explorationRenderStep{
-		start:    start,
-		end:      i,
-		computer: isComputerUseToolEvent(events[i]),
+		start: start,
+		end:   i,
 	}
 	for i < len(events) && events[i].Kind == SEToolCall {
 		ev := events[i]
-		if !isGroupedToolEvent(ev) || isComputerUseToolEvent(ev) != step.computer {
+		if !isExplorationToolEvent(ev) {
 			break
 		}
 		step.callIDs = append(step.callIDs, strings.TrimSpace(ev.CallID))
@@ -307,18 +289,7 @@ func (s *explorationProjectionState) renderContainerRows(blockID string, events 
 		return nil, idx, false
 	}
 	for i := range s.Containers {
-		if s.Containers[i].Computer && events[idx].Kind != SEToolCall && events[idx].Kind != SEReasoning {
-			continue
-		}
-		if s.Containers[i].Computer && events[idx].Kind == SEReasoning {
-			j := idx
-			for j < len(events) && events[j].Kind == SEReasoning {
-				j++
-			}
-			if j < len(events) && events[j].Kind == SEAssistant {
-				continue
-			}
-		}
+
 		start, end, ok := explorationContainerRange(events, idx, s.Containers[i].CallIDs)
 		if !ok || start != idx {
 			continue
@@ -373,9 +344,6 @@ func explorationContainerRange(events []SubagentEvent, idx int, callIDs []string
 func (s *explorationProjectionState) renderContainerAt(blockID string, events []SubagentEvent, end int, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions, container *explorationContainerState) ([]RenderedRow, int, bool) {
 	if container == nil || len(container.CallIDs) == 0 {
 		return nil, end, false
-	}
-	if container.Computer {
-		return renderComputerUseContainerRows(blockID, events, end, width, ctx, opts, container)
 	}
 	key := strings.TrimSpace(container.StableID)
 	if key == "" {
@@ -686,7 +654,7 @@ func isExplorationToolEvent(ev SubagentEvent) bool {
 	if strings.TrimSpace(ev.CallID) == "" {
 		return false
 	}
-	if isComputerUseToolEvent(ev) {
+	if ev.ParentToolName == "js_exec" && ev.ParentToolCallID != "" {
 		return false
 	}
 	return surfaceIsExplorationTool(ev.Name, ev.ToolKind, ev.ExplorationVerb)
