@@ -149,6 +149,9 @@ func (m *Manager) initialize(parent context.Context, server *managedServer, star
 	var listed []*mcpsdk.Tool
 	if err == nil && client.catalog == nil {
 		listed, err = client.ListTools(ctx)
+		if err != nil {
+			err = &startupError{Stage: "tools/list", Err: err}
+		}
 	}
 	if err == nil {
 		err = ctx.Err()
@@ -169,6 +172,9 @@ func (m *Manager) initialize(parent context.Context, server *managedServer, star
 	m.mu.Unlock()
 	if err == nil && client.catalog != nil {
 		refreshErr := m.refreshCatalog(ctx, server, false)
+		if refreshErr != nil {
+			refreshErr = &startupError{Stage: "tools/list", Err: refreshErr}
+		}
 		m.mu.Lock()
 		if m.closed || parent.Err() != nil {
 			m.mu.Unlock()
@@ -506,6 +512,9 @@ func (m *Manager) GetServerInfos(pluginID string) []MCPServerInfo {
 		}
 		if server.err != nil {
 			status = "failed"
+			if client == nil {
+				warnings = append(warnings, startupFailureSummary(server.err))
+			}
 		}
 		if client != nil {
 			status = "running"

@@ -345,7 +345,7 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 		return nil, fmt.Errorf("gatewayapp: failed to initialize MCP servers: %w", err)
 	}
 	bundle.MCP = mcpMgr
-	bundle.CapabilityStatus = nativePluginStatus(plan.NativeConfiguration, plan.Plugins, mcpMgr)
+	bundle.CapabilityStatus = nativePluginStatus(plan.NativeConfiguration, plan.Plugins, mcpMgr, mcpSpecs)
 	if err := ctx.Err(); err != nil {
 		bundle.Close()
 		return nil, err

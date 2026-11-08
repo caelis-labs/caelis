@@ -66,7 +66,7 @@ func startClientWithHTTPClient(ctx context.Context, spec ServerSpec, httpClient 
 func startClientWithCatalog(ctx context.Context, spec ServerSpec, httpClient *http.Client, refresh bool) (*Client, error) {
 	transport, transportName, launchIdentity, err := transportForSpecWithIdentity(spec, httpClient)
 	if err != nil {
-		return nil, err
+		return nil, &startupError{Stage: "transport", Err: err}
 	}
 	var catalog *clientCatalog
 	options := &mcpsdk.ClientOptions{Capabilities: &mcpsdk.ClientCapabilities{}}
@@ -98,10 +98,15 @@ func startClientWithCatalog(ctx context.Context, spec ServerSpec, httpClient *ht
 		})
 	}
 	lifetimeCtx, cancel := context.WithCancel(context.Background())
-	session, err := connectWithTimeout(ctx, client, lifetimeCtx, cancel, transport, DefaultStartupTimeout)
+	startup := &startupTransport{Transport: transport}
+	session, err := connectWithTimeout(ctx, client, lifetimeCtx, cancel, startup, DefaultStartupTimeout)
 	if err != nil {
 		cancel()
-		return nil, fmt.Errorf("connect %s MCP server %s/%s: %w", transportName, spec.PluginID, spec.Name, err)
+		stage := "transport"
+		if startup.connected.Load() {
+			stage = "initialize"
+		}
+		return nil, &startupError{Stage: stage, Err: fmt.Errorf("connect %s MCP server %s/%s: %w", transportName, spec.PluginID, spec.Name, err)}
 	}
 	connected := &Client{
 		spec:           spec,

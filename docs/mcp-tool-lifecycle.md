@@ -28,7 +28,10 @@ of slower or failed servers.
 Control's Session MCP status reports this same Runtime's connection state and
 catalog. `running` alone describes a connection, not a ready catalog: check that
 `refreshing`, `stale` and `refresh_failed` have cleared, with no warning, and that
-the expected tool directory is present. Inspection and reconnection do not
+the expected tool directory is present. Startup failures appear as a short, Session-scoped TUI hint rather than chat
+history; `/mcp` retains the failed server and a bounded diagnostic stage. A
+deadline does not by itself identify a 30-second startup timeout or a network or
+authentication failure. Inspection and reconnection do not
 activate a cold Runtime. Refresh
 targets an already active Runtime; it is not a startup operation. Integration
 clients must activate through actual work, observe readiness for that activation,

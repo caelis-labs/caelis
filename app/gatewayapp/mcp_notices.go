@@ -1,8 +1,6 @@
 package gatewayapp
 
 import (
-	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -26,7 +24,7 @@ func (s *runtimeComposition) mcpFailureNotifier() func(mcp.ServerFailure) {
 	return func(failure mcp.ServerFailure) {
 		_ = feed.Publish(eventstream.Envelope{
 			Kind: eventstream.KindNotice, SessionID: ref.SessionID, Scope: eventstream.ScopeMain,
-			OccurredAt: time.Now(), Notice: mcpFailureNotice(failure),
+			OccurredAt: time.Now(), Notice: mcpFailureNotice(failure), NoticeKind: eventstream.NoticeKindMCPStartupFailed,
 			Delivery: &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
 		})
 	}
@@ -42,8 +40,5 @@ func mcpFailureNotice(failure mcp.ServerFailure) string {
 	if runes := []rune(name); len(runes) > 80 {
 		name = string(runes[:80]) + "…"
 	}
-	if errors.Is(failure.Err, context.DeadlineExceeded) {
-		return fmt.Sprintf("MCP server %q did not initialize within 30 seconds. Its tools are unavailable; the conversation can continue.", name)
-	}
-	return fmt.Sprintf("MCP server %q could not initialize. Its tools are unavailable; check its configuration and connection. The conversation can continue.", name)
+	return fmt.Sprintf("MCP %q unavailable · /mcp for details", name)
 }

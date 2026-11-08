@@ -289,6 +289,19 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.beginSessionHistory(m.sessionHistory.start)
 		}
 		if env, ok := msg.(eventstream.Envelope); ok && eventstream.IsSessionNotice(env) {
+			if isMCPStartupNotice(env) {
+				if env.SessionID == m.sessionHistory.start.state.SessionID {
+					for _, pending := range m.sessionHistory.mcpNotices {
+						if pending.Notice == env.Notice {
+							return m, nil
+						}
+					}
+					// Keep the original timestamp. Attachment must not replay an
+					// expired hint or start a timer on the private history builder.
+					m.sessionHistory.mcpNotices = append(m.sessionHistory.mcpNotices, env)
+				}
+				return m, nil
+			}
 			m.sessionHistory.model.handleACPEventEnvelope(env)
 			return m, nil
 		}

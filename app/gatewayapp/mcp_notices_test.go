@@ -119,7 +119,7 @@ func TestMCPFailurePublishesOneNoticeWithoutChangingCanonicalSession(t *testing.
 				if event.Kind != eventstream.KindNotice {
 					continue
 				}
-				if event.Delivery == nil || event.Delivery.Mode != eventstream.DeliveryTransient || event.Position == nil || event.Position.Durable != nil {
+				if event.NoticeKind != eventstream.NoticeKindMCPStartupFailed || event.Delivery == nil || event.Delivery.Mode != eventstream.DeliveryTransient || event.Position == nil || event.Position.Durable != nil {
 					t.Fatalf("notice claimed persistence: %#v", event)
 				}
 				if event.Notice != mcpFailureNotice(mcp.ServerFailure{Name: "unreachable", Err: errors.New("failure")}) {
@@ -154,8 +154,8 @@ func TestMCPFailureNoticeIsBoundedAndDoesNotExposePrivateCause(t *testing.T) {
 		if strings.ContainsAny(text, "\x1b\n") || strings.Contains(text, "token=") || strings.Contains(text, "/Users/") {
 			t.Fatalf("unsafe notice=%q", text)
 		}
-		if errors.Is(failure.Err, context.DeadlineExceeded) && !strings.Contains(text, "30 seconds") {
-			t.Fatalf("missing timeout: %s", text)
+		if strings.Contains(text, "30 seconds") || !strings.Contains(text, "/mcp") {
+			t.Fatalf("notice invents a timeout or omits status: %s", text)
 		}
 	}
 }
