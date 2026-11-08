@@ -101,7 +101,6 @@ func TestCodeModeSimpleLive(t *testing.T) {
 		defs = append(defs, one.Definition())
 	}
 	writeLiveJSON(t, filepath.Join(root, "directory.json"), defs)
-	readonly := regexp.MustCompile(`^\s*await\s+app\.look\(\)\s*;\s*await\s+app\.capture\(\)\s*;?\s*$`)
 	allowed := func(def tool.Definition, raw json.RawMessage) bool {
 		if def.ExecutionRequirements != nil && def.ExecutionRequirements.Sandbox.CommandExec {
 			return false
@@ -118,7 +117,7 @@ func TestCodeModeSimpleLive(t *testing.T) {
 				App    string `json:"app"`
 				Source string `json:"source"`
 			}
-			return json.Unmarshal(raw, &v) == nil && (v.App == "dev.caelis.codemode.fixture" || v.App == "CodeModeFixture") && readonly.MatchString(v.Source)
+			return json.Unmarshal(raw, &v) == nil && (v.App == "dev.caelis.codemode.fixture" || v.App == "CodeModeFixture") && simpleReadonlyObservation(v.Source)
 		}
 		return false
 	}
@@ -320,4 +319,29 @@ func simpleFunctionalChecks(t *testing.T, dir, id string) map[string]bool {
 		return map[string]bool{"actual_image_in_following_model_request": imageReceived, "visible_code": strings.Contains(final, "ORBIT") && strings.Contains(final, "582"), "shape": strings.Contains(lower, "triangle") || strings.Contains(final, "三角"), "color": strings.Contains(lower, "teal") || strings.Contains(lower, "cyan") || strings.Contains(lower, "turquoise") || strings.Contains(final, "青") || strings.Contains(final, "蓝绿")}
 	}
 	return map[string]bool{"sourced_api_answer": strings.Contains(lower, "cleanup") && strings.Contains(lower, "react") && strings.Contains(final, "https://")}
+}
+
+// This acceptance fixture permits only two read-only calls and returning their
+// bound results. It is not a validator for arbitrary Desktop World programs.
+var simpleReadonlyExact = regexp.MustCompile(`^\s*await\s+app\.look\(\)\s*;\s*await\s+app\.capture\(\)\s*;?\s*$`)
+var simpleReadonlyBound = regexp.MustCompile(`^\s*const\s+([A-Za-z_$][A-Za-z0-9_$]{0,63})\s*=\s*await\s+app\.look\(\)\s*;\s*const\s+([A-Za-z_$][A-Za-z0-9_$]{0,63})\s*=\s*await\s+app\.capture\(\)\s*;\s*return\s+(?:\{\s*([A-Za-z_$][A-Za-z0-9_$]{0,63})\s*,\s*([A-Za-z_$][A-Za-z0-9_$]{0,63})\s*\}|([A-Za-z_$][A-Za-z0-9_$]{0,63}))\s*;?\s*$`)
+
+func simpleReadonlyObservation(source string) bool {
+	if simpleReadonlyExact.MatchString(source) {
+		return true
+	}
+	m := simpleReadonlyBound.FindStringSubmatch(source)
+	return m != nil && m[1] != m[2] && ((m[3] == m[1] && m[4] == m[2]) || m[5] == m[2])
+}
+func TestCodeModeSimpleReadOnlyBodies(t *testing.T) {
+	for _, source := range []string{`await app.look(); await app.capture();`, `const look = await app.look(); const capture = await app.capture(); return {look, capture};`, `const looked = await app.look(); const image = await app.capture(); return {looked, image};`, `const a=await app.look();const b=await app.capture();return b;`} {
+		if !simpleReadonlyObservation(source) {
+			t.Fatalf("authorized body rejected: %s", source)
+		}
+	}
+	for _, source := range []string{`await app.look();await app.capture();app.click(1,2);`, `const a=await app.look();const b=await app.capture();return {a,other};`, `const a=await app.look();const a=await app.capture();return {a,a};`, `const a=await app.look();const b=await app.capture();return eval(b);`, `await app.quit();`, `const a=await app.look();const b=await app.capture();return {a,b}; process.exit();`} {
+		if simpleReadonlyObservation(source) {
+			t.Fatalf("out-of-scope body admitted: %s", source)
+		}
+	}
 }
