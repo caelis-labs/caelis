@@ -291,8 +291,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if env, ok := msg.(eventstream.Envelope); ok && eventstream.IsSessionNotice(env) {
 			if isMCPStartupNotice(env) {
 				if env.SessionID == m.sessionHistory.start.state.SessionID {
-					for _, pending := range m.sessionHistory.mcpNotices {
+					for i, pending := range m.sessionHistory.mcpNotices {
 						if pending.Notice == env.Notice {
+							if env.OccurredAt.After(pending.OccurredAt) {
+								m.sessionHistory.mcpNotices[i] = env
+							}
 							return m, nil
 						}
 					}

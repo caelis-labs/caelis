@@ -148,3 +148,17 @@ func TestMCPStartupHintDuringHistoryAttachment(t *testing.T) {
 		}
 	}
 }
+
+func TestMCPStartupFreshNoticeSupersedesExpiredAttachmentDuplicate(t *testing.T) {
+	m := NewModel(Config{NoColor: true, NoAnimation: true})
+	m.beginSessionHistory(sessionViewStartMsg{state: appserver.SessionState{SessionID: "session-1"}})
+	env := mcpNoticeForTest()
+	env.OccurredAt = time.Now().Add(-time.Minute)
+	m.Update(env)
+	env.OccurredAt = time.Now()
+	m.Update(env)
+	m.commitSessionHistory()
+	if len(m.hintEntries) != 1 || m.hint != env.Notice {
+		t.Fatal("expired attachment duplicate suppressed the current failure hint")
+	}
+}
