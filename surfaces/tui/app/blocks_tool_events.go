@@ -2,9 +2,12 @@ package tuiapp
 
 import (
 	"strings"
+	"time"
 )
 
 type ToolUpdateMeta struct {
+	// OccurredAt is the original projected event time, never a Surface clock.
+	OccurredAt         time.Time
 	ParentToolCallID   string
 	ParentToolName     string
 	ToolNameExplicit   bool
@@ -92,6 +95,7 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 		args = taskCancelArgsWithLinkedCommand(args, out, taskHandle)
 	}
 	defer func() {
+		updated := changed
 		var moved bool
 		out, moved = relocateApprovalReviewEventsAfterTool(out, callID)
 		changed = changed || moved
@@ -100,6 +104,20 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 				if out[i].Kind == SEToolCall && out[i].CallID == callID {
 					out[i].ParentToolCallID = update.Meta.ParentToolCallID
 					out[i].ParentToolName = update.Meta.ParentToolName
+				}
+			}
+		}
+		if updated && !update.Meta.OccurredAt.IsZero() {
+			for i := range out {
+				ev := &out[i]
+				if ev.Kind != SEToolCall || ev.CallID != callID {
+					continue
+				}
+				if !update.Final && (ev.StartedAt.IsZero() || update.Meta.OccurredAt.Before(ev.StartedAt)) {
+					ev.StartedAt = update.Meta.OccurredAt
+				}
+				if update.Final && (ev.EndedAt.IsZero() || update.Meta.OccurredAt.After(ev.EndedAt)) {
+					ev.EndedAt = update.Meta.OccurredAt
 				}
 			}
 		}

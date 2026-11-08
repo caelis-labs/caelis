@@ -3,6 +3,7 @@ package tuiapp
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func codeModeBlockForTest() *MainACPTurnBlock {
@@ -108,5 +109,46 @@ func TestCodeModeLateTaskUpdatesRetainOneGroupAndDisclosure(t *testing.T) {
 	text := joinRenderedPlain(b.Render(ctx))
 	if strings.Count(text, "Code Mode") != 1 || !strings.Contains(text, "2 calls") || strings.Contains(text, "late running snapshot") || !b.explorationExpanded("script") {
 		t.Fatalf("late Task snapshot reopened or duplicated work: %s", text)
+	}
+}
+
+func TestCodeModeNarrowScriptWrapAndCopyExcludeGutter(t *testing.T) {
+	b := codeModeBlockForTest()
+	b.UpdateTool("script", "js_exec", "JavaScript", "finished", true, false)
+	b.Status = "completed"
+	b.toggleExplorationExpanded("script")
+	for range 2 {
+		if !b.toggleToolPanelClick("script") {
+			t.Fatal("script details unavailable")
+		}
+	}
+	for _, width := range []int{60, 36} {
+		ctx := NewModel(Config{NoColor: true, NoAnimation: true}).blockRenderContext(width)
+		rows := b.Render(ctx)
+		var lines []string
+		var indents []int
+		for _, row := range rows[1:] {
+			if !strings.HasPrefix(row.Plain, "│ ") || row.ACPHeader || displayColumns(row.Plain) > width {
+				t.Fatalf("child escaped inner layout at %d: %q", width, row.Plain)
+			}
+			lines = append(lines, row.Plain)
+			indents = append(indents, row.selectionIndent)
+		}
+		copied := selectionTextFromLinesWithIndents(lines, indents, textSelectionPoint{line: 0, col: 0}, textSelectionPoint{line: len(lines) - 1, col: displayColumns(lines[len(lines)-1])})
+		if strings.Contains(copied, "│") || !strings.Contains(copied, "SCRIPT_TAIL") {
+			t.Fatalf("copy leaked gutter/lost script: %s", copied)
+		}
+	}
+}
+
+func TestCodeModeDurationUsesProjectedToolTimes(t *testing.T) {
+	b := NewMainACPTurnBlock("timed-code-mode")
+	start := time.Date(2026, 11, 8, 0, 0, 0, 0, time.UTC)
+	b.UpdateToolWithMeta("script", "js_exec", "JavaScript", "", false, false, ToolUpdateMeta{OccurredAt: start, ToolStatusExplicit: true, ToolStatus: "running"})
+	b.UpdateToolWithMeta("script", "js_exec", "JavaScript", "finished", true, false, ToolUpdateMeta{OccurredAt: start.Add(2 * time.Second), ToolStatusExplicit: true, ToolStatus: "completed"})
+	b.UpdateToolWithMeta("script", "js_exec", "JavaScript", "late", false, false, ToolUpdateMeta{OccurredAt: start.Add(8 * time.Second), ToolStatusExplicit: true, ToolStatus: "running"})
+	text := joinRenderedPlain(b.Render(NewModel(Config{NoColor: true, NoAnimation: true}).blockRenderContext(60)))
+	if !strings.Contains(text, "Code Mode · 2.0s") || strings.Contains(text, "late") {
+		t.Fatalf("duration/lifecycle changed by stale snapshot: %s", text)
 	}
 }

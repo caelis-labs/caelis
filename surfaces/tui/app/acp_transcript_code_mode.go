@@ -117,15 +117,21 @@ func renderCodeModeContainerRows(blockID string, events []SubagentEvent, idx int
 			ev.Args, ev.StartArgs = "JavaScript", "JavaScript"
 		}
 		callRows, _ := renderACPToolLifecycleRowsWithoutReview(blockID, callEvents, index, innerWidth, ctx, opts)
-		for _, row := range callRows {
-			row.Plain = "│ " + row.Plain
-			row.Styled = ctx.Theme.ToolOutputMetaStyle().Render("│ ") + row.Styled
-			row.selectionIndent += 2
-			if row.boundedClick() {
-				row.ClickStartCol += 2
-				row.ClickEndCol += 2
+		for _, callRow := range callRows {
+			wrapped := []RenderedRow{callRow}
+			if callRow.ACPHeader {
+				wrapped = wrapAgentMessageRows(callRow, innerWidth)
 			}
-			rows = append(rows, row)
+			for _, row := range wrapped {
+				row.Plain = "│ " + row.Plain
+				row.Styled = ctx.Theme.ToolOutputMetaStyle().Render("│ ") + row.Styled
+				row.selectionIndent += 2
+				if row.boundedClick() {
+					row.ClickStartCol += 2
+					row.ClickEndCol += 2
+				}
+				rows = append(rows, row)
+			}
 		}
 	}
 	for _, child := range children {
