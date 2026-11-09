@@ -654,9 +654,6 @@ func isExplorationToolEvent(ev SubagentEvent) bool {
 	if strings.TrimSpace(ev.CallID) == "" {
 		return false
 	}
-	if ev.ParentToolName == "js_exec" && ev.ParentToolCallID != "" {
-		return false
-	}
 	return surfaceIsExplorationTool(ev.Name, ev.ToolKind, ev.ExplorationVerb)
 }
 

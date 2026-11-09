@@ -486,7 +486,7 @@ func TestRoutedMCPRendersRealTargetAndArguments(t *testing.T) {
 	}
 }
 
-func TestCodeModeRetainsNestedAuditWithoutMixingScriptPanel(t *testing.T) {
+func TestOrchestrationShowsActualNestedToolsWithoutScriptAction(t *testing.T) {
 	m := NewModel(Config{NoColor: true, NoAnimation: true})
 	m.Update(tea.WindowSizeMsg{Width: 120, Height: 32})
 	for _, event := range []*session.Event{
@@ -500,18 +500,19 @@ func TestCodeModeRetainsNestedAuditWithoutMixingScriptPanel(t *testing.T) {
 	}
 	block := requireMainACPTurnBlockForTest(t, m)
 	closed := joinRenderedPlain(block.Render(m.blockRenderContext(120)))
-	if !strings.Contains(closed, "Ran script") || strings.Contains(closed, "maps__route") {
-		t.Fatalf("running summary: %s", closed)
-	}
-	block.toggleToolPanelClick("script")
-	open := joinRenderedPlain(block.Render(m.blockRenderContext(120)))
-	for _, want := range []string{"Ran script", "fixture"} {
-		if !strings.Contains(open, want) {
-			t.Fatalf("missing %q: %s", want, open)
+	for _, want := range []string{"maps__route", "北京南站", "故宫"} {
+		if !strings.Contains(closed, want) {
+			t.Fatal(closed)
 		}
 	}
+	for _, hidden := range []string{"Ran script", "js_exec", "fixture"} {
+		if strings.Contains(closed, hidden) {
+			t.Fatal(closed)
+		}
+	}
+
 	if len(block.Events) != 2 || block.Events[1].ParentToolCallID != "script" {
 		t.Fatal("group modified original projection")
 	}
-	t.Logf("COLLAPSED\n%s\nEXPANDED\n%s", closed, open)
+	t.Logf("NATIVE TOOL PRESENTATION\n%s", closed)
 }

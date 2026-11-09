@@ -574,9 +574,6 @@ func renderACPTerminalLifecycleRows(blockID string, ev SubagentEvent, callID str
 		header = compactSingleLineHeader(header, width)
 	}
 	token := acpToolPanelClickTokenIf(callID, toolPanelCanExpandHiddenDetails(ev, text, final, err))
-	if ev.Name == "js_exec" {
-		token = acpToolPanelClickToken(callID)
-	}
 	tone, dim := acpToolHeaderMark(ctx, err, final)
 	var headerRow RenderedRow
 	if sendMessage {
@@ -702,15 +699,6 @@ func terminalLifecycleHeader(ev SubagentEvent) string {
 	name := rawName
 	args := strings.TrimSpace(ev.Args)
 	switch name {
-	case "js_exec":
-		header := "• Ran script"
-		if args != "" {
-			header += " " + args
-		}
-		if ev.Err {
-			header += " [failed]"
-		}
-		return header
 	case surfaceToolRunCommand:
 		if args != "" {
 			return "• Ran " + args
@@ -832,4 +820,23 @@ func mutationLifecycleHeader(ev SubagentEvent, err bool) string {
 		}
 		return standardVerbLifecycleHeader(name, args, err)
 	}
+}
+
+// renderACPToolResultOnlyRows reuses the normal bounded output panel and its
+// disclosure state. It never synthesizes an action, input or child container.
+func renderACPToolResultOnlyRows(blockID string, ev SubagentEvent, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions) []RenderedRow {
+	text := sanitizeRenderableText(ev.Output)
+	if !ev.Err && (strings.TrimSpace(text) == "" || strings.TrimSpace(text) == "null") {
+		return nil
+	}
+	if strings.TrimSpace(text) == "" {
+		text = "Tool execution failed"
+	}
+	token := acpToolPanelClickToken(ev.CallID)
+	full := opts.ToolPanelFullOutput != nil && opts.ToolPanelFullOutput(ev.CallID)
+	if full {
+		return renderACPFullTerminalPanelRows(blockID, ev.CallID, text, width, ctx, ev.Err, token)
+	}
+	text = summarizeACPToolPanelText(text, true, maxInt(1, width-4))
+	return renderACPToolPanelRows(blockID, ev.CallID, ev.Name, false, text, width, ctx, ev.Err, token, false, opts)
 }

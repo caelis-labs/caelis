@@ -51,25 +51,6 @@ func TestCodeModeFrozenNativeReplay(t *testing.T) {
 				m = applyACPEnvelopeForTest(t, m, env)
 			}
 		}
-		var groups []struct {
-			block *MainACPTurnBlock
-			call  string
-		}
-		for _, docBlock := range m.doc.Blocks() {
-			if b, ok := docBlock.(*MainACPTurnBlock); ok {
-				for _, event := range b.Events {
-					if isCodeModeParent(event) {
-						groups = append(groups, struct {
-							block *MainACPTurnBlock
-							call  string
-						}{b, event.CallID})
-					}
-				}
-			}
-		}
-		if len(groups) == 0 {
-			t.Fatal("native receipts contained no Code Mode")
-		}
 		save := func(state string) {
 			t.Helper()
 			m.markViewportStructureDirty()
@@ -86,21 +67,28 @@ func TestCodeModeFrozenNativeReplay(t *testing.T) {
 			assertPhysicalFullscreenFrame(t, width, 35, frame, updates)
 		}
 		save("collapsed")
-		for _, group := range groups {
-			if !m.tryToggleFoldToken(group.block.BlockID(), acpToolPanelClickToken(group.call)) {
-				t.Fatal("group click not routed")
+		for step := 1; step <= 2; step++ {
+			var targets []struct {
+				block Block
+				token string
 			}
+			seen := map[string]bool{}
+			for _, block := range m.doc.Blocks() {
+				for _, row := range block.Render(m.blockRenderContext(width)) {
+					key := block.BlockID() + "/" + row.ClickToken
+					if row.ClickToken != "" && !seen[key] {
+						targets = append(targets, struct {
+							block Block
+							token string
+						}{block, row.ClickToken})
+						seen[key] = true
+					}
+				}
+			}
+			for _, target := range targets {
+				m.tryToggleFoldToken(target.block.BlockID(), target.token)
+			}
+			save(fmt.Sprintf("disclosure-%d", step))
 		}
-		save("expanded")
-		for _, group := range groups {
-			m.tryToggleFoldToken(group.block.BlockID(), acpToolPanelClickToken(group.call))
-			m.tryToggleFoldToken(group.block.BlockID(), acpToolPanelClickToken(group.call))
-		}
-		save("script")
-		for _, group := range groups {
-
-			m.tryToggleFoldToken(group.block.BlockID(), acpToolPanelClickToken(group.call))
-		}
-		save("reclosed")
 	}
 }

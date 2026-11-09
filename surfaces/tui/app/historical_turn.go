@@ -56,8 +56,8 @@ func historicalTurnBlocks(blocks []Block) map[string]bool {
 	return compact
 }
 
-// renderHistoricalTurn renders a terminal historical block as user and
-// assistant narrative only. It does not mutate Events, expansion maps,
+// renderHistoricalTurn renders a terminal historical block as user/assistant
+// narrative and selected result-only outputs. It does not mutate Events, expansion maps,
 // compactHeightBudget, or exploration projection. Not for child-pane documents.
 func renderHistoricalTurn(block Block, ctx BlockRenderContext) []RenderedRow {
 	switch b := block.(type) {
@@ -194,6 +194,10 @@ func historicalTurnEvents(events []SubagentEvent) []SubagentEvent {
 	out := make([]SubagentEvent, 0, len(events))
 	for _, ev := range events {
 		switch ev.Kind {
+		case SEToolCall:
+			if isResultOnlyToolEvent(ev) && ev.Done {
+				out = append(out, ev)
+			}
 		case SEAssistant, SEUserInput:
 			if renderableTextHasContent(ev.Text) {
 				out = append(out, ev)

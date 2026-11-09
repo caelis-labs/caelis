@@ -432,6 +432,9 @@ func toolPanelHasHiddenToolArgs(events []SubagentEvent, callID string) bool {
 }
 
 func toolPanelEventHasHiddenToolArgs(ev SubagentEvent) bool {
+	if isResultOnlyToolEvent(ev) {
+		return false
+	}
 	fullArgs := strings.TrimSpace(ev.FullArgs)
 	if fullArgs == "" {
 		return false
@@ -508,5 +511,5 @@ func collectToolPanelCallIDs(events []SubagentEvent) []string {
 func shouldDefaultCollapseToolEvent(ev SubagentEvent) bool {
 	// Failed exploration remains part of the compact exploration presentation;
 	// its outcome must not split an otherwise contiguous Explored run.
-	return surfaceIsExplorationTool(ev.Name, ev.ToolKind, ev.ExplorationVerb) || ev.Name == "js_exec" || ev.ParentToolName == "js_exec"
+	return surfaceIsExplorationTool(ev.Name, ev.ToolKind, ev.ExplorationVerb)
 }

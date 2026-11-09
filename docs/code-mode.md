@@ -96,11 +96,17 @@ receipts remain in the existing audit/event chain. Filtering must not convert
 failed or unknown execution to success. A caught, durably settled ordinary tool
 failure permits subsequent calls and a final summary while retaining the failed
 receipt and overall error flag. Cancellation, authority, persistence, transport
-and unknown-effect failures still stop the script. TUI uses the existing Shell input/output panel: file scripts show
-`Ran script <filename>` and inline scripts show foldable source. The panel opens
-script input and final output, including failures. Child events remain in the
-audit chain rather than mixing into this panel; approval decisions still show
-the actual target separately. Presentation reuses the original Turn/call identity.
+and unknown-effect failures still stop the script.
+
+TUI presents actual child calls through the same native tool rows and Explored grouping used outside JavaScript. MCP names and
+argument summaries retain their existing presentation; tool capabilities are not
+changed to make a call exploratory. The JavaScript input and orchestration parent
+are not additional actions. Original selected results and script errors retain a
+common result-only panel with the original call identity and output disclosure,
+including when no child was called or the output differs from child results.
+Approval decisions stay with the actual target. Canonical events, failure flags,
+receipts and source bytes remain in the existing audit chain. Replayed and older
+compact Turns retain selected result/error access without inventing assistant text.
 
 ## Execution and Tasks
 

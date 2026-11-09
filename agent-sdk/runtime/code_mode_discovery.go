@@ -102,9 +102,10 @@ func codeModeCanCall(def tool.Definition) bool {
 }
 
 type codeModeSearchEntry struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	InputSchema map[string]any `json:"input_schema"`
+	ParallelSafe bool           `json:"parallel_safe"`
+	Name         string         `json:"name"`
+	Description  string         `json:"description"`
+	InputSchema  map[string]any `json:"input_schema"`
 }
 
 func (h *codeModeHost) Search(ctx context.Context, query string) (reply codemode.Reply, discoveryErr error) {
@@ -151,7 +152,7 @@ func (h *codeModeHost) Search(ctx context.Context, query string) (reply codemode
 			if over {
 				return reply, tool.NewError(errorcode.ResourceExhausted, "search call budget exceeded")
 			}
-			return h.searchReply("", []codeModeSearchEntry{{def.Name, def.Description, def.InputSchema}}, false)
+			return h.searchReply("", []codeModeSearchEntry{{ParallelSafe: def.Capabilities.ParallelSafe, Name: def.Name, Description: def.Description, InputSchema: def.InputSchema}}, false)
 		}
 	}
 	search, available, err := h.owner.lookup(ctx, tool.ToolSearchToolName)
@@ -200,7 +201,7 @@ func (h *codeModeHost) Search(ctx context.Context, query string) (reply codemode
 		h.targets[entry.Name] = codeModeTarget{tool: one, definition: def, digest: codeModeDefinitionDigest(def)}
 		h.discovered[entry.Name] = *entry.Binding
 		h.mu.Unlock()
-		entries = append(entries, codeModeSearchEntry{entry.Name, entry.Description, entry.InputSchema})
+		entries = append(entries, codeModeSearchEntry{ParallelSafe: def.Capabilities.ParallelSafe, Name: entry.Name, Description: entry.Description, InputSchema: entry.InputSchema})
 	}
 	return h.searchReply(reply.CallID, entries, selected.Truncated)
 }

@@ -176,7 +176,7 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 			MessageTarget:    messageTarget,
 		})
 		clearTaskWriteTerminalOwnership(&out[len(out)-1])
-		return out, true, name == "js_exec" || update.Meta.ParentToolName == "js_exec"
+		return out, true, false
 	}
 
 	finalEvent := SubagentEvent{
