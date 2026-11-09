@@ -325,20 +325,42 @@ func (s *Service) Run(ctx context.Context, report func(error)) {
 				}
 				continue
 			}
-			for _, target := range targets {
-				if active[target] {
+			complete := func(target Identity, err error) {
+				select {
+				case finished <- completion{target, err}:
+				case <-ctx.Done():
+				}
+			}
+			launch := func(target Identity) {
+				workers.Go(func() { complete(target, s.deliverRecipient(ctx, target)) })
+			}
+			for _, group := range s.deliveryGroups(targets) {
+				pending := make([]Identity, 0, len(group))
+				for _, target := range group {
+					if !active[target] {
+						active[target] = true
+						pending = append(pending, target)
+					}
+				}
+				if len(pending) == 0 {
 					continue
 				}
-				active[target] = true
-				workers.Add(1)
-				go func() {
-					defer workers.Done()
-					err := s.deliverRecipient(ctx, target)
-					select {
-					case finished <- completion{target, err}:
-					case <-ctx.Done():
+				if len(pending) == 1 {
+					launch(pending[0])
+					continue
+				}
+				// One discovery snapshot per Session/tick only filters candidates.
+				// Each attempt still rechecks its own current recipient at claim.
+				workers.Go(func() {
+					candidates, err := s.deliveryCandidates(ctx, pending)
+					for _, target := range pending {
+						if err != nil || !candidates[target.Member] {
+							complete(target, err)
+							continue
+						}
+						launch(target)
 					}
-				}()
+				})
 			}
 		}
 	}
@@ -375,7 +397,15 @@ func (s *Service) claimRecipient(ctx context.Context, i Identity) ([]Message, st
 	lock := s.readerLock(i)
 	lock.Lock()
 	defer lock.Unlock()
-	threads, err := s.backend.List(ctx, i.Session)
+	var threads []Thread
+	var err error
+	if backend, ok := s.backend.(RecipientBackend); ok {
+		var thread Thread
+		thread, err = backend.Recipient(ctx, i)
+		threads = []Thread{thread}
+	} else {
+		threads, err = s.backend.List(ctx, i.Session)
+	}
 	if errors.Is(err, ErrSessionClosed) {
 		return nil, "", s.purgeClosedSession(ctx, i.Session)
 	}
