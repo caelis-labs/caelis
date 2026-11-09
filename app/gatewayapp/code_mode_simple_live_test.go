@@ -187,7 +187,7 @@ func TestCodeModeSimpleLive(t *testing.T) {
 	for _, task := range prompts {
 		if task.ID == "context7" {
 			infos := manager.GetServerInfos("context7")
-			if len(infos) != 1 || infos[0].Status != "running" || len(infos[0].Tools) == 0 || infos[0].Warning != "" {
+			if len(infos) != 1 || !simpleMCPReady(infos[0]) {
 				writeLiveJSON(t, filepath.Join(root, "context7-blocked.json"), infos)
 				t.Error("Context7 initialization unavailable; no model request or startup retry")
 				continue
@@ -389,6 +389,24 @@ func TestCodeModeSimpleReadOnlyBodies(t *testing.T) {
 	for _, source := range []string{`await app.look();await app.capture();app.click(1,2);`, `const a=await app.look();const b=await app.capture();return {a,other};`, `const a=await app.look();const a=await app.capture();return {a,a};`, `const a=await app.look();const b=await app.capture();return eval(b);`, `await app.quit();`, `const a=await app.look();const b=await app.capture();return {a,b}; process.exit();`} {
 		if simpleReadonlyObservation(source) {
 			t.Fatalf("out-of-scope body admitted: %s", source)
+		}
+	}
+}
+
+// Metadata warnings do not make a current, dispatchable MCP directory unavailable.
+func simpleMCPReady(info mcp.MCPServerInfo) bool {
+	return info.Status == "running" && len(info.Tools) > 0 && !info.Stale && !info.RefreshFailed
+}
+func TestCodeModeSimpleServerReadiness(t *testing.T) {
+	ready := mcp.MCPServerInfo{Status: "running", Tools: []string{"query"}, Warning: "nonfatal metadata warning"}
+	if !simpleMCPReady(ready) {
+		t.Fatal("metadata warning hid a ready directory")
+	}
+	for _, change := range []func(*mcp.MCPServerInfo){func(v *mcp.MCPServerInfo) { v.Status = "failed" }, func(v *mcp.MCPServerInfo) { v.Tools = nil }, func(v *mcp.MCPServerInfo) { v.Stale = true }, func(v *mcp.MCPServerInfo) { v.RefreshFailed = true }} {
+		info := ready
+		change(&info)
+		if simpleMCPReady(info) {
+			t.Fatal("unavailable directory admitted")
 		}
 	}
 }
