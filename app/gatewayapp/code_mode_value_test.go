@@ -479,7 +479,7 @@ func runValueSession(ctx context.Context, t *testing.T, study string, plan value
 			seq = max(seq, event.Seq)
 		}
 		runCtx := context.WithValue(ctx, fairContextKey{}, fairRequestContext{Turn: turnNo})
-		run, runErr := rt.Run(runCtx, agent.RunRequest{SessionRef: active.SessionRef, Input: task.Prompts[plan.Route][turnNo-1], Request: agent.ModelRequestOptions{Stream: &stream}, ApprovalRequester: approver, SourceObserver: observer, AgentSpec: agent.AgentSpec{Model: trace, Tools: tools, DeferredTools: manager, Metadata: map[string]any{"reasoning_effort": resolved.ReasoningEffort, codemode.MetadataSelectedTools: task.Selected}}})
+		run, runErr := rt.Run(runCtx, agent.RunRequest{SessionRef: active.SessionRef, Input: task.Prompts[plan.Route][turnNo-1], Request: agent.ModelRequestOptions{Stream: &stream}, ApprovalRequester: approver, SourceObserver: observer, AgentSpec: agent.AgentSpec{Model: fairPreserveInvocationTracking(trace, resolved.Model), Tools: tools, DeferredTools: manager, Metadata: map[string]any{"reasoning_effort": resolved.ReasoningEffort, codemode.MetadataSelectedTools: task.Selected}}})
 		if runErr == nil {
 			runErr = run.Handle.WaitCompletion(runCtx)
 		}

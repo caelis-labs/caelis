@@ -280,6 +280,27 @@ type fairTrace struct {
 	prefix    []byte
 }
 
+// Trace wrappers preserve optional invocation ownership from the actual model.
+// Embedding LLM alone erases it and makes Runtime add a second fallback receipt.
+func fairPreserveInvocationTracking(wrapper, underlying model.LLM) model.LLM {
+	view := &fairModelView{LLM: wrapper}
+	if _, tracked := underlying.(model.InvocationTracker); tracked {
+		return &fairTrackedModelView{fairModelView: view}
+	}
+	return view
+}
+
+type fairModelView struct{ model.LLM }
+
+func (m *fairModelView) Capabilities() model.Capabilities {
+	c, _ := model.CapabilitiesOf(m.LLM)
+	return c
+}
+
+type fairTrackedModelView struct{ *fairModelView }
+
+func (*fairTrackedModelView) TracksInvocations() {}
+
 func (m *fairTrace) Capabilities() model.Capabilities { c, _ := model.CapabilitiesOf(m.LLM); return c }
 func (m *fairTrace) Generate(ctx context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
 	return func(yield func(*model.StreamEvent, error) bool) {
@@ -667,7 +688,7 @@ func runFairSession(ctx context.Context, t *testing.T, study string, plan fairSe
 			seq = max(seq, event.Seq)
 		}
 		runCtx := context.WithValue(ctx, fairContextKey{}, fairRequestContext{Turn: turnNo})
-		run, runErr := rt.Run(runCtx, agent.RunRequest{SessionRef: active.SessionRef, Input: manifest.Prompts[plan.Route][i], Request: agent.ModelRequestOptions{Stream: &stream}, ApprovalRequester: approver, SourceObserver: observer, AgentSpec: agent.AgentSpec{Model: trace, Tools: tools, DeferredTools: manager, Metadata: map[string]any{"reasoning_effort": resolved.ReasoningEffort, codemode.MetadataSelectedTools: gatewayapp.CodeModeFixtureSelectedTools(manager.Tools())}}})
+		run, runErr := rt.Run(runCtx, agent.RunRequest{SessionRef: active.SessionRef, Input: manifest.Prompts[plan.Route][i], Request: agent.ModelRequestOptions{Stream: &stream}, ApprovalRequester: approver, SourceObserver: observer, AgentSpec: agent.AgentSpec{Model: fairPreserveInvocationTracking(trace, resolved.Model), Tools: tools, DeferredTools: manager, Metadata: map[string]any{"reasoning_effort": resolved.ReasoningEffort, codemode.MetadataSelectedTools: gatewayapp.CodeModeFixtureSelectedTools(manager.Tools())}}})
 		if runErr == nil {
 			runErr = run.Handle.WaitCompletion(runCtx)
 		}

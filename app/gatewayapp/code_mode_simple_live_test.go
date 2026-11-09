@@ -68,15 +68,26 @@ func TestCodeModeSimpleLive(t *testing.T) {
 	if err = os.MkdirAll(workspace, 0700); err != nil {
 		t.Fatal(err)
 	}
-	spec, err := fairContext7Spec(os.Getenv("CAELIS_CODE_MODE_LIVE_CONFIG"), os.Getenv("CAELIS_CODE_MODE_LIVE_CONTEXT7_ENTRY"), workspace)
-	if err != nil {
-		t.Fatal(err)
+	selected := os.Getenv("CAELIS_CODE_MODE_SIMPLE_ONLY")
+	if selected != "" && selected != "context7" && selected != "image" {
+		t.Fatal("unsupported acceptance selection")
 	}
-	dtwRoot := os.Getenv("CAELIS_CODE_MODE_LIVE_DTW_ROOT")
-	if !filepath.IsAbs(dtwRoot) {
-		t.Fatal("explicit task-owned existing DTW package root required")
+	var specs []mcp.ServerSpec
+	if selected != "image" {
+		spec, e := fairContext7Spec(os.Getenv("CAELIS_CODE_MODE_LIVE_CONFIG"), os.Getenv("CAELIS_CODE_MODE_LIVE_CONTEXT7_ENTRY"), workspace)
+		if e != nil {
+			t.Fatal(e)
+		}
+		specs = append(specs, spec)
 	}
-	specs := []mcp.ServerSpec{spec, {PluginID: "desktop-world", Name: "desktop-world", Transport: mcp.TransportStdio, Command: filepath.Join(dtwRoot, "bin", "dtw"), Args: []string{"mcp"}, WorkDir: dtwRoot, CleanEnvironment: true}}
+	if selected != "context7" {
+		dtwRoot := os.Getenv("CAELIS_CODE_MODE_LIVE_DTW_ROOT")
+		if !filepath.IsAbs(dtwRoot) {
+			t.Fatal("explicit task-owned existing DTW package root required")
+		}
+		specs = append(specs, mcp.ServerSpec{PluginID: "desktop-world", Name: "desktop-world", Transport: mcp.TransportStdio, Command: filepath.Join(dtwRoot, "bin", "dtw"), Args: []string{"mcp"}, WorkDir: dtwRoot, CleanEnvironment: true})
+	}
+
 	manager, err := mcp.NewManager(ctx, specs, func(f mcp.ServerFailure) { t.Logf("MCP failure source=%s code=%s", f.Name, errorcode.CodeOf(f.Err)) })
 	if err != nil {
 		t.Fatal("MCP manager initialization failed")
@@ -152,18 +163,36 @@ func TestCodeModeSimpleLive(t *testing.T) {
 		}
 		return agent.ApprovalResponse{Outcome: "selected", OptionID: "cancel"}, nil
 	})
-	prompts := []struct{ ID, Text string }{
-		{"context7", `Use js_exec for an actual Context7 documentation call. Find React useEffect cleanup documentation: when is cleanup run? Return the tool result, then give a brief supported answer and its actual source, or explicitly report unavailable. Use read-only Context7 only; no shell or file writes.`},
-		{"image", `Use js_exec and Desktop World only to observe and capture the already running task-owned CodeModeFixture (bundle dev.caelis.codemode.fixture). Only this read-only domain source is authorized: await app.look(); await app.capture(); . Do not operate any other application or send input. Return the actual image result to yourself and describe the colored geometric marker and the large code visibly drawn in the fixture. Do not infer the picture from tool names, window title or this request. No shell or file writes.`},
+	prompts := []struct {
+		ID   string
+		Text []string
+	}{
+		{"context7", []string{
+			`Use js_exec and actual read-only Context7 tools to answer: when does React useEffect cleanup run, and what must cleanup undo? Search the tool schema before the first call; make the actual documentation request and give a brief summary with the actual source URLs. Report unavailable if the tool has no supporting evidence. No shell or external writes.`,
+			`Follow up from the original Context7 result: explain the extra development setup/cleanup cycle under React Strict Mode, with an actual documentation source. Reuse the still-valid schema and binding already discovered in this Session. For this reusable follow-up query, write a small JavaScript file inside the task workspace using the native file tool, then execute that file with js_exec. The script must make the real read-only documentation call and return the needed result. No shell or writes outside the workspace.`,
+		}},
+		{"image", []string{`Use js_exec and Desktop World only to observe/capture the already running task-owned CodeModeFixture (bundle dev.caelis.codemode.fixture). Authorized domain actions are app.look() and app.capture(), with optional const bindings and return; no other application/action/input. Return the actual image result to yourself and describe its geometric marker, color and large visible code. Do not infer the picture from tool names, window title or this prompt. No shell or file writes.`}},
 	}
-	if selected := os.Getenv("CAELIS_CODE_MODE_SIMPLE_ONLY"); selected != "" {
-		if selected != "image" {
-			t.Fatal("unsupported acceptance selection")
+	if selected != "" {
+		filtered := prompts[:0]
+		for _, task := range prompts {
+			if task.ID == selected {
+				filtered = append(filtered, task)
+			}
 		}
-		prompts = prompts[1:]
+		prompts = filtered
 	}
+
 	writeLiveJSON(t, filepath.Join(root, "prompts.json"), prompts)
 	for _, task := range prompts {
+		if task.ID == "context7" {
+			infos := manager.GetServerInfos("context7")
+			if len(infos) != 1 || infos[0].Status != "running" || len(infos[0].Tools) == 0 || infos[0].Warning != "" {
+				writeLiveJSON(t, filepath.Join(root, "context7-blocked.json"), infos)
+				t.Error("Context7 initialization unavailable; no model request or startup retry")
+				continue
+			}
+		}
 		dir := filepath.Join(root, task.ID)
 		if err = os.MkdirAll(dir, 0700); err != nil {
 			t.Fatal(err)
@@ -226,9 +255,18 @@ func TestCodeModeSimpleLive(t *testing.T) {
 			return errors.Join(e1, f.Close())
 		})
 		stream := true
-		result, runErr := rt.Run(taskCtx, agent.RunRequest{SessionRef: active.SessionRef, Input: task.Text, Request: agent.ModelRequestOptions{Stream: &stream}, ApprovalRequester: requester, SourceObserver: observer, AgentSpec: agent.AgentSpec{Model: trace, Metadata: map[string]any{"reasoning_effort": built.ReasoningEffort, codemode.MetadataSelectedTools: gatewayapp.CodeModeFixtureSelectedTools(manager.Tools())}, Tools: tools, DeferredTools: manager}})
-		if runErr == nil {
-			runErr = result.Handle.WaitCompletion(ctx)
+		var runErr error
+		for turnIndex, text := range task.Text {
+			runCtx := context.WithValue(taskCtx, fairContextKey{}, fairRequestContext{Turn: turnIndex + 1})
+			result, turnErr := rt.Run(runCtx, agent.RunRequest{SessionRef: active.SessionRef, Input: text, Request: agent.ModelRequestOptions{Stream: &stream}, ApprovalRequester: requester, SourceObserver: observer, AgentSpec: agent.AgentSpec{Model: fairPreserveInvocationTracking(trace, built.Model), Metadata: map[string]any{"reasoning_effort": built.ReasoningEffort, codemode.MetadataSelectedTools: gatewayapp.CodeModeFixtureSelectedTools(manager.Tools())}, Tools: tools, DeferredTools: manager}})
+			if turnErr == nil {
+				turnErr = result.Handle.WaitCompletion(runCtx)
+			}
+			writeLiveJSON(t, filepath.Join(dir, fmt.Sprintf("turn-%d.terminal.json", turnIndex+1)), map[string]any{"error_code": errorcode.CodeOf(turnErr), "error_type": fmt.Sprintf("%T", turnErr)})
+			if turnErr != nil {
+				runErr = turnErr
+				break
+			}
 		}
 		history, loadErr := store.LoadSession(ctx, session.LoadSessionRequest{SessionRef: active.SessionRef, IncludeTransient: true})
 		if loadErr == nil {
@@ -326,7 +364,16 @@ func simpleFunctionalChecks(t *testing.T, dir, id string) map[string]bool {
 var simpleReadonlyExact = regexp.MustCompile(`^\s*await\s+app\.look\(\)\s*;\s*await\s+app\.capture\(\)\s*;?\s*$`)
 var simpleReadonlyBound = regexp.MustCompile(`^\s*const\s+([A-Za-z_$][A-Za-z0-9_$]{0,63})\s*=\s*await\s+app\.look\(\)\s*;\s*const\s+([A-Za-z_$][A-Za-z0-9_$]{0,63})\s*=\s*await\s+app\.capture\(\)\s*;\s*return\s+(?:\{\s*([A-Za-z_$][A-Za-z0-9_$]{0,63})\s*,\s*([A-Za-z_$][A-Za-z0-9_$]{0,63})\s*\}|([A-Za-z_$][A-Za-z0-9_$]{0,63}))\s*;?\s*$`)
 
+var simpleReadonlyCapture = regexp.MustCompile(`^\s*(?:return\s+)?await\s+app\.capture\(\)\s*;?\s*$`)
+var simpleReadonlyCaptureBound = regexp.MustCompile(`^\s*const\s+([A-Za-z_$][A-Za-z0-9_$]{0,63})\s*=\s*await\s+app\.capture\(\)\s*;\s*return\s+([A-Za-z_$][A-Za-z0-9_$]{0,63})\s*;?\s*$`)
+
 func simpleReadonlyObservation(source string) bool {
+	if simpleReadonlyCapture.MatchString(source) {
+		return true
+	}
+	if m := simpleReadonlyCaptureBound.FindStringSubmatch(source); m != nil {
+		return m[1] == m[2]
+	}
 	if simpleReadonlyExact.MatchString(source) {
 		return true
 	}
@@ -334,7 +381,7 @@ func simpleReadonlyObservation(source string) bool {
 	return m != nil && m[1] != m[2] && ((m[3] == m[1] && m[4] == m[2]) || m[5] == m[2])
 }
 func TestCodeModeSimpleReadOnlyBodies(t *testing.T) {
-	for _, source := range []string{`await app.look(); await app.capture();`, `const look = await app.look(); const capture = await app.capture(); return {look, capture};`, `const looked = await app.look(); const image = await app.capture(); return {looked, image};`, `const a=await app.look();const b=await app.capture();return b;`} {
+	for _, source := range []string{`return await app.capture();`, `const image=await app.capture();return image;`, `await app.look(); await app.capture();`, `const look = await app.look(); const capture = await app.capture(); return {look, capture};`, `const looked = await app.look(); const image = await app.capture(); return {looked, image};`, `const a=await app.look();const b=await app.capture();return b;`} {
 		if !simpleReadonlyObservation(source) {
 			t.Fatalf("authorized body rejected: %s", source)
 		}
