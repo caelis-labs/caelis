@@ -57,6 +57,11 @@ bash ./scripts/go_test_nonempty.sh ./surfaces/tui/app \
 bash ./scripts/go_test_nonempty.sh ./surfaces/tui/app \
   '^Test(SessionObservationRecovery|SessionObservationRetry|ProductSessionObservationAutomaticallyRecoversAfterHostReplacement)' windows-host-reconnect -count=1
 
+# Discovery readers and mutation share the original cross-process lock.
+# Includes a deterministic legacy held-handle failure control, no random reruns.
+bash ./scripts/go_test_nonempty.sh ./app/controlserver \
+  '^TestWindowsDiscovery' windows-discovery-reader -count=1 -v
+
 # Code Mode is enabled in product assembly on Windows. Exercise native worker
 # handshake, cancellation and Wait/reaping through the installed CLI entry.
 mkdir -p .tmp/bin

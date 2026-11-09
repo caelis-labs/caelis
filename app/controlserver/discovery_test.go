@@ -1,6 +1,7 @@
 package controlserver
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -109,5 +110,16 @@ func testDiscoveryRecord() DiscoveryRecord {
 		DistributionVersion: "v1.2.3", BuildID: "test-build", BuildKind: "release",
 		Capabilities: appserver.RequiredManagedHostCapabilities(), Transports: []string{"http"},
 		StartedAt: time.Now().UTC(),
+	}
+}
+
+func TestDiscoveryMissingReadDoesNotCreateRuntimeFiles(t *testing.T) {
+	root := t.TempDir()
+	path := DefaultDiscoveryFile(root)
+	if _, err := LoadDiscoveryRecord(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Dir(path)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("cold read created runtime directory")
 	}
 }
