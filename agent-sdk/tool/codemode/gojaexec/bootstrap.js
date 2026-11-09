@@ -32,7 +32,7 @@
   // caps depth. It never exports an untrusted object graph to Go.
   function encode(value, budget, project) {
     let out = "", used = 0;
-    const seen = new SetType(), selected=new SetType(), media=[];
+    const seen = new SetType(), selected=new SetType(), directMedia=new SetType(), media=[];
     let direct=!!(project&&value&&typeof value==="object"&&weakGet(replies,value));
     function put(s, n) {
       if ((used += n) > budget) throw new ErrorType("JSON byte budget exceeded");
@@ -67,6 +67,7 @@
       if (has(seen,v)) throw new ErrorType("cyclic JSON");
       add(seen,v);
       const origin=weakGet(origins,v);
+      if(role===3&&origin&&(origin.kind==="media"||origin.kind==="file_ref"))add(directMedia,origin.handle);
       if(inspect&&origin&&(origin.kind==="media"||origin.kind==="file_ref")&&!has(selected,origin.handle)) {
         if(media.length>=limits.calls)throw new ErrorType("returned media budget exceeded");
         add(selected,origin.handle);
@@ -100,7 +101,7 @@
             if(origin.kind==="json"&&name==="json")payloadSeen=true;
             if((origin.kind==="media"||origin.kind==="file_ref")&&name==="handle")payloadSeen=child===origin.handle;
           }
-          visit(child,depth+1,inspect&&!(origin&&origin.kind==="json"&&name==="json"),role===1&&name==="parts"?2:0);
+          visit(child,depth+1,inspect,role===1&&name==="parts"?2:0);
         }
         if(role===3&&(!kindSeen||!payloadSeen))direct=false;
       }
@@ -109,7 +110,15 @@
     visit(value,0,!!project,direct?1:0);
     if(project) {
       const body=out, bytes=used;out="";used=0;
-      if(direct) {put('{"reply":true,',14);put(slice(body,1),bytes-1);}
+      if(direct) {
+        // Canonical JSON parts may now contain selected original media. Reuse
+        // the already encoded body: accessors must never be evaluated twice.
+        put('{"reply":true,',14);put(slice(body,1,-2),bytes-3);
+        for(let i=0;i<media.length;i++) if(!has(directMedia,media[i].handle)) {
+          put(',',1);visit(media[i],0,false,0);
+        }
+        put(']}',2);
+      }
       else {put('{"value":',9);put(body,bytes);put(',"parts":',9);visit(media,0,false,0);put('}',1);}
     }
     return out;
