@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -144,17 +145,28 @@ func newManager(ctx context.Context, specs []ServerSpec, start clientStarter, on
 
 func (m *Manager) initialize(parent context.Context, server *managedServer, start clientStarter) {
 	ctx, cancel := context.WithTimeout(parent, DefaultStartupTimeout)
-	defer cancel()
 	client, err := start(ctx, server.spec)
-	var listed []*mcpsdk.Tool
-	if err == nil && client.catalog == nil {
-		listed, err = client.ListTools(ctx)
-		if err != nil {
-			err = &startupError{Stage: "tools/list", Err: err}
-		}
-	}
 	if err == nil {
 		err = ctx.Err()
+	}
+	cancel()
+	if err != nil {
+		var phase *startupError
+		if !errors.As(err, &phase) {
+			err = &startupError{Stage: "connection", Err: err}
+		}
+	}
+	var listed []*mcpsdk.Tool
+	if err == nil && client.catalog == nil {
+		listCtx, listCancel := context.WithTimeout(parent, DefaultToolListTimeout)
+		listed, err = client.ListTools(listCtx)
+		if err == nil {
+			err = listCtx.Err()
+		}
+		listCancel()
+		if err != nil {
+			err = client.startupFailure("tools/list", err)
+		}
 	}
 	m.mu.Lock()
 	if m.closed || parent.Err() != nil {
@@ -171,9 +183,9 @@ func (m *Manager) initialize(parent context.Context, server *managedServer, star
 	m.rebuildToolsLocked()
 	m.mu.Unlock()
 	if err == nil && client.catalog != nil {
-		refreshErr := m.refreshCatalog(ctx, server, false)
+		refreshErr := m.refreshCatalog(parent, server, false)
 		if refreshErr != nil {
-			refreshErr = &startupError{Stage: "tools/list", Err: refreshErr}
+			refreshErr = client.startupFailure("tools/list", refreshErr)
 		}
 		m.mu.Lock()
 		if m.closed || parent.Err() != nil {
@@ -512,9 +524,7 @@ func (m *Manager) GetServerInfos(pluginID string) []MCPServerInfo {
 		}
 		if server.err != nil {
 			status = "failed"
-			if client == nil {
-				warnings = append(warnings, startupFailureSummary(server.err))
-			}
+			warnings = append(warnings, startupFailureSummary(server.err))
 		}
 		if client != nil {
 			status = "running"

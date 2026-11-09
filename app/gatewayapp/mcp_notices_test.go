@@ -122,7 +122,7 @@ func TestMCPFailurePublishesOneNoticeWithoutChangingCanonicalSession(t *testing.
 				if event.NoticeKind != eventstream.NoticeKindMCPStartupFailed || event.Delivery == nil || event.Delivery.Mode != eventstream.DeliveryTransient || event.Position == nil || event.Position.Durable != nil {
 					t.Fatalf("notice claimed persistence: %#v", event)
 				}
-				if event.Notice != mcpFailureNotice(mcp.ServerFailure{Name: "unreachable", Err: errors.New("failure")}) {
+				if event.Notice != `MCP "unreachable" · transport: executable not found · /mcp` {
 					t.Fatalf("notice=%q", event.Notice)
 				}
 				if found {

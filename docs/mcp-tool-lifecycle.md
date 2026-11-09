@@ -29,8 +29,21 @@ Control's Session MCP status reports this same Runtime's connection state and
 catalog. `running` alone describes a connection, not a ready catalog: check that
 `refreshing`, `stale` and `refresh_failed` have cleared, with no warning, and that
 the expected tool directory is present. Startup failures appear as a short, Session-scoped TUI hint rather than chat
-history; `/mcp` retains the failed server and a bounded diagnostic stage. A
-deadline does not by itself identify a 30-second startup timeout or a network or
+history; `/mcp` retains the failed server and a bounded diagnostic stage/reason.
+Transport startup and protocol initialization have a 30-second budget; the
+first complete `tools/list` has a separate 30 seconds, starting after connection.
+Directory refresh uses the same independent 30-second listing budget. Parent
+cancellation or an earlier caller deadline still bounds both stages; shutdown
+drains the SDK-owned process/connection before returning.
+
+For stdio, `startup/initialize` includes launcher work: a started npx process
+does not prove package resolution or the MCP peer's handshake has started.
+Only npm-prefixed fetch/error-code evidence in the last 4096 stderr bytes is
+classified as a registry failure. The tail is cleared after initialization;
+status/hints contain fixed categories, never raw stderr, URLs or credentials.
+Without that evidence, a timed-out npm launcher reports incomplete startup and
+suggests checking registry connectivity. HTTP 401/403 and typed network errors
+are reported separately. A deadline alone does not prove a network or
 authentication failure. Inspection and reconnection do not
 activate a cold Runtime. Refresh
 targets an already active Runtime; it is not a startup operation. Integration
@@ -72,7 +85,7 @@ A tool-list notification immediately makes that server's catalog uncertain and
 blocks new dispatch through all its pinned handles. One worker per server merges
 notifications in a bounded wake-up channel and fetches a complete paginated list.
 A notification generation change during pagination discards the read and retries
-at most three times within the existing startup timeout. Repeated cursors,
+at most three times within the independent listing timeout. Repeated cursors,
 duplicate names, listing failures and cancellation retain the last whole directory.
 A failed refresh exposes a status warning and keeps dispatch blocked until another
 notification or explicit `Manager.RefreshTools` succeeds. The authorized

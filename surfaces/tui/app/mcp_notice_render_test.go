@@ -71,7 +71,7 @@ func TestSessionObservationPresentsNoticePublishedBeforeAttachment(t *testing.T)
 }
 
 func mcpNoticeForTest() eventstream.Envelope {
-	return eventstream.Envelope{Kind: eventstream.KindNotice, SessionID: "session-1", NoticeKind: eventstream.NoticeKindMCPStartupFailed, Notice: "MCP context7 unavailable · /mcp for details", OccurredAt: time.Now(), Delivery: &eventstream.Delivery{Mode: eventstream.DeliveryTransient}}
+	return eventstream.Envelope{Kind: eventstream.KindNotice, SessionID: "session-1", NoticeKind: eventstream.NoticeKindMCPStartupFailed, Notice: "MCP context7 · startup/initialize: deadline exceeded · /mcp", OccurredAt: time.Now(), Delivery: &eventstream.Delivery{Mode: eventstream.DeliveryTransient}}
 }
 
 func TestMCPStartupNoticeIsDeduplicatedExpiringHint(t *testing.T) {

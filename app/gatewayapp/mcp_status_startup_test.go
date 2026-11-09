@@ -18,7 +18,7 @@ func TestConfiguredMCPStartupFailureRemainsQueryableWithoutPluginSource(t *testi
 	defer manager.Close()
 	<-manager.Initialized()
 	status := nativePluginStatus(&sessionprofile.Configuration{Revision: 7}, plugin.Contributions{}, manager, specs)(7)
-	if len(status.Servers) != 1 || status.Servers[0].Name != "context7" || status.Servers[0].Status != "failed" || status.Servers[0].Warning != "transport: failed" {
+	if len(status.Servers) != 1 || status.Servers[0].Name != "context7" || status.Servers[0].Status != "failed" || status.Servers[0].Warning != "transport: executable not found" {
 		t.Fatalf("status=%#v", status)
 	}
 	if strings.Contains(status.Servers[0].Warning, "private") || len(status.Plugins) != 0 {

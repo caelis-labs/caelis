@@ -21,8 +21,13 @@ import (
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// DefaultStartupTimeout bounds one server initialization, including tool listing.
+// DefaultStartupTimeout bounds transport startup and protocol initialization.
+// For stdio this includes any launcher/package resolution before the peer replies.
 const DefaultStartupTimeout = 30 * time.Second
+
+// DefaultToolListTimeout independently bounds one complete directory read,
+// including pagination and bounded catalog-generation retries.
+const DefaultToolListTimeout = 30 * time.Second
 
 type Client struct {
 	spec      ServerSpec
@@ -32,6 +37,7 @@ type Client struct {
 	// environment, before Connect. It contains no environment values.
 	launchIdentity string
 	cancel         context.CancelFunc
+	diagnostics    *startupDiagnostics
 
 	catalog *clientCatalog
 
@@ -99,14 +105,18 @@ func startClientWithCatalog(ctx context.Context, spec ServerSpec, httpClient *ht
 	}
 	lifetimeCtx, cancel := context.WithCancel(context.Background())
 	startup := &startupTransport{Transport: transport}
+	diagnostics := observeStartup(transport, spec)
 	session, err := connectWithTimeout(ctx, client, lifetimeCtx, cancel, startup, DefaultStartupTimeout)
+	reason := diagnostics.reason(err)
+	diagnostics.stopStderr()
 	if err != nil {
 		cancel()
 		stage := "transport"
 		if startup.connected.Load() {
 			stage = "initialize"
 		}
-		return nil, &startupError{Stage: stage, Err: fmt.Errorf("connect %s MCP server %s/%s: %w", transportName, spec.PluginID, spec.Name, err)}
+		return nil, &startupError{Stage: stage, Err: fmt.Errorf("connect %s MCP server %s/%s: %w", transportName, spec.PluginID, spec.Name, err),
+			stdio: transportName == TransportStdio, npm: isNPMLauncher(spec.Command), reason: reason}
 	}
 	connected := &Client{
 		spec:           spec,
@@ -115,6 +125,7 @@ func startClientWithCatalog(ctx context.Context, spec ServerSpec, httpClient *ht
 		transport:      transportName,
 		launchIdentity: launchIdentity,
 		cancel:         cancel,
+		diagnostics:    diagnostics,
 		closed:         make(chan struct{}),
 	}
 	// Observe process/connection exit independently of tool calls. A cancelled
@@ -423,6 +434,7 @@ func hasHeaderFold(headers http.Header, name string) bool {
 }
 
 func (c *Client) ListTools(ctx context.Context) ([]*mcpsdk.Tool, error) {
+	c.diagnostics.resetHTTP()
 	if err := c.closedError(); err != nil {
 		return nil, err
 	}

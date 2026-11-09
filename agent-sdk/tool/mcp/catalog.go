@@ -144,7 +144,7 @@ func (m *Manager) refreshCatalog(parent context.Context, server *managedServer, 
 	if err := parent.Err(); err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(parent, DefaultStartupTimeout)
+	ctx, cancel := context.WithTimeout(parent, DefaultToolListTimeout)
 	defer cancel()
 	c := server.client.catalog
 	m.mu.Lock()

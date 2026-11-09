@@ -40,5 +40,5 @@ func mcpFailureNotice(failure mcp.ServerFailure) string {
 	if runes := []rune(name); len(runes) > 80 {
 		name = string(runes[:80]) + "…"
 	}
-	return fmt.Sprintf("MCP %q unavailable · /mcp for details", name)
+	return fmt.Sprintf("MCP %q · %s · /mcp", name, failure.Summary())
 }
