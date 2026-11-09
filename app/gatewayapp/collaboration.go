@@ -28,6 +28,26 @@ type collaborationBackend struct {
 }
 
 func (b *collaborationBackend) List(ctx context.Context, id string) ([]collaboration.Thread, error) {
+	return b.list(ctx, id, "")
+}
+
+// Recipient rechecks current membership and Task state at the mailbox claim
+// boundary. Poll-time discovery is never reused as delivery permission.
+func (b *collaborationBackend) Recipient(ctx context.Context, target collaboration.Identity) ([]collaboration.Thread, error) {
+	threads, err := b.list(ctx, target.Session, target.Member)
+	if err != nil {
+		return nil, err
+	}
+	var out []collaboration.Thread
+	for _, thread := range threads {
+		if thread.Handle == target.Member {
+			out = append(out, thread)
+		}
+	}
+	return out, nil
+}
+
+func (b *collaborationBackend) list(ctx context.Context, id, member string) ([]collaboration.Thread, error) {
 	active, err := b.sessions.Session(ctx, session.SessionRef{SessionID: id})
 	if err != nil {
 		return nil, err
@@ -73,12 +93,23 @@ func (b *collaborationBackend) List(ctx context.Context, id string) ([]collabora
 			release()
 		}
 	}
-	entries, err := b.tasks.ListSession(ctx, active.SessionRef)
+	var taskIDs []string
+	if member != "" {
+		for _, p := range active.Participants {
+			if p.Kind == session.ParticipantKindSubagent && hostedChildHandle(p) == member {
+				taskIDs = append(taskIDs, p.DelegationID)
+			}
+		}
+		if len(taskIDs) == 0 {
+			return out, nil
+		}
+	}
+	entries, err := b.taskStates(ctx, active.SessionRef, taskIDs)
 	if err != nil {
 		return nil, err
 	}
 	for _, p := range active.Participants {
-		if p.Kind != session.ParticipantKindSubagent {
+		if p.Kind != session.ParticipantKindSubagent || (member != "" && hostedChildHandle(p) != member) {
 			continue
 		}
 		t := collaboration.Thread{ID: p.DelegationID, SessionID: p.SessionID, ParticipantID: p.ID, Generation: p.AttachmentGeneration, Handle: hostedChildHandle(p), Name: p.AgentName, State: "starting"}
@@ -86,8 +117,7 @@ func (b *collaborationBackend) List(ctx context.Context, id string) ([]collabora
 			if entry.TaskID == p.DelegationID {
 				t.State = string(entry.State)
 				t.Revision = entry.Revision
-				steer, _ := entry.Metadata["supports_steering"].(bool)
-				t.CanDeliver = (task.IsTerminalState(entry.State) || steer) && entry.State != task.StateUnknownOutcome
+				t.CanDeliver = (task.IsTerminalState(entry.State) || entry.SupportsSteering) && entry.State != task.StateUnknownOutcome
 				break
 			}
 		}
