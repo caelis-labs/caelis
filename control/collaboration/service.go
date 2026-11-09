@@ -400,9 +400,7 @@ func (s *Service) claimRecipient(ctx context.Context, i Identity) ([]Message, st
 	var threads []Thread
 	var err error
 	if backend, ok := s.backend.(RecipientBackend); ok {
-		var thread Thread
-		thread, err = backend.Recipient(ctx, i)
-		threads = []Thread{thread}
+		threads, err = backend.Recipient(ctx, i)
 	} else {
 		threads, err = s.backend.List(ctx, i.Session)
 	}

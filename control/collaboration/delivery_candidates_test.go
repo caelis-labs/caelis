@@ -3,6 +3,7 @@ package collaboration
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"reflect"
 	"sync"
@@ -33,14 +34,14 @@ func (b *focusedDeliveryBackend) List(ctx context.Context, _ string) ([]Thread, 
 		{ID: "b", Handle: "b", Generation: "discovery", CanDeliver: true}, {ID: "c", Handle: "c", Generation: "discovery", CanDeliver: true}}, nil
 }
 
-func (b *focusedDeliveryBackend) Recipient(ctx context.Context, target Identity) (Thread, error) {
+func (b *focusedDeliveryBackend) Recipient(ctx context.Context, target Identity) ([]Thread, error) {
 	if err := ctx.Err(); err != nil {
-		return Thread{}, err
+		return nil, err
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.claims[target.Member]++
-	return Thread{ID: target.Member, Handle: target.Member, Generation: b.generation, CanDeliver: b.available[target.Member]}, nil
+	return []Thread{{ID: target.Member, Handle: target.Member, Generation: b.generation, CanDeliver: b.available[target.Member]}}, nil
 }
 
 func (b *focusedDeliveryBackend) Deliver(_ context.Context, _ string, messages []Message) error {
@@ -130,11 +131,11 @@ func (b *cancelFocusedBackend) List(ctx context.Context, id string) ([]Thread, e
 	return b.focusedDeliveryBackend.List(ctx, id)
 }
 
-func (b *cancelFocusedBackend) Recipient(ctx context.Context, target Identity) (Thread, error) {
+func (b *cancelFocusedBackend) Recipient(ctx context.Context, target Identity) ([]Thread, error) {
 	if b.phase == "claim" {
 		b.once.Do(func() { close(b.entered) })
 		<-ctx.Done()
-		return Thread{}, ctx.Err()
+		return nil, ctx.Err()
 	}
 	return b.focusedDeliveryBackend.Recipient(ctx, target)
 }
@@ -176,5 +177,98 @@ func TestRunCancellationJoinsCandidateAndClaimReads(t *testing.T) {
 				t.Fatalf("canceled observation consumed mail: %d, %v", pending, err)
 			}
 		})
+	}
+}
+
+type duplicateDeliveryBackend struct {
+	threads   []Thread
+	delivered []Message
+	unknown   bool
+}
+
+func (b *duplicateDeliveryBackend) List(context.Context, string) ([]Thread, error) {
+	return append([]Thread(nil), b.threads...), nil
+}
+
+func (b *duplicateDeliveryBackend) Deliver(_ context.Context, _ string, messages []Message) error {
+	b.delivered = append(b.delivered, messages...)
+	if b.unknown {
+		return errors.New("original admission outcome unknown")
+	}
+	return nil
+}
+
+type duplicateFocusedBackend struct{ *duplicateDeliveryBackend }
+
+func (b *duplicateFocusedBackend) Recipient(_ context.Context, target Identity) ([]Thread, error) {
+	var out []Thread
+	for _, thread := range b.threads {
+		if thread.Handle == target.Member {
+			out = append(out, thread)
+		}
+	}
+	return out, nil
+}
+
+func TestFocusedDeliveryPreservesDuplicateHandleClaim(t *testing.T) {
+	for _, firstReady := range []bool{true, false} {
+		for _, unknown := range []bool{false, true} {
+			name := fmt.Sprintf("first_ready_%t/unknown_%t", firstReady, unknown)
+			t.Run(name, func(t *testing.T) {
+				threads := []Thread{{ID: "parent", Handle: "parent"},
+					{ID: "first", Handle: "duplicate", ParticipantID: "p-first", Generation: "g-first", CanDeliver: firstReady},
+					{ID: "last", Handle: "duplicate", ParticipantID: "p-last", Generation: "g-last", CanDeliver: !firstReady},
+					{ID: "peer", Handle: "peer", CanDeliver: true}}
+				for _, focused := range []bool{false, true} {
+					t.Run(fmt.Sprintf("focused_%t", focused), func(t *testing.T) {
+						base := &duplicateDeliveryBackend{threads: threads, unknown: unknown}
+						var backend Backend = base // The original List-based claim path.
+						if focused {
+							backend = &duplicateFocusedBackend{base}
+						}
+						service, err := Open(filepath.Join(t.TempDir(), "mail.sqlite"), backend)
+						if err != nil {
+							t.Fatal(err)
+						}
+						defer service.Close()
+						message, err := service.Send(t.Context(), Identity{"work", "parent"}, "duplicate", "original mail", "")
+						if err != nil {
+							t.Fatal(err)
+						}
+						target := Identity{"work", "duplicate"}
+						if focused {
+							candidates, err := service.deliveryCandidates(t.Context(), []Identity{target, {"work", "peer"}})
+							if err != nil || !candidates[target.Member] {
+								t.Fatalf("candidate filter suppressed original claim: %v, %v", candidates, err)
+							}
+						}
+						err = service.deliverRecipient(t.Context(), target)
+						if (err != nil) != unknown || len(base.delivered) != 1 || base.delivered[0] != message {
+							t.Fatalf("original mail not dispatched once: delivered=%v err=%v", base.delivered, err)
+						}
+						var pending, seen int
+						if err := service.db.QueryRow(`SELECT COUNT(*) FROM collaboration_mailbox`).Scan(&pending); err != nil || pending != 0 {
+							t.Fatalf("mail retained after original dispatch: %d, %v", pending, err)
+						}
+						// Keep the original readerInstance rule: first matching
+						// identity, even when a later matching row is ready.
+						instance, err := readerInstance(threads, target.Member)
+						if err != nil {
+							t.Fatal(err)
+						}
+						wantSeen := 1
+						if unknown {
+							wantSeen = 0
+						}
+						if err := service.db.QueryRow(`SELECT COUNT(*) FROM collaboration_seen WHERE id=? AND instance=?`, message.ID, instance).Scan(&seen); err != nil || seen != wantSeen {
+							t.Fatalf("original seen instance changed: %q count=%d, %v", instance, seen, err)
+						}
+						if err := service.deliverRecipient(t.Context(), target); err != nil || len(base.delivered) != 1 {
+							t.Fatalf("accepted/unknown original effect replayed: %d, %v", len(base.delivered), err)
+						}
+					})
+				}
+			})
+		}
 	}
 }

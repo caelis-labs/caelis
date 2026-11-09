@@ -8,9 +8,11 @@ import (
 // RecipientBackend is an optional focused, fresh lookup at the mailbox claim
 // boundary. Recipient must recheck canonical membership, instance/generation,
 // and current input availability; a prior discovery snapshot cannot authorize
-// delivery. An absent recipient returns an empty Thread, without claiming mail.
+// delivery. Recipient returns all matching observations in List order, including
+// any legacy duplicate handles; the ordinary claim loop retains selection and
+// reader-instance ownership. An absent recipient returns no observations.
 type RecipientBackend interface {
-	Recipient(context.Context, Identity) (Thread, error)
+	Recipient(context.Context, Identity) ([]Thread, error)
 }
 
 func (s *Service) deliveryGroups(targets []Identity) [][]Identity {
@@ -50,7 +52,7 @@ func (s *Service) deliveryCandidates(ctx context.Context, targets []Identity) (m
 	for _, thread := range threads {
 		// This is a scheduling hint only. A fresh Recipient call inside the
 		// reader lock decides whether each target's mail may actually be taken.
-		out[thread.Handle] = thread.CanDeliver
+		out[thread.Handle] = out[thread.Handle] || thread.CanDeliver
 	}
 	return out, nil
 }

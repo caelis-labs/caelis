@@ -33,17 +33,18 @@ func (b *collaborationBackend) List(ctx context.Context, id string) ([]collabora
 
 // Recipient rechecks current membership and Task state at the mailbox claim
 // boundary. Poll-time discovery is never reused as delivery permission.
-func (b *collaborationBackend) Recipient(ctx context.Context, target collaboration.Identity) (collaboration.Thread, error) {
+func (b *collaborationBackend) Recipient(ctx context.Context, target collaboration.Identity) ([]collaboration.Thread, error) {
 	threads, err := b.list(ctx, target.Session, target.Member)
 	if err != nil {
-		return collaboration.Thread{}, err
+		return nil, err
 	}
+	var out []collaboration.Thread
 	for _, thread := range threads {
 		if thread.Handle == target.Member {
-			return thread, nil
+			out = append(out, thread)
 		}
 	}
-	return collaboration.Thread{}, nil
+	return out, nil
 }
 
 func (b *collaborationBackend) list(ctx context.Context, id, member string) ([]collaboration.Thread, error) {
@@ -91,9 +92,6 @@ func (b *collaborationBackend) list(ctx context.Context, id, member string) ([]c
 		if release != nil {
 			release()
 		}
-	}
-	if member == "parent" {
-		return out, nil
 	}
 	var taskIDs []string
 	if member != "" {
