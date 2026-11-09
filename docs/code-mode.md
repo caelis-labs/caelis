@@ -92,10 +92,11 @@ The model receives only explicitly selected summaries and original media.
 Actual child names, exact arguments, results, failures, unknown outcomes and
 receipts remain in the existing audit/event chain. Filtering must not convert
 failed or unknown execution to success. TUI projects those original child
-identities in a default-collapsed Code Mode group. While running, its summary
-shows the current child action. Opening the group shows actual tool names and
-brief arguments; each tool's script, arguments and output have their own detail
-disclosure. Approval decisions remain visible outside the collapsed group.
+identities in a default-collapsed Running/Ran script group. File scripts show
+their name; inline scripts show a foldable source preview. A running summary
+shows the current child action. Opening the group shows actual child tool names
+and brief arguments, with separate result/source disclosure and explicit
+failures. Approval decisions remain visible outside the collapsed group.
 Grouping reuses the existing Turn and call identities and does not change the
 execution path.
 

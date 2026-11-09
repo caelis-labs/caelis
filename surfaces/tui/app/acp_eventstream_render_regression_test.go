@@ -500,12 +500,12 @@ func TestCodeModeRendersActualNestedToolAndParent(t *testing.T) {
 	}
 	block := requireMainACPTurnBlockForTest(t, m)
 	closed := joinRenderedPlain(block.Render(m.blockRenderContext(120)))
-	if !strings.Contains(closed, "Code Mode") || strings.Count(closed, "maps__route") != 1 {
+	if !strings.Contains(closed, "Running script") || strings.Count(closed, "maps__route") != 1 {
 		t.Fatalf("running summary: %s", closed)
 	}
 	block.toggleExplorationExpanded("script")
 	open := joinRenderedPlain(block.Render(m.blockRenderContext(120)))
-	for _, want := range []string{"Code Mode", "maps__route", "北京南站", "故宫"} {
+	for _, want := range []string{"Running script", "maps__route", "北京南站", "故宫"} {
 		if !strings.Contains(open, want) {
 			t.Fatalf("missing %q: %s", want, open)
 		}

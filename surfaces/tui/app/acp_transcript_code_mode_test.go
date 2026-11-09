@@ -1,6 +1,8 @@
 package tuiapp
 
 import (
+	"encoding/json"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -18,18 +20,18 @@ func TestCodeModeDisclosureKeepsCallIdentityScriptAndOutput(t *testing.T) {
 	b := codeModeBlockForTest()
 	ctx := NewModel(Config{NoColor: true, NoAnimation: true}).blockRenderContext(100)
 	closed := joinRenderedPlain(b.Render(ctx))
-	if !strings.Contains(closed, "Code Mode · 2 calls") || !strings.Contains(closed, "desktop_world__exec") || strings.Contains(closed, "tool_search") || strings.Contains(closed, "SCRIPT_TAIL") {
+	if !strings.Contains(closed, "Running script") || !strings.Contains(closed, "desktop_world__exec") || strings.Contains(closed, "tool_search") {
 		t.Fatalf("running group: %s", closed)
 	}
 	b.toggleExplorationExpanded("script")
 	rows := b.Render(ctx)
 	open := joinRenderedPlain(rows)
-	for _, want := range []string{"tool_search", "desktop_world__exec", "自有 fixture", "js_exec"} {
+	for _, want := range []string{"tool_search", "desktop_world__exec", "自有 fixture"} {
 		if !strings.Contains(open, want) {
 			t.Fatalf("missing %q: %s", want, open)
 		}
 	}
-	if strings.Contains(open, "Using Computer") || strings.Contains(open, "SCRIPT_TAIL") {
+	if strings.Contains(open, "Using Computer") || strings.Contains(open, "js_exec") || strings.Contains(open, "JavaScript") {
 		t.Fatalf("old group or eager script: %s", open)
 	}
 	for _, row := range rows {
@@ -82,7 +84,7 @@ func TestCodeModeFailureApprovalOrphanAndNativeBoundaries(t *testing.T) {
 	b.Status = "completed"
 	ctx := NewModel(Config{NoColor: true, NoAnimation: true}).blockRenderContext(100)
 	text := joinRenderedPlain(b.Render(ctx))
-	for _, want := range []string{"Code Mode · 2 calls · 1 failed", "denied", "Not permitted", "native.txt", "service__lookup"} {
+	for _, want := range []string{"Ran script [failed]", "denied", "Not permitted", "native.txt", "service__lookup"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("missing %q: %s", want, text)
 		}
@@ -107,7 +109,7 @@ func TestCodeModeLateTaskUpdatesRetainOneGroupAndDisclosure(t *testing.T) {
 	b.UpdateToolWithMeta("capture", "desktop_world__exec", "fixture", "late running snapshot", false, false, meta)
 	ctx := NewModel(Config{NoColor: true, NoAnimation: true}).blockRenderContext(60)
 	text := joinRenderedPlain(b.Render(ctx))
-	if strings.Count(text, "Code Mode") != 1 || !strings.Contains(text, "2 calls") || strings.Contains(text, "late running snapshot") || !b.explorationExpanded("script") {
+	if strings.Count(text, "Ran script") != 1 || strings.Contains(text, " calls") || strings.Contains(text, "late running snapshot") || !b.explorationExpanded("script") {
 		t.Fatalf("late Task snapshot reopened or duplicated work: %s", text)
 	}
 }
@@ -141,14 +143,52 @@ func TestCodeModeNarrowScriptWrapAndCopyExcludeGutter(t *testing.T) {
 	}
 }
 
-func TestCodeModeDurationUsesProjectedToolTimes(t *testing.T) {
+func TestCodeModeScriptSummaryOmitsCountsAndDuration(t *testing.T) {
 	b := NewMainACPTurnBlock("timed-code-mode")
 	start := time.Date(2026, 11, 8, 0, 0, 0, 0, time.UTC)
 	b.UpdateToolWithMeta("script", "js_exec", "JavaScript", "", false, false, ToolUpdateMeta{OccurredAt: start, ToolStatusExplicit: true, ToolStatus: "running"})
 	b.UpdateToolWithMeta("script", "js_exec", "JavaScript", "finished", true, false, ToolUpdateMeta{OccurredAt: start.Add(2 * time.Second), ToolStatusExplicit: true, ToolStatus: "completed"})
 	b.UpdateToolWithMeta("script", "js_exec", "JavaScript", "late", false, false, ToolUpdateMeta{OccurredAt: start.Add(8 * time.Second), ToolStatusExplicit: true, ToolStatus: "running"})
 	text := joinRenderedPlain(b.Render(NewModel(Config{NoColor: true, NoAnimation: true}).blockRenderContext(60)))
-	if !strings.Contains(text, "Code Mode · 2.0s") || strings.Contains(text, "late") {
+	if !strings.Contains(text, "Ran script") || strings.Contains(text, "late") || strings.Contains(text, "2.0s") || strings.Contains(text, "Code Mode") {
 		t.Fatalf("duration/lifecycle changed by stale snapshot: %s", text)
+	}
+}
+
+func TestCodeModeScriptNameAndInlineSourceDisclosure(t *testing.T) {
+	for _, file := range []string{"/private/task/probe.js", `C:\task\probe.js`} {
+		b := NewMainACPTurnBlock("script-file")
+		raw := `{"file":` + strconv.Quote(file) + `}`
+		b.UpdateToolWithMeta("script", "js_exec", "JavaScript", "done", true, false, ToolUpdateMeta{FullArgs: raw})
+		b.Status = "completed"
+		got := joinRenderedPlain(b.Render(NewModel(Config{NoColor: true, NoAnimation: true}).blockRenderContext(36)))
+		if !strings.Contains(got, "Ran script probe.js") || strings.Contains(got, "js_exec") || strings.Contains(got, "JavaScript") || strings.Contains(got, "Code Mode") {
+			t.Fatalf("file action: %s", got)
+		}
+		t.Logf("FILE ACTION\n%s", got)
+	}
+	b := NewMainACPTurnBlock("inline-source")
+	code := "const first = 1;\nconst second = 2;\nconst third = 3;\nconst SCRIPT_MIDDLE = 4;\nconst fifth = 5;\nconst sixth = 6;\nconst seventh = 7;\nreturn first;"
+	raw, _ := json.Marshal(map[string]any{"code": code})
+	b.UpdateToolWithMeta("script", "js_exec", "JavaScript", "done", true, false, ToolUpdateMeta{FullArgs: string(raw)})
+	b.Status = "completed"
+	ctx := NewModel(Config{NoColor: true, NoAnimation: true}).blockRenderContext(60)
+	closed := joinRenderedPlain(b.Render(ctx))
+	t.Logf("INLINE COLLAPSED\n%s", closed)
+	if !strings.Contains(closed, "Ran script\n└ const first") || strings.Contains(closed, "SCRIPT_MIDDLE") {
+		t.Fatal(closed)
+	}
+	b.toggleExplorationExpanded("script")
+	summary := joinRenderedPlain(b.Render(ctx))
+	if strings.Contains(summary, "SCRIPT_MIDDLE") || strings.Contains(summary, "js_exec") {
+		t.Fatal(summary)
+	}
+	for range 2 {
+		b.toggleToolPanelClick("script")
+	}
+	full := joinRenderedPlain(b.Render(ctx))
+	t.Logf("INLINE EXPANDED\n%s", full)
+	if !strings.Contains(full, "SCRIPT_MIDDLE") || !b.explorationExpanded("script") {
+		t.Fatal(full)
 	}
 }
