@@ -19,58 +19,25 @@ func codeModeBlockForTest() *MainACPTurnBlock {
 func TestCodeModeDisclosureKeepsCallIdentityScriptAndOutput(t *testing.T) {
 	b := codeModeBlockForTest()
 	ctx := NewModel(Config{NoColor: true, NoAnimation: true}).blockRenderContext(100)
-	closed := joinRenderedPlain(b.Render(ctx))
-	if !strings.Contains(closed, "Running script") || !strings.Contains(closed, "desktop_world__exec") || strings.Contains(closed, "tool_search") {
-		t.Fatalf("running group: %s", closed)
-	}
-	b.toggleExplorationExpanded("script")
-	rows := b.Render(ctx)
-	open := joinRenderedPlain(rows)
-	for _, want := range []string{"tool_search", "desktop_world__exec", "自有 fixture"} {
-		if !strings.Contains(open, want) {
-			t.Fatalf("missing %q: %s", want, open)
-		}
-	}
-	if strings.Contains(open, "Using Computer") || strings.Contains(open, "js_exec") || strings.Contains(open, "JavaScript") {
-		t.Fatalf("old group or eager script: %s", open)
-	}
-	for _, row := range rows {
-		if strings.HasPrefix(row.Plain, "│ ") && row.selectionIndent < 2 {
-			t.Fatal("gutter leaked into copy")
-		}
-		if row.Plain == "" {
-			t.Fatal("blank row inside group")
-		}
-	}
-	b.UpdateToolWithMeta("capture", "desktop_world__exec", `app="自有 fixture"`, strings.Repeat("output ", 100)+"RESULT_TAIL", true, false, ToolUpdateMeta{ParentToolCallID: "script", ParentToolName: "js_exec", FullArgs: `{"source":"return await capture();"}`})
-	b.UpdateTool("script", "js_exec", "JavaScript", "complete", true, false)
-	b.Status = "completed"
-	if !b.explorationExpanded("script") || strings.Contains(joinRenderedPlain(b.Render(ctx)), "RESULT_TAIL") {
-		t.Fatal("late completion changed disclosure")
-	}
-	for range 2 {
-		if !b.toggleToolPanelClick("capture") {
-			t.Fatal("child result disclosure unavailable")
-		}
-	}
-	if !strings.Contains(joinRenderedPlain(b.Render(ctx)), "RESULT_TAIL") {
-		t.Fatal("selected result missing")
-	}
+	b.UpdateTool("script", "js_exec", "JavaScript", "FINAL_SCRIPT_OUTPUT", true, false)
 	for range 2 {
 		if !b.toggleToolPanelClick("script") {
-			t.Fatal("script disclosure unavailable")
+			t.Fatal("script panel click unavailable")
 		}
 	}
-	if !strings.Contains(joinRenderedPlain(b.Render(ctx)), "SCRIPT_TAIL") || !b.explorationExpanded("script") {
-		t.Fatal("script folded the group or was lost")
+	text := joinRenderedPlain(b.Render(ctx))
+	for _, want := range []string{"Ran script", "SCRIPT_TAIL", "FINAL_SCRIPT_OUTPUT"} {
+		if !strings.Contains(text, want) {
+			t.Fatal(text)
+		}
 	}
-	b.toggleExplorationExpanded("script")
-	closed = joinRenderedPlain(b.Render(ctx))
-	if strings.Contains(closed, "desktop_world__exec") || strings.Contains(closed, "RESULT_TAIL") || strings.Contains(closed, "running") {
-		t.Fatalf("completed collapsed group: %s", closed)
+	for _, hidden := range []string{"desktop_world__exec", "tool_search", "Code Mode", "JavaScript"} {
+		if strings.Contains(text, hidden) {
+			t.Fatal(text)
+		}
 	}
-	if len(b.Events) != 3 || b.Events[2].Name != "desktop_world__exec" || b.Events[2].ParentToolCallID != "script" {
-		t.Fatal("render mutated projection")
+	if len(b.Events) != 3 || b.Events[2].ParentToolCallID != "script" {
+		t.Fatal("render mutated child identity")
 	}
 }
 
@@ -84,7 +51,7 @@ func TestCodeModeFailureApprovalOrphanAndNativeBoundaries(t *testing.T) {
 	b.Status = "completed"
 	ctx := NewModel(Config{NoColor: true, NoAnimation: true}).blockRenderContext(100)
 	text := joinRenderedPlain(b.Render(ctx))
-	for _, want := range []string{"Ran script [failed]", "denied", "Not permitted", "native.txt", "service__lookup"} {
+	for _, want := range []string{"Ran script", "[failed]", "denied", "Not permitted", "native.txt", "service__lookup"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("missing %q: %s", want, text)
 		}
@@ -92,7 +59,7 @@ func TestCodeModeFailureApprovalOrphanAndNativeBoundaries(t *testing.T) {
 	if strings.Count(text, "Not permitted") != 1 {
 		t.Fatal("approval duplicated")
 	}
-	b.toggleExplorationExpanded("script")
+	b.toggleToolPanelClick("script")
 	if strings.Count(joinRenderedPlain(b.Render(ctx)), "Not permitted") != 1 {
 		t.Fatal("opening group duplicated approval")
 	}
@@ -100,7 +67,7 @@ func TestCodeModeFailureApprovalOrphanAndNativeBoundaries(t *testing.T) {
 
 func TestCodeModeLateTaskUpdatesRetainOneGroupAndDisclosure(t *testing.T) {
 	b := codeModeBlockForTest()
-	b.toggleExplorationExpanded("script")
+	b.toggleToolPanelClick("script")
 	meta := ToolUpdateMeta{ParentToolCallID: "script", ParentToolName: "js_exec", ToolStatusExplicit: true, ToolStatus: "completed"}
 	b.UpdateToolWithMeta("capture", "desktop_world__exec", "fixture", "finished", true, false, meta)
 	b.UpdateTool("script", "js_exec", "JavaScript", "finished", true, false)
@@ -109,36 +76,45 @@ func TestCodeModeLateTaskUpdatesRetainOneGroupAndDisclosure(t *testing.T) {
 	b.UpdateToolWithMeta("capture", "desktop_world__exec", "fixture", "late running snapshot", false, false, meta)
 	ctx := NewModel(Config{NoColor: true, NoAnimation: true}).blockRenderContext(60)
 	text := joinRenderedPlain(b.Render(ctx))
-	if strings.Count(text, "Ran script") != 1 || strings.Contains(text, " calls") || strings.Contains(text, "late running snapshot") || !b.explorationExpanded("script") {
+	if strings.Count(text, "Ran script") != 1 || strings.Contains(text, " calls") || strings.Contains(text, "late running snapshot") {
 		t.Fatalf("late Task snapshot reopened or duplicated work: %s", text)
 	}
 }
 
-func TestCodeModeNarrowScriptWrapAndCopyExcludeGutter(t *testing.T) {
+func TestCodeModeNarrowScriptWrapAndCopy(t *testing.T) {
 	b := codeModeBlockForTest()
 	b.UpdateTool("script", "js_exec", "JavaScript", "finished", true, false)
 	b.Status = "completed"
-	b.toggleExplorationExpanded("script")
-	for range 2 {
+	for i := 0; i < 3 && !b.toolPanelFullOutput("script"); i++ {
 		if !b.toggleToolPanelClick("script") {
 			t.Fatal("script details unavailable")
 		}
 	}
 	for _, width := range []int{60, 36} {
-		ctx := NewModel(Config{NoColor: true, NoAnimation: true}).blockRenderContext(width)
-		rows := b.Render(ctx)
+		rows := b.Render(NewModel(Config{NoColor: true, NoAnimation: true}).blockRenderContext(width))
 		var lines []string
 		var indents []int
-		for _, row := range rows[1:] {
-			if !strings.HasPrefix(row.Plain, "│ ") || row.ACPHeader || displayColumns(row.Plain) > width {
-				t.Fatalf("child escaped inner layout at %d: %q", width, row.Plain)
+		for _, row := range rows {
+			physical := []string{row.Plain}
+			if row.ACPHeader {
+				if wrapped, _, ok := wrapACPTranscriptHeaderForViewport(row.Plain, width, NewModel(Config{NoColor: true, NoAnimation: true}).blockRenderContext(width), row.acpHeaderMarkTone, row.acpHeaderMarkDim); ok {
+					physical = wrapped
+				}
 			}
-			lines = append(lines, row.Plain)
-			indents = append(indents, row.selectionIndent)
+			for _, line := range physical {
+				if displayColumns(line) > width {
+					t.Fatalf("wide physical row %d: %q", width, line)
+				}
+				lines = append(lines, line)
+				indents = append(indents, row.selectionIndent)
+			}
+		}
+		if len(lines) == 0 {
+			t.Fatal("no script rows")
 		}
 		copied := selectionTextFromLinesWithIndents(lines, indents, textSelectionPoint{line: 0, col: 0}, textSelectionPoint{line: len(lines) - 1, col: displayColumns(lines[len(lines)-1])})
-		if strings.Contains(copied, "│") || !strings.Contains(copied, "SCRIPT_TAIL") {
-			t.Fatalf("copy leaked gutter/lost script: %s", copied)
+		if !strings.Contains(copied, "SCRIPT_TAIL") || strings.Contains(copied, "desktop_world__exec") {
+			t.Fatal(copied)
 		}
 	}
 }
@@ -175,20 +151,17 @@ func TestCodeModeScriptNameAndInlineSourceDisclosure(t *testing.T) {
 	ctx := NewModel(Config{NoColor: true, NoAnimation: true}).blockRenderContext(60)
 	closed := joinRenderedPlain(b.Render(ctx))
 	t.Logf("INLINE COLLAPSED\n%s", closed)
-	if !strings.Contains(closed, "Ran script\n└ const first") || strings.Contains(closed, "SCRIPT_MIDDLE") {
+	if !strings.Contains(closed, "Ran script const first") || strings.Contains(closed, "SCRIPT_MIDDLE") {
 		t.Fatal(closed)
 	}
-	b.toggleExplorationExpanded("script")
-	summary := joinRenderedPlain(b.Render(ctx))
-	if strings.Contains(summary, "SCRIPT_MIDDLE") || strings.Contains(summary, "js_exec") {
-		t.Fatal(summary)
-	}
-	for range 2 {
-		b.toggleToolPanelClick("script")
+	for i := 0; i < 3 && !b.toolPanelFullOutput("script"); i++ {
+		if !b.toggleToolPanelClick("script") {
+			t.Fatal("inline source disclosure unavailable")
+		}
 	}
 	full := joinRenderedPlain(b.Render(ctx))
 	t.Logf("INLINE EXPANDED\n%s", full)
-	if !strings.Contains(full, "SCRIPT_MIDDLE") || !b.explorationExpanded("script") {
+	if !strings.Contains(full, "SCRIPT_MIDDLE") {
 		t.Fatal(full)
 	}
 }

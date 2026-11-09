@@ -366,7 +366,7 @@ func TestJSExecH1HintWarningOncePreservesCapability(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Count(text, tool.ExternalCapabilityDescriptionPrefix) != 1 || !strings.Contains(text, "Read a synthetic lookup") || !strings.Contains(text, "{tools:[{name,description,input_schema}],count,truncated}") {
+	if strings.Count(text, tool.ExternalCapabilityDescriptionPrefix) != 1 || !strings.Contains(text, "Read a synthetic lookup") || !strings.Contains(text, "{tools:[{name,description,input_schema,parallel_safe}],count,truncated}") {
 		t.Fatalf("H1 guidance/hint semantics lost: %s", text)
 	}
 	if !strings.Contains(text, "tools.call(name,args)") || !strings.Contains(text, "input_schema") || strings.Contains(text, "tools.describe") || strings.Contains(text, "output.") {

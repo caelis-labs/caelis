@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"sync"
@@ -52,7 +53,8 @@ type Executor struct {
 }
 
 type workerConfig struct {
-	Limits codemode.Limits `json:"limits"`
+	Limits     codemode.Limits `json:"limits"`
+	SourceName string          `json:"source_name"`
 }
 type callRequest struct {
 	Method    string          `json:"method,omitempty"`
@@ -123,8 +125,8 @@ func (e *Executor) Execute(ctx context.Context, source codemode.Source, limits c
 	workCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	w := &wireWriter{w: input}
-	config, _ := json.Marshal(workerConfig{Limits: l})
-	if err = w.send(frameConfig, 0, config, 512); err == nil {
+	config, _ := json.Marshal(workerConfig{Limits: l, SourceName: source.Path})
+	if err = w.send(frameConfig, 0, config, 32768); err == nil {
 		err = w.send(frameSource, 0, []byte(source.Code), l.SourceBytes)
 	}
 	type incoming struct {
@@ -289,7 +291,7 @@ func (e *Executor) Execute(ctx context.Context, source codemode.Source, limits c
 						Error string `json:"error,omitempty"`
 					}{Raw: string(raw)}
 					if callErr != nil {
-						response.Error = "Host request failed (" + string(errorcode.CodeOf(callErr)) + ")"
+						response.Error = hostErrorMessage(req.Name, callErr)
 						if errorcode.Is(callErr, tool.ErrorCodeStaleRevision) {
 							response.Error = "Tool directory refreshed; use tools.search(name) to reload its schema/binding before calling. Old arguments were not executed."
 						}
@@ -366,4 +368,40 @@ func boundedReply(r codemode.Reply, budget int) bool {
 		}
 	}
 	return true
+}
+
+// Only typed validation details cross the bridge; transport errors never expose
+// response bodies, credentials or their underlying error chain.
+func hostErrorMessage(name string, err error) string {
+	code := errorcode.CodeOf(err)
+	if payload := tool.ErrorPayload(err); payload != nil {
+		if value, ok := payload["error_code"].(string); ok {
+			code = errorcode.Code(value)
+		}
+	}
+	if len(name) > 192 {
+		name = name[:192]
+	}
+	label := string(code)
+	if len(label) > 64 {
+		label = "unknown"
+	}
+	message := name + " [" + label + "]"
+	var pathError *os.PathError
+	if errors.Is(err, fs.ErrNotExist) && errors.As(err, &pathError) {
+		path := pathError.Path
+		if len(path) > 512 {
+			path = path[:512]
+		}
+		return message + ": $.path: file does not exist: " + path
+	}
+	var validation *tool.ToolError
+	if code == tool.ErrorCodeInvalidInput && errors.As(err, &validation) && validation.Err == nil {
+		detail := validation.Message
+		if len(detail) > 768 {
+			detail = detail[:768]
+		}
+		return message + ": " + detail
+	}
+	return message + ": Host request failed"
 }

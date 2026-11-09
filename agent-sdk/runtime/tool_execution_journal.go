@@ -146,6 +146,8 @@ func (t journaledTool) Call(ctx context.Context, call tool.Call) (tool.Result, e
 		}
 	}()
 	result, callErr := t.base.Call(ctx, call)
+	// Only this owner can publish the terminal receipt carrier.
+	delete(result.Metadata, tool.MetadataExecutionJournal)
 	close(callFinished)
 	<-cancelWatcherFinished
 	if cancelJournalErr != nil {
@@ -214,7 +216,11 @@ func (t journaledTool) Call(ctx context.Context, call tool.Call) (tool.Result, e
 	result.Metadata[tool.MetadataExecutionJournal] = journalValue
 	if nested {
 		// Aggregation has no canonical child result to carry this receipt.
-		callErr = errors.Join(callErr, persistToolExecutionReceipt(ctx, t.sessions, t.sessionRef, call, result))
+		receiptErr := persistToolExecutionReceipt(ctx, t.sessions, t.sessionRef, call, result)
+		if receiptErr != nil {
+			delete(result.Metadata, tool.MetadataExecutionJournal)
+		}
+		callErr = errors.Join(callErr, receiptErr)
 	}
 	return result, callErr
 }

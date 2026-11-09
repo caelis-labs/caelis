@@ -384,12 +384,13 @@ func TestCodeModeTerminalReceiptsSurviveDiscardedAggregate(t *testing.T) {
 type codeModeReceiptFailure struct {
 	session.Service
 	failed atomic.Bool
+	status session.ToolExecutionStatus
 }
 
 func (s *codeModeReceiptFailure) AppendEvent(ctx context.Context, req session.AppendEventRequest) (*session.Event, error) {
 	if req.Event.Journal != nil && req.Event.Journal.ToolExecution != nil {
 		r := req.Event.Journal.ToolExecution
-		if r.Parent != nil && r.Status == session.ToolExecutionSucceeded && s.failed.CompareAndSwap(false, true) {
+		if r.Parent != nil && (r.Status == s.status || (s.status == "" && r.Status == session.ToolExecutionSucceeded)) && s.failed.CompareAndSwap(false, true) {
 			return nil, errors.New("fixture: child terminal persistence failed")
 		}
 	}
@@ -440,5 +441,40 @@ func TestCodeModeReceiptFailureClosesBridgeAndRecoversOriginalUnknown(t *testing
 	}
 	if !checked.Load() || !failing.failed.Load() || !unknown || effects.Load() != 1 {
 		t.Fatalf("checked=%v failed=%v unknown=%v effects=%d", checked.Load(), failing.failed.Load(), unknown, effects.Load())
+	}
+}
+
+func TestCodeModeSettledFailureStillRequiresDurableReceipt(t *testing.T) {
+	store, active, _ := codeModeStore(t)
+	failing := &codeModeReceiptFailure{Service: store, status: session.ToolExecutionFailed}
+	var effects atomic.Int32
+	fail := tool.NamedTool{Def: tool.Definition{Name: "Fail", InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
+		return tool.Result{}, tool.NewError(tool.ErrorCodeInvalidInput, "ordinary invalid field")
+	}}
+	write := tool.NamedTool{Def: tool.Definition{Name: "Write", InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) { effects.Add(1); return tool.Result{}, nil }}
+	var checked atomic.Bool
+	declaration := &codemode.Tool{Name: "js_repl", Executor: codeExecutorFunc(func(ctx context.Context, _ codemode.Source, host codemode.Host) (json.RawMessage, error) {
+		if _, err := host.Call(ctx, "Fail", []byte(`{}`)); err == nil {
+			return nil, errors.New("failure hidden")
+		}
+		if _, err := host.Call(context.Background(), "Write", []byte(`{}`)); err == nil {
+			return nil, errors.New("admitted after failed receipt")
+		}
+		checked.Store(true)
+		return []byte(`{"caught":true}`), nil
+	})}
+	events, _ := runCodeMode(t, failing, active, agent.AgentSpec{Model: codeModeModel(false), Tools: []tool.Tool{declaration, fail, write}}, nil, nil)
+	parentFailed := false
+	for _, ev := range events {
+		if ev.Message != nil {
+			for _, part := range ev.Message.Parts {
+				if part.ToolResult != nil {
+					parentFailed = parentFailed || part.ToolResult.IsError
+				}
+			}
+		}
+	}
+	if !checked.Load() || !failing.failed.Load() || effects.Load() != 0 || !parentFailed {
+		t.Fatalf("checked=%v failed=%v effects=%d parentFailed=%v", checked.Load(), failing.failed.Load(), effects.Load(), parentFailed)
 	}
 }

@@ -69,8 +69,10 @@ software API change creates its own presentation snapshot, not a new grant cache
 
 JSON Numbers outside JavaScript's safe integer range may round. The original
 reply remains explicitly accessible through non-enumerable `reply.raw_json`,
-which retains original JSON tokens. BigInt must be returned as a string.
-Concurrent calls still require every target to be explicitly ParallelSafe.
+which retains original JSON tokens. BigInt must be returned as a string. Return only JSON values; omit
+optional undefined properties or use null. An omitted return is null. Encoding errors
+identify the field path. Await calls sequentially by default; concurrent calls
+require every target to advertise `parallel_safe: true` in search results.
 
 ## Authority and invalidation
 
@@ -91,14 +93,14 @@ Offline and revoked access retain their own errors.
 The model receives only explicitly selected summaries and original media.
 Actual child names, exact arguments, results, failures, unknown outcomes and
 receipts remain in the existing audit/event chain. Filtering must not convert
-failed or unknown execution to success. TUI projects those original child
-identities in a default-collapsed Running/Ran script group. File scripts show
-their name; inline scripts show a foldable source preview. A running summary
-shows the current child action. Opening the group shows actual child tool names
-and brief arguments, with separate result/source disclosure and explicit
-failures. Approval decisions remain visible outside the collapsed group.
-Grouping reuses the existing Turn and call identities and does not change the
-execution path.
+failed or unknown execution to success. A caught, durably settled ordinary tool
+failure permits subsequent calls and a final summary while retaining the failed
+receipt and overall error flag. Cancellation, authority, persistence, transport
+and unknown-effect failures still stop the script. TUI uses the existing Shell input/output panel: file scripts show
+`Ran script <filename>` and inline scripts show foldable source. The panel opens
+script input and final output, including failures. Child events remain in the
+audit chain rather than mixing into this panel; approval decisions still show
+the actual target separately. Presentation reuses the original Turn/call identity.
 
 ## Execution and Tasks
 

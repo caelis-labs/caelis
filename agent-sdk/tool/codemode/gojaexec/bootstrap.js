@@ -52,19 +52,21 @@
       }
       put('"',1);
     }
-    function visit(v, depth, inspect, role) {
+    function visit(v, depth, inspect, role, path) {
+      path=path||"$";
+      function invalid(reason) {return new ErrorType("invalid_input at "+slice(path,0,256)+": "+reason);}
       if(role===2&&!isArray(v))direct=false;
       if(role===3&&(!v||typeof v!=="object"||!weakGet(origins,v)))direct=false;
-      if (depth > 128) throw new ErrorType("JSON depth exceeded");
+      if (depth > 128) throw invalid("JSON depth exceeded");
       if (v === null) return put("null",4);
       switch (typeof v) {
         case "string": return quote(v);
         case "boolean": return put(v ? "true" : "false", v ? 4 : 5);
-        case "number": {if (!finite(v)) throw new ErrorType("non-finite JSON number");const s=""+v;return put(s,s.length);}
+        case "number": {if (!finite(v)) throw invalid("non-finite JSON number");const s=""+v;return put(s,s.length);}
         case "object": break;
-        default: throw new ErrorType("return and arguments must contain only JSON values");
+        default: throw invalid("only JSON values are supported; omit undefined fields or use null");
       }
-      if (has(seen,v)) throw new ErrorType("cyclic JSON");
+      if (has(seen,v)) throw invalid("cyclic JSON");
       add(seen,v);
       const origin=weakGet(origins,v);
       if(role===3&&origin&&(origin.kind==="media"||origin.kind==="file_ref"))add(directMedia,origin.handle);
@@ -76,7 +78,7 @@
       const array=isArray(v);put(array?"[":"{",1);
       if (array) {
         const length=v.length;
-        for (let i=0;i<length;i++) {if(i)put(",",1);visit(v[i],depth+1,inspect,role===2?3:0);}
+        for (let i=0;i<length;i++) {if(i)put(",",1);visit(v[i],depth+1,inspect,role===2?3:0,path+"["+i+"]");}
       } else {
         // keys() can allocate proportional to the input object. Goja has no
         // heap limiter; encoding/IPC budgets do not claim to bound the VM heap.
@@ -101,7 +103,7 @@
             if(origin.kind==="json"&&name==="json")payloadSeen=true;
             if((origin.kind==="media"||origin.kind==="file_ref")&&name==="handle")payloadSeen=child===origin.handle;
           }
-          visit(child,depth+1,inspect,role===1&&name==="parts"?2:0);
+          visit(child,depth+1,inspect,role===1&&name==="parts"?2:0,slice(path+"."+name,0,256));
         }
         if(role===3&&(!kindSeen||!payloadSeen))direct=false;
       }

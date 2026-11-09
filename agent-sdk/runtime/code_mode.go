@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"sync"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
@@ -427,7 +428,7 @@ func (h *codeModeHost) call(requestCtx context.Context, name string, arguments j
 	result, callErr := target.tool.Call(ctx, call)
 	outcome := codeModeOutcome(result, callErr)
 	status := "completed"
-	if callErr != nil || result.IsError {
+	if callErr != nil || result.IsError || outcome == codemode.OutcomeUnknown {
 		status = "failed"
 	}
 	if err := h.display(ctx, call, status); err != nil {
@@ -444,13 +445,26 @@ func (h *codeModeHost) call(requestCtx context.Context, name string, arguments j
 			scope.completeCodeMode(h.ctx)
 		}
 	}
+	if outcome == codemode.OutcomeUnknown && callErr == nil {
+		callErr = errorcode.New(errorcode.UnknownOutcome, "tool outcome is unknown; do not replay")
+	}
 	if callErr != nil {
 		if errors.Is(callErr, errCodeModeComplete) {
 			// A pending approval lost admission before claiming an effect. This
 			// expected rejection must not cancel the completing call's media Emit.
 			return codemode.Reply{CallID: callID, IsError: true, Outcome: outcome}, callErr
 		}
-		// A persistence failure or transport error must not be swallowed by an executor.
+		// A published failed receipt settles an ordinary tool failure. The
+		// producer remains admitted; the failure flag/receipt is never erased.
+		if h.ctx.Err() == nil && settledCodeModeToolError(result, callErr) {
+			reply, projectErr := h.project(callID, result, outcome)
+			if projectErr == nil {
+				reply.IsError = true
+				return reply, callErr
+			}
+			callErr = errors.Join(callErr, projectErr)
+		}
+		// Persistence, transport and authority failures still stop the producer.
 		h.fatal = errors.Join(h.fatal, callErr)
 		h.closed = true
 		h.cancel()
@@ -506,4 +520,33 @@ func (h *codeModeHost) display(ctx context.Context, call tool.Call, status strin
 		}
 	}
 	return err
+}
+
+// Only the journal owner publishes this carrier after durable child receipt
+// delivery. An unclassified/transport/authority error never grants continuation.
+func settledCodeModeToolError(result tool.Result, err error) bool {
+	journal, _ := result.Metadata[tool.MetadataExecutionJournal].(map[string]any)
+	record, _ := journal["tool_execution"].(map[string]any)
+	if record["status"] != string(session.ToolExecutionFailed) {
+		return false
+	}
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		children := joined.Unwrap()
+		if len(children) == 0 {
+			return false
+		}
+		for _, child := range children {
+			if !settledCodeModeToolError(result, child) {
+				return false
+			}
+		}
+		return true
+	}
+	switch errorcode.CodeOf(err) {
+	case tool.ErrorCodeInvalidInput, errorcode.InvalidArgument, tool.ErrorCodeNotFound, tool.ErrorCodeOldTextNotFound, tool.ErrorCodeTooManyMatches, tool.ErrorCodeUnexpectedMatchCount:
+		return true
+	case errorcode.Unknown:
+		return errors.Is(err, fs.ErrNotExist)
+	}
+	return false
 }

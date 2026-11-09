@@ -87,7 +87,7 @@ func TestCodeModeFrozenNativeReplay(t *testing.T) {
 		}
 		save("collapsed")
 		for _, group := range groups {
-			if !m.tryToggleFoldToken(group.block.BlockID(), acpStableExplorationClickToken(group.call)) {
+			if !m.tryToggleFoldToken(group.block.BlockID(), acpToolPanelClickToken(group.call)) {
 				t.Fatal("group click not routed")
 			}
 		}
@@ -98,10 +98,8 @@ func TestCodeModeFrozenNativeReplay(t *testing.T) {
 		}
 		save("script")
 		for _, group := range groups {
-			if !group.block.explorationExpanded(group.call) {
-				t.Fatal("script click folded group")
-			}
-			m.tryToggleFoldToken(group.block.BlockID(), acpStableExplorationClickToken(group.call))
+
+			m.tryToggleFoldToken(group.block.BlockID(), acpToolPanelClickToken(group.call))
 		}
 		save("reclosed")
 	}

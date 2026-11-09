@@ -3,8 +3,10 @@ package gojaexec
 import (
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/dop251/goja"
@@ -21,7 +23,7 @@ type settlement struct{ resolve, reject func(any) error }
 // use only Runtime.Interrupt, the engine's documented concurrent exception.
 func WorkerMain() int {
 	w := &wireWriter{w: os.Stdout}
-	f, err := readFrame(os.Stdin, 512)
+	f, err := readFrame(os.Stdin, 32768)
 	if err != nil || f.kind != frameConfig {
 		return 2
 	}
@@ -142,7 +144,11 @@ func WorkerMain() int {
 	if w.send(frameReady, 0, nil, 0) != nil {
 		return 2
 	}
-	value, runErr := vm.RunString("(async function(){\n\"use strict\";\n" + code + "\n})()")
+	sourceName := cfg.SourceName
+	if sourceName == "" {
+		sourceName = "inline.js"
+	}
+	value, runErr := vm.RunScript(sourceName, "(async function(){\"use strict\";"+code+"\n})()")
 	if runErr != nil {
 		return workerError(w, runErr)
 	}
@@ -174,7 +180,22 @@ func WorkerMain() int {
 		}
 	}
 	if promise.State() == goja.PromiseStateRejected {
-		return workerError(w, fmt.Errorf("%s", promise.Result().String()))
+		message := promise.Result().String()
+		if object, ok := promise.Result().(*goja.Object); ok {
+			if stack := object.Get("stack"); stack != nil && !goja.IsUndefined(stack) {
+				for _, line := range strings.Split(stack.String(), "\n") {
+					if strings.Contains(line, sourceName+":") {
+						tail := line[strings.Index(line, sourceName+":")+len(sourceName)+1:]
+						end := strings.IndexByte(tail, ':')
+						if end > 0 {
+							message += "\n" + sourceName + ":" + tail[:end]
+						}
+						break
+					}
+				}
+			}
+		}
+		return workerError(w, fmt.Errorf("%s", message))
 	}
 	encoded, err := encode(goja.Undefined(), promise.Result())
 	if err != nil {
@@ -191,6 +212,12 @@ func WorkerMain() int {
 
 func workerError(w *wireWriter, err error) int {
 	message := err.Error()
+	// Encoder exceptions are already safe, field-specific diagnostics; their
+	// bootstrap stack is not user source.
+	var exception *goja.Exception
+	if errors.As(err, &exception) {
+		message = exception.Value().String()
+	}
 	if len(message) > 1024 {
 		message = message[:1024]
 	}

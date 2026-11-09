@@ -37,145 +37,25 @@ func codeModeReview(events []SubagentEvent, review SubagentEvent) bool {
 	return false
 }
 
-// Code Mode uses the existing Explored disclosure state and ordinary tool
-// panels. All call/approval/result state remains in the original projection.
+// Script input/output uses the existing Shell panel; child receipts remain in
+// the projection/audit chain and approvals render separately at their real target.
 func renderCodeModeContainerRows(blockID string, events []SubagentEvent, idx int, status string, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions) []RenderedRow {
 	parent := events[idx]
-	parentIndex := idx
-	token := acpStableExplorationClickToken(parent.CallID)
-	var children []int
-	positions := map[string]int{}
-	failed := false
-	current := -1
-	for i, ev := range events {
+	for _, ev := range events {
 		if isCodeModeParent(ev) && ev.CallID == parent.CallID {
-			parent, parentIndex = ev, i
+			parent = ev
 		}
-		if ev.Kind != SEToolCall || codeModeParentIndex(events, ev) != idx {
-			continue
-		}
-		if position, exists := positions[ev.CallID]; exists {
-			children[position] = i
-		} else {
-			positions[ev.CallID] = len(children)
-			children = append(children, i)
-		}
-	}
-	for _, i := range children {
-		ev := events[i]
-		if ev.Err {
-			failed = true
-		}
-		if !ev.Done {
-			current = i
-		}
-	}
-	failed = failed || parent.Err
-	settled := isTerminalACPTranscriptStatus(status) || parent.Done && current < 0
-	header := "• Running script"
-	if settled {
-		header = "• Ran script"
 	}
 	code, file := codeModeScriptInput(parent)
-	suffixWidth := 0
-	if failed {
-		suffixWidth = displayColumns(" [failed]")
-	}
+	parent.Title, parent.ToolKind, parent.ExplorationVerb = "", "execute", ""
+	parent.Args, parent.FullArgs = code, code
 	if file != "" {
-		header += " " + compactACPToolInline(path.Base(strings.ReplaceAll(file, "\\", "/")), maxInt(8, width-displayColumns(header)-1-suffixWidth))
+		parent.Args = path.Base(strings.ReplaceAll(file, "\\", "/"))
+		parent.FullArgs = parent.Args
 	}
-	if failed {
-		header += " [failed]"
-	}
-	tone, dim := acpToolHeaderMark(ctx, failed, settled)
-	rows := []RenderedRow{renderACPTranscriptHeaderRowMarked(blockID, header, width, ctx, token, tone, dim)}
-	expanded := opts.ExplorationExpanded != nil && opts.ExplorationExpanded(parent.CallID)
-	if !expanded {
-		if code != "" {
-			preview := strings.TrimSpace(strings.SplitN(strings.TrimSpace(code), "\n", 2)[0])
-			preview = compactACPToolInline(preview, maxInt(4, width-2))
-			rows = append(rows, renderACPToolOutputRowsWithToken(blockID, "└ ", preview, width, ctx, ctx.Theme.ToolOutputStyle(), token)...)
-		}
-		if !settled && current >= 0 {
-			ev := events[current]
-			detail := ev.Name
-			if args := compactACPToolInline(ev.Args, maxInt(4, width-displayColumns(detail)-3)); args != "" {
-				detail += " " + args
-			}
-			rows = append(rows, renderACPToolOutputRowsWithToken(blockID, "└ ", detail, width, ctx, ctx.Theme.ToolOutputMetaStyle(), token)...)
-		}
-		// A collapsed failure retains the original failing tool/error panel.
-		for _, child := range children {
-			if events[child].Err {
-				callEvents := append([]SubagentEvent(nil), events...)
-				callEvents[child].Title, callEvents[child].ToolKind, callEvents[child].ExplorationVerb = "", "", ""
-				detail, _ := renderACPToolLifecycleRowsWithoutReview(blockID, callEvents, child, width, ctx, opts)
-				rows = append(rows, detail...)
-				return rows
-			}
-		}
-		if parent.Err {
-			detail, _ := renderACPToolLifecycleRowsWithoutReview(blockID, events, parentIndex, width, ctx, opts)
-			for _, row := range detail {
-				if !row.ACPHeader {
-					rows = append(rows, row)
-				}
-			}
-		}
-		return rows
-	}
-	// Lay out inside a real gutter before wrapping. Its columns are decorative
-	// for selection/copy, and child click ranges retain their original targets.
-	innerWidth := maxInt(4, width-2)
-	appendRows := func(callRows []RenderedRow) {
-		for _, callRow := range callRows {
-			wrapped := []RenderedRow{callRow}
-			if callRow.ACPHeader {
-				wrapped = wrapAgentMessageRows(callRow, innerWidth)
-			}
-			for _, row := range wrapped {
-				row.Plain = "│ " + row.Plain
-				row.Styled = ctx.Theme.ToolOutputMetaStyle().Render("│ ") + row.Styled
-				row.selectionIndent += 2
-				if row.boundedClick() {
-					row.ClickStartCol += 2
-					row.ClickEndCol += 2
-				}
-				rows = append(rows, row)
-			}
-		}
-	}
-	if code != "" {
-		text := code
-		if opts.ToolPanelFullOutput == nil || !opts.ToolPanelFullOutput(parent.CallID) {
-			text = summarizeACPToolPanelText(code, true, maxInt(1, innerWidth-2))
-		}
-		appendRows(renderACPToolOutputRowsWithToken(blockID, "└ ", text, innerWidth, ctx, ctx.Theme.ToolOutputStyle(), acpToolPanelClickToken(parent.CallID)))
-	}
-	appendCall := func(index int, script bool) {
-		callEvents := append([]SubagentEvent(nil), events...)
-		ev := &callEvents[index]
-		ev.Title, ev.ToolKind, ev.ExplorationVerb = "", "", ""
-		if script {
-			ev.Args, ev.StartArgs, ev.FullArgs = "", "", ""
-		}
-		callRows, _ := renderACPToolLifecycleRowsWithoutReview(blockID, callEvents, index, innerWidth, ctx, opts)
-		if script {
-			filtered := callRows[:0]
-			for _, row := range callRows {
-				if !row.ACPHeader {
-					filtered = append(filtered, row)
-				}
-			}
-			callRows = filtered
-		}
-		appendRows(callRows)
-	}
-	for _, child := range children {
-		appendCall(child, false)
-	}
-	appendCall(parentIndex, true)
-	return rows
+	expanded := opts.ToolPanelExpanded == nil || opts.ToolPanelExpanded(parent.CallID)
+	full := opts.ToolPanelFullOutput != nil && opts.ToolPanelFullOutput(parent.CallID)
+	return renderACPTerminalLifecycleRows(blockID, parent, parent.CallID, parent.Output, width, ctx, parent.Err, expanded, parent.Done, full, opts)
 }
 
 // A missing parent stays visible as an ordinary tool; out-of-order and late
