@@ -125,7 +125,7 @@ func EnvelopeBaseFromSessionEvent(ref session.SessionRef, event *session.Event, 
 		case session.EventChildScopeParticipant:
 			base.Scope = eventstream.ScopeParticipant
 		}
-		if origin.ParentTool.CallID != "" {
+		if (event.Tool == nil || event.Tool.Parent == nil || event.Tool.Parent.CallID == "") && origin.ParentTool.CallID != "" {
 			base.ParentTool = &eventstream.ParentToolRelation{
 				ToolCallID: origin.ParentTool.CallID,
 				ToolName:   origin.ParentTool.Name,

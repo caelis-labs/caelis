@@ -5,6 +5,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/caelis-labs/caelis/agent-sdk/display"
+	"github.com/charmbracelet/x/ansi"
 )
 
 type explorationProjectionState struct {
@@ -610,13 +611,12 @@ func renderExplorationToolRowWithMode(blockID string, ev SubagentEvent, width in
 	detail := explorationToolDetailForDisplay(ev, ctx.Workspace, mode)
 	prefix := explorationChildPrefix(first)
 	detail = truncateTailDisplay(detail, maxInt(16, width-displayColumns(prefix)-displayColumns(verb)-1))
-	plain := prefix + strings.TrimSpace(verb+" "+detail)
-	styled := ctx.Theme.TranscriptMetaStyle().Render(prefix) +
-		toolActionStyle(ctx, verb).Render(verb)
+	plain := strings.TrimSpace(verb + " " + detail)
+	styled := toolActionStyle(ctx, verb).Render(verb)
 	if detail != "" {
 		styled += " " + styleExplorationDetail(detail, verb, ctx)
 	}
-	return StyledPlainClickableRow(blockID, plain, styled, token)
+	return toolGroupChildRows([]RenderedRow{StyledPlainClickableRow(blockID, plain, styled, token)}, ctx, first)[0]
 }
 
 func explorationChildPrefix(first bool) string {
@@ -974,4 +974,22 @@ func isExplorationSummaryVerb(verb string) bool {
 
 func pluralizeUnit(n int, unit string) string {
 	return display.Pluralize(n, unit)
+}
+
+// toolGroupChildRows applies the existing Explored indentation to native rows.
+// Native headers, result/approval styles and per-call disclosure tokens survive.
+func toolGroupChildRows(rows []RenderedRow, ctx BlockRenderContext, first bool) []RenderedRow {
+	for i := range rows {
+		prefix := "    "
+		if i == 0 {
+			prefix = explorationChildPrefix(first)
+		}
+		if strings.HasPrefix(rows[i].Plain, "• ") {
+			rows[i].Plain = strings.TrimPrefix(rows[i].Plain, "• ")
+			rows[i].Styled = ansi.Cut(rows[i].Styled, 2, ansi.StringWidth(rows[i].Styled))
+		}
+		rows[i].Plain = prefix + rows[i].Plain
+		rows[i].Styled = ctx.Theme.TranscriptMetaStyle().Render(prefix) + rows[i].Styled
+	}
+	return rows
 }

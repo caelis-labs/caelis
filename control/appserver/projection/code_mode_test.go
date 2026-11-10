@@ -25,3 +25,20 @@ func TestCodeModeProjectsActualToolAndTypedParent(t *testing.T) {
 		}
 	}
 }
+
+func TestDirectParentSurvivesChildOriginWithoutInventingOne(t *testing.T) {
+	for _, direct := range []bool{false, true} {
+		event := &session.Event{Type: session.EventTypeToolResult, Tool: &session.EventTool{ID: "tool", Name: "MCP", Status: "completed"}, ChildOrigin: &session.EventChildOrigin{Scope: session.EventChildScopeSubagent, ScopeID: "task", ParentTool: session.EventParentTool{CallID: "spawn", Name: "StartThread"}}}
+		if direct {
+			event.Tool.Parent = &session.EventParentTool{CallID: "script", Name: "js_exec"}
+		}
+		base := EnvelopeBaseFromSessionEvent(session.SessionRef{SessionID: "session"}, event, SessionEventTransport{})
+		want := "spawn"
+		if direct {
+			want = "script"
+		}
+		if base.ParentTool == nil || base.ParentTool.ToolCallID != want || base.ScopeID != "task" {
+			t.Fatalf("scope/direct parent %+v", base)
+		}
+	}
+}

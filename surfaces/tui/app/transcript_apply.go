@@ -600,7 +600,7 @@ func parentToolIsTaskControl(name string) bool {
 
 func eventTargetsSubagentOutputView(event TranscriptEvent) bool {
 	return eventTargetsParentToolPanel(event) &&
-		event.AnchorToolName == surfaceToolSpawn
+		(event.AnchorToolName == surfaceToolSpawn || event.AnchorToolName == "js_exec")
 }
 
 func (m *Model) applyAnchoredSubagentNarrativeToTool(event TranscriptEvent) (tea.Model, tea.Cmd) {

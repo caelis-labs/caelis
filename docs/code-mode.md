@@ -98,15 +98,18 @@ failure permits subsequent calls and a final summary while retaining the failed
 receipt and overall error flag. Cancellation, authority, persistence, transport
 and unknown-effect failures still stop the script.
 
-TUI presents actual child calls through the same native tool rows and Explored grouping used outside JavaScript. MCP names and
-argument summaries retain their existing presentation; tool capabilities are not
-changed to make a call exploratory. The JavaScript input and orchestration parent
-are not additional actions. Original selected results and script errors retain a
-common result-only panel with the original call identity and output disclosure,
-including when no child was called or the output differs from child results.
-Approval decisions stay with the actual target. Canonical events, failure flags,
-receipts and source bytes remain in the existing audit chain. Replayed and older
-compact Turns retain selected result/error access without inventing assistant text.
+TUI folds consecutive script invocations and their directly related tool calls
+under `Called tools`, using the existing Explored disclosure and indentation.
+Actual native tool rows retain their names, argument summaries, failures and
+approval decisions; unrelated direct calls remain outside the group. MCP
+arguments are not interpreted to invent domain-specific summaries. The script
+source and orchestration parent are not additional actions. Empty successful
+status receipts add no result placeholder; nonempty selected returns and errors
+have a labeled common result entry with their original call/disclosure identity,
+including when no child was called. Original receipts, failure flags and source
+bytes remain in the audit chain. Replay uses the same direct-parent identities;
+child-pane ownership continues to use existing Task/scope routing. Older compact
+Turns retain selected result/error access without inventing assistant text.
 
 ## Execution and Tasks
 

@@ -300,7 +300,7 @@ func streamFrameEmbeddedEvents(req taskFrameProjectionRequest, frame controltask
 		if out[i].Scope != eventstream.ScopeSubagent {
 			continue
 		}
-		if parentTool != nil {
+		if parentTool != nil && (event.Tool == nil || event.Tool.Parent == nil || event.Tool.Parent.CallID == "") {
 			parentToolCopy := *parentTool
 			out[i].ParentTool = &parentToolCopy
 		}

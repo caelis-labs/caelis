@@ -81,6 +81,14 @@ func renderACPTranscriptRows(blockID string, events []SubagentEvent, status stri
 	}
 	for i := 0; i < len(visible); i++ {
 		ev := visible[i]
+		if groupRows, end, ok := renderInvocationToolGroupRows(blockID, visible, i, width, ctx, opts); ok {
+			flushSelected()
+			rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupTool, false)
+			rows = appendACPTranscriptSemanticRows(rows, blockID, groupRows, &pendingSemanticGap)
+			hasContent, lastGroup = true, acpTranscriptGroupTool
+			i = end
+			continue
+		}
 		if isResultOnlyToolEvent(ev) {
 			if !ev.Done {
 				continue
@@ -95,7 +103,7 @@ func renderACPTranscriptRows(blockID string, events []SubagentEvent, status stri
 			if !latest {
 				continue
 			}
-			resultRows := renderACPToolResultOnlyRows(blockID, ev, width, ctx, opts)
+			resultRows := renderInvocationResultRows(blockID, ev, "", width, ctx, opts)
 			selectedResults = append(selectedResults, resultRows...)
 			continue
 		}

@@ -99,6 +99,9 @@ func (m *Model) updateAnchoredSubagentActivity(event TranscriptEvent, mutation t
 		return nil
 	}
 	callID := strings.TrimSpace(event.AnchorToolCallID)
+	if event.AnchorToolName == "js_exec" {
+		callID = m.subagentOutputEventKey(event)
+	}
 	taskID := strings.TrimSpace(event.ScopeID)
 	for _, docBlock := range m.doc.Blocks() {
 		block, ok := docBlock.(*MainACPTurnBlock)
@@ -130,6 +133,9 @@ func (m *Model) markAnchoredSubagentNarrativeBoundary(event TranscriptEvent) {
 		return
 	}
 	callID := strings.TrimSpace(event.AnchorToolCallID)
+	if event.AnchorToolName == "js_exec" {
+		callID = m.subagentOutputEventKey(event)
+	}
 	taskID := strings.TrimSpace(event.ScopeID)
 	for _, docBlock := range m.doc.Blocks() {
 		block, ok := docBlock.(*MainACPTurnBlock)

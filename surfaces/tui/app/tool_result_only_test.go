@@ -89,6 +89,20 @@ func TestScriptResultsUseNativeToolsAndCommonResultEntry(t *testing.T) {
 						}
 						before := physical()
 						t.Logf("collapsed production viewport\n%s", before)
+						// Successful older children are intentionally folded. Expand via the
+						// rendered shared disclosure before asserting every actual action.
+						for _, r := range block.Render(ctx) {
+							if strings.HasPrefix(r.ClickToken, "acp_exploration_stable:tools:") {
+								key := strings.TrimPrefix(r.ClickToken, "acp_exploration_stable:")
+								if scope == "child-origin" {
+									m.subagentOutputViews["spawn"].block.toggleExplorationExpanded(key)
+								} else {
+									m.tryToggleFoldToken(block.BlockID(), r.ClickToken)
+								}
+								break
+							}
+						}
+						before = physical()
 						for _, want := range []string{"Read", "View", "service__lookup", "Edit", "SUMMARY_FIRST"} {
 							if !strings.Contains(before, want) {
 								t.Fatalf("missing %q: %s", want, before)
@@ -160,50 +174,6 @@ func TestResultOnlyZeroChildrenAndHistoricalErrorsRemainAccessible(t *testing.T)
 			}
 			if !found {
 				t.Fatal("no result/error disclosure")
-			}
-		}
-	}
-}
-
-func TestNestedActionsUseExactlyTheNativeExploredRowsAndColumns(t *testing.T) {
-	for _, width := range []int{36, 60, 100} {
-		for _, failed := range []bool{false, true} {
-			m := NewModel(Config{NoColor: true, NoAnimation: true})
-			ctx := m.blockRenderContext(width)
-			native, nested := NewMainACPTurnBlock("native"), NewMainACPTurnBlock("nested")
-			nested.UpdateToolWithMeta("script", "js_exec", "JavaScript", "", false, false, ToolUpdateMeta{FullArgs: `{"code":"SOURCE_MUST_NOT_RENDER"}`})
-			for i, name := range []string{"Read", "Read", "ViewImage", "service__lookup", "Write"} {
-				id := fmt.Sprint(i)
-				args := fmt.Sprintf("input%d.txt", i)
-				for _, b := range []*MainACPTurnBlock{native, nested} {
-					meta := ToolUpdateMeta{}
-					if b == nested {
-						meta.ParentToolCallID = "script"
-						meta.ParentToolName = "js_exec"
-					}
-					b.UpdateToolWithMeta(id, name, args, "NATIVE_RESULT", true, failed && i == 0, meta)
-				}
-			}
-			native.Status, nested.Status = "completed", "completed"
-			native.collapseAllToolPanels()
-			nested.collapseAllToolPanels()
-			for _, expanded := range []bool{false, true} {
-				// The first stable exploration call owns the same existing token in each block.
-				if expanded {
-					native.toggleExplorationExpanded("0")
-					nested.toggleExplorationExpanded("0")
-				}
-				a := m.renderViewportRowCacheFromRows(native, ctx, viewportRowCache{}, native.Render(ctx)).plainLines
-				b := m.renderViewportRowCacheFromRows(nested, ctx, viewportRowCache{}, nested.Render(ctx)).plainLines
-				if strings.Join(a, "\n") != strings.Join(b, "\n") {
-					t.Fatalf("width=%d expanded=%v native/nested differ\n%s\n---\n%s", width, expanded, strings.Join(a, "\n"), strings.Join(b, "\n"))
-				}
-				for _, line := range b {
-					if displayColumns(line) > width {
-						t.Fatalf("wide physical line %q", line)
-					}
-				}
-				t.Logf("native=nested width=%d expanded=%v failed=%v\n%s", width, expanded, failed, strings.Join(b, "\n"))
 			}
 		}
 	}

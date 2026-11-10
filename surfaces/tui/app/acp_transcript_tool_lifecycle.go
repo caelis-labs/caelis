@@ -239,6 +239,10 @@ func acpToolPanelText(preview string, final SubagentEvent, hasFinal bool) (strin
 	panelErr := false
 	if hasFinal {
 		panelText = sanitizeRenderableText(final.Output)
+		// The status-only orchestration mirror is not authored result content.
+		if final.ParentToolName == "js_exec" && final.OutputSynthetic && !final.Err {
+			return "", false
+		}
 		panelErr = final.Err
 		if !renderableTextHasContent(panelText) && !panelErr {
 			panelText = "completed"

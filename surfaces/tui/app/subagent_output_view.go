@@ -35,6 +35,7 @@ type subagentOutputView struct {
 	pane             *subagentOutputOverlayState
 	activity         runningHintTracker
 	callID           string
+	scopeID          string // Observed child scope; presentation routing only.
 	taskHandle       string
 	participantID    string
 	actor            string
@@ -127,6 +128,33 @@ func (m *Model) observeSubagentOutputEvents(events []TranscriptEvent) bool {
 }
 
 func (m *Model) subagentOutputEventKey(event TranscriptEvent) string {
+	if event.Scope == ACPProjectionSubagent && event.AnchorToolName == "js_exec" {
+		// An inner invocation keeps its direct parent. Resolve only an already
+		// observed parent within this child Turn; never bind by time or tool name.
+		for key, view := range m.subagentOutputViews {
+			if view == nil || view.scopeID != event.ScopeID {
+				continue
+			}
+			for turn, block := range view.turnBlocks {
+				if turn != event.TurnID {
+					continue
+				}
+				for _, tool := range block.Events {
+					if tool.Kind == SEToolCall && tool.CallID == event.AnchorToolCallID && isResultOnlyToolEvent(tool) {
+						return key
+					}
+				}
+			}
+		}
+		if call := m.taskStreamCallIDsByID[event.ScopeID]; call != "" {
+			return call
+		}
+		if event.ScopeID != "" {
+			return "task:" + event.ScopeID
+		}
+		return ""
+	}
+
 	if eventTargetsSubagentOutputView(event) {
 		return strings.TrimSpace(event.AnchorToolCallID)
 	}
@@ -224,6 +252,10 @@ func (v *subagentOutputView) observeChildEvent(event TranscriptEvent) {
 	if v == nil {
 		return
 	}
+	if v.scopeID == "" && event.Scope == ACPProjectionSubagent {
+		v.scopeID = event.ScopeID
+	}
+
 	defer v.retainDisplayWindow()
 	if event.Kind == TranscriptEventAgentCommunication {
 		incoming := agentCommunicationSubagentEvent(event)
