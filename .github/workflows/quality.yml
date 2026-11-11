@@ -104,15 +104,21 @@ jobs:
         run: go test -tags=e2e -timeout=2m ./eval -run '^TestACPSDKReleaseCompatibility$' -count=1 -v
 
       - name: Install bubblewrap
+        timeout-minutes: 5
         run: |
-          # Use job-local signed Ubuntu sources instead of the hosted image's
-          # mirror+file path, which can retain an unavailable Azure mirror.
+          # Keep dependency-network diagnostics bounded and free of credentials.
+          for apt_host in archive.ubuntu.com security.ubuntu.com mirror.its.umich.edu github.com; do
+            printf 'DNS %s\n' "$apt_host"
+            timeout 8 getent ahostsv4 "$apt_host" || printf 'DNS lookup exit: %s\n' "$?"
+          done
+          # This registered Ubuntu mirror uses the original Ubuntu archive keys.
+          # Keep sources job-local; do not rewrite the hosted image's mirror list.
           apt_source="$(mktemp)"
           trap 'rm -f "$apt_source"' EXIT
           printf '%s\n' \
-            'deb https://archive.ubuntu.com/ubuntu jammy main universe' \
-            'deb https://archive.ubuntu.com/ubuntu jammy-updates main universe' \
-            'deb https://security.ubuntu.com/ubuntu jammy-security main universe' > "$apt_source"
+            'deb [signed-by=/usr/share/keyrings/ubuntu-archive-keyring.gpg] https://mirror.its.umich.edu/ubuntu jammy main universe' \
+            'deb [signed-by=/usr/share/keyrings/ubuntu-archive-keyring.gpg] https://mirror.its.umich.edu/ubuntu jammy-updates main universe' \
+            'deb [signed-by=/usr/share/keyrings/ubuntu-archive-keyring.gpg] https://mirror.its.umich.edu/ubuntu jammy-security main universe' > "$apt_source"
           apt_source_options=(-o "Dir::Etc::sourcelist=$apt_source" -o "Dir::Etc::sourceparts=-")
           sudo apt-get update "${apt_source_options[@]}" -o APT::Update::Error-Mode=any
           sudo apt-get install -y bubblewrap "${apt_source_options[@]}"
