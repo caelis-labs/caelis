@@ -155,7 +155,7 @@ func TestManagerCloseDrainsLateSuccessfulConnection(t *testing.T) {
 	})
 }
 
-func TestManagerConnectionAndListingShareOneStartupBudget(t *testing.T) {
+func TestManagerListingTimeoutStartsAfterConnection(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		failures := make(chan ServerFailure, 1)
 		began := time.Now()
@@ -168,7 +168,7 @@ func TestManagerConnectionAndListingShareOneStartupBudget(t *testing.T) {
 		}
 		defer mgr.Close()
 		<-mgr.Initialized()
-		if elapsed := time.Since(began); elapsed != 30*time.Second {
+		if elapsed := time.Since(began); elapsed != 20*time.Second+DefaultToolListTimeout {
 			t.Fatalf("connection plus listing took %s", elapsed)
 		}
 		if failure := <-failures; !errors.Is(failure.Err, context.DeadlineExceeded) {

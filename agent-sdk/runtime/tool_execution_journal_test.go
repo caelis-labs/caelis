@@ -12,6 +12,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
@@ -103,6 +104,15 @@ func TestJournaledToolPersistsLifecycleAndCancellationRequest(t *testing.T) {
 			wantTerminal: session.ToolExecutionSucceeded,
 		},
 		{
+			name: "unknown",
+			ctx:  context.Background,
+			invoke: func(context.Context, tool.Call) (tool.Result, error) {
+				return tool.Result{IsError: true}, errorcode.New(errorcode.UnknownOutcome, "original effect is unresolved")
+			},
+			wantDurable:  []session.ToolExecutionStatus{session.ToolExecutionPrepared, session.ToolExecutionApproved, session.ToolExecutionStarted},
+			wantTerminal: session.ToolExecutionUnknownOutcome,
+		},
+		{
 			name: "cancelled",
 			ctx: func() context.Context {
 				ctx, cancel := context.WithCancel(context.Background())
@@ -179,6 +189,34 @@ func TestRuntimeRecoveryMarksStartedExecutionUnknownWithoutCallingTool(t *testin
 	last := loaded[len(loaded)-1].Journal.ToolExecution
 	if last.Status != session.ToolExecutionUnknownOutcome || last.Revision != 4 {
 		t.Fatalf("recovered execution = %#v, want UnknownOutcome revision 4", last)
+	}
+}
+
+func TestJournaledToolReceiptPreservesJSONNumberTokens(t *testing.T) {
+	service, active := newJournalTestSession(t, "exact-receipt-json")
+	const payload = `{"token":9223372036854775807,"exponent":1e1000}`
+	call := tool.Call{ID: "exact-call", Name: "Read", Input: []byte(payload), Execution: tool.InvocationContext{SessionID: active.SessionID, TurnID: "turn", ItemID: "step"}}
+	wrapped := journaledTool{sessions: service, sessionRef: active.SessionRef, runID: "run", turnID: "turn", base: tool.NamedTool{Def: tool.Definition{Name: "Read", EffectClass: tool.EffectReadOnly}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
+		return tool.Result{Content: []model.Part{model.NewJSONPart([]byte(payload))}}, nil
+	}}}
+	result, err := wrapped.Call(t.Context(), call)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := persistToolExecutionReceipt(t.Context(), service, active.SessionRef, call, result); err != nil {
+		t.Fatal(err)
+	}
+	events, err := service.Events(t.Context(), session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	last := events[len(events)-1].Journal.ToolExecution
+	var input map[string]json.RawMessage
+	if err := json.Unmarshal(last.Input, &input); err != nil {
+		t.Fatal(err)
+	}
+	if last.Status != session.ToolExecutionSucceeded || string(input["token"]) != `9223372036854775807` || string(input["exponent"]) != `1e1000` || !strings.Contains(string(last.Result), `9223372036854775807`) || !strings.Contains(string(last.Result), `1e1000`) {
+		t.Fatalf("receipt lost exact JSON tokens: input=%s result=%s", last.Input, last.Result)
 	}
 }
 

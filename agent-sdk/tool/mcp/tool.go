@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -75,19 +76,27 @@ func (t *MCPTool) Call(ctx context.Context, call tool.Call) (tool.Result, error)
 		Arguments: args,
 	})
 	if err != nil {
-		return tool.Result{
+		result := tool.Result{
 			ID:      call.ID,
 			Name:    call.Name,
 			IsError: true,
 			Content: []model.Part{
 				model.NewTextPart(fmt.Sprintf("MCP execution error: %s", err.Error())),
 			},
-		}, nil
+		}
+		if tool.EffectClassOf(t.def) != tool.EffectReadOnly {
+			return result, tool.WrapError(errorcode.UnknownOutcome, err, "MCP execution outcome is unknown: "+err.Error())
+		}
+		return result, nil
 	}
 
 	if resp == nil {
-		return tool.Result{ID: call.ID, Name: call.Name, IsError: true,
-			Content: []model.Part{model.NewTextPart("MCP server returned no tool result")}}, nil
+		result := tool.Result{ID: call.ID, Name: call.Name, IsError: true,
+			Content: []model.Part{model.NewTextPart("MCP server returned no tool result")}}
+		if tool.EffectClassOf(t.def) != tool.EffectReadOnly {
+			return result, tool.NewError(errorcode.UnknownOutcome, "MCP server returned no tool execution receipt")
+		}
+		return result, nil
 	}
 	parts, contentErr := mcpContentParts(resp.Content)
 	if resp.StructuredContent != nil {

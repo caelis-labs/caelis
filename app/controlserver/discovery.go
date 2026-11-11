@@ -108,6 +108,35 @@ func PublishDiscoveryRecord(path string, record DiscoveryRecord) error {
 
 // LoadDiscoveryRecord reads one stable, current-user-only discovery snapshot.
 func LoadDiscoveryRecord(path string) (DiscoveryRecord, error) {
+	var record DiscoveryRecord
+	err := withDiscoveryRecord(path, func(snapshot DiscoveryRecord) error {
+		record = snapshot
+		return nil
+	})
+	return record, err
+}
+
+// Every managed reader uses the existing cross-process publication/removal
+// lock. loadDiscoveryRecord closes its file before consume runs, so Windows
+// mutation never overlaps one of our non-delete-sharing read handles.
+func withDiscoveryRecord(path string, consume func(DiscoveryRecord) error) error {
+	path = filepath.Clean(path)
+	// Cold discovery remains read-only: do not create a runtime directory or
+	// lock file when there is no published record.
+	if _, err := os.Lstat(path); err != nil {
+		return err
+	}
+	return withDiscoveryMutationLock(path, func() error {
+		record, err := loadDiscoveryRecord(path)
+		if err != nil {
+			return err
+		}
+		return consume(record)
+	})
+}
+
+// The caller holds the discovery lock through both this read and its consumer.
+func loadDiscoveryRecord(path string) (record DiscoveryRecord, err error) {
 	path = filepath.Clean(path)
 	before, err := os.Lstat(path)
 	if err != nil {
@@ -120,7 +149,11 @@ func LoadDiscoveryRecord(path string) (DiscoveryRecord, error) {
 	if err != nil {
 		return DiscoveryRecord{}, fmt.Errorf("controlserver: open discovery file: %w", err)
 	}
-	defer file.Close()
+	defer func() {
+		if closeErr := file.Close(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("controlserver: close discovery file: %w", closeErr))
+		}
+	}()
 	after, err := file.Stat()
 	if err != nil {
 		return DiscoveryRecord{}, fmt.Errorf("controlserver: stat discovery file: %w", err)
@@ -134,7 +167,6 @@ func LoadDiscoveryRecord(path string) (DiscoveryRecord, error) {
 	limited := io.LimitReader(file, maxDiscoveryBytes+1)
 	decoder := json.NewDecoder(limited)
 	decoder.DisallowUnknownFields()
-	var record DiscoveryRecord
 	if err := decoder.Decode(&record); err != nil {
 		return DiscoveryRecord{}, fmt.Errorf("controlserver: decode discovery record: %w", err)
 	}
@@ -153,17 +185,7 @@ func LoadDiscoveryRecord(path string) (DiscoveryRecord, error) {
 // publication, so an older process exiting late cannot unpublish a replacement.
 func RemoveDiscoveryRecord(path string, instanceID string) error {
 	path = filepath.Clean(path)
-	if _, err := os.Lstat(path); errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	return withDiscoveryMutationLock(path, func() error {
-		record, err := LoadDiscoveryRecord(path)
-		if errors.Is(err, os.ErrNotExist) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
+	err := withDiscoveryRecord(path, func(record DiscoveryRecord) error {
 		if record.InstanceID != strings.TrimSpace(instanceID) {
 			return nil
 		}
@@ -172,6 +194,10 @@ func RemoveDiscoveryRecord(path string, instanceID string) error {
 		}
 		return nil
 	})
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	return err
 }
 
 func withDiscoveryMutationLock(path string, mutate func() error) (err error) {

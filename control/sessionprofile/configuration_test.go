@@ -230,3 +230,13 @@ func TestIdleRequestAdmissionUsesJobWithoutCompletedTurn(t *testing.T) {
 	req.JobID = ""
 	assertError(t, store.AdmitRequest(t.Context(), owner.Scope, binding.SessionID, req), ErrInvalid)
 }
+
+func TestFixedCodeModeEntryCannotBeShadowed(t *testing.T) {
+	for _, execution := range []string{"tools-only", "workspace-write"} {
+		profile := testProfile()
+		profile.Execution = execution
+		profile.NativeTools = []string{}
+		profile.Tools[0].Name = "js_exec"
+		assertError(t, ValidateProfile(profile), ErrInvalid)
+	}
+}

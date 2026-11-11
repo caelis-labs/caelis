@@ -18,7 +18,9 @@ import (
 type Kind string
 
 const (
-	KindCommand  Kind = "command"
+	KindCommand Kind = "command"
+	// KindCodeMode is an asynchronous script owned only by its original Run.
+	KindCodeMode Kind = "code_mode"
 	KindSubagent Kind = "subagent"
 )
 

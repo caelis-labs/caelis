@@ -9,6 +9,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 )
 
 type changingSearchSource struct{ tools []tool.Tool }
@@ -16,11 +17,23 @@ type changingSearchSource struct{ tools []tool.Tool }
 func (s *changingSearchSource) Tools() []tool.Tool { return s.tools }
 
 func TestToolSearchProviderDeclarationStable(t *testing.T) {
+	testFixedProviderDeclarationStable(t, false)
+}
+
+func TestJSExecProviderDeclarationStable(t *testing.T) {
+	testFixedProviderDeclarationStable(t, true)
+}
+
+func testFixedProviderDeclarationStable(t *testing.T, codeMode bool) {
+	t.Helper()
 	source := &changingSearchSource{}
-	search := toolsearch.NewSource(source)
+	entry := toolsearch.NewSource(source)
+	if codeMode {
+		entry = &codemode.Tool{Name: codemode.ToolName}
+	}
 	wire := func() map[string][]byte {
 		t.Helper()
-		req := &model.Request{Tools: tool.ModelSpecs(append([]tool.Tool{search}, source.tools...))}
+		req := &model.Request{Tools: tool.ModelSpecs(append([]tool.Tool{entry}, source.tools...))}
 		codex, err := openAICodexRequestFromModel(req, "synthetic")
 		if err != nil {
 			t.Fatal(err)
@@ -40,6 +53,9 @@ func TestToolSearchProviderDeclarationStable(t *testing.T) {
 				t.Fatal(err)
 			}
 			out[name] = raw
+			if !bytes.Contains(raw, []byte(`"oneOf"`)) {
+				t.Fatalf("%s lost the mutually exclusive source/selector schema: %s", name, raw)
+			}
 		}
 		return out
 	}
@@ -51,9 +67,11 @@ func TestToolSearchProviderDeclarationStable(t *testing.T) {
 				source.tools = append(source.tools, tool.NamedTool{Def: tool.Definition{Name: fmt.Sprintf("%s__remote_%d", name, i), Description: name, InputSchema: map[string]any{"type": "object", "properties": map[string]any{name: map[string]any{"type": "string"}}}, Metadata: map[string]any{tool.MetadataToolKind: tool.MetadataToolKindMCP, tool.MetadataMCPServer: name}}})
 			}
 		}
-		for provider, after := range wire() {
-			if !bytes.Equal(before[provider], after) {
-				t.Fatalf("%s declaration changed after %q", provider, name)
+		for range 32 {
+			for provider, after := range wire() {
+				if !bytes.Equal(before[provider], after) {
+					t.Fatalf("%s declaration changed after %q", provider, name)
+				}
 			}
 		}
 	}

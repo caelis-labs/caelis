@@ -56,12 +56,13 @@ func (r *Runtime) resolveAgent(
 
 // wrapTurnTools is shared by native and externally controlled execution.
 func (r *Runtime) wrapTurnTools(ctx context.Context, activeSession session.Session, ref session.SessionRef, state map[string]any, spec agent.AgentSpec, requester agent.ApprovalRequester, runID, turnID string, sequence *atomic.Uint64) []tool.Tool {
+	concrete := spec.Tools
 	spec.Tools = r.wrapToolsForExecutionJournal(ref, runID, turnID, spec.Tools)
 	spec.Tools = r.wrapToolsForPolicy(activeSession, ref, state, spec, approvalContext{
 		ctx: ctx, requester: requester, runtime: r, session: session.CloneSession(activeSession), sessionRef: session.NormalizeSessionRef(ref), runID: runID, turnID: turnID,
 	})
 	spec.Tools = wrapToolsForInvocation(ref, turnID, sequence, spec.Tools)
-	return r.wrapToolsForLifecycle(spec.Tools)
+	return ownCodeModeProducers(ctx, concrete, r.wrapToolsForLifecycle(spec.Tools))
 }
 
 func cloneAgentSpec(in agent.AgentSpec) agent.AgentSpec {
@@ -163,6 +164,9 @@ func (r *Runtime) runAttempt(
 	}
 
 	ctx = mcpdiscovery.WithEvents(ctx, invocation.SourceEvents)
+	if sink != nil {
+		ctx = context.WithValue(ctx, nestedToolEventSinkKey{}, sink.publishEvent)
+	}
 	var source *requestsource.Tracker
 	if r.compaction.Async.Enabled || r.compaction.Idle.Enabled {
 		ctx, source = requestsource.WithTracker(ctx, invocation.SourceEvents)

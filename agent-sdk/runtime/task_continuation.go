@@ -18,22 +18,24 @@ var errTaskAuthorizationChanged = errors.New("task authorization was invalidated
 type taskScopeKey struct{}
 
 type taskContinuationScope struct {
-	mu         sync.Mutex
-	active     map[string]*taskContinuation
-	changed    chan struct{}
-	closed     bool
-	generation uint64
-	err        error
+	mu             sync.Mutex
+	active         map[string]*taskContinuation
+	changed        chan struct{}
+	closed         bool
+	codeModeClosed bool
+	generation     uint64
+	err            error
 }
 
 type taskContinuation struct {
-	mu       sync.Mutex
-	ctx      context.Context
-	cancel   context.CancelCauseFunc
-	claimed  bool
-	admitted chan struct{}
-	admit    sync.Once
-	done     chan struct{}
+	mu          sync.Mutex
+	ctx         context.Context
+	cancel      context.CancelCauseFunc
+	claimed     bool
+	stopAtFinal bool
+	admitted    chan struct{}
+	admit       sync.Once
+	done        chan struct{}
 }
 
 func newTaskContinuationScope() *taskContinuationScope {
@@ -172,4 +174,19 @@ func (s *taskContinuationScope) join() error {
 	defer s.mu.Unlock()
 	s.closed = true
 	return s.err
+}
+
+// stopCodeMode closes original-Run script admission at a final safe point.
+// It leaves the existing command-approval continuation contract unchanged.
+func (s *taskContinuationScope) stopCodeMode() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, work := range s.active {
+		if work.stopAtFinal {
+			work.cancel(context.Canceled)
+		}
+	}
 }

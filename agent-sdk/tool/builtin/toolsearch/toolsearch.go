@@ -33,6 +33,7 @@ type entry struct {
 }
 
 type request struct {
+	Name  string `json:"name,omitempty"`
 	Query string `json:"query"`
 	Limit int    `json:"limit"`
 }
@@ -63,8 +64,9 @@ func newTool(entries []entry) *Tool {
 			InputSchema: map[string]any{
 				"type":                 "object",
 				"additionalProperties": false,
-				"required":             []any{"query"},
+				"oneOf":                []any{map[string]any{"required": []string{"query"}}, map[string]any{"required": []string{"name"}}},
 				"properties": map[string]any{
+					"name": map[string]any{"type": "string", "minLength": 1, "description": "Exact current tool name to describe without fuzzy selection."},
 					"query": map[string]any{
 						"type":        "string",
 						"description": "Search query for MCP tools.",
@@ -142,12 +144,35 @@ func (t *Tool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
 	if err != nil {
 		return tool.Result{}, err
 	}
-	snapshot := Tool{entries: t.currentEntries(), source: t.source, ranker: t.ranker}
-	matches, err := snapshot.rank(ctx, args.Query, args.Limit, SearchModel{
-		Model: call.RuntimeModel, Reasoning: call.RuntimeReasoning, ServiceTier: call.RuntimeServiceTier,
-	})
-	if err != nil {
-		return tool.Result{}, err
+	snapshot := Tool{source: t.source, ranker: t.ranker}
+	if named, ok := t.source.(tool.NamedSource); ok && args.Name != "" {
+		if err := t.checkSource(ctx); err != nil {
+			return tool.Result{}, err
+		}
+		one, found, lookupErr := named.Lookup(ctx, args.Name)
+		if lookupErr != nil {
+			return tool.Result{}, lookupErr
+		}
+		if found && one != nil {
+			snapshot.entries = buildEntries([]tool.Tool{one})
+		}
+	} else {
+		snapshot.entries = t.currentEntries()
+	}
+	var matches []entry
+	if args.Name != "" {
+		def, readErr := snapshot.readSchema(ctx, args.Name)
+		if readErr != nil {
+			return tool.Result{}, readErr
+		}
+		matches = []entry{{def: def}}
+	} else {
+		matches, err = snapshot.rank(ctx, args.Query, args.Limit, SearchModel{
+			Model: call.RuntimeModel, Reasoning: call.RuntimeReasoning, ServiceTier: call.RuntimeServiceTier,
+		})
+		if err != nil {
+			return tool.Result{}, err
+		}
 	}
 	result := tool.ToolSearchResult{Tools: make([]tool.ToolSearchDiscoveredTool, 0, len(matches))}
 	for _, match := range matches {
@@ -192,7 +217,18 @@ func (t *Tool) readSchema(ctx context.Context, name string) (tool.Definition, er
 			continue
 		}
 		if t.source != nil {
-			current := buildEntries(searchTools(t.source))
+			var current []entry
+			if named, ok := t.source.(tool.NamedSource); ok {
+				one, found, lookupErr := named.Lookup(ctx, name)
+				if lookupErr != nil {
+					return tool.Definition{}, lookupErr
+				}
+				if found && one != nil {
+					current = buildEntries([]tool.Tool{one})
+				}
+			} else {
+				current = buildEntries(searchTools(t.source))
+			}
 			for _, item := range current {
 				if item.def.Name == name && sameSearchDefinition(item.def, candidate.def) {
 					return tool.CloneDefinition(candidate.def), nil
@@ -229,13 +265,22 @@ func parseRequest(raw json.RawMessage) (request, error) {
 	if err := json.Unmarshal(raw, &values); err != nil {
 		return args, fmt.Errorf("decode ToolSearch input: %w", err)
 	}
-	if err := tool.RejectUnknownArgs(values, "query", "limit"); err != nil {
+	if err := tool.RejectUnknownArgs(values, "query", "limit", "name"); err != nil {
 		return args, err
 	}
 	if err := json.Unmarshal(raw, &args); err != nil {
 		return args, fmt.Errorf("decode ToolSearch input: %w", err)
 	}
 	args.Query = strings.TrimSpace(args.Query)
+	if args.Name != "" {
+		if args.Name != strings.TrimSpace(args.Name) || len(args.Name) > 1024 || args.Query != "" {
+			return args, tool.NewError(tool.ErrorCodeInvalidInput, "supply query or an exact name")
+		}
+		if args.Limit == 0 {
+			args.Limit = 1
+		}
+		return args, nil
+	}
 	if args.Query == "" {
 		return args, tool.NewError(tool.ErrorCodeInvalidInput, "ToolSearch query is required")
 	}

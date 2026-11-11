@@ -8,6 +8,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/mcpdiscovery"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -121,6 +122,9 @@ func (a *Agent) executeToolCallAdmitted(
 	defer step.MarkAdmissionComplete()
 	selectedTool, actualCall, binding, bindingErr := a.boundTool(call, visibility)
 	if bindingErr != nil {
+		if call.Name == tool.MCPCallToolName {
+			bindingErr = mcpdiscovery.WithEntryHint(bindingErr, tool.ToolSearchToolName)
+		}
 		rawOutput := tool.ErrorPayload(bindingErr)
 		result := tool.Result{
 			ID:      call.ID,
@@ -162,9 +166,12 @@ func (a *Agent) executeToolCallAdmitted(
 		Observer:           observer,
 	})
 	if err != nil {
+		if tool.IsMCPDefinition(selectedTool.Definition()) {
+			err = mcpdiscovery.WithEntryHint(err, tool.ToolSearchToolName)
+		}
 		result = modelVisibleToolErrorResult(call, result, err)
 	}
-	result = a.admitToolSearchResult(selectedTool.Definition(), call, result)
+	result = a.admitToolSearchResult(ctx, selectedTool.Definition(), call, result)
 	canonical, truncationMeta := canonicalToolResult(result, a.toolResultArtifacts)
 	message := toolResultMessageFromCanonical(call, canonical)
 	eventMeta := truncationMeta

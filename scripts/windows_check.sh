@@ -57,5 +57,18 @@ bash ./scripts/go_test_nonempty.sh ./surfaces/tui/app \
 bash ./scripts/go_test_nonempty.sh ./surfaces/tui/app \
   '^Test(SessionObservationRecovery|SessionObservationRetry|ProductSessionObservationAutomaticallyRecoversAfterHostReplacement)' windows-host-reconnect -count=1
 
+# Discovery readers and mutation share the original cross-process lock.
+# Includes a deterministic legacy held-handle failure control, no random reruns.
+bash ./scripts/go_test_nonempty.sh ./app/controlserver \
+  '^TestWindowsDiscovery' windows-discovery-reader -count=1 -v
+
+# Code Mode is enabled in product assembly on Windows. Exercise native worker
+# handshake, cancellation and Wait/reaping through the installed CLI entry.
+mkdir -p .tmp/bin
+code_mode_cli_binary="$(cygpath -am .tmp/bin/caelis-code-mode-smoke.exe)"
+CGO_ENABLED=0 go build -o "$code_mode_cli_binary" ./cmd/caelis
+CAELIS_TEST_CLI_BINARY="$code_mode_cli_binary" go test -count=1 -timeout "${GO_TEST_TIMEOUT:-5m}" \
+  ./cmd/caelis ./agent-sdk/tool/codemode/...
+
 # Match the release configuration for all production packages.
 CGO_ENABLED=0 go build ./...

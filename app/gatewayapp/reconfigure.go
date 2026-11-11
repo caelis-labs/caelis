@@ -23,6 +23,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/sandboxpolicy"
@@ -344,7 +345,7 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 		return nil, fmt.Errorf("gatewayapp: failed to initialize MCP servers: %w", err)
 	}
 	bundle.MCP = mcpMgr
-	bundle.CapabilityStatus = nativePluginStatus(plan.NativeConfiguration, plan.Plugins, mcpMgr)
+	bundle.CapabilityStatus = nativePluginStatus(plan.NativeConfiguration, plan.Plugins, mcpMgr, mcpSpecs)
 	if err := ctx.Err(); err != nil {
 		bundle.Close()
 		return nil, err
@@ -463,6 +464,9 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 				augmentedTools = append([]tool.Tool{spawn.NewWithTargets(agents, targets)}, augmentedTools...)
 			}
 			metadata := map[string]any{}
+			if _, frozen := req.State[codemode.MetadataCatalog].(string); !frozen && mcpMgr != nil {
+				metadata[codemode.MetadataSelectedTools] = selectedCodeModeTools(mcpMgr.Tools())
+			}
 			if systemPrompt := stringFromMap(effectiveBaseMetadata, "system_prompt"); systemPrompt != "" {
 				if spawnedChild {
 					systemPrompt = systemPromptWithoutCollaborationGuidance(systemPrompt)

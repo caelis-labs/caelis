@@ -18,6 +18,9 @@ func (tm *taskRuntime) syncCanonicalToolResult(ctx context.Context, ref session.
 	if !taskRuntimeMetaBool(event.Meta, toolbinding.MetadataSection, toolbinding.MetadataTaskResult) {
 		return nil
 	}
+	if taskRuntimeMetaString(event.Meta, "task", "kind") == string(taskapi.KindCodeMode) {
+		return tm.syncCanonicalCodeModeCursor(ctx, ref, event)
+	}
 	output := session.CloneState(event.Tool.Output)
 	if len(output) == 0 {
 		return nil
@@ -113,6 +116,12 @@ func (tm *taskRuntime) syncCanonicalToolOutput(ctx context.Context, ref session.
 		}
 	}
 	switch targetKind {
+	case string(taskapi.KindCodeMode):
+		cursor, ok := taskInt64Value(output["model_output_cursor"])
+		if !ok {
+			return nil
+		}
+		return tm.syncCodeModeCursor(ctx, ref, taskID, cursor)
 	case string(taskapi.KindCommand):
 		_, err := tm.syncCanonicalTaskEntry(ctx, ref, taskID, taskapi.KindCommand, output, event)
 		return err
@@ -170,7 +179,7 @@ func (tm *taskRuntime) storedTaskEntryByID(ctx context.Context, ref session.Sess
 		return nil, false
 	}
 	switch entry.Kind {
-	case taskapi.KindCommand, taskapi.KindSubagent:
+	case taskapi.KindCommand, taskapi.KindSubagent, taskapi.KindCodeMode:
 		return entry, true
 	default:
 		return nil, false
@@ -234,7 +243,7 @@ func (tm *taskRuntime) backfillCanonicalTaskEntry(ctx context.Context, ref sessi
 	// Unknown outcome is a durable safety state produced after a later effect
 	// claim or failed reconciliation. Historical model-visible tool output has
 	// no operation revision and therefore cannot safely prove that state stale.
-	if entry.State == taskapi.StateUnknownOutcome {
+	if entry.State == taskapi.StateUnknownOutcome || entry.Kind == taskapi.KindCodeMode {
 		return entry, nil
 	}
 	events, err := tm.runtime.sessions.Events(ctx, session.EventsRequest{SessionRef: ref})
@@ -368,7 +377,7 @@ func canonicalTaskOutputKind(event *session.Event, output map[string]any) taskap
 		taskRuntimeMetaString(event.Meta, "tool", "target_kind"),
 	))
 	switch taskapi.Kind(kind) {
-	case taskapi.KindCommand, taskapi.KindSubagent:
+	case taskapi.KindCommand, taskapi.KindSubagent, taskapi.KindCodeMode:
 		return taskapi.Kind(kind)
 	default:
 		return ""

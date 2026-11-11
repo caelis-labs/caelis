@@ -64,6 +64,11 @@ func WorkspaceWriteMode() policy.Mode {
 		ID: ModeWorkspaceWrite,
 		Decide: func(_ context.Context, input policy.ToolContext) (policy.Decision, error) {
 			def := workspaceWriteConstraints(input.Options)
+			if input.ReadPathArgument != "" {
+				if err := ensureReadPathsOutsideDefaultHiddenRoots(input); err != nil {
+					return policyErrorOrDeny(err)
+				}
+			}
 			switch policyClass(input) {
 			case builtinPolicyReadPath, builtinPolicySearchPath, builtinPolicyGlobPath:
 				if err := ensureReadPathsOutsideDefaultHiddenRoots(input); err != nil {

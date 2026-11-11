@@ -22,6 +22,44 @@ import (
 	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
 )
 
+func TestSourceReadAuthorizationDoesNotReplaceCommandClassification(t *testing.T) {
+	// Policy-only fixture: this command is never executed. A valid source read
+	// must not turn an effectful tool into a Read and bypass its risk decision.
+	input := commandCtx("rm -rf /", false)
+	args, err := policy.CallArgs(input.Call)
+	if err != nil {
+		t.Fatal(err)
+	}
+	args["file"] = "script.js"
+	input.Call.Input, err = json.Marshal(args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input.ReadPathArgument = "file"
+	decision, err := WorkspaceWriteMode().DecideTool(t.Context(), input)
+	if err != nil || decision.Action != policy.ActionDeny {
+		t.Fatalf("source read bypassed command classification: decision=%+v err=%v", decision, err)
+	}
+}
+
+func TestSourceReadAuthorizationDoesNotReplaceWriteTarget(t *testing.T) {
+	input := writeCtx(testOutsidePath())
+	args, err := policy.CallArgs(input.Call)
+	if err != nil {
+		t.Fatal(err)
+	}
+	args["file"] = "script.js"
+	input.Call.Input, err = json.Marshal(args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input.ReadPathArgument = "file"
+	decision, err := WorkspaceWriteMode().DecideTool(t.Context(), input)
+	if err != nil || decision.Action != policy.ActionAskApproval {
+		t.Fatalf("source read replaced the actual write target: decision=%+v err=%v", decision, err)
+	}
+}
+
 func TestWorkspaceWriteModeAllowsWorkspaceWrites(t *testing.T) {
 	t.Parallel()
 

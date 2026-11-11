@@ -17,6 +17,9 @@
 //   - The assembled Tool set owns capability admission. This preset is not a
 //     second Tool-name allowlist; calls without a maintained risk classifier
 //     are allowed under the default workspace constraints.
+//   - Runtime-declared source-read arguments share Read's sensitive-path and
+//     explicit read-grant rules. Display names and remote metadata do not
+//     establish these implementation semantics.
 //   - MCP calls require approval regardless of their effect annotation. Runtime
 //     enforces this boundary for every policy profile before remote execution.
 //   - Hard deny is reserved for machine-level catastrophic operations

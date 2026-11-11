@@ -402,6 +402,9 @@ func toolPanelCanExpandCollapsed(events []SubagentEvent, callID string) bool {
 	if toolPanelEventHasHiddenToolArgs(ev) {
 		return true
 	}
+	if (isResultOnlyToolEvent(ev) || ev.ParentToolName == "js_exec") && !ev.OutputSynthetic && strings.TrimSpace(ev.Output) != "null" {
+		return renderableTextHasContent(ev.Output)
+	}
 	return shouldRenderACPToolPanel(ev.Output, ev.Err)
 }
 
@@ -432,6 +435,9 @@ func toolPanelHasHiddenToolArgs(events []SubagentEvent, callID string) bool {
 }
 
 func toolPanelEventHasHiddenToolArgs(ev SubagentEvent) bool {
+	if isResultOnlyToolEvent(ev) {
+		return false
+	}
 	fullArgs := strings.TrimSpace(ev.FullArgs)
 	if fullArgs == "" {
 		return false
@@ -508,5 +514,5 @@ func collectToolPanelCallIDs(events []SubagentEvent) []string {
 func shouldDefaultCollapseToolEvent(ev SubagentEvent) bool {
 	// Failed exploration remains part of the compact exploration presentation;
 	// its outcome must not split an otherwise contiguous Explored run.
-	return surfaceIsExplorationTool(ev.Name, ev.ToolKind, ev.ExplorationVerb) || isComputerUseToolEvent(ev)
+	return isResultOnlyToolEvent(ev) || ev.ParentToolName == "js_exec" || surfaceIsExplorationTool(ev.Name, ev.ToolKind, ev.ExplorationVerb)
 }

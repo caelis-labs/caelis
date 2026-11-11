@@ -485,3 +485,39 @@ func TestRoutedMCPRendersRealTargetAndArguments(t *testing.T) {
 		t.Fatalf("frame exposed routing envelope:\n%s", frame)
 	}
 }
+
+func TestOrchestrationShowsActualNestedToolsWithoutScriptAction(t *testing.T) {
+	m := NewModel(Config{NoColor: true, NoAnimation: true})
+	m.Update(tea.WindowSizeMsg{Width: 120, Height: 32})
+	for _, event := range []*session.Event{
+		{SessionID: "code-mode", Type: session.EventTypeToolCall, Tool: &session.EventTool{ID: "script", Name: "js_exec", Status: "started", Input: map[string]any{"code": "fixture"}}},
+		{SessionID: "code-mode", Type: session.EventTypeToolCall, Visibility: session.VisibilityMirror, Tool: &session.EventTool{ID: "nested", Name: "maps__route", Status: "started", Input: map[string]any{"origin": "北京南站", "destination": "故宫"}, Parent: &session.EventParentTool{CallID: "script", Name: "js_exec"}}},
+	} {
+		base := projection.EnvelopeBaseFromSessionEvent(session.SessionRef{SessionID: "code-mode"}, event, projection.SessionEventTransport{})
+		for _, env := range projection.ProjectSessionEventEnvelope(base, event) {
+			m = applyACPEnvelopeForTest(t, m, env)
+		}
+	}
+	block := requireMainACPTurnBlockForTest(t, m)
+	ctx := m.blockRenderContext(120)
+	if closed := joinRenderedPlain(block.Render(ctx)); closed != "• Called tools" {
+		t.Fatalf("collapsed script leaked its children: %s", closed)
+	}
+	clickScriptToken(t, m, block, ctx, acpStableExplorationClickToken("tools:nested"))
+	trace := joinRenderedPlain(block.Render(ctx))
+	for _, want := range []string{"maps__route", "北京南站", "故宫"} {
+		if !strings.Contains(trace, want) {
+			t.Fatal(trace)
+		}
+	}
+	for _, hidden := range []string{"Ran script", "js_exec", "fixture"} {
+		if strings.Contains(trace, hidden) {
+			t.Fatal(trace)
+		}
+	}
+
+	if len(block.Events) != 2 || block.Events[1].ParentToolCallID != "script" {
+		t.Fatal("group modified original projection")
+	}
+	t.Logf("NATIVE TOOL PRESENTATION\n%s", trace)
+}

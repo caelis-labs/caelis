@@ -3,6 +3,7 @@ package tuiapp
 import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/caelis-labs/caelis/control/appserver"
+	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"maps"
 )
 
@@ -19,6 +20,7 @@ type sessionHistoryBuild struct {
 	model             *Model
 	pendingNavigation bool
 	before            string
+	mcpNotices        []eventstream.Envelope
 }
 
 func (m *Model) beginSessionHistory(start sessionViewStartMsg) tea.Cmd {
@@ -147,5 +149,9 @@ func (m *Model) commitSessionHistory() tea.Cmd {
 	m.syncViewportContent()
 	m.reconcileSubagentDirectoryViews()
 	m.reconcileSubagentOutputTaskStreams()
-	return tea.Batch(cmd, m.ensureSubagentDirectoryWatch())
+	commands := []tea.Cmd{cmd, m.ensureSubagentDirectoryWatch()}
+	for _, notice := range build.mcpNotices {
+		commands = append(commands, m.showMCPStartupHint(notice))
+	}
+	return tea.Batch(commands...)
 }

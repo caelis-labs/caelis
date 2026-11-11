@@ -542,7 +542,7 @@ func toolCallUpdateFromEventToolPayload(tool *session.EventTool, meta map[string
 		Content:       projectEventToolContent(tool.Content, displayTerminalID),
 		Locations:     projectEventToolLocations(tool.Locations),
 	}
-	if len(out.Content) == 0 && !taskBackedRunningCommandUpdate(tool.Name, tool.Status, meta) {
+	if len(out.Content) == 0 && !emptyOrchestratedToolResult(tool) && !taskBackedRunningCommandUpdate(tool.Name, tool.Status, meta) {
 		out.Content = projectedToolResultContent(tool.ID, tool.Name, tool.Input, tool.Output, meta, tool.Status)
 	}
 	if title := projectedToolLifecycleTitle(tool.Name, tool.Input, tool.Status, tool.Title); title != "" {
@@ -920,4 +920,11 @@ func containsProtocolField(fields []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// Native orchestration mirrors carry status independently of selected output.
+// Do not turn an empty successful receipt into authored "completed" content.
+func emptyOrchestratedToolResult(tool *session.EventTool) bool {
+	return tool != nil && tool.Status == "completed" && len(tool.Output) == 0 &&
+		(tool.Name == "js_exec" || tool.Parent != nil && tool.Parent.Name == "js_exec")
 }

@@ -408,3 +408,10 @@ func (s applicationMCPSource) SearchTools() []tool.Tool {
 	}
 	return ready
 }
+
+func (s applicationMCPSource) CheckToolBinding(ctx context.Context, binding tool.Binding) error {
+	if err := s.CheckSearchScope(ctx); err != nil {
+		return err
+	}
+	return s.manager.CheckToolBinding(ctx, binding)
+}

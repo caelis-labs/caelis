@@ -16,6 +16,15 @@ import (
 // definitions must remain immutable. Reading a source must not wait for I/O.
 type Source interface{ Tools() []Tool }
 
+// NamedSource optionally locates one canonical current tool without enumerating
+// the directory, using Registry.Lookup's signature. Lookup must not wait for I/O.
+// A result is a candidate, not a grant; callers still validate bindings and
+// execution authority. Missing names must not resolve to another source's alias.
+// Sources without this capability retain their ordinary enumeration fallback.
+type NamedSource interface {
+	Lookup(context.Context, string) (Tool, bool, error)
+}
+
 // Definition is the stable tool declaration exposed to runtimes and model
 // providers.
 type Definition struct {
@@ -120,6 +129,18 @@ type InvocationContext struct {
 	ItemID    string `json:"item_id"`
 }
 
+// ParentCall relates a nested invocation to the admitted host call that owns it.
+// It is Runtime data, never script arguments or an authorization capability.
+type ParentCall struct {
+	// Kind identifies the Runtime-owned relation, not execution authority.
+	// Empty retains ordinary parent provenance; code_mode requires a live
+	// Runtime admission binding which cannot be reconstructed from this record.
+	Kind      string            `json:"kind,omitempty"`
+	ID        string            `json:"id"`
+	Name      string            `json:"name"`
+	Execution InvocationContext `json:"execution"`
+}
+
 // Call is one provider-neutral tool invocation.
 type Call struct {
 	ID       string          `json:"id,omitempty"`
@@ -130,6 +151,7 @@ type Call struct {
 	// tool. Runtime overwrites any caller-provided value before invoking the tool.
 	// Direct callers and model-supplied Input/Metadata do not grant identity.
 	Execution InvocationContext `json:"-"`
+	Parent    *ParentCall       `json:"-"`
 	// ModelCall retains the model protocol envelope when Runtime routes to a real tool.
 	ModelCall     *model.ToolCall `json:"-"`
 	TargetBinding *Binding        `json:"-"`
@@ -237,13 +259,18 @@ func AvailableForModel(target Tool, llm model.LLM) bool {
 	if target == nil {
 		return false
 	}
-	definition := target.Definition()
+	return target.Definition().AvailableForModel(llm)
+}
+
+// AvailableForModel checks this definition against the model's capabilities.
+// Callers that already read a Tool definition can reuse that same snapshot.
+func (d Definition) AvailableForModel(llm model.LLM) bool {
 	actual, _ := model.CapabilitiesOf(llm)
 	name := ""
 	if llm != nil {
 		name = llm.Name()
 	}
-	return model.ValidateCapabilities(name, actual, definition.RequiredModelCapabilities) == nil
+	return model.ValidateCapabilities(name, actual, d.RequiredModelCapabilities) == nil
 }
 
 // Observer receives transient tool updates emitted before the model-visible
@@ -458,6 +485,10 @@ func CloneDefinition(in Definition) Definition {
 // CloneCall returns one copy of one tool call.
 func CloneCall(in Call) Call {
 	out := in
+	if in.Parent != nil {
+		value := *in.Parent
+		out.Parent = &value
+	}
 	out.Name = strings.TrimSpace(in.Name)
 	if in.ModelCall != nil {
 		value := *in.ModelCall

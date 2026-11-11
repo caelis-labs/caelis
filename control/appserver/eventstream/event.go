@@ -31,8 +31,9 @@ const (
 type NoticeKind string
 
 const (
-	NoticeKindCompact       NoticeKind = "compact"
-	NoticeKindCompactFailed NoticeKind = "compact_failed"
+	NoticeKindCompact          NoticeKind = "compact"
+	NoticeKindCompactFailed    NoticeKind = "compact_failed"
+	NoticeKindMCPStartupFailed NoticeKind = "mcp_startup_failed"
 )
 
 type Scope string

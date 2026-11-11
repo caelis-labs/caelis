@@ -69,6 +69,9 @@ func renderEventPolicyFor(msg tea.Msg) (renderEventPolicy, bool) {
 }
 
 func renderEventPolicyForACPEnvelope(env eventstream.Envelope) renderEventPolicy {
+	if isMCPStartupNotice(env) {
+		return renderEventPolicy{lane: renderLaneUIState}
+	}
 	if env.Err != nil || env.Kind == eventstream.KindError {
 		return renderEventPolicy{lane: renderLaneLifecycle, flushSmoothing: true, flushLogChunks: true, dismissHints: true}
 	}

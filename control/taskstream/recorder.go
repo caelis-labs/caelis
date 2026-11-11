@@ -141,7 +141,7 @@ func (r *Recorder) BindTaskOutput(ctx context.Context, binding output.Binding) o
 	r.mu.Unlock()
 	return &boundRecorder{
 		recorder: r, partition: partition, binding: binding,
-		partitionTerminal: binding.Kind == output.TaskKindCommand,
+		partitionTerminal: binding.Kind == output.TaskKindCommand || binding.Kind == output.TaskKindCodeMode,
 	}
 }
 

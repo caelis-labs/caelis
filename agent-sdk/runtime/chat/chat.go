@@ -17,6 +17,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/session/userdisplay"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/google/uuid"
 )
 
@@ -105,6 +106,9 @@ func (f Factory) NewAgent(_ context.Context, spec agent.AgentSpec) (agent.Agent,
 	if systemPrompt == "" {
 		systemPrompt = strings.TrimSpace(f.SystemPrompt)
 	}
+	if catalog, _ := spec.Metadata[codemode.MetadataCatalog].(string); catalog != "" {
+		systemPrompt += "\n\n" + catalog
+	}
 	chatAgent, err := NewWithTools(spec.Name, spec.Model, spec.Tools, systemPrompt)
 	if err != nil {
 		return nil, err
@@ -174,7 +178,7 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 				return
 			}
 			toolCallEvents := modelToolCallEvents(assistantMessage, final, messageID, a.model, requestPrefix)
-			a.bindMCPCalls(calls, &visibility)
+			a.bindMCPCalls(ctx, calls, &visibility)
 			for _, event := range toolCallEvents {
 				a.presentMCPEvent(event)
 				if !yield(event, nil) {

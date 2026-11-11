@@ -6,6 +6,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode/gojaexec"
 	"github.com/caelis-labs/caelis/app/gatewayapp"
 	"github.com/caelis-labs/caelis/app/gatewayapp/controladapter/local"
 	"github.com/caelis-labs/caelis/control/appserver"
@@ -17,6 +18,9 @@ import (
 // child the real CLI entry point while ordinary helper processes still run
 // their selected Go tests. This exercises the production stdio/Host boundary.
 func TestMain(m *testing.M) {
+	if len(os.Args) == 2 && os.Args[1] == gojaexec.WorkerArgument {
+		os.Exit(gojaexec.WorkerMain())
+	}
 	if bootstrap.MaybeRunInternalHelper(os.Args[1:]) {
 		os.Exit(0)
 	}

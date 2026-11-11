@@ -880,3 +880,21 @@ func TestStreamParentEchoMatchingUsesExactToolName(t *testing.T) {
 		t.Fatal("SPAWN alias unexpectedly matched exact Spawn parent")
 	}
 }
+
+func TestChildTaskFramePreservesDirectScriptParent(t *testing.T) {
+	req := spawnProjectionRequestForTest()
+	for _, direct := range []bool{false, true} {
+		event := &session.Event{Type: session.EventTypeToolCall, Scope: spawnSubagentScope("jack"), Tool: &session.EventTool{ID: "actual-child", Name: "service__lookup", Status: "started"}}
+		if direct {
+			event.Tool.Parent = &session.EventParentTool{CallID: "actual-script", Name: "js_exec"}
+		}
+		out := projectTaskStreamFrame(req, controltaskstream.Frame{Event: event, Running: true})
+		want := req.CallID
+		if direct {
+			want = "actual-script"
+		}
+		if len(out) != 1 || out[0].ParentTool == nil || out[0].ParentTool.ToolCallID != want || out[0].ScopeID != req.TaskID {
+			t.Fatalf("direct=%v frame=%+v", direct, out)
+		}
+	}
+}

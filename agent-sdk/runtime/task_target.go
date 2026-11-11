@@ -40,8 +40,17 @@ func (tm *taskRuntime) control(ctx context.Context, ref session.SessionRef, req 
 	if err != nil {
 		return taskapi.Snapshot{}, err
 	}
+	// Script cancellation joins its producer; only that producer and cursor
+	// checkpoints mutate the entry. Never hold the mutation claim during a join.
+	if identity.kind == taskapi.KindCodeMode && access != taskControlExclusive {
+		target, err := tm.codeModeTarget(ctx, ref, identity.taskID)
+		if err != nil {
+			return taskapi.Snapshot{}, err
+		}
+		return fn(target, req)
+	}
 	if access == taskControlCancel && identity.kind == taskapi.KindSubagent {
-		return taskapi.Snapshot{}, errorcode.New(errorcode.Unsupported, "task cancel accepts command tasks only")
+		return taskapi.Snapshot{}, errorcode.New(errorcode.Unsupported, "task cancel accepts command or script tasks")
 	}
 	// Subagent read/wait are observations, not lifecycle operations. They must
 	// not contend with SendMessage or producer completion for the mutation
@@ -95,6 +104,12 @@ func (tm *taskRuntime) resolveControlIdentity(ctx context.Context, ref session.S
 		tm.mu.RUnlock()
 		return taskControlIdentity{taskID: lookupID, kind: taskapi.KindSubagent}, nil
 	}
+	for taskID, script := range tm.codeTasks {
+		if script != nil && script.sessionRef.SessionID == ref.SessionID && (taskID == lookupID || script.handle == lookupID) {
+			tm.mu.RUnlock()
+			return taskControlIdentity{taskID: taskID, kind: taskapi.KindCodeMode}, nil
+		}
+	}
 	tm.mu.RUnlock()
 	if tm.store == nil {
 		return taskControlIdentity{}, fmt.Errorf("task is no longer available")
@@ -134,6 +149,12 @@ func (tm *taskRuntime) resolveTaskHandle(ctx context.Context, ref session.Sessio
 		}
 		matched = taskControlIdentity{taskID: taskID, kind: taskapi.KindSubagent}
 	}
+	for taskID, script := range tm.codeTasks {
+		if script != nil && script.sessionRef.SessionID == ref.SessionID && normalizeTaskHandle(script.handle) == handle {
+			matched = taskControlIdentity{taskID: taskID, kind: taskapi.KindCodeMode}
+			break
+		}
+	}
 	tm.mu.RUnlock()
 	if matched.taskID != "" {
 		return matched, nil
@@ -150,6 +171,8 @@ func (tm *taskRuntime) resolveTaskHandle(ctx context.Context, ref session.Sessio
 
 func (tm *taskRuntime) lookupControlTargetClaimed(ctx context.Context, ref session.SessionRef, identity taskControlIdentity) (taskControlTarget, error) {
 	switch identity.kind {
+	case taskapi.KindCodeMode:
+		return tm.codeModeTarget(ctx, ref, identity.taskID)
 	case taskapi.KindCommand:
 		task, err := tm.lookupCommandCanonical(ctx, ref, identity.taskID)
 		if err != nil {
@@ -278,5 +301,5 @@ func (t subagentControlTarget) Write(ctx context.Context, req taskapi.ControlReq
 func (t subagentControlTarget) Cancel(ctx context.Context, req taskapi.ControlRequest) (taskapi.Snapshot, error) {
 	_ = ctx
 	_ = req
-	return taskapi.Snapshot{}, errorcode.New(errorcode.Unsupported, "task cancel accepts command tasks only")
+	return taskapi.Snapshot{}, errorcode.New(errorcode.Unsupported, "task cancel accepts command or script tasks")
 }

@@ -139,6 +139,11 @@ func (t runtimeCommandTool) runApprovalContinuation(task *commandTask, work *tas
 		code, reason = "approval_denied", firstNonEmpty(strings.TrimSpace(response.Reason), "approval was denied")
 	default:
 		permitCtx := context.WithValue(work.ctx, taskStartPermitKey{}, taskStartPermit{taskID: task.ref.TaskID, work: work})
+		if approval.admission != nil {
+			// Carry only the invocation binding, never the cancelled Host.Call
+			// context which already returned the waiting_approval Task handle.
+			permitCtx = context.WithValue(permitCtx, codeModeAdmissionKey{}, approval.admission)
+		}
 		task.mu.Lock()
 		deadline := task.execution.Approval.Deadline
 		task.mu.Unlock()
@@ -154,6 +159,10 @@ func (t runtimeCommandTool) runApprovalContinuation(task *commandTask, work *tas
 		// A failed journal/claim before Start still has a durable pending intent.
 		// Once claimed, the existing command owner retains its actual outcome.
 		executionFailure = executeErr
+		//nolint:errorlint // Only the exact unclaimed completion rejection is benign; joined persistence errors must still fail the Run.
+		if executeErr == errCodeModeComplete {
+			executionFailure = nil
+		}
 		reason, code = firstNonEmpty(errorText(executeErr), "command could not start"), "command_start_failed"
 		if context.Cause(work.ctx) != nil {
 			state, code, reason = taskapi.StateCancelled, "approval_cancelled", context.Cause(work.ctx).Error()

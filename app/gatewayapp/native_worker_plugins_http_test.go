@@ -103,7 +103,7 @@ func TestNativeWorkerPluginConfigurationHTTP(t *testing.T) {
 			t.Fatal("native exec preceded app consent")
 		}
 	}); n != 1 {
-		loaded, _ := host.stack.Sessions().LoadSession(ctx, session.LoadSessionRequest{SessionRef: session.SessionRef{SessionID: created.SessionID}})
+		loaded, _ := host.stack.Sessions().LoadSession(ctx, session.LoadSessionRequest{SessionRef: session.SessionRef{SessionID: created.SessionID}, IncludeTransient: true})
 		for _, event := range loaded.Events {
 			if event.Tool != nil {
 				t.Logf("synthetic native event=%s tool=%s status=%s output=%v", event.Type, event.Tool.Name, event.Tool.Status, event.Tool.Output)
@@ -138,17 +138,20 @@ func TestNativeWorkerPluginConfigurationHTTP(t *testing.T) {
 	if _, err := client.UseSessionModel(ctx, appserver.SessionModelRequest{WriteBase: appserver.WriteBase{OperationID: "native-model-still-owned", SessionID: created.SessionID, ExpectedRevision: &state.Revision, ExpectedControllerEpoch: state.Controller.EpochID}, Model: "custom/gpt-4.1"}); err != nil {
 		t.Fatal("native model authority replaced", err)
 	}
-	loaded, err := host.stack.Sessions().LoadSession(ctx, session.LoadSessionRequest{SessionRef: session.SessionRef{SessionID: created.SessionID}})
+	loaded, err := host.stack.Sessions().LoadSession(ctx, session.LoadSessionRequest{SessionRef: session.SessionRef{SessionID: created.SessionID}, IncludeTransient: true})
 	if err != nil {
 		t.Fatal(err)
 	}
 	executions := 0
 	for _, event := range loaded.Events {
-		if event.Type == session.EventTypeToolResult && event.Tool != nil && event.Tool.Name == "desktop_world__exec" {
-			if event.Tool.Status == "failed" || event.Tool.ModelCall == nil || event.Tool.ModelCall.Name != "mcp_call" || event.Tool.ModelCall.ID != event.Tool.ID {
-				t.Fatal("native worker result lost envelope identity")
+		if event.Journal != nil && event.Journal.ToolExecution != nil {
+			r := event.Journal.ToolExecution
+			if r.ToolName == "desktop_world__exec" && r.Status == session.ToolExecutionSucceeded {
+				if r.Parent == nil || r.Parent.Kind != "code_mode" || r.Parent.Name != "js_exec" || r.Parent.ID == "" || r.Binding == nil || r.Binding.Identity == "" {
+					t.Fatal("native worker result lost original JS child identity")
+				}
+				executions++
 			}
-			executions++
 		}
 	}
 	remote, err := os.ReadFile(audit)
@@ -168,7 +171,7 @@ func TestNativeWorkerPluginConfigurationHTTP(t *testing.T) {
 		t.Fatal("disabled plugin requested approval")
 	}
 	health, err = client.SessionMCPStatus(ctx, created.SessionID)
-	if err != nil || len(health.Plugins) != 1 || health.Plugins[0].Root != installed || health.Plugins[0].Version != "0.1.3" {
+	if err != nil || len(health.Plugins) != 1 || !strings.HasPrefix(health.Plugins[0].Root, canonicalNativeFixtureStore(t, store)+string(filepath.Separator)+"builtin-plugins"+string(filepath.Separator)+"desktop-world"+string(filepath.Separator)) || health.Plugins[0].Version != builtinComputerUseVersion(t) {
 		t.Fatalf("[] lost the enabled global DTW default: %+v %v", health, err)
 	}
 	_ = feed.Subscription.Close()
@@ -199,7 +202,7 @@ func TestNativeWorkerPluginConfigurationHTTP(t *testing.T) {
 		t.Fatalf("independent native inheritance replaced: %+v %v", independentConfig, err)
 	}
 	health, err = client.SessionMCPStatus(ctx, standalone.SessionID)
-	if err != nil || len(health.Plugins) != 1 || health.Plugins[0].Root != installed || health.Plugins[0].Version != "0.1.3" {
+	if err != nil || len(health.Plugins) != 1 || !strings.HasPrefix(health.Plugins[0].Root, canonicalNativeFixtureStore(t, store)+string(filepath.Separator)+"builtin-plugins"+string(filepath.Separator)+"desktop-world"+string(filepath.Separator)) || health.Plugins[0].Version != builtinComputerUseVersion(t) {
 		t.Fatalf("independent Core source overwritten: %+v %v", health, err)
 	}
 	t.Log("ordinary native Worker: owner/CAS/busy/receipt preserved; synthetic MCP effects=2, OS effects=0, app approval=1; optional [] survives reopen and retains the enabled global DTW default")
@@ -228,4 +231,13 @@ func TestNativeWorkerPluginImmediateConfigurationAfterModelCreate(t *testing.T) 
 			t.Fatalf("immediate native configuration index=%d: %+v %v", index, result, err)
 		}
 	}
+}
+
+func canonicalNativeFixtureStore(t *testing.T, store string) string {
+	t.Helper()
+	root, err := filepath.EvalSymlinks(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return root
 }

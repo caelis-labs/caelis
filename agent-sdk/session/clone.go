@@ -246,13 +246,18 @@ func CloneEventScope(in EventScope) EventScope {
 // CloneEventTool returns one normalized copy of a durable tool payload.
 func CloneEventTool(in EventTool) EventTool {
 	out := EventTool{
-		ID:     in.ID,
-		Name:   strings.TrimSpace(in.Name),
-		Kind:   strings.TrimSpace(in.Kind),
-		Title:  strings.TrimSpace(in.Title),
-		Status: strings.TrimSpace(in.Status),
-		Input:  jsonvalue.CloneMap(in.Input),
-		Output: jsonvalue.CloneMap(in.Output),
+		TurnComplete: in.TurnComplete,
+		ID:           in.ID,
+		Name:         strings.TrimSpace(in.Name),
+		Kind:         strings.TrimSpace(in.Kind),
+		Title:        strings.TrimSpace(in.Title),
+		Status:       strings.TrimSpace(in.Status),
+		Input:        jsonvalue.CloneMap(in.Input),
+		Output:       jsonvalue.CloneMap(in.Output),
+	}
+	if in.Parent != nil {
+		value := *in.Parent
+		out.Parent = &value
 	}
 	if in.ModelCall != nil {
 		value := *in.ModelCall

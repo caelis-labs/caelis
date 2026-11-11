@@ -17,11 +17,13 @@ type ToolSearchResult struct {
 
 // ToolSearchDiscoveredTool identifies one deferred tool. The full accepted schema is returned in discovery results.
 type ToolSearchDiscoveredTool struct {
-	Description string                      `json:"description,omitempty"`
-	InputSchema map[string]any              `json:"input_schema,omitempty"`
-	Name        string                      `json:"name,omitempty"`
-	Binding     *Binding                    `json:"binding,omitempty"`
-	Function    *ToolSearchFunctionContract `json:"function,omitempty"`
+	// ParallelSafe reports the owning tool's existing concurrency capability.
+	ParallelSafe bool                        `json:"parallel_safe"`
+	Description  string                      `json:"description,omitempty"`
+	InputSchema  map[string]any              `json:"input_schema,omitempty"`
+	Name         string                      `json:"name,omitempty"`
+	Binding      *Binding                    `json:"binding,omitempty"`
+	Function     *ToolSearchFunctionContract `json:"function,omitempty"`
 }
 
 // ToolSearchFunctionContract accepts the nested function shape used by some
@@ -46,7 +48,7 @@ func NewToolSearchResult(definitions []Definition) ToolSearchResult {
 // NewToolSearchDiscoveredTool converts one deferred definition into the
 // tool_search result contract.
 func NewToolSearchDiscoveredTool(def Definition) ToolSearchDiscoveredTool {
-	entry := ToolSearchDiscoveredTool{Name: def.Name, Description: def.Description, InputSchema: CloneDefinition(def).InputSchema}
+	entry := ToolSearchDiscoveredTool{ParallelSafe: def.Capabilities.ParallelSafe, Name: def.Name, Description: def.Description, InputSchema: CloneDefinition(def).InputSchema}
 	if binding := BindingForDefinition(def); binding.Identity != "" {
 		entry.Binding = &binding
 	}

@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/caelis-labs/caelis/app/gatewayapp/internal/configstore"
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
@@ -106,8 +108,16 @@ func (p *revisionProvider) snapshot() []map[string]any {
 
 func assertRevisionPrefix(t *testing.T, body map[string]any, model, effort, tier, instructions, schemaType string) {
 	t.Helper()
-	if body["model"] != model || (body["instructions"] != instructions && !strings.HasPrefix(fmt.Sprint(body["instructions"]), instructions+"\n## Skills\n")) {
-		t.Fatalf("wrong model/instructions: %#v", body)
+	actual, ok := body["instructions"].(string)
+	remainder, hasPrefix := strings.CutPrefix(actual, instructions)
+	if body["model"] != model || !ok || !hasPrefix || !strings.HasPrefix(remainder, "\n") {
+		t.Fatalf("wrong model/profile-instructions prefix: %#v", body)
+	}
+	before, after, hasGuidance := strings.Cut(remainder, codemode.Guidance)
+	if !hasGuidance || strings.Count(actual, codemode.Guidance) != 1 ||
+		(strings.TrimSpace(before) != "" && !strings.HasPrefix(strings.TrimLeft(before, "\n"), "## Skills\n")) ||
+		!strings.HasPrefix(after, "\n\n"+tool.ExternalCapabilityDescriptionPrefix) {
+		t.Fatalf("Code Mode guidance must follow profile/Skills exactly once: %q", actual)
 	}
 	reasoning, _ := body["reasoning"].(map[string]any)
 	if reasoning["effort"] != effort {
@@ -119,9 +129,9 @@ func assertRevisionPrefix(t *testing.T, body map[string]any, model, effort, tier
 		}
 	}
 	tools, _ := body["tools"].([]any)
-	want := 7
+	want := 9
 	if builtinComputerUseSupported() {
-		want += 3
+		want += 1
 	}
 	if len(tools) != want {
 		t.Fatalf("tools = %#v", body["tools"])
@@ -297,6 +307,9 @@ func TestApplicationConfigurationHostHTTPHotRequestsAndRestart(t *testing.T) {
 	}
 	assertRevisionPrefix(t, requests[0], "gpt-5.4-mini", "low", "", profile.Instructions, "string")
 	assertRevisionPrefix(t, requests[1], "gpt-5.4", "high", "priority", newInstructions, "integer")
+	if strings.TrimPrefix(requests[0]["instructions"].(string), profile.Instructions) != strings.TrimPrefix(requests[1]["instructions"].(string), newInstructions) {
+		t.Fatal("hot reload changed guidance outside the profile instructions")
+	}
 	if inputs, _ := requests[1]["input"].([]any); len(inputs) == 0 || !strings.Contains(fmt.Sprint(inputs), "CONFIGURATION_TOOL_SENTINEL") {
 		t.Fatalf("new request lacks old callback result as model context: %#v", requests[1]["input"])
 	}
@@ -387,6 +400,12 @@ func TestApplicationConfigurationHostHTTPHotRequestsAndRestart(t *testing.T) {
 		t.Fatalf("restarted Turn produced %d model requests, want six", len(requests))
 	}
 	assertRevisionPrefix(t, requests[4], "gpt-5.4", "medium", "", newInstructions, "integer")
+	assertRevisionPrefix(t, requests[5], "gpt-5.4", "medium", "", newInstructions, "integer")
+	for _, i := range []int{2, 3, 4, 5} {
+		if requests[i]["instructions"] != requests[1]["instructions"] {
+			t.Fatalf("guidance changed across no-op/restart at request %d", i)
+		}
+	}
 	last, err := client.SessionConfiguration(ctx, session)
 	if err != nil || last.LastRequest == nil || last.LastRequest.Revision != 3 || last.LastRequest.Model != "gpt-5.4" || last.LastRequest.ReasoningEffort != "medium" || last.LastRequest.ServiceTier != "" || last.LastRequest.ToolsVersion != newVersion {
 		t.Fatalf("defaulted request selectors after restart %+v %v", last, err)

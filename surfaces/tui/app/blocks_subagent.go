@@ -65,10 +65,12 @@ type SubagentEvent struct {
 	narrativeFinal   bool
 
 	// ToolCall fields.
-	CallID       string
-	Name         string
-	NameExplicit bool
-	ToolKind     string
+	ParentToolCallID string
+	ParentToolName   string
+	CallID           string
+	Name             string
+	NameExplicit     bool
+	ToolKind         string
 	// Title is the standard ACP human-readable tool title. It remains separate
 	// from exact Name and coarse ToolKind throughout reduction and rendering.
 	Title string

@@ -70,22 +70,95 @@ func TestSessionObservationPresentsNoticePublishedBeforeAttachment(t *testing.T)
 	}
 }
 
-func TestMCPStartupNoticeRendersAsTimelineNotice(t *testing.T) {
-	const notice = "MCP server \"context7\" did not initialize within 30 seconds. Its tools are unavailable; the conversation can continue."
+func mcpNoticeForTest() eventstream.Envelope {
+	return eventstream.Envelope{Kind: eventstream.KindNotice, SessionID: "session-1", NoticeKind: eventstream.NoticeKindMCPStartupFailed, Notice: "MCP context7 · startup/initialize: deadline exceeded · /mcp", OccurredAt: time.Now(), Delivery: &eventstream.Delivery{Mode: eventstream.DeliveryTransient}}
+}
+
+func TestMCPStartupNoticeIsDeduplicatedExpiringHint(t *testing.T) {
 	for _, width := range []int{60, 120} {
-		model := NewModel(Config{NoColor: true, NoAnimation: true})
-		model = applyACPEnvelopeForTest(t, model, eventstream.Envelope{Kind: eventstream.KindNotice, SessionID: "session-1", Scope: eventstream.ScopeMain, Notice: notice, Delivery: &eventstream.Delivery{Mode: eventstream.DeliveryTransient}})
-		blocks := mainACPTurnBlocksForTest(model)
-		if len(blocks) != 1 || len(blocks[0].Events) != 1 || blocks[0].Events[0].Kind != SENotice {
-			t.Fatalf("notice blocks=%#v", blocks)
+		m := NewModel(Config{NoColor: true, NoAnimation: true})
+		m.Update(tea.WindowSizeMsg{Width: width, Height: 24})
+		env := mcpNoticeForTest()
+		_, cmd := m.handleACPEventEnvelope(env)
+		if cmd == nil || m.hint != env.Notice || len(mainACPTurnBlocksForTest(m)) != 0 {
+			t.Fatalf("hint=%q blocks=%d", m.hint, len(mainACPTurnBlocksForTest(m)))
 		}
-		text := joinRenderedPlain(blocks[0].Render(BlockRenderContext{Width: width}))
-		normalized := strings.Join(strings.Fields(text), " ")
-		for _, part := range []string{"context7", "30 seconds", "conversation can continue"} {
-			if !strings.Contains(normalized, part) {
-				t.Fatalf("render omitted %q: %s", part, text)
-			}
+		_, cmd = m.handleACPEventEnvelope(env)
+		if cmd != nil || len(m.hintEntries) != 1 {
+			t.Fatal("duplicate hint/timer")
 		}
-		t.Logf("width %d:\n%s", width, text)
+		if policy := renderEventPolicyForACPEnvelope(env); policy.dismissHints || policy.flushSmoothing {
+			t.Fatal("hint disturbed activity")
+		}
+		m.Update(clearHintMsg{id: m.hintEntries[0].id})
+		if m.hint != "" {
+			t.Fatal("hint did not expire")
+		}
+		env.OccurredAt = time.Now().Add(-mcpStartupHintLifetime - time.Second)
+		m.handleACPEventEnvelope(env)
+		if m.hint != "" {
+			t.Fatal("expired notice replayed")
+		}
+		if events := projectResumeReplayEvents([]eventstream.Envelope{env}); len(events) != 0 {
+			t.Fatal("transient notice persisted")
+		}
+	}
+}
+
+func TestMCPStartupHintDoesNotReplaceWorkAndClearsOnSessionChange(t *testing.T) {
+	m := NewModel(Config{NoColor: true, NoAnimation: true})
+	env := mcpNoticeForTest()
+	m.showHint("Current activity", hintOptions{priority: HintPriorityNormal})
+	m.handleACPEventEnvelope(env)
+	if m.hint != "Current activity" {
+		t.Fatal("overwrote higher priority hint")
+	}
+	m.applySessionReconnectState(appserver.SessionState{SessionID: "session-2"})
+	if len(m.hintEntries) != 0 {
+		t.Fatal("hint crossed Session")
+	}
+	m.handleACPEventEnvelope(env)
+	if len(m.hintEntries) != 0 {
+		t.Fatal("foreign Session hint")
+	}
+	env.SessionID = "session-2"
+	m.beginLiveTurn(SubmissionModeDefault, true, time.Now())
+	m.handleACPEventEnvelope(env)
+	if len(m.hintEntries) != 0 || !m.turnRunning() {
+		t.Fatal("startup hint disturbed running Turn")
+	}
+}
+
+func TestMCPStartupHintDuringHistoryAttachment(t *testing.T) {
+	for _, expired := range []bool{false, true} {
+		m := NewModel(Config{NoColor: true, NoAnimation: true})
+		m.beginSessionHistory(sessionViewStartMsg{state: appserver.SessionState{SessionID: "session-1"}})
+		env := mcpNoticeForTest()
+		if expired {
+			env.OccurredAt = time.Now().Add(-time.Minute)
+		}
+		m.Update(env)
+		m.Update(env)
+		m.commitSessionHistory()
+		if len(mainACPTurnBlocksForTest(m)) != 0 {
+			t.Fatal("startup notice entered transcript")
+		}
+		if expired && len(m.hintEntries) != 0 || !expired && len(m.hintEntries) != 1 {
+			t.Fatalf("expired=%v hints=%#v", expired, m.hintEntries)
+		}
+	}
+}
+
+func TestMCPStartupFreshNoticeSupersedesExpiredAttachmentDuplicate(t *testing.T) {
+	m := NewModel(Config{NoColor: true, NoAnimation: true})
+	m.beginSessionHistory(sessionViewStartMsg{state: appserver.SessionState{SessionID: "session-1"}})
+	env := mcpNoticeForTest()
+	env.OccurredAt = time.Now().Add(-time.Minute)
+	m.Update(env)
+	env.OccurredAt = time.Now()
+	m.Update(env)
+	m.commitSessionHistory()
+	if len(m.hintEntries) != 1 || m.hint != env.Notice {
+		t.Fatal("expired attachment duplicate suppressed the current failure hint")
 	}
 }

@@ -134,8 +134,7 @@ func toolCallStatus(call model.ToolCall, result tool.Result, rawOutput map[strin
 	// Spawn, Task, and SendMessage, do not transfer their invocation lifecycle
 	// to the target they address or observe.
 	if trustedTaskResult &&
-		strings.EqualFold(strings.TrimSpace(call.Name), shell.RunCommandToolName) &&
-		runtimeTaskKind(result.Metadata) == "command" {
+		((strings.EqualFold(strings.TrimSpace(call.Name), shell.RunCommandToolName) && runtimeTaskKind(result.Metadata) == "command") || (call.Name == "js_exec" && runtimeTaskKind(result.Metadata) == "code_mode")) {
 		state, _ := rawOutput["state"].(string)
 		if strings.TrimSpace(state) == "" {
 			if exitCode, ok := intValue(rawOutput["exit_code"]); ok && exitCode != 0 {

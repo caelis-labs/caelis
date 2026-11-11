@@ -58,6 +58,14 @@ func withPathWriteGrants(base sandbox.Constraints, paths []string) sandbox.Const
 }
 
 func ensureReadPathsOutsideDefaultHiddenRoots(input policy.ToolContext) error {
+	if input.ReadPathArgument != "" {
+		args, err := policy.CallArgs(input.Call)
+		if err != nil {
+			return err
+		}
+		paths := resolvePathsAgainstWorkspace(stringValues(args[input.ReadPathArgument]), input.Options.WorkspaceRoot)
+		return ensurePathsOutsideDefaultHiddenRoots(paths, approvedOverrideRoots(input.Options), "read")
+	}
 	paths, err := candidatePaths(input)
 	if err != nil {
 		return err

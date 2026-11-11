@@ -5,8 +5,10 @@ import (
 	"sync/atomic"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 )
 
 // wrapModelRequestResolver admits changing model-facing values through the same
@@ -30,6 +32,14 @@ func (r *Runtime) wrapModelRequestResolver(ctx context.Context, active session.S
 		bound.DeferredTools = snapshot.DeferredTools
 		bound.ResolveModelRequest = nil
 		prepareCtx := ctx
+		validateCodeMode := snapshot.Validate
+		if validateCodeMode == nil {
+			validateCodeMode = func(context.Context) (func(), error) {
+				return nil, tool.NewError(tool.ErrorCodeStaleRevision, "Code Mode host calls require a dynamic snapshot generation validator")
+			}
+		}
+		prepareCtx = context.WithValue(prepareCtx, codeModeValidationKey{}, validateCodeMode)
+		prepareCtx = context.WithValue(prepareCtx, codeModeModelAdmissionKey{}, snapshot.Admit)
 		if r.compaction.Enabled {
 			authority := &modelRequestAuthority{epoch: snapshot.Revision, refs: 1, release: snapshot.Release, validate: snapshot.Validate, deferredTools: snapshot.DeferredTools, resolveIdle: source}
 			if admit := snapshot.Admit; admit != nil {
@@ -39,7 +49,7 @@ func (r *Runtime) wrapModelRequestResolver(ctx context.Context, active session.S
 				}
 			}
 			snapshot.Release = authority.drop
-			prepareCtx = context.WithValue(ctx, modelRequestAuthorityKey{}, authority)
+			prepareCtx = context.WithValue(prepareCtx, modelRequestAuthorityKey{}, authority)
 		}
 		if err := r.prepareAgentSpec(prepareCtx, active, ref, state, &bound, req, runID, turnID, sequence); err != nil {
 			if snapshot.Release != nil {
@@ -48,6 +58,9 @@ func (r *Runtime) wrapModelRequestResolver(ctx context.Context, active session.S
 			return agent.ModelRequestSnapshot{}, err
 		}
 		snapshot.Model, snapshot.Tools, snapshot.DeferredTools = bound.Model, bound.Tools, bound.DeferredTools
+		if catalog, _ := bound.Metadata[codeModeCatalogKey].(string); catalog != "" {
+			snapshot.Instructions = append(snapshot.Instructions, model.NewTextPart(catalog))
+		}
 		if admit := snapshot.Admit; admit != nil {
 			snapshot.Admit = func(ctx context.Context, admission agent.ModelRequestAdmission) error {
 				admission.TurnID = turnID
@@ -62,7 +75,25 @@ func (r *Runtime) prepareAgentSpec(ctx context.Context, active session.Session, 
 	if err := validateAgentSpecCapabilities(spec.Model, spec.Tools, spec.Request.OutputSpec(), spec.Request.StreamEnabled(false), spec.RequiredModelCapabilities); err != nil {
 		return err
 	}
-	spec.Tools = tool.WithMCPCallTool(spec.Tools)
+	hasCodeMode := false
+	for _, one := range spec.Tools {
+		if declaration, ok := one.(*codemode.Tool); ok && declaration.Name == codemode.ToolName {
+			hasCodeMode = true
+		}
+	}
+	if hasCodeMode {
+		catalog, err := r.codeModeCatalog(ctx, ref, spec.DeferredTools, spec.Metadata)
+		if err != nil {
+			return err
+		}
+		if spec.Metadata == nil {
+			spec.Metadata = map[string]any{}
+		}
+		spec.Metadata[codeModeCatalogKey] = catalog
+	}
+	if !hasCodeMode {
+		spec.Tools = tool.WithMCPCallTool(spec.Tools)
+	}
 	modeName, _ := r.policyForName(ctx, r.policyMode(*spec))
 	authority, _ := ctx.Value(modelRequestAuthorityKey{}).(*modelRequestAuthority)
 	if authority == nil && r.compaction.Enabled {
@@ -80,7 +111,49 @@ func (r *Runtime) prepareAgentSpec(ctx context.Context, active session.Session, 
 		bound.Tools = tools
 		return r.wrapTurnTools(ctx, active, ref, state, bound, req.ApprovalRequester, runID, turnID, sequence)
 	}
-	spec.Tools = wrap(spec.Tools)
+	// Bind the concrete declaration only after native tools have received their
+	// Runtime injection, and look up targets through the ordinary wrapper chain.
+	var allTools []tool.Tool
+	lookup := func(ctx context.Context, name string) (tool.Tool, bool, error) {
+		for _, one := range allTools {
+			if one != nil && one.Definition().Name == name {
+				return one, true, nil
+			}
+		}
+		if source, ok := spec.DeferredTools.(tool.NamedSource); ok {
+			return source.Lookup(ctx, name)
+		}
+
+		return nil, false, nil
+	}
+	var checkBinding func(context.Context, tool.Binding) error
+	if source, ok := spec.DeferredTools.(interface {
+		CheckToolBinding(context.Context, tool.Binding) error
+	}); ok {
+		checkBinding = source.CheckToolBinding
+	}
+	validate, _ := ctx.Value(codeModeValidationKey{}).(func(context.Context) (func(), error))
+	admit, _ := ctx.Value(codeModeModelAdmissionKey{}).(func(context.Context, agent.ModelRequestAdmission) error)
+	for i, one := range spec.Tools {
+		if one != nil && tool.IsToolSearchDefinition(one.Definition()) {
+			spec.Tools[i] = codeModeDiscoveryTool{base: one, lookup: lookup, runtime: r, active: active, turnID: turnID, admit: admit}
+			continue
+		}
+		if declaration, ok := one.(*codemode.Tool); ok {
+			spec.Tools[i] = runtimeCodeModeTool{tasks: r.tasks, active: session.CloneSession(active), declaration: declaration, sessions: r.sessions, ref: ref, nativeTargets: func() []tool.Tool { return allTools }, lookup: lookup, validate: validate, checkBinding: checkBinding}
+		}
+	}
+	allTools = wrap(spec.Tools)
+	spec.Tools = allTools
+	if hasCodeMode {
+		visible := make([]tool.Tool, 0, len(allTools))
+		for _, one := range allTools {
+			if one != nil && !tool.IsToolSearchDefinition(one.Definition()) && !tool.IsMCPCallDefinition(one.Definition()) {
+				visible = append(visible, one)
+			}
+		}
+		spec.Tools = visible
+	}
 	if spec.DeferredTools != nil {
 		spec.DeferredTools = &deferredToolSource{source: spec.DeferredTools, wrap: wrap}
 	}

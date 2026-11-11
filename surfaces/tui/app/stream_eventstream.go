@@ -15,6 +15,9 @@ func (m *Model) handleACPEventEnvelope(env eventstream.Envelope) (tea.Model, tea
 	if m.currentSessionID != "" && env.SessionID != "" && env.SessionID != m.currentSessionID {
 		return m, nil
 	}
+	if isMCPStartupNotice(env) {
+		return m, m.showMCPStartupHint(env)
+	}
 	m.observeTaskStreamSession(env)
 	currentActivity := m.observeLiveActivityTurn(env)
 	if approvalSettled(env) {

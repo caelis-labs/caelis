@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"iter"
+	"strings"
 	"testing"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
@@ -77,6 +78,7 @@ func TestMCPRoutingRejectsLegacyDiscoveryGuessesAndInvalidArguments(t *testing.T
 	payload := map[string]any{"tools": []any{map[string]any{"name": remote.Definition().Name, "binding": binding}}}
 	legacy := &session.Event{Type: session.EventTypeToolResult, Tool: &session.EventTool{ID: "old-search", Name: "ToolSearch", Status: "completed", Output: payload}, Meta: map[string]any{"caelis.tool_exposure.v1": map[string]any{"version": 1, "active": []tool.Binding{binding}}}}
 	failures := 0
+	staleHints := 0
 	ctx := agent.NewContext(agent.ContextSpec{Context: t.Context(), Session: session.Session{SessionRef: session.SessionRef{SessionID: "legacy"}}, Events: []*session.Event{legacy}})
 	for e, err := range a.Run(ctx) {
 		if err != nil {
@@ -84,9 +86,16 @@ func TestMCPRoutingRejectsLegacyDiscoveryGuessesAndInvalidArguments(t *testing.T
 		}
 		if e.Type == session.EventTypeToolResult && e.Tool != nil && e.Tool.Status == "failed" {
 			failures++
+			if e.Tool.Output["error_code"] == string(tool.ErrorCodeStaleRevision) {
+				staleHints++
+				hint, _ := e.Tool.Output["system_hint"].(string)
+				if !strings.Contains(hint, "tool_search") || strings.Contains(hint, "tools.search") {
+					t.Fatalf("wrong legacy discovery hint: %+v", e.Tool.Output)
+				}
+			}
 		}
 	}
-	if calls != 2 || failures != 5 {
+	if calls != 2 || failures != 5 || staleHints != 1 {
 		t.Fatalf("calls=%d failures=%d", calls, failures)
 	}
 }

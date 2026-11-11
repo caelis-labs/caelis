@@ -1,6 +1,8 @@
 # MCP tools and fixed model entry points
 
-Every MCP-enabled native Session presents the fixed `tool_search` and `mcp_call`
+Native product Sessions use [Code Mode](code-mode.md): the fixed `js_exec`
+declaration exposes `tools.search` and `tools.call` inside an async script.
+SDK embedders without Code Mode use the fixed `tool_search` and `mcp_call`
 function declarations. Directory changes, search results and reconnection never
 append MCP schemas to the model's `tools` array. Ordinary model capability filters
 still apply to non-MCP tools. This contract covers the serialized tools field;
@@ -8,15 +10,16 @@ messages, instructions, model configuration and other request prefixes can chang
 
 ## Discovery and invocation
 
-`tool_search` uses the existing Manager directory and selector. Results contain
+Both `tools.search(query)` in Code Mode and `tool_search` without Code Mode
+use the existing Manager directory and selector. Results contain
 exact names, descriptions, complete normalized `input_schema` objects, and
 identity/version bindings. A per-result budget omits whole entries, with omission
 counts, rather than returning truncated callable schemas. There is no per-run
 64-tool limit or accumulated schema-token exposure budget.
 
 MCP startup is asynchronous. Search reads the currently ready directory once;
-it does not wait for connecting servers. An empty result serializes as `{}` and
-grants no discovery binding. It means no ready match at that instant, including
+it does not wait for connecting servers. An empty legacy search result serializes as `{}`; Code Mode returns an empty
+`tools` list. Neither grants a discovery binding. It means no ready match at that instant, including
 while all servers are connecting, rather than proof that the plugin has no tools.
 A fresh search after readiness can discover the tools; an earlier empty receipt
 is never filled in later. Complete ready servers remain searchable independently
@@ -25,7 +28,23 @@ of slower or failed servers.
 Control's Session MCP status reports this same Runtime's connection state and
 catalog. `running` alone describes a connection, not a ready catalog: check that
 `refreshing`, `stale` and `refresh_failed` have cleared, with no warning, and that
-the expected tool directory is present. Inspection and reconnection do not
+the expected tool directory is present. Startup failures appear as a short, Session-scoped TUI hint rather than chat
+history; `/mcp` retains the failed server and a bounded diagnostic stage/reason.
+Transport startup and protocol initialization have a 30-second budget; the
+first complete `tools/list` has a separate 30 seconds, starting after connection.
+Directory refresh uses the same independent 30-second listing budget. Parent
+cancellation or an earlier caller deadline still bounds both stages; shutdown
+drains the SDK-owned process/connection before returning.
+
+For stdio, `startup/initialize` includes launcher work: a started npx process
+does not prove package resolution or the MCP peer's handshake has started.
+Only npm-prefixed fetch/error-code evidence in the last 4096 stderr bytes is
+classified as a registry failure. The tail is cleared after initialization;
+status/hints contain fixed categories, never raw stderr, URLs or credentials.
+Without that evidence, a timed-out npm launcher reports incomplete startup and
+suggests checking registry connectivity. HTTP 401/403 and typed network errors
+are reported separately. A deadline alone does not prove a network or
+authentication failure. Inspection and reconnection do not
 activate a cold Runtime. Refresh
 targets an already active Runtime; it is not a startup operation. Integration
 clients must activate through actual work, observe readiness for that activation,
@@ -37,21 +56,25 @@ Successful new-format canonical search receipts are the sole durable discovery
 source. Runtime projects their bindings across compaction and file-Store resume;
 it does not maintain another durable registry. Old ToolSearch results, exposure
 metadata and checkpoint discovered-name fields remain readable history only.
-Legacy Sessions resume with fixed tools and must search again before an MCP call.
+Historical name-only discovery requires a fresh search before an MCP call.
+Current canonical bindings are reusable in the same Session across fresh VMs,
+compaction and resume while their source and schema remain valid.
 There is no legacy execution path or `tool_retire` tool.
 
 `mcp_call(tool_name, arguments)` requires an exact previously discovered name and
 object arguments. Runtime binds the assembled real Tool once per complete model
 response, compares its identity/version and validates its accepted input schema.
-A search in the same response cannot authorize an undiscovered sibling call.
-Changed or unavailable bindings fail closed and require a new search. No name
+Without Code Mode, a search in the same model response cannot authorize an
+undiscovered sibling call. In Code Mode, sequentially awaiting `tools.search`
+then `tools.call` in one script works: the canonical search receipt is committed
+before the call. Changed or unavailable bindings fail closed and require a new search. No name
 lookup fallback grants eligibility.
 
 The resolved Tool enters the existing lifecycle, invocation, policy/approval and
 execution-journal wrappers. It is never dispatched directly through Manager.
 Policy, approvals, display events and the one Journal record use the real name
-and arguments. The model-facing call/result retain the original `mcp_call` name
-and call ID; a typed original-call field preserves that pairing through Store
+and arguments. Without Code Mode, the model-facing call/result retain the original `mcp_call`
+name and call ID; a typed original-call field preserves that pairing through Store
 round trips and unknown-result recovery. Recovery never replays an unknown MCP
 effect or invents a recoverer. Final Manager admission still checks the pinned
 catalog handle immediately before dispatch.
@@ -62,7 +85,7 @@ A tool-list notification immediately makes that server's catalog uncertain and
 blocks new dispatch through all its pinned handles. One worker per server merges
 notifications in a bounded wake-up channel and fetches a complete paginated list.
 A notification generation change during pagination discards the read and retries
-at most three times within the existing startup timeout. Repeated cursors,
+at most three times within the independent listing timeout. Repeated cursors,
 duplicate names, listing failures and cancellation retain the last whole directory.
 A failed refresh exposes a status warning and keeps dispatch blocked until another
 notification or explicit `Manager.RefreshTools` succeeds. The authorized

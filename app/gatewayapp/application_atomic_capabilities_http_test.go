@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/app/gatewayapp"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/httpclient"
@@ -182,7 +184,8 @@ func (p *atomicCapabilityProvider) RoundTrip(req *http.Request) (*http.Response,
 			Content   any    `json:"content"`
 			ToolCalls []struct {
 				Function struct {
-					Name string `json:"name"`
+					Name      string `json:"name"`
+					Arguments string `json:"arguments"`
 				} `json:"function"`
 			} `json:"tool_calls"`
 		} `json:"messages"`
@@ -197,7 +200,8 @@ func (p *atomicCapabilityProvider) RoundTrip(req *http.Request) (*http.Response,
 			latestTool = ""
 		}
 		if message.Role == "assistant" && len(message.ToolCalls) != 0 {
-			latestTool = message.ToolCalls[len(message.ToolCalls)-1].Function.Name
+			call := message.ToolCalls[len(message.ToolCalls)-1].Function
+			latestTool = gatewayapp.CodeModeFixturePhase(call.Name, call.Arguments)
 		}
 	}
 	name, args := "", ""
@@ -276,6 +280,11 @@ func (p *atomicCapabilityProvider) RoundTrip(req *http.Request) (*http.Response,
 		args = fmt.Sprintf(`{"tool_name":%q,"arguments":%s}`, name, args)
 		name = "mcp_call"
 	}
+	hasJS := false
+	for _, one := range payload.Tools {
+		hasJS = hasJS || one.Function.Name == "js_exec"
+	}
+	name, args = gatewayapp.CodeModeFixtureCall(hasJS, name, args)
 	message := map[string]any{"role": "assistant", "content": "ATOMIC_DIALOGUE_OK"}
 	finish := "stop"
 	if name != "" {
@@ -709,7 +718,7 @@ func TestApplicationAtomicMCPRevisionLifecycleHTTP(t *testing.T) {
 		waitAtomicAuditCount(t, audit, "documents:stop:", i+1)
 		atomicAssertLiveService(t, audit, "documents", 0)
 		promptAtomicCapabilityClient(t, ctx, client, session, fmt.Sprintf("lifecycle-disabled-%d", i), "BASIC")
-		if strings.Contains(provider.lastTools(), "tool_search") != builtinComputerUseSupported() {
+		if !strings.Contains(provider.lastTools(), "js_exec") || strings.Contains(provider.lastTools(), "tool_search") {
 			t.Fatal("disabled tool appeared in a new request")
 		}
 		servers := []sessionprofile.MCPServer{server}
@@ -974,7 +983,7 @@ func TestApplicationAtomicCapabilitiesHTTP(t *testing.T) {
 	// load the Skill body only after the model calls the Skill tool.
 	promptAtomicCapabilityClient(t, ctx, client, created.SessionID, "atomic-skill", "SKILL")
 	first := provider.requestAt(0)
-	if !strings.Contains(first, "atomic-skill") || !strings.Contains(first, "ApplicationLookup") || !strings.Contains(first, "tool_search") || !strings.Contains(first, "Skill") || strings.Contains(first, "ATOMIC_SKILL_BODY_731") {
+	if !strings.Contains(first, "atomic-skill") || !strings.Contains(first, "ApplicationLookup") || !strings.Contains(first, "js_exec") || strings.Contains(first, "tool_search") || !strings.Contains(first, "Skill") || strings.Contains(first, "ATOMIC_SKILL_BODY_731") {
 		t.Fatalf("first model request lacked assembled metadata/tools or inlined Skill body: %s", first)
 	}
 	requests := provider.snapshot()
@@ -1230,6 +1239,15 @@ func TestApplicationAtomicMCPFailureIsolationHTTP(t *testing.T) {
 	promptAtomicCapabilityClient(t, ctx, client, created.SessionID, "failure-call", "CALLFAIL")
 	promptAtomicCapabilityClient(t, ctx, client, created.SessionID, "failure-healthy", "DOC")
 	if got := atomicAudit(audit); strings.Count(got, "callfail:call") != 1 || strings.Count(got, "documents:call") != 1 {
+		loaded, _ := host.stack.Sessions().LoadSession(ctx, session.LoadSessionRequest{SessionRef: session.SessionRef{SessionID: created.SessionID}, IncludeTransient: true})
+		for _, e := range loaded.Events {
+			if e.Journal != nil && e.Journal.ToolExecution != nil {
+				r := e.Journal.ToolExecution
+				if r.Error != "" {
+					t.Logf("original receipt tool=%s id=%s status=%s error=%s", r.ToolName, r.Identity, r.Status, r.Error)
+				}
+			}
+		}
 		t.Fatalf("call failure blocked an independent service: %s; requests: %s", got, provider.snapshot())
 	}
 }

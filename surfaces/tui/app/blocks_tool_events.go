@@ -2,9 +2,14 @@ package tuiapp
 
 import (
 	"strings"
+	"time"
 )
 
 type ToolUpdateMeta struct {
+	// OccurredAt is the original projected event time, never a Surface clock.
+	OccurredAt         time.Time
+	ParentToolCallID   string
+	ParentToolName     string
 	ToolNameExplicit   bool
 	TaskHandle         string
 	TaskAction         string
@@ -55,6 +60,9 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 	toolTitle := strings.TrimSpace(update.Meta.ToolTitle)
 	explorationVerb := strings.TrimSpace(update.Meta.ExplorationVerb)
 	fullArgs := strings.TrimSpace(update.Meta.FullArgs)
+	// Canonical replay loses Location/monotonic representation. Keep the same
+	// display instant for live and replay without changing the source event.
+	occurredAt := update.Meta.OccurredAt.UTC()
 	messageID := update.Meta.MessageID
 	taskHandle := strings.TrimSpace(update.Meta.TaskHandle)
 	taskAction := strings.ToLower(strings.TrimSpace(update.Meta.TaskAction))
@@ -90,9 +98,35 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 		args = taskCancelArgsWithLinkedCommand(args, out, taskHandle)
 	}
 	defer func() {
+		updated := changed
 		var moved bool
 		out, moved = relocateApprovalReviewEventsAfterTool(out, callID)
 		changed = changed || moved
+		if update.Meta.ParentToolCallID != "" {
+			for i := range out {
+				if out[i].Kind == SEToolCall && out[i].CallID == callID {
+					out[i].ParentToolCallID = update.Meta.ParentToolCallID
+					out[i].ParentToolName = update.Meta.ParentToolName
+				}
+			}
+		}
+		if updated && !occurredAt.IsZero() {
+			for i := range out {
+				ev := &out[i]
+				if ev.Kind != SEToolCall || ev.CallID != callID {
+					continue
+				}
+				if !update.Final && (ev.StartedAt.IsZero() || occurredAt.Before(ev.StartedAt)) {
+					ev.StartedAt = occurredAt
+				}
+				if update.Final && (ev.EndedAt.IsZero() || occurredAt.After(ev.EndedAt)) {
+					ev.EndedAt = occurredAt
+				}
+			}
+		}
+		if changed && (update.Final || semanticName == "js_exec" || update.Meta.ParentToolName == "js_exec") {
+			collapse = shouldDefaultCollapseCallID(out, callID)
+		}
 		updateToolEventIndex(toolIndex, out, callID)
 	}()
 	if settledIdx >= 0 && !update.Final {
@@ -181,9 +215,6 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 		ev := &out[i]
 		if !ev.Done {
 			mergeOpenFinalToolEvent(ev, &finalEvent, authoritativeFinal)
-			if shouldDefaultCollapseToolEvent(finalEvent) {
-				collapse = true
-			}
 			return out, true, collapse
 		}
 	}
@@ -195,9 +226,6 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 		fillMissingFinalToolEventFromExisting(&finalEvent, *ev)
 		if completedToolSnapshotsShareCallID(*ev, finalEvent) {
 			mergeFinalToolEvent(ev, &finalEvent, authoritativeFinal)
-			if shouldDefaultCollapseToolEvent(finalEvent) {
-				collapse = true
-			}
 			return out, true, collapse
 		}
 		break
@@ -206,9 +234,6 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 		return out, false, false
 	}
 	out = append(out, finalEvent)
-	if shouldDefaultCollapseToolEvent(finalEvent) {
-		collapse = true
-	}
 	return out, true, collapse
 }
 

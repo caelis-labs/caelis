@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/app/gatewayapp"
 	"github.com/caelis-labs/caelis/control/appserver"
 	"github.com/caelis-labs/caelis/control/appserver/httpclient"
 	"github.com/caelis-labs/caelis/control/appserver/wirev1/generated"
@@ -137,7 +138,13 @@ func (p *nativePluginProvider) RoundTrip(req *http.Request) (*http.Response, err
 		}
 		if name != "" {
 			encoded, _ := json.Marshal(args)
-			message = map[string]any{"role": "assistant", "tool_calls": []any{map[string]any{"id": fmt.Sprintf("native-%d", phase), "index": 0, "type": "function", "function": map[string]any{"name": name, "arguments": string(encoded)}}}}
+			hasJS := false
+			for _, one := range payload.Tools {
+				hasJS = hasJS || one.Function.Name == "js_exec"
+			}
+			var encodedArgs string
+			name, encodedArgs = gatewayapp.CodeModeFixtureCall(hasJS, name, string(encoded))
+			message = map[string]any{"role": "assistant", "tool_calls": []any{map[string]any{"id": fmt.Sprintf("native-%d", phase), "index": 0, "type": "function", "function": map[string]any{"name": name, "arguments": encodedArgs}}}}
 			finish = "tool_calls"
 		}
 	}
@@ -332,7 +339,7 @@ func TestSessionNativePluginsHTTPBridgeChildrenAndIsolation(t *testing.T) {
 	if childApproval.ScopeID != task || childApproval.Permission == nil || childApproval.Permission.ToolCall.Name != "desktop_world__exec" || len(childApproval.Permission.Options) != 2 {
 		t.Fatalf("child approval escaped original owner: %+v", childApproval)
 	}
-	loadedChild, err := host.stack.Sessions().LoadSession(ctx, session.LoadSessionRequest{SessionRef: session.SessionRef{SessionID: child}})
+	loadedChild, err := host.stack.Sessions().LoadSession(ctx, session.LoadSessionRequest{SessionRef: session.SessionRef{SessionID: child}, IncludeTransient: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -343,7 +350,7 @@ func TestSessionNativePluginsHTTPBridgeChildrenAndIsolation(t *testing.T) {
 		}
 	}
 	if originalInput["app"] == nil || originalInput["source"] == nil {
-		t.Fatal("child canonical tool call lacks original exec identity/arguments")
+		t.Fatal("child real tool event lacks original exec identity/arguments")
 	}
 	wantInput, _ := json.Marshal(originalInput)
 	gotInput, _ := json.Marshal(childApproval.Permission.ToolCall.RawInput)
@@ -366,7 +373,7 @@ func TestSessionNativePluginsHTTPBridgeChildrenAndIsolation(t *testing.T) {
 	// Only the child's canonical assistant event settles its original turn.
 	// A phrase in a Surface snapshot may already occur in inherited context.
 	for {
-		loaded, err := host.stack.Sessions().LoadSession(ctx, session.LoadSessionRequest{SessionRef: session.SessionRef{SessionID: child}})
+		loaded, err := host.stack.Sessions().LoadSession(ctx, session.LoadSessionRequest{SessionRef: session.SessionRef{SessionID: child}, IncludeTransient: true})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -386,17 +393,20 @@ func TestSessionNativePluginsHTTPBridgeChildrenAndIsolation(t *testing.T) {
 		}
 	}
 	for index, sid := range []string{parent, sibling, child} {
-		loaded, err := host.stack.Sessions().LoadSession(ctx, session.LoadSessionRequest{SessionRef: session.SessionRef{SessionID: sid}})
+		loaded, err := host.stack.Sessions().LoadSession(ctx, session.LoadSessionRequest{SessionRef: session.SessionRef{SessionID: sid}, IncludeTransient: true})
 		if err != nil {
 			t.Fatal(err)
 		}
 		executions := 0
 		for _, e := range loaded.Events {
-			if e.Type == session.EventTypeToolResult && e.Tool != nil && e.Tool.Name == "desktop_world__exec" {
-				if e.Tool.Status == "failed" || e.Tool.ModelCall == nil || e.Tool.ModelCall.Name != "mcp_call" || e.Tool.ModelCall.ID != e.Tool.ID {
-					t.Fatalf("canonical exec lost real/envelope pairing: %+v", e.Tool)
+			if e.Journal != nil && e.Journal.ToolExecution != nil {
+				r := e.Journal.ToolExecution
+				if r.ToolName == "desktop_world__exec" && r.Status == session.ToolExecutionSucceeded {
+					if r.Parent == nil || r.Parent.Kind != "code_mode" || r.Parent.Name != "js_exec" || r.Parent.ID == "" || r.Binding == nil || r.Binding.Identity == "" {
+						t.Fatalf("nested exec lost original identity: %+v", r)
+					}
+					executions++
 				}
-				executions++
 			}
 		}
 		want := 2
@@ -440,7 +450,7 @@ func TestSessionNativePluginsHTTPBridgeChildrenAndIsolation(t *testing.T) {
 		t.Fatal("default-only observation requested approval")
 	}
 	observed, err = client.SessionMCPStatus(ctx, parent)
-	if err != nil || len(observed.Plugins) != 1 || observed.Plugins[0].Root != installed || observed.Plugins[0].Version != "0.1.3" {
+	if err != nil || len(observed.Plugins) != 1 || !strings.HasPrefix(observed.Plugins[0].Root, filepath.Join(canonicalNativeFixtureStore(t, filepath.Join(root, "store")), "builtin-plugins", "desktop-world")+string(filepath.Separator)) || observed.Plugins[0].Version != builtinComputerUseVersion(t) {
 		t.Fatalf("removing explicit selection lost global DTW default: %+v %v", observed, err)
 	}
 }
