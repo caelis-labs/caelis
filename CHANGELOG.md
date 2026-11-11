@@ -2,6 +2,9 @@
 
 ## [0.78.0](https://github.com/caelis-labs/caelis/compare/v0.77.1...v0.78.0) (2026-11-11)
 
+Adds Goja Code Mode for tool discovery and execution, with the official Desktop World 0.4.2 package bundled on macOS arm64 and Windows x64. Explicit Session packages and enabled global DTW packages still override the builtin fallback.
+
+When upgrading from name-only MCP discovery, search again with `tools.search` in Code Mode or `tool_search` without it before calling tools. Historical Sessions and original receipts remain readable; upgrades do not replay unknown effects.
 
 ### Features
 
@@ -21,6 +24,12 @@
 
 * reduce collaboration polling task decoding ([#204](https://github.com/caelis-labs/caelis/issues/204)) ([a068fcd](https://github.com/caelis-labs/caelis/commit/a068fcd3778455cc4b4c96850ea07ee0c860d98e))
 * reuse incremental status usage projections ([#202](https://github.com/caelis-labs/caelis/issues/202)) ([83743d3](https://github.com/caelis-labs/caelis/commit/83743d3396faf4fd36fb8768ed16d0a2cd97384d))
+
+
+### Dependencies
+
+* Update sjson to 1.2.7 and SQLite to 1.61.1 ([#206](https://github.com/caelis-labs/caelis/pull/206)).
+* Require Go 1.26.11 for the net/http security update ([#207](https://github.com/caelis-labs/caelis/pull/207)).
 
 ## [0.77.1](https://github.com/caelis-labs/caelis/compare/v0.77.0...v0.77.1) (2026-11-03)
 
