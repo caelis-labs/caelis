@@ -7,9 +7,9 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 )
 
-// Project mixed canonical tool content, not the lossy rawOutput summary.
-// Text-only and single-JSON results keep the existing presentation contract;
-// images and mixed content carry ordered ACP blocks alongside the receipt.
+// Project selected js_exec results and mixed canonical tool content from their
+// original parts, not the lossy rawOutput summary. Other text-only and single-JSON
+// results retain their tool-specific presentation.
 func projectedMultimodalToolResultContent(message *model.Message) []eventstream.ToolCallContent {
 	if message == nil {
 		return nil
@@ -29,7 +29,7 @@ func projectedMultimodalToolResultContent(message *model.Message) []eventstream.
 			hasJSON = true
 		}
 	}
-	if !hasImage && (len(results[0].Content) <= 1 || !hasJSON) {
+	if results[0].Name != "js_exec" && !hasImage && (len(results[0].Content) <= 1 || !hasJSON) {
 		return nil
 	}
 	out := make([]eventstream.ToolCallContent, 0, len(results[0].Content))

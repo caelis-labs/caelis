@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/projection"
 )
@@ -93,62 +94,82 @@ func groupedCanonicalModel(t *testing.T, events []*session.Event, scope string, 
 	return m, b
 }
 
+func clickScriptToken(t *testing.T, m *Model, b Block, ctx BlockRenderContext, token string) {
+	t.Helper()
+	for _, row := range b.Render(ctx) {
+		if row.ClickToken != token {
+			continue
+		}
+		if child, ok := b.(*ParticipantTurnBlock); ok {
+			if key, found := strings.CutPrefix(token, "acp_exploration_stable:"); found && child.toggleExplorationExpanded(key) {
+				return
+			}
+			if id, found := strings.CutPrefix(token, "acp_tool_panel:"); found && child.toggleToolPanelClick(id) {
+				return
+			}
+		} else if m.tryToggleFoldToken(b.BlockID(), token) {
+			return
+		}
+		t.Fatalf("rendered click was not routed: %s", token)
+	}
+	t.Fatalf("disclosure not rendered: %s", token)
+}
+
 func TestConsecutiveScriptToolsHaveOwnSharedDisclosure(t *testing.T) {
 	for _, scope := range []string{"main", "child"} {
 		for _, replay := range []bool{false, true} {
-			t.Run(fmt.Sprintf("%s/replay%v", scope, replay), func(t *testing.T) {
-				m, b := groupedCanonicalModel(t, consecutiveScriptEvents(), scope, replay)
-				for _, width := range []int{36, 60, 100} {
+			for _, width := range []int{36, 60, 100} {
+				t.Run(fmt.Sprintf("%s/replay%v/width%d", scope, replay, width), func(t *testing.T) {
+					events := consecutiveScriptEvents()
+					for _, ev := range events {
+						if ev.Tool != nil && ev.Tool.ID == "script2Read" && ev.Type == session.EventTypeToolResult {
+							ev.Tool.Content = []session.EventToolContent{{Type: "content", Text: "VISIBLE_CHILD_RESULT"}}
+						}
+					}
+					m, b := groupedCanonicalModel(t, events, scope, replay)
 					ctx := m.blockRenderContext(width)
 					render := func() string {
 						return strings.Join(m.renderViewportRowCacheFromRows(b, ctx, viewportRowCache{}, b.Render(ctx)).plainLines, "\n")
 					}
 					before := render()
-					t.Logf("width=%d folded\n%s", width, before)
-					if strings.Count(before, "• Called tools") != 1 {
-						t.Fatalf("no single script invocation group: %s", before)
+					if before != "• Called tools" {
+						t.Fatalf("collapsed group leaked content: %s", before)
 					}
-					if strings.Contains(before, "completed") || strings.Contains(before, "SOURCE_JS_NEVER") || strings.Contains(before, "\n\n\n") || strings.Contains(before, "│") {
-						t.Fatal(before)
-					}
-					token := ""
-					for _, r := range b.Render(ctx) {
-						if strings.HasPrefix(r.ClickToken, "acp_exploration_stable:") {
-							token = r.ClickToken
-							break
+					groupToken := acpStableExplorationClickToken("tools:script1Read")
+					clickScriptToken(t, m, b, ctx, groupToken)
+					trace := render()
+					for _, want := range []string{"script1Read", "script2Read", "desktop_world", "Result", "BETWEEN_SCRIPT_STEPS"} {
+						if !strings.Contains(trace, want) {
+							t.Fatalf("missing %s: %s", want, trace)
 						}
 					}
-					if token == "" {
-						t.Fatal("no actual shared group disclosure")
-					}
-					if scope == "child" {
-						m.subagentOutputViews["spawn"].block.toggleExplorationExpanded(strings.TrimPrefix(token, "acp_exploration_stable:"))
-					} else if !m.tryToggleFoldToken(b.BlockID(), token) {
-						t.Fatal("click not routed")
-					}
-					after := render()
-					t.Logf("width=%d expanded\n%s", width, after)
-					if !strings.Contains(after, "script1Read") || !strings.Contains(after, "script2Read") || !strings.Contains(after, "desktop_world") || !strings.Contains(after, "FINAL_SUMMARY") || !strings.Contains(after, "Result") {
-						t.Fatal(after)
-					}
-					if width == 100 && !strings.Contains(after, "return await app.look();") {
-						t.Fatal("raw domain argument was replaced: " + after)
-					}
-					if after == before {
-						t.Fatal("disclosure changed no rows")
-					}
-					for _, r := range b.Render(ctx) {
-						if displayColumns(r.Plain) > width && r.PreWrapped {
-							t.Fatalf("wide row: %q", r.Plain)
+					for _, hidden := range []string{"VISIBLE_CHILD_RESULT", "FINAL_SUMMARY", "completed", "SOURCE_JS_NEVER", "│"} {
+						if strings.Contains(trace, hidden) {
+							t.Fatalf("trace leaked %s: %s", hidden, trace)
 						}
 					}
-					if scope == "child" {
-						m.subagentOutputViews["spawn"].block.toggleExplorationExpanded(strings.TrimPrefix(token, "acp_exploration_stable:"))
-					} else {
-						m.tryToggleFoldToken(b.BlockID(), token)
+					if width == 100 && !strings.Contains(trace, "return await app.look();") {
+						t.Fatal("raw domain argument was replaced: " + trace)
 					}
-				}
-			})
+					clickScriptToken(t, m, b, ctx, acpToolPanelClickToken("script2Read"))
+					if text := render(); !strings.Contains(text, "VISIBLE_CHILD_RESULT") || strings.Contains(text, "FINAL_SUMMARY") {
+						t.Fatalf("first child click did not reveal only its result: %s", text)
+					}
+					clickScriptToken(t, m, b, ctx, acpToolPanelClickToken("script2"))
+					if text := render(); !strings.Contains(text, "FINAL_SUMMARY") {
+						t.Fatalf("script result click lost selected output: %s", text)
+					}
+					for _, row := range b.Render(ctx) {
+						if displayColumns(row.Plain) > width && row.PreWrapped {
+							t.Fatalf("wide row: %q", row.Plain)
+						}
+					}
+					clickScriptToken(t, m, b, ctx, groupToken)
+					if after := render(); after != before {
+						t.Fatalf("group collapse left nested output: %s", after)
+					}
+				})
+			}
 		}
 	}
 }
@@ -164,8 +185,17 @@ func TestInvocationGroupsKeepDirectToolsAndLiteralCompleted(t *testing.T) {
 		ctx := m.blockRenderContext(100)
 		text := joinRenderedPlain(b.Render(ctx))
 		t.Log(text)
-		if !strings.Contains(text, "\n• foreign__direct") || strings.Count(text, "completed") != 1 {
+		if !strings.Contains(text, "\n• foreign__direct") || strings.Contains(text, "completed") {
 			t.Fatal(text)
+		}
+		for _, row := range b.Render(ctx) {
+			if strings.HasPrefix(row.ClickToken, "acp_exploration_stable:tools:") {
+				clickScriptToken(t, m, b, ctx, row.ClickToken)
+			}
+		}
+		clickScriptToken(t, m, b, ctx, acpToolPanelClickToken("script2"))
+		if text := joinRenderedPlain(b.Render(ctx)); strings.Count(text, "completed") != 1 {
+			t.Fatalf("literal script result was lost or synthesized: %s", text)
 		}
 		var raw []SubagentEvent
 		switch v := b.(type) {
@@ -214,7 +244,13 @@ func TestInvocationGroupsPreserveFailuresAndRealTargetReview(t *testing.T) {
 	block.UpdateToolWithMeta("script1Read", "Read", "bad.txt", "bad.txt: not found", true, true, ToolUpdateMeta{ParentToolCallID: "script1", ParentToolName: "js_exec"})
 	block.AddApprovalReviewEvent("script1desktop_world__exec", "desktop_world__exec", "raw command", "denied", "REAL_TARGET_DENIAL")
 	ctx := m.blockRenderContext(100)
+	clickScriptToken(t, m, b, ctx, acpStableExplorationClickToken("tools:script1Read"))
 	text := joinRenderedPlain(block.Render(ctx))
+	if strings.Contains(text, "REAL_TARGET_DENIAL") || strings.Contains(text, "bad.txt: not found") {
+		t.Fatal("unclicked failure result leaked: " + text)
+	}
+	clickScriptToken(t, m, b, ctx, acpToolPanelClickToken("script1desktop_world__exec"))
+	text = joinRenderedPlain(block.Render(ctx))
 	t.Log(text)
 	if strings.Count(text, "REAL_TARGET_DENIAL") != 1 || !strings.Contains(text, "[denied]") || !strings.Contains(text, "Read bad.txt failed") || strings.Contains(text, "[failed]") {
 		t.Fatal(text)
@@ -223,6 +259,29 @@ func TestInvocationGroupsPreserveFailuresAndRealTargetReview(t *testing.T) {
 	block.UpdateToolWithMeta("script1Read", "Read", "bad.txt", "", false, false, ToolUpdateMeta{ParentToolCallID: "script1", ParentToolName: "js_exec"})
 	if joinRenderedPlain(block.Render(ctx)) != text {
 		t.Fatal("late running changed terminal group")
+	}
+}
+
+func TestInvocationGroupRetainsReasoningBeforeZeroChildScript(t *testing.T) {
+	for _, scope := range []string{"main", "child"} {
+		for _, replay := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/replay%v", scope, replay), func(t *testing.T) {
+				var events []*session.Event
+				for _, ev := range consecutiveScriptEvents() {
+					if ev.Tool != nil && ev.Tool.Parent != nil && ev.Tool.Parent.CallID == "script2" {
+						continue
+					}
+					events = append(events, ev)
+				}
+				m, b := groupedCanonicalModel(t, events, scope, replay)
+				ctx := m.blockRenderContext(60)
+				clickScriptToken(t, m, b, ctx, acpStableExplorationClickToken("tools:script1Read"))
+				text := joinRenderedPlain(b.Render(ctx))
+				if !strings.Contains(text, "BETWEEN_SCRIPT_STEPS") || !strings.Contains(text, "Result") || strings.Contains(text, "FINAL_SUMMARY") {
+					t.Fatal(text)
+				}
+			})
+		}
 	}
 }
 
@@ -246,6 +305,39 @@ func TestChildInnerParentRoutingStaysWithinItsObservedTurn(t *testing.T) {
 	}
 	if joinRenderedPlain(b.Render(ctx)) != before {
 		t.Fatal("routing changed old receipt view")
+	}
+}
+
+func TestScriptSearchDisplaysOnlyOriginalResultOnClick(t *testing.T) {
+	const selected = `{"tools":[],"count":0}`
+	message := model.NewMessage(model.RoleTool, model.Part{Kind: model.PartKindToolResult, ToolResult: &model.ToolResultPart{
+		ToolUseID: "script", Name: "js_exec", Content: []model.Part{model.NewJSONPart(json.RawMessage(selected))},
+	}})
+	parent := &session.EventParentTool{CallID: "script", Name: "js_exec"}
+	events := []*session.Event{
+		{Type: session.EventTypeToolCall, SessionID: "fixture", Tool: &session.EventTool{ID: "script", Name: "js_exec", Status: "started"}},
+		{Type: session.EventTypeToolCall, SessionID: "fixture", Tool: &session.EventTool{ID: "search", Name: "tool_search", Status: "started", Parent: parent, Input: map[string]any{"query": "github pull request get diff"}}},
+		{Type: session.EventTypeToolResult, SessionID: "fixture", Tool: &session.EventTool{ID: "search", Name: "tool_search", Status: "completed", Parent: parent}},
+		{Type: session.EventTypeToolResult, SessionID: "fixture", Message: &message, Tool: &session.EventTool{ID: "script", Name: "js_exec", Status: "completed", Output: map[string]any{"tools": []any{}, "count": 0}}},
+	}
+	for _, scope := range []string{"main", "child"} {
+		for _, replay := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/replay%v", scope, replay), func(t *testing.T) {
+				m, b := groupedCanonicalModel(t, events, scope, replay)
+				ctx := m.blockRenderContext(60)
+				clickScriptToken(t, m, b, ctx, acpStableExplorationClickToken("tools:search"))
+				trace := joinRenderedPlain(b.Render(ctx))
+				if !strings.Contains(trace, "tool_search") || !strings.Contains(trace, "github pull request get diff") || strings.Contains(trace, "completed") || strings.Contains(trace, selected) {
+					t.Fatalf("search trace contains fabricated or expanded output: %s", trace)
+				}
+				clickScriptToken(t, m, b, ctx, acpToolPanelClickToken("script"))
+				result := joinRenderedPlain(b.Render(ctx))
+				if !strings.Contains(result, selected) || strings.Contains(result, "completed") || strings.Contains(result, "Result (tool_search)") {
+					t.Fatalf("original selected ToolResult not preserved: %s", result)
+				}
+				t.Logf("trace\n%s\nselected result\n%s", trace, result)
+			})
+		}
 	}
 }
 

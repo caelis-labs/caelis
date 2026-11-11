@@ -10,10 +10,12 @@
   const origins=new WeakMapType(), replies=new WeakMapType();
   // Object identity is private to this closure; no string/symbol property in
   // business JSON grants a projection role. Media identities are immutable.
-  function ownReply(result) {
+  function ownReply(result, raw) {
+    define(result,"raw_json",{value:raw,enumerable:false});
     weakSet(replies,result,true);
-    for(let i=0;i<result.parts.length;i++) {
-      const p=result.parts[i];
+    const parts=result.parts||[];
+    for(let i=0;i<parts.length;i++) {
+      const p=parts[i];
       weakSet(origins,p,{kind:p.kind,handle:p.handle});
       define(p,"kind",{value:p.kind,writable:false,configurable:false});
       if(p.kind==="media"||p.kind==="file_ref") freeze(p);
@@ -137,11 +139,9 @@
           if(typeof detail==="string") {message="Tool call failed: "+slice(detail,0,1024);break;}
         }
       }
-      const e=new ErrorType(message);e.reply=reply;throw e;
+      const e=new ErrorType(message);e.reply=ownReply(reply,envelope.raw);throw e;
     }
-    const result={parts:reply.parts||[]};
-    define(result,"raw_json",{value:envelope.raw,enumerable:false});
-    return ownReply(result);
+    return ownReply({parts:reply.parts||[]},envelope.raw);
   }
   const tools=freeze({
     call(name,args) {

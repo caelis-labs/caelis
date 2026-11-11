@@ -1,10 +1,5 @@
 package tuiapp
 
-import (
-	"slices"
-	"strings"
-)
-
 // invocationToolGroup is a disposable range of canonical direct-parent calls.
 // It owns no lifecycle or membership beyond the current transcript snapshot.
 func invocationToolGroup(events []SubagentEvent, start int) (int, bool) {
@@ -57,76 +52,54 @@ func renderInvocationToolGroupRows(blockID string, events []SubagentEvent, start
 		return nil, start, false
 	}
 	group := events[start : end+1]
-	var children []int
-	for i, ev := range group {
-		if ev.Kind == SEToolCall && !isResultOnlyToolEvent(ev) {
-			children = append(children, i)
+	firstChild := ""
+	failed, completed := false, true
+	for _, ev := range group {
+		if ev.Kind != SEToolCall {
+			continue
+		}
+		failed, completed = failed || ev.Err, completed && ev.Done
+		if firstChild == "" && !isResultOnlyToolEvent(ev) {
+			firstChild = ev.CallID
 		}
 	}
-	if len(children) == 0 {
-		return nil, start, false
-	}
-	key := "tools:" + group[children[0]].CallID
+	key := "tools:" + firstChild
 	token := acpStableExplorationClickToken(key)
 	expanded := opts.ExplorationExpanded != nil && opts.ExplorationExpanded(key)
-	tone, dim := acpToolHeaderMark(ctx, false, true)
-	rows := []RenderedRow{renderACPTranscriptHeaderRowMarked(blockID, "• Called tools", width, ctx, token, tone, dim)}
-	previous := 0
-	for n, index := range children {
-		if expanded {
-			for _, note := range group[previous:index] {
-				if note.Kind == SEReasoning {
-					rows = append(rows, renderExplorationNarrativeRows(blockID, note.Text, width, ctx, ctx.Theme.ReasoningStyle(), token, len(rows) == 1)...)
-				}
-			}
+	header := "• Called tools"
+	if failed {
+		header += " failed"
+	}
+	tone, dim := acpToolHeaderMark(ctx, failed, completed)
+	rows := []RenderedRow{renderACPTranscriptHeaderRowMarked(blockID, header, width, ctx, token, tone, dim)}
+	if !expanded {
+		return rows, end, true
+	}
+	var result *SubagentEvent
+	flushResult := func() {
+		if result != nil && result.Done {
+			resultRows := renderACPToolResultOnlyRows(blockID, *result, maxInt(8, width-4), ctx, opts)
+			rows = append(rows, toolGroupChildRows(resultRows, ctx, len(rows) == 1)...)
 		}
-		previous = index + 1
+		result = nil
+	}
+	for index := 0; index < len(group); index++ {
 		ev := group[index]
-		// Pending/failed invocations and reviewed decisions remain visible even
-		// when an older successful prefix is folded.
-		review := false
-		for _, other := range group {
-			if other.Kind == SEApproval && other.CallID == ev.CallID {
-				review = true
+		switch ev.Kind {
+		case SEReasoning:
+			flushResult()
+			rows = append(rows, renderExplorationNarrativeRows(blockID, ev.Text, width, ctx, ctx.Theme.ReasoningStyle(), token, len(rows) == 1)...)
+		case SEToolCall:
+			if isResultOnlyToolEvent(ev) {
+				flushResult()
+				result = &group[index]
+				continue
 			}
+			native, consumed := renderACPToolLifecycleRows(blockID, group, index, maxInt(8, width-4), ctx, opts)
+			rows = append(rows, toolGroupChildRows(native, ctx, len(rows) == 1)...)
+			index = consumed
 		}
-		if !expanded && n < len(children)-2 && !ev.Err && ev.Done && !review {
-			continue
-		}
-		childOpts := opts
-		childOpts.ToolPanelExpanded = func(id string) bool {
-			return ev.Err || review || (opts.ToolPanelFullOutput != nil && opts.ToolPanelFullOutput(id))
-		}
-		native, _ := renderACPToolLifecycleRows(blockID, group, index, maxInt(8, width-4), ctx, childOpts)
-		rows = append(rows, toolGroupChildRows(native, ctx, len(rows) == 1)...)
 	}
-	for _, ev := range group {
-		if !isResultOnlyToolEvent(ev) || !ev.Done {
-			continue
-		}
-		var names []string
-		for _, i := range children {
-			child := group[i]
-			if child.ParentToolCallID == ev.CallID && !slices.Contains(names, child.Name) {
-				names = append(names, child.Name)
-			}
-		}
-		rows = append(rows, renderInvocationResultRows(blockID, ev, strings.Join(names, ", "), width, ctx, opts)...)
-	}
+	flushResult()
 	return rows, end, true
-}
-
-func renderInvocationResultRows(blockID string, ev SubagentEvent, names string, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions) []RenderedRow {
-	if !ev.Err && (ev.OutputSynthetic || strings.TrimSpace(ev.Output) == "" || strings.TrimSpace(ev.Output) == "null") {
-		return nil
-	}
-	label := "Result"
-	if names != "" {
-		label += " (" + names + ")"
-	}
-	if strings.TrimSpace(ev.Output) == "" {
-		ev.Output = "Tool execution failed"
-	}
-	ev.Output = label + ":\n" + ev.Output
-	return renderACPToolResultOnlyRows(blockID, ev, width, ctx, opts)
 }

@@ -70,6 +70,68 @@ func TestJSExecCanonicalCursorCommitsOnlyAdvancement(t *testing.T) {
 	assertSubagentSagaModelRoundTrip(t, store, active.SessionRef)
 }
 
+type failCodeModeInitialStore struct {
+	taskapi.Store
+	failure error
+}
+
+func (s failCodeModeInitialStore) Put(ctx context.Context, req taskapi.PutRequest) (*taskapi.Entry, error) {
+	if req.Entry != nil && req.Entry.Kind == taskapi.KindCodeMode && req.ExpectedRevision == 0 {
+		return nil, s.failure
+	}
+	return s.Store.(taskapi.CASStore).Put(ctx, req)
+}
+
+func TestJSExecInitialPersistenceFailureDoesNotBindOutput(t *testing.T) {
+	store, active, _ := codeModeStore(t)
+	base := sessionfile.NewTaskStore(store)
+	failure := errors.New("initial-script-persistence-failure")
+	trace := &recordingProducerLifecycle{}
+	var executed atomic.Bool
+	driver := &mcpScriptModel{steps: func(i int, _ *model.Request) []model.ToolCall {
+		if i == 0 {
+			return []model.ToolCall{{ID: "script-submit", Name: codemode.ToolName, Args: `{"code":"return 42","yield_time_ms":0}`}}
+		}
+		return nil
+	}}
+	declaration := &codemode.Tool{Name: codemode.ToolName, Executor: codeExecutorFunc(func(context.Context, codemode.Source, codemode.Host) (json.RawMessage, error) {
+		executed.Store(true)
+		return []byte(`42`), nil
+	})}
+	rt, err := New(Config{Sessions: store, TaskStore: failCodeModeInitialStore{Store: base, failure: failure}, TaskOutput: trace, AgentFactory: chat.Factory{}, PolicyRegistry: mcpFixturePolicy(), DefaultPolicyMode: "mcp-test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := rt.Run(t.Context(), agent.RunRequest{SessionRef: active.SessionRef, Input: "script submission persistence failure", AgentSpec: agent.AgentSpec{Model: driver, Tools: []tool.Tool{declaration}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := run.Handle.WaitCompletion(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := base.ListSession(t.Context(), active.SessionRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if trace.binding.TaskID != "" || len(trace.events) != 0 || executed.Load() || len(entries) != 0 {
+		t.Fatalf("failed submission retained a producer: binding=%+v events=%+v executed=%v entries=%+v", trace.binding, trace.events, executed.Load(), entries)
+	}
+	events, err := store.Events(t.Context(), session.EventsRequest{SessionRef: active.SessionRef})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range events {
+		if event.Type == session.EventTypeToolResult && event.Tool != nil && event.Tool.ID == "script-submit" {
+			raw, err := json.Marshal(event.Tool)
+			if err != nil || event.Tool.Status != "failed" || !strings.Contains(string(raw), failure.Error()) {
+				t.Fatalf("submission failure was hidden: tool=%+v err=%v", event.Tool, err)
+			}
+			return
+		}
+	}
+	t.Fatal("missing failed script submission result")
+}
+
 func TestJSExecTerminalCommitFailureReachesProducerAndObservers(t *testing.T) {
 	store, active, _ := codeModeStore(t)
 	base := sessionfile.NewTaskStore(store)

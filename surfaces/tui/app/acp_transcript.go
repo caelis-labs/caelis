@@ -103,7 +103,7 @@ func renderACPTranscriptRows(blockID string, events []SubagentEvent, status stri
 			if !latest {
 				continue
 			}
-			resultRows := renderInvocationResultRows(blockID, ev, "", width, ctx, opts)
+			resultRows := renderACPToolResultOnlyRows(blockID, ev, width, ctx, opts)
 			selectedResults = append(selectedResults, resultRows...)
 			continue
 		}
@@ -942,6 +942,9 @@ func toolPanelCanExpandHiddenDetails(ev SubagentEvent, outputText string, final 
 	}
 	if final && ev.Name == surfaceToolSpawn {
 		return shouldRenderACPToolPanel(outputText, err)
+	}
+	if final && ev.ParentToolName == "js_exec" && renderableTextHasContent(outputText) {
+		return true
 	}
 	if final && shouldDefaultCollapseToolEvent(ev) && shouldRenderACPToolPanel(outputText, err) {
 		return true

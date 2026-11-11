@@ -499,20 +499,25 @@ func TestOrchestrationShowsActualNestedToolsWithoutScriptAction(t *testing.T) {
 		}
 	}
 	block := requireMainACPTurnBlockForTest(t, m)
-	closed := joinRenderedPlain(block.Render(m.blockRenderContext(120)))
+	ctx := m.blockRenderContext(120)
+	if closed := joinRenderedPlain(block.Render(ctx)); closed != "• Called tools" {
+		t.Fatalf("collapsed script leaked its children: %s", closed)
+	}
+	clickScriptToken(t, m, block, ctx, acpStableExplorationClickToken("tools:nested"))
+	trace := joinRenderedPlain(block.Render(ctx))
 	for _, want := range []string{"maps__route", "北京南站", "故宫"} {
-		if !strings.Contains(closed, want) {
-			t.Fatal(closed)
+		if !strings.Contains(trace, want) {
+			t.Fatal(trace)
 		}
 	}
 	for _, hidden := range []string{"Ran script", "js_exec", "fixture"} {
-		if strings.Contains(closed, hidden) {
-			t.Fatal(closed)
+		if strings.Contains(trace, hidden) {
+			t.Fatal(trace)
 		}
 	}
 
 	if len(block.Events) != 2 || block.Events[1].ParentToolCallID != "script" {
 		t.Fatal("group modified original projection")
 	}
-	t.Logf("NATIVE TOOL PRESENTATION\n%s", closed)
+	t.Logf("NATIVE TOOL PRESENTATION\n%s", trace)
 }

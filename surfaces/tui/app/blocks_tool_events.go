@@ -124,6 +124,9 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 				}
 			}
 		}
+		if changed && (update.Final || semanticName == "js_exec" || update.Meta.ParentToolName == "js_exec") {
+			collapse = shouldDefaultCollapseCallID(out, callID)
+		}
 		updateToolEventIndex(toolIndex, out, callID)
 	}()
 	if settledIdx >= 0 && !update.Final {
@@ -212,9 +215,6 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 		ev := &out[i]
 		if !ev.Done {
 			mergeOpenFinalToolEvent(ev, &finalEvent, authoritativeFinal)
-			if shouldDefaultCollapseToolEvent(finalEvent) {
-				collapse = true
-			}
 			return out, true, collapse
 		}
 	}
@@ -226,9 +226,6 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 		fillMissingFinalToolEventFromExisting(&finalEvent, *ev)
 		if completedToolSnapshotsShareCallID(*ev, finalEvent) {
 			mergeFinalToolEvent(ev, &finalEvent, authoritativeFinal)
-			if shouldDefaultCollapseToolEvent(finalEvent) {
-				collapse = true
-			}
 			return out, true, collapse
 		}
 		break
@@ -237,9 +234,6 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 		return out, false, false
 	}
 	out = append(out, finalEvent)
-	if shouldDefaultCollapseToolEvent(finalEvent) {
-		collapse = true
-	}
 	return out, true, collapse
 }
 

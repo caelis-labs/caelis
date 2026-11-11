@@ -79,13 +79,13 @@ func (tm *taskRuntime) startCodeMode(ctx context.Context, owner runtimeCodeModeT
 	// outlive the foreground observation, not the original Run's authority.
 	workCtx, cancel := context.WithCancel(ctx)
 	task := &codeModeTask{entry: entry, sessionRef: owner.ref, handle: handle, done: make(chan struct{}), cancel: cancel, observer: output.Nop()}
-	if tm.runtime.taskOutput != nil {
-		task.observer = tm.runtime.taskOutput.BindTaskOutput(workCtx, output.Binding{SessionID: owner.ref.SessionID, TaskID: taskID, Kind: output.TaskKindCodeMode, StartsAtTaskOrigin: true})
-	}
 	if err = tm.persistTaskEntry(ctx, entry); err != nil {
 		release()
 		cancel()
 		return tool.Result{}, err
+	}
+	if tm.runtime.taskOutput != nil {
+		task.observer = tm.runtime.taskOutput.BindTaskOutput(workCtx, output.Binding{SessionID: owner.ref.SessionID, TaskID: taskID, Kind: output.TaskKindCodeMode, StartsAtTaskOrigin: true})
 	}
 	tm.mu.Lock()
 	if tm.codeTasks == nil {

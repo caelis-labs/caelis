@@ -75,6 +75,9 @@ func TestCodeModeFrozenNativeReplay(t *testing.T) {
 			seen := map[string]bool{}
 			for _, block := range m.doc.Blocks() {
 				for _, row := range block.Render(m.blockRenderContext(width)) {
+					if step > 1 && strings.HasPrefix(row.ClickToken, "acp_exploration_stable:tools:") {
+						continue
+					}
 					key := block.BlockID() + "/" + row.ClickToken
 					if row.ClickToken != "" && !seen[key] {
 						targets = append(targets, struct {

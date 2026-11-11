@@ -100,16 +100,19 @@ and unknown-effect failures still stop the script.
 
 TUI folds consecutive script invocations and their directly related tool calls
 under `Called tools`, using the existing Explored disclosure and indentation.
-Actual native tool rows retain their names, argument summaries, failures and
-approval decisions; unrelated direct calls remain outside the group. MCP
-arguments are not interpreted to invent domain-specific summaries. The script
-source and orchestration parent are not additional actions. Empty successful
-status receipts add no result placeholder; nonempty selected returns and errors
-have a labeled common result entry with their original call/disclosure identity,
-including when no child was called. Original receipts, failure flags and source
-bytes remain in the audit chain. Replay uses the same direct-parent identities;
-child-pane ownership continues to use existing Task/scope routing. Older compact
-Turns retain selected result/error access without inventing assistant text.
+The group starts collapsed; expanding it reveals native call rows and their
+argument summaries, failures and approval decisions. Each call's result remains
+collapsed until its own disclosure is clicked. Closing the group hides all its
+nested output. Unrelated direct calls remain outside the group, and MCP arguments
+are not interpreted to invent domain-specific summaries. Script source is not
+rendered as an action. Selected script returns use a separate collapsed `Result`
+entry with their original call identity, including when no child was called;
+they are never attributed to a child tool. Projection preserves the canonical
+ToolResult's text, JSON and media. Empty successful status receipts produce no
+result placeholder. Original receipts, failure flags and source bytes remain in
+the audit chain. Replay uses the same direct-parent identities; child-pane
+ownership continues to use existing Task/scope routing. Older compact Turns
+retain selected result/error access without inventing assistant text.
 
 ## Execution and Tasks
 
