@@ -71,7 +71,8 @@ func TestActiveChildInputPreservesIngressOrderAndPublishesAcceptedInput(t *testi
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	runner := childInputTestRunner(t, "active")
+	terminalRelease := filepath.Join(t.TempDir(), "terminal-release")
+	runner := newChildInputTestRunner(t, "active", map[string]string{"CAELIS_ACP_CHILD_INPUT_TERMINAL_RELEASE": terminalRelease}, controlagents.Authentication{})
 	events := make(chan childInputTestEvent, 8)
 	spawn := childInputSpawnContext(t, "task-active-input", events)
 	anchor, initial, err := runner.Spawn(ctx, spawn, delegation.Request{
@@ -91,6 +92,10 @@ func TestActiveChildInputPreservesIngressOrderAndPublishesAcceptedInput(t *testi
 		Source: session.ActorRef{Kind: session.ActorKindController, ID: "controller-1"},
 		Input:  "guide now",
 	})
+	// Keep the producer active until its independent steering receipt settles.
+	if releaseErr := os.WriteFile(terminalRelease, nil, 0o600); releaseErr != nil {
+		t.Fatal(releaseErr)
+	}
 	if err != nil || result.StartedActivity || result.ActivityID == "" {
 		t.Fatalf("SubmitChildInput() = (%#v, %v), want active steering", result, err)
 	}
@@ -127,7 +132,8 @@ func TestActiveChildInputPreservesStandardACPImageContent(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	runner := childInputTestRunner(t, "image")
+	terminalRelease := filepath.Join(t.TempDir(), "terminal-release")
+	runner := newChildInputTestRunner(t, "image", map[string]string{"CAELIS_ACP_CHILD_INPUT_TERMINAL_RELEASE": terminalRelease}, controlagents.Authentication{})
 	events := make(chan childInputTestEvent, 8)
 	anchor, _, err := runner.Spawn(ctx, childInputSpawnContext(t, "task-image-input", events), delegation.Request{
 		Agent: "helper", Prompt: "initial",
@@ -146,6 +152,10 @@ func TestActiveChildInputPreservesStandardACPImageContent(t *testing.T) {
 			Type: model.ContentPartImage, MimeType: "image/png", Data: "aW1hZ2U=", FileName: "guide.png",
 		}},
 	})
+	// Keep the producer active until its independent steering receipt settles.
+	if releaseErr := os.WriteFile(terminalRelease, nil, 0o600); releaseErr != nil {
+		t.Fatal(releaseErr)
+	}
 	if err != nil || result.StartedActivity {
 		t.Fatalf("image SubmitChildInput() = (%#v, %v), want active steering", result, err)
 	}
@@ -765,7 +775,8 @@ func TestIdlePromptOwnershipMakesImmediateNextInputSteering(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	runner := childInputTestRunner(t, "second-active")
+	terminalRelease := filepath.Join(t.TempDir(), "terminal-release")
+	runner := newChildInputTestRunner(t, "second-active", map[string]string{"CAELIS_ACP_CHILD_INPUT_TERMINAL_RELEASE": terminalRelease}, controlagents.Authentication{})
 	events := make(chan childInputTestEvent, 12)
 	anchor, _, err := runner.Spawn(ctx, childInputSpawnContext(t, "task-prompt-then-steer", events), delegation.Request{
 		Agent: "helper", Prompt: "initial",
@@ -806,6 +817,10 @@ func TestIdlePromptOwnershipMakesImmediateNextInputSteering(t *testing.T) {
 	second, err := submitChildInputTest(runner, events, ctx, agent.ChildInputRequest{
 		Target: run.slot.target, Source: session.ActorRef{Kind: session.ActorKindController, ID: "controller-1"}, Input: "steer two",
 	})
+	// Keep the producer active until its independent steering receipt settles.
+	if releaseErr := os.WriteFile(terminalRelease, nil, 0o600); releaseErr != nil {
+		t.Fatal(releaseErr)
+	}
 	if err != nil || second.StartedActivity || second.ActivityID != first.ActivityID {
 		t.Fatalf("immediate second input = (%#v, %v), want same-activity steering", second, err)
 	}

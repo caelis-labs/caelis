@@ -28,7 +28,7 @@ require (
 	github.com/modelcontextprotocol/go-sdk v1.8.1-0.20260916072216-3785c500b581
 	github.com/rivo/uniseg v0.4.7
 	github.com/tidwall/gjson v1.20.0
-	github.com/tidwall/sjson v1.2.5
+	github.com/tidwall/sjson v1.2.7
 	github.com/yuin/goldmark v1.8.7
 	golang.org/x/image v0.47.0
 	golang.org/x/mod v0.42.0
@@ -37,7 +37,7 @@ require (
 	golang.org/x/sys v0.49.0
 	google.golang.org/genai v1.77.0
 	gopkg.in/yaml.v3 v3.0.1
-	modernc.org/sqlite v1.61.0
+	modernc.org/sqlite v1.61.1
 )
 
 require (
