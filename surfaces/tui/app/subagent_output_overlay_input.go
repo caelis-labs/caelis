@@ -339,8 +339,6 @@ func (m *Model) toggleSubagentOutputRow(token string) bool {
 		}
 		var changed bool
 		switch {
-		case strings.HasPrefix(token, toolDetailsTokenPrefix):
-			return m.openToolDetails(block.BlockID(), strings.TrimPrefix(token, toolDetailsTokenPrefix))
 		case strings.HasPrefix(token, agentMessageFoldTokenPrefix):
 			key := strings.TrimPrefix(token, agentMessageFoldTokenPrefix)
 			for index, event := range visibleNarrativeEvents(block.Events, block.Status) {

@@ -93,7 +93,7 @@ func (m *Model) renderPrimaryDrawer() string {
 	if drawer := m.renderModelAuthDrawer(); drawer != "" {
 		return drawer
 	}
-	if drawer := m.renderTextDrawer(); drawer != "" {
+	if drawer := m.renderBTWDrawer(); drawer != "" {
 		return drawer
 	}
 	return m.renderPlanDrawer()
@@ -153,7 +153,7 @@ func (m *Model) renderPlanDrawer() string {
 	return insetRenderedBlock(strings.Join(lines, "\n"), inputHorizontalInset)
 }
 
-func (m *Model) textDrawerVisibleBudget() int {
+func (m *Model) btwVisibleBudget() int {
 	switch {
 	case m.height <= 18:
 		return 4
@@ -166,7 +166,7 @@ func (m *Model) textDrawerVisibleBudget() int {
 	}
 }
 
-func (m *Model) textDrawerContentWidth() int {
+func (m *Model) btwContentWidth() int {
 	return maxInt(1, m.mainColumnWidth()-(inputHorizontalInset*2))
 }
 
@@ -180,19 +180,19 @@ func (m *Model) renderPendingSubmissionLine(text string) string {
 	return m.theme.HelpHintTextStyle().Render(pendingSubmissionIcon + " " + text)
 }
 
-func (m *Model) textDrawerContentLines() []string {
-	if m == nil || m.activeTextDrawer() == nil || m.width <= 0 {
+func (m *Model) btwContentLines() []string {
+	if m == nil || m.btwOverlay == nil || m.width <= 0 {
 		return nil
 	}
-	contentWidth := m.textDrawerContentWidth()
+	contentWidth := m.btwContentWidth()
 	rawLines := make([]string, 0, 16)
-	question := strings.TrimSpace(m.activeTextDrawer().Question)
-	answer := strings.TrimSpace(m.activeTextDrawer().Answer)
-	if answer == "" && m.activeTextDrawer().Loading {
+	question := strings.TrimSpace(m.btwOverlay.Question)
+	answer := strings.TrimSpace(m.btwOverlay.Answer)
+	if answer == "" && m.btwOverlay.Loading {
 		if pendingLine := m.renderPendingSubmissionLine(question); pendingLine != "" {
 			rawLines = append(rawLines, pendingLine)
 		}
-		return wrapTextDrawerContentLines(rawLines, contentWidth)
+		return wrapBTWContentLines(rawLines, contentWidth)
 	}
 	if question != "" {
 		rawLines = append(rawLines, m.theme.HelpHintTextStyle().Render(question), "")
@@ -205,10 +205,10 @@ func (m *Model) textDrawerContentLines() []string {
 	if len(rawLines) == 0 {
 		return nil
 	}
-	return wrapTextDrawerContentLines(rawLines, contentWidth)
+	return wrapBTWContentLines(rawLines, contentWidth)
 }
 
-func wrapTextDrawerContentLines(rawLines []string, contentWidth int) []string {
+func wrapBTWContentLines(rawLines []string, contentWidth int) []string {
 	lines := make([]string, 0, len(rawLines)*2)
 	for _, line := range rawLines {
 		wrapped := hardWrapDisplayLine(line, contentWidth)
@@ -221,52 +221,52 @@ func wrapTextDrawerContentLines(rawLines []string, contentWidth int) []string {
 	return lines
 }
 
-func (m *Model) textDrawerMaxScroll(total int) int {
-	visible := m.textDrawerVisibleBudget()
+func (m *Model) btwMaxScroll(total int) int {
+	visible := m.btwVisibleBudget()
 	if total <= visible {
 		return 0
 	}
 	return total - visible
 }
 
-func (m *Model) clampTextDrawerScroll(total int) {
-	if m == nil || m.activeTextDrawer() == nil {
+func (m *Model) clampBTWScroll(total int) {
+	if m == nil || m.btwOverlay == nil {
 		return
 	}
-	if m.activeTextDrawer().Scroll < 0 {
-		m.activeTextDrawer().Scroll = 0
+	if m.btwOverlay.Scroll < 0 {
+		m.btwOverlay.Scroll = 0
 	}
-	maxScroll := m.textDrawerMaxScroll(total)
-	if m.activeTextDrawer().Scroll > maxScroll {
-		m.activeTextDrawer().Scroll = maxScroll
+	maxScroll := m.btwMaxScroll(total)
+	if m.btwOverlay.Scroll > maxScroll {
+		m.btwOverlay.Scroll = maxScroll
 	}
 }
 
-func (m *Model) scrollTextDrawer(delta int) {
-	if m == nil || m.activeTextDrawer() == nil || delta == 0 {
+func (m *Model) scrollBTW(delta int) {
+	if m == nil || m.btwOverlay == nil || delta == 0 {
 		return
 	}
-	total := len(m.textDrawerContentLines())
-	m.clampTextDrawerScroll(total)
-	maxScroll := m.textDrawerMaxScroll(total)
-	next := m.activeTextDrawer().Scroll + delta
+	total := len(m.btwContentLines())
+	m.clampBTWScroll(total)
+	maxScroll := m.btwMaxScroll(total)
+	next := m.btwOverlay.Scroll + delta
 	next = max(next, 0)
 	next = min(next, maxScroll)
-	m.activeTextDrawer().Scroll = next
+	m.btwOverlay.Scroll = next
 }
 
-func (m *Model) renderTextDrawer() string {
-	if m == nil || m.activeTextDrawer() == nil || m.width <= 0 {
+func (m *Model) renderBTWDrawer() string {
+	if m == nil || m.btwOverlay == nil || m.width <= 0 {
 		return ""
 	}
-	lines := m.textDrawerContentLines()
-	m.clampTextDrawerScroll(len(lines))
-	start := max(m.activeTextDrawer().Scroll, 0)
-	end := minInt(len(lines), start+m.textDrawerVisibleBudget())
+	lines := m.btwContentLines()
+	m.clampBTWScroll(len(lines))
+	start := max(m.btwOverlay.Scroll, 0)
+	end := minInt(len(lines), start+m.btwVisibleBudget())
 	if start > end {
 		start = end
 	}
-	contentWidth := m.textDrawerContentWidth()
+	contentWidth := m.btwContentWidth()
 	drawerLines := []string{m.theme.SeparatorStyle().Render(strings.Repeat("─", contentWidth))}
 	drawerLines = append(drawerLines, lines[start:end]...)
 	return insetRenderedBlock(strings.Join(drawerLines, "\n"), inputHorizontalInset)

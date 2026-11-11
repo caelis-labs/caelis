@@ -25,7 +25,6 @@ func (m *Model) resetConversationView() {
 	m.participantTurnIDs = nil
 	m.activeParticipantTurnSessionID = ""
 	m.doc.Clear()
-	m.toolDetails = nil
 	m.viewportStyledLines = m.viewportStyledLines[:0]
 	m.viewportPlainLines = m.viewportPlainLines[:0]
 	m.viewportSelectionIndents = m.viewportSelectionIndents[:0]

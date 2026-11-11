@@ -17,8 +17,7 @@ import (
 // or callback messages.
 type OverlayState struct {
 	experimental *experimentalState
-	btwOverlay   *textDrawerState
-	toolDetails  *textDrawerState
+	btwOverlay   *btwOverlayState
 	btwDismissed bool
 
 	sessionPicker      *sessionPickerState
@@ -99,7 +98,7 @@ type OverlayState struct {
 
 // HasActiveOverlay returns true if any overlay is currently visible.
 func (o *OverlayState) HasActiveOverlay() bool {
-	return o.experimental != nil || o.wizardOverlay != nil || o.btwOverlay != nil || o.toolDetails != nil ||
+	return o.experimental != nil || o.wizardOverlay != nil || o.btwOverlay != nil ||
 		o.subagentOverlay != nil ||
 		o.subagentOutputOverlay != nil ||
 		o.activePrompt != nil ||

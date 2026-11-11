@@ -133,5 +133,5 @@ func (m *Model) renderModelAuthDrawer() string {
 			m.theme.HelpHintTextStyle().Render(waitingText),
 		)
 	}
-	return insetRenderedBlock(strings.Join(wrapTextDrawerContentLines(lines, contentWidth), "\n"), inputHorizontalInset)
+	return insetRenderedBlock(strings.Join(wrapBTWContentLines(lines, contentWidth), "\n"), inputHorizontalInset)
 }

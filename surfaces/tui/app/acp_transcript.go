@@ -406,6 +406,9 @@ func styleACPTranscriptHeaderWithMark(
 	}
 	rest := strings.TrimSpace(strings.TrimPrefix(trimmed, "•"))
 	verb, detail, _ := strings.Cut(rest, " ")
+	if rest == "Running script" || rest == "Ran script" {
+		return renderACPTranscriptHeaderMark(ctx, markTone, markDim) + " " + toolActionStyle(ctx, verb).Render(rest)
+	}
 	styled := renderACPTranscriptHeaderMark(ctx, markTone, markDim)
 	if verb != "" {
 		styled += " " + toolActionStyle(ctx, verb).Render(verb)

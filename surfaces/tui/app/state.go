@@ -313,7 +313,7 @@ type planEntryState struct {
 	Status  string
 }
 
-type textDrawerState struct {
+type btwOverlayState struct {
 	Question string
 	Answer   string
 	Loading  bool

@@ -71,7 +71,7 @@ func (d *scriptPTYDriver) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (d *scriptPTYDriver) snapshot(cause string) {
 	d.markViewportStructureDirty()
 	d.syncViewportContent()
-	data, _ := json.MarshalIndent(map[string]any{"stage": d.stage, "cause": cause, "viewport": d.viewportPlainLines, "source_head": os.Getenv("CAELIS_CANDIDATE_HEAD"), "drawer": d.activeTextDrawer()}, "", "  ")
+	data, _ := json.MarshalIndent(map[string]any{"stage": d.stage, "cause": cause, "viewport": d.viewportPlainLines, "source_head": os.Getenv("CAELIS_CANDIDATE_HEAD")}, "", "  ")
 	_ = os.WriteFile(filepath.Join(d.dir, "state.json"), data, 0600)
 	if cause == "stage" {
 		_ = os.WriteFile(filepath.Join(d.dir, fmt.Sprintf("stage-%02d.json", d.stage)), data, 0600)

@@ -98,8 +98,8 @@ failure permits subsequent calls and a final summary while retaining the failed
 receipt and overall error flag. Cancellation, authority, persistence, transport
 and unknown-effect failures still stop the script.
 
-TUI gives each script invocation its own `JS` disclosure, using the existing
-Explored summary, indentation and folding. Actual child calls appear as they
+TUI gives each script invocation its own `Running script` / `Ran script`
+disclosure, using the existing Explored summary, indentation and folding. Actual child calls appear as they
 start; the collapsed summary includes their real names and argument summaries.
 Expanding lists individual calls, with no source, return values or diagnostics in
 the trajectory. Failed calls are red; running calls use the existing activity
@@ -112,15 +112,12 @@ normally completed script has a normal dot. An uncaught exception has a red dot.
 Older records without this observation do not infer script failure from child
 errors. Zero-child scripts still have their own running or terminal entry.
 
-The header's `details` action and expanded tool rows open the existing read-only,
-scrollable drawer; the title and collapsed summary toggle folding. Details are a
-snapshot of the original invocation's input, selected return, diagnostics and
-approval rationale. File inputs retain their recorded reference, not a read of
-current file contents. Details stay separate from BTW output and close with Esc.
-Original receipts, failure flags, media and approval routing remain unchanged.
-Replay uses the same direct-parent identities; child panes use existing Task and
-scope routing. Compact historical Turns retain actual calls and details without
-inventing assistant text.
+Script groups contain only the action header and actual tool-call summaries.
+They have no source, result or diagnostic detail entry, including on failure or
+with no child calls. Expanding lists individual calls without their result
+bodies. Original canonical receipts, IsError, media, approval routing and other
+tools' existing detail capabilities are unchanged. Replay uses the same direct
+parent identities; child panes retain existing Task and scope routing.
 
 ## Execution and Tasks
 

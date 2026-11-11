@@ -1,5 +1,10 @@
 package tuiapp
 
+import (
+	"github.com/charmbracelet/x/ansi"
+	"strings"
+)
+
 // invocationToolParents is a disposable projection of direct canonical ancestry.
 // Narratives and unrelated tools never become members of a script disclosure.
 func invocationToolParents(events []SubagentEvent) map[string]string {
@@ -33,11 +38,11 @@ func renderInvocationToolGroupRows(blockID string, events []SubagentEvent, start
 	key := "tools:" + root.CallID
 	foldToken := acpStableExplorationClickToken(key)
 	tone, dim := acpToolHeaderMark(ctx, root.ScriptCompletion == "failed", root.Done)
-	title := "• JS details"
-	header := renderACPTranscriptHeaderRowMarked(blockID, title, width, ctx, toolDetailsClickToken(root.CallID), tone, dim)
-	header.ClickStartCol = displayColumns("• JS ")
-	header.ClickEndCol = displayColumns(title)
-	header.ClickTokenAlt = foldToken
+	title := "• Running script"
+	if root.Done {
+		title = "• Ran script"
+	}
+	header := renderACPTranscriptHeaderRowMarked(blockID, title, width, ctx, foldToken, tone, dim)
 	rows := []RenderedRow{header}
 	expanded := opts.ExplorationExpanded != nil && opts.ExplorationExpanded(key)
 	if !expanded {
@@ -67,13 +72,21 @@ func renderInvocationToolGroupRows(blockID string, events []SubagentEvent, start
 				summary.ApprovalStatus = review.ApprovalStatus
 			}
 		}
-		for _, row := range renderExplorationToolRowsWithMode(blockID, summary, width, ctx, toolDetailsClickToken(event.CallID), len(rows) == 1, explorationToolDetailLiveSummary) {
+		for _, row := range renderExplorationToolRowsWithMode(blockID, summary, width, ctx, foldToken, len(rows) == 1, explorationToolDetailLiveSummary) {
 			rows = append(rows, styleScriptToolState(row, event, ctx))
 		}
 	}
 	return rows, start, true
 }
 func styleScriptToolState(row RenderedRow, event SubagentEvent, ctx BlockRenderContext) RenderedRow {
+	// Keep the public summary/wrapping; accent only the actual tool name. The
+	// existing styled argument suffix (including approval marks) stays intact.
+	content := strings.TrimLeft(row.Plain, " └")
+	if content == event.Name || strings.HasPrefix(content, event.Name+" ") {
+		prefix := row.Plain[:len(row.Plain)-len(content)]
+		end := displayColumns(prefix) + displayColumns(event.Name)
+		row.Styled = ctx.Theme.TranscriptMetaStyle().Render(prefix) + ctx.Theme.Tokens().Accent.Bold(true).Render(event.Name) + ansi.Cut(row.Styled, end, ansi.StringWidth(row.Styled))
+	}
 	if event.Err {
 		row.Styled = ctx.Theme.ErrorStyle().Render(row.Plain)
 	} else if _, dim := acpToolHeaderMark(ctx, false, event.Done); dim {

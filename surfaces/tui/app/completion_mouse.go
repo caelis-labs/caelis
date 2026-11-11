@@ -30,7 +30,7 @@ type completionMouseState struct {
 }
 
 func (m *Model) completionMouseContext() (completionSnapshot, completionOverlayGeometry, bool) {
-	if m.activePrompt != nil || m.activeTextDrawer() != nil || m.shouldRenderPalette() {
+	if m.activePrompt != nil || m.btwOverlay != nil || m.shouldRenderPalette() {
 		return completionSnapshot{}, completionOverlayGeometry{}, false
 	}
 	return m.activeCompletionGeometry()
