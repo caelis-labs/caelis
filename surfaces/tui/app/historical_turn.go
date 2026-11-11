@@ -192,10 +192,11 @@ func historicalTurnEvents(events []SubagentEvent) []SubagentEvent {
 		return nil
 	}
 	out := make([]SubagentEvent, 0, len(events))
+	parents := invocationToolParents(events)
 	for _, ev := range events {
 		switch ev.Kind {
 		case SEToolCall:
-			if isResultOnlyToolEvent(ev) && ev.Done {
+			if (isScriptToolEvent(ev) && ev.Done) || parents[ev.CallID] != "" {
 				out = append(out, ev)
 			}
 		case SEAssistant, SEUserInput:

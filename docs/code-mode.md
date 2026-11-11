@@ -98,21 +98,26 @@ failure permits subsequent calls and a final summary while retaining the failed
 receipt and overall error flag. Cancellation, authority, persistence, transport
 and unknown-effect failures still stop the script.
 
-TUI folds consecutive script invocations and their directly related tool calls
-under `Called tools`, using the existing Explored disclosure and indentation.
-The group starts collapsed; expanding it reveals native call rows and their
-argument summaries, failures and approval decisions. Each call's result remains
-collapsed until its own disclosure is clicked. Closing the group hides all its
-nested output. Unrelated direct calls remain outside the group, and MCP arguments
-are not interpreted to invent domain-specific summaries. Script source is not
-rendered as an action. Selected script returns use a separate collapsed `Result`
-entry with their original call identity, including when no child was called;
-they are never attributed to a child tool. Projection preserves the canonical
-ToolResult's text, JSON and media. Empty successful status receipts produce no
-result placeholder. Original receipts, failure flags and source bytes remain in
-the audit chain. Replay uses the same direct-parent identities; child-pane
-ownership continues to use existing Task/scope routing. Older compact Turns
-retain selected result/error access without inventing assistant text.
+TUI gives each script invocation its own `Running script` / `Ran script`
+disclosure, using the existing Explored summary, indentation and folding. Actual child calls appear as they
+start; the collapsed summary includes their real names and argument summaries.
+Expanding lists individual calls, with no source, return values or diagnostics in
+the trajectory. Failed calls are red; running calls use the existing activity
+style. Model narration and unrelated direct calls remain outside. MCP arguments
+are not interpreted to invent domain summaries.
+
+The group dot uses the recorded script completion, independently of cumulative
+`IsError` and Task state. A caught child failure remains red on that call while a
+normally completed script has a normal dot. An uncaught exception has a red dot.
+Older records without this observation do not infer script failure from child
+errors. Zero-child scripts still have their own running or terminal entry.
+
+Script groups contain only the action header and actual tool-call summaries.
+They have no source, result or diagnostic detail entry, including on failure or
+with no child calls. Expanding lists individual calls without their result
+bodies. Original canonical receipts, IsError, media, approval routing and other
+tools' existing detail capabilities are unchanged. Replay uses the same direct
+parent identities; child panes retain existing Task and scope routing.
 
 ## Execution and Tasks
 

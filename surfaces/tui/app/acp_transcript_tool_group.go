@@ -1,105 +1,96 @@
 package tuiapp
 
-// invocationToolGroup is a disposable range of canonical direct-parent calls.
-// It owns no lifecycle or membership beyond the current transcript snapshot.
-func invocationToolGroup(events []SubagentEvent, start int) (int, bool) {
-	if start >= len(events) || events[start].Kind != SEToolCall {
-		return start, false
-	}
+import (
+	"github.com/charmbracelet/x/ansi"
+	"strings"
+)
+
+// invocationToolParents is a disposable projection of direct canonical ancestry.
+// Narratives and unrelated tools never become members of a script disclosure.
+func invocationToolParents(events []SubagentEvent) map[string]string {
 	roots := map[string]int{}
-	parents := map[string]string{}
 	for i, ev := range events {
-		if isResultOnlyToolEvent(ev) && ev.CallID != "" {
+		if isScriptToolEvent(ev) && ev.CallID != "" {
 			roots[ev.CallID] = i
 		}
 	}
+	parents := map[string]string{}
 	for i, ev := range events {
 		if root, ok := roots[ev.ParentToolCallID]; ok && root < i && ev.ParentToolName == "js_exec" {
 			parents[ev.CallID] = ev.ParentToolCallID
 		}
 	}
-	end, children := start-1, 0
-	for i := start; i < len(events); i++ {
-		ev := events[i]
-		switch ev.Kind {
-		case SEToolCall:
-			if isResultOnlyToolEvent(ev) {
-				end = i
-				continue
-			}
-			if parents[ev.CallID] == "" {
-				return end, children > 0
-			}
-			children++
-			end = i
-		case SEReasoning:
-			continue
-		case SEApproval:
-			if parents[ev.CallID] == "" {
-				return end, children > 0
-			}
-			end = i
-		default:
-			return end, children > 0
-		}
-	}
-	return end, children > 0
+	return parents
 }
 
 func renderInvocationToolGroupRows(blockID string, events []SubagentEvent, start, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions) ([]RenderedRow, int, bool) {
-	end, ok := invocationToolGroup(events, start)
-	if !ok {
+	root := events[start]
+	if !isScriptToolEvent(root) {
 		return nil, start, false
 	}
-	group := events[start : end+1]
-	firstChild := ""
-	failed, completed := false, true
-	for _, ev := range group {
-		if ev.Kind != SEToolCall {
-			continue
-		}
-		failed, completed = failed || ev.Err, completed && ev.Done
-		if firstChild == "" && !isResultOnlyToolEvent(ev) {
-			firstChild = ev.CallID
+	parents := invocationToolParents(events)
+	var children []SubagentEvent
+	for _, event := range events {
+		if event.Kind == SEToolCall && parents[event.CallID] == root.CallID {
+			children = append(children, event)
 		}
 	}
-	key := "tools:" + firstChild
-	token := acpStableExplorationClickToken(key)
+	key := "tools:" + root.CallID
+	foldToken := acpStableExplorationClickToken(key)
+	tone, dim := acpToolHeaderMark(ctx, root.ScriptCompletion == "failed", root.Done)
+	title := "• Running script"
+	if root.Done {
+		title = "• Ran script"
+	}
+	header := renderACPTranscriptHeaderRowMarked(blockID, title, width, ctx, foldToken, tone, dim)
+	rows := []RenderedRow{header}
 	expanded := opts.ExplorationExpanded != nil && opts.ExplorationExpanded(key)
-	header := "• Called tools"
-	if failed {
-		header += " failed"
-	}
-	tone, dim := acpToolHeaderMark(ctx, failed, completed)
-	rows := []RenderedRow{renderACPTranscriptHeaderRowMarked(blockID, header, width, ctx, token, tone, dim)}
 	if !expanded {
-		return rows, end, true
-	}
-	var result *SubagentEvent
-	flushResult := func() {
-		if result != nil && result.Done {
-			resultRows := renderACPToolResultOnlyRows(blockID, *result, maxInt(8, width-4), ctx, opts)
-			rows = append(rows, toolGroupChildRows(resultRows, ctx, len(rows) == 1)...)
-		}
-		result = nil
-	}
-	for index := 0; index < len(group); index++ {
-		ev := group[index]
-		switch ev.Kind {
-		case SEReasoning:
-			flushResult()
-			rows = append(rows, renderExplorationNarrativeRows(blockID, ev.Text, width, ctx, ctx.Theme.ReasoningStyle(), token, len(rows) == 1)...)
-		case SEToolCall:
-			if isResultOnlyToolEvent(ev) {
-				flushResult()
-				result = &group[index]
-				continue
+		for i := 0; i < len(children); {
+			end := i + 1
+			for end < len(children) && children[end].Name == children[i].Name && children[end].Err == children[i].Err && children[end].Done == children[i].Done {
+				end++
 			}
-			native, consumed := renderACPToolLifecycleRows(blockID, group, index, maxInt(8, width-4), ctx, opts)
-			rows = append(rows, toolGroupChildRows(native, ctx, len(rows) == 1)...)
-			index = consumed
+			display := append([]SubagentEvent(nil), children[i:end]...)
+			for j := range display {
+				display[j].Err = false
+			}
+			lines := toolGroupSummaryRowsWithPrefix(display, width, ctx.Workspace, explorationToolDetailLiveSummary, true, len(rows) == 1)
+			for _, line := range lines {
+				row := StyledPlainClickableRow(blockID, line, styleExplorationSummaryRow(line, ctx), foldToken)
+				rows = append(rows, styleScriptToolState(row, children[i], ctx))
+			}
+			i = end
+		}
+		return rows, start, true
+	}
+	for _, event := range children {
+		summary := event
+		summary.Err = false
+		for _, review := range events {
+			if review.Kind == SEApproval && review.CallID == event.CallID {
+				summary.ApprovalStatus = review.ApprovalStatus
+			}
+		}
+		for _, row := range renderExplorationToolRowsWithMode(blockID, summary, width, ctx, foldToken, len(rows) == 1, explorationToolDetailLiveSummary) {
+			rows = append(rows, styleScriptToolState(row, event, ctx))
 		}
 	}
-	flushResult()
-	return rows, end, true
+	return rows, start, true
+}
+func styleScriptToolState(row RenderedRow, event SubagentEvent, ctx BlockRenderContext) RenderedRow {
+	// Keep the public summary/wrapping; accent only the actual tool name. The
+	// existing styled argument suffix (including approval marks) stays intact.
+	content := strings.TrimLeft(row.Plain, " └")
+	if content == event.Name || strings.HasPrefix(content, event.Name+" ") {
+		prefix := row.Plain[:len(row.Plain)-len(content)]
+		end := displayColumns(prefix) + displayColumns(event.Name)
+		row.Styled = ctx.Theme.TranscriptMetaStyle().Render(prefix) + ctx.Theme.Tokens().Accent.Bold(true).Render(event.Name) + ansi.Cut(row.Styled, end, ansi.StringWidth(row.Styled))
+	}
+	if event.Err {
+		row.Styled = ctx.Theme.ErrorStyle().Render(row.Plain)
+	} else if _, dim := acpToolHeaderMark(ctx, false, event.Done); dim {
+		row.Styled = ctx.Theme.ToolStyle().Faint(true).Render(row.Styled)
+	}
+	return row
 }

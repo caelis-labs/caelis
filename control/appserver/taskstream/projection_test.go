@@ -1,11 +1,15 @@
 package taskstream
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/agent-sdk/task"
+	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/internal/eventmeta"
 	controltaskstream "github.com/caelis-labs/caelis/control/taskstream"
@@ -895,6 +899,26 @@ func TestChildTaskFramePreservesDirectScriptParent(t *testing.T) {
 		}
 		if len(out) != 1 || out[0].ParentTool == nil || out[0].ParentTool.ToolCallID != want || out[0].ScopeID != req.TaskID {
 			t.Fatalf("direct=%v frame=%+v", direct, out)
+		}
+	}
+}
+
+func TestCodeModeTaskStreamProjectsIndependentScriptCompletion(t *testing.T) {
+	for _, kind := range []task.Kind{task.KindCodeMode, task.KindCommand} {
+		for _, completion := range []string{"completed", "failed"} {
+			raw, _ := json.Marshal(tool.Result{IsError: true, Metadata: map[string]any{codemode.MetadataScriptCompletion: completion}})
+			events := commandTaskStreamFrameEvents(taskFrameProjectionRequest{TaskKind: kind, CallID: "script", ToolName: "js_exec"}, controltaskstream.Frame{Closed: true, State: "failed", Text: string(raw)})
+			update := events[0].Update.(eventstream.ToolCallUpdate)
+			value := update.Meta[codemode.MetadataScriptCompletion]
+			if kind == task.KindCodeMode && value != completion {
+				t.Fatalf("lost original completion %v", update.Meta)
+			}
+			if kind != task.KindCodeMode && value != nil {
+				t.Fatal("inferred completion from arbitrary command output")
+			}
+			if update.Status == nil || *update.Status != "failed" {
+				t.Fatal("changed cumulative state")
+			}
 		}
 	}
 }

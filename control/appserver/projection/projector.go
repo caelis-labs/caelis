@@ -923,8 +923,8 @@ func containsProtocolField(fields []string, want string) bool {
 }
 
 // Native orchestration mirrors carry status independently of selected output.
-// Do not turn an empty successful receipt into authored "completed" content.
+// Do not turn an empty settled receipt into authored status content.
 func emptyOrchestratedToolResult(tool *session.EventTool) bool {
-	return tool != nil && tool.Status == "completed" && len(tool.Output) == 0 &&
+	return tool != nil && (tool.Status == "completed" || tool.Status == "failed") && len(tool.Output) == 0 &&
 		(tool.Name == "js_exec" || tool.Parent != nil && tool.Parent.Name == "js_exec")
 }

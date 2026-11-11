@@ -161,6 +161,11 @@ func (t runtimeCodeModeTool) execute(ctx context.Context, call tool.Call, source
 		raw, _ := json.Marshal(map[string]any{"errors": host.failures, "instruction": "Do not replay unknown effects. Reload stale schemas/bindings with tools.search(name)."})
 		result.Content = append(result.Content, model.NewJSONPart(raw))
 	}
+	result.Metadata[codemode.MetadataScriptCompletion] = "completed"
+	if completed.err != nil || host.fatal != nil {
+		result.Metadata[codemode.MetadataScriptCompletion] = "failed"
+	}
+
 	if completed.err != nil {
 		return result, errors.Join(completed.err, host.fatal, host.firstCallError)
 	}

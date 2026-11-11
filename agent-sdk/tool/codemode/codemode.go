@@ -120,6 +120,11 @@ const MetadataCatalog = "code_mode_catalog_v2"
 
 // Guidance is the fixed model-facing SDK contract. Runtime appends its partial
 // catalog hints separately so discovery never changes this instruction slice.
+// MetadataScriptCompletion records whether script execution returned normally.
+// Its "completed"/"failed" value is presentation-only, independent of cumulative
+// IsError, Task state, authorization and durable effect outcomes.
+const MetadataScriptCompletion = "code_mode_script_completion"
+
 const Guidance = `Code Mode SDK: await tools.search(query) returns {tools:[{name,description,input_schema,parallel_safe}],count,truncated}, matching an exact name first, otherwise searching capabilities. It returns complete schemas; reuse valid schemas and bindings. tools.call(name,args) returns a Promise resolving to {parts:[{kind,text?,json?,handle?,mime_type?}]}; Use sequential await by default, including after search. Concurrent calls require every target to advertise parallel_safe:true; do not assume filesystem tools are parallel safe. Follow each schema and preserve required exact strings. Return JSON values: null, booleans, finite numbers, strings, arrays or objects; omit optional undefined fields or use null. No return yields null. Numbers use JS Number precision; use strings for big integers and reply.raw_json for exact original reply JSON. Explicitly return the value or selected/combined parts to deliver text, JSON and attachments. Return original media-part references to select attachments; copying fields does not grant media identity. Host failures reject with an Error whose reply property contains the host reply; local errors may lack reply. Catching an error does not erase failed records. Never blindly replay unknown outcomes. After a stale binding error, refresh if needed and use tools.search(name) again. Native filesystem tools remain directly callable; shell execution stays outside js_exec.`
 
 // Tool is a concrete declaration, retained until Runtime injects its Host.

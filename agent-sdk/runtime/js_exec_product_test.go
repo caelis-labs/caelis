@@ -328,6 +328,9 @@ func TestJSExecYieldReturnsControlAndContinuesOriginalTask(t *testing.T) {
 	for _, e := range events {
 		if e.Tool != nil && e.Tool.ID == "observe-original" && e.Type == session.EventTypeToolResult {
 			observed = e.Tool.Status == "completed"
+			if e.Meta[codemode.MetadataScriptCompletion] != "completed" {
+				t.Fatal("Task observation lost original script completion")
+			}
 		}
 	}
 	if !observed {

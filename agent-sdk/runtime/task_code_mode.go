@@ -136,6 +136,15 @@ func (tm *taskRuntime) startCodeMode(ctx context.Context, owner runtimeCodeModeT
 // The existing Task mutation claim serializes terminal CAS with canonical
 // cursor checkpoints. Observations never hold this claim while waiting.
 func (tm *taskRuntime) finishCodeModeTask(ctx context.Context, task *codeModeTask, result tool.Result, executeErr error) {
+	// Pre-execution failures have no VM settlement observation. Preserve that
+	// failed completion on the same original Task result, without changing its
+	// cumulative error or lifecycle outcome.
+	if executeErr != nil && result.Metadata[codemode.MetadataScriptCompletion] == nil {
+		if result.Metadata == nil {
+			result.Metadata = map[string]any{}
+		}
+		result.Metadata[codemode.MetadataScriptCompletion] = "failed"
+	}
 	raw, marshalErr := json.Marshal(result)
 	executeErr = errors.Join(executeErr, marshalErr)
 	cleanup, stop := context.WithTimeout(context.WithoutCancel(ctx), approvalResolutionRecoveryTimeout)

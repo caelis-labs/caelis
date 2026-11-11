@@ -822,31 +822,3 @@ func mutationLifecycleHeader(ev SubagentEvent, err bool) string {
 		return standardVerbLifecycleHeader(name, args, err)
 	}
 }
-
-// renderACPToolResultOnlyRows keeps selected script output behind its own call
-// disclosure without repeating script source or attributing it to a child.
-func renderACPToolResultOnlyRows(blockID string, ev SubagentEvent, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions) []RenderedRow {
-	text := sanitizeRenderableText(ev.Output)
-	if ev.OutputSynthetic || strings.TrimSpace(text) == "null" {
-		text = ""
-	}
-	if !ev.Err && !renderableTextHasContent(text) {
-		return nil
-	}
-	token := acpToolPanelClickTokenIf(ev.CallID, renderableTextHasContent(text))
-	header := "• Result"
-	if ev.Err {
-		header += " failed"
-	}
-	rows := []RenderedRow{renderACPToolHeaderRow(blockID, header, width, ctx, token, ev.Err, true)}
-	full := opts.ToolPanelFullOutput != nil && opts.ToolPanelFullOutput(ev.CallID)
-	expanded := full || (opts.ToolPanelExpanded != nil && opts.ToolPanelExpanded(ev.CallID))
-	if !expanded || !renderableTextHasContent(text) {
-		return rows
-	}
-	if full {
-		return append(rows, renderACPFullTerminalPanelRows(blockID, ev.CallID, text, width, ctx, ev.Err, token)...)
-	}
-	text = summarizeACPToolPanelText(text, true, maxInt(1, width-4))
-	return append(rows, renderACPToolPanelRows(blockID, ev.CallID, ev.Name, false, text, width, ctx, ev.Err, token, false, opts)...)
-}

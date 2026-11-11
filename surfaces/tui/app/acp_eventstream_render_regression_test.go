@@ -486,7 +486,7 @@ func TestRoutedMCPRendersRealTargetAndArguments(t *testing.T) {
 	}
 }
 
-func TestOrchestrationShowsActualNestedToolsWithoutScriptAction(t *testing.T) {
+func TestScriptActionShowsActualNestedTools(t *testing.T) {
 	m := NewModel(Config{NoColor: true, NoAnimation: true})
 	m.Update(tea.WindowSizeMsg{Width: 120, Height: 32})
 	for _, event := range []*session.Event{
@@ -500,10 +500,10 @@ func TestOrchestrationShowsActualNestedToolsWithoutScriptAction(t *testing.T) {
 	}
 	block := requireMainACPTurnBlockForTest(t, m)
 	ctx := m.blockRenderContext(120)
-	if closed := joinRenderedPlain(block.Render(ctx)); closed != "• Called tools" {
+	if closed := joinRenderedPlain(block.Render(ctx)); !strings.Contains(closed, "• Running script") || !strings.Contains(closed, "maps__route") || !strings.Contains(closed, "北京南站") {
 		t.Fatalf("collapsed script leaked its children: %s", closed)
 	}
-	clickScriptToken(t, m, block, ctx, acpStableExplorationClickToken("tools:nested"))
+	clickScriptToken(t, m, block, ctx, acpStableExplorationClickToken("tools:script"))
 	trace := joinRenderedPlain(block.Render(ctx))
 	for _, want := range []string{"maps__route", "北京南站", "故宫"} {
 		if !strings.Contains(trace, want) {

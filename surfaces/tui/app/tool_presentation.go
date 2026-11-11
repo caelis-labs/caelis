@@ -151,9 +151,8 @@ func surfaceSummaryMetadataKeys(style surfaceToolResultStyle) []string {
 	}
 }
 
-// isResultOnlyToolEvent identifies an orchestration entry whose selected result
-// is visible without repeating its implementation as another tool action.
-// Call identity, status and the original input remain in the event/audit chain.
-func isResultOnlyToolEvent(ev SubagentEvent) bool {
+// isScriptToolEvent identifies the existing script invocation presentation.
+// Original source, output and error semantics remain on its canonical call.
+func isScriptToolEvent(ev SubagentEvent) bool {
 	return ev.Kind == SEToolCall && ev.Name == "js_exec"
 }

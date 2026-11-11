@@ -386,7 +386,7 @@ func explorationContainerExpandedRows(blockID string, events []SubagentEvent, wi
 			rows = append(rows, renderExplorationNarrativeRows(blockID, ev.Text, width, ctx, ctx.Theme.TextStyle(), token, first)...)
 		case SEToolCall:
 			if isExplorationToolEvent(ev) {
-				rows = append(rows, renderExplorationToolRowWithMode(blockID, ev, width, ctx, token, first, mode))
+				rows = append(rows, renderExplorationToolRowsWithMode(blockID, ev, width, ctx, token, first, mode)...)
 			}
 		}
 	}
@@ -603,7 +603,7 @@ func renderExplorationNarrativeRows(blockID string, text string, width int, ctx 
 	return rows
 }
 
-func renderExplorationToolRowWithMode(blockID string, ev SubagentEvent, width int, ctx BlockRenderContext, token string, first bool, mode explorationToolDetailMode) RenderedRow {
+func renderExplorationToolRowsWithMode(blockID string, ev SubagentEvent, width int, ctx BlockRenderContext, token string, first bool, mode explorationToolDetailMode) []RenderedRow {
 	verb := surfaceExplorationVerb(ev.Name, ev.ToolKind, ev.ExplorationVerb)
 	if verb == "" {
 		verb = ev.Name
@@ -611,12 +611,21 @@ func renderExplorationToolRowWithMode(blockID string, ev SubagentEvent, width in
 	detail := explorationToolDetailForDisplay(ev, ctx.Workspace, mode)
 	prefix := explorationChildPrefix(first)
 	detail = truncateTailDisplay(detail, maxInt(16, width-displayColumns(prefix)-displayColumns(verb)-1))
-	plain := strings.TrimSpace(verb + " " + detail)
 	styled := toolActionStyle(ctx, verb).Render(verb)
 	if detail != "" {
 		styled += " " + styleExplorationDetail(detail, verb, ctx)
 	}
-	return toolGroupChildRows([]RenderedRow{StyledPlainClickableRow(blockID, plain, styled, token)}, ctx, first)[0]
+	if ev.ApprovalStatus != "" {
+		_, tag := approvalReviewStatusTag(ctx, ev.ApprovalStatus)
+		styled += " " + tag
+	}
+	var rows []RenderedRow
+	for _, line := range splitStyledPhysicalLines(ansi.Wrap(styled, maxInt(1, width-displayColumns(prefix)), "")) {
+		row := StyledPlainClickableRow(blockID, ansi.Strip(line), line, token)
+		row.PreWrapped = true
+		rows = append(rows, row)
+	}
+	return toolGroupChildRows(rows, ctx, first)
 }
 
 func explorationChildPrefix(first bool) string {
@@ -648,7 +657,7 @@ func isCompactExplorationTool(ev SubagentEvent) bool {
 
 func isExplorationToolEvent(ev SubagentEvent) bool {
 	// A reviewed invocation keeps its own header and decision visible.
-	if ev.Kind != SEToolCall || ev.ApprovalStatus != "" {
+	if ev.Kind != SEToolCall || ev.ApprovalStatus != "" || ev.ParentToolName == "js_exec" {
 		return false
 	}
 	if strings.TrimSpace(ev.CallID) == "" {
@@ -658,10 +667,20 @@ func isExplorationToolEvent(ev SubagentEvent) bool {
 }
 
 func explorationGroupDetailRowsWithWorkspaceMode(events []SubagentEvent, width int, workspace string, mode explorationToolDetailMode) []string {
+	return toolGroupDetailRowsWithWorkspaceMode(events, width, workspace, mode, false)
+}
+
+func toolGroupDetailRowsWithWorkspaceMode(events []SubagentEvent, width int, workspace string, mode explorationToolDetailMode, actualNames bool) []string {
+	return toolGroupSummaryRowsWithPrefix(events, width, workspace, mode, actualNames, true)
+}
+func toolGroupSummaryRowsWithPrefix(events []SubagentEvent, width int, workspace string, mode explorationToolDetailMode, actualNames, first bool) []string {
 	grouped := map[string][]string{}
 	order := make([]string, 0, 4)
 	for _, ev := range events {
 		verb := surfaceExplorationVerb(ev.Name, ev.ToolKind, ev.ExplorationVerb)
+		if verb == "" && actualNames {
+			verb = ev.Name
+		}
 		if verb == "" {
 			continue
 		}
@@ -683,7 +702,7 @@ func explorationGroupDetailRowsWithWorkspaceMode(events []SubagentEvent, width i
 			continue
 		}
 		prefix := "  "
-		if i == 0 {
+		if i == 0 && first {
 			prefix += "└ "
 		} else {
 			prefix += "  "

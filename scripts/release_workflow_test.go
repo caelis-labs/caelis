@@ -403,6 +403,10 @@ func TestScopedQualityFailsClosed(t *testing.T) {
 		"VULN_RESULT: ${{ needs.govulncheck.result }}", "GO_RESULT: ${{ needs.go-quality.result }}",
 		"bash scripts/ci_result.sh",
 		"sudo apt-get install -y bubblewrap", "CAELIS_LINUX_SANDBOX_SMOKE_E2E: '1'",
+		"https://mirror.its.umich.edu/ubuntu jammy main universe",
+		"signed-by=/usr/share/keyrings/ubuntu-archive-keyring.gpg", "timeout-minutes: 5", "timeout 8 getent ahostsv4",
+		"Dir::Etc::sourcelist=$apt_source", "Dir::Etc::sourceparts=-",
+		"APT::Update::Error-Mode=any", "trap 'rm -f",
 		"go test -count=1 -timeout=3m ./agent-sdk/sandbox/bwrap",
 	} {
 		if !strings.Contains(quality, want) {
