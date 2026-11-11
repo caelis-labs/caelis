@@ -136,6 +136,8 @@ func marshalWireValueUnchecked(value any) ([]byte, error) {
 		return marshalWriteRequest(typed, typed.ExpectedRevision)
 	case appserver.CloseSessionRequest:
 		return marshalWriteRequest(typed, typed.ExpectedRevision)
+	case appserver.SessionInterruptRequest:
+		return marshalWriteRequest(typed, typed.ExpectedRevision)
 	case appserver.CompactSessionRequest:
 		return marshalWriteRequest(typed, typed.ExpectedRevision)
 	case appserver.PromptRequest:

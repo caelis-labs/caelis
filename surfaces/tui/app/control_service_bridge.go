@@ -183,7 +183,7 @@ func (s *ProgramSender) beginRunContext(parent context.Context) (context.Context
 
 // markRunAdmitted prevents the local Esc fallback from pretending it stopped
 // an already-addressable Host Turn. From this point onward only Control's
-// exact-target Interrupt may report acceptance; observation remains attached.
+// Interrupt may report acceptance; observation remains attached.
 func (s *ProgramSender) markRunAdmitted(ctx context.Context) {
 	if s == nil || ctx == nil {
 		return
@@ -466,17 +466,9 @@ func ConfigFromControlService(service ControlServices, sender *ProgramSender, ba
 
 	if addressed, ok := service.(interface {
 		InterruptSession(context.Context, string) error
-		SessionID() string
 	}); ok {
 		base.cancelSession = func(sessionID string) bool {
-			if addressed.InterruptSession(ctx, sessionID) == nil {
-				return true
-			}
-			if sender == nil || addressed.SessionID() != sessionID {
-				return false
-			}
-			selected, _ := sender.sessionView()
-			return selected == sessionID && sender.CancelPendingRuns()
+			return addressed.InterruptSession(ctx, sessionID) == nil
 		}
 	}
 	if base.CancelRunning == nil {

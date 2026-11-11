@@ -25,6 +25,9 @@ func (tm *taskRuntime) attachSubagentParticipant(ctx context.Context, activeSess
 	// guarded commit outside it would let stale bindings authorize child input.
 	tm.runtime.participantMu.Lock()
 	defer tm.runtime.participantMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	handle := strings.TrimSpace(task.handle)
 	if handle == "" {
 		var err error

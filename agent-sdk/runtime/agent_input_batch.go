@@ -79,7 +79,7 @@ func (r *Runtime) SubmitAgentInputBatch(
 		if submitParent == nil {
 			return errorcode.New(errorcode.FailedPrecondition, "Main Agent messaging is unavailable")
 		}
-		return r.awaitParticipantInputLocked(ref, sources, func() error { return submitParent(ctx, active, messages) })
+		return r.awaitParticipantInputLocked(ctx, ref, sources, "", func(ctx context.Context) error { return submitParent(ctx, active, messages) })
 	}
 	_, err = r.submitChildInputLocked(ctx, ref, active, agent.ChildInputCommand{Target: target}, session.ActorRef{}, nil, messages)
 	return err

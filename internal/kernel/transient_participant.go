@@ -33,6 +33,16 @@ func (g *Gateway) StartParticipant(ctx context.Context, req StartParticipantRequ
 	if err := g.waitForTurnStart(ctx); err != nil {
 		return BeginTurnResult{}, err
 	}
+	ref, err := g.sessionTarget(req.SessionRef, req.BindingKey)
+	if err != nil {
+		return BeginTurnResult{}, err
+	}
+	g.mu.Lock()
+	blocked := g.sessionTurnAdmissionBlockedLocked(ref.SessionID)
+	g.mu.Unlock()
+	if blocked {
+		return BeginTurnResult{}, turnAdmissionBlockedError()
+	}
 	lifecycle, err := normalizeParticipantLifecycle(req.Lifecycle)
 	if err != nil {
 		return BeginTurnResult{}, err

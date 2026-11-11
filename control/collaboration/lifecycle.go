@@ -3,7 +3,9 @@ package collaboration
 import (
 	"context"
 	"errors"
+	"hash/fnv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -12,6 +14,35 @@ const closedSessionSweepInterval = time.Minute
 var sessionTables = [...]string{
 	"collaboration_mailbox", "collaboration_messages", "collaboration_readers",
 	"collaboration_seen", "collaboration_retention", "collaboration_setups",
+}
+
+func (s *Service) mailLock(id string) *sync.Mutex {
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(id))
+	return &s.mailLocks[h.Sum64()%uint64(len(s.mailLocks))]
+}
+
+// InterruptSession discards pending Agent mail and fails queued user inputs,
+// preserving shared history, reader positions, and sending or terminal receipts.
+// The Host must first revoke old members' input authority in canonical membership
+// and cancel their in-flight Runtime admissions. This method does not revoke
+// membership or prevent new authorized work in the Session.
+func (s *Service) InterruptSession(ctx context.Context, id string) error {
+	lock := s.mailLock(id)
+	lock.Lock()
+	defer lock.Unlock()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err = tx.ExecContext(ctx, `DELETE FROM collaboration_mailbox WHERE session=?`, id); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE collaboration_user_inputs SET state='failed',detail='Session interrupted before delivery',updated=? WHERE session=? AND state='queued'`, s.now().Unix(), id); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // CleanupClosedSession discards retained collaboration data only after the

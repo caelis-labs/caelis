@@ -155,6 +155,21 @@ func (tm *taskRuntime) startSubagentTarget(
 	if err != nil {
 		return taskapi.Snapshot{}, err
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	tm.runtime.participantMu.Lock()
+	ctx, reservation := tm.runtime.reserveParticipantInputLocked(ctx, ref, nil)
+	reservation.taskID = taskID
+	tm.runtime.participantMu.Unlock()
+	defer func() {
+		tm.runtime.participantMu.Lock()
+		tm.runtime.finishParticipantInputLocked(reservation)
+		tm.runtime.participantMu.Unlock()
+	}()
+	if err := ctx.Err(); err != nil {
+		return taskapi.Snapshot{}, err
+	}
 	outcome, err := tm.beginSubagentSpawn(ctx, activeSession, ref, taskID, spawnID, requestDigest, target, req, mode, role, runner)
 	if err != nil || outcome.Terminal {
 		return outcome.Snapshot, err
@@ -164,6 +179,9 @@ func (tm *taskRuntime) startSubagentTarget(
 	var spawnActivity *childTaskActivity
 	spawnInstalled := false
 	if outcome.ShouldSpawn {
+		if err := ctx.Err(); err != nil {
+			return taskapi.Snapshot{}, errors.Join(err, tm.failSubagentSpawnBeforeCreation(ctx, outcome.Entry))
+		}
 		activityID := firstNonEmpty(
 			taskStringValue(outcome.Entry.Metadata[subagentActivityIDMeta]),
 			taskSpecString(outcome.Entry.Spec, subagentActivityIDMeta),
@@ -225,6 +243,10 @@ func (tm *taskRuntime) startSubagentTarget(
 			return taskapi.Snapshot{}, tm.compensateSubagentSpawn(ctx, task, validationErr)
 		}
 		task = newSubagentTaskFromSpawn(ref, taskID, spawnID, requestDigest, target, req, mode, role, handle, runner, anchor, result, outcome.Entry.Revision, tm.runtime.now(), spawnPhasePostSpawn)
+		if task.running {
+			reservation.retainProducerContext = true
+			task.producerContextRelease = reservation.cancel
+		}
 		if taskapi.IsTerminalState(task.state) {
 			// Spawn owns synchronous terminal persistence. Join the gated writer
 			// before installation, retaining its latest gauge for the commit.
@@ -241,7 +263,7 @@ func (tm *taskRuntime) startSubagentTarget(
 		// Keep the exact completed result in the Task fallback. Transient ACP
 		// deltas already went directly to Control's bound output observer.
 		spawnedEntry := task.entrySnapshot(tm.runtime.now())
-		if err := tm.persistSpawnEntry(ctx, spawnedEntry); err != nil {
+		if err := tm.persistSpawnEntry(context.WithoutCancel(ctx), spawnedEntry); err != nil {
 			return taskapi.Snapshot{}, tm.compensateSubagentSpawn(ctx, task, err)
 		}
 		task.revision = spawnedEntry.Revision
@@ -253,10 +275,18 @@ func (tm *taskRuntime) startSubagentTarget(
 	tm.subagents[taskID] = task
 	tm.order[strings.TrimSpace(ref.SessionID)] = append(tm.order[strings.TrimSpace(ref.SessionID)], taskID)
 	tm.mu.Unlock()
-	snapshot, err := tm.advanceSubagentSpawn(ctx, activeSession, task, strings.TrimSpace(req.ParentCall), strings.TrimSpace(req.Prompt))
-	if err != nil {
-		return snapshot, err
+	if err := ctx.Err(); err != nil {
+		task.mu.Lock()
+		task.completionReady = true
+		task.mu.Unlock()
+		if spawnActivity != nil {
+			spawnActivity.markInstalled()
+			spawnInstalled = true
+		}
+		tm.kickSubagentCompletion(taskID)
+		return task.snapshot(), err
 	}
+	snapshot, err := tm.advanceSubagentSpawn(ctx, activeSession, task, strings.TrimSpace(req.ParentCall), strings.TrimSpace(req.Prompt))
 	task.mu.Lock()
 	task.completionReady = true
 	task.mu.Unlock()
@@ -265,7 +295,7 @@ func (tm *taskRuntime) startSubagentTarget(
 		spawnInstalled = true
 	}
 	tm.kickSubagentCompletion(taskID)
-	return snapshot, nil
+	return snapshot, err
 }
 
 func (tm *taskRuntime) beginSubagentSpawn(
@@ -361,6 +391,9 @@ func (tm *taskRuntime) bindSubagentOutput(
 }
 
 func (tm *taskRuntime) resumeExistingSpawn(ctx context.Context, existing *taskapi.Entry, spawnID string, runner subagent.Runner) (spawnBeginOutcome, error) {
+	if taskStringValue(existing.Metadata[subagentCancelPhaseKey]) != "" {
+		return spawnBeginOutcome{Entry: existing, Snapshot: snapshotFromTaskEntry(existing), Terminal: true}, context.Canceled
+	}
 	phase := spawnPhaseOf(existing)
 	switch phase {
 	case spawnPhaseCommitted:
@@ -543,7 +576,7 @@ func newSubagentTaskFromSpawn(
 		agent: agentName, target: target, handle: handle, title: spawn.ToolName + " " + agentName,
 		prompt: strings.TrimSpace(req.Prompt), contentParts: append([]model.ContentPart(nil), req.ContentParts...), mode: strings.TrimSpace(mode),
 		approvalMode: strings.TrimSpace(req.ApprovalMode), createdAt: now, revision: revision,
-		state: taskStateFromDelegation(result.State), running: result.State == delegation.StateRunning, turnSeq: 1,
+		state: taskStateFromDelegation(result.State), running: result.State == delegation.StateRunning, producerLive: true, turnSeq: 1,
 		metadata: map[string]any{
 			"source": firstNonEmpty(strings.TrimSpace(req.Source), "agent_spawn"), "participant_role": string(role),
 			"spawn_status": string(phase), "spawn_identity": spawnID, "spawn_request_digest": requestDigest,
@@ -721,6 +754,9 @@ func (tm *taskRuntime) advanceSubagentSpawn(
 	// Single post_spawn roll-forward: attach (idempotent) + canonical dialogue
 	// (idempotent keys) + one committed mark. No pure marker phases.
 	if err := tm.ensureSubagentParticipantAttached(ctx, activeSession, task, parentCall); err != nil {
+		if ctx.Err() != nil {
+			return task.snapshot(), err
+		}
 		return taskapi.Snapshot{}, tm.compensateSubagentSpawn(ctx, task, err)
 	}
 	if err := tm.appendSideSubagentUserEvent(ctx, task, strings.TrimSpace(prompt)); err != nil {

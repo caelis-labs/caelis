@@ -62,6 +62,9 @@ func (s *Service) EnqueueUserInput(ctx context.Context, id, userID, sessionID, p
 	if _, ok := s.backend.(UserInputBackend); !ok {
 		return UserInputStatus{}, errors.New("user input is unavailable")
 	}
+	lock := s.mailLock(sessionID)
+	lock.Lock()
+	defer lock.Unlock()
 	text = strings.TrimSpace(text)
 	textBytes := 0
 	for _, part := range parts {
@@ -102,8 +105,18 @@ func (s *Service) EnqueueUserInput(ctx context.Context, id, userID, sessionID, p
 	if err != nil {
 		return UserInputStatus{}, err
 	}
-	status, _, err := s.existingUserInput(ctx, id, userID, sessionID, participantID, taskID, text, parts)
-	return status, err
+	// A membership revocation can commit while the insert waits for SQLite.
+	// Reconcile under the same local lock as interrupt and dispatch claims.
+	current, err := s.backend.List(ctx, sessionID)
+	if err != nil || !hasUserInputTarget(current, input) {
+		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), lifecycleQueryTimeout)
+		defer cancel()
+		if finishErr := s.finishUserInput(cleanup, id, "queued", "failed", "Participant unavailable before delivery"); finishErr != nil {
+			return UserInputStatus{}, errors.Join(err, finishErr)
+		}
+	}
+	status, _, receiptErr := s.existingUserInput(ctx, id, userID, sessionID, participantID, taskID, text, parts)
+	return status, errors.Join(err, receiptErr)
 }
 
 // UserInputStatuses returns receipts only for the authorized user and Session.
@@ -196,12 +209,51 @@ func (s *Service) pendingUserInputs(ctx context.Context) ([]UserInput, error) {
 }
 
 func (s *Service) deliverUserInput(ctx context.Context, backend UserInputBackend, input UserInput) error {
+	claimed, err := s.claimUserInput(ctx, input)
+	if err != nil || !claimed {
+		return err
+	}
+	err = backend.DeliverUserInput(ctx, input)
+	if errors.Is(err, agent.ErrChildInputNotReady) {
+		lock := s.mailLock(input.SessionID)
+		lock.Lock()
+		defer lock.Unlock()
+		threads, checkErr := s.backend.List(ctx, input.SessionID)
+		if checkErr != nil || !hasUserInputTarget(threads, input) {
+			return errors.Join(checkErr, s.finishUserInput(ctx, input.ID, "sending", "failed", "Participant unavailable before delivery"))
+		}
+		return s.finishUserInput(ctx, input.ID, "sending", "queued", "")
+	}
+	state, detail := "sent", ""
+	if err != nil {
+		state, detail = "unknown", "Delivery could not be confirmed; input was not retried"
+		switch errorcode.CodeOf(err) {
+		case errorcode.InvalidArgument, errorcode.PermissionDenied, errorcode.NotFound, errorcode.Conflict, errorcode.Unsupported, errorcode.FailedPrecondition:
+			state, detail = "failed", err.Error()
+		}
+	}
+	return s.finishUserInput(ctx, input.ID, "sending", state, detail)
+}
+
+func hasUserInputTarget(threads []Thread, input UserInput) bool {
+	for _, t := range threads {
+		if t.ID == input.TaskID && t.ParticipantID == input.ParticipantID && t.SessionID == input.ChildSessionID && t.Generation == input.Generation {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Service) claimUserInput(ctx context.Context, input UserInput) (bool, error) {
+	lock := s.mailLock(input.SessionID)
+	lock.Lock()
+	defer lock.Unlock()
 	threads, err := s.backend.List(ctx, input.SessionID)
 	if errors.Is(err, ErrSessionClosed) {
-		return s.finishUserInput(ctx, input.ID, "failed", "Session closed before delivery")
+		return false, s.finishUserInput(ctx, input.ID, "queued", "failed", "Session closed before delivery")
 	}
 	if err != nil {
-		return err
+		return false, err
 	}
 	var target *Thread
 	for i := range threads {
@@ -212,41 +264,29 @@ func (s *Service) deliverUserInput(ctx context.Context, backend UserInputBackend
 		}
 	}
 	if target == nil {
-		return s.finishUserInput(ctx, input.ID, "failed", "Participant detached before delivery")
+		return false, s.finishUserInput(ctx, input.ID, "queued", "failed", "Participant detached before delivery")
 	}
 	if target.State == "unknown_outcome" {
-		return s.finishUserInput(ctx, input.ID, "unknown", "Participant execution is unresolved; input was not sent")
+		return false, s.finishUserInput(ctx, input.ID, "queued", "unknown", "Participant execution is unresolved; input was not sent")
 	}
 	if !target.CanDeliver {
-		return nil
+		return false, nil
 	}
 	result, err := s.db.ExecContext(ctx, `UPDATE collaboration_user_inputs SET state='sending',updated=? WHERE id=? AND state='queued'`, s.now().Unix(), input.ID)
 	if err != nil {
-		return err
+		return false, err
 	}
 	n, err := result.RowsAffected()
 	if err != nil || n != 1 {
-		return err
+		return false, err
 	}
-	err = backend.DeliverUserInput(ctx, input)
-	if errors.Is(err, agent.ErrChildInputNotReady) {
-		return s.finishUserInput(ctx, input.ID, "queued", "")
-	}
-	state, detail := "sent", ""
-	if err != nil {
-		state, detail = "unknown", "Delivery could not be confirmed; input was not retried"
-		switch errorcode.CodeOf(err) {
-		case errorcode.InvalidArgument, errorcode.PermissionDenied, errorcode.NotFound, errorcode.Conflict, errorcode.Unsupported, errorcode.FailedPrecondition:
-			state, detail = "failed", err.Error()
-		}
-	}
-	return s.finishUserInput(ctx, input.ID, state, detail)
+	return true, nil
 }
 
-func (s *Service) finishUserInput(ctx context.Context, id, state, detail string) error {
+func (s *Service) finishUserInput(ctx context.Context, id, from, state, detail string) error {
 	finish, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
-	_, err := s.db.ExecContext(finish, `UPDATE collaboration_user_inputs SET state=?,detail=?,updated=? WHERE id=?`, state, detail, s.now().Unix(), id)
+	_, err := s.db.ExecContext(finish, `UPDATE collaboration_user_inputs SET state=?,detail=?,updated=? WHERE id=? AND state=?`, state, detail, s.now().Unix(), id, from)
 	return err
 }
 

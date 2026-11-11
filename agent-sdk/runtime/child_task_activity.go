@@ -180,6 +180,7 @@ func (a *childTaskActivity) openLocked(task *subagentTask) bool {
 		return false
 	}
 	task.turnSeq = a.turnSeq
+	task.producerLive = true
 	task.activityID = a.activityID
 	task.activityGeneration = a.turnSeq
 	task.stdout, task.stderr = "", ""

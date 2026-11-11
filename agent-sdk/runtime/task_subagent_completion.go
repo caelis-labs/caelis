@@ -346,7 +346,20 @@ func (tm *taskRuntime) publishSubagentCompletionNoticeAsync(completion *subagent
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(completion.ctx), subagentCompletionNoticeTimeout)
 	go func() {
 		defer cancel()
-		_ = active.handle.submitRuntimeModelContext(ctx, submission)
+		r := tm.runtime
+		r.participantMu.Lock()
+		defer r.participantMu.Unlock()
+		current, err := r.sessions.Session(ctx, ref)
+		if err != nil {
+			return
+		}
+		binding, attached := participantBinding(current, submission.Actor.ID)
+		if !attached || binding.DelegationID != completion.result.TaskID {
+			return
+		}
+		_ = r.awaitParticipantInputLocked(ctx, ref, []session.ParticipantBinding{binding}, "", func(ctx context.Context) error {
+			return active.handle.submitRuntimeModelContext(ctx, submission)
+		})
 	}()
 }
 

@@ -641,7 +641,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if handled, cmd := m.handleActiveCompletionKey(msg); handled {
 		return m, cmd
 	}
-	if m.turnRunning() && key.Matches(msg, m.keys.Interrupt) {
+	if (m.turnRunning() || m.subagentRosterRunningCount() > 0) && key.Matches(msg, m.keys.Interrupt) {
 		return m.requestRunningInterrupt()
 	}
 	m.clearInputSelection()
@@ -1330,16 +1330,19 @@ func (m *Model) resetComposerAfterOverlayOpen() {
 
 func (m *Model) requestRunningInterrupt() (tea.Model, tea.Cmd) {
 	m.clearInputOverlays()
+	var finishCmd tea.Cmd
 	if m.revokeProvisionalTurnDispatch() {
-		finishCmd := m.finishLiveTurn(time.Now(), true, nil)
-		return m, tea.Batch(
-			finishCmd,
-			m.showHint("submission cancelled", hintOptions{
-				priority:       HintPriorityHigh,
-				clearOnMessage: true,
-				clearAfter:     copyHintDuration,
-			}),
-		)
+		finishCmd = m.finishLiveTurn(time.Now(), true, nil)
+		if m.subagentRosterRunningCount() == 0 {
+			return m, tea.Batch(
+				finishCmd,
+				m.showHint("submission cancelled", hintOptions{
+					priority:       HintPriorityHigh,
+					clearOnMessage: true,
+					clearAfter:     copyHintDuration,
+				}),
+			)
+		}
 	}
 	m.revokeSubmissionDispatchesForTurn(m.liveTurn.generation)
 	if m.cfg.CancelRunning == nil && m.cfg.cancelSession == nil {
@@ -1361,6 +1364,7 @@ func (m *Model) requestRunningInterrupt() (tea.Model, tea.Cmd) {
 	m.runningInterruptRequested = true
 	m.setRunningInterruptActivity()
 	return m, tea.Batch(
+		finishCmd,
 		m.showHint("interrupt requested", hintOptions{
 			priority:       HintPriorityCritical,
 			clearOnMessage: true,

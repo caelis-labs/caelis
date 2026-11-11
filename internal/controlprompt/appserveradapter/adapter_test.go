@@ -90,13 +90,13 @@ func TestSessionClientAdapterRoutesMainTurnWritesAndObservationThroughTypedClien
 		client.steer.Target != target ||
 		client.approval.Target != target ||
 		client.approval.ApprovalRequestID != "approval-1" ||
-		client.cancel.Target != target {
+		client.interrupt.SessionID != "session-1" || client.cancel.Target != (appserver.TurnTarget{}) {
 		t.Fatalf(
-			"typed requests prompt=%#v steer=%#v approval=%#v cancel=%#v",
+			"typed requests prompt=%#v steer=%#v approval=%#v interrupt=%#v",
 			client.prompt,
 			client.steer,
 			client.approval,
-			client.cancel,
+			client.interrupt,
 		)
 	}
 	if _, err := adapter.Submit(context.Background(), controlprompt.Submission{
@@ -177,8 +177,8 @@ func TestSessionClientAdapterInterruptsBlockedMainTurnAdmission(t *testing.T) {
 
 	client.mu.Lock()
 	defer client.mu.Unlock()
-	if client.cancel.Target != target {
-		t.Fatalf("Cancel() after admission = %#v, want formal cancel of %#v", client.cancel.Target, target)
+	if client.interrupt.SessionID != "session-1" || client.cancel.Target != (appserver.TurnTarget{}) {
+		t.Fatalf("Session interrupt after admission = %#v; exact Cancel = %#v", client.interrupt, client.cancel)
 	}
 }
 
@@ -394,8 +394,8 @@ func TestSessionClientAdapterUnknownAdmissionWithTargetKeepsTurnForCancel(t *tes
 	}
 	client.mu.Lock()
 	defer client.mu.Unlock()
-	if client.cancel.Target != target {
-		t.Fatalf("Cancel() = %#v, want proven unknown-admission target", client.cancel.Target)
+	if client.interrupt.SessionID != "session-1" || client.cancel.Target != (appserver.TurnTarget{}) {
+		t.Fatalf("Session interrupt after unknown admission = %#v; exact Cancel = %#v", client.interrupt, client.cancel)
 	}
 }
 
@@ -1124,11 +1124,11 @@ func TestAppServerAdapterReconnectsActiveTurnForSteerAndClonesState(t *testing.T
 		t.Fatal(err)
 	}
 	client.mu.Lock()
-	cancel := client.cancel
+	cancel := client.interrupt
 	client.mu.Unlock()
-	if cancel.Target != target || cancel.ExpectedRevision == nil || *cancel.ExpectedRevision != 7 ||
+	if cancel.SessionID != "session-resumed" || cancel.ExpectedRevision == nil || *cancel.ExpectedRevision != 7 ||
 		cancel.ExpectedControllerEpoch != "epoch-resumed" {
-		t.Fatalf("reconnected cancel = %#v, want exact resumed target and fence", cancel)
+		t.Fatalf("reconnected Session interrupt = %#v, want resumed Session CAS", cancel)
 	}
 
 	if err := resumed.Reconnect.Close(); err != nil {
@@ -2328,6 +2328,7 @@ type sessionClientAdapterTestClient struct {
 	steer               appserver.SteerRequest
 	approval            appserver.ResolveApprovalRequest
 	cancel              appserver.CancelRequest
+	interrupt           appserver.SessionInterruptRequest
 	compact             appserver.CompactSessionRequest
 	create              appserver.CreateSessionRequest
 	promptStarted       chan struct{}
@@ -2393,7 +2394,7 @@ func (t *detachOnlyTargetTurn) Close() error {
 }
 
 func (*sessionClientAdapterTestClient) Initialize(context.Context) (appserver.ServerInfo, error) {
-	return appserver.ServerInfo{}, nil
+	return appserver.ServerInfo{Capabilities: []string{appserver.CapabilitySessionInterrupt}}, nil
 }
 
 func (c *sessionClientAdapterTestClient) ListSessions(context.Context, appserver.ListSessionsRequest) (appserver.SessionList, error) {
@@ -3102,3 +3103,32 @@ func (*sessionClientAdapterTestSubscription) Err() error { return nil }
 var _ appserver.SessionClient = (*sessionClientAdapterTestClient)(nil)
 var _ appserver.ParticipantClient = (*sessionClientAdapterTestParticipantClient)(nil)
 var _ appserver.FeedSubscription = (*sessionClientAdapterTestSubscription)(nil)
+
+func (c *sessionClientAdapterTestClient) InterruptSession(_ context.Context, request appserver.SessionInterruptRequest) (appserver.CommandResult, error) {
+	c.mu.Lock()
+	c.interrupt = request
+	c.cancelIDs = append(c.cancelIDs, request.OperationID)
+	call := len(c.cancelIDs) - 1
+	err, started, release := c.cancelErr, c.cancelStarted, c.cancelRelease
+	var outcome appserver.Outcome
+	if call < len(c.cancelOutcomes) {
+		outcome = c.cancelOutcomes[call]
+	}
+	if call < len(c.cancelErrs) {
+		err = c.cancelErrs[call]
+	}
+	c.mu.Unlock()
+	if started != nil {
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+	}
+	if release != nil {
+		<-release
+	}
+	if err == nil && outcome == "" {
+		outcome = appserver.OutcomeCommitted
+	}
+	return appserver.CommandResult{OperationID: request.OperationID, Outcome: outcome}, err
+}

@@ -65,6 +65,9 @@ type Message struct {
 // recipient's work to complete. Deliver admits the complete ordered, nonempty
 // batch for one recipient as one prompt or steering operation. It must not
 // split the batch into separate Turns or retry an uncertain dispatch.
+// List must exclude members whose input authority was permanently revoked.
+// Deliver must recheck sender and recipient authority at Runtime admission,
+// including admissions already in flight when membership was revoked.
 type Backend interface {
 	List(context.Context, string) ([]Thread, error)
 	Deliver(context.Context, string, []Message) error
@@ -73,6 +76,7 @@ type Backend interface {
 // Service owns the persistent pending mailbox and process-bound credentials.
 type Service struct {
 	readLocks   [64]sync.Mutex
+	mailLocks   [64]sync.Mutex
 	db          *sql.DB
 	backend     Backend
 	mu          sync.Mutex
@@ -144,6 +148,9 @@ func (s *Service) List(ctx context.Context, i Identity) ([]Thread, error) { retu
 
 // Send appends once. Repeating a call intentionally sends another message.
 func (s *Service) Send(ctx context.Context, i Identity, to, text, replyTo string) (Message, error) {
+	lock := s.mailLock(i.Session)
+	lock.Lock()
+	defer lock.Unlock()
 	threads, err := s.members(ctx, i)
 	if err != nil {
 		return Message{}, err
@@ -193,10 +200,24 @@ func (s *Service) Send(ctx context.Context, i Identity, to, text, replyTo string
 	if err = tx.Commit(); err != nil {
 		return m, err
 	}
-	// A close may have raced membership validation and an earlier cleanup.
-	// Rechecking after insertion prevents that cleanup from stranding this row.
-	if _, err := s.backend.List(ctx, i.Session); errors.Is(err, ErrSessionClosed) {
+	// Membership revocation may race the insert. Keep claims excluded until
+	// this immutable sender has been rechecked and any late mail removed.
+	current, err := s.members(ctx, i)
+	if errors.Is(err, ErrSessionClosed) {
 		return m, errors.Join(err, s.purgeClosedSession(context.WithoutCancel(ctx), i.Session))
+	}
+	if err == nil {
+		var now string
+		now, err = readerInstance(current, i.Member)
+		if err == nil && now != instance {
+			err = errors.New("participant instance changed before mail admission")
+		}
+	}
+	if err != nil {
+		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), lifecycleQueryTimeout)
+		defer cancel()
+		_, cleanupErr := s.db.ExecContext(cleanup, `DELETE FROM collaboration_mailbox WHERE session=? AND body=?`, i.Session, string(body))
+		return m, errors.Join(err, cleanupErr)
 	}
 	return m, nil
 }
@@ -390,10 +411,13 @@ func (s *Service) pendingRecipients(ctx context.Context) ([]Identity, error) {
 	return targets, nil
 }
 
-// claimRecipient holds the read lock only while consuming the local mailbox.
+// claimRecipient holds mailbox and read locks only while consuming local mail.
 // Never hold it across remote admission: the recipient may need to finish a
 // ReceiveMessages/SendMessage tool before reaching the input boundary.
 func (s *Service) claimRecipient(ctx context.Context, i Identity) ([]Message, string, error) {
+	mailLock := s.mailLock(i.Session)
+	mailLock.Lock()
+	defer mailLock.Unlock()
 	lock := s.readerLock(i)
 	lock.Lock()
 	defer lock.Unlock()

@@ -45,6 +45,11 @@ func (s *CommandService) CreateSession(ctx context.Context, principal Principal,
 func (s *CommandService) CloseSession(ctx context.Context, principal Principal, req CloseSessionRequest) (CommandResult, error) {
 	return s.execute(ctx, principal, ActionSessionClose, req.WriteBase, req.SessionID, req)
 }
+
+// InterruptSession records a Session-scoped interrupt through the operation ledger.
+func (s *CommandService) InterruptSession(ctx context.Context, principal Principal, req SessionInterruptRequest) (CommandResult, error) {
+	return s.execute(ctx, principal, ActionSessionInterrupt, req.WriteBase, req.SessionID, req)
+}
 func (s *CommandService) CompactSession(ctx context.Context, principal Principal, req CompactSessionRequest) (CommandResult, error) {
 	return s.execute(ctx, principal, ActionSessionCompact, req.WriteBase, req.SessionID, req)
 }
@@ -372,6 +377,13 @@ func validateCommandRequest(action Action, request any) error {
 		}
 		if err := validatePromptContent("steer", typed.Input, typed.ContentParts); err != nil {
 			return err
+		}
+	case SessionInterruptRequest:
+		if err := requireSession(typed.SessionID); err != nil {
+			return err
+		}
+		if typed.ExpectedRevision == nil {
+			return errors.New("controlclient: session interrupt requires expected_revision")
 		}
 	case CancelRequest:
 		return requireSessionAndTurn(typed.SessionID, typed.Target)

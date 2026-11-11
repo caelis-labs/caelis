@@ -38,13 +38,14 @@ func TestProductionRequestAndResponseJSONConformsToOpenAPI(t *testing.T) {
 		{Type: model.ContentPartImage, MimeType: "image/png", Data: "aW1n", FileName: "shot.png"},
 	}
 	requests := map[string]any{
-		"CreateSessionRequest":   appserver.CreateSessionRequest{WriteBase: base, PreferredSessionID: "session-1", WorkspaceKey: "workspace-1", CWD: "/tmp/workspace", Title: "Session", Metadata: map[string]any{"source": "test"}},
-		"CloseSessionRequest":    appserver.CloseSessionRequest{WriteBase: base},
-		"PromptRequest":          appserver.PromptRequest{WriteBase: base, Input: "hello", DisplayInput: "hello", ContentParts: contentParts},
-		"SteerRequest":           appserver.SteerRequest{WriteBase: base, Target: target, ContentParts: contentParts},
-		"CancelRequest":          appserver.CancelRequest{WriteBase: base, Target: target, Reason: "stop"},
-		"ResolveApprovalRequest": appserver.ResolveApprovalRequest{WriteBase: base, Target: target, ApprovalRequestID: "approval-1", Outcome: "selected", OptionID: string(acpsdk.PermissionOptionKindAllowOnce), Approved: true},
-		"SessionModeRequest":     appserver.SessionModeRequest{WriteBase: base, Mode: "manual"},
+		"CreateSessionRequest":    appserver.CreateSessionRequest{WriteBase: base, PreferredSessionID: "session-1", WorkspaceKey: "workspace-1", CWD: "/tmp/workspace", Title: "Session", Metadata: map[string]any{"source": "test"}},
+		"CloseSessionRequest":     appserver.CloseSessionRequest{WriteBase: base},
+		"SessionInterruptRequest": appserver.SessionInterruptRequest{WriteBase: base, Reason: "stop"},
+		"PromptRequest":           appserver.PromptRequest{WriteBase: base, Input: "hello", DisplayInput: "hello", ContentParts: contentParts},
+		"SteerRequest":            appserver.SteerRequest{WriteBase: base, Target: target, ContentParts: contentParts},
+		"CancelRequest":           appserver.CancelRequest{WriteBase: base, Target: target, Reason: "stop"},
+		"ResolveApprovalRequest":  appserver.ResolveApprovalRequest{WriteBase: base, Target: target, ApprovalRequestID: "approval-1", Outcome: "selected", OptionID: string(acpsdk.PermissionOptionKindAllowOnce), Approved: true},
+		"SessionModeRequest":      appserver.SessionModeRequest{WriteBase: base, Mode: "manual"},
 		"SessionModelRequest": appserver.SessionModelRequest{
 			WriteBase: base, Model: "mimo", ReasoningEffort: "high",
 		},

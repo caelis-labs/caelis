@@ -59,6 +59,11 @@ func (s *TaskStore) put(ctx context.Context, entry *taskapi.Entry, expected *uin
 
 	var out *taskapi.Entry
 	err := s.store.withRootWriteLockContext(ctx, func() error {
+		if guard.Purpose == session.ControlMutationPurposeSubagentCancellation {
+			if err := s.validateDetachedSubagentLifecycle(entry, expected, guard.Purpose); err != nil {
+				return err
+			}
+		}
 		doc, err := s.store.readDocumentForRef(entry.Session)
 		if err == nil {
 			if err := authorizeDocumentMutation(&doc, guard); err != nil {
@@ -73,7 +78,7 @@ func (s *TaskStore) put(ctx context.Context, entry *taskapi.Entry, expected *uin
 			if !errors.Is(err, session.ErrSessionNotFound) || !taskMutationMayUseDetachedControlStore(guard) {
 				return err
 			}
-			if taskMutationIsDetachedSubagentLifecycle(guard) {
+			if taskMutationIsDetachedSubagentLifecycle(guard) && guard.Purpose != session.ControlMutationPurposeSubagentCancellation {
 				if err := s.validateDetachedSubagentLifecycle(entry, expected, guard.Purpose); err != nil {
 					return err
 				}
@@ -97,7 +102,7 @@ func taskMutationMayUseDetachedControlStore(guard session.MutationGuard) bool {
 
 func taskMutationIsDetachedSubagentLifecycle(guard session.MutationGuard) bool {
 	return guard.Authority == session.MutationAuthorityControl &&
-		(guard.Purpose == session.ControlMutationPurposeSubagentCompletion || guard.Purpose == session.ControlMutationPurposeSubagentActivity) &&
+		(guard.Purpose == session.ControlMutationPurposeSubagentCompletion || guard.Purpose == session.ControlMutationPurposeSubagentActivity || guard.Purpose == session.ControlMutationPurposeSubagentCancellation) &&
 		session.ValidateControlMutationGuard(guard) == nil
 }
 
@@ -119,6 +124,9 @@ func (s *TaskStore) validateDetachedSubagentLifecycle(entry *taskapi.Entry, expe
 		return &taskapi.RevisionConflictError{
 			TaskID: entry.TaskID, Expected: *expected, Actual: current.Revision,
 		}
+	}
+	if purpose == session.ControlMutationPurposeSubagentCancellation {
+		return validateSubagentCancellation(current, entry)
 	}
 	if purpose == session.ControlMutationPurposeSubagentActivity {
 		activity, _ := entry.Metadata["child_activity_id"].(string)

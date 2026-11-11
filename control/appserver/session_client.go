@@ -22,6 +22,7 @@ type SessionClient interface {
 	ListSessions(context.Context, ListSessionsRequest) (SessionList, error)
 	CreateSession(context.Context, CreateSessionRequest) (CommandResult, error)
 	CloseSession(context.Context, CloseSessionRequest) (CommandResult, error)
+	InterruptSession(context.Context, SessionInterruptRequest) (CommandResult, error)
 	CompactSession(context.Context, CompactSessionRequest) (CommandResult, error)
 	InspectSession(context.Context, StateRequest) (SessionState, error)
 	Reconnect(context.Context, ReconnectRequest) (ReconnectResult, error)
@@ -60,7 +61,7 @@ func (c *boundSessionClient) Initialize(ctx context.Context) (ServerInfo, error)
 		EnvelopeVersion: EnvelopeVersion,
 		APIVersion:      HTTPAPIVersion,
 		ServerID:        ServerIdentity,
-		Capabilities:    append(RequiredManagedHostCapabilities(), CapabilityExecutionConfiguration, CapabilityApprovalSubjects, CapabilityDisplayReplacements),
+		Capabilities:    append(RequiredManagedHostCapabilities(), CapabilityExecutionConfiguration, CapabilityApprovalSubjects, CapabilityDisplayReplacements, CapabilitySessionInterrupt),
 		Transports:      []string{"embedded"},
 	}
 	if SupportsConversationInteractions(c.service) {
@@ -84,6 +85,10 @@ func (c *boundSessionClient) CreateSession(ctx context.Context, request CreateSe
 
 func (c *boundSessionClient) CloseSession(ctx context.Context, request CloseSessionRequest) (CommandResult, error) {
 	return c.service.CloseSession(ctx, c.boundPrincipal(), request)
+}
+
+func (c *boundSessionClient) InterruptSession(ctx context.Context, request SessionInterruptRequest) (CommandResult, error) {
+	return c.service.InterruptSession(ctx, c.boundPrincipal(), request)
 }
 
 func (c *boundSessionClient) CompactSession(ctx context.Context, request CompactSessionRequest) (CommandResult, error) {

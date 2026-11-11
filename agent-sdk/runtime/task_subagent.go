@@ -511,7 +511,7 @@ func (tm *taskRuntime) hasActiveSubagentTask(entry *taskapi.Entry) bool {
 	}
 	task.mu.Lock()
 	defer task.mu.Unlock()
-	return task.running
+	return task.running && task.producerLive || task.pendingInput != nil && !task.pendingInput.settled.Load()
 }
 
 func interruptedSubagentEntry(entry *taskapi.Entry, reason string) *taskapi.Entry {
@@ -657,6 +657,10 @@ func (t *subagentTask) applyResult(result delegation.Result) {
 	result = delegation.CloneResult(result)
 	t.state = taskStateFromDelegation(result.State)
 	t.running = result.State == delegation.StateRunning
+	if !t.running && t.producerContextRelease != nil {
+		t.producerContextRelease()
+		t.producerContextRelease = nil
+	}
 	if t.result == nil {
 		t.result = map[string]any{}
 	}

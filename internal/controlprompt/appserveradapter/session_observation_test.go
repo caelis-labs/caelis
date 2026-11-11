@@ -116,13 +116,13 @@ func TestSessionInterruptRejectsQueuedInputFromPreviousView(t *testing.T) {
 	if err := adapter.InterruptSession(context.Background(), "a"); err == nil {
 		t.Fatal("old view interrupt was accepted")
 	}
-	if client.cancel.Target != (appserver.TurnTarget{}) {
+	if client.interrupt.SessionID != "" {
 		t.Fatal("old view interrupted the newly selected Session")
 	}
 	if err := adapter.InterruptSession(context.Background(), "b"); err != nil {
 		t.Fatal(err)
 	}
-	if client.cancel.Target.TurnID != "t" {
+	if client.interrupt.SessionID != "b" || client.cancel.Target != (appserver.TurnTarget{}) {
 		t.Fatal("current view failed to explicitly interrupt")
 	}
 }

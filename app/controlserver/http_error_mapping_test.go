@@ -51,6 +51,7 @@ func TestEveryHandlerUsesTypedHTTPErrorMappingGolden(t *testing.T) {
 		{name: "prompt", method: http.MethodPost, path: "/sessions/session-1/prompt", body: `{"input":"hello"}`, command: true},
 		{name: "steer", method: http.MethodPost, path: "/sessions/session-1/steer", body: `{"input":"continue","target":{"handle_id":"handle-1","run_id":"run-1","turn_id":"turn-1"}}`, command: true},
 		{name: "cancel", method: http.MethodPost, path: "/sessions/session-1/cancel", body: `{"target":{"handle_id":"handle-1","run_id":"run-1","turn_id":"turn-1"}}`, command: true},
+		{name: "session interrupt", method: http.MethodPost, path: "/sessions/session-1/interrupt", body: `{"expected_revision":"1","expected_controller_epoch":"epoch-1"}`, command: true},
 		{name: "resolve approval", method: http.MethodPost, path: "/sessions/session-1/approvals/approval-1/resolve", body: `{"outcome":"selected","option_id":"allow_once","approved":true,"target":{"handle_id":"handle-1","run_id":"run-1","turn_id":"turn-1"}}`, command: true},
 	}
 	type mapping struct {
@@ -215,4 +216,8 @@ func TestHTTPErrorDetailKeepsInternalCausesPrivate(t *testing.T) {
 			t.Fatalf("error response = %d %s", recorder.Code, recorder.Body.String())
 		}
 	}
+}
+
+func (s *errorMappingService) InterruptSession(context.Context, appserver.Principal, appserver.SessionInterruptRequest) (appserver.CommandResult, error) {
+	return s.result()
 }

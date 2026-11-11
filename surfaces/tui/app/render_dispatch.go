@@ -661,12 +661,12 @@ func singleLineErrorText(text string) string {
 }
 
 func (m *Model) handleRunningInterruptResultMsg(msg RunningInterruptResultMsg) (tea.Model, tea.Cmd) {
-	if msg.Accepted {
+	if msg.Accepted && m.turnRunning() {
 		return m, nil
 	}
 	m.runningInterruptRequested = false
 	m.clearRunningInterruptActivity()
-	if !m.turnRunning() {
+	if msg.Accepted || (!m.turnRunning() && m.subagentRosterRunningCount() == 0) {
 		return m, nil
 	}
 	return m, m.showHint("interrupt request did not reach the running task", hintOptions{
