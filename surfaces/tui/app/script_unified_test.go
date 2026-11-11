@@ -180,3 +180,18 @@ func TestUnifiedJSUsesExploredSummaryColumns(t *testing.T) {
 		}
 	}
 }
+
+func TestUnifiedJSDetailHitRangeMatchesRenderedLabel(t *testing.T) {
+	m, b := groupedCanonicalModel(t, unifiedScriptEvents("completed"), "main", false)
+	ctx := m.blockRenderContext(60)
+	rows := b.Render(ctx)
+	row := rows[0]
+	wrapped := m.wrapRenderedRowsForViewport(b, rows, 60, ctx)
+	bound := wrapped.clickBounds[0]
+	if got := sliceByDisplayColumns(wrapped.plainLines[0], bound.start, bound.end); got != "details" {
+		t.Fatalf("detail hit range %q on %q", got, row.Plain)
+	}
+	if row.ClickToken != "tool_details:script1" || row.ClickTokenAlt != acpStableExplorationClickToken("tools:script1") {
+		t.Fatal("detail and folding targets conflated")
+	}
+}

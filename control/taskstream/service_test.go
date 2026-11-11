@@ -445,4 +445,8 @@ func TestCodeModeFallbackPreservesOriginalResultBytes(t *testing.T) {
 	if len(snapshot.Frames) != 1 || snapshot.Frames[0].Text != raw || snapshot.State != "failed" {
 		t.Fatalf("original result/lifecycle lost: %+v", snapshot)
 	}
+	delete(entry.Result, "tool_result_json")
+	if got := terminalCommandFallbackSnapshot(entry).FinalText; got != "cumulative error" {
+		t.Fatalf("missing receipt erased existing diagnostic: %q", got)
+	}
 }

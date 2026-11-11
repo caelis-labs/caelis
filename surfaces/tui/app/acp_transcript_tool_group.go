@@ -33,9 +33,9 @@ func renderInvocationToolGroupRows(blockID string, events []SubagentEvent, start
 	key := "tools:" + root.CallID
 	foldToken := acpStableExplorationClickToken(key)
 	tone, dim := acpToolHeaderMark(ctx, root.ScriptCompletion == "failed", root.Done)
-	title := "• JS  details"
+	title := "• JS details"
 	header := renderACPTranscriptHeaderRowMarked(blockID, title, width, ctx, toolDetailsClickToken(root.CallID), tone, dim)
-	header.ClickStartCol = displayColumns("• JS  ")
+	header.ClickStartCol = displayColumns("• JS ")
 	header.ClickEndCol = displayColumns(title)
 	header.ClickTokenAlt = foldToken
 	rows := []RenderedRow{header}

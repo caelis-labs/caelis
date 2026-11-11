@@ -532,7 +532,9 @@ func terminalCommandFallbackSnapshot(entry *task.Entry) fallbackSnapshot {
 	// bytes on fallback, as on the producer stream, including its read-only
 	// completion observation. Task state remains the lifecycle authority.
 	if entry.Kind == task.KindCodeMode {
-		text = mapString(entry.Result, "tool_result_json")
+		if raw := mapString(entry.Result, "tool_result_json"); raw != "" {
+			text = raw
+		}
 	}
 	var exitCode *int
 	if code, ok := integerValue(entry.Result["exit_code"]); ok {
