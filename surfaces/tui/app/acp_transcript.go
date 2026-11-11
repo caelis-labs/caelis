@@ -63,53 +63,24 @@ func renderACPTranscriptRows(blockID string, events []SubagentEvent, status stri
 	if opts.StableExplorationPrep != nil {
 		opts.StableExplorationPrep(visible, status)
 	}
+	parents := invocationToolParents(visible)
 	rows := make([]RenderedRow, 0, len(visible)+2)
 	hasContent := false
 	pendingSemanticGap := false
 	lastGroup := acpTranscriptGroupNone
-	// Result-only tools are updated in place at their original start position.
-	// Keep their selected output after the tool run, before its next narrative.
-	var selectedResults []RenderedRow
-	flushSelected := func() {
-		if len(selectedResults) == 0 {
-			return
-		}
-		rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupTool, false)
-		rows = appendACPTranscriptSemanticRows(rows, blockID, selectedResults, &pendingSemanticGap)
-		selectedResults = nil
-		hasContent, lastGroup = true, acpTranscriptGroupTool
-	}
 	for i := 0; i < len(visible); i++ {
 		ev := visible[i]
+		if ev.Kind == SEToolCall && parents[ev.CallID] != "" {
+			continue
+		}
 		if groupRows, end, ok := renderInvocationToolGroupRows(blockID, visible, i, width, ctx, opts); ok {
-			flushSelected()
-			rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupTool, false)
-			rows = appendACPTranscriptSemanticRows(rows, blockID, groupRows, &pendingSemanticGap)
-			hasContent, lastGroup = true, acpTranscriptGroupTool
+			if len(groupRows) > 0 {
+				rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupTool, false)
+				rows = appendACPTranscriptSemanticRows(rows, blockID, groupRows, &pendingSemanticGap)
+				hasContent, lastGroup = true, acpTranscriptGroupTool
+			}
 			i = end
 			continue
-		}
-		if isResultOnlyToolEvent(ev) {
-			if !ev.Done {
-				continue
-			}
-			latest := true
-			for _, later := range visible[i+1:] {
-				if later.Kind == SEToolCall && later.CallID == ev.CallID && later.Done {
-					latest = false
-					break
-				}
-			}
-			if !latest {
-				continue
-			}
-			resultRows := renderACPToolResultOnlyRows(blockID, ev, width, ctx, opts)
-			selectedResults = append(selectedResults, resultRows...)
-			continue
-		}
-
-		if ev.Kind != SEToolCall {
-			flushSelected()
 		}
 		if ev.Kind == SESemanticBoundary {
 			if hasContent {
@@ -221,7 +192,6 @@ func renderACPTranscriptRows(blockID string, events []SubagentEvent, status stri
 			}
 		}
 	}
-	flushSelected()
 	if !hasContent {
 		placeholder := strings.TrimSpace(opts.EmptyPlaceholder)
 		if placeholder == "" && opts.UseStatusPlaceholder {

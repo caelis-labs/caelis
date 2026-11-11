@@ -98,18 +98,19 @@ failure permits subsequent calls and a final summary while retaining the failed
 receipt and overall error flag. Cancellation, authority, persistence, transport
 and unknown-effect failures still stop the script.
 
-TUI folds consecutive script invocations and their directly related tool calls
-under `Called tools`, using the existing Explored disclosure and indentation.
-The group starts collapsed; expanding it reveals native call rows and their
-argument summaries, failures and approval decisions. Each call's result remains
-collapsed until its own disclosure is clicked. Closing the group hides all its
-nested output. Unrelated direct calls remain outside the group, and MCP arguments
-are not interpreted to invent domain-specific summaries. Script source is not
-rendered as an action. Selected script returns use a separate collapsed `Result`
-entry with their original call identity, including when no child was called;
-they are never attributed to a child tool. Projection preserves the canonical
-ToolResult's text, JSON and media. Empty successful status receipts produce no
-result placeholder. Original receipts, failure flags and source bytes remain in
+TUI gives each script invocation its own `Called tools` disclosure, using the
+existing Explored summary, indentation and click routing. The collapsed summary
+updates as actual child calls arrive, showing their tool names and argument
+summaries. Expanding shows each call separately; its result or approval rationale
+opens on that call. Model narration stays outside these groups. Unrelated direct
+calls remain outside, and MCP arguments are not interpreted to invent domain
+summaries. Script source, counters and aggregate failure labels are not displayed.
+Original child errors and approval decisions remain on their calls. Nonempty
+selected script returns are clickable within the expanded group, attributed to
+the original invocation. With no child calls, a running, result or error entry
+uses that invocation's own disclosure. Empty successful status receipts produce
+no result placeholder. Projection preserves the canonical text, JSON and media.
+Original receipts, failure flags and source bytes remain in
 the audit chain. Replay uses the same direct-parent identities; child-pane
 ownership continues to use existing Task/scope routing. Older compact Turns
 retain selected result/error access without inventing assistant text.

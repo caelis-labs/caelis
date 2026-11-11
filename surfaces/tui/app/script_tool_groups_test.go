@@ -132,13 +132,13 @@ func TestConsecutiveScriptToolsHaveOwnSharedDisclosure(t *testing.T) {
 						return strings.Join(m.renderViewportRowCacheFromRows(b, ctx, viewportRowCache{}, b.Render(ctx)).plainLines, "\n")
 					}
 					before := render()
-					if before != "• Called tools" {
+					if strings.Count(before, "• Called tools") != 2 || !strings.Contains(before, "script1Read") || !strings.Contains(before, "script2Read") || !strings.Contains(before, "BETWEEN_SCRIPT_STEPS") {
 						t.Fatalf("collapsed group leaked content: %s", before)
 					}
-					groupToken := acpStableExplorationClickToken("tools:script1Read")
+					groupToken := acpStableExplorationClickToken("tools:script1")
 					clickScriptToken(t, m, b, ctx, groupToken)
 					trace := render()
-					for _, want := range []string{"script1Read", "script2Read", "desktop_world", "Result", "BETWEEN_SCRIPT_STEPS"} {
+					for _, want := range []string{"script1Read", "script2Read", "desktop_world", "BETWEEN_SCRIPT_STEPS"} {
 						if !strings.Contains(trace, want) {
 							t.Fatalf("missing %s: %s", want, trace)
 						}
@@ -151,8 +151,9 @@ func TestConsecutiveScriptToolsHaveOwnSharedDisclosure(t *testing.T) {
 					if width == 100 && !strings.Contains(trace, "return await app.look();") {
 						t.Fatal("raw domain argument was replaced: " + trace)
 					}
+					clickScriptToken(t, m, b, ctx, acpStableExplorationClickToken("tools:script2"))
 					clickScriptToken(t, m, b, ctx, acpToolPanelClickToken("script2Read"))
-					if text := render(); !strings.Contains(text, "VISIBLE_CHILD_RESULT") || strings.Contains(text, "FINAL_SUMMARY") {
+					if text := render(); !strings.Contains(text, "VISIBLE_CHILD_RESULT") {
 						t.Fatalf("first child click did not reveal only its result: %s", text)
 					}
 					clickScriptToken(t, m, b, ctx, acpToolPanelClickToken("script2"))
@@ -164,6 +165,7 @@ func TestConsecutiveScriptToolsHaveOwnSharedDisclosure(t *testing.T) {
 							t.Fatalf("wide row: %q", row.Plain)
 						}
 					}
+					clickScriptToken(t, m, b, ctx, acpStableExplorationClickToken("tools:script2"))
 					clickScriptToken(t, m, b, ctx, groupToken)
 					if after := render(); after != before {
 						t.Fatalf("group collapse left nested output: %s", after)
@@ -211,7 +213,7 @@ func TestInvocationGroupsKeepDirectToolsAndLiteralCompleted(t *testing.T) {
 				if ev.Output != "completed" {
 					t.Fatal("literal direct receipt changed")
 				}
-				if _, ok := invocationToolGroup(raw, i); ok {
+				if invocationToolParents(raw)[raw[i].CallID] != "" {
 					t.Fatal("direct tool admitted to script group")
 				}
 				if scope == "child" && ev.ParentToolName != "StartThread" {
@@ -244,7 +246,7 @@ func TestInvocationGroupsPreserveFailuresAndRealTargetReview(t *testing.T) {
 	block.UpdateToolWithMeta("script1Read", "Read", "bad.txt", "bad.txt: not found", true, true, ToolUpdateMeta{ParentToolCallID: "script1", ParentToolName: "js_exec"})
 	block.AddApprovalReviewEvent("script1desktop_world__exec", "desktop_world__exec", "raw command", "denied", "REAL_TARGET_DENIAL")
 	ctx := m.blockRenderContext(100)
-	clickScriptToken(t, m, b, ctx, acpStableExplorationClickToken("tools:script1Read"))
+	clickScriptToken(t, m, b, ctx, acpStableExplorationClickToken("tools:script1"))
 	text := joinRenderedPlain(block.Render(ctx))
 	if strings.Contains(text, "REAL_TARGET_DENIAL") || strings.Contains(text, "bad.txt: not found") {
 		t.Fatal("unclicked failure result leaked: " + text)
@@ -252,7 +254,7 @@ func TestInvocationGroupsPreserveFailuresAndRealTargetReview(t *testing.T) {
 	clickScriptToken(t, m, b, ctx, acpToolPanelClickToken("script1desktop_world__exec"))
 	text = joinRenderedPlain(block.Render(ctx))
 	t.Log(text)
-	if strings.Count(text, "REAL_TARGET_DENIAL") != 1 || !strings.Contains(text, "[denied]") || !strings.Contains(text, "Read bad.txt failed") || strings.Contains(text, "[failed]") {
+	if strings.Count(text, "REAL_TARGET_DENIAL") != 1 || !strings.Contains(text, "[denied]") || !strings.Contains(text, "Read script1Read.txt") || strings.Contains(text, "failed") || strings.Contains(text, "[failed]") {
 		t.Fatal(text)
 	}
 	// Late status cannot reopen a terminal child or resurrect script input.
@@ -275,9 +277,9 @@ func TestInvocationGroupRetainsReasoningBeforeZeroChildScript(t *testing.T) {
 				}
 				m, b := groupedCanonicalModel(t, events, scope, replay)
 				ctx := m.blockRenderContext(60)
-				clickScriptToken(t, m, b, ctx, acpStableExplorationClickToken("tools:script1Read"))
+				clickScriptToken(t, m, b, ctx, acpStableExplorationClickToken("tools:script1"))
 				text := joinRenderedPlain(b.Render(ctx))
-				if !strings.Contains(text, "BETWEEN_SCRIPT_STEPS") || !strings.Contains(text, "Result") || strings.Contains(text, "FINAL_SUMMARY") {
+				if !strings.Contains(text, "BETWEEN_SCRIPT_STEPS") || !strings.Contains(text, "Ran script") || strings.Contains(text, "Result") {
 					t.Fatal(text)
 				}
 			})
@@ -325,9 +327,9 @@ func TestScriptSearchDisplaysOnlyOriginalResultOnClick(t *testing.T) {
 			t.Run(fmt.Sprintf("%s/replay%v", scope, replay), func(t *testing.T) {
 				m, b := groupedCanonicalModel(t, events, scope, replay)
 				ctx := m.blockRenderContext(60)
-				clickScriptToken(t, m, b, ctx, acpStableExplorationClickToken("tools:search"))
+				clickScriptToken(t, m, b, ctx, acpStableExplorationClickToken("tools:script"))
 				trace := joinRenderedPlain(b.Render(ctx))
-				if !strings.Contains(trace, "tool_search") || !strings.Contains(trace, "github pull request get diff") || strings.Contains(trace, "completed") || strings.Contains(trace, selected) {
+				if !strings.Contains(trace, "tool_search") || !strings.Contains(trace, "github pull request get diff") || strings.Contains(trace, "completed") {
 					t.Fatalf("search trace contains fabricated or expanded output: %s", trace)
 				}
 				clickScriptToken(t, m, b, ctx, acpToolPanelClickToken("script"))
