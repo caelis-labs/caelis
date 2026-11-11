@@ -104,7 +104,18 @@ jobs:
         run: go test -tags=e2e -timeout=2m ./eval -run '^TestACPSDKReleaseCompatibility$' -count=1 -v
 
       - name: Install bubblewrap
-        run: sudo apt-get update && sudo apt-get install -y bubblewrap
+        run: |
+          # Use job-local signed Ubuntu sources instead of the hosted image's
+          # mirror+file path, which can retain an unavailable Azure mirror.
+          apt_source="$(mktemp)"
+          trap 'rm -f "$apt_source"' EXIT
+          printf '%s\n' \
+            'deb https://archive.ubuntu.com/ubuntu jammy main universe' \
+            'deb https://archive.ubuntu.com/ubuntu jammy-updates main universe' \
+            'deb https://security.ubuntu.com/ubuntu jammy-security main universe' > "$apt_source"
+          apt_source_options=(-o "Dir::Etc::sourcelist=$apt_source" -o "Dir::Etc::sourceparts=-")
+          sudo apt-get update "${apt_source_options[@]}" -o APT::Update::Error-Mode=any
+          sudo apt-get install -y bubblewrap "${apt_source_options[@]}"
 
       - name: Native Linux sandbox execution tests
         env:
