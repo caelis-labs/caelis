@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.78.1](https://github.com/caelis-labs/caelis/compare/v0.78.0...v0.78.1) (2026-11-11)
+
+
+### Bug Fixes
+
+* **tui:** show each script through shared tool disclosure ([#208](https://github.com/caelis-labs/caelis/issues/208)) ([6d23524](https://github.com/caelis-labs/caelis/commit/6d235241768ac6c1b0ce2f317cf666b85b234164))
+
 ## [0.78.0](https://github.com/caelis-labs/caelis/compare/v0.77.1...v0.78.0) (2026-11-11)
 
 Adds Goja Code Mode for tool discovery and execution, with the official Desktop World 0.4.2 package bundled on macOS arm64 and Windows x64.
