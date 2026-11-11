@@ -84,14 +84,25 @@ func TestCodeModeProjectsOriginalSelectedResult(t *testing.T) {
 }
 
 func TestCodeModeStatusOnlyResultHasNoAuthoredContent(t *testing.T) {
-	event := &session.Event{Type: session.EventTypeToolResult, Tool: &session.EventTool{ID: "script", Name: "js_exec", Status: "completed"}}
-	updates, err := ProjectEvent(event)
-	if err != nil || len(updates) != 1 {
-		t.Fatalf("updates = %#v, error = %v", updates, err)
-	}
-	update, ok := updates[0].(eventstream.ToolCallUpdate)
-	if !ok || len(update.Content) != 0 {
-		t.Fatalf("status-only result invented content: %#v", updates[0])
+	for _, status := range []string{"completed", "failed"} {
+		for _, literal := range []bool{false, true} {
+			event := &session.Event{Type: session.EventTypeToolResult, Tool: &session.EventTool{ID: "script", Name: "js_exec", Status: status}}
+			if literal {
+				event.Tool.Content = []session.EventToolContent{{Type: "content", Text: status}}
+			}
+			updates, err := ProjectEvent(event)
+			if err != nil || len(updates) != 1 {
+				t.Fatalf("%#v: %v", updates, err)
+			}
+			update, ok := updates[0].(eventstream.ToolCallUpdate)
+			want := 0
+			if literal {
+				want = 1
+			}
+			if !ok || len(update.Content) != want || update.Status == nil || *update.Status != status {
+				t.Fatalf("status=%s literal=%v: %#v", status, literal, updates[0])
+			}
+		}
 	}
 }
 

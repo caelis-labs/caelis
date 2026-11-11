@@ -54,3 +54,34 @@ func TestScriptSummaryKeepsNarrativeOutsideAndNoFailureLabels(t *testing.T) {
 		t.Fatal(text)
 	}
 }
+
+func TestScriptSummaryDoesNotInventAnEmptyFailureResult(t *testing.T) {
+	for _, literal := range []bool{false, true} {
+		events := consecutiveScriptEvents()[:6]
+		events[2].Tool.Status = "failed"
+		events[2].Tool.Content = []session.EventToolContent{{Type: "content", Text: "original child failure"}}
+		events[5].Tool.Status = "failed"
+		if literal {
+			events[5].Tool.Content = []session.EventToolContent{{Type: "content", Text: "failed"}}
+		}
+		m, b := groupedCanonicalModel(t, events, "main", true)
+		ctx := m.blockRenderContext(60)
+		clickScriptToken(t, m, b, ctx, acpStableExplorationClickToken("tools:script1"))
+		text := joinRenderedPlain(b.Render(ctx))
+		hasStatusLine := false
+		for _, line := range strings.Split(text, "\n") {
+			hasStatusLine = hasStatusLine || strings.TrimSpace(line) == "failed"
+		}
+		if hasStatusLine != literal {
+			t.Fatalf("literal=%v: unexpected synthetic status/result\n%s", literal, text)
+		}
+		root := b.(*MainACPTurnBlock).Events[0]
+		if !root.Err {
+			t.Fatal("original failure flag lost")
+		}
+		clickScriptToken(t, m, b, ctx, acpToolPanelClickToken("script1Read"))
+		if !strings.Contains(joinRenderedPlain(b.Render(ctx)), "original child failure") {
+			t.Fatal("actual child error lost")
+		}
+	}
+}
