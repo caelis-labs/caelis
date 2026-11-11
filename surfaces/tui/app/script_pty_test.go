@@ -24,7 +24,7 @@ func TestScriptGroupPTY(t *testing.T) {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	cfg := Config{AppName: "CAELIS candidate", Version: os.Getenv("CAELIS_CANDIDATE_HEAD"), Workspace: "/tmp/owned-script-fixture", ModelAlias: "fixture/no-model", NoAnimation: true}
+	cfg := Config{AppName: "CAELIS candidate", Version: os.Getenv("CAELIS_CANDIDATE_HEAD"), Workspace: "/tmp/owned-script-fixture", ModelAlias: "fixture/no-model"}
 	m := NewModel(cfg)
 	m.beginLiveTurn(SubmissionModeDefault, false, time.Now())
 	driver := &scriptPTYDriver{Model: m, dir: dir, stages: scriptPTYStages()}
