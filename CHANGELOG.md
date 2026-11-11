@@ -2,7 +2,7 @@
 
 ## [0.78.0](https://github.com/caelis-labs/caelis/compare/v0.77.1...v0.78.0) (2026-11-11)
 
-Adds Goja Code Mode for tool discovery and execution, with the official Desktop World 0.4.2 package bundled on macOS arm64 and Windows x64. Explicit Session packages and enabled global DTW packages still override the builtin fallback.
+Adds Goja Code Mode for tool discovery and execution, with the official Desktop World 0.4.2 package bundled on macOS arm64 and Windows x64.
 
 When upgrading from name-only MCP discovery, search again with `tools.search` in Code Mode or `tool_search` without it before calling tools. Historical Sessions and original receipts remain readable; upgrades do not replay unknown effects.
 
