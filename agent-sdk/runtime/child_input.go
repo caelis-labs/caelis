@@ -95,7 +95,7 @@ func (r *Runtime) SubmitParticipantInput(
 		if submitParent == nil {
 			return errorcode.New(errorcode.FailedPrecondition, "Main Agent messaging is unavailable")
 		}
-		return r.awaitParticipantInputLocked(ref, []session.ParticipantBinding{*sourceBinding}, func() error { return submitParent(ctx, active, source, input) })
+		return r.awaitParticipantInputLocked(ctx, ref, []session.ParticipantBinding{*sourceBinding}, "", func(ctx context.Context) error { return submitParent(ctx, active, source, input) })
 	}
 	if r.tasks == nil {
 		return errorcode.New(errorcode.FailedPrecondition, "Target Agent messaging is unavailable")
@@ -152,7 +152,7 @@ func (r *Runtime) submitChildInputLocked(
 		}
 	}
 	var result agent.ChildInputResult
-	err = r.awaitParticipantInputLocked(ref, pins, func() error {
+	err = r.awaitParticipantInputLocked(ctx, ref, pins, task.ref.TaskID, func(ctx context.Context) error {
 		release, err := task.inputAdmissions.acquire(ctx, ref)
 		if err != nil {
 			return err

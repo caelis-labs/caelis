@@ -115,7 +115,7 @@ func TestSessionObservationRefreshesEpochForLaterTurn(t *testing.T) {
 	if err := adapter.InterruptSession(context.Background(), "s"); err != nil {
 		t.Fatal(err)
 	}
-	for name, base := range map[string]appserver.WriteBase{"approval": client.approval.WriteBase, "steer": client.steer.WriteBase, "cancel": client.cancel.WriteBase} {
+	for name, base := range map[string]appserver.WriteBase{"approval": client.approval.WriteBase, "steer": client.steer.WriteBase, "interrupt": client.interrupt.WriteBase} {
 		if base.ExpectedControllerEpoch != "e2" || base.ExpectedRevision == nil || *base.ExpectedRevision != 20 {
 			t.Errorf("%s wrote stale controller state: %#v", name, base)
 		}

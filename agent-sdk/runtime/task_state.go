@@ -210,9 +210,13 @@ type subagentTask struct {
 	mu              sync.Mutex
 	state           taskapi.State
 	running         bool
-	result          map[string]any
-	metadata        map[string]any
-	contextUsage    *taskapi.ContextUsageRecord
+	// producerLive is process-local ownership, never restored from a Task record.
+	producerLive bool
+	// producerContextRelease cleans up the Spawn context only after terminal proof.
+	producerContextRelease context.CancelFunc
+	result                 map[string]any
+	metadata               map[string]any
+	contextUsage           *taskapi.ContextUsageRecord
 
 	stdout       string
 	stderr       string

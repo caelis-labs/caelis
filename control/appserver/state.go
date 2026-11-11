@@ -32,6 +32,8 @@ const (
 	// CapabilityDisplayReplacements exposes complete narrative replacement and
 	// explicit empty tool-display patches without changing canonical input.
 	CapabilityDisplayReplacements = "display-replacements-v1"
+	// CapabilitySessionInterrupt permits CAS-fenced cancellation of all Session work.
+	CapabilitySessionInterrupt = "session-interrupt-v1"
 )
 
 var ErrStateRevisionConflict = errorcode.New(errorcode.Conflict, "controlclient: session state changed during bootstrap")

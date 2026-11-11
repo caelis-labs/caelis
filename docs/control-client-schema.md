@@ -30,6 +30,19 @@ readers may discard unknown properties; these are different from vendor objects
 whose additional keys are data and must survive round trips. TypeScript types
 permit the marked objects' additional properties without changing declared types.
 
+## Session interrupt
+
+`session-interrupt-v1` permits `POST /sessions/{session_id}/interrupt` to interrupt
+the current Turn and the Session's managed delegation subtree, including while
+the main Turn is idle.
+`SessionInterruptRequest` requires the observed `expected_revision`; a changed
+Session rejects the interrupt. An optional `expected_controller_epoch` also
+fences a controller change when the observed Session has an epoch. The
+operation ledger retains its receipt. Acceptance acknowledges cancellation
+requests; producer terminal state is observed separately. The Session remains
+open for later user input. `POST /sessions/{session_id}/cancel` retains its exact
+Turn target requirement.
+
 ## Peer versions
 
 The unified Session protocol is the current baseline. Pre-unification Application

@@ -157,7 +157,7 @@ func (tm *taskRuntime) persistSubagentCancelPhase(
 		entry.Metadata["running"] = true
 		normalizeSubagentEntryResult(entry, reason)
 	}
-	if err := tm.persistSpawnEntry(ctx, entry); err != nil {
+	if err := tm.persistSubagentCancellationEntry(ctx, entry); err != nil {
 		return false, err
 	}
 	task.mu.Lock()
@@ -184,4 +184,53 @@ func (tm *taskRuntime) persistSubagentCancelPhase(
 	task.metadata[subagentCancelTurnSeqKey] = cancelTurnSeq
 	task.mu.Unlock()
 	return true, nil
+}
+
+// Cancellation changes only its existing Task journal and outcome. Rehydration
+// may normalize legacy spawn fields in memory; that does not authorize rewriting
+// the immutable canonical specification or unrelated metadata.
+func (tm *taskRuntime) persistSubagentCancellationEntry(ctx context.Context, desired *taskapi.Entry) error {
+	if session.RuntimeMutationGuard(ctx).Purpose != session.ControlMutationPurposeSubagentCancellation {
+		return tm.persistSpawnEntry(ctx, desired)
+	}
+	current, err := tm.store.Get(ctx, desired.TaskID)
+	if err != nil {
+		return err
+	}
+	if current == nil {
+		return fmt.Errorf("subagent cancellation requires an existing Task")
+	}
+	if current.Revision != desired.Revision {
+		return &taskapi.RevisionConflictError{TaskID: desired.TaskID, Expected: desired.Revision, Actual: current.Revision}
+	}
+	next := taskapi.CloneEntry(current)
+	next.State, next.Running = desired.State, desired.Running
+	next.SupportsInput, next.SupportsCancel = desired.SupportsInput, desired.SupportsCancel
+	next.Result = session.CloneState(desired.Result)
+	next.FailureDiagnostic, next.UpdatedAt = desired.FailureDiagnostic, desired.UpdatedAt
+	if next.Spec == nil {
+		next.Spec = map[string]any{}
+	}
+	if next.Metadata == nil {
+		next.Metadata = map[string]any{}
+	}
+	for _, key := range []string{subagentCancelPhaseKey, subagentCancelTurnSeqKey} {
+		if value, exists := desired.Spec[key]; exists {
+			next.Spec[key] = value
+		} else {
+			delete(next.Spec, key)
+		}
+	}
+	for _, key := range []string{subagentCancelPhaseKey, subagentCancelTurnSeqKey, "state", "running", "interrupted_reason"} {
+		if value, exists := desired.Metadata[key]; exists {
+			next.Metadata[key] = value
+		} else {
+			delete(next.Metadata, key)
+		}
+	}
+	if err := tm.persistSpawnEntry(ctx, next); err != nil {
+		return err
+	}
+	*desired = *next
+	return nil
 }

@@ -1032,3 +1032,7 @@ func (s *sessionTurnTestSubscription) Err() error {
 
 var _ SessionClient = (*sessionTurnTestClient)(nil)
 var _ FeedSubscription = (*sessionTurnTestSubscription)(nil)
+
+func (*sessionTurnTestClient) InterruptSession(context.Context, SessionInterruptRequest) (CommandResult, error) {
+	return CommandResult{}, errors.New("unexpected InterruptSession")
+}

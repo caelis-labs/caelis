@@ -12,9 +12,12 @@ import (
 )
 
 // BlockSessionTurnAdmission temporarily prevents new main or participant
-// Turns for one Session while Control reconciles an execution-affecting
-// configuration mutation. Existing Turns remain visible so the caller can
-// interrupt them and wait for their durable execution fence to be released.
+// Turns and active-Turn submissions for one Session. Control holds the block
+// while reconciling execution-affecting configuration or cancelling Session
+// work. Closing admission and reserving a new active Turn share g.mu, so a
+// caller can safely select and cancel the active Turn after acquiring the block.
+// Existing producers retain their active slots and durable execution fences
+// until they stop; releasing the block does not wait for or release producers.
 func (g *Gateway) BlockSessionTurnAdmission(ref session.SessionRef) (func(), error) {
 	if g == nil {
 		return nil, &Error{Kind: KindInternal, Code: CodeInternal, UserVisible: true, Message: "gateway: gateway is not configured"}
@@ -250,6 +253,10 @@ func (g *Gateway) SubmitActiveTurn(ctx context.Context, req SubmitActiveTurnRequ
 		}
 	}
 	g.mu.Lock()
+	if g.sessionTurnAdmissionBlockedLocked(sessionID) {
+		g.mu.Unlock()
+		return turnAdmissionBlockedError()
+	}
 	handle := g.active[sessionID]
 	coordinator := g.approvals[sessionID]
 	if handle != nil && !submissionMatchesHandle(req, handle) {

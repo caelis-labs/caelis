@@ -54,6 +54,7 @@ type Action string
 const (
 	ActionSessionCreate             Action = "session.create"
 	ActionSessionClose              Action = "session.close"
+	ActionSessionInterrupt          Action = "session.interrupt"
 	ActionSessionCompact            Action = "session.compact"
 	ActionSessionMCPRefresh         Action = "session.mcp.refresh"
 	ActionPrompt                    Action = "turn.prompt"
@@ -182,6 +183,16 @@ type CreateSessionRequest struct {
 }
 
 type CloseSessionRequest struct{ WriteBase }
+
+// SessionInterruptRequest interrupts the addressed Session's current Turn and
+// managed delegation subtree, including when its main Turn is idle.
+// ExpectedRevision is required; ExpectedControllerEpoch adds a controller fence
+// when supplied. Acceptance acknowledges cancellation requests; producer terminal
+// state is observed separately. The Session remains open for subsequent input.
+type SessionInterruptRequest struct {
+	WriteBase
+	Reason string `json:"reason,omitempty"`
+}
 
 // CompactSessionRequest starts one manual model-backed checkpoint for the
 // addressed Session Runtime.
@@ -352,6 +363,7 @@ type CommandRecoveryBackend interface {
 type CommandClient interface {
 	CreateSession(context.Context, Principal, CreateSessionRequest) (CommandResult, error)
 	CloseSession(context.Context, Principal, CloseSessionRequest) (CommandResult, error)
+	InterruptSession(context.Context, Principal, SessionInterruptRequest) (CommandResult, error)
 	CompactSession(context.Context, Principal, CompactSessionRequest) (CommandResult, error)
 	Prompt(context.Context, Principal, PromptRequest) (CommandResult, error)
 	Steer(context.Context, Principal, SteerRequest) (CommandResult, error)

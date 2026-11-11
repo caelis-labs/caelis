@@ -124,6 +124,13 @@ func TestEveryWriteCommandAuthorizationIdempotencyCASAndUnknownOutcome(t *testin
 			}
 			return s.Steer(context.Background(), p, SteerRequest{WriteBase: WriteBase{OperationID: op, SessionID: "session-1", ExpectedRevision: &revision, ExpectedControllerEpoch: epoch}, Target: target, Input: input})
 		}},
+		{"session interrupt", ActionSessionInterrupt, func(s *CommandService, p Principal, op string, changed bool) (CommandResult, error) {
+			reason := "stop"
+			if changed {
+				reason = "changed"
+			}
+			return s.InterruptSession(context.Background(), p, SessionInterruptRequest{WriteBase: WriteBase{OperationID: op, SessionID: "session-1", ExpectedRevision: &revision, ExpectedControllerEpoch: epoch}, Reason: reason})
+		}},
 		{"cancel", ActionCancel, func(s *CommandService, p Principal, op string, changed bool) (CommandResult, error) {
 			reason := "stop"
 			if changed {
@@ -1129,6 +1136,8 @@ func operationIDOf(request any) string {
 	case CreateSessionRequest:
 		return req.OperationID
 	case CloseSessionRequest:
+		return req.OperationID
+	case SessionInterruptRequest:
 		return req.OperationID
 	case RefreshMCPToolsRequest:
 		return req.OperationID

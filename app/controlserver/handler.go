@@ -140,6 +140,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST "+apiPrefix+"/sessions/{session_id}/prompt", s.prompt)
 	s.mux.HandleFunc("POST "+apiPrefix+"/sessions/{session_id}/steer", s.steer)
 	s.mux.HandleFunc("POST "+apiPrefix+"/sessions/{session_id}/cancel", s.cancel)
+	s.mux.HandleFunc("POST "+apiPrefix+"/sessions/{session_id}/interrupt", s.interruptSession)
 	s.mux.HandleFunc("POST "+apiPrefix+"/sessions/{session_id}/approvals/{approval_request_id}/resolve", s.resolveApproval)
 	s.mux.HandleFunc("GET "+apiPrefix+"/sessions/{session_id}/tasks", s.listTasks)
 	s.mux.HandleFunc("GET "+apiPrefix+"/sessions/{session_id}/tasks/watch", s.watchTaskDirectory)

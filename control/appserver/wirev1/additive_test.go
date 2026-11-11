@@ -162,6 +162,7 @@ func TestAdditiveControlCommandFamilies(t *testing.T) {
 		appserver.WorkspaceTrustRequest{},
 
 		appserver.CloseSessionRequest{WriteBase: base},
+		appserver.SessionInterruptRequest{WriteBase: base, Reason: "stop"},
 		appserver.CompactSessionRequest{WriteBase: base},
 		appserver.PromptRequest{WriteBase: base, Input: "original"},
 		appserver.SteerRequest{WriteBase: base, Target: target, Input: "original"},

@@ -446,6 +446,15 @@ func (c *Client) Steer(ctx context.Context, request appserver.SteerRequest) (app
 	return c.doCommand(ctx, http.MethodPost, "/sessions/"+sessionID+"/steer", request.WriteBase, request)
 }
 
+// InterruptSession cancels Session-scoped work without closing the Session.
+func (c *Client) InterruptSession(ctx context.Context, request appserver.SessionInterruptRequest) (appserver.CommandResult, error) {
+	sessionID, err := remotePathID("session", request.SessionID)
+	if err != nil {
+		return appserver.CommandResult{}, err
+	}
+	return c.doCommand(ctx, http.MethodPost, "/sessions/"+sessionID+"/interrupt", request.WriteBase, request)
+}
+
 func (c *Client) Cancel(ctx context.Context, request appserver.CancelRequest) (appserver.CommandResult, error) {
 	sessionID, err := remotePathID("session", request.SessionID)
 	if err != nil {

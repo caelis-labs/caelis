@@ -101,6 +101,7 @@ type Runtime struct {
 	participantMu           sync.Mutex
 	participantPromptClaims map[participantPromptKey]struct{}
 	participantInputPins    map[participantPromptKey]int
+	participantInputs       map[*participantInputReservation]struct{}
 	mu                      sync.RWMutex
 	runStates               map[string]agent.RunState
 	activeRunners           map[string]activeRun

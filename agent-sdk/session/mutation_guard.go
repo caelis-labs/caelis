@@ -44,6 +44,9 @@ const (
 	// and replaces its latest context gauge without changing that activity's
 	// lifecycle, independently of the parent Turn that admitted the child input.
 	ControlMutationPurposeSubagentActivity ControlMutationPurpose = "subagent_activity"
+	// ControlMutationPurposeSubagentCancellation records a cancellation claim or
+	// reconciliation for an existing child Task without acquiring its parent Turn.
+	ControlMutationPurposeSubagentCancellation ControlMutationPurpose = "subagent_cancellation"
 )
 
 // MutationGuard carries the authority and durable fence for one mutation.
@@ -211,6 +214,7 @@ func ControlMutationMayOverlapRuntimeFence(purpose ControlMutationPurpose) bool 
 		ControlMutationPurposeSystemCommit,
 		ControlMutationPurposeSubagentCompletion,
 		ControlMutationPurposeSubagentActivity,
+		ControlMutationPurposeSubagentCancellation,
 		ControlMutationPurposeTest:
 		return true
 	default:
@@ -231,7 +235,8 @@ func knownControlMutationPurpose(purpose ControlMutationPurpose) bool {
 		ControlMutationPurposeTest,
 		ControlMutationPurposeSystemCommit,
 		ControlMutationPurposeSubagentCompletion,
-		ControlMutationPurposeSubagentActivity:
+		ControlMutationPurposeSubagentActivity,
+		ControlMutationPurposeSubagentCancellation:
 		return true
 	default:
 		return false

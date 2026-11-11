@@ -126,6 +126,9 @@ func (s *controlCommandBackend) ExecuteControlCommand(ctx context.Context, princ
 			}, appserver.NewOutcomeError(appserver.OutcomeRejected, coded)
 		}
 	}
+	if req, ok := request.(appserver.SessionInterruptRequest); ok {
+		return s.interruptSession(ctx, req)
+	}
 	runtimes := s.runtimeRegistry()
 	if runtimes == nil {
 		result, commandErr := s.composition.executeControlCommand(ctx, principal, action, request)
@@ -697,6 +700,8 @@ func controlCommandSessionID(request any) string {
 	case appserver.RecordInteractionRequest:
 		return strings.TrimSpace(typed.SessionID)
 	case appserver.CloseSessionRequest:
+		return strings.TrimSpace(typed.SessionID)
+	case appserver.SessionInterruptRequest:
 		return strings.TrimSpace(typed.SessionID)
 	case appserver.RefreshMCPToolsRequest:
 		return strings.TrimSpace(typed.SessionID)
