@@ -6,6 +6,7 @@ import (
 )
 
 type ToolUpdateMeta struct {
+	ScriptCompletion string
 	// OccurredAt is the original projected event time, never a Surface clock.
 	OccurredAt         time.Time
 	ParentToolCallID   string
@@ -170,6 +171,7 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 			OutputNarrative:  update.Meta.OutputNarrative,
 			Terminal:         update.Meta.Terminal,
 			OutputSynthetic:  update.Meta.OutputSynthetic,
+			ScriptCompletion: update.Meta.ScriptCompletion,
 			OutputCollection: update.Meta.OutputCollection,
 			OutputTerminal:   update.Meta.OutputTerminal,
 			TaskHandle:       taskHandle,
@@ -200,6 +202,7 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 		OutputNarrative:  update.Meta.OutputNarrative,
 		Terminal:         update.Meta.Terminal,
 		OutputSynthetic:  update.Meta.OutputSynthetic,
+		ScriptCompletion: update.Meta.ScriptCompletion,
 		OutputCollection: update.Meta.OutputCollection,
 		OutputTerminal:   update.Meta.OutputTerminal,
 		Done:             true,
@@ -330,6 +333,10 @@ func updateToolEventIndex(index map[string]int, events []SubagentEvent, callID s
 }
 
 func mergeOpenToolEvent(ev *SubagentEvent, name, toolKind, toolTitle, args, fullArgs, output, messageID, taskHandle, taskAction, taskInput, taskTargetKind string, semanticName string, meta ToolUpdateMeta) {
+	if meta.ScriptCompletion != "" {
+		ev.ScriptCompletion = meta.ScriptCompletion
+	}
+
 	if ev == nil {
 		return
 	}
@@ -587,6 +594,9 @@ func mergeFinalToolEvent(ev *SubagentEvent, finalEvent *SubagentEvent, authorita
 	// an alias or a coarse standard kind.
 	if existingName := strings.TrimSpace(ev.Name); existingName != "" {
 		finalEvent.Name = existingName
+	}
+	if finalEvent.ScriptCompletion != "" {
+		ev.ScriptCompletion = finalEvent.ScriptCompletion
 	}
 	ev.Name = finalEvent.Name
 	ev.ToolKind = finalEvent.ToolKind

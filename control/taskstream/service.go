@@ -528,6 +528,12 @@ func terminalCommandFallbackSnapshot(entry *task.Entry) fallbackSnapshot {
 	if text == "" {
 		text = strings.TrimSpace(mapString(entry.Result, "error"))
 	}
+	// Code Mode already persists the original typed result. Use those same
+	// bytes on fallback, as on the producer stream, including its read-only
+	// completion observation. Task state remains the lifecycle authority.
+	if entry.Kind == task.KindCodeMode {
+		text = mapString(entry.Result, "tool_result_json")
+	}
 	var exitCode *int
 	if code, ok := integerValue(entry.Result["exit_code"]); ok {
 		exitCode = &code

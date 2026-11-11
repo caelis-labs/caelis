@@ -98,22 +98,29 @@ failure permits subsequent calls and a final summary while retaining the failed
 receipt and overall error flag. Cancellation, authority, persistence, transport
 and unknown-effect failures still stop the script.
 
-TUI gives each script invocation its own `Called tools` disclosure, using the
-existing Explored summary, indentation and click routing. The collapsed summary
-updates as actual child calls arrive, showing their tool names and argument
-summaries. Expanding shows each call separately; its result or approval rationale
-opens on that call. Model narration stays outside these groups. Unrelated direct
-calls remain outside, and MCP arguments are not interpreted to invent domain
-summaries. Script source, counters and aggregate failure labels are not displayed.
-Original child errors and approval decisions remain on their calls. Nonempty
-selected script returns are clickable within the expanded group, attributed to
-the original invocation. With no child calls, a running, result or error entry
-uses that invocation's own disclosure. Empty successful status receipts produce
-no result placeholder. Projection preserves the canonical text, JSON and media.
-Original receipts, failure flags and source bytes remain in
-the audit chain. Replay uses the same direct-parent identities; child-pane
-ownership continues to use existing Task/scope routing. Older compact Turns
-retain selected result/error access without inventing assistant text.
+TUI gives each script invocation its own `JS` disclosure, using the existing
+Explored summary, indentation and folding. Actual child calls appear as they
+start; the collapsed summary includes their real names and argument summaries.
+Expanding lists individual calls, with no source, return values or diagnostics in
+the trajectory. Failed calls are red; running calls use the existing activity
+style. Model narration and unrelated direct calls remain outside. MCP arguments
+are not interpreted to invent domain summaries.
+
+The group dot uses the recorded script completion, independently of cumulative
+`IsError` and Task state. A caught child failure remains red on that call while a
+normally completed script has a normal dot. An uncaught exception has a red dot.
+Older records without this observation do not infer script failure from child
+errors. Zero-child scripts still have their own running or terminal entry.
+
+The header's `details` action and expanded tool rows open the existing read-only,
+scrollable drawer; the title and collapsed summary toggle folding. Details are a
+snapshot of the original invocation's input, selected return, diagnostics and
+approval rationale. File inputs retain their recorded reference, not a read of
+current file contents. Details stay separate from BTW output and close with Esc.
+Original receipts, failure flags, media and approval routing remain unchanged.
+Replay uses the same direct-parent identities; child panes use existing Task and
+scope routing. Compact historical Turns retain actual calls and details without
+inventing assistant text.
 
 ## Execution and Tasks
 

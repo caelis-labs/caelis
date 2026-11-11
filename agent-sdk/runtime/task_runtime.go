@@ -15,6 +15,7 @@ import (
 	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 )
 
 const taskIDRandomBytes = 6
@@ -143,6 +144,9 @@ func taskSnapshotToolResultWithPayload(call tool.Call, def tool.Definition, snap
 		result.Content = append(result.Content, selected.Content...)
 		result.IsError = selected.IsError
 		result.TurnComplete = selected.TurnComplete && !selected.IsError
+		if completion, ok := selected.Metadata[codemode.MetadataScriptCompletion]; ok {
+			meta[codemode.MetadataScriptCompletion] = completion
+		}
 	}
 	if snapshot.Kind == taskapi.KindCodeMode && (snapshot.State == taskapi.StateUnknownOutcome || snapshot.State == taskapi.StateFailed || snapshot.State == taskapi.StateInterrupted || snapshot.State == taskapi.StateCancelled) {
 		result.IsError = true

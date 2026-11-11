@@ -671,6 +671,9 @@ func explorationGroupDetailRowsWithWorkspaceMode(events []SubagentEvent, width i
 }
 
 func toolGroupDetailRowsWithWorkspaceMode(events []SubagentEvent, width int, workspace string, mode explorationToolDetailMode, actualNames bool) []string {
+	return toolGroupSummaryRowsWithPrefix(events, width, workspace, mode, actualNames, true)
+}
+func toolGroupSummaryRowsWithPrefix(events []SubagentEvent, width int, workspace string, mode explorationToolDetailMode, actualNames, first bool) []string {
 	grouped := map[string][]string{}
 	order := make([]string, 0, 4)
 	for _, ev := range events {
@@ -699,7 +702,7 @@ func toolGroupDetailRowsWithWorkspaceMode(events []SubagentEvent, width int, wor
 			continue
 		}
 		prefix := "  "
-		if i == 0 {
+		if i == 0 && first {
 			prefix += "└ "
 		} else {
 			prefix += "  "

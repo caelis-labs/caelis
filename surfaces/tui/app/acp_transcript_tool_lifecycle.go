@@ -822,26 +822,3 @@ func mutationLifecycleHeader(ev SubagentEvent, err bool) string {
 		return standardVerbLifecycleHeader(name, args, err)
 	}
 }
-
-// renderACPToolResultOnlyRows presents only real output or a script's own
-// current state. Empty completion and inherited failure flags add no Result row.
-func renderACPToolResultOnlyRows(blockID string, ev SubagentEvent, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions) []RenderedRow {
-	text := sanitizeRenderableText(ev.Output)
-	if ev.OutputSynthetic || strings.TrimSpace(text) == "null" {
-		text = ""
-	}
-	if ev.Done && !ev.Err && !renderableTextHasContent(text) {
-		return nil
-	}
-	title := "• Running script"
-	if ev.Done {
-		if ev.Err {
-			title = "• Script error"
-		} else {
-			title = "• Ran script"
-		}
-	}
-	token := acpToolPanelClickTokenIf(ev.CallID, renderableTextHasContent(text))
-	rows := []RenderedRow{renderACPToolHeaderRow(blockID, title, width, ctx, token, ev.Err, ev.Done)}
-	return append(rows, renderInvocationOutputRows(blockID, ev, text, width, ctx, opts, true)...)
-}

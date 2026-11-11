@@ -1,13 +1,17 @@
 package taskstream
 
 import (
+	"encoding/json"
 	"strings"
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/agent-sdk/task"
+	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/shell"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
 	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/control/appserver/internal/eventmeta"
 	acpprojector "github.com/caelis-labs/caelis/control/appserver/projection"
@@ -27,6 +31,7 @@ type taskFrameProjectionRequest struct {
 	// display metadata. TaskID remains the typed stream address.
 	TaskHandle        string
 	TaskID            string
+	TaskKind          task.Kind
 	DisplayTerminalID string
 	Scope             eventstream.Scope
 	ParticipantID     string
@@ -94,7 +99,7 @@ func streamFrameEvent(req taskFrameProjectionRequest, frame controltaskstream.Fr
 func streamFinalFrameEvent(req taskFrameProjectionRequest, frame controltaskstream.Frame) eventstream.Envelope {
 	status, isErr := subagentFinalToolStatus(frame)
 	finalText := streamFinalTerminalText(frame.Text)
-	return streamToolUpdateEnvelope(req, frame, status, true, isErr, finalText, streamFrameMeta("final"), true)
+	return streamToolUpdateEnvelope(req, frame, status, true, isErr, finalText, scriptCompletionFrameMeta(req, frame), true)
 }
 
 func streamDisplayTerminalID(req taskFrameProjectionRequest, frame controltaskstream.Frame) string {
@@ -378,3 +383,22 @@ const (
 	toolStatusInterrupted = "interrupted"
 	toolStatusCancelled   = "cancelled"
 )
+
+// scriptCompletionFrameMeta reads only the Code Mode producer's serialized
+// tool.Result (or the same durable fallback). It does not infer completion from
+// output text, cumulative IsError or Task state, and never changes lifecycle.
+func scriptCompletionFrameMeta(req taskFrameProjectionRequest, frame controltaskstream.Frame) map[string]any {
+	meta := streamFrameMeta("final")
+	if req.TaskKind != task.KindCodeMode {
+		return meta
+	}
+	var receipt tool.Result
+	if json.Unmarshal([]byte(frame.Text), &receipt) != nil {
+		return meta
+	}
+	completion, _ := receipt.Metadata[codemode.MetadataScriptCompletion].(string)
+	if completion == "completed" || completion == "failed" {
+		meta[codemode.MetadataScriptCompletion] = completion
+	}
+	return meta
+}

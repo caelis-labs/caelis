@@ -964,6 +964,7 @@ func writeSubagentEvents(builder *blockKeyBuilder, events []SubagentEvent, ctx B
 		builder.addBool(event.OutputNarrativeBoundary)
 		builder.addBool(event.Terminal)
 		builder.addBool(event.OutputSynthetic)
+		builder.addString(event.ScriptCompletion)
 		builder.addBool(event.OutputCollection)
 		builder.addBool(event.OutputTerminal)
 		builder.addString(event.MessageTarget)

@@ -227,6 +227,7 @@ func taskFrameProjectionRequestFor(descriptor controltaskstream.TaskDescriptor, 
 		TurnID: turnID, SessionID: descriptor.SessionID,
 		CallID: descriptor.ParentTool.ToolCallID, ToolName: toolName, TaskHandle: descriptor.Handle,
 		TaskID:            descriptor.TaskID,
+		TaskKind:          descriptor.Kind,
 		DisplayTerminalID: displayTerminalID, Scope: scope, ParticipantID: descriptor.ParticipantID,
 	}
 }

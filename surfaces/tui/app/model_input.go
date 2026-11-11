@@ -35,14 +35,14 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 
 	switch typed := msg.(type) {
 	case tea.MouseWheelMsg:
-		if m.btwOverlay != nil {
+		if m.activeTextDrawer() != nil {
 			mouse := typed.Mouse()
 			switch mouse.Button {
 			case tea.MouseWheelUp:
-				m.scrollBTW(-1)
+				m.scrollTextDrawer(-1)
 				return m, nil
 			case tea.MouseWheelDown:
-				m.scrollBTW(1)
+				m.scrollTextDrawer(1)
 				return m, nil
 			}
 		}
@@ -624,7 +624,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.subagentOverlay != nil {
 		return m, m.handleSubagentOverlayKey(msg)
 	}
-	if m.btwOverlay != nil {
+	if m.activeTextDrawer() != nil {
 		return m.handleBTWOverlayKey(msg)
 	}
 	// Command palette overlay.
@@ -1170,7 +1170,7 @@ func (m *Model) handlePaste(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
 	if m.subagentOverlay != nil {
 		return m, m.handleSubagentOverlayPaste(msg)
 	}
-	if m.btwOverlay != nil {
+	if m.activeTextDrawer() != nil {
 		return m, nil
 	}
 	if state := m.subagentOutputOverlay; state != nil && m.workspace.childFocused {
@@ -1671,6 +1671,9 @@ func (m *Model) allowsBTWSubmission() bool {
 }
 
 func (m *Model) tryToggleFoldToken(blockID string, token string) bool {
+	if callID, ok := strings.CutPrefix(token, toolDetailsTokenPrefix); ok {
+		return m.openToolDetails(blockID, callID)
+	}
 	if key, ok := strings.CutPrefix(strings.TrimSpace(token), "acp_reasoning:"); ok {
 		return m.tryToggleACPReasoningToken(blockID, key)
 	}
@@ -1776,7 +1779,7 @@ func (m *Model) openBTWOverlay(line string) {
 	}
 	question := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "/btw"))
 	m.btwDismissed = false
-	m.btwOverlay = &btwOverlayState{
+	m.btwOverlay = &textDrawerState{
 		Question: question,
 		Loading:  true,
 		Scroll:   0,
@@ -1784,28 +1787,32 @@ func (m *Model) openBTWOverlay(line string) {
 }
 
 func (m *Model) handleBTWOverlayKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if m == nil || m.btwOverlay == nil {
+	if m == nil || m.activeTextDrawer() == nil {
 		return m, nil
 	}
 	switch {
 	case key.Matches(msg, m.keys.Back):
-		m.revokeOverlaySubmissionDispatches()
-		m.dropPendingStreamSmoothing(streamSmoothingKey("btw", "", "answer", ""))
-		m.btwOverlay = nil
-		m.btwDismissed = true
+		if m.toolDetails != nil {
+			m.toolDetails = nil
+		} else {
+			m.revokeOverlaySubmissionDispatches()
+			m.dropPendingStreamSmoothing(streamSmoothingKey("btw", "", "answer", ""))
+			m.btwOverlay = nil
+			m.btwDismissed = true
+		}
 		m.ensureViewportLayout()
 		return m, nil
 	case key.Matches(msg, m.keys.HistoryPrev):
-		m.scrollBTW(-1)
+		m.scrollTextDrawer(-1)
 		return m, nil
 	case key.Matches(msg, m.keys.HistoryNext):
-		m.scrollBTW(1)
+		m.scrollTextDrawer(1)
 		return m, nil
 	case key.Matches(msg, m.keys.PageUp):
-		m.scrollBTW(-m.btwVisibleBudget())
+		m.scrollTextDrawer(-m.textDrawerVisibleBudget())
 		return m, nil
 	case key.Matches(msg, m.keys.PageDown):
-		m.scrollBTW(m.btwVisibleBudget())
+		m.scrollTextDrawer(m.textDrawerVisibleBudget())
 		return m, nil
 	default:
 		return m, nil

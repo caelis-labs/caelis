@@ -345,7 +345,7 @@ func (m *Model) applyBTWOverlayImmediate(text string, final bool) {
 		return
 	}
 	if m.btwOverlay == nil {
-		m.btwOverlay = &btwOverlayState{}
+		m.btwOverlay = &textDrawerState{}
 	}
 	if final {
 		m.btwOverlay.Answer = strings.TrimSpace(text)
@@ -353,7 +353,7 @@ func (m *Model) applyBTWOverlayImmediate(text string, final bool) {
 		m.btwOverlay.Answer += text
 	}
 	m.btwOverlay.Loading = false
-	m.clampBTWScroll(len(m.btwContentLines()))
+	m.clampTextDrawerScroll(len(m.textDrawerContentLines()))
 	m.ensureViewportLayout()
 }
 

@@ -13,6 +13,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/google/uuid"
 )
 
@@ -193,14 +194,21 @@ func runtimeTaskResultSourceMeta(trusted bool) map[string]any {
 
 func modelVisibleToolErrorResult(call model.ToolCall, result tool.Result, err error) tool.Result {
 	executionJournal := result.Metadata[tool.MetadataExecutionJournal]
+	scriptCompletion := result.Metadata[codemode.MetadataScriptCompletion]
 	result = tool.Result{
 		ID:      strings.TrimSpace(call.ID),
 		Name:    strings.TrimSpace(call.Name),
 		IsError: true,
 		Content: []model.Part{model.NewJSONPart(mustJSON(tool.ErrorPayload(err)))},
 	}
+	result.Metadata = map[string]any{}
 	if executionJournal != nil {
-		result.Metadata = map[string]any{tool.MetadataExecutionJournal: executionJournal}
+		result.Metadata[tool.MetadataExecutionJournal] = executionJournal
+	}
+	if scriptCompletion != "" && scriptCompletion != nil {
+		result.Metadata[codemode.MetadataScriptCompletion] = scriptCompletion
+	} else if call.Name == "js_exec" {
+		result.Metadata[codemode.MetadataScriptCompletion] = "failed"
 	}
 	return result
 }

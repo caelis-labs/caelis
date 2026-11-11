@@ -2,6 +2,7 @@ package tuiapp
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -62,7 +63,7 @@ func (d *scriptPTYDriver) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	next, cmd := d.Model.Update(msg)
 	d.Model = next.(*Model)
 	switch msg.(type) {
-	case tea.MouseClickMsg, tea.MouseReleaseMsg, tea.WindowSizeMsg:
+	case tea.MouseClickMsg, tea.MouseReleaseMsg, tea.WindowSizeMsg, tea.KeyPressMsg:
 		d.snapshot("input")
 	}
 	return d, cmd
@@ -70,10 +71,10 @@ func (d *scriptPTYDriver) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (d *scriptPTYDriver) snapshot(cause string) {
 	d.markViewportStructureDirty()
 	d.syncViewportContent()
-	data, _ := json.MarshalIndent(map[string]any{"stage": d.stage, "cause": cause, "viewport": d.viewportPlainLines, "source_head": os.Getenv("CAELIS_CANDIDATE_HEAD")}, "", "  ")
+	data, _ := json.MarshalIndent(map[string]any{"stage": d.stage, "cause": cause, "viewport": d.viewportPlainLines, "source_head": os.Getenv("CAELIS_CANDIDATE_HEAD"), "drawer": d.activeTextDrawer()}, "", "  ")
 	_ = os.WriteFile(filepath.Join(d.dir, "state.json"), data, 0600)
 	if cause == "stage" {
-		_ = os.WriteFile(filepath.Join(d.dir, "stage-"+string(rune('0'+d.stage))+".json"), data, 0600)
+		_ = os.WriteFile(filepath.Join(d.dir, fmt.Sprintf("stage-%02d.json", d.stage)), data, 0600)
 	}
 }
 func scriptPTYStages() [][]*session.Event {
@@ -95,18 +96,29 @@ func scriptPTYStages() [][]*session.Event {
 		if output != "" {
 			entry.Content = []session.EventToolContent{{Type: "content", Text: output}}
 		}
-		return &session.Event{SessionID: "visual-fixture", Type: typ, Tool: entry}
+		event := &session.Event{SessionID: "visual-fixture", Type: typ, Tool: entry}
+		if name == "js_exec" && status != "started" {
+			completion := "completed"
+			if id == "s3" {
+				completion = "failed"
+			}
+			event.Meta = map[string]any{"code_mode_script_completion": completion}
+		}
+		return event
 	}
 	narrative := &session.Event{SessionID: "visual-fixture", Type: session.EventTypeAssistant, Protocol: &session.EventProtocol{Method: session.ProtocolMethodSessionUpdate, Update: &session.ProtocolUpdate{SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage), Content: session.ProtocolTextContent("Now **check the next file**. This explanation stays outside both scripts.")}}}
 	return [][]*session.Event{
 		{tool("native1", "Read", "", "completed", "README.md", ""), tool("native2", "Read", "", "completed", "docs/API.md", "")},
 		{tool("s1", "js_exec", "", "started", "", "")},
 		{tool("c1", "Read", "s1", "started", "notes/first.txt", "")},
-		{tool("c1", "Read", "s1", "completed", "notes/first.txt", "original file content"), tool("c2", "desktop_world__exec", "s1", "started", "", "")},
-		{tool("c2", "desktop_world__exec", "s1", "completed", "", ""), tool("s1", "js_exec", "", "completed", "", `{"selected_summary":"two observations"}`)},
+		{tool("c1", "Read", "s1", "completed", "notes/first.txt", "PRIVATE_CHILD_CONTENT"), tool("c1b", "Read", "s1", "completed", "notes/second.txt", "PRIVATE_SECOND_CONTENT"), tool("c2", "desktop_world__exec", "s1", "started", "", "")},
+		{tool("c2", "desktop_world__exec", "s1", "completed", "", ""), tool("s1", "js_exec", "", "completed", "", `{"PRIVATE_FINAL_SUMMARY":"two observations"}`)},
 		{narrative, tool("s2", "js_exec", "", "started", "", ""), tool("c3", "Read", "s2", "started", "notes/missing.txt", "")},
-		{tool("c3", "Read", "s2", "failed", "notes/missing.txt", "not_found: notes/missing.txt does not exist"), tool("s2", "js_exec", "", "failed", "", "")},
+		{tool("c3", "Read", "s2", "failed", "notes/missing.txt", "not_found: notes/missing.txt does not exist"), tool("c4", "Read", "s2", "started", "go.mod", "")},
+		{tool("c4", "Read", "s2", "completed", "go.mod", "PRIVATE_RECOVERY"), tool("s2", "js_exec", "", "failed", "", `{"PRIVATE_CAUGHT_SUMMARY":"recovered"}`)},
 		{tool("s3", "js_exec", "", "started", "", "")},
 		{tool("s3", "js_exec", "", "failed", "", "probe.js:3: TypeError: missing value\n at probe.js:3:7")},
+		{tool("s4", "js_exec", "", "started", "", "")},
+		{tool("s4", "js_exec", "", "completed", "", "42")},
 	}
 }

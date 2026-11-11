@@ -256,7 +256,7 @@ func (m *Model) wizardBodyLines(width, offset, budget int) ([]string, []int) {
 			lines = append(lines, m.theme.TitleStyle().Render("Code: "+code))
 		}
 		if url := m.slashArgLoadAuthURL; url != "" {
-			lines = append(lines, wrapBTWContentLines([]string{url}, width)...)
+			lines = append(lines, wrapTextDrawerContentLines([]string{url}, width)...)
 		}
 		return lines[:min(len(lines), budget)], nil
 	}

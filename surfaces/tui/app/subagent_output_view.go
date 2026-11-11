@@ -140,7 +140,7 @@ func (m *Model) subagentOutputEventKey(event TranscriptEvent) string {
 					continue
 				}
 				for _, tool := range block.Events {
-					if tool.Kind == SEToolCall && tool.CallID == event.AnchorToolCallID && isResultOnlyToolEvent(tool) {
+					if tool.Kind == SEToolCall && tool.CallID == event.AnchorToolCallID && isScriptToolEvent(tool) {
 						return key
 					}
 				}
