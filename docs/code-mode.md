@@ -28,7 +28,7 @@ output. Each execution starts with fresh state. There are no Node.js, module,
 direct filesystem, network or process APIs. `file` paths resolve relative to the
 working directory; shell execution stays outside `js_exec`.
 
-The async function body has two interfaces:
+The async function body exposes these SDK operations:
 
 - `await tools.search(query)` first matches an exact callable native or current
   extension name, otherwise uses the existing fuzzy search. It returns
