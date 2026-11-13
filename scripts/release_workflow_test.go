@@ -93,18 +93,13 @@ func TestReleasePublishesProtectedMainTagsWithoutRepeatingPRQuality(t *testing.T
 		"goreleaser/goreleaser-action@v7",
 		"args: release --clean --skip=publish",
 		"name: unpublished-archives",
-		"  verify-recovery:\n    if: github.event_name == 'workflow_dispatch'",
-		"  notarize-darwin:\n    needs: [build, verify-recovery]",
-		"run-id: 38420720149",
-		"run-id: 38505541188",
-		"python3 scripts/verify_release_publication_recovery.py recovery dist",
-		"if: ${{ always() && !cancelled()",
-		"github.event_name == 'push' && needs.build.result == 'success'",
+		"  notarize-darwin:\n    needs: build",
+		"if: ${{ !cancelled() && needs.build.result == 'success' }}",
 		"name: macos-signing-checkpoint",
 		"bash scripts/sign_notarize_cli.sh",
 		"name: verified-release-archives",
-		"  release:\n    needs: [notarize-darwin, verify-recovery]",
-		"github.event_name == 'workflow_dispatch' && needs.verify-recovery.result == 'success'",
+		"  release:\n    needs: notarize-darwin",
+		"if: ${{ !cancelled() && needs.notarize-darwin.result == 'success' }}",
 		"bash scripts/verify_release_archives.sh",
 		"bash scripts/publish_release_assets.sh",
 		"Publish platform packages",
@@ -122,6 +117,10 @@ func TestReleasePublishesProtectedMainTagsWithoutRepeatingPRQuality(t *testing.T
 		}
 	}
 	for _, forbidden := range []string{
+		"workflow_dispatch",
+		"verify-recovery",
+		"v0.71.1",
+		"run-id:",
 		"wait-quality:",
 		"gh run watch",
 		"/actions/workflows/quality.yml/runs",
@@ -592,8 +591,9 @@ func TestR2PublisherUpdatesLatestAfterVerifiedAssets(t *testing.T) {
 		`head-object`,
 		`printf '%s\n' "${tag}"`,
 		`max-age=60, must-revalidate`,
-		`list-objects-v2`,
-		`refusing to delete unexpected R2 object`,
+		`--if-none-match '*'`,
+		`refusing to overwrite conflicting R2 object`,
+		`R2 object absence not established`,
 	} {
 		if !strings.Contains(publisher, want) {
 			t.Errorf("R2 publisher missing %q", want)
@@ -602,9 +602,14 @@ func TestR2PublisherUpdatesLatestAfterVerifiedAssets(t *testing.T) {
 
 	latestUpload := strings.Index(publisher, `"s3://${R2_BUCKET}/latest.txt"`)
 	assetVerification := strings.Index(publisher, `head-object`)
-	cleanup := strings.Index(publisher, `list-objects-v2`)
-	if assetVerification < 0 || latestUpload < 0 || cleanup < 0 || assetVerification >= latestUpload || latestUpload >= cleanup {
-		t.Error("R2 publisher no longer verifies versioned assets, updates latest.txt, then cleans up old versions")
+	readback := strings.Index(publisher, `cmp "${work_dir}/${asset}" "${work_dir}/r2-readback/${asset}"`)
+	if assetVerification < 0 || readback < 0 || latestUpload < 0 || assetVerification >= readback || readback >= latestUpload {
+		t.Error("R2 publisher must verify versioned assets before updating latest.txt")
+	}
+	for _, forbidden := range []string{"s3 rm", "delete-object", "list-objects-v2"} {
+		if strings.Contains(publisher, forbidden) {
+			t.Errorf("R2 publisher must retain old versions: %q", forbidden)
+		}
 	}
 }
 

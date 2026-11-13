@@ -28,8 +28,8 @@ archive download, SHA256 verification, extraction, and executable replacement.
 Raw self-update runs the same scripts against the current installation directory,
 using Bash on macOS/Linux and PowerShell on Windows, then verifies the installed
 binary's release identity. `CAELIS_RELEASES_BASE_URL` overrides the archive base
-URL for both installation and self-update. The raw channel serves the latest
-release only and does not fall back to GitHub; GitHub Releases retains historical
+URL for both installation and self-update. The raw installer selects the latest
+release and does not fall back to GitHub; R2 and GitHub Releases retain historical
 versions for manual installs. Global npm installations update through npm.
 
 `caelis update` and TUI `Ctrl+U` install artifacts without stopping or starting a
@@ -201,7 +201,14 @@ leaves publication unconfirmed and blocks downstream steps; inspect the npm
 registry (and staged publishing settings if relevant) before recovery. The
 65-minute job budget accommodates concurrent platform verification followed by
 main-package verification. R2 reads the verified GitHub assets back and checks
-their bytes before updating `latest.txt`.
+their bytes before updating `latest.txt`. Versioned R2 objects are retained;
+publication never cleans up prior releases. Existing objects are skipped only
+when their bytes match the verified archive, otherwise publication stops.
+Only an explicit missing-key response permits a conditional create-only upload;
+read errors do not establish absence, and a concurrent write cannot be overwritten.
+A failed or uncertain upload stops publication before updating `latest.txt` and
+can be reconciled by the same byte-checking path on retry. Separate approval is
+required to remove historical objects.
 
 This separates immutable upload from eventually visible metadata, following
 [npm's immutable version and integrity contract](https://docs.npmjs.com/cli/v11/commands/npm-publish/)
@@ -220,18 +227,10 @@ assets or re-sign the Darwin binaries to resume a partially published version.
 
 A failed tag run keeps using the script from that immutable tag. A publishing or signing fix
 merged later to `main` cannot take effect through **Rerun failed jobs** on the
-old run. The one-off `workflow_dispatch` permits one `v0.71.1` publication
-resume from the Accepted Apple receipt, exact submission ZIP, and final
-release archives saved by signing run `38505541188` (built from tag run
-`38420720149`). Its guard
-verifies the original tag, signing run and artifact digests, Apple Accepted
-receipt and ZIP hash, both Darwin binary bytes, empty release, and absence of
-any additional recovery dispatch. Run it on reviewed `main` only after these
-conditions hold. It does not rebuild, re-sign, or submit to Apple again. A
-failed publication job can be rerun within that same run using the saved final
-archives. Keep the original tag and release assets immutable; the normal
-release-please tag flow remains the path for new versions. Remove this one-off
-dispatch after recovery.
+old run. There is no general manual dispatch for recovering an older release.
+If the immutable tag's workflow needs a fix, design and review a version-specific
+recovery from the saved receipt and exact signed bytes, or publish a new version.
+Never change an existing tag or replace published assets to resume publication.
 
 ### Manual fallback
 
