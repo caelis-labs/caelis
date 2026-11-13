@@ -5,9 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"os/exec"
 	"sync"
@@ -15,7 +13,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 )
@@ -265,8 +262,11 @@ func (e *Executor) Execute(ctx context.Context, source codemode.Source, limits c
 					case "", "call":
 						reply, callErr = host.Call(workCtx, req.Name, req.Arguments)
 					case "search":
-						if discovery, ok := host.(codemode.DiscoveryHost); ok {
-							reply, callErr = discovery.Search(workCtx, req.Name)
+						var query codemode.SearchRequest
+						if err := json.Unmarshal(req.Arguments, &query); err != nil {
+							callErr = tool.NewError(tool.ErrorCodeInvalidInput, "invalid search request")
+						} else if discovery, ok := host.(codemode.DiscoveryHost); ok {
+							reply, callErr = discovery.Search(workCtx, query)
 						} else {
 							callErr = fmt.Errorf("discovery is unavailable")
 						}
@@ -289,16 +289,16 @@ func (e *Executor) Execute(ctx context.Context, source codemode.Source, limits c
 					response := struct {
 						Raw   string `json:"raw"`
 						Error string `json:"error,omitempty"`
+						Code  string `json:"code,omitempty"`
 					}{Raw: string(raw)}
 					if callErr != nil {
-						response.Error = hostErrorMessage(req.Name, callErr)
-						if errorcode.Is(callErr, tool.ErrorCodeStaleRevision) {
-							response.Error = "Tool directory refreshed; use tools.search(name) to reload its schema/binding before calling. Old arguments were not executed."
+						name := req.Name
+						if req.Method == "search" {
+							name = "search"
 						}
-						if errorcode.Is(callErr, errorcode.UnknownOutcome) {
-							response.Error = "Tool outcome is unknown; do not replay the effect."
-						}
-					} // bounded, no internal error/credentials
+						public := codemode.PublicHostError(name, callErr)
+						response.Error, response.Code = public.Message, string(public.Code)
+					}
 					payload, _ := json.Marshal(response)
 					metricMu.Lock()
 					m.HostReplyBytes += int64(len(raw))
@@ -331,7 +331,7 @@ func (e *Executor) Execute(ctx context.Context, source codemode.Source, limits c
 				if resultErr != nil {
 					return codemode.Output{}, resultErr
 				}
-				return codemode.Output{}, errors.New("JavaScript execution failed: " + string(f.data))
+				return codemode.Output{}, tool.NewError(codemode.ErrorCodeJavaScript, "JavaScript execution failed: "+string(f.data))
 			default:
 				return codemode.Output{}, fmt.Errorf("unexpected worker frame")
 			}
@@ -368,40 +368,4 @@ func boundedReply(r codemode.Reply, budget int) bool {
 		}
 	}
 	return true
-}
-
-// Only typed validation details cross the bridge; transport errors never expose
-// response bodies, credentials or their underlying error chain.
-func hostErrorMessage(name string, err error) string {
-	code := errorcode.CodeOf(err)
-	if payload := tool.ErrorPayload(err); payload != nil {
-		if value, ok := payload["error_code"].(string); ok {
-			code = errorcode.Code(value)
-		}
-	}
-	if len(name) > 192 {
-		name = name[:192]
-	}
-	label := string(code)
-	if len(label) > 64 {
-		label = "unknown"
-	}
-	message := name + " [" + label + "]"
-	var pathError *os.PathError
-	if errors.Is(err, fs.ErrNotExist) && errors.As(err, &pathError) {
-		path := pathError.Path
-		if len(path) > 512 {
-			path = path[:512]
-		}
-		return message + ": $.path: file does not exist: " + path
-	}
-	var validation *tool.ToolError
-	if code == tool.ErrorCodeInvalidInput && errors.As(err, &validation) && validation.Err == nil {
-		detail := validation.Message
-		if len(detail) > 768 {
-			detail = detail[:768]
-		}
-		return message + ": " + detail
-	}
-	return message + ": Host request failed"
 }

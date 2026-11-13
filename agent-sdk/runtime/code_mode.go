@@ -154,22 +154,36 @@ func (t runtimeCodeModeTool) execute(ctx context.Context, call tool.Call, source
 	if len(host.failures) > 0 {
 		result.Metadata["code_mode_outcome"] = codemode.OutcomeFailed
 		for _, failure := range host.failures {
-			if failure["outcome"] == codemode.OutcomeUnknown {
+			if failure.Outcome == codemode.OutcomeUnknown {
 				result.Metadata["code_mode_outcome"] = codemode.OutcomeUnknown
 			}
 		}
-		raw, _ := json.Marshal(map[string]any{"errors": host.failures, "instruction": "Do not replay unknown effects. Reload stale schemas/bindings with tools.search(name)."})
-		result.Content = append(result.Content, model.NewJSONPart(raw))
+		result.Content = append(result.Content, host.failureParts(completed.err != nil))
 	}
 	result.Metadata[codemode.MetadataScriptCompletion] = "completed"
 	if completed.err != nil || host.fatal != nil {
 		result.Metadata[codemode.MetadataScriptCompletion] = "failed"
 	}
 
-	if completed.err != nil {
-		return result, errors.Join(completed.err, host.fatal, host.firstCallError)
+	if completed.err != nil || host.fatal != nil {
+		// Normalize once before foreground delivery or Task persistence. Keep
+		// private Host causes out of the public diagnostic and error string.
+		publicErr := completed.err
+		if result.Metadata["code_mode_outcome"] == codemode.OutcomeUnknown {
+			publicErr = codemode.PublicHostError(call.Name, tool.NewError(errorcode.UnknownOutcome, "tool outcome is unknown"))
+		} else if host.fatal != nil {
+			publicErr = codemode.PublicHostError(call.Name, host.fatal)
+		}
+		payload := tool.ErrorPayload(publicErr)
+		code, _ := payload["error_code"].(string)
+		raw, _ := json.Marshal(payload)
+		result.Content = append(result.Content, model.NewJSONPart(raw))
+		result.IsError = true
+		// Journal classification follows the normalized disposition, including
+		// an unknown effect among concurrently failed calls.
+		return result, &codemode.ExecutionError{Message: publicErr.Error(), Code: tool.ErrorCode(code), Err: errors.Join(host.fatal, completed.err, host.firstCallError)}
 	}
-	return result, host.fatal
+	return result, nil
 }
 
 type codeModeTarget struct {
@@ -191,15 +205,13 @@ type codeModeHost struct {
 	limits         codemode.Limits
 	targets        map[string]codeModeTarget
 	discovered     map[string]tool.Binding
-	failures       []map[string]string
+	failures       []codeModeFailure
 	firstCallError error
 	mu             sync.Mutex
 	closed         bool
 	drained        chan struct{}
 	drainClosed    bool
-	active         int
 	pending        int
-	unsafeActive   bool
 	calls          int
 	retained       int
 	isError        bool
@@ -300,7 +312,15 @@ func (h *codeModeHost) call(requestCtx context.Context, name string, arguments j
 			if outcome == "" {
 				outcome = codemode.OutcomeFailed
 			}
-			h.failures = append(h.failures, map[string]string{"tool": name, "outcome": outcome, "code": string(errorcode.CodeOf(callError))})
+			failure := codeModeFailure{Tool: name, CallID: returned.CallID, Outcome: outcome}
+			if code := errorcode.CodeOf(callError); code != errorcode.Unknown {
+				failure.Code = string(code)
+			}
+			if returned.CallID != "" {
+				reply := returned
+				failure.Reply = &reply
+			}
+			h.failures = append(h.failures, failure)
 			h.mu.Unlock()
 		}
 	}()
@@ -382,24 +402,8 @@ func (h *codeModeHost) call(requestCtx context.Context, name string, arguments j
 		h.mu.Unlock()
 		return codemode.Reply{}, fmt.Errorf("code mode host admission is closed")
 	}
-	safe := target.definition.Capabilities.ParallelSafe
-	if h.unsafeActive || (h.active > 0 && !safe) {
-		h.mu.Unlock()
-		return codemode.Reply{}, fmt.Errorf("concurrent host calls require explicit ParallelSafe targets")
-	}
 	callID := fmt.Sprintf("%s/%s/host-%d", h.parent.Execution.TurnID, h.parent.Execution.ItemID, ordinal)
-	h.active++
-	h.unsafeActive = !safe
 	h.mu.Unlock()
-	defer func() {
-		h.mu.Lock()
-		h.active--
-		if !safe {
-			h.unsafeActive = false
-		}
-		h.closeDrainLocked()
-		h.mu.Unlock()
-	}()
 	ctx, cancel := context.WithCancel(h.ctx)
 	if discovery {
 		ctx = context.WithValue(ctx, codeModeSearchKey{}, requestCtx.Value(codeModeSearchKey{}))

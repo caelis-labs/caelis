@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"time"
 
@@ -170,7 +171,10 @@ func (a *Agent) executeToolCallAdmitted(
 		if tool.IsMCPDefinition(selectedTool.Definition()) {
 			err = mcpdiscovery.WithEntryHint(err, tool.ToolSearchToolName)
 		}
-		result = modelVisibleToolErrorResult(call, result, err)
+		var normalized *codemode.ExecutionError
+		if selectedTool.Definition().Metadata[tool.MetadataToolKind] != codemode.ToolKind || !errors.As(err, &normalized) {
+			result = modelVisibleToolErrorResult(call, result, err)
+		}
 	}
 	result = a.admitToolSearchResult(ctx, selectedTool.Definition(), call, result)
 	canonical, truncationMeta := canonicalToolResult(result, a.toolResultArtifacts)

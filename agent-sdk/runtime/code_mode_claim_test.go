@@ -80,10 +80,10 @@ func TestCodeModeTurnCompletePendingApprovalStillEmitsMedia(t *testing.T) {
 		return agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_once", Approved: true}, nil
 	})
 	image := model.NewMediaPart(model.MediaModalityImage, model.MediaSource{Kind: model.MediaSourceInline, Data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="}, "image/png", "fixture.png")
-	complete := tool.NamedTool{Def: tool.Definition{Name: "Complete", InputSchema: map[string]any{"type": "object"}, Capabilities: tool.Capabilities{ParallelSafe: true}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
+	complete := tool.NamedTool{Def: tool.Definition{Name: "Complete", InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
 		return tool.Result{TurnComplete: true, Content: []model.Part{image}}, nil
 	}}
-	write := tool.NamedTool{Def: tool.Definition{Name: "Write", InputSchema: map[string]any{"type": "object"}, Capabilities: tool.Capabilities{ParallelSafe: true}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
+	write := tool.NamedTool{Def: tool.Definition{Name: "Write", InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
 		effects.Add(1)
 		return tool.Result{}, nil
 	}}

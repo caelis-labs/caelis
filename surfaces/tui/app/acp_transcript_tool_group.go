@@ -1,8 +1,9 @@
 package tuiapp
 
 import (
-	"github.com/charmbracelet/x/ansi"
 	"strings"
+
+	"github.com/charmbracelet/x/ansi"
 )
 
 // invocationToolParents is a disposable projection of direct canonical ancestry.
@@ -45,42 +46,84 @@ func renderInvocationToolGroupRows(blockID string, events []SubagentEvent, start
 	header := renderACPTranscriptHeaderRowMarked(blockID, title, width, ctx, foldToken, tone, dim)
 	rows := []RenderedRow{header}
 	expanded := opts.ExplorationExpanded != nil && opts.ExplorationExpanded(key)
-	if !expanded {
-		for i := 0; i < len(children); {
-			end := i + 1
-			for end < len(children) && children[end].Name == children[i].Name && children[end].Err == children[i].Err && children[end].Done == children[i].Done {
+	for i := 0; i < len(children); {
+		end := i + 1
+		if !expanded && (opts.ToolPanelFullOutput == nil || !opts.ToolPanelFullOutput(children[i].CallID)) {
+			for end < len(children) && children[end].Name == children[i].Name && children[end].Err == children[i].Err && children[end].Done == children[i].Done && (opts.ToolPanelFullOutput == nil || !opts.ToolPanelFullOutput(children[end].CallID)) {
 				end++
 			}
-			display := append([]SubagentEvent(nil), children[i:end]...)
-			for j := range display {
-				display[j].Err = false
-			}
-			lines := toolGroupSummaryRowsWithPrefix(display, width, ctx.Workspace, explorationToolDetailLiveSummary, true, len(rows) == 1)
-			for _, line := range lines {
-				row := StyledPlainClickableRow(blockID, line, styleExplorationSummaryRow(line, ctx), foldToken)
-				rows = append(rows, styleScriptToolState(row, children[i], ctx))
-			}
-			i = end
 		}
-		return rows, start, true
-	}
-	for _, event := range children {
-		summary := event
-		summary.Err = false
-		for _, review := range events {
-			if review.Kind == SEApproval && review.CallID == event.CallID {
-				summary.ApprovalStatus = review.ApprovalStatus
+		display := append([]SubagentEvent(nil), children[i:end]...)
+		for j := range display {
+			display[j].Err = false
+			// Script disclosure never includes result or diagnostic bodies.
+			display[j].Output = ""
+			for _, review := range events {
+				if review.Kind == SEApproval && review.CallID == display[j].CallID {
+					display[j].ApprovalStatus = review.ApprovalStatus
+				}
 			}
 		}
-		for _, row := range renderExplorationToolRowsWithMode(blockID, summary, width, ctx, foldToken, len(rows) == 1, explorationToolDetailLiveSummary) {
-			rows = append(rows, styleScriptToolState(row, event, ctx))
+		token := foldToken
+		fullArgs := false
+		if len(display) == 1 && strings.TrimSpace(firstNonEmpty(display[0].FullArgs, display[0].Args)) != "" {
+			token = acpToolPanelClickToken(display[0].CallID)
+			fullArgs = opts.ToolPanelFullOutput != nil && opts.ToolPanelFullOutput(display[0].CallID)
 		}
+		for _, row := range renderScriptInvocationRows(blockID, display, width, ctx, token, len(rows) == 1, fullArgs) {
+			rows = append(rows, styleScriptToolState(row, children[i], ctx))
+		}
+		i = end
 	}
 	return rows, start, true
 }
+
+// Script calls share exploration columns, but fold their argument preview before
+// layout so even long tool names occupy one physical row. Only a call click
+// discloses its original arguments; the script header controls aggregation.
+func renderScriptInvocationRows(blockID string, events []SubagentEvent, width int, ctx BlockRenderContext, token string, first, fullArgs bool) []RenderedRow {
+	ev := events[0]
+	var details []string
+	for _, event := range events {
+		detail := explorationToolDetailForDisplay(event, ctx.Workspace, explorationToolDetailLiveSummary)
+		if event.ApprovalStatus != "" {
+			tag, _ := approvalReviewStatusTag(ctx, event.ApprovalStatus)
+			detail = strings.TrimSpace(detail + " " + tag)
+		}
+		details = append(details, detail)
+	}
+	prefix := truncateDisplayCells(explorationChildPrefix(first), maxInt(0, width-1))
+	header := ev.Name
+	if !fullArgs {
+		header = strings.TrimSpace(header + " " + strings.Join(details, ", "))
+	} else if ev.ApprovalStatus != "" {
+		tag, _ := approvalReviewStatusTag(ctx, ev.ApprovalStatus)
+		header += " " + tag
+	}
+	budget := maxInt(1, width-displayColumns(prefix))
+	header = strings.Join(strings.Fields(header), " ")
+	if displayColumns(header) > budget && displayColumns(ev.Name) <= budget {
+		detail := strings.TrimSpace(strings.TrimPrefix(header, ev.Name))
+		header = ev.Name
+		if remaining := budget - displayColumns(header) - 1; remaining > 0 {
+			header += " " + compactSingleLineHeader(detail, remaining)
+		}
+	} else {
+		header = compactSingleLineHeader(header, budget)
+	}
+	header = truncateDisplayCells(header, budget)
+	line := prefix + header
+	rows := []RenderedRow{StyledPlainClickablePreWrappedRow(blockID, line, styleExplorationSummaryRow(line, ctx), token)}
+	if fullArgs {
+		args := firstNonEmpty(ev.FullArgs, ev.Args)
+		details := renderACPToolOutputRowsWithToken(blockID, "", args, maxInt(1, width-4), ctx, ctx.Theme.ToolArgsStyle(), token)
+		rows = append(rows, toolGroupChildRows(details, ctx, false)...)
+	}
+	return rows
+}
+
 func styleScriptToolState(row RenderedRow, event SubagentEvent, ctx BlockRenderContext) RenderedRow {
-	// Keep the public summary/wrapping; accent only the actual tool name. The
-	// existing styled argument suffix (including approval marks) stays intact.
+	// Accent the tool name while retaining the styled argument suffix.
 	content := strings.TrimLeft(row.Plain, " └")
 	if content == event.Name || strings.HasPrefix(content, event.Name+" ") {
 		prefix := row.Plain[:len(row.Plain)-len(content)]

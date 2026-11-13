@@ -40,10 +40,10 @@ func TestReviewCodeModeTurnCompleteFencesPendingApproval(t *testing.T) {
 		<-release
 		return agent.ApprovalResponse{Outcome: "selected", OptionID: "allow", Approved: true}, nil
 	})
-	complete := tool.NamedTool{Def: tool.Definition{Name: "Complete", InputSchema: map[string]any{"type": "object"}, Capabilities: tool.Capabilities{ParallelSafe: true}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
+	complete := tool.NamedTool{Def: tool.Definition{Name: "Complete", InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
 		return tool.Result{TurnComplete: true}, nil
 	}}
-	write := tool.NamedTool{Def: tool.Definition{Name: "Write", InputSchema: map[string]any{"type": "object"}, Capabilities: tool.Capabilities{ParallelSafe: true}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
+	write := tool.NamedTool{Def: tool.Definition{Name: "Write", InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
 		effects.Add(1)
 		return tool.Result{}, nil
 	}}

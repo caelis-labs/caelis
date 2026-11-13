@@ -22,6 +22,56 @@ import (
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+func TestCodeModeUnknownOutcomePrecedesJavaScriptError(t *testing.T) {
+	store, active, _ := codeModeStore(t)
+	var effects atomic.Int32
+	target := tool.NamedTool{Def: tool.Definition{Name: "Effect", InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
+		effects.Add(1)
+		return tool.Result{IsError: true}, errorcode.New(errorcode.UnknownOutcome, "effect response was lost")
+	}}
+	var checked atomic.Bool
+	declaration := &codemode.Tool{Name: codemode.ToolName, Executor: codeExecutorFunc(func(ctx context.Context, _ codemode.Source, host codemode.Host) (json.RawMessage, error) {
+		reply, err := host.Call(ctx, "Effect", []byte(`{}`))
+		if errorcode.CodeOf(err) != errorcode.UnknownOutcome || reply.Outcome != codemode.OutcomeUnknown || !reply.IsError || reply.CallID == "" {
+			return nil, errors.New("Host lost the unknown effect disposition")
+		}
+		checked.Store(true)
+		// Deterministically model a worker exception winning the race against
+		// cancellation after the Host has reported an unresolved effect.
+		return nil, tool.NewError(codemode.ErrorCodeJavaScript, "script rejected after the unknown effect")
+	})}
+	driver := &mcpScriptModel{steps: func(i int, _ *model.Request) []model.ToolCall {
+		if i == 0 {
+			return []model.ToolCall{{ID: "unknown-script", Name: codemode.ToolName, Args: `{"code":"fixture"}`}}
+		}
+		return nil
+	}}
+	runCodeMode(t, store, active, agent.AgentSpec{Model: driver, Tools: []tool.Tool{target, declaration}}, nil, nil)
+	events, err := store.Events(t.Context(), session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	outerUnknown, childUnknown := false, false
+	for _, event := range events {
+		if event.Journal == nil || event.Journal.ToolExecution == nil {
+			continue
+		}
+		record := event.Journal.ToolExecution
+		if record.Status != session.ToolExecutionUnknownOutcome {
+			continue
+		}
+		if record.ToolName == codemode.ToolName && record.Parent == nil && record.Key.ToolCallID == "unknown-script" {
+			outerUnknown = true
+		}
+		if record.ToolName == "Effect" && record.Parent != nil && record.Parent.ID == "unknown-script" {
+			childUnknown = true
+		}
+	}
+	if !checked.Load() || !outerUnknown || !childUnknown || effects.Load() != 1 {
+		t.Fatalf("checked=%v outer_unknown=%v child_unknown=%v effects=%d", checked.Load(), outerUnknown, childUnknown, effects.Load())
+	}
+}
+
 func TestCodeModeMCPTransportLossRetainsUnknownWithoutReplay(t *testing.T) {
 	store, active, _ := codeModeStore(t)
 	server := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "unknown-effect", Version: "1"}, nil)

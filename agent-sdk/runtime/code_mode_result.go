@@ -10,6 +10,29 @@ import (
 	"github.com/google/uuid"
 )
 
+// codeModeFailure retains the original Host projection, independently of any
+// exception properties a script can mutate. Replies are emitted only when the
+// script fails; caught failures keep their compact disposition record.
+type codeModeFailure struct {
+	Tool    string          `json:"tool"`
+	CallID  string          `json:"call_id,omitempty"`
+	Outcome string          `json:"outcome"`
+	Code    string          `json:"code,omitempty"`
+	Reply   *codemode.Reply `json:"reply,omitempty"`
+}
+
+func (h *codeModeHost) failureParts(detailed bool) model.Part {
+	failures := make([]codeModeFailure, len(h.failures))
+	for i, failure := range h.failures {
+		failures[i] = failure
+		if !detailed {
+			failures[i].Reply = nil
+		}
+	}
+	raw, _ := json.Marshal(map[string]any{"errors": failures, "instruction": "Do not replay unknown effects. Reload stale schemas/bindings with tools.search(name)."})
+	return model.NewJSONPart(raw)
+}
+
 // project runs under host.mu. Check sizes before copying JSON or serializing
 // transport data; original results have already crossed the durable receipt owner.
 func (h *codeModeHost) project(id string, result tool.Result, outcome string) (codemode.Reply, error) {

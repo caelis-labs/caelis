@@ -357,6 +357,16 @@ func TestJSExecH1SessionReuseAndPermissionRevocation(t *testing.T) {
 
 func TestJSExecH1HintWarningOncePreservesCapability(t *testing.T) {
 	store, active, _ := codeModeStore(t)
+	_, err := store.UpdateState(t.Context(), session.UpdateStateRequest{SessionRef: active.SessionRef, Update: func(state map[string]any) (map[string]any, error) {
+		if state == nil {
+			state = map[string]any{}
+		}
+		state["code_mode_catalog_v2"] = "legacy guidance requiring parallel_safe"
+		return state, nil
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
 	rt, err := New(Config{Sessions: store, AgentFactory: chat.Factory{}})
 	if err != nil {
 		t.Fatal(err)
@@ -366,13 +376,16 @@ func TestJSExecH1HintWarningOncePreservesCapability(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Count(text, tool.ExternalCapabilityDescriptionPrefix) != 1 || !strings.Contains(text, "Read a synthetic lookup") || !strings.Contains(text, "{tools:[{name,description,input_schema,parallel_safe}],count,truncated}") {
+	if strings.Count(text, tool.ExternalCapabilityDescriptionPrefix) != 1 || !strings.Contains(text, "Read a synthetic lookup") || !strings.Contains(text, "{tools:[{name,description,input_schema}],count,truncated,omitted_count?}") || strings.Contains(text, "parallel_safe") {
 		t.Fatalf("H1 guidance/hint semantics lost: %s", text)
 	}
 	if !strings.Contains(text, "tools.call(name,args)") || !strings.Contains(text, "input_schema") || strings.Contains(text, "tools.describe") || strings.Contains(text, "output.") {
 		t.Fatal("minimal search/call guidance absent")
 	}
 	state, _ := store.SnapshotState(t.Context(), active.SessionRef)
+	if state["code_mode_catalog_v2"] != "legacy guidance requiring parallel_safe" {
+		t.Fatal("changed a historical API snapshot")
+	}
 	again, err := rt.codeModeCatalog(t.Context(), active.SessionRef, nil, nil)
 	if err != nil || again != state[codeModeCatalogKey] {
 		t.Fatal("rewrote existing Session guidance")
@@ -412,7 +425,7 @@ func TestJSExecH1HintWarningOncePreservesCapability(t *testing.T) {
 
 }
 
-func TestJSExecSearchRequiresString(t *testing.T) {
+func TestJSExecSearchRejectsUnsupportedObject(t *testing.T) {
 	store, active, _ := codeModeStore(t)
 	s := h1Directory(0)
 	m := &h1Model{s: s, main: func(i int, _ *model.Request) []model.ToolCall {
