@@ -24,7 +24,7 @@ import (
 // Compile the peers in independent module graphs so this exercises actual old
 // and current SDK implementations, rather than two imports of the selected pin.
 func TestACPSDKReleaseCompatibility(t *testing.T) {
-	for _, version := range []string{"v1.5.2", "v1.6.0"} {
+	for _, version := range []string{"v1.5.2", "v1.6.0", "v1.7.0"} {
 		t.Run(version, func(t *testing.T) {
 			root := t.TempDir()
 			for _, name := range []string{"main.go", "go.mod", "go.sum"} {

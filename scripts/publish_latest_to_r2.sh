@@ -56,14 +56,33 @@ r2() {
 }
 
 versioned_prefix="releases/${tag}"
-for archive in "${archives[@]}"; do
-  r2 s3 cp "${work_dir}/${archive}" "s3://${R2_BUCKET}/${versioned_prefix}/${archive}" \
-    --content-type application/gzip \
+# Versioned objects are immutable. Only an explicit missing-key response permits
+# creation, and the conditional write also protects against concurrent writers.
+upload_immutable() {
+  local asset="$1" content_type="$2" key="${versioned_prefix}/$1"
+  if r2 s3api head-object --bucket "${R2_BUCKET}" --key "${key}" \
+      > /dev/null 2> "${work_dir}/head-error"; then
+    r2 s3 cp "s3://${R2_BUCKET}/${key}" "${work_dir}/existing" --no-progress
+    if ! cmp -s "${work_dir}/${asset}" "${work_dir}/existing"; then
+      echo "refusing to overwrite conflicting R2 object: ${key}" >&2
+      return 1
+    fi
+    return 0
+  fi
+  if ! grep -Eq '^An error occurred \((404|NoSuchKey)\) when calling the HeadObject operation:' "${work_dir}/head-error"; then
+    cat "${work_dir}/head-error" >&2
+    echo "R2 object absence not established: ${key}" >&2
+    return 1
+  fi
+  r2 s3api put-object --bucket "${R2_BUCKET}" --key "${key}" \
+    --body "${work_dir}/${asset}" --if-none-match '*' \
+    --content-type "${content_type}" \
     --cache-control 'public, max-age=31536000, immutable'
+}
+for archive in "${archives[@]}"; do
+  upload_immutable "${archive}" application/gzip
 done
-r2 s3 cp "${work_dir}/checksums.txt" "s3://${R2_BUCKET}/${versioned_prefix}/checksums.txt" \
-  --content-type 'text/plain; charset=utf-8' \
-  --cache-control 'public, max-age=31536000, immutable'
+upload_immutable checksums.txt 'text/plain; charset=utf-8'
 
 for asset in "${archives[@]}" checksums.txt; do
   local_size="$(wc -c < "${work_dir}/${asset}" | tr -d '[:space:]')"
@@ -93,22 +112,5 @@ r2 s3 cp "${work_dir}/latest.txt" "s3://${R2_BUCKET}/latest.txt" \
   --content-type 'text/plain; charset=utf-8' \
   --cache-control 'public, max-age=60, must-revalidate'
 
-mapfile -t r2_keys < <(
-  r2 s3api list-objects-v2 \
-    --bucket "${R2_BUCKET}" \
-    --prefix releases/ \
-    --query 'Contents[].Key' \
-    --output text | tr '\t' '\n'
-)
-for key in "${r2_keys[@]}"; do
-  if [[ -z "${key}" || "${key}" == None || "${key}" == "${versioned_prefix}/"* ]]; then
-    continue
-  fi
-  if [[ ! "${key}" =~ ^releases/v[0-9]+\.[0-9]+\.[0-9]+(-[^/[:space:]]+)?/(caelis_[^/]+\.tar\.gz|checksums\.txt)$ ]]; then
-    echo "refusing to delete unexpected R2 object: ${key}" >&2
-    exit 1
-  fi
-  r2 s3 rm "s3://${R2_BUCKET}/${key}"
-done
-
+# Retain prior releases. Removing immutable artifacts requires separate approval.
 echo "Published ${tag} to R2 and updated latest.txt"

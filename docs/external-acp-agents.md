@@ -17,7 +17,7 @@ Application integrations keep their existing stable types independently of the
 ACP wire profile.
 
 Repo-owned subprocess children use the explicitly selected
-`schema-v2.0.0-alpha.13` profile. The hosted Codex adapter keeps stable v1 by
+`schema-v2.0.0-alpha.15` profile. The hosted Codex adapter keeps stable v1 by
 default. Direct native main/child delegation stays
 inside Control and Runtime and does not acquire an ACP transport. User-provided
 process overrides remain stable unless their link explicitly selects a draft.
@@ -25,10 +25,10 @@ The Host-owned adapter descriptor, one-use channel grant and helper invocation
 carry the same exact schema. An unsupported schema fails before granting or
 serving the channel; the selected draft never falls back to v1.
 
-`caelis acp --acp-draft=schema-v2.0.0-alpha.13` serves product Sessions through the
+`caelis acp --acp-draft=schema-v2.0.0-alpha.15` serves product Sessions through the
 existing principal-bound Control clients. Initialization negotiates v2 from a
 client offering protocol version 2 or a newer major, using the v2 `info` shape.
-The controlled product channel requires an exact alpha.13
+The controlled product channel requires an exact alpha.15
 `_meta["caelis/acp_schema"]` tag. Responses advertise the implemented Session
 capabilities and the conditional-prompt profile described below. Initialization
 may repeat before any other request; concurrent attempts and
@@ -41,7 +41,7 @@ or additional directories that their existing owner cannot apply.
 
 The separate Core initialization/capability probe (`ServeDraftStdio`) also
 negotiates newer offered majors down to v2. Its schema tag is optional in the
-request; when explicitly provided it must match alpha.13. The response always
+request; when explicitly provided it must match alpha.15. The response always
 identifies the pinned schema. This probe advertises no Session or auth work;
 omitting its tag does not relax the controlled product channel's requirements.
 
