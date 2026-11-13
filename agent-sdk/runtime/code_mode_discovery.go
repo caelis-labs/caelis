@@ -35,6 +35,17 @@ type codeModeDiscoveryTool struct {
 func (t codeModeDiscoveryTool) Definition() tool.Definition { return t.base.Definition() }
 func (t codeModeDiscoveryTool) Call(ctx context.Context, call tool.Call) (returned tool.Result, callErr error) {
 	nested, _ := ctx.Value(codeModeSearchKey{}).(bool)
+	ctx = toolsearch.WithDiscoveryFilter(ctx, func(ctx context.Context, candidate tool.Definition) (bool, error) {
+		one, found, err := t.lookup(ctx, candidate.Name)
+		if err != nil {
+			return false, tool.WrapError(errorcode.CodeOf(err), err, "tool source lookup failed")
+		}
+		if !found || one == nil {
+			return false, nil
+		}
+		current := one.Definition()
+		return tool.IsMCPDefinition(current) && current.AvailableForModel(call.RuntimeModel) && (!nested || codeModeCanCall(current)) && tool.BindingForDefinition(current) == tool.BindingForDefinition(candidate), nil
+	})
 	if nested {
 		// The producer owns this sink through completion, including after the
 		// foreground yields. Chat's per-step buffer cannot own late receipts.
@@ -87,12 +98,12 @@ func (t codeModeDiscoveryTool) Call(ctx context.Context, call tool.Call) (return
 		}
 		if found && one != nil {
 			def := one.Definition()
-			if tool.IsMCPDefinition(def) && def.AvailableForModel(call.RuntimeModel) && codeModeCanCall(def) {
+			if tool.IsMCPDefinition(def) && def.AvailableForModel(call.RuntimeModel) && codeModeCanCall(def) && entry.Binding != nil && *entry.Binding == tool.BindingForDefinition(def) {
 				current[def.Name] = one
 			}
 		}
 	}
-	return mcpdiscovery.Admit(selected, current, result)
+	return mcpdiscovery.Admit(selected, current, result, call.Input)
 }
 
 func codeModeCanCall(def tool.Definition) bool {
@@ -131,7 +142,7 @@ func (h *codeModeHost) Search(ctx context.Context, request codemode.SearchReques
 	if closed {
 		return reply, tool.NewError(errorcode.FailedPrecondition, "code mode host admission is closed")
 	}
-	if service && (query != "" || len(request.Server) > 1024 || len(request.Plugin) > 1024) || !service && (len(query) == 0 || len(query) > 1024 || request.Plugin != "") {
+	if service && (query != "" || len(request.Server) > 1024 || len(request.Plugin) > 1024) || !service && (len(query) == 0 || len(query) > 1024 || request.Plugin != "" || request.After != "") || len(request.After) > 1024 {
 		return reply, tool.NewError(tool.ErrorCodeInvalidInput, "supply a query or an exact server and optional plugin")
 	}
 	var one tool.Tool
@@ -149,7 +160,7 @@ func (h *codeModeHost) Search(ctx context.Context, request codemode.SearchReques
 		exact = def.Name == query && tool.IsMCPDefinition(def)
 		if def.Name == query && !tool.IsMCPDefinition(def) && !tool.IsToolSearchDefinition(def) && !tool.IsMCPCallDefinition(def) && def.Metadata[tool.MetadataToolKind] != codemode.ToolKind {
 			if !codeModeCanCall(def) || !def.AvailableForModel(h.parent.RuntimeModel) {
-				return reply, tool.NewError(tool.ErrorCodePermissionDenied, "tool is not callable from JavaScript")
+				return reply, codemode.NewPublicPermissionError("tool is not callable from JavaScript")
 			}
 			h.mu.Lock()
 			h.calls++
@@ -158,7 +169,7 @@ func (h *codeModeHost) Search(ctx context.Context, request codemode.SearchReques
 			if over {
 				return reply, tool.NewError(errorcode.ResourceExhausted, "search call budget exceeded")
 			}
-			return h.searchReply("", []codeModeSearchEntry{{Name: def.Name, Description: def.Description, InputSchema: def.InputSchema}}, false, 0)
+			return h.searchReply("", []codeModeSearchEntry{{Name: def.Name, Description: def.Description, InputSchema: def.InputSchema}}, false, 0, "")
 		}
 	}
 	search, available, err := h.owner.lookup(ctx, tool.ToolSearchToolName)
@@ -175,6 +186,9 @@ func (h *codeModeHost) Search(ctx context.Context, request codemode.SearchReques
 		args = map[string]any{"server": request.Server, "limit": 16}
 		if request.Plugin != "" {
 			args["plugin"] = request.Plugin
+		}
+		if request.After != "" {
+			args["after"] = request.After
 		}
 	}
 	raw, _ := json.Marshal(args)
@@ -215,17 +229,18 @@ func (h *codeModeHost) Search(ctx context.Context, request codemode.SearchReques
 		h.mu.Unlock()
 		entries = append(entries, codeModeSearchEntry{Name: entry.Name, Description: entry.Description, InputSchema: entry.InputSchema})
 	}
-	return h.searchReply(reply.CallID, entries, selected.Truncated, selected.OmittedCount)
+	return h.searchReply(reply.CallID, entries, selected.Truncated, selected.OmittedCount, selected.Next)
 }
 
 // Schemas are complete or the search fails; no partial schema is advertised.
-func (h *codeModeHost) searchReply(id string, entries []codeModeSearchEntry, truncated bool, omitted int) (codemode.Reply, error) {
+func (h *codeModeHost) searchReply(id string, entries []codeModeSearchEntry, truncated bool, omitted int, next string) (codemode.Reply, error) {
 	raw, err := json.Marshal(struct {
 		Tools        []codeModeSearchEntry `json:"tools"`
 		Count        int                   `json:"count"`
 		Truncated    bool                  `json:"truncated"`
 		OmittedCount int                   `json:"omitted_count,omitempty"`
-	}{entries, len(entries), truncated, omitted})
+		Next         string                `json:"next,omitempty"`
+	}{entries, len(entries), truncated, omitted, next})
 	if err != nil {
 		return codemode.Reply{}, fmt.Errorf("encode search result: %w", err)
 	}

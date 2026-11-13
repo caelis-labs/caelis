@@ -64,11 +64,13 @@ type Host interface {
 }
 
 // SearchRequest selects either a name/capability query or an exact MCP server.
-// Plugin optionally qualifies Server; it is invalid without Server.
+// Plugin optionally qualifies Server. After continues after a previous Next name
+// in the same exact service scope. Both fields require Server.
 type SearchRequest struct {
 	Query  string `json:"query,omitempty"`
 	Server string `json:"server,omitempty"`
 	Plugin string `json:"plugin,omitempty"`
+	After  string `json:"after,omitempty"`
 }
 
 // DiscoveryHost adds the existing scoped discovery owner to the bridge.
@@ -124,7 +126,7 @@ const MetadataSelectedTools = "code_mode_selected_tools"
 
 // MetadataCatalog carries the Runtime-owned guidance and partial hint snapshot
 // through both static AgentSpec metadata and dynamic request instructions.
-const MetadataCatalog = "code_mode_catalog_v3"
+const MetadataCatalog = "code_mode_catalog_v4"
 
 // Guidance is the fixed model-facing SDK contract. Runtime appends its partial
 // catalog hints separately so discovery never changes this instruction slice.
@@ -133,7 +135,7 @@ const MetadataCatalog = "code_mode_catalog_v3"
 // IsError, Task state, authorization and durable effect outcomes.
 const MetadataScriptCompletion = "code_mode_script_completion"
 
-const Guidance = `Code Mode SDK: await tools.search(query) matches an exact tool name first, otherwise searches capabilities. tools.search({server,plugin?}) lists tools of an exact MCP server without fuzzy selection. Both return {tools:[{name,description,input_schema}],count,truncated,omitted_count?} with complete schemas; reuse valid bindings. await tools.call(name,args) returns {parts:[{kind,text?,json?,handle?,mime_type?}]}. Follow the schema and tool descriptions; choose sequential or concurrent calls according to their semantics. tools.unpack(reply) returns {json:[],text:[],media:[]} retaining every part and original media references. Explicitly return desired JSON or original reply/part references to deliver output and media; copying media fields does not preserve identity. Return only JSON values: omit undefined fields or use null; no return yields null. Numbers use JS Number precision; use strings for big integers and reply.raw_json for original JSON tokens. Host failures reject with error.reply containing the original projected reply and optional error.code for typed Host errors; local errors may lack reply. Catching does not erase failed records. Never blindly replay unknown outcomes. After a stale binding error, use tools.search(name) to reload its schema/binding. Native filesystem tools remain directly callable; shell execution stays outside js_exec.`
+const Guidance = `Code Mode SDK: await tools.search(query) matches an exact tool name first, otherwise searches capabilities. tools.search({server,plugin?,after?}) lists an exact MCP server without fuzzy selection; pass next as after with the same server/plugin to continue. Both return {tools:[{name,description,input_schema}],count,truncated,omitted_count?,next?} with complete schemas; reuse valid bindings. await tools.call(name,args) returns {parts:[{kind,text?,json?,handle?,mime_type?}]}. Follow the schema and tool descriptions; choose sequential or concurrent calls according to their semantics. tools.unpack(reply) returns {json:[],text:[],media:[]} retaining every part and original media references. Explicitly return desired JSON or original reply/part references to deliver output and media; copying media fields does not preserve identity. Return only JSON values: omit undefined fields or use null; no return yields null. Numbers use JS Number precision; use strings for big integers and reply.raw_json for original JSON tokens. Host failures reject with error.reply containing the original projected reply and optional error.code for typed Host errors; local errors may lack reply. Catching does not erase failed records. Never blindly replay unknown outcomes. After a stale binding error, use tools.search(name) to reload its schema/binding. Native filesystem tools remain directly callable; shell execution stays outside js_exec.`
 
 // Tool is a concrete declaration, retained until Runtime injects its Host.
 // Product assembly uses the fixed ToolName. Every execution has a new VM.

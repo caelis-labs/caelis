@@ -46,6 +46,16 @@ allowlist. A StartThread-created collaborator receives only `ListThreads` and `S
 from the collaboration tool set. Creation and work observation remain with the
 controller, keeping Agent collaboration one level deep.
 
+Within one native Run, Runtime serializes calls to a canonical target whose
+`ParallelSafe` capability is false. Native calls, yielded scripts and replacement
+model snapshots share that Run-owned gate. Waiting occurs after approval and
+before source guards or durable effect claims; cancellation of a queued call
+creates no execution claim. Different targets and explicitly parallel-safe tools
+can overlap. Task control declares this capability because its owner coordinates
+per-task mutations while allowing independent read, wait and cancellation.
+Embedders sharing unsafe mutable tool instances across independent Runs must
+coordinate that sharing themselves.
+
 Participant startup uses an internal Session-scoped execution identity. An optional handle must be unique.
 Optional context transfer is derived by the host's recipient-specific
 `ContextRouter`; an empty transfer or an unavailable router is not child-start

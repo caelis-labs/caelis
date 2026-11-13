@@ -10,6 +10,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
@@ -37,6 +38,7 @@ type request struct {
 	Query  string `json:"query"`
 	Server string `json:"server,omitempty"`
 	Plugin string `json:"plugin,omitempty"`
+	After  string `json:"after,omitempty"`
 	Limit  int    `json:"limit"`
 }
 
@@ -70,6 +72,7 @@ func newTool(entries []entry) *Tool {
 				"properties": map[string]any{
 					"server": map[string]any{"type": "string", "minLength": 1, "maxLength": 1024, "description": "Exact canonical MCP server metadata. Returns tools in name order without model selection."},
 					"plugin": map[string]any{"type": "string", "minLength": 1, "maxLength": 1024, "description": "Optional exact canonical plugin metadata; requires server."},
+					"after":  map[string]any{"type": "string", "minLength": 1, "maxLength": 1024, "description": "Continue an exact server/plugin search after the previous result's next name."},
 					"name":   map[string]any{"type": "string", "minLength": 1, "description": "Exact current tool name to describe without fuzzy selection."},
 					"query": map[string]any{
 						"type":        "string",
@@ -163,16 +166,43 @@ func (t *Tool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
 	} else {
 		snapshot.entries = t.currentEntries()
 	}
+	// Filter before selection and response budgets. This only controls discovery;
+	// execution and binding admission remain with their existing owners.
+	eligible := make([]entry, 0, len(snapshot.entries))
+	filter, _ := ctx.Value(discoveryFilterKey{}).(func(context.Context, tool.Definition) (bool, error))
+	for _, candidate := range snapshot.entries {
+		if args.Server != "" {
+			server, _ := candidate.def.Metadata[tool.MetadataMCPServer].(string)
+			plugin, _ := candidate.def.Metadata[tool.MetadataPluginID].(string)
+			if server != args.Server || args.Plugin != "" && plugin != args.Plugin {
+				continue
+			}
+		}
+		if !candidate.def.AvailableForModel(call.RuntimeModel) {
+			continue
+		}
+		if filter != nil {
+			allowed, err := filter(ctx, candidate.def)
+			if err != nil {
+				return tool.Result{}, err
+			}
+			if !allowed {
+				continue
+			}
+		}
+		eligible = append(eligible, candidate)
+	}
+	snapshot.entries = eligible
 	var matches []entry
 	omitted := 0
 	if args.Server != "" {
 		if err := snapshot.checkSource(ctx); err != nil {
 			return tool.Result{}, err
 		}
+		anchorFound := args.After == ""
 		for _, candidate := range snapshot.entries {
-			server, _ := candidate.def.Metadata[tool.MetadataMCPServer].(string)
-			plugin, _ := candidate.def.Metadata[tool.MetadataPluginID].(string)
-			if server != args.Server || args.Plugin != "" && plugin != args.Plugin {
+			if !anchorFound {
+				anchorFound = candidate.def.Name == args.After
 				continue
 			}
 			if len(matches) == args.Limit {
@@ -184,6 +214,9 @@ func (t *Tool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
 				return tool.Result{}, readErr
 			}
 			matches = append(matches, entry{def: def})
+		}
+		if !anchorFound {
+			return tool.Result{}, tool.NewError(tool.ErrorCodeStaleRevision, "service continuation is outside the current eligible scope; restart discovery")
 		}
 	} else if args.Name != "" {
 		def, readErr := snapshot.readSchema(ctx, args.Name)
@@ -204,11 +237,22 @@ func (t *Tool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
 		result.Tools = append(result.Tools, tool.NewToolSearchDiscoveredTool(match.def))
 	}
 	result.Count = len(result.Tools)
+	setNext := func() {
+		result.Next = ""
+		if args.Server != "" && result.Truncated && len(result.Tools) > 0 {
+			result.Next = result.Tools[len(result.Tools)-1].Name
+		}
+	}
+	setNext()
 	for tool.EstimateToolSearchResultPromptTokens(result) > tool.MaxToolSearchResultPromptTokens && len(result.Tools) > 0 {
 		result.Tools = result.Tools[:len(result.Tools)-1]
 		result.Count = len(result.Tools)
 		result.Truncated = true
 		result.OmittedCount++
+		setNext()
+	}
+	if args.Server != "" && result.Truncated && len(result.Tools) == 0 {
+		return tool.Result{}, tool.NewError(errorcode.ResourceExhausted, "complete tool schema exceeds the service search budget")
 	}
 	raw, err := json.Marshal(result)
 	if err != nil {
@@ -290,7 +334,7 @@ func parseRequest(raw json.RawMessage) (request, error) {
 	if err := json.Unmarshal(raw, &values); err != nil {
 		return args, fmt.Errorf("decode ToolSearch input: %w", err)
 	}
-	if err := tool.RejectUnknownArgs(values, "query", "limit", "name", "server", "plugin"); err != nil {
+	if err := tool.RejectUnknownArgs(values, "query", "limit", "name", "server", "plugin", "after"); err != nil {
 		return args, err
 	}
 	if err := json.Unmarshal(raw, &args); err != nil {
@@ -299,6 +343,10 @@ func parseRequest(raw json.RawMessage) (request, error) {
 	args.Query = strings.TrimSpace(args.Query)
 	_, serverProvided := values["server"]
 	_, pluginProvided := values["plugin"]
+	_, afterProvided := values["after"]
+	if afterProvided && (args.Server == "" || args.After == "" || args.After != strings.TrimSpace(args.After) || len(args.After) > 1024) {
+		return args, tool.NewError(tool.ErrorCodeInvalidInput, "after requires an exact server and a non-empty tool name")
+	}
 	if serverProvided || pluginProvided {
 		_, nameProvided := values["name"]
 		_, queryProvided := values["query"]

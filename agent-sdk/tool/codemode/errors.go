@@ -26,9 +26,26 @@ func (e *ExecutionError) Error() string             { return e.Message }
 func (e *ExecutionError) ErrorCode() errorcode.Code { return e.Code }
 func (e *ExecutionError) Unwrap() error             { return e.Err }
 
+// NewPublicPermissionError marks a fixed Runtime-owned permission diagnostic as
+// safe for JavaScript, model and Task output. The message must not include tool
+// arguments, credentials, transport details or other untrusted data.
+func NewPublicPermissionError(message string) error {
+	return &publicPermissionError{message: message}
+}
+
+type publicPermissionError struct {
+	message string
+}
+
+func (e *publicPermissionError) Error() string { return e.message }
+func (e *publicPermissionError) ErrorCode() errorcode.Code {
+	return tool.ErrorCodePermissionDenied
+}
+
 // PublicHostError projects a Host failure for JavaScript, model and Task output.
-// Only typed input/permission details and fixed recovery guidance cross this boundary;
-// transport bodies, credentials and arbitrary internal error chains stay private.
+// Only typed input details, explicitly safe permission diagnostics and fixed
+// recovery guidance cross this boundary; transport bodies, credentials and
+// arbitrary internal error chains stay private.
 func PublicHostError(name string, err error) *tool.ToolError {
 	code := errorcode.CodeOf(err)
 	if payload := tool.ErrorPayload(err); payload != nil {
@@ -52,15 +69,23 @@ func PublicHostError(name string, err error) *tool.ToolError {
 		return tool.NewError(code, message+": tool outcome is unknown; do not replay the effect.")
 	}
 	var pathError *os.PathError
-	if errors.Is(err, fs.ErrNotExist) && errors.As(err, &pathError) {
+	if code == tool.ErrorCodeNotFound && errors.Is(err, fs.ErrNotExist) && errors.As(err, &pathError) {
 		path := pathError.Path
 		if len(path) > 512 {
 			path = path[:512]
 		}
 		return tool.NewError(code, message+": $.path: file does not exist: "+path)
 	}
+	var permission *publicPermissionError
+	if code == tool.ErrorCodePermissionDenied && errors.As(err, &permission) {
+		detail := permission.message
+		if len(detail) > 768 {
+			detail = detail[:768]
+		}
+		return tool.NewError(code, message+": "+detail)
+	}
 	var validation *tool.ToolError
-	if (code == tool.ErrorCodeInvalidInput || code == tool.ErrorCodePermissionDenied) && errors.As(err, &validation) && validation.Err == nil {
+	if code == tool.ErrorCodeInvalidInput && errors.As(err, &validation) && validation.Err == nil {
 		detail := validation.Message
 		if len(detail) > 768 {
 			detail = detail[:768]

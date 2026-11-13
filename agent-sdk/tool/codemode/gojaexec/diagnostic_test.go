@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/caelis-labs/caelis/agent-sdk/tool"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
+	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 )
 
 func TestUserSourceAndJSONFieldDiagnostics(t *testing.T) {
@@ -61,14 +63,14 @@ func TestCaughtValidationDetailAndTransportRedaction(t *testing.T) {
 		t.Fatalf("typed Host code lost: %s (%v)", out.Value, err)
 	}
 	h = testHost{call: func(context.Context, string, json.RawMessage) (codemode.Reply, error) {
-		return codemode.Reply{}, tool.NewError(tool.ErrorCodePermissionDenied, "native command stdin is prohibited from JavaScript")
+		return codemode.Reply{}, codemode.NewPublicPermissionError("native command stdin is prohibited from JavaScript")
 	}}
 	out, err = (&Executor{}).Execute(t.Context(), fixed(`try {await tools.call("Task",{});}catch(e){return {message:e.message,code:e.code};}`), codemode.Limits{}, h)
 	if err != nil || !strings.Contains(string(out.Value), "native command stdin is prohibited") || !strings.Contains(string(out.Value), "permission_denied") {
 		t.Fatalf("permission diagnostic lost: %s (%v)", out.Value, err)
 	}
 	secret := "https://user:password@host/?token=secret raw network body"
-	for _, hostErr := range []error{errors.New(secret), tool.WrapError(tool.ErrorCodePermissionDenied, errors.New(secret), secret)} {
+	for _, hostErr := range []error{errors.New(secret), tool.NewError(tool.ErrorCodePermissionDenied, secret), fmt.Errorf("wrapper: %w", tool.NewError(tool.ErrorCodePermissionDenied, secret)), tool.WrapError(tool.ErrorCodePermissionDenied, errors.New(secret), secret)} {
 		h = testHost{call: func(context.Context, string, json.RawMessage) (codemode.Reply, error) {
 			return codemode.Reply{}, hostErr
 		}}

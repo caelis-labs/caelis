@@ -395,7 +395,7 @@ func (h *codeModeHost) call(requestCtx context.Context, name string, arguments j
 		return codemode.Reply{}, tool.NewError(tool.ErrorCodeNotFound, "tool has not been discovered; use tools.search(name) first")
 	}
 	if !codeModeCanCall(target.definition) {
-		return codemode.Reply{}, tool.NewError(tool.ErrorCodePermissionDenied, "native shell/process execution is prohibited from JavaScript")
+		return codemode.Reply{}, codemode.NewPublicPermissionError("native shell/process execution is prohibited from JavaScript")
 	}
 	h.mu.Lock()
 	if h.closed || h.ctx.Err() != nil {

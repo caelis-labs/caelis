@@ -24,6 +24,7 @@ type journaledTool struct {
 	runID      string
 	turnID     string
 	now        func() time.Time
+	gates      *toolCallGates
 }
 
 func (t journaledTool) Definition() tool.Definition { return tool.CloneDefinition(t.base.Definition()) }
@@ -36,6 +37,16 @@ func (t journaledTool) Call(ctx context.Context, call tool.Call) (tool.Result, e
 	admission, err := codeModeAdmissionFor(ctx, call)
 	if err != nil {
 		return tool.Result{}, err
+	}
+	def := t.base.Definition()
+	if t.gates != nil && !def.Capabilities.ParallelSafe {
+		// Approval has resolved. Wait before taking source/snapshot guards or
+		// claiming a durable effect, so cancellation of a queued call is final.
+		releaseCall, err := t.gates.acquire(ctx, def.Name)
+		if err != nil {
+			return tool.Result{}, err
+		}
+		defer releaseCall()
 	}
 	nested := admission != nil
 	var release func()
@@ -51,7 +62,6 @@ func (t journaledTool) Call(ctx context.Context, call tool.Call) (tool.Result, e
 			}
 		}()
 	}
-	def := t.base.Definition()
 	now := t.now
 	if now == nil {
 		now = time.Now
@@ -270,13 +280,14 @@ func (t journaledTool) appendEntry(
 	return err
 }
 
-func (r *Runtime) wrapToolsForExecutionJournal(ref session.SessionRef, runID string, turnID string, tools []tool.Tool) []tool.Tool {
+func (r *Runtime) wrapToolsForExecutionJournal(ctx context.Context, ref session.SessionRef, runID string, turnID string, tools []tool.Tool) []tool.Tool {
+	gates, _ := ctx.Value(toolCallGatesKey{}).(*toolCallGates)
 	out := make([]tool.Tool, 0, len(tools))
 	for _, item := range tools {
 		if item == nil {
 			continue
 		}
-		out = append(out, journaledTool{base: item, sessions: r.sessions, sessionRef: session.NormalizeSessionRef(ref), runID: strings.TrimSpace(runID), turnID: strings.TrimSpace(turnID), now: r.now})
+		out = append(out, journaledTool{base: item, sessions: r.sessions, sessionRef: session.NormalizeSessionRef(ref), runID: strings.TrimSpace(runID), turnID: strings.TrimSpace(turnID), now: r.now, gates: gates})
 	}
 	return out
 }

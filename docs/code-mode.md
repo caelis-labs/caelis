@@ -32,12 +32,16 @@ The async function body exposes these SDK operations:
 
 - `await tools.search(query)` first matches an exact callable native or current
   extension name, otherwise uses the existing fuzzy search. It returns
-  `{tools:[{name,description,input_schema}],count,truncated,omitted_count?}`.
-  `tools.search({server,plugin?})` instead matches an exact MCP server and optional
-  plugin identity, returning tools in name order without fuzzy selection. Both
-  routes return complete schemas; `truncated` and `omitted_count` report candidates
-  omitted by result limits or schema budgets. Extension bindings are recorded by
-  the original canonical discovery owner.
+  `{tools:[{name,description,input_schema}],count,truncated,omitted_count?,next?}`.
+  `tools.search({server,plugin?,after?})` instead matches an exact MCP server and
+  optional plugin identity without fuzzy selection. Current model and source
+  eligibility are applied before the result limits and schema budget. Service
+  pages use name order; when `next` is present, pass it as `after` with the same
+  server/plugin to continue. A removed, revoked or foreign continuation anchor
+  requires restarting discovery. Both routes return complete schemas;
+  `truncated` and `omitted_count` describe remaining eligible candidates.
+  An individually oversized schema produces a budget error. Extension bindings
+  are recorded by the original canonical discovery owner.
 - `tools.call(name, args)` returns a Promise resolving to `{parts:[...]}`. Text parts have `text`,
   JSON parts have `json`, and media parts carry an opaque invocation-owned handle.
 - `tools.unpack(reply)` returns `{json:[],text:[],media:[]}` in each part kind's
@@ -67,8 +71,11 @@ Catching does not erase failed records. An uncaught script exception produces
 call IDs and JSON tokens. Caught failures retain compact disposition records and
 explicitly selected output. JavaScript exception properties do not determine
 execution outcomes or attachment identity. Model delivery and Task completion
-use the same public diagnostics; internal Host causes stay private. An unknown
-outcome must never be replayed blindly.
+use the same public diagnostics; internal Host causes stay private. Permission
+messages are generic unless the Runtime owner explicitly marks a fixed diagnostic
+as public. Uncaught failures retain media handles as JSON evidence without
+attaching images. To deliver a diagnostic image, catch the error and return its
+original media reference. An unknown outcome must never be replayed blindly.
 Arguments follow the schema, including required exact strings. Native filesystem
 functions remain directly callable and may also be orchestrated from JS. Search
 and call retain current source, generation, binding and permission checks. On a
@@ -77,8 +84,8 @@ stale result, search again; old arguments are not automatically executed.
 Sources may implement the existing `tool.NamedSource`/`Registry.Lookup` contract.
 Lookup grants no authority; both admission boundaries and the final Journal claim
 remain in the original wrapper chain. Sources without Lookup retain the linear
-fallback; fuzzy search retains its existing selector budgets. No lock crosses
-approval or Tool I/O. Snapshot hints remain fixed within this API version; a
+fallback; fuzzy search retains its existing selector budgets. No source or
+discovery lock crosses approval or Tool I/O. Snapshot hints remain fixed within this API version; a
 software API change creates its own presentation snapshot, not a new grant cache.
 
 JSON Numbers outside JavaScript's safe integer range may round. The original
@@ -86,8 +93,10 @@ reply remains explicitly accessible through non-enumerable `reply.raw_json`,
 which retains original JSON tokens. BigInt must be returned as a string. Return only JSON values; omit
 optional undefined properties or use null. An omitted return is null. Encoding errors
 identify the field path. Scripts choose sequential or concurrent calls according
-to tool descriptions and operation semantics. Code Mode adds no concurrency
-capability flag or overlap restriction; ordinary admission, call budgets,
+to tool descriptions and operation semantics. `Promise.all` remains available;
+Runtime enforces the tool owner's concurrency capability internally through the
+[Run-owned execution gate](agent-sdk-boundary.md#runtime-and-capabilities).
+Discovery does not expose a concurrency flag. Ordinary admission, call budgets,
 cancellation and receipt ownership apply to every call.
 
 ## Authority and invalidation

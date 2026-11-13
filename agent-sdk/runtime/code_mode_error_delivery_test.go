@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -183,58 +185,77 @@ func TestJSExecErrorDeliveryPreservesDomainReply(t *testing.T) {
 // Validation errors occur before tool invocation and have no public MCP result.
 // Only the redacted worker diagnostic may enter model or Task error output.
 func TestJSExecErrorDeliveryRedactsInternalHostFailure(t *testing.T) {
-	store, active, root := codeModeStore(t)
-	secret := "https://user:private-password@host/?token=private-token raw-private-network-body"
-	var executing atomic.Bool
-	var calls atomic.Int32
-	target := tool.NamedTool{Def: tool.Definition{Name: "Effect", InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
-		calls.Add(1)
-		return tool.Result{}, nil
-	}}
-	declaration := &codemode.Tool{Name: codemode.ToolName, Executor: codeOutputExecutorFunc(func(ctx context.Context, source codemode.Source, host codemode.Host) (codemode.Output, error) {
-		executing.Store(true)
-		defer executing.Store(false)
-		return (&gojaexec.Executor{}).Execute(ctx, source, codemode.DefaultLimits(), host)
-	})}
-	driver := &mcpScriptModel{steps: func(i int, _ *model.Request) []model.ToolCall {
-		if i == 0 {
-			return []model.ToolCall{{ID: "host-error", Name: codemode.ToolName, Args: `{"code":"await tools.call('Effect',{});"}`}}
-		}
-		return nil
-	}}
-	spec := agent.AgentSpec{ResolveModelRequest: func(context.Context) (agent.ModelRequestSnapshot, error) {
-		return agent.ModelRequestSnapshot{Model: driver, Tools: []tool.Tool{target, declaration}, Revision: "host-error-generation", Validate: func(context.Context) (func(), error) {
-			if executing.Load() {
-				return nil, errors.New(secret)
+	for _, tc := range []struct {
+		name      string
+		hostError func(string) error
+	}{
+		{name: "untyped", hostError: func(secret string) error { return errors.New(secret) }},
+		{name: "plain_permission", hostError: func(secret string) error { return tool.NewError(tool.ErrorCodePermissionDenied, secret) }},
+		{name: "wrapped_permission", hostError: func(secret string) error {
+			return fmt.Errorf("private wrapper: %w", tool.NewError(tool.ErrorCodePermissionDenied, secret))
+		}},
+		{name: "permission_with_cause", hostError: func(secret string) error {
+			return tool.WrapError(tool.ErrorCodePermissionDenied, errors.New(secret), secret)
+		}},
+		{name: "permission_with_private_path", hostError: func(secret string) error {
+			return tool.WrapError(tool.ErrorCodePermissionDenied, &fs.PathError{Op: "read", Path: secret, Err: fs.ErrNotExist}, secret)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store, active, root := codeModeStore(t)
+			secret := "https://user:private-password@host/?token=private-token raw-private-network-body"
+			var executing atomic.Bool
+			var calls atomic.Int32
+			target := tool.NamedTool{Def: tool.Definition{Name: "Effect", InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
+				calls.Add(1)
+				return tool.Result{}, nil
+			}}
+			declaration := &codemode.Tool{Name: codemode.ToolName, Executor: codeOutputExecutorFunc(func(ctx context.Context, source codemode.Source, host codemode.Host) (codemode.Output, error) {
+				executing.Store(true)
+				defer executing.Store(false)
+				return (&gojaexec.Executor{}).Execute(ctx, source, codemode.DefaultLimits(), host)
+			})}
+			driver := &mcpScriptModel{steps: func(i int, _ *model.Request) []model.ToolCall {
+				if i == 0 {
+					return []model.ToolCall{{ID: "host-error", Name: codemode.ToolName, Args: `{"code":"await tools.call('Effect',{});"}`}}
+				}
+				return nil
+			}}
+			spec := agent.AgentSpec{ResolveModelRequest: func(context.Context) (agent.ModelRequestSnapshot, error) {
+				return agent.ModelRequestSnapshot{Model: driver, Tools: []tool.Tool{target, declaration}, Revision: "host-error-generation", Validate: func(context.Context) (func(), error) {
+					if executing.Load() {
+						return nil, tc.hostError(secret)
+					}
+					return func() {}, nil
+				}}, nil
+			}}
+			runCodeMode(t, store, active, spec, nil, nil)
+			if calls.Load() != 0 {
+				t.Fatal("failed Host validation admitted an effect")
 			}
-			return func() {}, nil
-		}}, nil
-	}}
-	runCodeMode(t, store, active, spec, nil, nil)
-	if calls.Load() != 0 {
-		t.Fatal("failed Host validation admitted an effect")
-	}
-	visible := errorDeliveryModelResult(t, driver.requests[len(driver.requests)-1], "host-error")
-	reopened := sessionfile.NewStore(sessionfile.Config{RootDir: filepath.Join(root, "sessions")})
-	entries, err := sessionfile.NewTaskStore(reopened).ListSession(t.Context(), active.SessionRef)
-	if err != nil || len(entries) != 1 {
-		t.Fatalf("durable script Tasks=%d, error=%v", len(entries), err)
-	}
-	if !visible.IsError || entries[0].State != taskapi.StateFailed {
-		t.Fatal("Host validation failure was hidden")
-	}
-	for name, value := range map[string]any{"next_model": visible, "persisted_task": entries[0].Result} {
-		raw, err := json.Marshal(value)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, private := range []string{"private-password", "private-token", "raw-private-network-body"} {
-			if bytes.Contains(raw, []byte(private)) {
-				t.Fatalf("%s exposed internal Host diagnostic %q: %s", name, private, raw)
+			visible := errorDeliveryModelResult(t, driver.requests[len(driver.requests)-1], "host-error")
+			reopened := sessionfile.NewStore(sessionfile.Config{RootDir: filepath.Join(root, "sessions")})
+			entries, err := sessionfile.NewTaskStore(reopened).ListSession(t.Context(), active.SessionRef)
+			if err != nil || len(entries) != 1 {
+				t.Fatalf("durable script Tasks=%d, error=%v", len(entries), err)
 			}
-		}
+			if !visible.IsError || entries[0].State != taskapi.StateFailed {
+				t.Fatal("Host validation failure was hidden")
+			}
+			for name, value := range map[string]any{"next_model": visible, "persisted_task": entries[0].Result} {
+				raw, err := json.Marshal(value)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, private := range []string{"private-password", "private-token", "raw-private-network-body"} {
+					if bytes.Contains(raw, []byte(private)) {
+						t.Fatalf("%s exposed internal Host diagnostic %q: %s", name, private, raw)
+					}
+				}
+			}
+			assertSubagentSagaModelRoundTrip(t, reopened, active.SessionRef)
+		})
 	}
-	assertSubagentSagaModelRoundTrip(t, reopened, active.SessionRef)
 }
 
 func errorDeliveryModelResult(t *testing.T, request *model.Request, callID string) *model.ToolResultPart {

@@ -362,6 +362,7 @@ func TestJSExecH1HintWarningOncePreservesCapability(t *testing.T) {
 			state = map[string]any{}
 		}
 		state["code_mode_catalog_v2"] = "legacy guidance requiring parallel_safe"
+		state["code_mode_catalog_v3"] = "legacy guidance without service continuation"
 		return state, nil
 	}})
 	if err != nil {
@@ -376,14 +377,14 @@ func TestJSExecH1HintWarningOncePreservesCapability(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Count(text, tool.ExternalCapabilityDescriptionPrefix) != 1 || !strings.Contains(text, "Read a synthetic lookup") || !strings.Contains(text, "{tools:[{name,description,input_schema}],count,truncated,omitted_count?}") || strings.Contains(text, "parallel_safe") {
+	if strings.Count(text, tool.ExternalCapabilityDescriptionPrefix) != 1 || !strings.Contains(text, "Read a synthetic lookup") || !strings.Contains(text, "{tools:[{name,description,input_schema}],count,truncated,omitted_count?,next?}") || strings.Contains(text, "parallel_safe") {
 		t.Fatalf("H1 guidance/hint semantics lost: %s", text)
 	}
 	if !strings.Contains(text, "tools.call(name,args)") || !strings.Contains(text, "input_schema") || strings.Contains(text, "tools.describe") || strings.Contains(text, "output.") {
 		t.Fatal("minimal search/call guidance absent")
 	}
 	state, _ := store.SnapshotState(t.Context(), active.SessionRef)
-	if state["code_mode_catalog_v2"] != "legacy guidance requiring parallel_safe" {
+	if state["code_mode_catalog_v2"] != "legacy guidance requiring parallel_safe" || state["code_mode_catalog_v3"] != "legacy guidance without service continuation" {
 		t.Fatal("changed a historical API snapshot")
 	}
 	again, err := rt.codeModeCatalog(t.Context(), active.SessionRef, nil, nil)

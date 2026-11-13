@@ -130,7 +130,7 @@ func TestCodeModeBoundaryBudgetsDuringConcurrentCalls(t *testing.T) {
 	unblock := sync.OnceFunc(func() { close(release) })
 	defer unblock()
 	var effects atomic.Int32
-	target := tool.NamedTool{Def: tool.Definition{Name: "Read", InputSchema: map[string]any{"type": "object"}}, Invoke: func(ctx context.Context, _ tool.Call) (tool.Result, error) {
+	target := tool.NamedTool{Def: tool.Definition{Name: "Read", Capabilities: tool.Capabilities{ParallelSafe: true}, InputSchema: map[string]any{"type": "object"}}, Invoke: func(ctx context.Context, _ tool.Call) (tool.Result, error) {
 		effects.Add(1)
 		started <- struct{}{}
 		select {

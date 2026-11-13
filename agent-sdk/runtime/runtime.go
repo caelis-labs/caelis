@@ -267,6 +267,7 @@ func (r *Runtime) Run(
 		turnID = r.nextID("turn", nil)
 	}
 	runCtx = context.WithValue(runCtx, taskScopeKey{}, newTaskContinuationScope())
+	runCtx = context.WithValue(runCtx, toolCallGatesKey{}, &toolCallGates{})
 	runCtx = withLifecycleScope(runCtx, lifecycleScope{sessionRef: ref, runID: runID, turnID: turnID})
 	if err := r.beginRun(ref, runID); err != nil {
 		cancel()

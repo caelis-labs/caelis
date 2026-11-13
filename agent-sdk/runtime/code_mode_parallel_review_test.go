@@ -16,7 +16,16 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode/gojaexec"
 )
 
-func TestJSExecConcurrentDefaultCapabilityTools(t *testing.T) {
+func TestJSExecParallelSafeSameTargetCallsOverlap(t *testing.T) {
+	testJSExecConcurrentTargets(t, true)
+}
+
+func TestJSExecDistinctDefaultTargetsOverlap(t *testing.T) {
+	testJSExecConcurrentTargets(t, false)
+}
+
+func testJSExecConcurrentTargets(t *testing.T, sameTarget bool) {
+	t.Helper()
 	for _, mcp := range []bool{false, true} {
 		t.Run(fmt.Sprint("mcp-", mcp), func(t *testing.T) {
 			store, active, _ := codeModeStore(t)
@@ -30,6 +39,7 @@ func TestJSExecConcurrentDefaultCapabilityTools(t *testing.T) {
 				def.Name = "z__target"
 				def.Metadata[tool.MetadataMCPSourceTrusted] = true
 			}
+			def.Capabilities.ParallelSafe = sameTarget
 			target := tool.NamedTool{Def: def, Invoke: func(ctx context.Context, _ tool.Call) (tool.Result, error) {
 				effects.Add(1)
 				started <- struct{}{}
@@ -56,10 +66,19 @@ func TestJSExecConcurrentDefaultCapabilityTools(t *testing.T) {
 				}
 				observed <- nil
 			}()
-			code := fmt.Sprintf(`await tools.search(%q); const replies = await Promise.all([tools.call(%q, {}), tools.call(%q, {})]); return {count: replies.length};`, def.Name, def.Name, def.Name)
+			other := target
+			if !sameTarget {
+				other.Def = tool.CloneDefinition(def)
+				other.Def.Name += "Other"
+			}
+			code := fmt.Sprintf(`await tools.search(%q); await tools.search(%q); const replies = await Promise.all([tools.call(%q, {}), tools.call(%q, {})]); return {count: replies.length};`, def.Name, other.Def.Name, def.Name, other.Def.Name)
+			targets := []tool.Tool{target}
+			if !sameTarget {
+				targets = append(targets, other)
+			}
 			var spec agent.AgentSpec
 			if mcp {
-				source := &h1Source{items: []tool.Tool{target}, seen: map[string]bool{}}
+				source := &h1Source{items: targets, seen: map[string]bool{}}
 				driver := &h1Model{s: source, main: func(i int, _ *model.Request) []model.ToolCall {
 					if i == 0 {
 						return h1Script(code)
@@ -74,7 +93,7 @@ func TestJSExecConcurrentDefaultCapabilityTools(t *testing.T) {
 					}
 					return nil
 				}}
-				spec = agent.AgentSpec{Model: driver, Tools: []tool.Tool{target, &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}}}}
+				spec = agent.AgentSpec{Model: driver, Tools: append(targets, &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}})}
 			}
 			events, _ := runCodeMode(t, store, active, spec, nil, nil)
 			if err := <-observed; err != nil {
