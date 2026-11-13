@@ -11,7 +11,7 @@ import (
 )
 
 func TestR2PublisherImmutableObjects(t *testing.T) {
-	for _, scenario := range []string{"fresh", "identical", "conflict", "denied", "race", "readback"} {
+	for _, scenario := range []string{"fresh", "prefixed-404", "no-such-key", "prefixed-no-such-key", "identical", "conflict", "denied", "prefixed-403", "race", "readback"} {
 		t.Run(scenario, func(t *testing.T) {
 			dir := t.TempDir()
 			bin := filepath.Join(dir, "bin")
@@ -84,8 +84,16 @@ while [[ $# -gt 0 ]]; do
 done
 path="${REMOTE}/${key##*/}"
 if [[ "$operation" == head-object ]]; then
- if [[ "$SCENARIO" == denied ]]; then echo 'An error occurred (403) when calling the HeadObject operation: Forbidden' >&2; exit 1; fi
- if [[ ! -f "$path" ]]; then echo 'An error occurred (404) when calling the HeadObject operation: Not Found' >&2; exit 1; fi
+ prefix=
+ if [[ "$SCENARIO" == prefixed-* ]]; then prefix='aws: [ERROR]: '; fi
+ if [[ "$SCENARIO" == denied || "$SCENARIO" == prefixed-403 ]]; then
+  echo "${prefix}An error occurred (403) when calling the HeadObject operation: Forbidden" >&2; exit 1
+ fi
+ if [[ ! -f "$path" ]]; then
+  code=404
+  if [[ "$SCENARIO" == *no-such-key ]]; then code=NoSuchKey; fi
+  echo "${prefix}An error occurred (${code}) when calling the HeadObject operation: Not Found" >&2; exit 1
+ fi
  if [[ "$query" == ContentLength ]]; then wc -c < "$path"; else echo '{}'; fi
 elif [[ "$operation" == put-object ]]; then
  [[ "$condition" == '*' ]] || exit 97
@@ -100,7 +108,7 @@ fi
 			cmd := exec.Command(testBash(t), filepath.Join(dir, "publish_latest_to_r2.sh"), "v0.79.1")
 			cmd.Env = append(os.Environ(), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"), "FIXTURE="+fixture, "REMOTE="+remote, "CALLS="+calls, "SCENARIO="+scenario, "GITHUB_REPOSITORY=caelis-labs/caelis", "GH_TOKEN=fixture", "R2_BUCKET=bucket", "R2_ENDPOINT=https://example.invalid")
 			output, err := cmd.CombinedOutput()
-			wantSuccess := scenario == "fresh" || scenario == "identical"
+			wantSuccess := scenario == "fresh" || scenario == "identical" || scenario == "prefixed-404" || strings.HasSuffix(scenario, "no-such-key")
 			if (err == nil) != wantSuccess {
 				t.Fatalf("success=%v want %v: %v\n%s", err == nil, wantSuccess, err, output)
 			}
@@ -119,7 +127,7 @@ fi
 			if scenario == "identical" && strings.Contains(string(log), "put-object") {
 				t.Fatal("matching immutable objects were rewritten")
 			}
-			if scenario == "denied" && strings.Contains(string(log), "put-object") {
+			if (scenario == "denied" || scenario == "prefixed-403") && strings.Contains(string(log), "put-object") {
 				t.Fatal("read failure treated as absence")
 			}
 			if scenario == "conflict" || scenario == "race" {

@@ -232,6 +232,11 @@ If the immutable tag's workflow needs a fix, design and review a version-specifi
 recovery from the saved receipt and exact signed bytes, or publish a new version.
 Never change an existing tag or replace published assets to resume publication.
 
+The temporary `recover-r2-v0791` workflow is scoped to the reviewed change of its
+workflow file on `main`. It verifies the original v0.79.1 tag and the completed
+release run, then resumes only R2 with the current publisher. It never rebuilds,
+re-signs, or republishes GitHub/npm artifacts. Remove this entry after recovery.
+
 ### Manual fallback
 
 If the bot is unavailable, first merge a reviewed PR updating the root manifest
