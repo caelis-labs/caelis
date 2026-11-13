@@ -69,7 +69,7 @@ upload_immutable() {
     fi
     return 0
   fi
-  if ! grep -Eq '^An error occurred \((404|NoSuchKey)\) when calling the HeadObject operation:' "${work_dir}/head-error"; then
+  if ! grep -Eq '^(aws: \[ERROR\]: )?An error occurred \((404|NoSuchKey)\) when calling the HeadObject operation:' "${work_dir}/head-error"; then
     cat "${work_dir}/head-error" >&2
     echo "R2 object absence not established: ${key}" >&2
     return 1
