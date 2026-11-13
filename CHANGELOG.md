@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.79.1](https://github.com/caelis-labs/caelis/compare/v0.79.0...v0.79.1) (2026-11-13)
+
+This release carries forward the Code Mode and TUI improvements from v0.79.0, whose binary publication was stopped after notarization failed. The v0.79.0 tag remains unchanged.
+
+SDK embedders upgrading from v0.78.1 must adapt `DiscoveryHost.Search` to `codemode.SearchRequest`; JavaScript string searches remain supported. Explicit ACP draft endpoints now require `schema-v2.0.0-alpha.15`; stable v1 remains the default.
+
+
+### Bug Fixes
+
+* **acp:** update SDK to v1.7.0 and preserve release artifacts ([#213](https://github.com/caelis-labs/caelis/issues/213)) ([825aeff](https://github.com/caelis-labs/caelis/commit/825aeff2217b76c9337e2c8eccd553880757e33e))
+
 ## [0.79.0](https://github.com/caelis-labs/caelis/compare/v0.78.1...v0.79.0) (2026-11-13)
 
 
