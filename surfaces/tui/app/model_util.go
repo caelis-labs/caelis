@@ -846,7 +846,8 @@ func alignDisplayColumnToCharBoundary(s string, c int) int {
 	state := -1
 	remaining := s
 	for len(remaining) > 0 {
-		_, rest, w, newState := uniseg.FirstGraphemeClusterInString(remaining, state)
+		cluster, rest, _, newState := uniseg.FirstGraphemeClusterInString(remaining, state)
+		w := graphemeWidth(cluster)
 		if c >= col && c < col+w {
 			return col
 		}

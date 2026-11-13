@@ -10,6 +10,8 @@ import (
 
 // graphemeWidth returns the display width of s in terminal cells,
 // iterating by grapheme cluster. ANSI escape codes are stripped first.
+// Use this width policy even when uniseg supplies cluster boundaries, so
+// layout follows the renderer's East Asian ambiguous-width setting.
 func graphemeWidth(s string) int {
 	return ansi.StringWidth(s)
 }
@@ -33,7 +35,8 @@ func graphemeSlice(s string, start, end int) string {
 	state := -1
 	remaining := s
 	for len(remaining) > 0 {
-		cluster, rest, w, newState := uniseg.FirstGraphemeClusterInString(remaining, state)
+		cluster, rest, _, newState := uniseg.FirstGraphemeClusterInString(remaining, state)
+		w := graphemeWidth(cluster)
 		state = newState
 		remaining = rest
 
@@ -71,7 +74,8 @@ func graphemeHardWrap(s string, width int) []string {
 	state := -1
 	remaining := s
 	for len(remaining) > 0 {
-		cluster, rest, w, newState := uniseg.FirstGraphemeClusterInString(remaining, state)
+		cluster, rest, _, newState := uniseg.FirstGraphemeClusterInString(remaining, state)
+		w := graphemeWidth(cluster)
 		state = newState
 		remaining = rest
 
