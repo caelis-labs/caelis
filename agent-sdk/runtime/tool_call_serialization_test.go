@@ -241,7 +241,7 @@ func TestToolCallSerializationSharedAcrossYieldedSnapshotsAndNative(t *testing.T
 		}
 		return policy.Decision{Action: policy.ActionAllow}, nil
 	}}}
-	driver := &mcpScriptModel{steps: func(i int, _ *model.Request) []model.ToolCall {
+	driver := &mcpScriptModel{steps: func(i int, req *model.Request) []model.ToolCall {
 		switch i {
 		case 0:
 			return []model.ToolCall{{ID: "script-one", Name: codemode.ToolName, Args: `{"code":"return await tools.call('State',{index:1})","yield_time_ms":0}`}}
@@ -256,10 +256,35 @@ func TestToolCallSerializationSharedAcrossYieldedSnapshotsAndNative(t *testing.T
 				{ID: "script-two", Name: codemode.ToolName, Args: `{"code":"return await tools.call('State',{index:2})","yield_time_ms":0}`},
 				{ID: "native-state", Name: "State", Args: `{"index":3}`},
 			}
+		case 2:
+			// The final safe point cancels unfinished scripts. Wait on their
+			// original handles so this test observes completion before ending the Turn.
+			var waits []model.ToolCall
+			for _, message := range req.Messages {
+				for _, part := range message.Parts {
+					if part.ToolResult == nil || part.ToolResult.Name != codemode.ToolName {
+						continue
+					}
+					for _, content := range part.ToolResult.Content {
+						if content.JSON == nil {
+							continue
+						}
+						var snapshot struct {
+							Handle string `json:"handle"`
+						}
+						if err := json.Unmarshal(content.JSON.Value, &snapshot); err != nil || snapshot.Handle == "" {
+							continue
+						}
+						raw, _ := json.Marshal(map[string]string{"action": "wait", "handle": snapshot.Handle})
+						waits = append(waits, model.ToolCall{ID: "observe-" + part.ToolResult.ToolUseID, Name: tasktool.ToolName, Args: string(raw)})
+					}
+				}
+			}
+			return waits
 		}
 		return nil
 	}}
-	tools := []tool.Tool{target, &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}}}
+	tools := []tool.Tool{target, tasktool.New(), &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}}}
 	var snapshots atomic.Int32
 	spec := agent.AgentSpec{Model: driver, Tools: tools, ResolveModelRequest: func(context.Context) (agent.ModelRequestSnapshot, error) {
 		return agent.ModelRequestSnapshot{Model: driver, Tools: tools, Revision: fmt.Sprint(snapshots.Add(1)), Validate: func(context.Context) (func(), error) { return func() {}, nil }}, nil
