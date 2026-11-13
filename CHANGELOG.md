@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.79.0](https://github.com/caelis-labs/caelis/compare/v0.78.1...v0.79.0) (2026-11-13)
+
+
+### ⚠ BREAKING CHANGES
+
+* SDK DiscoveryHost.Search now accepts codemode.SearchRequest instead of a query string. JavaScript string searches remain supported.
+
+### Features
+
+* improve js_exec usability and compact tool call display ([#210](https://github.com/caelis-labs/caelis/issues/210)) ([ceb2d8c](https://github.com/caelis-labs/caelis/commit/ceb2d8c8b34d3c6072d72e1bee790e211e852e49))
+
+
+### Bug Fixes
+
+* align TUI grapheme operations with renderer width ([#212](https://github.com/caelis-labs/caelis/issues/212)) ([37c08ef](https://github.com/caelis-labs/caelis/commit/37c08efb596ce60332ffd5f7db665f603caa1937))
+
 ## [0.78.1](https://github.com/caelis-labs/caelis/compare/v0.78.0...v0.78.1) (2026-11-11)
 
 
