@@ -1,7 +1,14 @@
 package tuiapp
 
 import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
+
+	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -119,28 +126,241 @@ func TestUnifiedJSZeroChildrenAndActualTargetReview(t *testing.T) {
 	}
 }
 
-func TestUnifiedJSUsesExploredSummaryColumns(t *testing.T) {
-	children := []SubagentEvent{
-		{Kind: SEToolCall, CallID: "one", Name: "Read", Args: "docs/first.txt", Done: true},
-		{Kind: SEToolCall, CallID: "two", Name: "Read", Args: "docs/second.txt", Done: true},
-	}
-	for _, width := range []int{36, 60, 100} {
+func TestUnifiedJSUsesSingleLineSummaryColumns(t *testing.T) {
+	for _, width := range []int{24, 36, 60, 100} {
 		m := NewModel(Config{})
 		ctx := m.blockRenderContext(width)
-		events := []SubagentEvent{{Kind: SEToolCall, CallID: "root", Name: "js_exec", Done: true, ScriptCompletion: "completed"}}
-		for _, child := range children {
-			child.ParentToolCallID = "root"
-			child.ParentToolName = "js_exec"
-			events = append(events, child)
+		events := []SubagentEvent{
+			{Kind: SEToolCall, CallID: "root", Name: "js_exec", Done: true},
+			{Kind: SEToolCall, CallID: "one", Name: "Read", Args: "docs/first.txt", ParentToolCallID: "root", ParentToolName: "js_exec", Done: true},
+			{Kind: SEToolCall, CallID: "two", Name: "Read", Args: "docs/second.txt", ParentToolCallID: "root", ParentToolName: "js_exec", Done: true},
 		}
 		rows, _, _ := renderInvocationToolGroupRows("b", events, 0, width, ctx, acpTranscriptRenderOptions{})
-		expected := explorationGroupDetailRowsWithWorkspaceMode(children, width, ctx.Workspace, explorationToolDetailLiveSummary)
-		if len(rows)-1 != len(expected) {
-			t.Fatal("different public summary wrapping")
+		want := "  └ Read " + compactSingleLineHeader("first.txt, second.txt", width-9)
+		if len(rows) != 2 || rows[1].Plain != want || !rows[1].PreWrapped {
+			t.Fatalf("width %d: %#v", width, rows)
 		}
-		for i, line := range expected {
-			if rows[i+1].Plain != line {
-				t.Fatalf("width %d: JS %q Explored %q", width, rows[i+1].Plain, line)
+	}
+}
+
+func longScriptArgumentEvents(status string) []*session.Event {
+	out := consecutiveScriptEvents()[:6]
+	for _, event := range out {
+		if event.Tool.Name == "Read" {
+			event.Tool.Name = "context7__query_docs"
+			event.Tool.Input = map[string]any{"libraryId": "/caelis/docs", "query": strings.Repeat("context details ", 18) + "EXACT_CONTEXT7_MIDDLE" + strings.Repeat(" documentation", 18)}
+		}
+		if event.Tool.Name == "desktop_world__exec" {
+			event.Tool.Input = map[string]any{"app": "fixture.app", "script": strings.Repeat("await app.look();\n", 18) + "EXACT_DTW_MIDDLE" + strings.Repeat(" await app.look();", 18)}
+		}
+		if event.Type == session.EventTypeToolResult {
+			event.Tool.Status = status
+			if status == "started" {
+				event.Type = session.EventTypeToolCall
+			}
+		}
+		event.Tool.Content = []session.EventToolContent{{Type: "content", Text: "PRIVATE_RESULT_BODY"}}
+	}
+	return out
+}
+
+func scriptBlockEvents(b Block) []SubagentEvent {
+	switch block := b.(type) {
+	case *MainACPTurnBlock:
+		return block.Events
+	case *ParticipantTurnBlock:
+		return block.Events
+	}
+	return nil
+}
+
+func TestUnifiedJSLongArgumentsLiveReplayDisclosure(t *testing.T) {
+	for _, scope := range []string{"main", "child"} {
+		for _, replay := range []bool{false, true} {
+			for _, status := range []string{"started", "completed", "failed"} {
+				for _, width := range []int{24, 36, 60, 100} {
+					t.Run(fmt.Sprintf("%s/replay=%v/%s/%d", scope, replay, status, width), func(t *testing.T) {
+						canonical := longScriptArgumentEvents(status)
+						m, b := groupedCanonicalModel(t, canonical, scope, replay)
+						ctx := m.blockRenderContext(width)
+						compact := b.Render(ctx)
+						if len(compact) != 3 {
+							t.Fatalf("calls wrapped: %s", joinRenderedPlain(compact))
+						}
+						for _, row := range compact {
+							if displayColumns(row.Plain) > width || ansi.StringWidth(row.Styled) > width || strings.Contains(row.Plain, "\n") {
+								t.Fatalf("wrapped row: %q", row.Plain)
+							}
+						}
+						for _, call := range []struct {
+							id, marker string
+							index      int
+						}{{"script1Read", "EXACT_CONTEXT7_MIDDLE", 1}, {"script1desktop_world__exec", "EXACT_DTW_MIDDLE", 3}} {
+							original, err := json.MarshalIndent(canonical[call.index].Tool.Input, "", "  ")
+							if err != nil {
+								t.Fatal(err)
+							}
+							ev, ok := latestToolEventForCallID(scriptBlockEvents(b), call.id)
+							if !ok || ev.FullArgs != string(original) {
+								t.Fatalf("original arguments lost: %q != %q", ev.FullArgs, original)
+							}
+							if strings.Contains(joinRenderedPlain(compact), call.marker) {
+								t.Fatal("middle not folded")
+							}
+							clickScriptToken(t, m, b, ctx, acpToolPanelClickToken(call.id))
+							full := joinRenderedPlain(b.Render(ctx))
+							// Wrapping can split the marker; remove display whitespace.
+							if !strings.Contains(strings.Join(strings.Fields(full), ""), call.marker) {
+								t.Fatalf("missing original args: %s", full)
+							}
+							if strings.Contains(full, "PRIVATE_RESULT_BODY") || strings.Contains(full, "SOURCE_JS_NEVER") {
+								t.Fatal(full)
+							}
+							clickScriptToken(t, m, b, ctx, acpToolPanelClickToken(call.id))
+							if got := joinRenderedPlain(b.Render(ctx)); got != joinRenderedPlain(compact) {
+								t.Fatalf("collapse differs: %s", got)
+							}
+							retained, _ := latestToolEventForCallID(scriptBlockEvents(b), call.id)
+							if retained.FullArgs != string(original) {
+								t.Fatal("click changed original arguments")
+							}
+						}
+						clickScriptToken(t, m, b, ctx, acpStableExplorationClickToken("tools:script1"))
+						if len(b.Render(ctx)) != 3 {
+							t.Fatal("root expansion wrapped calls")
+						}
+						clickScriptToken(t, m, b, ctx, acpToolPanelClickToken("script1Read"))
+						if len(b.Render(ctx)) <= 3 {
+							t.Fatal("expanded root lost child disclosure")
+						}
+					})
+				}
+			}
+		}
+	}
+}
+
+func TestUnifiedJSLongArgumentsPhysicalMouseAndGolden(t *testing.T) {
+	for _, width := range []int{24, 36, 60} {
+		t.Run(fmt.Sprint(width), func(t *testing.T) {
+			m, b := groupedCanonicalModel(t, longScriptArgumentEvents("completed"), "main", true)
+			m.Update(tea.WindowSizeMsg{Width: width, Height: 35})
+			m.syncViewportContent()
+			ctx := m.blockRenderContext(width)
+			path := filepath.Join("testdata", fmt.Sprintf("script_args_%d.golden", width))
+			got := joinRenderedPlain(b.Render(ctx)) + "\n"
+
+			want, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != string(want) {
+				t.Fatalf("%s mismatch:\n%s", path, got)
+			}
+			frames := []string{m.View().Content}
+			click := func() {
+				t.Helper()
+				for line, token := range m.viewportClickTokens {
+					if token == acpToolPanelClickToken("script1Read") {
+						clickViewportColumn(t, m, line, 5)
+						return
+					}
+				}
+				t.Fatal("call has no viewport mouse target")
+			}
+			click()
+			if !b.(*MainACPTurnBlock).toolPanelFullOutput("script1Read") {
+				t.Fatal("mouse did not expand arguments")
+			}
+			frames = append(frames, m.View().Content)
+			click()
+			if b.(*MainACPTurnBlock).toolPanelFullOutput("script1Read") {
+				t.Fatal("mouse did not collapse arguments")
+			}
+			frames = append(frames, m.View().Content)
+			updates := renderFullscreenFramesForTest(t, width, 35, frames...)
+			for n, frame := range frames {
+				assertPhysicalFullscreenFrame(t, width, 35, frame, updates[:n+1])
+			}
+		})
+	}
+}
+
+func TestUnifiedJSAggregateLongCallsAndNames(t *testing.T) {
+	for _, width := range []int{8, 24, 36} {
+		m := NewModel(Config{})
+		ctx := m.blockRenderContext(width)
+		b := NewMainACPTurnBlock("aggregate")
+		b.UpdateToolWithMeta("root", "js_exec", "", "", true, false, ToolUpdateMeta{})
+		name := "desktop_world__exec_with_a_very_long_tool_name"
+		args := strings.Repeat("argument ", 25) + "TAIL"
+		for _, id := range []string{"one", "two"} {
+			b.UpdateToolWithMeta(id, name, args, "PRIVATE_BODY", true, false, ToolUpdateMeta{ParentToolCallID: "root", ParentToolName: "js_exec", FullArgs: args})
+		}
+		rows := b.Render(ctx)
+		if len(rows) != 2 || rows[1].ClickToken != acpStableExplorationClickToken("tools:root") {
+			t.Fatal(joinRenderedPlain(rows))
+		}
+		if !b.toggleExplorationExpanded("tools:root") {
+			t.Fatal("root toggle failed")
+		}
+		rows = b.Render(ctx)
+		if len(rows) != 3 {
+			t.Fatal("aggregate did not reveal individual calls")
+		}
+		for _, row := range rows[1:] {
+			if displayColumns(row.Plain) > width || ansi.StringWidth(row.Styled) > width {
+				t.Fatalf("long name wrapped: %q", row.Plain)
+			}
+		}
+		if !b.toggleToolPanelClick("one") {
+			t.Fatal("call toggle failed")
+		}
+		if !b.toolPanelFullOutput("one") || b.toolPanelFullOutput("two") {
+			t.Fatal("child click changed sibling")
+		}
+		b.toggleExplorationExpanded("tools:root")
+		b.UpdateToolWithMeta("three", name, args, "", true, false, ToolUpdateMeta{ParentToolCallID: "root", ParentToolName: "js_exec", FullArgs: args})
+		found := false
+		for _, row := range b.Render(ctx) {
+			if row.ClickToken == acpToolPanelClickToken("one") {
+				found = true
+			}
+		}
+		if !found || len(b.Render(ctx)) <= 3 {
+			t.Fatal("adjacent arrival hid explicitly opened arguments")
+		}
+		b.UpdateToolWithMeta("empty", "empty_tool", "", "PRIVATE_BODY", true, false, ToolUpdateMeta{ParentToolCallID: "root", ParentToolName: "js_exec"})
+		for _, row := range b.Render(ctx) {
+			if row.ClickToken == acpToolPanelClickToken("empty") {
+				t.Fatal("empty call offered argument expansion")
+			}
+		}
+	}
+}
+
+func TestUnifiedJSArgumentClicksAcrossCompletion(t *testing.T) {
+	for _, scope := range []string{"main", "child"} {
+		m, b := groupedCanonicalModel(t, longScriptArgumentEvents("started"), scope, false)
+		ctx := m.blockRenderContext(36)
+		for cycle := 0; cycle < 3; cycle++ {
+			clickScriptToken(t, m, b, ctx, acpToolPanelClickToken("script1Read"))
+			if cycle == 0 {
+				meta := ToolUpdateMeta{ParentToolCallID: "script1", ParentToolName: "js_exec"}
+				switch block := b.(type) {
+				case *MainACPTurnBlock:
+					block.UpdateToolWithMeta("script1Read", "context7__query_docs", "", "PRIVATE_BODY", true, false, meta)
+				case *ParticipantTurnBlock:
+					block.UpdateToolWithMeta("script1Read", "context7__query_docs", "", "PRIVATE_BODY", true, false, meta)
+				}
+			}
+			full := strings.Join(strings.Fields(joinRenderedPlain(b.Render(ctx))), "")
+			if !strings.Contains(full, "EXACT_CONTEXT7_MIDDLE") {
+				t.Fatal("single click did not expand original arguments")
+			}
+			clickScriptToken(t, m, b, ctx, acpToolPanelClickToken("script1Read"))
+			if len(b.Render(ctx)) != 3 {
+				t.Fatal("single click did not collapse arguments")
 			}
 		}
 	}

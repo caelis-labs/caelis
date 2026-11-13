@@ -27,7 +27,7 @@ func codeModeAdmissionFor(ctx context.Context, call tool.Call) (*codeModeAdmissi
 	}
 	binding, _ := ctx.Value(codeModeAdmissionKey{}).(*codeModeAdmissionBinding)
 	if binding == nil || binding.validate == nil || binding.callID != call.ID || binding.name != call.Name || binding.parent != *call.Parent {
-		return nil, tool.NewError(tool.ErrorCodePermissionDenied, "Code Mode child requires its original live Host admission binding")
+		return nil, codemode.NewPublicPermissionError("Code Mode child requires its original live Host admission binding")
 	}
 	return binding, nil
 }

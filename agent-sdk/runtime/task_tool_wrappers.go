@@ -666,7 +666,11 @@ func (r subagentApprovalRequester) RequestSubagentApproval(
 }
 
 func (t runtimeTaskTool) Definition() tool.Definition {
-	return tool.CloneDefinition(t.base.Definition())
+	def := tool.CloneDefinition(t.base.Definition())
+	// Task control owns per-task mutation claims; observations and cancellation
+	// must remain independent of waits that can join the observed producer.
+	def.Capabilities.ParallelSafe = true
+	return def
 }
 
 func (t runtimeTaskTool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
@@ -696,7 +700,7 @@ func (t runtimeTaskTool) Call(ctx context.Context, call tool.Call) (tool.Result,
 				return tool.Result{}, err
 			}
 			if strings.EqualFold(action, "write") && identity.kind == taskapi.KindCommand {
-				return tool.Result{}, tool.NewError(tool.ErrorCodePermissionDenied, "native command stdin is prohibited from JavaScript")
+				return tool.Result{}, codemode.NewPublicPermissionError("native command stdin is prohibited from JavaScript")
 			}
 			if identity.kind == taskapi.KindCodeMode && (strings.EqualFold(action, "wait") || strings.EqualFold(action, "cancel")) {
 				entry, ok := t.tasks.storedTaskEntryByID(ctx, t.sessionRef, identity.taskID)

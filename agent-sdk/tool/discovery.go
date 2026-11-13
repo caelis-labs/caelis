@@ -13,6 +13,8 @@ type ToolSearchResult struct {
 	Count        int                        `json:"count,omitempty"`
 	Truncated    bool                       `json:"truncated,omitempty"`
 	OmittedCount int                        `json:"omitted_count,omitempty"`
+	// Next is the last emitted name when an exact service has another page.
+	Next string `json:"next,omitempty"`
 }
 
 // ToolSearchDiscoveredTool identifies one deferred tool. The full accepted schema is returned in discovery results.

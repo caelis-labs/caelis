@@ -10,6 +10,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
@@ -33,9 +34,12 @@ type entry struct {
 }
 
 type request struct {
-	Name  string `json:"name,omitempty"`
-	Query string `json:"query"`
-	Limit int    `json:"limit"`
+	Name   string `json:"name,omitempty"`
+	Query  string `json:"query"`
+	Server string `json:"server,omitempty"`
+	Plugin string `json:"plugin,omitempty"`
+	After  string `json:"after,omitempty"`
+	Limit  int    `json:"limit"`
 }
 
 // New returns a discovery tool for deferred MCP tools. A nil result means there
@@ -64,9 +68,12 @@ func newTool(entries []entry) *Tool {
 			InputSchema: map[string]any{
 				"type":                 "object",
 				"additionalProperties": false,
-				"oneOf":                []any{map[string]any{"required": []string{"query"}}, map[string]any{"required": []string{"name"}}},
+				"oneOf":                []any{map[string]any{"required": []string{"query"}}, map[string]any{"required": []string{"name"}}, map[string]any{"required": []string{"server"}}},
 				"properties": map[string]any{
-					"name": map[string]any{"type": "string", "minLength": 1, "description": "Exact current tool name to describe without fuzzy selection."},
+					"server": map[string]any{"type": "string", "minLength": 1, "maxLength": 1024, "description": "Exact canonical MCP server metadata. Returns tools in name order without model selection."},
+					"plugin": map[string]any{"type": "string", "minLength": 1, "maxLength": 1024, "description": "Optional exact canonical plugin metadata; requires server."},
+					"after":  map[string]any{"type": "string", "minLength": 1, "maxLength": 1024, "description": "Continue an exact server/plugin search after the previous result's next name."},
+					"name":   map[string]any{"type": "string", "minLength": 1, "description": "Exact current tool name to describe without fuzzy selection."},
 					"query": map[string]any{
 						"type":        "string",
 						"description": "Search query for MCP tools.",
@@ -159,8 +166,59 @@ func (t *Tool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
 	} else {
 		snapshot.entries = t.currentEntries()
 	}
+	// Filter before selection and response budgets. This only controls discovery;
+	// execution and binding admission remain with their existing owners.
+	eligible := make([]entry, 0, len(snapshot.entries))
+	filter, _ := ctx.Value(discoveryFilterKey{}).(func(context.Context, tool.Definition) (bool, error))
+	for _, candidate := range snapshot.entries {
+		if args.Server != "" {
+			server, _ := candidate.def.Metadata[tool.MetadataMCPServer].(string)
+			plugin, _ := candidate.def.Metadata[tool.MetadataPluginID].(string)
+			if server != args.Server || args.Plugin != "" && plugin != args.Plugin {
+				continue
+			}
+		}
+		if !candidate.def.AvailableForModel(call.RuntimeModel) {
+			continue
+		}
+		if filter != nil {
+			allowed, err := filter(ctx, candidate.def)
+			if err != nil {
+				return tool.Result{}, err
+			}
+			if !allowed {
+				continue
+			}
+		}
+		eligible = append(eligible, candidate)
+	}
+	snapshot.entries = eligible
 	var matches []entry
-	if args.Name != "" {
+	omitted := 0
+	if args.Server != "" {
+		if err := snapshot.checkSource(ctx); err != nil {
+			return tool.Result{}, err
+		}
+		anchorFound := args.After == ""
+		for _, candidate := range snapshot.entries {
+			if !anchorFound {
+				anchorFound = candidate.def.Name == args.After
+				continue
+			}
+			if len(matches) == args.Limit {
+				omitted++
+				continue
+			}
+			def, readErr := snapshot.readSchema(ctx, candidate.def.Name)
+			if readErr != nil {
+				return tool.Result{}, readErr
+			}
+			matches = append(matches, entry{def: def})
+		}
+		if !anchorFound {
+			return tool.Result{}, tool.NewError(tool.ErrorCodeStaleRevision, "service continuation is outside the current eligible scope; restart discovery")
+		}
+	} else if args.Name != "" {
 		def, readErr := snapshot.readSchema(ctx, args.Name)
 		if readErr != nil {
 			return tool.Result{}, readErr
@@ -174,16 +232,27 @@ func (t *Tool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
 			return tool.Result{}, err
 		}
 	}
-	result := tool.ToolSearchResult{Tools: make([]tool.ToolSearchDiscoveredTool, 0, len(matches))}
+	result := tool.ToolSearchResult{Tools: make([]tool.ToolSearchDiscoveredTool, 0, len(matches)), Truncated: omitted > 0, OmittedCount: omitted}
 	for _, match := range matches {
 		result.Tools = append(result.Tools, tool.NewToolSearchDiscoveredTool(match.def))
 	}
 	result.Count = len(result.Tools)
+	setNext := func() {
+		result.Next = ""
+		if args.Server != "" && result.Truncated && len(result.Tools) > 0 {
+			result.Next = result.Tools[len(result.Tools)-1].Name
+		}
+	}
+	setNext()
 	for tool.EstimateToolSearchResultPromptTokens(result) > tool.MaxToolSearchResultPromptTokens && len(result.Tools) > 0 {
 		result.Tools = result.Tools[:len(result.Tools)-1]
 		result.Count = len(result.Tools)
 		result.Truncated = true
 		result.OmittedCount++
+		setNext()
+	}
+	if args.Server != "" && result.Truncated && len(result.Tools) == 0 {
+		return tool.Result{}, tool.NewError(errorcode.ResourceExhausted, "complete tool schema exceeds the service search budget")
 	}
 	raw, err := json.Marshal(result)
 	if err != nil {
@@ -265,13 +334,28 @@ func parseRequest(raw json.RawMessage) (request, error) {
 	if err := json.Unmarshal(raw, &values); err != nil {
 		return args, fmt.Errorf("decode ToolSearch input: %w", err)
 	}
-	if err := tool.RejectUnknownArgs(values, "query", "limit", "name"); err != nil {
+	if err := tool.RejectUnknownArgs(values, "query", "limit", "name", "server", "plugin", "after"); err != nil {
 		return args, err
 	}
 	if err := json.Unmarshal(raw, &args); err != nil {
 		return args, fmt.Errorf("decode ToolSearch input: %w", err)
 	}
 	args.Query = strings.TrimSpace(args.Query)
+	_, serverProvided := values["server"]
+	_, pluginProvided := values["plugin"]
+	_, afterProvided := values["after"]
+	if afterProvided && (args.Server == "" || args.After == "" || args.After != strings.TrimSpace(args.After) || len(args.After) > 1024) {
+		return args, tool.NewError(tool.ErrorCodeInvalidInput, "after requires an exact server and a non-empty tool name")
+	}
+	if serverProvided || pluginProvided {
+		_, nameProvided := values["name"]
+		_, queryProvided := values["query"]
+		if args.Server == "" || args.Server != strings.TrimSpace(args.Server) || len(args.Server) > 1024 ||
+			args.Plugin != strings.TrimSpace(args.Plugin) || len(args.Plugin) > 1024 || pluginProvided && args.Plugin == "" ||
+			nameProvided || queryProvided {
+			return args, tool.NewError(tool.ErrorCodeInvalidInput, "supply an exact server and optional plugin, or query or name")
+		}
+	}
 	if args.Name != "" {
 		if args.Name != strings.TrimSpace(args.Name) || len(args.Name) > 1024 || args.Query != "" {
 			return args, tool.NewError(tool.ErrorCodeInvalidInput, "supply query or an exact name")
@@ -281,8 +365,8 @@ func parseRequest(raw json.RawMessage) (request, error) {
 		}
 		return args, nil
 	}
-	if args.Query == "" {
-		return args, tool.NewError(tool.ErrorCodeInvalidInput, "ToolSearch query is required")
+	if args.Query == "" && args.Server == "" {
+		return args, tool.NewError(tool.ErrorCodeInvalidInput, "ToolSearch query or server is required")
 	}
 	if utf8.RuneCountInString(args.Query) > maxQueryRunes {
 		return args, tool.NewError(tool.ErrorCodeInvalidInput, fmt.Sprintf("ToolSearch query must be at most %d characters", maxQueryRunes))

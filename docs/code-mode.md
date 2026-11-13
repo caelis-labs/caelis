@@ -28,15 +28,26 @@ output. Each execution starts with fresh state. There are no Node.js, module,
 direct filesystem, network or process APIs. `file` paths resolve relative to the
 working directory; shell execution stays outside `js_exec`.
 
-The async function body has two interfaces:
+The async function body exposes these SDK operations:
 
 - `await tools.search(query)` first matches an exact callable native or current
   extension name, otherwise uses the existing fuzzy search. It returns
-  `{tools:[{name,description,input_schema}],count,truncated}`. Schemas are complete;
-  candidates omitted by the bounded result budget are marked by `truncated`.
-  Extension bindings are recorded by the original canonical discovery owner.
+  `{tools:[{name,description,input_schema}],count,truncated,omitted_count?,next?}`.
+  `tools.search({server,plugin?,after?})` instead matches an exact MCP server and
+  optional plugin identity without fuzzy selection. Current model and source
+  eligibility are applied before the result limits and schema budget. Service
+  pages use name order; when `next` is present, pass it as `after` with the same
+  server/plugin to continue. A removed, revoked or foreign continuation anchor
+  requires restarting discovery. Both routes return complete schemas;
+  `truncated` and `omitted_count` describe remaining eligible candidates.
+  An individually oversized schema produces a budget error. Extension bindings
+  are recorded by the original canonical discovery owner.
 - `tools.call(name, args)` returns a Promise resolving to `{parts:[...]}`. Text parts have `text`,
   JSON parts have `json`, and media parts carry an opaque invocation-owned handle.
+- `tools.unpack(reply)` returns `{json:[],text:[],media:[]}` in each part kind's
+  original order. All JSON and text parts are retained, including repeated
+  representations; media entries are original part references. The input must be
+  an original tool reply, including one obtained from `error.reply`.
 
 `return await tools.call(name, args)` delivers the text, JSON and actual media to
 model context. `return await tools.search(query)` delivers the search result.
@@ -52,9 +63,19 @@ exception. No `tools.describe` or `output` interface is installed.
 First MCP discovery establishes bindings reusable within that Session. Search
 and calls may be sequentially awaited in the same script. Known schemas may be
 reused across calls; a fresh VM clears only JS variables. Host failures reject
-with an Error whose `reply` property contains the host reply. Local validation or
-script errors may lack `reply`. Catching does not erase failed records, and an
-unknown outcome must never be replayed blindly.
+with an Error whose `reply` property contains the host reply. Typed Host failures
+also expose `error.code`; tool-specific error codes and effect details stay in
+that reply's original content. Local validation or script errors may lack `reply`.
+Catching does not erase failed records. An uncaught script exception produces
+`javascript_error` plus the Runtime-retained failed replies, including original
+call IDs and JSON tokens. Caught failures retain compact disposition records and
+explicitly selected output. JavaScript exception properties do not determine
+execution outcomes or attachment identity. Model delivery and Task completion
+use the same public diagnostics; internal Host causes stay private. Permission
+messages are generic unless the Runtime owner explicitly marks a fixed diagnostic
+as public. Uncaught failures retain media handles as JSON evidence without
+attaching images. To deliver a diagnostic image, catch the error and return its
+original media reference. An unknown outcome must never be replayed blindly.
 Arguments follow the schema, including required exact strings. Native filesystem
 functions remain directly callable and may also be orchestrated from JS. Search
 and call retain current source, generation, binding and permission checks. On a
@@ -63,16 +84,20 @@ stale result, search again; old arguments are not automatically executed.
 Sources may implement the existing `tool.NamedSource`/`Registry.Lookup` contract.
 Lookup grants no authority; both admission boundaries and the final Journal claim
 remain in the original wrapper chain. Sources without Lookup retain the linear
-fallback; fuzzy search retains its existing selector budgets. No lock crosses
-approval or Tool I/O. Snapshot hints remain fixed within this API version; a
+fallback; fuzzy search retains its existing selector budgets. No source or
+discovery lock crosses approval or Tool I/O. Snapshot hints remain fixed within this API version; a
 software API change creates its own presentation snapshot, not a new grant cache.
 
 JSON Numbers outside JavaScript's safe integer range may round. The original
 reply remains explicitly accessible through non-enumerable `reply.raw_json`,
 which retains original JSON tokens. BigInt must be returned as a string. Return only JSON values; omit
 optional undefined properties or use null. An omitted return is null. Encoding errors
-identify the field path. Await calls sequentially by default; concurrent calls
-require every target to advertise `parallel_safe: true` in search results.
+identify the field path. Scripts choose sequential or concurrent calls according
+to tool descriptions and operation semantics. `Promise.all` remains available;
+Runtime enforces the tool owner's concurrency capability internally through the
+[Run-owned execution gate](agent-sdk-boundary.md#runtime-and-capabilities).
+Discovery does not expose a concurrency flag. Ordinary admission, call budgets,
+cancellation and receipt ownership apply to every call.
 
 ## Authority and invalidation
 
@@ -99,10 +124,11 @@ receipt and overall error flag. Cancellation, authority, persistence, transport
 and unknown-effect failures still stop the script.
 
 TUI gives each script invocation its own `Running script` / `Ran script`
-disclosure, using the existing Explored summary, indentation and folding. Actual child calls appear as they
-start; the collapsed summary includes their real names and argument summaries.
-Expanding lists individual calls, with no source, return values or diagnostics in
-the trajectory. Failed calls are red; running calls use the existing activity
+disclosure with the existing Explored indentation. Actual child calls appear as
+they start. The group header expands adjacent same-name summaries into individual
+calls. Each call preview occupies one physical line, using the existing middle
+fold for long arguments; clicking it expands the original arguments and clicking
+again folds them. Failed calls are red; running calls use the existing activity
 style. Model narration and unrelated direct calls remain outside. MCP arguments
 are not interpreted to invent domain summaries.
 
@@ -112,12 +138,12 @@ normally completed script has a normal dot. An uncaught exception has a red dot.
 Older records without this observation do not infer script failure from child
 errors. Zero-child scripts still have their own running or terminal entry.
 
-Script groups contain only the action header and actual tool-call summaries.
-They have no source, result or diagnostic detail entry, including on failure or
-with no child calls. Expanding lists individual calls without their result
-bodies. Original canonical receipts, IsError, media, approval routing and other
-tools' existing detail capabilities are unchanged. Replay uses the same direct
-parent identities; child panes retain existing Task and scope routing.
+The outer script source, return values and diagnostic bodies have no trajectory
+entry, including on failure or with no child calls. Argument disclosure uses the
+original call inputs and does not display result bodies. Canonical receipts,
+IsError, media and approval routing retain their original owners. Replay uses
+the same direct parent identities; child panes retain existing Task and scope
+routing.
 
 ## Execution and Tasks
 

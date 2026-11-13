@@ -150,32 +150,32 @@ func WorkerMain() int {
 	}
 	value, runErr := vm.RunScript(sourceName, "(async function(){\"use strict\";"+code+"\n})()")
 	if runErr != nil {
-		return workerError(w, runErr)
+		return workerError(w, l.OutputBytes, runErr)
 	}
 	promise, ok := value.Export().(*goja.Promise)
 	if !ok {
-		return workerError(w, fmt.Errorf("missing async result"))
+		return workerError(w, l.OutputBytes, fmt.Errorf("missing async result"))
 	}
 	for promise.State() == goja.PromiseStatePending {
 		if len(pending) == 0 {
-			return workerError(w, fmt.Errorf("unsettled Promise without a Host producer"))
+			return workerError(w, l.OutputBytes, fmt.Errorf("unsettled Promise without a Host producer"))
 		}
 		select {
 		case f := <-responses:
 			one, ok := pending[f.id]
 			if !ok {
-				return workerError(w, fmt.Errorf("unknown Host response ID"))
+				return workerError(w, l.OutputBytes, fmt.Errorf("unknown Host response ID"))
 			}
 			delete(pending, f.id)
 			// resolve runs Promise jobs synchronously on this owner, never on
 			// a Host, pipe-reader or watchdog goroutine.
 			if err := one.resolve(string(f.data)); err != nil {
-				return workerError(w, err)
+				return workerError(w, l.OutputBytes, err)
 			}
 		case <-time.After(10 * time.Millisecond):
 			// An idle VM still needs to observe cancellation/CPU interrupts.
 			if _, err := vm.RunString("void 0"); err != nil {
-				return workerError(w, err)
+				return workerError(w, l.OutputBytes, err)
 			}
 		}
 	}
@@ -195,14 +195,14 @@ func WorkerMain() int {
 				}
 			}
 		}
-		return workerError(w, fmt.Errorf("%s", message))
+		return workerError(w, l.OutputBytes, fmt.Errorf("%s", message))
 	}
 	encoded, err := encode(goja.Undefined(), promise.Result())
 	if err != nil {
-		return workerError(w, err)
+		return workerError(w, l.OutputBytes, err)
 	}
 	if len(pending) != 0 {
-		return workerError(w, fmt.Errorf("script returned with unawaited Host requests"))
+		return workerError(w, l.OutputBytes, fmt.Errorf("script returned with unawaited Host requests"))
 	}
 	if err = w.send(frameResult, 0, []byte(encoded.String()), l.OutputBytes); err != nil {
 		return 2
@@ -210,7 +210,7 @@ func WorkerMain() int {
 	return 0
 }
 
-func workerError(w *wireWriter, err error) int {
+func workerError(w *wireWriter, budget int, err error) int {
 	message := err.Error()
 	// Encoder exceptions are already safe, field-specific diagnostics; their
 	// bootstrap stack is not user source.
@@ -218,9 +218,14 @@ func workerError(w *wireWriter, err error) int {
 	if errors.As(err, &exception) {
 		message = exception.Value().String()
 	}
-	if len(message) > 1024 {
-		message = message[:1024]
+	if len(message) > budget {
+		const suffix = " [diagnostic exceeds output budget]"
+		if budget > len(suffix) {
+			message = message[:budget-len(suffix)] + suffix
+		} else {
+			message = message[:budget]
+		}
 	}
-	_ = w.send(frameError, 0, []byte(message), 1024)
+	_ = w.send(frameError, 0, []byte(message), budget)
 	return 1
 }

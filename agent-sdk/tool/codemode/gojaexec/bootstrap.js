@@ -139,7 +139,9 @@
           if(typeof detail==="string") {message="Tool call failed: "+slice(detail,0,1024);break;}
         }
       }
-      const e=new ErrorType(message);e.reply=ownReply(reply,envelope.raw);throw e;
+      const e=new ErrorType(message);e.reply=ownReply(reply,envelope.raw);
+      if(envelope.code)e.code=envelope.code;
+      throw e;
     }
     return ownReply({parts:reply.parts||[]},envelope.raw);
   }
@@ -150,8 +152,36 @@
       return then(rpc("call",name,encode(args,limits.argument_bytes)),decode);
     },
     search(query) {
-      if(typeof query!=="string" || query.length===0 || query.length>1024)throw new ErrorType("tools.search(query) requires a non-empty name or capability string");
-      return then(then(rpc("search",query,"{}"),decode),r=>define(r.parts[0].json,"raw_json",{value:r.raw_json,enumerable:false}));
+      let request;
+      if(typeof query==="string") {
+        if(query.length===0||query.length>1024)throw new ErrorType("tools.search requires a non-empty name or capability string");
+        request={query};
+      } else {
+        if(!query||typeof query!=="object"||isArray(query))throw new ErrorType("tools.search requires a query string or {server,plugin?,after?}");
+        const names=keys(query), server=query.server, plugin=query.plugin, after=query.after;
+        for(let i=0;i<names.length;i++)if(names[i]!=="server"&&names[i]!=="plugin"&&names[i]!=="after")throw new ErrorType("unsupported tools.search field: "+names[i]);
+        if(typeof server!=="string"||server.length===0||server.length>1024||
+          (plugin!==undefined&&(typeof plugin!=="string"||plugin.length===0||plugin.length>1024))||
+          (after!==undefined&&(typeof after!=="string"||after.length===0||after.length>1024)))throw new ErrorType("tools.search requires {server,plugin?,after?} with non-empty strings");
+        request={server};
+        if(plugin!==undefined)request.plugin=plugin;
+        if(after!==undefined)request.after=after;
+      }
+      return then(then(rpc("search","",encode(request,limits.argument_bytes)),decode),r=>define(r.parts[0].json,"raw_json",{value:r.raw_json,enumerable:false}));
+    },
+    unpack(reply) {
+      if(!reply||typeof reply!=="object"||!weakGet(replies,reply))throw new ErrorType("tools.unpack requires an original tool reply");
+      const result={json:[],text:[],media:[]}, parts=reply.parts||[];
+      for(let i=0;i<parts.length;i++) {
+        const p=parts[i];
+        let target, value;
+        if(p.kind==="json") {target=result.json;value=p.json;}
+        else if(p.kind==="text") {target=result.text;value=p.text;}
+        else if(p.kind==="media"||p.kind==="file_ref") {target=result.media;value=p;}
+        else continue;
+        define(target,target.length,{value,enumerable:true});
+      }
+      return result;
     }
   });
   return freeze({tools, encode:value=>encode(value===undefined?null:value,limits.output_bytes,true)});

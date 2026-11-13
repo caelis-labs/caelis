@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"testing"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
@@ -15,7 +14,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode/gojaexec"
 )
 
-func assertScriptSearchParallelValue(t *testing.T, events []*session.Event, safe bool) {
+func assertScriptSearchOmitsParallelCapability(t *testing.T, events []*session.Event) {
 	t.Helper()
 	found := 0
 	for _, ev := range events {
@@ -37,8 +36,8 @@ func assertScriptSearchParallelValue(t *testing.T, events []*session.Event, safe
 					continue
 				}
 				for _, entry := range value.Tools {
-					raw, present := entry["parallel_safe"]
-					if !present || string(raw) != fmt.Sprint(safe) || entry["input_schema"] == nil {
+					_, present := entry["parallel_safe"]
+					if present || entry["input_schema"] == nil {
 						t.Fatalf("wrong final js_exec search result: %s", output.JSON.Value)
 					}
 				}
@@ -52,7 +51,7 @@ func assertScriptSearchParallelValue(t *testing.T, events []*session.Event, safe
 	}
 }
 
-func TestJSExecSearchParallelSafetyNativeAndMCPRebuild(t *testing.T) {
+func TestJSExecSearchOmitsHarnessCapabilityNativeAndMCPRebuild(t *testing.T) {
 	var nativePrefix, mcpPrefix []byte
 	for _, safe := range []bool{false, true} {
 		t.Run(fmt.Sprint("native-", safe), func(t *testing.T) {
@@ -74,7 +73,7 @@ func TestJSExecSearchParallelSafetyNativeAndMCPRebuild(t *testing.T) {
 				return nil
 			}}
 			events, _ := runCodeMode(t, store, active, agent.AgentSpec{Model: driver, Tools: []tool.Tool{target, &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}}}}, nil, nil)
-			assertScriptSearchParallelValue(t, events, safe)
+			assertScriptSearchOmitsParallelCapability(t, events)
 		})
 		t.Run(fmt.Sprint("mcp-fuzzy-exact-rebuild-", safe), func(t *testing.T) {
 			store, active, _ := codeModeStore(t)
@@ -91,14 +90,14 @@ func TestJSExecSearchParallelSafetyNativeAndMCPRebuild(t *testing.T) {
 				return nil
 			}}
 			events, _ := runCodeMode(t, store, active, h1Spec(source, driver), nil, nil)
-			assertScriptSearchParallelValue(t, events, safe)
+			assertScriptSearchOmitsParallelCapability(t, events)
 			if mcpPrefix == nil {
 				mcpPrefix = driver.prefixes[0]
 			} else if !bytes.Equal(mcpPrefix, driver.prefixes[0]) {
 				t.Fatal("parallel flag changed MCP declaration prefix")
 			}
 			// New Runtime/Host/VM restores the Session binding, then exact discovery uses
-			// the current wrapped definition rather than trusting prior JSON flags.
+			// the current wrapped definition.
 			driver = &h1Model{s: source, main: func(i int, _ *model.Request) []model.ToolCall {
 				if i == 0 {
 					return h1Script(`return await tools.search("z__target");`)
@@ -106,14 +105,9 @@ func TestJSExecSearchParallelSafetyNativeAndMCPRebuild(t *testing.T) {
 				return nil
 			}}
 			events, _ = runCodeMode(t, store, active, h1Spec(source, driver), nil, nil)
-			assertScriptSearchParallelValue(t, events, safe)
+			assertScriptSearchOmitsParallelCapability(t, events)
 			if source.snapshot().QueryRequests != 1 || source.snapshot().ExactRequests != 1 {
 				t.Fatalf("paths not exercised: %+v", source.snapshot())
-			}
-			for _, prefix := range driver.prefixes {
-				if !strings.Contains(string(prefix), "sequential await") {
-					t.Fatal("fixed guidance lost")
-				}
 			}
 		})
 	}

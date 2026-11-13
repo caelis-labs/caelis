@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -122,64 +124,60 @@ func TestCodeModeTurnCompleteCannotBeSuppressedByExecutor(t *testing.T) {
 	}
 }
 
-func TestCodeModeBoundaryBudgetsAndParallelSafety(t *testing.T) {
-	for _, safe := range []bool{false, true} {
-		name := "serial"
-		if safe {
-			name = "parallel-safe"
+func TestCodeModeBoundaryBudgetsDuringConcurrentCalls(t *testing.T) {
+	store, active, _ := codeModeStore(t)
+	started, release := make(chan struct{}, 2), make(chan struct{})
+	unblock := sync.OnceFunc(func() { close(release) })
+	defer unblock()
+	var effects atomic.Int32
+	target := tool.NamedTool{Def: tool.Definition{Name: "Read", Capabilities: tool.Capabilities{ParallelSafe: true}, InputSchema: map[string]any{"type": "object"}}, Invoke: func(ctx context.Context, _ tool.Call) (tool.Result, error) {
+		effects.Add(1)
+		started <- struct{}{}
+		select {
+		case <-release:
+			return tool.Result{Content: []model.Part{model.NewTextPart("ok")}}, nil
+		case <-ctx.Done():
+			return tool.Result{}, ctx.Err()
 		}
-		t.Run(name, func(t *testing.T) {
-			store, active, _ := codeModeStore(t)
-			started, release := make(chan struct{}, 2), make(chan struct{})
-			var effects atomic.Int32
-			target := tool.NamedTool{Def: tool.Definition{Name: "Read", InputSchema: map[string]any{"type": "object"}, Capabilities: tool.Capabilities{ParallelSafe: safe}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
-				effects.Add(1)
-				started <- struct{}{}
-				<-release
-				return tool.Result{Content: []model.Part{model.NewTextPart("ok")}}, nil
-			}}
-			declaration := &codemode.Tool{Name: "js_repl", Limits: codemode.Limits{Calls: 3, ArgumentBytes: 32, ReplyBytes: 2048}, Executor: codeExecutorFunc(func(ctx context.Context, _ codemode.Source, host codemode.Host) (json.RawMessage, error) {
-				if _, err := host.Call(ctx, "Read", []byte(`{"large":"`+strings.Repeat("x", 32)+`"}`)); err == nil {
-					return nil, errors.New("argument budget ignored")
-				}
-				first := make(chan error, 1)
-				go func() { _, err := host.Call(ctx, "Read", []byte(`{}`)); first <- err }()
-				<-started
-				if safe {
-					second := make(chan error, 1)
-					go func() { _, err := host.Call(ctx, "Read", []byte(`{}`)); second <- err }()
-					<-started
-					close(release)
-					if err := <-second; err != nil {
-						return nil, err
-					}
-				} else {
-					if _, err := host.Call(ctx, "Read", []byte(`{}`)); err == nil {
-						close(release)
-						return nil, errors.New("unsafe calls ran concurrently")
-					}
-					close(release)
-				}
-				if err := <-first; err != nil {
-					return nil, err
-				}
-				if safe {
-					if _, err := host.Call(ctx, "Read", []byte(`{}`)); err == nil {
-						return nil, errors.New("call budget ignored")
-					}
-				}
-				return []byte(`{"ok":true}`), nil
-			})}
-			runCodeMode(t, store, active, agent.AgentSpec{Model: codeModeModel(false), Tools: []tool.Tool{declaration, target}}, nil, nil)
-			want := int32(1)
-			if safe {
-				want = 2
+	}}
+	var checked atomic.Bool
+	declaration := &codemode.Tool{Name: "js_repl", Limits: codemode.Limits{Calls: 3, ArgumentBytes: 32, ReplyBytes: 2048}, Executor: codeExecutorFunc(func(ctx context.Context, _ codemode.Source, host codemode.Host) (json.RawMessage, error) {
+		defer unblock()
+		if _, err := host.Call(ctx, "Read", []byte(`{"large":"`+strings.Repeat("x", 32)+`"}`)); err == nil {
+			return nil, errors.New("argument budget ignored")
+		}
+		done := make(chan error, 2)
+		for range 2 {
+			go func() { _, err := host.Call(ctx, "Read", []byte(`{}`)); done <- err }()
+		}
+		for range 2 {
+			select {
+			case <-started:
+			case err := <-done:
+				return nil, fmt.Errorf("concurrent call ended before both started: %w", err)
+			case <-ctx.Done():
+				return nil, ctx.Err()
 			}
-			if effects.Load() != want {
-				t.Fatalf("effects=%d want=%d", effects.Load(), want)
+		}
+		if _, err := host.Call(ctx, "Read", []byte(`{}`)); err == nil {
+			return nil, errors.New("call budget ignored while calls pending")
+		}
+		unblock()
+		for range 2 {
+			if err := <-done; err != nil {
+				return nil, err
 			}
-		})
+		}
+		checked.Store(true)
+		return []byte(`{"ok":true}`), nil
+	})}
+	runCodeMode(t, store, active, agent.AgentSpec{Model: codeModeModel(false), Tools: []tool.Tool{declaration, target}}, nil, nil)
+	if effects.Load() != 2 || !checked.Load() {
+		t.Fatalf("effects=%d budgets_checked=%v", effects.Load(), checked.Load())
 	}
+}
+
+func TestCodeModeBoundaryReplyBudgets(t *testing.T) {
 	store, active, _ := codeModeStore(t)
 	large := tool.NamedTool{Def: tool.Definition{Name: "Large", InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
 		return tool.Result{Content: []model.Part{model.NewTextPart(strings.Repeat("x", 1024))}}, nil
