@@ -25,6 +25,13 @@ original name; search is for complete schemas and explicit binding refreshes, no
 call prerequisite. Discovery never rewrites earlier prompt slices or changes the
 serialized tools definitions.
 
+Runtime supplies the [SDK usage guidance](../agent-sdk/tool/codemode/codemode.go)
+and hint snapshot through `model.Request.Instructions`, separate from user and
+tool messages. Responses uses the top-level `instructions` field; Chat
+Completions uses a `system` message. Hint descriptions remain external capability
+metadata. The `js_exec` description is the short entry summary; the guidance owns
+detailed API usage, output selection and error handling.
+
 Supply an async function body, use `await`, and explicitly `return` the desired
 output. Each execution starts with fresh state. There are no Node.js, module,
 direct filesystem, network or process APIs. `file` paths resolve relative to the
@@ -67,13 +74,15 @@ exposes these SDK operations:
   An individually oversized schema produces a budget error. Extension bindings
   are recorded by the original canonical discovery owner. Use search when the
   schema is unknown or to explicitly refresh a stale binding.
-- `tools.call(name, args)` remains supported by canonical name and returns a Promise
-  resolving to `{parts:[...]}`. Text parts have `text`,
-  JSON parts have `json`, and media parts carry an opaque invocation-owned handle.
+- Tool calls return a Promise resolving to `{parts:[...]}`. Text parts have
+  `text`, JSON parts have `json`, and media parts carry an opaque invocation-owned
+  handle.
 - `tools.unpack(reply)` returns `{json:[],text:[],media:[]}` in each part kind's
   original order. All JSON and text parts are retained, including repeated
   representations; media entries are original part references. The input must be
   an original tool reply, including one obtained from `error.reply`.
+- For canonical-name compatibility, `tools.call(name, args)` uses the same call
+  path and reply shape.
 
 Returning the result of a direct tool call, `tools.call(name, args)`, or
 `tools.search(query)` delivers its selected output to model context. Scripts may

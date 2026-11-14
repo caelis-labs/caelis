@@ -143,16 +143,24 @@ const MetadataSelectedTools = "code_mode_selected_tools"
 
 // MetadataCatalog carries the Runtime-owned guidance and partial hint snapshot
 // through both static AgentSpec metadata and dynamic request instructions.
-const MetadataCatalog = "code_mode_catalog_v5"
+const MetadataCatalog = "code_mode_catalog_v6"
 
-// Guidance is the fixed model-facing SDK contract. Runtime appends its partial
-// catalog hints separately so discovery never changes this instruction slice.
 // MetadataScriptCompletion records whether script execution returned normally.
 // Its "completed"/"failed" value is presentation-only, independent of cumulative
 // IsError, Task state, authorization and durable effect outcomes.
 const MetadataScriptCompletion = "code_mode_script_completion"
 
-const Guidance = `Code Mode SDK: Session tools are callable without search when their protocol is known, including from Skills. Use native original names such as await Read(args), and MCP original server/tool names such as await dtw.apps(args) or await context7['query-docs'](args). Special names and global collisions use tools.native[name](args), tools.mcp[server][tool](args), or tools.plugins[plugin][server][tool](args); ambiguous paths fail, names are never silently renamed or overwritten. Each fresh VM snapshots current available names. tools.call(canonicalName,args) remains supported. await tools.search(query) queries complete schemas, matching an exact tool name first, otherwise searching capabilities. tools.search({server,plugin?,after?}) lists an exact MCP server without fuzzy selection; pass next as after with the same server/plugin to continue. Both return {tools:[{name,description,input_schema}],count,truncated,omitted_count?,next?} with complete schemas; reuse valid bindings. await tools.call(name,args) returns {parts:[{kind,text?,json?,handle?,mime_type?}]}. Follow the schema and tool descriptions; choose sequential or concurrent calls according to their semantics. tools.unpack(reply) returns {json:[],text:[],media:[]} retaining every part and original media references. Explicitly return desired JSON or original reply/part references to deliver output and media; copying media fields does not preserve identity. Return only JSON values: omit undefined fields or use null; no return yields null. Numbers use JS Number precision; use strings for big integers and reply.raw_json for original JSON tokens. Host failures reject with error.reply containing the original projected reply and optional error.code for typed Host errors; local errors may lack reply. Catching does not erase failed records. Never blindly replay unknown outcomes. After a stale binding error, use tools.search(name) to reload its schema/binding. Native filesystem tools remain directly callable; shell execution stays outside js_exec.`
+// Guidance is the fixed model-facing SDK contract. Runtime appends its partial
+// catalog hints separately so discovery never changes this instruction slice.
+const Guidance = `Code Mode SDK: Available Session tools are exposed by original name as native functions (await Read(args)) and MCP objects (await dtw.apps(args), await context7['query-docs'](args)). Each fresh VM snapshots those names. Call known schemas directly, including those from Skills. Sequence dependent operations; run independent calls concurrently when tool semantics permit.
+
+Return JSON or original tool reply/part references to deliver output and media. Replies have {parts:[{kind,text?,json?,handle?,mime_type?}]}; tools.unpack(reply) returns {json:[],text:[],media:[]} preserving original media references. Omit undefined fields or use null; no return yields null. Use strings for large integers; reply.raw_json preserves exact tokens beyond JS Number precision.
+
+Use tools.search(query) for schemas as needed: exact name first, otherwise capabilities. tools.search({server,plugin?,after?}) lists an exact MCP server; continue with next as after and the same server/plugin. Both return {tools:[{name,description,input_schema}],count,truncated,omitted_count?,next?}.
+
+Qualified paths tools.native[name](args), tools.mcp[server][tool](args), and tools.plugins[plugin][server][tool](args) resolve special names and global collisions; ambiguous paths fail. The VM provides JavaScript and Session tool calls; run native commands outside js_exec.
+
+Host failures reject with error.reply and optional error.code; local errors may lack reply. Caught failures remain recorded. Inspect failed or unknown outcomes; never blindly replay operations. Refresh stale bindings with tools.search(name) before another call. Compatibility: tools.call(name,args) accepts canonical names.`
 
 // Tool is a concrete declaration, retained until Runtime injects its Host.
 // Product assembly uses the fixed ToolName. Every execution has a new VM.
@@ -165,7 +173,7 @@ type Tool struct {
 
 // Definition declares mutually exclusive inline and file source inputs.
 func (t *Tool) Definition() tool.Definition {
-	return tool.Definition{Name: t.Name, Metadata: map[string]any{tool.MetadataToolKind: ToolKind}, Description: "Execute an async JavaScript function body from code or file in fresh state. Await tools by their original native name or MCP server.tool(args); tools.search(query) queries schemas when needed. tools.call(name,args) remains supported. Explicitly return the desired output. No Node.js, modules, direct filesystem, network or process access. Shell execution stays outside js_exec. Long executions may yield a Task handle.", InputSchema: map[string]any{
+	return tool.Definition{Name: t.Name, Metadata: map[string]any{tool.MetadataToolKind: ToolKind}, Description: "Run an async JavaScript function body from code or file in a fresh VM. Await native functions or MCP object methods and return JSON or original reply/media references. Long executions may yield a Task handle.", InputSchema: map[string]any{
 		"type": "object", "additionalProperties": false,
 		"properties": map[string]any{"code": map[string]any{"type": "string", "minLength": 1, "description": "Async JavaScript function body; await tool calls and explicitly return the desired output."}, "file": map[string]any{"type": "string", "minLength": 1, "description": "JavaScript source file path; relative paths resolve from the working directory."}, "yield_time_ms": map[string]any{"type": "integer", "minimum": 0, "maximum": 60000, "default": 10000, "description": "Foreground wait only, in milliseconds. After yielding, use Task read/wait/cancel on the original handle; do not resubmit js_exec."}},
 		"oneOf":      []any{map[string]any{"required": []string{"code"}}, map[string]any{"required": []string{"file"}}},
