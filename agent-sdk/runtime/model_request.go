@@ -140,7 +140,8 @@ func (r *Runtime) prepareAgentSpec(ctx context.Context, active session.Session, 
 			continue
 		}
 		if declaration, ok := one.(*codemode.Tool); ok {
-			spec.Tools[i] = runtimeCodeModeTool{tasks: r.tasks, active: session.CloneSession(active), declaration: declaration, sessions: r.sessions, ref: ref, nativeTargets: func() []tool.Tool { return allTools }, lookup: lookup, validate: validate, checkBinding: checkBinding}
+			available := func() []tool.Tool { return codeModeAvailableTools(allTools, spec.DeferredTools) }
+			spec.Tools[i] = runtimeCodeModeTool{tasks: r.tasks, active: session.CloneSession(active), declaration: declaration, sessions: r.sessions, ref: ref, availableTools: available, lookup: lookup, validate: validate, checkBinding: checkBinding}
 		}
 	}
 	allTools = wrap(spec.Tools)

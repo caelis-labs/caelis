@@ -91,6 +91,31 @@ func (e *Executor) Execute(ctx context.Context, source codemode.Source, limits c
 	if err := ctx.Err(); err != nil {
 		return codemode.Output{}, err
 	}
+	// Name routes are a fixed snapshot, not discovery schemas or authorization.
+	var names []codemode.ToolRoute
+	if named, ok := host.(codemode.NamedHost); ok {
+		names, err = named.ToolNames(ctx)
+		if err != nil {
+			return codemode.Output{}, fmt.Errorf("tool names: %w", err)
+		}
+	}
+	remaining := l.ReplyBytes - 2
+	for _, name := range names {
+		remaining -= 64 // JSON field names, punctuation and element separator.
+		for _, value := range []string{name.Name, name.Server, name.Tool, name.Plugin} {
+			if len(value) > remaining/6 {
+				return codemode.Output{}, fmt.Errorf("tool names exceed reply byte budget")
+			}
+			remaining -= 6 * len(value)
+		}
+	}
+	namesJSON, err := json.Marshal(names)
+	if err != nil || len(namesJSON) > l.ReplyBytes {
+		return codemode.Output{}, fmt.Errorf("tool names exceed reply byte budget")
+	}
+	if err := ctx.Err(); err != nil {
+		return codemode.Output{}, err
+	}
 	executable, err := os.Executable()
 	if err != nil {
 		return codemode.Output{}, err
@@ -124,6 +149,9 @@ func (e *Executor) Execute(ctx context.Context, source codemode.Source, limits c
 	w := &wireWriter{w: input}
 	config, _ := json.Marshal(workerConfig{Limits: l, SourceName: source.Path})
 	if err = w.send(frameConfig, 0, config, 32768); err == nil {
+		err = w.send(frameNames, 0, namesJSON, l.ReplyBytes)
+	}
+	if err == nil {
 		err = w.send(frameSource, 0, []byte(source.Code), l.SourceBytes)
 	}
 	type incoming struct {
@@ -265,6 +293,8 @@ func (e *Executor) Execute(ctx context.Context, source codemode.Source, limits c
 						var query codemode.SearchRequest
 						if err := json.Unmarshal(req.Arguments, &query); err != nil {
 							callErr = tool.NewError(tool.ErrorCodeInvalidInput, "invalid search request")
+						} else if err := query.Validate(); err != nil {
+							callErr = err
 						} else if discovery, ok := host.(codemode.DiscoveryHost); ok {
 							reply, callErr = discovery.Search(workCtx, query)
 						} else {

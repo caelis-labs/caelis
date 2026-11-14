@@ -7,65 +7,80 @@ by Runtime.
 
 ## Model tools and discovery
 
-Core filesystem and shell tools keep their native function-call definitions.
-Filesystem tools are also callable from JavaScript through their real wrapped
-Tool identities. Shell, RunCommand, aliases and equivalent native process-launch
-capabilities are rejected in code before JS dispatch. A name containing `exec`
-is not sufficient to classify a tool: Desktop World exec is a domain operation,
-not the native shell entry.
+The model uses one fixed `js_exec` entry with exactly one of `code` and `file`,
+plus the foreground wait option. Runtime supplies general usage preferences and
+an optional bounded hint snapshot through model instructions; the `js_exec`
+description owns the JavaScript API contract. Hints contain partial name and
+description summaries. Search finds tools not shown in the hints, and discovery
+does not rewrite existing prompt slices or tool definitions.
 
-Extensions use one fixed `js_exec` definition, accepting exactly one of `code`
-and `file`, plus the existing foreground wait convention. The model does not
-also receive `tool_search`, `mcp_call`, or changing MCP schemas in its tools array.
-Product assembly selects canonical extension names via
-`AgentSpec.Metadata[codemode.MetadataSelectedTools]`; the SDK has no integration
-allowlist. A small name/description catalog is a partial, bounded Session hint snapshot;
-other extensions are found by fuzzy search. Discovery never rewrites earlier prompt
-slices or changes the serialized tools definitions.
+Supply an async JavaScript function body, use `await`, and explicitly `return`
+the desired result. Each execution starts with fresh state. `file` paths resolve
+relative to the working directory. Use tools for filesystem and network I/O, and
+use the original shell tools for commands.
 
-Supply an async function body, use `await`, and explicitly `return` the desired
-output. Each execution starts with fresh state. There are no Node.js, module,
-direct filesystem, network or process APIs. `file` paths resolve relative to the
-working directory; shell execution stays outside `js_exec`.
+Call a known tool directly using the syntax shown by its name and schema. This
+works for tools learned from Skills too; no search is needed when the schema is
+known. Calls may use function or method syntax, for example:
 
-The async function body exposes these SDK operations:
+```javascript
+await Read(args);
+await dtw.apps(args);
+await context7['query-docs'](args);
+```
 
-- `await tools.search(query)` first matches an exact callable native or current
-  extension name, otherwise uses the existing fuzzy search. It returns
-  `{tools:[{name,description,input_schema}],count,truncated,omitted_count?,next?}`.
-  `tools.search({server,plugin?,after?})` instead matches an exact MCP server and
-  optional plugin identity without fuzzy selection. Current model and source
-  eligibility are applied before the result limits and schema budget. Service
-  pages use name order; when `next` is present, pass it as `after` with the same
-  server/plugin to continue. A removed, revoked or foreign continuation anchor
-  requires restarting discovery. Both routes return complete schemas;
-  `truncated` and `omitted_count` describe remaining eligible candidates.
-  An individually oversized schema produces a budget error. Extension bindings
-  are recorded by the original canonical discovery owner.
-- `tools.call(name, args)` returns a Promise resolving to `{parts:[...]}`. Text parts have `text`,
-  JSON parts have `json`, and media parts carry an opaque invocation-owned handle.
-- `tools.unpack(reply)` returns `{json:[],text:[],media:[]}` in each part kind's
-  original order. All JSON and text parts are retained, including repeated
-  representations; media entries are original part references. The input must be
-  an original tool reply, including one obtained from `error.reply`.
+Use `tools.search(selector)` when a schema is unknown or to find a tool. It
+accepts these selectors:
 
-`return await tools.call(name, args)` delivers the text, JSON and actual media to
-model context. `return await tools.search(query)` delivers the search result.
-Scripts may process or combine returned values; only media present in the final
-return value is selected, never other calls' unreturned or historical media.
-The bridge tracks real reply/part object identities privately. Selecting those
-references preserves media; copying or reconstructing their fields creates
-ordinary JSON. Business properties named kind, parts or handle have no control
-meaning. Returned references are checked against the current invocation and
-retained media budgets. A failed or unknown child remains failed even if JavaScript catches its
-exception. No `tools.describe` or `output` interface is installed.
+- `{name}` looks up one exact tool name. A miss returns `not_found` and does not
+  fall back to capability search.
+- `{server,tool,plugin?}` looks up an exact method. An ambiguous match fails with
+  `too_many_matches`; add `plugin` or use an exact name.
+- `{query}` performs capability search only.
+- `{server,plugin?,after?}` lists a server's tools. When `next` is present, pass
+  it as `after` with the same `server` and `plugin` to continue.
+- A legacy string tries an exact name first, then searches capabilities.
 
-First MCP discovery establishes bindings reusable within that Session. Search
-and calls may be sequentially awaited in the same script. Known schemas may be
-reused across calls; a fresh VM clears only JS variables. Host failures reject
-with an Error whose `reply` property contains the host reply. Typed Host failures
-also expose `error.code`; tool-specific error codes and effect details stay in
-that reply's original content. Local validation or script errors may lack `reply`.
+Search results have the shape
+`{tools:[{name,description,input_schema,call_path,server?,tool?,plugin?}],count,truncated,omitted_count?,next?}`.
+Each tool includes its complete schema. `server`, `tool`, and `plugin` preserve
+original names when present. `call_path` is a JavaScript template such as
+`tools.call("returned_name", args)`; supply your argument object for `args` and
+use the path as returned. This handles special or conflicting names, including
+names found during the current execution. `truncated`, `omitted_count`, and `next`
+describe remaining results and pagination.
+
+A tool call resolves to `{parts:[...]}`. JSON parts expose `json`, text parts
+expose `text`, and media parts carry an opaque handle. `tools.unpack(reply)`
+returns `{json:[],text:[],media:[]}`, preserving each kind's order and the
+original media part references. Return the desired JSON, a tool reply, or a value
+containing media references to deliver the selected result. Only media in the
+final return value is delivered.
+
+Inspect `error.code` and `error.reply` when present. Exact misses report
+`not_found`; ambiguous matches report `too_many_matches`. A `stale_revision`
+error means search again and revise the arguments. Observe unknown outcomes
+without replaying the input.
+
+## Runtime-owned execution contracts
+
+Canonical search receipts and started child Journal records for Code Mode tool
+executions preserve MCP identity/version bindings across fresh Goja workers,
+compaction and file-Store resume. A first direct MCP call without a prior binding
+pins the current real Tool identity/version. Its arguments and execution still
+pass normal Runtime schema and policy admission. Later calls enforce that binding.
+If the bound MCP source or schema changes, the direct call fails stale before
+executing old arguments. Use `tools.search({name})` to get the complete schema and
+explicitly refresh the binding, then make a later call under the refreshed binding.
+Each VM snapshots current Session names; a later VM sees newly ready tools, and a
+search result's `call_path` can resolve a name that became ready during the current
+execution. Search does not rewrite existing prompt slices or model tool arrays.
+Outside Code Mode, `mcp_call` still requires prior discovery.
+
+Host failures reject with an Error whose `reply` property contains the host reply.
+Typed Host failures also expose `error.code`; tool-specific error codes and effect
+details stay in the reply's original content. Local validation or script errors may
+lack `reply`.
 Catching does not erase failed records. An uncaught script exception produces
 `javascript_error` plus the Runtime-retained failed replies, including original
 call IDs and JSON tokens. Caught failures retain compact disposition records and
@@ -76,10 +91,11 @@ messages are generic unless the Runtime owner explicitly marks a fixed diagnosti
 as public. Uncaught failures retain media handles as JSON evidence without
 attaching images. To deliver a diagnostic image, catch the error and return its
 original media reference. An unknown outcome must never be replayed blindly.
-Arguments follow the schema, including required exact strings. Native filesystem
-functions remain directly callable and may also be orchestrated from JS. Search
-and call retain current source, generation, binding and permission checks. On a
-stale result, search again; old arguments are not automatically executed.
+Arguments follow each tool's schema, including required exact strings. Direct
+calls, generated call paths, and tool search retain the Runtime-owned source,
+schema, policy, approval, Guardian, cancellation, Journal, media and budget
+checks. A stale schema requires a fresh search before a later call; old arguments
+are never automatically executed.
 
 Sources may implement the existing `tool.NamedSource`/`Registry.Lookup` contract.
 Lookup grants no authority; both admission boundaries and the final Journal claim
@@ -111,7 +127,7 @@ generation admission, effect claim, Journal and lifecycle wrappers. Discovery
 is not an execution grant. Refresh remains low-frequency Manager-owned work;
 searches do not push full catalog updates into prompts. Before an old binding
 can execute, a changed source/schema produces a distinct stale-binding error:
-the catalog was refreshed and tools.search(name) must reload it. Old
+the catalog was refreshed and tools.search({name}) must reload it. Old
 arguments are not dispatched or automatically retried with a new schema.
 Offline and revoked access retain their own errors.
 
@@ -192,19 +208,3 @@ DTW domain exec, capability/exact-name search, Session reuse, schema replacement
 Guardian parameters, async yield/handle/cancel/completion and unknown no-replay.
 Model-context round trips and rendered TUI parent/child evidence cover durable
 and visible behavior.
-
-Exact serialized model tools and stable leading prompt bytes are captured for
-first discovery, repeated orchestration and refresh/rediscovery. Token and model
-request comparisons use the same task, actual usage and retained source/output
-sizes; source-line counts or fixture-only usage are not savings evidence. Both
-routes must have the same saved-script obligation, shell prohibition and chosen
-summary/image outputs. Evaluate file edit/reread capability separately from
-inline batching savings; first and resumed Turns are separate accounting groups.
-A historical mixed-task usage difference does not isolate engine cost.
-Real acceptance uses streaming models with independent generation budgets of at
-least 600 seconds, no shorter enclosing client/header deadline and no added
-request retry. Authorized existing gpt-6-luna is preferred; an explicit quota
-failure permits deepseek-flash. Credentials are read only through the selected
-existing configuration path, never exported into shared evidence. Context7 read
-queries, a task-owned DTW observation/screenshot fixture and temporary fs work
-are kept separate from deterministic fixtures and broader platform claims.

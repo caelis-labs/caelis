@@ -37,6 +37,7 @@ type request struct {
 	Name   string `json:"name,omitempty"`
 	Query  string `json:"query"`
 	Server string `json:"server,omitempty"`
+	Tool   string `json:"tool,omitempty"`
 	Plugin string `json:"plugin,omitempty"`
 	After  string `json:"after,omitempty"`
 	Limit  int    `json:"limit"`
@@ -71,6 +72,7 @@ func newTool(entries []entry) *Tool {
 				"oneOf":                []any{map[string]any{"required": []string{"query"}}, map[string]any{"required": []string{"name"}}, map[string]any{"required": []string{"server"}}},
 				"properties": map[string]any{
 					"server": map[string]any{"type": "string", "minLength": 1, "maxLength": 1024, "description": "Exact canonical MCP server metadata. Returns tools in name order without model selection."},
+					"tool":   map[string]any{"type": "string", "minLength": 1, "maxLength": 1024, "description": "Exact original tool metadata; requires server. Multiple matches require plugin or an exact name. Cannot be combined with after."},
 					"plugin": map[string]any{"type": "string", "minLength": 1, "maxLength": 1024, "description": "Optional exact canonical plugin metadata; requires server."},
 					"after":  map[string]any{"type": "string", "minLength": 1, "maxLength": 1024, "description": "Continue an exact server/plugin search after the previous result's next name."},
 					"name":   map[string]any{"type": "string", "minLength": 1, "description": "Exact current tool name to describe without fuzzy selection."},
@@ -195,7 +197,30 @@ func (t *Tool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
 	snapshot.entries = eligible
 	var matches []entry
 	omitted := 0
-	if args.Server != "" {
+	if args.Tool != "" {
+		if err := snapshot.checkSource(ctx); err != nil {
+			return tool.Result{}, err
+		}
+		var selectedName string
+		for _, candidate := range snapshot.entries {
+			remote, _ := candidate.def.Metadata[tool.MetadataMCPTool].(string)
+			if remote != args.Tool {
+				continue
+			}
+			if selectedName != "" {
+				return tool.Result{}, tool.NewError(tool.ErrorCodeTooManyMatches, "tool selector is ambiguous; supply plugin or an exact name")
+			}
+			selectedName = candidate.def.Name
+		}
+		if selectedName == "" {
+			return tool.Result{}, tool.NewError(tool.ErrorCodeNotFound, "tool selector has no match in the current scope")
+		}
+		def, readErr := snapshot.readSchema(ctx, selectedName)
+		if readErr != nil {
+			return tool.Result{}, readErr
+		}
+		matches = []entry{{def: def}}
+	} else if args.Server != "" {
 		if err := snapshot.checkSource(ctx); err != nil {
 			return tool.Result{}, err
 		}
@@ -307,7 +332,7 @@ func (t *Tool) readSchema(ctx context.Context, name string) (tool.Definition, er
 		}
 		return tool.CloneDefinition(candidate.def), nil
 	}
-	return tool.Definition{}, fmt.Errorf("ToolSearch schema for %q is outside the current scope", name)
+	return tool.Definition{}, tool.NewError(tool.ErrorCodeNotFound, fmt.Sprintf("ToolSearch schema for %q is outside the current scope", name))
 }
 
 // Replay aliases only translate historical tool names. They do not change the
@@ -334,7 +359,7 @@ func parseRequest(raw json.RawMessage) (request, error) {
 	if err := json.Unmarshal(raw, &values); err != nil {
 		return args, fmt.Errorf("decode ToolSearch input: %w", err)
 	}
-	if err := tool.RejectUnknownArgs(values, "query", "limit", "name", "server", "plugin", "after"); err != nil {
+	if err := tool.RejectUnknownArgs(values, "query", "limit", "name", "server", "tool", "plugin", "after"); err != nil {
 		return args, err
 	}
 	if err := json.Unmarshal(raw, &args); err != nil {
@@ -344,6 +369,10 @@ func parseRequest(raw json.RawMessage) (request, error) {
 	_, serverProvided := values["server"]
 	_, pluginProvided := values["plugin"]
 	_, afterProvided := values["after"]
+	_, toolProvided := values["tool"]
+	if toolProvided && (args.Server == "" || args.Tool == "" || args.Tool != strings.TrimSpace(args.Tool) || len(args.Tool) > 1024 || afterProvided) {
+		return args, tool.NewError(tool.ErrorCodeInvalidInput, "tool requires an exact server and a non-empty original tool name, without after")
+	}
 	if afterProvided && (args.Server == "" || args.After == "" || args.After != strings.TrimSpace(args.After) || len(args.After) > 1024) {
 		return args, tool.NewError(tool.ErrorCodeInvalidInput, "after requires an exact server and a non-empty tool name")
 	}

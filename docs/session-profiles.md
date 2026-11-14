@@ -255,24 +255,25 @@ is created. Package assembly status is distinct from MCP connection readiness.
 
 ## MCP discovery and upgrades
 
-Product model declarations use the fixed `js_exec` entry with
-`tools.search`/`tools.call`; SDK embedders without Code Mode use fixed
-`tool_search` and `mcp_call` entries. Search
-returns complete tool schemas and source bindings in results; discovering or
-refreshing MCP does not add tools to the model declaration. Calls resolve a
-previously discovered real tool before policy, approval and execution. Surfaces
-present that tool's actual name and arguments.
+Product model declarations use the fixed `js_exec` entry. Code Mode can call a
+currently available Session tool by its original name when its schema is known;
+`tools.search` returns complete schemas and explicitly refreshes stale bindings.
+SDK embedders without Code Mode use fixed `tool_search` and `mcp_call` entries;
+`mcp_call` resolves a previously discovered real tool before policy, approval and
+execution. Discovering or refreshing MCP does not add tools to the model
+declaration. Surfaces present the actual target name and arguments.
 
-Historical Sessions retain readable tool calls and results. Discovery made by
-older dynamic-tool versions is not migrated into executable bindings. After an
-upgrade from name-only discovery, search again using `tools.search` in Code Mode
-or `tool_search` without it; retired discovery/retirement tools are unavailable.
-Current canonical discovery bindings remain reusable in that Session across
-fresh scripts and resume. Sequentially awaiting search and call in one script
-works; sibling function calls in one model response retain their prior-binding
-requirement. A changed source
-or schema also requires fresh discovery. Discovery grants no permission and
-never authorizes replay of an unknown external effect.
+Historical Sessions retain readable tool calls and results. Name-only history
+does not authorize non-Code Mode `mcp_call`; that entry needs a current search
+binding. Code Mode may call a known original name directly, and its first call
+without an existing binding pins the current real Tool identity/version. Canonical
+search receipts and started child Journal bindings for Code Mode tool executions
+remain reusable across fresh workers, compaction and resume. A change to the bound
+Code Mode source/schema fails stale
+until `tools.search(name)` explicitly refreshes the complete schema and binding.
+Without Code Mode, a search in the same model response cannot authorize an
+undiscovered sibling `mcp_call`. Discovery grants no permission and never
+authorizes replay of an unknown external effect.
 
 ## Sources, children and approvals
 

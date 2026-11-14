@@ -11,11 +11,15 @@ explicit Runtime/Manager options.
 | `idle_compact` | Generate and commit a checkpoint after a completed Turn has remained idle for 60 seconds. |
 
 MCP catalog refresh is always enabled and independent of compaction. MCP-enabled
-product Sessions use fixed `js_exec` with `tools.search`/`tools.call`; SDK
-entry points without Code Mode use fixed `tool_search` and `mcp_call`
-declarations. Both project discovery bindings from canonical search receipts,
-and Code Mode can sequentially await search then call within one script. Compaction does not retire
-MCP tools. See [MCP tools](mcp-tool-lifecycle.md) and the
+product Sessions use fixed `js_exec` with original-name Session routes plus
+`tools.search` and `tools.call`; SDK entry points without Code Mode use fixed
+`tool_search` and `mcp_call` declarations. Non-Code Mode discovery bindings come
+from canonical search receipts. Code Mode also records direct MCP call bindings
+in started child Journal records for Code Mode tool executions, and restores both
+kinds across fresh workers, compaction and resume. A Code Mode call needs no search
+when its schema is known; search
+returns complete schemas and explicitly refreshes stale bindings. Compaction does
+not retire MCP tools. See [MCP tools](mcp-tool-lifecycle.md) and the
 [SDK durability boundary](agent-sdk-boundary.md).
 
 ## Scope and activation
