@@ -377,11 +377,22 @@ func TestJSExecH1HintWarningOncePreservesCapability(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Count(text, tool.ExternalCapabilityDescriptionPrefix) != 1 || !strings.Contains(text, "Read a synthetic lookup") || !strings.Contains(text, "{tools:[{name,description,input_schema}],count,truncated,omitted_count?,next?}") || strings.Contains(text, "parallel_safe") {
-		t.Fatalf("H1 guidance/hint semantics lost: %s", text)
+	description := (&codemode.Tool{Name: codemode.ToolName}).Definition().Description
+	if strings.Count(text, tool.ExternalCapabilityDescriptionPrefix) != 1 || !strings.Contains(text, "Read a synthetic lookup") || strings.Contains(text, "input_schema") || strings.Contains(text, "parallel_safe") {
+		t.Fatalf("H1 hint semantics lost or schemas leaked into guidance: %s", text)
 	}
-	if !strings.Contains(text, "tools.call(name,args)") || !strings.Contains(text, "input_schema") || strings.Contains(text, "tools.describe") || strings.Contains(text, "output.") {
-		t.Fatal("minimal search/call guidance absent")
+	if !strings.Contains(text, "Search for unknown tools or arguments") || strings.Contains(text, "tools.search(") || strings.Contains(text, "tools.describe") || strings.Contains(text, "output.") {
+		t.Fatal("guidance should contain preferences without duplicating API details")
+	}
+	for _, contract := range []string{
+		"tools.search(selector)", "{name:string}", "{server:string,tool:string,plugin?:string}", "{query:string}",
+		"{server:string,plugin?:string,after?:string}",
+		"{tools:[{name:string,description:string,input_schema:object,call_path:string,server?:string,tool?:string,plugin?:string}],count:number,truncated:boolean,omitted_count?:number,next?:string}",
+		"tools.call(\"returned_name\", args)", "tools.unpack(reply)", "error.reply", "On stale_revision, search again and revise arguments",
+	} {
+		if !strings.Contains(description, contract) {
+			t.Fatalf("js_exec description lost API contract %q", contract)
+		}
 	}
 	state, _ := store.SnapshotState(t.Context(), active.SessionRef)
 	if state["code_mode_catalog_v2"] != "legacy guidance requiring parallel_safe" || state["code_mode_catalog_v3"] != "legacy guidance without service continuation" {
@@ -431,13 +442,13 @@ func TestJSExecSearchRejectsUnsupportedObject(t *testing.T) {
 	s := h1Directory(0)
 	m := &h1Model{s: s, main: func(i int, _ *model.Request) []model.ToolCall {
 		if i == 0 {
-			return h1Script(`return await tools.search({name:"unknown"});`)
+			return h1Script(`return await tools.search({name:"unknown",query:"invalid selector combination"});`)
 		}
 		return nil
 	}}
 	events, _ := runCodeMode(t, store, active, h1Spec(s, m), nil, nil)
-	if s.snapshot().QueryRequests != 0 {
-		t.Fatal("invalid query reached discovery")
+	if got := s.snapshot(); got.ExactRequests != 0 || got.QueryRequests != 0 {
+		t.Fatalf("invalid selector reached discovery: %+v", got)
 	}
 	for _, e := range events {
 		if e.Tool != nil && e.Tool.Name == codemode.ToolName && e.Tool.Status == "failed" {

@@ -83,10 +83,10 @@ func TestCodeModeDirectBindingSurvivesResumeAndRequiresExplicitRefresh(t *testin
 		t.Fatal("old arguments executed against replacement schema")
 	}
 	raw, _ := json.Marshal(stale.requests[len(stale.requests)-1].Messages)
-	if !strings.Contains(string(raw), "binding is stale") || !strings.Contains(string(raw), "tools.search(name)") {
+	if !strings.Contains(string(raw), "schema changed") || !strings.Contains(string(raw), "tools.search") {
 		t.Fatalf("missing explicit refresh diagnostic: %s", raw)
 	}
-	run(reopened, `const schema=await tools.search("docs__read");if(schema.count!==1)throw Error('schema unavailable');return await docs.read({value:"new"});`)
+	run(reopened, `const schema=await tools.search({name:"docs__read"});if(schema.count!==1)throw Error('schema unavailable');const args={value:"new"};return await eval(schema.tools[0].call_path);`)
 	if effects != 4 {
 		t.Fatalf("explicit refresh did not admit new arguments: effects=%d", effects)
 	}
@@ -129,7 +129,7 @@ func TestCodeModeNativeOwnerSupersedesHistoricalMCPBinding(t *testing.T) {
 	if _, err := host.resolveTarget(t.Context(), prior.Name, false); err != nil {
 		t.Fatalf("current native owner blocked: %v", err)
 	}
-	if _, err := host.Search(t.Context(), codemode.SearchRequest{Query: prior.Name}); err != nil {
+	if _, err := host.Search(t.Context(), codemode.SearchRequest{Name: prior.Name}); err != nil {
 		t.Fatalf("native schema query: %v", err)
 	}
 	if _, err := host.resolveTarget(t.Context(), prior.Name, false); err != nil {

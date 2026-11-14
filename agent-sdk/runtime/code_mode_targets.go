@@ -90,21 +90,25 @@ func (h *codeModeHost) ToolNames(ctx context.Context) ([]codemode.ToolRoute, err
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	routes := make([]codemode.ToolRoute, 0, len(h.targets))
-	for name, target := range h.targets {
+	for _, target := range h.targets {
 		def := target.definition
 		if !codeModeCanCall(def) {
 			continue
 		}
-		route := codemode.ToolRoute{Name: name}
-		if tool.IsMCPDefinition(def) {
-			route.Server, _ = def.Metadata[tool.MetadataMCPServer].(string)
-			route.Tool, _ = def.Metadata[tool.MetadataMCPTool].(string)
-			route.Plugin, _ = def.Metadata[tool.MetadataPluginID].(string)
-		}
-		routes = append(routes, route)
+		routes = append(routes, codeModeToolRoute(def))
 	}
 	sort.Slice(routes, func(i, j int) bool { return routes[i].Name < routes[j].Name })
 	return routes, nil
+}
+
+func codeModeToolRoute(def tool.Definition) codemode.ToolRoute {
+	route := codemode.ToolRoute{Name: def.Name}
+	if tool.IsMCPDefinition(def) {
+		route.Server, _ = def.Metadata[tool.MetadataMCPServer].(string)
+		route.Tool, _ = def.Metadata[tool.MetadataMCPTool].(string)
+		route.Plugin, _ = def.Metadata[tool.MetadataPluginID].(string)
+	}
+	return route
 }
 
 func (h *codeModeHost) resolveTarget(ctx context.Context, name string, search bool) (codeModeTarget, error) {

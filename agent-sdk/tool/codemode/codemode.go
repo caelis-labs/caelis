@@ -80,14 +80,41 @@ type NamedHost interface {
 	ToolNames(context.Context) ([]ToolRoute, error)
 }
 
-// SearchRequest selects either a name/capability query or an exact MCP server.
-// Plugin optionally qualifies Server. After continues after a previous Next name
-// in the same exact service scope. Both fields require Server.
+// SearchRequest selects an exact Name, exact Server/Tool, capability Query, or
+// Server listing. Plugin qualifies Server; After continues only a listing.
+// LegacyString preserves exact-name-first lookup for the string script syntax.
 type SearchRequest struct {
-	Query  string `json:"query,omitempty"`
-	Server string `json:"server,omitempty"`
-	Plugin string `json:"plugin,omitempty"`
-	After  string `json:"after,omitempty"`
+	Name         string `json:"name,omitempty"`
+	Query        string `json:"query,omitempty"`
+	Server       string `json:"server,omitempty"`
+	Tool         string `json:"tool,omitempty"`
+	Plugin       string `json:"plugin,omitempty"`
+	After        string `json:"after,omitempty"`
+	LegacyString bool   `json:"legacy_string,omitempty"`
+}
+
+// Validate checks the mutually exclusive search selectors at the Host boundary.
+func (r SearchRequest) Validate() error {
+	for _, value := range []string{r.Name, r.Query, r.Server, r.Tool, r.Plugin, r.After} {
+		if len(value) > 1024 {
+			return tool.NewError(tool.ErrorCodeInvalidInput, "search fields must be at most 1024 bytes")
+		}
+	}
+	switch {
+	case r.Name != "":
+		if r.Query == "" && r.Server == "" && r.Tool == "" && r.Plugin == "" && r.After == "" && !r.LegacyString {
+			return nil
+		}
+	case r.Server != "":
+		if r.Query == "" && !r.LegacyString && (r.Tool == "" || r.After == "") {
+			return nil
+		}
+	case r.Query != "":
+		if r.Tool == "" && r.Plugin == "" && r.After == "" {
+			return nil
+		}
+	}
+	return tool.NewError(tool.ErrorCodeInvalidInput, "supply {name}, {server,tool,plugin?}, {query}, or {server,plugin?,after?}")
 }
 
 // DiscoveryHost adds the existing scoped discovery owner to the bridge.
@@ -143,24 +170,26 @@ const MetadataSelectedTools = "code_mode_selected_tools"
 
 // MetadataCatalog carries the Runtime-owned guidance and partial hint snapshot
 // through both static AgentSpec metadata and dynamic request instructions.
-const MetadataCatalog = "code_mode_catalog_v6"
+const MetadataCatalog = "code_mode_catalog_v7"
 
 // MetadataScriptCompletion records whether script execution returned normally.
 // Its "completed"/"failed" value is presentation-only, independent of cumulative
 // IsError, Task state, authorization and durable effect outcomes.
 const MetadataScriptCompletion = "code_mode_script_completion"
 
-// Guidance is the fixed model-facing SDK contract. Runtime appends its partial
-// catalog hints separately so discovery never changes this instruction slice.
-const Guidance = `Code Mode SDK: Available Session tools are exposed by original name as native functions (await Read(args)) and MCP objects (await dtw.apps(args), await context7['query-docs'](args)). Each fresh VM snapshots those names. Call known schemas directly, including those from Skills. Sequence dependent operations; run independent calls concurrently when tool semantics permit.
+// Guidance supplies usage preferences; Tool.Definition owns the script API.
+// Runtime appends partial catalog hints separately.
+const Guidance = `Call known tools directly, including schemas from Skills. Search for unknown tools or arguments. Sequence dependent operations; independent calls may run concurrently when appropriate.`
 
-Return JSON or original tool reply/part references to deliver output and media. Replies have {parts:[{kind,text?,json?,handle?,mime_type?}]}; tools.unpack(reply) returns {json:[],text:[],media:[]} preserving original media references. Omit undefined fields or use null; no return yields null. Use strings for large integers; reply.raw_json preserves exact tokens beyond JS Number precision.
+const description = `Run an async JavaScript function body from code or file. Call tools as functions, e.g. await Read(args), or object methods, e.g. await dtw.apps(args) and await context7['query-docs'](args). Run shell commands through their original tools.
 
-Use tools.search(query) for schemas as needed: exact name first, otherwise capabilities. tools.search({server,plugin?,after?}) lists an exact MCP server; continue with next as after and the same server/plugin. Both return {tools:[{name,description,input_schema}],count,truncated,omitted_count?,next?}.
+await tools.search(selector) accepts {name:string} for an exact tool name, {server:string,tool:string,plugin?:string} for an exact object method, or {query:string} for a capability query. Exact misses return not_found; ambiguous matches require plugin or an exact name. {server:string,plugin?:string,after?:string} lists tools; continue with next as after and the same server/plugin. Legacy strings try an exact name first, then capabilities.
 
-Qualified paths tools.native[name](args), tools.mcp[server][tool](args), and tools.plugins[plugin][server][tool](args) resolve special names and global collisions; ambiguous paths fail. The VM provides JavaScript and Session tool calls; run native commands outside js_exec.
+Search returns {tools:[{name:string,description:string,input_schema:object,call_path:string,server?:string,tool?:string,plugin?:string}],count:number,truncated:boolean,omitted_count?:number,next?:string}. name is the exact callable name; server/tool/plugin retain original names when present. call_path is a JavaScript template such as tools.call("returned_name", args); supply your argument object for args. This also handles special or conflicting names.
 
-Host failures reject with error.reply and optional error.code; local errors may lack reply. Caught failures remain recorded. Inspect failed or unknown outcomes; never blindly replay operations. Refresh stale bindings with tools.search(name) before another call. Compatibility: tools.call(name,args) accepts canonical names.`
+Tool calls resolve to {parts:[{kind:'json',json:value}|{kind:'text',text:string}|{kind:'media'|'file_ref',handle:string,mime_type?:string}]}. tools.unpack(reply) returns arrays {json:[],text:[],media:[]}: JSON values, text strings, and original media parts, preserving every part in order within its array. Return business JSON, the original reply, or a value containing original media references to deliver those results.
+
+On errors inspect error.reply when present; observe unknown outcomes instead of replaying input. On stale_revision, search again and revise arguments.`
 
 // Tool is a concrete declaration, retained until Runtime injects its Host.
 // Product assembly uses the fixed ToolName. Every execution has a new VM.
@@ -173,7 +202,7 @@ type Tool struct {
 
 // Definition declares mutually exclusive inline and file source inputs.
 func (t *Tool) Definition() tool.Definition {
-	return tool.Definition{Name: t.Name, Metadata: map[string]any{tool.MetadataToolKind: ToolKind}, Description: "Run an async JavaScript function body from code or file in a fresh VM. Await native functions or MCP object methods and return JSON or original reply/media references. Long executions may yield a Task handle.", InputSchema: map[string]any{
+	return tool.Definition{Name: t.Name, Metadata: map[string]any{tool.MetadataToolKind: ToolKind}, Description: description, InputSchema: map[string]any{
 		"type": "object", "additionalProperties": false,
 		"properties": map[string]any{"code": map[string]any{"type": "string", "minLength": 1, "description": "Async JavaScript function body; await tool calls and explicitly return the desired output."}, "file": map[string]any{"type": "string", "minLength": 1, "description": "JavaScript source file path; relative paths resolve from the working directory."}, "yield_time_ms": map[string]any{"type": "integer", "minimum": 0, "maximum": 60000, "default": 10000, "description": "Foreground wait only, in milliseconds. After yielding, use Task read/wait/cancel on the original handle; do not resubmit js_exec."}},
 		"oneOf":      []any{map[string]any{"required": []string{"code"}}, map[string]any{"required": []string{"file"}}},

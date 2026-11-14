@@ -336,14 +336,15 @@ weakens local schema, approval, or policy validation. Malformed external schemas
 are quarantined instead of replaced by permissive empty schemas.
 
 Code Mode Sessions expose a fixed `js_exec` definition. Its async body can call
-known-schema Session tools by original native or MCP names, such as
+known-schema Session tools using original function or method syntax, such as
 `await Read(args)` or `await dtw.apps(args)`, without search. Special names and
 collisions use the qualified
 `tools.native[original]`, `tools.mcp[server][remoteTool]`, or
 `tools.plugins[plugin][server][remoteTool]` paths; `tools.call(name,args)` remains
 available by canonical name. Every Goja execution snapshots current Session tool
-names. Search returns complete normalized schemas and can explicitly refresh a
-stale binding. SDK entry points without Code Mode expose fixed `tool_search` and
+names. Search separates exact name/method lookup from capability queries and
+returns complete schemas, original names and a usable `call_path`. It can also
+explicitly refresh a stale schema. SDK entry points without Code Mode expose fixed `tool_search` and
 `mcp_call` definitions; `mcp_call` remains discovery-gated and requires a prior
 canonical search binding.
 

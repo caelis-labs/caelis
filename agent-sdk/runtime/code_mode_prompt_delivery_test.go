@@ -18,8 +18,8 @@ func TestCodeModePromptDeliveryStaticAndDynamicRequests(t *testing.T) {
 	for _, dynamic := range []bool{false, true} {
 		t.Run(map[bool]string{false: "static", true: "dynamic"}[dynamic], func(t *testing.T) {
 			store, active, _ := codeModeStore(t)
-			const legacyKey = "code_mode_catalog_v5"
-			const legacyGuidance = "LEGACY_V5_GUIDANCE"
+			const legacyKey = "code_mode_catalog_v6"
+			const legacyGuidance = "LEGACY_V6_GUIDANCE"
 			_, err := store.UpdateState(t.Context(), session.UpdateStateRequest{SessionRef: active.SessionRef, Update: func(state map[string]any) (map[string]any, error) {
 				if state == nil {
 					state = map[string]any{}

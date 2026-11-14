@@ -64,7 +64,7 @@ func PublicHostError(name string, err error) *tool.ToolError {
 	message := name + " [" + label + "]"
 	switch code {
 	case tool.ErrorCodeStaleRevision:
-		return tool.NewError(code, message+": tool directory refreshed; binding is stale; use tools.search(name) to reload its schema/binding before calling. Old arguments were not executed.")
+		return tool.NewError(code, message+": tool schema changed; use tools.search again and revise arguments before calling.")
 	case errorcode.UnknownOutcome:
 		return tool.NewError(code, message+": tool outcome is unknown; do not replay the effect.")
 	}

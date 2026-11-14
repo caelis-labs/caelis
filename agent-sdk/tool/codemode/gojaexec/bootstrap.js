@@ -155,17 +155,21 @@
       let request;
       if(typeof query==="string") {
         if(query.length===0||query.length>1024)throw new ErrorType("tools.search requires a non-empty name or capability string");
-        request={query};
+        request={query,legacy_string:true};
       } else {
-        if(!query||typeof query!=="object"||isArray(query))throw new ErrorType("tools.search requires a query string or {server,plugin?,after?}");
-        const names=keys(query), server=query.server, plugin=query.plugin, after=query.after;
-        for(let i=0;i<names.length;i++)if(names[i]!=="server"&&names[i]!=="plugin"&&names[i]!=="after")throw new ErrorType("unsupported tools.search field: "+names[i]);
-        if(typeof server!=="string"||server.length===0||server.length>1024||
-          (plugin!==undefined&&(typeof plugin!=="string"||plugin.length===0||plugin.length>1024))||
-          (after!==undefined&&(typeof after!=="string"||after.length===0||after.length>1024)))throw new ErrorType("tools.search requires {server,plugin?,after?} with non-empty strings");
-        request={server};
-        if(plugin!==undefined)request.plugin=plugin;
-        if(after!==undefined)request.after=after;
+        if(!query||typeof query!=="object"||isArray(query))throw new ErrorType("tools.search requires a selector object or query string");
+        const names=keys(query);
+        request={};
+        for(let i=0;i<names.length;i++) {
+          const key=names[i];
+          if(key!=="name"&&key!=="query"&&key!=="server"&&key!=="tool"&&key!=="plugin"&&key!=="after")throw new ErrorType("unsupported tools.search field: "+key);
+          const value=query[key];
+          if(typeof value!=="string"||value.length===0||value.length>1024)throw new ErrorType("tools.search fields require non-empty strings");
+          request[key]=value;
+        }
+        if(own(request,"name")?names.length!==1:
+          own(request,"query")?names.length!==1:
+          !own(request,"server")||(own(request,"tool")&&own(request,"after")))throw new ErrorType("tools.search requires {name}, {server,tool,plugin?}, {query}, or {server,plugin?,after?}");
       }
       return then(then(rpc("search","",encode(request,limits.argument_bytes)),decode),r=>define(r.parts[0].json,"raw_json",{value:r.raw_json,enumerable:false}));
     },

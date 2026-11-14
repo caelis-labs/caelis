@@ -293,6 +293,8 @@ func (e *Executor) Execute(ctx context.Context, source codemode.Source, limits c
 						var query codemode.SearchRequest
 						if err := json.Unmarshal(req.Arguments, &query); err != nil {
 							callErr = tool.NewError(tool.ErrorCodeInvalidInput, "invalid search request")
+						} else if err := query.Validate(); err != nil {
+							callErr = err
 						} else if discovery, ok := host.(codemode.DiscoveryHost); ok {
 							reply, callErr = discovery.Search(workCtx, query)
 						} else {
