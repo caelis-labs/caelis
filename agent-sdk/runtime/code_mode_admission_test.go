@@ -92,7 +92,7 @@ func TestCodeModeRevalidatesMCPAndGenerationAfterApproval(t *testing.T) {
 				checked.Store(true)
 				return []byte(`{"checked":true}`), nil
 			})}
-			llm := codeModeModel(true)
+			llm := codeModeModel(false)
 			spec := agent.AgentSpec{ResolveModelRequest: func(context.Context) (agent.ModelRequestSnapshot, error) {
 				snapshot := agent.ModelRequestSnapshot{Model: llm, Tools: []tool.Tool{toolsearch.NewSource(manager, exactMCPRanker{}), declaration}, DeferredTools: manager, Revision: "generation-1", Validate: func(context.Context) (func(), error) {
 					if stale.Load() {

@@ -20,6 +20,7 @@ const (
 	frameError
 	frameCancel
 	frameBudget
+	frameNames
 )
 
 type frame struct {

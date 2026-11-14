@@ -225,7 +225,7 @@ func (h *codeModeHost) Search(ctx context.Context, request codemode.SearchReques
 		}
 		h.mu.Lock()
 		h.targets[entry.Name] = codeModeTarget{tool: one, definition: def, digest: codeModeDefinitionDigest(def)}
-		h.discovered[entry.Name] = *entry.Binding
+		h.bindings[entry.Name] = *entry.Binding
 		h.mu.Unlock()
 		entries = append(entries, codeModeSearchEntry{Name: entry.Name, Description: entry.Description, InputSchema: entry.InputSchema})
 	}

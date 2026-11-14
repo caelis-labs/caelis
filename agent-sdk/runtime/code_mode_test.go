@@ -265,8 +265,8 @@ func TestCodeModeRuntimeMCPAggregationAndMediaReceipts(t *testing.T) {
 	}
 }
 
-func TestCodeModeDiscoveryRequiresCanonicalPriorSearch(t *testing.T) {
-	for _, mode := range []string{"guessed", "raw-search", "same-batch", "other-session", "prior-search"} {
+func TestCodeModeAssembledToolsDoNotRequireSearch(t *testing.T) {
+	for _, mode := range []string{"without-search", "prior-search"} {
 		t.Run(mode, func(t *testing.T) {
 			store, active, _ := codeModeStore(t)
 			var effects atomic.Int32
@@ -278,18 +278,10 @@ func TestCodeModeDiscoveryRequiresCanonicalPriorSearch(t *testing.T) {
 				return tool.Result{Content: []model.Part{model.NewTextPart("ok")}}, nil
 			}})
 			search := toolsearch.NewSource(source, exactMCPRanker{})
-			if mode == "raw-search" {
-				if _, err := search.Call(t.Context(), tool.Call{Input: []byte(`{"query":"docs__read"}`)}); err != nil {
-					t.Fatal(err)
-				}
-			}
 			declaration := &codemode.Tool{Name: "js_repl", Executor: codeExecutorFunc(func(ctx context.Context, _ codemode.Source, host codemode.Host) (json.RawMessage, error) {
 				_, err := host.Call(ctx, "docs__read", []byte(`{}`))
-				if mode == "prior-search" && err != nil {
+				if err != nil {
 					return nil, err
-				}
-				if mode != "prior-search" && err == nil {
-					return nil, errors.New("unadmitted MCP call executed")
 				}
 				if _, err := host.Call(ctx, tool.ToolSearchToolName, []byte(`{"query":"docs__read"}`)); err == nil {
 					return nil, errors.New("raw ToolSearch bypassed admission")
@@ -299,9 +291,6 @@ func TestCodeModeDiscoveryRequiresCanonicalPriorSearch(t *testing.T) {
 			llm := &mcpScriptModel{steps: func(i int, _ *model.Request) []model.ToolCall {
 				searchCall := model.ToolCall{ID: "search", Name: tool.ToolSearchToolName, Args: `{"query":"docs__read"}`}
 				codeCall := model.ToolCall{ID: "script", Name: "js_repl", Args: `{"code":"fixture"}`}
-				if i == 0 && mode == "same-batch" {
-					return []model.ToolCall{searchCall, codeCall}
-				}
 				if mode == "prior-search" {
 					if i == 0 {
 						return []model.ToolCall{searchCall}
@@ -316,26 +305,9 @@ func TestCodeModeDiscoveryRequiresCanonicalPriorSearch(t *testing.T) {
 				}
 				return nil
 			}}
-			if mode == "other-session" {
-				other, err := store.StartSession(t.Context(), session.StartSessionRequest{AppName: "fixture", UserID: "fixture"})
-				if err != nil {
-					t.Fatal(err)
-				}
-				searchModel := &mcpScriptModel{steps: func(i int, _ *model.Request) []model.ToolCall {
-					if i == 0 {
-						return []model.ToolCall{{ID: "search", Name: tool.ToolSearchToolName, Args: `{"query":"docs__read"}`}}
-					}
-					return nil
-				}}
-				runCodeMode(t, store, other, agent.AgentSpec{Model: searchModel, Tools: []tool.Tool{search}, DeferredTools: source}, nil, nil)
-			}
 			runCodeMode(t, store, active, agent.AgentSpec{Model: llm, Tools: []tool.Tool{search, declaration}, DeferredTools: source}, nil, nil)
-			want := int32(0)
-			if mode == "prior-search" {
-				want = 1
-			}
-			if effects.Load() != want {
-				t.Fatalf("effects=%d want=%d", effects.Load(), want)
+			if effects.Load() != 1 {
+				t.Fatalf("effects=%d want=1", effects.Load())
 			}
 		})
 	}

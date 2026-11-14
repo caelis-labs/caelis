@@ -84,7 +84,11 @@ and limit live acceptance to the exercised models, adapter, and request paths;
 a successful priority request does not establish latency, billing, or GUI and
 distribution acceptance.
 
-For the fixed MCP entry upgrade, include the [discovery compatibility rule](session-profiles.md#mcp-discovery-and-upgrades) in release notes: historical Sessions remain readable, but must discover MCP tools again before use.
+For MCP binding changes, release notes must distinguish Code Mode from the fixed
+non-Code Mode `mcp_call`: Code Mode can call a known current Session name directly
+and reuse bindings from canonical search receipts or started child Journal records
+for Code Mode tool executions, while `mcp_call` still requires prior discovery. See
+[the discovery compatibility rule](session-profiles.md#mcp-discovery-and-upgrades).
 
 ## Gate model
 

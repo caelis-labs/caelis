@@ -35,6 +35,11 @@ func WorkerMain() int {
 	if err != nil {
 		return 2
 	}
+	f, err = readFrame(os.Stdin, l.ReplyBytes)
+	if err != nil || f.kind != frameNames || !json.Valid(f.data) {
+		return 2
+	}
+	namesJSON := string(f.data)
 	f, err = readFrame(os.Stdin, l.SourceBytes)
 	if err != nil || f.kind != frameSource {
 		return 2
@@ -130,7 +135,11 @@ func WorkerMain() int {
 	if err != nil {
 		return 2
 	}
-	bridge, err := build(goja.Undefined(), vm.ToValue(rpc), limitsValue)
+	namesValue, err := vm.RunString("JSON.parse(" + fmt.Sprintf("%q", namesJSON) + ")")
+	if err != nil {
+		return 2
+	}
+	bridge, err := build(goja.Undefined(), vm.ToValue(rpc), limitsValue, namesValue)
 	if err != nil {
 		return 2
 	}
