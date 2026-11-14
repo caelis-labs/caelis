@@ -441,12 +441,12 @@ func TestCodeModeFallbackPreservesOriginalResultBytes(t *testing.T) {
 	entry.State = task.StateFailed
 	const raw = `{"is_error":true,"metadata":{"code_mode_script_completion":"completed"}}`
 	entry.Result = map[string]any{"tool_result_json": raw, "error": "cumulative error"}
-	snapshot := terminalCommandFallbackSnapshot(entry)
-	if len(snapshot.Frames) != 1 || snapshot.Frames[0].Text != raw || snapshot.State != "failed" {
-		t.Fatalf("original result/lifecycle lost: %+v", snapshot)
+	frame := terminalCommandFallbackFrame(entry)
+	if frame.Text != raw || frame.State != "failed" || !frame.Closed {
+		t.Fatalf("original result/lifecycle lost: %+v", frame)
 	}
 	delete(entry.Result, "tool_result_json")
-	if got := terminalCommandFallbackSnapshot(entry).FinalText; got != "cumulative error" {
+	if got := terminalCommandFallbackFrame(entry).Text; got != "cumulative error" {
 		t.Fatalf("missing receipt erased existing diagnostic: %q", got)
 	}
 }

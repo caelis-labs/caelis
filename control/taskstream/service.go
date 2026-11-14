@@ -457,19 +457,10 @@ func (s *service) fallbackDeliveries(ctx context.Context, entry *task.Entry) ([]
 	if entry.Kind == task.KindSubagent {
 		return nil, errorcode.New(errorcode.Unavailable, "Child output history is unavailable")
 	}
-	records := recordsForSnapshot(entry, terminalCommandFallbackSnapshot(entry))
-	return replacementDeliveries(entry, records)
-}
-
-func recordsForSnapshot(entry *task.Entry, snapshot fallbackSnapshot) []Record {
-	records := make([]Record, 0, len(snapshot.Frames)+1)
-	for _, frame := range framesForFallback(snapshot) {
-		cloned := cloneFrame(frame)
-		records = append(records, Record{
-			Sequence: uint64(len(records) + 1), Task: descriptorForFrame(entry, cloned), Frame: &cloned,
-		})
-	}
-	return records
+	frame := terminalCommandFallbackFrame(entry)
+	return replacementDeliveries(entry, []Record{{
+		Sequence: 1, Task: descriptorForFrame(entry, frame), Frame: &frame,
+	}})
 }
 
 func replacementDeliveries(entry *task.Entry, records []Record) ([]Delivery, error) {
@@ -519,10 +510,7 @@ func replacementDeliveries(entry *task.Entry, records []Record) ([]Delivery, err
 	return deliveries, nil
 }
 
-func terminalCommandFallbackSnapshot(entry *task.Entry) fallbackSnapshot {
-	if entry == nil {
-		return fallbackSnapshot{}
-	}
+func terminalCommandFallbackFrame(entry *task.Entry) Frame {
 	descriptor := descriptorFromEntry(entry)
 	text := strings.TrimSpace(mapString(entry.Result, "result"))
 	if text == "" {
@@ -540,13 +528,9 @@ func terminalCommandFallbackSnapshot(entry *task.Entry) fallbackSnapshot {
 	if code, ok := integerValue(entry.Result["exit_code"]); ok {
 		exitCode = &code
 	}
-	frame := Frame{
+	return Frame{
 		TerminalID: descriptor.CurrentTurnID,
 		Text:       text, State: string(entry.State), Closed: true, ExitCode: exitCode, UpdatedAt: entry.UpdatedAt,
-	}
-	return fallbackSnapshot{
-		State: frame.State, Running: false, TerminalFramed: true,
-		ExitCode: exitCode, UpdatedAt: entry.UpdatedAt, Frames: []Frame{frame}, FinalText: text,
 	}
 }
 

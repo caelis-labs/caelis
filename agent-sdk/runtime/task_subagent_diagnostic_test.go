@@ -163,20 +163,19 @@ func TestFailedSubagentDiagnosticSurvivesCanonicalTaskSyncAndRehydrate(t *testin
 		t.Fatalf("rehydrated failure became final assistant output: %#v", rehydrated.Result)
 	}
 
-	// Canonical synchronization remains a pure replacement. Compatibility
-	// producers that omit a typed Runtime diagnostic receive the fixed fallback
-	// instead of inheriting a previous error through the shared apply path.
+	// Result normalization uses the fixed fallback when no typed producer
+	// diagnostic is available, without promoting history to typed authority.
 	compatibility := task.CloneEntry(entry)
 	compatibility.FailureDiagnostic = ""
-	applyCanonicalTaskEntry(compatibility, map[string]any{
+	applyCanonicalTaskResult(compatibility, map[string]any{
 		"handle": taskPublicHandle(snapshot),
 		"state":  string(task.StateFailed),
-	}, "completed", time.Now())
+	}, time.Now())
 	if got := taskStringValue(compatibility.Result["error"]); got != "participant failed" {
 		t.Fatalf("canonical fallback error = %q, want participant failed", got)
 	}
-	if compatibility.FailureDiagnostic != "participant failed" {
-		t.Fatalf("canonical typed diagnostic = %q, want participant failed", compatibility.FailureDiagnostic)
+	if compatibility.FailureDiagnostic != "" {
+		t.Fatalf("canonical result changed the producer diagnostic to %q", compatibility.FailureDiagnostic)
 	}
 }
 
@@ -586,10 +585,10 @@ func TestCanonicalSubagentBatchNormalizesEachFailureIndependently(t *testing.T) 
 	}
 	got := []string{
 		taskStringValue(canonicalSubagentTaskOutput(
-			outputs[0], "completed", task.StateFailed, "subagent prompt failed",
+			outputs[0], task.StateFailed, "subagent prompt failed",
 		)["error"]),
 		taskStringValue(canonicalSubagentTaskOutput(
-			outputs[1], "completed", task.StateUnknownOutcome, "subagent outcome could not be confirmed",
+			outputs[1], task.StateUnknownOutcome, "subagent outcome could not be confirmed",
 		)["error"]),
 	}
 	want := []string{"subagent prompt failed", "subagent outcome could not be confirmed"}

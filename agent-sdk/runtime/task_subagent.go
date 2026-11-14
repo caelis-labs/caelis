@@ -421,7 +421,7 @@ func (tm *taskRuntime) lookupSubagent(ctx context.Context, ref session.SessionRe
 	if strings.TrimSpace(entry.Session.SessionID) != strings.TrimSpace(ref.SessionID) || entry.Kind != taskapi.KindSubagent {
 		return nil, fmt.Errorf("task %q not found", taskID)
 	}
-	entry, err = tm.backfillCanonicalTaskEntry(ctx, ref, entry)
+	entry, err = tm.recoverCanonicalTaskResult(ctx, ref, entry)
 	if err != nil {
 		return nil, err
 	}
@@ -466,7 +466,7 @@ func (tm *taskRuntime) lookupSubagentCanonical(ctx context.Context, ref session.
 	if entry.Kind != taskapi.KindSubagent || strings.TrimSpace(entry.Session.SessionID) != strings.TrimSpace(ref.SessionID) {
 		return nil, fmt.Errorf("task %q not found", taskID)
 	}
-	entry, err = tm.backfillCanonicalTaskEntry(ctx, ref, entry)
+	entry, err = tm.recoverCanonicalTaskResult(ctx, ref, entry)
 	if err != nil {
 		return nil, err
 	}
@@ -567,6 +567,9 @@ func (tm *taskRuntime) rehydrateSubagentTask(entry *taskapi.Entry) *subagentTask
 	}
 	target = delegation.NormalizeTarget(target)
 	result := session.CloneState(entry.Result)
+	// SDK Task recovery reads first-activity result mirrors written through
+	// v0.79.1. Remove this fallback once the minimum supported upgrade source
+	// is newer than v0.79.1; current writers use Entry.Result only.
 	if taskTurnSeqFromSpec(entry.Spec) <= 1 {
 		if stored, ok := entry.Spec["spawn_result"].(map[string]any); ok {
 			if result == nil {
@@ -881,7 +884,6 @@ func (t *subagentTask) entrySnapshot(now time.Time) *taskapi.Entry {
 			"turn_seq":             t.turnSeq,
 			"turn_id":              subagentTurnID(t.ref.TaskID, t.turnSeq),
 			"participant_role":     string(subagentParticipantRole(t)),
-			"spawn_result":         taskapi.SanitizeResultForPersistence(t.result, taskapi.ResultPersistenceCanonical),
 		},
 		// Producer completion publishes the public result without waiting for a
 		// model-facing Task observation to synchronize it.
