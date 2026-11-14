@@ -302,7 +302,7 @@ func TestApplicationMainHTTPProfileProjectionAndRecoveryArePassive(t *testing.T)
 		candidates, err := client.CompleteSkill(ctx, appserver.CompletionRequest{SessionID: sid})
 		selectedCandidates := candidates[:0]
 		for _, candidate := range candidates {
-			if candidate.Value != "desktop-world:desktop-world" {
+			if candidate.Value != "desktop-world:dtw" && candidate.Value != "desktop-world:desktop-world" {
 				selectedCandidates = append(selectedCandidates, candidate)
 			}
 		}

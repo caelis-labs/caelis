@@ -38,7 +38,7 @@ func selectedCodeModeTools(candidates []tool.Tool) []string {
 		remote, _ := def.Metadata[tool.MetadataMCPTool].(string)
 		server, _ := def.Metadata[tool.MetadataMCPServer].(string)
 		docs := remote == "resolve-library-id" || remote == "query-docs" || remote == "get-library-docs"
-		desktop := remote == "exec" && (server == "desktop-world" || server == "desktop_world")
+		desktop := remote == "exec" && (server == "dtw" || server == "desktop-world" || server == "desktop_world")
 		if docs || desktop {
 			names = append(names, def.Name)
 		}

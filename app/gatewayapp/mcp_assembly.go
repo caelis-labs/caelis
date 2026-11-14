@@ -33,11 +33,19 @@ func mergeRuntimeMCPSpecs(catalog []sdkmcp.ServerSpec, pluginSpecs []plugin.MCPS
 	if err != nil {
 		return nil, err
 	}
-	reserved := sdkmcp.ServerToolNamePrefix("desktop-world")
 	for _, spec := range combined {
+		if spec.PluginID == "desktop-world" {
+			continue
+		}
 		projected := sdkmcp.ServerToolNamePrefix(spec.Name)
-		if spec.PluginID != "desktop-world" && (strings.HasPrefix(projected, reserved) || strings.HasPrefix(reserved, projected)) {
-			return nil, fmt.Errorf("MCP source %q conflicts with Core's fixed desktop-world namespace", spec.Name)
+		// Keep the historical namespace reserved while released packages can
+		// still be selected. A rename must not transfer old tool names to a
+		// different source.
+		for _, name := range []string{"dtw", "desktop-world"} {
+			reserved := sdkmcp.ServerToolNamePrefix(name)
+			if strings.HasPrefix(projected, reserved) || strings.HasPrefix(reserved, projected) {
+				return nil, fmt.Errorf("MCP source %q conflicts with Core's fixed %s namespace", spec.Name, name)
+			}
 		}
 	}
 	return combined, nil
