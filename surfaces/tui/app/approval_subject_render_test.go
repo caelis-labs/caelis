@@ -6,11 +6,72 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	acpsdk "github.com/caelis-labs/acp-go-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 	"github.com/caelis-labs/caelis/internal/evalharness"
 )
+
+func TestApprovalMisleadingLabelsKeepOriginalKindThroughACPAndPrompt(t *testing.T) {
+	const allowID = "reject:opaque/Allow.ID-7"
+	const rejectID = "approve:opaque/Reject.ID-9"
+	for _, incomplete := range []bool{false, true} {
+		for _, key := range []struct {
+			name string
+			code rune
+		}{{name: "enter", code: tea.KeyEnter}, {name: "esc", code: tea.KeyEscape}} {
+			name := "known/" + key.name
+			if incomplete {
+				name = "opaque/" + key.name
+			}
+			t.Run(name, func(t *testing.T) {
+				known := session.KnownApprovalField
+				subject := &session.ApprovalSubject{Kind: "command", Tool: known("RunCommand"), Operation: known("execute"), Targets: []session.ApprovalField{known("git fetch origin")}, Effect: known("run the supplied command"), Scope: known("this invocation")}
+				if incomplete {
+					subject = session.ApprovalSubjectOf(nil)
+				}
+				env := eventstream.Envelope{Kind: eventstream.KindRequestPermission, ApprovalRequestID: "opaque-request/Keep.Case", ApprovalSubject: subject,
+					Permission: &eventstream.RequestPermissionRequest{Options: []acpsdk.PermissionOption{
+						{OptionId: allowID, Name: "Reject this request", Kind: acpsdk.PermissionOptionKindAllowOnce},
+						{OptionId: rejectID, Name: "Approve everything", Kind: acpsdk.PermissionOptionKindRejectOnce},
+					}}}
+				req := approvalPayloadFromACPEvent(env)
+				for _, option := range env.Permission.Options {
+					decision := approvalDecisionFromPrompt(req, PromptResponse{Line: string(option.OptionId)})
+					if decision.RequestID != env.ApprovalRequestID || decision.OptionID != string(option.OptionId) || decision.Approved != (option.Kind == acpsdk.PermissionOptionKindAllowOnce) {
+						t.Fatalf("ACP option identity/kind changed: %+v", decision)
+					}
+				}
+				responses := make(chan PromptResponse, 1)
+				prompt := approvalToPromptRequest(req, responses)
+				model := NewModel(Config{InitialPrompt: &prompt, NoColor: true, NoAnimation: true})
+				model.width, model.height = 88, 44
+				frame := evalharness.NormalizeFrame(model.renderPromptModal())
+				for _, want := range []string{"Reject this request", "Approve everything", "allow_once; scope: [unavailable]", "reject_once; scope: [unavailable]"} {
+					if !strings.Contains(frame, want) {
+						t.Fatalf("rendered approval missing %q:\n%s", want, frame)
+					}
+				}
+				wantID, wantApproved := allowID, true
+				if incomplete || key.name == "esc" {
+					wantID, wantApproved = rejectID, false
+				}
+				model.handlePromptKey(tea.KeyPressMsg{Code: key.code})
+				select {
+				case response := <-responses:
+					decision := approvalDecisionFromPrompt(req, response)
+					if decision.RequestID != env.ApprovalRequestID || decision.Outcome != approvalStatusSelected || decision.OptionID != wantID || decision.Approved != wantApproved {
+						t.Fatalf("%s decision = %+v, want option %q approved=%t", key.name, decision, wantID, wantApproved)
+					}
+				default:
+					t.Fatalf("%s did not complete approval prompt", key.name)
+				}
+				t.Logf("rendered approval before %s:\n%s", key.name, frame)
+			})
+		}
+	}
+}
 
 func TestApprovalSubjectRenderedDecisionContext(t *testing.T) {
 	for _, name := range []string{"known", "opaque", "sensitive", "truncated", "reported", "reported_sensitive"} {

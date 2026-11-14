@@ -192,6 +192,12 @@ type commandWriteProbeSession struct {
 	writes int
 }
 
+func (s *commandWriteProbeSession) Status(ctx context.Context) (sandbox.SessionStatus, error) {
+	status, err := s.yieldProbeSandboxSession.Status(ctx)
+	status.SupportsInput = status.Running
+	return status, err
+}
+
 func (s *commandWriteProbeSession) WriteInput(context.Context, []byte) error {
 	s.mu.Lock()
 	s.writes++
@@ -1324,12 +1330,16 @@ func TestTaskRuntimeSyncCanonicalToolResultPersistsBatchTaskResults(t *testing.T
 	taskStore := newFileTaskStoreForTest(t)
 	runtime.tasks.store = taskStore
 	for _, id := range []string{"task-a", "task-b", "task-error"} {
+		state := taskapi.StateCompleted
+		if id == "task-b" {
+			state = taskapi.StateFailed
+		}
 		if err := taskStore.Upsert(context.Background(), &taskapi.Entry{
 			TaskID:  id,
 			Kind:    taskapi.KindCommand,
 			Session: activeSession.SessionRef,
-			State:   taskapi.StateCompleted,
-			Result:  map[string]any{"state": string(taskapi.StateCompleted)},
+			State:   state,
+			Result:  map[string]any{"state": string(state)},
 			Terminal: sandbox.TerminalRef{
 				Backend:    sandbox.BackendHost,
 				SessionID:  id + "-session",
@@ -1566,7 +1576,6 @@ func TestTaskStreamBackfillDefersToActiveSessionFenceOwner(t *testing.T) {
 		UpdatedAt: eventTime.Add(-time.Minute),
 		Result: map[string]any{
 			"state":     string(taskapi.StateCompleted),
-			"result":    "stale result\n",
 			"exit_code": 0,
 		},
 		Metadata: map[string]any{"parent_call": "run-fence-contended"},
@@ -1624,75 +1633,48 @@ func TestTaskStreamBackfillDefersToActiveSessionFenceOwner(t *testing.T) {
 	}
 }
 
-func TestTaskControlWriteFailsClosedWhenBackfillLosesSessionFence(t *testing.T) {
+func TestTaskControlWriteFailsClosedWhenReloadLosesSessionFence(t *testing.T) {
 	t.Parallel()
 
-	sessions, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
+	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
 	baseStore := newFileTaskStoreForTest(t)
-	eventTime := time.Now().UTC()
-	entry := &taskapi.Entry{
-		TaskID:    "task-stale-session-fence",
-		Handle:    "command-7",
-		Kind:      taskapi.KindCommand,
-		Session:   activeSession.SessionRef,
-		State:     taskapi.StateRunning,
-		Running:   true,
-		CreatedAt: eventTime.Add(-2 * time.Minute),
-		UpdatedAt: eventTime.Add(-time.Minute),
-		Result:    map[string]any{"state": string(taskapi.StateRunning)},
-		Metadata:  map[string]any{"command_phase": commandPhaseRunning, "parent_call": "run-stale-fence"},
-		Terminal: sandbox.TerminalRef{
-			Backend:    sandbox.BackendHost,
-			SessionID:  "stale-fence-session",
-			TerminalID: "stale-fence-terminal",
-		},
-	}
-	if err := baseStore.Upsert(context.Background(), entry); err != nil {
-		t.Fatalf("Upsert() error = %v", err)
-	}
-	stored, err := baseStore.Get(context.Background(), entry.TaskID)
-	if err != nil {
-		t.Fatalf("Get() error = %v", err)
-	}
-	runtime.tasks.store = &fenceContendedBackfillTaskStore{
-		Store:         baseStore,
-		authoritative: stored,
-	}
+	runtime.tasks.store = baseStore
 	running := true
 	sessionProbe := &commandWriteProbeSession{
 		yieldProbeSandboxSession: &yieldProbeSandboxSession{statusRunning: &running},
 	}
-	runtime.tasks.backends[sandbox.BackendHost] = newCommandStartProbe(sessionProbe, nil)
-	if _, err := sessions.AppendEvent(context.Background(), session.AppendEventRequest{
-		SessionRef: activeSession.SessionRef,
-		Event: &session.Event{
-			Type: session.EventTypeToolResult,
-			Time: eventTime,
-			Tool: &session.EventTool{
-				ID:     "run-stale-fence",
-				Name:   "RunCommand",
-				Status: "running",
-				Output: map[string]any{
-					"handle": entry.Handle,
-					"state":  string(taskapi.StateRunning),
-				},
-			},
-		},
-	}); err != nil {
-		t.Fatalf("AppendEvent(tool result) error = %v", err)
-	}
-
-	_, err = runtime.tasks.Write(context.Background(), activeSession.SessionRef, taskapi.ControlRequest{
-		TaskID:    entry.TaskID,
-		Input:     "unsafe input",
-		Principal: session.ActorKindTool,
+	started, err := runtime.tasks.StartCommand(t.Context(), activeSession, activeSession.SessionRef, newCommandStartProbe(sessionProbe, nil), taskapi.CommandStartRequest{
+		Command: "controlled stdin", Workdir: activeSession.CWD, Yield: 0,
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime.tasks.store = commandReloadErrorTaskStore{Store: baseStore, err: &session.FenceConflictError{SessionID: activeSession.SessionID, Detail: "owner was lost"}}
+	request := taskapi.ControlRequest{TaskID: started.Ref.TaskID, Input: "input", Principal: session.ActorKindTool}
+	_, err = runtime.tasks.Write(t.Context(), activeSession.SessionRef, request)
 	if !errors.Is(err, session.ErrFenceConflict) {
 		t.Fatalf("Task Write() error = %v, want Session fence conflict", err)
 	}
 	if calls := sessionProbe.writeCalls(); calls != 0 {
 		t.Fatalf("sandbox WriteInput calls = %d, want none after Session fence loss", calls)
 	}
+	// The same producer accepts stdin once the authoritative read succeeds.
+	runtime.tasks.store = baseStore
+	if _, err := runtime.tasks.Write(t.Context(), activeSession.SessionRef, request); err != nil {
+		t.Fatal(err)
+	}
+	if calls := sessionProbe.writeCalls(); calls != 1 {
+		t.Fatalf("sandbox WriteInput calls = %d, want one after successful reload", calls)
+	}
+}
+
+type commandReloadErrorTaskStore struct {
+	taskapi.Store
+	err error
+}
+
+func (s commandReloadErrorTaskStore) Get(context.Context, string) (*taskapi.Entry, error) {
+	return nil, s.err
 }
 
 func TestLookupCommandCanonicalDoesNotRegressNewerDurableUnknownOutcome(t *testing.T) {
