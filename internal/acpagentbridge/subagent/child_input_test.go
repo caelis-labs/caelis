@@ -281,7 +281,8 @@ func TestFinishingChildSteeringRetainsInputForNextPrompt(t *testing.T) {
 	t.Parallel()
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	runner := childInputTestRunner(t, "prompt-required")
+	terminalRelease := filepath.Join(t.TempDir(), "terminal-release")
+	runner := newChildInputTestRunner(t, "prompt-required", map[string]string{"CAELIS_ACP_CHILD_INPUT_TERMINAL_RELEASE": terminalRelease}, controlagents.Authentication{})
 	events := make(chan childInputTestEvent, 24)
 	spawn := childInputSpawnContext(t, "task-finishing-input", events)
 	anchor, _, err := runner.Spawn(ctx, spawn, delegation.Request{Agent: "helper", Prompt: "initial"})
@@ -294,7 +295,13 @@ func TestFinishingChildSteeringRetainsInputForNextPrompt(t *testing.T) {
 		t.Fatal(err)
 	}
 	req := agent.ChildInputRequest{Target: run.slot.target, UserInput: true, Source: session.ActorRef{Kind: session.ActorKindUser, ID: "owner"}, Input: "recheck the fix"}
-	if _, err := submitChildInputTest(runner, events, ctx, req); !errors.Is(err, agent.ErrChildInputNotReady) {
+	_, err = submitChildInputTest(runner, events, ctx, req)
+	// A no-injection receipt must settle before the independent producer terminal
+	// can cancel its waiter; otherwise this fixture tests an unknown delivery.
+	if releaseErr := os.WriteFile(terminalRelease, nil, 0o600); releaseErr != nil {
+		t.Fatal(releaseErr)
+	}
+	if !errors.Is(err, agent.ErrChildInputNotReady) {
 		t.Fatalf("finishing input = %v, want proven no-injection for mailbox deferral", err)
 	}
 	frames, _ := waitChildActivityFramesUntilTerminalFor(t, ctx, events, spawn.ActivityID)
@@ -316,6 +323,9 @@ func TestFinishingChildSteeringRetainsInputForNextPrompt(t *testing.T) {
 		t.Fatalf("idle followup = %#v %v", result, err)
 	}
 	waitChildActivityTerminalFor(t, ctx, events, result.ActivityID)
+	if err := runner.Quiesce(ctx); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestIdleChildInputStartsPromptOnExistingSession(t *testing.T) {
