@@ -27,7 +27,12 @@ other plugins. Each Session keeps its own connection,
 state, app approvals and lifecycle. Built-in status grants no blanket approval.
 
 One whole `desktop-world` package supplies both MCP and its namespaced Skill.
-An explicit Session package wins, including its Host launch override. Otherwise,
+Core accepts a `dtw` service paired with `skills/dtw` (`desktop-world:dtw`), or
+an older package's `desktop-world` service paired with `skills/desktop-world`
+(`desktop-world:desktop-world`). The selected package must supply one coherent
+pair from the same root; mixed names and duplicate identities are errors. The
+plugin ID remains `desktop-world` for either pair. An explicit Session package
+wins, including its Host launch override. Otherwise,
 Core validates the enabled global DTW package's manifest identity and complete
 MCP/Skill pair, then selects the newer semantic version of that package and the
 supported embedded release. Equal versions, including build metadata differences,
@@ -42,7 +47,8 @@ using another source. Removing a Session override restores version selection
 between the enabled global package and embedded release. Disabling or removing the global override restores
 the embedded default. These changes do not delete or overwrite user packages.
 The embedded fallback itself has no switch or uninstall. Status identifies the
-selected source. A different service cannot shadow its projected MCP namespace.
+selected source. Other plugins and ordinary MCP services cannot shadow either
+the `dtw__` or historical `desktop_world__` projected namespace.
 
 Core's single release pin is
 [`control/plugin/builtin/desktop-world.json`](../control/plugin/builtin/desktop-world.json).
@@ -141,11 +147,13 @@ Mutation failures also include the Host `receipt` when available. Check its
 observation or cleanup failed; do not blindly replay an uncertain mutation.
 Without `--json`, the command prints a brief text result and errors on stderr.
 
-Desktop World's built-in Skill appears as `desktop-world:desktop-world`; its
-two MCP tools are `desktop_world__apps` and `desktop_world__exec` inside Caelis.
-`apps` discovers application identities; `exec` runs the selected app's async
-script. The paired Skill documents the script API and result format. Core does
-not emulate retired `api` or `result` endpoints.
+A package declaring the `dtw` service exposes `dtw__apps` and `dtw__exec` inside
+Caelis, with the Skill `desktop-world:dtw`. Older packages retain their declared
+`desktop-world` service, `desktop_world__` tool names and
+`desktop-world:desktop-world` Skill. The embedded package is identified by the
+release pin above. `apps` discovers application identities; `exec` runs the
+selected app's async script. The paired Skill documents the script API and
+result format. Core does not emulate retired `api` or `result` endpoints.
 
 The TUI limits MCP output previews by rendered rows, including long single-line
 JSON. Disclosure shows the original output and complete invocation parameters.
@@ -167,16 +175,18 @@ For the configured `desktop-world` 0.3 app contract, `apps` skips the ordinary
 MCP source prompt. Explicitly selected released 0.2 packages retain their own
 `apps`, `api`, and `result` source-read rules; pre-0.2 packages use ordinary MCP
 approval. Other tools retain ordinary MCP source approval.
-`desktop_world` is not a plugin-ID alias, and an ordinary MCP server named
-`desktop-world` does not inherit these rules. Explicit per-call policy Ask/Deny
+Neither `dtw` nor `desktop_world` is a plugin-ID alias. A server name alone
+does not inherit these rules. Explicit per-call policy Ask/Deny
 and OS permissions still apply. Caelis owns approval; DTW receives the same
 standard MCP arguments and remains usable with other Agents.
 
-Source/schema changes require fresh discovery and the original authorization
-checks. Old Session history remains readable, but old discovery is not migrated
-on resume. Existing operation IDs, receipts and unknown outcomes are retained;
-an upgrade or reconnect does not replay desktop work. Package roots are not
-overwritten in place.
+Source/schema changes retain the discovery and authorization rules in
+[MCP tools](mcp-tool-lifecycle.md#discovery-and-invocation). A service or Skill
+rename does not create an execution alias: old Session history remains readable,
+and old bindings and app approvals do not transfer to the renamed source.
+Accepted calls retain their original identity and result. Existing operation
+IDs, receipts and unknown outcomes are retained; an upgrade or reconnect does
+not replay desktop work. Package roots are not overwritten in place.
 
 Application-managed Sessions can also select optional native packages through
 [Session profiles](session-profiles.md#native-plugin-selection), including a DTW

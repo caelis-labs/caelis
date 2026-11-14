@@ -12,22 +12,25 @@ prepare = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(prepare)
 
 
-def fixture(extra=None, name='desktop-world'):
+def fixture(extra=None, name='desktop-world', identity='desktop-world', target='test-target', skill_name=None, skill_identity=None):
     source = {'commit': 'a' * 40, 'tree': 'b' * 40, 'cargo_lock_sha256': 'c' * 64}
-    build = json.dumps({'version': '0.2.3', 'target': 'test-target', 'source': source}).encode()
+    build = json.dumps({'version': '0.2.3', 'target': target, 'source': source}).encode()
+    binary = 'bin/dtw.exe' if 'windows' in target else 'bin/dtw'
+    skill = f'skills/{skill_name or identity}/SKILL.md'
+    skill_data = f'---\nname: {skill_identity or identity}\ndescription: Complete Skill fixture\n---\nSkill body\n'.encode()
     files = {'BUILD.json': build, 'plugin.json': json.dumps({'name': name, 'version': '0.2.3'}).encode(),
-             'bin/dtw': b'native binary fixture', 'skills/desktop-world/SKILL.md': b'complete Skill fixture',
+             binary: b'native binary fixture', skill: skill_data,
              'LICENSE': b'license', 'THIRD_PARTY_NOTICES.md': b'notices',
-             '.mcp.json': json.dumps({'mcpServers': {'desktop-world': {'command': '${CLAUDE_PLUGIN_ROOT}/bin/dtw', 'args': ['mcp']}}}).encode()}
+             '.mcp.json': json.dumps({'mcpServers': {identity: {'command': '${CLAUDE_PLUGIN_ROOT}/' + binary, 'args': ['mcp']}}}).encode()}
     files.update(extra or {})
     out = io.BytesIO()
     with zipfile.ZipFile(out, 'w') as archive:
         for key, value in files.items():
-            archive.writestr('desktop-world-0.2.3-test-target/' + key, value)
+            archive.writestr(f'desktop-world-0.2.3-{target}/' + key, value)
     data = out.getvalue()
-    platform = {'target': 'test-target', 'archive': 'desktop-world-0.2.3-test-target.zip', 'source': source,
-                'archive_sha256': prepare.sha(data), 'binary_sha256': prepare.sha(files['bin/dtw']),
-                'skill_sha256': prepare.sha(files['skills/desktop-world/SKILL.md']), 'build_sha256': prepare.sha(build)}
+    platform = {'target': target, 'archive': f'desktop-world-0.2.3-{target}.zip', 'source': source,
+                'archive_sha256': prepare.sha(data), 'binary_sha256': prepare.sha(files[binary]),
+                'skill_sha256': prepare.sha(files[skill]), 'build_sha256': prepare.sha(build)}
     return {'version': '0.2.3'}, platform, data
 
 
@@ -38,6 +41,67 @@ class PrepareBuiltinTests(unittest.TestCase):
         target['source'] = dict(target['source'], commit='d' * 40)
         with self.assertRaisesRegex(ValueError, 'provenance'):
             prepare.verify(pin, target, data)
+
+    def test_coherent_identities_on_both_platforms_without_version_threshold(self):
+        for identity in ('desktop-world', 'dtw'):
+            for target in ('aarch64-apple-darwin', 'x86_64-pc-windows-msvc'):
+                with self.subTest(identity=identity, target=target):
+                    pin, platform, data = fixture(identity=identity, target=target)
+                    evidence = prepare.verify(pin, platform, data)
+                    self.assertEqual(evidence['id'], 'desktop-world')
+                    self.assertEqual(evidence['target'], target)
+
+    def test_mixed_server_and_skill_locations_are_rejected(self):
+        for identity, skill in (('dtw', 'desktop-world'), ('desktop-world', 'dtw')):
+            with self.subTest(identity=identity):
+                pin, platform, data = fixture(identity=identity, skill_name=skill)
+                with self.assertRaisesRegex(ValueError, 'Skill location'):
+                    prepare.verify(pin, platform, data)
+
+    def test_two_server_or_skill_identities_are_rejected(self):
+        launch = {'command': '${CLAUDE_PLUGIN_ROOT}/bin/dtw', 'args': ['mcp']}
+        extras = [
+            {'.mcp.json': json.dumps({'mcpServers': {name: launch for name in ('dtw', 'desktop-world')}}).encode()},
+            {'skills/desktop-world/SKILL.md': b'---\nname: desktop-world\n---\n'},
+        ]
+        for extra in extras:
+            with self.subTest(extra=extra):
+                pin, platform, data = fixture(extra, identity='dtw')
+                with self.assertRaisesRegex(ValueError, 'identity|location'):
+                    prepare.verify(pin, platform, data)
+
+    def test_unknown_server_identity_is_rejected(self):
+        pin, platform, data = fixture(identity='other')
+        with self.assertRaisesRegex(ValueError, 'server identity'):
+            prepare.verify(pin, platform, data)
+
+    def test_matching_checksum_cannot_hide_wrong_skill_metadata(self):
+        for identity, metadata in (('dtw', 'desktop-world'), ('desktop-world', 'dtw'), ('dtw', 'desktop-world:dtw')):
+            with self.subTest(identity=identity, metadata=metadata):
+                pin, platform, data = fixture(identity=identity, skill_identity=metadata)
+                with self.assertRaisesRegex(ValueError, 'Skill identity'):
+                    prepare.verify(pin, platform, data)
+
+    def test_skill_requires_one_literal_frontmatter_name(self):
+        for content in (b'name: dtw\n', b'---\nname: dtw\n', b'---\ndescription: dtw\n---\n',
+                        b'---\nname: dtw\nname: other\n---\n', b'---\nname: >\n  dtw\n---\n'):
+            with self.subTest(content=content):
+                pin, platform, data = fixture({'skills/dtw/SKILL.md': content}, identity='dtw')
+                with self.assertRaisesRegex(ValueError, 'Skill identity'):
+                    prepare.verify(pin, platform, data)
+        for name in ('dtw', "'dtw'", '"dtw"'):
+            with self.subTest(name=name):
+                pin, platform, data = fixture(identity='dtw', skill_identity=name)
+                prepare.verify(pin, platform, data)
+
+    def test_windows_launch_must_use_exe_and_mcp_argument(self):
+        for launch in ({'command': '${CLAUDE_PLUGIN_ROOT}/bin/dtw', 'args': ['mcp']},
+                       {'command': '${CLAUDE_PLUGIN_ROOT}/bin/dtw.exe', 'args': []}):
+            with self.subTest(launch=launch):
+                pin, platform, data = fixture({'.mcp.json': json.dumps({'mcpServers': {'dtw': launch}}).encode()},
+                                              identity='dtw', target='x86_64-pc-windows-msvc')
+                with self.assertRaisesRegex(ValueError, 'launch contract'):
+                    prepare.verify(pin, platform, data)
 
     def test_tamper_is_not_accepted_as_a_valid_cached_asset(self):
         pin, target, data = fixture()

@@ -26,7 +26,7 @@ func optionalCapabilityStatus(status sessionprofile.MCPStatus) sessionprofile.MC
 		}
 	}
 	for _, skill := range status.Skills {
-		if skill.Name != "desktop-world:desktop-world" {
+		if skill.Name != "desktop-world:dtw" && skill.Name != "desktop-world:desktop-world" {
 			out.Skills = append(out.Skills, skill)
 		}
 	}
