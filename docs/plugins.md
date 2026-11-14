@@ -147,9 +147,9 @@ Mutation failures also include the Host `receipt` when available. Check its
 observation or cleanup failed; do not blindly replay an uncertain mutation.
 Without `--json`, the command prints a brief text result and errors on stderr.
 
-A package declaring the `dtw` service exposes `dtw__apps` and `dtw__exec` inside
-Caelis, with the Skill `desktop-world:dtw`. Older packages retain their declared
-`desktop-world` service, `desktop_world__` tool names and
+The embedded package declares the `dtw` service and exposes `dtw__apps` and
+`dtw__exec` inside Caelis, with the Skill `desktop-world:dtw`. Older packages
+retain their declared `desktop-world` service, `desktop_world__` tool names and
 `desktop-world:desktop-world` Skill. The embedded package is identified by the
 release pin above. `apps` discovers application identities; `exec` runs the
 selected app's async script. The paired Skill documents the script API and
