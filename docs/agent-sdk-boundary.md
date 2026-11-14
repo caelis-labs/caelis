@@ -310,11 +310,20 @@ schema-2 events; downgrade requires a Store backup from before those writes.
 Remove the schema-1 reader only when the supported upgrade floor requires
 schema-2 writers.
 
-Runtime-authored tool-result Events explicitly declare whether their wrapper may
-produce Task lifecycle facts. Historical absence is accepted only for the bounded
-legacy case where parent call and stored Task identity agree; an explicit false
-or malformed binding never upgrades. Remove that reader after the supported
-upgrade floor postdates the first release that wrote the marker.
+Task producers own lifecycle state and typed failure diagnostics. Runtime-authored
+tool-result Events declare whether their wrapper may supply bounded final-result
+enrichment for the same producer terminal state and child activity. Running
+observations and state-only receipts do not replace Task results. A later terminal
+observation can omit final text; that omission retains the preceding result and
+its canonical cursor. A missed sync can recover missing final text from matching
+canonical history, including text preceding a newer exit-only receipt; retained
+producer fields remain authoritative.
+
+Historical marker absence is accepted only where parent call and stored Task
+identity agree; an explicit false or malformed binding never upgrades. The SDK
+Task recovery owner retains this compatibility reader until the supported upgrade
+floor postdates the first release that wrote the marker. Child history without
+activity identity is limited to the first activity.
 
 ## Tools and instruction authority
 

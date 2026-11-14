@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/skill/fs"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
@@ -37,6 +38,9 @@ func TestProductDesktopWorldPackageAndSessionPaths(t *testing.T) {
 	}
 	if len(first.MCPServerSpecs) != 1 || len(first.SkillBundles) != 1 || len(first.Sources) != 1 {
 		t.Fatal("fixed package was split or duplicated")
+	}
+	if err := validateProductPair(first); err != nil {
+		t.Fatal(err)
 	}
 	a, b := first.MCPServerSpecs[0], second.MCPServerSpecs[0]
 	if a.PackageRoot != b.PackageRoot || a.DataDir == b.DataDir || a.PackageVersion != pinnedDesktopWorldTestVersion(t) || a.SourceTrusted || a.ToolResourceParameters["exec"] != "app" {
@@ -121,7 +125,7 @@ func TestProductDesktopWorldMCPStartup(t *testing.T) {
 		Count int                     `json:"count"`
 		Tools []struct{ Name string } `json:"tools"`
 	}
-	if err := json.Unmarshal(found.Content[0].JSON.Value, &discovery); err != nil || discovery.Count != 1 || len(discovery.Tools) != 1 || discovery.Tools[0].Name != "desktop_world__exec" {
+	if err := json.Unmarshal(found.Content[0].JSON.Value, &discovery); err != nil || discovery.Count != 1 || len(discovery.Tools) != 1 || discovery.Tools[0].Name != mcp.ServerToolNamePrefix(spec.Name)+"exec" {
 		t.Fatalf("selected package discovery = %+v, %v", discovery, err)
 	}
 	t.Logf("desktop-world %s: source=%s command=%s binary_sha256=%x tools=%v ToolSearch=%s; native stdio, no desktop RPC", version, contributions.Sources[0].Status, spec.Command, sha256.Sum256(binary), names, discovery.Tools[0].Name)
@@ -153,7 +157,15 @@ func TestProductDesktopWorldConcurrentMaterializationAndTamper(t *testing.T) {
 		}
 		root = candidate
 	}
-	skill := filepath.Join(root, "skills", "desktop-world", "SKILL.md")
+	contributions, err := ProductContributions(RuntimePaths{StoreDir: store})
+	if err != nil {
+		t.Fatal(err)
+	}
+	metas, err := fs.DiscoverPluginBundleMeta(contributions.SkillBundles)
+	if err != nil || len(metas) != 1 || !PathWithinRoot(root, metas[0].Path) {
+		t.Fatalf("builtin Skill = %+v, %v", metas, err)
+	}
+	skill := metas[0].Path
 	if err := os.WriteFile(skill, []byte("changed bytes"), 0o600); err != nil {
 		t.Fatal(err)
 	}

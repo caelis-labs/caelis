@@ -81,20 +81,35 @@ func validateProductPair(out Contributions) error {
 			root = source.Root
 		}
 	}
-	server := false
+	if root == "" {
+		return fmt.Errorf("desktop-world requires one selected package root")
+	}
+	var service string
 	for _, spec := range out.MCPServerSpecs {
-		if spec.PluginID == "desktop-world" && spec.PackageRoot == root {
-			server = true
+		if spec.PluginID != "desktop-world" {
+			continue
 		}
+		if spec.PackageRoot != root || (spec.Name != "dtw" && spec.Name != "desktop-world") || service != "" {
+			return fmt.Errorf("desktop-world requires one dtw or desktop-world MCP service from the selected package")
+		}
+		service = spec.Name
 	}
 	metas, err := fs.DiscoverPluginBundleMeta(out.SkillBundles)
 	if err != nil {
 		return err
 	}
+	var skill string
 	for _, meta := range metas {
-		if server && meta.PluginID == "desktop-world" && meta.LocalName == "desktop-world" && PathWithinRoot(root, meta.Path) {
-			return nil
+		if meta.PluginID != "desktop-world" || (meta.LocalName != "dtw" && meta.LocalName != "desktop-world") {
+			continue
 		}
+		if skill != "" || !PathWithinRoot(root, meta.Path) || meta.Name != "desktop-world:"+meta.LocalName {
+			return fmt.Errorf("desktop-world requires one paired Skill from the selected package")
+		}
+		skill = meta.LocalName
 	}
-	return fmt.Errorf("desktop-world requires its paired MCP service and desktop-world Skill")
+	if service != "" && skill == service {
+		return nil
+	}
+	return fmt.Errorf("desktop-world requires a coherent dtw MCP/Skill pair or desktop-world MCP/Skill pair")
 }

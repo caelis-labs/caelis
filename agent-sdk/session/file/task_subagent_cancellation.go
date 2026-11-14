@@ -45,6 +45,7 @@ func validateSubagentCancellation(current, next *taskapi.Entry) error {
 		entry.Lease.AcquiredAt = entry.Lease.AcquiredAt.UTC()
 		entry.Lease.HeartbeatAt = entry.Lease.HeartbeatAt.UTC()
 		entry.Lease.ExpiresAt = entry.Lease.ExpiresAt.UTC()
+		// Rewriting an older Task may drop its legacy result mirror.
 		for _, key := range []string{"cancel_phase", "cancel_turn_seq", "spawn_result"} {
 			delete(entry.Spec, key)
 		}

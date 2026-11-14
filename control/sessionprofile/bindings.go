@@ -107,7 +107,10 @@ func ValidateProfile(p Profile) error {
 	if p.Execution == "tools-only" && len(p.NativeTools) != 0 {
 		return fmt.Errorf("%w: native tools require workspace-write execution", ErrInvalid)
 	}
-	knownNative := map[string]bool{"Read": true, "ViewImage": true, "Write": true, "Patch": true, "Glob": true, "Grep": true, "RunCommand": true, "Task": true, codemode.ToolName: true}
+	knownNative := make(map[string]bool)
+	for _, name := range NativeToolNames() {
+		knownNative[name] = true
+	}
 	seenNative := make(map[string]bool, len(p.NativeTools))
 	for _, name := range p.NativeTools {
 		if !knownNative[name] || seenNative[name] {

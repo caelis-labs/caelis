@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	"github.com/caelis-labs/caelis/agent-sdk/task"
 )
 
 // Frame is one Control-owned normalized Task delivery record. Spool offsets,
@@ -22,17 +21,6 @@ type Frame struct {
 	UpdatedAt  time.Time      `json:"updated_at,omitempty"`
 }
 
-type fallbackSnapshot struct {
-	Frames         []Frame
-	FinalText      string
-	State          string
-	ActivityID     string
-	Running        bool
-	TerminalFramed bool
-	ExitCode       *int
-	UpdatedAt      time.Time
-}
-
 func cloneFrame(in Frame) Frame {
 	out := in
 	out.TerminalID = strings.TrimSpace(in.TerminalID)
@@ -43,79 +31,4 @@ func cloneFrame(in Frame) Frame {
 	}
 	out.Event = session.CloneEvent(in.Event)
 	return out
-}
-
-func framesForFallback(snapshot fallbackSnapshot) []Frame {
-	frames := make([]Frame, 0, len(snapshot.Frames)+1)
-	hasClosed := false
-	for _, frame := range snapshot.Frames {
-		cloned := cloneFrame(frame)
-		if cloned.ActivityID == "" {
-			cloned.ActivityID = strings.TrimSpace(snapshot.ActivityID)
-		}
-		frames = append(frames, cloned)
-		hasClosed = hasClosed || cloned.Closed
-	}
-	if hasClosed || snapshot.TerminalFramed || !task.IsTerminalState(task.State(snapshot.State)) {
-		return frames
-	}
-	closed := Frame{
-		ActivityID: strings.TrimSpace(snapshot.ActivityID),
-		Text:       snapshot.FinalText,
-		State:      normalizedClosedState(snapshot.State, snapshot.ExitCode),
-		Closed:     true,
-		ExitCode:   cloneExitCode(snapshot.ExitCode),
-		UpdatedAt:  snapshot.UpdatedAt,
-	}
-	if n := len(frames); n > 0 {
-		last := frames[n-1]
-		closed.TerminalID = strings.TrimSpace(last.TerminalID)
-		if closed.ActivityID == "" {
-			closed.ActivityID = last.ActivityID
-		}
-		closed.Event = closedFallbackLifecycleEvent(last, closed)
-	}
-	frames = append(frames, closed)
-	return frames
-}
-
-func closedFallbackLifecycleEvent(last, closed Frame) *session.Event {
-	if last.Event == nil || last.Event.Scope == nil {
-		return nil
-	}
-	turnID := strings.TrimSpace(last.Event.Scope.TurnID)
-	if turnID == "" {
-		return nil
-	}
-	return &session.Event{
-		Type: session.EventTypeLifecycle,
-		Time: closed.UpdatedAt,
-		Scope: &session.EventScope{
-			TurnID:      turnID,
-			Participant: last.Event.Scope.Participant,
-		},
-		Lifecycle: &session.EventLifecycle{Status: closed.State},
-	}
-}
-
-func normalizedClosedState(state string, exitCode *int) string {
-	state = strings.ToLower(strings.TrimSpace(state))
-	if task.IsTerminalState(task.State(state)) {
-		return state
-	}
-	if exitCode != nil && *exitCode != 0 {
-		if *exitCode < 0 {
-			return string(task.StateCancelled)
-		}
-		return string(task.StateFailed)
-	}
-	return string(task.StateUnknownOutcome)
-}
-
-func cloneExitCode(in *int) *int {
-	if in == nil {
-		return nil
-	}
-	code := *in
-	return &code
 }

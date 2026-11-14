@@ -33,7 +33,7 @@ func (tm *taskRuntime) lookupCommand(ctx context.Context, ref session.SessionRef
 	if entry.Kind != taskapi.KindCommand {
 		return nil, fmt.Errorf("task %q not found", taskID)
 	}
-	entry, err = tm.backfillCanonicalTaskEntry(ctx, ref, entry)
+	entry, err = tm.recoverCanonicalTaskResult(ctx, ref, entry)
 	if err != nil {
 		return nil, err
 	}
@@ -63,7 +63,7 @@ func (tm *taskRuntime) lookupCommandCanonical(ctx context.Context, ref session.S
 	if !storedTaskEntryMatches(entry, ref, taskapi.KindCommand) {
 		return nil, fmt.Errorf("task %q not found", taskID)
 	}
-	entry, err = tm.backfillCanonicalTaskEntry(ctx, ref, entry)
+	entry, err = tm.recoverCanonicalTaskResult(ctx, ref, entry)
 	if err != nil {
 		return nil, err
 	}

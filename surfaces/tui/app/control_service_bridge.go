@@ -15,6 +15,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/agentbinding"
 	controlagents "github.com/caelis-labs/caelis/control/agents"
@@ -869,17 +870,16 @@ func approvalDecisionFromPrompt(req *approvalPayload, response PromptResponse) c
 	if response.Err != nil || selected == "" {
 		return rejectionApprovalDecision(req)
 	}
-	if req != nil {
-		for _, opt := range req.Options {
-			if strings.TrimSpace(opt.ID) != selected {
-				continue
-			}
-			return controlprompt.ApprovalDecision{
-				RequestID: req.RequestID,
-				Outcome:   approvalStatusSelected,
-				OptionID:  selected,
-				Approved:  approvalOptionAllows(opt.Kind, opt.Name, opt.ID),
-			}
+	if req != nil && len(req.Options) > 0 {
+		option, decision, err := approval.ResolveStrictOption(strictApprovalOptions(req.Options), selected)
+		if err != nil {
+			return rejectionApprovalDecision(req)
+		}
+		return controlprompt.ApprovalDecision{
+			RequestID: req.RequestID,
+			Outcome:   approvalStatusSelected,
+			OptionID:  option.ID,
+			Approved:  decision == approval.OptionDecisionAllow,
 		}
 	}
 	switch strings.ToLower(selected) {
@@ -892,14 +892,12 @@ func approvalDecisionFromPrompt(req *approvalPayload, response PromptResponse) c
 
 func rejectionApprovalDecision(req *approvalPayload) controlprompt.ApprovalDecision {
 	if req != nil {
-		for _, opt := range req.Options {
-			if approvalOptionAllows(opt.Kind, opt.Name, opt.ID) {
-				continue
-			}
+		optionID, ok, err := approval.StrictOptionIDForDecision(strictApprovalOptions(req.Options), approval.OptionDecisionDeny)
+		if err == nil && ok {
 			return controlprompt.ApprovalDecision{
 				RequestID: req.RequestID,
 				Outcome:   approvalStatusSelected,
-				OptionID:  strings.TrimSpace(opt.ID),
+				OptionID:  optionID,
 				Approved:  false,
 			}
 		}
@@ -911,12 +909,10 @@ func rejectionApprovalDecision(req *approvalPayload) controlprompt.ApprovalDecis
 	return controlprompt.ApprovalDecision{RequestID: requestID, Outcome: approvalStatusRejected, Approved: false}
 }
 
-func approvalOptionAllows(kind string, name string, id string) bool {
-	parts := []string{strings.ToLower(strings.TrimSpace(kind)), strings.ToLower(strings.TrimSpace(name)), strings.ToLower(strings.TrimSpace(id))}
-	for _, part := range parts {
-		if strings.HasPrefix(part, "allow") || strings.HasPrefix(part, "approve") {
-			return true
-		}
+func strictApprovalOptions(options []approvalOption) []approval.Option {
+	out := make([]approval.Option, 0, len(options))
+	for _, option := range options {
+		out = append(out, approval.Option{ID: option.ID, Name: option.Name, Kind: option.Kind})
 	}
-	return false
+	return out
 }

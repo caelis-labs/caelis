@@ -118,10 +118,24 @@ func TestDesktopWorldOverridePrecedenceAcrossProfilesAndWorkers(t *testing.T) {
 }
 
 func TestFixedProductNamespaceCannotBeShadowedByOrdinaryMCP(t *testing.T) {
-	for _, name := range []string{"desktop-world", "desktop_world", "desktop-world__extra"} {
-		_, err := mergeRuntimeMCPSpecs([]mcp.ServerSpec{{PluginID: "user", Name: name}}, nil)
-		if err == nil {
-			t.Fatalf("ordinary MCP source %q shadowed the fixed tool namespace", name)
+	for _, name := range []string{"dtw", "dtw__extra", "dtw--extra", "desktop-world", "desktop_world", "desktop-world__extra"} {
+		for _, id := range []string{"", "user", "dtw", "desktop_world"} {
+			_, err := mergeRuntimeMCPSpecs([]mcp.ServerSpec{{PluginID: id, Name: name}}, nil)
+			if err == nil {
+				t.Fatalf("MCP source %q with plugin ID %q shadowed the fixed tool namespace", name, id)
+			}
+		}
+	}
+	for _, name := range []string{"dtw", "desktop-world"} {
+		got, err := mergeRuntimeMCPSpecs(nil, []plugin.MCPServerSpec{{PluginID: "desktop-world", Name: name}})
+		if err != nil || len(got) != 1 || got[0].Name != name {
+			t.Fatalf("selected DTW package lost its own namespace: %+v, %v", got, err)
+		}
+	}
+	for _, name := range []string{"dtw-extra", "dtw_extra", "dtworld", "desktop-world-extra", "other"} {
+		got, err := mergeRuntimeMCPSpecs([]mcp.ServerSpec{{Name: name}}, nil)
+		if err != nil || len(got) != 1 {
+			t.Fatalf("unrelated MCP namespace %q was reserved: %+v, %v", name, got, err)
 		}
 	}
 }
