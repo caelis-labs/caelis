@@ -3,19 +3,33 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"strings"
+	"testing"
+
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode/gojaexec"
-	"strings"
-	"testing"
 )
 
 func TestCodeModePromptDeliveryStaticAndDynamicRequests(t *testing.T) {
 	for _, dynamic := range []bool{false, true} {
 		t.Run(map[bool]string{false: "static", true: "dynamic"}[dynamic], func(t *testing.T) {
 			store, active, _ := codeModeStore(t)
+			const legacyKey = "code_mode_catalog_v6"
+			const legacyGuidance = "LEGACY_V6_GUIDANCE"
+			_, err := store.UpdateState(t.Context(), session.UpdateStateRequest{SessionRef: active.SessionRef, Update: func(state map[string]any) (map[string]any, error) {
+				if state == nil {
+					state = map[string]any{}
+				}
+				state[legacyKey] = legacyGuidance
+				return state, nil
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
 			def := fixtureMCPDefinition("v1")
 			def.Name = "hints__read"
 			def.Description = "prompt hint sentinel"
@@ -39,8 +53,8 @@ func TestCodeModePromptDeliveryStaticAndDynamicRequests(t *testing.T) {
 				t.Fatal(err)
 			}
 			catalog, ok := state[codemode.MetadataCatalog].(string)
-			if !ok || catalog == "" {
-				t.Fatal("missing catalog snapshot")
+			if !ok || !strings.HasPrefix(catalog, codemode.Guidance) || state[legacyKey] != legacyGuidance {
+				t.Fatal("current guidance must have its own snapshot and preserve historical state")
 			}
 			if len(llm.requests) != 2 {
 				t.Fatalf("requests=%d", len(llm.requests))
@@ -54,8 +68,25 @@ func TestCodeModePromptDeliveryStaticAndDynamicRequests(t *testing.T) {
 					}
 				}
 				got := text.String()
-				if !strings.HasPrefix(got, "PROFILE_INSTRUCTIONS") || strings.Count(got, catalog) != 1 || !strings.Contains(got, "prompt hint sentinel") {
+				if !strings.HasPrefix(got, "PROFILE_INSTRUCTIONS") || strings.Count(got, catalog) != 1 || !strings.Contains(got, "prompt hint sentinel") || strings.Contains(got, legacyGuidance) {
 					t.Fatalf("guidance propagation=%q", got)
+				}
+				for _, message := range req.Messages {
+					if strings.Contains(message.TextContent(), codemode.Guidance) {
+						t.Fatal("SDK guidance belongs in Instructions, not conversational messages")
+					}
+				}
+				entryCount := 0
+				for _, spec := range req.Tools {
+					if spec.Function != nil && spec.Function.Name == codemode.ToolName {
+						entryCount++
+						if spec.Function.Description != tools[0].Definition().Description {
+							t.Fatal("entry summary changed during model request assembly")
+						}
+					}
+				}
+				if entryCount != 1 {
+					t.Fatalf("js_exec definitions=%d", entryCount)
 				}
 				raw, _ := json.Marshal(req.Instructions)
 				if prefix != "" && prefix != string(raw) {

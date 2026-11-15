@@ -433,7 +433,7 @@ func TestJSExecStaleSchemaRejectsOldArgumentsBeforeEffect(t *testing.T) {
 	for _, e := range events {
 		if e.Tool != nil && e.Tool.ID == "stale" && e.Type == session.EventTypeToolResult {
 			raw, _ := json.Marshal(e.Tool.Output)
-			if e.Tool.Status != "failed" || !bytes.Contains(raw, []byte("refreshed")) || !bytes.Contains(raw, []byte("tools.search(name)")) {
+			if e.Tool.Status != "failed" || !bytes.Contains(raw, []byte("schema changed")) || !bytes.Contains(raw, []byte("tools.search")) {
 				t.Fatalf("stale call lacked actionable error: %s", raw)
 			}
 			checked = true

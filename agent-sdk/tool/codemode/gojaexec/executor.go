@@ -91,6 +91,21 @@ func (e *Executor) Execute(ctx context.Context, source codemode.Source, limits c
 	if err := ctx.Err(); err != nil {
 		return codemode.Output{}, err
 	}
+	// Name routes are a fixed snapshot, not discovery schemas or authorization.
+	var names []codemode.ToolRoute
+	if named, ok := host.(codemode.NamedHost); ok {
+		names, err = named.ToolNames(ctx)
+		if err != nil {
+			return codemode.Output{}, fmt.Errorf("tool names: %w", err)
+		}
+	}
+	namesJSON, err := json.Marshal(names)
+	if err != nil {
+		return codemode.Output{}, fmt.Errorf("encode tool names: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return codemode.Output{}, err
+	}
 	executable, err := os.Executable()
 	if err != nil {
 		return codemode.Output{}, err
@@ -118,14 +133,29 @@ func (e *Executor) Execute(ctx context.Context, source codemode.Source, limits c
 	if err := cmd.Start(); err != nil {
 		return codemode.Output{}, err
 	}
+	// Startup may span many pipe writes before the VM can accept frameCancel.
+	// Kill on cancellation during that phase to unblock writes and reach reaping.
+	stopStartupCancel := context.AfterFunc(ctx, func() { _ = cmd.Process.Kill() })
+	defer stopStartupCancel()
 	m := Metrics{PID: cmd.Process.Pid}
 	workCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	w := &wireWriter{w: input}
 	config, _ := json.Marshal(workerConfig{Limits: l, SourceName: source.Path})
 	if err = w.send(frameConfig, 0, config, 32768); err == nil {
+		for len(namesJSON) > 0 && err == nil {
+			n := min(len(namesJSON), namesFrameBytes)
+			err = w.send(frameNames, 0, namesJSON[:n], namesFrameBytes)
+			namesJSON = namesJSON[n:]
+		}
+	}
+	if err == nil {
+		err = w.send(frameNames, 0, nil, namesFrameBytes)
+	}
+	if err == nil {
 		err = w.send(frameSource, 0, []byte(source.Code), l.SourceBytes)
 	}
+	stopStartupCancel()
 	type incoming struct {
 		f   frame
 		err error
@@ -203,6 +233,9 @@ func (e *Executor) Execute(ctx context.Context, source codemode.Source, limits c
 		}
 	}()
 	if err != nil {
+		if ctx.Err() != nil {
+			return codemode.Output{}, ctx.Err()
+		}
 		return codemode.Output{}, err
 	}
 	// Cancellation uses an out-of-band VM interrupt first, then kill/reap after
@@ -265,6 +298,8 @@ func (e *Executor) Execute(ctx context.Context, source codemode.Source, limits c
 						var query codemode.SearchRequest
 						if err := json.Unmarshal(req.Arguments, &query); err != nil {
 							callErr = tool.NewError(tool.ErrorCodeInvalidInput, "invalid search request")
+						} else if err := query.Validate(); err != nil {
+							callErr = err
 						} else if discovery, ok := host.(codemode.DiscoveryHost); ok {
 							reply, callErr = discovery.Search(workCtx, query)
 						} else {

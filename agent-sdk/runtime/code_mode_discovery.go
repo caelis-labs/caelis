@@ -113,14 +113,27 @@ func codeModeCanCall(def tool.Definition) bool {
 }
 
 type codeModeSearchEntry struct {
-	Name        string         `json:"name"`
+	codemode.ToolRoute
 	Description string         `json:"description"`
 	InputSchema map[string]any `json:"input_schema"`
+	CallPath    string         `json:"call_path"`
+}
+
+func codeModeSearchEntryFor(def tool.Definition) codeModeSearchEntry {
+	name, _ := json.Marshal(def.Name)
+	return codeModeSearchEntry{
+		ToolRoute: codeModeToolRoute(def), Description: def.Description, InputSchema: def.InputSchema,
+		CallPath: "tools.call(" + string(name) + ", args)",
+	}
 }
 
 func (h *codeModeHost) Search(ctx context.Context, request codemode.SearchRequest) (reply codemode.Reply, discoveryErr error) {
 	query := request.Query
 	service := request.Server != ""
+	name := request.Name
+	if request.LegacyString {
+		name = query
+	}
 	failureRecorded := false
 	h.mu.Lock()
 	closed := h.closed || h.ctx.Err() != nil
@@ -142,23 +155,23 @@ func (h *codeModeHost) Search(ctx context.Context, request codemode.SearchReques
 	if closed {
 		return reply, tool.NewError(errorcode.FailedPrecondition, "code mode host admission is closed")
 	}
-	if service && (query != "" || len(request.Server) > 1024 || len(request.Plugin) > 1024) || !service && (len(query) == 0 || len(query) > 1024 || request.Plugin != "" || request.After != "") || len(request.After) > 1024 {
-		return reply, tool.NewError(tool.ErrorCodeInvalidInput, "supply a query or an exact server and optional plugin")
+	if err := request.Validate(); err != nil {
+		return reply, err
 	}
 	var one tool.Tool
 	var found bool
 	var err error
-	if !service {
-		one, found, err = h.owner.lookup(ctx, query)
+	if name != "" {
+		one, found, err = h.owner.lookup(ctx, name)
 		if err != nil {
 			return reply, err
 		}
 	}
-	exact := false
+	exact := request.Name != "" || request.Tool != ""
 	if found && one != nil {
 		def := one.Definition()
-		exact = def.Name == query && tool.IsMCPDefinition(def)
-		if def.Name == query && !tool.IsMCPDefinition(def) && !tool.IsToolSearchDefinition(def) && !tool.IsMCPCallDefinition(def) && def.Metadata[tool.MetadataToolKind] != codemode.ToolKind {
+		exact = exact || def.Name == name && tool.IsMCPDefinition(def)
+		if def.Name == name && !tool.IsMCPDefinition(def) && !tool.IsToolSearchDefinition(def) && !tool.IsMCPCallDefinition(def) && def.Metadata[tool.MetadataToolKind] != codemode.ToolKind {
 			if !codeModeCanCall(def) || !def.AvailableForModel(h.parent.RuntimeModel) {
 				return reply, codemode.NewPublicPermissionError("tool is not callable from JavaScript")
 			}
@@ -169,7 +182,7 @@ func (h *codeModeHost) Search(ctx context.Context, request codemode.SearchReques
 			if over {
 				return reply, tool.NewError(errorcode.ResourceExhausted, "search call budget exceeded")
 			}
-			return h.searchReply("", []codeModeSearchEntry{{Name: def.Name, Description: def.Description, InputSchema: def.InputSchema}}, false, 0, "")
+			return h.searchReply("", []codeModeSearchEntry{codeModeSearchEntryFor(def)}, false, 0, "")
 		}
 	}
 	search, available, err := h.owner.lookup(ctx, tool.ToolSearchToolName)
@@ -177,19 +190,25 @@ func (h *codeModeHost) Search(ctx context.Context, request codemode.SearchReques
 		return reply, err
 	}
 	if !available || search == nil || !tool.IsToolSearchDefinition(search.Definition()) {
-		return reply, tool.NewError(tool.ErrorCodeNotFound, "no extension search source is configured")
+		if request.Name != "" {
+			return reply, tool.NewError(tool.ErrorCodeNotFound, "tool name was not found")
+		}
+		return reply, tool.NewError(tool.ErrorCodeNotFound, "no tool search source is configured")
 	}
 	args := map[string]any{"query": query, "limit": 4}
-	if exact {
-		args = map[string]any{"name": query}
-	} else if service {
+	if service {
 		args = map[string]any{"server": request.Server, "limit": 16}
+		if request.Tool != "" {
+			args["tool"] = request.Tool
+		}
 		if request.Plugin != "" {
 			args["plugin"] = request.Plugin
 		}
 		if request.After != "" {
 			args["after"] = request.After
 		}
+	} else if exact {
+		args = map[string]any{"name": name}
 	}
 	raw, _ := json.Marshal(args)
 	reply, err = h.call(context.WithValue(ctx, codeModeSearchKey{}, true), search.Definition().Name, raw, true)
@@ -225,9 +244,9 @@ func (h *codeModeHost) Search(ctx context.Context, request codemode.SearchReques
 		}
 		h.mu.Lock()
 		h.targets[entry.Name] = codeModeTarget{tool: one, definition: def, digest: codeModeDefinitionDigest(def)}
-		h.discovered[entry.Name] = *entry.Binding
+		h.bindings[entry.Name] = *entry.Binding
 		h.mu.Unlock()
-		entries = append(entries, codeModeSearchEntry{Name: entry.Name, Description: entry.Description, InputSchema: entry.InputSchema})
+		entries = append(entries, codeModeSearchEntryFor(def))
 	}
 	return h.searchReply(reply.CallID, entries, selected.Truncated, selected.OmittedCount, selected.Next)
 }

@@ -31,9 +31,11 @@ when a required feature is absent.
 [Code Mode](code-mode.md) binds a fresh-process Goja executor to the existing
 Runtime tool chain. Product assembly registers `js_exec` and supplies selected
 name/description hints; SDK Runtime owns the generic bounded Session snapshot.
-Tools, Session authority and independent nested execution receipts retain their
-existing Go owners. Embedders using the default coding tools must install the
-early executable worker entry described in the SDK quickstart.
+Each execution snapshots current Session tool names for calls by original name. A
+known schema needs no search; `tools.search` returns complete schemas or explicitly
+refreshes a stale binding. Tools, Session authority and nested execution receipts
+retain their existing Go owners. Embedders using the default coding tools must
+install the early executable worker entry described in the SDK quickstart.
 
 `sandbox.ExecutionConfig` owns reusable native command environment and shell
 configuration. Hosts supply it through `sandbox.Config.Execution`, independently
@@ -342,25 +344,37 @@ Canonical ToolSpecs describe Runtime-accepted input. Provider downgrade never
 weakens local schema, approval, or policy validation. Malformed external schemas
 are quarantined instead of replaced by permissive empty schemas.
 
-Code Mode Sessions expose a fixed `js_exec` definition; its async body uses
-`await tools.search(query)` and `await tools.call(name,args)`. SDK entry points
-without Code Mode expose fixed `tool_search` and `mcp_call` definitions.
-Both search routes return complete normalized input schemas and identity/version
-bindings. Successful new-format canonical receipts alone grant discovery
-eligibility. Runtime projects them from canonical events across compaction and
-resume; old exposure, name-only search results and checkpoint discovered-name
-fields remain readable history and require a fresh search.
+Code Mode Sessions expose a fixed `js_exec` definition. Its async body can call
+known-schema Session tools using original function or method syntax, such as
+`await Read(args)` or `await dtw.apps(args)`, without search. Special names and
+collisions use the qualified
+`tools.native[original]`, `tools.mcp[server][remoteTool]`, or
+`tools.plugins[plugin][server][remoteTool]` paths; `tools.call(name,args)` remains
+available by canonical name. Every Goja execution snapshots current Session tool
+names. Search separates exact name/method lookup from capability queries and
+returns complete schemas, original names and a usable `call_path`. It can also
+explicitly refresh a stale schema. SDK entry points without Code Mode expose fixed `tool_search` and
+`mcp_call` definitions; `mcp_call` remains discovery-gated and requires a prior
+canonical search binding.
 
-Runtime resolves each route to a pinned real Tool, validates its binding and
-arguments, and enters the same policy, Journal, invocation and lifecycle wrappers
-as other tools. Display and approval data name the real target and arguments;
-typed original-call data keep model history paired under the outer call ID and
-`mcp_call` name without Code Mode. A Code Mode script can sequentially await
-search and call; its nested receipts retain the same discovery and execution
-owners. MCP schemas never join model `tools`, and no per-run exposure
-limit or retirement tool remains. [MCP tools](mcp-tool-lifecycle.md) describes
-refresh and final dispatch. The stable-tools contract does not promise that the
-entire model request prefix is unchanged.
+Code Mode reconstructs MCP bindings from canonical search receipts and started
+child Journal records for Code Mode tool executions across fresh workers, compaction
+and resume. A
+first direct call with no prior binding pins the current real Tool identity/version.
+A later change to the bound MCP source/schema fails stale until a successful
+`tools.search(name)` explicitly reloads the schema and binding. Historical name-only discovery does not
+authorize non-Code Mode `mcp_call`. Search grants no execution permission, and an
+unknown effect is never replayed. Manager name-collision losers are absent from the
+Session tool set and cannot be restored through qualified paths.
+
+Runtime resolves every route to a real Tool, validates the accepted schema and
+arguments, and enters the same policy, Guardian/approval, cancellation, Journal,
+invocation and lifecycle wrappers as other calls. Display and approval data name
+the real target and arguments; typed original-call data keep non-Code Mode history
+paired under the outer call ID and `mcp_call` name. MCP schemas never join model
+`tools`, and no per-run exposure limit or retirement tool remains. [MCP tools](mcp-tool-lifecycle.md)
+describes refresh and final dispatch. The stable-tools contract does not promise
+that the entire model request prefix is unchanged.
 
 Every MCP invocation reaches Runtime policy admission, including tools loaded
 through ToolSearch, plugins, and injected MCP sources. A ready connection,

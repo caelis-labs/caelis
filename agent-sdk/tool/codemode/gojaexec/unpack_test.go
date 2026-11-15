@@ -19,21 +19,31 @@ func TestUnpackKeepsAllContentAndOriginalMedia(t *testing.T) {
 			{Kind: "media", Handle: "original-image", MimeType: "image/png"},
 		}}, nil
 	}}
-	out, err := (&Executor{}).Execute(t.Context(), fixed(`const r=await tools.call("Read",{});const u=tools.unpack(r);return {json:u.json,text:u.text,image:u.media[0]};`), codemode.Limits{}, h)
-	if err != nil {
-		t.Fatal(err)
+	for _, tc := range []struct {
+		name string
+		code string
+	}{
+		{name: "direct", code: `const r=await tools.call("Read",{});const u=tools.unpack(r);return {json:u.json,text:u.text,image:u.media[0]};`},
+		{name: "map callback", code: `const replies=[await tools.call("Read",{})];const u=replies.map(tools.unpack)[0];return {json:u.json,text:u.text,image:u.media[0]};`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			out, err := (&Executor{}).Execute(t.Context(), fixed(tc.code), codemode.Limits{}, h)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got struct {
+				JSON []struct{ Value int } `json:"json"`
+				Text []string              `json:"text"`
+			}
+			if err = json.Unmarshal(out.Value, &got); err != nil || len(got.JSON) != 2 || got.JSON[0].Value != 1 || got.JSON[1].Value != 2 || len(got.Text) != 2 || got.Text[0] != `{"value":1}` || got.Text[1] != "second text" {
+				t.Fatalf("content changed: %s (%v)", out.Value, err)
+			}
+			if len(out.Parts) != 1 || out.Parts[0].Handle != "original-image" {
+				t.Fatalf("media identity lost: %+v", out.Parts)
+			}
+		})
 	}
-	var got struct {
-		JSON []struct{ Value int } `json:"json"`
-		Text []string              `json:"text"`
-	}
-	if err = json.Unmarshal(out.Value, &got); err != nil || len(got.JSON) != 2 || got.JSON[0].Value != 1 || got.JSON[1].Value != 2 || len(got.Text) != 2 || got.Text[0] != `{"value":1}` || got.Text[1] != "second text" {
-		t.Fatalf("content changed: %s (%v)", out.Value, err)
-	}
-	if len(out.Parts) != 1 || out.Parts[0].Handle != "original-image" {
-		t.Fatalf("media identity lost: %+v", out.Parts)
-	}
-	out, err = (&Executor{}).Execute(t.Context(), fixed(`const u=tools.unpack(await tools.call("Read",{}));return {...u.media[0]};`), codemode.Limits{}, h)
+	out, err := (&Executor{}).Execute(t.Context(), fixed(`const u=tools.unpack(await tools.call("Read",{}));return {...u.media[0]};`), codemode.Limits{}, h)
 	if err != nil || len(out.Parts) != 0 {
 		t.Fatalf("copied media gained identity: %+v (%v)", out, err)
 	}

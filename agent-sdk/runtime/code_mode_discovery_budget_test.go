@@ -14,7 +14,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode/gojaexec"
 )
 
-// Two candidates exercise schema admission, not directory performance.
+// Complete-schema query budgets do not gate a direct call with known arguments.
 func TestReviewSimpleSearchSchemaBudget(t *testing.T) {
 	for _, exact := range []bool{false, true} {
 		t.Run(map[bool]string{false: "fuzzy", true: "exact_oversize"}[exact], func(t *testing.T) {
@@ -38,7 +38,7 @@ func TestReviewSimpleSearchSchemaBudget(t *testing.T) {
 			}
 			code := `const s=await tools.search("fixture");if(s.count>1||!s.truncated)throw Error("budget result "+JSON.stringify(s));if(s.count){if(s.tools[0].name!=="fixture__small"||s.tools[0].input_schema.type!=="object")throw Error("partial schema");await tools.call("fixture__small",{});}return s;`
 			if exact {
-				code = `try{await tools.search("fixture__huge");}catch(e){}try{await tools.call("fixture__huge",{});}catch(e){}return {done:true};`
+				code = `let rejected=false;try{await tools.search("fixture__huge");}catch(e){rejected=true;}if(!rejected)throw Error("oversized schema accepted");await tools.call("fixture__huge",{});return {done:true};`
 			}
 			m := &mcpScriptModel{steps: func(i int, _ *model.Request) []model.ToolCall {
 				if i == 0 {
@@ -55,7 +55,7 @@ func TestReviewSimpleSearchSchemaBudget(t *testing.T) {
 					t.Logf("failed %s: %+v", e.Tool.Name, e.Tool.Output)
 				}
 			}
-			if exact && (!failed || effects != 0) || !exact && (failed || effects > 1) {
+			if exact && (!failed || effects != 1) || !exact && (failed || effects > 1) {
 				t.Fatalf("exact=%v failed=%v effects=%d", exact, failed, effects)
 			}
 		})

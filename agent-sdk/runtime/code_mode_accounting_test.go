@@ -173,6 +173,11 @@ func TestCodeModeAccountingSelectorReceiptsSurviveForeground(t *testing.T) {
 				want = 1
 			}
 			if receipts != want || tokens != 12*want || int(llm.selector.Load()) != want {
+				for _, event := range events {
+					if event.Tool != nil {
+						t.Logf("tool %s %s: %+v", event.Tool.Name, event.Tool.Status, event.Tool.Output)
+					}
+				}
 				t.Fatalf("selector=%d receipts=%d tokens=%d want=%d/%d/%d", llm.selector.Load(), receipts, tokens, want, want, 12*want)
 			}
 			wantAdmissions := 4

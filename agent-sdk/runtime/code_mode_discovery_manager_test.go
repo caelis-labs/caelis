@@ -87,7 +87,7 @@ func TestJSExecManagerLookupFinalAdmissionRejectsSourceChange(t *testing.T) {
 			}
 			if change == "schema" {
 				raw, _ := json.Marshal(driver.requests[len(driver.requests)-1].Messages)
-				if !strings.Contains(string(raw), "tools.search(name)") || !strings.Contains(string(raw), "binding is stale") {
+				if !strings.Contains(string(raw), "tools.search") || !strings.Contains(string(raw), "schema changed") {
 					t.Fatalf("next request lacks Code Mode stale guidance: %s", raw)
 				}
 			}

@@ -25,15 +25,15 @@ type nestedToolEventSinkKey struct{}
 var errCodeModeComplete = errors.New("code mode host admission is closed by TurnComplete")
 
 type runtimeCodeModeTool struct {
-	declaration   *codemode.Tool
-	tasks         *taskRuntime
-	active        session.Session
-	sessions      session.Service
-	ref           session.SessionRef
-	nativeTargets func() []tool.Tool
-	lookup        func(context.Context, string) (tool.Tool, bool, error)
-	checkBinding  func(context.Context, tool.Binding) error
-	validate      func(context.Context) (func(), error)
+	declaration    *codemode.Tool
+	tasks          *taskRuntime
+	active         session.Session
+	sessions       session.Service
+	ref            session.SessionRef
+	availableTools func() []tool.Tool
+	lookup         func(context.Context, string) (tool.Tool, bool, error)
+	checkBinding   func(context.Context, tool.Binding) error
+	validate       func(context.Context) (func(), error)
 }
 
 func (t runtimeCodeModeTool) Definition() tool.Definition { return t.declaration.Definition() }
@@ -65,52 +65,8 @@ func (t runtimeCodeModeTool) execute(ctx context.Context, call tool.Call, source
 	defer cancel()
 	host := &codeModeHost{ctx: workCtx, cancel: cancel, owner: t, parent: call, limits: limits,
 		targets: map[string]codeModeTarget{}, handles: map[string]model.Part{}, drained: make(chan struct{})}
-	discovered := mcpdiscovery.FromEvents(events)
-	host.discovered = discovered
-	candidates := append([]tool.Tool(nil), t.nativeTargets()...)
-	// Lookup prefers the static registration. Restoring its discovered binding
-	// must not append that same registration again; duplicates within the
-	// assembled static set still reach the ordinary rejection below.
-	staticNames := map[string]bool{}
-	for _, one := range candidates {
-		if one != nil {
-			staticNames[one.Definition().Name] = true
-		}
-	}
-	for name := range discovered {
-		if staticNames[name] {
-			continue
-		}
-		one, found, lookupErr := t.lookup(ctx, name)
-		if lookupErr == nil && found {
-			candidates = append(candidates, one)
-		}
-	}
-	for _, one := range candidates {
-		if one == nil {
-			continue
-		}
-		def := one.Definition()
-		if def.Name == call.Name || tool.IsMCPCallDefinition(def) || tool.IsToolSearchDefinition(def) {
-			continue
-		}
-		// Code Mode declarations are never recursively callable through Host.
-		if def.Metadata[tool.MetadataToolKind] == codemode.ToolKind {
-			continue
-		}
-		if tool.IsMCPDefinition(def) && discovered[def.Name] != tool.BindingForDefinition(def) {
-			continue
-		}
-		if tool.IsMCPDefinition(def) && tool.BindingForDefinition(def).Identity == "" {
-			continue
-		}
-		if !def.AvailableForModel(call.RuntimeModel) {
-			continue
-		}
-		if _, duplicate := host.targets[def.Name]; duplicate {
-			return tool.Result{}, fmt.Errorf("duplicate Code Mode target %q", def.Name)
-		}
-		host.targets[def.Name] = codeModeTarget{tool: one, definition: def, digest: codeModeDefinitionDigest(def)}
+	if err := host.prepareTargets(ctx, events); err != nil {
+		return tool.Result{}, err
 	}
 	type execution struct {
 		output codemode.Output
@@ -204,7 +160,7 @@ type codeModeHost struct {
 	parent         tool.Call
 	limits         codemode.Limits
 	targets        map[string]codeModeTarget
-	discovered     map[string]tool.Binding
+	bindings       map[string]tool.Binding
 	failures       []codeModeFailure
 	firstCallError error
 	mu             sync.Mutex
@@ -355,44 +311,9 @@ func (h *codeModeHost) call(requestCtx context.Context, name string, arguments j
 	if raw := bytes.TrimSpace(arguments); len(raw) == 0 || raw[0] != '{' {
 		return codemode.Reply{}, tool.NewError(tool.ErrorCodeInvalidInput, "host arguments must be a JSON object")
 	}
-	h.mu.Lock()
-	target, ok := h.targets[name]
-	oldBinding, known := h.discovered[name]
-	h.mu.Unlock()
-	if discovery {
-		one, found, lookupErr := h.owner.lookup(requestCtx, tool.ToolSearchToolName)
-		if lookupErr != nil {
-			return codemode.Reply{}, lookupErr
-		}
-		if found && one != nil {
-			def := one.Definition()
-			if tool.IsToolSearchDefinition(def) {
-				target = codeModeTarget{tool: one, definition: def, digest: codeModeDefinitionDigest(def)}
-				ok = true
-			}
-		}
-	}
-	if !ok {
-		if known {
-			if h.owner.checkBinding != nil {
-				if err := h.owner.checkBinding(requestCtx, oldBinding); err != nil {
-					return codemode.Reply{}, err
-				}
-			}
-			one, found, lookupErr := h.owner.lookup(requestCtx, name)
-			if lookupErr != nil {
-				return codemode.Reply{}, lookupErr
-			}
-			if found && one != nil {
-				def := one.Definition()
-				if def.Name == name && oldBinding != tool.BindingForDefinition(def) {
-					return codemode.Reply{}, tool.NewError(tool.ErrorCodeStaleRevision, "tool directory refreshed; binding is stale")
-				}
-			}
-
-			return codemode.Reply{}, tool.NewError(errorcode.Unavailable, "discovered tool is currently unavailable; check connection or access before rediscovery")
-		}
-		return codemode.Reply{}, tool.NewError(tool.ErrorCodeNotFound, "tool has not been discovered; use tools.search(name) first")
+	target, err := h.resolveTarget(requestCtx, name, discovery)
+	if err != nil {
+		return codemode.Reply{}, err
 	}
 	if !codeModeCanCall(target.definition) {
 		return codemode.Reply{}, codemode.NewPublicPermissionError("native shell/process execution is prohibited from JavaScript")

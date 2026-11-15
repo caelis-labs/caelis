@@ -294,6 +294,15 @@ func (r *Runtime) appendRuntimeEventOrLifecycle(
 	turnID string,
 	event *session.Event,
 ) (*session.Event, error) {
+	if session.IsCanonicalHistoryEvent(event) && event.Type == session.EventTypeToolResult && event.Tool != nil && event.Tool.Name == tool.ToolSearchToolName {
+		// Native discovery receipts share the binding-claim write order with
+		// nested discovery and started Code Mode children.
+		release, err := r.acquireSessionWrite(ctx, ref)
+		if err != nil {
+			return nil, err
+		}
+		defer release()
+	}
 	if session.IsModelInvocationReceipt(event) {
 		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()

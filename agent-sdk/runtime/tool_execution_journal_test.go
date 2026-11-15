@@ -203,7 +203,7 @@ func TestJournaledToolReceiptPreservesJSONNumberTokens(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := persistToolExecutionReceipt(t.Context(), service, active.SessionRef, call, result); err != nil {
+	if err := persistToolExecutionReceipt(t.Context(), service, nil, active.SessionRef, call, result); err != nil {
 		t.Fatal(err)
 	}
 	events, err := service.Events(t.Context(), session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})

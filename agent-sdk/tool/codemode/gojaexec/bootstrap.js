@@ -1,6 +1,6 @@
 // Trusted glue is closed over pristine intrinsics before untrusted code runs.
 // The only native function accepts bounded strings and returns a Promise.
-(function(rpc, limits) {
+(function(rpc, limits, names) {
   "use strict";
   const parse = JSON.parse, keys = Object.keys, isArray = Array.isArray;
   const finite = Number.isFinite, freeze = Object.freeze, define = Object.defineProperty;
@@ -145,7 +145,7 @@
     }
     return ownReply({parts:reply.parts||[]},envelope.raw);
   }
-  const tools=freeze({
+  const tools=Object.assign(Object.create(null),{
     call(name,args) {
       if(typeof name!=="string" || name.length>1024 || args===null || typeof args!=="object" || isArray(args))
         throw new ErrorType("tools.call(name,args) requires a name string and JSON object");
@@ -155,17 +155,21 @@
       let request;
       if(typeof query==="string") {
         if(query.length===0||query.length>1024)throw new ErrorType("tools.search requires a non-empty name or capability string");
-        request={query};
+        request={query,legacy_string:true};
       } else {
-        if(!query||typeof query!=="object"||isArray(query))throw new ErrorType("tools.search requires a query string or {server,plugin?,after?}");
-        const names=keys(query), server=query.server, plugin=query.plugin, after=query.after;
-        for(let i=0;i<names.length;i++)if(names[i]!=="server"&&names[i]!=="plugin"&&names[i]!=="after")throw new ErrorType("unsupported tools.search field: "+names[i]);
-        if(typeof server!=="string"||server.length===0||server.length>1024||
-          (plugin!==undefined&&(typeof plugin!=="string"||plugin.length===0||plugin.length>1024))||
-          (after!==undefined&&(typeof after!=="string"||after.length===0||after.length>1024)))throw new ErrorType("tools.search requires {server,plugin?,after?} with non-empty strings");
-        request={server};
-        if(plugin!==undefined)request.plugin=plugin;
-        if(after!==undefined)request.after=after;
+        if(!query||typeof query!=="object"||isArray(query))throw new ErrorType("tools.search requires a selector object or query string");
+        const names=keys(query);
+        request={};
+        for(let i=0;i<names.length;i++) {
+          const key=names[i];
+          if(key!=="name"&&key!=="query"&&key!=="server"&&key!=="tool"&&key!=="plugin"&&key!=="after")throw new ErrorType("unsupported tools.search field: "+key);
+          const value=query[key];
+          if(typeof value!=="string"||value.length===0||value.length>1024)throw new ErrorType("tools.search fields require non-empty strings");
+          request[key]=value;
+        }
+        if(own(request,"name")?names.length!==1:
+          own(request,"query")?names.length!==1:
+          !own(request,"server")||(own(request,"tool")&&own(request,"after")))throw new ErrorType("tools.search requires {name}, {server,tool,plugin?}, {query}, or {server,plugin?,after?}");
       }
       return then(then(rpc("search","",encode(request,limits.argument_bytes)),decode),r=>define(r.parts[0].json,"raw_json",{value:r.raw_json,enumerable:false}));
     },
@@ -184,5 +188,63 @@
       return result;
     }
   });
+  // All entry points delegate to the same validation, RPC, decode and identity
+  // path. Null prototypes preserve exact names, including __proto__.
+  const create=Object.create, own=Function.prototype.call.bind(Object.prototype.hasOwnProperty);
+  const native=create(null), mcp=create(null), plugins=create(null), shortcuts=create(null);
+  function table(parent,name) {
+    if(!own(parent,name)) define(parent,name,{value:create(null),enumerable:true});
+    return parent[name];
+  }
+  function route(parent,key,name,path) {
+    let invoke;
+    if(own(parent,key)) invoke=()=>{throw new ErrorType("ambiguous tool path: "+path);};
+    else invoke=args=>tools.call(name,args);
+    // Promise assimilation passes resolve/reject, never a JSON args object.
+    // A tool literally called then remains available as then(args).
+    if(key==="then") {
+      const call=invoke;
+      invoke=function(args,reject) {
+        if(typeof args==="function"&&typeof reject==="function")
+          return reject(new ErrorType("tool namespaces cannot be awaited"));
+        return call(args);
+      };
+    }
+    define(parent,key,{value:invoke,enumerable:true,configurable:true});
+  }
+  function shortcut(name,value) {
+    if(own(shortcuts,name)) shortcuts[name]=null;
+    else define(shortcuts,name,{value,writable:true,enumerable:true});
+  }
+  const entries=names||[];
+  for(let i=0;i<entries.length;i++) {
+    const entry=entries[i];
+    if(!entry.server) {
+      route(native,entry.name,entry.name,"tools.native["+entry.name+"]");
+      shortcut(entry.name,native[entry.name]);
+    } else {
+      route(table(mcp,entry.server),entry.tool,entry.name,"tools.mcp["+entry.server+"]["+entry.tool+"]");
+      if(entry.plugin) route(table(table(plugins,entry.plugin),entry.server),entry.tool,entry.name,
+        "tools.plugins["+entry.plugin+"]["+entry.server+"]["+entry.tool+"]");
+    }
+  }
+  const servers=keys(mcp);
+  for(let i=0;i<servers.length;i++) {
+    const server=servers[i];freeze(mcp[server]);shortcut(server,mcp[server]);
+  }
+  const pluginNames=keys(plugins);
+  for(let i=0;i<pluginNames.length;i++) {
+    const group=plugins[pluginNames[i]], groupServers=keys(group);
+    for(let j=0;j<groupServers.length;j++)freeze(group[groupServers[j]]);
+    freeze(group);
+  }
+  tools.native=freeze(native);tools.mcp=freeze(mcp);tools.plugins=freeze(plugins);
+  freeze(tools);
+  const globals=keys(shortcuts);
+  for(let i=0;i<globals.length;i++) {
+    const name=globals[i];
+    if(name!=="tools"&&!(name in globalThis)&&shortcuts[name]!==null)
+      define(globalThis,name,{value:shortcuts[name],enumerable:true});
+  }
   return freeze({tools, encode:value=>encode(value===undefined?null:value,limits.output_bytes,true)});
 })
