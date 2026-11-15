@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.81.0](https://github.com/caelis-labs/caelis/compare/v0.80.0...v0.81.0) (2026-11-15)
+
+
+### Features
+
+* **code-mode:** call Session tools by original names without search ([#219](https://github.com/caelis-labs/caelis/issues/219)) ([6db0843](https://github.com/caelis-labs/caelis/commit/6db0843a5f2d008519a22b0f6d01388f5c74d24d))
+
 ## [0.80.0](https://github.com/caelis-labs/caelis/compare/v0.79.1...v0.80.0) (2026-11-14)
 
 
