@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -114,21 +115,62 @@ func TestNamedCallsShareValidationErrorsMediaAndBudgets(t *testing.T) {
 }
 
 func TestToolNamesFailBeforeWorkerLaunch(t *testing.T) {
-	for _, tc := range []struct {
-		name   string
-		routes []codemode.ToolRoute
-		err    error
-	}{
-		{name: "host failure", err: errors.New("catalog unavailable")},
-		{name: "name bytes", routes: []codemode.ToolRoute{{Name: strings.Repeat("x", codemode.DefaultLimits().ReplyBytes)}}},
-		{name: "entry count", routes: make([]codemode.ToolRoute, codemode.DefaultLimits().ReplyBytes/32)},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			h := &namedTestHost{names: tc.routes, err: tc.err}
-			e := Executor{Observe: func(Metrics) { t.Error("worker launched for invalid name snapshot") }}
-			_, err := e.Execute(t.Context(), fixed(`return null;`), codemode.Limits{}, h)
-			if err == nil || h.queries != 1 {
-				t.Fatalf("queries=%d err=%v", h.queries, err)
+	h := &namedTestHost{err: errors.New("catalog unavailable")}
+	e := Executor{Observe: func(Metrics) { t.Error("worker launched for failed name snapshot") }}
+	_, err := e.Execute(t.Context(), fixed(`return null;`), codemode.Limits{}, h)
+	if err == nil || h.queries != 1 {
+		t.Fatalf("queries=%d err=%v", h.queries, err)
+	}
+}
+
+func TestTightReplyBudgetStillRejectsOversizedToolReply(t *testing.T) {
+	h := &namedTestHost{names: []codemode.ToolRoute{{Name: "Read"}}}
+	calls := 0
+	h.call = func(context.Context, string, json.RawMessage) (codemode.Reply, error) {
+		calls++
+		return codemode.Reply{Parts: []codemode.Part{{Kind: "text", Text: strings.Repeat("x", 2048)}}}, nil
+	}
+	var metrics Metrics
+	e := Executor{Observe: func(m Metrics) { metrics = m }}
+	_, err := e.Execute(t.Context(), fixed(`await Read({});return null;`), codemode.Limits{ReplyBytes: 1024}, h)
+	if err == nil || calls != 1 || !metrics.Reaped {
+		t.Fatalf("calls=%d err=%v metrics=%+v", calls, err, metrics)
+	}
+}
+
+func TestLargeNameSnapshotIndependentOfReplyBudget(t *testing.T) {
+	h := &namedTestHost{names: []codemode.ToolRoute{{Name: "Read"}}}
+	// Escaped JSON and multi-byte UTF-8 cross frame boundaries. The snapshot
+	// exceeds even the default reply limit, without imposing a catalog count cap.
+	for i := range 2000 {
+		remote := fmt.Sprintf("operation_%04d_", i) + strings.Repeat("界\\\"<\n", 32)
+		h.names = append(h.names, codemode.ToolRoute{Name: fmt.Sprintf("canonical_%04d", i), Server: "original-server", Tool: remote, Plugin: "original-plugin"})
+	}
+	raw, err := json.Marshal(h.names)
+	if err != nil || len(raw) <= codemode.DefaultLimits().ReplyBytes {
+		t.Fatalf("snapshot bytes=%d err=%v", len(raw), err)
+	}
+	t.Logf("catalog routes=%d actual escaped JSON bytes=%d frame limit=%d", len(h.names), len(raw), namesFrameBytes)
+	calls := []string{}
+	h.call = func(_ context.Context, name string, _ json.RawMessage) (codemode.Reply, error) {
+		calls = append(calls, name)
+		return codemode.Reply{}, nil
+	}
+	first, _ := json.Marshal(h.names[1].Tool)
+	last, _ := json.Marshal(h.names[len(h.names)-1].Tool)
+	code := fmt.Sprintf(`if(Object.keys(tools.mcp['original-server']).length!==2000)throw Error('incomplete catalog');await Read({});await globalThis['original-server'][%s]({});await tools.plugins['original-plugin']['original-server'][%s]({});await tools.call('canonical_1999',{});return null;`, first, last)
+	for _, budget := range []int{codemode.DefaultLimits().ReplyBytes, 1024} {
+		t.Run(fmt.Sprint(budget), func(t *testing.T) {
+			calls = nil
+			var metrics Metrics
+			e := Executor{Observe: func(m Metrics) { metrics = m }}
+			out, err := e.Execute(t.Context(), fixed(code), codemode.Limits{ReplyBytes: budget}, h)
+			if err != nil || string(out.Value) != "null" || strings.Join(calls, ",") != "Read,canonical_0000,canonical_1999,canonical_1999" || !metrics.Reaped {
+				t.Fatalf("out=%s calls=%v err=%v metrics=%+v", out.Value, calls, err, metrics)
+			}
+			out, err = e.Execute(t.Context(), fixed(`return null;`), codemode.Limits{ReplyBytes: budget}, h)
+			if err != nil || string(out.Value) != "null" || !metrics.Reaped {
+				t.Fatalf("null out=%s err=%v metrics=%+v", out.Value, err, metrics)
 			}
 		})
 	}

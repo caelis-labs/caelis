@@ -92,6 +92,9 @@ for Code Mode tool executions, while `mcp_call` still requires prior discovery. 
 
 ## Gate model
 
+Do not download release artifacts to verify hashes. Use existing caches, CI
+results and native publication records for release validation.
+
 The `main` branch ruleset requires the aggregate `quality` check from GitHub
 Actions. It does not require PR branches to be up to date. The workflow selects
 checks from actual changed files: code runs the Linux quality gate; maintained

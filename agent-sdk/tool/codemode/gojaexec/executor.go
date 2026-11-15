@@ -99,19 +99,9 @@ func (e *Executor) Execute(ctx context.Context, source codemode.Source, limits c
 			return codemode.Output{}, fmt.Errorf("tool names: %w", err)
 		}
 	}
-	remaining := l.ReplyBytes - 2
-	for _, name := range names {
-		remaining -= 64 // JSON field names, punctuation and element separator.
-		for _, value := range []string{name.Name, name.Server, name.Tool, name.Plugin} {
-			if len(value) > remaining/6 {
-				return codemode.Output{}, fmt.Errorf("tool names exceed reply byte budget")
-			}
-			remaining -= 6 * len(value)
-		}
-	}
 	namesJSON, err := json.Marshal(names)
-	if err != nil || len(namesJSON) > l.ReplyBytes {
-		return codemode.Output{}, fmt.Errorf("tool names exceed reply byte budget")
+	if err != nil {
+		return codemode.Output{}, fmt.Errorf("encode tool names: %w", err)
 	}
 	if err := ctx.Err(); err != nil {
 		return codemode.Output{}, err
@@ -143,17 +133,29 @@ func (e *Executor) Execute(ctx context.Context, source codemode.Source, limits c
 	if err := cmd.Start(); err != nil {
 		return codemode.Output{}, err
 	}
+	// Startup may span many pipe writes before the VM can accept frameCancel.
+	// Kill on cancellation during that phase to unblock writes and reach reaping.
+	stopStartupCancel := context.AfterFunc(ctx, func() { _ = cmd.Process.Kill() })
+	defer stopStartupCancel()
 	m := Metrics{PID: cmd.Process.Pid}
 	workCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	w := &wireWriter{w: input}
 	config, _ := json.Marshal(workerConfig{Limits: l, SourceName: source.Path})
 	if err = w.send(frameConfig, 0, config, 32768); err == nil {
-		err = w.send(frameNames, 0, namesJSON, l.ReplyBytes)
+		for len(namesJSON) > 0 && err == nil {
+			n := min(len(namesJSON), namesFrameBytes)
+			err = w.send(frameNames, 0, namesJSON[:n], namesFrameBytes)
+			namesJSON = namesJSON[n:]
+		}
+	}
+	if err == nil {
+		err = w.send(frameNames, 0, nil, namesFrameBytes)
 	}
 	if err == nil {
 		err = w.send(frameSource, 0, []byte(source.Code), l.SourceBytes)
 	}
+	stopStartupCancel()
 	type incoming struct {
 		f   frame
 		err error
@@ -231,6 +233,9 @@ func (e *Executor) Execute(ctx context.Context, source codemode.Source, limits c
 		}
 	}()
 	if err != nil {
+		if ctx.Err() != nil {
+			return codemode.Output{}, ctx.Err()
+		}
 		return codemode.Output{}, err
 	}
 	// Cancellation uses an out-of-band VM interrupt first, then kill/reap after

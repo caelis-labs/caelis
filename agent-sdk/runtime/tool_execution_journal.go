@@ -25,6 +25,7 @@ type journaledTool struct {
 	turnID     string
 	now        func() time.Time
 	gates      *toolCallGates
+	writes     *sessionWriteQueue
 }
 
 func (t journaledTool) Definition() tool.Definition { return tool.CloneDefinition(t.base.Definition()) }
@@ -51,11 +52,16 @@ func (t journaledTool) Call(ctx context.Context, call tool.Call) (tool.Result, e
 	nested := admission != nil
 	var release func()
 	if nested {
-		var err error
-		release, err = admission.validate(ctx)
+		releaseWrite, err := t.claimCodeModeBinding(ctx, call)
 		if err != nil {
 			return tool.Result{}, err
 		}
+		guard, err := admission.validate(ctx)
+		if err != nil {
+			releaseWrite()
+			return tool.Result{}, err
+		}
+		release = func() { guard(); releaseWrite() }
 		defer func() {
 			if release != nil {
 				release()
@@ -226,7 +232,7 @@ func (t journaledTool) Call(ctx context.Context, call tool.Call) (tool.Result, e
 	result.Metadata[tool.MetadataExecutionJournal] = journalValue
 	if nested {
 		// Aggregation has no canonical child result to carry this receipt.
-		receiptErr := persistToolExecutionReceipt(ctx, t.sessions, t.sessionRef, call, result)
+		receiptErr := persistToolExecutionReceipt(ctx, t.sessions, t.writes, t.sessionRef, call, result)
 		if receiptErr != nil {
 			delete(result.Metadata, tool.MetadataExecutionJournal)
 		}
@@ -287,7 +293,7 @@ func (r *Runtime) wrapToolsForExecutionJournal(ctx context.Context, ref session.
 		if item == nil {
 			continue
 		}
-		out = append(out, journaledTool{base: item, sessions: r.sessions, sessionRef: session.NormalizeSessionRef(ref), runID: strings.TrimSpace(runID), turnID: strings.TrimSpace(turnID), now: r.now, gates: gates})
+		out = append(out, journaledTool{base: item, sessions: r.sessions, sessionRef: session.NormalizeSessionRef(ref), runID: strings.TrimSpace(runID), turnID: strings.TrimSpace(turnID), now: r.now, gates: gates, writes: &r.sessionWrites})
 	}
 	return out
 }

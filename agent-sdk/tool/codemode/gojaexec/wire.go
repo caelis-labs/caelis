@@ -10,6 +10,11 @@ import (
 
 const WorkerArgument = "--code-mode-goja-worker"
 
+// Names are startup metadata, independent of per-call reply budgets. Each frame
+// carries at most this many actual JSON bytes; an empty frame ends the snapshot.
+// Splits may fall inside JSON escapes or UTF-8 and are joined before decoding.
+const namesFrameBytes = 64 << 10
+
 const (
 	frameConfig byte = iota + 1
 	frameSource

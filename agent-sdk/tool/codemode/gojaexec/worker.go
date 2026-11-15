@@ -35,11 +35,21 @@ func WorkerMain() int {
 	if err != nil {
 		return 2
 	}
-	f, err = readFrame(os.Stdin, l.ReplyBytes)
-	if err != nil || f.kind != frameNames || !json.Valid(f.data) {
+	var names strings.Builder
+	for {
+		f, err = readFrame(os.Stdin, namesFrameBytes)
+		if err != nil || f.kind != frameNames {
+			return 2
+		}
+		if len(f.data) == 0 {
+			break
+		}
+		names.Write(f.data)
+	}
+	namesJSON := names.String()
+	if !json.Valid([]byte(namesJSON)) {
 		return 2
 	}
-	namesJSON := string(f.data)
 	f, err = readFrame(os.Stdin, l.SourceBytes)
 	if err != nil || f.kind != frameSource {
 		return 2

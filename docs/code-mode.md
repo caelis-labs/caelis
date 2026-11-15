@@ -48,7 +48,8 @@ original names when present. `call_path` is a JavaScript template such as
 `tools.call("returned_name", args)`; supply your argument object for `args` and
 use the path as returned. This handles special or conflicting names, including
 names found during the current execution. `truncated`, `omitted_count`, and `next`
-describe remaining results and pagination.
+describe remaining results and pagination. Search returns this discovery object
+directly; it is not a tool reply and cannot be passed to `tools.unpack`.
 
 A tool call resolves to `{parts:[...]}`. JSON parts expose `json`, text parts
 expose `text`, and media parts carry an opaque handle. `tools.unpack(reply)`

@@ -46,7 +46,8 @@ func TestCodeModeMinimalModelInterface(t *testing.T) {
 		"{server:string,plugin?:string,after?:string}", "Exact misses return not_found", "ambiguous matches require plugin or an exact name",
 		"Legacy strings try an exact name first, then capabilities", "call_path:string", "server?:string,tool?:string,plugin?:string",
 		"tools.call(\"returned_name\", args)", "Tool calls resolve to {parts:[",
-		"tools.unpack(reply)", "arrays {json:[],text:[],media:[]}", "original media parts", "error.reply",
+		"Search returns a discovery object directly, not a tool reply", "tools.unpack(reply)",
+		"only original tool replies, not search results", "arrays {json:[],text:[],media:[]}", "original media parts", "error.reply",
 		"unknown outcomes instead of replaying input", "On stale_revision, search again and revise arguments",
 	} {
 		if !strings.Contains(description, contract) {
