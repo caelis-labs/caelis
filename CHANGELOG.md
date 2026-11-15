@@ -7,6 +7,10 @@
 
 * **code-mode:** call Session tools by original names without search ([#219](https://github.com/caelis-labs/caelis/issues/219)) ([6db0843](https://github.com/caelis-labs/caelis/commit/6db0843a5f2d008519a22b0f6d01388f5c74d24d))
 
+Code Mode can call a known current Session tool by its original name without a
+search. The fixed non-Code Mode `mcp_call` entry still requires prior discovery;
+source and schema changes retain their binding and approval checks.
+
 ## [0.80.0](https://github.com/caelis-labs/caelis/compare/v0.79.1...v0.80.0) (2026-11-14)
 
 
