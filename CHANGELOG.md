@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.81.1](https://github.com/caelis-labs/caelis/compare/v0.81.0...v0.81.1) (2026-11-16)
+
+
+### Bug Fixes
+
+* **model:** replace vulnerable imaging dependency ([#230](https://github.com/caelis-labs/caelis/issues/230)) ([5af2995](https://github.com/caelis-labs/caelis/commit/5af2995a4841e24c281fd7fe4b32460707c11a50))
+
 ## [0.81.0](https://github.com/caelis-labs/caelis/compare/v0.80.0...v0.81.0) (2026-11-15)
 
 
