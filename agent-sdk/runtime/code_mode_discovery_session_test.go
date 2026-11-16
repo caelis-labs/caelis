@@ -384,7 +384,7 @@ func TestJSExecH1HintWarningOncePreservesCapability(t *testing.T) {
 	if !strings.Contains(text, "Search for unknown tools or arguments") || strings.Contains(text, "tools.search(") || strings.Contains(text, "tools.describe") || strings.Contains(text, "output.") {
 		t.Fatal("guidance should contain preferences without duplicating API details")
 	}
-	for _, contract := range []string{"tools.search(", "{name}", "{server,tool,plugin?}", "{query}", "{server,plugin?,after?}", "input_schema", "output_schema", "call_path", "tools.call(name,args)", "Errors expose message, code and result", "stale_revision"} {
+	for _, contract := range []string{"tools.search(", "{name}", "{server,tool,plugin?}", "{query}", "{server,plugin?,after?}", "input_schema", "output_schema", "call_path", "tools.call(name,args)", "error.message, error.code and error.result when present", "stale_revision"} {
 		if !strings.Contains(description, contract) {
 			t.Fatalf("js_exec description lost API contract %q", contract)
 		}

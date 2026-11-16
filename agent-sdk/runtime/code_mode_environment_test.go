@@ -122,7 +122,7 @@ func TestCodeModeResetDoesNotWaitForOldHostOrAdmitOldReply(t *testing.T) {
 		t.Fatalf("requests=%d", len(driver.requests))
 	}
 	busy := errorDeliveryModelResult(t, driver.requests[2], "busy")
-	if !busy.IsError || !strings.Contains(string(errorDeliveryJSON(t, busy.Content)), "busy") {
+	if !busy.IsError || !strings.Contains(string(errorDeliveryJSON(t, busy.Content)), "busy") || !strings.Contains(string(errorDeliveryJSON(t, busy.Content)), "reset:true") {
 		t.Fatalf("overlap not rejected: %+v", busy)
 	}
 	result := errorDeliveryModelResult(t, driver.requests[4], "new")

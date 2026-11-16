@@ -215,7 +215,7 @@ const MetadataSelectedTools = "code_mode_selected_tools"
 
 // MetadataCatalog carries the Runtime-owned guidance and partial hint snapshot
 // through both static AgentSpec metadata and dynamic request instructions.
-const MetadataCatalog = "code_mode_catalog_v9"
+const MetadataCatalog = "code_mode_catalog_v10"
 
 // MetadataScriptCompletion records whether script execution returned normally.
 // Its "completed"/"failed" value is presentation-only, independent of cumulative
@@ -224,15 +224,15 @@ const MetadataScriptCompletion = "code_mode_script_completion"
 
 // Guidance supplies usage preferences; Tool.Definition owns the script API.
 // Runtime appends partial catalog hints separately.
-const Guidance = `Call known tools directly, including schemas from Skills. Search for unknown tools or arguments. Sequence dependent operations with await; independent calls may run concurrently when appropriate. Submit js_exec scripts sequentially in the active Session. After yielding, observe the original Task to completion before the next script; Task read/wait/cancel works independently of the script environment.`
+const Guidance = `Call known tools directly, including schemas from Skills. Search for unknown tools or arguments. Await dependent operations; express independent work concurrently. Runtime schedules execution. Submit js_exec scripts sequentially. After yield, observe the original Task to completion before the next script, or use reset:true to abort the old script. Task controls work independently of the VM.`
 
-const description = `Run JavaScript in the active Session using exactly one of code, file or reset:true. Call tools directly: await Read(args), await RunCommand(args), await dtw.apps(args), await context7['query-docs'](args). Top-level await and return are supported; omitted return is null. Declarations persist: let/const cannot be redeclared; use assignment to update variables. const cannot be assigned; var/function may be repeated.
+const description = `Run JavaScript using exactly one of code, file or reset:true. Call tools directly: await Read(args), await RunCommand(args), await dtw.apps(args), or await context7['query-docs'](args). Top-level await and return work; omitted return is null. Bindings persist only in the active host Session; resume/release/reset clears them. let/const cannot be redeclared; update let by assignment. const is read-only; var/function may repeat.
 
-Every tool returns a Body. result.text() joins all text/JSON entries with newlines, preserving JSON tokens. result.json() uses successful schema-validated structured content or parses the whole text as one JSON document; multiple documents fail. Reads are repeatable. result.media holds original media references. Return result for the complete original reply, or select JSON and original media references. Copied handle fields grant no media identity. Parsed JS numbers may round. Omit undefined fields; encode BigInt as a string.
+Tools return a Body; reads are repeatable. result.text() joins reply text/JSON entries with newlines, preserving JSON tokens. result.json() uses successful schema-validated structured content or parses the whole text as one JSON document; multiple documents fail. For Read file text, use result.json().content. result.media holds original media references. Return result for the whole reply without parsing, or select JSON and original media. Copied handles grant no identity. Numbers may round. Omit undefined; convert BigInt to string.
 
-tools.search(selector) accepts {name}, {server,tool,plugin?}, {query}, or {server,plugin?,after?}. Read its Body.json(): {tools:[{name,description,input_schema,output_schema?,call_path,server?,tool?,plugin?}],count,truncated,omitted_count?,next?}. Continue next as after; use call_path for conflicting names. tools.call(name,args) returns the same Body.
+tools.search(selector) accepts {name}, {server,tool,plugin?}, {query}, or {server,plugin?,after?}. Its Body.json(): {tools:[{name,description,input_schema,output_schema?,call_path,server?,tool?,plugin?}],count,truncated,omitted_count?,next?}. Pass next as after; use call_path for conflicts. tools.call(name,args) returns a Body.
 
-Errors expose message, code and result (reply alias). Failed Bodies are unverified diagnostics; json() only parses their text. stale_revision requires fresh search; unknown outcomes must not be replayed. runtime.state() reports generation/execution. reset:true cancels the old script and creates a new environment.`
+Inspect error.message, error.code and error.result when present (reply alias). Failed Bodies are unverified diagnostics; json() only parses text. On stale_revision, search again; never replay unknown outcomes. runtime.state() reports generation/execution on demand. reset:true aborts the old script and clears bindings without replaying effects.`
 
 // Tool is a concrete declaration, retained until Runtime injects its Host.
 // Product assembly uses the fixed ToolName. Runtime binds one environment to each active Session.
@@ -247,7 +247,7 @@ type Tool struct {
 func (t *Tool) Definition() tool.Definition {
 	return tool.Definition{Name: t.Name, Metadata: map[string]any{tool.MetadataToolKind: ToolKind}, Description: description, InputSchema: map[string]any{
 		"type": "object", "additionalProperties": false,
-		"properties": map[string]any{"code": map[string]any{"type": "string", "minLength": 1, "description": "JavaScript source; top-level await, return and persistent declarations are supported."}, "file": map[string]any{"type": "string", "minLength": 1, "description": "JavaScript source file path relative to the working directory."}, "reset": map[string]any{"type": "boolean", "const": true, "description": "Cancel the old script and replace the environment."}, "yield_time_ms": map[string]any{"type": "integer", "minimum": 0, "maximum": 60000, "default": 10000, "description": "Foreground wait in milliseconds. After yielding, observe the original Task to completion before the next script."}},
+		"properties": map[string]any{"code": map[string]any{"type": "string", "minLength": 1, "description": "JavaScript source."}, "file": map[string]any{"type": "string", "minLength": 1, "description": "JavaScript source file path relative to the working directory."}, "reset": map[string]any{"type": "boolean", "const": true, "description": "Replace the environment, interrupting any active script."}, "yield_time_ms": map[string]any{"type": "integer", "minimum": 0, "maximum": 60000, "default": 10000, "description": "Foreground wait in milliseconds; yielding keeps the original Task running."}},
 		"oneOf":      []any{map[string]any{"required": []string{"code"}}, map[string]any{"required": []string{"file"}}, map[string]any{"required": []string{"reset"}}},
 	}}
 }

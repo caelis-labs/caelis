@@ -70,7 +70,7 @@ func (r *Runtime) acquireCodeMode(ctx context.Context, ref session.SessionRef, e
 		r.codeModeEnvironments[key] = env
 	}
 	if env.busy {
-		return nil, nil, tool.NewError(tool.ErrorCodeInvalidInput, "JavaScript environment is busy; observe the original Task to completion before the next script")
+		return nil, nil, tool.NewError(tool.ErrorCodeInvalidInput, "JavaScript environment is busy; observe the original Task to completion before the next script, or use reset:true to interrupt the old script")
 	}
 	work, cancel := context.WithCancel(ctx)
 	execution := uuid.NewString()

@@ -18,8 +18,8 @@ func TestCodeModePromptDeliveryStaticAndDynamicRequests(t *testing.T) {
 	for _, dynamic := range []bool{false, true} {
 		t.Run(map[bool]string{false: "static", true: "dynamic"}[dynamic], func(t *testing.T) {
 			store, active, _ := codeModeStore(t)
-			const legacyKey = "code_mode_catalog_v6"
-			const legacyGuidance = "LEGACY_V6_GUIDANCE"
+			const legacyKey = "code_mode_catalog_v9"
+			const legacyGuidance = "LEGACY_V9_GUIDANCE"
 			_, err := store.UpdateState(t.Context(), session.UpdateStateRequest{SessionRef: active.SessionRef, Update: func(state map[string]any) (map[string]any, error) {
 				if state == nil {
 					state = map[string]any{}
@@ -59,7 +59,11 @@ func TestCodeModePromptDeliveryStaticAndDynamicRequests(t *testing.T) {
 			if len(llm.requests) != 2 {
 				t.Fatalf("requests=%d", len(llm.requests))
 			}
-			var prefix string
+			var prefix, declarations string
+			expectedDefinition, err := json.Marshal(tool.ModelSpecs(tools)[0])
+			if err != nil {
+				t.Fatal(err)
+			}
 			for _, req := range llm.requests {
 				var text strings.Builder
 				for _, p := range req.Instructions {
@@ -80,8 +84,9 @@ func TestCodeModePromptDeliveryStaticAndDynamicRequests(t *testing.T) {
 				for _, spec := range req.Tools {
 					if spec.Function != nil && spec.Function.Name == codemode.ToolName {
 						entryCount++
-						if spec.Function.Description != tools[0].Definition().Description {
-							t.Fatal("entry summary changed during model request assembly")
+						actual, err := json.Marshal(spec)
+						if err != nil || string(actual) != string(expectedDefinition) {
+							t.Fatalf("entry definition changed during request assembly: %s, %v", actual, err)
 						}
 					}
 				}
@@ -93,6 +98,18 @@ func TestCodeModePromptDeliveryStaticAndDynamicRequests(t *testing.T) {
 					t.Fatal("instruction prefix changed within Turn")
 				}
 				prefix = string(raw)
+				declared, err := json.Marshal(req.Tools)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if strings.Contains(got+string(declared), "parallel_safe") {
+					t.Fatal("internal scheduling capability leaked to model instructions or definitions")
+				}
+				if declarations != "" && declarations != string(declared) {
+					t.Fatal("tool definitions changed within Turn")
+				}
+				declarations = string(declared)
+				t.Logf("model instructions=%s\ndefinitions=%s", raw, declared)
 			}
 		})
 	}

@@ -21,7 +21,7 @@ func TestCodeModeMinimalModelInterface(t *testing.T) {
 	description := (&codemode.Tool{Name: codemode.ToolName}).Definition().Description
 	guidance := codemode.Guidance
 	for _, value := range []string{guidance, description} {
-		for _, removed := range []string{"tools.describe", "output.text", "output.image", "batch_id", "records()", "native", "MCP", "approval", "authorization"} {
+		for _, removed := range []string{"tools.describe", "output.text", "output.image", "batch_id", "records()", "native", "MCP", "approval", "authorization", "parallel_safe"} {
 			if strings.Contains(value, removed) {
 				t.Fatalf("model-facing text contains implementation detail %q", removed)
 			}
@@ -29,7 +29,9 @@ func TestCodeModeMinimalModelInterface(t *testing.T) {
 	}
 	for _, preference := range []string{
 		"Call known tools directly", "schemas from Skills", "Search for unknown tools or arguments",
-		"Sequence dependent operations", "independent calls may run concurrently when appropriate",
+		"Await dependent operations", "express independent work concurrently", "Runtime schedules execution",
+		"Submit js_exec scripts sequentially", "observe the original Task to completion before the next script, or use reset:true to abort the old script",
+		"Task controls work independently of the VM",
 	} {
 		if !strings.Contains(guidance, preference) {
 			t.Fatalf("missing usage preference %q", preference)
@@ -40,7 +42,7 @@ func TestCodeModeMinimalModelInterface(t *testing.T) {
 			t.Fatalf("detailed API protocol belongs in the tool description, found %q in Guidance", protocol)
 		}
 	}
-	for _, contract := range []string{"Top-level await and return", "await Read(args)", "await RunCommand(args)", "await dtw.apps(args)", "await context7['query-docs'](args)", "tools.search(", "input_schema", "output_schema", "call_path", "Body", "result.text()", "result.json()", "result.media", "runtime.state()", "reset:true", "Omit undefined", "omitted return is null", "message, code and result", "stale_revision", "unknown outcomes"} {
+	for _, contract := range []string{"Top-level await and return", "await Read(args)", "await RunCommand(args)", "await dtw.apps(args)", "await context7['query-docs'](args)", "tools.search(", "input_schema", "output_schema", "call_path", "Body", "result.text()", "result.json()", "result.media", "runtime.state()", "reset:true", "Omit undefined", "omitted return is null", "error.message, error.code and error.result when present", "stale_revision", "unknown outcomes", "reply text/JSON", "For Read file text, use result.json().content", "whole reply without parsing", "Bindings persist only in the active host Session", "resume/release/reset clears them", "let/const cannot be redeclared", "const is read-only", "var/function may repeat", "on demand", "clears bindings without replaying effects"} {
 		if !strings.Contains(description, contract) {
 			t.Fatalf("missing js_exec contract %q", contract)
 		}

@@ -61,8 +61,9 @@ const file = response.json();
 return {content: file.content};
 ```
 
-`result.text()` joins all textual and JSON content in original order with a
-newline between entries. JSON entries retain their original tokens.
+`result.text()` joins the tool reply's textual and JSON content in original order
+with a newline between entries. JSON entries retain their original tokens. For
+Read file text, use `result.json().content`; `text()` contains the reply envelope.
 `result.json()` uses the successful, schema-validated structured content when
 available; otherwise it parses the complete `text()` as one JSON document.
 Empty text and multiple independent JSON documents produce a parsing error.
@@ -72,10 +73,11 @@ authority. Returning a Body directly delivers its complete original reply;
 returning other values delivers their actual fields and selected original media
 references. Deleting fields from parsed JSON cannot restore removed attachments.
 
-Declared output schemas remain validated at the tool boundary. A failed call
-rejects with a diagnostic Body in `error.result`; its structured content is not
-promoted to a validated business result. Its `json()` performs only the explicit
-text parsing rule above. Use `text()` and `media` for failure diagnostics.
+Declared output schemas remain validated at the tool boundary. Inspect
+`error.message`, `error.code` and `error.result` when present; `error.reply` aliases
+`result`. A failed Host call exposes a diagnostic Body whose structured content
+is unverified; its `json()` only parses text. Script and local validation errors
+may omit these properties. Use `text()` and `media` for failure diagnostics.
 JavaScript Number computations follow Number precision; `text()` and a complete
 Body return retain original JSON tokens. Encode BigInt as a string, omit undefined
 fields or use null. An omitted return is null.
@@ -108,30 +110,30 @@ identity on demand. `js_exec({reset:true})`, mutually exclusive with `code` and
 of the occupied VM. A new environment does not wait for the old environment's
 cleanup. Old responses stay bound to their old execution and generation; no tool
 effect is replayed. Original Task and Journal records retain their disposition,
-including uncertain effects. Reset and environment release clear retained media
-and their cumulative retention budget.
+including uncertain effects. Reset and environment release clear bindings,
+retained media and their cumulative retention budget.
 
 The SDK Runtime owns the environment under its existing Session execution
 activation. The product releases it through `sessionRuntimeRegistry` only after
 Session uses, producer work, observers and running Tasks permit the ordinary
 resource-release path. There is no additional VM idle timer or Task dependency
-lease. Session reactivation/resume creates a new environment. Release does not
-insert a model message; scripts may inspect `runtime.state()` when needed.
+lease. Session reactivation/resume creates a new environment. No reset notification
+is injected into model instructions; scripts may inspect `runtime.state()` when
+needed.
 
 One script occupies the environment until its execution terminates. Foreground
 yield is not termination: observe the original Task to completion before sending
-the next script. A busy error is a fallback for overlapping submissions, not a
-scheduling mechanism. Task read/wait/cancel remains outside the VM. Within one
-script, Runtime continues to enforce each tool's parallel execution capability.
+the next script, or use `reset:true` to interrupt the occupied environment. A busy
+error is a fallback for overlapping submissions, not a scheduling mechanism. Task read/wait/cancel remains outside the VM. Within one
+script, await dependent operations; independent operations may be expressed
+concurrently. Runtime schedules their actual execution.
 Current Run cancellation, approvals, Guardian, Journal and Task ownership remain
 authoritative; retained variables do not keep an old Run alive or grant new tool
 authority. Execution cancellation interrupts and, if necessary, kills the original
 worker. Cleanup is bounded at the process boundary; pending tool producers keep
 their existing Runtime receipt and quiescence obligations.
 
-Inspect `error.message`, `error.code` and `error.result` when present.
-`error.reply` is a compatibility alias for that same projected result. Exact misses report
-`not_found`; ambiguous matches report `too_many_matches`. A `stale_revision`
+Exact misses report `not_found`; ambiguous matches report `too_many_matches`. A `stale_revision`
 error means search again and revise the arguments. Observe unknown outcomes
 without replaying the input.
 
@@ -150,12 +152,7 @@ search result's `call_path` can resolve a name that became ready during the curr
 execution. Search does not rewrite existing prompt slices or model tool arrays.
 Outside Code Mode, `mcp_call` still requires prior discovery.
 
-Host failures reject with an Error whose `result` property contains the projected
-failure diagnostics; `reply` aliases it. Failed MCP structured content has not
-been validated as a successful business result.
-Host failures also expose `error.code`; tool-specific error codes and effect
-details stay in the reply's original content. Local validation or script errors may
-lack `reply`.
+Tool-specific error codes and effect details stay in the reply's original content.
 Catching does not erase failed records. An uncaught script exception produces
 `javascript_error` plus the Runtime-retained failed replies, including original
 call IDs and JSON tokens. Caught failures retain compact disposition records and
@@ -179,9 +176,8 @@ fallback; fuzzy search retains its existing selector budgets. No source or
 discovery lock crosses approval or Tool I/O. Snapshot hints remain fixed within this API version; a
 software API change creates its own presentation snapshot, not a new grant cache.
 
-Scripts choose sequential or concurrent tool calls according to their schemas
-and operation semantics. Runtime enforces the tool owner's capability through
-the [Run-owned execution gate](agent-sdk-boundary.md#runtime-and-capabilities).
+Runtime schedules tool execution through the
+[Run-owned execution gate](agent-sdk-boundary.md#runtime-and-capabilities).
 Discovery, call budgets, cancellation and receipts keep their existing owners.
 
 ## Authority and invalidation
@@ -258,7 +254,8 @@ Final safe points cancel script producers before joining them, including an
 approval waiter. Cross-Turn background execution is not promised.
 
 `yield_time_ms` bounds only the foreground wait, not execution. After yielding,
-use Task read/wait/cancel on the original handle; do not resubmit `js_exec`.
+use Task read/wait/cancel on the original handle; do not resubmit the original
+script. `reset:true` can interrupt it without waiting for completion.
 Foreground yield transfers observation to the existing Task owner with one
 original handle. Query, wait, cancellation and completion reuse Task control and output cursors.
 Selected output is published at script completion; child progress uses the
