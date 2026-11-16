@@ -337,7 +337,9 @@ func pathInside(root, target string) bool {
 func pluginBaseEnvironment() []string {
 	allowed := []string{"PATH", "HOME", "USER", "TMPDIR", "TMP", "TEMP", "LANG", "LC_ALL"}
 	if runtime.GOOS == "windows" {
-		allowed = append(allowed, "SYSTEMROOT", "WINDIR", "APPDATA", "LOCALAPPDATA", "USERPROFILE")
+		// Windows Shell APIs expand system cache paths using these variables;
+		// an unresolved %SystemDrive% can otherwise become a relative directory.
+		allowed = append(allowed, "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "PROGRAMDATA", "APPDATA", "LOCALAPPDATA", "USERPROFILE")
 	}
 	var out []string
 	for _, key := range allowed {

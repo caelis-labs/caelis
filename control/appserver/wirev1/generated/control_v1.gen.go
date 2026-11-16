@@ -1786,6 +1786,7 @@ type SessionPluginStatus struct {
 	Root    string  `json:"root"`
 	Status  string  `json:"status"`
 	Version *string `json:"version,omitempty"`
+	Warning *string `json:"warning,omitempty"`
 }
 
 type SessionPresentationConfigRequest struct {

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -635,9 +636,13 @@ func TestDraftCancellationBeforeNativeTurnAcknowledgementTargetsActualTurn(t *te
 
 func TestDraftStdioMCPOptionalFieldsUseOriginalInjectionOwner(t *testing.T) {
 	fake, client, _, ctx, cwd := newDraftFixture(t)
+	command, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
 	done := make(chan error, 1)
 	go func() {
-		_, err := client.NewSession(ctx, v2.NewSessionRequest{Cwd: v2.AbsolutePath(cwd), McpServers: []v2.McpServer{{Stdio: &v2.McpServerStdioInline{Type: "stdio", Name: "fixture", Command: "/usr/bin/true"}}}})
+		_, err := client.NewSession(ctx, v2.NewSessionRequest{Cwd: v2.AbsolutePath(cwd), McpServers: []v2.McpServer{{Stdio: &v2.McpServerStdioInline{Type: "stdio", Name: "fixture", Command: v2.AbsolutePath(command)}}}})
 		done <- err
 	}()
 	req := fake.next(t, "thread/start")
@@ -651,7 +656,7 @@ func TestDraftStdioMCPOptionalFieldsUseOriginalInjectionOwner(t *testing.T) {
 		t.Fatal(err)
 	}
 	server, present := config["mcp_servers.fixture"]
-	if !present || server.Command != "/usr/bin/true" || server.Args == nil || server.Env == nil || !server.Enabled {
+	if !present || server.Command != command || server.Args == nil || server.Env == nil || !server.Enabled {
 		t.Fatalf("optional draft stdio injection lost owner normalization: %+v", config)
 	}
 	fake.reply(req, map[string]any{"thread": map[string]any{"id": "thread-1", "cwd": cwd}, "model": "gpt-test"})

@@ -67,7 +67,7 @@ func desktopWorldBundle() (*zip.Reader, builtinPlatform, string, error) {
 }
 
 func materializeDesktopWorld(ctx context.Context, storeDir string) (string, error) {
-	reader, platform, version, err := desktopWorldBundle()
+	reader, platform, _, err := desktopWorldBundle()
 	if err != nil {
 		return "", err
 	}
@@ -98,7 +98,7 @@ func materializeDesktopWorld(ctx context.Context, storeDir string) (string, erro
 	}
 	defer release()
 	if _, err := os.Lstat(root); err == nil {
-		return root, verifyDesktopWorldBundle(root, reader, platform, version)
+		return root, verifyDesktopWorldBundle(root, reader, platform)
 	} else if !os.IsNotExist(err) {
 		return "", err
 	}
@@ -133,7 +133,7 @@ func materializeDesktopWorld(ctx context.Context, storeDir string) (string, erro
 			return "", err
 		}
 	}
-	if err := verifyDesktopWorldBundle(tmp, reader, platform, version); err != nil {
+	if err := verifyDesktopWorldBundle(tmp, reader, platform); err != nil {
 		return "", err
 	}
 	if err := ctx.Err(); err != nil {
@@ -142,7 +142,7 @@ func materializeDesktopWorld(ctx context.Context, storeDir string) (string, erro
 	if err := os.Rename(tmp, root); err != nil {
 		// Another Host may have published the same bytes. Never replace or repair
 		// an existing root; readers can hold it across upgrades and rollbacks.
-		if verifyErr := verifyDesktopWorldBundle(root, reader, platform, version); verifyErr != nil {
+		if verifyErr := verifyDesktopWorldBundle(root, reader, platform); verifyErr != nil {
 			return "", err
 		}
 	}
@@ -179,7 +179,7 @@ func extractBuiltinEntry(entry *zip.File, dest string) error {
 	return closeErr
 }
 
-func verifyDesktopWorldBundle(root string, reader *zip.Reader, platform builtinPlatform, version string) error {
+func verifyDesktopWorldBundle(root string, reader *zip.Reader, platform builtinPlatform) error {
 	info, err := os.Lstat(root)
 	if err != nil {
 		return err
@@ -188,18 +188,13 @@ func verifyDesktopWorldBundle(root string, reader *zip.Reader, platform builtinP
 		return fmt.Errorf("builtin package root is not a real directory")
 	}
 	prefix := strings.TrimSuffix(platform.Archive, ".zip") + "/"
-	expected := map[string]bool{".": true}
 	for _, entry := range reader.File {
 		rel, err := builtinEntryPath(entry, prefix)
 		if err != nil {
 			return err
 		}
-		if rel == "" {
+		if rel == "" || !desktopWorldRuntimeFile(filepath.ToSlash(rel)) {
 			continue
-		}
-		expected[rel] = true
-		for parent := filepath.Dir(rel); parent != "."; parent = filepath.Dir(parent) {
-			expected[parent] = true
 		}
 		if entry.FileInfo().IsDir() {
 			continue
@@ -236,40 +231,15 @@ func verifyDesktopWorldBundle(root string, reader *zip.Reader, platform builtinP
 			return fmt.Errorf("builtin file checksum mismatch: %s", rel)
 		}
 	}
-	if err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-		if !expected[rel] || entry.Type()&os.ModeSymlink != 0 {
-			return fmt.Errorf("unexpected builtin package entry: %s", rel)
-		}
-		return nil
-	}); err != nil {
-		return err
-	}
-	var build struct {
-		Version string             `json:"version"`
-		Target  string             `json:"target"`
-		Source  builtinBuildSource `json:"source"`
-		Binary  struct {
-			SHA string `json:"sha256"`
-		} `json:"binary"`
-	}
-	data, err := os.ReadFile(filepath.Join(root, "BUILD.json"))
-	if err != nil {
-		return err
-	}
-	if err := json.Unmarshal(data, &build); err != nil {
-		return err
-	}
-	if build.Version != version || build.Target != platform.Target || build.Source != platform.Source || build.Binary.SHA != platform.BinaryHash {
-		return fmt.Errorf("builtin desktop-world build provenance mismatch")
-	}
 	return nil
+}
+
+// Runtime validation covers executable, configuration and Skill inputs. Release
+// provenance is verified on the embedded archive; unrelated files and caches do
+// not participate in package activation.
+func desktopWorldRuntimeFile(name string) bool {
+	return name == "plugin.json" || name == "mcp.json" || name == ".mcp.json" ||
+		name == ".claude-plugin/plugin.json" || strings.HasPrefix(name, "bin/") || strings.HasPrefix(name, "skills/")
 }
 
 // ProductContributions assembles fixed Core capabilities separately from optional

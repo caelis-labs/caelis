@@ -3,9 +3,12 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync/atomic"
+	"syscall"
 	"testing"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
@@ -77,6 +80,9 @@ func TestCodeModeSourceReadPolicyUsesConcreteSemanticsAndExistingGrants(t *testi
 			case "symlink":
 				path = filepath.Join(root, "link.js")
 				if err := os.Symlink(sensitive, path); err != nil {
+					if runtime.GOOS == "windows" && (errors.Is(err, syscall.Errno(1314)) || os.IsPermission(err)) {
+						t.Skipf("Windows symlink permission unavailable: %v", err)
+					}
 					t.Fatal(err)
 				}
 			case "granted":

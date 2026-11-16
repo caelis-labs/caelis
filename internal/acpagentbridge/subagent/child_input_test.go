@@ -846,6 +846,7 @@ func TestUnknownSteeringOutcomePreservesOriginalActivity(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	runner := childInputTestRunner(t, "unknown")
+	defer func() { _ = runner.Quiesce(context.Background()) }()
 	events := make(chan childInputTestEvent, 12)
 	anchor, _, err := runner.Spawn(ctx, childInputSpawnContext(t, "task-unknown-steering", events), delegation.Request{
 		Agent: "helper", Prompt: "initial",

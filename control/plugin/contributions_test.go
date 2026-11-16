@@ -90,6 +90,9 @@ func TestResolveAvailableContributionsSkipsBrokenPluginAndRecovers(t *testing.T)
 	if err != nil || len(got.SkillBundles) != 1 || got.SkillBundles[0].Plugin != "good" {
 		t.Fatalf("available contributions = %+v, %v", got, err)
 	}
+	if len(got.Sources) != 2 || got.Sources[1].ID != "broken" || got.Sources[1].Status != "failed" || !strings.Contains(got.Sources[1].Error, `parse enabled plugin "broken"`) {
+		t.Fatalf("broken package lost its diagnostic: %+v", got.Sources)
+	}
 	if err := os.WriteFile(brokenPath, []byte(manifest), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +102,7 @@ func TestResolveAvailableContributionsSkipsBrokenPluginAndRecovers(t *testing.T)
 	}
 }
 
-func TestResolveAvailableContributionsKeepsValidNativeMCPAndSkill(t *testing.T) {
+func TestResolveAvailableContributionsDisablesMalformedPackageAndRecovers(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "mixed")
 	manifestDir := filepath.Join(root, ".caelis-plugin")
 	if err := os.MkdirAll(manifestDir, 0o700); err != nil {
@@ -119,16 +122,12 @@ func TestResolveAvailableContributionsKeepsValidNativeMCPAndSkill(t *testing.T) 
 		t.Fatalf("strict contribution validation = %v", err)
 	}
 	got, err := ResolveAvailableContributions(config)
-	if err != nil || len(got.SkillBundles) != 1 || len(got.MCPServerSpecs) != 1 || got.MCPServerSpecs[0].Name != "good" {
+	if err != nil || len(got.SkillBundles) != 0 || len(got.MCPServerSpecs) != 0 || len(got.Sources) != 1 || got.Sources[0].Status != "failed" || !strings.Contains(got.Sources[0].Error, `server "bad"`) {
 		t.Fatalf("available contributions = %+v, %v", got, err)
-	}
-	parsed, err := ParseConfiguredAvailable(config[0])
-	if err != nil || len(parsed.Warnings) != 1 || !strings.Contains(parsed.Warnings[0], `"bad"`) {
-		t.Fatalf("degraded Plugin warning = %+v, %v", parsed.Warnings, err)
 	}
 	write(`{"command":"repaired-mcp"}`)
 	got, err = ResolveAvailableContributions(config)
-	if err != nil || len(got.MCPServerSpecs) != 2 {
+	if err != nil || len(got.MCPServerSpecs) != 2 || len(got.SkillBundles) != 1 || got.Sources[0].Error != "" {
 		t.Fatalf("repaired contributions = %+v, %v", got, err)
 	}
 }

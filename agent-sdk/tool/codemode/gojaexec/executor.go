@@ -123,6 +123,7 @@ func startWorker(e *Executor) (*workerProcess, error) {
 		return nil, err
 	}
 	cmd := exec.Command(executable, WorkerArgument)
+	configureWorkerProcess(cmd)
 	cmd.Dir = dir
 	cmd.Env = []string{"GOMAXPROCS=1", "GORACE=atexit_sleep_ms=0 halt_on_error=1"}
 	input, err := cmd.StdinPipe()

@@ -133,7 +133,7 @@ func (s *runtimeComposition) nativePluginContributions(configs []PluginConfig) (
 		contributions, err := resolveGatewayPluginContributions(configs, s.authorities.storeDir, s.workspace.CWD)
 		return contributions, &configuration, err
 	}
-	contributions, err := applicationRuntimePluginContributions(sessionprofile.Profile{Plugins: *configuration.Native.Plugins}, applicationPluginPaths(s.authorities.storeDir, active.SessionID, s.workspace.CWD), configs...)
+	contributions, err := s.resolveAvailableApplicationPlugins(sessionprofile.Profile{Plugins: *configuration.Native.Plugins}, applicationPluginPaths(s.authorities.storeDir, active.SessionID, s.workspace.CWD))
 	return contributions, &configuration, err
 }
 
@@ -157,7 +157,7 @@ func nativePluginStatus(configuration *sessionprofile.Configuration, contributio
 			return status
 		}
 		for _, source := range contributions.Sources {
-			status.Plugins = append(status.Plugins, sessionprofile.PluginStatus{ID: source.ID, Root: source.Root, Version: source.Version, Status: pluginSourceStatus(source)})
+			status.Plugins = append(status.Plugins, pluginSourceStatus(source))
 		}
 		for _, namespace := range namespaces {
 			for _, info := range manager.GetServerInfos(namespace) {

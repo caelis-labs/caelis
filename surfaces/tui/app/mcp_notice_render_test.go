@@ -30,6 +30,25 @@ func TestTurnObservationIncludesSessionNotice(t *testing.T) {
 	}
 }
 
+func TestPluginFailureRemainsVisibleDuringTurn(t *testing.T) {
+	const notice = `Plugin "desktop-world" disabled: builtin file checksum mismatch: bin/dtw.exe`
+	model := NewModel(Config{NoColor: true, NoAnimation: true})
+	model.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+	model.beginLiveTurn(SubmissionModeDefault, false, time.Now())
+	model.handleACPEventEnvelope(eventstream.Envelope{
+		Kind: eventstream.KindNotice, SessionID: "session-1", Scope: eventstream.ScopeMain,
+		Notice: notice, Delivery: &eventstream.Delivery{Mode: eventstream.DeliveryTransient},
+	})
+	model.drainPendingRenderEvents(time.Now())
+	model.flushPendingViewportSync()
+	frame := model.View().Content
+	if !strings.Contains(frame, notice) || !model.turnRunning() {
+		t.Fatalf("plugin error was hidden or stopped the Turn:\n%s", frame)
+	}
+	assertPhysicalFullscreenFrame(t, model.width, model.height, frame, renderFullscreenFramesForTest(t, model.width, model.height, frame))
+	t.Log(frame)
+}
+
 func TestSessionObservationPresentsNoticePublishedBeforeAttachment(t *testing.T) {
 	const notice = "MCP unavailable during admission"
 	for _, automatic := range []bool{true, false} {

@@ -142,8 +142,14 @@ func TestStartupNPMStderrFlowsThroughRealCommandWithoutOrdinaryMCPMislabel(t *te
 		t.Fatal(err)
 	}
 	npm := filepath.Join(t.TempDir(), name)
-	// A test executable with the launcher's name; never runs npm or installs.
-	if err := os.Link(executable, npm); err != nil {
+	// Copy the executable: a Windows hard link would share the running parent
+	// image's deletion lock even after the synthetic child has been reaped.
+	// This never runs npm or installs a package.
+	data, err := os.ReadFile(executable)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(npm, data, 0700); err != nil {
 		t.Fatal(err)
 	}
 	for _, command := range []string{npm, executable} {

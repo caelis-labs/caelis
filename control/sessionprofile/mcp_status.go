@@ -38,9 +38,11 @@ type SkillStatus struct {
 
 // PluginStatus identifies the selected native package observed in a Runtime
 // snapshot. Assembled is package assembly, not MCP connection or tool readiness.
+// Failed disables only this package; Warning retains the assembly failure.
 type PluginStatus struct {
 	ID      string `json:"id,omitempty"`
 	Root    string `json:"root"`
 	Version string `json:"version,omitempty"`
 	Status  string `json:"status"`
+	Warning string `json:"warning,omitempty"`
 }

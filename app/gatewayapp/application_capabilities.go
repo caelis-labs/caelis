@@ -224,7 +224,7 @@ func (r *applicationTurnResolver) acquireCapabilities(ctx context.Context, confi
 	if err := ctx.Err(); err != nil {
 		return nil, nil, err
 	}
-	contributions, err := r.composition.resolveApplicationPlugins(configuration.Profile, applicationPluginPaths(r.composition.authorities.storeDir, r.binding.SessionID, r.composition.workspace.CWD))
+	contributions, err := r.composition.resolveAvailableApplicationPlugins(configuration.Profile, applicationPluginPaths(r.composition.authorities.storeDir, r.binding.SessionID, r.composition.workspace.CWD))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -233,8 +233,9 @@ func (r *applicationTurnResolver) acquireCapabilities(ctx context.Context, confi
 		return nil, nil, err
 	}
 	assembled := &applicationCapabilities{catalog: catalog, skills: skills}
+	r.composition.reportPluginFailures(contributions)
 	for _, source := range contributions.Sources {
-		assembled.plugins = append(assembled.plugins, sessionprofile.PluginStatus{ID: source.ID, Root: source.Root, Version: source.Version, Status: pluginSourceStatus(source)})
+		assembled.plugins = append(assembled.plugins, pluginSourceStatus(source))
 	}
 	specs := append(applicationMCPSpecs(configuration.Profile), contributions.MCPServerSpecs...)
 	if len(catalog.Metas()) != 0 {

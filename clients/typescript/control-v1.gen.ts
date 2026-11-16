@@ -1794,8 +1794,9 @@ export interface SessionPluginMCPServer {
 export interface SessionPluginStatus {
   id?: string;
   root: string;
-  status: "inactive" | "assembled";
+  status: "inactive" | "assembled" | "failed";
   version?: string;
+  warning?: string;
   [key: string]: JSONValue;
 }
 
