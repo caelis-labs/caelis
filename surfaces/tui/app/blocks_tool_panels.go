@@ -30,8 +30,9 @@ func toggleToolPanelClick(expandedState *map[string]bool, fullOutputState *map[s
 	if callID == "" {
 		return false
 	}
-	if ev, ok := latestToolEventForCallID(events, callID); ok && ev.ParentToolName == "js_exec" {
-		if !toolPanelEventHasHiddenToolArgs(ev) || fullOutputState == nil {
+	if ev, ok := latestToolEventForCallID(events, callID); ok && (ev.ParentToolName == "js_exec" || isScriptToolEvent(ev)) {
+		canExpand := toolPanelEventHasHiddenToolArgs(ev) || (isScriptToolEvent(ev) && !ev.OutputSynthetic && renderableTextHasContent(ev.Output))
+		if !canExpand || fullOutputState == nil {
 			return false
 		}
 		if *fullOutputState == nil {
@@ -445,9 +446,6 @@ func toolPanelHasHiddenToolArgs(events []SubagentEvent, callID string) bool {
 }
 
 func toolPanelEventHasHiddenToolArgs(ev SubagentEvent) bool {
-	if isScriptToolEvent(ev) {
-		return false
-	}
 	if ev.ParentToolName == "js_exec" && strings.TrimSpace(firstNonEmpty(ev.FullArgs, ev.Args)) != "" {
 		return true
 	}

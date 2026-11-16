@@ -65,3 +65,21 @@ func TestScriptTaskTerminalUpdateWithoutTaskRead(t *testing.T) {
 		})
 	}
 }
+
+func TestScriptSourceDisclosesFrozenBytesOnFirstClick(t *testing.T) {
+	events := []*session.Event{{Type: session.EventTypeToolCall, Tool: &session.EventTool{ID: "file", Name: "js_exec", Status: "started", Input: map[string]any{"file": "workflow.js"}}}, {Type: session.EventTypeToolResult, Tool: &session.EventTool{ID: "file", Name: "js_exec", Status: "completed", Input: map[string]any{"file": "workflow.js"}}, Meta: map[string]any{"code_mode_script_completion": "completed", "code_mode_source": map[string]any{"path": "workflow.js", "code": "const frozen=42;\nreturn frozen;"}}}}
+	m, b := groupedCanonicalModel(t, events, "main", true)
+	ctx := m.blockRenderContext(70)
+	if !m.tryToggleFoldToken(b.BlockID(), acpToolPanelClickToken("file")) {
+		t.Fatal("source click has no route")
+	}
+	if text := joinRenderedPlain(b.Render(ctx)); !strings.Contains(text, "const frozen=42;") {
+		t.Fatalf("first click failed to disclose frozen source: %s", text)
+	}
+	if !m.tryToggleFoldToken(b.BlockID(), acpToolPanelClickToken("file")) {
+		t.Fatal("source collapse has no route")
+	}
+	if text := joinRenderedPlain(b.Render(ctx)); strings.Contains(text, "const frozen=42;") {
+		t.Fatalf("second click did not collapse source: %s", text)
+	}
+}
