@@ -226,8 +226,27 @@ func TestApplicationProfileChildHTTPIsolationAndRecovery(t *testing.T) {
 		}
 		return out
 	}(), "\n")
+	for _, encoded := range model.requests {
+		var request struct {
+			Tools []struct {
+				Function struct {
+					Name string `json:"name"`
+				} `json:"function"`
+			} `json:"tools"`
+		}
+		if err := json.Unmarshal(encoded, &request); err != nil {
+			model.mu.Unlock()
+			t.Fatal(err)
+		}
+		for _, declared := range request.Tools {
+			if declared.Function.Name == "RunCommand" || declared.Function.Name == "StartThread" {
+				model.mu.Unlock()
+				t.Fatalf("child imported ambient/nested declaration: %s", declared.Function.Name)
+			}
+		}
+	}
 	model.mu.Unlock()
-	if !strings.Contains(raw, "child-only-input") || !strings.Contains(raw, profile.Instructions) || !strings.Contains(raw, "profile-child-skill") || strings.Contains(raw, "RunCommand") || strings.Contains(raw, "StartThread") {
+	if !strings.Contains(raw, "child-only-input") || !strings.Contains(raw, profile.Instructions) || !strings.Contains(raw, "profile-child-skill") {
 		t.Fatalf("child imported ambient/nested tools: %s", raw)
 	}
 	host.close(t)

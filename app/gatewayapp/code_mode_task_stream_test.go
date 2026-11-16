@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
@@ -23,13 +24,16 @@ import (
 	"github.com/caelis-labs/caelis/control/taskstream"
 )
 
-type scriptStreamModel struct{ calls atomic.Int32 }
+type scriptStreamModel struct {
+	calls   atomic.Int32
+	entered <-chan struct{}
+}
 
 func (*scriptStreamModel) Capabilities() model.Capabilities {
 	return model.Capabilities{ToolCalls: true, Streaming: true}
 }
 func (*scriptStreamModel) Name() string { return "local-task-fixture" }
-func (m *scriptStreamModel) Generate(_ context.Context, _ *model.Request) iter.Seq2[*model.StreamEvent, error] {
+func (m *scriptStreamModel) Generate(ctx context.Context, _ *model.Request) iter.Seq2[*model.StreamEvent, error] {
 	return func(yield func(*model.StreamEvent, error) bool) {
 		n := m.calls.Add(1)
 		response := &model.Response{Message: model.NewTextMessage(model.RoleAssistant, "done"), TurnComplete: true}
@@ -37,6 +41,15 @@ func (m *scriptStreamModel) Generate(_ context.Context, _ *model.Request) iter.S
 			response = &model.Response{Message: model.NewMessage(model.RoleAssistant, model.NewToolUsePart("script", "js_exec", []byte(`{"code":"await Hold({});return {answer:42};","yield_time_ms":0}`)))}
 		}
 		if n == 2 {
+			// Do not end the model Turn before the yielded worker has entered
+			// its controlled Host wait. This is a late-success observation test,
+			// not a race against the original TurnComplete admission boundary.
+			select {
+			case <-m.entered:
+			case <-ctx.Done():
+				yield(nil, ctx.Err())
+				return
+			}
 			response = &model.Response{Message: model.NewMessage(model.RoleAssistant, model.NewToolUsePart("release", "Release", []byte(`{}`)))}
 		}
 		response.TurnComplete = true
@@ -57,7 +70,8 @@ func (scriptStreamAuth) AuthorizeTaskStream(context.Context, taskstream.Principa
 }
 
 func TestScriptRuntimeTaskTerminalWithoutTaskRead(t *testing.T) {
-	ctx := t.Context()
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
 	root := t.TempDir()
 	store := sessionfile.NewStore(sessionfile.Config{RootDir: root})
 	active, err := store.StartSession(ctx, session.StartSessionRequest{AppName: "caelis", UserID: "fixture", Workspace: session.WorkspaceRef{Key: root, CWD: root}})
@@ -83,7 +97,9 @@ func TestScriptRuntimeTaskTerminalWithoutTaskRead(t *testing.T) {
 		t.Fatal(err)
 	}
 	release := make(chan struct{})
+	entered := make(chan struct{})
 	hold := tool.NamedTool{Def: tool.Definition{Name: "Hold", InputSchema: map[string]any{"type": "object"}}, Invoke: func(ctx context.Context, _ tool.Call) (tool.Result, error) {
+		close(entered)
 		select {
 		case <-release:
 			return tool.Result{}, nil
@@ -92,7 +108,7 @@ func TestScriptRuntimeTaskTerminalWithoutTaskRead(t *testing.T) {
 		}
 	}}
 	next := tool.NamedTool{Def: tool.Definition{Name: "Release", InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) { close(release); return tool.Result{}, nil }}
-	run, err := rt.Run(ctx, agent.RunRequest{SessionRef: active.SessionRef, Input: "fixture", AgentSpec: agent.AgentSpec{Model: &scriptStreamModel{}, Tools: []tool.Tool{hold, next, &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}}}}})
+	run, err := rt.Run(ctx, agent.RunRequest{SessionRef: active.SessionRef, Input: "fixture", AgentSpec: agent.AgentSpec{Model: &scriptStreamModel{entered: entered}, Tools: []tool.Tool{hold, next, &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}}}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,6 +141,6 @@ func TestScriptRuntimeTaskTerminalWithoutTaskRead(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Fatal("late Control observer never received original script terminal without Task.read")
+		t.Fatalf("late Control observer never received original script terminal without Task.read: tasks=%+v response=%+v", entries, response)
 	}
 }
