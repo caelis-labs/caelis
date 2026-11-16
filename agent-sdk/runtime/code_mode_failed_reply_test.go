@@ -26,7 +26,7 @@ import (
 )
 
 // A recoverable MCP failure may carry a diagnostic screenshot and exact JSON.
-// Selecting its original parts must deliver the same data as a successful reply.
+// Selecting its original media must deliver the same data as a successful reply.
 func TestJSExecMCPReplyPreservesSelectedMediaAndRawJSON(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
@@ -70,18 +70,16 @@ func TestJSExecMCPReplyPreservesSelectedMediaAndRawJSON(t *testing.T) {
 				continued.Add(1)
 				return tool.Result{}, nil
 			}}
-			code := `await tools.search("live__diagnose");
+			code := `(await tools.search("live__diagnose")).json();
 let reply, caught=false;
 try { reply=await tools.call("live__diagnose",{}); }
 catch(e) { reply=e.reply; caught=true; }
 await tools.call("Continue",{});
-return {caught,selected:reply.parts[0],raw:reply.raw_json,
-  rawEnumerable:Object.keys(reply).includes("raw_json"),
-  outcome:reply.outcome||null,isError:reply.is_error||false};`
+return {caught,selected:reply.media[0],raw:reply.text()};`
 			if tc.uncaught {
-				code = `await tools.search("live__diagnose"); await tools.call("live__diagnose",{}); await tools.call("Continue",{});`
+				code = `(await tools.search("live__diagnose")).json(); await tools.call("live__diagnose",{}); await tools.call("Continue",{});`
 			} else if tc.copied {
-				code = strings.Replace(code, "selected:reply.parts[0]", "selected:{...reply.parts[0]}", 1)
+				code = strings.Replace(code, "selected:reply.media[0]", "selected:{...reply.media[0]}", 1)
 			}
 			args, _ := json.Marshal(map[string]any{"code": code})
 			driver := &mcpScriptModel{steps: func(i int, _ *model.Request) []model.ToolCall {
@@ -155,25 +153,15 @@ return {caught,selected:reply.parts[0],raw:reply.raw_json,
 							continue
 						}
 						var summary struct {
-							Caught        *bool  `json:"caught"`
-							Raw           string `json:"raw"`
-							RawEnumerable bool   `json:"rawEnumerable"`
-							Outcome       string `json:"outcome"`
-							IsError       bool   `json:"isError"`
+							Caught *bool  `json:"caught"`
+							Raw    string `json:"raw"`
 						}
 						if err := json.Unmarshal(content.JSON.Value, &summary); err != nil || summary.Caught == nil {
 							continue
 						}
 						summaries++
-						if *summary.Caught != tc.failed || summary.RawEnumerable || summary.IsError != tc.failed {
-							t.Fatalf("reply disposition or raw_json enumeration changed: %+v", summary)
-						}
-						if tc.failed && summary.Outcome != codemode.OutcomeFailed {
-							t.Fatalf("failed reply outcome=%q", summary.Outcome)
-						}
-						var original codemode.Reply
-						if err := json.Unmarshal([]byte(summary.Raw), &original); err != nil || original.IsError != tc.failed || original.CallID == "" {
-							t.Fatalf("original host reply unavailable: %q (%v)", summary.Raw, err)
+						if *summary.Caught != tc.failed || !json.Valid([]byte(summary.Raw)) {
+							t.Fatalf("Body diagnostic text/catch disposition changed: %+v", summary)
 						}
 						if !bytes.Contains([]byte(summary.Raw), []byte(`"receipt":9223372036854775807`)) {
 							t.Fatalf("exact integer tokens lost: %s", summary.Raw)

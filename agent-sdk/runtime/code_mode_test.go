@@ -90,6 +90,7 @@ func runCodeMode(t *testing.T, store session.Service, active session.Session, sp
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = rt.ReleaseCodeModeEnvironments() })
 	var mu sync.Mutex
 	var live []*session.Event
 	observer := agent.SourceEventObserverFunc(func(_ context.Context, event agent.SourceEvent) error {

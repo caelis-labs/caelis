@@ -3166,7 +3166,10 @@ func TestRuntimePolicyDefaultCommandEscalationWaitsApprovalThenExecutes(t *testi
 		t.Fatalf("shell.NewRunCommand() error = %v", err)
 	}
 	target := filepath.Join(activeSession.CWD, "approved.txt")
-	testModel := &approveEscalatedCommandRuntimeModel{command: shellWriteFileForTest(target, "approved\n")}
+	// Keep approval pending until the model observes the yielded Task. Run
+	// completion alone must not stand in for this command's completion.
+	approve := make(chan struct{})
+	testModel := &approveEscalatedCommandRuntimeModel{t: t, command: shellWriteFileForTest(target, "approved\n"), onPending: func() { close(approve) }}
 	requester := approvalRequesterFunc(func(ctx context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
 		state, err := runtime.RunState(ctx, activeSession.SessionRef)
 		if err != nil {
@@ -3181,6 +3184,16 @@ func TestRuntimePolicyDefaultCommandEscalationWaitsApprovalThenExecutes(t *testi
 		got, ok := req.Metadata[policy.MetadataSandboxPolicy].(sandbox.PolicySnapshot)
 		if !ok || !reflect.DeepEqual(got, sandboxPolicy) {
 			t.Fatalf("approval sandbox policy = %#v, want %#v", got, sandboxPolicy)
+		}
+		budget, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		if err := req.OnAdmission(budget); err != nil {
+			return agent.ApprovalResponse{}, err
+		}
+		select {
+		case <-approve:
+		case <-budget.Done():
+			return agent.ApprovalResponse{}, budget.Err()
 		}
 		return agent.ApprovalResponse{
 			Outcome:  "selected",

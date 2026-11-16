@@ -62,9 +62,10 @@ func JSONResult(name string, payload map[string]any, metaExtra ...map[string]any
 		}
 	}
 	return tool.Result{
-		Name:     name,
-		Content:  []model.Part{model.NewJSONPart(raw)},
-		Metadata: metadata,
+		Name:              name,
+		Content:           []model.Part{model.NewJSONPart(raw)},
+		StructuredContent: &tool.StructuredContent{Value: raw, ContentIndex: 0},
+		Metadata:          metadata,
 	}, nil
 }
 

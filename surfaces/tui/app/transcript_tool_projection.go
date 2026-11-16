@@ -42,6 +42,12 @@ func projectTranscriptToolCall(input transcript.ToolProjectionInput) TranscriptE
 	if semanticName == surfaceToolTask {
 		toolArgs = taskDisplayArgsWithHandle(toolArgs, toolTaskHandle)
 	}
+	if semanticName == "js_exec" {
+		input.ToolTitle, _ = displayInput["file"].(string)
+		if source := transcript.MetaString(input.Meta, "code_mode_source", "code"); source != "" {
+			toolFullArgs = source
+		}
+	}
 	return TranscriptEvent{
 		Kind:                 TranscriptEventTool,
 		Scope:                input.Scope,
@@ -170,6 +176,9 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 		display.MapString(rawInput, "task_id"),
 		display.ToolTaskHandle(rawInput, taskOutput, input.Meta),
 	)
+	if semanticName == "js_exec" && display.MetaString(input.Meta, "caelis", "runtime", "task", "kind") == "code_mode" {
+		toolTaskHandle = display.MetaString(input.Meta, "caelis", "runtime", "task", "handle")
+	}
 	toolTaskAction := firstNonEmpty(
 		display.MapString(rawOutput, "action"),
 		display.MapString(rawInput, "action"),
@@ -222,6 +231,12 @@ func projectTranscriptToolResult(input transcript.ToolProjectionInput, defaultSu
 	if input.GatewayProjection && isExecuteToolKind(input.ToolKind) && len(input.Content) == 0 && !toolOutputHasTerminalData {
 		toolOutput = ""
 		toolOutputSynthetic = false
+	}
+	if semanticName == "js_exec" {
+		input.ToolTitle, _ = displayInput["file"].(string)
+		if source := transcript.MetaString(input.Meta, "code_mode_source", "code"); source != "" {
+			toolFullArgs = source
+		}
 	}
 	return TranscriptEvent{
 		Kind:                     TranscriptEventTool,

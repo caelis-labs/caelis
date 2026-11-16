@@ -37,8 +37,9 @@ func New() tool.Tool { return Tool{} }
 
 func (Tool) Definition() tool.Definition {
 	return tool.Definition{
-		Name:        ToolName,
-		Description: "Maintain a short multi-step execution checklist so you and the user can track remaining goals. Skip one-step work and pure investigation/write-ups. When updating: keep prior step texts, advance status, and insert or append steps as needed; do not overwrite or delete history. At most one in_progress entry.",
+		Name:         ToolName,
+		Description:  "Maintain a short multi-step execution checklist so you and the user can track remaining goals. Skip one-step work and pure investigation/write-ups. When updating: keep prior step texts, advance status, and insert or append steps as needed; do not overwrite or delete history. At most one in_progress entry.",
+		OutputSchema: map[string]any{"type": "object"},
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -96,10 +97,11 @@ func (Tool) Call(_ context.Context, call tool.Call) (tool.Result, error) {
 	}
 	raw, _ := json.Marshal(payload)
 	return tool.Result{
-		ID:       strings.TrimSpace(call.ID),
-		Name:     ToolName,
-		Content:  []model.Part{model.NewJSONPart(raw)},
-		Metadata: meta,
+		ID:                strings.TrimSpace(call.ID),
+		Name:              ToolName,
+		Content:           []model.Part{model.NewJSONPart(raw)},
+		StructuredContent: &tool.StructuredContent{Value: raw, ContentIndex: 0},
+		Metadata:          meta,
 	}, nil
 }
 

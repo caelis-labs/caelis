@@ -102,7 +102,7 @@ func TestNamedCallsShareValidationErrorsMediaAndBudgets(t *testing.T) {
 		}
 		return codemode.Reply{Parts: []codemode.Part{{Kind: "media", Handle: "original-media", MimeType: "image/png"}}}, nil
 	}
-	code := `for(const arg of [null,[],{bad:undefined}]){try{await Read(arg);throw Error('accepted invalid args');}catch(e){if(e.message==='accepted invalid args')throw e;}}let failure;try{await Read({fail:true});}catch(e){if(!e.message.includes('fixture refusal'))throw e;failure=tools.unpack(e.reply).media[0];}const r=await Read({});return {selected:tools.unpack(r).media[0],failure};`
+	code := `for(const arg of [null,[],{bad:undefined}]){try{await Read(arg);throw Error('accepted invalid args');}catch(e){if(e.message==='accepted invalid args')throw e;}}let failure;try{await Read({fail:true});}catch(e){if(!e.message.includes('fixture refusal'))throw e;failure=e.result.media[0];}const r=await Read({});return {selected:r.media[0],failure};`
 	out, err := (&Executor{}).Execute(t.Context(), fixed(code), codemode.Limits{}, h)
 	if err != nil || calls != 2 || len(out.Parts) != 2 || out.Parts[0].Handle != "original-media" || out.Parts[1].Handle != "failed-media" {
 		t.Fatalf("out=%+v calls=%d err=%v", out, calls, err)

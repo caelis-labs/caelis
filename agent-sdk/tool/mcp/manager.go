@@ -305,6 +305,13 @@ func (mgr *Manager) rebuildToolsLocked() {
 					tool.MetadataReplayAliases:        legacyNames,
 				},
 			}
+			if info.OutputSchema != nil {
+				def.OutputSchema, err = normalizeMCPInputSchema(info.OutputSchema)
+				if err != nil {
+					mgr.addWarning(key, fmt.Sprintf("tool %s quarantined: output schema: %v", toolLabel, err))
+					continue
+				}
+			}
 			if spec.SourceTrusted || slices.Contains(spec.SourceTrustedTools, info.Name) {
 				def.Metadata[tool.MetadataMCPSourceTrusted] = true
 			}

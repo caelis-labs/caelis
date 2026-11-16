@@ -102,6 +102,7 @@ func TestJSExecInitialPersistenceFailureDoesNotBindOutput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = rt.ReleaseCodeModeEnvironments() })
 	run, err := rt.Run(t.Context(), agent.RunRequest{SessionRef: active.SessionRef, Input: "script submission persistence failure", AgentSpec: agent.AgentSpec{Model: driver, Tools: []tool.Tool{declaration}}})
 	if err != nil {
 		t.Fatal(err)
@@ -171,6 +172,7 @@ func TestJSExecTerminalCommitFailureReachesProducerAndObservers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = rt.ReleaseCodeModeEnvironments() })
 	run, err := rt.Run(t.Context(), agent.RunRequest{SessionRef: active.SessionRef, Input: "commit failure", AgentSpec: agent.AgentSpec{Model: driver, Tools: []tool.Tool{effect, &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}}}}})
 	if err != nil {
 		t.Fatal(err)

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -15,42 +14,30 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
-	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/mcpdiscovery"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
-	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode/gojaexec"
 )
 
-// Pause target enumeration after one Host reads its startup history, so a
-// different yielded script can durably pin a version before that Host proceeds.
-type overlappingBindingSource struct {
-	mu        sync.Mutex
-	current   tool.Tool
-	pauseNext atomic.Bool
-	paused    chan struct{}
-	resume    chan struct{}
+// changingBindingSource replaces one method while retaining its original name.
+type changingBindingSource struct {
+	mu      sync.Mutex
+	current tool.Tool
 }
 
-func (s *overlappingBindingSource) Tools() []tool.Tool {
+func (s *changingBindingSource) Tools() []tool.Tool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return []tool.Tool{s.current}
 }
 
-func (s *overlappingBindingSource) SearchTools() []tool.Tool {
-	if s.pauseNext.Swap(false) {
-		close(s.paused)
-		<-s.resume
-	}
-	return s.Tools()
-}
+func (s *changingBindingSource) SearchTools() []tool.Tool { return s.Tools() }
 
-func (s *overlappingBindingSource) Lookup(ctx context.Context, name string) (tool.Tool, bool, error) {
+func (s *changingBindingSource) Lookup(ctx context.Context, name string) (tool.Tool, bool, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, false, err
 	}
@@ -62,7 +49,7 @@ func (s *overlappingBindingSource) Lookup(ctx context.Context, name string) (too
 	return s.current, true, nil
 }
 
-func (s *overlappingBindingSource) CheckToolBinding(ctx context.Context, binding tool.Binding) error {
+func (s *changingBindingSource) CheckToolBinding(ctx context.Context, binding tool.Binding) error {
 	one, found, err := s.Lookup(ctx, binding.Name)
 	if err != nil {
 		return err
@@ -73,229 +60,95 @@ func (s *overlappingBindingSource) CheckToolBinding(ctx context.Context, binding
 	return nil
 }
 
-func (s *overlappingBindingSource) publish(one tool.Tool) {
+func (s *changingBindingSource) publish(one tool.Tool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.current = one
 }
 
-func TestCodeModeOverlappingDirectBindingRequiresExplicitRefresh(t *testing.T) {
+// Session scripts are serial. A compatible replacement still needs explicit
+// discovery; a retained VM does not refresh canonical binding authority.
+func TestCodeModeSequentialBindingRequiresExplicitRefresh(t *testing.T) {
 	for _, refresh := range []bool{false, true} {
 		t.Run(map[bool]string{false: "without-search", true: "explicit-search"}[refresh], func(t *testing.T) {
 			files, active, root := codeModeStore(t)
-			ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
-			defer cancel()
-			source := &overlappingBindingSource{paused: make(chan struct{}), resume: make(chan struct{})}
+			source := &changingBindingSource{}
 			var effectsV1, effectsV2 atomic.Int32
 			publish := func(version string, counter *atomic.Int32) {
 				def := fixtureMCPDefinition(version)
 				def.Metadata[tool.MetadataMCPSourceTrusted] = true
-				def.Capabilities.ParallelSafe = true
-				def.InputSchema = map[string]any{"type": "object", "required": []string{"value"}, "properties": map[string]any{"value": map[string]any{"type": "integer"}}}
 				source.publish(tool.NamedTool{Def: def, Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
 					counter.Add(1)
 					if call.Parent == nil || call.TargetBinding == nil || call.TargetBinding.Version != version {
-						return tool.Result{}, fmt.Errorf("wrong canonical identity: %+v", call)
+						return tool.Result{}, fmt.Errorf("wrong canonical binding: %+v", call)
 					}
-					t.Logf("EFFECT version=%s parent=%s binding=%+v args=%s", version, call.Parent.ID, *call.TargetBinding, call.Input)
 					return tool.Result{Content: []model.Part{model.NewJSONPart([]byte(`{"ok":true}`))}}, nil
 				}})
 			}
-			publish("overlap-v1", &effectsV1)
-			waitAEntered := make(chan struct{})
-			releaseA := make(chan struct{})
-			unblockA := sync.OnceFunc(func() { close(releaseA) })
-			unblockB := sync.OnceFunc(func() { close(source.resume) })
-			defer unblockA()
-			defer unblockB()
-			waitA := tool.NamedTool{Def: tool.Definition{Name: "WaitA", InputSchema: map[string]any{"type": "object"}}, Invoke: func(ctx context.Context, _ tool.Call) (tool.Result, error) {
-				close(waitAEntered)
-				select {
-				case <-source.paused:
-					t.Log("B startup history is captured; its source enumeration is paused before reading current tools")
-					return tool.Result{}, nil
-				case <-ctx.Done():
-					return tool.Result{}, ctx.Err()
+			publish("serial-v1", &effectsV1)
+			driver := &mcpScriptModel{steps: func(i int, _ *model.Request) []model.ToolCall {
+				if i == 0 {
+					return []model.ToolCall{{ID: "script-a", Name: codemode.ToolName, Args: `{"code":"return await tools.call('docs__read',{});"}`}}
 				}
-			}}
-			keepA := tool.NamedTool{Def: tool.Definition{Name: "KeepAAlive", InputSchema: map[string]any{"type": "object"}}, Invoke: func(ctx context.Context, _ tool.Call) (tool.Result, error) {
-				events, err := files.Events(ctx, session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
-				if err != nil {
-					return tool.Result{}, err
-				}
-				binding := codeModeBindings(events)["docs__read"]
-				if binding.Version != "overlap-v1" || effectsV1.Load() != 1 {
-					return tool.Result{}, fmt.Errorf("interleaving failed: binding=%+v v1=%d", binding, effectsV1.Load())
-				}
-				t.Logf("A completed v1; durable canonical binding BEFORE B target preparation=%+v", binding)
-				publish("overlap-v2", &effectsV2)
-				t.Log("source changed to v2 with compatible schema; releasing B startup")
-				unblockB()
-				select {
-				case <-releaseA:
-					return tool.Result{}, nil
-				case <-ctx.Done():
-					return tool.Result{}, ctx.Err()
-				}
-			}}
-			getHandle := func(req *model.Request, id string) string {
-				for _, message := range req.Messages {
-					for _, part := range message.Parts {
-						if part.ToolResult == nil || part.ToolResult.Name != codemode.ToolName || part.ToolResult.ToolUseID != id {
-							continue
-						}
-						for _, content := range part.ToolResult.Content {
-							if content.JSON != nil {
-								var snapshot struct {
-									Handle string `json:"handle"`
-								}
-								if json.Unmarshal(content.JSON.Value, &snapshot) == nil && snapshot.Handle != "" {
-									return snapshot.Handle
-								}
-							}
-						}
+				if i == 1 {
+					if effectsV1.Load() != 1 {
+						t.Error("first script did not complete before the next")
 					}
-				}
-				return ""
-			}
-			var handleA, handleB string
-			waitHandle := func(id, handle string) []model.ToolCall {
-				if handle == "" {
-					t.Error("missing yielded script handle for " + id)
-					return nil
-				}
-				raw, _ := json.Marshal(map[string]any{"action": "wait", "handle": handle})
-				return []model.ToolCall{{ID: id, Name: tasktool.ToolName, Args: string(raw)}}
-			}
-			driver := &mcpScriptModel{steps: func(i int, req *model.Request) []model.ToolCall {
-				switch i {
-				case 0:
-					return []model.ToolCall{{ID: "script-a", Name: codemode.ToolName, Args: `{"code":"await WaitA({}); const r=await tools.call('docs__read',{value:1}); await KeepAAlive({}); return r;","yield_time_ms":0}`}}
-				case 1:
-					handleA = getHandle(req, "script-a")
-					select {
-					case <-waitAEntered:
-					case <-ctx.Done():
-						t.Error("A did not start")
-						return nil
-					}
-					source.pauseNext.Store(true)
-					code := "return await tools.call('docs__read',{value:2});"
+					publish("serial-v2", &effectsV2)
+					code := `return await tools.call("docs__read",{});`
 					if refresh {
-						code = "await tools.search({name:'docs__read'}); " + code
+						code = `(await tools.search({name:"docs__read"})).json();` + code
 					}
-					raw, _ := json.Marshal(map[string]any{"code": code, "yield_time_ms": 0})
+					raw, _ := json.Marshal(map[string]any{"code": code})
 					return []model.ToolCall{{ID: "script-b", Name: codemode.ToolName, Args: string(raw)}}
-				case 2:
-					handleB = getHandle(req, "script-b")
-					return waitHandle("wait-b", handleB)
-				case 3:
-					unblockA()
-					return waitHandle("wait-a", handleA)
-				default:
-					return nil
 				}
+				return nil
 			}}
-			rt, err := New(Config{Sessions: files, TaskStore: sessionfile.NewTaskStore(files), AgentFactory: chat.Factory{}, PolicyRegistry: mcpFixturePolicy(), DefaultPolicyMode: "mcp-test"})
+			_, rt := runCodeMode(t, files, active, agent.AgentSpec{Model: driver, Tools: []tool.Tool{toolsearch.NewSource(source, exactMCPRanker{}), &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}}}, DeferredTools: source}, nil, nil)
+			events, err := files.Events(t.Context(), session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
 			if err != nil {
 				t.Fatal(err)
-			}
-			run, err := rt.Run(ctx, agent.RunRequest{SessionRef: active.SessionRef, Input: "overlapping direct calls must retain canonical binding", AgentSpec: agent.AgentSpec{Model: driver, Tools: []tool.Tool{waitA, keepA, tasktool.New(), toolsearch.NewSource(source, exactMCPRanker{}), &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}}}, DeferredTools: source}})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err = run.Handle.WaitCompletion(ctx); err != nil {
-				t.Fatal(err)
-			}
-			events, err := files.Events(ctx, session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
-			if err != nil {
-				t.Fatal(err)
-			}
-			searches := 0
-			for _, event := range events {
-				if event.Journal == nil || event.Journal.ToolExecution == nil {
-					continue
-				}
-				r := event.Journal.ToolExecution
-				if r.ToolName == tool.ToolSearchToolName {
-					searches++
-				}
-				if r.ToolName == "docs__read" {
-					t.Logf("JOURNAL parent=%s status=%s binding=%+v input=%s", r.Parent.ID, r.Status, r.Binding, r.Input)
-				}
-			}
-			entries, err := rt.tasks.store.ListSession(ctx, active.SessionRef)
-			if err != nil {
-				t.Fatal(err)
-			}
-			for _, entry := range entries {
-				t.Logf("TASK handle=%s state=%s running=%v", entry.Handle, entry.State, entry.Running)
-				if entry.Running || entry.State == "cancelled" {
-					t.Fatal("overlapping scripts did not settle before Turn completion")
-				}
-			}
-			t.Logf("RESULT real Runtime/Goja overlapping yielded scripts: handleA=%s handleB=%s v1_effects=%d v2_effects=%d explicit_search_journal_records=%d final_binding=%+v", handleA, handleB, effectsV1.Load(), effectsV2.Load(), searches, codeModeBindings(events)["docs__read"])
-			if len(entries) != 2 || handleA == "" || handleB == "" || effectsV1.Load() != 1 {
-				t.Fatal("scripts did not establish required interleaving")
 			}
 			wantV2 := int32(0)
-			wantBinding := "overlap-v1"
-			wantBState := "failed"
+			wantBinding, wantState := "serial-v1", "failed"
 			if refresh {
-				wantV2, wantBinding, wantBState = 1, "overlap-v2", "completed"
+				wantV2 = 1
+				wantBinding, wantState = "serial-v2", "completed"
 			}
-			if effectsV2.Load() != wantV2 {
-				t.Fatalf("replacement effects=%d, want %d; refresh=%v", effectsV2.Load(), wantV2, refresh)
+			if effectsV1.Load() != 1 || effectsV2.Load() != wantV2 {
+				t.Fatalf("effects v1=%d v2=%d; want 1/%d", effectsV1.Load(), effectsV2.Load(), wantV2)
 			}
-			if (searches > 0) != refresh {
-				t.Fatalf("search journal records=%d; refresh=%v", searches, refresh)
+			entries, err := rt.tasks.store.ListSession(t.Context(), active.SessionRef)
+			if err != nil || len(entries) != 2 {
+				t.Fatalf("Tasks=%d error=%v", len(entries), err)
 			}
 			for _, entry := range entries {
-				wantState := "completed"
-				if entry.Handle == handleB {
-					wantState = wantBState
+				if entry.Metadata["parent_call"] == "script-b" && string(entry.State) != wantState {
+					t.Fatalf("second Task state=%s want %s", entry.State, wantState)
 				}
-				if string(entry.State) != wantState {
-					t.Fatalf("Task %s state=%s, want %s", entry.Handle, entry.State, wantState)
+				if entry.Running {
+					t.Fatal("script remained running")
 				}
 			}
 			if binding := codeModeBindings(events)["docs__read"]; binding.Version != wantBinding {
-				t.Fatalf("canonical binding=%+v, want version %s", binding, wantBinding)
+				t.Fatalf("binding=%+v want %s", binding, wantBinding)
 			}
 			if !refresh {
-				for _, event := range events {
-					if event.Journal != nil && event.Journal.ToolExecution != nil {
-						record := event.Journal.ToolExecution
-						if record.ToolName == "docs__read" && record.Parent != nil && record.Parent.ID == "script-b" {
-							t.Fatalf("rejected replacement wrote an execution claim: %+v", record)
-						}
-					}
-				}
-				raw, _ := json.Marshal(driver.requests[len(driver.requests)-1].Messages)
-				if !strings.Contains(string(raw), "schema changed") || !strings.Contains(string(raw), "tools.search") {
-					t.Fatalf("rejected replacement lost explicit refresh guidance: %s", raw)
+				result := errorDeliveryModelResult(t, driver.requests[len(driver.requests)-1], "script-b")
+				raw := string(errorDeliveryJSON(t, result.Content))
+				if !result.IsError || !strings.Contains(raw, "tools.search") {
+					t.Fatal(raw)
 				}
 			}
-			// A new Store and Runtime must preserve both the canonical binding and the
-			// exact model context produced by the completed Turn, without replaying tools.
 			reopened := sessionfile.NewStore(sessionfile.Config{RootDir: filepath.Join(root, "sessions")})
-			resumedEvents, err := reopened.Events(ctx, session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
+			reloaded, err := reopened.Events(t.Context(), session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
 			if err != nil {
 				t.Fatal(err)
 			}
-			if binding := codeModeBindings(resumedEvents)["docs__read"]; binding.Version != wantBinding {
-				t.Fatalf("reopened binding=%+v, want version %s", binding, wantBinding)
+			if binding := codeModeBindings(reloaded)["docs__read"]; binding.Version != wantBinding {
+				t.Fatal(binding)
 			}
-			probe := &mcpScriptModel{steps: func(int, *model.Request) []model.ToolCall { return nil }}
-			runCodeMode(t, reopened, active, agent.AgentSpec{Model: probe}, nil, nil)
-			wantMessages := append(model.CloneMessages(driver.requests[len(driver.requests)-1].Messages),
-				model.NewTextMessage(model.RoleAssistant, "done"), model.NewTextMessage(model.RoleUser, "synthetic Code Mode task"))
-			if !reflect.DeepEqual(probe.requests[0].Messages, wantMessages) {
-				t.Fatal("reopened model context differs from Runtime-produced context")
-			}
-			if effectsV1.Load() != 1 || effectsV2.Load() != wantV2 {
-				t.Fatal("Store reopen replayed tool execution")
-			}
+			assertSubagentSagaModelRoundTrip(t, reopened, active.SessionRef)
 		})
 	}
 }

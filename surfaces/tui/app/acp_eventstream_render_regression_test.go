@@ -510,7 +510,7 @@ func TestScriptActionShowsActualNestedTools(t *testing.T) {
 			t.Fatal(trace)
 		}
 	}
-	for _, hidden := range []string{"Ran script", "js_exec", "fixture"} {
+	for _, hidden := range []string{"Ran script", "js_exec"} {
 		if strings.Contains(trace, hidden) {
 			t.Fatal(trace)
 		}

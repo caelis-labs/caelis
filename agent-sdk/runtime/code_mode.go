@@ -25,6 +25,8 @@ type nestedToolEventSinkKey struct{}
 var errCodeModeComplete = errors.New("code mode host admission is closed by TurnComplete")
 
 type runtimeCodeModeTool struct {
+	runtime        *Runtime
+	execution      *codeModeExecution
 	declaration    *codemode.Tool
 	tasks          *taskRuntime
 	active         session.Session
@@ -46,13 +48,37 @@ func (t runtimeCodeModeTool) Call(ctx context.Context, call tool.Call) (tool.Res
 	if t.declaration.Executor == nil {
 		return tool.Result{}, fmt.Errorf("code mode executor is unavailable")
 	}
+	var input struct {
+		Reset *bool           `json:"reset"`
+		Code  json.RawMessage `json:"code"`
+		File  json.RawMessage `json:"file"`
+	}
+	if err := json.Unmarshal(call.Input, &input); err != nil {
+		return tool.Result{}, err
+	}
+	if input.Reset != nil {
+		if !*input.Reset || len(input.Code) != 0 || len(input.File) != 0 {
+			return tool.Result{}, tool.NewError(tool.ErrorCodeInvalidInput, "reset:true is mutually exclusive with code and file")
+		}
+		if t.runtime == nil {
+			return tool.Result{}, fmt.Errorf("js_exec reset requires Runtime Session binding")
+		}
+		return t.runtime.resetCodeMode(t.ref, t.declaration.Executor), nil
+	}
 	source, err := t.declaration.ReadSource(call, limits.SourceBytes)
 	if err != nil {
-		return tool.Result{}, err
+		return tool.Result{}, tool.WrapError(tool.ErrorCodeInvalidInput, err, "js_exec source: "+err.Error())
+	}
+	if t.runtime != nil {
+		ctx, t.execution, err = t.runtime.acquireCodeMode(ctx, t.ref, t.declaration.Executor)
+		if err != nil {
+			return tool.Result{}, err
+		}
 	}
 	if t.tasks != nil && t.declaration.Name == codemode.ToolName {
 		return t.tasks.startCodeMode(ctx, t, call, source, limits)
 	}
+	defer t.execution.release()
 	return t.execute(ctx, call, source, limits)
 }
 
@@ -64,7 +90,12 @@ func (t runtimeCodeModeTool) execute(ctx context.Context, call tool.Call, source
 	workCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	host := &codeModeHost{ctx: workCtx, cancel: cancel, owner: t, parent: call, limits: limits,
-		targets: map[string]codeModeTarget{}, handles: map[string]model.Part{}, drained: make(chan struct{})}
+		targets: map[string]codeModeTarget{}, codeModeResults: newCodeModeResults(), drained: make(chan struct{})}
+	executor := t.declaration.Executor
+	if t.execution != nil {
+		host.codeModeResults = t.execution.environment.results
+		executor = t.execution.environment.engine
+	}
 	if err := host.prepareTargets(ctx, events); err != nil {
 		return tool.Result{}, err
 	}
@@ -74,7 +105,7 @@ func (t runtimeCodeModeTool) execute(ctx context.Context, call tool.Call, source
 	}
 	done := make(chan execution, 1)
 	go func() {
-		output, err := t.declaration.Executor.Execute(workCtx, source, limits, host)
+		output, err := executor.Execute(workCtx, source, limits, host)
 		done <- execution{output: output, err: err}
 	}()
 	var completed execution
@@ -83,6 +114,9 @@ func (t runtimeCodeModeTool) execute(ctx context.Context, call tool.Call, source
 	case <-ctx.Done():
 		host.stop()
 		completed = <-done
+	}
+	if t.execution != nil && (ctx.Err() != nil || (completed.err != nil && errorcode.CodeOf(completed.err) != codemode.ErrorCodeJavaScript)) {
+		t.execution.retire = true
 	}
 	// An executor cannot retain Host and dispatch after returning.
 	host.stop()
@@ -103,7 +137,7 @@ func (t runtimeCodeModeTool) execute(ctx context.Context, call tool.Call, source
 		completed.err = errors.Join(completed.err, fmt.Errorf("code mode output must be bounded JSON"))
 	}
 	result := tool.Result{ID: call.ID, Name: call.Name, IsError: host.isError && !host.turnComplete, TurnComplete: host.turnComplete,
-		Metadata: map[string]any{"code_mode_source": map[string]any{"path": source.Path, "sha256": source.SHA256}}}
+		Metadata: map[string]any{"code_mode_source": map[string]any{"path": source.Path, "sha256": source.SHA256, "code": source.Code}}}
 	if completed.err == nil {
 		result.Content, completed.err = host.returnedParts(completed.output)
 	}
@@ -169,11 +203,17 @@ type codeModeHost struct {
 	drainClosed    bool
 	pending        int
 	calls          int
-	retained       int
 	isError        bool
 	turnComplete   bool
 	fatal          error
-	handles        map[string]model.Part
+	*codeModeResults
+}
+
+func (h *codeModeHost) ExecutionState() codemode.ExecutionState {
+	if h.owner.execution != nil {
+		return h.owner.execution.state
+	}
+	return codemode.ExecutionState{}
 }
 
 func (h *codeModeHost) stop() {
@@ -315,9 +355,7 @@ func (h *codeModeHost) call(requestCtx context.Context, name string, arguments j
 	if err != nil {
 		return codemode.Reply{}, err
 	}
-	if !codeModeCanCall(target.definition) {
-		return codemode.Reply{}, codemode.NewPublicPermissionError("native shell/process execution is prohibited from JavaScript")
-	}
+
 	h.mu.Lock()
 	if h.closed || h.ctx.Err() != nil {
 		h.mu.Unlock()
@@ -387,7 +425,7 @@ func (h *codeModeHost) call(requestCtx context.Context, name string, arguments j
 		// A published failed receipt settles an ordinary tool failure. The
 		// producer remains admitted; the failure flag/receipt is never erased.
 		if h.ctx.Err() == nil && settledCodeModeToolError(result, callErr) {
-			reply, projectErr := h.project(callID, result, outcome)
+			reply, projectErr := h.project(callID, result, outcome, target.definition)
 			if projectErr == nil {
 				reply.IsError = true
 				return reply, callErr
@@ -400,7 +438,7 @@ func (h *codeModeHost) call(requestCtx context.Context, name string, arguments j
 		h.cancel()
 		return codemode.Reply{CallID: callID, IsError: true, Outcome: outcome}, callErr
 	}
-	return h.project(callID, result, outcome)
+	return h.project(callID, result, outcome, target.definition)
 }
 
 func codeModeOutcome(result tool.Result, err error) string {

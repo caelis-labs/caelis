@@ -23,6 +23,7 @@ type ToolSearchDiscoveredTool struct {
 	ParallelSafe bool                        `json:"parallel_safe"`
 	Description  string                      `json:"description,omitempty"`
 	InputSchema  map[string]any              `json:"input_schema,omitempty"`
+	OutputSchema map[string]any              `json:"output_schema,omitempty"`
 	Name         string                      `json:"name,omitempty"`
 	Binding      *Binding                    `json:"binding,omitempty"`
 	Function     *ToolSearchFunctionContract `json:"function,omitempty"`
@@ -50,7 +51,7 @@ func NewToolSearchResult(definitions []Definition) ToolSearchResult {
 // NewToolSearchDiscoveredTool converts one deferred definition into the
 // tool_search result contract.
 func NewToolSearchDiscoveredTool(def Definition) ToolSearchDiscoveredTool {
-	entry := ToolSearchDiscoveredTool{ParallelSafe: def.Capabilities.ParallelSafe, Name: def.Name, Description: def.Description, InputSchema: CloneDefinition(def).InputSchema}
+	entry := ToolSearchDiscoveredTool{ParallelSafe: def.Capabilities.ParallelSafe, Name: def.Name, Description: def.Description, InputSchema: CloneDefinition(def).InputSchema, OutputSchema: CloneDefinition(def).OutputSchema}
 	if binding := BindingForDefinition(def); binding.Identity != "" {
 		entry.Binding = &binding
 	}

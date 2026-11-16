@@ -104,12 +104,12 @@ func TestCodeModeSearchContractCallPathsPreserveOriginalNames(t *testing.T) {
 	code := fmt.Sprintf(`
 const expected=%s;
 if(typeof Date.now!=='function')throw Error('Date global overwritten');
-const date=(await tools.search({name:'Date'})).tools[0];
+const date=((await tools.search({name:'Date'})).json()).tools[0];
 if(date.name!=='Date'||'server' in date||'tool' in date||'plugin' in date)throw Error('Date metadata');
 let args={value:1};
 const first=await eval(date.call_path);
-if(tools.unpack(first).json[0].value!==1)throw Error('Date template result');
-const found=await tools.search({server:expected.server,tool:expected.tool,plugin:expected.plugin});
+if(first.json().value!==1)throw Error('Date template result');
+const found=(await tools.search({server:expected.server,tool:expected.tool,plugin:expected.plugin})).json();
 if(found.count!==1)throw Error('exact metadata selector');
 const entry=found.tools[0];
 for(const key of Object.keys(expected))if(entry[key]!==expected[key])throw Error('metadata fidelity '+key);
@@ -117,7 +117,7 @@ if(entry.input_schema.required[0]!=='value')throw Error('incomplete schema');
 if(typeof tools.plugins[expected.plugin][expected.server][expected.tool]!=='function')throw Error('original object names lost');
 args={value:2};
 const second=await eval(entry.call_path);
-if(tools.unpack(second).json[0].value!==2)throw Error('quoted template result');
+if(second.json().value!==2)throw Error('quoted template result');
 if(typeof Date.now!=='function')throw Error('Date global changed');
 return {contract:true};`, metadata)
 	runSearchContract(t, source, []tool.Tool{date}, exactMCPRanker{}, code)
@@ -149,12 +149,12 @@ func TestCodeModeSearchContractNewlyReadyToolUsesSameVMCallPath(t *testing.T) {
 	runSearchContract(t, source, []tool.Tool{publish}, exactMCPRanker{}, `
 if('late-server' in tools.mcp)throw Error('tool was ready before VM snapshot');
 await PublishReadyTool({});
-const found=await tools.search({server:'late-server',tool:'read'});
+const found=(await tools.search({server:'late-server',tool:'read'})).json();
 if(found.count!==1||found.tools[0].name!=='late__read')throw Error('new tool not discovered');
 if('late-server' in tools.mcp)throw Error('search mutated frozen namespace');
 const args={};
 const reply=await eval(found.tools[0].call_path);
-if(tools.unpack(reply).json[0].ready!==true)throw Error('new tool template failed');
+if(reply.json().ready!==true)throw Error('new tool template failed');
 if('late-server' in tools.mcp)throw Error('call mutated frozen namespace');
 return {contract:true};`)
 	if publications != 1 || effects != 1 {
@@ -181,16 +181,16 @@ func TestCodeModeSearchContractSelectorsKeepExactAndCapabilityModes(t *testing.T
 	})
 	events := runSearchContract(t, source, nil, ranker, `
 let caught=false;
-try {await tools.search({name:'missing'});}catch(e) {
+try {(await tools.search({name:'missing'})).json();}catch(e) {
   if(e.code!=='not_found'||!e.reply)throw Error('exact miss lost typed failure reply');
   caught=true;
 }
 if(!caught)throw Error('exact miss did not reject');
-const exact=await tools.search({name:'docs__read'});
+const exact=(await tools.search({name:'docs__read'})).json();
 if(exact.count!==1||exact.tools[0].name!=='docs__read')throw Error('exact name selected wrong target');
-const capability=await tools.search({query:'docs__read'});
+const capability=(await tools.search({query:'docs__read'})).json();
 if(capability.count!==1||capability.tools[0].name!=='capability__selected')throw Error('explicit query used exact lookup');
-const legacy=await tools.search('docs__read');
+const legacy=(await tools.search('docs__read')).json();
 if(legacy.count!==1||legacy.tools[0].name!=='docs__read')throw Error('legacy string lost exact-first behavior');
 return {contract:true};`)
 	if !reflect.DeepEqual(ranked, []string{"docs__read"}) {
@@ -252,12 +252,12 @@ func TestCodeModeSearchContractAmbiguityCanBeQualified(t *testing.T) {
 	}
 	runSearchContract(t, source, nil, exactMCPRanker{}, `
 let caught=false;
-try {await tools.search({server:'docs',tool:'read'});}catch(e) {
+try {(await tools.search({server:'docs',tool:'read'})).json();}catch(e) {
   if(e.code!=='too_many_matches'||!e.reply)throw Error('ambiguity lost typed failure');
   caught=true;
 }
 if(!caught)throw Error('ambiguous selector succeeded');
-const found=await tools.search({server:'docs',tool:'read',plugin:'two'});
+const found=(await tools.search({server:'docs',tool:'read',plugin:'two'})).json();
 if(found.count!==1||found.tools[0].name!=='two__read')throw Error('qualified recovery failed');
 return {contract:true};`)
 }

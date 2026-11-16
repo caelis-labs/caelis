@@ -39,8 +39,9 @@ func NewFetch(cfg FetchConfig) (*FetchTool, error) {
 
 func (t *FetchTool) Definition() tool.Definition {
 	return tool.Definition{
-		Name:        FetchToolName,
-		Description: "Fetch and read one specific http or https URL. Use this after the user provides a URL or after WebSearch returns a result that needs source inspection. This tool does not search, follow arbitrary browsing tasks, or discover related pages. It returns cleaned markdown by default and can return text or raw html when requested.",
+		Name:         FetchToolName,
+		Description:  "Fetch and read one specific http or https URL. Use this after the user provides a URL or after WebSearch returns a result that needs source inspection. This tool does not search, follow arbitrary browsing tasks, or discover related pages. It returns cleaned markdown by default and can return text or raw html when requested.",
+		OutputSchema: map[string]any{"type": "object"},
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

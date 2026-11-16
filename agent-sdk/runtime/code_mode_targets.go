@@ -92,9 +92,7 @@ func (h *codeModeHost) ToolNames(ctx context.Context) ([]codemode.ToolRoute, err
 	routes := make([]codemode.ToolRoute, 0, len(h.targets))
 	for _, target := range h.targets {
 		def := target.definition
-		if !codeModeCanCall(def) {
-			continue
-		}
+
 		routes = append(routes, codeModeToolRoute(def))
 	}
 	sort.Slice(routes, func(i, j int) bool { return routes[i].Name < routes[j].Name })

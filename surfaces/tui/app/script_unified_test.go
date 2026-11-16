@@ -37,7 +37,7 @@ func TestUnifiedJSTrajectoryNeverRendersDetails(t *testing.T) {
 				if !strings.HasPrefix(text, "• Ran script") || !strings.Contains(text, "Read script1Read.txt") {
 					t.Fatal(text)
 				}
-				for _, hidden := range []string{"Called tools", "Script error", "failed", "Result", "completed", "SOURCE_JS_NEVER", "CHILD_ERROR_PRIVATE_DETAIL", "FINAL_RETURN_PRIVATE_DETAIL", "│"} {
+				for _, hidden := range []string{"Called tools", "Script error", "failed", "Result", "completed", "CHILD_ERROR_PRIVATE_DETAIL", "FINAL_RETURN_PRIVATE_DETAIL", "│"} {
 					if strings.Contains(text, hidden) {
 						t.Fatalf("%s: %s", hidden, text)
 					}
@@ -82,7 +82,7 @@ func TestUnifiedJSIndependentGroupsHistoryAndNarrow(t *testing.T) {
 					if strings.Count(text, "• Ran script") != 2 || !strings.Contains(text, "script1Read") || !strings.Contains(text, "script2Read") || (!historical && !strings.Contains(text, "BETWEEN_SCRIPT_STEPS")) {
 						t.Fatal(text)
 					}
-					if strings.Count(text, "└") != 2 || strings.Contains(text, "FINAL_SUMMARY") || strings.Contains(text, "SOURCE_JS_NEVER") {
+					if strings.Count(text, "└") != 2 || strings.Contains(text, "FINAL_SUMMARY") {
 						t.Fatal(text)
 					}
 				}
@@ -106,7 +106,7 @@ func TestUnifiedJSZeroChildrenAndActualTargetReview(t *testing.T) {
 		if done {
 			want = "• Ran script"
 		}
-		if !strings.HasPrefix(text, want) || strings.Contains(text, "OWN_SCRIPT_STACK") {
+		if !strings.HasPrefix(text, want) || (strings.Contains(text, "OWN_SCRIPT_STACK") != done) {
 			t.Fatal(text)
 		}
 	}
@@ -213,7 +213,7 @@ func TestUnifiedJSLongArgumentsLiveReplayDisclosure(t *testing.T) {
 							if !strings.Contains(strings.Join(strings.Fields(full), ""), call.marker) {
 								t.Fatalf("missing original args: %s", full)
 							}
-							if strings.Contains(full, "PRIVATE_RESULT_BODY") || strings.Contains(full, "SOURCE_JS_NEVER") {
+							if strings.Contains(full, "PRIVATE_RESULT_BODY") {
 								t.Fatal(full)
 							}
 							clickScriptToken(t, m, b, ctx, acpToolPanelClickToken(call.id))

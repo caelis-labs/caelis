@@ -37,6 +37,12 @@ type codeModeTask struct {
 func (t runtimeCodeModeTool) RuntimeTaskResultSource(toolbinding.Token) bool { return true }
 
 func (tm *taskRuntime) startCodeMode(ctx context.Context, owner runtimeCodeModeTool, call tool.Call, source codemode.Source, limits codemode.Limits) (tool.Result, error) {
+	started := false
+	defer func() {
+		if !started {
+			owner.execution.release()
+		}
+	}()
 	var args struct {
 		Yield *int `json:"yield_time_ms"`
 	}
@@ -74,7 +80,7 @@ func (tm *taskRuntime) startCodeMode(ctx context.Context, owner runtimeCodeModeT
 		return tool.Result{}, err
 	}
 	now := tm.runtime.now()
-	entry := &taskapi.Entry{TaskID: taskID, Handle: handle, Session: owner.ref, Kind: taskapi.KindCodeMode, Title: codemode.ToolName, State: taskapi.StateRunning, Running: true, SupportsCancel: true, CreatedAt: now, UpdatedAt: now, Spec: map[string]any{"parent_call": call.ID, "parent_tool": call.Name, "source_path": source.Path, "source_sha256": source.SHA256}, Metadata: map[string]any{"parent_call": call.ID, "parent_tool": call.Name, "turn_id": call.Execution.TurnID}}
+	entry := &taskapi.Entry{TaskID: taskID, Handle: handle, Session: owner.ref, Kind: taskapi.KindCodeMode, Title: codemode.ToolName, State: taskapi.StateRunning, Running: true, SupportsCancel: true, CreatedAt: now, UpdatedAt: now, Spec: map[string]any{"parent_call": call.ID, "parent_tool": call.Name, "source_path": source.Path, "source_sha256": source.SHA256}, Metadata: map[string]any{"parent_call": call.ID, "parent_tool": call.Name, "turn_id": call.Execution.TurnID, "code_mode_source": map[string]any{"path": source.Path, "sha256": source.SHA256, "code": source.Code}}}
 	// This context is registered under the original Run producer owner. It must
 	// outlive the foreground observation, not the original Run's authority.
 	workCtx, cancel := context.WithCancel(ctx)
@@ -97,9 +103,10 @@ func (tm *taskRuntime) startCodeMode(ctx context.Context, owner runtimeCodeModeT
 	if transfer, ok := ctx.Value(codeModeProducerLifetimeKey{}).(func(<-chan struct{}, func() error)); ok {
 		transfer(task.done, func() error { task.mu.Lock(); defer task.mu.Unlock(); return task.persistErr })
 	}
+	started = true
 	go func() {
 		result, executeErr := owner.execute(workCtx, call, source, limits)
-		tm.finishCodeModeTask(workCtx, task, result, executeErr)
+		tm.finishCodeModeTask(workCtx, task, result, executeErr, owner.execution)
 	}()
 	timer := time.NewTimer(yield)
 	defer timer.Stop()
@@ -135,7 +142,7 @@ func (tm *taskRuntime) startCodeMode(ctx context.Context, owner runtimeCodeModeT
 
 // The existing Task mutation claim serializes terminal CAS with canonical
 // cursor checkpoints. Observations never hold this claim while waiting.
-func (tm *taskRuntime) finishCodeModeTask(ctx context.Context, task *codeModeTask, result tool.Result, executeErr error) {
+func (tm *taskRuntime) finishCodeModeTask(ctx context.Context, task *codeModeTask, result tool.Result, executeErr error, execution *codeModeExecution) {
 	// Pre-execution failures have no VM settlement observation. Preserve that
 	// failed completion on the same original Task result, without changing its
 	// cumulative error or lifecycle outcome.
@@ -199,6 +206,7 @@ func (tm *taskRuntime) finishCodeModeTask(ctx context.Context, task *codeModeTas
 	}
 	_ = observer.ObserveTaskOutput(context.WithoutCancel(ctx), output.Event{Text: string(raw), State: string(state), Closed: true, ProducerClosed: true})
 	task.cancel()
+	execution.release()
 	close(task.done)
 }
 

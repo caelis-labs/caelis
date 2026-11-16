@@ -26,6 +26,8 @@ const (
 	frameCancel
 	frameBudget
 	frameNames
+	frameClose
+	frameFatal
 )
 
 type frame struct {

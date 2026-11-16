@@ -55,9 +55,9 @@ func (m *codeModeAccountingModel) Generate(ctx context.Context, req *model.Reque
 			n := m.main.Add(1)
 			switch {
 			case n == 1:
-				args := `{"code":"return await tools.search('read documentation');"}`
+				args := `{"code":"return (await tools.search('read documentation')).json();"}`
 				if m.yielded {
-					args = `{"code":"return await tools.search('read documentation');","yield_time_ms":0}`
+					args = `{"code":"return (await tools.search('read documentation')).json();","yield_time_ms":0}`
 				}
 				message = model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{ID: "script", Name: codemode.ToolName, Args: args}}, "")
 			case n == 2 && m.yielded:
@@ -109,6 +109,7 @@ func TestCodeModeAccountingSelectorReceiptsSurviveForeground(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			t.Cleanup(func() { _ = rt.ReleaseCodeModeEnvironments() })
 			run, err := rt.Run(t.Context(), agent.RunRequest{SessionRef: active.SessionRef, Input: "accounting fixture", AgentSpec: spec})
 			if err != nil {
 				t.Fatal(err)
@@ -223,6 +224,7 @@ func TestCodeModeAccountingReceiptWriteFailureAndUncertainAppend(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			t.Cleanup(func() { _ = rt.ReleaseCodeModeEnvironments() })
 			run, err := rt.Run(t.Context(), agent.RunRequest{SessionRef: active.SessionRef, Input: "receipt fault", AgentSpec: agent.AgentSpec{Model: llm, Tools: []tool.Tool{toolsearch.NewSource(source), &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}}}, DeferredTools: source}})
 			if err != nil {
 				t.Fatal(err)

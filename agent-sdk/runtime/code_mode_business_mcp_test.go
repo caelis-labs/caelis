@@ -1,0 +1,247 @@
+package runtime
+
+import (
+	"bytes"
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"image"
+	"image/png"
+	"io"
+	"iter"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"testing"
+
+	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/model/providers"
+	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode/gojaexec"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
+	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
+)
+
+type codeModeBusinessModel struct {
+	model.LLM
+	requests []*model.Request
+}
+
+func (m *codeModeBusinessModel) Capabilities() model.Capabilities {
+	caps, _ := model.CapabilitiesOf(m.LLM)
+	return caps
+}
+
+func (m *codeModeBusinessModel) Generate(ctx context.Context, request *model.Request) iter.Seq2[*model.StreamEvent, error] {
+	m.requests = append(m.requests, model.CloneRequest(request))
+	return m.LLM.Generate(ctx, request)
+}
+
+// MCP, Goja, Runtime and provider HTTP encoding are real; the provider responses
+// are deterministic loopback fixtures and do not use a live model or account.
+func TestCodeModeMCPBusinessContract(t *testing.T) {
+	for _, tc := range []struct {
+		name, code, want string
+		image            bool
+	}{
+		{"direct", `return await live.value({});`, "9223372036854775807", true},
+		{"retained_complete", `return retainedBody;`, "9223372036854775807", true},
+		{"retained_media", `return retainedBody.media[0];`, "image/png", true},
+		{"retained_copy", `return {...retainedBody.media[0]};`, "handle", false},
+		{"retained_delete", `const parsed=retainedBody.json();parsed.content=retainedBody.media;delete parsed.content;return {nested:{...parsed}};`, "business", false},
+		{"dependency", `const r=await live.value({});return {selected:r.json().name};`, "selected", false},
+		{"nested", `return {record:await live.value({})};`, "record", true},
+		{"selected_media", `const r=await live.value({});return {image:r.media[0]};`, "image", true},
+		{"copied_media", `const r=await live.value({});return {...r.media[0]};`, "handle", false},
+		{"fallback", `const r=await live.fallback({});let rejected=false;try{r.json()}catch(e){rejected=true}if(!rejected||!r.text().includes('not-business')||r.media.length!==1)throw Error('Body content contract');return r;`, "not-business", true},
+		{"delete_content", `const response=await live.value({});const r=response.json();r.content=response.media;delete r.content;return r;`, "business", false},
+		{"nested_delete_content", `const response=await live.value({});const r=response.json();r.content=response.media;delete r.content;return {record:r};`, "record", false},
+		{"copy_delete_content", `const response=await live.value({});const r=response.json();r.content=response.media;delete r.content;return {...r};`, "business", false},
+		{"copied_fallback_handle", `const r=await live.fallback({});return {media:r.media.map(p=>({...p}))};`, "media", false},
+		{"nested_copied_fallback_handle", `const r=await live.fallback({});return {record:{media:r.media.map(p=>({...p}))}};`, "record", false},
+		{"copied_fallback_references", `return {...await live.fallback({})};`, "media", true},
+		{"selected_after_delete", `const response=await live.value({});const r=response.json();r.content=response.media;delete r.content;return {record:r,image:response.media[0]};`, "record", true},
+		{"schema", `const s=(await tools.search({server:'live',tool:'value'})).json();if(s.tools[0].output_format!=='body'||!s.tools[0].output_schema.properties.name)throw Error('output contract missing');return await live.value({});`, "9223372036854775807", true},
+		{"invalid_schema", `try{await live.invalid({});throw Error('resolved invalid output');}catch(e){if(!e.result||e.result!==e.reply||typeof e.result.text!=='function'||!e.result.text().includes('outputSchema'))throw Error('invalid diagnostic contract');let rejected=false;try{e.result.json()}catch(parseError){rejected=true}if(!rejected)throw Error('promoted unverified structured content');return {caught:true,diagnostic:e.result.text()};}`, "unverified", false},
+		{"failed_schema", `try{await live.failed({});throw Error('resolved failed output');}catch(e){if(!e.result||!e.result.text().includes('business'))throw Error('failed diagnostic contract');return {caught:true,diagnostic:e.result.text()};}`, "caught", false},
+		{"raw_json_collision", `const r=await live.collision({});if(r.json().raw_json!=='business-raw')throw Error('lost business field');return r;`, "business-raw", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store, active, _ := codeModeStore(t)
+			var bitmap bytes.Buffer
+			if err := png.Encode(&bitmap, image.NewRGBA(image.Rect(0, 0, 2, 2))); err != nil {
+				t.Fatal(err)
+			}
+			var effects atomic.Int32
+			server := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "business", Version: "1"}, nil)
+			for _, name := range []string{"value", "fallback", "invalid", "failed", "collision"} {
+				def := &mcpsdk.Tool{Name: name, InputSchema: map[string]any{"type": "object"}}
+				if name != "fallback" {
+					def.OutputSchema = map[string]any{"type": "object", "required": []string{"name", "n"}, "properties": map[string]any{"name": map[string]any{"type": "string"}, "n": map[string]any{"type": "integer"}}}
+				}
+				server.AddTool(def, func(_ context.Context, _ *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+					effects.Add(1)
+					structured := map[string]any{"name": "business", "n": json.Number("9223372036854775807")}
+					if name == "invalid" {
+						structured["n"] = "unverified"
+					}
+					if name == "collision" {
+						structured["raw_json"] = "business-raw"
+					}
+					return &mcpsdk.CallToolResult{IsError: name == "failed", Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: `{"name":"not-business"}`}, &mcpsdk.ImageContent{Data: bitmap.Bytes(), MIMEType: "image/png"}}, StructuredContent: structured}, nil
+				})
+			}
+			endpoint := httptest.NewServer(mcpsdk.NewStreamableHTTPHandler(func(*http.Request) *mcpsdk.Server { return server }, nil))
+			defer endpoint.Close()
+			manager, err := mcp.NewManager(t.Context(), []mcp.ServerSpec{{PluginID: "fixture", Name: "live", Transport: mcp.TransportStreamableHTTP, URL: endpoint.URL, SourceTrusted: true}}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer manager.Close()
+			<-manager.Initialized()
+			stages := []string{tc.code}
+			if strings.HasPrefix(tc.name, "retained_") {
+				stages = []string{`let retainedBody=await live.value({});return {loaded:true};`, tc.code}
+			}
+			var mu sync.Mutex
+			var requests [][]byte
+			provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				raw, err := io.ReadAll(r.Body)
+				if err != nil {
+					t.Error(err)
+					http.Error(w, "read", 500)
+					return
+				}
+				mu.Lock()
+				requests = append(requests, raw)
+				n := len(requests)
+				mu.Unlock()
+				if n > len(stages)+1 {
+					t.Error("unexpected extra model request")
+					http.Error(w, "extra", 500)
+					return
+				}
+				output := []any{map[string]any{"type": "message", "role": "assistant", "content": []any{map[string]any{"type": "output_text", "text": "done"}}}}
+				if n <= len(stages) {
+					args, _ := json.Marshal(map[string]any{"code": stages[n-1]})
+					id := "business"
+					if n < len(stages) {
+						id = "load-body"
+					}
+					output = []any{map[string]any{"type": "function_call", "name": codemode.ToolName, "call_id": id, "arguments": string(args)}}
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string]any{"id": "fixture", "object": "response", "model": "fixture", "status": "completed", "output": output, "usage": map[string]any{"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}})
+			}))
+			defer provider.Close()
+			factory := providers.NewFactory()
+			if err := factory.Register(providers.Config{Alias: "fixture/business", Provider: "fixture", API: providers.APIOpenAIResponses, Model: "fixture", BaseURL: provider.URL, HTTPClient: provider.Client(), Auth: providers.AuthConfig{Type: providers.AuthNone}, ImageInput: true, ContextWindowTokens: 200000}); err != nil {
+				t.Fatal(err)
+			}
+			llm, err := factory.NewByAlias("fixture/business")
+			if err != nil {
+				t.Fatal(err)
+			}
+			driver := &codeModeBusinessModel{LLM: llm}
+			runCodeMode(t, store, active, agent.AgentSpec{Model: driver, Tools: []tool.Tool{toolsearch.NewSource(manager, exactMCPRanker{}), &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}}}, DeferredTools: manager}, nil, nil)
+			if effects.Load() != 1 || len(driver.requests) != len(stages)+1 {
+				t.Fatalf("effects=%d requests=%d", effects.Load(), len(driver.requests))
+			}
+			visible := errorDeliveryModelResult(t, driver.requests[len(stages)], "business")
+			if visible.IsError != (tc.name == "invalid_schema" || tc.name == "failed_schema") {
+				t.Fatalf("unexpected script disposition: %s", errorDeliveryJSON(t, visible.Content))
+			}
+			raw, _ := json.Marshal(visible.Content)
+			if !strings.Contains(string(raw), tc.want) {
+				t.Fatalf("missing %s: %s", tc.want, raw)
+			}
+			images := 0
+			for _, p := range visible.Content {
+				if p.Media != nil {
+					images++
+					if p.Media.Source.Data != base64.StdEncoding.EncodeToString(bitmap.Bytes()) {
+						t.Fatal("changed image bytes")
+					}
+				}
+			}
+			wantImages := 0
+			if tc.image {
+				wantImages = 1
+			}
+			if images != wantImages {
+				t.Fatalf("images=%d expected=%v: %s", images, tc.image, raw)
+			}
+			mu.Lock()
+			wire := append([][]byte(nil), requests...)
+			mu.Unlock()
+			if len(wire) != len(stages)+1 {
+				t.Fatalf("provider HTTP requests=%d", len(wire))
+			}
+			var next struct {
+				Input []struct {
+					Type   string          `json:"type"`
+					CallID string          `json:"call_id"`
+					Output json.RawMessage `json:"output"`
+				} `json:"input"`
+			}
+			if err := json.Unmarshal(wire[len(stages)], &next); err != nil {
+				t.Fatal(err)
+			}
+			httpImages := 0
+			found := false
+			for _, input := range next.Input {
+				if input.Type != "function_call_output" || input.CallID != "business" {
+					continue
+				}
+				found = true
+				// Text-only tool output is a string; multimodal output is an array.
+				if len(input.Output) > 0 && input.Output[0] == '"' {
+					continue
+				}
+				var contentParts []struct {
+					Type     string `json:"type"`
+					ImageURL string `json:"image_url"`
+				}
+				if err := json.Unmarshal(input.Output, &contentParts); err != nil {
+					t.Fatal(err)
+				}
+				for _, content := range contentParts {
+					if content.Type == "input_image" {
+						httpImages++
+						if content.ImageURL != "data:image/png;base64,"+base64.StdEncoding.EncodeToString(bitmap.Bytes()) {
+							t.Fatal("next provider HTTP changed original PNG bytes")
+						}
+					}
+				}
+			}
+			if !found || httpImages != images {
+				t.Fatalf("provider HTTP images=%d; model request images=%d", httpImages, images)
+			}
+			if dir := os.Getenv("CAELIS_CODE_MODE_BUSINESS_ARTIFACTS"); dir != "" {
+				dir = filepath.Join(dir, tc.name)
+				if err := os.MkdirAll(dir, 0700); err != nil {
+					t.Fatal(err)
+				}
+				for i, request := range wire {
+					if err := os.WriteFile(filepath.Join(dir, fmt.Sprintf("request-%02d.json", i+1)), request, 0600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				for name, raw := range map[string][]byte{"first.request.json": wire[0], "next.request.json": wire[len(stages)], "source.png": bitmap.Bytes()} {
+					if err := os.WriteFile(filepath.Join(dir, name), raw, 0600); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			t.Logf("next provider HTTP: images=%d, original PNG bytes=%d", httpImages, bitmap.Len())
+		})
+	}
+}

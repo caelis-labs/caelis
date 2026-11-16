@@ -14,9 +14,9 @@ func TestNestedAuthenticatedMediaKeepsEncodingBudgets(t *testing.T) {
 		return codemode.Reply{Parts: []codemode.Part{{Kind: "json", JSON: json.RawMessage(`{}`)}, {Kind: "media", Handle: "owned-A"}, {Kind: "media", Handle: "owned-B"}}}, nil
 	}}
 	for _, tc := range []struct{ code, want string }{
-		{`r.parts[0].json.selected=[r.parts[1],r.parts[2]];r.parts=[r.parts[0]];return r;`, "returned media budget exceeded"},
-		{`r.parts[0].json.self=r.parts[0];return r;`, "cyclic JSON"},
-		{`let v=r.parts[1];for(let i=0;i<130;i++)v={nested:v};r.parts[0].json.selected=v;return r;`, "JSON depth exceeded"},
+		{`const value=r.json();value.selected=r.media;return value;`, "returned media budget exceeded"},
+		{`const value=r.json();value.self=value;return value;`, "cyclic JSON"},
+		{`let v=r.media[0];for(let i=0;i<130;i++)v={nested:v};const value=r.json();value.selected=v;return value;`, "JSON depth exceeded"},
 	} {
 		_, err := (&Executor{}).Execute(t.Context(), fixed(`const r=await tools.call("Target",{});`+tc.code), codemode.Limits{Calls: 1}, h)
 		if err == nil || !strings.Contains(err.Error(), tc.want) {

@@ -25,7 +25,7 @@ func consecutiveScriptEvents() []*session.Event {
 			tool.Input = map[string]any{"code": "return await app.look();"}
 		}
 		if name == "js_exec" {
-			tool.Input = map[string]any{"code": "SOURCE_JS_NEVER"}
+			tool.Input = map[string]any{"code": "return await Read({path:'input.txt'});"}
 		}
 		if parent != "" {
 			tool.Parent = &session.EventParentTool{CallID: parent, Name: "js_exec"}

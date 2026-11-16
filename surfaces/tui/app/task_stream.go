@@ -119,8 +119,8 @@ func (m *Model) observeTaskStreamSession(env eventstream.Envelope) {
 	m.currentSessionID = sessionID
 }
 
-// observeTaskPanelStreamOwner keeps live command output tied to the
-// RunCommand panel that owns it. Task control calls are observers or mutations
+// observeTaskPanelStreamOwner observes the original command or script producer.
+// Folded scripts still need terminal lifecycle updates. Task control calls are observers or mutations
 // of an existing Task and never own a Task-stream subscription.
 func (m *Model) observeTaskPanelStreamOwner(env eventstream.Envelope) {
 	if m == nil || m.cfg.TaskStreams == nil || m.cfg.ProgramSender == nil ||
@@ -132,7 +132,17 @@ func (m *Model) observeTaskPanelStreamOwner(env eventstream.Envelope) {
 		return
 	}
 	input, output := taskStreamToolValues(env.Update)
-	handle := display.ToolTaskHandle(input, output, nil)
+	var meta map[string]any
+	switch update := env.Update.(type) {
+	case eventstream.ToolCall:
+		meta = update.Meta
+	case eventstream.ToolCallUpdate:
+		meta = update.Meta
+	}
+	handle := display.ToolTaskHandle(input, output, meta)
+	if display.MetaString(meta, "caelis", "runtime", "task", "kind") == "code_mode" {
+		handle = display.MetaString(meta, "caelis", "runtime", "task", "handle")
+	}
 	if handle == "" {
 		return
 	}
@@ -171,7 +181,7 @@ func taskStreamPanelHandle(events []SubagentEvent, callID string) string {
 	for i := len(events) - 1; i >= 0; i-- {
 		event := events[i]
 		if event.Kind != SEToolCall || strings.TrimSpace(event.CallID) != callID ||
-			event.Name != surfaceToolRunCommand {
+			(event.Name != surfaceToolRunCommand && event.Name != "js_exec") {
 			continue
 		}
 		if taskHandle := normalizeTaskStreamHandle(event.TaskHandle); taskHandle != "" {
@@ -190,11 +200,11 @@ func (m *Model) taskStreamPanelExpanded(callID, handle string) bool {
 		switch typed := block.(type) {
 		case *MainACPTurnBlock:
 			if taskStreamPanelHandle(typed.Events, callID) == handle {
-				return typed.toolPanelExpanded(callID)
+				return scriptTaskOwner(typed.Events, callID) || typed.toolPanelExpanded(callID)
 			}
 		case *ParticipantTurnBlock:
 			if taskStreamPanelHandle(typed.Events, callID) == handle {
-				return typed.toolPanelExpanded(callID)
+				return scriptTaskOwner(typed.Events, callID) || typed.toolPanelExpanded(callID)
 			}
 		}
 	}
@@ -816,4 +826,15 @@ func (m *Model) closeTaskStreamSubscriptions() {
 	m.taskStreamRetries = map[string]int{}
 	m.taskStreamRecovery = map[string]time.Time{}
 	m.taskStreamFollowing = map[string]time.Time{}
+}
+
+// A visible yielded script needs its original Task terminal observation even
+// while its call list is folded. This does not create execution authority.
+func scriptTaskOwner(events []SubagentEvent, callID string) bool {
+	for _, event := range events {
+		if event.Kind == SEToolCall && event.CallID == callID && event.Name == "js_exec" && !event.Done {
+			return true
+		}
+	}
+	return false
 }
