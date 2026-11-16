@@ -129,3 +129,25 @@ func TestContinuousEnvironmentDoWhileDeclarations(t *testing.T) {
 		t.Fatal(string(out.Value))
 	}
 }
+
+func TestContinuousEnvironmentRecordsStartupOnce(t *testing.T) {
+	e := (&Executor{}).NewEnvironment().(*environment)
+	defer e.Close()
+	_, err := e.Execute(t.Context(), fixed(`return 1;`), codemode.Limits{}, testHost{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.child.mu.Lock()
+	first := e.child.metrics.Startup
+	e.child.mu.Unlock()
+	_, err = e.Execute(t.Context(), fixed(`return 2;`), codemode.Limits{}, testHost{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.child.mu.Lock()
+	second := e.child.metrics.Startup
+	e.child.mu.Unlock()
+	if first <= 0 || second != first {
+		t.Fatalf("process startup changed across executions: %v -> %v", first, second)
+	}
+}

@@ -345,7 +345,9 @@ func (e *environment) Execute(ctx context.Context, source codemode.Source, limit
 			switch f.kind {
 			case frameReady:
 				p.mu.Lock()
-				p.metrics.Startup = time.Since(p.started)
+				if p.metrics.Startup == 0 {
+					p.metrics.Startup = time.Since(p.started)
+				}
 				p.mu.Unlock()
 			case frameBudget:
 				return output, fmt.Errorf("worker exceeded 1s CPU budget")

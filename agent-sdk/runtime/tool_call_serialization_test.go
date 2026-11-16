@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -236,7 +237,7 @@ func TestToolCallSerializationSharedAcrossYieldedSnapshotsAndNative(t *testing.T
 	target := &serializationStateTool{def: tool.Definition{Name: "State", InputSchema: map[string]any{"type": "object"}}, started: make(chan struct{}), release: release, values: make(map[int]int)}
 	var admissions atomic.Int32
 	registry := staticPolicyRegistry{mode: policy.NamedMode{ID: "mcp-test", Decide: func(_ context.Context, in policy.ToolContext) (policy.Decision, error) {
-		if in.Tool.Name == "State" && admissions.Add(1) == 3 {
+		if in.Tool.Name == "State" && admissions.Add(1) == 2 {
 			unblock()
 		}
 		return policy.Decision{Action: policy.ActionAllow}, nil
@@ -253,7 +254,7 @@ func TestToolCallSerializationSharedAcrossYieldedSnapshotsAndNative(t *testing.T
 				return nil
 			}
 			return []model.ToolCall{
-				{ID: "script-two", Name: codemode.ToolName, Args: `{"code":"return await tools.call('State',{index:2})","yield_time_ms":0}`},
+				{ID: "overlap", Name: codemode.ToolName, Args: `{"code":"return await tools.call('State',{index:2})","yield_time_ms":0}`},
 				{ID: "native-state", Name: "State", Args: `{"index":3}`},
 			}
 		case 2:
@@ -281,6 +282,9 @@ func TestToolCallSerializationSharedAcrossYieldedSnapshotsAndNative(t *testing.T
 				}
 			}
 			return waits
+		case 3:
+			return []model.ToolCall{{ID: "script-two", Name: codemode.ToolName, Args: `{"code":"return await tools.call('State',{index:2})"}`}}
+
 		}
 		return nil
 	}}
@@ -290,6 +294,10 @@ func TestToolCallSerializationSharedAcrossYieldedSnapshotsAndNative(t *testing.T
 		return agent.ModelRequestSnapshot{Model: driver, Tools: tools, Revision: fmt.Sprint(snapshots.Add(1)), Validate: func(context.Context) (func(), error) { return func() {}, nil }}, nil
 	}}
 	_, rt := runCodeMode(t, store, active, spec, registry, nil)
+	busy := errorDeliveryModelResult(t, driver.requests[2], "overlap")
+	if !busy.IsError || !strings.Contains(string(errorDeliveryJSON(t, busy.Content)), "busy") {
+		t.Fatalf("overlapping VM submission not rejected: %+v", busy)
+	}
 	if snapshots.Load() < 2 || target.maximum.Load() != 1 || target.calls.Load() != 3 || len(target.values) != 3 {
 		t.Fatalf("snapshots=%d maximum=%d calls=%d state=%v", snapshots.Load(), target.maximum.Load(), target.calls.Load(), target.values)
 	}
@@ -339,7 +347,7 @@ func TestToolCallSerializationTaskWaitAllowsNestedTaskRead(t *testing.T) {
 	driver := &mcpScriptModel{steps: func(i int, req *model.Request) []model.ToolCall {
 		switch i {
 		case 0:
-			return []model.ToolCall{{ID: "yielded", Name: codemode.ToolName, Args: `{"code":"const reply=await tools.call('WaitForNativeTaskWait',{}); const value=reply.parts.find(p=>p.kind==='json').json; await tools.call('Task',{action:'read',handle:value.handle}); return {done:true}","yield_time_ms":0}`}}
+			return []model.ToolCall{{ID: "yielded", Name: codemode.ToolName, Args: `{"code":"const reply=await tools.call('WaitForNativeTaskWait',{}); const value=reply.json(); await tools.call('Task',{action:'read',handle:value.handle}); return {done:true}","yield_time_ms":0}`}}
 		case 1:
 			handle := jsExecTaskHandle(req)
 			handles <- handle
@@ -352,6 +360,7 @@ func TestToolCallSerializationTaskWaitAllowsNestedTaskRead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = rt.ReleaseCodeModeEnvironments() })
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 	run, err := rt.Run(ctx, agent.RunRequest{SessionRef: active.SessionRef, Input: "observe a yielded script", AgentSpec: agent.AgentSpec{Model: driver, Tools: []tool.Tool{target, tasktool.New(), &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}}}}})
