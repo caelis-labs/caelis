@@ -87,6 +87,9 @@ func (t *RunCommandTool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        RunCommandToolName,
 		Description: "Run a shell command for repository inspection, tests, builds, formatting, version-control operations, or work unavailable through file tools. Use it when the command may complete now or continue as an async Task; prefer dedicated file tools for file operations.",
+		OutputSchema: map[string]any{"type": "object", "properties": map[string]any{
+			"handle": map[string]any{"type": "string"}, "state": map[string]any{"type": "string"}, "result": map[string]any{"type": "string"}, "stdout": map[string]any{"type": "string"}, "stderr": map[string]any{"type": "string"}, "exit_code": map[string]any{"type": []string{"integer", "null"}},
+		}},
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

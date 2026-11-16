@@ -1,10 +1,11 @@
 # MCP tools and fixed model entry points
 
 Native product Sessions use [Code Mode](code-mode.md): the fixed `js_exec`
-declaration exposes `tools.search` and `tools.call` inside an async script.
-SDK embedders without Code Mode use the fixed `tool_search` and `mcp_call`
-function declarations. Directory changes, search results and reconnection never
-append MCP schemas to the model's `tools` array. Ordinary model capability filters
+declaration exposes Session tool routes by original name plus `tools.search` and
+`tools.call` inside an async script. SDK embedders without Code Mode use the fixed
+`tool_search` and `mcp_call` function declarations. Directory changes, search
+results and reconnection never append MCP schemas to the model's `tools` array.
+Ordinary model capability filters
 still apply to non-MCP tools. This contract covers the serialized tools field;
 messages, instructions, model configuration and other request prefixes can change.
 
@@ -21,9 +22,11 @@ MCP startup is asynchronous. Search reads the currently ready directory once;
 it does not wait for connecting servers. An empty legacy search result serializes as `{}`; Code Mode returns an empty
 `tools` list. Neither grants a discovery binding. It means no ready match at that instant, including
 while all servers are connecting, rather than proof that the plugin has no tools.
-A fresh search after readiness can discover the tools; an earlier empty receipt
-is never filled in later. Complete ready servers remain searchable independently
-of slower or failed servers.
+A fresh search after readiness can return complete schemas. A later Code Mode
+execution also snapshots the then-current Session names and can call a known
+original name directly; non-Code Mode `mcp_call` still requires a fresh discovery
+binding. An earlier empty search receipt is never filled in later. Complete ready
+servers remain searchable independently of slower or failed servers.
 
 Control's Session MCP status reports this same Runtime's connection state and
 catalog. `running` alone describes a connection, not a ready catalog: check that
@@ -47,35 +50,46 @@ are reported separately. A deadline alone does not prove a network or
 authentication failure. Inspection and reconnection do not
 activate a cold Runtime. Refresh
 targets an already active Runtime; it is not a startup operation. Integration
-clients must activate through actual work, observe readiness for that activation,
-and issue a fresh search before relying on a newly ready tool. A provider fixture
+clients must activate through actual work and observe readiness for that
+activation. Search after readiness when a complete schema is needed or before
+non-Code Mode `mcp_call`. Code Mode snapshots current Session names for each
+execution; a direct call needs no search when its schema is known, and canonical `tools.call`
+can resolve a newly ready name during the current execution. A provider fixture
 can wait between model responses within that original Turn. It must not inject a
-warmup Prompt, borrow historical discovery, or treat `connecting` as tool absence.
+warmup Prompt, use stale results as evidence of current readiness, or treat
+`connecting` as tool absence.
 
-Successful new-format canonical search receipts are the sole durable discovery
-source. Runtime projects their bindings across compaction and file-Store resume;
-it does not maintain another durable registry. Old ToolSearch results, exposure
-metadata and checkpoint discovered-name fields remain readable history only.
-Historical name-only discovery requires a fresh search before an MCP call.
-Current canonical bindings are reusable in the same Session across fresh VMs,
-compaction and resume while their source and schema remain valid.
-There is no legacy execution path or `tool_retire` tool.
+Canonical search receipts remain the durable discovery records. Started child
+Journal records for Code Mode tool executions also preserve the binding used by a
+direct MCP call.
+Runtime rebuilds both from canonical events across fresh VMs, compaction and
+file-Store resume; it does not maintain another durable registry. Old ToolSearch
+results, exposure metadata and checkpoint discovered-name fields remain readable
+history only. Historical name-only discovery requires a fresh search for
+non-Code Mode `mcp_call`; a Code Mode direct call without a prior binding pins the
+current real Tool identity/version. Valid bindings remain reusable while their
+source and schema are unchanged. There is no legacy execution path or
+`tool_retire` tool.
 
-`mcp_call(tool_name, arguments)` requires an exact previously discovered name and
-object arguments. Runtime binds the assembled real Tool once per complete model
-response, compares its identity/version and validates its accepted input schema.
-Without Code Mode, a search in the same model response cannot authorize an
-undiscovered sibling call. In Code Mode, sequentially awaiting `tools.search`
-then `tools.call` in one script works: the canonical search receipt is committed
-before the call. Changed or unavailable bindings fail closed and require a new search. No name
-lookup fallback grants eligibility.
+`mcp_call(tool_name, arguments)` is for SDK embedders without Code Mode. It
+requires an exact previously discovered name and object arguments. Runtime binds
+the assembled real Tool once per complete model response, compares its
+identity/version and validates its accepted input schema. Without Code Mode, a
+search in the same model response cannot authorize an undiscovered sibling call.
+In Code Mode, an original-name call with a known schema or `tools.call(name, args)` can run
+without search. A first direct MCP call with no prior binding pins the current
+identity/version. If a later call is stale after a source/schema change,
+`tools.search(name)` retrieves the complete schema and explicitly refreshes the
+binding before a subsequent call. Search grants no policy or approval authority;
+availability, revocation and approval retain their own checks. No name lookup
+fallback grants eligibility to non-Code Mode `mcp_call`.
 
 The resolved Tool enters the existing lifecycle, invocation, policy/approval and
 execution-journal wrappers. It is never dispatched directly through Manager.
 Policy, approvals, display events and the one Journal record use the real name
 and arguments. Without Code Mode, the model-facing call/result retain the original `mcp_call`
-name and call ID; a typed original-call field preserves that pairing through Store
-round trips and unknown-result recovery. Recovery never replays an unknown MCP
+name and call ID; a typed original-call field preserves that pairing through
+Store round trips and unknown-result recovery. Recovery never replays an unknown MCP
 effect or invents a recoverer. Final Manager admission still checks the pinned
 catalog handle immediately before dispatch.
 
@@ -99,8 +113,10 @@ The Manager remains the single directory owner. Cursor bytes stay opaque. The
 page-count limit is 4096; there is no new per-server tool-count truncation.
 
 An accepted projected-name owner stays pinned for that Manager activation. Removing
-it does not promote a colliding server or remote name. `RevokeServer` blocks all
-new calls immediately but leaves server/plugin shutdown to the embedding owner.
+it does not promote a colliding server or remote name. Candidates rejected from
+the Session tool set because of a projected-name collision are not available to
+Code Mode; qualified paths cannot restore them. `RevokeServer` blocks all new
+calls immediately but leaves server/plugin shutdown to the embedding owner.
 A source/schema change also rejects already-selected handles at final dispatch,
 including those that were waiting for approval. Calls admitted before revocation
 retain their results and are never automatically retried. This cannot undo an

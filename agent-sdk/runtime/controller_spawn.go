@@ -91,5 +91,5 @@ func (r *Runtime) CallControllerSpawn(ctx context.Context, ref session.SessionRe
 	spec.Tools = r.wrapToolsForRuntime(current, ref, spec, runtimeToolContext{mode: mode, approvalMode: string(r.currentApprovalMode(state)), approvalRequester: active.approvalRequester, runID: active.handle.RunID(), turnID: active.turnID})
 	wrapped := r.wrapTurnTools(workCtx, current, ref, state, spec, active.approvalRequester, active.handle.RunID(), active.turnID, nil)
 	result, callErr := wrapped[0].Call(workCtx, call)
-	return result, errors.Join(callErr, persistToolExecutionReceipt(workCtx, r.sessions, ref, call, result))
+	return result, errors.Join(callErr, persistToolExecutionReceipt(workCtx, r.sessions, &r.sessionWrites, ref, call, result))
 }

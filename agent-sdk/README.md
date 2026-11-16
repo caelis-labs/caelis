@@ -67,7 +67,10 @@ public `codemode.Tool` also injects the existing Task tool; shell is unnecessary
 The host can supply canonical selected names via
 `AgentSpec.Metadata[codemode.MetadataSelectedTools]` (`[]string`); the SDK does
 not choose product integrations. See [Code Mode](../docs/code-mode.md) for
-permissions, output selection and Run-scoped yield limits.
+the repeatable Body API, sequential Session environments, reset, permissions
+and original Run/Task yield ownership. Embedders release disposable VM resources
+with `Runtime.ReleaseCodeModeEnvironments` after quiescing the host Session; the
+product host already invokes it on its existing resource-release path.
 
 ## Dependency boundary
 

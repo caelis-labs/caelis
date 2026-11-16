@@ -3,6 +3,8 @@ package subagent
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -10,6 +12,7 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task/delegation"
+	controlagents "github.com/caelis-labs/caelis/control/agents"
 )
 
 func TestIdleChildBatchStartsOnePromptAndProjectsEverySource(t *testing.T) {
@@ -81,7 +84,8 @@ func TestIdleChildBatchStartsOnePromptAndProjectsEverySource(t *testing.T) {
 func TestActiveChildBatchSteersOnceAndProjectsEverySource(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	runner := childInputTestRunner(t, "active")
+	terminalRelease := filepath.Join(t.TempDir(), "terminal-release")
+	runner := newChildInputTestRunner(t, "active", map[string]string{"CAELIS_ACP_CHILD_INPUT_TERMINAL_RELEASE": terminalRelease}, controlagents.Authentication{})
 	events := make(chan childInputTestEvent, 16)
 	spawn := childInputSpawnContext(t, "task-active-batch", events)
 	anchor, _, err := runner.Spawn(ctx, spawn, delegation.Request{Agent: "helper", Prompt: "initial"})
@@ -98,6 +102,11 @@ func TestActiveChildBatchSteersOnceAndProjectsEverySource(t *testing.T) {
 		{MessageID: "mail-active-2", Source: session.ActorRef{Kind: session.ActorKindParticipant, ID: "sibling", Name: "sibling"}, Input: "second report", DisplayInput: "Second report"},
 	}
 	result, err := runner.SubmitChildInputBatch(ctx, agent.ChildInputRequest{Target: run.slot.target, Messages: inputs})
+	// Batch acceptance must be observed before the producer terminal can cancel
+	// the receipt waiter or overtake the accepted source projections.
+	if releaseErr := os.WriteFile(terminalRelease, nil, 0o600); releaseErr != nil {
+		t.Fatal(releaseErr)
+	}
 	if err != nil || result.StartedActivity || result.ActivityID != spawn.ActivityID {
 		t.Fatalf("active batch = %#v, %v", result, err)
 	}

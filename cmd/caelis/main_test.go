@@ -85,7 +85,9 @@ func TestCodeModeCLIWorkerHandshake(t *testing.T) {
 		input.WriteString(payload)
 	}
 	send(1, `{"limits":{}}`)
-	send(2, `return {text:"native-cli",total:42,fs:typeof require,output:typeof output,describe:typeof tools.describe};`)
+	send(10, `[{"name":"NativeFixture"}]`)
+	send(10, "") // End the name snapshot before sending source.
+	send(2, `return {text:"native-cli",total:42,fs:typeof require,output:typeof output,describe:typeof tools.describe,direct:typeof NativeFixture,native:typeof tools.native.NativeFixture};`)
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -139,8 +141,10 @@ func TestCodeModeCLIWorkerHandshake(t *testing.T) {
 		FS       string `json:"fs"`
 		Output   string `json:"output"`
 		Describe string `json:"describe"`
+		Direct   string `json:"direct"`
+		Native   string `json:"native"`
 	}
-	if json.Unmarshal(output.Value, &result) != nil || result.Total != 42 || result.FS != "undefined" || result.Text != "native-cli" || result.Output != "undefined" || result.Describe != "undefined" || len(raw) != 0 {
+	if json.Unmarshal(output.Value, &result) != nil || result.Total != 42 || result.FS != "undefined" || result.Text != "native-cli" || result.Output != "undefined" || result.Describe != "undefined" || result.Direct != "function" || result.Native != "function" || len(raw) != 0 {
 		t.Fatalf("worker protocol result=%s trailing=%d", payload, len(raw))
 	}
 	t.Logf("native CLI early-worker handshake complete; process Wait succeeded, result=%s", payload)
@@ -174,12 +178,20 @@ func TestCodeModeCLIWorkerCancellationReapsProcess(t *testing.T) {
 		t.Fatal(err)
 	}
 	var input bytes.Buffer
-	for i, payload := range []string{`{"limits":{}}`, `while(true){}`} {
+	for _, frame := range []struct {
+		kind    byte
+		payload string
+	}{
+		{1, `{"limits":{}}`},
+		{10, `[]`},
+		{10, ""},
+		{2, `while(true){}`},
+	} {
 		var header [13]byte
-		binary.BigEndian.PutUint32(header[:4], uint32(len(payload)))
-		header[4] = byte(i + 1)
+		binary.BigEndian.PutUint32(header[:4], uint32(len(frame.payload)))
+		header[4] = frame.kind
 		input.Write(header[:])
-		input.WriteString(payload)
+		input.WriteString(frame.payload)
 	}
 	if _, err = stdin.Write(input.Bytes()); err != nil {
 		cancel()

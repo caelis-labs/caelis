@@ -66,7 +66,7 @@ func TestJSExecManagerLookupFinalAdmissionRejectsSourceChange(t *testing.T) {
 			driver := &mcpScriptModel{steps: func(i int, _ *model.Request) []model.ToolCall {
 				switch i {
 				case 0:
-					return h1Script(`return await tools.search("live__read");`)
+					return h1Script(`return (await tools.search("live__read")).json();`)
 				case 1:
 					return h1Script(`await tools.call("live__read",{value:1});`)
 				}
@@ -87,7 +87,7 @@ func TestJSExecManagerLookupFinalAdmissionRejectsSourceChange(t *testing.T) {
 			}
 			if change == "schema" {
 				raw, _ := json.Marshal(driver.requests[len(driver.requests)-1].Messages)
-				if !strings.Contains(string(raw), "tools.search(name)") || !strings.Contains(string(raw), "binding is stale") {
+				if !strings.Contains(string(raw), "tools.search") || !strings.Contains(string(raw), "schema changed") {
 					t.Fatalf("next request lacks Code Mode stale guidance: %s", raw)
 				}
 			}

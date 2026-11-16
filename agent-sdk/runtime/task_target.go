@@ -133,7 +133,15 @@ func (tm *taskRuntime) resolveTaskHandle(ctx context.Context, ref session.Sessio
 	tm.mu.RLock()
 	var matched taskControlIdentity
 	for taskID, command := range tm.tasks {
-		if command == nil || strings.TrimSpace(command.sessionRef.SessionID) != strings.TrimSpace(ref.SessionID) || normalizeTaskHandle(command.handle) != handle {
+		if command == nil {
+			continue
+		}
+		// Directory locking protects membership; approval refresh mutates the
+		// command's public identity under the command lock.
+		command.mu.Lock()
+		matches := strings.TrimSpace(command.sessionRef.SessionID) == strings.TrimSpace(ref.SessionID) && normalizeTaskHandle(command.handle) == handle
+		command.mu.Unlock()
+		if !matches {
 			continue
 		}
 		matched = taskControlIdentity{taskID: taskID, kind: taskapi.KindCommand}

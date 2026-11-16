@@ -37,8 +37,8 @@ type Source struct {
 	SHA256 string `json:"sha256"`
 }
 
-// Part is the script-visible projection of a tool part. Media and other opaque
-// content have only a handle; paths, credentials and media bytes stay in Go.
+// Part is an internal bridge projection of a tool part. Body.media exposes only
+// opaque media references; paths, credentials and media bytes stay in Go.
 type Part struct {
 	Kind     string          `json:"kind"`
 	Text     string          `json:"text,omitempty"`
@@ -49,11 +49,31 @@ type Part struct {
 
 // Reply retains tool disposition independently of its projected content.
 type Reply struct {
-	CallID       string `json:"call_id"`
-	Outcome      string `json:"outcome"`
-	Parts        []Part `json:"parts,omitempty"`
-	IsError      bool   `json:"is_error,omitempty"`
-	TurnComplete bool   `json:"turn_complete,omitempty"`
+	CallID  string `json:"call_id"`
+	Outcome string `json:"outcome"`
+	Parts   []Part `json:"parts,omitempty"`
+	// BodyText is the ordered text/JSON view, retaining original JSON tokens.
+	BodyText string `json:"body_text"`
+	// Value is successful structured JSON validated against the declared output
+	// schema. Other Bodies parse BodyText explicitly; failed structured content
+	// remains unverified diagnostics.
+	Value        json.RawMessage `json:"value,omitempty"`
+	IsError      bool            `json:"is_error,omitempty"`
+	TurnComplete bool            `json:"turn_complete,omitempty"`
+}
+
+// Text joins all textual/JSON parts in their original order, retaining JSON tokens.
+func (r Reply) Text() string {
+	var entries []string
+	for _, p := range r.Parts {
+		switch p.Kind {
+		case "text":
+			entries = append(entries, p.Text)
+		case "json":
+			entries = append(entries, string(p.JSON))
+		}
+	}
+	return strings.Join(entries, "\n")
 }
 
 // Host is the executor's complete effect capability. Call arguments must be a
@@ -63,14 +83,67 @@ type Host interface {
 	Call(context.Context, string, json.RawMessage) (Reply, error)
 }
 
-// SearchRequest selects either a name/capability query or an exact MCP server.
-// Plugin optionally qualifies Server. After continues after a previous Next name
-// in the same exact service scope. Both fields require Server.
-type SearchRequest struct {
-	Query  string `json:"query,omitempty"`
+// ToolRoute maps a script-visible original name to a canonical Runtime target.
+// MCP routes retain the exact server, remote tool and optional plugin names;
+// native routes have only Name. Routes convey no schemas or execution authority.
+type ToolRoute struct {
+	Name   string `json:"name"`
 	Server string `json:"server,omitempty"`
+	Tool   string `json:"tool,omitempty"`
 	Plugin string `json:"plugin,omitempty"`
-	After  string `json:"after,omitempty"`
+}
+
+// ExecutionState identifies the current disposable environment and execution.
+type ExecutionState struct {
+	Generation string `json:"generation"`
+	Execution  string `json:"execution"`
+}
+
+// StateHost supplies Runtime-owned identities without extending call authority.
+type StateHost interface{ ExecutionState() ExecutionState }
+
+// NamedHost supplies the current invocation's name-only routing snapshot.
+// Every generated entry must call Host.Call, retaining Runtime admission.
+type NamedHost interface {
+	Host
+	ToolNames(context.Context) ([]ToolRoute, error)
+}
+
+// SearchRequest selects an exact Name, exact Server/Tool, capability Query, or
+// Server listing. Plugin qualifies Server; After continues only a listing.
+// LegacyString preserves exact-name-first lookup for the string script syntax.
+type SearchRequest struct {
+	Name         string `json:"name,omitempty"`
+	Query        string `json:"query,omitempty"`
+	Server       string `json:"server,omitempty"`
+	Tool         string `json:"tool,omitempty"`
+	Plugin       string `json:"plugin,omitempty"`
+	After        string `json:"after,omitempty"`
+	LegacyString bool   `json:"legacy_string,omitempty"`
+}
+
+// Validate checks the mutually exclusive search selectors at the Host boundary.
+func (r SearchRequest) Validate() error {
+	for _, value := range []string{r.Name, r.Query, r.Server, r.Tool, r.Plugin, r.After} {
+		if len(value) > 1024 {
+			return tool.NewError(tool.ErrorCodeInvalidInput, "search fields must be at most 1024 bytes")
+		}
+	}
+	switch {
+	case r.Name != "":
+		if r.Query == "" && r.Server == "" && r.Tool == "" && r.Plugin == "" && r.After == "" && !r.LegacyString {
+			return nil
+		}
+	case r.Server != "":
+		if r.Query == "" && !r.LegacyString && (r.Tool == "" || r.After == "") {
+			return nil
+		}
+	case r.Query != "":
+		if r.Tool == "" && r.Plugin == "" && r.After == "" {
+			return nil
+		}
+	}
+	return tool.NewError(tool.ErrorCodeInvalidInput, "supply {name}, {server,tool,plugin?}, {query}, or {server,plugin?,after?}")
 }
 
 // DiscoveryHost adds the existing scoped discovery owner to the bridge.
@@ -88,6 +161,9 @@ type Output struct {
 	Value json.RawMessage `json:"value,omitempty"`
 	Parts []Part          `json:"parts,omitempty"`
 	Reply bool            `json:"reply,omitempty"`
+	// CallID selects a complete original reply retained by the invocation Host.
+	// Only bridge-owned object identity can produce this adapter metadata.
+	CallID string `json:"call_id,omitempty"`
 }
 
 // Executor is the trusted Go adapter for one engine invocation. The adapter must
@@ -101,6 +177,19 @@ type Executor interface {
 	Execute(context.Context, Source, Limits, Host) (Output, error)
 }
 
+// Environment is one disposable language environment. Close interrupts its
+// execution and releases its process without replaying Host calls.
+type Environment interface {
+	Executor
+	Close() error
+}
+
+// EnvironmentFactory creates independent environments for Runtime Session
+// activations. The Runtime retains ownership of execution and Host authority.
+type EnvironmentFactory interface {
+	NewEnvironment() Environment
+}
+
 // Limits bound allocations/transfers at the common boundary. Tool-internal
 // allocations remain the owning tool's responsibility. Zero selects defaults.
 type Limits struct {
@@ -108,13 +197,13 @@ type Limits struct {
 	ArgumentBytes int `json:"argument_bytes"`
 	ReplyBytes    int `json:"reply_bytes"`
 	// OutputBytes bounds executor JSON. Opaque media emitted to the model is
-	// bounded by the invocation's cumulative RetainedBytes and Calls limits.
+	// bounded by the environment's cumulative RetainedBytes and invocation's Calls limits.
 	OutputBytes   int `json:"output_bytes"`
 	RetainedBytes int `json:"retained_bytes"`
 	Calls         int `json:"calls"`
 }
 
-// DefaultLimits returns conservative per-invocation transfer limits.
+// DefaultLimits returns conservative transfer and environment retention limits.
 func DefaultLimits() Limits {
 	return Limits{SourceBytes: 256 << 10, ArgumentBytes: 64 << 10, ReplyBytes: 1 << 20, OutputBytes: 1 << 20, RetainedBytes: 16 << 20, Calls: 64}
 }
@@ -126,19 +215,27 @@ const MetadataSelectedTools = "code_mode_selected_tools"
 
 // MetadataCatalog carries the Runtime-owned guidance and partial hint snapshot
 // through both static AgentSpec metadata and dynamic request instructions.
-const MetadataCatalog = "code_mode_catalog_v4"
+const MetadataCatalog = "code_mode_catalog_v10"
 
-// Guidance is the fixed model-facing SDK contract. Runtime appends its partial
-// catalog hints separately so discovery never changes this instruction slice.
 // MetadataScriptCompletion records whether script execution returned normally.
 // Its "completed"/"failed" value is presentation-only, independent of cumulative
 // IsError, Task state, authorization and durable effect outcomes.
 const MetadataScriptCompletion = "code_mode_script_completion"
 
-const Guidance = `Code Mode SDK: await tools.search(query) matches an exact tool name first, otherwise searches capabilities. tools.search({server,plugin?,after?}) lists an exact MCP server without fuzzy selection; pass next as after with the same server/plugin to continue. Both return {tools:[{name,description,input_schema}],count,truncated,omitted_count?,next?} with complete schemas; reuse valid bindings. await tools.call(name,args) returns {parts:[{kind,text?,json?,handle?,mime_type?}]}. Follow the schema and tool descriptions; choose sequential or concurrent calls according to their semantics. tools.unpack(reply) returns {json:[],text:[],media:[]} retaining every part and original media references. Explicitly return desired JSON or original reply/part references to deliver output and media; copying media fields does not preserve identity. Return only JSON values: omit undefined fields or use null; no return yields null. Numbers use JS Number precision; use strings for big integers and reply.raw_json for original JSON tokens. Host failures reject with error.reply containing the original projected reply and optional error.code for typed Host errors; local errors may lack reply. Catching does not erase failed records. Never blindly replay unknown outcomes. After a stale binding error, use tools.search(name) to reload its schema/binding. Native filesystem tools remain directly callable; shell execution stays outside js_exec.`
+// Guidance supplies usage preferences; Tool.Definition owns the script API.
+// Runtime appends partial catalog hints separately.
+const Guidance = `Call known tools directly, including schemas from Skills. Search for unknown tools or arguments. Await dependent operations; express independent work concurrently. Runtime schedules execution. Submit js_exec scripts sequentially. After yield, observe the original Task to completion before the next script, or use reset:true to abort the old script. Task controls work independently of the VM.`
+
+const description = `Run JavaScript using exactly one of code, file or reset:true. Call tools directly: await Read(args), await RunCommand(args), await dtw.apps(args), or await context7['query-docs'](args). Top-level await and return work; omitted return is null. Bindings persist only in the active host Session; resume/release/reset clears them. let/const cannot be redeclared; update let by assignment. const is read-only; var/function may repeat.
+
+Tools return a Body; reads are repeatable. result.text() joins reply text/JSON entries with newlines, preserving JSON tokens. result.json() uses successful schema-validated structured content or parses the whole text as one JSON document; multiple documents fail. For Read file text, use result.json().content. result.media holds original media references. Return result for the whole reply without parsing, or select JSON and original media. Copied handles grant no identity. Numbers may round. Omit undefined; convert BigInt to string.
+
+tools.search(selector) accepts {name}, {server,tool,plugin?}, {query}, or {server,plugin?,after?}. Its Body.json(): {tools:[{name,description,input_schema,output_schema?,call_path,server?,tool?,plugin?}],count,truncated,omitted_count?,next?}. Pass next as after; use call_path for conflicts. tools.call(name,args) returns a Body.
+
+Inspect error.message, error.code and error.result when present (reply alias). Failed Bodies are unverified diagnostics; json() only parses text. On stale_revision, search again; never replay unknown outcomes. runtime.state() reports generation/execution on demand. reset:true aborts the old script and clears bindings without replaying effects.`
 
 // Tool is a concrete declaration, retained until Runtime injects its Host.
-// Product assembly uses the fixed ToolName. Every execution has a new VM.
+// Product assembly uses the fixed ToolName. Runtime binds one environment to each active Session.
 type Tool struct {
 	Name     string
 	Executor Executor
@@ -146,12 +243,12 @@ type Tool struct {
 	Limits   Limits
 }
 
-// Definition declares mutually exclusive inline and file source inputs.
+// Definition declares mutually exclusive inline source, file source and reset operations.
 func (t *Tool) Definition() tool.Definition {
-	return tool.Definition{Name: t.Name, Metadata: map[string]any{tool.MetadataToolKind: ToolKind}, Description: "Execute an async JavaScript function body from code or file in fresh state. Use await for tools.search(query) and tools.call(name,args), then explicitly return the desired output. No Node.js, modules, direct filesystem, network or process access. Shell execution stays outside js_exec. Long executions may yield a Task handle.", InputSchema: map[string]any{
+	return tool.Definition{Name: t.Name, Metadata: map[string]any{tool.MetadataToolKind: ToolKind}, Description: description, InputSchema: map[string]any{
 		"type": "object", "additionalProperties": false,
-		"properties": map[string]any{"code": map[string]any{"type": "string", "minLength": 1, "description": "Async JavaScript function body; await tool calls and explicitly return the desired output."}, "file": map[string]any{"type": "string", "minLength": 1, "description": "JavaScript source file path; relative paths resolve from the working directory."}, "yield_time_ms": map[string]any{"type": "integer", "minimum": 0, "maximum": 60000, "default": 10000, "description": "Foreground wait only, in milliseconds. After yielding, use Task read/wait/cancel on the original handle; do not resubmit js_exec."}},
-		"oneOf":      []any{map[string]any{"required": []string{"code"}}, map[string]any{"required": []string{"file"}}},
+		"properties": map[string]any{"code": map[string]any{"type": "string", "minLength": 1, "description": "JavaScript source."}, "file": map[string]any{"type": "string", "minLength": 1, "description": "JavaScript source file path relative to the working directory."}, "reset": map[string]any{"type": "boolean", "const": true, "description": "Replace the environment, interrupting any active script."}, "yield_time_ms": map[string]any{"type": "integer", "minimum": 0, "maximum": 60000, "default": 10000, "description": "Foreground wait in milliseconds; yielding keeps the original Task running."}},
+		"oneOf":      []any{map[string]any{"required": []string{"code"}}, map[string]any{"required": []string{"file"}}, map[string]any{"required": []string{"reset"}}},
 	}}
 }
 

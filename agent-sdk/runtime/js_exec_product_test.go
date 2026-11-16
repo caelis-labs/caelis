@@ -19,6 +19,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/host"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -83,9 +84,9 @@ func TestJSExecRealGojaDiscoveryAndStableTools(t *testing.T) {
 		return tool.Result{Content: []model.Part{model.NewJSONPart(json.RawMessage(`{"value":42}`)), imagePart}}, nil
 	}}}
 	scripts := []string{
-		`const s=await tools.search("fixture");if(s.count!==1||!s.tools[0].input_schema.properties.script)throw Error("incomplete search schema");return s;`,
+		`const s=(await tools.search("fixture")).json();if(s.count!==1||!s.tools[0].input_schema.properties.script)throw Error("incomplete search schema");return s;`,
 		`return await tools.call("fixture__exec",{script:"observe"});`,
-		`const a=await tools.call("Read",{path:"numbers.txt"});const b=await tools.call("Read",{path:"numbers.txt"});if(a.parts[0].json.content!=="1: 17,25"||b.parts[0].json.content!=="1: 17,25")throw Error("Read content shape");return [a,b];`,
+		`const a=await tools.call("Read",{path:"numbers.txt"});const b=await tools.call("Read",{path:"numbers.txt"});if(a.json().content!=="1: 17,25"||b.json().content!=="1: 17,25")throw Error("Read content shape");return [a,b];`,
 	}
 	driver := &mcpScriptModel{steps: func(i int, req *model.Request) []model.ToolCall {
 		if i >= len(scripts) {
@@ -196,7 +197,7 @@ func TestJSExecRealGojaDiscoveryAndStableTools(t *testing.T) {
 	}
 }
 
-func TestJSExecBlocksNativeProcessAliasesAndKeepsErrors(t *testing.T) {
+func TestJSExecNativeProcessAliasesRetainPolicyDenial(t *testing.T) {
 	store, active, root := codeModeStore(t)
 	sandbox, err := host.New(host.Config{CWD: root})
 	if err != nil {
@@ -219,7 +220,13 @@ func TestJSExecBlocksNativeProcessAliasesAndKeepsErrors(t *testing.T) {
 		}
 		return nil
 	}}
-	events, _ := runCodeMode(t, store, active, agent.AgentSpec{Model: driver, Tools: []tool.Tool{disguised, &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}, Sandbox: sandbox}}}, nil, nil)
+	registry := staticPolicyRegistry{mode: policy.NamedMode{ID: "mcp-test", Decide: func(_ context.Context, in policy.ToolContext) (policy.Decision, error) {
+		if in.Tool.ExecutionRequirements != nil && in.Tool.ExecutionRequirements.Sandbox.CommandExec {
+			return policy.Decision{Action: policy.ActionDeny, Reason: "fixture command route denied"}, nil
+		}
+		return policy.Decision{Action: policy.ActionAllow}, nil
+	}}}
+	events, _ := runCodeMode(t, store, active, agent.AgentSpec{Model: driver, Tools: []tool.Tool{disguised, &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}, Sandbox: sandbox}}}, registry, nil)
 	if effects != 0 {
 		t.Fatal("process alias executed")
 	}
@@ -413,7 +420,7 @@ func TestJSExecStaleSchemaRejectsOldArgumentsBeforeEffect(t *testing.T) {
 	driver := &mcpScriptModel{steps: func(i int, r *model.Request) []model.ToolCall {
 		switch i {
 		case 0:
-			return []model.ToolCall{{ID: "describe", Name: codemode.ToolName, Args: `{"code":"return await tools.search('fixture__changing');"}`}}
+			return []model.ToolCall{{ID: "describe", Name: codemode.ToolName, Args: `{"code":"return (await tools.search('fixture__changing')).json();"}`}}
 		case 1:
 			next := fixtureMCPDefinition("v2")
 			next.Name = old.Name
@@ -433,7 +440,7 @@ func TestJSExecStaleSchemaRejectsOldArgumentsBeforeEffect(t *testing.T) {
 	for _, e := range events {
 		if e.Tool != nil && e.Tool.ID == "stale" && e.Type == session.EventTypeToolResult {
 			raw, _ := json.Marshal(e.Tool.Output)
-			if e.Tool.Status != "failed" || !bytes.Contains(raw, []byte("refreshed")) || !bytes.Contains(raw, []byte("tools.search(name)")) {
+			if e.Tool.Status != "failed" || !bytes.Contains(raw, []byte("schema changed")) || !bytes.Contains(raw, []byte("tools.search")) {
 				t.Fatalf("stale call lacked actionable error: %s", raw)
 			}
 			checked = true

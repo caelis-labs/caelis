@@ -134,31 +134,18 @@ func (tm *taskRuntime) syncCanonicalToolOutput(ctx context.Context, ref session.
 }
 
 func (tm *taskRuntime) syncCanonicalTaskEntry(ctx context.Context, ref session.SessionRef, taskID string, kind taskapi.Kind, output map[string]any, event *session.Event) (bool, error) {
-	if kind == taskapi.KindCommand && taskStringValue(output["state"]) == string(taskapi.StateWaitingApproval) {
-		// Submission already persisted the intent. A delayed observation cannot
-		// move the producer back to approval after it has started or settled.
-		return true, nil
-	}
 	entry, ok := tm.storedTaskEntry(ctx, ref, taskID, kind)
 	if !ok {
 		return false, nil
 	}
-	if entry.State == taskapi.StateUnknownOutcome {
+	if !canonicalTaskResultMatchesEntry(entry, output) {
 		return true, nil
-	}
-	status := ""
-	if event != nil && event.Tool != nil {
-		status = event.Tool.Status
 	}
 	updatedAt := time.Time{}
 	if event != nil {
 		updatedAt = event.Time
 	}
-	canonicalOutput := output
-	if kind == taskapi.KindSubagent {
-		canonicalOutput = canonicalSubagentTaskOutput(output, status, entry.State, entry.FailureDiagnostic)
-	}
-	applyCanonicalTaskEntry(entry, canonicalOutput, status, updatedAt)
+	applyCanonicalTaskResult(entry, output, updatedAt)
 	if err := tm.persistTaskEntry(ctx, entry); err != nil {
 		return false, err
 	}
@@ -190,37 +177,61 @@ func storedTaskEntryMatches(entry *taskapi.Entry, ref session.SessionRef, kind t
 	return entry != nil && strings.TrimSpace(entry.Session.SessionID) == strings.TrimSpace(ref.SessionID) && entry.Kind == kind
 }
 
-func applyCanonicalTaskEntry(entry *taskapi.Entry, output map[string]any, status string, updatedAt time.Time) {
-	if entry == nil {
-		return
-	}
-	diagnostic := entry.FailureDiagnostic
-	entry.Result = session.CloneState(output)
-	if entry.Kind == taskapi.KindCommand {
-		syncCanonicalCommandTaskMetadata(entry, output)
-	}
-	if state := taskStateFromCanonicalOutput(output, status, entry.State); state != "" {
-		entry.State = state
-		entry.Running = taskStateRunning(state)
+// Canonical results supply bounded final text, never lifecycle authority.
+// Concurrent observations may be published in model-call order rather than
+// producer order; a matching settled producer is required before enrichment.
+func canonicalTaskResultMatchesEntry(entry *taskapi.Entry, output map[string]any) bool {
+	if entry == nil || entry.Running || entry.State == taskapi.StateUnknownOutcome ||
+		!taskapi.IsTerminalState(entry.State) || taskapi.State(taskStringValue(output["state"])) != entry.State {
+		return false
 	}
 	if entry.Kind == taskapi.KindSubagent {
-		normalizeSubagentEntryResult(entry, diagnostic)
+		turn := taskTurnSeqFromSpec(entry.Spec)
+		turnID := taskStringValue(output["turn_id"])
+		sequence, hasSequence := taskInt64Value(output["turn_seq"])
+		if turnID != "" && turnID != firstNonEmpty(taskSpecString(entry.Spec, "turn_id"), subagentTurnID(entry.TaskID, turn)) ||
+			hasSequence && sequence != turn || turnID == "" && !hasSequence && turn > 1 {
+			return false
+		}
+	}
+	// A state-only cancellation or Spawn receipt has no final result to sync.
+	for _, key := range []string{"result", "final_message", "exit_code", "error", "error_code"} {
+		if _, exists := output[key]; exists {
+			return true
+		}
+	}
+	return false
+}
+
+func applyCanonicalTaskResult(entry *taskapi.Entry, output map[string]any, updatedAt time.Time) {
+	result := session.CloneState(entry.Result)
+	if result == nil {
+		result = map[string]any{}
+	}
+	// A terminal reload can observe only exit status before final text syncs.
+	// Omitted result fields do not clear a preceding complete observation.
+	for key, value := range output {
+		result[key] = value
+	}
+	entry.Result = result
+	if entry.Kind == taskapi.KindCommand {
+		syncCanonicalCommandTaskMetadata(entry, result)
+	}
+	if entry.Kind == taskapi.KindSubagent {
+		entry.Result = canonicalSubagentTaskOutput(result, entry.State, entry.FailureDiagnostic)
 	}
 	if !updatedAt.IsZero() {
 		entry.UpdatedAt = updatedAt
 	}
 }
 
-func canonicalSubagentTaskOutput(
-	output map[string]any,
-	status string,
-	fallback taskapi.State,
-	failureDiagnostic string,
-) map[string]any {
+func hasTaskFinalText(result map[string]any) bool {
+	return taskRawStringValue(result["result"]) != "" || taskRawStringValue(result["final_message"]) != ""
+}
+
+func canonicalSubagentTaskOutput(output map[string]any, state taskapi.State, failureDiagnostic string) map[string]any {
 	out := session.CloneState(output)
-	state := taskStateFromCanonicalOutput(out, status, fallback)
-	// Canonical output is model-visible compatibility data, not a trust source.
-	// Only the typed diagnostic already owned by Runtime may survive a rebuild.
+	// Only the typed diagnostic already owned by Runtime supplies failure text.
 	normalizeSubagentResultForState(&out, state, failureDiagnostic)
 	return out
 }
@@ -231,19 +242,19 @@ type canonicalTaskHistoryOutput struct {
 	Trusted         bool
 	BindingDeclared bool
 	CallID          string
-	Status          string
 	UpdatedAt       time.Time
 }
 
-func (tm *taskRuntime) backfillCanonicalTaskEntry(ctx context.Context, ref session.SessionRef, entry *taskapi.Entry) (*taskapi.Entry, error) {
+// recoverCanonicalTaskResult completes deferred final-text persistence after a
+// missed canonical sync. History can fill missing result fields, but cannot
+// replace producer lifecycle or an already retained final result.
+func (tm *taskRuntime) recoverCanonicalTaskResult(ctx context.Context, ref session.SessionRef, entry *taskapi.Entry) (*taskapi.Entry, error) {
 	entry = taskapi.CloneEntry(entry)
 	if entry == nil || tm == nil || tm.runtime == nil || tm.runtime.sessions == nil || tm.store == nil {
 		return entry, nil
 	}
-	// Unknown outcome is a durable safety state produced after a later effect
-	// claim or failed reconciliation. Historical model-visible tool output has
-	// no operation revision and therefore cannot safely prove that state stale.
-	if entry.State == taskapi.StateUnknownOutcome || entry.Kind == taskapi.KindCodeMode {
+	if entry.Running || !taskapi.IsTerminalState(entry.State) || entry.State == taskapi.StateUnknownOutcome ||
+		entry.Kind == taskapi.KindCodeMode || hasTaskFinalText(entry.Result) {
 		return entry, nil
 	}
 	events, err := tm.runtime.sessions.Events(ctx, session.EventsRequest{SessionRef: ref})
@@ -257,13 +268,15 @@ func (tm *taskRuntime) backfillCanonicalTaskEntry(ctx context.Context, ref sessi
 	)
 	for _, event := range events {
 		for _, candidate := range canonicalTaskHistoryOutputs(event) {
-			if entry.Kind == taskapi.KindCommand && taskStringValue(candidate.Output["state"]) == string(taskapi.StateWaitingApproval) {
-				continue
-			}
-			if (candidate.Kind != "" && candidate.Kind != entry.Kind) || !canonicalTaskOutputMatchesEntry(entry, candidate.Output) {
+			if (candidate.Kind != "" && candidate.Kind != entry.Kind) || !canonicalTaskOutputMatchesEntry(entry, candidate.Output) ||
+				!canonicalTaskResultMatchesEntry(entry, candidate.Output) {
 				continue
 			}
 			if !candidate.Trusted && (candidate.BindingDeclared || !legacyCanonicalTaskRelationMatchesEntry(entry, candidate)) {
+				continue
+			}
+			// Later exit-only receipts cannot shadow recoverable final text.
+			if found && hasTaskFinalText(latest.Output) && !hasTaskFinalText(candidate.Output) {
 				continue
 			}
 			latest = candidate
@@ -273,19 +286,23 @@ func (tm *taskRuntime) backfillCanonicalTaskEntry(ctx context.Context, ref sessi
 	if !found {
 		return entry, nil
 	}
-	if !entry.UpdatedAt.IsZero() && (latest.UpdatedAt.IsZero() || !latest.UpdatedAt.After(entry.UpdatedAt)) {
+	if !hasTaskFinalText(latest.Output) && !entry.UpdatedAt.IsZero() && (latest.UpdatedAt.IsZero() || !latest.UpdatedAt.After(entry.UpdatedAt)) {
 		return entry, nil
 	}
-	canonicalOutput := latest.Output
-	if entry.Kind == taskapi.KindSubagent {
-		canonicalOutput = canonicalSubagentTaskOutput(
-			latest.Output,
-			latest.Status,
-			entry.State,
-			entry.FailureDiagnostic,
-		)
+	result := session.CloneState(entry.Result)
+	if result == nil {
+		result = map[string]any{}
 	}
-	applyCanonicalTaskEntry(entry, canonicalOutput, latest.Status, latest.UpdatedAt)
+	for key, value := range latest.Output {
+		if _, exists := result[key]; !exists {
+			result[key] = value
+		}
+	}
+	updatedAt := time.Time{}
+	if latest.UpdatedAt.After(entry.UpdatedAt) {
+		updatedAt = latest.UpdatedAt
+	}
+	applyCanonicalTaskResult(entry, result, updatedAt)
 	if err := tm.persistTaskEntry(ctx, entry); err != nil {
 		var conflict *taskapi.RevisionConflictError
 		var fenceConflict *session.FenceConflictError
@@ -331,7 +348,6 @@ func canonicalTaskHistoryOutputs(event *session.Event) []canonicalTaskHistoryOut
 				Trusted:         trusted,
 				BindingDeclared: bindingDeclared,
 				CallID:          strings.TrimSpace(event.Tool.ID),
-				Status:          event.Tool.Status,
 				UpdatedAt:       event.Time,
 			})
 		}
@@ -348,7 +364,6 @@ func canonicalTaskHistoryOutputs(event *session.Event) []canonicalTaskHistoryOut
 		Trusted:         trusted,
 		BindingDeclared: bindingDeclared,
 		CallID:          strings.TrimSpace(event.Tool.ID),
-		Status:          event.Tool.Status,
 		UpdatedAt:       event.Time,
 	}}
 }
@@ -460,26 +475,6 @@ func syncCanonicalCommandTaskMetadata(entry *taskapi.Entry, output map[string]an
 	}
 	delete(entry.Metadata, "output_cursor")
 	delete(entry.Metadata, "model_output_cursor")
-}
-
-func taskStateFromCanonicalOutput(output map[string]any, status string, fallback taskapi.State) taskapi.State {
-	if state := taskapi.State(strings.TrimSpace(taskStringValue(output["state"]))); state != "" {
-		return state
-	}
-	switch strings.ToLower(strings.TrimSpace(status)) {
-	case "running", "waiting_input", "waiting_approval":
-		return taskapi.StateRunning
-	case "failed":
-		return taskapi.StateFailed
-	case "interrupted":
-		return taskapi.StateInterrupted
-	case "cancelled", "canceled":
-		return taskapi.StateCancelled
-	case "completed":
-		return taskapi.StateCompleted
-	default:
-		return fallback
-	}
 }
 
 func taskStateRunning(state taskapi.State) bool {

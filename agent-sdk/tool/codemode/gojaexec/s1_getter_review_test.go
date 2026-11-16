@@ -13,8 +13,8 @@ func TestReviewS1AuthenticatedReplyGetterEvaluatedOnce(t *testing.T) {
 		return codemode.Reply{Outcome: codemode.OutcomeSucceeded, Parts: []codemode.Part{{Kind: "media", Handle: "owned-A", MimeType: "image/png"}}}, nil
 	}}
 	for _, tc := range []struct{ name, code string }{
-		{"reply_parts_getter", `const r=await tools.call("Target",{});const real=r.parts;let n=0;Object.defineProperty(r,"parts",{enumerable:true,get(){return ++n===1?[{kind:"json",json:{reads:n}}]:real;}});return r;`},
-		{"reply_extra_property", `const r=await tools.call("Target",{});let n=0;r.note="ordinary data";Object.defineProperty(r,"parts",{enumerable:true,get(){return [{kind:"json",json:{reads:++n}}];}});return r;`},
+		{"reply_parts_getter", `const r=await tools.call("Target",{});const real=r.media;const selected={};let n=0;Object.defineProperty(selected,"parts",{enumerable:true,get(){return ++n===1?[{kind:"json",json:{reads:n}}]:real;}});return selected;`},
+		{"reply_extra_property", `const r=await tools.call("Target",{});const selected={note:"ordinary data"};let n=0;Object.defineProperty(selected,"parts",{enumerable:true,get(){return [{kind:"json",json:{reads:++n}}];}});return selected;`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			output, err := (&Executor{}).Execute(t.Context(), fixed(tc.code), codemode.Limits{}, h)

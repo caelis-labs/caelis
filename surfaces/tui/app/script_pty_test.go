@@ -84,11 +84,20 @@ func scriptPTYStages() [][]*session.Event {
 			typ = session.EventTypeToolResult
 		}
 		entry := &session.EventTool{ID: id, Name: name, Status: status, Input: map[string]any{"path": path}}
+		if name == "RunCommand" {
+			entry.Input = map[string]any{"command": "printf native-reference"}
+		}
 		if name == "Grep" {
 			entry.Input = map[string]any{"path": path, "pattern": "contract"}
 		}
 		if name == "js_exec" {
-			entry.Input = map[string]any{"code": "SOURCE_MUST_STAY_HIDDEN"}
+			entry.Input = map[string]any{"code": "const first = await Read({path:'notes/first.txt'});\nconst second = await Read({path:'notes/second.txt'});\nreturn {first:first.json().content,second:second.json().content};"}
+			if id == "s3" {
+				entry.Input = map[string]any{"file": "probe.js"}
+			}
+			if id == "s4" {
+				entry.Input = map[string]any{"code": "return 42;"}
+			}
 		}
 		if name == "desktop_world__exec" {
 			entry.Input = map[string]any{"source": "return await app.look();"}
@@ -106,12 +115,15 @@ func scriptPTYStages() [][]*session.Event {
 				completion = "failed"
 			}
 			event.Meta = map[string]any{"code_mode_script_completion": completion}
+			if id == "s3" {
+				event.Meta["code_mode_source"] = map[string]any{"path": "probe.js", "code": "const a=1;\nconst b=2;\nthrow new Error('fixture failure');"}
+			}
 		}
 		return event
 	}
 	narrative := &session.Event{SessionID: "visual-fixture", Type: session.EventTypeAssistant, Protocol: &session.EventProtocol{Method: session.ProtocolMethodSessionUpdate, Update: &session.ProtocolUpdate{SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage), Content: session.ProtocolTextContent("Now **check the next file**. This explanation stays outside both scripts.")}}}
 	return [][]*session.Event{
-		{tool("native1", "Read", "", "completed", "README.md", ""), tool("native2", "Grep", "", "completed", "docs", "")},
+		{tool("native-shell", "RunCommand", "", "completed", "", "native-reference"), tool("native1", "Read", "", "completed", "README.md", ""), tool("native2", "Grep", "", "completed", "docs", "")},
 		{tool("s1", "js_exec", "", "started", "", "")},
 		{tool("c1", "Read", "s1", "started", "notes/first.txt", "")},
 		{tool("c1", "Read", "s1", "completed", "notes/first.txt", "PRIVATE_CHILD_CONTENT"), tool("c1b", "Read", "s1", "completed", "notes/second.txt", "PRIVATE_SECOND_CONTENT"), tool("c2", "desktop_world__exec", "s1", "started", "", "")},

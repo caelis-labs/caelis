@@ -456,7 +456,7 @@ func TestCommandApprovalRecoveryNeverRestarts(t *testing.T) {
 	if _, err := r.sessions.AppendEvent(t.Context(), session.AppendEventRequest{SessionRef: active.SessionRef, Event: stale}); err != nil {
 		t.Fatal(err)
 	}
-	backfilled, err := r.tasks.backfillCanonicalTaskEntry(t.Context(), active.SessionRef, latest)
+	backfilled, err := r.tasks.recoverCanonicalTaskResult(t.Context(), active.SessionRef, latest)
 	if err != nil || backfilled.State != taskapi.StateInterrupted || backfilled.Revision != latest.Revision {
 		t.Fatalf("delayed pending result regressed recovery: %#v, %v", backfilled, err)
 	}

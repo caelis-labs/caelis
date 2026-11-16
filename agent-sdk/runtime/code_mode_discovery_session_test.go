@@ -285,9 +285,9 @@ func TestJSExecH1SessionReuseAndPermissionRevocation(t *testing.T) {
 			m := &h1Model{s: s, main: func(i int, _ *model.Request) []model.ToolCall {
 				switch i {
 				case 0:
-					return h1Script(`globalThis.local=1;return [await tools.search("a__target"),await tools.search("z__target")];`)
+					return h1Script(`globalThis.local=1;return [(await tools.search("a__target")).json(),(await tools.search("z__target")).json()];`)
 				case 1:
-					return h1Script(`if(typeof local!=="undefined")throw Error("VM retained variable");await tools.call("a__target",{value:1});await tools.call("z__target",{value:1});`)
+					return h1Script(`if(local!==1)throw Error("VM lost Session state");await tools.call("a__target",{value:1});await tools.call("z__target",{value:1});`)
 				}
 				return nil
 			}}
@@ -305,7 +305,7 @@ func TestJSExecH1SessionReuseAndPermissionRevocation(t *testing.T) {
 			}
 			h1Run(t, rt, active, h1Spec(s, m))
 			if got := s.snapshot(); got.ExactRequests != 0 || got.QueryRequests != 0 || got.SelectorCalls != 0 || got.Effects != 2 {
-				t.Fatalf("new Turn/VM rediscovered or missed effects: %+v", got)
+				t.Fatalf("new Turn rediscovered or missed effects: %+v", got)
 			}
 			if change == "permission" {
 				deny = true
@@ -377,12 +377,19 @@ func TestJSExecH1HintWarningOncePreservesCapability(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Count(text, tool.ExternalCapabilityDescriptionPrefix) != 1 || !strings.Contains(text, "Read a synthetic lookup") || !strings.Contains(text, "{tools:[{name,description,input_schema}],count,truncated,omitted_count?,next?}") || strings.Contains(text, "parallel_safe") {
-		t.Fatalf("H1 guidance/hint semantics lost: %s", text)
+	description := (&codemode.Tool{Name: codemode.ToolName}).Definition().Description
+	if strings.Count(text, tool.ExternalCapabilityDescriptionPrefix) != 1 || !strings.Contains(text, "Read a synthetic lookup") || strings.Contains(text, "input_schema") || strings.Contains(text, "parallel_safe") {
+		t.Fatalf("H1 hint semantics lost or schemas leaked into guidance: %s", text)
 	}
-	if !strings.Contains(text, "tools.call(name,args)") || !strings.Contains(text, "input_schema") || strings.Contains(text, "tools.describe") || strings.Contains(text, "output.") {
-		t.Fatal("minimal search/call guidance absent")
+	if !strings.Contains(text, "Search for unknown tools or arguments") || strings.Contains(text, "tools.search(") || strings.Contains(text, "tools.describe") || strings.Contains(text, "output.") {
+		t.Fatal("guidance should contain preferences without duplicating API details")
 	}
+	for _, contract := range []string{"tools.search(", "{name}", "{server,tool,plugin?}", "{query}", "{server,plugin?,after?}", "input_schema", "output_schema", "call_path", "tools.call(name,args)", "error.message, error.code and error.result when present", "stale_revision"} {
+		if !strings.Contains(description, contract) {
+			t.Fatalf("js_exec description lost API contract %q", contract)
+		}
+	}
+
 	state, _ := store.SnapshotState(t.Context(), active.SessionRef)
 	if state["code_mode_catalog_v2"] != "legacy guidance requiring parallel_safe" || state["code_mode_catalog_v3"] != "legacy guidance without service continuation" {
 		t.Fatal("changed a historical API snapshot")
@@ -431,13 +438,13 @@ func TestJSExecSearchRejectsUnsupportedObject(t *testing.T) {
 	s := h1Directory(0)
 	m := &h1Model{s: s, main: func(i int, _ *model.Request) []model.ToolCall {
 		if i == 0 {
-			return h1Script(`return await tools.search({name:"unknown"});`)
+			return h1Script(`return (await tools.search({name:"unknown",query:"invalid selector combination"})).json();`)
 		}
 		return nil
 	}}
 	events, _ := runCodeMode(t, store, active, h1Spec(s, m), nil, nil)
-	if s.snapshot().QueryRequests != 0 {
-		t.Fatal("invalid query reached discovery")
+	if got := s.snapshot(); got.ExactRequests != 0 || got.QueryRequests != 0 {
+		t.Fatalf("invalid selector reached discovery: %+v", got)
 	}
 	for _, e := range events {
 		if e.Tool != nil && e.Tool.Name == codemode.ToolName && e.Tool.Status == "failed" {

@@ -1,71 +1,158 @@
 # Code Mode
 
-The fixed `js_exec` entry runs JavaScript orchestration in a fresh Goja worker.
+The fixed `js_exec` entry runs JavaScript orchestration in a continuous Goja environment for the active host Session.
 Actual tools, policy,
 approval, Guardian, invocation identity, Journal and Task lifecycle remain owned
 by Runtime.
 
 ## Model tools and discovery
 
-Core filesystem and shell tools keep their native function-call definitions.
-Filesystem tools are also callable from JavaScript through their real wrapped
-Tool identities. Shell, RunCommand, aliases and equivalent native process-launch
-capabilities are rejected in code before JS dispatch. A name containing `exec`
-is not sufficient to classify a tool: Desktop World exec is a domain operation,
-not the native shell entry.
+The model uses one fixed `js_exec` entry with exactly one of `code`, `file` and `reset:true`,
+plus the foreground wait option. Runtime supplies general usage preferences and
+an optional bounded hint snapshot through model instructions; the `js_exec`
+description owns the JavaScript API contract. Hints contain partial name and
+description summaries. Search finds tools not shown in the hints, and discovery
+does not rewrite existing prompt slices or tool definitions.
 
-Extensions use one fixed `js_exec` definition, accepting exactly one of `code`
-and `file`, plus the existing foreground wait convention. The model does not
-also receive `tool_search`, `mcp_call`, or changing MCP schemas in its tools array.
-Product assembly selects canonical extension names via
-`AgentSpec.Metadata[codemode.MetadataSelectedTools]`; the SDK has no integration
-allowlist. A small name/description catalog is a partial, bounded Session hint snapshot;
-other extensions are found by fuzzy search. Discovery never rewrites earlier prompt
-slices or changes the serialized tools definitions.
+Supply an async JavaScript function body, use `await`, and explicitly `return`
+the desired result. Top-level state remains available in the active environment. `file` paths resolve
+relative to the working directory. Use tools for filesystem and network I/O, and
+RunCommand remains available both as a native function call and inside JavaScript.
+Both routes use the same command producer, policy, approval, Journal and Task controls.
 
-Supply an async function body, use `await`, and explicitly `return` the desired
-output. Each execution starts with fresh state. There are no Node.js, module,
-direct filesystem, network or process APIs. `file` paths resolve relative to the
-working directory; shell execution stays outside `js_exec`.
+Call a known tool directly using the syntax shown by its name and schema. This
+works for tools learned from Skills too; no search is needed when the schema is
+known. Calls may use function or method syntax, for example:
 
-The async function body exposes these SDK operations:
+```javascript
+const file = await Read(args);
+return {content: file.json().content};
+await dtw.apps(args);
+await context7['query-docs'](args);
+```
 
-- `await tools.search(query)` first matches an exact callable native or current
-  extension name, otherwise uses the existing fuzzy search. It returns
-  `{tools:[{name,description,input_schema}],count,truncated,omitted_count?,next?}`.
-  `tools.search({server,plugin?,after?})` instead matches an exact MCP server and
-  optional plugin identity without fuzzy selection. Current model and source
-  eligibility are applied before the result limits and schema budget. Service
-  pages use name order; when `next` is present, pass it as `after` with the same
-  server/plugin to continue. A removed, revoked or foreign continuation anchor
-  requires restarting discovery. Both routes return complete schemas;
-  `truncated` and `omitted_count` describe remaining eligible candidates.
-  An individually oversized schema produces a budget error. Extension bindings
-  are recorded by the original canonical discovery owner.
-- `tools.call(name, args)` returns a Promise resolving to `{parts:[...]}`. Text parts have `text`,
-  JSON parts have `json`, and media parts carry an opaque invocation-owned handle.
-- `tools.unpack(reply)` returns `{json:[],text:[],media:[]}` in each part kind's
-  original order. All JSON and text parts are retained, including repeated
-  representations; media entries are original part references. The input must be
-  an original tool reply, including one obtained from `error.reply`.
+Use `tools.search(selector)` when a schema is unknown or to find a tool. It
+accepts these selectors:
 
-`return await tools.call(name, args)` delivers the text, JSON and actual media to
-model context. `return await tools.search(query)` delivers the search result.
-Scripts may process or combine returned values; only media present in the final
-return value is selected, never other calls' unreturned or historical media.
-The bridge tracks real reply/part object identities privately. Selecting those
-references preserves media; copying or reconstructing their fields creates
-ordinary JSON. Business properties named kind, parts or handle have no control
-meaning. Returned references are checked against the current invocation and
-retained media budgets. A failed or unknown child remains failed even if JavaScript catches its
-exception. No `tools.describe` or `output` interface is installed.
+- `{name}` looks up one exact tool name. A miss returns `not_found` and does not
+  fall back to capability search.
+- `{server,tool,plugin?}` looks up an exact method. An ambiguous match fails with
+  `too_many_matches`; add `plugin` or use an exact name.
+- `{query}` performs capability search only.
+- `{server,plugin?,after?}` lists a server's tools. When `next` is present, pass
+  it as `after` with the same `server` and `plugin` to continue.
+- A legacy string tries an exact name first, then searches capabilities.
 
-First MCP discovery establishes bindings reusable within that Session. Search
-and calls may be sequentially awaited in the same script. Known schemas may be
-reused across calls; a fresh VM clears only JS variables. Host failures reject
-with an Error whose `reply` property contains the host reply. Typed Host failures
-also expose `error.code`; tool-specific error codes and effect details stay in
-that reply's original content. Local validation or script errors may lack `reply`.
+Read a search Body with `(await tools.search(selector)).json()`. Its JSON has the shape
+`{tools:[{name,description,input_schema,output_schema?,output_format,call_path,server?,tool?,plugin?}],count,truncated,omitted_count?,next?}`.
+Each tool includes its complete schema. `server`, `tool`, and `plugin` preserve
+original names when present. `call_path` is a JavaScript template such as
+`tools.call("returned_name", args)`; supply your argument object for `args` and
+use the path as returned. This handles special or conflicting names, including
+names found during the current execution. `truncated`, `omitted_count`, and `next`
+describe remaining results and pagination. Search uses the same repeatable Body API as every other tool entry.
+
+Every tool call returns the same Body object, through direct functions and
+`tools.call` alike:
+
+```javascript
+const response = await Read({path: "input.json"});
+const file = response.json();
+return {content: file.content};
+```
+
+`result.text()` joins the tool reply's textual and JSON content in original order
+with a newline between entries. JSON entries retain their original tokens. For
+Read file text, use `result.json().content`; `text()` contains the reply envelope.
+`result.json()` uses the successful, schema-validated structured content when
+available; otherwise it parses the complete `text()` as one JSON document.
+Empty text and multiple independent JSON documents produce a parsing error.
+Both reads are synchronous and repeatable. `result.media` contains every original
+media/file reference in content order. Copying its handle fields grants no media
+authority. Returning a Body directly delivers its complete original reply;
+returning other values delivers their actual fields and selected original media
+references. Deleting fields from parsed JSON cannot restore removed attachments.
+
+Declared output schemas remain validated at the tool boundary. Inspect
+`error.message`, `error.code` and `error.result` when present; `error.reply` aliases
+`result`. A failed Host call exposes a diagnostic Body whose structured content
+is unverified; its `json()` only parses text. Script and local validation errors
+may omit these properties. Use `text()` and `media` for failure diagnostics.
+JavaScript Number computations follow Number precision; `text()` and a complete
+Body return retain original JSON tokens. Encode BigInt as a string, omit undefined
+fields or use null. An omitted return is null.
+
+## Continuous environment
+
+An active host Session has one disposable JavaScript environment. Execute scripts
+in sequence. Top-level `let`, `const`, `var`, function and class declarations stay
+available to later scripts; ordinary assignment updates that same binding.
+`let` and `const` cannot be redeclared in the same environment, and `const` cannot
+be assigned. `var` and function declarations may be repeated. Block and function
+locals retain their JavaScript scope. Top-level `await` waits for tools and
+`return` selects this script's output without clearing its bindings. Bindings are
+reserved before execution; failed or unreached lexical initialization stays
+uninitialized until the environment is reset.
+
+```javascript
+// First js_exec
+let response = await Read({path: "input.json"});
+let file = response.json();
+return file.content;
+
+// Later js_exec in the same active Session
+return {content: file.content, images: response.media};
+```
+
+`runtime.state()` returns this environment's generation and the current execution
+identity on demand. `js_exec({reset:true})`, mutually exclusive with `code` and
+`file`, replaces the environment and cancels its old script. It works independently
+of the occupied VM. A new environment does not wait for the old environment's
+cleanup. Old responses stay bound to their old execution and generation; no tool
+effect is replayed. Original Task and Journal records retain their disposition,
+including uncertain effects. Reset and environment release clear bindings,
+retained media and their cumulative retention budget.
+
+The SDK Runtime owns the environment under its existing Session execution
+activation. The product releases it through `sessionRuntimeRegistry` only after
+Session uses, producer work, observers and running Tasks permit the ordinary
+resource-release path. There is no additional VM idle timer or Task dependency
+lease. Session reactivation/resume creates a new environment. No reset notification
+is injected into model instructions; scripts may inspect `runtime.state()` when
+needed.
+
+One script occupies the environment until its execution terminates. Foreground
+yield is not termination: observe the original Task to completion before sending
+the next script, or use `reset:true` to interrupt the occupied environment. A busy
+error is a fallback for overlapping submissions, not a scheduling mechanism. Task read/wait/cancel remains outside the VM. Within one
+script, await dependent operations; independent operations may be expressed
+concurrently. Runtime schedules their actual execution.
+Current Run cancellation, approvals, Guardian, Journal and Task ownership remain
+authoritative; retained variables do not keep an old Run alive or grant new tool
+authority. Execution cancellation interrupts and, if necessary, kills the original
+worker. Cleanup is bounded at the process boundary; pending tool producers keep
+their existing Runtime receipt and quiescence obligations.
+
+Exact misses report `not_found`; ambiguous matches report `too_many_matches`. A `stale_revision`
+error means search again and revise the arguments. Observe unknown outcomes
+without replaying the input.
+
+## Runtime-owned execution contracts
+
+Canonical search receipts and started child Journal records for Code Mode tool
+executions preserve MCP identity/version bindings across environment replacement,
+compaction and file-Store resume. A first direct MCP call without a prior binding
+pins the current real Tool identity/version. Its arguments and execution still
+pass normal Runtime schema and policy admission. Later calls enforce that binding.
+If the bound MCP source or schema changes, the direct call fails stale before
+executing old arguments. Use `tools.search({name})` to get the complete schema and
+explicitly refresh the binding, then make a later call under the refreshed binding.
+Each VM snapshots current Session names; a later VM sees newly ready tools, and a
+search result's `call_path` can resolve a name that became ready during the current
+execution. Search does not rewrite existing prompt slices or model tool arrays.
+Outside Code Mode, `mcp_call` still requires prior discovery.
+
+Tool-specific error codes and effect details stay in the reply's original content.
 Catching does not erase failed records. An uncaught script exception produces
 `javascript_error` plus the Runtime-retained failed replies, including original
 call IDs and JSON tokens. Caught failures retain compact disposition records and
@@ -76,10 +163,11 @@ messages are generic unless the Runtime owner explicitly marks a fixed diagnosti
 as public. Uncaught failures retain media handles as JSON evidence without
 attaching images. To deliver a diagnostic image, catch the error and return its
 original media reference. An unknown outcome must never be replayed blindly.
-Arguments follow the schema, including required exact strings. Native filesystem
-functions remain directly callable and may also be orchestrated from JS. Search
-and call retain current source, generation, binding and permission checks. On a
-stale result, search again; old arguments are not automatically executed.
+Arguments follow each tool's schema, including required exact strings. Direct
+calls, generated call paths, and tool search retain the Runtime-owned source,
+schema, policy, approval, Guardian, cancellation, Journal, media and budget
+checks. A stale schema requires a fresh search before a later call; old arguments
+are never automatically executed.
 
 Sources may implement the existing `tool.NamedSource`/`Registry.Lookup` contract.
 Lookup grants no authority; both admission boundaries and the final Journal claim
@@ -88,16 +176,9 @@ fallback; fuzzy search retains its existing selector budgets. No source or
 discovery lock crosses approval or Tool I/O. Snapshot hints remain fixed within this API version; a
 software API change creates its own presentation snapshot, not a new grant cache.
 
-JSON Numbers outside JavaScript's safe integer range may round. The original
-reply remains explicitly accessible through non-enumerable `reply.raw_json`,
-which retains original JSON tokens. BigInt must be returned as a string. Return only JSON values; omit
-optional undefined properties or use null. An omitted return is null. Encoding errors
-identify the field path. Scripts choose sequential or concurrent calls according
-to tool descriptions and operation semantics. `Promise.all` remains available;
-Runtime enforces the tool owner's concurrency capability internally through the
+Runtime schedules tool execution through the
 [Run-owned execution gate](agent-sdk-boundary.md#runtime-and-capabilities).
-Discovery does not expose a concurrency flag. Ordinary admission, call budgets,
-cancellation and receipt ownership apply to every call.
+Discovery, call budgets, cancellation and receipts keep their existing owners.
 
 ## Authority and invalidation
 
@@ -111,7 +192,7 @@ generation admission, effect claim, Journal and lifecycle wrappers. Discovery
 is not an execution grant. Refresh remains low-frequency Manager-owned work;
 searches do not push full catalog updates into prompts. Before an old binding
 can execute, a changed source/schema produces a distinct stale-binding error:
-the catalog was refreshed and tools.search(name) must reload it. Old
+the catalog was refreshed and tools.search({name}) must reload it. Old
 arguments are not dispatched or automatically retried with a new schema.
 Offline and revoked access retain their own errors.
 
@@ -138,26 +219,33 @@ normally completed script has a normal dot. An uncaught exception has a red dot.
 Older records without this observation do not infer script failure from child
 errors. Zero-child scripts still have their own running or terminal entry.
 
-The outer script source, return values and diagnostic bodies have no trajectory
-entry, including on failure or with no child calls. Argument disclosure uses the
-original call inputs and does not display result bodies. Canonical receipts,
-IsError, media and approval routing retain their original owners. Replay uses
-the same direct parent identities; child panes retain existing Task and scope
-routing.
+The title includes a folded one-line source summary, or the script filename.
+Clicking the summary uses the existing command argument disclosure to show the
+frozen bytes that actually executed, including when the file has since changed.
+Children show only real tool names, arguments and call state. A script with no
+children shows its actual final return or short error through the existing
+folded output panel; it never manufactures a completed/Result placeholder.
+Source and output disclosure uses the existing panel token, without a new drawer.
+Canonical IsError, media, receipts and approval routing keep their original owners.
+Replay uses the same direct parents and existing Task/scope routing.
+
+A yielded script observes its original Task even while its source or child list
+is folded. Original Task terminal updates settle the script without requiring a
+Task.read call. Returned business data, including a running inner command Task,
+does not own the outer script's lifecycle. Commands and scripts have distinct
+Task handles; cancel the producer that owns a pending command/approval. Canceling
+an already returned outer script does not implicitly cancel an independent
+inner command Task. Existing Run stop/generation boundaries remain authoritative.
 
 ## Execution and Tasks
 
-Every execution starts a new Goja child process in the same Go executable.
-Embedders must install the early WorkerMain dispatch documented in the
-[SDK quickstart](../agent-sdk/README.md#code-mode-executable-entry).
-There is no cross-call REPL, persistent Goja stack or restart replay. File reads
-reuse the source-read policy path, then execute only those fixed bytes/hash.
-CPU time and model network budgets are separate. Host/approval waiting is not
-CPU time. Interrupt is followed by kill/reap if needed. No hard VM heap bound is
-claimed; missing a hard heap limiter is not a default rejection condition.
-64MiB is an experimental observation target, not a product admission threshold.
-Process separation and JS capability restrictions do not constitute a secure OS
-sandbox against an engine exploit.
+Each environment owns a Goja child process in the same executable. Embedders
+install the early WorkerMain dispatch from the
+[SDK quickstart](../agent-sdk/README.md#code-mode-executable-entry) and release
+Session environments with their execution resources. File reads reuse source
+policy and execute the frozen source bytes/hash. CPU accounting applies to each
+execution; idle Host waits are separate. Process separation and JS capability
+restrictions do not constitute a secure OS sandbox against engine exploits.
 
 Scripts yield within the original Run. The Run owner remains
 until the producer is quiescent; it does not extend generation or permission
@@ -166,7 +254,8 @@ Final safe points cancel script producers before joining them, including an
 approval waiter. Cross-Turn background execution is not promised.
 
 `yield_time_ms` bounds only the foreground wait, not execution. After yielding,
-use Task read/wait/cancel on the original handle; do not resubmit `js_exec`.
+use Task read/wait/cancel on the original handle; do not resubmit the original
+script. `reset:true` can interrupt it without waiting for completion.
 Foreground yield transfers observation to the existing Task owner with one
 original handle. Query, wait, cancellation and completion reuse Task control and output cursors.
 Selected output is published at script completion; child progress uses the
@@ -192,19 +281,3 @@ DTW domain exec, capability/exact-name search, Session reuse, schema replacement
 Guardian parameters, async yield/handle/cancel/completion and unknown no-replay.
 Model-context round trips and rendered TUI parent/child evidence cover durable
 and visible behavior.
-
-Exact serialized model tools and stable leading prompt bytes are captured for
-first discovery, repeated orchestration and refresh/rediscovery. Token and model
-request comparisons use the same task, actual usage and retained source/output
-sizes; source-line counts or fixture-only usage are not savings evidence. Both
-routes must have the same saved-script obligation, shell prohibition and chosen
-summary/image outputs. Evaluate file edit/reread capability separately from
-inline batching savings; first and resumed Turns are separate accounting groups.
-A historical mixed-task usage difference does not isolate engine cost.
-Real acceptance uses streaming models with independent generation budgets of at
-least 600 seconds, no shorter enclosing client/header deadline and no added
-request retry. Authorized existing gpt-6-luna is preferred; an explicit quota
-failure permits deepseek-flash. Credentials are read only through the selected
-existing configuration path, never exported into shared evidence. Context7 read
-queries, a task-owned DTW observation/screenshot fixture and temporary fs work
-are kept separate from deterministic fixtures and broader platform claims.

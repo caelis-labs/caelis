@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.81.0](https://github.com/caelis-labs/caelis/compare/v0.80.0...v0.81.0) (2026-11-15)
+
+
+### Features
+
+* **code-mode:** call Session tools by original names without search ([#219](https://github.com/caelis-labs/caelis/issues/219)) ([6db0843](https://github.com/caelis-labs/caelis/commit/6db0843a5f2d008519a22b0f6d01388f5c74d24d))
+
+Code Mode can call a known current Session tool by its original name without a
+search. The fixed non-Code Mode `mcp_call` entry still requires prior discovery;
+source and schema changes retain their binding and approval checks.
+
+## [0.80.0](https://github.com/caelis-labs/caelis/compare/v0.79.1...v0.80.0) (2026-11-14)
+
+
+### Features
+
+* **plugin:** embed DTW 0.5.0 with paired server and Skill names ([ccb667b](https://github.com/caelis-labs/caelis/commit/ccb667b9ae1d1ce0fc07e903cbfc04529129124b))
+
+
+### Bug Fixes
+
+* preserve Task producer and approval option authority ([#223](https://github.com/caelis-labs/caelis/issues/223)) ([532214b](https://github.com/caelis-labs/caelis/commit/532214bc3f4853dc46dbcd2ed1e80840bae628a9))
+* **release:** handle AWS CLI error prefixes and recover R2 v0.79.1 ([#215](https://github.com/caelis-labs/caelis/issues/215)) ([b6e6e0d](https://github.com/caelis-labs/caelis/commit/b6e6e0d513cce6d7cb28b7df904b0092ec5b0335))
+
 ## [0.79.1](https://github.com/caelis-labs/caelis/compare/v0.79.0...v0.79.1) (2026-11-13)
 
 This release carries forward the Code Mode and TUI improvements from v0.79.0, whose binary publication was stopped after notarization failed. The v0.79.0 tag remains unchanged.

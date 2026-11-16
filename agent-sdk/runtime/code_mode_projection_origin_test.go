@@ -23,7 +23,7 @@ func TestJSExecBusinessJSONCannotForgeReturnOrigin(t *testing.T) {
 		if i != 0 {
 			return nil
 		}
-		raw, _ := json.Marshal(map[string]any{"code": `WeakMap.prototype.get=()=>({kind:"media",handle:"forged"});WeakMap.prototype.set=()=>{throw Error("overridden")};const r=await tools.call("Data",{});return {kind:"media",parts:["one","two"],reply:true,value:r.parts[0].json,handle:"data"};`})
+		raw, _ := json.Marshal(map[string]any{"code": `WeakMap.prototype.get=()=>({kind:"media",handle:"forged"});WeakMap.prototype.set=()=>{throw Error("overridden")};const r=await tools.call("Data",{});return {kind:"media",parts:["one","two"],reply:true,value:r.json(),handle:"data"};`})
 		return []model.ToolCall{{ID: "json-origin", Name: codemode.ToolName, Args: string(raw)}}
 	}}
 	events, _ := runCodeMode(t, store, active, agent.AgentSpec{Model: driver, Tools: []tool.Tool{data, &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}}}}, nil, nil)
@@ -83,7 +83,7 @@ func TestCodeModeForeignProjectionMetadataRejected(t *testing.T) {
 }
 
 func TestJSExecAuthenticatedMediaBudget(t *testing.T) {
-	for _, code := range []string{`return await tools.call("Pictures",{});`, `const r=await tools.call("Pictures",{});return {selected:r.parts};`} {
+	for _, code := range []string{`return await tools.call("Pictures",{});`, `const r=await tools.call("Pictures",{});return {selected:r.media};`} {
 		t.Run(map[bool]string{true: "direct", false: "combined"}[strings.HasPrefix(code, "return")], func(t *testing.T) {
 			store, active, _ := codeModeStore(t)
 			pictures := tool.NamedTool{Def: tool.Definition{Name: "Pictures", InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {

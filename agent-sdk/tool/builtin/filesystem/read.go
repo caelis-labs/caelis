@@ -64,6 +64,10 @@ func (t *ReadTool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        ReadToolName,
 		Description: "Read a slice of one text file and return numbered lines plus cursor metadata. Use this after Glob or Grep identifies a relevant file, or when exact text is needed before editing. Prefer small offsets and limits; if has_more is true, continue from next_offset. Use revision as if_revision for Write stale-edit guards. Regular files only; a line over 8MiB is an error, not a truncated line. Content pages at whole-line boundaries up to 8MiB.",
+		OutputSchema: map[string]any{"type": "object", "required": []string{"content", "start_line", "end_line", "next_offset", "has_more", "revision"}, "properties": map[string]any{
+			"content":    map[string]any{"type": "string", "description": "Original Read text with line-number prefixes."},
+			"start_line": map[string]any{"type": "integer"}, "end_line": map[string]any{"type": "integer"}, "next_offset": map[string]any{"type": "integer"}, "has_more": map[string]any{"type": "boolean"}, "revision": map[string]any{"type": "string"},
+		}},
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

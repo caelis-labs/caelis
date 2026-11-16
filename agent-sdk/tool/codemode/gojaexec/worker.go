@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/dop251/goja"
 )
 
@@ -17,67 +19,49 @@ var bootstrap string
 
 type settlement struct{ resolve, reject func(any) error }
 
-// WorkerMain runs the dedicated pipe protocol and returns a process exit code.
-// The caller must invoke it only for WorkerArgument and immediately os.Exit.
-// There is exactly one VM owner goroutine: this one. Readers and the watchdog
-// use only Runtime.Interrupt, the engine's documented concurrent exception.
+// WorkerMain owns one VM for the process lifetime. Pipe readers and the CPU
+// watchdog only interrupt it; all JS values and Promise jobs stay on this owner.
 func WorkerMain() int {
 	w := &wireWriter{w: os.Stdout}
-	f, err := readFrame(os.Stdin, 32768)
-	if err != nil || f.kind != frameConfig {
-		return 2
-	}
-	var cfg workerConfig
-	if json.Unmarshal(f.data, &cfg) != nil {
-		return 2
-	}
-	l, err := effective(cfg.Limits)
-	if err != nil {
-		return 2
-	}
-	f, err = readFrame(os.Stdin, l.SourceBytes)
-	if err != nil || f.kind != frameSource {
-		return 2
-	}
-	code := string(f.data)
 	vm := goja.New()
 	vm.SetMaxCallStackSize(1024)
 	done := make(chan struct{})
 	defer close(done)
-	responses := make(chan frame, 1)
+	frames := make(chan frame, 1)
 	go func() {
 		for {
-			f, err := readFrame(os.Stdin, 6*l.ReplyBytes+256)
+			f, err := readFrame(os.Stdin, 6*codemode.DefaultLimits().ReplyBytes+256)
 			if err != nil {
 				vm.Interrupt("parent transport closed")
+				close(frames)
 				return
 			}
 			if f.kind == frameCancel {
 				vm.Interrupt("execution canceled")
-				return
-			}
-			if f.kind != frameReply {
-				vm.Interrupt("invalid parent response")
-				return
+				continue
 			}
 			select {
-			case responses <- f:
+			case frames <- f:
 			case <-done:
 				return
 			}
 		}
 	}()
+	var cpuMu sync.Mutex
+	var cpuStart time.Duration
 	go func() {
 		ticker := time.NewTicker(5 * time.Millisecond)
 		defer ticker.Stop()
 		for {
 			select {
 			case <-ticker.C:
-				if processCPU() >= CPUBudget {
+				cpuMu.Lock()
+				if cpuStart > 0 && processCPU()-cpuStart >= CPUBudget {
 					vm.Interrupt("1s CPU budget exceeded")
 					_ = w.send(frameBudget, 0, nil, 0)
-					return
+					cpuStart = 0
 				}
+				cpuMu.Unlock()
 			case <-done:
 				return
 			}
@@ -85,28 +69,24 @@ func WorkerMain() int {
 	}()
 	pending := map[uint64]settlement{}
 	var next uint64
+	var calls int
+	var limits codemode.Limits
 	rpc := func(call goja.FunctionCall) goja.Value {
 		promise, resolve, reject := vm.NewPromise()
 		next++
-		if next > uint64(l.Calls) {
+		calls++
+		if calls > limits.Calls {
 			_ = reject("Host request budget exceeded")
 			return vm.ToValue(promise)
 		}
 		kind, name, args := call.Argument(0).String(), call.Argument(1).String(), call.Argument(2).String()
-		var data []byte
-		var frameType byte
-		if kind == "call" || kind == "search" {
-			if len(name) > 1024 || len(args) > l.ArgumentBytes {
-				_ = reject("Host argument budget exceeded")
-				return vm.ToValue(promise)
-			}
-			data, err = json.Marshal(callRequest{Method: kind, Name: name, Arguments: json.RawMessage(args)})
-			frameType = frameCall
-		} else {
-			err = fmt.Errorf("invalid bridge operation")
+		if (kind != "call" && kind != "search") || len(name) > 1024 || len(args) > limits.ArgumentBytes {
+			_ = reject("invalid Host request")
+			return vm.ToValue(promise)
 		}
+		data, err := json.Marshal(callRequest{Method: kind, Name: name, Arguments: json.RawMessage(args)})
 		if err == nil {
-			err = w.send(frameType, next, data, l.ArgumentBytes+2048)
+			err = w.send(frameCall, next, data, limits.ArgumentBytes+2048)
 		}
 		if err != nil {
 			vm.Interrupt("Host transport failed")
@@ -124,90 +104,177 @@ func WorkerMain() int {
 	if !ok {
 		return 2
 	}
-	lraw, _ := json.Marshal(l)
-	// JSON.parse creates plain JS data; no Go Limits/Host/Session is reflected.
-	limitsValue, err := vm.RunString("JSON.parse(" + fmt.Sprintf("%q", string(lraw)) + ")")
+	bridge, err := build(goja.Undefined(), vm.ToValue(rpc))
 	if err != nil {
 		return 2
 	}
-	bridge, err := build(goja.Undefined(), vm.ToValue(rpc), limitsValue)
-	if err != nil {
-		return 2
-	}
-	if err = vm.Set("tools", bridge.ToObject(vm).Get("tools")); err != nil {
-		return 2
-	}
-	encode, ok := goja.AssertFunction(bridge.ToObject(vm).Get("encode"))
-	if !ok {
-		return 2
-	}
-	if w.send(frameReady, 0, nil, 0) != nil {
-		return 2
-	}
-	sourceName := cfg.SourceName
-	if sourceName == "" {
-		sourceName = "inline.js"
-	}
-	value, runErr := vm.RunScript(sourceName, "(async function(){\"use strict\";"+code+"\n})()")
-	if runErr != nil {
-		return workerError(w, l.OutputBytes, runErr)
-	}
-	promise, ok := value.Export().(*goja.Promise)
-	if !ok {
-		return workerError(w, l.OutputBytes, fmt.Errorf("missing async result"))
-	}
-	for promise.State() == goja.PromiseStatePending {
-		if len(pending) == 0 {
-			return workerError(w, l.OutputBytes, fmt.Errorf("unsettled Promise without a Host producer"))
+	obj := bridge.ToObject(vm)
+	decodeJSON, _ := goja.AssertFunction(obj.Get("parse"))
+	configure, _ := goja.AssertFunction(obj.Get("configure"))
+	prepare, _ := goja.AssertFunction(obj.Get("prepare"))
+	encode, _ := goja.AssertFunction(obj.Get("encode"))
+	plain := func(value any) (goja.Value, error) {
+		raw, err := json.Marshal(value)
+		if err != nil {
+			return nil, err
 		}
-		select {
-		case f := <-responses:
-			one, ok := pending[f.id]
-			if !ok {
-				return workerError(w, l.OutputBytes, fmt.Errorf("unknown Host response ID"))
-			}
-			delete(pending, f.id)
-			// resolve runs Promise jobs synchronously on this owner, never on
-			// a Host, pipe-reader or watchdog goroutine.
-			if err := one.resolve(string(f.data)); err != nil {
-				return workerError(w, l.OutputBytes, err)
-			}
-		case <-time.After(10 * time.Millisecond):
-			// An idle VM still needs to observe cancellation/CPU interrupts.
-			if _, err := vm.RunString("void 0"); err != nil {
-				return workerError(w, l.OutputBytes, err)
-			}
-		}
+		return decodeJSON(goja.Undefined(), vm.ToValue(string(raw)))
 	}
-	if promise.State() == goja.PromiseStateRejected {
-		message := promise.Result().String()
-		if object, ok := promise.Result().(*goja.Object); ok {
-			if stack := object.Get("stack"); stack != nil && !goja.IsUndefined(stack) {
-				for _, line := range strings.Split(stack.String(), "\n") {
-					if strings.Contains(line, sourceName+":") {
-						tail := line[strings.Index(line, sourceName+":")+len(sourceName)+1:]
-						end := strings.IndexByte(tail, ':')
-						if end > 0 {
-							message += "\n" + sourceName + ":" + tail[:end]
-						}
+	for {
+		f, open := <-frames
+		if !open {
+			return 0
+		}
+		if f.kind == frameClose {
+			return 0
+		}
+		if f.kind != frameConfig {
+			return 2
+		}
+		var cfg workerConfig
+		if json.Unmarshal(f.data, &cfg) != nil {
+			return 2
+		}
+		limits, err = effective(cfg.Limits)
+		if err != nil {
+			return 2
+		}
+		var names strings.Builder
+		for {
+			f, open = <-frames
+			if !open || f.kind != frameNames || len(f.data) > namesFrameBytes {
+				return 2
+			}
+			if len(f.data) == 0 {
+				break
+			}
+			names.Write(f.data)
+		}
+		f, open = <-frames
+		if !open || f.kind != frameSource || len(f.data) > limits.SourceBytes {
+			return 2
+		}
+		sourceName := cfg.SourceName
+		if sourceName == "" {
+			sourceName = "inline.js"
+		}
+		cpuMu.Lock()
+		vm.ClearInterrupt()
+		cpuStart = max(1, processCPU())
+		cpuMu.Unlock()
+		limitsValue, e1 := plain(limits)
+		namesValue, e2 := plain(json.RawMessage(names.String()))
+		stateValue, e3 := plain(cfg.State)
+		if e1 != nil || e2 != nil || e3 != nil {
+			return 2
+		}
+		if _, err = configure(goja.Undefined(), limitsValue, namesValue, stateValue); err != nil {
+			return 2
+		}
+		calls = 0
+		if w.send(frameReady, 0, nil, 0) != nil {
+			return 2
+		}
+		script, runErr := prepareSource(sourceName, string(f.data))
+		if runErr == nil {
+			declarations, e := plain(script.declarations)
+			if e != nil {
+				return 2
+			}
+			var publish goja.Value
+			publish, runErr = prepare(goja.Undefined(), declarations)
+			if runErr == nil {
+				for _, code := range script.hoists {
+					if _, runErr = vm.RunScript(sourceName, code); runErr != nil {
 						break
 					}
 				}
 			}
+			var value goja.Value
+			if runErr == nil {
+				value, runErr = vm.RunScript(sourceName, script.code)
+			}
+			if runErr == nil {
+				run, ok := goja.AssertFunction(value)
+				if !ok {
+					return 2
+				}
+				value, runErr = run(goja.Undefined(), publish)
+			}
+			if runErr == nil {
+				promise, ok := value.Export().(*goja.Promise)
+				if !ok {
+					return 2
+				}
+				for promise.State() == goja.PromiseStatePending && runErr == nil {
+					if len(pending) == 0 {
+						runErr = fmt.Errorf("unsettled Promise without a Host producer")
+						break
+					}
+					select {
+					case f, open := <-frames:
+						if !open {
+							return 2
+						}
+						one, ok := pending[f.id]
+						if f.kind != frameReply || !ok {
+							return 2
+						}
+						delete(pending, f.id)
+						runErr = one.resolve(string(f.data))
+					case <-time.After(10 * time.Millisecond):
+						_, runErr = vm.RunString("void 0")
+					}
+				}
+				if runErr == nil && promise.State() == goja.PromiseStateRejected {
+					message := promise.Result().String()
+					if object, ok := promise.Result().(*goja.Object); ok {
+						if stack := object.Get("stack"); stack != nil && !goja.IsUndefined(stack) {
+							for _, line := range strings.Split(stack.String(), "\n") {
+								if at := strings.Index(line, sourceName+":"); at >= 0 {
+									tail := line[at+len(sourceName)+1:]
+									if end := strings.IndexByte(tail, ':'); end > 0 {
+										message += "\n" + sourceName + ":" + tail[:end]
+									}
+									break
+								}
+							}
+						}
+					}
+					runErr = fmt.Errorf("%s", message)
+				}
+				if runErr == nil {
+					var encoded goja.Value
+					encoded, runErr = encode(goja.Undefined(), promise.Result())
+					if runErr == nil && len(pending) == 0 {
+						cpuMu.Lock()
+						cpuStart = 0
+						cpuMu.Unlock()
+						if w.send(frameResult, 0, []byte(encoded.String()), limits.OutputBytes) != nil {
+							return 2
+						}
+						continue
+					}
+				}
+			}
 		}
-		return workerError(w, l.OutputBytes, fmt.Errorf("%s", message))
+		cpuMu.Lock()
+		cpuStart = 0
+		cpuMu.Unlock()
+		if len(pending) != 0 {
+			_ = w.send(frameFatal, 0, []byte("script returned with unawaited Host requests"), limits.OutputBytes)
+			return 1
+		}
+		if runErr == nil {
+			runErr = fmt.Errorf("invalid script completion")
+		}
+		var interrupted *goja.InterruptedError
+		if errors.As(runErr, &interrupted) {
+			_ = w.send(frameFatal, 0, []byte("execution interrupted"), limits.OutputBytes)
+			return 1
+		}
+		workerError(w, limits.OutputBytes, runErr)
 	}
-	encoded, err := encode(goja.Undefined(), promise.Result())
-	if err != nil {
-		return workerError(w, l.OutputBytes, err)
-	}
-	if len(pending) != 0 {
-		return workerError(w, l.OutputBytes, fmt.Errorf("script returned with unawaited Host requests"))
-	}
-	if err = w.send(frameResult, 0, []byte(encoded.String()), l.OutputBytes); err != nil {
-		return 2
-	}
-	return 0
 }
 
 func workerError(w *wireWriter, budget int, err error) int {

@@ -903,9 +903,11 @@ func TestSubagentReadDoesNotReopenConcurrentTerminalObservation(t *testing.T) {
 	if stored.Running || stored.State != task.StateCompleted {
 		t.Fatalf("stored task = %#v, want terminal state preserved", stored)
 	}
-	spawnResult, ok := stored.Spec["spawn_result"].(map[string]any)
-	if !ok || taskRawStringValue(spawnResult["final_message"]) != finalMessage {
-		t.Fatalf("stored spawn_result = %#v, want exact terminal result", stored.Spec["spawn_result"])
+	if taskRawStringValue(stored.Result["final_message"]) != finalMessage {
+		t.Fatalf("stored result = %#v, want exact terminal result", stored.Result)
+	}
+	if _, exists := stored.Spec["spawn_result"]; exists {
+		t.Fatal("current Task writes a duplicate spawn result")
 	}
 }
 

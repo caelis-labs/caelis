@@ -70,12 +70,12 @@ func (t journaledTool) callTaskContinuation(ctx context.Context, call tool.Call)
 		// Call already persists nested terminals through the same receipt owner.
 		return result, callErr
 	}
-	return result, errors.Join(callErr, persistToolExecutionReceipt(ctx, t.sessions, t.sessionRef, call, result))
+	return result, errors.Join(callErr, persistToolExecutionReceipt(ctx, t.sessions, t.writes, t.sessionRef, call, result))
 }
 
 // persistToolExecutionReceipt records a terminal journal entry when the caller
 // has no native chat tool-result event to carry it.
-func persistToolExecutionReceipt(ctx context.Context, sessions session.Service, ref session.SessionRef, call tool.Call, result tool.Result) error {
+func persistToolExecutionReceipt(ctx context.Context, sessions session.Service, writes *sessionWriteQueue, ref session.SessionRef, call tool.Call, result tool.Result) error {
 	value, ok := result.Metadata[tool.MetadataExecutionJournal]
 	if !ok {
 		return nil
@@ -94,6 +94,15 @@ func persistToolExecutionReceipt(ctx context.Context, sessions session.Service, 
 	}
 	receiptCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), approvalResolutionRecoveryTimeout)
 	defer cancel()
+	if record.ToolName == tool.ToolSearchToolName && isCodeModeChild(call) {
+		// An explicit refresh and a direct child's binding claim must observe
+		// the same canonical order, including across already-running Hosts.
+		release, err := writes.acquire(receiptCtx, ref)
+		if err != nil {
+			return err
+		}
+		defer release()
+	}
 	_, err = sessions.AppendEvent(receiptCtx, session.AppendEventRequest{
 		SessionRef: ref, MutationGuard: session.RuntimeMutationGuard(ctx),
 		Event: &session.Event{

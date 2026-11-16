@@ -54,6 +54,18 @@ def verify_release(pin, data):
                 raise ValueError(f'formal RELEASE {key} mismatch')
 
 
+def verify_skill_identity(data, name):
+    # Official packages use a literal top-level name in fenced frontmatter;
+    # this deliberately does not interpret general YAML syntax.
+    lines = data.decode('utf-8').splitlines()
+    if not lines or lines[0] != '---' or '---' not in lines[1:]:
+        raise ValueError('missing Skill identity frontmatter')
+    metadata = lines[1:lines.index('---', 1)]
+    names = [line.partition(':')[2].strip() for line in metadata if line.startswith('name:')]
+    if len(names) != 1 or names[0] not in (name, f'"{name}"', f"'{name}'"):
+        raise ValueError('unexpected Skill identity (expected a literal name)')
+
+
 def verify(pin, platform, data):
     if sha(data) != platform['archive_sha256']:
         raise ValueError('archive checksum mismatch')
@@ -80,12 +92,21 @@ def verify(pin, platform, data):
             raise ValueError('package identity mismatch')
         if build['version'] != pin['version'] or build['target'] != platform['target'] or build['source'] != platform['source']:
             raise ValueError('build provenance mismatch')
-        if sha(files['BUILD.json']) != platform['build_sha256'] or sha(files[binary]) != platform['binary_sha256'] or sha(files['skills/desktop-world/SKILL.md']) != platform['skill_sha256']:
-            raise ValueError('BUILD/binary/Skill checksum mismatch')
         for required in ['.mcp.json', 'LICENSE', 'THIRD_PARTY_NOTICES.md']:
             if not files.get(required):
                 raise ValueError(f'missing complete package content: {required}')
-        server = json.loads(files['.mcp.json'])['mcpServers']['desktop-world']
+        servers = json.loads(files['.mcp.json'])['mcpServers']
+        if set(servers) not in ({'desktop-world'}, {'dtw'}):
+            raise ValueError('unexpected standard MCP server identity')
+        name = next(iter(servers))
+        skill = f'skills/{name}/SKILL.md'
+        skills = {path for path in files if path.startswith('skills/') and path.endswith('/SKILL.md')}
+        if skills != {skill}:
+            raise ValueError('unexpected Skill location for MCP server identity')
+        if sha(files['BUILD.json']) != platform['build_sha256'] or sha(files[binary]) != platform['binary_sha256'] or sha(files[skill]) != platform['skill_sha256']:
+            raise ValueError('BUILD/binary/Skill checksum mismatch')
+        verify_skill_identity(files[skill], name)
+        server = servers[name]
         if server != {'command': '${CLAUDE_PLUGIN_ROOT}/' + binary, 'args': ['mcp']}:
             raise ValueError('unexpected standard MCP launch contract')
     return {'id': 'desktop-world', 'version': pin['version'], 'target': platform['target'], 'archive_sha256': sha(data), 'skill_sha256': platform['skill_sha256'], 'files': len(files)}

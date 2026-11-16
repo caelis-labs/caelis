@@ -1,6 +1,7 @@
 package tuiapp
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -79,6 +80,72 @@ func TestMCPApprovalFourChoicesRetainScopeInTUI(t *testing.T) {
 		decision := approvalDecisionFromPrompt(req, PromptResponse{Line: choice.ID})
 		if decision.RequestID != req.RequestID || decision.OptionID != choice.ID || decision.Approved != (i < 3) {
 			t.Fatalf("TUI decision = %#v", decision)
+		}
+	}
+}
+
+func TestApprovalDecisionUsesStrictOptionKinds(t *testing.T) {
+	for _, kind := range []string{"allow_once", "allow_always", "deny", "deny_once", "deny_always", "reject", "reject_once", "reject_always"} {
+		t.Run(kind, func(t *testing.T) {
+			req := &approvalPayload{RequestID: "kind-owner", Options: []approvalOption{
+				{ID: "approve:opaque/ID", Name: "Allow everything", Kind: kind},
+			}}
+			decision := approvalDecisionFromPrompt(req, PromptResponse{Line: req.Options[0].ID})
+			wantApproved := kind == "allow_once" || kind == "allow_always"
+			if decision.RequestID != req.RequestID || decision.Outcome != approvalStatusSelected || decision.OptionID != req.Options[0].ID || decision.Approved != wantApproved {
+				t.Fatalf("decision = %+v, want original ID and approved=%t for kind %q", decision, wantApproved, kind)
+			}
+		})
+	}
+}
+
+func TestApprovalDecisionInvalidOptionsFailClosed(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		options []approvalOption
+	}{
+		{name: "missing kind", options: []approvalOption{{ID: "allow_once", Name: "Approve"}}},
+		{name: "unknown kind", options: []approvalOption{{ID: "allow_once", Name: "Approve", Kind: "allow_custom"}}},
+		{name: "missing id", options: []approvalOption{{Name: "Approve", Kind: "allow_once"}}},
+		{name: "duplicate id", options: []approvalOption{{ID: "allow_once", Kind: "allow_once"}, {ID: "allow_once", Kind: "reject_once"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := &approvalPayload{RequestID: "invalid-options", Options: tc.options}
+			for _, response := range []PromptResponse{{Line: "allow_once"}, {Line: "yes"}, {Err: errors.New(PromptErrInterrupt)}} {
+				decision := approvalDecisionFromPrompt(req, response)
+				if decision.RequestID != req.RequestID || decision.Approved || decision.OptionID != "" || decision.Outcome != approvalStatusRejected {
+					t.Fatalf("invalid options produced decision %+v", decision)
+				}
+			}
+		})
+	}
+}
+
+func TestApprovalDecisionUnknownSelectionDoesNotUseOptionlessCompatibility(t *testing.T) {
+	req := &approvalPayload{RequestID: "with-options", Options: []approvalOption{
+		{ID: "opaque-allow", Kind: "allow_once"},
+		{ID: "opaque-deny", Kind: "reject_once"},
+	}}
+	for _, selected := range []string{"approve", "allow", "yes", "y", "unknown"} {
+		decision := approvalDecisionFromPrompt(req, PromptResponse{Line: selected})
+		if decision.RequestID != req.RequestID || decision.Approved || decision.OptionID != "opaque-deny" || decision.Outcome != approvalStatusSelected {
+			t.Fatalf("unknown selection %q produced decision %+v", selected, decision)
+		}
+	}
+}
+
+func TestApprovalDecisionOptionlessCompatibility(t *testing.T) {
+	req := &approvalPayload{RequestID: "optionless"}
+	for _, selected := range []string{"approve", "allow", "yes", "y"} {
+		decision := approvalDecisionFromPrompt(req, PromptResponse{Line: selected})
+		if decision.RequestID != req.RequestID || !decision.Approved || decision.OptionID != "" || decision.Outcome != approvalStatusApproved {
+			t.Fatalf("optionless selection %q produced decision %+v", selected, decision)
+		}
+	}
+	for _, response := range []PromptResponse{{}, {Line: "no"}, {Err: errors.New(PromptErrInterrupt)}} {
+		decision := approvalDecisionFromPrompt(req, response)
+		if decision.RequestID != req.RequestID || decision.Approved || decision.OptionID != "" || decision.Outcome != approvalStatusRejected {
+			t.Fatalf("optionless rejection produced decision %+v", decision)
 		}
 	}
 }

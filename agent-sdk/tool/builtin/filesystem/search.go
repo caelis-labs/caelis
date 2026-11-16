@@ -55,8 +55,9 @@ func NewSearch(runtime sandbox.Runtime) (*SearchTool, error) {
 
 func (t *SearchTool) Definition() tool.Definition {
 	return tool.Definition{
-		Name:        SearchToolName,
-		Description: "Search file contents with a regular expression. Matching is case-sensitive by default; use (?i) in pattern for case-insensitive search. Results are capped at 100 lines; a line over 8MiB fails the search rather than reporting no matches. Use Read for surrounding context or RunCommand with rg for advanced search.",
+		Name:         SearchToolName,
+		Description:  "Search file contents with a regular expression. Matching is case-sensitive by default; use (?i) in pattern for case-insensitive search. Results are capped at 100 lines; a line over 8MiB fails the search rather than reporting no matches. Use Read for surrounding context or RunCommand with rg for advanced search.",
+		OutputSchema: map[string]any{"type": "object"},
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

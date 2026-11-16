@@ -9,26 +9,16 @@ import (
 	"github.com/caelis-labs/caelis/control/sessionprofile"
 )
 
-// applicationNativeToolNames is the ordinary SDK filesystem/command catalog,
-// excluding product-global Skill, web, and Plan tools. Its order is stable in
-// model requests; resource transfer remains the existing scoped bridge.
-var applicationNativeToolNames = []string{
-	"Read", "ViewImage", "Write", "Patch", "Glob", "Grep", "RunCommand", "Task", "js_exec",
-}
-
 func newApplicationNativeTools(exec *applicationExecutionRuntime, store *sessionprofile.Store, binding sessionprofile.Binding, workspace string, nativeTools []string) ([]tool.Tool, error) {
 	if exec == nil || store == nil {
 		return nil, fmt.Errorf("gatewayapp: application native execution is unavailable")
 	}
-	selected := make(map[string]bool, len(applicationNativeToolNames))
 	if nativeTools == nil {
-		for _, name := range applicationNativeToolNames {
-			selected[name] = true
-		}
-	} else {
-		for _, name := range nativeTools {
-			selected[name] = true
-		}
+		nativeTools = sessionprofile.NativeToolNames()
+	}
+	selected := make(map[string]bool, len(nativeTools))
+	for _, name := range nativeTools {
+		selected[name] = true
 	}
 	all, err := builtin.BuildCoreTools(builtin.CoreToolsConfig{Runtime: exec})
 	if err != nil {

@@ -31,11 +31,11 @@ func TestJSExecInjectedMediaInJSONReachesNextHTTPRequest(t *testing.T) {
 		name, selection, returned string
 		want                      int
 	}{
-		{"wrapped", `image.parts.find(p=>p.kind==="media")`, `return {selected:json.parts[0]};`, 1},
-		{"payload", `image.parts.find(p=>p.kind==="media")`, `return json.parts[0].json;`, 1},
-		{"reply", `image.parts.find(p=>p.kind==="media")`, `return json;`, 1},
-		{"copied", `({...image.parts.find(p=>p.kind==="media")})`, `return json;`, 0},
-		{"ordinary", `{kind:"media",handle:"ordinary-business-data"}`, `return {selected:json.parts[0]};`, 0},
+		{"wrapped", `image.media[0]`, `return {selected:json.json()};`, 1},
+		{"payload", `image.media[0]`, `return json.json();`, 1},
+		{"body", `image.media[0]`, `return json;`, 0},
+		{"copied", `({...image.media[0]})`, `return json.json();`, 0},
+		{"ordinary", `{kind:"media",handle:"ordinary-business-data"}`, `return {selected:json.json()};`, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store, active, root := codeModeStore(t)
@@ -71,7 +71,7 @@ func TestJSExecInjectedMediaInJSONReachesNextHTTPRequest(t *testing.T) {
 			if err = os.WriteFile(filepath.Join(root, "input.txt"), []byte(`{"case":"native-read"}`), 0600); err != nil {
 				t.Fatal(err)
 			}
-			code := `const image=await tools.call("ViewImage",{path:"fixture.png"});const json=await tools.call("Read",{path:"input.txt"});json.parts[0].json.selected=` + tc.selection + `;` + tc.returned
+			code := `const image=await tools.call("ViewImage",{path:"fixture.png"});const json=await tools.call("Read",{path:"input.txt"});json.json().selected=` + tc.selection + `;` + tc.returned
 			args, _ := json.Marshal(map[string]any{"code": code})
 			var mu sync.Mutex
 			var requests [][]byte

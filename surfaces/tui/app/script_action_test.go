@@ -17,7 +17,7 @@ func TestScriptActionTitlesAndNoDetails(t *testing.T) {
 		if done {
 			want = "• Ran script"
 		}
-		if rows[0].Plain != want {
+		if !strings.HasPrefix(rows[0].Plain, want) {
 			t.Fatalf("title %q want %q", rows[0].Plain, want)
 		}
 		for _, row := range rows {

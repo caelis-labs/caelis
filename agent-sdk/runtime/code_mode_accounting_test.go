@@ -2,8 +2,10 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"iter"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -13,6 +15,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
+	taskapi "github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	tasktool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
@@ -52,9 +55,9 @@ func (m *codeModeAccountingModel) Generate(ctx context.Context, req *model.Reque
 			n := m.main.Add(1)
 			switch {
 			case n == 1:
-				args := `{"code":"return await tools.search('read documentation');"}`
+				args := `{"code":"return (await tools.search('read documentation')).json();"}`
 				if m.yielded {
-					args = `{"code":"return await tools.search('read documentation');","yield_time_ms":0}`
+					args = `{"code":"return (await tools.search('read documentation')).json();","yield_time_ms":0}`
 				}
 				message = model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{ID: "script", Name: codemode.ToolName, Args: args}}, "")
 			case n == 2 && m.yielded:
@@ -64,7 +67,7 @@ func (m *codeModeAccountingModel) Generate(ctx context.Context, req *model.Reque
 					return
 				}
 				close(m.release)
-				message = model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{ID: "wait", Name: "Task", Args: `{"action":"wait","handle":"` + handle + `","yield_time_ms":10000}`}}, "")
+				message = model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{ID: "wait", Name: "Task", Args: `{"action":"wait","handle":"` + handle + `"}`}}, "")
 			default:
 				message = model.NewTextMessage(model.RoleAssistant, "done")
 			}
@@ -76,7 +79,7 @@ func (m *codeModeAccountingModel) Generate(ctx context.Context, req *model.Reque
 func TestCodeModeAccountingSelectorReceiptsSurviveForeground(t *testing.T) {
 	for _, scenario := range []string{"success", "later-request-rejected", "after-yield", "selector-request-rejected"} {
 		t.Run(scenario, func(t *testing.T) {
-			store, active, _ := codeModeStore(t)
+			store, active, root := codeModeStore(t)
 			llm := &codeModeAccountingModel{yielded: scenario == "after-yield"}
 			if llm.yielded {
 				llm.release = make(chan struct{})
@@ -106,6 +109,7 @@ func TestCodeModeAccountingSelectorReceiptsSurviveForeground(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			t.Cleanup(func() { _ = rt.ReleaseCodeModeEnvironments() })
 			run, err := rt.Run(t.Context(), agent.RunRequest{SessionRef: active.SessionRef, Input: "accounting fixture", AgentSpec: spec})
 			if err != nil {
 				t.Fatal(err)
@@ -118,9 +122,38 @@ func TestCodeModeAccountingSelectorReceiptsSurviveForeground(t *testing.T) {
 			} else if runErr != nil {
 				t.Fatal(runErr)
 			}
-			events, err := store.Events(t.Context(), session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
+			reopened := sessionfile.NewStore(sessionfile.Config{RootDir: filepath.Join(root, "sessions")})
+			events, err := reopened.Events(t.Context(), session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
 			if err != nil {
 				t.Fatal(err)
+			}
+			if llm.yielded {
+				waited := false
+				for _, event := range events {
+					if session.EventTypeOf(event) == session.EventTypeToolResult && event.Tool != nil && event.Tool.Name == tasktool.ToolName {
+						if event.Tool.Status != "completed" || taskStringValue(event.Tool.Output["state"]) != string(taskapi.StateCompleted) {
+							t.Fatalf("yielded script wait did not complete: status=%s output=%+v", event.Tool.Status, event.Tool.Output)
+						}
+						waited = true
+					}
+				}
+				if !waited {
+					t.Fatal("missing canonical wait result for the yielded script")
+				}
+				entries, err := sessionfile.NewTaskStore(reopened).ListSession(t.Context(), active.SessionRef)
+				if err != nil || len(entries) != 1 {
+					t.Fatalf("persisted script tasks=%d error=%v", len(entries), err)
+				}
+				entry := entries[0]
+				raw := taskStringValue(entry.Result["tool_result_json"])
+				var result tool.Result
+				if err := json.Unmarshal([]byte(raw), &result); err != nil || result.IsError || !strings.Contains(raw, "docs__read") {
+					t.Fatalf("persisted script result=%s error=%v", raw, err)
+				}
+				cursor, ok := taskInt64Value(entry.Metadata["model_output_cursor"])
+				if entry.Kind != taskapi.KindCodeMode || entry.State != taskapi.StateCompleted || entry.Running || !ok || cursor != int64(len(raw)) {
+					t.Fatalf("persisted script completion or selected output cursor missing: %+v", entry)
+				}
 			}
 			receipts, tokens := 0, 0
 			for _, event := range session.InvocationAccountingEvents(events) {
@@ -141,6 +174,11 @@ func TestCodeModeAccountingSelectorReceiptsSurviveForeground(t *testing.T) {
 				want = 1
 			}
 			if receipts != want || tokens != 12*want || int(llm.selector.Load()) != want {
+				for _, event := range events {
+					if event.Tool != nil {
+						t.Logf("tool %s %s: %+v", event.Tool.Name, event.Tool.Status, event.Tool.Output)
+					}
+				}
 				t.Fatalf("selector=%d receipts=%d tokens=%d want=%d/%d/%d", llm.selector.Load(), receipts, tokens, want, want, 12*want)
 			}
 			wantAdmissions := 4
@@ -186,6 +224,7 @@ func TestCodeModeAccountingReceiptWriteFailureAndUncertainAppend(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			t.Cleanup(func() { _ = rt.ReleaseCodeModeEnvironments() })
 			run, err := rt.Run(t.Context(), agent.RunRequest{SessionRef: active.SessionRef, Input: "receipt fault", AgentSpec: agent.AgentSpec{Model: llm, Tools: []tool.Tool{toolsearch.NewSource(source), &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}}}, DeferredTools: source}})
 			if err != nil {
 				t.Fatal(err)

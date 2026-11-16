@@ -21,6 +21,7 @@ import (
 	skilltool "github.com/caelis-labs/caelis/agent-sdk/tool/builtin/skill"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/task"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/web"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 )
 
 // Core tools are always visible to the model, so each definition must leave
@@ -266,11 +267,19 @@ func TestCoreToolsFitModelContextBudgets(t *testing.T) {
 		t.Run(def.Name, func(t *testing.T) {
 			t.Parallel()
 
-			if got := tool.EstimateModelPromptTokens([]tool.Tool{configured}); got > maxCoreToolPromptTokens {
-				t.Errorf("model prompt cost = %d tokens, want <= %d", got, maxCoreToolPromptTokens)
+			promptLimit, descriptionLimit := maxCoreToolPromptTokens, maxCoreToolDescriptionRunes
+			budgeted := tool.CloneDefinition(def)
+			if def.Name == codemode.ToolName {
+				// The script API lives in the description; budget it together with
+				// its system preferences so moving text cannot evade the limit.
+				budgeted.Description += "\n\n" + codemode.Guidance
+				promptLimit, descriptionLimit = 768, 2048
 			}
-			if got := utf8.RuneCountInString(strings.TrimSpace(def.Description)); got > maxCoreToolDescriptionRunes {
-				t.Errorf("tool description = %d runes, want <= %d", got, maxCoreToolDescriptionRunes)
+			if got := tool.EstimateDefinitionPromptTokens(budgeted); got > promptLimit {
+				t.Errorf("model prompt cost = %d tokens, want <= %d", got, promptLimit)
+			}
+			if got := utf8.RuneCountInString(strings.TrimSpace(budgeted.Description)); got > descriptionLimit {
+				t.Errorf("tool description and guidance = %d runes, want <= %d", got, descriptionLimit)
 			}
 			requirePropertyDescriptionBudgets(t, def.InputSchema, "")
 		})

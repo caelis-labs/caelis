@@ -28,8 +28,9 @@ func NewWrite(runtime sandbox.Runtime) (*WriteTool, error) {
 
 func (t *WriteTool) Definition() tool.Definition {
 	return tool.Definition{
-		Name:        WriteToolName,
-		Description: "Create a new file or intentionally replace the full contents of one file. Prefer Patch for localized edits to existing files because Write overwrites the entire target. Include if_revision when replacing a file previously read.",
+		Name:         WriteToolName,
+		Description:  "Create a new file or intentionally replace the full contents of one file. Prefer Patch for localized edits to existing files because Write overwrites the entire target. Include if_revision when replacing a file previously read.",
+		OutputSchema: map[string]any{"type": "object"},
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
