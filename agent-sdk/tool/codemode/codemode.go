@@ -53,7 +53,8 @@ type Reply struct {
 	Outcome string `json:"outcome"`
 	Parts   []Part `json:"parts,omitempty"`
 	// Value is source-declared business JSON. ContentIndex identifies its
-	// original part; MCP without outputSchema uses the fixed content fallback.
+	// original part; MCP without outputSchema and failed MCP results use the
+	// fixed content fallback. Failed structured content is unverified diagnostics.
 	Value        json.RawMessage `json:"value,omitempty"`
 	ContentIndex *int            `json:"content_index,omitempty"`
 	MCP          bool            `json:"mcp,omitempty"`
@@ -193,7 +194,7 @@ const description = `Run an async JavaScript function body for tool orchestratio
 
 tools.search({name}) gets an exact name/schema; {server,tool,plugin?} gets an exact method; {query} searches capabilities; {server,plugin?,after?} lists tools (continue next as after). It returns {tools:[{name,description,input_schema,output_format,output_schema?,call_path,server?,tool?,plugin?}],count,truncated,omitted_count?,next?}. Use returned call_path for special/conflicting or newly discovered names; tools.call(name,args) uses the same result contract.
 
-Calls return business objects for tools with output_schema; unstructured extension results use fixed {content:[...],structuredContent?}. Return the whole result to deliver its original text/JSON/media; returning selected fields delivers only those fields and selected original media. raw_json retains original JSON tokens; JS Number arithmetic may round large integers. Return JSON values, omit undefined fields or use null, and encode BigInt as a string.
+Successful calls return business objects for tools with output_schema; unstructured extension results and failed extension diagnostics use fixed {content:[...],structuredContent?}. Failed structuredContent is unverified. Return an unchanged whole result to deliver its original text/JSON/media; modified objects deliver their returned fields and selected original media. raw_json retains original JSON tokens unless a business field owns that name; JS Number arithmetic may round large integers. Return JSON values, omit undefined fields or use null, and encode BigInt as a string.
 
 Errors expose message, code and result (reply is an alias). stale_revision requires a fresh search; unknown outcomes must not be replayed. After js_exec yields, use Task read/wait/cancel on its original handle.`
 

@@ -46,7 +46,7 @@ func (h *codeModeHost) failureParts(detailed bool) model.Part {
 // project runs under host.mu. Check sizes before copying JSON or serializing
 // transport data; original results have already crossed the durable receipt owner.
 func (h *codeModeHost) project(id string, result tool.Result, outcome string, def tool.Definition) (codemode.Reply, error) {
-	reply := codemode.Reply{CallID: id, Outcome: outcome, IsError: result.IsError, TurnComplete: result.TurnComplete && !result.IsError}
+	reply := codemode.Reply{CallID: id, Outcome: outcome, IsError: result.IsError, TurnComplete: result.TurnComplete && !result.IsError, MCP: tool.IsMCPDefinition(def)}
 	retained, projected := 0, len(id)*6+128
 	if projected > h.limits.ReplyBytes {
 		return reply, fmt.Errorf("code mode reply identity exceeds transfer budget")
@@ -75,6 +75,20 @@ func (h *codeModeHost) project(id string, result tool.Result, outcome string, de
 			return reply, fmt.Errorf("code mode result exceeds projection/retention budget; full receipt retained")
 		}
 	}
+	if source := result.StructuredContent; source != nil {
+		if source.ContentIndex < 0 || source.ContentIndex >= len(result.Content) || !json.Valid(source.Value) || result.Content[source.ContentIndex].Kind != model.PartKindJSON || result.Content[source.ContentIndex].JSON == nil || string(result.Content[source.ContentIndex].JSON.Value) != string(source.Value) {
+			return reply, fmt.Errorf("invalid structured result provenance")
+		}
+		reply.ContentIndex = &source.ContentIndex
+		if !reply.MCP || def.OutputSchema != nil && !result.IsError && outcome == codemode.OutcomeSucceeded {
+			// Failed MCP content remains diagnostic, even with an output schema.
+			if len(source.Value)*6 > h.limits.ReplyBytes-projected {
+				return reply, fmt.Errorf("structured result exceeds projection budget")
+			}
+			reply.Value = append(json.RawMessage(nil), source.Value...)
+		}
+	}
+	// No fallible validation remains when invocation-owned state is committed.
 	for _, part := range result.Content {
 		value := codemode.Part{Kind: string(part.Kind)}
 		switch part.Kind {
@@ -95,20 +109,6 @@ func (h *codeModeHost) project(id string, result tool.Result, outcome string, de
 		}
 		reply.Parts = append(reply.Parts, value)
 	}
-	if source := result.StructuredContent; source != nil {
-		if source.ContentIndex < 0 || source.ContentIndex >= len(result.Content) || !json.Valid(source.Value) || result.Content[source.ContentIndex].JSON == nil || string(result.Content[source.ContentIndex].JSON.Value) != string(source.Value) {
-			return reply, fmt.Errorf("invalid structured result provenance")
-		}
-		reply.ContentIndex = &source.ContentIndex
-		if !tool.IsMCPDefinition(def) || def.OutputSchema != nil {
-			// The original JSON already contributes to both budgets above.
-			if len(source.Value)*6 > h.limits.ReplyBytes-projected {
-				return reply, fmt.Errorf("structured result exceeds projection budget")
-			}
-			reply.Value = append(json.RawMessage(nil), source.Value...)
-		}
-	}
-	reply.MCP = tool.IsMCPDefinition(def)
 	if h.replies == nil {
 		h.replies = map[string]codemode.Reply{}
 	}

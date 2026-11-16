@@ -7,8 +7,9 @@
 // Each Execute has a new heap. Scripts are async function bodies: await
 // tools.call(name, object), tools.search(query), and JSON return. Runtime selects
 // returned opaque media from the final value; unreturned media is not delivered.
-// Reply JSON numbers use JavaScript Number semantics; reply.raw_json retains the
-// exact original Host reply JSON, including integers beyond 2^53-1. It is a
+// Reply JSON numbers use JavaScript Number semantics; unless a business field
+// owns that name, reply.raw_json retains the exact original Host reply JSON,
+// including integers beyond 2^53-1. The compatibility property is a
 // non-enumerable property: JSON.stringify and object spread
 // omit it; scripts can explicitly select reply.raw_json. BigInt must
 // be returned as a string. There are no default fs, network, shell, env or module

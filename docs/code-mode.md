@@ -59,9 +59,11 @@ business object: `const file = await Read(args)` allows `file.content`. Read's
 content retains its existing line-number prefixes; projection does not parse it.
 A tool's complete `output_schema`, when declared, is included in search results.
 
-MCP tools with an `outputSchema` expose their validated `structuredContent`
-object. Missing or invalid structured content is a failed result, never a
-successful guessed value. MCP tools without that schema expose a fixed
+Successful MCP calls with an `outputSchema` expose their validated
+`structuredContent` object. Missing or invalid structured content is a failed
+result. Failed MCP calls expose diagnostic `{content:[...],structuredContent?}`
+through `error.result`; its optional structured content is unverified and is not
+promoted to a business value. MCP tools without that schema expose a fixed
 `{content:[...],structuredContent?}` object. Content entries use the standard
 `type` discriminator: text stays text, images/file references retain opaque
 original identities, and resource/link objects retain their standard fields.
@@ -70,15 +72,20 @@ Projection never parses JSON-looking text or unboxes by the number of parts.
 without a declared schema retain their native result contract.
 
 `return await Read(args)` or `return await dtw.apps(args)` delivers the complete
-original result, including its original text, JSON and attachments. Nesting an
-original result retains its associated original text/media. Returning only a
-business field delivers that selection; unreturned calls do not attach media.
+original result, including its original text, JSON and attachments, when its
+enumerable content and object references are unchanged. Nesting such an unchanged
+original result retains its associated original text/media. Modified or copied
+objects deliver their actual returned fields and original media references;
+deleting `content` does not restore its removed text or attachments. Returning only
+a business field delivers that selection; unreturned calls do not attach media.
 Copying handle fields does not copy media authority. Only original media objects
 from this invocation may select attachments, subject to the existing budgets.
 An unchanged directly returned original result preserves original JSON tokens.
 JavaScript computations and nested JSON encoding follow JavaScript Number
-precision. Non-enumerable `raw_json` retains the original reply JSON string for
-exact tokens; returning that string preserves them. Convert BigInt to a string
+precision. When no business field has that name, non-enumerable `raw_json`
+retains the original reply JSON string for exact tokens; returning that string
+preserves them. A business `raw_json` field takes priority and makes this
+compatibility read unavailable on that object. Convert BigInt to a string
 before returning it. Omit undefined object fields or use null; encoding errors
 identify the field path. An omitted return (or root undefined) is JSON null.
 
@@ -111,8 +118,9 @@ search result's `call_path` can resolve a name that became ready during the curr
 execution. Search does not rewrite existing prompt slices or model tool arrays.
 Outside Code Mode, `mcp_call` still requires prior discovery.
 
-Host failures reject with an Error whose `result` property contains the same
-projected value a successful call would expose; `reply` aliases it.
+Host failures reject with an Error whose `result` property contains the projected
+failure diagnostics; `reply` aliases it. Failed MCP structured content has not
+been validated as a successful business result.
 Host failures also expose `error.code`; tool-specific error codes and effect
 details stay in the reply's original content. Local validation or script errors may
 lack `reply`.
@@ -139,9 +147,9 @@ fallback; fuzzy search retains its existing selector budgets. No source or
 discovery lock crosses approval or Tool I/O. Snapshot hints remain fixed within this API version; a
 software API change creates its own presentation snapshot, not a new grant cache.
 
-JSON Numbers outside JavaScript's safe integer range may round. The original
-reply remains explicitly accessible through non-enumerable `reply.raw_json`,
-which retains original JSON tokens. BigInt must be returned as a string. Return only JSON values; omit
+JSON Numbers outside JavaScript's safe integer range may round. The
+`raw_json` compatibility property described above retains original JSON tokens
+when no business field shadows it. BigInt must be returned as a string. Return only JSON values; omit
 optional undefined properties or use null. An omitted return is null. Encoding errors
 identify the field path. Scripts choose sequential or concurrent calls according
 to tool descriptions and operation semantics. `Promise.all` remains available;

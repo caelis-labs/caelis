@@ -43,8 +43,8 @@
       if(result.content_index!==undefined)value.structuredContent=parts[result.content_index].json;
     }
     if(value===null||typeof value!=="object")throw new ErrorType("structured result must be an object");
-    const baseline=encode(value,limits.reply_bytes,false);
-    weakSet(values,value,{baseline,parts:snapshot,callID:result.call_id});
+    const objects=[], baseline=encode(value,limits.reply_bytes,false,objects);
+    weakSet(values,value,{baseline,objects,parts:snapshot,callID:result.call_id});
     weakSet(replies,value,result);
     // Compatibility reads never shadow a business field and are not enumerated.
     if(!own(value,"parts"))define(value,"parts",{value:parts,enumerable:false});
@@ -64,10 +64,12 @@
   // Streaming JSON encoding bounds bytes before appending. It deliberately
   // accepts only JSON values (no toJSON, BigInt, functions or undefined), and
   // caps depth. It never exports an untrusted object graph to Go.
-  function encode(value, budget, project) {
+  function encode(value, budget, project, identities) {
     let out = "", used = 0;
     const seen = new SetType(), selected=new SetType(), directMedia=new SetType(), media=[], extras=[], extraSeen=new SetType();
     const business=project&&value&&typeof value==="object"?weakGet(values,value):null;
+    const objects=identities||[];
+    let complete=false;
     let direct=!!(project&&!business&&value&&typeof value==="object"&&weakGet(replies,value));
     function put(s, n) {
       if ((used += n) > budget) throw new ErrorType("JSON byte budget exceeded");
@@ -103,15 +105,9 @@
       }
       if (has(seen,v)) throw invalid("cyclic JSON");
       add(seen,v);
+      const start=out.length, first=objects.length;
+      if(project||identities)define(objects,objects.length,{value:v});
       const whole=inspect&&weakGet(values,v);
-      if(whole)for(let i=0;i<whole.parts.length;i++) {
-        const p=whole.parts[i];
-        if(p.kind==="text"&&!has(extraSeen,p)) {add(extraSeen,p);define(extras,extras.length,{value:p,enumerable:true});}
-        else if((p.kind==="media"||p.kind==="file_ref")&&!has(selected,p.handle)) {
-          if(media.length>=limits.calls)throw invalid("returned media budget exceeded");
-          add(selected,p.handle);define(media,media.length,{value:{kind:p.kind,handle:p.handle},enumerable:true});
-        }
-      }
       const origin=weakGet(origins,v);
       if(role===3&&origin&&(origin.kind==="media"||origin.kind==="file_ref"))add(directMedia,origin.handle);
       if(inspect&&origin&&(origin.kind==="media"||origin.kind==="file_ref")&&!has(selected,origin.handle)) {
@@ -152,11 +148,28 @@
         if(role===3&&(!kindSeen||!payloadSeen))direct=false;
       }
       put(array?"]":"}",1);del(seen,v);
+      // Compare the same budgeted reads, including object identities. Equal
+      // JSON containing a copied media handle is not an unchanged result.
+      if(whole&&slice(out,start)===whole.baseline&&objects.length-first===whole.objects.length) {
+        let unchanged=true;
+        for(let i=0;i<whole.objects.length;i++)if(objects[first+i]!==whole.objects[i]){unchanged=false;break;}
+        if(unchanged) {
+          if(depth===0)complete=true;
+          for(let i=0;i<whole.parts.length;i++) {
+            const p=whole.parts[i];
+            if(p.kind==="text"&&!has(extraSeen,p)) {add(extraSeen,p);define(extras,extras.length,{value:p,enumerable:true});}
+            else if((p.kind==="media"||p.kind==="file_ref")&&!has(selected,p.handle)) {
+              if(media.length>=limits.calls)throw invalid("returned media budget exceeded");
+              add(selected,p.handle);define(media,media.length,{value:{kind:p.kind,handle:p.handle},enumerable:true});
+            }
+          }
+        }
+      }
     }
     visit(value,0,!!project,direct?1:0);
     if(project) {
       const body=out, bytes=used;out="";used=0;
-      if(business&&body===business.baseline) {
+      if(complete) {
         put('{"reply":true,"call_id":',24);quote(business.callID);put('}',1);
       } else if(direct) {
         // Canonical JSON parts may now contain selected original media. Reuse
