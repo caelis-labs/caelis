@@ -1389,15 +1389,26 @@ func (m *denyCommandRuntimeModel) Generate(context.Context, *model.Request) iter
 }
 
 type approveEscalatedCommandRuntimeModel struct {
-	calls   int
-	command string
+	t         *testing.T
+	calls     int
+	command   string
+	onPending func()
 }
 
 func (m *approveEscalatedCommandRuntimeModel) Name() string { return "approve-escalated-command" }
 
-func (m *approveEscalatedCommandRuntimeModel) Generate(context.Context, *model.Request) iter.Seq2[*model.StreamEvent, error] {
+func (m *approveEscalatedCommandRuntimeModel) Generate(_ context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
 	m.calls++
 	callIndex := m.calls
+	handle := ""
+	state := taskapi.StateCompleted
+	if callIndex > 1 {
+		handle = mustFindTaskHandle(m.t, req)
+		state = mustFindTaskState(m.t, req, handle)
+		if callIndex == 2 && m.onPending != nil {
+			m.onPending()
+		}
+	}
 	return func(yield func(*model.StreamEvent, error) bool) {
 		if callIndex == 1 {
 			yield(&model.StreamEvent{
@@ -1422,14 +1433,22 @@ func (m *approveEscalatedCommandRuntimeModel) Generate(context.Context, *model.R
 			}, nil)
 			return
 		}
+		message := model.NewTextMessage(model.RoleAssistant, "done")
+		reason := model.FinishReasonStop
+		if taskStateRunning(state) {
+			message = model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{ID: fmt.Sprintf("approval-wait-%d", callIndex), Name: tasktool.ToolName, Args: string(mustJSONRaw(map[string]any{"action": "wait", "handle": handle}))}}, "")
+			reason = model.FinishReasonToolCalls
+		} else if state != taskapi.StateCompleted {
+			m.t.Fatalf("approved command Task state = %q, want completed", state)
+		}
 		yield(&model.StreamEvent{
 			Type: model.StreamEventTurnDone,
 			Response: &model.Response{
-				Message:      model.NewTextMessage(model.RoleAssistant, "done"),
+				Message:      message,
 				TurnComplete: true,
 				StepComplete: true,
 				Status:       model.ResponseStatusCompleted,
-				FinishReason: model.FinishReasonStop,
+				FinishReason: reason,
 			},
 		}, nil)
 	}
