@@ -83,3 +83,14 @@ func TestScriptSourceDisclosesFrozenBytesOnFirstClick(t *testing.T) {
 		t.Fatalf("second click did not collapse source: %s", text)
 	}
 }
+
+func TestScriptExpandedSourceKeepsCommonColumnsWithoutRail(t *testing.T) {
+	m := NewModel(Config{})
+	ctx := m.blockRenderContext(44)
+	for _, action := range []string{"Ran script", "Running script"} {
+		lines, _, ok := wrapACPTranscriptHeaderForViewport("• "+action+" const first=1;\nreturn first;", 44, ctx, acpHeaderMarkDefault, false)
+		if !ok || len(lines) != 2 || strings.Contains(strings.Join(lines, "\n"), "│") || !strings.HasSuffix(lines[1], "return first;") {
+			t.Fatalf("expanded source must share header columns without a rail: %q", lines)
+		}
+	}
+}

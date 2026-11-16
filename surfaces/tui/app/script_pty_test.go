@@ -84,6 +84,9 @@ func scriptPTYStages() [][]*session.Event {
 			typ = session.EventTypeToolResult
 		}
 		entry := &session.EventTool{ID: id, Name: name, Status: status, Input: map[string]any{"path": path}}
+		if name == "RunCommand" {
+			entry.Input = map[string]any{"command": "printf native-reference"}
+		}
 		if name == "Grep" {
 			entry.Input = map[string]any{"path": path, "pattern": "contract"}
 		}
@@ -120,7 +123,7 @@ func scriptPTYStages() [][]*session.Event {
 	}
 	narrative := &session.Event{SessionID: "visual-fixture", Type: session.EventTypeAssistant, Protocol: &session.EventProtocol{Method: session.ProtocolMethodSessionUpdate, Update: &session.ProtocolUpdate{SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage), Content: session.ProtocolTextContent("Now **check the next file**. This explanation stays outside both scripts.")}}}
 	return [][]*session.Event{
-		{tool("native1", "Read", "", "completed", "README.md", ""), tool("native2", "Grep", "", "completed", "docs", "")},
+		{tool("native-shell", "RunCommand", "", "completed", "", "native-reference"), tool("native1", "Read", "", "completed", "README.md", ""), tool("native2", "Grep", "", "completed", "docs", "")},
 		{tool("s1", "js_exec", "", "started", "", "")},
 		{tool("c1", "Read", "s1", "started", "notes/first.txt", "")},
 		{tool("c1", "Read", "s1", "completed", "notes/first.txt", "PRIVATE_CHILD_CONTENT"), tool("c1b", "Read", "s1", "completed", "notes/second.txt", "PRIVATE_SECOND_CONTENT"), tool("c2", "desktop_world__exec", "s1", "started", "", "")},

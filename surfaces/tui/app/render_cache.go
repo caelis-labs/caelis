@@ -436,6 +436,11 @@ func splitACPTranscriptHeaderPrefix(plain string) (prefix string, detail string,
 		return "", "", false
 	}
 	rest := strings.TrimPrefix(plain, "• ")
+	for _, action := range []string{"Running script", "Ran script"} {
+		if detail, found := strings.CutPrefix(rest, action+" "); found {
+			return "• " + action + " ", detail, true
+		}
+	}
 	verb, detail, found := strings.Cut(rest, " ")
 	if !found || strings.TrimSpace(verb) == "" {
 		return "", "", false
