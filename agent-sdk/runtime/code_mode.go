@@ -25,6 +25,8 @@ type nestedToolEventSinkKey struct{}
 var errCodeModeComplete = errors.New("code mode host admission is closed by TurnComplete")
 
 type runtimeCodeModeTool struct {
+	runtime        *Runtime
+	execution      *codeModeExecution
 	declaration    *codemode.Tool
 	tasks          *taskRuntime
 	active         session.Session
@@ -46,13 +48,37 @@ func (t runtimeCodeModeTool) Call(ctx context.Context, call tool.Call) (tool.Res
 	if t.declaration.Executor == nil {
 		return tool.Result{}, fmt.Errorf("code mode executor is unavailable")
 	}
+	var input struct {
+		Reset *bool           `json:"reset"`
+		Code  json.RawMessage `json:"code"`
+		File  json.RawMessage `json:"file"`
+	}
+	if err := json.Unmarshal(call.Input, &input); err != nil {
+		return tool.Result{}, err
+	}
+	if input.Reset != nil {
+		if !*input.Reset || len(input.Code) != 0 || len(input.File) != 0 {
+			return tool.Result{}, tool.NewError(tool.ErrorCodeInvalidInput, "reset:true is mutually exclusive with code and file")
+		}
+		if t.runtime == nil {
+			return tool.Result{}, fmt.Errorf("js_exec reset requires Runtime Session binding")
+		}
+		return t.runtime.resetCodeMode(t.ref, t.declaration.Executor), nil
+	}
 	source, err := t.declaration.ReadSource(call, limits.SourceBytes)
 	if err != nil {
 		return tool.Result{}, tool.WrapError(tool.ErrorCodeInvalidInput, err, "js_exec source: "+err.Error())
 	}
+	if t.runtime != nil {
+		ctx, t.execution, err = t.runtime.acquireCodeMode(ctx, t.ref, t.declaration.Executor)
+		if err != nil {
+			return tool.Result{}, err
+		}
+	}
 	if t.tasks != nil && t.declaration.Name == codemode.ToolName {
 		return t.tasks.startCodeMode(ctx, t, call, source, limits)
 	}
+	defer t.execution.release()
 	return t.execute(ctx, call, source, limits)
 }
 
@@ -64,7 +90,12 @@ func (t runtimeCodeModeTool) execute(ctx context.Context, call tool.Call, source
 	workCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	host := &codeModeHost{ctx: workCtx, cancel: cancel, owner: t, parent: call, limits: limits,
-		targets: map[string]codeModeTarget{}, handles: map[string]model.Part{}, drained: make(chan struct{})}
+		targets: map[string]codeModeTarget{}, codeModeResults: newCodeModeResults(), drained: make(chan struct{})}
+	executor := t.declaration.Executor
+	if t.execution != nil {
+		host.codeModeResults = t.execution.environment.results
+		executor = t.execution.environment.engine
+	}
 	if err := host.prepareTargets(ctx, events); err != nil {
 		return tool.Result{}, err
 	}
@@ -74,7 +105,7 @@ func (t runtimeCodeModeTool) execute(ctx context.Context, call tool.Call, source
 	}
 	done := make(chan execution, 1)
 	go func() {
-		output, err := t.declaration.Executor.Execute(workCtx, source, limits, host)
+		output, err := executor.Execute(workCtx, source, limits, host)
 		done <- execution{output: output, err: err}
 	}()
 	var completed execution
@@ -83,6 +114,9 @@ func (t runtimeCodeModeTool) execute(ctx context.Context, call tool.Call, source
 	case <-ctx.Done():
 		host.stop()
 		completed = <-done
+	}
+	if t.execution != nil && (ctx.Err() != nil || (completed.err != nil && errorcode.CodeOf(completed.err) != codemode.ErrorCodeJavaScript)) {
+		t.execution.retire = true
 	}
 	// An executor cannot retain Host and dispatch after returning.
 	host.stop()
@@ -169,12 +203,17 @@ type codeModeHost struct {
 	drainClosed    bool
 	pending        int
 	calls          int
-	retained       int
 	isError        bool
 	turnComplete   bool
 	fatal          error
-	handles        map[string]model.Part
-	replies        map[string]codemode.Reply
+	*codeModeResults
+}
+
+func (h *codeModeHost) ExecutionState() codemode.ExecutionState {
+	if h.owner.execution != nil {
+		return h.owner.execution.state
+	}
+	return codemode.ExecutionState{}
 }
 
 func (h *codeModeHost) stop() {

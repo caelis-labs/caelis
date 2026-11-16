@@ -37,6 +37,12 @@ type codeModeTask struct {
 func (t runtimeCodeModeTool) RuntimeTaskResultSource(toolbinding.Token) bool { return true }
 
 func (tm *taskRuntime) startCodeMode(ctx context.Context, owner runtimeCodeModeTool, call tool.Call, source codemode.Source, limits codemode.Limits) (tool.Result, error) {
+	started := false
+	defer func() {
+		if !started {
+			owner.execution.release()
+		}
+	}()
 	var args struct {
 		Yield *int `json:"yield_time_ms"`
 	}
@@ -97,9 +103,10 @@ func (tm *taskRuntime) startCodeMode(ctx context.Context, owner runtimeCodeModeT
 	if transfer, ok := ctx.Value(codeModeProducerLifetimeKey{}).(func(<-chan struct{}, func() error)); ok {
 		transfer(task.done, func() error { task.mu.Lock(); defer task.mu.Unlock(); return task.persistErr })
 	}
+	started = true
 	go func() {
 		result, executeErr := owner.execute(workCtx, call, source, limits)
-		tm.finishCodeModeTask(workCtx, task, result, executeErr)
+		tm.finishCodeModeTask(workCtx, task, result, executeErr, owner.execution)
 	}()
 	timer := time.NewTimer(yield)
 	defer timer.Stop()
@@ -135,7 +142,7 @@ func (tm *taskRuntime) startCodeMode(ctx context.Context, owner runtimeCodeModeT
 
 // The existing Task mutation claim serializes terminal CAS with canonical
 // cursor checkpoints. Observations never hold this claim while waiting.
-func (tm *taskRuntime) finishCodeModeTask(ctx context.Context, task *codeModeTask, result tool.Result, executeErr error) {
+func (tm *taskRuntime) finishCodeModeTask(ctx context.Context, task *codeModeTask, result tool.Result, executeErr error, execution *codeModeExecution) {
 	// Pre-execution failures have no VM settlement observation. Preserve that
 	// failed completion on the same original Task result, without changing its
 	// cumulative error or lifecycle outcome.
@@ -199,6 +206,7 @@ func (tm *taskRuntime) finishCodeModeTask(ctx context.Context, task *codeModeTas
 	}
 	_ = observer.ObserveTaskOutput(context.WithoutCancel(ctx), output.Event{Text: string(raw), State: string(state), Closed: true, ProducerClosed: true})
 	task.cancel()
+	execution.release()
 	close(task.done)
 }
 

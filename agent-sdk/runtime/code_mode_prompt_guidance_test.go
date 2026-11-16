@@ -21,7 +21,7 @@ func TestCodeModeMinimalModelInterface(t *testing.T) {
 	description := (&codemode.Tool{Name: codemode.ToolName}).Definition().Description
 	guidance := codemode.Guidance
 	for _, value := range []string{guidance, description} {
-		for _, removed := range []string{"tools.describe", "output.text", "output.image", "batch_id", "records()", "native", "MCP", "binding", "approval", "authorization"} {
+		for _, removed := range []string{"tools.describe", "output.text", "output.image", "batch_id", "records()", "native", "MCP", "approval", "authorization"} {
 			if strings.Contains(value, removed) {
 				t.Fatalf("model-facing text contains implementation detail %q", removed)
 			}
@@ -40,7 +40,7 @@ func TestCodeModeMinimalModelInterface(t *testing.T) {
 			t.Fatalf("detailed API protocol belongs in the tool description, found %q in Guidance", protocol)
 		}
 	}
-	for _, contract := range []string{"async JavaScript function body", "await Read(args)", "await RunCommand(args)", "await dtw.apps(args)", "await context7['query-docs'](args)", "tools.search(", "input_schema", "output_schema", "call_path", "business objects", "original text/JSON/media", "raw_json", "omit undefined", "omitted return is null", "message, code and result", "stale_revision", "unknown outcomes"} {
+	for _, contract := range []string{"Top-level await and return", "await Read(args)", "await RunCommand(args)", "await dtw.apps(args)", "await context7['query-docs'](args)", "tools.search(", "input_schema", "output_schema", "call_path", "Body", "result.text()", "result.json()", "result.media", "runtime.state()", "reset:true", "Omit undefined", "omitted return is null", "message, code and result", "stale_revision", "unknown outcomes"} {
 		if !strings.Contains(description, contract) {
 			t.Fatalf("missing js_exec contract %q", contract)
 		}

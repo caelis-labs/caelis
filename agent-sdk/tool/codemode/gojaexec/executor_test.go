@@ -41,7 +41,7 @@ func TestFreshWorkerAsyncAndRawJSON(t *testing.T) {
 			t.Errorf("metrics: %+v", m)
 		}
 	}}
-	code := `globalThis.saved=42;const results=await Promise.all([tools.call("Read",{}),tools.call("Read",{})]);return {raw:results[0].raw_json,rounded:results[0].parts[0].json.n,apis:[typeof process,typeof require,typeof fetch]};`
+	code := `globalThis.saved=42;const results=await Promise.all([tools.call("Read",{}),tools.call("Read",{})]);return {raw:results[0].text(),rounded:results[0].json().n,apis:[typeof process,typeof require,typeof fetch]};`
 	result, err := e.Execute(t.Context(), fixed(code), codemode.Limits{}, h)
 	if err != nil || !strings.Contains(string(result.Value), "9223372036854775807") || !strings.Contains(string(result.Value), "undefined") {
 		t.Fatalf("%s %v", result.Value, err)
@@ -99,11 +99,11 @@ func TestBudgetsAndDefaultUnboundedHeap(t *testing.T) {
 
 func TestRawJSONIsExplicitAndDefaultOutputDoesNotDuplicate(t *testing.T) {
 	reply := codemode.Reply{CallID: "original-receipt", Outcome: codemode.OutcomeSucceeded, Parts: []codemode.Part{{Kind: "json", JSON: json.RawMessage(`{"n":9223372036854775807,"content":"retained payload"}`)}}}
-	raw, _ := json.Marshal(reply)
+	raw := reply.Parts[0].JSON
 	h := testHost{call: func(context.Context, string, json.RawMessage) (codemode.Reply, error) { return reply, nil }}
 	// Mutating the global intrinsic cannot replace the trusted decoder's captured
 	// defineProperty. Explicit access remains exact; ordinary enumeration omits it.
-	code := `Object.defineProperty=()=>{throw Error("untrusted override")};const r=await tools.call("Read",{});return {reply:r,raw:r.raw_json,keys:Object.keys(r),spread:{...r},stringified:JSON.stringify(r),content:r.parts[0].json.content,removed:[typeof output,typeof tools.describe]};`
+	code := `Object.defineProperty=()=>{throw Error("untrusted override")};const r=await tools.call("Read",{});return {reply:r,raw:r.text(),keys:Object.keys(r),spread:{...r},stringified:JSON.stringify(r),content:r.json().content,removed:[typeof output,typeof tools.describe]};`
 	result, err := (&Executor{}).Execute(t.Context(), fixed(code), codemode.Limits{}, h)
 	if err != nil {
 		t.Fatal(err)
@@ -120,10 +120,10 @@ func TestRawJSONIsExplicitAndDefaultOutputDoesNotDuplicate(t *testing.T) {
 	if err = json.Unmarshal(result.Value, &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Raw != string(raw) || got.Reply["raw_json"] != nil || got.Spread["raw_json"] != nil || strings.Contains(got.Stringified, "raw_json") || got.Content != "retained payload" || got.Reply["parts"] == nil || got.Reply["call_id"] != nil {
+	if got.Raw != string(raw) || got.Reply["raw_json"] != nil || got.Spread["raw_json"] != nil || strings.Contains(got.Stringified, "raw_json") || got.Content != "retained payload" || got.Reply["media"] == nil || got.Reply["call_id"] != nil {
 		t.Fatalf("unexpected public reply: %s", result.Value)
 	}
-	if strings.Join(got.Removed, ",") != "undefined,undefined" || !strings.Contains(string(got.Reply["parts"]), "9223372036854776000") {
+	if strings.Join(got.Removed, ",") != "undefined,undefined" || !strings.Contains(got.Stringified, "media") {
 		t.Fatalf("interface/Number semantics: %s", result.Value)
 	}
 }

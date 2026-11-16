@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"image"
 	"image/png"
 	"io"
@@ -52,22 +53,26 @@ func TestCodeModeMCPBusinessContract(t *testing.T) {
 		image            bool
 	}{
 		{"direct", `return await live.value({});`, "9223372036854775807", true},
-		{"dependency", `const r=await live.value({});return {selected:r.name};`, "selected", false},
+		{"retained_complete", `return retainedBody;`, "9223372036854775807", true},
+		{"retained_media", `return retainedBody.media[0];`, "image/png", true},
+		{"retained_copy", `return {...retainedBody.media[0]};`, "handle", false},
+		{"retained_delete", `const parsed=retainedBody.json();parsed.content=retainedBody.media;delete parsed.content;return {nested:{...parsed}};`, "business", false},
+		{"dependency", `const r=await live.value({});return {selected:r.json().name};`, "selected", false},
 		{"nested", `return {record:await live.value({})};`, "record", true},
-		{"selected_media", `const r=await live.value({});return {image:r.parts.find(p=>p.kind==='media')};`, "image", true},
-		{"copied_media", `const r=await live.value({});return {...r.parts.find(p=>p.kind==='media')};`, "handle", false},
-		{"fallback", `const r=await live.fallback({});if(r.content[0].type!=='text'||typeof r.content[0].text!=='string'||r.name!==undefined)throw Error('content contract');return r;`, "not-business", true},
-		{"delete_content", `const r=await live.fallback({});delete r.content;return r;`, "structuredContent", false},
-		{"nested_delete_content", `const r=await live.fallback({});delete r.content;return {record:r};`, "record", false},
-		{"copy_delete_content", `const r=await live.fallback({});delete r.content;return {...r};`, "structuredContent", false},
-		{"copied_fallback_handle", `const r=await live.fallback({});r.content=[r.content[0],{...r.content[1]}];return r;`, "content", false},
-		{"nested_copied_fallback_handle", `const r=await live.fallback({});r.content=[r.content[0],{...r.content[1]}];return {record:r};`, "record", false},
-		{"copied_fallback_references", `return {...await live.fallback({})};`, "content", true},
-		{"selected_after_delete", `const r=await live.fallback({});const image=r.content[1];delete r.content;return {record:r,image};`, "record", true},
-		{"schema", `const s=await tools.search({server:'live',tool:'value'});if(s.tools[0].output_format!=='structured'||!s.tools[0].output_schema.properties.name)throw Error('output contract missing');return await live.value({});`, "9223372036854775807", true},
-		{"invalid_schema", `try{await live.invalid({});throw Error('resolved invalid output');}catch(e){if(!e.result||e.result!==e.reply||e.result.name!==undefined||e.result.structuredContent.n!=='unverified'||!e.result.content.some(p=>p.type==='text'&&p.text.includes('outputSchema')))throw Error('invalid diagnostic contract');return {caught:true,diagnostic:e.result.structuredContent};}`, "unverified", false},
-		{"failed_schema", `try{await live.failed({});throw Error('resolved failed output');}catch(e){if(!e.result||e.result.name!==undefined||e.result.structuredContent.name!=='business')throw Error('failed diagnostic contract');return {caught:true,diagnostic:e.result.structuredContent};}`, "caught", false},
-		{"raw_json_collision", `const r=await live.collision({});if(r.raw_json!=='business-raw'||!Object.keys(r).includes('raw_json'))throw Error('shadowed business field');return r;`, "business-raw", true},
+		{"selected_media", `const r=await live.value({});return {image:r.media[0]};`, "image", true},
+		{"copied_media", `const r=await live.value({});return {...r.media[0]};`, "handle", false},
+		{"fallback", `const r=await live.fallback({});let rejected=false;try{r.json()}catch(e){rejected=true}if(!rejected||!r.text().includes('not-business')||r.media.length!==1)throw Error('Body content contract');return r;`, "not-business", true},
+		{"delete_content", `const response=await live.value({});const r=response.json();r.content=response.media;delete r.content;return r;`, "business", false},
+		{"nested_delete_content", `const response=await live.value({});const r=response.json();r.content=response.media;delete r.content;return {record:r};`, "record", false},
+		{"copy_delete_content", `const response=await live.value({});const r=response.json();r.content=response.media;delete r.content;return {...r};`, "business", false},
+		{"copied_fallback_handle", `const r=await live.fallback({});return {media:r.media.map(p=>({...p}))};`, "media", false},
+		{"nested_copied_fallback_handle", `const r=await live.fallback({});return {record:{media:r.media.map(p=>({...p}))}};`, "record", false},
+		{"copied_fallback_references", `return {...await live.fallback({})};`, "media", true},
+		{"selected_after_delete", `const response=await live.value({});const r=response.json();r.content=response.media;delete r.content;return {record:r,image:response.media[0]};`, "record", true},
+		{"schema", `const s=(await tools.search({server:'live',tool:'value'})).json();if(s.tools[0].output_format!=='body'||!s.tools[0].output_schema.properties.name)throw Error('output contract missing');return await live.value({});`, "9223372036854775807", true},
+		{"invalid_schema", `try{await live.invalid({});throw Error('resolved invalid output');}catch(e){if(!e.result||e.result!==e.reply||typeof e.result.text!=='function'||!e.result.text().includes('outputSchema'))throw Error('invalid diagnostic contract');let rejected=false;try{e.result.json()}catch(parseError){rejected=true}if(!rejected)throw Error('promoted unverified structured content');return {caught:true,diagnostic:e.result.text()};}`, "unverified", false},
+		{"failed_schema", `try{await live.failed({});throw Error('resolved failed output');}catch(e){if(!e.result||!e.result.text().includes('business'))throw Error('failed diagnostic contract');return {caught:true,diagnostic:e.result.text()};}`, "caught", false},
+		{"raw_json_collision", `const r=await live.collision({});if(r.json().raw_json!=='business-raw')throw Error('lost business field');return r;`, "business-raw", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store, active, _ := codeModeStore(t)
@@ -102,7 +107,10 @@ func TestCodeModeMCPBusinessContract(t *testing.T) {
 			}
 			defer manager.Close()
 			<-manager.Initialized()
-			args, _ := json.Marshal(map[string]any{"code": tc.code})
+			stages := []string{tc.code}
+			if strings.HasPrefix(tc.name, "retained_") {
+				stages = []string{`let retainedBody=await live.value({});return {loaded:true};`, tc.code}
+			}
 			var mu sync.Mutex
 			var requests [][]byte
 			provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -116,14 +124,19 @@ func TestCodeModeMCPBusinessContract(t *testing.T) {
 				requests = append(requests, raw)
 				n := len(requests)
 				mu.Unlock()
-				if n > 2 {
+				if n > len(stages)+1 {
 					t.Error("unexpected extra model request")
 					http.Error(w, "extra", 500)
 					return
 				}
 				output := []any{map[string]any{"type": "message", "role": "assistant", "content": []any{map[string]any{"type": "output_text", "text": "done"}}}}
-				if n == 1 {
-					output = []any{map[string]any{"type": "function_call", "name": codemode.ToolName, "call_id": "business", "arguments": string(args)}}
+				if n <= len(stages) {
+					args, _ := json.Marshal(map[string]any{"code": stages[n-1]})
+					id := "business"
+					if n < len(stages) {
+						id = "load-body"
+					}
+					output = []any{map[string]any{"type": "function_call", "name": codemode.ToolName, "call_id": id, "arguments": string(args)}}
 				}
 				w.Header().Set("Content-Type", "application/json")
 				_ = json.NewEncoder(w).Encode(map[string]any{"id": "fixture", "object": "response", "model": "fixture", "status": "completed", "output": output, "usage": map[string]any{"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}})
@@ -139,10 +152,10 @@ func TestCodeModeMCPBusinessContract(t *testing.T) {
 			}
 			driver := &codeModeBusinessModel{LLM: llm}
 			runCodeMode(t, store, active, agent.AgentSpec{Model: driver, Tools: []tool.Tool{toolsearch.NewSource(manager, exactMCPRanker{}), &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}}}, DeferredTools: manager}, nil, nil)
-			if effects.Load() != 1 || len(driver.requests) != 2 {
+			if effects.Load() != 1 || len(driver.requests) != len(stages)+1 {
 				t.Fatalf("effects=%d requests=%d", effects.Load(), len(driver.requests))
 			}
-			visible := errorDeliveryModelResult(t, driver.requests[1], "business")
+			visible := errorDeliveryModelResult(t, driver.requests[len(stages)], "business")
 			if visible.IsError != (tc.name == "invalid_schema" || tc.name == "failed_schema") {
 				t.Fatalf("unexpected script disposition: %s", errorDeliveryJSON(t, visible.Content))
 			}
@@ -169,7 +182,7 @@ func TestCodeModeMCPBusinessContract(t *testing.T) {
 			mu.Lock()
 			wire := append([][]byte(nil), requests...)
 			mu.Unlock()
-			if len(wire) != 2 {
+			if len(wire) != len(stages)+1 {
 				t.Fatalf("provider HTTP requests=%d", len(wire))
 			}
 			var next struct {
@@ -179,7 +192,7 @@ func TestCodeModeMCPBusinessContract(t *testing.T) {
 					Output json.RawMessage `json:"output"`
 				} `json:"input"`
 			}
-			if err := json.Unmarshal(wire[1], &next); err != nil {
+			if err := json.Unmarshal(wire[len(stages)], &next); err != nil {
 				t.Fatal(err)
 			}
 			httpImages := 0
@@ -217,8 +230,13 @@ func TestCodeModeMCPBusinessContract(t *testing.T) {
 				if err := os.MkdirAll(dir, 0700); err != nil {
 					t.Fatal(err)
 				}
-				for i, name := range []string{"first.request.json", "next.request.json"} {
-					if err := os.WriteFile(filepath.Join(dir, name), wire[i], 0600); err != nil {
+				for i, request := range wire {
+					if err := os.WriteFile(filepath.Join(dir, fmt.Sprintf("request-%02d.json", i+1)), request, 0600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				for name, raw := range map[string][]byte{"first.request.json": wire[0], "next.request.json": wire[len(stages)], "source.png": bitmap.Bytes()} {
+					if err := os.WriteFile(filepath.Join(dir, name), raw, 0600); err != nil {
 						t.Fatal(err)
 					}
 				}

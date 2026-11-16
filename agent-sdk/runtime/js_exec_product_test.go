@@ -84,9 +84,9 @@ func TestJSExecRealGojaDiscoveryAndStableTools(t *testing.T) {
 		return tool.Result{Content: []model.Part{model.NewJSONPart(json.RawMessage(`{"value":42}`)), imagePart}}, nil
 	}}}
 	scripts := []string{
-		`const s=await tools.search("fixture");if(s.count!==1||!s.tools[0].input_schema.properties.script)throw Error("incomplete search schema");return s;`,
+		`const s=(await tools.search("fixture")).json();if(s.count!==1||!s.tools[0].input_schema.properties.script)throw Error("incomplete search schema");return s;`,
 		`return await tools.call("fixture__exec",{script:"observe"});`,
-		`const a=await tools.call("Read",{path:"numbers.txt"});const b=await tools.call("Read",{path:"numbers.txt"});if(a.parts[0].json.content!=="1: 17,25"||b.parts[0].json.content!=="1: 17,25")throw Error("Read content shape");return [a,b];`,
+		`const a=await tools.call("Read",{path:"numbers.txt"});const b=await tools.call("Read",{path:"numbers.txt"});if(a.json().content!=="1: 17,25"||b.json().content!=="1: 17,25")throw Error("Read content shape");return [a,b];`,
 	}
 	driver := &mcpScriptModel{steps: func(i int, req *model.Request) []model.ToolCall {
 		if i >= len(scripts) {
@@ -420,7 +420,7 @@ func TestJSExecStaleSchemaRejectsOldArgumentsBeforeEffect(t *testing.T) {
 	driver := &mcpScriptModel{steps: func(i int, r *model.Request) []model.ToolCall {
 		switch i {
 		case 0:
-			return []model.ToolCall{{ID: "describe", Name: codemode.ToolName, Args: `{"code":"return await tools.search('fixture__changing');"}`}}
+			return []model.ToolCall{{ID: "describe", Name: codemode.ToolName, Args: `{"code":"return (await tools.search('fixture__changing')).json();"}`}}
 		case 1:
 			next := fixtureMCPDefinition("v2")
 			next.Name = old.Name

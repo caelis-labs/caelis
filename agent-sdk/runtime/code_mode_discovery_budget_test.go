@@ -36,9 +36,9 @@ func TestReviewSimpleSearchSchemaBudget(t *testing.T) {
 					return tool.Result{Content: []model.Part{model.NewJSONPart([]byte(`{"ok":true}`))}}, nil
 				}})
 			}
-			code := `const s=await tools.search("fixture");if(s.count>1||!s.truncated)throw Error("budget result "+JSON.stringify(s));if(s.count){if(s.tools[0].name!=="fixture__small"||s.tools[0].input_schema.type!=="object")throw Error("partial schema");await tools.call("fixture__small",{});}return s;`
+			code := `const s=(await tools.search("fixture")).json();if(s.count>1||!s.truncated)throw Error("budget result "+JSON.stringify(s));if(s.count){if(s.tools[0].name!=="fixture__small"||s.tools[0].input_schema.type!=="object")throw Error("partial schema");await tools.call("fixture__small",{});}return s;`
 			if exact {
-				code = `let rejected=false;try{await tools.search("fixture__huge");}catch(e){rejected=true;}if(!rejected)throw Error("oversized schema accepted");await tools.call("fixture__huge",{});return {done:true};`
+				code = `let rejected=false;try{(await tools.search("fixture__huge")).json();}catch(e){rejected=true;}if(!rejected)throw Error("oversized schema accepted");await tools.call("fixture__huge",{});return {done:true};`
 			}
 			m := &mcpScriptModel{steps: func(i int, _ *model.Request) []model.ToolCall {
 				if i == 0 {

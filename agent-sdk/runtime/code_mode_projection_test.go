@@ -31,18 +31,18 @@ func TestJSExecReturnOnlySelectedMedia(t *testing.T) {
 		{"direct", `return await tools.call("PictureA",{});`, []string{"A"}, false, ""},
 		{"unreturned", `await tools.call("PictureA",{});return {ok:true};`, nil, false, ""},
 		{"other_call", `await tools.call("PictureA",{});return await tools.call("PictureB",{});`, []string{"B"}, false, ""},
-		{"foreign", `const r=await tools.call("PictureA",{});r.parts[2].handle="another-invocation";return r;`, nil, true, ""},
+		{"foreign", `const r=await tools.call("PictureA",{});r.media[0].handle="another-invocation";return r;`, nil, true, ""},
 		{"plain_foreign_data", `return {parts:[{kind:"media",handle:"another-invocation"}]};`, nil, false, ""},
-		{"copied_fields", `const r=await tools.call("PictureA",{});return {parts:[{...r.parts[2]}]};`, nil, false, ""},
-		{"combined", `const a=await tools.call("PictureA",{});const b=await tools.call("PictureB",{});return {selected:b.parts[2],record:{kind:"media",handle:"ordinary-data"}};`, []string{"B"}, false, ""},
-		{"selected_reply_parts", `const r=await tools.call("PictureA",{});r.parts=r.parts.filter(p=>p.kind!=="json");return r;`, []string{"A"}, false, ""},
-		{"getter_once", `const r=await tools.call("PictureA",{});let n=0;return {get selected(){return n++===0?{kind:"media",handle:"ordinary-data"}:r.parts[2]}};`, nil, false, ""},
-		{"proxy_array_reads", `const r=await tools.call("PictureA",{});r.parts=new Proxy([r.parts[2]],{get(t,k){if(k==="0")return {kind:"json",json:{visible:"actual proxy read"}};return Reflect.get(t,k)}});return r;`, nil, false, "actual proxy read"},
-		{"text_business_field", `const r=await tools.call("PictureA",{});r.parts=[r.parts[0]];r.parts[0].json={note:"text business"};return r;`, nil, false, "text business"},
-		{"json_business_field", `const r=await tools.call("PictureA",{});r.parts=[r.parts[1]];r.parts[0].text="json business";return r;`, nil, false, "json business"},
-		{"json_missing_payload", `const r=await tools.call("PictureA",{});r.parts=[r.parts[1]];delete r.parts[0].json;return r;`, nil, false, `kind`},
-		{"text_nonstring_payload", `const r=await tools.call("PictureA",{});r.parts=[r.parts[0]];r.parts[0].text={note:"text object"};return r;`, nil, false, "text object"},
-		{"text_handle_field", `const r=await tools.call("PictureA",{});r.parts=[r.parts[0]];r.parts[0].handle="business handle";return r;`, nil, false, "business handle"},
+		{"copied_fields", `const r=await tools.call("PictureA",{});return {parts:[{...r.media[0]}]};`, nil, false, ""},
+		{"combined", `const a=await tools.call("PictureA",{});const b=await tools.call("PictureB",{});return {selected:b.media[0],record:{kind:"media",handle:"ordinary-data"}};`, []string{"B"}, false, ""},
+		{"selected_reply_parts", `const r=await tools.call("PictureA",{});return {selected:r.media};`, []string{"A"}, false, ""},
+		{"getter_once", `const r=await tools.call("PictureA",{});let n=0;return {get selected(){return n++===0?{kind:"media",handle:"ordinary-data"}:r.media[0]}};`, nil, false, ""},
+		{"proxy_array_reads", `const r=await tools.call("PictureA",{});const parts=new Proxy([r.media[0]],{get(t,k){if(k==="0")return {kind:"json",json:{visible:"actual proxy read"}};return Reflect.get(t,k)}});return {parts};`, nil, false, "actual proxy read"},
+		{"text_business_field", `const r=await tools.call("PictureA",{});return {kind:"text",text:r.text(),json:{note:"text business"}};`, nil, false, "text business"},
+		{"json_business_field", `const r=await tools.call("PictureA",{});return {kind:"json",json:{value:42},text:"json business"};`, nil, false, "json business"},
+		{"json_missing_payload", `const r=await tools.call("PictureA",{});return {kind:"json"};`, nil, false, `kind`},
+		{"text_nonstring_payload", `const r=await tools.call("PictureA",{});return {kind:"text",text:{note:"text object"}};`, nil, false, "text object"},
+		{"text_handle_field", `const r=await tools.call("PictureA",{});return {kind:"text",text:r.text(),handle:"business handle"};`, nil, false, "business handle"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store, active, _ := codeModeStore(t)
@@ -124,7 +124,7 @@ func TestJSExecReturnOnlySelectedMedia(t *testing.T) {
 	}
 }
 
-func TestJSExecFixedFileBytesAndFreshVM(t *testing.T) {
+func TestJSExecFixedFileBytesInContinuousVM(t *testing.T) {
 	store, active, root := codeModeStore(t)
 	sandbox, err := host.New(host.Config{CWD: root})
 	if err != nil {
@@ -139,7 +139,7 @@ func TestJSExecFixedFileBytesAndFreshVM(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(root, "script.js")
-	if err = os.WriteFile(path, []byte(`const s=await tools.search("Read");if(s.count!==1||s.tools[0].name!=="Read"||!s.tools[0].input_schema)throw Error("native exact search");return await tools.call("Read",{path:"input.txt"});`), 0600); err != nil {
+	if err = os.WriteFile(path, []byte(`const s=(await tools.search("Read")).json();if(s.count!==1||s.tools[0].name!=="Read"||!s.tools[0].input_schema)throw Error("native exact search");return await tools.call("Read",{path:"input.txt"});`), 0600); err != nil {
 		t.Fatal(err)
 	}
 	driver := &mcpScriptModel{steps: func(i int, req *model.Request) []model.ToolCall {
@@ -177,9 +177,9 @@ func TestReviewSimpleReturnJSONDoesNotBecomeMedia(t *testing.T) {
 	for _, tc := range []struct{ name, code string }{
 		{"plain_kind", `return {kind:"media",label:"ordinary record"};`},
 		{"plain_parts", `return {parts:["one","two"]};`},
-		{"extracted_payload", `const r=await tools.call("Data",{});return r.parts[0].json;`},
+		{"extracted_payload", `const r=await tools.call("Data",{});return r.json();`},
 		{"wrapped_payload_control", `return await tools.call("Data",{});`},
-		{"search_schema_data", `return await tools.search("Data");`},
+		{"search_schema_data", `return (await tools.search("Data")).json();`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store, active, _ := codeModeStore(t)

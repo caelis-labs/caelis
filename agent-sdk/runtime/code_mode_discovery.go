@@ -117,16 +117,9 @@ type codeModeSearchEntry struct {
 
 func codeModeSearchEntryFor(def tool.Definition) codeModeSearchEntry {
 	name, _ := json.Marshal(def.Name)
-	format := "native"
-	if tool.IsMCPDefinition(def) {
-		format = "content"
-	}
-	if def.OutputSchema != nil {
-		format = "structured"
-	}
 	return codeModeSearchEntry{
 		ToolRoute: codeModeToolRoute(def), Description: def.Description, InputSchema: def.InputSchema,
-		CallPath: "tools.call(" + string(name) + ", args)", OutputSchema: def.OutputSchema, OutputFormat: format,
+		CallPath: "tools.call(" + string(name) + ", args)", OutputSchema: def.OutputSchema, OutputFormat: "body",
 	}
 }
 

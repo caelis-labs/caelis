@@ -16,7 +16,7 @@ func TestOriginalReturnKeepsOutputAndMediaBudgets(t *testing.T) {
 			limits := codemode.DefaultLimits()
 			limits.OutputBytes = 64
 			limits.Calls = 1
-			h := &codeModeHost{limits: limits, handles: map[string]model.Part{}}
+			h := &codeModeHost{limits: limits, codeModeResults: newCodeModeResults()}
 			result := tool.Result{Content: []model.Part{model.NewJSONPart(json.RawMessage(`{"large":"` + strings.Repeat("x", 100) + `"}`))}}
 			if media {
 				limits.OutputBytes = 4096

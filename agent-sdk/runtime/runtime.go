@@ -71,6 +71,8 @@ type Config struct {
 
 // Runtime is the baseline local runtime implementation.
 type Runtime struct {
+	codeModeMu               sync.Mutex
+	codeModeEnvironments     map[session.SessionRef]*codeModeEnvironment
 	childApprovalRequester   agent.ApprovalRequester
 	sessions                 session.Service
 	agentFactory             agent.AgentFactory

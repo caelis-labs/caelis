@@ -88,6 +88,7 @@ func TestIndependentJSExecYieldDoesNotHideTerminalPersistenceFailure(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = rt.ReleaseCodeModeEnvironments() })
 	run, err := rt.Run(t.Context(), agent.RunRequest{SessionRef: active.SessionRef, Input: "terminal persistence fault fixture", AgentSpec: agent.AgentSpec{Model: driver, Tools: []tool.Tool{hold, tasktool.New(), &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}}}}})
 	if err != nil {
 		t.Fatal(err)

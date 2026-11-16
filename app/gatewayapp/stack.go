@@ -864,6 +864,9 @@ func (s *runtimeComposition) closeWorkspaceResources() error {
 	}
 	if s.engine != nil {
 		s.engine.DiscardIdleCompactionSources()
+		if err := s.engine.ReleaseCodeModeEnvironments(); err != nil {
+			return err
+		}
 	}
 	s.mu.Lock()
 	exec := s.exec

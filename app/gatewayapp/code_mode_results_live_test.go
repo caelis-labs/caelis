@@ -114,6 +114,7 @@ func TestCodeModeResultsLive(t *testing.T) {
 	<-manager.Initialized()
 	prompts := []struct{ ID, Text string }{
 		{"workflow", `Complete this task with actual tools in the task workspace. Use js_exec direct function calls and save a reusable workflow.js, then execute that saved file with js_exec file and yield_time_ms:0. The script must first try absent.txt and catch its ordinary Read error, then Read request.txt, use its ticket in the local reports.lookup tool, and run the short command printf command-ok with RunCommand. Return the actual ticket, summary, original source, command output and caught error code. Search for any arguments you do not know. Query the original yielded Task to get the result before answering. You may use native Write to save the script. No other commands or external writes. Finish with the actual sourced summary and command output.`},
+		{"continuous", `Use at least three separate sequential js_exec calls in this same environment. First declare retainedBody from Read request.txt and retainedState from runtime.state(), then return the parsed request data. In the next script, use the already retained Body without reading request.txt again; confirm text() and json() can each be read twice, derive the ticket from its content, and use reports.lookup. Retain that result as retainedReport, and return its actual summary and source. In a third script reuse retainedReport and report the current generation together with retainedState.generation. Observe the original Task first if any script yields. Finally call js_exec reset:true, then a new script reporting typeof retainedBody and the new runtime.state().generation. Report the exact sourced summary, whether the first generation was retained and whether reset cleared the variable and changed generation. No command execution or file writes.`},
 		{"image", `Use js_exec to call the local reports.picture tool and directly return its complete result to yourself. Then describe the actual image's shapes and colors. Search for arguments if needed. Do not infer the image from the tool description. Do not read or write files or run commands in this task.`},
 	}
 	writeLiveJSON(t, filepath.Join(root, "prompts.json"), prompts)
@@ -219,6 +220,7 @@ func TestCodeModeResultsLive(t *testing.T) {
 		if runErr == nil {
 			runErr = result.Handle.WaitCompletion(ctx)
 		}
+		_ = rt.ReleaseCodeModeEnvironments()
 		writeLiveJSON(t, filepath.Join(dir, "terminal.json"), map[string]any{"error_code": errorcode.CodeOf(runErr), "error_type": fmt.Sprintf("%T", runErr)})
 		loaded, loadErr := store.LoadSession(t.Context(), session.LoadSessionRequest{SessionRef: active.SessionRef, IncludeTransient: true})
 		writeLiveJSON(t, filepath.Join(dir, "session.json"), loaded)
@@ -227,6 +229,9 @@ func TestCodeModeResultsLive(t *testing.T) {
 		writeLiveJSON(t, filepath.Join(root, "effects.json"), map[string]any{"lookup": lookups.Load(), "picture": pictures.Load()})
 		if runErr != nil || loadErr != nil || listErr != nil {
 			t.Fatal("functional acceptance stopped; original traces retained")
+		}
+		if task.ID == "continuous" && lookups.Load() < 2 {
+			t.Error("continuous model task did not call the real lookup")
 		}
 		if task.ID == "workflow" {
 			if _, e = os.Stat(filepath.Join(workspace, "workflow.js")); e != nil {

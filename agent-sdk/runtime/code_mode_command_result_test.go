@@ -32,9 +32,9 @@ func TestCodeModeRealRunCommand(t *testing.T) {
 		want       string
 	}{
 		{"short", `return await RunCommand({command:` + q(short) + `});`, false, "command-done"},
-		{"inner_yield", `const c=await RunCommand({command:` + q(yielding) + `,yield_time_ms:0});if(!c.handle)throw Error('missing command handle');return await Task({action:'wait',handle:c.handle});`, false, "command-done"},
+		{"inner_yield", `const body=await RunCommand({command:` + q(yielding) + `,yield_time_ms:0});const c=body.json();if(!c.handle)throw Error('missing command handle');return await Task({action:'wait',handle:c.handle});`, false, "command-done"},
 		{"outer_yield", `return await RunCommand({command:` + q(yielding) + `});`, true, "command-done"},
-		{"cancel_inner", `const c=await RunCommand({command:` + q(long) + `,yield_time_ms:0});let end;try{end=await Task({action:'cancel',handle:c.handle});}catch(e){end=e.result;}return {state:end.state};`, false, "cancelled"},
+		{"cancel_inner", `const body=await RunCommand({command:` + q(long) + `,yield_time_ms:0});const c=body.json();let end;try{end=await Task({action:'cancel',handle:c.handle});}catch(e){end=e.result;}return {state:end.json().state};`, false, "cancelled"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store, active, root := codeModeStore(t)

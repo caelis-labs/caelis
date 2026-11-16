@@ -49,7 +49,7 @@ func TestCodeModeServiceDiscoveryReportsOmissions(t *testing.T) {
 	source := h1Directory(20)
 	m := &h1Model{s: source, main: func(i int, _ *model.Request) []model.ToolCall {
 		if i == 0 {
-			return h1Script(`const s=await tools.search({server:"docs"});if(!s.truncated||s.count<1||s.count>16||s.count+s.omitted_count!==20)throw Error("missing omissions "+JSON.stringify(s));return s;`)
+			return h1Script(`const s=(await tools.search({server:"docs"})).json();if(!s.truncated||s.count<1||s.count>16||s.count+s.omitted_count!==20)throw Error("missing omissions "+JSON.stringify(s));return s;`)
 		}
 		return nil
 	}}
@@ -85,7 +85,7 @@ func TestCodeModeServiceDiscoveryCanonicalReceiptAcrossVMs(t *testing.T) {
 	m := &h1Model{s: source, main: func(i int, _ *model.Request) []model.ToolCall {
 		switch i {
 		case 0:
-			return h1Script(`const s=await tools.search({server:"docs",plugin:"fixture"});if(s.count!==2||s.truncated||"omitted_count" in s)throw Error("service result "+JSON.stringify(s));if(s.tools[0].name!=="a__target"||s.tools[1].name!=="m_0001__lookup")throw Error("wrong metadata filter/order");for(const t of s.tools){if(t.input_schema.required[0]!=="value"||"parallel_safe" in t)throw Error("schema contract");}return await tools.call(s.tools[0].name,{value:1});`)
+			return h1Script(`const s=(await tools.search({server:"docs",plugin:"fixture"})).json();if(s.count!==2||s.truncated||"omitted_count" in s)throw Error("service result "+JSON.stringify(s));if(s.tools[0].name!=="a__target"||s.tools[1].name!=="m_0001__lookup")throw Error("wrong metadata filter/order");for(const t of s.tools){if(t.input_schema.required[0]!=="value"||"parallel_safe" in t)throw Error("schema contract");}return await tools.call(s.tools[0].name,{value:1});`)
 		case 1:
 			return h1Script(`return await tools.call("m_0001__lookup",{value:2});`)
 		}
@@ -117,7 +117,7 @@ func TestCodeModeServiceDiscoveryCanonicalReceiptAcrossVMs(t *testing.T) {
 		}
 	}
 	if receipts != 1 || source.snapshot().Effects != 2 {
-		t.Fatalf("receipts=%d stats=%+v; want one canonical search and two effects across fresh VMs", receipts, source.snapshot())
+		t.Fatalf("receipts=%d stats=%+v; want one canonical search and two effects across sequential scripts", receipts, source.snapshot())
 	}
 }
 
@@ -150,7 +150,7 @@ func serviceDiscoveryReceipt(t *testing.T, event *session.Event) (tool.ToolSearc
 	return tool.ToolSearchResult{}, false
 }
 
-func TestCodeModeServicePaginationCanonicalBindingsAcrossVMs(t *testing.T) {
+func TestCodeModeServicePaginationCanonicalBindingsAcrossScripts(t *testing.T) {
 	for _, heavy := range []bool{false, true} {
 		t.Run(map[bool]string{false: "limit", true: "schema budget"}[heavy], func(t *testing.T) {
 			store, active, _ := codeModeStore(t)
@@ -165,7 +165,7 @@ func TestCodeModeServicePaginationCanonicalBindingsAcrossVMs(t *testing.T) {
 			m := &h1Model{s: source, main: func(i int, _ *model.Request) []model.ToolCall {
 				switch i {
 				case 0:
-					return h1Script(`const seen=new Set();let after;let pages=0;do{const q={server:"docs",plugin:"fixture"};if(after)q.after=after;const s=await tools.search(q);if(s.count===0||s.count>16)throw Error("empty/large page");for(const t of s.tools){if(seen.has(t.name))throw Error("repeated tool");seen.add(t.name);}if(s.next&&s.next!==s.tools[s.count-1].name)throw Error("bad anchor");after=s.next;if(++pages>37)throw Error("loop");}while(after);if(seen.size!==37||pages<3)throw Error("missing tools");return seen.size;`)
+					return h1Script(`const seen=new Set();let after;let pages=0;do{const q={server:"docs",plugin:"fixture"};if(after)q.after=after;const s=(await tools.search(q)).json();if(s.count===0||s.count>16)throw Error("empty/large page");for(const t of s.tools){if(seen.has(t.name))throw Error("repeated tool");seen.add(t.name);}if(s.next&&s.next!==s.tools[s.count-1].name)throw Error("bad anchor");after=s.next;if(++pages>37)throw Error("loop");}while(after);if(seen.size!==37||pages<3)throw Error("missing tools");return seen.size;`)
 				case 1:
 					return h1Script(`return await tools.call("z__target",{value:2});`)
 				}
@@ -215,7 +215,7 @@ func TestCodeModeServiceFiltersEligibilityBeforeLimit(t *testing.T) {
 	}
 	m := &h1Model{s: source, main: func(i int, _ *model.Request) []model.ToolCall {
 		if i == 0 {
-			return h1Script(`const s=await tools.search({server:"docs"});if(s.count!==12||s.truncated||s.next||s.omitted_count)throw Error("eligibility after limit: "+JSON.stringify(s));return await tools.call("z__target",{value:1});`)
+			return h1Script(`const s=(await tools.search({server:"docs"})).json();if(s.count!==12||s.truncated||s.next||s.omitted_count)throw Error("eligibility after limit: "+JSON.stringify(s));return await tools.call("z__target",{value:1});`)
 		}
 		return nil
 	}}
@@ -234,7 +234,7 @@ func TestCodeModeServiceFiltersCurrentRuntimeSourceBeforeLimit(t *testing.T) {
 	source.items = source.items[16:]
 	m := &h1Model{s: source, main: func(i int, _ *model.Request) []model.ToolCall {
 		if i == 0 {
-			return h1Script(`const s=await tools.search({server:"docs"});if(s.count!==4||s.truncated||s.next)throw Error("source scope applied after limit: "+JSON.stringify(s));return await tools.call("z__target",{value:1});`)
+			return h1Script(`const s=(await tools.search({server:"docs"})).json();if(s.count!==4||s.truncated||s.next)throw Error("source scope applied after limit: "+JSON.stringify(s));return await tools.call("z__target",{value:1});`)
 		}
 		return nil
 	}}

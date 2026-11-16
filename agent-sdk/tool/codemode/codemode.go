@@ -37,8 +37,8 @@ type Source struct {
 	SHA256 string `json:"sha256"`
 }
 
-// Part is the script-visible projection of a tool part. Media and other opaque
-// content have only a handle; paths, credentials and media bytes stay in Go.
+// Part is an internal bridge projection of a tool part. Body.media exposes only
+// opaque media references; paths, credentials and media bytes stay in Go.
 type Part struct {
 	Kind     string          `json:"kind"`
 	Text     string          `json:"text,omitempty"`
@@ -52,14 +52,28 @@ type Reply struct {
 	CallID  string `json:"call_id"`
 	Outcome string `json:"outcome"`
 	Parts   []Part `json:"parts,omitempty"`
-	// Value is source-declared business JSON. ContentIndex identifies its
-	// original part; MCP without outputSchema and failed MCP results use the
-	// fixed content fallback. Failed structured content is unverified diagnostics.
+	// BodyText is the ordered text/JSON view, retaining original JSON tokens.
+	BodyText string `json:"body_text"`
+	// Value is successful structured JSON validated against the declared output
+	// schema. Other Bodies parse BodyText explicitly; failed structured content
+	// remains unverified diagnostics.
 	Value        json.RawMessage `json:"value,omitempty"`
-	ContentIndex *int            `json:"content_index,omitempty"`
-	MCP          bool            `json:"mcp,omitempty"`
 	IsError      bool            `json:"is_error,omitempty"`
 	TurnComplete bool            `json:"turn_complete,omitempty"`
+}
+
+// Text joins all textual/JSON parts in their original order, retaining JSON tokens.
+func (r Reply) Text() string {
+	var entries []string
+	for _, p := range r.Parts {
+		switch p.Kind {
+		case "text":
+			entries = append(entries, p.Text)
+		case "json":
+			entries = append(entries, string(p.JSON))
+		}
+	}
+	return strings.Join(entries, "\n")
 }
 
 // Host is the executor's complete effect capability. Call arguments must be a
@@ -78,6 +92,15 @@ type ToolRoute struct {
 	Tool   string `json:"tool,omitempty"`
 	Plugin string `json:"plugin,omitempty"`
 }
+
+// ExecutionState identifies the current disposable environment and execution.
+type ExecutionState struct {
+	Generation string `json:"generation"`
+	Execution  string `json:"execution"`
+}
+
+// StateHost supplies Runtime-owned identities without extending call authority.
+type StateHost interface{ ExecutionState() ExecutionState }
 
 // NamedHost supplies the current invocation's name-only routing snapshot.
 // Every generated entry must call Host.Call, retaining Runtime admission.
@@ -154,6 +177,19 @@ type Executor interface {
 	Execute(context.Context, Source, Limits, Host) (Output, error)
 }
 
+// Environment is one disposable language environment. Close interrupts its
+// execution and releases its process without replaying Host calls.
+type Environment interface {
+	Executor
+	Close() error
+}
+
+// EnvironmentFactory creates independent environments for Runtime Session
+// activations. The Runtime retains ownership of execution and Host authority.
+type EnvironmentFactory interface {
+	NewEnvironment() Environment
+}
+
 // Limits bound allocations/transfers at the common boundary. Tool-internal
 // allocations remain the owning tool's responsibility. Zero selects defaults.
 type Limits struct {
@@ -161,13 +197,13 @@ type Limits struct {
 	ArgumentBytes int `json:"argument_bytes"`
 	ReplyBytes    int `json:"reply_bytes"`
 	// OutputBytes bounds executor JSON. Opaque media emitted to the model is
-	// bounded by the invocation's cumulative RetainedBytes and Calls limits.
+	// bounded by the environment's cumulative RetainedBytes and invocation's Calls limits.
 	OutputBytes   int `json:"output_bytes"`
 	RetainedBytes int `json:"retained_bytes"`
 	Calls         int `json:"calls"`
 }
 
-// DefaultLimits returns conservative per-invocation transfer limits.
+// DefaultLimits returns conservative transfer and environment retention limits.
 func DefaultLimits() Limits {
 	return Limits{SourceBytes: 256 << 10, ArgumentBytes: 64 << 10, ReplyBytes: 1 << 20, OutputBytes: 1 << 20, RetainedBytes: 16 << 20, Calls: 64}
 }
@@ -179,7 +215,7 @@ const MetadataSelectedTools = "code_mode_selected_tools"
 
 // MetadataCatalog carries the Runtime-owned guidance and partial hint snapshot
 // through both static AgentSpec metadata and dynamic request instructions.
-const MetadataCatalog = "code_mode_catalog_v8"
+const MetadataCatalog = "code_mode_catalog_v9"
 
 // MetadataScriptCompletion records whether script execution returned normally.
 // Its "completed"/"failed" value is presentation-only, independent of cumulative
@@ -188,18 +224,18 @@ const MetadataScriptCompletion = "code_mode_script_completion"
 
 // Guidance supplies usage preferences; Tool.Definition owns the script API.
 // Runtime appends partial catalog hints separately.
-const Guidance = `Call known tools directly, including schemas from Skills. Search for unknown tools or arguments. Sequence dependent operations with await; independent calls may run concurrently when appropriate.`
+const Guidance = `Call known tools directly, including schemas from Skills. Search for unknown tools or arguments. Sequence dependent operations with await; independent calls may run concurrently when appropriate. Submit js_exec scripts sequentially in the active Session. After yielding, observe the original Task to completion before the next script; Task read/wait/cancel works independently of the script environment.`
 
-const description = `Run an async JavaScript function body for tool orchestration and data processing from exactly one of code or file. Call tools directly: await Read(args), await RunCommand(args), await dtw.apps(args), await context7['query-docs'](args). Return the desired value; omitted return is null.
+const description = `Run JavaScript in the active Session environment using exactly one of code, file or reset:true. Call known tools directly: await Read(args), await RunCommand(args), await dtw.apps(args), await context7['query-docs'](args). Top-level await and return are supported; omitted return is null. Top-level declarations persist for later sequential scripts. let/const cannot be redeclared, const cannot be assigned; var can be redeclared. Use assignment to update existing variables.
 
-tools.search({name}) gets an exact name/schema; {server,tool,plugin?} gets an exact method; {query} searches capabilities; {server,plugin?,after?} lists tools (continue next as after). It returns {tools:[{name,description,input_schema,output_format,output_schema?,call_path,server?,tool?,plugin?}],count,truncated,omitted_count?,next?}. Use returned call_path for special/conflicting or newly discovered names; tools.call(name,args) uses the same result contract.
+Every tool returns a Body: result.text() reads all textual/JSON entries in order, joined by newlines; result.json() uses validated structured content or parses that whole text as one JSON document. Both reads are repeatable. result.media contains all original media references. Return result for the complete original reply, or return selected JSON and original media references. Copied handle fields convey no media identity. JS Number arithmetic may round large integers; text() and whole Body returns retain original JSON tokens. Omit undefined fields or use null, and encode BigInt as a string.
 
-Successful calls return business objects for tools with output_schema; unstructured extension results and failed extension diagnostics use fixed {content:[...],structuredContent?}. Failed structuredContent is unverified. Return an unchanged whole result to deliver its original text/JSON/media; modified objects deliver their returned fields and selected original media. raw_json retains original JSON tokens unless a business field owns that name; JS Number arithmetic may round large integers. Return JSON values, omit undefined fields or use null, and encode BigInt as a string.
+tools.search({name}) gets an exact name/schema; {server,tool,plugin?} gets an exact method; {query} searches capabilities; {server,plugin?,after?} lists tools. Read its Body with (await tools.search(selector)).json() to get {tools:[{name,description,input_schema,output_schema?,call_path,server?,tool?,plugin?}],count,truncated,omitted_count?,next?}. Continue next as after. Use returned call_path for special/conflicting names; tools.call(name,args) returns the same Body.
 
-Errors expose message, code and result (reply is an alias). stale_revision requires a fresh search; unknown outcomes must not be replayed. After js_exec yields, use Task read/wait/cancel on its original handle.`
+Errors expose message, code and result (reply is an alias). Failed Bodies contain unverified diagnostics; json() only parses their text. stale_revision requires a fresh search; unknown outcomes must not be replayed. runtime.state() reports generation/execution on demand. reset:true cancels the old script and creates a fresh environment. After yielding, use Task read/wait/cancel on the original handle before submitting another script.`
 
 // Tool is a concrete declaration, retained until Runtime injects its Host.
-// Product assembly uses the fixed ToolName. Every execution has a new VM.
+// Product assembly uses the fixed ToolName. Runtime binds one environment to each active Session.
 type Tool struct {
 	Name     string
 	Executor Executor
@@ -207,12 +243,12 @@ type Tool struct {
 	Limits   Limits
 }
 
-// Definition declares mutually exclusive inline and file source inputs.
+// Definition declares mutually exclusive inline source, file source and reset operations.
 func (t *Tool) Definition() tool.Definition {
 	return tool.Definition{Name: t.Name, Metadata: map[string]any{tool.MetadataToolKind: ToolKind}, Description: description, InputSchema: map[string]any{
 		"type": "object", "additionalProperties": false,
-		"properties": map[string]any{"code": map[string]any{"type": "string", "minLength": 1, "description": "Async JavaScript function body; await tool calls and explicitly return the desired output."}, "file": map[string]any{"type": "string", "minLength": 1, "description": "JavaScript source file path; relative paths resolve from the working directory."}, "yield_time_ms": map[string]any{"type": "integer", "minimum": 0, "maximum": 60000, "default": 10000, "description": "Foreground wait only, in milliseconds. After yielding, use Task read/wait/cancel on the original handle; do not resubmit js_exec."}},
-		"oneOf":      []any{map[string]any{"required": []string{"code"}}, map[string]any{"required": []string{"file"}}},
+		"properties": map[string]any{"code": map[string]any{"type": "string", "minLength": 1, "description": "JavaScript source; top-level await, return and persistent declarations are supported."}, "file": map[string]any{"type": "string", "minLength": 1, "description": "JavaScript source file path relative to the working directory."}, "reset": map[string]any{"type": "boolean", "const": true, "description": "Cancel the old script and replace the environment."}, "yield_time_ms": map[string]any{"type": "integer", "minimum": 0, "maximum": 60000, "default": 10000, "description": "Foreground wait in milliseconds. After yielding, observe the original Task to completion before the next script."}},
+		"oneOf":      []any{map[string]any{"required": []string{"code"}, "not": map[string]any{"anyOf": []any{map[string]any{"required": []string{"file"}}, map[string]any{"required": []string{"reset"}}}}}, map[string]any{"required": []string{"file"}, "not": map[string]any{"anyOf": []any{map[string]any{"required": []string{"code"}}, map[string]any{"required": []string{"reset"}}}}}, map[string]any{"required": []string{"reset"}, "not": map[string]any{"anyOf": []any{map[string]any{"required": []string{"code"}}, map[string]any{"required": []string{"file"}}}}}},
 	}}
 }
 

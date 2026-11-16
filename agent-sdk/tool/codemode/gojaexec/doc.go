@@ -1,20 +1,21 @@
-// Package gojaexec implements the fresh-process JavaScript executor.
-// Call WorkerMain at the executable's early
-// worker entry point; Execute reexecutes that same binary, with an empty environment
-// except GOMAXPROCS=1 and fixed race-detector shutdown settings; it inherits no
-// application handles or credentials.
+// Package gojaexec implements a disposable, continuous JavaScript environment.
+// Call WorkerMain at the executable's early worker entry point. NewEnvironment
+// reexecutes that binary lazily with an empty environment except GOMAXPROCS=1
+// and fixed race-detector shutdown settings. Runtime retains one environment
+// per active Session and releases it with the host's execution resources.
+// Standalone Executor.Execute creates and closes a single-use environment.
 //
-// Each Execute has a new heap. Scripts are async function bodies: await
-// tools.call(name, object), tools.search(query), and JSON return. Runtime selects
-// returned opaque media from the final value; unreturned media is not delivered.
-// Reply JSON numbers use JavaScript Number semantics; unless a business field
-// owns that name, reply.raw_json retains the exact original Host reply JSON,
-// including integers beyond 2^53-1. The compatibility property is a
-// non-enumerable property: JSON.stringify and object spread
-// omit it; scripts can explicitly select reply.raw_json. BigInt must
-// be returned as a string. There are no default fs, network, shell, env or module
-// APIs. This is capability isolation, not an OS sandbox against engine exploits.
+// Sequential scripts share top-level declarations and assignments, with await
+// and return at the script boundary. Every tool entry returns the same Body:
+// text() reads all textual/JSON entries, json() uses validated structured content
+// or parses that entire text, and media holds original opaque references.
+// Reading is repeatable. Returning a Body preserves the complete original reply;
+// selected values carry only explicitly returned original media identities.
+// text() and whole Body returns preserve exact JSON tokens; parsed values use
+// JavaScript Number semantics. BigInt must be returned as a string.
 //
-// Goja has no hard per-VM heap limit. Process RSS is an observation, not a hard
-// limit or a default rejection condition. No GOMEMLIMIT/RSS polling claim is made.
+// There are no default fs, network, shell, environment or module APIs. The worker
+// inherits no application handles or credentials. This is capability isolation,
+// not an OS sandbox against engine exploits. Goja has no hard per-VM heap limit;
+// process RSS is an observation, not a rejection condition or enforcement claim.
 package gojaexec

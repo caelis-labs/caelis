@@ -31,7 +31,7 @@ import (
 )
 
 // TestCodeModeDTWAtomicIsolatedX11 uses a deterministic model, production
-// Runtime/chat.Factory, fresh Goja workers and one real DTW atomic MCP process.
+// Runtime/chat.Factory, a continuous Goja environment and one real DTW atomic MCP process.
 // It is deliberately opt-in: the ordinary desktop must remain locked throughout.
 // Approval is an automated allow_once fixture callback, not a live human/Guardian.
 func TestCodeModeDTWAtomicIsolatedX11(t *testing.T) {
@@ -298,14 +298,14 @@ func TestCodeModeDTWAtomicIsolatedX11(t *testing.T) {
 	appJSON, _ := json.Marshal(executable)
 	queryJSON, _ := json.Marshal(fixtureName)
 	geometryJSON, _ := json.Marshal(geometry)
-	prefix := `const app=` + string(appJSON) + `;const g=` + string(geometryJSON) + `;function data(r){const j=tools.unpack(r).json;for(const x of j){if(x.view||x.apps)return x;}throw Error("missing structured result");}function checked(r){const i=data(r).view.image;if(!(i.width>0&&i.height>0)||JSON.stringify(i.bounds)!==JSON.stringify([g.x,g.y,g.width,g.height]))throw Error("capture/fixture coordinate mismatch");return r;}function point(w,i){const r=g[w];return {app,x:(r[0]+r[2]/2)*i.width/g.width,y:(r[1]+r[3]/2)*i.height/g.height};}`
+	prefix := `var app=` + string(appJSON) + `;var g=` + string(geometryJSON) + `;function data(r){return r.json();}function checked(r){const i=data(r).view.image;if(!(i.width>0&&i.height>0)||JSON.stringify(i.bounds)!==JSON.stringify([g.x,g.y,g.width,g.height]))throw Error("capture/fixture coordinate mismatch");return r;}function point(w,i){const r=g[w];return {app,x:(r[0]+r[2]/2)*i.width/g.width,y:(r[1]+r[3]/2)*i.height/g.height};}`
 	token := "caelis_atomic_731"
 	scripts := []string{
-		prefix + `const r=await dtw.apps({query:` + string(queryJSON) + `,state:"running"});const a=tools.unpack(r).json.find(x=>x.apps).apps;if(a.length!==1||a[0].app!==app)throw Error("fixture identity mismatch");await dtw.look({app});return checked(await dtw.capture({app}));`,
-		prefix + `const previousImage=__PREVIOUS_IMAGE__;await dtw.click(point("button",previousImage));return checked(await dtw.capture({app}));`,
-		// The click below consumes the previous VM's capture binding, without
+		prefix + `const r=await dtw.apps({query:` + string(queryJSON) + `,state:"running"});const a=r.json().apps;if(a.length!==1||a[0].app!==app)throw Error("fixture identity mismatch");await dtw.look({app});return checked(await dtw.capture({app}));`,
+		prefix + `var previousImage=__PREVIOUS_IMAGE__;await dtw.click(point("button",previousImage));return checked(await dtw.capture({app}));`,
+		// The click below consumes the previous script's capture binding, without
 		// another capture or focus call replacing the connection's app context.
-		prefix + `const previousImage=__PREVIOUS_IMAGE__;await dtw.click(point("entry",previousImage));await dtw.typeText({app,text:"` + token + `"});await dtw.keypress({app,keys:["ENTER"]});await dtw.look({app});return checked(await dtw.capture({app}));`,
+		prefix + `var previousImage=__PREVIOUS_IMAGE__;await dtw.click(point("entry",previousImage));await dtw.typeText({app,text:"` + token + `"});await dtw.keypress({app,keys:["ENTER"]});await dtw.look({app});return checked(await dtw.capture({app}));`,
 		prefix + `await dtw.look({app});return checked(await dtw.capture({app}));`,
 	}
 	var mu sync.Mutex

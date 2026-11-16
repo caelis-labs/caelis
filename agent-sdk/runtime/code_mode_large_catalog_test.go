@@ -51,7 +51,7 @@ func TestCodeModeLargeCatalogStartup(t *testing.T) {
 				return nil
 			}}
 			var metrics []gojaexec.Metrics
-			events, _ := runCodeMode(t, store, active, agent.AgentSpec{Model: driver, Tools: []tool.Tool{&codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{Observe: func(m gojaexec.Metrics) { metrics = append(metrics, m) }}}}, DeferredTools: source}, nil, nil)
+			events, rt := runCodeMode(t, store, active, agent.AgentSpec{Model: driver, Tools: []tool.Tool{&codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{Observe: func(m gojaexec.Metrics) { metrics = append(metrics, m) }}}}, DeferredTools: source}, nil, nil)
 			for _, event := range events {
 				if event.Tool != nil && event.Tool.Name == codemode.ToolName && event.Tool.Status == "failed" {
 					t.Errorf("script failed: %+v", event.Tool.Output)
@@ -59,6 +59,9 @@ func TestCodeModeLargeCatalogStartup(t *testing.T) {
 			}
 			if strings.Join(calls, ",") != strings.Join([]string{first.Name, last.Name, last.Name}, ",") {
 				t.Errorf("canonical calls=%v", calls)
+			}
+			if err := rt.ReleaseCodeModeEnvironments(); err != nil {
+				t.Fatal(err)
 			}
 			if len(metrics) != 1 || !metrics[0].Reaped {
 				t.Errorf("worker metrics=%+v", metrics)

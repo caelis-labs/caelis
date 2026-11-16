@@ -1,76 +1,46 @@
-// Trusted glue is closed over pristine intrinsics before untrusted code runs.
-// The only native function accepts bounded strings and returns a Promise.
-(function(rpc, limits, names) {
+// Trusted glue retains pristine intrinsics and private identities across scripts.
+(function(rpc) {
   "use strict";
-  const parse = JSON.parse, keys = Object.keys, isArray = Array.isArray;
-  const finite = Number.isFinite, freeze = Object.freeze, define = Object.defineProperty;
-  const ErrorType = Error, SetType = Set, WeakMapType = WeakMap;
-  const weakGet = Function.prototype.call.bind(WeakMap.prototype.get);
-  const weakSet = Function.prototype.call.bind(WeakMap.prototype.set);
-  const origins=new WeakMapType(), replies=new WeakMapType(), values=new WeakMapType();
-  // Object identity is private to this closure; no string/symbol property in
-  // business JSON grants a projection role. Media identities are immutable.
-  function ownReply(result, raw) {
-    define(result,"raw_json",{value:raw,enumerable:false});
-    weakSet(replies,result,true);
-    const parts=result.parts||[];
-    for(let i=0;i<parts.length;i++) {
-      const p=parts[i];
-      weakSet(origins,p,{kind:p.kind,handle:p.handle});
-      define(p,"kind",{value:p.kind,writable:false,configurable:false});
-      if(p.kind==="media"||p.kind==="file_ref") freeze(p);
-    }
-    if(!own(result,"value")&&!result.mcp) {
-      if(!result.is_error&&result.outcome!=="unknown_outcome") {const legacy={parts};define(legacy,"raw_json",{value:raw,enumerable:false});weakSet(replies,legacy,true);return legacy;}
-      return result;
-    }
-    const snapshot=parse(encode(parts,limits.reply_bytes,false));
-    let value=own(result,"value")&&result.content_index!==undefined?parts[result.content_index].json:result.value;
-    if(!own(result,"value")) {
-      const content=[];
-      for(let i=0;i<parts.length;i++) {
-        if(i===result.content_index)continue;
-        const p=parts[i];let c;
-        if(p.kind==="text")c={type:"text",text:p.text||""};
-        else if(p.kind==="json")c=p.json;
-        else {
-          c={type:p.kind==="media"?"image":"file_ref",handle:p.handle,mimeType:p.mime_type};
-          weakSet(origins,c,{kind:p.kind,handle:p.handle});freeze(c);
-        }
-        define(content,content.length,{value:c,enumerable:true});
+  const globals=globalThis, SyntaxErrorType=SyntaxError,ReferenceErrorType=ReferenceError,TypeErrorType=TypeError;
+  const parse=JSON.parse, keys=Object.keys, isArray=Array.isArray;
+  const finite=Number.isFinite, freeze=Object.freeze, define=Object.defineProperty;
+  const descriptor=Object.getOwnPropertyDescriptor, assign=Object.assign;
+  const create=Object.create, ErrorType=Error, SetType=Set, WeakMapType=WeakMap;
+  const weakGet=Function.prototype.call.bind(WeakMap.prototype.get);
+  const weakSet=Function.prototype.call.bind(WeakMap.prototype.set);
+  const own=Function.prototype.call.bind(Object.prototype.hasOwnProperty);
+  const charCode=Function.prototype.call.bind(String.prototype.charCodeAt);
+  const slice=Function.prototype.call.bind(String.prototype.slice);
+  const then=Function.prototype.call.bind(Promise.prototype.then);
+  const has=Function.prototype.call.bind(Set.prototype.has);
+  const add=Function.prototype.call.bind(Set.prototype.add);
+  const del=Function.prototype.call.bind(Set.prototype.delete);
+  const origins=new WeakMapType(), replies=new WeakMapType(), toolGlobals=new SetType();
+  let limits, state;
+  function ownReply(reply) {
+    const media=[];
+    for(let i=0;i<(reply.parts||[]).length;i++) {
+      const p=reply.parts[i];
+      if(p.kind==="media"||p.kind==="file_ref") {
+        weakSet(origins,p,{kind:p.kind,handle:p.handle});freeze(p);
+        define(media,media.length,{value:p,enumerable:true});
       }
-      value={content};
-      if(result.content_index!==undefined)value.structuredContent=parts[result.content_index].json;
     }
-    if(value===null||typeof value!=="object")throw new ErrorType("structured result must be an object");
-    const objects=[], baseline=encode(value,limits.reply_bytes,false,objects);
-    weakSet(values,value,{baseline,objects,parts:snapshot,callID:result.call_id});
-    weakSet(replies,value,result);
-    // Compatibility reads never shadow a business field and are not enumerated.
-    if(!own(value,"parts"))define(value,"parts",{value:parts,enumerable:false});
-    if(!own(value,"raw_json"))define(value,"raw_json",{value:raw,enumerable:false});
-    if(result.is_error||result.outcome==="unknown_outcome") {
-      for(const key of ["call_id","outcome","is_error","turn_complete"])if(!own(value,key))define(value,key,{value:result[key],enumerable:false});
-    }
-    return value;
+    const body={media:freeze(media)};
+    let read=false, json;
+    const text=reply.body_text;
+    define(body,"text",{value:()=>text});
+    define(body,"json",{value:()=>{if(!read){json=own(reply,"value")?reply.value:parse(text);read=true;}return json;}});
+    weakSet(replies,body,reply);
+    return freeze(body);
   }
-  const apply = Function.prototype.call.bind(Function.prototype.call);
-  const charCode = Function.prototype.call.bind(String.prototype.charCodeAt);
-  const slice = Function.prototype.call.bind(String.prototype.slice);
-  const then = Function.prototype.call.bind(Promise.prototype.then);
-  const has = Function.prototype.call.bind(Set.prototype.has);
-  const add = Function.prototype.call.bind(Set.prototype.add);
-  const del = Function.prototype.call.bind(Set.prototype.delete);
   // Streaming JSON encoding bounds bytes before appending. It deliberately
   // accepts only JSON values (no toJSON, BigInt, functions or undefined), and
   // caps depth. It never exports an untrusted object graph to Go.
-  function encode(value, budget, project, identities) {
+  function encode(value, budget, project) {
     let out = "", used = 0;
-    const seen = new SetType(), selected=new SetType(), directMedia=new SetType(), media=[], extras=[], extraSeen=new SetType();
-    const business=project&&value&&typeof value==="object"?weakGet(values,value):null;
-    const objects=identities||[];
-    let complete=false;
-    let direct=!!(project&&!business&&value&&typeof value==="object"&&weakGet(replies,value));
+    const seen = new SetType(), selected=new SetType(), media=[];
+    const original=project&&value&&typeof value==="object"?weakGet(replies,value):null;
     function put(s, n) {
       if ((used += n) > budget) throw new ErrorType("JSON byte budget exceeded");
       out += s;
@@ -89,11 +59,9 @@
       }
       put('"',1);
     }
-    function visit(v, depth, inspect, role, path) {
+    function visit(v, depth, inspect, path) {
       path=path||"$";
       function invalid(reason) {return new ErrorType("invalid_input at "+slice(path,0,256)+": "+reason);}
-      if(role===2&&!isArray(v))direct=false;
-      if(role===3&&(!v||typeof v!=="object"||!weakGet(origins,v)))direct=false;
       if (depth > 128) throw invalid("JSON depth exceeded");
       if (v === null) return put("null",4);
       switch (typeof v) {
@@ -105,11 +73,12 @@
       }
       if (has(seen,v)) throw invalid("cyclic JSON");
       add(seen,v);
-      const start=out.length, first=objects.length;
-      if(project||identities)define(objects,objects.length,{value:v});
-      const whole=inspect&&weakGet(values,v);
+      const body=inspect&&weakGet(replies,v);
+      if(body) {
+        del(seen,v);
+        return visit({text:body.body_text,media:v.media},depth,inspect,path);
+      }
       const origin=weakGet(origins,v);
-      if(role===3&&origin&&(origin.kind==="media"||origin.kind==="file_ref"))add(directMedia,origin.handle);
       if(inspect&&origin&&(origin.kind==="media"||origin.kind==="file_ref")&&!has(selected,origin.handle)) {
         if(media.length>=limits.calls)throw new ErrorType("returned media budget exceeded");
         add(selected,origin.handle);
@@ -118,69 +87,34 @@
       const array=isArray(v);put(array?"[":"{",1);
       if (array) {
         const length=v.length;
-        for (let i=0;i<length;i++) {if(i)put(",",1);visit(v[i],depth+1,inspect,role===2?3:0,path+"["+i+"]");}
+        for (let i=0;i<length;i++) {if(i)put(",",1);visit(v[i],depth+1,inspect,path+"["+i+"]");}
       } else {
         // keys() can allocate proportional to the input object. Goja has no
         // heap limiter; encoding/IPC budgets do not claim to bound the VM heap.
         const names=keys(v);
-        if(role===1&&(names.length!==1||names[0]!=="parts"))direct=false;
-        let kindSeen=false, payloadSeen=!!(origin&&origin.kind==="text");
         for(let i=0;i<names.length;i++) {
           const name=names[i];
-          // Canonical parts follow their original kind. Extra business fields
-          // keep the entire reply ordinary JSON rather than losing data in Go.
-          if(role===3&&origin&&name!=="kind"&&
-            !(origin.kind==="text"&&name==="text")&&
-            !(origin.kind==="json"&&name==="json")&&
-            !((origin.kind==="media"||origin.kind==="file_ref")&&(name==="handle"||name==="mime_type")))direct=false;
           if(i)put(",",1);quote(name);put(":",1);
           // All projection decisions consume these same budgeted reads. Proxy
           // descriptors and accessors never supply a separate preflight value.
           const child=v[name];
-          if(role===3&&origin) {
-            if(name==="kind")kindSeen=child===origin.kind;
-            if(origin.kind==="text"&&name==="text"&&typeof child!=="string")direct=false;
-            if(origin.kind==="json"&&name==="json")payloadSeen=true;
-            if((origin.kind==="media"||origin.kind==="file_ref")&&name==="handle")payloadSeen=child===origin.handle;
-          }
-          visit(child,depth+1,inspect,role===1&&name==="parts"?2:0,slice(path+"."+name,0,256));
+          visit(child,depth+1,inspect,slice(path+"."+name,0,256));
         }
-        if(role===3&&(!kindSeen||!payloadSeen))direct=false;
       }
       put(array?"]":"}",1);del(seen,v);
-      // Compare the same budgeted reads, including object identities. Equal
-      // JSON containing a copied media handle is not an unchanged result.
-      if(whole&&slice(out,start)===whole.baseline&&objects.length-first===whole.objects.length) {
-        let unchanged=true;
-        for(let i=0;i<whole.objects.length;i++)if(objects[first+i]!==whole.objects[i]){unchanged=false;break;}
-        if(unchanged) {
-          if(depth===0)complete=true;
-          for(let i=0;i<whole.parts.length;i++) {
-            const p=whole.parts[i];
-            if(p.kind==="text"&&!has(extraSeen,p)) {add(extraSeen,p);define(extras,extras.length,{value:p,enumerable:true});}
-            else if((p.kind==="media"||p.kind==="file_ref")&&!has(selected,p.handle)) {
-              if(media.length>=limits.calls)throw invalid("returned media budget exceeded");
-              add(selected,p.handle);define(media,media.length,{value:{kind:p.kind,handle:p.handle},enumerable:true});
-            }
-          }
-        }
-      }
     }
-    visit(value,0,!!project,direct?1:0);
+    if(original) {
+      const handles=new SetType();let count=0;
+      for(let i=0;i<(original.parts||[]).length;i++){const p=original.parts[i];if((p.kind==="media"||p.kind==="file_ref")&&!has(handles,p.handle)){add(handles,p.handle);if(++count>limits.calls)throw new ErrorType("returned media budget exceeded");}}
+      if(original.call_id){put('{"reply":true,"call_id":',24);quote(original.call_id);put('}',1);}
+      else {put('{"reply":true,"parts":',21);visit(original.parts||[],0,false);put('}',1);}
+      return out;
+    }
+
+    visit(value,0,!!project);
     if(project) {
       const body=out, bytes=used;out="";used=0;
-      if(complete) {
-        put('{"reply":true,"call_id":',24);quote(business.callID);put('}',1);
-      } else if(direct) {
-        // Canonical JSON parts may now contain selected original media. Reuse
-        // the already encoded body: accessors must never be evaluated twice.
-        put('{"reply":true,',14);put(slice(body,1,-2),bytes-3);
-        for(let i=0;i<media.length;i++) if(!has(directMedia,media[i].handle)) {
-          put(',',1);visit(media[i],0,false,0);
-        }
-        put(']}',2);
-      }
-      else {put('{"value":',9);put(body,bytes);put(',"parts":',9);for(let i=0;i<media.length;i++)define(extras,extras.length,{value:media[i],enumerable:true});visit(extras,0,false,0);put('}',1);}
+      put('{"value":',9);put(body,bytes);put(',"parts":',9);visit(media,0,false);put('}',1);
     }
     return out;
   }
@@ -196,13 +130,13 @@
           if(typeof detail==="string") {message="Tool call failed: "+slice(detail,0,1024);break;}
         }
       }
-      const e=new ErrorType(message);e.reply=ownReply(reply,envelope.raw);e.result=e.reply;
+      const e=new ErrorType(message);e.reply=ownReply(reply);e.result=e.reply;
       e.code=envelope.code||(reply.outcome==="unknown_outcome"?"unknown_outcome":"tool_failed");
       throw e;
     }
-    return ownReply(reply,envelope.raw);
+    return ownReply(reply);
   }
-  const tools=Object.assign(Object.create(null),{
+  const api=assign(create(null),{
     call(name,args) {
       if(typeof name!=="string" || name.length>1024 || args===null || typeof args!=="object" || isArray(args))
         throw new ErrorType("tools.call(name,args) requires a name string and JSON object");
@@ -228,27 +162,13 @@
           own(request,"query")?names.length!==1:
           !own(request,"server")||(own(request,"tool")&&own(request,"after")))throw new ErrorType("tools.search requires {name}, {server,tool,plugin?}, {query}, or {server,plugin?,after?}");
       }
-      return then(then(rpc("search","",encode(request,limits.argument_bytes)),decode),r=>define(r.parts[0].json,"raw_json",{value:r.raw_json,enumerable:false}));
-    },
-    unpack(reply) {
-      if(!reply||typeof reply!=="object"||!weakGet(replies,reply))throw new ErrorType("tools.unpack requires an original tool reply");
-      const original=weakGet(replies,reply);
-      const result={json:[],text:[],media:[]}, parts=original&&original.parts?original.parts:reply.parts||[];
-      for(let i=0;i<parts.length;i++) {
-        const p=parts[i];
-        let target, value;
-        if(p.kind==="json") {target=result.json;value=p.json;}
-        else if(p.kind==="text") {target=result.text;value=p.text;}
-        else if(p.kind==="media"||p.kind==="file_ref") {target=result.media;value=p;}
-        else continue;
-        define(target,target.length,{value,enumerable:true});
-      }
-      return result;
+      return then(rpc("search","",encode(request,limits.argument_bytes)),decode);
     }
   });
   // All entry points delegate to the same validation, RPC, decode and identity
   // path. Null prototypes preserve exact names, including __proto__.
-  const create=Object.create, own=Function.prototype.call.bind(Object.prototype.hasOwnProperty);
+  function install(names) {
+  const tools=assign(create(null),api);
   const native=create(null), mcp=create(null), plugins=create(null), shortcuts=create(null);
   function table(parent,name) {
     if(!own(parent,name)) define(parent,name,{value:create(null),enumerable:true});
@@ -298,11 +218,42 @@
   }
   tools.native=freeze(native);tools.mcp=freeze(mcp);tools.plugins=freeze(plugins);
   freeze(tools);
-  const globals=keys(shortcuts);
-  for(let i=0;i<globals.length;i++) {
-    const name=globals[i];
-    if(name!=="tools"&&!(name in globalThis)&&shortcuts[name]!==null)
-      define(globalThis,name,{value:shortcuts[name],enumerable:true});
+  const shortcutNames=keys(shortcuts);
+  for(let i=0;i<shortcutNames.length;i++) {
+    const name=shortcutNames[i];
+    if(name!=="tools"&&name!=="runtime"&&(!own(globals,name)||has(toolGlobals,name))&&shortcuts[name]!==null) {
+      define(globals,name,{value:shortcuts[name],enumerable:true,configurable:true});add(toolGlobals,name);
+    }
   }
-  return freeze({tools, encode:value=>encode(value===undefined?null:value,limits.output_bytes,true)});
+  define(globals,"tools",{value:tools,configurable:true});
+  return tools;
+  }
+  const bindings=create(null);
+  function prepare(declarations) {
+    for(let i=0;i<declarations.length;i++) {
+      const d=declarations[i];
+      if(own(bindings,d.name)?bindings[d.name].kind!=="var"||d.kind!=="var":d.name==="tools"||d.name==="runtime"||(own(globals,d.name)&&!descriptor(globals,d.name).configurable))
+        throw new SyntaxErrorType("Identifier '"+d.name+"' has already been declared");
+    }
+    for(let i=0;i<declarations.length;i++) {
+      const d=declarations[i];if(own(bindings,d.name))continue;
+      const cell={kind:d.kind,ready:d.kind==="var",value:d.kind==="var"&&own(globals,d.name)?globals[d.name]:undefined,read:null,write:null};bindings[d.name]=cell;del(toolGlobals,d.name);
+      define(globals,d.name,{enumerable:true,get(){
+        if(!cell.ready)throw new ReferenceErrorType("Cannot access '"+d.name+"' before initialization");
+        return cell.read?cell.read():cell.value;
+      },set(value){
+        if(!cell.ready)throw new ReferenceErrorType("Cannot access '"+d.name+"' before initialization");
+        if(cell.kind==="const")throw new TypeErrorType("Assignment to constant variable");
+        if(cell.write)cell.write(value);else cell.value=value;
+      }});
+    }
+    return (name,read,write)=>{const cell=bindings[name];if(!cell||cell.ready)throw new ErrorType("invalid declaration initialization");cell.read=read;cell.write=write;cell.ready=true;};
+  }
+  define(globals,"runtime",{value:freeze({state:()=>({generation:state.generation,execution:state.execution})})});
+  return freeze({
+    configure(nextLimits,names,nextState){limits=nextLimits;state=nextState;install(names);},
+    prepare,
+    parse,
+    encode:value=>encode(value===undefined?null:value,limits.output_bytes,true)
+  });
 })

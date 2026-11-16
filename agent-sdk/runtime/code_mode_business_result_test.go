@@ -18,8 +18,8 @@ import (
 
 func TestCodeModeNativeBusinessResult(t *testing.T) {
 	for _, code := range []string{
-		`const file=await Read({path:"input.txt"});return {content:file.content,done:!file.has_more};`,
-		`let failure;try{await Read({path:"missing.txt"})}catch(e){failure={code:e.code,message:e.message};}const file=await Read({path:"input.txt"});return {content:file.content,done:!file.has_more,failure};`,
+		`const response=await Read({path:"input.txt"});const file=response.json();return {content:file.content,done:!file.has_more};`,
+		`let failure;try{await Read({path:"missing.txt"})}catch(e){failure={code:e.code,message:e.message};}const response=await Read({path:"input.txt"});const file=response.json();return {content:file.content,done:!file.has_more,failure};`,
 	} {
 		t.Run(code, func(t *testing.T) {
 			store, active, root := codeModeStore(t)
