@@ -13,7 +13,6 @@ import (
 	"image/png"
 	"iter"
 
-	"github.com/disintegration/imaging"
 	"golang.org/x/image/draw"
 	_ "golang.org/x/image/webp"
 )
@@ -174,7 +173,7 @@ func prepareInlineImage(media *MediaPart) preparedImage {
 	}
 	// Decode even small images: a valid header alone does not establish that
 	// the body is usable, and replaying corrupt bytes would wedge every turn.
-	src, err := imaging.Decode(bytes.NewReader(data), imaging.AutoOrientation(true))
+	src, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
 		return omit("image could not be decoded")
 	}
@@ -183,6 +182,9 @@ func prepareInlineImage(media *MediaPart) preparedImage {
 	}
 	// Re-encoding removes EXIF, so use the displayed orientation and dimensions
 	// rather than rotating or mirroring camera photos as a side effect.
+	if format == "jpeg" {
+		src = orientJPEGImage(src, jpegOrientation(data))
+	}
 	cfg.Width, cfg.Height = src.Bounds().Dx(), src.Bounds().Dy()
 	regions := imagePreparationRegions(src.Bounds())
 	result := preparedImage{}

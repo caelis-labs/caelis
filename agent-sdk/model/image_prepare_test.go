@@ -19,6 +19,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"golang.org/x/image/tiff"
 )
 
 func imageTestPart(t testing.TB, width, height int) Part {
@@ -303,6 +305,56 @@ func TestGenerateOmitsInvalidImagesWithoutLosingOtherEvidence(t *testing.T) {
 		if len(parts) != 3 || parts[0].Text.Text != "keep" || parts[1].Text == nil || !strings.Contains(parts[1].Text.Text, "omitted:") || parts[2].Media == nil {
 			t.Fatal("invalid image prevented usable evidence from reaching provider")
 		}
+	}
+}
+
+func TestGenerateOmitsTIFFWithInvalidPaletteIndex(t *testing.T) {
+	t.Parallel()
+	// Match CVE-2023-36308's shape: palette index 70 with only 65 colors.
+	img := image.NewPaletted(image.Rect(0, 0, 1, 1), color.Palette{color.Black})
+	img.Pix[0] = 70
+	var encoded bytes.Buffer
+	if err := tiff.Encode(&encoded, img, nil); err != nil {
+		t.Fatal(err)
+	}
+	data := encoded.Bytes()
+	ifd := int(binary.LittleEndian.Uint32(data[4:8]))
+	count := int(binary.LittleEndian.Uint16(data[ifd : ifd+2]))
+	for i := 0; i < count; i++ {
+		entry := data[ifd+2+i*12 : ifd+2+(i+1)*12]
+		if binary.LittleEndian.Uint16(entry[:2]) == 320 { // TIFF ColorMap.
+			binary.LittleEndian.PutUint32(entry[4:8], 65*3)
+		}
+	}
+	// TIFF stays unsupported even if another SDK consumer registers a decoder.
+	if cfg, format, err := image.DecodeConfig(bytes.NewReader(data)); err != nil || format != "tiff" || len(cfg.ColorModel.(color.Palette)) != 65 {
+		t.Fatalf("invalid TIFF fixture header: format=%s config=%+v err=%v", format, cfg, err)
+	}
+	if _, err := tiff.Decode(bytes.NewReader(data)); err == nil || !strings.Contains(err.Error(), "invalid color index") {
+		t.Fatalf("fixture does not exercise an invalid palette index: %v", err)
+	}
+	bad := NewMediaPart(MediaModalityImage, MediaSource{Kind: MediaSourceInline, Data: base64.StdEncoding.EncodeToString(data)}, "image/png", "crafted.tiff")
+	valid := imageTestPart(t, 1, 1)
+	req := &Request{Messages: []Message{
+		NewMessage(RoleUser, NewTextPart("keep"), bad, valid),
+		MessageFromToolCalls(RoleAssistant, []ToolCall{{ID: "view", Name: "ViewImage", Args: `{}`}}, ""),
+		NewMessage(RoleTool, Part{Kind: PartKindToolResult, ToolResult: &ToolResultPart{ToolUseID: "view", Name: "ViewImage", Content: []Part{bad, valid}}}),
+	}}
+	original := CloneRequest(req)
+	probe := &retryTestLLM{}
+	for _, err := range Generate(t.Context(), probe, req) {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	prepared := probe.seenReqs[0]
+	for _, parts := range [][]Part{prepared.Messages[0].Parts[1:], prepared.Messages[2].Parts[0].ToolResult.Content} {
+		if len(parts) != 2 || parts[0].Text == nil || !strings.Contains(parts[0].Text.Text, "omitted: unsupported image format") || parts[1].Media == nil || parts[1].Media.Source.Data != valid.Media.Source.Data {
+			t.Fatalf("crafted TIFF reached provider or valid evidence was lost: %+v", parts)
+		}
+	}
+	if prepared.Messages[0].Parts[0].Text.Text != "keep" || !reflect.DeepEqual(req, original) {
+		t.Fatal("TIFF rejection changed surrounding evidence or canonical history")
 	}
 }
 

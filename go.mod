@@ -19,7 +19,6 @@ require (
 	github.com/charmbracelet/x/ansi v0.11.9
 	github.com/charmbracelet/x/vt v0.1.0
 	github.com/creack/pty v1.1.24
-	github.com/disintegration/imaging v1.6.2
 	github.com/dop251/goja v0.0.0-20261103214539-f5d1d0025744
 	github.com/google/jsonschema-go v0.4.3
 	github.com/google/uuid v1.6.0
