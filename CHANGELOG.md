@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.81.2](https://github.com/caelis-labs/caelis/compare/v0.81.1...v0.81.2) (2026-11-16)
+
+
+### Bug Fixes
+
+* **plugins:** isolate package failures and restore Windows sessions ([#233](https://github.com/caelis-labs/caelis/issues/233)) ([500283a](https://github.com/caelis-labs/caelis/commit/500283ab4e414a6612664c282d6d54d6533aace5))
+
 ## [0.81.1](https://github.com/caelis-labs/caelis/compare/v0.81.0...v0.81.1) (2026-11-16)
 
 
