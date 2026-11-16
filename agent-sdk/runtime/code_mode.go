@@ -48,7 +48,7 @@ func (t runtimeCodeModeTool) Call(ctx context.Context, call tool.Call) (tool.Res
 	}
 	source, err := t.declaration.ReadSource(call, limits.SourceBytes)
 	if err != nil {
-		return tool.Result{}, err
+		return tool.Result{}, tool.WrapError(tool.ErrorCodeInvalidInput, err, "js_exec source: "+err.Error())
 	}
 	if t.tasks != nil && t.declaration.Name == codemode.ToolName {
 		return t.tasks.startCodeMode(ctx, t, call, source, limits)
@@ -103,7 +103,7 @@ func (t runtimeCodeModeTool) execute(ctx context.Context, call tool.Call, source
 		completed.err = errors.Join(completed.err, fmt.Errorf("code mode output must be bounded JSON"))
 	}
 	result := tool.Result{ID: call.ID, Name: call.Name, IsError: host.isError && !host.turnComplete, TurnComplete: host.turnComplete,
-		Metadata: map[string]any{"code_mode_source": map[string]any{"path": source.Path, "sha256": source.SHA256}}}
+		Metadata: map[string]any{"code_mode_source": map[string]any{"path": source.Path, "sha256": source.SHA256, "code": source.Code}}}
 	if completed.err == nil {
 		result.Content, completed.err = host.returnedParts(completed.output)
 	}
@@ -174,6 +174,7 @@ type codeModeHost struct {
 	turnComplete   bool
 	fatal          error
 	handles        map[string]model.Part
+	replies        map[string]codemode.Reply
 }
 
 func (h *codeModeHost) stop() {
@@ -315,9 +316,7 @@ func (h *codeModeHost) call(requestCtx context.Context, name string, arguments j
 	if err != nil {
 		return codemode.Reply{}, err
 	}
-	if !codeModeCanCall(target.definition) {
-		return codemode.Reply{}, codemode.NewPublicPermissionError("native shell/process execution is prohibited from JavaScript")
-	}
+
 	h.mu.Lock()
 	if h.closed || h.ctx.Err() != nil {
 		h.mu.Unlock()
@@ -387,7 +386,7 @@ func (h *codeModeHost) call(requestCtx context.Context, name string, arguments j
 		// A published failed receipt settles an ordinary tool failure. The
 		// producer remains admitted; the failure flag/receipt is never erased.
 		if h.ctx.Err() == nil && settledCodeModeToolError(result, callErr) {
-			reply, projectErr := h.project(callID, result, outcome)
+			reply, projectErr := h.project(callID, result, outcome, target.definition)
 			if projectErr == nil {
 				reply.IsError = true
 				return reply, callErr
@@ -400,7 +399,7 @@ func (h *codeModeHost) call(requestCtx context.Context, name string, arguments j
 		h.cancel()
 		return codemode.Reply{CallID: callID, IsError: true, Outcome: outcome}, callErr
 	}
-	return h.project(callID, result, outcome)
+	return h.project(callID, result, outcome, target.definition)
 }
 
 func codeModeOutcome(result tool.Result, err error) string {

@@ -44,7 +44,7 @@ func (t codeModeDiscoveryTool) Call(ctx context.Context, call tool.Call) (return
 			return false, nil
 		}
 		current := one.Definition()
-		return tool.IsMCPDefinition(current) && current.AvailableForModel(call.RuntimeModel) && (!nested || codeModeCanCall(current)) && tool.BindingForDefinition(current) == tool.BindingForDefinition(candidate), nil
+		return tool.IsMCPDefinition(current) && current.AvailableForModel(call.RuntimeModel) && tool.BindingForDefinition(current) == tool.BindingForDefinition(candidate), nil
 	})
 	if nested {
 		// The producer owns this sink through completion, including after the
@@ -98,7 +98,7 @@ func (t codeModeDiscoveryTool) Call(ctx context.Context, call tool.Call) (return
 		}
 		if found && one != nil {
 			def := one.Definition()
-			if tool.IsMCPDefinition(def) && def.AvailableForModel(call.RuntimeModel) && codeModeCanCall(def) && entry.Binding != nil && *entry.Binding == tool.BindingForDefinition(def) {
+			if tool.IsMCPDefinition(def) && def.AvailableForModel(call.RuntimeModel) && entry.Binding != nil && *entry.Binding == tool.BindingForDefinition(def) {
 				current[def.Name] = one
 			}
 		}
@@ -106,24 +106,27 @@ func (t codeModeDiscoveryTool) Call(ctx context.Context, call tool.Call) (return
 	return mcpdiscovery.Admit(selected, current, result, call.Input)
 }
 
-func codeModeCanCall(def tool.Definition) bool {
-	// Aliases preserve this real infrastructure requirement. Domain exec is not
-	// native CommandExec merely because its display name contains "exec".
-	return def.ExecutionRequirements == nil || !def.ExecutionRequirements.Sandbox.CommandExec
-}
-
 type codeModeSearchEntry struct {
 	codemode.ToolRoute
-	Description string         `json:"description"`
-	InputSchema map[string]any `json:"input_schema"`
-	CallPath    string         `json:"call_path"`
+	Description  string         `json:"description"`
+	InputSchema  map[string]any `json:"input_schema"`
+	OutputSchema map[string]any `json:"output_schema,omitempty"`
+	OutputFormat string         `json:"output_format"`
+	CallPath     string         `json:"call_path"`
 }
 
 func codeModeSearchEntryFor(def tool.Definition) codeModeSearchEntry {
 	name, _ := json.Marshal(def.Name)
+	format := "native"
+	if tool.IsMCPDefinition(def) {
+		format = "content"
+	}
+	if def.OutputSchema != nil {
+		format = "structured"
+	}
 	return codeModeSearchEntry{
 		ToolRoute: codeModeToolRoute(def), Description: def.Description, InputSchema: def.InputSchema,
-		CallPath: "tools.call(" + string(name) + ", args)",
+		CallPath: "tools.call(" + string(name) + ", args)", OutputSchema: def.OutputSchema, OutputFormat: format,
 	}
 }
 
@@ -172,7 +175,7 @@ func (h *codeModeHost) Search(ctx context.Context, request codemode.SearchReques
 		def := one.Definition()
 		exact = exact || def.Name == name && tool.IsMCPDefinition(def)
 		if def.Name == name && !tool.IsMCPDefinition(def) && !tool.IsToolSearchDefinition(def) && !tool.IsMCPCallDefinition(def) && def.Metadata[tool.MetadataToolKind] != codemode.ToolKind {
-			if !codeModeCanCall(def) || !def.AvailableForModel(h.parent.RuntimeModel) {
+			if !def.AvailableForModel(h.parent.RuntimeModel) {
 				return reply, codemode.NewPublicPermissionError("tool is not callable from JavaScript")
 			}
 			h.mu.Lock()
@@ -239,7 +242,7 @@ func (h *codeModeHost) Search(ctx context.Context, request codemode.SearchReques
 			return reply, tool.NewError(tool.ErrorCodeStaleRevision, "tool directory changed; binding is stale")
 		}
 		def := one.Definition()
-		if def.Name != entry.Name || *entry.Binding != tool.BindingForDefinition(def) || !codeModeCanCall(def) || !def.AvailableForModel(h.parent.RuntimeModel) {
+		if def.Name != entry.Name || *entry.Binding != tool.BindingForDefinition(def) || !def.AvailableForModel(h.parent.RuntimeModel) {
 			return reply, tool.NewError(tool.ErrorCodeStaleRevision, "tool directory changed; binding is stale")
 		}
 		h.mu.Lock()

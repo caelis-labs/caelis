@@ -136,6 +136,14 @@ func toolCallStatus(call model.ToolCall, result tool.Result, rawOutput map[strin
 	if trustedTaskResult &&
 		((strings.EqualFold(strings.TrimSpace(call.Name), shell.RunCommandToolName) && runtimeTaskKind(result.Metadata) == "command") || (call.Name == "js_exec" && runtimeTaskKind(result.Metadata) == "code_mode")) {
 		state, _ := rawOutput["state"].(string)
+		if call.Name == "js_exec" {
+			// Returned business data may itself contain a running inner Task.
+			// Only the original outer Task producer owns this invocation state.
+			caelis, _ := result.Metadata["caelis"].(map[string]any)
+			runtimeMeta, _ := caelis["runtime"].(map[string]any)
+			taskMeta, _ := runtimeMeta["task"].(map[string]any)
+			state, _ = taskMeta["state"].(string)
+		}
 		if strings.TrimSpace(state) == "" {
 			if exitCode, ok := intValue(rawOutput["exit_code"]); ok && exitCode != 0 {
 				return "failed"

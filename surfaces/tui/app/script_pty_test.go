@@ -88,7 +88,13 @@ func scriptPTYStages() [][]*session.Event {
 			entry.Input = map[string]any{"path": path, "pattern": "contract"}
 		}
 		if name == "js_exec" {
-			entry.Input = map[string]any{"code": "SOURCE_MUST_STAY_HIDDEN"}
+			entry.Input = map[string]any{"code": "const first = await Read({path:'notes/first.txt'});\nconst second = await Read({path:'notes/second.txt'});\nreturn {first:first.content,second:second.content};"}
+			if id == "s3" {
+				entry.Input = map[string]any{"file": "probe.js"}
+			}
+			if id == "s4" {
+				entry.Input = map[string]any{"code": "return 42;"}
+			}
 		}
 		if name == "desktop_world__exec" {
 			entry.Input = map[string]any{"source": "return await app.look();"}
@@ -106,6 +112,9 @@ func scriptPTYStages() [][]*session.Event {
 				completion = "failed"
 			}
 			event.Meta = map[string]any{"code_mode_script_completion": completion}
+			if id == "s3" {
+				event.Meta["code_mode_source"] = map[string]any{"path": "probe.js", "code": "const a=1;\nconst b=2;\nthrow new Error('fixture failure');"}
+			}
 		}
 		return event
 	}

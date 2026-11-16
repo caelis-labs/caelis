@@ -99,13 +99,23 @@ func (t *MCPTool) Call(ctx context.Context, call tool.Call) (tool.Result, error)
 		return result, nil
 	}
 	parts, contentErr := mcpContentParts(resp.Content)
+	var source *tool.StructuredContent
 	if resp.StructuredContent != nil {
 		structured, err := structuredContentPart(resp.StructuredContent)
 		if err != nil {
 			contentErr = errors.Join(contentErr, err)
 		} else {
+			source = &tool.StructuredContent{Value: structured.JSON.Value, ContentIndex: len(parts)}
 			parts = append(parts, structured)
+			if t.def.OutputSchema != nil && !resp.IsError {
+				if err := tool.ValidateMCPArguments(tool.Definition{InputSchema: t.def.OutputSchema}, source.Value); err != nil {
+					contentErr = errors.Join(contentErr, fmt.Errorf("structuredContent does not match outputSchema: %w", err))
+				}
+			}
 		}
+	}
+	if t.def.OutputSchema != nil && source == nil && !resp.IsError {
+		contentErr = errors.Join(contentErr, errors.New("outputSchema requires structuredContent"))
 	}
 	if contentErr != nil {
 		parts = append(parts, model.NewTextPart("MCP content not delivered: "+contentErr.Error()))
@@ -115,10 +125,11 @@ func (t *MCPTool) Call(ctx context.Context, call tool.Call) (tool.Result, error)
 	}
 
 	return tool.Result{
-		ID:      call.ID,
-		Name:    call.Name,
-		Content: parts,
-		IsError: resp.IsError || contentErr != nil,
+		ID:                call.ID,
+		Name:              call.Name,
+		Content:           parts,
+		StructuredContent: source,
+		IsError:           resp.IsError || contentErr != nil,
 	}, nil
 }
 

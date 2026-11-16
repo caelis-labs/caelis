@@ -140,6 +140,7 @@ func taskSnapshotToolResultWithPayload(call tool.Call, def tool.Definition, snap
 	}
 	raw, _ := json.Marshal(payload)
 	result := tool.Result{ID: call.ID, Name: def.Name, Content: []model.Part{model.NewJSONPart(raw)}, Metadata: meta}
+	result.StructuredContent = &tool.StructuredContent{Value: raw, ContentIndex: 0}
 	if selected != nil {
 		result.Content = append(result.Content, selected.Content...)
 		result.IsError = selected.IsError
@@ -218,6 +219,11 @@ func taskCancelToolPayload(snapshot taskapi.Snapshot) map[string]any {
 
 func taskToolMeta(snapshot taskapi.Snapshot) map[string]any {
 	meta := map[string]any{}
+	if snapshot.Kind == taskapi.KindCodeMode {
+		if source, ok := snapshot.Metadata["code_mode_source"]; ok {
+			meta["code_mode_source"] = source
+		}
+	}
 	taskMeta := taskRuntimeMetaSection(meta, "task")
 	taskMeta["kind"] = strings.TrimSpace(string(snapshot.Kind))
 	taskMeta["state"] = strings.TrimSpace(string(snapshot.State))

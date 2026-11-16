@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/task"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -99,7 +100,26 @@ func streamFrameEvent(req taskFrameProjectionRequest, frame controltaskstream.Fr
 func streamFinalFrameEvent(req taskFrameProjectionRequest, frame controltaskstream.Frame) eventstream.Envelope {
 	status, isErr := subagentFinalToolStatus(frame)
 	finalText := streamFinalTerminalText(frame.Text)
-	return streamToolUpdateEnvelope(req, frame, status, true, isErr, finalText, scriptCompletionFrameMeta(req, frame), true)
+	if req.TaskKind != task.KindCodeMode {
+		return streamToolUpdateEnvelope(req, frame, status, true, isErr, finalText, scriptCompletionFrameMeta(req, frame), true)
+	}
+	// The script spool retains a typed original Tool result, not authored terminal
+	// text. Reuse canonical selected-content projection rather than display its
+	// receipt and source metadata as the script's return value.
+	env := streamToolUpdateEnvelope(req, frame, status, true, isErr, "", scriptCompletionFrameMeta(req, frame), true)
+	var receipt tool.Result
+	if json.Unmarshal([]byte(frame.Text), &receipt) == nil {
+		message := model.NewMessage(model.RoleTool, model.Part{Kind: model.PartKindToolResult, ToolResult: &model.ToolResultPart{ToolUseID: req.CallID, Name: req.ToolName, Content: receipt.Content, IsError: receipt.IsError}})
+		projected, err := acpprojector.ProjectEvent(&session.Event{Type: session.EventTypeToolResult, Message: &message, Tool: &session.EventTool{ID: req.CallID, Name: req.ToolName, Status: status}})
+		if err == nil && len(projected) == 1 {
+			if selected, ok := projected[0].(eventstream.ToolCallUpdate); ok {
+				update := env.Update.(eventstream.ToolCallUpdate)
+				update.Content = selected.Content
+				env.Update = update
+			}
+		}
+	}
+	return env
 }
 
 func streamDisplayTerminalID(req taskFrameProjectionRequest, frame controltaskstream.Frame) string {
@@ -395,6 +415,9 @@ func scriptCompletionFrameMeta(req taskFrameProjectionRequest, frame controltask
 	var receipt tool.Result
 	if json.Unmarshal([]byte(frame.Text), &receipt) != nil {
 		return meta
+	}
+	if source, ok := receipt.Metadata["code_mode_source"]; ok {
+		meta["code_mode_source"] = source
 	}
 	completion, _ := receipt.Metadata[codemode.MetadataScriptCompletion].(string)
 	if completion == "completed" || completion == "failed" {

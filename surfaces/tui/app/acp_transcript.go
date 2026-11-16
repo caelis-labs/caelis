@@ -406,8 +406,14 @@ func styleACPTranscriptHeaderWithMark(
 	}
 	rest := strings.TrimSpace(strings.TrimPrefix(trimmed, "•"))
 	verb, detail, _ := strings.Cut(rest, " ")
-	if rest == "Running script" || rest == "Ran script" {
-		return renderACPTranscriptHeaderMark(ctx, markTone, markDim) + " " + toolActionStyle(ctx, verb).Render(rest)
+	for _, action := range []string{"Running script", "Ran script"} {
+		if rest == action || strings.HasPrefix(rest, action+" ") {
+			styled := renderACPTranscriptHeaderMark(ctx, markTone, markDim) + " " + toolActionStyle(ctx, verb).Render(action)
+			if source := strings.TrimPrefix(rest, action); source != "" {
+				styled += ctx.Theme.ToolArgsStyle().Render(source)
+			}
+			return styled
+		}
 	}
 	styled := renderACPTranscriptHeaderMark(ctx, markTone, markDim)
 	if verb != "" {

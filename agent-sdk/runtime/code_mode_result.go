@@ -29,13 +29,23 @@ func (h *codeModeHost) failureParts(detailed bool) model.Part {
 			failures[i].Reply = nil
 		}
 	}
-	raw, _ := json.Marshal(map[string]any{"errors": failures, "instruction": "Do not replay unknown effects. Reload stale schemas/bindings with tools.search(name)."})
+	payload := map[string]any{"errors": failures}
+	for _, failure := range failures {
+		if failure.Outcome == codemode.OutcomeUnknown {
+			payload["instruction"] = "Do not replay unknown effects; inspect the original receipt."
+			break
+		}
+		if failure.Code == "stale_revision" {
+			payload["instruction"] = "Search the stale tool again before revising arguments."
+		}
+	}
+	raw, _ := json.Marshal(payload)
 	return model.NewJSONPart(raw)
 }
 
 // project runs under host.mu. Check sizes before copying JSON or serializing
 // transport data; original results have already crossed the durable receipt owner.
-func (h *codeModeHost) project(id string, result tool.Result, outcome string) (codemode.Reply, error) {
+func (h *codeModeHost) project(id string, result tool.Result, outcome string, def tool.Definition) (codemode.Reply, error) {
 	reply := codemode.Reply{CallID: id, Outcome: outcome, IsError: result.IsError, TurnComplete: result.TurnComplete && !result.IsError}
 	retained, projected := 0, len(id)*6+128
 	if projected > h.limits.ReplyBytes {
@@ -85,6 +95,24 @@ func (h *codeModeHost) project(id string, result tool.Result, outcome string) (c
 		}
 		reply.Parts = append(reply.Parts, value)
 	}
+	if source := result.StructuredContent; source != nil {
+		if source.ContentIndex < 0 || source.ContentIndex >= len(result.Content) || !json.Valid(source.Value) || result.Content[source.ContentIndex].JSON == nil || string(result.Content[source.ContentIndex].JSON.Value) != string(source.Value) {
+			return reply, fmt.Errorf("invalid structured result provenance")
+		}
+		reply.ContentIndex = &source.ContentIndex
+		if !tool.IsMCPDefinition(def) || def.OutputSchema != nil {
+			// The original JSON already contributes to both budgets above.
+			if len(source.Value)*6 > h.limits.ReplyBytes-projected {
+				return reply, fmt.Errorf("structured result exceeds projection budget")
+			}
+			reply.Value = append(json.RawMessage(nil), source.Value...)
+		}
+	}
+	reply.MCP = tool.IsMCPDefinition(def)
+	if h.replies == nil {
+		h.replies = map[string]codemode.Reply{}
+	}
+	h.replies[id] = codemode.Reply{Parts: reply.Parts}
 	h.retained += retained
 	return reply, nil
 }
@@ -103,7 +131,7 @@ func opaquePartBytes(part model.Part) int {
 // JSON. The scalar check precedes marshaling so an adapter cannot request an
 // unbounded copy at this common boundary.
 func validCodeModeOutput(output codemode.Output, budget int) bool {
-	size := len(output.Value)
+	size := len(output.Value) + len(output.CallID)
 	for _, part := range output.Parts {
 		size += len(part.Kind) + len(part.Text) + len(part.JSON) + len(part.Handle) + len(part.MimeType) + 16
 		if size > budget {
@@ -122,6 +150,18 @@ func validCodeModeOutput(output codemode.Output, budget int) bool {
 // authoritative here, independently of the worker's object-identity tracking.
 func (h *codeModeHost) returnedParts(output codemode.Output) ([]model.Part, error) {
 	var parts []model.Part
+	if output.CallID != "" {
+		original, ok := h.replies[output.CallID]
+		if !ok || !output.Reply || len(output.Value) != 0 || len(output.Parts) != 0 {
+			return nil, fmt.Errorf("returned reply does not belong to this invocation")
+		}
+		output = codemode.Output{Reply: true, Parts: original.Parts}
+		if !validCodeModeOutput(output, h.limits.OutputBytes) {
+			return nil, fmt.Errorf("complete original result exceeds output budget")
+		}
+		// Use the same authenticated JSON/media selection path as other returns;
+		// retaining raw tokens must not bypass attachment or output limits.
+	}
 	if !output.Reply {
 		parts = append(parts, model.NewJSONPart(output.Value))
 	}
@@ -129,9 +169,7 @@ func (h *codeModeHost) returnedParts(output codemode.Output) ([]model.Part, erro
 	for _, part := range output.Parts {
 		switch part.Kind {
 		case "text":
-			if !output.Reply {
-				return nil, fmt.Errorf("text selection requires an authenticated reply")
-			}
+
 			parts = append(parts, model.NewTextPart(part.Text))
 		case "json":
 			if !output.Reply || !json.Valid(part.JSON) {

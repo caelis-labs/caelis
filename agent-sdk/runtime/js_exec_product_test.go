@@ -19,6 +19,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/host"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -196,7 +197,7 @@ func TestJSExecRealGojaDiscoveryAndStableTools(t *testing.T) {
 	}
 }
 
-func TestJSExecBlocksNativeProcessAliasesAndKeepsErrors(t *testing.T) {
+func TestJSExecNativeProcessAliasesRetainPolicyDenial(t *testing.T) {
 	store, active, root := codeModeStore(t)
 	sandbox, err := host.New(host.Config{CWD: root})
 	if err != nil {
@@ -219,7 +220,13 @@ func TestJSExecBlocksNativeProcessAliasesAndKeepsErrors(t *testing.T) {
 		}
 		return nil
 	}}
-	events, _ := runCodeMode(t, store, active, agent.AgentSpec{Model: driver, Tools: []tool.Tool{disguised, &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}, Sandbox: sandbox}}}, nil, nil)
+	registry := staticPolicyRegistry{mode: policy.NamedMode{ID: "mcp-test", Decide: func(_ context.Context, in policy.ToolContext) (policy.Decision, error) {
+		if in.Tool.ExecutionRequirements != nil && in.Tool.ExecutionRequirements.Sandbox.CommandExec {
+			return policy.Decision{Action: policy.ActionDeny, Reason: "fixture command route denied"}, nil
+		}
+		return policy.Decision{Action: policy.ActionAllow}, nil
+	}}}
+	events, _ := runCodeMode(t, store, active, agent.AgentSpec{Model: driver, Tools: []tool.Tool{disguised, &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}, Sandbox: sandbox}}}, registry, nil)
 	if effects != 0 {
 		t.Fatal("process alias executed")
 	}

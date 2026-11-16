@@ -54,8 +54,9 @@ func New() Tool {
 
 func (Tool) Definition() tool.Definition {
 	return tool.Definition{
-		Name:        ToolName,
-		Description: "Inspect or control asynchronous work using a Task handle. Use read for long-lived servers and watchers, verify readiness with a time-limited probe, then continue once ready. Reserve wait for finite jobs whose completion you need.",
+		Name:         ToolName,
+		Description:  "Inspect or control asynchronous work using a Task handle. Use read for long-lived servers and watchers, verify readiness with a time-limited probe, then continue once ready. Reserve wait for finite jobs whose completion you need.",
+		OutputSchema: map[string]any{"type": "object"},
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

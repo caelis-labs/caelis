@@ -20,8 +20,9 @@ func NewSearch() *SearchTool {
 
 func (t *SearchTool) Definition() tool.Definition {
 	return tool.Definition{
-		Name:        SearchToolName,
-		Description: "Search the web for current, external, or unknown information when no URL is available. Use WebFetch to read a specific result. Cite final sources with visible Markdown links, and do not expose result IDs or private citation markers.",
+		Name:         SearchToolName,
+		Description:  "Search the web for current, external, or unknown information when no URL is available. Use WebFetch to read a specific result. Cite final sources with visible Markdown links, and do not expose result IDs or private citation markers.",
+		OutputSchema: map[string]any{"type": "object"},
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

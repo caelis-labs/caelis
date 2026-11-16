@@ -24,8 +24,9 @@ func NewPatch(runtime sandbox.Runtime) (*PatchTool, error) {
 
 func (t *PatchTool) Definition() tool.Definition {
 	return tool.Definition{
-		Name:        PatchToolName,
-		Description: "Apply surgical text replacements to one file. All edits are validated against the current file before the replacement batch is written. Copy old exactly. Line-ending differences are tolerated; a unique multiline match also tolerates consistent indentation or trailing whitespace differences when new changes only line bodies. On a match failure, no edits are written; use the short diagnostic to correct old and new.",
+		Name:         PatchToolName,
+		Description:  "Apply surgical text replacements to one file. All edits are validated against the current file before the replacement batch is written. Copy old exactly. Line-ending differences are tolerated; a unique multiline match also tolerates consistent indentation or trailing whitespace differences when new changes only line bodies. On a match failure, no edits are written; use the short diagnostic to correct old and new.",
+		OutputSchema: map[string]any{"type": "object"},
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

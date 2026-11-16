@@ -28,9 +28,12 @@ type NamedSource interface {
 // Definition is the stable tool declaration exposed to runtimes and model
 // providers.
 type Definition struct {
-	Name         string         `json:"name,omitempty"`
-	Description  string         `json:"description,omitempty"`
-	InputSchema  map[string]any `json:"input_schema,omitempty"`
+	Name        string         `json:"name,omitempty"`
+	Description string         `json:"description,omitempty"`
+	InputSchema map[string]any `json:"input_schema,omitempty"`
+	// OutputSchema describes a tool's structured business result, independently
+	// of ordered text and media content. It is not a provider input declaration.
+	OutputSchema map[string]any `json:"output_schema,omitempty"`
 	Metadata     map[string]any `json:"metadata,omitempty"`
 	EffectClass  EffectClass    `json:"effect_class,omitempty"`
 	Capabilities Capabilities   `json:"capabilities,omitempty"`
@@ -238,12 +241,23 @@ type Result struct {
 	ID      string       `json:"id,omitempty"`
 	Name    string       `json:"name,omitempty"`
 	Content []model.Part `json:"content,omitempty"`
+	// StructuredContent identifies the original structured payload and its
+	// position in Content. Producers set it explicitly; consumers never infer
+	// a business value from the number or apparent shape of content parts.
+	StructuredContent *StructuredContent `json:"structured_content,omitempty"`
 	// TurnComplete is a trusted host tool disposition. A completed result stops
 	// this Run before another serial tool effect or model request.
 	TurnComplete bool           `json:"turn_complete,omitempty"`
 	Meta         map[string]any `json:"meta,omitempty"`
 	IsError      bool           `json:"is_error,omitempty"`
 	Metadata     map[string]any `json:"metadata,omitempty"`
+}
+
+// StructuredContent preserves source provenance and original JSON tokens.
+// ContentIndex addresses the identical JSON part in Result.Content.
+type StructuredContent struct {
+	Value        json.RawMessage `json:"value"`
+	ContentIndex int             `json:"content_index"`
 }
 
 // Tool is the minimal tool execution contract.
@@ -474,6 +488,7 @@ func CloneDefinition(in Definition) Definition {
 	out.Name = strings.TrimSpace(in.Name)
 	out.Description = strings.TrimSpace(in.Description)
 	out.InputSchema = jsonvalue.CloneMap(in.InputSchema)
+	out.OutputSchema = jsonvalue.CloneMap(in.OutputSchema)
 	out.Metadata = jsonvalue.CloneMap(in.Metadata)
 	if in.ExecutionRequirements != nil {
 		requirements := *in.ExecutionRequirements
@@ -525,6 +540,11 @@ func CloneResult(in Result, err error) (Result, error) {
 	out := in
 	out.Name = strings.TrimSpace(in.Name)
 	out.Content = slices.Clone(in.Content)
+	if in.StructuredContent != nil {
+		value := *in.StructuredContent
+		value.Value = append(json.RawMessage(nil), value.Value...)
+		out.StructuredContent = &value
+	}
 	out.Meta = jsonvalue.CloneMap(in.Meta)
 	out.Metadata = jsonvalue.CloneMap(in.Metadata)
 	return out, err

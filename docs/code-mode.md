@@ -17,14 +17,16 @@ does not rewrite existing prompt slices or tool definitions.
 Supply an async JavaScript function body, use `await`, and explicitly `return`
 the desired result. Each execution starts with fresh state. `file` paths resolve
 relative to the working directory. Use tools for filesystem and network I/O, and
-use the original shell tools for commands.
+RunCommand remains available both as a native function call and inside JavaScript.
+Both routes use the same command producer, policy, approval, Journal and Task controls.
 
 Call a known tool directly using the syntax shown by its name and schema. This
 works for tools learned from Skills too; no search is needed when the schema is
 known. Calls may use function or method syntax, for example:
 
 ```javascript
-await Read(args);
+const file = await Read(args);
+return {content: file.content};
 await dtw.apps(args);
 await context7['query-docs'](args);
 ```
@@ -42,7 +44,7 @@ accepts these selectors:
 - A legacy string tries an exact name first, then searches capabilities.
 
 Search results have the shape
-`{tools:[{name,description,input_schema,call_path,server?,tool?,plugin?}],count,truncated,omitted_count?,next?}`.
+`{tools:[{name,description,input_schema,output_schema?,output_format,call_path,server?,tool?,plugin?}],count,truncated,omitted_count?,next?}`.
 Each tool includes its complete schema. `server`, `tool`, and `plugin` preserve
 original names when present. `call_path` is a JavaScript template such as
 `tools.call("returned_name", args)`; supply your argument object for `args` and
@@ -51,14 +53,45 @@ names found during the current execution. `truncated`, `omitted_count`, and `nex
 describe remaining results and pagination. Search returns this discovery object
 directly; it is not a tool reply and cannot be passed to `tools.unpack`.
 
-A tool call resolves to `{parts:[...]}`. JSON parts expose `json`, text parts
-expose `text`, and media parts carry an opaque handle. `tools.unpack(reply)`
-returns `{json:[],text:[],media:[]}`, preserving each kind's order and the
-original media part references. Return the desired JSON, a tool reply, or a value
-containing media references to deliver the selected result. Only media in the
-final return value is delivered.
+Calls resolve through one shared projection, regardless of direct syntax or
+`tools.call`. Native tools that publish a structured JSON result expose their
+business object: `const file = await Read(args)` allows `file.content`. Read's
+content retains its existing line-number prefixes; projection does not parse it.
+A tool's complete `output_schema`, when declared, is included in search results.
 
-Inspect `error.code` and `error.reply` when present. Exact misses report
+MCP tools with an `outputSchema` expose their validated `structuredContent`
+object. Missing or invalid structured content is a failed result, never a
+successful guessed value. MCP tools without that schema expose a fixed
+`{content:[...],structuredContent?}` object. Content entries use the standard
+`type` discriminator: text stays text, images/file references retain opaque
+original identities, and resource/link objects retain their standard fields.
+Projection never parses JSON-looking text or unboxes by the number of parts.
+`output_format` identifies structured or standard content results; native tools
+without a declared schema retain their native result contract.
+
+`return await Read(args)` or `return await dtw.apps(args)` delivers the complete
+original result, including its original text, JSON and attachments. Nesting an
+original result retains its associated original text/media. Returning only a
+business field delivers that selection; unreturned calls do not attach media.
+Copying handle fields does not copy media authority. Only original media objects
+from this invocation may select attachments, subject to the existing budgets.
+An unchanged directly returned original result preserves original JSON tokens.
+JavaScript computations and nested JSON encoding follow JavaScript Number
+precision. Non-enumerable `raw_json` retains the original reply JSON string for
+exact tokens; returning that string preserves them. Convert BigInt to a string
+before returning it. Omit undefined object fields or use null; encoding errors
+identify the field path. An omitted return (or root undefined) is JSON null.
+
+The SDK owns a narrow compatibility path for existing scripts: `.parts` and
+`tools.unpack(reply)` keep access to original part objects, while `.raw_json`
+keeps its original wire-reply meaning. Compatibility properties on business
+objects are non-enumerable and never shadow an actual business field. Embedders
+that return legacy `codemode.Reply` values without a result contract keep the
+legacy shape. New scripts use business values; compatibility is retained until
+those callers can migrate without losing original attachment identity.
+
+Inspect `error.message`, `error.code` and `error.result` when present.
+`error.reply` is a compatibility alias for that same projected result. Exact misses report
 `not_found`; ambiguous matches report `too_many_matches`. A `stale_revision`
 error means search again and revise the arguments. Observe unknown outcomes
 without replaying the input.
@@ -78,8 +111,9 @@ search result's `call_path` can resolve a name that became ready during the curr
 execution. Search does not rewrite existing prompt slices or model tool arrays.
 Outside Code Mode, `mcp_call` still requires prior discovery.
 
-Host failures reject with an Error whose `reply` property contains the host reply.
-Typed Host failures also expose `error.code`; tool-specific error codes and effect
+Host failures reject with an Error whose `result` property contains the same
+projected value a successful call would expose; `reply` aliases it.
+Host failures also expose `error.code`; tool-specific error codes and effect
 details stay in the reply's original content. Local validation or script errors may
 lack `reply`.
 Catching does not erase failed records. An uncaught script exception produces
@@ -155,12 +189,23 @@ normally completed script has a normal dot. An uncaught exception has a red dot.
 Older records without this observation do not infer script failure from child
 errors. Zero-child scripts still have their own running or terminal entry.
 
-The outer script source, return values and diagnostic bodies have no trajectory
-entry, including on failure or with no child calls. Argument disclosure uses the
-original call inputs and does not display result bodies. Canonical receipts,
-IsError, media and approval routing retain their original owners. Replay uses
-the same direct parent identities; child panes retain existing Task and scope
-routing.
+The title includes a folded one-line source summary, or the script filename.
+Clicking the summary uses the existing command argument disclosure to show the
+frozen bytes that actually executed, including when the file has since changed.
+Children show only real tool names, arguments and call state. A script with no
+children shows its actual final return or short error through the existing
+folded output panel; it never manufactures a completed/Result placeholder.
+Source and output disclosure uses the existing panel token, without a new drawer.
+Canonical IsError, media, receipts and approval routing keep their original owners.
+Replay uses the same direct parents and existing Task/scope routing.
+
+A yielded script observes its original Task even while its source or child list
+is folded. Original Task terminal updates settle the script without requiring a
+Task.read call. Returned business data, including a running inner command Task,
+does not own the outer script's lifecycle. Commands and scripts have distinct
+Task handles; cancel the producer that owns a pending command/approval. Canceling
+an already returned outer script does not implicitly cancel an independent
+inner command Task. Existing Run stop/generation boundaries remain authoritative.
 
 ## Execution and Tasks
 

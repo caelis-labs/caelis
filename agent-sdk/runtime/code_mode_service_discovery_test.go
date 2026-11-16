@@ -215,7 +215,7 @@ func TestCodeModeServiceFiltersEligibilityBeforeLimit(t *testing.T) {
 	}
 	m := &h1Model{s: source, main: func(i int, _ *model.Request) []model.ToolCall {
 		if i == 0 {
-			return h1Script(`const s=await tools.search({server:"docs"});if(s.count!==4||s.truncated||s.next||s.omitted_count)throw Error("eligibility after limit: "+JSON.stringify(s));return await tools.call("z__target",{value:1});`)
+			return h1Script(`const s=await tools.search({server:"docs"});if(s.count!==12||s.truncated||s.next||s.omitted_count)throw Error("eligibility after limit: "+JSON.stringify(s));return await tools.call("z__target",{value:1});`)
 		}
 		return nil
 	}}

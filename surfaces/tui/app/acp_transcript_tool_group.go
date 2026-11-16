@@ -43,8 +43,49 @@ func renderInvocationToolGroupRows(blockID string, events []SubagentEvent, start
 	if root.Done {
 		title = "• Ran script"
 	}
-	header := renderACPTranscriptHeaderRowMarked(blockID, title, width, ctx, foldToken, tone, dim)
+	source := root.FullArgs
+	preview := root.Args
+	if root.Title != "" {
+		preview = root.Title
+	} else if source != "" {
+		preview, _ = longCommandDisplayPreview(source, maxInt(1, compactSingleLineBudget(width)-displayColumns(title)-1))
+	}
+	sourceExpanded := opts.ToolPanelFullOutput != nil && opts.ToolPanelFullOutput(root.CallID)
+	if sourceExpanded && source != "" {
+		preview = source
+		if root.Title != "" {
+			preview = root.Title + "\n" + source
+		}
+	}
+	headerText := title
+	if preview != "" {
+		headerText += " " + preview
+	}
+	if !sourceExpanded {
+		if preview != "" {
+			headerText = title + " " + compactSingleLineHeader(preview, maxInt(1, width-displayColumns(title)-1))
+		} else {
+			headerText = title
+		}
+		if width < displayColumns(title) {
+			headerText = truncateDisplayCells(headerText, width)
+		}
+	}
+	header := renderACPTranscriptHeaderRowMarked(blockID, headerText, width, ctx, foldToken, tone, dim)
+	if source != "" || len(children) == 0 && root.Done && root.Output != "" && !root.OutputSynthetic {
+		header.ClickTokenAlt = acpToolPanelClickToken(root.CallID)
+		header.ClickStartCol = 2
+		header.ClickEndCol = displayColumns(title)
+	}
 	rows := []RenderedRow{header}
+	if len(children) == 0 && root.Done && !root.OutputSynthetic && renderableTextHasContent(root.Output) {
+		token := acpToolPanelClickToken(root.CallID)
+		if sourceExpanded {
+			rows = append(rows, renderACPFullTerminalPanelRows(blockID, root.CallID, root.Output, width, ctx, root.ScriptCompletion == "failed", token)...)
+		} else {
+			rows = append(rows, renderACPToolPanelRows(blockID, root.CallID, root.Name, false, root.Output, width, ctx, root.ScriptCompletion == "failed", token, false, opts)...)
+		}
+	}
 	expanded := opts.ExplorationExpanded != nil && opts.ExplorationExpanded(key)
 	for i := 0; i < len(children); {
 		end := i + 1

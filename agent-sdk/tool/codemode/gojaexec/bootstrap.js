@@ -7,7 +7,7 @@
   const ErrorType = Error, SetType = Set, WeakMapType = WeakMap;
   const weakGet = Function.prototype.call.bind(WeakMap.prototype.get);
   const weakSet = Function.prototype.call.bind(WeakMap.prototype.set);
-  const origins=new WeakMapType(), replies=new WeakMapType();
+  const origins=new WeakMapType(), replies=new WeakMapType(), values=new WeakMapType();
   // Object identity is private to this closure; no string/symbol property in
   // business JSON grants a projection role. Media identities are immutable.
   function ownReply(result, raw) {
@@ -20,7 +20,39 @@
       define(p,"kind",{value:p.kind,writable:false,configurable:false});
       if(p.kind==="media"||p.kind==="file_ref") freeze(p);
     }
-    return result;
+    if(!own(result,"value")&&!result.mcp) {
+      if(!result.is_error&&result.outcome!=="unknown_outcome") {const legacy={parts};define(legacy,"raw_json",{value:raw,enumerable:false});weakSet(replies,legacy,true);return legacy;}
+      return result;
+    }
+    const snapshot=parse(encode(parts,limits.reply_bytes,false));
+    let value=own(result,"value")&&result.content_index!==undefined?parts[result.content_index].json:result.value;
+    if(!own(result,"value")) {
+      const content=[];
+      for(let i=0;i<parts.length;i++) {
+        if(i===result.content_index)continue;
+        const p=parts[i];let c;
+        if(p.kind==="text")c={type:"text",text:p.text||""};
+        else if(p.kind==="json")c=p.json;
+        else {
+          c={type:p.kind==="media"?"image":"file_ref",handle:p.handle,mimeType:p.mime_type};
+          weakSet(origins,c,{kind:p.kind,handle:p.handle});freeze(c);
+        }
+        define(content,content.length,{value:c,enumerable:true});
+      }
+      value={content};
+      if(result.content_index!==undefined)value.structuredContent=parts[result.content_index].json;
+    }
+    if(value===null||typeof value!=="object")throw new ErrorType("structured result must be an object");
+    const baseline=encode(value,limits.reply_bytes,false);
+    weakSet(values,value,{baseline,parts:snapshot,callID:result.call_id});
+    weakSet(replies,value,result);
+    // Compatibility reads never shadow a business field and are not enumerated.
+    if(!own(value,"parts"))define(value,"parts",{value:parts,enumerable:false});
+    if(!own(value,"raw_json"))define(value,"raw_json",{value:raw,enumerable:false});
+    if(result.is_error||result.outcome==="unknown_outcome") {
+      for(const key of ["call_id","outcome","is_error","turn_complete"])if(!own(value,key))define(value,key,{value:result[key],enumerable:false});
+    }
+    return value;
   }
   const apply = Function.prototype.call.bind(Function.prototype.call);
   const charCode = Function.prototype.call.bind(String.prototype.charCodeAt);
@@ -34,8 +66,9 @@
   // caps depth. It never exports an untrusted object graph to Go.
   function encode(value, budget, project) {
     let out = "", used = 0;
-    const seen = new SetType(), selected=new SetType(), directMedia=new SetType(), media=[];
-    let direct=!!(project&&value&&typeof value==="object"&&weakGet(replies,value));
+    const seen = new SetType(), selected=new SetType(), directMedia=new SetType(), media=[], extras=[], extraSeen=new SetType();
+    const business=project&&value&&typeof value==="object"?weakGet(values,value):null;
+    let direct=!!(project&&!business&&value&&typeof value==="object"&&weakGet(replies,value));
     function put(s, n) {
       if ((used += n) > budget) throw new ErrorType("JSON byte budget exceeded");
       out += s;
@@ -70,6 +103,15 @@
       }
       if (has(seen,v)) throw invalid("cyclic JSON");
       add(seen,v);
+      const whole=inspect&&weakGet(values,v);
+      if(whole)for(let i=0;i<whole.parts.length;i++) {
+        const p=whole.parts[i];
+        if(p.kind==="text"&&!has(extraSeen,p)) {add(extraSeen,p);define(extras,extras.length,{value:p,enumerable:true});}
+        else if((p.kind==="media"||p.kind==="file_ref")&&!has(selected,p.handle)) {
+          if(media.length>=limits.calls)throw invalid("returned media budget exceeded");
+          add(selected,p.handle);define(media,media.length,{value:{kind:p.kind,handle:p.handle},enumerable:true});
+        }
+      }
       const origin=weakGet(origins,v);
       if(role===3&&origin&&(origin.kind==="media"||origin.kind==="file_ref"))add(directMedia,origin.handle);
       if(inspect&&origin&&(origin.kind==="media"||origin.kind==="file_ref")&&!has(selected,origin.handle)) {
@@ -114,7 +156,9 @@
     visit(value,0,!!project,direct?1:0);
     if(project) {
       const body=out, bytes=used;out="";used=0;
-      if(direct) {
+      if(business&&body===business.baseline) {
+        put('{"reply":true,"call_id":',24);quote(business.callID);put('}',1);
+      } else if(direct) {
         // Canonical JSON parts may now contain selected original media. Reuse
         // the already encoded body: accessors must never be evaluated twice.
         put('{"reply":true,',14);put(slice(body,1,-2),bytes-3);
@@ -123,7 +167,7 @@
         }
         put(']}',2);
       }
-      else {put('{"value":',9);put(body,bytes);put(',"parts":',9);visit(media,0,false,0);put('}',1);}
+      else {put('{"value":',9);put(body,bytes);put(',"parts":',9);for(let i=0;i<media.length;i++)define(extras,extras.length,{value:media[i],enumerable:true});visit(extras,0,false,0);put('}',1);}
     }
     return out;
   }
@@ -139,11 +183,11 @@
           if(typeof detail==="string") {message="Tool call failed: "+slice(detail,0,1024);break;}
         }
       }
-      const e=new ErrorType(message);e.reply=ownReply(reply,envelope.raw);
-      if(envelope.code)e.code=envelope.code;
+      const e=new ErrorType(message);e.reply=ownReply(reply,envelope.raw);e.result=e.reply;
+      e.code=envelope.code||(reply.outcome==="unknown_outcome"?"unknown_outcome":"tool_failed");
       throw e;
     }
-    return ownReply({parts:reply.parts||[]},envelope.raw);
+    return ownReply(reply,envelope.raw);
   }
   const tools=Object.assign(Object.create(null),{
     call(name,args) {
@@ -175,7 +219,8 @@
     },
     unpack(reply) {
       if(!reply||typeof reply!=="object"||!weakGet(replies,reply))throw new ErrorType("tools.unpack requires an original tool reply");
-      const result={json:[],text:[],media:[]}, parts=reply.parts||[];
+      const original=weakGet(replies,reply);
+      const result={json:[],text:[],media:[]}, parts=original&&original.parts?original.parts:reply.parts||[];
       for(let i=0;i<parts.length;i++) {
         const p=parts[i];
         let target, value;

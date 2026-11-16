@@ -40,28 +40,20 @@ func TestCodeModeMinimalModelInterface(t *testing.T) {
 			t.Fatalf("detailed API protocol belongs in the tool description, found %q in Guidance", protocol)
 		}
 	}
-	for _, contract := range []string{
-		"async JavaScript function body", "await Read(args)", "await dtw.apps(args)", "await context7['query-docs'](args)",
-		"await tools.search(selector)", "{name:string}", "{server:string,tool:string,plugin?:string}", "{query:string}",
-		"{server:string,plugin?:string,after?:string}", "Exact misses return not_found", "ambiguous matches require plugin or an exact name",
-		"Legacy strings try an exact name first, then capabilities", "call_path:string", "server?:string,tool?:string,plugin?:string",
-		"tools.call(\"returned_name\", args)", "Tool calls resolve to {parts:[",
-		"Search returns a discovery object directly, not a tool reply", "tools.unpack(reply)",
-		"only original tool replies, not search results", "arrays {json:[],text:[],media:[]}", "original media parts", "error.reply",
-		"unknown outcomes instead of replaying input", "On stale_revision, search again and revise arguments",
-	} {
+	for _, contract := range []string{"async JavaScript function body", "await Read(args)", "await RunCommand(args)", "await dtw.apps(args)", "await context7['query-docs'](args)", "tools.search(", "input_schema", "output_schema", "call_path", "business objects", "original text/JSON/media", "raw_json", "omit undefined", "omitted return is null", "message, code and result", "stale_revision", "unknown outcomes"} {
 		if !strings.Contains(description, contract) {
-			t.Fatalf("missing js_exec description contract %q", contract)
+			t.Fatalf("missing js_exec contract %q", contract)
 		}
 	}
-	direct := strings.Index(description, "await Read(args)")
-	search := strings.Index(description, "await tools.search(selector)")
-	result := strings.Index(description, "call_path:string")
-	parts := strings.Index(description, "Tool calls resolve")
-	errors := strings.Index(description, "On errors inspect")
-	if direct < 0 || search <= direct || result <= search || parts <= result || errors <= parts {
-		t.Fatal("description must own direct-call syntax, search results, replies, and error handling in order")
+	for _, legacy := range []string{"tools.unpack", "{parts:", "tools.describe", "output.text", "output.image"} {
+		if strings.Contains(description, legacy) {
+			t.Fatalf("legacy workflow still advertised: %s", legacy)
+		}
 	}
+	if strings.Index(description, "await Read(args)") > strings.Index(description, "tools.search(") {
+		t.Fatal("direct entry must precede discovery")
+	}
+
 	again, err := rt.codeModeCatalog(t.Context(), active.SessionRef, nil, nil)
 	if err != nil || again != text {
 		t.Fatal("prefix changed")

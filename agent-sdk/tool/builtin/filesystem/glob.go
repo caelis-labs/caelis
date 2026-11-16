@@ -33,8 +33,9 @@ func NewGlob(runtime sandbox.Runtime) (*GlobTool, error) {
 
 func (t *GlobTool) Definition() tool.Definition {
 	return tool.Definition{
-		Name:        GlobToolName,
-		Description: "Find files matching a glob pattern. Use * for direct children and **/* for recursive discovery. Results are capped at 100 files; use RunCommand with rg --files for advanced discovery.",
+		Name:         GlobToolName,
+		Description:  "Find files matching a glob pattern. Use * for direct children and **/* for recursive discovery. Results are capped at 100 files; use RunCommand with rg --files for advanced discovery.",
+		OutputSchema: map[string]any{"type": "object"},
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

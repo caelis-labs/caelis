@@ -384,16 +384,12 @@ func TestJSExecH1HintWarningOncePreservesCapability(t *testing.T) {
 	if !strings.Contains(text, "Search for unknown tools or arguments") || strings.Contains(text, "tools.search(") || strings.Contains(text, "tools.describe") || strings.Contains(text, "output.") {
 		t.Fatal("guidance should contain preferences without duplicating API details")
 	}
-	for _, contract := range []string{
-		"tools.search(selector)", "{name:string}", "{server:string,tool:string,plugin?:string}", "{query:string}",
-		"{server:string,plugin?:string,after?:string}",
-		"{tools:[{name:string,description:string,input_schema:object,call_path:string,server?:string,tool?:string,plugin?:string}],count:number,truncated:boolean,omitted_count?:number,next?:string}",
-		"tools.call(\"returned_name\", args)", "tools.unpack(reply)", "error.reply", "On stale_revision, search again and revise arguments",
-	} {
+	for _, contract := range []string{"tools.search(", "{name}", "{server,tool,plugin?}", "{query}", "{server,plugin?,after?}", "input_schema", "output_schema", "call_path", "tools.call(name,args)", "Errors expose message, code and result", "stale_revision"} {
 		if !strings.Contains(description, contract) {
 			t.Fatalf("js_exec description lost API contract %q", contract)
 		}
 	}
+
 	state, _ := store.SnapshotState(t.Context(), active.SessionRef)
 	if state["code_mode_catalog_v2"] != "legacy guidance requiring parallel_safe" || state["code_mode_catalog_v3"] != "legacy guidance without service continuation" {
 		t.Fatal("changed a historical API snapshot")

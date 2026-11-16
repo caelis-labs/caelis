@@ -74,7 +74,7 @@ func (tm *taskRuntime) startCodeMode(ctx context.Context, owner runtimeCodeModeT
 		return tool.Result{}, err
 	}
 	now := tm.runtime.now()
-	entry := &taskapi.Entry{TaskID: taskID, Handle: handle, Session: owner.ref, Kind: taskapi.KindCodeMode, Title: codemode.ToolName, State: taskapi.StateRunning, Running: true, SupportsCancel: true, CreatedAt: now, UpdatedAt: now, Spec: map[string]any{"parent_call": call.ID, "parent_tool": call.Name, "source_path": source.Path, "source_sha256": source.SHA256}, Metadata: map[string]any{"parent_call": call.ID, "parent_tool": call.Name, "turn_id": call.Execution.TurnID}}
+	entry := &taskapi.Entry{TaskID: taskID, Handle: handle, Session: owner.ref, Kind: taskapi.KindCodeMode, Title: codemode.ToolName, State: taskapi.StateRunning, Running: true, SupportsCancel: true, CreatedAt: now, UpdatedAt: now, Spec: map[string]any{"parent_call": call.ID, "parent_tool": call.Name, "source_path": source.Path, "source_sha256": source.SHA256}, Metadata: map[string]any{"parent_call": call.ID, "parent_tool": call.Name, "turn_id": call.Execution.TurnID, "code_mode_source": map[string]any{"path": source.Path, "sha256": source.SHA256, "code": source.Code}}}
 	// This context is registered under the original Run producer owner. It must
 	// outlive the foreground observation, not the original Run's authority.
 	workCtx, cancel := context.WithCancel(ctx)

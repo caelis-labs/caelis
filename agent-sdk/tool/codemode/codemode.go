@@ -49,11 +49,16 @@ type Part struct {
 
 // Reply retains tool disposition independently of its projected content.
 type Reply struct {
-	CallID       string `json:"call_id"`
-	Outcome      string `json:"outcome"`
-	Parts        []Part `json:"parts,omitempty"`
-	IsError      bool   `json:"is_error,omitempty"`
-	TurnComplete bool   `json:"turn_complete,omitempty"`
+	CallID  string `json:"call_id"`
+	Outcome string `json:"outcome"`
+	Parts   []Part `json:"parts,omitempty"`
+	// Value is source-declared business JSON. ContentIndex identifies its
+	// original part; MCP without outputSchema uses the fixed content fallback.
+	Value        json.RawMessage `json:"value,omitempty"`
+	ContentIndex *int            `json:"content_index,omitempty"`
+	MCP          bool            `json:"mcp,omitempty"`
+	IsError      bool            `json:"is_error,omitempty"`
+	TurnComplete bool            `json:"turn_complete,omitempty"`
 }
 
 // Host is the executor's complete effect capability. Call arguments must be a
@@ -132,6 +137,9 @@ type Output struct {
 	Value json.RawMessage `json:"value,omitempty"`
 	Parts []Part          `json:"parts,omitempty"`
 	Reply bool            `json:"reply,omitempty"`
+	// CallID selects a complete original reply retained by the invocation Host.
+	// Only bridge-owned object identity can produce this adapter metadata.
+	CallID string `json:"call_id,omitempty"`
 }
 
 // Executor is the trusted Go adapter for one engine invocation. The adapter must
@@ -170,7 +178,7 @@ const MetadataSelectedTools = "code_mode_selected_tools"
 
 // MetadataCatalog carries the Runtime-owned guidance and partial hint snapshot
 // through both static AgentSpec metadata and dynamic request instructions.
-const MetadataCatalog = "code_mode_catalog_v7"
+const MetadataCatalog = "code_mode_catalog_v8"
 
 // MetadataScriptCompletion records whether script execution returned normally.
 // Its "completed"/"failed" value is presentation-only, independent of cumulative
@@ -179,17 +187,15 @@ const MetadataScriptCompletion = "code_mode_script_completion"
 
 // Guidance supplies usage preferences; Tool.Definition owns the script API.
 // Runtime appends partial catalog hints separately.
-const Guidance = `Call known tools directly, including schemas from Skills. Search for unknown tools or arguments. Sequence dependent operations; independent calls may run concurrently when appropriate.`
+const Guidance = `Call known tools directly, including schemas from Skills. Search for unknown tools or arguments. Sequence dependent operations with await; independent calls may run concurrently when appropriate.`
 
-const description = `Run an async JavaScript function body from code or file. Call tools as functions, e.g. await Read(args), or object methods, e.g. await dtw.apps(args) and await context7['query-docs'](args). Run shell commands through their original tools.
+const description = `Run an async JavaScript function body for tool orchestration and data processing from exactly one of code or file. Call tools directly: await Read(args), await RunCommand(args), await dtw.apps(args), await context7['query-docs'](args). Return the desired value; omitted return is null.
 
-await tools.search(selector) accepts {name:string} for an exact tool name, {server:string,tool:string,plugin?:string} for an exact object method, or {query:string} for a capability query. Exact misses return not_found; ambiguous matches require plugin or an exact name. {server:string,plugin?:string,after?:string} lists tools; continue with next as after and the same server/plugin. Legacy strings try an exact name first, then capabilities.
+tools.search({name}) gets an exact name/schema; {server,tool,plugin?} gets an exact method; {query} searches capabilities; {server,plugin?,after?} lists tools (continue next as after). It returns {tools:[{name,description,input_schema,output_format,output_schema?,call_path,server?,tool?,plugin?}],count,truncated,omitted_count?,next?}. Use returned call_path for special/conflicting or newly discovered names; tools.call(name,args) uses the same result contract.
 
-Search returns a discovery object directly, not a tool reply: {tools:[{name:string,description:string,input_schema:object,call_path:string,server?:string,tool?:string,plugin?:string}],count:number,truncated:boolean,omitted_count?:number,next?:string}. name is the exact callable name; server/tool/plugin retain original names when present. call_path is a JavaScript template such as tools.call("returned_name", args); supply your argument object for args. This also handles special or conflicting names.
+Calls return business objects for tools with output_schema; unstructured extension results use fixed {content:[...],structuredContent?}. Return the whole result to deliver its original text/JSON/media; returning selected fields delivers only those fields and selected original media. raw_json retains original JSON tokens; JS Number arithmetic may round large integers. Return JSON values, omit undefined fields or use null, and encode BigInt as a string.
 
-Tool calls resolve to {parts:[{kind:'json',json:value}|{kind:'text',text:string}|{kind:'media'|'file_ref',handle:string,mime_type?:string}]}. tools.unpack(reply) accepts only original tool replies, not search results, and returns arrays {json:[],text:[],media:[]}: JSON values, text strings, and original media parts, preserving every part in order within its array. Return business JSON, the original reply, or a value containing original media references to deliver those results.
-
-On errors inspect error.reply when present; observe unknown outcomes instead of replaying input. On stale_revision, search again and revise arguments.`
+Errors expose message, code and result (reply is an alias). stale_revision requires a fresh search; unknown outcomes must not be replayed. After js_exec yields, use Task read/wait/cancel on its original handle.`
 
 // Tool is a concrete declaration, retained until Runtime injects its Host.
 // Product assembly uses the fixed ToolName. Every execution has a new VM.
