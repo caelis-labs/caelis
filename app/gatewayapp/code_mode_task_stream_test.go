@@ -27,6 +27,7 @@ import (
 type scriptStreamModel struct {
 	calls   atomic.Int32
 	entered <-chan struct{}
+	settled func(context.Context) error
 }
 
 func (*scriptStreamModel) Capabilities() model.Capabilities {
@@ -51,6 +52,15 @@ func (m *scriptStreamModel) Generate(ctx context.Context, _ *model.Request) iter
 				return
 			}
 			response = &model.Response{Message: model.NewMessage(model.RoleAssistant, model.NewToolUsePart("release", "Release", []byte(`{}`)))}
+		}
+		if n == 3 {
+			// Keep the original Run open until its producer has persisted the
+			// terminal result. TurnComplete may legitimately cancel unfinished
+			// work, even after Hold has returned to the bridge.
+			if err := m.settled(ctx); err != nil {
+				yield(nil, err)
+				return
+			}
 		}
 		response.TurnComplete = true
 		response.StepComplete = true
@@ -108,7 +118,23 @@ func TestScriptRuntimeTaskTerminalWithoutTaskRead(t *testing.T) {
 		}
 	}}
 	next := tool.NamedTool{Def: tool.Definition{Name: "Release", InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) { close(release); return tool.Result{}, nil }}
-	run, err := rt.Run(ctx, agent.RunRequest{SessionRef: active.SessionRef, Input: "fixture", AgentSpec: agent.AgentSpec{Model: &scriptStreamModel{entered: entered}, Tools: []tool.Tool{hold, next, &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}}}}})
+	settled := func(ctx context.Context) error {
+		for {
+			entries, err := tasks.ListSession(ctx, active.SessionRef)
+			if err != nil {
+				return err
+			}
+			if len(entries) == 1 && !entries[0].Running {
+				return nil
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(5 * time.Millisecond):
+			}
+		}
+	}
+	run, err := rt.Run(ctx, agent.RunRequest{SessionRef: active.SessionRef, Input: "fixture", AgentSpec: agent.AgentSpec{Model: &scriptStreamModel{entered: entered, settled: settled}, Tools: []tool.Tool{hold, next, &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}}}}})
 	if err != nil {
 		t.Fatal(err)
 	}
