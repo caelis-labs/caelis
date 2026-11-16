@@ -280,6 +280,10 @@ func TestDesktopWorldInvalidOverrideDoesNotFallBack(t *testing.T) {
 			if err == nil || len(got.MCPServerSpecs) != 0 {
 				t.Fatalf("invalid selection fell back: %+v, %v", got, err)
 			}
+			available := WithAvailableProductContributions(Contributions{}, RuntimePaths{StoreDir: t.TempDir()}, configs...)
+			if len(available.Sources) != 1 || available.Sources[0].ID != "desktop-world" || available.Sources[0].Status != "failed" || available.Sources[0].Error == "" || len(available.MCPServerSpecs) != 0 || len(available.SkillBundles) != 0 {
+				t.Fatalf("unavailable override escaped isolation: %+v", available)
+			}
 		})
 	}
 }

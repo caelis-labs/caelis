@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -17,7 +17,19 @@ function fixture(t) {
     mkdirSync(dirname(join(cwd, path)), { recursive: true });
     writeFileSync(join(cwd, path), content);
   };
-  const commit = () => { git('add', '-A'); git('commit', '--allow-empty', '-m', 'fixture'); return git('rev-parse', 'HEAD'); };
+  // The classifier reads Git tree modes. Set those directly so these fixtures
+  // also cover executable files and symlinks on Windows without OS privileges.
+  const entryModes = new Map();
+  const setMode = (path, mode) => entryModes.set(path, mode);
+  const commit = () => {
+    git('add', '-A');
+    for (const [path, mode] of entryModes) {
+      git('update-index', '--cacheinfo', `${mode},${git('hash-object', path)},${path}`);
+    }
+    entryModes.clear();
+    git('commit', '--allow-empty', '-m', 'fixture');
+    return git('rev-parse', 'HEAD');
+  };
   git('init', '-b', 'main');
   git('config', 'user.name', 'CI Test');
   git('config', 'user.email', 'ci@example.invalid');
@@ -28,7 +40,7 @@ function fixture(t) {
     write('.release-please-manifest.json', '{".":"0.56.1"}\n');
     write('CHANGELOG.md', '# Changelog\n\n## [0.56.1](https://example.invalid) (2026-09-15)\n\n### Bug Fixes\n');
   };
-  return { cwd, git, write, commit, base, release };
+  return { cwd, git, write, setMode, commit, base, release };
 }
 
 test('only maintained prose and release metadata avoid full checks', () => {
@@ -62,8 +74,8 @@ for (const [name, mutate, error] of [
   ['mismatched heading', f => f.write('CHANGELOG.md', '# Changelog\n\n## 0.56.2\n'), /heading must match/],
   ['missing changelog', f => rmSync(join(f.cwd, 'CHANGELOG.md')), /regular non-executable/],
   ['deleted manifest', f => rmSync(join(f.cwd, '.release-please-manifest.json')), /regular non-executable/],
-  ['executable metadata', f => chmodSync(join(f.cwd, 'CHANGELOG.md'), 0o755), /regular non-executable/],
-  ['symlink metadata', f => { rmSync(join(f.cwd, 'CHANGELOG.md')); symlinkSync('source.go', join(f.cwd, 'CHANGELOG.md')); }, /regular non-executable/],
+  ['executable metadata', f => f.setMode('CHANGELOG.md', '100755'), /regular non-executable/],
+  ['symlink metadata', f => { f.write('CHANGELOG.md', 'source.go'); f.setMode('CHANGELOG.md', '120000'); }, /regular non-executable/],
 ]) {
   test(`reject ${name}`, t => {
     const f = fixture(t); f.release(); mutate(f); f.commit();
@@ -80,8 +92,8 @@ test('rename from source to docs still selects full checks', t => {
 for (const mode of ['executable', 'symlink']) {
   test(`${mode} at a documentation path selects full checks`, t => {
     const f = fixture(t);
-    if (mode === 'symlink') symlinkSync('source.go', join(f.cwd, 'README.md'));
-    else { f.write('README.md', 'text'); chmodSync(join(f.cwd, 'README.md'), 0o755); }
+    f.write('README.md', mode === 'symlink' ? 'source.go' : 'text');
+    f.setMode('README.md', mode === 'symlink' ? '120000' : '100755');
     f.commit();
     assert.equal(inspectChanges(f.base, f.cwd).full, true);
   });

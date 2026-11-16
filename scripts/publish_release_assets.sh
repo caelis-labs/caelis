@@ -11,6 +11,10 @@ dist=$(cd "$dist" && pwd)
 bash "$(dirname "$0")/verify_release_archives.sh" "${tag#v}" "$dist" >/dev/null
 
 files=("$dist"/caelis_*.tar.gz "$dist/checksums.txt")
+checksum=(shasum -a 256)
+if ! command -v shasum >/dev/null 2>&1; then
+  checksum=(sha256sum)
+fi
 declare -A remote_digest remote_state
 # A failed metadata read must never look like an empty release.
 read_assets() {
@@ -30,7 +34,7 @@ missing=()
 read_assets
 for file in "${files[@]}"; do
   name=${file##*/}
-  expected_digest["$name"]="sha256:$(shasum -a 256 "$file" | awk '{print $1}')"
+  expected_digest["$name"]="sha256:$("${checksum[@]}" < "$file" | awk '{print $1}')"
   if [[ -n "${remote_digest[$name]+x}" ]]; then
     if [[ "${remote_state[$name]}" != uploaded || "${remote_digest[$name]}" != "${expected_digest[$name]}" ]]; then
       echo "GitHub release asset $name differs from the verified local bytes or is not uploaded" >&2

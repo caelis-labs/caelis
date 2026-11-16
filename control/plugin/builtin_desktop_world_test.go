@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -129,6 +130,71 @@ func TestProductDesktopWorldMCPStartup(t *testing.T) {
 		t.Fatalf("selected package discovery = %+v, %v", discovery, err)
 	}
 	t.Logf("desktop-world %s: source=%s command=%s binary_sha256=%x tools=%v ToolSearch=%s; native stdio, no desktop RPC", version, contributions.Sources[0].Status, spec.Command, sha256.Sum256(binary), names, discovery.Tools[0].Name)
+	if runtime.GOOS == "windows" {
+		for _, candidate := range manager.Tools() {
+			if candidate.Definition().Name != mcp.ServerToolNamePrefix(spec.Name)+"apps" {
+				continue
+			}
+			result, err := candidate.Call(ctx, tool.Call{ID: "windows-app-enumeration", Name: candidate.Definition().Name, Input: []byte(`{"state":"running","limit":1}`)})
+			if err != nil || result.IsError {
+				t.Fatalf("Windows app discovery = %+v, %v", result, err)
+			}
+		}
+		if _, err := os.Stat(filepath.Join(spec.PackageRoot, "%SystemDrive%")); !os.IsNotExist(err) {
+			t.Fatalf("Windows Shell wrote an unresolved environment path into the package: %v", err)
+		}
+	}
+}
+
+func TestProductDesktopWorldRuntimeIgnoresUnrelatedFiles(t *testing.T) {
+	if builtinDesktopWorldTarget == "" {
+		t.Skip("no official package for this build target")
+	}
+	store := t.TempDir()
+	root, err := materializeDesktopWorld(t.Context(), store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cache := filepath.Join(root, "%SystemDrive%", "ProgramData", "Microsoft", "Windows", "Caches")
+	if err := os.MkdirAll(cache, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cache, "cversions.2.db"), []byte("Shell cache"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "BUILD.json"), []byte("unrelated runtime metadata"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := materializeDesktopWorld(t.Context(), store); err != nil {
+		t.Fatalf("unrelated files prevented package activation: %v", err)
+	}
+}
+
+func TestAvailableProductDesktopWorldFailureKeepsOtherPlugin(t *testing.T) {
+	if builtinDesktopWorldTarget == "" {
+		t.Skip("no official package for this build target")
+	}
+	paths := RuntimePaths{StoreDir: t.TempDir()}
+	fixed, err := ProductContributions(paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(fixed.MCPServerSpecs[0].Command, []byte("damaged executable"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	other := desktopWorldOverrideTestPackage(t, "development")
+	other.ID = "other-plugin"
+	optional, err := ResolveContributions([]Config{other}, paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := WithAvailableProductContributions(optional, paths)
+	if len(got.Sources) != 2 || got.Sources[0].ID != "desktop-world" || got.Sources[0].Status != "failed" || !strings.Contains(got.Sources[0].Error, "builtin file checksum mismatch: bin") {
+		t.Fatalf("failed package diagnostic = %+v", got.Sources)
+	}
+	if len(got.MCPServerSpecs) != 1 || got.MCPServerSpecs[0].PluginID != "other-plugin" || len(got.SkillBundles) != 1 || got.SkillBundles[0].Plugin != "other-plugin" {
+		t.Fatalf("unrelated package was suppressed or broken package remained active: %+v", got)
+	}
 }
 
 func TestProductDesktopWorldConcurrentMaterializationAndTamper(t *testing.T) {

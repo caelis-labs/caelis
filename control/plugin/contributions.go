@@ -3,6 +3,7 @@ package plugin
 import (
 	"fmt"
 	"runtime"
+	"slices"
 	"strings"
 
 	"golang.org/x/mod/semver"
@@ -22,7 +23,26 @@ type Contributions struct {
 }
 
 // Source identifies the package snapshot that produced one set of contributions.
-type Source struct{ ID, Root, Version, Status string }
+type Source struct {
+	ID, Root, Version, Status string
+	// Error explains why this package is unavailable in the current activation.
+	// It never changes the persisted enabled selection.
+	Error string
+}
+
+// Disable removes one package's executable contributions and retains its
+// identity and failure for status and diagnostics. Other packages are untouched.
+func (c *Contributions) Disable(id string, err error) {
+	for i := range c.Sources {
+		if c.Sources[i].ID == id {
+			c.Sources[i].Status, c.Sources[i].Error = "failed", err.Error()
+		}
+	}
+	c.SkillBundles = slices.DeleteFunc(c.SkillBundles, func(b skill.PluginBundle) bool { return b.Plugin == id })
+	c.MCPServerSpecs = slices.DeleteFunc(c.MCPServerSpecs, func(s MCPServerSpec) bool { return s.PluginID == id })
+	c.SessionStartHooks = slices.DeleteFunc(c.SessionStartHooks, func(h HookSpec) bool { return h.PluginID == id })
+	c.Agents = slices.DeleteFunc(c.Agents, func(a AgentRegistration) bool { return a.PluginID == id })
+}
 
 // AgentRegistration associates a contributed Agent with its owning plugin.
 type AgentRegistration struct {
@@ -46,17 +66,32 @@ type RuntimePaths struct {
 // ResolveContributions strictly validates configured plugins for explicit
 // configuration changes. Broken enabled plugins return an actionable error.
 func ResolveContributions(configs []Config, paths ...RuntimePaths) (Contributions, error) {
-	return resolveContributions(configs, false, paths...)
+	return resolveContributions(configs, paths...)
 }
 
 // ResolveAvailableContributions assembles persisted optional plugin content.
 // A broken package or MCP server cannot prevent unrelated Runtime inputs from
 // loading. Explicit installation and configuration still use ResolveContributions.
 func ResolveAvailableContributions(configs []Config, paths ...RuntimePaths) (Contributions, error) {
-	return resolveContributions(configs, true, paths...)
+	var out Contributions
+	for _, configured := range configs {
+		part, err := resolveContributions([]Config{configured}, paths...)
+		if err != nil {
+			if configured.Enabled {
+				out.Sources = append(out.Sources, Source{ID: pluginConfigID(configured.Root, configured.ID), Root: configured.Root, Version: configured.Version, Status: "failed", Error: err.Error()})
+			}
+			continue
+		}
+		out.Sources = append(out.Sources, part.Sources...)
+		out.SkillBundles = append(out.SkillBundles, part.SkillBundles...)
+		out.MCPServerSpecs = append(out.MCPServerSpecs, part.MCPServerSpecs...)
+		out.SessionStartHooks = append(out.SessionStartHooks, part.SessionStartHooks...)
+		out.Agents = append(out.Agents, part.Agents...)
+	}
+	return out, nil
 }
 
-func resolveContributions(configs []Config, skipBroken bool, paths ...RuntimePaths) (Contributions, error) {
+func resolveContributions(configs []Config, paths ...RuntimePaths) (Contributions, error) {
 	var out Contributions
 	var runtimePaths RuntimePaths
 	if len(paths) > 0 {
@@ -66,13 +101,9 @@ func resolveContributions(configs []Config, skipBroken bool, paths ...RuntimePat
 		runtimePaths.TargetOS = runtime.GOOS
 	}
 	for _, configured := range configs {
-		parse := ParseConfigured
-		if skipBroken {
-			parse = ParseConfiguredAvailable
-		}
-		installed, err := parse(configured)
+		installed, err := ParseConfigured(configured)
 		if err != nil {
-			if configured.Enabled && !skipBroken {
+			if configured.Enabled {
 				return out, fmt.Errorf("parse enabled plugin %q failed: %w", configured.ID, err)
 			}
 			continue
@@ -98,32 +129,20 @@ func resolveContributions(configs []Config, skipBroken bool, paths ...RuntimePat
 				}
 				spec, err = instantiateAgentPluginMCP(spec, installed.Root, dataDir)
 				if err != nil {
-					if skipBroken {
-						continue
-					}
 					return out, fmt.Errorf("plugin %q MCP server %q: %w", installed.ID, spec.Name, err)
 				}
 				spec, err = applyHostExecutableEnv(spec, configured.ExecutableEnv, runtimePaths.TargetOS)
 				if err != nil {
-					if skipBroken {
-						continue
-					}
 					return out, fmt.Errorf("plugin %q MCP server %q: %w", installed.ID, spec.Name, err)
 				}
 			} else {
 				var err error
 				spec, err = instantiateClaudeProjectDir(spec, runtimePaths.WorkspaceDir)
 				if err != nil {
-					if skipBroken {
-						continue
-					}
 					return out, fmt.Errorf("plugin %q MCP server %q: %w", installed.ID, spec.Name, err)
 				}
 			}
 			if err := mcp.ValidateServerIdentity(spec); err != nil {
-				if skipBroken {
-					continue
-				}
 				return out, fmt.Errorf("plugin %q MCP server %q: %w", installed.ID, spec.Name, err)
 			}
 			spec.PackageRoot, spec.PackageVersion = installed.Root, installed.Version

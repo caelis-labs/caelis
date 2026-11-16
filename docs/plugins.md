@@ -18,6 +18,9 @@ follows the Core version; no separate installation is required. Core materialize
 starts its standard stdio process for each Session Runtime. Single-binary
 distribution does not mean single-process execution. Unsupported platforms keep
 Core usable and report computer use as unavailable; OS permissions still apply.
+Runtime validation checks the packaged executable, manifests and Skill inputs.
+Unrelated files, including caches created by platform APIs, do not prevent
+activation. Release provenance is verified against the embedded archive.
 
 The existing parser supplies MCP and the Skill from the same package. Main
 Sessions, application profiles, native children and managed Workers receive the
@@ -42,8 +45,10 @@ not the saved registration or directory name. This default selection also applie
 to application profiles and ordinary managed Workers; it does not inherit other optional global
 plugins into explicit selections. Configured aliases of the actual manifest
 identity select the same canonical capability. Duplicate enabled DTW overrides
-are rejected. An invalid selected override reports an error without silently
-using another source. Removing a Session override restores version selection
+are rejected. An invalid selected override is unavailable for that activation
+and reports its concrete error without silently using another source. Host and
+Session execution remain available. Removing a Session override restores version
+selection
 between the enabled global package and embedded release. Disabling or removing the global override restores
 the embedded default. These changes do not delete or overwrite user packages.
 The embedded fallback itself has no switch or uninstall. Status identifies the
@@ -138,8 +143,15 @@ Success exits zero. Explicit installation and configuration reject malformed
 manifests with an actionable error. A previously registered optional plugin whose
 manifest later becomes malformed is omitted from future Runtime assembly;
 `status` reports its error state and warning while the Host remains available.
-A selected DTW override instead remains an assembly error until corrected or
-removed; its paired MCP and Skill never fall back independently.
+The same isolation applies to embedded packages and selected DTW overrides:
+the unavailable package contributes no MCP, Skill, hook or Agent, and its paired
+MCP and Skill never fall back independently. A Session notice names the disabled
+plugin and the concrete failure; the private runtime log retains the full cause.
+Native Session and application plugin status report `status: "failed"` with
+the cause in `warning` for their activation. Persisted enable selections are
+unchanged, so a later activation can use a repaired package. Explicit
+configuration still rejects invalid selections with an actionable error for that
+request.
 Invalid arguments, ownership conflicts, and unavailable Stores/Hosts exit
 nonzero and include `error` in JSON output.
 Mutation failures also include the Host `receipt` when available. Check its
@@ -205,11 +217,14 @@ Standard Skill metadata is parsed as YAML; the fixed `skills/` location may
 link to files elsewhere inside the same plugin package, but never outside it.
 Automatic discovery omits a malformed Skill without listing it or emitting a
 startup notice; valid Skills in the same package remain available. Explicit
-Skill reads still report the parse error. A malformed plugin MCP entry is
-omitted without disabling valid sibling servers or Skills; a failed connection
-is reported through its MCP status and does not delay Host readiness.
+Skill reads still report the parse error. A malformed native Caelis MCP entry
+disables that package for the activation and reports its cause; other packages
+remain available. A failed connection is reported through its MCP status and
+does not delay Host readiness.
 On Windows, environment names are matched without case: an explicit Host
 executable path replaces any package value with the same name in another case.
+The platform environment retains `SystemRoot`, `SystemDrive` and `ProgramData`
+so Windows Shell APIs can resolve their system cache paths.
 On Unix, differently cased names remain distinct.
 Claude values expand `${CLAUDE_PLUGIN_ROOT}`; `${CLAUDE_PROJECT_DIR}` resolves
 to the exact Session workspace only when that value is used. Relative Claude

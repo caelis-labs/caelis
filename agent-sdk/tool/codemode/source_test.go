@@ -2,9 +2,12 @@ package codemode
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
@@ -23,11 +26,11 @@ func (r sourcePolicyRuntime) FileSystemFor(sandbox.Constraints) sandbox.FileSyst
 
 func TestSourceReadsFreshBytesWithExistingFilesystemPolicy(t *testing.T) {
 	root := t.TempDir()
-	runtime, err := host.New(host.Config{CWD: root})
+	sandboxRuntime, err := host.New(host.Config{CWD: root})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer runtime.Close()
+	defer sandboxRuntime.Close()
 	hidden := filepath.Join(root, "hidden")
 	if err := os.Mkdir(hidden, 0700); err != nil {
 		t.Fatal(err)
@@ -35,7 +38,7 @@ func TestSourceReadsFreshBytesWithExistingFilesystemPolicy(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(hidden, "private.js"), []byte("secret"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	constrained := sourcePolicyRuntime{Runtime: runtime, selected: policyfs.New(runtime.FileSystem(), func() policy.Policy { return policy.Policy{HiddenRoots: []string{hidden}} })}
+	constrained := sourcePolicyRuntime{Runtime: sandboxRuntime, selected: policyfs.New(sandboxRuntime.FileSystem(), func() policy.Policy { return policy.Policy{HiddenRoots: []string{hidden}} })}
 	declaration := &Tool{Name: "js_repl", Sandbox: constrained}
 	path := filepath.Join(root, "script.js")
 	read := func(input string) (Source, error) { return declaration.ReadSource(tool.Call{Input: []byte(input)}, 64) }
@@ -72,11 +75,16 @@ func TestSourceReadsFreshBytesWithExistingFilesystemPolicy(t *testing.T) {
 	if _, err := read(`{"file":"script.js"}`); err == nil {
 		t.Fatal("file budget ignored")
 	}
-	link := filepath.Join(root, "link.js")
-	if err := os.Symlink(filepath.Join(hidden, "private.js"), link); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := read(`{"file":"link.js"}`); err == nil {
-		t.Fatal("symlink escaped existing hidden-path policy")
-	}
+	t.Run("hidden symlink", func(t *testing.T) {
+		link := filepath.Join(root, "link.js")
+		if err := os.Symlink(filepath.Join(hidden, "private.js"), link); err != nil {
+			if runtime.GOOS == "windows" && (errors.Is(err, syscall.Errno(1314)) || os.IsPermission(err)) {
+				t.Skipf("Windows symlink permission unavailable: %v", err)
+			}
+			t.Fatal(err)
+		}
+		if _, err := read(`{"file":"link.js"}`); err == nil {
+			t.Fatal("symlink escaped existing hidden-path policy")
+		}
+	})
 }

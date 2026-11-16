@@ -10,8 +10,10 @@ GOFILES_CMD = if command -v rg >/dev/null 2>&1; then rg --files -0 -g '*.go'; el
 GO_TEST_TIMEOUT ?= 5m
 ifeq ($(OS),Windows_NT)
 BASH ?= $(shell git --exec-path)/../../../bin/bash.exe
+PYTHON ?= python
 else
 BASH ?= bash
+PYTHON ?= python3
 endif
 EVAL_REGRESSION_SELECTOR ?= ^TestRegression
 TUI_GOLDEN_SELECTOR ?= ^(TestExperimentalRenderedGoldenAndTerminal|TestTeamCellFocusRenderedFrames|TestRegressionACPEventstreamToolCallFrame120x32)$$
@@ -148,4 +150,4 @@ release-dry-run: cache-dirs
 
 .PHONY: prepare-builtin-plugins
 prepare-builtin-plugins:
-	python3 scripts/prepare_builtin_dtw.py
+	$(PYTHON) scripts/prepare_builtin_dtw.py

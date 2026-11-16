@@ -29,7 +29,8 @@ func TestMCPStdioWindowsServerHelper(t *testing.T) {
 	}
 	server := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "stdio-console-fixture", Version: "1"}, nil)
 	server.AddTool(&mcpsdk.Tool{Name: "probe", InputSchema: map[string]any{"type": "object"}}, func(_ context.Context, req *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
-		data, err := json.Marshal(map[string]any{"console": mcpTestConsoleWindow() != 0, "arguments": req.Params.Arguments})
+		data, err := json.Marshal(map[string]any{"console": mcpTestConsoleWindow() != 0, "arguments": req.Params.Arguments,
+			"system_drive": os.Getenv("SystemDrive"), "program_data": os.Getenv("ProgramData"), "private": os.Getenv("CAELIS_MCP_WINDOWS_PRIVATE")})
 		return &mcpsdk.CallToolResult{Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: string(data)}}}, err
 	})
 	_, _ = fmt.Fprintln(os.Stderr, "stdio-diagnostic-marker")
@@ -41,6 +42,7 @@ func TestMCPStdioWindowsServerHelper(t *testing.T) {
 
 func TestMCPStdioWindowsNoConsole(t *testing.T) {
 	if os.Getenv("CAELIS_MCP_WINDOWS_PROCESS") != "host" {
+		t.Setenv("CAELIS_MCP_WINDOWS_PRIVATE", "private-host-value")
 		// Match the managed Host's detached console state without changing the
 		// test runner's own console or the user's TUI.
 		ctx, cancel := context.WithTimeout(t.Context(), 40*time.Second)
@@ -63,7 +65,7 @@ func TestMCPStdioWindowsNoConsole(t *testing.T) {
 			transport, _, err := transportForSpecWithHTTPClient(ServerSpec{
 				PluginID: "fixture", Name: "stdio", Command: os.Args[0], WorkDir: t.TempDir(),
 				Args: []string{"-test.run=^TestMCPStdioWindowsServerHelper$"},
-				Env:  map[string]string{"CAELIS_MCP_WINDOWS_PROCESS": "server"},
+				Env:  map[string]string{"CAELIS_MCP_WINDOWS_PROCESS": "server"}, CleanEnvironment: true,
 			}, nil)
 			if err != nil {
 				t.Fatal(err)
@@ -88,7 +90,11 @@ func TestMCPStdioWindowsNoConsole(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer windows.CloseHandle(process)
+			defer func() {
+				if err := windows.CloseHandle(process); err != nil {
+					t.Error(err)
+				}
+			}()
 			listed, err := session.ListTools(t.Context(), nil)
 			if err != nil || len(listed.Tools) != 1 || listed.Tools[0].Name != "probe" {
 				t.Fatalf("stdio tool listing = %+v, %v", listed, err)
@@ -98,14 +104,20 @@ func TestMCPStdioWindowsNoConsole(t *testing.T) {
 				t.Fatalf("stdio round trip = %+v, %v", result, err)
 			}
 			var observed struct {
-				Console   bool              `json:"console"`
-				Arguments map[string]string `json:"arguments"`
+				Console     bool              `json:"console"`
+				Arguments   map[string]string `json:"arguments"`
+				SystemDrive string            `json:"system_drive"`
+				ProgramData string            `json:"program_data"`
+				Private     string            `json:"private"`
 			}
 			if err := json.Unmarshal([]byte(result.Content[0].(*mcpsdk.TextContent).Text), &observed); err != nil {
 				t.Fatal(err)
 			}
 			if observed.Console != (name == "legacy-control") || observed.Arguments["value"] != name {
 				t.Fatalf("child console/stdio = %+v", observed)
+			}
+			if observed.SystemDrive == "" || observed.SystemDrive != os.Getenv("SystemDrive") || observed.ProgramData != os.Getenv("ProgramData") || observed.Private != "" {
+				t.Fatalf("clean plugin environment lost platform paths or exposed Host state: %+v", observed)
 			}
 			if name == "restart-and-cancel" {
 				cancel()

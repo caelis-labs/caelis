@@ -2,10 +2,13 @@ package plugin
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -75,8 +78,9 @@ func TestAgentPluginDTWShapeUsesOneMCPAndPersistentPrivateData(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Arguments preserve the template's literal separators after expansion.
 	if spec.PluginID != "desktop-world" || spec.Name != "desktop-world" || spec.Command != filepath.Join(realRoot, "runtime", "node") ||
-		spec.Args[0] != filepath.Join(realRoot, "mcp", "server.mjs") || spec.Args[2] != spec.DataDir || spec.WorkDir != spec.DataDir ||
+		spec.Args[0] != realRoot+"/mcp/server.mjs" || spec.Args[2] != spec.DataDir || spec.WorkDir != spec.DataDir ||
 		spec.Env["PLUGIN_ROOT"] != realRoot || spec.Env["PLUGIN_DATA"] != spec.DataDir || !spec.CleanEnvironment {
 		t.Fatalf("DTW standard MCP spec = %+v", spec)
 	}
@@ -115,15 +119,24 @@ func TestAgentPluginSkipsOneInvalidSkillWithoutHidingOtherSkills(t *testing.T) {
 	writeAgentPluginFile(t, root, "skills/bad/SKILL.md", "invalid frontmatter")
 	outside := filepath.Join(t.TempDir(), "outside")
 	writeAgentPluginFile(t, outside, "SKILL.md", "---\nname: outside\ndescription: Escaped skill\n---\n")
-	if err := os.Symlink(outside, filepath.Join(root, "skills", "escaped")); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(root, "skills", "linked-file"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(filepath.Join(outside, "SKILL.md"), filepath.Join(root, "skills", "linked-file", "SKILL.md")); err != nil {
-		t.Fatal(err)
-	}
+	t.Run("escaped symlinks", func(t *testing.T) {
+		if err := os.MkdirAll(filepath.Join(root, "skills", "linked-file"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		for _, link := range [][2]string{
+			{outside, filepath.Join(root, "skills", "escaped")},
+			{filepath.Join(outside, "SKILL.md"), filepath.Join(root, "skills", "linked-file", "SKILL.md")},
+		} {
+			if err := os.Symlink(link[0], link[1]); err != nil {
+				// ERROR_PRIVILEGE_NOT_HELD is the Windows symlink permission
+				// failure when Developer Mode or an elevated token is unavailable.
+				if runtime.GOOS == "windows" && (errors.Is(err, syscall.Errno(1314)) || os.IsPermission(err)) {
+					t.Skipf("Windows symlink permission unavailable: %v", err)
+				}
+				t.Fatal(err)
+			}
+		}
+	})
 	host := &memoryHost{dir: t.TempDir()}
 	if _, err := NewService(host).Install(t.Context(), root); err != nil {
 		t.Fatalf("install package with mixed Skills: %v", err)
@@ -264,7 +277,7 @@ func TestClaudePluginMCPMapOverrideAndProjectVariable(t *testing.T) {
 	}
 	if len(got.MCPServerSpecs) != 2 || got.MCPServerSpecs[0].Name != "one" ||
 		got.MCPServerSpecs[0].Command != filepath.Join(realRoot, "bin", "one") ||
-		got.MCPServerSpecs[0].Args[0] != filepath.Join(realWorkspace, "file") ||
+		got.MCPServerSpecs[0].Args[0] != realWorkspace+"/file" ||
 		got.MCPServerSpecs[0].Env["PROJECT"] != realWorkspace {
 		t.Fatalf("Claude override/expansion = %+v", got.MCPServerSpecs)
 	}

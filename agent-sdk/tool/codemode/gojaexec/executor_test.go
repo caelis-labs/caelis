@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -56,7 +57,7 @@ func TestFreshWorkerAsyncAndRawJSON(t *testing.T) {
 func TestCancelInterruptAndCPU(t *testing.T) {
 	for _, cancelEarly := range []bool{true, false} {
 		t.Run(map[bool]string{true: "cancel", false: "cpu"}[cancelEarly], func(t *testing.T) {
-			ctx, stop := context.WithCancel(t.Context())
+			ctx, stop := context.WithTimeout(t.Context(), 10*time.Second)
 			defer stop()
 			var metrics Metrics
 			e := Executor{Observe: func(m Metrics) { metrics = m }}
@@ -64,8 +65,17 @@ func TestCancelInterruptAndCPU(t *testing.T) {
 				time.AfterFunc(100*time.Millisecond, stop)
 			}
 			_, err := e.Execute(ctx, fixed(`while(true){}`), codemode.Limits{}, testHost{})
-			if err == nil || !metrics.Reaped || metrics.Wall > 4*time.Second {
+			if err == nil || !metrics.Reaped {
 				t.Fatalf("err=%v metrics=%+v", err, metrics)
+			}
+			if cancelEarly {
+				if !errors.Is(err, context.Canceled) {
+					t.Fatalf("worker did not preserve cancellation: %v", err)
+				}
+			} else if !strings.Contains(err.Error(), "exceeded 1s CPU budget") || metrics.CPU <= 0 || metrics.CPU > 2*CPUBudget {
+				// CPU admission does not promise wall latency under concurrent
+				// test load. Require the budget cause and actual child CPU usage.
+				t.Fatalf("worker did not enforce its CPU budget: %v; %+v", err, metrics)
 			}
 		})
 	}

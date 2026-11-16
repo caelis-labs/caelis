@@ -220,7 +220,8 @@ func (s *runtimeComposition) loadGatewayBuildPlan(sandboxCfg SandboxConfig, runt
 	if err != nil {
 		return gatewayBuildPlan{}, err
 	}
-	configuredAssembly, err := s.configuredAssemblyWithPluginAgents(runtimeCfg.BaseAssembly, contribs.Agents, runtimeCfg)
+	isolatePluginMCPConflicts(mcpServers, &contribs, nil)
+	configuredAssembly, err := s.availablePluginAgentAssembly(runtimeCfg.BaseAssembly, &contribs, runtimeCfg)
 	if err != nil {
 		return gatewayBuildPlan{}, err
 	}
@@ -273,6 +274,7 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 		return nil, err
 	}
 	runtimeCfg := plan.RuntimeConfig
+	s.reportPluginFailures(plan.Plugins)
 	sandboxCfg := sandboxpolicy.EffectiveConfig(s.workspace.CWD, plan.SandboxConfig)
 	bundle := &gatewayRuntimeBundle{ReleasePluginCache: plan.ReleasePluginCache}
 	route, err := sandboxrouter.Current(sandbox.Backend(sandboxCfg.RequestedType))
@@ -632,14 +634,14 @@ func stackSkillDiscoveryDirs(workspaceDir string, configured []string) []string 
 	return DefaultSkillDiscoveryDirs(workspaceDir)
 }
 
-// resolveGatewayPluginContributions gives persisted configuration failures an
-// application-boundary prefix at initial assembly and pre-commit validation.
+// resolveGatewayPluginContributions samples persisted package availability.
+// Package failures remain attached to their own sources for diagnostics.
 func resolveGatewayPluginContributions(configs []PluginConfig, storeDir, workspaceDir string) (plugin.Contributions, error) {
 	selected := plugin.OptionalUserConfigs(configs)
 	paths := plugin.RuntimePaths{StoreDir: storeDir, WorkspaceDir: workspaceDir}
 	contributions, err := plugin.ResolveAvailableContributions(selected, paths)
 	if err == nil {
-		contributions, err = plugin.WithProductContributions(contributions, paths, configs...)
+		contributions = plugin.WithAvailableProductContributions(contributions, paths, configs...)
 	}
 	if err != nil {
 		return plugin.Contributions{}, fmt.Errorf("gatewayapp: %w", err)

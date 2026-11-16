@@ -1,7 +1,9 @@
 package main
 
 import (
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -251,11 +253,7 @@ func TestReleaseArchiveVerificationRejectsMissingOrTamperedAsset(t *testing.T) {
 	if err := verify("--names-only"); err != nil {
 		t.Fatalf("six archive names: %v", err)
 	}
-	checksum := exec.Command(testBash(t), "-c", "shasum -a 256 caelis_*.tar.gz > checksums.txt")
-	checksum.Dir = dir
-	if output, err := checksum.CombinedOutput(); err != nil {
-		t.Fatalf("prepare checksums: %v: %s", err, output)
-	}
+	writeReleaseTestChecksums(t, dir)
 	if err := verify(); err != nil {
 		t.Fatalf("valid final archives: %v", err)
 	}
@@ -284,17 +282,17 @@ func TestReleaseAssetRetryVerifiesBytesBeforeSkippingOrUploading(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	checksum := exec.Command(testBash(t), "-c", "shasum -a 256 caelis_*.tar.gz > checksums.txt")
-	checksum.Dir = dist
-	if output, err := checksum.CombinedOutput(); err != nil {
-		t.Fatalf("prepare checksums: %v: %s", err, output)
-	}
+	writeReleaseTestChecksums(t, dist)
 	fakeGH := `#!/usr/bin/env bash
 set -euo pipefail
+checksum=(shasum -a 256)
+if ! command -v shasum >/dev/null 2>&1; then
+  checksum=(sha256sum)
+fi
 if [[ "$1" == api ]]; then
   for file in "$FAKE_GH_STATE"/assets/*; do
     [[ -f "$file" ]] || continue
-    printf '%s\tsha256:%s\tuploaded\n' "${file##*/}" "$(shasum -a 256 "$file" | awk '{print $1}')"
+    printf '%s\tsha256:%s\tuploaded\n' "${file##*/}" "$("${checksum[@]}" < "$file" | awk '{print $1}')"
   done
 elif [[ "$1" == release && "$2" == upload ]]; then
   file=$4
@@ -318,7 +316,7 @@ fi
 		t.Helper()
 		cmd := exec.Command(testBash(t), "./publish_release_assets.sh", "v1.2.3", dist)
 		cmd.Dir = "../scripts"
-		cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"), "FAKE_GH_STATE="+state, "FAKE_GH_FAIL_AT="+failAt, "GITHUB_REPOSITORY=caelis-labs/caelis")
+		cmd.Env = append(os.Environ(), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"), "FAKE_GH_STATE="+state, "FAKE_GH_FAIL_AT="+failAt, "GITHUB_REPOSITORY=caelis-labs/caelis")
 		out, err := cmd.CombinedOutput()
 		return string(out), err
 	}
@@ -339,17 +337,32 @@ fi
 	if err := os.WriteFile(changed, []byte("new timestamped signature"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	checksum = exec.Command(testBash(t), "-c", "shasum -a 256 caelis_*.tar.gz > checksums.txt")
-	checksum.Dir = dist
-	if output, err := checksum.CombinedOutput(); err != nil {
-		t.Fatalf("recompute checksums: %v: %s", err, output)
-	}
+	writeReleaseTestChecksums(t, dist)
 	if output, err := run(""); err == nil || !strings.Contains(output, "differs from the verified local bytes") {
 		t.Fatalf("different signed asset must fail without overwrite: %v: %s", err, output)
 	}
 	uploadsAfter, err := os.ReadFile(filepath.Join(state, "uploads"))
 	if err != nil || string(uploadsAfter) != string(uploads) {
 		t.Fatalf("mismatched retry uploaded files: %q: %v", uploadsAfter, err)
+	}
+}
+
+func writeReleaseTestChecksums(t *testing.T, dir string) {
+	t.Helper()
+	archives, err := filepath.Glob(filepath.Join(dir, "caelis_*.tar.gz"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var checksums strings.Builder
+	for _, archive := range archives {
+		data, err := os.ReadFile(archive)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fmt.Fprintf(&checksums, "%x  %s\n", sha256.Sum256(data), filepath.Base(archive))
+	}
+	if err := os.WriteFile(filepath.Join(dir, "checksums.txt"), []byte(checksums.String()), 0600); err != nil {
+		t.Fatal(err)
 	}
 }
 

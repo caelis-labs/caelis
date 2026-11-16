@@ -31,5 +31,9 @@ for archive in "${archives[@]}"; do
 done
 (
   cd "$dist"
-  shasum -a 256 -c checksums.txt
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 -c checksums.txt
+  else
+    sha256sum -c checksums.txt
+  fi
 )

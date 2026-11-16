@@ -6,7 +6,6 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
-	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode/gojaexec"
 	"io"
 	"os"
 	"os/exec"
@@ -14,6 +13,8 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode/gojaexec"
 )
 
 func TestRunMainUsesInternalHelperBeforeCLI(t *testing.T) {
@@ -88,6 +89,7 @@ func TestCodeModeCLIWorkerHandshake(t *testing.T) {
 	send(10, `[{"name":"NativeFixture"}]`)
 	send(10, "") // End the name snapshot before sending source.
 	send(2, `return {text:"native-cli",total:42,fs:typeof require,output:typeof output,describe:typeof tools.describe,direct:typeof NativeFixture,native:typeof tools.native.NativeFixture};`)
+	send(11, "") // Persistent workers exit only after the explicit close frame.
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

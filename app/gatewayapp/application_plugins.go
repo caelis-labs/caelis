@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/skill"
 	skillfs "github.com/caelis-labs/caelis/agent-sdk/skill/fs"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
@@ -123,9 +124,20 @@ func applicationRuntimePluginContributions(profile sessionprofile.Profile, paths
 	if err != nil {
 		return plugin.Contributions{}, err
 	}
-	combined, err := plugin.WithProductContributions(optional, paths, defaults...)
-	if err != nil {
-		return combined, err
+	// Admission validates explicit selections. An unavailable default must
+	// not reject an unrelated package or Session configuration request.
+	selectedProduct := false
+	for _, source := range optional.Sources {
+		selectedProduct = selectedProduct || source.ID == "desktop-world"
+	}
+	var combined plugin.Contributions
+	if selectedProduct {
+		combined, err = plugin.WithProductContributions(optional, paths, defaults...)
+		if err != nil {
+			return combined, err
+		}
+	} else {
+		combined = plugin.WithAvailableProductContributions(optional, paths, defaults...)
 	}
 	if err := validateApplicationMCPNamespaces(profile, combined); err != nil {
 		return plugin.Contributions{}, err
@@ -133,11 +145,15 @@ func applicationRuntimePluginContributions(profile sessionprofile.Profile, paths
 	return combined, nil
 }
 
-func pluginSourceStatus(source plugin.Source) string {
-	if source.Status != "" {
-		return source.Status
+func pluginSourceStatus(source plugin.Source) sessionprofile.PluginStatus {
+	status := sessionprofile.PluginStatus{ID: source.ID, Root: source.Root, Version: source.Version, Status: "assembled", Warning: source.Error}
+	if strings.HasPrefix(source.Status, "unsupported on ") {
+		status.Warning = source.Status
 	}
-	return "assembled"
+	if status.Warning != "" {
+		status.Status = "failed"
+	}
+	return status
 }
 
 func (s *runtimeComposition) resolveApplicationPlugins(profile sessionprofile.Profile, paths plugin.RuntimePaths) (plugin.Contributions, error) {
@@ -145,5 +161,9 @@ func (s *runtimeComposition) resolveApplicationPlugins(profile sessionprofile.Pr
 	if err != nil {
 		return plugin.Contributions{}, err
 	}
-	return applicationRuntimePluginContributions(profile, paths, doc.Plugins...)
+	contributions, err := applicationRuntimePluginContributions(profile, paths, doc.Plugins...)
+	if err != nil {
+		return contributions, errorcode.Wrap(errorcode.InvalidArgument, fmt.Sprintf("native plugin selection is invalid: %v", err), err)
+	}
+	return contributions, nil
 }
