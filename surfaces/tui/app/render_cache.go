@@ -136,7 +136,7 @@ func (m *Model) wrapRenderedRowsForViewport(block Block, rawRows []RenderedRow, 
 		sourceOffsets = append(sourceOffsets, len(styledLines))
 		styledLine := m.adaptHistoryLineForViewport(row.Styled, wrapWidth)
 		plainLine := strings.TrimRight(ansi.Strip(styledLine), " ")
-		if isACPTranscriptBlockKind(block.Kind()) && row.ACPHeader {
+		if isACPTranscriptBlockKind(block.Kind()) && row.ACPHeader && !row.PreWrapped {
 			sourcePlain := strings.TrimRight(row.Plain, " ")
 			if strings.TrimSpace(sourcePlain) == "" {
 				sourcePlain = plainLine
@@ -369,6 +369,9 @@ func wrapACPTranscriptHeaderForViewport(
 		return nil, nil, false
 	}
 	verb := strings.TrimSpace(strings.TrimPrefix(prefix, "•"))
+	if verb == "Running script" || verb == "Ran script" {
+		return wrapACPScriptHeaderForViewport(prefix, detail, width, ctx, markTone, markDim)
+	}
 	continuationPrefix := strings.Repeat(" ", displayColumns(prefix))
 	if acpTranscriptHeaderUsesRailContinuation(verb) {
 		continuationPrefix = "  │ "

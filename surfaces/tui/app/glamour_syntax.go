@@ -4,12 +4,25 @@ import (
 	"image/color"
 	"strings"
 
+	"charm.land/lipgloss/v2"
 	"github.com/alecthomas/chroma/v2"
 	"github.com/alecthomas/chroma/v2/styles"
 	"github.com/charmbracelet/colorprofile"
 
 	"github.com/caelis-labs/caelis/surfaces/tui/tuikit"
 )
+
+func chromaTokenStyle(ctx BlockRenderContext, entry chroma.StyleEntry) lipgloss.Style {
+	style := ctx.Theme.TextStyle()
+	if entry.Colour.IsSet() {
+		profile := ctx.Theme.Profile
+		if profile == colorprofile.Unknown {
+			profile = colorprofile.TrueColor
+		}
+		style = style.Foreground(profile.Convert(lipgloss.Color(entry.Colour.String())))
+	}
+	return style.Bold(entry.Bold == chroma.Yes).Italic(entry.Italic == chroma.Yes).Underline(entry.Underline == chroma.Yes)
+}
 
 func init() {
 	registerCaelisChromaStyle(tuikit.Theme{

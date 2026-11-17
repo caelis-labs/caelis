@@ -106,16 +106,7 @@ func highlightDiffSide(lines []*diffPanelLine, ctx BlockRenderContext) {
 	}
 	row, offset := 0, 0
 	for _, token := range tokens {
-		entry := theme.Get(token.Type)
-		style := ctx.Theme.TextStyle()
-		if entry.Colour.IsSet() {
-			profile := ctx.Theme.Profile
-			if profile == colorprofile.Unknown {
-				profile = colorprofile.TrueColor
-			}
-			style = style.Foreground(profile.Convert(lipgloss.Color(entry.Colour.String())))
-		}
-		style = style.Bold(entry.Bold == chroma.Yes).Italic(entry.Italic == chroma.Yes).Underline(entry.Underline == chroma.Yes)
+		style := chromaTokenStyle(ctx, theme.Get(token.Type))
 		parts := strings.Split(token.Value, "\n")
 		for i, part := range parts {
 			if row < len(lines) {
