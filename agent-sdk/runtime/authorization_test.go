@@ -147,7 +147,7 @@ func TestAuthorizationRevocationRejectsLateDecisionAndQueuedDispatch(t *testing.
 	if err := r.RevokeAuthorization(t.Context(), active.SessionRef, a.Scope, "original-revoke"); err != nil {
 		t.Fatal(err)
 	}
-	if err := permit.consume(t.Context()); err == nil {
+	if err := permit.consume(t.Context(), nil); err == nil {
 		t.Fatal("revoked queued operation was admitted")
 	}
 	if err := r.checkAuthorization(t.Context(), active, a); err == nil {
@@ -160,10 +160,10 @@ func TestAuthorizationRevocationRejectsLateDecisionAndQueuedDispatch(t *testing.
 	}
 	a.Revocation = evidence.Revocations[a.Scope.Key()]
 	permit = &policyDispatchPermit{runtime: r, session: active, decision: policy.Decision{Action: policy.ActionAllow, Authorization: a}}
-	if err := permit.consume(t.Context()); err != nil {
+	if err := permit.consume(t.Context(), nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := permit.consume(t.Context()); err == nil {
+	if err := permit.consume(t.Context(), nil); err == nil {
 		t.Fatal("permission was consumed twice")
 	}
 }
@@ -311,7 +311,7 @@ func TestAuthorizationPendingCallRejectsCurrentSessionReplacement(t *testing.T) 
 	for _, replacement := range []session.Session{func() session.Session { v := active; v.CreatedAt = v.CreatedAt.Add(time.Second); return v }(), func() session.Session { v := active; v.CWD += "-other"; return v }()} {
 		r.sessions = replacedAuthorizationSession{Service: store, current: replacement}
 		permit := &policyDispatchPermit{runtime: r, session: active, decision: policy.Decision{Action: policy.ActionAllow, Authorization: a}}
-		if err := permit.consume(t.Context()); err == nil {
+		if err := permit.consume(t.Context(), nil); err == nil {
 			t.Fatal("old pending authorization survived a canonical Session replacement")
 		}
 	}

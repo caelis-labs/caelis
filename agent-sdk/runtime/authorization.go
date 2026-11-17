@@ -9,6 +9,7 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
 // PolicyConsentWriter commits an explicitly selected persistent Policy rule
@@ -91,24 +92,60 @@ func (r *Runtime) RevokeAuthorization(ctx context.Context, ref session.SessionRe
 	if err != nil {
 		return err
 	}
-	for _, event := range events {
-		if event != nil && event.IdempotencyKey == "authorization-revoke:"+requestID {
-			if event.AuthorizationRevocation == nil || event.AuthorizationRevocation.Scope != scope {
-				return errors.New("revocation request identity already has different content")
-			}
-			return nil
-		}
-	}
-	_, err = r.sessions.AppendEvent(ctx, session.AppendEventRequest{SessionRef: ref, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeApproval), Event: &session.Event{IdempotencyKey: "authorization-revoke:" + requestID, Type: session.EventTypeLifecycle, Visibility: session.VisibilityJournal, Time: r.now(), Lifecycle: &session.EventLifecycle{Status: "authorization_revoked"}, AuthorizationRevocation: &session.AuthorizationRevocation{Schema: session.AuthorizationSchemaVersion, Scope: scope}}})
+	confirmed, err := authorizationRevocationConfirmed(events, requestID, scope)
 	if err != nil {
 		return err
 	}
+	if confirmed {
+		r.cancelAuthorizationFlights(scope)
+		return nil
+	}
+	_, err = r.sessions.AppendEvent(ctx, session.AppendEventRequest{SessionRef: ref, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeApproval), Event: &session.Event{IdempotencyKey: "authorization-revoke:" + requestID, Type: session.EventTypeLifecycle, Visibility: session.VisibilityJournal, Time: r.now(), Lifecycle: &session.EventLifecycle{Status: "authorization_revoked"}, AuthorizationRevocation: &session.AuthorizationRevocation{Schema: session.AuthorizationSchemaVersion, Scope: scope}}})
+	if err != nil {
+		if session.IsCommitted(err) {
+			recoveryCtx, cancel := boundedApprovalRecoveryContext(ctx)
+			defer cancel()
+			durable, loadErr := r.sessions.Events(recoveryCtx, session.EventsRequest{SessionRef: ref, IncludeTransient: true})
+			if loadErr != nil {
+				return errors.Join(err, loadErr)
+			}
+			confirmed, checkErr := authorizationRevocationConfirmed(durable, requestID, scope)
+			if checkErr != nil {
+				return errors.Join(err, checkErr)
+			}
+			if confirmed {
+				r.cancelAuthorizationFlights(scope)
+			}
+		}
+		// Preserve the original post-commit report and request identity even
+		// when readback has confirmed the fact and cancelled its producer.
+		return err
+	}
+	r.cancelAuthorizationFlights(scope)
+	return nil
+}
+
+func authorizationRevocationConfirmed(events []*session.Event, requestID string, scope session.AuthorizationScope) (bool, error) {
+	for _, event := range events {
+		if event != nil && event.IdempotencyKey == "authorization-revoke:"+requestID {
+			revocation := event.AuthorizationRevocation
+			if revocation == nil || revocation.Schema != session.AuthorizationSchemaVersion || revocation.Scope != scope {
+				return false, errors.New("revocation request identity already has different content")
+			}
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// cancelAuthorizationFlights requires authorizationMu and is shared by every
+// path that confirms the original durable revocation, including readback.
+func (r *Runtime) cancelAuthorizationFlights(scope session.AuthorizationScope) {
 	for _, flight := range r.authorizationFlights {
 		if flight.scope == scope {
 			flight.cancel()
 		}
 	}
-	return nil
 }
 
 func (t policyWrappedTool) resolvePolicyApproval(ctx context.Context, request agent.ApprovalRequest) (agent.ApprovalResponse, error) {
@@ -201,7 +238,7 @@ func (t policyWrappedTool) resolvePolicyApproval(ctx context.Context, request ag
 	}
 }
 
-func (p *policyDispatchPermit) consume(ctx context.Context) error {
+func (p *policyDispatchPermit) consume(ctx context.Context, target tool.Tool) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.used {
@@ -227,6 +264,20 @@ func (p *policyDispatchPermit) consume(ctx context.Context) error {
 			defer release()
 		}
 	}
+	// Source ownership is checked last: Session/configuration reads above may
+	// yield while the directory changes. Hold its existing owner guard only
+	// through consumption, never through persistence or the remote effect.
+	if source, ok := target.(interface {
+		AdmitSource(context.Context) (func(), error)
+	}); ok {
+		release, err := source.AdmitSource(ctx)
+		if err != nil {
+			return err
+		}
+		if release != nil {
+			defer release()
+		}
+	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -234,10 +285,10 @@ func (p *policyDispatchPermit) consume(ctx context.Context) error {
 	return nil
 }
 
-func consumePolicyDispatch(ctx context.Context) error {
+func consumePolicyDispatch(ctx context.Context, target tool.Tool) error {
 	permit, _ := ctx.Value(policyDispatchKey{}).(*policyDispatchPermit)
 	if permit == nil {
 		return nil
 	}
-	return permit.consume(ctx)
+	return permit.consume(ctx, target)
 }

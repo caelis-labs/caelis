@@ -72,7 +72,7 @@ func (t journaledTool) Call(ctx context.Context, call tool.Call) (tool.Result, e
 	if now == nil {
 		now = time.Now
 	}
-	if err := consumePolicyDispatch(ctx); err != nil {
+	if err := consumePolicyDispatch(ctx, t.base); err != nil {
 		return tool.Result{}, err
 	}
 	createdAt := now()
