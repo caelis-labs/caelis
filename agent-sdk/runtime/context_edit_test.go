@@ -16,9 +16,10 @@ import (
 )
 
 func TestContextEditDurableProjectionAndUnknownCommit(t *testing.T) {
-	for _, replace := range []bool{false, true} {
+	for _, mode := range []string{"append", "replace", "replace-empty"} {
+		replace := mode != "append"
 		for _, ack := range []string{"normal", "unknown", "conflict"} {
-			t.Run(map[bool]string{false: "append", true: "replace"}[replace]+"/"+ack, func(t *testing.T) {
+			t.Run(mode+"/"+ack, func(t *testing.T) {
 				root := t.TempDir()
 				store := &contextEditAckStore{Store: sessionfile.NewStore(sessionfile.Config{RootDir: root}), mode: ack}
 				active, err := store.StartSession(t.Context(), session.StartSessionRequest{AppName: "hooks", UserID: "context"})
@@ -37,6 +38,9 @@ func TestContextEditDurableProjectionAndUnknownCommit(t *testing.T) {
 					edit := &agent.ContextEdit{Source: e.ContextSource}
 					if replace {
 						edit.ReplacePrefix = []model.Message{{Role: model.RoleUser, Parts: model.CloneParts(parts)}}
+						if mode == "replace-empty" {
+							edit.ReplacePrefix = []model.Message{}
+						}
 					} else {
 						edit.Append = model.CloneParts(parts)
 					}
@@ -95,7 +99,14 @@ func TestContextEditDurableProjectionAndUnknownCommit(t *testing.T) {
 				if !reflect.DeepEqual(actual, replay) {
 					t.Fatalf("runtime/reopen messages differ\nlive=%#v\nreplay=%#v", actual, replay)
 				}
-				if replace && len(actual) != 1 || !replace && len(actual) != 2 {
+				expected := 2
+				if replace {
+					expected = 1
+				}
+				if mode == "replace-empty" {
+					expected = 0
+				}
+				if len(actual) != expected {
 					t.Fatalf("messages=%d", len(actual))
 				}
 				assertSubagentSagaModelRoundTrip(t, reopened, active.SessionRef)

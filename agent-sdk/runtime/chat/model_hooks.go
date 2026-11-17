@@ -27,6 +27,9 @@ func cloneModelPreparation(p agent.ModelPreparation) agent.ModelPreparation {
 		edit := *p.ContextEdit
 		edit.Append = model.CloneParts(edit.Append)
 		edit.ReplacePrefix = model.CloneMessages(edit.ReplacePrefix)
+		if p.ContextEdit.ReplacePrefix != nil && edit.ReplacePrefix == nil {
+			edit.ReplacePrefix = []model.Message{}
+		}
 		p.ContextEdit = &edit
 	}
 	return p

@@ -212,7 +212,12 @@ func maxInt() int {
 }
 
 func normalizeCheckpointData(in CheckpointData) CheckpointData {
-	in.ReplacementMessages = model.CloneMessages(in.ReplacementMessages)
+	if in.ReplacementMessages != nil {
+		in.ReplacementMessages = model.CloneMessages(in.ReplacementMessages)
+		if in.ReplacementMessages == nil {
+			in.ReplacementMessages = []model.Message{}
+		}
+	}
 	in.SummarizedThroughID = strings.TrimSpace(in.SummarizedThroughID)
 	in.Generator = strings.TrimSpace(in.Generator)
 	in.Trigger = strings.TrimSpace(in.Trigger)

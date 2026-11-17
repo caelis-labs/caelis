@@ -99,7 +99,7 @@ func (r *Runtime) commitContextEdit(ctx context.Context, ref session.SessionRef,
 	var event *session.Event
 	if edit.ReplacePrefix != nil {
 		_, old, _ := compact.LatestCompactEvent(observed)
-		data := session.CheckpointData{ContractVersion: 2, Purpose: session.CheckpointReplacement, SourceStamp: stamp, ReplacementMessages: model.CloneMessages(edit.ReplacePrefix), Revision: old.Revision + 1, SourceEventCount: len(prefix), SummarizedThroughID: edit.Source.ThroughID, SummarizedThroughSeq: edit.Source.ThroughSeq, Generator: "hook/" + name, Trigger: "model_prepare"}
+		data := session.CheckpointData{ContractVersion: 2, Purpose: session.CheckpointReplacement, SourceStamp: stamp, ReplacementMessages: edit.ReplacePrefix, Revision: old.Revision + 1, SourceEventCount: len(prefix), SummarizedThroughID: edit.Source.ThroughID, SummarizedThroughSeq: edit.Source.ThroughSeq, Generator: "hook/" + name, Trigger: "model_prepare"}
 		message := model.NewTextMessage(model.RoleUser, "Context updated by "+name)
 		event = &session.Event{Type: session.EventTypeCompact, Visibility: session.VisibilityCanonical, Actor: session.ActorRef{Kind: session.ActorKindSystem, Name: "hook/" + name}, Message: &message, Meta: map[string]any{session.CheckpointMetadataKey: session.CheckpointDataValue(data)}}
 	} else {
