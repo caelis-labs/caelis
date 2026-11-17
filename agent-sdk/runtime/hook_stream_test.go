@@ -65,8 +65,10 @@ func hookTextDelta(text string) *model.StreamEvent {
 }
 
 func TestHooksStreamingAcceptedTextMatchesFileReopen(t *testing.T) {
-	for _, incremental := range []bool{false, true} {
-		t.Run(map[bool]string{false: "buffered-replacement", true: "incremental-unicode-empty-reset"}[incremental], func(t *testing.T) {
+	for _, mode := range []string{"buffered-replacement", "incremental-unicode-empty-reset", "incremental-repeated-chunks-final-snapshot"} {
+		incremental := mode != "buffered-replacement"
+		repeated := mode == "incremental-repeated-chunks-final-snapshot"
+		t.Run(mode, func(t *testing.T) {
 			root := t.TempDir()
 			store := sessionfile.NewStore(sessionfile.Config{RootDir: root})
 			active, err := store.StartSession(t.Context(), session.StartSessionRequest{AppName: "hooks", UserID: "stream"})
@@ -81,7 +83,11 @@ func TestHooksStreamingAcceptedTextMatchesFileReopen(t *testing.T) {
 					}
 					return
 				}
-				for _, text := range []string{"se", "", "cret ", string([]byte{0xe4}), string([]byte{0xbd, 0xa0}), "好"} {
+				fragments := []string{"se", "", "cret ", string([]byte{0xe4}), string([]byte{0xbd, 0xa0}), "好"}
+				if repeated {
+					fragments = append(fragments, fragments...)
+				}
+				for _, text := range fragments {
 					if !yield(hookTextDelta(text), nil) {
 						return
 					}
@@ -102,6 +108,9 @@ func TestHooksStreamingAcceptedTextMatchesFileReopen(t *testing.T) {
 			if incremental {
 				hooks.StreamMode = agent.StreamIncremental
 				expected = "[redacted] 你好"
+				if repeated {
+					expected += expected
+				}
 			} else {
 				hooks.Completion = []agent.Hook[model.Message, agent.CompletionDecision]{{Name: "replace", Apply: func(_ context.Context, _ agent.HookContext, candidate model.Message) (agent.CompletionDecision, error) {
 					if candidate.TextContent() != "[redacted] 你好" {

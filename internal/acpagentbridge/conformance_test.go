@@ -672,6 +672,7 @@ func newTestRuntimeAgentWithTools(t *testing.T, model model.LLM, tools []tool.To
 	t.Helper()
 	sessions := inmemory.NewStore(inmemory.Config{})
 	runtime, err := sdkruntime.New(sdkruntime.Config{
+		Hooks:    agent.Hooks{StreamMode: agent.StreamIncremental},
 		Sessions: sessions,
 		AgentFactory: sdkchat.Factory{
 			SystemPrompt: "Answer tersely.",

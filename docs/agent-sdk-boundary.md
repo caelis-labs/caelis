@@ -87,7 +87,9 @@ the final candidate is accepted. Caelis interactive Session assembly explicitly
 selects Incremental while it has no final-response mutators. Registering a
 ModelResult or Completion hook requires choosing Buffered instead. Explicit Incremental mode creates a transformer
 per actual attempt and derives live fragments and final text from one
-accumulator. It handles UTF-8 split across chunks and empty chunks; attempt
+accumulator. Published text remains authoritative when the provider's final
+snapshot differs; a matching final snapshot can fill an unstreamed suffix.
+It handles UTF-8 split across chunks and empty chunks; attempt
 reset discards its state. Irreversible output prevents automatic retry.
 Incremental rejects ModelResult and Completion registrations that could
 replace published text. Stream factories apply to actual provider attempts;

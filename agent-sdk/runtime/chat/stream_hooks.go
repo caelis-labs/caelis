@@ -110,10 +110,13 @@ func (s *textStream) finish(ctx context.Context, message model.Message, incremen
 		}
 		text := p.Text.Text
 		if incremental {
-			if !strings.HasPrefix(text, s.raw[index]) {
-				return model.Message{}, fmt.Errorf("stream and final text diverged")
+			// Published fragments are authoritative. A final provider snapshot can
+			// fill an unstreamed suffix, but cannot retract already accepted text.
+			if strings.HasPrefix(text, s.raw[index]) {
+				text = text[len(s.raw[index]):]
+			} else {
+				text = ""
 			}
-			text = text[len(s.raw[index]):]
 		}
 		if incremental && text == "" {
 			continue

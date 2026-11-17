@@ -44,11 +44,6 @@ const (
 	ToolOutcomeUnknown   ToolOutcome = "unknown_outcome"
 )
 
-// EventTool is the durable SDK tool-execution payload for one tool call or
-// result event. Input decodes numbers as json.Number so observation tokens
-// survive durable reload; Output and other open maps retain their established decoding.
-// ACP wire shapes are derived from this payload by surface projectors; they are
-// not the storage contract.
 // ToolProcessingFailure records a presentation failure separately from effect outcome.
 type ToolProcessingFailure struct {
 	Phase string `json:"phase"`
@@ -56,6 +51,11 @@ type ToolProcessingFailure struct {
 	Error string `json:"error"`
 }
 
+// EventTool is the durable SDK tool-execution payload for one tool call or
+// result event. Input decodes numbers as json.Number so observation tokens
+// survive durable reload; Output and other open maps retain their established decoding.
+// ACP wire shapes are derived from this payload by surface projectors; they are
+// not the storage contract.
 type EventTool struct {
 	ProcessingFailure *ToolProcessingFailure `json:"processing_failure,omitempty"`
 	// Parent identifies an actual nested host call, independently of display metadata.
