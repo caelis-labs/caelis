@@ -38,6 +38,9 @@ type codeModeProducerTool struct {
 
 func (t codeModeProducerTool) Definition() tool.Definition { return t.base.Definition() }
 
+func (t codeModeProducerTool) RuntimePrepareInvocation(_ toolbinding.Token, call tool.Call) tool.Call {
+	return toolbinding.Prepare(t.base, call)
+}
 func (t codeModeProducerTool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
 	if err := ctx.Err(); err != nil {
 		return tool.Result{}, err
@@ -88,8 +91,8 @@ func (t codeModeProducerTool) Call(ctx context.Context, call tool.Call) (tool.Re
 // binding, never from a display name or model/remote metadata. Journal is the
 // sole wrapper between policy and that binding at this point.
 func codeModeReadPathArgument(one tool.Tool) string {
-	if journal, ok := one.(journaledTool); ok {
-		one = journal.base
+	if dispatch, ok := one.(dispatchTool); ok {
+		one = dispatch.base
 	}
 	if _, ok := one.(runtimeCodeModeTool); ok {
 		return "file"

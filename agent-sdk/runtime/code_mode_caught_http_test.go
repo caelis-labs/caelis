@@ -91,13 +91,13 @@ func TestCodeModeCaughtReadsReachNextHTTPRequest(t *testing.T) {
 	}
 	failed, succeeded, parentFailed := 0, 0, false
 	for _, ev := range events {
-		if ev.Journal != nil && ev.Journal.ToolExecution != nil {
-			j := ev.Journal.ToolExecution
-			if j.Parent != nil && j.ToolName == "Read" {
-				if j.Status == session.ToolExecutionFailed {
+		if ev.Type == session.EventTypeToolResult && ev.Tool != nil {
+			j := ev.Tool
+			if j.Parent != nil && j.Name == "Read" {
+				if j.Status == "failed" {
 					failed++
 				}
-				if j.Status == session.ToolExecutionSucceeded {
+				if j.Status == "completed" {
 					succeeded++
 				}
 			}

@@ -289,7 +289,7 @@ func CloneRuntimeRequest(in agentsdk.ApprovalRequest) agentsdk.ApprovalRequest {
 	out.Session = session.CloneSession(in.Session)
 	out.RunID = strings.TrimSpace(in.RunID)
 	out.TurnID = strings.TrimSpace(in.TurnID)
-	out.PauseTokenID = strings.TrimSpace(in.PauseTokenID)
+	out.ApprovalRequestID = strings.TrimSpace(in.ApprovalRequestID)
 	out.OperationTaskID = strings.TrimSpace(in.OperationTaskID)
 	out.Tool = tool.CloneDefinition(in.Tool)
 	out.Call = tool.CloneCall(in.Call)

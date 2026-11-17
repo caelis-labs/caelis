@@ -107,12 +107,12 @@ func TestSharedMediaRebuildsRuntimeProducedContextWithoutToolReplay(t *testing.T
 	}
 	terminal := 0
 	for _, event := range events {
-		if event.Journal == nil || event.Journal.ToolExecution == nil || event.Journal.ToolExecution.Status != session.ToolExecutionSucceeded {
+		if event.Type != session.EventTypeToolResult || event.Tool == nil || event.Tool.Status != "completed" {
 			continue
 		}
 		terminal++
 		var receipt tool.Result
-		if err := json.Unmarshal(event.Journal.ToolExecution.Result, &receipt); err != nil || !reflect.DeepEqual(receipt.Content, content) {
+		if err := json.Unmarshal(toolResultJSON(event.Tool.Result), &receipt); err != nil || !reflect.DeepEqual(receipt.Content, content) {
 			t.Fatalf("recovery receipt lost original media: %v", err)
 		}
 	}

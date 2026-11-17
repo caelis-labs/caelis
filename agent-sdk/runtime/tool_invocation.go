@@ -11,8 +11,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
-// invocationTool binds identity before policy admission. Approval, the execution
-// journal and any asynchronous continuation consume this same identity; assigning
+// invocationTool binds identity before policy admission. Approval, the tool facts and any asynchronous continuation consume this same identity; assigning
 // it neither authorizes execution nor records that a tool has started.
 type invocationTool struct {
 	base      tool.Tool
@@ -30,12 +29,15 @@ func (t invocationTool) RuntimeTaskResultSource(toolbinding.Token) bool {
 }
 
 func (t invocationTool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
-	// Never accept identity supplied by a caller, provider input or metadata.
-	call.Execution = tool.InvocationContext{
-		SessionID: t.sessionID, TurnID: t.turnID,
-		ItemID: fmt.Sprintf("tool-step-%d:%s", t.sequence.Add(1), strings.TrimSpace(call.ID)),
+	if !toolbinding.IsPrepared(ctx, call) {
+		call = t.RuntimePrepareInvocation(toolbinding.Token{}, call)
 	}
 	return t.base.Call(ctx, call)
+}
+
+func (t invocationTool) RuntimePrepareInvocation(_ toolbinding.Token, call tool.Call) tool.Call {
+	call.Execution = tool.InvocationContext{SessionID: t.sessionID, TurnID: t.turnID, ItemID: fmt.Sprintf("tool-%d:%s", t.sequence.Add(1), strings.TrimSpace(call.ID))}
+	return call
 }
 
 func wrapToolsForInvocation(ref session.SessionRef, turnID string, sequence *atomic.Uint64, tools []tool.Tool) []tool.Tool {
@@ -49,4 +51,13 @@ func wrapToolsForInvocation(ref session.SessionRef, turnID string, sequence *ato
 		}
 	}
 	return out
+}
+
+// toolTaskOperationID binds a genuine Task submission to this admitted
+// occurrence. Direct legacy adapters leave identity to their existing owner.
+func toolTaskOperationID(call tool.Call) string {
+	if call.Execution.ItemID == "" {
+		return ""
+	}
+	return "tool/" + call.Execution.TurnID + "/" + call.Execution.ItemID + "/" + call.Name
 }

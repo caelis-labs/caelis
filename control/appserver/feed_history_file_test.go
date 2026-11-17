@@ -41,7 +41,7 @@ func TestFileHistoryMetadataPreservesLateApprovalsAndIndependentPages(t *testing
 				events = append(events, e)
 			}
 			if late {
-				events = append(events, &session.Event{Type: session.EventTypeLifecycle, Visibility: session.VisibilityJournal, Journal: &session.ExecutionJournalEntry{Schema: session.ExecutionJournalSchemaVersion, Kind: session.JournalKindPauseToken, PauseToken: &session.PauseToken{Schema: session.ExecutionJournalSchemaVersion, TokenID: "pause", SessionID: active.SessionID, RunID: "run", TurnID: "1", Revision: 2, Status: session.PauseTokenResolved, ToolCallID: "call", ReviewText: "late decision"}}})
+				events = append(events, &session.Event{Type: session.EventTypeLifecycle, Visibility: session.VisibilityJournal, Approval: &session.ApprovalRecord{Schema: session.ApprovalSchemaVersion, RequestID: "pause", SessionID: active.SessionID, RunID: "run", TurnID: "1", Revision: 2, Status: session.ApprovalRecordResolved, ToolCallID: "call", ReviewText: "late decision"}})
 			}
 			if _, err := writer.AppendEvents(t.Context(), session.AppendEventsRequest{SessionRef: active.SessionRef, Events: events}); err != nil {
 				t.Fatal(err)

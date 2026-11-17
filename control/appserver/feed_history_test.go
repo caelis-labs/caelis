@@ -128,7 +128,7 @@ func TestFeedHistoryLateApprovalRetainsOriginalTurn(t *testing.T) {
 		feedIdentifiedNarrative(1, "message-1", "turn-1", "first turn"),
 		feedIdentifiedNarrative(2, "message-2", "turn-2", "second turn"),
 		&session.Event{ID: "late-review", Seq: 3, Type: session.EventTypeLifecycle, Visibility: session.VisibilityJournal,
-			Journal: &session.ExecutionJournalEntry{Kind: session.JournalKindPauseToken, PauseToken: &session.PauseToken{Status: session.PauseTokenResolved, TurnID: "turn-1", ToolCallID: "call-1", Approved: true, ReviewText: "approved"}}},
+			Approval: &session.ApprovalRecord{Status: session.ApprovalRecordResolved, TurnID: "turn-1", ToolCallID: "call-1", Approved: true, ReviewText: "approved"}},
 	)
 	broker, _ := newTestFeedBroker(t, reader, FeedBrokerConfig{})
 	result, err := broker.Subscribe(t.Context(), SubscribeRequest{SessionID: "session-1", HistoryTurns: 1})

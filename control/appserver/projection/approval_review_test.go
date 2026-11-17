@@ -18,10 +18,10 @@ import (
 func TestApprovalReviewReplayUsesSafePresentationAndPreservesVerdict(t *testing.T) {
 	original := &session.ProtocolApproval{ToolCall: session.ProtocolToolCall{ID: "call", Name: "custom", RawInput: map[string]any{"credential": "REPLAY-MARKED-SECRET"}}, Options: []session.ProtocolApprovalOption{{ID: "native-allow", Kind: "allow_once"}}}
 	presentation := approval.ProtocolApprovalFromPayload(approval.DisplayPayloadFromRuntimeRequest(agent.ApprovalRequest{Tool: tool.Definition{Name: "custom", InputSchema: map[string]any{"properties": map[string]any{"credential": map[string]any{"writeOnly": true}}}}, Approval: original}))
-	event := &session.Event{ID: "review", Type: session.EventTypeLifecycle, Visibility: session.VisibilityJournal, Journal: &session.ExecutionJournalEntry{Kind: session.JournalKindPauseToken, PauseToken: &session.PauseToken{
-		TokenID: "native-request", TurnID: "turn", ToolCallID: "call", ToolName: "custom", Status: session.PauseTokenResolved, Approved: true, OptionID: "native-allow",
+	event := &session.Event{ID: "review", Type: session.EventTypeLifecycle, Visibility: session.VisibilityJournal, Approval: &session.ApprovalRecord{
+		RequestID: "native-request", TurnID: "turn", ToolCallID: "call", ToolName: "custom", Status: session.ApprovalRecordResolved, Approved: true, OptionID: "native-allow",
 		Input: json.RawMessage(`{"credential":"REPLAY-MARKED-SECRET"}`), Approval: original, Presentation: presentation, ReviewText: "REPLAY-MARKED-SECRET rationale",
-	}}}
+	}}
 	// A process-independent JSON round trip exercises the durable snapshot,
 	// including the explicit sensitivity bit used for derived review text.
 	rawEvent, _ := json.Marshal(event)
@@ -37,7 +37,7 @@ func TestApprovalReviewReplayUsesSafePresentationAndPreservesVerdict(t *testing.
 	if err != nil || strings.Contains(string(raw), "REPLAY-MARKED-SECRET") || out[0].ApprovalReview.Text != "Sensitive action details withheld." {
 		t.Fatalf("private review leaked: %s, %v", raw, err)
 	}
-	if restored.Journal.PauseToken.Approval.ToolCall.RawInput["credential"] != "REPLAY-MARKED-SECRET" || restored.Journal.PauseToken.OptionID != "native-allow" {
+	if restored.Approval.Approval.ToolCall.RawInput["credential"] != "REPLAY-MARKED-SECRET" || restored.Approval.OptionID != "native-allow" {
 		t.Fatal("display changed private action or grant evidence")
 	}
 }
@@ -45,7 +45,7 @@ func TestApprovalReviewReplayUsesSafePresentationAndPreservesVerdict(t *testing.
 func TestIndependentPermissionReviewReplayNeedsNoToolCall(t *testing.T) {
 	original := &session.ProtocolApproval{Context: &session.PermissionContext{Title: "Original", RawSubject: json.RawMessage(`{"type":"_private","secret":"PRIVATE-DRAFT-EVIDENCE"}`)}, Subject: &session.ApprovalSubject{Kind: "opaque", OpaqueInput: true}, Options: []session.ProtocolApprovalOption{{ID: "native-reject", Name: "Reject", Kind: "reject_once"}}}
 	presentation := approval.ProtocolApprovalFromPayload(approval.DisplayPayloadFromRuntimeRequest(agent.ApprovalRequest{Approval: original}))
-	event := &session.Event{ID: "review", Type: session.EventTypeLifecycle, Visibility: session.VisibilityJournal, Journal: &session.ExecutionJournalEntry{Kind: session.JournalKindPauseToken, PauseToken: &session.PauseToken{TokenID: "native-request", TurnID: "turn", Status: session.PauseTokenResolved, OptionID: "native-reject", Approval: original, Presentation: presentation, ReviewText: "PRIVATE-DRAFT-EVIDENCE reviewed"}}}
+	event := &session.Event{ID: "review", Type: session.EventTypeLifecycle, Visibility: session.VisibilityJournal, Approval: &session.ApprovalRecord{RequestID: "native-request", TurnID: "turn", Status: session.ApprovalRecordResolved, OptionID: "native-reject", Approval: original, Presentation: presentation, ReviewText: "PRIVATE-DRAFT-EVIDENCE reviewed"}}
 	projected := projection.ProjectSessionEventEnvelope(eventstream.Envelope{SessionID: "owner"}, event)
 	if len(projected) != 1 || projected[0].ApprovalRequestID != "native-request" || projected[0].ApprovalReview.ToolCallID != "" || projected[0].ApprovalReview.Status != "denied" || projected[0].ApprovalReview.Text != "Opaque action details withheld." {
 		t.Fatalf("independent reviewed decision lost or gained a tool: %+v", projected)
@@ -61,14 +61,14 @@ func TestApprovalDecisionJournalProjectsDisplayWithoutControlState(t *testing.T)
 		for _, child := range []bool{false, true} {
 			event := &session.Event{ID: "decision-1", Seq: 17, Type: session.EventTypeLifecycle, Visibility: session.VisibilityJournal,
 				Meta: map[string]any{"private": "must-not-leak"},
-				Journal: &session.ExecutionJournalEntry{Kind: session.JournalKindPauseToken, PauseToken: &session.PauseToken{
-					TokenID: "public-manual-token", RunID: "private-run", TurnID: "turn-1", ToolCallID: "call-1", ToolName: "RunCommand", ItemID: "step-1",
-					Status: session.PauseTokenResolved, Approved: approved, ReviewText: "review complete",
+				Approval: &session.ApprovalRecord{
+					RequestID: "public-manual-token", RunID: "private-run", TurnID: "turn-1", ToolCallID: "call-1", ToolName: "RunCommand", ItemID: "step-1",
+					Status: session.ApprovalRecordResolved, Approved: approved, ReviewText: "review complete",
 					Input: json.RawMessage(`{"command":"git status","exact":9007199254740991}`), Metadata: map[string]any{"private": "must-not-leak"},
-				}},
+				},
 			}
 			if child {
-				event.Journal.PauseToken.Metadata = map[string]any{"subagent": true, "task_id": "task-1", "parent_call_id": "spawn-1", "parent_tool": "StartThread", "agent": "reviewer"}
+				event.Approval.Metadata = map[string]any{"subagent": true, "task_id": "task-1", "parent_call_id": "spawn-1", "parent_tool": "StartThread", "agent": "reviewer"}
 			}
 			base := projection.EnvelopeBaseFromSessionEvent(session.SessionRef{SessionID: "session-1"}, event, projection.SessionEventTransport{})
 			out := projection.ProjectSessionEventEnvelope(base, event)
@@ -117,10 +117,10 @@ func TestApprovalDecisionJournalProjectsDisplayWithoutControlState(t *testing.T)
 
 func TestLegacyApprovalDecisionProjectsWithoutItemID(t *testing.T) {
 	event := &session.Event{Type: session.EventTypeLifecycle, Visibility: session.VisibilityJournal,
-		Journal: &session.ExecutionJournalEntry{Kind: session.JournalKindPauseToken, PauseToken: &session.PauseToken{
-			TokenID: "legacy-token", TurnID: "legacy-turn", ToolCallID: "legacy-call",
-			Status: session.PauseTokenResolved, ReviewText: "approved",
-		}},
+		Approval: &session.ApprovalRecord{
+			RequestID: "legacy-token", TurnID: "legacy-turn", ToolCallID: "legacy-call",
+			Status: session.ApprovalRecordResolved, ReviewText: "approved",
+		},
 	}
 	out := projection.ProjectSessionEventEnvelope(projection.EnvelopeBaseFromSessionEvent(session.SessionRef{SessionID: "s1"}, event, projection.SessionEventTransport{}), event)
 	if len(out) != 1 || out[0].ApprovalRequestID != "legacy-token" || out[0].ApprovalReview == nil || out[0].ApprovalReview.ItemID != "" {

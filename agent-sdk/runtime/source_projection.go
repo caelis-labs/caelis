@@ -3,7 +3,7 @@ package runtime
 import (
 	"strings"
 
-	"github.com/caelis-labs/caelis/agent-sdk"
+	agentsdk "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/session"

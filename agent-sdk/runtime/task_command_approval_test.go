@@ -130,8 +130,8 @@ func TestCommandApprovalYieldsWithinRunAndPreservesCanonicalHistory(t *testing.T
 		t.Fatal(err)
 	}
 	for _, event := range pendingEvents {
-		if event.Journal != nil && event.Journal.ToolExecution != nil {
-			t.Fatalf("execution journal started before approval: %#v", event.Journal.ToolExecution)
+		if event.Type == session.EventTypeToolResult && event.Tool != nil {
+			t.Fatalf("execution journal started before approval: %#v", event.Tool)
 		}
 	}
 	var pendingRequest *model.Request
@@ -155,7 +155,7 @@ func TestCommandApprovalYieldsWithinRunAndPreservesCanonicalHistory(t *testing.T
 		t.Fatal(err)
 	}
 	spec, err := commandExecutionFromEntry(entry)
-	if err != nil || spec.Approval.TokenID != approval.PauseTokenID || spec.Approval.Deadline.IsZero() || entry.Handle != mustFindTaskHandle(t, pendingRequest) {
+	if err != nil || spec.Approval.RequestID != approval.ApprovalRequestID || spec.Approval.Deadline.IsZero() || entry.Handle != mustFindTaskHandle(t, pendingRequest) {
 		t.Fatalf("durable intent = %#v, %#v, %v", entry, spec, err)
 	}
 	close(approve)
@@ -179,7 +179,7 @@ func TestCommandApprovalYieldsWithinRunAndPreservesCanonicalHistory(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	results, terminalReceipts, reviewed := 0, 0, 0
+	results, reviewed := 0, 0
 	for _, event := range events {
 		if token := session.ResolvedApprovalReview(event); token != nil {
 			reviewed++
@@ -190,16 +190,18 @@ func TestCommandApprovalYieldsWithinRunAndPreservesCanonicalHistory(t *testing.T
 		if event.Tool != nil && event.Tool.ID == "pending-command" && session.EventTypeOf(event) == session.EventTypeToolResult {
 			results++
 		}
-		if event.Journal != nil && event.Journal.ToolExecution != nil && event.Journal.ToolExecution.Key.ToolCallID == "pending-command" && event.Journal.ToolExecution.Status == session.ToolExecutionSucceeded {
-			terminalReceipts++
-			key := event.Journal.ToolExecution.Key
-			if key.SessionID != identity.SessionID || key.TurnID != identity.TurnID || key.StepID != identity.ItemID {
+		if event.Type == session.EventTypeToolResult && event.Tool != nil && event.Tool.ID == "pending-command" {
+			if event.Tool.Result == nil {
+				t.Fatal("missing complete yielded Task result")
+			}
+			key := event.Tool.Execution
+			if key.SessionID != identity.SessionID || key.TurnID != identity.TurnID || key.ItemID != identity.ItemID {
 				t.Fatalf("continuation identity = %#v, approval identity = %#v", key, identity)
 			}
 		}
 	}
-	if results != 1 || terminalReceipts != 1 || reviewed != 1 {
-		t.Fatalf("canonical results/terminal receipts/reviews = %d/%d/%d", results, terminalReceipts, reviewed)
+	if results != 1 || reviewed != 1 {
+		t.Fatalf("canonical results/reviews = %d/%d", results, reviewed)
 	}
 	reopened := sessionfile.NewStore(sessionfile.Config{RootDir: root})
 	reviewed = 0
@@ -301,7 +303,7 @@ func mustCommandTaskID(t *testing.T, ref session.SessionRef, callID string) stri
 func TestCommandExecutionSpecRoundTrip(t *testing.T) {
 	req := taskapi.CommandStartRequest{Timeout: 123 * time.Second, Constraints: sandbox.Constraints{Route: sandbox.RouteHost, Backend: sandbox.BackendHost, Permission: sandbox.PermissionFullAccess}}
 	spec := commandExecutionForRequest(req)
-	spec.Approval = &commandApprovalRef{RunID: "r", TurnID: "t", TokenID: "p", Deadline: time.Now().UTC().Truncate(time.Second)}
+	spec.Approval = &commandApprovalRef{RunID: "r", TurnID: "t", RequestID: "p", Deadline: time.Now().UTC().Truncate(time.Second)}
 	raw, err := json.Marshal(&taskapi.Entry{Spec: map[string]any{"execution": spec.value()}})
 	if err != nil {
 		t.Fatal(err)
@@ -424,7 +426,7 @@ func TestCommandApprovalRecoveryNeverRestarts(t *testing.T) {
 		t.Fatal(err)
 	}
 	spec := commandExecutionForRequest(req)
-	spec.Approval = &commandApprovalRef{RunID: "run-lost", TurnID: "turn-lost", TokenID: "pause-lost"}
+	spec.Approval = &commandApprovalRef{RunID: "run-lost", TurnID: "turn-lost", RequestID: "pause-lost"}
 	prepared, _, err := r.tasks.prepareCommandClaimed(t.Context(), active, active.SessionRef, id, digest, req, spec)
 	if err != nil {
 		t.Fatal(err)
@@ -577,8 +579,8 @@ func TestCommandApprovalFinalSafePointJoinsAndAcceptsSteering(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, event := range events {
-			if event.Journal != nil && event.Journal.ToolExecution != nil {
-				t.Fatal("unstarted command wrote an execution approval receipt")
+			if event.Type == session.EventTypeToolResult && event.Tool != nil && event.Tool.Result == nil {
+				t.Fatal("tool result lacks full returned value")
 			}
 		}
 	})

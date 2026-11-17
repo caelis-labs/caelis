@@ -274,7 +274,7 @@ func TestRuntimeMainControllerSteeringUsesReattachedBinding(t *testing.T) {
 	}
 	recovery := controllerRecoveryFunc(func(recoveryCtx context.Context, req controller.RecoveryRequest) (session.Session, error) {
 		return sessions.BindController(recoveryCtx, session.BindControllerRequest{
-			SessionRef: req.SessionRef, Binding: newBinding,
+			SessionRef: req.SessionRef, Binding: newBinding, MutationGuard: session.ControlMutationGuardWithRuntimeFence(recoveryCtx, session.ControlMutationPurposeHandoff),
 		})
 	})
 	runtime, err := New(testConfigWithACPForwarder(Config{

@@ -244,7 +244,7 @@ func TestAuthorizationLastWaiterAndRevocationRejectLateResolution(t *testing.T) 
 			case <-time.After(time.Second):
 				t.Fatal("approval producer outlived last waiter/revocation")
 			}
-			if err := r.ResolveApproval(t.Context(), agent.ResolveApprovalRequest{SessionRef: active.SessionRef, TokenID: req.PauseTokenID, Decision: agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_app", Approved: true}}); err == nil {
+			if err := r.ResolveApproval(t.Context(), agent.ResolveApprovalRequest{SessionRef: active.SessionRef, RequestID: req.ApprovalRequestID, Decision: agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_app", Approved: true}}); err == nil {
 				t.Fatal("late resolution restored cancelled consent")
 			}
 			releaseOnce.Do(func() { close(releaseRequester) })
@@ -266,7 +266,7 @@ func TestAuthorizationLastWaiterAndRevocationRejectLateResolution(t *testing.T) 
 type failedConsentSettlement struct{ session.Service }
 
 func (s failedConsentSettlement) AppendEvent(ctx context.Context, req session.AppendEventRequest) (*session.Event, error) {
-	if req.Event.Journal != nil && req.Event.Journal.PauseToken != nil && req.Event.Journal.PauseToken.Status == session.PauseTokenResolved {
+	if req.Event.Type == session.EventTypeLifecycle && req.Event.Approval != nil && req.Event.Approval.Status == session.ApprovalRecordResolved {
 		return nil, errors.New("fixture settlement unavailable")
 	}
 	return s.Service.AppendEvent(ctx, req)

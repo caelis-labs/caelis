@@ -123,9 +123,9 @@ func TestFeedRetentionReplacesExpiredReaderAndResumesApprovals(t *testing.T) {
 	paused := &retentionPausedStore{Store: s, entered: make(chan struct{}), release: make(chan struct{})}
 	canonical := &checkpointPageReader{active: session.Session{SessionRef: session.SessionRef{SessionID: "session-1"}}}
 	decision := &session.Event{ID: "decision", Seq: 1, Type: session.EventTypeLifecycle, Visibility: session.VisibilityJournal,
-		Journal: &session.ExecutionJournalEntry{Kind: session.JournalKindPauseToken, PauseToken: &session.PauseToken{
-			Status: session.PauseTokenResolved, TurnID: "turn-1", ToolCallID: "before-pressure", ToolName: "RunCommand", Approved: true, ReviewText: "approved",
-		}},
+		Approval: &session.ApprovalRecord{
+			Status: session.ApprovalRecordResolved, TurnID: "turn-1", ToolCallID: "before-pressure", ToolName: "RunCommand", Approved: true, ReviewText: "approved",
+		},
 	}
 	b := retentionBroker(t, paused, "session-1", canonical)
 	canonical.setEvents(decision)

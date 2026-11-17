@@ -2,13 +2,9 @@ package runtime
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
-	"fmt"
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
-	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
@@ -44,9 +40,9 @@ func submitTaskApproval(ctx context.Context, call tool.Call, approval taskApprov
 	}
 	execute := wrapped.Call
 	producerTool := wrapped
-	if journal, ok := wrapped.(journaledTool); ok {
-		producerTool = journal.base
-		execute = journal.callTaskContinuation
+	if dispatch, ok := wrapped.(dispatchTool); ok {
+		producerTool = dispatch.base
+		execute = dispatch.Call
 	}
 	producer, ok := producerTool.(taskApprovalProducer)
 	if !ok {
@@ -59,59 +55,4 @@ func submitTaskApproval(ctx context.Context, call tool.Call, approval taskApprov
 	approval.admission = binding
 	result, err := producer.submitApproval(ctx, call, approval, execute)
 	return result, true, err
-}
-
-// A yielded invocation has already returned its sole canonical result. The
-// continuation persists the execution receipt as journal data, never as a
-// second result for that call ID. Journaling still begins only after approval.
-func (t journaledTool) callTaskContinuation(ctx context.Context, call tool.Call) (tool.Result, error) {
-	result, callErr := t.Call(ctx, call)
-	if isCodeModeChild(call) {
-		// Call already persists nested terminals through the same receipt owner.
-		return result, callErr
-	}
-	return result, errors.Join(callErr, persistToolExecutionReceipt(ctx, t.sessions, t.writes, t.sessionRef, call, result))
-}
-
-// persistToolExecutionReceipt records a terminal journal entry when the caller
-// has no native chat tool-result event to carry it.
-func persistToolExecutionReceipt(ctx context.Context, sessions session.Service, writes *sessionWriteQueue, ref session.SessionRef, call tool.Call, result tool.Result) error {
-	value, ok := result.Metadata[tool.MetadataExecutionJournal]
-	if !ok {
-		return nil
-	}
-	raw, err := json.Marshal(value)
-	if err != nil {
-		return err
-	}
-	var journal session.ExecutionJournalEntry
-	if err := json.Unmarshal(raw, &journal); err != nil {
-		return err
-	}
-	record := journal.ToolExecution
-	if record == nil {
-		return errors.New("task execution receipt is missing")
-	}
-	receiptCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), approvalResolutionRecoveryTimeout)
-	defer cancel()
-	if record.ToolName == tool.ToolSearchToolName && isCodeModeChild(call) {
-		// An explicit refresh and a direct child's binding claim must observe
-		// the same canonical order, including across already-running Hosts.
-		release, err := writes.acquire(receiptCtx, ref)
-		if err != nil {
-			return err
-		}
-		defer release()
-	}
-	_, err = sessions.AppendEvent(receiptCtx, session.AppendEventRequest{
-		SessionRef: ref, MutationGuard: session.RuntimeMutationGuard(ctx),
-		Event: &session.Event{
-			IdempotencyKey: "tool-execution:" + record.Identity + ":" + fmt.Sprint(record.Revision),
-			Type:           session.EventTypeLifecycle, Visibility: session.VisibilityJournal,
-			Time: record.UpdatedAt, Journal: &journal,
-			Actor:     session.ActorRef{Kind: session.ActorKindTool, ID: call.ID, Name: call.Name},
-			Lifecycle: &session.EventLifecycle{Status: string(record.Status), Reason: record.Reason},
-		},
-	})
-	return err
 }

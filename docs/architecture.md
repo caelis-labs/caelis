@@ -183,8 +183,8 @@ mutations and Runtime cleanup, then closes stores and process resources.
 ## State, streams, and effects
 
 `agent-sdk/session.Event` and guarded Session state are durable truth. Canonical
-messages, tools, plans, protocol facts, and journals determine model context and
-recovery. UI, overlay, notice, and raw observation output are transient unless a
+messages, tool calls/results, plans and protocol facts determine model context.
+Approval, model accounting and compaction receipts retain their own owners. UI, overlay, notice, and raw observation output are transient unless a
 typed contract explicitly says otherwise.
 
 Control records normalized Session and Task output in one file-backed,

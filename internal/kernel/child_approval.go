@@ -21,8 +21,8 @@ func (g *Gateway) RequestChildApproval(ctx context.Context, req agent.ApprovalRe
 		ctx: ctx, sessionRef: req.SessionRef, createdAt: g.clock(),
 		handleID: g.allocateID("child-approval"), runID: g.allocateID("child-approval-run"), turnID: req.TurnID,
 		observer: observer, approvals: g.sessionApprovals(req.SessionRef),
-		persistApproval: g.approvalPersister(req.SessionRef, req.TurnID),
-		settleApproval:  g.approvalSettler(req.SessionRef, req.TurnID),
+		projectApproval:           g.approvalProjector(req.SessionRef, req.TurnID),
+		projectApprovalSettlement: g.approvalSettlementProjector(req.SessionRef, req.TurnID),
 	})
 	// This handle owns only queue publication, so it emits no parent Turn
 	// lifecycle. resolveApprovalRequest releases its queue entry before return.

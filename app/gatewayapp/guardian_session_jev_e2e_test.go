@@ -68,7 +68,7 @@ func TestGuardianSessionJevReplay(t *testing.T) {
 			copy.ID, copy.IdempotencyKey, copy.SessionID, copy.Seq = "", "", active.SessionID, 0
 			pending = append(pending, copy)
 		}
-		if event.Journal == nil || event.Journal.PauseToken == nil || event.Journal.PauseToken.Status != session.PauseTokenPending {
+		if event.Type != session.EventTypeLifecycle || event.Approval == nil || event.Approval.Status != session.ApprovalRecordPending {
 			continue
 		}
 		if len(results) >= 8 {
@@ -80,7 +80,7 @@ func TestGuardianSessionJevReplay(t *testing.T) {
 			}
 			pending = nil
 		}
-		pause := event.Journal.PauseToken
+		pause := event.Approval
 		// JSON journal metadata needs its typed trusted sandbox value restored.
 		if value, ok := pause.Metadata[policy.MetadataSandboxPolicy]; ok {
 			encoded, _ := json.Marshal(value)
@@ -98,7 +98,7 @@ func TestGuardianSessionJevReplay(t *testing.T) {
 		req := approvalReviewerTestRequest(active, nil, "", nil)
 		req.RuntimeRequest = runtimeReq
 		req.Approval = approval.PayloadFromRuntimeRequest(runtimeReq)
-		req.ReviewID = pause.TokenID
+		req.ReviewID = pause.RequestID
 		calls, requestBytes, userMessages := 0, 0, 0
 		var metricsErr error
 		var response judgment.Response

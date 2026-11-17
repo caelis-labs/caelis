@@ -283,7 +283,7 @@ func (g *Gateway) resolveActiveAutoApproval(
 	// context. Publishing it as a Session UsageUpdate would temporarily replace
 	// the main-turn context meter with the Guardian model's snapshot.
 	handle.publishApprovalReviewPayloadWithInvocation(req, terminal, invocation)
-	_ = g.persistApprovalReviewSessionAccounting(context.WithoutCancel(turnCtx), req, usage, terminal.DecisionSource, invocation)
+	_ = g.projectApprovalReviewSessionAccounting(context.WithoutCancel(turnCtx), req, usage, terminal.DecisionSource, invocation)
 	// Valid denials remain ordinary Guardian decisions.
 	response.ReviewText = strings.TrimSpace(result.DisplayText)
 	return response, nil
@@ -304,7 +304,7 @@ func (g *Gateway) approvalReviewSessionAccounting(ctx context.Context, req Appro
 	return nil, nil
 }
 
-func (g *Gateway) persistApprovalReviewSessionAccounting(ctx context.Context, req *agent.ApprovalRequest, usage *UsageSnapshot, source string, invocation *session.EventInvocation) error {
+func (g *Gateway) projectApprovalReviewSessionAccounting(ctx context.Context, req *agent.ApprovalRequest, usage *UsageSnapshot, source string, invocation *session.EventInvocation) error {
 	if g == nil || g.sessions == nil || req == nil || usage == nil || usageSnapshotEmpty(*usage) {
 		return nil
 	}

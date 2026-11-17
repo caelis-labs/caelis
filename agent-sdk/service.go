@@ -51,10 +51,10 @@ type ApprovalRequest struct {
 	Session       session.Session                `json:"session"`
 	RunID         string                         `json:"run_id,omitempty"`
 	TurnID        string                         `json:"turn_id,omitempty"`
-	// PauseTokenID identifies the SDK-owned durable pause, when this approval
+	// ApprovalRequestID identifies the SDK-owned durable request when this approval
 	// was created by Runtime durable approval handling. Product Control may use
 	// it as the request correlation value without adding it to ACP wire payloads.
-	PauseTokenID string `json:"pause_token_id,omitempty"`
+	ApprovalRequestID string `json:"approval_request_id,omitempty"`
 	// OperationTaskID associates the approval with a Job in SessionRef. It is
 	// separate from Origin.TaskID, which identifies the requesting Agent.
 	OperationTaskID string `json:"operation_task_id,omitempty"`
@@ -129,10 +129,10 @@ type AttachLiveRunRequest struct {
 	RunID      string             `json:"run_id"`
 }
 
-// ResolveApprovalRequest resolves one durable approval pause token.
+// ResolveApprovalRequest resolves one durable approval request.
 type ResolveApprovalRequest struct {
 	SessionRef session.SessionRef `json:"session_ref"`
-	TokenID    string             `json:"token_id"`
+	RequestID  string             `json:"request_id"`
 	Decision   ApprovalResponse   `json:"decision"`
 }
 

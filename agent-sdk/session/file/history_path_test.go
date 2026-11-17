@@ -2,9 +2,10 @@ package file
 
 import (
 	"bytes"
-	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"os"
 	"testing"
+
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 
 func TestHistoryPathIsStableLiveCanonicalLogAcrossReopen(t *testing.T) {

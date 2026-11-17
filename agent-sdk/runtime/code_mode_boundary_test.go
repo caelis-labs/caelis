@@ -75,10 +75,10 @@ func TestCodeModeRepeatedProviderIDsKeepDistinctChildReceipts(t *testing.T) {
 		if session.IsMirror(event) && event.Tool != nil && event.Tool.Parent != nil {
 			children[event.Tool.ID] = true
 		}
-		if event.Journal != nil && event.Journal.ToolExecution != nil {
-			r := event.Journal.ToolExecution
-			if r.Parent != nil && r.Status == session.ToolExecutionSucceeded {
-				terminals[r.Identity] = true
+		if event.Type == session.EventTypeToolResult && event.Tool != nil {
+			r := event.Tool
+			if r.Parent != nil && r.Status == "completed" {
+				terminals[r.Execution.ItemID] = true
 			}
 		}
 	}
@@ -208,7 +208,7 @@ func TestCodeModeBoundaryReplyBudgets(t *testing.T) {
 	}
 	found := false
 	for _, event := range events {
-		if event.Journal != nil && event.Journal.ToolExecution != nil && event.Journal.ToolExecution.Parent != nil && strings.Contains(string(event.Journal.ToolExecution.Result), strings.Repeat("x", 1024)) {
+		if event.Type == session.EventTypeToolResult && event.Tool != nil && event.Tool.Parent != nil && strings.Contains(string(toolResultJSON(event.Tool.Result)), strings.Repeat("x", 1024)) {
 			found = true
 		}
 	}

@@ -3,7 +3,6 @@ package runtime
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -79,15 +78,9 @@ func TestACPControllerCancelPersistsFencedRequestWhileRemoteTurnIsLive(t *testin
 	if cancelled.Err != nil {
 		t.Fatalf("Cancel() error = %v, want fenced durable request", cancelled.Err)
 	}
-	events, err := service.Events(context.Background(), session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, kind := range []session.JournalKind{session.JournalKindRun, session.JournalKindTurn} {
-		if !hasExecutionStatus(events, run.Handle.RunID(), kind, session.ExecutionCancelRequested) ||
-			hasExecutionStatus(events, run.Handle.RunID(), kind, session.ExecutionCancelled) {
-			t.Fatalf("%s before producer release: %v, want durable cancel_requested without cancelled", kind, cancelFencingEventDiagnostics(events))
-		}
+	state, err := core.RunState(t.Context(), active.SessionRef)
+	if err != nil || state.ActiveRunID != run.Handle.RunID() {
+		t.Fatalf("live producer lost: %+v %v", state, err)
 	}
 
 	releaseProducer()
@@ -96,15 +89,11 @@ func TestACPControllerCancelPersistsFencedRequestWhileRemoteTurnIsLive(t *testin
 	if err := run.Handle.WaitCompletion(completionCtx); !errors.Is(err, context.Canceled) {
 		t.Fatalf("WaitCompletion() error = %v, want cancellation", err)
 	}
-	events, err = service.Events(context.Background(), session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
-	if err != nil {
-		t.Fatal(err)
+	state, err = core.RunState(t.Context(), active.SessionRef)
+	if err != nil || state.ActiveRunID != "" {
+		t.Fatalf("drained producer still live: %+v %v", state, err)
 	}
-	for _, kind := range []session.JournalKind{session.JournalKindRun, session.JournalKindTurn} {
-		if !hasExecutionStatus(events, run.Handle.RunID(), kind, session.ExecutionCancelled) {
-			t.Fatalf("%s after producer release: %v, want durable cancelled", kind, cancelFencingEventDiagnostics(events))
-		}
-	}
+
 }
 
 type fencedCancelControllerHandle struct {
@@ -127,33 +116,3 @@ func (*fencedCancelControllerHandle) Cancel() controller.CancelResult {
 }
 
 func (*fencedCancelControllerHandle) Close() error { return nil }
-
-func hasExecutionStatus(events []*session.Event, runID string, kind session.JournalKind, status session.ExecutionStatus) bool {
-	for _, event := range events {
-		if event == nil || event.Journal == nil || event.Journal.Execution == nil {
-			continue
-		}
-		record := event.Journal.Execution
-		if record.RunID == runID && record.Kind == kind && record.Status == status {
-			return true
-		}
-	}
-	return false
-}
-
-func cancelFencingEventDiagnostics(events []*session.Event) []string {
-	out := make([]string, 0, len(events))
-	for _, event := range events {
-		if event == nil {
-			out = append(out, "nil event")
-			continue
-		}
-		detail := fmt.Sprintf("type=%s", session.EventTypeOf(event))
-		if event.Journal != nil && event.Journal.Execution != nil {
-			record := event.Journal.Execution
-			detail += fmt.Sprintf(" run=%q kind=%s status=%s", record.RunID, record.Kind, record.Status)
-		}
-		out = append(out, detail)
-	}
-	return out
-}

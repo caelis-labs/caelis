@@ -166,8 +166,8 @@ func RunLiveControllerCollaborationTest(t *testing.T, assemble func(*Stack) (app
 				raw, _ := json.Marshal(event.Protocol.Update)
 				t.Log(string(raw))
 			}
-			if event.Journal != nil && event.Journal.ToolExecution != nil {
-				t.Logf("tool journal: %s %s", event.Journal.ToolExecution.Status, event.Journal.ToolExecution.Error)
+			if event.Type == session.EventTypeToolResult && event.Tool != nil {
+				t.Logf("tool journal: %s %s", event.Tool.Status, event.Tool.Error)
 			}
 		}
 		t.Fatalf("expected native and ACP children, got %#v", parent.Participants)
@@ -178,10 +178,10 @@ func RunLiveControllerCollaborationTest(t *testing.T, assemble func(*Stack) (app
 	}
 	spawnCalls := map[string]bool{}
 	for _, event := range events {
-		if event.Journal != nil && event.Journal.ToolExecution != nil {
-			record := event.Journal.ToolExecution
-			if record.ToolName == "StartThread" && record.Status == session.ToolExecutionSucceeded && record.Key.RunID != "" && record.Key.TurnID != "" {
-				spawnCalls[record.Key.ToolCallID] = true
+		if event.Type == session.EventTypeToolResult && event.Tool != nil {
+			record := event.Tool
+			if record.Name == "StartThread" && record.Status == "completed" && record.Execution.TurnID != "" {
+				spawnCalls[record.ID] = true
 			}
 		}
 	}

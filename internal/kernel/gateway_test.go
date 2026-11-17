@@ -14,7 +14,7 @@ import (
 	sdkplacement "github.com/caelis-labs/caelis/agent-sdk/placement"
 	policyapi "github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	inmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
+	"github.com/caelis-labs/caelis/agent-sdk/session/memory"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 )
@@ -2194,7 +2194,7 @@ func TestBeginTurnBridgesApprovalRequestsIntoHandleEvents(t *testing.T) {
 		},
 	}
 	rt := &approvalRuntime{session: activeSession}
-	sessions := staticSessionService{
+	sessions := staticSessionService{approvalRequest: ptrApprovalRequest(rt.approvalRequest()),
 		session: activeSession,
 		state:   map[string]any{StateCurrentApprovalMode: string(ApprovalModeManual)},
 	}
@@ -2251,7 +2251,7 @@ func TestBeginTurnPublishesChildApprovalThroughControlQueue(t *testing.T) {
 		responses: make(chan agent.ApprovalResponse, 1),
 	}
 	gw, err := New(Config{
-		Sessions: staticSessionService{
+		Sessions: staticSessionService{approvalRequest: ptrApprovalRequest(runtime.approvalRequest()),
 			session: activeSession,
 			state:   map[string]any{StateCurrentApprovalMode: string(ApprovalModeManual)},
 		},
@@ -2591,7 +2591,7 @@ func TestBeginTurnDefaultManualApprovalModePromptsClient(t *testing.T) {
 	}
 	rt := &approvalRuntime{session: activeSession}
 	gw, err := New(Config{
-		Sessions: staticSessionService{
+		Sessions: staticSessionService{approvalRequest: ptrApprovalRequest(rt.approvalRequest()),
 			session: activeSession,
 			state:   map[string]any{},
 		},
@@ -2955,8 +2955,8 @@ func TestPersistApprovalReviewSessionAccountingUsesSessionStateNotHistory(t *tes
 	}
 	usage := &UsageSnapshot{PromptTokens: 7, CachedInputTokens: 3, CompletionTokens: 2, ReasoningTokens: 1, TotalTokens: 9}
 	invocation := &session.EventInvocation{Provider: "deepseek", Model: "deepseek-v4-pro"}
-	if err := gw.persistApprovalReviewSessionAccounting(ctx, req, usage, string(ApprovalModeAutoReview), invocation); err != nil {
-		t.Fatalf("persistApprovalReviewSessionAccounting() error = %v", err)
+	if err := gw.projectApprovalReviewSessionAccounting(ctx, req, usage, string(ApprovalModeAutoReview), invocation); err != nil {
+		t.Fatalf("projectApprovalReviewSessionAccounting() error = %v", err)
 	}
 	if got := sessions.updateCalls.Load(); got != 2 {
 		t.Fatalf("UpdateState() calls = %d, want one revision-conflict retry", got)
@@ -3211,3 +3211,5 @@ func TestBindSessionExpiresBinding(t *testing.T) {
 		t.Fatal("CurrentSession() ok = true, want expired binding to be cleared")
 	}
 }
+
+func ptrApprovalRequest(req agent.ApprovalRequest) *agent.ApprovalRequest { return &req }

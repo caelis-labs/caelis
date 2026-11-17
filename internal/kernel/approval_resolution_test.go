@@ -16,11 +16,11 @@ func TestNativeApprovalInvalidSelectionKeepsMainAndChildPending(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			handle := newTestTurnHandle()
-			request := &agent.ApprovalRequest{SessionRef: handle.sessionRef, RunID: handle.runID, TurnID: handle.turnID, PauseTokenID: "native-pending"}
+			request := &agent.ApprovalRequest{SessionRef: handle.sessionRef, RunID: handle.runID, TurnID: handle.turnID, ApprovalRequestID: "native-pending"}
 			if child {
 				handle.finish()
 				request = testChildApprovalRequest("native-task", "native.txt")
-				request.SessionRef, request.PauseTokenID = handle.sessionRef, "native-pending"
+				request.SessionRef, request.ApprovalRequestID = handle.sessionRef, "native-pending"
 			}
 			request.Approval = &session.ProtocolApproval{Options: []session.ProtocolApprovalOption{{ID: "native-reject", Kind: "reject_once"}, {ID: "native-allow", Kind: "allow_once"}}}
 			pending, err := handle.enqueueApproval(request, true)
@@ -28,7 +28,7 @@ func TestNativeApprovalInvalidSelectionKeepsMainAndChildPending(t *testing.T) {
 				t.Fatal(err)
 			}
 			var settlements int
-			handle.settleApproval = func(*agent.ApprovalRequest, eventstream.ApprovalRequestID, string) (*session.Event, error) {
+			handle.projectApprovalSettlement = func(*agent.ApprovalRequest, eventstream.ApprovalRequestID, string) (*session.Event, error) {
 				settlements++
 				return &session.Event{ID: "original-settlement", SessionID: handle.sessionRef.SessionID, Seq: 2}, nil
 			}

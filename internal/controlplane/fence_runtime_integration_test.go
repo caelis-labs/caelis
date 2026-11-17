@@ -17,7 +17,7 @@ import (
 	localruntime "github.com/caelis-labs/caelis/agent-sdk/runtime"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	inmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
+	"github.com/caelis-labs/caelis/agent-sdk/session/memory"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
@@ -100,7 +100,7 @@ func TestStartupHostTakeoverFencesNonCooperativeToolResultAndReplaysUnknownOutco
 	if err := drainControlplaneRunner(runB.Handle); err != nil {
 		t.Fatalf("takeover runner error = %v", err)
 	}
-	if !messagesContain(recoveryModel.messages, "unknown_outcome") {
+	if !messagesContain(recoveryModel.messages, "execution_interrupted") {
 		t.Fatalf("takeover model context = %#v, want durable unknown_outcome", recoveryModel.messages)
 	}
 
@@ -113,7 +113,7 @@ func TestStartupHostTakeoverFencesNonCooperativeToolResultAndReplaysUnknownOutco
 		t.Fatal(err)
 	}
 	for _, event := range events {
-		if event.Journal != nil && event.Journal.ToolExecution != nil && event.Journal.ToolExecution.Status == session.ToolExecutionSucceeded && event.Journal.ToolExecution.Key.RunID == runA.Handle.RunID() {
+		if event.Type == session.EventTypeToolResult && event.Tool != nil && event.Tool.Status == "completed" && event.Tool.ID == "call-1" {
 			t.Fatalf("stale success became durable: %#v", event)
 		}
 	}
@@ -183,12 +183,9 @@ func TestFencedRuntimeCancelPersistsFencedRequestBeforeNonCooperativeRunEnds(t *
 	if cancelled.Err != nil {
 		t.Fatalf("Cancel() error = %v, want fenced durable request", cancelled.Err)
 	}
-	events, err := service.Events(context.Background(), session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !hasRunJournalStatus(events, run.Handle.RunID(), session.ExecutionCancelRequested) {
-		t.Fatalf("events = %#v, want durable cancel_requested before Agent returns", events)
+	state, err := core.RunState(t.Context(), active.SessionRef)
+	if err != nil || state.ActiveRunID != run.Handle.RunID() {
+		t.Fatalf("cancel lost active producer: %+v %v", state, err)
 	}
 
 	close(release)
@@ -209,19 +206,6 @@ func (a nonCooperativeCancelAgent) Run(agent.Context) iter.Seq2[*session.Event, 
 		close(a.started)
 		<-a.release
 	}
-}
-
-func hasRunJournalStatus(events []*session.Event, runID string, status session.ExecutionStatus) bool {
-	for _, event := range events {
-		if event == nil || event.Journal == nil || event.Journal.Execution == nil {
-			continue
-		}
-		record := event.Journal.Execution
-		if record.Kind == session.JournalKindRun && record.RunID == runID && record.Status == status {
-			return true
-		}
-	}
-	return false
 }
 
 type fencingClock struct {

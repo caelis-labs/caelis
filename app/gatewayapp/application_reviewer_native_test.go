@@ -99,9 +99,9 @@ func TestApplicationReviewerNativeApprovalContinuation(t *testing.T) {
 				if allow {
 					wantStatus = "approved"
 				}
-				step := reviewerHTTPPauseItem(t, ctx, host, created.SessionID, result.Target.TurnID, name, sessionapi.PauseTokenResolved)
+				step := reviewerHTTPApprovalItem(t, ctx, host, created.SessionID, result.Target.TurnID, name, sessionapi.ApprovalRecordResolved)
 				if allow {
-					if journalStep := reviewerHTTPExecutionStep(t, ctx, host, created.SessionID, result.Target.TurnID, name); journalStep != step {
+					if journalStep := reviewerHTTPOccurrence(t, ctx, host, created.SessionID, result.Target.TurnID, name); journalStep != step {
 						t.Fatalf("native review step %q differs from invocation step %q", step, journalStep)
 					}
 				}
@@ -124,7 +124,7 @@ func TestApplicationReviewerNativeApprovalContinuation(t *testing.T) {
 					t.Fatal(err)
 				}
 				client = host.app(string(secret))
-				if restarted := reviewerHTTPPauseItem(t, ctx, host, created.SessionID, result.Target.TurnID, name, sessionapi.PauseTokenResolved); restarted != step {
+				if restarted := reviewerHTTPApprovalItem(t, ctx, host, created.SessionID, result.Target.TurnID, name, sessionapi.ApprovalRecordResolved); restarted != step {
 					t.Fatalf("native Host restart changed review identity: %q -> %q", step, restarted)
 				}
 				found = false

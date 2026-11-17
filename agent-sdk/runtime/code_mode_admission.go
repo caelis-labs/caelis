@@ -18,11 +18,11 @@ type codeModeAdmissionBinding struct {
 	validate func(context.Context) (func(), error)
 }
 
-// claimCodeModeBinding keeps canonical binding comparison and the durable started
-// claim in one Session write transaction. Search receipts use the same queue.
+// claimCodeModeBinding keeps canonical binding comparison and the frozen call
+// validation in one Session write transaction. Search receipts use the same queue.
 // Lock order is target execution gate, Session writer, snapshot guard, Host mutex;
 // neither approval nor external tool I/O holds the Session writer.
-func (t journaledTool) claimCodeModeBinding(ctx context.Context, call tool.Call) (func(), error) {
+func (t dispatchTool) claimCodeModeBinding(ctx context.Context, call tool.Call) (func(), error) {
 	if call.TargetBinding == nil {
 		return func() {}, nil
 	}
@@ -32,15 +32,31 @@ func (t journaledTool) claimCodeModeBinding(ctx context.Context, call tool.Call)
 	}
 	events, err := t.sessions.Events(ctx, session.EventsRequest{SessionRef: t.sessionRef, IncludeTransient: true})
 	if err == nil {
-		if prior, known := codeModeBindings(events)[call.Name]; known && prior != *call.TargetBinding {
-			err = tool.NewError(tool.ErrorCodeStaleRevision, "tool directory refreshed; binding is stale")
-		}
+		err = validateRecordedCodeModeBinding(events, call)
 	}
 	if err != nil {
 		release()
 		return nil, err
 	}
 	return release, nil
+}
+
+// validateRecordedCodeModeBinding keeps intent acceptance and final dispatch on
+// the same recorded binding order. The current intent never refreshes itself.
+func validateRecordedCodeModeBinding(events []*session.Event, call tool.Call) error {
+	if call.TargetBinding == nil {
+		return nil
+	}
+	filtered := make([]*session.Event, 0, len(events))
+	for _, event := range events {
+		if event != nil && (event.Tool == nil || event.Tool.Execution != call.Execution) {
+			filtered = append(filtered, event)
+		}
+	}
+	if prior, known := codeModeBindings(filtered)[call.Name]; known && prior != *call.TargetBinding {
+		return tool.NewError(tool.ErrorCodeStaleRevision, "tool directory refreshed; binding is stale")
+	}
+	return nil
 }
 
 func isCodeModeChild(call tool.Call) bool {

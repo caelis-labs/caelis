@@ -28,6 +28,9 @@ type Factory struct {
 
 // Agent is the minimal model-backed chat agent.
 type Agent struct {
+	preparedCalls  map[string]preparedToolCall
+	yieldedResults map[*session.Event]bool
+
 	name                string
 	model               model.LLM
 	tools               []tool.Tool
@@ -128,13 +131,18 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 		// A request snapshot belongs to this Run, never to the shared factory
 		// product. Its tools remain fixed until their response has been executed.
 		runAgent := *a
+		runAgent.yieldedResults = map[*session.Event]bool{}
 		a := &runAgent
 		defer func() {
 			if a.releaseModelRequest != nil {
 				a.releaseModelRequest()
 			}
 		}()
-		messages := messagesFromContext(ctx)
+		messages, historyErr := messagesFromContextChecked(ctx)
+		if historyErr != nil {
+			yield(nil, historyErr)
+			return
+		}
 		a.discoveries = mcpdiscovery.FromContext(ctx)
 		for event := range ctx.Events().All() {
 			mcpdiscovery.Apply(a.discoveries, event)
@@ -177,9 +185,13 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 				}
 				return
 			}
+			if err := a.prepareToolCalls(ctx, calls, &visibility); err != nil {
+				yield(nil, err)
+				return
+			}
 			toolCallEvents := modelToolCallEvents(assistantMessage, final, messageID, a.model, requestPrefix)
-			a.bindMCPCalls(ctx, calls, &visibility)
 			for _, event := range toolCallEvents {
+				a.applyPreparedFact(event)
 				a.presentMCPEvent(event)
 				if !yield(event, nil) {
 					return
@@ -215,7 +227,7 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 				return
 			}
 			for _, toolEvent := range toolEvents {
-				if !yield(toolEvent, nil) {
+				if !a.yieldedResults[toolEvent] && !yield(toolEvent, nil) {
 					return
 				}
 				// yield returns only after Runtime confirms the canonical append.
@@ -394,6 +406,7 @@ func (a *Agent) executeStepToolCalls(
 			}
 			if progress != nil && yieldProgress != nil && !yieldProgress(progress) {
 				cancel()
+				wg.Wait()
 				return nil, nil, false, nil
 			}
 		case result, ok := <-doneCh:
@@ -447,6 +460,16 @@ func (a *Agent) executeStepToolCallsSerial(
 		toolMessage, toolEvent, err := a.executeToolCallWithProgressAdmitted(ctx, call, modelStepRef(stepID, index, len(calls)), yieldProgress, visibility)
 		if err != nil {
 			return nil, nil, true, err
+		}
+		if yieldProgress != nil && toolEvent != nil {
+			if !yieldProgress(toolEvent) {
+				return nil, nil, false, nil
+			}
+			if a.yieldedResults == nil {
+				a.yieldedResults = map[*session.Event]bool{}
+			}
+			a.yieldedResults[toolEvent] = true
+			mcpdiscovery.Apply(a.discoveries, toolEvent)
 		}
 		messages = append(messages, toolMessage)
 		events = append(events, toolEvent)

@@ -53,17 +53,17 @@ func TestCodeModeUnknownOutcomePrecedesJavaScriptError(t *testing.T) {
 	}
 	outerUnknown, childUnknown := false, false
 	for _, event := range events {
-		if event.Journal == nil || event.Journal.ToolExecution == nil {
+		if event.Type != session.EventTypeToolResult || event.Tool == nil {
 			continue
 		}
-		record := event.Journal.ToolExecution
-		if record.Status != session.ToolExecutionUnknownOutcome {
+		record := event.Tool
+		if record.Outcome != "unknown_outcome" {
 			continue
 		}
-		if record.ToolName == codemode.ToolName && record.Parent == nil && record.Key.ToolCallID == "unknown-script" {
+		if record.Name == codemode.ToolName && record.Parent == nil && record.ID == "unknown-script" {
 			outerUnknown = true
 		}
-		if record.ToolName == "Effect" && record.Parent != nil && record.Parent.ID == "unknown-script" {
+		if record.Name == "Effect" && record.Parent != nil && record.Parent.CallID == "unknown-script" {
 			childUnknown = true
 		}
 	}
@@ -136,9 +136,9 @@ func TestCodeModeMCPTransportLossRetainsUnknownWithoutReplay(t *testing.T) {
 	}
 	unknown := false
 	for _, event := range events {
-		if event.Journal != nil && event.Journal.ToolExecution != nil {
-			r := event.Journal.ToolExecution
-			if r.Parent != nil && r.ToolName == "live__read" && r.Status == session.ToolExecutionUnknownOutcome && r.Binding != nil && len(r.Result) > 0 {
+		if event.Type == session.EventTypeToolResult && event.Tool != nil {
+			r := event.Tool
+			if r.Parent != nil && r.Name == "live__read" && r.Outcome == "unknown_outcome" && r.Binding != nil && r.Result != nil {
 				unknown = true
 			}
 		}

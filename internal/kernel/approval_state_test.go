@@ -13,7 +13,7 @@ func TestApprovalSnapshotExposesOnlyCallerResolvableHead(t *testing.T) {
 	handle := newTestTurnHandle()
 	request := func(id string) *agent.ApprovalRequest {
 		return &agent.ApprovalRequest{
-			SessionRef: handle.sessionRef, PauseTokenID: id,
+			SessionRef: handle.sessionRef, ApprovalRequestID: id,
 			Tool: tool.Definition{Name: "RunCommand"}, Call: tool.Call{ID: id, Name: "RunCommand"},
 			Approval: &session.ProtocolApproval{
 				ToolCall: session.ProtocolToolCall{ID: id, Name: "RunCommand"},

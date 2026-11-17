@@ -12,29 +12,20 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
 func newSharedMediaFixture(t testing.TB, count int) (*Store, session.Session, []*session.Event) {
 	t.Helper()
 	store, active := newEventPageIndexFixture(t, 0)
 	image := model.NewMediaPart(model.MediaModalityImage, model.MediaSource{Kind: model.MediaSourceInline, Data: strings.Repeat("YWJj", 256<<10)}, "image/png", "screen")
-	result, err := json.Marshal(struct {
-		Name    string       `json:"name"`
-		Content []model.Part `json:"content"`
-	}{"screen", []model.Part{image}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	result := tool.Result{Name: "screen", Content: []model.Part{image}}
 	events := make([]*session.Event, count)
 	for i := range count {
 		id := fmt.Sprintf("call-%d", i)
-		record := session.NormalizeToolExecution(session.ToolExecution{
-			Key:      session.ExecutionKey{SessionID: active.SessionID, RunID: "run", TurnID: "turn", StepID: id, ToolCallID: id},
-			Revision: 1, Status: session.ToolExecutionSucceeded, ToolName: "screen", Result: result,
-		})
 		message := model.Message{Role: model.RoleTool, Parts: []model.Part{{Kind: model.PartKindToolResult, ToolResult: &model.ToolResultPart{ToolUseID: id, Name: "screen", Content: []model.Part{image}}}}}
 		events[i] = &session.Event{ID: id, Type: session.EventTypeToolResult, Message: &message,
-			Journal: &session.ExecutionJournalEntry{Schema: session.ExecutionJournalSchemaVersion, Kind: session.JournalKindToolExecution, ToolExecution: &record}}
+			Tool: &session.EventTool{ID: id, Name: "screen", Result: &result}}
 	}
 	return store, active, events
 }
@@ -74,7 +65,7 @@ func TestSharedMediaSurvivesWALRecoveryPagingAndIdempotentRetry(t *testing.T) {
 				t.Fatalf("load events = %d, %v", len(loaded.Events), err)
 			}
 			for i, event := range loaded.Events {
-				if !reflect.DeepEqual(event.Message, events[i].Message) || !bytes.Equal(event.Journal.ToolExecution.Result, events[i].Journal.ToolExecution.Result) {
+				if !reflect.DeepEqual(event.Message, events[i].Message) || !reflect.DeepEqual(event.Tool.Result, events[i].Tool.Result) {
 					t.Fatal("message or recovery receipt changed")
 				}
 			}
@@ -151,7 +142,7 @@ func TestSharedMediaLegacyLogAndMixedAppend(t *testing.T) {
 		t.Fatalf("mixed history = %d, %v", len(loaded.Events), err)
 	}
 	for i, event := range loaded.Events {
-		if !reflect.DeepEqual(event.Message, events[i].Message) || !bytes.Equal(event.Journal.ToolExecution.Result, events[i].Journal.ToolExecution.Result) {
+		if !reflect.DeepEqual(event.Message, events[i].Message) || !reflect.DeepEqual(event.Tool.Result, events[i].Tool.Result) {
 			t.Fatal("legacy or current media changed")
 		}
 	}

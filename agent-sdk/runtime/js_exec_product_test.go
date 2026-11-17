@@ -103,10 +103,10 @@ func TestJSExecRealGojaDiscoveryAndStableTools(t *testing.T) {
 	}
 	if effects != 1 {
 		for _, event := range events {
-			if event.Journal != nil && event.Journal.ToolExecution != nil {
-				r := event.Journal.ToolExecution
-				if r.Status == session.ToolExecutionSucceeded || r.Error != "" {
-					t.Logf("journal %s %s error=%s result=%s", r.ToolName, r.Status, r.Error, r.Result)
+			if event.Type == session.EventTypeToolResult && event.Tool != nil {
+				r := event.Tool
+				if r.Status == "completed" || r.Error != "" {
+					t.Logf("journal %s %s error=%s result=%s", r.Name, r.Status, r.Error, toolResultJSON(r.Result))
 				}
 			}
 		}
@@ -492,19 +492,19 @@ func TestJSExecCannotWriteNativeCommandTask(t *testing.T) {
 	events, _ := runCodeMode(t, store, active, agent.AgentSpec{Model: driver, Tools: []tool.Tool{tasktool.New(), &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}}}}, nil, nil)
 	rejected := false
 	for _, e := range events {
-		if e.Journal != nil && e.Journal.ToolExecution != nil {
-			r := e.Journal.ToolExecution
-			if r.ToolName == codemode.ToolName && r.Status == session.ToolExecutionFailed && strings.Contains(r.Error, "native command stdin is prohibited") {
+		if e.Type == session.EventTypeToolResult && e.Tool != nil {
+			r := e.Tool
+			if r.Name == codemode.ToolName && r.Status == "failed" && strings.Contains(r.Error, "native command stdin is prohibited") {
 				rejected = true
 			}
 		}
 	}
 	if !rejected {
 		for _, e := range events {
-			if e.Journal != nil && e.Journal.ToolExecution != nil {
-				r := e.Journal.ToolExecution
+			if e.Type == session.EventTypeToolResult && e.Tool != nil {
+				r := e.Tool
 				if r.Error != "" {
-					t.Logf("%s %s %s", r.ToolName, r.Status, r.Error)
+					t.Logf("%s %s %s", r.Name, r.Status, r.Error)
 				}
 			}
 		}

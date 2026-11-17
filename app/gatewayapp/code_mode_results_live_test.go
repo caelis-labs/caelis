@@ -198,7 +198,7 @@ func TestCodeModeResultsLive(t *testing.T) {
 			if event.Canonical == nil {
 				return nil
 			}
-			if event.Canonical.Journal != nil && event.Canonical.Journal.ToolExecution != nil && event.Canonical.Journal.ToolExecution.Status == session.ToolExecutionUnknownOutcome {
+			if event.Canonical.Type == session.EventTypeToolResult && event.Canonical.Tool != nil && event.Canonical.Tool.Outcome == "unknown_outcome" {
 				defer cancel()
 			}
 			f, e := os.OpenFile(filepath.Join(dir, "events.jsonl"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)

@@ -21,9 +21,9 @@ func TestChildApprovalReplaySurvivesDeferredToolHistory(t *testing.T) {
 				m = applyACPEnvelopeForTest(t, m, eventstream.Envelope{Kind: eventstream.KindSessionUpdate, SessionID: "session-1", TurnID: "parent", Scope: eventstream.ScopeMain,
 					Update: eventstream.ToolCall{SessionUpdate: eventstream.UpdateToolCall, ToolCallID: "spawn-1", Title: "StartThread helper", Status: eventstream.ToolStatusCompleted, Meta: acpToolNameMeta("StartThread")}})
 				decision := &session.Event{ID: "review-1", Seq: 7, Type: session.EventTypeLifecycle, Visibility: session.VisibilityJournal,
-					Journal: &session.ExecutionJournalEntry{Kind: session.JournalKindPauseToken, PauseToken: &session.PauseToken{
-						Status: session.PauseTokenResolved, TurnID: "parent", ToolCallID: "child-call", ToolName: "RunCommand", Approved: status == "approved", ReviewText: status + ": review reason", Input: json.RawMessage(`{"command":"git status"}`),
-						Metadata: map[string]any{"subagent": true, "task_id": "task-1", "parent_call_id": "spawn-1", "parent_tool": "StartThread"}}}}
+					Approval: &session.ApprovalRecord{
+						Status: session.ApprovalRecordResolved, TurnID: "parent", ToolCallID: "child-call", ToolName: "RunCommand", Approved: status == "approved", ReviewText: status + ": review reason", Input: json.RawMessage(`{"command":"git status"}`),
+						Metadata: map[string]any{"subagent": true, "task_id": "task-1", "parent_call_id": "spawn-1", "parent_tool": "StartThread"}}}
 				base := acpprojector.EnvelopeBaseFromSessionEvent(session.SessionRef{SessionID: "session-1"}, decision, acpprojector.SessionEventTransport{})
 				review := acpprojector.ProjectSessionEventEnvelope(base, decision)[0]
 				sendReview := func() {

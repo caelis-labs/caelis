@@ -74,10 +74,10 @@ func (g *Gateway) BeginTurn(ctx context.Context, req BeginTurnRequest) (BeginTur
 		cancel: func() bool {
 			return cancelFn()
 		},
-		approvals:       approvals,
-		observer:        req.Observer,
-		persistApproval: g.approvalPersister(activeSession.SessionRef, turnID),
-		settleApproval:  g.approvalSettler(activeSession.SessionRef, turnID),
+		approvals:                 approvals,
+		observer:                  req.Observer,
+		projectApproval:           g.approvalProjector(activeSession.SessionRef, turnID),
+		projectApprovalSettlement: g.approvalSettlementProjector(activeSession.SessionRef, turnID),
 	})
 	g.active[activeSession.SessionID] = handle
 	g.signalActiveChangedLocked()

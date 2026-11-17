@@ -1,8 +1,9 @@
 package session
 
 import (
-	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"testing"
+
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 )
 
 func TestInvocationAccountingRequiresMatchingDurableReceipt(t *testing.T) {

@@ -18,7 +18,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 )
 
-func TestCodeModeClaimGuardExcludesReplacementWithoutCoveringApprovalOrIO(t *testing.T) {
+func TestCodeModeIntentDoesNotHoldConfigurationGuardDuringApprovalOrIO(t *testing.T) {
 	files, active, _ := codeModeStore(t)
 	var revision sync.RWMutex
 	var stale atomic.Bool
@@ -59,7 +59,7 @@ func TestCodeModeClaimGuardExcludesReplacementWithoutCoveringApprovalOrIO(t *tes
 		}}, nil
 	}
 	runCodeMode(t, store, active, spec, registry, requester)
-	if !approved.Load() || !executed.Load() || store.updated.Load() {
+	if !approved.Load() || !executed.Load() || !store.updated.Load() {
 		t.Fatalf("approval=%v execution=%v replacement_during_claim=%v", approved.Load(), executed.Load(), store.updated.Load())
 	}
 }

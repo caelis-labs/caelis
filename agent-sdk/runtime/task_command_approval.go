@@ -35,7 +35,7 @@ func (t runtimeCommandTool) submitApproval(ctx context.Context, call tool.Call, 
 		approval.started = time.Now()
 	}
 	deadline := approval.started.Add(req.Yield)
-	taskID, err := commandTaskID(t.sessionRef, call.ID)
+	taskID, err := commandTaskID(t.sessionRef, firstNonEmpty(req.OperationID, req.ParentCall))
 	if err != nil {
 		return tool.Result{}, err
 	}
@@ -53,7 +53,7 @@ func (t runtimeCommandTool) submitApproval(ctx context.Context, call tool.Call, 
 		return tool.Result{}, err
 	}
 	execution := commandExecutionForRequest(req)
-	execution.Approval = &commandApprovalRef{RunID: approval.request.RunID, TurnID: approval.request.TurnID, TokenID: "command-approval-" + taskID}
+	execution.Approval = &commandApprovalRef{RunID: approval.request.RunID, TurnID: approval.request.TurnID, RequestID: "command-approval-" + taskID}
 	task, created, err := t.tasks.prepareCommandClaimed(ctx, t.session, t.sessionRef, taskID, digest, req, execution)
 	if err != nil {
 		release()
@@ -112,7 +112,7 @@ func (t runtimeCommandTool) runApprovalContinuation(task *commandTask, work *tas
 	request := approval.request
 	request.OperationTaskID = task.ref.TaskID
 	task.mu.Lock()
-	request.PauseTokenID = task.execution.Approval.TokenID
+	request.ApprovalRequestID = task.execution.Approval.RequestID
 	task.mu.Unlock()
 	var admissionErr error
 	request.OnAdmission = func(admissionCtx context.Context) error {
@@ -156,7 +156,7 @@ func (t runtimeCommandTool) runApprovalContinuation(task *commandTask, work *tas
 		if executeErr == nil && !result.IsError {
 			return nil
 		}
-		// A failed journal/claim before Start still has a durable pending intent.
+		// A failed admission/claim before Start still has a durable pending intent.
 		// Once claimed, the existing command owner retains its actual outcome.
 		executionFailure = executeErr
 		//nolint:errorlint // Only the exact unclaimed completion rejection is benign; joined persistence errors must still fail the Run.

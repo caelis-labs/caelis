@@ -19,22 +19,22 @@ import (
 )
 
 type turnHandleConfig struct {
-	ctx                     context.Context
-	handleID                string
-	runID                   string
-	turnID                  string
-	activeKind              ActiveTurnKind
-	participantID           string
-	sessionRef              session.SessionRef
-	createdAt               time.Time
-	cancel                  func() bool
-	allowPendingSubmissions bool
-	waitForRunnerSubmission bool
-	prepareSubmission       func(context.Context, SubmitRequest) (SubmitRequest, error)
-	persistApproval         func(*agent.ApprovalRequest, eventstream.ApprovalRequestID) (*session.Event, error)
-	settleApproval          func(*agent.ApprovalRequest, eventstream.ApprovalRequestID, string) (*session.Event, error)
-	approvals               *approvalCoordinator
-	observer                TurnEventObserver
+	ctx                       context.Context
+	handleID                  string
+	runID                     string
+	turnID                    string
+	activeKind                ActiveTurnKind
+	participantID             string
+	sessionRef                session.SessionRef
+	createdAt                 time.Time
+	cancel                    func() bool
+	allowPendingSubmissions   bool
+	waitForRunnerSubmission   bool
+	prepareSubmission         func(context.Context, SubmitRequest) (SubmitRequest, error)
+	projectApproval           func(*agent.ApprovalRequest, eventstream.ApprovalRequestID) (*session.Event, error)
+	projectApprovalSettlement func(*agent.ApprovalRequest, eventstream.ApprovalRequestID, string) (*session.Event, error)
+	approvals                 *approvalCoordinator
+	observer                  TurnEventObserver
 }
 
 type turnHandle struct {
@@ -50,27 +50,27 @@ type turnHandle struct {
 	observer      TurnEventObserver
 	observerMu    sync.Mutex
 
-	mu                      sync.Mutex
-	closed                  bool
-	finishing               bool
-	finished                bool
-	failed                  bool
-	cancelled               bool
-	failureReason           string
-	producerTerminal        *eventstream.Envelope
-	runner                  agent.Runner
-	pendingSubmissions      []SubmitRequest
-	allowPendingSubmissions bool
-	waitForRunnerSubmission bool
-	runnerReady             chan struct{}
-	runnerReadyOnce         sync.Once
-	prepareSubmission       func(context.Context, SubmitRequest) (SubmitRequest, error)
-	persistApproval         func(*agent.ApprovalRequest, eventstream.ApprovalRequestID) (*session.Event, error)
-	settleApproval          func(*agent.ApprovalRequest, eventstream.ApprovalRequestID, string) (*session.Event, error)
-	approvals               *approvalCoordinator
-	finishHooks             []func()
-	done                    chan struct{}
-	doneOnce                sync.Once
+	mu                        sync.Mutex
+	closed                    bool
+	finishing                 bool
+	finished                  bool
+	failed                    bool
+	cancelled                 bool
+	failureReason             string
+	producerTerminal          *eventstream.Envelope
+	runner                    agent.Runner
+	pendingSubmissions        []SubmitRequest
+	allowPendingSubmissions   bool
+	waitForRunnerSubmission   bool
+	runnerReady               chan struct{}
+	runnerReadyOnce           sync.Once
+	prepareSubmission         func(context.Context, SubmitRequest) (SubmitRequest, error)
+	projectApproval           func(*agent.ApprovalRequest, eventstream.ApprovalRequestID) (*session.Event, error)
+	projectApprovalSettlement func(*agent.ApprovalRequest, eventstream.ApprovalRequestID, string) (*session.Event, error)
+	approvals                 *approvalCoordinator
+	finishHooks               []func()
+	done                      chan struct{}
+	doneOnce                  sync.Once
 
 	approvalReviewSeq uint64
 	acpCursorSeq      uint64
@@ -81,24 +81,24 @@ func newTurnHandle(cfg turnHandleConfig) *turnHandle {
 		cfg.ctx = context.Background()
 	}
 	h := &turnHandle{
-		handleID:                cfg.handleID,
-		runID:                   cfg.runID,
-		turnID:                  cfg.turnID,
-		activeKind:              cfg.activeKind,
-		participantID:           strings.TrimSpace(cfg.participantID),
-		sessionRef:              cfg.sessionRef,
-		createdAt:               cfg.createdAt,
-		cancelFn:                cfg.cancel,
-		ctx:                     cfg.ctx,
-		observer:                cfg.observer,
-		allowPendingSubmissions: cfg.allowPendingSubmissions,
-		waitForRunnerSubmission: cfg.waitForRunnerSubmission,
-		prepareSubmission:       cfg.prepareSubmission,
-		persistApproval:         cfg.persistApproval,
-		settleApproval:          cfg.settleApproval,
-		approvals:               cfg.approvals,
-		runnerReady:             make(chan struct{}),
-		done:                    make(chan struct{}),
+		handleID:                  cfg.handleID,
+		runID:                     cfg.runID,
+		turnID:                    cfg.turnID,
+		activeKind:                cfg.activeKind,
+		participantID:             strings.TrimSpace(cfg.participantID),
+		sessionRef:                cfg.sessionRef,
+		createdAt:                 cfg.createdAt,
+		cancelFn:                  cfg.cancel,
+		ctx:                       cfg.ctx,
+		observer:                  cfg.observer,
+		allowPendingSubmissions:   cfg.allowPendingSubmissions,
+		waitForRunnerSubmission:   cfg.waitForRunnerSubmission,
+		prepareSubmission:         cfg.prepareSubmission,
+		projectApproval:           cfg.projectApproval,
+		projectApprovalSettlement: cfg.projectApprovalSettlement,
+		approvals:                 cfg.approvals,
+		runnerReady:               make(chan struct{}),
+		done:                      make(chan struct{}),
 	}
 	if h.approvals == nil {
 		h.approvals = newApprovalCoordinator(cfg.sessionRef)
@@ -404,14 +404,14 @@ func (h *turnHandle) approvalReviewEnvelopes(req *agent.ApprovalRequest, payload
 	}
 	// Scope describes who produced an event; it does not make that event
 	// durable. Guardian progress is live; completed decisions also have a
-	// replay projection from their persisted pause token. Usage belongs to
+	// replay projection from their persisted approval record. Usage belongs to
 	// Session accounting and never enters the parent's model context.
 	base.Delivery = &eventstream.Delivery{Mode: eventstream.DeliveryTransient}
 	if review := approvalReviewFromPayload(payload); review != nil {
 		next := base
 		next.Kind = eventstream.KindApprovalReview
 		if req != nil {
-			next.ApprovalRequestID = eventstream.ApprovalRequestID(strings.TrimSpace(req.PauseTokenID))
+			next.ApprovalRequestID = eventstream.ApprovalRequestID(strings.TrimSpace(req.ApprovalRequestID))
 			review.ItemID = strings.TrimSpace(req.Call.Execution.ItemID)
 		}
 		next.ApprovalReview = review

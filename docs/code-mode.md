@@ -2,7 +2,7 @@
 
 The fixed `js_exec` entry runs JavaScript orchestration in a continuous Goja environment for the active host Session.
 Actual tools, policy,
-approval, Guardian, invocation identity, Journal and Task lifecycle remain owned
+approval, Guardian, invocation identity, tool facts and Task lifecycle remain owned
 by Runtime.
 
 ## Model tools and discovery
@@ -18,7 +18,7 @@ Supply an async JavaScript function body, use `await`, and explicitly `return`
 the desired result. Top-level state remains available in the active environment. `file` paths resolve
 relative to the working directory. Use tools for filesystem and network I/O, and
 RunCommand remains available both as a native function call and inside JavaScript.
-Both routes use the same command producer, policy, approval, Journal and Task controls.
+Both routes use the same command producer, policy, approval, tool facts and Task controls.
 
 Call a known tool directly using the syntax shown by its name and schema. This
 works for tools learned from Skills too; no search is needed when the schema is
@@ -109,7 +109,7 @@ identity on demand. `js_exec({reset:true})`, mutually exclusive with `code` and
 `file`, replaces the environment and cancels its old script. It works independently
 of the occupied VM. A new environment does not wait for the old environment's
 cleanup. Old responses stay bound to their old execution and generation; no tool
-effect is replayed. Original Task and Journal records retain their disposition,
+effect is replayed. Original Task records and tool facts retain their disposition,
 including uncertain effects. Reset and environment release clear bindings,
 retained media and their cumulative retention budget.
 
@@ -127,7 +127,7 @@ the next script, or use `reset:true` to interrupt the occupied environment. A bu
 error is a fallback for overlapping submissions, not a scheduling mechanism. Task read/wait/cancel remains outside the VM. Within one
 script, await dependent operations; independent operations may be expressed
 concurrently. Runtime schedules their actual execution.
-Current Run cancellation, approvals, Guardian, Journal and Task ownership remain
+Current Run cancellation, approvals, Guardian, tool facts and Task ownership remain
 authoritative; retained variables do not keep an old Run alive or grant new tool
 authority. Execution cancellation interrupts and, if necessary, kills the original
 worker. Cleanup is bounded at the process boundary; pending tool producers keep
@@ -139,8 +139,7 @@ without replaying the input.
 
 ## Runtime-owned execution contracts
 
-Canonical search receipts and started child Journal records for Code Mode tool
-executions preserve MCP identity/version bindings across environment replacement,
+Canonical search receipts and typed nested ToolCall facts preserve MCP identity/version bindings across environment replacement,
 compaction and file-Store resume. A first direct MCP call without a prior binding
 pins the current real Tool identity/version. Its arguments and execution still
 pass normal Runtime schema and policy admission. Later calls enforce that binding.
@@ -165,12 +164,12 @@ attaching images. To deliver a diagnostic image, catch the error and return its
 original media reference. An unknown outcome must never be replayed blindly.
 Arguments follow each tool's schema, including required exact strings. Direct
 calls, generated call paths, and tool search retain the Runtime-owned source,
-schema, policy, approval, Guardian, cancellation, Journal, media and budget
+schema, policy, approval, Guardian, cancellation, tool facts, media and budget
 checks. A stale schema requires a fresh search before a later call; old arguments
 are never automatically executed.
 
 Sources may implement the existing `tool.NamedSource`/`Registry.Lookup` contract.
-Lookup grants no authority; both admission boundaries and the final Journal claim
+Lookup grants no authority; both admission boundaries and the final dispatch check
 remain in the original wrapper chain. Sources without Lookup retain the linear
 fallback; fuzzy search retains its existing selector budgets. No source or
 discovery lock crosses approval or Tool I/O. Snapshot hints remain fixed within this API version; a
@@ -192,7 +191,7 @@ length per frame. Source, reply, output, retention, call and CPU budgets remain
 independent of argument size.
 
 Calls pass through the existing real Tool policy, Guardian/approval, source and
-generation admission, effect claim, Journal and lifecycle wrappers. Discovery
+generation admission, dispatch admission and lifecycle wrappers. Discovery
 is not an execution grant. Refresh remains low-frequency Manager-owned work;
 searches do not push full catalog updates into prompts. Before an old binding
 can execute, a changed source/schema produces a distinct stale-binding error:

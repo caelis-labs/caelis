@@ -1,14 +1,15 @@
 package runtime
 
 import (
+	"strings"
+	"testing"
+
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode/gojaexec"
-	"strings"
-	"testing"
 )
 
 func TestJSExecStaticDiscoveredUnionStillRejectsDuplicateRegistrations(t *testing.T) {

@@ -398,10 +398,10 @@ func TestSessionNativePluginsHTTPBridgeChildrenAndIsolation(t *testing.T) {
 		}
 		executions := 0
 		for _, e := range loaded.Events {
-			if e.Journal != nil && e.Journal.ToolExecution != nil {
-				r := e.Journal.ToolExecution
-				if r.ToolName == "desktop_world__look" && r.Status == session.ToolExecutionSucceeded {
-					if r.Parent == nil || r.Parent.Kind != "code_mode" || r.Parent.Name != "js_exec" || r.Parent.ID == "" || r.Binding == nil || r.Binding.Identity == "" {
+			if e.Type == session.EventTypeToolResult && e.Tool != nil {
+				r := e.Tool
+				if r.Name == "desktop_world__look" && r.Status == "completed" {
+					if r.Parent == nil || r.Parent.Kind != "code_mode" || r.Parent.Name != "js_exec" || r.Parent.CallID == "" || r.Binding == nil || r.Binding.Identity == "" {
 						t.Fatalf("nested exec lost original identity: %+v", r)
 					}
 					executions++

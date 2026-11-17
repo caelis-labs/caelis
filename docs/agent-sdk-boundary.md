@@ -179,9 +179,52 @@ no longer wrote `continue_phase`; v0.35.0 is the last known writer.
 
 - canonical messages, tools, plans, and typed protocol payloads carry their
   defined model or coordination semantics;
-- journal facts carry execution and recovery state;
+- approval, model accounting and compaction facts retain their own owners and
+  remain outside model context;
 - mirrors are durable client projection, not a second model context;
 - UI, overlay, notice, and raw observation values are transient.
+
+ToolCall facts freeze the complete model batch before dispatch, including an
+occurrence identity independent of provider call IDs, effective arguments, parent
+and target binding. ToolResult stores the complete returned `tool.Result`; its
+`Message` is the checked model view. Code Mode nested facts retain complete body
+and binding without introducing tool messages the model did not request.
+
+Missing results are repaired only under an exclusive Session fence after the
+prior producer has drained or Host ownership has been transferred. Repair appends
+an `execution_interrupted` result expressing an unknown outcome, never dispatches
+a tool, and preserves every existing result. Uncertain appends are reconciled by
+the original event identity and complete payload. A failed reconciliation stops
+the caller; it never creates a new operation identity. Read projection places late
+results beside their original occurrence and batch. Ambiguous legacy IDs fail
+explicitly. Checkpoint coverage never expands to adopt an orphan result.
+
+Run queries describe only live handles. Cancellation and a wait deadline do not
+prove producer completion. Plan cleanup follows actual producer drain under the
+owning Turn and original fence. Task commands and continuations retain their own
+claim, cancellation, output and settlement semantics. Runtime derives command
+operation and Spawn identities from the admitted occurrence; `ParentCall` keeps
+the original protocol ID for attribution. Direct command callers may supply
+`CommandStartRequest.OperationID`; the existing ParentCall fallback remains for
+legacy callers until that API requires an explicit identity. A yielded Task
+submission already has its single ToolResult; Task completion does not write
+another one.
+
+Approval request/resolution facts live in `Event.Approval`. Runtime owns their
+persistence and reusable consent; Control projects their redacted request and
+live queue settlement without a second approval history writer. Restart does not
+recreate approval waiters. Session event schema 3 is required for complete tool
+facts. The Session codec consumes known legacy execution fields and media solely
+for compatibility, preserving old messages and approval review; it never restores
+Run state, execution authority or tool bindings. Unknown future schemas fail closed.
+
+When a Session service implements `SessionFenceService`, SDK `Run` retains its
+exclusive fence until actual producers and finalization have drained. Control
+retains ownership of an inherited fence. A fenced file-backed Task store must
+use the same `file.Store` as its Session service; an independently configured
+Task store supports unguarded Task operations, not that Session's fence bearer.
+Missing-pair repair requires a valid fence even when the service does not expose
+fence acquisition.
 
 Runtime model attempts append `lifecycle` accounting records with `journal`
 visibility. Each actual provider attempt has one Runtime-generated identity;
@@ -357,8 +400,7 @@ explicitly refresh a stale schema. SDK entry points without Code Mode expose fix
 `mcp_call` definitions; `mcp_call` remains discovery-gated and requires a prior
 canonical search binding.
 
-Code Mode reconstructs MCP bindings from canonical search receipts and started
-child Journal records for Code Mode tool executions across fresh workers, compaction
+Code Mode reconstructs MCP bindings from canonical search receipts and typed nested ToolCall facts across fresh workers, compaction
 and resume. A
 first direct call with no prior binding pins the current real Tool identity/version.
 A later change to the bound MCP source/schema fails stale until a successful
@@ -368,7 +410,7 @@ unknown effect is never replayed. Manager name-collision losers are absent from 
 Session tool set and cannot be restored through qualified paths.
 
 Runtime resolves every route to a real Tool, validates the accepted schema and
-arguments, and enters the same policy, Guardian/approval, cancellation, Journal,
+arguments, and enters the same policy, Guardian/approval, cancellation, dispatch admission,
 invocation and lifecycle wrappers as other calls. Display and approval data name
 the real target and arguments; typed original-call data keep non-Code Mode history
 paired under the outer call ID and `mcp_call` name. MCP schemas never join model

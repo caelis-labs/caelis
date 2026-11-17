@@ -154,29 +154,6 @@ func TestControllerSpawnRetainsTurnFenceThroughCleanupAndReceipt(t *testing.T) {
 				if entry := entries[0]; entry.State != task.StateFailed || entry.Running || entry.Handle != "" {
 					t.Fatalf("unsettled Spawn Task: %#v", entry)
 				}
-				events, err := reopened.Events(ctx, session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
-				if err != nil {
-					t.Fatal(err)
-				}
-				var receiptSeq, turnSeq uint64
-				terminal := session.ExecutionSucceeded
-				if cancelTurn {
-					terminal = session.ExecutionCancelled
-				}
-				for _, event := range events {
-					if event.Journal == nil {
-						continue
-					}
-					if record := event.Journal.ToolExecution; record != nil && record.Key.ToolCallID == call.ID && record.Status == session.ToolExecutionCancelled {
-						receiptSeq = event.Seq
-					}
-					if record := event.Journal.Execution; record != nil && record.Kind == session.JournalKindTurn && record.RunID == run.Handle.RunID() && record.Status == terminal {
-						turnSeq = event.Seq
-					}
-				}
-				if receiptSeq == 0 || turnSeq <= receiptSeq {
-					t.Fatalf("terminal order: receipt=%d Turn=%d", receiptSeq, turnSeq)
-				}
 				next, err := reopened.AcquireSessionFence(ctx, session.AcquireSessionFenceRequest{SessionRef: active.SessionRef, OwnerID: "next-turn"})
 				if err != nil {
 					t.Fatalf("fence remained after settlement: %v", err)
@@ -199,7 +176,7 @@ type controllerSpawnReceiptStore struct {
 }
 
 func (s *controllerSpawnReceiptStore) AppendEvent(ctx context.Context, req session.AppendEventRequest) (*session.Event, error) {
-	if req.Event.Journal != nil && req.Event.Journal.ToolExecution != nil && req.Event.Journal.ToolExecution.Status == session.ToolExecutionCancelled {
+	if req.Event.Type == session.EventTypeToolResult && req.Event.Tool != nil && req.Event.Tool.Outcome == session.ToolOutcomeUnknown {
 		close(s.started)
 		<-s.release
 	}

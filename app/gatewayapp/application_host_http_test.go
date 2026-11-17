@@ -691,8 +691,8 @@ func TestApplicationHTTPCallbackCompletesOriginalTurnBeforeSibling(t *testing.T)
 	}
 	waitApplicationHTTPIdle(t, ctx, client, sessionID)
 	state, err := client.InspectSession(ctx, appserver.StateRequest{SessionID: sessionID})
-	if err != nil || state.Run.Status != "completed" {
-		t.Fatalf("terminal Turn state = %+v, %v", state.Run, err)
+	if err != nil || state.Run.Active || state.Run.Status != "" {
+		t.Fatalf("completed Turn retained live state = %+v, %v", state.Run, err)
 	}
 	calls, err = client.SessionToolCalls(ctx, sessionID)
 	if err != nil || len(calls) != 1 || calls[0].ID != call.ID || calls[0].State != "completed" || calls[0].Result == nil || !calls[0].Result.TurnComplete {

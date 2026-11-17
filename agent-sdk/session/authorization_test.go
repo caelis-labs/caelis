@@ -21,11 +21,11 @@ func TestAuthorizationChoicesAreTypedAndIsolated(t *testing.T) {
 	if requirement.Choices[0].Persistence != AuthorizationSession {
 		t.Fatal("choice alias")
 	}
-	raw, err := json.Marshal(PauseToken{Authorization: requirement})
+	raw, err := json.Marshal(ApprovalRecord{Authorization: requirement})
 	if err != nil {
 		t.Fatal(err)
 	}
-	var reloaded PauseToken
+	var reloaded ApprovalRecord
 	if err := json.Unmarshal(raw, &reloaded); err != nil {
 		t.Fatal(err)
 	}

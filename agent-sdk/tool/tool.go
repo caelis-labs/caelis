@@ -3,7 +3,6 @@ package tool
 import (
 	"context"
 	"encoding/json"
-	"slices"
 	"strings"
 	"sync"
 
@@ -70,31 +69,6 @@ const (
 	EffectNonIdempotent EffectClass = "non_idempotent"
 )
 
-type RecoveryStatus string
-
-const (
-	RecoveryUnknown   RecoveryStatus = "unknown"
-	RecoverySucceeded RecoveryStatus = "succeeded"
-	RecoveryFailed    RecoveryStatus = "failed"
-)
-
-type RecoveryRequest struct {
-	ExecutionIdentity string `json:"execution_identity"`
-	Call              Call   `json:"call"`
-}
-
-type RecoveryResult struct {
-	Status RecoveryStatus `json:"status"`
-	Result Result         `json:"result,omitempty"`
-	Reason string         `json:"reason,omitempty"`
-}
-
-// Recoverer optionally reconciles an execution whose side-effect outcome is
-// unknown. Runtime never replays the original Call automatically.
-type Recoverer interface {
-	Recover(context.Context, RecoveryRequest) (RecoveryResult, error)
-}
-
 const (
 	MetadataToolKind             = "caelis.tool.kind"
 	MetadataPluginID             = "caelis.plugin.id"
@@ -104,7 +78,6 @@ const (
 	MetadataExternalCapability   = "caelis.external.capability"
 	MetadataDescriptionAuthority = "caelis.description.authority"
 	MetadataReplayAliases        = "caelis.tool.replay_aliases"
-	MetadataExecutionJournal     = "caelis.execution_journal"
 
 	MetadataToolKindMCP             = "mcp"
 	MetadataToolKindToolSearch      = "tool_search"
@@ -538,7 +511,7 @@ func CloneModelStepRef(in *ModelStepRef) *ModelStepRef {
 func CloneResult(in Result, err error) (Result, error) {
 	out := in
 	out.Name = strings.TrimSpace(in.Name)
-	out.Content = slices.Clone(in.Content)
+	out.Content = model.CloneParts(in.Content)
 	if in.StructuredContent != nil {
 		value := *in.StructuredContent
 		value.Value = append(json.RawMessage(nil), value.Value...)

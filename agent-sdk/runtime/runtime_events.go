@@ -183,6 +183,14 @@ func normalizeEvent(activeSession session.Session, turnID string, event *session
 	if strings.TrimSpace(event.SessionID) == "" {
 		event.SessionID = strings.TrimSpace(activeSession.SessionID)
 	}
+	if event.Tool != nil && event.Tool.Execution.ItemID != "" {
+		if event.Tool.Execution.SessionID == "" {
+			event.Tool.Execution.SessionID = activeSession.SessionID
+		}
+		if event.Tool.Execution.TurnID == "" {
+			event.Tool.Execution.TurnID = turnID
+		}
+	}
 	if event.Scope == nil {
 		scope := defaultScope(activeSession, turnID)
 		event.Scope = &scope
@@ -216,6 +224,11 @@ func scopeRuntimeToolFactIdentity(event *session.Event, runID, turnID string, or
 	toolID := strings.TrimSpace(event.Tool.ID)
 	if toolID == "" {
 		return false
+	}
+	if event.Tool.Execution.ItemID != "" {
+		event.IdempotencyKey = fmt.Sprintf("tool:%s:%s:%s", turnID, event.Tool.Execution.ItemID, eventType)
+		event.ID = event.IdempotencyKey
+		return true
 	}
 	event.IdempotencyKey = fmt.Sprintf(
 		"%s:%s:%s:%d:%s",
@@ -305,6 +318,7 @@ func (r *Runtime) handlePlanEvent(
 	}
 	planState := map[string]any{
 		"version":     1,
+		"turn_id":     turnID,
 		"entries":     entriesToState(entries),
 		"explanation": explanation,
 	}

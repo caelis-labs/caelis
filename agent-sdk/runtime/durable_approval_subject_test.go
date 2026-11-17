@@ -44,7 +44,7 @@ func TestDurableApprovalSeparatesPrivateEvidenceFromPresentation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var token *session.PauseToken
+	var token *session.ApprovalRecord
 	for _, event := range events {
 		if resolved := session.ResolvedApprovalReview(event); resolved != nil {
 			token = resolved
@@ -89,7 +89,7 @@ func TestDurableIndependentPermissionRestoresExactEvidenceWithoutTool(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	var token *session.PauseToken
+	var token *session.ApprovalRecord
 	for _, event := range events {
 		if resolved := session.ResolvedApprovalReview(event); resolved != nil {
 			token = resolved

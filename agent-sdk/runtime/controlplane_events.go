@@ -184,7 +184,13 @@ func (r controllerApprovalRequester) RequestControllerApproval(ctx context.Conte
 		return controller.ApprovalResponse{}, nil
 	}
 	permission := cloneApproval(runtimeRequest.Approval)
-	resp, err := r.requester.RequestApproval(ctx, runtimeRequest)
+	var resp agent.ApprovalResponse
+	var err error
+	if r.runtime != nil {
+		resp, err = r.runtime.requestDurableApproval(ctx, runtimeRequest, r.requester)
+	} else {
+		resp, err = r.requester.RequestApproval(ctx, runtimeRequest)
+	}
 	if err != nil {
 		return controller.ApprovalResponse{}, err
 	}

@@ -139,8 +139,8 @@ func TestEventMetadataVisibilityMatchesCanonicalReaders(t *testing.T) {
 	// approvals or mirrored records.
 	cases := []*session.Event{
 		{Schema: session.EventSchemaVersion, Seq: 1, Type: session.EventTypeUser, Visibility: session.VisibilityCanonical, Scope: &session.EventScope{TurnID: "turn"}},
-		{Schema: session.EventSchemaVersion, Seq: 2, Type: session.EventTypeLifecycle, Visibility: session.VisibilityJournal, Journal: &session.ExecutionJournalEntry{Kind: session.JournalKindPauseToken, PauseToken: &session.PauseToken{Status: session.PauseTokenResolved, ToolCallID: "call", ReviewText: "review", TurnID: "original"}}},
-		{Schema: session.EventSchemaVersion, Seq: 3, Type: session.EventTypeLifecycle, Visibility: session.VisibilityJournal, Journal: &session.ExecutionJournalEntry{Kind: session.JournalKindPauseToken, PauseToken: &session.PauseToken{Status: session.PauseTokenPending, ToolCallID: "call", ReviewText: "review"}}},
+		{Schema: session.EventSchemaVersion, Seq: 2, Type: session.EventTypeLifecycle, Visibility: session.VisibilityJournal, Approval: &session.ApprovalRecord{Status: session.ApprovalRecordResolved, ToolCallID: "call", ReviewText: "review", TurnID: "original"}},
+		{Schema: session.EventSchemaVersion, Seq: 3, Type: session.EventTypeLifecycle, Visibility: session.VisibilityJournal, Approval: &session.ApprovalRecord{Status: session.ApprovalRecordPending, ToolCallID: "call", ReviewText: "review"}},
 		{Schema: session.EventSchemaVersion, Seq: 4, Type: session.EventTypeLifecycle, Visibility: session.VisibilityMirror, ChildOrigin: &session.EventChildOrigin{Scope: session.EventChildScopeSubagent}},
 	}
 	for _, event := range cases {
@@ -170,18 +170,10 @@ func TestEventMetadataRecoversCommittedWALBeforeReadingCachedIndex(t *testing.T)
 		}
 		return nil
 	}
-	run := session.NormalizeExecutionRecord(session.ExecutionRecord{Kind: session.JournalKindRun, SessionID: active.SessionID, RunID: "recovered", Revision: 1, Status: session.ExecutionSucceeded})
-	if _, err := store.AppendEvent(t.Context(), session.AppendEventRequest{SessionRef: active.SessionRef, Event: &session.Event{
-		Type: session.EventTypeLifecycle, Visibility: session.VisibilityJournal,
-		Journal: &session.ExecutionJournalEntry{Schema: session.ExecutionJournalSchemaVersion, Kind: session.JournalKindRun, Execution: &run},
-	}}); !session.IsCommitted(err) {
-		t.Fatalf("append error=%v, want committed WAL", err)
+	if _, err := store.AppendEvent(t.Context(), session.AppendEventRequest{SessionRef: active.SessionRef, Event: &session.Event{Type: session.EventTypeLifecycle, Visibility: session.VisibilityJournal, Lifecycle: &session.EventLifecycle{Status: "receipt"}}}); !session.IsCommitted(err) {
+		t.Fatalf("append error=%v", err)
 	}
 	reopened := NewStore(Config{RootDir: store.rootDir})
-	got, err := reopened.RunJournal(t.Context(), active.SessionRef, "")
-	if err != nil || got.Run == nil || got.Run.RunID != "recovered" {
-		t.Fatalf("recovered journal=%+v error=%v", got, err)
-	}
 	page, err := reopened.EventMetadataPage(t.Context(), req)
 	if err != nil || page.NextSeq != 5 {
 		t.Fatalf("recovered metadata=%+v error=%v", page, err)

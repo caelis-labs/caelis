@@ -12,7 +12,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	inmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
+	"github.com/caelis-labs/caelis/agent-sdk/session/memory"
 )
 
 func TestSystemManagedAgentUsesCoreRuntimeLifecycleAndJournalPipeline(t *testing.T) {
@@ -59,21 +59,15 @@ func TestSystemManagedAgentUsesCoreRuntimeLifecycleAndJournalPipeline(t *testing
 	if err != nil {
 		t.Fatalf("Events(staging) error = %v", err)
 	}
-	wantTerminal := map[session.JournalKind]bool{session.JournalKindRun: false, session.JournalKindTurn: false}
+	if len(events) == 0 {
+		t.Fatal("private staging facts missing")
+	}
 	for _, event := range events {
-		if event == nil || event.Journal == nil || event.Journal.Execution == nil {
-			continue
-		}
-		record := event.Journal.Execution
-		if record.Status == session.ExecutionSucceeded {
-			wantTerminal[record.Kind] = true
+		if event.Approval != nil {
+			t.Fatal("unexpected approval")
 		}
 	}
-	for kind, seen := range wantTerminal {
-		if !seen {
-			t.Fatalf("staging events = %#v, want terminal %s journal", events, kind)
-		}
-	}
+
 }
 
 func TestSystemManagedAgentDoesNotInheritParentRuntimeFence(t *testing.T) {

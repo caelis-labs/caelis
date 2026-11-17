@@ -129,10 +129,10 @@ func TestJSExecErrorDeliveryPreservesDomainReply(t *testing.T) {
 			}
 			callID := ""
 			for _, event := range events {
-				if event.Journal != nil && event.Journal.ToolExecution != nil {
-					receipt := event.Journal.ToolExecution
-					if receipt.ToolName == "live__fail" && receipt.Status == session.ToolExecutionFailed {
-						callID = receipt.Key.ToolCallID
+				if event.Type == session.EventTypeToolResult && event.Tool != nil {
+					receipt := event.Tool
+					if receipt.Name == "live__fail" && receipt.Status == "failed" {
+						callID = receipt.ID
 					}
 				}
 			}

@@ -12,7 +12,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
-	inmemory "github.com/caelis-labs/caelis/agent-sdk/session/memory"
+	"github.com/caelis-labs/caelis/agent-sdk/session/memory"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
 )
@@ -123,11 +123,11 @@ func TestRuntimeLateMCPUsesPolicyAndExecutionJournal(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, event := range events {
-				if event.Journal != nil && event.Journal.ToolExecution != nil && event.Journal.ToolExecution.ToolName == "docs__read" {
+				if event.Type == session.EventTypeToolResult && event.Tool != nil && event.Tool.Name == "docs__read" {
 					journaled = true
 				}
 			}
-			if journaled == deny {
+			if !journaled {
 				t.Fatalf("execution journal present=%v deny=%v", journaled, deny)
 			}
 		})

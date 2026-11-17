@@ -19,10 +19,10 @@ type commandExecutionSpec struct {
 }
 
 type commandApprovalRef struct {
-	RunID    string    `json:"run_id"`
-	TurnID   string    `json:"turn_id"`
-	TokenID  string    `json:"token_id"`
-	Deadline time.Time `json:"deadline,omitempty"`
+	RunID     string    `json:"run_id"`
+	TurnID    string    `json:"turn_id"`
+	RequestID string    `json:"token_id"`
+	Deadline  time.Time `json:"deadline,omitempty"`
 }
 
 func commandExecutionForRequest(req taskapi.CommandStartRequest) commandExecutionSpec {
@@ -56,7 +56,7 @@ func commandExecutionFromEntry(entry *taskapi.Entry) (commandExecutionSpec, erro
 	if spec.Version != 1 {
 		return spec, fmt.Errorf("unsupported command execution spec version %d", spec.Version)
 	}
-	if spec.Approval != nil && (spec.Approval.TokenID == "" || spec.Approval.RunID == "" || spec.Approval.TurnID == "") {
+	if spec.Approval != nil && (spec.Approval.RequestID == "" || spec.Approval.RunID == "" || spec.Approval.TurnID == "") {
 		return spec, fmt.Errorf("incomplete command approval association")
 	}
 	return spec, nil

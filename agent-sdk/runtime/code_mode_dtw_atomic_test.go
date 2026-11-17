@@ -402,11 +402,11 @@ func TestCodeModeDTWAtomicIsolatedX11(t *testing.T) {
 			// assertion fails before the model-visible snapshot checks complete.
 			captureIndex := 0
 			for _, event := range evidence {
-				if event.Journal == nil || event.Journal.ToolExecution == nil {
+				if event.Type != session.EventTypeToolResult || event.Tool == nil {
 					continue
 				}
-				record := event.Journal.ToolExecution
-				if record.ToolName != "dtw__capture" || record.Status != session.ToolExecutionSucceeded {
+				record := event.Tool
+				if record.Name != "dtw__capture" || record.Status != "completed" {
 					continue
 				}
 				for _, bitmap := range dtwAtomicPNGs(t, record.Result) {
@@ -433,24 +433,24 @@ func TestCodeModeDTWAtomicIsolatedX11(t *testing.T) {
 	defer func() { save("remote-calls.json", remoteCalls) }()
 	succeeded := map[string]int{}
 	for _, e := range events {
-		if e.Journal == nil || e.Journal.ToolExecution == nil {
+		if e.Type != session.EventTypeToolResult || e.Tool == nil {
 			continue
 		}
-		r := e.Journal.ToolExecution
+		r := e.Tool
 		if r.Parent == nil {
 			continue
 		}
 		switch r.Status {
-		case session.ToolExecutionSucceeded:
-			succeeded[r.ToolName]++
-			def, ok := definitions[r.ToolName]
+		case "completed":
+			succeeded[r.Name]++
+			def, ok := definitions[r.Name]
 			if !ok || r.Binding == nil || *r.Binding != tool.BindingForDefinition(def) {
 				t.Fatal("nested dispatch lost its admitted target binding")
 			}
-			remoteCalls = append(remoteCalls, map[string]any{"canonical_target": r.ToolName, "remote": def.Metadata[tool.MetadataMCPTool], "arguments": r.Input, "receipt": r.Result, "binding": r.Binding, "parent": r.Parent})
+			remoteCalls = append(remoteCalls, map[string]any{"canonical_target": r.Name, "remote": def.Metadata[tool.MetadataMCPTool], "arguments": r.Input, "receipt": r.Result, "binding": r.Binding, "parent": r.Parent})
 			journalMedia = append(journalMedia, dtwAtomicPNGs(t, r.Result)...)
-		case session.ToolExecutionFailed, session.ToolExecutionUnknownOutcome:
-			t.Fatalf("nested call failed: %s %s", r.ToolName, r.Error)
+		case "failed", "unknown":
+			t.Fatalf("nested call failed: %s %s", r.Name, r.Error)
 		}
 	}
 	for remote, want := range map[string]int{"click": 2, "typeText": 1, "keypress": 1, "apps": 1, "capture": 4, "look": 3} {

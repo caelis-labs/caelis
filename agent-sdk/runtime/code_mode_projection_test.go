@@ -15,6 +15,7 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox/host"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/filesystem"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
@@ -157,9 +158,9 @@ func TestJSExecFixedFileBytesInContinuousVM(t *testing.T) {
 	events, _ := runCodeMode(t, store, active, agent.AgentSpec{Model: driver, Tools: []tool.Tool{read, &codemode.Tool{Name: codemode.ToolName, Executor: &gojaexec.Executor{}, Sandbox: sandbox}}}, nil, nil)
 	var hashes []string
 	for _, e := range events {
-		if e.Journal != nil && e.Journal.ToolExecution != nil && e.Journal.ToolExecution.ToolName == codemode.ToolName && e.Journal.ToolExecution.Status == "succeeded" {
+		if e.Type == session.EventTypeToolResult && e.Tool != nil && e.Tool.Name == codemode.ToolName && e.Tool.Outcome == "succeeded" {
 			var result tool.Result
-			if json.Unmarshal(e.Journal.ToolExecution.Result, &result) != nil {
+			if json.Unmarshal(toolResultJSON(e.Tool.Result), &result) != nil {
 				t.Fatal("invalid original result")
 			}
 			m, _ := result.Metadata["code_mode_source"].(map[string]any)

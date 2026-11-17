@@ -542,8 +542,8 @@ type renamedAsyncProbe struct{ *asyncProbeModel }
 
 func (*renamedAsyncProbe) Name() string { return "changed-model" }
 
-func TestAsyncCompactionDefaultOffThresholdsAndFenceRequired(t *testing.T) {
-	for _, mode := range []string{"default_off", "invalid_ratio", "above_sync", "below_threshold", "no_fence"} {
+func TestAsyncCompactionDefaultOffAndThresholds(t *testing.T) {
+	for _, mode := range []string{"default_off", "invalid_ratio", "above_sync", "below_threshold"} {
 		t.Run(mode, func(t *testing.T) {
 			h := newAsyncHarness(t, "")
 			switch mode {
@@ -555,11 +555,7 @@ func TestAsyncCompactionDefaultOffThresholdsAndFenceRequired(t *testing.T) {
 				h.rt.compaction.Async.StartRatio = .99
 			case "below_threshold":
 				h.rt.compaction.Async.StartRatio = .8
-			case "no_fence":
-				if err := h.store.ReleaseSessionFence(t.Context(), session.SessionFenceReleaseRequest(h.fence)); err != nil {
-					t.Fatal(err)
-				}
-				h.ctx = t.Context()
+
 			}
 			run := h.run(t)
 			receiveSnapshotValue(t, h.llm.foreground)

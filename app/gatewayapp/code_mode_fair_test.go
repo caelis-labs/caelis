@@ -693,13 +693,13 @@ func runFairSession(ctx context.Context, t *testing.T, study string, plan fairSe
 			return e
 		}
 		var current []*session.Event
-		receipts := map[string]*session.ToolExecution{}
+		receipts := map[string]*session.EventTool{}
 		for _, event := range events {
 			if event.Seq > seq {
 				current = append(current, event)
-				if event.Journal != nil && event.Journal.ToolExecution != nil {
-					r := event.Journal.ToolExecution
-					receipts[r.Identity] = r
+				if event.Type == session.EventTypeToolResult && event.Tool != nil {
+					r := event.Tool
+					receipts[r.Execution.ItemID] = r
 				}
 			}
 		}
@@ -718,7 +718,7 @@ func runFairSession(ctx context.Context, t *testing.T, study string, plan fairSe
 			return runErr
 		}
 		for _, r := range receipts {
-			if r.Status == session.ToolExecutionUnknownOutcome {
+			if r.Outcome == "unknown_outcome" {
 				return fmt.Errorf("unknown original outcome; no replay")
 			}
 		}
@@ -726,7 +726,7 @@ func runFairSession(ctx context.Context, t *testing.T, study string, plan fairSe
 	return nil
 }
 
-func fairAssertions(raw []byte, readErr error, total int, receipts map[string]*session.ToolExecution, defs map[string]tool.Definition) map[string]any {
+func fairAssertions(raw []byte, readErr error, total int, receipts map[string]*session.EventTool, defs map[string]tool.Definition) map[string]any {
 	var answer struct {
 		Total  int    `json:"total"`
 		Status string `json:"api_status"`
@@ -740,23 +740,23 @@ func fairAssertions(raw []byte, readErr error, total int, receipts map[string]*s
 	inputNames := map[string]bool{}
 	var actual []map[string]any
 	for _, r := range receipts {
-		if r.Status != session.ToolExecutionSucceeded {
+		if r.Status != "completed" {
 			continue
 		}
-		if r.ToolName == "Read" {
+		if r.Name == "Read" {
 			var input map[string]any
-			_ = json.Unmarshal(r.Input, &input)
+			_ = json.Unmarshal(factJSON(r.Input), &input)
 			if p, ok := input["path"].(string); ok && (filepath.Base(p) == "a.txt" || filepath.Base(p) == "b.txt") {
 				reads++
 				inputNames[filepath.Base(p)] = true
 			}
 		}
-		def := defs[r.ToolName]
+		def := defs[r.Name]
 		remote, _ := def.Metadata[tool.MetadataMCPTool].(string)
 		if remote == "query-docs" || remote == "get-library-docs" {
 			var input map[string]any
-			_ = json.Unmarshal(r.Input, &input)
-			actual = append(actual, map[string]any{"tool": r.ToolName, "identity": r.Identity, "input": input, "result_bytes": len(r.Result), "result_sha256": fairHash(r.Result)})
+			_ = json.Unmarshal(factJSON(r.Input), &input)
+			actual = append(actual, map[string]any{"tool": r.Name, "identity": r.Execution.ItemID, "input": input, "result_bytes": len(toolResultJSON(r.Result)), "result_sha256": fairHash(toolResultJSON(r.Result))})
 			if input["query"] == fairQuestion {
 				queries++
 			}

@@ -10,17 +10,30 @@ import (
 )
 
 func messagesFromContext(ctx agent.Context) []model.Message {
+	messages, _ := messagesFromContextChecked(ctx)
+	return messages
+}
+func messagesFromContextChecked(ctx agent.Context) ([]model.Message, error) {
 	if ctx == nil {
-		return nil
+		return nil, nil
 	}
 	events := make([]*session.Event, 0, ctx.Events().Len())
 	for event := range ctx.Events().All() {
 		events = append(events, event)
 	}
-	return messagesFromEvents(ctx.Session(), events)
+	return messagesFromEventsChecked(ctx.Session(), events)
 }
 
 func messagesFromEvents(activeSession session.Session, events []*session.Event) []model.Message {
+	messages, _ := messagesFromEventsChecked(activeSession, events)
+	return messages
+}
+func messagesFromEventsChecked(activeSession session.Session, events []*session.Event) ([]model.Message, error) {
+	ordered, err := session.OrderToolFacts(events)
+	if err != nil {
+		return nil, err
+	}
+	events = ordered
 	out := make([]model.Message, 0, len(events))
 	for i := 0; i < len(events); {
 		event := events[i]
@@ -44,7 +57,7 @@ func messagesFromEvents(activeSession session.Session, events []*session.Event) 
 		out = append(out, message)
 		i++
 	}
-	return normalizeToolCallHistory(out)
+	return normalizeToolCallHistory(out), nil
 }
 
 func eventWithParticipantContextMeta(event *session.Event, activeSession session.Session) *session.Event {

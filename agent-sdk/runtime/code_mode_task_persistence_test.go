@@ -198,9 +198,9 @@ func TestJSExecTerminalCommitFailureReachesProducerAndObservers(t *testing.T) {
 		if e.Tool != nil && e.Tool.ID == "wait" && e.Type == session.EventTypeToolResult {
 			failedWait = e.Tool.Status == "failed"
 		}
-		if e.Journal != nil && e.Journal.ToolExecution != nil {
-			r := e.Journal.ToolExecution
-			if r.ToolName == "Effect" && r.Status == session.ToolExecutionSucceeded {
+		if e.Type == session.EventTypeToolResult && e.Tool != nil {
+			r := e.Tool
+			if r.Name == "Effect" && r.Status == "completed" {
 				receipts++
 			}
 		}

@@ -223,15 +223,16 @@ func TestCodeModeRuntimeMCPAggregationAndMediaReceipts(t *testing.T) {
 	}
 	terminals, outer := 0, false
 	for _, event := range loaded.Events {
-		if record := event.Journal; record != nil && record.ToolExecution != nil && record.ToolExecution.Parent != nil && record.ToolExecution.Status == session.ToolExecutionSucceeded {
+		if record := event.Tool; event.Type == session.EventTypeToolResult && record != nil && record.Parent != nil && record.Status == "completed" {
 			terminals++
-			if !session.IsJournal(event) || len(record.ToolExecution.Result) == 0 {
-				t.Fatal("child terminal did not persist independently")
+			if !session.IsMirror(event) || record.Result == nil {
+				t.Fatal("child full result missing")
 			}
-			if record.ToolExecution.ToolName == "live__read" && !bytes.Contains(record.ToolExecution.Result, []byte("9223372036854775807")) {
-				t.Fatalf("full terminal receipt rounded structured JSON: %s", record.ToolExecution.Result)
+			if record.Name == "live__read" && !bytes.Contains(toolResultJSON(record.Result), []byte("9223372036854775807")) {
+				t.Fatal("full result rounded")
 			}
 		}
+
 		if session.IsCanonicalHistoryEvent(event) && event.Tool != nil && event.Tool.Name == "js_repl" && event.Type == session.EventTypeToolResult {
 			outer = event.Tool.Output["sum"] == float64(5)
 			if event.Message == nil || len(event.Message.Parts[0].ToolResult.Content) != 2 || event.Message.Parts[0].ToolResult.Content[1].Media == nil {
@@ -246,7 +247,7 @@ func TestCodeModeRuntimeMCPAggregationAndMediaReceipts(t *testing.T) {
 	if terminals != 3 || !outer {
 		t.Fatalf("independent terminals=%d aggregate=%v", terminals, outer)
 	}
-	if len(session.RecoverIncompleteToolExecutions(loaded.Events)) != 0 {
+	if missingToolPairs(t, loaded.Events) != 0 {
 		t.Fatal("completed nested calls appear interrupted")
 	}
 	// Compare actual model requests across a fresh Runtime and file Store. The
@@ -339,16 +340,16 @@ func TestCodeModeTerminalReceiptsSurviveDiscardedAggregate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	statuses := map[string]session.ToolExecutionStatus{}
+	statuses := map[string]string{}
 	for _, event := range events {
-		if event.Journal != nil && event.Journal.ToolExecution != nil && event.Journal.ToolExecution.Parent != nil {
-			statuses[event.Journal.ToolExecution.ToolName] = event.Journal.ToolExecution.Status
+		if event.Type == session.EventTypeToolResult && event.Tool != nil && event.Tool.Parent != nil {
+			statuses[event.Tool.Name] = event.Tool.Status
 		}
 	}
-	if effects.Load() != 1 || statuses["Write"] != session.ToolExecutionSucceeded || statuses["Fail"] != session.ToolExecutionFailed {
+	if effects.Load() != 1 || statuses["Write"] != "completed" || statuses["Fail"] != "failed" {
 		t.Fatalf("effects=%d statuses=%v", effects.Load(), statuses)
 	}
-	if len(session.RecoverIncompleteToolExecutions(events)) != 0 {
+	if missingToolPairs(t, events) != 0 {
 		t.Fatal("discarded aggregation lost terminal receipts")
 	}
 }
@@ -356,13 +357,13 @@ func TestCodeModeTerminalReceiptsSurviveDiscardedAggregate(t *testing.T) {
 type codeModeReceiptFailure struct {
 	session.Service
 	failed atomic.Bool
-	status session.ToolExecutionStatus
+	status string
 }
 
 func (s *codeModeReceiptFailure) AppendEvent(ctx context.Context, req session.AppendEventRequest) (*session.Event, error) {
-	if req.Event.Journal != nil && req.Event.Journal.ToolExecution != nil {
-		r := req.Event.Journal.ToolExecution
-		if r.Parent != nil && (r.Status == s.status || (s.status == "" && r.Status == session.ToolExecutionSucceeded)) && s.failed.CompareAndSwap(false, true) {
+	if req.Event.Type == session.EventTypeToolResult && req.Event.Tool != nil {
+		r := req.Event.Tool
+		if r.Parent != nil && (r.Status == s.status || (s.status == "" && r.Status == "completed")) && s.failed.CompareAndSwap(false, true) {
 			return nil, errors.New("fixture: child terminal persistence failed")
 		}
 	}
@@ -398,18 +399,18 @@ func TestCodeModeReceiptFailureClosesBridgeAndRecoversOriginalUnknown(t *testing
 	var unknown bool
 	var original string
 	for _, event := range events {
-		if event.Journal == nil || event.Journal.ToolExecution == nil {
+		if event.Type != session.EventTypeToolResult || event.Tool == nil {
 			continue
 		}
-		r := event.Journal.ToolExecution
+		r := event.Tool
 		if r.Parent == nil {
 			continue
 		}
-		if original != "" && original != r.Identity {
+		if original != "" && original != r.Execution.ItemID {
 			t.Fatal("recovery replaced original operation identity")
 		}
-		original = r.Identity
-		unknown = r.Status == session.ToolExecutionUnknownOutcome
+		original = r.Execution.ItemID
+		unknown = r.Outcome == "unknown_outcome"
 	}
 	if !checked.Load() || !failing.failed.Load() || !unknown || effects.Load() != 1 {
 		t.Fatalf("checked=%v failed=%v unknown=%v effects=%d", checked.Load(), failing.failed.Load(), unknown, effects.Load())
@@ -418,7 +419,7 @@ func TestCodeModeReceiptFailureClosesBridgeAndRecoversOriginalUnknown(t *testing
 
 func TestCodeModeSettledFailureStillRequiresDurableReceipt(t *testing.T) {
 	store, active, _ := codeModeStore(t)
-	failing := &codeModeReceiptFailure{Service: store, status: session.ToolExecutionFailed}
+	failing := &codeModeReceiptFailure{Service: store, status: "failed"}
 	var effects atomic.Int32
 	fail := tool.NamedTool{Def: tool.Definition{Name: "Fail", InputSchema: map[string]any{"type": "object"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
 		return tool.Result{}, tool.NewError(tool.ErrorCodeInvalidInput, "ordinary invalid field")

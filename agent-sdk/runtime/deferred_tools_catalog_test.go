@@ -2,8 +2,9 @@ package runtime
 
 import (
 	"context"
-	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"testing"
+
+	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
 type preferredCatalogSource struct {

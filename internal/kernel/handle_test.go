@@ -138,7 +138,7 @@ func TestTurnHandleChildApprovalReviewIsTransientAndDoesNotPublishUsage(t *testi
 
 	handle := newTestTurnHandle()
 	request := testChildApprovalRequest("task-review", "review.txt")
-	request.PauseTokenID = "pause-review"
+	request.ApprovalRequestID = "pause-review"
 	request.Call.Execution.ItemID = "item-review"
 	payload := canonicalApprovalPayload(request)
 	payload.ReviewStatus = ApprovalReviewStatusApproved
@@ -745,7 +745,7 @@ func TestTurnHandleRejectsMissingUnknownStaleAndDuplicateApprovalIDs(t *testing.
 		Approval: &ApprovalDecision{RequestID: "unknown", Approved: true, Outcome: string(ApprovalStatusApproved)},
 	}))
 
-	pending, err := handle.enqueueApproval(&agent.ApprovalRequest{PauseTokenID: "pause-stable"}, true)
+	pending, err := handle.enqueueApproval(&agent.ApprovalRequest{ApprovalRequestID: "pause-stable"}, true)
 	if err != nil {
 		t.Fatalf("open durable approval: %v", err)
 	}
@@ -763,7 +763,7 @@ func TestTurnHandleRejectsMissingUnknownStaleAndDuplicateApprovalIDs(t *testing.
 		Kind:     SubmissionKindApproval,
 		Approval: &ApprovalDecision{RequestID: pending.id, Approved: true, Outcome: string(ApprovalStatusApproved)},
 	}))
-	if _, err := handle.enqueueApproval(&agent.ApprovalRequest{PauseTokenID: "pause-stable"}, true); err == nil {
+	if _, err := handle.enqueueApproval(&agent.ApprovalRequest{ApprovalRequestID: "pause-stable"}, true); err == nil {
 		t.Fatal("open reused durable approval id error = nil, want conflict")
 	} else {
 		assertApprovalNotPending(t, err)
@@ -871,7 +871,7 @@ func TestSessionApprovalCoordinatorAcceptsDetachedChildAfterParentTerminal(t *te
 	handle := newTestTurnHandle()
 	handle.finish()
 	request := testChildApprovalRequest("task-detached", "detached.txt")
-	request.PauseTokenID = "detached-approval"
+	request.ApprovalRequestID = "detached-approval"
 	pending, err := handle.enqueueApproval(request, true)
 	if err != nil {
 		t.Fatalf("open detached approval after parent terminal: %v", err)
@@ -938,13 +938,13 @@ func TestSessionApprovalCoordinatorKeepsConcurrentStepOpenForLateSibling(t *test
 	stepRefs := tool.NewConcurrentModelStepRefs("step-a", 2)
 	request := func(token string, step *tool.ModelStepRef) *agent.ApprovalRequest {
 		return &agent.ApprovalRequest{
-			SessionRef:   ref,
-			RunID:        "run-a",
-			TurnID:       "turn-a",
-			PauseTokenID: token,
-			Tool:         tool.Definition{Name: "RunCommand"},
-			Call:         tool.Call{ID: token, Name: "RunCommand"},
-			ModelStep:    step,
+			SessionRef:        ref,
+			RunID:             "run-a",
+			TurnID:            "turn-a",
+			ApprovalRequestID: token,
+			Tool:              tool.Definition{Name: "RunCommand"},
+			Call:              tool.Call{ID: token, Name: "RunCommand"},
+			ModelStep:         step,
 		}
 	}
 
@@ -1179,7 +1179,7 @@ func newTestTurnHandle() *turnHandle {
 		turnID:     "turn-1",
 		sessionRef: ref,
 		observer:   recorder,
-		persistApproval: func(req *agent.ApprovalRequest, requestID eventstream.ApprovalRequestID) (*session.Event, error) {
+		projectApproval: func(req *agent.ApprovalRequest, requestID eventstream.ApprovalRequestID) (*session.Event, error) {
 			permission := approval.ProtocolApprovalFromPayload(canonicalApprovalPayload(req))
 			event := &session.Event{
 				ID:                "test-" + string(requestID),

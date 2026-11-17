@@ -146,11 +146,11 @@ func TestJSExecYieldApprovalGuardAndTermination(t *testing.T) {
 			events, _ := store.Events(t.Context(), session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
 			starts := 0
 			for _, e := range events {
-				if e.Journal != nil && e.Journal.ToolExecution != nil {
-					r := e.Journal.ToolExecution
-					if r.ToolName == "Write" && r.Status == session.ToolExecutionStarted {
+				if e.Type == session.EventTypeToolResult && e.Tool != nil {
+					r := e.Tool
+					if r.Name == "Write" && r.Status == "completed" {
 						starts++
-						if r.Parent == nil || r.Parent.ID != "script" {
+						if r.Parent == nil || r.Parent.CallID != "script" {
 							t.Fatal("receipt lost parent")
 						}
 					}

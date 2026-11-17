@@ -193,8 +193,8 @@ func TestOneTurnScopesRepeatedProviderToolCallIDByStep(t *testing.T) {
 				resultKeys[event.IdempotencyKey] = true
 			}
 		}
-		if event != nil && event.Journal != nil && event.Journal.ToolExecution != nil {
-			stepIDs[event.Journal.ToolExecution.Key.StepID] = true
+		if event != nil && event.Type == session.EventTypeToolResult && event.Tool != nil {
+			stepIDs[event.Tool.Execution.ItemID] = true
 		}
 	}
 	if len(callKeys) != 2 || len(resultKeys) != 2 || len(stepIDs) != 2 {
@@ -212,15 +212,15 @@ func TestOneTurnScopesRepeatedProviderToolCallIDByStep(t *testing.T) {
 		}
 		var pending, resolved bool
 		for _, event := range loaded.Events {
-			if event.Journal == nil || event.Journal.PauseToken == nil || event.Journal.PauseToken.TokenID != approvals[i].PauseTokenID {
+			if event.Type != session.EventTypeLifecycle || event.Approval == nil || event.Approval.RequestID != approvals[i].ApprovalRequestID {
 				continue
 			}
-			token := event.Journal.PauseToken
+			token := event.Approval
 			if token.ItemID != execution.ItemID || token.SessionID != execution.SessionID || token.TurnID != execution.TurnID {
 				t.Fatalf("pause identity = %#v, callback identity = %#v", token, execution)
 			}
-			pending = pending || token.Status == session.PauseTokenPending
-			resolved = resolved || token.Status == session.PauseTokenResolved
+			pending = pending || token.Status == session.ApprovalRecordPending
+			resolved = resolved || token.Status == session.ApprovalRecordResolved
 		}
 		if !pending || !resolved {
 			t.Fatalf("missing approval lifecycle: pending=%v resolved=%v", pending, resolved)
@@ -231,10 +231,10 @@ func TestOneTurnScopesRepeatedProviderToolCallIDByStep(t *testing.T) {
 		matchedJournal := false
 		matchedResult := false
 		for _, event := range loaded.Events {
-			if event.Journal == nil || event.Journal.ToolExecution == nil || event.Journal.ToolExecution.Key.StepID != execution.ItemID {
+			if event.Type != session.EventTypeToolResult || event.Tool == nil || event.Tool.Execution.ItemID != execution.ItemID {
 				continue
 			}
-			key := event.Journal.ToolExecution.Key
+			key := event.Tool.Execution
 			if key.SessionID != execution.SessionID || key.TurnID != execution.TurnID {
 				t.Fatalf("callback identity = %#v, durable journal key = %#v", execution, key)
 			}
@@ -305,9 +305,11 @@ func TestSharedToolStepSequenceSurvivesOverflowStyleRebind(t *testing.T) {
 		t.Fatal(err)
 	}
 	sequence := &atomic.Uint64{}
+	var identities []tool.InvocationContext
 	base := tool.NamedTool{
 		Def: tool.Definition{Name: "ECHO", InputSchema: map[string]any{"type": "object"}},
 		Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
+			identities = append(identities, call.Execution)
 			return tool.Result{ID: call.ID, Name: call.Name, Content: []model.Part{model.NewJSONPart([]byte(`{"value":"ok"}`))}}, nil
 		},
 	}
@@ -322,24 +324,8 @@ func TestSharedToolStepSequenceSurvivesOverflowStyleRebind(t *testing.T) {
 	if _, err := secondWrap[0].Call(context.Background(), tool.Call{ID: "ollama-call-0", Name: "ECHO", Input: []byte(`{}`)}); err != nil {
 		t.Fatal(err)
 	}
-	events, err := service.Events(context.Background(), session.EventsRequest{
-		SessionRef: active.SessionRef, IncludeTransient: true,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	stepIDs := map[string]bool{}
-	for _, event := range events {
-		if event == nil || event.Journal == nil || event.Journal.ToolExecution == nil {
-			continue
-		}
-		if event.Journal.ToolExecution.Key.ToolCallID != "ollama-call-0" {
-			continue
-		}
-		stepIDs[event.Journal.ToolExecution.Key.StepID] = true
-	}
-	if !stepIDs["tool-step-1:ollama-call-0"] || !stepIDs["tool-step-2:ollama-call-0"] {
-		t.Fatalf("tool execution step identities = %v, want tool-step-1 and tool-step-2 for ollama-call-0", stepIDs)
+	if len(identities) != 2 || identities[0].ItemID != "tool-1:ollama-call-0" || identities[1].ItemID != "tool-2:ollama-call-0" || identities[0].TurnID != "turn-1" || identities[1].SessionID != active.SessionID {
+		t.Fatalf("occurrences after rebind = %+v", identities)
 	}
 }
 

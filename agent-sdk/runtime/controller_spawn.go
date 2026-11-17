@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
+
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/spawn"
@@ -89,7 +91,12 @@ func (r *Runtime) CallControllerSpawn(ctx context.Context, ref session.SessionRe
 	spec.Tools = []tool.Tool{base}
 	mode, _ := r.policyForName(workCtx, r.policyMode(spec))
 	spec.Tools = r.wrapToolsForRuntime(current, ref, spec, runtimeToolContext{mode: mode, approvalMode: string(r.currentApprovalMode(state)), approvalRequester: active.approvalRequester, runID: active.handle.RunID(), turnID: active.turnID})
-	wrapped := r.wrapTurnTools(workCtx, current, ref, state, spec, active.approvalRequester, active.handle.RunID(), active.turnID, nil)
+	wrapped := r.wrapTurnTools(workCtx, current, ref, state, spec, active.approvalRequester, active.handle.RunID(), active.turnID, &active.handle.toolSequence)
+	call = toolbinding.Prepare(wrapped[0], call)
+	workCtx = toolbinding.WithPrepared(workCtx, call)
+	if err := r.appendToolFact(workCtx, ref, active.turnID, call, nil, nil); err != nil {
+		return tool.Result{}, err
+	}
 	result, callErr := wrapped[0].Call(workCtx, call)
-	return result, errors.Join(callErr, persistToolExecutionReceipt(workCtx, r.sessions, &r.sessionWrites, ref, call, result))
+	return result, errors.Join(callErr, r.appendToolFact(workCtx, ref, active.turnID, call, &result, callErr))
 }

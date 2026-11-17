@@ -49,23 +49,16 @@ func (g *Gateway) ControlClientRuntimeState(ctx context.Context, ref session.Ses
 	if strings.TrimSpace(ref.SessionID) == "" {
 		return appserver.RuntimeState{}, session.ErrInvalidSession
 	}
-	runState, err := g.runtime.RunState(ctx, ref)
-	if err != nil && !errors.Is(err, session.ErrSessionNotFound) {
-		return appserver.RuntimeState{}, err
-	}
 	g.mu.Lock()
 	handle := g.active[ref.SessionID]
 	coordinator := g.approvals[ref.SessionID]
 	g.mu.Unlock()
 	if handle == nil {
-		out := appserver.RuntimeState{Run: appserver.RunState{
-			Status: strings.TrimSpace(string(runState.Status)), WaitingApproval: runState.WaitingApproval,
-			RunID: strings.TrimSpace(runState.ActiveRunID),
-		}}
+		out := appserver.RuntimeState{}
 		applyControlApprovalState(&out, coordinator, ref, "")
 		return out, nil
 	}
-	return handle.controlClientRuntimeState(strings.TrimSpace(string(runState.Status)), runState.WaitingApproval), nil
+	return handle.controlClientRuntimeState("running", false), nil
 }
 
 func (h *turnHandle) controlClientRuntimeState(status string, waitingApproval bool) appserver.RuntimeState {

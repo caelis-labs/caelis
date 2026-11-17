@@ -59,18 +59,18 @@ func ProjectAuthorizations(active Session, events []*Event) AuthorizationEvidenc
 				out.Revocations[key] = event.Seq
 			}
 		}
-		if event.Journal != nil && event.Journal.PauseToken != nil {
-			token := event.Journal.PauseToken
-			if prior := latest[token.TokenID]; prior == nil || prior.Journal.PauseToken.Revision < token.Revision {
-				latest[token.TokenID] = event
+		if event.Approval != nil {
+			token := event.Approval
+			if prior := latest[token.RequestID]; prior == nil || prior.Approval.Revision < token.Revision {
+				latest[token.RequestID] = event
 			}
 		}
 	}
 	consents := map[string]AuthorizationScope{}
 	for _, event := range latest {
-		token := event.Journal.PauseToken
+		token := event.Approval
 		a := token.Authorization
-		if a == nil || token.Status != PauseTokenResolved || !token.Approved || token.Outcome != "selected" || !a.Scope.MatchesSession(active) || a.Validate(token.Approval) != nil {
+		if a == nil || token.Status != ApprovalRecordResolved || !token.Approved || token.Outcome != "selected" || !a.Scope.MatchesSession(active) || a.Validate(token.Approval) != nil {
 			continue
 		}
 		choice, ok := a.Choice(token.OptionID)

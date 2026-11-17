@@ -117,7 +117,7 @@ func TestMCPFixedRoutingRefreshDuringApprovalAndRevocation(t *testing.T) {
 }
 
 func TestMCPFixedDuplicateCallIDsRejectedBeforeApprovalAndJournal(t *testing.T) {
-	service, active := newJournalTestSession(t, "fixed-duplicate")
+	service, active := newToolFactTestSession(t, "fixed-duplicate")
 	var effects atomic.Int32
 	invoke := func(context.Context, tool.Call) (tool.Result, error) {
 		effects.Add(1)
@@ -167,7 +167,7 @@ func TestMCPFixedDuplicateCallIDsRejectedBeforeApprovalAndJournal(t *testing.T) 
 		t.Fatal(err)
 	}
 	for _, event := range events {
-		if event.Journal != nil && event.Journal.ToolExecution != nil && event.Journal.ToolExecution.Key.ToolCallID == "duplicate" {
+		if event.Type == session.EventTypeToolResult && event.Tool != nil && event.Tool.ID == "duplicate" {
 			t.Fatal("duplicate batch entered the execution journal")
 		}
 		if session.IsCanonicalHistoryEvent(event) && event.Tool != nil && event.Tool.ID == "duplicate" {
@@ -260,25 +260,22 @@ func TestMCPFixedLegacySessionRequiresRediscovery(t *testing.T) {
 }
 
 func TestMCPFixedUnknownRecoveryKeepsOuterCallWithoutReplay(t *testing.T) {
-	service, active := newJournalTestSession(t, "fixed-unknown")
+	service, active := newToolFactTestSession(t, "fixed-unknown")
 	original := model.ToolCall{ID: "provider-operation", Name: tool.MCPCallToolName, Args: `{"tool_name":"docs__read","arguments":{"number":9007199254740993}}`}
-	writer := journaledTool{sessions: service, sessionRef: active.SessionRef, now: time.Now}
-	record := session.NormalizeToolExecution(session.ToolExecution{Schema: session.ToolExecutionSchemaVersion, Key: session.ExecutionKey{SessionID: active.SessionID, RunID: "original-run", TurnID: "original-turn", StepID: "original-step", ToolCallID: original.ID}, Revision: 1, ToolName: "docs__read", Input: json.RawMessage(`{"number":9007199254740993}`), ModelCall: &original, Binding: &tool.Binding{Name: "docs__read", Identity: "identity", Version: "v1"}, EffectClass: string(tool.EffectNonIdempotent), Status: session.ToolExecutionPrepared})
-	if err := writer.appendEntry(t.Context(), session.ToolExecution{}, record, session.ExecutionRecord{}, session.ExecutionRecord{}); err != nil {
+	input := map[string]any{"number": json.Number("9007199254740993")}
+	message := model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{original}, "")
+	fact := &session.Event{ID: "original-call", Type: session.EventTypeToolCall, Scope: &session.EventScope{TurnID: "original-turn"}, Message: &message, Tool: &session.EventTool{ID: original.ID, Name: "docs__read", Input: input, ModelCall: &original, Binding: &tool.Binding{Name: "docs__read", Identity: "identity", Version: "v1"}, Execution: tool.InvocationContext{SessionID: active.SessionID, TurnID: "original-turn", ItemID: "original-occurrence"}}}
+	if _, err := service.AppendEvent(t.Context(), session.AppendEventRequest{SessionRef: active.SessionRef, Event: fact}); err != nil {
 		t.Fatal(err)
 	}
-	for _, status := range []session.ToolExecutionStatus{session.ToolExecutionApproved, session.ToolExecutionStarted} {
-		previous := record
-		record.Revision++
-		record.Status = status
-		if err := writer.appendEntry(t.Context(), previous, record, session.ExecutionRecord{}, session.ExecutionRecord{}); err != nil {
-			t.Fatal(err)
-		}
-	}
 	rt := &Runtime{sessions: service, clock: time.Now}
+	fence, err := service.AcquireSessionFence(t.Context(), session.AcquireSessionFenceRequest{SessionRef: active.SessionRef, OwnerID: "new-owner"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := session.ContextWithRuntimeFence(t.Context(), fence)
 	effects := 0
-	remote := tool.NamedTool{Def: tool.Definition{Name: "docs__read"}, Invoke: func(context.Context, tool.Call) (tool.Result, error) { effects++; return tool.Result{}, nil }}
-	if err := rt.recoverIncompleteToolExecutions(t.Context(), active.SessionRef, remote); err != nil {
+	if err := rt.repairToolPairs(ctx, active.SessionRef); err != nil {
 		t.Fatal(err)
 	}
 	events, err := service.Events(t.Context(), session.EventsRequest{SessionRef: active.SessionRef})
@@ -286,7 +283,7 @@ func TestMCPFixedUnknownRecoveryKeepsOuterCallWithoutReplay(t *testing.T) {
 		t.Fatal(err)
 	}
 	last := events[len(events)-1]
-	if effects != 0 || last.Journal.ToolExecution.Status != session.ToolExecutionUnknownOutcome || last.Tool.Name != "docs__read" || last.Tool.ModelCall == nil || last.Message.ToolResults()[0].Name != tool.MCPCallToolName || fmt.Sprint(last.Tool.Input["number"]) != "9007199254740993" {
+	if effects != 0 || last.Tool.Outcome != "unknown_outcome" || last.Tool.Name != "docs__read" || last.Tool.ModelCall == nil || last.Message.ToolResults()[0].Name != tool.MCPCallToolName || fmt.Sprint(last.Tool.Input["number"]) != "9007199254740993" {
 		t.Fatalf("unknown recovery changed identity or replayed: effects=%d event=%+v", effects, last.Tool)
 	}
 }
@@ -355,26 +352,26 @@ func TestMCPFixedCancellationKeepsOriginalOperation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := fresh.recoverIncompleteToolExecutions(ctx, active.SessionRef, manager.Tools()...); err != nil {
+	if err := fresh.repairToolPairs(ctx, active.SessionRef); err != nil {
 		t.Fatal(err)
 	}
 	events, err := service.Events(ctx, session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	var latest *session.ToolExecution
+	var latest *session.EventTool
 	cancelRequested := false
 	for _, e := range events {
-		if e.Journal != nil && e.Journal.ToolExecution != nil && e.Journal.ToolExecution.ToolName == "live__wait" {
-			r := e.Journal.ToolExecution
+		if e.Type == session.EventTypeToolResult && e.Tool != nil && e.Tool.Name == "live__wait" {
+			r := e.Tool
 			latest = r
-			cancelRequested = cancelRequested || r.Status == session.ToolExecutionCancelRequested
-			if r.Key.ToolCallID != "original-remote-operation" || r.ModelCall == nil || r.ModelCall.ID != r.Key.ToolCallID {
+			cancelRequested = cancelRequested || r.Outcome == "unknown_outcome" || r.Status == "failed"
+			if r.ID != "original-remote-operation" || r.ModelCall == nil || r.ModelCall.ID != r.ID {
 				t.Fatal("cancellation changed operation identity")
 			}
 		}
 	}
-	if effects.Load() != 1 || !cancelRequested || latest == nil || latest.Status == session.ToolExecutionSucceeded {
+	if effects.Load() != 1 || !cancelRequested || latest == nil || latest.Status == "completed" {
 		t.Fatalf("effects=%d cancellation=%v latest=%+v", effects.Load(), cancelRequested, latest)
 	}
 }
