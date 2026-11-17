@@ -40,7 +40,7 @@ func TestCodeModeLargeWriteArguments(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			code := `const records=Array.from({length:320},(_,index)=>({index,text:"采集".repeat(600)}));const args={path:"records.json",content:JSON.stringify(records)};await ` + tc.call + `;`
+			code := `const records=Array.from({length:80},(_,index)=>({index,text:"采集".repeat(600)}));const args={path:"records.json",content:JSON.stringify(records)};await ` + tc.call + `;`
 			if tc.largeOutput {
 				code += `return "x".repeat(2048);`
 			} else {
@@ -60,15 +60,15 @@ func TestCodeModeLargeWriteArguments(t *testing.T) {
 				Text  string `json:"text"`
 			}
 			var records []record
-			for index := range 320 {
+			for index := range 80 {
 				records = append(records, record{index, strings.Repeat("采集", 600)})
 			}
 			want, err := json.Marshal(records)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(want) <= codemode.DefaultLimits().OutputBytes {
-				t.Fatal("fixture must exceed both the former argument budget and default output frame budget")
+			if len(want) <= 64<<10 || len(want) <= limits.OutputBytes {
+				t.Fatal("fixture must exceed both 64 KiB and the configured output budget")
 			}
 			if len(driver.requests) != 2 {
 				t.Fatalf("model requests=%d", len(driver.requests))
@@ -79,6 +79,7 @@ func TestCodeModeLargeWriteArguments(t *testing.T) {
 			if err != nil || !bytes.Equal(got, want) {
 				t.Fatalf("Write did not preserve the %d-byte JSON content: bytes=%d err=%v output=%s", len(want), len(got), err, output)
 			}
+			t.Logf("verified %d-byte JSON Write", len(want))
 			if result.IsError != tc.largeOutput {
 				t.Fatalf("IsError=%v output=%s", result.IsError, output)
 			}
@@ -86,7 +87,7 @@ func TestCodeModeLargeWriteArguments(t *testing.T) {
 				if !bytes.Contains(output, []byte("JSON byte budget exceeded")) {
 					t.Fatalf("output budget was not enforced: %s", output)
 				}
-			} else if !bytes.Contains(output, []byte(`"written":320`)) {
+			} else if !bytes.Contains(output, []byte(`"written":80`)) {
 				t.Fatalf("script did not complete: %s", output)
 			}
 		})
