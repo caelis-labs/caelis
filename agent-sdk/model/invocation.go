@@ -6,8 +6,10 @@ import (
 	"iter"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"github.com/caelis-labs/caelis/agent-sdk/internal/modelinvocation"
 	"github.com/google/uuid"
 )
 
@@ -139,7 +141,8 @@ func Generate(ctx context.Context, llm LLM, req *Request) iter.Seq2[*StreamEvent
 	admit, _ := ctx.Value(invocationAdmissionKey{}).(func(context.Context, *Request) error)
 	observer, _ := ctx.Value(invocationObserverKey{}).(func(Invocation))
 	start, _ := ctx.Value(invocationStartKey{}).(func(context.Context, Invocation, *Request) error)
-	if admit == nil && observer == nil && start == nil {
+	middleware, _ := ctx.Value(modelinvocation.MiddlewareKey{}).(func(context.Context, Invocation, *Request, func(context.Context) error) error)
+	if admit == nil && observer == nil && start == nil && middleware == nil {
 		return generatePrepared(ctx, llm, CloneRequest(req))
 	}
 	return func(yield func(*StreamEvent, error) bool) {
@@ -176,7 +179,12 @@ func Generate(ctx context.Context, llm LLM, req *Request) iter.Seq2[*StreamEvent
 		usage := &invocationUsage{}
 		attemptCtx := context.WithValue(ctx, invocationUsageKey{}, usage)
 		var cause error
+		stopped := false
+		var invoked atomic.Bool
 		defer func() {
+			if !invoked.Load() {
+				return
+			}
 			receipt.FinishedAt = time.Now()
 			usage.mu.Lock()
 			receipt.Usage = usage.latest
@@ -188,32 +196,53 @@ func Generate(ctx context.Context, llm LLM, req *Request) iter.Seq2[*StreamEvent
 				observer(receipt)
 			}
 		}()
-		for event, err := range generateAttempt(attemptCtx, llm, prepared) {
-			if event != nil && event.Response != nil {
-				cloned := *event
-				response := *event.Response
-				response.InvocationID = receipt.ID
-				cloned.Response = &response
-				event = &cloned
-				RecordInvocationUsage(attemptCtx, response.Usage)
-				if receipt.Provider == "" {
-					receipt.Provider = strings.TrimSpace(response.Provider)
+		dispatch := func(callCtx context.Context) error {
+			if !invoked.CompareAndSwap(false, true) {
+				return &invocationGateError{cause: errors.New("model continuation already consumed")}
+			}
+			attemptCtx = context.WithValue(callCtx, invocationUsageKey{}, usage)
+			for event, err := range generateAttempt(attemptCtx, llm, prepared) {
+				if event != nil && event.Response != nil {
+					cloned := *event
+					response := *event.Response
+					response.InvocationID = receipt.ID
+					cloned.Response = &response
+					event = &cloned
+					RecordInvocationUsage(attemptCtx, response.Usage)
+					if receipt.Provider == "" {
+						receipt.Provider = strings.TrimSpace(response.Provider)
+					}
+					if response.TurnComplete {
+						receipt.Outcome = "completed"
+					}
 				}
-				if response.TurnComplete {
-					receipt.Outcome = "completed"
+				if err != nil {
+					cause = err
+					receipt.Outcome = "failed"
+					return err
+				}
+				if !yield(event, err) {
+					stopped = true
+					return nil
 				}
 			}
-			if err != nil {
-				cause = err
-				receipt.Outcome = "failed"
-			}
-			if !yield(event, err) {
-				return
-			}
-			if err != nil {
-				return
-			}
+			return cause
 		}
+		if middleware != nil {
+			middlewareErr := middleware(attemptCtx, receipt, CloneRequest(prepared), dispatch)
+			if !errors.Is(middlewareErr, cause) {
+				cause = errors.Join(cause, middlewareErr)
+			}
+			if cause == nil && !invoked.Load() {
+				cause = &invocationGateError{cause: errors.New("model middleware did not consume actual attempt")}
+			}
+		} else {
+			cause = dispatch(attemptCtx)
+		}
+		if cause != nil && !stopped {
+			yield(nil, cause)
+		}
+
 	}
 }
 

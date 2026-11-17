@@ -11,7 +11,7 @@ import (
 
 const (
 	// EventSchemaVersion is the current durable canonical event schema.
-	EventSchemaVersion = 3
+	EventSchemaVersion = 4
 )
 
 // SchemaKind identifies one independently migrated durable contract.
@@ -119,6 +119,14 @@ func newDefaultMigrationRegistry() *MigrationRegistry {
 			return nil, err
 		}
 		o["schema"] = json.RawMessage(`3`)
+		return json.Marshal(o)
+	})
+	_ = registry.Register(SchemaKindEvent, 3, 4, func(raw json.RawMessage) (json.RawMessage, error) {
+		var o map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &o); err != nil {
+			return nil, err
+		}
+		o["schema"] = json.RawMessage(`4`)
 		return json.Marshal(o)
 	})
 	registerRetiredExecutionSchemas(registry)

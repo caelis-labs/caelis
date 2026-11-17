@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -11,6 +12,7 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/agent-sdk/internal/hookrun"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/identity"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
@@ -25,6 +27,9 @@ import (
 
 // Config defines one baseline local runtime instance.
 type Config struct {
+	Hooks agent.Hooks
+	// HookPurpose names this independently assembled model loop. Empty means chat.
+	HookPurpose    agent.HookPurpose
 	Sessions       session.Service
 	AgentFactory   agent.AgentFactory
 	RunIDGenerator func() string
@@ -60,13 +65,13 @@ type Config struct {
 	// ChildApprovalRequester routes approvals independently of a parent Turn,
 	// including user-started children and child endpoints reattached after restart.
 	ChildApprovalRequester agent.ApprovalRequester
-	LifecycleInterceptors  []agent.LifecycleInterceptor
 	TraceSink              agent.TraceSink
-	Guardrails             []agent.GuardrailSpec
 }
 
 // Runtime is the baseline local runtime implementation.
 type Runtime struct {
+	hooks                    agent.Hooks
+	hookPurpose              agent.HookPurpose
 	codeModeMu               sync.Mutex
 	codeModeEnvironments     map[session.SessionRef]*codeModeEnvironment
 	childApprovalRequester   agent.ApprovalRequester
@@ -106,9 +111,7 @@ type Runtime struct {
 	tasks                   *taskRuntime
 	taskOutput              output.Binder
 	terminals               *terminalService
-	lifecycle               agent.LifecycleOptions
-	guardrails              []agent.GuardrailSpec
-	guardrailSlots          chan struct{}
+	lifecycle               agent.TraceOptions
 }
 
 // RunnerCompletionWaiterGuaranteed marks that every non-nil Runner returned
@@ -123,7 +126,20 @@ func New(cfg Config) (*Runtime, error) {
 	if cfg.AgentFactory == nil {
 		return nil, errors.New("agent-sdk/runtime: agent factory is required")
 	}
+	if err := cfg.Hooks.Validate(); err != nil {
+		return nil, err
+	}
+	if cfg.HookPurpose == "" {
+		cfg.HookPurpose = agent.HookPurposeChat
+	}
+	switch cfg.HookPurpose {
+	case agent.HookPurposeChat, agent.HookPurposeToolSearch, agent.HookPurposeCompaction, agent.HookPurposeSystemAgent:
+	default:
+		return nil, fmt.Errorf("runtime: invalid hook purpose %q", cfg.HookPurpose)
+	}
 	r := &Runtime{
+		hooks:                    agent.CloneHooks(cfg.Hooks),
+		hookPurpose:              cfg.HookPurpose,
 		sessions:                 cfg.Sessions,
 		agentFactory:             cfg.AgentFactory,
 		runIDGenerator:           cfg.RunIDGenerator,
@@ -147,21 +163,15 @@ func New(cfg Config) (*Runtime, error) {
 		activeRunners:            map[string]activeRun{},
 		approvalWaiters:          map[string]approvalWaiter{},
 		participantPromptClaims:  map[participantPromptKey]struct{}{},
-		lifecycle: agent.LifecycleOptions{
-			Interceptors: append([]agent.LifecycleInterceptor(nil), cfg.LifecycleInterceptors...),
-			TraceSink:    cfg.TraceSink,
-			Clock:        cfg.Clock,
+		lifecycle: agent.TraceOptions{
+			TraceSink: cfg.TraceSink,
+			Clock:     cfg.Clock,
 		},
-		guardrails:     append([]agent.GuardrailSpec(nil), cfg.Guardrails...),
-		guardrailSlots: make(chan struct{}, maxOutstandingGuardrails),
 	}
 	if r.clock == nil {
 		r.clock = time.Now
 	}
 	r.lifecycle.Clock = r.clock
-	if err := validateGuardrailSpecs(r.guardrails); err != nil {
-		return nil, err
-	}
 	if r.policies == nil {
 		reg, err := presets.NewRegistry()
 		if err != nil {
@@ -239,14 +249,16 @@ func (r *Runtime) Run(
 	if err != nil {
 		return agent.RunResult{}, err
 	}
+	if r.hooks.HasLoopPhases() {
+		_, supports := r.agentFactory.(interface{ SupportsLoopHooks() })
+		if activeSession.Controller.Kind == session.ControllerKindACP || req.Agent != nil || !supports {
+			return agent.RunResult{}, errorcode.New(errorcode.Unsupported, "configured loop hook phases are unavailable inside this Agent")
+		}
+	}
 	if activeSession.Controller.Kind != session.ControllerKindACP && req.Agent == nil {
 		if err := validateRunRequestAgentSpec(req); err != nil {
 			return agent.RunResult{}, err
 		}
-	}
-	req, err = r.applyGuardrails(ctx, activeSession, req)
-	if err != nil {
-		return agent.RunResult{}, err
 	}
 	if ctx == nil {
 		ctx = context.Background()
@@ -364,14 +376,32 @@ func (r *Runtime) executeKernelTurn(
 	}()
 	defer r.unregisterActiveRun(runID)
 
+	ctx = hookrun.WithRun(ctx, r.hooks, agent.HookContext{SessionRef: ref, RunID: runID, TurnID: turnID, Purpose: r.hookPurpose})
+	hookrun.FromContext(ctx).Trace = r.lifecycle
 	batch := make([]*session.Event, 0, 4)
 	inputEvents, inputErr := buildRunInputEvents(activeSession, turnID, req)
 	if inputErr != nil {
 		handle.publishError(inputErr)
 		return
 	}
-	lifecycleErr := r.executeLifecycle(ctx, r.lifecycleEvent(ctx, agent.LifecycleRun, "", ""), func(runCtx context.Context) error {
-		return r.executeLifecycle(runCtx, r.lifecycleEvent(runCtx, agent.LifecycleTurn, "", ""), func(turnCtx context.Context) error {
+	inputEvents, inputErr = r.prepareHookInputs(ctx, inputEvents)
+	if inputErr == nil {
+		var start []*session.Event
+		start, inputErr = r.runTurnStartHooks(ctx)
+		inputEvents = append(inputEvents, start...)
+	}
+	if inputErr == nil && hookrun.FromContext(ctx).HasEarly() {
+		_, supports := r.agentFactory.(interface{ SupportsLoopHooks() })
+		if req.Agent != nil || !supports {
+			inputErr = errorcode.New(errorcode.Unsupported, "this external Agent cannot enforce an early-response hook decision")
+		}
+	}
+	if inputErr != nil {
+		handle.publishError(inputErr)
+		return
+	}
+	lifecycleErr := r.traceOperation(ctx, r.lifecycleEvent(ctx, agent.LifecycleRun, "", ""), func(runCtx context.Context) error {
+		return r.traceOperation(runCtx, r.lifecycleEvent(runCtx, agent.LifecycleTurn, "", ""), func(turnCtx context.Context) error {
 			runErr := r.runWithOverflowRecovery(turnCtx, activeSession, ref, runID, turnID, req, inputEvents, &batch, handle)
 			scope := taskScopeFromContext(turnCtx)
 			scope.stopCodeMode()

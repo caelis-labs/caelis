@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
@@ -59,13 +60,17 @@ func (f requesterFunc) RequestApproval(ctx context.Context, req agent.ApprovalRe
 	return f(ctx, req)
 }
 
-func runPolicyScript(t *testing.T, store session.Service, active session.Session, code string, targets []tool.Tool, requester agent.ApprovalRequester) {
+func runPolicyScript(t *testing.T, store session.Service, active session.Session, code string, targets []tool.Tool, requester agent.ApprovalRequester, hooks ...agent.Hooks) {
 	t.Helper()
 	registry, err := policy.NewMemory(Mode{Base: presets.WorkspaceWriteMode(), Authority: "owner"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	r, err := runtime.New(runtime.Config{Sessions: store, TaskStore: sessionfile.NewTaskStore(store.(*sessionfile.Store)), AgentFactory: chat.Factory{}, PolicyRegistry: registry})
+	var configured agent.Hooks
+	if len(hooks) > 0 {
+		configured = hooks[0]
+	}
+	r, err := runtime.New(runtime.Config{Sessions: store, TaskStore: sessionfile.NewTaskStore(store.(*sessionfile.Store)), AgentFactory: chat.Factory{}, PolicyRegistry: registry, Hooks: configured})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,5 +184,95 @@ func TestProductPolicyCrossAPPDenialDoesNotReplayEarlierEffect(t *testing.T) {
 	}))
 	if effects.Load() != 1 || approvals.Load() != 2 {
 		t.Fatalf("effects=%d approvals=%d", effects.Load(), approvals.Load())
+	}
+}
+
+func TestProductPolicyHookFinalAPPDoesNotReuseOriginalConsent(t *testing.T) {
+	for _, synthetic := range []bool{false, true} {
+		t.Run(map[bool]string{false: "dispatch", true: "synthetic"}[synthetic], func(t *testing.T) {
+			root := t.TempDir()
+			store := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+			active, err := store.StartSession(t.Context(), session.StartSessionRequest{AppName: "fixture", UserID: "owner", Workspace: session.WorkspaceRef{Key: "workspace", CWD: root}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var effects, asks, prepares atomic.Int32
+			targets := policyEffectTools(t, &effects)
+			code := `await tools.call("dtw__click",{app:"com.example.A"});return {};`
+			runPolicyScript(t, store, active, code, targets, requesterFunc(func(_ context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+				asks.Add(1)
+				if req.Authorization == nil || req.Authorization.Scope.Resource != "com.example.A" {
+					t.Error("original APP consent not scoped")
+				}
+				return agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_session", Approved: true}, nil
+			}))
+			hooks := agent.Hooks{ToolPrepare: []agent.Hook[agent.ToolPreparation, agent.ToolPreparation]{{Name: "target-B", Apply: func(_ context.Context, e agent.HookContext, p agent.ToolPreparation) (agent.ToolPreparation, error) {
+				if e.Tool.Name != "dtw__click" {
+					return p, nil
+				}
+				prepares.Add(1)
+				p.Input = json.RawMessage(`{"app":"com.example.B"}`)
+				if synthetic {
+					p.Kind = agent.ToolPrepareRespond
+					p.Result = &tool.Result{Content: []model.Part{model.NewTextPart("synthetic success")}}
+				}
+				return p, nil
+			}}}}
+			runPolicyScript(t, store, active, code, targets, requesterFunc(func(ctx context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+				asks.Add(1)
+				if req.Authorization == nil || req.Authorization.Scope.Resource != "com.example.B" || string(req.Call.Input) != `{"app":"com.example.B"}` {
+					t.Errorf("approval did not consume final APP: %+v", req)
+				}
+				if req.OnAdmission != nil {
+					if err := req.OnAdmission(ctx); err != nil {
+						return agent.ApprovalResponse{}, err
+					}
+				}
+				events, err := store.Events(ctx, session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
+				if err != nil {
+					return agent.ApprovalResponse{}, err
+				}
+				found := false
+				for _, e := range events {
+					found = found || e.Type == session.EventTypeToolCall && e.Tool != nil && e.Tool.Execution == req.Call.Execution && e.Tool.Input["app"] == "com.example.B"
+				}
+				if !found {
+					t.Error("approval began before the effective child fact")
+				}
+				delayed := make(chan struct{})
+				timer := time.AfterFunc(10*time.Millisecond, func() { close(delayed) })
+				defer timer.Stop()
+				select {
+				case <-delayed:
+				case <-ctx.Done():
+					return agent.ApprovalResponse{}, ctx.Err()
+				}
+				return agent.ApprovalResponse{Outcome: "selected", OptionID: "cancel", Approved: false}, nil
+			}), hooks)
+			if effects.Load() != 1 || asks.Load() != 2 || prepares.Load() != 1 {
+				t.Fatalf("APP A consent or synthetic result bypassed APP B denial: effects=%d asks=%d prepares=%d", effects.Load(), asks.Load(), prepares.Load())
+			}
+			reopened := sessionfile.NewStore(sessionfile.Config{RootDir: root})
+			events, err := reopened.Events(t.Context(), session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			pairs, err := session.PairToolFacts(events)
+			if err != nil {
+				t.Fatal(err)
+			}
+			found := false
+			for _, p := range pairs {
+				if p.Call.Tool.Input["app"] == "com.example.B" {
+					found = true
+					if p.Result == nil || p.Result.Tool.Outcome != session.ToolOutcomeFailed {
+						t.Fatal("denied effective APP result absent on reopen")
+					}
+				}
+			}
+			if !found {
+				t.Fatal("final APP fact absent")
+			}
+		})
 	}
 }

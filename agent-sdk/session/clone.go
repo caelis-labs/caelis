@@ -50,6 +50,17 @@ func CloneEvent(in *Event) *Event {
 		return nil
 	}
 	out := *in
+	if in.InputEvidence != nil {
+		evidence := *in.InputEvidence
+		evidence.Message = model.CloneMessage(evidence.Message)
+		evidence.Source = CloneActorRef(evidence.Source)
+		evidence.Hooks = append([]string(nil), evidence.Hooks...)
+		out.InputEvidence = &evidence
+	}
+	if in.ContextEdit != nil {
+		p := *in.ContextEdit
+		out.ContextEdit = &p
+	}
 	out.legacyJournal = append(json.RawMessage(nil), in.legacyJournal...)
 	if in.Approval != nil {
 		a := CloneApprovalRecord(*in.Approval)
@@ -273,6 +284,14 @@ func CloneEventTool(in EventTool) EventTool {
 	if in.Parent != nil {
 		value := *in.Parent
 		out.Parent = &value
+	}
+	if in.ProcessingFailure != nil {
+		value := *in.ProcessingFailure
+		out.ProcessingFailure = &value
+	}
+	if in.ProposedCall != nil {
+		value := *in.ProposedCall
+		out.ProposedCall = &value
 	}
 	if in.ModelCall != nil {
 		value := *in.ModelCall

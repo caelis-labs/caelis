@@ -24,6 +24,101 @@ experimental.
 
 ## Runtime and capabilities
 
+`runtime.Config.Hooks` fixes typed registrations for each Run. Every entry has
+an explicit name and timeout (five seconds by default). Independent private
+loops can set `HookPurpose`; the default is `chat`. System-agent assembly uses
+`system_agent` and does not inherit main-conversation hooks.
+
+| Phase | Editable value |
+| --- | --- |
+| Input | Effective Message, system context, early assistant response |
+| TurnStart | System context or early response, once per canonical Turn |
+| ModelPrepare | Request parameters, configured model choice, durable ContextEdit, cached response |
+| ModelInvoke | One actual-attempt continuation, with a detached request |
+| ModelResult | Semantic Message; actual usage and provider identity stay fixed |
+| ToolPrepare | Final arguments, synthetic result or block, with fixed occurrence and target |
+| ToolInvoke | One Policy-admitted dispatch continuation |
+| ToolResult | Content and StructuredContent; identity, error and system metadata stay fixed |
+| ModelView | Tool-result presentation content; the full business value stays fixed |
+| Completion | Accept, Replace, Continue with feedback or Reject before final commit |
+| Stream factory | Fresh text transformer for one actual attempt or synthetic candidate |
+
+Plain transformations run in registration order on detached values. Around
+middleware runs first registration outermost and unwinds in reverse order.
+`next` is consumed once and expires at middleware return. A retained or
+concurrent second continuation fails without another effect. Hook evidence
+excludes raw model handles, progress observers, private call metadata, Session
+writers, fence credentials and shared admission barriers.
+
+Pure transformations have bounded outstanding work; timeout discards late
+output. Effect middleware retains producer ownership until consumed work
+actually drains, including producers which ignore cancellation. Timeout is
+not proof of quiescence. Extensions run outside Session write locks. Failures
+and panics identify their phase and name. Read-only TraceSink records remain
+isolated and bounded, with no power to alter execution.
+
+Input facts retain original Message/source separately from the effective
+Message. Steering and Agent communication pass through Input once. Guardian
+uses original user evidence. Added context and completion feedback use system
+Actors and cannot enlarge user authorization.
+
+Model assembly has a logical identity and increasing assembly revision.
+Configuration refresh and context rebuild preserve that identity; semantic
+regeneration starts another. Each actual attempt has an independent invocation
+ID and receipt. Cache creates neither provider work nor usage. Configured
+model alternatives share the snapshot lease and admission owner; hooks cannot
+supply raw LLMs or unbound tool schemas. RetryRequest can request reconsideration
+of the exact retryable error returned by model next. Existing retry limits,
+authority checks, provider-tool restrictions and irreversible-output rules
+remain in force. An admitted response retains its snapshot lease through tools.
+
+Every tool route prepares all occurrences and final arguments before the batch
+is atomically committed. Policy, approval, canonical envelope and dispatch use
+those same arguments. ProposedCall keeps the original proposal as evidence.
+Synthetic success still passes Policy and final dispatch checks. Full results
+and checked model views share one ToolResult commit, including nested Code Mode
+calls. ToolResult affects JS Body; ModelView does not. A failed transformation
+commits safe presentation and typed processing_failure separately from the
+known effect outcome, then stops. It cannot replay the effect or fall back to
+unredacted output.
+
+Buffered output is the SDK default: provider fragments remain private. The
+existing final output owner transforms the accepted candidate after ModelResult
+and Completion replacements and before canonical publication. Cache and Input
+or TurnStart early responses use that same boundary. Their factories identify
+`cache`, `input_early` or `turn_start_early` in HookContext.OutputSource and have
+no InvocationID, attempt ordinal, provider receipt or provider usage. Actual
+attempt factories identify `provider` and retain their real invocation identity,
+including attempts discarded by transport retry. A discarded candidate never
+publishes its buffered text.
+
+Caelis interactive Session assembly explicitly selects Incremental while it has
+no final-response mutators. Incremental derives live fragments and final text
+from one accumulator; already transformed text is not transformed again at the
+final boundary. Published text remains authoritative when the provider's final
+snapshot differs; a matching snapshot can fill an unstreamed suffix. UTF-8 split
+across chunks and empty chunks are supported; attempt reset discards its state.
+Irreversible output prevents automatic retry. Incremental rejects ModelResult
+and Completion registrations at assembly because they could replace published
+text. Synthetic candidates still pass through the final transformer and emit no
+speculative fragments.
+
+Completion hooks share a feedback budget of two by default. New accepted input
+invalidates the old finish decision. Runtime closes final input and drains real
+producers before committing final output, then clears its owned Plan and
+notifies completion. Cancellation, authority and persistence failures cannot
+be replaced by a hook decision.
+
+The built-in chat factory owns these loop phases. External factories declare
+the same capability contract with SupportsLoopHooks(); explicitly supplied
+Agents and external ACP private loops reject required internal phases before
+input mutation. ACP supports input/context transformation, but explicitly
+rejects early-response decisions it cannot enforce. The
+[external consumer examples](../scripts/testdata/sdk_consumer/hooks_test.go)
+exercise retrieval, cache, model selection, early answers, bounded feedback,
+effective arguments and independent full/model results without importing
+Runtime internals.
+
 Hosts inject model, tool, Session, sandbox, task, policy, and endpoint
 implementations. Runtime validates the assembled capabilities and fails closed
 when a required feature is absent.
@@ -213,8 +308,8 @@ another one.
 Approval request/resolution facts live in `Event.Approval`. Runtime owns their
 persistence and reusable consent; Control projects their redacted request and
 live queue settlement without a second approval history writer. Restart does not
-recreate approval waiters. Session event schema 3 is required for complete tool
-facts. The Session codec consumes known legacy execution fields and media solely
+recreate approval waiters. Session event schema 4 carries original input evidence and durable context edits;
+complete tool facts from schema 3 remain readable. The Session codec consumes known legacy execution fields and media solely
 for compatibility, preserving old messages and approval review; it never restores
 Run state, execution authority or tool bindings. Unknown future schemas fail closed.
 
@@ -265,6 +360,16 @@ checkpoint follows retained older events. Strict in-context generation validates
 both boundaries and fingerprints and never falls back to an independent request.
 Custom async compactors must enforce `compact.Request` coverage and in-context
 requirements. Synchronous compaction retains its optional fallback.
+
+Model-prepare context edits use the same checkpoint commit owner. Append adds a
+system-authored context event with typed source provenance. ReplacePrefix uses
+checkpoint contract 2 with purpose `context_replacement`, exact source coverage
+and typed replacement messages. Original input, tool, binding and approval facts
+remain immutable; Guardian reads original input evidence. Replacement tool groups
+must remain complete and retain their original call identities and arguments.
+Summary contract 1 remains readable; unsupported event or checkpoint versions
+fail closed. Context replacement may increase the model view within its budget;
+it does not relax the smaller-prefix and ordered-tail rules for compaction.
 
 Candidate readiness is not a commit. Synchronous, async and idle paths use the
 same guarded checkpoint writer, with revision CAS and original-ID readback after
@@ -411,9 +516,10 @@ Session tool set and cannot be restored through qualified paths.
 
 Runtime resolves every route to a real Tool, validates the accepted schema and
 arguments, and enters the same policy, Guardian/approval, cancellation, dispatch admission,
-invocation and lifecycle wrappers as other calls. Display and approval data name
-the real target and arguments; typed original-call data keep non-Code Mode history
-paired under the outer call ID and `mcp_call` name. MCP schemas never join model
+invocation owners and typed hooks as other calls. Display and approval data name
+the real target and arguments. The effective ModelCall envelope keeps non-Code
+Mode history paired under the outer call ID and `mcp_call` name; ProposedCall
+retains the original proposal separately. MCP schemas never join model
 `tools`, and no per-run exposure limit or retirement tool remains. [MCP tools](mcp-tool-lifecycle.md)
 describes refresh and final dispatch. The stable-tools contract does not promise
 that the entire model request prefix is unchanged.

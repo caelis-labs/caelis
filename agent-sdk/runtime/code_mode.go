@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/agent-sdk/internal/hookrun"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/mcpdiscovery"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
@@ -376,9 +377,6 @@ func (h *codeModeHost) call(requestCtx context.Context, name string, arguments j
 		return codemode.Reply{}, err
 	}
 	release()
-	if err := tool.ValidateMCPArguments(target.definition, arguments); err != nil {
-		return codemode.Reply{}, err
-	}
 	call := tool.Call{ID: callID, Name: name, Input: append(json.RawMessage(nil), arguments...),
 		Parent:       &tool.ParentCall{Kind: codemode.ToolKind, ID: h.parent.ID, Name: h.parent.Name, Execution: h.parent.Execution},
 		RuntimeModel: h.parent.RuntimeModel, RuntimeReasoning: h.parent.RuntimeReasoning, RuntimeServiceTier: h.parent.RuntimeServiceTier}
@@ -387,15 +385,18 @@ func (h *codeModeHost) call(requestCtx context.Context, name string, arguments j
 		binding := tool.BindingForDefinition(target.definition)
 		call.TargetBinding = &binding
 	}
-	call = toolbinding.Prepare(target.tool, call)
-	ctx = toolbinding.WithPrepared(ctx, call)
-	if err := h.appendToolFact(ctx, call, nil, nil); err != nil {
+	call, synthetic, prepareErr := toolbinding.PrepareEffective(ctx, target.tool, call)
+	if prepareErr != nil {
+		return codemode.Reply{}, prepareErr
+	}
+	ctx = toolbinding.WithPrepared(ctx, call, synthetic)
+	if err := h.appendToolFact(ctx, call, nil, nil, target.definition); err != nil {
 		h.fail(err)
 		return codemode.Reply{}, err
 	}
 	result, callErr := target.tool.Call(ctx, call)
 	outcome := codeModeOutcome(result, callErr)
-	persistErr := h.appendToolFact(ctx, call, &result, callErr)
+	persistErr := h.appendToolFact(ctx, call, &result, callErr, target.definition)
 	if persistErr != nil {
 		h.fail(persistErr)
 		callErr = errors.Join(callErr, persistErr)
@@ -439,6 +440,7 @@ func (h *codeModeHost) call(requestCtx context.Context, name string, arguments j
 }
 
 func codeModeOutcome(result tool.Result, err error) string {
+	result, err = hookrun.EffectResult(result, err)
 	if errorcode.Is(err, errorcode.UnknownOutcome) || errorcode.Is(err, errorcode.Cancelled) || errors.Is(err, context.Canceled) {
 		return codemode.OutcomeUnknown
 	}
@@ -457,8 +459,8 @@ func (h *codeModeHost) fail(err error) {
 	h.mu.Unlock()
 }
 
-func (h *codeModeHost) appendToolFact(ctx context.Context, call tool.Call, result *tool.Result, callErr error) error {
-	return h.owner.runtime.appendToolFact(ctx, h.owner.ref, h.parent.Execution.TurnID, call, result, callErr)
+func (h *codeModeHost) appendToolFact(ctx context.Context, call tool.Call, result *tool.Result, callErr error, definition tool.Definition) error {
+	return h.owner.runtime.appendToolFact(ctx, h.owner.ref, h.parent.Execution.TurnID, call, result, callErr, definition)
 }
 
 // Only the ToolResult owner publishes this result after durable persistence

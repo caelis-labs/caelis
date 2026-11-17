@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"github.com/caelis-labs/caelis/agent-sdk/internal/hookrun"
 
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 
@@ -56,7 +57,13 @@ func (t dispatchTool) Call(ctx context.Context, call tool.Call) (tool.Result, er
 	} else if err := consumePolicyDispatch(ctx, t.base); err != nil {
 		return tool.Result{}, err
 	}
-	result, err := t.base.Call(ctx, tool.CloneCall(call))
+
+	result, err := hookrun.InvokeTool(ctx, def, call, func(callCtx context.Context) (tool.Result, error) {
+		if synthetic := toolbinding.PreparedResult(ctx); synthetic != nil {
+			return *synthetic, nil
+		}
+		return t.base.Call(callCtx, tool.CloneCall(call))
+	})
 	if admission != nil && ctx.Err() != nil && (err != nil || result.IsError) && tool.EffectClassOf(def) != tool.EffectReadOnly {
 		err = errorcode.Wrap(errorcode.UnknownOutcome, "tool result is unconfirmed after cancellation; do not replay", err)
 	}

@@ -44,12 +44,20 @@ const (
 	ToolOutcomeUnknown   ToolOutcome = "unknown_outcome"
 )
 
+// ToolProcessingFailure records a presentation failure separately from effect outcome.
+type ToolProcessingFailure struct {
+	Phase string `json:"phase"`
+	Name  string `json:"name"`
+	Error string `json:"error"`
+}
+
 // EventTool is the durable SDK tool-execution payload for one tool call or
 // result event. Input decodes numbers as json.Number so observation tokens
 // survive durable reload; Output and other open maps retain their established decoding.
 // ACP wire shapes are derived from this payload by surface projectors; they are
 // not the storage contract.
 type EventTool struct {
+	ProcessingFailure *ToolProcessingFailure `json:"processing_failure,omitempty"`
 	// Parent identifies an actual nested host call, independently of display metadata.
 	// Execution identifies this occurrence, independently of a reused protocol ID.
 	Execution tool.InvocationContext `json:"execution,omitempty"`
@@ -62,8 +70,10 @@ type EventTool struct {
 	Error     string           `json:"error,omitempty"`
 	ErrorCode string           `json:"error_code,omitempty"`
 	Parent    *EventParentTool `json:"parent,omitempty"`
-	// ModelCall retains the original protocol call when execution targets another tool.
-	ModelCall    *model.ToolCall     `json:"model_call,omitempty"`
+	// ModelCall retains the effective protocol envelope when execution targets another tool.
+	ModelCall *model.ToolCall `json:"model_call,omitempty"`
+	// ProposedCall is the original model proposal; it is evidence, never dispatch authority.
+	ProposedCall *model.ToolCall     `json:"proposed_call,omitempty"`
 	ID           string              `json:"id,omitempty"`
 	TurnComplete bool                `json:"turn_complete,omitempty"`
 	Name         string              `json:"name,omitempty"`
@@ -143,6 +153,8 @@ type EventCompactionContext struct {
 // is the ACP projection/control payload and must not be used as the local model
 // replay source.
 type Event struct {
+	ContextEdit             *ContextEditProvenance   `json:"context_edit,omitempty"`
+	InputEvidence           *InputEvidence           `json:"input_evidence,omitempty"`
 	AuthorizationRevocation *AuthorizationRevocation `json:"authorization_revocation,omitempty"`
 	ID                      string                   `json:"id,omitempty"`
 	IdempotencyKey          string                   `json:"idempotency_key,omitempty"`
@@ -211,6 +223,9 @@ func (e *Event) UnmarshalJSON(data []byte) error {
 	}
 	expanded, err := expandEventMedia(Event(decoded), fields.Media)
 	if err != nil {
+		return err
+	}
+	if err := validateCheckpointContract(&expanded); err != nil {
 		return err
 	}
 	*e = expanded

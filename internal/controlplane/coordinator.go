@@ -17,16 +17,15 @@ import (
 // CoordinatorConfig wires product-owned controller handoff coordination to
 // neutral SDK endpoint and participant mechanisms.
 type CoordinatorConfig struct {
-	Sessions              session.Service
-	Controllers           controller.Backend
-	Context               controller.ContextRouter
-	Clock                 func() time.Time
-	IDGenerator           func() string
-	FenceOwnerID          string
-	LifecycleContext      context.Context
-	Diagnostics           *slog.Logger
-	LifecycleInterceptors []agent.LifecycleInterceptor
-	TraceSink             agent.TraceSink
+	Sessions         session.Service
+	Controllers      controller.Backend
+	Context          controller.ContextRouter
+	Clock            func() time.Time
+	IDGenerator      func() string
+	FenceOwnerID     string
+	LifecycleContext context.Context
+	Diagnostics      *slog.Logger
+	TraceSink        agent.TraceSink
 }
 
 // Coordinator owns controller activation/deactivation and the atomic durable
@@ -38,7 +37,7 @@ type Coordinator struct {
 	context      controller.ContextRouter
 	clock        func() time.Time
 	idGenerator  func() string
-	lifecycle    agent.LifecycleOptions
+	lifecycle    agent.TraceOptions
 	fences       session.SessionFenceService
 	fenceOwnerID string
 	lifecycleCtx context.Context
@@ -78,10 +77,9 @@ func NewCoordinator(cfg CoordinatorConfig) (*Coordinator, error) {
 		fenceOwnerID: fenceOwnerID,
 		lifecycleCtx: lifecycleCtx,
 		diagnostics:  newFencePhaseDiagnostics(cfg.Diagnostics),
-		lifecycle: agent.LifecycleOptions{
-			Interceptors: append([]agent.LifecycleInterceptor(nil), cfg.LifecycleInterceptors...),
-			TraceSink:    cfg.TraceSink,
-			Clock:        cfg.Clock,
+		lifecycle: agent.TraceOptions{
+			TraceSink: cfg.TraceSink,
+			Clock:     cfg.Clock,
 		},
 	}, nil
 }
@@ -157,7 +155,7 @@ func (c *Coordinator) HandoffController(ctx context.Context, req agent.HandoffCo
 		SessionRef: session.NormalizeSessionRef(req.SessionRef),
 		Name:       strings.TrimSpace(req.Agent),
 	}
-	err := agent.ExecuteLifecycle(ctx, event, c.lifecycle, func(callCtx context.Context) error {
+	err := agent.TraceLifecycle(ctx, event, c.lifecycle, func(callCtx context.Context) error {
 		execute := func(executionCtx context.Context) error {
 			var handoffErr error
 			result, handoffErr = c.handoffController(executionCtx, req)

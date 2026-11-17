@@ -156,6 +156,7 @@ func (a *workspaceConfigAssembler) assembleProfileSnapshot(ctx context.Context, 
 	instance.activeRuntime.Assembly.Agents = agents
 	localConfig := runtime.Config{
 		Sessions: sessions, AgentFactory: chat.Factory{}, Compaction: compaction,
+		Hooks:       agent.Hooks{StreamMode: agent.StreamIncremental},
 		Diagnostics: a.deps.authorities.diagnostics, PolicyRegistry: toolpolicy.Registry{Base: policies, Authority: a.deps.authorities.userID, Rules: instance.policyRules}, DefaultPolicyMode: mode,
 		PersistPolicyConsent: instance.persistPolicyConsent,
 		SandboxPolicy:        sandboxPolicy,

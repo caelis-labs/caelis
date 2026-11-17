@@ -80,7 +80,13 @@ func guardianProjectEvent(e *session.Event) *session.Event {
 	var text string
 	user := session.EventTypeOf(e) == session.EventTypeUser && (e.Actor.Kind == session.ActorKindUser || e.Actor.Kind == "")
 	if user {
-		text = fmt.Sprintf("User message [%s]:\n%s", identity, guardianVisibleText(e))
+		original := session.CloneEvent(e)
+		if evidence := session.OriginalInputMessage(e); evidence != nil {
+			original.Message = evidence
+			original.Text = evidence.TextContent()
+			original.Protocol = nil
+		}
+		text = fmt.Sprintf("User message [%s]:\n%s", identity, guardianVisibleText(original))
 	} else if (session.EventTypeOf(e) == session.EventTypeToolCall || session.EventTypeOf(e) == session.EventTypeToolResult) && session.IsMainInvocationVisibleEvent(e) && e.Tool != nil {
 		kind, value := "Operation", e.Tool.Input
 		if session.EventTypeOf(e) == session.EventTypeToolResult {

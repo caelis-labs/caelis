@@ -123,8 +123,10 @@ type Call struct {
 	// Direct callers and model-supplied Input/Metadata do not grant identity.
 	Execution InvocationContext `json:"-"`
 	Parent    *ParentCall       `json:"-"`
-	// ModelCall retains the model protocol envelope when Runtime routes to a real tool.
-	ModelCall     *model.ToolCall `json:"-"`
+	// ModelCall retains the effective model protocol envelope when routing to a real tool.
+	ModelCall *model.ToolCall `json:"-"`
+	// ProposedCall is the original model proposal; it is evidence, never dispatch authority.
+	ProposedCall  *model.ToolCall `json:"proposed_call,omitempty"`
 	TargetBinding *Binding        `json:"-"`
 	// ModelStep identifies this call's position in one model-emitted tool-call
 	// batch. It is runtime-only execution context and is never sent back to a
@@ -477,6 +479,10 @@ func CloneCall(in Call) Call {
 		out.Parent = &value
 	}
 	out.Name = strings.TrimSpace(in.Name)
+	if in.ProposedCall != nil {
+		value := *in.ProposedCall
+		out.ProposedCall = &value
+	}
 	if in.ModelCall != nil {
 		value := *in.ModelCall
 		out.ModelCall = &value

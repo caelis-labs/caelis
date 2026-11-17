@@ -10,6 +10,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/agentcommunication"
+	"github.com/caelis-labs/caelis/agent-sdk/internal/hookrun"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/runtimeinput"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/mcpdiscovery"
@@ -21,15 +22,22 @@ import (
 	"github.com/google/uuid"
 )
 
-// Factory constructs baseline chat agents from one runtime.AgentSpec.
+// SupportsLoopHooks declares that this factory owns the typed chat phases.
+func (Factory) SupportsLoopHooks() {}
+
+// Factory constructs baseline chat agents from one AgentSpec.
 type Factory struct {
 	SystemPrompt string
 }
 
 // Agent is the minimal model-backed chat agent.
 type Agent struct {
-	preparedCalls  map[string]preparedToolCall
-	yieldedResults map[*session.Event]bool
+	validateModelRequest func(context.Context) (func(), error)
+	models               map[string]model.LLM
+	modelRevision        string
+	preparedCalls        map[string]preparedToolCall
+	yieldedResults       map[*session.Event]bool
+	outputStream         *textStream
 
 	name                string
 	model               model.LLM
@@ -100,7 +108,7 @@ func (f Factory) NewAgent(_ context.Context, spec agent.AgentSpec) (agent.Agent,
 		if name == "" {
 			name = "chat"
 		}
-		return &Agent{name: name, resolveModelRequest: spec.ResolveModelRequest, toolResultArtifacts: defaultToolResultArtifactStore()}, nil
+		return &Agent{name: name, models: spec.Models, resolveModelRequest: spec.ResolveModelRequest, toolResultArtifacts: defaultToolResultArtifactStore()}, nil
 	}
 	systemPrompt := ""
 	if raw, ok := spec.Metadata["system_prompt"].(string); ok {
@@ -116,6 +124,7 @@ func (f Factory) NewAgent(_ context.Context, spec agent.AgentSpec) (agent.Agent,
 	if err != nil {
 		return nil, err
 	}
+	chatAgent.models = spec.Models
 	chatAgent.deferredTools = spec.DeferredTools
 	chatAgent.reasoning = reasoningFromMetadata(spec.Metadata)
 	chatAgent.request = spec.Request.WithDefaults(agent.ModelRequestOptions{})
@@ -150,9 +159,35 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 		watchdog := newDefaultGenerationWatchdog()
 		visibility := tool.NewToolVisibilityForModel(a.tools, a.model)
 		for {
-			assistantMessage, calls, final, messageID, requestPrefix, ok, err := a.collectCanonicalModelStep(ctx, messages, watchdog, &visibility, func(event *session.Event) bool {
-				return yield(event, nil)
-			})
+			a.outputStream = nil
+			var assistantMessage model.Message
+			var calls []model.ToolCall
+			var final *model.Response
+			var messageID string
+			var requestPrefix prefixusage.Snapshot
+			ok := true
+			var err error
+			if early := hookrun.FromContext(ctx).TakeEarly(); early != nil {
+				if err = a.refreshModelRequest(ctx); err != nil {
+					yield(nil, err)
+					return
+				}
+				evidence := early.Evidence
+				evidence.ConfigurationRevision = a.modelRevision
+				a.outputStream, err = newTextStream(ctx, evidence)
+				if err != nil {
+					yield(nil, err)
+					return
+				}
+				assistantMessage = early.Message
+				final = &model.Response{Message: early.Message}
+				messageID = uuid.NewString()
+			} else {
+				assistantMessage, calls, final, messageID, requestPrefix, ok, err = a.collectCanonicalModelStep(ctx, &messages, watchdog, &visibility, func(event *session.Event) bool {
+					return yield(event, nil)
+				})
+			}
+
 			if !ok {
 				return
 			}
@@ -167,14 +202,29 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 				return
 			}
 			if len(calls) == 0 {
-				assistantEvent := modelResponseEvent(assistantMessage, final, messageID, a.model, requestPrefix)
-				if !yield(assistantEvent, nil) {
+				candidate, feedback, completeErr := a.completeCandidate(ctx, assistantMessage)
+				accepted, pendingErr := a.drainPendingSubmissions(ctx, &messages, func(e *session.Event) bool { return yield(e, nil) })
+				if pendingErr != nil {
+					yield(nil, pendingErr)
 					return
 				}
-				messages = append(messages, assistantMessage)
-				accepted, drainErr := a.drainFinalSubmissions(ctx, &messages, func(event *session.Event) bool {
-					return yield(event, nil)
-				})
+				if accepted {
+					watchdog.resetAll()
+					continue
+				}
+				if completeErr != nil {
+					yield(nil, completeErr)
+					return
+				}
+				if feedback != nil {
+					if !yield(feedback, nil) {
+						return
+					}
+					hookrun.FromContext(ctx).CommitFeedback(feedback.ID)
+					messages = append(messages, *feedback.Message)
+					continue
+				}
+				accepted, drainErr := a.drainFinalSubmissions(ctx, &messages, func(e *session.Event) bool { return yield(e, nil) })
 				if drainErr != nil {
 					yield(nil, drainErr)
 					return
@@ -183,12 +233,33 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 					watchdog.resetAll()
 					continue
 				}
+				if err := ctx.Err(); err != nil {
+					yield(nil, err)
+					return
+				}
+				candidate, err = a.finishOutput(ctx, candidate, messages)
+				if err != nil {
+					yield(nil, err)
+					return
+				}
+				final.Message = candidate
+				if !yield(modelResponseEvent(candidate, final, messageID, a.model, requestPrefix), nil) {
+					return
+				}
+				return
+			}
+
+			assistantMessage, err = a.finishOutput(ctx, assistantMessage, messages)
+			if err != nil {
+				yield(nil, err)
 				return
 			}
 			if err := a.prepareToolCalls(ctx, calls, &visibility); err != nil {
 				yield(nil, err)
 				return
 			}
+			assistantMessage = effectiveAssistantMessage(assistantMessage, calls)
+			final.Message = assistantMessage
 			toolCallEvents := modelToolCallEvents(assistantMessage, final, messageID, a.model, requestPrefix)
 			for _, event := range toolCallEvents {
 				a.applyPreparedFact(event)
@@ -222,10 +293,7 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 			if !ok {
 				return
 			}
-			if err != nil {
-				yield(nil, err)
-				return
-			}
+			terminalTool := false
 			for _, toolEvent := range toolEvents {
 				if !a.yieldedResults[toolEvent] && !yield(toolEvent, nil) {
 					return
@@ -235,8 +303,15 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 				if toolEvent != nil && toolEvent.Tool != nil && toolEvent.Tool.TurnComplete {
 					// The terminal callback receipt is durable before this Run exits.
 					// Do not consume queued input or issue another model request.
-					return
+					terminalTool = true
 				}
+			}
+			if err != nil {
+				yield(nil, err)
+				return
+			}
+			if terminalTool {
+				return
 			}
 			messages = append(messages, toolMessages...)
 			accepted, drainErr := a.drainPendingSubmissions(ctx, &messages, func(event *session.Event) bool {
@@ -255,7 +330,7 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 
 func (a *Agent) collectCanonicalModelStep(
 	ctx agent.Context,
-	messages []model.Message,
+	messages *[]model.Message,
 	watchdog *generationWatchdog,
 	visibility *tool.ToolVisibility,
 	yield func(*session.Event) bool,
@@ -272,7 +347,7 @@ func (a *Agent) collectCanonicalModelStep(
 		stream := a.request.StreamEnabled(false)
 		messageID := uuid.NewString()
 		request := &model.Request{
-			Messages:    messages,
+			Messages:    *messages,
 			Tools:       visibility.ModelSpecs(),
 			Reasoning:   a.reasoning,
 			Output:      a.request.OutputSpec(),
@@ -285,6 +360,23 @@ func (a *Agent) collectCanonicalModelStep(
 			request.Instructions = instructionsFromContext(ctx, a.systemPrompt)
 		}
 
+		run := hookrun.FromContext(ctx)
+		logicalID, assembly := run.RequestAssembly(uuid.NewString)
+		evidence := run.Evidence
+		evidence.ConfigurationRevision = a.modelRevision
+		evidence.LogicalRequestID = logicalID
+		evidence.AssemblyRevision = assembly
+		prepared, cached, prepareErr := a.prepareModel(ctx, evidence, request)
+		// ContextEdit updates the same Run context before tools, feedback or a
+		// stale assembly can continue. Only the checkpoint owner mutates it.
+		*messages = model.CloneMessages(request.Messages)
+		if prepareErr != nil {
+			if a.resolveModelRequest != nil && errors.Is(prepareErr, agent.ErrModelRequestSnapshotStale) {
+				continue
+			}
+			return model.Message{}, nil, nil, "", prefixusage.Snapshot{}, true, prepareErr
+		}
+		request = prepared
 		bindRequestSource(ctx, request)
 		modelCtx := model.WithProviderRequestMetadata(ctx, model.ProviderRequestMetadata{
 			SessionAffinity: ctx.Session().SessionID,
@@ -296,7 +388,16 @@ func (a *Agent) collectCanonicalModelStep(
 				return admit(ctx, agent.ModelRequestAdmission{RequestID: uuid.NewString()})
 			})
 		}
-		final, err := collectFinalResponse(modelCtx, a.model, request, messageID, watchdog, yield)
+		modelCtx = modelHookContext(modelCtx, evidence)
+		final := cached
+		var err error
+		if final == nil {
+			evidence.OutputSource = agent.HookOutputProvider
+			final, a.outputStream, err = collectFinalResponse(modelCtx, a.model, request, messageID, watchdog, yield)
+		} else {
+			evidence.OutputSource = agent.HookOutputCache
+			a.outputStream, err = newTextStream(ctx, evidence)
+		}
 		for _, receipt := range receipts {
 			if yield != nil && !yield(session.NewModelInvocationReceipt(receipt, "chat")) {
 				return model.Message{}, nil, nil, "", prefixusage.Snapshot{}, false, nil
@@ -309,16 +410,27 @@ func (a *Agent) collectCanonicalModelStep(
 			}
 			return model.Message{}, nil, nil, "", prefixusage.Snapshot{}, true, err
 		}
-		final.Message = normalizeAssistantCitations(final.Message, messages)
+		resultEvidence := evidence
+		resultEvidence.InvocationID = final.InvocationID
+		resultEvidence.AttemptOrdinal = uint64(len(receipts))
+		final, err = resultModel(ctx, resultEvidence, final)
+		if err != nil {
+			return model.Message{}, nil, nil, "", prefixusage.Snapshot{}, true, err
+		}
+		if hookrun.FromContext(ctx).Hooks.StreamMode != agent.StreamIncremental {
+			final.Message = normalizeAssistantCitations(final.Message, *messages)
+		}
 
 		assistantMessage, calls, err := validateAssistantToolCalls(final.Message)
 		if err == nil {
+			run.FinishRequest(logicalID)
 			return assistantMessage, calls, final, messageID, prefixusage.ForRequest(request), true, nil
 		}
 		if invalidAttempts >= maxInvalidToolCallRepairAttempts {
 			return model.Message{}, nil, nil, "", prefixusage.Snapshot{}, true, err
 		}
 		invalidAttempts++
+		run.FinishRequest(logicalID)
 		if reset := invalidToolCallAttemptResetEvent(invalidAttempts); reset != nil {
 			if yield != nil && !yield(reset) {
 				return model.Message{}, nil, nil, "", prefixusage.Snapshot{}, false, nil
@@ -351,10 +463,10 @@ func (a *Agent) executeStepToolCalls(
 	}
 	if len(calls) == 1 {
 		toolMessage, toolEvent, err := a.executeToolCallWithProgressAdmitted(ctx, calls[0], modelStepRef(stepID, 0, len(calls)), yieldProgress, visibility)
-		if err != nil {
+		if toolEvent == nil {
 			return nil, nil, true, err
 		}
-		return []model.Message{toolMessage}, []*session.Event{toolEvent}, true, nil
+		return []model.Message{toolMessage}, []*session.Event{toolEvent}, true, err
 	}
 	if !a.canExecuteStepToolCallsConcurrently(calls, visibility) {
 		return a.executeStepToolCallsSerial(ctx, stepID, calls, yieldProgress, visibility)
@@ -434,17 +546,13 @@ func (a *Agent) executeStepToolCalls(
 			}
 		}
 	}
-	if firstErr != nil {
-		return nil, nil, true, firstErr
-	}
-
 	messages := make([]model.Message, 0, len(results))
 	events := make([]*session.Event, 0, len(results))
 	for _, result := range results {
 		messages = append(messages, result.message)
 		events = append(events, result.event)
 	}
-	return messages, events, true, nil
+	return messages, events, true, firstErr
 }
 
 func (a *Agent) executeStepToolCallsSerial(
@@ -459,7 +567,11 @@ func (a *Agent) executeStepToolCallsSerial(
 	for index, call := range calls {
 		toolMessage, toolEvent, err := a.executeToolCallWithProgressAdmitted(ctx, call, modelStepRef(stepID, index, len(calls)), yieldProgress, visibility)
 		if err != nil {
-			return nil, nil, true, err
+			if toolEvent != nil {
+				messages = append(messages, toolMessage)
+				events = append(events, toolEvent)
+			}
+			return messages, events, true, err
 		}
 		if yieldProgress != nil && toolEvent != nil {
 			if !yieldProgress(toolEvent) {
@@ -518,7 +630,10 @@ func (a *Agent) drainFinalSubmissions(ctx agent.Context, messages *[]model.Messa
 		return a.drainPendingSubmissions(ctx, messages, yield)
 	}
 	for {
-		drained := drainer.DrainFinalSubmissions()
+		drained, err := drainer.DrainFinalSubmissions()
+		if err != nil {
+			return false, err
+		}
 		accepted, err := a.drainSubmissions(ctx, drained, messages, yield)
 		if accepted || err != nil || len(drained) == 0 {
 			return accepted, err
@@ -531,6 +646,15 @@ func (a *Agent) drainFinalSubmissions(ctx agent.Context, messages *[]model.Messa
 func (a *Agent) drainSubmissions(ctx agent.Context, drained []agent.Submission, messages *[]model.Message, yield func(*session.Event) bool) (bool, error) {
 	accepted := false
 	for _, submission := range drained {
+		if committer, ok := ctx.(runtimeinput.SubmissionCommitter); ok && (len(submission.Inputs) > 0 || isModelInputSubmission(submission)) {
+			committed, err := committer.CommitSubmission(submission)
+			if err != nil {
+				return accepted, err
+			}
+			*messages = append(*messages, committed...)
+			accepted = accepted || len(committed) > 0
+			continue
+		}
 		if len(submission.Inputs) > 0 {
 			if err := agent.ValidateSubmissionInputs(submission); err != nil {
 				return accepted, err

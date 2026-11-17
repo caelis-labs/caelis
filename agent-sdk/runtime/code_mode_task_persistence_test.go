@@ -40,6 +40,14 @@ func TestJSExecCanonicalCursorCommitsOnlyAdvancement(t *testing.T) {
 			if err != nil || len(entries) != 1 {
 				t.Fatalf("entries=%d %v", len(entries), err)
 			}
+			// A synchronously completed script returns its business value rather
+			// than a waiting snapshot. The Task remains the handle authority.
+			if handle == "" {
+				handle = entries[0].Handle
+			}
+			if handle == "" {
+				t.Fatal("completed Task lost its handle")
+			}
 			cursor, _ := taskInt64Value(entries[0].Metadata["model_output_cursor"])
 			if cursor <= 0 || entries[0].State != taskapi.StateCompleted {
 				t.Fatalf("selected output checkpoint missing: %+v", entries[0])

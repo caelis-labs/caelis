@@ -549,8 +549,11 @@ export interface CommandTarget {
 export interface CompactMetadata {
   context_window_tokens?: Uint64Decimal;
   contract_version?: Uint64Decimal;
+  purpose?: "compaction_summary" | "context_replacement";
+  replacement_messages?: Array<JSONValue>;
   revision?: Uint64Decimal;
   source_event_count?: Uint64Decimal;
+  source_stamp?: string;
   summarized_through_seq?: Uint64Decimal;
   total_tokens?: Uint64Decimal;
   [key: string]: JSONValue;

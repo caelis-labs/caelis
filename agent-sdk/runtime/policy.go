@@ -253,7 +253,7 @@ func (t policyWrappedTool) resolveApproval(ctx context.Context, request agent.Ap
 	}
 	if t.approval.runtime != nil {
 		event := t.approval.runtime.lifecycleEvent(ctx, agent.LifecycleApproval, request.Tool.Name, request.Call.ID)
-		err = t.approval.runtime.executeLifecycle(ctx, event, approvalCall)
+		err = t.approval.runtime.traceOperation(ctx, event, approvalCall)
 	} else {
 		err = approvalCall(ctx)
 	}

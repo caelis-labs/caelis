@@ -16,6 +16,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/internal/hookrun"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/runtimeinput"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -1139,7 +1140,7 @@ func TestChatAgentFinalDrainDoesNotLoseInputBehindEmptySubmission(t *testing.T) 
 			t.Fatal(err)
 		}
 	}
-	if drains != 3 || len(testModel.last.Messages) != 2 || testModel.last.Messages[1].TextContent() != "late report" {
+	if drains != 3 || len(testModel.last.Messages) != 1 || testModel.last.Messages[0].TextContent() != "late report" {
 		t.Fatalf("final drain lost continuation: drains=%d, model input=%#v", drains, testModel.last.Messages)
 	}
 }
@@ -1149,7 +1150,7 @@ type finalDrainContext struct {
 	drain func() []agent.Submission
 }
 
-func (c finalDrainContext) DrainFinalSubmissions() []agent.Submission { return c.drain() }
+func (c finalDrainContext) DrainFinalSubmissions() ([]agent.Submission, error) { return c.drain(), nil }
 
 func TestChatAgentDrainsPendingImageAsDurableUserMessage(t *testing.T) {
 	t.Parallel()
@@ -1510,7 +1511,7 @@ func TestCollectFinalResponseAnnotatesContextWindow(t *testing.T) {
 			TotalTokens:      17,
 		},
 	}
-	final, err := collectFinalResponse(context.Background(), testModel, &model.Request{}, "", nil, nil)
+	final, _, err := collectFinalResponse(context.Background(), testModel, &model.Request{}, "", nil, nil)
 	if err != nil {
 		t.Fatalf("collectFinalResponse() error = %v", err)
 	}
@@ -2664,7 +2665,7 @@ func TestCollectFinalResponseRejectsImagesForTextOnlyModel(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			probe := &requestCapabilityProbeModel{}
-			_, err := collectFinalResponse(context.Background(), probe, test.request, "", nil, nil)
+			_, _, err := collectFinalResponse(context.Background(), probe, test.request, "", nil, nil)
 			var capabilityErr *model.CapabilityError
 			if !errors.As(err, &capabilityErr) || capabilityErr.Capability != model.CapabilityImageInput {
 				t.Fatalf("collectFinalResponse() error = %#v, want image-input capability error", err)
@@ -3292,7 +3293,7 @@ func TestChatAgentStreamsAssistantChunksBeforeFinalMessage(t *testing.T) {
 	}
 
 	ctx := agent.NewContext(agent.ContextSpec{
-		Context: context.Background(),
+		Context: hookrun.WithRun(t.Context(), agent.Hooks{StreamMode: agent.StreamIncremental}, agent.HookContext{}),
 		Session: session.Session{
 			SessionRef: session.SessionRef{SessionID: "sess-stream"},
 		},
@@ -4046,6 +4047,7 @@ func (m *streamingModel) Generate(_ context.Context, req *model.Request) iter.Se
 			Type: model.StreamEventPartDelta,
 			PartDelta: &model.PartDelta{
 				Kind:      model.PartKindText,
+				Index:     1,
 				TextDelta: "hel",
 			},
 		}, nil) {
@@ -4055,6 +4057,7 @@ func (m *streamingModel) Generate(_ context.Context, req *model.Request) iter.Se
 			Type: model.StreamEventPartDelta,
 			PartDelta: &model.PartDelta{
 				Kind:      model.PartKindText,
+				Index:     1,
 				TextDelta: "lo",
 			},
 		}, nil) {
@@ -4238,7 +4241,7 @@ func TestChatAgentSpeculativeToolCallRetry(t *testing.T) {
 	}
 
 	ctx := agent.NewContext(agent.ContextSpec{
-		Context: context.Background(),
+		Context: hookrun.WithRun(t.Context(), agent.Hooks{StreamMode: agent.StreamIncremental}, agent.HookContext{}),
 		Session: session.Session{SessionRef: session.SessionRef{SessionID: "sess-retry-tool"}},
 		Events: []*session.Event{{
 			Type:    session.EventTypeUser,

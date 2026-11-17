@@ -14,14 +14,13 @@ import (
 type LifecycleOperation string
 
 const (
-	LifecycleRun       LifecycleOperation = "run"
-	LifecycleTurn      LifecycleOperation = "turn"
-	LifecycleModel     LifecycleOperation = "model"
-	LifecycleTool      LifecycleOperation = "tool"
-	LifecycleApproval  LifecycleOperation = "approval"
-	LifecycleCompact   LifecycleOperation = "compact"
-	LifecycleHandoff   LifecycleOperation = "handoff"
-	LifecycleGuardrail LifecycleOperation = "guardrail"
+	LifecycleRun      LifecycleOperation = "run"
+	LifecycleTurn     LifecycleOperation = "turn"
+	LifecycleModel    LifecycleOperation = "model"
+	LifecycleTool     LifecycleOperation = "tool"
+	LifecycleApproval LifecycleOperation = "approval"
+	LifecycleCompact  LifecycleOperation = "compact"
+	LifecycleHandoff  LifecycleOperation = "handoff"
 )
 
 // LifecycleEvent identifies an operation without exposing mutable request,
@@ -33,16 +32,6 @@ type LifecycleEvent struct {
 	TurnID     string             `json:"turn_id,omitempty"`
 	StepID     string             `json:"step_id,omitempty"`
 	Name       string             `json:"name,omitempty"`
-}
-
-// LifecycleNext is the next immutable operation in an interceptor chain.
-type LifecycleNext func(context.Context) error
-
-// LifecycleInterceptor observes or wraps one typed execution boundary. The
-// configured slice order is the nesting order: the first interceptor is the
-// outermost.
-type LifecycleInterceptor interface {
-	InterceptLifecycle(context.Context, LifecycleEvent, LifecycleNext) error
 }
 
 // TraceStatus identifies one observer-only lifecycle record.
@@ -72,18 +61,16 @@ type TraceSink interface {
 	RecordTrace(TraceRecord)
 }
 
-// LifecycleOptions configures one host-neutral interceptor invocation. OTel or
-// another telemetry implementation belongs in a host adapter implementing
-// TraceSink or LifecycleInterceptor.
-type LifecycleOptions struct {
-	Interceptors []LifecycleInterceptor
-	TraceSink    TraceSink
-	Clock        func() time.Time
+// TraceOptions configures read-only lifecycle telemetry. The sink cannot wrap
+// execution or influence its outcome.
+type TraceOptions struct {
+	TraceSink TraceSink
+	Clock     func() time.Time
 }
 
-// ExecuteLifecycle runs one operation through the configured interceptors and
-// emits observer-only start/terminal trace records.
-func ExecuteLifecycle(ctx context.Context, event LifecycleEvent, options LifecycleOptions, next LifecycleNext) error {
+// TraceLifecycle observes one owner-controlled operation and preserves its
+// result. Registered sinks receive only bounded read-only records.
+func TraceLifecycle(ctx context.Context, event LifecycleEvent, options TraceOptions, next func(context.Context) error) error {
 	if next == nil {
 		return fmt.Errorf("agent-sdk: lifecycle next is required")
 	}
@@ -102,18 +89,7 @@ func ExecuteLifecycle(ctx context.Context, event LifecycleEvent, options Lifecyc
 		dispatcher.record(TraceRecord{Event: event, Status: TraceStarted, At: startedAt})
 	}
 
-	chain := next
-	for i := len(options.Interceptors) - 1; i >= 0; i-- {
-		interceptor := options.Interceptors[i]
-		if interceptor == nil {
-			continue
-		}
-		following := chain
-		chain = func(callCtx context.Context) error {
-			return invokeLifecycleInterceptor(callCtx, event, interceptor, following)
-		}
-	}
-	err := chain(ctx)
+	err := next(ctx)
 	finishedAt := clock()
 	record := TraceRecord{
 		Event:    event,
@@ -129,15 +105,6 @@ func ExecuteLifecycle(ctx context.Context, event LifecycleEvent, options Lifecyc
 		dispatcher.record(record)
 	}
 	return err
-}
-
-func invokeLifecycleInterceptor(ctx context.Context, event LifecycleEvent, interceptor LifecycleInterceptor, next LifecycleNext) (err error) {
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			err = fmt.Errorf("agent-sdk: %s lifecycle interceptor panic: %v", event.Operation, recovered)
-		}
-	}()
-	return interceptor.InterceptLifecycle(ctx, event, next)
 }
 
 func normalizeLifecycleEvent(event LifecycleEvent) LifecycleEvent {

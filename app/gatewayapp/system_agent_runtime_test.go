@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
@@ -15,17 +16,17 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/session/memory"
 )
 
-func TestSystemManagedAgentUsesCoreRuntimeLifecycleAndJournalPipeline(t *testing.T) {
+func TestSystemManagedAgentUsesCoreRuntimeHooksAndFacts(t *testing.T) {
 	t.Parallel()
 
 	staging := inmemory.NewStore(inmemory.Config{})
 	interceptor := &systemManagedLifecycleRecorder{}
-	guardrail := &systemManagedGuardrailRecorder{}
+	startHook := &systemManagedStartRecorder{}
 	runner := newSystemManagedAgentRuntimeWithConfig(systemManagedAgentRuntimeConfig{
-		AgentFactory:          chat.Factory{},
-		StagingSessions:       func() session.Service { return staging },
-		LifecycleInterceptors: []agent.LifecycleInterceptor{interceptor},
-		Guardrails:            []agent.GuardrailSpec{{Guardrail: guardrail, OnFailure: agent.GuardrailFailClosed}},
+		AgentFactory:    chat.Factory{},
+		StagingSessions: func() session.Service { return staging },
+		TraceSink:       interceptor,
+		Hooks:           agent.Hooks{TurnStart: []agent.Hook[struct{}, agent.TurnStartDecision]{{Name: "start", Apply: startHook.Apply}}},
 	})
 	parent := session.Session{SessionRef: session.SessionRef{
 		AppName: "caelis", UserID: "user-1", SessionID: "parent-session", WorkspaceKey: "workspace-1",
@@ -46,8 +47,8 @@ func TestSystemManagedAgentUsesCoreRuntimeLifecycleAndJournalPipeline(t *testing
 			t.Fatalf("lifecycle events = %#v, want %q", interceptor.snapshot(), operation)
 		}
 	}
-	if guardrail.calls() != 1 {
-		t.Fatalf("guardrail calls = %d, want one Core Runtime input pass", guardrail.calls())
+	if startHook.calls() != 1 {
+		t.Fatalf("startHook calls = %d, want one Core Runtime input pass", startHook.calls())
 	}
 	plan, err := systemManagedAgentRunPlanFor(systemManagedAgentRunRequest{
 		AgentID: guardianSceneID, Model: systemManagedAgentResponseModel{}, ParentSession: parent,
@@ -104,31 +105,28 @@ type systemManagedLifecycleRecorder struct {
 	events []agent.LifecycleEvent
 }
 
-type systemManagedGuardrailRecorder struct {
+type systemManagedStartRecorder struct {
 	mu    sync.Mutex
 	count int
 }
 
-func (*systemManagedGuardrailRecorder) Name() string { return "system-managed-test" }
-
-func (r *systemManagedGuardrailRecorder) ApplyGuardrail(_ context.Context, input agent.GuardrailInput) (agent.GuardrailInput, error) {
+func (r *systemManagedStartRecorder) Apply(_ context.Context, _ agent.HookContext, _ struct{}) (agent.TurnStartDecision, error) {
 	r.mu.Lock()
 	r.count++
 	r.mu.Unlock()
-	return input, nil
+	return agent.TurnStartDecision{}, nil
 }
 
-func (r *systemManagedGuardrailRecorder) calls() int {
+func (r *systemManagedStartRecorder) calls() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.count
 }
 
-func (r *systemManagedLifecycleRecorder) InterceptLifecycle(ctx context.Context, event agent.LifecycleEvent, next agent.LifecycleNext) error {
+func (r *systemManagedLifecycleRecorder) RecordTrace(record agent.TraceRecord) {
 	r.mu.Lock()
-	r.events = append(r.events, event)
+	r.events = append(r.events, record.Event)
 	r.mu.Unlock()
-	return next(ctx)
 }
 
 func (r *systemManagedLifecycleRecorder) snapshot() []agent.LifecycleEvent {
@@ -138,12 +136,18 @@ func (r *systemManagedLifecycleRecorder) snapshot() []agent.LifecycleEvent {
 }
 
 func (r *systemManagedLifecycleRecorder) saw(operation agent.LifecycleOperation) bool {
-	for _, event := range r.snapshot() {
-		if event.Operation == operation {
-			return true
+	deadline := time.Now().Add(time.Second)
+	for {
+		for _, event := range r.snapshot() {
+			if event.Operation == operation {
+				return true
+			}
 		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(time.Millisecond)
 	}
-	return false
 }
 
 func TestSystemManagedAgentRegistryEntries(t *testing.T) {

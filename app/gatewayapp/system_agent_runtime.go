@@ -147,12 +147,11 @@ func systemManagedHistoryExtends(previous, next []*session.Event) bool {
 }
 
 type systemManagedAgentRuntimeConfig struct {
-	AgentFactory          agent.AgentFactory
-	StagingSessions       func() session.Service
-	LifecycleInterceptors []agent.LifecycleInterceptor
-	TraceSink             agent.TraceSink
-	Guardrails            []agent.GuardrailSpec
-	Diagnostics           *slog.Logger
+	AgentFactory    agent.AgentFactory
+	Hooks           agent.Hooks
+	StagingSessions func() session.Service
+	TraceSink       agent.TraceSink
+	Diagnostics     *slog.Logger
 }
 
 type systemManagedAgentRegistry struct {
@@ -178,8 +177,7 @@ func newSystemManagedAgentRuntimeWithConfig(config systemManagedAgentRuntimeConf
 			return inmemory.NewStore(inmemory.Config{})
 		}
 	}
-	config.LifecycleInterceptors = append([]agent.LifecycleInterceptor(nil), config.LifecycleInterceptors...)
-	config.Guardrails = append([]agent.GuardrailSpec(nil), config.Guardrails...)
+	config.Hooks = agent.CloneHooks(config.Hooks)
 	return &systemManagedAgentRuntime{config: config}
 }
 
@@ -267,14 +265,14 @@ func (r *systemManagedAgentRuntime) Run(ctx context.Context, req systemManagedAg
 		core = previous.core
 	} else {
 		core, err = sdkruntime.New(sdkruntime.Config{
-			Compactor:             compactor,
-			Sessions:              staging,
-			AgentFactory:          config.AgentFactory,
-			Compaction:            plan.Compaction,
-			LifecycleInterceptors: config.LifecycleInterceptors,
-			TraceSink:             config.TraceSink,
-			Guardrails:            config.Guardrails,
-			Diagnostics:           config.Diagnostics,
+			Compactor:    compactor,
+			Sessions:     staging,
+			AgentFactory: config.AgentFactory,
+			Compaction:   plan.Compaction,
+			TraceSink:    config.TraceSink,
+			Hooks:        config.Hooks,
+			HookPurpose:  agent.HookPurposeSystemAgent,
+			Diagnostics:  config.Diagnostics,
 		})
 		if err != nil {
 			return systemManagedAgentRunResult{}, err

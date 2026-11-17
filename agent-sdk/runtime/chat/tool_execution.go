@@ -7,6 +7,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/agent-sdk/internal/hookrun"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/mcpdiscovery"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
@@ -154,7 +155,7 @@ func (a *Agent) executeToolCallAdmitted(
 	invocation.RuntimeReasoning = a.reasoning
 	invocation.RuntimeServiceTier = a.request.ServiceTier
 	invocation.Observer = observer
-	result, err := selectedTool.Call(toolbinding.WithPrepared(ctx, invocation), invocation)
+	result, err := selectedTool.Call(toolbinding.WithPrepared(ctx, invocation, prepared.result), invocation)
 	complete, _ := tool.CloneResult(result, nil)
 
 	if err != nil {
@@ -169,6 +170,12 @@ func (a *Agent) executeToolCallAdmitted(
 	result = a.admitToolSearchResult(ctx, selectedTool.Definition(), call, result)
 	canonical, truncationMeta := canonicalToolResult(result, a.toolResultArtifacts)
 	message := toolResultMessageFromCanonical(call, canonical)
+	originalView := model.CloneMessage(message)
+	message, viewErr := hookrun.ModelView(ctx, selectedTool.Definition(), invocation, message)
+	if viewErr != nil {
+		message = hookrun.FailedView(originalView)
+		err = &hookrun.ProcessingError{Cause: viewErr, EffectError: err, Failed: complete.IsError}
+	}
 	eventMeta := truncationMeta
 	if toolbinding.IsTaskResultSource(selectedTool) {
 		eventMeta = mergeEventMeta(eventMeta, runtimeTaskResultSourceMeta(true))
@@ -177,6 +184,7 @@ func (a *Agent) executeToolCallAdmitted(
 	if err != nil && (len(complete.Content) > 0 || complete.StructuredContent != nil) {
 		event.Tool.Result = &complete
 	}
+	event.Tool.ProcessingFailure = hookrun.ProcessingFailure(err)
 	a.applyPreparedFact(event)
 	if err != nil {
 		event.Tool.Error = err.Error()
@@ -185,7 +193,19 @@ func (a *Agent) executeToolCallAdmitted(
 			event.Tool.Outcome = "unknown_outcome"
 		}
 	}
+	var processing *hookrun.ProcessingError
+	if errors.As(err, &processing) {
+		effect, effectErr := hookrun.EffectResult(complete, err)
+		event.Tool.Outcome = session.ToolOutcome(processingOutcome(effect, effectErr))
+		if event.Tool.Outcome == session.ToolOutcomeSucceeded {
+			event.Tool.Status = "completed"
+		}
+	}
 	a.presentMCPEvent(event)
+	var hookErr *agent.HookError
+	if errors.As(err, &hookErr) {
+		return message, event, err
+	}
 	return message, event, nil
 }
 
@@ -269,4 +289,21 @@ func (a *Agent) lookupRunTool(name string, visibility *tool.ToolVisibility) (too
 		return a.lookupTool(name)
 	}
 	return visibility.LookupTool(name)
+}
+
+// CanonicalToolResult projects a complete result for a nested fact without
+// changing the value returned to the calling script.
+func CanonicalToolResult(call model.ToolCall, result tool.Result) model.Message {
+	canonical, _ := canonicalToolResult(result, nil)
+	return toolResultMessageFromCanonical(call, canonical)
+}
+
+func processingOutcome(r tool.Result, err error) string {
+	if errorcode.Is(err, errorcode.UnknownOutcome) || errors.Is(err, context.Canceled) {
+		return "unknown_outcome"
+	}
+	if err != nil || r.IsError {
+		return "failed"
+	}
+	return "succeeded"
 }

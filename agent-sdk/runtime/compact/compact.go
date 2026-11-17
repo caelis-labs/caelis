@@ -2,6 +2,7 @@ package compact
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/caelis-labs/caelis/agent-sdk/display"
@@ -120,7 +121,12 @@ func PromptEventsFromLatestCompact(events []*session.Event) []*session.Event {
 	}
 	if data, ok := CompactEventDataFromEvent(visible[index]); ok {
 		out := make([]*session.Event, 0, len(visible[index:]))
-		if replacement := replacementTextEvent(visible[index]); replacement != nil {
+		if data.Purpose == session.CheckpointReplacement {
+			for i, m := range data.ReplacementMessages {
+				copy := model.CloneMessage(m)
+				out = append(out, &session.Event{ID: visible[index].ID + fmt.Sprintf("/view/%d", i), Type: session.EventTypeContext, Visibility: session.VisibilityCanonical, Actor: session.ActorRef{Kind: session.ActorKindSystem, Name: "context_replacement"}, Message: &copy})
+			}
+		} else if replacement := replacementTextEvent(visible[index]); replacement != nil {
 			out = append(out, replacement)
 		}
 		out = append(out, eventsAfterCheckpointCoverage(visible, index, data)...)
@@ -148,7 +154,7 @@ func EventsAfterLatestCompact(events []*session.Event) []*session.Event {
 }
 
 func eventsAfterCheckpointCoverage(events []*session.Event, checkpointIndex int, data CompactEventData) []*session.Event {
-	if data.ContractVersion != CompactContractVersion || data.SummarizedThroughSeq == 0 {
+	if (data.ContractVersion != CompactContractVersion && data.ContractVersion != 2) || data.SummarizedThroughSeq == 0 {
 		return nonCompactEvents(events[checkpointIndex+1:])
 	}
 	out := make([]*session.Event, 0, len(events)-checkpointIndex-1)
@@ -207,7 +213,7 @@ func lastCompactIndex(events []*session.Event) int {
 			continue
 		}
 		data, ok := CompactEventDataFromEvent(event)
-		if !ok || data.ContractVersion != CompactContractVersion || data.SummarizedThroughSeq == 0 {
+		if !ok || (data.ContractVersion != CompactContractVersion && data.ContractVersion != 2) || data.SummarizedThroughSeq == 0 {
 			legacyIndex = i
 			continue
 		}

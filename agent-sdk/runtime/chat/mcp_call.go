@@ -2,8 +2,10 @@ package chat
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
+	"github.com/caelis-labs/caelis/agent-sdk/internal/hookrun"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -94,7 +96,10 @@ func (a *Agent) bindMCPCalls(ctx context.Context, calls []model.ToolCall, visibi
 				bound.err = tool.NewError(tool.ErrorCodeStaleRevision, "MCP binding changed or is unavailable")
 			default:
 				bound.target = one
-				bound.err = tool.ValidateMCPArguments(definition, []byte(actual.Args))
+				// Preserve paired model-error handling when no transform is installed.
+				if len(hookrun.FromContext(ctx).Hooks.ToolPrepare) == 0 {
+					bound.err = tool.ValidateMCPArguments(definition, json.RawMessage(actual.Args))
+				}
 			}
 		}
 		a.boundCalls[call.ID] = bound

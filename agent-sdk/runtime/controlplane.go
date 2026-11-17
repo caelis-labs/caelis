@@ -7,7 +7,9 @@ import (
 	"strings"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/agentcommunication"
+	"github.com/caelis-labs/caelis/agent-sdk/internal/hookrun"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/controller"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
@@ -64,6 +66,8 @@ func (r *Runtime) runACPControllerTurn(
 		turnID = r.nextID("turn", nil)
 	}
 	ctx = withLifecycleScope(ctx, lifecycleScope{sessionRef: ref, runID: runID, turnID: turnID})
+	ctx = hookrun.WithRun(ctx, r.hooks, agent.HookContext{SessionRef: ref, RunID: runID, TurnID: turnID, Purpose: r.hookPurpose})
+	hookrun.FromContext(ctx).Trace = r.lifecycle
 	if err := r.beginRun(ref, runID); err != nil {
 		cancel()
 		return agent.RunResult{}, err
@@ -153,6 +157,19 @@ func (r *Runtime) executeACPControllerTurn(
 		handle.publishError(inputErr)
 		return
 	}
+	inputEvents, inputErr = r.prepareHookInputs(ctx, inputEvents)
+	if inputErr == nil {
+		var start []*session.Event
+		start, inputErr = r.runTurnStartHooks(ctx)
+		inputEvents = append(inputEvents, start...)
+	}
+	if inputErr == nil && hookrun.FromContext(ctx).TakeEarly() != nil {
+		inputErr = errorcode.New(errorcode.Unsupported, "external ACP Agent cannot enforce an early-response hook decision")
+	}
+	if inputErr != nil {
+		handle.publishError(inputErr)
+		return
+	}
 	var lastInputEvent *session.Event
 	persistedInputs, err := r.appendInputEvents(ctx, ref, inputEvents)
 	if err != nil {
@@ -184,6 +201,15 @@ func (r *Runtime) executeACPControllerTurn(
 		} else if lastInputEvent != nil && lastInputEvent.Message != nil {
 			controllerInput = ""
 			controllerParts = model.ContentPartsFromParts(lastInputEvent.Message.Parts)
+		}
+	}
+	if len(r.hooks.Input)+len(r.hooks.TurnStart) > 0 {
+		controllerInput = ""
+		controllerParts = nil
+		for _, e := range persistedInputs {
+			if e.Message != nil {
+				controllerParts = append(controllerParts, model.ContentPartsFromParts(e.Message.Parts)...)
+			}
 		}
 	}
 	turnReq := controller.TurnRequest{
@@ -230,8 +256,8 @@ func (r *Runtime) executeACPControllerTurn(
 	}
 	var turnResult controller.TurnResult
 	var forwarding agent.ControllerEventSession
-	err = r.executeLifecycle(ctx, r.lifecycleEvent(ctx, agent.LifecycleRun, "acp", ""), func(runCtx context.Context) error {
-		return r.executeLifecycle(runCtx, r.lifecycleEvent(runCtx, agent.LifecycleTurn, "acp", ""), func(turnCtx context.Context) error {
+	err = r.traceOperation(ctx, r.lifecycleEvent(ctx, agent.LifecycleRun, "acp", ""), func(runCtx context.Context) error {
+		return r.traceOperation(runCtx, r.lifecycleEvent(runCtx, agent.LifecycleTurn, "acp", ""), func(turnCtx context.Context) error {
 			var turnErr error
 			forwarding, turnErr = newForwarding(turnCtx)
 			if turnErr != nil {

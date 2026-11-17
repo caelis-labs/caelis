@@ -25,35 +25,32 @@ type commandObservationOrder struct {
 	waitReturned chan struct{}
 }
 
-func (o commandObservationOrder) InterceptLifecycle(ctx context.Context, event agent.LifecycleEvent, next agent.LifecycleNext) error {
-	if event.Operation != agent.LifecycleTool {
-		return next(ctx)
-	}
-	if event.StepID == "terminal-wait" {
-		err := next(ctx)
+func (o commandObservationOrder) Invoke(ctx context.Context, e agent.HookContext, next agent.ToolNext) (tool.Result, error) {
+	if e.Tool.ID == "terminal-wait" {
+		r, err := next(ctx)
 		close(o.waitReturned)
-		return err
+		return r, err
 	}
-	if event.StepID != "snapshot-read" {
+	if e.Tool.ID != "snapshot-read" {
 		return next(ctx)
 	}
 	select {
 	case <-o.command.waitStarted:
 	case <-ctx.Done():
-		return ctx.Err()
+		return tool.Result{}, ctx.Err()
 	}
 	if o.afterWait {
 		o.command.complete()
 		select {
 		case <-o.waitReturned:
 		case <-ctx.Done():
-			return ctx.Err()
+			return tool.Result{}, ctx.Err()
 		}
 		return next(ctx)
 	}
-	err := next(ctx)
+	r, err := next(ctx)
 	o.command.complete()
-	return err
+	return r, err
 }
 
 func TestRuntimeConcurrentTaskObservationsPreserveProducerCompletion(t *testing.T) {
@@ -80,8 +77,8 @@ func TestRuntimeConcurrentTaskObservationsPreserveProducerCompletion(t *testing.
 			command.result.ExitCode = 0
 			rt, err := New(Config{
 				Sessions: files, TaskStore: sessionfile.NewTaskStore(files), AgentFactory: chat.Factory{},
-				DefaultPolicyMode:     presets.ModeAutoReview,
-				LifecycleInterceptors: []agent.LifecycleInterceptor{commandObservationOrder{command: command, afterWait: afterWait, waitReturned: make(chan struct{})}},
+				DefaultPolicyMode: presets.ModeAutoReview,
+				Hooks:             agent.Hooks{ToolInvoke: []agent.ToolInvokeHook{{Name: "observation-order", Invoke: commandObservationOrder{command: command, afterWait: afterWait, waitReturned: make(chan struct{})}.Invoke}}},
 			})
 			if err != nil {
 				t.Fatal(err)

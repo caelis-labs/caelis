@@ -119,7 +119,7 @@ func assertMigrationSentinel(t *testing.T, object map[string]any, key, want stri
 }
 
 func TestCurrentSchemaMigrationPreservesPayloadWithoutAliasing(t *testing.T) {
-	raw := json.RawMessage(` { "schema":3, "future":{"large":"preserved"}, "journal": { "schema":1, "execution":{"schema":1,"unknown":123}, "tool_execution":{"schema":1}, "pause_token":{"schema":1} } } `)
+	raw := json.RawMessage(` { "schema":4, "future":{"large":"preserved"}, "journal": { "schema":1, "execution":{"schema":1,"unknown":123}, "tool_execution":{"schema":1}, "pause_token":{"schema":1} } } `)
 	migrated, err := session.MigrateEventJSON(raw)
 	if err != nil {
 		t.Fatal(err)
@@ -139,7 +139,7 @@ func TestCurrentSchemaMigrationPreservesPayloadWithoutAliasing(t *testing.T) {
 }
 
 func TestCurrentAndRetiredFutureSchemasFailClosed(t *testing.T) {
-	for _, raw := range []string{`{"schema":4}`, `{"schema":3,"approval":{"schema":2}}`, `{"schema":2,"journal":{"schema":2}}`, `{"schema":2,"journal":{"schema":1,"execution":{"schema":2}}}`, `{"schema":2,"journal":{"schema":1,"tool_execution":{"schema":2}}}`} {
+	for _, raw := range []string{`{"schema":5}`, `{"schema":3,"approval":{"schema":2}}`, `{"schema":2,"journal":{"schema":2}}`, `{"schema":2,"journal":{"schema":1,"execution":{"schema":2}}}`, `{"schema":2,"journal":{"schema":1,"tool_execution":{"schema":2}}}`} {
 		var event session.Event
 		if err := json.Unmarshal([]byte(raw), &event); err == nil {
 			t.Fatalf("future schema accepted: %s", raw)

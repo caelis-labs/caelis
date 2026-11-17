@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"fmt"
 	"sync/atomic"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
@@ -28,6 +29,7 @@ func (r *Runtime) wrapModelRequestResolver(ctx context.Context, active session.S
 		overrides.ServiceTier = ""
 		snapshot.Request = overrides.WithDefaults(snapshot.Request)
 		bound := cloneAgentSpec(spec)
+		bound.Models = snapshot.Models
 		bound.Model, bound.Tools, bound.Request = snapshot.Model, snapshot.Tools, snapshot.Request
 		bound.DeferredTools = snapshot.DeferredTools
 		bound.ResolveModelRequest = nil
@@ -57,6 +59,7 @@ func (r *Runtime) wrapModelRequestResolver(ctx context.Context, active session.S
 			}
 			return agent.ModelRequestSnapshot{}, err
 		}
+		snapshot.Models = bound.Models
 		snapshot.Model, snapshot.Tools, snapshot.DeferredTools = bound.Model, bound.Tools, bound.DeferredTools
 		if catalog, _ := bound.Metadata[codeModeCatalogKey].(string); catalog != "" {
 			snapshot.Instructions = append(snapshot.Instructions, model.NewTextPart(catalog))
@@ -99,7 +102,16 @@ func (r *Runtime) prepareAgentSpec(ctx context.Context, active session.Session, 
 	if authority == nil && r.compaction.Enabled {
 		authority = &modelRequestAuthority{epoch: "static", deferredTools: spec.DeferredTools, validate: func(context.Context) (func(), error) { return func() {}, nil }, refs: 1}
 	}
-	spec.Model = r.wrapModelForLifecycle(r.wrapModelForAutoCompaction(ref, spec.Model, authority))
+	for key, candidate := range spec.Models {
+		if candidate == nil {
+			return fmt.Errorf("model candidate %q is nil", key)
+		}
+		if err := validateAgentSpecCapabilities(candidate, spec.Tools, spec.Request.OutputSpec(), spec.Request.StreamEnabled(false), spec.RequiredModelCapabilities); err != nil {
+			return err
+		}
+		spec.Models[key] = r.wrapModelForAutoCompaction(ref, candidate, authority)
+	}
+	spec.Model = r.wrapModelForAutoCompaction(ref, spec.Model, authority)
 	spec.Tools = r.wrapToolsForRuntime(active, ref, *spec, runtimeToolContext{
 		mode: modeName, approvalMode: string(r.currentApprovalMode(state)),
 		approvalRequester: req.ApprovalRequester, runID: runID, turnID: turnID,

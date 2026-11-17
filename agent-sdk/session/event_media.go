@@ -84,7 +84,7 @@ func eventMediaID(data string) string {
 }
 
 func expandEventMedia(e Event, media map[string]string) (Event, error) {
-	if media != nil && e.Schema != 2 && e.Schema != EventSchemaVersion {
+	if media != nil && e.Schema != 2 && e.Schema != 3 && e.Schema != EventSchemaVersion {
 		return Event{}, fmt.Errorf("agent-sdk/session: event media requires schema %d", EventSchemaVersion)
 	}
 	for id, data := range media {
@@ -117,6 +117,14 @@ func expandEventMedia(e Event, media map[string]string) (Event, error) {
 // mapEventMedia traverses complete current tool values and passive legacy media.
 func mapEventMedia(e Event, kind model.MediaSourceKind, visit func(model.MediaSource) (model.MediaSource, error)) (Event, error) {
 	out := e
+	if e.InputEvidence != nil {
+		v := *e.InputEvidence
+		v.Message = model.CloneMessage(v.Message)
+		if err := visitPartMedia(v.Message.Parts, visit); err != nil {
+			return Event{}, err
+		}
+		out.InputEvidence = &v
+	}
 	if e.Message != nil {
 		m := model.CloneMessage(*e.Message)
 		if err := visitPartMedia(m.Parts, visit); err != nil {

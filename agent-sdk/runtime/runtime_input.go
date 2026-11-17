@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"context"
 	"strings"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
@@ -12,20 +13,27 @@ import (
 // with the producing Runtime, without exposing a Session writer to the Agent.
 type localInputContext struct {
 	agent.Context
-	runner *runner
-	commit func([]agent.AgentCommunicationInput) ([]model.Message, error)
+	runner        *runner
+	contextSource func() (agent.ContextSource, error)
+	contextEdit   func(string, string, agent.ContextEdit, func(context.Context) (func(), error)) ([]*session.Event, error)
+	commit        func(agent.Submission) ([]model.Message, error)
 }
 
 func (c *localInputContext) CommitAgentInputBatch(inputs []agent.AgentCommunicationInput) ([]model.Message, error) {
-	return c.commit(inputs)
+	return c.commit(agent.Submission{Kind: agent.SubmissionKindAgentCommunication, Inputs: inputs})
 }
 
-func (c *localInputContext) DrainFinalSubmissions() []agent.Submission {
-	taskScopeFromContext(c.runner.ctx).stopCodeMode()
-	if !taskScopeFromContext(c.runner.ctx).wait(c.runner.ctx, c.runner.inputReadySignal()) {
-		return c.runner.drainSubmissions()
+func (c *localInputContext) DrainFinalSubmissions() ([]agent.Submission, error) {
+	taskScopeFromContext(c.Context).stopCodeMode()
+	if !taskScopeFromContext(c.Context).wait(c.Context, c.runner.inputReadySignal()) {
+		return c.runner.drainSubmissions(), nil
 	}
-	return c.runner.drainFinalSubmissions()
+	if scope := asyncScope(c.Context); scope != nil {
+		if err := scope.drain(); err != nil {
+			return nil, err
+		}
+	}
+	return c.runner.drainFinalSubmissions(), nil
 }
 
 func buildSteeringInputEvents(active session.Session, turnID string, submission agent.Submission) ([]*session.Event, error) {
@@ -61,4 +69,15 @@ func preserveSteeringCorrelation(event *session.Event, metadata map[string]any) 
 		}
 		event.Meta[key] = value
 	}
+}
+
+func (c *localInputContext) CommitSubmission(s agent.Submission) ([]model.Message, error) {
+	return c.commit(s)
+}
+
+func (c *localInputContext) ContextEditSource() (agent.ContextSource, error) {
+	return c.contextSource()
+}
+func (c *localInputContext) CommitContextEdit(logical, name string, edit agent.ContextEdit, validate func(context.Context) (func(), error)) ([]*session.Event, error) {
+	return c.contextEdit(logical, name, edit, validate)
 }
