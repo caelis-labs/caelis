@@ -17,6 +17,7 @@ type HookContext struct {
 	SessionRef            session.SessionRef
 	RunID, TurnID         string
 	Purpose               HookPurpose
+	OutputSource          HookOutputSource
 	LogicalRequestID      string
 	AssemblyRevision      uint64
 	ConfigurationRevision string
@@ -27,6 +28,17 @@ type HookContext struct {
 	ToolDefinition        *tool.Definition
 	ContextSource         ContextSource
 }
+
+// HookOutputSource identifies a candidate's origin without claiming provider
+// work for synthetic output. Synthetic candidates have no invocation identity.
+type HookOutputSource string
+
+const (
+	HookOutputProvider   HookOutputSource = "provider"
+	HookOutputCache      HookOutputSource = "cache"
+	HookOutputInputEarly HookOutputSource = "input_early"
+	HookOutputTurnEarly  HookOutputSource = "turn_start_early"
+)
 
 // HookPurpose separates the main loop from private auxiliary model calls.
 type HookPurpose string
@@ -165,7 +177,7 @@ const (
 	StreamIncremental StreamMode = "incremental"
 )
 
-// StreamTransformer owns text state for exactly one actual attempt. Transform
+// StreamTransformer owns text state for one actual attempt or synthetic candidate. Transform
 // and Finish run in order; they never see media, signatures, identity or usage.
 type StreamTransformer interface {
 	Transform(context.Context, string) (string, error)

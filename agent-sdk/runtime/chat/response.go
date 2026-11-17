@@ -35,12 +35,12 @@ func collectFinalResponse(
 	messageID string,
 	watchdog *generationWatchdog,
 	yieldChunk func(*session.Event) bool,
-) (*model.Response, error) {
+) (*model.Response, *textStream, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := model.ValidateRequestCapabilities(llm, req); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	incremental := hookrun.FromContext(ctx).Hooks.StreamMode == agent.StreamIncremental
 	ctx = model.WithIrreversibleOutputTracking(ctx)
@@ -48,6 +48,7 @@ func collectFinalResponse(
 	var ordinal uint64
 	ctx = model.WithInvocationStart(ctx, func(ctx context.Context, in model.Invocation, _ *model.Request) error {
 		e := hookrun.RequestEvidence(ctx)
+		e.OutputSource = agent.HookOutputProvider
 		e.InvocationID = in.ID
 		ordinal++
 		e.AttemptOrdinal = ordinal
@@ -73,10 +74,10 @@ func collectFinalResponse(
 	}
 	for event, err := range model.Generate(ctx, llm, req) {
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			return nil, ctxErr
+			return nil, nil, ctxErr
 		}
 		if event != nil && event.Type == model.StreamEventAttemptReset {
 			pipeline = nil
@@ -84,7 +85,7 @@ func collectFinalResponse(
 			textFilterOrder = textFilterOrder[:0]
 		}
 		if err := watchdog.observeStreamEvent(event); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if req != nil && req.Stream && incremental {
 			visibleEvent := event
@@ -100,19 +101,19 @@ func collectFinalResponse(
 				copyDelta := *event.PartDelta
 				copyDelta.TextDelta = filter.Push(copyDelta.TextDelta)
 				if pipeline == nil {
-					return nil, errors.New("stream has no accounted attempt")
+					return nil, nil, errors.New("stream has no accounted attempt")
 				}
 				var transformErr error
 				copyDelta.TextDelta, transformErr = pipeline.push(ctx, index, copyDelta.TextDelta)
 				if transformErr != nil {
-					return nil, transformErr
+					return nil, nil, transformErr
 				}
 				copyEvent.PartDelta = &copyDelta
 				visibleEvent = &copyEvent
 			}
 			if chunk := chunkEventFromStreamEvent(visibleEvent, messageID); chunk != nil && yieldChunk != nil {
 				if !yieldChunk(chunk) {
-					return nil, context.Canceled
+					return nil, nil, context.Canceled
 				}
 				if visibleEvent.PartDelta != nil {
 					model.RecordIrreversibleOutput(ctx)
@@ -124,43 +125,46 @@ func collectFinalResponse(
 		}
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if incremental {
 		for _, index := range textFilterOrder {
 			if pending := textFilters[index].Flush(); pending != "" {
 				out, err := pipeline.push(ctx, index, pending)
 				if err != nil {
-					return nil, err
+					return nil, nil, err
 				}
 				if err := publish(index, out); err != nil {
-					return nil, err
+					return nil, nil, err
 				}
 			}
 		}
 	}
 
 	if final == nil {
-		return nil, errors.New("model returned no final response")
+		return nil, nil, errors.New("model returned no final response")
 	}
 	final.Message = normalizeAssistantCitations(final.Message, req.Messages)
 	if pipeline == nil {
-		return nil, errors.New("final response has no accounted attempt")
+		return nil, nil, errors.New("final response has no accounted attempt")
 	}
-	transformed, transformErr := pipeline.finish(ctx, final.Message, incremental, publish)
-	if transformErr != nil {
-		return nil, transformErr
+	if incremental {
+		transformed, transformErr := pipeline.finish(ctx, final.Message, incremental, publish)
+		if transformErr != nil {
+			return nil, nil, transformErr
+		}
+		copyFinal := *final
+		copyFinal.Message = transformed
+		final = &copyFinal
 	}
-	copyFinal := *final
-	copyFinal.Message = transformed
-	final = &copyFinal
+
 	if err := watchdog.finishModelStep(final); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if final.ContextWindowTokens <= 0 {
 		final.ContextWindowTokens = modelContextWindowTokens(llm)
 	}
-	return final, nil
+	return final, pipeline, nil
 }
 
 func modelContextWindowTokens(llm model.LLM) int {

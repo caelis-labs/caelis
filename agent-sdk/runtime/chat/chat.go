@@ -37,6 +37,7 @@ type Agent struct {
 	modelRevision        string
 	preparedCalls        map[string]preparedToolCall
 	yieldedResults       map[*session.Event]bool
+	outputStream         *textStream
 
 	name                string
 	model               model.LLM
@@ -156,9 +157,9 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 			mcpdiscovery.Apply(a.discoveries, event)
 		}
 		watchdog := newDefaultGenerationWatchdog()
-		feedbackRounds := 0
 		visibility := tool.NewToolVisibilityForModel(a.tools, a.model)
 		for {
+			a.outputStream = nil
 			var assistantMessage model.Message
 			var calls []model.ToolCall
 			var final *model.Response
@@ -171,8 +172,15 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 					yield(nil, err)
 					return
 				}
-				assistantMessage = *early
-				final = &model.Response{Message: *early}
+				evidence := early.Evidence
+				evidence.ConfigurationRevision = a.modelRevision
+				a.outputStream, err = newTextStream(ctx, evidence)
+				if err != nil {
+					yield(nil, err)
+					return
+				}
+				assistantMessage = early.Message
+				final = &model.Response{Message: early.Message}
 				messageID = uuid.NewString()
 			} else {
 				assistantMessage, calls, final, messageID, requestPrefix, ok, err = a.collectCanonicalModelStep(ctx, &messages, watchdog, &visibility, func(event *session.Event) bool {
@@ -194,15 +202,13 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 				return
 			}
 			if len(calls) == 0 {
-				previousRounds := feedbackRounds
-				candidate, feedback, completeErr := a.completeCandidate(ctx, assistantMessage, &feedbackRounds)
+				candidate, feedback, completeErr := a.completeCandidate(ctx, assistantMessage)
 				accepted, pendingErr := a.drainPendingSubmissions(ctx, &messages, func(e *session.Event) bool { return yield(e, nil) })
 				if pendingErr != nil {
 					yield(nil, pendingErr)
 					return
 				}
 				if accepted {
-					feedbackRounds = previousRounds
 					watchdog.resetAll()
 					continue
 				}
@@ -214,6 +220,7 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 					if !yield(feedback, nil) {
 						return
 					}
+					hookrun.FromContext(ctx).CommitFeedback(feedback.ID)
 					messages = append(messages, *feedback.Message)
 					continue
 				}
@@ -230,6 +237,11 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 					yield(nil, err)
 					return
 				}
+				candidate, err = a.finishOutput(ctx, candidate, messages)
+				if err != nil {
+					yield(nil, err)
+					return
+				}
 				final.Message = candidate
 				if !yield(modelResponseEvent(candidate, final, messageID, a.model, requestPrefix), nil) {
 					return
@@ -237,6 +249,11 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 				return
 			}
 
+			assistantMessage, err = a.finishOutput(ctx, assistantMessage, messages)
+			if err != nil {
+				yield(nil, err)
+				return
+			}
 			if err := a.prepareToolCalls(ctx, calls, &visibility); err != nil {
 				yield(nil, err)
 				return
@@ -375,7 +392,11 @@ func (a *Agent) collectCanonicalModelStep(
 		final := cached
 		var err error
 		if final == nil {
-			final, err = collectFinalResponse(modelCtx, a.model, request, messageID, watchdog, yield)
+			evidence.OutputSource = agent.HookOutputProvider
+			final, a.outputStream, err = collectFinalResponse(modelCtx, a.model, request, messageID, watchdog, yield)
+		} else {
+			evidence.OutputSource = agent.HookOutputCache
+			a.outputStream, err = newTextStream(ctx, evidence)
 		}
 		for _, receipt := range receipts {
 			if yield != nil && !yield(session.NewModelInvocationReceipt(receipt, "chat")) {

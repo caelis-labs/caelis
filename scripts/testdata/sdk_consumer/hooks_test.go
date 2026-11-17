@@ -88,6 +88,14 @@ func TestSDKHooksToolArgumentsFullResultAndModelView(t *testing.T) {
 	}
 }
 
+// Buffered output is transformed after semantic replacement, including early answers.
+type sdkOutputRedactor struct{}
+
+func (*sdkOutputRedactor) Transform(_ context.Context, text string) (string, error) {
+	return strings.ReplaceAll(text, "sensitive", "[redacted]"), nil
+}
+func (*sdkOutputRedactor) Finish(context.Context) (string, error) { return "", nil }
+
 // This source is copied into a separate Go module by sdk-boundary-check.
 // It intentionally uses only supported SDK imports.
 func TestSDKHooksRetrievalCacheEarlyAnswerAndBoundedFeedback(t *testing.T) {
@@ -101,6 +109,13 @@ func TestSDKHooksRetrievalCacheEarlyAnswerAndBoundedFeedback(t *testing.T) {
 			primary, preferred := &sdkHookModel{}, &sdkHookModel{}
 			var prepares, completions atomic.Int64
 			hooks := agent.Hooks{
+				StreamMode: agent.StreamBuffered,
+				Stream: []agent.Hook[struct{}, agent.StreamTransformer]{{Name: "redact-final", Apply: func(_ context.Context, e agent.HookContext, _ struct{}) (agent.StreamTransformer, error) {
+					if e.OutputSource != agent.HookOutputProvider && (e.InvocationID != "" || e.AttemptOrdinal != 0) {
+						t.Error("synthetic output claimed provider identity")
+					}
+					return &sdkOutputRedactor{}, nil
+				}}},
 				Input: []agent.Hook[agent.InputView, agent.InputDecision]{{Name: "normalize", Apply: func(_ context.Context, _ agent.HookContext, v agent.InputView) (agent.InputDecision, error) {
 					v.Message.Parts[0].Text.Text = strings.ToUpper(v.Message.Parts[0].Text.Text)
 					d := agent.InputDecision{Message: v.Message}
@@ -123,7 +138,7 @@ func TestSDKHooksRetrievalCacheEarlyAnswerAndBoundedFeedback(t *testing.T) {
 					if completions.Add(1) == 1 && !early {
 						return agent.CompletionDecision{Kind: agent.CompletionContinue, Feedback: []model.Part{model.NewTextPart("Include the source version.")}}, nil
 					}
-					m := model.NewTextMessage(model.RoleAssistant, "Accepted answer, source version 4.")
+					m := model.NewTextMessage(model.RoleAssistant, "Accepted sensitive answer, source version 4.")
 					return agent.CompletionDecision{Kind: agent.CompletionReplace, Message: &m}, nil
 				}}},
 			}
@@ -146,10 +161,10 @@ func TestSDKHooksRetrievalCacheEarlyAnswerAndBoundedFeedback(t *testing.T) {
 			for _, e := range loaded.Events {
 				if session.IsModelInvocationReceipt(e) {
 					receipts++
-					raw, _ := json.Marshal(e)
-					if strings.Contains(string(raw), "999") {
-						t.Fatal("cache invented provider usage")
+					if usage := session.UsageSnapshotFromSessionEvent(e); usage == nil || usage.TotalTokens != 7 {
+						t.Fatal("cache invented or changed provider usage")
 					}
+
 				}
 				if e.ContextEdit != nil {
 					edits++
@@ -159,7 +174,7 @@ func TestSDKHooksRetrievalCacheEarlyAnswerAndBoundedFeedback(t *testing.T) {
 				}
 				if e.Type == session.EventTypeAssistant {
 					finals++
-					if e.Message.TextContent() != "Accepted answer, source version 4." {
+					if e.Message.TextContent() != "Accepted [redacted] answer, source version 4." {
 						t.Fatal("unaccepted candidate committed")
 					}
 				}

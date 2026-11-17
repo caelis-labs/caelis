@@ -115,3 +115,19 @@ func TestPurePanicIdentifiesPhaseAndName(t *testing.T) {
 		t.Fatalf("panic error=%v", err)
 	}
 }
+
+func TestAroundDeadlineCannotAcceptLateProducerContent(t *testing.T) {
+	for range 20 {
+		_, err := Around(t.Context(), "tool_invoke", "deadline", time.Millisecond, func(ctx context.Context, next func(context.Context) (string, error)) (string, error) {
+			r, err := next(ctx)
+			if err != nil {
+				return r, err
+			}
+			<-ctx.Done()
+			return r, nil
+		}, func(context.Context) (string, error) { return "unprocessed", nil })
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("expired extension returned successful content: %v", err)
+		}
+	}
+}

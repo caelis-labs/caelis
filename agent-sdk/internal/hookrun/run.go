@@ -10,17 +10,18 @@ import (
 
 type runKey struct{}
 
-// Run keeps only ephemeral phase configuration and pending early responses.
+// Run keeps ephemeral hook configuration, candidate identities and budgets.
 // Session, policy, producer lifetime and commits retain their existing owners.
 type Run struct {
 	Trace     agent.TraceOptions
 	Hooks     agent.Hooks
 	Evidence  agent.HookContext
 	mu        sync.Mutex
-	early     *model.Message
+	early     *Early
 	requestID string
 	assembly  uint64
 	edits     map[string]bool
+	feedback  map[string]bool
 }
 
 // RequestAssembly survives a Runtime context rebuild, but ends with its one
@@ -57,6 +58,27 @@ func (r *Run) FinishRequest(id string) {
 	}
 }
 
+// FeedbackAvailable and CommitFeedback share the Run's bounded feedback budget
+// across Agent reconstruction. A candidate spends nothing until its canonical
+// append (or original-ID full-payload readback) has been confirmed.
+func (r *Run) FeedbackAvailable() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	limit := r.Hooks.CompletionLimit
+	if limit == 0 {
+		limit = 2
+	}
+	return len(r.feedback) < limit
+}
+func (r *Run) CommitFeedback(id string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.feedback == nil {
+		r.feedback = map[string]bool{}
+	}
+	r.feedback[id] = true
+}
+
 func WithRun(ctx context.Context, h agent.Hooks, e agent.HookContext) context.Context {
 	return context.WithValue(ctx, runKey{}, &Run{Hooks: agent.CloneHooks(h), Evidence: e})
 }
@@ -67,17 +89,23 @@ func FromContext(ctx context.Context) *Run {
 	}
 	return r
 }
-func (r *Run) SetEarly(m *model.Message) {
+
+// Early keeps the detached candidate origin for final output transformation.
+type Early struct {
+	Message  model.Message
+	Evidence agent.HookContext
+}
+
+func (r *Run) SetEarly(m *model.Message, e agent.HookContext) {
 	if m == nil {
 		return
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	c := model.CloneMessage(*m)
-	r.early = &c
+	r.early = &Early{Message: model.CloneMessage(*m), Evidence: e}
 }
 func (r *Run) HasEarly() bool { r.mu.Lock(); defer r.mu.Unlock(); return r.early != nil }
-func (r *Run) TakeEarly() *model.Message {
+func (r *Run) TakeEarly() *Early {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	m := r.early

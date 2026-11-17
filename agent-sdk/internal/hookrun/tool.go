@@ -168,6 +168,10 @@ func ValidateResult(def tool.Definition, r tool.Result) error {
 }
 
 func FullResult(ctx context.Context, def tool.Definition, call tool.Call, result tool.Result, cause error) (tool.Result, error) {
+	var processing *ProcessingError
+	if errors.As(cause, &processing) {
+		return failedProcessingResult(call, result), cause
+	}
 	e := toolEvidence(ctx, def, call)
 	for _, h := range FromContext(ctx).Hooks.ToolResult {
 		input := agent.ToolOutcome{Result: result, Error: cause}
@@ -186,12 +190,17 @@ func FullResult(ctx context.Context, def tool.Definition, call tool.Call, result
 		if err != nil {
 			// Never fall back to raw content after a failed redaction. The error
 			// preserves that an effect may have succeeded; callers never replay.
-			safe := tool.Result{ID: call.ID, Name: call.Name, IsError: result.IsError, TurnComplete: result.TurnComplete, Content: []model.Part{model.NewTextPart("Tool completed; result processing failed. Do not repeat the operation.")}}
-			return safe, &ProcessingError{Cause: &agent.HookError{Phase: "tool_result", Name: h.Name, Cause: err}, EffectError: cause, Failed: result.IsError}
+			return failedProcessingResult(call, result), &ProcessingError{Cause: &agent.HookError{Phase: "tool_result", Name: h.Name, Cause: err}, EffectError: cause, Failed: result.IsError}
 		}
 		result = next
 	}
 	return result, cause
+}
+
+// failedProcessingResult retains system disposition without retaining business
+// content, structured values, media or open metadata after failed processing.
+func failedProcessingResult(call tool.Call, result tool.Result) tool.Result {
+	return tool.Result{ID: call.ID, Name: call.Name, IsError: result.IsError, TurnComplete: result.TurnComplete, Content: []model.Part{model.NewTextPart("Tool completed; result processing failed. Do not repeat the operation.")}}
 }
 
 func InvokeTool(ctx context.Context, def tool.Definition, call tool.Call, base func(context.Context) (tool.Result, error)) (tool.Result, error) {
@@ -217,7 +226,7 @@ func InvokeTool(ctx context.Context, def tool.Definition, call tool.Call, base f
 	}
 	r, err := chain(ctx)
 	if err != nil && actual != nil && (!errors.Is(err, actualErr) || !errors.Is(actualErr, err)) {
-		return *actual, &ProcessingError{Cause: err, EffectError: actualErr, Failed: actual.IsError}
+		return failedProcessingResult(call, *actual), &ProcessingError{Cause: err, EffectError: actualErr, Failed: actual.IsError}
 	}
 	if err == nil && len(entries) > 0 {
 		if r.ID != "" && r.ID != call.ID || r.Name != "" && r.Name != call.Name || actual == nil && r.TurnComplete || actual != nil && (r.TurnComplete != actual.TurnComplete || r.IsError != actual.IsError || !reflect.DeepEqual(r.Meta, actual.Meta) || !reflect.DeepEqual(r.Metadata, actual.Metadata)) {
@@ -229,7 +238,7 @@ func InvokeTool(ctx context.Context, def tool.Definition, call tool.Call, base f
 		if err != nil {
 			err = &agent.HookError{Phase: "tool_invoke", Name: entries[0].Name, Cause: err}
 			if actual != nil {
-				return *actual, &ProcessingError{Cause: err, EffectError: actualErr, Failed: actual.IsError}
+				return failedProcessingResult(call, *actual), &ProcessingError{Cause: err, EffectError: actualErr, Failed: actual.IsError}
 			}
 			return tool.Result{}, err
 		}

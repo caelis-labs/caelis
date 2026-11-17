@@ -163,7 +163,7 @@ func Around[T any](ctx context.Context, phase, name string, timeout time.Duratio
 		}()
 		out, err = invoke(extensionCtx, next)
 	}()
-	timeoutErr := callCtx.Err()
+	timeoutErr := errors.Join(callCtx.Err(), extensionCtx.Err())
 	mu.Lock()
 	active = false
 	if running {

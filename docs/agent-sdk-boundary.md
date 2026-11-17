@@ -41,7 +41,7 @@ loops can set `HookPurpose`; the default is `chat`. System-agent assembly uses
 | ToolResult | Content and StructuredContent; identity, error and system metadata stay fixed |
 | ModelView | Tool-result presentation content; the full business value stays fixed |
 | Completion | Accept, Replace, Continue with feedback or Reject before final commit |
-| Stream factory | Fresh text transformer for one actual provider attempt |
+| Stream factory | Fresh text transformer for one actual attempt or synthetic candidate |
 
 Plain transformations run in registration order on detached values. Around
 middleware runs first registration outermost and unwinds in reverse order.
@@ -82,19 +82,26 @@ commits safe presentation and typed processing_failure separately from the
 known effect outcome, then stops. It cannot replay the effect or fall back to
 unredacted output.
 
-Buffered output is the SDK default: provider fragments remain private until
-the final candidate is accepted. Caelis interactive Session assembly explicitly
-selects Incremental while it has no final-response mutators. Registering a
-ModelResult or Completion hook requires choosing Buffered instead. Explicit Incremental mode creates a transformer
-per actual attempt and derives live fragments and final text from one
-accumulator. Published text remains authoritative when the provider's final
-snapshot differs; a matching final snapshot can fill an unstreamed suffix.
-It handles UTF-8 split across chunks and empty chunks; attempt
-reset discards its state. Irreversible output prevents automatic retry.
-Incremental rejects ModelResult and Completion registrations that could
-replace published text. Stream factories apply to actual provider attempts;
-cached and early responses have no stream factory and use their semantic
-response/completion stages.
+Buffered output is the SDK default: provider fragments remain private. The
+existing final output owner transforms the accepted candidate after ModelResult
+and Completion replacements and before canonical publication. Cache and Input
+or TurnStart early responses use that same boundary. Their factories identify
+`cache`, `input_early` or `turn_start_early` in HookContext.OutputSource and have
+no InvocationID, attempt ordinal, provider receipt or provider usage. Actual
+attempt factories identify `provider` and retain their real invocation identity,
+including attempts discarded by transport retry. A discarded candidate never
+publishes its buffered text.
+
+Caelis interactive Session assembly explicitly selects Incremental while it has
+no final-response mutators. Incremental derives live fragments and final text
+from one accumulator; already transformed text is not transformed again at the
+final boundary. Published text remains authoritative when the provider's final
+snapshot differs; a matching snapshot can fill an unstreamed suffix. UTF-8 split
+across chunks and empty chunks are supported; attempt reset discards its state.
+Irreversible output prevents automatic retry. Incremental rejects ModelResult
+and Completion registrations at assembly because they could replace published
+text. Synthetic candidates still pass through the final transformer and emit no
+speculative fragments.
 
 Completion hooks share a feedback budget of two by default. New accepted input
 invalidates the old finish decision. Runtime closes final input and drains real

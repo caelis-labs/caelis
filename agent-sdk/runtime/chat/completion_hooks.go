@@ -7,12 +7,17 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/internal/hookrun"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/google/uuid"
 )
 
-func (a *Agent) completeCandidate(ctx agent.Context, candidate model.Message, rounds *int) (model.Message, *session.Event, error) {
+func (a *Agent) completeCandidate(ctx agent.Context, candidate model.Message) (model.Message, *session.Event, error) {
 	run := hookrun.FromContext(ctx)
+	evidence := run.Evidence
+	if a.outputStream != nil {
+		evidence = a.outputStream.evidence
+	}
 	for _, h := range run.Hooks.Completion {
-		d, err := hookrun.Call(ctx, "completion", h, run.Evidence, candidate, model.CloneMessage, func(d agent.CompletionDecision) agent.CompletionDecision {
+		d, err := hookrun.Call(ctx, "completion", h, evidence, candidate, model.CloneMessage, func(d agent.CompletionDecision) agent.CompletionDecision {
 			d.Message = hookrun.CloneMessagePointer(d.Message)
 			d.Feedback = model.CloneParts(d.Feedback)
 			return d
@@ -40,19 +45,16 @@ func (a *Agent) completeCandidate(ctx agent.Context, candidate model.Message, ro
 			if d.Message != nil || len(d.Feedback) == 0 {
 				return bad("continue requires only feedback")
 			}
-			limit := run.Hooks.CompletionLimit
-			if limit == 0 {
-				limit = 2
-			}
-			if *rounds >= limit {
+			if !run.FeedbackAvailable() {
 				return bad("completion_limit")
 			}
+
 			m := model.Message{Role: model.RoleUser, Parts: model.CloneParts(d.Feedback)}
 			if err := session.ValidateContextMessages([]model.Message{m}); err != nil {
 				return bad(err.Error())
 			}
-			(*rounds)++
-			return candidate, &session.Event{Type: session.EventTypeContext, Visibility: session.VisibilityCanonical, Actor: session.ActorRef{Kind: session.ActorKindSystem, Name: "hook/completion/" + h.Name}, Message: &m}, nil
+			id := "hook-feedback:" + uuid.NewString()
+			return candidate, &session.Event{ID: id, IdempotencyKey: id, Type: session.EventTypeContext, Visibility: session.VisibilityCanonical, Actor: session.ActorRef{Kind: session.ActorKindSystem, Name: "hook/completion/" + h.Name}, Message: &m}, nil
 		default:
 			return bad("invalid completion kind")
 		}

@@ -518,10 +518,18 @@ func TestToolFactsRepeatedHookContinuationCannotReplayEffect(t *testing.T) {
 	}
 	events, _ := store.Events(t.Context(), session.EventsRequest{SessionRef: active.SessionRef})
 	pairs, err := session.PairToolFacts(events)
-	if err != nil || len(pairs) != 1 || pairs[0].Result == nil || pairs[0].Result.Tool.Result == nil || (model.Message{Parts: pairs[0].Result.Tool.Result.Content}).TextContent() != "full result" {
-		raw, _ := json.Marshal(events)
-		t.Fatalf("first complete result lost: %v completion=%v events=%s", err, completionErr, raw)
+	if err != nil || len(pairs) != 1 || pairs[0].Result == nil || pairs[0].Result.Tool.Result == nil {
+		t.Fatalf("paired result lost: %v", err)
 	}
+	r := pairs[0].Result.Tool
+	if completionErr == nil || r.Outcome != session.ToolOutcomeSucceeded || r.ProcessingFailure == nil || r.ProcessingFailure.Phase != "tool_invoke" || r.ProcessingFailure.Name != "repeat" || r.Result.ID != "same" || r.Result.Name != "Write" || r.Result.IsError {
+		t.Fatalf("actual identity/disposition lost: %+v completion=%v", r, completionErr)
+	}
+	raw, _ := json.Marshal(events)
+	if strings.Contains(string(raw), "full result") || !strings.Contains((model.Message{Parts: r.Result.Content}).TextContent(), "Do not repeat") {
+		t.Fatalf("failed processing retained business result: %s", raw)
+	}
+
 }
 
 type conflictingFactRepairStore struct {

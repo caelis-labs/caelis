@@ -21,6 +21,7 @@ type textStream struct {
 	raw, accepted, pendingInput, pendingOutput map[int]string
 	last                                       int
 	started                                    bool
+	finished                                   bool
 }
 
 func newTextStream(ctx context.Context, e agent.HookContext) (*textStream, error) {
@@ -174,5 +175,19 @@ func (s *textStream) finish(ctx context.Context, message model.Message, incremen
 			message.Parts[index].Text.Text = s.accepted[index]
 		}
 	}
+	s.finished = true
 	return message, nil
+}
+
+// finishOutput is the final text boundary for every candidate source. Buffered
+// output reaches it after semantic replacements; Incremental output is already
+// immutable and must not run its stateful transformer a second time.
+func (a *Agent) finishOutput(ctx context.Context, message model.Message, messages []model.Message) (model.Message, error) {
+	if a.outputStream == nil {
+		return model.Message{}, fmt.Errorf("candidate has no output transformer")
+	}
+	if a.outputStream.finished {
+		return message, nil
+	}
+	return a.outputStream.finish(ctx, normalizeAssistantCitations(message, messages), false, nil)
 }

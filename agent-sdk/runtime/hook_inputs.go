@@ -48,7 +48,8 @@ func (r *Runtime) prepareHookInputs(ctx context.Context, inputs []*session.Event
 				}
 				extra = append(extra, event)
 			}
-			run.SetEarly(decision.Response)
+			evidence.OutputSource = agent.HookOutputInputEarly
+			run.SetEarly(decision.Response, evidence)
 		}
 		out = append(out, e)
 		out = append(out, extra...)
@@ -74,7 +75,9 @@ func (r *Runtime) runTurnStartHooks(ctx context.Context) ([]*session.Event, erro
 			}
 			out = append(out, event)
 		}
-		run.SetEarly(decision.Response)
+		evidence := run.Evidence
+		evidence.OutputSource = agent.HookOutputTurnEarly
+		run.SetEarly(decision.Response, evidence)
 	}
 	return out, nil
 }

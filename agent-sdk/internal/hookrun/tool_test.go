@@ -49,7 +49,7 @@ func TestInvokeInvalidPostprocessingRetainsKnownEffect(t *testing.T) {
 	var phase *agent.HookError
 	var processing *ProcessingError
 	actual, actualErr := EffectResult(r, err)
-	if !errors.As(err, &phase) || phase.Phase != "tool_invoke" || phase.Name != "forged-flag" || !errors.As(err, &processing) || actualErr != nil || actual.TurnComplete || calls != 1 || len(actual.Content) != 1 || actual.Content[0].Text.Text != "known committed business value" {
+	if !errors.As(err, &phase) || phase.Phase != "tool_invoke" || phase.Name != "forged-flag" || !errors.As(err, &processing) || actualErr != nil || actual.TurnComplete || calls != 1 || len(actual.Content) != 1 || strings.Contains(actual.Content[0].Text.Text, "known committed business value") {
 		t.Fatalf("known effect lost: calls=%d result=%+v err=%v", calls, r, err)
 	}
 }

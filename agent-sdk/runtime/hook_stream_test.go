@@ -19,14 +19,22 @@ import (
 )
 
 type hookStreamModel struct {
-	calls atomic.Int64
-	emit  func(int, func(*model.StreamEvent, error) bool)
+	calls   atomic.Int64
+	emit    func(int, func(*model.StreamEvent, error) bool)
+	observe func(*model.Request)
 }
 
-func (*hookStreamModel) Name() string                     { return "hook-stream" }
-func (*hookStreamModel) Capabilities() model.Capabilities { return model.Capabilities{Streaming: true} }
-func (m *hookStreamModel) Generate(context.Context, *model.Request) iter.Seq2[*model.StreamEvent, error] {
-	return func(yield func(*model.StreamEvent, error) bool) { m.emit(int(m.calls.Add(1)), yield) }
+func (*hookStreamModel) Name() string { return "hook-stream" }
+func (*hookStreamModel) Capabilities() model.Capabilities {
+	return model.Capabilities{Streaming: true, ToolCalls: true}
+}
+func (m *hookStreamModel) Generate(_ context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
+	return func(yield func(*model.StreamEvent, error) bool) {
+		if m.observe != nil {
+			m.observe(req)
+		}
+		m.emit(int(m.calls.Add(1)), yield)
+	}
 }
 
 type hookRetryError struct{}
@@ -113,8 +121,8 @@ func TestHooksStreamingAcceptedTextMatchesFileReopen(t *testing.T) {
 				}
 			} else {
 				hooks.Completion = []agent.Hook[model.Message, agent.CompletionDecision]{{Name: "replace", Apply: func(_ context.Context, _ agent.HookContext, candidate model.Message) (agent.CompletionDecision, error) {
-					if candidate.TextContent() != "[redacted] 你好" {
-						t.Error("buffered transformer result missing")
+					if candidate.TextContent() != "secret 你好" {
+						t.Error("buffered semantic candidate transformed before replacement")
 					}
 					m := model.NewTextMessage(model.RoleAssistant, expected)
 					return agent.CompletionDecision{Kind: agent.CompletionReplace, Message: &m}, nil

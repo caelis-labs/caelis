@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -369,7 +370,7 @@ func (r *Runtime) appendRuntimeEventOrLifecycle(
 	if err == nil {
 		return persisted, nil
 	}
-	if event.Type == session.EventTypeToolCall || event.Type == session.EventTypeToolResult {
+	if event.Type == session.EventTypeToolCall || event.Type == session.EventTypeToolResult || event.Type == session.EventTypeContext && strings.HasPrefix(event.ID, "hook-feedback:") {
 		confirmed, readErr := r.reconcileCompactionAppend(ctx, ref, event)
 		if confirmed != nil {
 			return confirmed, nil

@@ -1,6 +1,10 @@
 package model
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	"github.com/caelis-labs/caelis/agent-sdk/internal/jsonvalue"
+)
 
 // CloneRequest returns a deep copy of one provider-neutral model request.
 func CloneRequest(in *Request) *Request {
@@ -25,7 +29,7 @@ func CloneOutputSpec(in *OutputSpec) *OutputSpec {
 		return nil
 	}
 	out := *in
-	out.JSONSchema = cloneJSONMap(in.JSONSchema)
+	out.JSONSchema = jsonvalue.CloneMap(in.JSONSchema)
 	return &out
 }
 
@@ -39,7 +43,7 @@ func CloneToolSpecs(in []ToolSpec) []ToolSpec {
 		cp := spec
 		if spec.Function != nil {
 			fn := *spec.Function
-			fn.Parameters = cloneJSONMap(spec.Function.Parameters)
+			fn.Parameters = jsonvalue.CloneMap(spec.Function.Parameters)
 			cp.Function = &fn
 		}
 		if spec.ProviderDefined != nil {
@@ -70,31 +74,4 @@ func cloneRawMessageMap(in map[string]json.RawMessage) map[string]json.RawMessag
 		out[key] = append(json.RawMessage(nil), value...)
 	}
 	return out
-}
-
-func cloneJSONMap(in map[string]any) map[string]any {
-	// Empty schema objects must remain objects on the wire, not null.
-	if in == nil {
-		return nil
-	}
-	out := make(map[string]any, len(in))
-	for key, value := range in {
-		out[key] = cloneJSONValue(value)
-	}
-	return out
-}
-
-func cloneJSONValue(value any) any {
-	switch typed := value.(type) {
-	case map[string]any:
-		return cloneJSONMap(typed)
-	case []any:
-		out := make([]any, len(typed))
-		for i, item := range typed {
-			out[i] = cloneJSONValue(item)
-		}
-		return out
-	default:
-		return typed
-	}
 }
