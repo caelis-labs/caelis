@@ -44,7 +44,13 @@ func TestHooksInvokeFailureSanitizesEveryResultSurface(t *testing.T) {
 					}
 					return r, nil
 				}}
-				hooks := agent.Hooks{ToolInvoke: []agent.ToolInvokeHook{{Name: "redact", Timeout: 500 * time.Millisecond, Invoke: func(ctx context.Context, e agent.HookContext, next agent.ToolNext) (tool.Result, error) {
+				// The hook also wraps js_exec's full lifecycle; only the deliberate
+				// timeout case needs a shorter budget than the normal hook default.
+				var timeout time.Duration
+				if mode == "timeout" {
+					timeout = 500 * time.Millisecond
+				}
+				hooks := agent.Hooks{ToolInvoke: []agent.ToolInvokeHook{{Name: "redact", Timeout: timeout, Invoke: func(ctx context.Context, e agent.HookContext, next agent.ToolNext) (tool.Result, error) {
 					r, err := next(ctx)
 					if e.Tool.Name != "ReadSecret" {
 						return r, err
@@ -98,8 +104,15 @@ func TestHooksInvokeFailureSanitizesEveryResultSurface(t *testing.T) {
 					t.Fatal(err)
 				}
 				completion := run.Handle.WaitCompletion(t.Context())
+				var hookErr *agent.HookError
+				if errors.As(completion, &hookErr) {
+					t.Logf("hook %s/%s cause=%v deadline=%v", hookErr.Phase, hookErr.Name, hookErr.Cause, errors.Is(completion, context.DeadlineExceeded))
+				}
 				if mode == "accepted" && completion != nil {
 					t.Fatal(completion)
+				}
+				if mode == "timeout" && !errors.Is(completion, context.DeadlineExceeded) {
+					t.Fatalf("expected deliberate deadline: %v", completion)
 				}
 				if effects.Load() != 1 {
 					events, _ := store.Events(t.Context(), session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
