@@ -97,7 +97,7 @@ func TestBudgetsAndDefaultUnboundedHeap(t *testing.T) {
 	if _, err := e.Execute(t.Context(), fixed(`return {};`), codemode.Limits{}, testHost{}); err != nil {
 		t.Fatal(err)
 	}
-	for _, code := range []string{`await tools.call("Read",{x:"a".repeat(70000)});return {};`, `return "x".repeat(1100000);`, `return 1n;`} {
+	for _, code := range []string{`return "x".repeat(1100000);`, `return 1n;`} {
 		if _, err := e.Execute(t.Context(), fixed(code), codemode.Limits{}, testHost{call: func(context.Context, string, json.RawMessage) (codemode.Reply, error) {
 			t.Error("oversize request dispatched")
 			return codemode.Reply{}, nil

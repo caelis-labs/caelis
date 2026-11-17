@@ -141,10 +141,10 @@ func TestCodeModeBoundaryBudgetsDuringConcurrentCalls(t *testing.T) {
 		}
 	}}
 	var checked atomic.Bool
-	declaration := &codemode.Tool{Name: "js_repl", Limits: codemode.Limits{Calls: 3, ArgumentBytes: 32, ReplyBytes: 2048}, Executor: codeExecutorFunc(func(ctx context.Context, _ codemode.Source, host codemode.Host) (json.RawMessage, error) {
+	declaration := &codemode.Tool{Name: "js_repl", Limits: codemode.Limits{Calls: 3, ReplyBytes: 2048}, Executor: codeExecutorFunc(func(ctx context.Context, _ codemode.Source, host codemode.Host) (json.RawMessage, error) {
 		defer unblock()
-		if _, err := host.Call(ctx, "Read", []byte(`{"large":"`+strings.Repeat("x", 32)+`"}`)); err == nil {
-			return nil, errors.New("argument budget ignored")
+		if _, err := host.Call(ctx, "Read", []byte(`[]`)); err == nil {
+			return nil, errors.New("non-object arguments accepted")
 		}
 		done := make(chan error, 2)
 		for range 2 {

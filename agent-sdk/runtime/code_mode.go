@@ -345,9 +345,6 @@ func (h *codeModeHost) call(requestCtx context.Context, name string, arguments j
 		h.closeDrainLocked()
 		h.mu.Unlock()
 	}()
-	if len(arguments) > h.limits.ArgumentBytes {
-		return codemode.Reply{}, fmt.Errorf("code mode arguments exceed budget")
-	}
 	if raw := bytes.TrimSpace(arguments); len(raw) == 0 || raw[0] != '{' {
 		return codemode.Reply{}, tool.NewError(tool.ErrorCodeInvalidInput, "host arguments must be a JSON object")
 	}

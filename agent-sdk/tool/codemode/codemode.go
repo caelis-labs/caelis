@@ -191,11 +191,11 @@ type EnvironmentFactory interface {
 }
 
 // Limits bound allocations/transfers at the common boundary. Tool-internal
-// allocations remain the owning tool's responsibility. Zero selects defaults.
+// allocations and argument sizes remain the owning tool's responsibility.
+// Zero selects defaults.
 type Limits struct {
-	SourceBytes   int `json:"source_bytes"`
-	ArgumentBytes int `json:"argument_bytes"`
-	ReplyBytes    int `json:"reply_bytes"`
+	SourceBytes int `json:"source_bytes"`
+	ReplyBytes  int `json:"reply_bytes"`
 	// OutputBytes bounds executor JSON. Opaque media emitted to the model is
 	// bounded by the environment's cumulative RetainedBytes and invocation's Calls limits.
 	OutputBytes   int `json:"output_bytes"`
@@ -205,7 +205,7 @@ type Limits struct {
 
 // DefaultLimits returns conservative transfer and environment retention limits.
 func DefaultLimits() Limits {
-	return Limits{SourceBytes: 256 << 10, ArgumentBytes: 64 << 10, ReplyBytes: 1 << 20, OutputBytes: 1 << 20, RetainedBytes: 16 << 20, Calls: 64}
+	return Limits{SourceBytes: 256 << 10, ReplyBytes: 1 << 20, OutputBytes: 1 << 20, RetainedBytes: 16 << 20, Calls: 64}
 }
 
 // MetadataSelectedTools is an optional AgentSpec.Metadata []string of canonical
@@ -260,7 +260,7 @@ func (*Tool) Call(context.Context, tool.Call) (tool.Result, error) {
 // EffectiveLimits validates and fills the boundary limits.
 func (t *Tool) EffectiveLimits() (Limits, error) {
 	l, d := t.Limits, DefaultLimits()
-	for _, pair := range [][2]*int{{&l.SourceBytes, &d.SourceBytes}, {&l.ArgumentBytes, &d.ArgumentBytes}, {&l.ReplyBytes, &d.ReplyBytes}, {&l.OutputBytes, &d.OutputBytes}, {&l.RetainedBytes, &d.RetainedBytes}, {&l.Calls, &d.Calls}} {
+	for _, pair := range [][2]*int{{&l.SourceBytes, &d.SourceBytes}, {&l.ReplyBytes, &d.ReplyBytes}, {&l.OutputBytes, &d.OutputBytes}, {&l.RetainedBytes, &d.RetainedBytes}, {&l.Calls, &d.Calls}} {
 		if *pair[0] < 0 {
 			return Limits{}, fmt.Errorf("code mode limits must be positive")
 		}
