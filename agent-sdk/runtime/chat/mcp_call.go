@@ -94,7 +94,7 @@ func (a *Agent) bindMCPCalls(ctx context.Context, calls []model.ToolCall, visibi
 				bound.err = tool.NewError(tool.ErrorCodeStaleRevision, "MCP binding changed or is unavailable")
 			default:
 				bound.target = one
-				bound.err = tool.ValidateMCPArguments(definition, []byte(actual.Args))
+				// Final arguments are checked after preparation hooks.
 			}
 		}
 		a.boundCalls[call.ID] = bound

@@ -17,3 +17,8 @@ type BatchCommitter interface {
 type FinalSubmissionDrainer interface {
 	DrainFinalSubmissions() []agent.Submission
 }
+
+// SubmissionCommitter persists one effective input through Runtime input hooks.
+type SubmissionCommitter interface {
+	CommitSubmission(agent.Submission) ([]model.Message, error)
+}

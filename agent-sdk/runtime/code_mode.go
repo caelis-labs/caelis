@@ -376,9 +376,6 @@ func (h *codeModeHost) call(requestCtx context.Context, name string, arguments j
 		return codemode.Reply{}, err
 	}
 	release()
-	if err := tool.ValidateMCPArguments(target.definition, arguments); err != nil {
-		return codemode.Reply{}, err
-	}
 	call := tool.Call{ID: callID, Name: name, Input: append(json.RawMessage(nil), arguments...),
 		Parent:       &tool.ParentCall{Kind: codemode.ToolKind, ID: h.parent.ID, Name: h.parent.Name, Execution: h.parent.Execution},
 		RuntimeModel: h.parent.RuntimeModel, RuntimeReasoning: h.parent.RuntimeReasoning, RuntimeServiceTier: h.parent.RuntimeServiceTier}
@@ -387,8 +384,11 @@ func (h *codeModeHost) call(requestCtx context.Context, name string, arguments j
 		binding := tool.BindingForDefinition(target.definition)
 		call.TargetBinding = &binding
 	}
-	call = toolbinding.Prepare(target.tool, call)
-	ctx = toolbinding.WithPrepared(ctx, call)
+	call, synthetic, prepareErr := toolbinding.PrepareEffective(ctx, target.tool, call)
+	if prepareErr != nil {
+		return codemode.Reply{}, prepareErr
+	}
+	ctx = toolbinding.WithPrepared(ctx, call, synthetic)
 	if err := h.appendToolFact(ctx, call, nil, nil); err != nil {
 		h.fail(err)
 		return codemode.Reply{}, err

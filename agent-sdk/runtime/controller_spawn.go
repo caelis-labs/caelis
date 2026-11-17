@@ -92,8 +92,11 @@ func (r *Runtime) CallControllerSpawn(ctx context.Context, ref session.SessionRe
 	mode, _ := r.policyForName(workCtx, r.policyMode(spec))
 	spec.Tools = r.wrapToolsForRuntime(current, ref, spec, runtimeToolContext{mode: mode, approvalMode: string(r.currentApprovalMode(state)), approvalRequester: active.approvalRequester, runID: active.handle.RunID(), turnID: active.turnID})
 	wrapped := r.wrapTurnTools(workCtx, current, ref, state, spec, active.approvalRequester, active.handle.RunID(), active.turnID, &active.handle.toolSequence)
-	call = toolbinding.Prepare(wrapped[0], call)
-	workCtx = toolbinding.WithPrepared(workCtx, call)
+	call, synthetic, err := toolbinding.PrepareEffective(workCtx, wrapped[0], call)
+	if err != nil {
+		return tool.Result{}, err
+	}
+	workCtx = toolbinding.WithPrepared(workCtx, call, synthetic)
 	if err := r.appendToolFact(workCtx, ref, active.turnID, call, nil, nil); err != nil {
 		return tool.Result{}, err
 	}

@@ -7,6 +7,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/agent-sdk/internal/hookrun"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/mcpdiscovery"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
@@ -154,7 +155,7 @@ func (a *Agent) executeToolCallAdmitted(
 	invocation.RuntimeReasoning = a.reasoning
 	invocation.RuntimeServiceTier = a.request.ServiceTier
 	invocation.Observer = observer
-	result, err := selectedTool.Call(toolbinding.WithPrepared(ctx, invocation), invocation)
+	result, err := selectedTool.Call(toolbinding.WithPrepared(ctx, invocation, prepared.result), invocation)
 	complete, _ := tool.CloneResult(result, nil)
 
 	if err != nil {
@@ -169,6 +170,10 @@ func (a *Agent) executeToolCallAdmitted(
 	result = a.admitToolSearchResult(ctx, selectedTool.Definition(), call, result)
 	canonical, truncationMeta := canonicalToolResult(result, a.toolResultArtifacts)
 	message := toolResultMessageFromCanonical(call, canonical)
+	message, viewErr := hookrun.ModelView(ctx, selectedTool.Definition(), invocation, message)
+	if viewErr != nil {
+		return model.Message{}, nil, viewErr
+	}
 	eventMeta := truncationMeta
 	if toolbinding.IsTaskResultSource(selectedTool) {
 		eventMeta = mergeEventMeta(eventMeta, runtimeTaskResultSourceMeta(true))

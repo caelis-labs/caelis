@@ -10,6 +10,7 @@ import (
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/agentcommunication"
+	"github.com/caelis-labs/caelis/agent-sdk/internal/hookrun"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/runtimeinput"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/mcpdiscovery"
@@ -28,6 +29,8 @@ type Factory struct {
 
 // Agent is the minimal model-backed chat agent.
 type Agent struct {
+	models         map[string]model.LLM
+	modelRevision  string
 	preparedCalls  map[string]preparedToolCall
 	yieldedResults map[*session.Event]bool
 
@@ -100,7 +103,7 @@ func (f Factory) NewAgent(_ context.Context, spec agent.AgentSpec) (agent.Agent,
 		if name == "" {
 			name = "chat"
 		}
-		return &Agent{name: name, resolveModelRequest: spec.ResolveModelRequest, toolResultArtifacts: defaultToolResultArtifactStore()}, nil
+		return &Agent{name: name, models: spec.Models, resolveModelRequest: spec.ResolveModelRequest, toolResultArtifacts: defaultToolResultArtifactStore()}, nil
 	}
 	systemPrompt := ""
 	if raw, ok := spec.Metadata["system_prompt"].(string); ok {
@@ -116,6 +119,7 @@ func (f Factory) NewAgent(_ context.Context, spec agent.AgentSpec) (agent.Agent,
 	if err != nil {
 		return nil, err
 	}
+	chatAgent.models = spec.Models
 	chatAgent.deferredTools = spec.DeferredTools
 	chatAgent.reasoning = reasoningFromMetadata(spec.Metadata)
 	chatAgent.request = spec.Request.WithDefaults(agent.ModelRequestOptions{})
@@ -148,11 +152,30 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 			mcpdiscovery.Apply(a.discoveries, event)
 		}
 		watchdog := newDefaultGenerationWatchdog()
+		feedbackRounds := 0
 		visibility := tool.NewToolVisibilityForModel(a.tools, a.model)
 		for {
-			assistantMessage, calls, final, messageID, requestPrefix, ok, err := a.collectCanonicalModelStep(ctx, messages, watchdog, &visibility, func(event *session.Event) bool {
-				return yield(event, nil)
-			})
+			var assistantMessage model.Message
+			var calls []model.ToolCall
+			var final *model.Response
+			var messageID string
+			var requestPrefix prefixusage.Snapshot
+			ok := true
+			var err error
+			if early := hookrun.FromContext(ctx).TakeEarly(); early != nil {
+				if err = a.refreshModelRequest(ctx); err != nil {
+					yield(nil, err)
+					return
+				}
+				assistantMessage = *early
+				final = &model.Response{Message: *early}
+				messageID = uuid.NewString()
+			} else {
+				assistantMessage, calls, final, messageID, requestPrefix, ok, err = a.collectCanonicalModelStep(ctx, messages, watchdog, &visibility, func(event *session.Event) bool {
+					return yield(event, nil)
+				})
+			}
+
 			if !ok {
 				return
 			}
@@ -167,14 +190,19 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 				return
 			}
 			if len(calls) == 0 {
-				assistantEvent := modelResponseEvent(assistantMessage, final, messageID, a.model, requestPrefix)
-				if !yield(assistantEvent, nil) {
+				candidate, feedback, completeErr := a.completeCandidate(ctx, assistantMessage, &feedbackRounds)
+				if completeErr != nil {
+					yield(nil, completeErr)
 					return
 				}
-				messages = append(messages, assistantMessage)
-				accepted, drainErr := a.drainFinalSubmissions(ctx, &messages, func(event *session.Event) bool {
-					return yield(event, nil)
-				})
+				if feedback != nil {
+					if !yield(feedback, nil) {
+						return
+					}
+					messages = append(messages, *feedback.Message)
+					continue
+				}
+				accepted, drainErr := a.drainFinalSubmissions(ctx, &messages, func(e *session.Event) bool { return yield(e, nil) })
 				if drainErr != nil {
 					yield(nil, drainErr)
 					return
@@ -183,12 +211,23 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 					watchdog.resetAll()
 					continue
 				}
+				if err := ctx.Err(); err != nil {
+					yield(nil, err)
+					return
+				}
+				final.Message = candidate
+				if !yield(modelResponseEvent(candidate, final, messageID, a.model, requestPrefix), nil) {
+					return
+				}
 				return
 			}
+
 			if err := a.prepareToolCalls(ctx, calls, &visibility); err != nil {
 				yield(nil, err)
 				return
 			}
+			assistantMessage = effectiveAssistantMessage(assistantMessage, calls)
+			final.Message = assistantMessage
 			toolCallEvents := modelToolCallEvents(assistantMessage, final, messageID, a.model, requestPrefix)
 			for _, event := range toolCallEvents {
 				a.applyPreparedFact(event)
@@ -261,6 +300,8 @@ func (a *Agent) collectCanonicalModelStep(
 	yield func(*session.Event) bool,
 ) (model.Message, []model.ToolCall, *model.Response, string, prefixusage.Snapshot, bool, error) {
 	invalidAttempts := 0
+	logicalID := uuid.NewString()
+	var assembly uint64
 	for {
 		if err := ctx.Err(); err != nil {
 			return model.Message{}, nil, nil, "", prefixusage.Snapshot{}, true, err
@@ -285,6 +326,14 @@ func (a *Agent) collectCanonicalModelStep(
 			request.Instructions = instructionsFromContext(ctx, a.systemPrompt)
 		}
 
+		assembly++
+		evidence := hookrun.FromContext(ctx).Evidence
+		evidence.LogicalRequestID = logicalID
+		evidence.AssemblyRevision = assembly
+		request, cached, prepareErr := a.prepareModel(ctx, evidence, request)
+		if prepareErr != nil {
+			return model.Message{}, nil, nil, "", prefixusage.Snapshot{}, true, prepareErr
+		}
 		bindRequestSource(ctx, request)
 		modelCtx := model.WithProviderRequestMetadata(ctx, model.ProviderRequestMetadata{
 			SessionAffinity: ctx.Session().SessionID,
@@ -296,7 +345,12 @@ func (a *Agent) collectCanonicalModelStep(
 				return admit(ctx, agent.ModelRequestAdmission{RequestID: uuid.NewString()})
 			})
 		}
-		final, err := collectFinalResponse(modelCtx, a.model, request, messageID, watchdog, yield)
+		modelCtx = modelHookContext(modelCtx, evidence)
+		final := cached
+		var err error
+		if final == nil {
+			final, err = collectFinalResponse(modelCtx, a.model, request, messageID, watchdog, yield)
+		}
 		for _, receipt := range receipts {
 			if yield != nil && !yield(session.NewModelInvocationReceipt(receipt, "chat")) {
 				return model.Message{}, nil, nil, "", prefixusage.Snapshot{}, false, nil
@@ -309,6 +363,10 @@ func (a *Agent) collectCanonicalModelStep(
 			}
 			return model.Message{}, nil, nil, "", prefixusage.Snapshot{}, true, err
 		}
+		final, err = resultModel(ctx, evidence, final)
+		if err != nil {
+			return model.Message{}, nil, nil, "", prefixusage.Snapshot{}, true, err
+		}
 		final.Message = normalizeAssistantCitations(final.Message, messages)
 
 		assistantMessage, calls, err := validateAssistantToolCalls(final.Message)
@@ -319,6 +377,8 @@ func (a *Agent) collectCanonicalModelStep(
 			return model.Message{}, nil, nil, "", prefixusage.Snapshot{}, true, err
 		}
 		invalidAttempts++
+		logicalID = uuid.NewString()
+		assembly = 0
 		if reset := invalidToolCallAttemptResetEvent(invalidAttempts); reset != nil {
 			if yield != nil && !yield(reset) {
 				return model.Message{}, nil, nil, "", prefixusage.Snapshot{}, false, nil
@@ -531,6 +591,15 @@ func (a *Agent) drainFinalSubmissions(ctx agent.Context, messages *[]model.Messa
 func (a *Agent) drainSubmissions(ctx agent.Context, drained []agent.Submission, messages *[]model.Message, yield func(*session.Event) bool) (bool, error) {
 	accepted := false
 	for _, submission := range drained {
+		if committer, ok := ctx.(runtimeinput.SubmissionCommitter); ok && (len(submission.Inputs) > 0 || isModelInputSubmission(submission)) {
+			committed, err := committer.CommitSubmission(submission)
+			if err != nil {
+				return accepted, err
+			}
+			*messages = append(*messages, committed...)
+			accepted = accepted || len(committed) > 0
+			continue
+		}
 		if len(submission.Inputs) > 0 {
 			if err := agent.ValidateSubmissionInputs(submission); err != nil {
 				return accepted, err

@@ -50,6 +50,13 @@ func CloneEvent(in *Event) *Event {
 		return nil
 	}
 	out := *in
+	if in.InputEvidence != nil {
+		evidence := *in.InputEvidence
+		evidence.Message = model.CloneMessage(evidence.Message)
+		evidence.Source = CloneActorRef(evidence.Source)
+		evidence.Hooks = append([]string(nil), evidence.Hooks...)
+		out.InputEvidence = &evidence
+	}
 	out.legacyJournal = append(json.RawMessage(nil), in.legacyJournal...)
 	if in.Approval != nil {
 		a := CloneApprovalRecord(*in.Approval)

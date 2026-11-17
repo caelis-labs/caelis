@@ -2,6 +2,7 @@ package toolbinding
 
 import (
 	"context"
+	"github.com/caelis-labs/caelis/agent-sdk/internal/hookrun"
 	"reflect"
 
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -23,12 +24,35 @@ func Prepare(candidate any, call tool.Call) tool.Call {
 
 type preparedKey struct{}
 type preparedInvocation struct {
-	call tool.Call
+	call   tool.Call
+	result *tool.Result
 }
 
 // WithPrepared admits only the exact occurrence prepared by a Runtime caller.
-func WithPrepared(ctx context.Context, call tool.Call) context.Context {
-	return context.WithValue(ctx, preparedKey{}, &preparedInvocation{call: tool.CloneCall(call)})
+func WithPrepared(ctx context.Context, call tool.Call, result ...*tool.Result) context.Context {
+	p := &preparedInvocation{call: tool.CloneCall(call)}
+	if len(result) > 0 && result[0] != nil {
+		r, _ := tool.CloneResult(*result[0], nil)
+		p.result = &r
+	}
+	return context.WithValue(ctx, preparedKey{}, p)
+}
+
+func PreparedResult(ctx context.Context) *tool.Result {
+	p, _ := ctx.Value(preparedKey{}).(*preparedInvocation)
+	if p == nil || p.result == nil {
+		return nil
+	}
+	r, _ := tool.CloneResult(*p.result, nil)
+	return &r
+}
+
+func PrepareEffective(ctx context.Context, candidate tool.Tool, call tool.Call) (tool.Call, *tool.Result, error) {
+	call = Prepare(candidate, call)
+	if candidate == nil {
+		return call, nil, nil
+	}
+	return hookrun.PrepareTool(ctx, candidate.Definition(), call)
 }
 
 // IsPrepared excludes caller-authored identity and changed effective arguments.

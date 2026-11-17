@@ -16,12 +16,13 @@ type preparedToolCall struct {
 	target tool.Tool
 	call   tool.Call
 	err    error
+	result *tool.Result
 }
 
 func (a *Agent) prepareToolCalls(ctx context.Context, calls []model.ToolCall, visibility *tool.ToolVisibility) error {
 	a.preparedCalls = make(map[string]preparedToolCall, len(calls))
 	a.bindMCPCalls(ctx, calls, visibility)
-	for _, protocol := range calls {
+	for i, protocol := range calls {
 		if _, duplicate := a.preparedCalls[protocol.ID]; duplicate {
 			return fmt.Errorf("duplicate tool call ID in model batch: %q", protocol.ID)
 		}
@@ -31,8 +32,29 @@ func (a *Agent) prepareToolCalls(ctx context.Context, calls []model.ToolCall, vi
 			original := protocol
 			call.ModelCall = &original
 		}
-		call = toolbinding.Prepare(target, call)
-		a.preparedCalls[protocol.ID] = preparedToolCall{target: target, call: call, err: err}
+		var synthetic *tool.Result
+		if err == nil {
+			var prepareErr error
+			call, synthetic, prepareErr = toolbinding.PrepareEffective(ctx, target, call)
+			if prepareErr != nil {
+				return prepareErr
+			}
+			effective := call.Input
+			if call.ModelCall != nil {
+				envelope, marshalErr := json.Marshal(map[string]any{"tool_name": call.Name, "arguments": call.Input})
+				if marshalErr != nil {
+					return marshalErr
+				}
+				effective = envelope
+				fixed := *call.ModelCall
+				fixed.Args = string(effective)
+				call.ModelCall = &fixed
+			}
+			calls[i].Args = string(effective)
+		} else {
+			call = toolbinding.Prepare(target, call)
+		}
+		a.preparedCalls[protocol.ID] = preparedToolCall{target: target, call: call, err: err, result: synthetic}
 	}
 	return nil
 }
@@ -54,4 +76,20 @@ func (a *Agent) applyPreparedFact(event *session.Event) {
 		decoder.UseNumber()
 		_ = decoder.Decode(&event.Tool.Input)
 	}
+}
+
+func effectiveAssistantMessage(message model.Message, calls []model.ToolCall) model.Message {
+	message = model.CloneMessage(message)
+	byID := map[string]model.ToolCall{}
+	for _, c := range calls {
+		byID[c.ID] = c
+	}
+	for i := range message.Parts {
+		if use := message.Parts[i].ToolUse; use != nil {
+			if c, ok := byID[use.ID]; ok {
+				use.Input = json.RawMessage(c.Args)
+			}
+		}
+	}
+	return message
 }

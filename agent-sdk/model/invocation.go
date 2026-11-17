@@ -6,6 +6,7 @@ import (
 	"iter"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -106,6 +107,17 @@ func WithInvocationStart(ctx context.Context, start func(context.Context, Invoca
 	return context.WithValue(ctx, invocationStartKey{}, start)
 }
 
+// InvocationMiddleware wraps the accounted actual provider dispatch. Requests
+// are read-only copies; next cannot change the admitted request or receipt.
+type InvocationMiddleware func(context.Context, Invocation, *Request, func(context.Context) error) error
+type invocationMiddlewareKey struct{}
+
+// WithInvocationMiddleware installs a controlled actual-attempt extension.
+// The caller must join any consumed next before returning.
+func WithInvocationMiddleware(ctx context.Context, m InvocationMiddleware) context.Context {
+	return context.WithValue(ctx, invocationMiddlewareKey{}, m)
+}
+
 // InvocationTracker is implemented by request gates and retry wrappers that
 // delegate accounting to their actual provider attempts rather than counting
 // their own admission or orchestration as an attempt.
@@ -139,7 +151,8 @@ func Generate(ctx context.Context, llm LLM, req *Request) iter.Seq2[*StreamEvent
 	admit, _ := ctx.Value(invocationAdmissionKey{}).(func(context.Context, *Request) error)
 	observer, _ := ctx.Value(invocationObserverKey{}).(func(Invocation))
 	start, _ := ctx.Value(invocationStartKey{}).(func(context.Context, Invocation, *Request) error)
-	if admit == nil && observer == nil && start == nil {
+	middleware, _ := ctx.Value(invocationMiddlewareKey{}).(InvocationMiddleware)
+	if admit == nil && observer == nil && start == nil && middleware == nil {
 		return generatePrepared(ctx, llm, CloneRequest(req))
 	}
 	return func(yield func(*StreamEvent, error) bool) {
@@ -176,7 +189,11 @@ func Generate(ctx context.Context, llm LLM, req *Request) iter.Seq2[*StreamEvent
 		usage := &invocationUsage{}
 		attemptCtx := context.WithValue(ctx, invocationUsageKey{}, usage)
 		var cause error
+		var invoked atomic.Bool
 		defer func() {
+			if !invoked.Load() {
+				return
+			}
 			receipt.FinishedAt = time.Now()
 			usage.mu.Lock()
 			receipt.Usage = usage.latest
@@ -188,32 +205,51 @@ func Generate(ctx context.Context, llm LLM, req *Request) iter.Seq2[*StreamEvent
 				observer(receipt)
 			}
 		}()
-		for event, err := range generateAttempt(attemptCtx, llm, prepared) {
-			if event != nil && event.Response != nil {
-				cloned := *event
-				response := *event.Response
-				response.InvocationID = receipt.ID
-				cloned.Response = &response
-				event = &cloned
-				RecordInvocationUsage(attemptCtx, response.Usage)
-				if receipt.Provider == "" {
-					receipt.Provider = strings.TrimSpace(response.Provider)
+		dispatch := func(callCtx context.Context) error {
+			if !invoked.CompareAndSwap(false, true) {
+				return &invocationGateError{cause: errors.New("model continuation already consumed")}
+			}
+			attemptCtx = context.WithValue(callCtx, invocationUsageKey{}, usage)
+			for event, err := range generateAttempt(attemptCtx, llm, prepared) {
+				if event != nil && event.Response != nil {
+					cloned := *event
+					response := *event.Response
+					response.InvocationID = receipt.ID
+					cloned.Response = &response
+					event = &cloned
+					RecordInvocationUsage(attemptCtx, response.Usage)
+					if receipt.Provider == "" {
+						receipt.Provider = strings.TrimSpace(response.Provider)
+					}
+					if response.TurnComplete {
+						receipt.Outcome = "completed"
+					}
 				}
-				if response.TurnComplete {
-					receipt.Outcome = "completed"
+				if err != nil {
+					cause = err
+					receipt.Outcome = "failed"
+				}
+				if !yield(event, err) {
+					return nil
+				}
+				if err != nil {
+					return nil
 				}
 			}
-			if err != nil {
-				cause = err
-				receipt.Outcome = "failed"
-			}
-			if !yield(event, err) {
-				return
-			}
-			if err != nil {
-				return
-			}
+			return cause
 		}
+		if middleware != nil {
+			cause = middleware(attemptCtx, receipt, CloneRequest(prepared), dispatch)
+			if cause == nil && !invoked.Load() {
+				cause = &invocationGateError{cause: errors.New("model middleware did not consume actual attempt")}
+			}
+			if cause != nil {
+				yield(nil, cause)
+			}
+		} else {
+			_ = dispatch(attemptCtx)
+		}
+
 	}
 }
 

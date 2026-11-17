@@ -13,11 +13,11 @@ import (
 type localInputContext struct {
 	agent.Context
 	runner *runner
-	commit func([]agent.AgentCommunicationInput) ([]model.Message, error)
+	commit func(agent.Submission) ([]model.Message, error)
 }
 
 func (c *localInputContext) CommitAgentInputBatch(inputs []agent.AgentCommunicationInput) ([]model.Message, error) {
-	return c.commit(inputs)
+	return c.commit(agent.Submission{Kind: agent.SubmissionKindAgentCommunication, Inputs: inputs})
 }
 
 func (c *localInputContext) DrainFinalSubmissions() []agent.Submission {
@@ -61,4 +61,8 @@ func preserveSteeringCorrelation(event *session.Event, metadata map[string]any) 
 		}
 		event.Meta[key] = value
 	}
+}
+
+func (c *localInputContext) CommitSubmission(s agent.Submission) ([]model.Message, error) {
+	return c.commit(s)
 }

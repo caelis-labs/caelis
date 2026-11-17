@@ -72,7 +72,7 @@ func (t codeModeProducerTool) Call(ctx context.Context, call tool.Call) (tool.Re
 	var durabilityErr error
 	// Retain the producer lifetime while carrying only the validated private
 	// invocation credential. Caller-authored Execution never supplies it.
-	ctx = context.WithValue(toolbinding.WithPrepared(work.ctx, call), codeModeProducerErrorKey{}, func(err error) {
+	ctx = context.WithValue(toolbinding.WithPrepared(work.ctx, call, toolbinding.PreparedResult(ctx)), codeModeProducerErrorKey{}, func(err error) {
 		errorMu.Lock()
 		durabilityErr = errors.Join(durabilityErr, err)
 		errorMu.Unlock()

@@ -65,11 +65,15 @@ func (r *Runtime) wrapTurnTools(ctx context.Context, activeSession session.Sessi
 		ctx: ctx, requester: requester, runtime: r, session: session.CloneSession(activeSession), sessionRef: session.NormalizeSessionRef(ref), runID: runID, turnID: turnID,
 	})
 	spec.Tools = wrapToolsForInvocation(ref, turnID, sequence, spec.Tools)
-	return ownCodeModeProducers(ctx, concrete, r.wrapToolsForLifecycle(spec.Tools))
+	return ownCodeModeProducers(ctx, concrete, r.wrapToolsForLifecycle(wrapToolResults(spec.Tools)))
 }
 
 func cloneAgentSpec(in agent.AgentSpec) agent.AgentSpec {
 	out := in
+	out.Models = make(map[string]model.LLM, len(in.Models))
+	for k, v := range in.Models {
+		out.Models[k] = v
+	}
 	out.Tools = append([]tool.Tool(nil), in.Tools...)
 	out.Metadata = session.CloneState(in.Metadata)
 	return out
@@ -213,8 +217,12 @@ func (r *Runtime) runAttempt(
 	var pendingCalls []*session.Event
 	pendingCount := 0
 	if sink != nil {
-		runCtx = &localInputContext{Context: runCtx, runner: sink, commit: func(inputs []agent.AgentCommunicationInput) ([]model.Message, error) {
-			events, err := buildSteeringInputEvents(activeSession, turnID, agent.Submission{Kind: agent.SubmissionKindAgentCommunication, Inputs: inputs})
+		runCtx = &localInputContext{Context: runCtx, runner: sink, commit: func(submission agent.Submission) ([]model.Message, error) {
+			events, err := buildSteeringInputEvents(activeSession, turnID, submission)
+			if err != nil {
+				return nil, err
+			}
+			events, err = r.prepareHookInputs(ctx, events)
 			if err != nil {
 				return nil, err
 			}

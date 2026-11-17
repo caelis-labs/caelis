@@ -143,6 +143,7 @@ type EventCompactionContext struct {
 // is the ACP projection/control payload and must not be used as the local model
 // replay source.
 type Event struct {
+	InputEvidence           *InputEvidence           `json:"input_evidence,omitempty"`
 	AuthorizationRevocation *AuthorizationRevocation `json:"authorization_revocation,omitempty"`
 	ID                      string                   `json:"id,omitempty"`
 	IdempotencyKey          string                   `json:"idempotency_key,omitempty"`

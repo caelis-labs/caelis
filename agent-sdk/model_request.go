@@ -19,6 +19,9 @@ type ModelRequestResolver func(context.Context) (ModelRequestSnapshot, error)
 // they do not inherit the previous snapshot or AgentSpec metadata. Revision is
 // an opaque embedding-owned identity and never enters the model prompt.
 type ModelRequestSnapshot struct {
+	// Models are alternative model bindings covered by this revision, admission
+	// and lease. Hooks select a key and cannot inject another raw LLM.
+	Models        map[string]model.LLM
 	Revision      string
 	Model         model.LLM
 	Tools         []tool.Tool
@@ -76,6 +79,10 @@ func (modelRequestSnapshotStaleError) Retryable() bool { return false }
 // callables, deferred sources and lifecycle hooks retain their identity.
 func CloneModelRequestSnapshot(in ModelRequestSnapshot) ModelRequestSnapshot {
 	out := in
+	out.Models = make(map[string]model.LLM, len(in.Models))
+	for k, v := range in.Models {
+		out.Models[k] = v
+	}
 	out.Tools = append([]tool.Tool(nil), in.Tools...)
 	out.Instructions = model.CloneParts(in.Instructions)
 	out.Request = in.Request.WithDefaults(ModelRequestOptions{})

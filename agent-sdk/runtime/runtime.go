@@ -11,6 +11,7 @@ import (
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
+	"github.com/caelis-labs/caelis/agent-sdk/internal/hookrun"
 	"github.com/caelis-labs/caelis/agent-sdk/internal/identity"
 	"github.com/caelis-labs/caelis/agent-sdk/policy"
 	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
@@ -25,6 +26,7 @@ import (
 
 // Config defines one baseline local runtime instance.
 type Config struct {
+	Hooks          agent.Hooks
 	Sessions       session.Service
 	AgentFactory   agent.AgentFactory
 	RunIDGenerator func() string
@@ -67,6 +69,7 @@ type Config struct {
 
 // Runtime is the baseline local runtime implementation.
 type Runtime struct {
+	hooks                    agent.Hooks
 	codeModeMu               sync.Mutex
 	codeModeEnvironments     map[session.SessionRef]*codeModeEnvironment
 	childApprovalRequester   agent.ApprovalRequester
@@ -123,7 +126,11 @@ func New(cfg Config) (*Runtime, error) {
 	if cfg.AgentFactory == nil {
 		return nil, errors.New("agent-sdk/runtime: agent factory is required")
 	}
+	if err := cfg.Hooks.Validate(); err != nil {
+		return nil, err
+	}
 	r := &Runtime{
+		hooks:                    agent.CloneHooks(cfg.Hooks),
 		sessions:                 cfg.Sessions,
 		agentFactory:             cfg.AgentFactory,
 		runIDGenerator:           cfg.RunIDGenerator,
@@ -364,8 +371,19 @@ func (r *Runtime) executeKernelTurn(
 	}()
 	defer r.unregisterActiveRun(runID)
 
+	ctx = hookrun.WithRun(ctx, r.hooks, agent.HookContext{SessionRef: ref, RunID: runID, TurnID: turnID, Purpose: agent.HookPurposeChat})
 	batch := make([]*session.Event, 0, 4)
 	inputEvents, inputErr := buildRunInputEvents(activeSession, turnID, req)
+	if inputErr != nil {
+		handle.publishError(inputErr)
+		return
+	}
+	inputEvents, inputErr = r.prepareHookInputs(ctx, inputEvents)
+	if inputErr == nil {
+		var start []*session.Event
+		start, inputErr = r.runTurnStartHooks(ctx)
+		inputEvents = append(inputEvents, start...)
+	}
 	if inputErr != nil {
 		handle.publishError(inputErr)
 		return
