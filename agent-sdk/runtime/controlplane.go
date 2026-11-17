@@ -81,6 +81,10 @@ func (r *Runtime) runACPControllerTurn(
 			r.unregisterActiveRun(runID)
 		}
 	}()
+	if err := r.reconcileTurnPlan(ctx, ref, turnID); err != nil {
+		cancel()
+		return agent.RunResult{}, err
+	}
 	if err := r.repairToolPairs(ctx, ref); err != nil {
 		cancel()
 

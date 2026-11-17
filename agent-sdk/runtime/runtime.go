@@ -281,6 +281,10 @@ func (r *Runtime) Run(
 			r.unregisterActiveRun(runID)
 		}
 	}()
+	if err := r.reconcileTurnPlan(runCtx, ref, turnID); err != nil {
+		cancel()
+		return agent.RunResult{}, err
+	}
 	if err := r.repairToolPairs(runCtx, ref); err != nil {
 		cancel()
 
