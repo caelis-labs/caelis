@@ -30,7 +30,7 @@ func WorkerMain() int {
 	frames := make(chan frame, 1)
 	go func() {
 		for {
-			f, err := readFrame(os.Stdin, 6*codemode.DefaultLimits().ReplyBytes+256)
+			f, err := readFrame(os.Stdin, 6*codemode.DefaultLimits().ReplyBytes+256, false)
 			if err != nil {
 				vm.Interrupt("parent transport closed")
 				close(frames)
@@ -80,13 +80,13 @@ func WorkerMain() int {
 			return vm.ToValue(promise)
 		}
 		kind, name, args := call.Argument(0).String(), call.Argument(1).String(), call.Argument(2).String()
-		if (kind != "call" && kind != "search") || len(name) > 1024 || len(args) > limits.ArgumentBytes {
+		if (kind != "call" && kind != "search") || len(name) > 1024 {
 			_ = reject("invalid Host request")
 			return vm.ToValue(promise)
 		}
 		data, err := json.Marshal(callRequest{Method: kind, Name: name, Arguments: json.RawMessage(args)})
 		if err == nil {
-			err = w.send(frameCall, next, data, limits.ArgumentBytes+2048)
+			err = w.send(frameCall, next, data, len(data))
 		}
 		if err != nil {
 			vm.Interrupt("Host transport failed")

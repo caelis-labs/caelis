@@ -71,7 +71,7 @@ func effective(l codemode.Limits) (codemode.Limits, error) {
 	// This worker supports tightening the shared defaults, not unbounded transport
 	// ceilings selected by a caller or a compromised worker.
 	d := codemode.DefaultLimits()
-	if l.SourceBytes > d.SourceBytes || l.ArgumentBytes > d.ArgumentBytes || l.ReplyBytes > d.ReplyBytes || l.OutputBytes > d.OutputBytes || l.Calls > d.Calls || l.RetainedBytes > d.RetainedBytes {
+	if l.SourceBytes > d.SourceBytes || l.ReplyBytes > d.ReplyBytes || l.OutputBytes > d.OutputBytes || l.Calls > d.Calls || l.RetainedBytes > d.RetainedBytes {
 		return l, fmt.Errorf("goja worker limits cannot exceed common defaults")
 	}
 	return l, nil
@@ -298,7 +298,7 @@ func (e *environment) Execute(ctx context.Context, source codemode.Source, limit
 	go func() {
 		defer close(readerDone)
 		for {
-			f, err := readFrame(p.output, max(l.ArgumentBytes+2048, l.OutputBytes, 1024))
+			f, err := readFrame(p.output, max(l.OutputBytes, 1024), true)
 			if err == nil {
 				p.mu.Lock()
 				p.metrics.RPCReceivedBytes += int64(len(f.data) + 13)
@@ -358,7 +358,7 @@ func (e *environment) Execute(ctx context.Context, source codemode.Source, limit
 					return output, fmt.Errorf("worker request admission closed or budget exceeded")
 				}
 				var req callRequest
-				if json.Unmarshal(f.data, &req) != nil || len(req.Name) > 1024 || len(req.Arguments) > l.ArgumentBytes || !json.Valid(req.Arguments) || len(req.Arguments) == 0 || req.Arguments[0] != '{' {
+				if json.Unmarshal(f.data, &req) != nil || len(req.Name) > 1024 || !json.Valid(req.Arguments) || len(req.Arguments) == 0 || req.Arguments[0] != '{' {
 					return output, fmt.Errorf("invalid worker call")
 				}
 				p.mu.Lock()

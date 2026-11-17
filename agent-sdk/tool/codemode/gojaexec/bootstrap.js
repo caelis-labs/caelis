@@ -34,15 +34,16 @@
     weakSet(replies,body,reply);
     return freeze(body);
   }
-  // Streaming JSON encoding bounds bytes before appending. It deliberately
-  // accepts only JSON values (no toJSON, BigInt, functions or undefined), and
-  // caps depth. It never exports an untrusted object graph to Go.
+  // Output encoding bounds bytes before appending. Argument encoding has no
+  // byte budget. Both accept only JSON values (no toJSON, BigInt, functions or
+  // undefined) and cap depth. Neither exports an untrusted object graph to Go.
   function encode(value, budget, project) {
     let out = "", used = 0;
     const seen = new SetType(), selected=new SetType(), media=[];
     const original=project&&value&&typeof value==="object"?weakGet(replies,value):null;
     function put(s, n) {
-      if ((used += n) > budget) throw new ErrorType("JSON byte budget exceeded");
+      used += n;
+      if (budget !== undefined && used > budget) throw new ErrorType("JSON byte budget exceeded");
       out += s;
     }
     function quote(s) {
@@ -140,7 +141,7 @@
     call(name,args) {
       if(typeof name!=="string" || name.length>1024 || args===null || typeof args!=="object" || isArray(args))
         throw new ErrorType("tools.call(name,args) requires a name string and JSON object");
-      return then(rpc("call",name,encode(args,limits.argument_bytes)),decode);
+      return then(rpc("call",name,encode(args)),decode);
     },
     search(query) {
       let request;
@@ -162,7 +163,7 @@
           own(request,"query")?names.length!==1:
           !own(request,"server")||(own(request,"tool")&&own(request,"after")))throw new ErrorType("tools.search requires {name}, {server,tool,plugin?}, {query}, or {server,plugin?,after?}");
       }
-      return then(rpc("search","",encode(request,limits.argument_bytes)),decode);
+      return then(rpc("search","",encode(request)),decode);
     }
   });
   // All entry points delegate to the same validation, RPC, decode and identity

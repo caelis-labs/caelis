@@ -183,9 +183,13 @@ Discovery, call budgets, cancellation and receipts keep their existing owners.
 ## Authority and invalidation
 
 The parent process owns Host, Session, credentials and Tool wrappers. The child
-receives fixed source bytes/hash and bounded JSON messages; no Go object,
+receives fixed source bytes/hash and bounded JSON replies; no Go object,
 credential, environment, module, filesystem, network or shell API is exposed.
 Goja has one VM goroutine; Host completions resolve promises on that owner.
+Tool arguments have no Code Mode byte budget; JSON type, cycle and depth checks
+and each tool's schema still apply. The process protocol uses a uint32 payload
+length per frame. Source, reply, output, retention, call and CPU budgets remain
+independent of argument size.
 
 Calls pass through the existing real Tool policy, Guardian/approval, source and
 generation admission, effect claim, Journal and lifecycle wrappers. Discovery
