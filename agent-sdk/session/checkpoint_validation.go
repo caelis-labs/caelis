@@ -18,6 +18,18 @@ type ContextEditProvenance struct {
 }
 
 func validateCheckpointContract(e *Event) error {
+	if p := e.ContextEdit; p != nil {
+		if p.Version != 1 {
+			return fmt.Errorf("unsupported context append version %d", p.Version)
+		}
+		if e.Type != EventTypeContext || p.SourceStamp == "" || p.SourceThroughID == "" || p.SourceThroughSeq == 0 || p.Hook == "" || p.LogicalRequestID == "" {
+			return fmt.Errorf("invalid context append provenance")
+		}
+	}
+	// Open metadata on other events does not establish a checkpoint contract.
+	if e.Type != EventTypeCompact {
+		return nil
+	}
 	if e.Meta == nil {
 		return nil
 	}
