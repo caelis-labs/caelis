@@ -14,6 +14,7 @@ import (
 	"github.com/caelis-labs/caelis/control/modelconfig"
 	"github.com/caelis-labs/caelis/control/modelprofile"
 	"github.com/caelis-labs/caelis/control/plugin"
+	"github.com/caelis-labs/caelis/control/toolpolicy"
 	"github.com/caelis-labs/caelis/control/uipreferences"
 	"github.com/caelis-labs/caelis/control/workspacetrust"
 )
@@ -26,6 +27,7 @@ const SchemaVersionV2 = 2
 // delegation, and system-Agent fields exist only in the private legacy wire
 // document used by the one-way migration.
 type AppConfig struct {
+	PolicyRules           []toolpolicy.Rule           `json:"policy_rules,omitempty"`
 	Experimental          experimental.Values         `json:"experimental,omitempty"`
 	UI                    uipreferences.Preferences   `json:"ui,omitzero"`
 	SchemaVersion         int                         `json:"schema_version"`
@@ -59,6 +61,9 @@ func validateForLoad(doc AppConfig) error {
 }
 
 func validate(doc AppConfig, validateMCP bool) error {
+	if err := toolpolicy.ValidateRules(doc.PolicyRules); err != nil {
+		return fmt.Errorf("gatewayapp: invalid policy rules: %w", err)
+	}
 	if err := experimental.Validate(doc.Experimental); err != nil {
 		return err
 	}

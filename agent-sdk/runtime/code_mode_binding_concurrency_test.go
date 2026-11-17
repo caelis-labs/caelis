@@ -76,7 +76,6 @@ func TestCodeModeSequentialBindingRequiresExplicitRefresh(t *testing.T) {
 			var effectsV1, effectsV2 atomic.Int32
 			publish := func(version string, counter *atomic.Int32) {
 				def := fixtureMCPDefinition(version)
-				def.Metadata[tool.MetadataMCPSourceTrusted] = true
 				source.publish(tool.NamedTool{Def: def, Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
 					counter.Add(1)
 					if call.Parent == nil || call.TargetBinding == nil || call.TargetBinding.Version != version {

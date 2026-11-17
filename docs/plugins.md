@@ -159,13 +159,28 @@ Mutation failures also include the Host `receipt` when available. Check its
 observation or cleanup failed; do not blindly replay an uncertain mutation.
 Without `--json`, the command prints a brief text result and errors on stderr.
 
-The embedded package declares the `dtw` service and exposes `dtw__apps` and
-`dtw__exec` inside Caelis, with the Skill `desktop-world:dtw`. Older packages
-retain their declared `desktop-world` service, `desktop_world__` tool names and
-`desktop-world:desktop-world` Skill. The embedded package is identified by the
-release pin above. `apps` discovers application identities; `exec` runs the
-selected app's async script. The paired Skill documents the script API and
-result format. Core does not emulate retired `api` or `result` endpoints.
+The embedded package declares the `dtw` service with Skill
+`desktop-world:dtw`. Host selection launches the unchanged signed package with
+`dtw mcp --atomic`: `dtw__apps`, `dtw__look`, `dtw__capture`,
+`dtw__readtext`, `dtw__wait`, `dtw__waitfornewwindow`, `dtw__click`,
+`dtw__setvalue`, `dtw__move`, `dtw__drag`, `dtw__typetext`, `dtw__keypress`,
+`dtw__scroll`, `dtw__focus`, and `dtw__quit`. There is no `exec` tool in
+that catalog. The paired Skill documents both upstream modes; discover the
+actual selected catalog before choosing an operation.
+
+`apps` discovers application identities. Other operations require an exact
+`app` argument and share one Session approval for that APP and the complete
+atomic operation set. Reads may start or activate the application, so approval
+also covers reads. The product supports Session and Cancel for this scope;
+Once, Always, a remembered ordinary MCP rule, and remote metadata cannot widen
+it. Changing APP, Session incarnation, launch/source revision or capability
+catalog requires approval again. Concurrent same-APP operations can share the
+pure APP approval; new per-call Policy restrictions still apply.
+
+The existing package selection chooses the effective version before atomic
+launch assembly. Host-level older overrides lose to a newer embedded release.
+The installed package, manifest, signatures and original Skill bytes remain
+unchanged. See [Policy admission](agent-sdk-boundary.md) for the common contract.
 
 The TUI limits MCP output previews by rendered rows, including long single-line
 JSON. Disclosure shows the original output and complete invocation parameters.

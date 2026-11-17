@@ -490,7 +490,7 @@ func TestResolveApprovalRedeliversMatchingDurableDecision(t *testing.T) {
 
 	waiter := make(chan agent.ApprovalResponse, 1)
 	runtime.mu.Lock()
-	runtime.approvalWaiters[resolved.TokenID] = waiter
+	runtime.approvalWaiters[resolved.TokenID] = approvalWaiter{responses: waiter, owner: t.Context()}
 	runtime.mu.Unlock()
 	defer func() {
 		runtime.mu.Lock()

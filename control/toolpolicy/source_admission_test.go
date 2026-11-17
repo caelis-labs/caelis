@@ -1,0 +1,164 @@
+package toolpolicy
+
+import (
+	"context"
+	"fmt"
+	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/policy"
+	"github.com/caelis-labs/caelis/agent-sdk/policy/presets"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
+	"github.com/caelis-labs/caelis/agent-sdk/session"
+	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
+	"github.com/caelis-labs/caelis/agent-sdk/tool"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/builtin/toolsearch"
+	"github.com/caelis-labs/caelis/agent-sdk/tool/mcp"
+	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
+	"iter"
+	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
+	"testing"
+	"time"
+)
+
+// Actual HTTP MCP -> fixed search/mcp_call -> shared product Policy -> durable
+// approval -> dispatch, with a catalog change inside the approval callback.
+func TestProductPolicyPendingCapabilityChange(t *testing.T) {
+	for _, change := range []string{"unchanged", "same-tool-schema", "other-atomic-schema", "source-revoke"} {
+		t.Run(change, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+			defer cancel()
+			srv := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "dtw-fixture", Version: "1"}, &mcpsdk.ServerOptions{Capabilities: &mcpsdk.ServerCapabilities{Tools: &mcpsdk.ToolCapabilities{}}})
+			var effects, asks atomic.Int32
+			publish := func(name, description string) {
+				srv.AddTool(&mcpsdk.Tool{Name: name, Description: description, InputSchema: map[string]any{"type": "object", "required": []string{"app"}, "properties": map[string]any{"app": map[string]any{"type": "string"}, "revision_marker": map[string]any{"type": "string", "const": description}}}}, func(context.Context, *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+					effects.Add(1)
+					return &mcpsdk.CallToolResult{Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: "effect"}}}, nil
+				})
+			}
+			for _, name := range append(AtomicOperations(), "apps") {
+				publish(name, "original")
+			}
+			ep := httptest.NewServer(mcpsdk.NewStreamableHTTPHandler(func(*http.Request) *mcpsdk.Server { return srv }, nil))
+			defer ep.Close()
+			mgr, err := mcp.NewManager(ctx, []mcp.ServerSpec{{PluginID: "desktop-world", Name: "dtw", Transport: mcp.TransportStreamableHTTP, URL: ep.URL, IntegrationID: "desktop-world/atomic-v1"}}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer mgr.Close()
+			<-mgr.Initialized()
+			old, found, err := mgr.Lookup(ctx, "dtw__look")
+			if err != nil || !found {
+				t.Fatalf("initial lookup: %v", err)
+			}
+			before := old.Definition()
+			store := sessionfile.NewStore(sessionfile.Config{RootDir: t.TempDir()})
+			active, err := store.StartSession(ctx, session.StartSessionRequest{AppName: "fixture", UserID: "owner", Workspace: session.WorkspaceRef{Key: "fixture", CWD: t.TempDir()}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			policies, err := policy.NewMemory(Mode{Base: presets.WorkspaceWriteMode(), Authority: "owner"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			llm := &fixedPolicyModel{steps: func(i int, _ *model.Request) []model.ToolCall {
+				if i == 0 {
+					return []model.ToolCall{{ID: "search", Name: tool.ToolSearchToolName, Args: `{"query":"dtw__look"}`}}
+				}
+				if i == 1 {
+					return []model.ToolCall{{ID: "original-look", Name: tool.MCPCallToolName, Args: `{"tool_name":"dtw__look","arguments":{"app":"com.example.A"}}`}}
+				}
+				return nil
+			}}
+			req := requesterFunc(func(_ context.Context, request agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+				asks.Add(1)
+				if request.Authorization == nil {
+					return agent.ApprovalResponse{}, fmt.Errorf("missing product authorization")
+				}
+				switch change {
+				case "same-tool-schema":
+					publish("look", "changed")
+				case "other-atomic-schema":
+					publish("click", "changed")
+				case "source-revoke":
+					if err := mgr.RevokeServer("desktop-world", "dtw"); err != nil {
+						return agent.ApprovalResponse{}, err
+					}
+				}
+				if change != "source-revoke" {
+					if err := mgr.RefreshTools(ctx, "desktop-world", "dtw"); err != nil {
+						return agent.ApprovalResponse{}, err
+					}
+				}
+				if change == "other-atomic-schema" {
+					current, _, err := mgr.Lookup(ctx, "dtw__look")
+					if err != nil {
+						return agent.ApprovalResponse{}, err
+					}
+					if before.Source.CapabilityRevision == current.Definition().Source.CapabilityRevision {
+						t.Error("fixture did not change group capability")
+					}
+					if tool.BindingForDefinition(before) != tool.BindingForDefinition(current.Definition()) {
+						t.Error("fixture unexpectedly changed current tool binding")
+					}
+				}
+				return agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_session", Approved: true}, nil
+			})
+			rt, err := runtime.New(runtime.Config{Sessions: store, AgentFactory: chat.Factory{}, PolicyRegistry: policies})
+			if err != nil {
+				t.Fatal(err)
+			}
+			run, err := rt.Run(ctx, agent.RunRequest{SessionRef: active.SessionRef, Input: "test", ApprovalRequester: req, AgentSpec: agent.AgentSpec{Model: llm, Tools: []tool.Tool{toolsearch.NewSource(mgr, exactPolicyRanker{})}, DeferredTools: mgr}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := run.Handle.WaitCompletion(ctx); err != nil {
+				t.Fatal(err)
+			}
+			t.Logf("change=%s approvals=%d effects=%d", change, asks.Load(), effects.Load())
+			if asks.Load() != 1 {
+				t.Fatalf("expected actual approval, got %d", asks.Load())
+			}
+			want := int32(0)
+			if change == "unchanged" {
+				want = 1
+			}
+			if effects.Load() != want {
+				t.Fatalf("stale capability approval dispatched: got effects=%d want=%d", effects.Load(), want)
+			}
+		})
+	}
+}
+
+type exactPolicyRanker struct{}
+
+func (exactPolicyRanker) Rank(_ context.Context, query string, defs []tool.Definition, _ int, _ toolsearch.SearchModel) ([]string, error) {
+	for _, def := range defs {
+		if def.Name == query {
+			return []string{query}, nil
+		}
+	}
+	return nil, nil
+}
+
+type fixedPolicyModel struct {
+	scriptModel
+	index int
+	steps func(int, *model.Request) []model.ToolCall
+}
+
+func (m *fixedPolicyModel) Generate(_ context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
+	calls := m.steps(m.index, req)
+	m.index++
+	return func(yield func(*model.StreamEvent, error) bool) {
+		message := model.NewTextMessage(model.RoleAssistant, "done")
+		reason := model.FinishReasonStop
+		if len(calls) > 0 {
+			message = model.MessageFromToolCalls(model.RoleAssistant, calls, "")
+			reason = model.FinishReasonToolCalls
+		}
+		yield(model.StreamEventFromResponse(&model.Response{Message: message, Status: model.ResponseStatusCompleted, FinishReason: reason, StepComplete: true, TurnComplete: true}), nil)
+	}
+}

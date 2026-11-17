@@ -24,7 +24,6 @@ func TestCodeModeDirectBindingSurvivesResumeAndRequiresExplicitRefresh(t *testin
 	effects := 0
 	publish := func(version, kind string) {
 		def := fixtureMCPDefinition(version)
-		def.Metadata[tool.MetadataMCPSourceTrusted] = true
 		def.InputSchema = map[string]any{"type": "object", "additionalProperties": false,
 			"required": []string{"value"}, "properties": map[string]any{"value": map[string]any{"type": kind}}}
 		source.publish(tool.NamedTool{Def: def, Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {

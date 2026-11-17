@@ -32,6 +32,7 @@ import (
 	"github.com/caelis-labs/caelis/control/plugin"
 	"github.com/caelis-labs/caelis/control/sessionprofile"
 	"github.com/caelis-labs/caelis/control/sessionvisibility"
+	"github.com/caelis-labs/caelis/control/toolpolicy"
 	acpassembly "github.com/caelis-labs/caelis/internal/acpagentbridge/assembly"
 	"github.com/caelis-labs/caelis/internal/acpbridge"
 	"github.com/caelis-labs/caelis/internal/controlplane"
@@ -354,18 +355,21 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 	}
 
 	var policyRegistry policy.Registry
-	if securityPosture.FullAccessMode {
+	{
 		registry, registryErr := presets.NewRegistry()
 		if registryErr != nil {
 			bundle.Close()
 			return nil, registryErr
 		}
 		policyRegistry = registry
-		if err := registry.Register(presets.DangerFullAccessMode()); err != nil {
-			bundle.Close()
-			return nil, err
+		if securityPosture.FullAccessMode {
+			if err := registry.Register(presets.DangerFullAccessMode()); err != nil {
+				bundle.Close()
+				return nil, err
+			}
 		}
 	}
+	policyRegistry = toolpolicy.Registry{Base: policyRegistry, Authority: s.authorities.userID, Rules: s.policyRules}
 	effectiveBaseMetadata := cloneMap(runtimeCfg.BaseMetadata)
 	tools, err := builtin.BuildCoreTools(builtin.CoreToolsConfig{
 		Runtime:      sandboxRuntime,
@@ -405,7 +409,7 @@ func (s *runtimeComposition) buildGatewayRuntimeContext(
 		SandboxPolicy:            sandboxPolicySnapshot,
 		PolicyRegistry:           policyRegistry,
 		DefaultApprovalMode:      string(kernelimpl.NormalizeApprovalMode(runtimeCfg.ApprovalMode)),
-		MCPGrants:                s.authorities.mcpGrants,
+		PersistPolicyConsent:     s.persistPolicyConsent,
 		Compaction:               compactionCfg,
 		Diagnostics:              s.authorities.diagnostics,
 		ControllerContextRouter:  contextRouter,

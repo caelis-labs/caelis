@@ -14,6 +14,13 @@ import (
 
 const approvalResolutionRecoveryTimeout = 5 * time.Second
 
+// approvalWaiter retains the existing producer's context so a cancelled owner
+// cannot settle permission merely because its callback has not returned yet.
+type approvalWaiter struct {
+	responses chan agent.ApprovalResponse
+	owner     context.Context
+}
+
 type activeRun struct {
 	ref               session.SessionRef
 	session           session.Session
@@ -103,8 +110,9 @@ func (r *Runtime) requestDurableApproval(
 	}
 	blocksRun := req.OperationTaskID == ""
 	token := session.ClonePauseToken(session.PauseToken{
-		Schema:  session.ExecutionJournalSchemaVersion,
-		TokenID: tokenID, SessionID: req.SessionRef.SessionID, RunID: req.RunID, TurnID: req.TurnID,
+		Authorization: session.CloneApprovalAuthorization(req.Authorization),
+		Schema:        session.ExecutionJournalSchemaVersion,
+		TokenID:       tokenID, SessionID: req.SessionRef.SessionID, RunID: req.RunID, TurnID: req.TurnID,
 		ToolCallID: req.Call.ID, ToolName: req.Tool.Name, ItemID: req.Call.Execution.ItemID, Revision: 1, Status: session.PauseTokenPending,
 		Input: req.Call.Input, Approval: req.Approval, Metadata: req.Metadata, CreatedAt: now, UpdatedAt: now,
 		Presentation: approval.ProtocolApprovalFromPayload(approval.DisplayPayloadFromRuntimeRequest(req)),
@@ -114,7 +122,7 @@ func (r *Runtime) requestDurableApproval(
 		return agent.ApprovalResponse{}, err
 	}
 	r.mu.Lock()
-	r.approvalWaiters[token.TokenID] = waiter
+	r.approvalWaiters[token.TokenID] = approvalWaiter{responses: waiter, owner: ctx}
 	r.mu.Unlock()
 	defer func() {
 		r.mu.Lock()
@@ -256,6 +264,14 @@ func (r *Runtime) ResolveApproval(ctx context.Context, req agent.ResolveApproval
 	if err != nil {
 		return err
 	}
+	if token.Authorization != nil {
+		r.authorizationMu.Lock()
+		defer r.authorizationMu.Unlock()
+		token, err = r.pauseToken(ctx, ref, req.TokenID)
+		if err != nil {
+			return err
+		}
+	}
 	decision, err := approval.ResolveNativeResponse(token.Approval, req.Decision)
 	if err != nil {
 		return fmt.Errorf("agent-sdk/runtime: invalid approval decision: %w", err)
@@ -271,6 +287,25 @@ func (r *Runtime) ResolveApproval(ctx context.Context, req agent.ResolveApproval
 	if token.Status != session.PauseTokenPending {
 		return fmt.Errorf("agent-sdk/runtime: pause token %q is %s", token.TokenID, token.Status)
 	}
+	if token.Authorization != nil {
+		active, err := r.sessions.Session(ctx, ref)
+		if err != nil {
+			return err
+		}
+		if err := r.checkAuthorization(ctx, active, token.Authorization); err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		r.mu.RLock()
+		waiter := r.approvalWaiters[token.TokenID]
+		live := waiter.responses != nil && waiter.owner != nil && waiter.owner.Err() == nil
+		r.mu.RUnlock()
+		if !live {
+			return errors.New("approval no longer has a live owner")
+		}
+	}
 	next := token
 	next.Revision++
 	next.Status = session.PauseTokenResolved
@@ -280,21 +315,45 @@ func (r *Runtime) ResolveApproval(ctx context.Context, req agent.ResolveApproval
 	next.Reason = strings.TrimSpace(req.Decision.Reason)
 	next.ReviewText = strings.TrimSpace(req.Decision.ReviewText)
 	next.UpdatedAt = r.now()
+	if next.Approved && next.Authorization != nil {
+		persistence, ok := next.Authorization.Choice(next.OptionID)
+		if !ok {
+			return errors.New("selected approval option has no typed authorization meaning")
+		}
+		if persistence == session.AuthorizationPolicy {
+			if r.persistPolicyConsent == nil {
+				return errors.New("persistent Policy configuration is unavailable")
+			}
+			scope := next.Authorization.Scope
+			scope.SessionID, scope.SessionIncarnation = "", ""
+			ruleID, revision, err := r.persistPolicyConsent(ctx, next.TokenID, scope)
+			if err != nil {
+				return fmt.Errorf("persistent policy settlement stopped this tool invocation without dispatch: %w", err)
+			}
+			next.PolicyRuleID, next.PolicyConfigurationRevision = ruleID, revision
+		}
+	}
 	if err := session.ValidatePauseTokenTransition(token, next); err != nil {
+		return err
+	}
+	settlementError := func(err error) error {
+		if next.PolicyRuleID != "" {
+			return fmt.Errorf("policy rule %s committed at configuration revision %d; Session settlement failed and tool was not dispatched: %w", next.PolicyRuleID, next.PolicyConfigurationRevision, err)
+		}
 		return err
 	}
 	if err := r.appendPauseTokenWithGuard(ctx, ref, next, session.ControlMutationGuard(session.ControlMutationPurposeApproval)); err != nil {
 		if !session.IsCommitted(err) {
-			return err
+			return settlementError(err)
 		}
 		recoveryCtx, cancel := boundedApprovalRecoveryContext(ctx)
 		defer cancel()
 		durable, loadErr := r.pauseToken(recoveryCtx, ref, next.TokenID)
 		if loadErr != nil {
-			return errors.Join(err, loadErr)
+			return settlementError(errors.Join(err, loadErr))
 		}
 		if durable.Status != session.PauseTokenResolved || !pauseDecisionEqual(durable, req.Decision) {
-			return err
+			return settlementError(err)
 		}
 		r.deliverApprovalDecision(durable)
 		return nil
@@ -315,7 +374,7 @@ func (r *Runtime) deliverApprovalDecision(token session.PauseToken) {
 		ReviewText: token.ReviewText,
 	}
 	r.mu.RLock()
-	waiter := r.approvalWaiters[token.TokenID]
+	waiter := r.approvalWaiters[token.TokenID].responses
 	r.mu.RUnlock()
 	if waiter != nil {
 		select {

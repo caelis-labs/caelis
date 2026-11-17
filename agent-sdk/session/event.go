@@ -115,21 +115,22 @@ type EventCompactionContext struct {
 // is the ACP projection/control payload and must not be used as the local model
 // replay source.
 type Event struct {
-	ID                string                  `json:"id,omitempty"`
-	IdempotencyKey    string                  `json:"idempotency_key,omitempty"`
-	SessionID         string                  `json:"session_id,omitempty"`
-	Seq               uint64                  `json:"seq,omitempty"`
-	Schema            int                     `json:"schema,omitempty"`
-	Type              EventType               `json:"type,omitempty"`
-	Visibility        Visibility              `json:"visibility,omitempty"`
-	Time              time.Time               `json:"time,omitempty"`
-	Actor             ActorRef                `json:"actor,omitempty"`
-	Scope             *EventScope             `json:"scope,omitempty"`
-	ChildOrigin       *EventChildOrigin       `json:"child_origin,omitempty"`
-	ApprovalRequestID string                  `json:"approval_request_id,omitempty"`
-	Invocation        *EventInvocation        `json:"invocation,omitempty"`
-	ContextUsage      *ContextUsageSnapshot   `json:"context_usage,omitempty"`
-	Compaction        *EventCompactionContext `json:"compaction_context,omitempty"`
+	AuthorizationRevocation *AuthorizationRevocation `json:"authorization_revocation,omitempty"`
+	ID                      string                   `json:"id,omitempty"`
+	IdempotencyKey          string                   `json:"idempotency_key,omitempty"`
+	SessionID               string                   `json:"session_id,omitempty"`
+	Seq                     uint64                   `json:"seq,omitempty"`
+	Schema                  int                      `json:"schema,omitempty"`
+	Type                    EventType                `json:"type,omitempty"`
+	Visibility              Visibility               `json:"visibility,omitempty"`
+	Time                    time.Time                `json:"time,omitempty"`
+	Actor                   ActorRef                 `json:"actor,omitempty"`
+	Scope                   *EventScope              `json:"scope,omitempty"`
+	ChildOrigin             *EventChildOrigin        `json:"child_origin,omitempty"`
+	ApprovalRequestID       string                   `json:"approval_request_id,omitempty"`
+	Invocation              *EventInvocation         `json:"invocation,omitempty"`
+	ContextUsage            *ContextUsageSnapshot    `json:"context_usage,omitempty"`
+	Compaction              *EventCompactionContext  `json:"compaction_context,omitempty"`
 	// MessageID identifies one logical message across transient chunks and its
 	// canonical durable event. It is semantic event state, not display metadata.
 	MessageID   string                 `json:"message_id,omitempty"`

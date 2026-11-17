@@ -49,6 +49,10 @@ func CloneEvent(in *Event) *Event {
 		return nil
 	}
 	out := *in
+	if in.AuthorizationRevocation != nil {
+		revoked := *in.AuthorizationRevocation
+		out.AuthorizationRevocation = &revoked
+	}
 	out.ID = strings.TrimSpace(in.ID)
 	out.IdempotencyKey = strings.TrimSpace(in.IdempotencyKey)
 	out.SessionID = strings.TrimSpace(in.SessionID)

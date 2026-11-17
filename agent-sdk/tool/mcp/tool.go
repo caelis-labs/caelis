@@ -27,6 +27,17 @@ func (t *MCPTool) Definition() tool.Definition {
 	return tool.CloneDefinition(t.def)
 }
 
+// AdmitSource validates the callable's frozen source and capability revisions
+// against the Manager's current directory. The returned guard orders permission
+// consumption with directory replacement and invalidation. Release it before
+// persistence or tool I/O; it does not make a Policy decision.
+func (t *MCPTool) AdmitSource(ctx context.Context) (func(), error) {
+	if t.manager == nil {
+		return nil, nil
+	}
+	return t.manager.guardCatalogTool(ctx, t)
+}
+
 func (t *MCPTool) addReplayAliases(in []string) {
 	if t == nil || len(in) == 0 {
 		return

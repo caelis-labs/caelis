@@ -110,7 +110,6 @@ func h1Directory(n int) *h1Source {
 		def := fixtureMCPDefinition("h1-v1")
 		def.Name = name
 		def.Description = tool.ExternalCapabilityDescriptionPrefix + " " + strings.Repeat("Read a synthetic lookup value with an integer argument. ", 3)
-		def.Metadata[tool.MetadataMCPSourceTrusted] = true
 		def.InputSchema = map[string]any{"type": "object", "additionalProperties": false, "required": []string{"value"}, "properties": map[string]any{"value": map[string]any{"type": "integer"}}}
 		s.items = append(s.items, h1Tool{s, def})
 	}

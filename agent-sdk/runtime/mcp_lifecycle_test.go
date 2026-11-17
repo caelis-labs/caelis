@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -82,11 +81,7 @@ func TestMCPFixedRoutingRefreshDuringApprovalAndRevocation(t *testing.T) {
 		}
 		return agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_once", Approved: true}, nil
 	})
-	grants, err := NewMCPGrantStore(filepath.Join(t.TempDir(), "grants.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	rt, err := New(Config{Sessions: service, AgentFactory: chat.Factory{}, PolicyRegistry: mcpFixturePolicy(), DefaultPolicyMode: "mcp-test", MCPGrants: grants})
+	rt, err := New(Config{Sessions: service, AgentFactory: chat.Factory{}, PolicyRegistry: mcpAskFixturePolicy(), DefaultPolicyMode: "mcp-test"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,7 +192,7 @@ func TestMCPFixedLegacySessionRequiresRediscovery(t *testing.T) {
 	}
 	reloaded := sessionfile.NewStore(sessionfile.Config{RootDir: root})
 	calls := 0
-	remote := tool.NamedTool{Def: tool.Definition{Name: "docs__read", InputSchema: map[string]any{"type": "object"}, Metadata: map[string]any{tool.MetadataToolKind: tool.MetadataToolKindMCP, tool.MetadataPluginID: "fixture", tool.MetadataMCPServer: "docs", tool.MetadataMCPTool: "read", tool.MetadataMCPSourceFingerprint: "current", tool.MetadataMCPSourceTrusted: true}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
+	remote := tool.NamedTool{Def: tool.Definition{Name: "docs__read", InputSchema: map[string]any{"type": "object"}, Metadata: map[string]any{tool.MetadataToolKind: tool.MetadataToolKindMCP, tool.MetadataPluginID: "fixture", tool.MetadataMCPServer: "docs", tool.MetadataMCPTool: "read", tool.MetadataMCPSourceFingerprint: "current"}}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
 		calls++
 		return tool.Result{Content: []model.Part{model.NewTextPart("read")}}, nil
 	}}
@@ -311,7 +306,7 @@ func TestMCPFixedCancellationKeepsOriginalOperation(t *testing.T) {
 	})
 	endpoint := httptest.NewServer(mcpsdk.NewStreamableHTTPHandler(func(*http.Request) *mcpsdk.Server { return server }, nil))
 	defer endpoint.Close()
-	manager, err := mcp.NewManager(ctx, []mcp.ServerSpec{{PluginID: "fixture", Name: "live", Transport: mcp.TransportStreamableHTTP, URL: endpoint.URL, SourceTrusted: true}}, nil)
+	manager, err := mcp.NewManager(ctx, []mcp.ServerSpec{{PluginID: "fixture", Name: "live", Transport: mcp.TransportStreamableHTTP, URL: endpoint.URL}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

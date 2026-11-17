@@ -2,11 +2,12 @@ package gatewayapp
 
 import (
 	"fmt"
+	"reflect"
+	"testing"
+
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
-	"reflect"
-	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
@@ -15,10 +16,13 @@ func TestSelectedCodeModeToolsAreProductPresentationPolicy(t *testing.T) {
 	makeTool := func(name, server, remote string) tool.Tool {
 		return tool.NamedTool{Def: tool.Definition{Name: name, Metadata: map[string]any{tool.MetadataToolKind: tool.MetadataToolKindMCP, tool.MetadataMCPServer: server, tool.MetadataMCPTool: remote}}}
 	}
-	candidates := []tool.Tool{nil, makeTool("docs_alias", "context7", "query-docs"), makeTool("dtw__exec", "dtw", "exec"), makeTool("legacy_exec", "desktop-world", "exec"), makeTool("dtw_alias", "desktop_world", "exec"), makeTool("dtw__apps", "dtw", "apps"), makeTool("other_exec", "other", "exec"), makeTool("unselected", "context7", "other"), tool.NamedTool{Def: tool.Definition{Name: "native", Metadata: map[string]any{tool.MetadataMCPTool: "query-docs"}}}}
-	if got := selectedCodeModeTools(candidates); !reflect.DeepEqual(got, []string{"docs_alias", "dtw__exec", "legacy_exec", "dtw_alias"}) {
+	desktop := makeTool("dtw__look", "dtw", "look").(tool.NamedTool)
+	desktop.Def.Source = &tool.SourceFacts{IntegrationID: "desktop-world/atomic-v1"}
+	candidates := []tool.Tool{nil, makeTool("docs_alias", "context7", "query-docs"), desktop, makeTool("untrusted_look", "dtw", "look"), makeTool("unselected", "context7", "other"), tool.NamedTool{Def: tool.Definition{Name: "native", Metadata: map[string]any{tool.MetadataMCPTool: "query-docs"}}}}
+	if got := selectedCodeModeTools(candidates); !reflect.DeepEqual(got, []string{"docs_alias", "dtw__look"}) {
 		t.Fatalf("selected canonical names=%v", got)
 	}
+
 }
 
 type codeModeHintSource struct {

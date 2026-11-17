@@ -105,7 +105,8 @@ func TestCodeModeRevalidatesMCPAndGenerationAfterApproval(t *testing.T) {
 				}
 				return snapshot, nil
 			}}
-			runCodeMode(t, store, active, spec, nil, requester)
+			registry := mcpAskFixturePolicy()
+			runCodeMode(t, store, active, spec, registry, requester)
 			want := int32(0)
 			if mode == "allow" {
 				want = 1

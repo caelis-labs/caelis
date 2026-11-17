@@ -36,8 +36,8 @@ func TestAgentPluginLocalUpgradeKeepsManifestIdentityAndData(t *testing.T) {
 			t.Fatalf("v%d contributions = %+v, %v", version, contributions, err)
 		}
 		spec := contributions.MCPServerSpecs[0]
-		if spec.SourceTrusted || spec.ToolResourceParameters["exec"] != "app" {
-			t.Fatalf("v%d Desktop World lost app-scoped approval: %+v", version, spec)
+		if spec.IntegrationID != "" {
+			t.Fatalf("v%d raw plugin assembly gained policy authority: %+v", version, spec)
 		}
 		data := contributions.MCPServerSpecs[0].DataDir
 		if version == 1 {

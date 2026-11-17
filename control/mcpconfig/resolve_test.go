@@ -36,7 +36,7 @@ func TestMCPOverlayCannotClaimPluginSourceTrust(t *testing.T) {
 	if err != nil || len(got) != 1 {
 		t.Fatalf("Resolve() = %+v, %v", got, err)
 	}
-	if got[0].PluginID != NamespaceUser || got[0].SourceTrusted {
+	if got[0].PluginID != NamespaceUser || got[0].IntegrationID != "" {
 		t.Fatalf("MCP document self-authorized plugin trust: %+v", got[0])
 	}
 }

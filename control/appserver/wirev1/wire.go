@@ -222,6 +222,8 @@ func marshalWireValueUnchecked(value any) ([]byte, error) {
 		return marshalWriteRequest(typed, typed.ExpectedRevision)
 	case appserver.ExperimentalRequest:
 		return marshalWriteRequest(typed, typed.ExpectedRevision)
+	case appserver.PolicyRuleRequest:
+		return marshalWriteRequest(typed, typed.ExpectedRevision)
 	case appserver.WorkspaceTrustRequest:
 		return marshalWriteRequest(typed, typed.ExpectedRevision)
 	case appserver.HandoffAgentRequest:

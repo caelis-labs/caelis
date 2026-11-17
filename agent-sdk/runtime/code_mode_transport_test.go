@@ -106,7 +106,7 @@ func TestCodeModeMCPTransportLossRetainsUnknownWithoutReplay(t *testing.T) {
 		handler.ServeHTTP(w, r)
 	}))
 	defer endpoint.Close()
-	manager, err := mcp.NewManager(t.Context(), []mcp.ServerSpec{{PluginID: "fixture", Name: "live", Transport: mcp.TransportStreamableHTTP, URL: endpoint.URL, SourceTrusted: true}}, nil)
+	manager, err := mcp.NewManager(t.Context(), []mcp.ServerSpec{{PluginID: "fixture", Name: "live", Transport: mcp.TransportStreamableHTTP, URL: endpoint.URL}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

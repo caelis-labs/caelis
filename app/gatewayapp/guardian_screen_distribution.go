@@ -4,9 +4,10 @@ import (
 	"fmt"
 	"math"
 
+	"github.com/caelis-labs/caelis/agent-sdk/session"
+
 	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/judgment"
-	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/internal/kernel"
 )
 
@@ -76,14 +77,15 @@ func guardianScreenSelection(req kernel.ApprovalReviewRequest, response judgment
 	if !guardianDistributionDominates(groups, winner, 20, .9) || !guardianScreenEvidenceSupports(winner, response.Answers) {
 		return fail()
 	}
-	nativeMCP := guardianNativeMCPScopeOptions(req) || guardianMCPResourceScope(req) != nil
+	nativeMCP := req.RuntimeRequest.Authorization != nil
 	onceIndex, expandedIndex := -1, -1
 	for index, option := range req.Approval.Options {
 		if kinds[index] != winner {
 			continue
 		}
 		isOnce := option.Kind == "allow_once" || option.Kind == "reject_once"
-		isNativeSession := nativeMCP && option.ID == "allow_session"
+		persistence, typed := req.RuntimeRequest.Authorization.Choice(option.ID)
+		isNativeSession := nativeMCP && typed && persistence != session.AuthorizationOnce
 		if isOnce && !isNativeSession {
 			if onceIndex < 0 || decision.Probabilities[option.ID] > decision.Probabilities[req.Approval.Options[onceIndex].ID] {
 				onceIndex = index
@@ -102,25 +104,6 @@ func guardianScreenSelection(req kernel.ApprovalReviewRequest, response judgment
 		return fail()
 	}
 	return req.Approval.Options[onceIndex], nil
-}
-
-// Only the Runtime's ordinary source gate has these four MCP scope options.
-// Resource rules use a separate two-option gate; custom policy options retain
-// their standard ACP kind semantics.
-func guardianNativeMCPScopeOptions(req kernel.ApprovalReviewRequest) bool {
-	if req.Approval == nil || !tool.IsMCPDefinition(req.RuntimeRequest.Tool) || len(req.Approval.Options) != 4 {
-		return false
-	}
-	if parameter, _ := req.RuntimeRequest.Tool.Metadata[tool.MetadataMCPResourceParameter].(string); parameter != "" {
-		return false
-	}
-	want := [4]struct{ id, kind string }{{"allow_once", "allow_once"}, {"allow_session", "allow_once"}, {"allow_always", "allow_always"}, {"cancel", "reject_once"}}
-	for i, option := range req.Approval.Options {
-		if option.ID != want[i].id || option.Kind != want[i].kind {
-			return false
-		}
-	}
-	return true
 }
 
 // Compare normalized lead and odds over the runner-up. This uses the whole

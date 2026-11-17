@@ -72,6 +72,9 @@ func (t journaledTool) Call(ctx context.Context, call tool.Call) (tool.Result, e
 	if now == nil {
 		now = time.Now
 	}
+	if err := consumePolicyDispatch(ctx, t.base); err != nil {
+		return tool.Result{}, err
+	}
 	createdAt := now()
 	// Identity was bound before policy admission and survives approval unchanged.
 	stepID := call.Execution.ItemID

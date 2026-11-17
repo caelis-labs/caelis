@@ -79,7 +79,6 @@ func TestJSExecSerializesDefaultTargetPromiseAll(t *testing.T) {
 			if mcp {
 				def = fixtureMCPDefinition("serialized-state")
 				def.Name = "z__target"
-				def.Metadata[tool.MetadataMCPSourceTrusted] = true
 			}
 			target := &serializationStateTool{def: def, started: make(chan struct{}), release: release, values: make(map[int]int)}
 			admitted := make(chan struct{})

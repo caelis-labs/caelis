@@ -1,0 +1,16 @@
+╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ Approval Required                                                                                                │
+│                                                                                                                  │
+│ DESCRIPTION: Application access requires approval for this Session                                               │
+│ OPERATION:   call app tool                                                                                       │
+│ TARGET:      desktop-world/dtw/look                                                                              │
+│ TARGET:      /task/workspace                                                                                     │
+│ TARGET:      dev.caelis.fixture                                                                                  │
+│ EFFECT:      non_idempotent                                                                                      │
+│ SCOPE:       this exact application and all 14 DTW atomic operations in this Session                             │
+│ DEFAULT:     Allow this app for this Session                                                                     │
+│                                                                                                                  │
+│ ▎ Allow this app for this Session  allow_once; scope: this exact application and all 14 DTW atomic operations... │
+│   Cancel                           reject_once; scope: no grant                                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+   ↑/↓ select  enter confirm  esc cancel

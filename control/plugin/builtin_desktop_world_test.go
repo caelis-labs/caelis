@@ -44,13 +44,13 @@ func TestProductDesktopWorldPackageAndSessionPaths(t *testing.T) {
 		t.Fatal(err)
 	}
 	a, b := first.MCPServerSpecs[0], second.MCPServerSpecs[0]
-	if a.PackageRoot != b.PackageRoot || a.DataDir == b.DataDir || a.PackageVersion != pinnedDesktopWorldTestVersion(t) || a.SourceTrusted || a.ToolResourceParameters["exec"] != "app" {
+	if a.PackageRoot != b.PackageRoot || a.DataDir == b.DataDir || a.PackageVersion != pinnedDesktopWorldTestVersion(t) || a.IntegrationID != "desktop-world/atomic-v1" {
 		t.Fatal("package sharing crossed Session data or approval boundaries")
 	}
-	if a.Command != filepath.Join(a.PackageRoot, "bin", filepath.Base(a.Command)) || len(a.Args) != 1 || a.Args[0] != "mcp" {
+	if a.Command != filepath.Join(a.PackageRoot, "bin", filepath.Base(a.Command)) || len(a.Args) != 2 || a.Args[0] != "mcp" || a.Args[1] != "--atomic" {
 		t.Fatal("fixed package did not use its standard stdio executable")
 	}
-	if len(a.SourceTrustedTools) != 1 || a.SourceTrustedTools[0] != "apps" {
+	if a.IntegrationID != "desktop-world/atomic-v1" {
 		t.Fatal("app execution acquired blanket builtin trust")
 	}
 }
@@ -101,20 +101,27 @@ func TestProductDesktopWorldMCPStartup(t *testing.T) {
 		name, _ := definition.Metadata[tool.MetadataMCPTool].(string)
 		names = append(names, name)
 		if name == "exec" {
+			t.Fatal("atomic catalog contains exec")
+		}
+		if name != "apps" {
 			raw, _ := json.Marshal(definition.InputSchema)
 			var schema struct {
 				Required []string `json:"required"`
 			}
-			if err := json.Unmarshal(raw, &schema); err != nil || !slices.Equal(schema.Required, []string{"app", "source"}) {
-				t.Fatalf("builtin exec schema = %s, %v", raw, err)
+			if err := json.Unmarshal(raw, &schema); err != nil || !slices.Contains(schema.Required, "app") {
+				t.Fatalf("atomic %s does not require app: %s", name, raw)
 			}
 		}
+		if definition.Source == nil || definition.Source.IntegrationID != "desktop-world/atomic-v1" {
+			t.Fatal("catalog lost configured integration identity")
+		}
+
 	}
 	slices.Sort(names)
-	if !slices.Equal(names, []string{"apps", "exec"}) {
+	if !slices.Equal(names, []string{"apps", "capture", "click", "drag", "focus", "keypress", "look", "move", "quit", "readText", "scroll", "setValue", "typeText", "wait", "waitForNewWindow"}) {
 		t.Fatalf("builtin tools = %v", names)
 	}
-	search := toolsearch.NewWithRanker(manager.SearchTools(), dtwCandidateRanker{})
+	search := toolsearch.NewWithRanker(manager.SearchTools(), builtinAtomicRanker{})
 	if search == nil {
 		t.Fatal("selected package is absent from ToolSearch")
 	}
@@ -126,7 +133,7 @@ func TestProductDesktopWorldMCPStartup(t *testing.T) {
 		Count int                     `json:"count"`
 		Tools []struct{ Name string } `json:"tools"`
 	}
-	if err := json.Unmarshal(found.Content[0].JSON.Value, &discovery); err != nil || discovery.Count != 1 || len(discovery.Tools) != 1 || discovery.Tools[0].Name != mcp.ServerToolNamePrefix(spec.Name)+"exec" {
+	if err := json.Unmarshal(found.Content[0].JSON.Value, &discovery); err != nil || discovery.Count != 1 || len(discovery.Tools) != 1 || discovery.Tools[0].Name != mcp.ServerToolNamePrefix(spec.Name)+"look" {
 		t.Fatalf("selected package discovery = %+v, %v", discovery, err)
 	}
 	t.Logf("desktop-world %s: source=%s command=%s binary_sha256=%x tools=%v ToolSearch=%s; native stdio, no desktop RPC", version, contributions.Sources[0].Status, spec.Command, sha256.Sum256(binary), names, discovery.Tools[0].Name)
@@ -288,4 +295,21 @@ func pinnedDesktopWorldTestVersion(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return pin.Version
+}
+
+// The offline selector reads one actual atomic schema rather than inventing a name.
+type builtinAtomicRanker struct{}
+
+func (builtinAtomicRanker) Rank(ctx context.Context, _ string, definitions []tool.Definition, _ int, selected toolsearch.SearchModel) ([]string, error) {
+	for _, def := range definitions {
+		if strings.HasSuffix(def.Name, "__look") {
+			schema, err := selected.ReadSchema(ctx, def.Name)
+			if err != nil {
+				return nil, err
+			}
+			_ = schema
+			return []string{def.Name}, nil
+		}
+	}
+	return nil, nil
 }

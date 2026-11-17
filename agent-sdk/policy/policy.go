@@ -38,14 +38,17 @@ type ModeOptions struct {
 // ToolContext is the stable tool-authorization input consumed by runtime-local
 // policy decisions.
 type ToolContext struct {
-	Session       session.Session        `json:"session"`
-	State         map[string]any         `json:"state,omitempty"`
-	Tool          tool.Definition        `json:"tool"`
-	Call          tool.Call              `json:"call"`
-	Sandbox       sandbox.Descriptor     `json:"sandbox"`
-	SandboxPolicy sandbox.PolicySnapshot `json:"sandbox_policy,omitempty"`
-	Mode          string                 `json:"mode,omitempty"`
-	Options       ModeOptions            `json:"options,omitempty"`
+	// Authorizations reads a detached projection only when a Policy needs
+	// reusable consent. Policies returning an unconditional Allow need no scan.
+	Authorizations func(context.Context) (session.AuthorizationEvidence, error) `json:"-"`
+	Session        session.Session                                              `json:"session"`
+	State          map[string]any                                               `json:"state,omitempty"`
+	Tool           tool.Definition                                              `json:"tool"`
+	Call           tool.Call                                                    `json:"call"`
+	Sandbox        sandbox.Descriptor                                           `json:"sandbox"`
+	SandboxPolicy  sandbox.PolicySnapshot                                       `json:"sandbox_policy,omitempty"`
+	Mode           string                                                       `json:"mode,omitempty"`
+	Options        ModeOptions                                                  `json:"options,omitempty"`
 	// ReadPathArgument is a source-read argument selected by Runtime from a
 	// trusted concrete implementation. Names and untrusted metadata cannot set
 	// it. Presets authorize this optional path using their existing Read rules.
@@ -55,11 +58,16 @@ type ToolContext struct {
 // Decision is the normalized policy result. Constraints are backend-neutral
 // and can be forwarded into sandbox-aware tools.
 type Decision struct {
-	Action      Action                    `json:"action,omitempty"`
-	Reason      string                    `json:"reason,omitempty"`
-	Constraints sandbox.Constraints       `json:"constraints,omitempty"`
-	Metadata    map[string]any            `json:"metadata,omitempty"`
-	Approval    *session.ProtocolApproval `json:"approval,omitempty"`
+	Authorization *session.ApprovalAuthorization `json:"authorization,omitempty"`
+	// Validate checks a frozen decision at dispatch. Its second argument is the
+	// selected option ID, empty for an unconditional Allow. The returned guard
+	// spans permission consumption only and is released before the tool effect.
+	Validate    func(context.Context, string) (func(), error) `json:"-"`
+	Action      Action                                        `json:"action,omitempty"`
+	Reason      string                                        `json:"reason,omitempty"`
+	Constraints sandbox.Constraints                           `json:"constraints,omitempty"`
+	Metadata    map[string]any                                `json:"metadata,omitempty"`
+	Approval    *session.ProtocolApproval                     `json:"approval,omitempty"`
 }
 
 // DecisionError reports a missing, empty, or invalid policy decision. Runtime
@@ -219,6 +227,7 @@ func CloneModeOptions(in ModeOptions) ModeOptions {
 // CloneDecision returns one isolated copy of one policy decision.
 func CloneDecision(in Decision, err error) (Decision, error) {
 	out := in
+	out.Authorization = session.CloneApprovalAuthorization(in.Authorization)
 	out.Action = Action(strings.TrimSpace(string(in.Action)))
 	out.Reason = strings.TrimSpace(in.Reason)
 	out.Constraints = sandbox.NormalizeConstraints(in.Constraints)
@@ -243,6 +252,18 @@ func NormalizeDecision(mode string, in Decision) (Decision, error) {
 			detail = fmt.Sprintf("unsupported decision action %q", out.Action)
 		}
 		return Decision{}, &DecisionError{Mode: mode, Detail: detail}
+	}
+	if out.Action == ActionAskApproval {
+		if err := out.Authorization.Validate(out.Approval); err != nil {
+			return Decision{}, &DecisionError{Mode: mode, Detail: "invalid authorization requirement", Err: err}
+		}
+	} else if out.Authorization != nil {
+		if out.Authorization.Schema != session.AuthorizationSchemaVersion {
+			return Decision{}, &DecisionError{Mode: mode, Detail: "unsupported authorization schema"}
+		}
+		if err := out.Authorization.Scope.Validate(); err != nil {
+			return Decision{}, &DecisionError{Mode: mode, Detail: "invalid authorization scope", Err: err}
+		}
 	}
 	if err := validateConstraints(out.Constraints); err != nil {
 		return Decision{}, &DecisionError{Mode: mode, Detail: "invalid constraints", Err: err}

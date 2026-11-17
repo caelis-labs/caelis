@@ -157,8 +157,8 @@ func TestBuiltinDesktopWorldLiveAgentTask(t *testing.T) {
 		}
 		if active := state.Approval.Active; active != nil {
 			selected, err := host.host.SessionMCPStatus(ctx, created.SessionID)
-			if err != nil || len(selected.Plugins) != 1 || selected.Plugins[0].ID != "desktop-world" || selected.Plugins[0].Version != "0.3.4" || len(selected.Servers) != 1 || len(selected.Servers[0].Tools) != 2 || len(selected.Skills) != 1 {
-				t.Fatal("live source does not contain one paired 0.3.4 MCP/Skill package")
+			if err != nil || len(selected.Plugins) != 1 || selected.Plugins[0].ID != "desktop-world" || selected.Plugins[0].Version != "0.5.0" || len(selected.Servers) != 1 || len(selected.Servers[0].Tools) != 2 || len(selected.Skills) != 1 {
+				t.Fatal("live source does not contain one paired 0.5.0 MCP/Skill package")
 			}
 			if root := os.Getenv("CAELIS_DTW_LIVE_PLUGIN"); root != "" && selected.Plugins[0].Root != root {
 				t.Fatal("explicit package silently fell back to another source")
@@ -167,7 +167,7 @@ func TestBuiltinDesktopWorldLiveAgentTask(t *testing.T) {
 			selectedRoot = selected.Plugins[0].Root
 			writeLiveJSON(t, filepath.Join(artifacts, fmt.Sprintf("approval-%d.json", approvals)), active)
 			encoded, _ := json.Marshal(active.Permission)
-			if active.Permission == nil || active.Permission.ToolCall.Name != "desktop_world__exec" || active.Permission.ToolCall.RawInput["app"] != "com.google.Chrome" || active.Permission.ToolCall.RawInput["source"] == nil || !bytes.Contains(encoded, []byte("com.google.Chrome")) {
+			if active.Permission == nil || !strings.HasPrefix(active.Permission.ToolCall.Name, "dtw__") || active.Permission.ToolCall.RawInput["app"] != "com.google.Chrome" || !bytes.Contains(encoded, []byte("com.google.Chrome")) {
 				t.Fatal("refusing non-target app or non-DTW approval")
 			}
 			pending, err := host.stack.Sessions().LoadSession(ctx, session.LoadSessionRequest{SessionRef: session.SessionRef{SessionID: created.SessionID}})
@@ -177,7 +177,7 @@ func TestBuiltinDesktopWorldLiveAgentTask(t *testing.T) {
 			matched := false
 			for _, event := range pending.Events {
 				if event.Type == session.EventTypeToolCall && event.Tool != nil && event.Tool.ID == active.Permission.ToolCall.ID {
-					matched = event.Tool.Name == active.Permission.ToolCall.Name && event.Tool.Input["app"] == active.Permission.ToolCall.RawInput["app"] && event.Tool.Input["source"] == active.Permission.ToolCall.RawInput["source"] && event.Tool.ModelCall != nil && event.Tool.ModelCall.ID == event.Tool.ID
+					matched = event.Tool.Name == active.Permission.ToolCall.Name && event.Tool.Input["app"] == active.Permission.ToolCall.RawInput["app"] && event.Tool.ModelCall != nil && event.Tool.ModelCall.ID == event.Tool.ID
 				}
 			}
 			if !matched {
@@ -230,7 +230,7 @@ func TestBuiltinDesktopWorldLiveAgentTask(t *testing.T) {
 	models := wire.base.models
 	wire.base.mu.Unlock()
 	writeLiveJSON(t, filepath.Join(artifacts, "summary.json"), map[string]any{"model": cfg.Model, "session_id": created.SessionID, "app_approvals": approvals, "tool_results": counts, "tools_hashes": hashes, "wire_models": models, "task_receipt_matches": values.Get("answer") == challenge, "page_submissions": submitted, "session_kind": os.Getenv("CAELIS_DTW_LIVE_SESSION"), "plugin_override": os.Getenv("CAELIS_DTW_LIVE_PLUGIN"), "page_title": title})
-	if approvals != 1 || submitted != 1 || values.Get("answer") != challenge || counts["Skill"] == 0 || counts["desktop_world__apps"] == 0 || counts["desktop_world__exec"] == 0 || counts["desktop_world__api"] != 0 || counts["desktop_world__result"] != 0 {
+	if approvals != 1 || submitted != 1 || values.Get("answer") != challenge || counts["Skill"] == 0 || counts["dtw__apps"] == 0 || counts["dtw__look"] == 0 || counts["dtw__exec"] != 0 {
 		t.Fatal("real Agent task acceptance incomplete; inspect private original evidence")
 	}
 	for _, h := range hashes {

@@ -323,7 +323,7 @@ func isHostAgentCommandRequest(request any) bool {
 
 func isHostConfigurationCommandRequest(request any) bool {
 	switch request.(type) {
-	case appserver.ConnectModelRequest,
+	case appserver.PolicyRuleRequest, appserver.ConnectModelRequest,
 		appserver.UseModelRequest,
 		appserver.DeleteModelRequest,
 		appserver.WorkspaceTrustRequest, appserver.ExperimentalRequest,

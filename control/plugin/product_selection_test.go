@@ -131,7 +131,7 @@ func testDesktopWorldNewestDefaultKeepsWholePackage(t *testing.T, identity strin
 				t.Fatalf("split or duplicated package: %+v", got)
 			}
 			spec, bundle := got.MCPServerSpecs[0], got.SkillBundles[0]
-			if spec.PluginID != selected.ID || spec.PackageRoot != selected.Root || spec.PackageVersion != selected.Version || !PathWithinRoot(selected.Root, spec.Command) || bundle.PluginRoot != selected.Root || spec.SourceTrusted {
+			if spec.PluginID != selected.ID || spec.PackageRoot != selected.Root || spec.PackageVersion != selected.Version || !PathWithinRoot(selected.Root, spec.Command) || bundle.PluginRoot != selected.Root {
 				t.Fatalf("launch/Skill/source mismatch: %+v, %+v, %+v", selected, spec, bundle)
 			}
 			metas, err := fs.DiscoverPluginBundleMeta(got.SkillBundles)

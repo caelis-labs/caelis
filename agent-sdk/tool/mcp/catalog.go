@@ -47,9 +47,30 @@ func (c *clientCatalog) invalidate() {
 	}
 }
 func (m *Manager) admitCatalogTool(ctx context.Context, remote *MCPTool) error {
+	release, err := m.guardCatalogTool(ctx, remote)
+	if release != nil {
+		release()
+	}
+	return err
+}
+
+func (m *Manager) guardCatalogTool(ctx context.Context, remote *MCPTool) (func(), error) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.admitCatalogToolLocked(ctx, remote)
+	c := remote.client.catalog
+	if c != nil {
+		c.mu.Lock()
+	}
+	release := func() {
+		if c != nil {
+			c.mu.Unlock()
+		}
+		m.mu.Unlock()
+	}
+	if err := m.checkCatalogToolLocked(ctx, remote); err != nil {
+		release()
+		return nil, err
+	}
+	return release, nil
 }
 
 // The owner lock protects the current directory; the catalog lock checks live
@@ -60,6 +81,14 @@ func (m *Manager) admitCatalogToolLocked(ctx context.Context, remote *MCPTool) e
 		c.mu.Lock()
 		defer c.mu.Unlock()
 	}
+	return m.checkCatalogToolLocked(ctx, remote)
+}
+
+// Both owner locks remain held until the caller's short admission ends. The
+// per-tool binding and the complete frozen source facts have separate roles:
+// another capability can change while this tool's exact binding stays stable.
+func (m *Manager) checkCatalogToolLocked(ctx context.Context, remote *MCPTool) error {
+	c := remote.client.catalog
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -74,11 +103,18 @@ func (m *Manager) admitCatalogToolLocked(ctx context.Context, remote *MCPTool) e
 	}
 	if c == nil || !c.dirty {
 		current := m.toolsByName[remote.def.Name]
-		if current != nil && current.bindingID == remote.bindingID && sameCatalogTool(current, remote) {
+		if current != nil && current.bindingID == remote.bindingID && sameCatalogTool(current, remote) && sameSourceFacts(current.def.Source, remote.def.Source) {
 			return nil
 		}
 	}
-	return tool.NewError(tool.ErrorCodeStaleRevision, "MCP directory refreshed; binding is stale")
+	return tool.NewError(tool.ErrorCodeStaleRevision, "MCP directory refreshed; callable source or binding is stale")
+}
+
+func sameSourceFacts(a, b *tool.SourceFacts) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
 }
 
 func (m *Manager) watchCatalog(ctx context.Context, server *managedServer) {
@@ -293,7 +329,7 @@ func (m *Manager) CheckToolBinding(ctx context.Context, binding tool.Binding) er
 					return tool.NewError(tool.ErrorCodeStaleRevision, "MCP directory was invalidated; refresh is required")
 				}
 			}
-			return tool.NewError(tool.ErrorCodeStaleRevision, "MCP directory refreshed; binding is stale")
+			return tool.NewError(tool.ErrorCodeStaleRevision, "MCP directory refreshed; callable source or binding is stale")
 		}
 	}
 	return tool.NewError(tool.ErrorCodeStaleRevision, "MCP directory refreshed; binding is no longer present")

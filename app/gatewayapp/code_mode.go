@@ -2,6 +2,7 @@ package gatewayapp
 
 import (
 	"context"
+
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
@@ -36,9 +37,8 @@ func selectedCodeModeTools(candidates []tool.Tool) []string {
 			continue
 		}
 		remote, _ := def.Metadata[tool.MetadataMCPTool].(string)
-		server, _ := def.Metadata[tool.MetadataMCPServer].(string)
 		docs := remote == "resolve-library-id" || remote == "query-docs" || remote == "get-library-docs"
-		desktop := remote == "exec" && (server == "dtw" || server == "desktop-world" || server == "desktop_world")
+		desktop := def.Source != nil && def.Source.IntegrationID == "desktop-world/atomic-v1" && (remote == "apps" || remote == "look" || remote == "click" || remote == "setValue" || remote == "typeText")
 		if docs || desktop {
 			names = append(names, def.Name)
 		}

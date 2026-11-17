@@ -48,7 +48,7 @@ func TestDTWIdentityGatewayAssembly(t *testing.T) {
 					t.Fatalf("selected package identity/root = %+v", got)
 				}
 				spec := got.MCPServerSpecs[0]
-				if spec.Name != name || spec.PluginID != "desktop-world" || spec.PackageRoot != root || spec.PackageVersion != "development" || spec.SourceTrusted || !reflect.DeepEqual(spec.ToolResourceParameters, map[string]string{"exec": "app"}) || len(spec.SourceTrustedTools) != 0 {
+				if spec.Name != name || spec.PluginID != "desktop-world" || spec.PackageRoot != root || spec.PackageVersion != "development" || spec.IntegrationID != "desktop-world/atomic-v1" {
 					t.Fatalf("service identity or app approval configuration = %+v", spec)
 				}
 				metas, err := applicationPluginSkills(got.SkillBundles)
@@ -62,7 +62,7 @@ func TestDTWIdentityGatewayAssembly(t *testing.T) {
 			}
 			assertPair(selected)
 			spec := selected.MCPServerSpecs[0]
-			if spec.Command != "verified-host-proxy" || !reflect.DeepEqual(spec.Args, []string{"generation"}) || spec.WorkDir != root || !spec.CleanEnvironment || spec.DataDir != "" || len(spec.Env) != 0 {
+			if spec.Command != "verified-host-proxy" || !reflect.DeepEqual(spec.Args, []string{"generation", "--atomic"}) || spec.WorkDir != root || !spec.CleanEnvironment || spec.DataDir != "" || len(spec.Env) != 0 {
 				t.Fatalf("Host proxy launch was not isolated: %+v", spec)
 			}
 			for _, optional := range [][]sessionprofile.Plugin{nil, {}} {
@@ -118,7 +118,7 @@ func TestDTWIdentityMCPBindingsAndInflightResult(t *testing.T) {
 	tools := make(map[string]tool.Tool)
 	for _, name := range []string{"desktop-world", "dtw"} {
 		server := mcpsdk.NewServer(&mcpsdk.Implementation{Name: name, Version: "development"}, nil)
-		server.AddTool(&mcpsdk.Tool{Name: "exec", InputSchema: map[string]any{"type": "object", "properties": map[string]any{"app": map[string]any{"type": "string"}}, "required": []string{"app"}}}, func(ctx context.Context, _ *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+		server.AddTool(&mcpsdk.Tool{Name: "look", InputSchema: map[string]any{"type": "object", "properties": map[string]any{"app": map[string]any{"type": "string"}}, "required": []string{"app"}}}, func(ctx context.Context, _ *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
 			if name == "desktop-world" {
 				if oldCalls.Add(1) == 1 {
 					close(entered)
@@ -153,7 +153,7 @@ func TestDTWIdentityMCPBindingsAndInflightResult(t *testing.T) {
 		case <-ctx.Done():
 			t.Fatal("MCP initialization timed out")
 		}
-		item, found, err := manager.Lookup(ctx, mcp.ServerToolNamePrefix(name)+"exec")
+		item, found, err := manager.Lookup(ctx, mcp.ServerToolNamePrefix(name)+"look")
 		if err != nil || !found {
 			t.Fatalf("assembled service missing from real MCP catalog: %v, %v", found, err)
 		}
@@ -202,7 +202,7 @@ func TestDTWIdentityMCPBindingsAndInflightResult(t *testing.T) {
 		t.Fatal("revoked old handle admitted another dispatch")
 	}
 	freshResult, err := fresh.Call(ctx, tool.Call{ID: "new-activation", Name: fresh.Definition().Name, Input: call.Input})
-	if err != nil || freshResult.IsError || freshResult.Name != "dtw__exec" {
+	if err != nil || freshResult.IsError || freshResult.Name != "dtw__look" {
 		t.Fatalf("new activation positive control = %+v, %v", freshResult, err)
 	}
 	releaseOld()

@@ -123,9 +123,10 @@ retain their results and are never automatically retried. This cannot undo an
 external effect already in flight or detect a remote removal before the client
 receives evidence of it.
 
-MCP grants separately capture per-scope revocation epochs before review and check
-them at dispatch. Revocation while waiting for source or per-call approval rejects
-the old call; a late approval cannot recreate its persistent grant. These checks
-apply independently of compaction. Epochs are process-local: the existing
-shared Host grant store owns persistence, and no pending callback survives a
-Runtime restart.
+Policy consumes typed Session approval/revocation facts and exact configuration
+rules. Runtime checks the captured scope revision after the unsafe-target gate
+and consumes its single-use dispatch permit under the approval owner. Persistent
+rule validation uses the existing configuration transaction boundary. Both guards
+are released before MCP I/O. Revocation prevents pending calls and late responses
+from restoring permission; it cannot undo an already admitted effect. See
+[Policy admission](agent-sdk-boundary.md) for scope and historical data contracts.
