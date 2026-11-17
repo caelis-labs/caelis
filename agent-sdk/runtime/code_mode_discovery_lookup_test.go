@@ -2,8 +2,9 @@ package runtime
 
 import (
 	"context"
-	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"testing"
+
+	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
 // A derived name index in the fixture's existing source owner. The base source

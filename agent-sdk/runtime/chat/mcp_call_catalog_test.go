@@ -1,9 +1,10 @@
 package chat
 
 import (
+	"testing"
+
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
-	"testing"
 )
 
 type bindingCatalogSource struct {

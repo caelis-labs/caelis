@@ -21,10 +21,10 @@ func TestApprovalDecisionReplayRendersOnCommandHeader(t *testing.T) {
 			}
 			m = applyACPEnvelopeForTest(t, m, tool)
 			event := &session.Event{ID: "decision-1", Seq: 7, Type: session.EventTypeLifecycle, Visibility: session.VisibilityJournal,
-				Journal: &session.ExecutionJournalEntry{Kind: session.JournalKindPauseToken, PauseToken: &session.PauseToken{
-					Status: session.PauseTokenResolved, TurnID: "turn-1", ToolCallID: "call-1", ToolName: "RunCommand", Approved: status == "approved",
+				Approval: &session.ApprovalRecord{
+					Status: session.ApprovalRecordResolved, TurnID: "turn-1", ToolCallID: "call-1", ToolName: "RunCommand", Approved: status == "approved",
 					Input: json.RawMessage(`{"command":"git status"}`), ReviewText: status + ": review reason",
-				}},
+				},
 			}
 			base := acpprojector.EnvelopeBaseFromSessionEvent(session.SessionRef{SessionID: "session-1"}, event, acpprojector.SessionEventTransport{})
 			out := acpprojector.ProjectSessionEventEnvelope(base, event)

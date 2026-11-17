@@ -224,7 +224,7 @@ func (s *IdleCompactionState) ValidateWindow(window IdleCompactionWindow, active
 }
 
 func idleCheckpointHash(event *Event) (string, error) {
-	if event == nil || event.ID == "" || event.IdempotencyKey != event.ID || event.Type != EventTypeCompact || event.Tool != nil || event.Lifecycle != nil || event.Notice != nil || event.PlanPayload != nil || event.Journal != nil || event.ChildOrigin != nil || event.Invocation != nil || event.ApprovalRequestID != "" || event.Seq != 0 || event.Message == nil || len(event.Message.ToolCalls()) != 0 || strings.TrimSpace(event.Message.TextContent()) == "" || !IsMainInvocationVisibleEvent(event) {
+	if event == nil || event.ID == "" || event.IdempotencyKey != event.ID || event.Type != EventTypeCompact || event.Tool != nil || event.Lifecycle != nil || event.Notice != nil || event.PlanPayload != nil || event.Approval != nil || event.ChildOrigin != nil || event.Invocation != nil || event.ApprovalRequestID != "" || event.Seq != 0 || event.Message == nil || len(event.Message.ToolCalls()) != 0 || strings.TrimSpace(event.Message.TextContent()) == "" || !IsMainInvocationVisibleEvent(event) {
 		return "", idleDenied("only a fixed canonical checkpoint is allowed")
 	}
 	if event.SessionID == "" || event.ContextUsage != nil || event.Compaction != nil || event.Message.Role != "user" {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"iter"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
@@ -277,10 +278,18 @@ func (t lifecycleTool) RuntimeTaskResultSource(toolbinding.Token) bool {
 	return toolbinding.IsTaskResultSource(t.inner)
 }
 
+func (t lifecycleTool) RuntimePrepareInvocation(_ toolbinding.Token, call tool.Call) tool.Call {
+	return toolbinding.Prepare(t.inner, call)
+}
+
 func (t lifecycleTool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
 	var result tool.Result
+	var consumed atomic.Bool
 	event := t.runtime.lifecycleEvent(ctx, agent.LifecycleTool, call.Name, call.ID)
 	err := t.runtime.executeLifecycle(ctx, event, func(callCtx context.Context) error {
+		if !consumed.CompareAndSwap(false, true) {
+			return fmt.Errorf("tool lifecycle continuation already consumed")
+		}
 		var callErr error
 		result, callErr = t.inner.Call(callCtx, call)
 		return callErr

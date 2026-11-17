@@ -402,16 +402,16 @@ func TestCodeModeDTWAtomicIsolatedX11(t *testing.T) {
 			// assertion fails before the model-visible snapshot checks complete.
 			captureIndex := 0
 			for _, event := range evidence {
-				if event.Journal == nil || event.Journal.ToolExecution == nil {
+				if event.Type != session.EventTypeToolResult || event.Tool == nil {
 					continue
 				}
-				record := event.Journal.ToolExecution
-				if record.ToolName != "dtw__capture" || record.Status != session.ToolExecutionSucceeded {
+				record := event.Tool
+				if record.Name != "dtw__capture" || record.Outcome != session.ToolOutcomeSucceeded {
 					continue
 				}
-				for _, bitmap := range dtwAtomicPNGs(t, record.Result) {
+				for _, bitmap := range dtwAtomicResultPNGs(t, record.Result) {
 					captureIndex++
-					if e := os.WriteFile(filepath.Join(artifacts, fmt.Sprintf("capture-journal-%02d.png", captureIndex)), bitmap, 0600); e != nil {
+					if e := os.WriteFile(filepath.Join(artifacts, fmt.Sprintf("capture-result-%02d.png", captureIndex)), bitmap, 0600); e != nil {
 						t.Error(e)
 					}
 				}
@@ -428,29 +428,29 @@ func TestCodeModeDTWAtomicIsolatedX11(t *testing.T) {
 	}
 	save("canonical-events.json", events)
 	save("model-requests.json", driver.requests)
-	var journalMedia [][]byte
+	var resultMedia [][]byte
 	var remoteCalls []map[string]any
 	defer func() { save("remote-calls.json", remoteCalls) }()
 	succeeded := map[string]int{}
 	for _, e := range events {
-		if e.Journal == nil || e.Journal.ToolExecution == nil {
+		if e.Type != session.EventTypeToolResult || e.Tool == nil {
 			continue
 		}
-		r := e.Journal.ToolExecution
+		r := e.Tool
 		if r.Parent == nil {
 			continue
 		}
-		switch r.Status {
-		case session.ToolExecutionSucceeded:
-			succeeded[r.ToolName]++
-			def, ok := definitions[r.ToolName]
+		switch r.Outcome {
+		case session.ToolOutcomeSucceeded:
+			succeeded[r.Name]++
+			def, ok := definitions[r.Name]
 			if !ok || r.Binding == nil || *r.Binding != tool.BindingForDefinition(def) {
 				t.Fatal("nested dispatch lost its admitted target binding")
 			}
-			remoteCalls = append(remoteCalls, map[string]any{"canonical_target": r.ToolName, "remote": def.Metadata[tool.MetadataMCPTool], "arguments": r.Input, "receipt": r.Result, "binding": r.Binding, "parent": r.Parent})
-			journalMedia = append(journalMedia, dtwAtomicPNGs(t, r.Result)...)
-		case session.ToolExecutionFailed, session.ToolExecutionUnknownOutcome:
-			t.Fatalf("nested call failed: %s %s", r.ToolName, r.Error)
+			remoteCalls = append(remoteCalls, map[string]any{"canonical_target": r.Name, "remote": def.Metadata[tool.MetadataMCPTool], "arguments": r.Input, "receipt": r.Result, "binding": r.Binding, "parent": r.Parent})
+			resultMedia = append(resultMedia, dtwAtomicResultPNGs(t, r.Result)...)
+		case session.ToolOutcomeFailed, session.ToolOutcomeUnknown:
+			t.Fatalf("nested call failed: %s %s", r.Name, r.Error)
 		}
 	}
 	for remote, want := range map[string]int{"click": 2, "typeText": 1, "keypress": 1, "apps": 1, "capture": 4, "look": 3} {
@@ -464,10 +464,10 @@ func TestCodeModeDTWAtomicIsolatedX11(t *testing.T) {
 			t.Fatalf("remote %s canonical %s executions=%d want=%d", remote, canonical, succeeded[canonical], want)
 		}
 	}
-	if len(journalMedia) < 4 {
-		t.Fatalf("canonical journal has only %d PNGs", len(journalMedia))
+	if len(resultMedia) < 4 {
+		t.Fatalf("complete tool results have only %d PNGs", len(resultMedia))
 	}
-	for i, b := range journalMedia {
+	for i, b := range resultMedia {
 		image, e := png.DecodeConfig(bytes.NewReader(b))
 		if e != nil || image.Width <= 0 || image.Height <= 0 {
 			t.Fatalf("PNG does not match capture coordinate canvas: %+v %v", image, e)
@@ -476,7 +476,7 @@ func TestCodeModeDTWAtomicIsolatedX11(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if bytes.Equal(journalMedia[0], journalMedia[len(journalMedia)-1]) {
+	if bytes.Equal(resultMedia[0], resultMedia[len(resultMedia)-1]) {
 		t.Fatal("captured image did not change")
 	}
 	requestsJSON, _ := json.Marshal(driver.requests)
@@ -647,6 +647,18 @@ func dtwAtomicChildPID(binary string) (int, error) {
 		return 0, fmt.Errorf("expected one directly owned DTW process, got %v", found)
 	}
 	return found[0], nil
+}
+
+func dtwAtomicResultPNGs(t *testing.T, result *tool.Result) [][]byte {
+	t.Helper()
+	if result == nil {
+		t.Fatal("nested ToolResult is missing its complete result")
+	}
+	raw, err := json.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return dtwAtomicPNGs(t, raw)
 }
 
 // Decode only typed inline media sources; plain text containing base64 is not

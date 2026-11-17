@@ -33,7 +33,7 @@ func TestApprovalSubjectLiveStateFileReplayAndStaleIdentity(t *testing.T) {
 			if err != nil || decision.Approval == nil {
 				t.Fatalf("native approval = %+v, %v", decision, err)
 			}
-			request := &agent.ApprovalRequest{SessionRef: active.SessionRef, Session: active, RunID: "run-1", TurnID: "turn-1", PauseTokenID: "native-pause", Tool: def, Call: call, Approval: decision.Approval, Metadata: decision.Metadata}
+			request := &agent.ApprovalRequest{SessionRef: active.SessionRef, Session: active, RunID: "run-1", TurnID: "turn-1", ApprovalRequestID: "native-pause", Tool: def, Call: call, Approval: decision.Approval, Metadata: decision.Metadata}
 			if child {
 				request.Metadata["subagent"] = true
 				request.Metadata["task_id"] = "child-task"
@@ -51,8 +51,9 @@ func TestApprovalSubjectLiveStateFileReplayAndStaleIdentity(t *testing.T) {
 			handle := newTestTurnHandle()
 			handle.sessionRef = active.SessionRef
 			gateway := &Gateway{sessions: store}
-			handle.persistApproval = gateway.approvalPersister(active.SessionRef, handle.turnID)
-			handle.settleApproval = gateway.approvalSettler(active.SessionRef, handle.turnID)
+			handle.projectApproval = gateway.approvalProjector(active.SessionRef, handle.turnID)
+			handle.projectApprovalSettlement = gateway.approvalSettlementProjector(active.SessionRef, handle.turnID)
+			appendRuntimeApprovalFixture(t, store, request, request.ApprovalRequestID)
 			pending, err := handle.enqueueApproval(request, true)
 			if err != nil {
 				t.Fatal(err)
@@ -74,9 +75,10 @@ func TestApprovalSubjectLiveStateFileReplayAndStaleIdentity(t *testing.T) {
 			}
 			event := page.Events[0]
 			replay := projection.ProjectSessionEventEnvelope(projection.EnvelopeBaseFromSessionEvent(active.SessionRef, event, projection.SessionEventTransport{}), event)
-			if len(replay) != 1 || !reflect.DeepEqual(live.ApprovalSubject, replay[0].ApprovalSubject) || replay[0].ApprovalRequestID != pending.id || session.IsCanonicalHistoryEvent(event) || session.IsMainInvocationVisibleEvent(event) {
-				t.Fatalf("display changed through durable replay or entered model context: %+v", replay)
+			if len(replay) != 0 || event.Approval == nil || !reflect.DeepEqual(live.ApprovalSubject, session.ApprovalSubjectOf(event.Approval.Presentation)) || session.IsCanonicalHistoryEvent(event) {
+				t.Fatalf("pending request gained replay authority or changed display: %+v", event)
 			}
+
 			for _, value := range []any{live, state, replay} {
 				raw, _ := json.Marshal(value)
 				if strings.Contains(string(raw), "MARKED-APPROVAL-SECRET") {
@@ -112,7 +114,7 @@ func TestGuardianReceivesExactMarkedActionWhileLiveReviewIsSafe(t *testing.T) {
 	const secret = "GUARDIAN-MARKED-SECRET"
 	input := json.RawMessage(`{"command":"GUARDIAN-MARKED-SECRET","justification":"GUARDIAN-MARKED-SECRET"}`)
 	original := &session.ProtocolApproval{ToolCall: session.ProtocolToolCall{ID: "call", Name: "RunCommand", Title: secret, RawInput: map[string]any{"command": secret, "justification": secret}}, Options: []session.ProtocolApprovalOption{{ID: "native-allow", Name: "Allow", Kind: "allow_once"}, {ID: "native-reject", Name: "Reject", Kind: "reject_once"}}}
-	req := &agent.ApprovalRequest{SessionRef: session.SessionRef{SessionID: "session"}, PauseTokenID: "native-request", Tool: tool.Definition{Name: "RunCommand", InputSchema: map[string]any{"properties": map[string]any{"command": map[string]any{"writeOnly": true}, "justification": map[string]any{"writeOnly": true}}}},
+	req := &agent.ApprovalRequest{SessionRef: session.SessionRef{SessionID: "session"}, ApprovalRequestID: "native-request", Tool: tool.Definition{Name: "RunCommand", InputSchema: map[string]any{"properties": map[string]any{"command": map[string]any{"writeOnly": true}, "justification": map[string]any{"writeOnly": true}}}},
 		Call: tool.Call{ID: "call", Name: "RunCommand", Input: input}, Approval: original, Metadata: map[string]any{"approval_reason": secret, "justification": secret}}
 	reviewer := &recordingApprovalReviewer{result: ApprovalReviewResult{Approved: true, OptionID: "native-allow", DisplayText: secret, Rationale: secret, Risk: secret, Authorization: secret}}
 	gateway := &Gateway{approvalReviewer: reviewer}

@@ -3,7 +3,6 @@ package runtime
 import (
 	"context"
 	"errors"
-	"strings"
 	"sync/atomic"
 	"time"
 
@@ -15,17 +14,21 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
-// RunState returns the last known run state for one session.
-func (r *Runtime) RunState(
-	ctx context.Context,
-	ref session.SessionRef,
-) (agent.RunState, error) {
-	ref = session.NormalizeSessionRef(ref)
+// RunState reports only execution still owned by this Runtime process.
+func (r *Runtime) RunState(ctx context.Context, ref session.SessionRef) (agent.RunState, error) {
+	active := r.activeRunForSession(ref)
+	if active.handle == nil {
+		return agent.RunState{}, nil
+	}
+	state := agent.RunState{Status: agent.RunLifecycleStatusRunning, ActiveRunID: active.handle.RunID()}
 	r.mu.RLock()
-	state, ok := r.runStates[ref.SessionID]
-	r.mu.RUnlock()
-	if !ok {
-		return r.persistedRunState(ctx, ref, "")
+	defer r.mu.RUnlock()
+	for id, waiter := range r.approvalWaiters {
+		if waiter.runID == state.ActiveRunID && waiter.blocksRun && waiter.owner.Err() == nil {
+			state.WaitingApproval = true
+			state.ApprovalRequestID = id
+			state.Status = agent.RunLifecycleStatusWaitingApproval
+		}
 	}
 	return state, nil
 }
@@ -57,7 +60,7 @@ func (r *Runtime) resolveAgent(
 // wrapTurnTools is shared by native and externally controlled execution.
 func (r *Runtime) wrapTurnTools(ctx context.Context, activeSession session.Session, ref session.SessionRef, state map[string]any, spec agent.AgentSpec, requester agent.ApprovalRequester, runID, turnID string, sequence *atomic.Uint64) []tool.Tool {
 	concrete := spec.Tools
-	spec.Tools = r.wrapToolsForExecutionJournal(ctx, ref, runID, turnID, spec.Tools)
+	spec.Tools = r.wrapToolsForDispatch(ctx, ref, spec.Tools)
 	spec.Tools = r.wrapToolsForPolicy(activeSession, ref, state, spec, approvalContext{
 		ctx: ctx, requester: requester, runtime: r, session: session.CloneSession(activeSession), sessionRef: session.NormalizeSessionRef(ref), runID: runID, turnID: turnID,
 	})
@@ -70,12 +73,6 @@ func cloneAgentSpec(in agent.AgentSpec) agent.AgentSpec {
 	out.Tools = append([]tool.Tool(nil), in.Tools...)
 	out.Metadata = session.CloneState(in.Metadata)
 	return out
-}
-
-func (r *Runtime) setRunState(sessionID string, state agent.RunState) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.runStates[strings.TrimSpace(sessionID)] = state
 }
 
 func (r *Runtime) runWithOverflowRecovery(
@@ -213,6 +210,8 @@ func (r *Runtime) runAttempt(
 	})
 
 	emitted := false
+	var pendingCalls []*session.Event
+	pendingCount := 0
 	if sink != nil {
 		runCtx = &localInputContext{Context: runCtx, runner: sink, commit: func(inputs []agent.AgentCommunicationInput) ([]model.Message, error) {
 			events, err := buildSteeringInputEvents(activeSession, turnID, agent.Submission{Kind: agent.SubmissionKindAgentCommunication, Inputs: inputs})
@@ -246,28 +245,54 @@ func (r *Runtime) runAttempt(
 		if toolFactOrdinal != nil && scopeRuntimeToolFactIdentity(normalized, runID, turnID, *toolFactOrdinal+1) {
 			(*toolFactOrdinal)++
 		}
-		if runtimeAgentEventShouldPersist(normalized) {
-			normalized, err = r.appendRuntimeEventOrLifecycle(ctx, activeSession, ref, turnID, normalized)
+		group := []*session.Event{normalized}
+		batchCommitted := false
+		if pendingCount > 0 || normalized.Type == session.EventTypeToolCall && normalized.Message != nil && len(normalized.Message.ToolCalls()) > 1 {
+			if pendingCount == 0 {
+				pendingCount = len(normalized.Message.ToolCalls())
+			}
+			if normalized.Type != session.EventTypeToolCall || normalized.Tool == nil {
+				return batch, emitted, inputPersisted, errors.New("incomplete frozen tool batch")
+			}
+			pendingCalls = append(pendingCalls, normalized)
+			if len(pendingCalls) < pendingCount {
+				continue
+			}
+			group, err = r.appendToolCallBatch(ctx, ref, pendingCalls)
 			if err != nil {
 				return batch, emitted, inputPersisted, err
 			}
-			if session.IsCanonicalHistoryEvent(normalized) {
-				_ = r.tasks.syncCanonicalToolResult(ctx, ref, normalized)
+			pendingCalls = nil
+			pendingCount = 0
+			batchCommitted = true
+		}
+		for _, normalized := range group {
+			if !batchCommitted && runtimeAgentEventShouldPersist(normalized) {
+				normalized, err = r.appendRuntimeEventOrLifecycle(ctx, activeSession, ref, turnID, normalized)
+				if err != nil {
+					return batch, emitted, inputPersisted, err
+				}
+				if session.IsCanonicalHistoryEvent(normalized) {
+					_ = r.tasks.syncCanonicalToolResult(ctx, ref, normalized)
+				}
 			}
-		}
-		source.Append(normalized)
-		batch = append(batch, session.CloneEvent(normalized))
-		if sink != nil {
-			sink.publishEvent(normalized)
-		}
-		if planEvent, handled, planErr := r.handlePlanEvent(ctx, ref, turnID, normalized); planErr != nil {
-			return batch, emitted, inputPersisted, planErr
-		} else if handled {
-			batch = append(batch, session.CloneEvent(planEvent))
+			source.Append(normalized)
+			batch = append(batch, session.CloneEvent(normalized))
 			if sink != nil {
-				sink.publishEvent(planEvent)
+				sink.publishEvent(normalized)
+			}
+			if planEvent, handled, planErr := r.handlePlanEvent(ctx, ref, turnID, normalized); planErr != nil {
+				return batch, emitted, inputPersisted, planErr
+			} else if handled {
+				batch = append(batch, session.CloneEvent(planEvent))
+				if sink != nil {
+					sink.publishEvent(planEvent)
+				}
 			}
 		}
+	}
+	if pendingCount > 0 {
+		return batch, emitted, inputPersisted, errors.New("incomplete frozen tool batch")
 	}
 	if err := ctx.Err(); err != nil {
 		return batch, emitted, inputPersisted, err
@@ -296,7 +321,7 @@ func (r *Runtime) appendRuntimeEventOrLifecycle(
 ) (*session.Event, error) {
 	if session.IsCanonicalHistoryEvent(event) && event.Type == session.EventTypeToolResult && event.Tool != nil && event.Tool.Name == tool.ToolSearchToolName {
 		// Native discovery receipts share the binding-claim write order with
-		// nested discovery and started Code Mode children.
+		// nested discovery, accepted ToolCalls and dispatch validation.
 		release, err := r.acquireSessionWrite(ctx, ref)
 		if err != nil {
 			return nil, err
@@ -308,13 +333,26 @@ func (r *Runtime) appendRuntimeEventOrLifecycle(
 		defer cancel()
 		return r.sessions.AppendEvent(cleanup, session.AppendEventRequest{SessionRef: ref, MutationGuard: session.RuntimeMutationGuard(ctx), Event: event})
 	}
-	persisted, err := r.sessions.AppendEvent(ctx, session.AppendEventRequest{
+	appendCtx := ctx
+	if event.Type == session.EventTypeToolResult {
+		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), approvalResolutionRecoveryTimeout)
+		defer cancel()
+		appendCtx = cleanup
+	}
+	persisted, err := r.sessions.AppendEvent(appendCtx, session.AppendEventRequest{
 		SessionRef:    ref,
 		MutationGuard: session.RuntimeMutationGuard(ctx),
 		Event:         event,
 	})
 	if err == nil {
 		return persisted, nil
+	}
+	if event.Type == session.EventTypeToolCall || event.Type == session.EventTypeToolResult {
+		confirmed, readErr := r.reconcileCompactionAppend(ctx, ref, event)
+		if confirmed != nil {
+			return confirmed, nil
+		}
+		return nil, errors.Join(err, readErr)
 	}
 	if !errors.Is(err, session.ErrInvalidEvent) {
 		return nil, err

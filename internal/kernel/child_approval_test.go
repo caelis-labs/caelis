@@ -37,13 +37,15 @@ func TestBackgroundChildApprovalWithoutParentToolOrTurn(t *testing.T) {
 			events := make(chan eventstream.Envelope, 16)
 			done := make(chan error, 1)
 			go func() {
-				response, err := gw.RequestChildApproval(ctx, agent.ApprovalRequest{
-					SessionRef: active.SessionRef, PauseTokenID: "child-permission",
+				request := agent.ApprovalRequest{
+					RunID: "child-run", TurnID: "child-turn", SessionRef: active.SessionRef, ApprovalRequestID: "child-permission",
 					Metadata: map[string]any{"subagent": true, "task_id": "child-task", "participant_id": "child-agent", "participant_kind": "subagent", "participant_session_id": "child-session"},
 					Origin:   &agent.ApprovalOrigin{Role: agent.ApprovalRoleSubagent, Endpoint: agent.ApprovalEndpointExternalACP, TaskID: "child-task", ParticipantID: "child-agent", SessionID: "child-session", ParentSessionID: active.SessionID},
 					Tool:     tool.Definition{Name: "Write"}, Call: tool.Call{ID: "write-1", Name: "Write"},
 					Approval: &session.ProtocolApproval{ToolCall: session.ProtocolToolCall{ID: "write-1", Name: "Write"}, Options: []session.ProtocolApprovalOption{{ID: "allow", Name: "Allow once", Kind: "allow_once"}}},
-				}, TurnEventObserverFunc(func(_ context.Context, event eventstream.Envelope) error { events <- event; return nil }))
+				}
+				appendRuntimeApprovalFixture(t, sessions, &request, "child-permission")
+				response, err := gw.RequestChildApproval(ctx, request, TurnEventObserverFunc(func(_ context.Context, event eventstream.Envelope) error { events <- event; return nil }))
 				if err == nil && !response.Approved {
 					t.Error("child approval was not delivered")
 				}
@@ -90,19 +92,19 @@ func TestBackgroundChildApprovalWithoutParentToolOrTurn(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			count := 0
+			var records int
 			for _, event := range loaded.Events {
-				if event.ChildOrigin == nil {
-					continue
+				if event.ChildOrigin != nil {
+					t.Fatal("Control duplicated the approval fact")
 				}
-				count++
-				if event.ChildOrigin.TaskID != "child-task" || event.ChildOrigin.ParentTool.CallID != "" || session.ValidateEventChildOrigin(*event.ChildOrigin) != nil {
-					t.Fatalf("invalid durable child approval: %#v", event.ChildOrigin)
+				if event.Approval != nil && event.Approval.RequestID == "child-permission" {
+					records++
 				}
 			}
-			if count != 2 {
-				t.Fatalf("approval replay has %d child events, want request and settlement", count)
+			if records != 1 {
+				t.Fatalf("request source facts=%d; Control must only project", records)
 			}
+
 		})
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"strconv"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
@@ -83,7 +84,7 @@ func eventMediaID(data string) string {
 }
 
 func expandEventMedia(e Event, media map[string]string) (Event, error) {
-	if media != nil && e.Schema != EventSchemaVersion {
+	if media != nil && e.Schema != 2 && e.Schema != EventSchemaVersion {
 		return Event{}, fmt.Errorf("agent-sdk/session: event media requires schema %d", EventSchemaVersion)
 	}
 	for id, data := range media {
@@ -113,28 +114,34 @@ func expandEventMedia(e Event, media map[string]string) (Event, error) {
 	return out, nil
 }
 
-// mapEventMedia copies only the message and journal branches it visits. The raw
-// receipt remains an open JSON value: unrelated fields and numeric tokens are
-// preserved rather than decoding through tool.Result or map[string]any.
+// mapEventMedia traverses complete current tool values and passive legacy media.
 func mapEventMedia(e Event, kind model.MediaSourceKind, visit func(model.MediaSource) (model.MediaSource, error)) (Event, error) {
 	out := e
 	if e.Message != nil {
-		message := model.CloneMessage(*e.Message)
-		if err := visitPartMedia(message.Parts, visit); err != nil {
+		m := model.CloneMessage(*e.Message)
+		if err := visitPartMedia(m.Parts, visit); err != nil {
 			return Event{}, err
 		}
-		out.Message = &message
+		out.Message = &m
 	}
-	if e.Journal != nil && e.Journal.ToolExecution != nil && len(e.Journal.ToolExecution.Result) > 0 {
-		result, err := mapReceiptMedia(e.Journal.ToolExecution.Result, kind, visit)
+	if e.Tool != nil && e.Tool.Result != nil {
+		t := *e.Tool
+		result, err := tool.CloneResult(*e.Tool.Result, nil)
 		if err != nil {
 			return Event{}, err
 		}
-		journal := *e.Journal
-		execution := *journal.ToolExecution
-		execution.Result = result
-		journal.ToolExecution = &execution
-		out.Journal = &journal
+		if err := visitPartMedia(result.Content, visit); err != nil {
+			return Event{}, err
+		}
+		t.Result = &result
+		out.Tool = &t
+	}
+	if len(e.legacyJournal) > 0 {
+		raw, err := mapRawMedia(e.legacyJournal, "tool_execution.result.content", kind, visit)
+		if err != nil {
+			return Event{}, err
+		}
+		out.legacyJournal = raw
 	}
 	return out, nil
 }

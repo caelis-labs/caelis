@@ -9,11 +9,12 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
-	"time"
+
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
-	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/chat"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/mcpdiscovery"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	sessionfile "github.com/caelis-labs/caelis/agent-sdk/session/file"
@@ -152,113 +153,101 @@ func TestCodeModeSequentialBindingRequiresExplicitRefresh(t *testing.T) {
 	}
 }
 
-// Hold the first journal append after the binding comparison. A concurrent
-// explicit refresh must not commit until the complete started claim is durable.
-type bindingClaimStore struct {
-	session.Service
-	prepared chan struct{}
-	resume   chan struct{}
-}
+func TestCodeModeConcurrentSearchCannotRedirectPendingOccurrence(t *testing.T) {
+	files, active, _ := codeModeStore(t)
+	source := &changingBindingSource{}
+	var oldEffects, newEffects atomic.Int32
+	publish := func(version string, count *atomic.Int32) {
+		source.publish(tool.NamedTool{Def: fixtureMCPDefinition(version), Invoke: func(context.Context, tool.Call) (tool.Result, error) {
+			count.Add(1)
+			return tool.Result{Content: []model.Part{model.NewJSONPart([]byte(`{"complete":true,"value":9007199254740993123456789}`))}}, nil
+		}})
+	}
+	publish("concurrent-v1", &oldEffects)
+	asked, release := make(chan struct{}), make(chan struct{})
+	requester := approvalRequesterFunc(func(_ context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+		if req.Call.TargetBinding != nil && req.Call.TargetBinding.Version == "concurrent-v1" {
+			close(asked)
+			<-release
+		}
+		return agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_once", Approved: true}, nil
+	})
+	var checked atomic.Bool
+	declaration := &codemode.Tool{Name: "js_repl", Executor: codeExecutorFunc(func(ctx context.Context, _ codemode.Source, host codemode.Host) (json.RawMessage, error) {
+		first := make(chan error, 1)
+		go func() { _, err := host.Call(ctx, "docs__read", []byte(`{}`)); first <- err }()
+		<-asked
+		publish("concurrent-v2", &newEffects)
+		if _, err := host.(codemode.DiscoveryHost).Search(ctx, codemode.SearchRequest{Name: "docs__read"}); err != nil {
+			return nil, err
+		}
+		close(release)
+		if err := <-first; err == nil || (errorcode.CodeOf(err) != tool.ErrorCodeStaleRevision && errorcode.CodeOf(err) != tool.ErrorCodePermissionDenied) {
+			return nil, fmt.Errorf("pending occurrence accepted changed source: %w", err)
+		}
+		checked.Store(true)
+		return []byte(`{}`), nil
+	})}
+	_, _ = runCodeMode(t, files, active, agent.AgentSpec{Model: codeModeModel(false), Tools: []tool.Tool{declaration, toolsearch.NewSource(source, exactMCPRanker{})}, DeferredTools: source}, mcpAskFixturePolicy(), requester)
 
-func (s bindingClaimStore) AppendEvent(ctx context.Context, req session.AppendEventRequest) (*session.Event, error) {
-	if journal := req.Event.Journal; journal != nil && journal.ToolExecution != nil {
-		record := journal.ToolExecution
-		if record.ToolName == "docs__read" && record.Status == session.ToolExecutionPrepared {
-			close(s.prepared)
-			select {
-			case <-s.resume:
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			}
+	fresh := &codemode.Tool{Name: "js_repl", Executor: codeExecutorFunc(func(ctx context.Context, _ codemode.Source, host codemode.Host) (json.RawMessage, error) {
+		_, err := host.Call(ctx, "docs__read", []byte(`{}`))
+		return []byte(`{}`), err
+	})}
+	runCodeMode(t, files, active, agent.AgentSpec{Model: codeModeModel(false), Tools: []tool.Tool{fresh, toolsearch.NewSource(source, exactMCPRanker{})}, DeferredTools: source}, mcpAskFixturePolicy(), requester)
+	if !checked.Load() || oldEffects.Load() != 0 || newEffects.Load() != 1 {
+		t.Fatalf("checked=%v old=%d new=%d", checked.Load(), oldEffects.Load(), newEffects.Load())
+	}
+	events, err := files.Events(t.Context(), session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pairs, err := session.PairToolFacts(events)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, pair := range pairs {
+		if pair.Call.Tool.Name == "docs__read" && (pair.Result == nil || pair.Result.Tool.Result == nil || pair.Call.Tool.Parent == nil || pair.Call.Tool.Parent.Execution.ItemID == "") {
+			t.Fatal("lost complete nested occurrence or parent")
 		}
 	}
-	return s.Service.AppendEvent(ctx, req)
+	if codeModeBindings(events)["docs__read"].Version != "concurrent-v2" {
+		t.Fatal("late result changed discovery binding")
+	}
 }
 
-func TestCodeModeBindingClaimOrdersConcurrentSearchReceipt(t *testing.T) {
-	files, active, root := codeModeStore(t)
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-	store := bindingClaimStore{Service: files, prepared: make(chan struct{}), resume: make(chan struct{})}
-	resume := sync.OnceFunc(func() { close(store.resume) })
-	defer resume()
-	writes := &sessionWriteQueue{}
-	def := fixtureMCPDefinition("claim-v1")
-	binding := tool.BindingForDefinition(def)
-	var effects atomic.Int32
-	effect := journaledTool{sessions: store, writes: writes, sessionRef: active.SessionRef, runID: "run", turnID: "turn", base: tool.NamedTool{Def: def, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
-		effects.Add(1)
-		return tool.Result{}, tool.NewError(errorcode.UnknownOutcome, "effect outcome is unknown")
-	}}}
-	makeCall := func(name, id string) (context.Context, tool.Call) {
-		call := tool.Call{ID: id, Name: name, Input: []byte(`{}`), Execution: tool.InvocationContext{SessionID: active.SessionID, TurnID: "turn", ItemID: id}, Parent: &tool.ParentCall{Kind: codemode.ToolKind, ID: "script", Name: codemode.ToolName}}
-		admission := &codeModeAdmissionBinding{callID: call.ID, name: call.Name, parent: *call.Parent, validate: func(ctx context.Context) (func(), error) { return func() {}, ctx.Err() }}
-		return context.WithValue(ctx, codeModeAdmissionKey{}, admission), call
-	}
-	effectCtx, effectCall := makeCall(def.Name, "effect")
-	effectCall.TargetBinding = &binding
-	effectDone := make(chan error, 1)
-	go func() { _, err := effect.Call(effectCtx, effectCall); effectDone <- err }()
-	select {
-	case <-store.prepared:
-	case <-ctx.Done():
-		t.Fatal("effect did not reach its prepared append")
-	}
-	claimTicket := sessionWriteTailForTest(writes, active.SessionRef)
-	if claimTicket == nil {
-		t.Fatal("binding comparison released the Session writer before its started claim")
-	}
-	fresh := fixtureMCPDefinition("claim-v2")
-	selected := tool.ToolSearchResult{Count: 1, Tools: []tool.ToolSearchDiscoveredTool{tool.NewToolSearchDiscoveredTool(fresh)}}
-	raw, err := json.Marshal(selected)
+// The Host can resolve v1, then a sibling can commit a v2 search before the old
+// intent reaches the writer. That late intent must not roll discovery back.
+func TestCodeModeOldPreparedIntentCannotOverwriteNewDiscovery(t *testing.T) {
+	files, active, _ := codeModeStore(t)
+	rt, _ := New(Config{Sessions: files, AgentFactory: chat.Factory{}})
+	fence, err := files.AcquireSessionFence(t.Context(), session.AcquireSessionFenceRequest{SessionRef: active.SessionRef, OwnerID: "interleaved-host"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	search := journaledTool{sessions: store, writes: writes, sessionRef: active.SessionRef, runID: "run", turnID: "turn", base: tool.NamedTool{Def: tool.Definition{Name: tool.ToolSearchToolName}, Invoke: func(context.Context, tool.Call) (tool.Result, error) {
-		return tool.Result{Content: []model.Part{model.NewJSONPart(raw)}, Metadata: map[string]any{mcpdiscovery.MetadataKey: true}}, nil
-	}}}
-	searchCtx, searchCall := makeCall(tool.ToolSearchToolName, "search")
-	searchDone := make(chan error, 1)
-	go func() { _, err := search.Call(searchCtx, searchCall); searchDone <- err }()
-	waitForSessionWriteTailChange(t, writes, active.SessionRef, claimTicket)
-	select {
-	case err := <-searchDone:
-		t.Fatalf("search receipt overtook an uncommitted started claim: %v", err)
-	default:
-	}
-	resume()
-	if err := <-effectDone; !errorcode.Is(err, errorcode.UnknownOutcome) {
-		t.Fatalf("effect outcome=%v, want unknown", err)
-	}
-	if err := <-searchDone; err != nil {
+	ctx := session.ContextWithRuntimeFence(t.Context(), fence)
+	old, current := tool.BindingForDefinition(fixtureMCPDefinition("v1")), tool.BindingForDefinition(fixtureMCPDefinition("v2"))
+	parent := &tool.ParentCall{ID: "script", Name: "js_exec", Kind: codemode.ToolKind, Execution: tool.InvocationContext{SessionID: active.SessionID, TurnID: "turn", ItemID: "script"}}
+	raw, _ := json.Marshal(map[string]any{"tools": []any{map[string]any{"name": current.Name, "binding": current, "input_schema": map[string]any{"type": "object"}}}})
+	search := tool.Call{ID: "search", Name: tool.ToolSearchToolName, Input: []byte(`{}`), Parent: parent, Execution: tool.InvocationContext{SessionID: active.SessionID, TurnID: "turn", ItemID: "search"}}
+	result := tool.Result{Content: []model.Part{model.NewJSONPart(raw)}, Metadata: map[string]any{mcpdiscovery.MetadataKey: true}}
+	if err := rt.appendToolFact(ctx, active.SessionRef, "turn", search, &result, nil); err != nil {
 		t.Fatal(err)
 	}
-	reopened := sessionfile.NewStore(sessionfile.Config{RootDir: filepath.Join(root, "sessions")})
-	events, err := reopened.Events(ctx, session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
+	prepared := tool.Call{ID: "old-intent", Name: old.Name, Input: []byte(`{}`), Parent: parent, TargetBinding: &old, Execution: tool.InvocationContext{SessionID: active.SessionID, TurnID: "turn", ItemID: "old"}}
+	if err := rt.appendToolFact(ctx, active.SessionRef, "turn", prepared, nil, nil); !errorcode.Is(err, tool.ErrorCodeStaleRevision) {
+		t.Fatalf("old intent accepted after new discovery: %v", err)
+	}
+	events, err := files.Events(ctx, session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	var startedSeq, searchSeq uint64
-	unknown := false
+	if codeModeBindings(events)[current.Name] != current {
+		t.Fatal("late intent rolled back discovery")
+	}
 	for _, event := range events {
-		if event.Journal == nil || event.Journal.ToolExecution == nil {
-			continue
+		if event.Tool != nil && event.Tool.Execution == prepared.Execution {
+			t.Fatal("rejected stale intent became binding authority")
 		}
-		record := event.Journal.ToolExecution
-		if record.ToolName == def.Name && record.Status == session.ToolExecutionStarted {
-			startedSeq = event.Seq
-		}
-		if record.ToolName == def.Name && record.Status == session.ToolExecutionUnknownOutcome {
-			unknown = true
-		}
-		if record.ToolName == tool.ToolSearchToolName && record.Status == session.ToolExecutionSucceeded {
-			searchSeq = event.Seq
-		}
-	}
-	if startedSeq == 0 || searchSeq <= startedSeq || !unknown || effects.Load() != 1 {
-		t.Fatalf("started seq=%d search seq=%d unknown=%v effects=%d", startedSeq, searchSeq, unknown, effects.Load())
-	}
-	if binding := codeModeBindings(events)[def.Name]; binding != tool.BindingForDefinition(fresh) {
-		t.Fatalf("refresh lost canonical order: %+v", binding)
 	}
 }

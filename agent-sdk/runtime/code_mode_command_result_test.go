@@ -104,9 +104,9 @@ func TestCodeModeRealRunCommand(t *testing.T) {
 			events, _ := store.Events(t.Context(), session.EventsRequest{SessionRef: active.SessionRef, IncludeTransient: true})
 			calls := 0
 			for _, e := range events {
-				if e.Journal != nil && e.Journal.ToolExecution != nil && e.Journal.ToolExecution.ToolName == "RunCommand" && e.Journal.ToolExecution.Status == "started" {
+				if e.Type == session.EventTypeToolCall && e.Tool != nil && e.Tool.Name == "RunCommand" && e.Tool.Status == "pending" {
 					calls++
-					if e.Journal.ToolExecution.Parent == nil || e.Journal.ToolExecution.Parent.Name != codemode.ToolName {
+					if e.Tool.Parent == nil || e.Tool.Parent.Name != codemode.ToolName {
 						t.Fatal("lost direct script parent")
 					}
 				}

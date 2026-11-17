@@ -484,14 +484,14 @@ func runValueSession(ctx context.Context, t *testing.T, study string, plan value
 			return err
 		}
 		var current []*session.Event
-		receipts := map[string]*session.ToolExecution{}
+		receipts := map[string]*session.EventTool{}
 		failed := 0
 		for _, event := range events {
 			if event.Seq > seq {
 				current = append(current, event)
-				if event.Journal != nil && event.Journal.ToolExecution != nil {
-					receipt := event.Journal.ToolExecution
-					receipts[receipt.Identity] = receipt
+				if event.Type == session.EventTypeToolResult && event.Tool != nil {
+					receipt := event.Tool
+					receipts[receipt.Execution.ItemID] = receipt
 				}
 				if event.Tool != nil && event.Tool.Status == "failed" {
 					failed++
@@ -525,7 +525,7 @@ func runValueSession(ctx context.Context, t *testing.T, study string, plan value
 			return runErr
 		}
 		for _, receipt := range receipts {
-			if receipt.Status == session.ToolExecutionUnknownOutcome {
+			if receipt.Outcome == "unknown_outcome" {
 				return fmt.Errorf("unknown original outcome; no replay")
 			}
 		}

@@ -36,15 +36,11 @@ func FromEvents(events []*session.Event) map[string]tool.Binding {
 // Apply accepts only new-format successful canonical discovery receipts.
 // Old name-only results and Exposure Active/Pending never grant call eligibility.
 func Apply(out map[string]tool.Binding, event *session.Event) {
-	if event != nil && session.IsJournal(event) && event.Journal != nil && event.Journal.ToolExecution != nil {
-		record := event.Journal.ToolExecution
-		if record.ToolName == tool.ToolSearchToolName && record.Status == session.ToolExecutionSucceeded && record.Parent != nil && record.Parent.Kind == "code_mode" {
-			var result tool.Result
-			if json.Unmarshal(record.Result, &result) == nil && !result.IsError && result.Metadata[MetadataKey] == true {
-				for _, part := range result.Content {
-					if part.JSON == nil {
-						continue
-					}
+	if event != nil && event.Type == session.EventTypeToolResult && event.Tool != nil && event.Tool.Name == tool.ToolSearchToolName && event.Tool.Result != nil && event.Tool.Outcome == session.ToolOutcomeSucceeded && (session.IsMainInvocationVisibleEvent(event) || event.Tool.Parent != nil && event.Tool.Parent.Kind == "code_mode" && event.Scope != nil && event.Scope.Source == "runtime_tool") {
+		result := event.Tool.Result
+		if !result.IsError && result.Metadata[MetadataKey] == true {
+			for _, part := range result.Content {
+				if part.JSON != nil {
 					var raw map[string]any
 					if json.Unmarshal(part.JSON.Value, &raw) == nil {
 						applyEntries(out, tool.ParseToolSearchOutput(raw))
@@ -52,6 +48,7 @@ func Apply(out map[string]tool.Binding, event *session.Event) {
 				}
 			}
 		}
+		return
 	}
 	if event == nil || !session.IsCanonicalHistoryEvent(event) || event.Type != session.EventTypeToolResult || event.Tool == nil || event.Tool.Name != tool.ToolSearchToolName || event.Tool.Status != "completed" {
 		return

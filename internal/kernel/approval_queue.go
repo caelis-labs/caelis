@@ -136,7 +136,7 @@ func approvalRequestIDForRuntimeRequest(req *agent.ApprovalRequest) eventstream.
 	if req == nil {
 		return ""
 	}
-	return eventstream.ApprovalRequestID(strings.TrimSpace(req.PauseTokenID))
+	return eventstream.ApprovalRequestID(strings.TrimSpace(req.ApprovalRequestID))
 }
 
 func (c *approvalCoordinator) submit(ctx context.Context, decision ApprovalDecision) error {
@@ -161,7 +161,7 @@ func (c *approvalCoordinator) submit(ctx context.Context, decision ApprovalDecis
 	}
 	// Only a published manual permission is caller-resolvable. The Guardian
 	// settles its own auto-review through resolve(pending); a client must not
-	// race its decision, even if it knows the pending pause token and Turn.
+	// race its decision, even if it knows the pending approval request and Turn.
 	if !pending.publishOnActivate {
 		return &Error{
 			Kind: KindConflict, Code: CodeApprovalNotPending, UserVisible: true,
@@ -349,13 +349,13 @@ func (c *approvalCoordinator) activateLocked(pending *pendingApproval) bool {
 	c.active = append(c.active, pending)
 	if pending.publishOnActivate {
 		owner := pending.owner
-		if owner == nil || owner.persistApproval == nil {
+		if owner == nil || owner.projectApproval == nil {
 			pending.activationErr = fmt.Errorf("gateway: durable approval persistence is unavailable")
 			c.removeLocked(pending, "persistence_failed")
 			close(pending.done)
 			return false
 		}
-		event, err := owner.persistApproval(pending.request, pending.id)
+		event, err := owner.projectApproval(pending.request, pending.id)
 		if err == nil {
 			err = validatePersistedApprovalEvent(event)
 		}
@@ -427,10 +427,10 @@ func autoApprovalParallelGroup(req *agent.ApprovalRequest) (string, <-chan struc
 }
 
 func (c *approvalCoordinator) settleLocked(pending *pendingApproval, state string) error {
-	if pending == nil || pending.settled || !pending.persisted || pending.owner == nil || pending.owner.settleApproval == nil {
+	if pending == nil || pending.settled || !pending.persisted || pending.owner == nil || pending.owner.projectApprovalSettlement == nil {
 		return nil
 	}
-	event, err := pending.owner.settleApproval(pending.request, pending.id, state)
+	event, err := pending.owner.projectApprovalSettlement(pending.request, pending.id, state)
 	if err != nil {
 		return err
 	}
@@ -447,6 +447,9 @@ func (c *approvalCoordinator) settleLocked(pending *pendingApproval, state strin
 func validatePersistedApprovalEvent(event *session.Event) error {
 	if event == nil {
 		return fmt.Errorf("gateway: durable approval persistence returned no event")
+	}
+	if session.IsUIOnly(event) {
+		return nil
 	}
 	if strings.TrimSpace(event.ID) == "" || event.Seq == 0 {
 		return fmt.Errorf("gateway: durable approval persistence returned an event without a durable position")

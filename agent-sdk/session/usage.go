@@ -19,7 +19,7 @@ func ProjectUsageEvent(event *Event) *Event {
 	if IsJournal(event) {
 		out.Visibility = VisibilityJournal
 	}
-	out.Message, out.Tool, out.PlanPayload, out.Protocol, out.Journal = nil, nil, nil, nil, nil
+	out.Message, out.Tool, out.PlanPayload, out.Protocol, out.Approval = nil, nil, nil, nil, nil
 	out.Text = ""
 	_, checkpoint := event.Meta[CheckpointMetadataKey]
 	if out.Type == EventTypeCompact || checkpoint {

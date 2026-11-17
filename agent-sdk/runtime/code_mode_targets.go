@@ -32,24 +32,25 @@ func codeModeAvailableTools(static []tool.Tool, source tool.Source) []tool.Tool 
 	return items
 }
 
-// Search and actual execution receipts share the existing canonical history.
-// A started Code Mode child pins its binding even if its outcome is unknown;
+// Search results and accepted ToolCalls share the canonical binding order.
+// An accepted Code Mode intent retains its binding even if its outcome is unknown;
 // reading that binding never replays the child or grants legacy mcp_call access.
 func codeModeBindings(events []*session.Event) map[string]tool.Binding {
 	bindings := map[string]tool.Binding{}
 	for _, event := range events {
 		mcpdiscovery.Apply(bindings, event)
-		if event == nil || !session.IsJournal(event) || event.Journal == nil || event.Journal.ToolExecution == nil {
+		if event == nil || event.Type != session.EventTypeToolCall || event.Tool == nil {
 			continue
 		}
-		record := event.Journal.ToolExecution
-		if record.Parent == nil || record.Parent.Kind != codemode.ToolKind || record.Status != session.ToolExecutionStarted || record.Binding == nil {
+		record := event.Tool
+		if record.Parent == nil || record.Parent.Kind != codemode.ToolKind || record.Binding == nil {
 			continue
 		}
 		binding := *record.Binding
-		if binding.Name == record.ToolName && binding.Identity != "" && binding.Version != "" {
+		if binding.Name == record.Name && binding.Identity != "" && binding.Version != "" {
 			bindings[binding.Name] = binding
 		}
+
 	}
 	return bindings
 }

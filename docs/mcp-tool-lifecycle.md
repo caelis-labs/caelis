@@ -59,8 +59,7 @@ can wait between model responses within that original Turn. It must not inject a
 warmup Prompt, use stale results as evidence of current readiness, or treat
 `connecting` as tool absence.
 
-Canonical search receipts remain the durable discovery records. Started child
-Journal records for Code Mode tool executions also preserve the binding used by a
+Canonical search receipts remain the durable discovery records. Typed nested ToolCall facts also preserve the binding used by a
 direct MCP call.
 Runtime rebuilds both from canonical events across fresh VMs, compaction and
 file-Store resume; it does not maintain another durable registry. Old ToolSearch
@@ -85,8 +84,8 @@ availability, revocation and approval retain their own checks. No name lookup
 fallback grants eligibility to non-Code Mode `mcp_call`.
 
 The resolved Tool enters the existing lifecycle, invocation, policy/approval and
-execution-journal wrappers. It is never dispatched directly through Manager.
-Policy, approvals, display events and the one Journal record use the real name
+dispatch-admission wrappers. It is never dispatched directly through Manager.
+Policy, approvals, display events and the canonical ToolCall/ToolResult use the real name
 and arguments. Without Code Mode, the model-facing call/result retain the original `mcp_call`
 name and call ID; a typed original-call field preserves that pairing through
 Store round trips and unknown-result recovery. Recovery never replays an unknown MCP

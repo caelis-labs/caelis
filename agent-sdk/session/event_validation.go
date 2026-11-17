@@ -69,17 +69,17 @@ func ValidateDurableCoreEvent(event *Event) error {
 			return coreEventValidationError(err.Error())
 		}
 	}
-	if event.Journal != nil {
-		if err := ValidateExecutionJournalEntry(*event.Journal); err != nil {
-			return coreEventValidationError(err.Error())
-		}
-	}
 	if event.ChildOrigin != nil {
 		if err := ValidateEventChildOrigin(*event.ChildOrigin); err != nil {
 			return coreEventValidationError(err.Error())
 		}
 		if !IsMirror(event) {
 			return coreEventValidationError("child origin requires mirror visibility")
+		}
+	}
+	if event.Approval != nil {
+		if err := ValidateApprovalRecord(*event.Approval); err != nil {
+			return coreEventValidationError(err.Error())
 		}
 	}
 	if !IsCanonicalHistoryEvent(event) {
@@ -124,17 +124,7 @@ func ValidateDurableCoreEvent(event *Event) error {
 }
 
 func eventSchemasCurrent(event *Event) bool {
-	if event.Schema != EventSchemaVersion {
-		return false
-	}
-	journal := event.Journal
-	if journal == nil {
-		return true
-	}
-	return journal.Schema == ExecutionJournalSchemaVersion &&
-		(journal.Execution == nil || journal.Execution.Schema == RunSchemaVersion) &&
-		(journal.ToolExecution == nil || journal.ToolExecution.Schema == ToolExecutionSchemaVersion) &&
-		(journal.PauseToken == nil || journal.PauseToken.Schema == ExecutionJournalSchemaVersion)
+	return event.Schema == EventSchemaVersion
 }
 
 func validateDurableCoreToolResult(event *Event) error {

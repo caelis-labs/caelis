@@ -144,10 +144,10 @@ func TestNativeWorkerPluginConfigurationHTTP(t *testing.T) {
 	}
 	executions := 0
 	for _, event := range loaded.Events {
-		if event.Journal != nil && event.Journal.ToolExecution != nil {
-			r := event.Journal.ToolExecution
-			if r.ToolName == "desktop_world__look" && r.Status == session.ToolExecutionSucceeded {
-				if r.Parent == nil || r.Parent.Kind != "code_mode" || r.Parent.Name != "js_exec" || r.Parent.ID == "" || r.Binding == nil || r.Binding.Identity == "" {
+		if event.Type == session.EventTypeToolResult && event.Tool != nil {
+			r := event.Tool
+			if r.Name == "desktop_world__look" && r.Status == "completed" {
+				if r.Parent == nil || r.Parent.Kind != "code_mode" || r.Parent.Name != "js_exec" || r.Parent.CallID == "" || r.Binding == nil || r.Binding.Identity == "" {
 					t.Fatal("native worker result lost original JS child identity")
 				}
 				executions++

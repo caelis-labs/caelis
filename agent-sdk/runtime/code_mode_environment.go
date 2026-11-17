@@ -130,7 +130,7 @@ func (r *Runtime) resetCodeMode(ref session.SessionRef, executor codemode.Execut
 
 // ReleaseCodeModeEnvironments releases disposable language state after the host
 // has quiesced this Runtime's Session execution resources. It does not authorize
-// effects, alter Task/Journal records, or replay interrupted scripts.
+// effects, alter Task/tool facts, or replay interrupted scripts.
 func (r *Runtime) ReleaseCodeModeEnvironments() error {
 	r.codeModeMu.Lock()
 	environments := r.codeModeEnvironments

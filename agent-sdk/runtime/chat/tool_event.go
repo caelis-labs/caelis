@@ -22,11 +22,13 @@ func toolProgressEvent(call model.ToolCall, result tool.Result, extraMeta ...map
 
 func toolEvent(call model.ToolCall, result tool.Result, message *model.Message, statusOverride string, extraMeta ...map[string]any) *session.Event {
 	rawInput := mustObject(call.Args)
-	rawOutput := toolResultRawOutput(result)
-	journal := toolExecutionJournalFromResult(result)
+	view, _ := canonicalToolResult(result, nil)
+	if message != nil && len(message.ToolResults()) > 0 {
+		view.Content = message.ToolResults()[0].Content
+	}
+	rawOutput := toolResultRawOutput(view)
 	trustedTaskResult := runtimeTaskResultSourceDeclared(extraMeta)
 	resultMetadata := session.CloneState(result.Metadata)
-	delete(resultMetadata, tool.MetadataExecutionJournal)
 	resultMetadata = withoutUntrustedRuntimeTaskAuthority(resultMetadata, trustedTaskResult)
 	metaParts := []map[string]any{resultMetadata}
 	metaParts = append(metaParts, extraMeta...)
@@ -44,8 +46,12 @@ func toolEvent(call model.ToolCall, result tool.Result, message *model.Message, 
 	if statusOverride == "" && !result.IsError {
 		event.Tool.TurnComplete = result.TurnComplete
 	}
-	if journal != nil {
-		event.Journal = journal
+	full, _ := tool.CloneResult(result, nil)
+	event.Tool.Result = &full
+	if result.IsError {
+		event.Tool.Outcome = "failed"
+	} else {
+		event.Tool.Outcome = "succeeded"
 	}
 	if message != nil {
 		event.Message = message
@@ -74,26 +80,6 @@ func withoutUntrustedRuntimeTaskAuthority(meta map[string]any, trusted bool) map
 		delete(runtimeMeta, "task")
 	}
 	return meta
-}
-
-func toolExecutionJournalFromResult(result tool.Result) *session.ExecutionJournalEntry {
-	raw, ok := result.Metadata[tool.MetadataExecutionJournal]
-	if !ok || raw == nil {
-		return nil
-	}
-	data, err := json.Marshal(raw)
-	if err != nil {
-		return nil
-	}
-	var journal session.ExecutionJournalEntry
-	if err := json.Unmarshal(data, &journal); err != nil {
-		return nil
-	}
-	journal = session.CloneExecutionJournalEntry(journal)
-	if journal.Schema != session.ExecutionJournalSchemaVersion || journal.Kind != session.JournalKindToolExecution || journal.ToolExecution == nil {
-		return nil
-	}
-	return &journal
 }
 
 func toolResultRawOutput(result tool.Result) map[string]any {

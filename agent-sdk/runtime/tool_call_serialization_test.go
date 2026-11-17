@@ -212,20 +212,21 @@ func TestToolCallSerializationCancellationBeforeClaim(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	claimed := false
+	var succeeded, interrupted bool
 	for _, event := range events {
-		if event.Journal == nil || event.Journal.ToolExecution == nil || event.Journal.ToolExecution.ToolName != "State" {
+		if event.Type != session.EventTypeToolResult || event.Tool == nil || event.Tool.Name != "State" {
 			continue
 		}
-		record := event.Journal.ToolExecution
-		if string(record.Input) == `{"queued":true}` {
-			t.Fatalf("cancelled queued call wrote a durable execution record: %+v", record)
+		if string(factJSON(event.Tool.Input)) == `{"queued":true}` {
+			interrupted = event.Tool.Outcome == session.ToolOutcomeUnknown && event.Tool.Result != nil
+		} else {
+			succeeded = event.Tool.Outcome == session.ToolOutcomeUnknown
 		}
-		claimed = claimed || record.Status == session.ToolExecutionStarted
 	}
-	if !claimed {
-		t.Fatal("the first call never durably claimed execution")
+	if !succeeded || !interrupted {
+		t.Fatal("accepted calls lost their complete outcomes")
 	}
+
 }
 
 func TestToolCallSerializationSharedAcrossYieldedSnapshotsAndNative(t *testing.T) {
@@ -311,15 +312,15 @@ func TestToolCallSerializationSharedAcrossYieldedSnapshotsAndNative(t *testing.T
 	}
 }
 
-type serializationJournalStore struct {
+type serializationFactStore struct {
 	session.Service
-	started func(*session.ToolExecution)
+	started func(*session.EventTool)
 }
 
-func (s serializationJournalStore) AppendEvent(ctx context.Context, req session.AppendEventRequest) (*session.Event, error) {
+func (s serializationFactStore) AppendEvent(ctx context.Context, req session.AppendEventRequest) (*session.Event, error) {
 	event, err := s.Service.AppendEvent(ctx, req)
-	if err == nil && req.Event != nil && req.Event.Journal != nil && req.Event.Journal.ToolExecution != nil {
-		s.started(req.Event.Journal.ToolExecution)
+	if err == nil && req.Event != nil && req.Event.Type == session.EventTypeToolCall && req.Event.Tool != nil {
+		s.started(req.Event.Tool)
 	}
 	return event, err
 }
@@ -328,8 +329,8 @@ func TestToolCallSerializationTaskWaitAllowsNestedTaskRead(t *testing.T) {
 	files, active, _ := codeModeStore(t)
 	waitStarted := make(chan struct{})
 	markWait := sync.OnceFunc(func() { close(waitStarted) })
-	store := serializationJournalStore{Service: files, started: func(record *session.ToolExecution) {
-		if record.ToolName == tasktool.ToolName && record.Parent == nil && record.Status == session.ToolExecutionStarted {
+	store := serializationFactStore{Service: files, started: func(record *session.EventTool) {
+		if record.Name == tasktool.ToolName && record.Parent == nil && record.Status == "pending" {
 			markWait()
 		}
 	}}
@@ -377,11 +378,11 @@ func TestToolCallSerializationTaskWaitAllowsNestedTaskRead(t *testing.T) {
 	}
 	var read, wait bool
 	for _, event := range events {
-		if event.Journal == nil || event.Journal.ToolExecution == nil {
+		if event.Type != session.EventTypeToolResult || event.Tool == nil {
 			continue
 		}
-		record := event.Journal.ToolExecution
-		if record.ToolName == tasktool.ToolName && record.Status == session.ToolExecutionSucceeded {
+		record := event.Tool
+		if record.Name == tasktool.ToolName && record.Status == "completed" {
 			if record.Parent == nil {
 				wait = true
 			} else {

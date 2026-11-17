@@ -18,20 +18,17 @@ import (
 // This disposable index stores provenance and byte locations, never transcript
 // payloads. It is built only for a requested Session, catches up incrementally,
 // and survives Host restart. The canonical log and its WAL remain authoritative.
-const eventMetadataIndexVersion = 1
+const eventMetadataIndexVersion = 2
 const maxEventMetadataIndexBytes = 32 << 20
 const eventMetadataCheckpointStride = 200
 
 type eventMetadataRecord struct {
 	session.EventMetadata
-	Offset      int64
-	Length      int
-	Line        int
-	Canonical   bool
-	Replay      bool
-	RunID       string `json:",omitempty"`
-	RunRevision uint64 `json:",omitempty"`
-	PauseRunID  string `json:",omitempty"`
+	Offset    int64
+	Length    int
+	Line      int
+	Canonical bool
+	Replay    bool
 }
 
 type eventMetadataIndex struct {
@@ -85,66 +82,6 @@ func (s *Store) EventMetadataPage(ctx context.Context, req session.EventPageRequ
 				through = min(through, req.ThroughSeq)
 			}
 			out.NextSeq = max(out.NextSeq, through)
-		}
-		return nil
-	})
-	return out, err
-}
-
-// RunJournal reads only the selected Run and pause payloads from canonical disk.
-func (s *Store) RunJournal(ctx context.Context, ref session.SessionRef, runID string) (session.RunJournalSnapshot, error) {
-	runID = strings.TrimSpace(runID)
-	var out session.RunJournalSnapshot
-	err := s.withEventMetadata(ctx, ref, func(index *eventMetadataIndex, path string) error {
-		var selected *eventMetadataRecord
-		for n := len(index.Records) - 1; n >= 0; n-- {
-			record := &index.Records[n]
-			if record.RunID == "" || runID != "" && record.RunID != runID {
-				continue
-			}
-			if runID == "" {
-				selected = record
-				break
-			}
-			if selected == nil || record.RunRevision >= selected.RunRevision {
-				selected = record
-			}
-		}
-		if selected == nil || selected.RunRevision == 0 {
-			return session.ErrSessionNotFound
-		}
-		file, err := os.Open(path)
-		if err != nil {
-			return err
-		}
-		defer file.Close()
-		event, err := readIndexedEvent(file, eventAppendRecord{offset: selected.Offset, length: selected.Length})
-		if err != nil {
-			return err
-		}
-		if event.Journal == nil || event.Journal.Execution == nil {
-			return errors.New("agent-sdk/session/file: invalid indexed Run")
-		}
-		run := session.NormalizeExecutionRecord(*event.Journal.Execution)
-		out.Run = &run
-		if run.Status != session.ExecutionWaitingApproval {
-			return nil
-		}
-		for n := len(index.Records) - 1; n >= 0; n-- {
-			record := index.Records[n]
-			if record.PauseRunID != run.RunID {
-				continue
-			}
-			event, err := readIndexedEvent(file, eventAppendRecord{offset: record.Offset, length: record.Length})
-			if err != nil {
-				return err
-			}
-			if event.Journal == nil || event.Journal.PauseToken == nil {
-				return errors.New("agent-sdk/session/file: invalid indexed pause")
-			}
-			pause := session.ClonePauseToken(*event.Journal.PauseToken)
-			out.Pause = &pause
-			break
 		}
 		return nil
 	})
@@ -341,19 +278,13 @@ func eventMetadataFromJSON(raw []byte, path string, line int) (eventMetadataReco
 		Scope       *session.EventScope       `json:"scope"`
 		ChildOrigin *session.EventChildOrigin `json:"child_origin"`
 		Notice      json.RawMessage           `json:"notice"`
-		Journal     *struct {
-			Kind       session.JournalKind      `json:"kind"`
-			Execution  *session.ExecutionRecord `json:"execution"`
-			PauseToken *session.PauseToken      `json:"pause_token"`
-		} `json:"journal"`
+		Approval    *session.ApprovalRecord   `json:"approval"`
 	}
 	if err := json.Unmarshal(raw, &header); err != nil {
 		return eventMetadataRecord{}, err
 	}
 	event := &session.Event{Schema: header.Schema, Seq: header.Seq, Type: header.Type, Visibility: header.Visibility, Scope: header.Scope, ChildOrigin: header.ChildOrigin}
-	if header.Journal != nil {
-		event.Journal = &session.ExecutionJournalEntry{Kind: header.Journal.Kind, Execution: header.Journal.Execution, PauseToken: header.Journal.PauseToken}
-	}
+	event.Approval = header.Approval
 	if header.Schema != session.EventSchemaVersion || header.Type == "" || header.Type == session.EventTypeContext || len(header.Notice) > 0 {
 		var err error
 		event, err = decodeIndexedEvent(raw, path, line)
@@ -365,17 +296,6 @@ func eventMetadataFromJSON(raw []byte, path string, line int) (eventMetadataReco
 	out := eventMetadataRecord{EventMetadata: session.EventMetadata{Seq: event.Seq, HasScope: event.Scope != nil, Child: event.ChildOrigin != nil, ReviewedApproval: session.ResolvedApprovalReview(event) != nil}, Canonical: session.IsCanonicalHistoryEvent(event), Replay: session.IsClientReplayEvent(event)}
 	if event.Scope != nil {
 		out.TurnID = event.Scope.TurnID
-	}
-	if event.Journal != nil {
-		if event.Journal.Execution != nil {
-			run := session.NormalizeExecutionRecord(*event.Journal.Execution)
-			if run.Kind == session.JournalKindRun {
-				out.RunID, out.RunRevision = run.RunID, run.Revision
-			}
-		}
-		if event.Journal.PauseToken != nil {
-			out.PauseRunID = event.Journal.PauseToken.RunID
-		}
 	}
 	return out, nil
 }
@@ -404,11 +324,11 @@ func (s *Store) metadataEventPageCheckpoint(ctx context.Context, file *os.File, 
 }
 
 func eventMetadataRecordBytes(record eventMetadataRecord) int64 {
-	return int64(256 + len(record.TurnID) + len(record.RunID) + len(record.PauseRunID))
+	return int64(256 + len(record.TurnID))
 }
 
 func (i *eventMetadataIndex) keep(record eventMetadataRecord) bool {
-	if len(i.Records) == 0 || record.RunID != "" || record.PauseRunID != "" || record.ReviewedApproval {
+	if len(i.Records) == 0 || record.ReviewedApproval {
 		return true
 	}
 	previous := i.Records[len(i.Records)-1]

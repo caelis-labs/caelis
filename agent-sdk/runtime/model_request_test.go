@@ -251,8 +251,8 @@ func TestRuntimeModelRequestSnapshotsPinInflightToolsAndRefreshSameTurn(t *testi
 		if event.Type == session.EventTypeUser {
 			users++
 		}
-		if event.Journal != nil && event.Journal.ToolExecution != nil && event.Journal.ToolExecution.Status == session.ToolExecutionSucceeded {
-			succeeded[event.Journal.ToolExecution.Key.StepID] = true
+		if event.Type == session.EventTypeToolResult && event.Tool != nil && event.Tool.Status == "completed" {
+			succeeded[event.Tool.Execution.ItemID] = true
 		}
 	}
 	if users != 1 || len(succeeded) != 2 {
@@ -301,7 +301,7 @@ func (b *snapshotLifecycleBarrier) InterceptLifecycle(ctx context.Context, event
 }
 
 func TestRuntimeModelRequestSnapshotRefreshesBeforeFinalAdmission(t *testing.T) {
-	sessions, active := newJournalTestSession(t, "snapshot-build-race")
+	sessions, active := newToolFactTestSession(t, "snapshot-build-race")
 	oldModel, newModel := newRequestSnapshotModel("old"), newRequestSnapshotModel("new")
 	source := &requestSnapshotSource{}
 	var oldReleases, newReleases atomic.Int64
@@ -336,7 +336,7 @@ func TestRuntimeModelRequestSnapshotRefreshesBeforeFinalAdmission(t *testing.T) 
 }
 
 func TestRuntimeModelRequestSnapshotRefreshesBeforeProviderRetry(t *testing.T) {
-	sessions, active := newJournalTestSession(t, "snapshot-retry-race")
+	sessions, active := newToolFactTestSession(t, "snapshot-retry-race")
 	oldModel, newModel := newRequestSnapshotModel("old"), newRequestSnapshotModel("new")
 	source := &requestSnapshotSource{}
 	var oldReleases, newReleases atomic.Int64
@@ -386,7 +386,7 @@ func TestRuntimeModelRequestSnapshotRefreshesBeforeProviderRetry(t *testing.T) {
 }
 
 func TestRuntimeModelRequestSnapshotReleasesOnPreparationFailure(t *testing.T) {
-	sessions, active := newJournalTestSession(t, "snapshot-prepare-failure")
+	sessions, active := newToolFactTestSession(t, "snapshot-prepare-failure")
 	llm := newRequestSnapshotModel("unused")
 	var releases atomic.Int64
 	rt, err := New(Config{Sessions: sessions, AgentFactory: chat.Factory{}})
@@ -414,7 +414,7 @@ func TestRuntimeModelRequestSnapshotReleasesOnPreparationFailure(t *testing.T) {
 }
 
 func TestRuntimeModelRequestSnapshotReleasesOnCancellation(t *testing.T) {
-	sessions, active := newJournalTestSession(t, "snapshot-cancel")
+	sessions, active := newToolFactTestSession(t, "snapshot-cancel")
 	llm := newRequestSnapshotModel("blocking")
 	var releases atomic.Int64
 	rt, err := New(Config{Sessions: sessions, AgentFactory: chat.Factory{}})
@@ -463,7 +463,7 @@ func (*snapshotOverflowCompactor) Force(context.Context, compact.Request, string
 }
 
 func TestRuntimeModelRequestSnapshotOverflowUsesActualModelAndTier(t *testing.T) {
-	sessions, active := newJournalTestSession(t, "snapshot-overflow")
+	sessions, active := newToolFactTestSession(t, "snapshot-overflow")
 	oldModel, newModel := newRequestSnapshotModel("bootstrap"), newRequestSnapshotModel("selected")
 	source := &requestSnapshotSource{}
 	snapshot := snapshotTestConfig("selected", newModel)

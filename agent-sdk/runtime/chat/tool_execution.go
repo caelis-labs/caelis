@@ -2,12 +2,11 @@ package chat
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"strings"
-	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/mcpdiscovery"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
@@ -17,8 +16,6 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
 	"github.com/google/uuid"
 )
-
-const toolCancellationDrainGrace = 100 * time.Millisecond
 
 type toolSearchInvocationObserverKey struct{}
 
@@ -65,7 +62,7 @@ func (a *Agent) executeToolCallWithProgressAdmitted(
 	}()
 
 	drainProgress := func(done toolExecutionResult) (model.Message, *session.Event, error) {
-		// Always prefer the terminal tool result so execution journals are not
+		// Always prefer the completed tool result so accepted ToolCalls are not
 		// dropped when a late progress yield is refused by the consumer.
 		for {
 			select {
@@ -92,24 +89,16 @@ func (a *Agent) executeToolCallWithProgressAdmitted(
 			event := toolProgressEvent(call, canonical, truncationMeta, progressTaskResultMeta)
 			a.presentMCPEvent(event)
 			if !yieldProgress(session.MarkUIOnly(event)) {
+				cancel()
+				<-doneCh
 				return model.Message{}, nil, context.Canceled
 			}
 		case done := <-doneCh:
 			return drainProgress(done)
 		case <-ctx.Done():
-			// Give context-aware tools a short window to return their terminal
-			// execution journal, but never let an unresponsive tool block run
-			// cancellation indefinitely. Recovery reconciles the durable
-			// cancel_requested record when no terminal result arrives.
+			// Cancellation closes admission; producer completion retains the fence.
 			cancel()
-			timer := time.NewTimer(toolCancellationDrainGrace)
-			defer timer.Stop()
-			select {
-			case done := <-doneCh:
-				return drainProgress(done)
-			case <-timer.C:
-				return model.Message{}, nil, ctx.Err()
-			}
+			return drainProgress(<-doneCh)
 		}
 	}
 }
@@ -122,7 +111,14 @@ func (a *Agent) executeToolCallAdmitted(
 	visibility *tool.ToolVisibility,
 ) (model.Message, *session.Event, error) {
 	defer step.MarkAdmissionComplete()
-	selectedTool, actualCall, binding, bindingErr := a.boundTool(call, visibility)
+	prepared, known := a.preparedCalls[call.ID]
+	if !known {
+		if err := a.prepareToolCalls(ctx, []model.ToolCall{call}, visibility); err != nil {
+			return model.Message{}, nil, err
+		}
+		prepared = a.preparedCalls[call.ID]
+	}
+	selectedTool, bindingErr := prepared.target, prepared.err
 	if bindingErr != nil {
 		if call.Name == tool.MCPCallToolName {
 			bindingErr = mcpdiscovery.WithEntryHint(bindingErr, tool.ToolSearchToolName)
@@ -136,7 +132,8 @@ func (a *Agent) executeToolCallAdmitted(
 		}
 		canonical, truncationMeta := canonicalToolResult(result, a.toolResultArtifacts)
 		message := toolResultMessageFromCanonical(call, canonical)
-		event := toolResultEvent(call, canonical, &message, truncationMeta)
+		event := toolResultEvent(call, result, &message, truncationMeta)
+		a.applyPreparedFact(event)
 		a.presentMCPEvent(event)
 		return message, event, nil
 	}
@@ -151,22 +148,15 @@ func (a *Agent) executeToolCallAdmitted(
 		}
 		ctx = toolsearch.WithInvocationAccounting(ctx, observer, admission)
 	}
-	var original *model.ToolCall
-	if binding != nil {
-		value := call
-		original = &value
-	}
-	result, err := selectedTool.Call(ctx, tool.Call{
-		ModelCall: original, TargetBinding: binding,
-		ID:                 strings.TrimSpace(call.ID),
-		Name:               strings.TrimSpace(actualCall.Name),
-		Input:              json.RawMessage(strings.TrimSpace(actualCall.Args)),
-		ModelStep:          step,
-		RuntimeModel:       a.model,
-		RuntimeReasoning:   a.reasoning,
-		RuntimeServiceTier: a.request.ServiceTier,
-		Observer:           observer,
-	})
+	invocation := prepared.call
+	invocation.ModelStep = step
+	invocation.RuntimeModel = a.model
+	invocation.RuntimeReasoning = a.reasoning
+	invocation.RuntimeServiceTier = a.request.ServiceTier
+	invocation.Observer = observer
+	result, err := selectedTool.Call(toolbinding.WithPrepared(ctx, invocation), invocation)
+	complete, _ := tool.CloneResult(result, nil)
+
 	if err != nil {
 		if tool.IsMCPDefinition(selectedTool.Definition()) {
 			err = mcpdiscovery.WithEntryHint(err, tool.ToolSearchToolName)
@@ -183,7 +173,18 @@ func (a *Agent) executeToolCallAdmitted(
 	if toolbinding.IsTaskResultSource(selectedTool) {
 		eventMeta = mergeEventMeta(eventMeta, runtimeTaskResultSourceMeta(true))
 	}
-	event := toolResultEvent(call, canonical, &message, eventMeta)
+	event := toolResultEvent(call, result, &message, eventMeta)
+	if err != nil && (len(complete.Content) > 0 || complete.StructuredContent != nil) {
+		event.Tool.Result = &complete
+	}
+	a.applyPreparedFact(event)
+	if err != nil {
+		event.Tool.Error = err.Error()
+		event.Tool.ErrorCode = string(errorcode.CodeOf(err))
+		if errorcode.Is(err, errorcode.UnknownOutcome) || errors.Is(err, context.Canceled) {
+			event.Tool.Outcome = "unknown_outcome"
+		}
+	}
 	a.presentMCPEvent(event)
 	return message, event, nil
 }
@@ -197,7 +198,6 @@ func runtimeTaskResultSourceMeta(trusted bool) map[string]any {
 }
 
 func modelVisibleToolErrorResult(call model.ToolCall, result tool.Result, err error) tool.Result {
-	executionJournal := result.Metadata[tool.MetadataExecutionJournal]
 	scriptCompletion := result.Metadata[codemode.MetadataScriptCompletion]
 	result = tool.Result{
 		ID:      strings.TrimSpace(call.ID),
@@ -206,9 +206,6 @@ func modelVisibleToolErrorResult(call model.ToolCall, result tool.Result, err er
 		Content: []model.Part{model.NewJSONPart(mustJSON(tool.ErrorPayload(err)))},
 	}
 	result.Metadata = map[string]any{}
-	if executionJournal != nil {
-		result.Metadata[tool.MetadataExecutionJournal] = executionJournal
-	}
 	if scriptCompletion != "" && scriptCompletion != nil {
 		result.Metadata[codemode.MetadataScriptCompletion] = scriptCompletion
 	} else if call.Name == "js_exec" {

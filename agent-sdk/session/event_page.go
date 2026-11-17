@@ -12,9 +12,9 @@ const (
 	// EventPageCanonical returns canonical model/session history only.
 	EventPageCanonical EventPageVisibility = "canonical"
 	// EventPageClientReplay returns durable events with a client projection,
-	// including completed reviewed approval decisions from execution journals.
+	// including completed reviewed approval facts.
 	EventPageClientReplay EventPageVisibility = "client_replay"
-	// EventPageAllDurable also returns journal records for recovery consumers.
+	// EventPageAllDurable also returns approval, accounting and compaction receipts.
 	EventPageAllDurable EventPageVisibility = "all_durable"
 )
 

@@ -94,7 +94,6 @@ type Runtime struct {
 	controllerEventForwarder agent.ControllerEventForwarder
 	subagents                agent.SubagentRunner
 	sessionWrites            sessionWriteQueue
-	executionMu              sync.Mutex
 	// participantMu linearizes durable participant topology mutations with
 	// source/target input reservations; remote receipt waits never hold it.
 	participantMu           sync.Mutex
@@ -102,7 +101,6 @@ type Runtime struct {
 	participantInputPins    map[participantPromptKey]int
 	participantInputs       map[*participantInputReservation]struct{}
 	mu                      sync.RWMutex
-	runStates               map[string]agent.RunState
 	activeRunners           map[string]activeRun
 	approvalWaiters         map[string]approvalWaiter
 	tasks                   *taskRuntime
@@ -146,7 +144,6 @@ func New(cfg Config) (*Runtime, error) {
 		subagents:                cfg.Subagents,
 		childApprovalRequester:   cfg.ChildApprovalRequester,
 		taskOutput:               cfg.TaskOutput,
-		runStates:                map[string]agent.RunState{},
 		activeRunners:            map[string]activeRun{},
 		approvalWaiters:          map[string]approvalWaiter{},
 		participantPromptClaims:  map[participantPromptKey]struct{}{},
@@ -226,7 +223,7 @@ func (r *Runtime) Terminals() terminal.Controller {
 func (r *Runtime) Run(
 	ctx context.Context,
 	req agent.RunRequest,
-) (agent.RunResult, error) {
+) (out agent.RunResult, runErr error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -271,29 +268,35 @@ func (r *Runtime) Run(
 		cancel()
 		return agent.RunResult{}, err
 	}
-	if err := r.recoverIncompleteExecutionJournal(runCtx, ref, req.AgentSpec.Tools...); err != nil {
+	runCtx, releaseFence, fenceErr := r.ownRunFence(runCtx, ref)
+	if fenceErr != nil {
+		r.unregisterActiveRun(runID)
 		cancel()
-		r.setRunState(ref.SessionID, agent.RunState{Status: agent.RunLifecycleStatusFailed, ActiveRunID: runID, LastError: err.Error(), UpdatedAt: r.now()})
+		return agent.RunResult{}, fenceErr
+	}
+	started := false
+	defer func() {
+		if !started {
+			runErr = errors.Join(runErr, releaseFence())
+			r.unregisterActiveRun(runID)
+		}
+	}()
+	if err := r.reconcileTurnPlan(runCtx, ref, turnID); err != nil {
+		cancel()
 		return agent.RunResult{}, err
 	}
-	if err := r.startRunTurnJournal(runCtx, ref, runID, turnID); err != nil {
+	if err := r.repairToolPairs(runCtx, ref); err != nil {
 		cancel()
-		r.setRunState(ref.SessionID, agent.RunState{Status: agent.RunLifecycleStatusFailed, ActiveRunID: runID, LastError: err.Error(), UpdatedAt: r.now()})
+
 		return agent.RunResult{}, err
 	}
-	r.setRunState(ref.SessionID, agent.RunState{
-		Status:      agent.RunLifecycleStatusRunning,
-		ActiveRunID: runID,
-		UpdatedAt:   r.now(),
-	})
 	handle := newRunner(runCtx, runID, cancel, req.SourceObserver)
-	handle.setCancelHook(func() error {
-		return r.transitionRunTurnJournal(context.WithoutCancel(runCtx), ref, runID, turnID, session.ExecutionCancelRequested, "run cancellation requested")
-	})
+
 	r.registerActiveRun(ref, activeSession, turnID, handle)
+	started = true
 	go func() {
 		defer cancel()
-		r.executeKernelTurn(runCtx, activeSession, ref, runID, turnID, req, handle)
+		r.executeKernelTurn(runCtx, activeSession, ref, runID, turnID, req, handle, releaseFence)
 	}()
 	return agent.RunResult{
 		Session: activeSession,
@@ -333,17 +336,13 @@ func (r *Runtime) beginRun(ref session.SessionRef, runID string) error {
 	ref = session.NormalizeSessionRef(ref)
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if current, ok := r.runStates[ref.SessionID]; ok {
-		switch current.Status {
-		case agent.RunLifecycleStatusRunning, agent.RunLifecycleStatusWaitingApproval:
-			return &agent.RunConflictError{SessionRef: ref, ActiveRunID: current.ActiveRunID}
+	for id, current := range r.activeRunners {
+		if current.ref.SessionID == ref.SessionID {
+			return &agent.RunConflictError{SessionRef: ref, ActiveRunID: id}
 		}
 	}
-	r.runStates[ref.SessionID] = agent.RunState{
-		Status:      agent.RunLifecycleStatusRunning,
-		ActiveRunID: strings.TrimSpace(runID),
-		UpdatedAt:   r.now(),
-	}
+	r.activeRunners[runID] = activeRun{ref: ref}
+
 	return nil
 }
 
@@ -355,8 +354,14 @@ func (r *Runtime) executeKernelTurn(
 	turnID string,
 	req agent.RunRequest,
 	handle *runner,
+	releaseFence func() error,
 ) {
 	defer handle.finish()
+	defer func() {
+		if err := releaseFence(); err != nil {
+			handle.publishError(err)
+		}
+	}()
 	defer r.unregisterActiveRun(runID)
 
 	batch := make([]*session.Event, 0, 4)
@@ -376,30 +381,9 @@ func (r *Runtime) executeKernelTurn(
 			return errors.Join(runErr, scope.join())
 		})
 	})
-	if err := lifecycleErr; err != nil {
-		journalStatus := executionJournalStatus(ctx, err)
-		if journalErr := r.transitionRunTurnJournal(context.WithoutCancel(ctx), ref, runID, turnID, journalStatus, err.Error()); journalErr != nil {
-			err = errors.Join(err, journalErr)
-		}
-		r.setRunState(ref.SessionID, agent.RunState{
-			Status:      interruptedOrFailedStatus(ctx, err),
-			ActiveRunID: runID,
-			LastError:   err.Error(),
-			UpdatedAt:   r.now(),
-		})
+	if err := errors.Join(lifecycleErr, r.finalizeTurn(ctx, ref, turnID)); err != nil {
 		handle.publishError(err)
-		return
 	}
-	if err := r.transitionRunTurnJournal(context.WithoutCancel(ctx), ref, runID, turnID, session.ExecutionSucceeded, ""); err != nil {
-		r.setRunState(ref.SessionID, agent.RunState{Status: agent.RunLifecycleStatusFailed, ActiveRunID: runID, LastError: err.Error(), UpdatedAt: r.now()})
-		handle.publishError(err)
-		return
-	}
-	r.setRunState(ref.SessionID, agent.RunState{
-		Status:      agent.RunLifecycleStatusCompleted,
-		ActiveRunID: runID,
-		UpdatedAt:   r.now(),
-	})
 }
 
 func (r *Runtime) nextID(prefix string, custom func() string) string {

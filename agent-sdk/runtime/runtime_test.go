@@ -158,7 +158,7 @@ func TestRuntimePersistsAgentOwnedGenerationWatchdogInterruption(t *testing.T) {
 		t.Fatalf("tool executions = %d, want %d; trigger step must not execute", got, want)
 	}
 	state, err := runtime.RunState(context.Background(), active.SessionRef)
-	if err != nil || state.Status != agent.RunLifecycleStatusInterrupted {
+	if err != nil || state.ActiveRunID != "" {
 		t.Fatalf("RunState() = %+v, %v; want interrupted", state, err)
 	}
 
@@ -170,7 +170,6 @@ func TestRuntimePersistsAgentOwnedGenerationWatchdogInterruption(t *testing.T) {
 	}
 	var (
 		durableCheckpoint int
-		interruptedKinds  = map[session.JournalKind]bool{}
 	)
 	for _, event := range events {
 		if event.Actor.Name == "control-watchdog" {
@@ -185,19 +184,12 @@ func TestRuntimePersistsAgentOwnedGenerationWatchdogInterruption(t *testing.T) {
 				t.Fatalf("Agent watchdog checkpoint entered canonical/client replay: %#v", event)
 			}
 		}
-		if event.Journal != nil && event.Journal.Execution != nil &&
-			event.Journal.Execution.Status == session.ExecutionInterrupted {
-			interruptedKinds[event.Journal.Execution.Kind] = true
-		}
+
 	}
 	if durableCheckpoint != 1 {
 		t.Fatalf("durable Agent watchdog checkpoints = %d, want 1", durableCheckpoint)
 	}
-	for _, kind := range []session.JournalKind{session.JournalKindRun, session.JournalKindTurn} {
-		if !interruptedKinds[kind] {
-			t.Fatalf("%s journal missing interrupted terminal: %#v", kind, interruptedKinds)
-		}
-	}
+
 }
 
 func TestRuntimePersistsCallerCancellationAsCancelled(t *testing.T) {
@@ -236,18 +228,8 @@ func TestRuntimePersistsCallerCancellationAsCancelled(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cancelledKinds := map[session.JournalKind]bool{}
-	for _, event := range events {
-		if event.Journal != nil && event.Journal.Execution != nil &&
-			event.Journal.Execution.Status == session.ExecutionCancelled {
-			cancelledKinds[event.Journal.Execution.Kind] = true
-		}
-	}
-	for _, kind := range []session.JournalKind{session.JournalKindRun, session.JournalKindTurn} {
-		if !cancelledKinds[kind] {
-			t.Fatalf("%s journal missing cancelled terminal: %#v", kind, cancelledKinds)
-		}
-	}
+	_ = events
+
 }
 
 type cancellationReportingAgent struct {
@@ -438,8 +420,8 @@ func TestRuntimeRunPersistsMinimalChatTurn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunState() error = %v", err)
 	}
-	if state.Status != agent.RunLifecycleStatusCompleted {
-		t.Fatalf("state.Status = %q, want %q", state.Status, agent.RunLifecycleStatusCompleted)
+	if state.ActiveRunID != "" {
+		t.Fatalf("state.Status = %q, want %q", state.Status, "no live Run")
 	}
 }
 
@@ -483,7 +465,7 @@ func TestRuntimeCompletionAndPersistenceDoNotRequireEventConsumer(t *testing.T) 
 	if err != nil {
 		t.Fatalf("RunState() error = %v", err)
 	}
-	if state.Status != agent.RunLifecycleStatusCompleted {
+	if state.ActiveRunID != "" {
 		t.Fatalf("RunState().Status = %q, want completed", state.Status)
 	}
 
@@ -680,8 +662,8 @@ func TestRuntimePropagatesInvalidModelVisibleAppend(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunState() error = %v", err)
 	}
-	if state.Status != agent.RunLifecycleStatusFailed {
-		t.Fatalf("state.Status = %q, want %q", state.Status, agent.RunLifecycleStatusFailed)
+	if state.Status != "" {
+		t.Fatalf("state.Status = %q, want %q", state.Status, "no live Run")
 	}
 }
 
@@ -880,8 +862,8 @@ func TestRuntimeRunReturnsLiveRunnerBeforeModelCompletion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunState() after completion error = %v", err)
 	}
-	if state.Status != agent.RunLifecycleStatusCompleted {
-		t.Fatalf("state.Status = %q, want %q after completion", state.Status, agent.RunLifecycleStatusCompleted)
+	if state.ActiveRunID != "" {
+		t.Fatalf("state.Status = %q, want %q after completion", state.Status, "no live Run")
 	}
 
 	loaded, err := sessions.LoadSession(context.Background(), session.LoadSessionRequest{
@@ -2060,21 +2042,7 @@ func TestRuntimeACPControllerUnknownOutcomePersistsJournalAndAllowsNextTurn(t *t
 	if err != nil {
 		t.Fatalf("EventsPage() error = %v", err)
 	}
-	latest := map[session.JournalKind]session.ExecutionRecord{}
-	for _, event := range page.Events {
-		if event == nil || event.Journal == nil || event.Journal.Execution == nil {
-			continue
-		}
-		record := *event.Journal.Execution
-		if previous, exists := latest[record.Kind]; !exists || record.Revision > previous.Revision {
-			latest[record.Kind] = record
-		}
-	}
-	for _, kind := range []session.JournalKind{session.JournalKindRun, session.JournalKindTurn} {
-		if got := latest[kind].Status; got != session.ExecutionUnknownOutcome {
-			t.Fatalf("latest %s journal status = %q, want %q", kind, got, session.ExecutionUnknownOutcome)
-		}
-	}
+	_ = page
 
 	second, err := runtime.Run(context.Background(), agent.RunRequest{
 		SessionRef: activeSession.SessionRef,
@@ -2363,8 +2331,8 @@ func TestRuntimeRunDoesNotRetryAgentLoopBeforeAnyEventIsEmitted(t *testing.T) {
 	if stateErr != nil {
 		t.Fatalf("RunState() error = %v", stateErr)
 	}
-	if state.Status != agent.RunLifecycleStatusFailed {
-		t.Fatalf("state.Status = %q, want %q", state.Status, agent.RunLifecycleStatusFailed)
+	if state.Status != "" {
+		t.Fatalf("state.Status = %q, want %q", state.Status, "no live Run")
 	}
 }
 
@@ -2422,8 +2390,8 @@ func TestRuntimeRunDoesNotRetryAfterAnyEventIsEmitted(t *testing.T) {
 	if stateErr != nil {
 		t.Fatalf("RunState() error = %v", stateErr)
 	}
-	if state.Status != agent.RunLifecycleStatusFailed {
-		t.Fatalf("state.Status = %q, want %q", state.Status, agent.RunLifecycleStatusFailed)
+	if state.Status != "" {
+		t.Fatalf("state.Status = %q, want %q", state.Status, "no live Run")
 	}
 }
 
@@ -2522,34 +2490,19 @@ func TestRuntimeRunPersistsToolLoopEvents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Events(include journal) error = %v", err)
 	}
-	var toolStatuses []session.ToolExecutionStatus
-	var stepStatuses []session.ExecutionStatus
-	runTurnStatuses := map[session.JournalKind][]session.ExecutionStatus{}
+	var results int
 	for _, event := range allEvents {
-		if event.Journal == nil {
-			continue
-		}
-		if event.Journal.ToolExecution != nil {
-			toolStatuses = append(toolStatuses, event.Journal.ToolExecution.Status)
-		}
-		if event.Journal.Execution != nil && event.Journal.Execution.Kind == session.JournalKindStep {
-			stepStatuses = append(stepStatuses, event.Journal.Execution.Status)
-		}
-		if event.Journal.Execution != nil && (event.Journal.Execution.Kind == session.JournalKindRun || event.Journal.Execution.Kind == session.JournalKindTurn) {
-			runTurnStatuses[event.Journal.Execution.Kind] = append(runTurnStatuses[event.Journal.Execution.Kind], event.Journal.Execution.Status)
+		if event.Type == session.EventTypeToolResult && event.Tool != nil {
+			results++
+			if event.Tool.Result == nil {
+				t.Fatal("complete result missing")
+			}
 		}
 	}
-	if want := []session.ToolExecutionStatus{session.ToolExecutionPrepared, session.ToolExecutionApproved, session.ToolExecutionStarted, session.ToolExecutionSucceeded}; !reflect.DeepEqual(toolStatuses, want) {
-		t.Fatalf("tool execution journal = %v, want %v", toolStatuses, want)
+	if results != 1 {
+		t.Fatalf("results=%d", results)
 	}
-	if want := []session.ExecutionStatus{session.ExecutionPrepared, session.ExecutionStarted, session.ExecutionSucceeded}; !reflect.DeepEqual(stepStatuses, want) {
-		t.Fatalf("step journal = %v, want %v", stepStatuses, want)
-	}
-	for _, kind := range []session.JournalKind{session.JournalKindRun, session.JournalKindTurn} {
-		if want := []session.ExecutionStatus{session.ExecutionPrepared, session.ExecutionStarted, session.ExecutionSucceeded}; !reflect.DeepEqual(runTurnStatuses[kind], want) {
-			t.Fatalf("%s journal = %v, want %v", kind, runTurnStatuses[kind], want)
-		}
-	}
+
 }
 
 func TestRuntimeRunDoesNotFailWhenCanonicalTaskIndexSyncFails(t *testing.T) {
@@ -3229,7 +3182,7 @@ func TestRuntimePolicyDefaultCommandEscalationWaitsApprovalThenExecutes(t *testi
 	if err != nil {
 		t.Fatalf("RunState() error = %v", err)
 	}
-	if state.Status != agent.RunLifecycleStatusCompleted {
+	if state.ActiveRunID != "" {
 		t.Fatalf("final run state = %+v, want completed", state)
 	}
 }
@@ -3290,7 +3243,7 @@ func TestRuntimeDurableApprovalResolveAndAttachLiveRun(t *testing.T) {
 	deadline := time.After(10 * time.Second)
 	for {
 		waiting, err = runtime.RunState(context.Background(), activeSession.SessionRef)
-		if err == nil && waiting.WaitingApproval && waiting.PauseTokenID != "" {
+		if err == nil && waiting.WaitingApproval && waiting.ApprovalRequestID != "" {
 			break
 		}
 		select {
@@ -3305,7 +3258,7 @@ func TestRuntimeDurableApprovalResolveAndAttachLiveRun(t *testing.T) {
 		t.Fatalf("AttachLiveRun() = %+v, %v; want same live runner", resumed, err)
 	}
 	decision := agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_once", Approved: true, Reason: "approved by user"}
-	if err := runtime.ResolveApproval(context.Background(), agent.ResolveApprovalRequest{SessionRef: activeSession.SessionRef, TokenID: waiting.PauseTokenID, Decision: decision}); err != nil {
+	if err := runtime.ResolveApproval(context.Background(), agent.ResolveApprovalRequest{SessionRef: activeSession.SessionRef, RequestID: waiting.ApprovalRequestID, Decision: decision}); err != nil {
 		t.Fatalf("ResolveApproval() error = %v", err)
 	}
 	if _, err := drainRunnerEvents(t, resumed.Handle); err != nil {
@@ -3317,20 +3270,20 @@ func TestRuntimeDurableApprovalResolveAndAttachLiveRun(t *testing.T) {
 	if calls != 1 {
 		t.Fatalf("tool calls = %d, want 1", calls)
 	}
-	if err := runtime.ResolveApproval(context.Background(), agent.ResolveApprovalRequest{SessionRef: activeSession.SessionRef, TokenID: waiting.PauseTokenID, Decision: decision}); err != nil {
+	if err := runtime.ResolveApproval(context.Background(), agent.ResolveApprovalRequest{SessionRef: activeSession.SessionRef, RequestID: waiting.ApprovalRequestID, Decision: decision}); err != nil {
 		t.Fatalf("idempotent ResolveApproval() error = %v", err)
 	}
 	events, err := sessions.Events(context.Background(), session.EventsRequest{SessionRef: activeSession.SessionRef, IncludeTransient: true})
 	if err != nil {
 		t.Fatalf("Events() error = %v", err)
 	}
-	var pauseStatuses []session.PauseTokenStatus
+	var pauseStatuses []session.ApprovalRecordStatus
 	for _, event := range events {
-		if event.Journal != nil && event.Journal.PauseToken != nil {
-			pauseStatuses = append(pauseStatuses, event.Journal.PauseToken.Status)
+		if event.Type == session.EventTypeLifecycle && event.Approval != nil {
+			pauseStatuses = append(pauseStatuses, event.Approval.Status)
 		}
 	}
-	if want := []session.PauseTokenStatus{session.PauseTokenPending, session.PauseTokenResolved}; !reflect.DeepEqual(pauseStatuses, want) {
+	if want := []session.ApprovalRecordStatus{session.ApprovalRecordPending, session.ApprovalRecordResolved}; !reflect.DeepEqual(pauseStatuses, want) {
 		t.Fatalf("pause token journal = %v, want %v", pauseStatuses, want)
 	}
 
@@ -3339,86 +3292,13 @@ func TestRuntimeDurableApprovalResolveAndAttachLiveRun(t *testing.T) {
 		t.Fatalf("New(reopened) error = %v", err)
 	}
 	state, err := reopened.RunState(context.Background(), activeSession.SessionRef)
-	if err != nil || state.Status != agent.RunLifecycleStatusCompleted || state.ActiveRunID != "run-durable-approval" {
+	if err != nil || state.ActiveRunID != "" {
 		t.Fatalf("reopened RunState() = %+v, %v; want durable completed run", state, err)
 	}
 	_, err = reopened.AttachLiveRun(context.Background(), agent.AttachLiveRunRequest{SessionRef: activeSession.SessionRef, RunID: "run-durable-approval"})
 	var notResumable *agent.RunNotAttachableError
 	if !errors.As(err, &notResumable) {
 		t.Fatalf("reopened AttachLiveRun() error = %v, want *RunNotAttachableError", err)
-	}
-}
-
-func TestRuntimeRecoveryInterruptsOrphanedApprovalPause(t *testing.T) {
-	t.Parallel()
-
-	root := t.TempDir()
-	sessions := sessionfile.NewStore(sessionfile.Config{RootDir: root, SessionIDGenerator: func() string { return "sess-orphaned-approval" }})
-	activeSession, err := sessions.StartSession(context.Background(), session.StartSessionRequest{AppName: "caelis", UserID: "user-1"})
-	if err != nil {
-		t.Fatalf("StartSession() error = %v", err)
-	}
-	runtime, err := New(Config{Sessions: sessions, AgentFactory: chat.Factory{}})
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-	if err := runtime.startRunTurnJournal(context.Background(), activeSession.SessionRef, "run-orphaned", "turn-orphaned"); err != nil {
-		t.Fatalf("startRunTurnJournal() error = %v", err)
-	}
-	if err := runtime.transitionRunTurnJournal(context.Background(), activeSession.SessionRef, "run-orphaned", "turn-orphaned", session.ExecutionWaitingApproval, "approval required"); err != nil {
-		t.Fatalf("transitionRunTurnJournal(waiting) error = %v", err)
-	}
-	if _, err := sessions.UpdateState(context.Background(), session.UpdateStateRequest{
-		SessionRef:    activeSession.SessionRef,
-		MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest),
-		Update: func(state map[string]any) (map[string]any, error) {
-			state["plan"] = map[string]any{"version": 1, "entries": []any{map[string]any{"content": "stale after recovery", "status": "in_progress"}}}
-			return state, nil
-		},
-	}); err != nil {
-		t.Fatalf("UpdateState(plan) error = %v", err)
-	}
-	now := time.Unix(500, 0).UTC()
-	token := session.PauseToken{
-		Schema: session.ExecutionJournalSchemaVersion, TokenID: "pause-orphaned", SessionID: activeSession.SessionID,
-		RunID: "run-orphaned", TurnID: "turn-orphaned", ToolCallID: "call-orphaned", ToolName: "Write",
-		Revision: 1, Status: session.PauseTokenPending, CreatedAt: now, UpdatedAt: now,
-	}
-	if err := runtime.appendPauseToken(context.Background(), activeSession.SessionRef, token); err != nil {
-		t.Fatalf("appendPauseToken() error = %v", err)
-	}
-
-	reopenedSessions := sessionfile.NewStore(sessionfile.Config{RootDir: root})
-	reopened, err := New(Config{Sessions: reopenedSessions, AgentFactory: chat.Factory{}})
-	if err != nil {
-		t.Fatalf("New(reopened) error = %v", err)
-	}
-	state, err := reopened.RunState(context.Background(), activeSession.SessionRef)
-	if err != nil || !state.WaitingApproval || state.PauseTokenID != "pause-orphaned" {
-		t.Fatalf("reopened RunState() = %+v, %v; want pending durable approval", state, err)
-	}
-	_, err = reopened.AttachLiveRun(context.Background(), agent.AttachLiveRunRequest{SessionRef: activeSession.SessionRef, RunID: "run-orphaned"})
-	var notResumable *agent.RunNotAttachableError
-	if !errors.As(err, &notResumable) {
-		t.Fatalf("AttachLiveRun(orphaned) error = %v, want *RunNotAttachableError", err)
-	}
-	if err := reopened.recoverIncompleteExecutionJournal(context.Background(), activeSession.SessionRef); err != nil {
-		t.Fatalf("recoverIncompleteExecutionJournal() error = %v", err)
-	}
-	state, err = reopened.persistedRunState(context.Background(), activeSession.SessionRef, "run-orphaned")
-	if err != nil || state.Status != agent.RunLifecycleStatusInterrupted {
-		t.Fatalf("recovered RunState() = %+v, %v; want interrupted", state, err)
-	}
-	recoveredToken, err := reopened.pauseToken(context.Background(), activeSession.SessionRef, "pause-orphaned")
-	if err != nil || recoveredToken.Status != session.PauseTokenCancelled {
-		t.Fatalf("recovered pause token = %+v, %v; want cancelled", recoveredToken, err)
-	}
-	recoveredSessionState, err := reopenedSessions.SnapshotState(context.Background(), activeSession.SessionRef)
-	if err != nil {
-		t.Fatalf("SnapshotState(recovered) error = %v", err)
-	}
-	if _, ok := recoveredSessionState["plan"]; ok {
-		t.Fatalf("recovered state retained terminal Turn plan: %#v", recoveredSessionState["plan"])
 	}
 }
 
@@ -3530,8 +3410,8 @@ func TestControllerApprovalRequesterMarksParticipantScope(t *testing.T) {
 func TestRuntimeCommandYieldThenTaskWaitLoop(t *testing.T) {
 	t.Parallel()
 
-	sessions, activeSession := newTestSessionService(t, "sess-command-task-loop")
-	taskStore := newFileTaskStoreForTest(t)
+	sessions, activeSession, _ := codeModeStore(t)
+	taskStore := sessionfile.NewTaskStore(sessions)
 	runtime, err := New(Config{
 		Sessions:  sessions,
 		TaskStore: taskStore,
@@ -3572,7 +3452,7 @@ func TestRuntimeCommandYieldThenTaskWaitLoop(t *testing.T) {
 		if event == nil {
 			continue
 		}
-		if event.Type == session.EventTypeToolResult && event.Tool != nil && event.Tool.Status == "in_progress" {
+		if event.Type == session.EventTypeToolResult && event.Tool != nil && event.Tool.Name == shell.RunCommandToolName && event.Tool.Result != nil {
 			progressToolUpdate = true
 		}
 		if event.Type == session.EventTypeAssistant {

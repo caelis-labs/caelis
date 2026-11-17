@@ -102,6 +102,7 @@ func (tm *taskRuntime) rehydrateCommandTask(entry *taskapi.Entry) (*commandTask,
 		tty:           taskSpecBool(entry.Spec, "tty"),
 		supportsInput: entry.SupportsInput,
 		parentCall:    taskSpecString(entry.Spec, "parent_call"),
+		operationID:   taskSpecString(entry.Spec, "operation_id"),
 		requestDigest: taskSpecString(entry.Spec, "command_request_digest"),
 		execution:     execution,
 		title:         strings.TrimSpace(entry.Title),
@@ -337,7 +338,7 @@ func (t *commandTask) entrySnapshot(now time.Time) *taskapi.Entry {
 		stdoutCursor = 0
 		stderrCursor = 0
 	}
-	return &taskapi.Entry{
+	entry := &taskapi.Entry{
 		TaskID:         t.ref.TaskID,
 		Handle:         t.handle,
 		Revision:       t.revision,
@@ -367,6 +368,10 @@ func (t *commandTask) entrySnapshot(now time.Time) *taskapi.Entry {
 		Metadata: metadata,
 		Terminal: terminal,
 	}
+	if t.operationID != "" {
+		entry.Spec["operation_id"] = t.operationID
+	}
+	return entry
 }
 
 func (t *commandTask) commandOutcomeUnattached() bool {

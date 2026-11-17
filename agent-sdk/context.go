@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"iter"
-	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/internal/jsonvalue"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
@@ -68,25 +67,21 @@ func (r CancelResult) Cancelled() bool {
 	return r.Status == CancelStatusCancelled
 }
 
-// RunLifecycleStatus identifies one runtime run lifecycle state.
+// RunLifecycleStatus describes a live handle and its active approval wait.
 type RunLifecycleStatus string
 
 const (
 	RunLifecycleStatusRunning         RunLifecycleStatus = "running"
 	RunLifecycleStatusWaitingApproval RunLifecycleStatus = "waiting_approval"
-	RunLifecycleStatusInterrupted     RunLifecycleStatus = "interrupted"
-	RunLifecycleStatusFailed          RunLifecycleStatus = "failed"
-	RunLifecycleStatusCompleted       RunLifecycleStatus = "completed"
 )
 
-// RunState is the runtime-visible state of one session run.
+// RunState projects only a live handle in this Runtime. An empty value means
+// no live handle; historical outcomes belong to their owning Session or Task facts.
 type RunState struct {
-	Status          RunLifecycleStatus `json:"status,omitempty"`
-	ActiveRunID     string             `json:"active_run_id,omitempty"`
-	WaitingApproval bool               `json:"waiting_approval,omitempty"`
-	PauseTokenID    string             `json:"pause_token_id,omitempty"`
-	LastError       string             `json:"last_error,omitempty"`
-	UpdatedAt       time.Time          `json:"updated_at,omitempty"`
+	Status            RunLifecycleStatus `json:"status,omitempty"`
+	ActiveRunID       string             `json:"active_run_id,omitempty"`
+	WaitingApproval   bool               `json:"waiting_approval,omitempty"`
+	ApprovalRequestID string             `json:"approval_request_id,omitempty"`
 }
 
 // ContextUsage reports context window usage for one session.
@@ -307,7 +302,7 @@ type AgentSpec struct {
 	Model model.LLM   `json:"-"`
 	Tools []tool.Tool `json:"-"`
 	// DeferredTools supplies MCP tools as their background initialization finishes.
-	// Runtime applies the same execution journal, policy and lifecycle wrappers
+	// Runtime applies the same invocation, policy and lifecycle wrappers
 	// as static tools. A run pins each accepted definition and callable together.
 	DeferredTools tool.Source `json:"-"`
 	// ResolveModelRequest optionally replaces model-facing configuration at

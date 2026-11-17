@@ -3,38 +3,12 @@ package session_test
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
-
-func TestDefaultMigrationsUpgradeEventAndNestedJournalSchemas(t *testing.T) {
-	t.Parallel()
-
-	record := session.ExecutionRecord{
-		Kind: session.JournalKindRun, SessionID: "session-1", RunID: "run-1",
-		Revision: 1, Status: session.ExecutionPrepared,
-	}
-	record.Identity = session.ExecutionRecordIdentity(record)
-	migrated, err := session.MigrateEvent(session.Event{
-		Type:       session.EventTypeLifecycle,
-		Visibility: session.VisibilityJournal,
-		Journal: &session.ExecutionJournalEntry{
-			Kind:      session.JournalKindRun,
-			Execution: &record,
-		},
-	})
-	if err != nil {
-		t.Fatalf("MigrateEvent() error = %v", err)
-	}
-	if migrated.Schema != session.EventSchemaVersion || migrated.Journal.Schema != session.ExecutionJournalSchemaVersion || migrated.Journal.Execution.Schema != session.RunSchemaVersion {
-		t.Fatalf("migrated schemas = event:%d journal:%d run:%d", migrated.Schema, migrated.Journal.Schema, migrated.Journal.Execution.Schema)
-	}
-	if err := session.ValidateDurableCoreEvent(&migrated); err != nil {
-		t.Fatalf("ValidateDurableCoreEvent() error = %v", err)
-	}
-}
 
 func TestPrepareEventsForAppendAlwaysPersistsCurrentEventSchema(t *testing.T) {
 	t.Parallel()
@@ -145,7 +119,7 @@ func assertMigrationSentinel(t *testing.T, object map[string]any, key, want stri
 }
 
 func TestCurrentSchemaMigrationPreservesPayloadWithoutAliasing(t *testing.T) {
-	raw := json.RawMessage(` { "schema":2, "future":{"large":"preserved"}, "journal": { "schema":1, "execution":{"schema":1,"unknown":123}, "tool_execution":{"schema":1}, "pause_token":{"schema":1} } } `)
+	raw := json.RawMessage(` { "schema":3, "future":{"large":"preserved"}, "journal": { "schema":1, "execution":{"schema":1,"unknown":123}, "tool_execution":{"schema":1}, "pause_token":{"schema":1} } } `)
 	migrated, err := session.MigrateEventJSON(raw)
 	if err != nil {
 		t.Fatal(err)
@@ -161,5 +135,29 @@ func TestCurrentSchemaMigrationPreservesPayloadWithoutAliasing(t *testing.T) {
 		if _, err := session.MigrateEventJSON(json.RawMessage(`{"schema":2,"journal":` + journal + `}`)); err == nil {
 			t.Fatalf("future nested schema accepted: %s", journal)
 		}
+	}
+}
+
+func TestCurrentAndRetiredFutureSchemasFailClosed(t *testing.T) {
+	for _, raw := range []string{`{"schema":4}`, `{"schema":3,"approval":{"schema":2}}`, `{"schema":2,"journal":{"schema":2}}`, `{"schema":2,"journal":{"schema":1,"execution":{"schema":2}}}`, `{"schema":2,"journal":{"schema":1,"tool_execution":{"schema":2}}}`} {
+		var event session.Event
+		if err := json.Unmarshal([]byte(raw), &event); err == nil {
+			t.Fatalf("future schema accepted: %s", raw)
+		}
+	}
+	raw := `{"schema":2,"type":"lifecycle","visibility":"journal","journal":{"schema":1,"tool_execution":{"schema":1,"key":{"tool_call_id":"native"},"tool_name":"Write","status":"succeeded","binding":{"name":"forbidden","identity":"old","version":"old"},"result":{"content":[{"kind":"json","json":{"value":{"large":9007199254740993123456789}}}]}}}}`
+	var event session.Event
+	if err := json.Unmarshal([]byte(raw), &event); err != nil {
+		t.Fatal(err)
+	}
+	if event.Tool == nil || event.Tool.Result == nil || event.Tool.Binding != nil || event.Tool.Execution.ItemID != "" {
+		t.Fatal("legacy body lost or old authority restored")
+	}
+	encoded, err := json.Marshal(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "\"journal\":") {
+		t.Fatal("retired writer restored")
 	}
 }

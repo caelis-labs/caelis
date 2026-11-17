@@ -64,30 +64,23 @@ func TestDefaultDurableIdentitiesSurviveThreeRuntimeRestarts(t *testing.T) {
 		t.Fatalf("Events() error = %v", err)
 	}
 	eventIDs := map[string]bool{}
-	runIDs := map[string]bool{}
 	turnIDs := map[string]bool{}
 	for _, event := range events {
 		if event.ID == "" || eventIDs[event.ID] {
 			t.Fatalf("durable event id %q is empty or repeated", event.ID)
 		}
 		eventIDs[event.ID] = true
-		if event.Journal == nil || event.Journal.Execution == nil {
-			continue
+		if event.Scope != nil && event.Scope.TurnID != "" {
+			turnIDs[event.Scope.TurnID] = true
 		}
-		record := event.Journal.Execution
-		switch record.Kind {
-		case session.JournalKindRun:
-			runIDs[record.RunID] = true
-		case session.JournalKindTurn:
-			turnIDs[record.TurnID] = true
-		}
+
 	}
-	if len(runIDs) != 3 || len(turnIDs) != 3 {
-		t.Fatalf("durable identities: runs=%v turns=%v, want three unique of each", runIDs, turnIDs)
+	if len(turnIDs) != 3 {
+		t.Fatalf("durable identities: runs=%v turns=%v, want three unique of each", turnIDs, turnIDs)
 	}
 }
 
-func TestDefaultPauseTokenIdentitySurvivesRuntimeRestart(t *testing.T) {
+func TestDefaultApprovalRecordIdentitySurvivesRuntimeRestart(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
@@ -106,9 +99,7 @@ func TestDefaultPauseTokenIdentitySurvivesRuntimeRestart(t *testing.T) {
 		}
 		runID := runtime.nextID("run", nil)
 		turnID := runtime.nextID("turn", nil)
-		if err := runtime.startRunTurnJournal(context.Background(), active.SessionRef, runID, turnID); err != nil {
-			t.Fatalf("startRunTurnJournal(runtime %d) error = %v", index, err)
-		}
+
 		result := make(chan error, 1)
 		go func() {
 			_, requestErr := runtime.requestDurableApproval(context.Background(), agent.ApprovalRequest{
@@ -122,12 +113,12 @@ func TestDefaultPauseTokenIdentitySurvivesRuntimeRestart(t *testing.T) {
 			result <- requestErr
 		}()
 
-		tokenID := waitForPendingPauseToken(t, service, active.SessionRef, runID)
+		tokenID := waitForPendingApprovalRecord(t, service, active.SessionRef, runID)
 		if seenTokens[tokenID] {
 			t.Fatalf("runtime %d reused pause token %q", index, tokenID)
 		}
 		seenTokens[tokenID] = true
-		if err := runtime.ResolveApproval(context.Background(), agent.ResolveApprovalRequest{SessionRef: active.SessionRef, TokenID: tokenID, Decision: decision}); err != nil {
+		if err := runtime.ResolveApproval(context.Background(), agent.ResolveApprovalRequest{SessionRef: active.SessionRef, RequestID: tokenID, Decision: decision}); err != nil {
 			t.Fatalf("ResolveApproval(runtime %d) error = %v", index, err)
 		}
 		select {
@@ -138,13 +129,11 @@ func TestDefaultPauseTokenIdentitySurvivesRuntimeRestart(t *testing.T) {
 		case <-time.After(2 * time.Second):
 			t.Fatalf("requestDurableApproval(runtime %d) did not wake", index)
 		}
-		if err := runtime.transitionRunTurnJournal(context.Background(), active.SessionRef, runID, turnID, session.ExecutionSucceeded, ""); err != nil {
-			t.Fatalf("transitionRunTurnJournal(runtime %d) error = %v", index, err)
-		}
+
 	}
 }
 
-func waitForPendingPauseToken(t *testing.T, service session.Service, ref session.SessionRef, runID string) string {
+func waitForPendingApprovalRecord(t *testing.T, service session.Service, ref session.SessionRef, runID string) string {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
@@ -153,8 +142,8 @@ func waitForPendingPauseToken(t *testing.T, service session.Service, ref session
 			t.Fatalf("Events() error = %v", err)
 		}
 		for _, event := range events {
-			if event.Journal != nil && event.Journal.PauseToken != nil && event.Journal.PauseToken.RunID == runID && event.Journal.PauseToken.Status == session.PauseTokenPending {
-				return event.Journal.PauseToken.TokenID
+			if event.Type == session.EventTypeLifecycle && event.Approval != nil && event.Approval.RunID == runID && event.Approval.Status == session.ApprovalRecordPending {
+				return event.Approval.RequestID
 			}
 		}
 		time.Sleep(time.Millisecond)

@@ -311,7 +311,7 @@ func (t runtimeCommandTool) commandRequest(call tool.Call, runtime sandbox.Runti
 	if yieldMS < 0 {
 		yieldMS = 0
 	}
-	req := taskapi.CommandStartRequest{
+	req := taskapi.CommandStartRequest{OperationID: toolTaskOperationID(call),
 		Command:     strings.TrimSpace(command),
 		Workdir:     strings.TrimSpace(workdir),
 		TTY:         tty,
@@ -439,7 +439,7 @@ func (t runtimeSpawnTool) Call(ctx context.Context, call tool.Call) (tool.Result
 		contextTransfer, contextUnsupported = t.resolveDelegatedSpawnContext(ctx)
 	}
 	snapshot, err := t.tasks.StartSubagentTarget(ctx, t.session, t.sessionRef, t.runner, delegation.NormalizeTarget(target), taskapi.SubagentStartRequest{
-		SpawnID:            strings.TrimSpace(call.ID),
+		SpawnID:            firstNonEmpty(toolTaskOperationID(call), strings.TrimSpace(call.ID)),
 		Prompt:             strings.TrimSpace(prompt),
 		Handle:             requestedHandle,
 		Context:            contextTransfer,
@@ -638,6 +638,10 @@ func (r subagentApprovalRequester) RequestSubagentApproval(
 			"parent_tool":    spawn.ToolName,
 		},
 	}
+	scope := lifecycleScopeFromContext(ctx)
+	runtimeRequest.RunID = firstNonEmpty(scope.runID, "task:"+req.TaskID)
+	runtimeRequest.TurnID = firstNonEmpty(scope.turnID, "task:"+req.TaskID)
+	runtimeRequest.OperationTaskID = req.TaskID
 	runtimeRequest = preserveEndpointApproval(runtimeRequest, req.Approval)
 	if r.runtime != nil {
 		mode := firstNonEmpty(req.Mode, r.mode)
@@ -649,7 +653,13 @@ func (r subagentApprovalRequester) RequestSubagentApproval(
 		return subagent.ApprovalResponse{}, nil
 	}
 	permission := cloneApproval(runtimeRequest.Approval)
-	resp, err := r.requester.RequestApproval(ctx, runtimeRequest)
+	var resp agent.ApprovalResponse
+	var err error
+	if r.runtime != nil {
+		resp, err = r.runtime.requestDurableApproval(ctx, runtimeRequest, r.requester)
+	} else {
+		resp, err = r.requester.RequestApproval(ctx, runtimeRequest)
+	}
 	if err != nil {
 		return subagent.ApprovalResponse{}, err
 	}

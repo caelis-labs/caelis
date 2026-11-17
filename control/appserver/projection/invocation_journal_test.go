@@ -13,9 +13,9 @@ func TestJournalNeverProjectsClientUsageOrLifecycle(t *testing.T) {
 	receipt := session.NewModelInvocationReceipt(model.Invocation{ID: "attempt", Provider: "test", Model: "test", Usage: model.Usage{TotalTokens: 4324}, Outcome: "completed"}, "chat")
 	for name, event := range map[string]*session.Event{
 		"invocation": receipt,
-		"execution":  {Type: session.EventTypeLifecycle, Visibility: session.VisibilityJournal, Lifecycle: &session.EventLifecycle{Status: "completed"}, Journal: &session.ExecutionJournalEntry{Kind: session.JournalKindTurn}},
-		"pause":      {Type: session.EventTypeLifecycle, Visibility: session.VisibilityJournal, Lifecycle: &session.EventLifecycle{Status: "resolved"}, Journal: &session.ExecutionJournalEntry{Kind: session.JournalKindPauseToken}},
-		"tool":       {Type: session.EventTypeLifecycle, Visibility: session.VisibilityJournal, Lifecycle: &session.EventLifecycle{Status: "failed"}, Journal: &session.ExecutionJournalEntry{Kind: session.JournalKindToolExecution}},
+		"execution":  {Type: session.EventTypeLifecycle, Visibility: session.VisibilityJournal, Lifecycle: &session.EventLifecycle{Status: "completed"}},
+		"pause":      {Type: session.EventTypeLifecycle, Visibility: session.VisibilityJournal, Lifecycle: &session.EventLifecycle{Status: "resolved"}},
+		"tool":       {Type: session.EventTypeLifecycle, Visibility: session.VisibilityJournal, Lifecycle: &session.EventLifecycle{Status: "failed"}},
 		"watchdog":   {Type: session.EventTypeLifecycle, Visibility: session.VisibilityJournal, Lifecycle: &session.EventLifecycle{Status: "agent_watchdog_checkpoint"}},
 	} {
 		t.Run(name, func(t *testing.T) {

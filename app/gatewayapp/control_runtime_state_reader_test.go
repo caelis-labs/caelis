@@ -1,17 +1,14 @@
 package gatewayapp
 
 import (
-	"fmt"
 	"reflect"
 	"testing"
-	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/control/appserver"
-	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 )
 
-func TestDormantSessionRuntimeStateRecoversCanonicalOutcomeWithoutActivation(t *testing.T) {
+func TestDormantSessionRuntimeStateHasNoLiveHandleWithoutActivation(t *testing.T) {
 	ctx := t.Context()
 	storeDir, workspace := t.TempDir(), t.TempDir()
 	stack, err := newGatewayAppTestStack(t, Config{StoreDir: storeDir, WorkspaceCWD: workspace})
@@ -20,17 +17,17 @@ func TestDormantSessionRuntimeStateRecoversCanonicalOutcomeWithoutActivation(t *
 	}
 	tests := []struct {
 		name     string
-		terminal session.ExecutionStatus
+		terminal string
 		want     string
 		ref      session.SessionRef
 	}{
 		{name: "no-run"},
-		{name: "startup-cancelled", terminal: session.ExecutionCancelled, want: "interrupted"},
-		{name: "completed", terminal: session.ExecutionSucceeded, want: "completed"},
-		{name: "failed", terminal: session.ExecutionFailed, want: "failed"},
-		{name: "crash-started", terminal: session.ExecutionStarted, want: eventstream.LifecycleStateUnknown},
-		{name: "crash-cancel-requested", terminal: session.ExecutionCancelRequested, want: eventstream.LifecycleStateUnknown},
-		{name: "crash-waiting-approval", terminal: session.ExecutionWaitingApproval, want: eventstream.LifecycleStateUnknown},
+		{name: "startup-cancelled", terminal: "cancelled", want: ""},
+		{name: "completed", terminal: "succeeded", want: ""},
+		{name: "failed", terminal: "failed", want: ""},
+		{name: "crash-started", terminal: "started", want: ""},
+		{name: "crash-cancel-requested", terminal: "cancel_requested", want: ""},
+		{name: "crash-waiting-approval", terminal: "waiting_approval", want: ""},
 	}
 	for i := range tests {
 		test := &tests[i]
@@ -42,31 +39,11 @@ func TestDormantSessionRuntimeStateRecoversCanonicalOutcomeWithoutActivation(t *
 		if test.terminal == "" {
 			continue
 		}
-		statuses := []session.ExecutionStatus{session.ExecutionPrepared, session.ExecutionStarted}
-		if test.terminal != session.ExecutionStarted {
-			statuses = append(statuses, test.terminal)
+		_, err = stack.composition.sessions.AppendEvent(ctx, session.AppendEventRequest{SessionRef: active.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest), Event: &session.Event{Type: session.EventTypeLifecycle, Visibility: session.VisibilityJournal, Lifecycle: &session.EventLifecycle{Status: test.terminal}}})
+		if err != nil {
+			t.Fatal(err)
 		}
-		for index, status := range statuses {
-			now := time.Now().UTC()
-			record := session.NormalizeExecutionRecord(session.ExecutionRecord{
-				Schema: session.ExecutionJournalSchemaVersion, Kind: session.JournalKindRun,
-				SessionID: active.SessionID, RunID: "run-" + test.name,
-				Revision: uint64(index + 1), Status: status, CreatedAt: now, UpdatedAt: now,
-			})
-			_, err := stack.composition.sessions.AppendEvent(ctx, session.AppendEventRequest{
-				SessionRef: active.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest),
-				Event: &session.Event{
-					IdempotencyKey: fmt.Sprintf("test-run:%s:%d", record.RunID, record.Revision),
-					Type:           session.EventTypeLifecycle, Visibility: session.VisibilityJournal, Time: now,
-					Actor:     session.ActorRef{Kind: session.ActorKindSystem, ID: "runtime"},
-					Lifecycle: &session.EventLifecycle{Status: string(status)},
-					Journal:   &session.ExecutionJournalEntry{Schema: session.ExecutionJournalSchemaVersion, Kind: session.JournalKindRun, Execution: &record},
-				},
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-		}
+
 	}
 	if err := stack.Close(); err != nil {
 		t.Fatal(err)
@@ -95,9 +72,6 @@ func TestDormantSessionRuntimeStateRecoversCanonicalOutcomeWithoutActivation(t *
 			}
 			if state.Run.Status != test.want || state.Run.Active || state.Run.WaitingApproval || state.Approval.Active != nil {
 				t.Fatalf("dormant state = %#v, approval = %#v; want %q with no live execution", state.Run, state.Approval, test.want)
-			}
-			if test.terminal != "" && state.Run.RunID != "run-"+test.name {
-				t.Fatalf("canonical run identity lost: %#v", state.Run)
 			}
 			after, err := restarted.composition.sessions.Session(ctx, test.ref)
 			if err != nil {

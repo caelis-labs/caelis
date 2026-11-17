@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
+	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
 const (
@@ -34,6 +35,15 @@ type EventLifecycle struct {
 // or a terminal Turn lifecycle state.
 const LifecycleStatusContextCompacting = "context_compacting"
 
+// ToolOutcome is the immutable disposition of one returned or interrupted call.
+type ToolOutcome string
+
+const (
+	ToolOutcomeSucceeded ToolOutcome = "succeeded"
+	ToolOutcomeFailed    ToolOutcome = "failed"
+	ToolOutcomeUnknown   ToolOutcome = "unknown_outcome"
+)
+
 // EventTool is the durable SDK tool-execution payload for one tool call or
 // result event. Input decodes numbers as json.Number so observation tokens
 // survive durable reload; Output and other open maps retain their established decoding.
@@ -41,7 +51,17 @@ const LifecycleStatusContextCompacting = "context_compacting"
 // not the storage contract.
 type EventTool struct {
 	// Parent identifies an actual nested host call, independently of display metadata.
-	Parent *EventParentTool `json:"parent,omitempty"`
+	// Execution identifies this occurrence, independently of a reused protocol ID.
+	Execution tool.InvocationContext `json:"execution,omitempty"`
+	// BatchID identifies the frozen model call batch; nested calls have no batch.
+	BatchID string        `json:"batch_id,omitempty"`
+	Binding *tool.Binding `json:"binding,omitempty"`
+	// Result is the complete returned value; Message carries the checked model view.
+	Result    *tool.Result     `json:"result,omitempty"`
+	Outcome   ToolOutcome      `json:"outcome,omitempty"`
+	Error     string           `json:"error,omitempty"`
+	ErrorCode string           `json:"error_code,omitempty"`
+	Parent    *EventParentTool `json:"parent,omitempty"`
 	// ModelCall retains the original protocol call when execution targets another tool.
 	ModelCall    *model.ToolCall     `json:"model_call,omitempty"`
 	ID           string              `json:"id,omitempty"`
@@ -65,7 +85,8 @@ func (t *EventTool) UnmarshalJSON(data []byte) error {
 	// float64 (which can reject a valid JSON number such as 1e1000).
 	fields := struct {
 		*toolAlias
-		Input json.RawMessage `json:"input"`
+		Input  json.RawMessage `json:"input"`
+		Result json.RawMessage `json:"result"`
 	}{toolAlias: &decoded}
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return err
@@ -74,6 +95,13 @@ func (t *EventTool) UnmarshalJSON(data []byte) error {
 		decoder := json.NewDecoder(bytes.NewReader(fields.Input))
 		decoder.UseNumber()
 		if err := decoder.Decode(&decoded.Input); err != nil {
+			return err
+		}
+	}
+	if len(fields.Result) > 0 && string(fields.Result) != "null" {
+		decoder := json.NewDecoder(bytes.NewReader(fields.Result))
+		decoder.UseNumber()
+		if err := decoder.Decode(&decoded.Result); err != nil {
 			return err
 		}
 	}
@@ -133,16 +161,17 @@ type Event struct {
 	Compaction              *EventCompactionContext  `json:"compaction_context,omitempty"`
 	// MessageID identifies one logical message across transient chunks and its
 	// canonical durable event. It is semantic event state, not display metadata.
-	MessageID   string                 `json:"message_id,omitempty"`
-	Message     *model.Message         `json:"message,omitempty"`
-	Tool        *EventTool             `json:"tool,omitempty"`
-	PlanPayload *EventPlanPayload      `json:"plan,omitempty"`
-	Notice      *EventNotice           `json:"notice,omitempty"`
-	Lifecycle   *EventLifecycle        `json:"lifecycle,omitempty"`
-	Journal     *ExecutionJournalEntry `json:"journal,omitempty"`
-	Protocol    *EventProtocol         `json:"protocol,omitempty"`
-	Text        string                 `json:"-"`
-	Meta        map[string]any         `json:"_meta,omitempty"`
+	MessageID     string            `json:"message_id,omitempty"`
+	Message       *model.Message    `json:"message,omitempty"`
+	Tool          *EventTool        `json:"tool,omitempty"`
+	PlanPayload   *EventPlanPayload `json:"plan,omitempty"`
+	Notice        *EventNotice      `json:"notice,omitempty"`
+	Lifecycle     *EventLifecycle   `json:"lifecycle,omitempty"`
+	Approval      *ApprovalRecord   `json:"approval,omitempty"`
+	legacyJournal json.RawMessage
+	Protocol      *EventProtocol `json:"protocol,omitempty"`
+	Text          string         `json:"-"`
+	Meta          map[string]any `json:"_meta,omitempty"`
 }
 
 // UnmarshalJSON expands event-local media and preserves numeric tokens in the
@@ -156,8 +185,9 @@ func (e *Event) UnmarshalJSON(data []byte) error {
 	var decoded eventAlias
 	fields := struct {
 		*eventAlias
-		Meta  json.RawMessage   `json:"_meta"`
-		Media map[string]string `json:"media"`
+		Meta    json.RawMessage   `json:"_meta"`
+		Media   map[string]string `json:"media"`
+		Journal json.RawMessage   `json:"journal"`
 	}{eventAlias: &decoded}
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return err
@@ -168,6 +198,16 @@ func (e *Event) UnmarshalJSON(data []byte) error {
 		if err := decoder.Decode(&decoded.Meta); err != nil {
 			return err
 		}
+	}
+	if decoded.Schema > EventSchemaVersion {
+		return &SchemaVersionError{Kind: SchemaKindEvent, From: decoded.Schema, To: EventSchemaVersion, Current: EventSchemaVersion, Detail: "future event schema"}
+	}
+	if decoded.Approval != nil && decoded.Approval.Schema > ApprovalSchemaVersion {
+		return &SchemaVersionError{Kind: SchemaKind("approval"), From: decoded.Approval.Schema, To: ApprovalSchemaVersion, Current: ApprovalSchemaVersion, Detail: "future approval schema"}
+	}
+	decoded.legacyJournal = fields.Journal
+	if err := decodeRetiredJournal((*Event)(&decoded)); err != nil {
+		return err
 	}
 	expanded, err := expandEventMedia(Event(decoded), fields.Media)
 	if err != nil {

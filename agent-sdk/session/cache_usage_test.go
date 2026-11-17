@@ -2,8 +2,9 @@ package session
 
 import (
 	"encoding/json"
-	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"testing"
+
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 )
 
 func TestCacheUsageRawAndCanonicalPresenceDoNotDoubleCount(t *testing.T) {

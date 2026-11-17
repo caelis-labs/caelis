@@ -1,8 +1,10 @@
 package mcpdiscovery
 
 import (
+	"encoding/json"
 	"testing"
 
+	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
@@ -28,5 +30,28 @@ func TestOnlyAdmittedCompleteCanonicalOutputGrantsDiscovery(t *testing.T) {
 		if got := FromEvents([]*session.Event{candidate}); len(got) != 0 {
 			t.Fatalf("legacy, failed or incomplete receipt granted %v", got)
 		}
+	}
+}
+
+func TestFullDiscoveryResultsRequireTheirOwningSource(t *testing.T) {
+	binding := tool.Binding{Name: "docs__read", Identity: "source", Version: "v1"}
+	raw, _ := json.Marshal(map[string]any{"tools": []any{map[string]any{"name": binding.Name, "binding": binding, "input_schema": map[string]any{"type": "object"}}}})
+	original := &session.Event{Type: session.EventTypeToolResult, Tool: &session.EventTool{Name: tool.ToolSearchToolName, Outcome: session.ToolOutcomeSucceeded, Result: &tool.Result{Content: []model.Part{model.NewJSONPart(raw)}, Metadata: map[string]any{MetadataKey: true}}}}
+	for _, nested := range []bool{false, true} {
+		event := session.CloneEvent(original)
+		if nested {
+			event.Visibility = session.VisibilityMirror
+			event.Tool.Parent = &session.EventParentTool{Kind: "code_mode"}
+			event.Scope = &session.EventScope{Source: "runtime_tool"}
+		}
+		if FromEvents([]*session.Event{event})[binding.Name] != binding {
+			t.Fatal("owning discovery result lost")
+		}
+	}
+	remote := session.CloneEvent(original)
+	remote.Visibility = session.VisibilityMirror
+	remote.Scope = &session.EventScope{Source: "acp"}
+	if len(FromEvents([]*session.Event{remote})) != 0 {
+		t.Fatal("remote mirror granted discovery")
 	}
 }

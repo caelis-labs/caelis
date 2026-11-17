@@ -60,7 +60,7 @@ func TestCodeModeDirectBindingSurvivesResumeAndRequiresExplicitRefresh(t *testin
 		t.Fatalf("actual Journal did not retain direct binding: %+v", binding)
 	}
 	for _, event := range events {
-		if event.Journal != nil && event.Journal.ToolExecution != nil && event.Journal.ToolExecution.ToolName == tool.ToolSearchToolName {
+		if event.Type == session.EventTypeToolResult && event.Tool != nil && event.Tool.Name == tool.ToolSearchToolName {
 			t.Fatal("direct path performed discovery")
 		}
 	}
@@ -95,10 +95,10 @@ func TestCodeModeDirectBindingSurvivesResumeAndRequiresExplicitRefresh(t *testin
 func TestCodeModeDirectBindingDoesNotGrantLegacyMCPDiscovery(t *testing.T) {
 	def := fixtureMCPDefinition("direct-v1")
 	binding := tool.BindingForDefinition(def)
-	events := []*session.Event{{Visibility: session.VisibilityJournal, Journal: &session.ExecutionJournalEntry{ToolExecution: &session.ToolExecution{
-		ToolName: def.Name, Binding: &binding, Status: session.ToolExecutionStarted,
-		Parent: &tool.ParentCall{Kind: codemode.ToolKind},
-	}}}}
+	events := []*session.Event{{Type: session.EventTypeToolCall, Visibility: session.VisibilityMirror, Tool: &session.EventTool{
+		Name: def.Name, Binding: &binding, Status: "pending",
+		Parent: &session.EventParentTool{Kind: codemode.ToolKind},
+	}}}
 	if codeModeBindings(events)[def.Name] != binding {
 		t.Fatal("Code Mode failed to retain its actual binding")
 	}
@@ -119,9 +119,9 @@ func TestCodeModeNativeOwnerSupersedesHistoricalMCPBinding(t *testing.T) {
 			return tool.NewError(tool.ErrorCodeStaleRevision, "MCP binding is no longer present")
 		},
 	}}
-	events := []*session.Event{{Visibility: session.VisibilityJournal, Journal: &session.ExecutionJournalEntry{ToolExecution: &session.ToolExecution{
-		ToolName: prior.Name, Binding: &binding, Status: session.ToolExecutionStarted, Parent: &tool.ParentCall{Kind: codemode.ToolKind},
-	}}}}
+	events := []*session.Event{{Type: session.EventTypeToolCall, Visibility: session.VisibilityMirror, Tool: &session.EventTool{
+		Name: prior.Name, Binding: &binding, Status: "pending", Parent: &session.EventParentTool{Kind: codemode.ToolKind},
+	}}}
 	if err := host.prepareTargets(t.Context(), events); err != nil {
 		t.Fatal(err)
 	}

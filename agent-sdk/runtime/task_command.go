@@ -49,7 +49,8 @@ func commandRequestDigest(req taskapi.CommandStartRequest) (string, error) {
 		Timeout     time.Duration       `json:"timeout"`
 		ParentCall  string              `json:"parent_call"`
 		Constraints sandbox.Constraints `json:"constraints"`
-	}{strings.TrimSpace(req.Command), strings.TrimSpace(req.Workdir), req.TTY, req.Timeout, strings.TrimSpace(req.ParentCall), constraints}
+		OperationID string              `json:"operation_id,omitempty"`
+	}{strings.TrimSpace(req.Command), strings.TrimSpace(req.Workdir), req.TTY, req.Timeout, strings.TrimSpace(req.ParentCall), constraints, strings.TrimSpace(req.OperationID)}
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return "", err
@@ -86,7 +87,7 @@ func (tm *taskRuntime) StartCommand(
 		sandboxReq.Backend = constraints.Backend
 		sandboxReq.Permission = constraints.Permission
 	}
-	taskID, err := commandTaskID(ref, req.ParentCall)
+	taskID, err := commandTaskID(ref, firstNonEmpty(req.OperationID, req.ParentCall))
 	if err != nil {
 		return taskapi.Snapshot{}, err
 	}
@@ -148,6 +149,7 @@ func (tm *taskRuntime) prepareCommandClaimed(ctx context.Context, activeSession 
 		workdir:       strings.TrimSpace(req.Workdir),
 		tty:           req.TTY,
 		parentCall:    strings.TrimSpace(req.ParentCall),
+		operationID:   strings.TrimSpace(req.OperationID),
 		requestDigest: requestDigest,
 		title:         shell.RunCommandToolName + " " + strings.TrimSpace(req.Command),
 		createdAt:     now,
@@ -337,6 +339,7 @@ func applyCommandEntry(task *commandTask, entry *taskapi.Entry) {
 	}
 	task.mu.Lock()
 	stateChanged := task.state != entry.State || task.running != entry.Running
+	task.operationID = taskSpecString(entry.Spec, "operation_id")
 	task.revision = entry.Revision
 	task.handle = firstNonEmpty(entry.Handle, taskSpecString(entry.Spec, "handle"), taskStringValue(entry.Metadata["handle"]))
 	task.lease = taskapi.CloneLease(entry.Lease)

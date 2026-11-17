@@ -75,9 +75,9 @@ type reviewGenerationStore struct {
 }
 
 func (s *reviewGenerationStore) AppendEvent(ctx context.Context, req session.AppendEventRequest) (*session.Event, error) {
-	if req.Event.Journal != nil && req.Event.Journal.ToolExecution != nil {
-		r := req.Event.Journal.ToolExecution
-		if r.Parent != nil && r.Status == session.ToolExecutionPrepared && s.revisionMu.TryLock() {
+	if req.Event.Type == session.EventTypeToolCall && req.Event.Tool != nil {
+		r := req.Event.Tool
+		if r.Parent != nil && r.Status == "pending" && s.revisionMu.TryLock() {
 			// Model a configuration writer at the first durable dispatch step.
 			// A retained Validate guard must exclude this revision replacement.
 			s.stale.Store(true)
@@ -218,10 +218,10 @@ func TestReviewCodeModeDrainRetainsSessionFence(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, event := range events {
-				if event.Journal != nil && event.Journal.ToolExecution != nil {
-					r := event.Journal.ToolExecution
-					if r.Parent != nil && r.ToolName == "Write" {
-						t.Logf("original child identity=%s call_id=%s status=%s revision=%d visibility=%s", r.Identity, r.Key.ToolCallID, r.Status, r.Revision, event.Visibility)
+				if event.Type == session.EventTypeToolResult && event.Tool != nil {
+					r := event.Tool
+					if r.Parent != nil && r.Name == "Write" {
+						t.Logf("original child identity=%s call_id=%s status=%s revision=%d visibility=%s", r.Execution.ItemID, r.ID, r.Status, event.Seq, event.Visibility)
 					}
 				}
 				if session.IsCanonicalHistoryEvent(event) && event.Tool != nil && event.Tool.Parent != nil {

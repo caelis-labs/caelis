@@ -355,22 +355,22 @@ func TestCodeModeLive(t *testing.T) {
 			}
 			fixedFile := false
 			for _, event := range history.Events {
-				if event.Journal == nil || event.Journal.ToolExecution == nil {
+				if event.Type != session.EventTypeToolResult || event.Tool == nil {
 					continue
 				}
-				record := event.Journal.ToolExecution
-				if record.ToolName != codemode.ToolName || record.Status != session.ToolExecutionSucceeded {
+				record := event.Tool
+				if record.Name != codemode.ToolName || record.Status != "completed" {
 					continue
 				}
 				var input struct {
 					File string `json:"file"`
 				}
-				_ = json.Unmarshal(record.Input, &input)
+				_ = json.Unmarshal(factJSON(record.Input), &input)
 				if filepath.Base(input.File) != "workflow.js" {
 					continue
 				}
 				var result tool.Result
-				if json.Unmarshal(record.Result, &result) != nil {
+				if json.Unmarshal(toolResultJSON(record.Result), &result) != nil {
 					continue
 				}
 				source, _ := result.Metadata["code_mode_source"].(map[string]any)

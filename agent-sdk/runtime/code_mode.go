@@ -13,6 +13,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/errorcode"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/mcpdiscovery"
+	"github.com/caelis-labs/caelis/agent-sdk/runtime/internal/toolbinding"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
@@ -169,7 +170,7 @@ func (t runtimeCodeModeTool) execute(ctx context.Context, call tool.Call, source
 		raw, _ := json.Marshal(payload)
 		result.Content = append(result.Content, model.NewJSONPart(raw))
 		result.IsError = true
-		// Journal classification follows the normalized disposition, including
+		// Outcome classification follows the normalized disposition, including
 		// an unknown effect among concurrently failed calls.
 		return result, &codemode.ExecutionError{Message: publicErr.Error(), Code: tool.ErrorCode(code), Err: errors.Join(host.fatal, completed.err, host.firstCallError)}
 	}
@@ -368,8 +369,8 @@ func (h *codeModeHost) call(requestCtx context.Context, name string, arguments j
 	stop := context.AfterFunc(requestCtx, cancel)
 	defer stop()
 	admission := func(ctx context.Context) (func(), error) { return h.admit(ctx, name, target) }
-	// This eligibility check is advisory; the journal repeats it after approval
-	// and retains the guard through its durable started claim.
+	// This eligibility check is advisory; final dispatch repeats it after approval
+	// and retains the guard through its final dispatch admission.
 	release, err := admission(ctx)
 	if err != nil {
 		return codemode.Reply{}, err
@@ -386,19 +387,18 @@ func (h *codeModeHost) call(requestCtx context.Context, name string, arguments j
 		binding := tool.BindingForDefinition(target.definition)
 		call.TargetBinding = &binding
 	}
-	if err := h.display(ctx, call, "started"); err != nil {
+	call = toolbinding.Prepare(target.tool, call)
+	ctx = toolbinding.WithPrepared(ctx, call)
+	if err := h.appendToolFact(ctx, call, nil, nil); err != nil {
 		h.fail(err)
 		return codemode.Reply{}, err
 	}
 	result, callErr := target.tool.Call(ctx, call)
 	outcome := codeModeOutcome(result, callErr)
-	status := "completed"
-	if callErr != nil || result.IsError || outcome == codemode.OutcomeUnknown {
-		status = "failed"
-	}
-	if err := h.display(ctx, call, status); err != nil {
-		h.fail(err)
-		callErr = errors.Join(callErr, err)
+	persistErr := h.appendToolFact(ctx, call, &result, callErr)
+	if persistErr != nil {
+		h.fail(persistErr)
+		callErr = errors.Join(callErr, persistErr)
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -421,7 +421,7 @@ func (h *codeModeHost) call(requestCtx context.Context, name string, arguments j
 		}
 		// A published failed receipt settles an ordinary tool failure. The
 		// producer remains admitted; the failure flag/receipt is never erased.
-		if h.ctx.Err() == nil && settledCodeModeToolError(result, callErr) {
+		if h.ctx.Err() == nil && persistErr == nil && settledCodeModeToolError(callErr) {
 			reply, projectErr := h.project(callID, result, outcome, target.definition)
 			if projectErr == nil {
 				reply.IsError = true
@@ -439,9 +439,7 @@ func (h *codeModeHost) call(requestCtx context.Context, name string, arguments j
 }
 
 func codeModeOutcome(result tool.Result, err error) string {
-	journal, _ := result.Metadata[tool.MetadataExecutionJournal].(map[string]any)
-	record, _ := journal["tool_execution"].(map[string]any)
-	if record["status"] == string(session.ToolExecutionUnknownOutcome) {
+	if errorcode.Is(err, errorcode.UnknownOutcome) || errorcode.Is(err, errorcode.Cancelled) || errors.Is(err, context.Canceled) {
 		return codemode.OutcomeUnknown
 	}
 	if err != nil || result.IsError {
@@ -459,49 +457,20 @@ func (h *codeModeHost) fail(err error) {
 	h.mu.Unlock()
 }
 
-func (h *codeModeHost) display(ctx context.Context, call tool.Call, status string) error {
-	var input map[string]any
-	decoder := json.NewDecoder(bytes.NewReader(call.Input))
-	decoder.UseNumber()
-	if err := decoder.Decode(&input); err != nil {
-		return err
-	}
-	kind := session.EventTypeToolResult
-	if status == "started" {
-		kind = session.EventTypeToolCall
-	}
-	event := &session.Event{Type: kind, Visibility: session.VisibilityMirror,
-		IdempotencyKey: "code-mode:" + call.ID + ":" + status,
-		Scope:          &session.EventScope{TurnID: h.parent.Execution.TurnID},
-		Actor:          session.ActorRef{Kind: session.ActorKindTool, ID: call.ID, Name: call.Name},
-		Tool: &session.EventTool{ID: call.ID, Name: call.Name, Status: status, Input: input,
-			Parent: &session.EventParentTool{CallID: h.parent.ID, Name: h.parent.Name}}}
-	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), approvalResolutionRecoveryTimeout)
-	defer cancel()
-	persisted, err := h.owner.sessions.AppendEvent(cleanup, session.AppendEventRequest{SessionRef: h.owner.ref, MutationGuard: session.RuntimeMutationGuard(h.ctx), Event: event})
-	if err == nil {
-		if sink, ok := h.ctx.Value(nestedToolEventSinkKey{}).(func(*session.Event)); ok {
-			sink(persisted)
-		}
-	}
-	return err
+func (h *codeModeHost) appendToolFact(ctx context.Context, call tool.Call, result *tool.Result, callErr error) error {
+	return h.owner.runtime.appendToolFact(ctx, h.owner.ref, h.parent.Execution.TurnID, call, result, callErr)
 }
 
-// Only the journal owner publishes this carrier after durable child receipt
+// Only the ToolResult owner publishes this result after durable persistence
 // delivery. An unclassified/transport/authority error never grants continuation.
-func settledCodeModeToolError(result tool.Result, err error) bool {
-	journal, _ := result.Metadata[tool.MetadataExecutionJournal].(map[string]any)
-	record, _ := journal["tool_execution"].(map[string]any)
-	if record["status"] != string(session.ToolExecutionFailed) {
-		return false
-	}
+func settledCodeModeToolError(err error) bool {
 	if joined, ok := err.(interface{ Unwrap() []error }); ok {
 		children := joined.Unwrap()
 		if len(children) == 0 {
 			return false
 		}
 		for _, child := range children {
-			if !settledCodeModeToolError(result, child) {
+			if !settledCodeModeToolError(child) {
 				return false
 			}
 		}

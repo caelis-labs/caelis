@@ -10,6 +10,7 @@ import (
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/placement"
 	"github.com/caelis-labs/caelis/agent-sdk/sandbox"
+	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
 // NormalizeSessionRef returns one normalized session ref.
@@ -49,6 +50,11 @@ func CloneEvent(in *Event) *Event {
 		return nil
 	}
 	out := *in
+	out.legacyJournal = append(json.RawMessage(nil), in.legacyJournal...)
+	if in.Approval != nil {
+		a := CloneApprovalRecord(*in.Approval)
+		out.Approval = &a
+	}
 	if in.AuthorizationRevocation != nil {
 		revoked := *in.AuthorizationRevocation
 		out.AuthorizationRevocation = &revoked
@@ -99,10 +105,6 @@ func CloneEvent(in *Event) *Event {
 		lifecycle.Reason = strings.TrimSpace(lifecycle.Reason)
 		lifecycle.Meta = cloneProtocolAnyMap(lifecycle.Meta)
 		out.Lifecycle = &lifecycle
-	}
-	if in.Journal != nil {
-		journal := CloneExecutionJournalEntry(*in.Journal)
-		out.Journal = &journal
 	}
 	if in.Protocol != nil {
 		protocol := CloneEventProtocol(*in.Protocol)
@@ -250,6 +252,7 @@ func CloneEventScope(in EventScope) EventScope {
 // CloneEventTool returns one normalized copy of a durable tool payload.
 func CloneEventTool(in EventTool) EventTool {
 	out := EventTool{
+		Execution: in.Execution, BatchID: in.BatchID, Outcome: in.Outcome, ErrorCode: in.ErrorCode, Error: in.Error,
 		TurnComplete: in.TurnComplete,
 		ID:           in.ID,
 		Name:         strings.TrimSpace(in.Name),
@@ -258,6 +261,14 @@ func CloneEventTool(in EventTool) EventTool {
 		Status:       strings.TrimSpace(in.Status),
 		Input:        jsonvalue.CloneMap(in.Input),
 		Output:       jsonvalue.CloneMap(in.Output),
+	}
+	if in.Result != nil {
+		result, _ := tool.CloneResult(*in.Result, nil)
+		out.Result = &result
+	}
+	if in.Binding != nil {
+		binding := *in.Binding
+		out.Binding = &binding
 	}
 	if in.Parent != nil {
 		value := *in.Parent

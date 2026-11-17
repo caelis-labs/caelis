@@ -185,7 +185,7 @@ When marked input is present, public raw input/output/content and derived
 title/reason/justification are withheld because they may quote the value.
 `sensitive_input` persists that fact without storing the value, allowing live
 and replay review text to be withheld while preserving the typed verdict and
-native options. The private pause token keeps action evidence; its separate
+native options. The private approval record keeps action evidence; its separate
 `presentation` snapshot supplies client replay. Older journals without a
 presentation snapshot retain their existing replay behavior; missing historic
 schema annotations cannot be reconstructed safely. Both the retained direct
@@ -225,7 +225,7 @@ including exhausted caches from earlier versions. This does not alter durable
 Session history and requires no manual data cleanup.
 
 Completed reviewed approval decisions have a `mirror` projection from the
-Runtime's persisted resolved pause token, including tokens written by earlier
+Runtime's persisted resolved approval record, including records written by earlier
 versions. It restores the original tool call's approved or denied display during
 replacement and restart. Progress remains transient; private journal metadata,
 pending approvals, and invocation receipts are not exposed by this projection.

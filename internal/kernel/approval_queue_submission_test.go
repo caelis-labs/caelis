@@ -15,7 +15,7 @@ func TestCallerCannotResolveAutoReviewButGuardianCan(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			handle := newTestTurnHandle()
-			request := &agent.ApprovalRequest{SessionRef: handle.sessionRef, PauseTokenID: "auto-main"}
+			request := &agent.ApprovalRequest{SessionRef: handle.sessionRef, ApprovalRequestID: "auto-main"}
 			gateway := &Gateway{
 				active:    map[string]*turnHandle{handle.sessionRef.SessionID: handle},
 				approvals: map[string]*approvalCoordinator{handle.sessionRef.SessionID: handle.approvals},
@@ -25,7 +25,7 @@ func TestCallerCannotResolveAutoReviewButGuardianCan(t *testing.T) {
 				delete(gateway.active, handle.sessionRef.SessionID)
 				request = testChildApprovalRequest("task-detached", "detached.txt")
 				request.SessionRef = handle.sessionRef
-				request.PauseTokenID = "auto-detached"
+				request.ApprovalRequestID = "auto-detached"
 			}
 			pending, err := handle.enqueueApproval(request, false)
 			if err != nil {
@@ -65,7 +65,7 @@ func TestCallerCanStillResolveManualApproval(t *testing.T) {
 	handle := newTestTurnHandle()
 	request := testChildApprovalRequest("task-manual", "manual.txt")
 	request.SessionRef = handle.sessionRef
-	request.PauseTokenID = "manual-request"
+	request.ApprovalRequestID = "manual-request"
 	pending, err := handle.enqueueApproval(request, true)
 	if err != nil {
 		t.Fatal(err)

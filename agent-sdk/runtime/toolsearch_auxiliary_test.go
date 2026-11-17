@@ -67,7 +67,7 @@ func (m *auxiliarySearchProbeModel) Generate(_ context.Context, req *model.Reque
 
 func auxiliarySearchRun(t *testing.T, llm *auxiliarySearchProbeModel, compactor compact.Engine, admissions *atomic.Int32) ([]*session.Event, error) {
 	t.Helper()
-	sessions, active := newJournalTestSession(t, "auxiliary-search")
+	sessions, active := newToolFactTestSession(t, "auxiliary-search")
 	candidate := tool.NamedTool{Def: tool.Definition{
 		Name: "docs__read", Description: "Read documents", InputSchema: map[string]any{"type": "object"},
 		Metadata: map[string]any{tool.MetadataToolKind: tool.MetadataToolKindMCP, tool.MetadataMCPServer: "docs", tool.MetadataMCPTool: "read", tool.MetadataMCPSourceFingerprint: "fixture-v1"},

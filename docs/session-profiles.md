@@ -267,7 +267,7 @@ Historical Sessions retain readable tool calls and results. Name-only history
 does not authorize non-Code Mode `mcp_call`; that entry needs a current search
 binding. Code Mode may call a known original name directly, and its first call
 without an existing binding pins the current real Tool identity/version. Canonical
-search receipts and started child Journal bindings for Code Mode tool executions
+search receipts and typed nested ToolCall bindings for Code Mode tool executions
 remain reusable across fresh workers, compaction and resume. A change to the bound
 Code Mode source/schema fails stale
 until `tools.search(name)` explicitly refreshes the complete schema and binding.

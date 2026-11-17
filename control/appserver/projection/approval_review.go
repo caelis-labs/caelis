@@ -33,7 +33,7 @@ func projectApprovalReview(base eventstream.Envelope, event *session.Event) []ev
 	base.Kind = eventstream.KindApprovalReview
 	base.Delivery = &eventstream.Delivery{Mode: eventstream.DeliveryMirror}
 	base.TurnID = strings.TrimSpace(token.TurnID)
-	base.ApprovalRequestID = eventstream.ApprovalRequestID(strings.TrimSpace(token.TokenID))
+	base.ApprovalRequestID = eventstream.ApprovalRequestID(strings.TrimSpace(token.RequestID))
 	base.Meta = nil
 	base.ApprovalReview = &eventstream.ApprovalReview{
 		ToolCallID: strings.TrimSpace(token.ToolCallID), ToolName: strings.TrimSpace(token.ToolName), ItemID: strings.TrimSpace(token.ItemID),

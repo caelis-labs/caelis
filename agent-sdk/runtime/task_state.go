@@ -162,6 +162,7 @@ type commandTask struct {
 	tty           bool
 	supportsInput bool
 	parentCall    string
+	operationID   string
 	requestDigest string
 	execution     commandExecutionSpec
 	continuation  *taskContinuation

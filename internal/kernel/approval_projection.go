@@ -12,21 +12,21 @@ import (
 	"github.com/caelis-labs/caelis/control/appserver/eventstream"
 )
 
-const approvalPersistenceTimeout = 5 * time.Second
+const approvalProjectionTimeout = 5 * time.Second
 
-func (g *Gateway) approvalPersister(ref session.SessionRef, turnID string) func(*agent.ApprovalRequest, eventstream.ApprovalRequestID) (*session.Event, error) {
+func (g *Gateway) approvalProjector(ref session.SessionRef, turnID string) func(*agent.ApprovalRequest, eventstream.ApprovalRequestID) (*session.Event, error) {
 	return func(req *agent.ApprovalRequest, requestID eventstream.ApprovalRequestID) (*session.Event, error) {
-		return g.persistApprovalRequest(req, ref, turnID, requestID)
+		return g.projectApprovalRequest(req, ref, turnID, requestID)
 	}
 }
 
-func (g *Gateway) approvalSettler(ref session.SessionRef, turnID string) func(*agent.ApprovalRequest, eventstream.ApprovalRequestID, string) (*session.Event, error) {
+func (g *Gateway) approvalSettlementProjector(ref session.SessionRef, turnID string) func(*agent.ApprovalRequest, eventstream.ApprovalRequestID, string) (*session.Event, error) {
 	return func(req *agent.ApprovalRequest, requestID eventstream.ApprovalRequestID, state string) (*session.Event, error) {
-		return g.persistApprovalSettlement(req, ref, turnID, requestID, state)
+		return g.projectApprovalSettlement(req, ref, turnID, requestID, state)
 	}
 }
 
-func (g *Gateway) persistApprovalRequest(req *agent.ApprovalRequest, fallbackRef session.SessionRef, fallbackTurnID string, requestID eventstream.ApprovalRequestID) (*session.Event, error) {
+func (g *Gateway) projectApprovalRequest(req *agent.ApprovalRequest, fallbackRef session.SessionRef, fallbackTurnID string, requestID eventstream.ApprovalRequestID) (*session.Event, error) {
 	if g == nil || g.sessions == nil || req == nil {
 		return nil, fmt.Errorf("gateway: approval persistence is unavailable")
 	}
@@ -63,11 +63,30 @@ func (g *Gateway) persistApprovalRequest(req *agent.ApprovalRequest, fallbackRef
 		event.Scope.ACP.SessionID = strings.TrimSpace(origin.ParticipantSessionID)
 		event.ChildOrigin = approvalChildOrigin(req, origin, requestID)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), approvalPersistenceTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), approvalProjectionTimeout)
 	defer cancel()
-	return g.sessions.AppendEvent(ctx, session.AppendEventRequest{
-		SessionRef: ref, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeApproval), Event: event,
-	})
+	events, err := g.sessions.Events(ctx, session.EventsRequest{SessionRef: ref, IncludeTransient: true})
+	if err != nil {
+		return nil, err
+	}
+	var source *session.Event
+	for _, fact := range events {
+		if fact.Approval != nil && fact.Approval.RequestID == string(requestID) && (source == nil || source.Approval.Revision < fact.Approval.Revision) {
+			source = fact
+		}
+	}
+	if source == nil || source.Approval.Status != session.ApprovalRecordPending {
+		return nil, fmt.Errorf("approval request %q has no pending Runtime fact", requestID)
+	}
+	if source.Approval.Presentation != nil {
+		shown := session.CloneProtocolApproval(*source.Approval.Presentation)
+		event.Protocol.Permission = &shown
+	}
+	event.ID = source.ID
+	event.Seq = source.Seq
+	event.Time = source.Time
+	return event, nil
+
 }
 
 func approvalChildOrigin(req *agent.ApprovalRequest, origin *EventOrigin, requestID eventstream.ApprovalRequestID) *session.EventChildOrigin {
@@ -107,9 +126,9 @@ func approvalChildOrigin(req *agent.ApprovalRequest, origin *EventOrigin, reques
 	}
 }
 
-func (g *Gateway) persistApprovalSettlement(req *agent.ApprovalRequest, fallbackRef session.SessionRef, fallbackTurnID string, requestID eventstream.ApprovalRequestID, state string) (*session.Event, error) {
+func (g *Gateway) projectApprovalSettlement(req *agent.ApprovalRequest, fallbackRef session.SessionRef, fallbackTurnID string, requestID eventstream.ApprovalRequestID, state string) (*session.Event, error) {
 	if g == nil || g.sessions == nil {
-		return nil, fmt.Errorf("gateway: approval settlement persistence is unavailable")
+		return nil, fmt.Errorf("gateway: approval settlement projection is unavailable")
 	}
 	ref := session.NormalizeSessionRef(fallbackRef)
 	if req != nil && strings.TrimSpace(req.SessionRef.SessionID) != "" {
@@ -134,11 +153,9 @@ func (g *Gateway) persistApprovalSettlement(req *agent.ApprovalRequest, fallback
 			event.ChildOrigin = approvalChildOrigin(req, origin, eventstream.ApprovalRequestID(string(requestID)+":settlement:"+state))
 		}
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), approvalPersistenceTimeout)
-	defer cancel()
-	return g.sessions.AppendEvent(ctx, session.AppendEventRequest{
-		SessionRef: ref, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeApproval), Event: event,
-	})
+	event.Visibility = session.VisibilityUIOnly
+	return event, nil
+
 }
 
 func approvalSettlementStatus(state string) string {

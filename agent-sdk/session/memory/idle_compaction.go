@@ -2,6 +2,7 @@ package inmemory
 
 import (
 	"context"
+
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 )
 

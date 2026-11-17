@@ -86,7 +86,7 @@ func TestSharedWorkerNativeHTTPCommandAndRecovery(t *testing.T) {
 		t.Fatalf("native Worker effect = %q, %v", data, err)
 	}
 	state, err := client.InspectSession(ctx, appserver.StateRequest{SessionID: sid})
-	if err != nil || state.Run.Active || state.Run.Status != "completed" || state.Run.RunID == "" {
+	if err != nil || state.Run.Active || state.Run.WaitingApproval || state.Run.Status != "" || state.Run.RunID != "" || state.Run.TurnID != "" || state.Run.HandleID != "" {
 		t.Fatalf("native Worker state = %+v, %v", state, err)
 	}
 	before := applicationHTTPHistory(t, ctx, client, sid)
@@ -114,6 +114,10 @@ func TestSharedWorkerNativeHTTPCommandAndRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	client = host.app(string(secret))
+	state, err = client.InspectSession(ctx, appserver.StateRequest{SessionID: sid})
+	if err != nil || state.Run.Active || state.Run.WaitingApproval || state.Run.Status != "" || state.Run.RunID != "" || state.Run.TurnID != "" || state.Run.HandleID != "" {
+		t.Fatalf("restarted native Worker has no live Run: %+v, %v", state, err)
+	}
 	for _, operation := range []string{create.OperationID, prompt.OperationID} {
 		receipt, err := client.Operation(ctx, operation)
 		if err != nil || receipt.SessionID != sid {

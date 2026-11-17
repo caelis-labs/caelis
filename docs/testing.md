@@ -413,7 +413,7 @@ GOWORK=off go test -race ./agent-sdk/runtime ./agent-sdk/tool/mcp ./control/sess
 
 The 500-tool stdio fixture discovers and calls 200 distinct tools, then reopens
 its file Store and calls a previously discovered binding. It checks actual model
-tools bytes, real policy identity, per-operation Journal identity and exact
+tools bytes, real policy identity, per-operation invocation identity and exact
 receipt effects. Catalog fixtures use loopback HTTP and cover notifications,
 pagination, failed refresh, schema replacement, disconnects and pinned handles.
 Generic asynchronous and idle compaction retain their own coverage/CAS,

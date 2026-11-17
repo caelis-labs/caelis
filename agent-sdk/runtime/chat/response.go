@@ -231,6 +231,7 @@ func modelToolCallEvents(
 			Tool:       toolEventPayload(call, "pending", rawInput, nil, nil),
 			Meta:       meta,
 		}
+		event.Tool.BatchID = messageID
 		if i == 0 {
 			event.MessageID = strings.TrimSpace(messageID)
 			event.Message = &message

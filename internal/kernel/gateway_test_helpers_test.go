@@ -11,6 +11,7 @@ import (
 	"time"
 
 	agent "github.com/caelis-labs/caelis/agent-sdk"
+	"github.com/caelis-labs/caelis/agent-sdk/approval"
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
@@ -102,27 +103,7 @@ func (r *approvalRuntime) Run(ctx context.Context, req agent.RunRequest) (agent.
 		requests = 1
 	}
 	for range requests {
-		response, err := req.ApprovalRequester.RequestApproval(ctx, agent.ApprovalRequest{
-			SessionRef: r.session.SessionRef,
-			Session:    r.session,
-			RunID:      "run-1",
-			TurnID:     "turn-1",
-			Tool:       tool.Definition{Name: "RunCommand"},
-			Call:       tool.Call{ID: "approval-call", Name: "RunCommand", RuntimeModel: r.model},
-			Approval: &session.ProtocolApproval{
-				ToolCall: session.ProtocolToolCall{
-					ID:     "approval-call",
-					Name:   "RunCommand",
-					Kind:   "execute",
-					Title:  "RUN_COMMAND test",
-					Status: "pending",
-				},
-				Options: []session.ProtocolApprovalOption{
-					{ID: "allow_once", Name: "Allow once", Kind: "allow_once"},
-					{ID: "reject_once", Name: "Reject once", Kind: "reject_once"},
-				},
-			},
-		})
+		response, err := req.ApprovalRequester.RequestApproval(ctx, r.approvalRequest())
 		if err != nil {
 			return agent.RunResult{}, err
 		}
@@ -157,38 +138,7 @@ func (r *childApprovalRuntime) Run(ctx context.Context, req agent.RunRequest) (a
 	if req.ApprovalRequester == nil {
 		return agent.RunResult{}, errors.New("missing approval requester")
 	}
-	response, err := req.ApprovalRequester.RequestApproval(ctx, agent.ApprovalRequest{
-		SessionRef: r.session.SessionRef,
-		Session:    r.session,
-		RunID:      "run-1",
-		TurnID:     "turn-1",
-		Tool:       tool.Definition{Name: "Write"},
-		Call:       tool.Call{ID: "shared-child-call", Name: "Write"},
-		Approval: &session.ProtocolApproval{
-			ToolCall: session.ProtocolToolCall{
-				ID:        "shared-child-call",
-				Name:      "Write",
-				Kind:      "edit",
-				Title:     "Write file",
-				Status:    "pending",
-				RawInput:  map[string]any{"path": "child.txt"},
-				RawOutput: map[string]any{"preview": "new content"},
-				Content: []session.ProtocolToolCallContent{{
-					Type:    "content",
-					Content: session.ProtocolTextContent("child permission detail"),
-				}},
-			},
-			Options: []session.ProtocolApprovalOption{{ID: "allow_once", Name: "Allow once", Kind: "allow_once"}},
-		},
-		Metadata: map[string]any{
-			"subagent":       true,
-			"scope":          "subagent",
-			"scope_id":       "task-1",
-			"task_id":        "task-1",
-			"parent_call_id": "spawn-call-1",
-			"parent_tool":    "StartThread",
-		},
-	})
+	response, err := req.ApprovalRequester.RequestApproval(ctx, r.approvalRequest())
 	if err != nil {
 		return agent.RunResult{}, err
 	}
@@ -591,8 +541,9 @@ func (r *controlPlaneRuntime) DetachParticipant(ctx context.Context, req agent.D
 }
 
 type staticSessionService struct {
-	session session.Session
-	state   map[string]any
+	approvalRequest *agent.ApprovalRequest
+	session         session.Session
+	state           map[string]any
 }
 
 func (s staticSessionService) StartSession(context.Context, session.StartSessionRequest) (session.Session, error) {
@@ -611,6 +562,15 @@ func (s staticSessionService) AppendEvent(_ context.Context, req session.AppendE
 	return storedTestEvent(req), nil
 }
 func (s staticSessionService) Events(context.Context, session.EventsRequest) ([]*session.Event, error) {
+	if s.approvalRequest != nil {
+		var events []*session.Event
+		for i := 1; i <= 5; i++ {
+			req := s.approvalRequest
+			id := fmt.Sprintf("%s-approval-%06d", s.session.SessionID, i)
+			events = append(events, &session.Event{ID: "fixture-runtime:" + id, Seq: uint64(i), Type: session.EventTypeLifecycle, Visibility: session.VisibilityJournal, Approval: &session.ApprovalRecord{Schema: session.ApprovalSchemaVersion, RequestID: id, SessionID: s.session.SessionID, RunID: req.RunID, TurnID: req.TurnID, ToolCallID: req.Call.ID, ToolName: req.Tool.Name, Revision: 1, Status: session.ApprovalRecordPending, Approval: req.Approval, Presentation: approval.ProtocolApprovalFromPayload(approval.DisplayPayloadFromRuntimeRequest(*req))}})
+		}
+		return events, nil
+	}
 	return nil, nil
 }
 func (s staticSessionService) ListSessions(context.Context, session.ListSessionsRequest) (session.SessionList, error) {
@@ -958,4 +918,63 @@ func firstUsageSnapshot(events []eventstream.Envelope) *session.UsageSnapshot {
 		}
 	}
 	return nil
+}
+
+func (r *approvalRuntime) approvalRequest() agent.ApprovalRequest {
+	return agent.ApprovalRequest{
+		SessionRef: r.session.SessionRef,
+		Session:    r.session,
+		RunID:      "run-1",
+		TurnID:     "turn-1",
+		Tool:       tool.Definition{Name: "RunCommand"},
+		Call:       tool.Call{ID: "approval-call", Name: "RunCommand", RuntimeModel: r.model},
+		Approval: &session.ProtocolApproval{
+			ToolCall: session.ProtocolToolCall{
+				ID:     "approval-call",
+				Name:   "RunCommand",
+				Kind:   "execute",
+				Title:  "RUN_COMMAND test",
+				Status: "pending",
+			},
+			Options: []session.ProtocolApprovalOption{
+				{ID: "allow_once", Name: "Allow once", Kind: "allow_once"},
+				{ID: "reject_once", Name: "Reject once", Kind: "reject_once"},
+			},
+		},
+	}
+}
+
+func (r *childApprovalRuntime) approvalRequest() agent.ApprovalRequest {
+	return agent.ApprovalRequest{
+		SessionRef: r.session.SessionRef,
+		Session:    r.session,
+		RunID:      "run-1",
+		TurnID:     "turn-1",
+		Tool:       tool.Definition{Name: "Write"},
+		Call:       tool.Call{ID: "shared-child-call", Name: "Write"},
+		Approval: &session.ProtocolApproval{
+			ToolCall: session.ProtocolToolCall{
+				ID:        "shared-child-call",
+				Name:      "Write",
+				Kind:      "edit",
+				Title:     "Write file",
+				Status:    "pending",
+				RawInput:  map[string]any{"path": "child.txt"},
+				RawOutput: map[string]any{"preview": "new content"},
+				Content: []session.ProtocolToolCallContent{{
+					Type:    "content",
+					Content: session.ProtocolTextContent("child permission detail"),
+				}},
+			},
+			Options: []session.ProtocolApprovalOption{{ID: "allow_once", Name: "Allow once", Kind: "allow_once"}},
+		},
+		Metadata: map[string]any{
+			"subagent":       true,
+			"scope":          "subagent",
+			"scope_id":       "task-1",
+			"task_id":        "task-1",
+			"parent_call_id": "spawn-call-1",
+			"parent_tool":    "StartThread",
+		},
+	}
 }

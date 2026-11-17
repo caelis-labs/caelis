@@ -173,10 +173,10 @@ func (g *Gateway) PromptParticipant(ctx context.Context, req PromptParticipantRe
 		cancel: func() bool {
 			return cancelFn()
 		},
-		approvals:       approvals,
-		observer:        req.Observer,
-		persistApproval: g.approvalPersister(session.SessionRef, turnID),
-		settleApproval:  g.approvalSettler(session.SessionRef, turnID),
+		approvals:                 approvals,
+		observer:                  req.Observer,
+		projectApproval:           g.approvalProjector(session.SessionRef, turnID),
+		projectApprovalSettlement: g.approvalSettlementProjector(session.SessionRef, turnID),
 	})
 	g.active[session.SessionID] = handle
 	g.signalActiveChangedLocked()

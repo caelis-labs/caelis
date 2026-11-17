@@ -3,6 +3,8 @@ package session
 import (
 	"fmt"
 	"strings"
+
+	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
 // EventChildScope identifies the client-visible child relationship of a
@@ -18,8 +20,10 @@ const (
 // EventParentTool identifies the real parent tool call that created delegated
 // child work. It never represents a rendered text mirror.
 type EventParentTool struct {
-	CallID string `json:"call_id,omitempty"`
-	Name   string `json:"name,omitempty"`
+	Kind      string                 `json:"kind,omitempty"`
+	Execution tool.InvocationContext `json:"execution,omitempty"`
+	CallID    string                 `json:"call_id,omitempty"`
+	Name      string                 `json:"name,omitempty"`
 }
 
 // EventChildOrigin is the durable, transport-neutral relation for one child

@@ -108,9 +108,9 @@ func testControllerSpawn(t *testing.T, recoverController bool) {
 	}
 	found := false
 	for _, event := range events {
-		if event.Journal != nil && event.Journal.ToolExecution != nil {
-			record := event.Journal.ToolExecution
-			if record.Key.ToolCallID == call.ID && record.Key.RunID == run.Handle.RunID() && record.Key.TurnID != "" && record.Status == session.ToolExecutionSucceeded {
+		if event.Type == session.EventTypeToolResult && event.Tool != nil {
+			record := event.Tool
+			if record.ID == call.ID && record.Execution.TurnID != "" && record.Status == "completed" {
 				found = true
 			}
 		}

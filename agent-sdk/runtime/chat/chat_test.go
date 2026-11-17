@@ -528,12 +528,13 @@ func TestChatAgentRetainsUnsupportedImageToolResultBeforeRejectingNextModelReque
 	}
 }
 
-func TestExecuteToolCallCancellationDoesNotWaitForUnresponsiveTool(t *testing.T) {
+func TestExecuteToolCallRetainsProducerUntilDrain(t *testing.T) {
 	t.Parallel()
 
 	started := make(chan struct{})
 	release := make(chan struct{})
-	t.Cleanup(func() { close(release) })
+	releaseOnce := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(releaseOnce)
 	blockingTool := tool.NamedTool{
 		Def: tool.Definition{Name: "BLOCK"},
 		Invoke: func(context.Context, tool.Call) (tool.Result, error) {
@@ -557,13 +558,17 @@ func TestExecuteToolCallCancellationDoesNotWaitForUnresponsiveTool(t *testing.T)
 	cancel()
 
 	select {
-	case callErr := <-finished:
-		if !errors.Is(callErr, context.Canceled) {
-			t.Fatalf("executeToolCallWithProgressAdmitted() error = %v, want context.Canceled", callErr)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("executeToolCallWithProgressAdmitted() remained blocked after cancellation")
+	case <-finished:
+		t.Fatal("producer ended before drain")
+	case <-time.After(20 * time.Millisecond):
 	}
+	releaseOnce()
+	select {
+	case <-finished:
+	case <-time.After(time.Second):
+		t.Fatal("producer failed to drain")
+	}
+
 }
 
 func TestChatAgentAnnotatesConcurrentCallsWithOneModelStep(t *testing.T) {
@@ -3717,6 +3722,7 @@ func persistedToolCallEvent(id string, name string, input map[string]any) *sessi
 		Args: string(mustRawJSON(input)),
 	}
 	return &session.Event{
+		ID:   "call:" + id,
 		Type: session.EventTypeToolCall,
 		Tool: toolEventPayload(call, "pending", maps.Clone(input), nil, nil),
 		Meta: mergeEventMeta(toolMeta(name)),

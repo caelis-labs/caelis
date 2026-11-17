@@ -2,10 +2,11 @@ package kernel
 
 import (
 	"context"
+	"testing"
+
 	agent "github.com/caelis-labs/caelis/agent-sdk"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
-	"testing"
 )
 
 func TestSteeringInvalidatesAutomaticApprovalBeforeSettlement(t *testing.T) {

@@ -2,11 +2,12 @@ package runtime
 
 import (
 	"context"
+	"sync/atomic"
+	"testing"
+
 	"github.com/caelis-labs/caelis/agent-sdk/session"
 	"github.com/caelis-labs/caelis/agent-sdk/tool"
 	"github.com/caelis-labs/caelis/agent-sdk/tool/codemode"
-	"sync/atomic"
-	"testing"
 )
 
 func TestCodeModeChildJournalRequiresOriginalAdmission(t *testing.T) {
@@ -37,7 +38,7 @@ func TestCodeModeChildJournalRequiresOriginalAdmission(t *testing.T) {
 			if name != "missing" {
 				ctx = context.WithValue(ctx, codeModeAdmissionKey{}, binding)
 			}
-			wrapped := journaledTool{base: tool.NamedTool{Def: tool.Definition{Name: "Write"}, Invoke: func(context.Context, tool.Call) (tool.Result, error) { effects.Add(1); return tool.Result{}, nil }}, sessions: store, sessionRef: active.SessionRef, runID: "run", turnID: "turn"}
+			wrapped := dispatchTool{base: tool.NamedTool{Def: tool.Definition{Name: "Write"}, Invoke: func(context.Context, tool.Call) (tool.Result, error) { effects.Add(1); return tool.Result{}, nil }}, sessions: store, sessionRef: active.SessionRef}
 			_, err := wrapped.Call(ctx, call)
 			allowed := name == "valid" || name == "ordinary-parent" || name == "no-parent"
 			if allowed != (err == nil) || allowed != (effects.Load() == 1) {
@@ -52,7 +53,7 @@ func TestCodeModeChildJournalRequiresOriginalAdmission(t *testing.T) {
 					t.Fatal(err)
 				}
 				for _, event := range events {
-					if event.Journal != nil && event.Journal.ToolExecution != nil {
+					if event.Type == session.EventTypeToolResult && event.Tool != nil {
 						t.Fatal("unbound child reached durable execution claim")
 					}
 				}

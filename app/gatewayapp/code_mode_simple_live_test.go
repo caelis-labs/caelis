@@ -240,7 +240,7 @@ func TestCodeModeSimpleLive(t *testing.T) {
 			if e.Canonical == nil {
 				return nil
 			}
-			if e.Canonical.Journal != nil && e.Canonical.Journal.ToolExecution != nil && e.Canonical.Journal.ToolExecution.Status == session.ToolExecutionUnknownOutcome {
+			if e.Canonical.Type == session.EventTypeToolResult && e.Canonical.Tool != nil && e.Canonical.Tool.Outcome == "unknown_outcome" {
 				defer cancelTask()
 			}
 			f, e1 := os.OpenFile(filepath.Join(dir, "events.jsonl"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)

@@ -1241,10 +1241,10 @@ func TestApplicationAtomicMCPFailureIsolationHTTP(t *testing.T) {
 	if got := atomicAudit(audit); strings.Count(got, "callfail:call") != 1 || strings.Count(got, "documents:call") != 1 {
 		loaded, _ := host.stack.Sessions().LoadSession(ctx, session.LoadSessionRequest{SessionRef: session.SessionRef{SessionID: created.SessionID}, IncludeTransient: true})
 		for _, e := range loaded.Events {
-			if e.Journal != nil && e.Journal.ToolExecution != nil {
-				r := e.Journal.ToolExecution
+			if e.Type == session.EventTypeToolResult && e.Tool != nil {
+				r := e.Tool
 				if r.Error != "" {
-					t.Logf("original receipt tool=%s id=%s status=%s error=%s", r.ToolName, r.Identity, r.Status, r.Error)
+					t.Logf("original receipt tool=%s id=%s status=%s error=%s", r.Name, r.Execution.ItemID, r.Status, r.Error)
 				}
 			}
 		}

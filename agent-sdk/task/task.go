@@ -102,6 +102,11 @@ type Observer interface {
 
 // CommandStartRequest defines one yielded RUN_COMMAND launch request.
 type CommandStartRequest struct {
+	// OperationID is the command owner's immutable submission identity. Runtime
+	// tool producers derive it from the admitted occurrence, not the protocol ID.
+	// Empty retains ParentCall identity for legacy direct Task callers; remove
+	// that fallback when the direct Command API requires OperationID.
+	OperationID string        `json:"operation_id,omitempty"`
 	Command     string        `json:"command,omitempty"`
 	Workdir     string        `json:"workdir,omitempty"`
 	TTY         bool          `json:"tty,omitempty"`

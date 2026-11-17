@@ -176,9 +176,9 @@ func TestFixedMCPEntryHundredsAndCanonicalResume(t *testing.T) {
 				}
 			}
 		}
-		if e.Journal != nil && e.Journal.ToolExecution != nil {
-			r := e.Journal.ToolExecution
-			if strings.HasPrefix(r.ToolName, "bulk__") && r.Status == session.ToolExecutionSucceeded {
+		if e.Type == session.EventTypeToolResult && e.Tool != nil {
+			r := e.Tool
+			if strings.HasPrefix(r.Name, "bulk__") && r.Status == "completed" {
 				terminals++
 				if r.ModelCall == nil || r.Binding == nil {
 					t.Fatal("journal lost protocol or target binding")

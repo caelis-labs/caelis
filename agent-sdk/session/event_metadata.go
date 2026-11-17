@@ -28,18 +28,3 @@ type EventMetadataPage struct {
 type EventMetadataReader interface {
 	EventMetadataPage(context.Context, EventPageRequest) (EventMetadataPage, error)
 }
-
-// RunJournalSnapshot contains the latest Run record and, while it is waiting
-// for approval, its latest pause token when present.
-// An empty RunID selects the Run at the greatest event sequence; an explicit
-// RunID selects its greatest revision, with the earliest sequence breaking ties.
-type RunJournalSnapshot struct {
-	Run   *ExecutionRecord
-	Pause *PauseToken
-}
-
-// RunJournalReader optionally reads execution state without loading transcript
-// content. Runtime supports other Stores through the base Events query.
-type RunJournalReader interface {
-	RunJournal(context.Context, SessionRef, string) (RunJournalSnapshot, error)
-}

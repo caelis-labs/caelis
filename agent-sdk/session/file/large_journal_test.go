@@ -12,6 +12,7 @@ import (
 
 	"github.com/caelis-labs/caelis/agent-sdk/model"
 	"github.com/caelis-labs/caelis/agent-sdk/session"
+	"github.com/caelis-labs/caelis/agent-sdk/tool"
 )
 
 func TestLargeJournalReceiptSurvivesColdAppendAndReopen(t *testing.T) {
@@ -44,7 +45,7 @@ func TestLargeJournalReceiptSurvivesColdAppendAndReopen(t *testing.T) {
 	if len(loaded.Events) != 3 || loaded.Events[1].ID != persisted.ID || !session.IsModelInvocationReceipt(loaded.Events[1]) {
 		t.Fatal("cold append or reopen lost the journal, receipt or final reply")
 	}
-	if !bytes.Equal(loaded.Events[0].Journal.ToolExecution.Result, largeJournalResult()) {
+	if !bytes.Equal(loaded.Events[0].Tool.Result.Content[0].JSON.Value, largeJournalResult()) {
 		t.Fatal("journal result changed across persistence")
 	}
 	got, ok := session.ModelMessageOf(loaded.Events[2])
@@ -69,14 +70,9 @@ func newLargeJournalFixture(t testing.TB, count int) (*Store, session.Session) {
 	result := largeJournalResult()
 	events := make([]*session.Event, 0, count)
 	for i := range count {
-		record := session.NormalizeToolExecution(session.ToolExecution{
-			Key:      session.ExecutionKey{SessionID: active.SessionID, RunID: "run", TurnID: "turn", StepID: fmt.Sprintf("step-%d", i), ToolCallID: fmt.Sprintf("call-%d", i)},
-			Revision: 1, Status: session.ToolExecutionSucceeded, ToolName: "screenshot", Result: result,
-		})
-		events = append(events, &session.Event{
-			ID: fmt.Sprintf("journal-%d", i), Type: session.EventTypeLifecycle, Visibility: session.VisibilityJournal,
-			Journal: &session.ExecutionJournalEntry{Schema: session.ExecutionJournalSchemaVersion, Kind: session.JournalKindToolExecution, ToolExecution: &record},
-		})
+		resultValue := tool.Result{Content: []model.Part{model.NewJSONPart(result)}}
+		events = append(events, &session.Event{ID: fmt.Sprintf("tool-result-%d", i), Type: session.EventTypeToolResult, Visibility: session.VisibilityMirror, Tool: &session.EventTool{ID: fmt.Sprintf("call-%d", i), Name: "screenshot", Result: &resultValue}})
+
 	}
 	if _, err := store.AppendEvents(context.Background(), session.AppendEventsRequest{SessionRef: active.SessionRef, Events: events}); err != nil {
 		t.Fatal(err)

@@ -21,7 +21,7 @@ import (
 type codeModeSearchKey struct{}
 type codeModeModelAdmissionKey struct{}
 
-// Nested search uses canonical admission before the existing Journal records
+// Nested search uses canonical admission before the existing tool facts
 // full schemas/bindings. Ordinary native ToolSearch keeps its Chat owner.
 type codeModeDiscoveryTool struct {
 	base    tool.Tool

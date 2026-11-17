@@ -125,9 +125,9 @@ func TestCodeModeRevalidatesMCPAndGenerationAfterApproval(t *testing.T) {
 func TestCodeModeCancellationAndRecoveryDoNotReplayEffects(t *testing.T) {
 	for _, outcome := range []string{"responsive-unknown", "unresponsive-unknown", "unresponsive-success"} {
 		responsive := outcome == "responsive-unknown"
-		wantStatus := session.ToolExecutionUnknownOutcome
+		wantStatus := "unknown_outcome"
 		if outcome == "unresponsive-success" {
-			wantStatus = session.ToolExecutionSucceeded
+			wantStatus = "succeeded"
 		}
 		t.Run(outcome, func(t *testing.T) {
 			store, active, root := codeModeStore(t)
@@ -145,7 +145,7 @@ func TestCodeModeCancellationAndRecoveryDoNotReplayEffects(t *testing.T) {
 					return tool.Result{IsError: true}, ctx.Err()
 				}
 				<-release
-				if wantStatus == session.ToolExecutionSucceeded {
+				if wantStatus == "succeeded" {
 					return tool.Result{Content: []model.Part{model.NewTextPart("confirmed after cancellation")}}, nil
 				}
 				return tool.Result{IsError: true}, ctx.Err()
@@ -212,11 +212,11 @@ func TestCodeModeCancellationAndRecoveryDoNotReplayEffects(t *testing.T) {
 				t.Fatal(err)
 			}
 			var original string
-			var pendingStatus session.ToolExecutionStatus
+			var pendingStatus string
 			for _, event := range before {
-				if event.Journal != nil && event.Journal.ToolExecution != nil && event.Journal.ToolExecution.ToolName == "Pending" {
-					original = event.Journal.ToolExecution.Identity
-					pendingStatus = event.Journal.ToolExecution.Status
+				if event.Type == session.EventTypeToolResult && event.Tool != nil && event.Tool.Name == "Pending" {
+					original = event.Tool.Execution.ItemID
+					pendingStatus = string(event.Tool.Outcome)
 				}
 			}
 			if original == "" || pendingStatus != wantStatus {
@@ -233,13 +233,13 @@ func TestCodeModeCancellationAndRecoveryDoNotReplayEffects(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			statuses := map[string]session.ToolExecutionStatus{}
+			statuses := map[string]string{}
 			for _, event := range after {
-				if event.Journal != nil && event.Journal.ToolExecution != nil {
-					r := event.Journal.ToolExecution
+				if event.Type == session.EventTypeToolResult && event.Tool != nil {
+					r := event.Tool
 					if r.Parent != nil {
-						statuses[r.ToolName] = r.Status
-						if r.ToolName == "Pending" && r.Identity != original {
+						statuses[r.Name] = string(r.Outcome)
+						if r.Name == "Pending" && r.Execution.ItemID != original {
 							t.Fatal("recovery replaced original operation identity")
 						}
 					}
@@ -248,7 +248,7 @@ func TestCodeModeCancellationAndRecoveryDoNotReplayEffects(t *testing.T) {
 					t.Fatal("recovery fabricated inner model tool result")
 				}
 			}
-			if original == "" || effects.Load() != 2 || statuses["Write"] != session.ToolExecutionSucceeded || statuses["Pending"] != wantStatus {
+			if original == "" || effects.Load() != 2 || statuses["Write"] != "succeeded" || statuses["Pending"] != wantStatus {
 				t.Fatalf("effects=%d statuses=%v original=%s", effects.Load(), statuses, original)
 			}
 		})

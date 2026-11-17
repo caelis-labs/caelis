@@ -86,7 +86,7 @@ distribution acceptance.
 
 For MCP binding changes, release notes must distinguish Code Mode from the fixed
 non-Code Mode `mcp_call`: Code Mode can call a known current Session name directly
-and reuse bindings from canonical search receipts or started child Journal records
+and reuse bindings from canonical search receipts or typed nested ToolCall facts
 for Code Mode tool executions, while `mcp_call` still requires prior discovery. See
 [the discovery compatibility rule](session-profiles.md#mcp-discovery-and-upgrades).
 

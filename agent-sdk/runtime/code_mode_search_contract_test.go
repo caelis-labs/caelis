@@ -195,15 +195,15 @@ return {contract:true};`)
 	}
 	failedSearches := 0
 	for _, event := range events {
-		if event.Journal == nil || event.Journal.ToolExecution == nil {
+		if event.Type != session.EventTypeToolResult || event.Tool == nil {
 			continue
 		}
-		record := event.Journal.ToolExecution
-		if record.ToolName != tool.ToolSearchToolName || record.Status != session.ToolExecutionFailed || record.Parent == nil || record.Parent.Kind != codemode.ToolKind {
+		record := event.Tool
+		if record.Name != tool.ToolSearchToolName || record.Status != "failed" || record.Parent == nil || record.Parent.Kind != codemode.ToolKind {
 			continue
 		}
 		var input map[string]any
-		if err := json.Unmarshal(record.Input, &input); err != nil {
+		if err := json.Unmarshal(factJSON(record.Input), &input); err != nil {
 			t.Fatal(err)
 		}
 		if input["name"] != "missing" || record.Error == "" {

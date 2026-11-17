@@ -123,15 +123,15 @@ func TestCodeModeServiceDiscoveryCanonicalReceiptAcrossVMs(t *testing.T) {
 
 func serviceDiscoveryReceipt(t *testing.T, event *session.Event) (tool.ToolSearchResult, bool) {
 	t.Helper()
-	if event.Journal == nil || event.Journal.ToolExecution == nil {
+	if event.Type != session.EventTypeToolResult || event.Tool == nil {
 		return tool.ToolSearchResult{}, false
 	}
-	record := event.Journal.ToolExecution
-	if record.ToolName != tool.ToolSearchToolName || record.Status != session.ToolExecutionSucceeded || record.Parent == nil || record.Parent.Kind != "code_mode" {
+	record := event.Tool
+	if record.Name != tool.ToolSearchToolName || record.Status != "completed" || record.Parent == nil || record.Parent.Kind != "code_mode" {
 		return tool.ToolSearchResult{}, false
 	}
 	var result tool.Result
-	if err := json.Unmarshal(record.Result, &result); err != nil {
+	if err := json.Unmarshal(toolResultJSON(record.Result), &result); err != nil {
 		t.Fatal(err)
 	}
 	if result.IsError || result.Metadata[mcpdiscovery.MetadataKey] != true {
