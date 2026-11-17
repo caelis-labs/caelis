@@ -32,7 +32,7 @@ func (a *Agent) completeCandidate(ctx agent.Context, candidate model.Message, ro
 				return bad("candidate rejected")
 			}
 		case agent.CompletionReplace:
-			if d.Message == nil || len(d.Feedback) > 0 || d.Message.Role != model.RoleAssistant || len(d.Message.ToolCalls()) > 0 {
+			if d.Message == nil || len(d.Feedback) > 0 || d.Message.Role != model.RoleAssistant || len(d.Message.ToolCalls()) > 0 || len(d.Message.ToolResults()) > 0 {
 				return bad("replacement requires one assistant final")
 			}
 			candidate = *d.Message
@@ -47,8 +47,11 @@ func (a *Agent) completeCandidate(ctx agent.Context, candidate model.Message, ro
 			if *rounds >= limit {
 				return bad("completion_limit")
 			}
-			(*rounds)++
 			m := model.Message{Role: model.RoleUser, Parts: model.CloneParts(d.Feedback)}
+			if err := session.ValidateContextMessages([]model.Message{m}); err != nil {
+				return bad(err.Error())
+			}
+			(*rounds)++
 			return candidate, &session.Event{Type: session.EventTypeContext, Visibility: session.VisibilityCanonical, Actor: session.ActorRef{Kind: session.ActorKindSystem, Name: "hook/completion/" + h.Name}, Message: &m}, nil
 		default:
 			return bad("invalid completion kind")

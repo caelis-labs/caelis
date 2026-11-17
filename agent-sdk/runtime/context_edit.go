@@ -103,7 +103,10 @@ func (r *Runtime) commitContextEdit(ctx context.Context, ref session.SessionRef,
 		message := model.NewTextMessage(model.RoleUser, "Context updated by "+name)
 		event = &session.Event{Type: session.EventTypeCompact, Visibility: session.VisibilityCanonical, Actor: session.ActorRef{Kind: session.ActorKindSystem, Name: "hook/" + name}, Message: &message, Meta: map[string]any{session.CheckpointMetadataKey: session.CheckpointDataValue(data)}}
 	} else {
-		event = hookContextEvent(edit.Append, "model_prepare/"+name)
+		event, err = hookContextEvent(edit.Append, "model_prepare/"+name)
+		if err != nil {
+			return nil, err
+		}
 		event.ContextEdit = &session.ContextEditProvenance{Version: 1, SourceStamp: stamp, SourceThroughID: edit.Source.ThroughID, SourceThroughSeq: edit.Source.ThroughSeq, Hook: name, LogicalRequestID: logical}
 	}
 	event.ID = id

@@ -67,6 +67,9 @@ func (a *Agent) prepareModel(ctx agent.Context, e agent.HookContext, req *model.
 				a.model = selected
 			}
 		}
+		if err == nil && next.Response != nil && (next.Response.Message.Role != model.RoleAssistant || len(next.Response.Message.ToolResults()) > 0) {
+			err = fmt.Errorf("cached response requires assistant content or tool proposals")
+		}
 		if err == nil && next.ContextEdit != nil && a.resolveModelRequest != nil && a.validateModelRequest == nil {
 			err = fmt.Errorf("dynamic ContextEdit requires the configuration Validate guard")
 		}
@@ -153,13 +156,16 @@ func resultModel(ctx agent.Context, e agent.HookContext, r *model.Response) (*mo
 		if err != nil {
 			return nil, err
 		}
+		if next.Message.Role != model.RoleAssistant || len(next.Message.ToolResults()) > 0 {
+			return nil, &agent.HookError{Phase: "model_result", Name: h.Name, Cause: fmt.Errorf("model result requires assistant content or tool proposals")}
+		}
 		// Only the semantic Message is editable. Original actual accounting and
 		// provider disposition survive arbitrary response replacement.
 		original := *r
 		original.Message = next.Message
 		r = &original
 	}
-	if r.Message.Role != model.RoleAssistant {
+	if r.Message.Role != model.RoleAssistant || len(r.Message.ToolResults()) > 0 {
 		return nil, fmt.Errorf("model result requires assistant role")
 	}
 	return r, nil

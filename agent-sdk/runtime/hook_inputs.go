@@ -33,7 +33,7 @@ func (r *Runtime) prepareHookInputs(ctx context.Context, inputs []*session.Event
 			if err != nil {
 				return nil, err
 			}
-			if decision.Message.Role != e.Message.Role || len(decision.Message.ToolCalls()) > 0 {
+			if decision.Message.Role != e.Message.Role || len(decision.Message.ToolCalls()) > 0 || len(decision.Message.ToolResults()) > 0 {
 				return nil, &agent.HookError{Phase: "input", Name: h.Name, Cause: fmt.Errorf("input role and protocol identity cannot change")}
 			}
 			if err := validateEarlyResponse(decision.Response); err != nil {
@@ -42,7 +42,11 @@ func (r *Runtime) prepareHookInputs(ctx context.Context, inputs []*session.Event
 			e.Message = &decision.Message
 			e.InputEvidence.Hooks = append(e.InputEvidence.Hooks, h.Name)
 			if len(decision.Context) > 0 {
-				extra = append(extra, hookContextEvent(decision.Context, "input/"+h.Name))
+				event, err := hookContextEvent(decision.Context, "input/"+h.Name)
+				if err != nil {
+					return nil, &agent.HookError{Phase: "input", Name: h.Name, Cause: err}
+				}
+				extra = append(extra, event)
 			}
 			run.SetEarly(decision.Response)
 		}
@@ -64,7 +68,11 @@ func (r *Runtime) runTurnStartHooks(ctx context.Context) ([]*session.Event, erro
 			return nil, &agent.HookError{Phase: "turn_start", Name: h.Name, Cause: err}
 		}
 		if len(decision.Context) > 0 {
-			out = append(out, hookContextEvent(decision.Context, "turn_start/"+h.Name))
+			event, err := hookContextEvent(decision.Context, "turn_start/"+h.Name)
+			if err != nil {
+				return nil, &agent.HookError{Phase: "turn_start", Name: h.Name, Cause: err}
+			}
+			out = append(out, event)
 		}
 		run.SetEarly(decision.Response)
 	}
@@ -72,13 +80,16 @@ func (r *Runtime) runTurnStartHooks(ctx context.Context) ([]*session.Event, erro
 }
 
 func validateEarlyResponse(m *model.Message) error {
-	if m != nil && (m.Role != model.RoleAssistant || len(m.ToolCalls()) > 0) {
+	if m != nil && (m.Role != model.RoleAssistant || len(m.ToolCalls()) > 0 || len(m.ToolResults()) > 0) {
 		return fmt.Errorf("early response must be an assistant final without tool calls")
 	}
 	return nil
 }
 
-func hookContextEvent(parts []model.Part, name string) *session.Event {
+func hookContextEvent(parts []model.Part, name string) (*session.Event, error) {
 	m := model.Message{Role: model.RoleUser, Parts: model.CloneParts(parts)}
-	return &session.Event{Type: session.EventTypeContext, Visibility: session.VisibilityCanonical, Actor: session.ActorRef{Kind: session.ActorKindSystem, Name: "hook/" + name}, Message: &m}
+	if err := session.ValidateContextMessages([]model.Message{m}); err != nil {
+		return nil, err
+	}
+	return &session.Event{Type: session.EventTypeContext, Visibility: session.VisibilityCanonical, Actor: session.ActorRef{Kind: session.ActorKindSystem, Name: "hook/" + name}, Message: &m}, nil
 }
