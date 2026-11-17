@@ -1547,12 +1547,25 @@ func TestRuntimeCompactionAppendsActivePlanWithoutGivingItModelAuthority(t *test
 	appendTestEvent(t, sessions, activeSession.SessionRef, userTextEvent("Next action: compact only from canonical events and verify no state leakage."))
 	appendTestEvent(t, sessions, activeSession.SessionRef, assistantEvent("ack"))
 
-	if _, err := sessions.UpdateState(context.Background(), session.UpdateStateRequest{SessionRef: activeSession.SessionRef, MutationGuard: session.ControlMutationGuard(session.ControlMutationPurposeTest), Update: func(state map[string]any) (map[string]any, error) {
+	// The active producer retains its original fence throughout compaction.
+	fenceService := sessions.(session.SessionFenceService)
+	fence, err := fenceService.AcquireSessionFence(t.Context(), session.AcquireSessionFenceRequest{SessionRef: activeSession.SessionRef, OwnerID: "active-plan-compaction"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := fenceService.ReleaseSessionFence(context.WithoutCancel(t.Context()), session.SessionFenceReleaseRequest(fence)); err != nil {
+			t.Error(err)
+		}
+	})
+	ctx := session.ContextWithRuntimeFence(t.Context(), fence)
+	if _, err := sessions.UpdateState(ctx, session.UpdateStateRequest{SessionRef: activeSession.SessionRef, MutationGuard: session.RuntimeMutationGuard(ctx), Update: func(state map[string]any) (map[string]any, error) {
 		if state == nil {
 			state = map[string]any{}
 		}
 		state["plan"] = map[string]any{
 			"version":     1,
+			"turn_id":     "active-turn",
 			"explanation": "continue from the exact active plan",
 			"entries": []any{
 				map[string]any{
@@ -1597,19 +1610,8 @@ func TestRuntimeCompactionAppendsActivePlanWithoutGivingItModelAuthority(t *test
 		t.Fatalf("New() error = %v", err)
 	}
 
-	result, err := runtime.Run(context.Background(), agent.RunRequest{
-		SessionRef: activeSession.SessionRef,
-		Input:      "continue",
-		AgentSpec: agent.AgentSpec{
-			Name:  "chat",
-			Model: testModel,
-		},
-	})
-	if err != nil {
-		t.Fatalf("Run() error = %v", err)
-	}
-	if _, err := drainRunnerEvents(t, result.Handle); err != nil {
-		t.Fatalf("runner error = %v", err)
+	if _, err := runtime.Compact(ctx, CompactRequest{SessionRef: activeSession.SessionRef, Model: testModel, Trigger: "manual"}); err != nil {
+		t.Fatal(err)
 	}
 	if testModel.compactionCalls != 1 {
 		t.Fatalf("compactionCalls = %d, want 1", testModel.compactionCalls)
@@ -1630,6 +1632,7 @@ func TestRuntimeCompactionAppendsActivePlanWithoutGivingItModelAuthority(t *test
 	payload := runtimeContinuityPayloadFromBlock(checkpoint[blockIndex:])
 	wantPlan := map[string]any{
 		"version":     float64(1),
+		"turn_id":     "active-turn",
 		"explanation": "continue from the exact active plan",
 		"entries": []any{map[string]any{
 			"content": "state-owned active plan item",

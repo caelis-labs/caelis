@@ -137,8 +137,8 @@ type ResolveApprovalRequest struct {
 }
 
 // RunNotAttachableError reports a run that has no live execution in this
-// Runtime process. Its durable RunState remains available for recovery
-// diagnostics, but callers must not interpret that state as a replay point.
+// Runtime process. Session history does not recreate a live handle or provide
+// an execution replay point.
 type RunNotAttachableError struct {
 	SessionRef session.SessionRef
 	RunID      string
